@@ -1,6 +1,13 @@
 
 # numpy
 # astropy
+ipython
+jupyter
+numpy
+scipy
+astropy
+speclite
+spectre
 pyyaml
 pygments
 sdss-tree>=2.15.2
