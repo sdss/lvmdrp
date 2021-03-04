@@ -1,6 +1,6 @@
 conda activate lvmdrp
 pip3 install numpy scipy astropy pyyaml requests fitsio matplotlib
-pip3 h5py speclite
+pip3 install h5py speclite
 
 pip3 install -e desiutil --user
 pip3 install -e specter --user
