@@ -1,0 +1,4 @@
+libboost-all-dev libcfitsio-dev
+libopenblas-dev liblapack-dev python3-matplotlib
+python3-scipy python3-astropy python3-requests
+python3-yaml python3-mpi4py
