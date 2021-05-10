@@ -5,7 +5,7 @@ pip3 install numpy scipy astropy pyyaml requests fitsio matplotlib
 pip3 install h5py speclite
 
 
-pref="${LVMDRP}/desihub/"
+pref="${LVMHUB}/lvmdrp/desihub/"
 
 cd ${pref}
 
