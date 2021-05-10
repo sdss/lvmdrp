@@ -5,9 +5,9 @@ pip3 install numpy scipy astropy pyyaml requests fitsio matplotlib
 pip3 install h5py speclite
 
 
-pref="${LVMHUB}/lvmdrp/desihub/"
+pref=$LVMHUB/lvmdrp/desihub/
 
-cd ${pref}
+cd $pref
 
 for pkg in desiutil desimodel desitarget desisim specter desispec specex; do
     pip3 uninstall ${pkg}
