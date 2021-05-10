@@ -9,7 +9,7 @@ pref=$LVMHUB/lvmdrp/desihub/
 
 cd $pref
 
-for pkg in desiutil desimodel desitarget desisim specter desispec specex; do
+for pkg in desiutil desimodel desitarget specter desispec specex; do
     pip3 uninstall ${pkg}
     pip3 install -e ${pkg} --user
 done
