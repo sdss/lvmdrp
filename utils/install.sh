@@ -11,8 +11,10 @@ cd $pref
 
 for pkg in desiutil desimodel desitarget specter desispec specex; do
     pip3 uninstall ${pkg}
+    # we need to do this in order to install DESI dependencies since those are not included in their
+    # setup.py. This is a temporary patch that will not work in the long run
+    pip3 install -r $pkg/requirements.txt
     pip3 install -e ${pkg} --user
 done
 
 mkdir $DESIOUT
-
