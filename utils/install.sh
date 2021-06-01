@@ -9,12 +9,12 @@ pref=$LVMHUB/lvmdrp/desihub/
 
 cd $pref
 
-for pkg in desiutil desimodel desitarget specter desispec specex; do
-    pip3 uninstall ${pkg}
+for pkg in desiutil desimodel specter desispec desisim desitarget; do
+    pip3 uninstall --yes ${pkg}
     # we need to do this in order to install DESI dependencies since those are not included in their
     # setup.py. This is a temporary patch that will not work in the long run
-    pip3 install -r $pkg/requirements.txt
-    pip3 install -e ${pkg} --user
+    yes | pip3 install -r $pkg/requirements.txt
+    yes | pip3 install -e ${pkg} --user
 done
 
-mkdir $DESIOUT
+#mkdir $DESIOUT
