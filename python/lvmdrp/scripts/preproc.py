@@ -1,5 +1,5 @@
 """
-desispec.scripts.preproc
+lvmdrp.scripts.preproc
 ========================
 
 Command line wrappers for pre-processing a LVM raw exposure
