@@ -37,7 +37,11 @@ def run(packages, install_requires):
           packages=packages,
           install_requires=install_requires,
           package_dir={'': 'python'},
-          scripts=['bin/drp', 'bin/preproc'],
+          scripts=[
+              'bin/drp',
+              'bin/preproc',
+              'bin/lvm2desi_translator'
+          ],
           classifiers=[
               'Development Status :: 4 - Beta',
               'Intended Audience :: Science/Research',
@@ -50,7 +54,7 @@ def run(packages, install_requires):
               'Topic :: Documentation :: Sphinx',
               'Topic :: Software Development :: Libraries :: Python Modules',
           ],
-          )
+    )
 
 
 def get_requirements(opts):
