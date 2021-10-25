@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE Project SYSTEM "Project-4.6.dtd">
+<!-- eric4 project file for project Py3D -->
+<!-- Saved: 2013-02-07, 17:49:15 -->
+<!-- Copyright (C) 2013 ,  -->
+<Project version="4.6">
+  <Language>en</Language>
+  <ProgLanguage mixed="0">Python</ProgLanguage>
+  <ProjectType>Other</ProjectType>
+  <Description></Description>
+  <Version>0.1</Version>
+  <Author></Author>
+  <Email></Email>
+  <Sources>
+    <Source>core/image.py</Source>
+    <Source>core/apertures.py</Source>
+    <Source>core/data_model.py</Source>
+    <Source>core/fiberrows.py</Source>
+    <Source>core/__init__.py</Source>
+    <Source>core/fit_profile.py</Source>
+    <Source>core/cube.py</Source>
+    <Source>core/header.py</Source>
+    <Source>core/rss.py</Source>
+    <Source>core/spectrum1d.py</Source>
+    <Source>core/tracemask.py</Source>
+    <Source>core/passband.py</Source>
+    <Source>core/positionTable.py</Source>
+    <Source>functions/headerMethod.py</Source>
+    <Source>functions/imageMethod.py</Source>
+    <Source>functions/__init__.py</Source>
+    <Source>functions/rssMethod.py</Source>
+    <Source>functions/cubeMethod.py</Source>
+    <Source>__init__.py</Source>
+    <Source>external/ancillary_func.py</Source>
+    <Source>external/astrolib.py</Source>
+    <Source>external/__init__.py</Source>
+    <Source>functions/plotMethod.py</Source>
+    <Source>functions/specialMethod.py</Source>
+    <Source>functions/vimosMethod.py</Source>
+    <Source>functions/commandMethod.py</Source>
+  </Sources>
+  <Forms>
+  </Forms>
+  <Translations>
+  </Translations>
+  <Resources>
+  </Resources>
+  <Interfaces>
+  </Interfaces>
+  <Others>
+    <Other>scripts/Py3D</Other>
+  </Others>
+  <Vcs>
+    <VcsType>None</VcsType>
+  </Vcs>
+  <FiletypeAssociations>
+    <FiletypeAssociation pattern="*.pyw" type="SOURCES" />
+    <FiletypeAssociation pattern="*.idl" type="INTERFACES" />
+    <FiletypeAssociation pattern="*.py" type="SOURCES" />
+    <FiletypeAssociation pattern="*.ptl" type="SOURCES" />
+  </FiletypeAssociations>
+</Project>
