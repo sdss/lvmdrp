@@ -39,3 +39,6 @@ test_redux-*
 
 # Mac OSX
 .DS_Store
+
+*data*
+.vscode
