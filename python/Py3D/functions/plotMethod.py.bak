@@ -1,4 +1,3 @@
-from __future__ import print_function
 
 import os
 
@@ -213,12 +212,12 @@ def  flexureOffsetNight_py3d(trace_log, disp_log, figure,  hdrKey_x, hdrKey_y, h
         if numpy.sum(select)==1:
             header = Header()
             header.loadFitsHeader(obj_trace_file[i])
-            print(obj_trace_file[i])
+            print obj_trace_file[i]
             el .append(header.getHdrValue(hdrKey_El))
             az .append(header.getHdrValue(hdrKey_Az))
             yoff.append(header.getHdrValue(hdrKey_y))
             header.loadFitsHeader(obj_disp_file[select][0])
-            print(obj_disp_file[select][0])
+            print obj_disp_file[select][0]
             xoff.append(header.getHdrValue(hdrKey_x))
     
     xoff=numpy.array(xoff)

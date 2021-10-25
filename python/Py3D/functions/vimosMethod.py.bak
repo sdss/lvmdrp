@@ -1,4 +1,3 @@
-from __future__ import print_function
 import  os, pyfits
 from Py3D.functions.imageMethod import *
 from Py3D.functions.rssMethod import *
@@ -15,7 +14,7 @@ def renameFiles_py3d(year):
     dir = os.listdir('.')
     for f in dir:
         if 'VIMOS.' in f and '.fits' in f and str(year) in f:
-            print(f)
+            print f
             hdr = pyfits.getheader(f, 0, ignore_missing_end=True)
             orig_name=hdr['ORIGFILE']
             os.system('mv  %s %s'%(f, orig_name))
@@ -149,9 +148,9 @@ def reduceCalibMR_py3d(night, fiberflat='1', wave_start=4880, wave_end=9300, wav
 
     image = loadImage('LAMP_B.1.fits')
     date = image.getHdrValue('ESO OBS START').split('T')[0]
-    print(date)
+    print date
     year = int(date.split('-')[0])
-    print(year)
+    print year
     if year>=2013:
         boundaries_x=['51,2098', '51,2098', '51,2098', '51,2098']
         boundaries_y=['1300,3450', '1340,3490', '1150,3300', '900,3150']
@@ -203,7 +202,7 @@ def reduceCalibHR_py3d(night, fiberflat='1', wave_start=4880, wave_end=9300, wav
     chips=['B.1', 'A.2', 'A.3', 'B.4']
     if except_chip!='':
       except_chips = except_chip.split(',')
-      print(except_chips)
+      print except_chips
       for i in range(len(except_chips)):
 	chips= [x for x in chips if x != except_chips[i]]
     fiberflat=int(fiberflat)
@@ -212,7 +211,7 @@ def reduceCalibHR_py3d(night, fiberflat='1', wave_start=4880, wave_end=9300, wav
 
     image = loadImage('LAMP_B.1.fits')
     date = image.getHdrValue('ESO OBS START').split('T')[0]
-    print(date)
+    print date
     year = int(date.split('-')[0])
     if year==2009:
 	peaks_guess  = 'peaks_2009.txt'
@@ -306,9 +305,9 @@ def reduceObjectMR_py3d(night, name_obj, object_nr, wave_start=4880, wave_end=85
 
     image = loadImage('VIMOS_IFU_OBS%03d_%04d_%s.fits.gz'%(night, object_nr, 'B.1'))
     date = image.getHdrValue('ESO OBS START').split('T')[0]
-    print(date)
+    print date
     year = int(date.split('-')[0])
-    print(year)
+    print year
     if year==2009:
       CCD_mask='2009'
     else:
@@ -416,9 +415,9 @@ def reduceObjectHR_py3d(night, name_obj, object_nr, wave_start=4880, wave_end=85
 
     image = loadImage('VIMOS_IFU_OBS%03d_%04d_%s.fits.gz'%(night, object_nr, 'B.1'))
     date = image.getHdrValue('ESO OBS START').split('T')[0]
-    print(date)
+    print date
     year = int(date.split('-')[0])
-    print(year)
+    print year
     if year==2009:
       CCD_mask='2009'
     elif year<=2004:
@@ -477,9 +476,9 @@ def reduceStdMR_py3d(night, std_nr, wave_start='4880', wave_end='9300', wave_dis
     
     image = loadImage('VIMOS_IFU_STD%03d_%04d_%s.fits.gz'%(night, std_nr, 'B.1'))
     date = image.getHdrValue('ESO OBS START').split('T')[0]
-    print(date)
+    print date
     year = int(date.split('-')[0])
-    print(year)
+    print year
     if year==2009:
       CCD_mask='2009'
     else:
@@ -559,9 +558,9 @@ def reduceStdHR_py3d(night, std_nr, wave_start='4880', wave_end='9300', wave_dis
     
     image = loadImage('VIMOS_IFU_STD%03d_%04d_%s.fits.gz'%(night, std_nr, 'B.1'))
     date = image.getHdrValue('ESO OBS START').split('T')[0]
-    print(date)
+    print date
     year = int(date.split('-')[0])
-    print(year)
+    print year
     if year==2009:
       CCD_mask='2009'
     elif year<=2004:

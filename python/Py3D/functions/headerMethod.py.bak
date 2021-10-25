@@ -1,4 +1,3 @@
-from __future__ import print_function
 import sys
 from Py3D import *
 from Py3D.external import astrolib
@@ -26,9 +25,9 @@ def printHdr_py3d(file, keyword='',  extension=0):
     hdr = Header()
     hdr.loadFitsHeader(file, extension=int(extension))
     if keyword=='':
-        print(hdr.getHeader())
+        print hdr.getHeader()
     else:
-        print(hdr.getHdrCard(keyword))
+        print hdr.getHdrCard(keyword)
 
 def expandHdrKeys_py3d(file, prefix, keywords='', exclude='', extension='0', verbose='0', removeEmpty='0'):
     """

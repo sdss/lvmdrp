@@ -1,5 +1,3 @@
-from __future__ import print_function
-from __future__ import absolute_import
 import numpy, pyfits
 try:
   import pylab
@@ -9,7 +7,7 @@ from scipy import sparse
 from scipy import optimize
 from scipy import interpolate
 from scipy import ndimage
-from . import fit_profile
+import fit_profile
 from copy import  deepcopy
 
 class Spectrum1D(object):
@@ -1181,7 +1179,7 @@ class Spectrum1D(object):
                 gaussians_fix_width.fit(self._wave[lo:hi], self._data[lo:hi], maxfev=1000, xtol=1e-4, ftol=1e-4) # fit without errors
             fit_par = gaussians_fix_width.getPar()
             if plot==i:
-                print(i, plot)
+                print i, plot
                 gaussians_fix_width.plot(self._wave[lo:hi], self._data[lo:hi])
 
             fwhm[brackets[i]:brackets[i+1]] = fit_par[0]*2.354 # convert Gaussian sigma to FWHM

@@ -1,4 +1,3 @@
-from __future__ import print_function
 import sys, numpy, time, pyfits
 try:
   import matplotlib
@@ -249,8 +248,8 @@ def detWaveSolution_py3d(arc_rss, prefix_out, ref_line_file='', ref_spec='', pix
             fwhm_sol[i, :]=leg_poly_fwhm(numpy.arange(arc._data.shape[1]))
         if i==-1:
             pylab.plot(numpy.arange(arc._data.shape[1]-1),  dwave[i, :], '-r')
-            print(cent_round)
-            print(dwave[i, cent_round])
+            print cent_round
+            print dwave[i, cent_round]
             pylab.plot(cent_wave[i, select_lines], fwhm[i, select_lines], 'or')
             pylab.plot(cent_wave[i, select_lines], fwhm_wave[select_lines], 'ok')
             pylab.plot(numpy.arange(arc._data.shape[1]), fwhm_sol[i, :])
@@ -726,7 +725,7 @@ def constructSkySpec_py3d(rss_in, sky_out, clip_sigma='3.0', nsky='0', filter=''
         sky_fib = numpy.sum(select)
     rss.setHdrValue('hierarch PIPE NSKY FIB', sky_fib, 'Number of averaged sky fibers')
     subRSS = rss.subRSS(select)
-    print(filter[0])
+    print filter[0]
     if filter[0]!='':
         passband = PassBand()
         passband.loadTxtFile(filter[0], wave_col=int(filter[1]),  trans_col=int(filter[2]))
@@ -940,7 +939,7 @@ def createFiberFlat_py3d(rss_in, rss_out, smooth_poly='0', clip='', valid=''):
     fiberflat.setHdrValue('hierarch PIPE FLAT STD', float('%.3f'%(std)), 'rms of fiberflat values')
 
     if fiberflat==None:
-        print('Please resample the RSS frame to a common wavelength solution!')
+        print 'Please resample the RSS frame to a common wavelength solution!'
     else:
         fiberflat.writeFitsData(rss_out)
 
@@ -1139,7 +1138,7 @@ def createSensFunction_py3d(rss_in, out_sens,  ref_spec, airmass, exptime, smoot
         star_out.close()
 
     star_spec.smoothSpec(smooth_ref)
-    print(exptime,extinct._wave,star_spec._wave)
+    print exptime,extinct._wave,star_spec._wave
     star_corr = star_spec/extinct/exptime
 
     sens_func = ref_star_resamp/star_corr
@@ -1652,7 +1651,7 @@ def createCube_py3d(rss_in, cube_out, position_x='', position_y='', ref_pos_wave
             offset_y = offset_y*-1
 
         if verbose==1:
-            print(ref_x, ref_y)
+            print ref_x, ref_y
             pylab.plot(pos_x._wave, offset_x[0, :], '-k')
             pylab.plot(pos_y._wave, offset_y[0, :], '-b')
             pylab.show()
@@ -1757,7 +1756,7 @@ def createCube_py3d(rss_in, cube_out, position_x='', position_y='', ref_pos_wave
         cube = Cube(data=data, error=error, mask=mask, wave=rss._wave, error_weight=error_weight, header=header,cover=cover)
     else:
         if pos_x!=None and pos_y!=None and ref_pos_wave!=None:
-            print(rss.getHdrValue('CRVAL1'), rss.getHdrValue('CDELT1'))
+            print rss.getHdrValue('CRVAL1'), rss.getHdrValue('CDELT1')
             cube = rss.createCubeInterDAR_new(offset_x, offset_y,min_x,max_x,min_y,max_y,dim_x,dim_y, mode=mode, sigma=sigma, resolution=resolution, radius_limit=radius_limit, min_fibers=min_fibers,slope=slope, bad_threshold=bad_threshold, replace_error=replace_error, store_cover=store_cover)
         else:
             cube = rss.createCubeInterpolation(mode=mode, sigma=sigma, resolution=resolution, radius_limit=radius_limit, min_fibers=min_fibers,slope=slope, bad_threshold=bad_threshold, replace_error=replace_error, store_cover=store_cover)
@@ -1990,8 +1989,8 @@ def registerSDSS_py3d(rss_in, rss_out, sdss_file, sdss_field, filter, ra, dec, h
 
     for i in range(len(search_box)):
         if verbose==1:
-            print('Start iteration %d'%(i+1))
-            print('Searchbox %.2f arcsec with sampling of %.2f arcsec'%(search_box[i], step[i]))
+            print 'Start iteration %d'%(i+1)
+            print 'Searchbox %.2f arcsec with sampling of %.2f arcsec'%(search_box[i], step[i])
         if i>0:
             offset_x = best_offset_x
             offset_y = best_offset_y
@@ -2007,11 +2006,11 @@ def registerSDSS_py3d(rss_in, rss_out, sdss_file, sdss_field, filter, ra, dec, h
         best_valid = valid_fibers[select_best][0]
 
         if verbose==1:
-            print('Best offset in RA: %.2f'%(-1*best_offset_x))
-            print('Best offset in DEC: %.2f'%(-1*best_offset_y))
-            print('Minimum Chi-square: %.1f'%(best_chisq))
-            print('Valid fibers: %.1f'%(best_valid))
-            print('Photometric scale factor: %.3f'%(best_scale))
+            print 'Best offset in RA: %.2f'%(-1*best_offset_x)
+            print 'Best offset in DEC: %.2f'%(-1*best_offset_y)
+            print 'Minimum Chi-square: %.1f'%(best_chisq)
+            print 'Valid fibers: %.1f'%(best_valid)
+            print 'Photometric scale factor: %.3f'%(best_scale)
 
     rss = loadRSS(rss_in)
     if rss._size!=None:

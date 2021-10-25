@@ -1,8 +1,9 @@
-import headerMethod
-import imageMethod
-import rssMethod
-import cubeMethod
-import plotMethod
-import specialMethod
-import vimosMethod
-import commandMethod
+from __future__ import absolute_import
+from . import headerMethod
+from . import imageMethod
+from . import rssMethod
+from . import cubeMethod
+from . import plotMethod
+from . import specialMethod
+from . import vimosMethod
+from . import commandMethod

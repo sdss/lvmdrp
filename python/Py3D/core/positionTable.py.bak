@@ -1,4 +1,3 @@
-from __future__ import print_function
 import pyfits, numpy
 
 class PositionTable(object):
@@ -64,12 +63,12 @@ class PositionTable(object):
     
     def writeTxtPosTab(self, file, fiber_type=False):
         dat = open(file, 'w')
-        print("%s %.2f %.2f %i"%(self._shape, self._size[0], self._size[1], 0), file=dat)
+        print >> dat, "%s %.2f %.2f %i"%(self._shape, self._size[0], self._size[1], 0)
         for i in range(len(self._arc_position_x)):
             if fiber_type:
-                print("%i %.2f %.2f %i %s"%(i+1, self._arc_position_x[i], self._arc_position_y[i], self._good_fibers[i], self._fiber_type[i]), file=dat)
+                print >> dat, "%i %.2f %.2f %i %s"%(i+1, self._arc_position_x[i], self._arc_position_y[i], self._good_fibers[i], self._fiber_type[i])
             else:
-                print("%i %.2f %.2f %i"%(i+1, self._arc_position_x[i], self._arc_position_y[i], self._good_fibers[i]), file=dat)
+                print >> dat, "%i %.2f %.2f %i"%(i+1, self._arc_position_x[i], self._arc_position_y[i], self._good_fibers[i])
         #    print >> dat, "%i %.2f %.2f %i"%(i+1, self._arc_position_x[i], self._arc_position_y[i], self._good_fibers[i])
        #    print >> dat, "%i %.2f %.2f"%(i+1, self._arc_position_x[i], self._arc_position_y[i])
         dat.close()
