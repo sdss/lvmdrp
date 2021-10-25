@@ -1,4 +1,7 @@
 from __future__ import print_function
+from __future__ import division
+from builtins import range
+from past.utils import old_div
 import numpy
 from scipy import stats
 from Py3D.core.rss import *
@@ -329,7 +332,7 @@ def matchSkySpecTime_py3d(list_sky_specs, ref_object, out_spec, hdr_key_start, h
             exp_profile = Exponential_constant([2.0, 500, 0.2])
             if err_sim>1 and sky_1._error!=None:
                 exp_profile.fit(sky_time,sky_data[:, i], sky_error[:, i], method='simplex', err_sim=err_sim)
-                sky_out._error[i] = numpy.std(exp_profile._par_err_models[:, 0][:, numpy.newaxis]*numpy.exp(object_time[numpy.newaxis, :]/exp_profile._par_err_models[:, 1][:, numpy.newaxis])+exp_profile._par_err_models[:, 2][:, numpy.newaxis])
+                sky_out._error[i] = numpy.std(exp_profile._par_err_models[:, 0][:, numpy.newaxis]*numpy.exp(old_div(object_time[numpy.newaxis, :],exp_profile._par_err_models[:, 1][:, numpy.newaxis]))+exp_profile._par_err_models[:, 2][:, numpy.newaxis])
             else:
                 exp_profile.fit(sky_time,sky_data[:, i], method='simplex',  err_sim=0)
             sky_out._data[i] = numpy.mean(exp_profile(object_time))

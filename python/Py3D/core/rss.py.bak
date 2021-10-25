@@ -1,7 +1,3 @@
-from __future__ import division
-from builtins import str
-from builtins import range
-from past.utils import old_div
 from Py3D.core.fiberrows import *
 from Py3D.core.spectrum1d import *
 from Py3D.core.cube import *
@@ -445,19 +441,19 @@ class RSS(FiberRows):
                 good_pix = numpy.sum(numpy.logical_not(select), 0)
                 select_mean = good_pix>0
              #   print combined_data.shape, data.shape, good_pix.shape, select_mean.shape, error
-                combined_data[select_mean] = old_div(numpy.sum(data, 0)[select_mean],good_pix[select_mean])
+                combined_data[select_mean] = numpy.sum(data, 0)[select_mean]/good_pix[select_mean]
             #    print combined_data.dtype
                 combined_mask = good_pix==0
                 if error!=None:
                     error[select] = replace_error
-                    combined_error[select_mean] = numpy.sqrt(old_div(numpy.sum(error**2, 0)[select_mean],good_pix[select_mean]**2))
+                    combined_error[select_mean] = numpy.sqrt(numpy.sum(error**2, 0)[select_mean]/good_pix[select_mean]**2)
                 else:
                     combined_error=None
             else:
                 combined_mask=None
-                combined_data= old_div(numpy.sum(data, 0),data.shape[0])
+                combined_data= numpy.sum(data, 0)/data.shape[0]
                 if error!=None:
-                    combined_error = numpy.sqrt(old_div(numpy.sum(error**2, 0),error.shape[0]))
+                    combined_error = numpy.sqrt(numpy.sum(error**2, 0)/error.shape[0])
                 else:
                     combined_error=None
 
@@ -466,12 +462,12 @@ class RSS(FiberRows):
                 select =mask==True
                 good_pix = numpy.sum(numpy.logical_not(select), 0)
                 select_mean = good_pix>0
-                combined_data= old_div(numpy.sum(old_div(data,error**2), 0),numpy.sum(old_div(1,error**2), 0))
+                combined_data= numpy.sum(data/error**2, 0)/numpy.sum(1/error**2, 0)
                 combined_mask = good_pix==0
-                combined_error = 1.0/numpy.sqrt(numpy.sum(old_div(1,error**2), 0))
+                combined_error = 1.0/numpy.sqrt(numpy.sum(1/error**2, 0))
                 combined_error[combined_mask] = replace_error
             else:
-                combined_data= old_div(numpy.sum(old_div(data,error**2), 0),numpy.sum(old_div(1,error**2), 0))
+                combined_data= numpy.sum(data/error**2, 0)/numpy.sum(1/error**2, 0)
                 combined_error = 1.0/numpy.sqrt(numpy.sum(1.0/error**2, 0))
                 combined_mask=None
 
@@ -546,12 +542,12 @@ class RSS(FiberRows):
                 error = numpy.zeros(len(self._wave), dtype=numpy.float32)
             else:
                 error = None
-            for i in range(len(self._wave)):
+            for i in xrange(len(self._wave)):
                 if numpy.sum(select[:, i])>0:
                     if method=='mean':
                         data[i] = numpy.mean(self._data[select[:, i], i])
                         if error!=None:
-                            error[i] = numpy.sqrt(old_div(numpy.sum(self._error[select[:, i], i]**2),numpy.sum(select[:, i])**2))
+                            error[i] = numpy.sqrt(numpy.sum(self._error[select[:, i], i]**2)/numpy.sum(select[:, i])**2)
                     elif method=='sum':
                         data[i] = numpy.sum(self._data[select[:, i], i])
                         if error!=None:
@@ -622,12 +618,12 @@ class RSS(FiberRows):
 
                 dist = numpy.sqrt((position_x[:,:,numpy.newaxis]-self._arc_position_x[numpy.newaxis,numpy.newaxis,:])**2+(position_y[:,:,numpy.newaxis]-self._arc_position_y[numpy.newaxis,numpy.newaxis,:])**2)
                 select = dist<=radius_limit
-                weights_0[select] = numpy.exp(-0.5*(old_div(dist[select],sigma))**slope)
+                weights_0[select] = numpy.exp(-0.5*(dist[select]/sigma)**slope)
 
                 for i in range(self._fibers):
         #            print i
                     select = weights_0[:, :, i]>0
-                    select_bad = old_div(weights_0[:, :, i],numpy.sum(weights_0[:, :, i].flatten()))>bad_threshold
+                    select_bad = weights_0[:, :, i]/numpy.sum(weights_0[:, :, i].flatten())>bad_threshold
                     #weight_temp = weights_0[select, i][numpy.newaxis, :]*good_pix[i, :][:, numpy.newaxis]*inv_var[i, :][:, numpy.newaxis]
                     weight_temp = weights_0[select, i][numpy.newaxis, :]*good_pix[i, :][:, numpy.newaxis]
                     mask[:, select_bad] = numpy.logical_or(mask[:, select_bad], self._mask[i, :][:, numpy.newaxis])
@@ -642,16 +638,16 @@ class RSS(FiberRows):
                         error[:, select] += (self._error[i, :][:, numpy.newaxis]*weight_temp*numpy.logical_not(self._mask[i, :][:, numpy.newaxis]))**2
                 select = weights>0
                 #cube[select] = (cube[select]/weights[select])*(resolution**2/fiber_area)
-                cube[select] = (old_div(cube[select],weights[select]))*resolution**2
+                cube[select] = (cube[select]/weights[select])*resolution**2
                 select_cover=cover<=min_fibers
                 mask2 = numpy.logical_or(select_cover, mask2)
                 cube[select_cover]=0
                 mask[select_cover] = True
                 if self._error!=None:
-                    error[select]= old_div(numpy.sqrt(error[select]),weights[select])*(resolution**2)
+                    error[select]= numpy.sqrt(error[select])/weights[select]*(resolution**2)
                     error[mask] = replace_error
                     error[select_cover]=replace_error
-                    corr_cube[select] = numpy.sqrt(old_div(corr_cube[select],weights[select]))
+                    corr_cube[select] = numpy.sqrt(corr_cube[select]/weights[select])
                     corr_cube[select_cover]=0
                 else:
                     error=None
@@ -659,8 +655,8 @@ class RSS(FiberRows):
             elif mode=='drizzle':
                 for i in range(self._fibers):
      #               print i
-                    aperture = Aperture(old_div((self._arc_position_x[i]-min_x),resolution), old_div((self._arc_position_y[i]-min_y),resolution), old_div(self._size[0],resolution))
-                    cover_fraction = old_div(aperture.cover_mask((dim_y, dim_x)),fiber_area)
+                    aperture = Aperture((self._arc_position_x[i]-min_x)/resolution, (self._arc_position_y[i]-min_y)/resolution, self._size[0]/resolution)
+                    cover_fraction = aperture.cover_mask((dim_y, dim_x))/fiber_area
                     select = cover_fraction>0
                     #select_cos = cover_fraction>crit_cos
                     #fiber_mask = numpy.logical_and(select_cos[numpy.newaxis, :, :], (self._mask[i, :])[:, numpy.newaxis, numpy.newaxis])
@@ -679,7 +675,7 @@ class RSS(FiberRows):
                         corr_cube[:, select] += temp
                      #   error2[:, select] +=1
                 select2 = weights>0
-                cube[select2] = old_div(cube[select2],weights[select2])*(resolution**2)
+                cube[select2] = cube[select2]/weights[select2]*(resolution**2)
                 #cube[mask2]=0
                 #corr_cube[select2]=corr_cube[select2]/weights[select2]
 
@@ -688,7 +684,7 @@ class RSS(FiberRows):
                 if self._error!=None:
                     corr_cube = numpy.sqrt(corr_cube)
                     error = numpy.sqrt(error)
-                    error[select2] = old_div(error[select2],weights[select2])*(resolution**2)
+                    error[select2] = error[select2]/weights[select2]*(resolution**2)
 
                     error[mask] = replace_error
                 else:
@@ -741,12 +737,12 @@ class RSS(FiberRows):
                     if self._error!=None:
                         error[:, select] += var[i,:][:,numpy.newaxis]*weight_0**2
                 select2 = weights>0
-                cube[select2] = old_div(cube[select2],weights[select2])*(resolution**2)
+                cube[select2] = cube[select2]/weights[select2]*(resolution**2)
                 cube[mask2]=0
 
                 if self._error!=None:
                     error = numpy.sqrt(error)
-                    error[select2] = old_div(error[select2],weights[select2])*(resolution**2)
+                    error[select2] = error[select2]/weights[select2]*(resolution**2)
 
                     error[mask] = replace_error
                 else:
@@ -813,8 +809,8 @@ class RSS(FiberRows):
                 for i in range(self._res_elements):
                     dist = numpy.sqrt((position_x-(self._arc_position_x[j]+offset_x[i]))**2+(position_y-(self._arc_position_y[j]+offset_y[i]))**2)
                     select = dist<=radius_limit
-                    weights_0[i, select] = numpy.exp(-0.5*(old_div(dist[select],sigma))**slope)
-                    select_bad = old_div(weights_0[i, :, :],numpy.sum(weights_0[i, :, :].flatten()))>bad_threshold
+                    weights_0[i, select] = numpy.exp(-0.5*(dist[select]/sigma)**slope)
+                    select_bad = weights_0[i, :, :]/numpy.sum(weights_0[i, :, :].flatten())>bad_threshold
                     mask[i, select_bad]= numpy.logical_or(mask[i, select_bad], numpy.logical_and(self._mask[j, i], weights_0[i, select_bad]>0))
                     mask2[i, select_bad] = numpy.logical_or(mask2[i, select_bad], numpy.logical_and(numpy.logical_and(self._mask[j, i],  self._data[j, i]==0), weights_0[i, select_bad]>0))
                 #weight_temp = weights_0*good_pix[j, :][:, numpy.newaxis, numpy.newaxis]*inv_var[j, :][:, numpy.newaxis, numpy.newaxis]
@@ -830,15 +826,15 @@ class RSS(FiberRows):
                     error += (self._error[j, :][:, numpy.newaxis, numpy.newaxis]*weight_temp*numpy.logical_not(self._mask[j, :][:, numpy.newaxis, numpy.newaxis]))**2
 
             select = weights>0
-            cube[select] = (old_div(cube[select],weights[select]))*resolution**2
+            cube[select] = (cube[select]/weights[select])*resolution**2
             select_cover=cover<=min_fibers
             mask2[select_cover] = True
             mask[select_cover] = True
             cube[mask2]=0
             if self._error!=None:
-                error[select]= old_div(numpy.sqrt(error[select]),weights[select])*(resolution**2)
+                error[select]= numpy.sqrt(error[select])/weights[select]*(resolution**2)
                 error[mask] = replace_error
-                corr_cube[select] = numpy.sqrt(old_div(corr_cube[select],weights[select]))
+                corr_cube[select] = numpy.sqrt(corr_cube[select]/weights[select])
             else:
                 error=None
 
@@ -850,7 +846,7 @@ class RSS(FiberRows):
                 cover_fraction[:, :, :]=0
                 for i in range(self._res_elements):
                     aperture = Aperture(self._arc_position_x[j]+offset_x[i]-min_x, self._arc_position_y[j]+offset_y[i]-min_y, self._size[0], grid_fixed=True)
-                    cover_fraction[i, :, :] = old_div(aperture.cover_mask((dim_y, dim_x)),fiber_area)
+                    cover_fraction[i, :, :] = aperture.cover_mask((dim_y, dim_x))/fiber_area
                 #select_cos = cover_fraction>crit_cos
                 #fiber_mask = numpy.logical_and(select_cos, (self._mask[i, :])[:, numpy.newaxis, numpy.newaxis])
                 mask = numpy.logical_or(mask,numpy.logical_and(cover_fraction>0, self._mask[j, :][:, numpy.newaxis, numpy.newaxis]))
@@ -865,14 +861,14 @@ class RSS(FiberRows):
                 if self._error!=None:
                     error += (self._error[j,:][:,numpy.newaxis, numpy.newaxis]*weights_temp)**2
             select2 = weights>0
-            cube[select2] = old_div(cube[select2],weights[select2])*(resolution**2)
+            cube[select2] = cube[select2]/weights[select2]*(resolution**2)
             mask = numpy.logical_or(mask, numpy.logical_not(select2))
             cube[mask2]=0
             if self._error!=None:
                 error = numpy.sqrt(error)
                 corr_cube = numpy.sqrt(corr_cube)
                 #error[select2] = error[select2]/weights[select2]*(resolution**2/fiber_area)*1
-                error[select2] = old_div(error[select2],weights[select2])*(resolution**2)
+                error[select2] = error[select2]/weights[select2]*(resolution**2)
                 error[mask] = replace_error
             else:
                 error = None
@@ -921,7 +917,7 @@ class RSS(FiberRows):
                 position_x = position[1].astype(numpy.float32)*resolution+min_x
                 dist_test=numpy.sqrt((position_x-position_x[dim_x/2.0, dim_y/2.0])**2+(position_y-position_y[dim_x/2.0, dim_y/2.0])**2)
                 select = dist_test<=radius_limit
-                int_kernel = float(numpy.sum(numpy.exp(-0.5*(old_div(dist_test[select],sigma))**slope)))
+                int_kernel = float(numpy.sum(numpy.exp(-0.5*(dist_test[select]/sigma)**slope)))
                 dim_x = int(dim_x)
                 dim_y = int(dim_y)
                 fibers = self._fibers
@@ -1024,7 +1020,7 @@ class RSS(FiberRows):
                     cover_fraction[:, :, :]=0
                     for i in range(self._res_elements):
                         aperture = Aperture(self._arc_position_x[j]+offset_x[j,i]-min_x, self._arc_position_y[j]+offset_y[j,i]-min_y, self._size[0], grid_fixed=True)
-                        cover_fraction[i, :, :] = old_div(aperture.cover_mask((dim_y, dim_x)),fiber_area)
+                        cover_fraction[i, :, :] = aperture.cover_mask((dim_y, dim_x))/fiber_area
                     #select_cos = cover_fraction>crit_cos
                     #fiber_mask = numpy.logical_and(select_cos, (self._mask[i, :])[:, numpy.newaxis, numpy.newaxis])
                     mask = numpy.logical_or(mask,numpy.logical_and(cover_fraction>0, self._mask[j, :][:, numpy.newaxis, numpy.newaxis]))
@@ -1039,14 +1035,14 @@ class RSS(FiberRows):
                     if self._error!=None:
                         error += (self._error[j,:][:,numpy.newaxis, numpy.newaxis]*weights_temp)**2
                 select2 = weights>0
-                cube[select2] = old_div(cube[select2],weights[select2])*(resolution**2)
+                cube[select2] = cube[select2]/weights[select2]*(resolution**2)
                 mask = numpy.logical_or(mask, numpy.logical_not(select2))
                 cube[mask2]=0
                 if self._error!=None:
                     error = numpy.sqrt(error)
                     corr_cube = numpy.sqrt(corr_cube)
                     #error[select2] = error[select2]/weights[select2]*(resolution**2/fiber_area)*1
-                    error[select2] = old_div(error[select2],weights[select2])*(resolution**2)
+                    error[select2] = error[select2]/weights[select2]*(resolution**2)
                     error[mask] = replace_error
                 else:
                     error = None
@@ -1185,7 +1181,7 @@ class RSS(FiberRows):
         #    pylab.plot(norm)
           #  pylab.show()
             normalize=numpy.zeros_like(self._data)
-            normalize[:, select] = old_div(self._data[:, select],norm[select][numpy.newaxis, :])
+            normalize[:, select] = self._data[:, select]/norm[select][numpy.newaxis, :]
             self._data = normalize
             if clip!=None:
                 mask = numpy.logical_or(self._data<clip[0], self._data>clip[1])
@@ -1318,8 +1314,8 @@ class RSS(FiberRows):
     def centreBary(self, guess_x, guess_y, radius, exponent=4):
         dist = self.distance(guess_x, guess_y)
         select = dist<=radius
-        bary_x = old_div(numpy.sum(self._data[select, :]**exponent*self._arc_position_x[select][:, numpy.newaxis], 0),numpy.sum(self._data[select, :]**exponent, 0))
-        bary_y = old_div(numpy.sum(self._data[select, :]**exponent*self._arc_position_y[select][:, numpy.newaxis], 0),numpy.sum(self._data[select, :]**exponent, 0))
+        bary_x = numpy.sum(self._data[select, :]**exponent*self._arc_position_x[select][:, numpy.newaxis], 0)/numpy.sum(self._data[select, :]**exponent, 0)
+        bary_y = numpy.sum(self._data[select, :]**exponent*self._arc_position_y[select][:, numpy.newaxis], 0)/numpy.sum(self._data[select, :]**exponent, 0)
         return bary_x, bary_y
 
     def getPositionTable(self):
@@ -1337,9 +1333,9 @@ class RSS(FiberRows):
         select_neg = flux_rss<=0
         flux_rss[select_neg] = 1e-10
         rss_mag = passband.fluxToMag(flux_rss)
-        AB_flux =10**(old_div(rss_mag,-2.5))
-        AB_eflux = error_rss*(old_div(AB_flux,flux_rss))
-        good_rss = old_div(flux_rss,error_rss)>3.0
+        AB_flux =10**(rss_mag/-2.5)
+        AB_eflux = error_rss*(AB_flux/flux_rss)
+        good_rss = flux_rss/error_rss>3.0
         #print flux_rss/error_rss
 
         # define empty areas for the search grid
@@ -1361,33 +1357,33 @@ class RSS(FiberRows):
         if cpus>1:
             pool = Pool(cpus)
             threads=[]
-            for i in range(len(offsets_x)):
-                for j in range(len(offsets_y)):
+            for i in xrange(len(offsets_x)):
+                for j in xrange(len(offsets_y)):
                         threads.append(pool.apply_async(image.extractApertures, args=(posTab,  ref_pix_x, ref_pix_y, arc_scale, angle, offsets_x[i], offsets_y[j])))
             pool.close()
             pool.join()
         m = 0
-        for i in range(len(offsets_x)):
-            for j in range(len(offsets_y)):
-                    offsets_xIFU[i, j] = old_div(offsets_x[i],arc_scale)
-                    offsets_yIFU[i, j] = old_div(offsets_y[j],arc_scale)
+        for i in xrange(len(offsets_x)):
+            for j in xrange(len(offsets_y)):
+                    offsets_xIFU[i, j] = offsets_x[i]/arc_scale
+                    offsets_yIFU[i, j] = offsets_y[j]/arc_scale
                     if cpus==1:
                         flux =  image.extractApertures(posTab,  ref_pix_x, ref_pix_y, arc_scale, angle=angle, offset_arc_x=offsets_x[i], offset_arc_y=offsets_y[j])
                     else:
                         flux = threads[m].get()
-                    good_pix = (old_div(flux[0],flux[1])>3.0)
+                    good_pix = (flux[0]/flux[1]>3.0)
                     good = numpy.logical_or(good_pix, good_rss) & (flux[2]>0.0) & numpy.logical_not(numpy.isnan(flux[1])) & numpy.logical_not(numpy.isnan(error_rss))
                     sort = numpy.argsort(flux[0][good])
                     #print AB_flux[good], flux[1][good], flux[0][good]
-                    match = numpy.median(old_div(flux[0][good][sort[:-1]],AB_flux[good][sort[:-1]]))
+                    match = numpy.median(flux[0][good][sort[:-1]]/AB_flux[good][sort[:-1]])
                     #print flux[0][good], numpy.sum(numpy.isnan(flux[0][good])),AB_flux[good], numpy.sum(numpy.isnan(AB_flux[good])),
                     #match=numpy.linalg.lstsq(numpy.array([AB_flux[good][sort[:-1]]/flux[1][good][sort[:-1]]]).T,
                     #flux[0][good][sort[:-1]]/flux[1][good][sort[:-1]])[0]
                     scale_flux[i, j] = match
                     valid_fibers[i,j] = numpy.sum(good[sort[:-1]])
                     #scale_flux_alt[i, j] = match_alt
-                    chisq[i, j] = float(numpy.sum(old_div((flux[0][good][sort[:-1]]-scale_flux[i, j]*AB_flux[good][sort[:-1]])**2,
-                    (flux[1][good][sort[:-1]]**2+AB_eflux[good][sort[:-1]]**2))))/(valid_fibers[i,j])
+                    chisq[i, j] = float(numpy.sum((flux[0][good][sort[:-1]]-scale_flux[i, j]*AB_flux[good][sort[:-1]])**2 /
+                    (flux[1][good][sort[:-1]]**2+AB_eflux[good][sort[:-1]]**2)))/(valid_fibers[i,j])
                     #chisq_alt[i, j] = numpy.sum((flux[0][good]-scale_flux_alt[i, j]*AB_flux[good])**2/(flux[1][good]**2+AB_eflux[good]**2))*1e10
            #     print m, len(offsets_x), len(offsets_y)
                     m+=1

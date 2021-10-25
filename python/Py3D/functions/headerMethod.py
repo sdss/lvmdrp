@@ -1,4 +1,5 @@
 from __future__ import print_function
+from builtins import range
 import sys
 from Py3D import *
 from Py3D.external import astrolib
@@ -243,8 +244,8 @@ def addHvelcorHdr_py3d(file, key, RAKey='RA', RAUnit='h', DECKey='DEC', ObsLongK
     elif RAUnit=='h':
         ra = ra/15.0
     if int(LongSignFlip)==1:
-        long = long*(-1)
-    vel_correction = astrolib.helcorr(long, lat, alt, ra, dec, mjd)
+        long = int*(-1)
+    vel_correction = astrolib.helcorr(int, lat, alt, ra, dec, mjd)
     hdr.setHdrValue(key, float('%.2f' %(vel_correction[0])), 'Heliocentric vel correction [km/s]')
     hdr.writeFitsHeader()
 

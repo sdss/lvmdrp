@@ -1,4 +1,6 @@
 from __future__ import print_function
+from builtins import range
+from builtins import object
 from distutils.version import LooseVersion
 import pyfits
 
@@ -84,7 +86,7 @@ class Header(object):
             keywords : list of strings, optional
                         list of keywords that are removed from the header
         """
-        keys = self._header.keys()
+        keys = list(self._header.keys())
         new_hdr = pyfits.Header()
         for k in keys:
             if not k in keywords:
@@ -116,7 +118,7 @@ class Header(object):
             out : list
                         list of strings representing the keywords in the header
         """
-        return self._header.keys()
+        return list(self._header.keys())
 
     def getHeader(self):
         return self._header
@@ -151,11 +153,11 @@ def combineHdr(headers):
     for i in range(len(headers)):
         if i==0:
             final_cards = headers[i]._header.cards
-            final_keys = headers[i]._header.keys()
+            final_keys = list(headers[i]._header.keys())
         final_header = pyfits.Header(cards=final_cards)
         if i>0:
             card = headers[i]._header.cards
-            keys = headers[i]._header.keys()
+            keys = list(headers[i]._header.keys())
             for k in keys:
                 if not k in final_keys:
                     final_header.append(card[k])

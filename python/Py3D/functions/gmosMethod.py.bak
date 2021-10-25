@@ -1,4 +1,3 @@
-from builtins import range
 import  os, pyfits
 from Py3D.functions.imageMethod import *
 from Py3D.functions.rssMethod import *

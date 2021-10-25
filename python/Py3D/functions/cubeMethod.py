@@ -1,4 +1,7 @@
 from __future__ import print_function
+from __future__ import division
+from builtins import range
+from past.utils import old_div
 import sys, numpy, time
 try:
   import pylab
@@ -307,9 +310,9 @@ def matchAbsFluxAper_py3d(cube_in, cube_out, key_mags,  ref_mags, hdrkey, commen
     for n in range(len(split_mags)):
         ref_mags.append(float(split_mags[n].split(':')[1]))
         ref_names.append(split_mags[n].split(':')[0].replace(' ', ''))
-        cube.setHdrValue(hdrkey+' RATIO '+ref_names[n], 10**((ref_mags[n]-mags[n])/-2.5), comment)
+        cube.setHdrValue(hdrkey+' RATIO '+ref_names[n], 10**(old_div((ref_mags[n]-mags[n]),-2.5)), comment)
     ref_mags=numpy.array(ref_mags)
-    diff_factor=numpy.mean(10**((ref_mags-mags)/-2.5))
+    diff_factor=numpy.mean(10**(old_div((ref_mags-mags),-2.5)))
 
     cube.setHdrValue(hdrkey+' RATIO', diff_factor, comment)
     cube._data = cube._data*diff_factor
@@ -352,7 +355,7 @@ def matchCubeAperSpec_py3d(cube_in, cube_ref, cube_out, radius, poly_correct='-3
     spec_in_resamp = spec_in.resampleSpec(wave, method='linear',  err_sim=0)
     spec_ref_resamp = spec_ref.resampleSpec(wave, method='linear',  err_sim=0)
 
-    ratio = spec_ref_resamp/spec_in_resamp
+    ratio = old_div(spec_ref_resamp,spec_in_resamp)
     #if verbose==1:
     #    pylab.plot(ratio._wave, ratio._data, '-k')
     out_par = ratio.smoothPoly(order=poly_correct, start_wave=start_wave, end_wave=end_wave, ref_base=cube1._wave)
@@ -464,7 +467,7 @@ def createSensFunction_py3d(cube_in, out_sens,  ref_spec, airmass, exptime, cent
     except KeyError:
         cent_x = float(cent_x)
 
-    star_spec = cube.getAperSpec(cent_x, cent_y, radius, kmax=1000, correct_masked=False, ignore_mask=True,  threshold_coverage=0.0)/aper_correct
+    star_spec = old_div(cube.getAperSpec(cent_x, cent_y, radius, kmax=1000, correct_masked=False, ignore_mask=True,  threshold_coverage=0.0),aper_correct)
 
     if extinct_curve=='mean' or extinct_curve=='summer' or extinct_curve=='winter':
         extinct = 10**(ancillary_func.extinctCAHA(star_spec._wave, extinct_v, type=extinct_curve)*airmass*-0.4)
@@ -485,11 +488,11 @@ def createSensFunction_py3d(cube_in, out_sens,  ref_spec, airmass, exptime, cent
             star_out.write('%i %.3f %e\n'%(i, star_spec._wave[i], star_spec._data[i]))
         star_out.close()
     star_spec.smoothSpec(smooth_ref)
-    star_corr = star_spec/extinct/exptime
+    star_corr = old_div(old_div(star_spec,extinct),exptime)
 
-    sens_func = ref_star_resamp/star_corr
+    sens_func = old_div(ref_star_resamp,star_corr)
     if mask_wave!=None:
-        regions = len(mask_wave)/2
+        regions = old_div(len(mask_wave),2)
         for i in range(regions):
             select_region = numpy.logical_and(sens_func._wave>mask_wave[i*2], sens_func._wave<mask_wave[i*2+1])
             select_blue = numpy.logical_and(sens_func._wave>mask_wave[i*2]-20, sens_func._wave<mask_wave[i*2])
@@ -512,10 +515,10 @@ def createSensFunction_py3d(cube_in, out_sens,  ref_spec, airmass, exptime, cent
         sens_func_smooth = 1.0/sens_func_smooth
         if verbose==1:
             pylab.plot(sens_func_smooth._wave,  sens_func_smooth._data, '-r')
-            pylab.plot(sens_func_smooth._wave,  sens_func._data/sens_func_smooth._data, '-g')
+            pylab.plot(sens_func_smooth._wave,  old_div(sens_func._data,sens_func_smooth._data), '-g')
             sens_test_out = open('test_sens.txt', 'w')
             for i in range(sens_func_smooth._dim):
-                sens_test_out.write('%i %.2f %e %e %e\n'%(i, sens_func_smooth._wave[i], sens_func._data[i], sens_func_smooth._data[i], sens_func._data[i]/sens_func_smooth._data[i]))
+                sens_test_out.write('%i %.2f %e %e %e\n'%(i, sens_func_smooth._wave[i], sens_func._data[i], sens_func_smooth._data[i], old_div(sens_func._data[i],sens_func_smooth._data[i])))
             sens_test_out.close()
     else:
         split = float(split)
@@ -597,11 +600,11 @@ def combineCubes_py3d(incubes, outcube, method='mean', replace_error='1e10'):
             good_pix = numpy.sum(numpy.logical_not(select), 0)
             select_bad = good_pix==0
             select_good = good_pix>0
-            data[i, select_good] = numpy.sum(image, 0)[select_good]/good_pix[select_good]
+            data[i, select_good] = old_div(numpy.sum(image, 0)[select_good],good_pix[select_good])
             if numpy.sum(select_bad)>0:
-                data[i, select_bad] = numpy.sum(image2, 0)[select_bad]/len(incubes)
+                data[i, select_bad] = old_div(numpy.sum(image2, 0)[select_bad],len(incubes))
             if error!=None:
-                error[i, select_good] = numpy.sqrt(numpy.sum(error_img**2, 0)[select_good]/good_pix[select_good]**2)
+                error[i, select_good] = numpy.sqrt(old_div(numpy.sum(error_img**2, 0)[select_good],good_pix[select_good]**2))
                 error[i, select_bad]=replace_error
             if mask!=None:
                 mask[i, :, :]=select_bad

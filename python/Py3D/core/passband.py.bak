@@ -1,6 +1,3 @@
-from __future__ import division
-from builtins import range
-from past.utils import old_div
 from Py3D.core.spectrum1d import Spectrum1D
 import numpy
 from scipy import interpolate
@@ -31,8 +28,8 @@ class PassBand(Spectrum1D):
 
     def effectiveWave(self):
         a=numpy.trapz(self._data*self._wave)
-        b=numpy.trapz(old_div(self._data,self._wave))
-        eff_wave=numpy.sqrt(old_div(a,b))
+        b=numpy.trapz(self._data/self._wave)
+        eff_wave=numpy.sqrt(a/b)
 
         return eff_wave
 
@@ -50,14 +47,14 @@ class PassBand(Spectrum1D):
 
         if spec._mask!=None:
             goodpix = numpy.logical_and(numpy.logical_not(spec._mask), total_cut)
-            flux = old_div(numpy.trapz(spec._data[goodpix]*new_trans[goodpix]*spec._wave[goodpix], spec._wave[goodpix]),numpy.trapz(new_trans[goodpix]*spec._wave[goodpix], spec._wave[goodpix]))
+            flux = numpy.trapz(spec._data[goodpix]*new_trans[goodpix]*spec._wave[goodpix], spec._wave[goodpix])/numpy.trapz(new_trans[goodpix]*spec._wave[goodpix], spec._wave[goodpix])
         else:
-            flux = old_div(numpy.trapz(spec._data[total_cut]*new_trans[total_cut]*spec._wave[total_cut], spec._wave[total_cut]),numpy.trapz(new_trans[total_cut]*spec._wave[total_cut], spec._wave[total_cut]))
+            flux = numpy.trapz(spec._data[total_cut]*new_trans[total_cut]*spec._wave[total_cut], spec._wave[total_cut])/numpy.trapz(new_trans[total_cut]*spec._wave[total_cut], spec._wave[total_cut])
         if spec._error!=None:
             if spec._mask!=None:
-                error =numpy.sqrt( old_div(numpy.trapz(spec._error[goodpix]**2*new_trans[goodpix]*spec._wave[goodpix], spec._wave[goodpix]),numpy.trapz(new_trans[goodpix]*spec._wave[goodpix], spec._wave[goodpix])))
+                error =numpy.sqrt( numpy.trapz(spec._error[goodpix]**2*new_trans[goodpix]*spec._wave[goodpix], spec._wave[goodpix])/numpy.trapz(new_trans[goodpix]*spec._wave[goodpix], spec._wave[goodpix]))
             else:
-                error =numpy.sqrt( old_div(numpy.trapz(spec._error[total_cut]**2*new_trans[total_cut]*spec._wave[total_cut], spec._wave[total_cut]),numpy.trapz(new_trans[total_cut]*spec._wave[total_cut], spec._wave[total_cut])))
+                error =numpy.sqrt( numpy.trapz(spec._error[total_cut]**2*new_trans[total_cut]*spec._wave[total_cut], spec._wave[total_cut])/numpy.trapz(new_trans[total_cut]*spec._wave[total_cut], spec._wave[total_cut]))
         else:
             error=None
         #print spec._data[total_cut],spec._error[total_cut]
@@ -105,15 +102,15 @@ class PassBand(Spectrum1D):
     def fluxToMag(self, flux, error=None, system='AB', units=1.0e-16, wave=None):
         if system=='AB':
             aLambda=3e-13 # for conversion to erg s-1 cm-2 angstrom-1 with lambda in microns
-            effLMicron=self.effectiveWave()*(old_div(1e-10,1e-6))
+            effLMicron=self.effectiveWave()*(1e-10/1e-6)
 
-            fluxJy=old_div((flux*units*effLMicron**2),aLambda)
-            mag=-2.5*numpy.log10(old_div(fluxJy,1e23))-48.6
+            fluxJy=(flux*units*effLMicron**2)/aLambda
+            mag=-2.5*numpy.log10(fluxJy/1e23)-48.6
         if system=='Vega':
             vega_spec = Spectrum1D()
             vega_spec.loadTxtData(resources_dir+'/vega.txt')
             (vega_flux, vega_err) = self.getFluxPass(vega_spec)
-            mag=-2.5*numpy.log10(old_div(flux*units,vega_flux))
+            mag=-2.5*numpy.log10(flux*units/vega_flux)
         #if error != None:
         #    error = 1.0857*error/flux
         #    return mag, error

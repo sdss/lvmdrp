@@ -1,3 +1,4 @@
+from __future__ import print_function
 ####
 #### This code is a collection of routines taken from the astrolib project
 ####
@@ -238,7 +239,7 @@ def precess(ra0, dec0, equinox1, equinox2, doprint=None, fk4=None, radian=False)
 #      dec = reform(dec, dimen, over=True)
    
    if (doprint is not None):   
-      print 'Equinox (' + strtrim(equinox2, 2) + '): ', adstring(ra, dec, 1)
+      print('Equinox (' + strtrim(equinox2, 2) + '): ', adstring(ra, dec, 1))
    
    return ra,dec
 
@@ -568,7 +569,7 @@ def precess_xyz(x, y, z, equinox1, equinox2):
    def _ret():  return (x, y, z, equinox1, equinox2)
    
    if n_params != 5:   
-      print 'Syntax - PRECESS_XYZ,x,y,z,equinox1,equinox2'
+      print('Syntax - PRECESS_XYZ,x,y,z,equinox1,equinox2')
       return _ret()
    
    #take input coords and convert to ra and dec (in radians)
@@ -668,8 +669,8 @@ def xyz(date, equinox=None):
    # ON_ERROR, 2
    
    if (n_params == 0):   
-      print 'Syntax - XYZ, date, x, y, z, [ xvel, yvel, zvel, EQUINOX= ]'
-      print '     (date is REDUCED Julian date (JD - 2400000.0) )'
+      print('Syntax - XYZ, date, x, y, z, [ xvel, yvel, zvel, EQUINOX= ]')
+      print('     (date is REDUCED Julian date (JD - 2400000.0) )')
       return _ret()
    
    picon = pi / 180.0e0
@@ -1151,26 +1152,26 @@ def helcorr(obs_long, obs_lat, obs_alt, ra2000, dec2000, jd, debug=False):
    bcorr = (vdiurnal + vbar) #using baricentric velocity for correction
    hcorr = (vdiurnal + vhel) #using heliocentric velocity for correction
    if debug:   
-      print ''
-      print '----- HELCORR.PRO - DEBUG INFO - START ----'
-      print '(obs_long,obs_lat,obs_alt) Observatory coordinates [deg,m]: ', obs_long, obs_lat, obs_alt
-      print '(ra,dec) Object coordinates (for epoch 2000.0) [deg]: ', ra, dec
-      print '(ut) Universal time (middle of exposure) [hrs]: ', ut#, format='(A,F20.12)'
-      print '(jd) Julian date (middle of exposure) (JD-2400000): ', jd#, format='(A,F20.12)'
-      print '(hjd) Heliocentric Julian date (middle of exposure) (HJD-2400000): ', hjd#, format='(A,F20.12)'
-      print '(gmst) Greenwich mean siderial time [hrs]: ', gmst % 24
-      print '(lmst) Local mean siderial time [hrs]: ', lmst
-      print '(dlat) Latitude correction [deg]: ', dlat
-      print '(lat) Geocentric latitude of observer [deg]: ', lat
-      print '(r) Distance of observer from center of earth [m]: ', r
-      print '(v) Rotational velocity of earth at the position of the observer [km/s]: ', v
-      print '(vdiurnal) Projected earth rotation and earth-moon revolution [km/s]: ', vdiurnal
-      print '(vbar) Baricentric velocity [km/s]: ', vbar
-      print '(vhel) Heliocentric velocity [km/s]: ', vhel   
-      print '(bcorr) Vdiurnal+vbar [km/s]: ', bcorr#, format='(A,F12.9)'
-      print '(hcorr) Vdiurnal+vbar [km/s]: ', hcorr#, format='(A,F12.9)'
-      print '----- HELCORR.PRO - DEBUG INFO - END -----'
-      print ''
+      print('')
+      print('----- HELCORR.PRO - DEBUG INFO - START ----')
+      print('(obs_long,obs_lat,obs_alt) Observatory coordinates [deg,m]: ', obs_long, obs_lat, obs_alt)
+      print('(ra,dec) Object coordinates (for epoch 2000.0) [deg]: ', ra, dec)
+      print('(ut) Universal time (middle of exposure) [hrs]: ', ut)#, format='(A,F20.12)'
+      print('(jd) Julian date (middle of exposure) (JD-2400000): ', jd)#, format='(A,F20.12)'
+      print('(hjd) Heliocentric Julian date (middle of exposure) (HJD-2400000): ', hjd)#, format='(A,F20.12)'
+      print('(gmst) Greenwich mean siderial time [hrs]: ', gmst % 24)
+      print('(lmst) Local mean siderial time [hrs]: ', lmst)
+      print('(dlat) Latitude correction [deg]: ', dlat)
+      print('(lat) Geocentric latitude of observer [deg]: ', lat)
+      print('(r) Distance of observer from center of earth [m]: ', r)
+      print('(v) Rotational velocity of earth at the position of the observer [km/s]: ', v)
+      print('(vdiurnal) Projected earth rotation and earth-moon revolution [km/s]: ', vdiurnal)
+      print('(vbar) Baricentric velocity [km/s]: ', vbar)
+      print('(vhel) Heliocentric velocity [km/s]: ', vhel)   
+      print('(bcorr) Vdiurnal+vbar [km/s]: ', bcorr)#, format='(A,F12.9)'
+      print('(hcorr) Vdiurnal+vbar [km/s]: ', hcorr)#, format='(A,F12.9)'
+      print('----- HELCORR.PRO - DEBUG INFO - END -----')
+      print('')
    
    
    return (hcorr, bcorr, hjd)

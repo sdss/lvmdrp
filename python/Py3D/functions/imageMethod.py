@@ -1,4 +1,9 @@
 from __future__ import print_function
+from __future__ import division
+from future import standard_library
+standard_library.install_aliases()
+from builtins import range
+from past.utils import old_div
 import sys, numpy, pyfits
 try:
   import pylab,matplotlib
@@ -17,7 +22,7 @@ from Py3D import *
 from Py3D.core.spectrum1d import Spectrum1D
 import multiprocessing
 from types import *
-import copy_reg
+import copyreg
 
 description='Provides Methods to process 2D images'
 
@@ -137,7 +142,7 @@ def detCos_py3d(image,  out_image,   rdnoise='2.9', sigma_det='5', rlim='1.2', i
     # start iteration
     if verbose:
       print('Start the detection process using %d CPU cores.'%(cpus))
-    for i in xrange(iterations):
+    for i in range(iterations):
         if verbose:
             print('Start iteration %i'%(i+1))
         # follow the LACosmic scheme to select pixel
@@ -148,7 +153,7 @@ def detCos_py3d(image,  out_image,   rdnoise='2.9', sigma_det='5', rlim='1.2', i
         result = []
         if cpus>1:
             fine=out.convolveGaussImg(sigma, sigma, mask=True)
-            fine_norm = out/fine
+            fine_norm = old_div(out,fine)
             select_neg = fine_norm<0
             fine_norm.setData(data=0, select=select_neg)
             pool = Pool(cpus)
@@ -177,7 +182,7 @@ def detCos_py3d(image,  out_image,   rdnoise='2.9', sigma_det='5', rlim='1.2', i
             Lap = result[0].get()
             Lap2 = result[1].get()
             pool.terminate()
-            S = Lap/(noise*2) # normalize Laplacian image by the noise
+            S = old_div(Lap,(noise*2)) # normalize Laplacian image by the noise
             S_prime = S-S.medianImg((5, 5)) # cleaning of the normalized Laplacian image
         else:
             sub = out.subsampleImg(2) # subsample image
@@ -185,11 +190,11 @@ def detCos_py3d(image,  out_image,   rdnoise='2.9', sigma_det='5', rlim='1.2', i
             select_neg = conv<0
             conv.setData(data=0, select=select_neg)  # replace all negative values with 0
             Lap = conv.rebin(2, 2) # rebin the data to original resolution
-            S = Lap/(noise*2) # normalize Laplacian image by the noise
+            S = old_div(Lap,(noise*2)) # normalize Laplacian image by the noise
             S_prime = S-S.medianImg((5, 5)) # cleaning of the normalized Laplacian image
             fine=out.convolveGaussImg(sigma, sigma, mask=True) # convolve image with a 2D Gaussian
 
-            fine_norm = out/fine
+            fine_norm = old_div(out,fine)
             select_neg = fine_norm<0
             fine_norm.setData(data=0, select=select_neg)
             sub_norm = fine_norm.subsampleImg(2) # subsample image
@@ -327,7 +332,7 @@ def LACosmic_py3d(image,  out_image,  sigma_det='5', flim='1.1', iter='3', sig_g
     else:
         cpus = int(parallel)
     # start iteration
-    for i in xrange(iterations):
+    for i in range(iterations):
         if verbose==1:
             print('iteration %i'%(i+1))
         # follow the LACosmic scheme to select pixel
@@ -338,7 +343,7 @@ def LACosmic_py3d(image,  out_image,  sigma_det='5', flim='1.1', iter='3', sig_g
         result = []
         if cpus>1:
             fine=out.convolveGaussImg(sigma_x, sigma_y)
-            fine_norm = out/fine
+            fine_norm = old_div(out,fine)
             select_neg = fine_norm<0
             fine_norm.setData(data=0, select=select_neg)
             pool = Pool(cpus)
@@ -367,7 +372,7 @@ def LACosmic_py3d(image,  out_image,  sigma_det='5', flim='1.1', iter='3', sig_g
             Lap = result[0].get()
             Lap2 = result[1].get()
             pool.terminate()
-            S = Lap/(noise*4) # normalize Laplacian image by the noise
+            S = old_div(Lap,(noise*4)) # normalize Laplacian image by the noise
             S_prime = S-S.medianImg((err_box_y, err_box_x)) # cleaning of the normalized Laplacian image
 
 
@@ -377,11 +382,11 @@ def LACosmic_py3d(image,  out_image,  sigma_det='5', flim='1.1', iter='3', sig_g
             select_neg = conv<0
             conv.setData(data=0, select=select_neg)  # replace all negative values with 0
             Lap = conv.rebin(2, 2) # rebin the data to original resolution
-            S = Lap/(noise*4) # normalize Laplacian image by the noise
+            S = old_div(Lap,(noise*4)) # normalize Laplacian image by the noise
             S_prime = S-S.medianImg((err_box_y, err_box_x)) # cleaning of the normalized Laplacian image
             fine=out.convolveGaussImg(sigma_x, sigma_y) # convolve image with a 2D Gaussian
 #        fine.writeFitsData('s_prime.fits')
-            fine_norm = out/fine
+            fine_norm = old_div(out,fine)
             select_neg = fine_norm<0
             fine_norm.setData(data=0, select=select_neg)
             sub_norm = fine_norm.subsampleImg() # subsample image
@@ -520,7 +525,7 @@ def findPeaksAuto_py3d(image, out_peaks_file, nfibers,  disp_axis='X', threshold
     # write number of peaks and their position to an ASCII file NEED TO BE REPLACE WITH XML OUTPUT
     file_out = open(out_peaks_file, 'w')
     file_out.write('%i\n' %(column))
-    for i in xrange(len(centers)):
+    for i in range(len(centers)):
         file_out.write('%i %i %e %i\n'%(i, round_cent[i], centers[i], 0))
     file_out.close()
     if verbose==1:
@@ -612,7 +617,7 @@ def findPeaksMaster_py3d(image, peaks_master, out_peaks_file, disp_axis='X', thr
     file_out = open(out_peaks_file, 'w')
     select_bad = numpy.logical_not(select_good_weak)
     file_out.write('%i\n' %(column))
-    for i in xrange(len(round_cent)):
+    for i in range(len(round_cent)):
         file_out.write('%i %i %e %i\n'%(i, round_cent[i], centers._data[i],  int(select_bad[i])))
     file_out.close()
 
@@ -719,7 +724,7 @@ def findPeaksMaster2_py3d(image, peaks_master, out_peaks_file, disp_axis='X', th
     file_out = open(out_peaks_file, 'w')
     select_bad = numpy.logical_not(select_good)
     file_out.write('%i\n' %(column))
-    for i in xrange(len(round_cent)):
+    for i in range(len(round_cent)):
         file_out.write('%i %i %e %i\n'%(i, round_cent[i], centers._data[i],  int(select_bad[i])))
     file_out.close()
 
@@ -809,7 +814,7 @@ def tracePeaks_py3d(image, peaks_file, trace_out, disp_axis='X', method='gauss',
     fibers = len(lines)-1  # number of fibers
     positions = numpy.zeros(fibers, dtype=numpy.float32) # empty array to store positions
     bad_fibers = numpy.zeros(fibers, dtype='bool') # empty array to store positions
-    for i in xrange(1, fibers+1):
+    for i in range(1, fibers+1):
         line = lines[i].split()
         positions[i-1]=float(line[2])
         bad_fibers[i-1] = bool(int(line[3]))
@@ -884,7 +889,7 @@ def tracePeaks_py3d(image, peaks_file, trace_out, disp_axis='X', method='gauss',
     # smooth all trace by a polynomial
     trace.smoothTracePoly(poly_disp)
 
-    for i in xrange(fibers):
+    for i in range(fibers):
         if bad_fibers[i]==False:
             trace._mask[i, :] = False
         else:
@@ -1672,7 +1677,7 @@ def testres_py3d(image, trace, fwhm, flux):
     fact = numpy.sqrt(2.*numpy.pi)
     for i in range(img._dim[1]):
       #  print i
-        A=1.0*numpy.exp(-0.5*((x[:, numpy.newaxis]-trace_mask._data[:, i][numpy.newaxis, :])/abs(trace_fwhm._data[:, i][numpy.newaxis, :]/2.354))**2)/(fact*abs(trace_fwhm._data[:, i][numpy.newaxis, :]/2.354))
+        A=old_div(1.0*numpy.exp(-0.5*(old_div((x[:, numpy.newaxis]-trace_mask._data[:, i][numpy.newaxis, :]),abs(trace_fwhm._data[:, i][numpy.newaxis, :]/2.354)))**2),(fact*abs(trace_fwhm._data[:, i][numpy.newaxis, :]/2.354)))
         spec = numpy.dot(A, trace_flux._data[:, i])
         out[:, i] = spec
         if i==1000:
@@ -1685,7 +1690,7 @@ def testres_py3d(image, trace, fwhm, flux):
     hdu = pyfits.PrimaryHDU(out)
     hdu.writeto('fit.fits', clobber=True)
 
-    hdu = pyfits.PrimaryHDU((img._data-out)/img._data)
+    hdu = pyfits.PrimaryHDU(old_div((img._data-out),img._data))
     hdu.writeto('res_rel.fits', clobber=True)
 
 

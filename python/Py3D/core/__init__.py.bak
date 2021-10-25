@@ -1,20 +1,21 @@
-from header import *
-from positionTable import *
-from cube import *
-from image import *
-from rss import *
-from spectrum1d import *
-from passband import *
-from tracemask import *
-from apertures import *
+from __future__ import absolute_import
+from .header import *
+from .positionTable import *
+from .cube import *
+from .image import *
+from .rss import *
+from .spectrum1d import *
+from .passband import *
+from .tracemask import *
+from .apertures import *
 import exceptions, copy_reg
 from types import *
 
 
 def _pickle_method(method):
-      func_name = method.im_func.__name__
-      obj = method.im_self
-      cls = method.im_class
+      func_name = method.__func__.__name__
+      obj = method.__self__
+      cls = method.__self__.__class__
       if func_name.startswith('__') and not func_name.endswith('__'):
 	cls_name = cls.__name__.lstrip('_')
 	if cls_name: func_name = '_' + cls_name + func_name

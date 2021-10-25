@@ -1,3 +1,4 @@
+from __future__ import print_function
 from Py3D.core.header import *
 from Py3D.core.positionTable import PositionTable
 from Py3D.core.spectrum1d import Spectrum1D
@@ -627,7 +628,7 @@ class FiberRows(Header, PositionTable):
 
         m=1
         if verbose==True:
-            print 'Start measuring arc lines...'
+            print('Start measuring arc lines...')
         plot=False
         for i in first:
             if verbose==True:

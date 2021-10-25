@@ -1,9 +1,12 @@
 from __future__ import print_function
+from __future__ import division
 ####
 #### This code is a collection of routines taken from the astrolib project
 ####
 
 
+from builtins import range
+from past.utils import old_div
 from numpy import *
 _radeg = 180.0 / pi
 
@@ -49,8 +52,8 @@ def premat(equinox1, equinox2, fk4=False):
           Converted to IDL V5.0   W. Landsman   September 1997
    """
 
-   deg_to_rad = pi / 180.0e0
-   sec_to_rad = deg_to_rad / 3600.e0
+   deg_to_rad = old_div(pi, 180.0e0)
+   sec_to_rad = old_div(deg_to_rad, 3600.e0)
    
    t = 0.001e0 * (equinox2 - equinox1)
    
@@ -179,7 +182,7 @@ def precess(ra0, dec0, equinox1, equinox2, doprint=None, fk4=None, radian=False)
       dec=array([dec0])
       npts=1
       xarray=False
-   deg_to_rad = pi / 180.0e0
+   deg_to_rad = old_div(pi, 180.0e0)
    
    if npts == 0:   
       print('ERROR - Input RA and DEC must be vectors or scalars')
@@ -207,7 +210,7 @@ def precess(ra0, dec0, equinox1, equinox2, doprint=None, fk4=None, radian=False)
       x = transpose(x)
       
    
-   sec_to_rad = deg_to_rad / 3600.e0
+   sec_to_rad = old_div(deg_to_rad, 3600.e0)
    
    # Use PREMAT function to get precession matrix from Equinox1 to Equinox2
    
@@ -227,9 +230,9 @@ def precess(ra0, dec0, equinox1, equinox2, doprint=None, fk4=None, radian=False)
       
    
    if not radian:   
-      ra = ra_rad / deg_to_rad
+      ra = old_div(ra_rad, deg_to_rad)
       ra = ra + (ra < 0.) * 360.e0            #RA between 0 and 360 degrees
-      dec = dec_rad / deg_to_rad
+      dec = old_div(dec_rad, deg_to_rad)
    else:   
       ra = ra_rad ; dec = dec_rad
       ra = ra + (ra < 0.) * 2.0e0 * pi
@@ -309,13 +312,13 @@ def daycnv(xjd):
             jd=jd+1
    hr = frac * 24.0
    l = jd + 68569
-   n = 4 * l / 146097
-   l = l - (146097 * n + 3) / 4
-   yr = 4000 * (l + 1) / 1461001
-   l = l - 1461 * yr / 4 + 31        #1461 = 365.25 * 4
-   mn = 80 * l / 2447
-   day = l - 2447 * mn / 80
-   l = mn / 11
+   n = old_div(4 * l, 146097)
+   l = l - old_div((146097 * n + 3), 4)
+   yr = old_div(4000 * (l + 1), 1461001)
+   l = l - old_div(1461 * yr, 4) + 31        #1461 = 365.25 * 4
+   mn = old_div(80 * l, 2447)
+   day = l - old_div(2447 * mn, 80)
+   l = old_div(mn, 11)
    mn = mn + 2 - 12 * l
    yr = 100 * (n - 49) + yr + l
    return (yr, mn, day, hr)
@@ -438,8 +441,8 @@ def bprecess(ra0, dec0, mu_radec=None, parallax=None, rad_vel=None, epoch=None):
    if epoch is None:   
       epoch = 2000.0e0
    
-   radeg = 180.e0 / pi
-   sec_to_radian = 1.e0 / radeg / 3600.e0
+   radeg = old_div(180.e0, pi)
+   sec_to_radian = old_div(old_div(1.e0, radeg), 3600.e0)
    
    m = array([array([+0.9999256795e0, -0.0111814828e0, -0.0048590040e0, -0.000551e0, -0.238560e0, +0.435730e0]),
    array([+0.0111814828e0, +0.9999374849e0, -0.0000271557e0, +0.238509e0, -0.002667e0, -0.008541e0]),
@@ -450,7 +453,7 @@ def bprecess(ra0, dec0, mu_radec=None, parallax=None, rad_vel=None, epoch=None):
    
    a_dot = 1e-3 * array([1.244e0, -1.579e0, -0.660e0])           #in arc seconds per century
    
-   ra_rad = ra / radeg       ;      dec_rad = dec / radeg
+   ra_rad = old_div(ra, radeg)       ;      dec_rad = old_div(dec, radeg)
    cosra = cos(ra_rad)  ;       sinra = sin(ra_rad)
    cosdec = cos(dec_rad) ;      sindec = sin(dec_rad)
    
@@ -489,12 +492,12 @@ def bprecess(ra0, dec0, mu_radec=None, parallax=None, rad_vel=None, epoch=None):
       rmag = sqrt(x1 ** 2 + y1 ** 2 + z1 ** 2)
       
       
-      s1 = r1 / rmag    ; s1_dot = r1_dot / rmag
+      s1 = old_div(r1, rmag)    ; s1_dot = old_div(r1_dot, rmag)
       
       s = s1
       for j in arange(0, 3):
          r = s1 + a - ((s * a).sum()) * s
-         s = r / rmag
+         s = old_div(r, rmag)
       x = r[0]          ; y = r[1]     ;  z = r[2]
       r2 = x ** 2 + y ** 2 + z ** 2
       rmag = sqrt(r2)
@@ -502,15 +505,15 @@ def bprecess(ra0, dec0, mu_radec=None, parallax=None, rad_vel=None, epoch=None):
       if mu_radec is not None:   
          r_dot = s1_dot + a_dot - ((s * a_dot).sum()) * s
          x_dot = r_dot[0]  ; y_dot = r_dot[1]  ;  z_dot = r_dot[2]
-         mu_radec[i,0] = (x * y_dot - y * x_dot) / (x ** 2 + y ** 2)
-         mu_radec[i,1] = (z_dot * (x ** 2 + y ** 2) - z * (x * x_dot + y * y_dot)) / (r2 * sqrt(x ** 2 + y ** 2))
+         mu_radec[i,0] = old_div((x * y_dot - y * x_dot), (x ** 2 + y ** 2))
+         mu_radec[i,1] = old_div((z_dot * (x ** 2 + y ** 2) - z * (x * x_dot + y * y_dot)), (r2 * sqrt(x ** 2 + y ** 2)))
       
-      dec_1950[i] = arcsin(z / rmag)
+      dec_1950[i] = arcsin(old_div(z, rmag))
       ra_1950[i] = arctan2(y, x)
       
       if parallax[i] > 0.:   
-         rad_vel[i] = (x * x_dot + y * y_dot + z * z_dot) / (21.095 * parallax[i] * rmag)
-         parallax[i] = parallax[i] / rmag
+         rad_vel[i] = old_div((x * x_dot + y * y_dot + z * z_dot), (21.095 * parallax[i] * rmag))
+         parallax[i] = old_div(parallax[i], rmag)
    
    neg = (ra_1950 < 0)
    if neg.any() > 0:   
@@ -576,7 +579,7 @@ def precess_xyz(x, y, z, equinox1, equinox2):
    
    ra = atan(y, x)
    _del = sqrt(x * x + y * y + z * z)  #magnitude of distance to Sun
-   dec = asin(z / _del)
+   dec = asin(old_div(z, _del))
    
    #   precess the ra and dec
    precess(ra, dec, equinox1, equinox2, radian=True)
@@ -673,8 +676,8 @@ def xyz(date, equinox=None):
       print('     (date is REDUCED Julian date (JD - 2400000.0) )')
       return _ret()
    
-   picon = pi / 180.0e0
-   t = (date - 15020.0e0) / 36525.0e0         #Relative Julian century from 1900
+   picon = old_div(pi, 180.0e0)
+   t = old_div((date - 15020.0e0), 36525.0e0)         #Relative Julian century from 1900
    
    # NOTE: longitude arguments below are given in *equinox* of date.
    #   Precess these to equinox 1950 to give everything an even footing.
@@ -814,11 +817,11 @@ def helio_jd(date, ra, dec, b1950=False, time_diff=False):
    radeg = 180.0 / pi
 #   zparcheck('HELIO_JD', date, 1, concatenate([3, 4, 5]), concatenate([0, 1]), 'Reduced Julian Date')
    
-   delta_t = (array(date).astype(float) - 33282.42345905e0) / 36525.0e0
+   delta_t = old_div((array(date).astype(float) - 33282.42345905e0), 36525.0e0)
    epsilon_sec = poly1d([44.836e0, -46.8495, -0.00429, 0.00181][::-1])(delta_t)
-   epsilon = (23.433333e0 + epsilon_sec / 3600.0e0) / radeg
-   ra1 = ra1 / radeg
-   dec1 = dec1 / radeg
+   epsilon = old_div((23.433333e0 + old_div(epsilon_sec, 3600.0e0)), radeg)
+   ra1 = old_div(ra1, radeg)
+   dec1 = old_div(dec1, radeg)
    
    x,y,z,tmp,tmp,tmp=xyz(date)
    
@@ -829,7 +832,7 @@ def helio_jd(date, ra, dec, b1950=False, time_diff=False):
    if time_diff:   
       return time
    else:   
-      return array(date).astype(float) + time / 86400.0e0
+      return array(date).astype(float) + old_div(time, 86400.0e0)
 
 
 def baryvel(dje, deq=0):
@@ -961,7 +964,7 @@ def baryvel(dje, deq=0):
    dc1mme = 0.99999696e0
    
    #Time arguments.
-   dt = (dje - dcto) / dcjul
+   dt = old_div((dje - dcto), dcjul)
    tvec = array([1e0, dt, dt * dt])
    
    #Values of all elements for the instant(aneous?) dje.
@@ -994,13 +997,13 @@ def baryvel(dje, deq=0):
          pertrd = pertrd + (ccamps[k,3] * cosa - ccamps[k,2] * sina) * ccamps[k,4]
    
    #Elliptic part of the motion of the emb.
-   phi = (e * e / 4e0) * (((8e0 / e) - e) * sin(g) + 5 * sin(2 * g) + (13 / 3e0) * e * sin(3 * g))
+   phi = (old_div(e * e, 4e0)) * (((old_div(8e0, e)) - e) * sin(g) + 5 * sin(2 * g) + (old_div(13, 3e0)) * e * sin(3 * g))
    f = g + phi
    sinf = sin(f)
    cosf = cos(f)
-   dpsi = (dc1 - e * e) / (dc1 + e * cosf)
+   dpsi = old_div((dc1 - e * e), (dc1 + e * cosf))
    phid = 2 * e * ccsgd * ((1 + 1.5 * e * e) * cosf + e * (1.25 - 0.5 * sinf * sinf))
-   psid = ccsgd * e * sinf / sqrt(dc1 - e * e)
+   psid = old_div(ccsgd * e * sinf, sqrt(dc1 - e * e))
    
    #Perturbed heliocentric motion of the emb.
    d1pdro = dc1 + pertr
@@ -1031,7 +1034,7 @@ def baryvel(dje, deq=0):
    tl = forbel[1] + pertl
    sinlm = sin(tl)
    coslm = cos(tl)
-   sigma = cckm / (1.0 + pertp)
+   sigma = old_div(cckm, (1.0 + pertp))
    a = sigma * (ccmld + pertld)
    b = sigma * pertpd
    dxhd = dxhd + a * sinlm + b * coslm
@@ -1068,7 +1071,7 @@ def baryvel(dje, deq=0):
       return (dvelh,dvelb)
    
    #General precession from epoch dje to deq.
-   deqdat = (dje - dcto - dcbes) / dctrop + dc1900
+   deqdat = old_div((dje - dcto - dcbes), dctrop) + dc1900
    prema = premat(deqdat, deq, fk4=True)
    
    dvelh = au * (transpose(dot(transpose(prema), transpose(array([dxhd, dyahd, dzahd])))))
@@ -1124,30 +1127,30 @@ def helcorr(obs_long, obs_lat, obs_alt, ra2000, dec2000, jd, debug=False):
    #DIURNAL VELOCITY (see IRAF task noao.astutil.rvcorrect)
    #convert geodetic latitude into geocentric latitude to correct
    #for rotation of earth
-   dlat = -(11. * 60. + 32.743) * sin(2 * obs_lat / _radeg) + 1.1633 * sin(4 * obs_lat / _radeg) - 0.0026 * sin(6 * obs_lat / _radeg)
-   lat = obs_lat + dlat / 3600
+   dlat = -(11. * 60. + 32.743) * sin(old_div(2 * obs_lat, _radeg)) + 1.1633 * sin(old_div(4 * obs_lat, _radeg)) - 0.0026 * sin(old_div(6 * obs_lat, _radeg))
+   lat = obs_lat + old_div(dlat, 3600)
    
    #calculate distance of observer from earth center
-   r = 6378160.0 * (0.998327073 + 0.001676438 * cos(2 * lat / _radeg) - 0.00000351 * cos(4 * lat / _radeg) + 0.000000008 * cos(6 * lat / _radeg)) + obs_alt
+   r = 6378160.0 * (0.998327073 + 0.001676438 * cos(old_div(2 * lat, _radeg)) - 0.00000351 * cos(old_div(4 * lat, _radeg)) + 0.000000008 * cos(old_div(6 * lat, _radeg))) + obs_alt
    
    #calculate rotational velocity (perpendicular to the radius vector) in km/s
    #23.934469591229 is the siderial day in hours for 1986
-   v = 2. * pi * (r / 1000.) / (23.934469591229 * 3600.)
+   v = old_div(2. * pi * (r / 1000.), (23.934469591229 * 3600.))
    
    #calculating local mean siderial time (see astronomical almanach)
-   tu = (jd - 51545.0) / 36525
-   gmst = 6.697374558 + ut + (236.555367908 * (jd - 51545.0) + 0.093104 * tu ** 2 - 6.2e-6 * tu ** 3) / 3600
-   lmst = (gmst - obs_long / 15) % 24
+   tu = old_div((jd - 51545.0), 36525)
+   gmst = 6.697374558 + ut + old_div((236.555367908 * (jd - 51545.0) + 0.093104 * tu ** 2 - 6.2e-6 * tu ** 3), 3600)
+   lmst = (gmst - old_div(obs_long, 15)) % 24
    
    #projection of rotational velocity along the line of sight
-   vdiurnal = v * cos(lat / _radeg) * cos(dec / _radeg) * sin((ra - lmst * 15) / _radeg)
+   vdiurnal = v * cos(old_div(lat, _radeg)) * cos(old_div(dec, _radeg)) * sin(old_div((ra - lmst * 15), _radeg))
    
    #BARICENTRIC and HELIOCENTRIC VELOCITIES
    vh,vb=baryvel(xjd, 0)
    
    #project to line of sight
-   vbar = vb[0] * cos(dec / _radeg) * cos(ra / _radeg) + vb[1] * cos(dec / _radeg) * sin(ra / _radeg) + vb[2] * sin(dec / _radeg)
-   vhel = vh[0] * cos(dec / _radeg) * cos(ra / _radeg) + vh[1] * cos(dec / _radeg) * sin(ra / _radeg) + vh[2] * sin(dec / _radeg)
+   vbar = vb[0] * cos(old_div(dec, _radeg)) * cos(old_div(ra, _radeg)) + vb[1] * cos(old_div(dec, _radeg)) * sin(old_div(ra, _radeg)) + vb[2] * sin(old_div(dec, _radeg))
+   vhel = vh[0] * cos(old_div(dec, _radeg)) * cos(old_div(ra, _radeg)) + vh[1] * cos(old_div(dec, _radeg)) * sin(old_div(ra, _radeg)) + vh[2] * sin(old_div(dec, _radeg))
    
    bcorr = (vdiurnal + vbar) #using baricentric velocity for correction
    hcorr = (vdiurnal + vhel) #using heliocentric velocity for correction

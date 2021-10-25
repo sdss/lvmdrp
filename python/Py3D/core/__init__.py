@@ -1,4 +1,6 @@
 from __future__ import absolute_import
+from future import standard_library
+standard_library.install_aliases()
 from .header import *
 from .positionTable import *
 from .cube import *
@@ -8,7 +10,7 @@ from .spectrum1d import *
 from .passband import *
 from .tracemask import *
 from .apertures import *
-import exceptions, copy_reg
+import exceptions, copyreg
 from types import *
 
 
@@ -30,4 +32,4 @@ def _unpickle_method(func_name, obj, cls):
 	else:
 	  break
       return func.__get__(obj, cls)
-copy_reg.pickle(MethodType,_pickle_method, _unpickle_method)
+copyreg.pickle(MethodType,_pickle_method, _unpickle_method)

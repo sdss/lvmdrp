@@ -1,4 +1,8 @@
 from __future__ import print_function
+from __future__ import division
+from builtins import str
+from builtins import range
+from past.utils import old_div
 import  os, pyfits
 from Py3D.functions.imageMethod import *
 from Py3D.functions.rssMethod import *
@@ -537,10 +541,10 @@ def reduceStdMR_py3d(night, std_nr, wave_start='4880', wave_end='9300', wave_dis
 	    else:
 	      mean_telluric += std_telluric[i]
 	    
-        mean_std_ratio = mean_std_ratio/len(std_ratios)
+        mean_std_ratio = old_div(mean_std_ratio,len(std_ratios))
         mean_std_ratio.writeTxtData('ratio.txt')
         if mask_telluric!='':
-	  mean_telluric = mean_telluric/len(std_telluric)
+	  mean_telluric = old_div(mean_telluric,len(std_telluric))
 	  mean_telluric.writeFitsData('telluric.fits')
         
 def reduceStdHR_py3d(night, std_nr, wave_start='4880', wave_end='9300', wave_disp='2.0', res_fwhm='0.0', ref_star='', A_V=0.15, mask_wave='', mask_telluric='', smooth_poly=-12, except_chip='', straylight='1', parallel='auto'):
@@ -631,10 +635,10 @@ def reduceStdHR_py3d(night, std_nr, wave_start='4880', wave_end='9300', wave_dis
 	    else:
 	      mean_telluric += std_telluric[i]
 	    
-        mean_std_ratio = mean_std_ratio/len(std_ratios)
+        mean_std_ratio = old_div(mean_std_ratio,len(std_ratios))
         mean_std_ratio.writeTxtData('ratio.txt')
         if mask_telluric!='':
-	  mean_telluric = mean_telluric/len(std_telluric)
+	  mean_telluric = old_div(mean_telluric,len(std_telluric))
 	  mean_telluric.writeFitsData('telluric.fits')
         
 def subtractSkyField_py3d(object_in,  object_out, sky_field, factor,  scale_region='',scale_ind=1, nsky=200):

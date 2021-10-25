@@ -1,3 +1,4 @@
+from __future__ import print_function
 import numpy
 from scipy import stats
 from Py3D.core.rss import *
@@ -230,7 +231,7 @@ def checkWavelengthRSS_py3d(rss_in, line_list, out_result, ref_spec='', init_bac
         if line[0]!='#':
             line_split = line.split()
             if len(line_split)==2:
-                print line_split
+                print(line_split)
                 line_name.append(line_split[1])
                 line_list.append(float(line_split[0]))
             elif len(line_split)==1:

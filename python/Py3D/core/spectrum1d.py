@@ -1,5 +1,10 @@
 from __future__ import print_function
 from __future__ import absolute_import
+from __future__ import division
+from builtins import str
+from builtins import range
+from builtins import object
+from past.utils import old_div
 import numpy, pyfits
 try:
   import pylab
@@ -163,7 +168,7 @@ class Spectrum1D(object):
             select = other._data!=0.0
             data = numpy.zeros_like(self._data)
             if numpy.sum(select)>0:
-                data[select] = self._data[select]/other._data[select].astype(numpy.float32)
+                data[select] = old_div(self._data[select],other._data[select].astype(numpy.float32))
 
             if self._mask!=None and other._mask!=None:
                 mask = numpy.logical_or(self._mask, other._mask)
@@ -176,11 +181,11 @@ class Spectrum1D(object):
             if self._error!=None and other._error!=None:
                 error = numpy.zeros_like(self._error)
                 if numpy.sum(select)>0:
-                    error[select]=numpy.sqrt((self._error[select]/other._data[select])**2+(self._data[select]*other._error[select]/other._data[select]**2)**2)
+                    error[select]=numpy.sqrt((old_div(self._error[select],other._data[select]))**2+(old_div(self._data[select]*other._error[select],other._data[select]**2))**2)
             elif self._error!=None:
                 error = numpy.zeros_like(self._error)
                 if numpy.sum(select)>0:
-                    error[select] = self._error[select]/other._data[select]
+                    error[select] = old_div(self._error[select],other._data[select])
                     error[numpy.logical_not(select)]=numpy.max(self._error)
             else:
                 error = None
@@ -194,9 +199,9 @@ class Spectrum1D(object):
 
         elif isinstance(other,  numpy.ndarray):
             if other!=0:
-                data = self._data / other
+                data = old_div(self._data, other)
                 if self._error !=None:
-                    error = self._error / other
+                    error = old_div(self._error, other)
                 else:
                     error = None
                 mask = self._mask
@@ -220,9 +225,9 @@ class Spectrum1D(object):
             # try to do addtion for other types, e.g. float, int, etc.
             try:
                 if other!=0.0:
-                    data = self._data/other
+                    data = old_div(self._data,other)
                     if self._error != None:
-                        error = self._error / other
+                        error = old_div(self._error, other)
                     else:
                         error = None
                     mask = self._mask
@@ -255,7 +260,7 @@ class Spectrum1D(object):
             select = self._data!=0.0
             data = numpy.zeros_like(self._data)
             if numpy.sum(select)>0:
-                data[select] = other._data[select].astype(numpy.float32)/self._data[select]
+                data[select] = old_div(other._data[select].astype(numpy.float32),self._data[select])
 
             if self._mask!=None and other._mask!=None:
                 mask = numpy.logical_or(self._mask, other._mask)
@@ -268,11 +273,11 @@ class Spectrum1D(object):
             if self._error!=None and other._error!=None:
                 error = numpy.zeros_like(self._error)
                 if numpy.sum(select)>0:
-                    error[select]=numpy.sqrt((other._error[select]/self._data[select])**2+(other._data[select]*self._error[select]/self._data[select]**2)**2)
+                    error[select]=numpy.sqrt((old_div(other._error[select],self._data[select]))**2+(old_div(other._data[select]*self._error[select],self._data[select]**2))**2)
             elif self._error!=None:
                 error = numpy.zeros_like(self._error)
                 if numpy.sum(select)>0:
-                    error[select] = other._error[select]/self._data[select]
+                    error[select] = old_div(other._error[select],self._data[select])
                     error[numpy.logical_not(select)]=numpy.max(self._error)
             else:
                 error = None
@@ -288,11 +293,11 @@ class Spectrum1D(object):
             select = self._data!=0.0
             data = numpy.zeros_like(self._data)
             if numpy.sum(select)>0:
-                data[select] = other[select] / self._data[select]
+                data[select] = old_div(other[select], self._data[select])
                 if self._error !=None:
                     error = numpy.zeros_like(self._error)
                     if numpy.sum(select)>0:
-                        error[select] = other[select] *self._error[select]/self._data[select]**2
+                        error[select] = old_div(other[select] *self._error[select],self._data[select]**2)
                     else:
                         error=None
                 else:
@@ -320,11 +325,11 @@ class Spectrum1D(object):
                 select = self._data!=0.0
                 data = numpy.zeros_like(self._data)
                 if numpy.sum(select)>0:
-                    data[select] = other / self._data[select]
+                    data[select] = old_div(other, self._data[select])
                     if self._error != None:
                         error = numpy.zeros_like(self._error)
                         if numpy.sum(select)>0:
-                            error[select] = other *self._error[select]/self._data[select]**2
+                            error[select] = old_div(other *self._error[select],self._data[select]**2)
                         else:
                             error=None
                     else:
@@ -830,14 +835,14 @@ class Spectrum1D(object):
             select = target_FWHM>fwhm
             gauss_sig[select] = numpy.sqrt(target_FWHM**2-fwhm[select]**2)/2.354
             fact = numpy.sqrt(2.*numpy.pi)
-            kernel=numpy.exp(-0.5*((wave[:, numpy.newaxis]-wave[numpy.newaxis, :])/gauss_sig[numpy.newaxis, :])**2)/(fact*gauss_sig[numpy.newaxis, :])
+            kernel=old_div(numpy.exp(-0.5*(old_div((wave[:, numpy.newaxis]-wave[numpy.newaxis, :]),gauss_sig[numpy.newaxis, :]))**2),(fact*gauss_sig[numpy.newaxis, :]))
             multiplied = data[:, numpy.newaxis]*kernel
-            new_data = numpy.sum(multiplied, axis=0)/numpy.sum(kernel, 0)
+            new_data = old_div(numpy.sum(multiplied, axis=0),numpy.sum(kernel, 0))
             if self._mask!=None:
                 self._data[good_pix] = new_data
                 self._inst_fwhm[:] = target_FWHM
             if error!=None:
-                new_error = numpy.sqrt(numpy.sum((error[:, numpy.newaxis]*kernel)**2, axis=0))/numpy.sum(kernel, 0)
+                new_error = old_div(numpy.sqrt(numpy.sum((error[:, numpy.newaxis]*kernel)**2, axis=0)),numpy.sum(kernel, 0))
                 if self._mask!=None:
                     self._error[good_pix] = new_error
                 else:
@@ -864,13 +869,13 @@ class Spectrum1D(object):
         bound_max = new_wave+new_disp/2.0
 
         disp = bound_max-bound_min
-        for i in xrange(len(new_wave)):
+        for i in range(len(new_wave)):
             select = numpy.logical_and(masked_wave>= bound_min[i], masked_wave <= bound_max[i])
             if numpy.sum(select) > 0:
 #                data_out[i] = numpy.mean(self._data[mask_in][select])
-                data_out[i] = numpy.sum(numpy.abs(masked_wave[select]-new_wave[i])*self._data[mask_in][select])/numpy.sum(numpy.abs(masked_wave[select]-new_wave[i]))
+                data_out[i] = old_div(numpy.sum(numpy.abs(masked_wave[select]-new_wave[i])*self._data[mask_in][select]),numpy.sum(numpy.abs(masked_wave[select]-new_wave[i])))
                 if self._error != None:
-                    error_out[i] = numpy.sqrt(numpy.sum(masked_error[select]**2)/numpy.sum(select)**2)
+                    error_out[i] = numpy.sqrt(old_div(numpy.sum(masked_error[select]**2),numpy.sum(select)**2))
             else:
                 data_out[i] = 0.0
                 mask_out[i] = True
@@ -921,13 +926,13 @@ class Spectrum1D(object):
 
         data = numpy.zeros_like(self._data)
         data[:] = self._data
-        GaussKernels = 1.0*numpy.exp(-0.5*((self._wave[mask][:, numpy.newaxis]-self._wave[mask][numpy.newaxis, :])/numpy.abs(fwhm[mask][numpy.newaxis, :]/2.354))**2)/(fact*numpy.abs(fwhm[mask][numpy.newaxis, :]/2.354))
-        data[mask] = numpy.sum(self._data[mask][:, numpy.newaxis]*GaussKernels, 0)/numpy.sum(GaussKernels, 0)
+        GaussKernels = old_div(1.0*numpy.exp(-0.5*(old_div((self._wave[mask][:, numpy.newaxis]-self._wave[mask][numpy.newaxis, :]),numpy.abs(fwhm[mask][numpy.newaxis, :]/2.354)))**2),(fact*numpy.abs(fwhm[mask][numpy.newaxis, :]/2.354)))
+        data[mask] = old_div(numpy.sum(self._data[mask][:, numpy.newaxis]*GaussKernels, 0),numpy.sum(GaussKernels, 0))
 
         if self._error!=None:
             error = numpy.zeros_like(self._error)
             error[:] = self._error
-            error[mask]=numpy.sqrt(numpy.sum((self._error[mask]*GaussKernels)**2, 0))/numpy.sum(GaussKernels, 0)
+            error[mask]=old_div(numpy.sqrt(numpy.sum((self._error[mask]*GaussKernels)**2, 0)),numpy.sum(GaussKernels, 0))
             #scale = Spectrum1D(wave=self._wave, data=error/self._error)
             #scale.smoothSpec(40, method='median')
             #error[mask]=error[mask]/scale._data[mask]
@@ -1024,7 +1029,7 @@ class Spectrum1D(object):
 	  data = self._data
 	  wave = self._wave
 	  pixels = self._pixels
-        pos_diff=(data[1:]-data[:-1] )/(wave[1:]-wave[:-1] ) # compute the discrete derivative
+        pos_diff=old_div((data[1:]-data[:-1] ),(wave[1:]-wave[:-1] )) # compute the discrete derivative
         select_peaks=numpy.logical_and(pos_diff[1:]<0, pos_diff[:-1]>0)  # select all maxima
 
         if npeaks==0:
@@ -1096,7 +1101,7 @@ class Spectrum1D(object):
         if method=='hyperbolic':
             # compute the subpixel peak position using the hyperbolic
             d = numpy.take(self._data, init_pos+1)-2*numpy.take(self._data, init_pos)+numpy.take(self._data,  init_pos-1)
-            positions = init_pos+1-((numpy.take(self._data, init_pos+1)-numpy.take(self._data, init_pos))/d+0.5)
+            positions = init_pos+1-(old_div((numpy.take(self._data, init_pos+1)-numpy.take(self._data, init_pos)),d)+0.5)
 
         elif method=='gauss':
             # compute the subpixel peak position by fitting a gaussian to all peaks (3 pixel to get a unique solution
@@ -1287,8 +1292,8 @@ class Spectrum1D(object):
                 max_flux = numpy.zeros(len(offset))
                 for o in range(len(offset)):
                     for g in range(numpy.sum(pos_mask)):
-                        Gaussian_vec[g,:] = numpy.exp(-0.5*((x-(pos_block[pos_mask][g]+offset[o]))/
-                        (pos_fwhm[pos_mask][g]/2.354))**2)/(numpy.sqrt(2.*numpy.pi)*abs((pos_fwhm[pos_mask][g]/2.354)))
+                        Gaussian_vec[g,:] = old_div(numpy.exp(-0.5*(old_div((x-(pos_block[pos_mask][g]+offset[o])),
+                        (pos_fwhm[pos_mask][g]/2.354)))**2),(numpy.sqrt(2.*numpy.pi)*abs((pos_fwhm[pos_mask][g]/2.354))))
                     result = numpy.linalg.lstsq(Gaussian_vec.T,self._data[lo:hi])
                     chisq[o] = result[1][0]
                     max_flux[o] = numpy.sum(result[0])
@@ -1401,13 +1406,13 @@ class Spectrum1D(object):
             self._error=numpy.ones_like(self._data)
 
         fact = numpy.sqrt(2.*numpy.pi)
-        A=1.0*numpy.exp(-0.5*((self._wave[:, numpy.newaxis]-pos[numpy.newaxis, :])/sigma[numpy.newaxis, :])**2)/(fact*sigma[numpy.newaxis, :])
+        A=old_div(1.0*numpy.exp(-0.5*(old_div((self._wave[:, numpy.newaxis]-pos[numpy.newaxis, :]),sigma[numpy.newaxis, :]))**2),(fact*sigma[numpy.newaxis, :]))
         select = A>0.0001
-        A=A/self._error[:, numpy.newaxis]
+        A=old_div(A,self._error[:, numpy.newaxis])
 
         B = sparse.csr_matrix( (A[select],(indices[0][select],indices[1][select])), shape=(self._dim,fibers) ).todense()
-        out= sparse.linalg.lsqr(B, self._data/self._error, atol=1e-7, btol=1e-7, conlim=1e13)
-        error = numpy.sqrt(1/numpy.sum((A**2), 0))
+        out= sparse.linalg.lsqr(B, old_div(self._data,self._error), atol=1e-7, btol=1e-7, conlim=1e13)
+        error = numpy.sqrt(old_div(1,numpy.sum((A**2), 0)))
         if numpy.sum(bad_pix)>0 and bad_pix!=None:
             error[bad_pix]=replace_error
         if plot==True:
@@ -1434,7 +1439,7 @@ class Spectrum1D(object):
         elif method=='mean':
             flux = numpy.mean(self._data[select])
             if self._error!=None:
-                error = numpy.sqrt(numpy.sum(self._error[select]**2)/numpy.sum(select)**2)
+                error = numpy.sqrt(old_div(numpy.sum(self._error[select]**2),numpy.sum(select)**2))
             else:
                 error = 0
         return flux, error

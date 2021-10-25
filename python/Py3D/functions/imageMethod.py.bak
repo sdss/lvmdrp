@@ -1,3 +1,4 @@
+from __future__ import print_function
 import sys, numpy, pyfits
 try:
   import pylab,matplotlib
@@ -89,7 +90,7 @@ def detCos_py3d(image,  out_image,   rdnoise='2.9', sigma_det='5', rlim='1.2', i
     gain = float(gain)
 
     if gain!=1.0 and verbose==True:
-      print 'Convert image from ADUs to electrons using a gain factor of %f' %(gain)
+      print('Convert image from ADUs to electrons using a gain factor of %f' %(gain))
 
     img = img*gain
     #img.writeFitsData('test.fits')
@@ -111,7 +112,7 @@ def detCos_py3d(image,  out_image,   rdnoise='2.9', sigma_det='5', rlim='1.2', i
     except KeyError:
         rdnoise=float(rdnoise)
     if verbose==True:
-      print 'A value of %f is used for the electron read-out noise.'%(rdnoise)
+      print('A value of %f is used for the electron read-out noise.'%(rdnoise))
 
 
     # create empty mask
@@ -135,10 +136,10 @@ def detCos_py3d(image,  out_image,   rdnoise='2.9', sigma_det='5', rlim='1.2', i
         cpus = 1
     # start iteration
     if verbose:
-      print 'Start the detection process using %d CPU cores.'%(cpus)
+      print('Start the detection process using %d CPU cores.'%(cpus))
     for i in xrange(iterations):
         if verbose:
-            print 'Start iteration %i'%(i+1)
+            print('Start iteration %i'%(i+1))
         # follow the LACosmic scheme to select pixel
         noise =out.medianImg((err_box_x, err_box_y))
         select_neg2 = noise.getData()<=0
@@ -201,7 +202,7 @@ def detCos_py3d(image,  out_image,   rdnoise='2.9', sigma_det='5', rlim='1.2', i
         if verbose:
             dim = img_original.getDim()
             det_pix = numpy.sum(select)
-            print 'Total number of detected cosmics: %i out of %i pixels'%(numpy.sum(select), dim[0]*dim[1])
+            print('Total number of detected cosmics: %i out of %i pixels'%(numpy.sum(select), dim[0]*dim[1]))
 
         if i==iterations-1:
             img_original.setData(mask=True, select=select) # set the new mask
@@ -328,7 +329,7 @@ def LACosmic_py3d(image,  out_image,  sigma_det='5', flim='1.1', iter='3', sig_g
     # start iteration
     for i in xrange(iterations):
         if verbose==1:
-            print 'iteration %i'%(i+1)
+            print('iteration %i'%(i+1))
         # follow the LACosmic scheme to select pixel
         noise =out.medianImg((err_box_y, err_box_x))
 	select_noise = noise.getData()<=0
@@ -394,7 +395,7 @@ def LACosmic_py3d(image,  out_image,  sigma_det='5', flim='1.1', iter='3', sig_g
         if verbose==1:
             dim = img_original.getDim()
             det_pix = numpy.sum(select)
-            print 'Detected pixels: %i out of %i '%(numpy.sum(select), dim[0]*dim[1])
+            print('Detected pixels: %i out of %i '%(numpy.sum(select), dim[0]*dim[1]))
 
         if i==iterations-1:
             img_original.setData(mask=True, select=select) # set the new mask
@@ -524,7 +525,7 @@ def findPeaksAuto_py3d(image, out_peaks_file, nfibers,  disp_axis='X', threshold
     file_out.close()
     if verbose==1:
         # control plot for the peaks NEED TO BE REPLACE BY A PROPER VERSION AND POSSIBLE IMPLEMENTAION FOR A GUI
-        print '%i Fibers found'%(len(centers))
+        print('%i Fibers found'%(len(centers)))
         pylab.plot(cut._data, '-k')
         pylab.plot(peaks[0],peaks[2] ,'or')
         pylab.plot(centers, numpy.ones(len(centers))*4000.0, 'xg')
@@ -617,7 +618,7 @@ def findPeaksMaster_py3d(image, peaks_master, out_peaks_file, disp_axis='X', thr
 
     if verbose==1:
         # control plot for the peaks NEED TO BE REPLACE BY A PROPER VERSION AND POSSIBLE IMPLEMENTAION FOR A GUI
-        print '%i Fibers found'%(len(centers._data))
+        print('%i Fibers found'%(len(centers._data)))
         pylab.plot(cut._data, '-k')
         pylab.plot(peaks_good[0],peaks_good[2] ,'or')
         if numpy.sum(select_weak)>0:
@@ -703,7 +704,7 @@ def findPeaksMaster2_py3d(image, peaks_master, out_peaks_file, disp_axis='X', th
 	threshold = threshold/1.1
       elif numpy.sum(select_good)<len(peaks_good):
 	threshold = threshold*1.2
-      print threshold,numpy.sum(select_good),len(peaks_good),shift_peaks
+      print(threshold,numpy.sum(select_good),len(peaks_good),shift_peaks)
       #break
     centers_good = cut.measurePeaks(peaks_good, method, init_sigma, threshold=0, max_diff=1.0)[0]
     peaks_ref = Spectrum1D(wave=fiber, data=ref_pos )
@@ -724,7 +725,7 @@ def findPeaksMaster2_py3d(image, peaks_master, out_peaks_file, disp_axis='X', th
 
     if verbose==1:
         # control plot for the peaks NEED TO BE REPLACE BY A PROPER VERSION AND POSSIBLE IMPLEMENTAION FOR A GUI
-        print '%i Fibers found'%(len(centers._data))
+        print('%i Fibers found'%(len(centers._data)))
         pylab.plot(cut._data, '-k')
         pylab.plot(peaks_good,peaks_flux ,'or')
         pylab.plot(centers._data, numpy.ones(len(centers._data))*2000.0, 'xg')
@@ -835,7 +836,7 @@ def tracePeaks_py3d(image, peaks_file, trace_out, disp_axis='X', method='gauss',
     m=1
     # iterate towards index 0 along dispersion axis
     if verbose=='1':
-        print 'Trace peaks along dispersion axis:'
+        print('Trace peaks along dispersion axis:')
     for i in first[select_first]:
         if verbose=='1':
             sys.stdout.write('Processing....%.0f%%\r'%(m/float(nslice)*100))
@@ -1627,7 +1628,7 @@ def subtractBias_py3d(file_in, file_out, bias, compute_error='1', boundary_x='',
         except KeyError:
             gain=float(gain)
         clean=clean*gain
-        print clean._dim
+        print(clean._dim)
 
     if rdnoise!='':
         # get gain value
@@ -1641,7 +1642,7 @@ def subtractBias_py3d(file_in, file_out, bias, compute_error='1', boundary_x='',
 
     if boundary_x!='' or boundary_y!='':
         straylight=clean.cutOverscan(bound_x, bound_y,subtract_light)
-        print straylight
+        print(straylight)
 
 
     clean.writeFitsData(file_out)

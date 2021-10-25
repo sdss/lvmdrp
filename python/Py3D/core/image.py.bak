@@ -1,7 +1,3 @@
-from __future__ import division
-from builtins import str
-from builtins import range
-from past.utils import old_div
 from Py3D.core.header import *
 from Py3D.core.apertures import  *
 from Py3D.core.spectrum1d import Spectrum1D
@@ -162,14 +158,14 @@ class Image(Header):
 
             # subtract data if contained in both
             if self._data!=None and other._data!=None:
-                new_data = old_div(self._data,other._data)
+                new_data = self._data/other._data
                 img.setData(data = new_data)
             else:
                 img.setData(data = self._data)
 
             # add error if contained in both
             if self._error!=None and other._error!=None:
-                new_error = numpy.sqrt((old_div(self._error,other._data))**2+(old_div(self._data*other._error,other._data**2))**2)
+                new_error = numpy.sqrt((self._error/other._data)**2+(self._data*other._error/other._data**2)**2)
                 img.setData(error=new_error)
             else:
                 img.setData(error=self._error)
@@ -190,22 +186,22 @@ class Image(Header):
                 dim = other.shape
                 #add ndarray according do its dimensions
                 if self._dim == dim:
-                    new_data= old_div(self._data,other)
+                    new_data= self._data/other
                     if self._error!=None:
-                        new_error = old_div(self._error,other)
+                        new_error = self._error/other
                     else:
                         new_error = None
                 elif len(dim)==1:
                     if self._dim[0] == dim[0]:
-                        new_data = old_div(self._data,other[:, numpy.newaxis])
+                        new_data = self._data/other[:, numpy.newaxis]
                         if self._error!=None:
-                            new_error = old_div(self._error,other[:, numpy.newaxis])
+                            new_error = self._error/other[:, numpy.newaxis]
                         else:
                             new_error!=None
                     elif self._dim[1] == dim[0]:
-                        new_data = old_div(self._data,other[numpy.newaxis, :])
+                        new_data = self._data/other[numpy.newaxis, :]
                         if self._error!=None:
-                            new_error = old_div(self._error,other[numpy.newaxis, :])
+                            new_error = self._error/other[numpy.newaxis, :]
                         else:
                             new_error!=None
                 else:
@@ -215,9 +211,9 @@ class Image(Header):
         else:
             # try to do addtion for other types, e.g. float, int, etc.
             try:
-                new_data = old_div(self._data,other)
+                new_data = self._data/other
                 if self._error!=None:
-                    new_error = old_div(self._error,other)
+                    new_error = self._error/other
                 else:
                     new_error = None
                 img = Image(data = new_data, error=new_error, mask=self._mask, header = self._header, origin=self._origin)
@@ -325,7 +321,7 @@ class Image(Header):
             new_data = None
 
         if self._error!=None and self._data!=None:
-            new_error = old_div(1,(2*numpy.sqrt(self._data)))*self._error #corresponding error
+            new_error = 1/(2*numpy.sqrt(self._data))*self._error #corresponding error
         else:
             new_error = None
 
@@ -764,7 +760,7 @@ class Image(Header):
         delta_y = numpy.ceil(box_y/2.0)
 
         # iterate over bad pixels
-        for m in range(len(y_cors)):
+        for m in xrange(len(y_cors)):
             # computes the min and max pixels of the filter window in x and y
             range_y = numpy.clip([y_cors[m]-delta_y, y_cors[m]+delta_y+1], 0, self._dim[0]-1)
             range_x = numpy.clip([x_cors[m]-delta_x, x_cors[m]+delta_x+1], 0, self._dim[1]-1)
@@ -798,7 +794,7 @@ class Image(Header):
         dark_var=float(tbfield.field('dark_variance')[0][filter_select])
 
         ## Photometric conversion factor
-        factor = old_div((10**(0.4*(aa+(kk*airmass)))),exptime)
+        factor = (10**(0.4*(aa+(kk*airmass))))/exptime
         calibratedImage = self._data-softbias
 
         if subtractSky:
@@ -808,9 +804,9 @@ class Image(Header):
                 sky = numpy.median(calibratedImage)
             #print 'Sky Background %s: %.2f Counts' %(filters[filter_select][0],sky)
             calibratedImage=calibratedImage-sky
-            error = numpy.sqrt(old_div((calibratedImage+sky),gain) + dark_var )
+            error = numpy.sqrt((calibratedImage+sky)/gain + dark_var )
         else:
-            error = numpy.sqrt(old_div((calibratedImage),gain) + dark_var )
+            error = numpy.sqrt((calibratedImage)/gain + dark_var )
         self.setHdrValue('FIELD', 0)
         sdssImage = Image(data=calibratedImage*factor,error=error*factor, header=self._header)
         return sdssImage
@@ -960,20 +956,20 @@ class Image(Header):
                 Subsampled image
         """
         # sum over the data array over each axis by the given pixel
-        new = numpy.sum(numpy.reshape(self._data,(self._dim[0],old_div(self._dim[1],bin_x),bin_x)),2)
-        new2 = numpy.sum(numpy.reshape(new,(old_div(self._dim[0],bin_y),bin_y, old_div(self._dim[1],bin_x))),1)
+        new = numpy.sum(numpy.reshape(self._data,(self._dim[0],self._dim[1]/bin_x,bin_x)),2)
+        new2 = numpy.sum(numpy.reshape(new,(self._dim[0]/bin_y,bin_y, self._dim[1]/bin_x)),1)
 
         if self._error!=None:
             # sum over the error array (converted to variance and back) over each axis by the given pixel
-            error_new = numpy.sum(numpy.reshape(self._error**2,(self._dim[0],old_div(self._dim[1],bin_x),bin_x)),2)
-            error_new2 = numpy.sqrt(numpy.sum(numpy.reshape(error_new,(old_div(self._dim[0],bin_y),bin_y, old_div(self._dim[1],bin_x))),1))
+            error_new = numpy.sum(numpy.reshape(self._error**2,(self._dim[0],self._dim[1]/bin_x,bin_x)),2)
+            error_new2 = numpy.sqrt(numpy.sum(numpy.reshape(error_new,(self._dim[0]/bin_y,bin_y, self._dim[1]/bin_x)),1))
         else:
             error_new2=None
 
         if self._mask!=None:
             # create the new  bad pixel mask
-            mask_new = numpy.sum(numpy.reshape(self._mask,(self._dim[0],old_div(self._dim[1],bin_x),bin_x)),2)
-            mask_new2 = numpy.sum(numpy.reshape(mask_new,(old_div(self._dim[0],bin_y),bin_y, old_div(self._dim[1],bin_x))),1)
+            mask_new = numpy.sum(numpy.reshape(self._mask,(self._dim[0],self._dim[1]/bin_x,bin_x)),2)
+            mask_new2 = numpy.sum(numpy.reshape(mask_new,(self._dim[0]/bin_y,bin_y, self._dim[1]/bin_x)),1)
             # if only one bad pixel in the binning pixel exists the binned pixel will have the bad pixel status
             new_mask = mask_new2>0
         else:
@@ -1035,7 +1031,7 @@ class Image(Header):
             self._data[self._mask]=0
             gauss =ndimage.filters.gaussian_filter(self._data,(sigma_y,sigma_x),mode=mode)
             scale =ndimage.filters.gaussian_filter((self._mask==False).astype('float32'),(sigma_y,sigma_x),mode=mode)
-            new=old_div(gauss,scale)
+            new=gauss/scale
             self._data[self._mask]=mask_data
         else:
             new=ndimage.filters.gaussian_filter(self._data,(sigma_y,sigma_x),mode=mode)
@@ -1167,7 +1163,7 @@ class Image(Header):
         if self._mask!=None:
             self._mask = numpy.logical_and(self._mask, numpy.logical_not(numpy.isnan(self._data)))
         #iterate over the image
-        for i in range(slices):
+        for i in xrange(slices):
             # decide on the bad pixel mask
             # fit the polynomial and clip pixels that are 3sigma away from the initial fit
             # redo the polynomial fitting with clipped data
@@ -1307,12 +1303,12 @@ class Image(Header):
         if cpus>1:
             pool = Pool(cpus)
             mask_pixels=[]
-            for i in range(self._dim[1]):
+            for i in xrange(self._dim[1]):
                 mask_pixels.append(pool.apply_async(numpy.unique, ([numpy.clip(numpy.round(trace[:, i][numpy.newaxis, :]+dx[:, numpy.newaxis]), 0, self._dim[0]-1).astype('int16')])))
             pool.close()
             pool.join()
 
-        for i in range(self._dim[1]):
+        for i in xrange(self._dim[1]):
             if cpus>1:
                 self._mask[mask_pixels[i].get(), i] = False
             else:
@@ -1372,11 +1368,11 @@ class Image(Header):
         if self._mask!=None:
             good_pix= numpy.logical_not(self._mask[int(guess_y-box_size/2.0):int(guess_y+box_size/2.0), int(guess_x-box_size/2.0):int(guess_x+box_size/2.0)])
 
-            cent_x = old_div(numpy.sum((idx_x*region**exponent)[good_pix]),numpy.sum(region[good_pix]**exponent))+1
-            cent_y = old_div(numpy.sum((idx_y*region**exponent)[good_pix]),numpy.sum(region[good_pix]**exponent))+1
+            cent_x = numpy.sum((idx_x*region**exponent)[good_pix])/numpy.sum(region[good_pix]**exponent)+1
+            cent_y = numpy.sum((idx_y*region**exponent)[good_pix])/numpy.sum(region[good_pix]**exponent)+1
         else:
-            cent_x = old_div(numpy.sum((idx_x*region**exponent)),numpy.sum(region**exponent))+1
-            cent_y = old_div(numpy.sum((idx_y*region**exponent)),numpy.sum(region**exponent))+1
+            cent_x = numpy.sum((idx_x*region**exponent))/numpy.sum(region**exponent)+1
+            cent_y = numpy.sum((idx_y*region**exponent))/numpy.sum(region**exponent)+1
         return cent_x, cent_y
 
     def centreMax(self, cent_x=None, cent_y=None, box_size=None):
@@ -1435,8 +1431,8 @@ class Image(Header):
             else:
                 total_error = None
             expected_area = numpy.pi*r_ap**2
-            correction_factor=old_div(expected_area,total_area)
-            coverage = old_div(total_area,expected_area)
+            correction_factor=expected_area/total_area
+            coverage = total_area/expected_area
             if correct_masked:
                 total_flux = total_flux*correction_factor
 
@@ -1449,8 +1445,8 @@ class Image(Header):
         new_posTab=posTab.rotatePosTab(angle).scalePosTab(1.0/arc_scale)
         new_posTab.offsetPosTab(ref_pixel_x, ref_pixel_y)
 
-        offset_x=old_div((offset_arc_x*numpy.cos(float(angle)/180.0*numpy.pi)-offset_arc_y*numpy.sin(float(angle)/180.0*numpy.pi)),arc_scale)
-        offset_y=old_div((offset_arc_x*numpy.sin(float(angle)/180.0*numpy.pi)+offset_arc_y*numpy.cos(float(angle)/180.0*numpy.pi)),arc_scale)
+        offset_x=(offset_arc_x*numpy.cos(float(angle)/180.0*numpy.pi)-offset_arc_y*numpy.sin(float(angle)/180.0*numpy.pi))/arc_scale
+        offset_y=(offset_arc_x*numpy.sin(float(angle)/180.0*numpy.pi)+offset_arc_y*numpy.cos(float(angle)/180.0*numpy.pi))/arc_scale
         new_posTab.offsetPosTab(-offset_x, -offset_y)
 
         apertures = Apertures(new_posTab._arc_position_x,new_posTab._arc_position_y,  numpy.ones(len(new_posTab._arc_position_x))*new_posTab._size[0])
@@ -1582,7 +1578,7 @@ def combineImages(images,  method='median', k=3):
             good_pixels = numpy.sum(select, 0)
             # set all bad pixel to 0 to compute the mean
             stack_image[numpy.logical_not(good_pixels)] = 0
-            new_image = old_div(numpy.sum(stack_image, 0),good_pixels)
+            new_image = numpy.sum(stack_image, 0)/good_pixels
 
         if images[0]._header!=None:
             new_header = images[0]._header

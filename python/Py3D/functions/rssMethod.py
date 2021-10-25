@@ -1,4 +1,8 @@
 from __future__ import print_function
+from __future__ import division
+from builtins import str
+from builtins import range
+from past.utils import old_div
 import sys, numpy, time, pyfits
 try:
   import matplotlib
@@ -377,7 +381,7 @@ def checkPixTable_py3d(rss_in, ref_lines, logfile, blocks='15',  init_back='100.
         fit_wave[i, :] = out[len(centres):2*len(centres)]
         for j in range(len(centres)):
             idx=numpy.argmin(numpy.abs(fit_wave[i, j]-spec._wave))
-            offset_pix[i, j] = (fit_wave[i, j]-centres[j])/disp_pix[idx]
+            offset_pix[i, j] = old_div((fit_wave[i, j]-centres[j]),disp_pix[idx])
 
 
     blocks = numpy.array_split(numpy.arange(0, len(rss)), nblocks)
@@ -809,7 +813,7 @@ def subtractSkySpec_py3d(rss_in, rss_out, sky, factor='1', scale_region='', scal
         scale_factor = numpy.median(factors[select_good])
         for i in range(len(rss)):
             if scale_ind==True:
-                rss[i] = rss[i]/factors[i]-sky_spec
+                rss[i] = old_div(rss[i],factors[i])-sky_spec
             else:
 
                 if factors[i]>0:
@@ -827,7 +831,7 @@ def subtractSkySpec_py3d(rss_in, rss_out, sky, factor='1', scale_region='', scal
         else:
             pool = Pool(int(parallel))
         threads=[]
-        for i in xrange(len(rss)):
+        for i in range(len(rss)):
             threads.append(pool.apply_async(sky_spec.binSpec, args=([rss[i]._wave])))
         pool.close()
         pool.join()
@@ -1058,7 +1062,7 @@ def correctFiberFlat_py3d(rss_in, rss_out, fiberflat, clip='0.2'):
         select_clip=numpy.logical_or((flat_resamp<clip) , (numpy.isnan(flat_resamp._data)))
         flat_resamp._data[select_clip]=0
         flat_resamp._mask[select_clip]=True
-        spec_new = spec_data/flat_resamp
+        spec_new = old_div(spec_data,flat_resamp)
         rss.setSpec(i, spec_new)
     rss.writeFitsData(rss_out)
 
@@ -1094,7 +1098,7 @@ def createSensFunction_py3d(rss_in, out_sens,  ref_spec, airmass, exptime, smoot
         rss.loadFitsData(rss_in)
         select = rss.selectSpec(min=0, max=coadd, method='median')
         star_rss=rss.subRSS(select)
-        star_spec = star_rss.create1DSpec(method='sum')/aper_correct
+        star_spec = old_div(star_rss.create1DSpec(method='sum'),aper_correct)
     else:
         star_spec = Spectrum1D()
         if '.fits' in rss_in:
@@ -1140,11 +1144,11 @@ def createSensFunction_py3d(rss_in, out_sens,  ref_spec, airmass, exptime, smoot
 
     star_spec.smoothSpec(smooth_ref)
     print(exptime,extinct._wave,star_spec._wave)
-    star_corr = star_spec/extinct/exptime
+    star_corr = old_div(old_div(star_spec,extinct),exptime)
 
-    sens_func = ref_star_resamp/star_corr
+    sens_func = old_div(ref_star_resamp,star_corr)
     if mask_wave!=None:
-        regions = len(mask_wave)/2
+        regions = old_div(len(mask_wave),2)
         for i in range(regions):
             select_region = numpy.logical_and(sens_func._wave>mask_wave[i*2], sens_func._wave<mask_wave[i*2+1])
             select_blue = numpy.logical_and(sens_func._wave>mask_wave[i*2]-20, sens_func._wave<mask_wave[i*2])
@@ -1157,14 +1161,14 @@ def createSensFunction_py3d(rss_in, out_sens,  ref_spec, airmass, exptime, smoot
     if mask_telluric!=None:
 	star_telluric1 = star_rss.create1DSpec(method='sum')
 	star_telluric2 = star_rss.create1DSpec(method='sum')
-        regions = len(mask_telluric)/2
+        regions = old_div(len(mask_telluric),2)
         for i in range(regions):
             select_region = numpy.logical_and(star_telluric1._wave>mask_telluric[i*2], star_telluric1._wave<mask_telluric[i*2+1])
             select_blue = numpy.logical_and(star_telluric1._wave>mask_telluric[i*2]-20, star_telluric1._wave<mask_telluric[i*2])
             select_red = numpy.logical_and(star_telluric1._wave>mask_telluric[i*2+1], star_telluric1._wave<mask_telluric[i*2+1]+20)
             line_par = stats.linregress([mask_telluric[i*2]-10,mask_telluric[i*2+1]+10], [numpy.median(star_telluric1._data[select_blue]), numpy.median(star_telluric1._data[select_red])])
             star_telluric2._data[select_region] = (line_par[0]*star_telluric1._wave[select_region]+line_par[1]).astype('float32')
-	telluric_spec = (star_telluric1 / star_telluric2)**(1.0/airmass)
+	telluric_spec = (old_div(star_telluric1, star_telluric2))**(1.0/airmass)
 	telluric_spec.writeFitsData('telluric_spec.fits')
     good_pix = numpy.logical_not(sens_func._mask)
     if median_filt>0:
@@ -1180,10 +1184,10 @@ def createSensFunction_py3d(rss_in, out_sens,  ref_spec, airmass, exptime, smoot
         sens_func_smooth = 1.0/sens_func_smooth
         if verbose==1:
             pylab.plot(sens_func_smooth._wave,  sens_func_smooth._data, '-r')
-            pylab.plot(sens_func_smooth._wave,  sens_func._data/sens_func_smooth._data, '-g')
+            pylab.plot(sens_func_smooth._wave,  old_div(sens_func._data,sens_func_smooth._data), '-g')
             sens_test_out = open('test_sens.txt', 'w')
             for i in range(sens_func_smooth._dim):
-                sens_test_out.write('%i %.2f %e %e %e\n'%(i, sens_func_smooth._wave[i], sens_func._data[i], sens_func_smooth._data[i], sens_func._data[i]/sens_func_smooth._data[i]))
+                sens_test_out.write('%i %.2f %e %e %e\n'%(i, sens_func_smooth._wave[i], sens_func._data[i], sens_func_smooth._data[i], old_div(sens_func._data[i],sens_func_smooth._data[i])))
             sens_test_out.close()
     else:
         split = float(split)
@@ -1249,7 +1253,7 @@ def createSensFunction2_py3d(rss_in, out_sens, ref_spec, airmass, exptime, smoot
         rss.loadFitsData(rss_in)
         select = rss.selectSpec(min=0, max=coadd, method='median')
         star_rss=rss.subRSS(select)
-        star_spec = star_rss.create1DSpec(method='sum')/aper_correct
+        star_spec = old_div(star_rss.create1DSpec(method='sum'),aper_correct)
     else:
         star_spec = Spectrum1D()
         if '.fits' in rss_in:
@@ -1294,11 +1298,11 @@ def createSensFunction2_py3d(rss_in, out_sens, ref_spec, airmass, exptime, smoot
         star_out.close()
 
     star_spec.smoothSpec(smooth_ref)
-    star_corr = star_spec/extinct/exptime
+    star_corr = old_div(old_div(star_spec,extinct),exptime)
 
-    sens_func = ref_star_resamp/star_corr
+    sens_func = old_div(ref_star_resamp,star_corr)
     if mask_wave!=None:
-        regions = len(mask_wave)/2
+        regions = old_div(len(mask_wave),2)
         for i in range(regions):
             select_region = numpy.logical_and(sens_func._wave>mask_wave[i*2], sens_func._wave<mask_wave[i*2+1])
             select_blue = numpy.logical_and(sens_func._wave>mask_wave[i*2]-20, sens_func._wave<mask_wave[i*2])
@@ -1320,10 +1324,10 @@ def createSensFunction2_py3d(rss_in, out_sens, ref_spec, airmass, exptime, smoot
     sens_func_smooth.smoothSpec(smooth_bspline,method='BSpline')
     if verbose==1:
         pylab.plot(sens_func_smooth._wave,  sens_func_smooth._data, '-r')
-        pylab.plot(sens_func_smooth._wave,  (1.0/sens_func._data)/sens_func_smooth._data, '-g')
+        pylab.plot(sens_func_smooth._wave,  old_div((1.0/sens_func._data),sens_func_smooth._data), '-g')
         sens_test_out = open('test_sens.txt', 'w')
         for i in range(sens_func_smooth._dim):
-            sens_test_out.write('%i %.2f %e %e %e\n'%(i, sens_func_smooth._wave[i], sens_func._data[i], sens_func_smooth._data[i], sens_func._data[i]/sens_func_smooth._data[i]))
+            sens_test_out.write('%i %.2f %e %e %e\n'%(i, sens_func_smooth._wave[i], sens_func._data[i], sens_func_smooth._data[i], old_div(sens_func._data[i],sens_func_smooth._data[i])))
         sens_test_out.close()
         pylab.show()
     sens_func_smooth = 1.0/sens_func_smooth
@@ -1385,7 +1389,7 @@ def fluxCalibration_py3d(rss_in, rss_out, sens_func, airmass, exptime, extinct_v
         sens_func_resamp = sens_func.resampleSpec(rss._wave, method='spline')
 
         for j in range(rss._fibers):
-            rss[j] = (rss[j]/extinct/exptime/norm_sb_fib)*sens_func_resamp*(ref_units/target_units)
+            rss[j] = (old_div(old_div(old_div(rss[j],extinct),exptime),norm_sb_fib))*sens_func_resamp*(old_div(ref_units,target_units))
     #        print exptime
     rss.writeFitsData(rss_out)
 
@@ -1468,7 +1472,7 @@ def matchFluxRSS_py3d(rsss, center_x, center_y, hdr_prefixes, arc_radius, start_
  #   print fluxes, order
     for i in range(len(list_rss)):
         rss=loadRSS(list_rss[i])
-        ratio = specs[order[-1]]/specs[i]
+        ratio = old_div(specs[order[-1]],specs[i])
         coeff=ratio.smoothPoly(order=polyorder, start_wave=start_wave, end_wave=end_wave)
         rss=rss*ratio
         rss._data=rss._data.astype(numpy.float32)
@@ -1483,7 +1487,7 @@ def matchFluxRSS_py3d(rsss, center_x, center_y, hdr_prefixes, arc_radius, start_
 
         rss.writeFitsData(list_rss[i])
         if verbose==1:
-	    pylab.plot(specs[i]._wave,(specs[order[-1]]/specs[i])._data,'-k')
+	    pylab.plot(specs[i]._wave,(old_div(specs[order[-1]],specs[i]))._data,'-k')
 	    pylab.plot(specs[i]._wave,ratio._data,'-r')
 	    #pylab.plot((specs[i])._data,'-k')
             #pylab.plot((specs[i]*ratio)._data,'-r')
@@ -1803,9 +1807,9 @@ def correctGalExtinct_py3d(rss_in, rss_out, Av, Rv='3.1', verbose='0'):
         galExtCurve = ancillary_func.galExtinct(rss._wave, Rv)
         Alambda = galExtCurve*Av
         if verbose==1:
-            pylab.plot(1.0/10**(Alambda._data/-2.5) )
+            pylab.plot(1.0/10**(old_div(Alambda._data,-2.5)) )
             pylab.show()
-        rss_corr = rss*(1.0/10**(Alambda/-2.5))
+        rss_corr = rss*(1.0/10**(old_div(Alambda,-2.5)))
     rss_corr.writeFitsData(rss_out)
 
 def correctTelluric_py3d(rss_in, rss_out, telluric_spectrum, airmass='AIRMASS'):
@@ -2053,7 +2057,7 @@ def registerSDSS_py3d(rss_in, rss_out, sdss_file, sdss_field, filter, ra, dec, h
         circ2 = matplotlib.collections.CircleCollection([60]*len(y_pos), offsets=XY, transOffset=ax2.transData,norm=norm,cmap=matplotlib.cm.gist_stern_r)
         select_nan=numpy.isnan(flux[0])
         flux[0][select_nan] = 1e-30
-        circ2.set_array((flux[0]/best_scale).ravel())
+        circ2.set_array((old_div(flux[0],best_scale)).ravel())
         ax2.add_collection(circ2)
         ax2.autoscale_view()
         ax2.set_xlim(-40, 40)
@@ -2116,7 +2120,7 @@ def DAR_registerSDSS_py3d(rss_in, sdss_file, sdss_field, ra, dec, out_prefix,  r
     scale=0.396
     wcs = astLib.astWCS.WCS(sdssimg._header,mode='pyfits')
     pix_coordinates = wcs.wcs2pix(ra,dec)
-    steps = int(numpy.rint(rss._res_elements/step))
+    steps = int(numpy.rint(old_div(rss._res_elements,step)))
     mean_wave = numpy.zeros(steps)
     position_x = numpy.zeros(steps, dtype=numpy.float32)
     position_y = numpy.zeros(steps, dtype=numpy.float32)
@@ -2139,9 +2143,9 @@ def DAR_registerSDSS_py3d(rss_in, sdss_file, sdss_field, ra, dec, out_prefix,  r
     error_rss = error_rss*fiber_area
 
     rss_mag = passband.fluxToMag(flux_rss)
-    AB_flux =10**(rss_mag/-2.5)
-    AB_eflux = error_rss*(AB_flux/flux_rss)
-    good_rss = flux_rss/error_rss>3.0
+    AB_flux =10**(old_div(rss_mag,-2.5))
+    AB_eflux = error_rss*(old_div(AB_flux,flux_rss))
+    good_rss = old_div(flux_rss,error_rss)>3.0
     for i in range(len(search_box)):
         result = rss.registerImage(sdssimg, passband, search_box[i], resolution[i], pix_coordinates[0], pix_coordinates[1], scale, spa, guess_x, guess_y, parallel=parallel)
         guess_x = result[0]
@@ -2151,12 +2155,12 @@ def DAR_registerSDSS_py3d(rss_in, sdss_file, sdss_field, ra, dec, out_prefix,  r
 
     select_blue = mean_wave<mean_wave[select_start]
     select_red =  mean_wave>mean_wave[select_start]
-    for m in xrange(idx_pass[select_blue][-1], idx_pass[select_blue][0]-1, -1):
+    for m in range(idx_pass[select_blue][-1], idx_pass[select_blue][0]-1, -1):
         result = rss.registerImage(sdssimg, passbands[m], search_box[-1], resolution[-1], pix_coordinates[0], pix_coordinates[1], scale, spa, position_x[m+1], position_y[m+1], parallel=parallel)
         position_x[m]=result[0]
         position_y[m]=result[1]
 
-    for m in xrange(idx_pass[select_red][0], idx_pass[select_red][-1]+1, 1):
+    for m in range(idx_pass[select_red][0], idx_pass[select_red][-1]+1, 1):
         result = rss.registerImage(sdssimg, passbands[m], search_box[-1], resolution[-1], pix_coordinates[0], pix_coordinates[1], scale, spa, position_x[m-1], position_y[m-1], parallel=parallel)
         position_x[m]=result[0]
         position_y[m]=result[1]

@@ -1,3 +1,4 @@
+from __future__ import print_function
 from Py3D.core.fiberrows import FiberRows
 from Py3D.core import fit_profile
 import numpy
@@ -130,8 +131,8 @@ class TraceMask(FiberRows):
                 fit_par[:, i] = fit # store parameters into array
             
             if i==-3930:
-               print change
-               print good_mask
+               print(change)
+               print(good_mask)
                #pylab.plot(change, '-k')
                pylab.plot(x[select_good][select], change_dist[select_good, i][select], 'ok')
                pylab.plot(x, numpy.polyval(fit_par[:, i], x), 'r')

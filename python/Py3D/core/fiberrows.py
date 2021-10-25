@@ -1,4 +1,8 @@
 from __future__ import print_function
+from __future__ import division
+from builtins import str
+from builtins import range
+from past.utils import old_div
 from Py3D.core.header import *
 from Py3D.core.positionTable import PositionTable
 from Py3D.core.spectrum1d import Spectrum1D
@@ -39,17 +43,17 @@ class FiberRows(Header, PositionTable):
 
             # subtract data if contained in both
             if self._data!=None and other._data!=None:
-                new_data = self._data/other._data
+                new_data = old_div(self._data,other._data)
                 img.setData(data = new_data)
             else:
                 img.setData(data = self._data)
 
             # add error if contained in both
             if self._error!=None and other._error!=None:
-                new_error = numpy.sqrt((self._error/other._data)**2+(self._data*other._error/other._data**2)**2)
+                new_error = numpy.sqrt((old_div(self._error,other._data))**2+(old_div(self._data*other._error,other._data**2))**2)
                 img.setData(error=new_error)
             elif self._error!=None and other._error==None:
-                new_error = self._error/other._data
+                new_error = old_div(self._error,other._data)
                 img.setData(error=new_error)
             else:
                 img.setData(error=self._error)
@@ -70,16 +74,16 @@ class FiberRows(Header, PositionTable):
                 dim = other.shape
                 #add ndarray according do its dimensions
                 if self._dim == dim:
-                    new_data= self._data/other
+                    new_data= old_div(self._data,other)
                 elif len(dim)==1:
                     if self._dim[0] == dim[0]:
-                        new_data = self._data/other[:, numpy.newaxis]
+                        new_data = old_div(self._data,other[:, numpy.newaxis])
                     elif self._dim[1] == dim[0]:
-                        new_data = self._data/other[numpy.newaxis, :]
+                        new_data = old_div(self._data,other[numpy.newaxis, :])
                 else:
                     new_data = self._data
                 if self._error!=None:
-                    new_error = self._error/other
+                    new_error = old_div(self._error,other)
                 else:
                     new_error=None
                 img.setData(data=new_data, error=new_error)
@@ -87,9 +91,9 @@ class FiberRows(Header, PositionTable):
         else:
             # try to do addtion for other types, e.g. float, int, etc.
             try:
-                new_data = self._data/other
+                new_data = old_div(self._data,other)
                 if self._error!=None:
-                    new_error = self._error/other
+                    new_error = old_div(self._error,other)
                 else:
                     new_error=None
                 img = FiberRows(data = new_data, error=new_error, mask=self._mask, header = self._header, shape=self._shape, size=self._size, arc_position_x=self._arc_position_x, arc_position_y=self._arc_position_y, good_fibers=self._good_fibers, fiber_type=self._fiber_type)
@@ -539,7 +543,7 @@ class FiberRows(Header, PositionTable):
 
     def applyFibers(self, function, args):
         result=[]
-        for i in xrange(len(self)):
+        for i in range(len(self)):
             result.append(function(args))
         return result
 
@@ -641,11 +645,11 @@ class FiberRows(Header, PositionTable):
             cent_wave[i, :] = fit[nlines:2*nlines]
             fwhm[i, :] = fit[2*nlines:3*nlines]*2.354
 
-            rel_flux_med = numpy.median(flux[i, :]/ref_flux)
+            rel_flux_med = numpy.median(old_div(flux[i, :],ref_flux))
             if rel_flux_med<rel_flux_limits[0] or  rel_flux_med>rel_flux_limits[1] or numpy.median(fwhm[i, :])>fwhm_max:
                 select = numpy.ones(len(flux[i, :]), dtype="bool")
             else:
-                select = numpy.logical_or(numpy.logical_or(flux[i, :]<flux_min, flux[i, :]/ref_flux>rel_flux_limits[1]), fwhm[i, :]>fwhm_max)
+                select = numpy.logical_or(numpy.logical_or(flux[i, :]<flux_min, old_div(flux[i, :],ref_flux)>rel_flux_limits[1]), fwhm[i, :]>fwhm_max)
 
 
             if numpy.sum(select)>0:
@@ -672,11 +676,11 @@ class FiberRows(Header, PositionTable):
             cent_wave[i, :] = fit[nlines:2*nlines]
             fwhm[i, :] = fit[2*nlines:3*nlines]*2.354
 
-            rel_flux_med = numpy.median(flux[i, :]/ref_flux)
+            rel_flux_med = numpy.median(old_div(flux[i, :],ref_flux))
             if rel_flux_med<rel_flux_limits[0] or  rel_flux_med>rel_flux_limits[1] or numpy.median(fwhm[i, :])>fwhm_max:
                 select = numpy.ones(len(flux[i, :]), dtype="bool")
             else:
-                select = numpy.logical_or(numpy.logical_or(flux[i, :]<flux_min, flux[i, :]/ref_flux>rel_flux_limits[1]), fwhm[i, :]>fwhm_max)
+                select = numpy.logical_or(numpy.logical_or(flux[i, :]<flux_min, old_div(flux[i, :],ref_flux)>rel_flux_limits[1]), fwhm[i, :]>fwhm_max)
 
 
             if numpy.sum(select)>0:
