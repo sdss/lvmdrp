@@ -1,5 +1,6 @@
 from builtins import range
-import  os, pyfits
+from astropy.io import fits as pyfits
+import os
 from Py3D.functions.imageMethod import *
 from Py3D.functions.rssMethod import *
 from Py3D.functions.headerMethod import *

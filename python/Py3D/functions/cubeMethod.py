@@ -1,16 +1,25 @@
 from __future__ import print_function
 from __future__ import division
 from builtins import range
+from copy import deepcopy
+
+from Py3D.core import fit_profile
+from Py3D.core.image import Image
+
 from past.utils import old_div
-import sys, numpy, time
+from scipy import stats
+import sys, numpy
 try:
   import pylab
   from matplotlib import pyplot as plt
 except:
   pass
-from scipy import ndimage
 from Py3D import *
 from Py3D.external import ancillary_func
+from Py3D.core.cube import Cube, loadCube
+from Py3D.core.passband import PassBand
+from Py3D.core.rss import RSS
+from Py3D.core.spectrum1d import Spectrum1D
 
 description='Provides Methods to process Cube files'
 
@@ -362,42 +371,42 @@ def matchCubeAperSpec_py3d(cube_in, cube_ref, cube_out, radius, poly_correct='-3
     new_cube = cube1*ratio
     new_cube.writeFitsData(cube_out)
     if verbose==1 or outfig!='':
-      fig = plt.figure(figsize=(8, 6))
-      ax = fig.add_axes([0.11, 0.11, 0.85, 0.87])
-      xcent = new_cube.getHdrValue("CRPIX1")
-      ycent = new_cube.getHdrValue("CRPIX2")
-      spec_out= new_cube.getAperSpec(xcent, ycent, radius)
-      spec_out_resamp = spec_out.resampleSpec(wave, method='linear',  err_sim=0)
-      ax.plot(spec_ref_resamp._wave,spec_ref_resamp._data,'-k')
-      #pylab.plot(spec_in_resamp._wave,spec_in_resamp._data,'-b')
-      ax.plot(spec_out_resamp._wave,spec_out_resamp._data,'-r',ls='dashed')
-      residual = spec_ref_resamp-spec_out_resamp
-      ax.plot(residual._wave, residual._data, '-g')
-      max_spec = numpy.max(spec_ref_resamp._data)
-      ax.set_ylim([-20,max_spec+0.05*max_spec])
-      ax.set_xlabel('wavelength [$\AA$]',fontsize=16)
-      ax.set_ylabel('Flux [$10^{-16}\,\mathrm{erg}\,\mathrm{s}^{-1}\,\mathrm{cm}^{-2}\,\mathrm{\AA}]$',fontsize=16)
-      fig.text(0.8,0.9,name_obj,fontsize=16)
-      if outfig!='':
-	pylab.savefig(outfig)
-      if verbose==1:
-	pylab.show()
+        fig = plt.figure(figsize=(8, 6))
+        ax = fig.add_axes([0.11, 0.11, 0.85, 0.87])
+        xcent = new_cube.getHdrValue("CRPIX1")
+        ycent = new_cube.getHdrValue("CRPIX2")
+        spec_out= new_cube.getAperSpec(xcent, ycent, radius)
+        spec_out_resamp = spec_out.resampleSpec(wave, method='linear',  err_sim=0)
+        ax.plot(spec_ref_resamp._wave,spec_ref_resamp._data,'-k')
+        #pylab.plot(spec_in_resamp._wave,spec_in_resamp._data,'-b')
+        ax.plot(spec_out_resamp._wave,spec_out_resamp._data,'-r',ls='dashed')
+        residual = spec_ref_resamp-spec_out_resamp
+        ax.plot(residual._wave, residual._data, '-g')
+        max_spec = numpy.max(spec_ref_resamp._data)
+        ax.set_ylim([-20,max_spec+0.05*max_spec])
+        ax.set_xlabel('wavelength [$\AA$]',fontsize=16)
+        ax.set_ylabel('Flux [$10^{-16}\,\mathrm{erg}\,\mathrm{s}^{-1}\,\mathrm{cm}^{-2}\,\mathrm{\AA}]$',fontsize=16)
+        fig.text(0.8,0.9,name_obj,fontsize=16)
+        if outfig!='':
+            pylab.savefig(outfig)
+        if verbose==1:
+            pylab.show()
 
 def subCubeWave_py3d(cube_in, cube_out, wave_start=None, wave_end=None):
     cube_in = loadCube(cube_in)
     select = numpy.ones(len(cube_in._wave), dtype="bool")
     if wave_start is not None:
-	select[cube_in._wave < float(wave_start)] = False
+	    select[cube_in._wave < float(wave_start)] = False
     if wave_end is not None:
-	select[cube_in._wave > float(wave_end)] = False
+	    select[cube_in._wave > float(wave_end)] = False
     if cube_in._error is not None:
-	error = cube_in._error[select, :, :]
+	    error = cube_in._error[select, :, :]
     else:
-	error = None
+	    error = None
     if cube_in._mask is not None:
-	mask = cube_in._mask[select, :, :]
+	    mask = cube_in._mask[select, :, :]
     else:
-	mask = None
+	    mask = None
 	
     cube_new = Cube(wave=cube_in._wave[select], data=cube_in._data[select, :, :], error=error, mask=mask, header=cube_in.getHeader())
     cube_new.writeFitsData(cube_out)
@@ -472,7 +481,7 @@ def createSensFunction_py3d(cube_in, out_sens,  ref_spec, airmass, exptime, cent
     if extinct_curve=='mean' or extinct_curve=='summer' or extinct_curve=='winter':
         extinct = 10**(ancillary_func.extinctCAHA(star_spec._wave, extinct_v, type=extinct_curve)*airmass*-0.4)
     elif extinct_curve=='Paranal':
-	extinct = 10**(ancillary_func.extinctParanal(star_spec._wave)*airmass*-0.4)
+	    extinct = 10**(ancillary_func.extinctParanal(star_spec._wave)*airmass*-0.4)
     else:
         extinct=Spectrum1D()
         extinct.loadTxtData(extinct_curve)

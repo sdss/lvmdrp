@@ -1,5 +1,6 @@
 from __future__ import print_function
-import pyfits, os
+from astropy.io import fits as pyfits
+import os
 import re
 
 description='Provides Methods for handling pipeline related tasks'

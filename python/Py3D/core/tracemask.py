@@ -4,7 +4,7 @@ from builtins import range
 from past.utils import old_div
 from Py3D.core.fiberrows import FiberRows
 from Py3D.core import fit_profile
-import numpy
+import numpy, pylab
 
 
 class TraceMask(FiberRows):

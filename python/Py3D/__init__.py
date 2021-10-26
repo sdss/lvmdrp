@@ -11,6 +11,6 @@
 #from multiprocessing import Pool
 #from multiprocessing import cpu_count
 
-from core import *
-import functions
-import external
+from .core import *
+from . import functions
+from . import external

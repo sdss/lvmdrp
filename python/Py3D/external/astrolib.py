@@ -203,7 +203,7 @@ def precess(ra0, dec0, equinox1, equinox2, doprint=None, fk4=None, radian=False)
       x = concatenate([a * cos(ra_rad), a * sin(ra_rad), sin(dec_rad)]) #input direction 
    else:   
       
-      x = numpy.zeros((npts, 3))
+      x = zeros((npts, 3))
       x[:,0] = a * cos(ra_rad)
       x[:,1] = a * sin(ra_rad)
       x[:,2] = sin(dec_rad)
@@ -241,7 +241,7 @@ def precess(ra0, dec0, equinox1, equinox2, doprint=None, fk4=None, radian=False)
 #      ra = reform(ra, dimen, over=True)
 #      dec = reform(dec, dimen, over=True)
    
-   if (doprint is not None):   
+   if doprint is not None:
       print('Equinox (' + strtrim(equinox2, 2) + '): ', adstring(ra, dec, 1))
    
    return ra,dec
@@ -577,9 +577,9 @@ def precess_xyz(x, y, z, equinox1, equinox2):
    
    #take input coords and convert to ra and dec (in radians)
    
-   ra = atan(y, x)
+   ra = arctan(y, x)
    _del = sqrt(x * x + y * y + z * z)  #magnitude of distance to Sun
-   dec = asin(old_div(z, _del))
+   dec = arcsin(old_div(z, _del))
    
    #   precess the ra and dec
    precess(ra, dec, equinox1, equinox2, radian=True)

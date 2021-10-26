@@ -2,6 +2,7 @@ from __future__ import print_function
 from builtins import range
 import sys
 from Py3D import *
+from Py3D.core.header import Header, combineHdr
 from Py3D.external import astrolib
 
 description='Provides Methods to handle Fits headers'

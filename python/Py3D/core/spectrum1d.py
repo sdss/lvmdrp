@@ -5,13 +5,13 @@ from builtins import str
 from builtins import range
 from builtins import object
 from past.utils import old_div
-import numpy, pyfits
+from astropy.io import fits as pyfits
+import numpy
 try:
   import pylab
 except:
   pass
 from scipy import sparse
-from scipy import optimize
 from scipy import interpolate
 from scipy import ndimage
 from . import fit_profile
@@ -92,7 +92,7 @@ class Spectrum1D(object):
                 return spec
             except:
                 #raise exception if the type are not matching in general
-                raise exceptions.TypeError("unsupported operand type(s) for -: %s and %s"%(str(type(self)).split("'")[1], str(type(other)).split("'")[1]))
+                raise TypeError("unsupported operand type(s) for -: %s and %s"%(str(type(self)).split("'")[1], str(type(other)).split("'")[1]))
 
     def __add__(self, other):
         if isinstance(other, Spectrum1D):
@@ -159,7 +159,7 @@ class Spectrum1D(object):
                 return spec
             except:
                 #raise exception if the type are not matching in general
-                raise exceptions.TypeError("unsupported operand type(s) for -: %s and %s"%(str(type(self)).split("'")[1], str(type(other)).split("'")[1]))
+                raise TypeError("unsupported operand type(s) for -: %s and %s"%(str(type(self)).split("'")[1], str(type(other)).split("'")[1]))
 
     def __div__(self, other):
 
@@ -210,7 +210,7 @@ class Spectrum1D(object):
                 if self._error!=None:
                     error = numpy.zeros_like(self._data)
                 if self._mask!=None:
-                    mask = nump.zeros(self._data.shape[0], dtype="bool")
+                    mask = numpy.zeros(self._data.shape[0], dtype="bool")
                 else:
                     mask = None
 
@@ -250,7 +250,7 @@ class Spectrum1D(object):
                 return spec
             except:
                 #raise exception if the type are not matching in general
-                raise exceptions.TypeError("unsupported operand type(s) for /: %s and %s"%(str(type(self)).split("'")[1], str(type(other)).split("'")[1]))
+                raise TypeError("unsupported operand type(s) for /: %s and %s"%(str(type(self)).split("'")[1], str(type(other)).split("'")[1]))
 
 
     def __rdiv__(self, other):
@@ -308,7 +308,7 @@ class Spectrum1D(object):
                 if self._error!=None:
                     error = numpy.zeros_like(self._data)
                 if self._mask!=None:
-                    mask = nump.zeros(self._data.shape[0], dtype="bool")
+                    mask = numpy.zeros(self._data.shape[0], dtype="bool")
                 else:
                     mask = None
 
@@ -355,7 +355,7 @@ class Spectrum1D(object):
                 return spec
       ##      except:
                 #raise exception if the type are not matching in general
-        ##        raise exceptions.TypeError("unsupported operand type(s) for /: %s and %s"%(str(type(self)).split("'")[1], str(type(other)).split("'")[1]))
+        ##        raise TypeError("unsupported operand type(s) for /: %s and %s"%(str(type(self)).split("'")[1], str(type(other)).split("'")[1]))
 
 
     def __mul__(self, other):
@@ -400,7 +400,7 @@ class Spectrum1D(object):
                 if self._error!=None:
                     error = numpy.zeros_like(self._data)
                 if self._mask!=None:
-                    mask = nump.zeros(self._data.shape[0], dtype="bool")
+                    mask = numpy.zeros(self._data.shape[0], dtype="bool")
                 else:
                     mask = None
             if data.dtype==numpy.float64 or data.dtype==numpy.dtype('>f8'):
@@ -441,7 +441,7 @@ class Spectrum1D(object):
                 return spec
            # except:
                 #raise exception if the type are not matching in general
-              #  raise exceptions.TypeError("unsupported operand type(s) for *: %s and %s"%(str(type(self)).split("'")[1], str(type(other)).split("'")[1]))
+              #  raise TypeError("unsupported operand type(s) for *: %s and %s"%(str(type(self)).split("'")[1], str(type(other)).split("'")[1]))
     def __rpow__(self, other):
         data = other**self._data
         error = None
@@ -521,7 +521,7 @@ class Spectrum1D(object):
             if extension_wave!=None:
                 self._wave = hdu[extension_wave].data
             if extension_fwhm!=None:
-                self._inst_fwhm = hdu[i].data
+                self._inst_fwhm = hdu[extension_fwhm].data
         hdu.close()
 
         if extension_hdr!=None:
@@ -613,7 +613,7 @@ class Spectrum1D(object):
         wave = numpy.zeros(len(lines),dtype=numpy.float32)
         data = numpy.zeros(len(lines),dtype=numpy.float32)
         for i in range(len(lines)):
-	    line = lines[i].split()
+            line = lines[i].split()
             wave[i] = float(line[1])
             data[i] = float(line[2])
         self._wave = wave
@@ -983,7 +983,7 @@ class Spectrum1D(object):
         else:
             self._data[:] = 0
             if self._mask!=None:
-	      self._mask[:]=True
+	            self._mask[:]=True
             out_par=0
         return out_par
 
@@ -1022,13 +1022,13 @@ class Spectrum1D(object):
             double_idx = idx[doubles]
             self._data[double_idx]+=add_doubles
         if self._mask!=None:
-	  data = self._data[numpy.logical_not(self._mask)]
-	  wave = self._wave[numpy.logical_not(self._mask)]
-	  pixels = self._pixels[numpy.logical_not(self._mask)]
-	else:
-	  data = self._data
-	  wave = self._wave
-	  pixels = self._pixels
+            data = self._data[numpy.logical_not(self._mask)]
+            wave = self._wave[numpy.logical_not(self._mask)]
+            pixels = self._pixels[numpy.logical_not(self._mask)]
+        else:
+            data = self._data
+            wave = self._wave
+            pixels = self._pixels
         pos_diff=old_div((data[1:]-data[:-1] ),(wave[1:]-wave[:-1] )) # compute the discrete derivative
         select_peaks=numpy.logical_and(pos_diff[1:]<0, pos_diff[:-1]>0)  # select all maxima
 
