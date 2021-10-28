@@ -1924,6 +1924,7 @@ def maskNAN_py3d(rss_in, replace_error='1e12'):
 		rss.writeFitsData(rss_in)
 
 def flatten(x):
+	# taken from: https://bit.ly/3BgHitH
 	result = []
 	for el in x:
 		if isinstance(x, collections.Iterable) and not isinstance(el, str):

@@ -218,7 +218,6 @@ def detCos_py3d(image,  out_image,   rdnoise='2.9', sigma_det='5', rlim='1.2', i
 			out = out.replaceMaskMedian(box_x, box_y, replace_error=None)  # replace possible corrput pixel with zeros
 	out.writeFitsData(out_image)
 
-
 def LACosmic_py3d(image,  out_image,  sigma_det='5', flim='1.1', iter='3', sig_gauss='0.8,0.8', error_box='20,1', replace_box='20,1',  replace_error='1e10',  rdnoise='2.9',  increase_radius='0', verbose='0', parallel='2'):
 	"""
 		   Detects and removes cosmic rays from astronomical images based on a modified Laplacian edge
@@ -382,7 +381,7 @@ def LACosmic_py3d(image,  out_image,  sigma_det='5', flim='1.1', iter='3', sig_g
 			S = old_div(Lap,(noise*4)) # normalize Laplacian image by the noise
 			S_prime = S-S.medianImg((err_box_y, err_box_x)) # cleaning of the normalized Laplacian image
 			fine=out.convolveGaussImg(sigma_x, sigma_y) # convolve image with a 2D Gaussian
-#        fine.writeFitsData('s_prime.fits')
+			# fine.writeFitsData('s_prime.fits')
 			fine_norm = old_div(out,fine)
 			select_neg = fine_norm<0
 			fine_norm.setData(data=0, select=select_neg)
@@ -445,7 +444,6 @@ def addCCDMask_py3d(image, mask, replaceError='1e10'):
 		img.setData(error=replaceError, select=mask_comb)
 	img.setData(mask=mask_comb)
 	img.writeFitsData(image)
-
 
 def findPeaksAuto_py3d(image, out_peaks_file, nfibers,  disp_axis='X', threshold='5000',median_box='8', median_cross='1', slice='', method='gauss',  init_sigma='1.0', verbose='1'):
 	"""
@@ -629,7 +627,6 @@ def findPeaksMaster_py3d(image, peaks_master, out_peaks_file, disp_axis='X', thr
 		pylab.plot(centers._data, numpy.ones(len(centers._data))*2000.0, 'xg')
 		pylab.show()
 
-
 def findPeaksMaster2_py3d(image, peaks_master, out_peaks_file, disp_axis='X', threshold='1500', threshold_weak='500', median_box='8', median_cross='1', slice='', method='gauss',  init_sigma='1.0', border='4', verbose='1'):
 
 	threshold=float(threshold)
@@ -732,7 +729,6 @@ def findPeaksMaster2_py3d(image, peaks_master, out_peaks_file, disp_axis='X', th
 		pylab.plot(peaks_good,peaks_flux ,'or')
 		pylab.plot(centers._data, numpy.ones(len(centers._data))*2000.0, 'xg')
 		pylab.show()
-
 
 def tracePeaks_py3d(image, peaks_file, trace_out, disp_axis='X', method='gauss', median_box='7', median_cross='1', steps='30', coadd='30', poly_disp='-6', init_sigma='1.0', threshold_peak='100.0', max_diff='2', verbose='1'):
 	"""
@@ -1032,8 +1028,6 @@ def combineImages_py3d(images, out_image, method='median', k='3.0'):
 	#write out FITS file
 	combined_img.writeFitsData(out_image)
 
-
-
 def subtractStraylight_py3d(image, trace, stray_image, clean_image, disp_axis='X',  aperture='7', poly_cross='4', smooth_disp='5', smooth_gauss='10.0', parallel='auto'):
 	"""
 			Subtracts a diffuse background signal (stray light) from the raw data. It uses the regions between fiber to estimate the stray light signal and
@@ -1132,7 +1126,6 @@ def subtractStraylight_py3d(image, trace, stray_image, clean_image, disp_axis='X
 	img_out.writeFitsData(clean_image)
 	img_smooth.writeFitsData(stray_image)
 
-
 def traceFWHM_py3d(image, trace, fwhm_out, disp_axis='X', blocks='20', steps='100', coadd='10', poly_disp='5', threshold_flux='50.0', init_fwhm='2.0', clip='', parallel='auto'):
 	"""
 			Measures the FWHM of the cross-dispersion fiber profile across the CCD.  It assumes that the profiles have a Gaussian shape and that the width  is CONSTANT for
@@ -1205,7 +1198,7 @@ def traceFWHM_py3d(image, trace, fwhm_out, disp_axis='X', blocks='20', steps='10
 		img = img.convolveImg(coadd_kernel) # perform convolution to coadd the signal
 		threshold_flux = threshold_flux*coadd #adjust threshold flux to the coadded signal
 
-# load trace
+	# load trace
 	trace_mask = TraceMask()
 	trace_mask.loadFitsData(trace)
 
@@ -1250,7 +1243,6 @@ def traceFWHM_py3d(image, trace, fwhm_out, disp_axis='X', blocks='20', steps='10
 
 	# write out FWHM trace to FITS file
 	traceFWHM.writeFitsData(fwhm_out)
-
 
 def offsetTrace_py3d(image, trace, disp, lines, logfile,  blocks='15', disp_axis='X',  init_offset='0.0', size='20'):
 	"""
@@ -1474,8 +1466,6 @@ def offsetTrace2_py3d(image, trace, trace_fwhm, disp, lines, logfile,  blocks='1
 	img.writeFitsHeader(image)
 	log.close()
 
-
-
 def extractSpec_py3d(image, trace, out_rss,  method='optimal',  aperture='7', fwhm='2.5', disp_axis='X',  replace_error='1e10', plot='-1', parallel='auto'):
 	"""
 			Extracts the flux for each fiber along the dispersion direction which is written into an RSS FITS file format.
@@ -1649,11 +1639,6 @@ def subtractBias_py3d(file_in, file_out, bias, compute_error='1', boundary_x='',
 
 	clean.writeFitsData(file_out)
 
-
-
-
-
-
 def testres_py3d(image, trace, fwhm, flux):
 	"""
 			Historic task used for debugging of the the extraction routine...
@@ -1689,8 +1674,3 @@ def testres_py3d(image, trace, fwhm, flux):
 
 	hdu = pyfits.PrimaryHDU(old_div((img._data-out),img._data))
 	hdu.writeto('res_rel.fits', clobber=True)
-
-
-
-
-
