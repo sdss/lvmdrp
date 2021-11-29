@@ -14,18 +14,18 @@ class FiberRows(Header, PositionTable):
 	def __init__(self, data=None, header = None, error = None, mask = None, shape=None, size=None, arc_position_x=None, arc_position_y=None, good_fibers=None,  fiber_type=None):
 		Header.__init__(self, header=header)
 		PositionTable.__init__(self,  shape=shape, size=size, arc_position_x=arc_position_x, arc_position_y=arc_position_y, good_fibers=good_fibers,  fiber_type=fiber_type)
-		if data==None:
+		if data is None:
 			self._data = None
 		else:
 			self._data = data
 			self._fibers = data.shape[0]
 
-		if error==None:
+		if error is None:
 			self._error = None
 		else:
 			self._error = numpy.array(error)
 
-		if mask==None:
+		if mask is None:
 			self._mask = None
 		else:
 			self._mask = numpy.array(mask)
@@ -33,7 +33,7 @@ class FiberRows(Header, PositionTable):
 	def __len__(self):
 		return self._fibers
 
-	def __div__(self, other):
+	def __truediv__(self, other):
 		"""
 		Operator to divide two Images or divide by another type if possible
 		"""
@@ -43,24 +43,24 @@ class FiberRows(Header, PositionTable):
 			img = FiberRows(header = self._header, shape=self._shape, size=self._size, arc_position_x=self._arc_position_x, arc_position_y=self._arc_position_y, good_fibers=self._good_fibers, fiber_type=self._fiber_type)
 
 			# subtract data if contained in both
-			if self._data!=None and other._data!=None:
+			if self._data is not None and other._data is not None:
 				new_data = old_div(self._data,other._data)
 				img.setData(data = new_data)
 			else:
 				img.setData(data = self._data)
 
 			# add error if contained in both
-			if self._error!=None and other._error!=None:
+			if self._error is not None and other._error is not None:
 				new_error = numpy.sqrt((old_div(self._error,other._data))**2+(old_div(self._data*other._error,other._data**2))**2)
 				img.setData(error=new_error)
-			elif self._error!=None and other._error==None:
+			elif self._error is not None and other._error is None:
 				new_error = old_div(self._error,other._data)
 				img.setData(error=new_error)
 			else:
 				img.setData(error=self._error)
 
 			# combined mask of valid pixels if contained in both
-			if self._mask!=None and other._mask!=None:
+			if self._mask is not None and other._mask is not None:
 				new_mask = numpy.logical_or(self._mask, other._mask)
 				img.setData(mask=new_mask)
 			else:
@@ -71,7 +71,7 @@ class FiberRows(Header, PositionTable):
 		elif isinstance(other,  numpy.ndarray):
 			img = FiberRows(error=self._error, mask=self._mask, header = self._header, shape=self._shape, size=self._size, arc_position_x=self._arc_position_x, arc_position_y=self._arc_position_y, good_fibers=self._good_fibers, fiber_type=self._fiber_type )
 
-			if self._data!=None:  # check if there is data in the object
+			if self._data is not None:  # check if there is data in the object
 				dim = other.shape
 				#add ndarray according do its dimensions
 				if self._dim == dim:
@@ -83,7 +83,7 @@ class FiberRows(Header, PositionTable):
 						new_data = old_div(self._data,other[numpy.newaxis, :])
 				else:
 					new_data = self._data
-				if self._error!=None:
+				if self._error is not None:
 					new_error = old_div(self._error,other)
 				else:
 					new_error=None
@@ -93,7 +93,7 @@ class FiberRows(Header, PositionTable):
 			# try to do addtion for other types, e.g. float, int, etc.
 			try:
 				new_data = old_div(self._data,other)
-				if self._error!=None:
+				if self._error is not None:
 					new_error = old_div(self._error,other)
 				else:
 					new_error=None
@@ -113,21 +113,21 @@ class FiberRows(Header, PositionTable):
 			img = FiberRows(header = self._header, shape=self._shape, size=self._size, arc_position_x=self._arc_position_x, arc_position_y=self._arc_position_y, good_fibers=self._good_fibers, fiber_type=self._fiber_type)
 
 			# subtract data if contained in both
-			if self._data!=None and other._data!=None:
+			if self._data is not None and other._data is not None:
 				new_data = self._data+other._data
 				img.setData(data = new_data)
 			else:
 				img.setData(data = self._data)
 
 			# add error if contained in both
-			if self._error!=None and other._error!=None:
+			if self._error is not None and other._error is not None:
 				new_error = numpy.sqrt(self._error**2+other._error**2)
 				img.setData(error=new_error)
 			else:
 				img.setData(error=self._error)
 
 			# combined mask of valid pixels if contained in both
-			if self._mask!=None and other._mask!=None:
+			if self._mask is not None and other._mask is not None:
 				new_mask = numpy.logical_or(self._mask, other._mask)
 				img.setData(mask=new_mask)
 			else:
@@ -138,7 +138,7 @@ class FiberRows(Header, PositionTable):
 		elif isinstance(other,  numpy.ndarray):
 			img = FiberRows(error=self._error, mask=self._mask, header = self._header, shape=self._shape, size=self._size, arc_position_x=self._arc_position_x, arc_position_y=self._arc_position_y, good_fibers=self._good_fibers, fiber_type=self._fiber_type )
 
-			if self._data!=None:  # check if there is data in the object
+			if self._data is not None:  # check if there is data in the object
 				dim = other.shape
 				#add ndarray according do its dimensions
 				if self._dim == dim:
@@ -156,7 +156,7 @@ class FiberRows(Header, PositionTable):
 		elif isinstance(other,  Spectrum1D):
 			img = FiberRows(error=self._error, mask=self._mask, header = self._header, shape=self._shape, size=self._size, arc_position_x=self._arc_position_x, arc_position_y=self._arc_position_y, good_fibers=self._good_fibers, fiber_type=self._fiber_type )
 
-			if self._data!=None:  # check if there is data in the object
+			if self._data is not None:  # check if there is data in the object
 
 				#add ndarray according do its dimensions
 				if self._fibers == other._dim:
@@ -187,24 +187,24 @@ class FiberRows(Header, PositionTable):
 			img = FiberRows(header = self._header, shape=self._shape, size=self._size, arc_position_x=self._arc_position_x, arc_position_y=self._arc_position_y, good_fibers=self._good_fibers, fiber_type=self._fiber_type)
 
 			# subtract data if contained in both
-			if self._data!=None and other._data!=None:
+			if self._data is not None and other._data is not None:
 				new_data = self._data*other._data
 				img.setData(data = new_data)
 			else:
 				img.setData(data = self._data)
 
 			# add error if contained in both
-			if self._error!=None and other._error!=None:
+			if self._error is not None and other._error is not None:
 				new_error = numpy.sqrt(other._data**2*self._error**2+self._data**2*other._error**2)
 				img.setData(error=new_error)
-			elif self._error!=None:
+			elif self._error is not None:
 				new_error = other._data*self._error
 				img.setData(error=new_error)
 			else:
 				img.setData(error=self._error)
 
 			# combined mask of valid pixels if contained in both
-			if self._mask!=None and other._mask!=None:
+			if self._mask is not None and other._mask is not None:
 				new_mask = numpy.logical_or(self._mask, other._mask)
 				img.setData(mask=new_mask)
 			else:
@@ -215,7 +215,7 @@ class FiberRows(Header, PositionTable):
 		elif isinstance(other,  numpy.ndarray):
 			img = FiberRows(error=self._error, mask=self._mask, header = self._header, shape=self._shape, size=self._size, arc_position_x=self._arc_position_x, arc_position_y=self._arc_position_y, good_fibers=self._good_fibers, fiber_type=self._fiber_type )
 
-			if self._data!=None:  # check if there is data in the object
+			if self._data is not None:  # check if there is data in the object
 				dim = other.shape
 				#add ndarray according do its dimensions
 				if self._dim == dim:
@@ -233,7 +233,7 @@ class FiberRows(Header, PositionTable):
 			# try to do addtion for other types, e.g. float, int, etc.
 			try:
 				new_data = self._data*other
-				if self._error!=None:
+				if self._error is not None:
 					new_error=self._error*other
 				else:
 					new_error = self._error
@@ -249,18 +249,16 @@ class FiberRows(Header, PositionTable):
 		if fiber>=self._fibers or fiber<self._fibers*-1:
 			raise IndexError('The Object contains only %i Fibers for which the index %i is invalid'%(self._fibers, fiber))
 		data = self._data[fiber, :]
-		if self._error!=None:
+		if self._error is not None:
 			error = self._error[fiber, :]
 		else:
 			error = None
-		if self._mask!=None:
+		if self._mask is not None:
 			mask = self._mask[fiber, :]
 		else:
 			mask=None
 		spec = Spectrum1D(numpy.arange(self._data.shape[1]), data,  error=error, mask=mask)
 		return spec
-
-
 
 	def __setitem__(self, fiber, spec):
 
@@ -272,10 +270,10 @@ class FiberRows(Header, PositionTable):
 
 		self._data[fiber, :] = spec._data
 
-		if self._error!=None and spec._error!=None:
+		if self._error is not None and spec._error is not None:
 			self._error[fiber, :] = spec._error
 
-		if self._mask!=None and spec._mask!=None:
+		if self._mask is not None and spec._mask is not None:
 			self._mask[fiber, :] = spec._mask
 
 	def __getslice__(self, i, j):
@@ -283,12 +281,12 @@ class FiberRows(Header, PositionTable):
 			raise TypeError('Fiber indices need to be integers')
 
 		data = self._data[i:j, :]
-		if self._error!=None:
+		if self._error is not None:
 			error = self._error[i:j, :]
 		else:
 			error = None
 
-		if self._mask!=None:
+		if self._mask is not None:
 			mask = self._mask[i:j, :]
 		else:
 			mask = None
@@ -311,16 +309,16 @@ class FiberRows(Header, PositionTable):
 				Dimension of the bad pixel mask to be created (all pixel masked bad)
 
 		"""
-		if data_dim!=None:
+		if data_dim is not None:
 			# create empty  data array and set number of fibers
 			self._data = numpy.zeros(data_dim, dtype=numpy.float32)
 			self._fibers  = self._data.shape[0]
 
-		if error_dim!=None:
+		if error_dim is not None:
 			# create empty  error array
 			self._error = numpy.zeros(error_dim, dtype=numpy.float32)
 
-		if mask_dim!=None:
+		if mask_dim is not None:
 			# create empty mask all pixel assigned bad
 			self._mask = numpy.ones(mask_dim, dtype='bool')
 
@@ -362,62 +360,61 @@ class FiberRows(Header, PositionTable):
 				Subselection of pixels along the slice that should be inserted
 		"""
 		if axis=='X' or axis=='x' or axis==1:
-			if select!=None:
-				if data!=None:
+			if select is not None:
+				if data is not None:
 					self._data[slice, select] = data
-				if error!=None:
+				if error is not None:
 					self._error[slice, select] = error
-				if mask!=None:
+				if mask is not None:
 					self._mask[slice, select] = mask
 			else:
-				if data!=None:
+				if data is not None:
 					self._data[slice, :] = data
-				if error!=None:
+				if error is not None:
 					self._error[slice, :] = error
-				if mask!=None:
+				if mask is not None:
 					self._mask[slice, :] = mask
 		elif axis=='Y' or axis=='y' or axis==0:
-			if select!=None:
-				if data!=None:
+			if select is not None:
+				if data is not None:
 					self._data[select, slice] = data
-				if error!=None:
+				if error is not None:
 					self._error[select, slice] = error
-				if mask!=None:
+				if mask is not None:
 					self._mask[select, slice] = mask
 			else:
-				if data!=None:
+				if data is not None:
 					self._data[:, slice] = data
-				if error!=None:
+				if error is not None:
 					self._error[:, slice] = error
-				if mask!=None:
+				if mask is not None:
 					self._mask[:, slice] = mask
 #        print self._data[:, slice]
-
 	def getSlice(self, slice, axis='x'):
 		if axis=='X' or axis=='x' or axis==1:
-			if self._data!=None:
+			if self._data is not None:
 				slice_data = self._data[slice, :]
 			else:
 				slice_data = None
-			if self._error!=None:
+			if self._error is not None:
 				slice_error = self._error[slice, :]
 			else:
 				slice_error = None
-			if self._mask!=None:
+			if self._mask is not None:
 				slice_mask = self._mask[slice, :]
 			else:
 				slice_mask = None
 
 		elif axis=='Y' or axis=='y' or axis==0:
-			if self._data!=None:
+			if self._data is not None:
 				slice_data = self._data[:, slice]
 			else:
 				slice_data = None
-			if self._error!=None:
+			if self._error is not None:
 				slice_error = self._error[:, slice]
 			else:
 				slice_error = None
-			if self._mask!=None:
+			if self._mask is not None:
 				slice_mask = self._mask[:, slice]
 			else:
 				slice_mask = None
@@ -425,15 +422,13 @@ class FiberRows(Header, PositionTable):
 			return None, None, None
 		return slice_data, slice_error, slice_mask
 
-
-
 	def getSpec(self, fiber):
 			data = self._data[fiber, :]
-			if self._error!=None:
+			if self._error is not None:
 				error = self._error[fiber, :]
 			else:
 				error = None
-			if self._mask!=None:
+			if self._mask is not None:
 				mask = self._mask[fiber, :]
 			else:
 				mask=None
@@ -462,19 +457,19 @@ class FiberRows(Header, PositionTable):
 		return data,  error,  mask
 
 	def setData(self, select=None , data=None, mask=None, error=None):
-		if select!=None:
-			if data!=None:
+		if select is not None:
+			if data is not None:
 				self._data[select] = data
-			if mask!=None:
+			if mask is not None:
 				self._mask[select] = mask
-			if error!=None:
+			if error is not None:
 				self._error[select] = error
 		else:
-			if data!=None:
+			if data is not None:
 				self._data = data
-			if mask!=None:
+			if mask is not None:
 				self._mask = mask
-			if error!=None:
+			if error is not None:
 				self._error = error
 
 	def split(self,  fragments, axis='x'):
@@ -485,11 +480,11 @@ class FiberRows(Header, PositionTable):
 			axis_split=0
 
 		split_data = numpy.array_split(self._data, fragments, axis=axis_split)
-		if self._error!=None:
+		if self._error is not None:
 			split_error = numpy.array_split(self._error, fragments, axis=axis_split)
 		else:
 			split_error = [None]*fragments
-		if self._mask!=None:
+		if self._mask is not None:
 			split_mask = numpy.array_split(self._mask, fragments, axis=axis_split)
 		else:
 			split_mask = [None]*fragments
@@ -497,8 +492,6 @@ class FiberRows(Header, PositionTable):
 			list.append(FiberRows(data=split_data[i], error=split_error[i],  mask=split_mask[i]))
 
 		return list
-
-
 
 	def loadFitsData(self, file, extension_data=None, extension_mask=None,  extension_error=None,  extension_hdr=None):
 		"""
@@ -519,7 +512,7 @@ class FiberRows(Header, PositionTable):
 				Number of the FITS extension containing the errors for the values
 		"""
 		hdu = pyfits.open(file)
-		if extension_data== None and extension_mask==None and extension_error==None:
+		if extension_data is None and extension_mask is None and extension_error is None:
 				self._data = hdu[0].data
 				self._fibers = self._data.shape[0] # set fibers
 				self.setHeader(hdu[0].header)
@@ -531,15 +524,15 @@ class FiberRows(Header, PositionTable):
 							self._mask = hdu[i].data
 
 		else:
-			if extension_data!=None:
+			if extension_data is not None:
 				self._data = hdu[extension_data].data
 				self._fibers = self._data.shape[0]
-			if extension_mask!=None:
+			if extension_mask is not None:
 				self._mask = hdu[extension_mask].data
-			if extension_error!=None:
+			if extension_error is not None:
 				self._error = hdu[extension_error].data
 		hdu.close()
-		if extension_hdr!=None:
+		if extension_hdr is not None:
 			self.setHeader(hdu[extension_hdr].header)
 
 	def applyFibers(self, function, args):
@@ -547,7 +540,6 @@ class FiberRows(Header, PositionTable):
 		for i in range(len(self)):
 			result.append(function(args))
 		return result
-
 
 	def writeFitsData(self, filename, extension_data=None, extension_mask=None,  extension_error=None):
 		"""
@@ -572,28 +564,28 @@ class FiberRows(Header, PositionTable):
 
 		# create primary hdus and image hdus
 		# data hdu
-		if extension_data==None and extension_error==None and extension_mask==None:
+		if extension_data is None and extension_error is None and extension_mask is None:
 			hdus[0] = pyfits.PrimaryHDU(self._data)
-			if self._error!=None:
+			if self._error is not None:
 				hdus[1] = pyfits.ImageHDU(self._error, name='ERROR')
-			if self._mask!=None:
+			if self._mask is not None:
 				hdus[2] = pyfits.ImageHDU(self._mask.astype('uint8'), name='BADPIX')
 		else:
 			if extension_data == 0:
 				hdus[0] = pyfits.PrimaryHDU(self._data)
-			elif extension_data>0 and extension_data!=None:
+			elif extension_data>0 and extension_data is not None:
 				hdus[extension_data] = pyfits.ImageHDU(self._data, name='DATA')
 
 			# mask hdu
 			if extension_mask == 0:
 				hdu = pyfits.PrimaryHDU(self._mask.astype('uint8'))
-			elif extension_mask>0 and extension_mask!=None:
+			elif extension_mask>0 and extension_mask is not None:
 				hdus[extension_mask] = pyfits.ImageHDU(self._mask.astype('uint8'), name='BADPIX')
 
 			# error hdu
 			if extension_error == 0:
 				hdu = pyfits.PrimaryHDU(self._error)
-			elif extension_error>0 and extension_error!=None:
+			elif extension_error>0 and extension_error is not None:
 				hdus[extension_error] = pyfits.ImageHDU(self._error, name='ERROR')
 
 		# remove not used hdus
@@ -605,12 +597,12 @@ class FiberRows(Header, PositionTable):
 
 		if len(hdus)>0:
 			hdu = pyfits.HDUList(hdus) # create an HDUList object
-			if self._header !=None:
+			if self._header  is not None:
 				hdu[0].header = self.getHeader() # add the primary header to the HDU
 				hdu[0].update_header()
-		del hdu[0]._header['COMMENT']
-		del hdu[0]._header['HISTORY']
-		hdu.writeto(filename, output_verify='fix', clobber=True) # write FITS file to disc
+		# del hdu[0]._header['COMMENT']
+		# del hdu[0]._header['HISTORY']
+		hdu.writeto(filename, output_verify='fix', overwrite=True) # write FITS file to disc
 
 	def measureArcLines(self, ref_spec, ref_cent, aperture=12, init_back=30.0, flux_min=100,fwhm_max=10, rel_flux_limits=[0.2, 5] , verbose=True):
 
@@ -715,13 +707,13 @@ class FiberRows(Header, PositionTable):
 
 	def append(self, rows, append_hdr=False):
 	  #  print self._error,  rows._error
-		if self._data!=None and rows._data!=None:
+		if self._data is not None and rows._data is not None:
 			self._data = numpy.concatenate((self._data, rows._data))
-			if self._header!= None:
+			if self._header is not None:
 				self.setHdrValue('NAXIS2', self._fibers+rows._fibers)
-		if self._error!=None and rows._error!=None:
+		if self._error is not None and rows._error is not None:
 			self._error = numpy.concatenate((self._error, rows._error))
-		if self._mask!=None and rows._mask!=None:
+		if self._mask is not None and rows._mask is not None:
 			self._mask = numpy.concatenate((self._mask, rows._mask))
 		try:
 			self._arc_position_x = numpy.concatenate((self._arc_position_x, rows._arc_position_x))
@@ -743,4 +735,3 @@ class FiberRows(Header, PositionTable):
 		if append_hdr:
 			combined_hdr=combineHdr([self, rows])
 			self.setHeader(combined_hdr._header)
-

@@ -300,7 +300,6 @@ class RSS(FiberRows):
 		if extension_hdr!=None:
 			self.setHeader(hdu[extension_hdr].header, origin=file)
 
-
 	def writeFitsData(self, filename, extension_data=None, extension_mask=None,  extension_error=None, extension_wave=None, extension_fwhm=None, include_PT=True):
 		"""
 			Save information from a RSS object into a FITS file.
@@ -386,7 +385,7 @@ class RSS(FiberRows):
 			if self._header !=None:
 				hdu[0].header = self.getHeader() # add the primary header to the HDU
 				hdu[0].update_header()
-		hdu.writeto(filename, clobber=True) # write FITS file to disc
+		hdu.writeto(filename, overwrite=True) # write FITS file to disc
 
 	def getSpec(self, fiber):
 		data = self._data[fiber, :]
@@ -487,9 +486,6 @@ class RSS(FiberRows):
 		self._good_fibers = rss_in[i]._good_fibers
 		self._fiber_type = rss_in[i]._fiber_type
 
-
-
-
 	def setSpec(self, fiber, spec):
 		if spec._data!=None and self._data!=None:
 			self._data[fiber, :] = spec._data
@@ -500,7 +496,6 @@ class RSS(FiberRows):
 		if spec._mask!=None and self._mask!=None:
 			self._mask[fiber, :] = spec._mask
 
-
 	def  createAperSpec(self, cent_x, cent_y, radius):
 		if self._arc_position_x!=None and self._arc_position_y!=None:
 			distance = numpy.sqrt((self._arc_position_x-cent_x)**2+(self._arc_position_y-cent_y)**2)
@@ -509,7 +504,6 @@ class RSS(FiberRows):
 			subRSS = self.subRSS(select_rad)
 			combined_spec = subRSS.create1DSpec(method='sum')
 		return combined_spec
-
 
 	def create1DSpec(self, method='mean'):
 		if len(self._wave.shape)==2:
@@ -1397,7 +1391,6 @@ def loadRSS(infile, extension_data=None, extension_mask=None,  extension_error=N
 	rss.loadFitsData(infile, extension_data=None, extension_mask=None,  extension_error=None)
 
 	return rss
-
 
 def glueRSS(infiles, outfile):
 	for i in range(len(infiles)):

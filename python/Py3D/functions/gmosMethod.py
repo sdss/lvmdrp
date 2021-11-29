@@ -87,7 +87,7 @@ def combineBias_py3d(file_list, file_out):
         hdu_out.header = hdu[j].header
         hdulist.append(hdu_out)
     hdu = pyfits.HDUList(hdulist)
-    hdu.writeto(file_out, clobber=True)
+    hdu.writeto(file_out, overwrite=True)
 
 
 def reduceCalib_py3d(trace, master_bias, arc=''):

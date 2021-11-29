@@ -285,9 +285,9 @@ class Cube(Header, PositionTable):
 					hdu[0].header.update('CRVAL3', self._wave[0])
 					hdu[0].header.update('CDELT3', self._wave[1]-self._wave[0])
 		if fix_header==True:
-			hdu.writeto(filename, output_verify='fix', clobber=True) # write FITS file to disc
+			hdu.writeto(filename, output_verify='fix', overwrite=True) # write FITS file to disc
 		else:
-			hdu.writeto(filename, clobber=True) # write FITS file to disc
+			hdu.writeto(filename, overwrite=True) # write FITS file to disc
 
 
 	def collapseCube(self, mode='mean', start_wave=None, end_wave=None):

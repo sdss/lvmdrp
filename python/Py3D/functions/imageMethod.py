@@ -280,8 +280,8 @@ def LACosmic_py3d(image,  out_image,  sigma_det='5', flim='1.1', iter='3', sig_g
 	flim= float(flim)
 	iterations = int(iter)
 	error_box = replace_box.split(',')
-	err_box_x = float(error_box[0])
-	err_box_y = float(error_box[1])
+	err_box_x = int(error_box[0])
+	err_box_y = int(error_box[1])
 	sig_gauss = sig_gauss.split(',')
 	sigma_x = float(sig_gauss[0])
 	sigma_y = float(sig_gauss[1])
@@ -339,7 +339,7 @@ def LACosmic_py3d(image,  out_image,  sigma_det='5', flim='1.1', iter='3', sig_g
 		result = []
 		if cpus>1:
 			fine=out.convolveGaussImg(sigma_x, sigma_y)
-			fine_norm = old_div(out,fine)
+			fine_norm = out / fine
 			select_neg = fine_norm<0
 			fine_norm.setData(data=0, select=select_neg)
 			pool = Pool(cpus)
@@ -378,11 +378,11 @@ def LACosmic_py3d(image,  out_image,  sigma_det='5', flim='1.1', iter='3', sig_g
 			select_neg = conv<0
 			conv.setData(data=0, select=select_neg)  # replace all negative values with 0
 			Lap = conv.rebin(2, 2) # rebin the data to original resolution
-			S = old_div(Lap,(noise*4)) # normalize Laplacian image by the noise
+			S = Lap / noise*4 # normalize Laplacian image by the noise
 			S_prime = S-S.medianImg((err_box_y, err_box_x)) # cleaning of the normalized Laplacian image
 			fine=out.convolveGaussImg(sigma_x, sigma_y) # convolve image with a 2D Gaussian
 			# fine.writeFitsData('s_prime.fits')
-			fine_norm = old_div(out,fine)
+			fine_norm = out / fine
 			select_neg = fine_norm<0
 			fine_norm.setData(data=0, select=select_neg)
 			sub_norm = fine_norm.subsampleImg() # subsample image
@@ -526,6 +526,7 @@ def findPeaksAuto_py3d(image, out_peaks_file, nfibers,  disp_axis='X', threshold
 	if verbose==1:
 		# control plot for the peaks NEED TO BE REPLACE BY A PROPER VERSION AND POSSIBLE IMPLEMENTAION FOR A GUI
 		print('%i Fibers found'%(len(centers)))
+		pylab.figure(figsize=(20,7))
 		pylab.plot(cut._data, '-k')
 		pylab.plot(peaks[0],peaks[2] ,'or')
 		pylab.plot(centers, numpy.ones(len(centers))*4000.0, 'xg')
@@ -1668,9 +1669,9 @@ def testres_py3d(image, trace, fwhm, flux):
 			pylab.show()
 
 	hdu = pyfits.PrimaryHDU(img._data-out)
-	hdu.writeto('res.fits', clobber=True)
+	hdu.writeto('res.fits', overwrite=True)
 	hdu = pyfits.PrimaryHDU(out)
-	hdu.writeto('fit.fits', clobber=True)
+	hdu.writeto('fit.fits', overwrite=True)
 
 	hdu = pyfits.PrimaryHDU(old_div((img._data-out),img._data))
-	hdu.writeto('res_rel.fits', clobber=True)
+	hdu.writeto('res_rel.fits', overwrite=True)

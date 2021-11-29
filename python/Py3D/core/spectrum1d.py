@@ -21,7 +21,7 @@ class Spectrum1D(object):
     def __init__(self, wave=None, data=None, error=None, mask=None, inst_fwhm=None):
         self._wave = wave
         self._data = data
-        if data!=None:
+        if data is not None:
             self._dim = self._data.shape[0]
             self._pixels = numpy.arange(self._dim)
         self._error = error
@@ -33,27 +33,27 @@ class Spectrum1D(object):
             data = numpy.zeros_like(self._data)
             select_zero = self._data==0
             data = self._data-other._data
-            if self._mask!=None and other._mask!=None:
+            if self._mask is not None and other._mask is not None:
                 mask = numpy.logical_or(self._mask, other._mask)
                 select_zero = numpy.logical_and(select_zero, mask)
                 data[select_zero]=0
-            elif self._mask==None and other._mask!=None:
+            elif self._mask is None and other._mask is not None:
                 mask = other._mask
-            elif self._mask!=None and other._mask==None:
+            elif self._mask is not None and other._mask is None:
                 mask= self._mask
                 select_zero = numpy.logical_and(select_zero, mask)
                 data[select_zero]=0
             else:
                 mask =None
-            if self._error!=None and other._error!=None:
+            if self._error is not None and other._error is not None:
                 error=numpy.sqrt(self._error**2+other._error**2)
-            elif self._error!=None:
+            elif self._error is not None:
                 error = self._error
             else:
                 error = None
             if data.dtype==numpy.float64 or data.dtype==numpy.dtype('>f8'):
                 data=data.astype(numpy.float32)
-            if error!=None:
+            if error is not None:
                 if (error.dtype==numpy.float64 or error.dtype==numpy.dtype('>f8')):
                     error=error.astype(numpy.float32)
             spec = Spectrum1D(wave=self._wave, data = data,  error = error,  mask=mask)
@@ -62,14 +62,14 @@ class Spectrum1D(object):
 
         elif isinstance(other,  numpy.ndarray):
             data = self._data - other
-            if self._error !=None:
+            if self._error  is not None:
                 error = self._error
             else:
                 error = None
             mask = self._mask
             if data.dtype==numpy.float64 or data.dtype==numpy.dtype('>f8'):
                 data=data.astype(numpy.float32)
-            if error!=None:
+            if error is not None:
                 if error.dtype==numpy.float64 or error.dtype==numpy.dtype('>f8'):
                     error=error.astype(numpy.float32)
             spec = Spectrum1D(wave=self._wave, data = data,  error = error,  mask=mask)
@@ -78,14 +78,14 @@ class Spectrum1D(object):
             # try to do addtion for other types, e.g. float, int, etc.
             try:
                 data = self._data - other
-                if self._error != None:
+                if self._error is not None:
                     error = self._error
                 else:
                     error = None
                 mask = self._mask
                 if data.dtype==numpy.float64 or data.dtype==numpy.dtype('>f8'):
                     data=data.astype(numpy.float32)
-                if error!=None:
+                if error is not None:
                     if error.dtype==numpy.float64 or error.dtype==numpy.dtype('>f8'):
                         error=error.astype(numpy.float32)
                 spec = Spectrum1D(wave=self._wave, data = data,  error = error,  mask=mask)
@@ -100,27 +100,27 @@ class Spectrum1D(object):
             data = numpy.zeros_like(self._data)
             select_zero = self._data==0
             data = self._data+other._data
-            if self._mask!=None and other._mask!=None:
+            if self._mask is not None and other._mask is not None:
                 mask = numpy.logical_or(self._mask, other._mask)
                 select_zero = numpy.logical_and(select_zero, mask)
                 data[select_zero]=0
-            elif self._mask==None and other._mask!=None:
+            elif self._mask is None and other._mask is not None:
                 mask = other._mask
-            elif self._mask!=None and other._mask==None:
+            elif self._mask is not None and other._mask is None:
                 mask= self._mask
                 select_zero = numpy.logical_and(select_zero, mask)
                 data[select_zero]=0
             else:
                 mask =None
-            if self._error!=None and other._error!=None:
+            if self._error is not None and other._error is not None:
                 error=numpy.sqrt(self._error**2+other._error**2)
-            elif self._error!=None:
+            elif self._error is not None:
                 error = self._error
             else:
                 error = None
             if data.dtype==numpy.float64 or data.dtype==numpy.dtype('>f8'):
                 data=data.astype(numpy.float32)
-            if error!=None:
+            if error is not None:
                 if error.dtype==numpy.float64 or error.dtype==numpy.dtype('>f8'):
                     error=error.astype(numpy.float32)
             spec = Spectrum1D(wave=self._wave, data = data,  error = error,  mask=mask)
@@ -129,14 +129,14 @@ class Spectrum1D(object):
 
         elif isinstance(other,  numpy.ndarray):
             data = self._data + other
-            if self._error !=None:
+            if self._error  is not None:
                 error = self._error
             else:
                 error = None
             mask = self._mask
             if data.dtype==numpy.float64 or data.dtype==numpy.dtype('>f8'):
                 data=data.astype(numpy.float32)
-            if error!=None:
+            if error is not None:
                 if error.dtype==numpy.float64 or error.dtype==numpy.dtype('>f8'):
                     error=error.astype(numpy.float32)
             spec = Spectrum1D(wave=self._wave, data = data,  error = error,  mask=mask)
@@ -145,14 +145,14 @@ class Spectrum1D(object):
             # try to do addtion for other types, e.g. float, int, etc.
             try:
                 data = self._data + other
-                if self._error != None:
+                if self._error is not None:
                     error = self._error
                 else:
                     error = None
                 mask = self._mask
                 if data.dtype==numpy.float64 or data.dtype==numpy.dtype('>f8'):
                     data=data.astype(numpy.float32)
-                if error!=None:
+                if error is not None:
                     if error.dtype==numpy.float64 or error.dtype==numpy.dtype('>f8'):
                         error=error.astype(numpy.float32)
                 spec = Spectrum1D(wave=self._wave, data = data,  error = error,  mask=mask)
@@ -161,7 +161,7 @@ class Spectrum1D(object):
                 #raise exception if the type are not matching in general
                 raise TypeError("unsupported operand type(s) for -: %s and %s"%(str(type(self)).split("'")[1], str(type(other)).split("'")[1]))
 
-    def __div__(self, other):
+    def __truediv__(self, other):
 
         if isinstance(other, Spectrum1D):
             other._data=other._data.astype(numpy.float32)
@@ -170,19 +170,19 @@ class Spectrum1D(object):
             if numpy.sum(select)>0:
                 data[select] = old_div(self._data[select],other._data[select].astype(numpy.float32))
 
-            if self._mask!=None and other._mask!=None:
+            if self._mask is not None and other._mask is not None:
                 mask = numpy.logical_or(self._mask, other._mask)
-            elif self._mask==None and other._mask!=None:
+            elif self._mask is None and other._mask is not None:
                 mask = other._mask
-            elif self._mask!=None and other._mask==None:
+            elif self._mask is not None and other._mask is None:
                 mask= self._mask
             else:
                 mask =None
-            if self._error!=None and other._error!=None:
+            if self._error is not None and other._error is not None:
                 error = numpy.zeros_like(self._error)
                 if numpy.sum(select)>0:
                     error[select]=numpy.sqrt((old_div(self._error[select],other._data[select]))**2+(old_div(self._data[select]*other._error[select],other._data[select]**2))**2)
-            elif self._error!=None:
+            elif self._error is not None:
                 error = numpy.zeros_like(self._error)
                 if numpy.sum(select)>0:
                     error[select] = old_div(self._error[select],other._data[select])
@@ -191,7 +191,7 @@ class Spectrum1D(object):
                 error = None
             if data.dtype==numpy.float64 or data.dtype==numpy.dtype('>f8'):
                 data=data.astype(numpy.float32)
-            if error!=None:
+            if error is not None:
                 if error.dtype==numpy.float64 or error.dtype==numpy.dtype('>f8'):
                     error=error.astype(numpy.float32)
             spec = Spectrum1D(wave=self._wave, data = data,  error = error,  mask=mask)
@@ -200,23 +200,23 @@ class Spectrum1D(object):
         elif isinstance(other,  numpy.ndarray):
             if other!=0:
                 data = old_div(self._data, other)
-                if self._error !=None:
+                if self._error  is not None:
                     error = old_div(self._error, other)
                 else:
                     error = None
                 mask = self._mask
             else:
                 data = numpy.zeros_like(self._data)
-                if self._error!=None:
+                if self._error is not None:
                     error = numpy.zeros_like(self._data)
-                if self._mask!=None:
+                if self._mask is not None:
                     mask = numpy.zeros(self._data.shape[0], dtype="bool")
                 else:
                     mask = None
 
             if data.dtype==numpy.float64 or data.dtype==numpy.dtype('>f8'):
                 data=data.astype(numpy.float32)
-            if error!=None:
+            if error is not None:
                 if error.dtype==numpy.float64 or error.dtype==numpy.dtype('>f8'):
                     error=error.astype(numpy.float32)
             spec = Spectrum1D(wave=self._wave, data = data,  error = error,  mask=mask)
@@ -226,24 +226,24 @@ class Spectrum1D(object):
             try:
                 if other!=0.0:
                     data = old_div(self._data,other)
-                    if self._error != None:
+                    if self._error is not None:
                         error = old_div(self._error, other)
                     else:
                         error = None
                     mask = self._mask
                 else:
                     data = numpy.zeros_like(self._data)
-                    if self._error!=None:
+                    if self._error is not None:
                         error = numpy.zeros_like(self._data)
                     else:
                         error = None
-                    if self._mask!=None:
+                    if self._mask is not None:
                         mask = numpy.zeros(self._data.shape[0], dtype='bool')
                     else:
                         mask=None
                 if data.dtype==numpy.float64 or data.dtype==numpy.dtype('>f8'):
                     data=data.astype(numpy.float32)
-                if error!=None:
+                if error is not None:
                     if error.dtype==numpy.float64 or error.dtype==numpy.dtype('>f8'):
                         error=error.astype(numpy.float32)
                 spec = Spectrum1D(wave=self._wave, data = data,  error = error,  mask=mask)
@@ -251,7 +251,6 @@ class Spectrum1D(object):
             except:
                 #raise exception if the type are not matching in general
                 raise TypeError("unsupported operand type(s) for /: %s and %s"%(str(type(self)).split("'")[1], str(type(other)).split("'")[1]))
-
 
     def __rdiv__(self, other):
 
@@ -262,19 +261,19 @@ class Spectrum1D(object):
             if numpy.sum(select)>0:
                 data[select] = old_div(other._data[select].astype(numpy.float32),self._data[select])
 
-            if self._mask!=None and other._mask!=None:
+            if self._mask is not None and other._mask is not None:
                 mask = numpy.logical_or(self._mask, other._mask)
-            elif self._mask==None and other._mask!=None:
+            elif self._mask is None and other._mask is not None:
                 mask = other._mask
-            elif self._mask!=None and other._mask==None:
+            elif self._mask is not None and other._mask is None:
                 mask= self._mask
             else:
                 mask =None
-            if self._error!=None and other._error!=None:
+            if self._error is not None and other._error is not None:
                 error = numpy.zeros_like(self._error)
                 if numpy.sum(select)>0:
                     error[select]=numpy.sqrt((old_div(other._error[select],self._data[select]))**2+(old_div(other._data[select]*self._error[select],self._data[select]**2))**2)
-            elif self._error!=None:
+            elif self._error is not None:
                 error = numpy.zeros_like(self._error)
                 if numpy.sum(select)>0:
                     error[select] = old_div(other._error[select],self._data[select])
@@ -283,7 +282,7 @@ class Spectrum1D(object):
                 error = None
             if data.dtype==numpy.float64 or data.dtype==numpy.dtype('>f8'):
                 data=data.astype(numpy.float32)
-            if error!=None:
+            if error is not None:
                 if error.dtype==numpy.float64 or error.dtype==numpy.dtype('>f8'):
                     error= error.astype(numpy.float32)
             spec = Spectrum1D(wave=self._wave, data = data,  error = error,  mask=mask)
@@ -294,7 +293,7 @@ class Spectrum1D(object):
             data = numpy.zeros_like(self._data)
             if numpy.sum(select)>0:
                 data[select] = old_div(other[select], self._data[select])
-                if self._error !=None:
+                if self._error  is not None:
                     error = numpy.zeros_like(self._error)
                     if numpy.sum(select)>0:
                         error[select] = old_div(other[select] *self._error[select],self._data[select]**2)
@@ -305,16 +304,16 @@ class Spectrum1D(object):
                 mask = self._mask
             else:
                 data = numpy.zeros_like(self._data)
-                if self._error!=None:
+                if self._error is not None:
                     error = numpy.zeros_like(self._data)
-                if self._mask!=None:
+                if self._mask is not None:
                     mask = numpy.zeros(self._data.shape[0], dtype="bool")
                 else:
                     mask = None
 
             if data.dtype==numpy.float64 or data.dtype==numpy.dtype('>f8'):
                 data=data.astype(numpy.float32)
-            if error!=None:
+            if error is not None:
                 if error.dtype==numpy.float64 or error.dtype==numpy.dtype('>f8'):
                     error= error.astype(numpy.float32)
             spec = Spectrum1D(wave=self._wave, data = data,  error = error,  mask=mask)
@@ -326,7 +325,7 @@ class Spectrum1D(object):
                 data = numpy.zeros_like(self._data)
                 if numpy.sum(select)>0:
                     data[select] = old_div(other, self._data[select])
-                    if self._error != None:
+                    if self._error is not None:
                         error = numpy.zeros_like(self._error)
                         if numpy.sum(select)>0:
                             error[select] = old_div(other *self._error[select],self._data[select]**2)
@@ -337,18 +336,18 @@ class Spectrum1D(object):
                     mask = self._mask
                 else:
                     data = numpy.zeros_like(self._data)
-                    if self._error!=None:
+                    if self._error is not None:
                         error = numpy.zeros_like(self._data)
                     else:
                         error = None
-                    if self._mask!=None:
+                    if self._mask is not None:
                         mask = numpy.zeros(self._data.shape[0], dtype='bool')
                     else:
                         mask=None
 
                 if data.dtype==numpy.float64 or data.dtype==numpy.dtype('>f8'):
                     data=data.astype(numpy.float32)
-                if error!=None:
+                if error is not None:
                     if error.dtype==numpy.float64 or error.dtype==numpy.dtype('>f8'):
                         error=error.astype(numpy.float32)
                 spec = Spectrum1D(wave=self._wave, data = data,  error = error,  mask=mask)
@@ -364,23 +363,23 @@ class Spectrum1D(object):
             other._data.astype(numpy.float32)
             data = self._data*other._data.astype(numpy.float32)
 
-            if self._mask!=None and other._mask!=None:
+            if self._mask is not None and other._mask is not None:
                 mask = numpy.logical_or(self._mask, other._mask)
-            elif self._mask==None and other._mask!=None:
+            elif self._mask is None and other._mask is not None:
                 mask = other._mask
-            elif self._mask!=None and other._mask==None:
+            elif self._mask is not None and other._mask is None:
                 mask= self._mask
             else:
                 mask =None
-            if self._error!=None and other._error!=None:
+            if self._error is not None and other._error is not None:
                 error=numpy.sqrt((self._error*other._data+self._data*other._error)**2)
-            elif self._error!=None and other._error==None:
+            elif self._error is not None and other._error is None:
                 error = self._error*other._data
             else:
                 error = None
             if data.dtype==numpy.float64 or data.dtype==numpy.dtype('>f8'):
                 data=data.astype(numpy.float32)
-            if error!=None:
+            if error is not None:
                if error.dtype==numpy.float64 or error.dtype==numpy.dtype('>f8'):
                     error=error.astype(numpy.float32)
             spec = Spectrum1D(wave=self._wave, data = data,  error = error,  mask=mask)
@@ -390,22 +389,22 @@ class Spectrum1D(object):
         elif isinstance(other,  numpy.ndarray):
             if other!=0:
                 data = self._data * other
-                if self._error !=None:
+                if self._error  is not None:
                     error = self._error * other
                 else:
                     error = None
                 mask = self._mask
             else:
                 data = numpy.zeros_like(self._data)
-                if self._error!=None:
+                if self._error is not None:
                     error = numpy.zeros_like(self._data)
-                if self._mask!=None:
+                if self._mask is not None:
                     mask = numpy.zeros(self._data.shape[0], dtype="bool")
                 else:
                     mask = None
             if data.dtype==numpy.float64 or data.dtype==numpy.dtype('>f8'):
                 data=data.astype(numpy.float32)
-            if error!=None:
+            if error is not None:
                 if error.dtype==numpy.float64 or error.dtype==numpy.dtype('>f8'):
                     error=error.astype(numpy.float32)
             spec = Spectrum1D(wave=self._wave, data = data,  error = error,  mask=mask)
@@ -414,7 +413,7 @@ class Spectrum1D(object):
             # try to do addtion for other types, e.g. float, int, etc.
           #  try:
                 data = self._data*other
-                if self._error != None:
+                if self._error is not None:
                     error = self._error * other
                     if error.dtype==numpy.float64 or error.dtype==numpy.dtype('>f8'):
                         error.astype(numpy.float32)
@@ -429,7 +428,7 @@ class Spectrum1D(object):
 
     def __pow__(self, other):
                 data = self._data**other
-                if self._error != None:
+                if self._error is not None:
                     error = 1.0/float(other)*self._data**(other-1)*self._error
                 else:
                     error = None
@@ -492,7 +491,7 @@ class Spectrum1D(object):
         """
 
         hdu = pyfits.open(file)
-        if extension_data==None and extension_mask==None and extension_error==None and extension_wave==None and extension_fwhm==None:
+        if extension_data is None and extension_mask is None and extension_error is None and extension_wave is None and extension_fwhm is None:
                 self._data = hdu[0].data
                 hdr = hdu[0].header
                 self._dim = self._data.shape[0] # set shape
@@ -508,23 +507,23 @@ class Spectrum1D(object):
                             self._wave = hdu[i].data
                         elif hdu[i].header['EXTNAME'].split()[0]=='INSTFWHM':
                             self._inst_fwhm = hdu[i].data
-                if self._wave==None:
+                if self._wave is None:
                     self._wave = self._pixels*hdr['cdelt1']+hdr['crval1']
         else:
-            if extension_data!=None:
+            if extension_data is not None:
                 self._data = hdu[extension_data].data
 
-            if extension_mask!=None:
+            if extension_mask is not None:
                 self._mask = hdu[extension_mask].data
-            if extension_error!=None:
+            if extension_error is not None:
                 self._error = hdu[extension_error].data
-            if extension_wave!=None:
+            if extension_wave is not None:
                 self._wave = hdu[extension_wave].data
-            if extension_fwhm!=None:
+            if extension_fwhm is not None:
                 self._inst_fwhm = hdu[extension_fwhm].data
         hdu.close()
 
-        if extension_hdr!=None:
+        if extension_hdr is not None:
             self.setHeader(hdu[extension_hdr].header, origin=file)
 
     def writeFitsData(self, filename, extension_data=None, extension_mask=None,  extension_error=None, extension_wave=None, extension_fwhm=None):
@@ -550,44 +549,44 @@ class Spectrum1D(object):
 
         # create primary hdus and image hdus
         # data hdu
-        if extension_data==None and extension_error==None and extension_mask==None:
+        if extension_data is None and extension_error is None and extension_mask is None:
             hdus[0] = pyfits.PrimaryHDU(self._data)
-            if self._wave!=None:
+            if self._wave is not None:
                 hdus[1] = pyfits.ImageHDU(self._wave, name='WAVE')
-            if self._inst_fwhm!=None:
+            if self._inst_fwhm is not None:
                 hdus[2] = pyfits.ImageHDU(self._inst_fwhm, name='INSTFWHM')
-            if self._error!=None:
+            if self._error is not None:
                 hdus[3] = pyfits.ImageHDU(self._error, name='ERROR')
-            if self._mask!=None:
+            if self._mask is not None:
                 hdus[4] = pyfits.ImageHDU(self._mask.astype('uint8'), name='BADPIX')
         else:
             if extension_data == 0:
                 hdus[0] = pyfits.PrimaryHDU(self._data)
-            elif extension_data>0 and extension_data!=None:
+            elif extension_data>0 and extension_data is not None:
                 hdus[extension_data] = pyfits.ImageHDU(self._data, name='DATA')
 
             # wavelength hdu
             if extension_wave == 0:
                 hdu = pyfits.PrimaryHDU(self._wave)
-            elif extension_wave>0 and extension_wave!=None:
+            elif extension_wave>0 and extension_wave is not None:
                 hdus[extension_wave] = pyfits.ImageHDU(self._wave, name='WAVE')
 
             # instrumental FWHM hdu
             if extension_fwhm == 0:
                 hdu = pyfits.PrimaryHDU(self._inst_fwhm)
-            elif extension_fwhm>0 and extension_fwhm!=None:
+            elif extension_fwhm>0 and extension_fwhm is not None:
                 hdus[extension_fwhm] = pyfits.ImageHDU(self._inst_fwhm, name='INSTFWHM')
 
             # mask hdu
             if extension_mask == 0:
                 hdu = pyfits.PrimaryHDU(self._mask.astype('uint8'))
-            elif extension_mask>0 and extension_mask!=None:
+            elif extension_mask>0 and extension_mask is not None:
                 hdus[extension_mask] = pyfits.ImageHDU(self._mask.astype('uint8'), name='BADPIX')
 
             # error hdu
             if extension_error == 0:
                 hdu = pyfits.PrimaryHDU(self._error)
-            elif extension_error>0 and extension_error!=None:
+            elif extension_error>0 and extension_error is not None:
                 hdus[extension_error] = pyfits.ImageHDU(self._error, name='ERROR')
 
         # remove not used hdus
@@ -599,7 +598,7 @@ class Spectrum1D(object):
 
         if len(hdus)>0:
             hdu = pyfits.HDUList(hdus) # create an HDUList object
-        hdu.writeto(filename, clobber=True) # write FITS file to disc
+        hdu.writeto(filename, overwrite=True) # write FITS file to disc
 
     def writeTxtData(self, filename):
         out = open(filename, 'w')
@@ -714,20 +713,20 @@ class Spectrum1D(object):
         if self._wave[-1]<self._wave[0]:
             self._wave=numpy.flipud(self._wave)
             self._data = numpy.flipud(self._data)
-            if self._error!=None:
+            if self._error is not None:
                 self._error = numpy.flipud(self._error)
-            if self._mask!=None:
+            if self._mask is not None:
                 self._mask = numpy.flipud(self._mask)
-        if self._mask!=None and numpy.sum(self._mask)==self._dim:
+        if self._mask is not None and numpy.sum(self._mask)==self._dim:
             new_mask = numpy.ones(len(ref_wave), dtype='bool')
             new_data =  numpy.zeros(len(ref_wave), numpy.float32)
-            if self._error==None or err_sim==0:
+            if self._error is None or err_sim==0:
                 new_error=None
             else:
                 new_error = numpy.ones(len(ref_wave), numpy.float32)*replace_error
         else:
             # replace bad pixels within the spectrum with linear interpolated values
-            if  self._mask!=None:
+            if  self._mask is not None:
                 good_pix = numpy.logical_not(self._mask)
                 intp = interpolate.UnivariateSpline(self._wave[good_pix], self._data[good_pix], k=1, s=0)
                 clean_data = intp(self._wave)
@@ -753,12 +752,12 @@ class Spectrum1D(object):
 
             select_not = numpy.logical_not(select)
             # replace the error of bad pixels within the spectrum to temporarily to zero  for the Monte Carlo simulation
-            if self._mask!=None:
+            if self._mask is not None:
                 select_goodpix=numpy.logical_not(self._mask)
             else:
                 select_goodpix=numpy.ones(self._dim, dtype='bool')
 
-            if self._error!=None and err_sim>0:
+            if self._error is not None and err_sim>0:
                 replace_pix = numpy.logical_and(self._mask, clean_data!=0.0)
                 self._error[replace_pix]=1e-20
                 #select_goodpix = numpy.logical_and(select_goodpix, self._data!=0.0)
@@ -780,7 +779,7 @@ class Spectrum1D(object):
                     sim[i, select_not] = out[select_not]
                 new_error = numpy.std(sim, 0)
 
-            if self._mask!=None:
+            if self._mask is not None:
                 badpix=numpy.zeros(ref_wave.shape[0], dtype='bool')
                 indices = numpy.arange(self._wave.shape[0])
                 nbadpix = numpy.sum(self._mask)
@@ -796,7 +795,7 @@ class Spectrum1D(object):
                         badpix = numpy.logical_or(badpix, select_bad)
                 badpix = numpy.logical_or(badpix, numpy.logical_or(ref_wave<self._wave[0], ref_wave>self._wave[-1]))
 
-                if self._error!=None and err_sim>0:
+                if self._error is not None and err_sim>0:
         #        new_mask = numpy.logical_and(badpix, new_error>0)
                     new_mask=badpix
                     new_error[new_mask] = replace_error
@@ -807,7 +806,7 @@ class Spectrum1D(object):
     #        new_data[badpix]=fill_value
      #           print numpy.sum(self._mask), numpy.sum(new_mask)
 
-            if self._error==None or err_sim==0:
+            if self._error is None or err_sim==0:
                 new_error=None
        # if numpy.isnan(new_data[10])==True:
         #    pylab.plot(self._wave[select_interp],'-k')
@@ -816,13 +815,13 @@ class Spectrum1D(object):
         return spec_out
 
     def matchFWHM(self, target_FWHM):
-        if self._inst_fwhm!=None:
-            if self._mask!=None:
+        if self._inst_fwhm is not None:
+            if self._mask is not None:
                 good_pix = numpy.logical_not(self._mask)
                 data = self._data[good_pix]
                 wave = self._wave[good_pix]
                 fwhm = self._inst_fwhm[good_pix]
-                if self._error!=None:
+                if self._error is not None:
                     error = self._error[good_pix]
                 else:
                     error = None
@@ -838,12 +837,12 @@ class Spectrum1D(object):
             kernel=old_div(numpy.exp(-0.5*(old_div((wave[:, numpy.newaxis]-wave[numpy.newaxis, :]),gauss_sig[numpy.newaxis, :]))**2),(fact*gauss_sig[numpy.newaxis, :]))
             multiplied = data[:, numpy.newaxis]*kernel
             new_data = old_div(numpy.sum(multiplied, axis=0),numpy.sum(kernel, 0))
-            if self._mask!=None:
+            if self._mask is not None:
                 self._data[good_pix] = new_data
                 self._inst_fwhm[:] = target_FWHM
-            if error!=None:
+            if error is not None:
                 new_error = old_div(numpy.sqrt(numpy.sum((error[:, numpy.newaxis]*kernel)**2, axis=0)),numpy.sum(kernel, 0))
-                if self._mask!=None:
+                if self._mask is not None:
                     self._error[good_pix] = new_error
                 else:
                     self._error = new_error
@@ -854,13 +853,13 @@ class Spectrum1D(object):
         new_disp = numpy.insert(new_disp, 0, new_disp[0])
         data_out = numpy.zeros(len(new_wave), dtype=numpy.float32)
         mask_out = numpy.zeros(len(new_wave), dtype="bool")
-        if self._mask != None:
+        if self._mask is not None:
             mask_in = numpy.logical_and(self._mask)
         else:
             mask_in = numpy.ones(len(self._wave), dtype="bool")
         masked_data = self._wave[mask_in]
         masked_wave = self._wave[mask_in]
-        if self._error != None:
+        if self._error is not None:
             error_out = numpy.zeros(len(new_wave), dtype=numpy.float32)
             masked_error = self._error[mask_in]
         else:
@@ -874,7 +873,7 @@ class Spectrum1D(object):
             if numpy.sum(select) > 0:
 #                data_out[i] = numpy.mean(self._data[mask_in][select])
                 data_out[i] = old_div(numpy.sum(numpy.abs(masked_wave[select]-new_wave[i])*self._data[mask_in][select]),numpy.sum(numpy.abs(masked_wave[select]-new_wave[i])))
-                if self._error != None:
+                if self._error is not None:
                     error_out[i] = numpy.sqrt(old_div(numpy.sum(masked_error[select]**2),numpy.sum(select)**2))
             else:
                 data_out[i] = 0.0
@@ -914,7 +913,7 @@ class Spectrum1D(object):
 
     def smoothGaussVariable(self, fwhm):
         fact = numpy.sqrt(2.*numpy.pi)
-        if self._mask!=None:
+        if self._mask is not None:
             mask = numpy.logical_not(self._mask)
         else:
             mask = numpy.ones(self._data.shape[0], dtype="bool")
@@ -929,7 +928,7 @@ class Spectrum1D(object):
         GaussKernels = old_div(1.0*numpy.exp(-0.5*(old_div((self._wave[mask][:, numpy.newaxis]-self._wave[mask][numpy.newaxis, :]),numpy.abs(fwhm[mask][numpy.newaxis, :]/2.354)))**2),(fact*numpy.abs(fwhm[mask][numpy.newaxis, :]/2.354)))
         data[mask] = old_div(numpy.sum(self._data[mask][:, numpy.newaxis]*GaussKernels, 0),numpy.sum(GaussKernels, 0))
 
-        if self._error!=None:
+        if self._error is not None:
             error = numpy.zeros_like(self._error)
             error[:] = self._error
             error[mask]=old_div(numpy.sqrt(numpy.sum((self._error[mask]*GaussKernels)**2, 0)),numpy.sum(GaussKernels, 0))
@@ -944,30 +943,30 @@ class Spectrum1D(object):
         return spec
 
     def smoothPoly(self, order=-5, start_wave=None, end_wave=None, ref_base=None):
-        if self._mask!=None:
+        if self._mask is not None:
             mask=numpy.logical_not(self._mask)
         else:
             mask=numpy.ones(self._dim, dtype='bool')
-        if start_wave!=None:
+        if start_wave is not None:
             mask = numpy.logical_and(mask, self._wave>=start_wave)
-        if end_wave!=None:
+        if end_wave is not None:
             mask = numpy.logical_and(mask, self._wave<=end_wave)
         mask = numpy.logical_and(mask,numpy.logical_not(numpy.isnan(self._data)))
         if numpy.sum(mask)>numpy.fabs(order):
             if order>=0:
                 fit_poly = numpy.polyfit(self._wave[mask], self._data[mask], order) # fit the spectrum with a normal polynomial
-                if ref_base==None:
+                if ref_base is None:
                     self._data  = numpy.polyval(fit_poly, self._wave)  # replace data with the modelled polynomial
                 else:
                     self._data = numpy.polyval(fit_poly, ref_base)
                     self._wave = ref_base
                     self._dim = len(ref_base)
                     self._pixels = numpy.arange(self._dim)
-                    if self._mask!=None:
+                    if self._mask is not None:
                         mask=numpy.zeros(self._dim, dtype='bool')
                 out_par = fit_poly
             elif order<0:
-                if ref_base==None:
+                if ref_base is None:
                     legandre_fit = fit_profile.LegandrePoly(numpy.zeros(-1*order+1), min_x=self._wave[0], max_x=self._wave[-1]) #initialize a legandre polynom
                     legandre_fit.fit(self._wave[mask], self._data[mask]) # fit the data by the polynomial
 
@@ -982,7 +981,7 @@ class Spectrum1D(object):
                 out_par = legandre_fit._coeff
         else:
             self._data[:] = 0
-            if self._mask!=None:
+            if self._mask is not None:
 	            self._mask[:]=True
             out_par=0
         return out_par
@@ -1021,7 +1020,7 @@ class Spectrum1D(object):
         if numpy.sum(doubles)>0:
             double_idx = idx[doubles]
             self._data[double_idx]+=add_doubles
-        if self._mask!=None:
+        if self._mask is not None:
             data = self._data[numpy.logical_not(self._mask)]
             wave = self._wave[numpy.logical_not(self._mask)]
             pixels = self._pixels[numpy.logical_not(self._mask)]
@@ -1180,7 +1179,7 @@ class Spectrum1D(object):
             # modell each block of peaks with Gaussians with and without associate errors
             par = numpy.insert(flux.astype(numpy.float64), 0, init_fwhm/2.354) #set initial paramters
             gaussians_fix_width = fit_profile.Gaussians_width(par, pos_block) # define profile with initial paramter
-            if self._error!=None:
+            if self._error is not None:
                 gaussians_fix_width.fit(self._wave[lo:hi], self._data[lo:hi], sigma=self._error[lo:hi], maxfev=1000, xtol=1e-4, ftol=1e-4) # fit with errors
             else:
                 gaussians_fix_width.fit(self._wave[lo:hi], self._data[lo:hi], maxfev=1000, xtol=1e-4, ftol=1e-4) # fit without errors
@@ -1192,7 +1191,7 @@ class Spectrum1D(object):
             fwhm[brackets[i]:brackets[i+1]] = fit_par[0]*2.354 # convert Gaussian sigma to FWHM
 
             # create the bad pixel mask
-            if threshold_flux!=None:
+            if threshold_flux is not None:
                 masked = numpy.logical_or(numpy.sum(fit_par[1:]<0)>0, numpy.sum(fit_par[1:]>threshold_flux)<0.2*len(fit_par[1:]))
                 mask[brackets[i]:brackets[i+1]]  = masked
             else:
@@ -1209,7 +1208,7 @@ class Spectrum1D(object):
         """
         # create empty fwhm and mask arrays
         fibers = len(pos)
-        if mask==None:
+        if mask is None:
             good = numpy.ones(fibers, dtype='bool') & (pos<=(self._data.shape[0]-1))
         else:
             good = numpy.logical_not(mask) & (pos<=(self._data.shape[0]-1))
@@ -1240,7 +1239,7 @@ class Spectrum1D(object):
                 par = numpy.insert(flux.astype(numpy.float64), 0, init_fwhm/2.354) #set initial paramters
                 par = numpy.append(par, init_offset) #set initial paramters
                 gaussians_offset = fit_profile.Gaussians_offset(par, pos_block[pos_mask]) # define profile with initial paramters
-                if self._error!=None:
+                if self._error is not None:
                     gaussians_offset.fit(self._wave[lo:hi], self._data[lo:hi], sigma=self._error[lo:hi], maxfev=4000, xtol=1e-8, ftol=1e-8) # fit with errors
                 else:
                     gaussians_offset.fit(self._wave[lo:hi], self._data[lo:hi], maxfev=4000, xtol=1e-8, ftol=1e-8) # fit without errors
@@ -1258,7 +1257,7 @@ class Spectrum1D(object):
 
     def measureOffsetPeaks2(self, pos, mask, fwhm, nblocks, min_offset, max_offset, step_offset,plot=0):
         fibers = len(pos)
-        if mask==None:
+        if mask is None:
             good = numpy.ones(fibers, dtype='bool') & (pos<=(self._data.shape[0]-1))
         else:
             good = numpy.logical_not(mask) & (pos<=(self._data.shape[0]-1))
@@ -1311,7 +1310,7 @@ class Spectrum1D(object):
         flux_in = numpy.zeros(len(centres), dtype=numpy.float32)
         sig_in = numpy.ones_like(flux_in)*init_fwhm/2.354
         cent =numpy.zeros(len(centres), dtype=numpy.float32)
-        if self._error!=None:
+        if self._error is not None:
             error = self._error
         else:
             error = numpy.ones_like(self._dim, dtype=numpy.float32)
@@ -1328,13 +1327,13 @@ class Spectrum1D(object):
     def fitParFile(self, par,  err_sim=0, ftol=1e-8, xtol=1e-8,method='leastsq',parallel='auto'):
         static_par = deepcopy(par)
 
-        if self._error!=None:
+        if self._error is not None:
             sigma=self._error
         else:
             sigma=1.0
         par.fit(self._wave, self._data, sigma=sigma, err_sim=err_sim, maxfev=1000,  method=method,ftol=ftol, xtol=xtol, parallel=parallel)
         par.restoreResult()
-        if err_sim>0 and self._error!=None:
+        if err_sim>0 and self._error is not None:
             par_err = deepcopy(static_par)
             par_err._par = par._par_err
             par_err.restoreResult()
@@ -1348,11 +1347,11 @@ class Spectrum1D(object):
         cent =numpy.zeros(ncomp,  dtype=numpy.float32)
         out = numpy.zeros(3*ncomp, dtype=numpy.float32)
         back = numpy.zeros(ncomp, dtype=numpy.float32)
-        if self._error!=None:
+        if self._error is not None:
             error = self._error
         else:
             error = numpy.ones(self._dim, dtype=numpy.float32)
-        if self._mask!=None:
+        if self._mask is not None:
             mask = self._mask
         else:
             mask = numpy.zero(self._dim, dtype="bool")
@@ -1394,7 +1393,7 @@ class Spectrum1D(object):
         fibers = len(pos)
         aperture=3
         pixels = numpy.round(pos[:, numpy.newaxis]+numpy.arange(-aperture/2.0, aperture/2.0, 1.0)[numpy.newaxis, :]).astype('int')
-        if self._mask!=None:
+        if self._mask is not None:
             bad_pix = numpy.zeros(fibers,  dtype='bool')
             select=numpy.sum(pixels>=self._mask.shape[0], 1)
             nselect = numpy.logical_not(select)
@@ -1402,7 +1401,7 @@ class Spectrum1D(object):
             bad_pix[nselect] = numpy.sum(self._mask[pixels[nselect, :]], 1)==aperture
         else:
             bad_pix=None
-        if self._error==None:
+        if self._error is None:
             self._error=numpy.ones_like(self._data)
 
         fact = numpy.sqrt(2.*numpy.pi)
@@ -1413,7 +1412,7 @@ class Spectrum1D(object):
         B = sparse.csr_matrix( (A[select],(indices[0][select],indices[1][select])), shape=(self._dim,fibers) ).todense()
         out= sparse.linalg.lsqr(B, old_div(self._data,self._error), atol=1e-7, btol=1e-7, conlim=1e13)
         error = numpy.sqrt(old_div(1,numpy.sum((A**2), 0)))
-        if numpy.sum(bad_pix)>0 and bad_pix!=None:
+        if numpy.sum(bad_pix)>0 and bad_pix is not None:
             error[bad_pix]=replace_error
         if plot==True:
             pylab.plot(self._data, 'ok')
@@ -1423,22 +1422,22 @@ class Spectrum1D(object):
         return out[0], error, bad_pix
 
     def collapseSpec(self, method='mean', start=None, end=None, transmission_func=None):
-        if start!=None:
+        if start is not None:
             select_start = self._wave>=start
         else:
             select_start = numpy.ones(self._dim, dtype='bool')
-        if end!=None:
+        if end is not None:
             select_end = self._wave<=end
         else:
             select_end = numpy.ones(self._dim, dtype='bool')
         select = numpy.logical_and(select_start, select_end)
-        if self._mask!=None:
+        if self._mask is not None:
             select = numpy.logical_and(select, numpy.logical_not(self._mask))
         if method!='mean' and method!='median' and method!='sum':
             pass
         elif method=='mean':
             flux = numpy.mean(self._data[select])
-            if self._error!=None:
+            if self._error is not None:
                 error = numpy.sqrt(old_div(numpy.sum(self._error[select]**2),numpy.sum(select)**2))
             else:
                 error = 0

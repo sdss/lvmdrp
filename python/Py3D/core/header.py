@@ -75,7 +75,7 @@ class Header(object):
 		hdu = pyfits.open(f_out)
 		hdu[extension].header = self._header
 		hdu[extension].update_header()
-		hdu.writeto(f_out,clobber=True)
+		hdu.writeto(f_out,overwrite=True)
 
 	def removeHdrEntries(self, keywords=['']):
 		"""

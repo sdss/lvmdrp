@@ -149,7 +149,7 @@ class Image(Header):
 				#raise exception if the type are not matching in general
 				raise TypeError("unsupported operand type(s) for -: %s and %s"%(str(type(self)).split("'")[1], str(type(other)).split("'")[1]))
 
-	def __div__(self, other):
+	def __truediv__(self, other):
 		"""
 		Operator to divide two Images or divide by another type if possible
 		"""
@@ -712,7 +712,7 @@ class Image(Header):
 				hdu[0].header = self.getHeader() # add the primary header to the HDU
 				hdu[0].update_header()
 
-		hdu.writeto(filename, output_verify='fix', clobber=True) # write FITS file to disc
+		hdu.writeto(filename, output_verify='fix', overwrite=True) # write FITS file to disc
 
 	def computePoissonError(self, rdnoise=0.0, replace_masked=1e20):
 		image = self._data
@@ -757,8 +757,8 @@ class Image(Header):
 		# iterate over bad pixels
 		for m in range(len(y_cors)):
 			# computes the min and max pixels of the filter window in x and y
-			range_y = numpy.clip([y_cors[m]-delta_y, y_cors[m]+delta_y+1], 0, self._dim[0]-1)
-			range_x = numpy.clip([x_cors[m]-delta_x, x_cors[m]+delta_x+1], 0, self._dim[1]-1)
+			range_y = numpy.clip([y_cors[m]-delta_y, y_cors[m]+delta_y+1], 0, self._dim[0]-1).astype(int)
+			range_x = numpy.clip([x_cors[m]-delta_x, x_cors[m]+delta_x+1], 0, self._dim[1]-1).astype(int)
 			# compute the masked median within the filter window and replace data
 			select = self._mask[range_y[0]:range_y[1],range_x[0]:range_x[1]]==0
 			out_data[y_cors[m],x_cors[m]] = numpy.median(self._data[range_y[0]:range_y[1],range_x[0]:range_x[1]][select])
@@ -895,11 +895,11 @@ class Image(Header):
 			new_data = numpy.zeros(new_dim,dtype=numpy.float32)
 		else:
 			new_data = None
-		if self._error != None:
+		if self._error is not None:
 			new_error = numpy.zeros(new_dim,dtype=numpy.float32)
 		else:
 			new_error = None
-		if self._mask != None:
+		if self._mask is not None:
 			new_mask= numpy.zeros(new_dim,dtype='bool')
 		else:
 			new_mask = None
@@ -912,17 +912,17 @@ class Image(Header):
 		select3 = numpy.logical_and(indices[0]%2==0,indices[1]%2==1)
 		select4 = numpy.logical_and(indices[0]%2==0,indices[1]%2==0)
 		# set pixel for the subsampled data, error and mask
-		if self._data != None:
+		if self._data is not None:
 			new_data[select1] = self._data.flatten()
 			new_data[select2] = self._data.flatten()
 			new_data[select3] = self._data.flatten()
 			new_data[select4] = self._data.flatten()
-		if self._error != None:
+		if self._error is not None:
 			new_error[select1] = self._error.flatten()
 			new_error[select2] = self._error.flatten()
 			new_error[select3] = self._error.flatten()
 			new_error[select4] = self._error.flatten()
-		if self._mask != None:
+		if self._mask is not None:
 			new_mask[select1] = self._mask.flatten()
 			new_mask[select2] = self._mask.flatten()
 			new_mask[select3] = self._mask.flatten()
