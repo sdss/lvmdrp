@@ -3,9 +3,9 @@ from __future__ import division
 from builtins import str
 from builtins import range
 from past.utils import old_div
-from Py3D.core.header import *
-from Py3D.core.positionTable import PositionTable
-from Py3D.core.spectrum1d import Spectrum1D
+from lvmdrp.core.header import *
+from lvmdrp.core.positionTable import PositionTable
+from lvmdrp.core.spectrum1d import Spectrum1D
 from astropy.io import fits as pyfits
 import numpy, sys
 

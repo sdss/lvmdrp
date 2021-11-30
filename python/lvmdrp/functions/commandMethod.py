@@ -5,7 +5,7 @@ import re
 
 description='Provides Methods for handling pipeline related tasks'
 
-def getFileInfo_py3d(path, outfile, match_files, hdr_keys='OBJECT'):
+def getFileInfo_drp(path, outfile, match_files, hdr_keys='OBJECT'):
     dir = os.listdir(path)
     dir = sorted(dir)
     out = open(outfile, 'w')

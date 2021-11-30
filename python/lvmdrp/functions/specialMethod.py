@@ -4,15 +4,15 @@ from builtins import range
 from past.utils import old_div
 import numpy
 from scipy import stats
-from Py3D.core.rss import *
-from Py3D.core.header  import Header
-from Py3D.core.spectrum1d  import Spectrum1D
-from Py3D.core.fiberrows import FiberRows
-from Py3D.core.fit_profile import Exponential_constant
+from lvmdrp.core.rss import *
+from lvmdrp.core.header  import Header
+from lvmdrp.core.spectrum1d  import Spectrum1D
+from lvmdrp.core.fiberrows import FiberRows
+from lvmdrp.core.fit_profile import Exponential_constant
 
 description='Provides Methods for dedicated CALIFA data reduction tasks'
 
-def extinctCAVEX_py3d(file,cavex_file, time_average='2', date_key='Date', extinct_key='EXT_V', min_extinct='0.1', missing_extinct='0.2'):
+def extinctCAVEX_drp(file,cavex_file, time_average='2', date_key='Date', extinct_key='EXT_V', min_extinct='0.1', missing_extinct='0.2'):
 	"""
 			Reads the ASCII file produced by the CAVEX monitor at Calar Alto to estimate the V-band atmospheric extinction at the observing time of the target and
 			adds a header keyword to the FITS file. It averages the measurements within a given time centered at the time of observation. If this is not possible a
@@ -38,7 +38,7 @@ def extinctCAVEX_py3d(file,cavex_file, time_average='2', date_key='Date', extinc
 
 			Example
 			-----------
-			user:> Py3D special FILE.fits CAVEX.dat time_average=1.5 min_extinct=0.15
+			user:> lvmdrp special FILE.fits CAVEX.dat time_average=1.5 min_extinct=0.15
 		"""
 	time_average = float(time_average)
 	min_extinct = float(min_extinct)
@@ -130,7 +130,7 @@ def extinctCAVEX_py3d(file,cavex_file, time_average='2', date_key='Date', extinc
 	header.setHdrValue(extinct_key+'_SD', float("%.3f"%(std_av)), 'std of V-band atmospheric extinction')
 	header.writeFitsHeader()
 
-def matchMasterTrace_py3d(CALIB_trace, Master_trace, out_trace, poly_cross=-2):
+def matchMasterTrace_drp(CALIB_trace, Master_trace, out_trace, poly_cross=-2):
 	poly_cross=int(poly_cross)
 	calib_trc = loadRSS(CALIB_trace)
 	master_trc = loadRSS(Master_trace)
@@ -148,7 +148,7 @@ def matchMasterTrace_py3d(CALIB_trace, Master_trace, out_trace, poly_cross=-2):
 		master_trc._data[:, i] = master_trc._data[:, i]+spec._data
 	master_trc.writeFitsData(out_trace)
 
-def matchARCLamp_py3d(arc_rss, arc_rss_ref, disp_ref, disp_out, ref_line_file='', poly_cross='1', poly_disp='6', init_back='4.0', aperture='13', flux_min='100.0', fwhm_max='6.0', rel_flux_limits='0.1,3.0', verbose='0'):
+def matchARCLamp_drp(arc_rss, arc_rss_ref, disp_ref, disp_out, ref_line_file='', poly_cross='1', poly_disp='6', init_back='4.0', aperture='13', flux_min='100.0', fwhm_max='6.0', rel_flux_limits='0.1,3.0', verbose='0'):
 	poly_cross=int(poly_cross)
 	poly_disp = int(poly_disp)
 	flux_min=float(flux_min)
@@ -215,7 +215,7 @@ def matchARCLamp_py3d(arc_rss, arc_rss_ref, disp_ref, disp_out, ref_line_file=''
 	rss_disp.writeFitsData(disp_out)
 
 
-def checkWavelengthRSS_py3d(rss_in, line_list, out_result, ref_spec='', init_back='1.0', aperture='13', flux_min='0.2', fwhm_max='10.0', rel_flux_limits='0.1,5.0', verbose='0'):
+def checkWavelengthRSS_drp(rss_in, line_list, out_result, ref_spec='', init_back='1.0', aperture='13', flux_min='0.2', fwhm_max='10.0', rel_flux_limits='0.1,5.0', verbose='0'):
 	flux_min=float(flux_min)
 	init_back=float(init_back)
 	aperture=float(aperture)
@@ -258,7 +258,7 @@ def checkWavelengthRSS_py3d(rss_in, line_list, out_result, ref_spec='', init_bac
 		out_file.write("%s %.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f\n"%(line_name[i], line_list[i], numpy.median(cent_wave[mask_line, i])*cdelt+crval, numpy.mean(cent_wave[mask_line, i])*cdelt+crval, numpy.std(cent_wave[mask_line, i])*cdelt, numpy.median(flux[mask_line, i]),  numpy.std(flux[mask_line, i]), numpy.median(fwhm[mask_line, i])*cdelt, numpy.mean(fwhm[mask_line, i])*cdelt, numpy.std(fwhm[mask_line, i])*cdelt))
 
 
-def matchSkySpecTime_py3d(list_sky_specs, ref_object, out_spec, hdr_key_start, hdr_key_end, function='polynomial', poly_order='0', err_sim='200', time_steps='1', next_day='', plot='-1'):
+def matchSkySpecTime_drp(list_sky_specs, ref_object, out_spec, hdr_key_start, hdr_key_end, function='polynomial', poly_order='0', err_sim='200', time_steps='1', next_day='', plot='-1'):
 	sky_in = list_sky_specs.split(',')
 	time_steps=float(time_steps)
 	err_sim= int(err_sim)

@@ -3,8 +3,8 @@ from __future__ import division
 from builtins import range
 from copy import deepcopy
 
-from Py3D.core import fit_profile
-from Py3D.core.image import Image
+from lvmdrp.core import fit_profile
+from lvmdrp.core.image import Image
 
 from past.utils import old_div
 from scipy import stats
@@ -14,16 +14,16 @@ try:
   from matplotlib import pyplot as plt
 except:
   pass
-from Py3D import *
-from Py3D.external import ancillary_func
-from Py3D.core.cube import Cube, loadCube
-from Py3D.core.passband import PassBand
-from Py3D.core.rss import RSS
-from Py3D.core.spectrum1d import Spectrum1D
+from lvmdrp import *
+from lvmdrp.external import ancillary_func
+from lvmdrp.core.cube import Cube, loadCube
+from lvmdrp.core.passband import PassBand
+from lvmdrp.core.rss import RSS
+from lvmdrp.core.spectrum1d import Spectrum1D
 
 description='Provides Methods to process Cube files'
 
-def collapseSliceCube_py3d(cube_in, image_out, mode='mean', start_wave='', end_wave=''):
+def collapseSliceCube_drp(cube_in, image_out, mode='mean', start_wave='', end_wave=''):
     """
            Creates a collapsed 2D image from the data cube within given wavelength boundaries
 
@@ -45,8 +45,8 @@ def collapseSliceCube_py3d(cube_in, image_out, mode='mean', start_wave='', end_w
 
             Examples
             ----------------
-            user:> Py3D cube collapsedSliceCube CUBE.fits IMAGE.fits mode=median
-            user:> Py3D cube collapsedSliceCube CUBE.fits IMAGE.fits mean start_wave=4000.0 end_wave=7000.0
+            user:> lvmdrp cube collapsedSliceCube CUBE.fits IMAGE.fits mode=median
+            user:> lvmdrp cube collapsedSliceCube CUBE.fits IMAGE.fits mean start_wave=4000.0 end_wave=7000.0
     """
     if start_wave=='':
         start_wave=None
@@ -63,7 +63,7 @@ def collapseSliceCube_py3d(cube_in, image_out, mode='mean', start_wave='', end_w
     image.writeFitsData(image_out)
 
 
-def measureDARPeak_py3d(cube_in, out_prefix, coadd='10', steps='50', search_box='16', bary_box='6', bary_exp='4', smooth_poly='-3', start_wave='', end_wave='', clip='0.3', fibers='', figure_out='', verbose='0'):
+def measureDARPeak_drp(cube_in, out_prefix, coadd='10', steps='50', search_box='16', bary_box='6', bary_exp='4', smooth_poly='-3', start_wave='', end_wave='', clip='0.3', fibers='', figure_out='', verbose='0'):
     """
            The target position is measured by means of its bary center a long the wavelength to measure the effect of the DAR.
            The measured positions are smooth by a polynomial fit and clip to reject outliners due to night sky or object emission lines before a final
@@ -101,7 +101,7 @@ def measureDARPeak_py3d(cube_in, out_prefix, coadd='10', steps='50', search_box=
 
             Examples
             ----------------
-            user:> Py3D cube measureDARPeak CUBE.fits PREFIX coadd=5 steps=1
+            user:> lvmdrp cube measureDARPeak CUBE.fits PREFIX coadd=5 steps=1
     """
     coadd = int(coadd)
     steps=int(steps)
@@ -221,7 +221,7 @@ def measureDARPeak_py3d(cube_in, out_prefix, coadd='10', steps='50', search_box=
     if verbose==1:
         plt.show()
 
-def aperFluxCube_py3d(cube_in, cent_x, cent_y, aperture, filter, hdrkey, comment='',  units='1e-16', kmax='1000', system='AB'):
+def aperFluxCube_drp(cube_in, cent_x, cent_y, aperture, filter, hdrkey, comment='',  units='1e-16', kmax='1000', system='AB'):
     """
            Measures the aperture photometry from the cube for a given position, circular aperture radius and filter curve.
            The results are stored in a header keyword.
@@ -252,7 +252,7 @@ def aperFluxCube_py3d(cube_in, cent_x, cent_y, aperture, filter, hdrkey, comment
 
             Examples
             ----------------
-            user:> Py3D cube aperFluxCube CUBE.fits 15 20 4 sloan_g.dat,0,1 'hiearach PIPE APER G' comment='4 arcsec g-band photometry'
+            user:> lvmdrp cube aperFluxCube CUBE.fits 15 20 4 sloan_g.dat,0,1 'hiearach PIPE APER G' comment='4 arcsec g-band photometry'
 
     """
 
@@ -280,7 +280,7 @@ def aperFluxCube_py3d(cube_in, cent_x, cent_y, aperture, filter, hdrkey, comment
     cube.setHdrValue(hdrkey, '%.3f'%AB_mag, comment)
     cube.writeFitsHeader()
 
-def matchAbsFluxAper_py3d(cube_in, cube_out, key_mags,  ref_mags, hdrkey, comment):
+def matchAbsFluxAper_drp(cube_in, cube_out, key_mags,  ref_mags, hdrkey, comment):
     """
            Computes the average flux ratio of the previously compute cube photometry with respect to given reference magnitudes.
            A photometrically rescaled cube will be stored including additional header keywords for the ratio in different bands and the
@@ -305,7 +305,7 @@ def matchAbsFluxAper_py3d(cube_in, cube_out, key_mags,  ref_mags, hdrkey, commen
 
             Examples
             ----------------
-            user:> Py3D cube matchAbsFluxAper CUBE_IN.fits CUBE_out.fits 'hierarch PIPE PHOT g,hierarch PIPE PHOT r' 'g:14.5,r:14.0' 'hierarch PIPE ABS ' "
+            user:> lvmdrp cube matchAbsFluxAper CUBE_IN.fits CUBE_out.fits 'hierarch PIPE PHOT g,hierarch PIPE PHOT r' 'g:14.5,r:14.0' 'hierarch PIPE ABS ' "
     """
     cube = loadCube(cube_in)
     key_mags = key_mags.split(',')
@@ -330,7 +330,7 @@ def matchAbsFluxAper_py3d(cube_in, cube_out, key_mags,  ref_mags, hdrkey, commen
     cube.writeFitsData(cube_out)
 
 
-def matchCubeAperSpec_py3d(cube_in, cube_ref, cube_out, radius, poly_correct='-3', smooth_in='0', smooth_ref='0', start_wave='', end_wave='', name_obj='', outfig='',verbose='0'):
+def matchCubeAperSpec_drp(cube_in, cube_ref, cube_out, radius, poly_correct='-3', smooth_in='0', smooth_ref='0', start_wave='', end_wave='', name_obj='', outfig='',verbose='0'):
     radius = float(radius)
     poly_correct=int(poly_correct)
     smooth_in = float(smooth_in)
@@ -392,7 +392,7 @@ def matchCubeAperSpec_py3d(cube_in, cube_ref, cube_out, radius, poly_correct='-3
         if verbose==1:
             pylab.show()
 
-def subCubeWave_py3d(cube_in, cube_out, wave_start=None, wave_end=None):
+def subCubeWave_drp(cube_in, cube_out, wave_start=None, wave_end=None):
     cube_in = loadCube(cube_in)
     select = numpy.ones(len(cube_in._wave), dtype="bool")
     if wave_start is not None:
@@ -412,7 +412,7 @@ def subCubeWave_py3d(cube_in, cube_out, wave_start=None, wave_end=None):
     cube_new.writeFitsData(cube_out)
 
 
-def glueCubesWavelength_py3d(cube1_in, cube2_in, cube_out, rescale_region='',  merge_wavelength='0.0', mergeHdr='1'):
+def glueCubesWavelength_drp(cube1_in, cube2_in, cube_out, rescale_region='',  merge_wavelength='0.0', mergeHdr='1'):
     merge_wavelength=float(merge_wavelength)
     mergeHdr = bool(int(mergeHdr))
     if rescale_region=='':
@@ -426,13 +426,13 @@ def glueCubesWavelength_py3d(cube1_in, cube2_in, cube_out, rescale_region='',  m
     cube.glueCubeSets(cube1, cube2, rescale_region=rescale_region, merge_wave=merge_wavelength, mergeHdr=mergeHdr)
     cube.writeFitsData(cube_out)
 
-def rot90_py3d(cube_in, cube_out, n_rot):
+def rot90_drp(cube_in, cube_out, n_rot):
     n_rot = int(n_rot)
     cube = loadCube(cube_in)
     cube_rot = cube.rot90(n_rot)
     cube_rot.writeFitsData(cube_out)
 
-def createSensFunction_py3d(cube_in, out_sens,  ref_spec, airmass, exptime, cent_x='CRPIX2', cent_y='CRPIX1', radius='6', smooth_poly='5', smooth_ref='6.0' , extinct_v='0.0', extinct_curve='mean',  aper_correct='1.0',  ref_units='1e-16', target_units='1e-16',column_wave='0', column_flux='1', delimiter='', header='1' , split='', mask_wave='', overlap='100', out_star='', verbose='0'):
+def createSensFunction_drp(cube_in, out_sens,  ref_spec, airmass, exptime, cent_x='CRPIX2', cent_y='CRPIX1', radius='6', smooth_poly='5', smooth_ref='6.0' , extinct_v='0.0', extinct_curve='mean',  aper_correct='1.0',  ref_units='1e-16', target_units='1e-16',column_wave='0', column_flux='1', delimiter='', header='1' , split='', mask_wave='', overlap='100', out_star='', verbose='0'):
     smooth_poly=int(smooth_poly)
     smooth_ref=float(smooth_ref)
     radius = float(radius)
@@ -570,7 +570,7 @@ def createSensFunction_py3d(cube_in, out_sens,  ref_spec, airmass, exptime, cent
     out.close()
 
 
-def combineCubes_py3d(incubes, outcube, method='mean', replace_error='1e10'):
+def combineCubes_drp(incubes, outcube, method='mean', replace_error='1e10'):
 
     incubes = incubes.split(',')
     replace_error = float(replace_error)
@@ -623,7 +623,7 @@ def combineCubes_py3d(incubes, outcube, method='mean', replace_error='1e10'):
     cube_out.writeFitsData(outcube)
 
 
-def fitCubeELines_py3d(cube_in, par_file, maps_prefix, smooth_box='', wave_range='', method='leastsq',guess_window='', err_sim='0', spectral_res='0.0',bad_error_replace='1e10', ftol='1e-4', xtol='1e-4', parallel='auto'):
+def fitCubeELines_drp(cube_in, par_file, maps_prefix, smooth_box='', wave_range='', method='leastsq',guess_window='', err_sim='0', spectral_res='0.0',bad_error_replace='1e10', ftol='1e-4', xtol='1e-4', parallel='auto'):
 
     err_sim=int(err_sim)
     ftol = float(ftol)

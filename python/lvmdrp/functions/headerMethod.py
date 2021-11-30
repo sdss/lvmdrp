@@ -1,13 +1,13 @@
 from __future__ import print_function
 from builtins import range
 import sys
-from Py3D import *
-from Py3D.core.header import Header, combineHdr
-from Py3D.external import astrolib
+from lvmdrp import *
+from lvmdrp.core.header import Header, combineHdr
+from lvmdrp.external import astrolib
 
 description='Provides Methods to handle Fits headers'
 
-def printHdr_py3d(file, keyword='',  extension=0):
+def printHdr_drp(file, keyword='',  extension=0):
     """
             Prints the Fits header of a file
 
@@ -22,8 +22,8 @@ def printHdr_py3d(file, keyword='',  extension=0):
 
             Example
             -----------
-            user:> Py3D image printHdr FILE.fits
-            user:> Py3D image printHdr FILE.fits  keyword=NAXIS
+            user:> lvmdrp image printHdr FILE.fits
+            user:> lvmdrp image printHdr FILE.fits  keyword=NAXIS
         """
     hdr = Header()
     hdr.loadFitsHeader(file, extension=int(extension))
@@ -32,7 +32,7 @@ def printHdr_py3d(file, keyword='',  extension=0):
     else:
         print(hdr.getHdrCard(keyword))
 
-def expandHdrKeys_py3d(file, prefix, keywords='', exclude='', extension='0', verbose='0', removeEmpty='0'):
+def expandHdrKeys_drp(file, prefix, keywords='', exclude='', extension='0', verbose='0', removeEmpty='0'):
     """
             Expand keyword names in the FITS header by a certain prefix string
 
@@ -60,8 +60,8 @@ def expandHdrKeys_py3d(file, prefix, keywords='', exclude='', extension='0', ver
 
             Example:
             -----------
-            user:> Py3D header expandHdrKeys FILE.fits PREFIX
-            user:> Py3D header expandHdrKeys FILE.fits PREFIX keywords=KEY1,KEY2,KEY3 exclude='KEY 4,KEY 5'
+            user:> lvmdrp header expandHdrKeys FILE.fits PREFIX
+            user:> lvmdrp header expandHdrKeys FILE.fits PREFIX keywords=KEY1,KEY2,KEY3 exclude='KEY 4,KEY 5'
 
     """
     key_list = keywords.split(',')
@@ -76,7 +76,7 @@ def expandHdrKeys_py3d(file, prefix, keywords='', exclude='', extension='0', ver
                 hdr.extendHierarch(k, prefix, verbose=int(verbose))
     hdr.writeFitsHeader()
 
-def copyHdr_py3d(file_in, file_out,  exclude='', extension='0', removeEmpty='1'):
+def copyHdr_drp(file_in, file_out,  exclude='', extension='0', removeEmpty='1'):
     """
             Copy the whole FITS header from one file to another
 
@@ -100,8 +100,8 @@ def copyHdr_py3d(file_in, file_out,  exclude='', extension='0', removeEmpty='1')
 
             Example:
             -----------
-            user:> Py3D header expandHdrKeys FILE1.fits FILE2.fits
-            user:> Py3D header expandHdrKeys FILE1.fits FILE2.fits exclude=KEY1,KEY2
+            user:> lvmdrp header expandHdrKeys FILE1.fits FILE2.fits
+            user:> lvmdrp header expandHdrKeys FILE1.fits FILE2.fits exclude=KEY1,KEY2
     """
     hdr_in = Header()
     hdr_in.loadFitsHeader(file_in, extension=int(extension), removeEmpty=int(removeEmpty))
@@ -118,7 +118,7 @@ def copyHdr_py3d(file_in, file_out,  exclude='', extension='0', removeEmpty='1')
     hdr.appendHeader(hdr_in)
     hdr.writeFitsHeader(file_out, extension=int(extension))
 
-def addHdrKey_py3d(file, key, value, comment='', extension='0'):
+def addHdrKey_drp(file, key, value, comment='', extension='0'):
     """
             Add a single keyword to the FITS Header
 
@@ -137,8 +137,8 @@ def addHdrKey_py3d(file, key, value, comment='', extension='0'):
 
             Example:
             -----------
-            user:> Py3D header addHdrKey FILE1.fits KEY VALUE
-            user:> Py3D header addHdrKey FILE1.fits KEY value=10 comment='dummy keyword'
+            user:> lvmdrp header addHdrKey FILE1.fits KEY VALUE
+            user:> lvmdrp header addHdrKey FILE1.fits KEY value=10 comment='dummy keyword'
     """
     hdr = Header()
     hdr.loadFitsHeader(file, extension=int(extension))
@@ -154,7 +154,7 @@ def addHdrKey_py3d(file, key, value, comment='', extension='0'):
     hdr.setHdrValue(key, v, comment)
     hdr.writeFitsHeader(extension=int(extension))
 
-def mergeHdr_py3d(files_in, file_out, exclude='',  extension='0', removeEmpty='0'):
+def mergeHdr_drp(files_in, file_out, exclude='',  extension='0', removeEmpty='0'):
     """
             Merge the FITS headers of several files into a single File
 
@@ -178,9 +178,9 @@ def mergeHdr_py3d(files_in, file_out, exclude='',  extension='0', removeEmpty='0
 
             Example:
             -----------
-            user:> Py3D header mergeHdr FILE1.fits,FILE2.fits  TARGET.fits
-            user:> Py3D header mergeHdr FILE1.fits,FILE2.fits  TARGET.fits KEY1
-            user:> Py3D header mergeHdr FILE1.fits,FILE2.fits  TARGET.fits exclude=KEY1
+            user:> lvmdrp header mergeHdr FILE1.fits,FILE2.fits  TARGET.fits
+            user:> lvmdrp header mergeHdr FILE1.fits,FILE2.fits  TARGET.fits KEY1
+            user:> lvmdrp header mergeHdr FILE1.fits,FILE2.fits  TARGET.fits exclude=KEY1
     """
     files = files_in.split(',')
     hdrs = []
@@ -198,7 +198,7 @@ def mergeHdr_py3d(files_in, file_out, exclude='',  extension='0', removeEmpty='0
             pass
     combined_header.writeFitsHeader(file_out, extension=int(extension))
 
-def addHvelcorHdr_py3d(file, key, RAKey='RA', RAUnit='h', DECKey='DEC', ObsLongKey='CAHA TEL GEOLON', LongSignFlip=1, ObsLatKey='CAHA TEL GEOLAT', ObsAltKey='CAHA TEL GEOELEV', ModJulKey='MJD-OBS', extension='0'):
+def addHvelcorHdr_drp(file, key, RAKey='RA', RAUnit='h', DECKey='DEC', ObsLongKey='CAHA TEL GEOLON', LongSignFlip=1, ObsLatKey='CAHA TEL GEOLAT', ObsAltKey='CAHA TEL GEOELEV', ModJulKey='MJD-OBS', extension='0'):
     """
             Computes the helocentric velocity and adds a corresponding keyword into the FITS header
 
@@ -229,8 +229,8 @@ def addHvelcorHdr_py3d(file, key, RAKey='RA', RAUnit='h', DECKey='DEC', ObsLongK
 
     Example:
             -----------
-            user:> Py3D header addHvelcorHdrFILE1.fits  HVELCOR
-            user:> Py3D header addHvelcorHdrFILE1.fits  HVELCOR RAUnit=deg  ObsLongKey='OBS Long' ObsLatKey='OBS Lat'
+            user:> lvmdrp header addHvelcorHdrFILE1.fits  HVELCOR
+            user:> lvmdrp header addHvelcorHdrFILE1.fits  HVELCOR RAUnit=deg  ObsLongKey='OBS Long' ObsLatKey='OBS Lat'
     """
     hdr = Header()
     hdr.loadFitsHeader(file, extension=int(extension))
@@ -250,7 +250,7 @@ def addHvelcorHdr_py3d(file, key, RAKey='RA', RAUnit='h', DECKey='DEC', ObsLongK
     hdr.setHdrValue(key, float('%.2f' %(vel_correction[0])), 'Heliocentric vel correction [km/s]')
     hdr.writeFitsHeader()
 
-def addAstrometry_py3d(file, ref_RA, ref_DEC, resolution_x, resolution_y, ref_pix_x='', ref_pix_y=''):
+def addAstrometry_drp(file, ref_RA, ref_DEC, resolution_x, resolution_y, ref_pix_x='', ref_pix_y=''):
     """
             Adds astrometric WCS information keywords to  the FITS headers.
             These are WCSAXES, WCSNAME, RADESYS, CTYPE1, CTYPE2, CUNIT1, CUNIT2, CD1_1, CD1_2, CD2_1, CD2_2
@@ -277,8 +277,8 @@ def addAstrometry_py3d(file, ref_RA, ref_DEC, resolution_x, resolution_y, ref_pi
 
             Example:
             -----------
-            user:> Py3D header addAstrometry FILE.fits 300.12 -10.0 1.0 1.0
-            user:> Py3D header addAstrometry FILE.fits 300.12 -10.0 1.0 1.0 ref_pix_x=29 ref_pix_y=40
+            user:> lvmdrp header addAstrometry FILE.fits 300.12 -10.0 1.0 1.0
+            user:> lvmdrp header addAstrometry FILE.fits 300.12 -10.0 1.0 1.0 ref_pix_x=29 ref_pix_y=40
     """
 
     resolution_x=float(resolution_x)
@@ -338,7 +338,7 @@ def addAstrometry_py3d(file, ref_RA, ref_DEC, resolution_x, resolution_y, ref_pi
         hdr.setHdrValue('CRPIX2',  ref_pix_y,  'Ref pixel for WCS')
     hdr.writeFitsHeader()
 
-def copyHdrKey_py3d(file_in, file_out, keyword, extension='0', extension_out=None):
+def copyHdrKey_drp(file_in, file_out, keyword, extension='0', extension_out=None):
     extension=int(extension)
     if extension_out is None:
       extension_out = extension

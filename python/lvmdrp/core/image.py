@@ -2,9 +2,9 @@ from __future__ import division
 from builtins import str
 from builtins import range
 from past.utils import old_div
-from Py3D.core.header import *
-from Py3D.core.apertures import  *
-from Py3D.core.spectrum1d import Spectrum1D
+from lvmdrp.core.header import *
+from lvmdrp.core.apertures import  *
+from lvmdrp.core.spectrum1d import Spectrum1D
 from astropy.io import fits as pyfits
 import numpy
 try:
@@ -1463,7 +1463,7 @@ def glueImages(images, positions):
 
 		Example
 		------------
-		>>> from Py3D.core import data_model
+		>>> from lvmdrp.core import data_model
 		>>> full_Image = data_model.Image()
 		>>> full_Image.mergeImages((Img1,Img2,Img3,Img4),('00,'01','10','11'))
 	"""

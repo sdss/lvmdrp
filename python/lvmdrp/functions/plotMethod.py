@@ -2,9 +2,9 @@ from __future__ import print_function
 
 from builtins import range
 import os, numpy
-from Py3D.core.header import Header
+from lvmdrp.core.header import Header
 
-from Py3D import *
+from lvmdrp import *
 try:
   from matplotlib import pyplot as plt
 except:
@@ -13,10 +13,10 @@ except:
 description='Provides Methods to make some plots'
 
 
-def flexurePatternTarget_py3d(trace_log, disp_log, figure, object,  scale='200'):
+def flexurePatternTarget_drp(trace_log, disp_log, figure, object,  scale='200'):
 	"""
     	Makes an arrow plot of the flexure offset in dispersion and cross-dispersion direction compared to the calibration exposure.
-		The log files produces the Py3D commands to measure those shifts in both direction are read in to 
+		The log files produces the lvmdrp commands to measure those shifts in both direction are read in to 
 		extract the required information.
 
 		Parameters
@@ -34,7 +34,7 @@ def flexurePatternTarget_py3d(trace_log, disp_log, figure, object,  scale='200')
 			
 		Example
 		-----------
-		user:> Py3D plot fluxurePatternTarget OFFSETCROSS.log OFFSETDISP.log OUTFIG.png NGC7594_p1
+		user:> lvmdrp plot fluxurePatternTarget OFFSETCROSS.log OFFSETDISP.log OUTFIG.png NGC7594_p1
 	"""
 	scale = float(scale)
 	trace = open(trace_log, 'r')
@@ -143,7 +143,7 @@ def flexurePatternTarget_py3d(trace_log, disp_log, figure, object,  scale='200')
 	plt.savefig(fig)
 
 
-def  flexureOffsetNight_py3d(trace_log, disp_log, figure,  hdrKey_x, hdrKey_y, hdrKey_El,  hdrKey_Az):
+def  flexureOffsetNight_drp(trace_log, disp_log, figure,  hdrKey_x, hdrKey_y, hdrKey_El,  hdrKey_Az):
 	"""
 	    Makes a plot of all the flexure offsets measure for the night with respect to their median value as a function of telescope Azimuth angle.
 	    
@@ -166,7 +166,7 @@ def  flexureOffsetNight_py3d(trace_log, disp_log, figure,  hdrKey_x, hdrKey_y, h
 		    
 	    Example
 	    -----------
-	    user:> Py3D plot flexureOffsetNight OFFSETCROSS.log OFFSETDISP.log OUTFIG.png 'hierarch PIPE FLEX XOFF' 'hierarch PIPE FLEX YOFF' 'hierarch CAHA TEL POS EL_END' 'hierarch CAHA TEL POS AZ_END'
+	    user:> lvmdrp plot flexureOffsetNight OFFSETCROSS.log OFFSETDISP.log OUTFIG.png 'hierarch PIPE FLEX XOFF' 'hierarch PIPE FLEX YOFF' 'hierarch CAHA TEL POS EL_END' 'hierarch CAHA TEL POS AZ_END'
 	"""
 	trace = open(trace_log, 'r')
 	disp = open(disp_log, 'r')

@@ -1,12 +1,12 @@
 from builtins import range
 from astropy.io import fits as pyfits
 import os
-from Py3D.functions.imageMethod import *
-from Py3D.functions.rssMethod import *
-from Py3D.functions.headerMethod import *
-from Py3D.core.spectrum1d import Spectrum1D
-from Py3D.core.header import Header
-from Py3D.core.image import Image
+from lvmdrp.functions.imageMethod import *
+from lvmdrp.functions.rssMethod import *
+from lvmdrp.functions.headerMethod import *
+from lvmdrp.core.spectrum1d import Spectrum1D
+from lvmdrp.core.header import Header
+from lvmdrp.core.image import Image
 from multiprocessing import cpu_count
 from multiprocessing import Pool
 
@@ -14,7 +14,7 @@ description = 'Provides Methods to reduce GMOS data'
 gmos_calib = os.path.dirname(__file__) + '/../../config/GMOS/'
 
 
-def createCCDfromArchive_py3d(infile, prefix, master_bias=None,splits='0,0,0,0'):
+def createCCDfromArchive_drp(infile, prefix, master_bias=None,splits='0,0,0,0'):
     splits = numpy.array(splits.split(',')).astype(numpy.int16)
     hdu = pyfits.open(infile)
     CCD = numpy.zeros((4608, 6144), dtype=numpy.float32)
@@ -71,7 +71,7 @@ def createCCDfromArchive_py3d(infile, prefix, master_bias=None,splits='0,0,0,0')
         CCD3_out = Image(data=CCD[:,4096:4096+splits[3]],error=CCD_err[:,4096:4096+splits[3]])
     CCD3_out.writeFitsData(prefix+'.CCD3.fits')
 
-def combineBias_py3d(file_list, file_out):
+def combineBias_drp(file_list, file_out):
     files = open(file_list, 'r')
     lines = files.readlines()
     hdu = pyfits.open(lines[0])
@@ -90,7 +90,7 @@ def combineBias_py3d(file_list, file_out):
     hdu.writeto(file_out, overwrite=True)
 
 
-def reduceCalib_py3d(trace, master_bias, arc=''):
+def reduceCalib_drp(trace, master_bias, arc=''):
     hdr_trace = Header()
     hdr_trace.loadFitsHeader(trace)
     IFU_mask = hdr_trace.getHdrValue('MASKNAME')
@@ -113,47 +113,47 @@ def reduceCalib_py3d(trace, master_bias, arc=''):
         ccds = ['CCD1', 'CCD2L', 'CCD2R', 'CCD3']
         steps = [40, 20, 20, 40]
 
-        createCCDfromArchive_py3d(trace, 'FLAT', master_bias=master_bias, splits=splits)
+        createCCDfromArchive_drp(trace, 'FLAT', master_bias=master_bias, splits=splits)
         if arc != '':
-            createCCDfromArchive_py3d(arc, 'ARC', master_bias=master_bias, splits=splits)
-        findPeaksAuto_py3d('FLAT.CCD1.fits', 'peaks.CCD1', nfibers=750, slice=slice1, verbose=0)
-        findPeaksAuto_py3d('FLAT.CCD2L.fits', 'peaks.CCD2L', nfibers=750, slice=slice2L, median_cross=2, verbose=0)
-        findPeaksMaster2_py3d('FLAT.CCD2R.fits', 'master_peaks.BLUE_slit', 'peaks.CCD2R', threshold=10000, slice=slice2R,
+            createCCDfromArchive_drp(arc, 'ARC', master_bias=master_bias, splits=splits)
+        findPeaksAuto_drp('FLAT.CCD1.fits', 'peaks.CCD1', nfibers=750, slice=slice1, verbose=0)
+        findPeaksAuto_drp('FLAT.CCD2L.fits', 'peaks.CCD2L', nfibers=750, slice=slice2L, median_cross=2, verbose=0)
+        findPeaksMaster2_drp('FLAT.CCD2R.fits', 'master_peaks.BLUE_slit', 'peaks.CCD2R', threshold=10000, slice=slice2R,
             median_cross=3, verbose=0)
-        findPeaksMaster2_py3d('FLAT.CCD3.fits', 'master_peaks.BLUE_slit', 'peaks.CCD3', threshold=10000, slice=slice3,
+        findPeaksMaster2_drp('FLAT.CCD3.fits', 'master_peaks.BLUE_slit', 'peaks.CCD3', threshold=10000, slice=slice3,
             median_cross=3, verbose=0)
-        tracePeaks_py3d('FLAT.CCD1.fits', 'peaks.CCD1', 'tjunk.CCD1.trc.fits', poly_disp='-5', steps=50, threshold_peak=400)
-        tracePeaks_py3d('FLAT.CCD2L.fits', 'peaks.CCD2L', 'tjunk.CCD2L.trc.fits', poly_disp='-5', steps=50, coadd=1, max_diff=1,
+        tracePeaks_drp('FLAT.CCD1.fits', 'peaks.CCD1', 'tjunk.CCD1.trc.fits', poly_disp='-5', steps=50, threshold_peak=400)
+        tracePeaks_drp('FLAT.CCD2L.fits', 'peaks.CCD2L', 'tjunk.CCD2L.trc.fits', poly_disp='-5', steps=50, coadd=1, max_diff=1,
             threshold_peak=400, median_cross=2)
-        tracePeaks_py3d('FLAT.CCD2R.fits', 'peaks.CCD2R', 'tjunk.CCD2R.trc.fits', poly_disp='-5', steps=20, coadd=1,
+        tracePeaks_drp('FLAT.CCD2R.fits', 'peaks.CCD2R', 'tjunk.CCD2R.trc.fits', poly_disp='-5', steps=20, coadd=1,
             max_diff=1, median_cross=3, threshold_peak=400)
-        tracePeaks_py3d('FLAT.CCD3.fits', 'peaks.CCD3', 'tjunk.CCD3.trc.fits', poly_disp='-5', steps=50, coadd=1,
+        tracePeaks_drp('FLAT.CCD3.fits', 'peaks.CCD3', 'tjunk.CCD3.trc.fits', poly_disp='-5', steps=50, coadd=1,
             max_diff=1, median_cross=3, threshold_peak=400)
         for i in range(len(ccds)):
-            subtractStraylight_py3d('FLAT.%s.fits' % (ccds[i]), 'tjunk.%s.trc.fits' % (ccds[i]), 'FLAT.%s.back.fits' % (ccds[i]),
+            subtractStraylight_drp('FLAT.%s.fits' % (ccds[i]), 'tjunk.%s.trc.fits' % (ccds[i]), 'FLAT.%s.back.fits' % (ccds[i]),
                 'FLAT.%s.stray.fits' % (ccds[i]), aperture=10, poly_cross=6, smooth_disp=30)
-            traceFWHM_py3d('FLAT.%s.stray.fits' % (ccds[i]), 'tjunk.%s.trc.fits' % (ccds[i]), 'tjunk.%s.fwhm.fits' % (ccds[i]),
+            traceFWHM_drp('FLAT.%s.stray.fits' % (ccds[i]), 'tjunk.%s.trc.fits' % (ccds[i]), 'tjunk.%s.fwhm.fits' % (ccds[i]),
                 blocks=16, steps=steps[i], poly_disp=-5, init_fwhm=3, clip='1.0,6.0', threshold_flux=2000)
             if arc != '':
-                subtractStraylight_py3d('ARC.%s.fits' % (ccds[i]), 'tjunk.%s.trc.fits' % (ccds[i]),
+                subtractStraylight_drp('ARC.%s.fits' % (ccds[i]), 'tjunk.%s.trc.fits' % (ccds[i]),
                     'ARC.%s.back.fits' % (ccds[i]), 'ARC.%s.stray.fits' % (ccds[i]), aperture=10, poly_cross=6, smooth_disp=30)
-                extractSpec_py3d('ARC.%s.stray.fits' % (ccds[i]), 'tjunk.%s.trc.fits' % (ccds[i]), 'ARC.%s.ms.fits' % (ccds[i]),
+                extractSpec_drp('ARC.%s.stray.fits' % (ccds[i]), 'tjunk.%s.trc.fits' % (ccds[i]), 'ARC.%s.ms.fits' % (ccds[i]),
                     method='aperture', aperture=5)
-                detWaveSolution_py3d('ARC.%s.ms.fits' % (ccds[i]), 'ARC.%s' % (ccds[i]), '../../arc.%s.%s.txt' %
+                detWaveSolution_drp('ARC.%s.ms.fits' % (ccds[i]), 'ARC.%s' % (ccds[i]), '../../arc.%s.%s.txt' %
                     (ccds[i], setup), poly_dispersion=poly_disp[i], poly_fwhm=poly_fwhm[i], flux_min=100.0, fwhm_max=8.0,
                     rel_flux_limits='0.1,6.0')
-            extractSpec_py3d('FLAT.%s.stray.fits' % (ccds[i]), 'tjunk.%s.trc.fits' % (ccds[i]), 'FLAT.%s.ms.fits' % (ccds[i]),
+            extractSpec_drp('FLAT.%s.stray.fits' % (ccds[i]), 'tjunk.%s.trc.fits' % (ccds[i]), 'FLAT.%s.ms.fits' % (ccds[i]),
                 method='optimal', fwhm='tjunk.%s.fwhm.fits' % (ccds[i]), parallel=1)
-            createPixTable_py3d('FLAT.%s.ms.fits' % (ccds[i]), 'FLAT.%s.rss.fits' % (ccds[i]), 'ARC.%s.disp.fits' % (ccds[i]),
+            createPixTable_drp('FLAT.%s.ms.fits' % (ccds[i]), 'FLAT.%s.rss.fits' % (ccds[i]), 'ARC.%s.disp.fits' % (ccds[i]),
                 'ARC.%s.res.fits' % (ccds[i]))
-        glueRSS_py3d('FLAT.CCD1.rss.fits,FLAT.CCD2L.rss.fits', 'FLAT_red.rss.fits')
-        glueRSS_py3d('FLAT.CCD2R.rss.fits,FLAT.CCD3.rss.fits', 'FLAT_blue.rss.fits')
-        resampleWave_py3d('FLAT_blue.rss.fits', 'FLAT_blue.disp_cor.fits', start_wave=start_wave, end_wave=end_wave,
+        glueRSS_drp('FLAT.CCD1.rss.fits,FLAT.CCD2L.rss.fits', 'FLAT_red.rss.fits')
+        glueRSS_drp('FLAT.CCD2R.rss.fits,FLAT.CCD3.rss.fits', 'FLAT_blue.rss.fits')
+        resampleWave_drp('FLAT_blue.rss.fits', 'FLAT_blue.disp_cor.fits', start_wave=start_wave, end_wave=end_wave,
             disp_pix=disp_pix, err_sim=0, method='linear', parallel=1)
-        resampleWave_py3d('FLAT_red.rss.fits', 'FLAT_red.disp_cor.fits', start_wave=start_wave, end_wave=end_wave,
+        resampleWave_drp('FLAT_red.rss.fits', 'FLAT_red.disp_cor.fits', start_wave=start_wave, end_wave=end_wave,
             disp_pix=disp_pix, err_sim=0, method='linear')
-        mergeRSS_py3d('FLAT_red.disp_cor.fits,FLAT_blue.disp_cor.fits', 'FLAT.disp_cor.fits')
-        createFiberFlat_py3d('FLAT.disp_cor.fits', 'FIBERFLAT.fits', clip='0.25,2.0')
+        mergeRSS_drp('FLAT_red.disp_cor.fits,FLAT_blue.disp_cor.fits', 'FLAT.disp_cor.fits')
+        createFiberFlat_drp('FLAT.disp_cor.fits', 'FIBERFLAT.fits', clip='0.25,2.0')
 
     elif IFU_mask == 'IFU-R' or IFU_mask == 'IFU-B':
         ccds = ['CCD1', 'CCD2', 'CCD3']
@@ -168,37 +168,37 @@ def reduceCalib_py3d(trace, master_bias, arc=''):
             start_wave = 5800
             end_wave = 9000
             disp_pix = 0.7
-        createCCDfromArchive_py3d(trace, 'FLAT', master_bias=master_bias, splits=splits)
+        createCCDfromArchive_drp(trace, 'FLAT', master_bias=master_bias, splits=splits)
         if arc != '':
-            createCCDfromArchive_py3d(arc, 'ARC', master_bias=master_bias, splits=splits)
-        findPeaksAuto_py3d('FLAT.CCD1.fits', 'peaks.CCD1', nfibers=750, slice=slice1, verbose=0)
-        findPeaksAuto_py3d('FLAT.CCD2.fits', 'peaks.CCD2', nfibers=750, slice=slice2, median_cross=2, verbose=0)
-        findPeaksAuto_py3d('FLAT.CCD3.fits', 'peaks.CCD3', nfibers=750, slice=slice3, verbose=0)
-        tracePeaks_py3d('FLAT.CCD1.fits', 'peaks.CCD1', 'tjunk.CCD1.trc.fits', poly_disp='-5', steps=50, max_diff=1,
+            createCCDfromArchive_drp(arc, 'ARC', master_bias=master_bias, splits=splits)
+        findPeaksAuto_drp('FLAT.CCD1.fits', 'peaks.CCD1', nfibers=750, slice=slice1, verbose=0)
+        findPeaksAuto_drp('FLAT.CCD2.fits', 'peaks.CCD2', nfibers=750, slice=slice2, median_cross=2, verbose=0)
+        findPeaksAuto_drp('FLAT.CCD3.fits', 'peaks.CCD3', nfibers=750, slice=slice3, verbose=0)
+        tracePeaks_drp('FLAT.CCD1.fits', 'peaks.CCD1', 'tjunk.CCD1.trc.fits', poly_disp='-5', steps=50, max_diff=1,
             threshold_peak=400)
-        tracePeaks_py3d('FLAT.CCD2.fits', 'peaks.CCD2', 'tjunk.CCD2.trc.fits', poly_disp='-5', steps=50, max_diff=1,
+        tracePeaks_drp('FLAT.CCD2.fits', 'peaks.CCD2', 'tjunk.CCD2.trc.fits', poly_disp='-5', steps=50, max_diff=1,
             median_cross=2, threshold_peak=400)
-        tracePeaks_py3d('FLAT.CCD3.fits', 'peaks.CCD3', 'tjunk.CCD3.trc.fits', poly_disp='-5', steps=50, max_diff=1,
+        tracePeaks_drp('FLAT.CCD3.fits', 'peaks.CCD3', 'tjunk.CCD3.trc.fits', poly_disp='-5', steps=50, max_diff=1,
             threshold_peak=400)
         for i in range(len(ccds)):
-            subtractStraylight_py3d('FLAT.%s.fits' % (ccds[i]), 'tjunk.%s.trc.fits' % (ccds[i]), 'FLAT.%s.back.fits' % (ccds[i]),
+            subtractStraylight_drp('FLAT.%s.fits' % (ccds[i]), 'tjunk.%s.trc.fits' % (ccds[i]), 'FLAT.%s.back.fits' % (ccds[i]),
                 'FLAT.%s.stray.fits' % (ccds[i]), aperture=10, poly_cross=6, smooth_disp=30)
-            traceFWHM_py3d('FLAT.%s.stray.fits' % (ccds[i]), 'tjunk.%s.trc.fits' % (ccds[i]), 'tjunk.%s.fwhm.fits' % (ccds[i]),
+            traceFWHM_drp('FLAT.%s.stray.fits' % (ccds[i]), 'tjunk.%s.trc.fits' % (ccds[i]), 'tjunk.%s.fwhm.fits' % (ccds[i]),
                 blocks=16, steps=50, poly_disp=-5, init_fwhm=3, clip='1.0,6.0', threshold_flux=2000)
             if arc != '':
-                subtractStraylight_py3d('ARC.%s.fits' % (ccds[i]), 'tjunk.%s.trc.fits' % (ccds[i]),
+                subtractStraylight_drp('ARC.%s.fits' % (ccds[i]), 'tjunk.%s.trc.fits' % (ccds[i]),
                     'ARC.%s.back.fits' % (ccds[i]), 'ARC.%s.stray.fits' % (ccds[i]), aperture=10, poly_cross=6, smooth_disp=30)
-                extractSpec_py3d('ARC.%s.stray.fits' % (ccds[i]), 'tjunk.%s.trc.fits' % (ccds[i]), 'ARC.%s.ms.fits' % (ccds[i]),
+                extractSpec_drp('ARC.%s.stray.fits' % (ccds[i]), 'tjunk.%s.trc.fits' % (ccds[i]), 'ARC.%s.ms.fits' % (ccds[i]),
                     method='aperture', aperture=5)
-                detWaveSolution_py3d('ARC.%s.ms.fits' % (ccds[i]), 'ARC.%s' % (ccds[i]), 'arc.%s.%s.txt' %
+                detWaveSolution_drp('ARC.%s.ms.fits' % (ccds[i]), 'ARC.%s' % (ccds[i]), 'arc.%s.%s.txt' %
                     (ccds[i], setup), poly_dispersion=poly_disp[i], poly_fwhm=poly_fwhm[i], flux_min=100.0, fwhm_max=8.0,
                     rel_flux_limits='0.1,6.0')
-            extractSpec_py3d('FLAT.%s.stray.fits' % (ccds[i]), 'tjunk.%s.trc.fits' % (ccds[i]), 'FLAT.%s.ms.fits' % (ccds[i]),
+            extractSpec_drp('FLAT.%s.stray.fits' % (ccds[i]), 'tjunk.%s.trc.fits' % (ccds[i]), 'FLAT.%s.ms.fits' % (ccds[i]),
                 method='optimal', fwhm='tjunk.%s.fwhm.fits' % (ccds[i]), parallel=1)
-            createPixTable_py3d('FLAT.%s.ms.fits' % (ccds[i]), 'FLAT.%s.rss.fits' % (ccds[i]), 'ARC.%s.disp.fits' % (ccds[i]),
+            createPixTable_drp('FLAT.%s.ms.fits' % (ccds[i]), 'FLAT.%s.rss.fits' % (ccds[i]), 'ARC.%s.disp.fits' % (ccds[i]),
                 'ARC.%s.res.fits' % (ccds[i]))
 
-        glueRSS_py3d('FLAT.CCD1.rss.fits,FLAT.CCD2.rss.fits,FLAT.CCD3.rss.fits', 'FLAT.rss.fits')
-        resampleWave_py3d('FLAT.rss.fits', 'FLAT.disp_cor.fits', start_wave=start_wave, end_wave=end_wave,
+        glueRSS_drp('FLAT.CCD1.rss.fits,FLAT.CCD2.rss.fits,FLAT.CCD3.rss.fits', 'FLAT.rss.fits')
+        resampleWave_drp('FLAT.rss.fits', 'FLAT.disp_cor.fits', start_wave=start_wave, end_wave=end_wave,
             disp_pix=disp_pix, err_sim=0, method='linear', parallel=1)
-        createFiberFlat_py3d('FLAT.disp_cor.fits', 'FIBERFLAT.fits', clip='0.25,2.0')
+        createFiberFlat_drp('FLAT.disp_cor.fits', 'FIBERFLAT.fits', clip='0.25,2.0')

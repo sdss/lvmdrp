@@ -1,7 +1,7 @@
 from __future__ import division
 from builtins import range
 from past.utils import old_div
-from Py3D.core.spectrum1d import Spectrum1D
+from lvmdrp.core.spectrum1d import Spectrum1D
 import numpy
 from scipy import interpolate
 from os import path

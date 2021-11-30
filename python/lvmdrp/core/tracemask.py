@@ -2,8 +2,8 @@ from __future__ import print_function
 from __future__ import division
 from builtins import range
 from past.utils import old_div
-from Py3D.core.fiberrows import FiberRows
-from Py3D.core import fit_profile
+from lvmdrp.core.fiberrows import FiberRows
+from lvmdrp.core import fit_profile
 import numpy, pylab
 
 

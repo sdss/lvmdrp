@@ -1,6 +1,6 @@
 from __future__ import print_function
 from __future__ import division
-from Py3D.core.fiberrows import FiberRows
+from lvmdrp.core.fiberrows import FiberRows
 
 from future import standard_library
 standard_library.install_aliases()
@@ -15,15 +15,15 @@ except:
 import time
 from multiprocessing import Pool
 from multiprocessing import cpu_count
-from Py3D.core.image import Image, combineImages, glueImages, loadImage
-from Py3D.core.tracemask import TraceMask
-from Py3D.core.spectrum1d import Spectrum1D
+from lvmdrp.core.image import Image, combineImages, glueImages, loadImage
+from lvmdrp.core.tracemask import TraceMask
+from lvmdrp.core.spectrum1d import Spectrum1D
 import multiprocessing
 from types import *
 
 description='Provides Methods to process 2D images'
 
-def detCos_py3d(image,  out_image,   rdnoise='2.9', sigma_det='5', rlim='1.2', iter='5', fwhm_gauss='2.0', replace_box='5,5',  error_box='5,5', replace_error='1e10', increase_radius='0', gain='1.0', verbose='0', parallel='auto'):
+def detCos_drp(image,  out_image,   rdnoise='2.9', sigma_det='5', rlim='1.2', iter='5', fwhm_gauss='2.0', replace_box='5,5',  error_box='5,5', replace_error='1e10', increase_radius='0', gain='1.0', verbose='0', parallel='auto'):
 	"""
 		   Detects and removes cosmics from astronomical images based on Laplacian edge
 		   detection scheme combined with a PSF convolution approach (Husemann  et al. in prep.).
@@ -218,7 +218,7 @@ def detCos_py3d(image,  out_image,   rdnoise='2.9', sigma_det='5', rlim='1.2', i
 			out = out.replaceMaskMedian(box_x, box_y, replace_error=None)  # replace possible corrput pixel with zeros
 	out.writeFitsData(out_image)
 
-def LACosmic_py3d(image,  out_image,  sigma_det='5', flim='1.1', iter='3', sig_gauss='0.8,0.8', error_box='20,1', replace_box='20,1',  replace_error='1e10',  rdnoise='2.9',  increase_radius='0', verbose='0', parallel='2'):
+def LACosmic_drp(image,  out_image,  sigma_det='5', flim='1.1', iter='3', sig_gauss='0.8,0.8', error_box='20,1', replace_box='20,1',  replace_error='1e10',  rdnoise='2.9',  increase_radius='0', verbose='0', parallel='2'):
 	"""
 		   Detects and removes cosmic rays from astronomical images based on a modified Laplacian edge
 		   detection method introduced by van Dokkum (2005) and modified by B. Husemann (2012, in prep.).
@@ -273,7 +273,7 @@ def LACosmic_py3d(image,  out_image,  sigma_det='5', flim='1.1', iter='3', sig_g
 
 			Examples
 			----------------
-			user:> Py3D image LACosmic IMAGE.fits MASK.fits CLEAN.fits 5 flim=1.1 sig_gauss=0.8,0.8 replace_box=5,5 increase_radius=1
+			user:> lvmdrp image LACosmic IMAGE.fits MASK.fits CLEAN.fits 5 flim=1.1 sig_gauss=0.8,0.8 replace_box=5,5 increase_radius=1
 	"""
 	# convert all parameters to proper type
 	sigma_det = float(sigma_det)
@@ -413,7 +413,7 @@ def LACosmic_py3d(image,  out_image,  sigma_det='5', flim='1.1', iter='3', sig_g
 			out = out.replaceMaskMedian(box_x, box_y, replace_error=None)  # replace possible corrput pixel with zeros
 	out.writeFitsData(out_image)
 
-def addCCDMask_py3d(image, mask, replaceError='1e10'):
+def addCCDMask_drp(image, mask, replaceError='1e10'):
 	"""
 		   Adds a mask image (containing only zeros and ones) as new FITS extension to the original image.
 		   Values of 1 in the mask image are considered as bad pixels. If the image contains already and error image as an
@@ -430,7 +430,7 @@ def addCCDMask_py3d(image, mask, replaceError='1e10'):
 
 			Examples
 			----------------
-			user:> Py3D image addCDDMask IMAGE.fits MASK.fits
+			user:> lvmdrp image addCDDMask IMAGE.fits MASK.fits
 	"""
 
 	replaceError = float(replaceError)
@@ -445,7 +445,7 @@ def addCCDMask_py3d(image, mask, replaceError='1e10'):
 	img.setData(mask=mask_comb)
 	img.writeFitsData(image)
 
-def findPeaksAuto_py3d(image, out_peaks_file, nfibers,  disp_axis='X', threshold='5000',median_box='8', median_cross='1', slice='', method='gauss',  init_sigma='1.0', verbose='1'):
+def findPeaksAuto_drp(image, out_peaks_file, nfibers,  disp_axis='X', threshold='5000',median_box='8', median_cross='1', slice='', method='gauss',  init_sigma='1.0', verbose='1'):
 	"""
 		   Finds the exact subpixel cross-dispersion position of a given number of fibers at a certain dispersion column on the raw CCD frame.
 		   If a predefined number of pixel are expected, the initial threshold value for the minimum peak height will varied until the expected number
@@ -478,7 +478,7 @@ def findPeaksAuto_py3d(image, out_peaks_file, nfibers,  disp_axis='X', threshold
 
 			Examples
 			----------------
-			user:> Py3D image findPeaksAuto IMAGE.fits OUT_PEAKS.txt 382  method='gauss', init_sigma=1.3
+			user:> lvmdrp image findPeaksAuto IMAGE.fits OUT_PEAKS.txt 382  method='gauss', init_sigma=1.3
 	"""
 	# convert all parameters to proper type
 	npeaks=int(nfibers)
@@ -532,7 +532,7 @@ def findPeaksAuto_py3d(image, out_peaks_file, nfibers,  disp_axis='X', threshold
 		pylab.plot(centers, numpy.ones(len(centers))*4000.0, 'xg')
 		pylab.show()
 
-def findPeaksMaster_py3d(image, peaks_master, out_peaks_file, disp_axis='X', threshold='1500', threshold_weak='500', median_box='8', median_cross='1', slice='', method='gauss',  init_sigma='1.0', verbose='1'):
+def findPeaksMaster_drp(image, peaks_master, out_peaks_file, disp_axis='X', threshold='1500', threshold_weak='500', median_box='8', median_cross='1', slice='', method='gauss',  init_sigma='1.0', verbose='1'):
 
 	threshold=float(threshold)
 	threshold_weak=float(threshold_weak)
@@ -628,7 +628,7 @@ def findPeaksMaster_py3d(image, peaks_master, out_peaks_file, disp_axis='X', thr
 		pylab.plot(centers._data, numpy.ones(len(centers._data))*2000.0, 'xg')
 		pylab.show()
 
-def findPeaksMaster2_py3d(image, peaks_master, out_peaks_file, disp_axis='X', threshold='1500', threshold_weak='500', median_box='8', median_cross='1', slice='', method='gauss',  init_sigma='1.0', border='4', verbose='1'):
+def findPeaksMaster2_drp(image, peaks_master, out_peaks_file, disp_axis='X', threshold='1500', threshold_weak='500', median_box='8', median_cross='1', slice='', method='gauss',  init_sigma='1.0', border='4', verbose='1'):
 
 	threshold=float(threshold)
 	threshold_weak=float(threshold_weak)
@@ -731,7 +731,7 @@ def findPeaksMaster2_py3d(image, peaks_master, out_peaks_file, disp_axis='X', th
 		pylab.plot(centers._data, numpy.ones(len(centers._data))*2000.0, 'xg')
 		pylab.show()
 
-def tracePeaks_py3d(image, peaks_file, trace_out, disp_axis='X', method='gauss', median_box='7', median_cross='1', steps='30', coadd='30', poly_disp='-6', init_sigma='1.0', threshold_peak='100.0', max_diff='2', verbose='1'):
+def tracePeaks_drp(image, peaks_file, trace_out, disp_axis='X', method='gauss', median_box='7', median_cross='1', steps='30', coadd='30', poly_disp='-6', init_sigma='1.0', threshold_peak='100.0', max_diff='2', verbose='1'):
 	"""
 			Traces the peaks of fibers along the dispersion axis. The peaks at a specific dispersion column had to be determined before.
 			Two scheme of measuring the subpixel peak positionare available: A hyperbolic approximation or fitting a Gaussian profile to the brightest 3 pixels of a peak.
@@ -768,7 +768,7 @@ def tracePeaks_py3d(image, peaks_file, trace_out, disp_axis='X', method='gauss',
 
 			Examples
 			----------------
-			user:> Py3D image tracePeaks IMAGE.fits OUT_PEAKS.txt x method=gauss steps=40 coadd=20 smooth_poly=-8
+			user:> lvmdrp image tracePeaks IMAGE.fits OUT_PEAKS.txt x method=gauss steps=40 coadd=20 smooth_poly=-8
 	"""
 
 	# convert all parameters to proper type
@@ -897,7 +897,7 @@ def tracePeaks_py3d(image, peaks_file, trace_out, disp_axis='X', method='gauss',
 
 	trace.writeFitsData(trace_out)
 
-def glueCCDFrames_py3d(images, out_image, boundary_x, boundary_y, positions, orientation, subtract_overscan='1',compute_error='1', gain='', rdnoise=''):
+def glueCCDFrames_drp(images, out_image, boundary_x, boundary_y, positions, orientation, subtract_overscan='1',compute_error='1', gain='', rdnoise=''):
 	"""
 			Glue CCD subimages of different amplifiers  to a full science CCD images. The orientations of the sub images are taken into account as well as their overscan regions.
 			A Poission error image can be automatically computed during this process. This requires that the GAIN and the Read-Out Noise are stored as header keywords in each
@@ -937,7 +937,7 @@ def glueCCDFrames_py3d(images, out_image, boundary_x, boundary_y, positions, ori
 
 			Examples
 			----------------
-			user:>  Py3D image glueCCDFrame FRAME1.fits, FRAME2.fits, FRAME3.fits, FRAME4.fits  FULLFRAME.fits  50,800 1,900  00,10,01,11 X,90,Y,180 gain='GAIN'
+			user:>  lvmdrp image glueCCDFrame FRAME1.fits, FRAME2.fits, FRAME3.fits, FRAME4.fits  FULLFRAME.fits  50,800 1,900  00,10,01,11 X,90,Y,180 gain='GAIN'
 			"""
    # convert input parameters to proper type
 	list_imgs= images.split(',')
@@ -1012,7 +1012,7 @@ def glueCCDFrames_py3d(images, out_image, boundary_x, boundary_y, positions, ori
 		extension_error=None
 	full_img.writeFitsData(out_image)
 
-def combineImages_py3d(images, out_image, method='median', k='3.0'):
+def combineImages_drp(images, out_image, method='median', k='3.0'):
 	# convert input parameters to proper type
 	list_imgs= images.split(',')
 	if len(list_imgs)==1:
@@ -1029,7 +1029,7 @@ def combineImages_py3d(images, out_image, method='median', k='3.0'):
 	#write out FITS file
 	combined_img.writeFitsData(out_image)
 
-def subtractStraylight_py3d(image, trace, stray_image, clean_image, disp_axis='X',  aperture='7', poly_cross='4', smooth_disp='5', smooth_gauss='10.0', parallel='auto'):
+def subtractStraylight_drp(image, trace, stray_image, clean_image, disp_axis='X',  aperture='7', poly_cross='4', smooth_disp='5', smooth_gauss='10.0', parallel='auto'):
 	"""
 			Subtracts a diffuse background signal (stray light) from the raw data. It uses the regions between fiber to estimate the stray light signal and
 			smoothes the result by a polyon in cross-disperion direction and afterwards a wide 2D Gaussian filter to reduce the introduction of low frequency noise.
@@ -1055,7 +1055,7 @@ def subtractStraylight_py3d(image, trace, stray_image, clean_image, disp_axis='X
 
 			Examples
 			----------------
-			user:> Py3D image subtractStrylight IMAGE.fits TRACE.fits CLEAN.fits x aperture=9 poly_cross=6 smooth_gauss=20.0
+			user:> lvmdrp image subtractStrylight IMAGE.fits TRACE.fits CLEAN.fits x aperture=9 poly_cross=6 smooth_gauss=20.0
 	"""
 	# convert input parameters to proper type
 	aperture = int(aperture)
@@ -1127,7 +1127,7 @@ def subtractStraylight_py3d(image, trace, stray_image, clean_image, disp_axis='X
 	img_out.writeFitsData(clean_image)
 	img_smooth.writeFitsData(stray_image)
 
-def traceFWHM_py3d(image, trace, fwhm_out, disp_axis='X', blocks='20', steps='100', coadd='10', poly_disp='5', threshold_flux='50.0', init_fwhm='2.0', clip='', parallel='auto'):
+def traceFWHM_drp(image, trace, fwhm_out, disp_axis='X', blocks='20', steps='100', coadd='10', poly_disp='5', threshold_flux='50.0', init_fwhm='2.0', clip='', parallel='auto'):
 	"""
 			Measures the FWHM of the cross-dispersion fiber profile across the CCD.  It assumes that the profiles have a Gaussian shape and that the width  is CONSTANT for
 			a BLOCK of fibers in cross-dispersion direction.  If the FITS image contains an extension with the error, the error frame will be taken into account in the Gaussian fitting.
@@ -1167,7 +1167,7 @@ def traceFWHM_py3d(image, trace, fwhm_out, disp_axis='X', blocks='20', steps='10
 
 			Examples
 			----------------
-			user:> Py3D image traceFWHM IMAGE.fits TRACE.fits FWHM.fits x blocks=32 steps=50 poly_disp=20 clip=2,6 parallel=2
+			user:> lvmdrp image traceFWHM IMAGE.fits TRACE.fits FWHM.fits x blocks=32 steps=50 poly_disp=20 clip=2,6 parallel=2
 	"""
 
 	# convert input parameters to proper type
@@ -1245,7 +1245,7 @@ def traceFWHM_py3d(image, trace, fwhm_out, disp_axis='X', blocks='20', steps='10
 	# write out FWHM trace to FITS file
 	traceFWHM.writeFitsData(fwhm_out)
 
-def offsetTrace_py3d(image, trace, disp, lines, logfile,  blocks='15', disp_axis='X',  init_offset='0.0', size='20'):
+def offsetTrace_drp(image, trace, disp, lines, logfile,  blocks='15', disp_axis='X',  init_offset='0.0', size='20'):
 	"""
 			Measures the offset in the fiber trace in  cross-dispersion direction in an object raw frame compared to the traces measured from a continuum lamp frame.
 			The measurements are stored in a ASCII logfile for futher processing and usage.
@@ -1276,7 +1276,7 @@ def offsetTrace_py3d(image, trace, disp, lines, logfile,  blocks='15', disp_axis
 
 			Examples
 			----------------
-			user:> Py3D image offsetTrace IMAGE.fits TRACE.fits DISP.fits  blocks=32 size=30
+			user:> lvmdrp image offsetTrace IMAGE.fits TRACE.fits DISP.fits  blocks=32 size=30
 	"""
 	lines = lines.split(',')
 	size = float(size)
@@ -1362,7 +1362,7 @@ def offsetTrace_py3d(image, trace, disp, lines, logfile,  blocks='15', disp_axis
 	img.writeFitsHeader(image)
 	log.close()
 
-def offsetTrace2_py3d(image, trace, trace_fwhm, disp, lines, logfile,  blocks='15', disp_axis='X', min_offset='-2',max_offset='2',step_offset='0.1', size='20'):
+def offsetTrace2_drp(image, trace, trace_fwhm, disp, lines, logfile,  blocks='15', disp_axis='X', min_offset='-2',max_offset='2',step_offset='0.1', size='20'):
 	"""
 			Measures the offset in the fiber trace in  cross-dispersion direction in an object raw frame compared to the traces measured from a continuum lamp frame.
 			The measurements are stored in a ASCII logfile for futher processing and usage.
@@ -1393,7 +1393,7 @@ def offsetTrace2_py3d(image, trace, trace_fwhm, disp, lines, logfile,  blocks='1
 
 			Examples
 			----------------
-			user:> Py3D image offsetTrace IMAGE.fits TRACE.fits DISP.fits  blocks=32 size=30
+			user:> lvmdrp image offsetTrace IMAGE.fits TRACE.fits DISP.fits  blocks=32 size=30
 	"""
 	lines = lines.split(',')
 	size = float(size)
@@ -1467,7 +1467,7 @@ def offsetTrace2_py3d(image, trace, trace_fwhm, disp, lines, logfile,  blocks='1
 	img.writeFitsHeader(image)
 	log.close()
 
-def extractSpec_py3d(image, trace, out_rss,  method='optimal',  aperture='7', fwhm='2.5', disp_axis='X',  replace_error='1e10', plot='-1', parallel='auto'):
+def extractSpec_drp(image, trace, out_rss,  method='optimal',  aperture='7', fwhm='2.5', disp_axis='X',  replace_error='1e10', plot='-1', parallel='auto'):
 	"""
 			Extracts the flux for each fiber along the dispersion direction which is written into an RSS FITS file format.
 			Either a simple aperture or an optimal extraction scheme may be used.
@@ -1501,7 +1501,7 @@ def extractSpec_py3d(image, trace, out_rss,  method='optimal',  aperture='7', fw
 
 			Examples
 			----------------
-			user:> Py3D image extractSpec IMAGE.fits TRACE.fits RSS.fits optimal fwhm=FWHM.fits
+			user:> lvmdrp image extractSpec IMAGE.fits TRACE.fits RSS.fits optimal fwhm=FWHM.fits
 	"""
 
 
@@ -1577,7 +1577,7 @@ def extractSpec_py3d(image, trace, out_rss,  method='optimal',  aperture='7', fw
 	  rss.setHdrValue('hierarch PIPE CDISP FWHM SIG',numpy.std(trace_fwhm._data[trace_mask._mask==False]))
 	rss.writeFitsData(out_rss)
 
-def calibrateSDSSImage_py3d(file_in, file_out, field_file):
+def calibrateSDSSImage_drp(file_in, file_out, field_file):
 	"""
 			Converts the original SDSS image as retrieved from the DR into a photometrically calibrated image
 			in untis of ??. Photometric information are taken from the corresponding SDSS field FITS file.
@@ -1593,13 +1593,13 @@ def calibrateSDSSImage_py3d(file_in, file_out, field_file):
 
 			Examples
 			----------------
-			user:> Py3D image calibrateSDSSImage fpC-001453-g4-0030.fit.gz SDSS_calib.fits drField-001453-4-40-0030.fit
+			user:> lvmdrp image calibrateSDSSImage fpC-001453-g4-0030.fit.gz SDSS_calib.fits drField-001453-4-40-0030.fit
 	"""
 	image = loadImage(file_in)
 	calImage = image.calibrateSDSS(field_file)
 	calImage.writeFitsData(file_out)
 
-def subtractBias_py3d(file_in, file_out, bias, compute_error='1', boundary_x='', boundary_y='', gain='', rdnoise='', subtract_light='0'):
+def subtractBias_drp(file_in, file_out, bias, compute_error='1', boundary_x='', boundary_y='', gain='', rdnoise='', subtract_light='0'):
 	subtract_light= bool(int(subtract_light))
 	compute_error = bool(int(compute_error))
 	image = loadImage(file_in)
@@ -1640,7 +1640,7 @@ def subtractBias_py3d(file_in, file_out, bias, compute_error='1', boundary_x='',
 
 	clean.writeFitsData(file_out)
 
-def testres_py3d(image, trace, fwhm, flux):
+def testres_drp(image, trace, fwhm, flux):
 	"""
 			Historic task used for debugging of the the extraction routine...
 	"""

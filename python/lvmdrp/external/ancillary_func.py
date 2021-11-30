@@ -1,6 +1,6 @@
 from __future__ import division
 from past.utils import old_div
-from Py3D.core.spectrum1d import *
+from lvmdrp.core.spectrum1d import *
 import numpy
 
 def extinctCAHA(wave, extinct_v, type='mean'):

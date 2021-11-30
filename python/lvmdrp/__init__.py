@@ -1,20 +1,16 @@
-# encoding: utf-8
+#import fit_profile
+#import pyfits, numpy, pylab, sys, time
+#from types import *
+#import exceptions, copy_reg
+#from copy import deepcopy
+#from scipy import ndimage
+#from scipy import signal
+#from scipy import optimize
+#from scipy import sparse
+#from scipy import interpolate
+#from multiprocessing import Pool
+#from multiprocessing import cpu_count
 
-from __future__ import absolute_import, division, print_function, unicode_literals
-
-from .utils import get_config, get_logger
-
-
-NAME = 'drp'
-
-
-# Loads config
-config = get_config(NAME)
-
-
-# Inits the logging system. Only shell logging, and exception and warning catching.
-# File logging can be started by calling log.start_file_logger(path).
-log = get_logger(NAME)
-
-
-__version__ = '0.1.0dev'
+from .core import *
+from . import functions
+from . import external

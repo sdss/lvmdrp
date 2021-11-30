@@ -17,18 +17,18 @@ from scipy import ndimage
 from scipy import optimize
 from scipy import stats
 from scipy import interpolate
-from Py3D.core.rss  import *
-from Py3D.core.cube  import *
-from Py3D.core.image import *
-from Py3D.core.passband import *
+from lvmdrp.core.rss  import *
+from lvmdrp.core.cube  import *
+from lvmdrp.core.image import *
+from lvmdrp.core.passband import *
 
-from Py3D.core import fit_profile
-from Py3D.external import ancillary_func
+from lvmdrp.core import fit_profile
+from lvmdrp.external import ancillary_func
 
 
 description='Provides Methods to process Row Stacked Spectra (RSS) files'
 
-def mergeRSS_py3d(files_in, file_out,  mergeHdr='1'):
+def mergeRSS_drp(files_in, file_out,  mergeHdr='1'):
 	"""
 			Different RSS are merged into a common file by extending the number of fibers.
 			Note that the number of spectral pixel need to be the same and that all input RSS must have the same extension.
@@ -45,7 +45,7 @@ def mergeRSS_py3d(files_in, file_out,  mergeHdr='1'):
 
 			Examples
 			----------------
-			user:> Py3D rss mergeRSS RSS1.fits,RSS2.fits,RSS3.fits RSS_OUT.fits
+			user:> lvmdrp rss mergeRSS RSS1.fits,RSS2.fits,RSS3.fits RSS_OUT.fits
 	"""
 
 	files = files_in.split(',')
@@ -62,7 +62,7 @@ def mergeRSS_py3d(files_in, file_out,  mergeHdr='1'):
 	rss.writeFitsData(file_out)
 
 
-def detWaveSolution_py3d(arc_rss, prefix_out, ref_line_file='', ref_spec='', pixel='', ref_lines='', poly_dispersion='-5', poly_fwhm='-3,-5', init_back='10.0',  aperture='13', flux_min='200.0', fwhm_max='10.0', rel_flux_limits='0.1,5.0', negative=False, verbose='1' ):
+def detWaveSolution_drp(arc_rss, prefix_out, ref_line_file='', ref_spec='', pixel='', ref_lines='', poly_dispersion='-5', poly_fwhm='-3,-5', init_back='10.0',  aperture='13', flux_min='200.0', fwhm_max='10.0', rel_flux_limits='0.1,5.0', negative=False, verbose='1' ):
 	"""
 			Measures the pixel position of emission lines in wavelength UNCALIBRATED for all fibers of the RSS.
 			Starting from the initial guess of pixel positions for a given fiber, the program measures the position using
@@ -119,8 +119,8 @@ def detWaveSolution_py3d(arc_rss, prefix_out, ref_line_file='', ref_spec='', pix
 
 			Examples
 			----------------
-			user:> Py3D rss detWaveSolution ARC_RSS.fits arc REF_FILE.txt poly_dispersion='-7' poly_fwhm='-4,-5'
-			user:> Py3D rss detWaveSolution ARC_RSS.fits arc ref_spec=100 pixel=200,500,1000 ref_lines=3000.0,5000.0,8000.0 flux_min=100.0
+			user:> lvmdrp rss detWaveSolution ARC_RSS.fits arc REF_FILE.txt poly_dispersion='-7' poly_fwhm='-4,-5'
+			user:> lvmdrp rss detWaveSolution ARC_RSS.fits arc ref_spec=100 pixel=200,500,1000 ref_lines=3000.0,5000.0,8000.0 flux_min=100.0
 	"""
 
 
@@ -273,7 +273,7 @@ def detWaveSolution_py3d(arc_rss, prefix_out, ref_line_file='', ref_spec='', pix
 	wave_trace.writeFitsData(prefix_out+'.disp.fits')
 	fwhm_trace.writeFitsData(prefix_out+'.res.fits')
 
-def  createPixTable_py3d(rss_in, rss_out, arc_wave, arc_fwhm='', cropping=''):
+def  createPixTable_drp(rss_in, rss_out, arc_wave, arc_fwhm='', cropping=''):
 	"""
 			Adds the wavelength and possibly also the spectral resolution (FWHM) pixel table as new extension to
 			the RSS that is stored as a seperate RSS file.
@@ -292,8 +292,8 @@ def  createPixTable_py3d(rss_in, rss_out, arc_wave, arc_fwhm='', cropping=''):
 
 			Examples
 			----------------
-			user:> Py3D rss createPixTable RSS_IN.fits RSS_OUT.fits WAVE.fits
-			user:> Py3D rss createPixTable RSS_IN.fits RSS_OUT.fits WAVE.fits FWHM.fits
+			user:> lvmdrp rss createPixTable RSS_IN.fits RSS_OUT.fits WAVE.fits
+			user:> lvmdrp rss createPixTable RSS_IN.fits RSS_OUT.fits WAVE.fits FWHM.fits
 	"""
 	rss = RSS()
 	rss.loadFitsData(rss_in)
@@ -326,7 +326,7 @@ def  createPixTable_py3d(rss_in, rss_out, arc_wave, arc_fwhm='', cropping=''):
 	rss.writeFitsData(rss_out)
 
 
-def checkPixTable_py3d(rss_in, ref_lines, logfile, blocks='15',  init_back='100.0', aperture='10'):
+def checkPixTable_drp(rss_in, ref_lines, logfile, blocks='15',  init_back='100.0', aperture='10'):
 	"""
 			Measures the offset in dispersion direction between the object frame and the used calibration frames.
 			It compares the wavelength of emission lines (i.e. night sky line) in the RSS as measured by Gaussian fitting
@@ -352,8 +352,8 @@ def checkPixTable_py3d(rss_in, ref_lines, logfile, blocks='15',  init_back='100.
 
 			Examples
 			----------------
-			user:> Py3D rss checkPixTable RSS_IN.fits 4500.0,5577.4,6300.3 OFFSETWAVE.log
-			user:> Py3D rss checkPixTable RSS_IN.fits 4500.0,5577.4,6300.3 OFFSETWAVE.log aperture=14
+			user:> lvmdrp rss checkPixTable RSS_IN.fits 4500.0,5577.4,6300.3 OFFSETWAVE.log
+			user:> lvmdrp rss checkPixTable RSS_IN.fits 4500.0,5577.4,6300.3 OFFSETWAVE.log aperture=14
 	"""
 	centres = numpy.array(ref_lines.split(',')).astype('float')
 	init_back = float(init_back)
@@ -414,7 +414,7 @@ def checkPixTable_py3d(rss_in, ref_lines, logfile, blocks='15',  init_back='100.
 	rss.writeFitsHeader(rss_in)
 	log.close()
 
-def correctPixTable_py3d(rss_in, rss_out, logfile, ref_id, smooth_poly_cross='', smooth_poly_disp='', poly_disp='6', verbose='0'):
+def correctPixTable_drp(rss_in, rss_out, logfile, ref_id, smooth_poly_cross='', smooth_poly_disp='', poly_disp='6', verbose='0'):
 	"""
 		   Corrects the RSS wavelength pixel table for possible offsets in dispersion direction due to flexure effects
 		   with respect to the calibration frames taken for this object. The offfsets need to be determined beforehand
@@ -449,7 +449,7 @@ def correctPixTable_py3d(rss_in, rss_out, logfile, ref_id, smooth_poly_cross='',
 
 			Examples
 			----------------
-			user:> Py3D rss correctPixTable RSS_in.fits RSS_out.fits OFFSETWAVE.log RSS_REF_ID poly_disp=7
+			user:> lvmdrp rss correctPixTable RSS_in.fits RSS_out.fits OFFSETWAVE.log RSS_REF_ID poly_disp=7
 
 	"""
 
@@ -513,7 +513,7 @@ def correctPixTable_py3d(rss_in, rss_out, logfile, ref_id, smooth_poly_cross='',
 		rss[i]=spec
 	rss.writeFitsData(rss_out)
 
-def resampleWave_py3d(rss_in, rss_out, method='spline', start_wave='', end_wave='', disp_pix='', err_sim='500', replace_error='1e10', correctHvel='',parallel='auto'):
+def resampleWave_drp(rss_in, rss_out, method='spline', start_wave='', end_wave='', disp_pix='', err_sim='500', replace_error='1e10', correctHvel='',parallel='auto'):
 	"""
 			Resamples the RSS with a wavelength in pixel table format to an RSS with a common wavelength solution for each fiber.
 			A Monte Carlo scheme can be used to propagte the error to the resample spectrum. Note that correlated noise is not taken
@@ -550,8 +550,8 @@ def resampleWave_py3d(rss_in, rss_out, method='spline', start_wave='', end_wave=
 
 			Examples
 			----------------
-			user:> Py3D rss resampleWave RSS_in.fits RSS_out.fits
-			user:> Py3D rss resampleWave RSS_in.fits RSS_out.fits start_wave=3700.0 end_wave=7000.0 disp_pix=2.0 err_sim=0
+			user:> lvmdrp rss resampleWave RSS_in.fits RSS_out.fits
+			user:> lvmdrp rss resampleWave RSS_in.fits RSS_out.fits start_wave=3700.0 end_wave=7000.0 disp_pix=2.0 err_sim=0
 	"""
 	err_sim=int(err_sim)
 	replace_error=float(replace_error)
@@ -618,7 +618,7 @@ def resampleWave_py3d(rss_in, rss_out, method='spline', start_wave='', end_wave=
 
 	resamp_rss.writeFitsData(rss_out)
 
-def matchResolution_py3d(rss_in, rss_out, targetFWHM, parallel='auto'):
+def matchResolution_drp(rss_in, rss_out, targetFWHM, parallel='auto'):
 	"""
 			Homogenise the spectral resolution of the RSS to a common spectral resolution (FWHM) by smoothing
 			with a corresponding Gaussian. A pixel table with the spectral resolution needs to be present in the RSS.
@@ -639,7 +639,7 @@ def matchResolution_py3d(rss_in, rss_out, targetFWHM, parallel='auto'):
 
 			Examples
 			----------------
-			user:> Py3D rss matchResolution RSS_in.fits RSS_out.fits 6.0
+			user:> lvmdrp rss matchResolution RSS_in.fits RSS_out.fits 6.0
 	"""
 	targetFWHM = float(targetFWHM)
 	rss = RSS()
@@ -674,7 +674,7 @@ def matchResolution_py3d(rss_in, rss_out, targetFWHM, parallel='auto'):
 	rss.writeFitsData(rss_out)
 
 
-def constructSkySpec_py3d(rss_in, sky_out, clip_sigma='3.0', nsky='0', filter='', non_neg='1', plot='0'):
+def constructSkySpec_drp(rss_in, sky_out, clip_sigma='3.0', nsky='0', filter='', non_neg='1', plot='0'):
 	"""
 			Creates a average (sky) spectrum from the RSS, which stored either as a FITS or an ASCII file.
 			Spectra may be rejected from the median computation. Bad pixel in the RSS are not included
@@ -696,8 +696,8 @@ def constructSkySpec_py3d(rss_in, sky_out, clip_sigma='3.0', nsky='0', filter=''
 
 			Examples
 			----------------
-			user:> Py3D rss constructSkySpec RSS_IN.fits SKY_OUT.fits 3.0
-			user:> Py3D rss constructSkySpec RSS_IN.fits SKY_OUT.txt
+			user:> lvmdrp rss constructSkySpec RSS_IN.fits SKY_OUT.fits 3.0
+			user:> lvmdrp rss constructSkySpec RSS_IN.fits SKY_OUT.txt
 	"""
 	clip_sigma=float(clip_sigma)
 	nsky = int(nsky)
@@ -760,7 +760,7 @@ def constructSkySpec_py3d(rss_in, sky_out, clip_sigma='3.0', nsky='0', filter=''
 	if '.txt' in sky_out:
 		skySpec.writeTxtData(sky_out)
 
-def subtractSkySpec_py3d(rss_in, rss_out, sky, factor='1', scale_region='', scale_ind=False,parallel='auto'):
+def subtractSkySpec_drp(rss_in, rss_out, sky, factor='1', scale_region='', scale_ind=False,parallel='auto'):
 	"""
 			Subtracts a (sky) spectrum, which was stored as a FITS file, from the whole RSS.
 			The error will be propagated if the spectrum AND the RSS contain error information.
@@ -779,7 +779,7 @@ def subtractSkySpec_py3d(rss_in, rss_out, sky, factor='1', scale_region='', scal
 
 			Examples
 			----------------
-			user:> Py3D rss subtractSkySpec RSS_IN.fits RSS_OUT.fits SKY_SPEC.fits
+			user:> lvmdrp rss subtractSkySpec RSS_IN.fits RSS_OUT.fits SKY_SPEC.fits
 	"""
 
 	factor=numpy.array(factor).astype(numpy.float32)
@@ -849,7 +849,7 @@ def subtractSkySpec_py3d(rss_in, rss_out, sky, factor='1', scale_region='', scal
 	rss.writeFitsData(rss_out)
 
 
-def splitFibers_py3d(rss_in, splitted_out, contains):
+def splitFibers_drp(rss_in, splitted_out, contains):
 	"""
 			Subtracts a (sky) spectrum, which was stored as a FITS file, from the whole RSS.
 			The error will be propagated if the spectrum AND the RSS contain error information.
@@ -869,8 +869,8 @@ def splitFibers_py3d(rss_in, splitted_out, contains):
 
 			Examples
 			----------------
-			user:> Py3D rss splitFibers RSS_IN.fits RSS_OBJ.fits,RSS_SKY.fits SKY,OBJ
-			user:> Py3D rss splitFibers RSS_IN.fits RSS_OBJ_SKY.fits,RSS_CAL.fits SKY;OBJ,SKY
+			user:> lvmdrp rss splitFibers RSS_IN.fits RSS_OBJ.fits,RSS_SKY.fits SKY,OBJ
+			user:> lvmdrp rss splitFibers RSS_IN.fits RSS_OBJ_SKY.fits,RSS_CAL.fits SKY;OBJ,SKY
 	"""
 	contains = contains.split(',')
 	splitted_out = splitted_out.split(',')
@@ -882,7 +882,7 @@ def splitFibers_py3d(rss_in, splitted_out, contains):
 
 
 
-def createFiberFlat_py3d(rss_in, rss_out, smooth_poly='0', clip='', valid=''):
+def createFiberFlat_drp(rss_in, rss_out, smooth_poly='0', clip='', valid=''):
 	"""
 			Creates a fiberflat from a wavelength calibrated skyflat RSS by computing the
 			relative transmission to the median spectrum.
@@ -908,8 +908,8 @@ def createFiberFlat_py3d(rss_in, rss_out, smooth_poly='0', clip='', valid=''):
 
 			Examples
 			----------------
-			user:> Py3D rss createFiberFlat RSS_IN.fits FIBERFLAT.fits clip=0.3,1.5 valid=100,250
-			user:> Py3D rss createFiberFlat RSS_IN.fits FIBERFLAT.fits -6 clip=0.1,2.0
+			user:> lvmdrp rss createFiberFlat RSS_IN.fits FIBERFLAT.fits clip=0.3,1.5 valid=100,250
+			user:> lvmdrp rss createFiberFlat RSS_IN.fits FIBERFLAT.fits -6 clip=0.1,2.0
 	"""
 	smooth_poly=int(smooth_poly)
 	if valid=='':
@@ -949,7 +949,7 @@ def createFiberFlat_py3d(rss_in, rss_out, smooth_poly='0', clip='', valid=''):
 	else:
 		fiberflat.writeFitsData(rss_out)
 
-def correctTraceMask_py3d(trace_in, trace_out, logfile, ref_file, poly_smooth=''):
+def correctTraceMask_drp(trace_in, trace_out, logfile, ref_file, poly_smooth=''):
 	"""
 		   Corrects the trace mask of the central fiber position for possible offsets in cross-dispersion direction due to
 		   flexure effects with respect to the calibration frames taken for this object. The offfsets need to be determined
@@ -973,8 +973,8 @@ def correctTraceMask_py3d(trace_in, trace_out, logfile, ref_file, poly_smooth=''
 
 			Examples
 			----------------
-			user:> Py3D rss correctTraceMask TRACE_IN.fits TRACE_OUT.fits OFFSET_TRACE.log REF_File_name
-			user:> Py3D rss correctTraceMask TRACE_IN.fits TRACE_OUT.fits OFFSET_TRACE.log REF_File_name poly_smooth= -6
+			user:> lvmdrp rss correctTraceMask TRACE_IN.fits TRACE_OUT.fits OFFSET_TRACE.log REF_File_name
+			user:> lvmdrp rss correctTraceMask TRACE_IN.fits TRACE_OUT.fits OFFSET_TRACE.log REF_File_name poly_smooth= -6
 	"""
 	log = open(logfile, 'r')
 	log_lines = log.readlines()
@@ -1029,7 +1029,7 @@ def correctTraceMask_py3d(trace_in, trace_out, logfile, ref_file, poly_smooth=''
 
 	trace.writeFitsData(trace_out)
 
-def correctFiberFlat_py3d(rss_in, rss_out, fiberflat, clip='0.2'):
+def correctFiberFlat_drp(rss_in, rss_out, fiberflat, clip='0.2'):
 	"""
 		   Correct an RSS frame for the effect of the different fiber transmission as measured by a fiberflat.
 
@@ -1047,8 +1047,8 @@ def correctFiberFlat_py3d(rss_in, rss_out, fiberflat, clip='0.2'):
 
 			Examples
 			----------------
-			user:> Py3D rss correctFiberFlat RSS_IN.fits RSS_OUT.fits FIBERFLAT_IN.fits
-			user:> Py3D rss correctFiberFlat RSS_IN.fits RSS_OUT.fits FIBERFLAT_IN.fits clip='0.4'
+			user:> lvmdrp rss correctFiberFlat RSS_IN.fits RSS_OUT.fits FIBERFLAT_IN.fits
+			user:> lvmdrp rss correctFiberFlat RSS_IN.fits RSS_OUT.fits FIBERFLAT_IN.fits clip='0.4'
 	"""
 	clip=float(clip)
 	rss = RSS()
@@ -1068,7 +1068,7 @@ def correctFiberFlat_py3d(rss_in, rss_out, fiberflat, clip='0.2'):
 	rss.writeFitsData(rss_out)
 
 
-def createSensFunction_py3d(rss_in, out_sens,  ref_spec, airmass, exptime, smooth_poly='5', smooth_ref='6.0', smooth_ref2='6.0', median_filt='0',coadd='1', extinct_v='0.0', extinct_curve='mean', aper_correct='1.0',  ref_units='1e-16', target_units='1e-16',column_wave='0', column_flux='1', delimiter='', header='1' , split='', mask_wave='', mask_telluric='', overlap='100', out_star='', verbose='0'):
+def createSensFunction_drp(rss_in, out_sens,  ref_spec, airmass, exptime, smooth_poly='5', smooth_ref='6.0', smooth_ref2='6.0', median_filt='0',coadd='1', extinct_v='0.0', extinct_curve='mean', aper_correct='1.0',  ref_units='1e-16', target_units='1e-16',column_wave='0', column_flux='1', delimiter='', header='1' , split='', mask_wave='', mask_telluric='', overlap='100', out_star='', verbose='0'):
 	smooth_poly=int(smooth_poly)
 	smooth_ref=float(smooth_ref)
 	smooth_ref2=float(smooth_ref2)
@@ -1230,7 +1230,7 @@ def createSensFunction_py3d(rss_in, out_sens,  ref_spec, airmass, exptime, smoot
 
 	out.close()
 
-def createSensFunction2_py3d(rss_in, out_sens, ref_spec, airmass, exptime, smooth_bspline='0.3', smooth_ref='6.0', smooth_ref2='6.0', median_filt='0',coadd='1', extinct_v='0.0', extinct_curve='mean', aper_correct='1.0',  ref_units='1e-16', target_units='1e-16',column_wave='0', column_flux='1', delimiter='', header='1' , mask_wave='', out_star='', verbose='0'):
+def createSensFunction2_drp(rss_in, out_sens, ref_spec, airmass, exptime, smooth_bspline='0.3', smooth_ref='6.0', smooth_ref2='6.0', median_filt='0',coadd='1', extinct_v='0.0', extinct_curve='mean', aper_correct='1.0',  ref_units='1e-16', target_units='1e-16',column_wave='0', column_flux='1', delimiter='', header='1' , mask_wave='', out_star='', verbose='0'):
 	smooth_bspline=float(smooth_bspline)
 	smooth_ref=float(smooth_ref)
 	smooth_ref2=float(smooth_ref2)
@@ -1340,7 +1340,7 @@ def createSensFunction2_py3d(rss_in, out_sens, ref_spec, airmass, exptime, smoot
 		out.write('%i %.3f %e\n'%(i,  sens_func_smooth._wave[i], sens_func_smooth._data[i]))
 	out.close()
 
-def fluxCalibration_py3d(rss_in, rss_out, sens_func, airmass, exptime, extinct_v='0.0', extinct_curve='mean', ref_units='1e-16', target_units='1e-16', norm_sb_fib=''):
+def fluxCalibration_drp(rss_in, rss_out, sens_func, airmass, exptime, extinct_v='0.0', extinct_curve='mean', ref_units='1e-16', target_units='1e-16', norm_sb_fib=''):
 	ref_units=float(ref_units)
 	target_units=float(target_units)
 	rss = RSS()
@@ -1396,7 +1396,7 @@ def fluxCalibration_py3d(rss_in, rss_out, sens_func, airmass, exptime, extinct_v
 
 
 
-def combineRSS_py3d(rsss, rss_out, method='mean'):
+def combineRSS_drp(rsss, rss_out, method='mean'):
 	# convert input parameters to proper type
 	list_rss= rsss.split(',')
 
@@ -1414,11 +1414,11 @@ def combineRSS_py3d(rsss, rss_out, method='mean'):
 
 
 
-def glueRSS_py3d(rsss,rss_out):
+def glueRSS_drp(rsss,rss_out):
 	list_rss= rsss.split(',')
 	glueRSS(list_rss,rss_out)
 
-def apertureFluxRSS_py3d(rss_in, center_x, center_y, hdr_prefix, arc_radius, flux_type='mean,3900,4600'):
+def apertureFluxRSS_drp(rss_in, center_x, center_y, hdr_prefix, arc_radius, flux_type='mean,3900,4600'):
 	flux_type=flux_type.split(',')
 	center_x = float(center_x)
 	center_y = float(center_y)
@@ -1444,7 +1444,7 @@ def apertureFluxRSS_py3d(rss_in, center_x, center_y, hdr_prefix, arc_radius, flu
 			rss.setHdrValue(hdr_prefix+' APER ERR', float('%.3f'%flux_spec[1]), flux_type[0].split('/')[-1].split('.')[0]+' band error (%.1farcsec diameter)'%(2*arc_radius) )
 	rss.writeFitsData(rss_in)
 
-def matchFluxRSS_py3d(rsss, center_x, center_y, hdr_prefixes, arc_radius, start_wave='3800', end_wave='4600', polyorder='2', verbose='0'):
+def matchFluxRSS_drp(rsss, center_x, center_y, hdr_prefixes, arc_radius, start_wave='3800', end_wave='4600', polyorder='2', verbose='0'):
 	verbose=int(verbose)
 	list_rss= rsss.split(',')
 	center_x = float(center_x)
@@ -1495,7 +1495,7 @@ def matchFluxRSS_py3d(rsss, center_x, center_y, hdr_prefixes, arc_radius, start_
 	if verbose==1:
 		pylab.show()
 
-def includePosTab_py3d(rss_in, position_table,  offset_x='0.0', offset_y='0.0'):
+def includePosTab_drp(rss_in, position_table,  offset_x='0.0', offset_y='0.0'):
 	"""
 		   Adds an ASCII file position table as a FITS table extension to the RSS file.
 		   An offset may be applied to the fiber positions in x and y direction independently.
@@ -1513,8 +1513,8 @@ def includePosTab_py3d(rss_in, position_table,  offset_x='0.0', offset_y='0.0'):
 
 			Examples
 			----------------
-			user:> Py3D rss includePosTab RSS.fits POSTAB.txt
-			user:> Py3D rss includePosTab RSS.fits POSTAB.txt  offset_x=-5.0 offset_y=3.0
+			user:> lvmdrp rss includePosTab RSS.fits POSTAB.txt
+			user:> lvmdrp rss includePosTab RSS.fits POSTAB.txt  offset_x=-5.0 offset_y=3.0
 	"""
 	offset_x=float(offset_x)
 	offset_y=float(offset_y)
@@ -1524,7 +1524,7 @@ def includePosTab_py3d(rss_in, position_table,  offset_x='0.0', offset_y='0.0'):
 	rss.offsetPosTab(offset_x, offset_y)
 	rss.writeFitsData(rss_in)
 
-def copyPosTab_py3d(rss_in, rss_out):
+def copyPosTab_drp(rss_in, rss_out):
 	"""
 		 Copies the position table FITS extension from one RSS to another RSS FITS file.
 
@@ -1537,7 +1537,7 @@ def copyPosTab_py3d(rss_in, rss_out):
 
 			Examples
 			----------------
-			user:> Py3D rss copyPosTab RSS1.fits RSS2.fits
+			user:> lvmdrp rss copyPosTab RSS1.fits RSS2.fits
 	"""
 	rss1 = RSS()
 	rss1.loadFitsData(rss_in)
@@ -1552,7 +1552,7 @@ def copyPosTab_py3d(rss_in, rss_out):
 	rss2._fiber_type = rss1._fiber_type
 	rss2.writeFitsData(rss_out)
 
-def offsetPosTab_py3d(rss_in, offset_x, offset_y):
+def offsetPosTab_drp(rss_in, offset_x, offset_y):
 	"""
 			Applies an offset to the fiber positions in x and y direction independently.
 
@@ -1567,7 +1567,7 @@ def offsetPosTab_py3d(rss_in, offset_x, offset_y):
 
 			Examples
 			----------------
-			user:> Py3D rss offsetPosTab RSS.fits offset_x=-5.0 offset_y=3.0
+			user:> lvmdrp rss offsetPosTab RSS.fits offset_x=-5.0 offset_y=3.0
 	"""
 	offset_x = float(offset_x)
 	offset_y = float(offset_y)
@@ -1576,7 +1576,7 @@ def offsetPosTab_py3d(rss_in, offset_x, offset_y):
 	rss.offsetPosTab(offset_x, offset_y)
 	rss.writeFitsData(rss_in)
 
-def rotatePosTab_py3d(rss_in, angle='0.0'):
+def rotatePosTab_drp(rss_in, angle='0.0'):
 	"""
 			Applies an offset to the fiber positions in x and y direction independently.
 
@@ -1589,7 +1589,7 @@ def rotatePosTab_py3d(rss_in, angle='0.0'):
 
 			Examples
 			----------------
-			user:> Py3D rss  RSS.fits rotate=152.0
+			user:> lvmdrp rss  RSS.fits rotate=152.0
 	"""
 	angle = float(angle)
 	rss = loadRSS(rss_in)
@@ -1597,7 +1597,7 @@ def rotatePosTab_py3d(rss_in, angle='0.0'):
 	rss.setPosTab(new_pos)
 	rss.writeFitsData(rss_in)
 
-def createCube_py3d(rss_in, cube_out, position_x='', position_y='', ref_pos_wave='', int_ref='1', mode='inverseDistance', resolution='1.0', sigma='1.0', radius_limit='5.0', min_fibers='3', slope='2', bad_threshold='0.01',replace_error='1e10', flip_x='0', flip_y='0', full_field='0', store_cover='0', parallel='auto', verbose='0'):
+def createCube_drp(rss_in, cube_out, position_x='', position_y='', ref_pos_wave='', int_ref='1', mode='inverseDistance', resolution='1.0', sigma='1.0', radius_limit='5.0', min_fibers='3', slope='2', bad_threshold='0.01',replace_error='1e10', flip_x='0', flip_y='0', full_field='0', store_cover='0', parallel='auto', verbose='0'):
 	resolution=float(resolution)
 	sigma = float(sigma)
 	radius_limit=float(radius_limit)
@@ -1775,7 +1775,7 @@ def createCube_py3d(rss_in, cube_out, position_x='', position_y='', ref_pos_wave
 		cube.setHdrValue('CRPIX2',  ref_y,  'Ref pixel for WCS')
 	cube.writeFitsData(cube_out)
 
-def correctGalExtinct_py3d(rss_in, rss_out, Av, Rv='3.1', verbose='0'):
+def correctGalExtinct_drp(rss_in, rss_out, Av, Rv='3.1', verbose='0'):
 	"""
 			Corrects the wavelength calibrated RSS for the effect of galactic extinction using
 			the galactic extinction curve from Cardelli et al. (1989).
@@ -1795,7 +1795,7 @@ def correctGalExtinct_py3d(rss_in, rss_out, Av, Rv='3.1', verbose='0'):
 
 			Examples
 			----------------
-			user:> Py3D rss correctGalExtinct RSS_IN.fits RSS_OUT.fits 0.33
+			user:> lvmdrp rss correctGalExtinct RSS_IN.fits RSS_OUT.fits 0.33
 	"""
 
 	Av=float(Av)
@@ -1813,7 +1813,7 @@ def correctGalExtinct_py3d(rss_in, rss_out, Av, Rv='3.1', verbose='0'):
 		rss_corr = rss*(1.0/10**(old_div(Alambda,-2.5)))
 	rss_corr.writeFitsData(rss_out)
 
-def correctTelluric_py3d(rss_in, rss_out, telluric_spectrum, airmass='AIRMASS'):
+def correctTelluric_drp(rss_in, rss_out, telluric_spectrum, airmass='AIRMASS'):
 	"""
 			Corrects the wavelength calibrated RSS for the effect of telluric absoroption using
 			a transmission spectrum generated from a star.
@@ -1832,8 +1832,8 @@ def correctTelluric_py3d(rss_in, rss_out, telluric_spectrum, airmass='AIRMASS'):
 
 			Examples
 			----------------
-			user:> Py3D rss correctTelluric RSS_IN.fits RSS_OUT.fits TELL_SPEC.fits
-			user:> Py3D rss correctTelluric RSS_IN.fits RSS_OUT.fits TELL_SPEC.fits  1.4
+			user:> lvmdrp rss correctTelluric RSS_IN.fits RSS_OUT.fits TELL_SPEC.fits
+			user:> lvmdrp rss correctTelluric RSS_IN.fits RSS_OUT.fits TELL_SPEC.fits  1.4
 	"""
 	rss = loadRSS(rss_in)
 	telluric = Spectrum1D()
@@ -1856,7 +1856,7 @@ def correctTelluric_py3d(rss_in, rss_out, telluric_spectrum, airmass='AIRMASS'):
 	rss_corr.writeFitsData(rss_out)
 
 
-def splitFile_py3d(rss_in, data='', error='', mask='', wave='', fwhm='', position_table=''):
+def splitFile_drp(rss_in, data='', error='', mask='', wave='', fwhm='', position_table=''):
 	"""
 			Copies the different extension of the RSS into separate files.
 
@@ -1879,8 +1879,8 @@ def splitFile_py3d(rss_in, data='', error='', mask='', wave='', fwhm='', positio
 
 			Examples
 			----------------
-			user:> Py3D rss splitFile RSS_IN.fits DATA_RSS.fits
-			user:> Py3D rss splitFile RSS_IN.fits mask=MASK_RSS.fits position_table=POSTAB.txt
+			user:> lvmdrp rss splitFile RSS_IN.fits DATA_RSS.fits
+			user:> lvmdrp rss splitFile RSS_IN.fits mask=MASK_RSS.fits position_table=POSTAB.txt
 	"""
 	rss = loadRSS(rss_in)
 
@@ -1896,7 +1896,7 @@ def splitFile_py3d(rss_in, data='', error='', mask='', wave='', fwhm='', positio
 	if position_table!='' and rss._arc_position_x!=None:
 		rss.writeTxtPosTab(position_table)
 
-def maskFibers_py3d(rss_in,rss_out,fibers,replace_error='1e10'):
+def maskFibers_drp(rss_in,rss_out,fibers,replace_error='1e10'):
 	replace_error = float(replace_error)
 	mask_fibers = fibers.split(',')
 
@@ -1910,7 +1910,7 @@ def maskFibers_py3d(rss_in,rss_out,fibers,replace_error='1e10'):
 			rss.maskFiber(int(mask_fibers[i])-1,replace_error=replace_error)
 	rss.writeFitsData(rss_out)
 
-def maskNAN_py3d(rss_in, replace_error='1e12'):
+def maskNAN_drp(rss_in, replace_error='1e12'):
 	rss = loadRSS(rss_in)
 	select = numpy.isnan(rss._data)
 	if numpy.sum(select)>0:
@@ -1933,7 +1933,7 @@ def flatten(x):
 			result.append(el)
 	return result
 
-def registerSDSS_py3d(rss_in, rss_out, sdss_file, sdss_field, filter, ra, dec, hdr_prefix,  search_box='20.0,2.6', step='1.0,0.2', offset_x ='0.0',  offset_y='0.0', quality_figure='',  angle_key='SPA', parallel='auto', verbose='0'):
+def registerSDSS_drp(rss_in, rss_out, sdss_file, sdss_field, filter, ra, dec, hdr_prefix,  search_box='20.0,2.6', step='1.0,0.2', offset_x ='0.0',  offset_y='0.0', quality_figure='',  angle_key='SPA', parallel='auto', verbose='0'):
 	"""
 			Copies the different extension of the RSS into separate files.
 
@@ -1974,8 +1974,8 @@ def registerSDSS_py3d(rss_in, rss_out, sdss_file, sdss_field, filter, ra, dec, h
 
 			Examples
 			----------------
-			user:> Py3D rss registerSDSS RSS_IN.fits RSS_OUT.fits SDSS_r_IMG.fits SDSS_FIELD.fit sloan_r.dat,0,1 234.0 20.3 'hierarch TEST'
-			user:> Py3D rss registerSDSS RSS_IN.fits RSS_OUT.fits SDSS_r_IMG.fits SDSS_FIELD.fit sloan_r.dat,0,1 234.0 20.3 'hierarch TEST'  search_box=20,2 step=2,0.5 quality_figure='test.png' parralel=3 verbose=1
+			user:> lvmdrp rss registerSDSS RSS_IN.fits RSS_OUT.fits SDSS_r_IMG.fits SDSS_FIELD.fit sloan_r.dat,0,1 234.0 20.3 'hierarch TEST'
+			user:> lvmdrp rss registerSDSS RSS_IN.fits RSS_OUT.fits SDSS_r_IMG.fits SDSS_FIELD.fit sloan_r.dat,0,1 234.0 20.3 'hierarch TEST'  search_box=20,2 step=2,0.5 quality_figure='test.png' parralel=3 verbose=1
 	"""
 
 	import astLib
@@ -2094,7 +2094,7 @@ def registerSDSS_py3d(rss_in, rss_out, sdss_file, sdss_field, filter, ra, dec, h
 			plt.show()
 
 
-def DAR_registerSDSS_py3d(rss_in, sdss_file, sdss_field, ra, dec, out_prefix,  ref_wave, coadd='150', step='150', smooth_poly='3', resolution='0.3,0.05', guess_x ='0.0',  guess_y='0.0',start_wave='', end_wave='',  parallel='auto', verbose='0'):
+def DAR_registerSDSS_drp(rss_in, sdss_file, sdss_field, ra, dec, out_prefix,  ref_wave, coadd='150', step='150', smooth_poly='3', resolution='0.3,0.05', guess_x ='0.0',  guess_y='0.0',start_wave='', end_wave='',  parallel='auto', verbose='0'):
 	"""
 			NOT YET TEST.
 			Requires the AstLib python package to be used

@@ -1,11 +1,11 @@
 from __future__ import division
 from builtins import range
 from past.utils import old_div
-from Py3D.core.header import *
-from Py3D.core.positionTable import PositionTable
-from Py3D.core.image import Image
-from Py3D.core.spectrum1d import Spectrum1D
-from Py3D.core.passband import PassBand
+from lvmdrp.core.header import *
+from lvmdrp.core.positionTable import PositionTable
+from lvmdrp.core.image import Image
+from lvmdrp.core.spectrum1d import Spectrum1D
+from lvmdrp.core.passband import PassBand
 from astropy.io import fits as pyfits
 import numpy
 from scipy import ndimage

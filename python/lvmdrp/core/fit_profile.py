@@ -9,7 +9,7 @@ import scipy
 from scipy import special
 from scipy import optimize
 from copy import deepcopy
-import Py3D
+import lvmdrp
 from multiprocessing import cpu_count
 from multiprocessing import Pool
 try:
@@ -373,7 +373,7 @@ class parFile(fit_profile1D):
 		self._fixed[self._names[-1]] = par_fix
 		for n in self._names:
 			if self._profile_type[n]=='TemplateScale':
-				spec = Py3D.Spectrum1D()
+				spec = lvmdrp.Spectrum1D()
 				spec.loadFitsData(self._parameters[n]['TemplateSpec'])
 				self._template_spec[n]=spec
 		self.freePar()

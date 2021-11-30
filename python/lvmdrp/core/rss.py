@@ -2,10 +2,10 @@ from __future__ import division
 from builtins import str
 from builtins import range
 from past.utils import old_div
-from Py3D.core.fiberrows import *
-from Py3D.core.spectrum1d import *
-from Py3D.core.cube import *
-from Py3D.core.apertures import *
+from lvmdrp.core.fiberrows import *
+from lvmdrp.core.spectrum1d import *
+from lvmdrp.core.cube import *
+from lvmdrp.core.apertures import *
 from multiprocessing import cpu_count
 from multiprocessing import Pool
 from copy import deepcopy
