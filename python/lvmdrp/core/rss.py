@@ -28,28 +28,28 @@ class RSS(FiberRows):
 
 
 			# subtract data if contained in both
-			if self._data!=None and other._data!=None:
+			if self._data is not None and other._data is not None:
 				data = self._data*other._data
 			else:
 				data = self._data
 
 
 			# add error if contained in both
-			if self._error!=None and other._error!=None:
+			if self._error is not None and other._error is not None:
 				error = numpy.sqrt(other._data**2*self._error**2+self._data**2*other._error**2)
-			elif self._error!=None:
+			elif self._error is not None:
 				error = other._data*self._error
 			else:
 				error=self._error
 
 			# combined mask of valid pixels if contained in both
-			if self._mask!=None and other._mask!=None:
+			if self._mask is not None and other._mask is not None:
 				mask = numpy.logical_or(self._mask, other._mask)
 			else:
 				mask=self._mask
 			if data.dtype==numpy.float64:
 				data.astype(numpy.float32)
-			if error!=None and error.dtype==numpy.float64:
+			if error is not None and error.dtype==numpy.float64:
 				error.astype(numpy.float32)
 			rss = RSS(data=data, error=error, mask=mask, header = self._header, shape=self._shape, size=self._size, arc_position_x=self._arc_position_x, arc_position_y=self._arc_position_y, good_fibers=self._good_fibers, fiber_type=self._fiber_type)
 			return rss
@@ -59,28 +59,28 @@ class RSS(FiberRows):
 			# define behaviour if the other is a Spectrum1D object
 
 			# subtract data if contained in both
-			if self._data!=None and other._data!=None:
+			if self._data is not None and other._data is not None:
 				data = self._data*other._data [numpy.newaxis, :]
 			else:
 				data = self._data
 
 			# add error if contained in both
-			if self._error!=None and other._error!=None:
+			if self._error is not None and other._error is not None:
 				error = numpy.sqrt(other._data[numpy.newaxis, :]**2*self._error**2+self._data**2*other._error[numpy.newaxis, :]**2)
-			elif self._error!=None:
+			elif self._error is not None:
 				error = other._data[numpy.newaxis, :]*self._error
 			else:
 				error=self._error
 
 			# combined mask of valid pixels if contained in both
-			if self._mask!=None and other._mask!=None:
+			if self._mask is not None and other._mask is not None:
 				mask = numpy.logical_or(self._mask, other._mask[numpy.newaxis, :])
 			else:
 				mask=self._mask
 
 			if data.dtype==numpy.float64:
 				data.astype(numpy.float32)
-			if error!=None and error.dtype==numpy.float64:
+			if error is not None and error.dtype==numpy.float64:
 				error.astype(numpy.float32)
 			rss = RSS(data=data, error=error, mask=mask, header = self._header, shape=self._shape, size=self._size, arc_position_x=self._arc_position_x, arc_position_y=self._arc_position_y, good_fibers=self._good_fibers, fiber_type=self._fiber_type)
 
@@ -89,7 +89,7 @@ class RSS(FiberRows):
 
 		elif isinstance(other,  numpy.ndarray):
 
-			if self._data!=None:  # check if there is data in the object
+			if self._data is not None:  # check if there is data in the object
 				dim = other.shape
 				#add ndarray according do its dimensions
 				if self._dim == dim:
@@ -110,13 +110,13 @@ class RSS(FiberRows):
 			# try to do addtion for other types, e.g. float, int, etc.
 			try:
 				data = self._data*other
-				if self._error!=None:
+				if self._error is not None:
 					error=self._error*other
 				else:
 					error = self._error
 				if data.dtype==numpy.float64:
 					data.astype(numpy.float32)
-				if error!=None and error.dtype==numpy.float64:
+				if error is not None and error.dtype==numpy.float64:
 					error.astype(numpy.float32)
 				rss = RSS(data = data, error=error, mask=self._mask, header = self._header, shape=self._shape, size=self._size, arc_position_x=self._arc_position_x, arc_position_y=self._arc_position_y, good_fibers=self._good_fibers, fiber_type=self._fiber_type)
 				return rss
@@ -131,11 +131,11 @@ class RSS(FiberRows):
 		self._wave_start = None
 		self._res_elements = None
 		self._inst_fwhm=None
-		if wave!=None:
+		if wave is not None:
 			self.setWave(wave)
 		else:
 			self.createWavefromHdr(logwave=logwave)
-		if inst_fwhm!=None:
+		if inst_fwhm is not None:
 			self.setInstFWHM(inst_fwhm)
 
 	def __getitem__(self, fiber):
@@ -148,7 +148,7 @@ class RSS(FiberRows):
 
 		data = self._data[fiber, :]
 
-		if self._wave!=None:
+		if self._wave is not None:
 			if len(self._wave.shape)==1:
 				wave = self._wave
 			else:
@@ -156,7 +156,7 @@ class RSS(FiberRows):
 		else:
 			wave = numpy.arange(data.shape[1])
 
-		if self._inst_fwhm!=None:
+		if self._inst_fwhm is not None:
 			if len(self._inst_fwhm.shape)==1:
 				inst_fwhm = self._inst_fwhm
 			else:
@@ -164,12 +164,12 @@ class RSS(FiberRows):
 		else:
 			inst_fwhm = None
 
-		if self._error!=None:
+		if self._error is not None:
 			error = self._error[fiber, :]
 		else:
 			error = None
 
-		if self._mask!=None:
+		if self._mask is not None:
 			mask = self._mask[fiber, :]
 		else:
 			mask = None
@@ -179,7 +179,7 @@ class RSS(FiberRows):
 
  #   def __getslice__(self, fiber_start,  fiber_end):
   #      data = self._data[fiber_start:fiber_end, :]
-   #     if self._wave!=None:
+   #     if self._wave is not None:
 
 
 
@@ -187,16 +187,16 @@ class RSS(FiberRows):
 
 		self._data[fiber, :] = spec._data
 
-		if self._wave!=None and len(self._wave.shape)==2:
+		if self._wave is not None and len(self._wave.shape)==2:
 			self._wave[fiber, :] = spec._wave
 
-		if self._inst_fwhm!=None and len(self._inst_fwhm.shape)==2:
+		if self._inst_fwhm is not None and len(self._inst_fwhm.shape)==2:
 			 self._inst_fwhm[fiber, :] = spec._inst_fwhm
 
-		if self._error!=None and spec._error!=None:
+		if self._error is not None and spec._error is not None:
 			self._error[fiber, :] = spec._error
 
-		if self._mask!=None and spec._mask!=None:
+		if self._mask is not None and spec._mask is not None:
 			self._mask[fiber, :] = spec._mask
 
 
@@ -209,7 +209,7 @@ class RSS(FiberRows):
 			self._wave_disp = self._wave[1]-self._wave[0]
 			self._wave_start = self._wave[0]
 			self._res_elements = self._wave.shape[0]
-			if self._header!=None:
+			if self._header is not None:
 				self.setHdrValue('CRVAL1', float('%.3f'%self._wave_start))
 				self.setHdrValue('CDELT1', float('%.3f'%self._wave_disp))
 				self.setHdrValue('CRPIX1', 1.0)
@@ -231,7 +231,7 @@ class RSS(FiberRows):
 			self._error[fiber,:]=replace_error
 
 	def createWavefromHdr(self, logwave=False):
-		if self._header !=None:
+		if self._header  is not None:
 			try:
 				self._wave_disp = self.getHdrValue('CDELT1')
 				self._wave_start = self.getHdrValue('CRVAL1')
@@ -261,7 +261,7 @@ class RSS(FiberRows):
 				Number of the FITS extension containing the errors for the values
 		"""
 		hdu = pyfits.open(file)
-		if extension_data==None and extension_mask==None and extension_error==None and extension_wave==None and extension_fwhm==None:
+		if extension_data is None and extension_mask is None and extension_error is None and extension_wave is None and extension_fwhm is None:
 				self._data = hdu[0].data
 				self._fibers = self._data.shape[0] # set fibers
 				self.setHeader(header = hdu[0].header, origin=file)
@@ -281,23 +281,23 @@ class RSS(FiberRows):
 							self.loadFitsPosTable(hdu[i])
 				else:
 					self.createWavefromHdr(logwave=logwave)
-				if self._wave==None:
+				if self._wave is None:
 					self.createWavefromHdr(logwave=logwave)
 		else:
-			if extension_data!=None:
+			if extension_data is not None:
 				self._data = hdu[extension_data].data
 				self._fibers = self._data.shape[0]
-			if extension_mask!=None:
+			if extension_mask is not None:
 				self._mask = hdu[extension_mask].data
-			if extension_error!=None:
+			if extension_error is not None:
 				self._error = hdu[extension_error].data
-			if extension_wave!=None:
+			if extension_wave is not None:
 				self.setWave(hdu[extension_wave].data)
-			if extension_fwhm!=None:
+			if extension_fwhm is not None:
 				self.setInstFWHM(hdu[extension_fwhm].data)
 		hdu.close()
 
-		if extension_hdr!=None:
+		if extension_hdr is not None:
 			self.setHeader(hdu[extension_hdr].header, origin=file)
 
 	def writeFitsData(self, filename, extension_data=None, extension_mask=None,  extension_error=None, extension_wave=None, extension_fwhm=None, include_PT=True):
@@ -323,46 +323,46 @@ class RSS(FiberRows):
 
 		# create primary hdus and image hdus
 		# data hdu
-		if extension_data==None and extension_error==None and extension_mask==None and extension_wave==None:
+		if extension_data is None and extension_error is None and extension_mask is None and extension_wave is None:
 			hdus[0] = pyfits.PrimaryHDU(self._data)
-			if self._wave!=None:
+			if self._wave is not None:
 				if len(self._wave.shape)>1:
 					hdus[1] = pyfits.ImageHDU(self._wave, name='WAVE')
-			if self._inst_fwhm!=None:
+			if self._inst_fwhm is not None:
 				hdus[2] = pyfits.ImageHDU(self._inst_fwhm, name='INSTFWHM')
-			if self._error!=None:
+			if self._error is not None:
 				hdus[3] = pyfits.ImageHDU(self._error, name='ERROR')
-			if self._mask!=None:
+			if self._mask is not None:
 				hdus[4] = pyfits.ImageHDU(self._mask.astype('uint8'), name='BADPIX')
 
 		else:
 			if extension_data == 0:
 				hdus[0] = pyfits.PrimaryHDU(self._data)
-			elif extension_data>0 and extension_data!=None:
+			elif extension_data>0 and extension_data is not None:
 				hdus[extension_data] = pyfits.ImageHDU(self._data, name='DATA')
 
 			# wavelength hdu
 			if extension_wave == 0:
 				hdu = pyfits.PrimaryHDU(self._wave)
-			elif extension_wave>0 and extension_wave!=None:
+			elif extension_wave>0 and extension_wave is not None:
 				hdus[extension_wave] = pyfits.ImageHDU(self._wave, name='WAVE')
 
 			# instrumental FWHM hdu
 			if extension_fwhm == 0:
 				hdu = pyfits.PrimaryHDU(self._inst_fwhm)
-			elif extension_fwhm>0 and extension_fwhm!=None:
+			elif extension_fwhm>0 and extension_fwhm is not None:
 				hdus[extension_fwhm] = pyfits.ImageHDU(self._inst_fwhm, name='INSTFWHM')
 
 			# mask hdu
 			if extension_mask == 0:
 				hdu = pyfits.PrimaryHDU(self._mask.astype('uint8'))
-			elif extension_mask>0 and extension_mask!=None:
+			elif extension_mask>0 and extension_mask is not None:
 				hdus[extension_mask] = pyfits.ImageHDU(self._mask.astype('uint8'), name='BADPIX')
 
 			# error hdu
 			if extension_error == 0:
 				hdu = pyfits.PrimaryHDU(self._error)
-			elif extension_error>0 and extension_error!=None:
+			elif extension_error>0 and extension_error is not None:
 				hdus[extension_error] = pyfits.ImageHDU(self._error, name='ERROR')
 
 		if include_PT==True:
@@ -382,33 +382,33 @@ class RSS(FiberRows):
 
 		if len(hdus)>0:
 			hdu = pyfits.HDUList(hdus) # create an HDUList object
-			if self._header !=None:
+			if self._header  is not None:
 				hdu[0].header = self.getHeader() # add the primary header to the HDU
 				hdu[0].update_header()
 		hdu.writeto(filename, overwrite=True) # write FITS file to disc
 
 	def getSpec(self, fiber):
 		data = self._data[fiber, :]
-		if self._wave!=None:
+		if self._wave is not None:
 			if len(self._wave.shape)==1:
 				wave = self._wave
 			else:
 				wave = self._wave[fiber, :]
 		else:
 			wave = numpy.arange(data.shape[1])
-		if self._inst_fwhm!=None:
+		if self._inst_fwhm is not None:
 			if len(self._inst_fwhm.shape)==1:
 				inst_fwhm = self._inst_fwhm
 			else:
 				inst_fwhm = self._inst_fwhm[fiber, :]
 		else:
 			inst_fwhm = None
-		if self._error!=None:
+		if self._error is not None:
 			error = self._error[fiber, :]
 		else:
 			error = None
 
-		if self._mask!=None:
+		if self._mask is not None:
 			mask = self._mask[fiber, :]
 		else:
 			mask = None
@@ -419,25 +419,25 @@ class RSS(FiberRows):
 
 		dim = rss_in[0]._data.shape
 		data = numpy.zeros((len(rss_in), dim[0], dim[1]), dtype=numpy.float32)
-		if rss_in[0]._mask!=None:
+		if rss_in[0]._mask is not None:
 			mask = numpy.zeros((len(rss_in), dim[0], dim[1]), dtype="bool")
 		else:
 			mask=None
-		if rss_in[0]._error!=None:
+		if rss_in[0]._error is not None:
 			error = numpy.zeros((len(rss_in), dim[0], dim[1]), dtype=numpy.float32)
 		else:
 			error = None
 		for i in range(len(rss_in)):
 			data[i, :, :] = rss_in[i]._data
-			if mask!=None:
+			if mask is not None:
 				mask[i, :, :] = rss_in[i]._mask
-			if error!=None:
+			if error is not None:
 				error[i, :, :] = rss_in[i]._error
 
 		combined_data = numpy.zeros(dim, dtype=numpy.float32)
 		combined_error = numpy.zeros(dim, dtype=numpy.float32)
 		if method=='mean':
-			if mask!=None:
+			if mask is not None:
 				select =mask==True
 				data[select] = 0
 				good_pix = numpy.sum(numpy.logical_not(select), 0)
@@ -446,7 +446,7 @@ class RSS(FiberRows):
 				combined_data[select_mean] = old_div(numpy.sum(data, 0)[select_mean],good_pix[select_mean])
 			#    print combined_data.dtype
 				combined_mask = good_pix==0
-				if error!=None:
+				if error is not None:
 					error[select] = replace_error
 					combined_error[select_mean] = numpy.sqrt(old_div(numpy.sum(error**2, 0)[select_mean],good_pix[select_mean]**2))
 				else:
@@ -454,13 +454,13 @@ class RSS(FiberRows):
 			else:
 				combined_mask=None
 				combined_data= old_div(numpy.sum(data, 0),data.shape[0])
-				if error!=None:
+				if error is not None:
 					combined_error = numpy.sqrt(old_div(numpy.sum(error**2, 0),error.shape[0]))
 				else:
 					combined_error=None
 
-		if method=='weighted_mean' and error!=None:
-			if mask!=None:
+		if method=='weighted_mean' and error is not None:
+			if mask is not None:
 				select =mask==True
 				good_pix = numpy.sum(numpy.logical_not(select), 0)
 				select_mean = good_pix>0
@@ -487,17 +487,17 @@ class RSS(FiberRows):
 		self._fiber_type = rss_in[i]._fiber_type
 
 	def setSpec(self, fiber, spec):
-		if spec._data!=None and self._data!=None:
+		if spec._data is not None and self._data is not None:
 			self._data[fiber, :] = spec._data
 
-		if spec._error!=None and self._error!=None:
+		if spec._error is not None and self._error is not None:
 			self._error[fiber, :] = spec._error
 
-		if spec._mask!=None and self._mask!=None:
+		if spec._mask is not None and self._mask is not None:
 			self._mask[fiber, :] = spec._mask
 
 	def  createAperSpec(self, cent_x, cent_y, radius):
-		if self._arc_position_x!=None and self._arc_position_y!=None:
+		if self._arc_position_x is not None and self._arc_position_y is not None:
 			distance = numpy.sqrt((self._arc_position_x-cent_x)**2+(self._arc_position_y-cent_y)**2)
 			select_rad = distance<=radius
 	   #     print select_rad, distance, radius
@@ -507,7 +507,7 @@ class RSS(FiberRows):
 
 	def create1DSpec(self, method='mean'):
 		if len(self._wave.shape)==2:
-			if self._mask!=None:
+			if self._mask is not None:
 				select = numpy.logical_not(self._mask)
 			else:
 				select = numpy.ones(self._data.shape, dtype="bool")
@@ -520,22 +520,22 @@ class RSS(FiberRows):
 			idx = numpy.argsort(wave)
 			wave = wave[idx]
 			data = self._data[select].flatten()[idx]
-			if self._error!=None:
+			if self._error is not None:
 				error = self._error[select].flatten()[idx]
 			else:
 				error = None
-			if self._inst_fwhm!=None:
+			if self._inst_fwhm is not None:
 				inst_fwhm = self._inst_fwhm[select].flatten()[idx]
 			else:
 				inst_fwhm = None
 
 		else:
-			if self._mask!=None:
+			if self._mask is not None:
 				select = numpy.logical_not(self._mask)
 			else:
 				select = numpy.ones(self._data.shape, dtype="bool")
 			data = numpy.zeros(len(self._wave), dtype=numpy.float32)
-			if self._error!=None:
+			if self._error is not None:
 				error = numpy.zeros(len(self._wave), dtype=numpy.float32)
 			else:
 				error = None
@@ -543,13 +543,13 @@ class RSS(FiberRows):
 				if numpy.sum(select[:, i])>0:
 					if method=='mean':
 						data[i] = numpy.mean(self._data[select[:, i], i])
-						if error!=None:
+						if error is not None:
 							error[i] = numpy.sqrt(old_div(numpy.sum(self._error[select[:, i], i]**2),numpy.sum(select[:, i])**2))
 					elif method=='sum':
 						data[i] = numpy.sum(self._data[select[:, i], i])
-						if error!=None:
+						if error is not None:
 							error[i] = numpy.sqrt(numpy.sum(self._error[select[:, i], i]**2))
-			if self._mask!=None:
+			if self._mask is not None:
 				bad = numpy.sum(self._mask, 0)
 				mask = bad==self._fibers
 			else:
@@ -563,7 +563,7 @@ class RSS(FiberRows):
 		collapsed = numpy.zeros(self._fibers, dtype=numpy.float32)
 		for i in range(self._fibers):
 			spec = self[i]
-			if spec._mask!=None:
+			if spec._mask is not None:
 				goodpix = numpy.logical_not(spec._mask)
 			else:
 				goodpix = numpy.ones(spec._data.dim[0], dtype=numpy.float32)
@@ -590,7 +590,7 @@ class RSS(FiberRows):
 
 			good_pix = self._data!=0
 			cube = numpy.zeros((self._res_elements,dim_y,dim_x),dtype=numpy.float32)
-			if self._error!=None:
+			if self._error is not None:
 				error = numpy.zeros(cube.shape, dtype=numpy.float32)
 				corr_cube= numpy.zeros(cube.shape, dtype=numpy.float32)
 			mask = numpy.zeros(cube.shape, dtype="bool")
@@ -598,7 +598,7 @@ class RSS(FiberRows):
 			weights = numpy.zeros(cube.shape, dtype=numpy.float32)
 
 			fiber_area = numpy.pi*self._size[0]**2
-			if self._error!=None:
+			if self._error is not None:
 				var = self._error**2
 				inv_var= numpy.zeros_like(var)
 				inv_var[self._mask==False] = 1.0/var[self._mask==False]
@@ -626,12 +626,12 @@ class RSS(FiberRows):
 					mask[:, select_bad] = numpy.logical_or(mask[:, select_bad], self._mask[i, :][:, numpy.newaxis])
 					mask2[:, select_bad] = numpy.logical_or(mask2[:, select_bad], numpy.logical_and(self._mask[i, :][:, numpy.newaxis], self._data[i, :][:, numpy.newaxis]==0))
 					temp = (numpy.sum(weight_temp>0, 1)[:, numpy.newaxis])
-					if self._error!=None:
+					if self._error is not None:
 						corr_cube[:, select] += temp*weight_temp
 					weights[:, select]+=weight_temp
 					cover[:, select] += (weight_temp>0).astype('int16')
 					cube[:,  select]+=self._data[i, :][:, numpy.newaxis]*weight_temp
-					if self._error!=None:
+					if self._error is not None:
 						error[:, select] += (self._error[i, :][:, numpy.newaxis]*weight_temp*numpy.logical_not(self._mask[i, :][:, numpy.newaxis]))**2
 				select = weights>0
 				#cube[select] = (cube[select]/weights[select])*(resolution**2/fiber_area)
@@ -640,7 +640,7 @@ class RSS(FiberRows):
 				mask2 = numpy.logical_or(select_cover, mask2)
 				cube[select_cover]=0
 				mask[select_cover] = True
-				if self._error!=None:
+				if self._error is not None:
 					error[select]= old_div(numpy.sqrt(error[select]),weights[select])*(resolution**2)
 					error[mask] = replace_error
 					error[select_cover]=replace_error
@@ -667,7 +667,7 @@ class RSS(FiberRows):
 					weights[:, select] += weight_0
 				   # weights2[:,  select]+= inv_var[i,:][:,numpy.newaxis]**2
 					cube[:,select] += self._data[i,:][:,numpy.newaxis]*weight_0
-					if self._error!=None:
+					if self._error is not None:
 						error[:, select] += var[i,:][:,numpy.newaxis]*weight_0**2
 						corr_cube[:, select] += temp
 					 #   error2[:, select] +=1
@@ -678,7 +678,7 @@ class RSS(FiberRows):
 
 
 
-				if self._error!=None:
+				if self._error is not None:
 					corr_cube = numpy.sqrt(corr_cube)
 					error = numpy.sqrt(error)
 					error[select2] = old_div(error[select2],weights[select2])*(resolution**2)
@@ -699,13 +699,13 @@ class RSS(FiberRows):
 
 			good_pix = self._data!=0
 			cube = numpy.zeros((self._res_elements,dim_y,dim_x),dtype=numpy.float32)
-			if self._error!=None:
+			if self._error is not None:
 				error = numpy.zeros(cube.shape, dtype=numpy.float32)
 				corr_cube= numpy.zeros(cube.shape, dtype=numpy.float32)
 			mask = numpy.zeros(cube.shape, dtype="bool")
 			mask2 = numpy.zeros(cube.shape, dtype="bool")
 			weights = numpy.zeros(cube.shape, dtype=numpy.float32)
-			if self._error!=None:
+			if self._error is not None:
 				var = self._error**2
 				inv_var= numpy.zeros_like(var)
 				inv_var[self._mask==False] = 1.0/var[self._mask==False]
@@ -731,13 +731,13 @@ class RSS(FiberRows):
 					weights[:, select] += weight_0
 				   # weights2[:,  select]+= inv_var[i,:][:,numpy.newaxis]**2
 					cube[:,select] += self._data[i,:][:,numpy.newaxis]*weight_0
-					if self._error!=None:
+					if self._error is not None:
 						error[:, select] += var[i,:][:,numpy.newaxis]*weight_0**2
 				select2 = weights>0
 				cube[select2] = old_div(cube[select2],weights[select2])*(resolution**2)
 				cube[mask2]=0
 
-				if self._error!=None:
+				if self._error is not None:
 					error = numpy.sqrt(error)
 					error[select2] = old_div(error[select2],weights[select2])*(resolution**2)
 
@@ -747,7 +747,7 @@ class RSS(FiberRows):
 				cover=None
 
 
-		if self._header!=None:
+		if self._header is not None:
 			self.setHdrValue('CRVAL3', self.getHdrValue('CRVAL1'))
 			self.setHdrValue('CDELT3', self.getHdrValue('CDELT1'))
 			self.setHdrValue('CRPIX3', 1.0)
@@ -758,7 +758,7 @@ class RSS(FiberRows):
 			self.setHdrValue('CRPIX2', 1.0)
 			self.setHdrValue('CRPIX1', 1.0)
 			self.setHdrValue('DISPAXIS', 3)
-		if self._error!=None:
+		if self._error is not None:
 			corr_cube = corr_cube**0.5
 		else:
 			corr_cube = None
@@ -778,7 +778,7 @@ class RSS(FiberRows):
 		good_pix = self._data!=0
 
 		cube = numpy.zeros((self._res_elements,dim_y,dim_x),dtype=numpy.float32)
-		if self._error!=None:
+		if self._error is not None:
 			error = numpy.zeros(cube.shape, dtype=numpy.float32)
 			corr_cube= numpy.zeros(cube.shape, dtype=numpy.float32)
 		mask = numpy.zeros(cube.shape, dtype="bool")
@@ -786,7 +786,7 @@ class RSS(FiberRows):
 		weights = numpy.zeros(cube.shape, dtype=numpy.float32)
 		fiber_area = numpy.pi*self._size[0]**2
 
-		if self._error!=None:
+		if self._error is not None:
 			var = self._error**2
 			inv_var= numpy.zeros_like(var)
 			inv_var[self._mask==False] = 1.0/var[self._mask==False]
@@ -819,7 +819,7 @@ class RSS(FiberRows):
 				weights+=weight_temp
 				cover += (weight_temp>0).astype('int16')
 				cube+=self._data[j,  :][:, numpy.newaxis, numpy.newaxis]*weight_temp
-				if self._error!=None:
+				if self._error is not None:
 					error += (self._error[j, :][:, numpy.newaxis, numpy.newaxis]*weight_temp*numpy.logical_not(self._mask[j, :][:, numpy.newaxis, numpy.newaxis]))**2
 
 			select = weights>0
@@ -828,7 +828,7 @@ class RSS(FiberRows):
 			mask2[select_cover] = True
 			mask[select_cover] = True
 			cube[mask2]=0
-			if self._error!=None:
+			if self._error is not None:
 				error[select]= old_div(numpy.sqrt(error[select]),weights[select])*(resolution**2)
 				error[mask] = replace_error
 				corr_cube[select] = numpy.sqrt(old_div(corr_cube[select],weights[select]))
@@ -855,13 +855,13 @@ class RSS(FiberRows):
 				corr_cube += temp[:, numpy.newaxis, numpy.newaxis]*(weights_temp>0)
 				weights +=weights_temp
 				cube +=self._data[j,:][:,numpy.newaxis, numpy.newaxis]*weights_temp
-				if self._error!=None:
+				if self._error is not None:
 					error += (self._error[j,:][:,numpy.newaxis, numpy.newaxis]*weights_temp)**2
 			select2 = weights>0
 			cube[select2] = old_div(cube[select2],weights[select2])*(resolution**2)
 			mask = numpy.logical_or(mask, numpy.logical_not(select2))
 			cube[mask2]=0
-			if self._error!=None:
+			if self._error is not None:
 				error = numpy.sqrt(error)
 				corr_cube = numpy.sqrt(corr_cube)
 				#error[select2] = error[select2]/weights[select2]*(resolution**2/fiber_area)*1
@@ -871,7 +871,7 @@ class RSS(FiberRows):
 				error = None
 
 
-		if self._header!=None:
+		if self._header is not None:
 			self.setHdrValue('CRVAL3', self.getHdrValue('CRVAL1'))
 			self.setHdrValue('CDELT3', self.getHdrValue('CDELT1'))
 			self.setHdrValue('CRPIX3', 1.0)
@@ -896,7 +896,7 @@ class RSS(FiberRows):
 			weights = numpy.zeros(cube.shape, dtype=numpy.float32)
 			fiber_area = numpy.pi*self._size[0]**2
 
-			if self._error!=None:
+			if self._error is not None:
 				var = self._error**2
 				inv_var= numpy.zeros_like(var)
 				inv_var[self._mask==False] = 1.0/var[self._mask==False]
@@ -924,11 +924,11 @@ class RSS(FiberRows):
 				good_pix = good_pix.astype(numpy.uint8)
 				data = self._data.astype(numpy.float32)
 
-				if self._mask!=None:
+				if self._mask is not None:
 					mask_in = self._mask.astype(numpy.uint8)
 				else:
 					mask_in = numpy.zeros_like(good_pix)
-				if self._error!=None:
+				if self._error is not None:
 					error_in = self._error.astype(numpy.float32)
 				else:
 					error_in = numpy.zeros_like(self._data)
@@ -1005,7 +1005,7 @@ class RSS(FiberRows):
 				weave.inline(c_code,['fibers','points','dim_y','dim_x', 'position_x', 'position_y', 'arc_position_x', 'arc_position_y', 'offset_x', 'offset_y', 'radius_limit', 'sigma', 'slope', 'min_fibers', 'bad_threshold',  'replace_error',  'weights_0',  'good_pix', 'resolution','data','error_in','cube', 'error','mask_in','mask','corr_cube',  'temp2', 'cover_img','cover', 'int_kernel'], headers=['<math.h>'], type_converters=converters.blitz,compiler='gcc')
 		
 			elif mode=='drizzle':
-				if self._error!=None:
+				if self._error is not None:
 					error = numpy.zeros(cube.shape, dtype=numpy.float32)
 					corr_cube= numpy.zeros(cube.shape, dtype=numpy.float32)
 				cover_fraction= numpy.zeros(cube.shape, dtype=numpy.float32)
@@ -1027,13 +1027,13 @@ class RSS(FiberRows):
 					corr_cube += temp[:, numpy.newaxis, numpy.newaxis]*(weights_temp>0)
 					weights +=weights_temp
 					cube +=self._data[j,:][:,numpy.newaxis, numpy.newaxis]*weights_temp
-					if self._error!=None:
+					if self._error is not None:
 						error += (self._error[j,:][:,numpy.newaxis, numpy.newaxis]*weights_temp)**2
 				select2 = weights>0
 				cube[select2] = old_div(cube[select2],weights[select2])*(resolution**2)
 				mask = numpy.logical_or(mask, numpy.logical_not(select2))
 				cube[mask2]=0
-				if self._error!=None:
+				if self._error is not None:
 					error = numpy.sqrt(error)
 					corr_cube = numpy.sqrt(corr_cube)
 					#error[select2] = error[select2]/weights[select2]*(resolution**2/fiber_area)*1
@@ -1054,7 +1054,7 @@ class RSS(FiberRows):
 			size_y = self._size[1]
 			data = self._data.astype(numpy.float32)
 			cube = numpy.zeros((self._res_elements,dim_y,dim_x),dtype=numpy.float32)
-			if self._error!=None:
+			if self._error is not None:
 				error = numpy.zeros(cube.shape, dtype=numpy.float32)
 				corr_cube= numpy.zeros(cube.shape, dtype=numpy.float32)
 				var = self._error**2
@@ -1065,7 +1065,7 @@ class RSS(FiberRows):
 				error_in = numpy.zeros_like(self._data)
 				inv_var = numpy.ones_like(self._data)
 
-			if self._mask!=None:
+			if self._mask is not None:
 				mask_in = self._mask.astype(numpy.uint8)
 			else:
 				mask_in = numpy.zeros_like(good_pix)
@@ -1138,7 +1138,7 @@ class RSS(FiberRows):
 		weave.inline(c_code,['fibers','points','dim_y','dim_x', 'min_x', 'min_y', 'size_x','size_y','arc_position_x', 'arc_position_y', 'offset_x', 'offset_y', 'replace_error',  'weights_0',  'good_pix', 'resolution','data','error_in','cube', 'error','mask_in','mask','corr_cube',  'temp2', 'cover'], headers=['<math.h>'], type_converters=converters.blitz,compiler='gcc')
 		cover=None
 
-		if self._header!=None:
+		if self._header is not None:
 			self.setHdrValue('CRVAL3', self.getHdrValue('CRVAL1'))
 			self.setHdrValue('CDELT3', self.getHdrValue('CDELT1'))
 			self.setHdrValue('CRPIX3', 1.0)
@@ -1160,7 +1160,7 @@ class RSS(FiberRows):
 
 		if len(self._wave.shape)==1:
 			#self._data = ndimage.filters.median_filter(self._data, (1, 10))
-			if valid!=None:
+			if valid is not None:
 				medians = numpy.median(self._data[valid[0]:valid[1], :], axis=1)
 				norm = numpy.median(self._data[valid[0]:valid[1], :], axis=0)
 			else:
@@ -1178,10 +1178,10 @@ class RSS(FiberRows):
 			normalize=numpy.zeros_like(self._data)
 			normalize[:, select] = old_div(self._data[:, select],norm[select][numpy.newaxis, :])
 			self._data = normalize
-			if clip!=None:
+			if clip is not None:
 				mask = numpy.logical_or(self._data<clip[0], self._data>clip[1])
 			   ##sky_resamp.setData(data=0, select=mask)
-				if self._mask!=None:
+				if self._mask is not None:
 				   mask = numpy.logical_or(self._mask, mask)
 				self.setData(mask=mask)
 
@@ -1193,12 +1193,12 @@ class RSS(FiberRows):
 
 					spec.smoothPoly(smooth_poly)
 					self._data[i, :] = spec._data
-					if self._mask!=None:
+					if self._mask is not None:
 						self._mask[i, :] = spec._mask
 				self.setHdrValue('Hierarch PIPE FLAT POLY', smooth_poly, 'Order of polynomial to smooth FLAT')
 			else:
 				self.setHdrValue('Hierarch PIPE FLAT POLY', smooth_poly, 'Order of polynomial to smooth FLAT')
-			if self._mask!=None:
+			if self._mask is not None:
 				self.setData(data=0.0, select=self._mask)
 
 			fiberflat = RSS(data=self._data, wave=self._wave, mask=self._mask, header=self._header, logwave=False)
@@ -1207,32 +1207,32 @@ class RSS(FiberRows):
 			return None
 
 	def subRSS(self, select):
-		if self._data!=None:
+		if self._data is not None:
 			data=self._data[select]
 		else:
 			data=None
 
-		if self._error!=None:
+		if self._error is not None:
 			error = self._error[select]
 		else:
 			error = None
 
-		if self._mask!=None:
+		if self._mask is not None:
 			mask=self._mask[select]
 		else:
 			mask=None
 
-		if self._arc_position_x!=None:
+		if self._arc_position_x is not None:
 			arc_position_x=self._arc_position_x[select]
 		else:
 			arc_position_x=None
 
-		if self._arc_position_y!=None:
+		if self._arc_position_y is not None:
 			arc_position_y=self._arc_position_y[select]
 		else:
 			arc_position_y=None
 
-		if self._good_fibers!=None:
+		if self._good_fibers is not None:
 			good_fibers = self._good_fibers[select]
 		else:
 			good_fibers = None
@@ -1242,7 +1242,7 @@ class RSS(FiberRows):
 		except:
 			fiber_type=None
 
-		if self._wave!=None:
+		if self._wave is not None:
 			if len(self._wave.shape)==2:
 				wave = self._wave[select, :]
 			else:
@@ -1250,7 +1250,7 @@ class RSS(FiberRows):
 		else:
 			wave = None
 
-		if self._inst_fwhm!=None:
+		if self._inst_fwhm is not None:
 			if len(self._inst_fwhm.shape)==2:
 				inst_fwhm = self._inst_fwhm[select, :]
 			else:
@@ -1267,22 +1267,22 @@ class RSS(FiberRows):
 		rss_parts=[]
 		for i in range(len(parts)):
 			data = self._data[:, parts[i]]
-			if self._error!=None:
+			if self._error is not None:
 				error = self._error[:, parts[i]]
 			else:
 				error = None
-			if self._mask!=None:
+			if self._mask is not None:
 				mask = self._mask[:, parts[i]]
 			else:
 				mask=None
-			if self._wave!=None:
+			if self._wave is not None:
 				if len(self._wave.shape)==2:
 					wave = self._wave[:, parts[i]]
 				else:
 					wave = self._wave[parts[i]]
 			else:
 				wave = None
-			if self._inst_fwhm!=None:
+			if self._inst_fwhm is not None:
 				if len(self._inst_fwhm.shape)==2:
 					inst_fwhm = self._inst_fwhm[:, parts[i]]
 				else:

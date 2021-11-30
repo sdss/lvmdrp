@@ -98,7 +98,7 @@ def detCos_drp(image,  out_image,   rdnoise='2.9', sigma_det='5', rlim='1.2', it
 	#img.writeFitsData('test.fits')
 
 	# create empty mask if no mask is present in original image
-	if img._mask!=None:
+	if img._mask is not None:
 		mask_orig=img.getMask()
 	else:
 		mask_orig=numpy.zeros(img.getDim(), dtype=numpy.bool)
@@ -299,7 +299,7 @@ def LACosmic_drp(image,  out_image,  sigma_det='5', flim='1.1', iter='3', sig_ga
 	img = loadImage(image)
 
 	# create empty mask if no mask is present in original image
-	if img._mask!=None:
+	if img._mask is not None:
 		mask_orig=img.getMask()
 	else:
 		mask_orig=numpy.zeros(img.getDim(), dtype=numpy.bool)
@@ -436,11 +436,11 @@ def addCCDMask_drp(image, mask, replaceError='1e10'):
 	replaceError = float(replaceError)
 	img = loadImage(image)
 	bad_pixel = loadImage(mask, extension_mask=0)
-	if img._mask!=None:
+	if img._mask is not None:
 		mask_comb = numpy.logical_or(img._mask, bad_pixel._mask)
 	else:
 		mask_comb = bad_pixel._mask
-	if img._error!=None:
+	if img._error is not None:
 		img.setData(error=replaceError, select=mask_comb)
 	img.setData(mask=mask_comb)
 	img.writeFitsData(image)
@@ -1061,7 +1061,7 @@ def subtractStraylight_drp(image, trace, stray_image, clean_image, disp_axis='X'
 	aperture = int(aperture)
 	poly_cross=int(poly_cross)
 	smooth_gauss = float(smooth_gauss)
-	smooth_disp = float(smooth_disp)
+	smooth_disp = int(smooth_disp)
 
 	# load image data
 	img = loadImage(image)
@@ -1073,7 +1073,7 @@ def subtractStraylight_drp(image, trace, stray_image, clean_image, disp_axis='X'
 	elif disp_axis=='Y' or disp_axis=='y':
 	   img.swapaxes()
 	initial_mask = img.getMask()
-	if initial_mask == None:
+	if initial_mask is None:
 		initial_mask = numpy.zeros(img._dim, dtype=numpy.uint16)
 		img._mask= numpy.zeros(img._dim, dtype=numpy.uint16)
    #
@@ -1108,7 +1108,7 @@ def subtractStraylight_drp(image, trace, stray_image, clean_image, disp_axis='X'
 
 
 	# replace initial mask
-	if initial_mask==None:
+	if initial_mask is None:
 		img_out.removeMask()
 	else:
 		img_out.setData(mask=initial_mask)
@@ -1330,14 +1330,14 @@ def offsetTrace_drp(image, trace, disp, lines, logfile,  blocks='15', disp_axis=
 
 		for j in range(len(line_pos)):
 			collapsed_data[j] = numpy.sum(img._data[j, line_pos[j]-size:line_pos[j]+size])
-		if img._error!=None:
+		if img._error is not None:
 			collapsed_error = numpy.zeros(len(line_pos), dtype=numpy.float32)
 			for j in range(len(line_pos)):
 				collapsed_error[j] = numpy.sqrt(numpy.sum(img._error[j, line_pos[j]-size:line_pos[j]+size]**2))
 		else:
 			collapsed_error = None
 		trace_spec = Spectrum1D(wave = numpy.arange(len(collapsed_data)), data=collapsed_data, error=collapsed_error)
-		if trace_mask._mask!=None:
+		if trace_mask._mask is not None:
 			mask=trace_mask._mask[numpy.arange(len(central_pix)), central_pix]
 		else:
 			mask=None
@@ -1435,14 +1435,14 @@ def offsetTrace2_drp(image, trace, trace_fwhm, disp, lines, logfile,  blocks='15
 
 		for j in range(len(line_pos)):
 			collapsed_data[j] = numpy.sum(img._data[j, line_pos[j]-size:line_pos[j]+size])
-		if img._error!=None:
+		if img._error is not None:
 			collapsed_error = numpy.zeros(len(line_pos), dtype=numpy.float32)
 			for j in range(len(line_pos)):
 				collapsed_error[j] = numpy.sqrt(numpy.sum(img._error[j, line_pos[j]-size:line_pos[j]+size]**2))
 		else:
 			collapsed_error = None
 		trace_spec = Spectrum1D(wave = numpy.arange(len(collapsed_data)), data=collapsed_data, error=collapsed_error)
-		if trace_mask._mask!=None:
+		if trace_mask._mask is not None:
 			mask=trace_mask._mask[numpy.arange(len(central_pix)), central_pix]
 		else:
 			mask=None
@@ -1550,11 +1550,11 @@ def extractSpec_drp(image, trace, out_rss,  method='optimal',  aperture='7', fwh
 			pool.close()
 			pool.join()
 			data = numpy.concatenate(data, axis=1)
-			if error[0]!=None:
+			if error[0] is not None:
 				error = numpy.concatenate(error, axis=1)
 			else:
 				error = None
-			if mask[0]!=None:
+			if mask[0] is not None:
 				mask = numpy.concatenate(mask, axis=1)
 			else:
 				mask = None
@@ -1563,7 +1563,7 @@ def extractSpec_drp(image, trace, out_rss,  method='optimal',  aperture='7', fwh
 	elif method=='aperture':
 		(data, error, mask) = img.extractSpecAperture(trace_mask, aperture)
 
-	if error!=None:
+	if error is not None:
 	  error[mask]=replace_error
 	rss= FiberRows(data=data, mask=mask, error=error, header = img.getHeader())
 	rss.setHdrValue('NAXIS2',  data.shape[0])
