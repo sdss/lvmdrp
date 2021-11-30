@@ -83,10 +83,10 @@ class PositionTable(object):
 		columns.append(pyfits.Column(name='Y_Position', unit='arcsec', format='E', array=self._arc_position_y.astype('float32')))
 		columns.append(pyfits.Column(name='GoodFiber', unit='flag', format='I', array=self._good_fibers))
 		columns.append(pyfits.Column(name='FiberType',  format='3A', array=self._fiber_type))
-		table = pyfits.new_table(columns)
-		table.header.update('FibShape', self._shape, 'Shape of the fiber (C-Circular, S-Square)')
-		table.header.update('FibSizeX', self._size[0], 'Size of the fiber in x-direction')
-		table.header.update('FibSizeY', self._size[1], 'Size of the fiber in y-direction')
+		table = pyfits.BinTableHDU.from_columns(columns)
+		table.header['FibShape'] = (self._shape, 'Shape of the fiber (C-Circular, S-Square)')
+		table.header['FibSizeX'] = (self._size[0], 'Size of the fiber in x-direction')
+		table.header['FibSizeY'] = (self._size[1], 'Size of the fiber in y-direction')
 		return table
 		
 	def loadFitsPosTable(self, table):
