@@ -1412,7 +1412,7 @@ class Spectrum1D(object):
         B = sparse.csr_matrix( (A[select],(indices[0][select],indices[1][select])), shape=(self._dim,fibers) ).todense()
         out= sparse.linalg.lsqr(B, old_div(self._data,self._error), atol=1e-7, btol=1e-7, conlim=1e13)
         error = numpy.sqrt(old_div(1,numpy.sum((A**2), 0)))
-        if numpy.sum(bad_pix)>0 and bad_pix is not None:
+        if bad_pix is not None and numpy.sum(bad_pix)>0:
             error[bad_pix]=replace_error
         if plot==True:
             pylab.plot(self._data, 'ok')
