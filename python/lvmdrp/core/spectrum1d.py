@@ -986,7 +986,6 @@ class Spectrum1D(object):
             out_par=0
         return out_par
 
-
     def findPeaks(self, threshold=100.0, npeaks=0, add_doubles=1e-1, maxiter=400):
         """
             Select local maxima in a Spectrum without taken subpixels into account.
@@ -1019,7 +1018,7 @@ class Spectrum1D(object):
         # add some value to one of those adjacent data points
         if numpy.sum(doubles)>0:
             double_idx = idx[doubles]
-            self._data[double_idx]+=add_doubles
+            self._data[double_idx] += add_doubles
         if self._mask is not None:
             data = self._data[numpy.logical_not(self._mask)]
             wave = self._wave[numpy.logical_not(self._mask)]
@@ -1028,7 +1027,13 @@ class Spectrum1D(object):
             data = self._data
             wave = self._wave
             pixels = self._pixels
-        pos_diff=old_div((data[1:]-data[:-1] ),(wave[1:]-wave[:-1] )) # compute the discrete derivative
+        pos_diff=(data[1:]-data[:-1]) / (wave[1:]-wave[:-1]) # compute the discrete derivative
+        # print(">>>>>>>>>>>>>>>>>>>>", (pos_diff<0).sum())
+        # print(numpy.array(list(data[1:]-data[:-1]))[(1900<=wave[1:])&(wave[1:]<=2500)].tolist())
+        # pylab.figure(figsize=(20,5))
+        # pylab.step(wave[1:], data[1:]-data[:-1], lw=1)
+        # pylab.xlim(1900,2500)
+        # pylab.show()
         select_peaks=numpy.logical_and(pos_diff[1:]<0, pos_diff[:-1]>0)  # select all maxima
 
         if npeaks==0:

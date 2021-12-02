@@ -625,7 +625,7 @@ class Image(Header):
 			extension_error : int, optional with default: None
 				Number of the FITS extension containing the errors for the values
 		"""
-		hdu = pyfits.open(filename, ignore_missing_end=True) #open FITS file
+		hdu = pyfits.open(filename, ignore_missing_end=True, uint=False) #open FITS file
 		if extension_data is None and extension_mask is None and extension_error is None:
 				self._data = hdu[0].data
 				self._dim = self._data.shape # set dimension
