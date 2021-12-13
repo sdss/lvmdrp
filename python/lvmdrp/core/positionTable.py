@@ -7,33 +7,33 @@ import numpy
 class PositionTable(object):
 	
 	def __init__(self, shape=None, size=None, arc_position_x=None, arc_position_y=None, good_fibers=None,  fiber_type=None):
-		if shape==None:
+		if shape is None:
 			self._shape = None
 		else:
 			self._shape = shape
 			
-		if size==None:
+		if size is None:
 			self._size = None
 		else:
 			self._size = size
 			
-		if arc_position_x==None:
+		if arc_position_x is None:
 			self._arc_position_x = None
 		else:
 			self._arc_position_x = numpy.array(arc_position_x)
 			
-		if arc_position_y==None:
+		if arc_position_y is None:
 			self._arc_position_y = None
 		else:
 			self._arc_position_y = numpy.array(arc_position_y)
 		
-		if good_fibers==None:
+		if good_fibers is None:
 			self._good_fibers= None
 		else:
 			self._good_fibers = numpy.array(good_fibers)
 			
 		try:
-		   self._fiber_type = numpy.array(fiber_type) 
+			self._fiber_type = numpy.array(fiber_type) 
 		except:
 			self._fiber_type = None
 			
@@ -103,7 +103,7 @@ class PositionTable(object):
 		self._pos_x = numpy.concatenate((self._pos_x, pos_tab._pos_x))
 		self._pos_y = numpy.concatenate((self._pos_y,  pos_tab._pos_y))
 		self._good = numpy.concatenate((self._good,  pos_tab._good))
-		if self._types!=None and pos_tab._types!=None:
+		if self._types is not None and pos_tab._types is not None:
 			self._types = numpy.concatenate((self._types,  pos_tab._types))
 			
 	def offsetPosTab(self, offset_x, offset_y):
