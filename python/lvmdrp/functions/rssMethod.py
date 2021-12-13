@@ -272,7 +272,7 @@ def detWaveSolution_drp(arc_rss, prefix_out, ref_line_file='', ref_spec='', pixe
 	wave_trace.writeFitsData(prefix_out+'.disp.fits')
 	fwhm_trace.writeFitsData(prefix_out+'.res.fits')
 
-def  createPixTable_drp(rss_in, rss_out, arc_wave, arc_fwhm='', cropping=''):
+def createPixTable_drp(rss_in, rss_out, arc_wave, arc_fwhm='', cropping=''):
 	"""
 			Adds the wavelength and possibly also the spectral resolution (FWHM) pixel table as new extension to
 			the RSS that is stored as a seperate RSS file.
@@ -842,7 +842,7 @@ def subtractSkySpec_drp(rss_in, rss_out, sky, factor='1', scale_region='', scale
 			#pylab.show()
 
 	if scale_region!='':
-	  rss.setHdrValue('hierarch PIPE SKY SCALE',float('%.3f'%scale_factor),'sky spectrum scale factor')
+		rss.setHdrValue('hierarch PIPE SKY SCALE',float('%.3f'%scale_factor),'sky spectrum scale factor')
 	rss.writeFitsData(rss_out)
 
 def splitFibers_drp(rss_in, splitted_out, contains):
@@ -1622,9 +1622,9 @@ def createCube_drp(rss_in, cube_out, position_x='', position_y='', ref_pos_wave=
 		rss._arc_position_y=-1*rss._arc_position_y
 
 	if int(full_field)==0:
-	  full_field=False
+		full_field=False
 	elif int(full_field)==1:
-	  full_field=True
+		full_field=True
 
 	if parallel=='auto':
 		cpus = cpu_count()
@@ -1667,29 +1667,29 @@ def createCube_drp(rss_in, cube_out, position_x='', position_y='', ref_pos_wave=
 				offset_y = offset_y + off_y
 				ref_x+=1
 				ref_y+=1
-	elif rss._shape=='R':
-		if full_field==False:
-			min_x = numpy.round(numpy.min(rss._arc_position_x) , 4)
-			max_x = numpy.round(numpy.max(rss._arc_position_x),  4)
-			min_y = numpy.round(numpy.min(rss._arc_position_y) , 4)
-			max_y = numpy.round(numpy.max(rss._arc_position_y), 4)
-			dim_x = numpy.round(numpy.rint(float(max_x-min_x)/resolution), 4)+1
-			dim_y = numpy.round(numpy.rint(float(max_y-min_y)/resolution), 4)+1
-			dim_x = int(dim_x)
-			dim_y = int(dim_y)
-			min_x=float(min_x)
-			min_y=float(min_y)
-		else:
-			min_x = numpy.round(numpy.min(rss._arc_position_x[:,numpy.newaxis]+offset_x*resolution) , 4)
-			max_x = numpy.round(numpy.max(rss._arc_position_x[:,numpy.newaxis]+offset_x*resolution),  4)
-			min_y = numpy.round(numpy.min(rss._arc_position_y[:,numpy.newaxis]+offset_y*resolution) , 4)
-			max_y = numpy.round(numpy.max(rss._arc_position_y[:,numpy.newaxis]+offset_y*resolution), 4)
-			dim_x = numpy.round(numpy.rint(float(max_x-min_x)/resolution), 4)+1
-			dim_y = numpy.round(numpy.rint(float(max_y-min_y)/resolution), 4)+1
-			dim_x = int(dim_x)
-			dim_y = int(dim_y)
-			min_x=float(min_x)
-			min_y=float(min_y)
+		elif rss._shape=='R':
+			if full_field==False:
+				min_x = numpy.round(numpy.min(rss._arc_position_x) , 4)
+				max_x = numpy.round(numpy.max(rss._arc_position_x),  4)
+				min_y = numpy.round(numpy.min(rss._arc_position_y) , 4)
+				max_y = numpy.round(numpy.max(rss._arc_position_y), 4)
+				dim_x = numpy.round(numpy.rint(float(max_x-min_x)/resolution), 4)+1
+				dim_y = numpy.round(numpy.rint(float(max_y-min_y)/resolution), 4)+1
+				dim_x = int(dim_x)
+				dim_y = int(dim_y)
+				min_x=float(min_x)
+				min_y=float(min_y)
+			else:
+				min_x = numpy.round(numpy.min(rss._arc_position_x[:,numpy.newaxis]+offset_x*resolution) , 4)
+				max_x = numpy.round(numpy.max(rss._arc_position_x[:,numpy.newaxis]+offset_x*resolution),  4)
+				min_y = numpy.round(numpy.min(rss._arc_position_y[:,numpy.newaxis]+offset_y*resolution) , 4)
+				max_y = numpy.round(numpy.max(rss._arc_position_y[:,numpy.newaxis]+offset_y*resolution), 4)
+				dim_x = numpy.round(numpy.rint(float(max_x-min_x)/resolution), 4)+1
+				dim_y = numpy.round(numpy.rint(float(max_y-min_y)/resolution), 4)+1
+				dim_x = int(dim_x)
+				dim_y = int(dim_y)
+				min_x=float(min_x)
+				min_y=float(min_y)
 
 
 		# needed to make sure the the c-code is compiled
