@@ -1,0 +1,269 @@
+
+from __future__ import division
+from __future__ import print_function
+from __future__ import absolute_import
+from __future__ import unicode_literals
+
+import argparse
+import os
+import sys
+
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
+from matplotlib.patches import Polygon
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+from matplotlib.widgets import TextBox
+
+from numpy.polynomial.hermite import hermfit, hermval
+from numpy.polynomial.polynomial import polyfit, polyval
+
+from lvmdrp.core import rss
+
+
+class Cursor:
+    """
+    A cross hair cursor.
+    """
+    def __init__(self, ax):
+        self.ax = ax
+        self.horizontal_line = ax.axhline(color='0.7', lw=0.8, ls='--')
+        self.vertical_line = ax.axvline(color='0.7', lw=0.8, ls='--')
+
+    def set_cross_hair_visible(self, visible):
+        need_redraw = self.horizontal_line.get_visible() != visible
+        self.horizontal_line.set_visible(visible)
+        self.vertical_line.set_visible(visible)
+        return need_redraw
+
+    def on_mouse_move(self, event):
+        if not event.inaxes:
+            need_redraw = self.set_cross_hair_visible(False)
+            if need_redraw:
+                self.ax.figure.canvas.draw()
+        else:
+            self.set_cross_hair_visible(True)
+            x, y = event.xdata, event.ydata
+            # update the line positions
+            self.horizontal_line.set_ydata(y)
+            self.vertical_line.set_xdata(x)
+            self.ax.figure.canvas.draw()
+
+class SolveWavelength:
+    """
+    A peak picker.
+    """
+    def __init__(self, ax, extracted_fits, aperture, poly_degree, dispersion_table, ny_spectra, width, plot):
+        self.ax = ax
+        self.extracted_fits = extracted_fits
+        self.aperture = aperture
+        self.poly_degree = poly_degree
+        self.dispersion_table = dispersion_table
+        self.width = width
+        self.plot = plot
+
+        self.pix = None
+        self.table_exist = os.path.isfile(self.dispersion_table)
+        
+        # open file
+        self._load_table(ny_spectra)
+        # compute coadded spectrum
+        self._set_spectrum()
+        # initialize plot
+        self._init_plot()
+ 
+    def _load_table(self, ny_spectra):
+        if self.table_exist:
+            with open(self.dispersion_table, "r") as t:
+                self.ny_spectra = int(t.readline()[:-1])
+                self.table = np.loadtxt(t)
+        else:
+            self.ny_spectra = ny_spectra
+            self.table = np.empty((0,3))
+        
+        self.nrows = self.table.shape[0]
+
+    def _set_spectrum(self):
+        # read given image
+        spectra = rss.loadRSS(self.extracted_fits)
+        # select spectra
+        iy = self.ny_spectra - self.width//2
+        fy = self.ny_spectra + self.width//2
+        # plot spectrum
+        self.xdata = np.arange(spectra._data.shape[1])
+        self.ydata = spectra._data[iy:fy+1,:].sum(axis=0)
+
+    def _init_plot(self):
+        self.line, = ax.step(self.xdata, self.ydata, lw=1, picker=True, pickradius=self.aperture, color="k")
+        for x_peak in self.table[:,0]:
+            x_min, x_max = x_peak-self.aperture, x_peak+self.aperture
+            self.ax.axvspan(x_min, x_max, fc="0.5", lw=0, alpha=0.5)
+            self.ax.plot([x_peak], [self.ydata[(x_min<=self.xdata)&(self.xdata<=x_max)].max()], "xr", mew=0.5, ms=4)
+        self.ax.set_xlabel("dispersion axis (pixel)")
+        self.ax.set_ylabel("flux")
+
+        # create text box for wavelength
+        ax_tb = inset_axes(ax, width="10%", height="3.5%", loc=1)
+        self.text_box = TextBox(ax_tb, f"wavelength for 0:", initial="0.0", textalignment="left")
+        # input corresponding wavelength
+        self.text_box.on_submit(self._append_wavelength)
+
+    def _find_peak(self):
+        i_min = self.pix - self.aperture
+        i_max = self.pix + self.aperture + 1
+        i_peak = i_min + np.argmax(self.ydata[i_min:i_max])
+        
+        window = self.ax.axvspan(self.xdata[i_min], self.xdata[i_max], fc="0.5", lw=0, alpha=0.5)
+        window.set_visible(False)
+        
+        return i_peak, window
+    
+    def _subsample_peak(self):
+        a = self.i_peak - 1
+        b = self.i_peak
+        c = self.i_peak + 1
+        fa = -self.ydata[a]
+        fb = -self.ydata[b]
+        fc = -self.ydata[c]
+        den = (fc - 2*fb + fa)
+        if den != 0:
+            x_peak = c - (b-a) * ((fc - fb)/den + 0.5)
+        else:
+            x_peak = self.i_peak
+        
+        peak_point, = self.ax.plot([x_peak], [self.ydata[self.i_peak]], "xr", mew=1, ms=7)
+        peak_point.set_visible(False)
+    
+        return np.round(x_peak, 2), peak_point
+
+    def _append_wavelength(self, wavelength):
+        new_row = np.atleast_2d([self.x_peak, float(wavelength), 1])
+
+        if new_row[0,1] == 0 or (self.table == new_row[0]).all(axis=1).any():
+            return None
+        # append wavelength and pixel to table
+        self.table = np.append(self.table, new_row, axis=0)
+        print(f"new row added: {new_row[0]}")
+        # update plot
+        self.window.set_visible(True)
+        self.peak_point.set_visible(True)
+    
+    def _save_table(self):
+        nrows = self.table.shape[0]
+        if self.nrows != nrows:
+            self.nrows = nrows
+            with open(self.dispersion_table, "a" if self.table_exist else "w") as t:
+                if t.mode == "w": t.write(f"{self.ny_spectra}\n")
+                for i in range(self.nrows):
+                    x, y, m = self.table[i]
+                    t.write(f"{x:>.2f} {y:>6.1f} {int(m):>1d}\n")
+
+    def on_pick(self, event):
+        if isinstance(event.artist, Line2D):
+            # take the middle pixel of the recorded ones
+            self.pix = event.ind[len(event.ind)//2]
+            # capture {x,y} where pick event happened
+            self.xpick = self.xdata[self.pix]
+            self.ypick = self.ydata[self.pix]
+            # find peak and subsample within given window size
+            self.i_peak, self.window = self._find_peak()
+            self.x_peak, self.peak_point = self._subsample_peak()
+            # update text box label
+            label, value = self.text_box.ax.get_children()[0], self.text_box.ax.get_children()[1]
+            label.set_text(f"wavelength for {self.x_peak:.2f}:")
+            value.set_text("0.0")
+        # elif isinstance(event.artist, Polygon):
+        #     # get span x range
+        #     # compute middle x
+        #     # find closest value in self.table
+        #     # remove value
+        #     # remove span
+        #     # remove point
+        #     pass
+    
+    def on_close(self, event):
+        # fit the wavelength solution
+        x, y, m = self.table.T
+        m = m.astype(bool)
+        x_m, y_m = x[m], y[m]
+        ndata = x.size
+        if ndata < self.poly_degree:
+            print(f"not enough points ({ndata}) to run a polynomial regression of degree {self.poly_degree}.")
+            if self.nrows > 1:
+                print(f"your table will still be stored at {self.dispersion_table} to save your progress.")
+                self._save_table()
+            return None
+        # store table
+        self._save_table()
+
+        x_os = np.linspace(self.xdata.min(), self.xdata.max(), 1000)
+        if self.poly_degree < 0:
+            coeffs = hermfit(x_m, y_m, -self.poly_degree)
+            poly = hermval(x_os, coeffs)
+        else:
+            coeffs = polyfit(x_m, y_m, self.poly_degree)
+            poly = polyval(x_os, coeffs)
+        
+        # display plot
+        if self.plot:
+            fig, ax = plt.subplots(figsize=(20,20))
+            ax.plot(x[~m], y[~m], "o", mec="0.5", mew=1, ms=8, mfc="none")
+            ax.plot(x_m, y_m, "or", mew=1, ms=10, mfc="none")
+            ax.plot(x_os, poly, "-k")
+            model = polyval(x, coeffs)
+            for i in range(x.size):
+                ax.annotate(
+                    f"{model[i]-y[i]:.2f}",
+                    xy=(x[i],y[i]),
+                    xytext=(9, -9),
+                    textcoords="offset pixels",
+                    color=("r" if m[i] else "0.5")
+                )
+
+            ax.set_xlabel("dispersion axis (pixel)")
+            ax.set_ylabel("wavelength (angstrom)")
+            fig.show()
+
+if __name__ == '__main__':
+
+    parser = argparse.ArgumentParser(
+        prog=os.path.basename(sys.argv[0]),
+        description='build a table for mapping pixels to wavelengths')
+
+    parser.add_argument('extracted_fits', metavar='EXTRACTED.fits', help='FITS containing the extracted spectra.')
+    parser.add_argument('crval', metavar='CRVAL', type=float, help='reference wavelength.')
+    parser.add_argument('cdelt', metavar='CDELT', type=float, help='wavelength sampling step.')
+    parser.add_argument('aperture', metavar='APERTURE', type=int, help='size in pixels of the tolerance window.')
+    parser.add_argument('ny_spectra', metavar='NY_SPECTRA', type=int, help='pixel row of reference spectrum.')
+    parser.add_argument('width', metavar='WIDTH', type=int, help='number of spectra to coadd to improve SNR.')
+    parser.add_argument('npoly', metavar='NPOLY', type=int, help='degree of the polynomial to fit.')
+    parser.add_argument('output', metavar='OUTPUT.fits', help='FITS file to store the wavelength solution.')
+    parser.add_argument('dispersion', metavar='DISPERSION.txt', help='ASCII file to store mapping table.')
+
+    parser.add_argument('--NMAX', type=int, help='.')
+    parser.add_argument('-p', '--plot', action='store_true', default=False, help='plots result.')
+    parser.add_argument('-v', '--verbose', action='store_true', default=False, help='sets verbose mode.')
+
+    args = parser.parse_args()
+
+    # display resulting spectrum
+    fig, ax = plt.subplots(figsize=(20,10))
+
+    # enable events for wavelength solver class
+    solve_wave = SolveWavelength(
+        ax,
+        extracted_fits=args.extracted_fits,
+        aperture=args.aperture,
+        poly_degree=args.npoly,
+        dispersion_table=args.dispersion,
+        ny_spectra=args.ny_spectra, width=args.width, plot=args.plot
+    )
+    fig.canvas.mpl_connect('pick_event', solve_wave.on_pick)
+    fig.canvas.mpl_connect('close_event', solve_wave.on_close)
+
+    # change cursor
+    cursor = Cursor(ax)
+    fig.canvas.mpl_connect('motion_notify_event', cursor.on_mouse_move)
+    
+    plt.show()
+

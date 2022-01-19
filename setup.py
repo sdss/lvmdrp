@@ -39,8 +39,7 @@ def run(packages, install_requires):
           package_dir={'': 'python'},
           scripts=[
               'bin/drp',
-              'bin/preproc',
-              'bin/lvm2desi_translator'
+              'bin/pix2wave'
           ],
           classifiers=[
               'Development Status :: 4 - Beta',
