@@ -1406,7 +1406,7 @@ class Image(Header):
 			area_mask = numpy.fromfunction(get_aperture_cover,dim,xc=xc,yc=yc,r_ap=r_ap,qrn_seq=qrn_seq)
 
 			if numpy.sum(mask)>0 and not ignore_mask:
-			   area_mask[mask] = 0
+				area_mask[mask] = 0
 			select = numpy.logical_or(numpy.isnan(image),numpy.isinf(image))
 			image[select]=0.0
 			flux_mask = area_mask*image

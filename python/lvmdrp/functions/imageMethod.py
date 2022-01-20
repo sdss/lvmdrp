@@ -92,7 +92,7 @@ def detCos_drp(image,  out_image,   rdnoise='2.9', sigma_det='5', rlim='1.2', it
 	gain = float(gain)
 
 	if gain!=1.0 and verbose==True:
-	  print('Convert image from ADUs to electrons using a gain factor of %f' %(gain))
+		print('Convert image from ADUs to electrons using a gain factor of %f' %(gain))
 
 	img = img*gain
 	#img.writeFitsData('test.fits')
@@ -114,7 +114,7 @@ def detCos_drp(image,  out_image,   rdnoise='2.9', sigma_det='5', rlim='1.2', it
 	except KeyError:
 		rdnoise=float(rdnoise)
 	if verbose==True:
-	  print('A value of %f is used for the electron read-out noise.'%(rdnoise))
+		print('A value of %f is used for the electron read-out noise.'%(rdnoise))
 
 
 	# create empty mask
@@ -138,7 +138,7 @@ def detCos_drp(image,  out_image,   rdnoise='2.9', sigma_det='5', rlim='1.2', it
 		cpus = 1
 	# start iteration
 	if verbose:
-	  print('Start the detection process using %d CPU cores.'%(cpus))
+		print('Start the detection process using %d CPU cores.'%(cpus))
 	for i in range(iterations):
 		if verbose:
 			print('Start iteration %i'%(i+1))
@@ -495,7 +495,7 @@ def findPeaksAuto_drp(image, out_peaks_file, nfibers,  disp_axis='X', threshold=
 	if disp_axis=='X' or disp_axis=='x':
 		pass
 	elif disp_axis=='Y' or disp_axis=='y':
-	   img.swapaxes()
+		img.swapaxes()
 
 	# perform median filtering along the dispersion axis to clean cosmic rays
 	img = img.medianImg((median_cross, median_box))
@@ -548,7 +548,7 @@ def findPeaksMaster_drp(image, peaks_master, out_peaks_file, disp_axis='X', thre
 	if disp_axis=='X' or disp_axis=='x':
 		pass
 	elif disp_axis=='Y' or disp_axis=='y':
-	   img.swapaxes()
+		img.swapaxes()
 
 	# perform median filtering along the dispersion axis to clean cosmic rays
 	img = img.medianImg((median_cross, median_box))
@@ -645,7 +645,7 @@ def findPeaksMaster2_drp(image, peaks_master, out_peaks_file, disp_axis='X', thr
 	if disp_axis=='X' or disp_axis=='x':
 		pass
 	elif disp_axis=='Y' or disp_axis=='y':
-	   img.swapaxes()
+		img.swapaxes()
 
 	# perform median filtering along the dispersion axis to clean cosmic rays
 	img = img.medianImg((median_cross, median_box))
@@ -789,7 +789,7 @@ def tracePeaks_drp(image, peaks_file, trace_out, disp_axis='X', method='gauss', 
 	if disp_axis=='X' or disp_axis=='x':
 		pass
 	elif disp_axis=='Y' or disp_axis=='y':
-	   img.swapaxes()
+		img.swapaxes()
 
 	dim = img.getDim()
 	# perform median filtering along the dispersion axis to clean cosmic rays
@@ -1071,7 +1071,7 @@ def subtractStraylight_drp(image, trace, stray_image, clean_image, disp_axis='X'
 	if disp_axis=='X' or disp_axis=='x':
 		pass
 	elif disp_axis=='Y' or disp_axis=='y':
-	   img.swapaxes()
+		img.swapaxes()
 	initial_mask = img.getMask()
 	if initial_mask is None:
 		initial_mask = numpy.zeros(img._dim, dtype=numpy.uint16)
@@ -1117,8 +1117,8 @@ def subtractStraylight_drp(image, trace, stray_image, clean_image, disp_axis='X'
 	if disp_axis=='X' or disp_axis=='x':
 		pass
 	elif disp_axis=='Y' or disp_axis=='y':
-	   img_out.swapaxes()
-	   img_smooth.swapaxes()
+		img_out.swapaxes()
+		img_smooth.swapaxes()
 
 
 
@@ -1564,17 +1564,17 @@ def extractSpec_drp(image, trace, out_rss,  method='optimal',  aperture='7', fwh
 		(data, error, mask) = img.extractSpecAperture(trace_mask, aperture)
 
 	if error is not None:
-	  error[mask]=replace_error
-	rss= FiberRows(data=data, mask=mask, error=error, header = img.getHeader())
+		error[mask]=replace_error
+	rss = FiberRows(data=data, mask=mask, error=error, header = img.getHeader())
 	rss.setHdrValue('NAXIS2',  data.shape[0])
 	rss.setHdrValue('NAXIS1',  data.shape[1])
 	rss.setHdrValue('DISPAXIS',  1)
 	if method=='optimal':
-	  rss.setHdrValue('hierarch PIPE CDISP FWHM MIN',numpy.min(trace_fwhm._data[trace_mask._mask==False]))
-	  rss.setHdrValue('hierarch PIPE CDISP FWHM MAX',numpy.max(trace_fwhm._data[trace_mask._mask==False]))
-	  rss.setHdrValue('hierarch PIPE CDISP FWHM AVG',numpy.mean(trace_fwhm._data[trace_mask._mask==False]))
-	  rss.setHdrValue('hierarch PIPE CDISP FWHM MED',numpy.median(trace_fwhm._data[trace_mask._mask==False]))
-	  rss.setHdrValue('hierarch PIPE CDISP FWHM SIG',numpy.std(trace_fwhm._data[trace_mask._mask==False]))
+		rss.setHdrValue('hierarch PIPE CDISP FWHM MIN',numpy.min(trace_fwhm._data[trace_mask._mask==False]))
+		rss.setHdrValue('hierarch PIPE CDISP FWHM MAX',numpy.max(trace_fwhm._data[trace_mask._mask==False]))
+		rss.setHdrValue('hierarch PIPE CDISP FWHM AVG',numpy.mean(trace_fwhm._data[trace_mask._mask==False]))
+		rss.setHdrValue('hierarch PIPE CDISP FWHM MED',numpy.median(trace_fwhm._data[trace_mask._mask==False]))
+		rss.setHdrValue('hierarch PIPE CDISP FWHM SIG',numpy.std(trace_fwhm._data[trace_mask._mask==False]))
 	rss.writeFitsData(out_rss)
 
 def calibrateSDSSImage_drp(file_in, file_out, field_file):

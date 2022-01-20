@@ -181,8 +181,6 @@ class RSS(FiberRows):
   #      data = self._data[fiber_start:fiber_end, :]
    #     if self._wave is not None:
 
-
-
 	def __setitem__(self, fiber, spec):
 
 		self._data[fiber, :] = spec._data
@@ -191,16 +189,13 @@ class RSS(FiberRows):
 			self._wave[fiber, :] = spec._wave
 
 		if self._inst_fwhm is not None and len(self._inst_fwhm.shape)==2:
-			 self._inst_fwhm[fiber, :] = spec._inst_fwhm
+			self._inst_fwhm[fiber, :] = spec._inst_fwhm
 
 		if self._error is not None and spec._error is not None:
 			self._error[fiber, :] = spec._error
 
 		if self._mask is not None and spec._mask is not None:
 			self._mask[fiber, :] = spec._mask
-
-
-
 
 	def setWave(self, wave):
 		self._wave = numpy.array(wave)
@@ -496,7 +491,7 @@ class RSS(FiberRows):
 		if spec._mask is not None and self._mask is not None:
 			self._mask[fiber, :] = spec._mask
 
-	def  createAperSpec(self, cent_x, cent_y, radius):
+	def createAperSpec(self, cent_x, cent_y, radius):
 		if self._arc_position_x is not None and self._arc_position_y is not None:
 			distance = numpy.sqrt((self._arc_position_x-cent_x)**2+(self._arc_position_y-cent_y)**2)
 			select_rad = distance<=radius
@@ -767,7 +762,6 @@ class RSS(FiberRows):
 		Cube_out = Cube(data=cube, error = error,  mask=mask, error_weight=corr_cube, header=self._header, cover=cover)
 		return Cube_out
 
-
 	def createCubeInterDAR(self, offset_x, offset_y, mode='inverseDistance', sigma=1.0, radius_limit=5, resolution=1.0, min_fibers=3, slope=2.0, bad_threshold=0.1,  replace_error=1e10):
 		min_x = numpy.min(self._arc_position_x)-self._size[0]
 		max_x = numpy.max(self._arc_position_x)+self._size[0]
@@ -884,7 +878,6 @@ class RSS(FiberRows):
 			self.setHdrValue('DISPAXIS', 3)
 		Cube_out = Cube(data=cube, error = error,  mask=mask, header=self._header, error_weight = corr_cube**0.5)
 		return Cube_out
-
 
 	def createCubeInterDAR_new(self, offset_x, offset_y,min_x,max_x,min_y,max_y,dim_x,dim_y,mode='inverseDistance', sigma=1.0, radius_limit=5, resolution=1.0, min_fibers=3, slope=2.0, bad_threshold=0.1, full_field=False, replace_error=1e10, store_cover=False):
 		if self._shape=='C':
@@ -1154,8 +1147,6 @@ class RSS(FiberRows):
 		Cube_out = Cube(data=cube, error = error,  mask=mask, header=self._header, error_weight = corr_cube**0.5,cover=cover)
 		return Cube_out
 
-
-
 	def createFiberFlat(self, smooth_poly=-5, clip=[0.2, 2], valid=None):
 
 		if len(self._wave.shape)==1:
@@ -1182,7 +1173,7 @@ class RSS(FiberRows):
 				mask = numpy.logical_or(self._data<clip[0], self._data>clip[1])
 			   ##sky_resamp.setData(data=0, select=mask)
 				if self._mask is not None:
-				   mask = numpy.logical_or(self._mask, mask)
+					mask = numpy.logical_or(self._mask, mask)
 				self.setData(mask=mask)
 
 		 #   sky_resamp._mask= numpy.logical_not(select)
