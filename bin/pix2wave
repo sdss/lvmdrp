@@ -149,6 +149,7 @@ class SolveWavelength:
         self.peak_point.set_visible(True)
     
     def _save_table(self):
+        self.table = self.table[self.table[:,0].argsort()]
         nrows = self.table.shape[0]
         if self.nrows != nrows:
             self.nrows = nrows
@@ -223,6 +224,12 @@ class SolveWavelength:
             ax.set_xlabel("dispersion axis (pixel)")
             ax.set_ylabel("wavelength (angstrom)")
             fig.show()
+
+# TODO (for each fiber):
+# * save the transformation in RSS like the FWHM (disp)
+# * save FITS with the disp_cor: resampled version in wavelength using the resulting transformation
+# TODO:
+# * iterate for each emission line 
 
 if __name__ == '__main__':
 
