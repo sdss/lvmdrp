@@ -61,7 +61,7 @@ def mergeRSS_drp(files_in, file_out,  mergeHdr='1'):
 				rss.append(rss_add, append_hdr=True)
 	rss.writeFitsData(file_out)
 
-def detWaveSolution_drp(arc_rss, prefix_out, ref_line_file='', ref_spec='', pixel='', ref_lines='', poly_dispersion='-5', poly_fwhm='-3,-5', init_back='10.0',  aperture='13', flux_min='200.0', fwhm_max='10.0', rel_flux_limits='0.1,5.0', negative=False, verbose='1' ):
+def detWaveSolution_drp(arc_rss, disp_rss, res_rss, ref_line_file='', ref_spec='', pixel='', ref_lines='', poly_dispersion='-5', poly_fwhm='-3,-5', init_back='10.0',  aperture='13', flux_min='200.0', fwhm_max='10.0', rel_flux_limits='0.1,5.0', negative=False, verbose='1' ):
 	"""
 			Measures the pixel position of emission lines in wavelength UNCALIBRATED for all fibers of the RSS.
 			Starting from the initial guess of pixel positions for a given fiber, the program measures the position using
@@ -74,9 +74,10 @@ def detWaveSolution_drp(arc_rss, prefix_out, ref_line_file='', ref_spec='', pixe
 			--------------
 			arc_rss : string
 					Input RSS FITS file name of the uncalibrated arc lamp exposure
-			prefix_out : string
-					PREFIX for the output RSS file containing the wavelength RSS pixel table (PREFIX.disp.fits) and
-					the spectral resolution (FWHM) RSS pixel table (PREFIX.res.fits)
+			disp_rss: string
+					Name of the FITS file in which the wavelength RSS pixel table is stored
+			res_rss: string
+					Name of the FITS file in which the spectral resolution (FWHM) RSS pixel table is stored
 			ref_line_file : string, optional with default: ''
 					ASCII file name containing the number of the reference fiber in the first row,
 					reference wavelength of emission line, its rough centroid pixel position a flag if the width of the
@@ -259,18 +260,18 @@ def detWaveSolution_drp(arc_rss, prefix_out, ref_line_file='', ref_spec='', pixe
 			pylab.plot(cent_wave[i, select_lines], fwhm_wave[select_lines], 'ok')
 			pylab.plot(numpy.arange(arc._data.shape[1]), fwhm_sol[i, :])
 			pylab.show()
-	arc.setHdrValue('hierarch PIPE FWHM POLY', '%d'%(numpy.abs(poly_fwhm_disp)), 'Order of the resolution polynomial')
+	arc.setHdrValue('HIERARCH PIPE FWHM POLY', '%d'%(numpy.abs(poly_fwhm_disp)), 'Order of the resolution polynomial')
 	fwhm_trace = FiberRows(data = fwhm_sol, header = arc.getHeader())
 	#arc.removeHdrEntries(keywords=['PIPE FWHM POLY'])
-	arc.setHdrValue('hierarch PIPE DISP POLY', '%d'%(numpy.abs(poly_dispersion)), 'Order of the dispersion polynomial')
-	arc.setHdrValue('hierarch PIPE DISP RMS MEDIAN', '%.4f'%(numpy.median(rms[good_fibers])), 'Median RMS of disp sol')
-	arc.setHdrValue('hierarch PIPE DISP RMS MIN', '%.4f'%(numpy.min(rms[good_fibers])), 'Min RMS of disp sol')
-	arc.setHdrValue('hierarch PIPE DISP RMS MAX', '%.4f'%(numpy.max(rms[good_fibers])), 'Max RMS of disp sol')
+	arc.setHdrValue('HIERARCH PIPE DISP POLY', '%d'%(numpy.abs(poly_dispersion)), 'Order of the dispersion polynomial')
+	arc.setHdrValue('HIERARCH PIPE DISP RMS MEDIAN', '%.4f'%(numpy.median(rms[good_fibers])), 'Median RMS of disp sol')
+	arc.setHdrValue('HIERARCH PIPE DISP RMS MIN', '%.4f'%(numpy.min(rms[good_fibers])), 'Min RMS of disp sol')
+	arc.setHdrValue('HIERARCH PIPE DISP RMS MAX', '%.4f'%(numpy.max(rms[good_fibers])), 'Max RMS of disp sol')
 
 	wave_trace = FiberRows(data = wave_sol, header = arc.getHeader())
 
-	wave_trace.writeFitsData(prefix_out+'.disp.fits')
-	fwhm_trace.writeFitsData(prefix_out+'.res.fits')
+	wave_trace.writeFitsData(disp_rss)
+	fwhm_trace.writeFitsData(res_rss)
 
 def createPixTable_drp(rss_in, rss_out, arc_wave, arc_fwhm='', cropping=''):
 	"""
@@ -312,9 +313,9 @@ def createPixTable_drp(rss_in, rss_out, arc_wave, arc_fwhm='', cropping=''):
 		rss._mask = rss._mask[:, crop_start:crop_end]
 
 	try:
-		rss.copyHdrKey(wave_trace, 'PIPE DISP RMS MEDIAN')
-		rss.copyHdrKey(wave_trace, 'PIPE DISP RMS MIN')
-		rss.copyHdrKey(wave_trace, 'PIPE DISP RMS MAX')
+		rss.copyHdrKey(wave_trace, 'HIERARCH PIPE DISP RMS MEDIAN')
+		rss.copyHdrKey(wave_trace, 'HIERARCH PIPE DISP RMS MIN')
+		rss.copyHdrKey(wave_trace, 'HIERARCH PIPE DISP RMS MAX')
 	except KeyError:
 		pass
 

@@ -547,7 +547,7 @@ class LegandrePoly(object):
 				self._coeff[i]=1
 				eigen_poly[:, i] = self(x)
 #        print eigen_poly, y
-		self._coeff=numpy.linalg.lstsq(eigen_poly, y)[0]
+		self._coeff=numpy.linalg.lstsq(eigen_poly, y, rcond=None)[0]
 
 
 def gaussian(p, x):
