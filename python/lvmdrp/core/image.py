@@ -1480,13 +1480,13 @@ def glueImages(images, positions):
 	max_y = max(pos_y)
 
 	# merge the subimages along the rows and then on the columns
-	idx = numpy.arange(len(images))
+	idx = numpy.arange(len(images), dtype=int)
 	columns=[]
 	for i in range(max_x+1):
 		rows=[]
 		for j in range(max_y+1):
 			select = numpy.logical_and(pos_x==i, pos_y==j) # select images
-			rows.append(images[idx[select]]._data) # add to row list
+			rows.append(images[idx[select][0]]._data) # add to row list
 		columns.append(numpy.concatenate(rows)) # combine images for each row and store to column list
 	full_CCD_data = numpy.concatenate(columns, axis=1) # create full CCD
 
@@ -1497,7 +1497,7 @@ def glueImages(images, positions):
 			rows=[]
 			for j in range(max_y+1):
 				select = numpy.logical_and(pos_x==i, pos_y==j)
-				rows.append(images[idx[select]]._error)
+				rows.append(images[idx[select][0]]._error)
 			columns.append(numpy.concatenate(rows))
 		full_CCD_error = numpy.concatenate(columns, axis=1)
 	else:
@@ -1510,7 +1510,7 @@ def glueImages(images, positions):
 			rows=[]
 			for j in range(max_y+1):
 				select = numpy.logical_and(pos_x==i, pos_y==j)
-				rows.append(images[idx[select]]._mask)
+				rows.append(images[idx[select][0]]._mask)
 			columns.append(numpy.concatenate(rows))
 		full_CCD_mask = numpy.concatenate(columns, axis=1)
 	else:
