@@ -157,7 +157,7 @@ class SolveWavelength:
                 if t.mode == "w": t.write(f"{self.ny_spectra}\n")
                 for i in range(self.nrows):
                     x, y, m = self.table[i]
-                    t.write(f"{x:>.2f} {y:>6.1f} {int(m):>1d}\n")
+                    t.write(f"{x:>.2f} {y:>9.4f} {int(m):>1d}\n")
 
     def on_pick(self, event):
         if isinstance(event.artist, Line2D):
