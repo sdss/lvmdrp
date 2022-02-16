@@ -17,7 +17,7 @@ import argparse
 import os
 import sys
 
-from drp.main import math
+from lvmdrp.main import math
 
 
 if __name__ == '__main__':
