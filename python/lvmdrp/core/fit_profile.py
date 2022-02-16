@@ -47,7 +47,7 @@ class fit_profile1D(object):
 		return numpy.sum((old_div((y-self(x)),sigma))**2)
 
 	def fit(self, x, y, sigma=1.0, p0=None, ftol=1e-8, xtol=1e-8, maxfev=9999, err_sim=0, warning=True, method='leastsq',parallel='auto'):
-		if  p0 == None and self._guess_par!=None:
+		if  p0 is None and self._guess_par is not None:
 			self._guess_par(x, y)
 		perr_init = deepcopy(self)
 		p0 = self._par
@@ -114,7 +114,7 @@ class fit_profile1D(object):
 
 
 	def plot(self, x, y=None):
-		if y!=None:
+		if y is not None:
 			pylab.plot(x, y, 'ok')
 		pylab.plot(x, self(x), '-r')
 		pylab.show()
@@ -131,13 +131,13 @@ class fit_profile2D(object):
 
 	def res(self, par, x, y, z, sigma=None, args=None):
 		self._par = par
-		if sigma==None:
+		if sigma is None:
 			return z-self(x, y)
 		else:
 			return old_div((z-self(x, y)),sigma)
 
 	def fit(self, x, y, z, sigma=None, p0=None, ftol=1e-4, xtol=1e-4, warning=True):
-		if  p0 == None and self._guess_par!=None:
+		if  p0 is None and self._guess_par is not None:
 			self._guess_par(x, y, z)
 		p0 = self._par
 
@@ -531,9 +531,9 @@ class LegandrePoly(object):
 
 	def __call__(self, x):
 		y = numpy.zeros(len(x), dtype=numpy.float32)
-		if self._min_x==None:
+		if self._min_x is None:
 			self._min_x = numpy.min(x)
-		if self._max_x==None:
+		if self._max_x is None:
 			self._max_x = numpy.max(x)
 		x_poly = (x-self._min_x)*1.98/numpy.abs((numpy.abs(self._max_x)-numpy.abs(self._min_x)))-0.99
 		for i in range(len(self._coeff)):
@@ -684,7 +684,7 @@ def fit_gaussian(x, y, sigma=1., p0=None, ftol=1e-4, xtol=1e-4, warning=True):
 	dx = abs(x[1]-x[0])
 
 	#if numpy.sum(sel)>3:
-	if p0==None or len(p0)!=3:
+	if p0 is None or len(p0)!=3:
 		p0 = numpy.zeros(3)
 		p0[0] = numpy.sum(y[sel])
 		p0[1] = old_div(numpy.sum(x[sel]*y[sel]),p0[0])
@@ -699,7 +699,7 @@ def fit_gaussian(x, y, sigma=1., p0=None, ftol=1e-4, xtol=1e-4, warning=True):
 def fit_gaussian_const(x, y, sigma=1.,  p0=None, ftol=1e-6, xtol=1e-6, warning=True):
 
 	dx = abs(x[1]-x[0])
-	if p0==None or len(p0)!=4:
+	if p0 is None or len(p0)!=4:
 		p0 = numpy.zeros(4)
 		ymin = numpy.min(y)
 		p0[0] = numpy.sum(y-ymin)
@@ -804,7 +804,7 @@ def fit_gauss_hermite(x, y, sigma=1., p0=None):
 	sel = numpy.isfinite(y)
 
 	#if numpy.sum(sel)>3:
-	if p0==None or len(p0)!=5:
+	if p0 is None or len(p0)!=5:
 		p0 = numpy.zeros(5)
 		p0[0] = numpy.sum(y[sel])
 		p0[1] = old_div(numpy.sum(x[sel]*y[sel]),p0[0])

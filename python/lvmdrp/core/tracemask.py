@@ -26,7 +26,7 @@ class TraceMask(FiberRows):
     def getFiberDist(self, slice):
         cut= self._data[:, slice]
         dist = cut[1:]-cut[:-1]
-        if self._mask!=None:
+        if self._mask is not None:
             slice_mask = self._mask[:, slice]
             dist_mask = numpy.logical_and(slice_mask[1:], slice_mask[:-1])
             return dist, dist_mask
@@ -57,7 +57,7 @@ class TraceMask(FiberRows):
                     fit_trace=leg_poly(pixels)
                 self._data[i, :] =  fit_trace# insert the polynomial smoothed trace back into the trace mask
             
-                if clip!=None:
+                if clip is not None:
                     self._data=numpy.clip(self._data, clip[0], clip[1])
                 self._mask[i, :] = False
             else:
@@ -86,7 +86,7 @@ class TraceMask(FiberRows):
        
         select_wave = numpy.sum(self._mask, axis=0)/float(self._fibers)<=0.05
         
-        if bound!=None:
+        if bound is not None:
             wave = numpy.arange(self._data.shape[1])
             select_wave = numpy.logical_and(numpy.logical_and(wave>=bound[0], wave<=bound[1]), select_wave)
         change_dist = numpy.zeros((self._fibers-1, self._data.shape[1]), dtype=numpy.float32) # empty array to store the fiber distances

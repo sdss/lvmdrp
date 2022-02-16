@@ -55,7 +55,7 @@ class Aperture(object):
 			self._xCenter=self._xCenter-(self._xCenter+cor_x-2-math.ceil(self._radius))
 			self._yCenter=self._yCenter-(self._yCenter+cor_y-2-math.ceil(self._radius))
 			area_mask = self.cover_mask((ylim[1]-ylim[0],xlim[1]-xlim[0]))
-			if image._mask!=None:
+			if image._mask is not None:
 				badpix = image._mask[ylim[0]:ylim[1], xlim[0]:xlim[1]]
 				area_mask[badpix]=0
 			select = numpy.logical_or(numpy.isnan(data),numpy.isinf(data))
@@ -64,7 +64,7 @@ class Aperture(object):
 			flux_mask= area_mask[select]*data[select]
 			total_area  = numpy.sum(area_mask[select].flatten())
 			total_flux = numpy.sum(flux_mask)
-			if image._error!=None:
+			if image._error is not None:
 				error = image._error[ylim[0]:ylim[1], xlim[0]:xlim[1]]
 				error_mask = area_mask[select]*error[select]
 				total_error = numpy.sqrt(numpy.sum(error_mask**2))
@@ -75,7 +75,7 @@ class Aperture(object):
 		else:
 			total_area = 0.0
 			total_flux = 0.0
-			if image._error!=None:
+			if image._error is not None:
 				total_error=0.0
 			else:
 				total_error=None
@@ -104,7 +104,7 @@ class Apertures(object):
 	def integratedFlux(self, image):
 		aperture_fluxes = numpy.zeros(len(self._xCenters), dtype=numpy.float32)
 		aperture_areas =  numpy.zeros(len(self._xCenters), dtype=numpy.float32)
-		if image._error!=None:
+		if image._error is not None:
 			aperture_errors = numpy.zeros(len(self._xCenters), dtype=numpy.float32)
 		else:
 			aperture_errors = None
@@ -113,7 +113,7 @@ class Apertures(object):
 			result = self._apertures[i].integratedFlux(image)
 			aperture_fluxes[i]=result[0]
 			aperture_areas[i]=result[2]
-			if image._error!=None:
+			if image._error is not None:
 				aperture_errors[i]=result[1]
 		
 		return aperture_fluxes, aperture_errors, aperture_areas

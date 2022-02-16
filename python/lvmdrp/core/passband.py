@@ -48,13 +48,13 @@ class PassBand(Spectrum1D):
 		highCut = numpy.less(spec._wave,numpy.max(self._wave))
 		total_cut = numpy.logical_and(lowCut, highCut)
 
-		if spec._mask!=None:
+		if spec._mask is not None:
 			goodpix = numpy.logical_and(numpy.logical_not(spec._mask), total_cut)
 			flux = old_div(numpy.trapz(spec._data[goodpix]*new_trans[goodpix]*spec._wave[goodpix], spec._wave[goodpix]),numpy.trapz(new_trans[goodpix]*spec._wave[goodpix], spec._wave[goodpix]))
 		else:
 			flux = old_div(numpy.trapz(spec._data[total_cut]*new_trans[total_cut]*spec._wave[total_cut], spec._wave[total_cut]),numpy.trapz(new_trans[total_cut]*spec._wave[total_cut], spec._wave[total_cut]))
-		if spec._error!=None:
-			if spec._mask!=None:
+		if spec._error is not None:
+			if spec._mask is not None:
 				error =numpy.sqrt( old_div(numpy.trapz(spec._error[goodpix]**2*new_trans[goodpix]*spec._wave[goodpix], spec._wave[goodpix]),numpy.trapz(new_trans[goodpix]*spec._wave[goodpix], spec._wave[goodpix])))
 			else:
 				error =numpy.sqrt( old_div(numpy.trapz(spec._error[total_cut]**2*new_trans[total_cut]*spec._wave[total_cut], spec._wave[total_cut]),numpy.trapz(new_trans[total_cut]*spec._wave[total_cut], spec._wave[total_cut])))
@@ -66,7 +66,7 @@ class PassBand(Spectrum1D):
 	def getFluxRSS(self, rss, resamp='linear'):
 
 		flux = numpy.zeros(rss._fibers, dtype=numpy.float32)
-		if rss._error!=None:
+		if rss._error is not None:
 			error = numpy.zeros(rss._fibers, dtype=numpy.float32)
 		else:
 			error=None
@@ -75,7 +75,7 @@ class PassBand(Spectrum1D):
 			spec = rss[i]
 			photo = self.getFluxPass(spec, resamp)
 			flux[i] = photo[0]
-			if rss._error!=None:
+			if rss._error is not None:
 				error[i] = photo[1]
 		min = numpy.min(flux)
 		max = numpy.max(flux)
@@ -114,7 +114,7 @@ class PassBand(Spectrum1D):
 			vega_spec.loadTxtData(resources_dir+'/vega.txt')
 			(vega_flux, vega_err) = self.getFluxPass(vega_spec)
 			mag=-2.5*numpy.log10(old_div(flux*units,vega_flux))
-		#if error != None:
+		#if error is not None:
 		#    error = 1.0857*error/flux
 		#    return mag, error
 		#else:

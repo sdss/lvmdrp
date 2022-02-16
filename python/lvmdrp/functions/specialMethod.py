@@ -277,17 +277,17 @@ def matchSkySpecTime_drp(list_sky_specs, ref_object, out_spec, hdr_key_start, hd
 	sky_wave = sky_1._wave
 
 	sky_data = numpy.zeros((len(sky_in), sky_1._dim), dtype=numpy.float32)
-	if sky_1._error!=None:
+	if sky_1._error is not None:
 		sky_error = numpy.zeros((len(sky_in), sky_1._dim), dtype=numpy.float32)
 
-	if err_sim>1 and sky_1._error!=None:
+	if err_sim>1 and sky_1._error is not None:
 		sky_out = Spectrum1D(wave = sky_wave, data=numpy.zeros(sky_1._dim, dtype=numpy.float32), error=numpy.zeros(sky_1._dim, dtype=numpy.float32))
 	else:
 		sky_out = Spectrum1D(wave = sky_wave, data=numpy.zeros(sky_1._dim, dtype=numpy.float32))
 	sky_time = numpy.zeros(len(sky_in), dtype=numpy.float32)
 
 	sky_data[0, :] = sky_1._data
-	if sky_1._error!=None:
+	if sky_1._error is not None:
 		sky_error[0, :] = sky_1._error
 	sky_time[0] = (sky_1_header.getHdrValue(hdr_key_start)+(next_day[0]*86400)+sky_1_header.getHdrValue(hdr_key_end)+(next_day[0]*86400))/2.0
 
@@ -295,7 +295,7 @@ def matchSkySpecTime_drp(list_sky_specs, ref_object, out_spec, hdr_key_start, hd
 		sky = Spectrum1D()
 		sky.loadFitsData(sky_in[i])
 		sky_data[i, :] = sky._data
-		if sky._error!=None:
+		if sky._error is not None:
 			sky_error[i, :] = sky._error
 		sky_header = Header()
 		sky_header.loadFitsHeader(sky_in[i])
@@ -314,7 +314,7 @@ def matchSkySpecTime_drp(list_sky_specs, ref_object, out_spec, hdr_key_start, hd
 		for i in range(sky_1._dim):
 			fit = numpy.polyfit(sky_time, sky_data[:, i], poly_order)
 			sky_out._data[i] = numpy.mean(numpy.polyval(fit, object_time))
-			if err_sim>1 and sky_1._error!=None:
+			if err_sim>1 and sky_1._error is not None:
 				out = numpy.zeros(err_sim, dtype=numpy.float32)
 				for j in range(err_sim):
 					try:    rnormal = numpy.random.normal(sky_data[:, i], sky_error[:, i])
@@ -330,7 +330,7 @@ def matchSkySpecTime_drp(list_sky_specs, ref_object, out_spec, hdr_key_start, hd
 	if function=='exponential':
 		for i in range(sky_1._dim):
 			exp_profile = Exponential_constant([2.0, 500, 0.2])
-			if err_sim>1 and sky_1._error!=None:
+			if err_sim>1 and sky_1._error is not None:
 				exp_profile.fit(sky_time,sky_data[:, i], sky_error[:, i], method='simplex', err_sim=err_sim)
 				sky_out._error[i] = numpy.std(exp_profile._par_err_models[:, 0][:, numpy.newaxis]*numpy.exp(old_div(object_time[numpy.newaxis, :],exp_profile._par_err_models[:, 1][:, numpy.newaxis]))+exp_profile._par_err_models[:, 2][:, numpy.newaxis])
 			else:

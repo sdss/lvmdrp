@@ -162,11 +162,11 @@ def measureDARPeak_drp(cube_in, out_prefix, coadd='10', steps='50', search_box='
     spec_y = Spectrum1D(data=cent_y, wave=wave)
     poly_y = spec_y.smoothPoly(order=smooth_poly, start_wave=start_wave, end_wave=end_wave)
 
-    if start_wave!=None and end_wave!=None:
+    if start_wave is not None and end_wave is not None:
         select = numpy.logical_and(wave>=start_wave, wave<=end_wave)
-    elif start_wave!=None:
+    elif start_wave is not None:
         select = wave>=start_wave
-    elif end_wave!=None:
+    elif end_wave is not None:
         select = wave<=end_wave
     else:
         select = wave>=wave[0]
@@ -182,7 +182,7 @@ def measureDARPeak_drp(cube_in, out_prefix, coadd='10', steps='50', search_box='
     poly_x = spec2_x.smoothPoly(order=smooth_poly, ref_base=cube._wave)
     poly_y = spec2_y.smoothPoly(order=smooth_poly, ref_base=cube._wave)
 
-    if fibers==None:
+    if fibers is None:
       fibers=cube._dim_x*cube._dim_y
 
     rss_x = RSS(wave=cube._wave, data= numpy.ones(((fibers), len(cube._wave)))*spec2_x._data[numpy.newaxis, :], header=cube._header)
@@ -325,7 +325,7 @@ def matchAbsFluxAper_drp(cube_in, cube_out, key_mags,  ref_mags, hdrkey, comment
 
     cube.setHdrValue(hdrkey+' RATIO', diff_factor, comment)
     cube._data = cube._data*diff_factor
-    if cube._error!=None:
+    if cube._error is not None:
         cube._error = cube._error*diff_factor
     cube.writeFitsData(cube_out)
 
@@ -500,7 +500,7 @@ def createSensFunction_drp(cube_in, out_sens,  ref_spec, airmass, exptime, cent_
     star_corr = old_div(old_div(star_spec,extinct),exptime)
 
     sens_func = old_div(ref_star_resamp,star_corr)
-    if mask_wave!=None:
+    if mask_wave is not None:
         regions = old_div(len(mask_wave),2)
         for i in range(regions):
             select_region = numpy.logical_and(sens_func._wave>mask_wave[i*2], sens_func._wave<mask_wave[i*2+1])
@@ -578,11 +578,11 @@ def combineCubes_drp(incubes, outcube, method='mean', replace_error='1e10'):
     for  i in range(len(incubes)):
         cubes.append(loadCube(incubes[i]))
     data = numpy.zeros_like(cubes[0]._data)
-    if cubes[0]._error!=None:
+    if cubes[0]._error is not None:
         error = numpy.zeros_like(cubes[0]._error)
     else:
         error = None
-    if cubes[0]._mask!=None:
+    if cubes[0]._mask is not None:
         mask = numpy.zeros_like(cubes[0]._mask)
     else:
         mask = None
@@ -597,9 +597,9 @@ def combineCubes_drp(incubes, outcube, method='mean', replace_error='1e10'):
             error_img[:, :, :]=0
             mask_img[:, :, :]=False
             for j in range(len(incubes)):
-                if mask!=None:
+                if mask is not None:
                     mask_img[j, :, :] = cubes[j]._mask[i, :, :]
-                if error!=None:
+                if error is not None:
                     error_img[j, :, :] = cubes[j]._error[i, :, :]
                 image[j, :, :] = cubes[j]._data[i, :, :]
                 image2[j, :, :] = cubes[j]._data[i, :, :]
@@ -612,10 +612,10 @@ def combineCubes_drp(incubes, outcube, method='mean', replace_error='1e10'):
             data[i, select_good] = old_div(numpy.sum(image, 0)[select_good],good_pix[select_good])
             if numpy.sum(select_bad)>0:
                 data[i, select_bad] = old_div(numpy.sum(image2, 0)[select_bad],len(incubes))
-            if error!=None:
+            if error is not None:
                 error[i, select_good] = numpy.sqrt(old_div(numpy.sum(error_img**2, 0)[select_good],good_pix[select_good]**2))
                 error[i, select_bad]=replace_error
-            if mask!=None:
+            if mask is not None:
                 mask[i, :, :]=select_bad
 
 
@@ -636,7 +636,7 @@ def fitCubeELines_drp(cube_in, par_file, maps_prefix, smooth_box='', wave_range=
     if smooth_box!='':
         out_smooth = Cube(wave=wave, data=numpy.zeros_like(cube._data), header=cube.getHeader())
 
-    if cube._error!=None:
+    if cube._error is not None:
         select = cube._error<=0
         if numpy.sum(select)>0:
             cube._error[select]=float(bad_error_replace)
@@ -656,7 +656,7 @@ def fitCubeELines_drp(cube_in, par_file, maps_prefix, smooth_box='', wave_range=
     for n in par._names:
         model={}
         if par._profile_type[n]=='Gauss':
-            if err_sim>0 and cube._error!=None:
+            if err_sim>0 and cube._error is not None:
                 model['flux'] = Image(data=numpy.zeros((cube._dim_y, cube._dim_x), dtype=numpy.float32), error=numpy.zeros((cube._dim_y, cube._dim_x), dtype=numpy.float32))
                 model['vel'] = Image(data=numpy.zeros((cube._dim_y, cube._dim_x), dtype=numpy.float32), error=numpy.zeros((cube._dim_y, cube._dim_x), dtype=numpy.float32))
                 model['disp'] = Image(data=numpy.zeros((cube._dim_y, cube._dim_x), dtype=numpy.float32), error=numpy.zeros((cube._dim_y, cube._dim_x), dtype=numpy.float32))
@@ -665,7 +665,7 @@ def fitCubeELines_drp(cube_in, par_file, maps_prefix, smooth_box='', wave_range=
                 model['vel'] = Image(data=numpy.zeros((cube._dim_y, cube._dim_x), dtype=numpy.float32))
                 model['disp'] = Image(data=numpy.zeros((cube._dim_y, cube._dim_x), dtype=numpy.float32))
         elif par._profile_type[n]=='TemplateScale':
-            if err_sim>0 and cube._error!=None:
+            if err_sim>0 and cube._error is not None:
                 model['scale'] = Image(data=numpy.zeros((cube._dim_y, cube._dim_x), dtype=numpy.float32), error=numpy.zeros((cube._dim_y, cube._dim_x), dtype=numpy.float32))
             else:
                 model['scale'] = Image(data=numpy.zeros((cube._dim_y, cube._dim_x), dtype=numpy.float32), error=numpy.zeros((cube._dim_y, cube._dim_x), dtype=numpy.float32))
@@ -700,13 +700,13 @@ def fitCubeELines_drp(cube_in, par_file, maps_prefix, smooth_box='', wave_range=
                         maps[n]['flux'] ._data[i, j]=fit_par._parameters[n]['flux']
                         maps[n]['vel'] ._data[i, j]=fit_par._parameters[n]['vel']
                         maps[n]['disp'] ._data[i, j]=numpy.fabs(fit_par._parameters[n]['disp'])*2.354
-                        if err_sim>0 and cube._error!=None:
+                        if err_sim>0 and cube._error is not None:
                             maps[n]['flux'] ._error[i, j]=fit_par._parameters_err[n]['flux']
                             maps[n]['vel'] ._error[i, j]=fit_par._parameters_err[n]['vel']
                             maps[n]['disp'] ._error[i, j]=numpy.fabs(fit_par._parameters_err[n]['disp'])*2.354
                     elif fit_par._profile_type[n]=='TemplateScale':
                         maps[n]['scale'] ._data[i, j]=fit_par._parameters[n]['scale']
-                        if err_sim>0 and cube._error!=None:
+                        if err_sim>0 and cube._error is not None:
                             maps[n]['scale'] ._error[i, j]=fit_par._parameters_err[n]['scale']
             z+=1
     sys.stdout.write('\n')

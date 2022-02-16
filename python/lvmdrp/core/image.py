@@ -864,11 +864,11 @@ class Image(Header):
 			#new_data = ndimage.interpolation.zoom(self._data, factor, output=numpy.float32, order=0, prefilter=False)
 		#else:
 			#new_data = None
-		#if self._error != None:
+		#if self._error is not None:
 			#new_error = ndimage.interpolation.zoom(self._error, factor, output=numpy.float32, order=0, prefilter=False)
 		#else:
 			#new_error = None
-		#if self._mask != None:
+		#if self._mask is not None:
 			#new_mask= ndimage.interpolation.zoom(self._mask, factor, output="bool", order=0, prefilter=False)
 		#else:
 			#new_mask = None
