@@ -225,10 +225,13 @@ def detWaveSolution_drp(arc_rss, disp_rss, res_rss, ref_line_file='', ref_spec='
 
 			rms[i]= numpy.std(ref_lines[select_ref_lines][select]-legandre_wave(cent_wave[i, select_ref_lines][select])) # compute the rms of the polynomial
 			wave_sol[i, :] = legandre_wave(numpy.arange(arc._data.shape[1]))
-			if i==-1:
+			if i==21:
+				pylab.figure(figsize=(25, 5))
 				#pylab.plot(ref_lines[select_ref_lines][select], ref_lines[select_ref_lines][select]-legandre_wave(cent_wave[i, select_ref_lines][select]), 'ok')
-				pylab.plot(cent_wave[i, select_ref_lines][select],   ref_lines[select_ref_lines][select], 'ok')
-				pylab.plot(numpy.arange(arc._data.shape[1]),wave_sol[i, :] )
+				pylab.plot(cent_wave[i, select_ref_lines][select],   ref_lines[select_ref_lines][select], 'ok', label="data")
+				pylab.plot(numpy.arange(arc._data.shape[1]), wave_sol[i, :], label="wave solution (AA)")
+				pylab.xlabel("dispersion axis (pixel)")
+				pylab.ylabel("wavelength (AA)")
 				pylab.show()
 	##pylab.plot(masked_fib)
 	##pylab.plot(rms[good_fibers])
@@ -252,13 +255,17 @@ def detWaveSolution_drp(arc_rss, disp_rss, res_rss, ref_line_file='', ref_spec='
 			leg_poly_fwhm = fit_profile.LegandrePoly(numpy.zeros(-1*poly_fwhm_disp+1), min_x=0, max_x=arc._data.shape[1]-1 )
 			leg_poly_fwhm.fit(cent_wave[i, select_lines], fwhm_wave[select_lines])
 			fwhm_sol[i, :]=leg_poly_fwhm(numpy.arange(arc._data.shape[1]))
-		if i==-1:
-			pylab.plot(numpy.arange(arc._data.shape[1]-1),  dwave[i, :], '-r')
-			print(cent_round)
-			print(dwave[i, cent_round])
-			pylab.plot(cent_wave[i, select_lines], fwhm[i, select_lines], 'or')
-			pylab.plot(cent_wave[i, select_lines], fwhm_wave[select_lines], 'ok')
-			pylab.plot(numpy.arange(arc._data.shape[1]), fwhm_sol[i, :])
+		if i==21:
+			pylab.figure(figsize=(25, 5))
+			pylab.plot(numpy.arange(arc._data.shape[1]-1),  dwave[i, :], '-r', label="wave sampling (AA)")
+			# print(cent_round)
+			# print(dwave[i, cent_round])
+			pylab.plot(cent_wave[i, select_lines], fwhm[i, select_lines], 'or', label="data (pixel)")
+			pylab.plot(cent_wave[i, select_lines], fwhm_wave[select_lines], 'ok', label="data (AA)")
+			pylab.plot(numpy.arange(arc._data.shape[1]), fwhm_sol[i, :], "b", label="LSF (AA)")
+			pylab.legend(loc=0, frameon=False)
+			pylab.xlabel("dispersion axis (pixel)")
+			# pylab.ylabel("LSF (AA)")
 			pylab.show()
 	arc.setHdrValue('HIERARCH PIPE FWHM POLY', '%d'%(numpy.abs(poly_fwhm_disp)), 'Order of the resolution polynomial')
 	fwhm_trace = FiberRows(data = fwhm_sol, header = arc.getHeader())
@@ -272,6 +279,8 @@ def detWaveSolution_drp(arc_rss, disp_rss, res_rss, ref_line_file='', ref_spec='
 
 	wave_trace.writeFitsData(disp_rss)
 	fwhm_trace.writeFitsData(res_rss)
+
+	return cent_wave[:, select_lines], fwhm_wave[select_lines]
 
 def createPixTable_drp(rss_in, rss_out, arc_wave, arc_fwhm='', cropping=''):
 	"""
