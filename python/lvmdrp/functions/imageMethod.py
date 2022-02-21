@@ -1771,6 +1771,8 @@ def preprocRawFrame_drp(in_image, out_image, boundary_x, boundary_y, positions, 
 
 	# create glued image
 	full_img = glueImages(images, pos)
+	# flip along dispersion axis
+	full_img.orientImage("X")
 
 	# adjust FITS header information
 	full_img.removeHdrEntries(['GAIN','RDNOISE', ''])
