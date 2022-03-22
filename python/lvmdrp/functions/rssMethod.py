@@ -225,8 +225,8 @@ def detWaveSolution_drp(arc_rss, disp_rss, res_rss, ref_line_file='', ref_spec='
 
 			rms[i]= numpy.std(ref_lines[select_ref_lines][select]-legandre_wave(cent_wave[i, select_ref_lines][select])) # compute the rms of the polynomial
 			wave_sol[i, :] = legandre_wave(numpy.arange(arc._data.shape[1]))
-			if i==21:
-				pylab.figure(figsize=(25, 5))
+			if verbose>0 and i==verbose:
+				pylab.figure(figsize=(17, 5))
 				#pylab.plot(ref_lines[select_ref_lines][select], ref_lines[select_ref_lines][select]-legandre_wave(cent_wave[i, select_ref_lines][select]), 'ok')
 				pylab.plot(cent_wave[i, select_ref_lines][select],   ref_lines[select_ref_lines][select], 'ok', label="data")
 				pylab.plot(numpy.arange(arc._data.shape[1]), wave_sol[i, :], label="wave solution (AA)")
@@ -255,8 +255,8 @@ def detWaveSolution_drp(arc_rss, disp_rss, res_rss, ref_line_file='', ref_spec='
 			leg_poly_fwhm = fit_profile.LegandrePoly(numpy.zeros(-1*poly_fwhm_disp+1), min_x=0, max_x=arc._data.shape[1]-1 )
 			leg_poly_fwhm.fit(cent_wave[i, select_lines], fwhm_wave[select_lines])
 			fwhm_sol[i, :]=leg_poly_fwhm(numpy.arange(arc._data.shape[1]))
-		if i==21:
-			pylab.figure(figsize=(25, 5))
+		if verbose>0 and i==verbose:
+			pylab.figure(figsize=(17, 5))
 			pylab.plot(numpy.arange(arc._data.shape[1]-1),  dwave[i, :], '-r', label="wave sampling (AA)")
 			# print(cent_round)
 			# print(dwave[i, cent_round])
