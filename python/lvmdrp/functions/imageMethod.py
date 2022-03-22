@@ -1676,7 +1676,7 @@ def testres_drp(image, trace, fwhm, flux):
 	hdu = pyfits.PrimaryHDU(old_div((img._data-out),img._data))
 	hdu.writeto('res_rel.fits', overwrite=True)
 
-def preprocRawFrame_drp(in_image, out_image, boundary_x, boundary_y, positions, orientation, subtract_overscan='1',compute_error='1', gain='GAIN', rdnoise='RDNOISE'):
+def preprocRawFrame_drp(in_image, channel, out_image, boundary_x, boundary_y, positions, orientation, subtract_overscan='1',compute_error='1', gain='GAIN', rdnoise='RDNOISE'):
 	"""
 		Preprocess LVM raw image with different amplifiers to a full science CCD images. The orientations of the sub images are taken into account as well as their
 		overscan regions. A Poission error image can be automatically computed during this process. This requires that the GAIN and the Read-Out Noise are stored
@@ -1686,6 +1686,8 @@ def preprocRawFrame_drp(in_image, out_image, boundary_x, boundary_y, positions, 
 		--------------
 		in_image: string
 				name of the FITS raw image containing the subimage to be preprocessed
+		channel: string
+				name of the spectrograph channel, e.g.: b1, r2, z1
 		out_image: string
 				Name of the FITS file  in which the preprocessed image will be stored
 		boundary_x : string of two comma-separated integers
@@ -1772,7 +1774,8 @@ def preprocRawFrame_drp(in_image, out_image, boundary_x, boundary_y, positions, 
 	# create glued image
 	full_img = glueImages(images, pos)
 	# flip along dispersion axis
-	full_img.orientImage("X")
+	if channel.startswith("z"):
+		full_img.orientImage("X")
 
 	# adjust FITS header information
 	full_img.removeHdrEntries(['GAIN','RDNOISE', ''])
