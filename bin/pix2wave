@@ -96,7 +96,7 @@ class SolveWavelength:
         self.ydata = spectra._data[iy:fy+1,:].sum(axis=0)
 
     def _init_plot(self):
-        self.line, = ax.step(self.xdata, self.ydata, lw=1, picker=True, pickradius=self.aperture, color="k")
+        self.line, = ax.plot(self.xdata, self.ydata, lw=1, picker=True, pickradius=self.aperture, color="k")
         for x_peak in self.table[:,0]:
             x_min, x_max = x_peak-self.aperture, x_peak+self.aperture
             self.ax.axvspan(x_min, x_max, fc="0.5", lw=0, alpha=0.5)
@@ -155,8 +155,8 @@ class SolveWavelength:
         nrows = self.table.shape[0]
         if self.nrows != nrows:
             self.nrows = nrows
-            with open(self.dispersion_table, "a" if self.table_exist else "w") as t:
-                if t.mode == "w": t.write(f"{self.ny_spectra}\n")
+            with open(self.dispersion_table, "w") as t:
+                if not self.table_exist: t.write(f"{self.ny_spectra}\n")
                 for i in range(self.nrows):
                     x, y, m = self.table[i]
                     t.write(f"{x:>.2f} {y:>9.4f} {int(m):>1d}\n")
@@ -199,32 +199,44 @@ class SolveWavelength:
         # store table
         self._save_table()
 
-        x_os = np.linspace(self.xdata.min(), self.xdata.max(), 1000)
+        x_os = np.linspace(x.min(), x.max(), 1000)
+        y_os = np.linspace(y.min(), y.max(), 1000)
         if self.poly_degree < 0:
-            coeffs = hermfit(x_m, y_m, -self.poly_degree)
-            poly = hermval(x_os, coeffs)
+            # coeffs = hermfit(x_m, y_m, -self.poly_degree)
+            # poly = hermval(x_os, coeffs)
+            coeffs_inv = hermfit(y_m, x_m, -self.poly_degree)
+            poly_inv = hermval(y_os, coeffs_inv)
         else:
-            coeffs = polyfit(x_m, y_m, self.poly_degree)
-            poly = polyval(x_os, coeffs)
+            # coeffs = polyfit(x_m, y_m, self.poly_degree)
+            # poly = polyval(x_os, coeffs)
+            coeffs_inv = polyfit(y_m, x_m, self.poly_degree)
+            poly_inv = polyval(y_os, coeffs_inv)
         
         # display plot
         if self.plot:
+            if self.poly_degree < 0:
+                # model = hermval(x, coeffs)
+                model_inv = hermval(y, coeffs_inv)
+            else:
+                # model = polyval(x, coeffs)
+                model_inv = polyval(y, coeffs_inv)
+        
             fig, ax = plt.subplots(figsize=(20,20))
-            ax.plot(x[~m], y[~m], "o", mec="0.5", mew=1, ms=8, mfc="none")
-            ax.plot(x_m, y_m, "or", mew=1, ms=10, mfc="none")
-            ax.plot(x_os, poly, "-k")
-            model = polyval(x, coeffs)
+            ax.axhline(ls="--", lw=1, color="0.7")
+            # ax.plot(x_os, poly_inv - x_os, "-", lw=2, color="0.2")
+            ax.plot(x[m], (model_inv - x)[m], "or", mew=1, ms=10, mfc="none")
+            ax.plot(x[~m], (model_inv - x)[~m], "o", mec="0.5", mew=1, ms=8, mfc="none")
+
             for i in range(x.size):
                 ax.annotate(
-                    f"{model[i]-y[i]:.2f}",
-                    xy=(x[i],y[i]),
+                    f"{(model_inv - x)[i]:.2f}",
+                    xy=(x[i], (model_inv - x)[i]),
                     xytext=(9, -9),
                     textcoords="offset pixels",
                     color=("r" if m[i] else "0.5")
                 )
-
             ax.set_xlabel("dispersion axis (pixel)")
-            ax.set_ylabel("wavelength (angstrom)")
+            ax.set_ylabel("residuals (pixel)")
             fig.show()
 
 # TODO (for each fiber):
