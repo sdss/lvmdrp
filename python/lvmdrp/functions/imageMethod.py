@@ -1774,7 +1774,7 @@ def preprocRawFrame_drp(in_image, channel, out_image, boundary_x, boundary_y, po
 	# create glued image
 	full_img = glueImages(images, pos)
 	# flip along dispersion axis
-	if channel.startswith("z"):
+	if channel.startswith("z") or channel.startswith("b"):
 		full_img.orientImage("X")
 
 	# adjust FITS header information
