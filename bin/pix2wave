@@ -94,9 +94,11 @@ class SolveWavelength:
         # plot spectrum
         self.xdata = np.arange(spectra._data.shape[1])
         self.ydata = spectra._data[iy:fy+1,:].sum(axis=0)
+        self.ydata /= self.ydata.max()
+        self.ydata = np.sqrt(1e-3+self.ydata)
 
     def _init_plot(self):
-        self.line, = ax.plot(self.xdata, self.ydata, lw=1, picker=True, pickradius=self.aperture, color="k")
+        self.line, = ax.step(self.xdata, self.ydata, lw=1, picker=True, pickradius=self.aperture, color="k")
         for x_peak in self.table[:,0]:
             x_min, x_max = x_peak-self.aperture, x_peak+self.aperture
             self.ax.axvspan(x_min, x_max, fc="0.5", lw=0, alpha=0.5)
@@ -202,13 +204,13 @@ class SolveWavelength:
         x_os = np.linspace(x.min(), x.max(), 1000)
         y_os = np.linspace(y.min(), y.max(), 1000)
         if self.poly_degree < 0:
-            # coeffs = hermfit(x_m, y_m, -self.poly_degree)
-            # poly = hermval(x_os, coeffs)
+            coeffs = hermfit(x_m, y_m, -self.poly_degree)
+            poly = hermval(x_os, coeffs)
             coeffs_inv = hermfit(y_m, x_m, -self.poly_degree)
             poly_inv = hermval(y_os, coeffs_inv)
         else:
-            # coeffs = polyfit(x_m, y_m, self.poly_degree)
-            # poly = polyval(x_os, coeffs)
+            coeffs = polyfit(x_m, y_m, self.poly_degree)
+            poly = polyval(x_os, coeffs)
             coeffs_inv = polyfit(y_m, x_m, self.poly_degree)
             poly_inv = polyval(y_os, coeffs_inv)
         
@@ -229,7 +231,7 @@ class SolveWavelength:
 
             for i in range(x.size):
                 ax.annotate(
-                    f"{(model_inv - x)[i]:.2f}",
+                    f"{(model_inv - x)[i]:.4f}",
                     xy=(x[i], (model_inv - x)[i]),
                     xytext=(9, -9),
                     textcoords="offset pixels",
@@ -237,6 +239,7 @@ class SolveWavelength:
                 )
             ax.set_xlabel("dispersion axis (pixel)")
             ax.set_ylabel("residuals (pixel)")
+            fig.savefig(f"{os.path.basename(self.extracted_fits.strip('.ms.fits'))}.png", bbox_inches="tight")
             fig.show()
 
 # TODO (for each fiber):
