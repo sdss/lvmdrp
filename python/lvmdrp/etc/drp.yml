@@ -1,9 +1,29 @@
 ---
+# this configuration file will be written during DRP (post) installation:
 
-option1:
-    suboption1: 1
-    suboption2: "some text"
-    suboption3:
-        subsuboption1: [1, 2, 3]
+# CONSTANTS:
+# define root path of the installation
+# define path to pixel-to-wavelength maps for each spectrograph
+# define path to fiber maps
+# define naming conventions
+# staleness parameters
 
-option2: 2.0
+# ~CONSTANTS:
+# define root path for frames (probably hardcoded):
+# define path for ~constant frames: (continuum, arcs)
+# define path for flux calibration sources (~constant)
+# define path for long-term frames: master bias, CCDflats, fiberflats (domeflats, skyflats)
+# define path for short term frames: night bias, dark, flats, sky, object
+
+# define initial calibration parameters (set by drp-fit 1st with lab data, 2nd with simulations, 3rd during comissioning)
+# preprocessing parameters
+# cosmic ray parameters
+# peak detection parameters
+# 1st trace parameters
+# stray light parameters
+# 2nd trace parameters (FWHM)
+# extraction parameters
+# wavelength solution parameters
+# fiberflat parameters
+# sky module parameters
+...
