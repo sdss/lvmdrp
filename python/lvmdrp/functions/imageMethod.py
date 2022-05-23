@@ -18,6 +18,7 @@ from multiprocessing import cpu_count
 from lvmdrp.core.image import Image, combineImages, glueImages, loadImage
 from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.core.spectrum1d import Spectrum1D
+from lvmdrp.utils.decorators import missing_files
 import multiprocessing
 from types import *
 
@@ -218,6 +219,7 @@ def detCos_drp(image,  out_image,   rdnoise='2.9', sigma_det='5', rlim='1.2', it
 			out = out.replaceMaskMedian(box_x, box_y, replace_error=None)  # replace possible corrput pixel with zeros
 	out.writeFitsData(out_image)
 
+@missing_files("image")
 def LACosmic_drp(image,  out_image,  sigma_det='5', flim='1.1', iter='3', sig_gauss='0.8,0.8', error_box='20,1', replace_box='20,1',  replace_error='1e10',  rdnoise='2.9',  increase_radius='0', verbose='0', parallel='2'):
 	"""
 		   Detects and removes cosmic rays from astronomical images based on a modified Laplacian edge
@@ -445,6 +447,7 @@ def addCCDMask_drp(image, mask, replaceError='1e10'):
 	img.setData(mask=mask_comb)
 	img.writeFitsData(image)
 
+@missing_files("image")
 def findPeaksAuto_drp(image, out_peaks_file, nfibers,  disp_axis='X', threshold='5000',median_box='8', median_cross='1', slice='', method='gauss',  init_sigma='1.0', verbose='1'):
 	"""
 		   Finds the exact subpixel cross-dispersion position of a given number of fibers at a certain dispersion column on the raw CCD frame.
@@ -731,6 +734,7 @@ def findPeaksMaster2_drp(image, peaks_master, out_peaks_file, disp_axis='X', thr
 		pylab.plot(centers._data, numpy.ones(len(centers._data))*2000.0, 'xg')
 		pylab.show()
 
+@missing_files("image", "peaks_file")
 def tracePeaks_drp(image, peaks_file, trace_out, disp_axis='X', method='gauss', median_box='7', median_cross='1', steps='30', coadd='30', poly_disp='-6', init_sigma='1.0', threshold_peak='100.0', max_diff='2', verbose='1'):
 	"""
 			Traces the peaks of fibers along the dispersion axis. The peaks at a specific dispersion column had to be determined before.
@@ -1029,6 +1033,7 @@ def combineImages_drp(images, out_image, method='median', k='3.0'):
 	#write out FITS file
 	combined_img.writeFitsData(out_image)
 
+@missing_files("image", "trace")
 def subtractStraylight_drp(image, trace, stray_image, clean_image, disp_axis='X',  aperture='7', poly_cross='4', smooth_disp='5', smooth_gauss='10.0', parallel='auto'):
 	"""
 			Subtracts a diffuse background signal (stray light) from the raw data. It uses the regions between fiber to estimate the stray light signal and
@@ -1127,6 +1132,7 @@ def subtractStraylight_drp(image, trace, stray_image, clean_image, disp_axis='X'
 	img_out.writeFitsData(clean_image)
 	img_smooth.writeFitsData(stray_image)
 
+@missing_files("image", "trace")
 def traceFWHM_drp(image, trace, fwhm_out, disp_axis='X', blocks='20', steps='100', coadd='10', poly_disp='5', threshold_flux='50.0', init_fwhm='2.0', clip='', parallel='auto'):
 	"""
 			Measures the FWHM of the cross-dispersion fiber profile across the CCD.  It assumes that the profiles have a Gaussian shape and that the width  is CONSTANT for
@@ -1467,6 +1473,7 @@ def offsetTrace2_drp(image, trace, trace_fwhm, disp, lines, logfile,  blocks='15
 	img.writeFitsHeader(image)
 	log.close()
 
+@missing_files("image", "trace")
 def extractSpec_drp(image, trace, out_rss,  method='optimal',  aperture='7', fwhm='2.5', disp_axis='X',  replace_error='1e10', plot='-1', parallel='auto'):
 	"""
 			Extracts the flux for each fiber along the dispersion direction which is written into an RSS FITS file format.
@@ -1599,6 +1606,7 @@ def calibrateSDSSImage_drp(file_in, file_out, field_file):
 	calImage = image.calibrateSDSS(field_file)
 	calImage.writeFitsData(file_out)
 
+@missing_files("file_in")
 def subtractBias_drp(file_in, file_out, bias, compute_error='1', boundary_x='', boundary_y='', gain='', rdnoise='', subtract_light='0'):
 	subtract_light= bool(int(subtract_light))
 	compute_error = bool(int(compute_error))
@@ -1676,6 +1684,7 @@ def testres_drp(image, trace, fwhm, flux):
 	hdu = pyfits.PrimaryHDU(old_div((img._data-out),img._data))
 	hdu.writeto('res_rel.fits', overwrite=True)
 
+@missing_files("in_image")
 def preprocRawFrame_drp(in_image, channel, out_image, boundary_x, boundary_y, positions, orientation, subtract_overscan='1',compute_error='1', gain='GAIN', rdnoise='RDNOISE'):
 	"""
 		Preprocess LVM raw image with different amplifiers to a full science CCD images. The orientations of the sub images are taken into account as well as their
