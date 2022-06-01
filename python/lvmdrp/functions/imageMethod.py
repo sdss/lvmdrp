@@ -1577,11 +1577,11 @@ def extractSpec_drp(image, trace, out_rss,  method='optimal',  aperture='7', fwh
 	rss.setHdrValue('NAXIS1',  data.shape[1])
 	rss.setHdrValue('DISPAXIS',  1)
 	if method=='optimal':
-		rss.setHdrValue('hierarch PIPE CDISP FWHM MIN',numpy.min(trace_fwhm._data[trace_mask._mask==False]))
-		rss.setHdrValue('hierarch PIPE CDISP FWHM MAX',numpy.max(trace_fwhm._data[trace_mask._mask==False]))
-		rss.setHdrValue('hierarch PIPE CDISP FWHM AVG',numpy.mean(trace_fwhm._data[trace_mask._mask==False]))
-		rss.setHdrValue('hierarch PIPE CDISP FWHM MED',numpy.median(trace_fwhm._data[trace_mask._mask==False]))
-		rss.setHdrValue('hierarch PIPE CDISP FWHM SIG',numpy.std(trace_fwhm._data[trace_mask._mask==False]))
+		rss.setHdrValue('hierarch PIPE CDISP FWHM MIN',numpy.min(trace_fwhm._data[trace_mask._mask==False], initial=0))
+		rss.setHdrValue('hierarch PIPE CDISP FWHM MAX',numpy.max(trace_fwhm._data[trace_mask._mask==False], initial=0))
+		rss.setHdrValue('hierarch PIPE CDISP FWHM AVG',numpy.mean(trace_fwhm._data[trace_mask._mask==False]) if data.size != 0 else 0)
+		rss.setHdrValue('hierarch PIPE CDISP FWHM MED',numpy.median(trace_fwhm._data[trace_mask._mask==False]) if data.size != 0 else 0)
+		rss.setHdrValue('hierarch PIPE CDISP FWHM SIG',numpy.std(trace_fwhm._data[trace_mask._mask==False]) if data.size != 0 else 0)
 	rss.writeFitsData(out_rss)
 
 def calibrateSDSSImage_drp(file_in, file_out, field_file):
@@ -1684,121 +1684,256 @@ def testres_drp(image, trace, fwhm, flux):
 	hdu = pyfits.PrimaryHDU(old_div((img._data-out),img._data))
 	hdu.writeto('res_rel.fits', overwrite=True)
 
+
 @missing_files("in_image")
-def preprocRawFrame_drp(in_image, channel, out_image, boundary_x, boundary_y, positions, orientation, subtract_overscan='1',compute_error='1', gain='GAIN', rdnoise='RDNOISE'):
-	"""
-		Preprocess LVM raw image with different amplifiers to a full science CCD images. The orientations of the sub images are taken into account as well as their
-		overscan regions. A Poission error image can be automatically computed during this process. This requires that the GAIN and the Read-Out Noise are stored
-		as header keywords in the raw image.
+def preprocRawFrame_drp(in_image, channel, out_image, boundary_x, boundary_y, positions, orientation, subtract_overscan='1', compute_error='1', gain="none", rdnoise="none", gain_field='GAIN', rdnoise_field='RDNOISE'):
+    """
+        Preprocess LVM raw image with different amplifiers to a full science CCD images. The orientations of the sub images are taken into account as well as their
+        overscan regions. A Poission error image can be automatically computed during this process. This requires that the {gain_field} and the Read-Out Noise are stored
+        as header keywords in the raw image.
 
-		Parameters
-		--------------
-		in_image: string
-				name of the FITS raw image containing the subimage to be preprocessed
-		channel: string
-				name of the spectrograph channel, e.g.: b1, r2, z1
-		out_image: string
-				Name of the FITS file  in which the preprocessed image will be stored
-		boundary_x : string of two comma-separated integers
-				Pixel boundaries of the subimages EXCLUDING the overscan regions along x axis (first pixel has index 1)
-		boundary_y : string of two comma-separated integers
-				Pixel boundaries of the subimages EXCLUDING the overscan regionsalong y axis (first pixel has index 1)
-		positions : string of two comma-separated  integer digits,
-				Describes the position of each sub image in colum/row format where the first digit describes the row and the second the column position.
-				'00' would correspond to the lower left corner in the preprocessed CCD frame
-		orientation: comma-separated strings
-				Describes how each subimage should be oriented before place into the glued CCD frame. Possible options are: 'S','T','X','Y','90','180'', and 270'
-				Their meaning are:
-				'S' : orientation is unchanged
-				'T' : the x and y axes are swapped
-				'X' : mirrored along the x axis
-				'Y' : mirrored along the y axis
-				'90' : rotated by 90 degrees
-				'180' : rotated by 180 degrees
-				'270' : rotated by 270 degrees
-		subtract_overscan : string of integer ('0' or '1'), optional  with default: '1'
-				Should the median value of the overscan region be subtracted from the subimage before glueing, '1' - Yes, '0' - No
-		compute_error : string of integer ('0' or '1'), optional  with default: '1'
-				Should the Poisson error included into the second extension, '1' - Yes, '0' - No
-		gain : string, optional with default :''
-				Name of the FITS Header keyword for the gain value of the CCD, will be multiplied
-		rdnoise: string, optional with default: ''
-				Name of the FITS Header keyword for the read out noise value
-		"""
-   	# convert input parameters to proper type
-	bound_x = boundary_x.split(',')
-	bound_y = boundary_y.split(',')
-	orient = orientation.split(',')
-	pos = positions.split(',')
-	subtract_overscan = bool(int(subtract_overscan))
-	compute_error = bool(int(compute_error))
+        Parameters
+        --------------
+        in_image: string
+                name of the FITS raw image containing the subimage to be preprocessed
+        channel: string
+                name of the spectrograph channel, e.g.: b1, r2, z1
+        out_image: string
+                Name of the FITS file  in which the preprocessed image will be stored
+        boundary_x : string of two comma-separated integers
+                Pixel boundaries of the subimages EXCLUDING the overscan regions along x axis (first pixel has index 1)
+        boundary_y : string of two comma-separated integers
+                Pixel boundaries of the subimages EXCLUDING the overscan regionsalong y axis (first pixel has index 1)
+        positions : string of two comma-separated  integer digits,
+                Describes the position of each sub image in colum/row format where the first digit describes the row and the second the column position.
+                '00' would correspond to the lower left corner in the preprocessed CCD frame
+        orientation: comma-separated strings
+                Describes how each subimage should be oriented before place into the glued CCD frame. Possible options are: 'S','T','X','Y','90','180'', and 270'
+                Their meaning are:
+                'S' : orientation is unchanged
+                'T' : the x and y axes are swapped
+                'X' : mirrored along the x axis
+                'Y' : mirrored along the y axis
+                '90' : rotated by 90 degrees
+                '180' : rotated by 180 degrees
+                '270' : rotated by 270 degrees
+        subtract_overscan : string of integer ('0' or '1'), optional  with default: '1'
+                Should the median value of the overscan region be subtracted from the subimage before glueing, '1' - Yes, '0' - No
+        compute_error : string of integer ('0' or '1'), optional  with default: '1'
+                Should the Poisson error included into the second extension, '1' - Yes, '0' - No
+        gain : string, optional with default :''
+                Name of the FITS Header keyword for the gain value of the CCD, will be multiplied
+        rdnoise: string, optional with default: ''
+                Name of the FITS Header keyword for the read out noise value
+    """
+    # convert input parameters to proper type
+    # BUG: convert to electrons using the gain
+    # TODO: handle this according to frame type:
+    #           - objects will have several exposures, add combination procedure
+    bound_x = boundary_x.split(',')
+    bound_y = boundary_y.split(',')
+    orient = orientation.split(',')
+    pos = positions.split(',')
+    subtract_overscan = bool(int(subtract_overscan))
+    compute_error = bool(int(compute_error))
 
-	org_image = loadImage(in_image)
-	ab, cd = org_image.split(2, axis="Y")
-	(a, b), (c, d) = ab.split(2, axis="X"), cd.split(2, axis="X")
-	# reflect b and d amplifiers to have the overscan regions in the last columns
-	b.orientImage("X")
-	d.orientImage("X")
-	images = [a, b, c, d]
+    org_image = loadImage(in_image)
+    ab, cd = org_image.split(2, axis="Y")
+    (a, b), (c, d) = ab.split(2, axis="X"), cd.split(2, axis="X")
+    # reflect b and d amplifiers to have the overscan regions in the last columns
+    b.orientImage("X")
+    d.orientImage("X")
+    images = [a, b, c, d]
 
-	if gain!='':
-		# get gain value
-		try:
-			gain = org_image.getHdrValue(gain)
-		except KeyError:
-			gain = float(gain)
-	if rdnoise!='':
-		# get read out noise value
-		try:
-			rdnoise = org_image.getHdrValue(rdnoise)
-		except KeyError:
-			rdnoise = float(rdnoise)
-	else:
-		rdnoise = 0.0
-	gains = len(images)*[gain] # list of gains
-	rdnoises=len(images)*[rdnoise] # list of read-out noises
+    if gain != '':
+        # get gain value
+        try:
+            gain = org_image.getHdrValue(gain_field)
+        except KeyError:
+            try:
+                gain = float(gain)
+            except ValueError:
+                gain = ""
+    if rdnoise != '':
+        # get read out noise value
+        try:
+            rdnoise = org_image.getHdrValue(rdnoise_field)
+        except KeyError:
+            try:
+                rdnoise = float(rdnoise)
+            except ValueError:
+                rdnoise = 0.0
+    else:
+        rdnoise = 0.0
+    gains = len(images)*[gain]  # list of gains
+    rdnoises = len(images)*[rdnoise]  # list of read-out noises
 
-	# create empty lists
-	bias = []  # list of biasses
-	for i in range(len(images)):
-		# append the bias from the overscane region
-		bias.append(images[i].cutOverscan(bound_x, bound_y, subtract_overscan))
-		# return to original orientation
-		if i==1 or i==3: images[i].orientImage("X")
-		# multiplication with the gain factor
-		if gain=='':
-			mult=1.0
-		else:
-			mult=gains[i]
-		images[i]=images[i]*mult
+    # create empty lists
+    bias = []  # list of biasses
+    for i in range(len(images)):
+        # append the bias from the overscane region
+        bias_ = images[i].cutOverscan(bound_x, bound_y, subtract_overscan)
+        bias.append(0.0 if numpy.isnan(bias_) else bias_)
+        # return to original orientation
+        if i == 1 or i == 3:
+            images[i].orientImage("X")
+        # multiplication with the gain factor
+        if gain == '':
+            mult = 1.0
+        else:
+            mult = gains[i]
+        images[i] = images[i]*mult
 
-		# change orientation of subimages
-		images[i].orientImage(orient[i])
-		if compute_error:
-			images[i].computePoissonError(rdnoise=rdnoises[i])
+        # change orientation of subimages
+        images[i].orientImage(orient[i])
+        if compute_error:
+            images[i].computePoissonError(rdnoise=rdnoises[i])
+
+        # copy original geader into each image
+        images[i].setHeader(org_image.getHeader())
+
+    # create glued image
+    full_img = glueImages(images, pos)
+    # flip along dispersion axis
+    if channel.startswith("z") or channel.startswith("b"):
+        full_img.orientImage("X")
+
+    # adjust FITS header information
+    full_img.removeHdrEntries(['{gain_field}', f'{rdnoise_field}', ''])
+    # add gain keywords for the different subimages (CDDs/Amplifies)
+    if gain != '':
+        for i in range(len(images)):
+            full_img.setHdrValue(f'HIERARCH AMP%i {gain_field}' % (
+                i+1), gains[i], 'Gain value of CCD amplifier %i' % (i+1))
+    # add read-out noise keywords for the different subimages (CDDs/Amplifies)
+    if rdnoise != '':
+        for i in range(len(images)):
+            full_img.setHdrValue(f'HIERARCH AMP%i {rdnoise_field}' % (
+                i+1), rdnoises[i], 'Read-out noise of CCD amplifier %i' % (i+1))
+    # add bias of overscan region for the different subimages (CDDs/Amplifies)
+    for i in range(len(images)):
+        if subtract_overscan:
+            full_img.setHdrValue('HIERARCH AMP%i OVERSCAN' % (
+                i+1), bias[i], 'Overscan median (bias) of CCD amplifier %i' % (i+1))
+    #write out FITS file
+    full_img.writeFitsData(out_image)
+    return full_img
+
+# @missing_files("in_image")
+# def preprocRawFrame_drp(in_image, channel, out_image, boundary_x, boundary_y, positions, orientation, subtract_overscan='1',compute_error='1', gain='GAIN', rdnoise='RDNOISE'):
+# 	"""
+# 		Preprocess LVM raw image with different amplifiers to a full science CCD images. The orientations of the sub images are taken into account as well as their
+# 		overscan regions. A Poission error image can be automatically computed during this process. This requires that the GAIN and the Read-Out Noise are stored
+# 		as header keywords in the raw image.
+
+# 		Parameters
+# 		--------------
+# 		in_image: string
+# 				name of the FITS raw image containing the subimage to be preprocessed
+# 		channel: string
+# 				name of the spectrograph channel, e.g.: b1, r2, z1
+# 		out_image: string
+# 				Name of the FITS file  in which the preprocessed image will be stored
+# 		boundary_x : string of two comma-separated integers
+# 				Pixel boundaries of the subimages EXCLUDING the overscan regions along x axis (first pixel has index 1)
+# 		boundary_y : string of two comma-separated integers
+# 				Pixel boundaries of the subimages EXCLUDING the overscan regionsalong y axis (first pixel has index 1)
+# 		positions : string of two comma-separated  integer digits,
+# 				Describes the position of each sub image in colum/row format where the first digit describes the row and the second the column position.
+# 				'00' would correspond to the lower left corner in the preprocessed CCD frame
+# 		orientation: comma-separated strings
+# 				Describes how each subimage should be oriented before place into the glued CCD frame. Possible options are: 'S','T','X','Y','90','180'', and 270'
+# 				Their meaning are:
+# 				'S' : orientation is unchanged
+# 				'T' : the x and y axes are swapped
+# 				'X' : mirrored along the x axis
+# 				'Y' : mirrored along the y axis
+# 				'90' : rotated by 90 degrees
+# 				'180' : rotated by 180 degrees
+# 				'270' : rotated by 270 degrees
+# 		subtract_overscan : string of integer ('0' or '1'), optional  with default: '1'
+# 				Should the median value of the overscan region be subtracted from the subimage before glueing, '1' - Yes, '0' - No
+# 		compute_error : string of integer ('0' or '1'), optional  with default: '1'
+# 				Should the Poisson error included into the second extension, '1' - Yes, '0' - No
+# 		gain : string, optional with default :''
+# 				Name of the FITS Header keyword for the gain value of the CCD, will be multiplied
+# 		rdnoise: string, optional with default: ''
+# 				Name of the FITS Header keyword for the read out noise value
+# 		"""
+#    	# convert input parameters to proper type
+# 	bound_x = boundary_x.split(',')
+# 	bound_y = boundary_y.split(',')
+# 	orient = orientation.split(',')
+# 	pos = positions.split(',')
+# 	subtract_overscan = bool(int(subtract_overscan))
+# 	compute_error = bool(int(compute_error))
+
+# 	org_image = loadImage(in_image)
+# 	ab, cd = org_image.split(2, axis="Y")
+# 	(a, b), (c, d) = ab.split(2, axis="X"), cd.split(2, axis="X")
+# 	# reflect b and d amplifiers to have the overscan regions in the last columns
+# 	b.orientImage("X")
+# 	d.orientImage("X")
+# 	images = [a, b, c, d]
+
+# 	if gain!='':
+# 		# get gain value
+# 		try:
+# 			gain = org_image.getHdrValue(gain)
+# 		except KeyError:
+# 			gain = float(gain)
+# 	if rdnoise!='':
+# 		# get read out noise value
+# 		try:
+# 			rdnoise = org_image.getHdrValue(rdnoise)
+# 		except KeyError:
+# 			rdnoise = float(rdnoise)
+# 	else:
+# 		rdnoise = 0.0
+# 	gains = len(images)*[gain] # list of gains
+# 	rdnoises=len(images)*[rdnoise] # list of read-out noises
+
+# 	# create empty lists
+# 	bias = []  # list of biasses
+# 	for i in range(len(images)):
+# 		# append the bias from the overscane region
+# 		bias.append(images[i].cutOverscan(bound_x, bound_y, subtract_overscan))
+# 		# return to original orientation
+# 		if i==1 or i==3: images[i].orientImage("X")
+# 		# multiplication with the gain factor
+# 		if gain=='':
+# 			mult=1.0
+# 		else:
+# 			mult=gains[i]
+# 		images[i]=images[i]*mult
+
+# 		# change orientation of subimages
+# 		images[i].orientImage(orient[i])
+# 		if compute_error:
+# 			images[i].computePoissonError(rdnoise=rdnoises[i])
 		
-		# copy original geader into each image
-		images[i].setHeader(org_image.getHeader())
+# 		# copy original geader into each image
+# 		images[i].setHeader(org_image.getHeader())
 
-	# create glued image
-	full_img = glueImages(images, pos)
-	# flip along dispersion axis
-	if channel.startswith("z") or channel.startswith("b"):
-		full_img.orientImage("X")
+# 	# create glued image
+# 	full_img = glueImages(images, pos)
+# 	# flip along dispersion axis
+# 	if channel.startswith("z") or channel.startswith("b"):
+# 		full_img.orientImage("X")
 
-	# adjust FITS header information
-	full_img.removeHdrEntries(['GAIN','RDNOISE', ''])
-	# add gain keywords for the different subimages (CDDs/Amplifies)
-	if gain!='':
-		for i in range(len(images)):
-			full_img.setHdrValue('HIERARCH AMP%i GAIN'%(i+1), gains[i], 'Gain value of CCD amplifier %i'%(i+1))
-	# add read-out noise keywords for the different subimages (CDDs/Amplifies)
-	if rdnoise!='':
-		for i in range(len(images)):
-			full_img.setHdrValue('HIERARCH AMP%i RDNOISE'%(i+1), rdnoises[i], 'Read-out noise of CCD amplifier %i'%(i+1))
-	# add bias of overscan region for the different subimages (CDDs/Amplifies)
-	for i in range(len(images)):
-		if subtract_overscan:
-			full_img.setHdrValue('HIERARCH AMP%i OVERSCAN'%(i+1), bias[i], 'Overscan median (bias) of CCD amplifier %i'%(i+1))
-	#write out FITS file	
-	full_img.writeFitsData(out_image)
+# 	# adjust FITS header information
+# 	full_img.removeHdrEntries(['GAIN','RDNOISE', ''])
+# 	# add gain keywords for the different subimages (CDDs/Amplifies)
+# 	if gain!='':
+# 		for i in range(len(images)):
+# 			full_img.setHdrValue('HIERARCH AMP%i GAIN'%(i+1), gains[i], 'Gain value of CCD amplifier %i'%(i+1))
+# 	# add read-out noise keywords for the different subimages (CDDs/Amplifies)
+# 	if rdnoise!='':
+# 		for i in range(len(images)):
+# 			full_img.setHdrValue('HIERARCH AMP%i RDNOISE'%(i+1), rdnoises[i], 'Read-out noise of CCD amplifier %i'%(i+1))
+# 	# add bias of overscan region for the different subimages (CDDs/Amplifies)
+# 	for i in range(len(images)):
+# 		if subtract_overscan:
+# 			full_img.setHdrValue('HIERARCH AMP%i OVERSCAN'%(i+1), bias[i], 'Overscan median (bias) of CCD amplifier %i'%(i+1))
+# 	#write out FITS file	
+# 	full_img.writeFitsData(out_image)
