@@ -1648,6 +1648,65 @@ def subtractBias_drp(file_in, file_out, bias, compute_error='1', boundary_x='', 
 
 	clean.writeFitsData(file_out)
 
+def reprojectRSS_drp(stray, trace, fwhm_cross, fwhm_spect, wave, flux, file_out, sim_fwhm=0.5):
+	"""
+			Historic task used for debugging of the the extraction routine...
+	"""
+	# read original (projected) image
+	# img = Image()
+	# img.loadFitsData(image, extension_data=0)
+	# read stray light map
+	trace_stray = TraceMask()
+	trace_stray.loadFitsData(stray, extension_data=0)
+	# read trace
+	trace_mask = TraceMask()
+	trace_mask.loadFitsData(trace, extension_data=0)
+	# read spatial fwhm
+	trace_fwhm = TraceMask()
+	trace_fwhm.loadFitsData(fwhm_cross, extension_data=0)
+	# read spectral fwhm (lsf)
+	spect_fwhm = TraceMask()
+	spect_fwhm.loadFitsData(fwhm_spect, extension_data=0)
+	# read wavelength solution
+	trace_wave = TraceMask()
+	trace_wave.loadFitsData(wave, extension_data=0)
+	# read simulated RSS
+	trace_flux = RSS()
+	trace_flux.loadFitsData(flux)
+	# TODO: convert physical units into electrons
+	# 	- read flux calibration factor
+	# 	- apply factor to simulated spectra
+
+	out_rss = numpy.zeros(trace_wave._data.shape)
+	for j in range(trace_flux._data.shape[0]):
+		# extract the j-spectrum & set the original (simulated) fwhm
+		spectrum = trace_flux[j]
+		# BUG: resampling should be done after applying LSF to ensure the later is done in the most well-sampled data possible
+		# resample to instrumental sampling
+		spectrum = spectrum.resampleSpec(trace_wave[j]._data, method="spline")
+		# degrade spectral resolution to instrumental fwhm
+		spectrum = spectrum.smoothGaussVariable(numpy.sqrt(spect_fwhm._data[j]**2 - sim_fwhm**2))
+		# transform to pixel space
+		out_rss[j] = spectrum._data
+	
+	out = numpy.zeros(trace_stray._data.shape)
+	pixel = numpy.arange(spect_fwhm._data.shape[1])
+	fact = numpy.sqrt(2.*numpy.pi)
+	for i in range(trace_flux._data.shape[1]):
+		# re-project spectrum using the given instrumental setup
+		sigma = trace_fwhm._data[:, i][None, :] / 2.354
+		A = numpy.exp(-0.5*((pixel[:, None]-trace_mask._data[:, i][None, :]) / abs(sigma))**2) / (fact*abs(sigma))
+		out[:, i] = numpy.dot(A, out_rss[:, i])
+
+	# add stray light map
+	out = out + trace_stray._data
+	# TODO: add fiber-to-fiber transmission (fiberflat)
+	# TODO: add random poissonian noise (bias+dark)
+	# TODO: convert to ADU
+	# store re-projected in FITS
+	rep = pyfits.PrimaryHDU(out)
+	rep.writeto(file_out if file_out.endswith(".fits") else f"{file_out}.fits", overwrite=True)
+
 def testres_drp(image, trace, fwhm, flux):
 	"""
 			Historic task used for debugging of the the extraction routine...
