@@ -1,7 +1,93 @@
-# read main configuration file
-# overwrite config object with cmdline arguments
-# read latest record in DRP logs
-# check for new frames
+#!/usr/bin/env python
+# encoding: utf-8
+#
+# @Author: Alfredo Mejía-Narváez
+# @Date: Apr 27, 2022
+# @Filename: drp
+# @License: BSD 3-Clause
+# @Copyright: SDSS-V LVM
+
+from lvmdrp.utils.database import load_db, get_raws_metadata, get_calib_metadata, get_analogs_metadata, add_master, put_redux_state
+from lvmdrp.main import *
+
+
+# TODO: implement script for adding flags to individual frames manually
+# TODO: implement status updates as decorators to target specific functions responsible for changing the reduction status:
+#   - setup_reduction
+#   - get_analogs_metadata
+
+if __name__ == "__main__":
+    # parse master config file
+    config = load_master_config()
+    # parse cmdline arguments
+    config, cmd_args = parse_arguments(config=config)
+    # connect to DB for new frames
+    db = load_db(config=config)
+    # locate new frames pending for calibration
+    new_frames = get_raws_metadata(db=db)
+    ids = [metadata.ID for metadata in new_frames]
+    for metadata in new_frames:
+        # for each new frame, build current reduction settings according to configuration file
+        metadata, redux_settings = setup_reduction(config=config, metadata=metadata)
+        # BUG: redux_settings.CALIB_METADATA may return None values, handle this by skipping calibration steps whenever possible
+        #      also adding the corresponding calibration flags
+        # BUG: fix cases in which there are no calibration files
+        # BUG: in the case of arcs, if missing continuum frame, fall back to arc with most lamps on
+        #      this should be the next best thing for a continuum frame
+        #      finally fall back to current frame as continuum and add corresponding flags
+        calib_metadata = get_calib_metadata(db=db, metadata=metadata)
+        # NOTE: remove this line after testing
+        # if metadata.IMAGETYP not in ("arc", "object"): continue
+        # if metadata.IMAGETYP != "bias": continue
+        if redux_settings.TYPE != "arc": continue
+
+        # run basic calibration for new frame
+        if redux_settings.TYPE in CALIBRATION_TYPES:
+            # retrieve analog frames for master
+            analogs_metadata = get_analogs_metadata(db=db, metadata=metadata)
+            # update reduction state for analogs metadata
+            # BUG: this assumes that the current frame is in the analogs list
+            put_redux_state(db=db, metadata=analogs_metadata, table="RAW_FRAMES")
+            
+            master_metadata, analogs_metadata = build_master(
+                config=config,
+                analogs_metadata=analogs_metadata,
+                calib_metadata=calib_metadata,
+                frame_settings=redux_settings
+            )
+            # create new master DB record
+            add_master(db=db, master_metadata=master_metadata, analogs_metadata=analogs_metadata)
+            # update DB
+            put_redux_state(db=db, metadata=analogs_metadata, table="RAW_FRAMES")
+            # update new_frames iterator by removing already processed calibration frames
+            for analog_metadata in analogs_metadata:
+                if analog_metadata.ID in ids:
+                    idx = ids.index(analog_metadata.ID)
+                    ids.pop(idx)
+                    new_frames.pop(idx)
+            # BUG: build masters for continuum and arcs
+            # BUG: should I build cont/arc master before or after reducing cont/arc?
+        else:
+            put_redux_state(db=db, metadata=metadata, table="RAW_FRAMES")
+            metadata = run_reduction_calib(config=config, metadata=metadata, calib_metadata=calib_metadata, frame_settings=redux_settings)
+            # run calibration according to type of frame
+            if redux_settings.TYPE == "continuum":
+                metadata = run_reduction_continuum(config=config, metadata=metadata, frame_settings=redux_settings)
+            elif redux_settings.TYPE == "arc":
+                metadata = run_reduction_arc(config=config, metadata=metadata, calib_metadata=calib_metadata, frame_settings=redux_settings)
+            elif redux_settings.TYPE == "object":
+                metadata = run_reduction_object(config=config, metadata=metadata, calib_metadata=calib_metadata, frame_settings=redux_settings)
+            
+            # TODO: run tests
+            #   - add flags
+            # TODO: update DB
+            #   - update reduction state
+            put_redux_state(db=db, metadata=metadata, table="RAW_FRAMES")
+        break
+    # close DB connection
+    db.close()
+
+# -------------------------------------------------------------------------------------------------
 # if new frame:
 #   run preprocessing (remove overscan, prescan and align amplifiers)
 
@@ -24,58 +110,39 @@
 #       run continuum diagnostics, while failing:
 #         use closest in time master if exists, else add continuum flag
 #     if arc:
-#       locate corresponding continuum, else use master
+#       locate corresponding continuum (clostest in time/temp), else use master
 #       cosmic ray
 #       stray light
 #       extraction
+#       wavelength solution (vacuum)
 #       run arc diagnostics, while failing:
-#         use most recent master if exists, else add arc flag
+#         use closest in time master if exists, else add arc flag
 
-#   if calibration star:
+#   if object (sky + science + calibration star):
 #     run basic calibration:
 #        dark:
 #          run dark diagnostics, while failing:
-#            use most recent master if exists, else add dark flag
+#            use closest in time master if exists, else add dark flag
 #        bias:
 #          run bias diagnostics, while failing:
-#            use most recent master if exists, else add bias flag
+#            use closest in time master if exists, else add bias flag
 #        flat:
 #          run flat diagnostics, while failing:
-#            use most recent master if exists, else add flat flag
-#     locate continuum if present, else use current master
+#            use closest in time master if exists, else add flat flag
+#     locate continuum if present (dome and twilight flats), else use current master
 #     locate arc if present, else use current master
 #     cosmic ray
 #     stray light
+#     diagnose likely shifts and stretching along the cross-dispersion axis (dome flat)
 #     extraction
-#     wavelength solution
-#     fiberflat
-#     join channels (if needed by sky module)
+#     locate corresponding sky fibers
+#     locate strong sky lines
+#     refine wavelength solution using strong sky lines (at the very end?)
+#     applying wavelength solution
+#     fiberflat (twilight flat)
 #     sky subtraction
+#     locate corresponding calibration star fibers, else use closest in time
 #     flux calibration
-#     run diagnostics and add corresponding flags
-
-#   if object:
-#     run basic calibration:
-#        dark:
-#          run dark diagnostics, while failing:
-#            use most recent master if exists, else add dark flag
-#        bias:
-#          run bias diagnostics, while failing:
-#            use most recent master if exists, else add bias flag
-#        flat:
-#          run flat diagnostics, while failing:
-#            use most recent master if exists, else add flat flag
-#     locate continuum if present, else use current master
-#     locate arc if present, else use current master
-#     locate corresponding calibration star, else use most recent
-#     cosmic ray
-#     stray light
-#     extraction
-#     wavelength solution
-#     fiberflat
 #     join channels (if needed by sky module)
-#     sky subtraction
-#     flux calibration
 #     run diagnostics and add corresponding flags
-
 #   write logs

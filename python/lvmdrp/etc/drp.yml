@@ -2,20 +2,78 @@
 # this configuration file will be written during DRP (post) installation:
 
 # CONSTANTS:
+# database credentials
+LVM_DB_HOST: "localhost"
+LVM_DB_USER: "lvmdrp"
+LVM_DB_PASS: "1234"
+LVM_DB_NAME: "lvmdrp_test"
 # define root path of the installation
+# LVM_DRP_ROOT: &root_path "/home/mejia/Research/UNAM/lvm-drp/"
+LVM_DRP_ROOT: &root_path "/disk-a/mejia/Research/UNAM/lvm-drp/"
+# define path to config files
+LVM_DRP_CONFIG_PATH: !join [*root_path, "lvmdrp/python/lvmdrp/etc/"]
+# define log path
+DB_PATH: !join [*root_path, "lvm-db.pk"]
 # define path to pixel-to-wavelength maps for each spectrograph
+PIX2WAVE_MAPS:
+  "b1": !join [*root_path, "lvm-neon_nist_b1.txt"]
+  "r1": !join [*root_path, "lvm-neon_nist_r1.txt"]
+  "z1": !join [*root_path, "lvm-neon_nist_z1.txt"]
+  "b2": !join [*root_path, "lvm-neon_nist_b2.txt"]
+  "r2": !join [*root_path, "lvm-neon_nist_r2.txt"]
+  "z2": !join [*root_path, "lvm-neon_nist_z2.txt"]
+  "b3": !join [*root_path, "lvm-neon_nist_b3.txt"]
+  "r3": !join [*root_path, "lvm-neon_nist_r3.txt"]
+  "z3": !join [*root_path, "lvm-neon_nist_z3.txt"]
 # define path to fiber maps
 # define naming conventions
+LVM_CONT_NAME: "{}.cont.fits.gz"
+LVM_ARC_NAME: "{}.arc.fits.gz"
+
 # staleness parameters
+# define installed lamps
+CONT_LAMPS: &cont_lamps
+  - "M625L4"
+  - "FFS"
+  - "MI150"
+  - "TS"
+  - "LDLS"
+  - "NIRLED"
+ARC_LAMPS: &arc_lamps
+  - "NEON"
+  - "ARGON"
+  - "XENON"
+  - "HGAR"
+  - "KRYPTO"
+  - "HGNE"
+# ALL_LAMPS:
+#   <<: *cont_lamps
+#   <<: *arc_lamps
+# define wavelength ranges per spectrograph/channel
+WAVELENGTH_RANGES:
+  "b": [3600, 5930]
+  "r": [5660, 7720]
+  "z": [7470, 9800]
 
 # ~CONSTANTS:
 # define root path for frames (probably hardcoded):
-# define path for ~constant frames: (continuum, arcs)
+LVM_DATA_ROOT: &data_root_path !join [*root_path, "data.sdss5.org/sas/sdsswork/data/lvm"]
+RAW_DATA_PATHS:
+  - !join [*data_root_path, "lab"]
+  - !join [*data_root_path, "lco"]
+  - !join [*data_root_path, "apo"]
+# define path for reduced frames
+LVM_SPECTRO_REDUX_PATH: !join [*root_path, "redux"]
+# define path for ~constant frames: (bias, darks, flats, continuum, arcs)
+LVM_SPECTRO_CALIB_PATH: !join [*root_path, "calib"]
 # define path for flux calibration sources (~constant)
 # define path for long-term frames: master bias, CCDflats, fiberflats (domeflats, skyflats)
 # define path for short term frames: night bias, dark, flats, sky, object
 
 # define initial calibration parameters (set by drp-fit 1st with lab data, 2nd with simulations, 3rd during comissioning)
+# readout noise and gain default values
+READ_NOISE: 3
+GAIN: 2.5
 # preprocessing parameters
 # cosmic ray parameters
 # peak detection parameters

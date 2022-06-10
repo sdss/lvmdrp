@@ -1,0 +1,66 @@
+#!/usr/bin/env python
+# encoding: utf-8
+#
+# @Author: Alfredo Mejía-Narváez
+# @Date: Apr 27, 2022
+# @Filename: drp
+# @License: BSD 3-Clause
+# @Copyright: SDSS-V LVM
+
+import sys
+import argparse
+
+from lvmdrp.utils import database
+from lvmdrp.main import load_master_config
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(prog="LVM script to handle the database")
+    parser.add_argument(
+        "-c", "--create",
+        help="create all tables",
+        action="store_true"
+    )
+    parser.add_argument(
+        "-u", "--update",
+        help="update all tables",
+        action="store_true"
+    )
+    parser.add_argument(
+        "-d", "--delete",
+        help="remove all tables",
+        action="store_true"
+    )
+    parser.add_argument(
+        "--no-confirmation",
+        help="do not ask for confirmation",
+        action="store_true"
+    )
+    parser.add_argument(
+        "--ignore-cache",
+        help="whether to ignore or not DB cache",
+        action="store_true"
+    )
+    args = parser.parse_args(sys.argv[1:])
+
+    config = load_master_config()
+
+    if args.delete:
+        if args.no_confirmation:
+            database.delete_tables_db(config)
+            database.delete_db(config)
+        else:
+            confirm, i = "", 0
+            while confirm not in ["yes", "no"]:
+                if i < 2:
+                    confirm = input(f"are you sure you want to delete all tables in '{config.LVM_DB_NAME}' [yes/no]: ")
+                else:
+                    confirm = input(f"please answer 'yes' or 'no': ")
+                i += 1
+            if confirm == "yes":
+                database.delete_tables_db(config)
+                database.delete_db(config)
+    if args.create:
+        database.create_db(config)
+        database.create_tables_db(config)
+    if args.update: database.record_db(config, ignore_cache=args.ignore_cache)
