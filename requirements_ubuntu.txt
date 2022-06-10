@@ -4,3 +4,5 @@ libbz2-dev
 cmake
 harp
 subversion
+mysql-server
+libmysqlclient-dev

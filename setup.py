@@ -2,7 +2,7 @@
 #
 # setup.py
 #
-
+# BUG: this script should take an optional master configuration template, other wise use the one shipped with the package
 
 from __future__ import division
 from __future__ import print_function
