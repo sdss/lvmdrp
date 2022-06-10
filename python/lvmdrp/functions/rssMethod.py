@@ -63,7 +63,7 @@ def mergeRSS_drp(files_in, file_out,  mergeHdr='1'):
 				rss.append(rss_add, append_hdr=True)
 	rss.writeFitsData(file_out)
 
-@missing_files("arc_rss", "ref_line_file")
+@missing_files(["BAD_CALIBRATION_FRAMES"], "arc_rss", "ref_line_file")
 def detWaveSolution_drp(arc_rss, disp_rss, res_rss, ref_line_file='', ref_spec='', pixel='', ref_lines='', poly_dispersion='-5', poly_fwhm='-3,-5', init_back='10.0',  aperture='13', flux_min='200.0', fwhm_max='10.0', rel_flux_limits='0.1,5.0', negative=False, verbose='1' ):
 	"""
 			Measures the pixel position of emission lines in wavelength UNCALIBRATED for all fibers of the RSS.
@@ -285,7 +285,7 @@ def detWaveSolution_drp(arc_rss, disp_rss, res_rss, ref_line_file='', ref_spec='
 
 	return cent_wave[:, select_lines], fwhm_wave[select_lines]
 
-@missing_files("rss_in")
+@missing_files(["BAD_CALIBRATION_FRAMES"], "rss_in")
 def createPixTable_drp(rss_in, rss_out, arc_wave, arc_fwhm='', cropping=''):
 	"""
 			Adds the wavelength and possibly also the spectral resolution (FWHM) pixel table as new extension to
@@ -525,7 +525,7 @@ def correctPixTable_drp(rss_in, rss_out, logfile, ref_id, smooth_poly_cross='', 
 		rss[i]=spec
 	rss.writeFitsData(rss_out)
 
-@missing_files("rss_in")
+@missing_files(["BAD_CALIBRATION_FRAMES"], "rss_in")
 def resampleWave_drp(rss_in, rss_out, method='spline', start_wave='', end_wave='', disp_pix='', err_sim='500', replace_error='1e10', correctHvel='',parallel='auto'):
 	"""
 			Resamples the RSS with a wavelength in pixel table format to an RSS with a common wavelength solution for each fiber.
@@ -1499,7 +1499,7 @@ def matchFluxRSS_drp(rsss, center_x, center_y, hdr_prefixes, arc_radius, start_w
 	if verbose==1:
 		pylab.show()
 
-@missing_files("rss_in", "position_table")
+@missing_files(["BAD_CALIBRATION_FRAMES"], "rss_in", "position_table")
 def includePosTab_drp(rss_in, position_table,  offset_x='0.0', offset_y='0.0'):
 	"""
 		   Adds an ASCII file position table as a FITS table extension to the RSS file.

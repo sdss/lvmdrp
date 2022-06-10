@@ -8,7 +8,6 @@ from lvmdrp.core.cube import *
 from lvmdrp.core.apertures import *
 from multiprocessing import cpu_count
 from multiprocessing import Pool
-from copy import deepcopy
 try:
   from scipy import weave
   from scipy.weave import converters
@@ -177,12 +176,7 @@ class RSS(FiberRows):
 		spec = Spectrum1D(wave, data, error=error, mask=mask, inst_fwhm=inst_fwhm)
 		return spec
 
- #   def __getslice__(self, fiber_start,  fiber_end):
-  #      data = self._data[fiber_start:fiber_end, :]
-   #     if self._wave is not None:
-
 	def __setitem__(self, fiber, spec):
-
 		self._data[fiber, :] = spec._data
 
 		if self._wave is not None and len(self._wave.shape)==2:
@@ -1286,7 +1280,6 @@ class RSS(FiberRows):
 
 	def splitFiberType(self, contains=['CAL', 'SKY', 'OBJ']):
 			splitted_rss=[]
-		#try:
 			for types in contains:
 				type = types.split(';')
 				select = numpy.zeros(self._fibers, dtype="bool")
@@ -1295,7 +1288,6 @@ class RSS(FiberRows):
 
 				splitted_rss.append(self.subRSS(select))
 			return splitted_rss
-	   # except:
 
 	def centreBary(self, guess_x, guess_y, radius, exponent=4):
 		dist = self.distance(guess_x, guess_y)
