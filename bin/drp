@@ -39,7 +39,7 @@ if __name__ == "__main__":
         # NOTE: remove this line after testing
         # if metadata.IMAGETYP not in ("arc", "object"): continue
         # if metadata.IMAGETYP != "bias": continue
-        if redux_settings.TYPE != "arc": continue
+        # if redux_settings.TYPE != "arc": continue
 
         # run basic calibration for new frame
         if redux_settings.TYPE in CALIBRATION_TYPES:
@@ -83,7 +83,6 @@ if __name__ == "__main__":
             # TODO: update DB
             #   - update reduction state
             put_redux_state(db=db, metadata=metadata, table="RAW_FRAMES")
-        break
     # close DB connection
     db.close()
 
