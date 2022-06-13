@@ -10,6 +10,10 @@
 from lvmdrp.utils.database import load_db, get_raws_metadata, get_calib_metadata, get_analogs_metadata, add_master, put_redux_state
 from lvmdrp.main import *
 
+import warnings
+from astropy.utils.exceptions import AstropyWarning
+
+warnings.simplefilter('ignore', category=AstropyWarning)
 
 # TODO: implement script for adding flags to individual frames manually
 # TODO: implement status updates as decorators to target specific functions responsible for changing the reduction status:
