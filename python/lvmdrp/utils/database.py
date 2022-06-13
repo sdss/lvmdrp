@@ -264,6 +264,8 @@ def get_calib_metadata(db, metadata):
     if frame_needs is None:
         raise ValueError(f"Unrecognized frame type '{metadata.IMAGETYP}'")
 
+    # BUG: change sorting to use 'mjd' instead of 'obstime', since master will be represented by that parameter
+    # BUG: remove 'exptime' constrain when looking for bias frames, since all of them have exptime = 0
     for calib_type in frame_needs:
         try:
             with db.cursor(buffered=True) as cursor:
@@ -271,8 +273,8 @@ def get_calib_metadata(db, metadata):
                 SELECT *
                 FROM CALIBRATION_FRAMES
                 WHERE
-                    imagetyp = '{calib_type}' AND ccd = '{metadata.CCD}' AND exptime = '{metadata.EXPTIME}'
-                ORDER BY ABS( DATEDIFF( OBSTIME, '{metadata.OBSTIME}' ) )
+                    imagetyp = '{calib_type}' AND ccd = '{metadata.CCD}' AND ABS(exptime-{metadata.EXPTIME}) <= 1e-6
+                ORDER BY ABS( DATEDIFF( obstime, '{metadata.OBSTIME}' ) )
                 """)
                 # TODO: handle the case in which the retrieved frame is stale and/or has quality flags
                 # BUG: there may be cases in which no frame is found
@@ -324,6 +326,7 @@ def put_redux_state(db, metadata, table):
     return None
 
 def add_master(db, master_metadata, analogs_metadata):
+    # BUG: there is DB overwriting happening in CALIBRATION_FRAMES table
     if master_metadata.STATUS == "IN_PROGRESS": master_metadata.REDUCTION_STARTED = datetime.now()
     elif master_metadata.STATUS == "FINISHED": master_metadata.REDUCTION_FINISHED = datetime.now()
     _metadata_fields, _metadata_values = zip(*[(field.lower(), value) for field, value in master_metadata.__dict__.items()])

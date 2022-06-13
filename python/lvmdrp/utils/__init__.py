@@ -29,7 +29,7 @@ def get_calibration_paths(calib_metadata, path, kinds=None):
 
 def get_master_name(label, image_type, mjd):
     master_name = label.split("-")
-    master_name[0] = str(mjd)
+    master_name[-1] = str(mjd)
     master_name = "-".join(master_name)
     return f"{master_name}.m{image_type.upper()}"
 

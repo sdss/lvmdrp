@@ -192,6 +192,7 @@ def build_master(config, analogs_metadata, calib_metadata, frame_settings):
     #   - add frame to master frames
     #   - add flags according to test results
     #   - add DB reference for preprocessed frames
+    # BUG: update columns inherited from original frames metadata (remove 'path', remove 'obstime')
     # define new master metadata
     master_metadata.LABEL = frame_settings.LABEL
     master_metadata.NAXIS1 = new_master._header["NAXIS1"]
