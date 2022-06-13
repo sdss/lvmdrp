@@ -1653,9 +1653,6 @@ def reprojectRSS_drp(stray, trace, fwhm_cross, fwhm_spect, wave, flux, file_out,
 	"""
 			Historic task used for debugging of the the extraction routine...
 	"""
-	# read original (projected) image
-	# img = Image()
-	# img.loadFitsData(image, extension_data=0)
 	# read stray light map
 	trace_stray = TraceMask()
 	trace_stray.loadFitsData(stray, extension_data=0)
@@ -1672,40 +1669,47 @@ def reprojectRSS_drp(stray, trace, fwhm_cross, fwhm_spect, wave, flux, file_out,
 	trace_wave = TraceMask()
 	trace_wave.loadFitsData(wave, extension_data=0)
 	# read simulated RSS
-	trace_flux = RSS()
-	trace_flux.loadFitsData(flux)
+	rss_flux = RSS()
+	rss_flux.loadFitsData(flux)
+
+	# TODO: implement interpolation in the cross-dispersion direction for:
+	# 	- trace_fwhm
+	# 	- spect_fwhm
+	# 	- trace_wave
+	# 	- trace_mask
+
 	# TODO: convert physical units into electrons
 	# 	- read flux calibration factor
 	# 	- apply factor to simulated spectra
 
-	out_rss = numpy.zeros(trace_wave._data.shape)
-	for j in range(trace_flux._data.shape[0]):
+	rss_flux_out = numpy.zeros(trace_wave._data.shape)
+	for j in range(rss_flux._data.shape[0]):
 		# extract the j-spectrum & set the original (simulated) fwhm
-		spectrum = trace_flux[j]
+		spectrum = rss_flux[j]
 		# BUG: resampling should be done after applying LSF to ensure the later is done in the most well-sampled data possible
 		# resample to instrumental sampling
 		spectrum = spectrum.resampleSpec(trace_wave[j]._data, method="spline")
 		# degrade spectral resolution to instrumental fwhm
 		spectrum = spectrum.smoothGaussVariable(numpy.sqrt(spect_fwhm._data[j]**2 - sim_fwhm**2))
 		# transform to pixel space
-		out_rss[j] = spectrum._data
+		rss_flux_out[j] = spectrum._data
 	
-	out = numpy.zeros(trace_stray._data.shape)
+	out_2d = numpy.zeros(trace_stray._data.shape)
 	pixel = numpy.arange(spect_fwhm._data.shape[1])
 	fact = numpy.sqrt(2.*numpy.pi)
-	for i in range(trace_flux._data.shape[1]):
+	for i in range(rss_flux._data.shape[1]):
 		# re-project spectrum using the given instrumental setup
 		sigma = trace_fwhm._data[:, i][None, :] / 2.354
 		A = numpy.exp(-0.5*((pixel[:, None]-trace_mask._data[:, i][None, :]) / abs(sigma))**2) / (fact*abs(sigma))
-		out[:, i] = numpy.dot(A, out_rss[:, i])
+		out_2d[:, i] = numpy.dot(A, rss_flux_out[:, i])
 
 	# add stray light map
-	out = out + trace_stray._data
+	out_2d = out_2d + trace_stray._data
 	# TODO: add fiber-to-fiber transmission (fiberflat)
 	# TODO: add random poissonian noise (bias+dark)
 	# TODO: convert to ADU
 	# store re-projected in FITS
-	rep = pyfits.PrimaryHDU(out)
+	rep = pyfits.PrimaryHDU(out_2d)
 	rep.writeto(file_out if file_out.endswith(".fits") else f"{file_out}.fits", overwrite=True)
 
 def testres_drp(image, trace, fwhm, flux):
