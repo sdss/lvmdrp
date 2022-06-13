@@ -220,7 +220,7 @@ def get_analogs_metadata(db, metadata):
                 SELECT *
                 FROM RAW_FRAMES
                 WHERE
-                    imagetyp = '{metadata.IMAGETYP}' AND ccd = '{metadata.CCD}' AND mjd = '{metadata.MJD}' AND exptime = '{metadata.EXPTIME}'
+                    imagetyp = '{metadata.IMAGETYP}' AND ccd = '{metadata.CCD}' AND mjd = '{metadata.MJD}' AND ABS(exptime-{metadata.EXPTIME}) <= 1e-6
                 """)
                 analog_data = cursor.fetchall()
         except mysql.Error as e:
