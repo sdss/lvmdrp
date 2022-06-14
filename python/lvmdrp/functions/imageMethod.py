@@ -1650,102 +1650,102 @@ def subtractBias_drp(file_in, file_out, bias, compute_error='1', boundary_x='', 
 
 	clean.writeFitsData(file_out)
 
-def reprojectRSS_drp(stray, trace, fwhm_cross, fwhm_spect, wave, flux, file_out, flux_hdu=0, sim_fwhm=0.5, method="spline"):
-    """
-            Historic task used for debugging of the the extraction routine...
-    """
-    # read stray light map
-    trace_stray = TraceMask()
-    trace_stray.loadFitsData(stray, extension_data=0)
-    # read trace
-    trace_mask = TraceMask()
-    trace_mask.loadFitsData(trace, extension_data=0)
-    # read spatial fwhm
-    trace_fwhm = TraceMask()
-    trace_fwhm.loadFitsData(fwhm_cross, extension_data=0)
-    # read spectral fwhm (lsf)
-    spect_fwhm = TraceMask()
-    spect_fwhm.loadFitsData(fwhm_spect, extension_data=0)
-    # read wavelength solution
-    trace_wave = TraceMask()
-    trace_wave.loadFitsData(wave, extension_data=0)
-    # read simulated RSS
-    rss_flux = RSS()
-    rss_flux.loadFitsData(flux)
+def reprojectRSS_drp(stray, trace, fwhm_cross, fwhm_spect, wave, flux, file_out, flux_hdu=0, sim_fwhm=0.5, method="linear"):
+	"""
+			Historic task used for debugging of the the extraction routine...
+	"""
+	# read stray light map
+	trace_stray = TraceMask()
+	trace_stray.loadFitsData(stray, extension_data=0)
+	# read trace
+	trace_mask = TraceMask()
+	trace_mask.loadFitsData(trace, extension_data=0)
+	# read spatial fwhm
+	trace_fwhm = TraceMask()
+	trace_fwhm.loadFitsData(fwhm_cross, extension_data=0)
+	# read spectral fwhm (lsf)
+	spect_fwhm = TraceMask()
+	spect_fwhm.loadFitsData(fwhm_spect, extension_data=0)
+	# read wavelength solution
+	trace_wave = TraceMask()
+	trace_wave.loadFitsData(wave, extension_data=0)
+	# read simulated RSS
+	rss_flux = RSS()
+	rss_flux.loadFitsData(flux)
 
-    # TODO: implement interpolation in the cross-dispersion direction for:
-    # 	- trace_fwhm
-    # 	- spect_fwhm
-    # 	- trace_wave
-    # 	- trace_mask
-    if trace_mask._data.shape[1] != rss_flux._data.shape[1]:
-        trace_fwhm_res = numpy.zeros((rss_flux._data.shape[0], trace_mask._data.shape[1]))
-        spect_fwhm_res = numpy.zeros((rss_flux._data.shape[0], trace_mask._data.shape[1]))
-        trace_wave_res = numpy.zeros((rss_flux._data.shape[0], trace_mask._data.shape[1]))
-        trace_mask_res = numpy.zeros((rss_flux._data.shape[0], trace_mask._data.shape[1]))
-        cross_pixel = numpy.arange(trace_mask._data.shape[0])
-        cross_pixel_res = numpy.arange(rss_flux._data.shape[0])
-        for i in range(trace_mask._data.shape[1]):
-            if method == "spline":
-                interp_trace_fwhm = interpolate.UnivariateSpline(cross_pixel, trace_fwhm._data[:, i], s=0)
-                interp_spect_fwhm = interpolate.UnivariateSpline(cross_pixel, spect_fwhm._data[:, i], s=0)
-                interp_wave = interpolate.UnivariateSpline(cross_pixel, trace_wave._data[:, i], s=0)
-                interp_mask = interpolate.UnivariateSpline(cross_pixel, trace_mask._data[:, i], s=0)
-                trace_fwhm_res[:, i] = interp_trace_fwhm(cross_pixel_res)
-                spect_fwhm_res[:, i] = interp_spect_fwhm(cross_pixel_res)
-                trace_wave_res[:, i] = interp_wave(cross_pixel_res)
-                trace_mask_res[:, i] = interp_mask(cross_pixel_res)
-            elif method == "linear":
-                interp_trace_fwhm = interpolate.interpolate.interp1d(cross_pixel, trace_fwhm._data[:, i])
-                interp_spect_fwhm = interpolate.interpolate.interp1d(cross_pixel, spect_fwhm._data[:, i])
-                interp_wave = interpolate.interpolate.interp1d(cross_pixel, trace_wave._data[:, i])
-                interp_mask = interpolate.interpolate.interp1d(cross_pixel, trace_mask._data[:, i])
-                trace_fwhm_res[:, i] = interp_trace_fwhm(cross_pixel_res)
-                spect_fwhm_res[:, i] = interp_spect_fwhm(cross_pixel_res)
-                trace_wave_res[:, i] = interp_wave(cross_pixel_res)
-                trace_mask_res[:, i] = interp_mask(cross_pixel_res)
-            else:
-                raise NotImplementedError(f"interpolation method '{method}' not implemented")
-    else:
-        trace_fwhm_res = trace_fwhm
-        spect_fwhm_res = spect_fwhm
-        trace_wave_res = trace_wave
-        trace_mask_res = trace_mask
+	# TODO: implement interpolation in the cross-dispersion direction for:
+	# 	- trace_fwhm
+	# 	- spect_fwhm
+	# 	- trace_wave
+	# 	- trace_mask
+	if trace_mask._data.shape[1] != rss_flux._data.shape[1]:
+		trace_fwhm_res = numpy.zeros((rss_flux._data.shape[0], trace_mask._data.shape[1]))
+		spect_fwhm_res = numpy.zeros((rss_flux._data.shape[0], trace_mask._data.shape[1]))
+		trace_wave_res = numpy.zeros((rss_flux._data.shape[0], trace_mask._data.shape[1]))
+		trace_mask_res = numpy.zeros((rss_flux._data.shape[0], trace_mask._data.shape[1]))
+		cross_pixel = numpy.arange(trace_mask._data.shape[0])
+		cross_pixel_res = numpy.linspace(0, trace_mask._data.shape[0]-1, rss_flux._data.shape[0])
+		for i in range(trace_mask._data.shape[1]):
+			if method == "spline":
+				interp_trace_fwhm = interpolate.UnivariateSpline(cross_pixel, trace_fwhm._data[:, i], s=0)
+				interp_spect_fwhm = interpolate.UnivariateSpline(cross_pixel, spect_fwhm._data[:, i], s=0)
+				interp_wave = interpolate.UnivariateSpline(cross_pixel, trace_wave._data[:, i], s=0)
+				interp_mask = interpolate.UnivariateSpline(cross_pixel, trace_mask._data[:, i], s=0)
+				trace_fwhm_res[:, i] = interp_trace_fwhm(cross_pixel_res)
+				spect_fwhm_res[:, i] = interp_spect_fwhm(cross_pixel_res)
+				trace_wave_res[:, i] = interp_wave(cross_pixel_res)
+				trace_mask_res[:, i] = interp_mask(cross_pixel_res)
+			elif method == "linear":
+				interp_trace_fwhm = interpolate.interpolate.interp1d(cross_pixel, trace_fwhm._data[:, i])
+				interp_spect_fwhm = interpolate.interpolate.interp1d(cross_pixel, spect_fwhm._data[:, i])
+				interp_wave = interpolate.interpolate.interp1d(cross_pixel, trace_wave._data[:, i])
+				interp_mask = interpolate.interpolate.interp1d(cross_pixel, trace_mask._data[:, i])
+				trace_fwhm_res[:, i] = interp_trace_fwhm(cross_pixel_res)
+				spect_fwhm_res[:, i] = interp_spect_fwhm(cross_pixel_res)
+				trace_wave_res[:, i] = interp_wave(cross_pixel_res)
+				trace_mask_res[:, i] = interp_mask(cross_pixel_res)
+			else:
+				raise NotImplementedError(f"interpolation method '{method}' not implemented")
+	else:
+		trace_fwhm_res = trace_fwhm
+		spect_fwhm_res = spect_fwhm
+		trace_wave_res = trace_wave
+		trace_mask_res = trace_mask
 
-    # TODO: convert physical units into electrons
-    # 	- read flux calibration factor
-    # 	- apply factor to simulated spectra
+	# TODO: convert physical units into electrons
+	# 	- read flux calibration factor
+	# 	- apply factor to simulated spectra
 
-    rss_flux_out = numpy.zeros(trace_wave._data.shape)
-    for j in range(rss_flux._data.shape[0]):
-        # extract the j-spectrum & set the original (simulated) fwhm
-        spectrum = rss_flux[j]
-        spectrum._data = spectrum._data + 20000
-        # BUG: resampling should be done after applying LSF to ensure the later is done in the most well-sampled data possible
-        # resample to instrumental sampling
-        spectrum = spectrum.resampleSpec(trace_wave_res[j], method="spline")
-        # degrade spectral resolution to instrumental fwhm
-        spectrum = spectrum.smoothGaussVariable(numpy.sqrt(spect_fwhm_res[j]**2 - sim_fwhm**2))
-        # transform to pixel space
-        rss_flux_out[j] = spectrum._data
-    
-    out_2d = numpy.zeros(trace_stray._data.shape)
-    pixel = numpy.arange(spect_fwhm_res.shape[1])
-    fact = numpy.sqrt(2.*numpy.pi)
-    for i in range(trace_mask_res.shape[1]):
-        # re-project spectrum using the given instrumental setup
-        sigma = trace_fwhm_res[:, i][None, :] / 2.354
-        A = numpy.exp(-0.5*((pixel[:, None]-trace_mask_res[:, i][None, :]) / abs(sigma))**2) / (fact*abs(sigma))
-        out_2d[:, i] = numpy.dot(A, rss_flux_out[:, i])
-    
-    # add stray light map
-    out_2d = out_2d + trace_stray._data
-    # TODO: add fiber-to-fiber transmission (fiberflat)
-    # TODO: add random poissonian noise (bias+dark)
-    # TODO: convert to ADU
-    # store re-projected in FITS
-    rep = pyfits.PrimaryHDU(out_2d)
-    rep.writeto(file_out if file_out.endswith(".fits") else f"{file_out}.fits", overwrite=True)
+	rss_flux_out = numpy.zeros((rss_flux._data.shape[0], trace_mask._data.shape[1]))
+	for j in range(rss_flux._data.shape[0]):
+		# extract the j-spectrum & set the original (simulated) fwhm
+		spectrum = rss_flux[j]
+		# BUG: resampling should be done after applying LSF to ensure the later is done in the most well-sampled data possible
+		# resample to instrumental sampling
+		spectrum = spectrum.resampleSpec(trace_wave_res[j], method="spline")
+		# degrade spectral resolution to instrumental fwhm
+		# BUG: there are cases in which instrumental resolution is better than simulation resolution
+		spectrum = spectrum.smoothGaussVariable(numpy.sqrt(numpy.abs(spect_fwhm_res[j]**2 - sim_fwhm**2)))
+		# transform to pixel space
+		rss_flux_out[j] = spectrum._data
+
+	out_2d = numpy.zeros(trace_stray._data.shape)
+	pixel = numpy.arange(spect_fwhm_res.shape[1])
+	fact = numpy.sqrt(2.*numpy.pi)
+	for i in range(trace_mask_res.shape[1]):
+		# re-project spectrum using the given instrumental setup
+		sigma = trace_fwhm_res[:, i][None, :] / 2.354
+		A = numpy.exp(-0.5*((pixel[:, None]-trace_mask_res[:, i][None, :]) / abs(sigma))**2) / (fact*abs(sigma))
+		out_2d[:, i] = numpy.dot(A, rss_flux_out[:, i])
+
+	# add stray light map
+	out_2d = out_2d + trace_stray._data
+	# TODO: add fiber-to-fiber transmission (fiberflat)
+	# TODO: add random poissonian noise (bias+dark)
+	# TODO: convert to ADU
+	# store re-projected in FITS
+	rep = pyfits.PrimaryHDU(out_2d)
+	rep.writeto(file_out if file_out.endswith(".fits") else f"{file_out}.fits", overwrite=True)
 
 def testres_drp(image, trace, fwhm, flux):
 	"""

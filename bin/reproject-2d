@@ -1,0 +1,97 @@
+#!/usr/bin/env python
+# encoding: utf-8
+#
+# @Author: Alfredo Mejía-Narváez
+# @Date: Jun 14, 2022
+# @Filename: reproject-2d
+# @License: BSD 3-Clause
+# @Copyright: SDSS-V LVM
+
+from lvmdrp.core import RSS
+import os
+import numpy as np
+from copy import deepcopy as copy
+from astropy.io import fits
+
+from lvmdrp.functions import imageMethod
+from lvmdrp.core import image
+
+
+def preprocess_simulations(sim_path, rss_path, out_path, overwrite=True):
+    obs = fits.open(rss_path)
+    sim = fits.open(sim_path)
+
+    new_sim = copy(obs)
+    new_sim[0].data = sim["TOTAL"].data
+    new_sim[0].header = sim["PRIMARY"].header
+    new_sim[0].header["CRVAL1"] = sim["WAVE"].data.min()
+    new_sim[0].header["CRPIX1"] = 1
+    # BUG: this assumes the wavelength sampling step does not change with wavelength
+    new_sim[0].header["CDELT1"] = np.diff(sim["WAVE"].data)[0]
+
+    new_sim[1].data = (sim[2].data < 0).astype(int)
+    new_sim.writeto(out_path, overwrite=overwrite)
+
+    return None
+
+if __name__ == "__main__":
+
+    # constants ================================================================================
+    obs_path = "docs/nb/_data-lvm"
+    sim_path = "docs/nb/_sim"
+    # blue channel frames
+    cont_name = "sdR-s-b1-00003082"
+    arc_name = "sdR-s-b1-00002998"
+    # red channel frames
+    cont_name = "sdR-s-r1-00001613"
+    arc_name = "sdR-s-r1-00001563"
+    # nir channel frames
+    cont_name = "sdR-s-z1-00001614"
+    arc_name = "sdR-s-z1-00001563"
+
+    sim_fwhm = 0.5
+
+    # preprocess Enrico & Oleg simulations =====================================================
+    simulation_path = f"{sim_path}/LVM_Field_large_linear_full_9000_realization.fits"
+    observation_path = f"{obs_path}/{arc_name}.disp_cor.fits"
+    new_sim_name = os.path.basename(simulation_path).replace(".fits", "")
+    preprocess_simulations(
+        sim_path=simulation_path,
+        rss_path=observation_path,
+        out_path=f"{sim_path}/{new_sim_name}_rss.fits",
+        overwrite=True
+    )
+
+    imageMethod.reprojectRSS_drp(
+        stray=f"{obs_path}/{arc_name}.back.fits",
+        trace=f"{obs_path}/{cont_name}.trc.fits",
+        fwhm_cross=f"{obs_path}/{cont_name}.fwhm.fits",
+        fwhm_spect=f"{obs_path}/{arc_name}.res.fits",
+        wave=f"{obs_path}/{arc_name}.disp.fits",
+        # flux=f"{obs_path}/{arc_name}.disp_cor.fits",
+        flux=f"{sim_path}/LVM_Field_large_linear_full_9000_realization_rss.fits",
+        sim_fwhm=sim_fwhm,
+        file_out="sim_2d.fits"
+    )
+
+    # imageMethod.testres_drp(
+    #     image=f"{obs_path}/{arc_name}.stray.fits",
+    #     trace=f"{obs_path}/{cont_name}.trc.fits",
+    #     fwhm=f"{obs_path}/{cont_name}.fwhm.fits",
+    #     flux=f"{obs_path}/{arc_name}.ms.fits",
+    # )
+
+
+    # sim = fits.open("_sim/LVM_Field_large_linear_full_9000_realization.fits")
+    # sim.info()
+
+
+    # new_sim = RSS()
+    # new_sim.loadFitsData(f"_sim/{new_sim_name}_rss.fits")
+
+
+    # imageMethod.findPeaksAuto_drp(
+    #     image=f"sim_2d.fits",
+    #     out_peaks_file="sim_2d.trace.peaks",
+    #     disp_axis="X", threshold="5000", slice="3696", nfibers="1081", median_box="1", median_cross="1", method="gauss", init_sigma="0.5", verbose=0
+    # )
