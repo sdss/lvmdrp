@@ -13,6 +13,7 @@ try:
   import pylab
 except:
   pass
+import os
 import time
 from multiprocessing import Pool
 from multiprocessing import cpu_count
@@ -1650,10 +1651,14 @@ def subtractBias_drp(file_in, file_out, bias, compute_error='1', boundary_x='', 
 
 	clean.writeFitsData(file_out)
 
-def reprojectRSS_drp(stray, trace, fwhm_cross, fwhm_spect, wave, flux, file_out, flux_hdu=0, sim_fwhm=0.5, method="linear"):
+def reprojectRSS_drp(stray, trace, fwhm_cross, fwhm_spect, wave, flux, sim_fwhm=0.5, method="linear"):
 	"""
 			Historic task used for debugging of the the extraction routine...
 	"""
+	# label for outputs
+	out_path = os.path.dirname(flux) or "./"
+	out_name = os.path.basename(flux).replace(".fits", "")
+
 	# read stray light map
 	trace_stray = TraceMask()
 	trace_stray.loadFitsData(stray, extension_data=0)
@@ -1711,6 +1716,16 @@ def reprojectRSS_drp(stray, trace, fwhm_cross, fwhm_spect, wave, flux, file_out,
 		spect_fwhm_res = spect_fwhm
 		trace_wave_res = trace_wave
 		trace_mask_res = trace_mask
+	
+	trace_fwhm.setData(data=trace_fwhm_res)
+	spect_fwhm.setData(data=spect_fwhm_res)
+	trace_wave.setData(data=trace_wave_res)
+	trace_mask.setData(data=trace_mask_res)
+	# write new trace frames
+	trace_fwhm.writeFitsData(filename=f"{out_path}/{out_name}.fwhm.fits")
+	spect_fwhm.writeFitsData(filename=f"{out_path}/{out_name}.res.fits")
+	trace_wave.writeFitsData(filename=f"{out_path}/{out_name}.disp.fits")
+	trace_mask.writeFitsData(filename=f"{out_path}/{out_name}.trc.fits")
 
 	# TODO: convert physical units into electrons
 	# 	- read flux calibration factor
@@ -1745,7 +1760,7 @@ def reprojectRSS_drp(stray, trace, fwhm_cross, fwhm_spect, wave, flux, file_out,
 	# TODO: convert to ADU
 	# store re-projected in FITS
 	rep = pyfits.PrimaryHDU(out_2d)
-	rep.writeto(file_out if file_out.endswith(".fits") else f"{file_out}.fits", overwrite=True)
+	rep.writeto(f"{out_path}/{out_name}_2d.fits", overwrite=True)
 
 def testres_drp(image, trace, fwhm, flux):
 	"""
