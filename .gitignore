@@ -43,3 +43,4 @@ test_redux-*
 _*
 *.zip
 .vscode
+*.db

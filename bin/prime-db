@@ -3,7 +3,7 @@
 #
 # @Author: Alfredo Mejía-Narváez
 # @Date: Apr 27, 2022
-# @Filename: drp
+# @Filename: prime-db
 # @License: BSD 3-Clause
 # @Copyright: SDSS-V LVM
 
@@ -61,6 +61,5 @@ if __name__ == "__main__":
                 database.delete_tables_db(config)
                 database.delete_db(config)
     if args.create:
-        database.create_db(config)
-        database.create_tables_db(config)
+        db = database.create_or_connect_db(config)
     if args.update: database.record_db(config, ignore_cache=args.ignore_cache)
