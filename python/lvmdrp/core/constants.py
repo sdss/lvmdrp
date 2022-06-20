@@ -10,8 +10,8 @@ import os
 
 
 ROOT_PATH = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-ETC_PATH = os.path.join(ROOT_PATH, "python", "lvmdrp", "etc")
-MASTER_CONFIG_PATH = os.path.join(ETC_PATH, "drp.yml")
+CONFIG_PATH = os.path.join(ROOT_PATH, "python", "lvmdrp", "etc")
+MASTER_CONFIG_PATH = os.path.join(CONFIG_PATH, "drp.yml")
 
 CALIBRATION_TYPES = [
     "bias",

@@ -6,20 +6,9 @@
 # @License: BSD 3-Clause
 # @Copyright: SDSS-V LVM
 
-# NOTE: to start using a database, first run these commands in the mysql console as superuser:
-#       CREATE USER 'sammy'@'localhost' IDENTIFIED BY 'password';
-#       GRANT ALL PRIVILEGES ON *.* TO 'sammy'@'localhost' WITH GRANT OPTION;
-#       FLUSH PRIVILEGES;
-
-# TODO:
-#   - create peewee models for tables in DB
-#   - install lvmsurveysim to use Niv's functions
-
 import os
 import pickle
 import datetime as dt
-from signal import default_int_handler
-from sqlalchemy import null
 from tqdm import tqdm
 from sqlite3 import Error
 from peewee import *
@@ -28,9 +17,9 @@ from astropy.io import fits
 
 from lvmsurveysim.utils.sqlite2astropy import *
 
-from lvmdrp.core.constants import RAW_NAMES, ETC_PATH
+from lvmdrp.core.constants import CONFIG_PATH
+from lvmdrp.core.constants import FRAMES_PRIORITY, CALIBRATION_TYPES, FRAMES_CALIB_NEEDS
 from lvmdrp.utils.bitmask import ReductionStatus, QualityFlag
-from traitlets import default
 
 
 db = SqliteDatabase(None)
@@ -41,17 +30,17 @@ class BaseModel(Model):
 
 class BasicMixin(Model):
     datetime = DateTimeField(default=dt.datetime.now)
-    mjd = IntegerField(default=-999)
-    spec = CharField(default="")
-    ccd = CharField(default="")
-    exptime = FloatField(default=-999)
-    imagetyp = CharField(default="")
-    obstime = DateTimeField(default=dt.datetime.min)
-    observat = CharField(default="")
-    label = CharField()
-    path = CharField()
-    naxis1 = IntegerField(default=-999)
-    naxis2 = IntegerField(default=-999)
+    mjd = IntegerField(null=True)
+    spec = CharField(null=True)
+    ccd = CharField(null=True)
+    exptime = FloatField(null=True)
+    imagetyp = CharField(null=True)
+    obstime = DateTimeField(null=True)
+    observat = CharField(null=True)
+    label = CharField(null=True)
+    path = CharField(null=True)
+    naxis1 = IntegerField(null=True)
+    naxis2 = IntegerField(null=True)
 
 class LabMixin(Model):
     ccdtemp1 = FloatField(null=True)
@@ -89,24 +78,24 @@ class RawFrames(BaseModel, BasicMixin, LabMixin, ArcMixin, ContMixin, StatusMixi
     id = IntegerField(primary_key=True)
     master_id = ForeignKeyField(CalibrationFrames, backref="raws", null=True)
 
-# def _parse_db_data(data, column_names):
-#     _column_names = list(map(str.upper, column_names))
-#     if isinstance(data, list):
-#         metadata = []
-#         for j in range(len(data)):
-#             data_j = list(data[j])
-#             for i, name in enumerate(column_names):
-#                 data_j[i] = ALL_CONVERTERS[name](data_j[i])
-#             metadata.append(Namespace(**dict(zip(_column_names, data_j))))
-#     elif isinstance(data, tuple):
-#         metadata = Namespace(**dict(zip(_column_names, data)))
-#     else:
-#         raise ValueError(f"unexpected data type '{type(data)}'")
-#     return metadata
+# define auto columns
+AUTO_COLUMNS = ["id", "master_id", "datetime"]
+# define mandatory columns
+MANDATORY_COLUMNS = [name for name in BasicMixin._meta.columns if name not in AUTO_COLUMNS]
+# define raw columns excluding auto columns
+RAW_COLUMNS = [name for name in RawFrames._meta.columns if name not in AUTO_COLUMNS]
+# define arc/continuum names using peewee model definitions
+ARC_NAMES = list(ArcMixin._meta.columns.keys())
+CON_NAMES = list(ContMixin._meta.columns.keys())
+ARC_NAMES.remove("id")
+CON_NAMES.remove("id")
+LAMP_NAMES = ARC_NAMES + CON_NAMES
+# define calibration table columns excluding auto columns
+CALIBRATION_COLUMNS = [name for name in CalibrationFrames._meta.columns if name not in AUTO_COLUMNS]
 
 def create_or_connect_db(config):
     try:
-        db.init(os.path.join(ETC_PATH, config.LVM_DB_NAME))
+        db.init(os.path.join(CONFIG_PATH, config.LVM_DB_NAME))
         db.connect()
         db.create_tables([RawFrames, CalibrationFrames])
     except Error as e:
@@ -115,7 +104,7 @@ def create_or_connect_db(config):
 
 def delete_tables_db(config):
     try:
-        db.init(os.path.join(ETC_PATH, config.LVM_DB_NAME))
+        db.init(os.path.join(CONFIG_PATH, config.LVM_DB_NAME))
         db.connect()
         db.drop_tables([RawFrames, CalibrationFrames])
     except Error as e:
@@ -123,26 +112,17 @@ def delete_tables_db(config):
     return None
 
 def delete_db(config):
-    os.remove(os.path.join(ETC_PATH, config.LVM_DB_NAME))
+    os.remove(os.path.join(CONFIG_PATH, config.LVM_DB_NAME))
     return None
 
 def record_db(config, target_paths=None, ignore_cache=False):
     if target_paths is None: target_paths = config.RAW_DATA_PATHS
-    # prepare fields skipping 'id', 'master_id' and 'datetime'
-    RAW_COLUMNS = [name for name in RawFrames._meta.columns if name not in ["id", "master_id", "datetime"]]
-    RAW_NULLABLE_COLUMNS = [name for name, column in RawFrames._meta.columns.items() if column.null]
-    RAW_NONNULL_COLUMNS = set(RAW_COLUMNS).difference(RAW_NULLABLE_COLUMNS)
-    ARC_NAMES = list(ArcMixin._meta.columns.keys())
-    ARC_NAMES.pop(0)
-    CON_NAMES = list(ContMixin._meta.columns.keys())
-    CON_NAMES.pop(0)
-    LAMP_NAMES = ARC_NAMES + CON_NAMES
     # extract records from frames header
     if os.path.isfile(config.DB_PATH) and not ignore_cache:
         metadata = pickle.load(open(config.DB_PATH, "rb"))
-        RawFrames.insert_many(metadata).execute()
-        # for record in metadata:
-        #     RawFrames.insert(record).execute()
+        # RawFrames.insert_many(metadata).execute()
+        for record in tqdm(metadata, desc="adding new frames to DB", unit="frame", ascii=True):
+            RawFrames.insert(record).execute()
     else:
         metadata = []
         for target_path in target_paths:
@@ -153,7 +133,7 @@ def record_db(config, target_paths=None, ignore_cache=False):
                     new_frame_label = frame.replace(".fits.gz", "")
                     if frame.endswith(".fits.gz"):
                         # NOTE: remove this once testing is finished
-                        # if len(metadata) >= 10: break
+                        # if len(metadata) >= 1000: break
                         try:
                             header = fits.getheader(new_frame_path, ext=0)
                         except OSError as e:
@@ -168,208 +148,140 @@ def record_db(config, target_paths=None, ignore_cache=False):
                         header["FLAGS"] = QualityFlag["OK"]
 
                         record = {key: header.get(key, RawFrames._meta.columns[key].default) for key in RAW_COLUMNS}
-                        # create new record, but ignore default columns 'id' and 'datetime'
-                        # record = list(header.get(k.upper(), ALL_DEFAULTS[k]) for k in _metadata_fields)
                         # update status in case there are missing metadata with the exception of those fields that are allowed to be NULL
-                        nonnull_values = [record[name] for name in RAW_NONNULL_COLUMNS]
+                        nonnull_values = [record[name] for name in MANDATORY_COLUMNS]
                         record["flags"] += "MISSING_METADATA" if None in nonnull_values else "OK"
                         # add record to DB
-                        RawFrames.insert(record).execute()
+                        try:
+                            RawFrames.insert(record).execute()
+                        except Error as e:
+                            print(e)
+                            print(record)
                         # append to list for cache
                         metadata.append(record)
         # store cache
         pickle.dump(metadata, open(config.DB_PATH, "wb"))
     return None
 
-# def integrity_db(config):
-#     pass
-
-# def load_db(config):
-#     _host = config.LVM_DB_HOST
-#     _user = config.LVM_DB_USER
-#     _pass = config.LVM_DB_PASS
-#     _name = config.LVM_DB_NAME
-#     try:
-#         db = mysql.connect(
-#             host=_host,
-#             user=_user,
-#             password=_pass,
-#             database=_name
-#         )
-#     except mysql.Error as e:
-#         print(e)
-
-#     return db
-
-# def get_raws_metadata(db):
-#     try:
-#         priorities = ",".join(map(repr, FRAMES_PRIORITY))
-#         with db.cursor() as cursor:
-#             cursor.execute(f"""
-#             SELECT *
-#             FROM RAW_FRAMES
-#             WHERE
-#                 status = {ReductionStatus['RAW']} AND flags = {QualityFlag['OK']} AND imagetyp IN ({priorities})
-#             ORDER BY
-#                 FIELD(imagetyp, {priorities}), mjd ASC
-#             """)
-#             all_data = cursor.fetchall()
-#     except mysql.Error as e:
-#         print(e)
+def get_raws_metadata():
+    new_frames = []
+    try:
+        priority = Case(RawFrames.imagetyp, tuple((frame_type, i) for i, frame_type in enumerate(FRAMES_PRIORITY)))
+        query = RawFrames.select().where(
+            (RawFrames.status == 1) &
+            (RawFrames.flags == 1) &
+            (RawFrames.imagetyp << FRAMES_PRIORITY)
+        ).order_by(priority)
+    except Error as e:
+        print(e)
     
-#     new_frames = _parse_db_data(data=all_data, column_names=RAW_NAMES)
+    # BUG: define custom fields for flags
+    for new_frame in query:
+        new_frame.status = ReductionStatus(new_frame.status)
+        new_frame.flags = QualityFlag(new_frame.flags)
+        new_frames.append(new_frame)
+    return new_frames
 
-#     return new_frames
-
-# # BUG: make these functions return the input (potentially updated) metadata to avoid memory issues
-# def get_analogs_metadata(db, metadata):
-#     analogs_metadata = []
-#     if metadata.IMAGETYP in CALIBRATION_TYPES and metadata.MASTER_ID is None:
-#         try:
-#             with db.cursor(buffered=True) as cursor:
-#                 cursor.execute(f"""
-#                 SELECT *
-#                 FROM RAW_FRAMES
-#                 WHERE
-#                     imagetyp = '{metadata.IMAGETYP}' AND ccd = '{metadata.CCD}' AND mjd = '{metadata.MJD}' AND ABS(exptime-{metadata.EXPTIME}) <= 1e-6
-#                 """)
-#                 analog_data = cursor.fetchall()
-#         except mysql.Error as e:
-#             print(f"{metadata.IMAGETYP}: {e}")
+def get_analogs_metadata(metadata):
+    # define empty metadata in case current frame has already a master
+    analogs_metadata = []
+    if metadata.imagetyp in CALIBRATION_TYPES and metadata.master_id is None:
+        try:
+            query = RawFrames.select().where(
+                (RawFrames.imagetyp == metadata.imagetyp) &
+                (RawFrames.ccd == metadata.ccd) &
+                (RawFrames.mjd == metadata.mjd) &
+                (RawFrames.exptime == metadata.exptime)
+            )
+        except Error as e:
+            print(f"{metadata.imagetyp}: {e}")
         
-#         analogs_metadata = _parse_db_data(data=analog_data, column_names=RAW_NAMES)
-#         # set status in progress
-#         for analog_metadata in analogs_metadata:
-#             analog_metadata.STATUS += "IN_PROGRESS"
-#     return analogs_metadata
+        # set status in progress
+        for analog_metadata in query:
+            analog_metadata.status = ReductionStatus["IN_PROGRESS"]
+            analog_metadata.flags = QualityFlag(metadata.flags)
+            analogs_metadata.append(analog_metadata)
+    return analogs_metadata
 
-# def get_calib_metadata(db, metadata):
-#     """finds and retrieve calibration frames given a target frame
+def get_calib_metadata(metadata):
+    """finds and retrieve calibration frames given a target frame
     
-#     Depending on the type of the target frame, a set of calibration
-#     frames may be needed. These are stored in lvmdrp.core.constants.FRAMES_CALIB_NEEDS.
-#     This function retrieves the closest in time set of calibration frames
-#     according to that mapping.
+    Depending on the type of the target frame, a set of calibration
+    frames may be needed. These are stored in lvmdrp.core.constants.FRAMES_CALIB_NEEDS.
+    This function retrieves the closest in time set of calibration frames
+    according to that mapping.
     
-#     NOTE: When frame_type=='bias', an empty list is returned.
+    NOTE: When frame_type=='bias', an empty list is returned.
 
-#     Parameters
-#     ----------
-#     db: mysql.connection object
-#         connection to DB from which calibration frames can be retrieved
-#     metadata: namespace
-#         the metadata for the target frame
+    Parameters
+    ----------
+    db: mysql.connection object
+        connection to DB from which calibration frames can be retrieved
+    metadata: namespace
+        the metadata for the target frame
     
-#     Returns
-#     -------
-#     calib_frames: list_like
-#         list containing the calibration frames needed by the target frame
-#     """
-#     # retrieve calibration needs
-#     frame_needs = FRAMES_CALIB_NEEDS.get(metadata.IMAGETYP)
-#     calib_frames = dict.fromkeys(frame_needs, Namespace(**dict([(field.upper(), ALL_DEFAULTS[field]) for field in CALIBRATION_NAMES])))
-#     # handle empty list cases (e.g., bias)
-#     if frame_needs == []:
-#         return calib_frames
-#     # handle unrecognized frame type
-#     if frame_needs is None:
-#         raise ValueError(f"Unrecognized frame type '{metadata.IMAGETYP}'")
+    Returns
+    -------
+    calib_frames: list_like
+        list containing the calibration frames needed by the target frame
+    """
+    # retrieve calibration needs
+    frame_needs = FRAMES_CALIB_NEEDS.get(metadata.imagetyp)
+    # raise error in case current frame is not recognized in FRAMES_CALIB_NEEDS
+    if frame_needs is None: raise ValueError(f"Unrecognized frame type '{metadata.imagetyp}'")
+    
+    calib_frames = dict.fromkeys(frame_needs, [])
+    # handle empty list cases (e.g., bias)
+    if frame_needs == []:
+        return calib_frames
+    # handle unrecognized frame type
 
-#     # BUG: change sorting to use 'mjd' instead of 'obstime', since master will be represented by that parameter
-#     # BUG: remove 'exptime' constrain when looking for bias frames, since all of them have exptime = 0
-#     for calib_type in frame_needs:
-#         try:
-#             with db.cursor(buffered=True) as cursor:
-#                 cursor.execute(f"""
-#                 SELECT *
-#                 FROM CALIBRATION_FRAMES
-#                 WHERE
-#                     imagetyp = '{calib_type}' AND ccd = '{metadata.CCD}' AND ABS(exptime-{metadata.EXPTIME}) <= 1e-6
-#                 ORDER BY ABS( DATEDIFF( obstime, '{metadata.OBSTIME}' ) )
-#                 """)
-#                 # TODO: handle the case in which the retrieved frame is stale and/or has quality flags
-#                 # BUG: there may be cases in which no frame is found
-#                 data = cursor.fetchone()
-#                 if data is not None:
-#                     calib_frames[calib_type] = _parse_db_data(data=data, column_names=CALIBRATION_NAMES)
-#         except mysql.Error as e:
-#             print(f"{calib_type}: {e}")
-#     return calib_frames
+    # BUG: change sorting to use 'mjd' instead of 'obstime', since master will be represented by that parameter
+    # BUG: remove 'exptime' constrain when looking for bias frames, since all of them have exptime = 0
+    for calib_type in frame_needs:
+        try:
+            query = CalibrationFrames.select().where(
+                (CalibrationFrames.imagetyp == calib_type) &
+                (CalibrationFrames.ccd == metadata.ccd) &
+                (CalibrationFrames.exptime == metadata.exptime)
+            ).order_by(SQL(f"ABS( DATEDIFF( obstime, '{metadata.OBSTIME}' ) )").asc())
+        except Error as e:
+            print(f"{calib_type}: {e}")
+        
+        # TODO: handle the case in which the retrieved frame is stale and/or has quality flags
+        # BUG: there may be cases in which no frame is found
+        calib_frame = query.get()
+        calib_frame.status = ReductionStatus(calib_frame.status)
+        calib_frame.flags = QualityFlag(calib_frame.flags)
+        calib_frames[calib_type] = calib_frame
+    return calib_frames
 
-# def put_redux_state(db, metadata, table):
-#     try:
-#         with db.cursor() as cursor:
-#             if isinstance(metadata, Namespace):
-#                 if metadata.STATUS == "IN_PROGRESS": metadata.REDUCTION_STARTED = datetime.now()
-#                 elif metadata.STATUS == "FINISHED": metadata.REDUCTION_FINISHED = datetime.now()
-#                 cursor.execute(f"""
-#                 UPDATE IGNORE
-#                     {table}
-#                 SET
-#                     status = '{metadata.STATUS}',
-#                     flags = '{metadata.FLAGS}',
-#                     reduction_started = '{metadata.REDUCTION_STARTED}',
-#                     reduction_finished = '{metadata.REDUCTION_FINISHED}'
-#                 WHERE
-#                     id = {metadata.ID}
-#                 """)
-#                 db.commit()
-#             elif isinstance(metadata, list):
-#                 for _ in metadata:
-#                     if _.STATUS == "IN_PROGRESS": _.REDUCTION_STARTED = datetime.now()
-#                     elif _.STATUS == "FINISHED": _.REDUCTION_FINISHED = datetime.now()
-#                 cursor.executemany(f"""
-#                 UPDATE IGNORE
-#                     {table}
-#                 SET
-#                     status = %s,
-#                     flags = %s,
-#                     reduction_started = %s,
-#                     reduction_finished = %s
-#                 WHERE
-#                     id = %s
-#                 """, [(_.STATUS, _.FLAGS, _.REDUCTION_STARTED, _.REDUCTION_FINISHED, _.ID) for _ in metadata])
-#                 db.commit()
-#             else:
-#                 raise ValueError(f"unknown metadata type '{type(metadata)}'")
-#     except mysql.Error as e:
-#         print(f"{metadata.ID}: {e}")
-#     return None
+def put_redux_state(metadata):
+    try:
+        if isinstance(metadata, (RawFrames, CalibrationFrames)):
+            if metadata.status == "IN_PROGRESS": metadata.reduction_started = dt.datetime.now()
+            elif metadata.status == "FINISHED": metadata.reduction_finished = dt.datetime.now()
+            metadata.save()
+        elif isinstance(metadata, list):
+            for md in metadata:
+                if md.status == "IN_PROGRESS": md.reduction_started = dt.datetime.now()
+                elif md.status == "FINISHED": md.reduction_finished = dt.datetime.now()
+                md.save()
+        else:
+            raise ValueError(f"unknown metadata type '{type(metadata)}'")
+    except Error as e:
+        print(e)
+    return metadata
 
-# def add_master(db, master_metadata, analogs_metadata):
-#     # BUG: there is DB overwriting happening in CALIBRATION_FRAMES table
-#     if master_metadata.STATUS == "IN_PROGRESS": master_metadata.REDUCTION_STARTED = datetime.now()
-#     elif master_metadata.STATUS == "FINISHED": master_metadata.REDUCTION_FINISHED = datetime.now()
-#     _metadata_fields, _metadata_values = zip(*[(field.lower(), value) for field, value in master_metadata.__dict__.items()])
-#     try:
-#         with db.cursor(buffered=True) as cursor:
-#             # insert new master
-#             cursor.execute(f"""
-#             INSERT IGNORE INTO CALIBRATION_FRAMES
-#                 ({','.join(_metadata_fields)})
-#             VALUES
-#                 ({','.join(len(_metadata_values)*['%s'])})
-#             """, _metadata_values)
-#             db.commit()
-
-#             # get last master id
-#             master_metadata.ID = cursor.lastrowid
-            
-#             # update master reference in raw frames
-#             cursor.execute(f"""
-#             UPDATE
-#                 RAW_FRAMES
-#             SET
-#                 master_id = {master_metadata.ID}
-#             WHERE
-#                 id IN ({','.join([str(analog_frame.ID) for analog_frame in analogs_metadata])})
-#             """
-#             )
-#             db.commit()
-#     except mysql.Error as e:
-#         print(e)
-#         print(master_metadata)
-#     return None
+def add_master(metadata):
+    if metadata.status == "IN_PROGRESS": metadata.reduction_started = dt.datetime.now()
+    elif metadata.status == "FINISHED": metadata.reduction_finished = dt.datetime.now()
+    try:
+        CalibrationFrames.insert(metadata).execute()
+    except Error as e:
+        print(e)
+        print(metadata)
+    return None
 
 
 if __name__ == "__main__":
@@ -379,6 +291,6 @@ if __name__ == "__main__":
     config = load_master_config()
     db = create_or_connect_db(config)
     
-    for i, raw in enumerate(RawFrames.select()):
-        print(i+1, raw.label)
-
+    new_frames = get_raws_metadata()
+    for new_frame in new_frames:
+        print(new_frame.label, new_frame.flags)
