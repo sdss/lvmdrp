@@ -28,7 +28,7 @@ class ReductionStatus(IntFlag):
         elif isinstance(flag, str):
             return self.value == self.__class__[flag.upper()].value
         elif isinstance(flag, int):
-            return self.value == flag
+            return self.value == self.__class__(flag)
         else:
             try:
                 return super().__eq__(flag)
@@ -84,7 +84,7 @@ class QualityFlag(IntFlag):
         elif isinstance(flag, str):
             return self.value == self.__class__[flag.upper()].value
         elif isinstance(flag, int):
-            return self.value == flag
+            return self.value == self.__class__(flag)
         else:
             try:
                 return super().__eq__(flag)
@@ -118,6 +118,8 @@ class QualityFlag(IntFlag):
             return (self & flag) == flag
         elif isinstance(flag, str):
             return (self & self.__class__[flag.upper()]) == self.__class__[flag.upper()]
+        elif isinstance(flag, int):
+            return (self & self.__class__(flag)) == self.__class__(flag)
         else:
             try:
                 return super().__contains__(flag)
