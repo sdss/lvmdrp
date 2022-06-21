@@ -244,15 +244,13 @@ def get_calib_metadata(metadata):
                 query = CalibrationFrames.select().where(
                     (CalibrationFrames.imagetyp == calib_type) &
                     (CalibrationFrames.ccd == metadata.ccd) &
-                    (CalibrationFrames.exptime == metadata.exptime) &
-                    (CalibrationFrames.obstime <= metadata.obstime)
-                ).order_by((metadata.obstime - CalibrationFrames.obstime).asc())
+                    (CalibrationFrames.exptime == metadata.exptime)
+                ).order_by(fn.ABS(metadata.obstime - CalibrationFrames.obstime).asc())
             else:
                 query = CalibrationFrames.select().where(
                     (CalibrationFrames.imagetyp == calib_type) &
-                    (CalibrationFrames.ccd == metadata.ccd) &
-                    (CalibrationFrames.obstime <= metadata.obstime)
-                ).order_by((metadata.obstime - CalibrationFrames.obstime).asc())
+                    (CalibrationFrames.ccd == metadata.ccd)
+                ).order_by(fn.ABS(metadata.obstime - CalibrationFrames.obstime).asc())
         except Error as e:
             print(f"{calib_type}: {e}")
         
