@@ -11,12 +11,13 @@ import sys
 import yaml
 import argparse
 from argparse import Namespace
+import datetime as dt
 import numpy as np
 
 from lvmdrp import image
 from lvmdrp.core.constants import MASTER_CONFIG_PATH, CALIBRATION_TYPES, CONT_FIELDS, ARC_FIELDS, PRODUCT_PATH
 from lvmdrp.utils import get_master_name
-from lvmdrp.utils.database import MANDATORY_COLUMNS, CalibrationFrames
+from lvmdrp.utils.database import CalibrationFrames
 from lvmdrp.utils.bitmask import QualityFlag, ReductionStatus
 from lvmdrp.utils.namespace import Loader
 from lvmdrp.functions import imageMethod, rssMethod
@@ -109,13 +110,12 @@ def build_master(config, analogs_metadata, calib_metadata, frame_settings):
     # take into account the exposure time
     # in case of exposure time mismatch assume linearity
     # preprocess analog frames
-    frame_paths = []
+    proc_images = []
     for analog_metadata in analogs_metadata:
-        analog_out_path = frame_settings.output_path.format(label=analog_metadata.label, kind="pre")
         proc_image, flags = imageMethod.preprocRawFrame_drp(
             in_image=analog_metadata.path,
             channel=frame_settings.ccd,
-            out_image=analog_out_path,
+            out_image=frame_settings.output_path.format(label=analog_metadata.label, kind="pre"),
             boundary_x="1,2040",
             boundary_y="1,2040",
             positions="00,10,01,11",
@@ -127,71 +127,60 @@ def build_master(config, analogs_metadata, calib_metadata, frame_settings):
         analog_metadata.status += "FINISHED"
         analog_metadata.flags += flags
         # only add those frames that were reduced correctly
-        if analog_metadata.flags == "OK": frame_paths.append(analog_out_path)
+        if analog_metadata.flags == "OK":
+            proc_images.append(proc_image)
     
-    # build masters
-    # BUG: quick fix for the case of one analog
-    master_out_path = frame_settings.master_path.format(kind="calib")
-    imageMethod.combineImages_drp(
-        images=",".join(frame_paths if len(frame_paths) > 1 else 2*frame_paths),
-        out_image=master_out_path,
-        method="mean"
-    )
-    # initialize flags
-    flags = QualityFlag["OK"]
-    if frame_settings.type == "bias":
-        new_master = image.loadImage(master_out_path)
-    elif frame_settings.type == "dark":
-        master_frame = image.loadImage(master_out_path)
-        if calib_metadata["bias"]:
-            master_bias = image.loadImage(calib_metadata["bias"].path)
-        else:
-            master_bias = image.Image(data=np.zeros_like(master_frame._data))
-            flags += "BAD_CALIBRATION_FRAMES"
-        new_master = (master_frame - master_bias._data.mean())
-        new_master.writeFitsData(master_out_path)
-    elif frame_settings.type == "flat":
-        master_frame = image.loadImage(master_out_path)
-        if calib_metadata["bias"]:
-            master_bias = image.loadImage(calib_metadata["bias"].path)
-        else:
-            master_bias = image.Image(data=np.zeros_like(master_frame._data))
-            flags += "BAD_CALIBRATION_FRAMES"
-        if calib_metadata["dark"]:
-            master_dark = image.loadImage(calib_metadata["dark"].path)
-        else:
-            master_dark = image.Image(data=np.zeros_like(master_frame._data))
-            flags += "BAD_CALIBRATION_FRAMES"
-        new_master = (master_frame - master_bias._data.mean() - master_dark._data.mean())
-        new_master.writeFitsData(master_out_path)
+    # read master bias
+    if calib_metadata["bias"]:
+        master_bias = image.loadImage(calib_metadata["bias"].path)
     else:
-        raise ValueError(f"unkown calibration type '{frame_settings.type}'")
+        master_bias = image.Image(data=np.zeros_like(proc_image._data))
+        flags += "BAD_CALIBRATION_FRAMES"
+    # read master dark
+    if calib_metadata["dark"]:
+        master_dark = image.loadImage(calib_metadata["dark"].path)
+        master_dark._data *= analogs_metadata[0].exptime / calib_metadata["dark"].exptime
+    else:
+        master_dark = image.Image(data=np.zeros_like(proc_image._data))
+        flags += "BAD_CALIBRATION_FRAMES"
+    # read master flat
+    if calib_metadata["flat"]:
+        master_flat = image.loadImage(calib_metadata["flat"].path)
+        master_flat *= analogs_metadata[0].exptime / calib_metadata["flat"].exptime
+    else:
+        master_flat = image.Image(data=np.ones_like(proc_image._data))
+        flags += "BAD_CALIBRATION_FRAMES"
+
+    # run basic calibration for each analog
+    calib_images = [(proc_image - master_dark - master_bias) / master_flat for proc_image in proc_images]
+    # build new master
+    # BUG: quick fix for the case of one analog
+    new_master = image.combineImages(calib_images, method="median")    
     # TODO: test and update database
     #   - test quality of master
     #   - add frame to master frames
     #   - add flags according to test results
     #   - add DB reference for preprocessed frames
-    # BUG: update columns inherited from original frames metadata (remove 'path', remove 'obstime')
-    # define new master metadata
-    # define master metadata by copying the basic fields from the analog metadata
     # BUG: set master & analogs reduction state before entering 'build_master' & put calibration state for both
+    # define new master metadata
     master_metadata = CalibrationFrames(
         mjd=new_master._header["MJD"],
         spec=new_master._header["SPEC"],
         ccd=new_master._header["CCD"],
         exptime=new_master._header["EXPTIME"],
         imagetyp=new_master._header["IMAGETYP"],
-        obstime=new_master._header["OBSTIME"],
+        obstime=dt.datetime.now(),
         observat=new_master._header["OBSERVAT"],
         naxis1=new_master._header["NAXIS1"],
         naxis2=new_master._header["NAXIS2"],
         label=frame_settings.label,
-        path=master_out_path,
+        path=frame_settings.master_path.format(kind="calib"),
         reduction_started=analog_metadata.reduction_started,
         reduction_finished=analog_metadata.reduction_finished,
         status=ReductionStatus["FINISHED"],
         flags=flags
     )
+    new_master.writeFitsData(master_metadata.path)
     return master_metadata, analogs_metadata
 
 def run_reduction_calib(config, metadata, calib_metadata, frame_settings):
