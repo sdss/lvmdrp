@@ -76,10 +76,10 @@ class CalibrationFrames(BaseModel, BasicMixin, StatusMixin):
 
 class RawFrames(BaseModel, BasicMixin, LabMixin, ArcMixin, ContMixin, StatusMixin):
     id = IntegerField(primary_key=True)
-    master_id = ForeignKeyField(CalibrationFrames, backref="raws", null=True)
+    master = ForeignKeyField(CalibrationFrames, backref="raws", null=True)
 
 # define auto columns
-AUTO_COLUMNS = ["id", "master_id", "datetime"]
+AUTO_COLUMNS = ["id", "master", "datetime"]
 # define mandatory columns
 MANDATORY_COLUMNS = [name for name in BasicMixin._meta.columns if name not in AUTO_COLUMNS]
 # define raw columns excluding auto columns
