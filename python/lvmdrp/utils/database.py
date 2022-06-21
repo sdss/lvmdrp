@@ -237,25 +237,20 @@ def get_calib_metadata(metadata):
     # handle unrecognized frame type
 
     # BUG: change sorting to use 'mjd' instead of 'obstime', since master will be represented by that parameter
-    # BUG: remove 'exptime' constrain when looking for bias frames, since all of them have exptime = 0
     for calib_type in frame_needs:
         try:
-            if calib_type != "bias":
-                query = CalibrationFrames.select().where(
-                    (CalibrationFrames.imagetyp == calib_type) &
-                    (CalibrationFrames.ccd == metadata.ccd) &
-                    (CalibrationFrames.exptime == metadata.exptime)
-                ).order_by(fn.ABS(metadata.obstime - CalibrationFrames.obstime).asc())
-            else:
-                query = CalibrationFrames.select().where(
-                    (CalibrationFrames.imagetyp == calib_type) &
-                    (CalibrationFrames.ccd == metadata.ccd)
-                ).order_by(fn.ABS(metadata.obstime - CalibrationFrames.obstime).asc())
+            query = CalibrationFrames.select().where(
+                (CalibrationFrames.imagetyp == calib_type) &
+                (CalibrationFrames.ccd == metadata.ccd)
+            ).order_by(fn.ABS(metadata.obstime - CalibrationFrames.obstime).asc())
         except Error as e:
             print(f"{calib_type}: {e}")
         
         # TODO: handle the case in which the retrieved frame is stale and/or has quality flags
         # BUG: there may be cases in which no frame is found
+        # BUG: this is retrieving only the first (closest) calibration frame, not necessarily the best
+        #      Should retrieve all possible calibration frames & decide which one is the best based on
+        #      quality
         calib_frame = query.get()
         calib_frame.status = ReductionStatus(calib_frame.status)
         calib_frame.flags = QualityFlag(calib_frame.flags)
