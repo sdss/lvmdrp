@@ -51,7 +51,7 @@ if __name__ == "__main__":
             analogs_metadata = get_analogs_metadata(metadata=metadata)
             # update reduction state for analogs metadata
             # BUG: this assumes that the current frame is in the analogs list
-            # put_redux_state(metadata=analogs_metadata, table="rawframes")
+            put_redux_state(metadata=analogs_metadata)
             
             master_metadata, analogs_metadata = build_master(
                 config=config,
@@ -60,9 +60,9 @@ if __name__ == "__main__":
                 frame_settings=redux_settings
             )
             # create new master DB record
-            # add_master(metadata=master_metadata)
+            add_master(master_metadata=master_metadata, analogs_metadata=analogs_metadata)
             # update DB
-            # put_redux_state(metadata=analogs_metadata, table="rawframes")
+            put_redux_state(metadata=analogs_metadata)
             # update new_frames iterator by removing already processed calibration frames
             for analog_metadata in analogs_metadata:
                 if analog_metadata.id in ids:
@@ -72,7 +72,7 @@ if __name__ == "__main__":
             # BUG: build masters for continuum and arcs
             # BUG: should I build cont/arc master before or after reducing cont/arc? YES
         else:
-            # put_redux_state(metadata=metadata, table="rawframes")
+            put_redux_state(metadata=metadata)
             metadata = run_reduction_calib(config=config, metadata=metadata, calib_metadata=calib_metadata, frame_settings=redux_settings)
             # run calibration according to type of frame
             if redux_settings.type == "continuum":
@@ -86,7 +86,7 @@ if __name__ == "__main__":
             #   - add flags
             # TODO: update DB
             #   - update reduction state
-            # put_redux_state(metadata=metadata, table="rawframes")
+            put_redux_state(metadata=metadata)
     # close DB connection
     db.close()
 

@@ -230,9 +230,9 @@ def get_calib_metadata(metadata):
     # raise error in case current frame is not recognized in FRAMES_CALIB_NEEDS
     if frame_needs is None: raise ValueError(f"Unrecognized frame type '{metadata.imagetyp}'")
     
-    calib_frames = dict.fromkeys(frame_needs, [])
+    calib_frames = dict.fromkeys(frame_needs)
     # handle empty list cases (e.g., bias)
-    if frame_needs == []:
+    if not frame_needs:
         return calib_frames
     # handle unrecognized frame type
 
@@ -240,11 +240,19 @@ def get_calib_metadata(metadata):
     # BUG: remove 'exptime' constrain when looking for bias frames, since all of them have exptime = 0
     for calib_type in frame_needs:
         try:
-            query = CalibrationFrames.select().where(
-                (CalibrationFrames.imagetyp == calib_type) &
-                (CalibrationFrames.ccd == metadata.ccd) &
-                (CalibrationFrames.exptime == metadata.exptime)
-            ).order_by(SQL(f"ABS( DATEDIFF( obstime, '{metadata.OBSTIME}' ) )").asc())
+            if calib_type != "bias":
+                query = CalibrationFrames.select().where(
+                    (CalibrationFrames.imagetyp == calib_type) &
+                    (CalibrationFrames.ccd == metadata.ccd) &
+                    (CalibrationFrames.exptime == metadata.exptime) &
+                    (CalibrationFrames.obstime <= metadata.obstime)
+                ).order_by((metadata.obstime - CalibrationFrames.obstime).asc())
+            else:
+                query = CalibrationFrames.select().where(
+                    (CalibrationFrames.imagetyp == calib_type) &
+                    (CalibrationFrames.ccd == metadata.ccd) &
+                    (CalibrationFrames.obstime <= metadata.obstime)
+                ).order_by((metadata.obstime - CalibrationFrames.obstime).asc())
         except Error as e:
             print(f"{calib_type}: {e}")
         
@@ -273,14 +281,17 @@ def put_redux_state(metadata):
         print(e)
     return metadata
 
-def add_master(metadata):
-    if metadata.status == "IN_PROGRESS": metadata.reduction_started = dt.datetime.now()
-    elif metadata.status == "FINISHED": metadata.reduction_finished = dt.datetime.now()
+def add_master(master_metadata, analogs_metadata):
+    if master_metadata.status == "IN_PROGRESS": master_metadata.reduction_started = dt.datetime.now()
+    elif master_metadata.status == "FINISHED": master_metadata.reduction_finished = dt.datetime.now()
     try:
-        CalibrationFrames.insert(metadata).execute()
+        master_metadata.save()
+        for analog_metadata in analogs_metadata:
+            analog_metadata.master_id = master_metadata.id
+            analog_metadata.save()
     except Error as e:
         print(e)
-        print(metadata)
+        print(master_metadata)
     return None
 
 
