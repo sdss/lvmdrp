@@ -15,9 +15,9 @@ import datetime as dt
 import numpy as np
 
 from lvmdrp import image
-from lvmdrp.core.constants import MASTER_CONFIG_PATH, CALIBRATION_TYPES, CONT_FIELDS, ARC_FIELDS, PRODUCT_PATH
+from lvmdrp.core.constants import MASTER_CONFIG_PATH, BASIC_CALIBRATION_TYPES, CALIBRATION_TYPES, PRODUCT_PATH
 from lvmdrp.utils import get_master_name
-from lvmdrp.utils.database import CalibrationFrames
+from lvmdrp.utils.database import CON_NAMES, ARC_NAMES, LAMP_NAMES, CalibrationFrames
 from lvmdrp.utils.bitmask import QualityFlag, ReductionStatus
 from lvmdrp.utils.namespace import Loader
 from lvmdrp.functions import imageMethod, rssMethod
@@ -53,7 +53,7 @@ def setup_reduction(config, metadata):
     redux_settings.mjd = metadata.mjd
     redux_settings.wl_range = config.WAVELENGTH_RANGES.__dict__[metadata.ccd[0]]
     redux_settings.pix2wave_map = os.path.join(config.LVM_DRP_CONFIG_PATH, config.PIX2WAVE_MAPS.__dict__[metadata.ccd])
-    redux_settings.lamps = [field.lower() for field in metadata.__dict__ if field.lower() in list(CONT_FIELDS.keys())+list(ARC_FIELDS.keys()) if metadata.__dict__[field]]
+    redux_settings.lamps = [name for name in metadata.__data__ if name in LAMP_NAMES and metadata.__data__[name]]
     # find type of reduction and calibration frames depending on the target image
     if metadata.imagetyp in CALIBRATION_TYPES:
         redux_settings.type = metadata.imagetyp
@@ -92,6 +92,7 @@ def setup_reduction(config, metadata):
             kind="{kind}"
         )
     else:
+        redux_settings.label = metadata.label
         redux_settings.output_path = PRODUCT_PATH.format(
             path=config.LVM_SPECTRO_REDUX_PATH,
             label=redux_settings.label,
@@ -131,22 +132,22 @@ def build_master(config, analogs_metadata, calib_metadata, frame_settings):
             proc_images.append(proc_image)
     
     # read master bias
-    if calib_metadata["bias"]:
+    if calib_metadata.get("bias"):
         master_bias = image.loadImage(calib_metadata["bias"].path)
     else:
         master_bias = image.Image(data=np.zeros_like(proc_image._data))
         flags += "BAD_CALIBRATION_FRAMES"
     # read master dark
-    if calib_metadata["dark"]:
+    if calib_metadata.get("dark"):
         master_dark = image.loadImage(calib_metadata["dark"].path)
         master_dark._data *= analogs_metadata[0].exptime / calib_metadata["dark"].exptime
     else:
         master_dark = image.Image(data=np.zeros_like(proc_image._data))
         flags += "BAD_CALIBRATION_FRAMES"
     # read master flat
-    if calib_metadata["flat"]:
+    if calib_metadata.get("flat"):
         master_flat = image.loadImage(calib_metadata["flat"].path)
-        master_flat *= analogs_metadata[0].exptime / calib_metadata["flat"].exptime
+        master_flat._data *= analogs_metadata[0].exptime / calib_metadata["flat"].exptime
     else:
         master_flat = image.Image(data=np.ones_like(proc_image._data))
         flags += "BAD_CALIBRATION_FRAMES"
@@ -154,7 +155,6 @@ def build_master(config, analogs_metadata, calib_metadata, frame_settings):
     # run basic calibration for each analog
     calib_images = [(proc_image - master_dark - master_bias) / master_flat for proc_image in proc_images]
     # build new master
-    # BUG: quick fix for the case of one analog
     new_master = image.combineImages(calib_images, method="median")    
     # TODO: test and update database
     #   - test quality of master
