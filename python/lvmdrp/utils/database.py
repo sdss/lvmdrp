@@ -8,6 +8,7 @@
 
 import os
 import pickle
+import numpy as np
 import datetime as dt
 from tqdm import tqdm
 from sqlite3 import Error
@@ -21,6 +22,11 @@ from lvmdrp.core.constants import CONFIG_PATH
 from lvmdrp.core.constants import FRAMES_PRIORITY, CALIBRATION_TYPES, FRAMES_CALIB_NEEDS
 from lvmdrp.utils.bitmask import ReductionStatus, QualityFlag
 
+
+# TODO:
+#   - add frame regions (overscan, prescan, science) to check if those are correct
+# TODO: add table for DRP products, from preprocessed frames to final science-ready frames
+# TODO: add weather table for data quality monitoring purposes
 
 db = SqliteDatabase(None)
 
@@ -142,6 +148,22 @@ def record_db(config, target_paths=None, ignore_cache=False):
                         # update/add metadata keywords
                         for key in LAMP_NAMES:
                             header[key] = True if header.get(key) == "ON" else False
+                        
+                        # BUG: fix imagetyp key because the header is messed up. This will be done only for lab data (hopefully!)
+                        if header.get("IMAGETYP") and header["IMAGETYP"] in ["continuum", "arc", "object"]:
+                            lamps = [lamp for lamp in LAMP_NAMES if header[lamp]]
+                            if lamps:
+                                has_cont = np.isin(CON_NAMES, lamps)
+                                has_arcs = np.isin(ARC_NAMES, lamps)
+                                if header["IMAGETYP"] == "continuum" or has_cont.any() or has_arcs.all():
+                                    header["IMAGETYP"] = "continuum"
+                                elif header["IMAGETYP"] == "arc" or (not has_cont.any() and has_arcs.any() and not has_arcs.all()):
+                                    header["IMAGETYP"] = "arc"
+                                else:
+                                    raise ValueError(f"unrecognized case for lamps: '{lamps}'.")
+                            else:
+                                header["IMAGETYP"] = "object"
+                        
                         header["LABEL"] = new_frame_label
                         header["PATH"] = new_frame_path
                         header["STATUS"] = ReductionStatus["RAW"]
@@ -251,10 +273,11 @@ def get_calib_metadata(metadata):
         # BUG: this is retrieving only the first (closest) calibration frame, not necessarily the best
         #      Should retrieve all possible calibration frames & decide which one is the best based on
         #      quality
-        calib_frame = query.get()
-        calib_frame.status = ReductionStatus(calib_frame.status)
-        calib_frame.flags = QualityFlag(calib_frame.flags)
-        calib_frames[calib_type] = calib_frame
+        calib_frame = query.get_or_none()
+        if calib_frame:
+            calib_frame.status = ReductionStatus(calib_frame.status)
+            calib_frame.flags = QualityFlag(calib_frame.flags)
+            calib_frames[calib_type] = calib_frame
     return calib_frames
 
 def put_redux_state(metadata):
