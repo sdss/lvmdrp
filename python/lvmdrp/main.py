@@ -86,7 +86,7 @@ def setup_reduction(config, metadata):
     metadata.status += "IN_PROGRESS"
     return metadata, redux_settings
 
-def build_master(config, analogs_metadata, calib_metadata, frame_settings):
+def build_master(config, analogs_metadata, calib_metadata, redux_settings):
     # bypass if all analog frames are already part of a master
     if (np.asarray([_.master_id for _ in analogs_metadata]) != None).all():
         return None, analogs_metadata
@@ -99,13 +99,13 @@ def build_master(config, analogs_metadata, calib_metadata, frame_settings):
     for analog_metadata in analogs_metadata:
         proc_image, flags = imageMethod.preprocRawFrame_drp(
             in_image=analog_metadata.path,
-            channel=frame_settings.ccd,
-            out_image=frame_settings.output_path.format(label=analog_metadata.label, kind="pre"),
+            channel=redux_settings.ccd,
+            out_image=redux_settings.output_path.format(label=analog_metadata.label, kind="pre"),
             boundary_x="1,2040",
             boundary_y="1,2040",
             positions="00,10,01,11",
             orientation="S,S,S,S",
-            gain=config.GAIN, rdnoise=config.READ_NOISE
+            gain=config.GAIN, rdnoise=config.READ_NOISE, subtract_overscan=0
         )
         analog_metadata.naxis1 = proc_image._header["NAXIS1"]
         analog_metadata.naxis2 = proc_image._header["NAXIS2"]
@@ -116,30 +116,33 @@ def build_master(config, analogs_metadata, calib_metadata, frame_settings):
             proc_images.append(proc_image)
     
     # read master bias
-    if calib_metadata.get("bias"):
+    if "bias" in calib_metadata and calib_metadata.get("bias"):
         master_bias = image.loadImage(calib_metadata["bias"].path)
     else:
         master_bias = image.Image(data=np.zeros_like(proc_image._data))
         flags += "BAD_CALIBRATION_FRAMES"
     # read master dark
-    if calib_metadata.get("dark"):
+    if "dark" in calib_metadata and calib_metadata.get("dark"):
         master_dark = image.loadImage(calib_metadata["dark"].path)
         master_dark._data *= analogs_metadata[0].exptime / calib_metadata["dark"].exptime
     else:
         master_dark = image.Image(data=np.zeros_like(proc_image._data))
         flags += "BAD_CALIBRATION_FRAMES"
     # read master flat
-    if calib_metadata.get("flat"):
+    if "flat" in calib_metadata and calib_metadata.get("flat"):
         master_flat = image.loadImage(calib_metadata["flat"].path)
         master_flat._data *= analogs_metadata[0].exptime / calib_metadata["flat"].exptime
     else:
         master_flat = image.Image(data=np.ones_like(proc_image._data))
         flags += "BAD_CALIBRATION_FRAMES"
 
+    # normalize in case of flat calibration
+    if redux_settings.type == "flat":
+        proc_images = map(lambda proc_image: proc_image / np.median(proc_image._data), proc_images)
     # run basic calibration for each analog
     calib_images = [(proc_image - master_dark - master_bias) / master_flat for proc_image in proc_images]
     # build new master
-    new_master = image.combineImages(calib_images, method="median")    
+    new_master = image.combineImages(calib_images, method="median")
     # TODO: test and update database
     #   - test quality of master
     #   - add frame to master frames
@@ -148,17 +151,17 @@ def build_master(config, analogs_metadata, calib_metadata, frame_settings):
     # BUG: set master & analogs reduction state before entering 'build_master' & put calibration state for both
     # define new master metadata
     master_metadata = CalibrationFrames(
-        mjd=new_master._header["MJD"],
-        spec=new_master._header["SPEC"],
-        ccd=new_master._header["CCD"],
-        exptime=new_master._header["EXPTIME"],
-        imagetyp=new_master._header["IMAGETYP"],
+        mjd=analog_metadata.mjd,
+        spec=analog_metadata.spec,
+        ccd=analog_metadata.ccd,
+        exptime=analog_metadata.exptime,
+        imagetyp=analog_metadata.imagetyp,
         obstime=dt.datetime.now(),
-        observat=new_master._header["OBSERVAT"],
-        naxis1=new_master._header["NAXIS1"],
-        naxis2=new_master._header["NAXIS2"],
-        label=frame_settings.label,
-        path=frame_settings.master_path.format(kind="calib"),
+        observat=analog_metadata.observat,
+        naxis1=analog_metadata.naxis1,
+        naxis2=analog_metadata.naxis2,
+        label=redux_settings.label,
+        path=redux_settings.master_path.format(kind="calib"),
         reduction_started=analog_metadata.reduction_started,
         reduction_finished=analog_metadata.reduction_finished,
         status=ReductionStatus["FINISHED"],
@@ -167,12 +170,12 @@ def build_master(config, analogs_metadata, calib_metadata, frame_settings):
     new_master.writeFitsData(master_metadata.path)
     return master_metadata, analogs_metadata
 
-def run_reduction_calib(config, metadata, calib_metadata, frame_settings):
+def run_reduction_calib(config, metadata, calib_metadata, redux_settings):
     
     target_frame, flags = imageMethod.preprocRawFrame_drp(
-        in_image=frame_settings.input_path,
-        channel=frame_settings.ccd,
-        out_image=frame_settings.output_path.format(kind="pre"),
+        in_image=redux_settings.input_path,
+        channel=redux_settings.ccd,
+        out_image=redux_settings.output_path.format(kind="pre"),
         boundary_x="1,2040",
         boundary_y="1,2040",
         positions="00,10,01,11",
@@ -201,7 +204,7 @@ def run_reduction_calib(config, metadata, calib_metadata, frame_settings):
         flags += "BAD_CALIBRATION_FRAMES"
 
     frame_calib = ((target_frame - master_bias._data.mean() - master_dark._data.mean())/master_flat)
-    frame_calib.writeFitsData(frame_settings.output_path.format(kind="calib"))
+    frame_calib.writeFitsData(redux_settings.output_path.format(kind="calib"))
 
     metadata.naxis1 = frame_calib._header["NAXIS1"]
     metadata.naxis2 = frame_calib._header["NAXIS2"]
@@ -209,122 +212,137 @@ def run_reduction_calib(config, metadata, calib_metadata, frame_settings):
     metadata.flags += flags
     return metadata
 
-def run_reduction_block(config, metadata, calib_metadata, frame_settings):
+def run_reduction_block(config, metadata, calib_metadata, redux_settings):
     # build calibration paths
-    calib_path = PRODUCT_PATH.format(path=config.LVM_SPECTRO_CALIB_PATH, label=calib_metadata["continuum"].LABEL, kind="{kind}")
+    master_continuum_path = redux_settings.output_path.format(
+        label=calib_metadata["continuum"].label,
+        kind="{kind}"
+    )
+    target_frame_path = redux_settings.output_path.format(
+        label=metadata.label,
+        kind="{kind}"
+    )
     _, flags = imageMethod.subtractStraylight_drp(
-        image=frame_settings.output_path.format(kind="cosmic"),
-        trace=calib_path.format(kind="trc"),
-        stray_image=frame_settings.output_path.format(kind="back"),
-        clean_image=frame_settings.output_path.format(kind="stray"),
+        image=target_frame_path.format(kind="cosmic"),
+        trace=master_continuum_path.format(kind="trc"),
+        stray_image=target_frame_path.format(kind="back"),
+        clean_image=target_frame_path.format(kind="stray"),
         aperture=40, poly_cross=2, smooth_gauss=30
     )
     metadata.flags += flags
     _, flags = imageMethod.extractSpec_drp(
-        image=frame_settings.output_path.format(kind="stray"),
-        trace=calib_path.format(kind="trc"),
-        out_rss=frame_settings.output_path.format(kind="ms"),
-        fwhm=calib_path.format(kind="fwhm"),
+        image=target_frame_path.format(kind="stray"),
+        trace=master_continuum_path.format(kind="trc"),
+        out_rss=target_frame_path.format(kind="ms"),
+        fwhm=master_continuum_path.format(kind="fwhm"),
         method="optimal", parallel="5"
     )
     metadata.flags += flags
     return metadata
 
-def run_reduction_continuum(config, metadata, frame_settings):
+def run_reduction_continuum(config, metadata, calib_metadata, redux_settings):
 
     # BUG: add continuum frames to CALIBRATION_FRAMES in DB
+    target_frame_path = redux_settings.output_path.format(
+        label=metadata.label,
+        kind="{kind}"
+    )
     _, flags = imageMethod.LACosmic_drp(
-        image=frame_settings.output_path.format(kind="calib"),
-        out_image=frame_settings.output_path.format(kind="cosmic"),
+        image=target_frame_path.format(kind="calib"),
+        out_image=target_frame_path.format(kind="cosmic"),
         increase_radius=1, flim="1.3", parallel='5'
     )
     metadata.flags += flags
     # BUG: verify outputs against expected values, skip calibration steps if needed & set corresponding flags
     _, flags = imageMethod.findPeaksAuto_drp(
-        image=frame_settings.output_path.format(kind="cosmic"),
-        out_peaks_file=frame_settings.output_path.format(kind="trace").replace(".fits", ".peaks"),
+        image=target_frame_path.format(kind="cosmic"),
+        out_peaks_file=target_frame_path.format(kind="trace").replace(".fits", ".peaks"),
         disp_axis="X", threshold="5000", slice="3696", nfibers="41", median_box="1", median_cross="1", method="gauss", init_sigma="0.5", verbose=0
     )
     metadata.flags += flags
     _, flags = imageMethod.tracePeaks_drp(
-        image=frame_settings.output_path.format(kind="cosmic"),
-        peaks_file=frame_settings.output_path.format(kind="trace").replace(".fits", ".peaks"),
-        trace_out=frame_settings.output_path.format(kind="trc"),
+        image=target_frame_path.format(kind="cosmic"),
+        peaks_file=target_frame_path.format(kind="trace").replace(".fits", ".peaks"),
+        trace_out=target_frame_path.format(kind="trc"),
         steps=30, method="gauss", threshold_peak=50, poly_disp=5, coadd=30, verbose=0
     )
     metadata.flags += flags
     _, flags = imageMethod.subtractStraylight_drp(
-        image=frame_settings.output_path.format(kind="cosmic"),
-        trace=frame_settings.output_path.format(kind="trc"),
-        stray_image=frame_settings.output_path.format(kind="back"),
-        clean_image=frame_settings.output_path.format(kind="stray"),
+        image=target_frame_path.format(kind="cosmic"),
+        trace=target_frame_path.format(kind="trc"),
+        stray_image=target_frame_path.format(kind="back"),
+        clean_image=target_frame_path.format(kind="stray"),
         aperture=40, poly_cross=2, smooth_gauss=30
     )
     metadata.flags += flags
     _, flags = imageMethod.traceFWHM_drp(
-        image=frame_settings.output_path.format(kind="stray"),
-        trace=frame_settings.output_path.format(kind="trc"),
-        fwhm_out=frame_settings.output_path.format(kind="fwhm"),
+        image=target_frame_path.format(kind="stray"),
+        trace=target_frame_path.format(kind="trc"),
+        fwhm_out=target_frame_path.format(kind="fwhm"),
         blocks=32, steps=30, coadd=20, threshold_flux=50.0, poly_disp=5, clip="1.5,4.0"
     )
     metadata.flags += flags
     _, flags = imageMethod.extractSpec_drp(
-        image=frame_settings.output_path.format(kind="stray"),
-        trace=frame_settings.output_path.format(kind="trc"),
-        out_rss=frame_settings.output_path.format(kind="ms"),
-        fwhm=frame_settings.output_path.format(kind="fwhm"),
+        image=target_frame_path.format(kind="stray"),
+        trace=target_frame_path.format(kind="trc"),
+        out_rss=target_frame_path.format(kind="ms"),
+        fwhm=target_frame_path.format(kind="fwhm"),
         parallel=5, method="optimal"
     )
     metadata.status += "FINISHED"
     metadata.flags += flags
     return metadata
 
-def run_reduction_arc(config, metadata, calib_metadata, frame_settings):
-    metadata = run_reduction_block(config, metadata=metadata, calib_metadata=calib_metadata, frame_settings=frame_settings)
+def run_reduction_arc(config, metadata, calib_metadata, redux_settings):
+    metadata = run_reduction_block(config, metadata=metadata, calib_metadata=calib_metadata, redux_settings=redux_settings)
+    target_frame_path = redux_settings.output_path.format(
+        label=metadata.label,
+        kind="{kind}"
+    )
     _, flags = rssMethod.detWaveSolution_drp(
-        arc_rss=frame_settings.output_path.format(kind="ms"),
-        disp_rss=frame_settings.output_path.format(kind="disp"),
-        res_rss=frame_settings.output_path.format(kind="res"),
-        ref_line_file=frame_settings.pix2wave_map,
+        arc_rss=target_frame_path.format(kind="ms"),
+        disp_rss=target_frame_path.format(kind="disp"),
+        res_rss=target_frame_path.format(kind="res"),
+        ref_line_file=redux_settings.pix2wave_map,
         aperture="7", poly_fwhm="-1,-1", poly_dispersion="-4", rel_flux_limits="0.2,2", flux_min="100.0", verbose="-1"
     )
     metadata.flags += flags
     _, flags = rssMethod.createPixTable_drp(
-        rss_in=frame_settings.output_path.format(kind="ms"),
-        rss_out=frame_settings.output_path.format(kind="rss"),
-        arc_wave=frame_settings.output_path.format(kind="disp"),
-        arc_fwhm=frame_settings.output_path.format(kind="res"),
+        rss_in=target_frame_path.format(kind="ms"),
+        rss_out=target_frame_path.format(kind="rss"),
+        arc_wave=target_frame_path.format(kind="disp"),
+        arc_fwhm=target_frame_path.format(kind="res"),
         cropping=''
     )
     metadata.flags += flags
     _, flags = rssMethod.resampleWave_drp(
-        rss_in=frame_settings.output_path.format(kind="rss"),
-        rss_out=frame_settings.output_path.format(kind="disp_cor"),
-        start_wave=frame_settings.wl_range[0], end_wave=frame_settings.wl_range[1], disp_pix="1.0", err_sim="0"
+        rss_in=target_frame_path.format(kind="rss"),
+        rss_out=target_frame_path.format(kind="disp_cor"),
+        start_wave=redux_settings.wl_range[0], end_wave=redux_settings.wl_range[1], disp_pix="1.0", err_sim="0"
     )
     metadata.flags += flags
     metadata.status += "FINISHED"
     return metadata
 
-def run_reduction_object(config, metadata, calib_metadata, frame_settings):
+def run_reduction_object(config, metadata, calib_metadata, redux_settings):
 
     _, flags = imageMethod.LACosmic_drp(
-        image=frame_settings.output_path.format(kind="calib"),
-        out_image=frame_settings.output_path.format(kind="cosmic"),
+        image=redux_settings.output_path.format(kind="calib"),
+        out_image=redux_settings.output_path.format(kind="cosmic"),
         increase_radius=1, flim="1.3", parallel='5'
     )
     metadata.flags += flags
-    metadata = run_reduction_block(config, metadata=metadata, calib_metadata=calib_metadata, frame_settings=frame_settings)
+    metadata = run_reduction_block(config, metadata=metadata, calib_metadata=calib_metadata, redux_settings=redux_settings)
     _, flags = rssMethod.createPixTable_drp(
-        rss_in=frame_settings.output_path.format(kind="ms"),
-        rss_out=frame_settings.output_path.format(kind="rss"),
-        arc_wave=frame_settings.output_path.format(kind="disp"), arc_fwhm=frame_settings.output_path.format(kind="res"), cropping=''
+        rss_in=redux_settings.output_path.format(kind="ms"),
+        rss_out=redux_settings.output_path.format(kind="rss"),
+        arc_wave=redux_settings.output_path.format(kind="disp"), arc_fwhm=redux_settings.output_path.format(kind="res"), cropping=''
     )
     metadata.flags += flags
     _, flags = rssMethod.resampleWave_drp(
-        rss_in=frame_settings.output_path.format(kind="rss"),
-        rss_out=frame_settings.output_path.format(kind="disp_cor"),
-        start_wave=frame_settings.wl_range[0], end_wave=frame_settings.wl_range[1], disp_pix="1.0", err_sim="0"
+        rss_in=redux_settings.output_path.format(kind="rss"),
+        rss_out=redux_settings.output_path.format(kind="disp_cor"),
+        start_wave=redux_settings.wl_range[0], end_wave=redux_settings.wl_range[1], disp_pix="1.0", err_sim="0"
     )
     metadata.flags += flags
     metadata.status += "FINISHED"
