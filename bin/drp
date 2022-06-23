@@ -39,11 +39,10 @@ if __name__ == "__main__":
         # BUG: in the case of arcs, if missing continuum frame, fall back to arc with most lamps on
         #      this should be the next best thing for a continuum frame
         #      finally fall back to current frame as continuum and add corresponding flags
+        # BUG: I should get calibration metadata from DB for each analog for building masters
         calib_metadata = get_calib_metadata(metadata=metadata)
         # NOTE: remove this line after testing
-        # if metadata.imagetyp not in ("arc", "object"): continue
-        # if metadata.imagetyp != "bias": continue
-        # if redux_settings.type != "arc": continue
+        if redux_settings.type != "continuum": continue
 
         # run basic calibration for new frame
         if redux_settings.type in CALIBRATION_TYPES:
@@ -57,8 +56,14 @@ if __name__ == "__main__":
                 config=config,
                 analogs_metadata=analogs_metadata,
                 calib_metadata=calib_metadata,
-                frame_settings=redux_settings
+                redux_settings=redux_settings
             )
+            # run reduction for continuum/arc frames
+            if redux_settings.type == "continuum":
+                metadata = run_reduction_continuum(config=config, metadata=master_metadata, calib_metadata=calib_metadata, redux_settings=redux_settings)
+            elif redux_settings.type == "arc":
+                metadata = run_reduction_arc(config=config, metadata=master_metadata, calib_metadata=calib_metadata, redux_settings=redux_settings)
+
             # create new master DB record
             add_master(master_metadata=master_metadata, analogs_metadata=analogs_metadata)
             # update DB
@@ -73,20 +78,16 @@ if __name__ == "__main__":
             # BUG: should I build cont/arc master before or after reducing cont/arc? YES
         else:
             put_redux_state(metadata=metadata)
-            metadata = run_reduction_calib(config=config, metadata=metadata, calib_metadata=calib_metadata, frame_settings=redux_settings)
+            metadata = run_reduction_calib(config=config, metadata=metadata, calib_metadata=calib_metadata, redux_settings=redux_settings)
             # run calibration according to type of frame
-            if redux_settings.type == "continuum":
-                metadata = run_reduction_continuum(config=config, metadata=metadata, frame_settings=redux_settings)
-            elif redux_settings.type == "arc":
-                metadata = run_reduction_arc(config=config, metadata=metadata, calib_metadata=calib_metadata, frame_settings=redux_settings)
-            elif redux_settings.type == "object":
-                metadata = run_reduction_object(config=config, metadata=metadata, calib_metadata=calib_metadata, frame_settings=redux_settings)
+            metadata = run_reduction_object(config=config, metadata=metadata, calib_metadata=calib_metadata, redux_settings=redux_settings)
             
             # TODO: run tests
             #   - add flags
             # TODO: update DB
             #   - update reduction state
             put_redux_state(metadata=metadata)
+        break
     # close DB connection
     db.close()
 
