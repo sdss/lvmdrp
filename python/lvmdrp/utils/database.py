@@ -23,6 +23,7 @@ from lvmdrp.core.constants import FRAMES_PRIORITY, CALIBRATION_TYPES, FRAMES_CAL
 from lvmdrp.utils.bitmask import ReductionStatus, QualityFlag
 
 
+SQLITE_MAX_VARIABLE_NUMBER = 32766
 # TODO:
 #   - add frame regions (overscan, prescan, science) to check if those are correct
 # TODO: add table for DRP products, from preprocessed frames to final science-ready frames
@@ -126,9 +127,13 @@ def record_db(config, target_paths=None, ignore_cache=False):
     # extract records from frames header
     if os.path.isfile(config.DB_PATH) and not ignore_cache:
         metadata = pickle.load(open(config.DB_PATH, "rb"))
-        # RawFrames.insert_many(metadata).execute()
-        for record in tqdm(metadata, desc="adding new frames to DB", unit="frame", ascii=True):
-            RawFrames.insert(record).execute()
+        with db.atomic():
+            for i, batch in enumerate(chunked(metadata, n=SQLITE_MAX_VARIABLE_NUMBER//len(metadata[0]))):
+                try:
+                    RawFrames.insert_many(batch).execute()
+                except Error as e:
+                    print(e)
+                    print(f"in chunk={i}, {batch}")
     else:
         metadata = []
         for target_path in target_paths:
@@ -173,16 +178,18 @@ def record_db(config, target_paths=None, ignore_cache=False):
                         # update status in case there are missing metadata with the exception of those fields that are allowed to be NULL
                         nonnull_values = [record[name] for name in MANDATORY_COLUMNS]
                         record["flags"] += "MISSING_METADATA" if None in nonnull_values else "OK"
-                        # add record to DB
-                        try:
-                            RawFrames.insert(record).execute()
-                        except Error as e:
-                            print(e)
-                            print(record)
                         # append to list for cache
                         metadata.append(record)
         # store cache
         pickle.dump(metadata, open(config.DB_PATH, "wb"))
+        # add record to DB
+        with db.atomic():
+            for i, batch in enumerate(chunked(metadata, n=SQLITE_MAX_VARIABLE_NUMBER//len(metadata[0]))):
+                try:
+                    RawFrames.insert_many(batch).execute()
+                except Error as e:
+                    print(e)
+                    print(f"in chunk={i}, {batch}")
     return None
 
 def get_raws_metadata():
