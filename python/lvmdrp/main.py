@@ -15,9 +15,9 @@ import datetime as dt
 import numpy as np
 
 from lvmdrp import image
-from lvmdrp.core.constants import MASTER_CONFIG_PATH, BASIC_CALIBRATION_TYPES, CALIBRATION_TYPES, PRODUCT_PATH
+from lvmdrp.core.constants import MASTER_CONFIG_PATH, FRAMES_PRIORITY, CALIBRATION_TYPES, PRODUCT_PATH
 from lvmdrp.utils import get_master_name
-from lvmdrp.utils.database import CON_NAMES, ARC_NAMES, LAMP_NAMES, CalibrationFrames
+from lvmdrp.utils.database import LAMP_NAMES, CalibrationFrames
 from lvmdrp.utils.bitmask import QualityFlag, ReductionStatus
 from lvmdrp.utils.namespace import Loader
 from lvmdrp.functions import imageMethod, rssMethod
@@ -55,34 +55,18 @@ def setup_reduction(config, metadata):
     redux_settings.pix2wave_map = os.path.join(config.LVM_DRP_CONFIG_PATH, config.PIX2WAVE_MAPS.__dict__[metadata.ccd])
     redux_settings.lamps = [name for name in metadata.__data__ if name in LAMP_NAMES and metadata.__data__[name]]
     # find type of reduction and calibration frames depending on the target image
-    if metadata.imagetyp in CALIBRATION_TYPES:
+    if metadata.imagetyp in FRAMES_PRIORITY:
         redux_settings.type = metadata.imagetyp
-    elif metadata.imagetyp =="arc" or metadata.imagetyp == "object":
-        if redux_settings.lamps:
-            has_cont = np.isin(list(CONT_FIELDS.keys()), redux_settings.lamps)
-            has_arcs = np.isin(list(ARC_FIELDS.keys()), redux_settings.lamps)
-            if metadata.imagetyp == "continuum" or has_cont.any() or has_arcs.all():
-                redux_settings.type = "continuum"
-                metadata.imagetyp = "continuum"
-            elif metadata.imagetyp == "arc" or (not has_cont.any() and has_arcs.any() and not has_arcs.all()):
-                redux_settings.type = "arc"
-                metadata.imagetyp = "arc"
-            else:
-                raise ValueError(f"unrecognized case for lamps: '{redux_settings.lamps}'.")
-        else:
-            redux_settings.type = "object"
     else:
         raise ValueError(f"unrecognized image type '{metadata.imagetyp}'")
 
     # locate input frame in file system
     redux_settings.input_path = metadata.path
     # define output paths
-    if redux_settings.type in CALIBRATION_TYPES+["arc", "continuum"]:
+    if redux_settings.type in CALIBRATION_TYPES:
         redux_settings.label = get_master_name(metadata.label, redux_settings.type, redux_settings.mjd)
         redux_settings.output_path = PRODUCT_PATH.format(
             path=config.LVM_SPECTRO_CALIB_PATH,
-            # use original label for intermediate calibration frames to
-            # avoid overwriting
             label="{label}",
             kind="{kind}"
         )
