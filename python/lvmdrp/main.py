@@ -97,6 +97,8 @@ def build_master(config, analogs_metadata, calib_metadata, redux_settings):
     # preprocess analog frames
     proc_images = []
     for analog_metadata in analogs_metadata:
+        # BUG: subtract or not subtract bias overscan? YES for everything
+        # BUG: best way to calculate gain for each amplifier: series of flats and fit the slope for sigma_counts vs sqrt(mean_counts)
         proc_image, flags = imageMethod.preprocRawFrame_drp(
             in_image=analog_metadata.path,
             channel=redux_settings.ccd,
@@ -111,6 +113,8 @@ def build_master(config, analogs_metadata, calib_metadata, redux_settings):
         analog_metadata.naxis2 = proc_image._header["NAXIS2"]
         analog_metadata.status += "FINISHED"
         analog_metadata.flags += flags
+        # TODO: implement stray light subtraction, consider frames with & without fibers? NO
+
         # only add those frames that were reduced correctly
         if analog_metadata.flags == "OK":
             proc_images.append(proc_image)

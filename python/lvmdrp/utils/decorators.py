@@ -18,6 +18,7 @@ from lvmdrp.utils.bitmask import QualityFlag
 #   - shape of the image
 #   - the image has structures
 #   - image stats (mean, median, std, etc)
+#   - continuum & arcs have the correct number of fibers
 # TODO: add validation flags according to the calling function, e.g.: {f.__name__: flags}
 # this way there will be no overwriting of the flags and the DRP should be able to track
 # where things go wrong
