@@ -119,25 +119,25 @@ def build_master(config, analogs_metadata, calib_metadata, redux_settings):
         if analog_metadata.flags == "OK":
             proc_images.append(proc_image)
     
+    master_bias = image.Image(data=np.zeros_like(proc_image._data))
+    master_dark = image.Image(data=np.zeros_like(proc_image._data))
+    master_flat = image.Image(data=np.ones_like(proc_image._data))
     # read master bias
-    if "bias" in calib_metadata and calib_metadata.get("bias"):
+    if "bias" in calib_metadata and calib_metadata["bias"]:
         master_bias = image.loadImage(calib_metadata["bias"].path)
-    else:
-        master_bias = image.Image(data=np.zeros_like(proc_image._data))
+    elif "bias" in calib_metadata:
         flags += "BAD_CALIBRATION_FRAMES"
     # read master dark
-    if "dark" in calib_metadata and calib_metadata.get("dark"):
+    if "dark" in calib_metadata and calib_metadata["dark"]:
         master_dark = image.loadImage(calib_metadata["dark"].path)
         master_dark._data *= analogs_metadata[0].exptime / calib_metadata["dark"].exptime
-    else:
-        master_dark = image.Image(data=np.zeros_like(proc_image._data))
+    elif "dark" in calib_metadata:
         flags += "BAD_CALIBRATION_FRAMES"
     # read master flat
-    if "flat" in calib_metadata and calib_metadata.get("flat"):
+    if "flat" in calib_metadata and calib_metadata["flat"]:
         master_flat = image.loadImage(calib_metadata["flat"].path)
         master_flat._data *= analogs_metadata[0].exptime / calib_metadata["flat"].exptime
-    else:
-        master_flat = image.Image(data=np.ones_like(proc_image._data))
+    elif "flat" in calib_metadata:
         flags += "BAD_CALIBRATION_FRAMES"
 
     # normalize in case of flat calibration
