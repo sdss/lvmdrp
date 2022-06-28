@@ -18,6 +18,7 @@ from lvmdrp import image
 from lvmdrp.core.constants import MASTER_CONFIG_PATH, FRAMES_PRIORITY, CALIBRATION_TYPES, PRODUCT_PATH
 from lvmdrp.utils import get_master_name
 from lvmdrp.utils.database import LAMP_NAMES, CalibrationFrames
+from lvmdrp.utils.decorators import validate_fibers
 from lvmdrp.utils.bitmask import QualityFlag, ReductionStatus
 from lvmdrp.utils.namespace import Loader
 from lvmdrp.functions import imageMethod, rssMethod
@@ -86,20 +87,27 @@ def setup_reduction(config, metadata):
     metadata.status += "IN_PROGRESS"
     return metadata, redux_settings
 
-def build_master(config, analogs_metadata, calib_metadata, redux_settings):
+# BUG: this function is doing too much! It should:
+#      * look for calibrated analogs
+#      * build a calibrated master
+#      * it should be its own script
+#      the DRP should handle the reduction of masters continuum and arc
+def build_master(config, analogs_metadata, calibs_metadata, redux_settings):
     # bypass if all analog frames are already part of a master
     if (np.asarray([_.master_id for _ in analogs_metadata]) != None).all():
         return None, analogs_metadata
     
-    # BUG: subtract bias and darks on individual frames
-    # take into account the exposure time
-    # in case of exposure time mismatch assume linearity
-    # preprocess analog frames
-    proc_images = []
-    for analog_metadata in analogs_metadata:
-        # BUG: subtract or not subtract bias overscan? YES for everything
+    calib_images = []
+    for analog_metadata, calib_metadata in zip(analogs_metadata, calibs_metadata):
         # BUG: best way to calculate gain for each amplifier: series of flats and fit the slope for sigma_counts vs sqrt(mean_counts)
-        proc_image, flags = imageMethod.preprocRawFrame_drp(
+        # decorate preprocessing if necessary
+        if redux_settings.type in ["continuum", "arc", "object"]:
+            preproc = validate_fibers(["BAD_FIBERS"], config, "out_image")(imageMethod.preprocRawFrame_drp)
+        else:
+            preproc = imageMethod.preprocRawFrame_drp
+        
+        # preprocess analog frames
+        proc_image, flags = preproc(
             in_image=analog_metadata.path,
             channel=redux_settings.ccd,
             out_image=redux_settings.output_path.format(label=analog_metadata.label, kind="pre"),
@@ -109,15 +117,16 @@ def build_master(config, analogs_metadata, calib_metadata, redux_settings):
             orientation="S,S,S,S",
             gain=config.GAIN, rdnoise=config.READ_NOISE, subtract_overscan=0
         )
+        # update analogs metadata
         analog_metadata.naxis1 = proc_image._header["NAXIS1"]
         analog_metadata.naxis2 = proc_image._header["NAXIS2"]
-        analog_metadata.status += "FINISHED"
         analog_metadata.flags += flags
-        # TODO: implement stray light subtraction, consider frames with & without fibers? NO
-
-        # only add those frames that were reduced correctly
-        if analog_metadata.flags == "OK":
-            proc_images.append(proc_image)
+        # only calibrate those frames that were reduced correctly
+        if analog_metadata.flags != "OK":
+            analog_metadata.status += "FAILED"
+            continue
+        else:
+        analog_metadata.status += "FINISHED"
     
     master_bias = image.Image(data=np.zeros_like(proc_image._data))
     master_dark = image.Image(data=np.zeros_like(proc_image._data))
@@ -142,17 +151,27 @@ def build_master(config, analogs_metadata, calib_metadata, redux_settings):
 
     # normalize in case of flat calibration
     if redux_settings.type == "flat":
-        proc_images = map(lambda proc_image: proc_image / np.median(proc_image._data), proc_images)
+            proc_image = proc_image / np.median(proc_image._data)
+
     # run basic calibration for each analog
-    calib_images = [(proc_image - master_dark - master_bias) / master_flat for proc_image in proc_images]
-    # build new master
-    new_master = image.combineImages(calib_images, method="median")
+        calib_image = (proc_image - master_dark - master_bias) / master_flat
+        calib_image.writeFitsData(redux_settings.output_path.format(label=analog_metadata.label, kind="calib"))
+        calib_images.append(calib_image)
+    
     # TODO: test and update database
     #   - test quality of master
     #   - add frame to master frames
     #   - add flags according to test results
     #   - add DB reference for preprocessed frames
     # BUG: set master & analogs reduction state before entering 'build_master' & put calibration state for both
+    # save calibrated analogs & build master
+    if len(calib_images) > 1:
+        new_master = image.combineImages(calib_images, method="median")
+        new_master.writeFitsData(redux_settings.master_path.format(kind="calib"))
+        status = ReductionStatus["FINISHED"]
+    else:
+        flags += "POORLY_DEFINED_MASTER"
+        status = ReductionStatus["FAILED"]
     # define new master metadata
     master_metadata = CalibrationFrames(
         mjd=analog_metadata.mjd,
@@ -168,10 +187,9 @@ def build_master(config, analogs_metadata, calib_metadata, redux_settings):
         path=redux_settings.master_path.format(kind="calib"),
         reduction_started=analog_metadata.reduction_started,
         reduction_finished=analog_metadata.reduction_finished,
-        status=ReductionStatus["FINISHED"],
+        status=status,
         flags=flags
     )
-    new_master.writeFitsData(master_metadata.path)
     return master_metadata, analogs_metadata
 
 def run_reduction_calib(config, metadata, calib_metadata, redux_settings):
