@@ -193,8 +193,13 @@ def build_master(config, analogs_metadata, calibs_metadata, redux_settings):
     return master_metadata, analogs_metadata
 
 def run_reduction_calib(config, metadata, calib_metadata, redux_settings):
+    # decorate preprocessing if necessary
+    if redux_settings.type in ["continuum", "arc", "object"]:
+        preproc = validate_fibers(["BAD_FIBERS"], config, "out_image")(imageMethod.preprocRawFrame_drp)
+    else:
+        preproc = imageMethod.preprocRawFrame_drp
     
-    target_frame, flags = imageMethod.preprocRawFrame_drp(
+    proc_image, flags = preproc(
         in_image=redux_settings.input_path,
         channel=redux_settings.ccd,
         out_image=redux_settings.output_path.format(kind="pre"),
@@ -204,33 +209,37 @@ def run_reduction_calib(config, metadata, calib_metadata, redux_settings):
         orientation="S,S,S,S",
         gain=config.GAIN, rdnoise=config.READ_NOISE
     )
-    calib_path = PRODUCT_PATH.format(
-        path=config.LVM_SPECTRO_CALIB_PATH,
-        label="{label}",
-        kind="calib"
-    )
-    if calib_metadata["bias"].LABEL is not None:
-        master_bias = image.loadImage(calib_path.format(label=calib_metadata["bias"].LABEL))
-    else:
-        master_bias = image.Image(data=np.zeros_like(target_frame._data))
+    master_bias = image.Image(data=np.zeros_like(proc_image._data))
+    master_dark = image.Image(data=np.zeros_like(proc_image._data))
+    master_flat = image.Image(data=np.ones_like(proc_image._data))
+    # read master bias
+    if "bias" in calib_metadata and calib_metadata["bias"]:
+        master_bias = image.loadImage(calib_metadata["bias"].path)
+    elif "bias" in calib_metadata:
         flags += "BAD_CALIBRATION_FRAMES"
-    if calib_metadata["dark"].LABEL is not None:
-        master_dark = image.loadImage(calib_path.format(label=calib_metadata["dark"].LABEL))
-    else:
-        master_dark = image.Image(data=np.zeros_like(target_frame._data))
+    # read master dark
+    if "dark" in calib_metadata and calib_metadata["dark"]:
+        master_dark = image.loadImage(calib_metadata["dark"].path)
+        master_dark._data *= metadata.exptime / calib_metadata["dark"].exptime
+    elif "dark" in calib_metadata:
         flags += "BAD_CALIBRATION_FRAMES"
-    if calib_metadata["flat"].LABEL is not None:
-        master_flat = image.loadImage(calib_path.format(label=calib_metadata["flat"].LABEL))
-    else:
-        master_flat = image.Image(data=np.ones_like(target_frame._data))
+    # read master flat
+    if "flat" in calib_metadata and calib_metadata["flat"]:
+        master_flat = image.loadImage(calib_metadata["flat"].path)
+        master_flat._data *= metadata.exptime / calib_metadata["flat"].exptime
+    elif "flat" in calib_metadata:
         flags += "BAD_CALIBRATION_FRAMES"
 
-    frame_calib = ((target_frame - master_bias._data.mean() - master_dark._data.mean())/master_flat)
-    frame_calib.writeFitsData(redux_settings.output_path.format(kind="calib"))
+    # normalize in case of flat calibration
+    if redux_settings.type == "flat":
+        proc_image = proc_image / np.median(proc_image._data)
 
-    metadata.naxis1 = frame_calib._header["NAXIS1"]
-    metadata.naxis2 = frame_calib._header["NAXIS2"]
-    metadata.status += "FINISHED"
+    # run basic calibration for each analog
+    calib_image = (proc_image - master_dark - master_bias) / master_flat
+    calib_image.writeFitsData(redux_settings.output_path.format(label=metadata.label, kind="calib"))
+
+    metadata.naxis1 = calib_image._header["NAXIS1"]
+    metadata.naxis2 = calib_image._header["NAXIS2"]
     metadata.flags += flags
     return metadata
 
