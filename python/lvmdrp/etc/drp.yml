@@ -77,6 +77,8 @@ GAIN: 2.5
 # preprocessing parameters
 # cosmic ray parameters
 # peak detection parameters
+NFIBERS: 41
+PEAKS_AT_COLUMN: 3696
 # 1st trace parameters
 # stray light parameters
 # 2nd trace parameters (FWHM)

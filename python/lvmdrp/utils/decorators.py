@@ -9,6 +9,7 @@
 import os
 
 from lvmdrp.utils.bitmask import QualityFlag
+from lvmdrp.core import image
 
 
 # TODO: implement a decorator for validating outputs
@@ -59,6 +60,24 @@ def missing_files(potential_flags, *par_files):
                 for flag in potential_flags:
                     flags += flag
                 return None, flags
+        return inner
+    return decorator
+
+def validate_fibers(potential_flags, config, target_frame):
+    def decorator(f):
+        def inner(*args, **kwargs):
+            # run decorated function
+            result, flags = f(*args, **kwargs)
+            # read output frame
+            frame = image.loadImage(kwargs.get(target_frame))
+            # run peak detection
+            cross = frame.getSlice(slice=config.PEAKS_AT_COLUMN, axis="y")
+            peaks, _, _ = cross.findPeaks(npeaks=config.NFIBERS)
+            # compare output number of fibers with expected one
+            if len(peaks) != config.NFIBERS:
+                for flag in potential_flags:
+                    flags += flag
+            return result, flags
         return inner
     return decorator
 
