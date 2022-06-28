@@ -69,6 +69,7 @@ class QualityFlag(IntFlag):
     BAD_FRAME_SHAPE = auto()
     # during calibration flags
     BAD_CALIBRATION_FRAMES = auto()
+    POORLY_DEFINED_MASTER = auto()
     BAD_FIBERS = auto()
     HAS_STRUCTURE = auto()
     BAD_EXTRACTION = auto()

@@ -290,12 +290,12 @@ def put_redux_state(metadata):
     try:
         if isinstance(metadata, (RawFrames, CalibrationFrames)):
             if metadata.status == "IN_PROGRESS": metadata.reduction_started = dt.datetime.now()
-            elif metadata.status == "FINISHED": metadata.reduction_finished = dt.datetime.now()
+            elif metadata.status in ["FINISHED", "FAILED"]: metadata.reduction_finished = dt.datetime.now()
             metadata.save()
         elif isinstance(metadata, list):
             for md in metadata:
                 if md.status == "IN_PROGRESS": md.reduction_started = dt.datetime.now()
-                elif md.status == "FINISHED": md.reduction_finished = dt.datetime.now()
+                elif md.status in ["FINISHED", "FAILED"]: md.reduction_finished = dt.datetime.now()
                 md.save()
         else:
             raise ValueError(f"unknown metadata type '{type(metadata)}'")
@@ -305,7 +305,7 @@ def put_redux_state(metadata):
 
 def add_master(master_metadata, analogs_metadata):
     if master_metadata.status == "IN_PROGRESS": master_metadata.reduction_started = dt.datetime.now()
-    elif master_metadata.status == "FINISHED": master_metadata.reduction_finished = dt.datetime.now()
+    elif master_metadata.status in ["FINISHED", "FAILED"]: master_metadata.reduction_finished = dt.datetime.now()
     try:
         master_metadata.save()
         for analog_metadata in analogs_metadata:
