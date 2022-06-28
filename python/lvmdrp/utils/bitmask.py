@@ -35,6 +35,19 @@ class ReductionStatus(IntFlag):
             except:
                 raise# TypeError(f"unsupported operand type(s) for +: '{type(self)}' and '{type(flag)}'")
 
+    def __ne__(self, flag):
+        if isinstance(flag, self.__class__):
+            return self.value != flag.value
+        elif isinstance(flag, str):
+            return self.value != self.__class__[flag.upper()].value
+        elif isinstance(flag, int):
+            return self.value != self.__class__(flag)
+        else:
+            try:
+                return super().__ne__(flag)
+            except:
+                raise# TypeError(f"unsupported operand type(s) for +: '{type(self)}' and '{type(flag)}'")
+
     def __add__(self, flag):
         if isinstance(flag, self.__class__):
             return (self & 0) | flag
@@ -88,6 +101,19 @@ class QualityFlag(IntFlag):
         else:
             try:
                 return super().__eq__(flag)
+            except:
+                raise# TypeError(f"unsupported operand type(s) for +: '{type(self)}' and '{type(flag)}'")
+
+    def __ne__(self, flag):
+        if isinstance(flag, self.__class__):
+            return self.value != flag.value
+        elif isinstance(flag, str):
+            return self.value != self.__class__[flag.upper()].value
+        elif isinstance(flag, int):
+            return self.value != self.__class__(flag)
+        else:
+            try:
+                return super().__ne__(flag)
             except:
                 raise# TypeError(f"unsupported operand type(s) for +: '{type(self)}' and '{type(flag)}'")
 
