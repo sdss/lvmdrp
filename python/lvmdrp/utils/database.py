@@ -265,13 +265,12 @@ def get_calib_metadata(metadata):
         return calib_frames
     # handle unrecognized frame type
 
-    # BUG: change sorting to use 'mjd' instead of 'obstime', since master will be represented by that parameter
     for calib_type in frame_needs:
         try:
             query = CalibrationFrames.select().where(
                 (CalibrationFrames.imagetyp == calib_type) &
                 (CalibrationFrames.ccd == metadata.ccd)
-            ).order_by(fn.ABS(metadata.obstime - CalibrationFrames.obstime).asc())
+            ).order_by(fn.ABS(metadata.mjd - CalibrationFrames.mjd).asc())
         except Error as e:
             print(f"{calib_type}: {e}")
         
