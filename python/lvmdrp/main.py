@@ -44,6 +44,12 @@ def parse_arguments(config, args=None):
     # replace config parameters with cmdline arguments
     return config, cmd_args
 
+# BUG: redux settings should contain information about the whole reduction process
+#   - which steps to carry on
+#   - which parameters should be used in each step
+#   - input and output paths well defined
+#   - write current run config file (read only permissions)
+#   - add possibility to run in dry mode, only producing the run config file
 def setup_reduction(config, metadata):
     # create a mapping of the target frame and the metadata/calibration frames needed to run the calibration
     redux_settings = Namespace()
@@ -83,8 +89,6 @@ def setup_reduction(config, metadata):
             label=redux_settings.label,
             kind="{kind}"
         )
-    # update reduction status
-    metadata.status += "IN_PROGRESS"
     return metadata, redux_settings
 
 # BUG: this function is doing too much! It should:
@@ -92,71 +96,13 @@ def setup_reduction(config, metadata):
 #      * build a calibrated master
 #      * it should be its own script
 #      the DRP should handle the reduction of masters continuum and arc
-def build_master(config, analogs_metadata, calibs_metadata, redux_settings):
-    # bypass if all analog frames are already part of a master
-    if (np.asarray([_.master_id for _ in analogs_metadata]) != None).all():
-        return None, analogs_metadata
-    
+def build_master(config, analogs_metadata, redux_settings):
     calib_images = []
-    for analog_metadata, calib_metadata in zip(analogs_metadata, calibs_metadata):
+    flags = QualityFlag["OK"]
+    for analog_metadata in analogs_metadata:
         # BUG: best way to calculate gain for each amplifier: series of flats and fit the slope for sigma_counts vs sqrt(mean_counts)
-        # decorate preprocessing if necessary
-        if redux_settings.type in ["continuum", "arc", "object"]:
-            preproc = validate_fibers(["BAD_FIBERS"], config, "out_image")(imageMethod.preprocRawFrame_drp)
-        else:
-            preproc = imageMethod.preprocRawFrame_drp
-        
-        # preprocess analog frames
-        proc_image, flags = preproc(
-            in_image=analog_metadata.path,
-            channel=redux_settings.ccd,
-            out_image=redux_settings.output_path.format(label=analog_metadata.label, kind="pre"),
-            boundary_x="1,2040",
-            boundary_y="1,2040",
-            positions="00,10,01,11",
-            orientation="S,S,S,S",
-            gain=config.GAIN, rdnoise=config.READ_NOISE, subtract_overscan=0
-        )
-        # update analogs metadata
-        analog_metadata.naxis1 = proc_image._header["NAXIS1"]
-        analog_metadata.naxis2 = proc_image._header["NAXIS2"]
-        analog_metadata.flags += flags
-        # only calibrate those frames that were reduced correctly
-        if analog_metadata.flags != "OK":
-            analog_metadata.status += "FAILED"
-            continue
-        else:
-        analog_metadata.status += "FINISHED"
-    
-    master_bias = image.Image(data=np.zeros_like(proc_image._data))
-    master_dark = image.Image(data=np.zeros_like(proc_image._data))
-    master_flat = image.Image(data=np.ones_like(proc_image._data))
-    # read master bias
-    if "bias" in calib_metadata and calib_metadata["bias"]:
-        master_bias = image.loadImage(calib_metadata["bias"].path)
-    elif "bias" in calib_metadata:
-        flags += "BAD_CALIBRATION_FRAMES"
-    # read master dark
-    if "dark" in calib_metadata and calib_metadata["dark"]:
-        master_dark = image.loadImage(calib_metadata["dark"].path)
-        master_dark._data *= analogs_metadata[0].exptime / calib_metadata["dark"].exptime
-    elif "dark" in calib_metadata:
-        flags += "BAD_CALIBRATION_FRAMES"
-    # read master flat
-    if "flat" in calib_metadata and calib_metadata["flat"]:
-        master_flat = image.loadImage(calib_metadata["flat"].path)
-        master_flat._data *= analogs_metadata[0].exptime / calib_metadata["flat"].exptime
-    elif "flat" in calib_metadata:
-        flags += "BAD_CALIBRATION_FRAMES"
-
-    # normalize in case of flat calibration
-    if redux_settings.type == "flat":
-            proc_image = proc_image / np.median(proc_image._data)
-
-    # run basic calibration for each analog
-        calib_image = (proc_image - master_dark - master_bias) / master_flat
-        calib_image.writeFitsData(redux_settings.output_path.format(label=analog_metadata.label, kind="calib"))
-        calib_images.append(calib_image)
+        calib_images.append(image.loadImage(redux_settings.output_path.format(label=analog_metadata.label, kind="calib")))
+        flags += analog_metadata.flags
     
     # TODO: test and update database
     #   - test quality of master
@@ -190,7 +136,7 @@ def build_master(config, analogs_metadata, calibs_metadata, redux_settings):
         status=status,
         flags=flags
     )
-    return master_metadata, analogs_metadata
+    return master_metadata
 
 def run_reduction_calib(config, metadata, calib_metadata, redux_settings):
     # decorate preprocessing if necessary
@@ -202,7 +148,7 @@ def run_reduction_calib(config, metadata, calib_metadata, redux_settings):
     proc_image, flags = preproc(
         in_image=redux_settings.input_path,
         channel=redux_settings.ccd,
-        out_image=redux_settings.output_path.format(kind="pre"),
+        out_image=redux_settings.output_path.format(label=metadata.label, kind="pre"),
         boundary_x="1,2040",
         boundary_y="1,2040",
         positions="00,10,01,11",
