@@ -217,6 +217,7 @@ def get_analogs_metadata(metadata):
     if metadata.imagetyp in CALIBRATION_TYPES and metadata.master_id is None:
         try:
             query = RawFrames.select().where(
+                (RawFrames.master_id == None) &
                 (RawFrames.imagetyp == metadata.imagetyp) &
                 (RawFrames.ccd == metadata.ccd) &
                 (RawFrames.mjd == metadata.mjd) &
@@ -286,7 +287,17 @@ def get_calib_metadata(metadata):
             calib_frames[calib_type] = calib_frame
     return calib_frames
 
-def put_redux_state(metadata):
+def put_redux_state(metadata, status=None):
+    if status is not None:
+        if isinstance(status, str):
+            metadata.status = ReductionStatus[status]
+        elif isinstance(status, int):
+            metadata.status = ReductionStatus(status)
+        elif isinstance(status, ReductionStatus):
+            metadata.status = status
+        else:
+            ValueError(f"unknown status type '{type(status)}'")
+
     try:
         if isinstance(metadata, (RawFrames, CalibrationFrames)):
             if metadata.status == "IN_PROGRESS": metadata.reduction_started = dt.datetime.now()
@@ -303,7 +314,17 @@ def put_redux_state(metadata):
         print(e)
     return metadata
 
-def add_master(master_metadata, analogs_metadata):
+def add_master(master_metadata, analogs_metadata, status=None):
+    if status is not None:
+        if isinstance(status, str):
+            master_metadata.status = ReductionStatus[status]
+        elif isinstance(status, int):
+            master_metadata.status = ReductionStatus(status)
+        elif isinstance(status, ReductionStatus):
+            master_metadata.status = status
+        else:
+            ValueError(f"unknown status type '{type(status)}'")
+    
     if master_metadata.status == "IN_PROGRESS": master_metadata.reduction_started = dt.datetime.now()
     elif master_metadata.status in ["FINISHED", "FAILED"]: master_metadata.reduction_finished = dt.datetime.now()
     try:
