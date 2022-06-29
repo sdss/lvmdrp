@@ -96,19 +96,29 @@ class StatusMixin(Model):
     status = StatusField(default=ReductionStatus["RAW"])
     flags = FlagsField(default=QualityFlag["OK"])
 
-class CalibrationFrames(BaseModel, BasicMixin, StatusMixin):
+# TODO:
+#   - turn this into a master calibration frame
+#   - store normal calibration frames in 'lvm_frames' table
+class CalibrationFrames(BaseModel, StatusMixin):
     id = IntegerField(primary_key=True)
+    is_master = BooleanField(default=False)
 
-class RawFrames(BaseModel, BasicMixin, LabMixin, ArcMixin, ContMixin, StatusMixin):
+    class Meta:
+        table_name = "calibration_frames"
+
+class LVMFrames(BaseModel, BasicMixin, LabMixin, ArcMixin, ContMixin, StatusMixin):
     id = IntegerField(primary_key=True)
-    master = ForeignKeyField(CalibrationFrames, backref="raws", null=True)
+    calib = ForeignKeyField(CalibrationFrames, backref="frames", null=True)
+
+    class Meta:
+        table_name = "lvm_frames"
 
 # define auto columns
-AUTO_COLUMNS = ["id", "master", "datetime"]
+AUTO_COLUMNS = ["id", "calib", "datetime"]
 # define mandatory columns
 MANDATORY_COLUMNS = [name for name in BasicMixin._meta.columns if name not in AUTO_COLUMNS]
 # define raw columns excluding auto columns
-RAW_COLUMNS = [name for name in RawFrames._meta.columns if name not in AUTO_COLUMNS]
+FRAME_COLUMNS = [name for name in LVMFrames._meta.columns if name not in AUTO_COLUMNS]
 # define arc/continuum names using peewee model definitions
 ARC_NAMES = list(ArcMixin._meta.columns.keys())
 CON_NAMES = list(ContMixin._meta.columns.keys())
@@ -122,7 +132,7 @@ def create_or_connect_db(config):
     try:
         db.init(os.path.join(CONFIG_PATH, config.LVM_DB_NAME))
         db.connect()
-        db.create_tables([RawFrames, CalibrationFrames])
+        db.create_tables([LVMFrames, CalibrationFrames])
     except Error as e:
         print(e)
     return db
@@ -131,7 +141,7 @@ def delete_tables_db(config):
     try:
         db.init(os.path.join(CONFIG_PATH, config.LVM_DB_NAME))
         db.connect()
-        db.drop_tables([RawFrames, CalibrationFrames])
+        db.drop_tables([LVMFrames, CalibrationFrames])
     except Error as e:
         print(e)
     return None
@@ -148,7 +158,7 @@ def record_db(config, target_paths=None, ignore_cache=False):
         with db.atomic():
             for i, batch in enumerate(chunked(metadata, n=SQLITE_MAX_VARIABLE_NUMBER//len(metadata[0]))):
                 try:
-                    RawFrames.insert_many(batch).execute()
+                    LVMFrames.insert_many(batch).execute()
                 except Error as e:
                     print(e)
                     print(f"in chunk={i}, {batch}")
@@ -192,7 +202,7 @@ def record_db(config, target_paths=None, ignore_cache=False):
                         header["STATUS"] = ReductionStatus["RAW"]
                         header["FLAGS"] = QualityFlag["OK"]
 
-                        record = {key: header.get(key, RawFrames._meta.columns[key].default) for key in RAW_COLUMNS}
+                        record = {key: header.get(key, LVMFrames._meta.columns[key].default) for key in FRAME_COLUMNS}
                         # update status in case there are missing metadata with the exception of those fields that are allowed to be NULL
                         nonnull_values = [record[name] for name in MANDATORY_COLUMNS]
                         record["flags"] += "MISSING_METADATA" if None in nonnull_values else "OK"
@@ -204,20 +214,19 @@ def record_db(config, target_paths=None, ignore_cache=False):
         with db.atomic():
             for i, batch in enumerate(chunked(metadata, n=SQLITE_MAX_VARIABLE_NUMBER//len(metadata[0]))):
                 try:
-                    RawFrames.insert_many(batch).execute()
+                    LVMFrames.insert_many(batch).execute()
                 except Error as e:
                     print(e)
                     print(f"in chunk={i}, {batch}")
     return None
 
 def get_raws_metadata():
-    new_frames = []
     try:
-        priority = Case(RawFrames.imagetyp, tuple((frame_type, i) for i, frame_type in enumerate(FRAMES_PRIORITY)))
-        query = RawFrames.select().where(
-            (RawFrames.status == 1) &
-            (RawFrames.flags == 1) &
-            (RawFrames.imagetyp << FRAMES_PRIORITY)
+        priority = Case(LVMFrames.imagetyp, tuple((frame_type, i) for i, frame_type in enumerate(FRAMES_PRIORITY)))
+        query = LVMFrames.select().where(
+            (LVMFrames.status == ReductionStatus["RAW"]) &
+            (LVMFrames.flags == QualityFlag["OK"]) &
+            (LVMFrames.imagetyp << FRAMES_PRIORITY)
         ).order_by(priority)
     except Error as e:
         print(e)
@@ -225,17 +234,30 @@ def get_raws_metadata():
     new_frames = [new_frame for new_frame in query]
     return new_frames
 
+def get_calib_metadata():
+    try:
+        query = LVMFrames.select().where(
+            (ReductionStatus["PREPROCESSED"] << LVMFrames.status) &
+            (LVMFrames.flags == QualityFlag["OK"]) &
+            (LVMFrames.imagetyp << CALIBRATION_TYPES)
+        )
+    except Error as e:
+        print(e)
+    
+    calibration_metadata = [calib_metadata for calib_metadata in query]
+    return calibration_metadata
+
 def get_analogs_metadata(metadata):
     # define empty metadata in case current frame has already a master
     analogs_metadata = []
-    if metadata.imagetyp in CALIBRATION_TYPES and metadata.master_id is None:
+    if metadata.imagetyp in CALIBRATION_TYPES and metadata.calib_id is None:
         try:
-            query = RawFrames.select().where(
-                (RawFrames.master_id == None) &
-                (RawFrames.imagetyp == metadata.imagetyp) &
-                (RawFrames.ccd == metadata.ccd) &
-                (RawFrames.mjd == metadata.mjd) &
-                (RawFrames.exptime == metadata.exptime)
+            query = LVMFrames.select().where(
+                (LVMFrames.calib_id == None) &
+                (LVMFrames.imagetyp == metadata.imagetyp) &
+                (LVMFrames.ccd == metadata.ccd) &
+                (LVMFrames.mjd == metadata.mjd) &
+                (LVMFrames.exptime == metadata.exptime)
             )
         except Error as e:
             print(f"{metadata.imagetyp}: {e}")
@@ -243,7 +265,7 @@ def get_analogs_metadata(metadata):
     analogs_metadata = [analog_metadata for analog_metadata in query]
     return analogs_metadata
 
-def get_calib_metadata(metadata):
+def get_master_metadata(metadata):
     """finds and retrieve calibration frames given a target frame
     
     Depending on the type of the target frame, a set of calibration
@@ -305,9 +327,8 @@ def put_redux_state(metadata, status=None):
             metadata.status = status
         else:
             ValueError(f"unknown status type '{type(status)}'")
-
     try:
-        if isinstance(metadata, (RawFrames, CalibrationFrames)):
+        if isinstance(metadata, (LVMFrames, CalibrationFrames)):
             if metadata.status == "IN_PROGRESS": metadata.reduction_started = dt.datetime.now()
             elif metadata.status in ["FINISHED", "FAILED"]: metadata.reduction_finished = dt.datetime.now()
             metadata.save()
@@ -321,6 +342,26 @@ def put_redux_state(metadata, status=None):
     except Error as e:
         print(e)
     return metadata
+
+def add_calib(calib_metadata, status=None):
+    if status is not None:
+        if isinstance(status, str):
+            calib_metadata.status = ReductionStatus[status]
+        elif isinstance(status, int):
+            calib_metadata.status = ReductionStatus(status)
+        elif isinstance(status, ReductionStatus):
+            calib_metadata.status = status
+        else:
+            ValueError(f"unknown status type '{type(status)}'")
+    
+    if calib_metadata.status == "IN_PROGRESS": calib_metadata.reduction_started = dt.datetime.now()
+    elif calib_metadata.status in ["FINISHED", "FAILED"]: calib_metadata.reduction_finished = dt.datetime.now()
+    try:
+        calib_metadata.save()
+    except Error as e:
+        print(e)
+        print(calib_metadata)
+    return calib_metadata
 
 def add_master(master_metadata, analogs_metadata, status=None):
     if status is not None:
@@ -338,12 +379,12 @@ def add_master(master_metadata, analogs_metadata, status=None):
     try:
         master_metadata.save()
         for analog_metadata in analogs_metadata:
-            analog_metadata.master_id = master_metadata.id
+            analog_metadata.calib_id = master_metadata.id
             analog_metadata.save()
     except Error as e:
         print(e)
         print(master_metadata)
-    return None
+    return master_metadata
 
 
 if __name__ == "__main__":
@@ -355,4 +396,4 @@ if __name__ == "__main__":
     
     new_frames = get_raws_metadata()
     for new_frame in new_frames:
-        print(new_frame.label, new_frame.flags)
+        print(new_frame.label, new_frame.flags.get_name())
