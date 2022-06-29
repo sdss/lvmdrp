@@ -9,11 +9,24 @@
 from enum import IntFlag, auto
 
 
+# TODO:
+#   - add flag for each step in the reduction, for example: "calib", "cosmic", "stray", etc.
 class ReductionStatus(IntFlag):
+    # mutually exclusive bits
     RAW = auto()
     IN_PROGRESS = auto()
     FINISHED = auto()
     FAILED = auto()
+    # completed reduction steps
+    PREPROCESSED = auto()
+    CALIBRATED = auto()
+    COSMIC_CLEAN = auto()
+    STRAY_CLEAN = auto()
+    FIBERS_FOUND = auto()
+    FIBERS_TRACED = auto()
+    SPECTRA_EXTRACTED = auto()
+    WAVELENGTH_SOLVED = auto()
+    WAVELENGTH_RESAMPLED = auto()
     
     def _as_bitmask(self):
         fmt_string = "{:0" + str(len(self.__class__.__members__)) + "b}"
