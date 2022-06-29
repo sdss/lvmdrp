@@ -31,6 +31,24 @@ SQLITE_MAX_VARIABLE_NUMBER = 32766
 
 db = SqliteDatabase(None)
 
+class FlagsField(IntegerField):
+    def db_value(self, flags_val):
+        if not isinstance(flags_val, QualityFlag):
+            raise TypeError(f"Wrong type '{type(flags_val)}', '{QualityFlag}' instance expected")
+        return super().adapt(flags_val.value)
+
+    def python_value(self, db_val):
+        return QualityFlag(db_val)
+
+class StatusField(IntegerField):
+    def db_value(self, status_val):
+        if not isinstance(status_val, ReductionStatus):
+            raise TypeError(f"Wrong type '{type(status_val)}', '{ReductionStatus}' instance expected")
+        return super().adapt(status_val.value)
+
+    def python_value(self, db_val):
+        return ReductionStatus(db_val)
+
 class BaseModel(Model):
     class Meta:
         database = db
@@ -75,8 +93,8 @@ class ContMixin(Model):
 class StatusMixin(Model):
     reduction_started = DateTimeField(null=True)
     reduction_finished = DateTimeField(null=True)
-    status = IntegerField(default=ReductionStatus["RAW"])
-    flags = IntegerField(default=QualityFlag["OK"])
+    status = StatusField(default=ReductionStatus["RAW"])
+    flags = FlagsField(default=QualityFlag["OK"])
 
 class CalibrationFrames(BaseModel, BasicMixin, StatusMixin):
     id = IntegerField(primary_key=True)
@@ -204,11 +222,7 @@ def get_raws_metadata():
     except Error as e:
         print(e)
     
-    # BUG: define custom fields for flags
-    for new_frame in query:
-        new_frame.status = ReductionStatus(new_frame.status)
-        new_frame.flags = QualityFlag(new_frame.flags)
-        new_frames.append(new_frame)
+    new_frames = [new_frame for new_frame in query]
     return new_frames
 
 def get_analogs_metadata(metadata):
@@ -226,11 +240,7 @@ def get_analogs_metadata(metadata):
         except Error as e:
             print(f"{metadata.imagetyp}: {e}")
         
-        # set status in progress
-        for analog_metadata in query:
-            analog_metadata.status = ReductionStatus["IN_PROGRESS"]
-            analog_metadata.flags = QualityFlag(metadata.flags)
-            analogs_metadata.append(analog_metadata)
+    analogs_metadata = [analog_metadata for analog_metadata in query]
     return analogs_metadata
 
 def get_calib_metadata(metadata):
@@ -281,9 +291,7 @@ def get_calib_metadata(metadata):
         #      Should retrieve all possible calibration frames & decide which one is the best based on
         #      quality
         calib_frame = query.get_or_none()
-        if calib_frame:
-            calib_frame.status = ReductionStatus(calib_frame.status)
-            calib_frame.flags = QualityFlag(calib_frame.flags)
+        if calib_frame is not None:
             calib_frames[calib_type] = calib_frame
     return calib_frames
 
