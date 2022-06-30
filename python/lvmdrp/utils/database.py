@@ -227,8 +227,8 @@ def get_raws_metadata():
     try:
         priority = Case(LVMFrames.imagetyp, tuple((frame_type, i) for i, frame_type in enumerate(FRAMES_PRIORITY)))
         query = LVMFrames.select().where(
-            (LVMFrames.status == ReductionStatus["RAW"]) &
-            (LVMFrames.flags == QualityFlag["OK"]) &
+            (LVMFrames.status == ReductionStatus.RAW) &
+            (LVMFrames.flags == QualityFlag.OK) &
             (LVMFrames.imagetyp << FRAMES_PRIORITY)
         ).order_by(priority)
     except Error as e:
@@ -239,10 +239,9 @@ def get_raws_metadata():
 
 def get_calib_metadata():
     try:
-        query = LVMFrames.select().where(
-            (ReductionStatus["PREPROCESSED"] << LVMFrames.status) &
-            (LVMFrames.flags == QualityFlag["OK"]) &
-            (LVMFrames.imagetyp << CALIBRATION_TYPES)
+        query = CalibrationFrames.select().where(
+            (~CalibrationFrames.is_master) &
+            (CalibrationFrames.flags == QualityFlag.OK)
         )
     except Error as e:
         print(e)
@@ -253,10 +252,11 @@ def get_calib_metadata():
 def get_analogs_metadata(metadata):
     # define empty metadata in case current frame has already a master
     analogs_metadata = []
-    if metadata.imagetyp in CALIBRATION_TYPES and metadata.calib_id is None:
+    if metadata.imagetyp in CALIBRATION_TYPES and not metadata.calib.is_master:
         try:
             query = LVMFrames.select().where(
-                (LVMFrames.calib_id == None) &
+                (LVMFrames.status == ReductionStatus.PREPROCESSED|ReductionStatus.CALIBRATED|ReductionStatus.FINISHED) &
+                (LVMFrames.flags == QualityFlag.OK) &
                 (LVMFrames.imagetyp == metadata.imagetyp) &
                 (LVMFrames.ccd == metadata.ccd) &
                 (LVMFrames.mjd == metadata.mjd) &
@@ -264,7 +264,8 @@ def get_analogs_metadata(metadata):
             )
         except Error as e:
             print(f"{metadata.imagetyp}: {e}")
-        
+    else:
+        return analogs_metadata
     analogs_metadata = [analog_metadata for analog_metadata in query]
     return analogs_metadata
 
@@ -323,22 +324,22 @@ def get_master_metadata(metadata):
 def put_redux_state(metadata, status=None):
     if status is not None:
         if isinstance(status, str):
-            metadata.status = ReductionStatus[status]
+            metadata.status += ReductionStatus[status]
         elif isinstance(status, int):
-            metadata.status = ReductionStatus(status)
+            metadata.status += ReductionStatus(status)
         elif isinstance(status, ReductionStatus):
-            metadata.status = status
+            metadata.status += status
         else:
             ValueError(f"unknown status type '{type(status)}'")
     try:
         if isinstance(metadata, (LVMFrames, CalibrationFrames)):
-            if metadata.status == "IN_PROGRESS": metadata.reduction_started = dt.datetime.now()
-            elif metadata.status in ["FINISHED", "FAILED"]: metadata.reduction_finished = dt.datetime.now()
+            if "IN_PROGRESS" in metadata.status: metadata.reduction_started = dt.datetime.now()
+            elif "FINISHED" in metadata.status or "FAILED" in metadata.status: metadata.reduction_finished = dt.datetime.now()
             metadata.save()
         elif isinstance(metadata, list):
             for md in metadata:
-                if md.status == "IN_PROGRESS": md.reduction_started = dt.datetime.now()
-                elif md.status in ["FINISHED", "FAILED"]: md.reduction_finished = dt.datetime.now()
+                if "IN_PROGRESS" in md.status: md.reduction_started = dt.datetime.now()
+                elif "FINISHED" in md.status or "FAILED" in md.status: md.reduction_finished = dt.datetime.now()
                 md.save()
         else:
             raise ValueError(f"unknown metadata type '{type(metadata)}'")
@@ -346,21 +347,23 @@ def put_redux_state(metadata, status=None):
         print(e)
     return metadata
 
-def add_calib(calib_metadata, status=None):
+def add_calib(calib_metadata, raw_metadata, status=None):
     if status is not None:
         if isinstance(status, str):
-            calib_metadata.status = ReductionStatus[status]
+            calib_metadata.status += ReductionStatus[status]
         elif isinstance(status, int):
-            calib_metadata.status = ReductionStatus(status)
+            calib_metadata.status += ReductionStatus(status)
         elif isinstance(status, ReductionStatus):
-            calib_metadata.status = status
+            calib_metadata.status += status
         else:
             ValueError(f"unknown status type '{type(status)}'")
     
     if calib_metadata.status == "IN_PROGRESS": calib_metadata.reduction_started = dt.datetime.now()
-    elif calib_metadata.status in ["FINISHED", "FAILED"]: calib_metadata.reduction_finished = dt.datetime.now()
+    elif "FINISHED" in calib_metadata.status or "FAILED" in calib_metadata.status: calib_metadata.reduction_finished = dt.datetime.now()
     try:
         calib_metadata.save()
+        raw_metadata.calib_id = calib_metadata.id
+        raw_metadata.save()
     except Error as e:
         print(e)
         print(calib_metadata)
@@ -369,21 +372,21 @@ def add_calib(calib_metadata, status=None):
 def add_master(master_metadata, analogs_metadata, status=None):
     if status is not None:
         if isinstance(status, str):
-            master_metadata.status = ReductionStatus[status]
+            master_metadata.status += ReductionStatus[status]
         elif isinstance(status, int):
-            master_metadata.status = ReductionStatus(status)
+            master_metadata.status += ReductionStatus(status)
         elif isinstance(status, ReductionStatus):
-            master_metadata.status = status
+            master_metadata.status += status
         else:
             ValueError(f"unknown status type '{type(status)}'")
     
     if master_metadata.status == "IN_PROGRESS": master_metadata.reduction_started = dt.datetime.now()
-    elif master_metadata.status in ["FINISHED", "FAILED"]: master_metadata.reduction_finished = dt.datetime.now()
+    elif "FINISHED" in master_metadata.status or "FAILED" in master_metadata.status: master_metadata.reduction_finished = dt.datetime.now()
     try:
         master_metadata.save()
         for analog_metadata in analogs_metadata:
             analog_metadata.calib_id = master_metadata.id
-            analog_metadata.save()
+            analog_metadata.update()
     except Error as e:
         print(e)
         print(master_metadata)
