@@ -304,10 +304,13 @@ def get_master_metadata(metadata):
 
     for calib_type in frame_needs:
         try:
-            query = CalibrationFrames.select().where(
-                (CalibrationFrames.imagetyp == calib_type) &
-                (CalibrationFrames.ccd == metadata.ccd)
-            ).order_by(fn.ABS(metadata.mjd - CalibrationFrames.mjd).asc())
+            query = LVMFrames.select().where(
+                (LVMFrames.status == ReductionStatus.PREPROCESSED|ReductionStatus.CALIBRATED|ReductionStatus.FINISHED) &
+                (LVMFrames.flags == QualityFlag.OK) &
+                (LVMFrames.imagetyp == calib_type) &
+                (LVMFrames.ccd == metadata.ccd) &
+                (LVMFrames.calib_id != None)
+            ).order_by(fn.ABS(metadata.mjd - LVMFrames.mjd).asc())
         except Error as e:
             print(f"{calib_type}: {e}")
         
@@ -318,7 +321,7 @@ def get_master_metadata(metadata):
         #      quality
         calib_frame = query.get_or_none()
         if calib_frame is not None:
-            calib_frames[calib_type] = calib_frame
+            calib_frames[calib_type] = calib_frame.calib
     return calib_frames
 
 def put_redux_state(metadata, status=None):
