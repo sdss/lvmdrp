@@ -7,7 +7,15 @@
 # @Copyright: SDSS-V LVM
 
 from enum import IntFlag, auto
+from copy import copy
 
+
+class classproperty(object):
+    """taken from https://bit.ly/3yrErQr"""
+    def __init__(self, f):
+        self.f = f
+    def __get__(self, obj, owner):
+        return self.f(owner)
 
 # TODO:
 #   - add flag for each step in the reduction, for example: "calib", "cosmic", "stray", etc.
@@ -27,53 +35,93 @@ class ReductionStatus(IntFlag):
     SPECTRA_EXTRACTED = auto()
     WAVELENGTH_SOLVED = auto()
     WAVELENGTH_RESAMPLED = auto()
+
+    @classproperty
+    def MUTUALLY_EXCLUSIVE_BITS(cls):
+        return ("RAW", "IN_PROGRESS", "FINISHED", "FAILED")
     
     def _as_bitmask(self):
         fmt_string = "{:0" + str(len(self.__class__.__members__)) + "b}"
         return fmt_string.format(self.value)
     
+    def get_name(self):
+        if self.name is not None:
+            return self.name
+        else:
+            bits = list(map(int, self._as_bitmask()))[::-1]
+            names = list(self.__class__.__members__.keys())
+            return ",".join([names[i] for i in range(len(names)) if bits[i]])
+
     def __str__(self):
         return f"{self.value}"
 
     def __eq__(self, flag):
         if isinstance(flag, self.__class__):
-            return self.value == flag.value
+            pass
         elif isinstance(flag, str):
-            return self.value == self.__class__[flag.upper()].value
+            flag = self.__class__[flag.upper()]
         elif isinstance(flag, int):
-            return self.value == self.__class__(flag)
+            flag = self.__class__(flag)
         else:
             try:
                 return super().__eq__(flag)
             except:
-                raise# TypeError(f"unsupported operand type(s) for +: '{type(self)}' and '{type(flag)}'")
+                raise
+        
+        return self.value == flag.value
 
     def __ne__(self, flag):
         if isinstance(flag, self.__class__):
-            return self.value != flag.value
+            pass
         elif isinstance(flag, str):
-            return self.value != self.__class__[flag.upper()].value
+            flag = self.__class__[flag.upper()]
         elif isinstance(flag, int):
-            return self.value != self.__class__(flag)
+            flag = self.__class__(flag)
         else:
             try:
                 return super().__ne__(flag)
             except:
-                raise# TypeError(f"unsupported operand type(s) for +: '{type(self)}' and '{type(flag)}'")
+                raise
+        
+        return self.value != flag.value
 
     def __add__(self, flag):
         if isinstance(flag, self.__class__):
-            return (self & 0) | flag
+            pass
         elif isinstance(flag, str):
-            return (self & 0) | self.__class__[flag.upper()]
+            flag = self.__class__[flag.upper()]
         elif isinstance(flag, int):
-            return (self & 0) | self.__class__(flag)
+            flag = self.__class__(flag)
         else:
-            raise TypeError(f"unsupported operand type(s) for +: '{type(self)}' and '{type(flag)}'")
+            try:
+                return super().__add__(flag)
+            except:
+                raise
 
+        new = copy(self)
+        flag_exclusive = set(flag.get_name().split(",")).intersection(self.MUTUALLY_EXCLUSIVE_BITS)
+        if flag_exclusive:
+            to_remove = set(self.MUTUALLY_EXCLUSIVE_BITS).difference(flag_exclusive)
+            for bit in to_remove:
+                bit = self.__class__[bit]
+                if bit in self: new = self ^ bit
+        return new | flag
 
-# BUG: once a bad flag is set, adding an OK flag should produce the same input flag
-# OK flag should not be able to change what was wrong before
+    def __contains__(self, flag):
+        if isinstance(flag, self.__class__):
+            pass
+        elif isinstance(flag, str):
+            flag = self.__class__[flag.upper()]
+        elif isinstance(flag, int):
+            flag = self.__class__(flag)
+        else:
+            try:
+                return super().__contains__(flag)
+            except:
+                raise
+        
+        return (self & flag) == flag
+
 class QualityFlag(IntFlag):
     # mutually exclusive flag: if OK, OK only, else not OK
     OK = auto()
@@ -107,81 +155,114 @@ class QualityFlag(IntFlag):
 
     def __eq__(self, flag):
         if isinstance(flag, self.__class__):
-            return self.value == flag.value
+            pass
         elif isinstance(flag, str):
-            return self.value == self.__class__[flag.upper()].value
+            flag = self.__class__[flag.upper()]
         elif isinstance(flag, int):
-            return self.value == self.__class__(flag)
+            flag = self.__class__(flag)
         else:
             try:
                 return super().__eq__(flag)
             except:
-                raise# TypeError(f"unsupported operand type(s) for +: '{type(self)}' and '{type(flag)}'")
+                raise
+        
+        return self.value == flag.value
 
     def __ne__(self, flag):
         if isinstance(flag, self.__class__):
-            return self.value != flag.value
+            pass
         elif isinstance(flag, str):
-            return self.value != self.__class__[flag.upper()].value
+            flag = self.__class__[flag.upper()]
         elif isinstance(flag, int):
-            return self.value != self.__class__(flag)
+            flag = self.__class__(flag)
         else:
             try:
                 return super().__ne__(flag)
             except:
-                raise# TypeError(f"unsupported operand type(s) for +: '{type(self)}' and '{type(flag)}'")
+                raise
+        
+        return self.value != flag.value
 
     def __add__(self, flag):
         if isinstance(flag, self.__class__):
-            if flag.name == "OK" or self.name == "OK":
-                return (self & 0) | flag
-            else:
-                return self | flag
+            pass
         elif isinstance(flag, str):
-            if flag.upper() == "OK" or self.name == "OK":
-                return (self & 0) | self.__class__[flag.upper()]
-            else:
-                return self | self.__class__[flag.upper()]
+            flag = self.__class__[flag.upper()]
         elif isinstance(flag, int):
-            if flag == 1 or self.value == 1:
-                return (self & 0) | self.__class__(flag)
-            else:
-                return self | self.__class__(flag)
+            flag = self.__class__(flag)
         else:
             try:
                 return super().__add__(flag)
             except:
-                raise# TypeError(f"unsupported operand type(s) for +: '{type(self)}' and '{type(flag)}'")
-    
+                raise
+
+        ok_bit = self.__class__.OK
+        if flag.name != ok_bit and self == ok_bit:
+            new = self & 0
+        elif flag.name == ok_bit and self != ok_bit:
+            new = copy(self)
+            flag = self.__class__(0)
+        else:
+            new = copy(self)
+        return new | flag
+
     def __contains__(self, flag):
         if isinstance(flag, self.__class__):
-            return (self & flag) == flag
+            pass
         elif isinstance(flag, str):
-            return (self & self.__class__[flag.upper()]) == self.__class__[flag.upper()]
+            flag = self.__class__[flag.upper()]
         elif isinstance(flag, int):
-            return (self & self.__class__(flag)) == self.__class__(flag)
+            flag = self.__class__(flag)
         else:
             try:
                 return super().__contains__(flag)
             except:
-                raise# TypeError(f"unsupported operand type(s) for +: '{type(self)}' and '{type(flag)}'")
+                raise
+        
+        return (self & flag) == flag
 
 # define flag name constants
 STATUS = list(ReductionStatus.__members__.keys())
 FLAGS = list(QualityFlag.__members__.keys())
 
 if __name__ == "__main__":
-    status = ReductionStatus(1)
-    print(status.name, status)
+    status = ReductionStatus.RAW
+    print(status.get_name())
     status += "IN_PROGRESS"
-    print(status.name, status)
-    status += "FINISHED"
-    print(status.name, status)
-    print(ReductionStatus["FINISHED"] == "FINISHED")
+    print(status.get_name())
+    status += ReductionStatus.PREPROCESSED
+    print(status.get_name())
+    status += ReductionStatus.CALIBRATED
+    print(status.get_name())
+    status += ReductionStatus.FINISHED
+    print(status.get_name())
+    status += ReductionStatus.IN_PROGRESS
+    print(status.get_name())
+    status += ReductionStatus.FIBERS_FOUND
+    print(status.get_name())
+    status += ReductionStatus.FINISHED
+    print(status.get_name())
+    print("finished" in status)
+    status = ReductionStatus.IN_PROGRESS
+    print(status.get_name())
+    status += ReductionStatus.PREPROCESSED|ReductionStatus.CALIBRATED
+    print(status.get_name())
 
-    flag = QualityFlag(1)
-    print(flag.name, flag)
-    flag = flag + QualityFlag(6)
-    print(flag.get_name(), flag)
-    print("bad_fibers" in flag, flag.value)
-    print("missing_metadata" in flag, flag)
+    flag = QualityFlag(0)
+    print(flag.get_name())
+    flag = QualityFlag.OK
+    print(flag.get_name())
+    flag += QualityFlag.OK
+    print(flag.get_name())
+    flag += QualityFlag.BAD_FIBERS
+    print(flag.get_name())
+    flag += QualityFlag.MISSING_METADATA
+    print(flag.get_name())
+    print("bad_fibers" in flag)
+    print("missing_metadata" in flag)
+    flag += QualityFlag.OK
+    print(flag.get_name())
+    flag = QualityFlag.OK
+    print(flag.get_name())
+    flag += QualityFlag.BAD_CALIBRATION_FRAMES|QualityFlag.BAD_EXTRACTION
+    print(flag.get_name())
