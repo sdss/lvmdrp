@@ -61,6 +61,7 @@ def setup_reduction(config, metadata):
     redux_settings.wl_range = config.WAVELENGTH_RANGES.__dict__[metadata.ccd[0]]
     redux_settings.pix2wave_map = os.path.join(config.LVM_DRP_CONFIG_PATH, config.PIX2WAVE_MAPS.__dict__[metadata.ccd])
     redux_settings.lamps = [name for name in metadata.__data__ if name in LAMP_NAMES and metadata.__data__[name]]
+    redux_settings.label = metadata.label
     # find type of reduction and calibration frames depending on the target image
     if metadata.imagetyp in FRAMES_PRIORITY:
         redux_settings.type = metadata.imagetyp
@@ -71,72 +72,18 @@ def setup_reduction(config, metadata):
     redux_settings.input_path = metadata.path
     # define output paths
     if redux_settings.type in CALIBRATION_TYPES:
-        redux_settings.label = get_master_name(metadata.label, redux_settings.type, redux_settings.mjd)
         redux_settings.output_path = PRODUCT_PATH.format(
-            path=config.LVM_SPECTRO_CALIB_PATH,
-            label="{label}",
-            kind="{kind}"
-        )
-        redux_settings.master_path = PRODUCT_PATH.format(
             path=config.LVM_SPECTRO_CALIB_PATH,
             label=redux_settings.label,
             kind="{kind}"
         )
     else:
-        redux_settings.label = metadata.label
         redux_settings.output_path = PRODUCT_PATH.format(
             path=config.LVM_SPECTRO_REDUX_PATH,
             label=redux_settings.label,
             kind="{kind}"
         )
     return metadata, redux_settings
-
-# BUG: this function is doing too much! It should:
-#      * look for calibrated analogs
-#      * build a calibrated master
-#      * it should be its own script
-#      the DRP should handle the reduction of masters continuum and arc
-def build_master(config, analogs_metadata, redux_settings):
-    calib_images = []
-    flags = QualityFlag["OK"]
-    for analog_metadata in analogs_metadata:
-        # BUG: best way to calculate gain for each amplifier: series of flats and fit the slope for sigma_counts vs sqrt(mean_counts)
-        calib_images.append(image.loadImage(redux_settings.output_path.format(label=analog_metadata.label, kind="calib")))
-        flags += analog_metadata.flags
-    
-    # TODO: test and update database
-    #   - test quality of master
-    #   - add frame to master frames
-    #   - add flags according to test results
-    #   - add DB reference for preprocessed frames
-    # BUG: set master & analogs reduction state before entering 'build_master' & put calibration state for both
-    # save calibrated analogs & build master
-    if len(calib_images) > 1:
-        new_master = image.combineImages(calib_images, method="median")
-        new_master.writeFitsData(redux_settings.master_path.format(kind="calib"))
-        status = ReductionStatus["FINISHED"]
-    else:
-        flags += "POORLY_DEFINED_MASTER"
-        status = ReductionStatus["FAILED"]
-    # define new master metadata
-    master_metadata = CalibrationFrames(
-        mjd=analog_metadata.mjd,
-        spec=analog_metadata.spec,
-        ccd=analog_metadata.ccd,
-        exptime=analog_metadata.exptime,
-        imagetyp=analog_metadata.imagetyp,
-        obstime=dt.datetime.now(),
-        observat=analog_metadata.observat,
-        naxis1=analog_metadata.naxis1,
-        naxis2=analog_metadata.naxis2,
-        label=redux_settings.label,
-        path=redux_settings.master_path.format(kind="calib"),
-        reduction_started=analog_metadata.reduction_started,
-        reduction_finished=analog_metadata.reduction_finished,
-        status=status,
-        flags=flags
-    )
-    return master_metadata
 
 def run_reduction_calib(config, metadata, calib_metadata, redux_settings):
     # decorate preprocessing if necessary
@@ -155,6 +102,7 @@ def run_reduction_calib(config, metadata, calib_metadata, redux_settings):
         orientation="S,S,S,S",
         gain=config.GAIN, rdnoise=config.READ_NOISE
     )
+    metadata.status += "PREPROCESSED"
     master_bias = image.Image(data=np.zeros_like(proc_image._data))
     master_dark = image.Image(data=np.zeros_like(proc_image._data))
     master_flat = image.Image(data=np.ones_like(proc_image._data))
@@ -186,6 +134,7 @@ def run_reduction_calib(config, metadata, calib_metadata, redux_settings):
 
     metadata.naxis1 = calib_image._header["NAXIS1"]
     metadata.naxis2 = calib_image._header["NAXIS2"]
+    metadata.status += "CALIBRATED"
     metadata.flags += flags
     return metadata
 
