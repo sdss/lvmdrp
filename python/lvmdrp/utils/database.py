@@ -102,6 +102,8 @@ class StatusMixin(Model):
 #   - store normal calibration frames in 'lvm_frames' table
 class CalibrationFrames(BaseModel, StatusMixin):
     id = IntegerField(primary_key=True)
+    label = CharField(null=True)
+    path = CharField(null=True)
     is_master = BooleanField(default=False)
 
     class Meta:
