@@ -52,6 +52,7 @@ class StatusField(IntegerField):
 class BaseModel(Model):
     class Meta:
         database = db
+        only_save_dirty = True
 
 class BasicMixin(Model):
     datetime = DateTimeField(default=dt.datetime.now)
