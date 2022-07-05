@@ -8,8 +8,8 @@ LVM_DB_USER: "lvmdrp"
 LVM_DB_PASS: "1234"
 LVM_DB_NAME: "lvmdrp.db"
 # define root path of the installation
-# LVM_DRP_ROOT: &root_path "/home/mejia/Research/UNAM/lvm-drp/"
-LVM_DRP_ROOT: &root_path "/disk-a/mejia/Research/UNAM/lvm-drp/"
+LVM_DRP_ROOT: &root_path "/home/mejia/Research/UNAM/lvm-drp/"
+# LVM_DRP_ROOT: &root_path "/disk-a/mejia/Research/UNAM/lvm-drp/"
 # define path to config files
 LVM_DRP_CONFIG_PATH: !join [*root_path, "lvmdrp/python/lvmdrp/etc/"]
 # define log path
@@ -26,9 +26,6 @@ PIX2WAVE_MAPS:
   "r3": !join [*root_path, "lvm-neon_nist_r3.txt"]
   "z3": !join [*root_path, "lvm-neon_nist_z3.txt"]
 # define path to fiber maps
-# define naming conventions
-LVM_CONT_NAME: "{}.cont.fits.gz"
-LVM_ARC_NAME: "{}.arc.fits.gz"
 
 # staleness parameters
 # define installed lamps
@@ -51,9 +48,9 @@ ARC_LAMPS: &arc_lamps
 #   <<: *arc_lamps
 # define wavelength ranges per spectrograph/channel
 WAVELENGTH_RANGES:
-  "b": [3600, 5930]
-  "r": [5660, 7720]
-  "z": [7470, 9800]
+  b: [3600, 5930]
+  r: [5660, 7720]
+  z: [7470, 9800]
 
 # ~CONSTANTS:
 # define root path for frames (probably hardcoded):
@@ -69,21 +66,152 @@ LVM_SPECTRO_CALIB_PATH: !join [*root_path, "calib"]
 # define path for flux calibration sources (~constant)
 # define path for long-term frames: master bias, CCDflats, fiberflats (domeflats, skyflats)
 # define path for short term frames: night bias, dark, flats, sky, object
+INPUT_FILE_PATTERN: &input_pattern !join ["{path}", "{mjd}", "{label}.fits.gz"]
+PRODUCT_FILE_PATTERN: &product_pattern !join ["{path}", "{label}.{kind}.fits"]
+PEAKS_FILE_PATTERN: &peaks_pattern !join ["{path}", "{label}.{kind}.txt"]
 
 # define initial calibration parameters (set by drp-fit 1st with lab data, 2nd with simulations, 3rd during comissioning)
-# readout noise and gain default values
-READ_NOISE: 3
-GAIN: 2.5
-# preprocessing parameters
-# cosmic ray parameters
-# peak detection parameters
-NFIBERS: 41
-PEAKS_AT_COLUMN: 3696
-# 1st trace parameters
-# stray light parameters
-# 2nd trace parameters (FWHM)
-# extraction parameters
-# wavelength solution parameters
-# fiberflat parameters
-# sky module parameters
+DRP_STEPS:
+  # preprocessing parameters
+  pre:
+    in_image: *input_pattern
+    out_image: *product_pattern
+    boundary_x: "1,2040"
+    boundary_y: "1,2040"
+    positions: "00,10,01,11"
+    orientation: "S,S,S,S"
+    subtract_overscan: 1
+    compute_error: 1
+    gain: 2.5
+    rdnoise: 3
+    gain_field: "GAIN"
+    rdnoise_field: "RDNOISE"
+  # basic calibration parameters
+  calib:
+    in_image: *product_pattern
+    out_image: *product_pattern
+    bias: *product_pattern
+    dark: *product_pattern
+    flat: *product_pattern
+  # cosmic ray parameters
+  cosmic:
+    image: *product_pattern
+    out_image: *product_pattern
+    sigma_det: 5
+    flim: 1.3
+    iter: 3
+    sig_gauss: "0.8,0.8"
+    error_box: "20,1"
+    replace_box: "20,1"
+    replace_error: 1e10
+    rdnoise: 2.9
+    increase_radius: 1
+    verbose: 0
+    parallel: 2
+  # peak detection parameters
+  peaks:
+    image: *product_pattern
+    out_peaks_file: *peaks_pattern
+    nfibers: 41
+    disp_axis: "X"
+    threshold: 5000
+    median_box: 1
+    median_cross: 1
+    slice: 3696
+    method: "gauss"
+    init_sigma: 0.5
+    verbose: 0
+  # 1st trace parameters
+  trace:
+    image: *product_pattern
+    peaks_file: *peaks_pattern
+    trace_out: *product_pattern
+    disp_axis: "X"
+    method: "gauss"
+    median_box: 7
+    median_cross: 1
+    steps: 30
+    coadd: 30
+    poly_disp: 5
+    init_sigma: 1.0
+    threshold_peak: 50.0
+    max_diff: 2
+    verbose: 0
+  # stray light parameters
+  stray:
+    image: *product_pattern
+    trace: *product_pattern
+    stray_image: *product_pattern
+    clean_image: *product_pattern
+    disp_axis: "X"
+    aperture: 40
+    poly_cross: 2
+    smooth_disp: 5
+    smooth_gauss: 30.0
+    parallel: "auto"
+  # 2nd trace parameters (FWHM)
+  fwhm:
+    image: *product_pattern
+    trace: *product_pattern
+    fwhm_out: *product_pattern
+    disp_axis: "X"
+    blocks: 32
+    steps: 30
+    coadd: 20
+    poly_disp: 5
+    threshold_flux: 50.0
+    init_fwhm: 2.0
+    clip: "1.5,4.0"
+    parallel: "auto"
+  # extraction parameters
+  extract:
+    image: *product_pattern
+    trace: *product_pattern
+    out_rss: *product_pattern
+    method: "optimal"
+    aperture: 7
+    fwhm: 2.5
+    disp_axis: "X"
+    replace_error: 1e10
+    plot: -1
+    parallel: "auto"
+  # wavelength solution parameters
+  wave:
+    arc_rss: *product_pattern
+    disp_rss: *product_pattern
+    res_rss: *product_pattern
+    ref_line_file: null
+    ref_spec: ""
+    pixel: ""
+    ref_lines: ""
+    poly_dispersion: -4
+    poly_fwhm: "-1,-1"
+    init_back: 10.0
+    aperture: 7
+    flux_min: 100.0
+    fwhm_max: 10.0
+    rel_flux_limits: "0.2,2.0"
+    negative: false
+    verbose: 0
+  # build pixel table
+  pixtable:
+    rss_in: *product_pattern
+    rss_out: *product_pattern
+    arc_wave: *product_pattern
+    arc_fwhm: *product_pattern
+    cropping: ""
+  # resample wavelength vector
+  waveres:
+    rss_in: *product_pattern
+    rss_out: *product_pattern
+    method: "spline"
+    start_wave: null
+    end_wave: null
+    disp_pix: null
+    err_sim: 0
+    replace_error: 1e10
+    correctHvel: ""
+    parallel: "auto"
+  # fiberflat parameters
+  # sky module parameters
 ...
