@@ -2,7 +2,7 @@
 # author: jdthorpe
 
 import os
-import yaml as yaml
+import yaml
 from types import SimpleNamespace
 
 
@@ -16,6 +16,12 @@ class Dumper(yaml.Dumper):
 def _join(loader, node):
     seq = loader.construct_sequence(node)
     return os.path.join(*seq)
+
+def _format(loader, node):
+    to_fmt = {key: f"{{{key}}}" for key in ["path", "label", "kind"]}
+    str, keys = loader.construct_sequence(node)
+    to_fmt.update(keys.__dict__)
+    return str.format(**to_fmt)
 
 def _construct_mapping(loader, node):
     loader.flatten_mapping(node)
@@ -32,7 +38,9 @@ Dumper.add_representer(SimpleNamespace, _ns_representer)
 Loader.add_constructor(
     yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _construct_mapping
 )
-## register the tag handler
 Loader.add_constructor(
-    '!join', _join
+    "!join", _join
+)
+Loader.add_constructor(
+    "!fmt", _format
 )
