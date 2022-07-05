@@ -303,9 +303,12 @@ def get_master_metadata(metadata):
     # handle unrecognized frame type
 
     for calib_type in frame_needs:
+        bmask = ReductionStatus.PREPROCESSED|ReductionStatus.CALIBRATED|ReductionStatus.FINISHED
+        if calib_type in ["continuum", "arc"]:
+            bmask += ReductionStatus.COSMIC_CLEAN|ReductionStatus.STRAY_CLEAN|ReductionStatus.FIBERS_FOUND|ReductionStatus.FIBERS_TRACED|ReductionStatus.SPECTRA_EXTRACTED|ReductionStatus.WAVELENGTH_SOLVED
         try:
             query = LVMFrames.select().where(
-                (LVMFrames.status == ReductionStatus.PREPROCESSED|ReductionStatus.CALIBRATED|ReductionStatus.FINISHED) &
+                (LVMFrames.status == bmask) &
                 (LVMFrames.flags == QualityFlag.OK) &
                 (LVMFrames.imagetyp == calib_type) &
                 (LVMFrames.ccd == metadata.ccd) &
