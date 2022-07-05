@@ -1925,3 +1925,39 @@ def preprocRawFrame_drp(in_image, out_image, boundary_x, boundary_y, positions, 
 	#write out FITS file
 	full_img.writeFitsData(out_image)
 	return full_img
+
+@missing_files(["BAD_CALIBRATION_FRAMES"], "in_image")
+def basicCalibration_drp(in_image, out_image, bias=None, dark=None, flat=None):
+
+	proc_image = loadImage(in_image)
+
+	# read master bias
+	if bias is not None:
+		if os.path.isfile(bias):
+			master_bias = loadImage(bias)
+		else:
+			flags += "BAD_CALIBRATION_FRAMES"
+	# read master dark
+	if dark is not None:
+		if os.path.isfile(dark):
+			master_dark = loadImage(dark)
+			master_dark._data *= proc_image._header["EXPTIME"] / master_dark._header["EXPTIME"]
+		else:
+			flags += "BAD_CALIBRATION_FRAMES"
+	# read master flat
+	if flat is not None:
+		if os.path.isfile(flat):
+			master_flat = loadImage(flat)
+			master_flat._data *= proc_image._header["EXPTIME"] / master_flat._header["EXPTIME"]
+		else:
+			flags += "BAD_CALIBRATION_FRAMES"
+
+	# normalize in case of flat calibration
+	if proc_image._header["IMAGETYP"] == "flat":
+		proc_image = proc_image / numpy.median(proc_image._data)
+
+	# run basic calibration for each analog
+	calib_image = (proc_image - master_dark - master_bias) / master_flat
+	calib_image.writeFitsData(out_image)
+
+	return calib_image
