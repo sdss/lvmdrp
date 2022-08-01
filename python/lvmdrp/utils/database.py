@@ -312,7 +312,7 @@ def get_master_metadata(metadata):
                 (LVMFrames.flags == QualityFlag.OK) &
                 (LVMFrames.imagetyp == calib_type) &
                 (LVMFrames.ccd == metadata.ccd) &
-                (LVMFrames.calib_id != None)
+                (LVMFrames.calib_id is not None)
             ).order_by(fn.ABS(metadata.mjd - LVMFrames.mjd).asc())
         except Error as e:
             print(f"{calib_type}: {e}")

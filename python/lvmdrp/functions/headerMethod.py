@@ -1,9 +1,6 @@
-from __future__ import print_function
-from builtins import range
 import sys
-from lvmdrp import *
-from lvmdrp.core.header import Header, combineHdr
 from lvmdrp.external import astrolib
+from lvmdrp.core.header import Header
 
 description='Provides Methods to handle Fits headers'
 
@@ -245,12 +242,12 @@ def addHvelcorHdr_drp(file, key, RAKey='RA', RAUnit='h', DECKey='DEC', ObsLongKe
     elif RAUnit=='h':
         ra = ra/15.0
     if int(LongSignFlip)==1:
-        long = int*(-1)
-    vel_correction = astrolib.helcorr(int, lat, alt, ra, dec, mjd)
+        long = long*(-1)
+    vel_correction = astrolib.helcorr(long, lat, alt, ra, dec, mjd)
     hdr.setHdrValue(key, float('%.2f' %(vel_correction[0])), 'Heliocentric vel correction [km/s]')
     hdr.writeFitsHeader()
 
-def addAstrometry_drp(file, ref_RA, ref_DEC, resolution_x, resolution_y, ref_pix_x='', ref_pix_y=''):
+def addAstrometry_drp(file, ref_RA, ref_DEC, resolution_x, resolution_y, rotation=0, ref_pix_x='', ref_pix_y=''):
     """
             Adds astrometric WCS information keywords to  the FITS headers.
             These are WCSAXES, WCSNAME, RADESYS, CTYPE1, CTYPE2, CUNIT1, CUNIT2, CD1_1, CD1_2, CD2_1, CD2_2
@@ -283,6 +280,7 @@ def addAstrometry_drp(file, ref_RA, ref_DEC, resolution_x, resolution_y, ref_pix
 
     resolution_x=float(resolution_x)
     resolution_y=float(resolution_y)
+    rotation=float(rotation)
 
     hdr = Header()
     hdr.loadFitsHeader(file)
@@ -298,18 +296,18 @@ def addAstrometry_drp(file, ref_RA, ref_DEC, resolution_x, resolution_y, ref_pix
      hdr.setHdrValue('CTYPE3',  'AWAV')
      hdr.setHdrValue('CUNIT3', 'Angstrom', 'Units')
 
-    hdr.setHdrValue('CD1_1',  resolution_x/3600.0*-1,  'Pixels in degress for X-axis')
-    hdr.setHdrValue('CD1_2',  0.00000 )
-    hdr.setHdrValue('CD2_1',  0.00000 )
-    hdr.setHdrValue('CD2_2',  resolution_y/3600.0,  'Pixels in degress for Y-axis')
+    hdr.setHdrValue('CD1_1',  resolution_x/3600.0*-1*numpy.cos(rotation/180*numpy.pi))
+    hdr.setHdrValue('CD1_2',  resolution_y/3600.0*-1*numpy.sin(rotation/180*numpy.pi))
+    hdr.setHdrValue('CD2_1',  resolution_x/3600.0*-1*numpy.sin(rotation/180*numpy.pi) )
+    hdr.setHdrValue('CD2_2',  resolution_y/3600.0*numpy.cos(rotation/180*numpy.pi))
     if wcsaxes == 3:
      hdr.setHdrValue('CD3_3',  hdr.getHdrValue('CDELT3'))
      hdr.setHdrValue('CD1_3',  0.0)
      hdr.setHdrValue('CD2_3',  0.0)
      hdr.setHdrValue('CD3_1',  0.0)
      hdr.setHdrValue('CD3_2',  0.0)
-    hdr.setHdrValue('CDELT1',  resolution_x/3600.0*-1)
-    hdr.setHdrValue('CDELT2',  resolution_y/3600.0)
+    #hdr.setHdrValue('CDELT1',  resolution_x/3600.0*-1)
+    #hdr.setHdrValue('CDELT2',  resolution_y/3600.0)
     try:
         ref_RA = hdr.getHdrValue(ref_RA)
     except (KeyError, ValueError):

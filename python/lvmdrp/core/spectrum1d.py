@@ -1,20 +1,14 @@
-from __future__ import print_function
-from __future__ import absolute_import
-from __future__ import division
-from builtins import str
-from builtins import range
-from builtins import object
-from past.utils import old_div
-from astropy.io import fits as pyfits
 import numpy
+from astropy.io import fits as pyfits
 try:
   import pylab
 except:
   pass
 from scipy import sparse
+from scipy import optimize
 from scipy import interpolate
 from scipy import ndimage
-from . import fit_profile
+from lvmdrp.core import fit_profile
 from copy import  deepcopy
 
 class Spectrum1D(object):
@@ -92,7 +86,7 @@ class Spectrum1D(object):
                 return spec
             except:
                 #raise exception if the type are not matching in general
-                raise TypeError("unsupported operand type(s) for -: %s and %s"%(str(type(self)).split("'")[1], str(type(other)).split("'")[1]))
+                raise exceptions.TypeError("unsupported operand type(s) for -: %s and %s"%(str(type(self)).split("'")[1], str(type(other)).split("'")[1]))
 
     def __add__(self, other):
         if isinstance(other, Spectrum1D):
@@ -159,7 +153,7 @@ class Spectrum1D(object):
                 return spec
             except:
                 #raise exception if the type are not matching in general
-                raise TypeError("unsupported operand type(s) for -: %s and %s"%(str(type(self)).split("'")[1], str(type(other)).split("'")[1]))
+                raise exceptions.TypeError("unsupported operand type(s) for -: %s and %s"%(str(type(self)).split("'")[1], str(type(other)).split("'")[1]))
 
     def __truediv__(self, other):
 
@@ -168,7 +162,7 @@ class Spectrum1D(object):
             select = other._data!=0.0
             data = numpy.zeros_like(self._data)
             if numpy.sum(select)>0:
-                data[select] = old_div(self._data[select],other._data[select].astype(numpy.float32))
+                data[select] = self._data[select]/other._data[select].astype(numpy.float32)
 
             if self._mask is not None and other._mask is not None:
                 mask = numpy.logical_or(self._mask, other._mask)
@@ -181,11 +175,11 @@ class Spectrum1D(object):
             if self._error is not None and other._error is not None:
                 error = numpy.zeros_like(self._error)
                 if numpy.sum(select)>0:
-                    error[select]=numpy.sqrt((old_div(self._error[select],other._data[select]))**2+(old_div(self._data[select]*other._error[select],other._data[select]**2))**2)
+                    error[select]=numpy.sqrt((self._error[select]/other._data[select])**2+(self._data[select]*other._error[select]/other._data[select]**2)**2)
             elif self._error is not None:
                 error = numpy.zeros_like(self._error)
                 if numpy.sum(select)>0:
-                    error[select] = old_div(self._error[select],other._data[select])
+                    error[select] = self._error[select]/other._data[select]
                     error[numpy.logical_not(select)]=numpy.max(self._error)
             else:
                 error = None
@@ -199,9 +193,9 @@ class Spectrum1D(object):
 
         elif isinstance(other,  numpy.ndarray):
             if other!=0:
-                data = old_div(self._data, other)
+                data = self._data / other
                 if self._error  is not None:
-                    error = old_div(self._error, other)
+                    error = self._error / other
                 else:
                     error = None
                 mask = self._mask
@@ -210,7 +204,7 @@ class Spectrum1D(object):
                 if self._error is not None:
                     error = numpy.zeros_like(self._data)
                 if self._mask is not None:
-                    mask = numpy.zeros(self._data.shape[0], dtype="bool")
+                    mask = nump.zeros(self._data.shape[0], dtype="bool")
                 else:
                     mask = None
 
@@ -225,9 +219,9 @@ class Spectrum1D(object):
             # try to do addtion for other types, e.g. float, int, etc.
             try:
                 if other!=0.0:
-                    data = old_div(self._data,other)
+                    data = self._data/other
                     if self._error is not None:
-                        error = old_div(self._error, other)
+                        error = self._error / other
                     else:
                         error = None
                     mask = self._mask
@@ -250,7 +244,8 @@ class Spectrum1D(object):
                 return spec
             except:
                 #raise exception if the type are not matching in general
-                raise TypeError("unsupported operand type(s) for /: %s and %s"%(str(type(self)).split("'")[1], str(type(other)).split("'")[1]))
+                raise exceptions.TypeError("unsupported operand type(s) for /: %s and %s"%(str(type(self)).split("'")[1], str(type(other)).split("'")[1]))
+
 
     def __rdiv__(self, other):
 
@@ -259,7 +254,7 @@ class Spectrum1D(object):
             select = self._data!=0.0
             data = numpy.zeros_like(self._data)
             if numpy.sum(select)>0:
-                data[select] = old_div(other._data[select].astype(numpy.float32),self._data[select])
+                data[select] = other._data[select].astype(numpy.float32)/self._data[select]
 
             if self._mask is not None and other._mask is not None:
                 mask = numpy.logical_or(self._mask, other._mask)
@@ -272,11 +267,11 @@ class Spectrum1D(object):
             if self._error is not None and other._error is not None:
                 error = numpy.zeros_like(self._error)
                 if numpy.sum(select)>0:
-                    error[select]=numpy.sqrt((old_div(other._error[select],self._data[select]))**2+(old_div(other._data[select]*self._error[select],self._data[select]**2))**2)
+                    error[select]=numpy.sqrt((other._error[select]/self._data[select])**2+(other._data[select]*self._error[select]/self._data[select]**2)**2)
             elif self._error is not None:
                 error = numpy.zeros_like(self._error)
                 if numpy.sum(select)>0:
-                    error[select] = old_div(other._error[select],self._data[select])
+                    error[select] = other._error[select]/self._data[select]
                     error[numpy.logical_not(select)]=numpy.max(self._error)
             else:
                 error = None
@@ -292,11 +287,11 @@ class Spectrum1D(object):
             select = self._data!=0.0
             data = numpy.zeros_like(self._data)
             if numpy.sum(select)>0:
-                data[select] = old_div(other[select], self._data[select])
+                data[select] = other[select] / self._data[select]
                 if self._error  is not None:
                     error = numpy.zeros_like(self._error)
                     if numpy.sum(select)>0:
-                        error[select] = old_div(other[select] *self._error[select],self._data[select]**2)
+                        error[select] = other[select] *self._error[select]/self._data[select]**2
                     else:
                         error=None
                 else:
@@ -307,7 +302,7 @@ class Spectrum1D(object):
                 if self._error is not None:
                     error = numpy.zeros_like(self._data)
                 if self._mask is not None:
-                    mask = numpy.zeros(self._data.shape[0], dtype="bool")
+                    mask = nump.zeros(self._data.shape[0], dtype="bool")
                 else:
                     mask = None
 
@@ -324,11 +319,11 @@ class Spectrum1D(object):
                 select = self._data!=0.0
                 data = numpy.zeros_like(self._data)
                 if numpy.sum(select)>0:
-                    data[select] = old_div(other, self._data[select])
+                    data[select] = other / self._data[select]
                     if self._error is not None:
                         error = numpy.zeros_like(self._error)
                         if numpy.sum(select)>0:
-                            error[select] = old_div(other *self._error[select],self._data[select]**2)
+                            error[select] = other *self._error[select]/self._data[select]**2
                         else:
                             error=None
                     else:
@@ -354,7 +349,7 @@ class Spectrum1D(object):
                 return spec
       ##      except:
                 #raise exception if the type are not matching in general
-        ##        raise TypeError("unsupported operand type(s) for /: %s and %s"%(str(type(self)).split("'")[1], str(type(other)).split("'")[1]))
+        ##        raise exceptions.TypeError("unsupported operand type(s) for /: %s and %s"%(str(type(self)).split("'")[1], str(type(other)).split("'")[1]))
 
 
     def __mul__(self, other):
@@ -365,7 +360,7 @@ class Spectrum1D(object):
 
             if self._mask is not None and other._mask is not None:
                 mask = numpy.logical_or(self._mask, other._mask)
-            elif self._mask is None and other._mask is not None:
+            elif self._mask is not None and other._mask is not None:
                 mask = other._mask
             elif self._mask is not None and other._mask is None:
                 mask= self._mask
@@ -399,7 +394,7 @@ class Spectrum1D(object):
                 if self._error is not None:
                     error = numpy.zeros_like(self._data)
                 if self._mask is not None:
-                    mask = numpy.zeros(self._data.shape[0], dtype="bool")
+                    mask = nump.zeros(self._data.shape[0], dtype="bool")
                 else:
                     mask = None
             if data.dtype==numpy.float64 or data.dtype==numpy.dtype('>f8'):
@@ -440,7 +435,7 @@ class Spectrum1D(object):
                 return spec
            # except:
                 #raise exception if the type are not matching in general
-              #  raise TypeError("unsupported operand type(s) for *: %s and %s"%(str(type(self)).split("'")[1], str(type(other)).split("'")[1]))
+              #  raise exceptions.TypeError("unsupported operand type(s) for *: %s and %s"%(str(type(self)).split("'")[1], str(type(other)).split("'")[1]))
     def __rpow__(self, other):
         data = other**self._data
         error = None
@@ -490,7 +485,7 @@ class Spectrum1D(object):
                 Number of the FITS extension containing the errors for the values
         """
 
-        hdu = pyfits.open(file)
+        hdu = pyfits.open(file,uint=True, do_not_scale_image_data=True )
         if extension_data is None and extension_mask is None and extension_error is None and extension_wave is None and extension_fwhm is None:
                 self._data = hdu[0].data
                 hdr = hdu[0].header
@@ -520,7 +515,7 @@ class Spectrum1D(object):
             if extension_wave is not None:
                 self._wave = hdu[extension_wave].data
             if extension_fwhm is not None:
-                self._inst_fwhm = hdu[extension_fwhm].data
+                self._inst_fwhm = hdu[i].data
         hdu.close()
 
         if extension_hdr is not None:
@@ -603,7 +598,13 @@ class Spectrum1D(object):
     def writeTxtData(self, filename):
         out = open(filename, 'w')
         for i in range(self._dim):
-            out.write('%i %f %f\n'%(i+1, self._wave[i], self._data[i]))
+            if self._error is None and self._mask is None:
+                out.write('%i %f %f\n'%(i+1, self._wave[i], self._data[i]))
+            elif self._error is not None and self._mask is None:
+                out.write('%i %f %f %f\n'%(i+1, self._wave[i], self._data[i], self._error[i]))
+            elif self._error is not None and self._mask is not None:
+                out.write('%i %f %f %f %d\n'%(i+1, self._wave[i], self._data[i], self._error[i], int(self._mask[i])))
+
         out.close()
 
     def loadTxtData(self, filename):
@@ -717,7 +718,7 @@ class Spectrum1D(object):
                 self._error = numpy.flipud(self._error)
             if self._mask is not None:
                 self._mask = numpy.flipud(self._mask)
-        if self._mask is not None and numpy.sum(self._mask)==self._dim:
+        if self._mask is not None and numpy.sum(self._mask)>self._dim/2.0:
             new_mask = numpy.ones(len(ref_wave), dtype='bool')
             new_data =  numpy.zeros(len(ref_wave), numpy.float32)
             if self._error is None or err_sim==0:
@@ -757,7 +758,7 @@ class Spectrum1D(object):
             else:
                 select_goodpix=numpy.ones(self._dim, dtype='bool')
 
-            if self._error is not None and err_sim>0:
+            if self._error is not None and self._mask is not None and err_sim>0:
                 replace_pix = numpy.logical_and(self._mask, clean_data!=0.0)
                 self._error[replace_pix]=1e-20
                 #select_goodpix = numpy.logical_and(select_goodpix, self._data!=0.0)
@@ -804,10 +805,12 @@ class Spectrum1D(object):
                 new_data[badpix]=0
             new_mask = badpix
     #        new_data[badpix]=fill_value
-     #           print numpy.sum(self._mask), numpy.sum(new_mask)
+     #           print(numpy.sum(self._mask), numpy.sum(new_mask))
 
             if self._error is None or err_sim==0:
                 new_error=None
+            if self._mask is None:
+                new_mask = None
        # if numpy.isnan(new_data[10])==True:
         #    pylab.plot(self._wave[select_interp],'-k')
         #    pylab.show()
@@ -834,18 +837,19 @@ class Spectrum1D(object):
             select = target_FWHM>fwhm
             gauss_sig[select] = numpy.sqrt(target_FWHM**2-fwhm[select]**2)/2.354
             fact = numpy.sqrt(2.*numpy.pi)
-            kernel=old_div(numpy.exp(-0.5*(old_div((wave[:, numpy.newaxis]-wave[numpy.newaxis, :]),gauss_sig[numpy.newaxis, :]))**2),(fact*gauss_sig[numpy.newaxis, :]))
+            kernel=numpy.exp(-0.5*((wave[:, numpy.newaxis]-wave[numpy.newaxis, :])/gauss_sig[numpy.newaxis, :])**2)/(fact*gauss_sig[numpy.newaxis, :])
             multiplied = data[:, numpy.newaxis]*kernel
-            new_data = old_div(numpy.sum(multiplied, axis=0),numpy.sum(kernel, 0))
+            new_data = numpy.sum(multiplied, axis=0)/numpy.sum(kernel, 0)
             if self._mask is not None:
                 self._data[good_pix] = new_data
                 self._inst_fwhm[:] = target_FWHM
             if error is not None:
-                new_error = old_div(numpy.sqrt(numpy.sum((error[:, numpy.newaxis]*kernel)**2, axis=0)),numpy.sum(kernel, 0))
+                new_error = numpy.sqrt(numpy.sum((error[:, numpy.newaxis]*kernel)**2, axis=0))/numpy.sum(kernel, 0)
                 if self._mask is not None:
                     self._error[good_pix] = new_error
                 else:
                     self._error = new_error
+
 
     def binSpec(self, new_wave):
         new_disp = new_wave[1:]-new_wave[:-1]
@@ -871,9 +875,9 @@ class Spectrum1D(object):
             select = numpy.logical_and(masked_wave>= bound_min[i], masked_wave <= bound_max[i])
             if numpy.sum(select) > 0:
 #                data_out[i] = numpy.mean(self._data[mask_in][select])
-                data_out[i] = old_div(numpy.sum(numpy.abs(masked_wave[select]-new_wave[i])*self._data[mask_in][select]),numpy.sum(numpy.abs(masked_wave[select]-new_wave[i])))
+                data_out[i] = numpy.sum(numpy.abs(masked_wave[select]-new_wave[i])*self._data[mask_in][select])/numpy.sum(numpy.abs(masked_wave[select]-new_wave[i]))
                 if self._error is not None:
-                    error_out[i] = numpy.sqrt(old_div(numpy.sum(masked_error[select]**2),numpy.sum(select)**2))
+                    error_out[i] = numpy.sqrt(numpy.sum(masked_error[select]**2)/numpy.sum(select)**2)
             else:
                 data_out[i] = 0.0
                 mask_out[i] = True
@@ -909,6 +913,7 @@ class Spectrum1D(object):
             smooth= interpolate.splrep(self._wave,self._data,w=1.0/numpy.sqrt(numpy.fabs(self._data)),s=size)
             self._data =  interpolate.splev(self._wave,smooth,der=0)
 
+
     def smoothGaussVariable(self, fwhm):
         fact = numpy.sqrt(2.*numpy.pi)
         if self._mask is not None:
@@ -923,13 +928,13 @@ class Spectrum1D(object):
 
         data = numpy.zeros_like(self._data)
         data[:] = self._data
-        GaussKernels = old_div(1.0*numpy.exp(-0.5*(old_div((self._wave[mask][:, numpy.newaxis]-self._wave[mask][numpy.newaxis, :]),numpy.abs(fwhm[mask][numpy.newaxis, :]/2.354)))**2),(fact*numpy.abs(fwhm[mask][numpy.newaxis, :]/2.354)))
-        data[mask] = old_div(numpy.sum(self._data[mask][:, numpy.newaxis]*GaussKernels, 0),numpy.sum(GaussKernels, 0))
+        GaussKernels = 1.0*numpy.exp(-0.5*((self._wave[mask][:, numpy.newaxis]-self._wave[mask][numpy.newaxis, :])/numpy.abs(fwhm[mask][numpy.newaxis, :]/2.354))**2)/(fact*numpy.abs(fwhm[mask][numpy.newaxis, :]/2.354))
+        data[mask] = numpy.sum(self._data[mask][:, numpy.newaxis]*GaussKernels, 0)/numpy.sum(GaussKernels, 0)
 
         if self._error is not None:
             error = numpy.zeros_like(self._error)
             error[:] = self._error
-            error[mask]=old_div(numpy.sqrt(numpy.sum((self._error[mask]*GaussKernels)**2, 0)),numpy.sum(GaussKernels, 0))
+            error[mask]=numpy.sqrt(numpy.sum((self._error[mask]*GaussKernels)**2, 0))/numpy.sum(GaussKernels, 0)
             #scale = Spectrum1D(wave=self._wave, data=error/self._error)
             #scale.smoothSpec(40, method='median')
             #error[mask]=error[mask]/scale._data[mask]
@@ -984,6 +989,7 @@ class Spectrum1D(object):
             out_par=0
         return out_par
 
+
     def findPeaks(self, threshold=100.0, npeaks=0, add_doubles=1e-1, maxiter=400):
         """
             Select local maxima in a Spectrum without taken subpixels into account.
@@ -1016,7 +1022,7 @@ class Spectrum1D(object):
         # add some value to one of those adjacent data points
         if numpy.sum(doubles)>0:
             double_idx = idx[doubles]
-            self._data[double_idx] += add_doubles
+            self._data[double_idx]+=add_doubles
         if self._mask is not None:
             data = self._data[numpy.logical_not(self._mask)]
             wave = self._wave[numpy.logical_not(self._mask)]
@@ -1025,13 +1031,7 @@ class Spectrum1D(object):
             data = self._data
             wave = self._wave
             pixels = self._pixels
-        pos_diff=(data[1:]-data[:-1]) / (wave[1:]-wave[:-1]) # compute the discrete derivative
-        # print(">>>>>>>>>>>>>>>>>>>>", (pos_diff<0).sum())
-        # print(numpy.array(list(data[1:]-data[:-1]))[(1900<=wave[1:])&(wave[1:]<=2500)].tolist())
-        # pylab.figure(figsize=(20,5))
-        # pylab.step(wave[1:], data[1:]-data[:-1], lw=1)
-        # pylab.xlim(1900,2500)
-        # pylab.show()
+        pos_diff=(data[1:]-data[:-1] )/(wave[1:]-wave[:-1] ) # compute the discrete derivative
         select_peaks=numpy.logical_and(pos_diff[1:]<0, pos_diff[:-1]>0)  # select all maxima
 
         if npeaks==0:
@@ -1103,7 +1103,7 @@ class Spectrum1D(object):
         if method=='hyperbolic':
             # compute the subpixel peak position using the hyperbolic
             d = numpy.take(self._data, init_pos+1)-2*numpy.take(self._data, init_pos)+numpy.take(self._data,  init_pos-1)
-            positions = init_pos+1-(old_div((numpy.take(self._data, init_pos+1)-numpy.take(self._data, init_pos)),d)+0.5)
+            positions = init_pos+1-((numpy.take(self._data, init_pos+1)-numpy.take(self._data, init_pos))/d+0.5)
 
         elif method=='gauss':
             # compute the subpixel peak position by fitting a gaussian to all peaks (3 pixel to get a unique solution
@@ -1203,6 +1203,8 @@ class Spectrum1D(object):
         #return results
         return fwhm, mask
 
+
+
     def measureOffsetPeaks(self, pos, mask,  nblocks, init_fwhm=2.0, init_offset=0.0,  plot=-1):
         """
 
@@ -1292,8 +1294,8 @@ class Spectrum1D(object):
                 max_flux = numpy.zeros(len(offset))
                 for o in range(len(offset)):
                     for g in range(numpy.sum(pos_mask)):
-                        Gaussian_vec[g,:] = old_div(numpy.exp(-0.5*(old_div((x-(pos_block[pos_mask][g]+offset[o])),
-                        (pos_fwhm[pos_mask][g]/2.354)))**2),(numpy.sqrt(2.*numpy.pi)*abs((pos_fwhm[pos_mask][g]/2.354))))
+                        Gaussian_vec[g,:] = numpy.exp(-0.5*((x-(pos_block[pos_mask][g]+offset[o]))/
+                        (pos_fwhm[pos_mask][g]/2.354))**2)/(numpy.sqrt(2.*numpy.pi)*abs((pos_fwhm[pos_mask][g]/2.354)))
                     result = numpy.linalg.lstsq(Gaussian_vec.T,self._data[lo:hi])
                     chisq[o] = result[1][0]
                     max_flux[o] = numpy.sum(result[0])
@@ -1340,6 +1342,8 @@ class Spectrum1D(object):
             par_err.restoreResult()
             par._parameters_err=par_err._parameters
 
+
+
     def fitSepGauss(self, centres, aperture, init_back=0.0, ftol=1e-8, xtol=1e-8, plot=False, warning=False):
 
         ncomp = len(centres)
@@ -1384,6 +1388,10 @@ class Spectrum1D(object):
                     pylab.show()
         return out
 
+
+
+
+
     def obtainGaussFluxPeaks(self, pos, sigma, indices,  replace_error=1e10, plot=False):
         fibers = len(pos)
         aperture=3
@@ -1400,13 +1408,13 @@ class Spectrum1D(object):
             self._error=numpy.ones_like(self._data)
 
         fact = numpy.sqrt(2.*numpy.pi)
-        A=old_div(1.0*numpy.exp(-0.5*(old_div((self._wave[:, numpy.newaxis]-pos[numpy.newaxis, :]),sigma[numpy.newaxis, :]))**2),(fact*sigma[numpy.newaxis, :]))
+        A=1.0*numpy.exp(-0.5*((self._wave[:, numpy.newaxis]-pos[numpy.newaxis, :])/sigma[numpy.newaxis, :])**2)/(fact*sigma[numpy.newaxis, :])
         select = A>0.0001
-        A=old_div(A,self._error[:, numpy.newaxis])
+        A=A/self._error[:, numpy.newaxis]
 
         B = sparse.csr_matrix( (A[select],(indices[0][select],indices[1][select])), shape=(self._dim,fibers) ).todense()
-        out= sparse.linalg.lsqr(B, old_div(self._data,self._error), atol=1e-7, btol=1e-7, conlim=1e13)
-        error = numpy.sqrt(old_div(1,numpy.sum((A**2), 0)))
+        out= sparse.linalg.lsqr(B, self._data/self._error, atol=1e-7, btol=1e-7, conlim=1e13)
+        error = numpy.sqrt(1/numpy.sum((A**2), 0))
         if bad_pix is not None and numpy.sum(bad_pix)>0:
             error[bad_pix]=replace_error
         if plot==True:
@@ -1428,12 +1436,12 @@ class Spectrum1D(object):
         select = numpy.logical_and(select_start, select_end)
         if self._mask is not None:
             select = numpy.logical_and(select, numpy.logical_not(self._mask))
-        if method!='mean' and method!='median' and method!='sum':
+        if method != 'mean' and method != 'median' and method != 'sum':
             pass
         elif method=='mean':
             flux = numpy.mean(self._data[select])
             if self._error is not None:
-                error = numpy.sqrt(old_div(numpy.sum(self._error[select]**2),numpy.sum(select)**2))
+                error = numpy.sqrt(numpy.sum(self._error[select]**2)/numpy.sum(select)**2)
             else:
                 error = 0
         return flux, error

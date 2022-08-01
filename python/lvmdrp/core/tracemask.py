@@ -1,10 +1,6 @@
-from __future__ import print_function
-from __future__ import division
-from builtins import range
-from past.utils import old_div
 from lvmdrp.core.fiberrows import FiberRows
 from lvmdrp.core import fit_profile
-import numpy, pylab
+import numpy
 
 
 class TraceMask(FiberRows):
@@ -100,7 +96,7 @@ class TraceMask(FiberRows):
         for i in first:
             if select_wave[i]==True:
                 (dist, bad_mask) = self.getFiberDist(i) # get the fiber distance for the dispersion column i
-                change = old_div(init_dist,dist) # compute the relative change in the fiber distance compared to the reference dispersion column
+                change = init_dist/dist # compute the relative change in the fiber distance compared to the reference dispersion column
                 change_dist[:, i] = change # store the changes into array
                 good_mask= numpy.logical_not(bad_mask)
                 select_good = numpy.logical_and(numpy.logical_and(change>0.5, change<2.0), good_mask) # masked unrealstic changes
@@ -120,7 +116,7 @@ class TraceMask(FiberRows):
         for i in second:    
             if select_wave[i]==True:
                 (dist, mask) = self.getFiberDist(i) # get the fiber distance for the dispersion column i
-                change = old_div(init_dist,dist) # compute the relative change in the fiber distance compared to the reference dispersion column
+                change = init_dist/dist # compute the relative change in the fiber distance compared to the reference dispersion column
                 change_dist[:, i] = change # store the changes into array
                 good_mask= numpy.logical_not(bad_mask)
                 select_good = numpy.logical_and(numpy.logical_and(change>0.5, change<2.0), good_mask) # masked unrealstic changes
@@ -143,7 +139,7 @@ class TraceMask(FiberRows):
             
             
         wave = numpy.arange(fit_par.shape[1]) # create coordinates in dispersion direction
-     #   print wave[select_wave]
+     #   print(wave[select_wave])
         fit_par_smooth=numpy.zeros_like(fit_par) # empty array for the smooth polynomial fit parameters
         # iterate over the order of the fitted polynomial in cross-dispersion direction
         for j in range(len(poly_cross)):
@@ -164,7 +160,7 @@ class TraceMask(FiberRows):
         for i in range(len(wave)):
            change_dist[:, i] = numpy.polyval(fit_par_smooth[:, i], x) # replace the relative fiber distance with their polynomial smoothed values
         
-        dist_new = old_div(init_dist[:, numpy.newaxis],change_dist) # convert relative fiber distance back to absolute fiber distance with the reference 
+        dist_new = init_dist[:, numpy.newaxis]/change_dist # convert relative fiber distance back to absolute fiber distance with the reference 
         new_trace = numpy.zeros_like(self._data) # create empty array for the full trace mask
         new_trace[1:, :] = numpy.cumsum(dist_new, axis=0) # create absolute positions with an arbitrary zero-point
         select_wave=numpy.sum(self._mask, axis=0)<self._fibers

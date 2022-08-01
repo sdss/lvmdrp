@@ -1,27 +1,24 @@
-from __future__ import print_function
-from __future__ import division
-from lvmdrp.core.fiberrows import FiberRows
-
-from future import standard_library
-standard_library.install_aliases()
-from builtins import range
-from past.utils import old_div
-from astropy.io import fits as pyfits
 import sys, numpy
-from scipy import interpolate
+from astropy.io import fits as pyfits
 try:
-  import pylab
+  import pylab,matplotlib
+  from matplotlib import pyplot as plt
 except:
   pass
-import os
 import time
 from multiprocessing import Pool
 from multiprocessing import cpu_count
-from lvmdrp.core.image import Image, combineImages, glueImages, loadImage
-from lvmdrp.core.tracemask import TraceMask
+from lvmdrp.core import fit_profile
+from scipy import ndimage
+from scipy import optimize
+from scipy import sparse
+from scipy.sparse import linalg
+from scipy.sparse.linalg import linsolve
+from lvmdrp.core.image import loadImage, Image, combineImages
 from lvmdrp.core.spectrum1d import Spectrum1D
-from lvmdrp.core.rss import RSS
-from lvmdrp.utils.decorators import missing_files
+from lvmdrp.core.tracemask import TraceMask
+from lvmdrp.core.fiberrows import FiberRows
+
 import multiprocessing
 from types import *
 
@@ -75,11 +72,11 @@ def detCos_drp(image,  out_image,   rdnoise='2.9', sigma_det='5', rlim='1.2', it
 	iterations = int(iter)
 	sigma= float(fwhm_gauss)/2.354
 	error_box = replace_box.split(',')
-	err_box_x = float(error_box[0])
-	err_box_y = float(error_box[1])
+    err_box_x = int(error_box[0])
+    err_box_y = int(error_box[1])
 	replace_box = replace_box.split(',')
-	box_x = float(replace_box[0])
-	box_y = float(replace_box[1])
+    box_x = int(replace_box[0])
+    box_y = int(replace_box[1])
 	increase_radius=int(increase_radius)
 	verbose=int(verbose)
 	try:
@@ -154,7 +151,7 @@ def detCos_drp(image,  out_image,   rdnoise='2.9', sigma_det='5', rlim='1.2', it
 		result = []
 		if cpus>1:
 			fine=out.convolveGaussImg(sigma, sigma, mask=True)
-			fine_norm = old_div(out,fine)
+            fine_norm = out/fine
 			select_neg = fine_norm<0
 			fine_norm.setData(data=0, select=select_neg)
 			pool = Pool(cpus)
@@ -183,7 +180,7 @@ def detCos_drp(image,  out_image,   rdnoise='2.9', sigma_det='5', rlim='1.2', it
 			Lap = result[0].get()
 			Lap2 = result[1].get()
 			pool.terminate()
-			S = old_div(Lap,(noise*2)) # normalize Laplacian image by the noise
+            S = Lap/(noise*2) # normalize Laplacian image by the noise
 			S_prime = S-S.medianImg((5, 5)) # cleaning of the normalized Laplacian image
 		else:
 			sub = out.subsampleImg(2) # subsample image
@@ -191,11 +188,11 @@ def detCos_drp(image,  out_image,   rdnoise='2.9', sigma_det='5', rlim='1.2', it
 			select_neg = conv<0
 			conv.setData(data=0, select=select_neg)  # replace all negative values with 0
 			Lap = conv.rebin(2, 2) # rebin the data to original resolution
-			S = old_div(Lap,(noise*2)) # normalize Laplacian image by the noise
+            S = Lap/(noise*2) # normalize Laplacian image by the noise
 			S_prime = S-S.medianImg((5, 5)) # cleaning of the normalized Laplacian image
 			fine=out.convolveGaussImg(sigma, sigma, mask=True) # convolve image with a 2D Gaussian
 
-			fine_norm = old_div(out,fine)
+            fine_norm = out/fine
 			select_neg = fine_norm<0
 			fine_norm.setData(data=0, select=select_neg)
 			sub_norm = fine_norm.subsampleImg(2) # subsample image
@@ -278,7 +275,7 @@ def LACosmic_drp(image,  out_image,  sigma_det='5', flim='1.1', iter='3', sig_ga
 
 			Examples
 			----------------
-			user:> lvmdrp image LACosmic IMAGE.fits MASK.fits CLEAN.fits 5 flim=1.1 sig_gauss=0.8,0.8 replace_box=5,5 increase_radius=1
+            user:> lvmdrp image LACosmic IMAGE.fits MASK.fits CLEAN.fits 5 flim=1.1 sig_gauss=0.8,0.8 replace_box=5,5 increase_radius=1
 	"""
 	# convert all parameters to proper type
 	sigma_det = float(sigma_det)
@@ -291,8 +288,8 @@ def LACosmic_drp(image,  out_image,  sigma_det='5', flim='1.1', iter='3', sig_ga
 	sigma_x = float(sig_gauss[0])
 	sigma_y = float(sig_gauss[1])
 	replace_box = replace_box.split(',')
-	box_x = float(replace_box[0])
-	box_y = float(replace_box[1])
+    box_x = int(replace_box[0])
+    box_y = int(replace_box[1])
 	increase_radius=int(increase_radius)
 	verbose=int(verbose)
 	try:
@@ -344,7 +341,7 @@ def LACosmic_drp(image,  out_image,  sigma_det='5', flim='1.1', iter='3', sig_ga
 		result = []
 		if cpus>1:
 			fine=out.convolveGaussImg(sigma_x, sigma_y)
-			fine_norm = out / fine
+            fine_norm = out/fine
 			select_neg = fine_norm<0
 			fine_norm.setData(data=0, select=select_neg)
 			pool = Pool(cpus)
@@ -373,7 +370,7 @@ def LACosmic_drp(image,  out_image,  sigma_det='5', flim='1.1', iter='3', sig_ga
 			Lap = result[0].get()
 			Lap2 = result[1].get()
 			pool.terminate()
-			S = old_div(Lap,(noise*4)) # normalize Laplacian image by the noise
+            S = Lap/(noise*4) # normalize Laplacian image by the noise
 			S_prime = S-S.medianImg((err_box_y, err_box_x)) # cleaning of the normalized Laplacian image
 
 
@@ -383,11 +380,11 @@ def LACosmic_drp(image,  out_image,  sigma_det='5', flim='1.1', iter='3', sig_ga
 			select_neg = conv<0
 			conv.setData(data=0, select=select_neg)  # replace all negative values with 0
 			Lap = conv.rebin(2, 2) # rebin the data to original resolution
-			S = Lap / noise*4 # normalize Laplacian image by the noise
+            S = Lap/(noise*4) # normalize Laplacian image by the noise
 			S_prime = S-S.medianImg((err_box_y, err_box_x)) # cleaning of the normalized Laplacian image
 			fine=out.convolveGaussImg(sigma_x, sigma_y) # convolve image with a 2D Gaussian
-			# fine.writeFitsData('s_prime.fits')
-			fine_norm = out / fine
+#        fine.writeFitsData('s_prime.fits')
+            fine_norm = out/fine
 			select_neg = fine_norm<0
 			fine_norm.setData(data=0, select=select_neg)
 			sub_norm = fine_norm.subsampleImg() # subsample image
@@ -435,7 +432,7 @@ def addCCDMask_drp(image, mask, replaceError='1e10'):
 
 			Examples
 			----------------
-			user:> lvmdrp image addCDDMask IMAGE.fits MASK.fits
+            user:> lvmdrp image addCDDMask IMAGE.fits MASK.fits
 	"""
 
 	replaceError = float(replaceError)
@@ -484,7 +481,7 @@ def findPeaksAuto_drp(image, out_peaks_file, nfibers,  disp_axis='X', threshold=
 
 			Examples
 			----------------
-			user:> lvmdrp image findPeaksAuto IMAGE.fits OUT_PEAKS.txt 382  method='gauss', init_sigma=1.3
+            user:> lvmdrp image findPeaksAuto IMAGE.fits OUT_PEAKS.txt 382  method='gauss', init_sigma=1.3
 	"""
 	# convert all parameters to proper type
 	npeaks=int(nfibers)
@@ -532,11 +529,126 @@ def findPeaksAuto_drp(image, out_peaks_file, nfibers,  disp_axis='X', threshold=
 	if verbose==1:
 		# control plot for the peaks NEED TO BE REPLACE BY A PROPER VERSION AND POSSIBLE IMPLEMENTAION FOR A GUI
 		print('%i Fibers found'%(len(centers)))
-		pylab.figure(figsize=(20,7))
 		pylab.plot(cut._data, '-k')
 		pylab.plot(peaks[0],peaks[2] ,'or')
 		pylab.plot(centers, numpy.ones(len(centers))*4000.0, 'xg')
 		pylab.show()
+
+def findPeaksOffset_drp(image, peaks_master, out_peaks_file, disp_axis='X', threshold='1500', median_box='8', median_cross='1', slice='', method='gauss',  init_sigma='1.0',accuracy=1.2):
+
+    threshold=float(threshold)
+    median_box=int(median_box)
+    median_cross=int(median_cross)
+    init_sigma = float(init_sigma)
+
+    # Load Image
+    img = loadImage(image)
+
+    # swap axes so that the dispersion axis goes along the x axis
+    if disp_axis=='X' or disp_axis=='x':
+        pass
+    elif disp_axis=='Y' or disp_axis=='y':
+       img.swapaxes()
+
+    # perform median filtering along the dispersion axis to clean cosmic rays
+    img = img.medianImg((median_cross, median_box))
+
+    # if no slice is given find the cross-dispersion cut with the highest signal
+    if slice=='':
+        median_cut=img.collapseImg(axis='y', mode='median') #median collapse of image along cross-dispersion axis
+        maximum = median_cut.max() #get maximum value along dispersion axis
+        column=maximum[2] # pixel position of maximum value
+        cut = img.getSlice(column, axis='y') # extract this column from image
+    else:
+        column = int(slice) # convert column to integer value
+        cut = img.getSlice(column, axis='y') # extract this column from image
+
+    master_file = open(peaks_master, 'r')
+    lines = master_file.readlines()
+    fiber = numpy.zeros(len(lines), dtype=numpy.int16)
+    pixel = numpy.zeros(len(lines), dtype=numpy.int16)
+    ref_pos = numpy.zeros(len(lines), dtype=numpy.float32)
+    fib_qual = []
+    for i in range(len(lines)):
+        line = lines[i].split()
+        fiber[i] = int(line[0])
+        pixel[i] = int(line[1])
+        ref_pos[i] = float(line[2])
+        fib_qual.append(line[3])
+    fib_qual=numpy.array(fib_qual)
+
+    select_good = fib_qual=='GOOD'
+    #npeaks=numpy.sum(select_good)
+    # find location of peaks (local maxima) either above a fixed threshold or to reach a fixed number of peaks
+    
+    accepted = False
+    offset = 0.0
+    slope = 0.0
+    
+    ref_positions = ref_pos[select_good]
+    while accepted is False:
+        #if numpy.sum(select_weak)>0:
+        #    select = numpy.logical_and(select_good_weak, select_weak)
+        #    pylab.plot(peaks_weak_good[0][select[select_good_weak]],peaks_weak_good[2] [select[select_good_weak]],'ob')
+        peaks = cut.findPeaks(threshold=threshold)
+        centers = cut.measurePeaks(peaks[0], method, init_sigma, threshold=0, max_diff=1.0)[0]
+        plt.clf()
+        plt.plot(cut._data, '-k')
+        plt.plot(peaks[0],peaks[2] ,'or')
+        plt.plot(centers, numpy.ones(len(centers))*2000.0, 'xg')
+        mpeaks = plt.plot(ref_positions+(ref_positions-ref_positions[0])*slope+offset,numpy.ones(numpy.sum(select_good))*2000.0,'+b')
+        plt.show()
+        print('New Threshold (%.1f):'%(threshold))
+        line = sys.stdin.readline()
+        try:
+            threshold = float(line)
+        except:
+            accepted=True
+        print('New Offset (%.1f):'%(offset))
+        line = sys.stdin.readline()
+        try:
+            offset = float(line)
+        except:
+            pass
+        print('New slope (%.1f):'%(slope))
+        line = sys.stdin.readline()
+        try:
+            slope = float(line)
+        except:
+            pass
+        
+    #expect_first = ref_pos[select_good][0]
+    #shift_peaks=peaks_good[0][0]-expect_first
+    #if expect_first>=5 and shift_peaks>5:
+    #    idx = numpy.indices(cut._data.shape)[0]
+        #while ref_pos[select_good][-1]+shift_peaks+2>cut._data.shape[0]:
+        #    last_fiber = idx[select_good][-1]
+    
+    
+    #npeaks = numpy.sum(select_good)
+    #peaks_good = cut.findPeaks(threshold=threshold, npeaks=npeaks)
+    
+    #centers = peaks_ref
+
+
+    #round_cent = numpy.round(centers._data).astype('int16') # round the subpixel peak positions to their nearest integer value
+    file_out = open(out_peaks_file, 'w')
+    
+    file_out.write('%i\n' %(column))
+    for i in range(len(ref_pos)):
+        position = (ref_pos[i]-ref_positions[0])*slope+offset+ref_pos[i]
+        if select_good[i]:
+            diff_arg = numpy.argmin(numpy.fabs(position-centers))
+            diff = position-centers[diff_arg]
+            if numpy.fabs(diff)<accuracy:
+                file_out.write('%i %i %e %i\n'%(i+1, numpy.round(centers[diff_arg]).astype('int16'), centers[diff_arg], 0))
+            else:
+                file_out.write('%i %i %e %i\n'%(i+1, numpy.round(position).astype('int16'), position, 1))
+        else:
+            file_out.write('%i %i %e %i\n'%(i+1, numpy.round(position).astype('int16'), position, 1))
+    file_out.close()
+
+        
 
 def findPeaksMaster_drp(image, peaks_master, out_peaks_file, disp_axis='X', threshold='1500', threshold_weak='500', median_box='8', median_cross='1', slice='', method='gauss',  init_sigma='1.0', verbose='1'):
 
@@ -634,6 +746,7 @@ def findPeaksMaster_drp(image, peaks_master, out_peaks_file, disp_axis='X', thre
 		pylab.plot(centers._data, numpy.ones(len(centers._data))*2000.0, 'xg')
 		pylab.show()
 
+
 def findPeaksMaster2_drp(image, peaks_master, out_peaks_file, disp_axis='X', threshold='1500', threshold_weak='500', median_box='8', median_cross='1', slice='', method='gauss',  init_sigma='1.0', border='4', verbose='1'):
 
 	threshold=float(threshold)
@@ -674,6 +787,7 @@ def findPeaksMaster2_drp(image, peaks_master, out_peaks_file, disp_axis='X', thr
 	fib_qual = []
 	for i in range(len(lines)):
 		line = lines[i].split()
+        #print(line)
 		fiber[i] = int(line[0])
 		pixel[i] = int(line[1])
 		ref_pos[i] = float(line[2])
@@ -707,10 +821,10 @@ def findPeaksMaster2_drp(image, peaks_master, out_peaks_file, disp_axis='X', thr
 		select_good = (fib_qual=='GOOD') & (numpy.rint(ref_pos+shift_peaks)>border) & (numpy.rint(ref_pos+shift_peaks)<len(cut._data)-border-1)
 		#print (ref_pos+shift_peaks)[select_good],len(cut._data)
 		if numpy.sum(select_good)>len(peaks_good):
-			threshold = threshold/1.1
+            threshold = threshold/1.02
 		elif numpy.sum(select_good)<len(peaks_good):
-			threshold = threshold*1.2
-		print(threshold,numpy.sum(select_good),len(peaks_good),shift_peaks)
+            threshold = threshold*1.05
+      #print(threshold,numpy.sum(select_good),len(peaks_good),shift_peaks)
 		#break
 	centers_good = cut.measurePeaks(peaks_good, method, init_sigma, threshold=0, max_diff=1.0)[0]
 	peaks_ref = Spectrum1D(wave=fiber, data=ref_pos )
@@ -775,7 +889,7 @@ def tracePeaks_drp(image, peaks_file, trace_out, disp_axis='X', method='gauss', 
 
 			Examples
 			----------------
-			user:> lvmdrp image tracePeaks IMAGE.fits OUT_PEAKS.txt x method=gauss steps=40 coadd=20 smooth_poly=-8
+            user:> lvmdrp image tracePeaks IMAGE.fits OUT_PEAKS.txt x method=gauss steps=40 coadd=20 smooth_poly=-8
 	"""
 
 	# convert all parameters to proper type
@@ -944,7 +1058,7 @@ def glueCCDFrames_drp(images, out_image, boundary_x, boundary_y, positions, orie
 
 			Examples
 			----------------
-			user:>  lvmdrp image glueCCDFrame FRAME1.fits, FRAME2.fits, FRAME3.fits, FRAME4.fits  FULLFRAME.fits  50,800 1,900  00,10,01,11 X,90,Y,180 gain='GAIN'
+            user:>  lvmdrp image glueCCDFrame FRAME1.fits, FRAME2.fits, FRAME3.fits, FRAME4.fits  FULLFRAME.fits  50,800 1,900  00,10,01,11 X,90,Y,180 gain='GAIN'
 			"""
    # convert input parameters to proper type
 	list_imgs= images.split(',')
@@ -998,7 +1112,7 @@ def glueCCDFrames_drp(images, out_image, boundary_x, boundary_y, positions, orie
 	full_img = glueImages(imgs, pos)
 
 	# adjust FITS header information
-	full_img.removeHdrEntries(['GAIN','RDNOISE', ''])
+    full_img.removeHdrEntries(['GAIN','RDNOISE', 'COMMENT',''])
 	# add gain keywords for the different subimages (CDDs/Amplifies)
 	if gain!='':
 		for i in range(len(imgs)):
@@ -1030,7 +1144,7 @@ def combineImages_drp(images, out_image, method='median', k='3.0'):
 	imgs=[]
 	for i in list_imgs:
 		#load subimages from disc and append them to a list
-		imgs.append(loadImage(i))
+        imgs.append(loadImage(i.replace('\n','')))
 
 	combined_img = combineImages(imgs, method=method, k=k)
 	#write out FITS file
@@ -1063,13 +1177,14 @@ def subtractStraylight_drp(image, trace, stray_image, clean_image, disp_axis='X'
 
 			Examples
 			----------------
-			user:> lvmdrp image subtractStrylight IMAGE.fits TRACE.fits CLEAN.fits x aperture=9 poly_cross=6 smooth_gauss=20.0
+            user:> lvmdrp image subtractStrylight IMAGE.fits TRACE.fits CLEAN.fits x aperture=9 poly_cross=6 smooth_gauss=20.0
 	"""
 	# convert input parameters to proper type
 	aperture = int(aperture)
 	poly_cross=int(poly_cross)
 	smooth_gauss = float(smooth_gauss)
 	smooth_disp = int(smooth_disp)
+
 
 	# load image data
 	img = loadImage(image)
@@ -1080,46 +1195,39 @@ def subtractStraylight_drp(image, trace, stray_image, clean_image, disp_axis='X'
 		pass
 	elif disp_axis=='Y' or disp_axis=='y':
 		img.swapaxes()
-	initial_mask = img.getMask()
-	if initial_mask is None:
-		initial_mask = numpy.zeros(img._dim, dtype=numpy.uint16)
-		img._mask= numpy.zeros(img._dim, dtype=numpy.uint16)
-   #
+    
 	# load trace mask
 	trace_mask = TraceMask()
 	trace_mask.loadFitsData(trace, extension_data=0)
    # trace_mask.clipTrace(img._dim[0])
-	# mask regions around each fiber within a given cross-dispersion aperture
 
-	img._mask[initial_mask==1]=True
-	img._mask = img._mask.astype('bool')
-	img_median = img.replaceMaskMedian(box_x=100, box_y=0)
-	img_median._mask[initial_mask==1]=False
+
+    #if img._mask is not None:
+    #    img._data[img._mask==1] = numpy.nan
+
+    # smooth image along dispersion axis with a median filter excluded NaN values bas
+    img_median = img.medianImg((1, smooth_disp),use_mask=True)
+
+	# mask regions around each fiber within a given cross-dispersion aperture
 	img_median.maskFiberTraces(trace_mask, aperture=aperture, parallel=parallel)
 
-	# smooth image along dispersion axis with a median filter (not taken masked pixel into account)
-	img_median2 = img_median.medianImg((1, smooth_disp))
-	#img_median2._mask[initial_mask==1]=False
-
-	##
-	##img_median = img.filterMinImg((3, 20))
-	# further smooth image along dispersion axis with a Gaussian filter  of 2 pixel width (not taken masked pixel into account)
-	##img_gauss = img_median.convolveGaussImg(smooth_disp/2.0, 0)
 	# fit the signal in unmaksed areas along cross-dispersion axis independently with a polynom of a given order
-	img_fit = img_median2.fitPoly(order=poly_cross, plot=-1)
+    img_fit = img_median.fitPoly(order=poly_cross, plot=-1)
 
 	# smooth the results by 2D Gaussian filter of given with (cross- and dispersion axis have equal width)
 	img_smooth =img_fit.convolveGaussImg(smooth_gauss, smooth_gauss)
+    
 	# subtract smoothed background signal from origianal image
+    img = loadImage(image)
+    
+    if disp_axis=='X' or disp_axis=='x':
+        pass
+    elif disp_axis=='Y' or disp_axis=='y':
+       img.swapaxes()
+       
 	img_out = img-img_smooth
 	##img_out = img-img_fit
 
-
-	# replace initial mask
-	if initial_mask is None:
-		img_out.removeMask()
-	else:
-		img_out.setData(mask=initial_mask)
 
 	#restore original orientation of image
 	if disp_axis=='X' or disp_axis=='x':
@@ -1176,7 +1284,7 @@ def traceFWHM_drp(image, trace, fwhm_out, disp_axis='X', blocks='20', steps='100
 
 			Examples
 			----------------
-			user:> lvmdrp image traceFWHM IMAGE.fits TRACE.fits FWHM.fits x blocks=32 steps=50 poly_disp=20 clip=2,6 parallel=2
+            user:> lvmdrp image traceFWHM IMAGE.fits TRACE.fits FWHM.fits x blocks=32 steps=50 poly_disp=20 clip=2,6 parallel=2
 	"""
 
 	# convert input parameters to proper type
@@ -1254,6 +1362,7 @@ def traceFWHM_drp(image, trace, fwhm_out, disp_axis='X', blocks='20', steps='100
 	# write out FWHM trace to FITS file
 	traceFWHM.writeFitsData(fwhm_out)
 
+
 def offsetTrace_drp(image, trace, disp, lines, logfile,  blocks='15', disp_axis='X',  init_offset='0.0', size='20'):
 	"""
 			Measures the offset in the fiber trace in  cross-dispersion direction in an object raw frame compared to the traces measured from a continuum lamp frame.
@@ -1285,7 +1394,7 @@ def offsetTrace_drp(image, trace, disp, lines, logfile,  blocks='15', disp_axis=
 
 			Examples
 			----------------
-			user:> lvmdrp image offsetTrace IMAGE.fits TRACE.fits DISP.fits  blocks=32 size=30
+            user:> lvmdrp image offsetTrace IMAGE.fits TRACE.fits DISP.fits  blocks=32 size=30
 	"""
 	lines = lines.split(',')
 	size = float(size)
@@ -1402,10 +1511,10 @@ def offsetTrace2_drp(image, trace, trace_fwhm, disp, lines, logfile,  blocks='15
 
 			Examples
 			----------------
-			user:> lvmdrp image offsetTrace IMAGE.fits TRACE.fits DISP.fits  blocks=32 size=30
+            user:> lvmdrp image offsetTrace IMAGE.fits TRACE.fits DISP.fits  blocks=32 size=30
 	"""
 	lines = lines.split(',')
-	size = float(size)
+    size = int(size)
 	blocks = int(blocks)
 	min_offset = float(min_offset)
 	max_offset = float(max_offset)
@@ -1511,7 +1620,7 @@ def extractSpec_drp(image, trace, out_rss,  method='optimal',  aperture='7', fwh
 
 			Examples
 			----------------
-			user:> lvmdrp image extractSpec IMAGE.fits TRACE.fits RSS.fits optimal fwhm=FWHM.fits
+            user:> lvmdrp image extractSpec IMAGE.fits TRACE.fits RSS.fits optimal fwhm=FWHM.fits
 	"""
 
 
@@ -1575,7 +1684,7 @@ def extractSpec_drp(image, trace, out_rss,  method='optimal',  aperture='7', fwh
 
 	if error is not None:
 		error[mask]=replace_error
-	rss = FiberRows(data=data, mask=mask, error=error, header = img.getHeader())
+    rss= FiberRows(data=data, mask=mask, error=error, header = img.getHeader())
 	rss.setHdrValue('NAXIS2',  data.shape[0])
 	rss.setHdrValue('NAXIS1',  data.shape[1])
 	rss.setHdrValue('DISPAXIS',  1)
@@ -1603,7 +1712,7 @@ def calibrateSDSSImage_drp(file_in, file_out, field_file):
 
 			Examples
 			----------------
-			user:> lvmdrp image calibrateSDSSImage fpC-001453-g4-0030.fit.gz SDSS_calib.fits drField-001453-4-40-0030.fit
+            user:> lvmdrp image calibrateSDSSImage fpC-001453-g4-0030.fit.gz SDSS_calib.fits drField-001453-4-40-0030.fit
 	"""
 	image = loadImage(file_in)
 	calImage = image.calibrateSDSS(field_file)
@@ -1614,8 +1723,12 @@ def subtractBias_drp(file_in, file_out, bias, compute_error='1', boundary_x='', 
 	subtract_light= bool(int(subtract_light))
 	compute_error = bool(int(compute_error))
 	image = loadImage(file_in)
+    #print('image',image._data)
 	bias_frame = loadImage(bias)
+    #print('bias',bias_frame._data)
+    
 	clean=image-bias_frame
+    #print('clean',clean._data)
 	if boundary_x!='':
 		bound_x = boundary_x.split(',')
 	else:
@@ -1632,7 +1745,7 @@ def subtractBias_drp(file_in, file_out, bias, compute_error='1', boundary_x='', 
 		except KeyError:
 			gain=float(gain)
 		clean=clean*gain
-		print(clean._dim)
+        #print(clean._dim)
 
 	if rdnoise!='':
 		# get gain value
@@ -1646,7 +1759,7 @@ def subtractBias_drp(file_in, file_out, bias, compute_error='1', boundary_x='', 
 
 	if boundary_x!='' or boundary_y!='':
 		straylight=clean.cutOverscan(bound_x, bound_y,subtract_light)
-		print(straylight)
+        #print(straylight)
 
 
 	clean.writeFitsData(file_out)
@@ -1782,7 +1895,7 @@ def testres_drp(image, trace, fwhm, flux):
 	fact = numpy.sqrt(2.*numpy.pi)
 	for i in range(img._dim[1]):
 	  #  print i
-		A=old_div(1.0*numpy.exp(-0.5*(old_div((x[:, numpy.newaxis]-trace_mask._data[:, i][numpy.newaxis, :]),abs(trace_fwhm._data[:, i][numpy.newaxis, :]/2.354)))**2),(fact*abs(trace_fwhm._data[:, i][numpy.newaxis, :]/2.354)))
+        A=1.0*numpy.exp(-0.5*((x[:, numpy.newaxis]-trace_mask._data[:, i][numpy.newaxis, :])/abs(trace_fwhm._data[:, i][numpy.newaxis, :]/2.354))**2)/(fact*abs(trace_fwhm._data[:, i][numpy.newaxis, :]/2.354))
 		spec = numpy.dot(A, trace_flux._data[:, i])
 		out[:, i] = spec
 		if i==1000:
@@ -1791,11 +1904,11 @@ def testres_drp(image, trace, fwhm, flux):
 			pylab.show()
 
 	hdu = pyfits.PrimaryHDU(img._data-out)
-	hdu.writeto('res.fits', overwrite=True)
+    hdu.writeto('res.fits', clobber=True)
 	hdu = pyfits.PrimaryHDU(out)
 	hdu.writeto('fit.fits', overwrite=True)
 
-	hdu = pyfits.PrimaryHDU(old_div((img._data-out),img._data))
+	hdu = pyfits.PrimaryHDU((img._data-out) / img._data)
 	hdu.writeto('res_rel.fits', overwrite=True)
 
 @missing_files(["BAD_CALIBRATION_FRAMES"], "in_image")

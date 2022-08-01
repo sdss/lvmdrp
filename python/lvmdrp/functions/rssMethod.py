@@ -1,10 +1,5 @@
-from __future__ import print_function
-from __future__ import division
-from builtins import str
-from builtins import range
-from past.utils import old_div
-import collections
-import numpy
+import sys, numpy, time
+from astropy.io import fits as pyfits
 try:
   import matplotlib
   from matplotlib import pyplot as plt
@@ -17,15 +12,15 @@ from scipy import ndimage
 from scipy import optimize
 from scipy import stats
 from scipy import interpolate
-from lvmdrp.core.rss  import *
-from lvmdrp.core.cube  import *
-from lvmdrp.core.image import *
-from lvmdrp.core.passband import *
+from lvmdrp.core.fiberrows  import FiberRows
+from lvmdrp.core.rss  import RSS, loadRSS
+from lvmdrp.core.spectrum1d  import Spectrum1D
+from lvmdrp.core.cube  import Cube
+from lvmdrp.core.image import loadImage
+from lvmdrp.core.passband import PassBand
 
-from lvmdrp.core import fit_profile
+#from lvmdrp.core import fit_profile
 from lvmdrp.external import ancillary_func
-
-from lvmdrp.utils.decorators import missing_files
 
 
 description='Provides Methods to process Row Stacked Spectra (RSS) files'
@@ -47,7 +42,7 @@ def mergeRSS_drp(files_in, file_out,  mergeHdr='1'):
 
 			Examples
 			----------------
-			user:> lvmdrp rss mergeRSS RSS1.fits,RSS2.fits,RSS3.fits RSS_OUT.fits
+            user:> lvmdrp rss mergeRSS RSS1.fits,RSS2.fits,RSS3.fits RSS_OUT.fits
 	"""
 
 	files = files_in.split(',')
@@ -63,8 +58,8 @@ def mergeRSS_drp(files_in, file_out,  mergeHdr='1'):
 				rss.append(rss_add, append_hdr=True)
 	rss.writeFitsData(file_out)
 
-@missing_files(["BAD_CALIBRATION_FRAMES"], "arc_rss", "ref_line_file")
-def detWaveSolution_drp(arc_rss, disp_rss, res_rss, ref_line_file='', ref_spec='', pixel='', ref_lines='', poly_dispersion='-5', poly_fwhm='-3,-5', init_back='10.0',  aperture='13', flux_min='200.0', fwhm_max='10.0', rel_flux_limits='0.1,5.0', negative=False, verbose='1' ):
+
+def detWaveSolution_drp(arc_rss, prefix_out, ref_line_file='', ref_spec='', pixel='', ref_lines='', poly_dispersion='-5', poly_fwhm='-3,-5', init_back='10.0',  aperture='13', flux_min='200.0', fwhm_max='10.0', rel_flux_limits='0.1,5.0', fiberflat='', negative=False, verbose='1' ):
 	"""
 			Measures the pixel position of emission lines in wavelength UNCALIBRATED for all fibers of the RSS.
 			Starting from the initial guess of pixel positions for a given fiber, the program measures the position using
@@ -77,10 +72,9 @@ def detWaveSolution_drp(arc_rss, disp_rss, res_rss, ref_line_file='', ref_spec='
 			--------------
 			arc_rss : string
 					Input RSS FITS file name of the uncalibrated arc lamp exposure
-			disp_rss: string
-					Name of the FITS file in which the wavelength RSS pixel table is stored
-			res_rss: string
-					Name of the FITS file in which the spectral resolution (FWHM) RSS pixel table is stored
+            prefix_out : string
+                    PREFIX for the output RSS file containing the wavelength RSS pixel table (PREFIX.disp.fits) and
+                    the spectral resolution (FWHM) RSS pixel table (PREFIX.res.fits)
 			ref_line_file : string, optional with default: ''
 					ASCII file name containing the number of the reference fiber in the first row,
 					reference wavelength of emission line, its rough centroid pixel position a flag if the width of the
@@ -122,8 +116,8 @@ def detWaveSolution_drp(arc_rss, disp_rss, res_rss, ref_line_file='', ref_spec='
 
 			Examples
 			----------------
-			user:> lvmdrp rss detWaveSolution ARC_RSS.fits arc REF_FILE.txt poly_dispersion='-7' poly_fwhm='-4,-5'
-			user:> lvmdrp rss detWaveSolution ARC_RSS.fits arc ref_spec=100 pixel=200,500,1000 ref_lines=3000.0,5000.0,8000.0 flux_min=100.0
+            user:> lvmdrp rss detWaveSolution ARC_RSS.fits arc REF_FILE.txt poly_dispersion='-7' poly_fwhm='-4,-5'
+            user:> lvmdrp rss detWaveSolution ARC_RSS.fits arc ref_spec=100 pixel=200,500,1000 ref_lines=3000.0,5000.0,8000.0 flux_min=100.0
 	"""
 
 
@@ -140,8 +134,11 @@ def detWaveSolution_drp(arc_rss, disp_rss, res_rss, ref_line_file='', ref_spec='
 	rel_flux_limits=[float(limits[0]), float(limits[1])]
 	negative=bool(negative)
 	verbose=int(verbose)
+    if fiberflat != '':
+      fiberflat=fiberflat.split(',')
 
-	if ref_line_file!='':
+
+    if ref_line_file != '':
 		# load initial pixel positions and reference wavelength from txt config file NEED TO BE REPLACE BY XML SCHEMA
 		file_in = open(ref_line_file, 'r') # load file
 		lines = file_in.readlines() # read lines
@@ -185,6 +182,16 @@ def detWaveSolution_drp(arc_rss, disp_rss, res_rss, ref_line_file='', ref_spec='
 
 
 	(fibers, flux, cent_wave, fwhm, masked) = arc.measureArcLines(ref_spec, pixel, aperture=aperture, init_back=init_back, flux_min=flux_min, fwhm_max=fwhm_max, rel_flux_limits=rel_flux_limits, verbose=bool(verbose))
+    norm_flux = numpy.zeros_like(ref_lines)
+    for n in range(len(ref_lines)):
+      norm_flux[n] = numpy.mean(flux[numpy.logical_not(masked[:,n]),n])
+    if fiberflat != '':
+        flat_flux = numpy.mean(flux/norm_flux[numpy.newaxis,:],1)
+        wave = numpy.arange(float(fiberflat[0]),float(fiberflat[1])+float(fiberflat[2]),float(fiberflat[2]))
+        norm = numpy.ones((flux.shape[0],len(wave)),dtype=numpy.float32)
+        norm = norm*flat_flux[:,numpy.newaxis]
+        rss_flat=RSS(wave=wave,data=norm,header=arc.getHeader())
+        rss_flat.writeFitsData('%s.fits'%(fiberflat[3]))
 
 
 	# smooth the FWHM values for each ARC line in cross-dispersion direction
@@ -200,8 +207,8 @@ def detWaveSolution_drp(arc_rss, disp_rss, res_rss, ref_line_file='', ref_spec='
 			fwhm[:, i] = legandre_fwhm(fibers)
 		if i==-1:
 			#pylab.plot(fibers[select], fwhm_med, 'ok')
-			pylab.plot(fibers, masked[:, i])
-			#pylab.plot(fibers, cent_wave[:, i])
+            #pylab.plot(fibers, masked[:, i])
+            pylab.plot(fibers, cent_wave[:, i])
 			pylab.show()
    # Determine the wavelength solution
 	select_ref_lines = ref_lines>0.0 # select the lines for the wavelength calibration with
@@ -228,13 +235,11 @@ def detWaveSolution_drp(arc_rss, disp_rss, res_rss, ref_line_file='', ref_spec='
 
 			rms[i]= numpy.std(ref_lines[select_ref_lines][select]-legandre_wave(cent_wave[i, select_ref_lines][select])) # compute the rms of the polynomial
 			wave_sol[i, :] = legandre_wave(numpy.arange(arc._data.shape[1]))
-			if verbose>0 and i==verbose:
-				pylab.figure(figsize=(17, 5))
-				#pylab.plot(ref_lines[select_ref_lines][select], ref_lines[select_ref_lines][select]-legandre_wave(cent_wave[i, select_ref_lines][select]), 'ok')
-				pylab.plot(cent_wave[i, select_ref_lines][select],   ref_lines[select_ref_lines][select], 'ok', label="data")
-				pylab.plot(numpy.arange(arc._data.shape[1]), wave_sol[i, :], label="wave solution (AA)")
-				pylab.xlabel("dispersion axis (pixel)")
-				pylab.ylabel("wavelength (AA)")
+            if i==-1:
+                pylab.plot(ref_lines[select_ref_lines][select], ref_lines[select_ref_lines][select]-legandre_wave(cent_wave[i, select_ref_lines][select]), 'ok')
+                pylab.show()
+                pylab.plot(cent_wave[i, select_ref_lines][select],   ref_lines[select_ref_lines][select], 'ok')
+                pylab.plot(numpy.arange(arc._data.shape[1]),wave_sol[i, :] )
 				pylab.show()
 	##pylab.plot(masked_fib)
 	##pylab.plot(rms[good_fibers])
@@ -250,7 +255,7 @@ def detWaveSolution_drp(arc_rss, disp_rss, res_rss, ref_line_file='', ref_spec='
 
 	# Iterate over the fibers
 	for i in fibers:
-		fwhm_wave = dwave[i, cent_round[i, :]]*fwhm[i, :]
+        fwhm_wave = numpy.fabs(dwave[i, cent_round[i, :]])*fwhm[i, :]
 		if poly_fwhm_disp>0:
 			fit_fwhm= numpy.polyfit(cent_wave[i, select_lines], fwhm_wave[select_lines], poly_fwhm_disp )
 			fwhm_sol[i, : ] = numpy.polyval(fit_fwhm, numpy.arange(arc._data.shape[1]))
@@ -258,30 +263,27 @@ def detWaveSolution_drp(arc_rss, disp_rss, res_rss, ref_line_file='', ref_spec='
 			leg_poly_fwhm = fit_profile.LegandrePoly(numpy.zeros(-1*poly_fwhm_disp+1), min_x=0, max_x=arc._data.shape[1]-1 )
 			leg_poly_fwhm.fit(cent_wave[i, select_lines], fwhm_wave[select_lines])
 			fwhm_sol[i, :]=leg_poly_fwhm(numpy.arange(arc._data.shape[1]))
-		if verbose>0 and i==verbose:
-			pylab.figure(figsize=(17, 5))
-			pylab.plot(numpy.arange(arc._data.shape[1]-1),  dwave[i, :], '-r', label="wave sampling (AA)")
-			# print(cent_round)
-			# print(dwave[i, cent_round])
-			pylab.plot(cent_wave[i, select_lines], fwhm[i, select_lines], 'or', label="data (pixel)")
-			pylab.plot(cent_wave[i, select_lines], fwhm_wave[select_lines], 'ok', label="data (AA)")
-			pylab.plot(numpy.arange(arc._data.shape[1]), fwhm_sol[i, :], "b", label="LSF (AA)")
-			pylab.legend(loc=0, frameon=False)
-			pylab.xlabel("dispersion axis (pixel)")
-			# pylab.ylabel("LSF (AA)")
+        if i==-1:
+            pylab.plot(numpy.arange(arc._data.shape[1]-1),  numpy.fabs(dwave[i, :]), '-r')
+            print(cent_round)
+            print(dwave[i, cent_round])
+            pylab.plot(cent_wave[i, select_lines], fwhm[i, select_lines], 'or')
+            pylab.plot(cent_wave[i, select_lines], fwhm_wave[select_lines], 'ok')
+            pylab.plot(numpy.arange(arc._data.shape[1]), fwhm_sol[i, :])
 			pylab.show()
-	arc.setHdrValue('HIERARCH PIPE FWHM POLY', '%d'%(numpy.abs(poly_fwhm_disp)), 'Order of the resolution polynomial')
+    #print numpy.abs(poly_fwhm_disp)
+    arc.setHdrValue('hierarch PIPE FWHM POLY', '%d'%(numpy.abs(poly_fwhm_disp)), 'Order of the resolution polynomial')
 	fwhm_trace = FiberRows(data = fwhm_sol, header = arc.getHeader())
 	#arc.removeHdrEntries(keywords=['PIPE FWHM POLY'])
-	arc.setHdrValue('HIERARCH PIPE DISP POLY', '%d'%(numpy.abs(poly_dispersion)), 'Order of the dispersion polynomial')
-	arc.setHdrValue('HIERARCH PIPE DISP RMS MEDIAN', '%.4f'%(numpy.median(rms[good_fibers])), 'Median RMS of disp sol')
-	arc.setHdrValue('HIERARCH PIPE DISP RMS MIN', '%.4f'%(numpy.min(rms[good_fibers])), 'Min RMS of disp sol')
-	arc.setHdrValue('HIERARCH PIPE DISP RMS MAX', '%.4f'%(numpy.max(rms[good_fibers])), 'Max RMS of disp sol')
+    arc.setHdrValue('hierarch PIPE DISP POLY', '%d'%(numpy.abs(poly_dispersion)), 'Order of the dispersion polynomial')
+    arc.setHdrValue('hierarch PIPE DISP RMS MEDIAN', '%.4f'%(numpy.median(rms[good_fibers])), 'Median RMS of disp sol')
+    arc.setHdrValue('hierarch PIPE DISP RMS MIN', '%.4f'%(numpy.min(rms[good_fibers])), 'Min RMS of disp sol')
+    arc.setHdrValue('hierarch PIPE DISP RMS MAX', '%.4f'%(numpy.max(rms[good_fibers])), 'Max RMS of disp sol')
 
 	wave_trace = FiberRows(data = wave_sol, header = arc.getHeader())
 
-	wave_trace.writeFitsData(disp_rss)
-	fwhm_trace.writeFitsData(res_rss)
+    wave_trace.writeFitsData(prefix_out+'.disp.fits')
+    fwhm_trace.writeFitsData(prefix_out+'.res.fits')
 
 	return cent_wave[:, select_lines], fwhm_wave[select_lines]
 
@@ -305,12 +307,12 @@ def createPixTable_drp(rss_in, rss_out, arc_wave, arc_fwhm='', cropping=''):
 
 			Examples
 			----------------
-			user:> lvmdrp rss createPixTable RSS_IN.fits RSS_OUT.fits WAVE.fits
-			user:> lvmdrp rss createPixTable RSS_IN.fits RSS_OUT.fits WAVE.fits FWHM.fits
+            user:> lvmdrp rss createPixTable RSS_IN.fits RSS_OUT.fits WAVE.fits
+            user:> lvmdrp rss createPixTable RSS_IN.fits RSS_OUT.fits WAVE.fits FWHM.fits
 	"""
 	rss = RSS()
 	rss.loadFitsData(rss_in)
-	if cropping!='':
+    if cropping != '':
 		crop_start=int(cropping.split(',')[0])-1
 		crop_end=int(cropping.split(',')[1])-1
 	else:
@@ -326,17 +328,18 @@ def createPixTable_drp(rss_in, rss_out, arc_wave, arc_fwhm='', cropping=''):
 		rss._mask = rss._mask[:, crop_start:crop_end]
 
 	try:
-		rss.copyHdrKey(wave_trace, 'HIERARCH PIPE DISP RMS MEDIAN')
-		rss.copyHdrKey(wave_trace, 'HIERARCH PIPE DISP RMS MIN')
-		rss.copyHdrKey(wave_trace, 'HIERARCH PIPE DISP RMS MAX')
+        rss.copyHdrKey(wave_trace, 'PIPE DISP RMS MEDIAN')
+        rss.copyHdrKey(wave_trace, 'PIPE DISP RMS MIN')
+        rss.copyHdrKey(wave_trace, 'PIPE DISP RMS MAX')
 	except KeyError:
 		pass
 
-	if arc_fwhm!='':
+    if arc_fwhm != '':
 		fwhm_trace =FiberRows()
 		fwhm_trace.loadFitsData(arc_fwhm)
 		rss.setInstFWHM(fwhm_trace.getData()[0][:, crop_start:crop_end])
 	rss.writeFitsData(rss_out)
+
 
 def checkPixTable_drp(rss_in, ref_lines, logfile, blocks='15',  init_back='100.0', aperture='10'):
 	"""
@@ -364,8 +367,8 @@ def checkPixTable_drp(rss_in, ref_lines, logfile, blocks='15',  init_back='100.0
 
 			Examples
 			----------------
-			user:> lvmdrp rss checkPixTable RSS_IN.fits 4500.0,5577.4,6300.3 OFFSETWAVE.log
-			user:> lvmdrp rss checkPixTable RSS_IN.fits 4500.0,5577.4,6300.3 OFFSETWAVE.log aperture=14
+            user:> lvmdrp rss checkPixTable RSS_IN.fits 4500.0,5577.4,6300.3 OFFSETWAVE.log
+            user:> lvmdrp rss checkPixTable RSS_IN.fits 4500.0,5577.4,6300.3 OFFSETWAVE.log aperture=14
 	"""
 	centres = numpy.array(ref_lines.split(',')).astype('float')
 	init_back = float(init_back)
@@ -394,7 +397,7 @@ def checkPixTable_drp(rss_in, ref_lines, logfile, blocks='15',  init_back='100.0
 		fit_wave[i, :] = out[len(centres):2*len(centres)]
 		for j in range(len(centres)):
 			idx=numpy.argmin(numpy.abs(fit_wave[i, j]-spec._wave))
-			offset_pix[i, j] = old_div((fit_wave[i, j]-centres[j]),disp_pix[idx])
+            offset_pix[i, j] = (fit_wave[i, j]-centres[j])/disp_pix[idx]
 
 
 	blocks = numpy.array_split(numpy.arange(0, len(rss)), nblocks)
@@ -461,7 +464,7 @@ def correctPixTable_drp(rss_in, rss_out, logfile, ref_id, smooth_poly_cross='', 
 
 			Examples
 			----------------
-			user:> lvmdrp rss correctPixTable RSS_in.fits RSS_out.fits OFFSETWAVE.log RSS_REF_ID poly_disp=7
+            user:> lvmdrp rss correctPixTable RSS_in.fits RSS_out.fits OFFSETWAVE.log RSS_REF_ID poly_disp=7
 
 	"""
 
@@ -525,8 +528,7 @@ def correctPixTable_drp(rss_in, rss_out, logfile, ref_id, smooth_poly_cross='', 
 		rss[i]=spec
 	rss.writeFitsData(rss_out)
 
-@missing_files(["BAD_CALIBRATION_FRAMES"], "rss_in")
-def resampleWave_drp(rss_in, rss_out, method='spline', start_wave='', end_wave='', disp_pix='', err_sim='500', replace_error='1e10', correctHvel='',parallel='auto'):
+def resampleWave_drp(rss_in, rss_out, method='spline', start_wave='', end_wave='', disp_pix='', err_sim='500', replace_error='1e10', correctHvel='',compute_densities=0,parallel='auto'):
 	"""
 			Resamples the RSS with a wavelength in pixel table format to an RSS with a common wavelength solution for each fiber.
 			A Monte Carlo scheme can be used to propagte the error to the resample spectrum. Note that correlated noise is not taken
@@ -563,13 +565,14 @@ def resampleWave_drp(rss_in, rss_out, method='spline', start_wave='', end_wave='
 
 			Examples
 			----------------
-			user:> lvmdrp rss resampleWave RSS_in.fits RSS_out.fits
-			user:> lvmdrp rss resampleWave RSS_in.fits RSS_out.fits start_wave=3700.0 end_wave=7000.0 disp_pix=2.0 err_sim=0
+            user:> lvmdrp rss resampleWave RSS_in.fits RSS_out.fits
+            user:> lvmdrp rss resampleWave RSS_in.fits RSS_out.fits start_wave=3700.0 end_wave=7000.0 disp_pix=2.0 err_sim=0
 	"""
 	err_sim=int(err_sim)
 	replace_error=float(replace_error)
-
+    compute_densities = bool(compute_densities)
 	rss = loadRSS(rss_in)
+    #print(rss._error)
 	if start_wave=='':
 		start_wave=numpy.min(rss._wave)
 	else:
@@ -596,12 +599,18 @@ def resampleWave_drp(rss_in, rss_out, method='spline', start_wave='', end_wave='
 	rss._wave = rss._wave*(1+offset_vel/300000.0)
 
 	data = numpy.zeros((rss._fibers, len(ref_wave)), dtype=numpy.float32)
-	if rss._error is not None and err_sim!=0:
+    if rss._error is not None and err_sim != 0:
 		error = numpy.zeros((rss._fibers, len(ref_wave)), dtype=numpy.float32)
 	else:
 		error = None
 	mask = numpy.zeros((rss._fibers, len(ref_wave)), dtype='bool')
-
+    if compute_densities:
+        width_pix = numpy.zeros_like(rss._data)
+        width_pix[:,:-1] = numpy.fabs(rss._wave[:, 1:]-rss._wave[:, :-1])
+        width_pix[:,-1] = width_pix[:,-2]
+        rss._data = rss._data/width_pix
+        if rss._error is not None:
+            rss._error = rss._error/width_pix
 	if rss._wave is not None and len(rss._wave.shape)==2:
 		if parallel=='auto':
 			cpus = cpu_count()
@@ -652,7 +661,7 @@ def matchResolution_drp(rss_in, rss_out, targetFWHM, parallel='auto'):
 
 			Examples
 			----------------
-			user:> lvmdrp rss matchResolution RSS_in.fits RSS_out.fits 6.0
+            user:> lvmdrp rss matchResolution RSS_in.fits RSS_out.fits 6.0
 	"""
 	targetFWHM = float(targetFWHM)
 	rss = RSS()
@@ -686,6 +695,7 @@ def matchResolution_drp(rss_in, rss_out, targetFWHM, parallel='auto'):
 	rss.setHdrValue('hierarch PIPE SPEC RES', targetFWHM, 'FWHM in A of spectral resolution')
 	rss.writeFitsData(rss_out)
 
+
 def constructSkySpec_drp(rss_in, sky_out, clip_sigma='3.0', nsky='0', filter='', non_neg='1', plot='0'):
 	"""
 			Creates a average (sky) spectrum from the RSS, which stored either as a FITS or an ASCII file.
@@ -708,8 +718,8 @@ def constructSkySpec_drp(rss_in, sky_out, clip_sigma='3.0', nsky='0', filter='',
 
 			Examples
 			----------------
-			user:> lvmdrp rss constructSkySpec RSS_IN.fits SKY_OUT.fits 3.0
-			user:> lvmdrp rss constructSkySpec RSS_IN.fits SKY_OUT.txt
+            user:> lvmdrp rss constructSkySpec RSS_IN.fits SKY_OUT.fits 3.0
+            user:> lvmdrp rss constructSkySpec RSS_IN.fits SKY_OUT.txt
 	"""
 	clip_sigma=float(clip_sigma)
 	nsky = int(nsky)
@@ -721,15 +731,18 @@ def constructSkySpec_drp(rss_in, sky_out, clip_sigma='3.0', nsky='0', filter='',
 	median = numpy.zeros(len(rss), dtype=numpy.float32)
 	for i in range(len(rss)):
 		spec = rss[i]
-		##pylab.plot(spec._wave, spec._data)
+        
+        #pylab.plot(spec._wave, spec._data)
 		if spec._mask is not None:
 			if numpy.sum(numpy.logical_not(spec._mask))!=0:
 				median[i] = numpy.median(spec._data[numpy.logical_not(spec._mask)])
+                #print(median[i])
 			else:
 				median[i]=0
 		else:
 			median[i] = numpy.median(spec._data)
 	select_good = median!=0
+    
 	if clip_sigma>0.0 and nsky==0:
 		select = numpy.logical_and(numpy.logical_and(median<numpy.median(median[select_good])+clip_sigma*numpy.std(median[select_good])/2.0, median>numpy.median(median[select_good])-clip_sigma*numpy.std(median[select_good])/2.0), select_good)
 		sky_fib = numpy.sum(select)
@@ -743,8 +756,8 @@ def constructSkySpec_drp(rss_in, sky_out, clip_sigma='3.0', nsky='0', filter='',
 		sky_fib = numpy.sum(select)
 	rss.setHdrValue('hierarch PIPE NSKY FIB', sky_fib, 'Number of averaged sky fibers')
 	subRSS = rss.subRSS(select)
-	print(filter[0])
-	if filter[0]!='':
+
+    if filter[0] != '':
 		passband = PassBand()
 		passband.loadTxtFile(filter[0], wave_col=int(filter[1]),  trans_col=int(filter[2]))
 		(flux_rss, error_rss, min_rss, max_rss, std_rss) = passband.getFluxRSS(subRSS)
@@ -752,6 +765,7 @@ def constructSkySpec_drp(rss_in, sky_out, clip_sigma='3.0', nsky='0', filter='',
 		for m in range(len(flux_rss)):
 			if flux_rss[m]>0.0:
 				mag_flux[m] = passband.fluxToMag(flux_rss[m], system='Vega')
+
 		mag_mean = numpy.mean(mag_flux[mag_flux>0.0])
 		mag_min = numpy.min(mag_flux[mag_flux>0.0])
 		mag_max = numpy.max(mag_flux[mag_flux>0.0])
@@ -763,6 +777,7 @@ def constructSkySpec_drp(rss_in, sky_out, clip_sigma='3.0', nsky='0', filter='',
 
 	rss.writeFitsHeader(rss_in)
 	skySpec = subRSS.create1DSpec()
+
 
 	if plot==1:
 		pylab.plot(skySpec._wave, skySpec._data, 'ok')
@@ -791,12 +806,12 @@ def subtractSkySpec_drp(rss_in, rss_out, sky, factor='1', scale_region='', scale
 
 			Examples
 			----------------
-			user:> lvmdrp rss subtractSkySpec RSS_IN.fits RSS_OUT.fits SKY_SPEC.fits
+            user:> lvmdrp rss subtractSkySpec RSS_IN.fits RSS_OUT.fits SKY_SPEC.fits
 	"""
 
 	factor=numpy.array(factor).astype(numpy.float32)
 	scale_ind = bool(scale_ind)
-	if scale_region!='':
+    if scale_region != '':
 		region = scale_region.split( ',')
 		wave_region=[float(region[0]), float(region[1])]
 	rss = RSS()
@@ -805,7 +820,7 @@ def subtractSkySpec_drp(rss_in, rss_out, sky, factor='1', scale_region='', scale
 	sky_spec.loadFitsData(sky)
 	def optimize_sky(factor, test_spec, sky_spec, start_wave, end_wave):
 		wave = test_spec._wave
-		if test_spec._mask is not None:
+        if test_spec._mask is not None:
 			good_pix = numpy.logical_not(test_spec._mask)
 			select1 = numpy.logical_and(wave>start_wave, wave<end_wave)
 			if numpy.sum(good_pix[select1])>1:
@@ -814,19 +829,25 @@ def subtractSkySpec_drp(rss_in, rss_out, sky, factor='1', scale_region='', scale
 				select = select1
 		else:
 			select = numpy.logical_and(wave>start_wave, wave<end_wave)
+        if (numpy.sum(select)==0) or (numpy.sum(test_spec._data[select])==0):
+            raise RuntimeError
 		rms = numpy.std(test_spec._data[select]-sky_spec._data[select]*factor)
 		return rms
 
-	if numpy.all(rss._wave==sky_spec._wave) and scale_region!='':
+    if numpy.all(rss._wave==sky_spec._wave) and scale_region != '':
 		factors=numpy.zeros(len(rss), dtype=numpy.float32)
 		for i in range(len(rss)):
+            try:
 			optimum= optimize.fmin(optimize_sky, [1.0], args=(rss[i], sky_spec, wave_region[0], wave_region[1]), disp=0)
 			factors[i]=optimum[0]
+            except RuntimeError:
+                factors[i]=1.0
+                rss._mask[i,:] = True
 		select_good = factors>0.0
 		scale_factor = numpy.median(factors[select_good])
 		for i in range(len(rss)):
 			if scale_ind==True:
-				rss[i] = old_div(rss[i],factors[i])-sky_spec
+                rss[i] = rss[i]/factors[i]-sky_spec
 			else:
 
 				if factors[i]>0:
@@ -856,9 +877,10 @@ def subtractSkySpec_drp(rss_in, rss_out, sky, factor='1', scale_region='', scale
 			#pylab.plot(threads[i].get()._wave, threads[i].get()._data, '-r')
 			#pylab.show()
 
-	if scale_region!='':
+    if scale_region != '':
 		rss.setHdrValue('hierarch PIPE SKY SCALE',float('%.3f'%scale_factor),'sky spectrum scale factor')
 	rss.writeFitsData(rss_out)
+
 
 def splitFibers_drp(rss_in, splitted_out, contains):
 	"""
@@ -880,8 +902,8 @@ def splitFibers_drp(rss_in, splitted_out, contains):
 
 			Examples
 			----------------
-			user:> lvmdrp rss splitFibers RSS_IN.fits RSS_OBJ.fits,RSS_SKY.fits SKY,OBJ
-			user:> lvmdrp rss splitFibers RSS_IN.fits RSS_OBJ_SKY.fits,RSS_CAL.fits SKY;OBJ,SKY
+            user:> lvmdrp rss splitFibers RSS_IN.fits RSS_OBJ.fits,RSS_SKY.fits SKY,OBJ
+            user:> lvmdrp rss splitFibers RSS_IN.fits RSS_OBJ_SKY.fits,RSS_CAL.fits SKY;OBJ,SKY
 	"""
 	contains = contains.split(',')
 	splitted_out = splitted_out.split(',')
@@ -891,7 +913,9 @@ def splitFibers_drp(rss_in, splitted_out, contains):
 	for i in range(len(splitted_rss)):
 		splitted_rss[i].writeFitsData(splitted_out[i])
 
-def createFiberFlat_drp(rss_in, rss_out, smooth_poly='0', clip='', valid=''):
+
+
+def createFiberFlat_drp(rss_in, rss_out, smooth_poly='0', smooth_median='0', clip='', valid=''):
 	"""
 			Creates a fiberflat from a wavelength calibrated skyflat RSS by computing the
 			relative transmission to the median spectrum.
@@ -917,15 +941,16 @@ def createFiberFlat_drp(rss_in, rss_out, smooth_poly='0', clip='', valid=''):
 
 			Examples
 			----------------
-			user:> lvmdrp rss createFiberFlat RSS_IN.fits FIBERFLAT.fits clip=0.3,1.5 valid=100,250
-			user:> lvmdrp rss createFiberFlat RSS_IN.fits FIBERFLAT.fits -6 clip=0.1,2.0
+            user:> lvmdrp rss createFiberFlat RSS_IN.fits FIBERFLAT.fits clip=0.3,1.5 valid=100,250
+            user:> lvmdrp rss createFiberFlat RSS_IN.fits FIBERFLAT.fits -6 clip=0.1,2.0
 	"""
 	smooth_poly=int(smooth_poly)
+    smooth_median=int(smooth_median)
 	if valid=='':
 		valid=None
 	else:
 		valid=numpy.array(valid.split(',')).astype('int16')
-	if clip!='':
+    if clip != '':
 		clip = clip.split(',')
 		clip[0] = float(clip[0])
 		clip[1] = float(clip[1])
@@ -934,7 +959,7 @@ def createFiberFlat_drp(rss_in, rss_out, smooth_poly='0', clip='', valid=''):
 
 	rss = loadRSS(rss_in)
 #    print rss._wave
-	fiberflat=rss.createFiberFlat(smooth_poly, clip, valid=valid)
+    fiberflat=rss.createFiberFlat(smooth_poly, smooth_median, clip, valid=valid)
 
 	# perform some statistic about the fiberflat
 	if fiberflat._mask is not None:
@@ -982,8 +1007,8 @@ def correctTraceMask_drp(trace_in, trace_out, logfile, ref_file, poly_smooth='')
 
 			Examples
 			----------------
-			user:> lvmdrp rss correctTraceMask TRACE_IN.fits TRACE_OUT.fits OFFSET_TRACE.log REF_File_name
-			user:> lvmdrp rss correctTraceMask TRACE_IN.fits TRACE_OUT.fits OFFSET_TRACE.log REF_File_name poly_smooth= -6
+            user:> lvmdrp rss correctTraceMask TRACE_IN.fits TRACE_OUT.fits OFFSET_TRACE.log REF_File_name
+            user:> lvmdrp rss correctTraceMask TRACE_IN.fits TRACE_OUT.fits OFFSET_TRACE.log REF_File_name poly_smooth= -6
 	"""
 	log = open(logfile, 'r')
 	log_lines = log.readlines()
@@ -1056,8 +1081,8 @@ def correctFiberFlat_drp(rss_in, rss_out, fiberflat, clip='0.2'):
 
 			Examples
 			----------------
-			user:> lvmdrp rss correctFiberFlat RSS_IN.fits RSS_OUT.fits FIBERFLAT_IN.fits
-			user:> lvmdrp rss correctFiberFlat RSS_IN.fits RSS_OUT.fits FIBERFLAT_IN.fits clip='0.4'
+            user:> lvmdrp rss correctFiberFlat RSS_IN.fits RSS_OUT.fits FIBERFLAT_IN.fits
+            user:> lvmdrp rss correctFiberFlat RSS_IN.fits RSS_OUT.fits FIBERFLAT_IN.fits clip='0.4'
 	"""
 	clip=float(clip)
 	rss = RSS()
@@ -1072,9 +1097,10 @@ def correctFiberFlat_drp(rss_in, rss_out, fiberflat, clip='0.2'):
 		select_clip=numpy.logical_or((flat_resamp<clip) , (numpy.isnan(flat_resamp._data)))
 		flat_resamp._data[select_clip]=0
 		flat_resamp._mask[select_clip]=True
-		spec_new = old_div(spec_data,flat_resamp)
+        spec_new = spec_data/flat_resamp
 		rss.setSpec(i, spec_new)
 	rss.writeFitsData(rss_out)
+
 
 def createSensFunction_drp(rss_in, out_sens,  ref_spec, airmass, exptime, smooth_poly='5', smooth_ref='6.0', smooth_ref2='6.0', median_filt='0',coadd='1', extinct_v='0.0', extinct_curve='mean', aper_correct='1.0',  ref_units='1e-16', target_units='1e-16',column_wave='0', column_flux='1', delimiter='', header='1' , split='', mask_wave='', mask_telluric='', overlap='100', out_star='', verbose='0'):
 	smooth_poly=int(smooth_poly)
@@ -1088,12 +1114,12 @@ def createSensFunction_drp(rss_in, out_sens,  ref_spec, airmass, exptime, smooth
 	column_wave = int(column_wave)
 	column_flux = int(column_flux)
 	header = int(header)
-	if mask_wave!='':
+    if mask_wave != '':
 		mask_wave = numpy.array(mask_wave.split(',')).astype('float32')
 	else:
 		mask_wave=None
 		
-	if mask_telluric!='':
+    if mask_telluric != '':
 		mask_telluric = numpy.array(mask_telluric.split(',')).astype('float32')
 	else:
 		mask_telluric=None
@@ -1107,7 +1133,7 @@ def createSensFunction_drp(rss_in, out_sens,  ref_spec, airmass, exptime, smooth
 		rss.loadFitsData(rss_in)
 		select = rss.selectSpec(min=0, max=coadd, method='median')
 		star_rss=rss.subRSS(select)
-		star_spec = old_div(star_rss.create1DSpec(method='sum'),aper_correct)
+        star_spec = star_rss.create1DSpec(method='sum')/aper_correct
 	else:
 		star_spec = Spectrum1D()
 		if '.fits' in rss_in:
@@ -1145,19 +1171,19 @@ def createSensFunction_drp(rss_in, out_sens,  ref_spec, airmass, exptime, smooth
 	ref_star_resamp = ref_star_spec.resampleSpec(star_spec._wave, method='linear')
 
 	ref_star_resamp.smoothSpec(smooth_ref/2.354/(star_spec._wave[1]-star_spec._wave[0]))
-	if out_star!='':
+    if out_star != '':
 		star_out = open(out_star, 'w')
 		for i in range(star_spec._dim):
 			star_out.write('%i %.3f %e\n'%(i, star_spec._wave[i], star_spec._data[i]))
 		star_out.close()
 
 	star_spec.smoothSpec(smooth_ref)
-	print(exptime,extinct._wave,star_spec._wave)
-	star_corr = old_div(old_div(star_spec,extinct),exptime)
+    #print(exptime,extinct._wave,star_spec._wave)
+    star_corr = star_spec/extinct/exptime
 
-	sens_func = old_div(ref_star_resamp,star_corr)
+    sens_func = ref_star_resamp/star_corr
 	if mask_wave is not None:
-		regions = old_div(len(mask_wave),2)
+        regions = len(mask_wave)/2
 		for i in range(regions):
 			select_region = numpy.logical_and(sens_func._wave>mask_wave[i*2], sens_func._wave<mask_wave[i*2+1])
 			select_blue = numpy.logical_and(sens_func._wave>mask_wave[i*2]-20, sens_func._wave<mask_wave[i*2])
@@ -1170,14 +1196,14 @@ def createSensFunction_drp(rss_in, out_sens,  ref_spec, airmass, exptime, smooth
 	if mask_telluric is not None:
 		star_telluric1 = star_rss.create1DSpec(method='sum')
 		star_telluric2 = star_rss.create1DSpec(method='sum')
-		regions = old_div(len(mask_telluric),2)
+        regions = len(mask_telluric)/2
 		for i in range(regions):
 			select_region = numpy.logical_and(star_telluric1._wave>mask_telluric[i*2], star_telluric1._wave<mask_telluric[i*2+1])
 			select_blue = numpy.logical_and(star_telluric1._wave>mask_telluric[i*2]-20, star_telluric1._wave<mask_telluric[i*2])
 			select_red = numpy.logical_and(star_telluric1._wave>mask_telluric[i*2+1], star_telluric1._wave<mask_telluric[i*2+1]+20)
 			line_par = stats.linregress([mask_telluric[i*2]-10,mask_telluric[i*2+1]+10], [numpy.median(star_telluric1._data[select_blue]), numpy.median(star_telluric1._data[select_red])])
 			star_telluric2._data[select_region] = (line_par[0]*star_telluric1._wave[select_region]+line_par[1]).astype('float32')
-		telluric_spec = (old_div(star_telluric1, star_telluric2))**(1.0/airmass)
+        telluric_spec = (star_telluric1 / star_telluric2)**(1.0/airmass)
 		telluric_spec.writeFitsData('telluric_spec.fits')
 	good_pix = numpy.logical_not(sens_func._mask)
 	if median_filt>0:
@@ -1193,10 +1219,10 @@ def createSensFunction_drp(rss_in, out_sens,  ref_spec, airmass, exptime, smooth
 		sens_func_smooth = 1.0/sens_func_smooth
 		if verbose==1:
 			pylab.plot(sens_func_smooth._wave,  sens_func_smooth._data, '-r')
-			pylab.plot(sens_func_smooth._wave,  old_div(sens_func._data,sens_func_smooth._data), '-g')
+            pylab.plot(sens_func_smooth._wave,  sens_func._data/sens_func_smooth._data, '-g')
 			sens_test_out = open('test_sens.txt', 'w')
 			for i in range(sens_func_smooth._dim):
-				sens_test_out.write('%i %.2f %e %e %e\n'%(i, sens_func_smooth._wave[i], sens_func._data[i], sens_func_smooth._data[i], old_div(sens_func._data[i],sens_func_smooth._data[i])))
+                sens_test_out.write('%i %.2f %e %e %e\n'%(i, sens_func_smooth._wave[i], sens_func._data[i], sens_func_smooth._data[i], sens_func._data[i]/sens_func_smooth._data[i]))
 			sens_test_out.close()
 	else:
 		split = float(split)
@@ -1250,7 +1276,7 @@ def createSensFunction2_drp(rss_in, out_sens, ref_spec, airmass, exptime, smooth
 	column_wave = int(column_wave)
 	column_flux = int(column_flux)
 	header = int(header)
-	if mask_wave!='':
+    if mask_wave != '':
 		mask_wave = numpy.array(mask_wave.split(',')).astype('float32')
 	else:
 		mask_wave=None
@@ -1262,7 +1288,7 @@ def createSensFunction2_drp(rss_in, out_sens, ref_spec, airmass, exptime, smooth
 		rss.loadFitsData(rss_in)
 		select = rss.selectSpec(min=0, max=coadd, method='median')
 		star_rss=rss.subRSS(select)
-		star_spec = old_div(star_rss.create1DSpec(method='sum'),aper_correct)
+        star_spec = star_rss.create1DSpec(method='sum')/aper_correct
 	else:
 		star_spec = Spectrum1D()
 		if '.fits' in rss_in:
@@ -1300,18 +1326,18 @@ def createSensFunction2_drp(rss_in, out_sens, ref_spec, airmass, exptime, smooth
 	ref_star_resamp = ref_star_spec.resampleSpec(star_spec._wave, method='linear')
 
 	ref_star_resamp.smoothSpec(smooth_ref/2.354/(star_spec._wave[1]-star_spec._wave[0]))
-	if out_star!='':
+    if out_star != '':
 		star_out = open(out_star, 'w')
 		for i in range(star_spec._dim):
 			star_out.write('%i %.3f %e\n'%(i, star_spec._wave[i], star_spec._data[i]))
 		star_out.close()
 
 	star_spec.smoothSpec(smooth_ref)
-	star_corr = old_div(old_div(star_spec,extinct),exptime)
+    star_corr = star_spec/extinct/exptime
 
-	sens_func = old_div(ref_star_resamp,star_corr)
+    sens_func = ref_star_resamp/star_corr
 	if mask_wave is not None:
-		regions = old_div(len(mask_wave),2)
+        regions = len(mask_wave)/2
 		for i in range(regions):
 			select_region = numpy.logical_and(sens_func._wave>mask_wave[i*2], sens_func._wave<mask_wave[i*2+1])
 			select_blue = numpy.logical_and(sens_func._wave>mask_wave[i*2]-20, sens_func._wave<mask_wave[i*2])
@@ -1333,10 +1359,10 @@ def createSensFunction2_drp(rss_in, out_sens, ref_spec, airmass, exptime, smooth
 	sens_func_smooth.smoothSpec(smooth_bspline,method='BSpline')
 	if verbose==1:
 		pylab.plot(sens_func_smooth._wave,  sens_func_smooth._data, '-r')
-		pylab.plot(sens_func_smooth._wave,  old_div((1.0/sens_func._data),sens_func_smooth._data), '-g')
+        pylab.plot(sens_func_smooth._wave,  (1.0/sens_func._data)/sens_func_smooth._data, '-g')
 		sens_test_out = open('test_sens.txt', 'w')
 		for i in range(sens_func_smooth._dim):
-			sens_test_out.write('%i %.2f %e %e %e\n'%(i, sens_func_smooth._wave[i], sens_func._data[i], sens_func_smooth._data[i], old_div(sens_func._data[i],sens_func_smooth._data[i])))
+            sens_test_out.write('%i %.2f %e %e %e\n'%(i, sens_func_smooth._wave[i], sens_func._data[i], sens_func_smooth._data[i], sens_func._data[i]/sens_func_smooth._data[i]))
 		sens_test_out.close()
 		pylab.show()
 	sens_func_smooth = 1.0/sens_func_smooth
@@ -1398,9 +1424,11 @@ def fluxCalibration_drp(rss_in, rss_out, sens_func, airmass, exptime, extinct_v=
 		sens_func_resamp = sens_func.resampleSpec(rss._wave, method='spline')
 
 		for j in range(rss._fibers):
-			rss[j] = (old_div(old_div(old_div(rss[j],extinct),exptime),norm_sb_fib))*sens_func_resamp*(old_div(ref_units,target_units))
+            rss[j] = (rss[j]/extinct/exptime/norm_sb_fib)*sens_func_resamp*(ref_units/target_units)
 	#        print exptime
 	rss.writeFitsData(rss_out)
+
+
 
 def combineRSS_drp(rsss, rss_out, method='mean'):
 	# convert input parameters to proper type
@@ -1417,6 +1445,8 @@ def combineRSS_drp(rsss, rss_out, method='mean'):
 	combined_rss.setHeader(header=combined_header._header)
 	#write out FITS file
 	combined_rss.writeFitsData(rss_out)
+
+
 
 def glueRSS_drp(rsss,rss_out):
 	list_rss= rsss.split(',')
@@ -1453,11 +1483,11 @@ def matchFluxRSS_drp(rsss, center_x, center_y, hdr_prefixes, arc_radius, start_w
 	list_rss= rsss.split(',')
 	center_x = float(center_x)
 	center_y = float(center_y)
-	if start_wave!='':
+    if start_wave != '':
 		start_wave=float(start_wave)
 	else:
 		start_wave=None
-	if end_wave!='':
+    if end_wave != '':
 		end_wave=float(end_wave)
 	else:
 		end_Wave=None
@@ -1477,11 +1507,10 @@ def matchFluxRSS_drp(rsss, center_x, center_y, hdr_prefixes, arc_radius, start_w
  #   print fluxes, order
 	for i in range(len(list_rss)):
 		rss=loadRSS(list_rss[i])
-		ratio = old_div(specs[order[-1]],specs[i])
+        ratio = specs[order[-1]]/specs[i]
 		coeff=ratio.smoothPoly(order=polyorder, start_wave=start_wave, end_wave=end_wave)
 		rss=rss*ratio
 		rss._data=rss._data.astype(numpy.float32)
-		if rss._error is not None:
 			rss._error=rss._error.astype(numpy.float32)
 		if start_wave is not None:
 			rss.setHdrValue(hdr_prefixes[i]+' RELFLUX START',  start_wave, 'Start wave for poly fit')
@@ -1492,7 +1521,7 @@ def matchFluxRSS_drp(rsss, center_x, center_y, hdr_prefixes, arc_radius, start_w
 
 		rss.writeFitsData(list_rss[i])
 		if verbose==1:
-			pylab.plot(specs[i]._wave,(old_div(specs[order[-1]],specs[i]))._data,'-k')
+            pylab.plot(specs[i]._wave,(specs[order[-1]]/specs[i])._data,'-k')
 			pylab.plot(specs[i]._wave,ratio._data,'-r')
 			#pylab.plot((specs[i])._data,'-k')
 			#pylab.plot((specs[i]*ratio)._data,'-r')
@@ -1518,8 +1547,8 @@ def includePosTab_drp(rss_in, position_table,  offset_x='0.0', offset_y='0.0'):
 
 			Examples
 			----------------
-			user:> lvmdrp rss includePosTab RSS.fits POSTAB.txt
-			user:> lvmdrp rss includePosTab RSS.fits POSTAB.txt  offset_x=-5.0 offset_y=3.0
+            user:> lvmdrp rss includePosTab RSS.fits POSTAB.txt
+            user:> lvmdrp rss includePosTab RSS.fits POSTAB.txt  offset_x=-5.0 offset_y=3.0
 	"""
 	offset_x=float(offset_x)
 	offset_y=float(offset_y)
@@ -1542,7 +1571,7 @@ def copyPosTab_drp(rss_in, rss_out):
 
 			Examples
 			----------------
-			user:> lvmdrp rss copyPosTab RSS1.fits RSS2.fits
+            user:> lvmdrp rss copyPosTab RSS1.fits RSS2.fits
 	"""
 	rss1 = RSS()
 	rss1.loadFitsData(rss_in)
@@ -1572,7 +1601,7 @@ def offsetPosTab_drp(rss_in, offset_x, offset_y):
 
 			Examples
 			----------------
-			user:> lvmdrp rss offsetPosTab RSS.fits offset_x=-5.0 offset_y=3.0
+            user:> lvmdrp rss offsetPosTab RSS.fits offset_x=-5.0 offset_y=3.0
 	"""
 	offset_x = float(offset_x)
 	offset_y = float(offset_y)
@@ -1594,7 +1623,7 @@ def rotatePosTab_drp(rss_in, angle='0.0'):
 
 			Examples
 			----------------
-			user:> lvmdrp rss  RSS.fits rotate=152.0
+            user:> lvmdrp rss  RSS.fits rotate=152.0
 	"""
 	angle = float(angle)
 	rss = loadRSS(rss_in)
@@ -1627,7 +1656,7 @@ def createCube_drp(rss_in, cube_out, position_x='', position_y='', ref_pos_wave=
 		#pos_y = Spectrum1D()
 		#pos_y.loadFitsData(position_y)
 		pos_y=loadRSS(position_y)
-	if ref_pos_wave!='':
+    if ref_pos_wave != '':
 		ref_pos_wave=float(ref_pos_wave)
 	else:
 		ref_pos_wave=None
@@ -1668,6 +1697,12 @@ def createCube_drp(rss_in, cube_out, position_x='', position_y='', ref_pos_wave=
 			pylab.show()
 
 		if rss._shape=='C':
+            if full_field:
+                min_x = numpy.min(rss._arc_position_x+numpy.min(offset_x)) - rss._size[0]
+                max_x = numpy.max(rss._arc_position_x+numpy.max(offset_x)) + rss._size[0]
+                min_y = numpy.min(rss._arc_position_y+numpy.min(offset_y)) - rss._size[1]
+                max_y = numpy.max(rss._arc_position_y+numpy.max(offset_y)) + rss._size[1]
+            else:
 			min_x = numpy.min(rss._arc_position_x) - rss._size[0]
 			max_x = numpy.max(rss._arc_position_x) + rss._size[0]
 			min_y = numpy.min(rss._arc_position_y) - rss._size[1]
@@ -1683,7 +1718,15 @@ def createCube_drp(rss_in, cube_out, position_x='', position_y='', ref_pos_wave=
 				offset_y = offset_y + off_y
 				ref_x+=1
 				ref_y+=1
+            dim_x = int(dim_x)
+            dim_y = int(dim_y)
+            min_x=float(min_x)
+            min_y=float(min_y)
+            max_x=float(max_x)
+            max_y=float(max_y)
+                
 		elif rss._shape=='R':
+        
 			if full_field==False:
 				min_x = numpy.round(numpy.min(rss._arc_position_x) , 4)
 				max_x = numpy.round(numpy.max(rss._arc_position_x),  4)
@@ -1715,6 +1758,7 @@ def createCube_drp(rss_in, cube_out, position_x='', position_y='', ref_pos_wave=
 
 
 
+    
 	if cpus>1:
 		pool = Pool(cpus)
 		threads=[]
@@ -1767,9 +1811,10 @@ def createCube_drp(rss_in, cube_out, position_x='', position_y='', ref_pos_wave=
 		cube = Cube(data=data, error=error, mask=mask, wave=rss._wave, error_weight=error_weight, header=header,cover=cover)
 	else:
 		if pos_x is not None and pos_y is not None and ref_pos_wave is not None:
-			print(rss.getHdrValue('CRVAL1'), rss.getHdrValue('CDELT1'))
+            #print(rss.getHdrValue('CRVAL1'), rss.getHdrValue('CDELT1'))
 			cube = rss.createCubeInterDAR_new(offset_x, offset_y,min_x,max_x,min_y,max_y,dim_x,dim_y, mode=mode, sigma=sigma, resolution=resolution, radius_limit=radius_limit, min_fibers=min_fibers,slope=slope, bad_threshold=bad_threshold, replace_error=replace_error, store_cover=store_cover)
 		else:
+            #print(pos_x,pos_y,ref_pos_wave,'test')
 			cube = rss.createCubeInterpolation(mode=mode, sigma=sigma, resolution=resolution, radius_limit=radius_limit, min_fibers=min_fibers,slope=slope, bad_threshold=bad_threshold, replace_error=replace_error, store_cover=store_cover)
 
  #   Cube.writeFitsData('dat_'+cube_out, extension_data=0)
@@ -1800,7 +1845,7 @@ def correctGalExtinct_drp(rss_in, rss_out, Av, Rv='3.1', verbose='0'):
 
 			Examples
 			----------------
-			user:> lvmdrp rss correctGalExtinct RSS_IN.fits RSS_OUT.fits 0.33
+            user:> lvmdrp rss correctGalExtinct RSS_IN.fits RSS_OUT.fits 0.33
 	"""
 
 	Av=float(Av)
@@ -1813,9 +1858,9 @@ def correctGalExtinct_drp(rss_in, rss_out, Av, Rv='3.1', verbose='0'):
 		galExtCurve = ancillary_func.galExtinct(rss._wave, Rv)
 		Alambda = galExtCurve*Av
 		if verbose==1:
-			pylab.plot(1.0/10**(old_div(Alambda._data,-2.5)) )
+            pylab.plot(1.0/10**(Alambda._data/-2.5) )
 			pylab.show()
-		rss_corr = rss*(1.0/10**(old_div(Alambda,-2.5)))
+        rss_corr = rss*(1.0/10**(Alambda/-2.5))
 	rss_corr.writeFitsData(rss_out)
 
 def correctTelluric_drp(rss_in, rss_out, telluric_spectrum, airmass='AIRMASS'):
@@ -1837,12 +1882,14 @@ def correctTelluric_drp(rss_in, rss_out, telluric_spectrum, airmass='AIRMASS'):
 
 			Examples
 			----------------
-			user:> lvmdrp rss correctTelluric RSS_IN.fits RSS_OUT.fits TELL_SPEC.fits
-			user:> lvmdrp rss correctTelluric RSS_IN.fits RSS_OUT.fits TELL_SPEC.fits  1.4
+            user:> lvmdrp rss correctTelluric RSS_IN.fits RSS_OUT.fits TELL_SPEC.fits
+            user:> lvmdrp rss correctTelluric RSS_IN.fits RSS_OUT.fits TELL_SPEC.fits  1.4
 	"""
 	rss = loadRSS(rss_in)
 	telluric = Spectrum1D()
 	telluric.loadFitsData(telluric_spectrum)
+    telluric._mask = None
+    telluric._error = None
 
 	try:
 		airmass = rss.getHdrValue(airmass)
@@ -1859,6 +1906,7 @@ def correctTelluric_drp(rss_in, rss_out, telluric_spectrum, airmass='AIRMASS'):
 			telluric_resamp = telluric.resampleSpec(spec._wave)
 			rss_corr[i] = spec*(1.0/(telluric_resamp**(airmass)))
 	rss_corr.writeFitsData(rss_out)
+
 
 def splitFile_drp(rss_in, data='', error='', mask='', wave='', fwhm='', position_table=''):
 	"""
@@ -1883,21 +1931,21 @@ def splitFile_drp(rss_in, data='', error='', mask='', wave='', fwhm='', position
 
 			Examples
 			----------------
-			user:> lvmdrp rss splitFile RSS_IN.fits DATA_RSS.fits
-			user:> lvmdrp rss splitFile RSS_IN.fits mask=MASK_RSS.fits position_table=POSTAB.txt
+            user:> lvmdrp rss splitFile RSS_IN.fits DATA_RSS.fits
+            user:> lvmdrp rss splitFile RSS_IN.fits mask=MASK_RSS.fits position_table=POSTAB.txt
 	"""
 	rss = loadRSS(rss_in)
 
-	if data!='' and rss._data is not None:
+    if data != '' and rss._data is not None:
 		rss.writeFitsData(data, extension_data=0, include_PT=False)
 
-	if error!='' and rss._error is not None:
+    if error != '' and rss._error is not None:
 		rss.writeFitsData(error, extension_error=0, include_PT=False)
 
-	if mask!='' and rss._mask is not None:
+    if mask != '' and rss._mask is not None:
 		rss.writeFitsData(mask, extension_mask=0, include_PT=False)
 
-	if position_table!='' and rss._arc_position_x is not None:
+    if position_table != '' and rss._arc_position_x is not None:
 		rss.writeTxtPosTab(position_table)
 
 def maskFibers_drp(rss_in,rss_out,fibers,replace_error='1e10'):
@@ -1927,15 +1975,6 @@ def maskNAN_drp(rss_in, replace_error='1e12'):
 					rss._mask[i, :]=True
 		rss.writeFitsData(rss_in)
 
-def flatten(x):
-	# taken from: https://bit.ly/3BgHitH
-	result = []
-	for el in x:
-		if isinstance(x, collections.Iterable) and not isinstance(el, str):
-			result.extend(flatten(el))
-		else:
-			result.append(el)
-	return result
 
 def registerSDSS_drp(rss_in, rss_out, sdss_file, sdss_field, filter, ra, dec, hdr_prefix,  search_box='20.0,2.6', step='1.0,0.2', offset_x ='0.0',  offset_y='0.0', quality_figure='',  angle_key='SPA', parallel='auto', verbose='0'):
 	"""
@@ -1978,11 +2017,12 @@ def registerSDSS_drp(rss_in, rss_out, sdss_file, sdss_field, filter, ra, dec, hd
 
 			Examples
 			----------------
-			user:> lvmdrp rss registerSDSS RSS_IN.fits RSS_OUT.fits SDSS_r_IMG.fits SDSS_FIELD.fit sloan_r.dat,0,1 234.0 20.3 'hierarch TEST'
-			user:> lvmdrp rss registerSDSS RSS_IN.fits RSS_OUT.fits SDSS_r_IMG.fits SDSS_FIELD.fit sloan_r.dat,0,1 234.0 20.3 'hierarch TEST'  search_box=20,2 step=2,0.5 quality_figure='test.png' parralel=3 verbose=1
+            user:> lvmdrp rss registerSDSS RSS_IN.fits RSS_OUT.fits SDSS_r_IMG.fits SDSS_FIELD.fit sloan_r.dat,0,1 234.0 20.3 'hierarch TEST'
+            user:> lvmdrp rss registerSDSS RSS_IN.fits RSS_OUT.fits SDSS_r_IMG.fits SDSS_FIELD.fit sloan_r.dat,0,1 234.0 20.3 'hierarch TEST'  search_box=20,2 step=2,0.5 quality_figure='test.png' parralel=3 verbose=1
 	"""
 
-	import astLib
+    import astLib.astWCS
+    from compiler.ast import flatten
 
 	search_box = numpy.array(search_box.split(',')).astype(numpy.float32)
 	step =  numpy.array(step.split(',')).astype(numpy.float32)
@@ -2043,7 +2083,7 @@ def registerSDSS_drp(rss_in, rss_out, sdss_file, sdss_field, filter, ra, dec, hd
 	rss.setHdrValue(hdr_prefix+' PIPE PHOTSCL', float('%.3f'%(best_scale)),   'photometric scale factor')
 	rss.writeFitsData(rss_out)
 
-	if quality_figure!='' or verbose==1:
+    if quality_figure != '' or verbose==1:
 		flux =  sdssimg.extractApertures(posTab, pix_coordinates[0], pix_coordinates[1], scale, angle=spa, offset_arc_x=best_offset_x, offset_arc_y=best_offset_y)
 
 		fig = plt.figure(figsize=(16,6))
@@ -2070,7 +2110,7 @@ def registerSDSS_drp(rss_in, rss_out, sdss_file, sdss_field, filter, ra, dec, hd
 		circ2 = matplotlib.collections.CircleCollection([60]*len(y_pos), offsets=XY, transOffset=ax2.transData,norm=norm,cmap=matplotlib.cm.gist_stern_r)
 		select_nan=numpy.isnan(flux[0])
 		flux[0][select_nan] = 1e-30
-		circ2.set_array((old_div(flux[0],best_scale)).ravel())
+        circ2.set_array((flux[0]/best_scale).ravel())
 		ax2.add_collection(circ2)
 		ax2.autoscale_view()
 		ax2.set_xlim(-40, 40)
@@ -2096,6 +2136,7 @@ def registerSDSS_drp(rss_in, rss_out, sdss_file, sdss_field, filter, ra, dec, hd
 			plt.savefig(quality_figure)
 		if verbose==1:
 			plt.show()
+
 
 def DAR_registerSDSS_drp(rss_in, sdss_file, sdss_field, ra, dec, out_prefix,  ref_wave, coadd='150', step='150', smooth_poly='3', resolution='0.3,0.05', guess_x ='0.0',  guess_y='0.0',start_wave='', end_wave='',  parallel='auto', verbose='0'):
 	"""
@@ -2132,7 +2173,7 @@ def DAR_registerSDSS_drp(rss_in, sdss_file, sdss_field, ra, dec, out_prefix,  re
 	scale=0.396
 	wcs = astLib.astWCS.WCS(sdssimg._header,mode='pyfits')
 	pix_coordinates = wcs.wcs2pix(ra,dec)
-	steps = int(numpy.rint(old_div(rss._res_elements,step)))
+    steps = int(numpy.rint(rss._res_elements/step))
 	mean_wave = numpy.zeros(steps)
 	position_x = numpy.zeros(steps, dtype=numpy.float32)
 	position_y = numpy.zeros(steps, dtype=numpy.float32)
@@ -2155,9 +2196,9 @@ def DAR_registerSDSS_drp(rss_in, sdss_file, sdss_field, ra, dec, out_prefix,  re
 	error_rss = error_rss*fiber_area
 
 	rss_mag = passband.fluxToMag(flux_rss)
-	AB_flux =10**(old_div(rss_mag,-2.5))
-	AB_eflux = error_rss*(old_div(AB_flux,flux_rss))
-	good_rss = old_div(flux_rss,error_rss)>3.0
+    AB_flux =10**(rss_mag/-2.5)
+    AB_eflux = error_rss*(AB_flux/flux_rss)
+    good_rss = flux_rss/error_rss>3.0
 	for i in range(len(search_box)):
 		result = rss.registerImage(sdssimg, passband, search_box[i], resolution[i], pix_coordinates[0], pix_coordinates[1], scale, spa, guess_x, guess_y, parallel=parallel)
 		guess_x = result[0]

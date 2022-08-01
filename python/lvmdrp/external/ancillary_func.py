@@ -1,5 +1,3 @@
-from __future__ import division
-from past.utils import old_div
 from lvmdrp.core.spectrum1d import *
 import numpy
 
@@ -40,6 +38,6 @@ def galExtinct(wave, Rv):
     bx=(1.41338*y)+(2.28305*y**2)+(1.07233*y**3)-(5.38434*y**4)-(0.62251*y**5)+(5.30260*y**6)-(2.09002*y**7)
     
 
-    Arat=(ax+(old_div(bx,Rv))).astype(numpy.float32)
+    Arat=(ax+(bx/Rv)).astype(numpy.float32)
     spec = Spectrum1D(wave=wave, data=Arat)
     return spec

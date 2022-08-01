@@ -1,4 +1,3 @@
-from __future__ import print_function
 from astropy.io import fits as pyfits
 import os
 import re
@@ -9,7 +8,7 @@ def getFileInfo_drp(path, outfile, match_files, hdr_keys='OBJECT'):
     dir = os.listdir(path)
     dir = sorted(dir)
     out = open(outfile, 'w')
-    print(match_files)
+    #print(match_files)
     prog = re.compile(match_files)
     for f in dir:
         if prog.match(f):

@@ -1,5 +1,3 @@
-from builtins import range
-from builtins import object
 import numpy, math
 
 class Aperture(object):
@@ -117,3 +115,10 @@ class Apertures(object):
 				aperture_errors[i]=result[1]
 		
 		return aperture_fluxes, aperture_errors, aperture_areas
+            
+        
+        
+    
+        
+        
+    

@@ -31,7 +31,3 @@ FRAMES_CALIB_NEEDS = {
     "arc": ["bias", "dark", "flat", "continuum"],
     "object": ["bias", "dark", "flat", "continuum", "arc"],
 }
-
-# define product path pattern
-INPUT_PATH = os.path.join("{input_path}", "{mjd}", "{label}.fits.gz")
-PRODUCT_PATH = os.path.join("{path}", "{label}.{kind}.fits")
