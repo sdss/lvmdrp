@@ -95,14 +95,15 @@ class SolveWavelength:
         self.xdata = np.arange(spectra._data.shape[1])
         self.ydata = spectra._data[iy:fy+1,:].sum(axis=0)
         self.ydata /= self.ydata.max()
-        self.ydata = np.sqrt(1e-3+self.ydata)
+        # self.ydata = np.sqrt(1e-3+self.ydata)
 
     def _init_plot(self):
         self.line, = ax.step(self.xdata, self.ydata, lw=1, picker=True, pickradius=self.aperture, color="k")
-        for x_peak in self.table[:,0]:
+        for x_peak, wavelength, _ in self.table:
             x_min, x_max = x_peak-self.aperture, x_peak+self.aperture
             self.ax.axvspan(x_min, x_max, fc="0.5", lw=0, alpha=0.5)
-            self.ax.plot([x_peak], [self.ydata[(x_min<=self.xdata)&(self.xdata<=x_max)].max()], "xr", mew=0.5, ms=4)
+            self.ax.plot([x_peak], [self.ydata[(x_min<=self.xdata)&(self.xdata<=x_max)].max()], "or", mew=0.5, ms=5, mfc="none")
+            self.ax.text(x_max, 0.95, f"{wavelength:.4f}", va="top", ha="left", size="small", weight="bold", color="0.5", rotation=90)
         self.ax.set_xlabel("dispersion axis (pixel)")
         self.ax.set_ylabel("flux")
 
@@ -141,7 +142,7 @@ class SolveWavelength:
         return np.round(x_peak, 2), peak_point
 
     def _append_wavelength(self, wavelength):
-        new_row = np.atleast_2d([self.x_peak, float(wavelength), 1])
+        new_row = np.atleast_2d([self.x_peak, float(wavelength or 0), 1])
 
         if new_row[0,1] == 0 or (self.table == new_row[0]).all(axis=1).any():
             return None
@@ -151,6 +152,7 @@ class SolveWavelength:
         # update plot
         self.window.set_visible(True)
         self.peak_point.set_visible(True)
+        self.ax.text(self.x_peak+self.aperture, 0.95, f"{float(wavelength or 0):.4f}", va="top", ha="left", size="small", weight="bold", color="b", rotation=90)
     
     def _save_table(self):
         self.table = self.table[self.table[:,0].argsort()]
@@ -176,7 +178,7 @@ class SolveWavelength:
             # update text box label
             label, value = self.text_box.ax.get_children()[0], self.text_box.ax.get_children()[1]
             label.set_text(f"wavelength for {self.x_peak:.2f}:")
-            value.set_text("0.0")
+            value.set_text("")
         # elif isinstance(event.artist, Polygon):
         #     # get span x range
         #     # compute middle x
