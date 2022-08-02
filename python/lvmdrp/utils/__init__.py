@@ -3,7 +3,15 @@ from .configuration import *
 from .logger import *
 import os
 import collections.abc
+import collections
 
+
+def flatten(iterable):
+    for el in iterable:
+        if isinstance(el, collections.Iterable) and not isinstance(el, str): 
+            yield from flatten(el)
+        else:
+            yield el
 
 def get_input_path(pattern, mjd, label, paths):
     for path in paths:
