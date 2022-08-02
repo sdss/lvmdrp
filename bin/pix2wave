@@ -99,11 +99,16 @@ class SolveWavelength:
 
     def _init_plot(self):
         self.line, = ax.step(self.xdata, self.ydata, lw=1, picker=True, pickradius=self.aperture, color="k")
-        for x_peak, wavelength, _ in self.table:
+        for x_peak, wavelength, mask in self.table:
             x_min, x_max = x_peak-self.aperture, x_peak+self.aperture
-            self.ax.axvspan(x_min, x_max, fc="0.5", lw=0, alpha=0.5)
-            self.ax.plot([x_peak], [self.ydata[(x_min<=self.xdata)&(self.xdata<=x_max)].max()], "or", mew=0.5, ms=5, mfc="none")
-            self.ax.text(x_max, 0.95, f"{wavelength:.4f}", va="top", ha="left", size="small", weight="bold", color="0.5", rotation=90)
+            if mask:
+                self.ax.axvspan(x_min, x_max, fc="0.5", lw=0, alpha=0.5)
+                self.ax.plot([x_peak], [self.ydata[(x_min<=self.xdata)&(self.xdata<=x_max)].max()], "or", mew=0.5, ms=5, mfc="none")
+                self.ax.text(x_max, 0.95, f"{wavelength:.4f}", va="top", ha="left", size="small", weight="bold", color="0.5", rotation=90)
+            else:
+                self.ax.axvspan(x_min, x_max, fc="0.8", lw=0, alpha=0.5)
+                self.ax.plot([x_peak], [self.ydata[(x_min<=self.xdata)&(self.xdata<=x_max)].max()], "ok", mew=0.5, ms=3, mfc="none")
+                self.ax.text(x_max, 0.95, f"{wavelength:.4f}", va="top", ha="left", size="small", color="0.8", rotation=90)
         self.ax.set_xlabel("dispersion axis (pixel)")
         self.ax.set_ylabel("flux")
 
