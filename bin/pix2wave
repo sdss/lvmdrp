@@ -95,7 +95,7 @@ class SolveWavelength:
         self.xdata = np.arange(spectra._data.shape[1])
         self.ydata = spectra._data[iy:fy+1,:].sum(axis=0)
         self.ydata /= self.ydata.max()
-        # self.ydata = np.sqrt(1e-3+self.ydata)
+        self.ydata = np.sqrt(1e-3+self.ydata)
 
     def _init_plot(self):
         self.line, = ax.step(self.xdata, self.ydata, lw=1, picker=True, pickradius=self.aperture, color="k")
