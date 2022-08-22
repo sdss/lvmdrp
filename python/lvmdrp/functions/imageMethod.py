@@ -1,4 +1,4 @@
-import sys, numpy
+import os, sys, numpy
 from astropy.io import fits as pyfits
 try:
   import pylab,matplotlib
@@ -9,15 +9,20 @@ import time
 from multiprocessing import Pool
 from multiprocessing import cpu_count
 from lvmdrp.core import fit_profile
+import scipy
 from scipy import ndimage
 from scipy import optimize
 from scipy import sparse
+from scipy import interpolate
 from scipy.sparse import linalg
-from scipy.sparse.linalg import linsolve
-from lvmdrp.core.image import loadImage, Image, combineImages
+# from scipy.sparse.linalg import linsolve
+# import scipy.sparse.linalg.dsolve as linsolve
+from lvmdrp.core.image import loadImage, Image, glueImages, combineImages
 from lvmdrp.core.spectrum1d import Spectrum1D
 from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.core.fiberrows import FiberRows
+from lvmdrp.core.rss import RSS
+from lvmdrp.utils.decorators import missing_files
 
 import multiprocessing
 from types import *
@@ -26,12 +31,12 @@ description='Provides Methods to process 2D images'
 
 def detCos_drp(image,  out_image,   rdnoise='2.9', sigma_det='5', rlim='1.2', iter='5', fwhm_gauss='2.0', replace_box='5,5',  error_box='5,5', replace_error='1e10', increase_radius='0', gain='1.0', verbose='0', parallel='auto'):
 	"""
-		   Detects and removes cosmics from astronomical images based on Laplacian edge
-		   detection scheme combined with a PSF convolution approach (Husemann  et al. in prep.).
+			Detects and removes cosmics from astronomical images based on Laplacian edge
+			detection scheme combined with a PSF convolution approach (Husemann  et al. in prep.).
 
-		   IMPORTANT:
-		   The image and the readout noise are assumed to be in units of electrons.
-		   The image also needs to be BIAS subtracted! The gain can be entered to convert the image from ADUs to electros, when this is down already set gain=1.0 as the default.
+			IMPORTANT:
+			The image and the readout noise are assumed to be in units of electrons.
+			The image also needs to be BIAS subtracted! The gain can be entered to convert the image from ADUs to electros, when this is down already set gain=1.0 as the default.
 
 			Parameters
 			--------------
@@ -72,11 +77,11 @@ def detCos_drp(image,  out_image,   rdnoise='2.9', sigma_det='5', rlim='1.2', it
 	iterations = int(iter)
 	sigma= float(fwhm_gauss)/2.354
 	error_box = replace_box.split(',')
-    err_box_x = int(error_box[0])
-    err_box_y = int(error_box[1])
+	err_box_x = int(error_box[0])
+	err_box_y = int(error_box[1])
 	replace_box = replace_box.split(',')
-    box_x = int(replace_box[0])
-    box_y = int(replace_box[1])
+	box_x = int(replace_box[0])
+	box_y = int(replace_box[1])
 	increase_radius=int(increase_radius)
 	verbose=int(verbose)
 	try:
@@ -151,7 +156,7 @@ def detCos_drp(image,  out_image,   rdnoise='2.9', sigma_det='5', rlim='1.2', it
 		result = []
 		if cpus>1:
 			fine=out.convolveGaussImg(sigma, sigma, mask=True)
-            fine_norm = out/fine
+			fine_norm = out/fine
 			select_neg = fine_norm<0
 			fine_norm.setData(data=0, select=select_neg)
 			pool = Pool(cpus)
@@ -180,7 +185,7 @@ def detCos_drp(image,  out_image,   rdnoise='2.9', sigma_det='5', rlim='1.2', it
 			Lap = result[0].get()
 			Lap2 = result[1].get()
 			pool.terminate()
-            S = Lap/(noise*2) # normalize Laplacian image by the noise
+			S = Lap/(noise*2) # normalize Laplacian image by the noise
 			S_prime = S-S.medianImg((5, 5)) # cleaning of the normalized Laplacian image
 		else:
 			sub = out.subsampleImg(2) # subsample image
@@ -188,11 +193,11 @@ def detCos_drp(image,  out_image,   rdnoise='2.9', sigma_det='5', rlim='1.2', it
 			select_neg = conv<0
 			conv.setData(data=0, select=select_neg)  # replace all negative values with 0
 			Lap = conv.rebin(2, 2) # rebin the data to original resolution
-            S = Lap/(noise*2) # normalize Laplacian image by the noise
+			S = Lap/(noise*2) # normalize Laplacian image by the noise
 			S_prime = S-S.medianImg((5, 5)) # cleaning of the normalized Laplacian image
 			fine=out.convolveGaussImg(sigma, sigma, mask=True) # convolve image with a 2D Gaussian
 
-            fine_norm = out/fine
+			fine_norm = out/fine
 			select_neg = fine_norm<0
 			fine_norm.setData(data=0, select=select_neg)
 			sub_norm = fine_norm.subsampleImg(2) # subsample image
@@ -222,12 +227,12 @@ def detCos_drp(image,  out_image,   rdnoise='2.9', sigma_det='5', rlim='1.2', it
 @missing_files(["BAD_CALIBRATION_FRAMES"], "image")
 def LACosmic_drp(image,  out_image,  sigma_det='5', flim='1.1', iter='3', sig_gauss='0.8,0.8', error_box='20,1', replace_box='20,1',  replace_error='1e10',  rdnoise='2.9',  increase_radius='0', verbose='0', parallel='2'):
 	"""
-		   Detects and removes cosmic rays from astronomical images based on a modified Laplacian edge
-		   detection method introduced by van Dokkum (2005) and modified by B. Husemann (2012, in prep.).
+			Detects and removes cosmic rays from astronomical images based on a modified Laplacian edge
+			detection method introduced by van Dokkum (2005) and modified by B. Husemann (2012, in prep.).
 
-		   IMPORTANT:
-		   The image and the readout noise are assumed to be in units of electrons.
-		   The image also need to be bias subtracted so that the proper Poisson noise image can be estimated.
+			IMPORTANT:
+			The image and the readout noise are assumed to be in units of electrons.
+			The image also need to be bias subtracted so that the proper Poisson noise image can be estimated.
 
 			Parameters
 			--------------
@@ -275,7 +280,7 @@ def LACosmic_drp(image,  out_image,  sigma_det='5', flim='1.1', iter='3', sig_ga
 
 			Examples
 			----------------
-            user:> lvmdrp image LACosmic IMAGE.fits MASK.fits CLEAN.fits 5 flim=1.1 sig_gauss=0.8,0.8 replace_box=5,5 increase_radius=1
+			user:> lvmdrp image LACosmic IMAGE.fits MASK.fits CLEAN.fits 5 flim=1.1 sig_gauss=0.8,0.8 replace_box=5,5 increase_radius=1
 	"""
 	# convert all parameters to proper type
 	sigma_det = float(sigma_det)
@@ -288,8 +293,8 @@ def LACosmic_drp(image,  out_image,  sigma_det='5', flim='1.1', iter='3', sig_ga
 	sigma_x = float(sig_gauss[0])
 	sigma_y = float(sig_gauss[1])
 	replace_box = replace_box.split(',')
-    box_x = int(replace_box[0])
-    box_y = int(replace_box[1])
+	box_x = int(replace_box[0])
+	box_y = int(replace_box[1])
 	increase_radius=int(increase_radius)
 	verbose=int(verbose)
 	try:
@@ -341,7 +346,7 @@ def LACosmic_drp(image,  out_image,  sigma_det='5', flim='1.1', iter='3', sig_ga
 		result = []
 		if cpus>1:
 			fine=out.convolveGaussImg(sigma_x, sigma_y)
-            fine_norm = out/fine
+			fine_norm = out/fine
 			select_neg = fine_norm<0
 			fine_norm.setData(data=0, select=select_neg)
 			pool = Pool(cpus)
@@ -370,7 +375,7 @@ def LACosmic_drp(image,  out_image,  sigma_det='5', flim='1.1', iter='3', sig_ga
 			Lap = result[0].get()
 			Lap2 = result[1].get()
 			pool.terminate()
-            S = Lap/(noise*4) # normalize Laplacian image by the noise
+			S = Lap/(noise*4) # normalize Laplacian image by the noise
 			S_prime = S-S.medianImg((err_box_y, err_box_x)) # cleaning of the normalized Laplacian image
 
 
@@ -380,11 +385,11 @@ def LACosmic_drp(image,  out_image,  sigma_det='5', flim='1.1', iter='3', sig_ga
 			select_neg = conv<0
 			conv.setData(data=0, select=select_neg)  # replace all negative values with 0
 			Lap = conv.rebin(2, 2) # rebin the data to original resolution
-            S = Lap/(noise*4) # normalize Laplacian image by the noise
+			S = Lap/(noise*4) # normalize Laplacian image by the noise
 			S_prime = S-S.medianImg((err_box_y, err_box_x)) # cleaning of the normalized Laplacian image
 			fine=out.convolveGaussImg(sigma_x, sigma_y) # convolve image with a 2D Gaussian
-#        fine.writeFitsData('s_prime.fits')
-            fine_norm = out/fine
+	#        fine.writeFitsData('s_prime.fits')
+			fine_norm = out/fine
 			select_neg = fine_norm<0
 			fine_norm.setData(data=0, select=select_neg)
 			sub_norm = fine_norm.subsampleImg() # subsample image
@@ -403,10 +408,10 @@ def LACosmic_drp(image,  out_image,  sigma_det='5', flim='1.1', iter='3', sig_ga
 		if i==iterations-1:
 			img_original.setData(mask=True, select=select) # set the new mask
 			if increase_radius>0:
-			   # print numpy.sum(img_original._mask)
+				# print numpy.sum(img_original._mask)
 				mask_img = Image(data=img_original._mask)
 				mask_new=mask_img.convolveImg(kernel=numpy.ones((2*increase_radius+1, 2*increase_radius+1)))
-			   # print numpy.sum(mask_new._data)
+				# print numpy.sum(mask_new._data)
 				mask_new = mask_new._data>0
 				img_original.setData(mask=mask_new)
 			out=img_original.replaceMaskMedian(box_x, box_y, replace_error=replace_error) # replace possible corrput pixel with zeros for final output
@@ -821,9 +826,9 @@ def findPeaksMaster2_drp(image, peaks_master, out_peaks_file, disp_axis='X', thr
 		select_good = (fib_qual=='GOOD') & (numpy.rint(ref_pos+shift_peaks)>border) & (numpy.rint(ref_pos+shift_peaks)<len(cut._data)-border-1)
 		#print (ref_pos+shift_peaks)[select_good],len(cut._data)
 		if numpy.sum(select_good)>len(peaks_good):
-            threshold = threshold/1.02
+			threshold = threshold/1.02
 		elif numpy.sum(select_good)<len(peaks_good):
-            threshold = threshold*1.05
+			threshold = threshold*1.05
       #print(threshold,numpy.sum(select_good),len(peaks_good),shift_peaks)
 		#break
 	centers_good = cut.measurePeaks(peaks_good, method, init_sigma, threshold=0, max_diff=1.0)[0]
@@ -1054,13 +1059,13 @@ def glueCCDFrames_drp(images, out_image, boundary_x, boundary_y, positions, orie
 			gain : string, optional with default :''
 					Name of the FITS Header keyword for the gain value of the CCD, will be multiplied
 			rdnoise: string, optional with default: ''
-				   Name of the FITS Header keyword for the read out noise value
+					Name of the FITS Header keyword for the read out noise value
 
 			Examples
 			----------------
-            user:>  lvmdrp image glueCCDFrame FRAME1.fits, FRAME2.fits, FRAME3.fits, FRAME4.fits  FULLFRAME.fits  50,800 1,900  00,10,01,11 X,90,Y,180 gain='GAIN'
+			user:>  lvmdrp image glueCCDFrame FRAME1.fits, FRAME2.fits, FRAME3.fits, FRAME4.fits  FULLFRAME.fits  50,800 1,900  00,10,01,11 X,90,Y,180 gain='GAIN'
 			"""
-   # convert input parameters to proper type
+	# convert input parameters to proper type
 	list_imgs= images.split(',')
 	bound_x = boundary_x.split(',')
 	bound_y = boundary_y.split(',')
@@ -1112,7 +1117,7 @@ def glueCCDFrames_drp(images, out_image, boundary_x, boundary_y, positions, orie
 	full_img = glueImages(imgs, pos)
 
 	# adjust FITS header information
-    full_img.removeHdrEntries(['GAIN','RDNOISE', 'COMMENT',''])
+	full_img.removeHdrEntries(['GAIN','RDNOISE', 'COMMENT',''])
 	# add gain keywords for the different subimages (CDDs/Amplifies)
 	if gain!='':
 		for i in range(len(imgs)):
@@ -1144,7 +1149,7 @@ def combineImages_drp(images, out_image, method='median', k='3.0'):
 	imgs=[]
 	for i in list_imgs:
 		#load subimages from disc and append them to a list
-        imgs.append(loadImage(i.replace('\n','')))
+		imgs.append(loadImage(i.replace('\n','')))
 
 	combined_img = combineImages(imgs, method=method, k=k)
 	#write out FITS file
@@ -1206,25 +1211,25 @@ def subtractStraylight_drp(image, trace, stray_image, clean_image, disp_axis='X'
     #    img._data[img._mask==1] = numpy.nan
 
     # smooth image along dispersion axis with a median filter excluded NaN values bas
-    img_median = img.medianImg((1, smooth_disp),use_mask=True)
+	img_median = img.medianImg((1, smooth_disp),use_mask=True)
 
 	# mask regions around each fiber within a given cross-dispersion aperture
 	img_median.maskFiberTraces(trace_mask, aperture=aperture, parallel=parallel)
 
 	# fit the signal in unmaksed areas along cross-dispersion axis independently with a polynom of a given order
-    img_fit = img_median.fitPoly(order=poly_cross, plot=-1)
+	img_fit = img_median.fitPoly(order=poly_cross, plot=-1)
 
 	# smooth the results by 2D Gaussian filter of given with (cross- and dispersion axis have equal width)
 	img_smooth =img_fit.convolveGaussImg(smooth_gauss, smooth_gauss)
-    
+
 	# subtract smoothed background signal from origianal image
-    img = loadImage(image)
-    
-    if disp_axis=='X' or disp_axis=='x':
-        pass
-    elif disp_axis=='Y' or disp_axis=='y':
-       img.swapaxes()
-       
+	img = loadImage(image)
+
+	if disp_axis=='X' or disp_axis=='x':
+		pass
+	elif disp_axis=='Y' or disp_axis=='y':
+		img.swapaxes()
+		
 	img_out = img-img_smooth
 	##img_out = img-img_fit
 
@@ -1511,10 +1516,10 @@ def offsetTrace2_drp(image, trace, trace_fwhm, disp, lines, logfile,  blocks='15
 
 			Examples
 			----------------
-            user:> lvmdrp image offsetTrace IMAGE.fits TRACE.fits DISP.fits  blocks=32 size=30
+			user:> lvmdrp image offsetTrace IMAGE.fits TRACE.fits DISP.fits  blocks=32 size=30
 	"""
 	lines = lines.split(',')
-    size = int(size)
+	size = int(size)
 	blocks = int(blocks)
 	min_offset = float(min_offset)
 	max_offset = float(max_offset)
@@ -1620,7 +1625,7 @@ def extractSpec_drp(image, trace, out_rss,  method='optimal',  aperture='7', fwh
 
 			Examples
 			----------------
-            user:> lvmdrp image extractSpec IMAGE.fits TRACE.fits RSS.fits optimal fwhm=FWHM.fits
+			user:> lvmdrp image extractSpec IMAGE.fits TRACE.fits RSS.fits optimal fwhm=FWHM.fits
 	"""
 
 
@@ -1684,7 +1689,7 @@ def extractSpec_drp(image, trace, out_rss,  method='optimal',  aperture='7', fwh
 
 	if error is not None:
 		error[mask]=replace_error
-    rss= FiberRows(data=data, mask=mask, error=error, header = img.getHeader())
+	rss= FiberRows(data=data, mask=mask, error=error, header = img.getHeader())
 	rss.setHdrValue('NAXIS2',  data.shape[0])
 	rss.setHdrValue('NAXIS1',  data.shape[1])
 	rss.setHdrValue('DISPAXIS',  1)
@@ -1885,7 +1890,7 @@ def testres_drp(image, trace, fwhm, flux):
 	trace_mask = TraceMask()
 	trace_mask.loadFitsData(trace, extension_data=0)
 	trace_fwhm = TraceMask()
- #   trace_fwhm.setData(data=numpy.ones(trace_mask._data.shape)*2.5)
+	#   trace_fwhm.setData(data=numpy.ones(trace_mask._data.shape)*2.5)
 	trace_fwhm.loadFitsData(fwhm, extension_data=0)
 
 	trace_flux = TraceMask()
@@ -1894,8 +1899,8 @@ def testres_drp(image, trace, fwhm, flux):
 	out = numpy.zeros(img._dim)
 	fact = numpy.sqrt(2.*numpy.pi)
 	for i in range(img._dim[1]):
-	  #  print i
-        A=1.0*numpy.exp(-0.5*((x[:, numpy.newaxis]-trace_mask._data[:, i][numpy.newaxis, :])/abs(trace_fwhm._data[:, i][numpy.newaxis, :]/2.354))**2)/(fact*abs(trace_fwhm._data[:, i][numpy.newaxis, :]/2.354))
+		#  print i
+		A=1.0*numpy.exp(-0.5*((x[:, numpy.newaxis]-trace_mask._data[:, i][numpy.newaxis, :])/abs(trace_fwhm._data[:, i][numpy.newaxis, :]/2.354))**2)/(fact*abs(trace_fwhm._data[:, i][numpy.newaxis, :]/2.354))
 		spec = numpy.dot(A, trace_flux._data[:, i])
 		out[:, i] = spec
 		if i==1000:
@@ -1904,7 +1909,7 @@ def testres_drp(image, trace, fwhm, flux):
 			pylab.show()
 
 	hdu = pyfits.PrimaryHDU(img._data-out)
-    hdu.writeto('res.fits', clobber=True)
+	hdu.writeto('res.fits', clobber=True)
 	hdu = pyfits.PrimaryHDU(out)
 	hdu.writeto('fit.fits', overwrite=True)
 

@@ -86,7 +86,7 @@ class Spectrum1D(object):
                 return spec
             except:
                 #raise exception if the type are not matching in general
-                raise exceptions.TypeError("unsupported operand type(s) for -: %s and %s"%(str(type(self)).split("'")[1], str(type(other)).split("'")[1]))
+                raise TypeError("unsupported operand type(s) for -: %s and %s"%(str(type(self)).split("'")[1], str(type(other)).split("'")[1]))
 
     def __add__(self, other):
         if isinstance(other, Spectrum1D):
@@ -153,7 +153,7 @@ class Spectrum1D(object):
                 return spec
             except:
                 #raise exception if the type are not matching in general
-                raise exceptions.TypeError("unsupported operand type(s) for -: %s and %s"%(str(type(self)).split("'")[1], str(type(other)).split("'")[1]))
+                raise TypeError("unsupported operand type(s) for -: %s and %s"%(str(type(self)).split("'")[1], str(type(other)).split("'")[1]))
 
     def __truediv__(self, other):
 
@@ -204,7 +204,7 @@ class Spectrum1D(object):
                 if self._error is not None:
                     error = numpy.zeros_like(self._data)
                 if self._mask is not None:
-                    mask = nump.zeros(self._data.shape[0], dtype="bool")
+                    mask = numpy.zeros(self._data.shape[0], dtype="bool")
                 else:
                     mask = None
 
@@ -244,7 +244,7 @@ class Spectrum1D(object):
                 return spec
             except:
                 #raise exception if the type are not matching in general
-                raise exceptions.TypeError("unsupported operand type(s) for /: %s and %s"%(str(type(self)).split("'")[1], str(type(other)).split("'")[1]))
+                raise TypeError("unsupported operand type(s) for /: %s and %s"%(str(type(self)).split("'")[1], str(type(other)).split("'")[1]))
 
 
     def __rdiv__(self, other):
@@ -302,7 +302,7 @@ class Spectrum1D(object):
                 if self._error is not None:
                     error = numpy.zeros_like(self._data)
                 if self._mask is not None:
-                    mask = nump.zeros(self._data.shape[0], dtype="bool")
+                    mask = numpy.zeros(self._data.shape[0], dtype="bool")
                 else:
                     mask = None
 
@@ -349,7 +349,7 @@ class Spectrum1D(object):
                 return spec
       ##      except:
                 #raise exception if the type are not matching in general
-        ##        raise exceptions.TypeError("unsupported operand type(s) for /: %s and %s"%(str(type(self)).split("'")[1], str(type(other)).split("'")[1]))
+        ##        raise TypeError("unsupported operand type(s) for /: %s and %s"%(str(type(self)).split("'")[1], str(type(other)).split("'")[1]))
 
 
     def __mul__(self, other):
@@ -394,7 +394,7 @@ class Spectrum1D(object):
                 if self._error is not None:
                     error = numpy.zeros_like(self._data)
                 if self._mask is not None:
-                    mask = nump.zeros(self._data.shape[0], dtype="bool")
+                    mask = numpy.zeros(self._data.shape[0], dtype="bool")
                 else:
                     mask = None
             if data.dtype==numpy.float64 or data.dtype==numpy.dtype('>f8'):
@@ -435,7 +435,7 @@ class Spectrum1D(object):
                 return spec
            # except:
                 #raise exception if the type are not matching in general
-              #  raise exceptions.TypeError("unsupported operand type(s) for *: %s and %s"%(str(type(self)).split("'")[1], str(type(other)).split("'")[1]))
+              #  raise TypeError("unsupported operand type(s) for *: %s and %s"%(str(type(self)).split("'")[1], str(type(other)).split("'")[1]))
     def __rpow__(self, other):
         data = other**self._data
         error = None
