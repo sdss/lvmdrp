@@ -1,138 +1,41 @@
-# average all sky fibers into one
-# take into account the difference in LSF
-# two (super?) sky: one per each sky telescope
-
-# * try entry point: joint spectra, fiberflat, linearized, de-trended?
-# 
-# * try entry point: joint spectra, fiberflat, flux calibration
-# 
-# 1st approach:
-#   - interpolate (naively) the sky in the science region
-#   - run skycorr (yield a model?)
-#   - subtract the sky from the science fibers
-# 
-# 2nd approach:
-#   - for each science fiber:
-#   - look for N closest sky fibers in wavelength and LSF space and combine them into a (super?) sky
-#   - fit model
-#   - subtract from science
-# 
-# 3rd approach: handling emission and continuum sky
-#   - process/model emission lines component with skycorr
-#   - process/model continuum component using physical models (e.g., moon spectra, etc)
-#   - combine emission+cont
-#   - subtract joint sky model from science fiber
-
-import numpy as np
 
 
-def build_eigen_sky(sky_fibers):
-    """Returns eigen vectors for the given sky fibers
-    
+def select_sky_fibers():
+    """select sky fibers to be used to build master skies 1 and 2"""
+    pass
 
-    Parameters
-    ----------
-    sky_fibers:
-        1D linear fiber flat sky fibers
-    
-    Returns
-    -------
-    eigen_sky:
-        the resulting PCA eigen vectors
+
+def build_master_sky():
+    """run continuum/line separation algorithm on master sky 1 and 2 and master science and produce line-only (sky1_line, sky2_line, sci_line) and continuum-only (sky1_cont, sky2_cont, sci_cont) spectra for each"""
+    pass
+
+
+def cont_line_separation():
+    """average sky1_line and sky2_line into "sky_line", and run skycorr on "sky_line" and "sci_line" to produce "sky_line_corr"
     """
-    eigen_sky = None
-    return eigen_sky
+    pass
 
 
-def build_sky(sky_fibers, sci_fibers, method="naive", sci_wave=None, sci_lsf=None, sky_wave=None, sky_lsf=None):
-    """Build the optimal sky for the given science fiber
+def eval_eso_sky():
+    """run ESO sky model for observation parameters (ephemeris, atmospheric conditions, site, etc) to evaluate sky spectrum at each telescope pointing (model_sky1, model_sky2, model_skysci)"""
+    pass
 
 
-    Parameters
-    ----------
-    sky_fibers:
-        1D linear fiber flat sky fibers
-    sci_fiber:
-        1D linear fiber flat science fiber for which the best sky will be calculated
-    method:
-        method to use for building the best sky for the given science fiber.
-        Possible values:
-            - 'naive': simply naive all given sky fibers into one sky (default, best SNR)
-            - 'optimal': find in wavelength and LSF space the closest sky fibers and naive them (best spectral quality)
-    
-    Returns
-    -------
-    best_sky:
-        sky to use for given fiber
-    """
-    if method == "naive":
-        best_sky = np.median(sky_fibers, axis=0)
-    elif method == "optimal":
-        # handle the case of missing wave_rss and lsf_rss
-        # find closest sky fibers in wavelength and LSF space
-        best_sky = None
-    return best_sky
+def sky_cont_correct():
+    """correct and combine continuum only spectra by doing:   sky_cont_corr=0.5*( sky1_cont*(model_skysci/model_sky1) + sky2_cont*(model_skysci/model_sky2)) """
+    pass
 
 
-def fit_continuum(best_sky, sci_fiber):
-    """Returns the best continuum model for sky and science
-    
-    
-    Parameters
-    ----------
-    best_sky:
-        sky spectrum
-    sci_fiber:
-        target science spectrum
-    
-    Returns
-    -------
-    cont:
-        sky continuum
-    
-    """
-    # this is already in skycorr using a rolling window median (not a physical model)
-    # handle the moon:
-    #   - we already have moon spectrum
-    cont = None
-    return cont
+def coadd_sky():
+    """coadd corrected line and continuum combined sky frames:    sky_corr=sky_cont_corr+sky_line_corr"""
+    pass
 
 
-def fit_sky(best_sky, fit_flux_cal=True):
-    """Runs skycorr (or similar) to fit/adjust a sky model"""
-    # preprocessing of best_sky
-    # fit model to best_sky
-    # skycorr post mortem
-    sky_model = None
-    return sky_model
+def sky_lsf_matching():
+    """do LSF matching of sky_corr to each science fiber and subtract the LSF-matched corrected sky spectra"""
+    pass
 
 
-def subtract_sky(sky_model, sci_fiber):
-    """Subtracts the given sky model to the given science fiber
-    
-    
-    Parameters
-    ----------
-    sky_model:
-        sky to subtract from the given science fiber
-    
-    """
-    clean_fiber = None
-    return clean_fiber
-
-
-def pca_refine(sci_fibers):
-    """Runs PCA refinement on all sky subtracted science fibers
-    
-    NOTE: I thought PCA was going to come as a refinement step
-    after the actual sky subtraction. Something along the lines
-    of finding residual sky components in the PCA and then removing
-    them.
-
-    Parameters
-    ----------
-    sci_fibers:
-        sky subtracted science fibers
-
-    """
+def refine_cont_subtraction():
+    """optionally apply an extra residual continuum subtraction using the faintest (i.e. with no stellar light detection) spaxels in the science IFU"""
     pass
