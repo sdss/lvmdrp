@@ -4,7 +4,7 @@ from scipy import special
 from scipy import optimize
 from scipy import interpolate
 from copy import deepcopy
-from lvmdrp.core.spectrum1d import Spectrum1D
+# from lvmdrp.core.spectrum1d import Spectrum1D
 import astropy.io.fits as pyfits
 from multiprocessing import cpu_count
 from multiprocessing import Pool
@@ -472,11 +472,11 @@ class parFile(fit_profile1D):
         self._parameters[self._names[-1]]=par_comp
         self._fixed[self._names[-1]] = par_fix
         self._parameters_err=deepcopy(self._parameters)
-        for n in self._names:
-            if self._profile_type[n]=='TemplateScale':
-                spec = Spectrum1D()
-                spec.loadFitsData(self._parameters[n]['TemplateSpec'])
-                self._template_spec[n]=spec
+        # for n in self._names:
+        #     if self._profile_type[n]=='TemplateScale':
+        #         spec = Spectrum1D()
+        #         spec.loadFitsData(self._parameters[n]['TemplateSpec'])
+        #         self._template_spec[n]=spec
         self.freePar()
         fit_profile1D.__init__(self, self._par, self._profile)
 
@@ -822,7 +822,7 @@ def fit_gaussian(x, y, sigma=1., p0=None, ftol=1e-4, xtol=1e-4, warning=True):
         p0[2] = numpy.sqrt(numpy.sum((y[sel]*(x[sel]-p0[1])**2))/p0[0])
         p0[0]*= dx
 
-    sol = scipy.optimize.leastsq(res_gaussian, p0, (x,y,sigma), maxfev=9999, ftol=ftol, xtol=xtol)#, factor=100)#, Dfun=dev_gaussian, col_deriv=True)
+    sol = optimize.leastsq(res_gaussian, p0, (x,y,sigma), maxfev=9999, ftol=ftol, xtol=xtol)#, factor=100)#, Dfun=dev_gaussian, col_deriv=True)
 
     return sol[0]
 
@@ -837,9 +837,9 @@ def fit_gaussian_const(x, y, sigma=1.,  p0=None, ftol=1e-6, xtol=1e-6, warning=T
         p0[1] = numpy.sum(x*(y-ymin))/p0[0]
         p0[2] = numpy.sqrt(numpy.sum(((y-ymin)*(x-p0[1])**2))/p0[0])
         p0[3] = ymin
-        p0[0]*= dx
+        p0[0]*= cdelt
 
-    sol = scipy.optimize.leastsq(res_gaussian_const, p0, (x,y,sigma), maxfev=99999, ftol=ftol, xtol=xtol)[0]#, Dfun=dev_gaussian_const, col_deriv=True)
+    sol = optimize.leastsq(res_gaussian_const, p0, (x,y,sigma), maxfev=99999, ftol=ftol, xtol=xtol)[0]#, Dfun=dev_gaussian_const, col_deriv=True)
 
     ##print sol
     #pylab.clf()
@@ -859,9 +859,9 @@ def fit_gaussian_poly(x, y, sigma=1., npoly=0):
     p0[0] = numpy.sum(y)
     p0[1] = numpy.sum(x*y)/p0[0]
     p0[2] = numpy.sqrt(numpy.sum(y*(x-p0[1])**2)/p0[0])
-    p0[0]*= dx
+    p0[0]*= cdelt
 
-    sol = scipy.optimize.leastsq(res_gaussian_poly, p0, (x,y,sigma))#, Dfun=dev_gaussian_poly, col_deriv=True)
+    sol = optimize.leastsq(res_gaussian_poly, p0, (x,y,sigma))#, Dfun=dev_gaussian_poly, col_deriv=True)
 
     #pylab.plot(x,y,'k', drawstyle='steps-mid')
     #pylab.plot(x,gaussian_poly(sol[0], x),'-r')#,drawstyle='steps-mid')
@@ -881,7 +881,7 @@ def fit_gaussian_multi(x, y, ncomp=1, sigma=1., f0=[1.], m0=[0.], s0=[1.]):
     if len(s0)==ncomp: p0[2*ncomp:3*ncomp] = s0
     else:              p0[2*ncomp:3*ncomp] = s0[0]
 
-    sol = scipy.optimize.leastsq(res_gaussian_multi, p0, (x,y,sigma))
+    sol = optimize.leastsq(res_gaussian_multi, p0, (x,y,sigma))
 
     return sol[0]
 
@@ -892,7 +892,7 @@ def fit_gaussian_width_multi(x, y, pos, sigma=1., flux0=1., width0=1.):
     p0[0]         = width0
     p0[1:ncomp+1] = flux0
 
-    sol = scipy.optimize.leastsq(res_gaussian_width_multi, p0, (x,y,pos,sigma), ftol=0.1)
+    sol = optimize.leastsq(res_gaussian_width_multi, p0, (x,y,pos,sigma), ftol=0.1)
 
     return sol[0]
 
@@ -904,7 +904,7 @@ def fit_gaussian_width_multi_offset(x, y, pos, sigma=1., flux0=1., width0=1.):
     p0[1:ncomp+1] = flux0
     p0[-1]        = 0.
 
-    sol = scipy.optimize.leastsq(res_gaussian_width_multi_offset, p0, (x,y,pos,sigma))#, ftol=0.1)
+    sol = optimize.leastsq(res_gaussian_width_multi_offset, p0, (x,y,pos,sigma))#, ftol=0.1)
 
     #print sol[0][0], sol[0][-1]
     #pylab.plot(x,y,'k')#,drawstyle='steps-mid')
@@ -926,7 +926,7 @@ def fit_gaussian2d(x, y, z, sigma=1.):
     p0[3]  = numpy.sqrt(numpy.sum(z[indrow]*(x[indrow]-p0[2])**2)/numpy.sum(z[indrow]))
     p0[4]  = numpy.sqrt(numpy.sum(z[indcol]*(y[indcol]-p0[1])**2)/numpy.sum(z[indcol]))
 
-    sol = scipy.optimize.leastsq(res_gaussian2d, p0, (x,y,z,sigma))
+    sol = optimize.leastsq(res_gaussian2d, p0, (x,y,z,sigma))
 
     return sol[0]
 
@@ -943,7 +943,7 @@ def fit_gauss_hermite(x, y, sigma=1., p0=None):
         p0[3] = 0.
         p0[4] = 0.
 
-    sol = scipy.optimize.leastsq(res_gauss_hermite, p0, (x,y,sigma), maxfev=9999, ftol=1e-9, xtol=1e-9)#, factor=100)#, Dfun=dev_gaussian, col_deriv=True)
+    sol = optimize.leastsq(res_gauss_hermite, p0, (x,y,sigma), maxfev=9999, ftol=1e-9, xtol=1e-9)#, factor=100)#, Dfun=dev_gaussian, col_deriv=True)
 
     return sol[0]
 

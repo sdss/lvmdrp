@@ -2025,17 +2025,17 @@ def preprocRawFrame_drp(in_image, out_image, boundary_x, boundary_y, positions, 
 
 	# adjust FITS header information
 	full_img.removeHdrEntries(['{gain_field}', f'{rdnoise_field}', ''])
-	# add gain keywords for the different subimages (CDDs/Amplifies)
+	# add gain keywords for the different subimages (CCDs/Amplifiers)
 	if gain != '':
 		for i in range(len(images)):
 			full_img.setHdrValue(f'HIERARCH AMP%i {gain_field}' % (
 				i+1), gains[i], 'Gain value of CCD amplifier %i' % (i+1))
-	# add read-out noise keywords for the different subimages (CDDs/Amplifies)
+	# add read-out noise keywords for the different subimages (CCDs/Amplifiers)
 	if rdnoise != '':
 		for i in range(len(images)):
 			full_img.setHdrValue(f'HIERARCH AMP%i {rdnoise_field}' % (
 				i+1), rdnoises[i], 'Read-out noise of CCD amplifier %i' % (i+1))
-	# add bias of overscan region for the different subimages (CDDs/Amplifies)
+	# add bias of overscan region for the different subimages (CCDs/Amplifiers)
 	for i in range(len(images)):
 		if subtract_overscan:
 			full_img.setHdrValue('HIERARCH AMP%i OVERSCAN' % (

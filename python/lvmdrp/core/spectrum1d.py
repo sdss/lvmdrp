@@ -850,7 +850,6 @@ class Spectrum1D(object):
                 else:
                     self._error = new_error
 
-
     def binSpec(self, new_wave):
         new_disp = new_wave[1:]-new_wave[:-1]
         new_disp = numpy.insert(new_disp, 0, new_disp[0])
@@ -912,7 +911,6 @@ class Spectrum1D(object):
         elif method=='BSpline':
             smooth= interpolate.splrep(self._wave,self._data,w=1.0/numpy.sqrt(numpy.fabs(self._data)),s=size)
             self._data =  interpolate.splev(self._wave,smooth,der=0)
-
 
     def smoothGaussVariable(self, fwhm):
         fact = numpy.sqrt(2.*numpy.pi)
@@ -988,7 +986,6 @@ class Spectrum1D(object):
                 self._mask[:]=True
             out_par=0
         return out_par
-
 
     def findPeaks(self, threshold=100.0, npeaks=0, add_doubles=1e-1, maxiter=400):
         """
@@ -1203,8 +1200,6 @@ class Spectrum1D(object):
         #return results
         return fwhm, mask
 
-
-
     def measureOffsetPeaks(self, pos, mask,  nblocks, init_fwhm=2.0, init_offset=0.0,  plot=-1):
         """
 
@@ -1342,8 +1337,6 @@ class Spectrum1D(object):
             par_err.restoreResult()
             par._parameters_err=par_err._parameters
 
-
-
     def fitSepGauss(self, centres, aperture, init_back=0.0, ftol=1e-8, xtol=1e-8, plot=False, warning=False):
 
         ncomp = len(centres)
@@ -1387,10 +1380,6 @@ class Spectrum1D(object):
         if plot==True:
                     pylab.show()
         return out
-
-
-
-
 
     def obtainGaussFluxPeaks(self, pos, sigma, indices,  replace_error=1e10, plot=False):
         fibers = len(pos)
