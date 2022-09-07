@@ -814,7 +814,7 @@ class Spectrum1D(object):
                 intp = interpolate.UnivariateSpline(self._wave[select_interp], clean_data[select_interp], s=0)
                 new_data = intp(ref_wave)
             elif method=='linear':
-                intp = interpolate.interp1d(self._wave[select_interp], clean_data[select_interp])
+                intp = interpolate.interp1d(self._wave[select_interp], clean_data[select_interp], bounds_error=False)
                 #intp = interpolate.UnivariateSpline(self._wave[select_interp], clean_data[select_interp], k=1, s=0)
                 new_data = intp(ref_wave)
             select_out= numpy.logical_or(ref_wave<wave_interp[0],ref_wave>wave_interp[-1])
@@ -843,7 +843,7 @@ class Spectrum1D(object):
                         intp = interpolate.UnivariateSpline(self._wave[select_interp], data[select_interp], s=0)
                         out =intp(ref_wave)
                     elif method=='linear':
-                        intp = interpolate.interpolate.interp1d(self._wave[select_interp], data[select_interp])
+                        intp = interpolate.interpolate.interp1d(self._wave[select_interp], data[select_interp], bounds_error=False)
                         out = intp(ref_wave)
                     select_out= numpy.logical_or(ref_wave<wave_interp[0],ref_wave>wave_interp[-1])
                     out[select_out]=0
@@ -1527,7 +1527,7 @@ class Spectrum1D(object):
         fwhms = numpy.zeros_like(fluxes)
         masks = numpy.zeros_like(fluxes, dtype=bool)
         for i, s in enumerate(spectra):
-            s_new = s.resampleSpec(wave)
+            s_new = s.resampleSpec(wave, method="linear")
             fluxes[i, :] = s_new._data
             if s._error is None:
                 raise ValueError(
@@ -1536,9 +1536,13 @@ class Spectrum1D(object):
                 errors[i, :] = s_new._error
             
             if s._inst_fwhm is not None:
-                fwhms[i, :] = s._inst_fwhm
+                fwhms[i, :] = s_new._inst_fwhm
             if s._mask is not None:
-                masks[i, :] = s._mask
+                masks[i, :] = s_new._mask
+
+        fluxes[masks] = 0
+        errors[masks] = 0
+        fwhms[masks] = 0
 
         # First, make sure there is no flux defined if there is no error.
         errors = numpy.ma.fix_invalid(errors)
@@ -1548,10 +1552,9 @@ class Spectrum1D(object):
         fluxes = numpy.ma.fix_invalid(fluxes)
         # There are no masked quantities yet, so make sure they are filled here.
         fluxes = numpy.ma.average(fluxes, weights=1./errors**2, axis=0).filled(numpy.nan)
-        errors = numpy.sqrt(1. / numpy.ma.sum(1./errors**2., axis=0).filled(numpy.nan))
-        
         fwhms = numpy.ma.average(fwhms, weights=1./errors**2, axis=0).filled(numpy.nan)
-
+        errors = numpy.sqrt(1. / numpy.ma.sum(1./errors**2, axis=0).filled(numpy.nan))
+        
         masks = numpy.logical_or(masks[0], masks[1])
         masks |= numpy.isnan(fluxes) | numpy.isnan(errors)
         
