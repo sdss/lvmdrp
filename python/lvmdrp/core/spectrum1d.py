@@ -11,6 +11,83 @@ from scipy import ndimage
 from lvmdrp.core import fit_profile
 from copy import  deepcopy
 
+
+def wave_little_interpol(wavelist):
+    '''Make a wavelengths array for merging echelle orders with little interpolation.
+
+    In echelle spectra we often have the situation that neighboring orders overlap
+    a little in wavelength space::
+
+        aaaaaaaaaaaa
+                 bbbbbbbbbbbbb
+                          ccccccccccccc
+
+    When merging those spectra, we want to keep the original wavelength grid where possible.
+    This way, we only need to interpolate on a new wavelength grid where different orders
+    overlap (here ``ab`` or ``bc``) and can avoid the dangers of flux interpolation in
+    those wavelength region where only one order contributes.
+
+    This algorithm has limitations, some are fundamental, some are just due to the 
+    implementation and may be removed in future versions:
+
+    - The resulting grid is **not** equally spaced, but the step size should not vary too much.
+    - The wavelength arrays need to be sorted in increasing order.
+    - There has to be overlap between every order and every order has to have some overlap
+      free region in the middle.
+
+    # NOTE: taken from https://bit.ly/3qpRFIp
+
+    Parameters
+    ----------
+    wavelist : list of 1-dim ndarrays
+        input list of wavelength
+
+    Returns
+    -------
+    waveout : ndarray
+        wavelength array that can be used to co-adding all echelle orders.
+    '''
+    mins = numpy.array([min(w) for w in wavelist])
+    maxs = numpy.array([max(w) for w in wavelist])
+
+    if numpy.any(numpy.argsort(mins) != numpy.arange(len(wavelist))):
+        raise ValueError(
+            'List of wavelengths must be sorted in increasing order.')
+    if numpy.any(numpy.argsort(mins) != numpy.arange(len(wavelist))):
+        raise ValueError(
+            'List of wavelengths must be sorted in increasing order.')
+    if not numpy.all(maxs[:-1] > mins[1:]):
+        raise ValueError('Not all orders overlap.')
+    if numpy.any(mins[2:] < maxs[:-2]):
+        raise ValueError('No order can be completely overlapped.')
+
+    waveout = [wavelist[0][wavelist[0] < mins[1]]]
+    for i in range(len(wavelist)-1):
+        #### overlap region ####
+        # No assumptions on how bin edges of different orders match up
+        # overlap start and stop are the last and first "clean" points.
+        overlap_start = numpy.max(waveout[-1])
+        overlap_end = numpy.min(wavelist[i+1][wavelist[i+1] > maxs[i]])
+        # In overlap region patch in a linear scale with slightly different step.
+        dw = overlap_end - overlap_start
+        step = 0.5 * \
+            (numpy.mean(numpy.diff(wavelist[i])) + numpy.mean(numpy.diff(wavelist[i+1])))
+        n_steps = int(dw / step + 0.5)
+
+        wave_overlap = numpy.linspace(
+            overlap_start + step,  overlap_end - step, n_steps - 1)
+        waveout.append(wave_overlap)
+
+        #### next region without overlap ####
+        if i < (len(wavelist) - 2):  # normal case
+            waveout.append(
+                wavelist[i+1][(wavelist[i+1] > maxs[i]) & (wavelist[i+1] < mins[i+2])])
+        else:                       # last array - no more overlap behind that
+            waveout.append(wavelist[i+1][(wavelist[i+1] > maxs[i])])
+
+    return numpy.hstack(waveout)
+
+
 class Spectrum1D(object):
     def __init__(self, wave=None, data=None, error=None, mask=None, inst_fwhm=None):
         self._wave = wave
@@ -246,7 +323,6 @@ class Spectrum1D(object):
                 #raise exception if the type are not matching in general
                 raise TypeError("unsupported operand type(s) for /: %s and %s"%(str(type(self)).split("'")[1], str(type(other)).split("'")[1]))
 
-
     def __rdiv__(self, other):
 
         if isinstance(other, Spectrum1D):
@@ -347,10 +423,6 @@ class Spectrum1D(object):
                         error=error.astype(numpy.float32)
                 spec = Spectrum1D(wave=self._wave, data = data,  error = error,  mask=mask)
                 return spec
-      ##      except:
-                #raise exception if the type are not matching in general
-        ##        raise TypeError("unsupported operand type(s) for /: %s and %s"%(str(type(self)).split("'")[1], str(type(other)).split("'")[1]))
-
 
     def __mul__(self, other):
 
@@ -433,9 +505,7 @@ class Spectrum1D(object):
                     data=data.astype(numpy.float32)
                 spec = Spectrum1D(wave=self._wave, data = data,  error = error,  mask=mask)
                 return spec
-           # except:
-                #raise exception if the type are not matching in general
-              #  raise TypeError("unsupported operand type(s) for *: %s and %s"%(str(type(self)).split("'")[1], str(type(other)).split("'")[1]))
+
     def __rpow__(self, other):
         data = other**self._data
         error = None
@@ -1435,3 +1505,54 @@ class Spectrum1D(object):
                 error = 0
         return flux, error
 
+    def coaddSpec(self, other, wave=None):
+        """Coadds spectrum with another one with the possibility of overlaping wavelength ranges
+
+        This method is perfect for computing the joint spectrum from two spectrograph channels.
+
+        NOTE: taken from https://bit.ly/3qpRFIp
+        """
+        # check if other is Spectrum1D instance
+        # find best/optimal joint wavelength vector
+        if isinstance(other, Spectrum1D):
+            spectra = [self, other]
+        else:
+            raise NotImplementedError("'other' need to be of 'Spectrum1D' type")
+        
+        if wave is None:
+            wave = wave_little_interpol([self._wave, other._wave])
+        
+        fluxes = numpy.ma.zeros((2, len(wave)))
+        errors = numpy.zeros_like(fluxes)
+        fwhms = numpy.zeros_like(fluxes)
+        masks = numpy.zeros_like(fluxes, dtype=bool)
+        for i, s in enumerate(spectra):
+            s_new = s.resampleSpec(wave)
+            fluxes[i, :] = s_new._data
+            if s._error is None:
+                raise ValueError(
+                    's.uncertainty needs to be set for every spectrum')
+            else:
+                errors[i, :] = s_new._error
+            
+            if s._inst_fwhm is not None:
+                fwhms[i, :] = s._inst_fwhm
+            if s._mask is not None:
+                masks[i, :] = s._mask
+
+        # First, make sure there is no flux defined if there is no error.
+        errors = numpy.ma.fix_invalid(errors)
+        if numpy.ma.is_masked(errors):
+            fluxes[errors.mask] = numpy.ma.masked
+        # This can be simplified considerably as soon as masked quantities exist.
+        fluxes = numpy.ma.fix_invalid(fluxes)
+        # There are no masked quantities yet, so make sure they are filled here.
+        fluxes = numpy.ma.average(fluxes, weights=1./errors**2, axis=0).filled(numpy.nan)
+        errors = numpy.sqrt(1. / numpy.ma.sum(1./errors**2., axis=0).filled(numpy.nan))
+        
+        fwhms = numpy.ma.average(fwhms, weights=1./errors**2, axis=0).filled(numpy.nan)
+
+        masks = numpy.logical_or(masks[0], masks[1])
+        masks |= numpy.isnan(fluxes) | numpy.isnan(errors)
+        
+        return Spectrum1D(wave=wave, data=fluxes, error=errors, inst_fwhm=fwhms, mask=masks)
