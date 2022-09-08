@@ -7,7 +7,7 @@
 # @License: BSD 3-Clause
 # @Copyright: SDSS-V LVM
 
-from lvmdrp.utils.database import create_or_connect_db, get_raws_metadata, get_calib_metadata, get_analogs_metadata, add_master, put_redux_state
+from lvmdrp.utils.database import CalibrationFrames, create_or_connect_db, get_raws_metadata, get_master_metadata, add_calib, put_redux_state
 from lvmdrp.main import *
 
 import warnings
@@ -29,65 +29,63 @@ if __name__ == "__main__":
     db = create_or_connect_db(config=config)
     # locate new frames pending for calibration
     new_frames = get_raws_metadata()
-    ids = [metadata.id for metadata in new_frames]
+    i = 0
     for metadata in new_frames:
+        # NOTE: remove this line after testing
+        if metadata.imagetyp != "bias": continue
+        i += 1
         # for each new frame, build current reduction settings according to configuration file
-        metadata, redux_settings = setup_reduction(config=config, metadata=metadata)
+        metadata, settings = setup_reduction(config=config, metadata=metadata)
         # BUG: redux_settings.calib_metadata may return None values, handle this by skipping calibration steps whenever possible
         #      also adding the corresponding calibration flags
         # BUG: fix cases in which there are no calibration files
         # BUG: in the case of arcs, if missing continuum frame, fall back to arc with most lamps on
         #      this should be the next best thing for a continuum frame
         #      finally fall back to current frame as continuum and add corresponding flags
-        # BUG: I should get calibration metadata from DB for each analog for building masters
-        calib_metadata = get_calib_metadata(metadata=metadata)
-        # NOTE: remove this line after testing
-        if redux_settings.type != "continuum": continue
 
+        # put reduction state
+        put_redux_state(metadata=metadata, status="IN_PROGRESS")
+        
         # run basic calibration for new frame
-        if redux_settings.type in CALIBRATION_TYPES:
-            # retrieve analog frames for master
-            analogs_metadata = get_analogs_metadata(metadata=metadata)
-            # update reduction state for analogs metadata
-            # BUG: this assumes that the current frame is in the analogs list
-            put_redux_state(metadata=analogs_metadata)
-            
-            master_metadata, analogs_metadata = build_master(
-                config=config,
-                analogs_metadata=analogs_metadata,
-                calib_metadata=calib_metadata,
-                redux_settings=redux_settings
+        if settings.type in CALIBRATION_TYPES:
+            # get calibration metadata for each analog
+            calib_metadata = get_master_metadata(metadata=metadata)
+            # run basic calibration for each analog
+            run_reduction_calib(config=config, metadata=metadata, calib_metadata=calib_metadata, redux_settings=settings)
+            # run continuum/arc reduction if needed
+            if settings.type in ["continuum", "arc"]:
+                run_reduction = {"continuum": run_reduction_continuum, "arc": run_reduction_arc}
+                metadata = run_reduction[settings.type](
+                    config=config,
+                    metadata=metadata,
+                    calib_metadata=calib_metadata,
+                    redux_settings=settings
+                )
+            put_redux_state(metadata=metadata, status="FINISHED")
+            new_calib_metadata = CalibrationFrames(
+                label=metadata.label,
+                path=settings.output_path.format(kind="calib"),
+                reduction_started=metadata.reduction_started,
+                reduction_finished=metadata.reduction_finished,
+                is_master=False,
+                status=metadata.status,
+                flags=metadata.flags
             )
-            # run reduction for continuum/arc frames
-            if redux_settings.type == "continuum":
-                metadata = run_reduction_continuum(config=config, metadata=master_metadata, calib_metadata=calib_metadata, redux_settings=redux_settings)
-            elif redux_settings.type == "arc":
-                metadata = run_reduction_arc(config=config, metadata=master_metadata, calib_metadata=calib_metadata, redux_settings=redux_settings)
-
-            # create new master DB record
-            add_master(master_metadata=master_metadata, analogs_metadata=analogs_metadata)
-            # update DB
-            put_redux_state(metadata=analogs_metadata)
-            # update new_frames iterator by removing already processed calibration frames
-            for analog_metadata in analogs_metadata:
-                if analog_metadata.id in ids:
-                    idx = ids.index(analog_metadata.id)
-                    ids.pop(idx)
-                    new_frames.pop(idx)
-            # BUG: build masters for continuum and arcs
-            # BUG: should I build cont/arc master before or after reducing cont/arc? YES
+            add_calib(calib_metadata=new_calib_metadata, raw_metadata=metadata)
         else:
-            put_redux_state(metadata=metadata)
-            metadata = run_reduction_calib(config=config, metadata=metadata, calib_metadata=calib_metadata, redux_settings=redux_settings)
+            # get calibration frames metadata
+            calib_metadata = get_master_metadata(metadata=metadata)
+            # run basic calibration
+            metadata = run_reduction_calib(config=config, metadata=metadata, calib_metadata=calib_metadata, redux_settings=settings)
             # run calibration according to type of frame
-            metadata = run_reduction_object(config=config, metadata=metadata, calib_metadata=calib_metadata, redux_settings=redux_settings)
+            metadata = run_reduction_object(config=config, metadata=metadata, calib_metadata=calib_metadata, redux_settings=settings)
             
             # TODO: run tests
             #   - add flags
             # TODO: update DB
             #   - update reduction state
-            put_redux_state(metadata=metadata)
-        break
+        put_redux_state(metadata=metadata)
+        if i == 3: break
     # close DB connection
     db.close()
 
