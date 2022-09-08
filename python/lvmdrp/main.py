@@ -400,3 +400,25 @@ def run_reduction_object(config, metadata, calib_metadata, settings):
     metadata.flags += flags
     metadata.status += "FINISHED"
     return metadata
+
+
+def run_sky_subtraction(config, rss, lsf_rss):
+    # select sky fibers
+    #   - use the fiber map to separate science, sky, std stars
+    #   - select best method to build master sky (naive: combine all fibers, smart: best match to science in spectral space)
+    # select science/standard stars fibers
+    # build master sky
+    # get cont_sky, lines_sky
+    #   - read a selection of common lines
+    #   - mask those lines
+    #   - smooth masked master sky
+    #   - residual = master_sky - smoothed spectrum
+    #   - return sky_cont, sky_lines
+    # interpolate/extrapolate sky using ESO
+    # spatially interpolate sky continuum using the ESO sky model sky_cont_corr=0.5*( sky1_cont*(model_skysci/model_sky1) + sky2_cont*(model_skysci/model_sky2))
+    # combine corrected versions of lines and continuum sky
+    # for each fiber match LSF between sky and science
+    # subtract the matched sky from science fibers
+    # select faintest fiber in the science field refine sky subtraction with it
+    # PCA refinement
+    pass

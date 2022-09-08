@@ -25,7 +25,12 @@ PIX2WAVE_MAPS:
   "b3": !join [*root_path, "lvm-neon_nist_b3.txt"]
   "r3": !join [*root_path, "lvm-neon_nist_r3.txt"]
   "z3": !join [*root_path, "lvm-neon_nist_z3.txt"]
-# define path to fiber maps
+# define path to fiber maps (needed to separate sky/science/std fibers)
+FIBER_MAP:
+  "": 
+# used to calculate the sky continuum
+COMMON_SKY_LINE_LIST:
+  "":
 
 # staleness parameters
 # define installed lamps
