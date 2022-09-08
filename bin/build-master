@@ -11,7 +11,6 @@ import sys
 import os
 import argparse
 
-from lvmdrp.core.constants import PRODUCT_PATH
 from lvmdrp.core import image
 from lvmdrp.utils.database import CalibrationFrames, create_or_connect_db, get_calib_metadata, get_analogs_metadata, add_master
 from lvmdrp.utils import get_master_name
@@ -46,7 +45,7 @@ def build_master(config, analogs_metadata):
     status = ReductionStatus.IN_PROGRESS
     flags = QualityFlag.OK
     calib_images = []
-    analog_path = PRODUCT_PATH.format(path=config.LVM_SPECTRO_CALIB_PATH, label="{label}", kind="calib")
+    analog_path = config.PRODUCT_FILE_PATTERN.format(path=config.LVM_SPECTRO_CALIB_PATH, label="{label}", kind="calib")
     for analog_metadata in analogs_metadata:
         # BUG: best way to calculate gain for each amplifier: series of flats and fit the slope for sigma_counts vs sqrt(mean_counts)
         calib_images.append(image.loadImage(analog_path.format(label=analog_metadata.label)))
