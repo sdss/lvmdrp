@@ -31,6 +31,9 @@ FIBER_MAP:
 # used to calculate the sky continuum
 COMMON_SKY_LINE_LIST:
   "":
+SKYCORR_CONFIG: !join [*LVM_DRP_CONFIG_PATH, "skycalc.json"]
+ALMANAC_CONFIG: !join [*LVM_DRP_CONFIG_PATH, "almanac.json"]
+
 
 # staleness parameters
 # define installed lamps
