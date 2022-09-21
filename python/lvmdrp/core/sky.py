@@ -42,20 +42,18 @@ def get_sky_model(skycalc_config=SKYCALC_CONFIG_PATH, almanac_config=ALMANAC_CON
     with open(almanac_config, 'r') as f:
         inputalmdic = json.load(f)
     
+    # update dictionary with parameters passed as keyword arguments
+    inputdic.update((k, kwargs[k]) for k in inputdic.keys() & kwargs.keys())
+    inputalmdic.update((k, kwargs[k]) for k in inputalmdic.keys() & kwargs.keys())
+
     alm = AlmanacQuery(inputalmdic)
     dic = alm.query()
 
-    for key, value in inputdic.items():
-        dic[key] = value
+    for key, value in dic.items():
+        inputdic[key] = value
     
-    # update dictionary with parameters passed as keyword arguments
-    # print(dic, kwargs)
-
-    dic.update(kwargs)
-    # print(dic)
-
     try:
-        dic = fixObservatory(dic)
+        dic = fixObservatory(inputdic)
     except ValueError:
         raise
 
@@ -73,7 +71,7 @@ def get_sky_model(skycalc_config=SKYCALC_CONFIG_PATH, almanac_config=ALMANAC_CON
     sky_components["flux"] = sky_components["flux"] * (1/u.s/u.m**2*u.arcsec**2) #photons/s/m2/μm/arcsec2
 
     return sky_metadata, sky_components
-    
+
 
 def select_sky_fibers(rss, fiber_map_path):
     """select sky fibers to be used to build master skies 1 and 2"""
