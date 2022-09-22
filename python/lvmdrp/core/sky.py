@@ -17,7 +17,7 @@ def _load_sky_lines():
     pass
 
 
-def get_sky_model(skycalc_config=SKYCALC_CONFIG_PATH, almanac_config=ALMANAC_CONFIG_PATH, **kwargs):
+def get_sky_model(skycalc_config=SKYCALC_CONFIG_PATH, almanac_config=ALMANAC_CONFIG_PATH, return_pars=False, **kwargs):
     """run ESO sky model for observation parameters (ephemeris, atmospheric conditions, site, etc) to evaluate sky spectrum at each telescope pointing (model_sky1, model_sky2, model_skysci)
     
     Parameters
@@ -70,6 +70,8 @@ def get_sky_model(skycalc_config=SKYCALC_CONFIG_PATH, almanac_config=ALMANAC_CON
     sky_components["lam"] = sky_components["lam"]*10*u.AA
     sky_components["flux"] = sky_components["flux"] * (1/u.s/u.m**2*u.arcsec**2) #photons/s/m2/μm/arcsec2
 
+    if return_pars:
+        return sky_metadata, sky_components, dic
     return sky_metadata, sky_components
 
 
