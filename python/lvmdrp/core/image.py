@@ -633,7 +633,7 @@ class Image(Header):
             extension_error : int, optional with default: None
                 Number of the FITS extension containing the errors for the values
         """
-        hdu = pyfits.open(filename, ignore_missing_end=True,uint=True,do_not_scale_image_data=True) #open FITS file
+        hdu = pyfits.open(filename, ignore_missing_end=True, uint=False) #open FITS file
         if '.fz' in filename[-4:]:
             extension_data=1
             extension_header=1
