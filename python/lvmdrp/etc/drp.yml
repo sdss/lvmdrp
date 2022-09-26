@@ -8,10 +8,10 @@ LVM_DB_USER: "lvmdrp"
 LVM_DB_PASS: "1234"
 LVM_DB_NAME: "lvmdrp.db"
 # define root path of the installation
-LVM_DRP_ROOT: &root_path "/home/mejia/Research/UNAM/lvm-drp/"
-# LVM_DRP_ROOT: &root_path "/disk-a/mejia/Research/UNAM/lvm-drp/"
+# LVM_DRP_ROOT: &root_path "/home/mejia/Research/UNAM/lvm-drp/"
+LVM_DRP_ROOT: &root_path "/disk-a/mejia/Research/UNAM/lvm-drp/"
 # define path to config files
-LVM_DRP_CONFIG_PATH: !join [*root_path, "lvmdrp/python/lvmdrp/etc/"]
+LVM_DRP_CONFIG_PATH: &config_path !join [*root_path, "lvmdrp/python/lvmdrp/etc/"]
 # define log path
 DB_PATH: !join [*root_path, "lvm-db.pk"]
 # define path to pixel-to-wavelength maps for each spectrograph
@@ -31,8 +31,8 @@ FIBER_MAP:
 # used to calculate the sky continuum
 COMMON_SKY_LINE_LIST:
   "":
-SKYCORR_CONFIG: !join [*LVM_DRP_CONFIG_PATH, "skycalc.json"]
-ALMANAC_CONFIG: !join [*LVM_DRP_CONFIG_PATH, "almanac.json"]
+SKYCORR_CONFIG: !join [*config_path, "skycalc.json"]
+ALMANAC_CONFIG: !join [*config_path, "almanac.json"]
 
 
 # staleness parameters
