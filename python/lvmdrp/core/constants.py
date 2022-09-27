@@ -14,6 +14,7 @@ CONFIG_PATH = os.path.join(ROOT_PATH, "python", "lvmdrp", "etc")
 MASTER_CONFIG_PATH = os.path.join(CONFIG_PATH, "drp.yml")
 SKYCALC_CONFIG_PATH = os.path.join(CONFIG_PATH, "skycalc.json")
 ALMANAC_CONFIG_PATH = os.path.join(CONFIG_PATH, "almanac.json")
+SKYCORR_CONFIG_PATH = os.path.join(CONFIG_PATH, "skycorr_config.yml")
 
 BASIC_CALIBRATION_TYPES = [
     "bias",

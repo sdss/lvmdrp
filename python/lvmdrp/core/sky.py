@@ -1,13 +1,61 @@
-import json
+import os
+import json, yaml
+import numpy as np
 from io import BytesIO
 from astropy.io import fits
 from astropy.table import Table
 from astropy import units as u 
 
 from lvmdrp.core.constants import SKYCALC_CONFIG_PATH, ALMANAC_CONFIG_PATH
+from lvmdrp.external.skycorr import fitstabSkyCorrWrapper, createParFile, runSkyCorr
 from skycalc_cli.skycalc import SkyModel, AlmanacQuery
 from skycalc_cli.skycalc_cli import fixObservatory
 
+
+# PAR_MAP = {
+#     "objfile": "INPUT_OBJECT_SPECTRUM", "skyfile": "INPUT_SKY_SPECTRIM", "outfile": "OUTPUT_NAME", "outdir": "OUTPUT_DIR",
+#     "colnames": "COL_NAMES",
+#     "install": "INST_DIR", "defaultError": "DEFAULT_ERROR",
+#     "wave2Micron": "WLG_TO_MICRON", "vacOrAir": "VAC_AIR", "dateKey": "DATE_KEY", "timeKey": "TIME_KEY",
+#     "telAltKey": "TELALT_KEY",
+#     "linetab": "LINETABNAME", "vardat": "VARDATNAME",
+#     "soldaturl": "SOLDATURL",
+#     "solflux": "SOLFLUX", "fwhm": "FWHM", "varfwhm": "VARFWHM", "ltol": "LTOL", "minLineDist": "MIN_LINE_DIST", "fluxLim": "FLUXLIM",
+#     "ftol": "FTOL", "xtol": "XTOL", "wtol": "WTOL", "chebyMax": "CHEBY_MAX", "chebyMin": "CHEBY_MIN", "chebyConst": "CHEBY_CONST",
+#     "rebinType": "REBINTYPE", "weightLim": "WEIGHTLIM", "sigLim": "SIGLIM", "fitLim": "FITLIM", "plotType": "PLOT_TYPE"}
+
+PAR_MAP_R = {'INPUT_OBJECT_SPECTRUM': 'objfile',
+             'INPUT_SKY_SPECTRUM': 'skyfile',
+             'OUTPUT_NAME': 'outfile',
+             'OUTPUT_DIR': 'outdir',
+             'COL_NAMES': 'colnames',
+             'INST_DIR': 'install',
+             'DEFAULT_ERROR': 'defaultError',
+             'WLG_TO_MICRON': 'wave2Micron',
+             'VAC_AIR': 'vacOrAir',
+             'DATE_KEY': 'dateKey',
+             'TIME_KEY': 'timeKey',
+             'TELALT_KEY': 'telAltKey',
+             'LINETABNAME': 'linetab',
+             'VARDATNAME': 'vardat',
+             'SOLDATURL': 'soldaturl',
+             'SOLFLUX': 'solflux',
+             'FWHM': 'fwhm',
+             'VARFWHM': 'varfwhm',
+             'LTOL': 'ltol',
+             'MIN_LINE_DIST': 'minLineDist',
+             'FLUXLIM': 'fluxLim',
+             'FTOL': 'ftol',
+             'XTOL': 'xtol',
+             'WTOL': 'wtol',
+             'CHEBY_MAX': 'chebyMax',
+             'CHEBY_MIN': 'chebyMin',
+             'CHEBY_CONST': 'chebyConst',
+             'REBINTYPE': 'rebinType',
+             'WEIGHTLIM': 'weightLim',
+             'SIGLIM': 'sigLim',
+             'FITLIM': 'fitLim',
+             'PLOT_TYPE': 'plotType'}
 
 def _load_fiber_map():
     pass
@@ -73,6 +121,37 @@ def get_sky_model(skycalc_config=SKYCALC_CONFIG_PATH, almanac_config=ALMANAC_CON
     if return_pars:
         return sky_metadata, sky_components, dic
     return sky_metadata, sky_components
+
+
+def run_skycorr(config_file, wl, sci_rss, sky_rss, metadata=None):
+
+    skycorr_config = yaml.safe_load(open(config_file, "r"))
+    # write each spectrum in skycorr individual format
+    # TODO: look for actual meaning of timeVal and telAltVal (see examples)
+    sky_corr_rss = np.zeros_like(sci_rss)
+    for i, flux in enumerate(sci_rss):
+        if  metadata is not None:
+            sci_fits_file, sky_fits_file = fitstabSkyCorrWrapper(wave=wl, objflux=flux, skyflux=sky_rss[i], dateVal=metadata["MJD"], timeVal=metadata["TIME"], telAltVal=metadata["TELALT"])
+        else:
+            sci_fits_file, sky_fits_file = fitstabSkyCorrWrapper(wave=wl, objflux=flux, skyflux=sky_rss[i], dateVal=None, timeVal=None, telAltVal=None)
+
+        # convert from yaml to skycorr keys
+        skycorr_config_ = {val: skycorr_config[key] for key, val in PAR_MAP_R.items()}
+        skycorr_config_["objfile"] = sci_fits_file
+        skycorr_config_["skyfile"] = sky_fits_file
+
+        out_file = os.path.basename(sci_fits_file.replace(".fits", f"_out_{i}.fits"))
+        skycorr_config_["outfile"] = out_file
+
+        # OPTIONAL CHANGE OF THESE PARS: parfile = None, timeVal = None, dateVal = None, telAltVal = None
+        par_file = createParFile(**skycorr_config_)
+        runSkyCorr(parfile=par_file)
+
+        # read outputs
+        # sky_corr_fits = fits.open(os.path.join(skycorr_config_["outdir"], skycorr_config_["outfile"]))
+    # store outputs in RSS
+
+    return skycorr_config_, par_file
 
 
 def select_sky_fibers(rss, fiber_map_path):
