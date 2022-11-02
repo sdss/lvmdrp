@@ -96,6 +96,7 @@ def get_sky_model(skycalc_config=SKYCALC_CONFIG_PATH, almanac_config=ALMANAC_CON
 
     alm = AlmanacQuery(inputalmdic)
     dic = alm.query()
+    if dic["msolflux"] < 0: dic["msolflux"] = 130.0
 
     for key, value in dic.items():
         inputdic[key] = value
