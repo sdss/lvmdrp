@@ -877,6 +877,8 @@ class Spectrum1D(object):
     #        new_data[badpix]=fill_value
      #           print(numpy.sum(self._mask), numpy.sum(new_mask))
 
+            # TODO: implement LSF interpolation
+
             if self._error is None or err_sim==0:
                 new_error=None
             if self._mask is None:
