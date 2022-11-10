@@ -1590,6 +1590,9 @@ def offsetTrace2_drp(image, trace, trace_fwhm, disp, lines, logfile,  blocks='15
 	img.writeFitsHeader(image)
 	log.close()
 
+# TODO: suggestion from Oleg: test a voigt profile for the flux extraction
+# it might be better in dealing with cross-talk
+
 @missing_files(["BAD_CALIBRATION_FRAMES"], "image", "trace")
 def extractSpec_drp(image, trace, out_rss,  method='optimal',  aperture='7', fwhm='2.5', disp_axis='X',  replace_error='1e10', plot='-1', parallel='auto'):
 	"""
