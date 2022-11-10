@@ -799,7 +799,8 @@ class Spectrum1D(object):
             # replace bad pixels within the spectrum with linear interpolated values
             if  self._mask is not None:
                 good_pix = numpy.logical_not(self._mask)
-                intp = interpolate.UnivariateSpline(self._wave[good_pix], self._data[good_pix], k=1, s=0)
+                # intp = interpolate.UnivariateSpline(self._wave[good_pix], self._data[good_pix], k=1, s=0)
+                intp = interpolate.interp1d(self._wave[good_pix], self._data[good_pix], bounds_error=False)
                 clean_data = intp(self._wave)
                 if self._pixels[good_pix][0]>0:
                     clean_data[:self._pixels[good_pix][0]]=0
@@ -819,8 +820,8 @@ class Spectrum1D(object):
                 new_data = intp(ref_wave)
             select_out= numpy.logical_or(ref_wave<wave_interp[0],ref_wave>wave_interp[-1])
             new_data[select_out]=0
-            select = numpy.logical_or(ref_wave<numpy.min(self._wave), ref_wave>numpy.max(self._wave))
 
+            select = numpy.logical_or(ref_wave<numpy.min(self._wave), ref_wave>numpy.max(self._wave))
             select_not = numpy.logical_not(select)
             # replace the error of bad pixels within the spectrum to temporarily to zero  for the Monte Carlo simulation
             if self._mask is not None:
