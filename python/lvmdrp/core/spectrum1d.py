@@ -851,6 +851,32 @@ class Spectrum1D(object):
                     sim[i, select_not] = out[select_not]
                 new_error = numpy.std(sim, 0)
 
+            if self._inst_fwhm is not None:
+                if  self._mask is not None:
+                    good_pix = numpy.logical_not(self._mask)
+                    intp = interpolate.interp1d(self._wave[good_pix], self._inst_fwhm[good_pix], bounds_error=False)
+                    clean_inst_fwhm = intp(self._wave)
+                    if self._pixels[good_pix][0]>0:
+                        clean_inst_fwhm[:self._pixels[good_pix][0]]=0
+                    if self._pixels[good_pix][-1]<self._pixels[-1]:
+                        clean_inst_fwhm[self._pixels[good_pix][-1]-1:]=0
+                else:
+                    clean_inst_fwhm = self._inst_fwhm
+                select_interp = clean_inst_fwhm!=0
+                wave_interp = self._wave[select_interp]
+                # perform the interpolation on the data
+                if method=='spline':
+                    intp = interpolate.UnivariateSpline(self._wave[select_interp], clean_inst_fwhm[select_interp], s=0)
+                    new_inst_fwhm = intp(ref_wave)
+                elif method=='linear':
+                    intp = interpolate.interp1d(self._wave[select_interp], clean_inst_fwhm[select_interp], bounds_error=False)
+                    #intp = interpolate.UnivariateSpline(self._wave[select_interp], clean_inst_fwhm[select_interp], k=1, s=0)
+                    new_inst_fwhm = intp(ref_wave)
+                select_out= numpy.logical_or(ref_wave<wave_interp[0],ref_wave>wave_interp[-1])
+                new_inst_fwhm[select_out]=0
+            else:
+                new_inst_fwhm = None
+
             if self._mask is not None:
                 badpix=numpy.zeros(ref_wave.shape[0], dtype='bool')
                 indices = numpy.arange(self._wave.shape[0])
@@ -878,8 +904,6 @@ class Spectrum1D(object):
     #        new_data[badpix]=fill_value
      #           print(numpy.sum(self._mask), numpy.sum(new_mask))
 
-            # TODO: implement LSF interpolation
-
             if self._error is None or err_sim==0:
                 new_error=None
             if self._mask is None:
@@ -887,7 +911,7 @@ class Spectrum1D(object):
        # if numpy.isnan(new_data[10])==True:
         #    pylab.plot(self._wave[select_interp],'-k')
         #    pylab.show()
-        spec_out = Spectrum1D(wave=ref_wave, data=new_data, error=new_error, mask=new_mask)
+        spec_out = Spectrum1D(wave=ref_wave, data=new_data, error=new_error, mask=new_mask, inst_fwhm=new_inst_fwhm)
         return spec_out
 
     def matchFWHM(self, target_FWHM):
