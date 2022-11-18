@@ -1977,23 +1977,30 @@ def preprocRawFrame_drp(in_image, out_image, boundary_x, boundary_y, positions, 
 	images = [a, b, c, d]
 
 	try:
-		gain = org_image.getHdrValue(gain_field)
+		gains = [org_image.getHdrValue(f"{gain_field}{i+1}") for i in range(len(images))]
 	except KeyError:
-		if gain != "":
-			try:
-				gain = float(gain)
-			except ValueError:
-				gain = ""
+		try:
+			gain = org_image.getHdrValue(gain_field)
+		except KeyError:
+			if gain != "":
+				try:
+					gain = float(gain)
+				except ValueError:
+					gain = ""
+		gains = len(images)*[gain]  # list of gains
+	
 	try:
-		rdnoise = org_image.getHdrValue(rdnoise_field)
+		rdnoises = [org_image.getHdrValue(f"{rdnoise_field}{i+1}") for i in range(len(images))]
 	except KeyError:
-		if rdnoise != "":
-			try:
-				rdnoise = float(rdnoise)
-			except ValueError:
-				rdnoise = ""
-	gains = len(images)*[gain]  # list of gains
-	rdnoises = len(images)*[rdnoise]  # list of read-out noises
+		try:
+			rdnoise = org_image.getHdrValue(rdnoise_field)
+		except KeyError:
+			if rdnoise != "":
+				try:
+					rdnoise = float(rdnoise)
+				except ValueError:
+					rdnoise = ""
+		rdnoises = len(images)*[rdnoise]  # list of read-out noises
 
 	# create empty lists
 	bias = []  # list of biasses
