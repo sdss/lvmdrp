@@ -156,6 +156,10 @@ def detWaveSolution_drp(arc_rss, disp_rss, res_rss, ref_line_file='', ref_spec='
 			pixel[i-1] = float(line[0])
 			ref_lines[i-1] =float(line[1])
 			use_fwhm[i-1] = int(line[2])
+		pixel = pixel[use_fwhm]
+		ref_lines = ref_lines[use_fwhm]
+		use_fwhm = use_fwhm[use_fwhm]
+		nlines = use_fwhm.sum()
 	else:
 		# get the reference spectrum number, the inital pixel positions and their reference wavelength from the parameter list
 		ref_spec = int(ref_spec) # reference fiber
@@ -231,7 +235,7 @@ def detWaveSolution_drp(arc_rss, disp_rss, res_rss, ref_line_file='', ref_spec='
 		if poly_dispersion>0:
 			fit_wave = numpy.polyfit(cent_wave[i, select_ref_lines][select], ref_lines[select_ref_lines][select], poly_dispersion) # fit with a polynomial
 			rms[i]= numpy.std(ref_lines[select_ref_lines][select]-numpy.polyval(fit_wave, cent_wave[i, select_ref_lines][select])) # compute the rms of the polynomial
-			wave_sol[i, : ] = numpy.polyval(fit_wave, numpy.arange(arc._data.shape[1])) # write wavelength solution
+			wave_sol[i, :] = numpy.polyval(fit_wave, numpy.arange(arc._data.shape[1])) # write wavelength solution
 		elif poly_dispersion<0:
 			legandre_wave = fit_profile.LegandrePoly(numpy.zeros(-1*poly_dispersion+1), min_x=0, max_x=arc._data.shape[1]-1)
 			legandre_wave.fit(cent_wave[i, select_ref_lines][select],   ref_lines[select_ref_lines][select])
