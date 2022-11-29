@@ -788,9 +788,11 @@ class Spectrum1D(object):
                 self._error = numpy.flipud(self._error)
             if self._mask is not None:
                 self._mask = numpy.flipud(self._mask)
+        
         if self._mask is not None and numpy.sum(self._mask)>self._dim/2.0:
             new_mask = numpy.ones(len(ref_wave), dtype='bool')
             new_data =  numpy.zeros(len(ref_wave), numpy.float32)
+            new_inst_fwhm = numpy.zeros(len(ref_wave), numpy.float32)
             if self._error is None or err_sim==0:
                 new_error=None
             else:
