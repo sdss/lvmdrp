@@ -347,7 +347,6 @@ def createPixTable_drp(rss_in, rss_out, arc_wave, arc_fwhm='', cropping=''):
 		rss.setInstFWHM(fwhm_trace.getData()[0][:, crop_start:crop_end])
 	rss.writeFitsData(rss_out)
 
-
 def checkPixTable_drp(rss_in, ref_lines, logfile, blocks='15',  init_back='100.0', aperture='10'):
 	"""
 			Measures the offset in dispersion direction between the object frame and the used calibration frames.
@@ -535,6 +534,7 @@ def correctPixTable_drp(rss_in, rss_out, logfile, ref_id, smooth_poly_cross='', 
 		rss[i]=spec
 	rss.writeFitsData(rss_out)
 
+@missing_files(["BAD_CALIBRATION_FRAMES"], "rss_in")
 def resampleWave_drp(rss_in, rss_out, method='spline', start_wave='', end_wave='', disp_pix='', err_sim='500', replace_error='1e10', correctHvel='',compute_densities=0,parallel='auto'):
 	"""
 			Resamples the RSS with a wavelength in pixel table format to an RSS with a common wavelength solution for each fiber.
@@ -638,7 +638,7 @@ def resampleWave_drp(rss_in, rss_out, method='spline', start_wave='', end_wave='
 				spec = result_spec[i].get()
 			else:
 				spec = rss.getSpec(i)
-				spec=spec.resampleSpec(ref_wave, method, err_sim, replace_error)
+				spec = spec.resampleSpec(ref_wave, method, err_sim, replace_error)
 			data[i, :] = spec._data
 			if rss._error is not None and err_sim!=0:
 				error[i, :] = spec._error
@@ -701,7 +701,6 @@ def matchResolution_drp(rss_in, rss_out, targetFWHM, parallel='auto'):
 	rss._inst_fwhm=None
 	rss.setHdrValue('hierarch PIPE SPEC RES', targetFWHM, 'FWHM in A of spectral resolution')
 	rss.writeFitsData(rss_out)
-
 
 def constructSkySpec_drp(rss_in, sky_out, clip_sigma='3.0', nsky='0', filter='', non_neg='1', plot='0'):
 	"""
@@ -888,7 +887,6 @@ def subtractSkySpec_drp(rss_in, rss_out, sky, factor='1', scale_region='', scale
 		rss.setHdrValue('hierarch PIPE SKY SCALE',float('%.3f'%scale_factor),'sky spectrum scale factor')
 	rss.writeFitsData(rss_out)
 
-
 def splitFibers_drp(rss_in, splitted_out, contains):
 	"""
 			Subtracts a (sky) spectrum, which was stored as a FITS file, from the whole RSS.
@@ -919,8 +917,6 @@ def splitFibers_drp(rss_in, splitted_out, contains):
 	splitted_rss = rss.splitFiberType(contains)
 	for i in range(len(splitted_rss)):
 		splitted_rss[i].writeFitsData(splitted_out[i])
-
-
 
 def createFiberFlat_drp(rss_in, rss_out, smooth_poly='0', smooth_median='0', clip='', valid=''):
 	"""
@@ -1107,7 +1103,6 @@ def correctFiberFlat_drp(rss_in, rss_out, fiberflat, clip='0.2'):
 		spec_new = spec_data/flat_resamp
 		rss.setSpec(i, spec_new)
 	rss.writeFitsData(rss_out)
-
 
 def createSensFunction_drp(rss_in, out_sens,  ref_spec, airmass, exptime, smooth_poly='5', smooth_ref='6.0', smooth_ref2='6.0', median_filt='0',coadd='1', extinct_v='0.0', extinct_curve='mean', aper_correct='1.0',  ref_units='1e-16', target_units='1e-16',column_wave='0', column_flux='1', delimiter='', header='1' , split='', mask_wave='', mask_telluric='', overlap='100', out_star='', verbose='0'):
 	smooth_poly=int(smooth_poly)
@@ -1435,8 +1430,6 @@ def fluxCalibration_drp(rss_in, rss_out, sens_func, airmass, exptime, extinct_v=
 	#        print exptime
 	rss.writeFitsData(rss_out)
 
-
-
 def combineRSS_drp(rsss, rss_out, method='mean'):
 	# convert input parameters to proper type
 	list_rss= rsss.split(',')
@@ -1452,8 +1445,6 @@ def combineRSS_drp(rsss, rss_out, method='mean'):
 	combined_rss.setHeader(header=combined_header._header)
 	#write out FITS file
 	combined_rss.writeFitsData(rss_out)
-
-
 
 def glueRSS_drp(rsss,rss_out):
 	list_rss= rsss.split(',')
@@ -1914,7 +1905,6 @@ def correctTelluric_drp(rss_in, rss_out, telluric_spectrum, airmass='AIRMASS'):
 			rss_corr[i] = spec*(1.0/(telluric_resamp**(airmass)))
 	rss_corr.writeFitsData(rss_out)
 
-
 def splitFile_drp(rss_in, data='', error='', mask='', wave='', fwhm='', position_table=''):
 	"""
 			Copies the different extension of the RSS into separate files.
@@ -1981,7 +1971,6 @@ def maskNAN_drp(rss_in, replace_error='1e12'):
 				if rss._mask is not None:
 					rss._mask[i, :]=True
 		rss.writeFitsData(rss_in)
-
 
 def registerSDSS_drp(rss_in, rss_out, sdss_file, sdss_field, filter, ra, dec, hdr_prefix,  search_box='20.0,2.6', step='1.0,0.2', offset_x ='0.0',  offset_y='0.0', quality_figure='',  angle_key='SPA', parallel='auto', verbose='0'):
 	"""
@@ -2143,7 +2132,6 @@ def registerSDSS_drp(rss_in, rss_out, sdss_file, sdss_field, filter, ra, dec, hd
 			plt.savefig(quality_figure)
 		if verbose==1:
 			plt.show()
-
 
 def DAR_registerSDSS_drp(rss_in, sdss_file, sdss_field, ra, dec, out_prefix,  ref_wave, coadd='150', step='150', smooth_poly='3', resolution='0.3,0.05', guess_x ='0.0',  guess_y='0.0',start_wave='', end_wave='',  parallel='auto', verbose='0'):
 	"""

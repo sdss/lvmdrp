@@ -1178,7 +1178,6 @@ class RSS(FiberRows):
         return Cube_out
 
 
-
     def createFiberFlat(self, smooth_poly=-5, smooth_median=0, clip=[0.2, 2], valid=None):
 
         if len(self._wave.shape)==1:
