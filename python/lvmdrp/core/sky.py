@@ -205,12 +205,13 @@ def build_master_sky(sky1_fibers, sky2_fibers, sci_fibers):
     """build master sky spectra 1 and 2 (sky1, sky2) and master science spectrum (sci1, rejecting bright fibers)
     """
     # average the cleaned fibers
-    master_sky1 = np.average(sky1_fibers)
-    master_sky2 = np.average(sky2_fibers)
-    master_sci = np.average(sci_fibers)
+    master_sky1 = np.average(sky1_fibers, axis=0)
+    master_sky2 = np.average(sky2_fibers, axis=0)
+    master_sci = np.average(sci_fibers, axis=0)
     return master_sky1, master_sky2, master_sci
 
-def cont_line_separation(wl_master_sky, master_sky1, master_sky2):
+
+def cont_line_separation(wl_master_sky, master_sky1, master_sky2, master_sci):
     """run continuum/line separation algorithm on master sky 1 and 2 and master science and produce line-only (sky1_line, sky2_line, sci_line) and continuum-only (sky1_cont, sky2_cont, sci_cont) spectra for each
     """
     # build a sky model library with continuum and line separated (ESO skycalc)
@@ -219,11 +220,15 @@ def cont_line_separation(wl_master_sky, master_sky1, master_sky2):
     pass
 
 
-def sky_line_correct(sky1_line, sky2_line):
+def sky_line_correct(wl_master_sky, sky1_line, sky2_line, sci_line, config):
     """average sky1_line and sky2_line into 'sky_line', and run skycorr on 'sky_line' and 'sci_line' to produce 'sky_line_corr'"""
     # compute a weighted average using as weights the inverse distance distance to science
+    w_1, w_2 = None, None
+    sky_line = w_1 * sky1_line + w_2 * sky2_line
     # run skycorr on averaged line spectrum
-    pass
+    sky_line_corr = run_skycorr(config_file=config, wl=wl_master_sky, sci_rss=sci_line, sky_rss=sky_line)
+    
+    return sky_line_corr
 
 
 def eval_eso_sky(sky1_par, sky2_par, sci_par):
@@ -234,9 +239,9 @@ def eval_eso_sky(sky1_par, sky2_par, sci_par):
     sky_line_corr, sky_cont_corr, model_skysci
 
     """
-    sky1_meta, sky1_model = get_sky_model(**sky1_par)
-    sky2_meta, sky2_model = get_sky_model(**sky2_par)
-    sci_meta, sci_model = get_sky_model(**sci_par)    
+    _, sky1_model = get_sky_model(**sky1_par)
+    _, sky2_model = get_sky_model(**sky2_par)
+    _, sci_model = get_sky_model(**sci_par)    
 
     return sky1_model, sky2_model, sci_model
 
@@ -249,7 +254,7 @@ def sky_cont_correct(sky1_cont, sky2_cont, sky1_model, sky2_model, sci_model):
 
 def coadd_sky(sky_cont_corr, sky_line_corr):
     """coadd corrected line and continuum combined sky frames:    sky_corr=sky_cont_corr+sky_line_corr"""
-    sky_corr = sky_cont_corr+sky_line_corr
+    sky_corr = sky_cont_corr + sky_line_corr
     return sky_corr
 
 
