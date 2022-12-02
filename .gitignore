@@ -47,3 +47,6 @@ _*
 *.zip
 .vscode
 *.db
+
+# DRP specific
+de421.bsp
