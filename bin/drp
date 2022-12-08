@@ -1,150 +1,84 @@
 #!/usr/bin/env python
 # encoding: utf-8
 #
-# @Author: Alfredo Mejía-Narváez
-# @Date: Apr 27, 2022
+# @Author: Bernd Husemann, Alfredo Mejía-Narváez
+# @Date: Dec 7, 2022
 # @Filename: drp
 # @License: BSD 3-Clause
 # @Copyright: SDSS-V LVM
 
-from lvmdrp.utils.database import CalibrationFrames, create_or_connect_db, get_raws_metadata, get_master_metadata, add_calib, put_redux_state
-from lvmdrp.main import *
+import sys
+from lvmdrp.functions import (commandMethod, headerMethod, imageMethod, rssMethod, skyMethod)
 
-import warnings
-from astropy.utils.exceptions import AstropyWarning
 
-warnings.simplefilter('ignore', category=AstropyWarning)
-
-# TODO: implement script for adding flags to individual frames manually
-# TODO: implement status updates as decorators to target specific functions responsible for changing the reduction status:
-#   - setup_reduction
-#   - get_analogs_metadata
-
-if __name__ == "__main__":
-    # parse master config file
-    config = load_master_config()
-    # parse cmdline arguments
-    config, cmd_args = parse_arguments(config=config)
-    # connect to DB for new frames
-    db = create_or_connect_db(config=config)
-    # locate new frames pending for calibration
-    new_frames = get_raws_metadata()
-    i = 0
-    for metadata in new_frames:
-        # NOTE: remove this line after testing
-        if metadata.imagetyp != "bias": continue
-        i += 1
-        # for each new frame, build current reduction settings according to configuration file
-        metadata, settings = setup_reduction(config=config, metadata=metadata)
-        # BUG: redux_settings.calib_metadata may return None values, handle this by skipping calibration steps whenever possible
-        #      also adding the corresponding calibration flags
-        # BUG: fix cases in which there are no calibration files
-        # BUG: in the case of arcs, if missing continuum frame, fall back to arc with most lamps on
-        #      this should be the next best thing for a continuum frame
-        #      finally fall back to current frame as continuum and add corresponding flags
-
-        # put reduction state
-        put_redux_state(metadata=metadata, status="IN_PROGRESS")
-        
-        # run basic calibration for new frame
-        if settings.type in CALIBRATION_TYPES:
-            # get calibration metadata for each analog
-            calib_metadata = get_master_metadata(metadata=metadata)
-            # run basic calibration for each analog
-            run_reduction_calib(config=config, metadata=metadata, calib_metadata=calib_metadata, redux_settings=settings)
-            # run continuum/arc reduction if needed
-            if settings.type in ["continuum", "arc"]:
-                run_reduction = {"continuum": run_reduction_continuum, "arc": run_reduction_arc}
-                metadata = run_reduction[settings.type](
-                    config=config,
-                    metadata=metadata,
-                    calib_metadata=calib_metadata,
-                    redux_settings=settings
-                )
-            put_redux_state(metadata=metadata, status="FINISHED")
-            new_calib_metadata = CalibrationFrames(
-                label=metadata.label,
-                path=settings.output_path.format(kind="calib"),
-                reduction_started=metadata.reduction_started,
-                reduction_finished=metadata.reduction_finished,
-                is_master=False,
-                status=metadata.status,
-                flags=metadata.flags
-            )
-            add_calib(calib_metadata=new_calib_metadata, raw_metadata=metadata)
+if __name__=="__main__":
+    args = sys.argv[1:]
+    if len(args)==0:
+        print('No subcategory of commands given.')
+        print('Please use "drp help" for a list of valid command categories')
+    elif args[0]=='help':
+        print('')
+        print('Available command SUBCATEGORIES of drp:')
+        i=1
+        methods = dir()
+        for func in methods:
+            if "Method" in func:
+                print('%i. %s  >> %s '%(i, func.split('Method')[0], eval(func+'.description')))
+                i+=1
+        print('')
+        print('Please use "drp SUBCATEGORY help" to get a list of available commands for the category')
+        print('')
+    
+    elif args[0]+'Method' in dir():
+        command = args[0]+'Method.'
+        if args[1]=='help' and len(args)==2:
+            try:
+                list_commands = eval("dir(%s)"%(command[:-1]))
+                print('')
+                print('Available drp COMMANDs within the subcategory %s:' %(args[0]))
+                for comm in list_commands:
+                    if '_drp' in comm:
+                        print( '%s' %(comm.split('_drp')[0]))
+                print('')
+                print('Please use "drp %s help COMMAND" to detailed information command, its description, '%(args[0]))
+                print('required and optional parameter. You can quit the help by pressing "q" on your keyboard.')
+                print('The first row informs you about the internal python method and its parameter list and default values.')
+                print('')
+                print('GENERAL REMARKS:')
+                print('You can run the routine by call "drp SUBCATEGORY COMMAND" followed by the required parameters.')
+                print('Parameters with default values do not need to be given incase the default setting should be used.')
+                print('The parameters need to be provided in their correct order or should explicitly called with their parameter name, e.g.  name=value.')
+                print('If the parameter value contains a space, e.g. for comment strings, bracket them in "" so they can be associated to a single parameter.')
+                
+                print('')
+            except KeyError:
+              print('You have asked for help about a noexisting command subcategory of drp')
+              print('Please use "drp help" for a list of valid command categories')
+        elif args[1]=='help' and len(args)==3:
+            try:
+                eval('help('+command+args[2]+'_drp)')
+            except:
+                print('You asked for help on a non-existing subcategory and/or command of drp')
+                
         else:
-            # get calibration frames metadata
-            calib_metadata = get_master_metadata(metadata=metadata)
-            # run basic calibration
-            metadata = run_reduction_calib(config=config, metadata=metadata, calib_metadata=calib_metadata, redux_settings=settings)
-            # run calibration according to type of frame
-            metadata = run_reduction_object(config=config, metadata=metadata, calib_metadata=calib_metadata, redux_settings=settings)
-            
-            # TODO: run tests
-            #   - add flags
-            # TODO: update DB
-            #   - update reduction state
-        put_redux_state(metadata=metadata)
-        if i == 3: break
-    # close DB connection
-    db.close()
-
-# -------------------------------------------------------------------------------------------------
-# if new frame:
-#   run preprocessing (remove overscan, prescan and align amplifiers)
-
-#   if basic calibration frame (bias, dark, flat):
-#     build master
-#     read current master
-#     compare new to current master
-#     if current master too different (from new master) or too stale: replace current master
-
-#   if continuum/arc frame:
-#     find basic calibration frames matching cont/arc if exists, else use closest in time
-#     run basic calibration (bias, dark, flat)
-#     if continuum:
-#       cosmic ray
-#       find peaks
-#       1st trace
-#       stray light
-#       2nd trace
-#       extraction
-#       run continuum diagnostics, while failing:
-#         use closest in time master if exists, else add continuum flag
-#     if arc:
-#       locate corresponding continuum (clostest in time/temp), else use master
-#       cosmic ray
-#       stray light
-#       extraction
-#       wavelength solution (vacuum)
-#       run arc diagnostics, while failing:
-#         use closest in time master if exists, else add arc flag
-
-#   if object (sky + science + calibration star):
-#     run basic calibration:
-#        dark:
-#          run dark diagnostics, while failing:
-#            use closest in time master if exists, else add dark flag
-#        bias:
-#          run bias diagnostics, while failing:
-#            use closest in time master if exists, else add bias flag
-#        flat:
-#          run flat diagnostics, while failing:
-#            use closest in time master if exists, else add flat flag
-#     locate continuum if present (dome and twilight flats), else use current master
-#     locate arc if present, else use current master
-#     cosmic ray
-#     stray light
-#     diagnose likely shifts and stretching along the cross-dispersion axis (dome flat)
-#     extraction
-#     locate corresponding sky fibers
-#     locate strong sky lines
-#     refine wavelength solution using strong sky lines (at the very end?)
-#     applying wavelength solution
-#     fiberflat (twilight flat)
-#     sky subtraction
-#     locate corresponding calibration star fibers, else use closest in time
-#     flux calibration
-#     join channels (if needed by sky module)
-#     run diagnostics and add corresponding flags
-#   write logs
+            key=False
+            error=False
+            command+=args[1]+'_drp('
+            for a in args[2:]:
+                if not '=' in a and key!=True:
+                    command+='"'+a+'"'
+                elif '=' in a:
+                    entry=a.split('=')
+                    command+=entry[0]+'="'+entry[1]+'"'
+                    key=True
+                else:
+                    error=True
+                    print('The command you tried to run does not exist in drp')
+                    break
+                
+                command+=','
+            if error==False:
+                command=command[:-1]+')'
+                eval(command)
+    else:
+        print('no')

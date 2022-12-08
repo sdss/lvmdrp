@@ -25,34 +25,35 @@ RELEASE = 'dev' in VERSION
 def run(packages, install_requires):
 
     setup(name=NAME,
-          version=VERSION,
-          license='BSD3',
-          description='SDSSV-LVM Data Reduction Pipeline',
-          long_description=open('README.rst').read(),
-          author='Eric Pellegrini',
-          author_email='ericpellegrini@outlook.com',
-          keywords='astronomy software',
-          url='https://github.com/sdss/lvmdrp',
-          include_package_data=True,
-          packages=packages,
-          install_requires=install_requires,
-          package_dir={'': 'python'},
-          scripts=[
-              'bin/drp',
-              'bin/pix2wave'
-          ],
-          classifiers=[
-              'Development Status :: 4 - Beta',
-              'Intended Audience :: Science/Research',
-              'License :: OSI Approved :: BSD License',
-              'Natural Language :: English',
-              'Operating System :: OS Independent',
-              'Programming Language :: Python',
-              'Programming Language :: Python :: 2.6',
-              'Programming Language :: Python :: 2.7',
-              'Topic :: Documentation :: Sphinx',
-              'Topic :: Software Development :: Libraries :: Python Modules',
-          ],
+            version=VERSION,
+            license='BSD3',
+            description='SDSSV-LVM Data Reduction Pipeline',
+            long_description=open('README.rst').read(),
+            author='Eric Pellegrini',
+            author_email='ericpellegrini@outlook.com',
+            keywords='astronomy software',
+            url='https://github.com/sdss/lvmdrp',
+            include_package_data=True,
+            packages=packages,
+            install_requires=install_requires,
+            package_dir={'': 'python'},
+            scripts=[
+                'bin/lvmdrp',
+                'bin/drp',
+                'bin/pix2wave'
+            ],
+            classifiers=[
+                'Development Status :: 4 - Beta',
+                'Intended Audience :: Science/Research',
+                'License :: OSI Approved :: BSD License',
+                'Natural Language :: English',
+                'Operating System :: OS Independent',
+                'Programming Language :: Python',
+                'Programming Language :: Python :: 2.6',
+                'Programming Language :: Python :: 2.7',
+                'Topic :: Documentation :: Sphinx',
+                'Topic :: Software Development :: Libraries :: Python Modules',
+            ],
     )
 
 

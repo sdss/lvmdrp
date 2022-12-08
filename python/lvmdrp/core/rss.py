@@ -1,3 +1,5 @@
+from lvmdrp.core.header import Header, combineHdr
+from lvmdrp.core.positionTable import PositionTable
 from lvmdrp.core.fiberrows import FiberRows
 from lvmdrp.core.spectrum1d import Spectrum1D
 from lvmdrp.core.cube import Cube
@@ -7,6 +9,7 @@ from multiprocessing import Pool
 from copy import deepcopy
 from astropy.io import fits as pyfits
 import numpy
+from scipy import ndimage
 
 
 class RSS(FiberRows):
@@ -113,7 +116,7 @@ class RSS(FiberRows):
                 return rss
             except:
                 #raise exception if the type are not matching in general
-                raise exceptions.TypeError("unsupported operand type(s) for *: %s and %s"%(str(type(self)).split("'")[1], str(type(other)).split("'")[1]))
+                raise TypeError("unsupported operand type(s) for *: %s and %s"%(str(type(self)).split("'")[1], str(type(other)).split("'")[1]))
 
     def __init__(self, data=None, wave=None,  inst_fwhm=None, header = None, error = None, mask = None,shape=None, size=None, arc_position_x=None, arc_position_y=None, good_fibers=None,  fiber_type=None,  logwave=False):
         FiberRows.__init__(self, data,  header, error, mask, shape, size, arc_position_x, arc_position_y, good_fibers, fiber_type)
@@ -220,7 +223,6 @@ class RSS(FiberRows):
             self._mask[fiber,:]=True
         if self._error is not None:
             self._error[fiber,:]=replace_error
-
 
 
     def createWavefromHdr(self, logwave=False):
@@ -492,8 +494,6 @@ class RSS(FiberRows):
         self._size = rss_in[i]._size
         self._good_fibers = rss_in[i]._good_fibers
         self._fiber_type = rss_in[i]._fiber_type
-
-
 
 
     def setSpec(self, fiber, spec):
