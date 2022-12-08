@@ -1,6 +1,7 @@
-INST_DIR: /disk-a/mejia/Research/UNAM/lvm-drp/lvmdrp/lib/skycorr/
-INPUT_OBJECT_SPECTRUM: /disk-a/mejia/Research/UNAM/lvm-drp/lvmdrp/lib/skycorr/examples/data/sky_sinfo_1.fits
-INPUT_SKY_SPECTRUM: /disk-a/mejia/Research/UNAM/lvm-drp/lvmdrp/lib/skycorr/examples/data/sky_sinfo_2.fits
+# BUG: the change the paths during installation to be relative to the installation directory
+INST_DIR: /home/mejia/Research/UNAM/lvm-drp/lvmdrp/lib/skycorr/
+INPUT_OBJECT_SPECTRUM: /home/mejia/Research/UNAM/lvm-drp/lvmdrp/lib/skycorr/examples/data/sky_sinfo_1.fits
+INPUT_SKY_SPECTRUM: /home/mejia/Research/UNAM/lvm-drp/lvmdrp/lib/skycorr/examples/data/sky_sinfo_2.fits
 OUTPUT_DIR: "./"
 OUTPUT_NAME: TEST-SINFO-H
 COL_NAMES: [lambda, flux]

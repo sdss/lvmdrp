@@ -16,6 +16,40 @@ SKYCALC_CONFIG_PATH = os.path.join(CONFIG_PATH, "skycalc.json")
 ALMANAC_CONFIG_PATH = os.path.join(CONFIG_PATH, "almanac.json")
 SKYCORR_CONFIG_PATH = os.path.join(CONFIG_PATH, "skycorr_config.yml")
 
+SKYCORR_PAR_MAP = {'INPUT_OBJECT_SPECTRUM': 'objfile',
+             'INPUT_SKY_SPECTRUM': 'skyfile',
+             'OUTPUT_NAME': 'outfile',
+             'OUTPUT_DIR': 'outdir',
+             'COL_NAMES': 'colnames',
+             'INST_DIR': 'install',
+             'DEFAULT_ERROR': 'defaultError',
+             'WLG_TO_MICRON': 'wave2Micron',
+             'VAC_AIR': 'vacOrAir',
+             'DATE_KEY': 'dateKey',
+             'TIME_KEY': 'timeKey',
+             'TELALT_KEY': 'telAltKey',
+             'LINETABNAME': 'linetab',
+             'VARDATNAME': 'vardat',
+             'SOLDATURL': 'soldaturl',
+             'SOLFLUX': 'solflux',
+             'FWHM': 'fwhm',
+             'VARFWHM': 'varfwhm',
+             'LTOL': 'ltol',
+             'MIN_LINE_DIST': 'minLineDist',
+             'FLUXLIM': 'fluxLim',
+             'FTOL': 'ftol',
+             'XTOL': 'xtol',
+             'WTOL': 'wtol',
+             'CHEBY_MAX': 'chebyMax',
+             'CHEBY_MIN': 'chebyMin',
+             'CHEBY_CONST': 'chebyConst',
+             'REBINTYPE': 'rebinType',
+             'WEIGHTLIM': 'weightLim',
+             'SIGLIM': 'sigLim',
+             'FITLIM': 'fitLim',
+             'PLOT_TYPE': 'plotType'
+}
+
 BASIC_CALIBRATION_TYPES = [
     "bias",
     "dark",

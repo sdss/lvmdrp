@@ -1,12 +1,9 @@
 
 # taken from @ryanhoughton github repository
 
-from gettext import install
 import numpy as np
-import pylab as pl
 import subprocess as sp
 import uuid
-import pdb
 import os
 # get rid of annoying fits table warnings
 import warnings
@@ -161,7 +158,7 @@ def runSkyCorr(parfile, installdir=skycorrinstall, bin="bin/skycorr"):
     FNULL.close()
 
 
-def fitstabSkyCorrWrapper(wave, objflux, skyflux, dateVal, timeVal, telAltVal, tmp=skycorrtmp):
+def fitstabSkyCorrWrapper(wave, objflux, skyflux, dateVal, timeVal, telAltVal, label, specs_dir=skycorrtmp, overwrite=True):
     """
     RH 19/11/15
 
@@ -169,45 +166,36 @@ def fitstabSkyCorrWrapper(wave, objflux, skyflux, dateVal, timeVal, telAltVal, t
 
     """
 
-    dirname = tmp+"skycorr"+str(uuid.uuid4())+"/"
-    objfile = dirname+"OBJ"+str(uuid.uuid4())+".fits"
-    skyfile = dirname+"SKY"+str(uuid.uuid4())+".fits"
-    outfile = "OUT"+str(uuid.uuid4())
+    specs_dir = os.path.abspath(specs_dir)
+    objfile = os.path.join(specs_dir, f"OBJ_{label}.fits")
+    skyfile = os.path.join(specs_dir, f"SKY_{label}.fits")
 
-    print(dirname)
-
-    os.makedirs(dirname, exist_ok=True)
-    # sp.call(["mkdir", dirname])
+    os.makedirs(specs_dir, exist_ok=True)
     objtab = ap.Table()
     objtab.add_column(name='lambda', col=wave)
     objtab.add_column(name='flux', col=objflux)
     objtab.table_name = "Obj"
-    objtab.write(objfile, format="fits")
+    objtab.write(objfile, format="fits", overwrite=overwrite)
 
     ot = pf.open(objfile)
     ot[1].header['MJD-OBS'] = dateVal
     ot[1].header['TM-START'] = timeVal
     ot[1].header['ESO TEL ALT'] = telAltVal
-    ot.writeto(objfile, clobber=True)
+    ot.writeto(objfile, overwrite=True)
     ot.close()
 
     skytab = ap.Table()
     skytab.add_column(name='lambda', col=wave)
     skytab.add_column(name='flux', col=skyflux)
     skytab.table_name = "Sky"
-    skytab.write(skyfile, format="fits")
+    skytab.write(skyfile, format="fits", overwrite=overwrite)
 
     st = pf.open(skyfile)
     st[1].header['MJD-OBS'] = dateVal
     st[1].header['TM-START'] = timeVal
     st[1].header['ESO TEL ALT'] = telAltVal
-    st.writeto(skyfile, clobber=True)
+    st.writeto(skyfile, overwrite=True)
     st.close()
-
-    # colnames = ["lambda", "flux"]
-    # parfile = createParFile(objfile, skyfile, outfile, outdir=dirname, colnames=colnames)
-    # runSkyCorr(parfile)
-    # raise ValueError("Incomplete Code")
 
     return objfile, skyfile
 
