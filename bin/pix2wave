@@ -13,9 +13,11 @@ import sys
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
-from matplotlib.patches import Polygon
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from matplotlib.widgets import TextBox
+import seaborn as sns
+
+sns.set(context="talk", style="ticks", palette="husl", color_codes=True)
 
 from numpy.polynomial.hermite import hermfit, hermval
 from numpy.polynomial.polynomial import polyfit, polyval
@@ -104,11 +106,11 @@ class SolveWavelength:
             if mask:
                 self.ax.axvspan(x_min, x_max, fc="0.5", lw=0, alpha=0.5)
                 self.ax.plot([x_peak], [self.ydata[(x_min<=self.xdata)&(self.xdata<=x_max)].max()], "or", mew=0.5, ms=5, mfc="none")
-                self.ax.text(x_max, 0.95, f"{wavelength:.4f}", va="top", ha="left", size="small", weight="bold", color="0.5", rotation=90)
+                self.ax.text(x_max, 0.95, f"{wavelength:.4f}", va="top", ha="left", size="xx-small", weight="bold", color="0.5", rotation=90)
             else:
                 self.ax.axvspan(x_min, x_max, fc="0.8", lw=0, alpha=0.5)
                 self.ax.plot([x_peak], [self.ydata[(x_min<=self.xdata)&(self.xdata<=x_max)].max()], "ok", mew=0.5, ms=3, mfc="none")
-                self.ax.text(x_max, 0.95, f"{wavelength:.4f}", va="top", ha="left", size="small", color="0.8", rotation=90)
+                self.ax.text(x_max, 0.95, f"{wavelength:.4f}", va="top", ha="left", size="xx-small", color="0.8", rotation=90)
         self.ax.set_xlabel("dispersion axis (pixel)")
         self.ax.set_ylabel("flux")
 
@@ -157,7 +159,7 @@ class SolveWavelength:
         # update plot
         self.window.set_visible(True)
         self.peak_point.set_visible(True)
-        self.ax.text(self.x_peak+self.aperture, 0.95, f"{float(wavelength or 0):.4f}", va="top", ha="left", size="small", weight="bold", color="b", rotation=90)
+        self.ax.text(self.x_peak+self.aperture, 0.95, f"{float(wavelength or 0):.4f}", va="top", ha="left", size="xx-small", weight="bold", color="b", rotation=90)
     
     def _save_table(self):
         self.table = self.table[self.table[:,0].argsort()]
@@ -166,6 +168,7 @@ class SolveWavelength:
             self.nrows = nrows
             with open(self.dispersion_table, "w") as t:
                 if not self.table_exist: t.write(f"{self.ny_spectra}\n")
+                t.write(f"{self.nrows}\n")
                 for i in range(self.nrows):
                     x, y, m = self.table[i]
                     t.write(f"{x:>.2f} {y:>9.4f} {int(m):>1d}\n")
