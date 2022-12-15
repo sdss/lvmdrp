@@ -171,12 +171,6 @@ class RSS(FiberRows):
         spec = Spectrum1D(wave, data, error=error, mask=mask, inst_fwhm=inst_fwhm)
         return spec
 
- #   def __getslice__(self, fiber_start,  fiber_end):
-  #      data = self._data[fiber_start:fiber_end, :]
-   #     if self._wave is not None:
-
-
-
     def __setitem__(self, fiber, spec):
 
         self._data[fiber, :] = spec._data
@@ -192,9 +186,6 @@ class RSS(FiberRows):
 
         if self._mask is not None and spec._mask is not None:
             self._mask[fiber, :] = spec._mask
-
-
-
 
     def setWave(self, wave):
         self._wave = numpy.array(wave)
@@ -223,7 +214,6 @@ class RSS(FiberRows):
             self._mask[fiber,:]=True
         if self._error is not None:
             self._error[fiber,:]=replace_error
-
 
     def createWavefromHdr(self, logwave=False):
         if self._header  is not None:
@@ -294,7 +284,6 @@ class RSS(FiberRows):
 
         if extension_hdr is not None:
             self.setHeader(hdu[extension_hdr].header, origin=file)
-
 
     def writeFitsData(self, filename, extension_data=None, extension_mask=None,  extension_error=None, extension_wave=None, extension_fwhm=None, include_PT=True):
         """
@@ -495,7 +484,6 @@ class RSS(FiberRows):
         self._good_fibers = rss_in[i]._good_fibers
         self._fiber_type = rss_in[i]._fiber_type
 
-
     def setSpec(self, fiber, spec):
         if spec._data is not None and self._data is not None:
             self._data[fiber, :] = spec._data
@@ -506,7 +494,6 @@ class RSS(FiberRows):
         if spec._mask is not None and self._mask is not None:
             self._mask[fiber, :] = spec._mask
 
-
     def  createAperSpec(self, cent_x, cent_y, radius):
         if self._arc_position_x is not None and self._arc_position_y is not None:
             distance = numpy.sqrt((self._arc_position_x-cent_x)**2+(self._arc_position_y-cent_y)**2)
@@ -515,7 +502,6 @@ class RSS(FiberRows):
             subRSS = self.subRSS(select_rad)
             combined_spec = subRSS.create1DSpec(method='sum')
         return combined_spec
-
 
     def create1DSpec(self, method='mean'):
         if len(self._wave.shape)==2:
@@ -784,7 +770,6 @@ class RSS(FiberRows):
         Cube_out = Cube(data=cube, error = error,  mask=mask, error_weight=corr_cube, header=self._header, cover=cover)
         return Cube_out
 
-
     def createCubeInterDAR(self, offset_x, offset_y, mode='inverseDistance', sigma=1.0, radius_limit=5, resolution=1.0, min_fibers=3, slope=2.0, bad_threshold=0.1,  replace_error=1e10):
         min_x = numpy.min(self._arc_position_x)-self._size[0]
         max_x = numpy.max(self._arc_position_x)+self._size[0]
@@ -901,7 +886,6 @@ class RSS(FiberRows):
             self.setHdrValue('DISPAXIS', 3)
         Cube_out = Cube(data=cube, error = error,  mask=mask, header=self._header, error_weight = corr_cube**0.5)
         return Cube_out
-
 
     def createCubeInterDAR_new(self, offset_x, offset_y,min_x,max_x,min_y,max_y,dim_x,dim_y,mode='inverseDistance', sigma=1.0, radius_limit=5, resolution=1.0, min_fibers=3, slope=2.0, bad_threshold=0.1, full_field=False, replace_error=1e10, store_cover=False):
         if self._shape=='C':
@@ -1177,7 +1161,6 @@ class RSS(FiberRows):
             Cube_out = Cube(data=cube, error = error,  mask=mask, header=self._header, error_weight = corr_cube**0.5,cover=cover)
         return Cube_out
 
-
     def createFiberFlat(self, smooth_poly=-5, smooth_median=0, clip=[0.2, 2], valid=None):
 
         if len(self._wave.shape)==1:
@@ -1328,7 +1311,6 @@ class RSS(FiberRows):
 
                 splitted_rss.append(self.subRSS(select))
             return splitted_rss
-       # except:
 
     def centreBary(self, guess_x, guess_y, radius, exponent=4):
         dist = self.distance(guess_x, guess_y)
@@ -1409,13 +1391,13 @@ class RSS(FiberRows):
 
         return offsets_xIFU*arc_scale, offsets_yIFU*arc_scale, chisq, scale_flux, AB_flux, valid_fibers
 
+
 def loadRSS(infile, extension_data=None, extension_mask=None,  extension_error=None):
 
     rss = RSS()
     rss.loadFitsData(infile, extension_data=None, extension_mask=None,  extension_error=None)
 
     return rss
-
 
 def glueRSS(infiles, outfile):
     for i in range(len(infiles)):

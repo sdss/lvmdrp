@@ -11,11 +11,13 @@ import matplotlib.pyplot as plt
 from multiprocessing import cpu_count
 from multiprocessing import Pool
 from scipy import optimize
+from astropy.io import fits
 
-from lvmdrp.core.constants import SKYCORR_CONFIG_PATH
-from lvmdrp.core.sky import run_skycorr, run_skymodel, optimize_sky
+from lvmdrp.core.constants import SKYCORR_CONFIG_PATH, SKYCALC_CONFIG_PATH, ALMANAC_CONFIG_PATH
+from lvmdrp.core.sky import run_skycorr, run_skymodel, optimize_sky, ang_distance
 from lvmdrp.core.passband import PassBand
 from lvmdrp.core.spectrum1d import Spectrum1D
+from lvmdrp.core.header import Header
 from lvmdrp.core.rss import RSS
 
 
@@ -143,7 +145,13 @@ def sepContinuumLine_drp(sky_ref, cont_out, line_out, method="skycorr", sky_sci=
         # TODO: match wavelength sampling and resolution if needed
         if np.any(sky_spec._wave != sci_spec._wave):
             sky_spec.binSpec(new_wave=sci_spec._wave)
-        sky_line, sky_cont = run_skycorr(skycorr_config=skycorr_config, sci_spec=sci_spec, sky_spec=sky_spec)
+        pars_out, par_file, skycorr_fit = run_skycorr(skycorr_config=skycorr_config, sci_spec=sci_spec, sky_spec=sky_spec)
+
+        wavelength = skycorr_fit["lambda"]/10000
+        # TODO: include propagated errors from the continuum fitting
+        # TODO: include propagated pixel masks
+        sky_cont = Spectrum1D(wave=wavelength, data=skycorr_fit["mcflux"])
+        sky_line = Spectrum1D(wave=wavelength, data=skycorr_fit["mlflux"])
     # run physical
     elif method == "physical":
         # NOTE: build a sky model library with continuum and line separated (ESO skycalc)
@@ -158,44 +166,118 @@ def sepContinuumLine_drp(sky_ref, cont_out, line_out, method="skycorr", sky_sci=
     sky_line.writeFitsData(line_out)
 
 
-def evalESOSky_drp(sky1_par, sky2_par, sci_par):
-    """run ESO sky model for observation parameters (ephemeris, atmospheric conditions, site, etc) to evaluate sky spectrum at each
-    telescope pointing (model_sky1, model_sky2, model_skysci)
+def evalESOSky_drp(sky_ref, rss_out, skymodel_config=SKYCALC_CONFIG_PATH, almanac_config=ALMANAC_CONFIG_PATH, parallel="auto"):
+    """
     
-    Parameters:
-    -----------
-    {sky1, sky2, sci}_par: dictionary_like
-        Parameters to evaluate/calculate the ESO sky corresponding to each pointing
-
-    Returns
-    -------
-    sky1_model, sky2_model, sci_model
+    run ESO sky model for observation parameters (ephemeris, atmospheric conditions, site, etc) to evaluate sky spectrum at each
+    telescope pointing (model_sky1, model_sky2, model_skysci)
 
     """
-    _, sky1_model = run_skymodel(**sky1_par)
-    _, sky2_model = run_skymodel(**sky2_par)
-    _, sci_model = run_skymodel(**sci_par)    
 
-    return sky1_model, sky2_model, sci_model
+    # read sky spectrum
+    sky_spec = Spectrum1D()
+    sky_spec.loadFitsData(sky_ref)
+
+    # TODO: modify requested resolving power to ensure better resolution than reference spectrum
+    # TODO: modify requested sampling in sky model to ensure 3 samples per resolution elements
+    pars_out, sky_model = run_skymodel(skycalc_config=skymodel_config, almanac_config=almanac_config)
+    
+    # create RSS
+    wav_comp = sky_model["lam"].value
+    lsf_comp = sky_model["lam"].value / pars_out["wres"].value
+    sed_comp = sky_model.as_array()[:,1].T
+    hdr_comp = fits.Header(pars_out)
+    rss = RSS(data=sed_comp, wave=wav_comp, inst_fwhm=lsf_comp, header=hdr_comp)
+    
+    # resample RSS to observed LSF
+    smoothFWHM = np.sqrt(sky_ref._inst_fwhm**2 - lsf_comp**2)
+    if parallel=='auto':
+        cpus = cpu_count()
+    else:
+        cpus = int(parallel)
+
+    if cpus > 1:
+        pool = Pool(cpus)
+        threads = []
+        for i in range(len(rss)):
+            threads.append(pool.apply_async(rss[i].smoothGaussVariable, ([smoothFWHM[i]])))
+
+        for i in range(len(rss)):
+            rss[i] = threads[i].get()
+        pool.close()
+        pool.join()
+    else:
+        for i in range(len(rss)):
+            rss[i] = rss[i].smoothGaussVariable(smoothFWHM[i])
+    
+    # dump RSS file containing the
+    rss.writeFitsData(filename=rss_out)
 
 
 def subtractGeocoronal_drp():
     pass
 
 
-def corrSkyLine_drp(wl_master_sky, sky1_line, sky2_line, sci_line, config):
-    """average sky1_line and sky2_line into 'sky_line', and run skycorr on 'sky_line' and 'sci_line' to produce 'sky_line_corr'"""
-    # compute a weighted average using as weights the inverse distance distance to science
-    w_1, w_2 = None, None
-    sky_line = w_1 * sky1_line + w_2 * sky2_line
-    # run skycorr on averaged line spectrum
-    sky_line_corr = run_skycorr(skycorr_config=config, wl=wl_master_sky, sci_spec=sci_line, sky_spec=sky_line)
+def corrSkyLine_drp(sky1_line_in, sky2_line_in, sci_line_in, rss_out, skycorr_config=SKYCORR_CONFIG_PATH):
+    """
     
-    return sky_line_corr
+    average sky1_line and sky2_line into 'sky_line', and run skycorr on 'sky_line' and 'sci_line' to produce 'sky_line_corr'
+    """
+
+    # read sky spectra
+    sky1_line = Spectrum1D()
+    sky1_line.loadFitsData(sky1_line_in)
+    sky1_head = Header()
+    sky1_head.loadFitsHeader(sky1_line_in)
+
+    sky2_line = Spectrum1D()
+    sky2_line.loadFitsData(sky2_line_in)
+    sky2_head = Header()
+    sky2_head.loadFitsHeader(sky2_line_in)
+
+    # read science spectra
+    sci_line = Spectrum1D()
+    sci_line.loadFitsData(sci_line_in)
+    sci_head = Header()
+    sci_head.loadFitsHeader(sci_line_in)
+
+    # sky1 position
+    ra_1, dec_1 = sky1_head["RA"], sky1_head["DEC"]
+    # sky2 position
+    ra_2, dec_2 = sky2_head["RA"], sky2_head["DEC"]
+    # sci position
+    ra_s, dec_s = sci_head["RA"], sci_head["DEC"]
+
+    w_1 = ang_distance(ra_1, dec_1, ra_s, dec_s)
+    w_2 = ang_distance(ra_2, dec_2, ra_s, dec_s)
+    w_norm = w_1 + w_2
+    w_1, w_2 = w_1 / w_norm, w_2 / w_norm
+    
+    # TODO: make sure all these spectra are in the same wavelength sampling
+    wl_master_sky = sci_line._wave
+
+    # compute a weighted average using as weights the inverse distance distance to science
+    sky_line = w_1 * sky1_line + w_2 * sky2_line
+    
+    # run skycorr on averaged line spectrum
+    pars_out, par_file, line_fit = run_skycorr(skycorr_config=skycorr_config, wl=wl_master_sky, sci_spec=sci_line, sky_spec=sky_line)
+
+    # create RSS
+    wav_fit = line_fit["lambda"].value
+    lsf_fit = line_fit["lambda"].value / pars_out["wres"].value
+    sed_fit = line_fit.as_array()[:,1].T
+    hdr_fit = fits.Header(pars_out)
+    rss = RSS(data=sed_fit, wave=wav_fit, inst_fwhm=lsf_fit, header=hdr_fit)
+
+    # dump RSS file containing the
+    rss.writeFitsData(filename=rss_out)
 
 
 def corrSkyContinuum_drp(sky1_cont, sky2_cont, sky1_model, sky2_model, sci_model):
-    """correct and combine continuum only spectra by doing:   sky_cont_corr=0.5*( sky1_cont*(model_skysci/model_sky1) + sky2_cont*(model_skysci/model_sky2)) """
+    """
+    
+    correct and combine continuum only spectra by doing:   sky_cont_corr=0.5*( sky1_cont*(model_skysci/model_sky1) + sky2_cont*(model_skysci/model_sky2))
+    """
     sky_cont_corr = 0.5 * (sky1_cont * (sci_model/sky1_model) + sky2_cont * (sci_model/sky2_model))
     return sky_cont_corr
 
@@ -287,11 +369,16 @@ def subtractSky_drp(rss_in, rss_out, sky, factor='1', scale_region='', scale_ind
 
     if scale_region != '':
         rss.setHdrValue('hierarch PIPE SKY SCALE',float('%.3f'%scale_factor),'sky spectrum scale factor')
+    # TODO: dump the resolved sky model into an RSS file and continue the sky calibration down to flux calibration. 
     rss.writeFitsData(rss_out)
 
 
 def refineContinuum_drp():
-    """optionally apply an extra residual continuum subtraction using the faintest (i.e. with no stellar light detection) spaxels in the science IFU"""
+    """
+    optionally apply an extra residual continuum subtraction using the faintest (i.e. with no stellar light detection) spaxels in the science IFU
+
+    This relies in the availability of dark enough spaxels in the science pointing.
+    """
     pass
 
 

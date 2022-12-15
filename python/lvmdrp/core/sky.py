@@ -21,6 +21,35 @@ from skycalc_cli.skycalc import SkyModel, AlmanacQuery
 from skycalc_cli.skycalc_cli import fixObservatory
 
 
+RADIAN = 57.29578
+
+def ang_distance(r1,d1,r2,d2):
+    '''
+    distance(r1,d1,r2,d2)
+    Return the angular offset between two ra,dec positions
+    All variables are expected to be in degrees.
+    Output is in degrees
+
+    Note - This routine could easily be made more general
+    
+    author: Knox Long
+
+    '''
+    r1 = r1 / RADIAN
+    d1 = d1 / RADIAN
+    r2 = r2 / RADIAN
+    d2 = d2 / RADIAN
+    xlambda = np.sin(d1)*np.sin(d2)+np.cos(d1)*np.cos(d2)*np.cos(r1-r2)
+    if xlambda >= 1.0:
+        xlambda = 0.0
+    else:
+        xlambda = np.acos(xlambda)
+
+    xlambda = xlambda * RADIAN
+
+    return xlambda
+
+
 def get_bright_fiber_selection(rss):
     """Returns a selection (mask) of fibers with known stars given an RSS object
     
@@ -32,8 +61,16 @@ def get_bright_fiber_selection(rss):
     pass
 
 
+# configruation files to look into:
+# - instrument instrument_etc.par file (constant, LSF kernel, wavelength sampling)
+# - sm_filenames.dat (paths to atmospheric library, names of tables containing data that depends on the observing conditions)
+# - skymodel_etc.par (observing conditions, output columns: moon, etc.)
+# - estmultiscat (run once, more to improve the quality scattering component)
+# - preplinetrans (just once)
+# - calcskymodel (within drp, looking for skymodel_etc.par)
+# - outputs: radspec.fits and transspec.fits (contains same columns as skycalc)
 def run_skymodel(skycalc_config=SKYCALC_CONFIG_PATH, almanac_config=ALMANAC_CONFIG_PATH, return_pars=False, **kwargs):
-    """run ESO sky model for observation parameters (ephemeris, atmospheric conditions, site, etc) to evaluate sky spectrum at each telescope pointing (model_sky1, model_sky2, model_skysci)
+    """run ESO sky model for observation parameters (ephemeris, atmospheric conditions, site, etc)
     
     Parameters
     ----------
@@ -63,6 +100,7 @@ def run_skymodel(skycalc_config=SKYCALC_CONFIG_PATH, almanac_config=ALMANAC_CONF
 
     alm = AlmanacQuery(inputalmdic)
     dic = alm.query()
+    # TODO: investigate if this parameter has data in the future (this may be important for geocoronal subtraction)
     if dic["msolflux"] < 0: dic["msolflux"] = 130.0
 
     for key, value in dic.items():
@@ -96,6 +134,7 @@ def run_skycorr(skycorr_config, sci_spec, sky_spec, spec_label, specs_dir="./", 
     skycorr_config = yaml.safe_load(open(skycorr_config, "r"))
     # write each spectrum in skycorr individual format
     # TODO: look for actual meaning of timeVal and telAltVal (see examples)
+    # TODO: deactivate the Halpha geocoronal subtraction in skycorr (is not well implemented)
     sci_fits_file, sky_fits_file = fitstabSkyCorrWrapper(
         wave=sci_spec._wave,
         objflux=sci_spec._data,
@@ -122,6 +161,7 @@ def run_skycorr(skycorr_config, sci_spec, sky_spec, spec_label, specs_dir="./", 
 
     # read outputs
     skycorr_fit = Table(fits.getdata(os.path.join(out_dir, f"{out_file}_fit.fits"), ext=1))
+    skycorr_fit["lambda"] = skycorr_fit["lambda"] * 10000
     
     return skycorr_config_, par_file, skycorr_fit
 
