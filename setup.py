@@ -9,51 +9,242 @@ from __future__ import print_function
 from __future__ import absolute_import
 
 from setuptools import setup, find_packages
+from setuptools.command.develop import develop
+from setuptools.command.install import install
 
 import os
-import argparse
 import sys
+import site
+import argparse
+import shutil
+import subprocess
+import struct
 
+from lvmdrp.utils import logger
+
+setup_logger = logger.get_logger("drp setup")
+
+
+def get_env_lib_directory():
+    """Return the installation directory, or None
+    
+    taken from: https://bit.ly/3BAOpQK
+    """
+    if '--user' in sys.argv:
+        paths = (site.getusersitepackages(),)
+    else:
+        py_version = '%s.%s' % (sys.version_info[0], sys.version_info[1])
+        paths = (s % (py_version) for s in (
+            sys.prefix + '/lib/python%s/dist-packages/',
+            sys.prefix + '/lib/python%s/site-packages/',
+            sys.prefix + '/local/lib/python%s/dist-packages/',
+            sys.prefix + '/local/lib/python%s/site-packages/',
+            '/Library/Python/%s/site-packages/',
+        ))
+
+    for path in paths:
+        if os.path.exists(path):
+            return os.path.basename(os.path.basename(os.path.basename(path)))
+    
+    setup_logger.error('no installation path found')
+    return None
 
 # The NAME variable should be of the format "sdss-drp".
 # Please check your NAME adheres to that format.
 NAME = 'drp'
 VERSION = '0.1.0dev'
 RELEASE = 'dev' in VERSION
+SYSTEM = struct.calcsize("P") * 8
+
+SRC_PATH = os.path.abspath("src")
+INS_PATH = get_env_lib_directory()
+LIB_PATH = os.path.join(INS_PATH, "lib")
+BIN_PATH = os.path.join(INS_PATH, "bin")
+INC_PATH = os.path.join(INS_PATH, "include")
+
+SKYCORR_SRC_PATH = os.path.join(SRC_PATH, "skycorr.tar.gz")
+SKYMODEL_SRC_PATH = os.path.join(SRC_PATH, "SM-01.tar.gz")
+
+SKYCORR_INST_PATH = os.path.join(LIB_PATH, "skycorr")
+SKYMODEL_INST_PATH = os.path.join(LIB_PATH, "skymodel")
+
+
+class DevCommand(develop):
+    def run(self):
+        # pre-install stuff
+        develop.run(self)
+        # post-install stuff
+
+class InsCommand(install):
+    def run(self):
+        # pre-install stuff
+        # - install skycorr ---------------------------------------------------------------------------------------------
+        #   * unpack compressed files
+        #   * decide which platform to install on
+        #   * decide which system (32 or 64 bits)
+        #   * run installer script
+        #   * check everything went fine (run tests)
+        #   * clean up
+        setup_logger.info("preparing to install skycorr")
+        os.chdir(SRC_PATH)
+        out = subprocess.run(f"tar xzvf {SKYCORR_SRC_PATH}".split(), capture_output=True)
+        if out.returncode == 0:
+            setup_logger.info("successfully extracted skycorr installer")
+            setup_logger.info(out.stdout.decode("utf-8"))
+        else:
+            pass
+
+        os.chdir("skycorr")
+        if sys.platform == "linux":
+            if SYSTEM == 32:
+                out = subprocess.run("bash skycorr_installer_linux_x86_64-1.1.2.run".split(), capture_output=True, text=True, input=SKYCORR_INST_PATH)
+            elif SYSTEM == 64:
+                out = subprocess.run("bash skycorr_installer_linux_i686-1.1.2.run".split(), capture_output=True, text=True, input=SKYCORR_INST_PATH)
+        elif sys.platform == "darwin":
+            out = subprocess.run("bash skycorr_installer_macos_x86_64-1.1.2.run".split(), capture_output=True, text=True, input=SKYCORR_INST_PATH)
+        else:
+            raise NotImplementedError(f"installation not implemented for '{sys.platform}' OS.")
+
+        if out.returncode == 0:
+            setup_logger.info("successfully installed skycorr.")
+            setup_logger.info(f"{out.stdout.decode('utf-8')}")
+        else:
+            setup_logger.error(f"error while installing skycorr.")
+            setup_logger.error(f"full report:")
+            setup_logger.error(f"{out.stderr.decode('utf-8')}")
+        
+        skycorr_out_test = subprocess.run(f"{os.path.join(SKYCORR_INST_PATH, 'bin', 'skycorr')} {os.path.join(SKYCORR_INST_PATH, 'examples', 'config', 'sctest_sinfo_H.par')}".split(), capture_output=True)
+        if skycorr_out_test.returncode == 0:
+            setup_logger.info("successfully tested skycorr.")
+            setup_logger.info(f"{skycorr_out_test.stdout.decode('utf-8')}")
+        else:
+            setup_logger.error("error while testing skycorr.")
+            setup_logger.error(f"rolling back changes in {SKYCORR_INST_PATH}")
+            shutil.rmtree(SKYCORR_INST_PATH, ignore_errors=True)
+            setup_logger.error("full report:")
+            setup_logger.error(skycorr_out_test.stderr.decode('utf-8'))
+
+        # - install skymodel ---------------------------------------------------------------------------------------------
+        setup_logger.info("preparing to install skymodel")
+        os.chdir(SRC_PATH)
+        out = subprocess.run(f"tar xzvf {SKYMODEL_SRC_PATH}".split(), capture_output=True)
+        if out.returncode == 0:
+            setup_logger.info("successfully extracted sky model installer")
+            setup_logger.info(out.stdout.decode("utf-8"))
+        else:
+            pass
+
+        os.chdir(os.path.join("SM-01", "sm-01_mod01", "third_party_code"))
+        out = subprocess.run("tar xzvf lnfl_lblrtm_aer.tar.gz".split(), capture_output=True)
+        if out.returncode == 0:
+            setup_logger.info("successfully extracted third-party codes")
+            setup_logger.info(out.stdout.decode("utf-8"))
+        else:
+            pass
+
+        os.chdir(os.path.join("lnfl", "build"))
+        if sys.platform == "linux":
+            out = subprocess.run("make -f make_lnfl linuxGNUsgl".split(), capture_output=True)
+        elif sys.platform == "darwin":
+            out = subprocess.run("make -f make_lnfl osxGNUsgl".split(), capture_output=True)
+        else:
+            raise NotImplementedError(f"installation not implemented for '{sys.platform}' OS.")
+        
+        os.chdir("..")
+        shutil.copyfile("lnfl_v12.2_linux_gnu_sgl", os.path.join(SKYMODEL_INST_PATH, "bin"))
+        os.symlink(os.path.join(SKYMODEL_INST_PATH, "bin", "lnfl_v12.2_linux_gnu_sgl"), os.path.join(SKYMODEL_INST_PATH, "bin", "lnfl"))
+
+        os.chdir("..")
+        os.chdir(os.path.join("lblrtm", "build"))
+        if sys.platform == "linux":
+            out = subprocess.run("make -f make_lblrtm linuxGNUsgl".split(), capture_output=True)
+        elif sys.platform == "darwin":
+            out = subprocess.run("make -f make_lblrtm osxGNUsgl".split(), capture_output=True)
+        else:
+            raise NotImplementedError(f"installation not implemented for '{sys.platform}' OS.")      
+
+        os.chdir("..")
+        shutil.copyfile("lblrtm_v12.2_linux_gnu_sgl", os.path.join(SKYMODEL_INST_PATH, "bin"))
+        os.symlink(os.path.join(SKYMODEL_INST_PATH, "bin", "lblrtm_v12.2_linux_gnu_sgl"), os.path.join(SKYMODEL_INST_PATH, "bin", "lblrtm"))
+
+        os.chdir(os.path.join(SRC_PATH, "SM-01", "sm-01_mod1"))
+        out = subprocess.run("./bootstrap".split(), capture_output=True)
+        out = subprocess.run(f"./configure --prefix={SKYMODEL_INST_PATH} --with-cpl={SKYCORR_INST_PATH} -CFLAGS='-std=c99 -Wno-error'".split(), capture_output=True)
+        out = subprocess.run("make".split(), capture_output=True)
+        out = subprocess.run("make install".split(), capture_output=True)
+
+        # copy line database to installation-dir/data
+        shutil.copyfile(os.path.join("third_party_code", "aer_v_3.2", "line_file", "aer_v_3.2"), os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "data", "aer_v_3.2"))
+        # copy config, data and doc dirs into installation-dir/data
+        shutil.copytree("config", os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1"))
+        shutil.copytree("data", os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1"))
+        shutil.copytree("doc", os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1"))
+
+        # make symbolic links of binary files in python_dir/bin
+        os.symlink(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "bin", "lnfl_v12.2_linux_gnu_sgl"), os.path.join(BIN_PATH, "lnfl"))
+        os.symlink(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "bin", "lblrtm_v12.2_linux_gnu_sgl"), os.path.join(BIN_PATH, "lblrtm"))
+        os.symlink(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "bin", "create_spec"), os.path.join(BIN_PATH, "create_spec"))
+        os.symlink(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "bin", "create_speclib"), os.path.join(BIN_PATH, "create_speclib"))
+        # TODO: copy library files in python_dir/lib
+        # TODO: copy header files in python_dir/include
+
+        os.chdir(os.path.join(SKYMODEL_SRC_PATH, "sm-01_mod2"))
+        shutil.copytree("config", os.path.join(SKYMODEL_INST_PATH, "sm-01_mod2"))
+        shutil.copytree("data", os.path.join(SKYMODEL_INST_PATH, "sm-01_mod2"))
+        shutil.copytree("test", os.path.join(SKYMODEL_INST_PATH, "sm-01_mod2"))
+        shutil.copytree("doc", os.path.join(SKYMODEL_INST_PATH, "sm-01_mod2"))
+        os.makedirs(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod2", "output"))
+        out = subprocess.run("./bootstrap".split(), capture_output=True)
+        out = subprocess.run(f"./configure --prefix={SKYMODEL_INST_PATH} --with-cpl={SKYCORR_INST_PATH} -CFLAGS='-std=c99 -Wno-error'".split(), capture_output=True)
+        out = subprocess.run("make install".split(), capture_output=True)
+
+        shutil.symlink(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod2", "bin", "preplinetrans"), os.path.join(BIN_PATH, "preplinetrans"))
+        shutil.symlink(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod2", "bin", "calcskymodel"), os.path.join(BIN_PATH, "calcskymodel"))
+        shutil.symlink(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod2", "bin", "estmultiscat"), os.path.join(BIN_PATH, "estmultiscat"))
+        shutil.symlink(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod2", "bin", "testskymodel"), os.path.join(BIN_PATH, "testskymodel"))
+        # TODO: copy library files in python_dir/lib
+        # TODO: copy header files in python_dir/include
+
+        # clean 'src' directory
+
+        install.run(self)
+        # post-install stuff
 
 
 def run(packages, install_requires):
 
     setup(name=NAME,
-            version=VERSION,
-            license='BSD3',
-            description='SDSSV-LVM Data Reduction Pipeline',
-            long_description=open('README.rst').read(),
-            author='Eric Pellegrini',
-            author_email='ericpellegrini@outlook.com',
-            keywords='astronomy software',
-            url='https://github.com/sdss/lvmdrp',
-            include_package_data=True,
-            packages=packages,
-            install_requires=install_requires,
-            package_dir={'': 'python'},
-            scripts=[
-                'bin/lvmdrp',
-                'bin/drp',
-                'bin/pix2wave'
-            ],
-            classifiers=[
-                'Development Status :: 4 - Beta',
-                'Intended Audience :: Science/Research',
-                'License :: OSI Approved :: BSD License',
-                'Natural Language :: English',
-                'Operating System :: OS Independent',
-                'Programming Language :: Python',
-                'Programming Language :: Python :: 2.6',
-                'Programming Language :: Python :: 2.7',
-                'Topic :: Documentation :: Sphinx',
-                'Topic :: Software Development :: Libraries :: Python Modules',
-            ],
+        version=VERSION,
+        license='BSD3',
+        description='SDSSV-LVM Data Reduction Pipeline',
+        long_description=open('README.rst').read(),
+        author='Eric Pellegrini',
+        author_email='ericpellegrini@outlook.com',
+        keywords='astronomy software',
+        url='https://github.com/sdss/lvmdrp',
+        include_package_data=True,
+        packages=packages,
+        install_requires=install_requires,
+        package_dir={'': 'python'},
+        scripts=[
+            'bin/drp',
+            'bin/pix2wave'
+        ],
+        classifiers=[
+            'Development Status :: 4 - Beta',
+            'Intended Audience :: Science/Research',
+            'License :: OSI Approved :: BSD License',
+            'Natural Language :: English',
+            'Operating System :: OS Independent',
+            'Programming Language :: Python',
+            'Programming Language :: Python :: 3.8',
+            'Topic :: Documentation :: Sphinx',
+            'Topic :: Software Development :: Libraries :: Python Modules',
+        ],
+        cmdclass={
+            "develop": DevCommand,
+            "install": InsCommand
+        }
     )
 
 
