@@ -288,7 +288,7 @@ def coaddContinuumLine_drp(sky_cont_corr, sky_line_corr):
     return sky_corr
 
 
-def subtractSky_drp(rss_in, rss_out, sky, factor='1', scale_region='', scale_ind=False, parallel='auto'):
+def subtractSky_drp(rss_in, rss_out, sky, sky_out, factor='1', scale_region='', scale_ind=False, parallel='auto'):
     """
         Subtracts a (sky) spectrum, which was stored as a FITS file, from the whole RSS.
         The error will be propagated if the spectrum AND the RSS contain error information.
@@ -301,6 +301,8 @@ def subtractSky_drp(rss_in, rss_out, sky, factor='1', scale_region='', scale_ind
                 Output RSS FITS file with spectrum subtracted
         sky : string
                 Input sky spectrum in FITS format.
+        sky_out: string
+                Output file to store the RSS sky spectra.
         factor: string of float, optional with default: '1'
                 The default value for the flux scale factor in case the fitting fails
         scale_region: string of tuple of floats, optional with default: ''
@@ -316,61 +318,78 @@ def subtractSky_drp(rss_in, rss_out, sky, factor='1', scale_region='', scale_ind
         user:> drp sky subtractSkySpec RSS_IN.fits RSS_OUT.fits SKY_SPEC.fits
     """
 
-    factor=np.array(factor).astype(np.float32)
+    factor = np.array(factor).astype(np.float32)
     scale_ind = bool(scale_ind)
     if scale_region != '':
         region = scale_region.split(',')
-        wave_region=[float(region[0]), float(region[1])]
+        wave_region = [float(region[0]), float(region[1])]
     rss = RSS()
     rss.loadFitsData(rss_in)
+    
     sky_spec = Spectrum1D()
     sky_spec.loadFitsData(sky)
+    
+    sky_head = Header()
+    sky_head.loadFitsHeader()
+    
+    sky_rss = RSS(
+        data=np.zeros_like(rss._data),
+        wave=np.zeros_like(rss._wave),
+        inst_fwhm=np.zeros_like(rss._inst_fwhm),
+        error=np.zeros_like(rss._error),
+        mask=np.zeros_like(rss._mask),
+        header=sky_head
+    )
 
     if np.all(rss._wave==sky_spec._wave) and scale_region != '':
         factors=np.zeros(len(rss), dtype=np.float32)
         for i in range(len(rss)):
             try:
-                optimum= optimize.fmin(optimize_sky, [1.0], args=(rss[i], sky_spec, wave_region[0], wave_region[1]), disp=0)
-                factors[i]=optimum[0]
+                optimum = optimize.fmin(optimize_sky, [1.0], args=(rss[i], sky_spec, wave_region[0], wave_region[1]), disp=0)
+                factors[i] = optimum[0]
             except RuntimeError:
-                factors[i]=1.0
-                rss._mask[i,:] = True
-        select_good = factors>0.0
+                factors[i] = 1.0
+                rss._mask[i, :] = True
+        select_good = factors > 0.0
         scale_factor = np.median(factors[select_good])
         for i in range(len(rss)):
             if scale_ind:
-                rss[i] = rss[i]/factors[i]-sky_spec
+                sky_rss[i] = sky_spec * factors[i]
+                rss[i] = rss[i] - sky_rss[i]
             else:
-                if factors[i]>0:
-                    rss[i] = rss[i]-sky_spec*np.median(factors[select_good])
-    elif np.all(rss._wave==sky_spec._wave) and scale_region=='':
+                if factors[i] > 0:
+                    sky_rss[i] = sky_spec * np.median(factors[select_good])
+                    rss[i] = rss[i] - sky_rss[i]
+    elif np.all(rss._wave == sky_spec._wave) and scale_region == '':
         for i in range(len(rss)):
-            rss[i] = rss[i]-sky_spec*factor
-        scale_factor=factor
+            sky_rss[i] = sky_spec * factor
+            rss[i] = rss[i] - sky_rss[i]
+        scale_factor = factor
 
-    if len(rss._wave)==2:
-        if parallel=='auto':
+    if len(rss._wave) == 2:
+        if parallel == 'auto':
             pool = Pool(cpu_count())
         else:
             pool = Pool(int(parallel))
-        threads=[]
+        threads = []
         for i in range(len(rss)):
             threads.append(pool.apply_async(sky_spec.binSpec, args=([rss[i]._wave])))
         pool.close()
         pool.join()
 
         for i in range(len(rss)):
-            # rss[i] = rss[i]-threads[i].get()
             if scale_ind:
-                rss[i] = rss[i]/factors[i]-threads[i].get()
+                sky_rss[i] = threads[i].get() * factors[i]
+                rss[i] = rss[i] - sky_rss[i]
             else:
-                if factors[i]>0:
-                    rss[i] = rss[i]-threads[i].get()*np.median(factors[select_good])
+                sky_rss[i] = threads[i].get() * np.median(factors[select_good])
+                if factors[i] > 0:
+                    rss[i] = rss[i] - sky_rss[i]
 
     if scale_region != '':
-        rss.setHdrValue('hierarch PIPE SKY SCALE',float('%.3f'%scale_factor),'sky spectrum scale factor')
-    # TODO: dump the resolved sky model into an RSS file and continue the sky calibration down to flux calibration. 
+        rss.setHdrValue('HIERARCH PIPE SKY SCALE', float('%.3f'%scale_factor), 'sky spectrum scale factor')
     rss.writeFitsData(rss_out)
+    sky_rss.writeFitsData(sky_out)
 
 
 def refineContinuum_drp():
