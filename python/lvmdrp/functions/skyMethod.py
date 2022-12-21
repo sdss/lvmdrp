@@ -147,7 +147,7 @@ def sepContinuumLine_drp(sky_ref, cont_out, line_out, method="skycorr", sky_sci=
             sky_spec.binSpec(new_wave=sci_spec._wave)
         pars_out, par_file, skycorr_fit = run_skycorr(skycorr_config=skycorr_config, sci_spec=sci_spec, sky_spec=sky_spec)
 
-        wavelength = skycorr_fit["lambda"]/10000
+        wavelength = skycorr_fit["lambda"]
         # TODO: include propagated errors from the continuum fitting
         # TODO: include propagated pixel masks
         sky_cont = Spectrum1D(wave=wavelength, data=skycorr_fit["mcflux"])
@@ -273,13 +273,52 @@ def corrSkyLine_drp(sky1_line_in, sky2_line_in, sci_line_in, rss_out, skycorr_co
     rss.writeFitsData(filename=rss_out)
 
 
-def corrSkyContinuum_drp(sky1_cont, sky2_cont, sky1_model, sky2_model, sci_model):
+def corrSkyContinuum_drp(sky1_cont_in, sky2_cont_in, sky1_model_in, sky2_model_in, sci_model_in, rss_out, model_fiber=2):
     """
     
     correct and combine continuum only spectra by doing:   sky_cont_corr=0.5*( sky1_cont*(model_skysci/model_sky1) + sky2_cont*(model_skysci/model_sky2))
     """
-    sky_cont_corr = 0.5 * (sky1_cont * (sci_model/sky1_model) + sky2_cont * (sci_model/sky2_model))
-    return sky_cont_corr
+
+    # read sky continuum from both telescopes
+    sky1_cont = Spectrum1D()
+    sky1_cont.loadFitsData(sky1_cont_in)
+
+    sky2_cont = Spectrum1D()
+    sky2_cont.loadFitsData(sky2_cont_in)
+
+    # read sky models for all pointings
+    sky1_rss = RSS()
+    sky1_rss.loadFitsData(sky1_model_in)
+    sky2_rss = RSS()
+    sky2_rss.loadFitsData(sky2_model_in)
+    sci_rss = RSS()
+    sci_rss.loadFitsData(sci_model_in)
+
+    sky1_model = sky1_rss[model_fiber]
+    sky2_model = sky2_rss[model_fiber]
+    sci_model = sci_rss[model_fiber]
+
+    # match wavelength resolution and wavelenth across telescopes using science pointing as reference
+    if np.all(sky1_model._wave != sci_model._wave):
+        sky1_model = sky1_model.resampleSpec(sci_model._wave)
+    if np.all(sky2_model._wave != sci_model._wave):
+        sky2_model = sky2_model.resampleSpec(sci_model._wave)
+
+    if np.all(sky1_model._inst_fwhm != sci_model._inst_fwhm):
+        sky1_model.matchFWHM(sci_model._inst_fwhm)
+    if np.all(sky2_model._inst_fwhm != sci_model._inst_fwhm):
+        sky2_model.matchFWHM(sci_model._inst_fwhm)    
+
+    # extrapolate sky pointings into science pointing
+    # this is equivalent to interpolating the spectral space
+    w_1 = sci_model / sky1_model
+    w_2 = sci_model / sky2_model
+    # TODO: implement sky coordinates interpolation
+    # TODO: implement interpolation in the parameter space
+    # TODO: smooth high frequency features in weights
+
+    cont_fit = 0.5 * (w_1 * sky1_cont + w_2 * sky2_cont)
+    cont_fit.writeFitsData(rss_out)
 
 
 def coaddContinuumLine_drp(sky_cont_corr, sky_line_corr):
