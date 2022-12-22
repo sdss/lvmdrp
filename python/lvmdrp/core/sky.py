@@ -43,7 +43,7 @@ def ang_distance(r1,d1,r2,d2):
     if xlambda >= 1.0:
         xlambda = 0.0
     else:
-        xlambda = np.acos(xlambda)
+        xlambda = np.arccos(xlambda)
 
     xlambda = xlambda * RADIAN
 
@@ -65,7 +65,7 @@ def get_bright_fiber_selection(rss):
 # - instrument instrument_etc.par file (constant, LSF kernel, wavelength sampling)
 # - sm_filenames.dat (paths to atmospheric library, names of tables containing data that depends on the observing conditions)
 # - skymodel_etc.par (observing conditions, output columns: moon, etc.)
-# - estmultiscat (run once, more to improve the quality scattering component)
+# - estmultiscat (run once, more than once to improve the quality scattering component)
 # - preplinetrans (just once)
 # - calcskymodel (within drp, looking for skymodel_etc.par)
 # - outputs: radspec.fits and transspec.fits (contains same columns as skycalc)
@@ -125,8 +125,8 @@ def run_skymodel(skycalc_config=SKYCALC_CONFIG_PATH, almanac_config=ALMANAC_CONF
     sky_components["flux"] = sky_components["flux"] * (1/u.s/u.m**2*u.arcsec**2) #photons/s/m2/μm/arcsec2
 
     if return_pars:
-        return sky_metadata, sky_components, dic
-    return sky_metadata, sky_components
+        return sky_metadata, skycalc_config, sky_components, dic
+    return sky_metadata, skycalc_config, sky_components
 
 
 def run_skycorr(skycorr_config, sci_spec, sky_spec, spec_label, specs_dir="./", out_dir="./", metadata={}):

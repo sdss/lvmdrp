@@ -168,8 +168,8 @@ class InsCommand(install):
         os.symlink(os.path.join(SKYMODEL_INST_PATH, "bin", "lblrtm_v12.2_linux_gnu_sgl"), os.path.join(SKYMODEL_INST_PATH, "bin", "lblrtm"))
 
         os.chdir(os.path.join(SRC_PATH, "SM-01", "sm-01_mod1"))
-        out = subprocess.run("./bootstrap".split(), capture_output=True)
-        out = subprocess.run(f"./configure --prefix={SKYMODEL_INST_PATH} --with-cpl={SKYCORR_INST_PATH} -CFLAGS='-std=c99 -Wno-error'".split(), capture_output=True)
+        out = subprocess.run("bash bootstrap".split(), capture_output=True)
+        out = subprocess.run(f"bash configure --prefix={SKYMODEL_INST_PATH} --with-cpl={SKYCORR_INST_PATH} -CFLAGS='-std=c99 -Wno-error'".split(), capture_output=True)
         out = subprocess.run("make".split(), capture_output=True)
         out = subprocess.run("make install".split(), capture_output=True)
 
@@ -194,8 +194,8 @@ class InsCommand(install):
         shutil.copytree("test", os.path.join(SKYMODEL_INST_PATH, "sm-01_mod2"))
         shutil.copytree("doc", os.path.join(SKYMODEL_INST_PATH, "sm-01_mod2"))
         os.makedirs(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod2", "output"))
-        out = subprocess.run("./bootstrap".split(), capture_output=True)
-        out = subprocess.run(f"./configure --prefix={SKYMODEL_INST_PATH} --with-cpl={SKYCORR_INST_PATH} -CFLAGS='-std=c99 -Wno-error'".split(), capture_output=True)
+        out = subprocess.run("bash bootstrap".split(), capture_output=True)
+        out = subprocess.run(f"bash configure --prefix={SKYMODEL_INST_PATH} --with-cpl={SKYCORR_INST_PATH} -CFLAGS='-std=c99 -Wno-error'".split(), capture_output=True)
         out = subprocess.run("make install".split(), capture_output=True)
 
         shutil.symlink(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod2", "bin", "preplinetrans"), os.path.join(BIN_PATH, "preplinetrans"))

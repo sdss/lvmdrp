@@ -2,7 +2,7 @@
 #
 # @Author: The LVM Sky Team
 # @Date: Dec 7, 2022
-# @Filename: drp
+# @Filename: skyMethod
 # @License: BSD 3-Clause
 # @Copyright: SDSS-V LVM
 
@@ -144,12 +144,13 @@ def sepContinuumLine_drp(sky_ref, cont_out, line_out, method="skycorr", sky_sci=
             raise ValueError(f"You need to provide a science spectrum to perform the continuum/line separation using skycorr.")
         # TODO: match wavelength sampling and resolution if needed
         if np.any(sky_spec._wave != sci_spec._wave):
-            sky_spec.binSpec(new_wave=sci_spec._wave)
+            sky_spec = sky_spec.binSpec(new_wave=sci_spec._wave)
         pars_out, par_file, skycorr_fit = run_skycorr(skycorr_config=skycorr_config, sci_spec=sci_spec, sky_spec=sky_spec)
 
         wavelength = skycorr_fit["lambda"]
         # TODO: include propagated errors from the continuum fitting
         # TODO: include propagated pixel masks
+        # TODO: include LSF
         sky_cont = Spectrum1D(wave=wavelength, data=skycorr_fit["mcflux"])
         sky_line = Spectrum1D(wave=wavelength, data=skycorr_fit["mlflux"])
     # run physical
@@ -187,6 +188,7 @@ def evalESOSky_drp(sky_ref, rss_out, skymodel_config=SKYCALC_CONFIG_PATH, almana
     lsf_comp = sky_model["lam"].value / pars_out["wres"].value
     sed_comp = sky_model.as_array()[:,1].T
     hdr_comp = fits.Header(pars_out)
+    hdr_comp["ASMCONF"] = (par_file, "ESO Advanced Sky Model config file")
     rss = RSS(data=sed_comp, wave=wav_comp, inst_fwhm=lsf_comp, header=hdr_comp)
     
     # resample RSS to observed LSF
@@ -218,7 +220,7 @@ def subtractGeocoronal_drp():
     pass
 
 
-def corrSkyLine_drp(sky1_line_in, sky2_line_in, sci_line_in, rss_out, skycorr_config=SKYCORR_CONFIG_PATH):
+def corrSkyLine_drp(sky1_line_in, sky2_line_in, sci_line_in, line_corr_out, skycorr_config=SKYCORR_CONFIG_PATH):
     """
     
     average sky1_line and sky2_line into 'sky_line', and run skycorr on 'sky_line' and 'sci_line' to produce 'sky_line_corr'
@@ -267,13 +269,14 @@ def corrSkyLine_drp(sky1_line_in, sky2_line_in, sci_line_in, rss_out, skycorr_co
     lsf_fit = line_fit["lambda"].value / pars_out["wres"].value
     sed_fit = line_fit.as_array()[:,1].T
     hdr_fit = fits.Header(pars_out)
+    hdr_fit["ESCCONF"] = (par_file, "ESO Skycorr config file")
     rss = RSS(data=sed_fit, wave=wav_fit, inst_fwhm=lsf_fit, header=hdr_fit)
 
-    # dump RSS file containing the
-    rss.writeFitsData(filename=rss_out)
+    # dump RSS file containing the model sky line spectrum
+    rss.writeFitsData(filename=line_corr_out)
 
 
-def corrSkyContinuum_drp(sky1_cont_in, sky2_cont_in, sky1_model_in, sky2_model_in, sci_model_in, rss_out, model_fiber=2):
+def corrSkyContinuum_drp(sky1_cont_in, sky2_cont_in, sky1_model_in, sky2_model_in, sci_model_in, cont_corr_out, model_fiber=2):
     """
     
     correct and combine continuum only spectra by doing:   sky_cont_corr=0.5*( sky1_cont*(model_skysci/model_sky1) + sky2_cont*(model_skysci/model_sky2))
@@ -310,15 +313,18 @@ def corrSkyContinuum_drp(sky1_cont_in, sky2_cont_in, sky1_model_in, sky2_model_i
         sky2_model.matchFWHM(sci_model._inst_fwhm)    
 
     # extrapolate sky pointings into science pointing
-    # this is equivalent to interpolating the spectral space
     w_1 = sci_model / sky1_model
     w_2 = sci_model / sky2_model
-    # TODO: implement sky coordinates interpolation
-    # TODO: implement interpolation in the parameter space
     # TODO: smooth high frequency features in weights
 
+    # TODO: implement sky coordinates interpolation
+    # TODO: implement interpolation in the parameter space
+
+    # TODO: propagate error in continuum correction
+    # TODO: propagate mask
+    # TODO: propagate LSF
     cont_fit = 0.5 * (w_1 * sky1_cont + w_2 * sky2_cont)
-    cont_fit.writeFitsData(rss_out)
+    cont_fit.writeFitsData(cont_corr_out)
 
 
 def coaddContinuumLine_drp(sky_cont_corr, sky_line_corr):
@@ -376,7 +382,7 @@ def subtractSky_drp(rss_in, rss_out, sky, sky_out, factor='1', scale_region='', 
         wave=np.zeros_like(rss._wave),
         inst_fwhm=np.zeros_like(rss._inst_fwhm),
         error=np.zeros_like(rss._error),
-        mask=np.zeros_like(rss._mask),
+        mask=np.zeros_like(rss._mask, dtype=bool),
         header=sky_head
     )
 
