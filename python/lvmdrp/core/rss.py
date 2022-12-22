@@ -13,6 +13,27 @@ from scipy import ndimage
 
 
 class RSS(FiberRows):
+
+    @classmethod
+    def from_spectra1d(cls, spectra_list, header=None, shape=None, size=None, arc_position_x=None, arc_position_y=None, good_fibers=None, fiber_type=None, logwave=False):
+        """Returns an RSS instance given a list of Spectrum1D instances"""
+        n_spectra = len(spectra_list)
+        if n_spectra <= 0:
+            raise ValueError("cannot create RSS from an empty list of spectra")
+        ref_spec = spectra_list[0]
+
+        rss = cls(
+            data=numpy.zeros(n_spectra, ref_spec._data.size),
+            wave=numpy.zeros(n_spectra, ref_spec._wave.size) if ref_spec._wave is not None else None,
+            inst_fwhm=numpy.zeros(n_spectra, ref_spec._inst_fhwm) if ref_spec._inst_fwhm is not None else None,
+            error=numpy.zeros(n_spectra, ref_spec._error) if ref_spec._error is not None else None,
+            mask=numpy.zeros(n_spectra, ref_spec._mask, dtype=bool) if ref_spec._mask is not None else None,
+            header=header, shape=shape, size=size, arc_position_x=arc_position_x, arc_position_y=arc_position_y, good_fibers=good_fibers, fiber_type=fiber_type, logwave=logwave
+        )
+        for i in range(n_spectra):
+            rss[i] = spectra_list[i]
+        return rss
+
     def __mul__(self, other):
         """
         Operator to add two FiberRow or divide by another type if possible
@@ -494,7 +515,7 @@ class RSS(FiberRows):
         if spec._mask is not None and self._mask is not None:
             self._mask[fiber, :] = spec._mask
 
-    def  createAperSpec(self, cent_x, cent_y, radius):
+    def createAperSpec(self, cent_x, cent_y, radius):
         if self._arc_position_x is not None and self._arc_position_y is not None:
             distance = numpy.sqrt((self._arc_position_x-cent_x)**2+(self._arc_position_y-cent_y)**2)
             select_rad = distance<=radius
