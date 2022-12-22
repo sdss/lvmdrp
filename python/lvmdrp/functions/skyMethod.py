@@ -167,7 +167,7 @@ def sepContinuumLine_drp(sky_ref, cont_out, line_out, method="skycorr", sky_sci=
     sky_line.writeFitsData(line_out)
 
 
-def evalESOSky_drp(sky_ref, rss_out, skymodel_config=SKYCALC_CONFIG_PATH, almanac_config=ALMANAC_CONFIG_PATH, parallel="auto"):
+def evalESOSky_drp(sky_ref, rss_out, skymodel_config=SKYCALC_CONFIG_PATH, almanac_config=ALMANAC_CONFIG_PATH, resample_step="optimal", resample_method="linear", err_sim='500', replace_error='1e10', parallel="auto"):
     """
     
     run ESO sky model for observation parameters (ephemeris, atmospheric conditions, site, etc) to evaluate sky spectrum at each
@@ -179,9 +179,31 @@ def evalESOSky_drp(sky_ref, rss_out, skymodel_config=SKYCALC_CONFIG_PATH, almana
     sky_spec = Spectrum1D()
     sky_spec.loadFitsData(sky_ref)
 
-    # TODO: modify requested resolving power to ensure better resolution than reference spectrum
-    # TODO: modify requested sampling in sky model to ensure 3 samples per resolution elements
-    pars_out, sky_model = run_skymodel(skycalc_config=skymodel_config, almanac_config=almanac_config)
+    eval_failed = False
+    if resample_step != "optimal":
+        try:
+            resample_step = eval(resample_step)
+        except ValueError:
+            # TODO: add logger info to screen
+            pass
+    if eval_failed or resample_step == "optimal":
+        # NOTE: determine sampling based on wavelength resolution
+        # NOTE: if not present LSF in reference spectrum, use the reference sampling step
+        if sky_spec._inst_fwhm is not None:
+            resample_step = np.min(sky_spec._inst_fwhm) / 3
+        else:
+            resample_step = np.min(sky_spec._wave)
+    
+    new_wave = np.arange(sky_spec._wave.min(), sky_spec._wave.max() + resample_step, resample_step)
+
+    pars_out, par_file, sky_model = run_skymodel(
+        skycalc_config=skymodel_config,
+        almanac_config=almanac_config,
+        wmin=new_wave.min(),
+        wmax=new_wave.max(),
+        wdelta=resample_step,
+        wres=(new_wave/resample_step).max()
+    )
     
     # create RSS
     wav_comp = sky_model["lam"].value
@@ -191,27 +213,44 @@ def evalESOSky_drp(sky_ref, rss_out, skymodel_config=SKYCALC_CONFIG_PATH, almana
     hdr_comp["ASMCONF"] = (par_file, "ESO Advanced Sky Model config file")
     rss = RSS(data=sed_comp, wave=wav_comp, inst_fwhm=lsf_comp, header=hdr_comp)
     
-    # resample RSS to observed LSF
-    smoothFWHM = np.sqrt(sky_ref._inst_fwhm**2 - lsf_comp**2)
     if parallel=='auto':
         cpus = cpu_count()
     else:
         cpus = int(parallel)
 
+    # resample RSS to reference wavelength sampling
+    spectra_list = []
     if cpus > 1:
         pool = Pool(cpus)
         threads = []
         for i in range(len(rss)):
-            threads.append(pool.apply_async(rss[i].smoothGaussVariable, ([smoothFWHM[i]])))
+            threads.append(pool.apply_async(rss[i].resampleSpec, (new_wave, resample_method, err_sim, replace_error)))
 
         for i in range(len(rss)):
-            rss[i] = threads[i].get()
+            spectra_list.append(threads[i].get())
         pool.close()
         pool.join()
     else:
         for i in range(len(rss)):
-            rss[i] = rss[i].smoothGaussVariable(smoothFWHM[i])
+            spectra_list.append(rss[i].resampleSpec(new_wave))
     
+    # convolve RSS to reference LSF
+    if cpus > 1:
+        pool = Pool(cpus)
+        threads = []
+        for i in range(len(spectra_list)):
+            threads.append(pool.apply_async(spectra_list[i].matchFWHM, (sky_spec._inst_fwhm)))
+
+        for i in range(len(spectra_list)):
+            spectra_list[i] = threads[i].get()
+        pool.close()
+        pool.join()
+    else:
+        for i in range(len(spectra_list)):
+            spectra_list[i] = spectra_list[i].matchFWHM(sky_spec._inst_fwhm)
+    
+    # build RSS
+    rss = RSS.from_spectra1d(spectra_list=spectra_list)
     # dump RSS file containing the
     rss.writeFitsData(filename=rss_out)
 
