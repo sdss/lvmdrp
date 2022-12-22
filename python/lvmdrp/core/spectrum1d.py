@@ -916,7 +916,7 @@ class Spectrum1D(object):
         spec_out = Spectrum1D(wave=ref_wave, data=new_data, error=new_error, mask=new_mask, inst_fwhm=new_inst_fwhm)
         return spec_out
 
-    def matchFWHM(self, target_FWHM):
+    def matchFWHM(self, target_FWHM, inplace=False):
         if self._inst_fwhm is not None:
             if self._mask is not None:
                 good_pix = numpy.logical_not(self._mask)
@@ -932,22 +932,30 @@ class Spectrum1D(object):
                 wave = self._wave
                 fwhm = self._inst_fwhm
                 error = self._error
+
+            if inplace:
+                new_spec = self
+            else:
+                new_spec = deepcopy(self)
+            
             gauss_sig = numpy.zeros_like(fwhm)
             select = target_FWHM>fwhm
             gauss_sig[select] = numpy.sqrt(target_FWHM**2-fwhm[select]**2)/2.354
             fact = numpy.sqrt(2.*numpy.pi)
-            kernel=numpy.exp(-0.5*((wave[:, numpy.newaxis]-wave[numpy.newaxis, :])/gauss_sig[numpy.newaxis, :])**2)/(fact*gauss_sig[numpy.newaxis, :])
+            kernel = numpy.exp(-0.5*((wave[:, numpy.newaxis]-wave[numpy.newaxis, :])/gauss_sig[numpy.newaxis, :])**2)/(fact*gauss_sig[numpy.newaxis, :])
             multiplied = data[:, numpy.newaxis]*kernel
             new_data = numpy.sum(multiplied, axis=0)/numpy.sum(kernel, 0)
-            if self._mask is not None:
-                self._data[good_pix] = new_data
-                self._inst_fwhm[:] = target_FWHM
+            if new_spec._mask is not None:
+                new_spec._data[good_pix] = new_data
+                new_spec._inst_fwhm[:] = target_FWHM
             if error is not None:
                 new_error = numpy.sqrt(numpy.sum((error[:, numpy.newaxis]*kernel)**2, axis=0))/numpy.sum(kernel, 0)
-                if self._mask is not None:
-                    self._error[good_pix] = new_error
+                if new_spec._mask is not None:
+                    new_spec._error[good_pix] = new_error
                 else:
-                    self._error = new_error
+                    new_spec._error = new_error
+            
+            return new_spec
 
     def binSpec(self, new_wave):
         new_disp = new_wave[1:]-new_wave[:-1]
@@ -1035,7 +1043,6 @@ class Spectrum1D(object):
             #scale = Spectrum1D(wave=self._wave, data=error/self._error)
             #scale.smoothSpec(40, method='median')
             #error[mask]=error[mask]/scale._data[mask]
-
         else:
             error = None
 
