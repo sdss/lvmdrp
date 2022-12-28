@@ -205,7 +205,30 @@ class InsCommand(install):
         # TODO: copy library files in python_dir/lib
         # TODO: copy header files in python_dir/include
 
+        # TODO: run preparation scripts
+        #   - run preplinetrans
+        #   - run estmultiscat
+        os.chdir(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod2"))
+        out = subprocess.run(os.path.join("bin", "preplinetrans").split(), capture_output=True)
+        if out.returncode == 0:
+            setup_logger.info("sucessfully finished preplinetrans")
+            setup_logger.info(out.stdout.decode("utf-8"))
+        else:
+            setup_logger.error("failed while running preplinetrans")
+            setup_logger.error(out.stderr.decode("utf-8"))
+        
+        out = subprocess.run(os.path.join("bin", "estmultiscat").split(), capture_output=True)
+        if out.returncode == 0:
+            setup_logger.info("successfully finished estmultiscat")
+            setup_logger.info(out.stdout.decode("utf-8"))
+        else:
+            setup_logger.error("failed while running estmultiscat")
+            setup_logger.error(out.stderr.decode("utf-8"))
+        
+        
         # clean 'src' directory
+        shutil.rmtree(os.path.join(SRC_PATH, "SM-01"))
+        shutil.rmtree(os.path.join(SRC_PATH, "skycorr"))
 
         install.run(self)
         # post-install stuff
