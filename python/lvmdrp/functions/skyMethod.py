@@ -349,7 +349,7 @@ def corrSkyContinuum_drp(sky1_cont_in, sky2_cont_in, sky1_model_in, sky2_model_i
     if np.all(sky1_model._inst_fwhm != sci_model._inst_fwhm):
         sky1_model.matchFWHM(sci_model._inst_fwhm)
     if np.all(sky2_model._inst_fwhm != sci_model._inst_fwhm):
-        sky2_model.matchFWHM(sci_model._inst_fwhm)    
+        sky2_model.matchFWHM(sci_model._inst_fwhm)
 
     # extrapolate sky pointings into science pointing
     w_1 = sci_model / sky1_model
@@ -366,10 +366,21 @@ def corrSkyContinuum_drp(sky1_cont_in, sky2_cont_in, sky1_model_in, sky2_model_i
     cont_fit.writeFitsData(cont_corr_out)
 
 
-def coaddContinuumLine_drp(sky_cont_corr, sky_line_corr):
+def coaddContinuumLine_drp(sky_cont_corr_in, sky_line_corr_in, sky_corr_out, line_fiber=9):
     """coadd corrected line and continuum combined sky frames: sky_corr=sky_cont_corr+sky_line_corr"""
+
+    # read RSS sky line contribution
+    sky_cont_corr = Spectrum1D()
+    sky_cont_corr.loadFitsData(sky_cont_corr_in)
+    # read RSS continuum contribution
+    sky_line_corr = RSS()
+    sky_line_corr.loadFitsData(sky_line_corr_in)
+    sky_line_corr = sky_line_corr[line_fiber]
+    # coadd to build joint sky model
+
     sky_corr = sky_cont_corr + sky_line_corr
-    return sky_corr
+    # dump final sky model
+    sky_corr.writeFitsData(sky_corr_out)
 
 
 def subtractSky_drp(rss_in, rss_out, sky, sky_out, factor='1', scale_region='', scale_ind=False, parallel='auto'):
