@@ -19,10 +19,15 @@ import argparse
 import shutil
 import subprocess
 import struct
+import logging as setup_logger
 
-from lvmdrp.utils import logger
 
-setup_logger = logger.get_logger("drp setup")
+def rc_symlink(src, dst):
+    """Forces creation of symbolic link if already exists"""
+    if os.path.islink(dst):
+        os.remove(dst)
+    os.symlink(src, dst)
+    return None
 
 
 def get_env_lib_directory():
@@ -44,7 +49,7 @@ def get_env_lib_directory():
 
     for path in paths:
         if os.path.exists(path):
-            return os.path.basename(os.path.basename(os.path.basename(path)))
+            return os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(path))))
     
     setup_logger.error('no installation path found')
     return None
@@ -77,7 +82,9 @@ class DevCommand(develop):
 
 class InsCommand(install):
     def run(self):
-        # pre-install stuff
+        install.run(self)
+
+        # post-install stuff
         # - install skycorr ---------------------------------------------------------------------------------------------
         #   * unpack compressed files
         #   * decide which platform to install on
@@ -97,32 +104,32 @@ class InsCommand(install):
         os.chdir("skycorr")
         if sys.platform == "linux":
             if SYSTEM == 32:
-                out = subprocess.run("bash skycorr_installer_linux_x86_64-1.1.2.run".split(), capture_output=True, text=True, input=SKYCORR_INST_PATH)
+                out = subprocess.run("bash skycorr_installer_linux_i686-1.1.2.run".split(), capture_output=True, text=True, input=f"{SKYCORR_INST_PATH}\ny\ny\n")
             elif SYSTEM == 64:
-                out = subprocess.run("bash skycorr_installer_linux_i686-1.1.2.run".split(), capture_output=True, text=True, input=SKYCORR_INST_PATH)
+                out = subprocess.run("bash skycorr_installer_linux_x86_64-1.1.2.run".split(), capture_output=True, text=True, input=f"{SKYCORR_INST_PATH}\ny\ny\n")
         elif sys.platform == "darwin":
-            out = subprocess.run("bash skycorr_installer_macos_x86_64-1.1.2.run".split(), capture_output=True, text=True, input=SKYCORR_INST_PATH)
+            out = subprocess.run("bash skycorr_installer_macos_x86_64-1.1.2.run".split(), capture_output=True, text=True, input=f"{SKYCORR_INST_PATH}\ny\ny\n")
         else:
-            raise NotImplementedError(f"installation not implemented for '{sys.platform}' OS.")
+            raise NotImplementedError(f"installation not implemented for '{sys.platform}' OS")
 
         if out.returncode == 0:
-            setup_logger.info("successfully installed skycorr.")
-            setup_logger.info(f"{out.stdout.decode('utf-8')}")
+            setup_logger.info("successfully installed skycorr")
+            # setup_logger.info(f"{out.stdout}")
         else:
-            setup_logger.error(f"error while installing skycorr.")
+            setup_logger.error(f"error while installing skycorr")
             setup_logger.error(f"full report:")
-            setup_logger.error(f"{out.stderr.decode('utf-8')}")
+            setup_logger.error(f"{out.stderr}")
         
-        skycorr_out_test = subprocess.run(f"{os.path.join(SKYCORR_INST_PATH, 'bin', 'skycorr')} {os.path.join(SKYCORR_INST_PATH, 'examples', 'config', 'sctest_sinfo_H.par')}".split(), capture_output=True)
-        if skycorr_out_test.returncode == 0:
-            setup_logger.info("successfully tested skycorr.")
-            setup_logger.info(f"{skycorr_out_test.stdout.decode('utf-8')}")
+        out = subprocess.run(f"{os.path.join(SKYCORR_INST_PATH, 'bin', 'skycorr')} {os.path.join(SKYCORR_INST_PATH, 'examples', 'config', 'sctest_sinfo_H.par')}".split(), capture_output=True)
+        if out.returncode == 0:
+            setup_logger.info("successfully tested skycorr")
+            # setup_logger.info(f"{out.stdout.decode('utf-8')}")
         else:
-            setup_logger.error("error while testing skycorr.")
+            setup_logger.error("error while testing skycorr")
             setup_logger.error(f"rolling back changes in {SKYCORR_INST_PATH}")
             shutil.rmtree(SKYCORR_INST_PATH, ignore_errors=True)
             setup_logger.error("full report:")
-            setup_logger.error(skycorr_out_test.stderr.decode('utf-8'))
+            setup_logger.error(out.stderr.decode('utf-8'))
 
         # - install skymodel ---------------------------------------------------------------------------------------------
         setup_logger.info("preparing to install skymodel")
@@ -130,109 +137,163 @@ class InsCommand(install):
         out = subprocess.run(f"tar xzvf {SKYMODEL_SRC_PATH}".split(), capture_output=True)
         if out.returncode == 0:
             setup_logger.info("successfully extracted sky model installer")
-            setup_logger.info(out.stdout.decode("utf-8"))
+            # setup_logger.info(out.stdout.decode("utf-8"))
         else:
-            pass
+            setup_logger.error("error while extracting skymodel")
+            setup_logger.error("full report:")
+            setup_logger.error(out.stderr.decode('utf-8'))
 
-        os.chdir(os.path.join("SM-01", "sm-01_mod01", "third_party_code"))
+        # create directory structure in installation path
+        os.chdir(os.path.join(SRC_PATH, "SM-01", "sm-01_mod1"))
+        # copy line database to installation-dir/data
+        os.makedirs(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "data"), exist_ok=True)
+        # copy config, data and doc dirs into installation-dir/data
+        shutil.copytree("config", os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "config"), dirs_exist_ok=True)
+        shutil.copytree("data", os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "data"), dirs_exist_ok=True)
+        shutil.copytree("doc", os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "doc"), dirs_exist_ok=True)
+        shutil.copytree("third_party_code", os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "third_party_code"), dirs_exist_ok=True)
+        shutil.copytree("bin", os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "bin"), dirs_exist_ok=True)
+        shutil.copytree("src", os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "src"), dirs_exist_ok=True)
+        shutil.copytree("m4macros", os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "m4macros"), dirs_exist_ok=True)
+        shutil.copyfile("bootstrap", os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "bootstrap"))
+        shutil.copyfile("configure.ac", os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "configure.ac"))
+        shutil.copyfile("do_all_compilations.sh", os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "do_all_compilations.sh"))
+        shutil.copyfile("Makefile.am", os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "Makefile.am"))
+
+        os.chdir(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "third_party_code"))
         out = subprocess.run("tar xzvf lnfl_lblrtm_aer.tar.gz".split(), capture_output=True)
         if out.returncode == 0:
             setup_logger.info("successfully extracted third-party codes")
-            setup_logger.info(out.stdout.decode("utf-8"))
+            # setup_logger.info(out.stdout.decode("utf-8"))
         else:
-            pass
+            setup_logger.error("error while extracting third-party codes")
+            setup_logger.error("full report:")
+            setup_logger.error(out.stderr.decode('utf-8'))
 
-        os.chdir(os.path.join("lnfl", "build"))
+        shutil.copyfile(
+            os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "third_party_code", "aer_v_3.2", "line_file", "aer_v_3.2"),
+            os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "data", "aer_v_3.2")
+        )
+
+        os.chdir(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "third_party_code", "lnfl", "build"))
+        setup_logger.info("installing LNFL")
         if sys.platform == "linux":
             out = subprocess.run("make -f make_lnfl linuxGNUsgl".split(), capture_output=True)
         elif sys.platform == "darwin":
             out = subprocess.run("make -f make_lnfl osxGNUsgl".split(), capture_output=True)
         else:
-            raise NotImplementedError(f"installation not implemented for '{sys.platform}' OS.")
-        
-        os.chdir("..")
-        shutil.copyfile("lnfl_v12.2_linux_gnu_sgl", os.path.join(SKYMODEL_INST_PATH, "bin"))
-        os.symlink(os.path.join(SKYMODEL_INST_PATH, "bin", "lnfl_v12.2_linux_gnu_sgl"), os.path.join(SKYMODEL_INST_PATH, "bin", "lnfl"))
+            raise NotImplementedError(f"installation not implemented for '{sys.platform}' OS")
 
-        os.chdir("..")
-        os.chdir(os.path.join("lblrtm", "build"))
+        if out.returncode == 0:
+            setup_logger.info("successfully installed LNFL")
+            # setup_logger.info(out.stdout.decode("utf-8"))
+        else:
+            setup_logger.error("error while installing LNFL")
+            setup_logger.error("full report:")
+            setup_logger.error(out.stderr.decode('utf-8'))
+        
+        os.chdir(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "third_party_code", "lnfl"))
+        shutil.move("lnfl_v2.6_linux_gnu_sgl", os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "bin", "lnfl_v2.6_linux_gnu_sgl"))
+        rc_symlink(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "bin", "lnfl_v2.6_linux_gnu_sgl"), os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "bin", "lnfl"))
+
+        os.chdir(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "third_party_code", "lblrtm", "build"))
+        setup_logger.info("installing LBLRTM")
         if sys.platform == "linux":
             out = subprocess.run("make -f make_lblrtm linuxGNUsgl".split(), capture_output=True)
         elif sys.platform == "darwin":
             out = subprocess.run("make -f make_lblrtm osxGNUsgl".split(), capture_output=True)
         else:
-            raise NotImplementedError(f"installation not implemented for '{sys.platform}' OS.")      
+            raise NotImplementedError(f"installation not implemented for '{sys.platform}' OS")      
 
-        os.chdir("..")
-        shutil.copyfile("lblrtm_v12.2_linux_gnu_sgl", os.path.join(SKYMODEL_INST_PATH, "bin"))
-        os.symlink(os.path.join(SKYMODEL_INST_PATH, "bin", "lblrtm_v12.2_linux_gnu_sgl"), os.path.join(SKYMODEL_INST_PATH, "bin", "lblrtm"))
+        if out.returncode == 0:
+            setup_logger.info("successfully installed LBLRTM")
+            # setup_logger.info(out.stdout.decode("utf-8"))
+        else:
+            setup_logger.error("error while installing LBLRTM")
+            setup_logger.error("full report:")
+            setup_logger.error(out.stderr.decode('utf-8'))
 
-        os.chdir(os.path.join(SRC_PATH, "SM-01", "sm-01_mod1"))
+        os.chdir(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "third_party_code", "lblrtm"))
+        shutil.move("lblrtm_v12.2_linux_gnu_sgl", os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "bin", "lblrtm_v12.2_linux_gnu_sgl"))
+        rc_symlink(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "bin", "lblrtm_v12.2_linux_gnu_sgl"), os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "bin", "lblrtm"))
+
+        os.chdir(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1"))
         out = subprocess.run("bash bootstrap".split(), capture_output=True)
-        out = subprocess.run(f"bash configure --prefix={SKYMODEL_INST_PATH} --with-cpl={SKYCORR_INST_PATH} -CFLAGS='-std=c99 -Wno-error'".split(), capture_output=True)
+        out = subprocess.run(f"bash configure --prefix={os.path.join(SKYMODEL_INST_PATH, 'sm-01_mod1')} --with-cpl={SKYCORR_INST_PATH}".split(), capture_output=True)
         out = subprocess.run("make".split(), capture_output=True)
         out = subprocess.run("make install".split(), capture_output=True)
 
-        # copy line database to installation-dir/data
-        shutil.copyfile(os.path.join("third_party_code", "aer_v_3.2", "line_file", "aer_v_3.2"), os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "data", "aer_v_3.2"))
-        # copy config, data and doc dirs into installation-dir/data
-        shutil.copytree("config", os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1"))
-        shutil.copytree("data", os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1"))
-        shutil.copytree("doc", os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1"))
+        if out.returncode == 0:
+            setup_logger.info("successfully installed skymodel module 01")
+            # setup_logger.info(out.stdout.decode("utf-8"))
+        else:
+            setup_logger.error("error while installing skymodel module 01")
+            setup_logger.error("full report:")
+            setup_logger.error(out.stderr.decode('utf-8'))
 
         # make symbolic links of binary files in python_dir/bin
-        os.symlink(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "bin", "lnfl_v12.2_linux_gnu_sgl"), os.path.join(BIN_PATH, "lnfl"))
-        os.symlink(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "bin", "lblrtm_v12.2_linux_gnu_sgl"), os.path.join(BIN_PATH, "lblrtm"))
-        os.symlink(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "bin", "create_spec"), os.path.join(BIN_PATH, "create_spec"))
-        os.symlink(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "bin", "create_speclib"), os.path.join(BIN_PATH, "create_speclib"))
+        rc_symlink(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "bin", "lnfl_v2.6_linux_gnu_sgl"), os.path.join(BIN_PATH, "lnfl"))
+        rc_symlink(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "bin", "lblrtm_v12.2_linux_gnu_sgl"), os.path.join(BIN_PATH, "lblrtm"))
+        rc_symlink(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "bin", "create_spec"), os.path.join(BIN_PATH, "create_spec"))
+        rc_symlink(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "bin", "create_speclib"), os.path.join(BIN_PATH, "create_speclib"))
         # TODO: copy library files in python_dir/lib
         # TODO: copy header files in python_dir/include
 
-        os.chdir(os.path.join(SKYMODEL_SRC_PATH, "sm-01_mod2"))
-        shutil.copytree("config", os.path.join(SKYMODEL_INST_PATH, "sm-01_mod2"))
-        shutil.copytree("data", os.path.join(SKYMODEL_INST_PATH, "sm-01_mod2"))
-        shutil.copytree("test", os.path.join(SKYMODEL_INST_PATH, "sm-01_mod2"))
-        shutil.copytree("doc", os.path.join(SKYMODEL_INST_PATH, "sm-01_mod2"))
-        os.makedirs(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod2", "output"))
+        os.chdir(os.path.join(SRC_PATH, "SM-01", "sm-01_mod2"))
+        shutil.copytree("config", os.path.join(SKYMODEL_INST_PATH, "sm-01_mod2", "config"), dirs_exist_ok=True)
+        shutil.copytree("data", os.path.join(SKYMODEL_INST_PATH, "sm-01_mod2", "data"), dirs_exist_ok=True)
+        shutil.copytree("test", os.path.join(SKYMODEL_INST_PATH, "sm-01_mod2", "test"), dirs_exist_ok=True)
+        shutil.copytree("doc", os.path.join(SKYMODEL_INST_PATH, "sm-01_mod2", "doc"), dirs_exist_ok=True)
+        shutil.copytree("src", os.path.join(SKYMODEL_INST_PATH, "sm-01_mod2", "src"), dirs_exist_ok=True)
+        shutil.copytree("m4macros", os.path.join(SKYMODEL_INST_PATH, "sm-01_mod2", "m4macros"), dirs_exist_ok=True)
+        shutil.copyfile("bootstrap", os.path.join(SKYMODEL_INST_PATH, "sm-01_mod2", "bootstrap"))
+        shutil.copyfile("configure.ac", os.path.join(SKYMODEL_INST_PATH, "sm-01_mod2", "configure.ac"))
+        shutil.copyfile("Makefile.am", os.path.join(SKYMODEL_INST_PATH, "sm-01_mod2", "Makefile.am"))
+        os.makedirs(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod2", "output"), exist_ok=True)
+
+        os.chdir(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod2"))
         out = subprocess.run("bash bootstrap".split(), capture_output=True)
-        out = subprocess.run(f"bash configure --prefix={SKYMODEL_INST_PATH} --with-cpl={SKYCORR_INST_PATH} -CFLAGS='-std=c99 -Wno-error'".split(), capture_output=True)
+        out = subprocess.run(f"bash configure --prefix={os.path.join(SKYMODEL_INST_PATH, 'sm-01_mod2')} --with-cpl={SKYCORR_INST_PATH}".split(), capture_output=True)
         out = subprocess.run("make install".split(), capture_output=True)
 
-        shutil.symlink(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod2", "bin", "preplinetrans"), os.path.join(BIN_PATH, "preplinetrans"))
-        shutil.symlink(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod2", "bin", "calcskymodel"), os.path.join(BIN_PATH, "calcskymodel"))
-        shutil.symlink(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod2", "bin", "estmultiscat"), os.path.join(BIN_PATH, "estmultiscat"))
-        shutil.symlink(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod2", "bin", "testskymodel"), os.path.join(BIN_PATH, "testskymodel"))
+        if out.returncode == 0:
+            setup_logger.info("successfully installed skymodel module 02")
+            # setup_logger.info(out.stdout.decode("utf-8"))
+        else:
+            setup_logger.error("error while installing skymodel module 02")
+            setup_logger.error("full report:")
+            setup_logger.error(out.stderr.decode('utf-8'))
+
+        rc_symlink(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod2", "bin", "preplinetrans"), os.path.join(BIN_PATH, "preplinetrans"))
+        rc_symlink(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod2", "bin", "calcskymodel"), os.path.join(BIN_PATH, "calcskymodel"))
+        rc_symlink(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod2", "bin", "estmultiscat"), os.path.join(BIN_PATH, "estmultiscat"))
+        rc_symlink(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod2", "bin", "testskymodel"), os.path.join(BIN_PATH, "testskymodel"))
         # TODO: copy library files in python_dir/lib
         # TODO: copy header files in python_dir/include
 
         # TODO: run preparation scripts
         #   - run preplinetrans
         #   - run estmultiscat
-        os.chdir(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod2"))
-        out = subprocess.run(os.path.join("bin", "preplinetrans").split(), capture_output=True)
-        if out.returncode == 0:
-            setup_logger.info("sucessfully finished preplinetrans")
-            setup_logger.info(out.stdout.decode("utf-8"))
-        else:
-            setup_logger.error("failed while running preplinetrans")
-            setup_logger.error(out.stderr.decode("utf-8"))
+        # os.chdir(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod2"))
+        # out = subprocess.run(os.path.join("bin", "preplinetrans").split(), capture_output=True)
+        # if out.returncode == 0:
+        #     setup_logger.info("sucessfully finished preplinetrans")
+        #     # setup_logger.info(out.stdout.decode("utf-8"))
+        # else:
+        #     setup_logger.error("failed while running preplinetrans")
+        #     setup_logger.error(out.stderr.decode("utf-8"))
         
-        out = subprocess.run(os.path.join("bin", "estmultiscat").split(), capture_output=True)
-        if out.returncode == 0:
-            setup_logger.info("successfully finished estmultiscat")
-            setup_logger.info(out.stdout.decode("utf-8"))
-        else:
-            setup_logger.error("failed while running estmultiscat")
-            setup_logger.error(out.stderr.decode("utf-8"))
-        
-        
+        # out = subprocess.run(os.path.join("bin", "estmultiscat").split(), capture_output=True)
+        # if out.returncode == 0:
+        #     setup_logger.info("successfully finished estmultiscat")
+        #     # setup_logger.info(out.stdout.decode("utf-8"))
+        # else:
+        #     setup_logger.error("failed while running estmultiscat")
+        #     setup_logger.error(out.stderr.decode("utf-8"))
+                
         # clean 'src' directory
         shutil.rmtree(os.path.join(SRC_PATH, "SM-01"))
         shutil.rmtree(os.path.join(SRC_PATH, "skycorr"))
-
-        install.run(self)
-        # post-install stuff
-
 
 def run(packages, install_requires):
 

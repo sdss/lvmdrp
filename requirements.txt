@@ -1,14 +1,11 @@
 astLib==0.11.8
 astropy==5.1
-drp==0.1.2
 future==0.18.2
 invoke==1.6.0
 ipython==8.7.0
-lvmsurveysim==0.2.5
 matplotlib==3.5.2
 numpy==1.22.4
 peewee==3.15.0
-pyfits==3.5
 Pygments==2.11.2
 pytest==7.2.0
 PyYAML==6.0
@@ -17,3 +14,4 @@ setuptools==58.0.4
 skycalc_cli==1.4
 sphinx_bootstrap_theme==0.8.1
 tqdm==4.64.0
+lvmsurveysim @ git+https://github.com/sdss/lvmsurveysim.git@0.8.3

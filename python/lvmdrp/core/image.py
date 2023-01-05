@@ -1,10 +1,7 @@
 from lvmdrp.core.header import *
 from lvmdrp.core.apertures import  *
 from lvmdrp.core.spectrum1d import Spectrum1D
-try:
-  import pyfits
-except:
-  from astropy.io import fits as pyfits
+from astropy.io import fits as pyfits
 import numpy
 try:
   import pylab
