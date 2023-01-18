@@ -1,32 +1,39 @@
-# lvmdrp
-Local Volume Mapper (LVM) Data Reduction Pipeline
+# Local Volume Mapper (LVM) Data Reduction Pipeline (DRP)
 
-The LVM DRP in it's current incarnation installs a collection of routines which make use of the DESI-DRP, specifically spectre and DESI-PREPROC.
-
-The purpose of the current repository is 2 fold.
-
-1. Automatically recreate the DESI environment, with dependencies
-2. Host LVM routines/wrappers/patches to operate the based DESI-DRP
+The LVM DRP in it's current incarnation installs a collection of routines which make use of the [Py3D]().
 
 ## Installation
 
-This code is being developed in a Ubuntu-based OS. We recommend to use a Python environment manager such as Anaconda in order to avoid cluttering the OS's python installation.
+This code is being developed/tested in a Ubuntu-based OS. We recommend to use a Python environment manager such as Anaconda in order to avoid cluttering the OS's python installation.
 
-To get the LVM DRP and DESI reduction package working on your system, you need to follow this steps:
+To install the DRP along with its dependencies, you need to run the following steps:
 
-1. Define the `LVMHUB` environment variable to point to the root directory containing the LVM DRP repositories. E.g. in bash:
-> `export LVMHUB=path/to/drp/root`
-
-2. `cd $LVMHUB`
-
-3. Clone the repository:
+1. Make sure you are in the intended python environment and directory.
+   
+2. Clone the Github repository:
 > `git clone --recurse-submodules -j8 git://github.com/sdss/lvmdrp.git`
 
-4. Install external (OS) dependencies listed in `$LVMHUB/lvmdrp/requirements_ubuntu.txt`:
-> `sudo apt install -y $(awk '{print $1'} $LVMHUB/lvmdrp/requirements_ubuntu.txt)`
+3. Go into the lvmdrp directory:
+> `cd lvmdrp`
 
-5. Run installation script:
-> `bash $LVMHUB/lvmdrp/utils/install.sh`
+4. Install the DRP package in the current python environment:
+> `pip install .`
+
+5. Run the ESO sky model configuration:
+> `drp sky configureSkyModel`
+
+The installation (step 4) may take a while, since it is going to install the necessary routines to run the ESO skycorr and the ASM.
+The sky model configuration (step 5) should be fast as it is going to write the default configuratation files in order to produce
+sky models. For more advanced (and slower) sky model configuration options, see the section below.
+
+### Advanced ESO sky model configuration
+
+...
+
+## Tutorials
+
+<!-- write tutorial notebooks -->
+You will find tutorial notebooks to run different DRP routines in the [examples]() folder. Here is a list of the tutorials
 
 ## Testing the installation
 
