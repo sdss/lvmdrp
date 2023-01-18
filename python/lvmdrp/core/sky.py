@@ -21,9 +21,14 @@ from skycalc_cli.skycalc import SkyModel, AlmanacQuery
 from skycalc_cli.skycalc_cli import fixObservatory
 
 
-RADIAN = 57.29578
+from lvmdrp.utils.logger import get_logger
 
-def ang_distance(r1,d1,r2,d2):
+
+sky_logger = get_logger("sky module")
+
+
+
+def ang_distance(r1, d1, r2, d2):
     '''
     distance(r1,d1,r2,d2)
     Return the angular offset between two ra,dec positions
@@ -35,6 +40,8 @@ def ang_distance(r1,d1,r2,d2):
     author: Knox Long
 
     '''
+    RADIAN = 57.29578
+
     r1 = r1 / RADIAN
     d1 = d1 / RADIAN
     r2 = r2 / RADIAN
@@ -48,6 +55,74 @@ def ang_distance(r1,d1,r2,d2):
     xlambda = xlambda * RADIAN
 
     return xlambda
+
+
+def read_skymodel_par(parfile, verify=True):
+    """Returns a dictionary with the ESO skymodel input .par file contents
+    
+    Parameters
+    ----------
+    parfile: string
+        path to the configuration (.par) file
+    verify: boolean
+        whether to verify or not the integrity of the configuration file. Defaults to True
+    """
+    with open(parfile, "r") as f:
+        line = f.realine()[:-1].strip()
+        pars = {}
+        while line:
+            if line.startswith("#"): continue
+            key, val = list(map(str.strip, line.split("=")))
+            vals = val.split()
+            if len(vals) != 1:
+                val_new = []
+                for val in vals:
+                    if val.replace(".", "").isnumeric():
+                        val_new.append(eval(val))
+                    else:
+                        val_new.append(val)
+            else:
+                if val.replace(".", "").isnumeric():
+                    val_new = eval(val)
+                else:
+                    val_new = val
+
+            pars[key] = val_new
+
+            line = f.readline()[:-1].strip()
+    
+    # TODO: verify integrity of the configuration parameters
+    if verify:
+        pass
+
+    return pars
+
+
+def write_skymodel_par(par_path, config_dict, verify=True):
+    """Writes the configuration dictionary in a given .par file(s)
+    
+    Parameters
+    ----------
+    par_path: string
+        path to the output configuration file(s)
+    config_dict: dict-like
+        configuration dictionary to save in the given .par file
+    verify: boolean
+        whether to verify or not the integrity of the parameters dictionary. Dafaults to True.
+    """
+    # split dictionary in different .par file(s)
+    # verify all keywords are present for each given parameter file
+    # if all parameters present, write corresponding .par file
+
+    for parfile, expected_keys in SKYMODEL_CONFIG_PARS.items():
+        if all(map(lambda key: key in config_dict.keys(), expected_keys)):
+            config_par = {key: val for key, val in config_dict.items() if key in expected_keys}
+            with open(os.path.join(par_path, parfile), "w") as f:
+                for key, val in config_par.items():
+                    if isinstance(val, list, tuple):
+                        f.write(f"{key} = {' '.join(val)}\n")
+                    elif isinstance(val, str):
+                        f.write(f"{key} = {val}\n")
 
 
 def get_bright_fiber_selection(rss):
