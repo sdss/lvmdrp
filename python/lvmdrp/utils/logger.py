@@ -15,6 +15,7 @@ import shutil
 import sys
 import traceback
 import warnings
+import tqdm
 from logging.handlers import TimedRotatingFileHandler
 
 from pygments import highlight
@@ -26,6 +27,18 @@ from .color_print import color_text
 
 __all__ = ['get_logger']
 
+
+class TqdmLoggingHandler(logging.Handler):
+    def __init__(self, level=logging.NOTSET):
+        super().__init__(level)
+
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+            tqdm.tqdm.write(msg)
+            self.flush()
+        except Exception:
+            self.handleError(record)  
 
 def get_exception_formatted(tp, value, tb):
     """Adds colours to tracebacks."""
@@ -222,6 +235,7 @@ def get_logger(name, **kwargs):
     logging.setLoggerClass(SDSSLogger)
 
     log = logging.getLogger(name)
+    log.addHandler(TqdmLoggingHandler())
     log.init(**kwargs)
 
     logging.setLoggerClass(orig_logger)
