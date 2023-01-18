@@ -33,101 +33,130 @@ sky_logger = get_logger(name="sky module")
 description = "Provides methods for sky subtraction"
 
 
-def configureSkyModule_drp(skymodule_config_path=SKYMODEL_CONFIG_PATH, skymodel_path=SKYMODEL_INST_PATH, method="run", source="", run_multiscat=False, pwvs="-1"):
-    """Runs/downloads the configuration files of the sky module
-    
-    If method='run' mode, the following ESO configuration files will be written:
-        - lblrtm_setup
-        - libstruct.dat
-        - sm_filenames.dat
-        - instrument_etc.par
-        - skymodel_etc.par
+def configureSkyModel_drp(skymodel_config_path=SKYMODEL_CONFIG_PATH, skymodel_path=SKYMODEL_INST_PATH, method="run", run_library=False, run_multiscat=False, pwvs="-1", source=""):
+    f"""
+        Runs/downloads the configuration files of the sky module
+        
+        If method='run' mode, the following ESO configuration files will be written:
+            - lblrtm_setup
+            - libstruct.dat
+            - sm_filenames.dat
+            - instrument_etc.par
+            - skymodel_etc.par
 
-    Then this function will execute the following ESO routines:
-    create_spec <airmass> <time> <seasson> <output_path> <spectra_resolution> <pwv>
-    preplinetrans
-    estmultiscat (optional)
+        Then, if run_library=True, this function will execute the following ESO routines:
+            > create_spec <airmass> <time> <seasson> <output_path> <spectra_resolution> <pwv>
+            > preplinetrans
 
-    If method='download', this function will download the neccessary files to run the
-    ESO sky models. Additionally you can specify the source from which these files should
-    be downloaded.
+        Additionally, the ESO routine for updating the multiple scattering corrections component
+        will be executed if run_multiscat=True
+            > estmultiscat
+
+        If method='download', this function will download the neccessary files to run the
+        ESO sky models. Additionally you can specify the source from which these files should
+        be downloaded. NOTE: this method is not implemented yet.
+
+        Parameters
+        ----------
+        skymodel_config_path : string
+            path to master ESO sky model configuration file. Defaults to {SKYMODEL_CONFIG_PATH}
+        skymodel_inst_path : string
+            path to ESO sky model installation path. Defaults to {SKYMODEL_INST_PATH}
+        method : string
+            which method to use for the ESO sky model configuration:
+                - 'run' : will write the configuration files and (optionally) pre-build a spectral library (see 'run_library' and 'run_multiscat')
+                - 'download' : will download all configuration files and corresponding library files (NOTE: NOT IMPLEMENTED YET)
+        run_library : boolean
+            whether to run or not the ESO routines to build a spectral library using the specified configuration files and a set of precipitable water vapor scalings (see 'pwv')
+        run_multiscat : boolean
+            whether to run or not the ESO 'estmultiscat' routine for the multiple scattering corrections
+        pwvs : string of floats
+            the precipitable water vapor values (in mm) to use. Defaults to -1 which means no PWV scaling is applied
+
+        Examples
+        --------
+
+        user:> drp sky configureSkyModel # to write the configuration files only
+        user:> drp sky configureSkyModel method=run run_library=True run_multiscat=False pwvs=0.5,1.0,2.5 # to write the configuration files and build a spectral library with the given parameters
+
     """
 
     if method == "run":
         # read master configuration file
-        skymodel_master_config = yaml.load(skymodule_config_path, Loader=yaml.Loader)
+        skymodel_master_config = yaml.load(skymodel_config_path, Loader=yaml.Loader)
 
         # write default parameters for the ESO skymodel
         config_names = list(skymodel_master_config.keys())
-        with open(os.path.join(skymodule_config_path, "sm-01_mod1", "config", config_names[0])) as cf:
+        with open(os.path.join(skymodel_config_path, "sm-01_mod1", "config", config_names[0])) as cf:
             for key, val in skymodel_master_config[config_names[0]].items():
                 cf.write(f"{key} = {val}\n")
-        with open(os.path.join(skymodule_config_path, "sm-01_mod2", "data", config_names[1])) as cf:
+        with open(os.path.join(skymodel_config_path, "sm-01_mod2", "data", config_names[1])) as cf:
             for par in skymodel_master_config[config_names[1]]:
                 cf.write(f"{par}\n")
-        with open(os.path.join(skymodule_config_path, "sm-01_mod2", "data", config_names[2])) as cf:
+        with open(os.path.join(skymodel_config_path, "sm-01_mod2", "data", config_names[2])) as cf:
             for key, val in skymodel_master_config[config_names[2]].items():
                 cf.write(f"{key} = {val}\n")
-        with open(os.path.join(skymodule_config_path, "sm-01_mod2", "config", config_names[3])) as cf:
+        with open(os.path.join(skymodel_config_path, "sm-01_mod2", "config", config_names[3])) as cf:
             for key, val in skymodel_master_config[config_names[3]].items():
                 cf.write(f"{key} = {val}\n")
-        with open(os.path.join(skymodule_config_path, "sm-01_mod2", "config", config_names[4])) as cf:
+        with open(os.path.join(skymodel_config_path, "sm-01_mod2", "config", config_names[4])) as cf:
             for key, val in skymodel_master_config[config_names[4]].items():
                 cf.write(f"{key} = {val}\n")
 
         # create sky library
-        # TODO: parse create_spec parameters
-        os.chdir(os.path.join(skymodule_config_path, "sm-01_mod1"))
-        lib_path = os.path.abspath(skymodel_master_config["sm_filenames.dat"]["libpath"])
-        fact = dict(map(lambda s: s.split()[1:], skymodel_master_config["libstruct.dat"][::1]))
-        fact = {k: 10**eval(v) for k, v in fact.items()}
-        pars = dict(zip(fact.keys(), skymodel_master_config["libstruct.dat"][1::1].split()))
-        
-        airmasses = map(lambda f, p: f*eval(p), fact["airmass"], pars["airmass"])
-        times = map(lambda f, p: f * eval(p), fact["time"], pars["time"])
-        seasons = map(lambda f, p: f * eval(p), fact["season"], pars["season"])
-        resols = map(lambda f, p: f * eval(p), fact["resol"], pars["resol"])
-        pwvs = pwvs.split()
-        create_spec_pars = it.product(airmasses, times, seasons, resols, pwvs)
+        if run_library:
+            # TODO: parse create_spec parameters
+            os.chdir(os.path.join(skymodel_config_path, "sm-01_mod1"))
+            lib_path = os.path.abspath(skymodel_master_config["sm_filenames.dat"]["libpath"])
+            fact = dict(map(lambda s: s.split()[1:], skymodel_master_config["libstruct.dat"][::1]))
+            fact = {k: 10**eval(v) for k, v in fact.items()}
+            pars = dict(zip(fact.keys(), skymodel_master_config["libstruct.dat"][1::1].split()))
+            
+            airmasses = map(lambda f, p: f*eval(p), fact["airmass"], pars["airmass"])
+            times = map(lambda f, p: f * eval(p), fact["time"], pars["time"])
+            seasons = map(lambda f, p: f * eval(p), fact["season"], pars["season"])
+            resols = map(lambda f, p: f * eval(p), fact["resol"], pars["resol"])
+            pwvs = pwvs.split()
+            create_spec_pars = it.product(airmasses, times, seasons, resols, pwvs)
 
-        # TODO: run create_spec across all parameter grid
-        for airmass, time, season, res, pwv in tqdm(create_spec_pars, desc="creating sky library", unit="grid step", ascii=True):
-            out = subprocess.run(f"{os.path.join('bin', 'create_spec')} {airmass} {time} {season} {lib_path} {res} {pwv}".split(), capture_output=True)
+            # run create_spec across all parameter grid
+            for airmass, time, season, res, pwv in tqdm(create_spec_pars, desc="creating sky library", unit="grid step", ascii=True):
+                out = subprocess.run(f"{os.path.join('bin', 'create_spec')} {airmass} {time} {season} {lib_path} {res} {pwv}".split(), capture_output=True)
+                if out.returncode == 0:
+                    sky_logger.info("successfully finished 'create_spec'")
+                else:
+                    sky_logger.error("failed while running 'create_spec'")
+                    sky_logger.error(f"with parameters: {airmass, time, season, res, pwv, lib_path}")
+                    sky_logger.error(out.stderr.decode("utf-8"))
+
+            # create library destination path
+            os.makedirs(os.path.join(skymodel_path, "sm-01_mod2", "data", "lib"), exist_ok=True)
+            # copy library to destination path as specified in sm_filenames.dat
+            shutil.copytree(os.path.join(skymodel_path, "sm-01_mod1", "data"), os.path.join(skymodel_path, "sm-01_mod2", "data", "lib"), dirs_exist_ok=True)
+
+            # run prelinetrans
+            os.chdir(os.path.join(skymodel_path, "sm-01_mod2"))
+            out = subprocess.run(os.path.join("bin", "preplinetrans").split(), capture_output=True)
             if out.returncode == 0:
-                sky_logger.info("successfully finished create_spec")
+                sky_logger.info("sucessfully finished 'preplinetrans'")
             else:
-                sky_logger.error("failed while running create_spec")
-                sky_logger.error(f"with parameters: {airmass, time, season, res, pwv, lib_path}")
+                sky_logger.error("failed while running 'preplinetrans'")
                 sky_logger.error(out.stderr.decode("utf-8"))
-
-        # create library destination path
-        os.makedirs(os.path.join(skymodel_path, "sm-01_mod2", "data", "lib"), exist_ok=True)
-        # copy library to destination path as specified in sm_filenames.dat
-        shutil.copytree(os.path.join(skymodel_path, "sm-01_mod1", "data"), os.path.join(skymodel_path, "sm-01_mod2", "data", "lib"), dirs_exist_ok=True)
-
-        # run prelinetrans
-        os.chdir(os.path.join(skymodel_path, "sm-01_mod2"))
-        out = subprocess.run(os.path.join("bin", "preplinetrans").split(), capture_output=True)
-        if out.returncode == 0:
-            sky_logger.info("sucessfully finished preplinetrans")
-        else:
-            sky_logger.error("failed while running preplinetrans")
-            sky_logger.error(out.stderr.decode("utf-8"))
-        
-        if run_multiscat:
-            out = subprocess.run(os.path.join("bin", "estmultiscat").split(), capture_output=True)
-            if out.returncode == 0:
-                sky_logger.info("successfully finished estmultiscat")
-            else:
-                sky_logger.error("failed while running estmultiscat")
-                sky_logger.error(out.stderr.decode("utf-8"))
+            
+            if run_multiscat:
+                out = subprocess.run(os.path.join("bin", "estmultiscat").split(), capture_output=True)
+                if out.returncode == 0:
+                    sky_logger.info("successfully finished 'estmultiscat'")
+                else:
+                    sky_logger.error("failed while running 'estmultiscat'")
+                    sky_logger.error(out.stderr.decode("utf-8"))
     elif method == "download":
         # TODO: download master configuration file and overwrite current one
         # TODO: write individual configuration files (as above)
         # TODO: download create_spec outputs and overwrite current ones
         # TODO: download preplinetrans outputs and overwrite current ones
         # TODO: download multiscat outputs and overwrite current ones
-        pass
+        raise NotImplementedError(f"'{method}' is not implemented yet. Please try again using the 'run' method")
     else:
         raise ValueError(f"unknown method '{method}'. Valid values are: 'run' and 'download'")
         
@@ -233,7 +262,8 @@ def createMasterSky_drp(rss_in, sky_out, clip_sigma='3.0', nsky='0', filter='', 
 
 
 def sepContinuumLine_drp(sky_ref, cont_out, line_out, method="skycorr", sky_sci="", skycorr_config=SKYCORR_CONFIG_PATH):
-    """Separates the continuum from the sky line contribution using the specified method
+    """
+        Separates the continuum from the sky line contribution using the specified method
     
         Run the chosen continuum/line separation algorithm on master sky 1 and 2 and master science and produce
         line-only (sky1_line, sky2_line, sci_line) and continuum-only (sky1_cont, sky2_cont, sci_cont) spectra for each
@@ -253,7 +283,7 @@ def sepContinuumLine_drp(sky_ref, cont_out, line_out, method="skycorr", sky_sci=
         # TODO: match wavelength sampling and resolution if needed
         if np.any(sky_spec._wave != sci_spec._wave):
             sky_spec = sky_spec.binSpec(new_wave=sci_spec._wave)
-        pars_out, par_file, skycorr_fit = run_skycorr(skycorr_config=skycorr_config, sci_spec=sci_spec, sky_spec=sky_spec)
+        pars_out, skycorr_fit = run_skycorr(skycorr_config=skycorr_config, sci_spec=sci_spec, sky_spec=sky_spec)
 
         wavelength = skycorr_fit["lambda"]
         # TODO: include propagated errors from the continuum fitting
@@ -501,15 +531,15 @@ def subtractSky_drp(rss_in, rss_out, sky, sky_out, factor='1', scale_region='', 
                 Output RSS FITS file with spectrum subtracted
         sky : string
                 Input sky spectrum in FITS format.
-        sky_out: string
+        sky_out : string
                 Output file to store the RSS sky spectra.
-        factor: string of float, optional with default: '1'
+        factor : string of float, optional with default: '1'
                 The default value for the flux scale factor in case the fitting fails
-        scale_region: string of tuple of floats, optional with default: ''
+        scale_region : string of tuple of floats, optional with default: ''
                 The wavelength range within which the 'factor' will be fit
-        scale_ind: boolean, optional with deafult: False
+        scale_ind : boolean, optional with deafult: False
                 Whether apply factors individually or apply the median of good factors
-        parallel: either string of integer (>0) or  'auto', optional with default: 'auto'
+        parallel : either string of integer (>0) or  'auto', optional with default: 'auto'
                 Number of CPU cores used in parallel for the computation. If set to auto, the maximum number of CPUs
                 for the given system is used.
 
