@@ -13,7 +13,7 @@ from multiprocessing import Pool
 from scipy import optimize
 from astropy.io import fits
 
-from lvmdrp.core.constants import SKYCORR_CONFIG_PATH, SKYCALC_CONFIG_PATH, ALMANAC_CONFIG_PATH
+from lvmdrp.core.constants import SKYCORR_CONFIG_PATH, SKYMODEL_CONFIG_PATH, SKYMODEL_INST_PATH
 from lvmdrp.core.sky import run_skycorr, run_skymodel, optimize_sky, ang_distance
 from lvmdrp.core.passband import PassBand
 from lvmdrp.core.spectrum1d import Spectrum1D
@@ -167,7 +167,7 @@ def sepContinuumLine_drp(sky_ref, cont_out, line_out, method="skycorr", sky_sci=
     sky_line.writeFitsData(line_out)
 
 
-def evalESOSky_drp(sky_ref, rss_out, skymodel_config=SKYCALC_CONFIG_PATH, almanac_config=ALMANAC_CONFIG_PATH, resample_step="optimal", resample_method="linear", err_sim='500', replace_error='1e10', parallel="auto"):
+def evalESOSky_drp(sky_ref, rss_out, resample_step="optimal", resample_method="linear", err_sim='500', replace_error='1e10', parallel="auto"):
     """
     
     run ESO sky model for observation parameters (ephemeris, atmospheric conditions, site, etc) to evaluate sky spectrum at each
@@ -196,13 +196,11 @@ def evalESOSky_drp(sky_ref, rss_out, skymodel_config=SKYCALC_CONFIG_PATH, almana
     
     new_wave = np.arange(sky_spec._wave.min(), sky_spec._wave.max() + resample_step, resample_step)
 
-    pars_out, par_file, sky_model = run_skymodel(
-        skycalc_config=skymodel_config,
-        almanac_config=almanac_config,
-        wmin=new_wave.min(),
-        wmax=new_wave.max(),
-        wdelta=resample_step,
-        wres=(new_wave/resample_step).max()
+    pars_out, sky_model = run_skymodel(
+        skymodel_path=SKYMODEL_INST_PATH,
+        limlam=[new_wave.min()/1e4, new_wave.max()/1e4],
+        dlam=resample_step/1e4,
+        resol=np.int(np.ceil((new_wave/resample_step).max()))
     )
     
     # create RSS
@@ -210,7 +208,6 @@ def evalESOSky_drp(sky_ref, rss_out, skymodel_config=SKYCALC_CONFIG_PATH, almana
     lsf_comp = sky_model["lam"].value / pars_out["wres"].value
     sed_comp = sky_model.as_array()[:,1].T
     hdr_comp = fits.Header(pars_out)
-    hdr_comp["ASMCONF"] = (par_file, "ESO Advanced Sky Model config file")
     rss = RSS(data=sed_comp, wave=wav_comp, inst_fwhm=lsf_comp, header=hdr_comp)
     
     if parallel=='auto':
