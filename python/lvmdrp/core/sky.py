@@ -8,18 +8,21 @@
 
 
 import os
-import json, yaml
+import json
+import yaml
 from io import BytesIO
+import shutil
+import subprocess
 import numpy as np
 from astropy.io import fits
-from astropy.table import Table
+from astropy.table import Table, hstack
 from astropy import units as u
-
-from lvmdrp.core.constants import SKYCALC_CONFIG_PATH, ALMANAC_CONFIG_PATH, SKYCORR_PAR_MAP
-from lvmdrp.external.skycorr import fitstabSkyCorrWrapper, createParFile, runSkyCorr
 from skycalc_cli.skycalc import SkyModel, AlmanacQuery
 from skycalc_cli.skycalc_cli import fixObservatory
 
+from lvmdrp.core.constants import SKYMODEL_INST_PATH, SKYCORR_PAR_MAP, SKYMODEL_CONFIG_PARS
+from lvmdrp.core.constants import ALMANAC_CONFIG_PATH, SKYCALC_CONFIG_PATH, SKYMODEL_CONFIG_PATH
+from lvmdrp.external.skycorr import fitstabSkyCorrWrapper, createParFile, runSkyCorr
 
 from lvmdrp.utils.logger import get_logger
 
@@ -136,7 +139,7 @@ def get_bright_fiber_selection(rss):
     pass
 
 
-# configruation files to look into:
+# configuration files to look into:
 # - instrument instrument_etc.par file (constant, LSF kernel, wavelength sampling)
 # - sm_filenames.dat (paths to atmospheric library, names of tables containing data that depends on the observing conditions)
 # - skymodel_etc.par (observing conditions, output columns: moon, etc.)
@@ -144,8 +147,132 @@ def get_bright_fiber_selection(rss):
 # - preplinetrans (just once)
 # - calcskymodel (within drp, looking for skymodel_etc.par)
 # - outputs: radspec.fits and transspec.fits (contains same columns as skycalc)
-def run_skymodel(skycalc_config=SKYCALC_CONFIG_PATH, almanac_config=ALMANAC_CONFIG_PATH, return_pars=False, **kwargs):
+def run_skymodel(skymodel_path=SKYMODEL_INST_PATH, **kwargs):
     """run ESO sky model for observation parameters (ephemeris, atmospheric conditions, site, etc)
+    
+    Parameters
+    ----------
+    skymodel_path: string
+        path where the main ESO sky model configuration files and scripts are installed
+    **kwargs: dict_like
+        configuration parameters within instrument_etc.par and skymodel_etc.par to overwrite
+
+    Returns
+    -------
+    sky_metadata: fits.Header
+        metadata describing sky components
+    sky_components: fits.BinTableDU
+        table contaning different components of the sky
+
+    """
+    # load master configuration to get original configuration file names --------------------------
+    skymodel_config_names = list(yaml.load(SKYMODEL_CONFIG_PATH, Loader=yaml.Loader).keys())
+    instrument_par_name = skymodel_config_names[3]
+    skymodel_par_name = skymodel_config_names[4]
+
+    # load original configuration file
+    skymodel_config = {}
+    skymodel_config.update(read_skymodel_par(os.path.join("data")))
+    skymodel_config.update(read_skymodel_par(os.path.join("config", instrument_par_name)))
+    skymodel_config.update(read_skymodel_par(os.path.join("config", skymodel_par_name)))
+    alt, time, season, resol, pwv = skymodel_config["alt"], skymodel_config["time"], skymodel_config["season"], skymodel_config["resol"], skymodel_config["pwv"]
+    airmass = np.sec((90 - alt) * np.pi / 180)
+    # ---------------------------------------------------------------------------------------------
+     
+    # update original configuration settings with kwargs ------------------------------------------
+    skymodel_config.update((k, kwargs[k]) for k in skymodel_config.keys() & kwargs.keys())
+    # save configuration files with the names expected by calcskymodel
+    write_skymodel_par(par_path="./config", config_dict=skymodel_config)
+    # ---------------------------------------------------------------------------------------------
+
+    # run calcskymodel with the requested input parameters ----------------------------------------
+    os.chdir(os.path.join(skymodel_path, "sm-01_mod2"))
+    # clean output directory
+    shutil.rmtree("output")
+    
+    out = subprocess.run(f"bin/calcskymodel".split(), capture_output=True)
+    if out.returncode == 0:
+        sky_logger.info("successfully finished sky model calculation")
+    elif "File opening failed" in out.stderr.decode("utf-8"):
+        os.chdir(skymodel_path, "sm-01_mod1")
+        out = subprocess.run(f"bin/create_spec {airmass} {time} {season} . {resol} {pwv}".split(), capture_output=True)
+        if out.returncode == 0:
+            sky_logger.info("successfully finished 'create_spec'")
+        else:
+            sky_logger.error("failed while running 'create_spec'")
+            sky_logger.error(out.stderr.decode("utf-8"))
+
+        os.chdir(skymodel_path, "sm-01_mod2")
+        out = subprocess.run(f"bin/preplinetrans".split(), capture_output=True)
+        if out.returncode == 0:
+            sky_logger.info("successfully finished 'preplinetrans'")
+        else:
+            sky_logger.error("failed while running 'preplinetrans'")
+            sky_logger.error(out.stderr.decode("utf-8"))
+
+        out = subprocess.run(f"bin/calcskymodel".split(), capture_output=True)
+        if out.returncode == 0:
+            sky_logger.info("successfully finished 'calcskymodel'")
+        else:
+            sky_logger.error("failed while running 'calcskymodel'")
+            sky_logger.error(out.stderr.decode("utf-8"))
+    else:
+        sky_logger.error("failed while running 'calcskymodel'")
+        sky_logger.error(out.stderr.decode("utf-8"))
+
+        return skymodel_config, None 
+    # ---------------------------------------------------------------------------------------------
+
+    # read output files and organize in a FITS table ----------------------------------------------
+    trans_table = Table(fits.getdata(os.path.join("output/transspec.fits"), ext=1))
+    lines_table = Table(fits.getdata(os.path.join("output/radspec.fits"), ext=1))
+
+    trans_table.remove_column("lam")
+    sky_comps = hstack([lines_table, trans_table])
+    sky_comps["lam"] = sky_comps["lam"]*1e4
+
+    return skymodel_config, sky_comps
+
+
+def run_skycorr(skycorr_config_path, sci_spec, sky_spec, spec_label, specs_dir="./", out_dir="./", metadata={}):
+
+    skycorr_config_ = yaml.safe_load(open(skycorr_config_path, "r"))
+    # write each spectrum in skycorr individual format
+    # TODO: look for actual meaning of timeVal and telAltVal (see examples)
+    # TODO: deactivate the Halpha geocoronal subtraction in skycorr (is not well implemented)
+    sci_fits_file, sky_fits_file = fitstabSkyCorrWrapper(
+        wave=sci_spec._wave,
+        objflux=sci_spec._data,
+        skyflux=sky_spec._data,
+        dateVal=metadata.get("MJD"),
+        timeVal=metadata.get("TIME"),
+        telAltVal=metadata.get("TELALT"),
+        label=spec_label,
+        specs_dir=specs_dir
+    )
+    
+    # convert from yaml to skycorr keys
+    skycorr_config = {val: skycorr_config_[key] for key, val in SKYCORR_PAR_MAP.items()}
+    skycorr_config["objfile"] = sci_fits_file
+    skycorr_config["skyfile"] = sky_fits_file
+
+    out_file = os.path.basename(sci_fits_file.replace(".fits", f"_out"))
+    skycorr_config["outfile"] = out_file
+    skycorr_config["outdir"] = out_dir
+
+    # OPTIONAL CHANGE OF THESE PARS: parfile = None, timeVal = None, dateVal = None, telAltVal = None
+    par_file = createParFile(**skycorr_config)
+    runSkyCorr(parfile=par_file)
+
+    # read outputs
+    skycorr_fit = Table(fits.getdata(os.path.join(out_dir, f"{out_file}_fit.fits"), ext=1))
+    skycorr_fit["lambda"] = skycorr_fit["lambda"] * 1e4
+    
+    return skycorr_config, skycorr_fit
+
+
+def run_skycalc(skycalc_config=SKYCALC_CONFIG_PATH, almanac_config=ALMANAC_CONFIG_PATH, **kwargs):
+    """run web version of the ESO sky model for observation parameters (ephemeris, atmospheric conditions, site, etc)
     
     Parameters
     ----------
@@ -155,14 +282,12 @@ def run_skymodel(skycalc_config=SKYCALC_CONFIG_PATH, almanac_config=ALMANAC_CONF
         path to ESO almanac configuration file
     **kwargs: dict_like
         configuration parameters to overwrite
-
     Returns
     -------
     sky_metadata: fits.Header
         metadata describing sky components
     sky_components: fits.BinTableDU
         table contaning different components of the sky
-
     """
     with open(skycalc_config, 'r') as f:
         inputdic = json.load(f)
@@ -199,46 +324,7 @@ def run_skymodel(skycalc_config=SKYCALC_CONFIG_PATH, almanac_config=ALMANAC_CONF
     sky_components["lam"] = sky_components["lam"]*10*u.AA
     sky_components["flux"] = sky_components["flux"] * (1/u.s/u.m**2*u.arcsec**2) #photons/s/m2/μm/arcsec2
 
-    if return_pars:
-        return sky_metadata, skycalc_config, sky_components, dic
-    return sky_metadata, skycalc_config, sky_components
-
-
-def run_skycorr(skycorr_config, sci_spec, sky_spec, spec_label, specs_dir="./", out_dir="./", metadata={}):
-
-    skycorr_config = yaml.safe_load(open(skycorr_config, "r"))
-    # write each spectrum in skycorr individual format
-    # TODO: look for actual meaning of timeVal and telAltVal (see examples)
-    # TODO: deactivate the Halpha geocoronal subtraction in skycorr (is not well implemented)
-    sci_fits_file, sky_fits_file = fitstabSkyCorrWrapper(
-        wave=sci_spec._wave,
-        objflux=sci_spec._data,
-        skyflux=sky_spec._data,
-        dateVal=metadata.get("MJD"),
-        timeVal=metadata.get("TIME"),
-        telAltVal=metadata.get("TELALT"),
-        label=spec_label,
-        specs_dir=specs_dir
-    )
-    
-    # convert from yaml to skycorr keys
-    skycorr_config_ = {val: skycorr_config[key] for key, val in SKYCORR_PAR_MAP.items()}
-    skycorr_config_["objfile"] = sci_fits_file
-    skycorr_config_["skyfile"] = sky_fits_file
-
-    out_file = os.path.basename(sci_fits_file.replace(".fits", f"_out"))
-    skycorr_config_["outfile"] = out_file
-    skycorr_config_["outdir"] = out_dir
-
-    # OPTIONAL CHANGE OF THESE PARS: parfile = None, timeVal = None, dateVal = None, telAltVal = None
-    par_file = createParFile(**skycorr_config_)
-    runSkyCorr(parfile=par_file)
-
-    # read outputs
-    skycorr_fit = Table(fits.getdata(os.path.join(out_dir, f"{out_file}_fit.fits"), ext=1))
-    skycorr_fit["lambda"] = skycorr_fit["lambda"] * 10000
-    
-    return skycorr_config_, par_file, skycorr_fit
+    return sky_metadata, dic, sky_components
 
 
 def optimize_sky(factor, test_spec, sky_spec, start_wave, end_wave):

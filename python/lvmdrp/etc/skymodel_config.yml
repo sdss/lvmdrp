@@ -1,0 +1,309 @@
+---
+# This is the master configuration file for the sky module.
+# This file will be read only once when running the configuration script (configureSkyModule)
+
+# each of the following sections corresponds to the relevant configuration file
+
+# NOTE: please do not change the order of the items in this file, the code relies on it
+
+lblrtm_setup:
+  # File name of the line database to be used with LNFL/LBLRTM
+  # NOTE: Also specify the format of the line database (parameter 'hitran_fmt')
+  hitran_db: "aer_v_3.2"
+  # Line format of database given in parameter 'hitran_db'
+  # NOTE: LBLRTM is delivered with a specific line database (aer_v_<x>.<x>).
+  #       Although this database is based on HITRAN, it is in a different format
+  #       (100 character line) than the original one (160 character).
+  hitran_fmt: 100
+  #: 100   100 characters per line (old HITRAN format, format of aer database)
+  #: 160   160 characters per line (new HITRAN format,>= HITRAN 2004)
+  # filename of ATM standard profile (must be located in data/ directory)
+  atm: "equ.atm"
+  # continua and raleigh extinction
+  ICNTNM: 5
+  # : 0  no continuum calculated
+  # : 1  all continua calculated, including Rayleigh extinction where applicable
+  # : 2  H2O self not calculated, all other continua/Rayleigh extinction calculated
+  # : 3  H2O foreign not calculated, all other continua/Rayleigh extinction calculated
+  # : 4  H2O self and foreign not calculated, all other continua/Rayleigh extinction calculated
+  # : 5  Rayleigh extinction not calculated, all other continua calculated
+  # aerosols
+  IAERSL: 0
+  # : 0  no aerosols used
+  # : 1  internal LOWTRAN aerosol models
+  # optical depth values
+  MPTS: 5
+  #  number of optical depth values printed for the beginning and
+  #  ending of each panel as a result of convolution for current layer
+  #  (for MPTS < O, output printing is suppressed)
+  # number of values for each panel
+  NPTS: 5
+  #  number of values printed for the beginning and ending of each panel
+  #  as result of merge of current layer with previous layers
+  #  (optical depth for IEMIT=0 radiance and transmission for IEMIT=1)
+  # beginning wavelength for the calculation [µm]
+  V1: 1.9
+  # ending wavelength for the calculation [µm]
+  # (V2-V1 must be less than 2020 cm-1)
+  V2: 2.4
+  # number of sample points per mean halfwidth (between 1 and 4)
+  # (default: 4)
+  SAMPLE: 4
+  # average collision broadened halfwidth (cm - 1/atm)
+  # (default: 0.04)
+  ALFAL0: 0
+  # average molecular mass (amu) for Doppler halfwidth
+  # (default: 36)
+  AVMASS: 0
+  # minimum molecular optical depth below which lines will be rejected
+  # (negative value defaults to DPTMIN: 0.0002)
+  DPTMIN: 0.0002
+  # factor multiplying molecular continuum optical depth to
+  # determine optical depth below which lines will be rejected
+  # (negative value defaults to DPTFAC: 0.001)
+  DPTFAC: 0.001
+  # temperature of boundary [K]
+  TBOUND: 0
+  # frequency dependent boundary emissivity coefficients
+  # EMISSIVITY  : SREMIS1 + SREMIS2*V + SREMIS3*(V**2)
+  SREMIS1: 0
+  SREMIS2: 0
+  SREMIS3: 0
+  # frequency dependent boundary reflectivity coefficients
+  # REFLECTIVITY: SRREFL1 + SRREFL2*V + SRREFL3*(V**2)
+  SRREFL1: 0
+  SRREFL2: 0
+  SRREFL3: 0
+  # selects atmospheric profile
+  MODEL: 0
+  # : 0  user supplied atmospheric profile
+  # : 1  tropical model
+  # : 2  midlatitude summer model
+  # : 3  midlatitude winter model
+  # : 4  subarctic summer model
+  # : 5  subarctic winter model
+  # : 6  U.S. standard 1976
+  # selects type of path
+  ITYPE: 3
+  # : 1  horizontal path (constant pressure, temperature), use RECORD 3.2H
+  # : 2  slant path from H1 to H2, use RECORD 3.2
+  # : 3  slant path from H1 to space (see HSPACE), use RECORD 3.2
+  # zeroing of small amounts of absorbers
+  NOZERO: 0
+  # : 0  zeroes absorber amounts which are less than 0.1 percent of total (default)
+  # : 1  suppresses zeroing of small amounts
+  # output
+  NOPRNT: 0
+  # : 0  full printout
+  # : 1  selects short printout
+  # write out layer data
+  IPUNCH: 0
+  # : 0  layer data not written (default)
+  # : 1  layer data written to unit ITAPE7)PU (TAPE7)
+  # radius of earth [km]
+  RE: 0
+  #  defaults for RE=0:
+  #  a)  MODEL 0,2,3,6    RE: 6371.23 km
+  #  b)        1          RE: 6378.39 km
+  #  c)        4,5        RE: 6356.91 km
+  # altitude definition for space (default: 100 km)
+  HSPACE: 120
+  #  internal models defined to 120 km
+  # frequency for refractive geometry calculation
+  #VBAR: 0
+  #  (default:  VBAR: (V1+V2) / 2 )     (V1,V2 from Record 1.3)
+  # latitude of location of calculation [degrees]
+  REF_LAT: -24.63
+  #  defaults for REF_LAT: 0:
+  #  a) MODEL 0,2,3,6    REF_LAT: 45.0 degrees
+  #  b) MODEL 1          REF_LAT: 15.0
+  #  c) MODEL 4,5        REF_LAT: 60.0
+  # observer altitude [km]
+  H1: 2.64
+  # upper height limit
+  H2: 0
+  #  for ITYPE: 2, H2 is the end point altitude [km]
+  #      ITYPE: 3, H2 is the tangent height [km] for H2 .GT. 0.
+  #                 if H2: 0. ANGLE determines tangent height
+  # zenith angle at H1 [degrees]
+  ANGLE: 0
+  # length of a straight path from H1 to H2 [km]
+  RANGE: 0
+  # earth centered angle from H1 to H2 [degrees]
+  BETA: 0
+  # path length
+  LEN: 0
+  # : 0  short path (default)
+  # : 1  long path through a tangent height
+  #
+  #  LEN is only used for H1 > H2 (ANGLE > 90`)
+  #
+  #  for ITYPE: 2, only 3 of the first 5 parameters are required to
+  #                 specify the path, e.g., H1, H2, ANGLE or H1, H2 and
+  #                 RANGE
+  #
+  #  for ITYPE: 3, H1: observer altitude must be specified. Either
+  #                 H2: tangent height or ANGLE must be specified.
+  #                 Other parameters are ignored.
+  # Height of observer
+  HOBS: 0
+  #  Height of observer, used only for informational purposes in
+  #  satellite-type simulations when computing output geometry
+  #  above 120 km.
+  # maximum Voigt width ratio across a layer (if zero, default=1.5)
+  AVTRAT: 2
+  # maximum layer temperature difference at ALTD1 (if zero, default=5 K)
+  TDIFF1: 5
+  # maximum layer temperature difference at ALTD2 (if zero, default=8 K)
+  TDIFF2: 8
+  # altitude of TDIFF1 (if zero, default: 0 Km)
+  ALTD1: 0
+  # altitude of TDIFF2 (if zero, default: 100 Km)
+  ALTD2: 0
+  # number of wavenumbers [cm-1] per major division
+  DELV: 1
+
+libstruct.dat:
+  # Structure of LBLRTM/RFM library of atmospheric molecular spectra
+  # File name structure (increasing field numbers [1-7] from left to right):
+  - "lib/111_A22_t3_s4_R5555555_6.fits"
+  # Meaning of data fields:
+  # 1st line: description
+  # - ID (number in file name structure -> 1,2,3,...)
+  # - label (code-defined variable name -> list of allowed labels:
+  #          rtcode, season, time, alt, airmass, pwv, resol, spectype)
+  # - factor (scaling constant 10^n, strings -> n = 0)
+  # 2nd line: list of values (in ascending order and required format)
+  - "1 rtcode 0"
+  - "LBL"
+  - "2 airmass -1"
+  - "10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30"
+  - "3 time 0"
+  - "0 1 2 3 4"
+  - "4 season 0"
+  - "0 1 2 3 4 5 6"
+  - "5 resol 0"
+  - "0600000"
+  - "6 spectype 0"
+  - "R T L"
+
+sm_filenames.dat:
+  # path to library structure files
+  # (relative to folder with this file or absolute path)
+  libpath: "."
+  # names of files containing the LBLRTM/RFM library structure:
+  # 1: time-dependent library, 2: PWV-dependent library
+  # libstruct:  "libstruct.dat libstruct_pwv.dat"
+  #libstruct:  "libstruct_pwv_time.dat libstruct_pwv_time.dat"
+  libstruct:  "libstruct_time.dat libstruct_time.dat"
+  # path to input data files
+  # (relative to folder with this file or absolute path)
+  datapath:  "."
+  # solar spectrum [W m^-2 mum^-1]
+  solspecname:  "solspec_ext.dat"
+  # aerosol extinction table (optical depths; NONE:  parametrisation)
+  #mieextname:  "mie_paranal_ref.dat"
+  mieextname:  "NONE"
+  # parameters for lunar irradiance model
+  lunirrname:  "moonalbedo.dat"
+  # file for Mie scattering phase functions
+  miephasename:  "mie_m15s1.dat"
+  # file for multiple scattering correction of single scattering calculations
+  sscatcorname:  "sscatcor_m15s1.dat"
+  #sscatcorname:  "multiscat_m15s1.dat"
+  # file for multiple scattering correction of double scattering calculations
+  dscatcorname:  "dscatcor_m15s1.dat"
+  # file for UV/optical ozone transmission
+  o3transname:  "o3trans.dat"
+  # mean spectrum of scattered starlight
+  starspecname:  "scatstarlight.dat"
+  # V-brightness of zodiacal light [10^-8 W m^-2 sr^-1 mum^-1]
+  zodtabname:  "zodiacallight.dat"
+  # airglow line table (vacuum wavelengths)
+  linetabname:  "airglow_lines.dat"
+  # file for airglow lines scaling parameters
+  vardatname:  "airglow_var.dat"
+  # file for airglow continuum (scaling parameters included)
+  acontname: " airglow_cont.dat"
+
+instrument_etc_ref.par:
+  # minimum and maximum wavelength [mum]
+  limlam: "0.36 0.98"
+  # step size [mum]
+  dlam: 0.0002
+  # radius of convolution kernel [pixels] (N_pixel: 2 x kernrad + 1)
+  kernrad: 0
+  # FWHM of boxcar kernel [pixels]
+  wbox: 0.
+  # FWHM of Gaussian kernel [pixels]
+  wgauss: 0.
+  # FWHM of Lorentzian kernel [pixels]
+  wlorentz: 0.
+  # variable kernel (width proportional to wavelength)? -> 1: yes; 0: no
+  # if varkern: 1: kernel radius and FWHM for central wavelength
+  varkern: 0
+  # output file for kernel ("stdout": screen; "null": no output)
+  kernelfile: "null"
+
+skymodel_etc_ref.par:
+  # observatory height in km [2.4, 3.06] (default: 2.64)
+  sm_h: 2.64
+  # lower height limit in km (default: 2.0)
+  sm_hmin: 2.0
+  # altitude of object above horizon [0,90]
+  alt: 90.0
+  # separation of Sun and Moon as seen from Earth [0,360]
+  # (> 180 for waning Moon)
+  alpha: 90.0
+  # separation of Moon and object [0,180]
+  rho: 70.0
+  # altitude of Moon above horizon [-90,90]
+  altmoon: 20.0
+  # distance to Moon (mean distance: 1; [0.91,1.08])
+  moondist: 1.0
+  # pressure at observer altitude in hPa (default: 744)
+  pres: 744.
+  # single scattering albedo for aerosols [0,1] (default: 0.97)
+  ssa: 0.97
+  # calculation of double scattering of moonlight ('Y' or 'N')
+  calcds: N
+  # relative UV/optical ozone column density (1 -> 258 DU)
+  o3column: 1.
+  # scaling factor for scattered moonlight (default: 1.0)
+  moonscal: 1.0
+  ## heliocentric ecliptic longitude of object [-180,180]
+  lon_ecl: 135.0
+  # ecliptic latitude of object [-90,90]
+  lat_ecl: 90.0
+  # grey-body emissivity (comma-separated list)
+  emis_str: 0.1
+  # grey-body temperature in K (comma-separated list)
+  temp_str: 290
+  # monthly-averaged solar radio flux [sfu]
+  msolflux: 200.0
+  # bimonthly period (1: Dec/Jan, ..., 6: Oct/Nov; 0: entire year)
+  season: 4
+  # period of the night (x/3 of night, x: 1,2,3; 0: entire night)
+  time: 0
+  # vac[uum] or air wavelengths
+  vac_air: "air"
+  # precipitable water vapour in mm (-1: bimonthly mean)
+  pwv: -1
+  # radiative transfer code L(BLRTM) or R(FM) for molecular spectra
+  rtcode: "L"
+  # resolution of molecular spectra in library (crucial for run time)
+  resol: 6e4
+  # path to file sm_filenames.dat for data paths and file names
+  filepath: "data"
+  # inclusion of sky model components
+  # format: "xxxxxxx" where x: "Y" (yes) or x: "N" (no)
+  # pos. 1: scattered moonlight
+  #      2: scattered starlight
+  #      3: zodiacal light
+  #      4: thermal emission by telescope/instrument
+  #      5: molecular emission of lower atmosphere
+  #      6: sky emission lines of upper atmosphere
+  #      7: airglow continuum (residual continuum)
+  incl: "YYYYYYY"
+
+...

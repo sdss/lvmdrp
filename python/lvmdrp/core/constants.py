@@ -7,14 +7,23 @@
 # @Copyright: SDSS-V LVM
 
 import os
+import sys
 
 
 ROOT_PATH = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+PYTHON_PATH = os.path.dirname(sys.path[0])
 CONFIG_PATH = os.path.join(ROOT_PATH, "python", "lvmdrp", "etc")
 MASTER_CONFIG_PATH = os.path.join(CONFIG_PATH, "drp.yml")
+SKYMODEL_CONFIG_PATH = os.path.join(CONFIG_PATH, "skymodel_config.yml")
 SKYCALC_CONFIG_PATH = os.path.join(CONFIG_PATH, "skycalc.json")
 ALMANAC_CONFIG_PATH = os.path.join(CONFIG_PATH, "almanac.json")
 SKYCORR_CONFIG_PATH = os.path.join(CONFIG_PATH, "skycorr_config.yml")
+
+SKYMODEL_INST_PATH = os.path.join(PYTHON_PATH, "lib", "skymodel")
+SKYCORR_INST_PATH = os.path.join(PYTHON_PATH, "lib", "skycorr")
+
+# dict of dicts containing parameter names for each .par file used in ESO sky model 
+SKYMODEL_CONFIG_PARS = {}
 
 SKYCORR_PAR_MAP = {'INPUT_OBJECT_SPECTRUM': 'objfile',
              'INPUT_SKY_SPECTRUM': 'skyfile',
