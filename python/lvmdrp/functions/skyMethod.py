@@ -6,23 +6,131 @@
 # @License: BSD 3-Clause
 # @Copyright: SDSS-V LVM
 
+import os
+import yaml
+import subprocess
+import itertools as it
+import shutil
 import numpy as np
 import matplotlib.pyplot as plt
 from multiprocessing import cpu_count
 from multiprocessing import Pool
 from scipy import optimize
 from astropy.io import fits
+from tqdm import tqdm
 
 from lvmdrp.core.constants import SKYCORR_CONFIG_PATH, SKYMODEL_CONFIG_PATH, SKYMODEL_INST_PATH
+from lvmdrp.utils.logger import get_logger
 from lvmdrp.core.sky import run_skycorr, run_skymodel, optimize_sky, ang_distance
 from lvmdrp.core.passband import PassBand
 from lvmdrp.core.spectrum1d import Spectrum1D
 from lvmdrp.core.header import Header
 from lvmdrp.core.rss import RSS
 
+sky_logger = get_logger(name="sky module")
+
 
 description = "Provides methods for sky subtraction"
 
+
+def configureSkyModule_drp(skymodule_config_path=SKYMODEL_CONFIG_PATH, skymodel_path=SKYMODEL_INST_PATH, method="run", source="", run_multiscat=False, pwvs="-1"):
+    """Runs/downloads the configuration files of the sky module
+    
+    If method='run' mode, the following ESO configuration files will be written:
+        - lblrtm_setup
+        - libstruct.dat
+        - sm_filenames.dat
+        - instrument_etc.par
+        - skymodel_etc.par
+
+    Then this function will execute the following ESO routines:
+    create_spec <airmass> <time> <seasson> <output_path> <spectra_resolution> <pwv>
+    preplinetrans
+    estmultiscat (optional)
+
+    If method='download', this function will download the neccessary files to run the
+    ESO sky models. Additionally you can specify the source from which these files should
+    be downloaded.
+    """
+
+    if method == "run":
+        # read master configuration file
+        skymodel_master_config = yaml.load(skymodule_config_path, Loader=yaml.Loader)
+
+        # write default parameters for the ESO skymodel
+        config_names = list(skymodel_master_config.keys())
+        with open(os.path.join(skymodule_config_path, "sm-01_mod1", "config", config_names[0])) as cf:
+            for key, val in skymodel_master_config[config_names[0]].items():
+                cf.write(f"{key} = {val}\n")
+        with open(os.path.join(skymodule_config_path, "sm-01_mod2", "data", config_names[1])) as cf:
+            for par in skymodel_master_config[config_names[1]]:
+                cf.write(f"{par}\n")
+        with open(os.path.join(skymodule_config_path, "sm-01_mod2", "data", config_names[2])) as cf:
+            for key, val in skymodel_master_config[config_names[2]].items():
+                cf.write(f"{key} = {val}\n")
+        with open(os.path.join(skymodule_config_path, "sm-01_mod2", "config", config_names[3])) as cf:
+            for key, val in skymodel_master_config[config_names[3]].items():
+                cf.write(f"{key} = {val}\n")
+        with open(os.path.join(skymodule_config_path, "sm-01_mod2", "config", config_names[4])) as cf:
+            for key, val in skymodel_master_config[config_names[4]].items():
+                cf.write(f"{key} = {val}\n")
+
+        # create sky library
+        # TODO: parse create_spec parameters
+        os.chdir(os.path.join(skymodule_config_path, "sm-01_mod1"))
+        lib_path = os.path.abspath(skymodel_master_config["sm_filenames.dat"]["libpath"])
+        fact = dict(map(lambda s: s.split()[1:], skymodel_master_config["libstruct.dat"][::1]))
+        fact = {k: 10**eval(v) for k, v in fact.items()}
+        pars = dict(zip(fact.keys(), skymodel_master_config["libstruct.dat"][1::1].split()))
+        
+        airmasses = map(lambda f, p: f*eval(p), fact["airmass"], pars["airmass"])
+        times = map(lambda f, p: f * eval(p), fact["time"], pars["time"])
+        seasons = map(lambda f, p: f * eval(p), fact["season"], pars["season"])
+        resols = map(lambda f, p: f * eval(p), fact["resol"], pars["resol"])
+        pwvs = pwvs.split()
+        create_spec_pars = it.product(airmasses, times, seasons, resols, pwvs)
+
+        # TODO: run create_spec across all parameter grid
+        for airmass, time, season, res, pwv in tqdm(create_spec_pars, desc="creating sky library", unit="grid step", ascii=True):
+            out = subprocess.run(f"{os.path.join('bin', 'create_spec')} {airmass} {time} {season} {lib_path} {res} {pwv}".split(), capture_output=True)
+            if out.returncode == 0:
+                sky_logger.info("successfully finished create_spec")
+            else:
+                sky_logger.error("failed while running create_spec")
+                sky_logger.error(f"with parameters: {airmass, time, season, res, pwv, lib_path}")
+                sky_logger.error(out.stderr.decode("utf-8"))
+
+        # create library destination path
+        os.makedirs(os.path.join(skymodel_path, "sm-01_mod2", "data", "lib"), exist_ok=True)
+        # copy library to destination path as specified in sm_filenames.dat
+        shutil.copytree(os.path.join(skymodel_path, "sm-01_mod1", "data"), os.path.join(skymodel_path, "sm-01_mod2", "data", "lib"), dirs_exist_ok=True)
+
+        # run prelinetrans
+        os.chdir(os.path.join(skymodel_path, "sm-01_mod2"))
+        out = subprocess.run(os.path.join("bin", "preplinetrans").split(), capture_output=True)
+        if out.returncode == 0:
+            sky_logger.info("sucessfully finished preplinetrans")
+        else:
+            sky_logger.error("failed while running preplinetrans")
+            sky_logger.error(out.stderr.decode("utf-8"))
+        
+        if run_multiscat:
+            out = subprocess.run(os.path.join("bin", "estmultiscat").split(), capture_output=True)
+            if out.returncode == 0:
+                sky_logger.info("successfully finished estmultiscat")
+            else:
+                sky_logger.error("failed while running estmultiscat")
+                sky_logger.error(out.stderr.decode("utf-8"))
+    elif method == "download":
+        # TODO: download master configuration file and overwrite current one
+        # TODO: write individual configuration files (as above)
+        # TODO: download create_spec outputs and overwrite current ones
+        # TODO: download preplinetrans outputs and overwrite current ones
+        # TODO: download multiscat outputs and overwrite current ones
+        pass
+    else:
+        raise ValueError(f"unknown method '{method}'. Valid values are: 'run' and 'download'")
+        
 
 def createMasterSky_drp(rss_in, sky_out, clip_sigma='3.0', nsky='0', filter='', non_neg='1', plot='0'):
 	"""
