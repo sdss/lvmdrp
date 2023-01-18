@@ -261,7 +261,7 @@ def createMasterSky_drp(rss_in, sky_out, clip_sigma='3.0', nsky='0', filter='', 
 		skySpec.writeTxtData(sky_out)
 
 
-def sepContinuumLine_drp(sky_ref, cont_out, line_out, method="skycorr", sky_sci="", skycorr_config=SKYCORR_CONFIG_PATH):
+def sepContinuumLine_drp(sky_ref, cont_line_out, method="skycorr", sky_sci="", skycorr_config=SKYCORR_CONFIG_PATH):
     """
         Separates the continuum from the sky line contribution using the specified method
     
@@ -280,29 +280,59 @@ def sepContinuumLine_drp(sky_ref, cont_out, line_out, method="skycorr", sky_sci=
             sci_spec.loadFitsData(sky_sci)
         else:
             raise ValueError(f"You need to provide a science spectrum to perform the continuum/line separation using skycorr.")
-        # TODO: match wavelength sampling and resolution if needed
         if np.any(sky_spec._wave != sci_spec._wave):
-            sky_spec = sky_spec.binSpec(new_wave=sci_spec._wave)
+            sky_spec = sky_spec.resampleSpec(ref_wave=sci_spec._wave, method="linear")
+        if np.any(sky_spec._inst_fwhm != sci_spec._inst_fwhm):
+            sky_spec = sky_spec.matchFWHM(target_FWHM=sci_spec._inst_fwhm)
         pars_out, skycorr_fit = run_skycorr(skycorr_config=skycorr_config, sci_spec=sci_spec, sky_spec=sky_spec)
 
         wavelength = skycorr_fit["lambda"]
-        # TODO: include propagated errors from the continuum fitting
-        # TODO: include propagated pixel masks
-        # TODO: include LSF
-        sky_cont = Spectrum1D(wave=wavelength, data=skycorr_fit["mcflux"])
-        sky_line = Spectrum1D(wave=wavelength, data=skycorr_fit["mlflux"])
-    # run physical
-    elif method == "physical":
-        # NOTE: build a sky model library with continuum and line separated (ESO skycalc)
-        # NOTE: use this library as templates to fit master skies
-        # NOTE: check if we can recover observing condition parameters from this fit
+        sky_cont = Spectrum1D(wave=wavelength, data=skycorr_fit["mcflux"], error=skycorr_fit["mdflux"], mask=skycorr_fit["mmask"], inst_fwhm=sky_spec._inst_fwhm)
+        sky_line = Spectrum1D(wave=wavelength, data=skycorr_fit["mlflux"], error=skycorr_fit["mdflux"], mask=skycorr_fit["mmask"], inst_fwhm=sky_spec._inst_fwhm)
+        # TODO: implement skycorr method output
+
+    # run modeling
+    elif method == "modeling":
+        # TODO: use the master sky parameters (datetime, observing conditions: lunation, moon distance, etc.) evaluate a sky model
+        # TODO: use the resulting model continuum as physical representation of the target sky continuum
+        # TODO: remove continuum contribution from original sky spectrum
+        resample_step, resolving_power = np.diff(sky_spec._wave).min(), np.int(np.ceil((sky_spec._wave/np.diff(sky_spec._wave).min()).max()))
+        pars_out, sky_model = run_skymodel(
+            limlam=[sky_spec._wave.min()/1e4, sky_spec._wave.max()/1e4],
+            dlam=resample_step/1e4,
+            resol=resolving_power
+        )
+        # TODO: use only Mie and Rayleigh scattering components of the transmission sky spectrum
+        sky_cont = Spectrum1D(
+            wave=sky_model["lam"].value,
+            data=sky_model["trans"].value,
+            error=(sky_model["dtrans2"] - sky_model["dtrans1"]).value/2,
+            mask=np.zeros_like(sky_model["lam"].value, dtype=bool),
+            inst_fwhm=sky_model["lam"].value / resolving_power
+        )
+        # resample and match in spectral resolution sky model as needed
+        if np.any(sky_model._wave != sky_spec._wave):
+            sky_model = sky_model.resampleSpec(ref_wave=sky_spec._wave, method="linear")
+        if np.any(sky_model._inst_fwhm != sky_spec._inst_fwhm):
+            sky_model = sky_model.matchFWHM(target_FWHM=sky_spec._inst_fwhm)
+
+        # TODO: verify that the transmission spectrum is in the form of a factor
+        sky_line = sky_spec / sky_cont
+    # run fitting
+    elif method == "fitting":
+        # TODO: build a sky model library with continuum and line separated (ESO skycalc)
+        # TODO: use this library as templates to fit master skies
+        # TODO: check if we can recover observing condition parameters from this fit
         raise NotImplementedError("This method of continuum/line separation is not implemented yet.")
     else:
-        raise ValueError(f"Unknown method '{method}'. Valid mehods are: skycorr (default) and physical.")
+        raise ValueError(f"Unknown method '{method}'. Valid mehods are: 'skycorr' (default), 'modeling' and 'fitting'.")
     
     # pack outputs in FITS file
-    sky_cont.writeFitsData(cont_out)
-    sky_line.writeFitsData(line_out)
+    rss_cont_line = RSS.from_spectra1d((sky_cont, sky_line))
+    rss_cont_line.appendHeader(pars_out)
+    for key in pars_out:
+        rss_cont_line.extendHierarch(keyword=key, add_prefix="SKYCORR", verbose=False)
+    rss_cont_line.writeFitsData(cont_line_out)
 
 
 def evalESOSky_drp(sky_ref, rss_out, resample_step="optimal", resample_method="linear", err_sim='500', replace_error='1e10', parallel="auto"):
@@ -343,7 +373,7 @@ def evalESOSky_drp(sky_ref, rss_out, resample_step="optimal", resample_method="l
     
     # create RSS
     wav_comp = sky_model["lam"].value
-    lsf_comp = sky_model["lam"].value / pars_out["wres"].value
+    lsf_comp = sky_model["lam"].value / pars_out["resol"].value
     sed_comp = sky_model.as_array()[:,1].T
     hdr_comp = fits.Header(pars_out)
     rss = RSS(data=sed_comp, wave=wav_comp, inst_fwhm=lsf_comp, header=hdr_comp)
