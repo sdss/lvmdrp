@@ -291,8 +291,8 @@ def sepContinuumLine_drp(sky_ref, cont_line_out, method="skycorr", sky_sci="", s
         sky_line = Spectrum1D(wave=wavelength, data=skycorr_fit["mlflux"], error=skycorr_fit["mdflux"], mask=skycorr_fit["mmask"], inst_fwhm=sky_spec._inst_fwhm)
         # TODO: implement skycorr method output
 
-    # run modeling
-    elif method == "modeling":
+    # run model
+    elif method == "model":
         # TODO: use the master sky parameters (datetime, observing conditions: lunation, moon distance, etc.) evaluate a sky model
         # TODO: use the resulting model continuum as physical representation of the target sky continuum
         # TODO: remove continuum contribution from original sky spectrum
@@ -318,14 +318,14 @@ def sepContinuumLine_drp(sky_ref, cont_line_out, method="skycorr", sky_sci="", s
 
         # TODO: verify that the transmission spectrum is in the form of a factor
         sky_line = sky_spec / sky_cont
-    # run fitting
-    elif method == "fitting":
+    # run fit
+    elif method == "fit":
         # TODO: build a sky model library with continuum and line separated (ESO skycalc)
         # TODO: use this library as templates to fit master skies
         # TODO: check if we can recover observing condition parameters from this fit
         raise NotImplementedError("This method of continuum/line separation is not implemented yet.")
     else:
-        raise ValueError(f"Unknown method '{method}'. Valid mehods are: 'skycorr' (default), 'modeling' and 'fitting'.")
+        raise ValueError(f"Unknown method '{method}'. Valid mehods are: 'skycorr' (default), 'model' and 'fit'.")
     
     # pack outputs in FITS file
     rss_cont_line = RSS.from_spectra1d((sky_cont, sky_line))
@@ -352,6 +352,7 @@ def evalESOSky_drp(sky_ref, rss_out, resample_step="optimal", resample_method="l
         try:
             resample_step = eval(resample_step)
         except ValueError:
+            eval_failed = True
             sky_logger.error(f"resample_step should be either 'optimal' or a floating point. '{resample_step}' is none.")
             sky_logger.warning("falling back to resample_step='optimal'")
     if eval_failed or resample_step == "optimal":
@@ -438,7 +439,7 @@ def subtractGeocoronal_drp():
     pass
 
 
-def corrSkyLine_drp(sky1_line_in, sky2_line_in, sci_line_in, line_corr_out, skycorr_config=SKYCORR_CONFIG_PATH):
+def corrSkyLine_drp(sky1_line_in, sky2_line_in, sci_line_in, line_corr_out, method="distance", sky_models_in="", sci_model_in="", skycorr_config=SKYCORR_CONFIG_PATH):
     """
     
     average sky1_line and sky2_line into 'sky_line', and run skycorr on 'sky_line' and 'sci_line' to produce 'sky_line_corr'
@@ -462,17 +463,47 @@ def corrSkyLine_drp(sky1_line_in, sky2_line_in, sci_line_in, line_corr_out, skyc
     sci_head.loadFitsHeader(sci_line_in)
 
     # sky1 position
-    ra_1, dec_1 = sky1_head["RA"], sky1_head["DEC"]
-    # sky2 position
-    ra_2, dec_2 = sky2_head["RA"], sky2_head["DEC"]
-    # sci position
-    ra_s, dec_s = sci_head["RA"], sci_head["DEC"]
+    if method == "distance":
+        ra_1, dec_1 = sky1_head["RA"], sky1_head["DEC"]
+        # sky2 position
+        ra_2, dec_2 = sky2_head["RA"], sky2_head["DEC"]
+        # sci position
+        ra_s, dec_s = sci_head["RA"], sci_head["DEC"]
 
-    w_1 = ang_distance(ra_1, dec_1, ra_s, dec_s)
-    w_2 = ang_distance(ra_2, dec_2, ra_s, dec_s)
-    w_norm = w_1 + w_2
-    w_1, w_2 = w_1 / w_norm, w_2 / w_norm
+        w_1 = ang_distance(ra_1, dec_1, ra_s, dec_s)
+        w_2 = ang_distance(ra_2, dec_2, ra_s, dec_s)
+        w_norm = w_1 + w_2
+        w_1, w_2 = w_1 / w_norm, w_2 / w_norm
+    elif method == "model":
+        if sky_models_in != "":
+            sky_models_in = sky_models_in.split(",")
+            if len(sky_models_in) == 1:
+                sky_models_in = 2 * sky_models_in
+
+            sky1_model = RSS()
+            sky1_model.loadFitsData(sky_models_in[0])[1]
+            sky2_model = RSS()
+            sky2_model.loadFitsData(sky_models_in[1])[1]
+        else:
+            # TODO: fall back to closest sky model if not given filenames
+            pass
     
+        if sci_model_in != "":
+            sci_model = RSS()
+            sci_model.loadFitsData(sci_model_in)[1]
+        else:
+            # TODO: fall back to closest sky model to science target
+            pass
+
+        w_1 = sci_model / sky1_model
+        w_2 = sci_model / sky2_model
+
+    elif method == "interpolate":
+        # TODO: interpolate in parameter space and evaluate corresponding sky model
+        pass
+    else:
+        raise ValueError(f"Unknown method '{method}'. Valid mehods are: 'distance' (default), 'model' and 'interpolate'.")
+
     # TODO: make sure all these spectra are in the same wavelength sampling
     wl_master_sky = sci_line._wave
 
@@ -493,7 +524,7 @@ def corrSkyLine_drp(sky1_line_in, sky2_line_in, sci_line_in, line_corr_out, skyc
     rss.writeFitsData(filename=line_corr_out)
 
 
-def corrSkyContinuum_drp(sky1_cont_in, sky2_cont_in, sky1_model_in, sky2_model_in, sci_model_in, cont_corr_out, model_fiber=2):
+def corrSkyContinuum_drp(sky1_cont_in, sky2_cont_in, sky1_model_in, sky2_model_in, sci_model_in, cont_corr_out, model_fiber=1):
     """
     
     correct and combine continuum only spectra by doing:   sky_cont_corr=0.5*( sky1_cont*(model_skysci/model_sky1) + sky2_cont*(model_skysci/model_sky2))
