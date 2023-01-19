@@ -137,7 +137,7 @@ class Header(object):
     def extendHierarch(self, keyword, add_prefix, verbose=1):
         if self._header is not None:
             try:
-                self._header.rename_keyword(keyword, 'hierarch '+add_prefix+' '+keyword)
+                self._header.rename_keyword(keyword, 'HIERARCH '+add_prefix+' '+keyword)
             except ValueError:
                 if verbose==1:
                     print("The keyword %s does already exists!"%(add_prefix.upper()+' '+keyword.upper()))

@@ -30,7 +30,6 @@ from lvmdrp.utils.logger import get_logger
 sky_logger = get_logger("sky module")
 
 
-
 def ang_distance(r1, d1, r2, d2):
     '''
     distance(r1,d1,r2,d2)
@@ -172,7 +171,6 @@ def run_skymodel(skymodel_path=SKYMODEL_INST_PATH, **kwargs):
 
     # load original configuration file
     skymodel_config = {}
-    skymodel_config.update(read_skymodel_par(os.path.join("data")))
     skymodel_config.update(read_skymodel_par(os.path.join("config", instrument_par_name)))
     skymodel_config.update(read_skymodel_par(os.path.join("config", skymodel_par_name)))
     alt, time, season, resol, pwv = skymodel_config["alt"], skymodel_config["time"], skymodel_config["season"], skymodel_config["resol"], skymodel_config["pwv"]
@@ -201,6 +199,9 @@ def run_skymodel(skymodel_path=SKYMODEL_INST_PATH, **kwargs):
         else:
             sky_logger.error("failed while running 'create_spec'")
             sky_logger.error(out.stderr.decode("utf-8"))
+
+        # copy library files to corresponding path according to libpath
+        shutil.copytree(os.path.join(skymodel_path, "sm-01_mod1", "output"), os.path.join(skymodel_path, "sm-01_mod2", "data", "lib"))
 
         os.chdir(skymodel_path, "sm-01_mod2")
         out = subprocess.run(f"bin/preplinetrans".split(), capture_output=True)
@@ -234,7 +235,7 @@ def run_skymodel(skymodel_path=SKYMODEL_INST_PATH, **kwargs):
     return skymodel_config, sky_comps
 
 
-def run_skycorr(skycorr_config_path, sci_spec, sky_spec, spec_label, specs_dir="./", out_dir="./", metadata={}):
+def run_skycorr(skycorr_config_path, sci_spec, sky_spec, spec_label, specs_dir="./", out_dir="./", **kwargs):
 
     skycorr_config_ = yaml.safe_load(open(skycorr_config_path, "r"))
     # write each spectrum in skycorr individual format
@@ -244,9 +245,9 @@ def run_skycorr(skycorr_config_path, sci_spec, sky_spec, spec_label, specs_dir="
         wave=sci_spec._wave,
         objflux=sci_spec._data,
         skyflux=sky_spec._data,
-        dateVal=metadata.get("MJD"),
-        timeVal=metadata.get("TIME"),
-        telAltVal=metadata.get("TELALT"),
+        dateVal=kwargs.get("MJD"),
+        timeVal=kwargs.get("TIME"),
+        telAltVal=kwargs.get("TELALT"),
         label=spec_label,
         specs_dir=specs_dir
     )

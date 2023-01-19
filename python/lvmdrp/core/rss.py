@@ -227,7 +227,7 @@ class RSS(FiberRows):
             if len(inst_fwhm)>0:
                 self._inst_fwhm = numpy.array(inst_fwhm)
         except:
-            self._inst_fwhm = res_fwhm
+            self._inst_fwhm = inst_fwhm
 
     def maskFiber(self, fiber, replace_error=1e10):
         self._data[fiber,:]=0
