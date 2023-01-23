@@ -2,6 +2,13 @@
 # this configuration file will be written during DRP (post) installation:
 
 # CONSTANTS:
+# define observatories and their main quantities in the standard metric system
+LVM_OBSERVATORIES:
+  LCO:
+    lon: '70.6926W'
+    lat: '29.0146S'
+    hei: 2380.0 # [m]
+
 # database credentials
 LVM_DB_HOST: "localhost"
 LVM_DB_USER: "lvmdrp"
