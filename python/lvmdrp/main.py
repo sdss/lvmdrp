@@ -18,7 +18,7 @@ from lvmdrp.core.constants import MASTER_CONFIG_PATH, FRAMES_PRIORITY, CALIBRATI
 from lvmdrp.utils.database import LAMP_NAMES, get_master_metadata
 from lvmdrp.utils.decorators import validate_fibers
 from lvmdrp.utils.bitmask import ReductionStatus
-from lvmdrp.utils.namespace import Loader
+from lvmdrp.utils.namespace import NamespaceLoader, DictLoader
 from lvmdrp.functions import imageMethod, rssMethod
 
 
@@ -118,10 +118,19 @@ def define_inout_paths(params, metadata, calib_metadata, prev_step, curr_step, p
 #   - define parameters to pass on each step
 
 
-def load_master_config(master_config_path=MASTER_CONFIG_PATH):
+def load_master_config(master_config_path=MASTER_CONFIG_PATH, fmt="namespace"):
+    """Returns the master configuration object in namespace or a dictionary structure
+    
+    BUG: fmt='dict' is failing because the standard yaml loader doesn't know how to handle definitions
+    """
     # if no path is given, load from hard-coded path
     with open(master_config_path, "r") as config_file:
-        master_config = yaml.load(config_file, Loader=Loader)
+        if fmt == "namespace":
+            master_config = yaml.load(config_file, Loader=NamespaceLoader)
+        elif fmt == "dict":
+            master_config = yaml.load(config_file, Loader=DictLoader)
+        else:
+            raise ValueError(f"format '{fmt}' not implemented. Valid values are: 'namespace' (default) and 'dict'")
     return master_config
 
 def parse_arguments(config, args=None):

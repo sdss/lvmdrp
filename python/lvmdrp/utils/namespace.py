@@ -6,11 +6,18 @@ import yaml
 from types import SimpleNamespace
 
 
-class Loader(yaml.Loader):
+class DictLoader(yaml.Loader):
+    pass
+
+class DictDumper(yaml.Dumper):
     pass
 
 
-class Dumper(yaml.Dumper):
+class NamespaceLoader(yaml.Loader):
+    pass
+
+
+class NamespaceDumper(yaml.Dumper):
     pass
 
 def _join(loader, node):
@@ -33,14 +40,20 @@ def _ns_representer(dumper, data):
         yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, data.__dict__.items()
     )
 
-Dumper.add_representer(SimpleNamespace, _ns_representer)
-
-Loader.add_constructor(
-    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _construct_mapping
-)
-Loader.add_constructor(
+DictLoader.add_constructor(
     "!join", _join
 )
-Loader.add_constructor(
+DictLoader.add_constructor(
+    "!fmt", _format
+)
+
+NamespaceDumper.add_representer(SimpleNamespace, _ns_representer)
+NamespaceLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _construct_mapping
+)
+NamespaceLoader.add_constructor(
+    "!join", _join
+)
+NamespaceLoader.add_constructor(
     "!fmt", _format
 )

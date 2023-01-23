@@ -22,8 +22,6 @@ SKYCORR_CONFIG_PATH = os.path.join(CONFIG_PATH, "skycorr_config.yml")
 SKYMODEL_INST_PATH = os.path.join(PYTHON_PATH, "lib", "skymodel")
 SKYCORR_INST_PATH = os.path.join(PYTHON_PATH, "lib", "skycorr")
 
-# dict of dicts containing parameter names for each .par file used in ESO sky model 
-SKYMODEL_CONFIG_PARS = {}
 
 SKYCORR_PAR_MAP = {'INPUT_OBJECT_SPECTRUM': 'objfile',
              'INPUT_SKY_SPECTRUM': 'skyfile',
