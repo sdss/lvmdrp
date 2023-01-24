@@ -20,8 +20,9 @@ from astropy import units as u
 from skycalc_cli.skycalc import SkyModel, AlmanacQuery
 from skycalc_cli.skycalc_cli import fixObservatory
 
-from lvmdrp.core.constants import SKYMODEL_INST_PATH, SKYCORR_PAR_MAP, SKYMODEL_CONFIG_PARS
+from lvmdrp.core.constants import SKYMODEL_INST_PATH, SKYCORR_PAR_MAP
 from lvmdrp.core.constants import ALMANAC_CONFIG_PATH, SKYCALC_CONFIG_PATH, SKYMODEL_CONFIG_PATH
+from lvmdrp.core.constants import SKYMODEL_INST_CONFIG_PATH, SKYMODEL_MODEL_CONFIG_PATH
 from lvmdrp.external.skycorr import fitstabSkyCorrWrapper, createParFile, runSkyCorr
 
 from lvmdrp.utils.logger import get_logger
@@ -59,7 +60,7 @@ def ang_distance(r1, d1, r2, d2):
     return xlambda
 
 
-def read_skymodel_par(parfile, verify=True):
+def read_skymodel_par(parfile_path, verify=True):
     """Returns a dictionary with the ESO skymodel input .par file contents
     
     Parameters
@@ -69,9 +70,9 @@ def read_skymodel_par(parfile, verify=True):
     verify: boolean
         whether to verify or not the integrity of the configuration file. Defaults to True
     """
-    with open(parfile, "r") as f:
+    with open(parfile_path, "r") as f:
         line = f.realine()[:-1].strip()
-        pars = {}
+        config = {}
         while line:
             if line.startswith("#"): continue
             key, val = list(map(str.strip, line.split("=")))
@@ -89,16 +90,17 @@ def read_skymodel_par(parfile, verify=True):
                 else:
                     val_new = val
 
-            pars[key] = val_new
+            config[key] = val_new
 
             line = f.readline()[:-1].strip()
     
     # TODO: verify integrity of the configuration parameters
     if verify:
         pass
+    
+    # TODO: add units support
 
-    return pars
-
+    return config
 
 
 def write_skymodel_par(parfile_path, config, verify=True):
@@ -113,15 +115,15 @@ def write_skymodel_par(parfile_path, config, verify=True):
     verify: boolean
         whether to verify or not the integrity of the parameters dictionary. Dafaults to True.
     """
-
+    
     # TODO: add units support
 
     with open(parfile_path, "w") as f:
         for key, val in config.items():
-                    if isinstance(val, list, tuple):
-                        f.write(f"{key} = {' '.join(val)}\n")
-                    elif isinstance(val, str):
-                        f.write(f"{key} = {val}\n")
+            if isinstance(val, list, tuple):
+                f.write(f"{key} = {' '.join(val)}\n")
+            elif isinstance(val, str):
+                f.write(f"{key} = {val}\n")
 
 
 def get_bright_fiber_selection(rss):
@@ -161,23 +163,21 @@ def run_skymodel(skymodel_path=SKYMODEL_INST_PATH, **kwargs):
         table contaning different components of the sky
 
     """
-    # load master configuration to get original configuration file names --------------------------
-    skymodel_config_names = list(yaml.load(SKYMODEL_CONFIG_PATH, Loader=yaml.Loader).keys())
-    instrument_par_name = skymodel_config_names[3]
-    skymodel_par_name = skymodel_config_names[4]
-
+ 
     # load original configuration file
-    skymodel_config = {}
-    skymodel_config.update(read_skymodel_par(os.path.join("config", instrument_par_name)))
-    skymodel_config.update(read_skymodel_par(os.path.join("config", skymodel_par_name)))
-    alt, time, season, resol, pwv = skymodel_config["alt"], skymodel_config["time"], skymodel_config["season"], skymodel_config["resol"], skymodel_config["pwv"]
-    airmass = np.sec((90 - alt) * np.pi / 180)
+    skymodel_inst_par = {}
+    skymodel_model_par = {}
+    skymodel_inst_par.update(read_skymodel_par(SKYMODEL_INST_CONFIG_PATH))
+    skymodel_model_par.update(read_skymodel_par(SKYMODEL_MODEL_CONFIG_PATH))
+    configs_path = os.path.dirname(SKYMODEL_INST_CONFIG_PATH)
     # ---------------------------------------------------------------------------------------------
      
     # update original configuration settings with kwargs ------------------------------------------
-    skymodel_config.update((k, kwargs[k]) for k in skymodel_config.keys() & kwargs.keys())
+    skymodel_inst_par.update((k, kwargs[k]) for k in skymodel_inst_par.keys() & kwargs.keys())
+    skymodel_inst_par.update((k, kwargs[k]) for k in skymodel_inst_par.keys() & kwargs.keys())
     # save configuration files with the names expected by calcskymodel
-    write_skymodel_par(par_path="./config", config_dict=skymodel_config)
+    write_skymodel_par(parfile_path=configs_path, config=skymodel_inst_par)
+    write_skymodel_par(parfile_path=configs_path, config=skymodel_model_par)
     # ---------------------------------------------------------------------------------------------
 
     # run calcskymodel with the requested input parameters ----------------------------------------
@@ -189,6 +189,10 @@ def run_skymodel(skymodel_path=SKYMODEL_INST_PATH, **kwargs):
     if out.returncode == 0:
         sky_logger.info("successfully finished sky model calculation")
     elif "File opening failed" in out.stderr.decode("utf-8"):
+        # extract parameters from config for radiative transfer run
+        alt, time, season, resol, pwv = skymodel_model_par["alt"], skymodel_model_par["time"], skymodel_model_par["season"], skymodel_model_par["resol"], skymodel_model_par["pwv"]
+        airmass = np.round(np.sec((90 - alt) * np.pi / 180), 1)
+
         os.chdir(skymodel_path, "sm-01_mod1")
         out = subprocess.run(f"bin/create_spec {airmass} {time} {season} . {resol} {pwv}".split(), capture_output=True)
         if out.returncode == 0:
@@ -218,7 +222,7 @@ def run_skymodel(skymodel_path=SKYMODEL_INST_PATH, **kwargs):
         sky_logger.error("failed while running 'calcskymodel'")
         sky_logger.error(out.stderr.decode("utf-8"))
 
-        return skymodel_config, None 
+        return skymodel_inst_par, skymodel_model_par, None 
     # ---------------------------------------------------------------------------------------------
 
     # read output files and organize in a FITS table ----------------------------------------------
@@ -229,7 +233,7 @@ def run_skymodel(skymodel_path=SKYMODEL_INST_PATH, **kwargs):
     sky_comps = hstack([lines_table, trans_table])
     sky_comps["lam"] = sky_comps["lam"]*1e4
 
-    return skymodel_config, sky_comps
+    return skymodel_inst_par, skymodel_model_par, sky_comps
 
 
 def run_skycorr(skycorr_config_path, sci_spec, sky_spec, spec_label, specs_dir="./", out_dir="./", **kwargs):
