@@ -290,7 +290,8 @@ def run(packages, install_requires):
         package_dir={'': 'python'},
         scripts=[
             'bin/drp',
-            'bin/pix2wave'
+            'bin/pix2wave',
+            "bin/prime-db"
         ],
         classifiers=[
             'Development Status :: 4 - Beta',

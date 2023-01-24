@@ -10,17 +10,38 @@ import os
 import sys
 
 
-ROOT_PATH = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+# installation path
 PYTHON_PATH = os.path.dirname(sys.path[0])
-CONFIG_PATH = os.path.join(ROOT_PATH, "python", "lvmdrp", "etc")
-MASTER_CONFIG_PATH = os.path.join(CONFIG_PATH, "drp.yml")
-SKYMODEL_CONFIG_PATH = os.path.join(CONFIG_PATH, "skymodel_config.yml")
-SKYCALC_CONFIG_PATH = os.path.join(CONFIG_PATH, "skycalc.json")
-ALMANAC_CONFIG_PATH = os.path.join(CONFIG_PATH, "almanac.json")
-SKYCORR_CONFIG_PATH = os.path.join(CONFIG_PATH, "skycorr_config.yml")
 
+# installation path for ESO routines
 SKYMODEL_INST_PATH = os.path.join(PYTHON_PATH, "lib", "skymodel")
 SKYCORR_INST_PATH = os.path.join(PYTHON_PATH, "lib", "skycorr")
+
+# root package path
+ROOT_PATH = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+# configuration paths
+CONFIG_PATH = os.path.join(ROOT_PATH, "python", "lvmdrp", "etc")
+
+# main DRP configuration path
+MASTER_CONFIG_PATH = os.path.join(CONFIG_PATH, "drp.yml")
+
+# ESO sky model (web version) configuration files
+SKYCALC_CONFIG_PATH = os.path.join(CONFIG_PATH, "skycalc.json")
+ALMANAC_CONFIG_PATH = os.path.join(CONFIG_PATH, "almanac.json")
+
+# ESO sky model master configuration file
+SKYMODEL_CONFIG_PATH = os.path.join(CONFIG_PATH, "skymodel_config.yml")
+# high-level ESO sky model configuration files
+SKYMODEL_INST_CONFIG_PATH = os.path.join(SKYMODEL_INST_PATH, "sm-01_mod2", "config", "instrument_etc_ref.par")
+SKYMODEL_MODEL_CONFIG_PATH = os.path.join(SKYMODEL_INST_CONFIG_PATH, "sm-01_mod2", "config", "skymodel_etc_ref.par")
+
+# ESO skycorr configuration file
+SKYCORR_CONFIG_PATH = os.path.join(CONFIG_PATH, "skycorr_config.yml")
+
+# data paths
+DATA_PATH = os.path.join(ROOT_PATH, "data")
+EPHEMERIS_PATH = os.path.join(DATA_PATH, "de421.bsp")
 
 
 SKYCORR_PAR_MAP = {'INPUT_OBJECT_SPECTRUM': 'objfile',

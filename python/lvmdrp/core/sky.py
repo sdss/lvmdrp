@@ -100,7 +100,8 @@ def read_skymodel_par(parfile, verify=True):
     return pars
 
 
-def write_skymodel_par(par_path, config_dict, verify=True):
+
+def write_skymodel_par(parfile_path, config, verify=True):
     """Writes the configuration dictionary in a given .par file(s)
     
     Parameters
@@ -112,15 +113,11 @@ def write_skymodel_par(par_path, config_dict, verify=True):
     verify: boolean
         whether to verify or not the integrity of the parameters dictionary. Dafaults to True.
     """
-    # split dictionary in different .par file(s)
-    # verify all keywords are present for each given parameter file
-    # if all parameters present, write corresponding .par file
 
-    for parfile, expected_keys in SKYMODEL_CONFIG_PARS.items():
-        if all(map(lambda key: key in config_dict.keys(), expected_keys)):
-            config_par = {key: val for key, val in config_dict.items() if key in expected_keys}
-            with open(os.path.join(par_path, parfile), "w") as f:
-                for key, val in config_par.items():
+    # TODO: add units support
+
+    with open(parfile_path, "w") as f:
+        for key, val in config.items():
                     if isinstance(val, list, tuple):
                         f.write(f"{key} = {' '.join(val)}\n")
                     elif isinstance(val, str):
