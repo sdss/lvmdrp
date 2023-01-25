@@ -311,6 +311,20 @@ def run(packages, install_requires):
     )
 
 
+def parse_requirements(reqfile_path):
+    """
+        Returns the parsed requirements from a requirements .txt file
+    """
+    install_requires = []
+    with open(reqfile_path, "r") as r:
+        requirement = r.readline()[:-1].strip()
+        if requirement.startswith("-r"):
+            install_requires.extend(parse_requirements(requirement.replace("-r ", "")))
+        else:
+            install_requires.append(requirement)
+    return install_requires
+
+
 def get_requirements(opts):
     ''' Get the proper requirements file based on the optional argument '''
 
@@ -319,11 +333,10 @@ def get_requirements(opts):
     elif opts.doc:
         name = 'requirements_doc.txt'
     else:
-        name = 'requirements.txt'
-
+        name = 'requirements_all.txt'
+    
     requirements_file = os.path.join(os.path.dirname(__file__), name)
-    install_requires = [line.strip().replace('==', '>=') for line in open(requirements_file)
-                        if not line.strip().startswith('#') and line.strip() != '']
+    install_requires = parse_requirements(requirements_file)
     return install_requires
 
 

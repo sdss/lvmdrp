@@ -14,4 +14,3 @@ setuptools==58.0.4
 skycalc_cli==1.4
 sphinx_bootstrap_theme==0.8.1
 tqdm==4.64.0
-lvmsurveysim @ git+https://github.com/sdss/lvmsurveysim.git@0.8.3

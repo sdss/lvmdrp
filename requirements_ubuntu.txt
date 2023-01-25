@@ -1,8 +1,0 @@
-python3-venv
-bzip2
-libbz2-dev
-cmake
-harp
-subversion
-mysql-server
-libmysqlclient-dev
