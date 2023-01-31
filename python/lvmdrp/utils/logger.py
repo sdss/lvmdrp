@@ -235,7 +235,8 @@ def get_logger(name, **kwargs):
     logging.setLoggerClass(SDSSLogger)
 
     log = logging.getLogger(name)
-    log.addHandler(TqdmLoggingHandler())
+    # BUG: when adding this handler, each logged message appears twice
+    # log.addHandler(TqdmLoggingHandler())
     log.init(**kwargs)
 
     logging.setLoggerClass(orig_logger)
