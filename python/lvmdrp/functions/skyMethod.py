@@ -22,7 +22,7 @@ from astropy import units as u
 from astropy.time import Time
 from skyfield.api import load, wgs84, Star
 from skyfield import almanac
-from skyfield.positionlib import ecliptic_frame
+from skyfield.framelib import ecliptic_frame
 from tqdm import tqdm
 
 from lvmdrp.core.constants import EPHEMERIS_PATH
@@ -77,20 +77,23 @@ def configureSkyModel_drp(skymodel_config_path=SKYMODEL_CONFIG_PATH, skymodel_pa
             path to ESO sky model installation path. Defaults to {SKYMODEL_INST_PATH}
         method : string
             which method to use for the ESO sky model configuration:
-                - 'run' : will write the configuration files and (optionally) pre-build a spectral library (see 'run_library' and 'run_multiscat')
-                - 'download' : will download all configuration files and corresponding library files (NOTE: NOT IMPLEMENTED YET)
+                - 'run' : will write the configuration files and (optionally) pre-build a library
+                - 'download' : will download all configuration files and corresponding library files
         run_library : boolean
-            whether to run or not the ESO routines to build a spectral library using the specified configuration files and a set of precipitable water vapor scalings (see 'pwv')
+            whether to run or not the ESO routines to build a spectral library using the specified
+            configuration files and a set of precipitable water vapor scalings (see 'pwv')
         run_multiscat : boolean
-            whether to run or not the ESO 'estmultiscat' routine for the multiple scattering corrections
+            whether to run or not the ESO 'estmultiscat' routine for the multiple scattering
+            corrections
         pwvs : string of floats
-            the precipitable water vapor values (in mm) to use. Defaults to -1 which means no PWV scaling is applied
+            the precipitable water vapor values (in mm) to use. Defaults to -1 which means no PWV
+            scaling is applied
 
         Examples
         --------
 
         user:> drp sky configureSkyModel # to write the configuration files only
-        user:> drp sky configureSkyModel method=run run_library=True run_multiscat=False pwvs=0.5,1.0,2.5 # to write the configuration files and build a spectral library with the given parameters
+        user:> drp sky configureSkyModel method=run run_library=True run_multiscat=False pwvs=0.5,1.0,2.5
 
     """
 
@@ -176,7 +179,7 @@ def configureSkyModel_drp(skymodel_config_path=SKYMODEL_CONFIG_PATH, skymodel_pa
 
 def createMasterSky_drp(rss_in, sky_out, clip_sigma='3.0', nsky='0', filter='', non_neg='1', plot='0'):
 	"""
-        Creates an average (sky) spectrum from the RSS, which stored either as a FITS or an ASCII file.
+        Creates a mean (sky) spectrum from the RSS, which stored either as a FITS or an ASCII file.
         Spectra may be rejected from the median computation. Bad pixel in the RSS are not included
         in the median computation.
 
@@ -189,12 +192,13 @@ def createMasterSky_drp(rss_in, sky_out, clip_sigma='3.0', nsky='0', filter='', 
         sky_out : string
             Output Sky spectrum. Either in FITS format (if *.fits) or in ASCII format (if *.txt)
         clip_sigma : string of float, optiional with default: '3.0'
-            Sigma value used to reject outlier sky spectra identified in the collapsed median value along the dispersion axis
-            Only used if the nsky value is set to 0 and clip_sigma>0.
+            Sigma value used to reject outlier sky spectra identified in the collapsed median value
+            along the dispersion axis. Only used if the nsky value is set to 0 and clip_sigma>0
         nsky : string of integer (>0), optional with default: '0'
             Selects the number of brightest sky spectra to be used for creating the median sky spec.
         filter : string of tuple, optional with default: ''
-            Path to file containing the response function of a filter, and the wavelength and transmission columns
+            Path to file containing the response function of a filter, and the wavelength and
+            transmission columns
         plot : string of integer (0 or 1)
             If set to 1, the sky spectrum will be display on screen.
 
@@ -274,13 +278,56 @@ def createMasterSky_drp(rss_in, sky_out, clip_sigma='3.0', nsky='0', filter='', 
 		skySpec.writeTxtData(sky_out)
 
 
-def sepContinuumLine_drp(sky_ref, cont_line_out, method="skycorr", sky_sci="", skycorr_config=SKYCORR_CONFIG_PATH):
-    """
-        Separates the continuum from the sky line contribution using the specified method
+def sepContinuumLine_drp(sky_ref, cont_line_out, method="skycorr", sky_sci="", skycorr_config=SKYCORR_CONFIG_PATH, is_science=False):
+    f"""
+
+        Separates the continuum from the sky line contribution using the specified method. The
+        output spectra (continuum and line) is stored in a RSS format, with the continuum in the
+        first row.
+        
+        If method='skycorr' (default), this function will use the ESO skycorr routine to fit for
+        the line and continuum contribution of the given spectrum in 'sky_ref'. To be able tu run
+        this method, 'sky_sci' should be given and contain a 1D version of the science spectrum.
+        Optionally a YAML file containing skycorr parameter definitions could also be given.
+
+        If method='model', this function will use the ESO sky model to calculate a sky spectrum
+        matching the 'sky_ref' observing conditions (ephemeris, airmass, etc.). The continuum
+        contribution from the target sky spectrum is set to be the continuum component of the
+        calculated model.
+
+        If method='fit', this function will run a tradicional spectral fitting method to
+        dissentangle the continuum and line contributions using a set of pre-built continuum/line
+        templates.
+
+        NOTE: by using the 'skycorr' method, we get for free a first fitting of the line
+        contribution for the 'sky_ref' spectrum. By using the 'model' method, we get all calculated
+        components for the target sky spectrum. This information could be use later
+
+        Parameters
+        ----------
+        sky_ref : string
+            path to the 1D target sky spectrum. It should be readable as a
+            lvmdrp.core.spectrum1d.Spectrum1D
+        cont_line_out : string
+            path where the output RSS file will be stored. It will be saved using the methods in
+            lvmdrp.core.rss.RSS
+         method : string of 'skycorr' (default), 'model' or 'fit'
+            the method to be used for the continuum line separation.
+        sky_sci : string, optional
+            path to the 1D science sky spectrum in the same format as 'sky_ref'. This parameter is
+            only requiered if method='skycorr'
+        skycorr_config : string, optional with default {SKYCORR_CONFIG_PATH}
+            path to a file containing the skycorr parameter definitions in YAML format
+        
     
-        Run the chosen continuum/line separation algorithm on master sky 1 and 2 and master science and produce
-        line-only (sky1_line, sky2_line, sci_line) and continuum-only (sky1_cont, sky2_cont, sci_cont) spectra for each
+        Examples
+        ----------------
+        user:> drp sky sepContinumLine SKY_REF.fits CONT_LINE_OUT.fits method='model'
+        user:> drp sky sepContinumLine SKY_REF.fits CONT_LINE_OUT.fits sky_sci='SKY_SCI.fits'
+
     """
+    # TODO: if science, then remove/mask out science lines from a predefined list
+    # TODO: if science, then select wavelength ranges dominated by sky
 
     # read sky spectrum
     sky_spec = Spectrum1D()
@@ -310,12 +357,14 @@ def sepContinuumLine_drp(sky_ref, cont_line_out, method="skycorr", sky_sci="", s
         # TODO: use the resulting model continuum as physical representation of the target sky continuum
         # TODO: remove continuum contribution from original sky spectrum
         resample_step, resolving_power = np.diff(sky_spec._wave).min(), np.int(np.ceil((sky_spec._wave/np.diff(sky_spec._wave).min()).max()))
+        # BUG: implement missing parameters in this call of run_skymodel
         pars_out, sky_model = run_skymodel(
             limlam=[sky_spec._wave.min()/1e4, sky_spec._wave.max()/1e4],
             dlam=resample_step/1e4,
             resol=resolving_power
         )
-        # TODO: use only Mie and Rayleigh scattering components of the transmission sky spectrum
+        # TODO: the predicted continuum would be the full radiative component - airglow line
+        # TODO: scale the predicted continuum with the sky_ref
         sky_cont = Spectrum1D(
             wave=sky_model["lam"].value,
             data=sky_model["trans"].value,
@@ -340,6 +389,8 @@ def sepContinuumLine_drp(sky_ref, cont_line_out, method="skycorr", sky_sci="", s
     else:
         raise ValueError(f"Unknown method '{method}'. Valid mehods are: 'skycorr' (default), 'model' and 'fit'.")
     
+    # TODO: explore the MaNGA way: sigma-clipping the lines and then smooth high-frequency features so that we get a continuum estimate
+
     # pack outputs in FITS file
     rss_cont_line = RSS.from_spectra1d((sky_cont, sky_line))
     rss_cont_line.appendHeader(pars_out)
@@ -351,9 +402,59 @@ def sepContinuumLine_drp(sky_ref, cont_line_out, method="skycorr", sky_sci="", s
 def evalESOSky_drp(sky_ref, rss_out, resample_step="optimal", resample_method="linear", err_sim='500', replace_error='1e10', parallel="auto"):
     """
     
-    run ESO sky model for observation parameters (ephemeris, atmospheric conditions, site, etc) to evaluate sky spectrum at each
-    telescope pointing (model_sky1, model_sky2, model_skysci)
+        Evaluates the ESO sky model following the observing conditions in the given sky reference.
+        The output contains the calculated components of the sky in a RSS format. In addition a
+        'fibermap' table is stored in the second HDU, to keep track of the meaning of each row.
 
+        The wavelength sampling and resolution of the returned model components will always match
+        that of the input 'sky_ref'. However, the sampling and resolution of the original sky model
+        can be controlled by the user. It is always desirable that the sampling and resolution of
+        this original model exceeds those of the reference spectrum, so there is no loss of
+        information when matching the wavelength vector to the reference. The user can control the
+        wavelength sampling of the sky model components by specifying the 'sampling_step'. By
+        setting sampling_step='optimal' (default), sampling will be defined using the input
+        'sky_ref' spectrum in two possible ways. If the input spectrum contains the LSF, the
+        optimal sampling will be computed to be 1/3 of the maximum resolution following the
+        criteria in the sampling theorem. Otherwise, the optimal sampling will be computed to be
+        the smallest sampling step in the reference spectrum. For a more seasoned users, the
+        sampling_step can also take a floating point value, which is going to be used to produce a
+        model for the sky spectra components.
+        
+        The original model resolution will be either the best resolution from the reference spectrum
+        (if the LSF is present), or max( wavelength_ref / sampling_step ). Again, this ensures there
+        is a minimum loss of information when matching the original model wavelength vector to the
+        reference.
+
+        When resampling the original model components, the user can specify if this is done linearly
+        (resample_method='linear') or using a spline (='spline'). To accurately propagate the errors
+        during the resampling process, a Monte Carlo method is addopted and the user can specify the
+        number of realisations using 'err_sim'. Missing values in the error can be replaced with the
+        'replace_error' parameter.
+
+        Parameters
+        ----------
+        sky_ref : string
+            path to the reference spectrum from which observing conditions and ephemeris can be
+            inferred to evaluate a ESO model spectrum
+        rss_out : string
+            path where the output RSS file will be saved
+        resample_step : string, optional with default 'optimal'
+            the resample step or method to use when interpolating the model in the sky reference
+            wavelength
+        resample_method : string of 'linear' (default) or 'spline'
+            interpolation method to use
+        err_sim : float, optional with default 500
+            number of MC to propagate the error in the spectrum when interpolating
+        replace_error : float, optional with default 1e10
+            value to replace missing error values
+        parallel : string or integer with default 'auto'
+            whether to run the interpolation in parallel in a given number of threads or
+            in a serial way (parallel=1)
+
+        Examples
+        --------
+
+        user:> drp sky evalESOSky SKY_REF.fits RSS_OUT.fits
     """
 
     # read master configuration file
@@ -469,7 +570,8 @@ def evalESOSky_drp(sky_ref, rss_out, resample_step="optimal", resample_method="l
     # vacuum or air wavelengths ('vac_air', vac or air)
     # precipitable water vapour ('pwv' in mm; -1: bimonthly mean)
     # TODO: - ** radiative transfer code for molecular spectra ('rtcode', L or R)
-    # TODO: - ** resolving poser of molecular spectra in library ('resol')
+    # TODO: - ** resolving power of molecular spectra in library ('resol')
+    resol = np.int(np.ceil((new_wave/resample_step).max()))
     # TODO: - ** sky model components
 
     # TODO: move unit and data type conversions to within the run_skymodel routine
@@ -501,7 +603,7 @@ def evalESOSky_drp(sky_ref, rss_out, resample_step="optimal", resample_method="l
         vac_air="vac",
         pwv=-1*u.mm,
         rtcode="L",
-        resol=np.int(np.ceil((new_wave/resample_step).max())),
+        resol=resol,
         filepath="data",
         incl="YYYYYYY"
     )
@@ -574,10 +676,46 @@ def subtractGeocoronal_drp():
 
 
 def corrSkyLine_drp(sky1_line_in, sky2_line_in, sci_line_in, line_corr_out, method="distance", sky_models_in="", sci_model_in="", skycorr_config=SKYCORR_CONFIG_PATH):
-    """
+    f"""
+
+        Combines the two master sky line components a as weighted average, where the weights are
+        determined depending on the given method. Then it runs the ESO skycorr routine to return
+        the final version of the sky line component for the science pointing.
+
+        If method='distance', this function will calculate the spherical distance between the sky
+        pointings and the science pointing and define the weights as the inverse of those
+        distances.
+
+        If method='model', this method will use the given sky models in paths 'sky_models_in' and
+        'sci_model_in' to calculate the weights as a scaling factor between the models of each sky
+        pointing and the science pointing.
+
+        The extrapolated sky line component will be calculated as a weighted average:
+
+            sky_line = w_1 * sky1_line + w_2 * sky2_line
+
+        Then 'sky_line' will be passed to the ESO skycorr routine to produce the final sky line
+        component for the science pointing
+
+        Parameters
+        ----------
+        sky1_line_in, sky2_line_in, sci_line_in : string
+            paths to the sky line components for the sky and the science pointings, respectively
+        line_corr_out : string
+            path to file where the output line component will be stored
+        method : string of 'distance' (default) or 'model'
+            method used to calculate the weights
+        sky_models_in, sci_model_in : strings
+            needed to calculate the weights if method='model'
+        skycorr_config : string, optional with default {SKYCORR_CONFIG_PATH}
+            path to skycorr configuration file
+        
+        Examples
+        --------
+        user:> drp sky corrSkyLine SKY1_LINE.fits SKY2_LINE.fits SCI_LINE.fits LINE_OUT.fits
     
-    average sky1_line and sky2_line into 'sky_line', and run skycorr on 'sky_line' and 'sci_line' to produce 'sky_line_corr'
     """
+    # BUG: skycorr should be run on each sky pointing and then we have to figure out how to combine them to produce the final sky_line_corr
 
     # read sky spectra
     sky1_line = Spectrum1D()
@@ -604,8 +742,8 @@ def corrSkyLine_drp(sky1_line_in, sky2_line_in, sci_line_in, line_corr_out, meth
         # sci position
         ra_s, dec_s = sci_head["RA"], sci_head["DEC"]
 
-        w_1 = ang_distance(ra_1, dec_1, ra_s, dec_s)
-        w_2 = ang_distance(ra_2, dec_2, ra_s, dec_s)
+        w_1 = 1 / ang_distance(ra_1, dec_1, ra_s, dec_s)
+        w_2 = 1 / ang_distance(ra_2, dec_2, ra_s, dec_s)
         w_norm = w_1 + w_2
         w_1, w_2 = w_1 / w_norm, w_2 / w_norm
     elif method == "model":
@@ -631,10 +769,6 @@ def corrSkyLine_drp(sky1_line_in, sky2_line_in, sci_line_in, line_corr_out, meth
 
         w_1 = sci_model / sky1_model
         w_2 = sci_model / sky2_model
-
-    elif method == "interpolate":
-        # TODO: interpolate in parameter space and evaluate corresponding sky model
-        pass
     else:
         raise ValueError(f"Unknown method '{method}'. Valid mehods are: 'distance' (default), 'model' and 'interpolate'.")
 
@@ -660,8 +794,35 @@ def corrSkyLine_drp(sky1_line_in, sky2_line_in, sci_line_in, line_corr_out, meth
 
 def corrSkyContinuum_drp(sky1_cont_in, sky2_cont_in, sky1_model_in, sky2_model_in, sci_model_in, cont_corr_out, model_fiber=1):
     """
-    
-    correct and combine continuum only spectra by doing:   sky_cont_corr=0.5*( sky1_cont*(model_skysci/model_sky1) + sky2_cont*(model_skysci/model_sky2))
+
+        Combines the sky continuum components from the sky pointings into a final model for the science pointing.
+
+        Given the sky models for the sky and the science pointings, this function will extrapolate the sky continuum components
+        in the science pointing as a weighted average, where the weights are a scaling factor between the sky pointings and the
+        science pointing:
+
+            w_1 = sci_model / sky1_model
+            w_2 = sci_model / sky2_model
+
+        So that the final continuum model for the science pointing is:
+
+            sky_cont = 0.5 * (w_1 * sky1_cont + w_2 * sky2_cont)
+        
+        Parameters
+        ----------
+        sky1_cont_in, sky2_cont_in, sky1_model_in : strings
+            path to the sky continuum component for the sky and the science pointings, respectively
+        sky1_model_in, sky2_model_in, sci_odel_in : strings
+            path to the sky model for the sky and the science pointings, respectively
+        cont_corr_out : string
+            path to output file where to store the extrapolated sky continuum component
+        model_fiber : integer, with default 1
+            fiber that represents the model sky spectrum in the given files
+        
+        Examples
+        --------
+        user:> drp sky corrSkyContinuum SKY1_CONT.fits SKY2_CONT.fits SKY1_MODEL.fits SKY2_MODEL.fits SCI_MODEL.fits CONT_OUT.fits
+
     """
 
     # read sky continuum from both telescopes
@@ -694,6 +855,7 @@ def corrSkyContinuum_drp(sky1_cont_in, sky2_cont_in, sky1_model_in, sky2_model_i
     if np.any(sky2_model._inst_fwhm != sci_model._inst_fwhm):
         sky2_model.matchFWHM(sci_model._inst_fwhm)
 
+    # TODO: weight the continuum components of each sky telescope depending on the sky quality (darker, airmass)
     # extrapolate sky pointings into science pointing
     w_1 = sci_model / sky1_model
     w_2 = sci_model / sky2_model
@@ -710,7 +872,26 @@ def corrSkyContinuum_drp(sky1_cont_in, sky2_cont_in, sky1_model_in, sky2_model_i
 
 
 def coaddContinuumLine_drp(sky_cont_corr_in, sky_line_corr_in, sky_corr_out, line_fiber=9):
-    """coadd corrected line and continuum combined sky frames: sky_corr=sky_cont_corr+sky_line_corr"""
+    """
+    
+        Coadds the corrected line and continuum components into the joint sky spectrum:
+            
+            sky_corr = sky_cont_corr + sky_line_corr
+        
+        Parameters
+        ----------
+        sky_cont_corr_in, sky_line_corr_in : strings
+            paths to the corrected sky continuum and line components
+        sky_corr_out : string
+            path to output file where to store the joint sky spectrum
+        line_fiber : integer with default 9
+            row in the sky line RSS file that represents the model line component
+        
+        Examples
+        --------
+        user:> drp sky coadContinuumLine SKY_CONT_CORR.fits SKY_LINE_CORR.fits SKY_CORR_OUT.fits
+        
+    """
 
     # read RSS sky line contribution
     sky_cont_corr = Spectrum1D()
@@ -728,32 +909,34 @@ def coaddContinuumLine_drp(sky_cont_corr_in, sky_line_corr_in, sky_corr_out, lin
 
 def subtractSky_drp(rss_in, rss_out, sky_ref, sky_out, factor='1', scale_region='', scale_ind=False, parallel='auto'):
     """
+
         Subtracts a (sky) spectrum, which was stored as a FITS file, from the whole RSS.
         The error will be propagated if the spectrum AND the RSS contain error information.
 
         Parameters
         --------------
         rss_in : string
-                Input RSS FITS file
+            input RSS FITS file
         rss_out : string
-                Output RSS FITS file with spectrum subtracted
+            output RSS FITS file with spectrum subtracted
         sky_ref : string
-                Input sky spectrum in FITS format.
+            input sky spectrum in FITS format.
         sky_out : string
-                Output file to store the RSS sky spectra.
+            output file to store the RSS sky spectra.
         factor : string of float, optional with default: '1'
-                The default value for the flux scale factor in case the fitting fails
+            the default value for the flux scale factor in case the fitting fails
         scale_region : string of tuple of floats, optional with default: ''
-                The wavelength range within which the 'factor' will be fit
+            the wavelength range within which the 'factor' will be fit
         scale_ind : boolean, optional with deafult: False
-                Whether apply factors individually or apply the median of good factors
+            whether apply factors individually or apply the median of good factors
         parallel : either string of integer (>0) or  'auto', optional with default: 'auto'
-                Number of CPU cores used in parallel for the computation. If set to auto, the maximum number of CPUs
-                for the given system is used.
+            number of CPU cores used in parallel for the computation. If set to 'auto', the maximum
+            number of CPUs for the given system is used
 
         Examples
         ----------------
         user:> drp sky subtractSkySpec RSS_IN.fits RSS_OUT.fits SKY_SPEC.fits
+
     """
 
     factor = np.array(factor).astype(np.float32)
