@@ -1,0 +1,22 @@
+name: lvmMaps
+short: replace me - with a short one sentence summary of file
+description: replace me - with a longer description of the data product
+location: $LVM_SPECTRO_ANALYSIS/[DRPVER]/[DAPVER]/[TILEID]
+created_by: module.py
+used_by: module.py
+naming_convention: lvm-[TILEID]-maps.fits.gz
+hdu0:
+  name: PRIMARY
+  description: replace me description
+  is_image: true
+  size: 0 bytes
+  header:
+  - key: SIMPLE
+    value: true
+    comment: conforms to FITS standard
+  - key: BITPIX
+    value: 8
+    comment: array data type
+  - key: NAXIS
+    value: 0
+    comment: number of array dimensions

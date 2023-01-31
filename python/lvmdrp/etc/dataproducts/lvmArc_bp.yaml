@@ -1,0 +1,63 @@
+
+name: lvmArc
+short: the extracted arc frame
+description: |
+  This is the extracted arc frame, including wavelength calibration and removal of fiber-to-fiber
+  flat field variations. The format is similar to MaNGA mgArc files.
+location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[OBSERVATORY]/[MJD]/
+created_by: module.py
+used_by: module.py
+naming_convention: |
+  lvmArc-[CAMERA]-[EXPNUM].fits.gz, [CAMERA] is one of the nine cameras on the instrument, b1, r1, z1,
+  or b2, r2, z2, or b3, r3, or z3 for the blue, red, nir cameras on each LVM spectrograph, and
+  [EXPNUM] is the (zero-padded) 8-digit exposure number.
+hdu0:
+  name: PRIMARY
+  description: the primary header metadata
+  is_image: true
+  header:
+  - key: DRP2QUAL
+    comment: the DRP quality bitmask
+hdu1:
+  name: FLUX
+  description: extracted flux from the arc image
+  is_image: true
+  shape: CCDROW x NFIBER
+hdu2:
+  name: MASK
+  description: the bitmask describing the quality of the fiber
+  is_image: true
+  shape: NFIBER
+hdu3:
+  name: LXPEAK
+  description: |
+    wavelength and x positions of good arc lamp lines. 1st column element contains wavelengths, the
+    remaining NFIBER contains the lamp line positions along the CCD.
+  is_image: true
+  shape: NFIBER+1 x NLAMP
+hdu4:
+  name: WSET
+  description: wavelength solution as Legendre polynomials for all fibers
+  is_image: false
+  shape: BINARY FITS TABLE
+  columns:
+    FUNC:
+      name: FUNC
+      type: char[8]
+      unit: ''
+      description: ''
+    XMIN:
+      name: XMIN
+      type: float64
+      unit: ''
+      description: ''
+    XMAX:
+      name: XMAX
+      type: float64
+      unit: ''
+      description: ''
+    COEFF:
+      name: COEFF
+      type: float64
+      unit: ''
+      description: ''
