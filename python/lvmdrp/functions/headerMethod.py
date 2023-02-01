@@ -1,8 +1,11 @@
 import sys
+import numpy
 from lvmdrp.external import astrolib
-from lvmdrp.core.header import Header
+from lvmdrp.core.header import Header, combineHdr
+
 
 description='Provides Methods to handle Fits headers'
+
 
 def printHdr_drp(file, keyword='',  extension=0):
     """

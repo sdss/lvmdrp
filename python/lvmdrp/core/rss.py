@@ -16,7 +16,9 @@ class RSS(FiberRows):
 
     @classmethod
     def from_spectra1d(cls, spectra_list, header=None, shape=None, size=None, arc_position_x=None, arc_position_y=None, good_fibers=None, fiber_type=None, logwave=False):
-        """Returns an RSS instance given a list of Spectrum1D instances"""
+        """
+            Returns an RSS instance given a list of Spectrum1D instances
+        """
         n_spectra = len(spectra_list)
         if n_spectra <= 0:
             raise ValueError("cannot create RSS from an empty list of spectra")
@@ -1343,74 +1345,6 @@ class RSS(FiberRows):
     def getPositionTable(self):
         posTab = PositionTable(shape=self._shape, size=self._size, arc_position_x=self._arc_position_x, arc_position_y=self._arc_position_y, good_fibers=self._good_fibers,  fiber_type=self._fiber_type)
         return posTab
-
-    def registerImage(self, image, passband, search_box, step_search,  ref_pix_x, ref_pix_y, arc_scale, angle=0.0, guess_x=0.0,  guess_y=0.0, parallel='auto'):
-        posTab = self.getPositionTable()
-        fiber_area = numpy.pi*posTab._size[0]**2
-
-        # extract the Passband fluxes for each spectrum of the RSS
-        (flux_rss, error_rss, min_rss, max_rss, std_rss) = passband.getFluxRSS(self)
-        flux_rss = flux_rss*fiber_area
-        error_rss = error_rss*fiber_area
-        select_neg = flux_rss<=0
-        flux_rss[select_neg] = 1e-10
-        rss_mag = passband.fluxToMag(flux_rss)
-        AB_flux =10**(rss_mag/-2.5)
-        AB_eflux = error_rss*(AB_flux/flux_rss)
-        good_rss = flux_rss/error_rss>3.0
-        #print(flux_rss/error_rss)
-
-        # define empty areas for the search grid
-        offsets_x = numpy.arange(-search_box/2.0, search_box/2.0+step_search, step_search)+guess_x
-        offsets_y = numpy.arange(-search_box/2.0, search_box/2.0+step_search, step_search)+guess_y
-        angles_off=numpy.arange(-10, 10, 2)
-        offsets_xIFU = numpy.zeros((len(offsets_x), len(offsets_y)))
-        offsets_yIFU = numpy.zeros((len(offsets_x), len(offsets_y)))
-        chisq = numpy.zeros((len(offsets_x), len(offsets_y)))
-        scale_flux = numpy.zeros((len(offsets_x), len(offsets_y)))
-        valid_fibers = numpy.zeros((len(offsets_x), len(offsets_y)))
-        #scale_flux_alt = numpy.zeros((len(offsets_x), len(offsets_y)))
-        #chisq_alt = numpy.zeros((len(offsets_x), len(offsets_y)))
-
-        if parallel=='auto':
-            cpus = cpu_count()
-        else:
-            cpus = int(parallel)
-        if cpus>1:
-            pool = Pool(cpus)
-            threads=[]
-            for i in range(len(offsets_x)):
-                for j in range(len(offsets_y)):
-                        threads.append(pool.apply_async(image.extractApertures, args=(posTab,  ref_pix_x, ref_pix_y, arc_scale, angle, offsets_x[i], offsets_y[j])))
-            pool.close()
-            pool.join()
-        m = 0
-        for i in range(len(offsets_x)):
-            for j in range(len(offsets_y)):
-                    offsets_xIFU[i, j] = offsets_x[i]/arc_scale
-                    offsets_yIFU[i, j] = offsets_y[j]/arc_scale
-                    if cpus==1:
-                        flux =  image.extractApertures(posTab,  ref_pix_x, ref_pix_y, arc_scale, angle=angle, offset_arc_x=offsets_x[i], offset_arc_y=offsets_y[j])
-                    else:
-                        flux = threads[m].get()
-                    good_pix = (flux[0]/flux[1]>3.0)
-                    good = numpy.logical_or(good_pix, good_rss) & (flux[2]>0.0) & numpy.logical_not(numpy.isnan(flux[1])) & numpy.logical_not(numpy.isnan(error_rss))
-                    sort = numpy.argsort(flux[0][good])
-                    #print(AB_flux[good], flux[1][good], flux[0][good])
-                    match = numpy.median(flux[0][good][sort[:-1]]/AB_flux[good][sort[:-1]])
-                    #print(flux[0][good], numpy.sum(numpy.isnan(flux[0][good])),AB_flux[good], numpy.sum(numpy.isnan(AB_flux[good])))
-                    #match=numpy.linalg.lstsq(numpy.array([AB_flux[good][sort[:-1]]/flux[1][good][sort[:-1]]]).T,
-                    #flux[0][good][sort[:-1]]/flux[1][good][sort[:-1]])[0]
-                    scale_flux[i, j] = match
-                    valid_fibers[i,j] = numpy.sum(good[sort[:-1]])
-                    #scale_flux_alt[i, j] = match_alt
-                    chisq[i, j] = float(numpy.sum((flux[0][good][sort[:-1]]-scale_flux[i, j]*AB_flux[good][sort[:-1]])**2 /
-                    (flux[1][good][sort[:-1]]**2+AB_eflux[good][sort[:-1]]**2)))/(valid_fibers[i,j])
-                    #chisq_alt[i, j] = numpy.sum((flux[0][good]-scale_flux_alt[i, j]*AB_flux[good])**2/(flux[1][good]**2+AB_eflux[good]**2))*1e10
-           #     print m, len(offsets_x), len(offsets_y)
-                    m+=1
-
-        return offsets_xIFU*arc_scale, offsets_yIFU*arc_scale, chisq, scale_flux, AB_flux, valid_fibers
 
 
 def loadRSS(infile, extension_data=None, extension_mask=None,  extension_error=None):

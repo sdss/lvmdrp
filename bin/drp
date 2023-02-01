@@ -8,58 +8,53 @@
 # @Copyright: SDSS-V LVM
 
 import sys
-from lvmdrp.functions import (commandMethod, headerMethod, imageMethod, rssMethod, skyMethod)
+
+from lvmdrp.utils.logger import get_logger
+from lvmdrp.functions import (commandMethod, headerMethod, imageMethod, rssMethod, skyMethod, fluxCalMethod)
+
+
+drp_logger = get_logger(name="lvm-drp")
 
 
 if __name__=="__main__":
     args = sys.argv[1:]
     if len(args)==0:
-        print('No subcategory of commands given.')
-        print('Please use "drp help" for a list of valid command categories')
+        drp_logger.info('No subcategory of commands given.')
+        drp_logger.info('Please use "drp help" for a list of valid command categories')
     elif args[0]=='help':
-        print('')
-        print('Available command SUBCATEGORIES of drp:')
+        drp_logger.info('')
+        drp_logger.info('Available command SUBCATEGORIES of drp:')
         i=1
         methods = dir()
         for func in methods:
             if "Method" in func:
-                print('%i. %s  >> %s '%(i, func.split('Method')[0], eval(func+'.description')))
+                drp_logger.info('%i. %s  >> %s '%(i, func.split('Method')[0], eval(func+'.description')))
                 i+=1
-        print('')
-        print('Please use "drp SUBCATEGORY help" to get a list of available commands for the category')
-        print('')
+        drp_logger.info('')
+        drp_logger.info('Please use "drp SUBCATEGORY help" to get a list of available commands for the category')
+        drp_logger.info('')
     
     elif args[0]+'Method' in dir():
         command = args[0]+'Method.'
         if args[1]=='help' and len(args)==2:
             try:
                 list_commands = eval("dir(%s)"%(command[:-1]))
-                print('')
-                print('Available drp COMMANDs within the subcategory %s:' %(args[0]))
+                drp_logger.info('')
+                drp_logger.info('Available drp COMMANDs within the subcategory %s:' %(args[0]))
                 for comm in list_commands:
                     if '_drp' in comm:
-                        print( '%s' %(comm.split('_drp')[0]))
-                print('')
-                print('Please use "drp %s help COMMAND" to detailed information command, its description, '%(args[0]))
-                print('required and optional parameter. You can quit the help by pressing "q" on your keyboard.')
-                print('The first row informs you about the internal python method and its parameter list and default values.')
-                print('')
-                print('GENERAL REMARKS:')
-                print('You can run the routine by call "drp SUBCATEGORY COMMAND" followed by the required parameters.')
-                print('Parameters with default values do not need to be given incase the default setting should be used.')
-                print('The parameters need to be provided in their correct order or should explicitly called with their parameter name, e.g.  name=value.')
-                print('If the parameter value contains a space, e.g. for comment strings, bracket them in "" so they can be associated to a single parameter.')
-                
-                print('')
+                        drp_logger.info( '%s' %(comm.split('_drp')[0]))
+                drp_logger.info('')
+                drp_logger.info('Please use "drp %s help COMMAND" to detailed information command, its description, '%(args[0]))
+                drp_logger.info('You can run the routine by call "drp SUBCATEGORY COMMAND" followed by the required parameters.')
             except KeyError:
-              print('You have asked for help about a noexisting command subcategory of drp')
-              print('Please use "drp help" for a list of valid command categories')
+                drp_logger.error('You have asked for help about a non-existing subcategory of drp')
+                drp_logger.error('Please use "drp help" for a list of valid command categories')
         elif args[1]=='help' and len(args)==3:
             try:
                 eval('help('+command+args[2]+'_drp)')
             except:
-                print('You asked for help on a non-existing subcategory and/or command of drp')
-                
+                drp_logger.error('You asked for help on a non-existing subcategory and/or command of drp')     
         else:
             key=False
             error=False
@@ -73,12 +68,11 @@ if __name__=="__main__":
                     key=True
                 else:
                     error=True
-                    print('The command you tried to run does not exist in drp')
+                    drp_logger.info('The command you tried to run does not exist in drp')
                     break
-                
                 command+=','
             if error==False:
                 command=command[:-1]+')'
                 eval(command)
     else:
-        print('no')
+        drp_logger.info('no')

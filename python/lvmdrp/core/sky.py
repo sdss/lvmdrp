@@ -21,7 +21,7 @@ from skycalc_cli.skycalc import SkyModel, AlmanacQuery
 from skycalc_cli.skycalc_cli import fixObservatory
 
 from lvmdrp.core.constants import SKYMODEL_INST_PATH, SKYCORR_PAR_MAP
-from lvmdrp.core.constants import ALMANAC_CONFIG_PATH, SKYCALC_CONFIG_PATH, SKYMODEL_CONFIG_PATH
+from lvmdrp.core.constants import ALMANAC_CONFIG_PATH, SKYCALC_CONFIG_PATH
 from lvmdrp.core.constants import SKYMODEL_INST_CONFIG_PATH, SKYMODEL_MODEL_CONFIG_PATH
 from lvmdrp.external.skycorr import fitstabSkyCorrWrapper, createParFile, runSkyCorr
 
@@ -137,14 +137,6 @@ def get_bright_fiber_selection(rss):
     pass
 
 
-# configuration files to look into:
-# - instrument instrument_etc.par file (constant, LSF kernel, wavelength sampling)
-# - sm_filenames.dat (paths to atmospheric library, names of tables containing data that depends on the observing conditions)
-# - skymodel_etc.par (observing conditions, output columns: moon, etc.)
-# - estmultiscat (run once, more than once to improve the quality scattering component)
-# - preplinetrans (just once)
-# - calcskymodel (within drp, looking for skymodel_etc.par)
-# - outputs: radspec.fits and transspec.fits (contains same columns as skycalc)
 def run_skymodel(skymodel_path=SKYMODEL_INST_PATH, **kwargs):
     """run ESO sky model for observation parameters (ephemeris, atmospheric conditions, site, etc)
     
