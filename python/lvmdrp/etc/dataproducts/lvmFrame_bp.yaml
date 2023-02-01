@@ -14,8 +14,54 @@ hdu0:
   description: primary header metadata
   is_image: true
   header:
-  - key: SIMPLE
-    comment: conforms to FITS standard
+  - key: DPOS
+    comment: LVM dither position
+  - key: DRA
+    comment: LVM dither right ascension
+  - key: DDEC
+    comment: LVM dither declination
+  - key: VERSDRP2
+    comment: LVM DRP version (2d processing)
+  - key: VERSCORE
+    comment: lvmcore version
+  - key: VERSPY
+    comment: python version
+  - key: SLITFILE
+    comment: Associated slitmap name
+  - key: AIRMSBEG
+    comment: airmass at beginning of exposure
+  - key: AIRMSMID
+    comment: airmass at midpoint of exposure
+  - key: AIRMSEND
+    comment: airmass at end of exposure
+  - key: LSTBEG
+    comment: LST (hours) at beginning of exposure
+  - key: LSTMID
+    comment: LST (hours) at midpoint of exposure
+  - key: LSTEND
+    comment: LST (hours) at end of exposure
+  - key: HRANGBEG
+    comment: hour angle (hours) at beginning of exposure
+  - key: HRANGMID
+    comment: hour angle (hours) at midpoint of exposure
+  - key: HRANGEND
+    comment: hour angle (hours) at end of exposure
+  - key: DRP2QUAL
+    comment: DRP-2d quality bitmask
+  - key: MASKNAME
+    comment: Name of the bits in sdssMaskbits.par used by MASK extension of this file
+  - key: SCATVAL0
+    comment: Median scattered light around all edges
+  - key: SCATVAL1
+    comment: Scattered light in quadrant 1
+  - key: SCATVAL2
+    comment: Scattered light in quadrant 2
+  - key: SCATVAL3
+    comment: Scattered light in quadrant 3
+  - key: SCATVAL4
+    comment: Scattered light in quadrant 4
+  - key: SCATSIG
+    comment: Deviation in SCATVAL between quadrants
 hdu1:
   name: FLUX
   description: Flux in flat fielded electrons
