@@ -367,8 +367,8 @@ def sepContinuumLine_drp(sky_ref, cont_line_out, method="skycorr", sky_sci="", s
         # TODO: scale the predicted continuum with the sky_ref
         sky_cont = Spectrum1D(
             wave=sky_model["lam"].value,
-            data=sky_model["trans"].value,
-            error=(sky_model["dtrans2"] - sky_model["dtrans1"]).value/2,
+            data=sky_model["flux"].value - sky_model["flux_ael"].value,
+            error=(sky_model["dflux2"] - sky_model["dflux1"]).value/2,
             mask=np.zeros_like(sky_model["lam"].value, dtype=bool),
             inst_fwhm=sky_model["lam"].value / resolving_power
         )
