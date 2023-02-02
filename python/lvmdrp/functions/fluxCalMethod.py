@@ -37,11 +37,8 @@
 #   * divide the observed spectra by the expected flux (obs_star / (frac_PSF * model_star))
 # -------------------------------------------------------------------------------------------------
 
-# FROM THE MANGA DRP CODE -------------------------------------------------------------------------
-
-# -------------------------------------------------------------------------------------------------
-
 # FROM THE CODE BASE (PY3D) -----------------------------------------------------------------------
+
 import numpy as np
 from scipy import stats
 import matplotlib.pyplot as plt
@@ -49,6 +46,9 @@ import matplotlib.pyplot as plt
 from lvmdrp.core.spectrum1d import Spectrum1D
 from lvmdrp.core.rss import RSS, loadRSS
 from lvmdrp.external import ancillary_func
+
+
+description = "Provides with flux calibration tasks"
 
 
 def createSensFunction_drp(rss_in, out_sens,  ref_spec, airmass, exptime, smooth_poly='5', smooth_ref='6.0', smooth_ref2='6.0', median_filt='0',coadd='1', extinct_v='0.0', extinct_curve='mean', aper_correct='1.0',  ref_units='1e-16', target_units='1e-16',column_wave='0', column_flux='1', delimiter='', header='1' , split='', mask_wave='', mask_telluric='', overlap='100', out_star='', verbose='0'):
