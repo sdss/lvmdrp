@@ -54,6 +54,14 @@ hdu0:
     comment: Declination of this IFU in J2000
   - key: TILEID
     comment: Tile ID number
+  - key: TARGNAME
+    comment: The name of the target on for this tile
+  - key: TARGRA
+    comment: the target right ascension in J2000
+  - key: TARGDEC
+    comment: the target declination in J2000
+  - key: IFULABEL
+    comment: The IFU spectrograph+fiber label for this fiber, e.g. A3-2, S2-300
   - key: DRPQUAL
     comment: Quality bitmaks
   - key: IFUGLON
