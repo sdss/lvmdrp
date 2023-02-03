@@ -11,19 +11,22 @@ To install the DRP along with its dependencies, you need to run the following st
 1. Make sure you are in the intended python environment and directory.
    
 2. Clone the Github repository:
-> `git clone --recurse-submodules -j8 git://github.com/sdss/lvmdrp.git`
+> `git clone --recurse-submodules -j8 https://github.com/sdss/lvmdrp.git`
 
 3. Go into the lvmdrp directory:
 > `cd lvmdrp`
 
-4. Install the DRP package in the current python environment:
+4. Switch to the development branch:
+> `git checkout -b development`
+
+5. Install the DRP package in the current python environment:
 > `pip install .`
 
-5. Run the ESO sky model configuration:
+6. Run the ESO sky model configuration:
 > `drp sky configureSkyModel`
 
-The installation (step 4) may take a while, since it is going to install the necessary routines to run the ESO skycorr and the ASM.
-The sky model configuration (step 5) should be fast as it is going to write the default configuratation files in order to produce
+The installation (step 5) may take a while, since it is going to install the necessary routines to run the ESO skycorr and the ASM.
+The sky model configuration (step 6) should be fast as it is going to write the default configuration files in order to produce
 sky models. For more advanced (and slower) sky model configuration options, see the section below.
 
 ### Advanced ESO sky model configuration
