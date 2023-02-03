@@ -15,9 +15,9 @@ from setuptools.command.install import install
 import os
 import sys
 import site
-import argparse
 import shutil
 import subprocess
+import pexpect
 import struct
 import logging as setup_logger
 
@@ -56,9 +56,10 @@ def get_env_lib_directory():
 
 # The NAME variable should be of the format "sdss-drp".
 # Please check your NAME adheres to that format.
-NAME = 'drp'
-VERSION = '0.1.0dev'
+NAME = 'lvmdrp'
+VERSION = '0.1.0'
 RELEASE = 'dev' in VERSION
+
 SYSTEM = struct.calcsize("P") * 8
 
 SRC_PATH = os.path.abspath("src")
@@ -76,6 +77,9 @@ SKYMODEL_INST_PATH = os.path.join(LIB_PATH, "skymodel")
 
 # TODO: implement installation path parameters and defaults
 def install_eso_routines():
+    # get original current directory
+    initial_path = os.getcwd()
+
     # - install skycorr ---------------------------------------------------------------------------------------------
     setup_logger.info("preparing to install skycorr")
     os.chdir(SRC_PATH)
@@ -90,20 +94,33 @@ def install_eso_routines():
     os.chdir("skycorr")
     if sys.platform == "linux":
         if SYSTEM == 32:
-            out = subprocess.run("bash skycorr_installer_linux_i686-1.1.2.run".split(), capture_output=True, text=True, input=f"{SKYCORR_INST_PATH}\ny\ny\n")
+            skycorr_installer = pexpect.spawn("bash skycorr_installer_linux_i686-1.1.2.run", encoding="utf-8")
         elif SYSTEM == 64:
-            out = subprocess.run("bash skycorr_installer_linux_x86_64-1.1.2.run".split(), capture_output=True, text=True, input=f"{SKYCORR_INST_PATH}\ny\ny\n")
+            skycorr_installer = pexpect.spawn("bash skycorr_installer_linux_x86_64-1.1.2.run", encoding="utf-8")
     elif sys.platform == "darwin":
-        out = subprocess.run("bash skycorr_installer_macos_x86_64-1.1.2.run".split(), capture_output=True, text=True, input=f"{SKYCORR_INST_PATH}\ny\ny\n")
+        skycorr_installer = pexpect.spawn("bash skycorr_installer_macos_x86_64-1.1.2.run", encoding="utf-8")
     else:
         raise NotImplementedError(f"installation not implemented for '{sys.platform}' OS")
 
-    if out.returncode == 0:
+    skycorr_installer.logfile_read = sys.stdout
+
+    skycorr_installer.expect("root installation directory")
+    skycorr_installer.sendline(SKYCORR_INST_PATH)
+    skycorr_installer.expect("Is this OK [Y/n]?")
+    skycorr_installer.sendline("y")
+    prompt = skycorr_installer.expect("Proceed with this installation directory")
+    if prompt == 0:
+        skycorr_installer.sendline("y")
+    prompt = skycorr_installer.expect("will overwrite existing files without further warning")
+    if prompt == 0:
+        skycorr_installer.sendline("y")
+    skycorr_installer.wait()
+    skycorr_installer.close()
+
+    if skycorr_installer.exitstatus == 0:
         setup_logger.info("successfully installed skycorr")
     else:
         setup_logger.error(f"error while installing skycorr")
-        setup_logger.error(f"full report:")
-        setup_logger.error(f"{out.stderr}")
     
     out = subprocess.run(f"{os.path.join(SKYCORR_INST_PATH, 'bin', 'skycorr')} {os.path.join(SKYCORR_INST_PATH, 'examples', 'config', 'sctest_sinfo_H.par')}".split(), capture_output=True)
     if out.returncode == 0:
@@ -256,6 +273,9 @@ def install_eso_routines():
     shutil.rmtree(os.path.join(SRC_PATH, "SM-01"))
     shutil.rmtree(os.path.join(SRC_PATH, "skycorr"))
 
+    # return to original directory
+    os.chdir(initial_path)
+
 
 class DevCommand(develop):
     def run(self):
@@ -275,7 +295,8 @@ class InsCommand(install):
 
 def run(packages, install_requires):
 
-    setup(name=NAME,
+    setup(
+        name=NAME,
         version=VERSION,
         license='BSD3',
         description='SDSSV-LVM Data Reduction Pipeline',
@@ -325,17 +346,10 @@ def parse_requirements(reqfile_path):
     return install_requires
 
 
-def get_requirements(opts):
+def get_requirements():
     ''' Get the proper requirements file based on the optional argument '''
 
-    if opts.dev:
-        name = 'requirements_dev.txt'
-    elif opts.doc:
-        name = 'requirements_doc.txt'
-    else:
-        name = 'requirements_all.txt'
-    
-    requirements_file = os.path.join(os.path.dirname(__file__), name)
+    requirements_file = os.path.join(os.path.dirname(__file__), "requirements_all.txt")
     install_requires = parse_requirements(requirements_file)
     return install_requires
 
@@ -355,21 +369,8 @@ def remove_args(parser):
 
 if __name__ == '__main__':
 
-    # Custom parser to decide whether which requirements to install
-    parser = argparse.ArgumentParser(prog=os.path.basename(sys.argv[0]))
-    parser.add_argument('-d', '--dev', dest='dev', default=False, action='store_true',
-                        help='Install all packages for development')
-    parser.add_argument('-o', '--doc', dest='doc', default=False, action='store_true',
-                        help='Install only core + documentation packages')
-
-    # We use parse_known_args because we want to leave the remaining args for distutils
-    args = parser.parse_known_args()[0]
-
     # Get the proper requirements file
-    install_requires = get_requirements(args)
-
-    # Now we remove all our custom arguments to make sure they don't interfere with distutils
-    remove_args(parser)
+    install_requires = get_requirements()
 
     # Have distutils find the packages
     packages = find_packages(where='python')
