@@ -752,6 +752,7 @@ def corrSkyLine_drp(sky1_line_in, sky2_line_in, sci_line_in, line_corr_out, meth
             if len(sky_models_in) == 1:
                 sky_models_in = 2 * sky_models_in
 
+            # BUG: I cannot index xxx_model.loadFitsData(...) because that is an in-place operation
             sky1_model = RSS()
             sky1_model.loadFitsData(sky_models_in[0])[1]
             sky2_model = RSS()
@@ -792,7 +793,7 @@ def corrSkyLine_drp(sky1_line_in, sky2_line_in, sci_line_in, line_corr_out, meth
     rss.writeFitsData(filename=line_corr_out)
 
 
-def corrSkyContinuum_drp(sky1_cont_in, sky2_cont_in, sky1_model_in, sky2_model_in, sci_model_in, cont_corr_out, model_fiber=1):
+def corrSkyContinuum_drp(sky1_cont_in, sky2_cont_in, sci_cont_in, cont_corr_out, method="model", sky_models_in="", sci_model_in="", model_fiber=1):
     """
 
         Combines the sky continuum components from the sky pointings into a final model for the science pointing.
@@ -825,44 +826,84 @@ def corrSkyContinuum_drp(sky1_cont_in, sky2_cont_in, sky1_model_in, sky2_model_i
 
     """
 
-    # read sky continuum from both telescopes
+    # read sky continuum from both sky telescopes
     sky1_cont = Spectrum1D()
     sky1_cont.loadFitsData(sky1_cont_in)
+    sky1_head = Header()
+    sky1_head.loadFitsHeader(sky1_cont_in)
 
     sky2_cont = Spectrum1D()
     sky2_cont.loadFitsData(sky2_cont_in)
+    sky2_head = Header()
+    sky2_head.loadFitsHeader(sky2_cont_in)
+
+    # read sky continuum from science telescope
+    sci_cont = Spectrum1D()
+    sci_cont.loadFitsData(sci_cont_in)
+    sci_head = Header()
+    sci_head.loadFitsHeader(sci_cont_in)
 
     # read sky models for all pointings
-    sky1_rss = RSS()
-    sky1_rss.loadFitsData(sky1_model_in)
-    sky2_rss = RSS()
-    sky2_rss.loadFitsData(sky2_model_in)
-    sci_rss = RSS()
-    sci_rss.loadFitsData(sci_model_in)
+    if method == "model":
+        if sky_models_in != "":
+            sky_models_in = sky_models_in.split(",")
+            if len(sky_models_in) == 1:
+                sky_models_in = 2 * sky_models_in
 
-    sky1_model = sky1_rss[model_fiber]
-    sky2_model = sky2_rss[model_fiber]
-    sci_model = sci_rss[model_fiber]
+            sky1_model = RSS()
+            sky1_model.loadFitsData(sky_models_in[0])
+            sky2_model = RSS()
+            sky2_model.loadFitsData(sky_models_in[1])
+        else:
+            # TODO: fall back to closest sky model if not given filenames
+            pass
+    
+        if sci_model_in != "":
+            sci_model = RSS()
+            sci_model.loadFitsData(sci_model_in)
+        else:
+            # TODO: fall back to closest sky model to science target
+            pass
 
-    # match wavelength resolution and wavelenth across telescopes using science pointing as reference
-    if np.any(sky1_model._wave != sci_model._wave):
-        sky1_model = sky1_model.resampleSpec(sci_model._wave)
-    if np.any(sky2_model._wave != sci_model._wave):
-        sky2_model = sky2_model.resampleSpec(sci_model._wave)
+        sky1_model = sky1_model.getSpec(model_fiber)
+        sky2_model = sky2_model.getSpec(model_fiber)
+        sci_model = sci_model.getSpec(model_fiber)
 
-    if np.any(sky1_model._inst_fwhm != sci_model._inst_fwhm):
-        sky1_model.matchFWHM(sci_model._inst_fwhm)
-    if np.any(sky2_model._inst_fwhm != sci_model._inst_fwhm):
-        sky2_model.matchFWHM(sci_model._inst_fwhm)
+        # match wavelength resolution and wavelenth across telescopes using science pointing as reference
+        if np.any(sky1_model._wave != sci_model._wave):
+            sky1_model = sky1_model.resampleSpec(sci_model._wave)
+        if np.any(sky2_model._wave != sci_model._wave):
+            sky2_model = sky2_model.resampleSpec(sci_model._wave)
 
-    # TODO: weight the continuum components of each sky telescope depending on the sky quality (darker, airmass)
-    # extrapolate sky pointings into science pointing
-    w_1 = sci_model / sky1_model
-    w_2 = sci_model / sky2_model
-    # TODO: smooth high frequency features in weights
+        if np.any(sky1_model._inst_fwhm != sci_model._inst_fwhm):
+            sky1_model.matchFWHM(sci_model._inst_fwhm)
+        if np.any(sky2_model._inst_fwhm != sci_model._inst_fwhm):
+            sky2_model.matchFWHM(sci_model._inst_fwhm)
+
+        # TODO: weight the continuum components of each sky telescope depending on the sky quality (darker, airmass)
+        # extrapolate sky pointings into science pointing
+        w_1 = sci_model / sky1_model
+        w_2 = sci_model / sky2_model
+        # TODO: smooth high frequency features in weights
 
     # TODO: implement sky coordinates interpolation
+    elif method == "distance":
+        ra_1, dec_1 = sky1_head["RA"], sky1_head["DEC"]
+        # sky2 position
+        ra_2, dec_2 = sky2_head["RA"], sky2_head["DEC"]
+        # sci position
+        ra_s, dec_s = sci_head["RA"], sci_head["DEC"]
+
+        w_1 = 1 / ang_distance(ra_1, dec_1, ra_s, dec_s)
+        w_2 = 1 / ang_distance(ra_2, dec_2, ra_s, dec_s)
+        w_norm = w_1 + w_2
+        w_1, w_2 = w_1 / w_norm, w_2 / w_norm
+
     # TODO: implement interpolation in the parameter space
+    elif method == "interpolate":
+        raise NotImplementedError(f"method '{method}' is not implemented yet")
+    else:
+        raise ValueError(f"Unknown method '{method}'. Valid mehods are: 'distance', 'model' (default) and 'interpolate'.")
 
     # TODO: propagate error in continuum correction
     # TODO: propagate mask
