@@ -1566,8 +1566,7 @@ class Spectrum1D(object):
             s_new = s.resampleSpec(wave, method="linear")
             fluxes[i, :] = s_new._data
             if s._error is None:
-                raise ValueError(
-                    's.uncertainty needs to be set for every spectrum')
+                raise ValueError('s.uncertainty needs to be set for all spectra')
             else:
                 errors[i, :] = s_new._error
             
@@ -1591,7 +1590,9 @@ class Spectrum1D(object):
         fwhms = numpy.ma.average(fwhms, weights=1./errors**2, axis=0).filled(numpy.nan)
         errors = numpy.sqrt(1. / numpy.ma.sum(1./errors**2, axis=0).filled(numpy.nan))
         
-        masks = numpy.logical_or(masks[0], masks[1])
-        masks |= numpy.isnan(fluxes) | numpy.isnan(errors)
+        masks = numpy.logical_and(masks[0], masks[1])
+        masks = numpy.logical_or(masks, numpy.isnan(fluxes))
+        masks = numpy.logical_or(masks, numpy.isnan(fwhms))
+        masks = numpy.logical_or(masks, numpy.isnan(errors))
         
         return Spectrum1D(wave=wave, data=fluxes, error=errors, inst_fwhm=fwhms, mask=masks)

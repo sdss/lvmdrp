@@ -82,11 +82,10 @@ class Image(Header):
                 return img
             except:
                 #raise exception if the type are not matching in general
-                raise exceptions.TypeError("unsupported operand type(s) for +: %s and %s"%(str(type(self)).split("'")[1], str(type(other)).split("'")[1]))
+                raise TypeError("unsupported operand type(s) for +: %s and %s"%(str(type(self)).split("'")[1], str(type(other)).split("'")[1]))
 
     def __radd__(self, other):
         self.__add__(other)
-
 
     def __sub__(self, other):
         """
@@ -145,9 +144,7 @@ class Image(Header):
                 return img
             except:
                 #raise exception if the type are not matching in general
-                raise exceptions.TypeError("unsupported operand type(s) for -: %s and %s"%(str(type(self)).split("'")[1], str(type(other)).split("'")[1]))
-
-
+                raise TypeError("unsupported operand type(s) for -: %s and %s"%(str(type(self)).split("'")[1], str(type(other)).split("'")[1]))
 
     def __truediv__(self, other):
         """
@@ -222,7 +219,7 @@ class Image(Header):
                 return img
             except:
                 #raise exception if the type are not matching in general
-                raise exceptions.TypeError("unsupported operand type(s) for /: %s and %s"%(str(type(self)).split("'")[1], str(type(other)).split("'")[1]))
+                raise TypeError("unsupported operand type(s) for /: %s and %s"%(str(type(self)).split("'")[1], str(type(other)).split("'")[1]))
 
     def __mul__(self, other):
         """
@@ -281,12 +278,10 @@ class Image(Header):
                 return img
             except:
                 #raise exception if the type are not matching in general
-                raise exceptions.TypeError("unsupported operand type(s) for *: %s and %s"%(str(type(self)).split("'")[1], str(type(other)).split("'")[1]))
-
+                raise TypeError("unsupported operand type(s) for *: %s and %s"%(str(type(self)).split("'")[1], str(type(other)).split("'")[1]))
 
     def __rmul__(self, other):
         self.__mul__(other)
-
 
     def __lt__(self, other):
         return self._data<other
@@ -305,7 +300,6 @@ class Image(Header):
 
     def __ge__(self, other):
         return self._data>=other
-
 
     def sqrt(self):
         """
@@ -425,7 +419,6 @@ class Image(Header):
             out_mask = None
         return out_data, out_error, out_mask
 
-
     def getSlice(self, slice, axis):
         if axis=='X' or axis=='x' or axis == 0:
             if self._error is not None:
@@ -447,7 +440,6 @@ class Image(Header):
             else:
                 mask = None
             return Spectrum1D(numpy.arange(self._dim[0]), self._data[:, slice], error,  mask)
-
 
     def setData(self, data=None, error=None, mask=None, header=None, select=None):
         """
@@ -661,8 +653,6 @@ class Image(Header):
         self.setHeader(hdu[extension_header].header) # get header  from the first FITS extension
         hdu.close()
 
-
-
     def writeFitsData(self, filename,  extension_data=None, extension_mask=None, extension_error=None):
         """
             Save information from an Image into a FITS file. A single or multiple extension file can be created.
@@ -820,7 +810,6 @@ class Image(Header):
         sdssImage = Image(data=calibratedImage*factor,error=error*factor, header=self._header)
         return sdssImage
 
-
     def split(self,  fragments, axis='X'):
         image_list = []
         if axis=='X' or axis=='x' or axis == 1:
@@ -863,37 +852,6 @@ class Image(Header):
             self._mask =  numpy.concatenate(mask, axis_split)
         if image_list[0]._header is not None:
             self._header = image_list[0]._header
-
-
-    #def subsampleImg(self, factor=2):
-        #"""
-            #Subsample the image by a certain, e.g. each pixel is divided into several pixel so that their sum is the factor**2 times the original one.
-
-            #Returns
-            #-----------
-            #new_image :  Image object
-                #Subsampled image
-
-        #"""
-        ## create empty array with 2 time larger size in both axes
-        #if self._data  is not None:
-            #new_data = ndimage.interpolation.zoom(self._data, factor, output=numpy.float32, order=0, prefilter=False)
-        #else:
-            #new_data = None
-        #if self._error is not None:
-            #new_error = ndimage.interpolation.zoom(self._error, factor, output=numpy.float32, order=0, prefilter=False)
-        #else:
-            #new_error = None
-        #if self._mask is not None:
-            #new_mask= ndimage.interpolation.zoom(self._mask, factor, output="bool", order=0, prefilter=False)
-        #else:
-            #new_mask = None
-
-        ## define selection for the the 4 different subpixels in which to store the original data
-
-        ## create new Image object with the new subsample data
-        #new_image = Image(data=new_data, error=new_error,  mask=new_mask)
-        #return new_image
 
     def subsampleImg(self):
         """
@@ -1049,31 +1007,6 @@ class Image(Header):
         new_image = Image(data=new, error=self._error,  mask=self._mask, header = self._header, origin=self._origin)
         return new_image
 
-#    def convolveGaussImg(self, sigma_x, sigma_y, mode='nearest'):
-#        """
-#            Convolves the data of the Image with a given kernel. The mask and error information will be unchanged.
-#
-#            Parameters
-#            --------------
-#            sigma_x : float
-#                With of the Gaussian in pixels along the x direction
-#            sigma_y : float
-#                With of the Gaussian in pixels along the y direction
-#            mode :  string, optional with default: 'nearest'
-#                Set the mode how to handle the boundarys within the convolution
-#
-#
-#            Returns
-#            -----------
-#            new_image :  Image object
-#                Convolved Image
-#        """
-#        # convolve the data array with the 2D Gaussian convolution kernel
-#        new=ndimage.filters.gaussian_filter(self._data,(sigma_y,sigma_x),mode=mode)
-#        # create new Image object with the error and the mask unchanged and return
-#        new_image = Image(data=new, error=self._error,  mask=self._mask, header = self._header, origin=self._origin)
-#        return new_image
-
     def medianImg(self, size, mode='nearest',use_mask=False):
         """
             Return a new Image that has been median filtered with a filter window of given size.
@@ -1144,8 +1077,6 @@ class Image(Header):
         elif mode=='max':
             return Spectrum1D(numpy.arange(dim), numpy.amax(self._data, axis))
 
-
-
     def fitPoly(self, axis='y', order=4, plot=-1):
         """
             Fits the image with polynomial function along a given axis.
@@ -1202,11 +1133,11 @@ class Image(Header):
                 else:
                     fit_result[:, i] = numpy.nan
             else:
-                fit_par[:, i] = numpy.polyfit(x[minfit:maxfit], self._data[minfit:maxfit, i], order) # fit polynom
+                fit_par[:, i] = numpy.polyfit(x, self._data[:, i], order) # fit polynom
                 res = numpy.polyval(fit_par[:, i], x)-self._data[:, i] # compute residuals
                 std= numpy.std(res)  # compute RMS deviation
                 select = numpy.logical_and(res>-3*std, res<3*std) # select good pixels
-                fit_par[:, i] = numpy.polyfit(x[minfit:maxfit][select[minfit:maxfit]], self._data[minfit:maxfit, i][select[minfit:maxfit]], order)  #refit polynomial with clipped data
+                fit_par[:, i] = numpy.polyfit(x[select], self._data[:, i][select], order)  #refit polynomial with clipped data
                 if plot==i:
                     pylab.plot(x[select], self._data[:, i][select], 'ok')
                 fit_result[:, i] = numpy.polyval(fit_par[:, i], x)  # evalute the polynom
@@ -1256,7 +1187,6 @@ class Image(Header):
             #return traceFWHM
         return (fwhm, mask)
 
-
     def extractSpecAperture(self, TraceMask, aperture):
         pos = TraceMask._data
         bad_pix = TraceMask._mask
@@ -1283,7 +1213,6 @@ class Image(Header):
                 mask[good_pix[:, i], i] = numpy.sum(self._mask[:, i][pixels], 1)>0
             mask[:, i]=bad_pix[:, i]
         return data,  error,  mask
-
 
     def extractSpecOptimal(self, TraceMask, TraceFWHM, plot=-1):
 
@@ -1343,9 +1272,6 @@ class Image(Header):
             else:
                 select = numpy.unique(numpy.clip(numpy.round(trace[:, i][numpy.newaxis, :]+dx[:, numpy.newaxis]), 0, self._dim[0]-1).astype('int16').flatten())
                 self._mask[select, i] = True
-
-
-
 
     def peakPosition(self, guess_x=None, guess_y=None, box_x=None, box_y=None):
         image = self._data *numpy.logical_not(self._mask)
@@ -1493,7 +1419,7 @@ class Image(Header):
         aperture_result = integrate_aperture(self._data, cent_x, cent_y, aperture, kmax, error=self._error,  mask=self._mask)
         return aperture_result
 
-    def  extractApertures(self, posTab,  ref_pixel_x, ref_pixel_y, arc_scale, angle=0, offset_arc_x=0.0, offset_arc_y=0.0 ):
+    def extractApertures(self, posTab,  ref_pixel_x, ref_pixel_y, arc_scale, angle=0, offset_arc_x=0.0, offset_arc_y=0.0):
         new_posTab=posTab.rotatePosTab(angle).scalePosTab(1.0/arc_scale)
         new_posTab.offsetPosTab(ref_pixel_x, ref_pixel_y)
 
@@ -1503,10 +1429,7 @@ class Image(Header):
 
         apertures = Apertures(new_posTab._arc_position_x,new_posTab._arc_position_y,  numpy.ones(len(new_posTab._arc_position_x))*new_posTab._size[0])
         flux = apertures.integratedFlux(self)
-        return flux#, new_posTab._arc_position_x, new_posTab._arc_position_y
-
-
-
+        return flux
 
 
 def loadImage(infile,  extension_data=None, extension_mask=None, extension_error=None, extension_header=0):
@@ -1591,6 +1514,7 @@ def glueImages(images, positions):
 
         return out_image
 
+
 def combineImages(images,  method='median', k=3):
         """
             Combines several image to a single one according to a certain average methods
@@ -1640,5 +1564,3 @@ def combineImages(images,  method='median', k=3):
         outImage = Image(data=new_image, header = new_header)
 
         return outImage
-
-

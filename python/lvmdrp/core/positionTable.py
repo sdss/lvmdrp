@@ -124,7 +124,7 @@ class PositionTable(object):
         posTab_new = PositionTable(shape=self._shape, size=self._size, arc_position_x=arc_position_x, arc_position_y=arc_position_y, good_fibers=self._good_fibers,  fiber_type=self._fiber_type)
         return posTab_new
         
-    def  scalePosTab(self, scale):
+    def scalePosTab(self, scale):
         position_x = self._arc_position_x*scale
         position_y = self._arc_position_y*scale
         size = [self._size[0]*scale, self._size[1]*scale]

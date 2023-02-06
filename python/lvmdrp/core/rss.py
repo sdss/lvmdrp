@@ -25,11 +25,11 @@ class RSS(FiberRows):
         ref_spec = spectra_list[0]
 
         rss = cls(
-            data=numpy.zeros(n_spectra, ref_spec._data.size),
-            wave=numpy.zeros(n_spectra, ref_spec._wave.size) if ref_spec._wave is not None else None,
-            inst_fwhm=numpy.zeros(n_spectra, ref_spec._inst_fhwm) if ref_spec._inst_fwhm is not None else None,
-            error=numpy.zeros(n_spectra, ref_spec._error) if ref_spec._error is not None else None,
-            mask=numpy.zeros(n_spectra, ref_spec._mask, dtype=bool) if ref_spec._mask is not None else None,
+            data=numpy.zeros((n_spectra, ref_spec._data.size)),
+            wave=numpy.zeros((n_spectra, ref_spec._wave.size)) if ref_spec._wave is not None else None,
+            inst_fwhm=numpy.zeros((n_spectra, ref_spec._inst_fwhm.size)) if ref_spec._inst_fwhm is not None else None,
+            error=numpy.zeros((n_spectra, ref_spec._error.size)) if ref_spec._error is not None else None,
+            mask=numpy.zeros((n_spectra, ref_spec._mask.size), dtype=bool) if ref_spec._mask is not None else None,
             header=header, shape=shape, size=size, arc_position_x=arc_position_x, arc_position_y=arc_position_y, good_fibers=good_fibers, fiber_type=fiber_type, logwave=logwave
         )
         for i in range(n_spectra):
