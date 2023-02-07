@@ -16,10 +16,14 @@ import os
 import sys
 import site
 import shutil
+import zipfile
 import subprocess
 import pexpect
 import struct
 import logging as setup_logger
+import requests
+from html.parser import HTMLParser
+from urllib.parse import urlparse, parse_qs
 
 
 def rc_symlink(src, dst):
@@ -74,15 +78,68 @@ SKYMODEL_SRC_PATH = os.path.join(SRC_PATH, "SM-01.tar.gz")
 SKYCORR_INST_PATH = os.path.join(LIB_PATH, "skycorr")
 SKYMODEL_INST_PATH = os.path.join(LIB_PATH, "skymodel")
 
+GD_SRC_ID = "17J9dfyiA8jxtZ_y4Yl7vZ2RenBK73AzC"
+
+
+class GetForm(HTMLParser):
+    def handle_starttag(self, tag, attrs):
+        if tag == "form":
+            self.tag, self.attrs = tag, dict(attrs)
+        return super().handle_starttag(tag, attrs)
+
+# NOTE: inspired by https://bit.ly/3juwYLX
+def get_token(response):
+    gd_parser = GetForm()
+    gd_parser.feed(response.text)
+    params = parse_qs(urlparse(gd_parser.attrs["action"]).query)
+    return params["uuid"][0]
+
+def dump_content(response, destination):
+    CHUNK_SIZE = 32768
+
+    with open(destination, "wb") as f:
+        for chunk in response.iter_content(CHUNK_SIZE):
+            if chunk: # filter out keep-alive new chunks
+                f.write(chunk)
+
+def get_gd_file(id, destination):
+    URL = "https://docs.google.com/uc?export=download"
+
+    session = requests.Session()
+
+    response = session.get(URL, params = { 'id' : id }, stream = True)
+    token = get_token(response)
+
+    if token:
+        params = { 'id' : id, 'confirm' : token }
+        response = session.get(URL, params = params, stream = True)
+
+    dump_content(response, destination)
+
 
 # TODO: implement installation path parameters and defaults
 def install_eso_routines():
     # get original current directory
     initial_path = os.getcwd()
 
+    # NOTE: this is probably an unsafe solution, but for now will have to do!!
+    # - download compressed source files ----------------------------------------------------------------------------
+    os.makedirs(SRC_PATH, exist_ok=True)
+    os.chdir(SRC_PATH)
+    get_gd_file(id=GD_SRC_ID, destination="lvmdrp_src.zip")
+    # if out.returncode == 0:
+    #     setup_logger.info("successfully downloaded ESO source files")
+    # else:
+    #     setup_logger.error("error while downloading source files")
+    #     setup_logger.error("full report:")
+    #     setup_logger.error(out.stderr.decode("utf-8"))
+    with zipfile.ZipFile("lvmdrp_src.zip", "r") as src_compressed:
+        src_compressed.extractall(os.path.curdir)
+    os.remove("lvmdrp_src.zip")
+    # ---------------------------------------------------------------------------------------------------------------
+
     # - install skycorr ---------------------------------------------------------------------------------------------
     setup_logger.info("preparing to install skycorr")
-    os.chdir(SRC_PATH)
     out = subprocess.run(f"tar xzvf {SKYCORR_SRC_PATH}".split(), capture_output=True)
     if out.returncode == 0:
         setup_logger.info("successfully extracted skycorr installer")
@@ -103,7 +160,6 @@ def install_eso_routines():
         raise NotImplementedError(f"installation not implemented for '{sys.platform}' OS")
 
     skycorr_installer.logfile_read = sys.stdout
-
     skycorr_installer.expect("root installation directory")
     skycorr_installer.sendline(SKYCORR_INST_PATH)
     skycorr_installer.expect("Is this OK [Y/n]?")
