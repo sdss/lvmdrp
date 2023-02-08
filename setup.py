@@ -90,7 +90,7 @@ def install_eso_routines():
     # - download compressed source files ----------------------------------------------------------------------------
     os.makedirs(SRC_PATH, exist_ok=True)
     os.chdir(SRC_PATH)
-    out = subprocess.run(f"wget {LVM_SRC_URL}".split(), capture_output=True)
+    out = subprocess.run(f"curl {LVM_SRC_URL} --output lvmdrp_src.zip".split(), capture_output=True)
     if out.returncode == 0:
         setup_logger.info("successfully downloaded ESO source files")
     else:
