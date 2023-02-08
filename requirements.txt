@@ -1,6 +1,7 @@
 astLib==0.11.8
 astropy==5.2
 drp==0.1.2
+dust_extinction==1.1
 invoke==1.7.3
 ipython==8.9.0
 lvmsurveysim==0.8.3
@@ -8,6 +9,7 @@ matplotlib==3.6.2
 numpy==1.24.1
 peewee==3.15.4
 pexpect==4.8.0
+pydl==0.7.0
 pyfits==3.5
 Pygments==2.14.0
 pytest==7.2.0

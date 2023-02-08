@@ -78,43 +78,7 @@ SKYMODEL_SRC_PATH = os.path.join(SRC_PATH, "SM-01.tar.gz")
 SKYCORR_INST_PATH = os.path.join(LIB_PATH, "skycorr")
 SKYMODEL_INST_PATH = os.path.join(LIB_PATH, "skymodel")
 
-GD_SRC_ID = "17J9dfyiA8jxtZ_y4Yl7vZ2RenBK73AzC"
-
-
-class GetForm(HTMLParser):
-    def handle_starttag(self, tag, attrs):
-        if tag == "form":
-            self.tag, self.attrs = tag, dict(attrs)
-        return super().handle_starttag(tag, attrs)
-
-# NOTE: inspired by https://bit.ly/3juwYLX
-def get_token(response):
-    gd_parser = GetForm()
-    gd_parser.feed(response.text)
-    params = parse_qs(urlparse(gd_parser.attrs["action"]).query)
-    return params["uuid"][0]
-
-def dump_content(response, destination):
-    CHUNK_SIZE = 32768
-
-    with open(destination, "wb") as f:
-        for chunk in response.iter_content(CHUNK_SIZE):
-            if chunk: # filter out keep-alive new chunks
-                f.write(chunk)
-
-def get_gd_file(id, destination):
-    URL = "https://docs.google.com/uc?export=download"
-
-    session = requests.Session()
-
-    response = session.get(URL, params = { 'id' : id }, stream = True)
-    token = get_token(response)
-
-    if token:
-        params = { 'id' : id, 'confirm' : token }
-        response = session.get(URL, params = params, stream = True)
-
-    dump_content(response, destination)
+LVM_SRC_URL = "http://ifs.astroscu.unam.mx/LVM/lvmdrp_src.zip"
 
 
 # TODO: implement installation path parameters and defaults
@@ -126,13 +90,13 @@ def install_eso_routines():
     # - download compressed source files ----------------------------------------------------------------------------
     os.makedirs(SRC_PATH, exist_ok=True)
     os.chdir(SRC_PATH)
-    get_gd_file(id=GD_SRC_ID, destination="lvmdrp_src.zip")
-    # if out.returncode == 0:
-    #     setup_logger.info("successfully downloaded ESO source files")
-    # else:
-    #     setup_logger.error("error while downloading source files")
-    #     setup_logger.error("full report:")
-    #     setup_logger.error(out.stderr.decode("utf-8"))
+    out = subprocess.run(f"wget {LVM_SRC_URL}".split(), capture_output=True)
+    if out.returncode == 0:
+        setup_logger.info("successfully downloaded ESO source files")
+    else:
+        setup_logger.error("error while downloading source files")
+        setup_logger.error("full report:")
+        setup_logger.error(out.stderr.decode("utf-8"))
     with zipfile.ZipFile("lvmdrp_src.zip", "r") as src_compressed:
         src_compressed.extractall(os.path.curdir)
     os.remove("lvmdrp_src.zip")
