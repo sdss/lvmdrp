@@ -1,23 +1,106 @@
 name: lvmModels
-short: replace me - with a short one sentence summary of file
-description: replace me - with a longer description of the data product
+short: observed and fitted model spectra for each fiber
+description: |
+  general metadata propagated from the DRP solutions is provided in the first HDU.
+  The observed flux, inverse variance, wavelength, LSF (sigma) and bitmask for each fiber are included (HDU1-5).
+  The reddedning correction for each fiber is provided (HDU6). The corresponding best fitting joint models,
+  stellar and emission line spectra, along with their bitmasks, are also included (HDU7-12).
+  A position table provides information of where each fiber is pointing in the sky (HDU14).
 location: $LVM_SPECTRO_ANALYSIS/[DRPVER]/[DAPVER]/[TILEID]
-created_by: module.py
-used_by: module.py
+created_by: lvmdap._cmd.py
+used_by: null
 naming_convention: lvm-[TILEID]-models.fits.gz
 hdu0:
   name: PRIMARY
-  description: replace me description
+  description: general metadata propagated from the DRP
   is_image: true
-  size: 0 bytes
   header:
-  - key: SIMPLE
-    value: true
-    comment: conforms to FITS standard
-  - key: BITPIX
-    value: 8
-    comment: array data type
-  - key: NAXIS
-    value: 0
-    comment: number of array dimensions
-
+  - key: STSNR
+    comment: median S/N for the observed stellar component
+  - key: EMSNR
+    comment: median S/N for the observed emission line component
+hdu1:
+  name: FLUX
+  description: observed flux [1e-17 erg/s/cm^2/AA/fiber]
+  is_image: true
+  shape: NWAVE x NFIBER
+hdu2:
+  name: IVAR
+  description: inverse variance
+  is_image: true
+  shape: NWAVE x NFIBER
+hdu3:
+  name: MASK
+  description: bitmask for each fiber pixel
+  is_image: true
+  shape: NWAVE x NFIBER
+hdu4:
+  name: LSF
+  description: line-spread function (sigma)
+  is_image: true
+  shape: NWAVE
+hdu5:
+  name: WAVE
+  description: wavelength vector [AA]
+  is_image: true
+  shape: NWAVE
+hdu6:
+  name: REDCORR
+  description: reddening correction
+  is_image: true
+  shape: NWAVE x NFIBER
+hdu7:
+  name: MODEL
+  description: joint model spectra for each observed fiber [1e-17 erg/s/cm^2/AA/fiber]
+  is_image: true
+  shape: NWAVE x NFIBER
+hdu8:
+  name: MODEL_MASK
+  description: bitmask for each pixel in the joint model spectra
+  is_image: true
+  shape: NWAVE x NFIBER
+hdu9:
+  name: EMLINE
+  description: emission line component of the joint model spectra [1e-17 erg/s/cm^2/AA/fiber]
+  is_image: true
+  shape: NWAVE x NFIBER
+hdu10:
+  name: EMLINE_MASK
+  description: bitmask for emisison line component
+  is_image: true
+  shape: NWAVE x NFIBER
+hdu11:
+  name: STELLAR
+  description: stellar continuum component of the joint model spectra [1e-17 erg/s/cm^2/AA/fiber]
+  is_image: true
+  shape: NWAVE x NFIBER
+hdu12:
+  name: STELLAR_MASK
+  description: bitmask for the stellar continuum compoent
+  is_image: true
+  shape: NWAVE x NFIBER
+hdu13:
+  name: BINID
+  description: REPLACE ME
+  is_image: true
+hdu14:
+  name: POSTAB
+  description: position table mapping fiber IDs to sky positions
+  is_image: false
+  shape: BINARY FITS TABLE
+  columns:
+    FIBERID:
+      name: FIBERID
+      type: int32
+      unit: 
+      description: index of the fiber in the RSS extensions
+    XPOS:
+      name: XPOS
+      type: float32
+      unit: arcsec
+      description: x position of the fiber in sky coordinates
+    YPOS:
+      name: YPOS
+      type: float32
+      unit: arcsec
+      description: y position of the fiber in sky coordinates
