@@ -1,13 +1,13 @@
 name: lvmModels
 short: observed and fitted model spectra for each fiber
 description: |
-  general metadata propagated from the DRP solutions is provided in the first HDU.
-  The observed flux, inverse variance, wavelength, LSF (sigma) and bitmask for each fiber are included (HDU1-5).
-  The reddedning correction for each fiber is provided (HDU6). The corresponding best fitting joint models,
-  stellar and emission line spectra, along with their bitmasks, are also included (HDU7-12).
-  A position table provides information of where each fiber is pointing in the sky (HDU14).
+  general metadata propagated from the DRP solution and describing the contents of this file (HDU0),
+  the observed flux, inverse variance, wavelength, LSF (sigma) and bitmask for each fiber (HDU1-5),
+  the reddening correction for each fiber (HDU6),
+  the corresponding best fitting joint, stellar and emission line model spectra, along with their inverse variance and bitmasks (HDU7-12), and
+  fiber map table with information of each fiber position on the sky, the slitmap and a bitmask for quality (HDU13)
 location: $LVM_SPECTRO_ANALYSIS/[DRPVER]/[DAPVER]/[TILEID]
-created_by: lvmdap._cmd.py
+created_by: lvmdap._cmdline._main
 used_by: null
 naming_convention: lvm-[TILEID]-models.fits.gz
 hdu0:
@@ -15,6 +15,8 @@ hdu0:
   description: general metadata propagated from the DRP
   is_image: true
   header:
+  - key: DAPVER
+    comment: DAP version
   - key: STSNR
     comment: median S/N for the observed stellar component
   - key: EMSNR
@@ -23,22 +25,22 @@ hdu1:
   name: FLUX
   description: observed flux [1e-17 erg/s/cm^2/AA/fiber]
   is_image: true
-  shape: NWAVE x NFIBER
+  shape: NWAVE x (NFIBER * NEXP)
 hdu2:
   name: IVAR
   description: inverse variance
   is_image: true
-  shape: NWAVE x NFIBER
+  shape: NWAVE x (NFIBER * NEXP)
 hdu3:
   name: MASK
   description: bitmask for each fiber pixel
   is_image: true
-  shape: NWAVE x NFIBER
+  shape: NWAVE x (NFIBER * NEXP)
 hdu4:
   name: LSF
   description: line-spread function (sigma)
   is_image: true
-  shape: NWAVE
+  shape: NWAVE x (NFIBER * NEXP)
 hdu5:
   name: WAVE
   description: wavelength vector [AA]
@@ -48,52 +50,43 @@ hdu6:
   name: REDCORR
   description: reddening correction
   is_image: true
-  shape: NWAVE x NFIBER
+  shape: NWAVE x (NFIBER * NEXP)
 hdu7:
   name: MODEL
   description: joint model spectra for each observed fiber [1e-17 erg/s/cm^2/AA/fiber]
   is_image: true
-  shape: NWAVE x NFIBER
+  shape: NWAVE x (NFIBER * NEXP)
 hdu8:
   name: MODEL_MASK
   description: bitmask for each pixel in the joint model spectra
   is_image: true
-  shape: NWAVE x NFIBER
+  shape: NWAVE x (NFIBER * NEXP)
 hdu9:
   name: EMLINE
   description: emission line component of the joint model spectra [1e-17 erg/s/cm^2/AA/fiber]
   is_image: true
-  shape: NWAVE x NFIBER
+  shape: NWAVE x (NFIBER * NEXP)
 hdu10:
   name: EMLINE_MASK
   description: bitmask for emisison line component
   is_image: true
-  shape: NWAVE x NFIBER
+  shape: NWAVE x (NFIBER * NEXP)
 hdu11:
   name: STELLAR
   description: stellar continuum component of the joint model spectra [1e-17 erg/s/cm^2/AA/fiber]
   is_image: true
-  shape: NWAVE x NFIBER
+  shape: NWAVE x (NFIBER * NEXP)
 hdu12:
   name: STELLAR_MASK
   description: bitmask for the stellar continuum compoent
   is_image: true
-  shape: NWAVE x NFIBER
+  shape: NWAVE x (NFIBER * NEXP)
 hdu13:
-  name: BINID
-  description: REPLACE ME
-  is_image: true
-hdu14:
-  name: POSTAB
-  description: position table mapping fiber IDs to sky positions
+  name: FIBMAP
+  description: mapping of each fiber IDs to sky positions
   is_image: false
   shape: BINARY FITS TABLE
   columns:
-    FIBERID:
-      name: FIBERID
-      type: int32
-      unit: 
-      description: index of the fiber in the RSS extensions
     XPOS:
       name: XPOS
       type: float32
@@ -104,3 +97,13 @@ hdu14:
       type: float32
       unit: arcsec
       description: y position of the fiber in sky coordinates
+    MASK:
+      name: MASK
+      type: bitmask
+      unit: ""
+      description: bitmask for the fiber
+    SLITMAP:
+      name: SLITMAP
+      type: string
+      unit: ""
+      description: fiber position along the slit
