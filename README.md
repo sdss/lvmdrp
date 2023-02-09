@@ -16,8 +16,10 @@ To install the DRP along with its dependencies, you need to run the following st
 3. Go into the lvmdrp directory:
 > `cd lvmdrp`
 
-4. Switch to the development branch:
+4. Switch to the (current) development branch:
 > `git checkout -b development`
+> `git branch --set-upstream-to=origin/development development`
+> `git pull`
 
 5. Install the DRP package in the current python environment:
 > `pip install .`
