@@ -4,27 +4,31 @@ The LVM DRP in it's current incarnation installs a collection of routines which 
 
 ## Installation
 
-This code is being developed/tested in a Ubuntu-based OS. We recommend to use a Python environment manager such as Anaconda in order to avoid cluttering the OS's python installation.
+This code is being developed/tested in a Ubuntu-based OS, using **Python 3.8**. We recommend to use a Python environment manager such as Anaconda or similar, in order to avoid cluttering the OS's python installation.
 
 To install the DRP along with its dependencies, you need to run the following steps:
 
-1. Make sure you are in the intended python environment and directory.
+1. Create a **Python 3.8** environment. This is optional, but strongly recommended. With conda this is done like this:
+> `conda create -n lvmdrp python=3.8`
+
+2. Make sure you are in the intended **Python 3.8** environment and directory.
+> `conda activate lvmdrp`
    
-2. Clone the Github repository:
+3. Clone the Github repository:
 > `git clone --recurse-submodules -j8 https://github.com/sdss/lvmdrp.git`
 
-3. Go into the lvmdrp directory:
+4. Go into the lvmdrp directory:
 > `cd lvmdrp`
 
-4. Switch to the (current) development branch:
+5. Switch to the (current) development branch:
 > `git checkout -b development`
 > `git branch --set-upstream-to=origin/development development`
 > `git pull`
 
-5. Install the DRP package in the current python environment:
+6. Install the DRP package in the current python environment:
 > `pip install .`
 
-6. Run the ESO sky model configuration:
+7. Run the ESO sky model configuration:
 > `drp sky configureSkyModel`
 
 The installation (step 5) may take a while, since it is going to install the necessary routines to run the ESO skycorr and the ASM.
