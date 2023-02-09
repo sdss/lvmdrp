@@ -213,6 +213,7 @@ def createSensFunction_drp(rss_in, out_sens,  ref_spec, airmass, exptime, smooth
 
 	out.close()
 
+
 def createSensFunction2_drp(rss_in, out_sens, ref_spec, airmass, exptime, smooth_bspline='0.3', smooth_ref='6.0', smooth_ref2='6.0', median_filt='0',coadd='1', extinct_v='0.0', extinct_curve='mean', aper_correct='1.0',  ref_units='1e-16', target_units='1e-16',column_wave='0', column_flux='1', delimiter='', header='1' , mask_wave='', out_star='', verbose='0'):
 	smooth_bspline=float(smooth_bspline)
 	smooth_ref=float(smooth_ref)
@@ -323,6 +324,7 @@ def createSensFunction2_drp(rss_in, out_sens, ref_spec, airmass, exptime, smooth
 		out.write('%i %.3f %e\n'%(i,  sens_func_smooth._wave[i], sens_func_smooth._data[i]))
 	out.close()
 
+
 def fluxCalibration_drp(rss_in, rss_out, sens_func, airmass, exptime, extinct_v='0.0', extinct_curve='mean', ref_units='1e-16', target_units='1e-16', norm_sb_fib=''):
 	ref_units=float(ref_units)
 	target_units=float(target_units)
@@ -376,6 +378,7 @@ def fluxCalibration_drp(rss_in, rss_out, sens_func, airmass, exptime, extinct_v=
 			rss[j] = (rss[j]/extinct/exptime/norm_sb_fib)*sens_func_resamp*(ref_units/target_units)
 	#        print exptime
 	rss.writeFitsData(rss_out)
+
 
 def correctTelluric_drp(rss_in, rss_out, telluric_spectrum, airmass='AIRMASS'):
 	"""
