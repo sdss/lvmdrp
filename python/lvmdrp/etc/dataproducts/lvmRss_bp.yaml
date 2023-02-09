@@ -3,8 +3,8 @@ short: the row-stacked fiber spectra
 description: |
   The row-stacked, flux-calibrated fiber spectra for a given tile across all exposures.
 location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[OBSERVATORY]/[MJD]/
-created_by: module.py
-used_by: module.py
+created_by: lvmdrp.functions.fluxCalMethod.
+used_by: lvmdap._cmdline._main
 naming_convention: lvm-[TILEID]-RSS.fits.gz where [TILEID] is the id of survey tile sky pointing
 hdu0:
   name: PRIMARY
@@ -92,12 +92,12 @@ hdu1:
   name: FLUX
   description: Row-stacked spectra from all exposures for the target in units of 10(-17) erg/s/cm2/Ang/fiber
   is_image: true
-  shape: CCDROW x NFIBER
+  shape: NWAVE x (NFIBER * NEXP)
 hdu2:
   name: IVAR
   description: Inverse variance (1/sigma2) for the above
   is_image: true
-  shape: CCDROW x NFIBER
+  shape: NWAVE x (NFIBER * NEXP)
 hdu3:
   name: MASK
   description: the quality bitmask for each fiber pixel
