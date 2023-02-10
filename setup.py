@@ -358,7 +358,8 @@ def parse_requirements(reqfile_path):
     """
     install_requires = []
     with open(reqfile_path, "r") as r:
-        requirement = r.readline()[:-1].strip()
+        for requirement in r.readlines():
+            requirement = requirement.strip()
         if requirement.startswith("-r"):
             install_requires.extend(parse_requirements(requirement.replace("-r ", "")))
         else:
