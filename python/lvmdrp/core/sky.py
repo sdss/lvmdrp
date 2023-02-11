@@ -28,7 +28,7 @@ from lvmdrp.external.skycorr import fitstabSkyCorrWrapper, createParFile, runSky
 from lvmdrp.utils.logger import get_logger
 
 
-sky_logger = get_logger("sky module")
+sky_logger = get_logger(name=__name__)
 
 
 def ang_distance(r1, d1, r2, d2):

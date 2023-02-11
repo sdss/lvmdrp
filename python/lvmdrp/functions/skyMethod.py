@@ -37,10 +37,11 @@ from lvmdrp.core.rss import RSS
 from lvmdrp.main import load_master_config
 
 
-sky_logger = get_logger(name="sky module")
-
-
 description = "Provides methods for sky subtraction"
+
+
+sky_logger = get_logger(name=__name__)
+
 
 # average moon distance from earth
 MEAN_MOON_DIST = 384979000 * u.m
