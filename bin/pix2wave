@@ -11,13 +11,19 @@ import os
 import sys
 
 import numpy as np
+
+import matplotlib
 import matplotlib.pyplot as plt
+
+font = {'family' : 'sans-serif',
+        'weight' : 'bold',
+        'size'   : 12}
+
+matplotlib.rc('font', **font)
+
 from matplotlib.lines import Line2D
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from matplotlib.widgets import TextBox
-import seaborn as sns
-
-sns.set(context="talk", style="ticks", palette="husl", color_codes=True)
 
 from numpy.polynomial.hermite import hermfit, hermval
 from numpy.polynomial.polynomial import polyfit, polyval
