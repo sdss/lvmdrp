@@ -1,5 +1,5 @@
-recursive-include python/drp/etc *
+recursive-include python/lvmdrp/etc *
 
 include requirements.txt
-include requirements_doc.txt
-include requirements_dev.txt
+include requirements_third.txt
+include requirements_all.txt
