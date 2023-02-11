@@ -9,43 +9,41 @@ This code is being developed/tested in a Ubuntu-based OS, using **Python 3.8**. 
 To install the DRP along with its dependencies, you need to run the following steps:
 
 1. Create a **Python 3.8** environment. This is optional, but strongly recommended. With conda this is done like this:
-> `conda create -n lvmdrp python=3.8`
+    > `conda create -n lvmdrp python=3.8`
 
 2. Make sure you are in the intended **Python 3.8** environment and directory.
-> `conda activate lvmdrp`
+    > `conda activate lvmdrp`
    
 3. Clone the Github repository:
-> `git clone --recurse-submodules -j8 https://github.com/sdss/lvmdrp.git`
+    > `git clone --recurse-submodules -j8 https://github.com/sdss/lvmdrp.git`
 
 4. Go into the lvmdrp directory:
-> `cd lvmdrp`
+    > `cd lvmdrp`
 
 5. Switch to the (current) development branch:
-> `git checkout -b development`
-> `git branch --set-upstream-to=origin/development development`
-> `git pull`
+    > `git checkout development`
 
 6. Install the DRP package in the current python environment:
-> `pip install .`
+    > `pip install .`
 
-7. Run the ESO sky model configuration:
-> `drp sky configureSkyModel`
+## Testing the installation
 
-The installation (step 5) may take a while, since it is going to install the necessary routines to run the ESO skycorr and the ASM.
-The sky model configuration (step 6) should be fast as it is going to write the default configuration files in order to produce
-sky models. For more advanced (and slower) sky model configuration options, see the section below.
+<!-- write a script to test everything went find with the installation -->
 
 ### Advanced ESO sky model configuration
 
-...
+If you are planning on using the sky module, you will need to install the ESO routines first. In order to install the ESO routines
+you need to run the following commands, **also within DRP python environment**.
+
+1. Install the ESO skycorr and skymodel routines:
+    > `drp sky installESOSky`
+
+2. Run the sky module configuration:
+    > `drp sky configureSkyModel`
 
 ## Tutorials
 
 <!-- write tutorial notebooks -->
 You will find tutorial notebooks to run different DRP routines in the [examples]() folder. Here is a list of the tutorials
-
-## Testing the installation
-
-<!-- write a script to test everything went find with the installation -->
 
 ## Creating Test Data

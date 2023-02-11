@@ -1,6 +1,8 @@
 
 from .configuration import *
 from .logger import *
+import sys
+import site
 import os
 import collections.abc
 import collections
@@ -53,3 +55,33 @@ def dict_update(d, u):
         else:
             d[k] = v
     return d
+
+def rc_symlink(src, dst):
+    """Forces creation of symbolic link if already exists"""
+    if os.path.islink(dst):
+        os.remove(dst)
+    os.symlink(src, dst)
+    return None
+
+def get_env_lib_directory():
+    """Return the installation directory, or None
+    
+    taken from: https://bit.ly/3BAOpQK
+    """
+    if '--user' in sys.argv:
+        paths = (site.getusersitepackages(),)
+    else:
+        py_version = '%s.%s' % (sys.version_info[0], sys.version_info[1])
+        paths = (s % (py_version) for s in (
+            sys.prefix + '/lib/python%s/dist-packages/',
+            sys.prefix + '/lib/python%s/site-packages/',
+            sys.prefix + '/local/lib/python%s/dist-packages/',
+            sys.prefix + '/local/lib/python%s/site-packages/',
+            '/Library/Python/%s/site-packages/',
+        ))
+
+    for path in paths:
+        if os.path.exists(path):
+            return os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(path))))
+    
+    return None
