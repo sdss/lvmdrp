@@ -7,21 +7,34 @@
 # @Copyright: SDSS-V LVM
 
 import os
-import sys
 
+from lvmdrp.utils import get_env_lib_directory
+
+
+# sources server URL
+LVM_SRC_URL = "http://ifs.astroscu.unam.mx/LVM/lvmdrp_src.zip"
 
 # installation path
-PYTHON_PATH = os.path.dirname(sys.path[0])
+INS_PATH = get_env_lib_directory()
+
+LIB_PATH = os.path.join(INS_PATH, "lib")
+BIN_PATH = os.path.join(INS_PATH, "bin")
+INC_PATH = os.path.join(INS_PATH, "include")
+
+# sources path
+SRC_PATH = os.path.abspath("src")
+SKYCORR_SRC_PATH = os.path.join(SRC_PATH, "skycorr.tar.gz")
+SKYMODEL_SRC_PATH = os.path.join(SRC_PATH, "SM-01.tar.gz")
 
 # installation path for ESO routines
-SKYMODEL_INST_PATH = os.path.join(PYTHON_PATH, "lib", "skymodel")
-SKYCORR_INST_PATH = os.path.join(PYTHON_PATH, "lib", "skycorr")
+SKYCORR_INST_PATH = os.path.join(LIB_PATH, "skycorr")
+SKYMODEL_INST_PATH = os.path.join(LIB_PATH, "skymodel")
 
 # root package path
-ROOT_PATH = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # configuration paths
-CONFIG_PATH = os.path.join(ROOT_PATH, "python", "lvmdrp", "etc")
+CONFIG_PATH = os.path.join(ROOT_PATH, "etc")
 
 # main DRP configuration path
 MASTER_CONFIG_PATH = os.path.join(CONFIG_PATH, "drp.yml")

@@ -35,8 +35,9 @@ import struct
 import site
 
 from lvmdrp.core.constants import EPHEMERIS_PATH
-from lvmdrp.core.constants import SKYCORR_CONFIG_PATH, SKYMODEL_CONFIG_PATH, SKYMODEL_INST_PATH
-from lvmdrp.utils import get_env_lib_directory, rc_symlink
+from lvmdrp.core.constants import LVM_SRC_URL, SRC_PATH, SKYCORR_SRC_PATH, SKYMODEL_SRC_PATH, SKYCORR_INST_PATH, SKYMODEL_INST_PATH
+from lvmdrp.core.constants import BIN_PATH, INC_PATH, SKYCORR_CONFIG_PATH, SKYMODEL_CONFIG_PATH
+from lvmdrp.utils import rc_symlink
 from lvmdrp.utils.logger import get_logger
 from lvmdrp.core.sky import run_skycorr, run_skymodel, optimize_sky, ang_distance
 from lvmdrp.core.passband import PassBand
@@ -57,20 +58,6 @@ sky_logger = get_logger(name=__name__)
 MEAN_MOON_DIST = 384979000 * u.m
 
 SYSTEM = struct.calcsize("P") * 8
-
-SRC_PATH = os.path.abspath("src")
-INS_PATH = get_env_lib_directory()
-LIB_PATH = os.path.join(INS_PATH, "lib")
-BIN_PATH = os.path.join(INS_PATH, "bin")
-INC_PATH = os.path.join(INS_PATH, "include")
-
-SKYCORR_SRC_PATH = os.path.join(SRC_PATH, "skycorr.tar.gz")
-SKYMODEL_SRC_PATH = os.path.join(SRC_PATH, "SM-01.tar.gz")
-
-SKYCORR_INST_PATH = os.path.join(LIB_PATH, "skycorr")
-SKYMODEL_INST_PATH = os.path.join(LIB_PATH, "skymodel")
-
-LVM_SRC_URL = "http://ifs.astroscu.unam.mx/LVM/lvmdrp_src.zip"
 
 
 # TODO: implement installation path parameters and defaults
