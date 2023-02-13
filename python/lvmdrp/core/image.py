@@ -13,6 +13,14 @@ from multiprocessing import Pool
 from multiprocessing import cpu_count
 from astropy.modeling import models, fitting
 
+
+def _parse_ccd_section(section):
+    """Parse a CCD section in the format [1:NCOL, 1:NROW] to python tuples"""
+    slice_x, slice_y = section.strip("[]").split(",")
+    slice_x = list(map(lambda str: int(str)-1, slice_x.split(":")))
+    slice_y = list(map(lambda str: int(str)-1, slice_y.split(":")))
+    return slice_x, slice_y
+
 class Image(Header):
     def __init__(self, data=None, header=None,  mask=None, error=None, origin=None):
         Header.__init__(self, header=header, origin=origin)
@@ -301,6 +309,37 @@ class Image(Header):
     def __ge__(self, other):
         return self._data>=other
 
+    def getSection(self, section):
+        """get image section"""
+        sec_x, sec_y = _parse_ccd_section(section)
+
+        data = self._data[sec_y[0]:sec_y[1], sec_x[0]:sec_x[1]]
+        if self._error is not None:
+            error = self._error[sec_y[0]:sec_y[1], sec_x[0]:sec_x[1]]
+        else:
+            error = None
+        if self._mask is not None:
+            mask = self._mask[sec_y[0]:sec_y[1], sec_x[0]:sec_x[1]]
+        else:
+            mask = None
+
+        header = self._header
+        
+        return Image(data=data, header=header, error=error, mask=mask)
+
+    def setSection(self, section, subimg, update_header=False, inplace=True):
+        sec_x, sec_y = _parse_ccd_section(section)
+
+        new_image = self if inplace else Image(data=self._data, header=self._header, mask=self._mask, error=self._error, origin=self._origin)
+
+        new_image._data[sec_y[0]:sec_y[1], sec_x[0]:sec_x[1]] = subimg._data
+        new_image._error[sec_y[0]:sec_y[1], sec_x[0]:sec_x[1]] = subimg._error
+        new_image._mask[sec_y[0]:sec_y[1], sec_x[0]:sec_x[1]] = subimg._mask
+
+        if update_header: new_image._header.update(subimg._header)
+
+        return new_image
+
     def sqrt(self):
         """
             Computes the square root  of the image
@@ -483,6 +522,31 @@ class Image(Header):
                 self._error[select] = error
             if header is not None:
                 self.setHeader(header) # set header
+
+    def convertUnit(self, unit, assume="ADU", gain_field="GAIN", assume_gain=1.0, inplace=True):
+
+        current = self._header.get("BUNIT", assume)
+        
+        new_image = self if inplace else Image(data=self._data, header=self._header, mask=self._mask, error=self._error, origin=self._origin)
+        if current != unit:
+            gains = self._header[f"AMP? {gain_field}"]
+            sects = self._header[f"AMP? TRIMSEC"]
+            n_amp = len(gains)
+            for i in range(n_amp):
+                factor = gains[f"AMP{i+1} {gain_field}"] if current == "ADU" else 1 / gains[f"AMP{i+1} {gain_field}"]
+                new_image.setSection(
+                    section=sects[i],
+                    subimg=new_image.getSection(section=sects[i]) * factor,
+                    update_header=False,
+                    inplace=True
+                )
+            else:
+                factor = self._header.get(gain_field, assume_gain) if current == "ADU" else 1 / self._header.get(gain_field, assume_gain)
+                new_image *= factor
+        
+            new_image._header["BUNIT"] = unit
+
+        return new_image
 
     def removeMask(self):
         self._mask=None

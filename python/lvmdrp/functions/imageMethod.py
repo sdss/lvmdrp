@@ -2173,34 +2173,46 @@ def preprocRawFrame_drp(in_image, out_image, positions="00,10,01,11", orientatio
 @missing_files(["BAD_CALIBRATION_FRAMES"], "in_image")
 def basicCalibration_drp(in_image, out_image, bias=None, dark=None, flat=None):
 
-	proc_image = loadImage(in_image)
+    proc_image = loadImage(in_image).convertUnit(unit="e-")
+    exptime = proc_image._header["EXPTIME"]
+    img_type = proc_image._header["IMAGETYP"].lower()
+
+    # dummy calibration images
+    dummy_bias = Image(data=numpy.zeros_like(proc_image._data))
+    dummy_dark = Image(data=numpy.zeros_like(proc_image._data))
+    dummy_flat = Image(data=numpy.ones_like(proc_image._data))
 
 	# read master bias
-	if bias is not None:
-		if os.path.isfile(bias):
-			master_bias = loadImage(bias)
+    if img_type in ["bias"] or bias is None or not os.path.isfile(bias):
+        master_bias = dummy_bias
 		else:
-			flags += "BAD_CALIBRATION_FRAMES"
+        master_bias = loadImage(bias).convertUnit(unit="e-")
+    
 	# read master dark
-	if dark is not None:
-		if os.path.isfile(dark):
-			master_dark = loadImage(dark)
-			master_dark._data *= proc_image._header["EXPTIME"] / master_dark._header["EXPTIME"]
+    if img_type in ["bias", "dark"] or dark is None or not os.path.isfile(dark):
+        master_dark = dummy_dark
 		else:
-			flags += "BAD_CALIBRATION_FRAMES"
+        master_dark = loadImage(dark).convertUnit(unit="e-")
+        # scale down the dark if needed
+        factor = exptime / master_dark._header["EXPTIME"]
+        if factor > 1.0:
+            # WARNING: scaling up
+            pass 
+        master_dark *= factor
+
 	# read master flat
-	if flat is not None:
-		if os.path.isfile(flat):
-			master_flat = loadImage(flat)
-			master_flat._data *= proc_image._header["EXPTIME"] / master_flat._header["EXPTIME"]
+    if img_type in ["bias", "dark", "flat", "flatfield", "fiberflat", "object"] or flat is None or not os.path.isfile(flat):
+        master_flat = dummy_flat
 		else:
-			flags += "BAD_CALIBRATION_FRAMES"
+        master_flat = loadImage(flat).convertUnit(unit="e-")
 
 	# normalize in case of flat calibration
-	if proc_image._header["IMAGETYP"] == "flat":
+    if img_type == "bias":
+        calib_image = proc_image
+    if img_type == "flat" or img_type == "flatfield":
 		proc_image = proc_image / numpy.median(proc_image._data)
 
-	# run basic calibration for each analog
+    # run basic calibration
 	calib_image = (proc_image - master_dark - master_bias) / master_flat
 	calib_image.writeFitsData(out_image)
 
