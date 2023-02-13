@@ -14,5 +14,7 @@ tornado>=4
 jsonschema!=2.5.0,>=2.4
 entrypoints>=0.2.2
 jinja2>=2.4
-jupyter-core
-ipython
+jupyter==1.0.0
+jupyterlab==3.6.1
+ipython==8.10.0
+pandas==1.5.3
