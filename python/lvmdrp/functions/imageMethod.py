@@ -1920,7 +1920,7 @@ def testres_drp(image, trace, fwhm, flux):
 	hdu.writeto('res_rel.fits', overwrite=True)
 
 @missing_files(["BAD_CALIBRATION_FRAMES"], "in_image")
-def preprocRawFrame_drp(in_image, out_image, boundary_x, boundary_y, positions, orientation, subtract_overscan='1', compute_error='1', gain="none", rdnoise="none", gain_field='GAIN', rdnoise_field='RDNOISE'):
+def old_preprocRawFrame_drp(in_image, out_image, boundary_x, boundary_y, positions, orientation, subtract_overscan='1', compute_error='1', gain="none", rdnoise="none", gain_field='GAIN', rdnoise_field='RDNOISE'):
 	"""
 		Preprocess LVM raw image with different amplifiers to a full science CCD images. The orientations of the sub images are taken into account as well as their
 		overscan regions. A Poission error image can be automatically computed during this process. This requires that the {gain_field} and the Read-Out Noise are stored
@@ -2084,6 +2084,7 @@ def preprocRawFrame_drp(in_image, out_image, positions="00,10,01,11", orientatio
     os_quads = [os_a, os_b, os_c, os_d]
     # * compute statistics on each OS section
     os_bias = [numpy.nanmedian(os_quad._data) for os_quad in os_quads]
+	os_bias_std = [numpy.nanstd(os_quad._data) for os_quad in os_quads]
     
     # parse science section:
     # * extract science section
@@ -2162,7 +2163,10 @@ def preprocRawFrame_drp(in_image, out_image, positions="00,10,01,11", orientatio
         preproc_image.setHdrValue(f'HIERARCH AMP{i+1} {rdnoise_field}', rdnoises[i], f'Read-out noise of CCD amplifier {i+1} [e-]')
     # add bias of overscan region for the different subimages (CCDs/Amplifiers)
     for i in range(len(quads)):
-        preproc_image.setHdrValue(f'HIERARCH AMP{i+1} OVERSCAN', os_bias[i], f'Overscan median (bias) of CCD amplifier {i+1} [ADU]')
+		preproc_image.setHdrValue(f'HIERARCH AMP{i+1} OVERSCAN', os_bias[i], f'Overscan median of CCD amplifier {i+1} [ADU]')
+	# add bias std of overscan region for the different subimages (CCDs/Amplifiers)
+	for i in range(len(quads)):
+		preproc_image.setHdrValue(f"HIERARCH AMP{i+1} OVERSCAN_STD", os_bias_std[i], f"Overscan std of CCD amplifier {i+1} [ADU]")
     #write out FITS file
     preproc_image.writeFitsData(out_image)
 
