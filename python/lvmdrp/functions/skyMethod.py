@@ -96,23 +96,25 @@ def installESOSky_drp():
         sky_logger.error("full report:")
         sky_logger.error(out.stderr.decode("utf-8"))
 
-    sky_logger.info("installing skycorr")
+    sky_logger.info(f"installing skycorr on a {SYSTEM}-bit {sys.platform.capitalize()} system")
     os.chdir("skycorr")
     if sys.platform == "linux":
         if SYSTEM == 32:
             skycorr_installer = pexpect.spawn("bash skycorr_installer_linux_i686-1.1.2.run", encoding="utf-8")
         elif SYSTEM == 64:
-            skycorr_installer = pexpect.spawn("bash skycorr_installer_linux_x86_64-1.1.2.run", encoding="utf-8", echo=False)
+            skycorr_installer = pexpect.spawn("bash skycorr_installer_linux_x86_64-1.1.2.run", encoding="utf-8")
     elif sys.platform == "darwin":
         skycorr_installer = pexpect.spawn("bash skycorr_installer_macos_x86_64-1.1.2.run", encoding="utf-8")
     else:
         raise NotImplementedError(f"installation not implemented for '{sys.platform}' OS")
 
+    # skycorr_installer.delaybeforesend = 1.0
+    # skycorr_installer.logfile_read = sys.stdout
     skycorr_installer.expect("root installation directory")
     skycorr_installer.sendline(SKYCORR_INST_PATH)
-    skycorr_installer.expect("Is this OK [Y/n]?")
+    skycorr_installer.expect("Is this OK")
     skycorr_installer.sendline("y")
-    if len(SKYCORR_INST_PATH) >= 70:
+    if len(SKYCORR_INST_PATH) >= 50:
         skycorr_installer.expect("Proceed with this installation directory")
         skycorr_installer.sendline("y")
     if os.path.exists(SKYCORR_INST_PATH):
@@ -135,6 +137,11 @@ def installESOSky_drp():
         shutil.rmtree(SKYCORR_INST_PATH, ignore_errors=True)
         sky_logger.error("full report:")
         sky_logger.error(out.stderr.decode('utf-8'))
+
+    # defining environment variables for CPL
+    cpl_path = os.path.join(SKYCORR_INST_PATH, "lib")
+    sky_logger.info(f"setting $LD_LIBRARY_PATH={cpl_path} for CPL discovery")
+    os.environ["LD_LIBRARY_PATH"] = cpl_path
 
     # - install skymodel ---------------------------------------------------------------------------------------------
     sky_logger.info(f"preparing to install skymodel at '{SKYMODEL_INST_PATH}'")
