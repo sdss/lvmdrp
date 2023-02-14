@@ -40,7 +40,7 @@ reduction_steps:
       out_rss: "{ext_rss}"
       trace: "{fiberflat_rss}"
       method: "aperture"
-      aperture: 7
+      aperture: 7 #median of the distance between peaks (from the mid region trace)
     rssMethod.createPixTable:
       rss_in: "{ext_rss}"
       rss_out: "{wav_rss}"
@@ -48,4 +48,13 @@ reduction_steps:
       arc_fwhm: "{arc_fwhm_rss}"
     rssMethod.joinChannels:
     rssMethod.quickQuality:
+      # SN in several bands (FWHM=100AA)
+      # locate sky lines (match against a known list)
+      # measure sky lines width
+      # sky lines equivalent width
+    # for quick flux calibration:
+    # * get solar spectrum
+    # * normalize solar spectrum by fiberflat
+    # apply fiber flat
+    # perform basic flux calibration (theoric response function)
 ...

@@ -290,7 +290,7 @@ def run_reduction_block(config, metadata, calib_metadata, settings):
     )
     metadata.flags += flags
     _, flags = imageMethod.extractSpec_drp(
-        image=target_frame_path.format(kind="stray"),
+        in_image=target_frame_path.format(kind="stray"),
         trace=master_continuum_path.format(kind="trc"),
         out_rss=target_frame_path.format(kind="ms"),
         fwhm=master_continuum_path.format(kind="fwhm"),
@@ -345,7 +345,7 @@ def run_reduction_continuum(config, metadata, calib_metadata, settings):
     )
     metadata.flags += flags
     _, flags = imageMethod.extractSpec_drp(
-        image=target_frame_path.format(kind="stray"),
+        in_image=target_frame_path.format(kind="stray"),
         trace=target_frame_path.format(kind="trc"),
         out_rss=target_frame_path.format(kind="ms"),
         fwhm=target_frame_path.format(kind="fwhm"),

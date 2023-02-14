@@ -1591,7 +1591,7 @@ def offsetTrace2_drp(image, trace, trace_fwhm, disp, lines, logfile,  blocks='15
 # it might be better in dealing with cross-talk
 
 @missing_files(["BAD_CALIBRATION_FRAMES"], "image", "trace")
-def extractSpec_drp(image, trace, out_rss,  method='optimal',  aperture='7', fwhm='2.5', disp_axis='X',  replace_error='1e10', plot='-1', parallel='auto'):
+def extractSpec_drp(in_image, trace, out_rss,  method='optimal',  aperture='7', fwhm='2.5', disp_axis='X',  replace_error='1e10', plot='-1', parallel='auto'):
 	"""
 			Extracts the flux for each fiber along the dispersion direction which is written into an RSS FITS file format.
 			Either a simple aperture or an optimal extraction scheme may be used.
@@ -1631,7 +1631,7 @@ def extractSpec_drp(image, trace, out_rss,  method='optimal',  aperture='7', fwh
 
 	aperture = int(aperture)
 	replace_error = float(replace_error)
-	img = loadImage(image)
+	img = loadImage(in_image)
 	plot=int(plot)
 
 	# orient image so that the cross-dispersion is along the first and the dispersion is along the second array axis
