@@ -1,0 +1,51 @@
+---
+short: "quick LVM Data Reduction Pipeline (DRP) configuration file"
+description: |
+  "defines the target frame, calibration frames and DRP steps to perform the quick DRP for frame validation"
+metadata:
+  drp_ver: 0.1.0
+target_frame:
+    - name: sdR-{hemi}-{camera}-{expnum}.fits.gz
+      path: $LVM_DATA_S/{mjd}
+calibration_frames:
+    bias:
+    - name: lvmBias-{camera}.fits
+      path: $LVM_DATA/{mjd}/calib
+    dark:
+    - name: lvmDark-{camera}-{exptime}.fits
+      path: $LVM_DATA/{mjd}/calib
+    flatfield:
+    - name: lvmDark-{camera}-{exptime}.fits
+      path: $LVM_DATA/{mjd}/calib
+    fiberflat:
+    - name: lvmFlat-{camera}-{expnum}.fits
+      path: $LVM_DATA/{mjd}/calib
+    arc:
+    - name: lvmArc-{camera}-{expnum}.fits
+      path: $LVM_DATA/{mjd}/calib
+reduction_steps:
+    imageMethod.preprocRawFrame:
+      in_image: "{raw_frame}"
+      out_image: "{proc_frame}"
+      compute_error: true
+      unit: "e-"
+    imageMethod.basicCalibration:
+      in_image: "{proc_frame}"
+      out_image: "{cal_frame}"
+      bias: "{bias_frame}"
+      dark: "{dark_frame}"
+      flat: "{flat_frame}"
+    imageMethod.extractSpec:
+      in_image: "{cal_frame}"
+      out_rss: "{ext_rss}"
+      trace: "{fiberflat_rss}"
+      method: "aperture"
+      aperture: 7
+    rssMethod.createPixTable:
+      rss_in: "{ext_rss}"
+      rss_out: "{wav_rss}"
+      arc_wave: "{arc_wave_rss}"
+      arc_fwhm: "{arc_fwhm_rss}"
+    rssMethod.joinChannels:
+    rssMethod.quickQuality:
+...
