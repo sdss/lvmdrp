@@ -19,6 +19,7 @@ REGISTERED_MODULES = [headerMethod, imageMethod, rssMethod, skyMethod, fluxCalMe
 MODULES = {module.__name__.split(".")[-1].replace("Method", ""): module for module in REGISTERED_MODULES}
 
 # TODO: implement special 'run' task for running a given configuration file
+# TODO: implement 'out_bp' argument in each task to produce an output in the right format
 
 if __name__=="__main__":
     args = sys.argv[1:]
