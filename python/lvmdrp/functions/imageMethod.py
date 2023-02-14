@@ -1,22 +1,14 @@
 import os, sys, numpy
 from astropy.io import fits as pyfits
 try:
-  import pylab,matplotlib
+  import pylab
   from matplotlib import pyplot as plt
 except:
   pass
 import time
 from multiprocessing import Pool
 from multiprocessing import cpu_count
-from lvmdrp.core import fit_profile
-import scipy
-from scipy import ndimage
-from scipy import optimize
-from scipy import sparse
 from scipy import interpolate
-from scipy.sparse import linalg
-# from scipy.sparse.linalg import linsolve
-# import scipy.sparse.linalg.dsolve as linsolve
 from lvmdrp.core.image import loadImage, Image, glueImages, combineImages
 from lvmdrp.core.spectrum1d import Spectrum1D
 from lvmdrp.core.tracemask import TraceMask
@@ -27,7 +19,16 @@ from lvmdrp.utils.decorators import missing_files
 import multiprocessing
 from types import *
 
+
 description='Provides Methods to process 2D images'
+
+__all__ = [
+	"LACosmic_drp", "findPeaksAuto_drp", "tracePeaks_drp",
+	"subtractStraylight_drp", "traceFWHM_drp", "extractSpec_drp",
+	"subtractBias_drp", "preprocRawFrame_drp", "basicCalibration_drp",
+	"createMasterFrame_drp"
+]
+
 
 def detCos_drp(image,  out_image,   rdnoise='2.9', sigma_det='5', rlim='1.2', iter='5', fwhm_gauss='2.0', replace_box='5,5',  error_box='5,5', replace_error='1e10', increase_radius='0', gain='1.0', verbose='0', parallel='auto'):
 	"""
@@ -653,8 +654,6 @@ def findPeaksOffset_drp(image, peaks_master, out_peaks_file, disp_axis='X', thre
             file_out.write('%i %i %e %i\n'%(i+1, numpy.round(position).astype('int16'), position, 1))
     file_out.close()
 
-        
-
 def findPeaksMaster_drp(image, peaks_master, out_peaks_file, disp_axis='X', threshold='1500', threshold_weak='500', median_box='8', median_cross='1', slice='', method='gauss',  init_sigma='1.0', verbose='1'):
 
 	threshold=float(threshold)
@@ -750,7 +749,6 @@ def findPeaksMaster_drp(image, peaks_master, out_peaks_file, disp_axis='X', thre
 			pylab.plot(peaks_weak_good[0][select[select_good_weak]],peaks_weak_good[2] [select[select_good_weak]],'ob')
 		pylab.plot(centers._data, numpy.ones(len(centers._data))*2000.0, 'xg')
 		pylab.show()
-
 
 def findPeaksMaster2_drp(image, peaks_master, out_peaks_file, disp_axis='X', threshold='1500', threshold_weak='500', median_box='8', median_cross='1', slice='', method='gauss',  init_sigma='1.0', border='4', verbose='1'):
 
@@ -1366,7 +1364,6 @@ def traceFWHM_drp(image, trace, fwhm_out, disp_axis='X', blocks='20', steps='100
 
 	# write out FWHM trace to FITS file
 	traceFWHM.writeFitsData(fwhm_out)
-
 
 def offsetTrace_drp(image, trace, disp, lines, logfile,  blocks='15', disp_axis='X',  init_offset='0.0', size='20'):
 	"""

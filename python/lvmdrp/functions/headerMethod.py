@@ -6,6 +6,8 @@ from lvmdrp.core.header import Header, combineHdr
 
 description='Provides Methods to handle Fits headers'
 
+__all__ = ["printHdr_drp", "expandHdrKeys_drp", "copyHdr_drp", "addHdrKey_drp", "mergeHdr_drp", "addHvelcorHdr_drp", "addAstrometry_drp", "copyHdrKey_drp"]
+
 
 def printHdr_drp(file, keyword='',  extension=0):
     """

@@ -50,6 +50,13 @@ from lvmdrp.main import load_master_config
 
 description = "Provides methods for sky subtraction"
 
+__all__ = [
+    "installESOSky_drp", "configureSkyModel_drp", "createMasterSky_drp",
+    "sepContinuumLine_drp", "evalESOSky_drp", "subtractGeocoronal_drp",
+    "corrSkyLine_drp", "corrSkyContinuum_drp", "coaddContinuumLine_drp",
+    "subtractSky_drp", "refineContinuum_drp", "subtractPCAResiduals_drp"
+]
+
 
 sky_logger = get_logger(name=__name__)
 

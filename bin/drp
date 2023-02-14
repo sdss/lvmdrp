@@ -10,69 +10,99 @@
 import sys
 
 from lvmdrp.utils.logger import get_logger
-from lvmdrp.functions import (commandMethod, headerMethod, imageMethod, rssMethod, skyMethod, fluxCalMethod)
+from lvmdrp.functions import (headerMethod, imageMethod, rssMethod, skyMethod, fluxCalMethod, astrometryMethod)
 
 
-drp_logger = get_logger(name="lvm-drp")
+drp_logger = get_logger(name=__name__)
 
+REGISTERED_MODULES = [headerMethod, imageMethod, rssMethod, skyMethod, fluxCalMethod, astrometryMethod]
+MODULES = {module.__name__.split(".")[-1].replace("Method", ""): module for module in REGISTERED_MODULES}
+
+# TODO: implement special 'run' task for running a given configuration file
 
 if __name__=="__main__":
     args = sys.argv[1:]
-    if len(args)==0:
-        drp_logger.info('No subcategory of commands given.')
-        drp_logger.info('Please use "drp help" for a list of valid command categories')
-    elif args[0]=='help':
-        drp_logger.info('')
-        drp_logger.info('Available command SUBCATEGORIES of drp:')
-        i=1
-        methods = dir()
-        for func in methods:
-            if "Method" in func:
-                drp_logger.info('%i. %s  >> %s '%(i, func.split('Method')[0], eval(func+'.description')))
-                i+=1
-        drp_logger.info('')
-        drp_logger.info('Please use "drp SUBCATEGORY help" to get a list of available commands for the category')
-        drp_logger.info('')
+
+    # show basic help
+    if len(args) == 0:
+        drp_logger.info('no <MODULE> given')
+        drp_logger.info("use 'drp help' for a list of available MODULES")
     
-    elif args[0]+'Method' in dir():
-        command = args[0]+'Method.'
-        if args[1]=='help' and len(args)==2:
-            try:
-                list_commands = eval("dir(%s)"%(command[:-1]))
+    # show detailed help
+    elif args[0] == 'help':
+        # modules list
+        if len(args) == 1:
+            drp_logger.info('')
+            drp_logger.info('Available MODULES in the DRP:')
+            max_length = max(map(len, MODULES.keys()))
+            for module in MODULES:
+                name = module.ljust(max_length, " ")
+                drp_logger.info(f" * {name} : {MODULES[module].description}")
+            drp_logger.info('')
+            drp_logger.info("use 'drp help <MODULE>' to get a list of available TASKS within the MODULE")
+            drp_logger.info('')
+        # modules tasks
+        elif len(args) == 2:
+            module = args[1]
+            if module in MODULES:
+                tasks = MODULES[module].__all__
                 drp_logger.info('')
-                drp_logger.info('Available drp COMMANDs within the subcategory %s:' %(args[0]))
-                for comm in list_commands:
-                    if '_drp' in comm:
-                        drp_logger.info( '%s' %(comm.split('_drp')[0]))
+                drp_logger.info(f"available DRP TASKS within MODULE '{module}':")
+                for task in tasks:
+                    task = task.replace("_drp", "")
+                    drp_logger.info(f' * {task}')
                 drp_logger.info('')
-                drp_logger.info('Please use "drp %s help COMMAND" to detailed information command, its description, '%(args[0]))
-                drp_logger.info('You can run the routine by call "drp SUBCATEGORY COMMAND" followed by the required parameters.')
-            except KeyError:
-                drp_logger.error('You have asked for help about a non-existing subcategory of drp')
-                drp_logger.error('Please use "drp help" for a list of valid command categories')
-        elif args[1]=='help' and len(args)==3:
+                drp_logger.info(f"use 'drp help {module} <TASK>' to get detailed information on <TASK>")
+                drp_logger.info("you can run the routine by call 'drp <MODULE> <TASK> [<ARG1> <ARG2> ...]'")
+            elif module not in MODULES:
+                drp_logger.error(f"you have asked for help about a non-existing MODULE '{args[1]}' in the DRP")
+                drp_logger.error('use "drp help" for a list of available MODULES')
+        # task help
+        elif len(args) == 3:
+            module = args[1]
+            task = args[2]
             try:
-                eval('help('+command+args[2]+'_drp)')
+                drp_logger.info(getattr(MODULES[module], f"{task}_drp").__doc__)
             except:
-                drp_logger.error('You asked for help on a non-existing subcategory and/or command of drp')     
-        else:
-            key=False
-            error=False
-            command+=args[1]+'_drp('
-            for a in args[2:]:
-                if not '=' in a and key!=True:
-                    command+='"'+a+'"'
-                elif '=' in a:
-                    entry=a.split('=')
-                    command+=entry[0]+'="'+entry[1]+'"'
-                    key=True
-                else:
-                    error=True
-                    drp_logger.info('The command you tried to run does not exist in drp')
-                    break
-                command+=','
-            if error==False:
-                command=(command[:-1] if command.endswith(",") else command)+')'
-                eval(command)
+                drp_logger.error(f"you asked for help on a non-existing MODULE '{module}' and/or TASK '{task}' in the DRP")
+                drp_logger.error("use 'drp help' for a list of available MODULES")
+    # try run
     else:
-        drp_logger.info('no')
+        if len(args) < 2:
+            drp_logger.error(f"the correct command line is 'drp <MODULE> <TASK> [<ARG1> <ARG2> ...]'")
+            drp_logger.info("use 'drp help' for a list of available MODULES")
+            drp_logger.info("use 'drp help <MODULE>' to get a list of available TASKS within the MODULE")
+            sys.exit(-1)
+            
+        module = args[0]
+        task = args[1]
+
+        if module not in MODULES:
+            drp_logger.error(f"no MODULE '{module}' in the DRP")
+            sys.exit(-1)
+        if f"{task}_drp" not in MODULES[module].__all__:
+            drp_logger.error(f"no TASK '{task}' within MODULE '{module}' in the DRP")
+            sys.exit(-1)
+
+        error = False
+        key = False
+
+        run_task = f"{module}Method.{task}_drp("
+        for arg in args[2:]:
+            if not '=' in arg and key != True:
+                run_task += '"' + arg + '"'
+            elif '=' in arg:
+                entry = arg.split('=')
+                run_task += entry[0] + '="' + entry[1] + '"'
+                key = True
+            else:
+                error = True
+                drp_logger.error(f"the TASK '{run_task}' does not exist in the DRP")
+                break
+            run_task += ','
+        if not error:
+            run_task = (run_task[:-1] if run_task.endswith(",") else run_task)+')'
+            try:
+                eval(run_task)
+            except Exception as e:
+                drp_logger.error(*e.args)

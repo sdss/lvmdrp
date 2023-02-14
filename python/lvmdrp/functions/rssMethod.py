@@ -23,6 +23,12 @@ from lvmdrp.external import ancillary_func
 
 description='Provides Methods to process Row Stacked Spectra (RSS) files'
 
+__all__ = [
+	"detWaveSolution_drp", "createPixTable_drp", "resampleWave_drp",
+	"includePosTab_drp"
+]
+
+
 def mergeRSS_drp(files_in, file_out,  mergeHdr='1'):
 	"""
 			Different RSS are merged into a common file by extending the number of fibers.
