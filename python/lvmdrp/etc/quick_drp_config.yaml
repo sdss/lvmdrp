@@ -2,59 +2,48 @@
 short: "quick LVM Data Reduction Pipeline (DRP) configuration file"
 description: |
   "defines the target frame, calibration frames and DRP steps to perform the quick DRP for frame validation"
+location: null
+naming_convention: null
 metadata:
   drp_ver: 0.1.0
-target_frame:
-    - name: sdR-{hemi}-{camera}-{expnum}.fits.gz
-      path: $LVM_DATA_S/{mjd}
+target_frame: lvmSdr
 calibration_frames:
-    bias:
-    - name: lvmBias-{camera}.fits
-      path: $LVM_DATA/{mjd}/calib
-    dark:
-    - name: lvmDark-{camera}-{exptime}.fits
-      path: $LVM_DATA/{mjd}/calib
-    flatfield:
-    - name: lvmDark-{camera}-{exptime}.fits
-      path: $LVM_DATA/{mjd}/calib
-    fiberflat:
-    - name: lvmFlat-{camera}-{expnum}.fits
-      path: $LVM_DATA/{mjd}/calib
-    arc:
-    - name: lvmArc-{camera}-{expnum}.fits
-      path: $LVM_DATA/{mjd}/calib
+  bias: lvmMBias
+  dark: lvmMDark
+  pixelflat: lvmMPix
+  fiberflat: lvmMFlat
+  arc: lvmMArc
 reduction_steps:
-    imageMethod.preprocRawFrame:
-      in_image: "{raw_frame}"
-      out_image: "{proc_frame}"
-      compute_error: true
-      unit: "e-"
-    imageMethod.basicCalibration:
-      in_image: "{proc_frame}"
-      out_image: "{cal_frame}"
-      bias: "{bias_frame}"
-      dark: "{dark_frame}"
-      flat: "{flat_frame}"
-    imageMethod.extractSpec:
-      in_image: "{cal_frame}"
-      out_rss: "{ext_rss}"
-      trace: "{fiberflat_rss}"
-      method: "aperture"
-      aperture: 7 #median of the distance between peaks (from the mid region trace)
-    rssMethod.createPixTable:
-      rss_in: "{ext_rss}"
-      rss_out: "{wav_rss}"
-      arc_wave: "{arc_wave_rss}"
-      arc_fwhm: "{arc_fwhm_rss}"
-    rssMethod.joinChannels:
-    rssMethod.quickQuality:
-      # SN in several bands (FWHM=100AA)
-      # locate sky lines (match against a known list)
-      # measure sky lines width
-      # sky lines equivalent width
-    # for quick flux calibration:
-    # * get solar spectrum
-    # * normalize solar spectrum by fiberflat
-    # apply fiber flat
-    # perform basic flux calibration (theoric response function)
+  imageMethod.preprocRawFrame:
+    in_image: lvmSdr
+    out_image: lvmPre
+    compute_error: true
+    unit: "e-"
+  imageMethod.basicCalibration:
+    in_image: lvmPre
+    out_image: lvmCal
+    in_bias: lvmMBias
+    in_dark: lvmMDark
+    in_pixelflat: lvmMPix
+  imageMethod.extractSpec:
+    in_image: lvmCal
+    out_rss: lvmFrame
+    in_fiberflat: lvmMFlat
+    method: "aperture"
+    aperture: 7 #median of the distance between peaks (from the mid region trace)
+  rssMethod.createPixTable:
+    rss_in: lvmFrame
+    rss_out: lvmWFrame
+    in_arc: lvmMArc
+  rssMethod.joinChannels:
+  rssMethod.quickQuality:
+    # SN in several bands (FWHM=100AA)
+    # locate sky lines (match against a known list)
+    # measure sky lines width
+    # sky lines equivalent width
+  # for quick flux calibration:
+  # * get solar spectrum
+  # * normalize solar spectrum by fiberflat
+  # apply fiber flat
+  # perform basic flux calibration (theoric response function)
 ...
