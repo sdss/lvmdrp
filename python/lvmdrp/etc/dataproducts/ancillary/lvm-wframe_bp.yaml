@@ -1,0 +1,42 @@
+name: lvm-xframe
+short: extracted frame from 2D image 
+description: |
+  this is the extracted frame with wavelenth calibration.
+location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[OBSERVATORY]/[MJD]/
+created_by: imageMethod.createPixTable
+used_by:
+  - joinSpecChannels
+naming_convention: |
+  lvm-wframe-[CAMERA]-[EXPNUM].fits.gz, [CAMERA] is one of the nine cameras on the instrument, b1, r1, z1,
+  or b2, r2, z2, or b3, r3, or z3 for the blue, red, nir cameras on each LVM spectrograph, and
+  [EXPNUM] is the (zero-padded) 8-digit exposure number.
+hdu0:
+  name: PRIMARY
+  description: primary header metadata
+  is_image: true
+  header:
+hdu1:
+  name: FLUX
+  description: Flux row-stacked in electrons
+  is_image: true
+  shape: CCDROW x NFIBER
+hdu2:
+  name: IVAR
+  description: Inverse variance (1/sigma2) for the above
+  is_image: true
+  shape: CCDROW x NFIBER
+hdu3:
+  name: MASK
+  description: Quality bitmask for each fiber pixel
+  is_image: true
+  shape: CCDROW x NFIBER
+hdu4:
+  name: WAVE
+  description: Wavelength solutions for each fiber [AA]
+  is_image: true
+  shape: CCDROW x NFIBER
+hdu5:
+  name: LSF
+  description: Line-spread function for each fiber [AA]
+  is_image: true
+  shape: CCDROW x NFIBER
