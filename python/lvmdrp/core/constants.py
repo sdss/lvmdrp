@@ -40,22 +40,22 @@ CONFIG_PATH = os.path.join(ROOT_PATH, "etc")
 DATAPRODUCT_BP_PATH = os.path.join(CONFIG_PATH, "dataproducts")
 
 # main DRP configuration path
-MASTER_CONFIG_PATH = os.path.join(CONFIG_PATH, "drp.yml")
+MASTER_CONFIG_PATH = os.path.join(CONFIG_PATH, "drp_configs", "drp.yml")
 # quick DRP configuration path
-QUICK_CONFIG_PATH = os.path.join(CONFIG_PATH, "quick_drp_config.yaml")
+QUICK_CONFIG_PATH = os.path.join(CONFIG_PATH, "drp_configs", "quick_drp_config.yaml")
 
 # ESO sky model (web version) configuration files
-SKYCALC_CONFIG_PATH = os.path.join(CONFIG_PATH, "skycalc.json")
-ALMANAC_CONFIG_PATH = os.path.join(CONFIG_PATH, "almanac.json")
+SKYCALC_CONFIG_PATH = os.path.join(CONFIG_PATH, "third_configs", "skycalc.json")
+ALMANAC_CONFIG_PATH = os.path.join(CONFIG_PATH, "third_configs", "almanac.json")
 
 # ESO sky model master configuration file
-SKYMODEL_CONFIG_PATH = os.path.join(CONFIG_PATH, "skymodel_config.yml")
+SKYMODEL_CONFIG_PATH = os.path.join(CONFIG_PATH, "third_configs", "skymodel_config.yml")
 # high-level ESO sky model configuration files
 SKYMODEL_INST_CONFIG_PATH = os.path.join(SKYMODEL_INST_PATH, "sm-01_mod2", "config", "instrument_etc_ref.par")
 SKYMODEL_MODEL_CONFIG_PATH = os.path.join(SKYMODEL_INST_CONFIG_PATH, "sm-01_mod2", "config", "skymodel_etc_ref.par")
 
 # ESO skycorr configuration file
-SKYCORR_CONFIG_PATH = os.path.join(CONFIG_PATH, "skycorr_config.yml")
+SKYCORR_CONFIG_PATH = os.path.join(CONFIG_PATH, "third_configs", "skycorr_config.yml")
 
 # data paths
 DATA_PATH = os.path.join(ROOT_PATH, "data")
