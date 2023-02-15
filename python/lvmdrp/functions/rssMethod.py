@@ -1679,3 +1679,49 @@ def DAR_registerSDSS_drp(in_rss, sdss_file, sdss_field, ra, dec, out_prefix,  re
 		plt.plot(mean_wave, position_y, 'ok')
 		plt.plot(spec_y._wave, spec_y._data, '-k')
 		plt.show()
+
+@missing_files(["BAD_CALIBRATION_FRAMES"], "in_rss")
+def joinSpecChannels(in_rss, out_rss, parallel="auto"):
+	rss_b = loadRSS(in_rss[0])
+	rss_r = loadRSS(in_rss[1])
+	rss_z = loadRSS(in_rss[2])
+
+	# TODO: verify all RSS files have the same number of fibers
+	# TODO: verify overlapping wavelength ranges
+
+	# parallel or not
+	if parallel=='auto':
+		cpus = cpu_count()
+	else:
+		cpus = int(parallel)
+	if cpus>1:
+		pool = Pool(cpus)
+
+		result_spec = []
+		for ifiber in range(rss_b._fibers):
+			spec_b = rss_b.getSpec(ifiber)
+			spec_r = rss_r.getSpec(ifiber)
+			spec_z = rss_z.getSpec(ifiber)
+
+			chain_coadd = lambda b, r, z: b.coaddSpec(r).coaddSpec(z)
+			result_spec.append(pool.apply_async(chain_coadd, args=(spec_b, spec_r, spec_z)))
+		pool.close()
+		pool.join()
+
+	# combine channels
+	spectra = []
+	for ifiber in range(rss_b._data.shape[0]):
+		if cpus > 1:
+			spec_brz = result_spec[ifiber].get()
+		else:
+			spec_b = rss_b.getSpec(ifiber)
+			spec_r = rss_r.getSpec(ifiber)
+			spec_z = rss_z.getSpec(ifiber)
+
+			spec_br = spec_b.coaddSpec(spec_r)
+			spec_brz = spec_br.coaddSpec(spec_z)
+		
+		spectra.append(spec_brz)
+
+	rss_brz = RSS.from_spectra1d(spectra)
+	rss_brz.writeFitsData(out_rss)
