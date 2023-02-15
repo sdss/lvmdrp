@@ -58,11 +58,13 @@ class BasicMixin(Model):
     datetime = DateTimeField(default=dt.datetime.now)
     mjd = IntegerField(null=True)
     spec = CharField(null=True)
-    ccd = CharField(null=True)
+    camera = CharField(null=True)
+    exposure = IntegerField(null=True)
     exptime = FloatField(null=True)
     imagetyp = CharField(null=True)
     obstime = DateTimeField(null=True)
     observat = CharField(null=True)
+    hemi = CharField(null=True)
     label = CharField(null=True)
     path = CharField(null=True)
     naxis1 = IntegerField(null=True)
@@ -206,6 +208,8 @@ def record_db(config, target_paths=None, ignore_cache=False):
                         header["FLAGS"] = QualityFlag["OK"]
 
                         record = {key: header.get(key, LVMFrames._meta.columns[key].default) for key in FRAME_COLUMNS}
+                        # update hemisphere field
+                        record["hemi"] = "s" if record["observat"] == "LCO" else "n"
                         # update status in case there are missing metadata with the exception of those fields that are allowed to be NULL
                         nonnull_values = [record[name] for name in MANDATORY_COLUMNS]
                         record["flags"] += "MISSING_METADATA" if None in nonnull_values else "OK"
@@ -223,7 +227,7 @@ def record_db(config, target_paths=None, ignore_cache=False):
                     print(f"in chunk={i}, {batch}")
     return None
 
-def get_raws_metadata():
+def get_raws_metadata(mjd=None, exposure=None, spec=None, camera=None):
     try:
         priority = Case(LVMFrames.imagetyp, tuple((frame_type, i) for i, frame_type in enumerate(FRAMES_PRIORITY)))
         query = LVMFrames.select().where(
@@ -231,6 +235,16 @@ def get_raws_metadata():
             (LVMFrames.flags == QualityFlag.OK) &
             (LVMFrames.imagetyp << FRAMES_PRIORITY)
         ).order_by(priority)
+
+        # filter by MJD if present
+        if mjd is not None:
+            query = query.where(LVMFrames.mjd == mjd)
+        if exposure is not None:
+            query = query.where(LVMFrames.exposure == exposure)
+        if spec is not None:
+            query = query.where(LVMFrames.spec == spec)
+        if camera is not None:
+            query = query.where(LVMFrames.camera == camera)
     except Error as e:
         print(e)
     
@@ -258,7 +272,7 @@ def get_analogs_metadata(metadata):
                 (LVMFrames.status == ReductionStatus.PREPROCESSED|ReductionStatus.CALIBRATED|ReductionStatus.FINISHED) &
                 (LVMFrames.flags == QualityFlag.OK) &
                 (LVMFrames.imagetyp == metadata.imagetyp) &
-                (LVMFrames.ccd == metadata.ccd) &
+                (LVMFrames.camera == metadata.camera) &
                 (LVMFrames.mjd == metadata.mjd) &
                 (LVMFrames.exptime == metadata.exptime)
             )
@@ -311,7 +325,7 @@ def get_master_metadata(metadata):
                 (LVMFrames.status == bmask) &
                 (LVMFrames.flags == QualityFlag.OK) &
                 (LVMFrames.imagetyp == calib_type) &
-                (LVMFrames.ccd == metadata.ccd) &
+                (LVMFrames.camera == metadata.camera) &
                 (LVMFrames.calib_id is not None)
             ).order_by(fn.ABS(metadata.mjd - LVMFrames.mjd).asc())
         except Error as e:
