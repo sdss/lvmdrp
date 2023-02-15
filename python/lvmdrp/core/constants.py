@@ -36,8 +36,13 @@ ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # configuration paths
 CONFIG_PATH = os.path.join(ROOT_PATH, "etc")
 
+# dataproduct blueprints path
+DATAPRODUCT_BP_PATH = os.path.join(CONFIG_PATH, "dataproducts")
+
 # main DRP configuration path
 MASTER_CONFIG_PATH = os.path.join(CONFIG_PATH, "drp.yml")
+# quick DRP configuration path
+QUICK_CONFIG_PATH = os.path.join(CONFIG_PATH, "quick_drp_config.yaml")
 
 # ESO sky model (web version) configuration files
 SKYCALC_CONFIG_PATH = os.path.join(CONFIG_PATH, "skycalc.json")
@@ -94,18 +99,18 @@ SKYCORR_PAR_MAP = {'INPUT_OBJECT_SPECTRUM': 'objfile',
 BASIC_CALIBRATION_TYPES = [
     "bias",
     "dark",
-    "flat"
+    "pixelflat"
 ]
 CALIBRATION_TYPES = BASIC_CALIBRATION_TYPES + [
-    "continuum",
+    "fiberflat",
     "arc"
 ]
 FRAMES_PRIORITY = CALIBRATION_TYPES + ["object"]
 FRAMES_CALIB_NEEDS = {
     "bias": [],
     "dark": ["bias"],
-    "flat": ["bias", "dark"],
-    "continuum": ["bias", "dark", "flat"],
-    "arc": ["bias", "dark", "flat", "continuum"],
-    "object": ["bias", "dark", "flat", "continuum", "arc"],
+    "pixelflat": ["bias", "dark"],
+    "fiberflat": ["bias", "dark", "flat"],
+    "arc": ["bias", "dark", "flat", "fiberflat"],
+    "object": ["bias", "dark", "flat", "fiberflat", "arc"],
 }
