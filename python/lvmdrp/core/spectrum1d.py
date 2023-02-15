@@ -70,8 +70,7 @@ def wave_little_interpol(wavelist):
         overlap_end = numpy.min(wavelist[i+1][wavelist[i+1] > maxs[i]])
         # In overlap region patch in a linear scale with slightly different step.
         dw = overlap_end - overlap_start
-        step = 0.5 * \
-            (numpy.mean(numpy.diff(wavelist[i])) + numpy.mean(numpy.diff(wavelist[i+1])))
+        step = 0.5 * (numpy.mean(numpy.diff(wavelist[i])) + numpy.mean(numpy.diff(wavelist[i+1])))
         n_steps = int(dw / step + 0.5)
 
         wave_overlap = numpy.linspace(

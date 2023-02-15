@@ -282,7 +282,7 @@ def run_reduction_block(config, metadata, calib_metadata, settings):
         kind="{kind}"
     )
     _, flags = imageMethod.subtractStraylight_drp(
-        image=target_frame_path.format(kind="cosmic"),
+        in_image=target_frame_path.format(kind="cosmic"),
         trace=master_continuum_path.format(kind="trc"),
         stray_image=target_frame_path.format(kind="back"),
         clean_image=target_frame_path.format(kind="stray"),
@@ -291,7 +291,7 @@ def run_reduction_block(config, metadata, calib_metadata, settings):
     metadata.flags += flags
     _, flags = imageMethod.extractSpec_drp(
         in_image=target_frame_path.format(kind="stray"),
-        trace=master_continuum_path.format(kind="trc"),
+        in_arc=master_continuum_path.format(kind="trc"),
         out_rss=target_frame_path.format(kind="ms"),
         fwhm=master_continuum_path.format(kind="fwhm"),
         method="optimal", parallel="5"
@@ -310,27 +310,27 @@ def run_reduction_continuum(config, metadata, calib_metadata, settings):
         kind="{kind}"
     )
     _, flags = imageMethod.LACosmic_drp(
-        image=target_frame_path.format(kind="calib"),
+        in_image=target_frame_path.format(kind="calib"),
         out_image=target_frame_path.format(kind="cosmic"),
         increase_radius=1, flim="1.3", parallel='5'
     )
     metadata.flags += flags
     # BUG: verify outputs against expected values, skip calibration steps if needed & set corresponding flags
     _, flags = imageMethod.findPeaksAuto_drp(
-        image=target_frame_path.format(kind="cosmic"),
+        in_image=target_frame_path.format(kind="cosmic"),
         out_peaks_file=target_frame_path.format(kind="trace").replace(".fits", ".peaks"),
         disp_axis="X", threshold="5000", slice="3696", nfibers="41", median_box="1", median_cross="1", method="gauss", init_sigma="0.5", verbose=0
     )
     metadata.flags += flags
     _, flags = imageMethod.tracePeaks_drp(
-        image=target_frame_path.format(kind="cosmic"),
+        in_image=target_frame_path.format(kind="cosmic"),
         peaks_file=target_frame_path.format(kind="trace").replace(".fits", ".peaks"),
         trace_out=target_frame_path.format(kind="trc"),
         steps=30, method="gauss", threshold_peak=50, poly_disp=5, coadd=30, verbose=0
     )
     metadata.flags += flags
     _, flags = imageMethod.subtractStraylight_drp(
-        image=target_frame_path.format(kind="cosmic"),
+        in_image=target_frame_path.format(kind="cosmic"),
         trace=target_frame_path.format(kind="trc"),
         stray_image=target_frame_path.format(kind="back"),
         clean_image=target_frame_path.format(kind="stray"),
@@ -338,7 +338,7 @@ def run_reduction_continuum(config, metadata, calib_metadata, settings):
     )
     metadata.flags += flags
     _, flags = imageMethod.traceFWHM_drp(
-        image=target_frame_path.format(kind="stray"),
+        in_image=target_frame_path.format(kind="stray"),
         trace=target_frame_path.format(kind="trc"),
         fwhm_out=target_frame_path.format(kind="fwhm"),
         blocks=32, steps=30, coadd=20, threshold_flux=50.0, poly_disp=5, clip="1.5,4.0"
@@ -346,7 +346,7 @@ def run_reduction_continuum(config, metadata, calib_metadata, settings):
     metadata.flags += flags
     _, flags = imageMethod.extractSpec_drp(
         in_image=target_frame_path.format(kind="stray"),
-        trace=target_frame_path.format(kind="trc"),
+        in_arc=target_frame_path.format(kind="trc"),
         out_rss=target_frame_path.format(kind="ms"),
         fwhm=target_frame_path.format(kind="fwhm"),
         parallel=5, method="optimal"
@@ -378,8 +378,8 @@ def run_reduction_arc(config, metadata, calib_metadata, settings):
     )
     metadata.flags += flags
     _, flags = rssMethod.resampleWave_drp(
-        rss_in=target_frame_path.format(kind="rss"),
-        rss_out=target_frame_path.format(kind="disp_cor"),
+        in_rss=target_frame_path.format(kind="rss"),
+        out_rss=target_frame_path.format(kind="disp_cor"),
         start_wave=settings.wl_range[0], end_wave=settings.wl_range[1], disp_pix="1.0", err_sim="0"
     )
     metadata.flags += flags
@@ -389,7 +389,7 @@ def run_reduction_arc(config, metadata, calib_metadata, settings):
 def run_reduction_object(config, metadata, calib_metadata, settings):
 
     _, flags = imageMethod.LACosmic_drp(
-        image=settings.output_path.format(kind="calib"),
+        in_image=settings.output_path.format(kind="calib"),
         out_image=settings.output_path.format(kind="cosmic"),
         increase_radius=1, flim="1.3", parallel='5'
     )
@@ -402,8 +402,8 @@ def run_reduction_object(config, metadata, calib_metadata, settings):
     )
     metadata.flags += flags
     _, flags = rssMethod.resampleWave_drp(
-        rss_in=settings.output_path.format(kind="rss"),
-        rss_out=settings.output_path.format(kind="disp_cor"),
+        in_rss=settings.output_path.format(kind="rss"),
+        out_rss=settings.output_path.format(kind="disp_cor"),
         start_wave=settings.wl_range[0], end_wave=settings.wl_range[1], disp_pix="1.0", err_sim="0"
     )
     metadata.flags += flags

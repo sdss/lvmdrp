@@ -20,7 +20,7 @@ import multiprocessing
 from types import *
 
 
-description='Provides Methods to process 2D images'
+description = 'Provides Methods to process 2D images'
 
 __all__ = [
 	"LACosmic_drp", "findPeaksAuto_drp", "tracePeaks_drp",
@@ -225,8 +225,8 @@ def detCos_drp(image,  out_image,   rdnoise='2.9', sigma_det='5', rlim='1.2', it
 			out = out.replaceMaskMedian(box_x, box_y, replace_error=None)  # replace possible corrput pixel with zeros
 	out.writeFitsData(out_image)
 
-@missing_files(["BAD_CALIBRATION_FRAMES"], "image")
-def LACosmic_drp(image,  out_image,  sigma_det='5', flim='1.1', iter='3', sig_gauss='0.8,0.8', error_box='20,1', replace_box='20,1',  replace_error='1e10',  rdnoise='2.9',  increase_radius='0', verbose='0', parallel='2'):
+@missing_files(["BAD_CALIBRATION_FRAMES"], "in_image")
+def LACosmic_drp(in_image,  out_image,  sigma_det='5', flim='1.1', iter='3', sig_gauss='0.8,0.8', error_box='20,1', replace_box='20,1',  replace_error='1e10',  rdnoise='2.9',  increase_radius='0', verbose='0', parallel='2'):
 	"""
 			Detects and removes cosmic rays from astronomical images based on a modified Laplacian edge
 			detection method introduced by van Dokkum (2005) and modified by B. Husemann (2012, in prep.).
@@ -304,7 +304,7 @@ def LACosmic_drp(image,  out_image,  sigma_det='5', flim='1.1', iter='3', sig_ga
 		replace_error = None
 
 	# load image from FITS file
-	img = loadImage(image)
+	img = loadImage(in_image)
 
 	# create empty mask if no mask is present in original image
 	if img._mask is not None:
@@ -453,8 +453,8 @@ def addCCDMask_drp(image, mask, replaceError='1e10'):
 	img.setData(mask=mask_comb)
 	img.writeFitsData(image)
 
-@missing_files(["BAD_CALIBRATION_FRAMES"], "image")
-def findPeaksAuto_drp(image, out_peaks_file, nfibers,  disp_axis='X', threshold='5000',median_box='8', median_cross='1', slice='', method='gauss',  init_sigma='1.0', verbose='1'):
+@missing_files(["BAD_CALIBRATION_FRAMES"], "in_image")
+def findPeaksAuto_drp(in_image, out_peaks_file, nfibers,  disp_axis='X', threshold='5000',median_box='8', median_cross='1', slice='', method='gauss',  init_sigma='1.0', verbose='1'):
 	"""
 		   Finds the exact subpixel cross-dispersion position of a given number of fibers at a certain dispersion column on the raw CCD frame.
 		   If a predefined number of pixel are expected, the initial threshold value for the minimum peak height will varied until the expected number
@@ -498,7 +498,7 @@ def findPeaksAuto_drp(image, out_peaks_file, nfibers,  disp_axis='X', threshold=
 	verbose = int(verbose)
 
 	# Load Image
-	img = loadImage(image)
+	img = loadImage(in_image)
 
 	# swap axes so that the dispersion axis goes along the x axis
 	if disp_axis=='X' or disp_axis=='x':
@@ -854,8 +854,8 @@ def findPeaksMaster2_drp(image, peaks_master, out_peaks_file, disp_axis='X', thr
 		pylab.plot(centers._data, numpy.ones(len(centers._data))*2000.0, 'xg')
 		pylab.show()
 
-@missing_files(["BAD_CALIBRATION_FRAMES"], "image", "peaks_file")
-def tracePeaks_drp(image, peaks_file, trace_out, disp_axis='X', method='gauss', median_box='7', median_cross='1', steps='30', coadd='30', poly_disp='-6', init_sigma='1.0', threshold_peak='100.0', max_diff='2', verbose='1'):
+@missing_files(["BAD_CALIBRATION_FRAMES"], "in_image", "peaks_file")
+def tracePeaks_drp(in_image, peaks_file, trace_out, disp_axis='X', method='gauss', median_box='7', median_cross='1', steps='30', coadd='30', poly_disp='-6', init_sigma='1.0', threshold_peak='100.0', max_diff='2', verbose='1'):
 	"""
 			Traces the peaks of fibers along the dispersion axis. The peaks at a specific dispersion column had to be determined before.
 			Two scheme of measuring the subpixel peak positionare available: A hyperbolic approximation or fitting a Gaussian profile to the brightest 3 pixels of a peak.
@@ -906,7 +906,7 @@ def tracePeaks_drp(image, peaks_file, trace_out, disp_axis='X', method='gauss', 
 	init_sigma = float(init_sigma)
 
 	# load continuum image  from file
-	img = loadImage(image)
+	img = loadImage(in_image)
 
 
 	# orient image so that the cross-dispersion is along the first and the dispersion is along the second array axis
@@ -1153,8 +1153,8 @@ def combineImages_drp(images, out_image, method='median', k='3.0'):
 	#write out FITS file
 	combined_img.writeFitsData(out_image)
 
-@missing_files(["BAD_CALIBRATION_FRAMES"], "image", "trace")
-def subtractStraylight_drp(image, trace, stray_image, clean_image, disp_axis='X',  aperture='7', poly_cross='4', smooth_disp='5', smooth_gauss='10.0', parallel='auto'):
+@missing_files(["BAD_CALIBRATION_FRAMES"], "in_image", "trace")
+def subtractStraylight_drp(in_image, trace, stray_image, clean_image, disp_axis='X',  aperture='7', poly_cross='4', smooth_disp='5', smooth_gauss='10.0', parallel='auto'):
 	"""
 			Subtracts a diffuse background signal (stray light) from the raw data. It uses the regions between fiber to estimate the stray light signal and
 			smoothes the result by a polyon in cross-disperion direction and afterwards a wide 2D Gaussian filter to reduce the introduction of low frequency noise.
@@ -1190,7 +1190,7 @@ def subtractStraylight_drp(image, trace, stray_image, clean_image, disp_axis='X'
 
 
 	# load image data
-	img = loadImage(image)
+	img = loadImage(in_image)
 
 
 	# orient image so that the cross-dispersion is along the first and the dispersion is along the second array axis
@@ -1221,7 +1221,7 @@ def subtractStraylight_drp(image, trace, stray_image, clean_image, disp_axis='X'
 	img_smooth =img_fit.convolveGaussImg(smooth_gauss, smooth_gauss)
 
 	# subtract smoothed background signal from origianal image
-	img = loadImage(image)
+	img = loadImage(in_image)
 
 	if disp_axis=='X' or disp_axis=='x':
 		pass
@@ -1246,8 +1246,8 @@ def subtractStraylight_drp(image, trace, stray_image, clean_image, disp_axis='X'
 	img_out.writeFitsData(clean_image)
 	img_smooth.writeFitsData(stray_image)
 
-@missing_files(["BAD_CALIBRATION_FRAMES"], "image", "trace")
-def traceFWHM_drp(image, trace, fwhm_out, disp_axis='X', blocks='20', steps='100', coadd='10', poly_disp='5', threshold_flux='50.0', init_fwhm='2.0', clip='', parallel='auto'):
+@missing_files(["BAD_CALIBRATION_FRAMES"], "in_image", "trace")
+def traceFWHM_drp(in_image, trace, fwhm_out, disp_axis='X', blocks='20', steps='100', coadd='10', poly_disp='5', threshold_flux='50.0', init_fwhm='2.0', clip='', parallel='auto'):
 	"""
 			Measures the FWHM of the cross-dispersion fiber profile across the CCD.  It assumes that the profiles have a Gaussian shape and that the width  is CONSTANT for
 			a BLOCK of fibers in cross-dispersion direction.  If the FITS image contains an extension with the error, the error frame will be taken into account in the Gaussian fitting.
@@ -1304,7 +1304,7 @@ def traceFWHM_drp(image, trace, fwhm_out, disp_axis='X', blocks='20', steps='100
 		clip=None
 
 	# load image data
-	img = loadImage(image)
+	img = loadImage(in_image)
 
 	# orient image so that the cross-dispersion is along the first and the dispersion is along the second array axis
 	if disp_axis=='X' or disp_axis=='x':
@@ -1589,9 +1589,11 @@ def offsetTrace2_drp(image, trace, trace_fwhm, disp, lines, logfile,  blocks='15
 
 # TODO: suggestion from Oleg: test a voigt profile for the flux extraction
 # it might be better in dealing with cross-talk
-
-@missing_files(["BAD_CALIBRATION_FRAMES"], "image", "trace")
-def extractSpec_drp(in_image, trace, out_rss,  method='optimal',  aperture='7', fwhm='2.5', disp_axis='X',  replace_error='1e10', plot='-1', parallel='auto'):
+# TODO:
+# * define lvm-frame ancillary product to replace for out_rss
+# * set in_arc = lvm(M)Arc
+@missing_files(["BAD_CALIBRATION_FRAMES"], "in_image", "in_arc")
+def extractSpec_drp(in_image, out_rss, in_arc,  method='optimal',  aperture='7', fwhm='2.5', disp_axis='X',  replace_error='1e10', plot='-1', parallel='auto'):
 	"""
 			Extracts the flux for each fiber along the dispersion direction which is written into an RSS FITS file format.
 			Either a simple aperture or an optimal extraction scheme may be used.
@@ -1642,7 +1644,7 @@ def extractSpec_drp(in_image, trace, out_rss,  method='optimal',  aperture='7', 
 
 
 	trace_mask = TraceMask()
-	trace_mask.loadFitsData(trace)
+	trace_mask.loadFitsData(in_arc)
 	trace_fwhm = TraceMask()
 
 	if method=='optimal':
@@ -1723,13 +1725,13 @@ def calibrateSDSSImage_drp(file_in, file_out, field_file):
 	calImage = image.calibrateSDSS(field_file)
 	calImage.writeFitsData(file_out)
 
-@missing_files(["BAD_CALIBRATION_FRAMES"], "file_in")
-def subtractBias_drp(file_in, file_out, bias, compute_error='1', boundary_x='', boundary_y='', gain='', rdnoise='', subtract_light='0'):
+@missing_files(["BAD_CALIBRATION_FRAMES"], "in_image", "in_bias")
+def subtractBias_drp(in_image, out_image, in_bias, compute_error='1', boundary_x='', boundary_y='', gain='', rdnoise='', subtract_light='0'):
 	subtract_light= bool(int(subtract_light))
 	compute_error = bool(int(compute_error))
-	image = loadImage(file_in)
+	image = loadImage(in_image)
     #print('image',image._data)
-	bias_frame = loadImage(bias)
+	bias_frame = loadImage(in_bias)
     #print('bias',bias_frame._data)
     
 	clean=image-bias_frame
@@ -1767,7 +1769,7 @@ def subtractBias_drp(file_in, file_out, bias, compute_error='1', boundary_x='', 
         #print(straylight)
 
 
-	clean.writeFitsData(file_out)
+	clean.writeFitsData(out_image)
 
 def reprojectRSS_drp(stray, trace, fwhm_cross, fwhm_spect, wave, flux, sim_fwhm=0.5, method="linear"):
 	"""
@@ -2167,11 +2169,11 @@ def preprocRawFrame_drp(in_image, out_image, positions="00,10,01,11", orientatio
 	#write out FITS file
 	preproc_image.writeFitsData(out_image)
 
-# TODO: after preprocessing remove cosmic ray if needed (exptime < T or NEXP > 2)
+# TODO: after preprocessing remove cosmic ray if needed (don't if exptime < T and/or NEXP > 2)
 # TODO: if NEXP == 2, where CR, choose the other and when both clean, choose the average
 
-@missing_files(["BAD_CALIBRATION_FRAMES"], "in_image")
-def basicCalibration_drp(in_image, out_image, bias=None, dark=None, flat=None):
+@missing_files(["BAD_CALIBRATION_FRAMES"], "in_image", "in_bias", "in_dark", "in_pixelflat")
+def basicCalibration_drp(in_image, out_image, in_bias=None, in_dark=None, in_pixelflat=None):
 
     proc_image = loadImage(in_image).convertUnit(unit="e-")
     exptime = proc_image._header["EXPTIME"]
@@ -2183,16 +2185,16 @@ def basicCalibration_drp(in_image, out_image, bias=None, dark=None, flat=None):
     dummy_flat = Image(data=numpy.ones_like(proc_image._data))
 
     # read master bias
-    if img_type in ["bias"] or bias is None or not os.path.isfile(bias):
+    if img_type in ["bias"] or in_bias is None or not os.path.isfile(in_bias):
         master_bias = dummy_bias
     else:
-        master_bias = loadImage(bias).convertUnit(unit="e-")
+        master_bias = loadImage(in_bias).convertUnit(unit="e-")
     
     # read master dark
-    if img_type in ["bias", "dark"] or dark is None or not os.path.isfile(dark):
+    if img_type in ["bias", "dark"] or in_dark is None or not os.path.isfile(in_dark):
         master_dark = dummy_dark
     else:
-        master_dark = loadImage(dark).convertUnit(unit="e-")
+        master_dark = loadImage(in_dark).convertUnit(unit="e-")
         # scale down the dark if needed
         factor = exptime / master_dark._header["EXPTIME"]
         if factor > 1.0:
@@ -2201,10 +2203,10 @@ def basicCalibration_drp(in_image, out_image, bias=None, dark=None, flat=None):
         master_dark *= factor
 
     # read master flat
-    if img_type in ["bias", "dark", "flat", "flatfield", "fiberflat", "object"] or flat is None or not os.path.isfile(flat):
+    if img_type in ["bias", "dark", "flat", "flatfield", "fiberflat", "object"] or in_pixelflat is None or not os.path.isfile(in_pixelflat):
         master_flat = dummy_flat
     else:
-        master_flat = loadImage(flat).convertUnit(unit="e-")
+        master_flat = loadImage(in_pixelflat).convertUnit(unit="e-")
 
     # normalize in case of flat calibration
     if img_type == "bias":

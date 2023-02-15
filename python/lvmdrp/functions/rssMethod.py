@@ -62,6 +62,11 @@ def mergeRSS_drp(files_in, file_out,  mergeHdr='1'):
 				rss.append(rss_add, append_hdr=True)
 	rss.writeFitsData(file_out)
 
+# TODO:
+# * define ancillary product lvm-lxpeak for ref_line_file
+# * define ancillary product lvm-arc (rss arc) for replace arc_rss
+# * define ancillary product lvm-wave to contain wavelength solutions
+# * merge disp_rss and res_rss products into lvmArc product, change variable to out_arc
 @missing_files(["BAD_CALIBRATION_FRAMES"], "arc_rss", "ref_line_file")
 def detWaveSolution_drp(arc_rss, disp_rss, res_rss, ref_line_file='', ref_spec='', pixel='', ref_lines='', poly_dispersion='-5', poly_fwhm='-3,-5', init_back='10.0',  aperture='13', flux_min='200.0', fwhm_max='10.0', rel_flux_limits='0.1,5.0', fiberflat='', negative=False, verbose='1' ):
 	"""
@@ -295,17 +300,19 @@ def detWaveSolution_drp(arc_rss, disp_rss, res_rss, ref_line_file='', ref_spec='
 
 	return cent_wave[:, select_lines], fwhm_wave[select_lines]
 
-@missing_files(["BAD_CALIBRATION_FRAMES"], "rss_in")
-def createPixTable_drp(rss_in, rss_out, arc_wave, arc_fwhm='', cropping=''):
+# TODO:
+# * merge arc_wave and arc_fwhm into lvmArc product, change variable name to in_arc
+@missing_files(["BAD_CALIBRATION_FRAMES"], "in_rss")
+def createPixTable_drp(in_rss, out_rss, arc_wave, arc_fwhm='', cropping=''):
 	"""
 			Adds the wavelength and possibly also the spectral resolution (FWHM) pixel table as new extension to
 			the RSS that is stored as a seperate RSS file.
 
 			Parameters
 			--------------
-			rss_in : string
+			in_rss : string
 					Input RSS FITS file
-			rss_out : string
+			out_rss : string
 					Output RSS FITS file with the wavelength and spectral resolution pixel table added as extensions
 			arc_wave : string
 					RSS FITS file containing the wavelength pixel table in its primary (0th) extension
@@ -319,7 +326,7 @@ def createPixTable_drp(rss_in, rss_out, arc_wave, arc_fwhm='', cropping=''):
 			user:> lvmdrp rss createPixTable RSS_IN.fits RSS_OUT.fits WAVE.fits FWHM.fits
 	"""
 	rss = RSS()
-	rss.loadFitsData(rss_in)
+	rss.loadFitsData(in_rss)
 	if cropping != '':
 		crop_start=int(cropping.split(',')[0])-1
 		crop_end=int(cropping.split(',')[1])-1
@@ -346,9 +353,9 @@ def createPixTable_drp(rss_in, rss_out, arc_wave, arc_fwhm='', cropping=''):
 		fwhm_trace =FiberRows()
 		fwhm_trace.loadFitsData(arc_fwhm)
 		rss.setInstFWHM(fwhm_trace.getData()[0][:, crop_start:crop_end])
-	rss.writeFitsData(rss_out)
+	rss.writeFitsData(out_rss)
 
-def checkPixTable_drp(rss_in, ref_lines, logfile, blocks='15',  init_back='100.0', aperture='10'):
+def checkPixTable_drp(in_rss, ref_lines, logfile, blocks='15',  init_back='100.0', aperture='10'):
 	"""
 			Measures the offset in dispersion direction between the object frame and the used calibration frames.
 			It compares the wavelength of emission lines (i.e. night sky line) in the RSS as measured by Gaussian fitting
@@ -356,7 +363,7 @@ def checkPixTable_drp(rss_in, ref_lines, logfile, blocks='15',  init_back='100.0
 
 			Parameters
 			--------------
-			rss_in : string
+			in_rss : string
 					Input RSS FITS file
 			ref_lines : string
 					Comma-separated list of emission lines to be fit in the RSS for each fiber
@@ -382,12 +389,12 @@ def checkPixTable_drp(rss_in, ref_lines, logfile, blocks='15',  init_back='100.0
 	aperture=float(aperture)
 	nblocks = int(blocks)
 	rss = RSS()
-	rss.loadFitsData(rss_in)
+	rss.loadFitsData(in_rss)
 	fit_wave = numpy.zeros((len(rss), len(centres)), dtype=numpy.float32)
 	good_fiber = numpy.zeros(len(rss), dtype="bool")
 	offset_pix = numpy.zeros((len(rss), len(centres)), dtype=numpy.float32)
 	log = open(logfile, 'a')
-	log.write('%s\n'%(rss_in))
+	log.write('%s\n'%(in_rss))
 
 	for i in range(len(rss)):
 		spec = rss[i]
@@ -433,10 +440,10 @@ def checkPixTable_drp(rss_in, ref_lines, logfile, blocks='15',  init_back='100.0
 	off_disp_rms    = float('%.4f'%off_disp_rms) if numpy.isfinite(off_disp_rms) else str(off_disp_rms)
 	rss.setHdrValue('hierarch PIPE FLEX XOFF', off_disp_median, 'flexure offset in x-direction')
 	rss.setHdrValue('hierarch PIPE FLEX XRMS', off_disp_rms, 'flexure rms in x-direction')
-	rss.writeFitsHeader(rss_in)
+	rss.writeFitsHeader(in_rss)
 	log.close()
 
-def correctPixTable_drp(rss_in, rss_out, logfile, ref_id, smooth_poly_cross='', smooth_poly_disp='', poly_disp='6', verbose='0'):
+def correctPixTable_drp(in_rss, out_rss, logfile, ref_id, smooth_poly_cross='', smooth_poly_disp='', poly_disp='6', verbose='0'):
 	"""
 			Corrects the RSS wavelength pixel table for possible offsets in dispersion direction due to flexure effects
 			with respect to the calibration frames taken for this object. The offfsets need to be determined beforehand
@@ -445,9 +452,9 @@ def correctPixTable_drp(rss_in, rss_out, logfile, ref_id, smooth_poly_cross='', 
 
 			Parameters
 			--------------
-			rss_in : string
+			in_rss : string
 					Input RSS FITS file
-			rss_out : string
+			out_rss : string
 					Output RSS FITS file with corrected wavelength pixel table
 			logfile : string
 					Input ASCII logfile containing the previously measured offset for certain reference emission line
@@ -479,7 +486,7 @@ def correctPixTable_drp(rss_in, rss_out, logfile, ref_id, smooth_poly_cross='', 
 	poly_disp = int(poly_disp)
 	verbose = int(verbose)
 
-	rss = loadRSS(rss_in)
+	rss = loadRSS(in_rss)
 	log = open(logfile, 'r')
 	log_lines = log.readlines()
 	m=0
@@ -533,10 +540,10 @@ def correctPixTable_drp(rss_in, rss_out, logfile, ref_id, smooth_poly_cross='', 
 		new_wave.smoothPoly(poly_disp, ref_base=spec._pixels)
 		spec._wave=new_wave._data
 		rss[i]=spec
-	rss.writeFitsData(rss_out)
+	rss.writeFitsData(out_rss)
 
-@missing_files(["BAD_CALIBRATION_FRAMES"], "rss_in")
-def resampleWave_drp(rss_in, rss_out, method='spline', start_wave='', end_wave='', disp_pix='', err_sim='500', replace_error='1e10', correctHvel='',compute_densities=0,parallel='auto'):
+@missing_files(["BAD_CALIBRATION_FRAMES"], "in_rss")
+def resampleWave_drp(in_rss, out_rss, method='spline', start_wave='', end_wave='', disp_pix='', err_sim='500', replace_error='1e10', correctHvel='',compute_densities=0,parallel='auto'):
 	"""
 			Resamples the RSS with a wavelength in pixel table format to an RSS with a common wavelength solution for each fiber.
 			A Monte Carlo scheme can be used to propagte the error to the resample spectrum. Note that correlated noise is not taken
@@ -544,9 +551,9 @@ def resampleWave_drp(rss_in, rss_out, method='spline', start_wave='', end_wave='
 
 			Parameters
 			--------------
-			rss_in : string
+			in_rss : string
 					Input RSS FITS file where the wavelength is stored as a pixel table
-			rss_out : string
+			out_rss : string
 					Output RSS FITS file with a common wavelength solution
 			method : string, optional with default: 'spline'
 					Interpolation scheme used for the spectral resampling of the data.
@@ -579,7 +586,7 @@ def resampleWave_drp(rss_in, rss_out, method='spline', start_wave='', end_wave='
 	err_sim=int(err_sim)
 	replace_error=float(replace_error)
 	compute_densities = bool(compute_densities)
-	rss = loadRSS(rss_in)
+	rss = loadRSS(in_rss)
 	#print(rss._error)
 	if start_wave=='':
 		start_wave=numpy.min(rss._wave)
@@ -646,9 +653,9 @@ def resampleWave_drp(rss_in, rss_out, method='spline', start_wave='', end_wave='
 			mask[i, :] = spec._mask
 		resamp_rss = RSS(data=data, wave=ref_wave, header = rss.getHeader(), error=error, mask=mask)
 
-	resamp_rss.writeFitsData(rss_out)
+	resamp_rss.writeFitsData(out_rss)
 
-def matchResolution_drp(rss_in, rss_out, targetFWHM, parallel='auto'):
+def matchResolution_drp(in_rss, out_rss, targetFWHM, parallel='auto'):
 	"""
 			Homogenise the spectral resolution of the RSS to a common spectral resolution (FWHM) by smoothing
 			with a corresponding Gaussian. A pixel table with the spectral resolution needs to be present in the RSS.
@@ -657,9 +664,9 @@ def matchResolution_drp(rss_in, rss_out, targetFWHM, parallel='auto'):
 
 			Parameters
 			--------------
-			rss_in : string
+			in_rss : string
 					Input RSS FITS file with a pixel table for the spectral resolution
-			rss_out : string
+			out_rss : string
 					Output RSS FITS file with a homogenised spectral resolution
 			targetFWHM : string of float
 					Spectral resolution in FWHM to which the RSS shall be homogenised
@@ -673,7 +680,7 @@ def matchResolution_drp(rss_in, rss_out, targetFWHM, parallel='auto'):
 	"""
 	targetFWHM = float(targetFWHM)
 	rss = RSS()
-	rss.loadFitsData(rss_in)
+	rss.loadFitsData(in_rss)
 
 	smoothFWHM = numpy.zeros_like(rss._inst_fwhm)
 	select = rss._inst_fwhm<targetFWHM
@@ -701,16 +708,16 @@ def matchResolution_drp(rss_in, rss_out, targetFWHM, parallel='auto'):
 			rss[i]=rss[i].smoothGaussVariable(smoothFWHM[i, :])
 	rss._inst_fwhm=None
 	rss.setHdrValue('hierarch PIPE SPEC RES', targetFWHM, 'FWHM in A of spectral resolution')
-	rss.writeFitsData(rss_out)
+	rss.writeFitsData(out_rss)
 
-def splitFibers_drp(rss_in, splitted_out, contains):
+def splitFibers_drp(in_rss, splitted_out, contains):
 	"""
 			Subtracts a (sky) spectrum, which was stored as a FITS file, from the whole RSS.
 			The error will be propagated if the spectrum AND the RSS contain error information.
 
 			Parameters
 			--------------
-			rss_in : string
+			in_rss : string
 					Input RSS FITS file including a position table as an extension
 			splitted_out : string
 					Comma-separated list of output RSS FITS files
@@ -729,12 +736,13 @@ def splitFibers_drp(rss_in, splitted_out, contains):
 	contains = contains.split(',')
 	splitted_out = splitted_out.split(',')
 	rss = RSS()
-	rss.loadFitsData(rss_in)
+	rss.loadFitsData(in_rss)
 	splitted_rss = rss.splitFiberType(contains)
 	for i in range(len(splitted_rss)):
 		splitted_rss[i].writeFitsData(splitted_out[i])
 
-def createFiberFlat_drp(rss_in, rss_out, smooth_poly='0', smooth_median='0', clip='', valid=''):
+# TODO: for twilight fiber flats, normalize the individual flats before combining to remove the time dependence
+def createFiberFlat_drp(in_rss, out_rss, smooth_poly='0', smooth_median='0', clip='', valid=''):
 	"""
 			Creates a fiberflat from a wavelength calibrated skyflat RSS by computing the
 			relative transmission to the median spectrum.
@@ -742,9 +750,9 @@ def createFiberFlat_drp(rss_in, rss_out, smooth_poly='0', smooth_median='0', cli
 
 			Parameters
 			--------------
-			rss_in : string
+			in_rss : string
 					Input RSS FITS of a skyflat observations
-			rss_out : string
+			out_rss : string
 					Output RSS FITS file with fiberflat RSS
 			smooth_poly : string of integer (>0), optional with default: '-5'
 					Degree of polynomial with which the fiberflat may be fitted along
@@ -776,7 +784,7 @@ def createFiberFlat_drp(rss_in, rss_out, smooth_poly='0', smooth_median='0', cli
 	else:
 		clip=None
 
-	rss = loadRSS(rss_in)
+	rss = loadRSS(in_rss)
 	#    print rss._wave
 	fiberflat=rss.createFiberFlat(smooth_poly, smooth_median, clip, valid=valid)
 
@@ -800,7 +808,7 @@ def createFiberFlat_drp(rss_in, rss_out, smooth_poly='0', smooth_median='0', cli
 	if fiberflat is None:
 		print('Please resample the RSS frame to a common wavelength solution!')
 	else:
-		fiberflat.writeFitsData(rss_out)
+		fiberflat.writeFitsData(out_rss)
 
 def correctTraceMask_drp(trace_in, trace_out, logfile, ref_file, poly_smooth=''):
 	"""
@@ -882,15 +890,15 @@ def correctTraceMask_drp(trace_in, trace_out, logfile, ref_file, poly_smooth='')
 
 	trace.writeFitsData(trace_out)
 
-def correctFiberFlat_drp(rss_in, rss_out, fiberflat, clip='0.2'):
+def correctFiberFlat_drp(in_rss, out_rss, fiberflat, clip='0.2'):
 	"""
 			Correct an RSS frame for the effect of the different fiber transmission as measured by a fiberflat.
 
 			Parameters
 			--------------
-			rss_in : string
+			in_rss : string
 					Input RSS FITS file
-			rss_out : string
+			out_rss : string
 					Output RSS FITS file which is fiberflat corrected.
 			fiberflat : string
 					Fiberflat RSS FITS file containing the relative transmission of each fiber
@@ -905,7 +913,7 @@ def correctFiberFlat_drp(rss_in, rss_out, fiberflat, clip='0.2'):
 	"""
 	clip=float(clip)
 	rss = RSS()
-	rss.loadFitsData(rss_in)
+	rss.loadFitsData(in_rss)
 	flat = RSS()
 	flat.loadFitsData(fiberflat)
 
@@ -918,9 +926,9 @@ def correctFiberFlat_drp(rss_in, rss_out, fiberflat, clip='0.2'):
 		flat_resamp._mask[select_clip]=True
 		spec_new = spec_data/flat_resamp
 		rss.setSpec(i, spec_new)
-	rss.writeFitsData(rss_out)
+	rss.writeFitsData(out_rss)
 
-def combineRSS_drp(rsss, rss_out, method='mean'):
+def combineRSS_drp(rsss, out_rss, method='mean'):
 	# convert input parameters to proper type
 	list_rss= rsss.split(',')
 
@@ -934,19 +942,19 @@ def combineRSS_drp(rsss, rss_out, method='mean'):
 	combined_rss.combineRSS(rss_list, method=method)
 	combined_rss.setHeader(header=combined_header._header)
 	#write out FITS file
-	combined_rss.writeFitsData(rss_out)
+	combined_rss.writeFitsData(out_rss)
 
-def glueRSS_drp(rsss,rss_out):
+def glueRSS_drp(rsss,out_rss):
 	list_rss= rsss.split(',')
-	glueRSS(list_rss,rss_out)
+	glueRSS(list_rss,out_rss)
 
-def apertureFluxRSS_drp(rss_in, center_x, center_y, hdr_prefix, arc_radius, flux_type='mean,3900,4600'):
+def apertureFluxRSS_drp(in_rss, center_x, center_y, hdr_prefix, arc_radius, flux_type='mean,3900,4600'):
 	flux_type=flux_type.split(',')
 	center_x = float(center_x)
 	center_y = float(center_y)
 	arc_radius=float(arc_radius)
 	#load subimages from disc and append them to a list
-	rss= loadRSS(rss_in)
+	rss= loadRSS(in_rss)
 
 	spec = rss.createAperSpec(center_x, center_y, arc_radius)
 	if flux_type[0]=='mean' or flux_type[0]=='sum' or flux_type[0]=='median':
@@ -964,7 +972,7 @@ def apertureFluxRSS_drp(rss_in, center_x, center_y, hdr_prefix, arc_radius, flux
 		rss.setHdrValue(hdr_prefix+' APER FLUX', float('%.3f'%flux_spec[0]), flux_type[0].split('/')[-1].split('.')[0]+' band flux (%.1farcsec diameter)'%(2*arc_radius) )
 		if flux_spec[1] is not None:
 			rss.setHdrValue(hdr_prefix+' APER ERR', float('%.3f'%flux_spec[1]), flux_type[0].split('/')[-1].split('.')[0]+' band error (%.1farcsec diameter)'%(2*arc_radius) )
-	rss.writeFitsData(rss_in)
+	rss.writeFitsData(in_rss)
 
 def matchFluxRSS_drp(rsss, center_x, center_y, hdr_prefixes, arc_radius, start_wave='3800', end_wave='4600', polyorder='2', verbose='0'):
 	verbose=int(verbose)
@@ -1016,15 +1024,15 @@ def matchFluxRSS_drp(rsss, center_x, center_y, hdr_prefixes, arc_radius, start_w
 	if verbose==1:
 		plt.show()
 
-@missing_files(["BAD_CALIBRATION_FRAMES"], "rss_in", "position_table")
-def includePosTab_drp(rss_in, position_table,  offset_x='0.0', offset_y='0.0'):
+@missing_files(["BAD_CALIBRATION_FRAMES"], "in_rss", "position_table")
+def includePosTab_drp(in_rss, position_table,  offset_x='0.0', offset_y='0.0'):
 	"""
 		   Adds an ASCII file position table as a FITS table extension to the RSS file.
 		   An offset may be applied to the fiber positions in x and y direction independently.
 
 			Parameters
 			--------------
-			rss_in : string
+			in_rss : string
 					Input RSS FITS file for which the position table will be added
 			position_table : string
 					Input position table ASCII file name
@@ -1041,20 +1049,20 @@ def includePosTab_drp(rss_in, position_table,  offset_x='0.0', offset_y='0.0'):
 	offset_x=float(offset_x)
 	offset_y=float(offset_y)
 	rss = RSS()
-	rss.loadFitsData(rss_in)
+	rss.loadFitsData(in_rss)
 	rss.loadTxtPosTab(position_table)
 	rss.offsetPosTab(offset_x, offset_y)
-	rss.writeFitsData(rss_in)
+	rss.writeFitsData(in_rss)
 
-def copyPosTab_drp(rss_in, rss_out):
+def copyPosTab_drp(in_rss, out_rss):
 	"""
 		 Copies the position table FITS extension from one RSS to another RSS FITS file.
 
 			Parameters
 			--------------
-			rss_in : string
+			in_rss : string
 					Input RSS FITS file from which the position table will be taken.
-			rss_out : string
+			out_rss : string
 					Output RSS FITS file (must already exist) in which the position table will be added.
 
 			Examples
@@ -1062,9 +1070,9 @@ def copyPosTab_drp(rss_in, rss_out):
             user:> lvmdrp rss copyPosTab RSS1.fits RSS2.fits
 	"""
 	rss1 = RSS()
-	rss1.loadFitsData(rss_in)
+	rss1.loadFitsData(in_rss)
 	rss2 = RSS()
-	rss2.loadFitsData(rss_out)
+	rss2.loadFitsData(out_rss)
 	rss2._shape = rss1._shape
 	rss2._size= rss1._size
 
@@ -1072,15 +1080,15 @@ def copyPosTab_drp(rss_in, rss_out):
 	rss2._arc_position_y = rss1._arc_position_y
 	rss2._good_fibers = rss1._good_fibers
 	rss2._fiber_type = rss1._fiber_type
-	rss2.writeFitsData(rss_out)
+	rss2.writeFitsData(out_rss)
 
-def offsetPosTab_drp(rss_in, offset_x, offset_y):
+def offsetPosTab_drp(in_rss, offset_x, offset_y):
 	"""
 			Applies an offset to the fiber positions in x and y direction independently.
 
 			Parameters
 			--------------
-			rss_in : string
+			in_rss : string
 					Input RSS FITS file in which the position table will be changed by fiber offsets
 			offset_x : string of float, optional with default: '0.0'
 					Offset applied to the fiber positions in x direction.
@@ -1094,17 +1102,17 @@ def offsetPosTab_drp(rss_in, offset_x, offset_y):
 	offset_x = float(offset_x)
 	offset_y = float(offset_y)
 	rss = RSS()
-	rss.loadFitsData(rss_in)
+	rss.loadFitsData(in_rss)
 	rss.offsetPosTab(offset_x, offset_y)
-	rss.writeFitsData(rss_in)
+	rss.writeFitsData(in_rss)
 
-def rotatePosTab_drp(rss_in, angle='0.0'):
+def rotatePosTab_drp(in_rss, angle='0.0'):
 	"""
 			Applies an offset to the fiber positions in x and y direction independently.
 
 			Parameters
 			--------------
-			rss_in : string
+			in_rss : string
 					Input RSS FITS file in which the position table will be rotated around the bundle zero-point 0,0 by an angle
 			angle : string of float, optional with default: '0.0'
 					Angle applied to rotate the fiber positions counter-clockwise
@@ -1114,12 +1122,12 @@ def rotatePosTab_drp(rss_in, angle='0.0'):
             user:> lvmdrp rss  RSS.fits rotate=152.0
 	"""
 	angle = float(angle)
-	rss = loadRSS(rss_in)
+	rss = loadRSS(in_rss)
 	new_pos=rss.rotatePosTab(angle)
 	rss.setPosTab(new_pos)
-	rss.writeFitsData(rss_in)
+	rss.writeFitsData(in_rss)
 
-def createCube_drp(rss_in, cube_out, position_x='', position_y='', ref_pos_wave='', int_ref='1', mode='inverseDistance', resolution='1.0', sigma='1.0', radius_limit='5.0', min_fibers='3', slope='2', bad_threshold='0.01',replace_error='1e10', flip_x='0', flip_y='0', full_field='0', store_cover='0', parallel='auto', verbose='0'):
+def createCube_drp(in_rss, cube_out, position_x='', position_y='', ref_pos_wave='', int_ref='1', mode='inverseDistance', resolution='1.0', sigma='1.0', radius_limit='5.0', min_fibers='3', slope='2', bad_threshold='0.01',replace_error='1e10', flip_x='0', flip_y='0', full_field='0', store_cover='0', parallel='auto', verbose='0'):
 	resolution=float(resolution)
 	sigma = float(sigma)
 	radius_limit=float(radius_limit)
@@ -1148,7 +1156,7 @@ def createCube_drp(rss_in, cube_out, position_x='', position_y='', ref_pos_wave=
 		ref_pos_wave=float(ref_pos_wave)
 	else:
 		ref_pos_wave=None
-	rss= loadRSS(rss_in)
+	rss= loadRSS(in_rss)
 	if flip_x==1:
 		rss._arc_position_x=-1*rss._arc_position_x
 	if flip_y==1:
@@ -1313,16 +1321,16 @@ def createCube_drp(rss_in, cube_out, position_x='', position_y='', ref_pos_wave=
 		cube.setHdrValue('CRPIX2',  ref_y,  'Ref pixel for WCS')
 	cube.writeFitsData(cube_out)
 
-def correctGalExtinct_drp(rss_in, rss_out, Av, Rv='3.1', verbose='0'):
+def correctGalExtinct_drp(in_rss, out_rss, Av, Rv='3.1', verbose='0'):
 	"""
 			Corrects the wavelength calibrated RSS for the effect of galactic extinction using
 			the galactic extinction curve from Cardelli et al. (1989).
 
 			Parameters
 			--------------
-			rss_in : string
+			in_rss : string
 					Input RSS FITS file
-			rss_out : string
+			out_rss : string
 					Output RSS FITS file with the corrected spectra
 			Av : string of float
 					V-band galactic extinction in magnitudes along the line of sight
@@ -1340,7 +1348,7 @@ def correctGalExtinct_drp(rss_in, rss_out, Av, Rv='3.1', verbose='0'):
 	Rv=float(Rv)
 
 	verbose = int(verbose)
-	rss = loadRSS(rss_in)
+	rss = loadRSS(in_rss)
 
 	if len(rss._wave.shape)==1:
 		galExtCurve = ancillary_func.galExtinct(rss._wave, Rv)
@@ -1349,15 +1357,15 @@ def correctGalExtinct_drp(rss_in, rss_out, Av, Rv='3.1', verbose='0'):
 			plt.plot(1.0/10**(Alambda._data/-2.5) )
 			plt.show()
 		rss_corr = rss*(1.0/10**(Alambda/-2.5))
-	rss_corr.writeFitsData(rss_out)
+	rss_corr.writeFitsData(out_rss)
 
-def splitFile_drp(rss_in, data='', error='', mask='', wave='', fwhm='', position_table=''):
+def splitFile_drp(in_rss, data='', error='', mask='', wave='', fwhm='', position_table=''):
 	"""
 			Copies the different extension of the RSS into separate files.
 
 			Parameters
 			--------------
-			rss_in : string
+			in_rss : string
 					Input RSS FITS file
 			data : string, optional with default: ''
 					Ouput FITS file name containing only the data RSS in its primary extension
@@ -1377,7 +1385,7 @@ def splitFile_drp(rss_in, data='', error='', mask='', wave='', fwhm='', position
 			user:> lvmdrp rss splitFile RSS_IN.fits DATA_RSS.fits
 			user:> lvmdrp rss splitFile RSS_IN.fits mask=MASK_RSS.fits position_table=POSTAB.txt
 	"""
-	rss = loadRSS(rss_in)
+	rss = loadRSS(in_rss)
 
 	if data != '' and rss._data is not None:
 		rss.writeFitsData(data, extension_data=0, include_PT=False)
@@ -1391,11 +1399,11 @@ def splitFile_drp(rss_in, data='', error='', mask='', wave='', fwhm='', position
 	if position_table != '' and rss._arc_position_x is not None:
 		rss.writeTxtPosTab(position_table)
 
-def maskFibers_drp(rss_in,rss_out,fibers,replace_error='1e10'):
+def maskFibers_drp(in_rss,out_rss,fibers,replace_error='1e10'):
 	replace_error = float(replace_error)
 	mask_fibers = fibers.split(',')
 
-	rss =loadRSS(rss_in)
+	rss =loadRSS(in_rss)
 	for i in range(len(mask_fibers)):
 		mfibers=mask_fibers[i].split('-')
 		if len(mfibers)==2:
@@ -1403,10 +1411,10 @@ def maskFibers_drp(rss_in,rss_out,fibers,replace_error='1e10'):
 				rss.maskFiber(f+1,replace_error=replace_error)
 		else:
 			rss.maskFiber(int(mask_fibers[i])-1,replace_error=replace_error)
-	rss.writeFitsData(rss_out)
+	rss.writeFitsData(out_rss)
 
-def maskNAN_drp(rss_in, replace_error='1e12'):
-	rss = loadRSS(rss_in)
+def maskNAN_drp(in_rss, replace_error='1e12'):
+	rss = loadRSS(in_rss)
 	select = numpy.isnan(rss._data)
 	if numpy.sum(select)>0:
 		for i in range(rss._fibers):
@@ -1416,20 +1424,20 @@ def maskNAN_drp(rss_in, replace_error='1e12'):
 					rss._error[i, :]=float(replace_error)
 				if rss._mask is not None:
 					rss._mask[i, :]=True
-		rss.writeFitsData(rss_in)
+		rss.writeFitsData(in_rss)
 
-def registerSDSS_drp(rss_in, rss_out, sdss_file, sdss_field, filter, ra, dec, hdr_prefix,  search_box='20.0,2.6', step='1.0,0.2', offset_x ='0.0',  offset_y='0.0', quality_figure='',  angle_key='SPA', parallel='auto', verbose='0'):
+def registerSDSS_drp(in_rss, out_rss, sdss_file, sdss_field, filter, ra, dec, hdr_prefix,  search_box='20.0,2.6', step='1.0,0.2', offset_x ='0.0',  offset_y='0.0', quality_figure='',  angle_key='SPA', parallel='auto', verbose='0'):
 	"""
 			Copies the different extension of the RSS into separate files.
 
 			Parameters
 			--------------
-			rss_in : string
+			in_rss : string
 					Input RSS FITS file
-			rss_out : string
+			out_rss : string
 					Output RSS FITS file
 			sdss_file : string
-					Original SDSS file in a given filter band that contains the object given in rss_in
+					Original SDSS file in a given filter band that contains the object given in in_rss
 			sdss_field : string
 					Corresponding SDSS field calibration field for photometric calibration
 			filter : string
@@ -1472,7 +1480,7 @@ def registerSDSS_drp(rss_in, rss_out, sdss_file, sdss_field, filter, ra, dec, hd
 	offset_y = float(offset_y)
 	verbose=int(verbose)
 
-	rss = loadRSS(rss_in)
+	rss = loadRSS(in_rss)
 
 	filter=filter.split(',')
 	posTab = rss.getPositionTable()
@@ -1512,7 +1520,7 @@ def registerSDSS_drp(rss_in, rss_out, sdss_file, sdss_field, filter, ra, dec, hd
 			print('Valid fibers: %.1f'%(best_valid))
 			print('Photometric scale factor: %.3f'%(best_scale))
 
-	rss = loadRSS(rss_in)
+	rss = loadRSS(in_rss)
 	if rss._size is not None:
 		rss.offsetPosTab(-1*best_offset_x, -1*best_offset_y)
 	rss=rss*best_scale
@@ -1523,7 +1531,7 @@ def registerSDSS_drp(rss_in, rss_out, sdss_file, sdss_field, filter, ra, dec, hd
 	rss.setHdrValue(hdr_prefix+' PIPE CHISQ', float('%.2f'%(best_chisq)),  'CHISQ of image matching')
 	rss.setHdrValue(hdr_prefix+' PIPE VALIDFIB', int('%d'%(best_valid)),  'Valid fibers for image matching')
 	rss.setHdrValue(hdr_prefix+' PIPE PHOTSCL', float('%.3f'%(best_scale)),   'photometric scale factor')
-	rss.writeFitsData(rss_out)
+	rss.writeFitsData(out_rss)
 
 	if quality_figure != '' or verbose==1:
 		flux =  sdssimg.extractApertures(posTab, pix_coordinates[0], pix_coordinates[1], scale, angle=spa, offset_arc_x=best_offset_x, offset_arc_y=best_offset_y)
@@ -1579,7 +1587,7 @@ def registerSDSS_drp(rss_in, rss_out, sdss_file, sdss_field, filter, ra, dec, hd
 		if verbose==1:
 			plt.show()
 
-def DAR_registerSDSS_drp(rss_in, sdss_file, sdss_field, ra, dec, out_prefix,  ref_wave, coadd='150', step='150', smooth_poly='3', resolution='0.3,0.05', guess_x ='0.0',  guess_y='0.0',start_wave='', end_wave='',  parallel='auto', verbose='0'):
+def DAR_registerSDSS_drp(in_rss, sdss_file, sdss_field, ra, dec, out_prefix,  ref_wave, coadd='150', step='150', smooth_poly='3', resolution='0.3,0.05', guess_x ='0.0',  guess_y='0.0',start_wave='', end_wave='',  parallel='auto', verbose='0'):
 	"""
 			NOT YET TEST.
 			Requires the AstLib python package to be used
@@ -1605,7 +1613,7 @@ def DAR_registerSDSS_drp(rss_in, sdss_file, sdss_field, ra, dec, out_prefix,  re
 	else:
 		end_wave=float(end_wave)
 
-	rss = loadRSS(rss_in)
+	rss = loadRSS(in_rss)
 	posTab = rss.getPositionTable()
 	fiber_area = numpy.pi*posTab._size[0]**2
 	img = loadImage(sdss_file)

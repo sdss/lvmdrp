@@ -36,6 +36,20 @@ class RSS(FiberRows):
             rss[i] = spectra_list[i]
         return rss
 
+    def __init__(self, data=None, wave=None,  inst_fwhm=None, header = None, error = None, mask = None,shape=None, size=None, arc_position_x=None, arc_position_y=None, good_fibers=None,  fiber_type=None,  logwave=False):
+        FiberRows.__init__(self, data,  header, error, mask, shape, size, arc_position_x, arc_position_y, good_fibers, fiber_type)
+        self._wave = None
+        self._wave_disp = None
+        self._wave_start = None
+        self._res_elements = None
+        self._inst_fwhm=None
+        if wave is not None:
+            self.setWave(wave)
+        else:
+            self.createWavefromHdr(logwave=logwave)
+        if inst_fwhm is not None:
+            self.setInstFWHM(inst_fwhm)
+
     def __mul__(self, other):
         """
         Operator to add two FiberRow or divide by another type if possible
@@ -140,20 +154,6 @@ class RSS(FiberRows):
             except:
                 #raise exception if the type are not matching in general
                 raise TypeError("unsupported operand type(s) for *: %s and %s"%(str(type(self)).split("'")[1], str(type(other)).split("'")[1]))
-
-    def __init__(self, data=None, wave=None,  inst_fwhm=None, header = None, error = None, mask = None,shape=None, size=None, arc_position_x=None, arc_position_y=None, good_fibers=None,  fiber_type=None,  logwave=False):
-        FiberRows.__init__(self, data,  header, error, mask, shape, size, arc_position_x, arc_position_y, good_fibers, fiber_type)
-        self._wave = None
-        self._wave_disp = None
-        self._wave_start = None
-        self._res_elements = None
-        self._inst_fwhm=None
-        if wave is not None:
-            self.setWave(wave)
-        else:
-            self.createWavefromHdr(logwave=logwave)
-        if inst_fwhm is not None:
-            self.setInstFWHM(inst_fwhm)
 
     def __getitem__(self, fiber):
 

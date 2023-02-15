@@ -1,41 +1,52 @@
 ---
-short: "quick LVM Data Reduction Pipeline (DRP) configuration file"
+name: quick_drp_config
+short: quick LVM Data Reduction Pipeline (DRP) configuration file
 description: |
-  "defines the target frame, calibration frames and DRP steps to perform the quick DRP for frame validation"
-location: null
+  defines the target frame, calibration frames and DRP steps to perform the quick DRP for frame validation.
+location: $LVM_SPECTRO_REDUX/[DRPVER]/calib/
 naming_convention: null
 metadata:
   drp_ver: 0.1.0
 target_frame: lvmSdr
 calibration_frames:
-  bias: lvmMBias
-  dark: lvmMDark
-  pixelflat: lvmMPix
+  bias: lvm-mbias
+  dark: lvm-mdark
+  pixelflat: lvm-mpixelflat
   fiberflat: lvmMFlat
   arc: lvmMArc
 reduction_steps:
   imageMethod.preprocRawFrame:
     in_image: lvmSdr
-    out_image: lvmPre
+    out_image: lvm-pframe
+    unit: e-
     compute_error: true
-    unit: "e-"
   imageMethod.basicCalibration:
-    in_image: lvmPre
-    out_image: lvmCal
-    in_bias: lvmMBias
-    in_dark: lvmMDark
-    in_pixelflat: lvmMPix
+    in_image: lvm-pframe
+    out_image: lvm-cframe
+    in_bias: lvm-mbias
+    in_dark: lvm-mdark
+    in_pixelflat: lvm-mpixelflat
   imageMethod.extractSpec:
-    in_image: lvmCal
-    out_rss: lvmFrame
+    in_image: lvm-cframe
+    out_rss: lvm-xframe
     in_fiberflat: lvmMFlat
-    method: "aperture"
+    method: aperture
     aperture: 7 #median of the distance between peaks (from the mid region trace)
+  rssMethod.correctFiberFlat:
+    in_rss: lvm-xframe
+    out_rss: lvm-fframe
+    fiberflat: lvmMFlat
   rssMethod.createPixTable:
-    rss_in: lvmFrame
-    rss_out: lvmWFrame
+    in_rss: lvm-fframe
+    out_rss: lvm-wframe
     in_arc: lvmMArc
-  rssMethod.joinChannels:
+  rssMethod.joinSpecChannels:
+    in_rss:
+      - lvm-wframe
+      - lvm-wframe
+      - lvm-wframe
+    out_rss: lvmCFrame
+  rssMethod.quickFluxCalib:
   rssMethod.quickQuality:
     # SN in several bands (FWHM=100AA)
     # locate sky lines (match against a known list)
