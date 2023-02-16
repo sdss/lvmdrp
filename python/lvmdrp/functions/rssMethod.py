@@ -7,6 +7,7 @@ except:
 from multiprocessing import cpu_count
 from multiprocessing import Pool
 from scipy import ndimage
+from astropy.wcs import WCS
 from lvmdrp.core.header import combineHdr
 from lvmdrp.core.fiberrows  import FiberRows
 from lvmdrp.core.rss  import RSS, loadRSS, glueRSS
@@ -1471,9 +1472,6 @@ def registerSDSS_drp(in_rss, out_rss, sdss_file, sdss_field, filter, ra, dec, hd
 			user:> lvmdrp rss registerSDSS RSS_IN.fits RSS_OUT.fits SDSS_r_IMG.fits SDSS_FIELD.fit sloan_r.dat,0,1 234.0 20.3 'hierarch TEST'  search_box=20,2 step=2,0.5 quality_figure='test.png' parralel=3 verbose=1
 	"""
 
-	import astLib.astWCS
-	# from compiler.ast import flatten
-
 	search_box = numpy.array(search_box.split(',')).astype(numpy.float32)
 	step =  numpy.array(step.split(',')).astype(numpy.float32)
 	offset_x=float(offset_x)
@@ -1490,8 +1488,8 @@ def registerSDSS_drp(in_rss, out_rss, sdss_file, sdss_field, filter, ra, dec, hd
 	spa = -1*img.getHdrValue(angle_key)
 	scale=0.396
 	#sdssimg._header.verify('fix')
-	wcs = astLib.astWCS.WCS(sdssimg._header,mode='pyfits')
-	pix_coordinates = flatten(wcs.wcs2pix(ra,dec))
+	wcs = WCS(sdssimg._header)
+	pix_coordinates = flatten(wcs.world_to_pix(ra,dec))
 	passband = PassBand()
 	passband.loadTxtFile(filter[0], wave_col=int(filter[1]),  trans_col=int(filter[2]))
 
@@ -1588,11 +1586,6 @@ def registerSDSS_drp(in_rss, out_rss, sdss_file, sdss_field, filter, ra, dec, hd
 			plt.show()
 
 def DAR_registerSDSS_drp(in_rss, sdss_file, sdss_field, ra, dec, out_prefix,  ref_wave, coadd='150', step='150', smooth_poly='3', resolution='0.3,0.05', guess_x ='0.0',  guess_y='0.0',start_wave='', end_wave='',  parallel='auto', verbose='0'):
-	"""
-			NOT YET TEST.
-			Requires the AstLib python package to be used
-	"""
-	import astLib
 
 	resolution = numpy.array(resolution.split(',')).astype(numpy.float32)
 	search_box = resolution*5
@@ -1620,8 +1613,8 @@ def DAR_registerSDSS_drp(in_rss, sdss_file, sdss_field, ra, dec, out_prefix,  re
 	sdssimg = img.calibrateSDSS(sdss_field)
 	spa = -1*img.getHdrValue('spa')
 	scale=0.396
-	wcs = astLib.astWCS.WCS(sdssimg._header,mode='pyfits')
-	pix_coordinates = wcs.wcs2pix(ra,dec)
+	wcs = WCS(sdssimg._header)
+	pix_coordinates = wcs.world_to_pixel(ra,dec)
 	steps = int(numpy.rint(rss._res_elements/step))
 	mean_wave = numpy.zeros(steps)
 	position_x = numpy.zeros(steps, dtype=numpy.float32)
