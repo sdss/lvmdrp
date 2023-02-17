@@ -1,12 +1,10 @@
 ---
-name: quick_drp_config
-short: quick LVM Data Reduction Pipeline (DRP) configuration file
+name: quick-drp
+short: quick Data Reduction Pipeline (DRP) configuration file
 description: |
   defines the target frame, calibration frames and DRP steps to perform the quick DRP for frame validation.
-location: $LVM_SPECTRO_REDUX/[DRPVER]/calib/
-naming_convention: null
-metadata:
-  drp_ver: 0.1.0
+location: $LVM_QUICK_S/[DRPVER]/calib/
+naming_convention: quick-drp-[HEMI]-[CAMERA]-[EXPNUM].yaml
 target_frame: lvmSdr
 calibration_frames:
   bias: lvm-mbias
@@ -47,6 +45,11 @@ reduction_steps:
       - lvm-wframe
     out_rss: lvmCFrame
   rssMethod.quickFluxCalib:
+    in_rss: lvmCFrame
+    out_rss: lvmFFrame
+    in_throuput: lvm-throughput
+    airmass: null
+    exptime: null
   rssMethod.quickQuality:
     # SN in several bands (FWHM=100AA)
     # locate sky lines (match against a known list)
@@ -54,7 +57,6 @@ reduction_steps:
     # sky lines equivalent width
   # for quick flux calibration:
   # * get solar spectrum
-  # * normalize solar spectrum by fiberflat
-  # apply fiber flat
-  # perform basic flux calibration (theoric response function)
+  # * normalize solar spectrum by twilight fiberflat
+  # * apply as flux calibration vector to each fiber
 ...

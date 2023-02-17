@@ -50,10 +50,10 @@ from lvmdrp.external import ancillary_func
 
 description = "Provides with flux calibration tasks"
 
-__all__ = ["createSensFunction_drp", "createSensFunction2_drp", "fluxCalibration_drp", "correctTelluric_drp"]
+__all__ = ["createSensFunction_drp", "createSensFunction2_drp", "quickFluxCalibration_drp", "correctTelluric_drp"]
 
 
-def createSensFunction_drp(rss_in, out_sens,  ref_spec, airmass, exptime, smooth_poly='5', smooth_ref='6.0', smooth_ref2='6.0', median_filt='0',coadd='1', extinct_v='0.0', extinct_curve='mean', aper_correct='1.0',  ref_units='1e-16', target_units='1e-16',column_wave='0', column_flux='1', delimiter='', header='1' , split='', mask_wave='', mask_telluric='', overlap='100', out_star='', verbose='0'):
+def createSensFunction_drp(in_rss, out_throughput,  ref_spec, airmass, exptime, smooth_poly='5', smooth_ref='6.0', smooth_ref2='6.0', median_filt='0',coadd='1', extinct_v='0.0', extinct_curve='mean', aper_correct='1.0',  ref_units='1e-16', target_units='1e-16',column_wave='0', column_flux='1', delimiter='', header='1' , split='', mask_wave='', mask_telluric='', overlap='100', out_star='', verbose='0'):
 	smooth_poly=int(smooth_poly)
 	smooth_ref=float(smooth_ref)
 	smooth_ref2=float(smooth_ref2)
@@ -81,16 +81,16 @@ def createSensFunction_drp(rss_in, out_sens,  ref_spec, airmass, exptime, smooth
 
 	if coadd>0:
 		rss = RSS()
-		rss.loadFitsData(rss_in)
+		rss.loadFitsData(in_rss)
 		select = rss.selectSpec(min=0, max=coadd, method='median')
 		star_rss=rss.subRSS(select)
 		star_spec = star_rss.create1DSpec(method='sum')/aper_correct
 	else:
 		star_spec = Spectrum1D()
-		if '.fits' in rss_in:
-			star_spec.loadFitsData(rss_in)
-		elif '.txt' in rss_in:
-			star_spec.loadTxtData(rss_in)
+		if '.fits' in in_rss:
+			star_spec.loadFitsData(in_rss)
+		elif '.txt' in in_rss:
+			star_spec.loadTxtData(in_rss)
 
 	try:
 		extinct_v = rss.getHdrValue(extinct_v)
@@ -132,18 +132,18 @@ def createSensFunction_drp(rss_in, out_sens,  ref_spec, airmass, exptime, smooth
 	#print(exptime,extinct._wave,star_spec._wave)
 	star_corr = star_spec/extinct/exptime
 
-	sens_func = ref_star_resamp/star_corr
+	throughput = ref_star_resamp/star_corr
 	if mask_wave is not None:
 		regions = len(mask_wave)/2
 		for i in range(regions):
-			select_region = np.logical_and(sens_func._wave>mask_wave[i*2], sens_func._wave<mask_wave[i*2+1])
-			select_blue = np.logical_and(sens_func._wave>mask_wave[i*2]-20, sens_func._wave<mask_wave[i*2])
-			select_red = np.logical_and(sens_func._wave>mask_wave[i*2+1], sens_func._wave<mask_wave[i*2+1]+20)
-			line_par = stats.linregress([mask_wave[i*2]-10,mask_wave[i*2+1]+10], [np.median(sens_func._data[select_blue]), np.median(sens_func._data[select_red])])
+			select_region = np.logical_and(throughput._wave>mask_wave[i*2], throughput._wave<mask_wave[i*2+1])
+			select_blue = np.logical_and(throughput._wave>mask_wave[i*2]-20, throughput._wave<mask_wave[i*2])
+			select_red = np.logical_and(throughput._wave>mask_wave[i*2+1], throughput._wave<mask_wave[i*2+1]+20)
+			line_par = stats.linregress([mask_wave[i*2]-10,mask_wave[i*2+1]+10], [np.median(throughput._data[select_blue]), np.median(throughput._data[select_red])])
 
-			sens_func._data[select_region] = (line_par[0]*sens_func._wave[select_region]+line_par[1]).astype('float32')
-			#select = np.logical_and(sens_func._wave>mask_wave[i*2], sens_func._wave<mask_wave[i*2+1])
-			#sens_func._mask[select]=True
+			throughput._data[select_region] = (line_par[0]*throughput._wave[select_region]+line_par[1]).astype('float32')
+			#select = np.logical_and(throughput._wave>mask_wave[i*2], throughput._wave<mask_wave[i*2+1])
+			#throughput._mask[select]=True
 	if mask_telluric is not None:
 		star_telluric1 = star_rss.create1DSpec(method='sum')
 		star_telluric2 = star_rss.create1DSpec(method='sum')
@@ -156,67 +156,67 @@ def createSensFunction_drp(rss_in, out_sens,  ref_spec, airmass, exptime, smooth
 			star_telluric2._data[select_region] = (line_par[0]*star_telluric1._wave[select_region]+line_par[1]).astype('float32')
 		telluric_spec = (star_telluric1 / star_telluric2)**(1.0/airmass)
 		telluric_spec.writeFitsData('telluric_spec.fits')
-	good_pix = np.logical_not(sens_func._mask)
+	good_pix = np.logical_not(throughput._mask)
 	if median_filt>0:
-		sens_func.smoothSpec(median_filt,method='median')
+		throughput.smoothSpec(median_filt,method='median')
 	if verbose==1:
-		plt.plot(sens_func._wave[good_pix][10:-10], sens_func._data[good_pix][10:-10], '-k')
+		plt.plot(throughput._wave[good_pix][10:-10], throughput._data[good_pix][10:-10], '-k')
 	if split=='':
-		mask = sens_func._mask
+		mask = throughput._mask
 		#mask[:10]=True
 		#mask[-10:]=True
-		sens_func_smooth = 1.0/Spectrum1D(wave=sens_func._wave, data=sens_func._data, mask=mask)
-		sens_func_smooth.smoothPoly(smooth_poly)
-		sens_func_smooth = 1.0/sens_func_smooth
+		throughput_s = 1.0/Spectrum1D(wave=throughput._wave, data=throughput._data, mask=mask)
+		throughput_s.smoothPoly(smooth_poly)
+		throughput_s = 1.0/throughput_s
 		if verbose==1:
-			plt.plot(sens_func_smooth._wave,  sens_func_smooth._data, '-r')
-			plt.plot(sens_func_smooth._wave,  sens_func._data/sens_func_smooth._data, '-g')
+			plt.plot(throughput_s._wave,  throughput_s._data, '-r')
+			plt.plot(throughput_s._wave,  throughput._data/throughput_s._data, '-g')
 			sens_test_out = open('test_sens.txt', 'w')
-			for i in range(sens_func_smooth._dim):
-				sens_test_out.write('%i %.2f %e %e %e\n'%(i, sens_func_smooth._wave[i], sens_func._data[i], sens_func_smooth._data[i], sens_func._data[i]/sens_func_smooth._data[i]))
+			for i in range(throughput_s._dim):
+				sens_test_out.write('%i %.2f %e %e %e\n'%(i, throughput_s._wave[i], throughput._data[i], throughput_s._data[i], throughput._data[i]/throughput_s._data[i]))
 			sens_test_out.close()
 	else:
 		split = float(split)
 		overlap = float(overlap)
-		select = sens_func._wave>split
-		mask = sens_func._mask[select]
+		select = throughput._wave>split
+		mask = throughput._mask[select]
 		mask[-10:]=True
-		sens_func_smooth2 = Spectrum1D(wave=sens_func._wave[select], data=sens_func._data[select], mask=mask)
-		sens_func_smooth2.smoothPoly(smooth_poly)
+		throughput_s2 = Spectrum1D(wave=throughput._wave[select], data=throughput._data[select], mask=mask)
+		throughput_s2.smoothPoly(smooth_poly)
 
-		select = sens_func._wave<split+overlap
-		mask = sens_func._mask[select]
+		select = throughput._wave<split+overlap
+		mask = throughput._mask[select]
 		mask[-10:]=True
-		sens_func_smooth1 = Spectrum1D(wave=sens_func._wave[select], data=sens_func._data[select], mask=mask)
-		sens_func_smooth1.smoothPoly(smooth_poly)
+		throughput_s1 = Spectrum1D(wave=throughput._wave[select], data=throughput._data[select], mask=mask)
+		throughput_s1.smoothPoly(smooth_poly)
 
 		if verbose==1:
-			plt.plot(sens_func_smooth1._wave,  sens_func_smooth1._data, '-r')
-			plt.plot(sens_func_smooth2._wave,  sens_func_smooth2._data, '-r')
+			plt.plot(throughput_s1._wave,  throughput_s1._data, '-r')
+			plt.plot(throughput_s2._wave,  throughput_s2._data, '-r')
 	if verbose==1:
 		plt.show()
 
 	# need to replace with XML output
-	out = open(out_sens, 'w')
+	out = open(out_throughput, 'w')
 
 	if split=='':
-		for i in range(sens_func._dim):
-			out.write('%i %.3f %e\n'%(i,  sens_func_smooth._wave[i], sens_func_smooth._data[i]))
+		for i in range(throughput._dim):
+			out.write('%i %.3f %e\n'%(i,  throughput_s._wave[i], throughput_s._data[i]))
 	else:
-		min = np.argmin(np.abs(sens_func_smooth1._data[sens_func_smooth1._wave>split]-sens_func_smooth2._data[sens_func_smooth2._wave<split+overlap]))
+		min = np.argmin(np.abs(throughput_s1._data[throughput_s1._wave>split]-throughput_s2._data[throughput_s2._wave<split+overlap]))
 	#    print min
-		start2 = np.sum(sens_func._wave<=split)
+		start2 = np.sum(throughput._wave<=split)
 		change = min+start2
-		for i in range(sens_func._dim):
+		for i in range(throughput._dim):
 			if i<change:
-				out.write('%i %.3f %e\n'%(i, sens_func_smooth1._wave[i], sens_func_smooth1._data[i]))
+				out.write('%i %.3f %e\n'%(i, throughput_s1._wave[i], throughput_s1._data[i]))
 			else:
-				out.write('%i %.3f %e\n'%(i, sens_func_smooth2._wave[i-start2], sens_func_smooth2._data[i-start2]))
+				out.write('%i %.3f %e\n'%(i, throughput_s2._wave[i-start2], throughput_s2._data[i-start2]))
 
 	out.close()
 
 
-def createSensFunction2_drp(rss_in, out_sens, ref_spec, airmass, exptime, smooth_bspline='0.3', smooth_ref='6.0', smooth_ref2='6.0', median_filt='0',coadd='1', extinct_v='0.0', extinct_curve='mean', aper_correct='1.0',  ref_units='1e-16', target_units='1e-16',column_wave='0', column_flux='1', delimiter='', header='1' , mask_wave='', out_star='', verbose='0'):
+def createSensFunction2_drp(in_rss, out_sens, ref_spec, airmass, exptime, smooth_bspline='0.3', smooth_ref='6.0', smooth_ref2='6.0', median_filt='0',coadd='1', extinct_v='0.0', extinct_curve='mean', aper_correct='1.0',  ref_units='1e-16', target_units='1e-16',column_wave='0', column_flux='1', delimiter='', header='1' , mask_wave='', out_star='', verbose='0'):
 	smooth_bspline=float(smooth_bspline)
 	smooth_ref=float(smooth_ref)
 	smooth_ref2=float(smooth_ref2)
@@ -237,16 +237,16 @@ def createSensFunction2_drp(rss_in, out_sens, ref_spec, airmass, exptime, smooth
 	rss = RSS()
 	if coadd>0:
 
-		rss.loadFitsData(rss_in)
+		rss.loadFitsData(in_rss)
 		select = rss.selectSpec(min=0, max=coadd, method='median')
 		star_rss=rss.subRSS(select)
 		star_spec = star_rss.create1DSpec(method='sum')/aper_correct
 	else:
 		star_spec = Spectrum1D()
-		if '.fits' in rss_in:
-			star_spec.loadFitsData(rss_in)
-		elif '.txt' in rss_in:
-			star_spec.loadTxtData(rss_in)
+		if '.fits' in in_rss:
+			star_spec.loadFitsData(in_rss)
+		elif '.txt' in in_rss:
+			star_spec.loadTxtData(in_rss)
 
 	try:
 		extinct_v = rss.getHdrValue(extinct_v)
@@ -287,51 +287,51 @@ def createSensFunction2_drp(rss_in, out_sens, ref_spec, airmass, exptime, smooth
 	star_spec.smoothSpec(smooth_ref)
 	star_corr = star_spec/extinct/exptime
 
-	sens_func = ref_star_resamp/star_corr
+	throughput = ref_star_resamp/star_corr
 	if mask_wave is not None:
 		regions = len(mask_wave)/2
 		for i in range(regions):
-			select_region = np.logical_and(sens_func._wave>mask_wave[i*2], sens_func._wave<mask_wave[i*2+1])
-			select_blue = np.logical_and(sens_func._wave>mask_wave[i*2]-20, sens_func._wave<mask_wave[i*2])
-			select_red = np.logical_and(sens_func._wave>mask_wave[i*2+1], sens_func._wave<mask_wave[i*2+1]+20)
-			line_par = stats.linregress([mask_wave[i*2]-10,mask_wave[i*2+1]+10], [np.median(sens_func._data[select_blue]), np.median(sens_func._data[select_red])])
+			select_region = np.logical_and(throughput._wave>mask_wave[i*2], throughput._wave<mask_wave[i*2+1])
+			select_blue = np.logical_and(throughput._wave>mask_wave[i*2]-20, throughput._wave<mask_wave[i*2])
+			select_red = np.logical_and(throughput._wave>mask_wave[i*2+1], throughput._wave<mask_wave[i*2+1]+20)
+			line_par = stats.linregress([mask_wave[i*2]-10,mask_wave[i*2+1]+10], [np.median(throughput._data[select_blue]), np.median(throughput._data[select_red])])
 
-			sens_func._data[select_region] = (line_par[0]*sens_func._wave[select_region]+line_par[1]).astype('float32')
+			throughput._data[select_region] = (line_par[0]*throughput._wave[select_region]+line_par[1]).astype('float32')
 
-	good_pix = np.logical_not(sens_func._mask)
+	good_pix = np.logical_not(throughput._mask)
 	if median_filt>0:
-		sens_func.smoothSpec(median_filt,method='median')
+		throughput.smoothSpec(median_filt,method='median')
 	if verbose==1:
-		plt.plot(sens_func._wave[good_pix][10:-10], 1.0/sens_func._data[good_pix][10:-10], '-k')
+		plt.plot(throughput._wave[good_pix][10:-10], 1.0/throughput._data[good_pix][10:-10], '-k')
 
-	mask = sens_func._mask
+	mask = throughput._mask
 	#mask[:10]=True
 	#mask[-10:]=True
-	sens_func_smooth = Spectrum1D(wave=sens_func._wave, data=1.0/sens_func._data, mask=mask)
-	sens_func_smooth.smoothSpec(smooth_bspline,method='BSpline')
+	throughput_s = Spectrum1D(wave=throughput._wave, data=1.0/throughput._data, mask=mask)
+	throughput_s.smoothSpec(smooth_bspline,method='BSpline')
 	if verbose==1:
-		plt.plot(sens_func_smooth._wave,  sens_func_smooth._data, '-r')
-		plt.plot(sens_func_smooth._wave,  (1.0/sens_func._data)/sens_func_smooth._data, '-g')
+		plt.plot(throughput_s._wave,  throughput_s._data, '-r')
+		plt.plot(throughput_s._wave,  (1.0/throughput._data)/throughput_s._data, '-g')
 		sens_test_out = open('test_sens.txt', 'w')
-		for i in range(sens_func_smooth._dim):
-			sens_test_out.write('%i %.2f %e %e %e\n'%(i, sens_func_smooth._wave[i], sens_func._data[i], sens_func_smooth._data[i], sens_func._data[i]/sens_func_smooth._data[i]))
+		for i in range(throughput_s._dim):
+			sens_test_out.write('%i %.2f %e %e %e\n'%(i, throughput_s._wave[i], throughput._data[i], throughput_s._data[i], throughput._data[i]/throughput_s._data[i]))
 		sens_test_out.close()
 		plt.show()
-	sens_func_smooth = 1.0/sens_func_smooth
+	throughput_s = 1.0/throughput_s
 
 
 	# need to replace with XML output
 	out = open(out_sens, 'w')
-	for i in range(sens_func._dim):
-		out.write('%i %.3f %e\n'%(i,  sens_func_smooth._wave[i], sens_func_smooth._data[i]))
+	for i in range(throughput._dim):
+		out.write('%i %.3f %e\n'%(i,  throughput_s._wave[i], throughput_s._data[i]))
 	out.close()
 
 
-def fluxCalibration_drp(rss_in, rss_out, sens_func, airmass, exptime, extinct_v='0.0', extinct_curve='mean', ref_units='1e-16', target_units='1e-16', norm_sb_fib=''):
+def quickFluxCalibration_drp(in_rss, out_rss, in_throughput, airmass, exptime, extinct_v='0.0', extinct_curve='mean', ref_units='1e-16', target_units='1e-16', norm_sb_fib=''):
 	ref_units=float(ref_units)
 	target_units=float(target_units)
 	rss = RSS()
-	rss.loadFitsData(rss_in)
+	rss.loadFitsData(in_rss)
 	if norm_sb_fib=='':
 		norm_sb_fib=1.0
 	else:
@@ -351,8 +351,8 @@ def fluxCalibration_drp(rss_in, rss_out, sens_func, airmass, exptime, extinct_v=
 	except KeyError:
 		extinct_v = float(extinct_v)
 
-	sens_in = open(sens_func, 'r')
-	lines = sens_in.readlines()
+	troughput_file = open(in_throughput, 'r')
+	lines = troughput_file.readlines()
 	wave_sens = np.zeros(len(lines), dtype=np.float32)
 	sens_dat = np.zeros(len(lines), dtype=np.float32)
 	for i in range(len(lines)):
@@ -363,7 +363,7 @@ def fluxCalibration_drp(rss_in, rss_out, sens_func, airmass, exptime, extinct_v=
 		elif len(line)==2:
 			wave_sens[i]=float(line[0])
 			sens_dat[i]=float(line[1])
-	sens_func = Spectrum1D(wave=wave_sens, data=sens_dat)
+	throughput = Spectrum1D(wave=wave_sens, data=sens_dat)
 	if len(rss._wave.shape)==1:
 		if extinct_curve=='mean' or extinct_curve=='summer' or extinct_curve=='winter':
 			extinct = 10**(ancillary_func.extinctCAHA(rss._wave, extinct_v, type=extinct_curve)*airmass*-0.4)
@@ -374,24 +374,24 @@ def fluxCalibration_drp(rss_in, rss_out, sens_func, airmass, exptime, extinct_v=
 			extinct.loadTxtData(extinct_curve)
 			extinct = 10**(extinct*airmass*-0.4)
 			extinct = extinct.resampleSpec(rss._wave, method='spline')
-		sens_func_resamp = sens_func.resampleSpec(rss._wave, method='spline')
+		throughput_resamp = throughput.resampleSpec(rss._wave, method='spline')
 
 		for j in range(rss._fibers):
-			rss[j] = (rss[j]/extinct/exptime/norm_sb_fib)*sens_func_resamp*(ref_units/target_units)
+			rss[j] = (rss[j]/extinct/exptime/norm_sb_fib)*throughput_resamp*(ref_units/target_units)
 	#        print exptime
-	rss.writeFitsData(rss_out)
+	rss.writeFitsData(out_rss)
 
 
-def correctTelluric_drp(rss_in, rss_out, telluric_spectrum, airmass='AIRMASS'):
+def correctTelluric_drp(in_rss, out_rss, telluric_spectrum, airmass='AIRMASS'):
 	"""
         Corrects the wavelength calibrated RSS for the effect of telluric absoroption using
         a transmission spectrum generated from a star.
 
         Parameters
         --------------
-        rss_in : string
+        in_rss : string
                 Input RSS FITS file
-        rss_out : string
+        out_rss : string
                 Output RSS FITS file with the corrected spectra
         telluric_spectrum : string
                 FITS file of the telluric transmission spectrum
@@ -401,10 +401,10 @@ def correctTelluric_drp(rss_in, rss_out, telluric_spectrum, airmass='AIRMASS'):
 
         Examples
         ----------------
-        user:> lvmdrp rss correctTelluric RSS_IN.fits RSS_OUT.fits TELL_SPEC.fits
-        user:> lvmdrp rss correctTelluric RSS_IN.fits RSS_OUT.fits TELL_SPEC.fits  1.4
+        user:> lvmdrp rss correctTelluric in_rss.fits out_rss.fits TELL_SPEC.fits
+        user:> lvmdrp rss correctTelluric in_rss.fits out_rss.fits TELL_SPEC.fits  1.4
 	"""
-	rss = loadRSS(rss_in)
+	rss = loadRSS(in_rss)
 	telluric = Spectrum1D()
 	telluric.loadFitsData(telluric_spectrum)
 	telluric._mask = None
@@ -424,6 +424,6 @@ def correctTelluric_drp(rss_in, rss_out, telluric_spectrum, airmass='AIRMASS'):
 			spec = rss[i]
 			telluric_resamp = telluric.resampleSpec(spec._wave)
 			rss_corr[i] = spec*(1.0/(telluric_resamp**(airmass)))
-	rss_corr.writeFitsData(rss_out)
+	rss_corr.writeFitsData(out_rss)
 
 # -------------------------------------------------------------------------------------------------
