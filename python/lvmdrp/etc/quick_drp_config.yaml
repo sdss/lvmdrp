@@ -59,4 +59,7 @@ reduction_steps:
   # * get solar spectrum
   # * normalize solar spectrum by twilight fiberflat
   # * apply as flux calibration vector to each fiber
+  # * add sky quick subtraction
+  # * quick <15min (including calibration frames)
+  # * add quality flags for calibration frames as well
 ...
