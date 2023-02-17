@@ -31,13 +31,37 @@ def _parse_dataproduct_bp(dataproduct_bp):
 
     return dataproduct_path, keywords
 
-# TODO: define prepQuick_drp(spec, ccd, exposure, mjd):
-#   * read a quick configuration template
-#   * find target frame(s) in DB
-#   * match with calibration frames from DB
-#   * update quick configuration template(s)
-#   * return quick configuration .YAML file(s)
+# TODO: allow for several MJDs
 def prepQuick_drp(mjd=None, exposure=None, spec=None, ccd=None):
+    """
+
+        Returns a list of configuration to perform the quick DRP
+        
+        Steps carried out by this task:
+            * read a quick configuration template
+            * find target frame(s) in DB
+            * match with calibration frames from DB
+            * update quick configuration template(s)
+            * return quick configuration .YAML file(s)
+        
+        all parameters (mjd, exposure. spec and ccd) are optional and are used to constrain the
+        search for *raw* science frames in the database. Once the intended frame(s) is(are) found,
+        this task will locate in the database the matching calibration frames needed to carry out
+        the quick reduction. The i/o file paths for each reduction step will be automatically
+        updated as well.
+
+        Parameters
+        ----------
+        mjd : int, optional
+            the MJD constrain to add to the raw frames list
+        exposure : int, optional
+            the exposure number to target for quick reduction
+        spec : string of 'spec1', 'spec2' or 'spec3', optional
+            the spectrograph to target for quick reduction
+        ccd : string of b1, r1, z1, b2, r2, z2, b3, r3, or z3
+            the CCD to target for quick reduction. Note that setting ccd also constrains spec
+    
+    """
     # get quick DRP configuration template
     quick_config_template = yaml.safe_load(open(QUICK_DRP_CONFIG, "r"))
 
@@ -86,7 +110,6 @@ def prepQuick_drp(mjd=None, exposure=None, spec=None, ccd=None):
         quick_configs.append(_)
     
     return quick_configs
-        
 
 # TODO: define prepFull_drp(spec, channel, exposure, mjd):
 #   * read a full configuration template
@@ -102,4 +125,20 @@ def prepFull_drp(spec, channel, exposure, mjd):
 #   * parse each DRP step in config (match config.steps to each module.step in registered_modules)
 #   * run each DRP step
 def fromConfig_drp(config, **registered_modules):
-    pass
+    config = yaml.safe_load(config)
+
+    # TODO: show target frame info
+    # TODO: show calibration frames info
+    
+    reduction_steps = config["reduction_steps"]
+    for step in reduction_steps:
+        module_name, task_name = list(step.keys())[0].split(".")
+
+        if module_name not in registered_modules:
+            # TODO: show error message
+            # TODO: try to import the module.task
+            pass
+
+        task = getattr(registered_modules[module_name], task_name)
+        # TODO: show running step info
+        task(**reduction_steps[step])
