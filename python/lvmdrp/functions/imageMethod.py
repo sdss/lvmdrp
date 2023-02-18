@@ -2215,9 +2215,6 @@ def preprocRawFrame_drp(in_image, out_image, positions="00,10,01,11", orientatio
 	#write out FITS file
 	preproc_image.writeFitsData(out_image)
 
-# TODO: after preprocessing remove cosmic ray if needed (don't if exptime < T and/or NEXP > 2)
-# TODO: if NEXP == 2, where CR, choose the other and when both clean, choose the average
-
 @missing_files(["BAD_CALIBRATION_FRAMES"], "in_image", "in_bias", "in_dark", "in_pixelflat")
 def basicCalibration_drp(in_image, out_image, in_bias=None, in_dark=None, in_pixelflat=None):
 
@@ -2265,32 +2262,109 @@ def basicCalibration_drp(in_image, out_image, in_bias=None, in_dark=None, in_pix
     calib_image.writeFitsData(out_image)
 
 @missing_files(["BAD_CALIBRATION_FRAMES"], "in_images")
-def createMasterFrame_drp(in_images, out_image):
+def createMasterFrame_drp(in_images, out_image, reject_cr=False, exptime_thresh=5, **cr_kwargs):
+	"""
 
-    proc_images, exptimes, img_types = [], [], []
-    for in_image in in_images:
-        proc_image = loadImage(in_image).convertUnit(unit="e-")
-        exptimes.append(proc_image._header["EXPTIME"])
-        img_types.append(proc_image._header["IMAGETYP"].lower())
-        proc_images.append(proc_image)
-    
-    if any(img_types[0] != img_types):
-        # WARNING: dropping frames != frames[0]
-        pass
-    
-    if img_types[0] == "bias":
-        master_frame = combineImages(proc_images, method="clipped_mean", k=3)
-    elif img_types[0] == "dark":
-        master_frame = combineImages(proc_images, method="clipped_mean", k=3)
-    elif img_types[0] == "flat" or img_types[0] == "flatfield":
-        master_frame = combineImages([proc_image / numpy.nanmedian(proc_image._data) for proc_image in proc_images], method="clipped_mean", k=3)
-    
-    # TODO:
-    # * add keyword for MASTER
-    # * add keyword for NFRAMES
-    # * add binary table with columns: MJD, EXPNUM, SPEC, CHANNEL, EXPTIME
-    
-    master_frame.writeFitsData(out_image)
+		Combines the given calibration frames (bias, dark, or pixelflat) into a master calibration frame.
+		
+		Optionally this task will apply a cosmic ray rejection algorithm (reject_cr=True) if the
+		following conditions apply:
+
+			* exposure time < exptime_thresh OR
+			* number of frames is <= 2
+		
+		The combination of the images will be carried out using a sigma clipped median statistic if the
+		number of exposures is > 2. If the number of exposures <= 2, a simple average statistic is
+		applied. In the special case that CR rejection is needed, the combination of images is selective:
+		
+			* where cosmic ray in one frame, select the other
+			* where cosmic ray in none of the frames, calculate an average of both.
+		
+		When only one frame is given, it is still flagged as master, but a warning will be thrown.
+
+		Parameters
+		----------
+
+
+		Examples
+		--------
+
+
+	"""
+	if not isinstance(in_images, (list, tuple)): in_images = [in_images]
+
+	nexp = len(in_images)
+	proc_images, exptimes, img_types = [], [], []
+	for in_image in in_images:
+		proc_image = loadImage(in_image).convertUnit(unit="ADU")
+		exptimes.append(proc_image._header["EXPTIME"])
+		img_types.append(proc_image._header["IMAGETYP"].lower())
+		proc_images.append(proc_image)
+
+	master_type = img_types[0]
+	if any(master_frame != img_types):
+		# TODO: drop minority type
+		# TODO: throw warning: dropping frames != frames[0]
+		pass
+
+	master_exptime = exptimes[0]
+	if any(master_exptime != exptimes):
+		# TODO: scale frames to a common exptime
+		# TODO: throw warning: scale frames to a common exptime
+		pass
+
+	if reject_cr and (master_exptime < exptime_thresh or nexp <= 2):
+		cr_select_1 = proc_images[0].createCosmicMask(**cr_kwargs)
+		if nexp == 2:
+			cr_select_2 = proc_images[1].createCosmicMask(**cr_kwargs)
+			
+			# filter out cosmic rays by selecting pixels where no CR were detected
+			# normalize counts if pixelflat
+			new_data_1 = numpy.where(cr_select_1, x=proc_images[1]._data, y=proc_images[0]._data)
+			new_data_2 = numpy.where(cr_select_2, x=proc_images[0]._data, y=proc_images[1]._data)
+			if master_type == "flat" or master_type == "flatfield":
+				new_data = [new_data_1/numpy.nanmedian(new_data_1), new_data_2/numpy.nanmedian(new_data_2)]
+			else:
+				new_data = [new_data_1, new_data_2]
+
+			# average images
+			new_data = numpy.mean(new_data, axis=0)
+
+			new_header = proc_images[0]._header
+			# combine CR pixel selection
+			cr_mask = numpy.logical_and(cr_select_1, cr_select_2)
+			# combine original masks
+			new_mask = numpy.logical_and(proc_images[0]._mask, proc_images[1]._mask)
+
+		elif nexp == 1:
+			new_data = proc_images[0]._data
+			new_header = proc_images[0]._header
+			cr_mask = cr_select_1
+			new_mask = proc_images[0]._mask
+
+		# prepare image for CRR
+		master_frame = Image(data=new_data, header=new_header, mask=cr_mask)
+		replace_box = cr_kwargs.get("replace_box", (20,1))
+		replace_error = cr_kwargs.get("replace_error", 1e10)
+		# filter out remaining cosmic rays
+		master_frame.replaceMaskMedian(*replace_box, replace_error=replace_error)
+		# add original masks
+		master_frame.setData(mask=new_mask)
+	else:
+		if master_type == "bias":
+			master_frame = combineImages(proc_images, method="clipped_mean", k=3)
+		elif master_type == "dark":
+			master_frame = combineImages(proc_images, method="clipped_mean", k=3)
+		elif master_type == "flat" or master_type == "flatfield":
+			master_frame = combineImages([proc_image / numpy.nanmedian(proc_image._data) for proc_image in proc_images], method="clipped_mean", k=3)
+
+	# TODO:
+	# * add binary table with columns: MJD, EXPNUM, SPEC, CHANNEL, EXPTIME
+	master_frame._header["EXPTIME"] = master_exptime
+	master_frame._header["ISMASTER"] = (True, "is this a combined frame")
+	master_frame._header["NFRAMES"] = (nexp, "number of exposures combined")
+
+	master_frame.writeFitsData(out_image)
     
 # TODO: for fiberflats, calculate an average over an X range (around the center) of the extracted fibers and normalize by it
 # TODO: then combine them using the RSS method implemented
