@@ -226,7 +226,53 @@ def detCos_drp(image,  out_image,   rdnoise='2.9', sigma_det='5', rlim='1.2', it
 	out.writeFitsData(out_image)
 
 @missing_files(["BAD_CALIBRATION_FRAMES"], "in_image")
-def LACosmic_drp(in_image,  out_image,  sigma_det='5', flim='1.1', iter='3', sig_gauss='0.8,0.8', error_box='20,1', replace_box='20,1',  replace_error='1e10',  rdnoise='2.9',  increase_radius='0', verbose='0', parallel='2'):
+def LACosmic_drp(in_image, out_image, sigma_det='5', flim='1.1', iter='3', sig_gauss='0.8,0.8', error_box='20,1', replace_box='20,1',  replace_error='1e10',  increase_radius='0', parallel='2'):
+	# convert all parameters to proper type
+	sigma_det = float(sigma_det)
+	flim = float(flim)
+	iter = int(iter)
+	error_box = replace_box.split(',')
+	error_box = int(error_box[0]), int(error_box[1])
+	sig_gauss = sig_gauss.split(',')
+	sig_gauss = float(sig_gauss[0]), float(sig_gauss[1])
+	replace_box = replace_box.split(',')
+	replace_box = int(replace_box[0]), int(replace_box[1])
+	increase_radius = int(increase_radius)
+	try:
+		replace_error = float(replace_error)
+	except:
+		replace_error = None
+
+	# load image from FITS file
+	img = loadImage(in_image)
+
+	# create empty mask if no mask is present in original image
+	if img._mask is not None:
+		mask_orig = img.getMask()
+	else:
+		mask_orig = numpy.zeros(img.getDim(), dtype=numpy.bool)
+
+	# create a new Image instance to store the initial data array
+	img_original = Image(data=img.getData(), header=img.getHeader(), error=img.getError(),  mask=mask_orig)
+	img.setData(mask=numpy.zeros(img.getDim(), dtype=numpy.bool))
+	img.removeError()
+
+	cr_select = img.createCosmicMask(sigma_det=sigma_det, flim=flim, iter=iter, sig_gauss=sig_gauss, error_box=error_box, replace_box=replace_box, parallel=parallel)
+
+	# update mask in original image
+	img_original.setData(mask=True, select=cr_select)
+
+	# refine CR selection
+	if increase_radius>0:
+		mask_img = Image(data=img_original._mask)
+		mask_new = mask_img.convolveImg(kernel=numpy.ones((2*increase_radius+1, 2*increase_radius+1)))
+		mask_new = mask_new._data>0
+		img_original.setData(mask=mask_new)
+	out = img_original.replaceMaskMedian(replace_box[0], replace_box[1], replace_error=replace_error)
+	out.writeFitsData(out_image)
+
+@missing_files(["BAD_CALIBRATION_FRAMES"], "in_image")
+def old_LACosmic_drp(in_image,  out_image,  sigma_det='5', flim='1.1', iter='3', sig_gauss='0.8,0.8', error_box='20,1', replace_box='20,1',  replace_error='1e10',  rdnoise='2.9',  increase_radius='0', verbose='0', parallel='2'):
 	"""
 			Detects and removes cosmic rays from astronomical images based on a modified Laplacian edge
 			detection method introduced by van Dokkum (2005) and modified by B. Husemann (2012, in prep.).

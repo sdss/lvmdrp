@@ -1495,6 +1495,103 @@ class Image(Header):
         flux = apertures.integratedFlux(self)
         return flux
 
+    def createCosmicMask(self, sigma_det=5, flim=1.1, iter=3, sig_gauss=(0.8,0.8), error_box=(20,1), replace_box=(20,1), parallel='auto'):
+        """Return the cosmic ray pixel mask computed using the LA algorithm"""
+        err_box_x = error_box[0]
+        err_box_y = error_box[1]
+        sigma_x = sig_gauss[0]
+        sigma_y = sig_gauss[1]
+        box_x = replace_box[0]
+        box_y = replace_box[1]
+
+        # create a new Image instance to store the initial data array
+        out = Image(data=self.getData(), header=self.getHeader(), error=None,  mask=numpy.zeros(self.getDim(), dtype=numpy.bool))
+        out.convertUnit("e-")
+        out.removeError()
+
+        # initial CR selection
+        select = out._mask
+
+        # define Laplacian convolution kernel
+        LA_kernel=numpy.array([[0,-1,0,],[-1,4,-1],[0,-1,0]])/4.0
+
+        if parallel=='auto':
+            cpus = cpu_count()
+        else:
+            cpus = int(parallel)
+        
+        # get rdnoise from header or assume given value
+        quads = out._header["HIERARCH AMP? TRIMSEC"].values()
+        rdnoises = out._header["HIERARCH AMP? RDNOISE"].values()
+        
+        # start iteration
+        for i in range(iter):
+            # quick and dirty CRR on current iteration
+            noise = out.medianImg((err_box_y, err_box_x))
+            # rough estimate of error for each quadrant
+            for iquad in range(len(quads)):
+                quad = noise.getSection(quads[iquad])
+                select_noise = noise.getData()<=0
+                quad.setData(data=0, select=select_noise)
+                quad=(quad + rdnoises[iquad]**2).sqrt()
+                noise.setSection(quads[iquad], subimg=quad, update_header=False, inplace=True)
+            if cpus>1:
+                result = []
+                fine=out.convolveGaussImg(sigma_x, sigma_y)
+                fine_norm = out/fine
+                select_neg = fine_norm<0
+                fine_norm.setData(data=0, select=select_neg)
+                pool = Pool(cpus)
+                result.append(pool.apply_async(out.subsampleImg))
+                result.append(pool.apply_async(fine_norm.subsampleImg))
+                pool.close()
+                pool.join()
+                sub = result[0].get()
+                sub_norm = result[1].get()
+                pool.terminate()
+                pool = Pool(cpus)
+                result[0]=pool.apply_async(sub.convolveImg, args=([LA_kernel]))
+                result[1]=pool.apply_async(sub_norm.convolveImg, args=([LA_kernel]))
+                pool.close()
+                pool.join()
+                conv = result[0].get()
+                select_neg = conv<0
+                conv.setData(data=0, select=select_neg)  # replace all negative values with 0
+                Lap2 = result[1].get()
+                pool.terminate()
+                pool = Pool(cpus)
+                result[0]=pool.apply_async(conv.rebin, args=(2, 2))
+                result[1]=pool.apply_async(Lap2.rebin, args=(2, 2))
+                pool.close()
+                pool.join()
+                Lap = result[0].get()
+                Lap2 = result[1].get()
+                pool.terminate()
+                S = Lap/(noise*4) # normalize Laplacian image by the noise
+                S_prime = S-S.medianImg((err_box_y, err_box_x)) # cleaning of the normalized Laplacian image
+            else:
+                sub = out.subsampleImg() # subsample image
+                conv= sub.convolveImg(LA_kernel) # convolve subsampled image with kernel
+                select_neg = conv<0
+                conv.setData(data=0, select=select_neg)  # replace all negative values with 0
+                Lap = conv.rebin(2, 2) # rebin the data to original resolution
+                S = Lap/(noise*4) # normalize Laplacian image by the noise
+                S_prime = S-S.medianImg((err_box_y, err_box_x)) # cleaning of the normalized Laplacian image
+                fine=out.convolveGaussImg(sigma_x, sigma_y) # convolve image with a 2D Gaussian
+                fine_norm = out/fine
+                select_neg = fine_norm<0
+                fine_norm.setData(data=0, select=select_neg)
+                sub_norm = fine_norm.subsampleImg() # subsample image
+                Lap2 = (sub_norm).convolveImg(LA_kernel)
+                Lap2 = Lap2.rebin(2, 2) # rebin the data to original resolution
+
+            # define cosmic ray selection
+            select = numpy.logical_or(numpy.logical_and((Lap2)>flim, S_prime>sigma_det),  select)
+            # update mask in clean image for next iteration
+            out.setData(mask=True, select=select)
+            out = out.replaceMaskMedian(box_x, box_y, replace_error=None)
+    
+        return select
 
 def loadImage(infile,  extension_data=None, extension_mask=None, extension_error=None, extension_header=0):
 
