@@ -1,20 +1,26 @@
-name: lvm-mbias
-short: reduced and combined bias frames
+name: lvm-mdark
+short: reduced and combined (master) dark frames
 description: |
-  this is the frame after trimming overscan region, subtracted overscan bias, converted to e- units
-  and calculated pixel-to-pixel errors.
-location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[OBSERVATORY]/[MJD]/
+  this is the frame after combining several reduced dark frames, in units of e-,
+  Poisson errors calculated and CR rejected.
+location: [CALIB_PATH]/[DRPVER]/[TILEID]/[OBSERVATORY]/[MJD]/
 created_by: imageMethod.createMasterFrame
 used_by:
   - imageMethod.basicCalibration
 naming_convention: |
-  lvm-mbias-[CAMERA].fits.gz, [CAMERA] is one of the nine cameras on the instrument, b1, r1, z1,
+  lvm-mdark-[CAMERA]-[EXPTIME].fits.gz, [CAMERA] is one of the nine cameras on the instrument, b1, r1, z1,
   or b2, r2, z2, or b3, r3, or z3 for the blue, red, nir cameras on each LVM spectrograph.
 hdu0:
   name: PRIMARY
   description: primary header metadata
   is_image: true
   header:
+    - key: COSMIC
+      comment: Cosmic ray rejection applied
+    - key: ISMASTER
+      comment: Is this a combined (master) frame
+    - key: NFRAMES
+      comment: Number of exposures combined
 hdu1:
   name: FLUX
   description: Flux in electrons
@@ -44,16 +50,16 @@ hdu4:
     MEAN:
       name: MEAN
       type: float32
-      unit: ADU
+      unit: e-
       description: average counts across the field
     MEDIAN:
       name: MEDIAN
       type: float32
-      unit: ADU
+      unit: e-
       description: median counts across the field
     STDDEV:
       name: STDDEV
       type: float32
-      unit: ADU
+      unit: e-
       description: standard deviation in counts across the field
     
