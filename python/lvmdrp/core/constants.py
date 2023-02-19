@@ -40,9 +40,7 @@ CONFIG_PATH = os.path.join(ROOT_PATH, "etc")
 DATAPRODUCT_BP_PATH = os.path.join(CONFIG_PATH, "dataproducts")
 
 # main DRP configuration path
-MASTER_CONFIG_PATH = os.path.join(CONFIG_PATH, "drp_configs", "drp.yml")
-# quick DRP configuration path
-QUICK_CONFIG_PATH = os.path.join(CONFIG_PATH, "drp_configs", "quick_drp_config.yaml")
+MASTER_CONFIG_PATH = os.path.join(CONFIG_PATH, "drp_master_config.yaml")
 
 # ESO sky model (web version) configuration files
 SKYCALC_CONFIG_PATH = os.path.join(CONFIG_PATH, "third_configs", "skycalc.json")

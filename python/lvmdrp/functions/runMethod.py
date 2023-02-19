@@ -5,7 +5,7 @@ import yaml
 import numpy as np
 from copy import deepcopy as copy
 
-from lvmdrp.core.constants import QUICK_DRP_CONFIG, DATAPRODUCT_BP_PATH
+from lvmdrp.core.constants import CONFIG_PATH, DATAPRODUCT_BP_PATH
 from lvmdrp.core.image import Image, loadImage
 from lvmdrp.core.rss import RSS, loadRSS
 
@@ -32,7 +32,7 @@ def _parse_dataproduct_bp(dataproduct_bp):
     return dataproduct_path, keywords
 
 # TODO: allow for several MJDs
-def prepQuick_drp(mjd=None, exposure=None, spec=None, ccd=None):
+def prepQuick_drp(mjd=None, exposure=None, spec=None, ccd=None, config_name="lvm_quick_config.yaml"):
     """
 
         Returns a list of configuration to perform the quick DRP
@@ -63,7 +63,7 @@ def prepQuick_drp(mjd=None, exposure=None, spec=None, ccd=None):
     
     """
     # get quick DRP configuration template
-    quick_config_template = yaml.safe_load(open(QUICK_DRP_CONFIG, "r"))
+    quick_config_template = yaml.safe_load(open(os.path.join(CONFIG_PATH, config_name), "r"))
 
     # connect to DB
     config = load_master_config()

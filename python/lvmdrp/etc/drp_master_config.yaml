@@ -15,8 +15,8 @@ LVM_DB_USER: "lvmdrp"
 LVM_DB_PASS: "1234"
 LVM_DB_NAME: "lvmdrp.db"
 # define root path of the installation
-# LVM_DRP_ROOT: &root_path "/home/mejia/Research/UNAM/lvm-drp/"
-LVM_DRP_ROOT: &root_path "/disk-a/mejia/Research/UNAM/lvm-drp/"
+LVM_DRP_ROOT: &root_path "/home/mejia/Research/UNAM/lvm-drp/"
+# LVM_DRP_ROOT: &root_path "/disk-a/mejia/Research/UNAM/lvm-drp/"
 # define path to config files
 LVM_DRP_CONFIG_PATH: &config_path !join [*root_path, "lvmdrp/python/lvmdrp/etc/"]
 # define log path
