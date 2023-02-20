@@ -100,8 +100,105 @@ def _get_path_from_bp(bp_path):
 
     return dataproduct_path, kws_path
 
+# TODO:
+#   * read preproc configuration template
+#   * read master calibration configuration template
+#   * find target frame(s) in DB
+#   * find analogs of the target frames
+#   * update preprocessing configuration template(s)
+#   * update master calibration configuration template(s)
+#   * write configuration file(s) to disk
+def prepCalib_drp(path, calib_type, mjd=None, exposure=None, spec=None, ccd=None, preproc_config="lvm_preproc_config", calib_config="lvm_{imagetyp}_config"):
 
-    return dataproduct_path, keywords
+    # expand path
+    path = os.path.expandvars(path)
+
+    # get calibration preprocessing DRP configuration template
+    preproc_config_template = _load_template(template_path=os.path.join(CONFIG_PATH, f"{preproc_config}.yaml"))
+    # get calibration DRP configuration template
+    calib_config_path = os.path.join(CONFIG_PATH, f"{calib_config}.yaml")
+    calib_config_path = calib_config_path.format(imagetyp=calib_type)
+    calib_config_template = _load_template(template_path=calib_config_path)
+
+    # connect to DB
+    master_config = load_master_config()
+    db.create_or_connect_db(master_config)
+
+    # get target calibration frames from DB
+    calib_frames = db.get_raws_metadata_where(imagetyp=calib_type, mjd=mjd, exposure=exposure, spec=spec, ccd=ccd)
+    # create preproc configuration files
+    for calib_frame in calib_frames:
+        # copy preproc template for modification
+        _ = copy(preproc_config_template)
+        # fill-in location
+        _["location"] = _["location"].format(CALIB_PATH=path, DRPVER=lvmdrp.__version__)
+        # fill-in naming_convention
+        _["naming_convention"] = _["naming_convention"].format(
+            IMAGETYP=calib_type,
+            HEMI="s" if calib_frame.OBSERVATORY=="LCO" else "n",
+            CAMERA=calib_frame.ccd,
+            EXPNUM=calib_frame.expnum
+        )
+        # fill-in target_frame
+        path, path_kws = _get_path_from_bp(_["target_frame"])
+        _["target_frame"] = path.format(**{key: calib_frame.__dict__[key.lower()] for key in path_kws})
+        _["reduction_steps"]["imageMethod.preprocRawFrame"]["out_image"] = _["reduction_steps"]["imageMethod.preprocRawFrame"]["out_image"].format(IMAGETYP=calib_type)
+        # fill-in calibration_frames
+        master_calib = db.get_master_metadata(metadata=calib_frame)
+        if master_calib["bias"] is not None:
+            path, path_kws = _get_path_from_bp(_["calib_frames"]["bias"])
+            _["calib_frames"]["bias"] = path.format(**{key: master_calib["bias"].__dict__[key.lower()] for key in path_kws})
+        if master_calib["dark"] is not None:
+            path, path_kws = _get_path_from_bp(_["calib_frames"]["dark"])
+            _["calib_frames"]["dark"] = path.format(**{key: master_calib["dark"].__dict__[key.lower()] for key in path_kws})
+        if master_calib["pixelflat"] is not None:
+            path, path_kws = _get_path_from_bp(_["calib_frames"]["pixelflat"])
+            _["calib_frames"]["pixelflat"] = path.format(**{key: master_calib["pixelflat"].__dict__[key.lower()] for key in path_kws})
+        if master_calib["fiberflat"] is not None:
+            path, path_kws = _get_path_from_bp(_["calib_frames"]["fiberflat"])
+            _["calib_frames"]["fiberflat"] = path.format(**{key: master_calib["fiberflat"].__dict__[key.lower()] for key in path_kws})
+        if master_calib["arc"] is not None:
+            path, path_kws = _get_path_from_bp(_["calib_frames"]["arc"])
+            _["calib_frames"]["arc"] = path.format(**{key: master_calib["arc"].__dict__[key.lower()] for key in path_kws})
+
+        # fill in reduction steps
+        for step in _["reduction_steps"]:
+            for par in step:
+                if par.startswith("in_") or par.startswith("out_"):
+                    if "in_bias" == par: _["reduction_steps"][step][par] = _["calibration_frames"]["bias"]
+                    elif "in_dark" == par: _["reduction_steps"][step][par] = _["calibration_frames"]["dark"]
+                    elif "in_pixelflat" == par: _["reduction_steps"][step][par] = _["calibration_frames"]["pixelflat"]
+                    elif "in_fiberflat" == par: _["reduction_steps"][step][par] = _["calibration_frames"]["fiberflat"]
+                    elif "in_arc" == par: _["reduction_steps"][step][par] = _["calibration_frames"]["arc"]
+                    else:
+                        path, path_kws = _get_path_from_bp(par)
+                        _["reduction_steps"][step][par] = path.format(**{key: calib_frame.__dict__[key.lower()] for key in path_kws})
+
+
+        # dump preproc configuration file
+        yaml.safe_dump(_, open(os.path.join(_["location"], _["naming_convention"]), "w"))
+
+    # separate non-analog frames in target list
+    non_analogs = db.get_analogs_groups(metadata=calib_frames)
+    # get analog calibration frames for each target frame
+    # conditions to be analog:
+    #   * be the same calibration type (bias, dark, etc.)
+    #   * be of the same camera/spectrograph
+    #   * have the same exposure time if applies
+    for non_analog in non_analogs:
+        analogs = db.get_analogs_metadata(metadata=non_analog)
+        # create calibration configuration files
+        for analog in analogs:
+            # copy calib template for modification
+            _ = copy(calib_config_template)
+            # fill in missing information in configuration template
+            _["location"] = _["location"].format(CALIB_PATH=path, DRPVER=lvmdrp.__version__)
+            if calib_type == "bias":
+                _["naming_convention"] = _["naming_convention"].format(CAMERA=analog.ccd)
+            elif calib_type == "dark" or (calib_type == "flat" or "flatfield"):
+                _["naming_convetion"] = _["naming_convention"].format(CAMERA=analog.ccd, EXPTIME=analog.exptime)
+            else:
+                pass
 
 # TODO: allow for several MJDs
 def prepQuick_drp(mjd=None, exposure=None, spec=None, ccd=None, quick_config="lvm_quick_config"):
@@ -163,7 +260,7 @@ def prepQuick_drp(mjd=None, exposure=None, spec=None, ccd=None, quick_config="lv
         path, path_kws = _get_path_from_bp(_["target_frame"])
         _["target_frame"] = path.format(**{key: target_frame.__dict__[key.lower()] for key in path_kws})
 
-        # fill-in calibration frames
+        # fill-in calibration_frames
         if master_calib["bias"] is not None:
             path, path_kws = _get_path_from_bp(_["calib_frames"]["bias"])
             _["calib_frames"]["bias"] = path.format(**{key: master_calib["bias"].__dict__[key.lower()] for key in path_kws})
@@ -227,3 +324,14 @@ def fromConfig_drp(config, **registered_modules):
         task = getattr(registered_modules[module_name], task_name)
         # TODO: show running step info
         task(**reduction_steps[step])
+
+def getScript_drp(config, **registered_modules):
+    """
+    
+        Print to screen a commandline script version of the given configuration file
+    
+    """
+    pass
+
+def checkDone_drp(config):
+    pass
