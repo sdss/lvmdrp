@@ -6,6 +6,7 @@
 # @License: BSD 3-Clause
 # @Copyright: SDSS-V LVM
 
+import io
 import os
 import re
 import yaml
@@ -27,6 +28,66 @@ __all__ = [
     "prepQuick_drp", "prepFull_drp", "fromConfig_drp"
 ]
 
+
+def _get_missing_fields_in(template):
+    """Return config template keywords that need to be filled in
+    
+    This function creates an (dictionary) structure to parse fields in the given configuration
+    template. Those fields are:
+
+        * location
+        * naming_convention
+
+    The structure is as follows:
+
+        {
+            location: (template, [kw1, kw2, ...]),
+            naming_convention: (template, [kw1, kw2, ...])
+        }
+
+    where template is the original value of the field (e.g., location) in the
+    configuration template and the list of kw corresponds to the missing values to evaluate
+    the corresponding template field.
+    
+    This structure can then be used to fill in the missing fields using information from other
+    sources such as DBs and/or FITS headers.
+
+    Parameters
+    ----------
+    template : string or dict_like
+        the path to the template file to parse information from or the already loaded YAML
+        template.
+    
+    Returns
+    -------
+    missing_fields : dict_like
+        a structure to evaluate the missing fields in the given configuration template
+    """
+    if isinstance(template, (list, dict)):
+        temp = template
+    else:
+        temp = yaml.safe_load(open(template, "r"))
+
+    # parse location
+    location = temp["location"].replace("[", "{").replace("]", "}")
+    location_kws = list(map(str.lower, re.findall(r"\{(\w+)\}", location)))
+    # parse naming_convention
+    naming = temp["naming_convetions"].replace("[", "{").replace("]", "}")
+    naming_kws = list(map(str.lower, re.findall(r"\{(\w+)\}", naming)))
+
+    missing_fields = {
+        "location": (location, location_kws),
+        "naming_convention": (naming, naming_kws)
+    }
+    return missing_fields
+
+def _load_template(template_path):
+    """Return a configuration template with missing information as formatter string"""
+    with open(template_path, "r") as raw_temp:
+        lines = [line.replace("[", "{").replace("]", "}") for line in raw_temp.readlines()]
+
+    temp = yaml.safe_load(io.StringIO("".join(lines)))
+    return temp
 
 def _get_path_from_bp(bp_path):
     """Return dataproduct BP path information"""
