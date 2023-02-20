@@ -227,7 +227,7 @@ def record_db(config, target_paths=None, ignore_cache=False):
                     print(f"in chunk={i}, {batch}")
     return None
 
-def get_raws_metadata(mjd=None, exposure=None, spec=None, camera=None):
+def get_raws_metadata(imagetyp=None, mjd=None, exposure=None, spec=None, camera=None):
     try:
         priority = Case(LVMFrames.imagetyp, tuple((frame_type, i) for i, frame_type in enumerate(FRAMES_PRIORITY)))
         query = LVMFrames.select().where(
@@ -237,11 +237,13 @@ def get_raws_metadata(mjd=None, exposure=None, spec=None, camera=None):
         ).order_by(priority)
 
         # filter by MJD if present
+        if imagetyp is not None and imagetyp in FRAMES_PRIORITY:
+            query = query.where(LVMFrames.imagetyp == imagetyp)
         if mjd is not None:
             query = query.where(LVMFrames.mjd == mjd)
         if exposure is not None:
             query = query.where(LVMFrames.exposure == exposure)
-        if spec is not None:
+        if spec is not None and camera is None:
             query = query.where(LVMFrames.spec == spec)
         if camera is not None:
             query = query.where(LVMFrames.camera == camera)
