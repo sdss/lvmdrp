@@ -3,7 +3,7 @@ name: lvm-mbias
 short: configuration file for master bias creation
 description: |
   defines the reduction steps to create a master bias.
-location: [CALIB_PATH]/[DRPVER]/
+location: "[CALIB_PATH]/[DRPVER]/"
 naming_convention: lvm-mbias-[CAMERA]-config.yaml
 target_frame: lvm-bias
 calibration_frames:

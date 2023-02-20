@@ -3,7 +3,7 @@ name: lvm-mdark
 short: configuration file for master dark creation
 description: |
   defines the reduction steps to create a master dark.
-location: [CALIB_PATH]/[DRPVER]/
+location: "[CALIB_PATH]/[DRPVER]/"
 naming_convention: lvm-mdark-[CAMERA]-[EXPTIME]-config.yaml
 target_frame: lvm-dark
 calibration_frames:

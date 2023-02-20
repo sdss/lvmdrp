@@ -3,7 +3,7 @@ short: preprocessing for calibration frames (bias, dark, pixelflat)
 description: |
   defines the preprocessing step for calibration frames, which does not require Poisson error calculation and
   data units are set to ADU.
-location: [CALIB_PATH]/[DRPVER]/
+location: "[CALIB_PATH]/[DRPVER]/"
 naming_convention: lvm-calib-[IMAGETYP]-[HEMI]-[CAMERA]-[EXPNUM]-config.yaml
 target_frame: lvmSdr
 calibration_frames:
