@@ -2361,8 +2361,8 @@ def createMasterFrame_drp(in_images, out_image, reject_cr=False, exptime_thresh=
 	# TODO:
 	# * add binary table with columns: MJD, EXPNUM, SPEC, CHANNEL, EXPTIME
 	master_frame._header["EXPTIME"] = master_exptime
-	master_frame._header["ISMASTER"] = (True, "is this a combined frame")
-	master_frame._header["NFRAMES"] = (nexp, "number of exposures combined")
+	master_frame._header["ISMASTER"] = (True, "Is this a combined (master) frame")
+	master_frame._header["NFRAMES"] = (nexp, "Number of exposures combined")
 
 	master_frame.writeFitsData(out_image)
     

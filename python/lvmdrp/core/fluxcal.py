@@ -3,7 +3,7 @@
 #
 # @Author: Alfredo Mejía-Narváez (adapted from MaNGA IDL code)
 # @Date: Jan 27, 2023
-# @Filename: astrometry.py
+# @Filename: fluxcal.py
 # @License: BSD 3-Clause
 # @Copyright: SDSS-V LVM
 

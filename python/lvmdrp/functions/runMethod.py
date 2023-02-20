@@ -25,7 +25,9 @@ import lvmdrp.utils.database as db
 description = 'provides tasks for running the DRP'
 
 __all__ = [
-    "prepQuick_drp", "prepFull_drp", "fromConfig_drp"
+    "prepCalib_drp", "prepQuick_drp", "prepFull_drp",
+    "fromConfig_drp",
+    "dumpScript_drp", "getConfigs_drp", "checkDone_drp"
 ]
 
 
@@ -325,7 +327,12 @@ def fromConfig_drp(config, **registered_modules):
         # TODO: show running step info
         task(**reduction_steps[step])
 
-def getScript_drp(config, **registered_modules):
+# TODO: define task for verifying completness of the run from a configuration script
+def checkDone_drp(config):
+    pass
+
+# TODO: define task for dumping script from configs
+def dumpScript_drp(configs, **registered_modules):
     """
     
         Print to screen a commandline script version of the given configuration file
@@ -333,5 +340,6 @@ def getScript_drp(config, **registered_modules):
     """
     pass
 
-def checkDone_drp(config):
+# TODO: define task for recovering configs from script
+def getConfigs_drp(script, **registered_modules):
     pass
