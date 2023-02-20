@@ -13,6 +13,7 @@ import datetime as dt
 from tqdm import tqdm
 from sqlite3 import Error
 from peewee import *
+from astropy.table import Table
 
 from astropy.io import fits
 
@@ -264,6 +265,14 @@ def get_calib_metadata():
     
     calibration_metadata = [calib_metadata for calib_metadata in query]
     return calibration_metadata
+
+def get_nonanalogs_groups(metadata_list):
+    """Return filtered metadata list filtered by analog attributes: imagetyp, mjd, ccd and exptime"""
+    # build metadata table containing columns relevant for analog selection: imagetyp, mjd, ccd, exptime
+    metadata_table = Table(data=[metadata.__dict__ for metadata in metadata_list])
+    metadata_group = metadata_table.group_by(["imagetyp", "mjd", "ccd", "exptime"])
+    # return filtered list containing non-analog frames metadata for which to find analogs
+    return [metadata_list[idx] for idx in metadata_group.groups.indices]
 
 def get_analogs_metadata(metadata):
     # define empty metadata in case current frame has already a master
