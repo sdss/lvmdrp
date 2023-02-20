@@ -284,14 +284,14 @@ def run_reduction_block(config, metadata, calib_metadata, settings):
     _, flags = imageMethod.subtractStraylight_drp(
         in_image=target_frame_path.format(kind="cosmic"),
         trace=master_continuum_path.format(kind="trc"),
-        stray_image=target_frame_path.format(kind="back"),
-        clean_image=target_frame_path.format(kind="stray"),
+        out_stray=target_frame_path.format(kind="back"),
+        out_image=target_frame_path.format(kind="stray"),
         aperture=40, poly_cross=2, smooth_gauss=30
     )
     metadata.flags += flags
     _, flags = imageMethod.extractSpec_drp(
         in_image=target_frame_path.format(kind="stray"),
-        in_arc=master_continuum_path.format(kind="trc"),
+        in_trace=master_continuum_path.format(kind="trc"),
         out_rss=target_frame_path.format(kind="ms"),
         fwhm=master_continuum_path.format(kind="fwhm"),
         method="optimal", parallel="5"
@@ -324,7 +324,7 @@ def run_reduction_continuum(config, metadata, calib_metadata, settings):
     metadata.flags += flags
     _, flags = imageMethod.tracePeaks_drp(
         in_image=target_frame_path.format(kind="cosmic"),
-        peaks_file=target_frame_path.format(kind="trace").replace(".fits", ".peaks"),
+        in_peaks=target_frame_path.format(kind="trace").replace(".fits", ".peaks"),
         trace_out=target_frame_path.format(kind="trc"),
         steps=30, method="gauss", threshold_peak=50, poly_disp=5, coadd=30, verbose=0
     )
@@ -332,21 +332,21 @@ def run_reduction_continuum(config, metadata, calib_metadata, settings):
     _, flags = imageMethod.subtractStraylight_drp(
         in_image=target_frame_path.format(kind="cosmic"),
         trace=target_frame_path.format(kind="trc"),
-        stray_image=target_frame_path.format(kind="back"),
-        clean_image=target_frame_path.format(kind="stray"),
+        out_stray=target_frame_path.format(kind="back"),
+        out_image=target_frame_path.format(kind="stray"),
         aperture=40, poly_cross=2, smooth_gauss=30
     )
     metadata.flags += flags
     _, flags = imageMethod.traceFWHM_drp(
         in_image=target_frame_path.format(kind="stray"),
-        trace=target_frame_path.format(kind="trc"),
-        fwhm_out=target_frame_path.format(kind="fwhm"),
+        in_trace=target_frame_path.format(kind="trc"),
+        out_fwhm=target_frame_path.format(kind="fwhm"),
         blocks=32, steps=30, coadd=20, threshold_flux=50.0, poly_disp=5, clip="1.5,4.0"
     )
     metadata.flags += flags
     _, flags = imageMethod.extractSpec_drp(
         in_image=target_frame_path.format(kind="stray"),
-        in_arc=target_frame_path.format(kind="trc"),
+        in_trace=target_frame_path.format(kind="trc"),
         out_rss=target_frame_path.format(kind="ms"),
         fwhm=target_frame_path.format(kind="fwhm"),
         parallel=5, method="optimal"

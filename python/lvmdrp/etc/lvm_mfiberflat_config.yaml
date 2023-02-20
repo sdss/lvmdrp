@@ -1,0 +1,70 @@
+---
+name: lvm-mfiberflat
+short: configuration file for master fiberflat creation
+description: |
+  defines the reduction steps to create a master fiberflat.
+location: "[CALIB_PATH]/[DRPVER]/"
+naming_convention: lvm-mfiberflat-[HEMI]-[CAMERA]-[EXPNUM]-config.yaml
+target_frame: lvmSdr
+calibration_frames:
+  bias: lvm-mbias
+  dark: lvm-mdark
+  flat: lvm-mflat
+reduction_steps:
+  imageMethod.preprocRawFrame:
+    in_image: lvmSdr
+    out_image: lvm-fiberflat
+    unit: ADU
+    compute_error: false
+  imageMethod.basicCalibration:
+    in_image: lvm-fiberflat
+    out_image: lvm-fiberflat
+    in_bias: lvm-mbias
+    in_dark: lvm-mdark
+    in_pixelflat: lvm-mpixelflat
+  imageMethod.LACosmic:
+    in_image: lvm-fiberflat
+    out_image: lvm-fiberflat
+    increase_radius: 1
+    flim: 1.3
+    parallel: auto
+  imageMethod.findPeaksAuto_drp:
+    in_image: lvm-fiberflat
+    out_peaks: lvm-peaks
+    nfibers: null
+  imageMethod.tracePeaks:
+    in_image: lvm-fiberflat
+    out_trace: lvm-trace
+    in_peaks: lvm-peaks
+    steps: 30
+    method: "gauss"
+    threshold_peak: 50
+    poly_disp: 5
+    coadd: 30
+    verbose: 0
+  imageMethod.subtractStraylight:
+    in_image: lvm-fiberflat
+    out_image: lvm-fiberflat
+    in_trace: lvm-trace 
+    out_stray: lvm-stray
+    aperture: 7
+    poly_cross: 2
+    smooth_gauss: 30
+  imageMethod.traceFWHM:
+    in_image: lvm-fiberflat
+    out_fwhm: lvm-fwhm
+    in_trace: lvm-trace
+    blocks: 32
+    steps: 30
+    coadd: 20
+    threshold_flux: 50.0
+    poly_disp: 5
+    clip: 1.5,4.0
+  imageMethod.extractSpec:
+    in_image: lvm-fiberflat
+    out_rss: lvmFlat
+    in_trace: lvm-trace
+    in_fwhm: lvm-fwhm
+    method: optimal
+    parallel: auto
+...

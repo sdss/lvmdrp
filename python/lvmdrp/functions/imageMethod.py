@@ -500,7 +500,7 @@ def addCCDMask_drp(image, mask, replaceError='1e10'):
 	img.writeFitsData(image)
 
 @missing_files(["BAD_CALIBRATION_FRAMES"], "in_image")
-def findPeaksAuto_drp(in_image, out_peaks_file, nfibers,  disp_axis='X', threshold='5000',median_box='8', median_cross='1', slice='', method='gauss',  init_sigma='1.0', verbose='1'):
+def findPeaksAuto_drp(in_image, out_peaks, nfibers,  disp_axis='X', threshold='5000',median_box='8', median_cross='1', slice='', method='gauss',  init_sigma='1.0', verbose='1'):
 	"""
 		   Finds the exact subpixel cross-dispersion position of a given number of fibers at a certain dispersion column on the raw CCD frame.
 		   If a predefined number of pixel are expected, the initial threshold value for the minimum peak height will varied until the expected number
@@ -512,7 +512,7 @@ def findPeaksAuto_drp(in_image, out_peaks_file, nfibers,  disp_axis='X', thresho
 			--------------
 			image: string
 					Name of the Continuum FITS file in which the fiber position along cross-dispersion direction will be measured
-			out_peaks_file : string
+			out_peaks : string
 					Name of the ASCII file in which the resulting fiber peak positions are stored
 			nfibers: string of integer > 0
 					Number of fibers for which need to be identified in cross-dispersion
@@ -573,7 +573,7 @@ def findPeaksAuto_drp(in_image, out_peaks_file, nfibers,  disp_axis='X', thresho
 	centers = cut.measurePeaks(peaks[0], method, init_sigma, threshold=0, max_diff=1.0)[0]
 	round_cent = numpy.round(centers).astype('int16') # round the subpixel peak positions to their nearest integer value
 	# write number of peaks and their position to an ASCII file NEED TO BE REPLACE WITH XML OUTPUT
-	file_out = open(out_peaks_file, 'w')
+	file_out = open(out_peaks, 'w')
 	file_out.write('%i\n' %(column))
 	for i in range(len(centers)):
 		file_out.write('%i %i %e %i\n'%(i, round_cent[i], centers[i], 0))
@@ -586,7 +586,7 @@ def findPeaksAuto_drp(in_image, out_peaks_file, nfibers,  disp_axis='X', thresho
 		pylab.plot(centers, numpy.ones(len(centers))*4000.0, 'xg')
 		pylab.show()
 
-def findPeaksOffset_drp(image, peaks_master, out_peaks_file, disp_axis='X', threshold='1500', median_box='8', median_cross='1', slice='', method='gauss',  init_sigma='1.0',accuracy=1.2):
+def findPeaksOffset_drp(image, peaks_master, out_peaks, disp_axis='X', threshold='1500', median_box='8', median_cross='1', slice='', method='gauss',  init_sigma='1.0',accuracy=1.2):
 
     threshold=float(threshold)
     median_box=int(median_box)
@@ -684,7 +684,7 @@ def findPeaksOffset_drp(image, peaks_master, out_peaks_file, disp_axis='X', thre
 
 
     #round_cent = numpy.round(centers._data).astype('int16') # round the subpixel peak positions to their nearest integer value
-    file_out = open(out_peaks_file, 'w')
+    file_out = open(out_peaks, 'w')
     
     file_out.write('%i\n' %(column))
     for i in range(len(ref_pos)):
@@ -700,7 +700,7 @@ def findPeaksOffset_drp(image, peaks_master, out_peaks_file, disp_axis='X', thre
             file_out.write('%i %i %e %i\n'%(i+1, numpy.round(position).astype('int16'), position, 1))
     file_out.close()
 
-def findPeaksMaster_drp(image, peaks_master, out_peaks_file, disp_axis='X', threshold='1500', threshold_weak='500', median_box='8', median_cross='1', slice='', method='gauss',  init_sigma='1.0', verbose='1'):
+def findPeaksMaster_drp(image, peaks_master, out_peaks, disp_axis='X', threshold='1500', threshold_weak='500', median_box='8', median_cross='1', slice='', method='gauss',  init_sigma='1.0', verbose='1'):
 
 	threshold=float(threshold)
 	threshold_weak=float(threshold_weak)
@@ -778,7 +778,7 @@ def findPeaksMaster_drp(image, peaks_master, out_peaks_file, disp_axis='X', thre
 	offset_weak[select_wrong]=0
 	centers._data[select_good_weak]= centers._data[select_good_weak]-offset_weak
 	round_cent = numpy.round(centers._data).astype('int16') # round the subpixel peak positions to their nearest integer value
-	file_out = open(out_peaks_file, 'w')
+	file_out = open(out_peaks, 'w')
 	select_bad = numpy.logical_not(select_good_weak)
 	file_out.write('%i\n' %(column))
 	for i in range(len(round_cent)):
@@ -796,7 +796,7 @@ def findPeaksMaster_drp(image, peaks_master, out_peaks_file, disp_axis='X', thre
 		pylab.plot(centers._data, numpy.ones(len(centers._data))*2000.0, 'xg')
 		pylab.show()
 
-def findPeaksMaster2_drp(image, peaks_master, out_peaks_file, disp_axis='X', threshold='1500', threshold_weak='500', median_box='8', median_cross='1', slice='', method='gauss',  init_sigma='1.0', border='4', verbose='1'):
+def findPeaksMaster2_drp(image, peaks_master, out_peaks, disp_axis='X', threshold='1500', threshold_weak='500', median_box='8', median_cross='1', slice='', method='gauss',  init_sigma='1.0', border='4', verbose='1'):
 
 	threshold=float(threshold)
 	threshold_weak=float(threshold_weak)
@@ -885,7 +885,7 @@ def findPeaksMaster2_drp(image, peaks_master, out_peaks_file, disp_axis='X', thr
 
 
 	round_cent = numpy.round(centers._data).astype('int16') # round the subpixel peak positions to their nearest integer value
-	file_out = open(out_peaks_file, 'w')
+	file_out = open(out_peaks, 'w')
 	select_bad = numpy.logical_not(select_good)
 	file_out.write('%i\n' %(column))
 	for i in range(len(round_cent)):
@@ -900,8 +900,8 @@ def findPeaksMaster2_drp(image, peaks_master, out_peaks_file, disp_axis='X', thr
 		pylab.plot(centers._data, numpy.ones(len(centers._data))*2000.0, 'xg')
 		pylab.show()
 
-@missing_files(["BAD_CALIBRATION_FRAMES"], "in_image", "peaks_file")
-def tracePeaks_drp(in_image, peaks_file, trace_out, disp_axis='X', method='gauss', median_box='7', median_cross='1', steps='30', coadd='30', poly_disp='-6', init_sigma='1.0', threshold_peak='100.0', max_diff='2', verbose='1'):
+@missing_files(["BAD_CALIBRATION_FRAMES"], "in_image", "in_peaks")
+def tracePeaks_drp(in_image, in_peaks, trace_out, disp_axis='X', method='gauss', median_box='7', median_cross='1', steps='30', coadd='30', poly_disp='-6', init_sigma='1.0', threshold_peak='100.0', max_diff='2', verbose='1'):
 	"""
 			Traces the peaks of fibers along the dispersion axis. The peaks at a specific dispersion column had to be determined before.
 			Two scheme of measuring the subpixel peak positionare available: A hyperbolic approximation or fitting a Gaussian profile to the brightest 3 pixels of a peak.
@@ -972,7 +972,7 @@ def tracePeaks_drp(in_image, peaks_file, trace_out, disp_axis='X', method='gauss
 		threshold=threshold_peak*coadd # adjust the minimum contrast threshold for the peaks
 
 	# load the initial positions of the fibers at a certain column NEED TO BE REPLACED WITH XML handling
-	file_in_peaks = open(peaks_file, 'r') # load file
+	file_in_peaks = open(in_peaks, 'r') # load file
 	lines = file_in_peaks.readlines()   # read lines
 	column = int(lines[0]) #read the pixel column of the initially measured fiber positions as a starting value
 	fibers = len(lines)-1  # number of fibers
@@ -1199,8 +1199,8 @@ def combineImages_drp(images, out_image, method='median', k='3.0'):
 	#write out FITS file
 	combined_img.writeFitsData(out_image)
 
-@missing_files(["BAD_CALIBRATION_FRAMES"], "in_image", "trace")
-def subtractStraylight_drp(in_image, trace, stray_image, clean_image, disp_axis='X',  aperture='7', poly_cross='4', smooth_disp='5', smooth_gauss='10.0', parallel='auto'):
+@missing_files(["BAD_CALIBRATION_FRAMES"], "in_image", "in_trace")
+def subtractStraylight_drp(in_image, in_trace, out_stray, out_image, disp_axis='X', aperture='7', poly_cross='4', smooth_disp='5', smooth_gauss='10.0', parallel='auto'):
 	"""
 			Subtracts a diffuse background signal (stray light) from the raw data. It uses the regions between fiber to estimate the stray light signal and
 			smoothes the result by a polyon in cross-disperion direction and afterwards a wide 2D Gaussian filter to reduce the introduction of low frequency noise.
@@ -1289,11 +1289,11 @@ def subtractStraylight_drp(in_image, trace, stray_image, clean_image, disp_axis=
 
 	# include header and write out file
 	img_out.setHeader(header=img.getHeader())
-	img_out.writeFitsData(clean_image)
-	img_smooth.writeFitsData(stray_image)
+	img_out.writeFitsData(out_image)
+	img_smooth.writeFitsData(out_stray)
 
-@missing_files(["BAD_CALIBRATION_FRAMES"], "in_image", "trace")
-def traceFWHM_drp(in_image, trace, fwhm_out, disp_axis='X', blocks='20', steps='100', coadd='10', poly_disp='5', threshold_flux='50.0', init_fwhm='2.0', clip='', parallel='auto'):
+@missing_files(["BAD_CALIBRATION_FRAMES"], "in_image", "in_trace")
+def traceFWHM_drp(in_image, in_trace, out_fwhm, disp_axis='X', blocks='20', steps='100', coadd='10', poly_disp='5', threshold_flux='50.0', init_fwhm='2.0', clip='', parallel='auto'):
 	"""
 			Measures the FWHM of the cross-dispersion fiber profile across the CCD.  It assumes that the profiles have a Gaussian shape and that the width  is CONSTANT for
 			a BLOCK of fibers in cross-dispersion direction.  If the FITS image contains an extension with the error, the error frame will be taken into account in the Gaussian fitting.
@@ -1367,7 +1367,7 @@ def traceFWHM_drp(in_image, trace, fwhm_out, disp_axis='X', blocks='20', steps='
 
 	# load trace
 	trace_mask = TraceMask()
-	trace_mask.loadFitsData(trace)
+	trace_mask.loadFitsData(in_trace)
 
 	# create a trace mask for the image
 	traceFWHM = TraceMask()
@@ -1409,7 +1409,7 @@ def traceFWHM_drp(in_image, trace, fwhm_out, disp_axis='X', blocks='20', steps='
 	traceFWHM.smoothTracePoly(poly_disp, clip=clip)
 
 	# write out FWHM trace to FITS file
-	traceFWHM.writeFitsData(fwhm_out)
+	traceFWHM.writeFitsData(out_fwhm)
 
 def offsetTrace_drp(image, trace, disp, lines, logfile,  blocks='15', disp_axis='X',  init_offset='0.0', size='20'):
 	"""
@@ -1637,9 +1637,8 @@ def offsetTrace2_drp(image, trace, trace_fwhm, disp, lines, logfile,  blocks='15
 # it might be better in dealing with cross-talk
 # TODO:
 # * define lvm-frame ancillary product to replace for out_rss
-# * set in_arc = lvm(M)Arc
-@missing_files(["BAD_CALIBRATION_FRAMES"], "in_image", "in_arc")
-def extractSpec_drp(in_image, out_rss, in_arc,  method='optimal',  aperture='7', fwhm='2.5', disp_axis='X',  replace_error='1e10', plot='-1', parallel='auto'):
+@missing_files(["BAD_CALIBRATION_FRAMES"], "in_image", "in_trace")
+def extractSpec_drp(in_image, out_rss, in_trace,  method='optimal',  aperture='7', fwhm='2.5', disp_axis='X',  replace_error='1e10', plot='-1', parallel='auto'):
 	"""
 			Extracts the flux for each fiber along the dispersion direction which is written into an RSS FITS file format.
 			Either a simple aperture or an optimal extraction scheme may be used.
@@ -1690,7 +1689,7 @@ def extractSpec_drp(in_image, out_rss, in_arc,  method='optimal',  aperture='7',
 
 
 	trace_mask = TraceMask()
-	trace_mask.loadFitsData(in_arc)
+	trace_mask.loadFitsData(in_trace)
 	trace_fwhm = TraceMask()
 
 	if method=='optimal':
