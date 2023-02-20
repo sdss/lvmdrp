@@ -3,7 +3,7 @@ name: lvm-quick
 short: quick Data Reduction Pipeline (DRP) configuration file
 description: |
   defines the target frame, calibration frames and DRP steps to perform the quick DRP for frame validation.
-location: $LVM_QUICK_S/[DRPVER]/
+location: $LVM_QUICK_[HEMI]/[DRPVER]/
 naming_convention: lvm-quick-[HEMI]-[CAMERA]-[EXPNUM]-config.yaml
 target_frame: lvmSdr
 calibration_frames:

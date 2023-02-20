@@ -1,3 +1,10 @@
+# encoding: utf-8
+#
+# @Author: Alfredo Mejía-Narváez
+# @Date: Feb 14, 2023
+# @Filename: runMethod.py
+# @License: BSD 3-Clause
+# @Copyright: SDSS-V LVM
 
 import os
 import re
@@ -5,6 +12,7 @@ import yaml
 import numpy as np
 from copy import deepcopy as copy
 
+import lvmdrp
 from lvmdrp.core.constants import CONFIG_PATH, DATAPRODUCT_BP_PATH
 from lvmdrp.core.image import Image, loadImage
 from lvmdrp.core.rss import RSS, loadRSS
@@ -20,19 +28,22 @@ __all__ = [
 ]
 
 
-def _parse_dataproduct_bp(dataproduct_bp):
-    """Return dataproduct BP information"""
+def _get_path_from_bp(bp_path):
+    """Return dataproduct BP path information"""
     # build dataproduct path template
-    bp = yaml.safe_load(open(dataproduct_bp, "r"))
-    path = os.path.expandvars(bp["location"])
-    name = bp["naming_convetion"].split(",")[0]
-    dataproduct_path = os.path.join(path, name).replace("[", "{").replace("]", "}")
-    keywords = re.findall(r"\[(\w+)\]", name)
+    bp = yaml.safe_load(open(bp_path, "r"))
+    loc = os.path.expandvars(bp["location"])
+    name = bp["naming_convention"].split(",")[0]
+    dataproduct_path = os.path.join(loc, name).replace("[", "{").replace("]", "}")
+    kws_path = re.findall(r"\{(\w+)\}", name)
+
+    return dataproduct_path, kws_path
+
 
     return dataproduct_path, keywords
 
 # TODO: allow for several MJDs
-def prepQuick_drp(mjd=None, exposure=None, spec=None, ccd=None, config_name="lvm_quick_config.yaml"):
+def prepQuick_drp(mjd=None, exposure=None, spec=None, ccd=None, quick_config="lvm_quick_config"):
     """
 
         Returns a list of configuration to perform the quick DRP
@@ -60,56 +71,69 @@ def prepQuick_drp(mjd=None, exposure=None, spec=None, ccd=None, config_name="lvm
             the spectrograph to target for quick reduction
         ccd : string of b1, r1, z1, b2, r2, z2, b3, r3, or z3
             the CCD to target for quick reduction. Note that setting ccd also constrains spec
+        quick_config: string
+            the name of the quick configuration template
     
     """
     # get quick DRP configuration template
-    quick_config_template = yaml.safe_load(open(os.path.join(CONFIG_PATH, config_name), "r"))
+    quick_config_template = _load_template(template_path=os.path.join(CONFIG_PATH, f"{quick_config}.yaml"))
 
     # connect to DB
-    config = load_master_config()
-    db.create_or_connect_db(config)
+    master_config = load_master_config()
+    db.create_or_connect_db(master_config)
 
-    target_frames = db.get_raws_metadata_where(mjd, exposure, spec, ccd)
-    quick_configs = []
+    target_frames = db.get_raws_metadata_where(mjd=mjd, exposure=exposure, spec=spec, ccd=ccd)
     for target_frame in target_frames:
         master_calib = db.get_master_metadata(metadata=target_frame)
 
-        # fill-in config
+        # copy quick configuration template
         _ = copy(quick_config_template)
 
-        # calibration frames
-        if master_calib["bias"] is not None:
-            io_path, keys = _parse_dataproduct_bp(_["calib_frames"]["bias"])
-            _["calib_frames"]["bias"] = io_path.format(**{key: master_calib["bias"].__dict__[key.lower()] for key in keys})
-        if master_calib["dark"] is not None:
-            io_path, keys = _parse_dataproduct_bp(_["calib_frames"]["dark"])
-            _["calib_frames"]["dark"] = io_path.format(**{key: master_calib["dark"].__dict__[key.lower()] for key in keys})
-        if master_calib["pixelflat"] is not None:
-            io_path, keys = _parse_dataproduct_bp(_["calib_frames"]["pixelflat"])
-            _["calib_frames"]["pixelflat"] = io_path.format(**{key: master_calib["pixelflat"].__dict__[key.lower()] for key in keys})
-        if master_calib["fiberflat"] is not None:
-            io_path, keys = _parse_dataproduct_bp(_["calib_frames"]["fiberflat"])
-            _["calib_frames"]["fiberflat"] = io_path.format(**{key: master_calib["fiberflat"].__dict__[key.lower()] for key in keys})
-        if master_calib["arc"] is not None:
-            io_path, keys = _parse_dataproduct_bp(_["calib_frames"]["arc"])
-            _["calib_frames"]["arc"] = io_path.format(**{key: master_calib["arc"].__dict__[key.lower()] for key in keys})
+        # fill-in location
+        hemi = "s" if target_frame.OBSERVATORY=="LCO" else "n"
+        _["location"] = os.path.expandvars(_["location"].format(HEMI=hemi, DRPVER=lvmdrp.__version__))
+        # fill-in naming_convention
+        _["naming_convention"] = _["naming_convention"].format(
+            HEMI=hemi,
+            CAMERA=target_frame.ccd,
+            EXPNUM=target_frame.expnum
+        )
+        # fill-in target_frame
+        path, path_kws = _get_path_from_bp(_["target_frame"])
+        _["target_frame"] = path.format(**{key: target_frame.__dict__[key.lower()] for key in path_kws})
 
-        # DRP steps
+        # fill-in calibration frames
+        if master_calib["bias"] is not None:
+            path, path_kws = _get_path_from_bp(_["calib_frames"]["bias"])
+            _["calib_frames"]["bias"] = path.format(**{key: master_calib["bias"].__dict__[key.lower()] for key in path_kws})
+        if master_calib["dark"] is not None:
+            path, path_kws = _get_path_from_bp(_["calib_frames"]["dark"])
+            _["calib_frames"]["dark"] = path.format(**{key: master_calib["dark"].__dict__[key.lower()] for key in path_kws})
+        if master_calib["pixelflat"] is not None:
+            path, path_kws = _get_path_from_bp(_["calib_frames"]["pixelflat"])
+            _["calib_frames"]["pixelflat"] = path.format(**{key: master_calib["pixelflat"].__dict__[key.lower()] for key in path_kws})
+        if master_calib["fiberflat"] is not None:
+            path, path_kws = _get_path_from_bp(_["calib_frames"]["fiberflat"])
+            _["calib_frames"]["fiberflat"] = path.format(**{key: master_calib["fiberflat"].__dict__[key.lower()] for key in path_kws})
+        if master_calib["arc"] is not None:
+            path, path_kws = _get_path_from_bp(_["calib_frames"]["arc"])
+            _["calib_frames"]["arc"] = path.format(**{key: master_calib["arc"].__dict__[key.lower()] for key in path_kws})
+
+        # fill-in reduction steps
         for step in _["reduction_steps"]:
             for par in step:
                 if par.startswith("in_") or par.startswith("out_"):
-                    if "bias" in par.lower(): _["reduction_steps"][step][par] = _["calibration_frames"]["bias"]
-                    elif "dark" in par.lower(): _["reduction_steps"][step][par] = _["calibration_frames"]["dark"]
-                    elif "pixelflat" in par.lower(): _["reduction_steps"][step][par] = _["calibration_frames"]["pixelflat"]
-                    elif "fiberflat" in par.lower(): _["reduction_steps"][step][par] = _["calibration_frames"]["fiberflat"]
-                    elif "arc" in par.lower(): _["reduction_steps"][step][par] = _["calibration_frames"]["arc"]
+                    if "in_bias" == par: _["reduction_steps"][step][par] = _["calibration_frames"]["bias"]
+                    elif "in_dark" == par: _["reduction_steps"][step][par] = _["calibration_frames"]["dark"]
+                    elif "in_pixelflat" == par: _["reduction_steps"][step][par] = _["calibration_frames"]["pixelflat"]
+                    elif "in_fiberflat" == par: _["reduction_steps"][step][par] = _["calibration_frames"]["fiberflat"]
+                    elif "in_arc" == par: _["reduction_steps"][step][par] = _["calibration_frames"]["arc"]
                     else:
-                        io_path, keys = _parse_dataproduct_bp(par)
-                        _["reduction_steps"][step][par] = io_path.format(**{key: target_frame.__dict__[key.lower()] for key in keys})
+                        path, path_kws = _get_path_from_bp(par)
+                        _["reduction_steps"][step][par] = path.format(**{key: target_frame.__dict__[key.lower()] for key in path_kws})
 
-        quick_configs.append(_)
-    
-    return quick_configs
+        # dump quick reduction configuration file
+        yaml.safe_dump(_, open(os.path.join(_["location"], _["naming_convention"]), "w"))
 
 # TODO: define prepFull_drp(spec, channel, exposure, mjd):
 #   * read a full configuration template
