@@ -115,13 +115,13 @@ def installESOSky_drp():
     else:
         raise NotImplementedError(f"installation not implemented for '{sys.platform}' OS")
 
-    # skycorr_installer.delaybeforesend = 1.0
-    # skycorr_installer.logfile_read = sys.stdout
+    skycorr_installer.delaybeforesend = 1.0
+    skycorr_installer.logfile_read = sys.stdout
     skycorr_installer.expect("root installation directory")
     skycorr_installer.sendline(SKYCORR_INST_PATH)
     skycorr_installer.expect("Is this OK")
     skycorr_installer.sendline("y")
-    if len(SKYCORR_INST_PATH) >= 50:
+    if len(SKYCORR_INST_PATH) >= 45:
         skycorr_installer.expect("Proceed with this installation directory")
         skycorr_installer.sendline("y")
     if os.path.exists(SKYCORR_INST_PATH):

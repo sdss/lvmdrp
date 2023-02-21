@@ -11,7 +11,7 @@ To install the DRP along with its dependencies, you need to run the following st
 1. Create a **Python 3.8** environment. This is optional, but strongly recommended. With conda this is done like this:
     > `conda create -n lvmdrp python=3.8`
 
-2. Make sure you are in the intended **Python 3.8** environment and directory.
+2. Make sure you are in the intended **Python 3.8** environment and directory:
     > `conda activate lvmdrp`
    
 3. Clone the Github repository:
@@ -23,16 +23,16 @@ To install the DRP along with its dependencies, you need to run the following st
 5. Switch to the (current) development branch:
     > `git checkout development`
 
-6. Install the DRP package in the current python environment:
-    > `pip install .`
+6. Install the DRP package in the current python environment (see *Contributing* section below for a replacement of this step):
+    > `pip install --no-cache-dir . 2>&1 | tee today.txt`
 
 ## Testing the installation
 
-<!-- write a script to test everything went find with the installation -->
+<!-- write a script to test everything went fine with the installation -->
 
 ### Advanced ESO sky model configuration
 
-If you are planning on using the sky module, you will need to install the ESO routines first. In order to install the ESO routines
+If you are planning on using the sky module, you will need to install the ESO routines first. In order to install to do so
 you need to run the following commands, **also within DRP python environment**.
 
 1. Install the ESO skycorr and skymodel routines:
