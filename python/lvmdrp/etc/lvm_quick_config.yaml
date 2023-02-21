@@ -44,10 +44,13 @@ reduction_steps:
       - lvm-wframe
       - lvm-wframe
     out_rss: lvmCFrame
-  rssMethod.quickFluxCalib:
+  rssMethod.quickSkySubtract:
     in_rss: lvmCFrame
+    out_rss: lvmSFrame
+  rssMethod.quickFluxCalib:
+    in_rss: lvmSFrame
     out_rss: lvmFFrame
-    in_throuput: lvm-throughput
+    in_throughput: lvm-throughput
     airmass: null
     exptime: null
   rssMethod.quickQuality:
