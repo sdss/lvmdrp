@@ -106,17 +106,13 @@ def _get_path_from_bp(bp_path):
 #   * read preproc configuration template
 #   * read master calibration configuration template
 #   * find target frame(s) in DB
-#   * find analogs of the target frames
-#   * update preprocessing configuration template(s)
-#   * update master calibration configuration template(s)
+#   * update calibration frame configuration template(s)
 #   * write configuration file(s) to disk
-def prepCalib_drp(path, calib_type, mjd=None, exposure=None, spec=None, ccd=None, preproc_config="lvm_preproc_config", calib_config="lvm_{imagetyp}_config"):
+def prepCalib_drp(path, calib_type, mjd=None, exposure=None, spec=None, ccd=None, calib_config="lvm_{imagetyp}_config"):
 
     # expand path
     path = os.path.expandvars(path)
 
-    # get calibration preprocessing DRP configuration template
-    preproc_config_template = _load_template(template_path=os.path.join(CONFIG_PATH, f"{preproc_config}.yaml"))
     # get calibration DRP configuration template
     calib_config_path = os.path.join(CONFIG_PATH, f"{calib_config}.yaml")
     calib_config_path = calib_config_path.format(imagetyp=calib_type)
@@ -131,7 +127,7 @@ def prepCalib_drp(path, calib_type, mjd=None, exposure=None, spec=None, ccd=None
     # create preproc configuration files
     for calib_frame in calib_frames:
         # copy preproc template for modification
-        _ = copy(preproc_config_template)
+        _ = copy(calib_config_template)
         # fill-in location
         _["location"] = _["location"].format(CALIB_PATH=path, DRPVER=lvmdrp.__version__)
         # fill-in naming_convention
@@ -145,6 +141,7 @@ def prepCalib_drp(path, calib_type, mjd=None, exposure=None, spec=None, ccd=None
         path, path_kws = _get_path_from_bp(_["target_frame"])
         _["target_frame"] = path.format(**{key: calib_frame.__dict__[key.lower()] for key in path_kws})
         _["reduction_steps"]["imageMethod.preprocRawFrame"]["out_image"] = _["reduction_steps"]["imageMethod.preprocRawFrame"]["out_image"].format(IMAGETYP=calib_type)
+        
         # fill-in calibration_frames
         master_calib = db.get_master_metadata(metadata=calib_frame)
         if master_calib["bias"] is not None:
@@ -163,7 +160,7 @@ def prepCalib_drp(path, calib_type, mjd=None, exposure=None, spec=None, ccd=None
             path, path_kws = _get_path_from_bp(_["calib_frames"]["arc"])
             _["calib_frames"]["arc"] = path.format(**{key: master_calib["arc"].__dict__[key.lower()] for key in path_kws})
 
-        # fill in reduction steps
+        # fill-in reduction steps
         for step in _["reduction_steps"]:
             for par in step:
                 if par.startswith("in_") or par.startswith("out_"):
@@ -176,31 +173,10 @@ def prepCalib_drp(path, calib_type, mjd=None, exposure=None, spec=None, ccd=None
                         path, path_kws = _get_path_from_bp(par)
                         _["reduction_steps"][step][par] = path.format(**{key: calib_frame.__dict__[key.lower()] for key in path_kws})
 
-
         # dump preproc configuration file
         yaml.safe_dump(_, open(os.path.join(_["location"], _["naming_convention"]), "w"))
 
-    # separate non-analog frames in target list
-    non_analogs = db.get_analogs_groups(metadata=calib_frames)
-    # get analog calibration frames for each target frame
-    # conditions to be analog:
-    #   * be the same calibration type (bias, dark, etc.)
-    #   * be of the same camera/spectrograph
-    #   * have the same exposure time if applies
-    for non_analog in non_analogs:
-        analogs = db.get_analogs_metadata(metadata=non_analog)
-        # create calibration configuration files
-        for analog in analogs:
-            # copy calib template for modification
-            _ = copy(calib_config_template)
-            # fill in missing information in configuration template
-            _["location"] = _["location"].format(CALIB_PATH=path, DRPVER=lvmdrp.__version__)
-            if calib_type == "bias":
-                _["naming_convention"] = _["naming_convention"].format(CAMERA=analog.ccd)
-            elif calib_type == "dark" or (calib_type == "flat" or "flatfield"):
-                _["naming_convetion"] = _["naming_convention"].format(CAMERA=analog.ccd, EXPTIME=analog.exptime)
-            else:
-                pass
+
 
 # TODO: allow for several MJDs
 def prepQuick_drp(mjd=None, exposure=None, spec=None, ccd=None, quick_config="lvm_quick_config"):
