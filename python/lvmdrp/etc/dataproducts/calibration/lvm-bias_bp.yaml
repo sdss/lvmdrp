@@ -2,13 +2,13 @@ name: lvm-bias
 short: preprocessed bias frame
 description: |
   this is the frame after trimming overscan region, subtracted overscan bias.
-location: [CALIB_PATH]/[DRPVER]/[TILEID]/[OBSERVATORY]/[MJD]/
+location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[OBSERVATORY]/[MJD]/
 created_by: imageMethod.preprocRawFrame
 used_by:
   - imageMethod.basicCalibration
   - imageMethod.createMasterFrame
 naming_convention: |
-  lvm-bias-[HEMI]-[CAMERA]-[EXPNUM].fits.gz, where [HEMI] is either s or n, [CAMERA] is one of the nine cameras on the instrument, b1, r1, z1,
+  lvm-bias-[CAMERA]-[EXPNUM].fits.gz, where [CAMERA] is one of the nine cameras on the instrument, b1, r1, z1,
   or b2, r2, z2, or b3, r3, or z3 for the blue, red, nir cameras on each LVM spectrograph, and
   [EXPNUM] is the (zero-padded) 8-digit exposure number.
 hdu0:
@@ -24,10 +24,5 @@ hdu1:
 hdu3:
   name: MASK
   description: Quality bitmask for each fiber pixel
-  is_image: true
-  shape: 4080 x 4080
-hdu4:
-  name: COSMIC
-  description: Cosmic Ray mask for each pixel
   is_image: true
   shape: 4080 x 4080

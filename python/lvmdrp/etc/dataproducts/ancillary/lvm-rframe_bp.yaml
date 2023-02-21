@@ -1,7 +1,7 @@
 name: lvm-rframe
 short: cosmic ray cleaned frame
 description: |
-  this is the frame after cosmic ray rejection.
+  this is the frame after cosmic ray (CR) rejection, it contains the CR pixel mask in the COSMIC HDU.
 location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[OBSERVATORY]/[MJD]/
 created_by: imageMethod.LACosmic
 used_by:
@@ -27,6 +27,11 @@ hdu2:
   shape: 4080 x 4080
 hdu3:
   name: MASK
-  description: Quality bitmask for each fiber pixel
+  description: Quality bitmask for each pixel
+  is_image: true
+  shape: 4080 x 4080
+hdu4:
+  name: COSMIC
+  description: Cosmic ray mask for each pixel (1 = CR; 0 = clean)
   is_image: true
   shape: 4080 x 4080
