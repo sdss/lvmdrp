@@ -133,13 +133,13 @@ def prepCalib_drp(path, calib_type, mjd=None, exposure=None, spec=None, ccd=None
         # fill-in naming_convention
         _["naming_convention"] = _["naming_convention"].format(
             IMAGETYP=calib_type,
-            HEMI="s" if calib_frame.OBSERVATORY=="LCO" else "n",
             CAMERA=calib_frame.ccd,
             EXPNUM=calib_frame.expnum
         )
         # fill-in target_frame
         path, path_kws = _get_path_from_bp(_["target_frame"])
         _["target_frame"] = path.format(**{key: calib_frame.__dict__[key.lower()] for key in path_kws})
+        # fill-in image type
         _["reduction_steps"]["imageMethod.preprocRawFrame"]["out_image"] = _["reduction_steps"]["imageMethod.preprocRawFrame"]["out_image"].format(IMAGETYP=calib_type)
         
         # fill-in calibration_frames
@@ -173,10 +173,57 @@ def prepCalib_drp(path, calib_type, mjd=None, exposure=None, spec=None, ccd=None
                         path, path_kws = _get_path_from_bp(par)
                         _["reduction_steps"][step][par] = path.format(**{key: calib_frame.__dict__[key.lower()] for key in path_kws})
 
-        # dump preproc configuration file
+        # dump calibration configuration file(s)
         yaml.safe_dump(_, open(os.path.join(_["location"], _["naming_convention"]), "w"))
 
+def prepMasterCalib_drp(path, calib_type, mjd=None, exposure=None, spec=None, ccd=None, mcalib_config="lvm_mcalib_config"):
 
+    # expand path
+    path = os.path.expandvars(path)
+
+    # get calibration DRP configuration template
+    mcalib_config_path = os.path.join(CONFIG_PATH, f"{mcalib_config}.yaml")
+    mcalib_config_template = _load_template(template_path=mcalib_config_path)
+
+    # connect to DB
+    master_config = load_master_config()
+    db.create_or_connect_db(master_config)
+
+    # get target calibration frames from DB
+    calib_frames = db.get_raws_metadata_where(imagetyp=calib_type, mjd=mjd, exposure=exposure, spec=spec, ccd=ccd)
+
+    # separate non-analog frames in target list
+    non_analogs = db.get_analogs_groups(metadata=calib_frames)
+    # get analog calibration frames for each target frame
+    # conditions to be analog:
+    #   * be the same calibration type (bias, dark, etc.)
+    #   * be of the same camera/spectrograph
+    #   * have the same exposure time if applies
+    for non_analog in non_analogs:
+        # get analog for each non-analog
+        analogs = db.get_analogs_metadata(metadata=non_analog)
+
+        # copy calib template for modification
+        _ = copy(mcalib_config_template)
+        # fill-in location
+        _["location"] = _["location"].format(CALIB_PATH=path, DRPVER=lvmdrp.__version__)
+        # fill-in naming_convention
+        _["naming_convention"] = _["naming_convention"].format(
+            IMAGETYP=calib_type,
+            CAMERA=non_analog.ccd,
+            EXPNUM=non_analog.expnum
+        )
+        # fill-in target_frame
+        path, path_kws = _get_path_from_bp(_["target_frame"].format(IMAGETYP=calib_type))
+        _["target_frame"] = [path.format(**{key: analog.__dict__[key.lower()] for key in path_kws}) for analog in analogs]
+        # fill-in calibration steps
+        _["reduction_steps"]["imageMethod.createMasterFrame"]["in_images"] = _["target_frame"]
+        
+        path, path_kws = _get_path_from_bp(_["reduction_steps"]["imageMethod.createMasterFrame"]["out_image"].format(calib_type))
+        _["reduction_steps"]["imageMethod.createMasterFrame"]["out_image"] = path.format(**{key: non_analog.__dict__[key.lower()] for key in path_kws})
+
+    # dump master creation configuration file(s)
+    yaml.safe_dump(_, open(os.path.join(_["location"], _["naming_convention"]), "w"))
 
 # TODO: allow for several MJDs
 def prepQuick_drp(mjd=None, exposure=None, spec=None, ccd=None, quick_config="lvm_quick_config"):
@@ -302,6 +349,7 @@ def fromConfig_drp(config, **registered_modules):
         task = getattr(registered_modules[module_name], task_name)
         # TODO: show running step info
         task(**reduction_steps[step])
+        # TODO: add records to corresponding tables in DB
 
 # TODO: define task for verifying completness of the run from a configuration script
 def checkDone_drp(config):
