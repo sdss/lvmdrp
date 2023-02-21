@@ -91,8 +91,10 @@ def _load_template(template_path):
     temp = yaml.safe_load(io.StringIO("".join(lines)))
     return temp
 
-def _get_path_from_bp(bp_path):
+def _get_path_from_bp(bp_name):
     """Return dataproduct BP path information"""
+    # define BP path
+    bp_path = os.path.join(DATAPRODUCT_BP_PATH, f"{bp_name}_bp.yaml")
     # build dataproduct path template
     bp = yaml.safe_load(open(bp_path, "r"))
     loc = os.path.expandvars(bp["location"])
