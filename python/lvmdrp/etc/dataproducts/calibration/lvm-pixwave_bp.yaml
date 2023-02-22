@@ -1,4 +1,4 @@
-name: lvm-pix2wave
+name: lvm-pixwave
 short: the wavelength of each dispersion pixel at a given fiber
 description: |
   contains a table mapping dispersion pixels into wavelength for a set of arc reference lines, determined for a reference fiber.
@@ -7,7 +7,7 @@ used_by:
   - imageMethod.tracePeaks
 location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[OBSERVATORY]/[MJD]/
 naming_convention: |
-  lvm-pix2wave-[LAMP]-[CAMERA]-[EXPNUM].fits.gz, where [LAMP] is the arc lamp, [CAMERA] is one of the nine cameras on the instrument, b1, r1, z1,
+  lvm-pixwave-[LAMP]-[CAMERA]-[EXPNUM].fits.gz, where [LAMP] is the arc lamp, [CAMERA] is one of the nine cameras on the instrument, b1, r1, z1,
   or b2, r2, z2, or b3, r3, or z3 for the blue, red, nir cameras on each LVM spectrograph, and
   [EXPNUM] is the (zero-padded) 8-digit exposure number.
 hdu0:
@@ -20,7 +20,7 @@ hdu0:
     - key: NCOADD
       comment: number of fibers coadded (above and below) to increase arc line contrast
 hdu1:
-  name: PIX2WAVE
+  name: PIXWAVE
   description: fiber peak positions in pixels along the cross-dispersion axis
   is_image: false
   shape: BINARY FITS TABLE
@@ -35,6 +35,11 @@ hdu1:
       type: float64
       unit: null
       description: sub-pixel sampling of the arc line
+    WAVE:
+      name: WAVE
+      type: float64
+      unit: Angstrom
+      description: wavelength of the arc line
     MASK:
       name: MASK
       type: int32
