@@ -1,0 +1,69 @@
+---
+name: lvm-fiberflat
+short: configuration file for fiberflat reduction
+description: |
+  defines the reduction steps to create a reduced fiberflat.
+location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[OBSERVATORY]/[MJD]
+naming_convention: lvm-fiberflat-[CAMERA]-[EXPNUM]-config.yaml
+target_frame: lvmSdr
+calibration_frames:
+  bias: lvm-mbias
+  dark: lvm-mdark
+  flat: lvm-mpixelflat
+reduction_steps:
+  imageMethod.preprocRawFrame:
+    in_image: lvmSdr
+    out_image: lvm-pframe
+    unit: e-
+    compute_error: true
+  imageMethod.basicCalibration:
+    in_image: lvm-pframe
+    out_image: lvm-cframe
+    in_bias: lvm-mbias
+    in_dark: lvm-mdark
+    in_pixelflat: lvm-mpixelflat
+  imageMethod.LACosmic:
+    in_image: lvm-cframe
+    out_image: lvm-rframe
+    increase_radius: 1
+    flim: 1.3
+    parallel: auto
+  imageMethod.findPeaksAuto_drp:
+    in_image: lvm-rframe
+    out_peaks: lvm-peak
+    nfibers: null
+  imageMethod.tracePeaks:
+    in_image: lvm-rframe
+    out_trace: lvm-trace
+    in_peaks: lvm-peak
+    steps: 30
+    method: gauss
+    threshold_peak: 50
+    poly_disp: 5
+    coadd: 30
+    verbose: 0
+  imageMethod.subtractStraylight:
+    in_image: lvm-rframe
+    out_image: lvm-sframe
+    in_trace: lvm-trace
+    aperture: 7
+    poly_cross: 2
+    smooth_gauss: 30
+  imageMethod.traceFWHM:
+    in_image: lvm-sframe
+    out_fwhm: lvm-fwhm
+    in_trace: lvm-trace
+    blocks: 32
+    steps: 30
+    coadd: 20
+    threshold_flux: 50.0
+    poly_disp: 5
+    clip: 1.5,4.0
+  imageMethod.extractSpec:
+    in_image: lvm-sframe
+    out_rss: lvm-xframe
+    in_trace: lvm-trace
+    in_fwhm: lvm-fwhm
+    method: optimal
+    parallel: auto
+...

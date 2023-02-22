@@ -1,10 +1,10 @@
 ---
-name: lvm-mfiberflat
-short: configuration file for master fiberflat creation
+name: lvm-arc
+short: configuration file for arc reduction
 description: |
-  defines the reduction steps to create a master fiberflat.
+  defines the reduction steps to create a reduced arc.
 location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[OBSERVATORY]/[MJD]
-naming_convention: lvm-mfiberflat-[CAMERA]-[EXPNUM]-config.yaml
+naming_convention: lvm-arc-[CAMERA]-[EXPNUM]-config.yaml
 target_frame: lvmSdr
 calibration_frames:
   bias: lvm-mbias
@@ -14,8 +14,8 @@ reduction_steps:
   imageMethod.preprocRawFrame:
     in_image: lvmSdr
     out_image: lvm-pframe
-    unit: ADU
-    compute_error: false
+    unit: e-
+    compute_error: true
   imageMethod.basicCalibration:
     in_image: lvm-pframe
     out_image: lvm-cframe
@@ -61,9 +61,19 @@ reduction_steps:
     clip: 1.5,4.0
   imageMethod.extractSpec:
     in_image: lvm-sframe
-    out_rss: lvmFlat
+    out_rss: lvm-xframe
     in_trace: lvm-trace
     in_fwhm: lvm-fwhm
     method: optimal
     parallel: auto
+  rssMethod.detWaveSolution:
+    in_arc: lvm-xframe
+    out_wave: lvm-wave
+    in_ref_lines: lvm-pix2wave
+    aperture: 10
+    poly_fwhm: -5,-1
+    poly_dispersion: -3
+    rel_flux_limits: 0.2,2
+    flux_min: 100.0
+    verbose: 0
 ...

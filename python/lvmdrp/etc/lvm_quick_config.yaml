@@ -4,14 +4,14 @@ short: quick Data Reduction Pipeline (DRP) configuration file
 description: |
   defines the target frame, calibration frames and DRP steps to perform the quick DRP for frame validation.
 location: $LVM_QUICK_[HEMI]/[DRPVER]/
-naming_convention: lvm-quick-[HEMI]-[CAMERA]-[EXPNUM]-config.yaml
+naming_convention: lvm-quick-[CAMERA]-[EXPNUM]-config.yaml
 target_frame: lvmSdr
 calibration_frames:
   bias: lvm-mbias
   dark: lvm-mdark
   pixelflat: lvm-mpixelflat
-  fiberflat: lvmMFlat
-  arc: lvmMArc
+  fiberflat: lvmFlat
+  arc: lvmArc
 reduction_steps:
   imageMethod.preprocRawFrame:
     in_image: lvmSdr
@@ -27,17 +27,17 @@ reduction_steps:
   imageMethod.extractSpec:
     in_image: lvm-cframe
     out_rss: lvm-xframe
-    in_fiberflat: lvmMFlat
+    in_fiberflat: lvmFlat
     method: aperture
     aperture: 7 #median of the distance between peaks (from the mid region trace)
   rssMethod.correctFiberFlat:
     in_rss: lvm-xframe
     out_rss: lvm-fframe
-    fiberflat: lvmMFlat
+    fiberflat: lvmFlat
   rssMethod.createPixTable:
     in_rss: lvm-fframe
     out_rss: lvm-wframe
-    in_arc: lvmMArc
+    in_arc: lvmArc
   rssMethod.joinSpecChannels:
     in_rss:
       - lvm-wframe

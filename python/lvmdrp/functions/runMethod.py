@@ -10,13 +10,10 @@ import io
 import os
 import re
 import yaml
-import numpy as np
 from copy import deepcopy as copy
 
 import lvmdrp
 from lvmdrp.core.constants import CONFIG_PATH, DATAPRODUCT_BP_PATH
-from lvmdrp.core.image import Image, loadImage
-from lvmdrp.core.rss import RSS, loadRSS
 
 from lvmdrp.main import load_master_config
 import lvmdrp.utils.database as db
@@ -25,9 +22,10 @@ import lvmdrp.utils.database as db
 description = 'provides tasks for running the DRP'
 
 __all__ = [
-    "prepCalib_drp", "prepQuick_drp", "prepFull_drp",
+    "prepCalib_drp", "prepMasterCalib_drp", "prepReduction_drp",
     "fromConfig_drp",
-    "dumpScript_drp", "getConfigs_drp", "checkDone_drp"
+    "checkDone_drp",
+    "dumpScript_drp", "getConfigs_drp",
 ]
 
 
@@ -228,40 +226,40 @@ def prepMasterCalib_drp(path, calib_type, mjd=None, exposure=None, spec=None, cc
     yaml.safe_dump(_, open(os.path.join(_["location"], _["naming_convention"]), "w"))
 
 # TODO: allow for several MJDs
-def prepQuick_drp(mjd=None, exposure=None, spec=None, ccd=None, quick_config="lvm_quick_config"):
+def prepReduction_drp(config_template, mjd=None, exposure=None, spec=None, ccd=None):
     """
 
-        Returns a list of configuration to perform the quick DRP
+        Writes to disk configuration file(s) to perform the reduction of the target raw frames
         
         Steps carried out by this task:
-            * read a quick configuration template
+            * read a configuration template
             * find target frame(s) in DB
             * match with calibration frames from DB
-            * update quick configuration template(s)
-            * return quick configuration .YAML file(s)
+            * update configuration template(s)
+            * write the filled-in configuration to YAML file(s)
         
         all parameters (mjd, exposure. spec and ccd) are optional and are used to constrain the
-        search for *raw* science frames in the database. Once the intended frame(s) is(are) found,
+        search for *raw* target frames in the database. Once the intended frame(s) is(are) found,
         this task will locate in the database the matching calibration frames needed to carry out
-        the quick reduction. The i/o file paths for each reduction step will be automatically
-        updated as well.
+        the reduction. The i/o file paths for each reduction step will be automatically filled-in
+        as well.
 
         Parameters
         ----------
+        config_template : string
+            the name of the configuration template to prepare the reduction of the target frame(s)
         mjd : int, optional
             the MJD constrain to add to the raw frames list
         exposure : int, optional
-            the exposure number to target for quick reduction
+            the exposure number to target for reduction
         spec : string of 'spec1', 'spec2' or 'spec3', optional
-            the spectrograph to target for quick reduction
+            the spectrograph to target for reduction
         ccd : string of b1, r1, z1, b2, r2, z2, b3, r3, or z3
-            the CCD to target for quick reduction. Note that setting ccd also constrains spec
-        quick_config: string
-            the name of the quick configuration template
+            the CCD to target for reduction. Note that setting ccd also constrains spec
     
     """
-    # get quick DRP configuration template
-    quick_config_template = _load_template(template_path=os.path.join(CONFIG_PATH, f"{quick_config}.yaml"))
+    # get DRP configuration template
+    config_template = _load_template(template_path=os.path.join(CONFIG_PATH, f"{config_template}.yaml"))
 
     # connect to DB
     master_config = load_master_config()
@@ -271,8 +269,8 @@ def prepQuick_drp(mjd=None, exposure=None, spec=None, ccd=None, quick_config="lv
     for target_frame in target_frames:
         master_calib = db.get_master_metadata(metadata=target_frame)
 
-        # copy quick configuration template
-        _ = copy(quick_config_template)
+        # copy configuration template
+        _ = copy(config_template)
 
         # fill-in location
         hemi = "s" if target_frame.OBSERVATORY=="LCO" else "n"
@@ -317,17 +315,8 @@ def prepQuick_drp(mjd=None, exposure=None, spec=None, ccd=None, quick_config="lv
                         path, path_kws = _get_path_from_bp(par)
                         _["reduction_steps"][step][par] = path.format(**{key: target_frame.__dict__[key.lower()] for key in path_kws})
 
-        # dump quick reduction configuration file
+        # dump reduction configuration file
         yaml.safe_dump(_, open(os.path.join(_["location"], _["naming_convention"]), "w"))
-
-# TODO: define prepFull_drp(spec, channel, exposure, mjd):
-#   * read a full configuration template
-#   * find target frame(s) in DB
-#   * match with calibration frames
-#   * update full configuration template(s)
-#   * return full configuration .YAML file(s)
-def prepFull_drp(spec, channel, exposure, mjd):
-    pass
 
 # TODO: define fromConfig_drp(config, **registered_modules):
 #   * read config
