@@ -121,7 +121,7 @@ def installESOSky_drp():
     skycorr_installer.sendline(SKYCORR_INST_PATH)
     skycorr_installer.expect("Is this OK")
     skycorr_installer.sendline("y")
-    if len(SKYCORR_INST_PATH) >= 45:
+    if len(SKYCORR_INST_PATH) > 40:
         skycorr_installer.expect("Proceed with this installation directory")
         skycorr_installer.sendline("y")
     if os.path.exists(SKYCORR_INST_PATH):
