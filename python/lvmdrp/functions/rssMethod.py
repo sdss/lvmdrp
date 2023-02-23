@@ -7,6 +7,7 @@ except:
 from multiprocessing import cpu_count
 from multiprocessing import Pool
 from scipy import ndimage
+from scipy import interpolate
 from astropy.wcs import WCS
 from lvmdrp.core.header import combineHdr
 from lvmdrp.core.fiberrows  import FiberRows
@@ -1718,3 +1719,45 @@ def joinSpecChannels(in_rss, out_rss, parallel="auto"):
 
 	rss_brz = RSS.from_spectra1d(spectra)
 	rss_brz.writeFitsData(out_rss)
+
+# TODO: from Law+2016
+# 	* normalize each fiber to unity
+# 	* merge all fiber spectra into a single (supersampled) spectrum
+# 	* fit with a basis-spline function, this is the superflat
+# 	* evaluate the fitted function in the individual fiber wavelengths
+# 	* normalize each evaluated superflat by the individual fiberflat
+# 	* fit each normalized fiber with a bspline
+# 	* interpolate across bad pixels
+def createMasterFiberFlat_drp(in_fiberflat, out_masterflat, weighted=False, degree=3, smooth=None):
+	
+	fiberflat = RSS()
+	fiberflat.loadFitsData(in_fiberflat)
+
+	if len(in_fiberflat._wave.shape) == 1:
+		# cannot create master flat with homogeneous wavelength sampled RSS
+		return None
+	else:
+		superflat = fiberflat.create1DSpec()
+		if weighted:
+			weights = 1 / superflat._error
+		else:
+			weights = None
+		knots, coeffs, deg = interpolate.splrep(superflat._wave, superflat._data, w=weights, s=smooth, k=degree)
+		superflat_func = interpolate.BSpline(knots, coeffs, deg, extrapolate=False)
+
+		if fiberflat._mask is not None:
+			select = numpy.logical_not(fiberflat._mask)
+		else:
+			select = numpy.ones_like(fiberflat._data)
+
+		fiberflats = []
+		for ifiber in range(fiberflat._fibers):
+			wave_ori = fiberflat[ifiber]._wave
+			fiber = superflat_func(fiberflat[ifiber]._wave[select]) * (1 / fiberflat[ifiber][select])
+			fiber.smoothSpec(smooth, method="BSpline")
+			fiber = fiber.resampleSpec(wave_ori)
+			fiberflats.append(fiber)
+		
+		master_fiberflat = RSS.from_spectra1d(fiberflats)
+
+		master_fiberflat.writeFitsData(out_masterflat)
