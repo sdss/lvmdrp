@@ -17,3 +17,5 @@ jupyter==1.0.0
 jupyterlab==3.6.1
 ipython==8.10.0
 pandas==1.5.3
+astroquery==0.4.6
+keyring>=4.0
