@@ -30,14 +30,18 @@ reduction_steps:
     in_fiberflat: lvmFlat
     method: aperture
     aperture: 7 #median of the distance between peaks (from the mid region trace)
-  rssMethod.correctFiberFlat:
-    in_rss: lvm-xframe
-    out_rss: lvm-fframe
-    fiberflat: lvmFlat
   rssMethod.createPixTable:
-    in_rss: lvm-fframe
+    in_rss: lvm-xframe
     out_rss: lvm-wframe
     in_arc: lvmArc
+  rssMethod.resampleWave:
+    in_rss: lvm-wframe
+    out_rss: lvm-hframe
+    parallel: auto
+  rssMethod.correctFiberFlat:
+    in_rss: lvm-hframe
+    out_rss: lvm-fframe
+    in_fiberflat: lvmFlat
   rssMethod.joinSpecChannels:
     in_rss:
       - lvm-wframe
