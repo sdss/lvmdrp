@@ -1,5 +1,5 @@
-name: lvm-xframe
-short: extracted frame from 2D image 
+name: lvm-wframe
+short: extracted and wavelength calibrated RSS
 description: |
   this is the extracted frame with wavelenth calibration.
 location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[OBSERVATORY]/[MJD]/

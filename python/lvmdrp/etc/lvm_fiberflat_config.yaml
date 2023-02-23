@@ -66,4 +66,11 @@ reduction_steps:
     in_fwhm: lvm-fwhm
     method: optimal
     parallel: auto
+  rssMethod.createPixTable:
+    in_rss: lvm-fframe
+    out_rss: lvm-wframe
+    in_arc: lvmArc
+  rssMethod.createMasterFiberFlat:
+    in_rss: lvm-wframe
+    out_rss: lvmFlat
 ...
