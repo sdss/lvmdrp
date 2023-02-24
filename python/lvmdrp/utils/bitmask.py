@@ -17,33 +17,11 @@ class classproperty(object):
     def __get__(self, obj, owner):
         return self.f(owner)
 
-# TODO:
-#   - add flag for each step in the reduction, for example: "calib", "cosmic", "stray", etc.
-class ReductionStatus(IntFlag):
-    # mutually exclusive bits
-    RAW = auto()
-    IN_PROGRESS = auto()
-    FINISHED = auto()
-    FAILED = auto()
-    # completed reduction steps
-    PREPROCESSED = auto()
-    CALIBRATED = auto()
-    COSMIC_CLEAN = auto()
-    STRAY_CLEAN = auto()
-    FIBERS_FOUND = auto()
-    FIBERS_TRACED = auto()
-    SPECTRA_EXTRACTED = auto()
-    WAVELENGTH_SOLVED = auto()
-    WAVELENGTH_RESAMPLED = auto()
-
-    @classproperty
-    def MUTUALLY_EXCLUSIVE_BITS(cls):
-        return ("RAW", "IN_PROGRESS", "FINISHED", "FAILED")
-    
+class BaseBitmask(IntFlag):
     def _as_bitmask(self):
         fmt_string = "{:0" + str(len(self.__class__.__members__)) + "b}"
         return fmt_string.format(self.value)
-    
+
     def get_name(self):
         if self.name is not None:
             return self.name
@@ -84,6 +62,59 @@ class ReductionStatus(IntFlag):
                 raise
         
         return self.value != flag.value
+
+    def __add__(self, flag):
+        if isinstance(flag, self.__class__):
+            pass
+        elif isinstance(flag, str):
+            flag = self.__class__[flag.upper()]
+        elif isinstance(flag, int):
+            flag = self.__class__(flag)
+        else:
+            try:
+                return super().__add__(flag)
+            except:
+                raise
+        
+        return self | flag
+
+    def __contains__(self, flag):
+        if isinstance(flag, self.__class__):
+            pass
+        elif isinstance(flag, str):
+            flag = self.__class__[flag.upper()]
+        elif isinstance(flag, int):
+            flag = self.__class__(flag)
+        else:
+            try:
+                return super().__contains__(flag)
+            except:
+                raise
+        
+        return (self & flag) == flag
+
+# TODO:
+#   - add flag for each step in the reduction, for example: "calib", "cosmic", "stray", etc.
+class ReductionStatus(BaseBitmask):
+    # mutually exclusive bits
+    RAW = auto()
+    IN_PROGRESS = auto()
+    FINISHED = auto()
+    FAILED = auto()
+    # completed reduction steps
+    PREPROCESSED = auto()
+    CALIBRATED = auto()
+    COSMIC_CLEAN = auto()
+    STRAY_CLEAN = auto()
+    FIBERS_FOUND = auto()
+    FIBERS_TRACED = auto()
+    SPECTRA_EXTRACTED = auto()
+    WAVELENGTH_SOLVED = auto()
+    WAVELENGTH_RESAMPLED = auto()
+
+    @classproperty
+    def MUTUALLY_EXCLUSIVE_BITS(cls):
+        return ("RAW", "IN_PROGRESS", "FINISHED", "FAILED")
 
     def __add__(self, flag):
         if isinstance(flag, self.__class__):
@@ -107,119 +138,61 @@ class ReductionStatus(IntFlag):
                 if bit in self: new = self ^ bit
         return new | flag
 
-    def __contains__(self, flag):
-        if isinstance(flag, self.__class__):
-            pass
-        elif isinstance(flag, str):
-            flag = self.__class__[flag.upper()]
-        elif isinstance(flag, int):
-            flag = self.__class__(flag)
-        else:
-            try:
-                return super().__contains__(flag)
-            except:
-                raise
-        
-        return (self & flag) == flag
+class QualityFlag(BaseBitmask):
+    EXTRACTBAD = auto()	    # Many bad values in extracted frame.
+    EXTRACTBRIGHT = auto()	# Extracted spectra abnormally bright.
+    LOWEXPTIME = auto()	    # Exposure time less than 10 minutes.
+    BADIFU = auto()	        # One or more IFUs missing/bad in this frame.
+    HIGHSCAT = auto()	    # High scattered light levels.
+    SCATFAIL = auto()	    # Failure to correct high scattered light levels.
+    BADDITHER = auto()	    # Bad dither location information.
+    ARCFOCUS = auto()	    # Bad focus on arc frames.
+    RAMPAGINGBUNNY = auto()	# Rampaging dust bunnies in IFU flats.
+    SKYSUBBAD = auto()	    # Bad sky subtraction.
+    SKYSUBFAIL = auto()	    # Failed sky subtraction.
+    FULLCLOUD = auto()	    # Completely cloudy exposure.
+    BADFLEXURE = auto()	    # Abnormally high flexure LSF correction.
+    BGROOVEFAIL = auto()	# Possible B-groove glue failure.
+    RGROOVEFAIL = auto()	# Possible R-groove glue failure.
+    NOGUIDER = auto()	    # No guider data available.
+    NOSPEC1 = auto()	    # No data from spec1.
+    NOSPEC2 = auto()	    # No data from spec2.
+    NOSPEC3 = auto()        # No data from spec3.
+    BLOWTORCH = auto()	    # Blowtorch artifact detected.
+    SEVEREBT = auto()	    # Severe blowtorch artifact.
 
-class QualityFlag(IntFlag):
-    # mutually exclusive flag: if OK, OK only, else not OK
-    OK = auto()
-    # general flags
-    MISSING_METADATA = auto()
-    BAD_FRAME_SHAPE = auto()
-    # during calibration flags
-    BAD_CALIBRATION_FRAMES = auto()
-    POORLY_DEFINED_MASTER = auto()
-    BAD_FIBERS = auto()
-    HAS_STRUCTURE = auto()
-    BAD_EXTRACTION = auto()
-    BAD_WAVELENGTH = auto()
-    # products quality flags
-    LOW_SNR = auto()
-
-    def _as_bitmask(self):
-        fmt_string = "{:0" + str(len(self.__class__.__members__)) + "b}"
-        return fmt_string.format(self.value)
-
-    def get_name(self):
-        if self.name is not None:
-            return self.name
-        else:
-            bits = list(map(int, self._as_bitmask()))[::-1]
-            names = list(self.__class__.__members__.keys())
-            return ",".join([names[i] for i in range(len(names)) if bits[i]])
-
-    def __str__(self):
-        return f"{self.value}"
-
-    def __eq__(self, flag):
-        if isinstance(flag, self.__class__):
-            pass
-        elif isinstance(flag, str):
-            flag = self.__class__[flag.upper()]
-        elif isinstance(flag, int):
-            flag = self.__class__(flag)
-        else:
-            try:
-                return super().__eq__(flag)
-            except:
-                raise
-        
-        return self.value == flag.value
-
-    def __ne__(self, flag):
-        if isinstance(flag, self.__class__):
-            pass
-        elif isinstance(flag, str):
-            flag = self.__class__[flag.upper()]
-        elif isinstance(flag, int):
-            flag = self.__class__(flag)
-        else:
-            try:
-                return super().__ne__(flag)
-            except:
-                raise
-        
-        return self.value != flag.value
-
-    def __add__(self, flag):
-        if isinstance(flag, self.__class__):
-            pass
-        elif isinstance(flag, str):
-            flag = self.__class__[flag.upper()]
-        elif isinstance(flag, int):
-            flag = self.__class__(flag)
-        else:
-            try:
-                return super().__add__(flag)
-            except:
-                raise
-
-        ok_bit = self.__class__.OK
-        if flag.name != ok_bit and self == ok_bit:
-            new = self & 0
-        elif flag.name == ok_bit and self != ok_bit:
-            new = copy(self)
-            flag = self.__class__(0)
-        else:
-            new = copy(self)
-        return new | flag
-
-    def __contains__(self, flag):
-        if isinstance(flag, self.__class__):
-            pass
-        elif isinstance(flag, str):
-            flag = self.__class__[flag.upper()]
-        elif isinstance(flag, int):
-            flag = self.__class__(flag)
-        else:
-            try:
-                return super().__contains__(flag)
-            except:
-                raise
-        
-        return (self & flag) == flag
+class PixMask(BaseBitmask):
+    # fiber bitmasks
+    NOPLUG = auto()
+    BADTRACE = auto()
+    BADFLAT = auto()
+    BADARC = auto()
+    MANYBADCOLUMNS = auto()
+    MANYREJECTED = auto()
+    LARGESHIFT = auto()
+    BADSKYFIBER = auto()
+    NEARWHOPPER = auto()
+    WHOPPER = auto()
+    SMEARIMAGE = auto()
+    SMEARHIGHSN = auto()
+    SMEARMEDSN = auto()
+    DEADFIBER = auto()
+    # pixel bitmasks
+    SATURATION = auto()
+    BADPIX = auto()
+    COSMIC = auto()
+    NEARBADPIXEL = auto()
+    LOWFLAT = auto()
+    FULLREJECT = auto()
+    PARTIALREJECT = auto()
+    SCATTEREDLIGHT = auto()
+    CROSSTALK = auto()
+    NOSKY = auto()
+    BRIGHTSKY = auto()
+    NODATA = auto()
+    COMBINEREJ = auto()
+    BADFLUXFACTOR = auto()
+    BADSKYCHI = auto()
 
 # define flag name constants
 STATUS = list(ReductionStatus.__members__.keys())
@@ -247,22 +220,3 @@ if __name__ == "__main__":
     print(status.get_name())
     status += ReductionStatus.PREPROCESSED|ReductionStatus.CALIBRATED
     print(status.get_name())
-
-    flag = QualityFlag(0)
-    print(flag.get_name())
-    flag = QualityFlag.OK
-    print(flag.get_name())
-    flag += QualityFlag.OK
-    print(flag.get_name())
-    flag += QualityFlag.BAD_FIBERS
-    print(flag.get_name())
-    flag += QualityFlag.MISSING_METADATA
-    print(flag.get_name())
-    print("bad_fibers" in flag)
-    print("missing_metadata" in flag)
-    flag += QualityFlag.OK
-    print(flag.get_name())
-    flag = QualityFlag.OK
-    print(flag.get_name())
-    flag += QualityFlag.BAD_CALIBRATION_FRAMES|QualityFlag.BAD_EXTRACTION
-    print(flag.get_name())
