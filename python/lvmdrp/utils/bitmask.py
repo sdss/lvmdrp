@@ -17,6 +17,7 @@ class classproperty(object):
     def __get__(self, obj, owner):
         return self.f(owner)
 
+
 class BaseBitmask(IntFlag):
     def _as_bitmask(self):
         fmt_string = "{:0" + str(len(self.__class__.__members__)) + "b}"
@@ -45,7 +46,7 @@ class BaseBitmask(IntFlag):
                 return super().__eq__(flag)
             except:
                 raise
-        
+
         return self.value == flag.value
 
     def __ne__(self, flag):
@@ -60,7 +61,7 @@ class BaseBitmask(IntFlag):
                 return super().__ne__(flag)
             except:
                 raise
-        
+
         return self.value != flag.value
 
     def __add__(self, flag):
@@ -75,7 +76,7 @@ class BaseBitmask(IntFlag):
                 return super().__add__(flag)
             except:
                 raise
-        
+
         return self | flag
 
     def __contains__(self, flag):
@@ -90,31 +91,19 @@ class BaseBitmask(IntFlag):
                 return super().__contains__(flag)
             except:
                 raise
-        
+
         return (self & flag) == flag
 
-# TODO:
-#   - add flag for each step in the reduction, for example: "calib", "cosmic", "stray", etc.
+
 class ReductionStatus(BaseBitmask):
     # mutually exclusive bits
-    RAW = auto()
-    IN_PROGRESS = auto()
-    FINISHED = auto()
-    FAILED = auto()
-    # completed reduction steps
-    PREPROCESSED = auto()
-    CALIBRATED = auto()
-    COSMIC_CLEAN = auto()
-    STRAY_CLEAN = auto()
-    FIBERS_FOUND = auto()
-    FIBERS_TRACED = auto()
-    SPECTRA_EXTRACTED = auto()
-    WAVELENGTH_SOLVED = auto()
-    WAVELENGTH_RESAMPLED = auto()
+    IN_PROGRESS = auto()  # bit whether a reduction is in progress
+    FINISHED = auto()     # bit whether a reduction has succesfully finished
+    FAILED = auto()       # bit whether a reduction has failed
 
     @classproperty
     def MUTUALLY_EXCLUSIVE_BITS(cls):
-        return ("RAW", "IN_PROGRESS", "FINISHED", "FAILED")
+        return ("IN_PROGRESS", "FINISHED", "FAILED")
 
     def __add__(self, flag):
         if isinstance(flag, self.__class__):
@@ -138,6 +127,23 @@ class ReductionStatus(BaseBitmask):
                 if bit in self: new = self ^ bit
         return new | flag
 
+
+# TODO:
+#   - add flag for each step in the reduction, for example: "calib", "cosmic", "stray", etc.
+class ReductionStage(BaseBitmask):
+    # completed reduction steps
+    UNREDUCED = auto()              # exposure not reduced
+    PREPROCESSED = auto()           # trimmed overscan region
+    CALIBRATED = auto()             # bias, dark and pixelflat calibrated
+    COSMIC_CLEAN = auto()           # cosmic ray cleaned
+    STRAY_CLEAN = auto()            # stray light subtracted
+    FIBERS_FOUND = auto()           # fiberflat fibers located along the column
+    FIBERS_TRACED = auto()          # fiberflat fibers traces along the dispersion axis
+    SPECTRA_EXTRACTED = auto()      # extracted the fiber spectra of any arc, flat, or science frames
+    WAVELENGTH_SOLVED = auto()      # arc fiber wavelength solution found
+    WAVELENGTH_RESAMPLED = auto()   # fiber wavelength resampled to common wavelength/LSF vector
+
+
 class QualityFlag(BaseBitmask):
     EXTRACTBAD = auto()	    # Many bad values in extracted frame.
     EXTRACTBRIGHT = auto()	# Extracted spectra abnormally bright.
@@ -160,6 +166,7 @@ class QualityFlag(BaseBitmask):
     NOSPEC3 = auto()        # No data from spec3.
     BLOWTORCH = auto()	    # Blowtorch artifact detected.
     SEVEREBT = auto()	    # Severe blowtorch artifact.
+
 
 class PixMask(BaseBitmask):
     # fiber bitmasks
@@ -196,27 +203,29 @@ class PixMask(BaseBitmask):
 
 # define flag name constants
 STATUS = list(ReductionStatus.__members__.keys())
+STAGE = list(ReductionStage.__members__.keys())
 FLAGS = list(QualityFlag.__members__.keys())
 
 if __name__ == "__main__":
     status = ReductionStatus.RAW
-    print(status.get_name())
+    stage = ReductionStage.UNREDUCED
+    print(status.get_name(), stage.get_name())
     status += "IN_PROGRESS"
-    print(status.get_name())
-    status += ReductionStatus.PREPROCESSED
-    print(status.get_name())
-    status += ReductionStatus.CALIBRATED
-    print(status.get_name())
+    print(status.get_name(), stage.get_name())
+    stage += ReductionStage.PREPROCESSED
+    print(status.get_name(), stage.get_name())
+    stage += ReductionStage.CALIBRATED
+    print(status.get_name(), stage.get_name())
     status += ReductionStatus.FINISHED
-    print(status.get_name())
+    print(status.get_name(), stage.get_name())
     status += ReductionStatus.IN_PROGRESS
-    print(status.get_name())
-    status += ReductionStatus.FIBERS_FOUND
-    print(status.get_name())
+    print(status.get_name(), stage.get_name())
+    stage += ReductionStage.FIBERS_FOUND
+    print(status.get_name(), stage.get_name())
     status += ReductionStatus.FINISHED
-    print(status.get_name())
+    print(status.get_name(), stage.get_name())
     print("finished" in status)
     status = ReductionStatus.IN_PROGRESS
-    print(status.get_name())
-    status += ReductionStatus.PREPROCESSED|ReductionStatus.CALIBRATED
-    print(status.get_name())
+    print(status.get_name(), stage.get_name())
+    stage += ReductionStage.PREPROCESSED|ReductionStage.CALIBRATED
+    print(status.get_name(), stage.get_name())
