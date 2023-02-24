@@ -19,6 +19,12 @@ hdu0:
   description: primary header metadata
   is_image: true
   header:
+    - key: DRPSTAT
+      comment: bitmask for general data reduction status
+    - key: DRPSTAGE
+      comment: bitmask for data reduction stage
+    - key: DRPQUAL
+      comment: bitmask for general data quality
 hdu1:
   name: FLUX
   description: Flux in electrons
