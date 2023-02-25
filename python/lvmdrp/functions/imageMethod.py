@@ -108,11 +108,11 @@ def detCos_drp(image,  out_image,   rdnoise='2.9', sigma_det='5', rlim='1.2', it
 	if img._mask is not None:
 		mask_orig=img.getMask()
 	else:
-		mask_orig=numpy.zeros(img.getDim(), dtype=numpy.bool)
+		mask_orig=numpy.zeros(img.getDim(), dtype=bool)
 
 	# create a new Image instance to store the initial data array
 	img_original = Image(data=img.getData(), header=img.getHeader(), error = img.getError(),  mask=mask_orig)
-	img.setData(mask=numpy.zeros(img.getDim(), dtype=numpy.bool))
+	img.setData(mask=numpy.zeros(img.getDim(), dtype=bool))
 	img.removeError()
 
 	# estimate Poisson noise after roughly cleaning cosmics using a median filter
@@ -125,7 +125,7 @@ def detCos_drp(image,  out_image,   rdnoise='2.9', sigma_det='5', rlim='1.2', it
 
 
 	# create empty mask
-	select = numpy.zeros(img.getDim(),dtype=numpy.bool)
+	select = numpy.zeros(img.getDim(),dtype=bool)
 
 	# define Laplacian convolution kernal
 	LA_kernel=numpy.array([[0,-1,0,],[-1,4,-1],[0,-1,0]])/4.0
@@ -225,7 +225,6 @@ def detCos_drp(image,  out_image,   rdnoise='2.9', sigma_det='5', rlim='1.2', it
 			out = out.replaceMaskMedian(box_x, box_y, replace_error=None)  # replace possible corrput pixel with zeros
 	out.writeFitsData(out_image)
 
-@missing_files(["BAD_CALIBRATION_FRAMES"], "in_image")
 def LACosmic_drp(in_image, out_image, sigma_det='5', flim='1.1', iter='3', sig_gauss='0.8,0.8', error_box='20,1', replace_box='20,1',  replace_error='1e10',  increase_radius='0', parallel='2'):
 	# convert all parameters to proper type
 	sigma_det = float(sigma_det)
@@ -250,11 +249,11 @@ def LACosmic_drp(in_image, out_image, sigma_det='5', flim='1.1', iter='3', sig_g
 	if img._mask is not None:
 		mask_orig = img.getMask()
 	else:
-		mask_orig = numpy.zeros(img.getDim(), dtype=numpy.bool)
+		mask_orig = numpy.zeros(img.getDim(), dtype=bool)
 
 	# create a new Image instance to store the initial data array
 	img_original = Image(data=img.getData(), header=img.getHeader(), error=img.getError(),  mask=mask_orig)
-	img.setData(mask=numpy.zeros(img.getDim(), dtype=numpy.bool))
+	img.setData(mask=numpy.zeros(img.getDim(), dtype=bool))
 	img.removeError()
 
 	cr_select = img.createCosmicMask(sigma_det=sigma_det, flim=flim, iter=iter, sig_gauss=sig_gauss, error_box=error_box, replace_box=replace_box, parallel=parallel)
@@ -271,7 +270,6 @@ def LACosmic_drp(in_image, out_image, sigma_det='5', flim='1.1', iter='3', sig_g
 	out = img_original.replaceMaskMedian(replace_box[0], replace_box[1], replace_error=replace_error)
 	out.writeFitsData(out_image)
 
-@missing_files(["BAD_CALIBRATION_FRAMES"], "in_image")
 def old_LACosmic_drp(in_image,  out_image,  sigma_det='5', flim='1.1', iter='3', sig_gauss='0.8,0.8', error_box='20,1', replace_box='20,1',  replace_error='1e10',  rdnoise='2.9',  increase_radius='0', verbose='0', parallel='2'):
 	"""
 			Detects and removes cosmic rays from astronomical images based on a modified Laplacian edge
@@ -356,11 +354,11 @@ def old_LACosmic_drp(in_image,  out_image,  sigma_det='5', flim='1.1', iter='3',
 	if img._mask is not None:
 		mask_orig=img.getMask()
 	else:
-		mask_orig=numpy.zeros(img.getDim(), dtype=numpy.bool)
+		mask_orig=numpy.zeros(img.getDim(), dtype=bool)
 
 	# create a new Image instance to store the initial data array
 	img_original = Image(data=img.getData(), header=img.getHeader(), error = img.getError(),  mask=mask_orig)
-	img.setData(mask=numpy.zeros(img.getDim(), dtype=numpy.bool))
+	img.setData(mask=numpy.zeros(img.getDim(), dtype=bool))
 	img.removeError()
 
 	# estimate Poisson noise after roughly cleaning cosmics using a median filter
@@ -371,7 +369,7 @@ def old_LACosmic_drp(in_image,  out_image,  sigma_det='5', flim='1.1', iter='3',
 
 
 	# create empty mask
-	select = numpy.zeros(img.getDim(),dtype=numpy.bool)
+	select = numpy.zeros(img.getDim(),dtype=bool)
 
 	# define Laplacian convolution kernal
 	LA_kernel=numpy.array([[0,-1,0,],[-1,4,-1],[0,-1,0]])/4.0
@@ -499,7 +497,6 @@ def addCCDMask_drp(image, mask, replaceError='1e10'):
 	img.setData(mask=mask_comb)
 	img.writeFitsData(image)
 
-@missing_files(["BAD_CALIBRATION_FRAMES"], "in_image")
 def findPeaksAuto_drp(in_image, out_peaks, nfibers,  disp_axis='X', threshold='5000',median_box='8', median_cross='1', slice='', method='gauss',  init_sigma='1.0', verbose='1'):
 	"""
 		   Finds the exact subpixel cross-dispersion position of a given number of fibers at a certain dispersion column on the raw CCD frame.
@@ -900,7 +897,6 @@ def findPeaksMaster2_drp(image, peaks_master, out_peaks, disp_axis='X', threshol
 		pylab.plot(centers._data, numpy.ones(len(centers._data))*2000.0, 'xg')
 		pylab.show()
 
-@missing_files(["BAD_CALIBRATION_FRAMES"], "in_image", "in_peaks")
 def tracePeaks_drp(in_image, in_peaks, trace_out, disp_axis='X', method='gauss', median_box='7', median_cross='1', steps='30', coadd='30', poly_disp='-6', init_sigma='1.0', threshold_peak='100.0', max_diff='2', verbose='1'):
 	"""
 			Traces the peaks of fibers along the dispersion axis. The peaks at a specific dispersion column had to be determined before.
@@ -1199,7 +1195,6 @@ def combineImages_drp(images, out_image, method='median', k='3.0'):
 	#write out FITS file
 	combined_img.writeFitsData(out_image)
 
-@missing_files(["BAD_CALIBRATION_FRAMES"], "in_image", "in_trace")
 def subtractStraylight_drp(in_image, in_trace, out_stray, out_image, disp_axis='X', aperture='7', poly_cross='4', smooth_disp='5', smooth_gauss='10.0', parallel='auto'):
 	"""
 			Subtracts a diffuse background signal (stray light) from the raw data. It uses the regions between fiber to estimate the stray light signal and
@@ -1292,7 +1287,6 @@ def subtractStraylight_drp(in_image, in_trace, out_stray, out_image, disp_axis='
 	img_out.writeFitsData(out_image)
 	img_smooth.writeFitsData(out_stray)
 
-@missing_files(["BAD_CALIBRATION_FRAMES"], "in_image", "in_trace")
 def traceFWHM_drp(in_image, in_trace, out_fwhm, disp_axis='X', blocks='20', steps='100', coadd='10', poly_disp='5', threshold_flux='50.0', init_fwhm='2.0', clip='', parallel='auto'):
 	"""
 			Measures the FWHM of the cross-dispersion fiber profile across the CCD.  It assumes that the profiles have a Gaussian shape and that the width  is CONSTANT for
@@ -1637,7 +1631,6 @@ def offsetTrace2_drp(image, trace, trace_fwhm, disp, lines, logfile,  blocks='15
 # it might be better in dealing with cross-talk
 # TODO:
 # * define lvm-frame ancillary product to replace for out_rss
-@missing_files(["BAD_CALIBRATION_FRAMES"], "in_image", "in_trace")
 def extractSpec_drp(in_image, out_rss, in_trace,  method='optimal',  aperture='7', fwhm='2.5', disp_axis='X',  replace_error='1e10', plot='-1', parallel='auto'):
 	"""
 			Extracts the flux for each fiber along the dispersion direction which is written into an RSS FITS file format.
@@ -1770,7 +1763,6 @@ def calibrateSDSSImage_drp(file_in, file_out, field_file):
 	calImage = image.calibrateSDSS(field_file)
 	calImage.writeFitsData(file_out)
 
-@missing_files(["BAD_CALIBRATION_FRAMES"], "in_image", "in_bias")
 def subtractBias_drp(in_image, out_image, in_bias, compute_error='1', boundary_x='', boundary_y='', gain='', rdnoise='', subtract_light='0'):
 	subtract_light= bool(int(subtract_light))
 	compute_error = bool(int(compute_error))
@@ -1963,7 +1955,6 @@ def testres_drp(image, trace, fwhm, flux):
 	hdu = pyfits.PrimaryHDU((img._data-out) / img._data)
 	hdu.writeto('res_rel.fits', overwrite=True)
 
-@missing_files(["BAD_CALIBRATION_FRAMES"], "in_image")
 def old_preprocRawFrame_drp(in_image, out_image, boundary_x, boundary_y, positions, orientation, subtract_overscan='1', compute_error='1', gain="none", rdnoise="none", gain_field='GAIN', rdnoise_field='RDNOISE'):
 	"""
 		Preprocess LVM raw image with different amplifiers to a full science CCD images. The orientations of the sub images are taken into account as well as their
@@ -2214,7 +2205,6 @@ def preprocRawFrame_drp(in_image, out_image, positions="00,10,01,11", orientatio
 	#write out FITS file
 	preproc_image.writeFitsData(out_image)
 
-@missing_files(["BAD_CALIBRATION_FRAMES"], "in_image", "in_bias", "in_dark", "in_pixelflat")
 def basicCalibration_drp(in_image, out_image, in_bias=None, in_dark=None, in_pixelflat=None):
 
     proc_image = loadImage(in_image).convertUnit(unit="e-")
@@ -2260,7 +2250,6 @@ def basicCalibration_drp(in_image, out_image, in_bias=None, in_dark=None, in_pix
     calib_image = (proc_image - master_dark - master_bias) / master_flat
     calib_image.writeFitsData(out_image)
 
-@missing_files(["BAD_CALIBRATION_FRAMES"], "in_images")
 def createMasterFrame_drp(in_images, out_image, reject_cr=False, exptime_thresh=5, **cr_kwargs):
 	"""
 
