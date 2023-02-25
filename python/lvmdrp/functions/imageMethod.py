@@ -2103,16 +2103,22 @@ def preprocRawFrame_drp(in_image, out_image, positions="00,10,01,11", orientatio
 		pass
 	os_y, os_x = (int(os_y[0])-1, int(os_y[1])), (int(os_x[0])-1, int(os_x[1]))
 
+	infer_trimsec = False
 	if "TRIMSEC" in org_image._header:
-		sc_x_i, sc_y_i, sc_x_f, sc_y_f = org_image._header["TRIMSEC"].replace("[", "").replace("]", "").split(",")
-		sc_y_i, sc_x_i, sc_y_f, sc_x_f = sc_y_i.split(":"), sc_x_i.split(":"), sc_y_f.split(":"), sc_x_f.split(":")
-	else:
+		try:
+			sc_x_i, sc_y_i, sc_x_f, sc_y_f = org_image._header["TRIMSEC"].replace("[", "").replace("]", "").split(",")
+			sc_y_i, sc_x_i, sc_y_f, sc_x_f = sc_y_i.split(":"), sc_x_i.split(":"), sc_y_f.split(":"), sc_x_f.split(":")
+		except (KeyError, ValueError) as error:
+			# show a warning and fallback to infer TRIMSEC
+			infer_trimsec = True
+
+	if not "TRIMSEC" in org_image._header or infer_trimsec:
 		# assume OS region is in the middle column
 		ysize, xsize = org_image._dim
-		xsize /= 2
-		os_xsize = (os_x[1] - os_x[0]) / 2
+		xsize = xsize // 2
+		os_xsize = (os_x[1] - os_x[0]) // 2
 		sc_y_i, sc_x_i = ["1", str(ysize)], ["1", str(xsize-os_xsize)]
-		sc_y_f, sc_x_f = ["1", str(ysize)], [str(xsize-2*os_xsize+1), str(xsize)]
+		sc_y_f, sc_x_f = ["1", str(ysize)], [str(xsize+os_xsize+1), str(2*xsize)]
 	sc_i, sc_f = ((int(sc_y_i[0])-1, int(sc_y_i[1])), (int(sc_x_i[0])-1, int(sc_x_i[1]))), ((int(sc_y_f[0])-1, int(sc_y_f[1])), (int(sc_x_f[0])-1, int(sc_x_f[1])))
 
 	# select data outside the cut out region (overscan)
@@ -2122,7 +2128,7 @@ def preprocRawFrame_drp(in_image, out_image, positions="00,10,01,11", orientatio
 	(os_a, os_b), (os_c, os_d) = os_ab.split(2, "X"), os_cd.split(2, "X")
 	os_quads = [os_a, os_b, os_c, os_d]
 	# * compute statistics on each OS section
-	os_bias = [numpy.nanmedian(os_quad._data) for os_quad in os_quads]
+	os_bias_med = [numpy.nanmedian(os_quad._data) for os_quad in os_quads]
 	os_bias_std = [numpy.nanstd(os_quad._data) for os_quad in os_quads]
 
 	# parse science section:
@@ -2134,7 +2140,7 @@ def preprocRawFrame_drp(in_image, out_image, positions="00,10,01,11", orientatio
 	(sc_a, sc_b), (sc_c, sc_d) = sc_ab.split(2, "X"), sc_cd.split(2, "X")
 	sc_quads = [sc_a, sc_b, sc_c, sc_d]
 	# * apply bias subtraction
-	quads = [quad - os_bias[i] for i, quad in enumerate(sc_quads)]
+	quads = [quad - os_bias_med[i] for i, quad in enumerate(sc_quads)]
 
 	# parse gain and read noise from header if possible
 	try:
@@ -2179,7 +2185,11 @@ def preprocRawFrame_drp(in_image, out_image, positions="00,10,01,11", orientatio
 	# join images
 	preproc_image = glueImages(quads, pos)
 	# flip along dispersion axis
-	ccd = org_image._header["CCD"]
+	try:
+		ccd = org_image._header["CCD"]
+	except KeyError:
+		ccd = os.path.basename(in_image).split(".")[0].split("-")[1]
+		org_image._header["CCD"] = ccd
 	if ccd.startswith("z") or ccd.startswith("b"):
 		preproc_image.orientImage("X")
 
