@@ -1507,7 +1507,7 @@ class Image(Header):
         box_y = replace_box[1]
 
         # create a new Image instance to store the initial data array
-        out = Image(data=self.getData(), header=self.getHeader(), error=None,  mask=numpy.zeros(self.getDim(), dtype=numpy.bool))
+        out = Image(data=self.getData(), header=self.getHeader(), error=None,  mask=numpy.zeros(self.getDim(), dtype=bool))
         out.convertUnit("e-")
         out.removeError()
 
@@ -1523,8 +1523,8 @@ class Image(Header):
             cpus = int(parallel)
         
         # get rdnoise from header or assume given value
-        quads = out._header["HIERARCH AMP? TRIMSEC"].values()
-        rdnoises = out._header["HIERARCH AMP? RDNOISE"].values()
+        quads = list(self._header["AMP? TRIMSEC"].values())
+        rdnoises = list(self._header["AMP? RDNOISE"].values())
         
         # start iteration
         for i in range(iter):
@@ -1533,10 +1533,10 @@ class Image(Header):
             # rough estimate of error for each quadrant
             for iquad in range(len(quads)):
                 quad = noise.getSection(quads[iquad])
-                select_noise = noise.getData()<=0
+                select_noise = quad.getData()<=0
                 quad.setData(data=0, select=select_noise)
                 quad=(quad + rdnoises[iquad]**2).sqrt()
-                noise.setSection(quads[iquad], subimg=quad, update_header=False, inplace=True)
+                noise = noise.setSection(quads[iquad], subimg=quad, update_header=False, inplace=False)
             if cpus>1:
                 result = []
                 fine=out.convolveGaussImg(sigma_x, sigma_y)
