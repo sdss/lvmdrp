@@ -2077,8 +2077,7 @@ def old_preprocRawFrame_drp(in_image, out_image, boundary_x, boundary_y, positio
 	full_img.writeFitsData(out_image)
 	return full_img
 
-@missing_files(["BAD_CALIBRATION_FRAMES"], "in_image")
-def preprocRawFrame_drp(in_image, out_image, positions="00,10,01,11", orientation="S,S,S,S", subtract_overscan='1', os_bound_x='', os_bound_y='', compute_error='1', gain="1.0", rdnoise="5", gain_field='GAIN', rdnoise_field='RDNOISE', unit="ADU"):
+def preprocRawFrame_drp(in_image, out_image, positions="00,10,01,11", orientation="S,S,S,S", subtract_overscan='1', os_bound_x='', os_bound_y='', compute_error='1', assume_gain="1.0", assume_rdnoise="5", gain_field='GAIN', rdnoise_field='RDNOISE', unit="ADU", assume_imagetyp="bias"):
 	# convert input parameters to proper type
 	orient = orientation.split(',')
 	pos = positions.split(',')
@@ -2087,6 +2086,11 @@ def preprocRawFrame_drp(in_image, out_image, positions="00,10,01,11", orientatio
 
 	# load image
 	org_image = loadImage(in_image)
+	# header quick check
+	try:
+		org_image._header["IMAGETYP"]
+	except KeyError:
+		org_image._header["IMAGETYP"] = assume_imagetyp
 
 	# parse overscan (OS) section:
 	# * extract BIASSEC
@@ -2137,27 +2141,27 @@ def preprocRawFrame_drp(in_image, out_image, positions="00,10,01,11", orientatio
 		gains = [org_image.getHdrValue(f"{gain_field}{i+1}") for i in range(len(quads))]
 	except KeyError:
 		try:
-			gain = org_image.getHdrValue(gain_field)
+			assume_gain = org_image.getHdrValue(gain_field)
 		except KeyError:
-			if gain != "":
+			if assume_gain != "":
 				try:
-					gain = float(gain)
+					assume_gain = float(assume_gain)
 				except ValueError:
-					gain = 1.0
-		gains = len(quads)*[gain]
+					assume_gain = 1.0
+		gains = len(quads)*[assume_gain]
 
 	try:
 		rdnoises = [org_image.getHdrValue(f"{rdnoise_field}{i+1}") for i in range(len(quads))]
 	except KeyError:
 		try:
-			rdnoise = org_image.getHdrValue(rdnoise_field)
+			assume_rdnoise = org_image.getHdrValue(rdnoise_field)
 		except KeyError:
-			if rdnoise != "":
+			if assume_rdnoise != "":
 				try:
-					rdnoise = float(rdnoise)
+					assume_rdnoise = float(assume_rdnoise)
 				except ValueError:
-					rdnoise = 5.0
-		rdnoises = len(quads)*[rdnoise]
+					assume_rdnoise = 5.0
+		rdnoises = len(quads)*[assume_rdnoise]
 
 	# orient quadrants as requested
 	[quad.orientImage(orient[i]) for i, quad in enumerate(quads)]
@@ -2189,19 +2193,19 @@ def preprocRawFrame_drp(in_image, out_image, positions="00,10,01,11", orientatio
 		x, y =int(pos[i][0]), int(pos[i][1])
 		# flip y-axis
 		y = 1 if y == 0 else 0
-		preproc_image.setHdrValue(f"HIERARCH AMP{i+1} TRIMSEC", f"[{x*xsize+1}:{xsize*(x+1)}, {y*ysize+1}:{ysize*(y+1)}]", f"Region of CCD amplifier {i+1}")
+		preproc_image.setHdrValue(f"HIERARCH AMP{i+1} TRIMSEC", f"[{x*xsize+1}:{xsize*(x+1)}, {y*ysize+1}:{ysize*(y+1)}]", f"Region of amp. {i+1}")
 	# add gain keywords for the different subimages (CCDs/Amplifiers)
 	for i in range(len(quads)):
-		preproc_image.setHdrValue(f'HIERARCH AMP{i+1} {gain_field}', gains[i], f'Gain value of CCD amplifier {i+1} [e-/ADU]')
+		preproc_image.setHdrValue(f'HIERARCH AMP{i+1} {gain_field}', gains[i], f'Gain value of amp. {i+1} [e-/ADU]')
 	# add read-out noise keywords for the different subimages (CCDs/Amplifiers)
 	for i in range(len(quads)):
-		preproc_image.setHdrValue(f'HIERARCH AMP{i+1} {rdnoise_field}', rdnoises[i], f'Read-out noise of CCD amplifier {i+1} [e-]')
+		preproc_image.setHdrValue(f'HIERARCH AMP{i+1} {rdnoise_field}', rdnoises[i], f'Read-out noise of amp. {i+1} [e-]')
 	# add bias of overscan region for the different subimages (CCDs/Amplifiers)
 	for i in range(len(quads)):
-		preproc_image.setHdrValue(f'HIERARCH AMP{i+1} OVERSCAN', os_bias[i], f'Overscan median of CCD amplifier {i+1} [ADU]')
+		preproc_image.setHdrValue(f'HIERARCH AMP{i+1} OVERSCAN', os_bias_med[i], f'Overscan median of amp. {i+1} [ADU]')
 	# add bias std of overscan region for the different subimages (CCDs/Amplifiers)
 	for i in range(len(quads)):
-		preproc_image.setHdrValue(f"HIERARCH AMP{i+1} OVERSCAN_STD", os_bias_std[i], f"Overscan std of CCD amplifier {i+1} [ADU]")
+		preproc_image.setHdrValue(f"HIERARCH AMP{i+1} OVERSCAN_STD", os_bias_std[i], f"Overscan std of amp. {i+1} [ADU]")
 	#write out FITS file
 	preproc_image.writeFitsData(out_image)
 
