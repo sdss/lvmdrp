@@ -333,8 +333,10 @@ class Image(Header):
         new_image = self if inplace else Image(data=self._data, header=self._header, mask=self._mask, error=self._error, origin=self._origin)
 
         new_image._data[sec_y[0]:sec_y[1], sec_x[0]:sec_x[1]] = subimg._data
-        new_image._error[sec_y[0]:sec_y[1], sec_x[0]:sec_x[1]] = subimg._error
-        new_image._mask[sec_y[0]:sec_y[1], sec_x[0]:sec_x[1]] = subimg._mask
+        if new_image._error is not None:
+            new_image._error[sec_y[0]:sec_y[1], sec_x[0]:sec_x[1]] = subimg._error
+        if new_image._mask is not None:
+            new_image._mask[sec_y[0]:sec_y[1], sec_x[0]:sec_x[1]] = subimg._mask
 
         if update_header: new_image._header.update(subimg._header)
 
