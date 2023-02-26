@@ -2146,40 +2146,53 @@ def preprocRawFrame_drp(in_image, out_image, positions="00,10,01,11", orientatio
 	(sc_a, sc_b), (sc_c, sc_d) = sc_ab.split(2, "X"), sc_cd.split(2, "X")
 	sc_quads = [sc_a, sc_b, sc_c, sc_d]
 	# * apply bias subtraction
-	quads = [quad - os_bias_med[i] for i, quad in enumerate(sc_quads)]
+	quads = [(quad - os_bias_med[i]) if subtract_overscan else quad for i, quad in enumerate(sc_quads)]
+	nquad = len(quads)
 
 	# parse gain and read noise from header if possible
 	try:
-		gains = [org_image.getHdrValue(f"{gain_field}{i+1}") for i in range(len(quads))]
+		gains = [org_image.getHdrValue(f"{gain_field}{i+1}") for i in range(nquad)]
 	except KeyError:
 		try:
 			assume_gain = org_image.getHdrValue(gain_field)
 		except KeyError:
-			if assume_gain != "":
+			if assume_gain:
+				assume_gain = assume_gain.split(",")
 				try:
-					assume_gain = float(assume_gain)
+					assume_gain = [float(gain) for gain in assume_gain]
 				except ValueError:
 					assume_gain = 1.0
-		gains = len(quads)*[assume_gain]
+		if len(assume_gain) == 1:
+			gains = nquad * assume_gain
+		elif len(assume_gain) >= nquad:
+			gains = assume_gain[:nquad]
+		else:
+			gains = nquad * [1.0]
 
 	try:
-		rdnoises = [org_image.getHdrValue(f"{rdnoise_field}{i+1}") for i in range(len(quads))]
+		rdnoises = [org_image.getHdrValue(f"{rdnoise_field}{i+1}") for i in range(nquad)]
 	except KeyError:
 		try:
 			assume_rdnoise = org_image.getHdrValue(rdnoise_field)
 		except KeyError:
-			if assume_rdnoise != "":
+			if assume_rdnoise:
+				assume_rdnoise = assume_rdnoise.split(",")
 				try:
-					assume_rdnoise = float(assume_rdnoise)
+					assume_rdnoise = [float(rdnoise) for rdnoise in assume_rdnoise]
 				except ValueError:
 					assume_rdnoise = 5.0
-		rdnoises = len(quads)*[assume_rdnoise]
+		if len(assume_rdnoise) == 1:
+			rdnoises = nquad * assume_rdnoise
+		elif len(assume_rdnoise) >= nquad:
+			rdnoises = assume_rdnoise[:nquad]
+		else:
+			rdnoises = nquad * [5.0]
 
 	# orient quadrants as requested
 	[quad.orientImage(orient[i]) for i, quad in enumerate(quads)]
 	# convert to specified unit
 	if unit == "e-":
-		for i in range(len(quads)):
+		for i in range(nquad):
 			quads[i] *= gains[i]
 			if compute_error:
 				quads[i].computePoissonError(rdnoise=rdnoises[i])
@@ -2204,23 +2217,23 @@ def preprocRawFrame_drp(in_image, out_image, positions="00,10,01,11", orientatio
 	# update/set unit
 	preproc_image.setHdrValue("BUNIT", unit, "physical units of the array values")
 	# add amplifier quadrants
-	for i in range(len(quads)):
+	for i in range(nquad):
 		ysize, xsize = quads[i]._dim
 		x, y =int(pos[i][0]), int(pos[i][1])
 		# flip y-axis
 		y = 1 if y == 0 else 0
 		preproc_image.setHdrValue(f"HIERARCH AMP{i+1} TRIMSEC", f"[{x*xsize+1}:{xsize*(x+1)}, {y*ysize+1}:{ysize*(y+1)}]", f"Region of amp. {i+1}")
 	# add gain keywords for the different subimages (CCDs/Amplifiers)
-	for i in range(len(quads)):
+	for i in range(nquad):
 		preproc_image.setHdrValue(f'HIERARCH AMP{i+1} {gain_field}', gains[i], f'Gain value of amp. {i+1} [e-/ADU]')
 	# add read-out noise keywords for the different subimages (CCDs/Amplifiers)
-	for i in range(len(quads)):
+	for i in range(nquad):
 		preproc_image.setHdrValue(f'HIERARCH AMP{i+1} {rdnoise_field}', rdnoises[i], f'Read-out noise of amp. {i+1} [e-]')
 	# add bias of overscan region for the different subimages (CCDs/Amplifiers)
-	for i in range(len(quads)):
+	for i in range(nquad):
 		preproc_image.setHdrValue(f'HIERARCH AMP{i+1} OVERSCAN', os_bias_med[i], f'Overscan median of amp. {i+1} [ADU]')
 	# add bias std of overscan region for the different subimages (CCDs/Amplifiers)
-	for i in range(len(quads)):
+	for i in range(nquad):
 		preproc_image.setHdrValue(f"HIERARCH AMP{i+1} OVERSCAN_STD", os_bias_std[i], f"Overscan std of amp. {i+1} [ADU]")
 	#write out FITS file
 	preproc_image.writeFitsData(out_image)
