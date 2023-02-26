@@ -16,14 +16,14 @@ examples_logger = logger.get_logger(name=__name__)
 
 FC = [0.88, 0.94]
 GAINS = {
-    "b": [1.048, 1.048, 1.018, 1.006],
-    "r": [1.9253, 1.5122, 1.4738, 1.5053],
-    "z": [1.9253, 1.5122, 1.4738, 1.5053]
+    "b": [1.018, 1.006, 1.048, 1.048],
+    "r": [1.4738, 1.5053, 1.9253, 1.5122],
+    "z": [1.4738, 1.5053, 1.9253, 1.5122]
 }
 RDNOISES = {
-    "b": 2.0*FC[0]*0.56,
-    "r": 2.0*FC[0]*0.56,
-    "z": 2.0*FC[0]*0.56
+    "b": 4 * [2.0*FC[0]*0.56],
+    "r": 4 * [2.0*FC[0]*0.56],
+    "z": 4 * [2.0*FC[0]*0.56]
 }
 
 def parse_sdr_name(sdr_name):
@@ -53,7 +53,7 @@ def fetch_example_data(url, compressed_name, dest_path):
     else:
         examples_logger.info("example data already exists")
 
-@lru_cache(maxsize=128)
+@lru_cache(maxsize=1)
 def get_frames_metadata(path):
     """Return astropy.table.Table containing useful metadata from 2D raw frames"""
     frames = [os.path.join(root, frame_name) for root, _, frame_names in os.walk(path) for frame_name in frame_names if frame_name.endswith(".fit.gz")]
