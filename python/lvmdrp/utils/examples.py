@@ -14,6 +14,18 @@ from . import logger
 examples_logger = logger.get_logger(name=__name__)
 
 
+FC = [0.88, 0.94]
+GAINS = {
+    "b": [1.048, 1.048, 1.018, 1.006],
+    "r": [1.9253, 1.5122, 1.4738, 1.5053],
+    "z": [1.9253, 1.5122, 1.4738, 1.5053]
+}
+RDNOISES = {
+    "b": 2.0*FC[0]*0.56,
+    "r": 2.0*FC[0]*0.56,
+    "z": 2.0*FC[0]*0.56
+}
+
 def parse_sdr_name(sdr_name):
     """Return camera and expnum from a given raw frame path/name"""
     camera, expnum = os.path.basename(sdr_name).split(".")[0].split("-")[1:]
