@@ -550,7 +550,10 @@ def findPeaksAuto_drp(in_image, out_peaks, nfibers,  disp_axis='X', threshold='5
 		img.swapaxes()
 
 	# perform median filtering along the dispersion axis to clean cosmic rays
-	img = img.medianImg((median_cross, median_box))
+	if median_box or median_cross:
+		median_box = max(median_box, 1)
+		median_cross = max(median_cross, 1)
+		img = img.medianImg((median_cross, median_box))
 
 	# if no slice is given find the cross-dispersion cut with the highest signal
 	if slice=='':
@@ -897,7 +900,7 @@ def findPeaksMaster2_drp(image, peaks_master, out_peaks, disp_axis='X', threshol
 		pylab.plot(centers._data, numpy.ones(len(centers._data))*2000.0, 'xg')
 		pylab.show()
 
-def tracePeaks_drp(in_image, in_peaks, trace_out, disp_axis='X', method='gauss', median_box='7', median_cross='1', steps='30', coadd='30', poly_disp='-6', init_sigma='1.0', threshold_peak='100.0', max_diff='2', verbose='1'):
+def tracePeaks_drp(in_image, in_peaks, out_trace, disp_axis='X', method='gauss', median_box='7', median_cross='1', steps='30', coadd='30', poly_disp='-6', init_sigma='1.0', threshold_peak='100.0', max_diff='2', verbose='1'):
 	"""
 			Traces the peaks of fibers along the dispersion axis. The peaks at a specific dispersion column had to be determined before.
 			Two scheme of measuring the subpixel peak positionare available: A hyperbolic approximation or fitting a Gaussian profile to the brightest 3 pixels of a peak.
@@ -959,7 +962,10 @@ def tracePeaks_drp(in_image, in_peaks, trace_out, disp_axis='X', method='gauss',
 
 	dim = img.getDim()
 	# perform median filtering along the dispersion axis to clean cosmic rays
-	img = img.medianImg((median_cross, median_box))
+	if median_box or median_cross:
+		median_box = max(median_box, 1)
+		median_cross = max(median_cross, 1)
+		img = img.medianImg((median_cross, median_box))
 
 	# coadd images along the dispersion axis to increase the S/N of the peaks
 	if coadd!=0:
@@ -1061,7 +1067,7 @@ def tracePeaks_drp(in_image, in_peaks, trace_out, disp_axis='X', method='gauss',
 	##    poly_cross = numpy.array(poly_cross.split(',')).astype('int16')
 	##    trace.smoothTraceDist(column, poly_cross=poly_cross, poly_disp=poly_disp)
 
-	trace.writeFitsData(trace_out)
+	trace.writeFitsData(out_trace)
 
 def glueCCDFrames_drp(images, out_image, boundary_x, boundary_y, positions, orientation, subtract_overscan='1',compute_error='1', gain='', rdnoise=''):
 	"""
@@ -1242,7 +1248,7 @@ def subtractStraylight_drp(in_image, in_trace, out_stray, out_image, disp_axis='
     
 	# load trace mask
 	trace_mask = TraceMask()
-	trace_mask.loadFitsData(trace, extension_data=0)
+	trace_mask.loadFitsData(in_trace, extension_data=0)
    # trace_mask.clipTrace(img._dim[0])
 
 
