@@ -2250,13 +2250,13 @@ def basicCalibration_drp(in_image, out_image, in_bias=None, in_dark=None, in_pix
     dummy_flat = Image(data=numpy.ones_like(proc_image._data))
 
     # read master bias
-    if img_type in ["bias"] or in_bias is None or not os.path.isfile(in_bias):
+    if img_type in ["bias"] or (in_bias is None or not os.path.isfile(in_bias)):
         master_bias = dummy_bias
     else:
         master_bias = loadImage(in_bias).convertUnit(unit="e-")
     
     # read master dark
-    if img_type in ["bias", "dark"] or in_dark is None or not os.path.isfile(in_dark):
+    if img_type in ["bias", "dark"] or (in_dark is None or not os.path.isfile(in_dark)):
         master_dark = dummy_dark
     else:
         master_dark = loadImage(in_dark).convertUnit(unit="e-")
@@ -2268,19 +2268,19 @@ def basicCalibration_drp(in_image, out_image, in_bias=None, in_dark=None, in_pix
         master_dark *= factor
 
     # read master flat
-    if img_type in ["bias", "dark", "flat", "flatfield", "fiberflat", "object"] or in_pixelflat is None or not os.path.isfile(in_pixelflat):
+    if img_type in ["bias", "dark", "flat", "flatfield"] or (in_pixelflat is None or not os.path.isfile(in_pixelflat)):
         master_flat = dummy_flat
     else:
         master_flat = loadImage(in_pixelflat).convertUnit(unit="e-")
 
-    # normalize in case of flat calibration
-    if img_type == "bias":
-        calib_image = proc_image
-    if img_type == "flat" or img_type == "flatfield":
-        proc_image = proc_image / numpy.median(proc_image._data)
 
     # run basic calibration
     calib_image = (proc_image - master_dark - master_bias) / master_flat
+
+    # normalize in case of flat calibration
+    if img_type == "flat" or img_type == "flatfield":
+        calib_image = calib_image / numpy.median(calib_image._data)
+
     calib_image.writeFitsData(out_image)
 
 def createMasterFrame_drp(in_images, out_image, reject_cr=False, exptime_thresh=5, **cr_kwargs):
