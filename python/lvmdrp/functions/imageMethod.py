@@ -1256,7 +1256,11 @@ def subtractStraylight_drp(in_image, in_trace, out_stray, out_image, disp_axis='
     #    img._data[img._mask==1] = numpy.nan
 
     # smooth image along dispersion axis with a median filter excluded NaN values bas
-	img_median = img.medianImg((1, smooth_disp),use_mask=True)
+	if smooth_disp:
+		smooth_disp = max(1, smooth_disp)
+		img_median = img.medianImg((1, smooth_disp), use_mask=True)
+	else:
+		img_median = img
 
 	# mask regions around each fiber within a given cross-dispersion aperture
 	img_median.maskFiberTraces(trace_mask, aperture=aperture, parallel=parallel)
