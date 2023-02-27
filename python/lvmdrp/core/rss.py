@@ -171,7 +171,7 @@ class RSS(FiberRows):
             else:
                 wave = self._wave[fiber, :]
         else:
-            wave = numpy.arange(data.shape[1])
+            wave = numpy.arange(data.size)
 
         if self._inst_fwhm is not None:
             if len(self._inst_fwhm.shape)==1:
