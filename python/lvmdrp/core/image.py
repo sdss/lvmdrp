@@ -700,7 +700,7 @@ class Image(Header):
                         if hdu[i].header['EXTNAME'].split()[0]=='ERROR':
                             self._error = hdu[i].data
                         elif hdu[i].header['EXTNAME'].split()[0]=='BADPIX':
-                            self._mask = hdu[i].data
+                            self._mask = hdu[i].data.astype('bool')
 
         else:
             if extension_data is not None:
