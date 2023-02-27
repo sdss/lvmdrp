@@ -1509,7 +1509,7 @@ class Image(Header):
         # create a new Image instance to store the initial data array
         out = Image(data=self.getData(), header=self.getHeader(), error=None,  mask=numpy.zeros(self.getDim(), dtype=bool))
         out.convertUnit("e-")
-        out.removeError()
+        # out.removeError()
 
         # initial CR selection
         select = out._mask
@@ -1529,20 +1529,24 @@ class Image(Header):
         # start iteration
         for i in range(iter):
             # quick and dirty CRR on current iteration
-            noise = out.medianImg((err_box_y, err_box_x))
+            if out._error is None:
+                noise = out.medianImg((err_box_y, err_box_x))
+                for iquad in range(len(quads)):
+                    quad = noise.getSection(quads[iquad])
+                    select_noise = quad.getData()<=0
+                    quad.setData(data=0, select=select_noise)
+                    quad=(quad + rdnoises[iquad]**2).sqrt()
+                    noise = noise.setSection(quads[iquad], subimg=quad, update_header=False, inplace=False)
+            else:
+                noise = out._error
             # rough estimate of error for each quadrant
-            for iquad in range(len(quads)):
-                quad = noise.getSection(quads[iquad])
-                select_noise = quad.getData()<=0
-                quad.setData(data=0, select=select_noise)
-                quad=(quad + rdnoises[iquad]**2).sqrt()
-                noise = noise.setSection(quads[iquad], subimg=quad, update_header=False, inplace=False)
             if cpus>1:
                 result = []
                 fine=out.convolveGaussImg(sigma_x, sigma_y)
                 fine_norm = out/fine
                 select_neg = fine_norm<0
                 fine_norm.setData(data=0, select=select_neg)
+                
                 pool = Pool(cpus)
                 result.append(pool.apply_async(out.subsampleImg))
                 result.append(pool.apply_async(fine_norm.subsampleImg))
@@ -1551,6 +1555,7 @@ class Image(Header):
                 sub = result[0].get()
                 sub_norm = result[1].get()
                 pool.terminate()
+                
                 pool = Pool(cpus)
                 result[0]=pool.apply_async(sub.convolveImg, args=([LA_kernel]))
                 result[1]=pool.apply_async(sub_norm.convolveImg, args=([LA_kernel]))
@@ -1561,6 +1566,7 @@ class Image(Header):
                 conv.setData(data=0, select=select_neg)  # replace all negative values with 0
                 Lap2 = result[1].get()
                 pool.terminate()
+                
                 pool = Pool(cpus)
                 result[0]=pool.apply_async(conv.rebin, args=(2, 2))
                 result[1]=pool.apply_async(Lap2.rebin, args=(2, 2))
@@ -1569,6 +1575,7 @@ class Image(Header):
                 Lap = result[0].get()
                 Lap2 = result[1].get()
                 pool.terminate()
+                
                 S = Lap/(noise*4) # normalize Laplacian image by the noise
                 S_prime = S-S.medianImg((err_box_y, err_box_x)) # cleaning of the normalized Laplacian image
             else:
