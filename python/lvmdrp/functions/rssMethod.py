@@ -69,8 +69,7 @@ def mergeRSS_drp(files_in, file_out,  mergeHdr='1'):
 # * define ancillary product lvm-arc (rss arc) for replace arc_rss
 # * define ancillary product lvm-wave to contain wavelength solutions
 # * merge disp_rss and res_rss products into lvmArc product, change variable to out_arc
-@missing_files(["BAD_CALIBRATION_FRAMES"], "arc_rss", "ref_line_file")
-def detWaveSolution_drp(arc_rss, disp_rss, res_rss, ref_line_file='', ref_spec='', pixel='', ref_lines='', poly_dispersion='-5', poly_fwhm='-3,-5', init_back='10.0',  aperture='13', flux_min='200.0', fwhm_max='10.0', rel_flux_limits='0.1,5.0', fiberflat='', negative=False, verbose='1' ):
+def detWaveSolution_drp(in_arc, out_wave, out_lsf, in_ref_lines='', ref_fiber='', pixel='', ref_lines='', poly_dispersion='-5', poly_fwhm='-3,-5', init_back='10.0',  aperture='13', flux_min='200.0', fwhm_max='10.0', rel_flux_limits='0.1,5.0', fiberflat='', negative=False, verbose='1' ):
 	"""
 			Measures the pixel position of emission lines in wavelength UNCALIBRATED for all fibers of the RSS.
 			Starting from the initial guess of pixel positions for a given fiber, the program measures the position using
@@ -149,15 +148,15 @@ def detWaveSolution_drp(arc_rss, disp_rss, res_rss, ref_line_file='', ref_spec='
 		fiberflat=fiberflat.split(',')
 
 
-	if ref_line_file != '':
+	if in_ref_lines != '':
 		# load initial pixel positions and reference wavelength from txt config file NEED TO BE REPLACE BY XML SCHEMA
-		file_in = open(ref_line_file, 'r') # load file
+		file_in = open(in_ref_lines, 'r') # load file
 		lines = file_in.readlines() # read lines
 		nlines = len(lines)-1
 		pixel = numpy.zeros(nlines, dtype=numpy.float32) # empty for pixel position
 		ref_lines = numpy.zeros(nlines, dtype=numpy.float32) # empty for reference wavelength
 		use_fwhm = numpy.zeros(nlines, dtype="bool") # empty for reference wavelength
-		ref_spec = int(lines[0]) # the reference fiber for the initial positions
+		ref_fiber = int(lines[0]) # the reference fiber for the initial positions
 		# read the information from file
 		for i in range(1, nlines+1):
 			line = lines[i].split()
@@ -170,7 +169,7 @@ def detWaveSolution_drp(arc_rss, disp_rss, res_rss, ref_line_file='', ref_spec='
 		nlines = use_fwhm.sum()
 	else:
 		# get the reference spectrum number, the inital pixel positions and their reference wavelength from the parameter list
-		ref_spec = int(ref_spec) # reference fiber
+		ref_fiber = int(ref_fiber) # reference fiber
 		pixels = pixel.split(',') # split pixel list
 		ref = ref_lines.split(',') # split reference wavelength list
 		nlines = len(pixels)
@@ -183,7 +182,7 @@ def detWaveSolution_drp(arc_rss, disp_rss, res_rss, ref_line_file='', ref_spec='
 
 	# initialize the extracted arc line frame
 	arc = FiberRows() # create object
-	arc.loadFitsData(arc_rss) # load data
+	arc.loadFitsData(in_arc) # load data
 
 	if negative==True:
 		arc = arc*-1+numpy.median(arc._data)
@@ -196,7 +195,7 @@ def detWaveSolution_drp(arc_rss, disp_rss, res_rss, ref_line_file='', ref_spec='
 	# measure the ARC lines with individual Gaussian across the CCD
 
 
-	(fibers, flux, cent_wave, fwhm, masked) = arc.measureArcLines(ref_spec, pixel, aperture=aperture, init_back=init_back, flux_min=flux_min, fwhm_max=fwhm_max, rel_flux_limits=rel_flux_limits, verbose=bool(verbose))
+	(fibers, flux, cent_wave, fwhm, masked) = arc.measureArcLines(ref_fiber, pixel, aperture=aperture, init_back=init_back, flux_min=flux_min, fwhm_max=fwhm_max, rel_flux_limits=rel_flux_limits, verbose=bool(verbose))
 	norm_flux = numpy.zeros_like(ref_lines)
 	for n in range(len(ref_lines)):
 		norm_flux[n] = numpy.mean(flux[numpy.logical_not(masked[:,n]),n])
@@ -297,14 +296,13 @@ def detWaveSolution_drp(arc_rss, disp_rss, res_rss, ref_line_file='', ref_spec='
 
 	wave_trace = FiberRows(data = wave_sol, header = arc.getHeader())
 
-	wave_trace.writeFitsData(disp_rss)
-	fwhm_trace.writeFitsData(res_rss)
+	wave_trace.writeFitsData(out_wave)
+	fwhm_trace.writeFitsData(out_lsf)
 
 	return cent_wave[:, select_lines], fwhm_wave[select_lines]
 
 # TODO:
 # * merge arc_wave and arc_fwhm into lvmArc product, change variable name to in_arc
-@missing_files(["BAD_CALIBRATION_FRAMES"], "in_rss")
 def createPixTable_drp(in_rss, out_rss, arc_wave, arc_fwhm='', cropping=''):
 	"""
 			Adds the wavelength and possibly also the spectral resolution (FWHM) pixel table as new extension to
@@ -544,7 +542,6 @@ def correctPixTable_drp(in_rss, out_rss, logfile, ref_id, smooth_poly_cross='', 
 		rss[i]=spec
 	rss.writeFitsData(out_rss)
 
-@missing_files(["BAD_CALIBRATION_FRAMES"], "in_rss")
 def resampleWave_drp(in_rss, out_rss, method='spline', start_wave='', end_wave='', disp_pix='', err_sim='500', replace_error='1e10', correctHvel='',compute_densities=0,parallel='auto'):
 	"""
 			Resamples the RSS with a wavelength in pixel table format to an RSS with a common wavelength solution for each fiber.
@@ -892,7 +889,7 @@ def correctTraceMask_drp(trace_in, trace_out, logfile, ref_file, poly_smooth='')
 
 	trace.writeFitsData(trace_out)
 
-def correctFiberFlat_drp(in_rss, out_rss, fiberflat, clip='0.2'):
+def correctFiberFlat_drp(in_rss, out_rss, in_fiberflat, clip='0.2'):
 	"""
 			Correct an RSS frame for the effect of the different fiber transmission as measured by a fiberflat.
 
@@ -902,7 +899,7 @@ def correctFiberFlat_drp(in_rss, out_rss, fiberflat, clip='0.2'):
 					Input RSS FITS file
 			out_rss : string
 					Output RSS FITS file which is fiberflat corrected.
-			fiberflat : string
+			in_fiberflat : string
 					Fiberflat RSS FITS file containing the relative transmission of each fiber
 			clip : string of float, optional with default: ''
 					Minimum relative transmission considered for the used fiberflat. Value below the given limits are replaced
@@ -917,7 +914,7 @@ def correctFiberFlat_drp(in_rss, out_rss, fiberflat, clip='0.2'):
 	rss = RSS()
 	rss.loadFitsData(in_rss)
 	flat = RSS()
-	flat.loadFitsData(fiberflat)
+	flat.loadFitsData(in_fiberflat)
 
 	for i in range(flat._fibers):
 		spec_flat = flat.getSpec(i)
@@ -930,11 +927,11 @@ def correctFiberFlat_drp(in_rss, out_rss, fiberflat, clip='0.2'):
 		rss.setSpec(i, spec_new)
 	rss.writeFitsData(out_rss)
 
-def combineRSS_drp(rsss, out_rss, method='mean'):
+def combineRSS_drp(in_rsss, out_rss, method='mean'):
 	# convert input parameters to proper type
-	list_rss= rsss.split(',')
+	list_rss = in_rsss.split(',')
 
-	rss_list=[]
+	rss_list = []
 	for i in list_rss:
 		#load subimages from disc and append them to a list
 		rss= loadRSS(i)
@@ -1026,7 +1023,6 @@ def matchFluxRSS_drp(rsss, center_x, center_y, hdr_prefixes, arc_radius, start_w
 	if verbose==1:
 		plt.show()
 
-@missing_files(["BAD_CALIBRATION_FRAMES"], "in_rss", "position_table")
 def includePosTab_drp(in_rss, position_table,  offset_x='0.0', offset_y='0.0'):
 	"""
 		   Adds an ASCII file position table as a FITS table extension to the RSS file.
@@ -1674,7 +1670,6 @@ def DAR_registerSDSS_drp(in_rss, sdss_file, sdss_field, ra, dec, out_prefix,  re
 		plt.plot(spec_y._wave, spec_y._data, '-k')
 		plt.show()
 
-@missing_files(["BAD_CALIBRATION_FRAMES"], "in_rss")
 def joinSpecChannels(in_rss, out_rss, parallel="auto"):
 	rss_b = loadRSS(in_rss[0])
 	rss_r = loadRSS(in_rss[1])
