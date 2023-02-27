@@ -2212,6 +2212,11 @@ def preprocRawFrame_drp(in_image, out_image, positions="00,10,01,11", orientatio
 	if ccd.startswith("z") or ccd.startswith("b"):
 		preproc_image.orientImage("X")
 
+	# define initial pixel mask
+	preproc_image._mask = numpy.zeros_like(preproc_image._data, dtype=bool)
+	preproc_image._mask |= (preproc_image._data>=2**16)
+	preproc_image._mask |= (preproc_image._data<=0)
+
 	# update header
 	preproc_image.setHeader(org_image.getHeader())
 	# update/set unit
