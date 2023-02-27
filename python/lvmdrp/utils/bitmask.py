@@ -207,7 +207,7 @@ STAGE = list(ReductionStage.__members__.keys())
 FLAGS = list(QualityFlag.__members__.keys())
 
 if __name__ == "__main__":
-    status = ReductionStatus.RAW
+    status = ReductionStatus(0)
     stage = ReductionStage.UNREDUCED
     print(status.get_name(), stage.get_name())
     status += "IN_PROGRESS"

@@ -14,6 +14,8 @@ import os
 import yaml
 from pkg_resources import parse_version
 
+from lvmdrp.core.constants import MASTER_CONFIG_PATH
+from lvmdrp.utils.namespace import NamespaceLoader, DictLoader
 
 __all__ = ['get_config']
 
@@ -105,3 +107,18 @@ def get_config(name, allow_user=True, user_path=None, config_envvar=None,
         return merge_config(user_config, config)
     else:
         return user_config
+
+def load_master_config(master_config_path=MASTER_CONFIG_PATH, fmt="namespace"):
+    """Returns the master configuration object in namespace or a dictionary structure
+    
+    BUG: fmt='dict' is failing because the standard yaml loader doesn't know how to handle definitions
+    """
+    # if no path is given, load from hard-coded path
+    with open(master_config_path, "r") as config_file:
+        if fmt == "namespace":
+            master_config = yaml.load(config_file, Loader=NamespaceLoader)
+        elif fmt == "dict":
+            master_config = yaml.load(config_file, Loader=DictLoader)
+        else:
+            raise ValueError(f"format '{fmt}' not implemented. Valid values are: 'namespace' (default) and 'dict'")
+    return master_config

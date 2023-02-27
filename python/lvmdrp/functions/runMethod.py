@@ -15,7 +15,7 @@ from copy import deepcopy as copy
 import lvmdrp
 from lvmdrp.core.constants import CONFIG_PATH, DATAPRODUCT_BP_PATH
 
-from lvmdrp.main import load_master_config
+from lvmdrp.utils.configuration import load_master_config
 import lvmdrp.utils.database as db
 
 

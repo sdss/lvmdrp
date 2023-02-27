@@ -14,11 +14,10 @@ from argparse import Namespace
 import numpy as np
 
 from lvmdrp.core import image
-from lvmdrp.core.constants import MASTER_CONFIG_PATH, FRAMES_PRIORITY, CALIBRATION_TYPES
+from lvmdrp.core.constants import FRAMES_PRIORITY, CALIBRATION_TYPES
 from lvmdrp.utils.database import LAMP_NAMES, get_master_metadata
 from lvmdrp.utils.decorators import validate_fibers
 from lvmdrp.utils.bitmask import ReductionStatus
-from lvmdrp.utils.namespace import NamespaceLoader, DictLoader
 from lvmdrp.functions import imageMethod, rssMethod
 
 
@@ -116,22 +115,6 @@ def define_inout_paths(params, metadata, calib_metadata, prev_step, curr_step, p
 #   - define the paths to the input files
 #   - define the paths to the output files
 #   - define parameters to pass on each step
-
-
-def load_master_config(master_config_path=MASTER_CONFIG_PATH, fmt="namespace"):
-    """Returns the master configuration object in namespace or a dictionary structure
-    
-    BUG: fmt='dict' is failing because the standard yaml loader doesn't know how to handle definitions
-    """
-    # if no path is given, load from hard-coded path
-    with open(master_config_path, "r") as config_file:
-        if fmt == "namespace":
-            master_config = yaml.load(config_file, Loader=NamespaceLoader)
-        elif fmt == "dict":
-            master_config = yaml.load(config_file, Loader=DictLoader)
-        else:
-            raise ValueError(f"format '{fmt}' not implemented. Valid values are: 'namespace' (default) and 'dict'")
-    return master_config
 
 def parse_arguments(config, args=None):
     if args is None:
@@ -325,7 +308,7 @@ def run_reduction_continuum(config, metadata, calib_metadata, settings):
     _, flags = imageMethod.tracePeaks_drp(
         in_image=target_frame_path.format(kind="cosmic"),
         in_peaks=target_frame_path.format(kind="trace").replace(".fits", ".peaks"),
-        trace_out=target_frame_path.format(kind="trc"),
+        out_trace=target_frame_path.format(kind="trc"),
         steps=30, method="gauss", threshold_peak=50, poly_disp=5, coadd=30, verbose=0
     )
     metadata.flags += flags

@@ -45,7 +45,7 @@ from lvmdrp.core.spectrum1d import Spectrum1D
 from lvmdrp.core.header import Header
 from lvmdrp.core.rss import RSS
 
-from lvmdrp.main import load_master_config
+from lvmdrp.utils.configuration import load_master_config
 
 
 description = "Provides methods for sky subtraction"

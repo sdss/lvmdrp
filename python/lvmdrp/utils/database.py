@@ -21,7 +21,7 @@ from lvmsurveysim.utils.sqlite2astropy import *
 
 from lvmdrp.core.constants import CONFIG_PATH
 from lvmdrp.core.constants import FRAMES_PRIORITY, CALIBRATION_TYPES, FRAMES_CALIB_NEEDS
-from lvmdrp.utils.bitmask import ReductionStatus, QualityFlag
+from lvmdrp.utils.bitmask import ReductionStatus, ReductionStage, QualityFlag
 
 
 SQLITE_MAX_VARIABLE_NUMBER = 32766
@@ -49,6 +49,15 @@ class StatusField(IntegerField):
 
     def python_value(self, db_val):
         return ReductionStatus(db_val)
+
+class StageField(IntegerField):
+    def db_value(self, status_val):
+        if not isinstance(status_val, ReductionStage):
+            raise TypeError(f"Wrong type '{type(status_val)}', '{ReductionStage}' instance expected")
+        return super().adapt(status_val.value)
+
+    def python_value(self, db_val):
+        return ReductionStage(db_val)
 
 class BaseModel(Model):
     class Meta:
@@ -97,8 +106,9 @@ class ContMixin(Model):
 class StatusMixin(Model):
     reduction_started = DateTimeField(null=True)
     reduction_finished = DateTimeField(null=True)
-    status = StatusField(default=ReductionStatus["RAW"])
-    flags = FlagsField(default=QualityFlag["OK"])
+    stage = StageField(default=ReductionStage.UNREDUCED)
+    status = StatusField(default=0)
+    flags = FlagsField(default=0)
 
 # TODO:
 #   - turn this into a master calibration frame
@@ -205,15 +215,16 @@ def record_db(config, target_paths=None, ignore_cache=False):
                         
                         header["LABEL"] = new_frame_label
                         header["PATH"] = new_frame_path
-                        header["STATUS"] = ReductionStatus["RAW"]
-                        header["FLAGS"] = QualityFlag["OK"]
+                        header["STAGE"] = ReductionStage.UNREDUCED
+                        header["STATUS"] = 0
+                        header["FLAGS"] = 0
 
                         record = {key: header.get(key, LVMFrames._meta.columns[key].default) for key in FRAME_COLUMNS}
                         # update hemisphere field
                         record["hemi"] = "s" if record["observat"] == "LCO" else "n"
                         # update status in case there are missing metadata with the exception of those fields that are allowed to be NULL
-                        nonnull_values = [record[name] for name in MANDATORY_COLUMNS]
-                        record["flags"] += "MISSING_METADATA" if None in nonnull_values else "OK"
+                        # nonnull_values = [record[name] for name in MANDATORY_COLUMNS]
+                        # record["flags"] += "MISSING_METADATA" if None in nonnull_values else "OK"
                         # append to list for cache
                         metadata.append(record)
         # store cache
@@ -232,8 +243,7 @@ def get_raws_metadata(imagetyp=None, mjd=None, exposure=None, spec=None, camera=
     try:
         priority = Case(LVMFrames.imagetyp, tuple((frame_type, i) for i, frame_type in enumerate(FRAMES_PRIORITY)))
         query = LVMFrames.select().where(
-            (LVMFrames.status == ReductionStatus.RAW) &
-            (LVMFrames.flags == QualityFlag.OK) &
+            (LVMFrames.status == ReductionStage.UNREDUCED) &
             (LVMFrames.imagetyp << FRAMES_PRIORITY)
         ).order_by(priority)
 
@@ -258,7 +268,7 @@ def get_calib_metadata():
     try:
         query = CalibrationFrames.select().where(
             (~CalibrationFrames.is_master) &
-            (CalibrationFrames.flags == QualityFlag.OK)
+            (CalibrationFrames.flags == 0)
         )
     except Error as e:
         print(e)
@@ -280,8 +290,8 @@ def get_analogs_metadata(metadata):
     if metadata.imagetyp in CALIBRATION_TYPES and not metadata.calib.is_master:
         try:
             query = LVMFrames.select().where(
-                (LVMFrames.status == ReductionStatus.PREPROCESSED|ReductionStatus.CALIBRATED|ReductionStatus.FINISHED) &
-                (LVMFrames.flags == QualityFlag.OK) &
+                (LVMFrames.stage == ReductionStage.PREPROCESSED|ReductionStage.CALIBRATED) &
+                (LVMFrames.flags == 0) &
                 (LVMFrames.imagetyp == metadata.imagetyp) &
                 (LVMFrames.camera == metadata.camera) &
                 (LVMFrames.mjd == metadata.mjd) &
@@ -328,13 +338,13 @@ def get_master_metadata(metadata):
     # handle unrecognized frame type
 
     for calib_type in frame_needs:
-        bmask = ReductionStatus.PREPROCESSED|ReductionStatus.CALIBRATED|ReductionStatus.FINISHED
+        bmask = ReductionStage.PREPROCESSED|ReductionStage.CALIBRATED
         if calib_type in ["continuum", "arc"]:
-            bmask += ReductionStatus.COSMIC_CLEAN|ReductionStatus.STRAY_CLEAN|ReductionStatus.FIBERS_FOUND|ReductionStatus.FIBERS_TRACED|ReductionStatus.SPECTRA_EXTRACTED|ReductionStatus.WAVELENGTH_SOLVED
+            bmask += ReductionStage.COSMIC_CLEAN|ReductionStage.STRAY_CLEAN|ReductionStage.FIBERS_FOUND|ReductionStage.FIBERS_TRACED|ReductionStage.SPECTRA_EXTRACTED|ReductionStage.WAVELENGTH_SOLVED
         try:
             query = LVMFrames.select().where(
-                (LVMFrames.status == bmask) &
-                (LVMFrames.flags == QualityFlag.OK) &
+                (LVMFrames.stage == bmask) &
+                (LVMFrames.flags == 0) &
                 (LVMFrames.imagetyp == calib_type) &
                 (LVMFrames.camera == metadata.camera) &
                 (LVMFrames.calib_id is not None)
@@ -352,16 +362,17 @@ def get_master_metadata(metadata):
             calib_frames[calib_type] = calib_frame.calib
     return calib_frames
 
-def put_redux_state(metadata, status=None):
-    if status is not None:
-        if isinstance(status, str):
-            metadata.status += ReductionStatus[status]
-        elif isinstance(status, int):
-            metadata.status += ReductionStatus(status)
-        elif isinstance(status, ReductionStatus):
-            metadata.status += status
+def put_redux_stage(metadata, stage=None):
+
+    if stage is not None:
+        if isinstance(stage, str):
+            metadata.status += ReductionStage[stage]
+        elif isinstance(stage, int):
+            metadata.status += ReductionStage(stage)
+        elif isinstance(stage, ReductionStage):
+            metadata.status += stage
         else:
-            ValueError(f"unknown status type '{type(status)}'")
+            ValueError(f"unknown status type '{type(stage)}'")
     try:
         if isinstance(metadata, (LVMFrames, CalibrationFrames)):
             if "IN_PROGRESS" in metadata.status: metadata.reduction_started = dt.datetime.now()
@@ -378,16 +389,16 @@ def put_redux_state(metadata, status=None):
         print(e)
     return metadata
 
-def add_calib(calib_metadata, raw_metadata, status=None):
-    if status is not None:
-        if isinstance(status, str):
-            calib_metadata.status += ReductionStatus[status]
-        elif isinstance(status, int):
-            calib_metadata.status += ReductionStatus(status)
-        elif isinstance(status, ReductionStatus):
-            calib_metadata.status += status
+def add_calib(calib_metadata, raw_metadata, stage=None):
+    if stage is not None:
+        if isinstance(stage, str):
+            calib_metadata.status += ReductionStage[stage]
+        elif isinstance(stage, int):
+            calib_metadata.status += ReductionStage(stage)
+        elif isinstance(stage, ReductionStage):
+            calib_metadata.status += stage
         else:
-            ValueError(f"unknown status type '{type(status)}'")
+            ValueError(f"unknown status type '{type(stage)}'")
     
     if calib_metadata.status == "IN_PROGRESS": calib_metadata.reduction_started = dt.datetime.now()
     elif "FINISHED" in calib_metadata.status or "FAILED" in calib_metadata.status: calib_metadata.reduction_finished = dt.datetime.now()
@@ -400,16 +411,16 @@ def add_calib(calib_metadata, raw_metadata, status=None):
         print(calib_metadata)
     return calib_metadata
 
-def add_master(master_metadata, analogs_metadata, status=None):
-    if status is not None:
-        if isinstance(status, str):
-            master_metadata.status += ReductionStatus[status]
-        elif isinstance(status, int):
-            master_metadata.status += ReductionStatus(status)
-        elif isinstance(status, ReductionStatus):
-            master_metadata.status += status
+def add_master(master_metadata, analogs_metadata, stage=None):
+    if stage is not None:
+        if isinstance(stage, str):
+            master_metadata.status += ReductionStage[stage]
+        elif isinstance(stage, int):
+            master_metadata.status += ReductionStage(stage)
+        elif isinstance(stage, ReductionStage):
+            master_metadata.status += stage
         else:
-            ValueError(f"unknown status type '{type(status)}'")
+            ValueError(f"unknown status type '{type(stage)}'")
     
     if master_metadata.status == "IN_PROGRESS": master_metadata.reduction_started = dt.datetime.now()
     elif "FINISHED" in master_metadata.status or "FAILED" in master_metadata.status: master_metadata.reduction_finished = dt.datetime.now()
@@ -425,7 +436,7 @@ def add_master(master_metadata, analogs_metadata, status=None):
 
 
 if __name__ == "__main__":
-    from lvmdrp.main import load_master_config
+    from lvmdrp.utils.configuration import load_master_config
 
     
     config = load_master_config()

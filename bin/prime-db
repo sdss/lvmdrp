@@ -11,7 +11,7 @@ import sys
 import argparse
 
 from lvmdrp.utils import database
-from lvmdrp.main import load_master_config
+from lvmdrp.utils.configuration import load_master_config
 
 
 if __name__ == "__main__":
