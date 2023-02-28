@@ -31,12 +31,13 @@ def parse_sdr_name(sdr_name):
     camera, expnum = os.path.basename(sdr_name).split(".")[0].split("-")[1:]
     return camera, expnum
 
-def fetch_example_data(url, compressed_name, dest_path):
+def fetch_example_data(url, name, dest_path, ext="zip"):
     """Download 2D examples data"""
-    if not os.path.exists(os.path.join(dest_path, "data", "data_simulator")):
-        compressed_path = os.path.join(dest_path, compressed_name)
-        examples_logger.info(f"downloading example data to {compressed_path}")
-        process = subprocess.Popen(f"curl {url} --output {compressed_path}".split(), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+    file_name = f"{name}.{ext}"
+    file_path = os.path.join(dest_path, file_name)
+    if not os.path.exists(os.path.join(dest_path, name)):
+        examples_logger.info(f"downloading example data to {file_path}")
+        process = subprocess.Popen(f"curl {url}/{file_name} --output {file_path}".split(), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
         for stdout_line in iter(process.stdout.readline, ""):
             examples_logger.info(stdout_line[:-1])
         process.stdout.close()
@@ -47,9 +48,9 @@ def fetch_example_data(url, compressed_name, dest_path):
             examples_logger.error("error while downloading example data")
             examples_logger.error("full report:")
             examples_logger.error(process.stderr.decode("utf-8"))
-        with zipfile.ZipFile(compressed_path, "r") as src_compressed:
+        with zipfile.ZipFile(file_path, "r") as src_compressed:
             src_compressed.extractall(dest_path)
-        os.remove(compressed_path)
+        os.remove(file_path)
     else:
         examples_logger.info("example data already exists")
 
