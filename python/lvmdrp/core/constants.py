@@ -12,8 +12,8 @@ from lvmdrp.utils import get_env_lib_directory
 
 
 # sources server URL
-LVM_SRC_URL = "http://ifs.astroscu.unam.mx/LVM/lvmdrp_src.zip"
-LVM_SIM_URL = "http://ifs.astroscu.unam.mx/LVM/lvmdrp_example_data.zip"
+LVM_UNAM_URL = "http://ifs.astroscu.unam.mx/LVM"
+LVM_SRC_URL = f"{LVM_UNAM_URL}/lvmdrp_src.zip"
 
 # installation path
 INS_PATH = get_env_lib_directory()
