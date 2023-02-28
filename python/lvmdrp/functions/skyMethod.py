@@ -76,7 +76,6 @@ def installESOSky_drp():
     """
     # get original current directory
     initial_path = os.getcwd()
-
     # - download compressed source files ----------------------------------------------------------------------------
     os.makedirs(SRC_PATH, exist_ok=True)
     os.chdir(SRC_PATH)
@@ -209,15 +208,24 @@ def installESOSky_drp():
         sky_logger.error(out.stderr.decode('utf-8'))
     
     os.chdir(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "third_party_code", "lnfl"))
-    shutil.move("lnfl_v2.6_linux_gnu_sgl", os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "bin", "lnfl_v2.6_linux_gnu_sgl"))
-    rc_symlink(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "bin", "lnfl_v2.6_linux_gnu_sgl"), os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "bin", "lnfl"))
+
+    if sys.platform == "linux":
+        shutil.move("lnfl_v2.6_linux_gnu_sgl", os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "bin", "lnfl_v2.6_linux_gnu_sgl"))
+        rc_symlink(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "bin", "lnfl_v2.6_linux_gnu_sgl"), os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "bin", "lnfl"))
+    elif sys.platform == "darwin":
+        shutil.move("lnfl_v2.6_OS_X_gnu_sgl",
+                    os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "bin", "lnfl_v2.6_OS_X_gnu_sgl"))
+        rc_symlink(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "bin", "lnfl_v2.6_OS_X_gnu_sgl"),
+                   os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "bin", "lnfl"))
 
     os.chdir(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "third_party_code", "lblrtm", "build"))
     sky_logger.info("installing LBLRTM")
     if sys.platform == "linux":
         out = subprocess.run("make -f make_lblrtm linuxGNUsgl".split(), capture_output=True)
+        lblrtm_sgl_file="lblrtm_v12.2_linux_gnu_sgl"
     elif sys.platform == "darwin":
         out = subprocess.run("make -f make_lblrtm osxGNUsgl".split(), capture_output=True)
+        lblrtm_sgl_file = "lblrtm_v12.2_OS_X_gnu_sgl"
     else:
         raise NotImplementedError(f"installation not implemented for '{sys.platform}' OS")      
 
@@ -230,8 +238,8 @@ def installESOSky_drp():
 
     sky_logger.info("installing skymodel")
     os.chdir(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "third_party_code", "lblrtm"))
-    shutil.move("lblrtm_v12.2_linux_gnu_sgl", os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "bin", "lblrtm_v12.2_linux_gnu_sgl"))
-    rc_symlink(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "bin", "lblrtm_v12.2_linux_gnu_sgl"), os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "bin", "lblrtm"))
+    shutil.move(lblrtm_sgl_file, os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "bin", lblrtm_sgl_file))
+    rc_symlink(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "bin", lblrtm_sgl_file), os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "bin", "lblrtm"))
 
     os.chdir(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1"))
     out = subprocess.run("bash bootstrap".split(), capture_output=True)
@@ -240,8 +248,9 @@ def installESOSky_drp():
     else:
         sky_logger.error("error while running bootstrap for module 01")
         sky_logger.error("full report:")
-        sky_logger.error(out.stderr.decor("utf-8"))
-    out = subprocess.run(f"bash configure --prefix={os.path.join(SKYMODEL_INST_PATH, 'sm-01_mod1')} --with-cpl={SKYCORR_INST_PATH}".split(), capture_output=True)
+        #sky_logger.error(out.stderr.decor("utf-8"))
+    sky_logger.info({os.path.join(SKYMODEL_INST_PATH, 'sm-01_mod1')})
+    out = subprocess.run(f"bash configure --prefix={os.path.join(SKYMODEL_INST_PATH, 'sm-01_mod1')} --with-cpl=/usr/local".split(), capture_output=True)
     if out.returncode == 0:
         sky_logger.info("successfully finished configure for module 01")
     else:
@@ -292,7 +301,7 @@ def installESOSky_drp():
         sky_logger.error("error while running bootstrap for module 02")
         sky_logger.error("full report:")
         sky_logger.error(out.stderr.decode("utf-8"))
-    out = subprocess.run(f"bash configure --prefix={os.path.join(SKYMODEL_INST_PATH, 'sm-01_mod2')} --with-cpl={SKYCORR_INST_PATH}".split(), capture_output=True)
+    out = subprocess.run(f"bash configure --prefix={os.path.join(SKYMODEL_INST_PATH, 'sm-01_mod2')} --with-cpl=/usr/local".split(), capture_output=True)
     if out.returncode == 0:
         sky_logger.info("successfully finished configure for module 02")
     else:
