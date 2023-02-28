@@ -281,8 +281,6 @@ class RSS(FiberRows):
                             self._mask = hdu[i].data.astype('bool')
                         if hdu[i].header['EXTNAME'].split()[0]=='WAVE':
                             self.setWave(hdu[i].data)
-#                        else:
-#                           self.createWavefromHdr(logwave=logwave)
                         if hdu[i].header['EXTNAME'].split()[0]=='INSTFWHM':
                             self.setInstFWHM(hdu[i].data)
                         if hdu[i].header['EXTNAME'].split()[0]=='POSTABLE':
@@ -533,9 +531,7 @@ class RSS(FiberRows):
             else:
                 select = numpy.ones(self._data.shape, dtype="bool")
             disp = self._wave[:, 1:]-self._wave[:, :-1]
- #           print(disp.shape)
             disp = numpy.insert(disp, 0, disp[:, 0], 1)
-    #        print(disp.shape)
             wave = self._wave[select].flatten()
             disp = disp[select].flatten()
             idx = numpy.argsort(wave)
@@ -1022,8 +1018,6 @@ class RSS(FiberRows):
                 }
                 """
 
-    #
-
                 #distance = sqrt(pow(position_x(k,l)- (arc_position_x(j)+offset_x(i)),2)+pow(position_y(k,l)- (arc_position_y(j)+offset_y(i)),2);
                 weave.inline(c_code,['fibers','points','dim_y','dim_x', 'position_x', 'position_y', 'arc_position_x', 'arc_position_y', 'offset_x', 'offset_y', 'radius_limit', 'sigma', 'slope', 'min_fibers', 'bad_threshold',  'replace_error',  'weights_0',  'good_pix', 'resolution','data','error_in','cube', 'error','mask_in','mask','corr_cube',  'temp2', 'cover_img','cover', 'int_kernel'], headers=['<math.h>'], type_converters=converters.blitz,compiler='gcc')
 		
@@ -1197,13 +1191,13 @@ class RSS(FiberRows):
                 medians = numpy.median(self._data, axis=1)
             max = numpy.max(medians)
             select_max = numpy.median(self._data, axis=1)==max
-#            print(numpy.arange(len(medians))[select_max]+1)
+        #    print(numpy.arange(len(medians))[select_max]+1)
             #norm = numpy.amax(self._data[select_ma], axis=0)
             #norm = self._data[select_max, :][0]
             #norm = numpy.mean(self._data[100:280, :], axis=0)
             select = norm>0
         #    pylab.plot(norm)
-          #  pylab.show()
+        #    pylab.show()
             normalize=numpy.zeros_like(self._data)
             normalize[:, select] = self._data[:, select]/norm[select][numpy.newaxis, :]
             self._data = normalize

@@ -1014,21 +1014,21 @@ class Spectrum1D(object):
             smooth= interpolate.splrep(self._wave,self._data,w=1.0/numpy.sqrt(numpy.fabs(self._data)),s=size)
             self._data =  interpolate.splev(self._wave,smooth,der=0)
 
-    def smoothGaussVariable(self, fwhm):
+    def smoothGaussVariable(self, diff_fwhm):
         fact = numpy.sqrt(2.*numpy.pi)
         if self._mask is not None:
             mask = numpy.logical_not(self._mask)
         else:
             mask = numpy.ones(self._data.shape[0], dtype="bool")
 
-        if isinstance(fwhm, float) or isinstance(fwhm, int):
-            fwhm=numpy.ones(self._data.shape[0], dtype=numpy.float32)*fwhm
-        select = fwhm>0.0
+        if isinstance(diff_fwhm, float) or isinstance(diff_fwhm, int):
+            diff_fwhm=numpy.ones(self._data.shape[0], dtype=numpy.float32)*diff_fwhm
+        select = diff_fwhm>0.0
         mask = numpy.logical_and(mask, select)
 
         data = numpy.zeros_like(self._data)
         data[:] = self._data
-        GaussKernels = 1.0*numpy.exp(-0.5*((self._wave[mask][:, numpy.newaxis]-self._wave[mask][numpy.newaxis, :])/numpy.abs(fwhm[mask][numpy.newaxis, :]/2.354))**2)/(fact*numpy.abs(fwhm[mask][numpy.newaxis, :]/2.354))
+        GaussKernels = 1.0*numpy.exp(-0.5*((self._wave[mask][:, numpy.newaxis]-self._wave[mask][numpy.newaxis, :])/numpy.abs(diff_fwhm[mask][numpy.newaxis, :]/2.354))**2)/(fact*numpy.abs(diff_fwhm[mask][numpy.newaxis, :]/2.354))
         data[mask] = numpy.sum(self._data[mask][:, numpy.newaxis]*GaussKernels, 0)/numpy.sum(GaussKernels, 0)
 
         if self._error is not None:
@@ -1040,8 +1040,13 @@ class Spectrum1D(object):
             #error[mask]=error[mask]/scale._data[mask]
         else:
             error = None
+        
+        if self._inst_fwhm is not None:
+            inst_fwhm = numpy.sqrt(self._inst_fwhm**2 + diff_fwhm**2)
+        else:
+            inst_fwhm = fwhm
 
-        spec = Spectrum1D(wave = self._wave, data = data,  error = error,  mask=self._mask)
+        spec = Spectrum1D(wave=self._wave, data=data, error=error, mask=self._mask, inst_fwhm=inst_fwhm)
         return spec
 
     def smoothPoly(self, order=-5, start_wave=None, end_wave=None, ref_base=None):
