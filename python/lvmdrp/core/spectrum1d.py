@@ -389,39 +389,37 @@ class Spectrum1D(object):
             spec = Spectrum1D(wave=self._wave, data = data,  error = error,  mask=mask)
             return spec
         else:
-            # try to do addtion for other types, e.g. float, int, etc.
-   ##         try:
-                select = self._data!=0.0
-                data = numpy.zeros_like(self._data)
-                if numpy.sum(select)>0:
-                    data[select] = other / self._data[select]
-                    if self._error is not None:
-                        error = numpy.zeros_like(self._error)
-                        if numpy.sum(select)>0:
-                            error[select] = other *self._error[select]/self._data[select]**2
-                        else:
-                            error=None
+            select = self._data!=0.0
+            data = numpy.zeros_like(self._data)
+            if numpy.sum(select)>0:
+                data[select] = other / self._data[select]
+                if self._error is not None:
+                    error = numpy.zeros_like(self._error)
+                    if numpy.sum(select)>0:
+                        error[select] = other *self._error[select]/self._data[select]**2
                     else:
-                        error = None
-                    mask = self._mask
+                        error=None
                 else:
-                    data = numpy.zeros_like(self._data)
-                    if self._error is not None:
-                        error = numpy.zeros_like(self._data)
-                    else:
-                        error = None
-                    if self._mask is not None:
-                        mask = numpy.zeros(self._data.shape[0], dtype='bool')
-                    else:
-                        mask=None
+                    error = None
+                mask = self._mask
+            else:
+                data = numpy.zeros_like(self._data)
+                if self._error is not None:
+                    error = numpy.zeros_like(self._data)
+                else:
+                    error = None
+                if self._mask is not None:
+                    mask = numpy.zeros(self._data.shape[0], dtype='bool')
+                else:
+                    mask=None
 
-                if data.dtype==numpy.float64 or data.dtype==numpy.dtype('>f8'):
-                    data=data.astype(numpy.float32)
-                if error is not None:
-                    if error.dtype==numpy.float64 or error.dtype==numpy.dtype('>f8'):
-                        error=error.astype(numpy.float32)
-                spec = Spectrum1D(wave=self._wave, data = data,  error = error,  mask=mask)
-                return spec
+            if data.dtype==numpy.float64 or data.dtype==numpy.dtype('>f8'):
+                data=data.astype(numpy.float32)
+            if error is not None:
+                if error.dtype==numpy.float64 or error.dtype==numpy.dtype('>f8'):
+                    error=error.astype(numpy.float32)
+            spec = Spectrum1D(wave=self._wave, data = data,  error = error,  mask=mask)
+            return spec
 
     def __mul__(self, other):
 
