@@ -570,13 +570,13 @@ class RSS(FiberRows):
                         data[i] = numpy.sum(self._data[select[:, i], i])
                         if error is not None:
                             error[i] = numpy.sqrt(numpy.sum(self._error[select[:, i], i]**2))
-            if self._mask is not None:
-                bad = numpy.sum(self._mask, 0)
-                mask = bad==self._fibers
-            else:
-                mask = None
-            inst_fwhm = self._inst_fwhm
-            wave = self._wave
+        if self._mask is not None:
+            bad = numpy.sum(self._mask, 0)
+            mask = bad==self._fibers
+        else:
+            mask = None
+        inst_fwhm = self._inst_fwhm
+        wave = self._wave
         spec= Spectrum1D(wave = wave, data=data, error=error, inst_fwhm=inst_fwhm, mask=mask)
         return spec
 
