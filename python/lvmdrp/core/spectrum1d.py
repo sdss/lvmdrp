@@ -828,8 +828,8 @@ class Spectrum1D(object):
             else:
                 select_goodpix=numpy.ones(self._dim, dtype='bool')
 
-            if self._error is not None and self._mask is not None and err_sim>0:
-                replace_pix = numpy.logical_and(self._mask, clean_data!=0.0)
+            if self._error is not None and err_sim>0:
+                replace_pix = numpy.logical_and(~select_goodpix, clean_data!=0.0)
                 self._error[replace_pix]=1e-20
                 #select_goodpix = numpy.logical_and(select_goodpix, self._data!=0.0)
                 select_goodpix = self._data!=0.0
@@ -893,27 +893,25 @@ class Spectrum1D(object):
                 badpix = numpy.logical_or(badpix, numpy.logical_or(ref_wave<self._wave[0], ref_wave>self._wave[-1]))
 
                 if self._error is not None and err_sim>0:
-        #        new_mask = numpy.logical_and(badpix, new_error>0)
+            #    new_mask = numpy.logical_and(badpix, new_error>0)
                     new_mask=badpix
                     new_error[new_mask] = replace_error
             else:
                 badpix = numpy.logical_or(ref_wave<self._wave[0], ref_wave>self._wave[-1])
                 new_data[badpix]=0
+                new_error[badpix] = replace_error
             new_mask = badpix
-    #        new_data[badpix]=fill_value
-     #           print(numpy.sum(self._mask), numpy.sum(new_mask))
+        #    new_data[badpix]=fill_value
+        #        print(numpy.sum(self._mask), numpy.sum(new_mask))
 
-            if self._error is None or err_sim==0:
-                new_error=None
-            if self._mask is None:
-                new_mask = None
-       # if numpy.isnan(new_data[10])==True:
-        #    pylab.plot(self._wave[select_interp],'-k')
-        #    pylab.show()
+        if self._error is None or err_sim==0:
+            new_error=None
+        if self._mask is None:
+            new_mask = None
         spec_out = Spectrum1D(wave=ref_wave, data=new_data, error=new_error, mask=new_mask, inst_fwhm=new_inst_fwhm)
         return spec_out
 
-    def matchFWHM(self, target_FWHM, inplace=False):
+    def matchFWHM(self, target_fwhm, inplace=False):
         if self._inst_fwhm is not None:
             if self._mask is not None:
                 good_pix = numpy.logical_not(self._mask)
@@ -936,15 +934,15 @@ class Spectrum1D(object):
                 new_spec = deepcopy(self)
             
             gauss_sig = numpy.zeros_like(fwhm)
-            select = target_FWHM>fwhm
-            gauss_sig[select] = numpy.sqrt(target_FWHM**2-fwhm[select]**2)/2.354
+            select = target_fwhm>fwhm
+            gauss_sig[select] = numpy.sqrt(target_fwhm**2-fwhm[select]**2)/2.354
             fact = numpy.sqrt(2.*numpy.pi)
             kernel = numpy.exp(-0.5*((wave[:, numpy.newaxis]-wave[numpy.newaxis, :])/gauss_sig[numpy.newaxis, :])**2)/(fact*gauss_sig[numpy.newaxis, :])
             multiplied = data[:, numpy.newaxis]*kernel
             new_data = numpy.sum(multiplied, axis=0)/numpy.sum(kernel, 0)
             if new_spec._mask is not None:
                 new_spec._data[good_pix] = new_data
-                new_spec._inst_fwhm[:] = target_FWHM
+                new_spec._inst_fwhm[:] = target_fwhm
             if error is not None:
                 new_error = numpy.sqrt(numpy.sum((error[:, numpy.newaxis]*kernel)**2, axis=0))/numpy.sum(kernel, 0)
                 if new_spec._mask is not None:
@@ -977,7 +975,7 @@ class Spectrum1D(object):
         for i in range(len(new_wave)):
             select = numpy.logical_and(masked_wave>= bound_min[i], masked_wave <= bound_max[i])
             if numpy.sum(select) > 0:
-#                data_out[i] = numpy.mean(self._data[mask_in][select])
+            #    data_out[i] = numpy.mean(self._data[mask_in][select])
                 data_out[i] = numpy.sum(numpy.abs(masked_wave[select]-new_wave[i])*self._data[mask_in][select])/numpy.sum(numpy.abs(masked_wave[select]-new_wave[i]))
                 if self._error is not None:
                     error_out[i] = numpy.sqrt(numpy.sum(masked_error[select]**2)/numpy.sum(select)**2)
@@ -985,8 +983,8 @@ class Spectrum1D(object):
                 data_out[i] = 0.0
                 mask_out[i] = True
         data_out = numpy.interp(new_wave, masked_wave, self._data[mask_in])
-      #      numpy.delete(masked_wave, select)
-       #     numpy.delete(masked_data,  select)
+        #    numpy.delete(masked_wave, select)
+        #    numpy.delete(masked_data,  select)
         #    numpy.delete(masked_error, select)
         spec = Spectrum1D(data = data_out, wave = new_wave, error=error_out, mask=mask_out)
         return spec
