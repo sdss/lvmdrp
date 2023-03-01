@@ -134,7 +134,7 @@ def combineBias_drp(file_list, file_out):
         hdu_out.header = hdu[j].header
         hdulist.append(hdu_out)
     hdu = pyfits.HDUList(hdulist)
-    hdu.writeto(file_out, clobber=True)
+    hdu.writeto(file_out, overwrite=True)
 
 
 def reduceCalib_drp(trace, master_bias, arc='', fiberflat='1',reduce_ccd='ALL'):

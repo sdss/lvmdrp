@@ -1958,7 +1958,7 @@ def testres_drp(image, trace, fwhm, flux):
 			pylab.show()
 
 	hdu = pyfits.PrimaryHDU(img._data-out)
-	hdu.writeto('res.fits', clobber=True)
+	hdu.writeto('res.fits', overwrite=True)
 	hdu = pyfits.PrimaryHDU(out)
 	hdu.writeto('fit.fits', overwrite=True)
 

@@ -432,7 +432,7 @@ class parFile(fit_profile1D):
     
         coldefs = pyfits.ColDefs(columns)
         tbhdu = pyfits.BinTableHDU.from_columns(coldefs)
-        tbhdu.writeto(outfile,clobber=True)
+        tbhdu.writeto(outfile,overwrite=True)
 
     def __init__(self, file,spec_res=0):
         fpar = open(file, 'r')
