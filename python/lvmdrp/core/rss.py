@@ -34,6 +34,12 @@ class RSS(FiberRows):
         )
         for i in range(n_spectra):
             rss[i] = spectra_list[i]
+
+        # handle uniform wavelength
+        if (np.repeat(rss._wave.mean(axis=0)[None], rss._fibers, axis=0) == rss._wave).all():
+            rss.setWave(rss._wave[0])
+        if (np.repeat(rss._inst_fwhm.mean(axis=0)[None], rss._fibers, axis=0) == rss._inst_fwhm).all():
+            rss.setInstFWHM(rss._inst_fwhm[0])
         return rss
 
     def __init__(self, data=None, wave=None,  inst_fwhm=None, header = None, error = None, mask = None,shape=None, size=None, arc_position_x=None, arc_position_y=None, good_fibers=None,  fiber_type=None,  logwave=False):
