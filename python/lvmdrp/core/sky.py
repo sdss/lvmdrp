@@ -20,8 +20,8 @@ from astropy import units as u
 from skycalc_cli.skycalc import SkyModel, AlmanacQuery
 from skycalc_cli.skycalc_cli import fixObservatory
 
-from lvmdrp.core.constants import SKYMODEL_INST_PATH, SKYCORR_PAR_MAP
 from lvmdrp.core.constants import ALMANAC_CONFIG_PATH, SKYCALC_CONFIG_PATH
+from lvmdrp.core.constants import SKYMODEL_INST_PATH, SKYCORR_INST_PATH, SKYCORR_CONFIG_PATH, SKYCORR_PAR_MAP
 from lvmdrp.core.constants import SKYMODEL_INST_CONFIG_PATH, SKYMODEL_MODEL_CONFIG_PATH
 from lvmdrp.external.skycorr import fitstabSkyCorrWrapper, createParFile, runSkyCorr
 
@@ -231,9 +231,14 @@ def run_skymodel(skymodel_path=SKYMODEL_INST_PATH, **kwargs):
     return skymodel_inst_par, skymodel_model_par, sky_comps
 
 
-def run_skycorr(skycorr_config_path, sci_spec, sky_spec, spec_label, specs_dir="./", out_dir="./", **kwargs):
+def run_skycorr(sci_spec, sky_spec, spec_label, skycorr_path=SKYCORR_INST_PATH, specs_dir="./", out_dir="./", **kwargs):
+    # invert masks if present
+    if sci_spec._mask is not None:
+        sci_spec._mask = ~sci_spec._mask
+    if sky_spec._mask is not None:
+        sky_spec._mask = ~sci_spec._mask
 
-    skycorr_config_ = yaml.safe_load(open(skycorr_config_path, "r"))
+    skycorr_config_ = yaml.safe_load(open(SKYCORR_CONFIG_PATH, "r"))
     # write each spectrum in skycorr individual format
     # TODO: look for actual meaning of timeVal and telAltVal (see examples)
     # TODO: deactivate the Halpha geocoronal subtraction in skycorr (is not well implemented)
@@ -241,19 +246,22 @@ def run_skycorr(skycorr_config_path, sci_spec, sky_spec, spec_label, specs_dir="
         wave=sci_spec._wave,
         objflux=sci_spec._data,
         skyflux=sky_spec._data,
-        dateVal=kwargs.get("MJD"),
-        timeVal=kwargs.get("TIME"),
-        telAltVal=kwargs.get("TELALT"),
+        dateVal=kwargs.pop("MJD"),
+        timeVal=kwargs.pop("TIME"),
+        telAltVal=kwargs.pop("TELALT"),
         label=spec_label,
         specs_dir=specs_dir
     )
     
+    # update config pars with keyword arguments
+    skycorr_config_.update((k, kwargs[k]) for k in skycorr_config_.keys() & kwargs.keys())
     # convert from yaml to skycorr keys
     skycorr_config = {val: skycorr_config_[key] for key, val in SKYCORR_PAR_MAP.items()}
+    skycorr_config["install"] = skycorr_path
     skycorr_config["objfile"] = sci_fits_file
     skycorr_config["skyfile"] = sky_fits_file
 
-    out_file = os.path.basename(sci_fits_file.replace(".fits", f"_out"))
+    out_file = os.path.basename(sci_fits_file.replace(".fits", "_out"))
     skycorr_config["outfile"] = out_file
     skycorr_config["outdir"] = out_dir
 
