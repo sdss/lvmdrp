@@ -51,7 +51,7 @@ ALMANAC_CONFIG_PATH = os.path.join(CONFIG_PATH, "third_configs", "almanac.json")
 SKYMODEL_CONFIG_PATH = os.path.join(CONFIG_PATH, "third_configs", "skymodel_config.yml")
 # high-level ESO sky model configuration files
 SKYMODEL_INST_CONFIG_PATH = os.path.join(SKYMODEL_INST_PATH, "sm-01_mod2", "config", "instrument_etc_ref.par")
-SKYMODEL_MODEL_CONFIG_PATH = os.path.join(SKYMODEL_INST_CONFIG_PATH, "sm-01_mod2", "config", "skymodel_etc_ref.par")
+SKYMODEL_MODEL_CONFIG_PATH = os.path.join(SKYMODEL_INST_PATH, "sm-01_mod2", "config", "skymodel_etc_ref.par")
 
 # ESO skycorr configuration file
 SKYCORR_CONFIG_PATH = os.path.join(CONFIG_PATH, "third_configs", "skycorr_config.yml")

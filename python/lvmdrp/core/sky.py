@@ -118,7 +118,6 @@ def write_skymodel_par(parfile_path, config, verify=True):
 
     with open(parfile_path, "w") as f:
         for key, val in config.items():
-            print(key, val)
             if isinstance(val, (list, tuple)):
                 vals = list(map(str, val))
                 f.write(f"{key} = {' '.join(vals)}\n")
@@ -161,21 +160,20 @@ def run_skymodel(skymodel_path=SKYMODEL_INST_PATH, **kwargs):
     skymodel_model_par = {}
     skymodel_inst_par.update(read_skymodel_par(SKYMODEL_INST_CONFIG_PATH))
     skymodel_model_par.update(read_skymodel_par(SKYMODEL_MODEL_CONFIG_PATH))
-    configs_path = os.path.dirname(SKYMODEL_INST_CONFIG_PATH)
     # ---------------------------------------------------------------------------------------------
      
     # update original configuration settings with kwargs ------------------------------------------
     skymodel_inst_par.update((k, kwargs[k]) for k in skymodel_inst_par.keys() & kwargs.keys())
     skymodel_inst_par.update((k, kwargs[k]) for k in skymodel_inst_par.keys() & kwargs.keys())
     # save configuration files with the names expected by calcskymodel
-    write_skymodel_par(parfile_path=configs_path, config=skymodel_inst_par)
-    write_skymodel_par(parfile_path=configs_path, config=skymodel_model_par)
+    write_skymodel_par(parfile_path=SKYMODEL_INST_CONFIG_PATH.replace("_ref", ""), config=skymodel_inst_par)
+    write_skymodel_par(parfile_path=SKYMODEL_MODEL_CONFIG_PATH.replace("_ref", ""), config=skymodel_model_par)
     # ---------------------------------------------------------------------------------------------
 
     # run calcskymodel with the requested input parameters ----------------------------------------
     os.chdir(os.path.join(skymodel_path, "sm-01_mod2"))
     # clean output directory
-    shutil.rmtree("output")
+    shutil.rmtree("output", ignore_errors=True)
     
     out = subprocess.run(f"bin/calcskymodel".split(), capture_output=True)
     if out.returncode == 0:
@@ -322,23 +320,23 @@ def run_skycalc(skycalc_config=SKYCALC_CONFIG_PATH, almanac_config=ALMANAC_CONFI
 
 
 def optimize_sky(factor, test_spec, sky_spec, start_wave, end_wave):
-	"""Returns the residual statistic between the test (science) spectrum and the sky spectrum within a given wavelength range
-	
-	This is a helper function to fit the 'factor', the flux scale by which the residuals between the science spectrum and the
-	sky spectrum are minimized.
+    """Returns the residual statistic between the test (science) spectrum and the sky spectrum within a given wavelength range
 
-	"""
-	wave = test_spec._wave
-	if test_spec._mask is not None:
-		good_pix = np.logical_not(test_spec._mask)
-		select1 = np.logical_and(wave>start_wave, wave<end_wave)
-		if np.sum(good_pix[select1])>1:
-			select = np.logical_and(select1, good_pix)
-		else:
-			select = select1
-	else:
-		select = np.logical_and(wave>start_wave, wave<end_wave)
-	if (np.sum(select)==0) or (np.sum(test_spec._data[select])==0):
-		raise RuntimeError
-	rms = np.std(test_spec._data[select]-sky_spec._data[select]*factor)
-	return rms
+    This is a helper function to fit the 'factor', the flux scale by which the residuals between the science spectrum and the
+    sky spectrum are minimized.
+
+    """
+    wave = test_spec._wave
+    if test_spec._mask is not None:
+        good_pix = np.logical_not(test_spec._mask)
+        select1 = np.logical_and(wave>start_wave, wave<end_wave)
+        if np.sum(good_pix[select1])>1:
+            select = np.logical_and(select1, good_pix)
+        else:
+            select = select1
+    else:
+        select = np.logical_and(wave>start_wave, wave<end_wave)
+    if (np.sum(select)==0) or (np.sum(test_spec._data[select])==0):
+        raise RuntimeError
+    rms = np.std(test_spec._data[select]-sky_spec._data[select]*factor)
+    return rms
