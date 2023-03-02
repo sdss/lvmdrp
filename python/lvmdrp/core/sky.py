@@ -154,7 +154,8 @@ def run_skymodel(skymodel_path=SKYMODEL_INST_PATH, **kwargs):
         table contaning different components of the sky
 
     """
- 
+    # store initial current path
+    curdir = os.path.abspath(os.curdir)
     # load original configuration file
     skymodel_inst_par = {}
     skymodel_model_par = {}
@@ -173,51 +174,55 @@ def run_skymodel(skymodel_path=SKYMODEL_INST_PATH, **kwargs):
     # run calcskymodel with the requested input parameters ----------------------------------------
     os.chdir(os.path.join(skymodel_path, "sm-01_mod2"))
     # clean output directory
-    shutil.rmtree("output", ignore_errors=True)
+    # shutil.rmtree("output", ignore_errors=True)
+    os.makedirs("output", exist_ok=True)
     
+    sky_logger.info("running skymodel from pre-computed airglow lines")
     out = subprocess.run(f"bin/calcskymodel".split(), capture_output=True)
-    if out.returncode == 0:
-        sky_logger.info("successfully finished sky model calculation")
-    elif "File opening failed" in out.stderr.decode("utf-8"):
+    if out.returncode != 0 or "error" in out.stderr.decode("utf-8").lower() or "error" in out.stdout.decode("utf-8").lower():
+        sky_logger.warning("no suitable airglow spectrum found")
+        
         # extract parameters from config for radiative transfer run
         alt, time, season, resol, pwv = skymodel_model_par["alt"], skymodel_model_par["time"], skymodel_model_par["season"], skymodel_model_par["resol"], skymodel_model_par["pwv"]
-        airmass = np.round(np.sec((90 - alt) * np.pi / 180), 1)
+        airmass = np.round(1/np.cos((90 - alt) * np.pi / 180), 1)
+        resol = int(float(resol))
+        pwv = int(pwv) if pwv == "-1" else float(pwv)
 
-        os.chdir(skymodel_path, "sm-01_mod1")
+        sky_logger.info(f"calculating airglow lines with parameters {airmass = }, {time = }, {season = }, {resol = } {pwv = }")
+        os.chdir(os.path.join(skymodel_path, "sm-01_mod1"))
         out = subprocess.run(f"bin/create_spec {airmass} {time} {season} . {resol} {pwv}".split(), capture_output=True)
         if out.returncode == 0:
-            sky_logger.info("successfully finished 'create_spec'")
+            sky_logger.info("successfully finished airglow lines calculations")
         else:
-            sky_logger.error("failed while running 'create_spec'")
+            sky_logger.error("failed while running airglow lines calculations")
             sky_logger.error(out.stderr.decode("utf-8"))
 
         # copy library files to corresponding path according to libpath
         shutil.copytree(os.path.join(skymodel_path, "sm-01_mod1", "output"), os.path.join(skymodel_path, "sm-01_mod2", "data", "lib"))
 
-        os.chdir(skymodel_path, "sm-01_mod2")
+        sky_logger.info("calculating effective atmospheric transmission")
+        os.chdir(os.path.join(skymodel_path, "sm-01_mod2"))
         out = subprocess.run(f"bin/preplinetrans".split(), capture_output=True)
         if out.returncode == 0:
-            sky_logger.info("successfully finished 'preplinetrans'")
+            sky_logger.info("successfully finished effective atmospheric transmission calculations")
         else:
-            sky_logger.error("failed while running 'preplinetrans'")
+            sky_logger.error("failed while running effective atmospheric transmission calculations")
             sky_logger.error(out.stderr.decode("utf-8"))
 
         out = subprocess.run(f"bin/calcskymodel".split(), capture_output=True)
         if out.returncode == 0:
             sky_logger.info("successfully finished 'calcskymodel'")
         else:
+            os.chdir(curdir)
             sky_logger.error("failed while running 'calcskymodel'")
             sky_logger.error(out.stderr.decode("utf-8"))
-    else:
-        sky_logger.error("failed while running 'calcskymodel'")
-        sky_logger.error(out.stderr.decode("utf-8"))
-
-        return skymodel_inst_par, skymodel_model_par, None 
+            return skymodel_inst_par, skymodel_model_par, None    
     # ---------------------------------------------------------------------------------------------
 
     # read output files and organize in a FITS table ----------------------------------------------
     trans_table = Table(fits.getdata(os.path.join("output/transspec.fits"), ext=1))
     lines_table = Table(fits.getdata(os.path.join("output/radspec.fits"), ext=1))
+    os.chdir(curdir)
 
     trans_table.remove_column("lam")
     sky_comps = hstack([lines_table, trans_table])
