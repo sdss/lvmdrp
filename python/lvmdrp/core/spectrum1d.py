@@ -552,7 +552,7 @@ class Spectrum1D(object):
                 Number of the FITS extension containing the errors for the values
         """
 
-        hdu = pyfits.open(file,uint=True, do_not_scale_image_data=True )
+        hdu = pyfits.open(file,uint=True, do_not_scale_image_data=True)
         if extension_data is None and extension_mask is None and extension_error is None and extension_wave is None and extension_fwhm is None:
                 self._data = hdu[0].data
                 hdr = hdu[0].header

@@ -36,9 +36,9 @@ class RSS(FiberRows):
             rss[i] = spectra_list[i]
 
         # handle uniform wavelength
-        if (np.repeat(rss._wave.mean(axis=0)[None], rss._fibers, axis=0) == rss._wave).all():
+        if numpy.allclose(np.repeat(rss._wave.mean(axis=0)[None], rss._fibers, axis=0), rss._wave):
             rss.setWave(rss._wave[0])
-        if (np.repeat(rss._inst_fwhm.mean(axis=0)[None], rss._fibers, axis=0) == rss._inst_fwhm).all():
+        if numpy.allclose(np.repeat(rss._inst_fwhm.mean(axis=0)[None], rss._fibers, axis=0), rss._inst_fwhm):
             rss.setInstFWHM(rss._inst_fwhm[0])
         return rss
 
@@ -216,17 +216,20 @@ class RSS(FiberRows):
         if self._mask is not None and spec._mask is not None:
             self._mask[fiber, :] = spec._mask
 
-    def setWave(self, wave):
+    def setWave(self, wave, unit="AA"):
         self._wave = numpy.array(wave)
 
         if len(wave.shape)==1:
+            # NOTE: do this only if wavelength is uniform
             self._wave_disp = self._wave[1]-self._wave[0]
             self._wave_start = self._wave[0]
             self._res_elements = self._wave.shape[0]
             if self._header is not None:
-                self.setHdrValue('CRVAL1', float('%.3f'%self._wave_start))
-                self.setHdrValue('CDELT1', float('%.3f'%self._wave_disp))
-                self.setHdrValue('CRPIX1', 1.0)
+                self.setHdrValue(f'CRVAL1', float('%.3f'%self._wave_start))
+                self.setHdrValue(f'CDELT1', float('%.3f'%self._wave_disp))
+                self.setHdrValue(f'CRPIX1', 1.0)
+                self.setHdrValue(f'CTYPE1', "WAVE")
+                self.setHdrValue(f'CUNIT1', unit)
         if len(wave.shape)==2:
             self._res_elements = self._wave.shape[1]
 
