@@ -466,8 +466,8 @@ def configureSkyModel_drp(skymodel_config_path=SKYMODEL_CONFIG_PATH, skymodel_pa
         raise ValueError(f"unknown method '{method}'. Valid values are: 'run' and 'download'")
         
 
-def createMasterSky_drp(rss_in, sky_out, clip_sigma='3.0', nsky='0', filter='', non_neg='1', plot='0'):
-	"""
+def createMasterSky_drp(in_rss, out_sky, clip_sigma='3.0', nsky='0', filter='', non_neg='1', plot='0'):
+    """
         Creates a mean (sky) spectrum from the RSS, which stored either as a FITS or an ASCII file.
         Spectra may be rejected from the median computation. Bad pixel in the RSS are not included
         in the median computation.
@@ -476,11 +476,11 @@ def createMasterSky_drp(rss_in, sky_out, clip_sigma='3.0', nsky='0', filter='', 
 
         Parameters
         --------------
-        rss_in : string
+        in_rss : string
             Input RSS FITS file with a pixel table for the spectral resolution
-        sky_out : string
+        out_sky : string
             Output Sky spectrum. Either in FITS format (if *.fits) or in ASCII format (if *.txt)
-        clip_sigma : string of float, optiional with default: '3.0'
+        clip_sigma : string of float, optional with default: '3.0'
             Sigma value used to reject outlier sky spectra identified in the collapsed median value
             along the dispersion axis. Only used if the nsky value is set to 0 and clip_sigma>0
         nsky : string of integer (>0), optional with default: '0'
@@ -493,78 +493,89 @@ def createMasterSky_drp(rss_in, sky_out, clip_sigma='3.0', nsky='0', filter='', 
 
         Examples
         ----------------
-        user:> drp sky constructSkySpec RSS_IN.fits SKY_OUT.fits 3.0
-        user:> drp sky constructSkySpec RSS_IN.fits SKY_OUT.txt
-	"""
-	clip_sigma=float(clip_sigma)
-	nsky = int(nsky)
-	non_neg = int(non_neg)
-	plot = int(plot)
-	filter=filter.split(',')
-	rss = RSS()
-	rss.loadFitsData(rss_in)
-	median = np.zeros(len(rss), dtype=np.float32)
-	for i in range(len(rss)):
-		spec = rss[i]
-		
-		if spec._mask is not None:
-			if np.sum(np.logical_not(spec._mask))!=0:
-				median[i] = np.median(spec._data[np.logical_not(spec._mask)])
-			else:
-				median[i]=0
-		else:
-			median[i] = np.median(spec._data)
-	# mask for fibers with valid sky spectra
-	select_good = median!=0
+        user:> drp sky constructSkySpec IN_RSS.fits OUT_SKY.fits 3.0
+        user:> drp sky constructSkySpec IN_RSS.fits OUT_SKY.txt
+    """
+    sky_logger.info(f"preparing to create master 'sky' from '{in_rss}'")
 
-	# sigma clipping around the median sky spectrum
-	if clip_sigma>0.0 and nsky==0:
-		select = np.logical_and(np.logical_and(median<np.median(median[select_good])+clip_sigma*np.std(median[select_good])/2.0, median>np.median(median[select_good])-clip_sigma*np.std(median[select_good])/2.0), select_good)
-		sky_fib = np.sum(select)
-	# select fibers that are below the maximum median spectrum within the top nsky fibers
-	elif nsky>0:
-		idx=np.argsort(median[select_good])
-		max_value = np.max(median[select_good][idx[:nsky]])
-		if non_neg==1:
-			select = (median<=max_value) & (median>0.0)
-		else:
-			select = (median<=max_value)
-		sky_fib = np.sum(select)
-	rss.setHdrValue('hierarch PIPE NSKY FIB', sky_fib, 'Number of averaged sky fibers')
-	
-	# selection of sky fibers to build master sky
-	subRSS = rss.subRSS(select)
+    clip_sigma=float(clip_sigma)
+    nsky = int(nsky)
+    non_neg = int(non_neg)
+    plot = int(plot)
+    filter=filter.split(',')
+    
+    rss = RSS()
+    rss.loadFitsData(in_rss)
 
-	# calculates the sky magnitude within a given filter response function
-	if filter[0] != '':
-		passband = PassBand()
-		passband.loadTxtFile(filter[0], wave_col=int(filter[1]),  trans_col=int(filter[2]))
-		(flux_rss, error_rss, min_rss, max_rss, std_rss) = passband.getFluxRSS(subRSS)
-		mag_flux = np.zeros(len(flux_rss))
-		for m in range(len(flux_rss)):
-			if flux_rss[m]>0.0:
-				mag_flux[m] = passband.fluxToMag(flux_rss[m], system='Vega')
+    sky_logger.info("calculating median value for each fiber")
+    median = np.zeros(len(rss), dtype=np.float32)
+    for i in range(len(rss)):
+        spec = rss[i]
+        
+        if spec._mask is not None:
+            good_pixels = np.logical_not(spec._mask)
+            if np.sum(good_pixels)!=0:
+                median[i] = np.median(spec._data[good_pixels])
+            else:
+                median[i]=0
+        else:
+            median[i] = np.median(spec._data)
+    # mask for fibers with valid sky spectra
+    select_good = median!=0
 
-		mag_mean = np.mean(mag_flux[mag_flux>0.0])
-		mag_min = np.min(mag_flux[mag_flux>0.0])
-		mag_max = np.max(mag_flux[mag_flux>0.0])
-		mag_std = np.std(mag_flux[mag_flux>0.0])
-		rss.setHdrValue('hierarch PIPE SKY MEAN', float('%.2f'%mag_mean), 'Mean sky brightness of sky fibers')
-		rss.setHdrValue('hierarch PIPE SKY MIN', float('%.2f'%mag_min), 'Minium sky brightness of sky fibers')
-		rss.setHdrValue('hierarch PIPE SKY MAX', float('%.2f'%mag_max), 'Maximum sky brightness of sky fibers')
-		rss.setHdrValue('hierarch PIPE SKY RMS', float('%.2f'%mag_std), 'RMS sky brightness of sky fibers')
+    # sigma clipping around the median sky spectrum
+    if clip_sigma>0.0 and nsky==0:
+        sky_logger.info(f"calculating sigma clipping with sigma = {clip_sigma} within {select_good.sum()} fibers")
+        select = np.logical_and(np.logical_and(median<np.median(median[select_good])+clip_sigma*np.std(median[select_good])/2.0, median>np.median(median[select_good])-clip_sigma*np.std(median[select_good])/2.0), select_good)
+        sky_fib = np.sum(select)
+    # select fibers that are below the maximum median spectrum within the top nsky fibers
+    elif nsky>0:
+        idx=np.argsort(median[select_good])
+        max_value = np.max(median[select_good][idx[:nsky]])
+        if non_neg==1:
+            sky_logger.info(f"selecting non-negative (maximum) {nsky} fibers")
+            select = (median<=max_value) & (median>0.0)
+        else:
+            sky_logger.info(f"selecting (maximum) {nsky} fibers with median below {max_value = }")
+            select = (median<=max_value)
+        sky_fib = np.sum(select)
+    rss.setHdrValue('HIERARCH PIPE NSKY FIB', sky_fib, 'Number of averaged sky fibers')
 
-	rss.writeFitsHeader(rss_in)
-	# create master sky spectrum by computing the average spectrum across selected fibers
-	skySpec = subRSS.create1DSpec()
+    # selection of sky fibers to build master sky
+    subRSS = rss.subRSS(select)
 
-	if plot==1:
-		plt.plot(skySpec._wave, skySpec._data, 'ok')
-		plt.show()
-	if '.fits' in sky_out:
-		skySpec.writeFitsData(sky_out)
-	if '.txt' in sky_out:
-		skySpec.writeTxtData(sky_out)
+    # calculates the sky magnitude within a given filter response function
+    if filter[0] != '':
+        sky_logger.info(f"calculating 'sky' magnitude in Vega system using filter in {filter[0]}")
+        passband = PassBand()
+        passband.loadTxtFile(filter[0], wave_col=int(filter[1]),  trans_col=int(filter[2]))
+        (flux_rss, error_rss, min_rss, max_rss, std_rss) = passband.getFluxRSS(subRSS)
+        mag_flux = np.zeros(len(flux_rss))
+        for m in range(len(flux_rss)):
+            if flux_rss[m]>0.0:
+                mag_flux[m] = passband.fluxToMag(flux_rss[m], system='Vega')
+
+        mag_mean = np.mean(mag_flux[mag_flux>0.0])
+        mag_min = np.min(mag_flux[mag_flux>0.0])
+        mag_max = np.max(mag_flux[mag_flux>0.0])
+        mag_std = np.std(mag_flux[mag_flux>0.0])
+        rss.setHdrValue('HIERARCH PIPE SKY MEAN', float('%.2f'%mag_mean), 'Mean sky brightness of sky fibers')
+        rss.setHdrValue('HIERARCH PIPE SKY MIN', float('%.2f'%mag_min), 'Minimum sky brightness of sky fibers')
+        rss.setHdrValue('HIERARCH PIPE SKY MAX', float('%.2f'%mag_max), 'Maximum sky brightness of sky fibers')
+        rss.setHdrValue('HIERARCH PIPE SKY RMS', float('%.2f'%mag_std), 'RMS sky brightness of sky fibers')
+        sky_logger.info(f"{mag_mean = }, {mag_min = }, {mag_max = }, {mag_std = }")
+
+    # create master sky spectrum by computing the average spectrum across selected fibers
+    sky_logger.info(f"creating master (averaged) sky out of {subRSS._fibers}")
+    skySpec = subRSS.create1DSpec()
+    
+    if plot==1:
+        plt.figure(figsize=(20,5))
+        plt.step(skySpec._wave, skySpec._data, color='k')
+        plt.show()
+    
+    sky_logger.info(f"storing master sky in '{out_sky}'")
+    skySpec.writeFitsData(out_sky)
 
 
 def sepContinuumLine_drp(sky_ref, cont_line_out, method="skycorr", sky_sci="", skycorr_config=SKYCORR_CONFIG_PATH, is_science=False):
