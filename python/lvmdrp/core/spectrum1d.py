@@ -89,7 +89,7 @@ def wave_little_interpol(wavelist):
 
 
 class Spectrum1D(Header):
-    def __init__(self, wave=None, data=None, error=None, mask=None, inst_fwhm=None):
+    def __init__(self, wave=None, data=None, error=None, mask=None, inst_fwhm=None, header=None):
         self._wave = wave
         self._data = data
         if data is not None:
@@ -98,6 +98,7 @@ class Spectrum1D(Header):
         self._error = error
         self._mask = mask
         self._inst_fwhm = inst_fwhm
+        self._header = header
 
     def __sub__(self, other):
         if isinstance(other, Spectrum1D):
@@ -554,9 +555,9 @@ class Spectrum1D(Header):
         """
 
         hdu = pyfits.open(file,uint=True, do_not_scale_image_data=True)
-        if extension_data is None and extension_mask is None and extension_error is None and extension_wave is None and extension_fwhm is None:
+        if extension_data is None and extension_mask is None and extension_error is None and extension_wave is None and extension_fwhm is None and extension_hdr is None:
                 self._data = hdu[0].data
-                hdr = hdu[0].header
+                self._header = hdu[0].header
                 self._dim = self._data.shape[0] # set shape
                 self._pixels = numpy.arange(self._dim)
                 #self.setHeader(header = hdu[0].header, origin=file)
@@ -571,7 +572,7 @@ class Spectrum1D(Header):
                         elif hdu[i].header['EXTNAME'].split()[0]=='INSTFWHM':
                             self._inst_fwhm = hdu[i].data
                 if self._wave is None:
-                    self._wave = self._pixels*hdr['cdelt1']+hdr['crval1']
+                    self._wave = self._pixels*self._header['CDELT1']+self._header['CRVAL1']
         else:
             if extension_data is not None:
                 self._data = hdu[extension_data].data
@@ -589,7 +590,7 @@ class Spectrum1D(Header):
         if extension_hdr is not None:
             self.setHeader(hdu[extension_hdr].header, origin=file)
 
-    def writeFitsData(self, filename, extension_data=None, extension_mask=None,  extension_error=None, extension_wave=None, extension_fwhm=None):
+    def writeFitsData(self, filename, extension_data=None, extension_mask=None,  extension_error=None, extension_wave=None, extension_fwhm=None, extension_hdr=None):
         """
             Save information from a Spectrum1D object into a FITS file.
             A single or multiple extension file are possible to create.
@@ -612,8 +613,8 @@ class Spectrum1D(Header):
 
         # create primary hdus and image hdus
         # data hdu
-        if extension_data is None and extension_error is None and extension_mask is None:
-            hdus[0] = pyfits.PrimaryHDU(self._data)
+        if extension_data is None and extension_error is None and extension_mask is None and extension_fwhm is None and extension_hdr is None:
+            hdus[0] = pyfits.PrimaryHDU(self._data, header=self._header)
             if self._wave is not None:
                 hdus[1] = pyfits.ImageHDU(self._wave, name='WAVE')
             if self._inst_fwhm is not None:
@@ -651,6 +652,12 @@ class Spectrum1D(Header):
                 hdu = pyfits.PrimaryHDU(self._error)
             elif extension_error>0 and extension_error is not None:
                 hdus[extension_error] = pyfits.ImageHDU(self._error, name='ERROR')
+            
+            # header hdu
+            if extension_hdr == 0:
+                hdu = pyfits.PrimaryHDU(header=self._header)
+            elif extension_hdr>0 and extension_hdr is not None:
+                hdus[extension_hdr].header = self._header
 
         # remove not used hdus
         for i in range(len(hdus)):
