@@ -31,6 +31,7 @@ distribute-*.tar.gz
 *~
 
 # Test directories and files
+data
 lib
 *.tar.gz*
 test-*.fits
@@ -51,3 +52,6 @@ _*
 
 # DRP specific
 de421.bsp
+
+# notebooks
+*checkpoint*
