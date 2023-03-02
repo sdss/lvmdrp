@@ -177,7 +177,7 @@ libstruct.dat:
   - "1 rtcode 0"
   - "LBL"
   - "2 airmass -1"
-  - "10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30"
+  - "10"
   - "3 time 0"
   - "0 1 2 3 4"
   - "4 season 0"
@@ -195,7 +195,7 @@ sm_filenames.dat:
   # 1: time-dependent library, 2: PWV-dependent library
   # libstruct:  "libstruct.dat libstruct_pwv.dat"
   #libstruct:  "libstruct_pwv_time.dat libstruct_pwv_time.dat"
-  libstruct:  "libstruct_time.dat libstruct_time.dat"
+  libstruct:  "libstruct.dat libstruct_pwv.dat"
   # path to input data files
   # (relative to folder with this file or absolute path)
   datapath:  "."
