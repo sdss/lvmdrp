@@ -114,14 +114,15 @@ def write_skymodel_par(parfile_path, config, verify=True):
     verify: boolean
         whether to verify or not the integrity of the parameters dictionary. Dafaults to True.
     """
-    
     # TODO: add units support
 
     with open(parfile_path, "w") as f:
         for key, val in config.items():
-            if isinstance(val, list, tuple):
-                f.write(f"{key} = {' '.join(val)}\n")
-            elif isinstance(val, str):
+            print(key, val)
+            if isinstance(val, (list, tuple)):
+                vals = list(map(str, val))
+                f.write(f"{key} = {' '.join(vals)}\n")
+            elif isinstance(val, (str, int, float)):
                 f.write(f"{key} = {val}\n")
 
 
