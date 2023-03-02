@@ -70,11 +70,12 @@ def read_skymodel_par(parfile_path, verify=True):
     verify: boolean
         whether to verify or not the integrity of the configuration file. Defaults to True
     """
-    with open(parfile_path, "r") as f:
-        line = f.realine()[:-1].strip()
-        config = {}
-        while line:
-            if line.startswith("#"): continue
+    config = {}
+    with open(parfile_path, "r") as f:        
+        lines = f.readlines()
+        for line in lines:
+            if line.startswith("#") or not line.strip():
+                continue
             key, val = list(map(str.strip, line.split("=")))
             vals = val.split()
             if len(vals) != 1:
@@ -91,8 +92,6 @@ def read_skymodel_par(parfile_path, verify=True):
                     val_new = val
 
             config[key] = val_new
-
-            line = f.readline()[:-1].strip()
     
     # TODO: verify integrity of the configuration parameters
     if verify:
