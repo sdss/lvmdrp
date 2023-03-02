@@ -12,7 +12,7 @@ with warnings.catch_warnings():
     import astropy.table as ap
 import astropy.io.fits as pf
 
-from lvmdrp.core.constants import ROOT_PATH
+from lvmdrp.core.constants import SKYCORR_INST_PATH
 
 
 # setup slow (hard disk) and fast (RAM disk) methods, then choose one
@@ -24,7 +24,7 @@ skycorrtmp_fast = '/Volumes/RAMDisk/tmp/'
 skycorrtmp_fasthsim = '/mnt/ramdisk/tmp/'
 
 # skycorrinstall_fast#hsim #_slow #
-skycorrinstall = os.path.join(ROOT_PATH, "lib", "skycorr")+"/"
+skycorrinstall = SKYCORR_INST_PATH+"/"
 # skycorrtmp_fast#hsim #_slow #
 skycorrtmp = os.path.join(skycorrinstall, "tmp") + "/"
 
