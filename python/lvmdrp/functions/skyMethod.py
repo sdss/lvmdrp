@@ -13,7 +13,7 @@ import itertools as it
 import shutil
 import numpy as np
 import matplotlib.pyplot as plt
-from datetime import timedelta
+from datetime import datetime, timedelta
 from multiprocessing import cpu_count
 from multiprocessing import Pool
 from scipy import optimize
@@ -42,7 +42,7 @@ from lvmdrp.utils.logger import get_logger
 from lvmdrp.core.sky import run_skycorr, run_skymodel, optimize_sky, ang_distance
 from lvmdrp.core.passband import PassBand
 from lvmdrp.core.spectrum1d import Spectrum1D
-from lvmdrp.core.header import Header
+from lvmdrp.core.header import Header, combineHdr
 from lvmdrp.core.rss import RSS
 
 from lvmdrp.utils.configuration import load_master_config
@@ -578,7 +578,7 @@ def createMasterSky_drp(in_rss, out_sky, clip_sigma='3.0', nsky='0', filter='', 
     skySpec.writeFitsData(out_sky)
 
 
-def sepContinuumLine_drp(sky_ref, cont_line_out, method="skycorr", sky_sci="", skycorr_config=SKYCORR_CONFIG_PATH, is_science=False):
+def sepContinuumLine_drp(sky_ref, out_cont_line, method="skycorr", sky_sci="", skycorr_config=SKYCORR_CONFIG_PATH, is_science=False):
     """
 
         Separates the continuum from the sky line contribution using the specified method. The
@@ -586,7 +586,7 @@ def sepContinuumLine_drp(sky_ref, cont_line_out, method="skycorr", sky_sci="", s
         first row.
         
         If method='skycorr' (default), this function will use the ESO skycorr routine to fit for
-        the line and continuum contribution of the given spectrum in 'sky_ref'. To be able tu run
+        the line and continuum contribution of the given spectrum in 'sky_ref'. To be able to run
         this method, 'sky_sci' should be given and contain a 1D version of the science spectrum.
         Optionally a YAML file containing skycorr parameter definitions could also be given.
 
@@ -608,7 +608,7 @@ def sepContinuumLine_drp(sky_ref, cont_line_out, method="skycorr", sky_sci="", s
         sky_ref : string
             path to the 1D target sky spectrum. It should be readable as a
             lvmdrp.core.spectrum1d.Spectrum1D
-        cont_line_out : string
+        out_cont_line : string
             path where the output RSS file will be stored. It will be saved using the methods in
             lvmdrp.core.rss.RSS
          method : string of 'skycorr' (default), 'model' or 'fit'
@@ -622,8 +622,8 @@ def sepContinuumLine_drp(sky_ref, cont_line_out, method="skycorr", sky_sci="", s
     
         Examples
         ----------------
-        user:> drp sky sepContinumLine SKY_REF.fits CONT_LINE_OUT.fits method='model'
-        user:> drp sky sepContinumLine SKY_REF.fits CONT_LINE_OUT.fits sky_sci='SKY_SCI.fits'
+        user:> drp sky sepContinumLine SKY_REF.fits OUT_CONT_LINE.fits method='model'
+        user:> drp sky sepContinumLine SKY_REF.fits OUT_CONT_LINE.fits sky_sci='SKY_SCI.fits'
 
     """
     # TODO: if science, then remove/mask out science lines from a predefined list
@@ -637,6 +637,7 @@ def sepContinuumLine_drp(sky_ref, cont_line_out, method="skycorr", sky_sci="", s
     
     # run skycorr
     if method == "skycorr":
+        prefix = "SKYCORR"
         if sky_sci != "":
             sci_spec = Spectrum1D()
             sci_spec.loadFitsData(sky_sci)
@@ -646,25 +647,43 @@ def sepContinuumLine_drp(sky_ref, cont_line_out, method="skycorr", sky_sci="", s
             sky_spec = sky_spec.resampleSpec(ref_wave=sci_spec._wave, method="linear")
         if np.any(sky_spec._inst_fwhm != sci_spec._inst_fwhm):
             sky_spec = sky_spec.matchFWHM(target_FWHM=sci_spec._inst_fwhm)
-        pars_out, skycorr_fit = run_skycorr(skycorr_config=skycorr_config, sci_spec=sci_spec, sky_spec=sky_spec)
+        
+        output_path = os.path.abspath(os.path.dirname(out_cont_line))
+        pars_out, skycorr_fit = run_skycorr(
+            skycorr_config_path=skycorr_config,
+            sci_spec=sci_spec,
+            sky_spec=sky_spec,
+            specs_dir=output_path,
+            out_dir=output_path,
+            spec_label=os.path.basename(out_cont_line).replace(".fits", ""),
+            MJD=sky_spec._header["MJD"],
+            TIME=(Time(sky_spec._header["MJD"], format="mjd").to_datetime() - datetime.fromisoformat('1970-01-01 00:00:00')).days*24*3600,
+            TELALT=sky_spec._header["ALT"],
+            WLG_TO_MICRON=1e-4,
+            FWHM=sky_spec._inst_fwhm.max()/np.diff(sky_spec._wave).min(),
+        )
 
         wavelength = skycorr_fit["lambda"]
-        sky_cont = Spectrum1D(wave=wavelength, data=skycorr_fit["mcflux"], error=skycorr_fit["mdflux"], mask=skycorr_fit["mmask"], inst_fwhm=sky_spec._inst_fwhm)
-        sky_line = Spectrum1D(wave=wavelength, data=skycorr_fit["mlflux"], error=skycorr_fit["mdflux"], mask=skycorr_fit["mmask"], inst_fwhm=sky_spec._inst_fwhm)
+        sky_cont = Spectrum1D(wave=wavelength, data=skycorr_fit["mcflux"], error=None, mask=None, inst_fwhm=sky_spec._inst_fwhm)
+        sky_line = Spectrum1D(wave=wavelength, data=skycorr_fit["mlflux"], error=None, mask=None, inst_fwhm=sky_spec._inst_fwhm)
         # TODO: implement skycorr method output
 
     # run model
     elif method == "model":
+        prefix = "SKYMODEL"
         # TODO: use the master sky parameters (datetime, observing conditions: lunation, moon distance, etc.) evaluate a sky model
         # TODO: use the resulting model continuum as physical representation of the target sky continuum
         # TODO: remove continuum contribution from original sky spectrum
-        resample_step, resolving_power = np.diff(sky_spec._wave).min(), np.int(np.ceil((sky_spec._wave/np.diff(sky_spec._wave).min()).max()))
+        resample_step, resolving_power = np.diff(sky_spec._wave).min(), int(np.ceil((sky_spec._wave/np.diff(sky_spec._wave).min()).max()))
         # BUG: implement missing parameters in this call of run_skymodel
-        pars_out, sky_model = run_skymodel(
+        inst_pars, model_pars, sky_model = run_skymodel(
             limlam=[sky_spec._wave.min()/1e4, sky_spec._wave.max()/1e4],
             dlam=resample_step/1e4,
             resol=resolving_power
         )
+        pars_out = {}
+        pars_out.update(inst_pars)
+        pars_out.update(model_pars)
         # TODO: the predicted continuum would be the full radiative component - airglow line
         # TODO: scale the predicted continuum with the sky_ref
         sky_cont = Spectrum1D(
@@ -692,13 +711,17 @@ def sepContinuumLine_drp(sky_ref, cont_line_out, method="skycorr", sky_sci="", s
         raise ValueError(f"Unknown method '{method}'. Valid mehods are: 'skycorr' (default), 'model' and 'fit'.")
     
     # TODO: explore the MaNGA way: sigma-clipping the lines and then smooth high-frequency features so that we get a continuum estimate
-
     # pack outputs in FITS file
     rss_cont_line = RSS.from_spectra1d((sky_cont, sky_line))
-    rss_cont_line.appendHeader(pars_out)
-    for key in pars_out:
-        rss_cont_line.extendHierarch(keyword=key, add_prefix="SKYCORR", verbose=False)
-    rss_cont_line.writeFitsData(cont_line_out)
+    if method == "skycorr":
+        header = combineHdr([Header(sky_spec._header), Header(sci_spec._header)])
+    else:
+        header = Header(sky_spec._header)
+    rss_cont_line.setHeader(header._header, origin=sky_ref)
+    # rss_cont_line.appendHeader(Header(fits.Header({pars_out[key]: ",".join(list(map(str, val))) if isinstance(val, (list,tuple)) else val for key, val in pars_out.items()})))
+    # for key in pars_out:
+    #     rss_cont_line.extendHierarch(keyword=key, add_prefix=prefix, verbose=False)
+    rss_cont_line.writeFitsData(out_cont_line)
 
 
 def evalESOSky_drp(sky_ref, rss_out, resample_step="optimal", resample_method="linear", err_sim='500', replace_error='1e10', parallel="auto"):

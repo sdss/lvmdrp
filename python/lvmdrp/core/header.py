@@ -124,7 +124,8 @@ class Header(object):
         self._header[key] = (Header_in._header[key], Header_in._header.comments[key])
 
     def appendHeader(self, Header, unique=True, strip=True):
-        self._header.append(Header._header.cards, strip=strip, unique=unique)
+        for card in Header._header.cards:
+            self._header.append(card)
 
     def setHdrValue(self, keyword, value, comment=None):
         if self._header is None:
