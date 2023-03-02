@@ -9,6 +9,7 @@ from scipy import optimize
 from scipy import interpolate
 from scipy import ndimage
 from lvmdrp.core import fit_profile
+from lvmdrp.core.header import Header
 from copy import  deepcopy
 
 
@@ -87,7 +88,7 @@ def wave_little_interpol(wavelist):
     return numpy.hstack(waveout)
 
 
-class Spectrum1D(object):
+class Spectrum1D(Header):
     def __init__(self, wave=None, data=None, error=None, mask=None, inst_fwhm=None):
         self._wave = wave
         self._data = data
