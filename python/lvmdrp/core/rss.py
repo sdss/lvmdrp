@@ -582,7 +582,8 @@ class RSS(FiberRows):
             mask = None
         inst_fwhm = self._inst_fwhm
         wave = self._wave
-        spec= Spectrum1D(wave = wave, data=data, error=error, inst_fwhm=inst_fwhm, mask=mask)
+        header = self._header
+        spec= Spectrum1D(wave = wave, data=data, error=error, inst_fwhm=inst_fwhm, mask=mask, header=header)
         return spec
 
     def selectSpec(self, min=0, max=0, method='median'):
