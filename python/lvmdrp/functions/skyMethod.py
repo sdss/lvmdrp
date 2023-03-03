@@ -637,7 +637,7 @@ def sepContinuumLine_drp(sky_ref, out_cont_line, method="skycorr", sky_sci="", s
     
     # run skycorr
     if method == "skycorr":
-        prefix = "SKYCORR"
+        prefix = "SC"
         if sky_sci != "":
             sci_spec = Spectrum1D()
             sci_spec.loadFitsData(sky_sci)
@@ -670,7 +670,7 @@ def sepContinuumLine_drp(sky_ref, out_cont_line, method="skycorr", sky_sci="", s
 
     # run model
     elif method == "model":
-        prefix = "SKYMODEL"
+        prefix = "SM"
         # TODO: use the master sky parameters (datetime, observing conditions: lunation, moon distance, etc.) evaluate a sky model
         # TODO: use the resulting model continuum as physical representation of the target sky continuum
         # TODO: remove continuum contribution from original sky spectrum
@@ -713,14 +713,16 @@ def sepContinuumLine_drp(sky_ref, out_cont_line, method="skycorr", sky_sci="", s
     # TODO: explore the MaNGA way: sigma-clipping the lines and then smooth high-frequency features so that we get a continuum estimate
     # pack outputs in FITS file
     rss_cont_line = RSS.from_spectra1d((sky_cont, sky_line))
-    if method == "skycorr":
-        header = combineHdr([Header(sky_spec._header), Header(sci_spec._header)])
-    else:
-        header = Header(sky_spec._header)
-    rss_cont_line.setHeader(header._header, origin=sky_ref)
-    # rss_cont_line.appendHeader(Header(fits.Header({pars_out[key]: ",".join(list(map(str, val))) if isinstance(val, (list,tuple)) else val for key, val in pars_out.items()})))
-    # for key in pars_out:
-    #     rss_cont_line.extendHierarch(keyword=key, add_prefix=prefix, verbose=False)
+    
+    header = sky_spec._header
+    for key, val in pars_out.items():
+        if isinstance(val, (list,tuple)):
+            val = ",".join(map(str, val))
+        elif isinstance(val, str) and (os.path.isfile(val) or os.path.isdir(val)):
+            val = os.path.basename(val)
+        header.append((f"HIERARCH {prefix} {key.upper()}", val))
+
+    rss_cont_line.setHeader(header, origin=sky_ref)
     rss_cont_line.writeFitsData(out_cont_line)
 
 
