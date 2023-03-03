@@ -29,8 +29,14 @@ class Header(object):
             self._origin = None
 
     def setHeader(self, header, origin=None):
+        if isinstance(header, Header):
+            header = header._header
+        elif isinstance(header, pyfits.Header):
+            pass
+        elif isinstance(header, dict):
+            header = pyfits.Header(header)
         self._header = header
-        self._origin=origin
+        self._origin = origin
 
     def loadFitsHeader(self, filename,  extension = 0, removeEmpty=0):
         """
@@ -120,11 +126,17 @@ class Header(object):
     def getHeader(self):
         return self._header
 
-    def copyHdrKey(self, Header_in, key):
+    def copyHdrKey(self, header, key):
         self._header[key] = (Header_in._header[key], Header_in._header.comments[key])
 
-    def appendHeader(self, Header, unique=True, strip=True):
-        for card in Header._header.cards:
+    def appendHeader(self, header, unique=True, strip=True):
+        if isinstance(header, Header):
+            cards = header._header.cards
+        elif isinstance(header, pyfits.Header):
+            cards = header.cards
+        elif isinstance(header, dict):
+            cards = header.items()
+        for card in cards:
             self._header.append(card)
 
     def setHdrValue(self, keyword, value, comment=None):
