@@ -2110,7 +2110,9 @@ def preprocRawFrame_drp(in_image, out_image, positions="00,10,01,11", orientatio
 	elif os_bound_x and os_bound_y:
 		os_y, os_x = os_bound_y.split(','), os_bound_x.split(',')
 	else:
-		pass
+		os_x, os_y = '[2021:2060, 1:4080]'.strip("[]").split(",")
+		os_y, os_x = os_y.split(":"), os_x.split(":")
+
 	os_y, os_x = (int(os_y[0])-1, int(os_y[1])), (int(os_x[0])-1, int(os_x[1]))
 
 	infer_trimsec = False
