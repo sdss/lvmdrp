@@ -1701,10 +1701,13 @@ def combineImages(images,  method='median', k=3):
         # creates an empty empty array to store the images in a stack
         dim = images[0].getDim()
         stack_image = numpy.zeros((len(images), dim[0], dim[1]), dtype=numpy.float32)
+        stack_mask = numpy.zeros((len(images), dim[0], dim[1]), dtype=bool)
 
         # load image data in to stack
         for i in range(len(images)):
             stack_image[i, :, :] = images[i].getData()
+            if images[i]._mask is not None:
+                stack_mask[i, :, :] = images[i].getMask()
 
         # combine the images according to the selected method
         if method=='median':
@@ -1721,16 +1724,21 @@ def combineImages(images,  method='median', k=3):
             # select pixels within given sigma limits around the median
             select = numpy.logical_and(stack_image<median+k*rms, stack_image>median-k*rms)
             # compute the number of good pixels
-            good_pixels = numpy.sum(select, 0)
+            good_pixels = numpy.sum(select, 0).astype(bool)
             # set all bad pixel to 0 to compute the mean
-            stack_image[numpy.logical_not(good_pixels)] = 0
+            stack_image[:, numpy.logical_not(good_pixels)] = 0
             new_image = numpy.sum(stack_image, 0)/good_pixels
+            # mask bad pixels
+            old_mask = numpy.sum(stack_mask, 0).astype(bool)
+            new_mask = numpy.logical_or(old_mask, numpy.isnan(new_image))
+            # replace masked pixels
+            new_image[new_mask] = 0
 
         if images[0]._header is not None:
             new_header = images[0]._header
         else:
             new_header = None
 
-        outImage = Image(data=new_image, header = new_header)
+        outImage = Image(data=new_image, mask=new_mask, header=new_header)
 
         return outImage
