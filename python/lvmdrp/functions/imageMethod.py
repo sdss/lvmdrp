@@ -2287,10 +2287,13 @@ def basicCalibration_drp(in_image, out_image, in_bias=None, in_dark=None, in_pix
 
     # run basic calibration
     calib_image = (proc_image - master_dark - master_bias) / master_flat
+    # propagate pixel mask
+    calib_image._mask = numpy.logical_or(proc_image._mask, numpy.isnan(calib_image._data))
+    calib_image._data[calib_image._mask] = 0
 
     # normalize in case of flat calibration
     if img_type == "flat" or img_type == "flatfield":
-        calib_image = calib_image / numpy.median(calib_image._data)
+        calib_image = calib_image / numpy.nanmedian(calib_image._data)
 
     calib_image.writeFitsData(out_image)
 
