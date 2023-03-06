@@ -179,11 +179,11 @@ libstruct.dat:
   - "2 airmass -1"
   - "10"
   - "3 time 0"
-  - "0 1 2 3 4"
+  - "0"
   - "4 season 0"
-  - "0 1 2 3 4 5 6"
+  - "4"
   - "5 resol 0"
-  - "0600000"
+  - "0060000"
   - "6 spectype 0"
   - "R T L"
 
@@ -195,7 +195,7 @@ sm_filenames.dat:
   # 1: time-dependent library, 2: PWV-dependent library
   # libstruct:  "libstruct.dat libstruct_pwv.dat"
   #libstruct:  "libstruct_pwv_time.dat libstruct_pwv_time.dat"
-  libstruct:  "libstruct.dat libstruct_pwv.dat"
+  libstruct:  "libstruct.dat libstruct.dat"
   # path to input data files
   # (relative to folder with this file or absolute path)
   datapath:  "."
