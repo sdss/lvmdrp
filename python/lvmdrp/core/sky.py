@@ -179,7 +179,7 @@ def run_skymodel(skymodel_path=SKYMODEL_INST_PATH, **kwargs):
     
     sky_logger.info("running skymodel from pre-computed airglow lines")
     out = subprocess.run(f"bin/calcskymodel".split(), capture_output=True)
-    if out.returncode != 0 or "error" in out.stderr.decode("utf-8").lower() or "error" in out.stdout.decode("utf-8").lower():
+    if out.returncode != 0 or "error" in out.stderr.decode("utf-8").lower():
         sky_logger.warning("no suitable airglow spectrum found")
         
         # extract parameters from config for radiative transfer run

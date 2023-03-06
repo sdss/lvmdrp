@@ -690,17 +690,17 @@ def sepContinuumLine_drp(sky_ref, out_cont_line, method="skycorr", sky_sci="", s
             wave=sky_model["lam"].value,
             data=sky_model["flux"].value - sky_model["flux_ael"].value,
             error=(sky_model["dflux2"] - sky_model["dflux1"]).value/2,
-            mask=np.zeros_like(sky_model["lam"].value, dtype=bool),
             inst_fwhm=sky_model["lam"].value / resolving_power
         )
+        sky_cont._mask = np.isnan(sky_cont._data)
         # resample and match in spectral resolution sky model as needed
-        if np.any(sky_model._wave != sky_spec._wave):
-            sky_model = sky_model.resampleSpec(ref_wave=sky_spec._wave, method="linear")
-        if np.any(sky_model._inst_fwhm != sky_spec._inst_fwhm):
-            sky_model = sky_model.matchFWHM(target_FWHM=sky_spec._inst_fwhm)
+        if np.any(sky_cont._wave != sky_spec._wave):
+            sky_cont = sky_cont.resampleSpec(ref_wave=sky_spec._wave, method="linear")
+        if np.any(sky_cont._inst_fwhm != sky_spec._inst_fwhm):
+            sky_cont = sky_cont.smoothGaussVariable(diff_fwhm=np.sqrt(sky_spec._inst_fwhm**2 - sky_cont._inst_fwhm**2))
 
-        # TODO: verify that the transmission spectrum is in the form of a factor
-        sky_line = sky_spec / sky_cont
+        # calculate the line component
+        sky_line = sky_spec - sky_cont
     # run fit
     elif method == "fit":
         # TODO: build a sky model library with continuum and line separated (ESO skycalc)
