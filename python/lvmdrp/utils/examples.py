@@ -3,13 +3,13 @@
 import os
 import subprocess
 import zipfile
+import pickle
 
 from astropy.table import Table
 from astropy.io import fits
-from functools import lru_cache
 from tqdm import tqdm
 
-from . import logger
+from lvmdrp.utils import logger
 
 examples_logger = logger.get_logger(name=__name__)
 
@@ -54,10 +54,14 @@ def fetch_example_data(url, name, dest_path, ext="zip"):
     else:
         examples_logger.info("example data already exists")
 
-@lru_cache(maxsize=1)
-def get_frames_metadata(path):
+def get_frames_metadata(path, suffix=".fits.gz"):
     """Return astropy.table.Table containing useful metadata from 2D raw frames"""
-    frames = [os.path.join(root, frame_name) for root, _, frame_names in os.walk(path) for frame_name in frame_names if frame_name.endswith(".fit.gz")]
+    CACHE_PATH = os.path.join(path, "frames_table.pkl")
+    if os.path.isfile(CACHE_PATH):
+        examples_logger.info(f"loading cached metadata from '{CACHE_PATH}'")
+        return pickle.load(open(CACHE_PATH, "rb"))
+    
+    frames = [os.path.join(root, frame_name) for root, _, frame_names in os.walk(path) for frame_name in frame_names if frame_name.endswith(suffix)]
     examples_logger.info(f"extracting metadata from {len(frames)} frames")
     frames_table = Table(names=["imagetyp", "spec", "camera", "expnum", "exptime", "path"], dtype=[str, str, str, str, float, str])
     for frame_path in tqdm(frames, ascii=True):
@@ -65,7 +69,11 @@ def get_frames_metadata(path):
         exptime = header["EXPTIME"]
         camera, expnum = parse_sdr_name(frame_path)
         spec = f"sp{camera[-1]}"
-        imagetyp = frame_path.split(os.sep)[-2]
+        imagetyp = header["FLAVOR"]
         frames_table.add_row([imagetyp, spec, camera, expnum, exptime, frame_path])
     examples_logger.info("successfully extracted metadata")
+
+    examples_logger.info(f"caching metadata to '{CACHE_PATH}'")
+    pickle.dump(frames_table, open(CACHE_PATH, "wb"))
+
     return frames_table
