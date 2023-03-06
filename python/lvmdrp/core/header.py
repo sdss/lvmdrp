@@ -127,7 +127,7 @@ class Header(object):
         return self._header
 
     def copyHdrKey(self, header, key):
-        self._header[key] = (Header_in._header[key], Header_in._header.comments[key])
+        self._header[key] = (header._header[key], header._header.comments[key])
 
     def appendHeader(self, header, unique=True, strip=True):
         if isinstance(header, Header):

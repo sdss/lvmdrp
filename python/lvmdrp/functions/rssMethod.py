@@ -155,7 +155,7 @@ def detWaveSolution_drp(in_arc, out_wave, out_lsf, in_ref_lines='', ref_fiber=''
 		nlines = len(lines)-1
 		pixel = numpy.zeros(nlines, dtype=numpy.float32) # empty for pixel position
 		ref_lines = numpy.zeros(nlines, dtype=numpy.float32) # empty for reference wavelength
-		use_fwhm = numpy.zeros(nlines, dtype="bool") # empty for reference wavelength
+		use_fwhm = numpy.zeros(nlines, dtype=bool) # empty for reference wavelength
 		ref_fiber = int(lines[0]) # the reference fiber for the initial positions
 		# read the information from file
 		for i in range(1, nlines+1):
@@ -175,6 +175,7 @@ def detWaveSolution_drp(in_arc, out_wave, out_lsf, in_ref_lines='', ref_fiber=''
 		nlines = len(pixels)
 		pixel = numpy.zeros(nlines, dtype=numpy.float32) # empty for pixel position
 		ref_lines = numpy.zeros(nlines, dtype=numpy.float32) # empty for reference wavelength
+		use_fwhm = numpy.ones(len(ref_lines), dtype=bool)
 		# iterate over the different lines and convert to float
 		for i in range(len(ref)):
 			ref_lines[i] = float(ref[i])
