@@ -583,7 +583,7 @@ def findPeaksAuto_drp(in_image, out_peaks, nfibers,  disp_axis='X', threshold='5
 		print('%i Fibers found'%(len(centers)))
 		pylab.plot(cut._data, '-k')
 		pylab.plot(peaks[0],peaks[2] ,'or')
-		pylab.plot(centers, numpy.ones(len(centers))*4000.0, 'xg')
+		pylab.plot(centers, numpy.ones(len(centers))*(peaks[2].max()*0.5), 'xg')
 		pylab.show()
 
 def findPeaksOffset_drp(image, peaks_master, out_peaks, disp_axis='X', threshold='1500', median_box='8', median_cross='1', slice='', method='gauss',  init_sigma='1.0',accuracy=1.2):
@@ -2251,51 +2251,52 @@ def preprocRawFrame_drp(in_image, out_image, positions="00,10,01,11", orientatio
 
 def basicCalibration_drp(in_image, out_image, in_bias=None, in_dark=None, in_pixelflat=None):
 
-    proc_image = loadImage(in_image).convertUnit(unit="e-")
-    exptime = proc_image._header["EXPTIME"]
-    img_type = proc_image._header["IMAGETYP"].lower()
+	proc_image = loadImage(in_image).convertUnit(unit="e-")
+	exptime = proc_image._header["EXPTIME"]
+	img_type = proc_image._header["IMAGETYP"].lower()
 
-    # dummy calibration images
-    dummy_bias = Image(data=numpy.zeros_like(proc_image._data))
-    dummy_dark = Image(data=numpy.zeros_like(proc_image._data))
-    dummy_flat = Image(data=numpy.ones_like(proc_image._data))
+	# dummy calibration images
+	dummy_bias = Image(data=numpy.zeros_like(proc_image._data))
+	dummy_dark = Image(data=numpy.zeros_like(proc_image._data))
+	dummy_flat = Image(data=numpy.ones_like(proc_image._data))
 
-    # read master bias
-    if img_type in ["bias"] or (in_bias is None or not os.path.isfile(in_bias)):
-        master_bias = dummy_bias
-    else:
-        master_bias = loadImage(in_bias).convertUnit(unit="e-")
-    
-    # read master dark
-    if img_type in ["bias", "dark"] or (in_dark is None or not os.path.isfile(in_dark)):
-        master_dark = dummy_dark
-    else:
-        master_dark = loadImage(in_dark).convertUnit(unit="e-")
-        # scale down the dark if needed
-        factor = exptime / master_dark._header["EXPTIME"]
-        if factor > 1.0:
-            # WARNING: scaling up
-            pass 
-        master_dark *= factor
+	# read master bias
+	if img_type in ["bias"] or (in_bias is None or not os.path.isfile(in_bias)):
+		master_bias = dummy_bias
+	else:
+		master_bias = loadImage(in_bias).convertUnit(unit="e-")
 
-    # read master flat
-    if img_type in ["bias", "dark", "flat", "flatfield"] or (in_pixelflat is None or not os.path.isfile(in_pixelflat)):
-        master_flat = dummy_flat
-    else:
-        master_flat = loadImage(in_pixelflat).convertUnit(unit="e-")
+	# read master dark
+	if img_type in ["bias", "dark"] or (in_dark is None or not os.path.isfile(in_dark)):
+		master_dark = dummy_dark
+	else:
+		master_dark = loadImage(in_dark).convertUnit(unit="e-")
+		# scale down the dark if needed
+		factor = exptime / master_dark._header["EXPTIME"]
+		if factor > 1.0:
+			# WARNING: scaling up
+			pass 
+		master_dark *= factor
+
+	# read master flat
+	if img_type in ["bias", "dark", "flat", "flatfield"] or (in_pixelflat is None or not os.path.isfile(in_pixelflat)):
+		master_flat = dummy_flat
+	else:
+		master_flat = loadImage(in_pixelflat).convertUnit(unit="e-")
 
 
-    # run basic calibration
-    calib_image = (proc_image - master_dark - master_bias) / master_flat
-    # propagate pixel mask
-    calib_image._mask = numpy.logical_or(proc_image._mask, numpy.isnan(calib_image._data))
-    calib_image._data[calib_image._mask] = 0
+	# run basic calibration
+	calib_image = (proc_image - master_dark - master_bias) / master_flat
+	# propagate pixel mask
+	calib_image._mask = numpy.logical_or(proc_image._mask, numpy.isnan(calib_image._data))
+	calib_image._mask = numpy.logical_or(calib_image._mask, numpy.isinf(calib_image._data))
+	calib_image._data[calib_image._mask] = 0
 
-    # normalize in case of flat calibration
-    if img_type == "flat" or img_type == "flatfield":
-        calib_image = calib_image / numpy.nanmedian(calib_image._data)
+	# normalize in case of flat calibration
+	if img_type == "flat" or img_type == "flatfield":
+		calib_image = calib_image / numpy.nanmedian(calib_image._data)
 
-    calib_image.writeFitsData(out_image)
+	calib_image.writeFitsData(out_image)
 
 def createMasterFrame_drp(in_images, out_image, reject_cr=False, exptime_thresh=5, **cr_kwargs):
     """

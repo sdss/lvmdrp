@@ -300,8 +300,6 @@ def detWaveSolution_drp(in_arc, out_wave, out_lsf, in_ref_lines='', ref_fiber=''
 	wave_trace.writeFitsData(out_wave)
 	fwhm_trace.writeFitsData(out_lsf)
 
-	return cent_wave[:, select_lines], fwhm_wave[select_lines]
-
 # TODO:
 # * merge arc_wave and arc_fwhm into lvmArc product, change variable name to in_arc
 def createPixTable_drp(in_rss, out_rss, arc_wave, arc_fwhm='', cropping=''):
