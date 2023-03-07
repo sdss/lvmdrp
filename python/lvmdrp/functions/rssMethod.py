@@ -377,13 +377,13 @@ def detWaveSolution_drp(in_arc, out_wave, out_lsf, in_ref_lines='', ref_fiber=''
 			plt.plot(numpy.arange(arc._data.shape[1]), fwhm_sol[i, :])
 			plt.show()
 	#print numpy.abs(poly_fwhm_disp)
-	arc.setHdrValue('hierarch PIPE FWHM POLY', '%d'%(numpy.abs(poly_fwhm_disp)), 'Order of the resolution polynomial')
+	arc.setHdrValue('HIERARCH PIPE FWHM POLY', '%d'%(numpy.abs(poly_fwhm_disp)), 'Order of the resolution polynomial')
 	fwhm_trace = FiberRows(data = fwhm_sol, header = arc.getHeader())
 	#arc.removeHdrEntries(keywords=['PIPE FWHM POLY'])
-	arc.setHdrValue('hierarch PIPE DISP POLY', '%d'%(numpy.abs(poly_dispersion)), 'Order of the dispersion polynomial')
-	arc.setHdrValue('hierarch PIPE DISP RMS MEDIAN', '%.4f'%(numpy.median(rms[good_fibers])), 'Median RMS of disp sol')
-	arc.setHdrValue('hierarch PIPE DISP RMS MIN', '%.4f'%(numpy.min(rms[good_fibers])), 'Min RMS of disp sol')
-	arc.setHdrValue('hierarch PIPE DISP RMS MAX', '%.4f'%(numpy.max(rms[good_fibers])), 'Max RMS of disp sol')
+	arc.setHdrValue('HIERARCH PIPE DISP POLY', '%d'%(numpy.abs(poly_dispersion)), 'Order of the dispersion polynomial')
+	arc.setHdrValue('HIERARCH PIPE DISP RMS MEDIAN', '%.4f'%(numpy.median(rms[good_fibers])), 'Median RMS of disp sol')
+	arc.setHdrValue('HIERARCH PIPE DISP RMS MIN', '%.4f'%(numpy.min(rms[good_fibers])), 'Min RMS of disp sol')
+	arc.setHdrValue('HIERARCH PIPE DISP RMS MAX', '%.4f'%(numpy.max(rms[good_fibers])), 'Max RMS of disp sol')
 
 	wave_trace = FiberRows(data = wave_sol, header = arc.getHeader())
 
@@ -432,9 +432,9 @@ def createPixTable_drp(in_rss, out_rss, arc_wave, arc_fwhm='', cropping=''):
 		rss._mask = rss._mask[:, crop_start:crop_end]
 
 	try:
-		rss.copyHdrKey(wave_trace, 'PIPE DISP RMS MEDIAN')
-		rss.copyHdrKey(wave_trace, 'PIPE DISP RMS MIN')
-		rss.copyHdrKey(wave_trace, 'PIPE DISP RMS MAX')
+		rss.copyHdrKey(wave_trace, 'HIERARCH PIPE DISP RMS MEDIAN')
+		rss.copyHdrKey(wave_trace, 'HIERARCH PIPE DISP RMS MIN')
+		rss.copyHdrKey(wave_trace, 'HIERARCH PIPE DISP RMS MAX')
 	except KeyError:
 		pass
 
@@ -527,8 +527,8 @@ def checkPixTable_drp(in_rss, ref_lines, logfile, blocks='15',  init_back='100.0
 	off_disp_rms=numpy.std(offset_pix[good_fiber, :])
 	off_disp_median = float('%.4f'%off_disp_median) if numpy.isfinite(off_disp_median) else str(off_disp_median)
 	off_disp_rms    = float('%.4f'%off_disp_rms) if numpy.isfinite(off_disp_rms) else str(off_disp_rms)
-	rss.setHdrValue('hierarch PIPE FLEX XOFF', off_disp_median, 'flexure offset in x-direction')
-	rss.setHdrValue('hierarch PIPE FLEX XRMS', off_disp_rms, 'flexure rms in x-direction')
+	rss.setHdrValue('HIERARCH PIPE FLEX XOFF', off_disp_median, 'flexure offset in x-direction')
+	rss.setHdrValue('HIERARCH PIPE FLEX XRMS', off_disp_rms, 'flexure rms in x-direction')
 	rss.writeFitsHeader(in_rss)
 	log.close()
 
@@ -805,7 +805,7 @@ def matchResolution_drp(in_rss, out_rss, targetFWHM, parallel='auto'):
 		for i in range(len(rss)):
 			rss[i]=rss[i].smoothGaussVariable(smoothFWHM[i, :])
 	rss._inst_fwhm=None
-	rss.setHdrValue('hierarch PIPE SPEC RES', targetFWHM, 'FWHM in A of spectral resolution')
+	rss.setHdrValue('HIERARCH PIPE SPEC RES', targetFWHM, 'FWHM in A of spectral resolution')
 	rss.writeFitsData(out_rss)
 
 def splitFibers_drp(in_rss, splitted_out, contains):
@@ -897,11 +897,11 @@ def createFiberFlat_drp(in_rss, out_rss, smooth_poly='0', smooth_median='0', cli
 	median = numpy.median(fiberflat._data[select])
 	std = numpy.std(fiberflat._data[select])
 
-	fiberflat.setHdrValue('hierarch PIPE FLAT MIN', float('%.3f'%(min)), 'Mininum fiberflat value')
-	fiberflat.setHdrValue('hierarch PIPE FLAT MAX', float('%.3f'%(max)), 'Maximum fiberflat value')
-	fiberflat.setHdrValue('hierarch PIPE FLAT AVR', float('%.2f'%(mean)), 'Mean fiberflat value')
-	fiberflat.setHdrValue('hierarch PIPE FLAT MED', float('%.2f'%(median)), 'Median fiberflat value')
-	fiberflat.setHdrValue('hierarch PIPE FLAT STD', float('%.3f'%(std)), 'rms of fiberflat values')
+	fiberflat.setHdrValue('HIERARCH PIPE FLAT MIN', float('%.3f'%(min)), 'Mininum fiberflat value')
+	fiberflat.setHdrValue('HIERARCH PIPE FLAT MAX', float('%.3f'%(max)), 'Maximum fiberflat value')
+	fiberflat.setHdrValue('HIERARCH PIPE FLAT AVR', float('%.2f'%(mean)), 'Mean fiberflat value')
+	fiberflat.setHdrValue('HIERARCH PIPE FLAT MED', float('%.2f'%(median)), 'Median fiberflat value')
+	fiberflat.setHdrValue('HIERARCH PIPE FLAT STD', float('%.3f'%(std)), 'rms of fiberflat values')
 
 	if fiberflat is None:
 		print('Please resample the RSS frame to a common wavelength solution!')
@@ -1545,7 +1545,7 @@ def registerSDSS_drp(in_rss, out_rss, sdss_file, sdss_field, filter, ra, dec, hd
 			dec: string of float
 					Declination of reference point to center the IFU in degrees
 			hdr_prefix : string
-					Prefix for the FITS keywords in which the measurement parameters are stored. Need to start with 'hierarch'
+					Prefix for the FITS keywords in which the measurement parameters are stored. Need to start with 'HIERARCH'
 			search_box : string list of floats with default '20.0,2.6'
 					Search box size  for subsequent iterations to construct the chi-square plane of the matching
 			step : string list of floats with default '1.0,0.2'
@@ -1564,8 +1564,8 @@ def registerSDSS_drp(in_rss, out_rss, sdss_file, sdss_field, filter, ra, dec, hd
 
 			Examples
 			----------------
-			user:> lvmdrp rss registerSDSS RSS_IN.fits RSS_OUT.fits SDSS_r_IMG.fits SDSS_FIELD.fit sloan_r.dat,0,1 234.0 20.3 'hierarch TEST'
-			user:> lvmdrp rss registerSDSS RSS_IN.fits RSS_OUT.fits SDSS_r_IMG.fits SDSS_FIELD.fit sloan_r.dat,0,1 234.0 20.3 'hierarch TEST'  search_box=20,2 step=2,0.5 quality_figure='test.png' parralel=3 verbose=1
+			user:> lvmdrp rss registerSDSS RSS_IN.fits RSS_OUT.fits SDSS_r_IMG.fits SDSS_FIELD.fit sloan_r.dat,0,1 234.0 20.3 'HIERARCH TEST'
+			user:> lvmdrp rss registerSDSS RSS_IN.fits RSS_OUT.fits SDSS_r_IMG.fits SDSS_FIELD.fit sloan_r.dat,0,1 234.0 20.3 'HIERARCH TEST'  search_box=20,2 step=2,0.5 quality_figure='test.png' parralel=3 verbose=1
 	"""
 
 	search_box = numpy.array(search_box.split(',')).astype(numpy.float32)

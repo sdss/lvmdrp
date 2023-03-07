@@ -1167,15 +1167,15 @@ def glueCCDFrames_drp(images, out_image, boundary_x, boundary_y, positions, orie
 	# add gain keywords for the different subimages (CDDs/Amplifies)
 	if gain!='':
 		for i in range(len(imgs)):
-			full_img.setHdrValue('hierarch AMP%i GAIN'%(i+1), gains[i], 'Gain value of CCD amplifier %i'%(i+1))
+			full_img.setHdrValue('HIERARCH AMP%i GAIN'%(i+1), gains[i], 'Gain value of CCD amplifier %i'%(i+1))
 	# add read-out noise keywords for the different subimages (CDDs/Amplifies)
 	if rdnoise!='':
 		for i in range(len(imgs)):
-			full_img.setHdrValue('hierarch AMP%i RDNOISE'%(i+1), rdnoises[i], 'Read-out noise of CCD amplifier %i'%(i+1))
+			full_img.setHdrValue('HIERARCH AMP%i RDNOISE'%(i+1), rdnoises[i], 'Read-out noise of CCD amplifier %i'%(i+1))
 	# add bias of overscan region for the different subimages (CDDs/Amplifies)
 	for i in range(len(imgs)):
 		if subtract_overscan:
-			full_img.setHdrValue('hierarch AMP%i OVERSCAN'%(i+1), bias[i], 'Overscan median (bias) of CCD amplifier %i'%(i+1))
+			full_img.setHdrValue('HIERARCH AMP%i OVERSCAN'%(i+1), bias[i], 'Overscan median (bias) of CCD amplifier %i'%(i+1))
 	##full_img.setHeader(header=header) # set the modified FITS Header
 	#write out FITS file
 	if compute_error:
@@ -1527,8 +1527,8 @@ def offsetTrace_drp(image, trace, disp, lines, logfile,  blocks='15', disp_axis=
 	off_trace_median= numpy.median(numpy.array(off_trace_all))
 	off_trace_rms = numpy.std(numpy.array(off_trace_all))
 	off_trace_rms = '%.4f' % off_trace_rms if numpy.isfinite(off_trace_rms) else 'NAN'
-	img.setHdrValue('hierarch PIPE FLEX YOFF', float('%.4f'%off_trace_median)*-1, 'flexure offset in y-direction')
-	img.setHdrValue('hierarch PIPE FLEX YRMS', off_trace_rms, 'flexure rms in y-direction')
+	img.setHdrValue('HIERARCH PIPE FLEX YOFF', float('%.4f'%off_trace_median)*-1, 'flexure offset in y-direction')
+	img.setHdrValue('HIERARCH PIPE FLEX YRMS', off_trace_rms, 'flexure rms in y-direction')
 	img.writeFitsHeader(image)
 	log.close()
 
@@ -1632,8 +1632,8 @@ def offsetTrace2_drp(image, trace, trace_fwhm, disp, lines, logfile,  blocks='15
 
 	off_trace_median= numpy.median(numpy.array(off_trace_all))
 	off_trace_rms = numpy.std(numpy.array(off_trace_all))
-	img.setHdrValue('hierarch PIPE FLEX YOFF', float('%.4f'%off_trace_median)*-1, 'flexure offset in y-direction')
-	img.setHdrValue('hierarch PIPE FLEX YRMS', float('%.4f'%off_trace_rms), 'flexure rms in y-direction')
+	img.setHdrValue('HIERARCH PIPE FLEX YOFF', float('%.4f'%off_trace_median)*-1, 'flexure offset in y-direction')
+	img.setHdrValue('HIERARCH PIPE FLEX YRMS', float('%.4f'%off_trace_rms), 'flexure rms in y-direction')
 	img.writeFitsHeader(image)
 	log.close()
 
@@ -1744,11 +1744,11 @@ def extractSpec_drp(in_image, out_rss, in_trace,  method='optimal',  aperture='7
 	rss.setHdrValue('NAXIS1',  data.shape[1])
 	rss.setHdrValue('DISPAXIS',  1)
 	if method=='optimal':
-		rss.setHdrValue('hierarch PIPE CDISP FWHM MIN',numpy.min(trace_fwhm._data[trace_mask._mask==False], initial=0))
-		rss.setHdrValue('hierarch PIPE CDISP FWHM MAX',numpy.max(trace_fwhm._data[trace_mask._mask==False], initial=0))
-		rss.setHdrValue('hierarch PIPE CDISP FWHM AVG',numpy.mean(trace_fwhm._data[trace_mask._mask==False]) if data.size != 0 else 0)
-		rss.setHdrValue('hierarch PIPE CDISP FWHM MED',numpy.median(trace_fwhm._data[trace_mask._mask==False]) if data.size != 0 else 0)
-		rss.setHdrValue('hierarch PIPE CDISP FWHM SIG',numpy.std(trace_fwhm._data[trace_mask._mask==False]) if data.size != 0 else 0)
+		rss.setHdrValue('HIERARCH PIPE CDISP FWHM MIN',numpy.min(trace_fwhm._data[trace_mask._mask==False], initial=0))
+		rss.setHdrValue('HIERARCH PIPE CDISP FWHM MAX',numpy.max(trace_fwhm._data[trace_mask._mask==False], initial=0))
+		rss.setHdrValue('HIERARCH PIPE CDISP FWHM AVG',numpy.mean(trace_fwhm._data[trace_mask._mask==False]) if data.size != 0 else 0)
+		rss.setHdrValue('HIERARCH PIPE CDISP FWHM MED',numpy.median(trace_fwhm._data[trace_mask._mask==False]) if data.size != 0 else 0)
+		rss.setHdrValue('HIERARCH PIPE CDISP FWHM SIG',numpy.std(trace_fwhm._data[trace_mask._mask==False]) if data.size != 0 else 0)
 	rss.writeFitsData(out_rss)
 
 def calibrateSDSSImage_drp(file_in, file_out, field_file):
