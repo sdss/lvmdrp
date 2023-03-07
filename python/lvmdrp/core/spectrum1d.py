@@ -918,10 +918,11 @@ class Spectrum1D(Header):
                 new_mask = None
         
         if extrapolate is not None:
-            new_data = numpy.where(new_data<=0, extrapolate._data, new_data)
-            new_error = numpy.where(new_data<=0, extrapolate._error, new_error)
-            new_mask = numpy.where(new_data<=0, extrapolate._mask, new_mask)
-            new_inst_fwhm = numpy.where(new_data<=0, extrapolate._inst_fwhm, new_inst_fwhm)
+            out_mask = numpy.logical_or(ref_wave<self._wave[0], ref_wave>self._wave[-1])
+            new_data = numpy.where(out_mask, extrapolate._data, new_data)
+            new_error = numpy.where(out_mask, extrapolate._error, new_error)
+            new_mask = numpy.where(out_mask, extrapolate._mask, new_mask)
+            new_inst_fwhm = numpy.where(out_mask, extrapolate._inst_fwhm, new_inst_fwhm)
 
         spec_out = Spectrum1D(wave=ref_wave, data=new_data, error=new_error, mask=new_mask, inst_fwhm=new_inst_fwhm)
         return spec_out
