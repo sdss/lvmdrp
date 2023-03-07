@@ -40,9 +40,9 @@ class RSS(FiberRows):
             rss[i] = spectra_list[i]
 
         # handle uniform wavelength
-        if numpy.allclose(numpy.repeat(rss._wave[None, :], rss._fibers, axis=0), rss._wave):
+        if numpy.allclose(numpy.repeat(rss._wave[0][None, :], rss._fibers, axis=0), rss._wave):
             rss.setWave(rss._wave[0])
-        if numpy.allclose(numpy.repeat(rss._inst_fwhm[None, :], rss._fibers, axis=0), rss._inst_fwhm):
+        if numpy.allclose(numpy.repeat(rss._inst_fwhm[0][None, :], rss._fibers, axis=0), rss._inst_fwhm):
             rss.setInstFWHM(rss._inst_fwhm[0])
         return rss
 
