@@ -1810,7 +1810,16 @@ def joinSpecChannels(in_rss, out_rss, parallel="auto"):
 
         spectra.append(spec_brz)
 
-    rss_brz = RSS.from_spectra1d(spectra)
+    # update header
+    header = rss_b._header
+    header["CCD"] = ",".join([rss_b._header["CCD"], rss_r._header["CCD"], rss_z._header["CCD"]])
+    if "CAMERAS" in header:
+        header["CAMERAS"] = header["CCD"].translate({ord(i): None for i in "123"})
+    # create RSS
+    rss_brz = RSS.from_spectra1d(spectra, header=header)
+    # update mask
+    rss_brz._mask = numpy.logical_or(rss_brz._mask, numpy.isnan(rss_brz._data))
+    
     rss_brz.writeFitsData(out_rss)
 
 # TODO: from Law+2016
