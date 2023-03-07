@@ -25,7 +25,7 @@ To install the DRP along with its dependencies, you need to run the following st
 5. Switch to the (current) development branch:
     > `git checkout development`
 
-6. Install the DRP package in the current python environment (see *Contributing* section below for a replacement of this step):
+6. Install the DRP package in the current python environment (see [contributing](#contributing-to-lvm-drp-development) section below for a replacement of this step):
     > `pip install --no-cache-dir . 2>&1 | tee today.txt`
 
 ## Testing the installation
@@ -45,10 +45,42 @@ you need to run the following commands, **also within DRP python environment**.
 
 ## Creating Test Data
 
-## Tutorials
+We encourage the reader to use the [LVM data simulator](https://github.com/sdss/lvmdatasimulator) to generate data for testing the DRP. But if you want to skip that step, we have already some simulations produced using the same simulator, so you don't have to run the simulator yourself, which can be computationally demanding in the case of 2D simulations.
 
-<!-- write tutorial notebooks -->
-You will find tutorial notebooks to run different DRP routines in the [examples]() folder. Here is a list of the tutorials
+If you follow the [examples](#examples) below, you will have access to the above mentioned simulations.
+
+## Examples
+
+You will find tutorial notebooks to run different DRP routines in the [examples](https://github.com/sdss/lvmdrp/tree/development/examples) folder. Here is you will find Jupyter Notebooks that illustrate different tasks in the DRP:
+
+- [Basic Calibration](): reduction of calibration images: bias, dark and pixel flats; as well as reduction of arcs and fiber flats.
+- [Wavelength Calibration](): automatic pixel to wavelength mapping and wavelength and LSF fitting.
+- [Flux Calibration](): conversion of the extracted spectra from electrons to flux calibrated spectra.
+- [Sky Module](): several procedures to sky-subtract science spectra.
+
+In each of the links above you will find a short description of what's going on in each example and also the order in which those are intended to be followed.
+
+## Contributing to LVM-DRP development
+
+There are two ways in which you can contribute:
+
+- Testing the DRP and reporting bugs on Github or
+- By diving into the code to fix bugs and implement new features
+
+For those willing to contribute by coding, there are some steps to streamline the development process:
+
+1. Before you start coding on a new feature/bug-fix, make sure your **local** `development` branch is up to date:
+    > `git pull development`
+
+2. Create a branch to work on and make sure the name can be easily mappable to the work you intend to do:
+    > `git checkout -b <feature_name>`
+
+3. Afterwards, you can push your updates to the remote branch on Github:
+    > `git push`
+
+4. Finally, if you consider your feature is ready to be merged to the `development` branch, you can create a new [pull request at Github](https://github.com/sdss/lvmdrp/pulls).
+
+Regarding commits, I'm trying to go for an *atomic* approach, where each commit has a single purpose. So please try to avoid as much as possible pushing lots of unrelated changes in one commit.
 
 ## Troubleshooting
 
