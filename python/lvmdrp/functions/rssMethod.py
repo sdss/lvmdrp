@@ -6,8 +6,11 @@ except:
   pass
 from multiprocessing import cpu_count
 from multiprocessing import Pool
+from scipy import signal
 from scipy import ndimage
 from scipy import interpolate
+from rascal.util import refine_peaks
+from rascal.calibrator import Calibrator
 from astropy.wcs import WCS
 from lvmdrp.core.header import combineHdr
 from lvmdrp.core.fiberrows  import FiberRows
@@ -63,6 +66,93 @@ def mergeRSS_drp(files_in, file_out,  mergeHdr='1'):
 			else:
 				rss.append(rss_add, append_hdr=True)
 	rss.writeFitsData(file_out)
+
+def autoPixWaveMap_drp(in_arc, out_pixwave, elements, ref_fiber='300', coadd_fibers='10', line_heights='10', prominence='5', lines_dist='1', refine_window='3', wave_range='', pixels='', waves='', poly_deg='2', poly_kind='poly', plot='0'):
+
+	elements = elements.split(",")
+	ref_fiber = int(ref_fiber)
+	coadd_fibers = int(coadd_fibers)
+	line_heights = float(line_heights)
+	prominence = float(prominence)
+	lines_dist = int(lines_dist)
+	refine_window = int(refine_window)
+	poly_deg = int(poly_deg)
+	plot = bool(int(plot))
+	if wave_range != '':
+		wave_range = wave_range.split(",")
+		wave_range = float(wave_range[0]), float(wave_range[1])
+	else:
+		wave_range = [None, None]
+	if pixels != '':
+		pixels = pixels.split(",")
+		pixels = [float(pixel) for pixel in pixels]
+	if waves != '':
+		waves = waves.split(",")
+		waves = [float(wave) for wave in waves]
+	if len(pixels) != len(waves):
+		# WARNING: not matching pixels/waves given
+		pass
+
+	arc = RSS()
+	arc.loadFitsData(in_arc)
+
+	if coadd_fibers > 0:
+		spectrum = numpy.median(arc._data[ref_fiber-coadd_fibers:ref_fiber+coadd_fibers], axis=0)
+	else:
+		spectrum = arc._data[ref_fiber]
+
+	peaks, _ = signal.find_peaks(spectrum, height=line_heights, prominence=prominence, distance=lines_dist)
+	peaks_refined = refine_peaks(spectrum, peaks, window_width=refine_window)
+
+	c = Calibrator(peaks_refined, spectrum)
+	c.set_hough_properties(num_slopes=2000,
+							xbins=100,
+							ybins=100,
+							min_wavelength=wave_range[0],
+							max_wavelength=wave_range[1],
+							range_tolerance=500.,
+							linearity_tolerance=50)
+
+	c.add_atlas(elements=elements,
+				min_atlas_wavelength=wave_range[0],
+				max_atlas_wavelength=wave_range[1],
+				constrain_poly=True)
+
+	if pixels and waves:
+		for pix, wav in zip(pixels, waves):
+			c.add_pix_wave_pair(pix, wav)
+
+	c.set_ransac_properties(sample_size=5,
+							top_n_candidate=5,
+							linear=True,
+							filter_close=False,
+							ransac_tolerance=5,
+							candidate_weighted=True,
+							hough_weight=1.0)
+
+	c.do_hough_transform()
+
+	if plot:
+		_ = c.plot_arc(log_spectrum=False)
+
+	fit_coeff, _, _, rms, residual, peak_utilisation, _ = c.fit(max_tries=5000, fit_tolerance=10., fit_deg=poly_deg, fit_type=poly_kind)
+
+	if plot:
+		_ = c.plot_fit(fit_coeff,
+					plot_atlas=False,
+					log_spectrum=False,
+					tolerance=5.)
+
+		print("RMS: {}".format(rms))
+		print("Stdev error: {} A".format(numpy.abs(residual).std()))
+		print("Peaks utilisation rate: {}%".format(peak_utilisation*100))
+
+	_, m_pixels, m_waves = zip(*c.get_pix_wave_pairs())
+	with open(out_pixwave, "w") as f:
+		f.write(f"{ref_fiber}\n")
+		for i in range(len(m_pixels)):
+			f.write(f"{m_pixels[i]:>.2f} {m_waves[i]:>9.4f} {1:>1d}\n")
+
 
 # TODO:
 # * define ancillary product lvm-lxpeak for ref_line_file
