@@ -12,6 +12,10 @@ import numpy
 from scipy import ndimage
 
 
+def _chain_join(b, r, z):
+    return b.coaddSpec(r).coaddSpec(z)
+
+
 class RSS(FiberRows):
 
     @classmethod

@@ -1,9 +1,9 @@
 import numpy
 try:
-  import matplotlib
-  from matplotlib import pyplot as plt
+    import matplotlib
+    from matplotlib import pyplot as plt
 except:
-  pass
+    pass
 from multiprocessing import cpu_count
 from multiprocessing import Pool
 from scipy import signal
@@ -13,8 +13,8 @@ from rascal.util import refine_peaks
 from rascal.calibrator import Calibrator
 from astropy.wcs import WCS
 from lvmdrp.core.header import combineHdr
-from lvmdrp.core.fiberrows  import FiberRows
-from lvmdrp.core.rss  import RSS, loadRSS, glueRSS
+from lvmdrp.core.fiberrows import FiberRows
+from lvmdrp.core.rss import RSS, loadRSS, glueRSS, _chain_join
 from lvmdrp.core.spectrum1d  import Spectrum1D
 from lvmdrp.core.cube  import Cube
 from lvmdrp.core.image import loadImage
@@ -1760,49 +1760,48 @@ def DAR_registerSDSS_drp(in_rss, sdss_file, sdss_field, ra, dec, out_prefix,  re
 		plt.show()
 
 def joinSpecChannels(in_rss, out_rss, parallel="auto"):
-	rss_b = loadRSS(in_rss[0])
-	rss_r = loadRSS(in_rss[1])
-	rss_z = loadRSS(in_rss[2])
+    rss_b = loadRSS(in_rss[0])
+    rss_r = loadRSS(in_rss[1])
+    rss_z = loadRSS(in_rss[2])
 
-	# TODO: verify all RSS files have the same number of fibers
-	# TODO: verify overlapping wavelength ranges
+    # TODO: verify all RSS files have the same number of fibers
+    # TODO: verify overlapping wavelength ranges
 
-	# parallel or not
-	if parallel=='auto':
-		cpus = cpu_count()
-	else:
-		cpus = int(parallel)
-	if cpus>1:
-		pool = Pool(cpus)
+    # parallel or not
+    if parallel=='auto':
+        cpus = cpu_count()
+    else:
+        cpus = int(parallel)
+    if cpus>1:
+        pool = Pool(cpus)
 
-		result_spec = []
-		for ifiber in range(rss_b._fibers):
-			spec_b = rss_b.getSpec(ifiber)
-			spec_r = rss_r.getSpec(ifiber)
-			spec_z = rss_z.getSpec(ifiber)
+        result_spec = []
+        for ifiber in range(rss_b._fibers):
+            spec_b = rss_b.getSpec(ifiber)
+            spec_r = rss_r.getSpec(ifiber)
+            spec_z = rss_z.getSpec(ifiber)
 
-			chain_coadd = lambda b, r, z: b.coaddSpec(r).coaddSpec(z)
-			result_spec.append(pool.apply_async(chain_coadd, args=(spec_b, spec_r, spec_z)))
-		pool.close()
-		pool.join()
+            result_spec.append(pool.apply_async(_chain_join, args=(spec_b, spec_r, spec_z)))
+        pool.close()
+        pool.join()
 
-	# combine channels
-	spectra = []
-	for ifiber in range(rss_b._data.shape[0]):
-		if cpus > 1:
-			spec_brz = result_spec[ifiber].get()
-		else:
-			spec_b = rss_b.getSpec(ifiber)
-			spec_r = rss_r.getSpec(ifiber)
-			spec_z = rss_z.getSpec(ifiber)
+    # combine channels
+    spectra = []
+    for ifiber in range(rss_b._data.shape[0]):
+        if cpus > 1:
+            spec_brz = result_spec[ifiber].get()
+        else:
+            spec_b = rss_b.getSpec(ifiber)
+            spec_r = rss_r.getSpec(ifiber)
+            spec_z = rss_z.getSpec(ifiber)
 
-			spec_br = spec_b.coaddSpec(spec_r)
-			spec_brz = spec_br.coaddSpec(spec_z)
-		
-		spectra.append(spec_brz)
+            spec_br = spec_b.coaddSpec(spec_r)
+            spec_brz = spec_br.coaddSpec(spec_z)
 
-	rss_brz = RSS.from_spectra1d(spectra)
-	rss_brz.writeFitsData(out_rss)
+        spectra.append(spec_brz)
+
+    rss_brz = RSS.from_spectra1d(spectra)
+    rss_brz.writeFitsData(out_rss)
 
 # TODO: from Law+2016
 # 	* normalize each fiber to unity
