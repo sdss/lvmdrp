@@ -543,7 +543,8 @@ class RSS(FiberRows):
             disp = numpy.insert(disp, 0, disp[:, 0], 1)
             wave = self._wave[select].flatten()
             disp = disp[select].flatten()
-            idx = numpy.argsort(wave)
+            # idx = numpy.argsort(wave)
+            _, idx = numpy.unique(wave, return_index=True)
             wave = wave[idx]
             data = self._data[select].flatten()[idx]
             if self._error is not None:
@@ -554,6 +555,10 @@ class RSS(FiberRows):
                 inst_fwhm = self._inst_fwhm[select].flatten()[idx]
             else:
                 inst_fwhm = None
+            if self._mask is not None:
+                mask = self._mask[select].flatten()[idx]
+            else:
+                mask = None
         else:
             if self._mask is not None:
                 select = numpy.logical_not(self._mask)
@@ -574,15 +579,15 @@ class RSS(FiberRows):
                         data[i] = numpy.sum(self._data[select[:, i], i])
                         if error is not None:
                             error[i] = numpy.sqrt(numpy.sum(self._error[select[:, i], i]**2))
-        if self._mask is not None:
-            bad = numpy.sum(self._mask, 0)
-            mask = bad==self._fibers
-        else:
-            mask = None
-        inst_fwhm = self._inst_fwhm
-        wave = self._wave
+            if self._mask is not None:
+                bad = numpy.sum(self._mask, 0)
+                mask = bad==self._fibers
+            else:
+                mask = None
+            inst_fwhm = self._inst_fwhm
+            wave = self._wave
         header = self._header
-        spec= Spectrum1D(wave=wave, data=data, error=error, inst_fwhm=inst_fwhm, mask=mask, header=header)
+        spec = Spectrum1D(wave=wave, data=data, error=error, inst_fwhm=inst_fwhm, mask=mask, header=header)
         return spec
 
     def selectSpec(self, min=0, max=0, method='median'):
