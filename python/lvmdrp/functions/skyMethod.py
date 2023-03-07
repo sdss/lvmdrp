@@ -726,7 +726,7 @@ def sepContinuumLine_drp(sky_ref, out_cont_line, method="skycorr", sky_sci="", s
     rss_cont_line.writeFitsData(out_cont_line)
 
 
-def evalESOSky_drp(sky_ref, rss_out, resample_step="optimal", resample_method="linear", err_sim='500', replace_error='1e10', parallel="auto"):
+def evalESOSky_drp(sky_ref, out_rss, resample_step="optimal", resample_method="linear", err_sim='500', replace_error='1e10', parallel="auto"):
     """
     
         Evaluates the ESO sky model following the observing conditions in the given sky reference.
@@ -763,7 +763,7 @@ def evalESOSky_drp(sky_ref, rss_out, resample_step="optimal", resample_method="l
         sky_ref : string
             path to the reference spectrum from which observing conditions and ephemeris can be
             inferred to evaluate a ESO model spectrum
-        rss_out : string
+        out_rss : string
             path where the output RSS file will be saved
         resample_step : string, optional with default 'optimal'
             the resample step or method to use when interpolating the model in the sky reference
@@ -781,7 +781,7 @@ def evalESOSky_drp(sky_ref, rss_out, resample_step="optimal", resample_method="l
         Examples
         --------
 
-        user:> drp sky evalESOSky SKY_REF.fits RSS_OUT.fits
+        user:> drp sky evalESOSky SKY_REF.fits out_rss.fits
     """
 
     # read master configuration file
@@ -898,7 +898,7 @@ def evalESOSky_drp(sky_ref, rss_out, resample_step="optimal", resample_method="l
     # precipitable water vapour ('pwv' in mm; -1: bimonthly mean)
     # TODO: - ** radiative transfer code for molecular spectra ('rtcode', L or R)
     # TODO: - ** resolving power of molecular spectra in library ('resol')
-    resol = np.int(np.ceil((new_wave/resample_step).max()))
+    resol = int(np.ceil((new_wave/resample_step).max()))
     # TODO: - ** sky model components
 
     # TODO: move unit and data type conversions to within the run_skymodel routine
@@ -995,7 +995,7 @@ def evalESOSky_drp(sky_ref, rss_out, resample_step="optimal", resample_method="l
     rss = RSS.from_spectra1d(spectra_list=spectra_list)
     rss.setHeader(fits.Header(pars_out))
     # dump RSS file containing the
-    rss.writeFitsData(filename=rss_out)
+    rss.writeFitsData(filename=out_rss)
 
 
 def subtractGeocoronal_drp():
@@ -1277,7 +1277,7 @@ def coaddContinuumLine_drp(sky_cont_corr_in, sky_line_corr_in, sky_corr_out, lin
     sky_corr.writeFitsData(sky_corr_out)
 
 
-def subtractSky_drp(rss_in, rss_out, sky_ref, sky_out, factor='1', scale_region='', scale_ind=False, parallel='auto'):
+def subtractSky_drp(in_rss, out_rss, sky_ref, out_sky, factor='1', scale_region='', scale_ind=False, parallel='auto'):
     """
 
         Subtracts a (sky) spectrum, which was stored as a FITS file, from the whole RSS.
@@ -1285,13 +1285,13 @@ def subtractSky_drp(rss_in, rss_out, sky_ref, sky_out, factor='1', scale_region=
 
         Parameters
         --------------
-        rss_in : string
+        in_rss : string
             input RSS FITS file
-        rss_out : string
+        out_rss : string
             output RSS FITS file with spectrum subtracted
         sky_ref : string
             input sky spectrum in FITS format.
-        sky_out : string
+        out_sky : string
             output file to store the RSS sky spectra.
         factor : string of float, optional with default: '1'
             the default value for the flux scale factor in case the fitting fails
@@ -1305,7 +1305,7 @@ def subtractSky_drp(rss_in, rss_out, sky_ref, sky_out, factor='1', scale_region=
 
         Examples
         ----------------
-        user:> drp sky subtractSkySpec RSS_IN.fits RSS_OUT.fits SKY_SPEC.fits
+        user:> drp sky subtractSkySpec in_rss.fits out_rss.fits SKY_SPEC.fits
 
     """
 
@@ -1315,7 +1315,7 @@ def subtractSky_drp(rss_in, rss_out, sky_ref, sky_out, factor='1', scale_region=
         region = scale_region.split(',')
         wave_region = [float(region[0]), float(region[1])]
     rss = RSS()
-    rss.loadFitsData(rss_in)
+    rss.loadFitsData(in_rss)
     
     sky_spec = Spectrum1D()
     sky_spec.loadFitsData(sky_ref)
@@ -1379,8 +1379,8 @@ def subtractSky_drp(rss_in, rss_out, sky_ref, sky_out, factor='1', scale_region=
 
     if scale_region != '':
         rss.setHdrValue('HIERARCH PIPE SKY SCALE', float('%.3f'%scale_factor), 'sky spectrum scale factor')
-    rss.writeFitsData(rss_out)
-    sky_rss.writeFitsData(sky_out)
+    rss.writeFitsData(out_rss)
+    sky_rss.writeFitsData(out_sky)
 
 
 def refineContinuum_drp():
