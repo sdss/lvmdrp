@@ -631,7 +631,7 @@ def correctPixTable_drp(in_rss, out_rss, logfile, ref_id, smooth_poly_cross='', 
 		rss[i]=spec
 	rss.writeFitsData(out_rss)
 
-def resampleWave_drp(in_rss, out_rss, method='spline', start_wave='', end_wave='', disp_pix='', err_sim='500', replace_error='1e10', correctHvel='',compute_densities=0,parallel='auto'):
+def resampleWave_drp(in_rss, out_rss, method='spline', start_wave='', end_wave='', disp_pix='', err_sim='500', replace_error='1e10', correctHvel='', compute_densities=0, extrapolate=1, parallel='auto'):
 	"""
 			Resamples the RSS with a wavelength in pixel table format to an RSS with a common wavelength solution for each fiber.
 			A Monte Carlo scheme can be used to propagte the error to the resample spectrum. Note that correlated noise is not taken
@@ -700,12 +700,21 @@ def resampleWave_drp(in_rss, out_rss, method='spline', start_wave='', end_wave='
 
 	ref_wave = numpy.arange(start_wave, end_wave+disp_pix-0.001, disp_pix)
 	rss._wave = rss._wave*(1+offset_vel/300000.0)
+	
+	if extrapolate:
+		collapsed_spec = rss.create1DSpec().resampleSpec(ref_wave, method="linear", err_sim=err_sim)
+	else:
+		collapsed_spec = None
 
 	data = numpy.zeros((rss._fibers, len(ref_wave)), dtype=numpy.float32)
 	if rss._error is not None and err_sim != 0:
 		error = numpy.zeros((rss._fibers, len(ref_wave)), dtype=numpy.float32)
 	else:
 		error = None
+	if rss._inst_fwhm is not None:
+		inst_fwhm = numpy.zeros((rss._fibers, len(ref_wave)), dtype=numpy.float32)
+	else:
+		inst_fwhm = None
 	mask = numpy.zeros((rss._fibers, len(ref_wave)), dtype='bool')
 	if compute_densities:
 		width_pix = numpy.zeros_like(rss._data)
@@ -724,8 +733,7 @@ def resampleWave_drp(in_rss, out_rss, method='spline', start_wave='', end_wave='
 			result_spec=[]
 			for i in range(rss._fibers):
 				spec = rss.getSpec(i)
-				result_spec.append(pool.apply_async(spec.resampleSpec, args=(ref_wave, method, err_sim, replace_error)))
-		#      spec.resampleSpec(ref_wave, method, err_sim)
+				result_spec.append(pool.apply_async(spec.resampleSpec, args=(ref_wave, method, err_sim, replace_error, collapsed_spec)))
 			pool.close()
 			pool.join()
 
@@ -734,12 +742,14 @@ def resampleWave_drp(in_rss, out_rss, method='spline', start_wave='', end_wave='
 				spec = result_spec[i].get()
 			else:
 				spec = rss.getSpec(i)
-				spec = spec.resampleSpec(ref_wave, method, err_sim, replace_error)
+				spec = spec.resampleSpec(ref_wave, method, err_sim, replace_error, collapsed_spec)
 			data[i, :] = spec._data
 			if rss._error is not None and err_sim!=0:
 				error[i, :] = spec._error
+			if rss._inst_fwhm is not None:
+				inst_fwhm[i, :] = spec._inst_fwhm
 			mask[i, :] = spec._mask
-		resamp_rss = RSS(data=data, wave=ref_wave, header = rss.getHeader(), error=error, mask=mask)
+		resamp_rss = RSS(data=data, wave=ref_wave, inst_fwhm=inst_fwhm, header=rss.getHeader(), error=error, mask=mask)
 
 	resamp_rss.writeFitsData(out_rss)
 

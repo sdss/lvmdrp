@@ -785,7 +785,7 @@ class Spectrum1D(Header):
         mask = self._mask
         return pix,  wave,  data,  error,  mask
 
-    def resampleSpec(self, ref_wave, method='spline', err_sim=500, replace_error=1e10):
+    def resampleSpec(self, ref_wave, method='spline', err_sim=500, replace_error=1e10, extrapolate=None):
         if self._wave[-1]<self._wave[0]:
             self._wave=numpy.flipud(self._wave)
             self._data = numpy.flipud(self._data)
@@ -807,7 +807,7 @@ class Spectrum1D(Header):
             if  self._mask is not None:
                 good_pix = numpy.logical_not(self._mask)
                 # intp = interpolate.UnivariateSpline(self._wave[good_pix], self._data[good_pix], k=1, s=0)
-                intp = interpolate.interp1d(self._wave[good_pix], self._data[good_pix], bounds_error=False)
+                intp = interpolate.interp1d(self._wave[good_pix], self._data[good_pix], bounds_error=False, assume_sorted=True)
                 clean_data = intp(self._wave)
                 if self._pixels[good_pix][0]>0:
                     clean_data[:self._pixels[good_pix][0]]=0
@@ -822,7 +822,7 @@ class Spectrum1D(Header):
                 intp = interpolate.UnivariateSpline(self._wave[select_interp], clean_data[select_interp], s=0)
                 new_data = intp(ref_wave)
             elif method=='linear':
-                intp = interpolate.interp1d(self._wave[select_interp], clean_data[select_interp], bounds_error=False)
+                intp = interpolate.interp1d(self._wave[select_interp], clean_data[select_interp], bounds_error=False, assume_sorted=True)
                 #intp = interpolate.UnivariateSpline(self._wave[select_interp], clean_data[select_interp], k=1, s=0)
                 new_data = intp(ref_wave)
             select_out= numpy.logical_or(ref_wave<wave_interp[0],ref_wave>wave_interp[-1])
@@ -836,8 +836,8 @@ class Spectrum1D(Header):
             else:
                 select_goodpix=numpy.ones(self._dim, dtype='bool')
 
-            if self._error is not None and err_sim>0:
-                replace_pix = numpy.logical_and(~select_goodpix, clean_data!=0.0)
+            if self._error is not None and self._mask is not None and err_sim>0:
+                replace_pix = numpy.logical_and(self._mask, clean_data!=0.0)
                 self._error[replace_pix]=1e-20
                 #select_goodpix = numpy.logical_and(select_goodpix, self._data!=0.0)
                 select_goodpix = self._data!=0.0
@@ -851,7 +851,7 @@ class Spectrum1D(Header):
                         intp = interpolate.UnivariateSpline(self._wave[select_interp], data[select_interp], s=0)
                         out =intp(ref_wave)
                     elif method=='linear':
-                        intp = interpolate.interpolate.interp1d(self._wave[select_interp], data[select_interp], bounds_error=False)
+                        intp = interpolate.interpolate.interp1d(self._wave[select_interp], data[select_interp], bounds_error=False, assume_sorted=True)
                         out = intp(ref_wave)
                     select_out= numpy.logical_or(ref_wave<wave_interp[0],ref_wave>wave_interp[-1])
                     out[select_out]=0
@@ -861,7 +861,7 @@ class Spectrum1D(Header):
             if self._inst_fwhm is not None:
                 if  self._mask is not None:
                     good_pix = numpy.logical_not(self._mask)
-                    intp = interpolate.interp1d(self._wave[good_pix], self._inst_fwhm[good_pix], bounds_error=False)
+                    intp = interpolate.interp1d(self._wave[good_pix], self._inst_fwhm[good_pix], bounds_error=False, assume_sorted=True)
                     clean_inst_fwhm = intp(self._wave)
                     if self._pixels[good_pix][0]>0:
                         clean_inst_fwhm[:self._pixels[good_pix][0]]=0
@@ -876,7 +876,7 @@ class Spectrum1D(Header):
                     intp = interpolate.UnivariateSpline(self._wave[select_interp], clean_inst_fwhm[select_interp], s=0)
                     new_inst_fwhm = intp(ref_wave)
                 elif method=='linear':
-                    intp = interpolate.interp1d(self._wave[select_interp], clean_inst_fwhm[select_interp], bounds_error=False)
+                    intp = interpolate.interp1d(self._wave[select_interp], clean_inst_fwhm[select_interp], bounds_error=False, assume_sorted=True)
                     #intp = interpolate.UnivariateSpline(self._wave[select_interp], clean_inst_fwhm[select_interp], k=1, s=0)
                     new_inst_fwhm = intp(ref_wave)
                 select_out= numpy.logical_or(ref_wave<wave_interp[0],ref_wave>wave_interp[-1])
@@ -903,19 +903,26 @@ class Spectrum1D(Header):
                 if self._error is not None and err_sim>0:
             #    new_mask = numpy.logical_and(badpix, new_error>0)
                     new_mask=badpix
-                    new_error[new_mask] = replace_error
+                    # new_error[new_mask] = replace_error
             else:
                 badpix = numpy.logical_or(ref_wave<self._wave[0], ref_wave>self._wave[-1])
                 new_data[badpix]=0
                 new_error[badpix] = replace_error
-            new_mask = badpix
+                new_mask = badpix
         #    new_data[badpix]=fill_value
         #        print(numpy.sum(self._mask), numpy.sum(new_mask))
 
-        if self._error is None or err_sim==0:
-            new_error=None
-        if self._mask is None:
-            new_mask = None
+            if self._error is None or err_sim==0:
+                new_error=None
+            if self._mask is None:
+                new_mask = None
+        
+        if extrapolate is not None:
+            new_data = numpy.where(new_data<=0, extrapolate._data, new_data)
+            new_error = numpy.where(new_data<=0, extrapolate._error, new_error)
+            new_mask = numpy.where(new_data<=0, extrapolate._mask, new_mask)
+            new_inst_fwhm = numpy.where(new_data<=0, extrapolate._inst_fwhm, new_inst_fwhm)
+
         spec_out = Spectrum1D(wave=ref_wave, data=new_data, error=new_error, mask=new_mask, inst_fwhm=new_inst_fwhm)
         return spec_out
 
