@@ -12,6 +12,7 @@ from scipy import signal
 from scipy import ndimage
 from scipy import interpolate
 from rascal.util import refine_peaks
+from rascal.atlas import Atlas
 from rascal.calibrator import Calibrator
 from astropy.wcs import WCS
 from astropy.io import fits
@@ -27,7 +28,6 @@ from lvmdrp.core.cube  import Cube
 from lvmdrp.core.image import loadImage
 from lvmdrp.core.passband import PassBand
 from lvmdrp.utils import flatten
-from lvmdrp.utils.decorators import missing_files
 
 from lvmdrp.core import fit_profile
 from lvmdrp.external import ancillary_func
@@ -74,13 +74,16 @@ def mergeRSS_drp(files_in, file_out,  mergeHdr='1'):
 				rss.append(rss_add, append_hdr=True)
 	rss.writeFitsData(file_out)
 
-def autoPixWaveMap_drp(in_arc, out_pixwave, elements, ref_fiber='300', coadd_fibers='10', line_heights='10', prominence='5', lines_dist='1', refine_window='3', wave_range='', pixels='', waves='', poly_deg='2', poly_kind='poly', plot='0'):
+def autoPixWaveMap_drp(in_arc, out_pixwave, elements, ref_fiber='300', coadd_fibers='10', line_heights='10', prominence='5', lines_dist='5', refine_window='3', wave_range='', pixels='', waves='', poly_deg='2', poly_kind='poly', plot='0'):
 
 	elements = elements.split(",")
 	ref_fiber = int(ref_fiber)
 	coadd_fibers = int(coadd_fibers)
+	try:
+		prominence = float(prominence)
+	except (ValueError, TypeError):
+		prominence = None
 	line_heights = float(line_heights)
-	prominence = float(prominence)
 	lines_dist = int(lines_dist)
 	refine_window = int(refine_window)
 	poly_deg = int(poly_deg)
@@ -104,40 +107,41 @@ def autoPixWaveMap_drp(in_arc, out_pixwave, elements, ref_fiber='300', coadd_fib
 	arc.loadFitsData(in_arc)
 
 	if coadd_fibers > 0:
-		spectrum = numpy.median(arc._data[ref_fiber-coadd_fibers:ref_fiber+coadd_fibers], axis=0)
+		spectrum = numpy.nanmean(arc._data[ref_fiber-coadd_fibers:ref_fiber+coadd_fibers], axis=0)
 	else:
 		spectrum = arc._data[ref_fiber]
 
-	peaks, _ = signal.find_peaks(spectrum, height=line_heights, prominence=prominence, distance=lines_dist)
+	peaks, _ = signal.find_peaks(spectrum, height=line_heights, prominence=prominence, distance=lines_dist, wlen=refine_window)
 	peaks_refined = refine_peaks(spectrum, peaks, window_width=refine_window)
 
 	c = Calibrator(peaks_refined, spectrum)
 	c.set_hough_properties(num_slopes=2000,
-							xbins=100,
-							ybins=100,
+							xbins=200,
+							ybins=200,
 							min_wavelength=wave_range[0],
 							max_wavelength=wave_range[1],
-							range_tolerance=500.,
-							linearity_tolerance=50)
+							range_tolerance=10.,
+							linearity_tolerance=10)
 
-	c.add_atlas(elements=elements,
+	atlas = Atlas(elements=elements,
 				min_atlas_wavelength=wave_range[0],
 				max_atlas_wavelength=wave_range[1],
-				constrain_poly=True)
+				min_dist=3)
+	c.set_atlas(atlas, constrain_poly=False)
 
 	if pixels and waves:
 		for pix, wav in zip(pixels, waves):
 			c.add_pix_wave_pair(pix, wav)
 
-	c.set_ransac_properties(sample_size=5,
-							top_n_candidate=5,
+	c.set_ransac_properties(sample_size=2*poly_deg+1,
+							top_n_candidate=2*poly_deg+1,
 							linear=True,
-							filter_close=False,
+							filter_close=True,
 							ransac_tolerance=5,
 							candidate_weighted=True,
 							hough_weight=1.0)
 
-	c.do_hough_transform()
+	c.do_hough_transform(brute_force=True)
 
 	if plot:
 		_ = c.plot_arc(log_spectrum=False)
