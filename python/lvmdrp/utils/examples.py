@@ -28,7 +28,13 @@ RDNOISES = {
 
 def parse_sdr_name(sdr_name):
     """Return camera and expnum from a given raw frame path/name"""
-    camera, expnum = os.path.basename(sdr_name).split(".")[0].split("-")[1:]
+    name_parts = os.path.basename(sdr_name).split(".")[0].split("-")[1:]
+    if len(name_parts) == 2:
+        camera, expnum = name_parts
+    elif len(name_parts) == 3:
+        hemi, camera, expnum = name_parts
+    else:
+        raise ValueError(f"unkown name formatting {os.path.basename(sdr_name)}")
     return camera, expnum
 
 def fetch_example_data(url, name, dest_path, ext="zip"):
@@ -69,7 +75,7 @@ def get_frames_metadata(path, suffix=".fits.gz"):
         exptime = header["EXPTIME"]
         camera, expnum = parse_sdr_name(frame_path)
         spec = f"sp{camera[-1]}"
-        imagetyp = header["FLAVOR"]
+        imagetyp = header.get("FLAVOR", header.get("IMAGETYP"))
         frames_table.add_row([imagetyp, spec, camera, expnum, exptime, frame_path])
     examples_logger.info("successfully extracted metadata")
 
