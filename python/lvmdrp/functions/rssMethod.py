@@ -4,6 +4,8 @@ try:
     from matplotlib import pyplot as plt
 except:
     pass
+import os
+import yaml
 from multiprocessing import cpu_count
 from multiprocessing import Pool
 from scipy import signal
@@ -12,6 +14,11 @@ from scipy import interpolate
 from rascal.util import refine_peaks
 from rascal.calibrator import Calibrator
 from astropy.wcs import WCS
+from astropy.io import fits
+from astropy.table import Table
+from astropy.time import Time
+from astropy import units as u
+from lvmdrp.core.constants import CONFIG_PATH
 from lvmdrp.core.header import combineHdr
 from lvmdrp.core.fiberrows import FiberRows
 from lvmdrp.core.rss import RSS, loadRSS, glueRSS, _chain_join
@@ -1863,3 +1870,168 @@ def createMasterFiberFlat_drp(in_fiberflat, out_masterflat, weighted=False, degr
 		master_fiberflat = RSS.from_spectra1d(fiberflats)
 
 		master_fiberflat.writeFitsData(out_masterflat)
+
+def quickQuality(in_std, in_sky, in_biases, in_fiberflat, in_arc, out_report, pct_level=98, passbands="gri"):
+	# TODO: load reference values for qualitative quality flags
+	ref_values = yaml.load(open(ref_values, "r"))
+
+	# bias quality
+	# 	- exposure name
+	# 	- percentile counts in each quadrant and channel
+	# 	- temperature of specs room (need for a bias?)
+	# 	- UT (of observation or reduction?)
+	# 	- qualitative quality (GOOD, BAD)
+	frame_names = []
+	avg_count, std_count, pct_count = [], [], []
+	temps, times, flags = [], [], []
+	for in_bias in in_biases:
+		bias_img = loadImage(in_bias).convertUnit("e-")
+		
+		# extract frame name
+		frame_name = os.path.basename(in_bias).split(".")[0]
+		_, camera, expnum = frame_name.split("-")
+		frame_names.append(frame_name)
+
+		# compute statistics
+		quads_avg, quads_std, quads_pct = [], [], []
+		for section in bias_img._header["AMP? TRIMSEC"]:
+			quad = bias_img.getSection(section)
+			quads_avg.append(numpy.mean(quad._data))
+			quads_std.append(numpy.std(quad._data))
+			quads_pct.append(numpy.percentile(quad._data, q=pct_level))
+		avg_count.append(quads_avg)
+		std_count.append(quads_std)
+		pct_count.append(quads_pct)
+
+		# extract other quantities
+		temps.append(bias_img["TRUSTEMP"])
+		times.append(Time(bias_img["DATE-OBS"], scale="tai"))
+		# TODO: set quality flags
+		flags.append("GOOD")
+	
+	# build bias table
+	bias_table = Table(
+		data = {
+			"frame_name": frame_names,
+			"avg_count": numpy.asarray(avg_count),
+			"std_count": numpy.asarray(std_count),
+			f"{pct_level}p_count": numpy.asarray(pct_count),
+			"temp": numpy.asarray(temps),
+			"time": numpy.asarray(times),
+			"flag": numpy.asarray(flags)
+		},
+		names=["frame_name", "avg_count", "std_count", f"{pct_level}p_count", "temp", "time", "flag"],
+		unit=[None, u.electron, u.electron, u.electron, u.Celcius, "UT", None]
+	)
+
+	# fiberflat
+	# 	- exposure name
+	# 	- fiber recovery (good/total)
+	# 	- exp. time
+	# 	- temperature of specs room
+	# 	- UT
+	# 	- median flux in e- in all given passpands
+	# 	- quality (GOOD, BAD)
+	# arc
+	# 	- exposure name
+	# 	- exp. time
+	# 	- temperature of specs room
+	# 	- UT
+	# 	- wavelength center for each channel
+	# 	- quality (GOOD, BAD)
+	# std
+	# 	- exposure name
+	# 	- fiber recovery (good/total)
+	# 	- exp. time
+	# 	- temperature of specs room
+	# 	- UT
+	# 	- sky level for each channel
+	# 	- S/N**2 for each channel
+	# 	- quality (GOOD, BAD)
+	frame_names = []
+	flx_count, err_count, sn2_count, mag_count = [], [], [], []
+	temps, times, rfibs, expos, flags = [], [], []
+	for kind, in_fiber in zip(["flat", "arc", "std", "sky"], [in_fiberflat, in_arc, in_std, in_sky]):
+		rss = loadRSS(in_fiber)
+		
+		# extract frame name
+		frame_name = os.path.basename(in_bias).split(".")[0]
+		_, camera, expnum = frame_name.split("-")
+		frame_names.append(frame_name)
+
+		# extract passband fluxes, errors and SN2
+		flx_pass, err_pass, sn2_pass, mag_pass = [], [], [], []
+		for passband in passbands:
+			# read passband
+			response = PassBand()
+			response.loadTxtFile(os.path.join(CONFIG_PATH, f"{passband}_passband.txt"))
+			# collapse flat into superflat
+			superflat = rss.get1DSpec()
+			# calculate flux/error through
+			flx, err = response.getFluxSpec(superflat)
+			flx_pass.append(flx)
+			err_pass.append(err)
+			sn2_pass.append((flx/err)**2)
+		flx_count.append(flx_pass)
+		err_count.append(err_pass)
+		sn2_count.append(sn2_pass)
+		mag_count.append(mag_pass)
+		
+		# extract other quantities
+		temps.append(rss._header["TRUSTEMP"])
+		times.append(Time(rss._header["OBS-TIME"], scale="tai"))
+		rfibs.append(rss._good_fibers.size / rss._fibers)
+		expos.append(rss._header["EXPTIME"])
+		# TODO: set quality flags
+		flags.append("GOOD")
+
+		if kind == "flat":
+			# TODO: calculate fiber transparency
+			# 	- pull flat information from past (fiducial) fiberflats
+			# 	- calculate fiber ratio between two consecutive (in time) flats
+			# 	- calculate the median/mean statistic
+			pass
+		elif kind == "arc":
+			# TODO:
+			# 	- fraction of lines detected vs expected
+			# 	- lines used to calculate wavelength solution
+			# 	- distribution of polynomial coefficients for wavelength
+			# 	- distribution of polynomial coefficients for LSF
+			pass
+		elif kind == "std":
+			# TODO:
+			# 	- calculate flux for each fiber
+			# 	- calculate magnitud for each fiber
+			# 	- calculate SN2 for each spec/channel
+			pass
+		elif kind == "sky":
+			# TODO:
+			# 	- calculate sky flux in passbands
+			# 	- 
+			pass
+		else:
+			pass
+
+	# build flat/arc table
+	fiber_table = Table(
+		data = {
+			"frame_name": frame_names,
+			"flx_count": numpy.asarray(flx_count),
+			"err_count": numpy.asarray(err_count),
+			"sn2_count": numpy.asarray(sn2_count),
+			"temp": numpy.asarray(temps),
+			"time": numpy.asarray(times),
+			"fibers_frac": numpy.asarray(rfibs),
+			"exp_time": numpy.asarray(expos),
+			"flag": numpy.asarray(flags)
+		},
+		names=["frame_name", "flx_count", "err_count", "sn2_count", "temp", "time", "fibers_frac", "exp_time", "flag"],
+		unit=[None, u.electron, u.electron, None, u.Celcius, "UT", None, u.second, None]
+	)
+
+	# dump all tables in a multi-extension FITS
+	metadata = fits.PrimaryHDU()
+	report_fits = fits.HDUList([metadata]+[fits.table_to_hdu(bias_table), fits.table_to_hdu(fiber_table)])
+	report_fits[0].name = "BIAS"
+	report_fits[1].name = "FLAT/ARC/STD/SKY"
+	report_fits.writeto(out_report, overwrite=True)
