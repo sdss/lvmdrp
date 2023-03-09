@@ -1841,39 +1841,47 @@ def joinSpecChannels(in_rss, out_rss, parallel="auto"):
 # 	* normalize each evaluated superflat by the individual fiberflat
 # 	* fit each normalized fiber with a bspline
 # 	* interpolate across bad pixels
-def createMasterFiberFlat_drp(in_fiberflat, out_masterflat, weighted=False, degree=3, smooth=None):
-	
-	fiberflat = RSS()
-	fiberflat.loadFitsData(in_fiberflat)
+def createMasterFiberFlat_drp(in_fiberflat, out_masterflat, weighted=True, degree=3, smooth=3, start_wave=None, end_wave=None):
 
-	if len(in_fiberflat._wave.shape) == 1:
-		# cannot create master flat with homogeneous wavelength sampled RSS
-		return None
-	else:
-		superflat = fiberflat.create1DSpec()
-		if weighted:
-			weights = 1 / superflat._error
-		else:
-			weights = None
-		knots, coeffs, deg = interpolate.splrep(superflat._wave, superflat._data, w=weights, s=smooth, k=degree)
-		superflat_func = interpolate.BSpline(knots, coeffs, deg, extrapolate=False)
+    fiberflat = RSS()
+    fiberflat.loadFitsData(in_fiberflat)
 
-		if fiberflat._mask is not None:
-			select = numpy.logical_not(fiberflat._mask)
-		else:
-			select = numpy.ones_like(fiberflat._data)
+    if len(fiberflat._wave.shape) == 1:
+        # cannot create master flat with homogeneous wavelength sampled RSS
+        return None
+    else:
+        superflat = fiberflat.create1DSpec()
+        print(superflat)
+        
+        # good pixels in superflat
+        good_pix = superflat._data>0
+        
+        # define weights
+        if weighted:
+            weights = 1 / superflat._error[good_pix]
+        else:
+            weights = None
+        
+        knots, coeffs, deg = interpolate.splrep(superflat._wave[good_pix], superflat._data[good_pix], w=weights, s=None, k=degree, xb=start_wave, xe=end_wave)
+        print(knots, coeffs, deg)
+        superflat_func = interpolate.BSpline(knots, coeffs, deg, extrapolate=False)
+        print(superflat_func)
 
-		fiberflats = []
-		for ifiber in range(fiberflat._fibers):
-			wave_ori = fiberflat[ifiber]._wave
-			fiber = superflat_func(fiberflat[ifiber]._wave[select]) * (1 / fiberflat[ifiber][select])
-			fiber.smoothSpec(smooth, method="BSpline")
-			fiber = fiber.resampleSpec(wave_ori)
-			fiberflats.append(fiber)
-		
-		master_fiberflat = RSS.from_spectra1d(fiberflats)
+        fiberflats = []
+        for ifiber in range(fiberflat._fibers):
+            print(ifiber)
+            fiber = fiberflat.getSpec(ifiber)
+            select = numpy.logical_not(fiber._mask)
+            wave_ori = fiber._wave
 
-		master_fiberflat.writeFitsData(out_masterflat)
+            norm = superflat_func(fiber._wave[select]) * (1 / fiber[select])
+            norm.smoothSpec(smooth, method="BSpline")
+            norm = norm.resampleSpec(wave_ori)
+            fiberflats.append(norm)
+
+        master_fiberflat = RSS.from_spectra1d(fiberflats)
+
+        master_fiberflat.writeFitsData(out_masterflat)
 
 def quickQuality(in_std, in_sky, in_biases, in_fiberflat, in_arc, out_report, pct_level=98, passbands="gri"):
 	# TODO: load reference values for qualitative quality flags
