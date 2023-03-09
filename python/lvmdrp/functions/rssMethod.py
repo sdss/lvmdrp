@@ -126,7 +126,7 @@ def autoPixWaveMap_drp(in_arc, out_pixwave, elements, ref_fiber='300', coadd_fib
 	atlas = Atlas(elements=elements,
 				min_atlas_wavelength=wave_range[0],
 				max_atlas_wavelength=wave_range[1],
-				min_dist=3)
+				min_distance=3)
 	c.set_atlas(atlas, constrain_poly=False)
 
 	if pixels and waves:
