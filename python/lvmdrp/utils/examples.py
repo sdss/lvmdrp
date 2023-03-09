@@ -60,10 +60,10 @@ def fetch_example_data(url, name, dest_path, ext="zip"):
     else:
         examples_logger.info("example data already exists")
 
-def get_frames_metadata(path, suffix=".fits.gz"):
+def get_frames_metadata(path, suffix=".fits.gz", ignore_cache=False):
     """Return astropy.table.Table containing useful metadata from 2D raw frames"""
     CACHE_PATH = os.path.join(path, "frames_table.pkl")
-    if os.path.isfile(CACHE_PATH):
+    if os.path.isfile(CACHE_PATH) and not ignore_cache:
         examples_logger.info(f"loading cached metadata from '{CACHE_PATH}'")
         return pickle.load(open(CACHE_PATH, "rb"))
     
