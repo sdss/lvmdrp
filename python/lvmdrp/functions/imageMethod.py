@@ -581,9 +581,12 @@ def findPeaksAuto_drp(in_image, out_peaks, nfibers,  disp_axis='X', threshold='5
 	if verbose==1:
 		# control plot for the peaks NEED TO BE REPLACE BY A PROPER VERSION AND POSSIBLE IMPLEMENTAION FOR A GUI
 		print('%i Fibers found'%(len(centers)))
-		pylab.plot(cut._data, '-k')
-		pylab.plot(peaks[0],peaks[2] ,'or')
-		pylab.plot(centers, numpy.ones(len(centers))*(peaks[2].max()*0.5), 'xg')
+		pylab.figure(figsize=(25,10))
+		pylab.plot(cut._data, '-k', lw=1)
+		pylab.plot(peaks[0], peaks[2] ,'o', color="tab:red")
+		pylab.plot(centers, numpy.ones(len(centers))*(peaks[2].max()*0.5), 'x', color="tab:blue")
+		pylab.xlabel("cross-dispersion axis (pix)")
+		pylab.ylabel("fiber profile")
 		pylab.show()
 
 def findPeaksOffset_drp(image, peaks_master, out_peaks, disp_axis='X', threshold='1500', median_box='8', median_cross='1', slice='', method='gauss',  init_sigma='1.0',accuracy=1.2):
