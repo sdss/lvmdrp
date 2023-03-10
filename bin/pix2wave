@@ -86,6 +86,8 @@ class SolveWavelength:
         if self.table_exist:
             with open(self.dispersion_table, "r") as t:
                 self.ny_spectra = int(t.readline()[:-1])
+                if ny_spectra != self.ny_spectra:
+                    self.ny_spectra = ny_spectra
                 self.table = np.loadtxt(t)
         else:
             self.ny_spectra = ny_spectra
@@ -103,9 +105,10 @@ class SolveWavelength:
         self.xdata = np.arange(spectra._data.shape[1])
         self.ydata = spectra._data[iy:fy+1,:].sum(axis=0)
         self.ydata /= self.ydata.max()
-        self.ydata = np.sqrt(1e-3+self.ydata)
+        self.ydata = np.sqrt(np.abs(np.nanmin(self.ydata))+self.ydata)
 
     def _init_plot(self):
+        self.ax.set_title(os.path.basename(self.extracted_fits))
         self.line, = ax.step(self.xdata, self.ydata, lw=1, picker=True, pickradius=self.aperture, color="k")
         for x_peak, wavelength, mask in self.table:
             x_min, x_max = x_peak-self.aperture, x_peak+self.aperture
@@ -118,7 +121,7 @@ class SolveWavelength:
                 self.ax.plot([x_peak], [self.ydata[(x_min<=self.xdata)&(self.xdata<=x_max)].max()], "ok", mew=0.5, ms=3, mfc="none")
                 self.ax.text(x_max, 0.95, f"{wavelength:.4f}", va="top", ha="left", size="xx-small", color="0.8", rotation=90)
         self.ax.set_xlabel("dispersion axis (pixel)")
-        self.ax.set_ylabel("flux")
+        self.ax.set_ylabel("counts (e-/pix)")
 
         # create text box for wavelength
         ax_tb = inset_axes(ax, width="10%", height="3.5%", loc=1)
