@@ -27,7 +27,7 @@ from lvmdrp.core.spectrum1d  import Spectrum1D
 from lvmdrp.core.cube  import Cube
 from lvmdrp.core.image import loadImage
 from lvmdrp.core.passband import PassBand
-from lvmdrp.utils import flatten
+from lvmdrp.utils import flatten, spec_from_lines
 
 from lvmdrp.core import fit_profile
 from lvmdrp.external import ancillary_func
@@ -36,7 +36,7 @@ from lvmdrp.external import ancillary_func
 description='Provides Methods to process Row Stacked Spectra (RSS) files'
 
 __all__ = [
-	"detWaveSolution_drp", "createPixTable_drp", "resampleWave_drp",
+	"detWaveSolution_drp", "createPixTable_drp", "checkPixTable_drp", "correctPixTable_drp", "resampleWave_drp",
 	"includePosTab_drp"
 ]
 
@@ -170,7 +170,7 @@ def autoPixWaveMap_drp(in_arc, out_pixwave, elements, ref_fiber='300', coadd_fib
 # * define ancillary product lvm-arc (rss arc) for replace arc_rss
 # * define ancillary product lvm-wave to contain wavelength solutions
 # * merge disp_rss and res_rss products into lvmArc product, change variable to out_arc
-def detWaveSolution_drp(in_arc, out_wave, out_lsf, in_ref_lines='', ref_fiber='', pixel='', ref_lines='', poly_dispersion='-5', poly_fwhm='-3,-5', init_back='10.0',  aperture='13', flux_min='200.0', fwhm_max='10.0', rel_flux_limits='0.1,5.0', fiberflat='', negative=False, verbose='1' ):
+def detWaveSolution_drp(in_arc, out_wave, out_lsf, in_ref_lines='', ref_fiber='', pixel='', ref_lines='', poly_dispersion='-5', poly_fwhm='-3,-5', init_back='10.0',  aperture='13', flux_min='200.0', fwhm_max='10.0', rel_flux_limits='0.1,5.0', fiberflat='', negative=False, cc_correction=False, verbose='1' ):
 	"""
 			Measures the pixel position of emission lines in wavelength UNCALIBRATED for all fibers of the RSS.
 			Starting from the initial guess of pixel positions for a given fiber, the program measures the position using
@@ -257,7 +257,10 @@ def detWaveSolution_drp(in_arc, out_wave, out_lsf, in_ref_lines='', ref_fiber=''
 		pixel = numpy.zeros(nlines, dtype=numpy.float32) # empty for pixel position
 		ref_lines = numpy.zeros(nlines, dtype=numpy.float32) # empty for reference wavelength
 		use_fwhm = numpy.zeros(nlines, dtype=bool) # empty for reference wavelength
-		ref_fiber = int(lines[0]) # the reference fiber for the initial positions
+		if ref_fiber != int(lines[0]):
+			cc_correction = True
+		else:
+			ref_fiber = int(lines[0]) # the reference fiber for the initial positions
 		# read the information from file
 		for i in range(1, nlines+1):
 			line = lines[i].split()
@@ -285,9 +288,24 @@ def detWaveSolution_drp(in_arc, out_wave, out_lsf, in_ref_lines='', ref_fiber=''
 	# initialize the extracted arc line frame
 	arc = FiberRows() # create object
 	arc.loadFitsData(in_arc) # load data
-
-	if negative==True:
+	if negative:
 		arc = arc*-1+numpy.median(arc._data)
+	
+	# apply cc correction to lines if needed
+	if cc_correction:
+		wave = numpy.arange(arc._data.shape[1])
+		data = arc._data[ref_fiber]
+		
+		# plt.figure(figsize=(25,5))
+		# plt.vlines(pixel, numpy.nanmin(data), numpy.nanmax(data), color="0.5", lw=1)
+		# plt.step(wave, data, color="0.2", lw=1)
+		
+		pix_spec = spec_from_lines(pixel, sigma=2, wavelength=wave)
+		corr = signal.correlate(data, pix_spec, mode="full")
+		shift = numpy.argmax(corr) - pix_spec.size
+		pixel = pixel + shift
+		# plt.vlines(pixel, numpy.nanmin(data), numpy.nanmax(data), color="tab:red", lw=1)
+		# plt.show()
 
 	# setup storage array
 	wave_sol = numpy.zeros((arc._fibers, arc._data.shape[1]), dtype=numpy.float32) # empty for wavelength solution
@@ -295,8 +313,6 @@ def detWaveSolution_drp(in_arc, out_wave, out_lsf, in_ref_lines='', ref_fiber=''
 	rms = numpy.zeros(arc._fibers, dtype=numpy.float32) # empty for rms of wavelength solution for each fiber
 
 	# measure the ARC lines with individual Gaussian across the CCD
-
-
 	(fibers, flux, cent_wave, fwhm, masked) = arc.measureArcLines(ref_fiber, pixel, aperture=aperture, init_back=init_back, flux_min=flux_min, fwhm_max=fwhm_max, rel_flux_limits=rel_flux_limits, verbose=bool(verbose))
 	norm_flux = numpy.zeros_like(ref_lines)
 	for n in range(len(ref_lines)):

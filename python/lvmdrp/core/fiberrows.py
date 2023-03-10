@@ -2,6 +2,7 @@ from lvmdrp.core.header import Header
 from lvmdrp.core.positionTable import PositionTable
 from lvmdrp.core.spectrum1d import Spectrum1D
 from astropy.io import fits as pyfits
+from tqdm import tqdm
 import numpy
 import sys
 
@@ -614,7 +615,7 @@ class FiberRows(Header, PositionTable):
             pass
         hdu.writeto(filename, output_verify='silentfix', overwrite=True) # write FITS file to disc
 
-    def measureArcLines(self, ref_spec, ref_cent, aperture=12, init_back=30.0, flux_min=100,fwhm_max=10, rel_flux_limits=[0.2, 5] , verbose=True):
+    def measureArcLines(self, ref_fiber, ref_cent, aperture=12, init_back=30.0, flux_min=100, fwhm_max=10, rel_flux_limits=[0.2, 5], verbose=True):
 
         nlines=len(ref_cent)
         cent_wave = numpy.zeros((self._fibers, nlines), dtype=numpy.float32)
@@ -623,24 +624,22 @@ class FiberRows(Header, PositionTable):
         masked = numpy.zeros((self._fibers, nlines), dtype='bool')
 
 
-        spec = self.getSpec(ref_spec)
+        spec = self.getSpec(ref_fiber)
         fit = spec.fitSepGauss(ref_cent, aperture,  init_back)
-        masked[ref_spec, :] = False
-        flux[ref_spec, :] = fit[:nlines]
-        ref_flux=flux[ref_spec, :]
-        cent_wave[ref_spec, :] = fit[nlines:2*nlines]
-        fwhm[ref_spec, :] = fit[2*nlines:3*nlines]*2.354
-        first = numpy.arange(ref_spec-1, -1, -1)
-        second = numpy.arange(ref_spec+1, self._fibers, 1)
+        masked[ref_fiber, :] = False
+        flux[ref_fiber, :] = fit[:nlines]
+        ref_flux=flux[ref_fiber, :]
+        cent_wave[ref_fiber, :] = fit[nlines:2*nlines]
+        fwhm[ref_fiber, :] = fit[2*nlines:3*nlines]*2.354
+        first = numpy.arange(ref_fiber-1, -1, -1)
+        second = numpy.arange(ref_fiber+1, self._fibers, 1)
 
-        m=1
-        if verbose==True:
-            print('Start measuring arc lines...')
+        if verbose:
+            iterator = tqdm(first, total=first.size, desc=f"measuring arc lines upwards from {ref_fiber}", ascii=True, unit="fiber")
+        else:
+            iterator = first
         plot=False
-        for i in first:
-            if verbose==True:
-                sys.stdout.write('Processing....%.0f%%\r'%(m/float(self._fibers)*100))
-                sys.stdout.flush()
+        for i in iterator:
             spec = self.getSpec(i)
 
             fit = spec.fitSepGauss(cent_wave[i+1], aperture, init_back, plot=plot)
@@ -659,16 +658,14 @@ class FiberRows(Header, PositionTable):
                 cent_wave[i, select] = cent_wave[i+1, select]
                 fwhm[i, select] = fwhm[i+1, select]
                 masked[i, select] = True
-#                if i<130:
- #                   plot=True
             else:
                 plot=False
-            m+=1
 
-        for i in second:
-            if verbose==True:
-                sys.stdout.write('Processing....%.0f%%\r'%(m/float(self._fibers)*100))
-                sys.stdout.flush()
+        if verbose:
+            iterator = tqdm(second, total=second.size, desc=f"measuring arc lines downwards from {ref_fiber}", ascii=True, unit="fiber")
+        else:
+            iterator = second
+        for i in iterator:
             spec = self.getSpec(i)
             if i==10:
                 plot=True
@@ -690,7 +687,6 @@ class FiberRows(Header, PositionTable):
                 cent_wave[i, select] = cent_wave[i-1, select]
                 fwhm[i, select] = fwhm[i-1, select]
                 masked[i, select] = True
-            m+=1
 
         fibers = numpy.arange(self._fibers)
         for i in range(nlines):
