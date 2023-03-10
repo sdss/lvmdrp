@@ -1,8 +1,8 @@
-name: lvm-hframe
-short: wavelength resampled frame 
+name: lvmHframe
+short: wavelength resampled frame
 description: |
   this is the extracted frame, with homogeneous wavelength calibration.
-location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[OBSERVATORY]/[MJD]/
+location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[MJD]/
 created_by: imageMethod.resampleWave
 used_by: null
 naming_convention: |

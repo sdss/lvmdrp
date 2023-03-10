@@ -1,14 +1,14 @@
-name: lvm-mpixelflat
-short: reduced and combined (master) pixelflat frames
+name: lvmMbias
+short: reduced and combined (master) bias frames
 description: |
-  this is the frame after combining several reduced pixelflat frames, in units of e-,
-  Poisson errors calculated and CR rejected.
-location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[OBSERVATORY]/[MJD]/
+  this is the frame after combining several reduced bias frames, in units of e-
+  and Poisson errors calculated.
+location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[MJD]/
 created_by: imageMethod.createMasterFrame
 used_by:
   - imageMethod.basicCalibration
 naming_convention: |
-  lvm-mpixelflat-[CAMERA]-[EXPTIME].fits.gz, where [CAMERA] is one of the nine cameras on the instrument, b1, r1, z1,
+  lvm-mbias-[CAMERA].fits.gz, where [CAMERA] is one of the nine cameras on the instrument, b1, r1, z1,
   or b2, r2, z2, or b3, r3, or z3 for the blue, red, nir cameras on each LVM spectrograph.
 hdu0:
   name: PRIMARY
@@ -62,4 +62,3 @@ hdu4:
       type: float32
       unit: e-
       description: standard deviation in counts across the field
-    

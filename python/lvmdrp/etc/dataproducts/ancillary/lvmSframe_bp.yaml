@@ -1,17 +1,18 @@
-name: lvm-rframe
-short: cosmic ray cleaned frame
+name: lvmSframe
+short: stray light subtracted frame
 description: |
-  this is the frame after cosmic ray (CR) rejection, it contains the CR pixel mask in the COSMIC HDU.
-location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[OBSERVATORY]/[MJD]/
-created_by: imageMethod.LACosmic
+  this is the frame after stray light subtraction, it contains the stray light field in the STRAY HDU.
+location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[MJD]/
+created_by: imageMethod.subtractStraylight
 used_by:
-  - imageMethod.basicCalibration
+  - imageMethod.traceFWHM
+  - imageMethod.extractSpec
 naming_convention: |
-  lvm-r[IMAGETYP]-[CAMERA]-[EXPNUM].fits.gz, where [IMAGETYP] is the flavor of the exposure bias,
+  lvm-s[IMAGETYP]-[CAMERA]-[EXPNUM].fits.gz, where [IMAGETYP] is the flavor of the exposure bias,
   dark, pixelflat, fiberflat, arc or science, [CAMERA] is one of the nine cameras on the
   instrument, b1, r1, z1, or b2, r2, z2, or b3, r3, or z3 for the blue, red, nir cameras on each
-  LVM spectrograph, and [EXPNUM] is the (zero-padded) 8-digit exposure number. The "r" before the
-  frame flavor stands for "rejected cosmic ray".
+  LVM spectrograph, and [EXPNUM] is the (zero-padded) 8-digit exposure number. The "s" before the
+  frame flavor stands for "subtracted stray-light".
 hdu0:
   name: PRIMARY
   description: primary header metadata
@@ -33,7 +34,7 @@ hdu3:
   is_image: true
   shape: 4080 x 4080
 hdu4:
-  name: COSMIC
-  description: Cosmic ray mask for each pixel (1 = CR; 0 = clean)
+  name: STRAY
+  description: Stray light for each pixel
   is_image: true
   shape: 4080 x 4080

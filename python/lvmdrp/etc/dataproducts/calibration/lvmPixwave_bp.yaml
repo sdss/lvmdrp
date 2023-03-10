@@ -1,11 +1,11 @@
-name: lvm-pixwave
+name: lvmPixwave
 short: the wavelength of each dispersion pixel at a given fiber
 description: |
   contains a table mapping dispersion pixels into wavelength for a set of arc reference lines, determined for a reference fiber.
 created_by: imageMethod.findPeaksAuto
 used_by:
   - imageMethod.tracePeaks
-location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[OBSERVATORY]/[MJD]/
+location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[MJD]/
 naming_convention: |
   lvm-pixwave-[LAMP]-[CAMERA]-[EXPNUM].fits.gz, where [LAMP] is the arc lamp, [CAMERA] is one of the nine cameras on the instrument, b1, r1, z1,
   or b2, r2, z2, or b3, r3, or z3 for the blue, red, nir cameras on each LVM spectrograph, and

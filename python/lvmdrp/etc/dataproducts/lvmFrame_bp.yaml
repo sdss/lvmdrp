@@ -2,7 +2,7 @@ name: lvmFrame
 short: the extracted fiber science spectra
 description: |
   The lvmFrame files are the extracted fiber spectra for each camera for the science exposures.
-location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[OBSERVATORY]/[MJD]/
+location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[MJD]/
 created_by: module.py
 used_by: module.py
 naming_convention: |

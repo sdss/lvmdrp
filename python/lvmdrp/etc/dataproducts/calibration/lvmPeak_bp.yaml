@@ -1,11 +1,11 @@
-name: lvm-peak
+name: lvmPeak
 short: the peaks of each fiber at a given row
 description: |
   contains a table of the center of each fiber in cross-dispersion direction.
 created_by: imageMethod.findPeaksAuto
 used_by:
   - imageMethod.tracePeaks
-location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[OBSERVATORY]/[MJD]/
+location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[MJD]/
 naming_convention: |
   lvm-peak-[CAMERA]-[EXPNUM].fits.gz, where [CAMERA] is one of the nine cameras on the instrument, b1, r1, z1,
   or b2, r2, z2, or b3, r3, or z3 for the blue, red, nir cameras on each LVM spectrograph, and

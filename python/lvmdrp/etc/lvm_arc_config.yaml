@@ -3,7 +3,7 @@ name: lvm-arc
 short: configuration file for arc reduction
 description: |
   defines the reduction steps to create a reduced arc.
-location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[OBSERVATORY]/[MJD]
+location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[MJD]
 naming_convention: lvm-arc-[CAMERA]-[EXPNUM]-config.yaml
 target_frame: lvmSdr
 calibration_frames:
