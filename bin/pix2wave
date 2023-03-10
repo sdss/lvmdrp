@@ -104,7 +104,9 @@ class SolveWavelength:
             with open(self.in_pixtable, "r") as t:
                 self.fiber_id = int(t.readline()[:-1])
                 if fiber_id != self.fiber_id:
+                    log.warning(f"current pixel table seem to map to {self.fiber_id}, which is different than what you asked {fiber_id = }, turning cross-correlation correction 'on'")
                     self.fiber_id = fiber_id
+                    self.correct_lines = True
                 self.table = np.loadtxt(t)
         else:
             log.info(f"initializing new pixel table '{self.in_pixtable}'")
@@ -208,12 +210,10 @@ class SolveWavelength:
     
     def _save_table(self):
         self.table = self.table[self.table[:,0].argsort()]
-        log.info(f"saving pixel table with {self.table.shape[0]-self.nrows} new lines")
+        log.info(f"saving pixel table with {self.table.shape[0]-self.nrows} new lines to '{self.in_pixtable}'")
         self.nrows = self.table.shape[0]
         with open(self.in_pixtable, "w") as t:
-            if not self.table_exist:
-                t.write(f"{self.fiber_id}\n")
-            t.write(f"{self.nrows}\n")
+            t.write(f"{self.fiber_id}\n")
             for i in range(self.nrows):
                 x, y, m = self.table[i]
                 t.write(f"{x:>.2f} {y:>9.4f} {int(m):>1d}\n")
