@@ -399,22 +399,25 @@ def configureSkyModel_drp(skymodel_config_path=SKYMODEL_CONFIG_PATH, skymodel_pa
         # create sky library
         if run_library:
             sky_logger.info("creating sky radiative models library")
-            # TODO: parse create_spec parameters
+            # parse create_spec parameters
             os.chdir(os.path.join(skymodel_path, "sm-01_mod1"))
             lib_path = os.path.abspath(skymodel_master_config["sm_filenames.dat"]["libpath"])
-            fact = dict(map(lambda s: s.split()[1:], skymodel_master_config["libstruct.dat"][::1]))
+            fact = dict(map(lambda s: s.split()[1:], skymodel_master_config["libstruct.dat"][1::2]))
             fact = {k: 10**eval(v) for k, v in fact.items()}
-            pars = dict(zip(fact.keys(), skymodel_master_config["libstruct.dat"][1::1].split()))
+            pars = dict(zip(fact.keys(), map(str.split, skymodel_master_config["libstruct.dat"][2::2])))
             
-            airmasses = map(lambda f, p: f*eval(p), fact["airmass"], pars["airmass"])
-            times = map(lambda f, p: f * eval(p), fact["time"], pars["time"])
-            seasons = map(lambda f, p: f * eval(p), fact["season"], pars["season"])
-            resols = map(lambda f, p: f * eval(p), fact["resol"], pars["resol"])
-            pwvs = pwvs.split()
-            create_spec_pars = it.product(airmasses, times, seasons, resols, pwvs)
+            airmasses = map(lambda p: np.round(fact["airmass"]*int(p), len(p)-1), pars["airmass"])
+            times = map(lambda p: fact["time"] * int(p), pars["time"])
+            seasons = map(lambda p: fact["season"] * int(p), pars["season"])
+            resols = map(lambda p: fact["resol"] * int(p), pars["resol"])
+            pwvs = map(eval, pwvs.split(","))
+            create_spec_pars = list(it.product(airmasses, times, seasons, resols, pwvs))
+            nlib = len(create_spec_pars)
 
             # run create_spec across all parameter grid
-            for airmass, time, season, res, pwv in tqdm(create_spec_pars, desc="creating sky library", unit="grid step", ascii=True):
+            sky_logger.info(f"going to generate an airglow spectral library of {nlib} spectra")
+            for i, (airmass, time, season, res, pwv) in enumerate(create_spec_pars):
+                sky_logger.info(f"[{i:04d}/{nlib:04d}] creating airglow spectrum with parameters: {airmass=}, {time=}, {season=}, {res=}, {pwv=}")
                 out = subprocess.run(f"{os.path.join('bin', 'create_spec')} {airmass} {time} {season} {lib_path} {res} {pwv}".split(), capture_output=True)
                 if out.returncode == 0:
                     sky_logger.info(f"successfully finished 'create_spec' with parameters: {airmass=}, {time=}, {season=}, {res=}, {pwv=}")
