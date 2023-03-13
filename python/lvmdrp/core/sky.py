@@ -121,7 +121,7 @@ def write_skymodel_par(parfile_path, config, verify=True):
             if isinstance(val, (list, tuple)):
                 vals = list(map(str, val))
                 f.write(f"{key} = {' '.join(vals)}\n")
-            elif isinstance(val, (str, int, float)):
+            else:
                 f.write(f"{key} = {val}\n")
 
 
@@ -165,7 +165,7 @@ def run_skymodel(skymodel_path=SKYMODEL_INST_PATH, **kwargs):
      
     # update original configuration settings with kwargs ------------------------------------------
     skymodel_inst_par.update((k, kwargs[k]) for k in skymodel_inst_par.keys() & kwargs.keys())
-    skymodel_inst_par.update((k, kwargs[k]) for k in skymodel_inst_par.keys() & kwargs.keys())
+    skymodel_model_par.update((k, kwargs[k]) for k in skymodel_model_par.keys() & kwargs.keys())
     # save configuration files with the names expected by calcskymodel
     write_skymodel_par(parfile_path=SKYMODEL_INST_CONFIG_PATH.replace("_ref", ""), config=skymodel_inst_par)
     write_skymodel_par(parfile_path=SKYMODEL_MODEL_CONFIG_PATH.replace("_ref", ""), config=skymodel_model_par)
@@ -178,7 +178,7 @@ def run_skymodel(skymodel_path=SKYMODEL_INST_PATH, **kwargs):
     os.makedirs("output", exist_ok=True)
     
     sky_logger.info("running skymodel from pre-computed airglow lines")
-    out = subprocess.run(f"bin/calcskymodel".split(), capture_output=True)
+    out = subprocess.run("bin/calcskymodel".split(), capture_output=True)
     if out.returncode != 0 or "error" in out.stderr.decode("utf-8").lower():
         sky_logger.warning("no suitable airglow spectrum found")
         
@@ -198,7 +198,10 @@ def run_skymodel(skymodel_path=SKYMODEL_INST_PATH, **kwargs):
             sky_logger.error(out.stderr.decode("utf-8"))
 
         # copy library files to corresponding path according to libpath
-        shutil.copytree(os.path.join(skymodel_path, "sm-01_mod1", "output"), os.path.join(skymodel_path, "sm-01_mod2", "data", "lib"))
+        try:
+            shutil.copytree(os.path.join(skymodel_path, "sm-01_mod1", "output"), os.path.join(skymodel_path, "sm-01_mod2", "data", "lib"), dirs_exist_ok=True, symlinks=True, ignore_dangling_symlinks=True)
+        except shutil.Error as e:
+            sky_logger.warning(e.args[0])
 
         sky_logger.info("calculating effective atmospheric transmission")
         os.chdir(os.path.join(skymodel_path, "sm-01_mod2"))
