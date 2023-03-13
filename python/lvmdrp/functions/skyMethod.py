@@ -13,16 +13,12 @@ import itertools as it
 import shutil
 import numpy as np
 import matplotlib.pyplot as plt
-from datetime import datetime, timedelta
+from datetime import datetime
 from multiprocessing import cpu_count
 from multiprocessing import Pool
 from scipy import optimize
 from astropy.io import fits
-from astropy import units as u
 from astropy.time import Time
-from skyfield.api import load, wgs84, Star
-from skyfield import almanac
-from skyfield.framelib import ecliptic_frame
 from tqdm import tqdm
 
 import sys
@@ -32,20 +28,16 @@ import zipfile
 import subprocess
 import pexpect
 import struct
-import site
 
-from lvmdrp.core.constants import EPHEMERIS_PATH
 from lvmdrp.core.constants import LVM_SRC_URL, SRC_PATH, SKYCORR_SRC_PATH, SKYMODEL_SRC_PATH, SKYCORR_INST_PATH, SKYMODEL_INST_PATH
-from lvmdrp.core.constants import BIN_PATH, INC_PATH, SKYCORR_CONFIG_PATH, SKYMODEL_CONFIG_PATH
+from lvmdrp.core.constants import BIN_PATH, SKYCORR_CONFIG_PATH, SKYMODEL_CONFIG_PATH
 from lvmdrp.utils import rc_symlink
 from lvmdrp.utils.logger import get_logger
-from lvmdrp.core.sky import run_skycorr, run_skymodel, optimize_sky, ang_distance
+from lvmdrp.core.sky import run_skycorr, run_skymodel, skymodel_pars_from_header, optimize_sky, ang_distance
 from lvmdrp.core.passband import PassBand
 from lvmdrp.core.spectrum1d import Spectrum1D
-from lvmdrp.core.header import Header, combineHdr
+from lvmdrp.core.header import Header
 from lvmdrp.core.rss import RSS
-
-from lvmdrp.utils.configuration import load_master_config
 
 
 description = "Provides methods for sky subtraction"
@@ -60,9 +52,6 @@ __all__ = [
 
 sky_logger = get_logger(name=__name__)
 
-
-# average moon distance from earth
-MEAN_MOON_DIST = 384979000 * u.m
 
 SYSTEM = struct.calcsize("P") * 8
 
@@ -633,14 +622,14 @@ def sepContinuumLine_drp(sky_ref, out_cont_line, method="skycorr", sky_sci="", s
 
     # read sky spectrum
     sky_spec = Spectrum1D()
-    sky_spec.loadFitsData(sky_ref)
+    sky_spec.loadFitsData(sky_ref, extension_hdr=0)
     
     # run skycorr
     if method == "skycorr":
         prefix = "SC"
         if sky_sci != "":
             sci_spec = Spectrum1D()
-            sci_spec.loadFitsData(sky_sci)
+            sci_spec.loadFitsData(sky_sci, extension_hdr=0)
         else:
             raise ValueError(f"You need to provide a science spectrum to perform the continuum/line separation using skycorr.")
         if np.any(sky_spec._wave != sci_spec._wave):
@@ -676,10 +665,11 @@ def sepContinuumLine_drp(sky_ref, out_cont_line, method="skycorr", sky_sci="", s
         # TODO: remove continuum contribution from original sky spectrum
         resample_step, resolving_power = np.diff(sky_spec._wave).min(), int(np.ceil((sky_spec._wave/np.diff(sky_spec._wave).min()).max()))
         # BUG: implement missing parameters in this call of run_skymodel
+        skymodel_pars = skymodel_pars_from_header(sky_spec._head)
         inst_pars, model_pars, sky_model = run_skymodel(
             limlam=[sky_spec._wave.min()/1e4, sky_spec._wave.max()/1e4],
             dlam=resample_step/1e4,
-            resol=resolving_power
+            **skymodel_pars
         )
         pars_out = {}
         pars_out.update(inst_pars)
@@ -784,15 +774,10 @@ def evalESOSky_drp(sky_ref, out_rss, resample_step="optimal", resample_method="l
         user:> drp sky evalESOSky SKY_REF.fits out_rss.fits
     """
 
-    # read master configuration file
-    master_config = load_master_config(fmt="dict")
-
     # read sky spectrum
     sky_spec = Spectrum1D()
-    sky_spec.loadFitsData(sky_ref)
-    sky_head = Header()
-    sky_head.loadFitsHeader(sky_ref)
-
+    sky_spec.loadFitsData(sky_ref, extension_hdr=0)
+    
     eval_failed = False
     if resample_step != "optimal":
         try:
@@ -810,130 +795,22 @@ def evalESOSky_drp(sky_ref, out_rss, resample_step="optimal", resample_method="l
             resample_step = np.min(np.diff(sky_spec._wave))
     
     new_wave = np.arange(sky_spec._wave.min(), sky_spec._wave.max() + resample_step, resample_step)
-
-    # build quantities from information in sky_head
-    try:
-        obs_pars = master_config["LVM_OBSERVATORIES"][sky_head["OBSERVAT"]]
-    except KeyError:
-        sky_logger.error(f"observatory '{sky_head['OBSERVAT']}' not found in master configuration file.")
-        sky_logger.warning("falling back to 'LCO'")
-        obs_pars = master_config["LVM_OBSERVATORIES"]["LCO"]
     
-    # define ephemeris object
-    astros = load(EPHEMERIS_PATH)
-    # define location
-    obs_topos = wgs84.latlon(latitude_degrees=obs_pars["lat"], longitude_degrees=obs_pars["lon"], elevation_m=obs_pars["height"])
-    obs = earth + obs_topos
-    # define observation datetime
-    ts = load.timescale()
-    obs_time = ts.from_astropy(Time(sky_head["OBSTIME"]))
-    # define observatory object
-    obs = obs.at(obs_time)
-
-    # define astros
-    sun, earth, moon = astros["sun"], astros["earth"], astros["moon"]
-    s, m = obs.observe(sun).apparent(), obs.observe(moon).apparent()
-
-    # define target
-    target_ra, target_dec = sky_head["RA"]*u.deg, sky_head["DEC"]*u.deg
-    target = Star(ra_hours=target_ra.to(u.hourangle), dec_degrees=target_dec.to(u.deg))
-    t = obs.observe(target).apparent()
-
-    # observatory height ('sm_h' in km)
-    sm_h = obs_pars["height"]*u.m
-
-    # TODO: - ** lower height limit ('sm_hmin' in km)
-    # altitude of object above the horizon (alt, 0 -- 90)
-    alt, az, _ = t.altaz()
-
-    # separation between moon and sun from earth ('alpha', 0 -- 360, >180 for waning moon)
-    alpha = s.separation_from(m)
-
-    # separation between moon and object ('rho', 0 -- 180)
-    rho = t.separation_from(m)
-
-    # altitude of moon ('altmoon', -90 -- 90)
-    altmoon, _, moondist = m.altaz()
-
-    # TODO: - ** distance to moon ('moondist', 0.91 -- 1.08; 1: mean distance)
-    moondist = moondist.to(u.m) / MEAN_MOON_DIST
-    
-    # TODO: - ** pressure at observatory altitude ('pres' in hPa)
-    # TODO: - ** single scattering albedo for aerosols ('ssa')
-    # TODO: - ** calculation of double scattering of moonlight ('calcds', Y or N)
-    # TODO: - ** relative UV/optical ozone column density ('o3column'; 1: 258 DU)
-    # TODO: - ** scaling factor for scattered moonlight ('moonscal')
-
-    # heliocentric ecliptic longitude of object ('lon_ecl', -180 -- 180)
-    # heliocentric ecliptic latitude of object ('lat_ecl', -90 -- 90)
-    lon_ecl, lat_ecl, _ = t.frame_latlon(ecliptic_frame)
-
-    # TODO: - ** grey-body emissivity ('emis_str', comma-separated list)
-    # TODO: - ** grey-body temperature ('temp_str' in K, comma-separated list)
-    # TODO: - ** monthly-averaged solar radio flux ('msolflux' in sfu)
-
-    # bimonthly period ('season'; 1: Dec/Jan, ..., 6: Oct/Nov; 0 entire year)
-    month = obs_time.datetime.month
-    if month in [12, 1]: season = 1
-    elif month in [2, 3]: season = 2
-    elif month in [4, 5]: season = 3
-    elif month in [6, 7]: season = 4
-    elif month in [8, 9]: season = 5
-    else: season = 6
-        
-    # time of the observation ('time' in x/3 of the night; 0: entire night)
-    t_ini, t_fin = obs_time - timedelta(days=2), obs_time + timedelta(days=2)
-
-    risings_and_settings, _ = almanac.find_discrete(t_ini, t_fin, almanac.sunrise_sunset(ephemeris=astros, topos=obs_topos))
-    i = np.digitize(obs_time.tt, bins=risings_and_settings.tt, right=False)
-    risings_and_settings[i-1].tt <= obs_time.tt < risings_and_settings[i].tt, _[[i-1,i]]
-
-    night_thirds = np.linspace(*risings_and_settings[[i-1, i]].tt, 4)
-    time = np.digitize(time.tt, bins=night_thirds)
-    # assume whole night if the target obstime was observed during 'daylight'
-    if time == 4:
-        time = 0
-
-    # vacuum or air wavelengths ('vac_air', vac or air)
-    # precipitable water vapour ('pwv' in mm; -1: bimonthly mean)
-    # TODO: - ** radiative transfer code for molecular spectra ('rtcode', L or R)
-    # TODO: - ** resolving power of molecular spectra in library ('resol')
-    resol = int(np.ceil((new_wave/resample_step).max()))
-    # TODO: - ** sky model components
+    # get skymodel parameters from header
+    skymodel_pars = skymodel_pars_from_header(header=sky_spec._header)
 
     # TODO: move unit and data type conversions to within the run_skymodel routine
-    pars_out, sky_model = run_skymodel(
+    inst_pars, model_pars, sky_model = run_skymodel(
         skymodel_path=SKYMODEL_INST_PATH,
         # instrument parameters
-        limlam=[new_wave.min()*u.AA, new_wave.max()*u.AA],
-        dlam=resample_step*u.AA,
+        limlam=[new_wave.min()/1e4, new_wave.max()/1e4],
+        dlam=resample_step/1e4,
         # sky model parameters
-        sm_h=sm_h.to(u.km),
-        sm_hmin=(2.0*u.km), 
-        alt=alt.to(u.deg),
-        alpha=alpha.to(u.deg),
-        rho=rho.to(u.deg),
-        altmoon=altmoon.to(u.deg),
-        moondist=moondist,
-        pres=744*u.hPa,
-        ssa=0.97,
-        calcds="N",
-        o2column=1.0,
-        moonscal=1.0,
-        lon_ecl=lon_ecl.to(u.deg),
-        lat_ecl=lat_ecl.to(u.deg),
-        emis_str=",".join([0.2]),
-        temp_str=",".join([290.0*u.K]),
-        msolflux=130.0*(1e-19*u.erg/u.s/u.cm**2/u.Hz),
-        season=season,
-        time=time,
-        vac_air="vac",
-        pwv=-1*u.mm,
-        rtcode="L",
-        resol=resol,
-        filepath="data",
-        incl="YYYYYYY"
+        **skymodel_pars
     )
+    pars_out = {}
+    pars_out.update(inst_pars)
+    pars_out.update(model_pars)
     
     # create RSS
     wav_comp = sky_model["lam"].value
