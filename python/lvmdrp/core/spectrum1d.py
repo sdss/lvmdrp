@@ -555,7 +555,7 @@ class Spectrum1D(Header):
         """
 
         hdu = pyfits.open(file,uint=True, do_not_scale_image_data=True)
-        if extension_data is None and extension_mask is None and extension_error is None and extension_wave is None and extension_fwhm is None and extension_hdr is None:
+        if extension_data is None and extension_mask is None and extension_error is None and extension_wave is None and extension_fwhm is None is None:
                 self._data = hdu[0].data
                 self._header = hdu[0].header
                 self._dim = self._data.shape[0] # set shape
