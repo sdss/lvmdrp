@@ -19,7 +19,7 @@ from multiprocessing import Pool
 from scipy import optimize
 from astropy.io import fits
 from astropy.time import Time
-from tqdm import tqdm
+from multiprocessing import Pool, cpu_count
 
 import sys
 import os
@@ -321,7 +321,7 @@ def installESOSky_drp():
     os.chdir(initial_path)
 
 
-def configureSkyModel_drp(skymodel_config_path=SKYMODEL_CONFIG_PATH, skymodel_path=SKYMODEL_INST_PATH, method="run", run_library=False, run_multiscat=False, pwvs="-1", source=""):
+def configureSkyModel_drp(skymodel_config_path=SKYMODEL_CONFIG_PATH, skymodel_path=SKYMODEL_INST_PATH, method="run", run_library=False, run_multiscat=False, pwvs="-1", source="", parallel="auto"):
     """
         Runs/downloads the configuration files of the sky module
         
@@ -363,6 +363,9 @@ def configureSkyModel_drp(skymodel_config_path=SKYMODEL_CONFIG_PATH, skymodel_pa
         pwvs : string of floats
             the precipitable water vapor values (in mm) to use. Defaults to -1 which means no PWV
             scaling is applied
+        parallel : string or int
+            whether to run the library generation in parallel or not. Valid values are 'auto' (default)
+            and integers representing the number of threads to use.
 
         Examples
         --------
@@ -398,7 +401,6 @@ def configureSkyModel_drp(skymodel_config_path=SKYMODEL_CONFIG_PATH, skymodel_pa
 
         # create sky library
         if run_library:
-            sky_logger.info("creating sky radiative models library")
             # parse create_spec parameters
             os.chdir(os.path.join(skymodel_path, "sm-01_mod1"))
             lib_path = os.path.abspath(skymodel_master_config["sm_filenames.dat"]["libpath"])
@@ -415,29 +417,48 @@ def configureSkyModel_drp(skymodel_config_path=SKYMODEL_CONFIG_PATH, skymodel_pa
             nlib = len(create_spec_pars)
 
             # run create_spec across all parameter grid
-            sky_logger.info(f"going to generate an airglow spectral library of {nlib} spectra")
+            if parallel == "auto":
+                cpus = cpu_count()
+            else:
+                cpus = int(parallel)
+            if cpus > 1:
+                sky_logger.info(f"going to generate an airglow lines library of {nlib} spectra with {cpus} concurrent workers")
+                pool = Pool(cpus)
+                result = [pool.apply_async(subprocess.run, args=(f"{os.path.join('bin', 'create_spec')} {airmass} {time} {season} {lib_path} {res} {pwv}".split(),), kwds={"capture_output": True}) for i, (airmass, time, season, res, pwv) in enumerate(create_spec_pars)]
+                pool.close()
+                pool.join()
+            else:
+                sky_logger.info(f"going to generate an airglow lines library of {nlib} spectra")
+
             for i, (airmass, time, season, res, pwv) in enumerate(create_spec_pars):
-                sky_logger.info(f"[{i:04d}/{nlib:04d}] creating airglow spectrum with parameters: {airmass=}, {time=}, {season=}, {res=}, {pwv=}")
-                out = subprocess.run(f"{os.path.join('bin', 'create_spec')} {airmass} {time} {season} {lib_path} {res} {pwv}".split(), capture_output=True)
-                if out.returncode == 0:
-                    sky_logger.info(f"successfully finished 'create_spec' with parameters: {airmass=}, {time=}, {season=}, {res=}, {pwv=}")
+                if cpus > 1:
+                    sky_logger.info(f"[{i:04d}/{nlib:04d}] retrieving airglow lines with parameters: {airmass = }, {time = }, {season = }, {res = }, {pwv = }")
+                    out = result[i].get()
                 else:
-                    sky_logger.error("failed while running 'create_spec'")
-                    sky_logger.error(f"with parameters: {airmass=}, {time=}, {season=}, {res=}, {pwv=}")
+                    sky_logger.info(f"[{i:04d}/{nlib:04d}] creating airglow lines with parameters: {airmass = }, {time = }, {season = }, {res = }, {pwv = }")
+                    out = subprocess.run(f"{os.path.join('bin', 'create_spec')} {airmass} {time} {season} {lib_path} {res} {pwv}".split(), capture_output=True)
+                if out.returncode == 0:
+                    sky_logger.info("successfully finished airglow lines calculations")
+                else:
+                    sky_logger.error("failed while running airglow lines calculations")
                     sky_logger.error(out.stderr.decode("utf-8"))
 
             # create library destination path
             os.makedirs(os.path.join(skymodel_path, "sm-01_mod2", "data", "lib"), exist_ok=True)
             # copy library to destination path as specified in sm_filenames.dat
-            shutil.copytree(os.path.join(skymodel_path, "sm-01_mod1", "data"), os.path.join(skymodel_path, "sm-01_mod2", "data", "lib"), dirs_exist_ok=True)
+            try:
+                shutil.copytree(os.path.join(skymodel_path, "sm-01_mod1", "data"), os.path.join(skymodel_path, "sm-01_mod2", "data", "lib"), dirs_exist_ok=True, symlinks=True, ignore_dangling_symlinks=True)
+            except shutil.Error as e:
+                sky_logger.warning(e.args[0])
 
             # run prelinetrans
+            sky_logger.info("calculating effective atmospheric transmission")
             os.chdir(os.path.join(skymodel_path, "sm-01_mod2"))
             out = subprocess.run(os.path.join("bin", "preplinetrans").split(), capture_output=True)
             if out.returncode == 0:
-                sky_logger.info("sucessfully finished 'preplinetrans'")
+                sky_logger.info("successfully finished effective atmospheric transmission calculations")
             else:
-                sky_logger.error("failed while running 'preplinetrans'")
+                sky_logger.error("failed while running effective atmospheric transmission calculations")
                 sky_logger.error(out.stderr.decode("utf-8"))
             
             if run_multiscat:
