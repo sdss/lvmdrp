@@ -7,6 +7,7 @@
 # @Copyright: SDSS-V LVM
 
 import os
+import re
 import yaml
 import subprocess
 import itertools as it
@@ -321,7 +322,7 @@ def installESOSky_drp():
     os.chdir(initial_path)
 
 
-def configureSkyModel_drp(skymodel_config_path=SKYMODEL_CONFIG_PATH, skymodel_path=SKYMODEL_INST_PATH, method="run", run_library=False, run_multiscat=False, pwvs="-1", source="", parallel="auto"):
+def configureSkyModel_drp(skymodel_config_path=SKYMODEL_CONFIG_PATH, skymodel_path=SKYMODEL_INST_PATH, method="run", run_library=False, run_multiscat=False, source="", parallel="auto"):
     """
         Runs/downloads the configuration files of the sky module
         
@@ -356,22 +357,19 @@ def configureSkyModel_drp(skymodel_config_path=SKYMODEL_CONFIG_PATH, skymodel_pa
                 - 'download' : will download all configuration files and corresponding library files
         run_library : boolean
             whether to run or not the ESO routines to build a spectral library using the specified
-            configuration files and a set of precipitable water vapor scalings (see 'pwv')
+            configuration files
         run_multiscat : boolean
             whether to run or not the ESO 'estmultiscat' routine for the multiple scattering
             corrections
-        pwvs : string of floats
-            the precipitable water vapor values (in mm) to use. Defaults to -1 which means no PWV
-            scaling is applied
         parallel : string or int
             whether to run the library generation in parallel or not. Valid values are 'auto' (default)
-            and integers representing the number of threads to use.
+            and integers representing the number of threads to use
 
         Examples
         --------
 
         user:> drp sky configureSkyModel # to write the configuration files only
-        user:> drp sky configureSkyModel method=run run_library=True run_multiscat=False pwvs=0.5,1.0,2.5
+        user:> drp sky configureSkyModel method=run run_library=True run_multiscat=False
 
     """
 
@@ -401,20 +399,41 @@ def configureSkyModel_drp(skymodel_config_path=SKYMODEL_CONFIG_PATH, skymodel_pa
 
         # create sky library
         if run_library:
+            # parse library path
+            lib_path = os.path.abspath(os.path.join(skymodel_path, "sm-01_mod2", "data", skymodel_master_config["sm_filenames.dat"]["libpath"]))
+            # set hard-coded pwv (no scaling)
+            pwv = -1
             # parse create_spec parameters
             os.chdir(os.path.join(skymodel_path, "sm-01_mod1"))
-            lib_path = os.path.abspath(skymodel_master_config["sm_filenames.dat"]["libpath"])
-            fact = dict(map(lambda s: s.split()[1:], skymodel_master_config["libstruct.dat"][1::2]))
-            fact = {k: 10**eval(v) for k, v in fact.items()}
-            pars = dict(zip(fact.keys(), map(str.split, skymodel_master_config["libstruct.dat"][2::2])))
+            spec_name = skymodel_master_config["libstruct.dat"][0]
+            fact, pars = {}, {}
+            ipar = {}
+            for conv, values in zip(skymodel_master_config["libstruct.dat"][1::2], skymodel_master_config["libstruct.dat"][2::2]):
+                pos, name, exp = conv.split()
+                pars[name] = values.split()
+                fact[name] = 10**eval(exp)
+                ipar[name] = pos
+                spec_name = re.sub(f"{pos}+", f"{{{name}}}", spec_name)
             
-            airmasses = map(lambda p: np.round(fact["airmass"]*int(p), len(p)-1), pars["airmass"])
-            times = map(lambda p: fact["time"] * int(p), pars["time"])
-            seasons = map(lambda p: fact["season"] * int(p), pars["season"])
-            resols = map(lambda p: fact["resol"] * int(p), pars["resol"])
-            pwvs = map(eval, pwvs.split(","))
-            create_spec_pars = list(it.product(airmasses, times, seasons, resols, pwvs))
-            nlib = len(create_spec_pars)
+            spec_pars = []
+            spec_nams = []
+            filt_nams = list(filter(lambda name: name not in ["rtcode", "spectype"], pars.keys()))
+            for i, values in enumerate(it.product(*tuple(v for k, v in pars.items() if k in filt_nams))):
+                # create output spectra names
+                cur_values = {name: value for name, value in zip(filt_nams, values)}
+                cur_values["rtcode"] = pars["rtcode"][0]
+                cur_values_r, cur_values_t = cur_values.copy(), cur_values.copy()
+                cur_values_r["spectype"], cur_values_t["spectype"] = "R", "T"
+                spec_nams.append((
+                    os.path.join(lib_path, spec_name.format(**cur_values_r)),
+                    os.path.join(lib_path, spec_name.format(**cur_values_t))
+                ))
+
+                # parse parameters
+                airmass, time, season, res = values
+                spec_pars.append((fact["airmass"] * int(airmass), fact["time"] * int(time), fact["season"] * int(season), fact["resol"] * int(res)))
+
+            nlib = len(spec_pars)
 
             # run create_spec across all parameter grid
             if parallel == "auto":
@@ -424,32 +443,33 @@ def configureSkyModel_drp(skymodel_config_path=SKYMODEL_CONFIG_PATH, skymodel_pa
             if cpus > 1:
                 sky_logger.info(f"going to generate an airglow lines library of {nlib} spectra with {cpus} concurrent workers")
                 pool = Pool(cpus)
-                result = [pool.apply_async(subprocess.run, args=(f"{os.path.join('bin', 'create_spec')} {airmass} {time} {season} {lib_path} {res} {pwv}".split(),), kwds={"capture_output": True}) for i, (airmass, time, season, res, pwv) in enumerate(create_spec_pars)]
+                result = []
+                for i, (airmass, time, season, res) in enumerate(spec_pars):
+                    # TODO: build output file names
+                    if all(map(os.path.isfile, spec_nams[i])): continue
+                    # add task to worker
+                    result.append(pool.apply_async(subprocess.run, args=(f"{os.path.join('bin', 'create_spec')} {airmass} {time} {season} {lib_path} {res} {pwv}".split(),), kwds={"capture_output": True}))
                 pool.close()
                 pool.join()
             else:
                 sky_logger.info(f"going to generate an airglow lines library of {nlib} spectra")
 
-            for i, (airmass, time, season, res, pwv) in enumerate(create_spec_pars):
+            for i, (airmass, time, season, res) in enumerate(spec_pars):
+                if all(map(os.path.isfile, spec_nams[i])):
+                    sky_logger.info(f"skipping parameters {airmass = :g}, {time = }, {season = }, {res = }, {pwv = }, files {spec_nams[i]} already exist")
+                    continue
                 if cpus > 1:
-                    sky_logger.info(f"[{i:04d}/{nlib:04d}] retrieving airglow lines with parameters: {airmass = }, {time = }, {season = }, {res = }, {pwv = }")
+                    sky_logger.info(f"[{i+1:04d}/{nlib:04d}] retrieving airglow lines with parameters: {airmass = :g}, {time = }, {season = }, {res = }, {pwv = }")
                     out = result[i].get()
                 else:
-                    sky_logger.info(f"[{i:04d}/{nlib:04d}] creating airglow lines with parameters: {airmass = }, {time = }, {season = }, {res = }, {pwv = }")
-                    out = subprocess.run(f"{os.path.join('bin', 'create_spec')} {airmass} {time} {season} {lib_path} {res} {pwv}".split(), capture_output=True)
+                    sky_logger.info(f"[{i+1:04d}/{nlib:04d}] creating airglow lines with parameters: {airmass = :g}, {time = }, {season = }, {res = }, {pwv = }")
+                    continue
+                    out = subprocess.run(f"{os.path.join('bin', 'create_spec')} {airmass:g} {time} {season} {lib_path} {res} {pwv}".split(), capture_output=True)
                 if out.returncode == 0:
                     sky_logger.info("successfully finished airglow lines calculations")
                 else:
                     sky_logger.error("failed while running airglow lines calculations")
                     sky_logger.error(out.stderr.decode("utf-8"))
-
-            # create library destination path
-            os.makedirs(os.path.join(skymodel_path, "sm-01_mod2", "data", "lib"), exist_ok=True)
-            # copy library to destination path as specified in sm_filenames.dat
-            try:
-                shutil.copytree(os.path.join(skymodel_path, "sm-01_mod1", "data"), os.path.join(skymodel_path, "sm-01_mod2", "data", "lib"), dirs_exist_ok=True, symlinks=True, ignore_dangling_symlinks=True)
-            except shutil.Error as e:
-                sky_logger.warning(e.args[0])
 
             # run prelinetrans
             sky_logger.info("calculating effective atmospheric transmission")
@@ -477,7 +497,7 @@ def configureSkyModel_drp(skymodel_config_path=SKYMODEL_CONFIG_PATH, skymodel_pa
         raise NotImplementedError(f"'{method}' is not implemented yet. Please try again using the 'run' method")
     else:
         raise ValueError(f"unknown method '{method}'. Valid values are: 'run' and 'download'")
-        
+
 
 def createMasterSky_drp(in_rss, out_sky, clip_sigma='3.0', nsky='0', filter='', non_neg='1', plot='0'):
     """
