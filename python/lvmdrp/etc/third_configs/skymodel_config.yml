@@ -166,7 +166,7 @@ lblrtm_setup:
 libstruct.dat:
   # Structure of LBLRTM/RFM library of atmospheric molecular spectra
   # File name structure (increasing field numbers [1-7] from left to right):
-  - "111_A22_t3_s4_R5555555_6.fits"
+  - "lib/111_A22_t3_s4_R5555555_6.fits"
   # Meaning of data fields:
   # 1st line: description
   # - ID (number in file name structure -> 1,2,3,...)
@@ -190,7 +190,7 @@ libstruct.dat:
 sm_filenames.dat:
   # path to library structure files
   # (relative to folder with this file or absolute path)
-  libpath: "./lib"
+  libpath: "."
   # names of files containing the LBLRTM/RFM library structure:
   # 1: time-dependent library, 2: PWV-dependent library
   # libstruct:  "libstruct.dat libstruct_pwv.dat"

@@ -373,6 +373,8 @@ def configureSkyModel_drp(skymodel_config_path=SKYMODEL_CONFIG_PATH, skymodel_pa
 
     """
 
+    cwd = os.path.abspath(os.curdir)
+
     if method == "run":
         sky_logger.info(f"writing configuration files using '{skymodel_config_path}' as source")
         # read master configuration file
@@ -431,7 +433,12 @@ def configureSkyModel_drp(skymodel_config_path=SKYMODEL_CONFIG_PATH, skymodel_pa
 
                 # parse parameters
                 airmass, time, season, res = values
-                spec_pars.append((fact["airmass"] * int(airmass), fact["time"] * int(time), fact["season"] * int(season), fact["resol"] * int(res)))
+                spec_pars.append((
+                    np.round(fact["airmass"] * int(airmass), 1),
+                    fact["time"] * int(time),
+                    fact["season"] * int(season),
+                    fact["resol"] * int(res)
+                    ))
 
             nlib = len(spec_pars)
 
@@ -446,9 +453,11 @@ def configureSkyModel_drp(skymodel_config_path=SKYMODEL_CONFIG_PATH, skymodel_pa
                 result = []
                 for i, (airmass, time, season, res) in enumerate(spec_pars):
                     # TODO: build output file names
-                    if all(map(os.path.isfile, spec_nams[i])): continue
+                    if all(map(os.path.isfile, spec_nams[i])):
+                        result.append(None)
+                        continue
                     # add task to worker
-                    result.append(pool.apply_async(subprocess.run, args=(f"{os.path.join('bin', 'create_spec')} {airmass} {time} {season} {lib_path} {res} {pwv}".split(),), kwds={"capture_output": True}))
+                    result.append(pool.apply_async(subprocess.run, args=(f"{os.path.join('bin', 'create_spec')} {airmass} {time} {season} . {res} {pwv}".split(),), kwds={"capture_output": True}))
                 pool.close()
                 pool.join()
             else:
@@ -456,19 +465,27 @@ def configureSkyModel_drp(skymodel_config_path=SKYMODEL_CONFIG_PATH, skymodel_pa
 
             for i, (airmass, time, season, res) in enumerate(spec_pars):
                 if all(map(os.path.isfile, spec_nams[i])):
-                    sky_logger.info(f"skipping parameters {airmass = :g}, {time = }, {season = }, {res = }, {pwv = }, files {spec_nams[i]} already exist")
+                    sky_logger.info(f"skipping parameters {airmass = }, {time = }, {season = }, {res = }, {pwv = }, files {spec_nams[i]} already exist")
                     continue
                 if cpus > 1:
-                    sky_logger.info(f"[{i+1:04d}/{nlib:04d}] retrieving airglow lines with parameters: {airmass = :g}, {time = }, {season = }, {res = }, {pwv = }")
+                    sky_logger.info(f"[{i+1:04d}/{nlib:04d}] retrieving airglow lines with parameters: {airmass = }, {time = }, {season = }, {res = }, {pwv = }")
                     out = result[i].get()
                 else:
-                    sky_logger.info(f"[{i+1:04d}/{nlib:04d}] creating airglow lines with parameters: {airmass = :g}, {time = }, {season = }, {res = }, {pwv = }")
-                    out = subprocess.run(f"{os.path.join('bin', 'create_spec')} {airmass:g} {time} {season} {lib_path} {res} {pwv}".split(), capture_output=True)
+                    sky_logger.info(f"[{i+1:04d}/{nlib:04d}] creating airglow lines with parameters: {airmass = }, {time = }, {season = }, {res = }, {pwv = }")
+                    out = subprocess.run(f"{os.path.join('bin', 'create_spec')} {airmass} {time} {season} . {res} {pwv}".split(), capture_output=True)
                 if out.returncode == 0:
                     sky_logger.info("successfully finished airglow lines calculations")
                 else:
                     sky_logger.error("failed while running airglow lines calculations")
                     sky_logger.error(out.stderr.decode("utf-8"))
+
+            # copy airglow library to intended destination
+            out = subprocess.run(f"mv output/*.fits {lib_path}/.".split(), capture_output=True)
+            if out.returncode == 0:
+                sky_logger.info("successfully copied airglow library")
+            else:
+                sky_logger.error("failed while copying airglow library")
+                sky_logger.error(out.stderr.decode("utf-8"))
 
             # run prelinetrans
             sky_logger.info("calculating effective atmospheric transmission")
@@ -487,6 +504,8 @@ def configureSkyModel_drp(skymodel_config_path=SKYMODEL_CONFIG_PATH, skymodel_pa
                 else:
                     sky_logger.error("failed while running 'estmultiscat'")
                     sky_logger.error(out.stderr.decode("utf-8"))
+        # return to original path
+        os.chdir(cwd)
     elif method == "download":
         # TODO: download master configuration file and overwrite current one
         # TODO: write individual configuration files (as above)
