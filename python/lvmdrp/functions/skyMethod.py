@@ -402,11 +402,11 @@ def configureSkyModel_drp(skymodel_config_path=SKYMODEL_CONFIG_PATH, skymodel_pa
         # create sky library
         if run_library:
             # parse library path
+            cur_path = os.chdir(os.path.join(skymodel_path, "sm-01_mod1"))
             lib_path = os.path.abspath(os.path.join(skymodel_path, "sm-01_mod2", "data", skymodel_master_config["sm_filenames.dat"]["libpath"]))
             # set hard-coded pwv (no scaling)
             pwv = -1
             # parse create_spec parameters
-            os.chdir(os.path.join(skymodel_path, "sm-01_mod1"))
             spec_name = skymodel_master_config["libstruct.dat"][0]
             fact, pars = {}, {}
             ipar = {}
@@ -417,8 +417,7 @@ def configureSkyModel_drp(skymodel_config_path=SKYMODEL_CONFIG_PATH, skymodel_pa
                 ipar[name] = pos
                 spec_name = re.sub(f"{pos}+", f"{{{name}}}", spec_name)
             
-            spec_pars = []
-            spec_nams = []
+            spec_nams, spec_pars = [], []
             filt_nams = list(filter(lambda name: name not in ["rtcode", "spectype"], pars.keys()))
             for i, values in enumerate(it.product(*tuple(v for k, v in pars.items() if k in filt_nams))):
                 # create output spectra names
@@ -457,7 +456,7 @@ def configureSkyModel_drp(skymodel_config_path=SKYMODEL_CONFIG_PATH, skymodel_pa
                         result.append(None)
                         continue
                     # add task to worker
-                    result.append(pool.apply_async(subprocess.run, args=(f"{os.path.join('bin', 'create_spec')} {airmass} {time} {season} . {res} {pwv}".split(),), kwds={"capture_output": True}))
+                    result.append(pool.apply_async(subprocess.run, args=(f"{os.path.join('bin', 'create_spec')} {airmass} {time} {season} {cur_path} {res} {pwv}".split(),), kwds={"capture_output": True}))
                 pool.close()
                 pool.join()
             else:
@@ -472,7 +471,7 @@ def configureSkyModel_drp(skymodel_config_path=SKYMODEL_CONFIG_PATH, skymodel_pa
                     out = result[i].get()
                 else:
                     sky_logger.info(f"[{i+1:04d}/{nlib:04d}] creating airglow lines with parameters: {airmass = }, {time = }, {season = }, {res = }, {pwv = }")
-                    out = subprocess.run(f"{os.path.join('bin', 'create_spec')} {airmass} {time} {season} . {res} {pwv}".split(), capture_output=True)
+                    out = subprocess.run(f"{os.path.join('bin', 'create_spec')} {airmass} {time} {season} {cur_path} {res} {pwv}".split(), capture_output=True)
                 if out.returncode == 0:
                     sky_logger.info("successfully finished airglow lines calculations")
                 else:
