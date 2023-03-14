@@ -463,7 +463,6 @@ def configureSkyModel_drp(skymodel_config_path=SKYMODEL_CONFIG_PATH, skymodel_pa
                     out = result[i].get()
                 else:
                     sky_logger.info(f"[{i+1:04d}/{nlib:04d}] creating airglow lines with parameters: {airmass = :g}, {time = }, {season = }, {res = }, {pwv = }")
-                    continue
                     out = subprocess.run(f"{os.path.join('bin', 'create_spec')} {airmass:g} {time} {season} {lib_path} {res} {pwv}".split(), capture_output=True)
                 if out.returncode == 0:
                     sky_logger.info("successfully finished airglow lines calculations")
