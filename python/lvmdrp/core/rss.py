@@ -220,7 +220,7 @@ class RSS(FiberRows):
         if self._mask is not None and spec._mask is not None:
             self._mask[fiber, :] = spec._mask
 
-    def setWave(self, wave, unit="AA"):
+    def setWave(self, wave, unit="Angstrom"):
         self._wave = numpy.array(wave)
 
         if len(wave.shape)==1:
