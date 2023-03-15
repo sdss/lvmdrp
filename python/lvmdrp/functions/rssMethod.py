@@ -11,9 +11,9 @@ from multiprocessing import Pool
 from scipy import signal
 from scipy import ndimage
 from scipy import interpolate
-from rascal.util import refine_peaks
-from rascal.atlas import Atlas
-from rascal.calibrator import Calibrator
+# from rascal.util import refine_peaks
+# from rascal.atlas import Atlas
+# from rascal.calibrator import Calibrator
 from astropy.wcs import WCS
 from astropy.io import fits
 from astropy.table import Table
@@ -74,95 +74,95 @@ def mergeRSS_drp(files_in, file_out,  mergeHdr='1'):
 				rss.append(rss_add, append_hdr=True)
 	rss.writeFitsData(file_out)
 
-def autoPixWaveMap_drp(in_arc, out_pixwave, elements, ref_fiber='300', coadd_fibers='10', line_heights='10', prominence='5', lines_dist='5', refine_window='3', wave_range='', pixels='', waves='', poly_deg='2', poly_kind='poly', plot='0'):
+# def autoPixWaveMap_drp(in_arc, out_pixwave, elements, ref_fiber='300', coadd_fibers='10', line_heights='10', prominence='5', lines_dist='5', refine_window='3', wave_range='', pixels='', waves='', poly_deg='2', poly_kind='poly', plot='0'):
 
-	elements = elements.split(",")
-	ref_fiber = int(ref_fiber)
-	coadd_fibers = int(coadd_fibers)
-	try:
-		prominence = float(prominence)
-	except (ValueError, TypeError):
-		prominence = None
-	line_heights = float(line_heights)
-	lines_dist = int(lines_dist)
-	refine_window = int(refine_window)
-	poly_deg = int(poly_deg)
-	plot = bool(int(plot))
-	if wave_range != '':
-		wave_range = wave_range.split(",")
-		wave_range = float(wave_range[0]), float(wave_range[1])
-	else:
-		wave_range = [None, None]
-	if pixels != '':
-		pixels = pixels.split(",")
-		pixels = [float(pixel) for pixel in pixels]
-	if waves != '':
-		waves = waves.split(",")
-		waves = [float(wave) for wave in waves]
-	if len(pixels) != len(waves):
-		# WARNING: not matching pixels/waves given
-		pass
+# 	elements = elements.split(",")
+# 	ref_fiber = int(ref_fiber)
+# 	coadd_fibers = int(coadd_fibers)
+# 	try:
+# 		prominence = float(prominence)
+# 	except (ValueError, TypeError):
+# 		prominence = None
+# 	line_heights = float(line_heights)
+# 	lines_dist = int(lines_dist)
+# 	refine_window = int(refine_window)
+# 	poly_deg = int(poly_deg)
+# 	plot = bool(int(plot))
+# 	if wave_range != '':
+# 		wave_range = wave_range.split(",")
+# 		wave_range = float(wave_range[0]), float(wave_range[1])
+# 	else:
+# 		wave_range = [None, None]
+# 	if pixels != '':
+# 		pixels = pixels.split(",")
+# 		pixels = [float(pixel) for pixel in pixels]
+# 	if waves != '':
+# 		waves = waves.split(",")
+# 		waves = [float(wave) for wave in waves]
+# 	if len(pixels) != len(waves):
+# 		# WARNING: not matching pixels/waves given
+# 		pass
 
-	arc = RSS()
-	arc.loadFitsData(in_arc)
+# 	arc = RSS()
+# 	arc.loadFitsData(in_arc)
 
-	if coadd_fibers > 0:
-		spectrum = numpy.nanmean(arc._data[ref_fiber-coadd_fibers:ref_fiber+coadd_fibers], axis=0)
-	else:
-		spectrum = arc._data[ref_fiber]
+# 	if coadd_fibers > 0:
+# 		spectrum = numpy.nanmean(arc._data[ref_fiber-coadd_fibers:ref_fiber+coadd_fibers], axis=0)
+# 	else:
+# 		spectrum = arc._data[ref_fiber]
 
-	peaks, _ = signal.find_peaks(spectrum, height=line_heights, prominence=prominence, distance=lines_dist, wlen=refine_window)
-	peaks_refined = refine_peaks(spectrum, peaks, window_width=refine_window)
+# 	peaks, _ = signal.find_peaks(spectrum, height=line_heights, prominence=prominence, distance=lines_dist, wlen=refine_window)
+# 	peaks_refined = refine_peaks(spectrum, peaks, window_width=refine_window)
 
-	c = Calibrator(peaks_refined, spectrum)
-	c.set_hough_properties(num_slopes=2000,
-							xbins=200,
-							ybins=200,
-							min_wavelength=wave_range[0],
-							max_wavelength=wave_range[1],
-							range_tolerance=10.,
-							linearity_tolerance=10)
+# 	c = Calibrator(peaks_refined, spectrum)
+# 	c.set_hough_properties(num_slopes=2000,
+# 							xbins=200,
+# 							ybins=200,
+# 							min_wavelength=wave_range[0],
+# 							max_wavelength=wave_range[1],
+# 							range_tolerance=10.,
+# 							linearity_tolerance=10)
 
-	atlas = Atlas(elements=elements,
-				min_atlas_wavelength=wave_range[0],
-				max_atlas_wavelength=wave_range[1],
-				min_distance=3)
-	c.set_atlas(atlas, constrain_poly=False)
+# 	atlas = Atlas(elements=elements,
+# 				min_atlas_wavelength=wave_range[0],
+# 				max_atlas_wavelength=wave_range[1],
+# 				min_distance=3)
+# 	c.set_atlas(atlas, constrain_poly=False)
 
-	if pixels and waves:
-		for pix, wav in zip(pixels, waves):
-			c.add_pix_wave_pair(pix, wav)
+# 	if pixels and waves:
+# 		for pix, wav in zip(pixels, waves):
+# 			c.add_pix_wave_pair(pix, wav)
 
-	c.set_ransac_properties(sample_size=2*poly_deg+1,
-							top_n_candidate=2*poly_deg+1,
-							linear=True,
-							filter_close=True,
-							ransac_tolerance=5,
-							candidate_weighted=True,
-							hough_weight=1.0)
+# 	c.set_ransac_properties(sample_size=2*poly_deg+1,
+# 							top_n_candidate=2*poly_deg+1,
+# 							linear=True,
+# 							filter_close=True,
+# 							ransac_tolerance=5,
+# 							candidate_weighted=True,
+# 							hough_weight=1.0)
 
-	c.do_hough_transform(brute_force=True)
+# 	c.do_hough_transform(brute_force=True)
 
-	if plot:
-		_ = c.plot_arc(log_spectrum=False)
+# 	if plot:
+# 		_ = c.plot_arc(log_spectrum=False)
 
-	fit_coeff, _, _, rms, residual, peak_utilisation, _ = c.fit(max_tries=5000, fit_tolerance=10., fit_deg=poly_deg, fit_type=poly_kind)
+# 	fit_coeff, _, _, rms, residual, peak_utilisation, _ = c.fit(max_tries=5000, fit_tolerance=10., fit_deg=poly_deg, fit_type=poly_kind)
 
-	if plot:
-		_ = c.plot_fit(fit_coeff,
-					plot_atlas=False,
-					log_spectrum=False,
-					tolerance=5.)
+# 	if plot:
+# 		_ = c.plot_fit(fit_coeff,
+# 					plot_atlas=False,
+# 					log_spectrum=False,
+# 					tolerance=5.)
 
-		print("RMS: {}".format(rms))
-		print("Stdev error: {} A".format(numpy.abs(residual).std()))
-		print("Peaks utilisation rate: {}%".format(peak_utilisation*100))
+# 		print("RMS: {}".format(rms))
+# 		print("Stdev error: {} A".format(numpy.abs(residual).std()))
+# 		print("Peaks utilisation rate: {}%".format(peak_utilisation*100))
 
-	_, m_pixels, m_waves = zip(*c.get_pix_wave_pairs())
-	with open(out_pixwave, "w") as f:
-		f.write(f"{ref_fiber}\n")
-		for i in range(len(m_pixels)):
-			f.write(f"{m_pixels[i]:>.2f} {m_waves[i]:>9.4f} {1:>1d}\n")
+# 	_, m_pixels, m_waves = zip(*c.get_pix_wave_pairs())
+# 	with open(out_pixwave, "w") as f:
+# 		f.write(f"{ref_fiber}\n")
+# 		for i in range(len(m_pixels)):
+# 			f.write(f"{m_pixels[i]:>.2f} {m_waves[i]:>9.4f} {1:>1d}\n")
 
 
 # TODO:
