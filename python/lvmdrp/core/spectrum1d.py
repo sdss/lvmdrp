@@ -786,7 +786,8 @@ class Spectrum1D(Header):
         return pix,  wave,  data,  error,  mask
 
     def resampleSpec(self, ref_wave, method='spline', err_sim=500, replace_error=1e10, extrapolate=None):
-        if self._wave[-1]<self._wave[0]:
+        # flip spectrum along dispersion axis if needed
+        if self._wave[-1] < self._wave[0]:
             self._wave=numpy.flipud(self._wave)
             self._data = numpy.flipud(self._data)
             if self._error is not None:
@@ -794,135 +795,122 @@ class Spectrum1D(Header):
             if self._mask is not None:
                 self._mask = numpy.flipud(self._mask)
         
-        if self._mask is not None and numpy.sum(self._mask)>self._dim/2.0:
-            new_mask = numpy.ones(len(ref_wave), dtype='bool')
+        # case where input spectrum has more than half the pixels masked
+        if self._mask is not None and numpy.sum(self._mask) > self._dim/2:
+            # all pixels masked
+            new_mask = numpy.ones(len(ref_wave), dtype=bool)
+            # all data points to zero
             new_data =  numpy.zeros(len(ref_wave), numpy.float32)
-            new_inst_fwhm = numpy.zeros(len(ref_wave), numpy.float32)
-            if self._error is None or err_sim==0:
-                new_error=None
+            # all LSF pixels zero (if present)
+            if self._inst_fwhm is not None:
+                new_inst_fwhm = numpy.zeros(len(ref_wave), numpy.float32)
+            else:
+                new_inst_fwhm = None
+            # all error pixels replaced with replace_error
+            if self._error is None or err_sim == 0:
+                new_error = None
             else:
                 new_error = numpy.ones(len(ref_wave), numpy.float32)*replace_error
+            
+            # return masked spectrum
+            return Spectrum1D(data=new_data, wave=self._wave, error=new_error, mask=new_mask, inst_fwhm=new_inst_fwhm, header=self._header)
+
         else:
-            # replace bad pixels within the spectrum with linear interpolated values
-            if  self._mask is not None:
-                good_pix = numpy.logical_not(self._mask)
-                # intp = interpolate.UnivariateSpline(self._wave[good_pix], self._data[good_pix], k=1, s=0)
-                intp = interpolate.interp1d(self._wave[good_pix], self._data[good_pix], bounds_error=False, assume_sorted=True)
-                clean_data = intp(self._wave)
-                if self._pixels[good_pix][0]>0:
-                    clean_data[:self._pixels[good_pix][0]]=0
-                if self._pixels[good_pix][-1]<self._pixels[-1]:
-                    clean_data[self._pixels[good_pix][-1]-1:]=0
-            else:
-                clean_data = self._data
-            select_interp = clean_data!=0
-            wave_interp = self._wave[select_interp]
-            # perform the interpolation on the data
-            if method=='spline':
-                intp = interpolate.UnivariateSpline(self._wave[select_interp], clean_data[select_interp], s=0)
-                new_data = intp(ref_wave)
-            elif method=='linear':
-                intp = interpolate.interp1d(self._wave[select_interp], clean_data[select_interp], bounds_error=False, assume_sorted=True)
-                #intp = interpolate.UnivariateSpline(self._wave[select_interp], clean_data[select_interp], k=1, s=0)
-                new_data = intp(ref_wave)
-            select_out= numpy.logical_or(ref_wave<wave_interp[0],ref_wave>wave_interp[-1])
-            new_data[select_out]=0
-
-            select = numpy.logical_or(ref_wave<numpy.min(self._wave), ref_wave>numpy.max(self._wave))
-            select_not = numpy.logical_not(select)
-            # replace the error of bad pixels within the spectrum to temporarily to zero  for the Monte Carlo simulation
+            # good pixels selection
             if self._mask is not None:
-                select_goodpix=numpy.logical_not(self._mask)
+                select_badpix = self._mask
+                select_goodpix = numpy.logical_not(self._mask)
             else:
-                select_goodpix=numpy.ones(self._dim, dtype='bool')
+                select_badpix = numpy.zeros(self._dim, dtype=bool)
+                select_goodpix = numpy.ones(self._dim, dtype=bool)
 
-            if self._error is not None and self._mask is not None and err_sim>0:
-                replace_pix = numpy.logical_and(self._mask, clean_data!=0.0)
-                self._error[replace_pix]=1e-20
-                #select_goodpix = numpy.logical_and(select_goodpix, self._data!=0.0)
-                select_goodpix = self._data!=0.0
-                sim  = numpy.zeros((err_sim, len(ref_wave)), dtype=numpy.float32)
-                data = numpy.zeros(len(self._wave), dtype=numpy.float32)
-
-
-                for i in range(err_sim):
-                    data[select_goodpix] = numpy.random.normal(clean_data[select_goodpix], self._error[select_goodpix]).astype(numpy.float32)
-                    if method=='spline':
-                        intp = interpolate.UnivariateSpline(self._wave[select_interp], data[select_interp], s=0)
-                        out =intp(ref_wave)
-                    elif method=='linear':
-                        intp = interpolate.interpolate.interp1d(self._wave[select_interp], data[select_interp], bounds_error=False, assume_sorted=True)
-                        out = intp(ref_wave)
-                    select_out= numpy.logical_or(ref_wave<wave_interp[0],ref_wave>wave_interp[-1])
-                    out[select_out]=0
-                    sim[i, select_not] = out[select_not]
-                new_error = numpy.std(sim, 0)
-
+            # interpolate LSF ---------------------------------------------------------------------------------------------------------------------------------
             if self._inst_fwhm is not None:
-                if  self._mask is not None:
-                    good_pix = numpy.logical_not(self._mask)
-                    intp = interpolate.interp1d(self._wave[good_pix], self._inst_fwhm[good_pix], bounds_error=False, assume_sorted=True)
-                    clean_inst_fwhm = intp(self._wave)
-                    if self._pixels[good_pix][0]>0:
-                        clean_inst_fwhm[:self._pixels[good_pix][0]]=0
-                    if self._pixels[good_pix][-1]<self._pixels[-1]:
-                        clean_inst_fwhm[self._pixels[good_pix][-1]-1:]=0
-                else:
-                    clean_inst_fwhm = self._inst_fwhm
+                intp = interpolate.interp1d(self._wave[select_goodpix], self._inst_fwhm[select_goodpix], bounds_error=False, assume_sorted=True, fill_value=(0.0,0.0))
+                clean_inst_fwhm = intp(self._wave)
+                
                 select_interp = clean_inst_fwhm!=0
                 wave_interp = self._wave[select_interp]
                 # perform the interpolation on the data
-                if method=='spline':
-                    intp = interpolate.UnivariateSpline(self._wave[select_interp], clean_inst_fwhm[select_interp], s=0)
+                if method == 'spline':
+                    intp = interpolate.UnivariateSpline(self._wave[select_interp], clean_inst_fwhm[select_interp], s=0, ext="zeros")
                     new_inst_fwhm = intp(ref_wave)
-                elif method=='linear':
-                    intp = interpolate.interp1d(self._wave[select_interp], clean_inst_fwhm[select_interp], bounds_error=False, assume_sorted=True)
-                    #intp = interpolate.UnivariateSpline(self._wave[select_interp], clean_inst_fwhm[select_interp], k=1, s=0)
+                elif method == 'linear':
+                    intp = interpolate.interp1d(self._wave[select_interp], clean_inst_fwhm[select_interp], bounds_error=False, assume_sorted=True, fill_value=(0.0,0.0))
                     new_inst_fwhm = intp(ref_wave)
-                select_out= numpy.logical_or(ref_wave<wave_interp[0],ref_wave>wave_interp[-1])
-                new_inst_fwhm[select_out]=0
             else:
                 new_inst_fwhm = None
+            
+            # interpolate data --------------------------------------------------------------------------------------------------------------------------------
+            # replace bad pixels within the spectrum with linear interpolated values
+            intp = interpolate.interp1d(self._wave[select_goodpix], self._data[select_goodpix], bounds_error=False, assume_sorted=True, fill_value=(0.0,0.0))
+            clean_data = intp(self._wave)
+            
+            # select pixels that were interpolated (excluding extrapolated ones)
+            select_interp = clean_data != 0
+            wave_interp = self._wave[select_interp]
+            # perform the interpolation on the data
+            if method == 'spline':
+                intp = interpolate.UnivariateSpline(self._wave[select_interp], clean_data[select_interp], s=0, ext="zeros")
+                new_data = intp(ref_wave)
+            elif method == 'linear':
+                intp = interpolate.interp1d(self._wave[select_interp], clean_data[select_interp], bounds_error=False, assume_sorted=True, fill_value=(0.0,0.0))
+                new_data = intp(ref_wave)
+            
+            # interpolate error -------------------------------------------------------------------------------------------------------------------------------
+            select_in = numpy.logical_and(ref_wave>=numpy.min(self._wave), ref_wave<=numpy.max(self._wave))
+            if self._error is not None and err_sim > 0:
+                # replace the error of bad pixels within the spectrum temporarily to ~zero for the MC simulation
+                replace_pix = numpy.logical_and(select_badpix, clean_data != 0.0)
+                self._error[replace_pix] = 1e-20
+                
+                # prepare arrays
+                errors = numpy.zeros((err_sim, len(ref_wave)), dtype=numpy.float32)
+                error = numpy.zeros(len(self._wave), dtype=numpy.float32)
 
+                # propagate errors using MC simulation
+                for i in range(err_sim):
+                    error[select_goodpix] = numpy.random.normal(clean_data[select_goodpix], self._error[select_goodpix]).astype(numpy.float32)
+
+                    if method == 'spline':
+                        intp = interpolate.UnivariateSpline(self._wave[select_interp], error[select_interp], s=0, ext="zeros")
+                        out = intp(ref_wave)
+                    elif method == 'linear':
+                        intp = interpolate.interpolate.interp1d(self._wave[select_interp], error[select_interp], bounds_error=False, assume_sorted=True, fill_value=(0.0,0.0))
+                        out = intp(ref_wave)
+                    errors[i, select_in] = out[select_in]
+                new_error = numpy.std(errors, axis=0)
+            else:
+                new_error = None
+
+            # interpolate mask --------------------------------------------------------------------------------------------------------------------------------
             if self._mask is not None:
-                badpix=numpy.zeros(ref_wave.shape[0], dtype='bool')
+                badpix = numpy.zeros(ref_wave.shape[0], dtype=bool)
                 indices = numpy.arange(self._wave.shape[0])
                 nbadpix = numpy.sum(self._mask)
-                if nbadpix>0:
+                if nbadpix > 0:
                     badpix_id = indices[self._mask]
                     for i in range(len(badpix_id)):
-                        badpix_min = badpix_id[i]-2
-                        badpix_max = badpix_id[i]+2
+                        badpix_min = badpix_id[i] - 2
+                        badpix_max = badpix_id[i] + 2
                         bound = numpy.clip(numpy.array([badpix_min, badpix_max]), 0, self._dim-1)
                         select_bad = numpy.logical_and(ref_wave>=self._wave[bound[0]], ref_wave<=self._wave[bound[1]])
-                        if clean_data[badpix_id[i]]==0:
-                            new_data[select_bad]=0
                         badpix = numpy.logical_or(badpix, select_bad)
-                badpix = numpy.logical_or(badpix, numpy.logical_or(ref_wave<self._wave[0], ref_wave>self._wave[-1]))
-
-                if self._error is not None and err_sim>0:
-            #    new_mask = numpy.logical_and(badpix, new_error>0)
-                    new_mask=badpix
-                    # new_error[new_mask] = replace_error
+                new_mask = numpy.logical_or(badpix, numpy.logical_or(ref_wave<self._wave[0], ref_wave>self._wave[-1]))
             else:
-                badpix = numpy.logical_or(ref_wave<self._wave[0], ref_wave>self._wave[-1])
-                new_data[badpix]=0
-                new_error[badpix] = replace_error
-                new_mask = badpix
-        #    new_data[badpix]=fill_value
-        #        print(numpy.sum(self._mask), numpy.sum(new_mask))
-
-            if self._error is None or err_sim==0:
-                new_error=None
-            if self._mask is None:
-                new_mask = None
+                new_mask = numpy.logical_or(ref_wave<self._wave[0], ref_wave>self._wave[-1])
+                # replace error values in masked pixels
+                if new_error is not None:
+                    new_error[new_mask] = replace_error
         
         if extrapolate is not None:
-            out_mask = numpy.logical_or(ref_wave<self._wave[0], ref_wave>self._wave[-1])
-            new_data = numpy.where(out_mask, extrapolate._data, new_data)
-            new_error = numpy.where(out_mask, extrapolate._error, new_error)
-            new_mask = numpy.where(out_mask, extrapolate._mask, new_mask)
-            new_inst_fwhm = numpy.where(out_mask, extrapolate._inst_fwhm, new_inst_fwhm)
+            select_out = numpy.logical_or(ref_wave<self._wave[0], ref_wave>self._wave[-1])
+            new_data = numpy.where(select_out, extrapolate._data, new_data)
+            new_mask = numpy.where(select_out, extrapolate._mask, new_mask)
+            if new_error is not None:
+                new_error = numpy.where(select_out, extrapolate._error, new_error)
+            if new_inst_fwhm is not None:
+                new_inst_fwhm = numpy.where(select_out, extrapolate._inst_fwhm, new_inst_fwhm)
 
         spec_out = Spectrum1D(wave=ref_wave, data=new_data, error=new_error, mask=new_mask, inst_fwhm=new_inst_fwhm)
         return spec_out
