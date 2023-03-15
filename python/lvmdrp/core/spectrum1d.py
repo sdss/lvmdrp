@@ -269,7 +269,7 @@ class Spectrum1D(Header):
             spec = Spectrum1D(wave=self._wave, data = data,  error = error,  mask=mask)
             return spec
 
-        elif isinstance(other,  numpy.ndarray):
+        elif isinstance(other, numpy.ndarray):
             if other!=0:
                 data = self._data / other
                 if self._error  is not None:
@@ -324,7 +324,7 @@ class Spectrum1D(Header):
                 #raise exception if the type are not matching in general
                 raise TypeError("unsupported operand type(s) for /: %s and %s"%(str(type(self)).split("'")[1], str(type(other)).split("'")[1]))
 
-    def __rdiv__(self, other):
+    def __rtruediv__(self, other):
 
         if isinstance(other, Spectrum1D):
             other._data=other._data.astype(numpy.float32)
