@@ -813,7 +813,7 @@ class Spectrum1D(Header):
                 new_error = numpy.ones(len(ref_wave), numpy.float32)*replace_error
             
             # return masked spectrum
-            return Spectrum1D(data=new_data, wave=self._wave, error=new_error, mask=new_mask, inst_fwhm=new_inst_fwhm, header=self._header)
+            return Spectrum1D(data=new_data, wave=ref_wave, error=new_error, mask=new_mask, inst_fwhm=new_inst_fwhm, header=self._header)
 
         else:
             # good pixels selection
