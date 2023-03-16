@@ -726,7 +726,7 @@ def sepContinuumLine_drp(sky_ref, out_cont_line, method="skycorr", sky_sci="", s
         # TODO: remove continuum contribution from original sky spectrum
         resample_step, resolving_power = np.diff(sky_spec._wave).min(), int(np.ceil((sky_spec._wave/np.diff(sky_spec._wave).min()).max()))
         # BUG: implement missing parameters in this call of run_skymodel
-        skymodel_pars = skymodel_pars_from_header(sky_spec._head)
+        skymodel_pars = skymodel_pars_from_header(sky_spec._header)
         inst_pars, model_pars, sky_model = run_skymodel(
             limlam=[sky_spec._wave.min()/1e4, sky_spec._wave.max()/1e4],
             dlam=resample_step/1e4,
@@ -834,6 +834,8 @@ def evalESOSky_drp(sky_ref, out_rss, resample_step="optimal", resample_method="l
 
         user:> drp sky evalESOSky SKY_REF.fits out_rss.fits
     """
+    err_sim = int(err_sim)
+    replace_error = float(replace_error)
 
     # read sky spectrum
     sky_spec = Spectrum1D()
@@ -845,7 +847,7 @@ def evalESOSky_drp(sky_ref, out_rss, resample_step="optimal", resample_method="l
             resample_step = eval(resample_step)
         except ValueError:
             eval_failed = True
-            sky_logger.error(f"resample_step should be either 'optimal' or a floating point. '{resample_step}' is none.")
+            sky_logger.error(f"resample_step should be either 'optimal' or a floating point. '{resample_step}' is none of those.")
             sky_logger.warning("falling back to resample_step='optimal'")
     if eval_failed or resample_step == "optimal":
         # determine sampling based on wavelength resolution
@@ -875,15 +877,14 @@ def evalESOSky_drp(sky_ref, out_rss, resample_step="optimal", resample_method="l
     
     # create RSS
     wav_comp = sky_model["lam"].value
-    lsf_comp = sky_model["lam"].value / pars_out["resol"].value
+    lsf_comp = sky_model["lam"].value / pars_out["resol"]
     sky_model.remove_column("lam")
 
-    msk_comp = np.zeros_like(wav_comp, dtype=bool)
     err_radi = (sky_model["dflux2"] - sky_model["dflux1"]) / 2
     err_tran = (sky_model["dtrans2"] - sky_model["dtrans2"]) / 2
     sky_model.remove_columns(["dflux1", "dflux2", "dtrans1", "dtrans2"])
-
-    sed_comp = sky_model.as_array().T
+    sed_comp = np.asarray(sky_model.as_array().tolist()).T
+    msk_comp = np.isnan(sed_comp)
 
     nradi = len(list(filter(lambda c: c.startswith("flux"), sky_model.columns)))
     ntran = len(list(filter(lambda c: c.startswith("trans"), sky_model.columns)))
@@ -892,9 +893,9 @@ def evalESOSky_drp(sky_ref, out_rss, resample_step="optimal", resample_method="l
         np.tile(err_tran, (ntran, 1))
     ))
     # create initial RSS containing the sky model components
-    spectra_list = [Spectrum1D(wave=wav_comp, data=sed, error=err, mask=msk_comp, inst_fwhm=lsf_comp) for sed, err in zip(sed_comp, err_comp)]
+    spectra_list = [Spectrum1D(wave=wav_comp, data=sed, error=err, mask=msk, inst_fwhm=lsf_comp) for sed, err, msk in zip(sed_comp, err_comp, msk_comp)]
     
-    if parallel=='auto':
+    if parallel == 'auto':
         cpus = cpu_count()
     else:
         cpus = int(parallel)
@@ -904,7 +905,7 @@ def evalESOSky_drp(sky_ref, out_rss, resample_step="optimal", resample_method="l
         pool = Pool(cpus)
         threads = []
         for i in range(len(spectra_list)):
-            threads.append(pool.apply_async(spectra_list[i].resampleSpec, (new_wave, resample_method, err_sim, replace_error)))
+            threads.append(pool.apply_async(spectra_list[i].resampleSpec, (sky_spec._wave, resample_method, err_sim, replace_error)))
 
         for i in range(len(spectra_list)):
             spectra_list[i] = threads[i].get()
@@ -912,14 +913,15 @@ def evalESOSky_drp(sky_ref, out_rss, resample_step="optimal", resample_method="l
         pool.join()
     else:
         for i in range(len(spectra_list)):
-            spectra_list[i] = spectra_list[i].resampleSpec(new_wave)
+            spectra_list[i] = spectra_list[i].resampleSpec(sky_spec._wave, resample_method, err_sim, replace_error)
     
     # convolve RSS to reference LSF
+    diff_fwhm = np.sqrt(sky_spec._inst_fwhm**2 - spectra_list[0]._inst_fwhm**2)
     if cpus > 1:
         pool = Pool(cpus)
         threads = []
         for i in range(len(spectra_list)):
-            threads.append(pool.apply_async(spectra_list[i].matchFWHM, (sky_spec._inst_fwhm)))
+            threads.append(pool.apply_async(spectra_list[i].smoothGaussVariable, (diff_fwhm,)))
 
         for i in range(len(spectra_list)):
             spectra_list[i] = threads[i].get()
@@ -927,11 +929,19 @@ def evalESOSky_drp(sky_ref, out_rss, resample_step="optimal", resample_method="l
         pool.join()
     else:
         for i in range(len(spectra_list)):
-            spectra_list[i] = spectra_list[i].matchFWHM(sky_spec._inst_fwhm)
+            spectra_list[i] = spectra_list[i].smoothGaussVariable(diff_fwhm)
     
     # build RSS
     rss = RSS.from_spectra1d(spectra_list=spectra_list)
-    rss.setHeader(fits.Header(pars_out))
+    header = sky_spec._header
+    for key, val in pars_out.items():
+        if isinstance(val, (list,tuple)):
+            val = ",".join(map(str, val))
+        elif isinstance(val, str) and (os.path.isfile(val) or os.path.isdir(val)):
+            val = os.path.basename(val)
+        header.append((f"HIERARCH SM {key.upper()}", val))
+
+    rss.setHeader(header, origin=sky_ref)
     # dump RSS file containing the
     rss.writeFitsData(filename=out_rss)
 
@@ -1052,7 +1062,7 @@ def corrSkyLine_drp(sky1_line_in, sky2_line_in, sci_line_in, line_corr_out, meth
     # create RSS
     wav_fit = line_fit["lambda"].value
     lsf_fit = line_fit["lambda"].value / pars_out["wres"].value
-    sed_fit = line_fit.as_array()[:,1].T
+    sed_fit = np.asarray(line_fit.as_array().tolist())[:,1].T
     hdr_fit = fits.Header(pars_out)
     rss = RSS(data=sed_fit, wave=wav_fit, inst_fwhm=lsf_fit, header=hdr_fit)
 
