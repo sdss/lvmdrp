@@ -796,7 +796,7 @@ class Spectrum1D(Header):
                 self._mask = numpy.flipud(self._mask)
         
         # case where input spectrum has more than half the pixels masked
-        if self._mask is not None and numpy.sum(self._mask) > self._dim/2:
+        if numpy.nansum(self._data) == 0.0 or (self._mask is not None and numpy.sum(self._mask) > self._dim/2):
             # all pixels masked
             new_mask = numpy.ones(len(ref_wave), dtype=bool)
             # all data points to zero
