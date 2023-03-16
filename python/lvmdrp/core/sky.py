@@ -91,12 +91,12 @@ def read_skymodel_par(parfile_path, verify=True):
             if len(vals) != 1:
                 val_new = []
                 for val in vals:
-                    if val.replace(".", "").isnumeric():
+                    if val.lower().replace(".", "").replace("e", "").isnumeric():
                         val_new.append(eval(val))
                     else:
                         val_new.append(val)
             else:
-                if val.replace(".", "").isnumeric():
+                if val.lower().replace(".", "").replace("e", "").isnumeric():
                     val_new = eval(val)
                 else:
                     val_new = val
@@ -326,7 +326,7 @@ def run_skymodel(skymodel_path=SKYMODEL_INST_PATH, **kwargs):
     # shutil.rmtree("output", ignore_errors=True)
     os.makedirs("output", exist_ok=True)
     
-    sky_logger.info("running skymodel from pre-computed airglow lines")
+    sky_logger.info("trying skymodel from pre-computed airglow lines")
     out = subprocess.run("bin/calcskymodel".split(), capture_output=True)
     if out.returncode != 0 or "error" in out.stderr.decode("utf-8").lower():
         sky_logger.warning("no suitable airglow spectrum found")
@@ -368,12 +368,14 @@ def run_skymodel(skymodel_path=SKYMODEL_INST_PATH, **kwargs):
             os.chdir(curdir)
             sky_logger.error("failed while running 'calcskymodel'")
             sky_logger.error(out.stderr.decode("utf-8"))
-            return skymodel_inst_par, skymodel_model_par, None    
+            return skymodel_inst_par, skymodel_model_par, None
+    else:
+        sky_logger.info("successfully finished 'calcskymodel'")
     # ---------------------------------------------------------------------------------------------
 
     # read output files and organize in a FITS table ----------------------------------------------
-    trans_table = Table(fits.getdata(os.path.join("output/transspec.fits"), ext=1))
-    lines_table = Table(fits.getdata(os.path.join("output/radspec.fits"), ext=1))
+    trans_table = Table(fits.getdata(os.path.join("output","transspec.fits"), ext=1))
+    lines_table = Table(fits.getdata(os.path.join("output","radspec.fits"), ext=1))
     os.chdir(curdir)
 
     trans_table.remove_column("lam")
