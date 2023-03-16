@@ -39,6 +39,8 @@ sky_logger = get_logger(name=__name__)
 
 # average moon distance from earth
 MEAN_MOON_DIST = 384979000 * u.m
+# define environment variable for CPL discovery
+os.environ["LD_LIBRARY_PATH"] = os.path.join(SKYCORR_INST_PATH, "lib")
 
 
 def ang_distance(r1, d1, r2, d2):
