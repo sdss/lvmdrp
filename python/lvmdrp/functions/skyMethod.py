@@ -373,7 +373,7 @@ def configureSkyModel_drp(skymodel_config_path=SKYMODEL_CONFIG_PATH, skymodel_pa
 
     """
 
-    cwd = os.path.abspath(os.curdir)
+    ori_path = os.path.abspath(os.curdir)
 
     if method == "run":
         sky_logger.info(f"writing configuration files using '{skymodel_config_path}' as source")
@@ -402,7 +402,7 @@ def configureSkyModel_drp(skymodel_config_path=SKYMODEL_CONFIG_PATH, skymodel_pa
         # create sky library
         if run_library:
             # parse library path
-            cur_path = os.chdir(os.path.join(skymodel_path, "sm-01_mod1"))
+            cur_path = os.path.join(skymodel_path, "sm-01_mod1")
             lib_path = os.path.abspath(os.path.join(skymodel_path, "sm-01_mod2", "data", skymodel_master_config["sm_filenames.dat"]["libpath"]))
             # set hard-coded pwv (no scaling)
             pwv = -1
@@ -442,6 +442,7 @@ def configureSkyModel_drp(skymodel_config_path=SKYMODEL_CONFIG_PATH, skymodel_pa
             nlib = len(spec_pars)
 
             # run create_spec across all parameter grid
+            os.chdir(cur_path)
             if parallel == "auto":
                 cpus = cpu_count()
             else:
@@ -504,7 +505,7 @@ def configureSkyModel_drp(skymodel_config_path=SKYMODEL_CONFIG_PATH, skymodel_pa
                     sky_logger.error("failed while running 'estmultiscat'")
                     sky_logger.error(out.stderr.decode("utf-8"))
         # return to original path
-        os.chdir(cwd)
+        os.chdir(ori_path)
     elif method == "download":
         # TODO: download master configuration file and overwrite current one
         # TODO: write individual configuration files (as above)
