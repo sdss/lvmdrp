@@ -1,5 +1,6 @@
 import os, sys, numpy
 from astropy.io import fits as pyfits
+from astropy.visualization import ImageNormalize, PercentileInterval, AsinhStretch, LogStretch
 try:
     import pylab
     from matplotlib import pyplot as plt
@@ -15,6 +16,7 @@ from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.core.fiberrows import FiberRows
 from lvmdrp.core.rss import RSS
 from lvmdrp.utils.decorators import missing_files
+from lvmdrp.utils.logger import get_logger
 
 import multiprocessing
 from types import *
@@ -28,6 +30,9 @@ __all__ = [
 	"subtractBias_drp", "preprocRawFrame_drp", "basicCalibration_drp",
 	"createMasterFrame_drp"
 ]
+
+
+image_logger = get_logger(__name__)
 
 
 def detCos_drp(image,  out_image,   rdnoise='2.9', sigma_det='5', rlim='1.2', iter='5', fwhm_gauss='2.0', replace_box='5,5',  error_box='5,5', replace_error='1e10', increase_radius='0', gain='1.0', verbose='0', parallel='auto'):
@@ -2090,12 +2095,13 @@ def old_preprocRawFrame_drp(in_image, out_image, boundary_x, boundary_y, positio
 	full_img.writeFitsData(out_image)
 	return full_img
 
-def preprocRawFrame_drp(in_image, out_image, positions="00,10,01,11", orientation="S,S,S,S", subtract_overscan='1', os_bound_x='', os_bound_y='', compute_error='1', assume_gain="1.0", assume_rdnoise="5", gain_field='GAIN', rdnoise_field='RDNOISE', unit="ADU", assume_imagetyp="bias"):
+def preprocRawFrame_drp(in_image, out_image, positions="00,10,01,11", orientation="S,S,S,S", subtract_overscan='1', os_bound_x='', os_bound_y='', compute_error='1', assume_gain="1.0", assume_rdnoise="5", gain_field='GAIN', rdnoise_field='RDNOISE', unit="ADU", assume_imagetyp="bias", plot='2', figure_path=".figures"):
 	# convert input parameters to proper type
 	orient = orientation.split(',')
 	pos = positions.split(',')
 	subtract_overscan = bool(int(subtract_overscan))
 	compute_error = bool(int(compute_error))
+	plot = int(plot)
 
 	# load image
 	org_image = loadImage(in_image)
@@ -2103,6 +2109,7 @@ def preprocRawFrame_drp(in_image, out_image, positions="00,10,01,11", orientatio
 	try:
 		org_image._header["IMAGETYP"]
 	except KeyError:
+		image_logger.warning(f"header keyword 'IMAGETYP' not found. Assuming IMAGETYP='{assume_imagetyp}'")
 		org_image._header["IMAGETYP"] = assume_imagetyp
 
 	# parse overscan (OS) section:
@@ -2110,11 +2117,14 @@ def preprocRawFrame_drp(in_image, out_image, positions="00,10,01,11", orientatio
 	if "BIASSEC" in org_image._header:
 		os_x, os_y = org_image._header["BIASSEC"].strip("[]").split(",")
 		os_y, os_x = os_y.split(":"), os_x.split(":")
+		image_logger.info(f"parsed overscan region from 'BIASSEC', Y = {os_y}, X = {os_x}")
 	elif os_bound_x and os_bound_y:
 		os_y, os_x = os_bound_y.split(','), os_bound_x.split(',')
+		image_logger.info(f"using given overscan region Y = {os_y}, X = {os_x}")
 	else:
 		os_x, os_y = '[2021:2060, 1:4080]'.strip("[]").split(",")
 		os_y, os_x = os_y.split(":"), os_x.split(":")
+		image_logger.warning(f"no overscan region given. Assuming Y = {os_y}, X = {os_x}")
 
 	os_y, os_x = (int(os_y[0])-1, int(os_y[1])), (int(os_x[0])-1, int(os_x[1]))
 
@@ -2123,8 +2133,8 @@ def preprocRawFrame_drp(in_image, out_image, positions="00,10,01,11", orientatio
 		try:
 			sc_x_i, sc_y_i, sc_x_f, sc_y_f = org_image._header["TRIMSEC"].replace("[", "").replace("]", "").split(",")
 			sc_y_i, sc_x_i, sc_y_f, sc_x_f = sc_y_i.split(":"), sc_x_i.split(":"), sc_y_f.split(":"), sc_x_f.split(":")
+			image_logger.info(f"parsed data region from 'TRIMSEC', YX_i = {sc_y_i, sc_x_i}, YX_f = {sc_y_f, sc_x_f}")
 		except (KeyError, ValueError) as error:
-			# show a warning and fallback to infer TRIMSEC
 			infer_trimsec = True
 
 	if not "TRIMSEC" in org_image._header or infer_trimsec:
@@ -2134,10 +2144,29 @@ def preprocRawFrame_drp(in_image, out_image, positions="00,10,01,11", orientatio
 		os_xsize = (os_x[1] - os_x[0]) // 2
 		sc_y_i, sc_x_i = ["1", str(ysize)], ["1", str(xsize-os_xsize)]
 		sc_y_f, sc_x_f = ["1", str(ysize)], [str(xsize+os_xsize+1), str(2*xsize)]
+		image_logger.warning(f"no valid 'TRIMSEC' found in header. Assuming YX_i = {sc_y_i, sc_x_i}, YX_f = {sc_y_f, sc_x_f}")
 	sc_i, sc_f = ((int(sc_y_i[0])-1, int(sc_y_i[1])), (int(sc_x_i[0])-1, int(sc_x_i[1]))), ((int(sc_y_f[0])-1, int(sc_y_f[1])), (int(sc_x_f[0])-1, int(sc_x_f[1])))
 
 	# select data outside the cut out region (overscan)
 	os_region = Image(data=org_image._data[os_y[0]:os_y[1], os_x[0]:os_x[1]])
+	if plot:
+		fig, ax = plt.subplots()
+		norm = ImageNormalize(os_region._data, interval=PercentileInterval(50), stretch=AsinhStretch())
+		im = ax.imshow(os_region._data, origin="lower", aspect="auto", norm=norm, cmap=plt.cm.gray)
+		plt.colorbar(im)
+		ax.set_title(f"{org_image._header['BIASSEC'] = } -> {os_x}, {os_y}")
+		ax.set_xlabel("X (pix)")
+		ax.set_ylabel("Y (pix)")
+		if plot == 1:
+			plt.show()
+		else:
+			fig_name = os.path.basename(out_image)
+			fig_path = os.path.join(os.path.dirname(out_image), figure_path)
+			if not os.path.isdir(fig_path):
+				os.makedirs(fig_path, exist_ok=True)
+			fig_path = os.path.join(fig_path, f"{fig_name.replace('.fits', '')}_preproc.png")
+			fig.savefig(fig_path, bbox_inches="tight")
+			plt.close(fig)
 	# * split OS in four amplifier sections
 	os_ab, os_cd = os_region.split(2, axis="Y")
 	(os_a, os_b), (os_c, os_d) = os_ab.split(2, "X"), os_cd.split(2, "X")
@@ -2145,6 +2174,8 @@ def preprocRawFrame_drp(in_image, out_image, positions="00,10,01,11", orientatio
 	# * compute statistics on each OS section
 	os_bias_med = [numpy.nanmedian(os_quad._data) for os_quad in os_quads]
 	os_bias_std = [numpy.nanstd(os_quad._data) for os_quad in os_quads]
+	image_logger.info(f"median counts in overscan sections { {k: v for k, v in zip('abcd', os_bias_med)} }")
+	image_logger.info(f"standard deviation in overscan sections { {k: v for k, v in zip('abcd', os_bias_std)} }")
 
 	# parse science section:
 	# * extract science section
@@ -2161,16 +2192,20 @@ def preprocRawFrame_drp(in_image, out_image, positions="00,10,01,11", orientatio
 	# parse gain and read noise from header if possible
 	try:
 		gains = [org_image.getHdrValue(f"{gain_field}{i+1}") for i in range(nquad)]
+		image_logger.info(f"extracted gain values '{gain_field}' = { {k: v for k, v in zip('abcd', gains)} }")
 	except KeyError:
 		try:
 			assume_gain = org_image.getHdrValue(gain_field)
+			image_logger.warning(f"no gain per amplifier found, extracted '{gain_field}' = {assume_gain}")
 		except KeyError:
 			if assume_gain:
 				assume_gain = assume_gain.split(",")
 				try:
 					assume_gain = [float(gain) for gain in assume_gain]
+					image_logger.warning(f"no valid '{gain_field}' found in header. Using given values { {k: v for k, v in zip('abcd', assume_gain)} }")
 				except ValueError:
 					assume_gain = 1.0
+					image_logger.warning(f"no valid '{gain_field}' found in header. Assuming constant value {assume_gain}")
 		if len(assume_gain) == 1:
 			gains = nquad * assume_gain
 		elif len(assume_gain) >= nquad:
@@ -2180,16 +2215,20 @@ def preprocRawFrame_drp(in_image, out_image, positions="00,10,01,11", orientatio
 
 	try:
 		rdnoises = [org_image.getHdrValue(f"{rdnoise_field}{i+1}") for i in range(nquad)]
+		image_logger.info(f"extracted rdnoise values '{rdnoise_field}' = { {k: v for k, v in zip('abcd', rdnoises)} }")
 	except KeyError:
 		try:
 			assume_rdnoise = org_image.getHdrValue(rdnoise_field)
+			image_logger.warning(f"no rdnoise per amplifier found, extracted '{rdnoise_field}' = {assume_rdnoise}")
 		except KeyError:
 			if assume_rdnoise:
 				assume_rdnoise = assume_rdnoise.split(",")
 				try:
 					assume_rdnoise = [float(rdnoise) for rdnoise in assume_rdnoise]
+					image_logger.warning(f"no valid '{rdnoise_field}' found in header. Using given values { {k: v for k, v in zip('abcd', assume_rdnoise)} }")
 				except ValueError:
 					assume_rdnoise = 5.0
+					image_logger.warning(f"no valid '{rdnoise_field}' found in header. Assuming constant value {assume_rdnoise}")
 		if len(assume_rdnoise) == 1:
 			rdnoises = nquad * assume_rdnoise
 		elif len(assume_rdnoise) >= nquad:
@@ -2201,10 +2240,12 @@ def preprocRawFrame_drp(in_image, out_image, positions="00,10,01,11", orientatio
 	[quad.orientImage(orient[i]) for i, quad in enumerate(quads)]
 	# convert to specified unit
 	if unit == "e-":
+		image_logger.info("converting from ADU to e-")
 		for i in range(nquad):
 			quads[i] *= gains[i]
 			if compute_error:
 				quads[i].computePoissonError(rdnoise=rdnoises[i])
+				image_logger.info(f"calculated Poisson errors for amplifier '{'abcd'[i]}'")
 	elif unit.upper() == "ADU":
 		unit = unit.upper()
 	else:
@@ -2219,14 +2260,18 @@ def preprocRawFrame_drp(in_image, out_image, positions="00,10,01,11", orientatio
 		ccd = os.path.basename(in_image).split(".")[0].split("-")[1]
 		org_image._header["CCD"] = ccd
 	if ccd.startswith("z") or ccd.startswith("b"):
+		image_logger.info("flipping along X-axis")
 		preproc_image.orientImage("X")
 
 	# define initial pixel mask
+	image_logger.info("building pixel mask")
 	preproc_image._mask = numpy.zeros_like(preproc_image._data, dtype=bool)
 	preproc_image._mask |= (preproc_image._data>=2**16)
 	preproc_image._mask |= (preproc_image._data<=0)
+	image_logger.info(f"{preproc_image._mask.sum()} pixels masked")
 
 	# update header
+	image_logger.info(f"updating header and writing pre-processed frame to '{out_image}'")
 	preproc_image.setHeader(org_image.getHeader())
 	# update/set unit
 	preproc_image.setHdrValue("BUNIT", unit, "physical units of the array values")
@@ -2393,7 +2438,7 @@ def createMasterFrame_drp(in_images, out_image, reject_cr=False, exptime_thresh=
         master_frame.setData(mask=new_mask)
     else:
         if master_type == "bias":
-            master_frame = combineImages(proc_images, method="clipped_mean", k=3)
+            master_frame = combineImages(proc_images, method="median")
         elif master_type == "dark":
             master_frame = combineImages(proc_images, method="clipped_mean", k=3)
         elif master_type == "flat" or master_type == "flatfield":
