@@ -1728,12 +1728,16 @@ def combineImages(images,  method='median', k=3):
             # set all bad pixel to 0 to compute the mean
             stack_image[:, numpy.logical_not(good_pixels)] = 0
             new_image = numpy.sum(stack_image, 0)/good_pixels
-            # mask bad pixels
-            old_mask = numpy.sum(stack_mask, 0).astype(bool)
-            new_mask = numpy.logical_or(old_mask, numpy.isnan(new_image))
-            # replace masked pixels
-            new_image[new_mask] = 0
 
+        # mask bad pixels
+        old_mask = numpy.sum(stack_mask, 0).astype(bool)
+        new_mask = numpy.logical_or(old_mask, numpy.isnan(new_image))
+        # replace masked pixels
+        # new_image[new_mask] = 0
+
+        # TODO: add new header keywords:
+        #   - NCOMBINE: number of frames combined
+        #   - STATCOMB: statistic used to combine
         if images[0]._header is not None:
             new_header = images[0]._header
         else:
