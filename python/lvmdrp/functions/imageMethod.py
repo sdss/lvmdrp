@@ -10,6 +10,7 @@ import time
 from multiprocessing import Pool
 from multiprocessing import cpu_count
 from scipy import interpolate
+from lvmdrp.core.plot import save_fig
 from lvmdrp.core.image import loadImage, Image, glueImages, combineImages
 from lvmdrp.core.spectrum1d import Spectrum1D
 from lvmdrp.core.tracemask import TraceMask
@@ -502,7 +503,7 @@ def addCCDMask_drp(image, mask, replaceError='1e10'):
 	img.setData(mask=mask_comb)
 	img.writeFitsData(image)
 
-def findPeaksAuto_drp(in_image, out_peaks, nfibers,  disp_axis='X', threshold='5000',median_box='8', median_cross='1', slice='', method='gauss',  init_sigma='1.0', verbose='1'):
+def findPeaksAuto_drp(in_image, out_peaks, nfibers,  disp_axis='X', threshold='5000',median_box='8', median_cross='1', slice='', method='gauss',  init_sigma='1.0', plot='1', figure_path=".figures"):
 	"""
 		   Finds the exact subpixel cross-dispersion position of a given number of fibers at a certain dispersion column on the raw CCD frame.
 		   If a predefined number of pixel are expected, the initial threshold value for the minimum peak height will varied until the expected number
@@ -530,7 +531,7 @@ def findPeaksAuto_drp(in_image, out_peaks, nfibers,  disp_axis='X', threshold='5
 				Set the method to measure the peaks positions, either 'gauss' or 'hyperbolic'.
 			init_sigma: string of  float, optional with default: '1.0'
 					Init guess for the  sigma width (in pixels units)  for the Gaussian fitting, only used if method 'gauss' is selected
-			verbose: string of integer (0 or 1), optional  with default: 1
+			plot: string of integer (0 or 1), optional  with default: 1
 					Show information during the processing on the command line (0 - no, 1 - yes)
 
 			Examples
@@ -543,7 +544,7 @@ def findPeaksAuto_drp(in_image, out_peaks, nfibers,  disp_axis='X', threshold='5
 	median_box=int(median_box)
 	median_cross=int(median_cross)
 	init_sigma = float(init_sigma)
-	verbose = int(verbose)
+	plot = int(plot)
 
 	# Load Image
 	img = loadImage(in_image)
@@ -583,16 +584,17 @@ def findPeaksAuto_drp(in_image, out_peaks, nfibers,  disp_axis='X', threshold='5
 	for i in range(len(centers)):
 		file_out.write('%i %i %e %i\n'%(i, round_cent[i], centers[i], 0))
 	file_out.close()
-	if verbose==1:
-		# control plot for the peaks NEED TO BE REPLACE BY A PROPER VERSION AND POSSIBLE IMPLEMENTAION FOR A GUI
-		print('%i Fibers found'%(len(centers)))
-		pylab.figure(figsize=(25,10))
+
+	if plot == 1:
+		fig = pylab.figure(figsize=(25,10))
 		pylab.plot(cut._data, '-k', lw=1)
 		pylab.plot(peaks[0], peaks[2] ,'o', color="tab:red")
-		pylab.plot(centers, numpy.ones(len(centers))*(peaks[2].max()*0.5), 'x', color="tab:blue")
+		pylab.plot(centers, numpy.ones(len(centers))*(np.nanmax(peaks[2])*0.5), 'x', color="tab:blue")
 		pylab.xlabel("cross-dispersion axis (pix)")
 		pylab.ylabel("fiber profile")
 		pylab.show()
+	else:
+		save_fig(fig, output_path=out_peaks, figure_path=figure_path, label=None)
 
 def findPeaksOffset_drp(image, peaks_master, out_peaks, disp_axis='X', threshold='1500', median_box='8', median_cross='1', slice='', method='gauss',  init_sigma='1.0',accuracy=1.2):
 
@@ -2153,20 +2155,16 @@ def preprocRawFrame_drp(in_image, out_image, positions="00,10,01,11", orientatio
 		fig, ax = plt.subplots()
 		norm = ImageNormalize(os_region._data, interval=PercentileInterval(50), stretch=AsinhStretch())
 		im = ax.imshow(os_region._data, origin="lower", aspect="auto", norm=norm, cmap=plt.cm.gray)
-		plt.colorbar(im)
-		ax.set_title(f"{org_image._header['BIASSEC'] = } -> {os_x}, {os_y}")
+		cb = plt.colorbar(im)
+		ax.set_title(f"{org_image._header.get('BIASSEC') = } -> {os_x}, {os_y}")
 		ax.set_xlabel("X (pix)")
 		ax.set_ylabel("Y (pix)")
+		cb.set_label("counts (ADU)")
 		if plot == 1:
 			plt.show()
 		else:
-			fig_name = os.path.basename(out_image)
-			fig_path = os.path.join(os.path.dirname(out_image), figure_path)
-			if not os.path.isdir(fig_path):
-				os.makedirs(fig_path, exist_ok=True)
-			fig_path = os.path.join(fig_path, f"{fig_name.replace('.fits', '')}_preproc.png")
-			fig.savefig(fig_path, bbox_inches="tight")
-			plt.close(fig)
+			save_fig(fig, output_path=out_image, figure_path=figure_path, label="preproc")
+	
 	# * split OS in four amplifier sections
 	os_ab, os_cd = os_region.split(2, axis="Y")
 	(os_a, os_b), (os_c, os_d) = os_ab.split(2, "X"), os_cd.split(2, "X")
