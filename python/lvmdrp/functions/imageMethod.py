@@ -562,20 +562,26 @@ def findPeaksAuto_drp(in_image, out_peaks, nfibers,  disp_axis='X', threshold='5
 		img = img.medianImg((median_cross, median_box))
 
 	# if no slice is given find the cross-dispersion cut with the highest signal
-	if slice=='':
-		median_cut=img.collapseImg(axis='y', mode='median') #median collapse of image along cross-dispersion axis
+	if slice == '':
+		image_logger.info("collapsing image along Y-axis using a median statistic")
+		median_cut = img.collapseImg(axis='y', mode='median') #median collapse of image along cross-dispersion axis
 		maximum = median_cut.max() #get maximum value along dispersion axis
-		column=maximum[2] # pixel position of maximum value
+		column = maximum[2] # pixel position of maximum value
+		image_logger.info(f"selecting {column = } to locate fibers")
 		cut = img.getSlice(column, axis='y') # extract this column from image
 	else:
 		column = int(slice) # convert column to integer value
+		image_logger.info(f"selecting {column = } to locate fibers")
 		cut = img.getSlice(column, axis='y') # extract this column from image
 
 	# find location of peaks (local maxima) either above a fixed threshold or to reach a fixed number of peaks
+	image_logger.info("locating fibers")
 	peaks = cut.findPeaks(threshold=threshold, npeaks=npeaks)
+	image_logger.info(f"found {len(peaks[0])} fibers")
 
 	# find the subpixel centroids of the peaks from the central 3 pixels using either a hyperbolic approximation
 	# or perform a leastsq fit with a Gaussian
+	image_logger.info(f"refining fiber location")
 	centers = cut.measurePeaks(peaks[0], method, init_sigma, threshold=0, max_diff=1.0)[0]
 	round_cent = numpy.round(centers).astype('int16') # round the subpixel peak positions to their nearest integer value
 	# write number of peaks and their position to an ASCII file NEED TO BE REPLACE WITH XML OUTPUT
@@ -589,7 +595,7 @@ def findPeaksAuto_drp(in_image, out_peaks, nfibers,  disp_axis='X', threshold='5
 		fig = pylab.figure(figsize=(25,10))
 		pylab.plot(cut._data, '-k', lw=1)
 		pylab.plot(peaks[0], peaks[2] ,'o', color="tab:red")
-		pylab.plot(centers, numpy.ones(len(centers))*(np.nanmax(peaks[2])*0.5), 'x', color="tab:blue")
+		pylab.plot(centers, numpy.ones(len(centers))*(numpy.nanmax(peaks[2])*0.5), 'x', color="tab:blue")
 		pylab.xlabel("cross-dispersion axis (pix)")
 		pylab.ylabel("fiber profile")
 		pylab.show()
