@@ -2122,37 +2122,40 @@ def preprocRawFrame_drp(in_image, out_image, positions="00,10,01,11", orientatio
 
 	# parse overscan (OS) section:
 	# * extract BIASSEC
-	if "BIASSEC" in org_image._header:
+	if os_bound_x and os_bound_y:
+		os_y, os_x = os_bound_y.split(','), os_bound_x.split(',')
+		image_logger.info(f"using given overscan region Y = {os_y}, X = {os_x}")
+		infer_trimsec = True
+	elif "BIASSEC" in org_image._header:
 		os_x, os_y = org_image._header["BIASSEC"].strip("[]").split(",")
 		os_y, os_x = os_y.split(":"), os_x.split(":")
 		image_logger.info(f"parsed overscan region from 'BIASSEC', Y = {os_y}, X = {os_x}")
-	elif os_bound_x and os_bound_y:
-		os_y, os_x = os_bound_y.split(','), os_bound_x.split(',')
-		image_logger.info(f"using given overscan region Y = {os_y}, X = {os_x}")
+		infer_trimsec = False
 	else:
 		os_x, os_y = '[2021:2060, 1:4080]'.strip("[]").split(",")
 		os_y, os_x = os_y.split(":"), os_x.split(":")
 		image_logger.warning(f"no overscan region given. Assuming Y = {os_y}, X = {os_x}")
+		infer_trimsec = True
 
 	os_y, os_x = (int(os_y[0])-1, int(os_y[1])), (int(os_x[0])-1, int(os_x[1]))
 
-	infer_trimsec = False
-	if "TRIMSEC" in org_image._header:
+	if not infer_trimsec:
 		try:
 			sc_x_i, sc_y_i, sc_x_f, sc_y_f = org_image._header["TRIMSEC"].replace("[", "").replace("]", "").split(",")
 			sc_y_i, sc_x_i, sc_y_f, sc_x_f = sc_y_i.split(":"), sc_x_i.split(":"), sc_y_f.split(":"), sc_x_f.split(":")
 			image_logger.info(f"parsed data region from 'TRIMSEC', YX_i = {sc_y_i, sc_x_i}, YX_f = {sc_y_f, sc_x_f}")
 		except (KeyError, ValueError) as error:
+			image_logger.warning("no valid 'TRIMSEC' found in header")
 			infer_trimsec = True
-
-	if not "TRIMSEC" in org_image._header or infer_trimsec:
+	elif infer_trimsec:
 		# assume OS region is in the middle column
 		ysize, xsize = org_image._dim
 		xsize = xsize // 2
 		os_xsize = (os_x[1] - os_x[0]) // 2
 		sc_y_i, sc_x_i = ["1", str(ysize)], ["1", str(xsize-os_xsize)]
 		sc_y_f, sc_x_f = ["1", str(ysize)], [str(xsize+os_xsize+1), str(2*xsize)]
-		image_logger.warning(f"no valid 'TRIMSEC' found in header. Assuming YX_i = {sc_y_i, sc_x_i}, YX_f = {sc_y_f, sc_x_f}")
+		image_logger.warning(f"assuming 'TRIMSEC' YX_i = {sc_y_i, sc_x_i}, YX_f = {sc_y_f, sc_x_f}")
+
 	sc_i, sc_f = ((int(sc_y_i[0])-1, int(sc_y_i[1])), (int(sc_x_i[0])-1, int(sc_x_i[1]))), ((int(sc_y_f[0])-1, int(sc_y_f[1])), (int(sc_x_f[0])-1, int(sc_x_f[1])))
 
 	# select data outside the cut out region (overscan)
@@ -2272,7 +2275,8 @@ def preprocRawFrame_drp(in_image, out_image, positions="00,10,01,11", orientatio
 	preproc_image._mask = numpy.zeros_like(preproc_image._data, dtype=bool)
 	preproc_image._mask |= (preproc_image._data>=2**16)
 	preproc_image._mask |= (preproc_image._data<=0)
-	image_logger.info(f"{preproc_image._mask.sum()} pixels masked")
+	masked_pixels = preproc_image._mask.sum()
+	image_logger.info(f"{masked_pixels} ({masked_pixels / preproc_image._mask.size * 100:.2g} %) pixels masked")
 
 	# update header
 	image_logger.info(f"updating header and writing pre-processed frame to '{out_image}'")
