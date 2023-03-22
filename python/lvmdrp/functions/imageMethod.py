@@ -1,4 +1,5 @@
 import os, sys, numpy
+from tqdm import tqdm
 from astropy.io import fits as pyfits
 from astropy.visualization import ImageNormalize, PercentileInterval, AsinhStretch, LogStretch
 try:
@@ -584,6 +585,7 @@ def findPeaksAuto_drp(in_image, out_peaks, nfibers,  disp_axis='X', threshold='5
 	image_logger.info(f"refining fiber location")
 	centers = cut.measurePeaks(peaks[0], method, init_sigma, threshold=0, max_diff=1.0)[0]
 	round_cent = numpy.round(centers).astype('int16') # round the subpixel peak positions to their nearest integer value
+	image_logger.info(f"final number of fibers found {len(round_cent)}")
 	# write number of peaks and their position to an ASCII file NEED TO BE REPLACE WITH XML OUTPUT
 	file_out = open(out_peaks, 'w')
 	file_out.write('%i\n' %(column))
@@ -916,7 +918,7 @@ def findPeaksMaster2_drp(image, peaks_master, out_peaks, disp_axis='X', threshol
 		pylab.plot(centers._data, numpy.ones(len(centers._data))*2000.0, 'xg')
 		pylab.show()
 
-def tracePeaks_drp(in_image, in_peaks, out_trace, disp_axis='X', method='gauss', median_box='7', median_cross='1', steps='30', coadd='30', poly_disp='-6', init_sigma='1.0', threshold_peak='100.0', max_diff='2', verbose='1'):
+def tracePeaks_drp(in_image, in_peaks, out_trace, disp_axis='X', method='gauss', median_box='7', median_cross='1', steps='30', coadd='30', poly_disp='-6', init_sigma='1.0', threshold_peak='100.0', max_diff='2', verbose='1', plot='1'):
 	"""
 			Traces the peaks of fibers along the dispersion axis. The peaks at a specific dispersion column had to be determined before.
 			Two scheme of measuring the subpixel peak positionare available: A hyperbolic approximation or fitting a Gaussian profile to the brightest 3 pixels of a peak.
@@ -965,6 +967,8 @@ def tracePeaks_drp(in_image, in_peaks, out_trace, disp_axis='X', method='gauss',
 	threshold_peak=float(threshold_peak)
 	max_diff = float(max_diff)
 	init_sigma = float(init_sigma)
+	verbose = bool(verbose)
+	plot = int(plot)
 
 	# load continuum image  from file
 	img = loadImage(in_image)
@@ -1022,41 +1026,18 @@ def tracePeaks_drp(in_image, in_peaks, out_trace, disp_axis='X', method='gauss',
 	nslice = numpy.sum(select_first)+numpy.sum(select_second)
 	m=1
 	# iterate towards index 0 along dispersion axis
-	if verbose=='1':
-		print('Trace peaks along dispersion axis:')
-	for i in first[select_first]:
-		if verbose=='1':
-			sys.stdout.write('Processing....%.0f%%\r'%(m/float(nslice)*100))
-			sys.stdout.flush()
+	image_logger.info("tracing fibers along dispersion axis")
+	if verbose:
+		iterator = tqdm(first[select_first], total=select_first.sum(), desc=f"tracing fiber left from pixel {column}", ascii=True, unit="fiber")
+	else:
+		iterator = first[select_first]
+	for i in iterator:
 		cut_iter = img.getSlice(i, axis='y') # extract cross-dispersion slice
 		# infer pixel position of the previous slice
 		if i==first[select_first][0]:
 			pix = numpy.round(trace.getData()[0][:, column]).astype('int16')
 		else:
 			pix = numpy.round(trace.getData()[0][:, i+steps]).astype('int16')
-
-		#measure the peaks for the slice and store it in the trace
-		centers = cut_iter.measurePeaks(pix, method,  init_sigma, threshold=threshold, max_diff=float(max_diff))
-		if numpy.sum(bad_fibers)>0:
-			diff = Spectrum1D(wave=positions,  data=(centers[0]-positions), mask=bad_fibers)
-			diff.smoothPoly(-1, ref_base=positions)
-			centers[0][bad_fibers]=diff._data[bad_fibers]+positions[bad_fibers]
-			centers[1][bad_fibers]=False
-		trace.setSlice(i, axis='y', data = centers[0], mask = centers[1])
-		m+=1
-
-
-	# iterate towards the last index along dispersion axis
-	for i in second[select_second]:
-		if verbose=='1':
-			sys.stdout.write('Processing....%.0f%%\r'%(m/float(nslice)*100))
-			sys.stdout.flush()
-		cut_iter = img.getSlice(i, axis='y')# extract cross-dispersion slice
-		# infer pixel position of the previous slice
-		if i==second[select_second][0]:
-			pix = numpy.round(trace.getData()[0][:, column]).astype('int16')
-		else:
-			pix = numpy.round(trace.getData()[0][:, i-steps]).astype('int16')
 
 		#measure the peaks for the slice and store it in the trace
 		centers = cut_iter.measurePeaks(pix, method, init_sigma, threshold=threshold, max_diff=float(max_diff))
@@ -1068,11 +1049,35 @@ def tracePeaks_drp(in_image, in_peaks, out_trace, disp_axis='X', method='gauss',
 		trace.setSlice(i, axis='y', data = centers[0], mask = centers[1])
 		m+=1
 
+	# iterate towards the last index along dispersion axis
+	if verbose:
+		iterator = tqdm(second[select_second], total=select_second.sum(), desc=f"tracing fiber right from pixel {column}", ascii=True, unit="fiber")
+	else:
+		iterator = second[select_second]
+	for i in iterator:
+		cut_iter = img.getSlice(i, axis='y')# extract cross-dispersion slice
+		# infer pixel position of the previous slice
+		if i==second[select_second][0]:
+			pix = numpy.round(trace.getData()[0][:, column]).astype('int16')
+		else:
+			pix = numpy.round(trace.getData()[0][:, i-steps]).astype('int16')
+
+		#measure the peaks for the slice and store it in the trace
+		centers = cut_iter.measurePeaks(pix, method, init_sigma, threshold=threshold, max_diff=float(max_diff))
+		if numpy.sum(bad_fibers)>0:
+			diff = Spectrum1D(wave=positions, data=(centers[0]-positions), mask=bad_fibers)
+			diff.smoothPoly(-1, ref_base=positions)
+			centers[0][bad_fibers] = diff._data[bad_fibers]+positions[bad_fibers]
+			centers[1][bad_fibers] = False
+		trace.setSlice(i, axis='y', data = centers[0], mask = centers[1])
+		m+=1
+
 	# smooth all trace by a polynomial
+	image_logger.info(f"fitting trace with {numpy.abs(poly_disp)}-deg polynomial")
 	trace.smoothTracePoly(poly_disp)
 
 	for i in range(fibers):
-		if bad_fibers[i]==False:
+		if bad_fibers[i] == False:
 			trace._mask[i, :] = False
 		else:
 			trace._mask[i, :] = True
@@ -2371,17 +2376,28 @@ def createMasterFrame_drp(in_images, out_image, reject_cr=False, exptime_thresh=
         applied. In the special case that CR rejection is needed, the combination of images is selective:
 
             * where cosmic ray in one frame, select the other
-            * where cosmic ray in none of the frames, calculate an average of both.
+            * where cosmic ray in none of the frames, calculate an average of both
 
         When only one frame is given, it is still flagged as master, but a warning will be thrown.
 
         Parameters
         ----------
-
+		im_images : string
+			comma-separated list of paths to images that are going to be combined into a master frame
+		out_image : string
+			path to output master frame
+		reject_cr : boolean, optional
+			whether to reject or not cosmic rays. Deafults to False. If true this task will decide if
+			cosmic ray rejection is needed or not based on the exposure time of the frame and the number
+			of frames being combined
+		exptime_thresh : integer, optional
+			minimum exposure time belowe which no cosmic rejection routine will be run
+		cr_kwargs :
+			additional keyword arguments to be passed to the cosmic ray rejection routine
 
         Examples
         --------
-
+		drp image createMasterFrame IN_IMAGE1,IN_IMAGE2,... OUT_IMAGE
 
     """
     if not isinstance(in_images, (list, tuple)): in_images = [in_images]
