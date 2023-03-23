@@ -1028,7 +1028,7 @@ def tracePeaks_drp(in_image, in_peaks, out_trace, disp_axis='X', method='gauss',
 	# iterate towards index 0 along dispersion axis
 	image_logger.info("tracing fibers along dispersion axis")
 	if verbose:
-		iterator = tqdm(first[select_first], total=select_first.sum(), desc=f"tracing fiber left from pixel {column}", ascii=True, unit="fiber")
+		iterator = tqdm(first[select_first], total=select_first.sum(), desc=f"tracing fiber left from pixel {column}", ascii=True, unit="pixel")
 	else:
 		iterator = first[select_first]
 	for i in iterator:
@@ -1051,7 +1051,7 @@ def tracePeaks_drp(in_image, in_peaks, out_trace, disp_axis='X', method='gauss',
 
 	# iterate towards the last index along dispersion axis
 	if verbose:
-		iterator = tqdm(second[select_second], total=select_second.sum(), desc=f"tracing fiber right from pixel {column}", ascii=True, unit="fiber")
+		iterator = tqdm(second[select_second], total=select_second.sum(), desc=f"tracing fiber right from pixel {column}", ascii=True, unit="pixel")
 	else:
 		iterator = second[select_second]
 	for i in iterator:
