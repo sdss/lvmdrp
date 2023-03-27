@@ -2108,7 +2108,7 @@ def old_preprocRawFrame_drp(in_image, out_image, boundary_x, boundary_y, positio
 	full_img.writeFitsData(out_image)
 	return full_img
 
-def preprocRawFrame_drp(in_image, out_image, positions="00,10,01,11", orientation="S,S,S,S", subtract_overscan='1', os_bound_x='', os_bound_y='', compute_error='1', assume_gain="1.0", assume_rdnoise="5", gain_field='GAIN', rdnoise_field='RDNOISE', unit="ADU", assume_imagetyp="bias", plot='2', figure_path=".figures"):
+def preprocRawFrame_drp(in_image, out_image, positions="00,10,01,11", orientation="S,S,S,S", subtract_overscan='1', os_bound_x='', os_bound_y='', compute_error='1', assume_gain="1.0", assume_rdnoise="5", gain_field='GAIN', rdnoise_field='RDNOISE', unit="adu", assume_imagetyp="bias", plot='2', figure_path=".figures"):
 	# convert input parameters to proper type
 	orient = orientation.split(',')
 	pos = positions.split(',')
@@ -2251,17 +2251,18 @@ def preprocRawFrame_drp(in_image, out_image, positions="00,10,01,11", orientatio
 	# orient quadrants as requested
 	[quad.orientImage(orient[i]) for i, quad in enumerate(quads)]
 	# convert to specified unit
-	if unit == "e-":
+	if unit == "electron":
 		image_logger.info("converting from ADU to e-")
 		for i in range(nquad):
 			quads[i] *= gains[i]
 			if compute_error:
 				quads[i].computePoissonError(rdnoise=rdnoises[i])
 				image_logger.info(f"calculated Poisson errors for amplifier '{'abcd'[i]}'")
-	elif unit.upper() == "ADU":
-		unit = unit.upper()
+	elif unit == "adu":
+		image_logger.info("using original ADU units")
 	else:
-		pass
+		image_logger.warning("unrecongnized CCD pixel unit. Assuming 'ADU'")
+		unit = "adu"
 
 	# join images
 	preproc_image = glueImages(quads, pos)
@@ -2297,22 +2298,22 @@ def preprocRawFrame_drp(in_image, out_image, positions="00,10,01,11", orientatio
 		preproc_image.setHdrValue(f"HIERARCH AMP{i+1} TRIMSEC", f"[{x*xsize+1}:{xsize*(x+1)}, {y*ysize+1}:{ysize*(y+1)}]", f"Region of amp. {i+1}")
 	# add gain keywords for the different subimages (CCDs/Amplifiers)
 	for i in range(nquad):
-		preproc_image.setHdrValue(f'HIERARCH AMP{i+1} {gain_field}', gains[i], f'Gain value of amp. {i+1} [e-/ADU]')
+		preproc_image.setHdrValue(f'HIERARCH AMP{i+1} {gain_field}', gains[i], f'Gain value of amp. {i+1} [electron/adu]')
 	# add read-out noise keywords for the different subimages (CCDs/Amplifiers)
 	for i in range(nquad):
-		preproc_image.setHdrValue(f'HIERARCH AMP{i+1} {rdnoise_field}', rdnoises[i], f'Read-out noise of amp. {i+1} [e-]')
+		preproc_image.setHdrValue(f'HIERARCH AMP{i+1} {rdnoise_field}', rdnoises[i], f'Read-out noise of amp. {i+1} [electron]')
 	# add bias of overscan region for the different subimages (CCDs/Amplifiers)
 	for i in range(nquad):
-		preproc_image.setHdrValue(f'HIERARCH AMP{i+1} OVERSCAN', os_bias_med[i], f'Overscan median of amp. {i+1} [ADU]')
+		preproc_image.setHdrValue(f'HIERARCH AMP{i+1} OVERSCAN', os_bias_med[i], f'Overscan median of amp. {i+1} [adu]')
 	# add bias std of overscan region for the different subimages (CCDs/Amplifiers)
 	for i in range(nquad):
-		preproc_image.setHdrValue(f"HIERARCH AMP{i+1} OVERSCAN_STD", os_bias_std[i], f"Overscan std of amp. {i+1} [ADU]")
+		preproc_image.setHdrValue(f"HIERARCH AMP{i+1} OVERSCAN_STD", os_bias_std[i], f"Overscan std of amp. {i+1} [adu]")
 	#write out FITS file
 	preproc_image.writeFitsData(out_image)
 
 def basicCalibration_drp(in_image, out_image, in_bias=None, in_dark=None, in_pixelflat=None):
 
-	proc_image = loadImage(in_image).convertUnit(unit="e-")
+	proc_image = loadImage(in_image).convertUnit(unit="electron")
 	exptime = proc_image._header["EXPTIME"]
 	img_type = proc_image._header["IMAGETYP"].lower()
 
@@ -2325,13 +2326,13 @@ def basicCalibration_drp(in_image, out_image, in_bias=None, in_dark=None, in_pix
 	if img_type in ["bias"] or (in_bias is None or not os.path.isfile(in_bias)):
 		master_bias = dummy_bias
 	else:
-		master_bias = loadImage(in_bias).convertUnit(unit="e-")
+		master_bias = loadImage(in_bias).convertUnit(unit="electron")
 
 	# read master dark
 	if img_type in ["bias", "dark"] or (in_dark is None or not os.path.isfile(in_dark)):
 		master_dark = dummy_dark
 	else:
-		master_dark = loadImage(in_dark).convertUnit(unit="e-")
+		master_dark = loadImage(in_dark).convertUnit(unit="electron")
 		# scale down the dark if needed
 		factor = exptime / master_dark._header["EXPTIME"]
 		if factor > 1.0:
@@ -2343,7 +2344,7 @@ def basicCalibration_drp(in_image, out_image, in_bias=None, in_dark=None, in_pix
 	if img_type in ["bias", "dark", "flat", "flatfield"] or (in_pixelflat is None or not os.path.isfile(in_pixelflat)):
 		master_flat = dummy_flat
 	else:
-		master_flat = loadImage(in_pixelflat).convertUnit(unit="e-")
+		master_flat = loadImage(in_pixelflat).convertUnit(unit="electron")
 
 	# run basic calibration
 	calib_image = (proc_image - master_dark - master_bias) / master_flat

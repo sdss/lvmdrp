@@ -525,7 +525,7 @@ class Image(Header):
             if header is not None:
                 self.setHeader(header) # set header
 
-    def convertUnit(self, unit, assume="ADU", gain_field="GAIN", assume_gain=1.0, inplace=True):
+    def convertUnit(self, unit, assume="adu", gain_field="GAIN", assume_gain=1.0, inplace=True):
 
         current = self._header.get("BUNIT", assume)
         
@@ -535,7 +535,7 @@ class Image(Header):
             sects = self._header[f"AMP? TRIMSEC"]
             n_amp = len(gains)
             for i in range(n_amp):
-                factor = gains[f"AMP{i+1} {gain_field}"] if current == "ADU" else 1 / gains[f"AMP{i+1} {gain_field}"]
+                factor = gains[f"AMP{i+1} {gain_field}"] if current == "adu" else 1 / gains[f"AMP{i+1} {gain_field}"]
                 new_image.setSection(
                     section=sects[i],
                     subimg=new_image.getSection(section=sects[i]) * factor,
@@ -543,7 +543,7 @@ class Image(Header):
                     inplace=True
                 )
             else:
-                factor = self._header.get(gain_field, assume_gain) if current == "ADU" else 1 / self._header.get(gain_field, assume_gain)
+                factor = self._header.get(gain_field, assume_gain) if current == "adu" else 1 / self._header.get(gain_field, assume_gain)
                 new_image *= factor
         
             new_image._header["BUNIT"] = unit
