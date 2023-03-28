@@ -1,7 +1,7 @@
+import matplotlib.pyplot as plt
 import numpy
 from numpy import polynomial
 
-from lvmdrp.core import fit_profile
 from lvmdrp.core.fiberrows import FiberRows
 
 
@@ -54,30 +54,38 @@ class TraceMask(FiberRows):
         else:
             return dist, None
 
-    def smoothTracePoly(self, order, clip=None):
+    def smoothTracePoly(self, deg, poly_kind="poly", clip=None):
         """
-        Smooth the traces along the dispersion direction with a polynomical function for each individual fiber
+        smooths the traces along the dispersion direction with a polynomical function for each individual fiber
 
         Parameters
-        --------------
-        order: int
-            Order of the polynomial function to describe the trace along diserpsion direction
+        ----------
+        deg: int
+            degree of the polynomial function to describe the trace along diserpsion direction
+        poly_kind : string, optional with default 'poly'
+            the kind of polynomial to use when smoothing the trace, valid options are: 'poly' (power series, default), 'legendre', 'chebyshev'
+        clip : 2-tuple of int, optional with default None
+            clip data around this values, defaults to no clipping
         """
         pixels = numpy.arange(
             self._data.shape[1]
         )  # pixel position in dispersion direction
-        self._coeffs = numpy.zeros((self._data.shape[0], numpy.abs(order) + 1))
+        self._coeffs = numpy.zeros((self._data.shape[0], numpy.abs(deg) + 1))
         # iterate over each fiber
         for i in range(self._fibers):
             good_pix = numpy.logical_not(self._mask[i, :])
             if numpy.sum(good_pix) != 0:
-                if order > 0:
+                if poly_kind == "poly":
                     poly = polynomial.Polynomial.fit(
-                        pixels[good_pix], self._data[i, good_pix], deg=order
+                        pixels[good_pix], self._data[i, good_pix], deg=deg
                     )
-                if order < 0:
+                elif poly_kind == "legendre":
                     poly = polynomial.Legendre.fit(
-                        pixels[good_pix], self._data[i, good_pix], deg=-1 * order
+                        pixels[good_pix], self._data[i, good_pix], deg=deg
+                    )
+                elif poly_kind == "chebyshev":
+                    poly = polynomial.Chebyshev.fit(
+                        pixels[good_pix], self._data[i, good_pix], deg=deg
                     )
 
                 self._coeffs[i, :] = poly.coef
@@ -195,12 +203,11 @@ class TraceMask(FiberRows):
             if i == -3930:
                 print(change)
                 print(good_mask)
-                # pylab.plot(change, '-k')
-                pylab.plot(
+                plt.plot(
                     x[select_good][select], change_dist[select_good, i][select], "ok"
                 )
-                pylab.plot(x, numpy.polyval(fit_par[:, i], x), "r")
-                pylab.show()
+                plt.plot(x, numpy.polyval(fit_par[:, i], x), "r")
+                plt.show()
 
         wave = numpy.arange(
             fit_par.shape[1]
@@ -230,12 +237,12 @@ class TraceMask(FiberRows):
                 fit, wave - fit_par.shape[1] / 2.0
             )  # store the resulting polynomial
 
-            # pylab.subplot(len(poly_cross), 1, len(poly_cross)-j)
-            # pylab.plot(wave[select_wave], res, '-k')
-            # pylab.plot(wave[select_wave], fit_par[j, select_wave], 'ok')
-            # pylab.plot(wave[select_wave][select], fit_par[j, select_wave][select], 'or')
-            # pylab.plot(wave, fit_par_smooth[j, :], '-r')
-        # pylab.show()
+            # plt.subplot(len(poly_cross), 1, len(poly_cross)-j)
+            # plt.plot(wave[select_wave], res, '-k')
+            # plt.plot(wave[select_wave], fit_par[j, select_wave], 'ok')
+            # plt.plot(wave[select_wave][select], fit_par[j, select_wave][select], 'or')
+            # plt.plot(wave, fit_par_smooth[j, :], '-r')
+        # plt.show()
 
         for i in range(len(wave)):
             change_dist[:, i] = numpy.polyval(
@@ -263,11 +270,11 @@ class TraceMask(FiberRows):
         )  # compute the rms scatter of the measured positions for each dispersion column
         fit_offset = numpy.polyfit(wave[select_wave], offset_mean, poly_disp)
         ext_offset = numpy.polyval(fit_offset, wave)
-        #   pylab.plot(wave[select_wave], offset_mean, 'ok')
-        #  pylab.plot(wave[select_wave], offset1, '-b')
-        #  pylab.plot(wave[select_wave], offset2, '-g')
-        #  pylab.plot(wave, ext_offset, '-r')
-        #  pylab.show()
+        #   plt.plot(wave[select_wave], offset_mean, 'ok')
+        #  plt.plot(wave[select_wave], offset1, '-b')
+        #  plt.plot(wave[select_wave], offset2, '-g')
+        #  plt.plot(wave, ext_offset, '-r')
+        #  plt.show()
         out_trace = new_trace + ext_offset[numpy.newaxis, :]  # match the trace offsets
         self._data = out_trace
 
@@ -278,4 +285,5 @@ class TraceMask(FiberRows):
         return (x_cor, y_cor)
 
     def clipTrace(self, dim):
+        self._data = numpy.clip(self._data, 0, dim)
         self._data = numpy.clip(self._data, 0, dim)
