@@ -1,4 +1,5 @@
 import numpy
+from numpy import polynomial
 try:
     import matplotlib
     from matplotlib import pyplot as plt
@@ -28,6 +29,7 @@ from lvmdrp.core.cube  import Cube
 from lvmdrp.core.image import loadImage
 from lvmdrp.core.passband import PassBand
 from lvmdrp.utils import flatten, spec_from_lines
+from lvmdrp.utils.logger import get_logger
 
 from lvmdrp.core import fit_profile
 from lvmdrp.external import ancillary_func
@@ -39,6 +41,9 @@ __all__ = [
 	"detWaveSolution_drp", "createPixTable_drp", "checkPixTable_drp", "correctPixTable_drp", "resampleWave_drp",
 	"includePosTab_drp"
 ]
+
+
+rss_logger = get_logger(__name__)
 
 
 def mergeRSS_drp(files_in, file_out,  mergeHdr='1'):
@@ -170,7 +175,7 @@ def mergeRSS_drp(files_in, file_out,  mergeHdr='1'):
 # * define ancillary product lvm-arc (rss arc) for replace arc_rss
 # * define ancillary product lvm-wave to contain wavelength solutions
 # * merge disp_rss and res_rss products into lvmArc product, change variable to out_arc
-def detWaveSolution_drp(in_arc, out_wave, out_lsf, in_ref_lines='', ref_fiber='', pixel='', ref_lines='', poly_dispersion='-5', poly_fwhm='-3,-5', init_back='10.0',  aperture='13', flux_min='200.0', fwhm_max='10.0', rel_flux_limits='0.1,5.0', fiberflat='', negative=False, cc_correction=False, verbose='1' ):
+def detWaveSolution_drp(in_arc, out_wave, out_lsf, in_ref_lines='', ref_fiber='', pixel='', ref_lines='', poly_dispersion='-5', poly_fwhm='-3,-5', init_back='10.0',  aperture='13', flux_min='200.0', fwhm_max='10.0', rel_flux_limits='0.1,5.0', fiberflat='', negative=False, cc_correction=True, plot='2', figure_path=".figures"):
 	"""
 			Measures the pixel position of emission lines in wavelength UNCALIBRATED for all fibers of the RSS.
 			Starting from the initial guess of pixel positions for a given fiber, the program measures the position using
@@ -191,8 +196,8 @@ def detWaveSolution_drp(in_arc, out_wave, out_lsf, in_ref_lines='', ref_fiber=''
 					reference wavelength of emission line, its rough centroid pixel position a flag if the width of the
 					line should be considered for the spectral resolution measurements (space separated) in
 					each subsquent row.
-					If no ASCII file is provided those information must be given in the ref_spec, pixel and ref_lines parameters.
-			ref_spec : string of integer, optional with default: ''
+					If no ASCII file is provided those information must be given in the ref_fiber, pixel and ref_lines parameters.
+			ref_fiber : string of integer, optional with default: ''
 					Number of the fiber in the RSS for which the rough guess for their centroid pixel position (x-direction) are given.
 					Only used if no ASCII file is given.
 			pixel : string of integers, optional with default: ''
@@ -222,32 +227,31 @@ def detWaveSolution_drp(in_arc, out_wave, out_lsf, in_ref_lines='', ref_fiber=''
 					Required relative integrated fluxes with respect to the measured fluxes  for the reference fiber.
 					If relative fluxes are outside this range, they will be masked.
 			negative :
-			verbose: string of integer (0 or 1), optional  with default: 1
+			plot: string of integer (0 or 1), optional  with default: 1
 					Show information during the processing on the command line (0 - no, 1 - yes)
 
 			Examples
 			----------------
 			user:> lvmdrp rss detWaveSolution ARC_RSS.fits arc REF_FILE.txt poly_dispersion='-7' poly_fwhm='-4,-5'
-			user:> lvmdrp rss detWaveSolution ARC_RSS.fits arc ref_spec=100 pixel=200,500,1000 ref_lines=3000.0,5000.0,8000.0 flux_min=100.0
+			user:> lvmdrp rss detWaveSolution ARC_RSS.fits arc ref_fiber=100 pixel=200,500,1000 ref_lines=3000.0,5000.0,8000.0 flux_min=100.0
 	"""
 
 
 	# convert parameters to the correct type
-	flux_min=float(flux_min)
-	fwhm_max=float(fwhm_max)
-	init_back=float(init_back)
-	aperture=float(aperture)
-	poly_dispersion=int(poly_dispersion)
-	poly_fwhm_cross=int(poly_fwhm.split(',')[0])
-	poly_fwhm_disp=int(poly_fwhm.split(',')[1])
-
+	flux_min = float(flux_min)
+	fwhm_max = float(fwhm_max)
+	init_back = float(init_back)
+	aperture = float(aperture)
+	poly_dispersion = int(poly_dispersion)
+	poly_fwhm_cross = int(poly_fwhm.split(',')[0])
+	poly_fwhm_disp = int(poly_fwhm.split(',')[1])
 	limits = rel_flux_limits.split(',')
-	rel_flux_limits=[float(limits[0]), float(limits[1])]
-	negative=bool(negative)
-	verbose=int(verbose)
+	rel_flux_limits = [float(limits[0]), float(limits[1])]
+	negative = bool(negative)
+	plot = int(plot)
+	
 	if fiberflat != '':
-		fiberflat=fiberflat.split(',')
-
+		fiberflat = fiberflat.split(',')
 
 	if in_ref_lines != '':
 		# load initial pixel positions and reference wavelength from txt config file NEED TO BE REPLACE BY XML SCHEMA
@@ -256,21 +260,18 @@ def detWaveSolution_drp(in_arc, out_wave, out_lsf, in_ref_lines='', ref_fiber=''
 		nlines = len(lines)-1
 		pixel = numpy.zeros(nlines, dtype=numpy.float32) # empty for pixel position
 		ref_lines = numpy.zeros(nlines, dtype=numpy.float32) # empty for reference wavelength
-		use_fwhm = numpy.zeros(nlines, dtype=bool) # empty for reference wavelength
-		if ref_fiber != int(lines[0]):
-			cc_correction = True
-		else:
-			ref_fiber = int(lines[0]) # the reference fiber for the initial positions
+		use_line = numpy.zeros(nlines, dtype=bool) # empty for reference wavelength
+		ref_fiber = int(lines[0]) # the reference fiber for the initial positions
 		# read the information from file
 		for i in range(1, nlines+1):
 			line = lines[i].split()
 			pixel[i-1] = float(line[0])
-			ref_lines[i-1] =float(line[1])
-			use_fwhm[i-1] = int(line[2])
-		pixel = pixel[use_fwhm]
-		ref_lines = ref_lines[use_fwhm]
-		use_fwhm = use_fwhm[use_fwhm]
-		nlines = use_fwhm.sum()
+			ref_lines[i-1] = float(line[1])
+			use_line[i-1] = int(line[2])
+		pixel = pixel[use_line]
+		ref_lines = ref_lines[use_line]
+		use_line = use_line[use_line]
+		nlines = use_line.sum()
 	else:
 		# get the reference spectrum number, the inital pixel positions and their reference wavelength from the parameter list
 		ref_fiber = int(ref_fiber) # reference fiber
@@ -279,41 +280,53 @@ def detWaveSolution_drp(in_arc, out_wave, out_lsf, in_ref_lines='', ref_fiber=''
 		nlines = len(pixels)
 		pixel = numpy.zeros(nlines, dtype=numpy.float32) # empty for pixel position
 		ref_lines = numpy.zeros(nlines, dtype=numpy.float32) # empty for reference wavelength
-		use_fwhm = numpy.ones(len(ref_lines), dtype=bool)
+		use_line = numpy.ones(len(ref_lines), dtype=bool)
 		# iterate over the different lines and convert to float
 		for i in range(len(ref)):
 			ref_lines[i] = float(ref[i])
 			pixel[i] = float(pixels[i])
-
+	
 	# initialize the extracted arc line frame
 	arc = FiberRows() # create object
 	arc.loadFitsData(in_arc) # load data
 	if negative:
-		arc = arc*-1+numpy.median(arc._data)
-	
+		arc = -1 * arc + numpy.median(arc._data)
+
 	# apply cc correction to lines if needed
-	if cc_correction:
-		wave = numpy.arange(arc._data.shape[1])
-		data = arc._data[ref_fiber]
-		
-		# plt.figure(figsize=(25,5))
-		# plt.vlines(pixel, numpy.nanmin(data), numpy.nanmax(data), color="0.5", lw=1)
-		# plt.step(wave, data, color="0.2", lw=1)
-		
-		pix_spec = spec_from_lines(pixel, sigma=2, wavelength=wave)
-		corr = signal.correlate(data, pix_spec, mode="full")
+	if cc_correction:		
+		# determine maximum correlation shift
+		pix_spec = spec_from_lines(pixel, sigma=2, wavelength=arc._pixels)
+		corr = signal.correlate(arc._data[ref_fiber], pix_spec, mode="full")
 		shift = numpy.argmax(corr) - pix_spec.size
-		pixel = pixel + shift
-		# plt.vlines(pixel, numpy.nanmin(data), numpy.nanmax(data), color="tab:red", lw=1)
-		# plt.show()
+	else:
+		shift = 0
+
+	# plot if requested
+	if plot:
+		fig, axs = plt.subplots(3, 1, figsize=(25,15))
+		for pix in pixel:
+			axs[0].axvspan(pix-(aperture-1)//2, pix+(aperture-1)//2, numpy.nanmin(arc._data[ref_fiber]), numpy.nanmax(arc._data[ref_fiber]), fc="0.5", alpha=0.5)
+		axs[0].vlines(pixel, numpy.nanmin(arc._data[ref_fiber]), numpy.nanmax(arc._data[ref_fiber]), color="tab:red", lw=1, label="orig. ref. lines")
+		if shift != 0:
+			axs[0].vlines(pixel+shift, numpy.nanmin(arc._data[ref_fiber]), numpy.nanmax(arc._data[ref_fiber]), color="tab:blue", lw=1, label=f"corr. lines ({shift = } pix)")
+		axs[0].step(arc._pixels, arc._data[ref_fiber], color="0.2", lw=1)
+		axs[0].set_title(f"reference arc spectrum {ref_fiber}", loc="left")
+		axs[0].set_xlabel("dispersion axis (pix)")
+		axs[0].set_ylabel("count (e-/pix)")
+		axs[0].legend(loc=1)
+	
+	# correct initial pixel map by shifting
+	pixel += shift
 
 	# setup storage array
+	wave_coeffs = numpy.zeros((arc._fibers, numpy.abs(poly_dispersion)+1))
+	lsf_coeffs = numpy.zeros((arc._fibers, numpy.abs(poly_fwhm_disp)+1))
 	wave_sol = numpy.zeros((arc._fibers, arc._data.shape[1]), dtype=numpy.float32) # empty for wavelength solution
 	fwhm_sol = numpy.zeros((arc._fibers, arc._data.shape[1]), dtype=numpy.float32) # empty for FWHM spectral resolution
 	rms = numpy.zeros(arc._fibers, dtype=numpy.float32) # empty for rms of wavelength solution for each fiber
 
 	# measure the ARC lines with individual Gaussian across the CCD
-	(fibers, flux, cent_wave, fwhm, masked) = arc.measureArcLines(ref_fiber, pixel, aperture=aperture, init_back=init_back, flux_min=flux_min, fwhm_max=fwhm_max, rel_flux_limits=rel_flux_limits, verbose=bool(verbose))
+	fibers, flux, cent_wave, fwhm, masked = arc.measureArcLines(ref_fiber, pixel, aperture=aperture, init_back=init_back, flux_min=flux_min, fwhm_max=fwhm_max, rel_flux_limits=rel_flux_limits, verbose=True)
 	norm_flux = numpy.zeros_like(ref_lines)
 	for n in range(len(ref_lines)):
 		norm_flux[n] = numpy.mean(flux[numpy.logical_not(masked[:,n]),n])
@@ -325,94 +338,97 @@ def detWaveSolution_drp(in_arc, out_wave, out_lsf, in_ref_lines='', ref_fiber=''
 		rss_flat=RSS(wave=wave,data=norm,header=arc.getHeader())
 		rss_flat.writeFitsData('%s.fits'%(fiberflat[3]))
 
-
 	# smooth the FWHM values for each ARC line in cross-dispersion direction
 	for i in range(nlines): # iterate over modelled emission lines
 		select = numpy.logical_and(numpy.logical_not(masked[:, i]), flux[:, i]>flux_min)
 		fwhm_med = ndimage.filters.median_filter(numpy.fabs(fwhm[select, i]), 4)
 		if poly_fwhm_cross>0:
-			fit_fwhm = numpy.polyfit(fibers[select], fwhm_med, poly_fwhm_cross) # fit the profile with a polynomial of given order
-			fwhm[:, i]  = numpy.polyval(fit_fwhm, fibers)  # replace the smooth profile
+			poly = polynomial.Polynomial.fit(fibers[select], fwhm_med, deg=poly_fwhm_cross)
 		elif poly_fwhm_cross<0:
-			legandre_fwhm = fit_profile.LegandrePoly(numpy.zeros(-1*poly_fwhm_cross+1), min_x=0, max_x=arc._fibers-1)
-			legandre_fwhm.fit((fibers[select]),  fwhm_med)
-			fwhm[:, i] = legandre_fwhm(fibers)
-		if i==-1:
-			#plt.plot(fibers[select], fwhm_med, 'ok')
-			#plt.plot(fibers, masked[:, i])
-			plt.plot(fibers, cent_wave[:, i])
-			plt.show()
+			poly = polynomial.Legendre.fit(fibers[select], fwhm_med, deg=-1*poly_fwhm_cross)
+
+		fwhm[:, i] = poly(fibers)
+	
 	# Determine the wavelength solution
-	select_ref_lines = ref_lines>0.0 # select the lines for the wavelength calibration with
+	select_lines = use_line>0.0
 	# Iterate over the fibers
-	good_fibers=numpy.zeros(len(fibers), dtype="bool")
+	good_fibers = numpy.zeros(len(fibers), dtype="bool")
 	masked_fib = numpy.zeros(len(fibers), dtype="uint16")
 	for i in fibers:
-		select = masked[i, select_ref_lines]
+		select = masked[i, select_lines]
 		masked_fib[i] = numpy.sum(select)
 
 		if numpy.sum(select)==0:
-			good_fibers[i]=True
+			good_fibers[i] = True
 		elif numpy.sum(select)==len(select):
-			select[:]=False
-		select=numpy.logical_not(select)
+			select[:] = False
+		select = numpy.logical_not(select)
 
 		if poly_dispersion>0:
-			fit_wave = numpy.polyfit(cent_wave[i, select_ref_lines][select], ref_lines[select_ref_lines][select], poly_dispersion) # fit with a polynomial
-			rms[i]= numpy.std(ref_lines[select_ref_lines][select]-numpy.polyval(fit_wave, cent_wave[i, select_ref_lines][select])) # compute the rms of the polynomial
-			wave_sol[i, :] = numpy.polyval(fit_wave, numpy.arange(arc._data.shape[1])) # write wavelength solution
-		elif poly_dispersion<0:
-			legandre_wave = fit_profile.LegandrePoly(numpy.zeros(-1*poly_dispersion+1), min_x=0, max_x=arc._data.shape[1]-1)
-			legandre_wave.fit(cent_wave[i, select_ref_lines][select],   ref_lines[select_ref_lines][select])
+			poly = polynomial.Polynomial.fit(cent_wave[i, select_lines][select], ref_lines[select_lines][select], deg=poly_dispersion)
+		else:
+			poly = polynomial.Legendre.fit(cent_wave[i, select_lines][select], ref_lines[select_lines][select], deg=-1*poly_dispersion)
+		
+		wave_coeffs[i, :] = poly.coef
+		wave_sol[i, :] = poly(arc._pixels)	
+		rms[i] = numpy.std(ref_lines[select_lines][select] - poly(cent_wave[i, select_lines][select]))
+	
+	if plot:
+		axs[1].axhline(len(ref_lines), ls="--", color="0.2", lw=1)
+		axs[1].bar(fibers, masked_fib, color="tab:blue")
+		axs[1].set_xlabel("cross-dispersion axis (pix)")
+		axs[1].set_ylabel("number of lines")
+		axs[1].set_title("# of masked lines per fiber", loc="left")
 
-			rms[i]= numpy.std(ref_lines[select_ref_lines][select]-legandre_wave(cent_wave[i, select_ref_lines][select])) # compute the rms of the polynomial
-			wave_sol[i, :] = legandre_wave(numpy.arange(arc._data.shape[1]))
-			if i==-1:
-				plt.plot(ref_lines[select_ref_lines][select], ref_lines[select_ref_lines][select]-legandre_wave(cent_wave[i, select_ref_lines][select]), 'ok')
-				plt.show()
-				plt.plot(cent_wave[i, select_ref_lines][select],   ref_lines[select_ref_lines][select], 'ok')
-				plt.plot(numpy.arange(arc._data.shape[1]),wave_sol[i, :] )
-				plt.show()
-	##plt.plot(masked_fib)
-	##plt.plot(rms[good_fibers])
-	##plt.plot(good_fibers)
-	##plt.show()
+		axs[2].fill_between(arc._pixels, wave_sol.mean(0) - wave_sol.std(0), wave_sol.mean(0) + wave_sol.std(0), lw=0, fc="0.5", alpha=0.5)
+		for i in fibers:
+			select = masked[i, select_lines]
+			masked_fib[i] = numpy.sum(select)
 
-	# Estimate the spectral resoltuion patern
+			if numpy.sum(select)==0:
+				good_fibers[i] = True
+			elif numpy.sum(select)==len(select):
+				select[:] = False
+			select = numpy.logical_not(select)
+			axs[2].plot(cent_wave[i, select_lines][select], ref_lines[select_lines][select], ",", color="tab:blue")
+		axs[2].set_xlabel("dispersion axis (pix)")
+		axs[2].set_ylabel("wavelength (AA)")
+		axs[2].set_title(f"wavelength solutions with a polynomial of {poly_dispersion}-deg", loc="left")
 
+		fig.tight_layout()
+		if plot == 1:
+			plt.show()
+		else:
+			save_fig(fig, output_path=out_image, figure_path=figure_path, label="fit_wave")
+
+	# Estimate the spectral resolution pattern
 	dwave = wave_sol[:, 1:]-wave_sol[:, :-1] # compute the pixel size in wavelength units accross the CCD
 	cent_round = numpy.round(cent_wave).astype('int16') # get the pixel coordinates of the lines
 
-	select_lines = use_fwhm
+	select_lines = use_line>0
 
 	# Iterate over the fibers
 	for i in fibers:
 		fwhm_wave = numpy.fabs(dwave[i, cent_round[i, :]])*fwhm[i, :]
 		if poly_fwhm_disp>0:
-			fit_fwhm= numpy.polyfit(cent_wave[i, select_lines], fwhm_wave[select_lines], poly_fwhm_disp )
-			fwhm_sol[i, : ] = numpy.polyval(fit_fwhm, numpy.arange(arc._data.shape[1]))
+			poly = polynomial.Polynomial.fit(cent_wave[i, select_lines], fwhm_wave[select_lines], deg=poly_fwhm_disp)
 		elif poly_fwhm_disp<0:
-			leg_poly_fwhm = fit_profile.LegandrePoly(numpy.zeros(-1*poly_fwhm_disp+1), min_x=0, max_x=arc._data.shape[1]-1 )
-			leg_poly_fwhm.fit(cent_wave[i, select_lines], fwhm_wave[select_lines])
-			fwhm_sol[i, :]=leg_poly_fwhm(numpy.arange(arc._data.shape[1]))
-		if i==-1:
-			plt.plot(numpy.arange(arc._data.shape[1]-1),  numpy.fabs(dwave[i, :]), '-r')
-			print(cent_round)
-			print(dwave[i, cent_round])
-			plt.plot(cent_wave[i, select_lines], fwhm[i, select_lines], 'or')
-			plt.plot(cent_wave[i, select_lines], fwhm_wave[select_lines], 'ok')
-			plt.plot(numpy.arange(arc._data.shape[1]), fwhm_sol[i, :])
-			plt.show()
-	#print numpy.abs(poly_fwhm_disp)
+			poly = polynomial.Legendre.fit(cent_wave[i, select_lines], fwhm_wave[select_lines], deg=-1*poly_fwhm_disp)
+		
+		lsf_coeffs[i, :] = poly.coef
+		fwhm_sol[i, :] = poly(arc._pixels)
+	
+	# update header
 	arc.setHdrValue('HIERARCH PIPE FWHM POLY', '%d'%(numpy.abs(poly_fwhm_disp)), 'Order of the resolution polynomial')
-	fwhm_trace = FiberRows(data = fwhm_sol, header = arc.getHeader())
-	#arc.removeHdrEntries(keywords=['PIPE FWHM POLY'])
 	arc.setHdrValue('HIERARCH PIPE DISP POLY', '%d'%(numpy.abs(poly_dispersion)), 'Order of the dispersion polynomial')
 	arc.setHdrValue('HIERARCH PIPE DISP RMS MEDIAN', '%.4f'%(numpy.median(rms[good_fibers])), 'Median RMS of disp sol')
 	arc.setHdrValue('HIERARCH PIPE DISP RMS MIN', '%.4f'%(numpy.min(rms[good_fibers])), 'Min RMS of disp sol')
 	arc.setHdrValue('HIERARCH PIPE DISP RMS MAX', '%.4f'%(numpy.max(rms[good_fibers])), 'Max RMS of disp sol')
 
-	wave_trace = FiberRows(data = wave_sol, header = arc.getHeader())
+	wave_trace = FiberRows(data=wave_sol, header=arc.getHeader())
+	wave_trace._coeffs = wave_coeffs
+	fwhm_trace = FiberRows(data=fwhm_sol, header=arc.getHeader())
+	fwhm_trace._coeffs = lsf_coeffs
 
 	wave_trace.writeFitsData(out_wave)
 	fwhm_trace.writeFitsData(out_lsf)

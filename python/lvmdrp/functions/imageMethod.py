@@ -596,8 +596,8 @@ def findPeaksAuto_drp(in_image, out_peaks, nfibers,  disp_axis='X', threshold='5
 	if plot == 1:
 		fig = pylab.figure(figsize=(25,10))
 		pylab.plot(cut._data, '-k', lw=1)
-		pylab.plot(peaks[0], peaks[2] ,'o', color="tab:red")
-		pylab.plot(centers, numpy.ones(len(centers))*(numpy.nanmax(peaks[2])*0.5), 'x', color="tab:blue")
+		pylab.plot(peaks[0], peaks[2] ,'o', color="tab:red", mew=0, ms=5)
+		pylab.plot(centers, numpy.ones(len(centers))*numpy.nanmax(peaks[2])*0.5, 'x', mew=1, ms=7, color="tab:blue")
 		pylab.xlabel("cross-dispersion axis (pix)")
 		pylab.ylabel("fiber profile")
 		pylab.show()
