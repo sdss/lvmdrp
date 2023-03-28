@@ -1,6 +1,8 @@
-from astropy.io import fits as pyfits
 import os
 import re
+
+from astropy.io import fits as pyfits
+
 
 description='Provides Methods for handling pipeline related tasks'
 

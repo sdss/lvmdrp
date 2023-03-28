@@ -1,9 +1,10 @@
 
-import sys
-import site
-import os
-import collections.abc
 import collections
+import collections.abc
+import os
+import site
+import sys
+
 import numpy as np
 
 

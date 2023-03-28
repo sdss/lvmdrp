@@ -6,8 +6,8 @@
 # @License: BSD 3-Clause
 # @Copyright: SDSS-V LVM
 
-from enum import IntFlag, auto
 from copy import copy
+from enum import IntFlag, auto
 
 
 class classproperty(object):

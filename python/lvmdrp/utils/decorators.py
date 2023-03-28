@@ -8,8 +8,8 @@
 
 import os
 
-from lvmdrp.utils.bitmask import QualityFlag
 from lvmdrp.core import image
+from lvmdrp.utils.bitmask import QualityFlag
 
 
 # TODO: implement a decorator for validating outputs

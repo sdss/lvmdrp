@@ -15,9 +15,9 @@ import shutil
 import sys
 import traceback
 import warnings
-import tqdm
 from logging.handlers import TimedRotatingFileHandler
 
+import tqdm
 from pygments import highlight
 from pygments.formatters import TerminalFormatter
 from pygments.lexers import get_lexer_by_name

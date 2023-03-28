@@ -4,14 +4,12 @@
 #
 # BUG: this script should take an optional master configuration template, other wise use the one shipped with the package
 
-from __future__ import division
-from __future__ import print_function
-from __future__ import absolute_import
-
-from setuptools import setup, find_packages
+from __future__ import absolute_import, division, print_function
 
 import os
 import sys
+
+from setuptools import find_packages, setup
 
 
 # The NAME variable should be of the format "sdss-drp".

@@ -1,15 +1,16 @@
+from copy import deepcopy
+from multiprocessing import Pool, cpu_count
+
+import numpy
+from astropy.io import fits as pyfits
+from scipy import ndimage
+
+from lvmdrp.core.apertures import Aperture
+from lvmdrp.core.cube import Cube
+from lvmdrp.core.fiberrows import FiberRows
 from lvmdrp.core.header import Header, combineHdr
 from lvmdrp.core.positionTable import PositionTable
-from lvmdrp.core.fiberrows import FiberRows
 from lvmdrp.core.spectrum1d import Spectrum1D
-from lvmdrp.core.cube import Cube
-from lvmdrp.core.apertures import Aperture
-from multiprocessing import cpu_count
-from multiprocessing import Pool
-from copy import deepcopy
-from astropy.io import fits as pyfits
-import numpy
-from scipy import ndimage
 
 
 def _chain_join(b, r, z):

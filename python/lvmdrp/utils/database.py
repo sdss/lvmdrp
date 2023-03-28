@@ -6,22 +6,25 @@
 # @License: BSD 3-Clause
 # @Copyright: SDSS-V LVM
 
+import datetime as dt
 import os
 import pickle
-import numpy as np
-import datetime as dt
-from tqdm import tqdm
 from sqlite3 import Error
-from peewee import *
-from astropy.table import Table
 
+import numpy as np
 from astropy.io import fits
-
+from astropy.table import Table
 from lvmsurveysim.utils.sqlite2astropy import *
+from peewee import *
+from tqdm import tqdm
 
-from lvmdrp.core.constants import CONFIG_PATH
-from lvmdrp.core.constants import FRAMES_PRIORITY, CALIBRATION_TYPES, FRAMES_CALIB_NEEDS
-from lvmdrp.utils.bitmask import ReductionStatus, ReductionStage, QualityFlag
+from lvmdrp.core.constants import (
+    CALIBRATION_TYPES,
+    CONFIG_PATH,
+    FRAMES_CALIB_NEEDS,
+    FRAMES_PRIORITY,
+)
+from lvmdrp.utils.bitmask import QualityFlag, ReductionStage, ReductionStatus
 
 
 SQLITE_MAX_VARIABLE_NUMBER = 32766

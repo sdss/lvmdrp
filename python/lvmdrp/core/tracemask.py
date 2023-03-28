@@ -1,7 +1,8 @@
-from lvmdrp.core.fiberrows import FiberRows
-from lvmdrp.core import fit_profile
 import numpy
 from numpy import polynomial
+
+from lvmdrp.core import fit_profile
+from lvmdrp.core.fiberrows import FiberRows
 
 
 class TraceMask(FiberRows):

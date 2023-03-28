@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
-import numpy
-from scipy import special
-from scipy import optimize
-from scipy import interpolate
 from copy import deepcopy
+from multiprocessing import Pool, cpu_count
+
 # from lvmdrp.core.spectrum1d import Spectrum1D
 import astropy.io.fits as pyfits
-from multiprocessing import cpu_count
-from multiprocessing import Pool
+import numpy
+from scipy import interpolate, optimize, special
+
+
 try:
   import pylab
 except:

@@ -1,12 +1,14 @@
-import  os
+import os
+from multiprocessing import Pool, cpu_count
+
 from astropy.io import fits as pyfits
+
+from lvmdrp.core.spectrum1d import Spectrum1D
+from lvmdrp.functions.headerMethod import *
 from lvmdrp.functions.imageMethod import *
 from lvmdrp.functions.rssMethod import *
-from lvmdrp.functions.headerMethod import *
 from lvmdrp.functions.specialMethod import *
-from lvmdrp.core.spectrum1d import Spectrum1D
-from multiprocessing import cpu_count
-from multiprocessing import Pool
+
 
 description='Provides Methods to reduce VIMOS data'
 

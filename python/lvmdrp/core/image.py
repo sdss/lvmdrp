@@ -1,17 +1,19 @@
-from lvmdrp.core.header import *
-from lvmdrp.core.apertures import  *
-from lvmdrp.core.spectrum1d import Spectrum1D
-from astropy.io import fits as pyfits
 import numpy
+from astropy.io import fits as pyfits
+
+from lvmdrp.core.apertures import *
+from lvmdrp.core.header import *
+from lvmdrp.core.spectrum1d import Spectrum1D
+
+
 try:
   import pylab
 except:
   pass
-from scipy import ndimage
+from multiprocessing import Pool, cpu_count
 
-from multiprocessing import Pool
-from multiprocessing import cpu_count
-from astropy.modeling import models, fitting
+from astropy.modeling import fitting, models
+from scipy import ndimage
 
 
 def _parse_ccd_section(section):

@@ -1,38 +1,39 @@
 import numpy
 from numpy import polynomial
+
+
 try:
     import matplotlib
     from matplotlib import pyplot as plt
 except:
     pass
 import os
+from multiprocessing import Pool, cpu_count
+
 import yaml
-from multiprocessing import cpu_count
-from multiprocessing import Pool
-from scipy import signal
-from scipy import ndimage
-from scipy import interpolate
+from astropy import units as u
+from astropy.io import fits
+from astropy.table import Table
+from astropy.time import Time
+
 # from rascal.util import refine_peaks
 # from rascal.atlas import Atlas
 # from rascal.calibrator import Calibrator
 from astropy.wcs import WCS
-from astropy.io import fits
-from astropy.table import Table
-from astropy.time import Time
-from astropy import units as u
-from lvmdrp.core.constants import CONFIG_PATH
-from lvmdrp.core.header import combineHdr
-from lvmdrp.core.fiberrows import FiberRows
-from lvmdrp.core.rss import RSS, loadRSS, glueRSS, _chain_join
-from lvmdrp.core.spectrum1d  import Spectrum1D
-from lvmdrp.core.cube  import Cube
-from lvmdrp.core.image import loadImage
-from lvmdrp.core.passband import PassBand
-from lvmdrp.utils import flatten, spec_from_lines
-from lvmdrp.utils.logger import get_logger
+from scipy import interpolate, ndimage, signal
 
 from lvmdrp.core import fit_profile
+from lvmdrp.core.constants import CONFIG_PATH
+from lvmdrp.core.cube import Cube
+from lvmdrp.core.fiberrows import FiberRows
+from lvmdrp.core.header import combineHdr
+from lvmdrp.core.image import loadImage
+from lvmdrp.core.passband import PassBand
+from lvmdrp.core.rss import RSS, _chain_join, glueRSS, loadRSS
+from lvmdrp.core.spectrum1d import Spectrum1D
 from lvmdrp.external import ancillary_func
+from lvmdrp.utils import flatten, spec_from_lines
+from lvmdrp.utils.logger import get_logger
 
 
 description='Provides Methods to process Row Stacked Spectra (RSS) files'

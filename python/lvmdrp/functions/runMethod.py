@@ -9,14 +9,14 @@
 import io
 import os
 import re
-import yaml
 from copy import deepcopy as copy
 
-import lvmdrp
-from lvmdrp.core.constants import CONFIG_PATH, DATAPRODUCT_BP_PATH
+import yaml
 
-from lvmdrp.utils.configuration import load_master_config
+import lvmdrp
 import lvmdrp.utils.database as db
+from lvmdrp.core.constants import CONFIG_PATH, DATAPRODUCT_BP_PATH
+from lvmdrp.utils.configuration import load_master_config
 
 
 description = 'provides tasks for running the DRP'

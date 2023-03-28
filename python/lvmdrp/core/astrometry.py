@@ -15,8 +15,9 @@
 # size of the search box 1/3 of the IFU size
 
 
+from multiprocessing import Pool, cpu_count
+
 import numpy as np
-from multiprocessing import cpu_count, Pool
 
 
 def get_ps_images(ra, dec, size_pix, scale, passband_name):

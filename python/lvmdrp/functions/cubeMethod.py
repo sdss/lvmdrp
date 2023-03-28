@@ -1,15 +1,21 @@
-import sys, numpy, time
+import sys
+import time
+
+import numpy
+
+
 try:
   import pylab
   from matplotlib import pyplot as plt
 except:
   pass
-from scipy import ndimage
+from scipy import ndimage, stats
+
 from lvmdrp.core.cube import Cube
-from lvmdrp.core.spectrum1d import Spectrum1D
 from lvmdrp.core.passband import PassBand
-from scipy import stats
+from lvmdrp.core.spectrum1d import Spectrum1D
 from lvmdrp.external import ancillary_func
+
 
 description='Provides Methods to process Cube files'
 

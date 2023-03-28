@@ -1,15 +1,16 @@
 
 
 import os
+import pickle
 import subprocess
 import zipfile
-import pickle
 
-from astropy.table import Table
 from astropy.io import fits
+from astropy.table import Table
 from tqdm import tqdm
 
 from lvmdrp.utils import logger
+
 
 examples_logger = logger.get_logger(name=__name__)
 

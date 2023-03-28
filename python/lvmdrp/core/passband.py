@@ -1,7 +1,10 @@
-from lvmdrp.core.spectrum1d import Spectrum1D
+from os import path
+
 import numpy
 from scipy import interpolate
-from os import path
+
+from lvmdrp.core.spectrum1d import Spectrum1D
+
 
 resources_dir = path.join(path.dirname(__file__), '../resources')
 

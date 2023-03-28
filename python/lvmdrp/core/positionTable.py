@@ -1,5 +1,6 @@
-from astropy.io import fits as pyfits
 import numpy
+from astropy.io import fits as pyfits
+
 
 class PositionTable(object):
     

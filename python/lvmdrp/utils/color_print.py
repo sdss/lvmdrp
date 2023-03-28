@@ -10,14 +10,13 @@ This module includes astropy-based functions for colour printing.
 
 """
 
-from __future__ import (absolute_import, division, print_function,
-                        unicode_literals)
+from __future__ import absolute_import, division, print_function, unicode_literals
 
-import sys
-import multiprocessing
-import threading
 import codecs
 import locale
+import multiprocessing
+import sys
+import threading
 
 
 try:
@@ -27,8 +26,8 @@ except NameError:
     stdio = sys
 else:
     try:
-        from IPython.zmq.iostream import OutStream
         from IPython.utils import io
+        from IPython.zmq.iostream import OutStream
         stdio = io
     except ImportError:
         OutStream = None

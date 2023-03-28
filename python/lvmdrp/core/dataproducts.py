@@ -7,11 +7,12 @@
 # @Copyright: SDSS-V LVM
 
 import os
-import yaml
+
 import numpy as np
+import yaml
+from astropy import units as u
 from astropy.io import fits
 from astropy.table import Table
-from astropy import units as u
 
 from lvmdrp.core.constants import CONFIG_PATH
 

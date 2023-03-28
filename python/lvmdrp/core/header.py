@@ -1,5 +1,7 @@
 from distutils.version import LooseVersion
+
 from astropy.io import fits as pyfits
+
 
 class Header(object):
     def __init__(self, header=None, origin=None):

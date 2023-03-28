@@ -1,15 +1,20 @@
 
 # taken from @ryanhoughton github repository
 
-import numpy as np
+import os
 import subprocess as sp
 import uuid
-import os
+
 # get rid of annoying fits table warnings
 import warnings
+
+import numpy as np
+
+
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")
     import astropy.table as ap
+
 import astropy.io.fits as pf
 
 from lvmdrp.core.constants import SKYCORR_INST_PATH

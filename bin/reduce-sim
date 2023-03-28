@@ -8,9 +8,9 @@
 # @Copyright: SDSS-V LVM
 
 import os
-import numpy as np
 
 import matplotlib.pyplot as plt
+import numpy as np
 
 from lvmdrp.functions import imageMethod, rssMethod
 

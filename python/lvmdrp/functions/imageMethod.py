@@ -1,27 +1,32 @@
-import os, sys, numpy
-from tqdm import tqdm
+import os
+import sys
+
+import numpy
 from astropy.io import fits as pyfits
-from astropy.visualization import ImageNormalize, PercentileInterval, AsinhStretch, LogStretch
+from astropy.visualization import AsinhStretch, ImageNormalize, LogStretch, PercentileInterval
+from tqdm import tqdm
+
+
 try:
     import pylab
     from matplotlib import pyplot as plt
 except:
     pass
+import multiprocessing
 import time
-from multiprocessing import Pool
-from multiprocessing import cpu_count
+from multiprocessing import Pool, cpu_count
+from types import *
+
 from scipy import interpolate
+
+from lvmdrp.core.fiberrows import FiberRows
+from lvmdrp.core.image import Image, combineImages, glueImages, loadImage
 from lvmdrp.core.plot import save_fig
-from lvmdrp.core.image import loadImage, Image, glueImages, combineImages
+from lvmdrp.core.rss import RSS
 from lvmdrp.core.spectrum1d import Spectrum1D
 from lvmdrp.core.tracemask import TraceMask
-from lvmdrp.core.fiberrows import FiberRows
-from lvmdrp.core.rss import RSS
 from lvmdrp.utils.decorators import missing_files
 from lvmdrp.utils.logger import get_logger
-
-import multiprocessing
-from types import *
 
 
 description = 'Provides Methods to process 2D images'
@@ -140,8 +145,7 @@ def detCos_drp(image,  out_image,   rdnoise='2.9', sigma_det='5', rlim='1.2', it
 
 	if parallel:
 		try:
-			from multiprocessing import Pool
-			from multiprocessing import cpu_count
+			from multiprocessing import Pool, cpu_count
 			cpus = cpu_count()
 			if cpus>1:
 				cpus=2

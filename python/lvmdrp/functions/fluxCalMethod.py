@@ -39,12 +39,12 @@
 
 # FROM THE CODE BASE (PY3D) -----------------------------------------------------------------------
 
+import matplotlib.pyplot as plt
 import numpy as np
 from scipy import stats
-import matplotlib.pyplot as plt
 
-from lvmdrp.core.spectrum1d import Spectrum1D
 from lvmdrp.core.rss import RSS, loadRSS
+from lvmdrp.core.spectrum1d import Spectrum1D
 from lvmdrp.external import ancillary_func
 
 

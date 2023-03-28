@@ -1,10 +1,13 @@
+import sys
+
+import numpy
+from astropy.io import fits as pyfits
+from tqdm import tqdm
+
 from lvmdrp.core.header import Header
 from lvmdrp.core.positionTable import PositionTable
 from lvmdrp.core.spectrum1d import Spectrum1D
-from astropy.io import fits as pyfits
-from tqdm import tqdm
-import numpy
-import sys
+
 
 class FiberRows(Header, PositionTable):
 

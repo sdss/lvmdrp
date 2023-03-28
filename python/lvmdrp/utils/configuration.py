@@ -15,7 +15,8 @@ import yaml
 from pkg_resources import parse_version
 
 from lvmdrp.core.constants import MASTER_CONFIG_PATH
-from lvmdrp.utils.namespace import NamespaceLoader, DictLoader
+from lvmdrp.utils.namespace import DictLoader, NamespaceLoader
+
 
 __all__ = ['get_config']
 

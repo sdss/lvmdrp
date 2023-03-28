@@ -1,5 +1,7 @@
-from lvmdrp.core.spectrum1d import *
 import numpy
+
+from lvmdrp.core.spectrum1d import *
+
 
 def extinctCAHA(wave, extinct_v, type='mean'):
     if type=='mean':

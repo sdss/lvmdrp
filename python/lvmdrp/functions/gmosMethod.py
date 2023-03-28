@@ -1,12 +1,14 @@
-import  os
+import os
+from multiprocessing import Pool, cpu_count
+
 from astropy.io import fits as pyfits
-from lvmdrp.functions.imageMethod import *
-from lvmdrp.functions.rssMethod import *
-from lvmdrp.functions.headerMethod import *
+
 from lvmdrp.core.header import Header
 from lvmdrp.core.image import Image
-from multiprocessing import cpu_count
-from multiprocessing import Pool
+from lvmdrp.functions.headerMethod import *
+from lvmdrp.functions.imageMethod import *
+from lvmdrp.functions.rssMethod import *
+
 
 description = 'Provides Methods to reduce GMOS data'
 gmos_calib_n = os.path.dirname(__file__) + '/../../config/GMOS-N/'

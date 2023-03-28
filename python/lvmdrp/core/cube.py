@@ -1,11 +1,13 @@
-from lvmdrp.core.header import Header
-from lvmdrp.core.positionTable import PositionTable
-from lvmdrp.core.image import Image
-from lvmdrp.core.spectrum1d import Spectrum1D
-from lvmdrp.core.passband import PassBand
-from astropy.io import fits as pyfits
 import numpy
+from astropy.io import fits as pyfits
 from scipy import ndimage
+
+from lvmdrp.core.header import Header
+from lvmdrp.core.image import Image
+from lvmdrp.core.passband import PassBand
+from lvmdrp.core.positionTable import PositionTable
+from lvmdrp.core.spectrum1d import Spectrum1D
+
 
 class Cube(Header, PositionTable):
 

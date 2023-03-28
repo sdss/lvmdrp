@@ -1,7 +1,9 @@
 import sys
+
 import numpy
-from lvmdrp.external import astrolib
+
 from lvmdrp.core.header import Header, combineHdr
+from lvmdrp.external import astrolib
 
 
 description='Provides Methods to handle Fits headers'

@@ -2,8 +2,9 @@
 # author: jdthorpe
 
 import os
-import yaml
 from types import SimpleNamespace
+
+import yaml
 
 
 class DictLoader(yaml.Loader):

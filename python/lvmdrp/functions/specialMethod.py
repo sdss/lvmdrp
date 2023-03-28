@@ -1,10 +1,12 @@
 import numpy
 from scipy import stats
-from lvmdrp.core.rss import loadRSS
-from lvmdrp.core.header  import Header
-from lvmdrp.core.spectrum1d  import Spectrum1D
+
 from lvmdrp.core.fiberrows import FiberRows
 from lvmdrp.core.fit_profile import Exponential_constant
+from lvmdrp.core.header import Header
+from lvmdrp.core.rss import loadRSS
+from lvmdrp.core.spectrum1d import Spectrum1D
+
 
 description='Provides Methods for dedicated CALIFA data reduction tasks'
 

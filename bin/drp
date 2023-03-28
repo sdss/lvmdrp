@@ -9,8 +9,15 @@
 
 import sys
 
+from lvmdrp.functions import (
+    astrometryMethod,
+    fluxCalMethod,
+    headerMethod,
+    imageMethod,
+    rssMethod,
+    skyMethod,
+)
 from lvmdrp.utils.logger import get_logger
-from lvmdrp.functions import (headerMethod, imageMethod, rssMethod, skyMethod, fluxCalMethod, astrometryMethod)
 
 
 drp_logger = get_logger(name=__name__)

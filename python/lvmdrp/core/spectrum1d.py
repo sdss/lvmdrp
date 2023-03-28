@@ -1,16 +1,17 @@
 import numpy
 from astropy.io import fits as pyfits
+
+
 try:
   import pylab
 except:
   pass
-from scipy import sparse
-from scipy import optimize
-from scipy import interpolate
-from scipy import ndimage
+from copy import deepcopy
+
+from scipy import interpolate, ndimage, optimize, sparse
+
 from lvmdrp.core import fit_profile
 from lvmdrp.core.header import Header
-from copy import  deepcopy
 
 
 def wave_little_interpol(wavelist):

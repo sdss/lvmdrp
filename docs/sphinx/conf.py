@@ -13,6 +13,9 @@
 # serve to show the default.
 
 import sphinx_bootstrap_theme
+from drp import __version__
+from pkg_resources import parse_version
+
 
 # Importing matplotlib here with agg to prevent tkinter error in readthedocs
 # import matplotlib
@@ -22,8 +25,6 @@ import sphinx_bootstrap_theme
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 
-from drp import __version__
-from pkg_resources import parse_version
 
 
 # -- General configuration ------------------------------------------------

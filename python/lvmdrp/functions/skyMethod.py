@@ -6,39 +6,49 @@
 # @License: BSD 3-Clause
 # @Copyright: SDSS-V LVM
 
+import itertools as it
 import os
 import re
-import yaml
-import subprocess
-import itertools as it
 import shutil
-import numpy as np
-import matplotlib.pyplot as plt
+import struct
+import subprocess
+import sys
+import zipfile
 from datetime import datetime
-from multiprocessing import cpu_count
-from multiprocessing import Pool
-from scipy import optimize
-from astropy.io import fits
-from astropy.time import Time
 from multiprocessing import Pool, cpu_count
 
-import sys
-import os
-import shutil
-import zipfile
-import subprocess
+import matplotlib.pyplot as plt
+import numpy as np
 import pexpect
-import struct
+import yaml
+from astropy.io import fits
+from astropy.time import Time
+from scipy import optimize
 
-from lvmdrp.core.constants import LVM_SRC_URL, SRC_PATH, SKYCORR_SRC_PATH, SKYMODEL_SRC_PATH, SKYCORR_INST_PATH, SKYMODEL_INST_PATH
-from lvmdrp.core.constants import BIN_PATH, SKYCORR_CONFIG_PATH, SKYMODEL_CONFIG_PATH
+from lvmdrp.core.constants import (
+    BIN_PATH,
+    LVM_SRC_URL,
+    SKYCORR_CONFIG_PATH,
+    SKYCORR_INST_PATH,
+    SKYCORR_SRC_PATH,
+    SKYMODEL_CONFIG_PATH,
+    SKYMODEL_INST_PATH,
+    SKYMODEL_SRC_PATH,
+    SRC_PATH,
+)
+from lvmdrp.core.header import Header
+from lvmdrp.core.passband import PassBand
+from lvmdrp.core.rss import RSS
+from lvmdrp.core.sky import (
+    ang_distance,
+    optimize_sky,
+    run_skycorr,
+    run_skymodel,
+    skymodel_pars_from_header,
+)
+from lvmdrp.core.spectrum1d import Spectrum1D
 from lvmdrp.utils import rc_symlink
 from lvmdrp.utils.logger import get_logger
-from lvmdrp.core.sky import run_skycorr, run_skymodel, skymodel_pars_from_header, optimize_sky, ang_distance
-from lvmdrp.core.passband import PassBand
-from lvmdrp.core.spectrum1d import Spectrum1D
-from lvmdrp.core.header import Header
-from lvmdrp.core.rss import RSS
 
 
 description = "Provides methods for sky subtraction"

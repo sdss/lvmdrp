@@ -1,4 +1,7 @@
-import numpy, math
+import math
+
+import numpy
+
 
 class Aperture(object):
 	

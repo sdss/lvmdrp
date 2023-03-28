@@ -6,19 +6,20 @@
 # @License: BSD 3-Clause
 # @Copyright: SDSS-V LVM
 
+import argparse
 import os
 import sys
-import yaml
-import argparse
 from argparse import Namespace
+
 import numpy as np
+import yaml
 
 from lvmdrp.core import image
-from lvmdrp.core.constants import FRAMES_PRIORITY, CALIBRATION_TYPES
+from lvmdrp.core.constants import CALIBRATION_TYPES, FRAMES_PRIORITY
+from lvmdrp.functions import imageMethod, rssMethod
+from lvmdrp.utils.bitmask import ReductionStatus
 from lvmdrp.utils.database import LAMP_NAMES, get_master_metadata
 from lvmdrp.utils.decorators import validate_fibers
-from lvmdrp.utils.bitmask import ReductionStatus
-from lvmdrp.functions import imageMethod, rssMethod
 
 
 # TODO: define values in this dictionary as strings and move it to the constants module

@@ -7,21 +7,20 @@
 # @License: BSD 3-Clause
 # @Copyright: SDSS-V LVM
 
-# FROM THE MANGA DRP CODE -------------------------------------------------------------------------
-import numpy as np
 from collections import namedtuple
-from scipy.interpolate import interp1d, splrep, BSpline
-from scipy.optimize import nnls, minimize
-from scipy.ndimage import median_filter
-from scipy.special import eval_legendre, eval_chebyc
+
 import matplotlib.pyplot as plt
 
-
+# FROM THE MANGA DRP CODE -------------------------------------------------------------------------
+import numpy as np
 from dust_extinction.parameter_averages import F99
-
 from pydl.pydlspec2d.spec2d import filter_thru
-from pydl.pydlutils.sdss import sdss_flagval
 from pydl.pydlutils.bspline import bspline
+from pydl.pydlutils.sdss import sdss_flagval
+from scipy.interpolate import BSpline, interp1d, splrep
+from scipy.ndimage import median_filter
+from scipy.optimize import minimize, nnls
+from scipy.special import eval_chebyc, eval_legendre
 
 
 f99_ext = F99(Rv=3.1)
