@@ -2,12 +2,13 @@ from lvmdrp.core.header import Header
 from lvmdrp.core.positionTable import PositionTable
 from lvmdrp.core.spectrum1d import Spectrum1D
 from astropy.io import fits as pyfits
+from tqdm import tqdm
 import numpy
 import sys
 
 class FiberRows(Header, PositionTable):
 
-    def __init__(self, data=None, header = None, error = None, mask = None, shape=None, size=None, arc_position_x=None, arc_position_y=None, good_fibers=None,  fiber_type=None):
+    def __init__(self, data=None, header=None, error=None, mask=None, shape=None, size=None, arc_position_x=None, arc_position_y=None, good_fibers=None, fiber_type=None, coeffs=None):
         Header.__init__(self, header=header)
         PositionTable.__init__(self,  shape=shape, size=size, arc_position_x=arc_position_x, arc_position_y=arc_position_y, good_fibers=good_fibers,  fiber_type=fiber_type)
         if data is None:
@@ -25,6 +26,11 @@ class FiberRows(Header, PositionTable):
             self._mask = None
         else:
             self._mask = numpy.array(mask)
+        
+        if coeffs is None:
+            self._coeffs = None
+        else:
+            self._coeffs = coeffs
 
     def __len__(self):
         return self._fibers
@@ -256,8 +262,6 @@ class FiberRows(Header, PositionTable):
         spec = Spectrum1D(numpy.arange(self._data.shape[1]), data,  error=error, mask=mask)
         return spec
 
-
-
     def __setitem__(self, fiber, spec):
 
         if not isinstance(fiber, int):
@@ -421,8 +425,6 @@ class FiberRows(Header, PositionTable):
             return None, None, None
         return slice_data, slice_error, slice_mask
 
-
-
     def getSpec(self, fiber):
             data = self._data[fiber, :]
             if self._error is not None:
@@ -494,9 +496,7 @@ class FiberRows(Header, PositionTable):
 
         return list
 
-
-
-    def loadFitsData(self, file, extension_data=None, extension_mask=None,  extension_error=None,  extension_hdr=None):
+    def loadFitsData(self, file, extension_data=None, extension_mask=None,  extension_error=None, extension_coeffs=None,  extension_hdr=None):
         """
             Load data from a FITS image into an FiberRows object (Fibers in y-direction, dispersion in x-direction)
 
@@ -514,8 +514,8 @@ class FiberRows(Header, PositionTable):
             extension_error : int, optional with default: None
                 Number of the FITS extension containing the errors for the values
         """
-        hdu = pyfits.open(file,uint=True,do_not_scale_image_data=True )
-        if extension_data is None and extension_mask is None and extension_error is None:
+        hdu = pyfits.open(file, uint=True, do_not_scale_image_data=True)
+        if extension_data is None and extension_mask is None and extension_error is None and extension_coeffs is None:
                 self._data = hdu[0].data
                 self._fibers = self._data.shape[0] # set fibers
                 self.setHeader(hdu[0].header)
@@ -525,6 +525,8 @@ class FiberRows(Header, PositionTable):
                             self._error = hdu[i].data
                         elif hdu[i].header['EXTNAME'].split()[0]=='BADPIX':
                             self._mask = hdu[i].data
+                        elif hdu[i].header["EXTNAME"].split()[0]=="COEFFS":
+                            self._coeffs = hdu[i].data
 
         else:
             if extension_data is not None:
@@ -534,6 +536,8 @@ class FiberRows(Header, PositionTable):
                 self._mask = hdu[extension_mask].data
             if extension_error is not None:
                 self._error = hdu[extension_error].data
+            if extension_coeffs is not None:
+                self._coeffs = hdu[extension_coeffs].data
         hdu.close()
         if extension_hdr is not None:
             self.setHeader(hdu[extension_hdr].header)
@@ -544,8 +548,7 @@ class FiberRows(Header, PositionTable):
             result.append(function(args))
         return result
 
-
-    def writeFitsData(self, filename, extension_data=None, extension_mask=None,  extension_error=None):
+    def writeFitsData(self, filename, extension_data=None, extension_mask=None,  extension_error=None, extension_coeffs=None):
         """
             Save information from a FiberRows object into a FITS file.
             A single or multiple extension file are possible to create.
@@ -564,16 +567,18 @@ class FiberRows(Header, PositionTable):
             extension_error : int (0, 1, or 2), optional with default: None
                 Number of the FITS extension containing the errors for the values
         """
-        hdus=[None, None, None] # create empty list for hdu storage
+        hdus=[None, None, None, None]
 
         # create primary hdus and image hdus
         # data hdu
-        if extension_data is None and extension_error is None and extension_mask is None:
+        if extension_data is None and extension_error is None and extension_mask is None and extension_coeffs is None:
             hdus[0] = pyfits.PrimaryHDU(self._data)
             if self._error is not None:
                 hdus[1] = pyfits.ImageHDU(self._error, name='ERROR')
             if self._mask is not None:
                 hdus[2] = pyfits.ImageHDU(self._mask.astype('uint8'), name='BADPIX')
+            if self._coeffs is not None:
+                hdus[3] = pyfits.ImageHDU(self._coeffs, name="COEFFS")
         else:
             if extension_data == 0:
                 hdus[0] = pyfits.PrimaryHDU(self._data)
@@ -591,6 +596,12 @@ class FiberRows(Header, PositionTable):
                 hdu = pyfits.PrimaryHDU(self._error)
             elif extension_error>0 and extension_error is not None:
                 hdus[extension_error] = pyfits.ImageHDU(self._error, name='ERROR')
+            
+            # polynomial trace hdu
+            if extension_coeffs == 0:
+                hdu = pyfits.PrimaryHDU(self._coeffs)
+            elif extension_coeffs>0 and extension_coeffs is not None:
+                hdus[extension_coeffs] = pyfits.ImageHDU(self._coeffs, name="COEFFS")
 
         # remove not used hdus
         for i in range(len(hdus)):
@@ -614,7 +625,7 @@ class FiberRows(Header, PositionTable):
             pass
         hdu.writeto(filename, output_verify='silentfix', overwrite=True) # write FITS file to disc
 
-    def measureArcLines(self, ref_spec, ref_cent, aperture=12, init_back=30.0, flux_min=100,fwhm_max=10, rel_flux_limits=[0.2, 5] , verbose=True):
+    def measureArcLines(self, ref_fiber, ref_cent, aperture=12, init_back=30.0, flux_min=100, fwhm_max=10, rel_flux_limits=[0.2, 5], verbose=True):
 
         nlines=len(ref_cent)
         cent_wave = numpy.zeros((self._fibers, nlines), dtype=numpy.float32)
@@ -623,24 +634,22 @@ class FiberRows(Header, PositionTable):
         masked = numpy.zeros((self._fibers, nlines), dtype='bool')
 
 
-        spec = self.getSpec(ref_spec)
+        spec = self.getSpec(ref_fiber)
         fit = spec.fitSepGauss(ref_cent, aperture,  init_back)
-        masked[ref_spec, :] = False
-        flux[ref_spec, :] = fit[:nlines]
-        ref_flux=flux[ref_spec, :]
-        cent_wave[ref_spec, :] = fit[nlines:2*nlines]
-        fwhm[ref_spec, :] = fit[2*nlines:3*nlines]*2.354
-        first = numpy.arange(ref_spec-1, -1, -1)
-        second = numpy.arange(ref_spec+1, self._fibers, 1)
+        masked[ref_fiber, :] = False
+        flux[ref_fiber, :] = fit[:nlines]
+        ref_flux=flux[ref_fiber, :]
+        cent_wave[ref_fiber, :] = fit[nlines:2*nlines]
+        fwhm[ref_fiber, :] = fit[2*nlines:3*nlines]*2.354
+        first = numpy.arange(ref_fiber-1, -1, -1)
+        second = numpy.arange(ref_fiber+1, self._fibers, 1)
 
-        m=1
-        if verbose==True:
-            print('Start measuring arc lines...')
+        if verbose:
+            iterator = tqdm(first, total=first.size, desc=f"measuring arc lines upwards from {ref_fiber}", ascii=True, unit="fiber")
+        else:
+            iterator = first
         plot=False
-        for i in first:
-            if verbose==True:
-                sys.stdout.write('Processing....%.0f%%\r'%(m/float(self._fibers)*100))
-                sys.stdout.flush()
+        for i in iterator:
             spec = self.getSpec(i)
 
             fit = spec.fitSepGauss(cent_wave[i+1], aperture, init_back, plot=plot)
@@ -659,16 +668,14 @@ class FiberRows(Header, PositionTable):
                 cent_wave[i, select] = cent_wave[i+1, select]
                 fwhm[i, select] = fwhm[i+1, select]
                 masked[i, select] = True
-#                if i<130:
- #                   plot=True
             else:
                 plot=False
-            m+=1
 
-        for i in second:
-            if verbose==True:
-                sys.stdout.write('Processing....%.0f%%\r'%(m/float(self._fibers)*100))
-                sys.stdout.flush()
+        if verbose:
+            iterator = tqdm(second, total=second.size, desc=f"measuring arc lines downwards from {ref_fiber}", ascii=True, unit="fiber")
+        else:
+            iterator = second
+        for i in iterator:
             spec = self.getSpec(i)
             if i==10:
                 plot=True
@@ -690,7 +697,6 @@ class FiberRows(Header, PositionTable):
                 cent_wave[i, select] = cent_wave[i-1, select]
                 fwhm[i, select] = fwhm[i-1, select]
                 masked[i, select] = True
-            m+=1
 
         fibers = numpy.arange(self._fibers)
         for i in range(nlines):

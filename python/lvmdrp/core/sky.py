@@ -14,21 +14,33 @@ from io import BytesIO
 import shutil
 import subprocess
 import numpy as np
+from datetime import timedelta
 from astropy.io import fits
+from astropy.time import Time
 from astropy.table import Table, hstack
 from astropy import units as u
 from skycalc_cli.skycalc import SkyModel, AlmanacQuery
 from skycalc_cli.skycalc_cli import fixObservatory
+from skyfield.api import load, wgs84, Star
+from skyfield import almanac
+from skyfield.framelib import ecliptic_frame
 
+from lvmdrp.core.constants import EPHEMERIS_PATH
 from lvmdrp.core.constants import ALMANAC_CONFIG_PATH, SKYCALC_CONFIG_PATH
 from lvmdrp.core.constants import SKYMODEL_INST_PATH, SKYCORR_INST_PATH, SKYCORR_CONFIG_PATH, SKYCORR_PAR_MAP
 from lvmdrp.core.constants import SKYMODEL_INST_CONFIG_PATH, SKYMODEL_MODEL_CONFIG_PATH
 from lvmdrp.external.skycorr import fitstabSkyCorrWrapper, createParFile, runSkyCorr
 
+from lvmdrp.utils.configuration import load_master_config
 from lvmdrp.utils.logger import get_logger
 
 
 sky_logger = get_logger(name=__name__)
+
+# average moon distance from earth
+MEAN_MOON_DIST = 384979000 * u.m
+# define environment variable for CPL discovery
+os.environ["LD_LIBRARY_PATH"] = os.path.join(SKYCORR_INST_PATH, "lib")
 
 
 def ang_distance(r1, d1, r2, d2):
@@ -81,12 +93,12 @@ def read_skymodel_par(parfile_path, verify=True):
             if len(vals) != 1:
                 val_new = []
                 for val in vals:
-                    if val.replace(".", "").isnumeric():
+                    if val.lower().replace(".", "").replace("e", "").isnumeric():
                         val_new.append(eval(val))
                     else:
                         val_new.append(val)
             else:
-                if val.replace(".", "").isnumeric():
+                if val.lower().replace(".", "").replace("e", "").isnumeric():
                     val_new = eval(val)
                 else:
                     val_new = val
@@ -121,8 +133,147 @@ def write_skymodel_par(parfile_path, config, verify=True):
             if isinstance(val, (list, tuple)):
                 vals = list(map(str, val))
                 f.write(f"{key} = {' '.join(vals)}\n")
-            elif isinstance(val, (str, int, float)):
+            else:
                 f.write(f"{key} = {val}\n")
+
+
+def skymodel_pars_from_header(header):
+    # read master configuration file
+    master_config = load_master_config(fmt="dict")
+
+    # extract useful header information
+    try:
+        observatory = header["OBSERVAT"]
+    except KeyError:
+        sky_logger.warning(f"'OBSERVAT' is not in reference sky header. Assuming OBSERVAT='LCO'")
+        observatory = "LCO"
+    try:
+        obstime = Time(header["OBSTIME"], scale="tai")
+    except KeyError:
+        sky_logger.warning(f"'OBSTIME' is not in reference sky header. Falling back to 'MJD'")
+    try:
+        obstime = Time(header["MJD"], format="mjd")
+    except KeyError:
+        sky_logger.error(f"'MJD' is not in reference sky header.")
+        raise ValueError(f"no datetime information found for reference sky.")
+    ra, dec = header["RA"], header["DEC"]
+
+    # build quantities from information in sky_head
+    try:
+        obs_pars = master_config["LVM_OBSERVATORIES"][observatory]
+    except KeyError:
+        sky_logger.error(f"observatory '{observatory}' not found in master configuration file.")
+        sky_logger.warning("falling back to 'LCO'")
+        obs_pars = master_config["LVM_OBSERVATORIES"]["LCO"]
+    
+    # define ephemeris object
+    astros = load(EPHEMERIS_PATH)
+    sun, earth, moon = astros["sun"], astros["earth"], astros["moon"]
+    # define location
+    obs_topos = wgs84.latlon(latitude_degrees=obs_pars["lat"], longitude_degrees=obs_pars["lon"], elevation_m=obs_pars["height"])
+    obs = earth + obs_topos
+    # define observation datetime
+    ts = load.timescale()
+    obs_time = ts.from_astropy(obstime)
+    # define observatory object
+    obs = obs.at(obs_time)
+
+    # define astros
+    s, m = obs.observe(sun).apparent(), obs.observe(moon).apparent()
+
+    # define target
+    target_ra, target_dec = ra*u.deg, dec*u.deg
+    target = Star(ra_hours=target_ra.to(u.hourangle), dec_degrees=target_dec.to(u.deg))
+    t = obs.observe(target).apparent()
+
+    # observatory height ('sm_h' in km)
+    sm_h = obs_pars["height"]*u.m
+
+    # TODO: - ** lower height limit ('sm_hmin' in km)
+    # altitude of object above the horizon (alt, 0 -- 90)
+    alt, az, _ = t.altaz()
+
+    # separation between moon and sun from earth ('alpha', 0 -- 360, >180 for waning moon)
+    alpha = s.separation_from(m)
+
+    # separation between moon and object ('rho', 0 -- 180)
+    rho = t.separation_from(m)
+
+    # altitude of moon ('altmoon', -90 -- 90)
+    altmoon, _, moondist = m.altaz()
+
+    # TODO: - ** distance to moon ('moondist', 0.91 -- 1.08; 1: mean distance)
+    moondist = moondist.to(u.m) / MEAN_MOON_DIST
+    
+    # TODO: - ** pressure at observatory altitude ('pres' in hPa)
+    # TODO: - ** single scattering albedo for aerosols ('ssa')
+    # TODO: - ** calculation of double scattering of moonlight ('calcds', Y or N)
+    # TODO: - ** relative UV/optical ozone column density ('o3column'; 1: 258 DU)
+    # TODO: - ** scaling factor for scattered moonlight ('moonscal')
+
+    # heliocentric ecliptic longitude of object ('lon_ecl', -180 -- 180)
+    # heliocentric ecliptic latitude of object ('lat_ecl', -90 -- 90)
+    lon_ecl, lat_ecl, _ = t.frame_latlon(ecliptic_frame)
+
+    # TODO: - ** grey-body emissivity ('emis_str', comma-separated list)
+    # TODO: - ** grey-body temperature ('temp_str' in K, comma-separated list)
+    # TODO: - ** monthly-averaged solar radio flux ('msolflux' in sfu)
+
+    # bimonthly period ('season'; 1: Dec/Jan, ..., 6: Oct/Nov; 0 entire year)
+    month = obs_time.to_astropy().to_datetime().month
+    if month in [12, 1]:
+        season = 1
+    elif month in [2, 3]:
+        season = 2
+    elif month in [4, 5]:
+        season = 3
+    elif month in [6, 7]:
+        season = 4
+    elif month in [8, 9]:
+        season = 5
+    else:
+        season = 6
+        
+    # time of the observation ('time' in x/3 of the night; 0: entire night)
+    t_ini, t_fin = obs_time - timedelta(days=2), obs_time + timedelta(days=2)
+
+    risings_and_settings, _ = almanac.find_discrete(t_ini, t_fin, almanac.sunrise_sunset(ephemeris=astros, topos=obs_topos))
+    i = np.digitize(obs_time.tt, bins=risings_and_settings.tt, right=False)
+    risings_and_settings[i-1].tt <= obs_time.tt < risings_and_settings[i].tt, _[[i-1,i]]
+
+    night_thirds = np.linspace(*risings_and_settings[[i-1, i]].tt, 4)
+    time = np.digitize(obs_time.tt, bins=night_thirds)
+    # assume whole night if the target obstime was observed during 'daylight'
+    if time == 4:
+        time = 0
+
+    # vacuum or air wavelengths ('vac_air', vac or air)
+    # precipitable water vapour ('pwv' in mm; -1: bimonthly mean)
+    # TODO: - ** radiative transfer code for molecular spectra ('rtcode', L or R)
+    # TODO: - ** resolving power of molecular spectra in library ('resol')
+    # TODO: - ** sky model components
+    
+    return {
+        "sm_h": max(2.4, max(3.06, sm_h.to(u.km).value)),
+        "sm_hmin": (2.0*u.km).value, 
+        "alt": alt.to(u.deg).value,
+        "alpha": alpha.to(u.deg).value,
+        "rho": rho.to(u.deg).value,
+        "altmoon": altmoon.to(u.deg).value,
+        "moondist": moondist.value,
+        "pres": (744*u.hPa).value,
+        "ssa": 0.97,
+        "calcds": "N",
+        "o2column": 1.0,
+        "moonscal": 1.0,
+        "lon_ecl": lon_ecl.to(u.deg).value,
+        "lat_ecl": lat_ecl.to(u.deg).value,
+        "emis_str": ",".join(map(str, [0.2])),
+        "temp_str": ",".join(map(str, [(290.0*u.K).value])),
+        "msolflux": 130.0, # 1 sfu = 1e-19 erg/s/cm**2/Hz,
+        "season": season,
+        "time": time
+    }
 
 
 def get_bright_fiber_selection(rss):
@@ -165,7 +316,7 @@ def run_skymodel(skymodel_path=SKYMODEL_INST_PATH, **kwargs):
      
     # update original configuration settings with kwargs ------------------------------------------
     skymodel_inst_par.update((k, kwargs[k]) for k in skymodel_inst_par.keys() & kwargs.keys())
-    skymodel_inst_par.update((k, kwargs[k]) for k in skymodel_inst_par.keys() & kwargs.keys())
+    skymodel_model_par.update((k, kwargs[k]) for k in skymodel_model_par.keys() & kwargs.keys())
     # save configuration files with the names expected by calcskymodel
     write_skymodel_par(parfile_path=SKYMODEL_INST_CONFIG_PATH.replace("_ref", ""), config=skymodel_inst_par)
     write_skymodel_par(parfile_path=SKYMODEL_MODEL_CONFIG_PATH.replace("_ref", ""), config=skymodel_model_par)
@@ -177,8 +328,8 @@ def run_skymodel(skymodel_path=SKYMODEL_INST_PATH, **kwargs):
     # shutil.rmtree("output", ignore_errors=True)
     os.makedirs("output", exist_ok=True)
     
-    sky_logger.info("running skymodel from pre-computed airglow lines")
-    out = subprocess.run(f"bin/calcskymodel".split(), capture_output=True)
+    sky_logger.info("trying skymodel from pre-computed airglow lines")
+    out = subprocess.run("bin/calcskymodel".split(), capture_output=True)
     if out.returncode != 0 or "error" in out.stderr.decode("utf-8").lower():
         sky_logger.warning("no suitable airglow spectrum found")
         
@@ -198,7 +349,10 @@ def run_skymodel(skymodel_path=SKYMODEL_INST_PATH, **kwargs):
             sky_logger.error(out.stderr.decode("utf-8"))
 
         # copy library files to corresponding path according to libpath
-        shutil.copytree(os.path.join(skymodel_path, "sm-01_mod1", "output"), os.path.join(skymodel_path, "sm-01_mod2", "data", "lib"))
+        try:
+            shutil.copytree(os.path.join(skymodel_path, "sm-01_mod1", "output"), os.path.join(skymodel_path, "sm-01_mod2", "data", "lib"), dirs_exist_ok=True, symlinks=True, ignore_dangling_symlinks=True)
+        except shutil.Error as e:
+            sky_logger.warning(e.args[0])
 
         sky_logger.info("calculating effective atmospheric transmission")
         os.chdir(os.path.join(skymodel_path, "sm-01_mod2"))
@@ -216,12 +370,14 @@ def run_skymodel(skymodel_path=SKYMODEL_INST_PATH, **kwargs):
             os.chdir(curdir)
             sky_logger.error("failed while running 'calcskymodel'")
             sky_logger.error(out.stderr.decode("utf-8"))
-            return skymodel_inst_par, skymodel_model_par, None    
+            return skymodel_inst_par, skymodel_model_par, None
+    else:
+        sky_logger.info("successfully finished 'calcskymodel'")
     # ---------------------------------------------------------------------------------------------
 
     # read output files and organize in a FITS table ----------------------------------------------
-    trans_table = Table(fits.getdata(os.path.join("output/transspec.fits"), ext=1))
-    lines_table = Table(fits.getdata(os.path.join("output/radspec.fits"), ext=1))
+    trans_table = Table(fits.getdata(os.path.join("output","transspec.fits"), ext=1))
+    lines_table = Table(fits.getdata(os.path.join("output","radspec.fits"), ext=1))
     os.chdir(curdir)
 
     trans_table.remove_column("lam")

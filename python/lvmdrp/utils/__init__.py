@@ -4,7 +4,19 @@ import site
 import os
 import collections.abc
 import collections
+import numpy as np
 
+
+def gaussian(x, mean=0, stddev=1):
+    return np.exp(-0.5*(x-mean)**2 / stddev**2) / np.sqrt(2*np.pi) / stddev
+
+def spec_from_lines(lines, sigma, wavelength, heights=None, names=None):
+    rss = np.zeros((len(lines), wavelength.size))
+    for i, line in enumerate(lines):
+        rss[i] = gaussian(wavelength, mean=line, stddev=sigma)
+    if heights is not None:
+        rss * heights[None]
+    return rss.sum(axis=0)
 
 def flatten(iterable):
     for el in iterable:

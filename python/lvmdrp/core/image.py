@@ -836,8 +836,11 @@ class Image(Header):
                 # replace the error of bad pixel if defined
                 out_error[y_cors[m],x_cors[m]] = replace_error
 
+        # fill nan values and update mask
+        out_mask = numpy.logical_or(self._mask, numpy.isnan(out_data))
+        out_data = numpy.nan_to_num(out_data)
         # create new Image object
-        new_image = Image(data=out_data, error = out_error,  mask = self._mask,  header = self._header)
+        new_image = Image(data=out_data, error=out_error,  mask=out_mask,  header=self._header)
         return new_image
 
     def calibrateSDSS(self, fieldPhot, subtractSky=True):
@@ -1497,7 +1500,7 @@ class Image(Header):
         flux = apertures.integratedFlux(self)
         return flux
 
-    def createCosmicMask(self, sigma_det=5, flim=1.1, iter=3, sig_gauss=(0.8,0.8), error_box=(20,1), replace_box=(20,1), parallel='auto'):
+    def createCosmicMask(self, sigma_det=5, flim=1.1, iter=3, sig_gauss=(0.8,0.8), error_box=(20,2), replace_box=(20,2), parallel='auto'):
         """Return the cosmic ray pixel mask computed using the LA algorithm"""
         err_box_x = error_box[0]
         err_box_y = error_box[1]
@@ -1512,7 +1515,7 @@ class Image(Header):
         # out.removeError()
 
         # initial CR selection
-        select = out._mask
+        select = numpy.zeros_like(out._mask, dtype=bool)
 
         # define Laplacian convolution kernel
         LA_kernel=numpy.array([[0,-1,0,],[-1,4,-1],[0,-1,0]])/4.0
@@ -1529,17 +1532,14 @@ class Image(Header):
         # start iteration
         for i in range(iter):
             # quick and dirty CRR on current iteration
-            if out._error is None:
-                noise = out.medianImg((err_box_y, err_box_x))
-                for iquad in range(len(quads)):
-                    quad = noise.getSection(quads[iquad])
-                    select_noise = quad.getData()<=0
-                    quad.setData(data=0, select=select_noise)
-                    quad=(quad + rdnoises[iquad]**2).sqrt()
-                    noise = noise.setSection(quads[iquad], subimg=quad, update_header=False, inplace=False)
-            else:
-                noise = out._error
-            # rough estimate of error for each quadrant
+            noise = out.medianImg((err_box_y, err_box_x))
+            for iquad in range(len(quads)):
+                quad = noise.getSection(quads[iquad])
+                select_noise = quad.getData()<=0
+                quad.setData(data=0, select=select_noise)
+                quad = (quad + rdnoises[iquad]**2).sqrt()
+                noise = noise.setSection(quads[iquad], subimg=quad, update_header=False, inplace=False)
+            noise.setData(data=noise._data[noise._data>0].min(), select=noise._data<=0)
             if cpus>1:
                 result = []
                 fine=out.convolveGaussImg(sigma_x, sigma_y)
@@ -1580,7 +1580,7 @@ class Image(Header):
                 S_prime = S-S.medianImg((err_box_y, err_box_x)) # cleaning of the normalized Laplacian image
             else:
                 sub = out.subsampleImg() # subsample image
-                conv= sub.convolveImg(LA_kernel) # convolve subsampled image with kernel
+                conv = sub.convolveImg(LA_kernel) # convolve subsampled image with kernel
                 select_neg = conv<0
                 conv.setData(data=0, select=select_neg)  # replace all negative values with 0
                 Lap = conv.rebin(2, 2) # rebin the data to original resolution
@@ -1595,7 +1595,7 @@ class Image(Header):
                 Lap2 = Lap2.rebin(2, 2) # rebin the data to original resolution
 
             # define cosmic ray selection
-            select = numpy.logical_or(numpy.logical_and((Lap2)>flim, S_prime>sigma_det),  select)
+            select = numpy.logical_or(numpy.logical_and((Lap2)>flim, S_prime>sigma_det), select)
             # update mask in clean image for next iteration
             out.setData(mask=True, select=select)
             out = out.replaceMaskMedian(box_x, box_y, replace_error=None)
@@ -1728,12 +1728,16 @@ def combineImages(images,  method='median', k=3):
             # set all bad pixel to 0 to compute the mean
             stack_image[:, numpy.logical_not(good_pixels)] = 0
             new_image = numpy.sum(stack_image, 0)/good_pixels
-            # mask bad pixels
-            old_mask = numpy.sum(stack_mask, 0).astype(bool)
-            new_mask = numpy.logical_or(old_mask, numpy.isnan(new_image))
-            # replace masked pixels
-            new_image[new_mask] = 0
 
+        # mask bad pixels
+        old_mask = numpy.sum(stack_mask, 0).astype(bool)
+        new_mask = numpy.logical_or(old_mask, numpy.isnan(new_image))
+        # replace masked pixels
+        # new_image[new_mask] = 0
+
+        # TODO: add new header keywords:
+        #   - NCOMBINE: number of frames combined
+        #   - STATCOMB: statistic used to combine
         if images[0]._header is not None:
             new_header = images[0]._header
         else:

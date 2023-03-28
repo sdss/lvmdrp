@@ -177,13 +177,13 @@ libstruct.dat:
   - "1 rtcode 0"
   - "LBL"
   - "2 airmass -1"
-  - "10"
+  - "10 15 20 25 30"
   - "3 time 0"
-  - "0"
+  - "0 1 2 3"
   - "4 season 0"
-  - "4"
+  - "0 1 2 3 4 5 6"
   - "5 resol 0"
-  - "0060000"
+  - "0600000"
   - "6 spectype 0"
   - "R T L"
 
@@ -292,7 +292,7 @@ skymodel_etc_ref.par:
   # radiative transfer code L(BLRTM) or R(FM) for molecular spectra
   rtcode: "L"
   # resolution of molecular spectra in library (crucial for run time)
-  resol: 6e4
+  resol: 6e5
   # path to file sm_filenames.dat for data paths and file names
   filepath: "data"
   # inclusion of sky model components

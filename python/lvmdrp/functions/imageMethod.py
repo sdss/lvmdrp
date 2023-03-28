@@ -1,5 +1,7 @@
 import os, sys, numpy
+from tqdm import tqdm
 from astropy.io import fits as pyfits
+from astropy.visualization import ImageNormalize, PercentileInterval, AsinhStretch, LogStretch
 try:
     import pylab
     from matplotlib import pyplot as plt
@@ -9,12 +11,14 @@ import time
 from multiprocessing import Pool
 from multiprocessing import cpu_count
 from scipy import interpolate
+from lvmdrp.core.plot import save_fig
 from lvmdrp.core.image import loadImage, Image, glueImages, combineImages
 from lvmdrp.core.spectrum1d import Spectrum1D
 from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.core.fiberrows import FiberRows
 from lvmdrp.core.rss import RSS
 from lvmdrp.utils.decorators import missing_files
+from lvmdrp.utils.logger import get_logger
 
 import multiprocessing
 from types import *
@@ -28,6 +32,9 @@ __all__ = [
 	"subtractBias_drp", "preprocRawFrame_drp", "basicCalibration_drp",
 	"createMasterFrame_drp"
 ]
+
+
+image_logger = get_logger(__name__)
 
 
 def detCos_drp(image,  out_image,   rdnoise='2.9', sigma_det='5', rlim='1.2', iter='5', fwhm_gauss='2.0', replace_box='5,5',  error_box='5,5', replace_error='1e10', increase_radius='0', gain='1.0', verbose='0', parallel='auto'):
@@ -497,7 +504,7 @@ def addCCDMask_drp(image, mask, replaceError='1e10'):
 	img.setData(mask=mask_comb)
 	img.writeFitsData(image)
 
-def findPeaksAuto_drp(in_image, out_peaks, nfibers,  disp_axis='X', threshold='5000',median_box='8', median_cross='1', slice='', method='gauss',  init_sigma='1.0', verbose='1'):
+def findPeaksAuto_drp(in_image, out_peaks, nfibers,  disp_axis='X', threshold='5000',median_box='8', median_cross='1', slice='', method='gauss',  init_sigma='1.0', plot='1', figure_path=".figures"):
 	"""
 		   Finds the exact subpixel cross-dispersion position of a given number of fibers at a certain dispersion column on the raw CCD frame.
 		   If a predefined number of pixel are expected, the initial threshold value for the minimum peak height will varied until the expected number
@@ -525,7 +532,7 @@ def findPeaksAuto_drp(in_image, out_peaks, nfibers,  disp_axis='X', threshold='5
 				Set the method to measure the peaks positions, either 'gauss' or 'hyperbolic'.
 			init_sigma: string of  float, optional with default: '1.0'
 					Init guess for the  sigma width (in pixels units)  for the Gaussian fitting, only used if method 'gauss' is selected
-			verbose: string of integer (0 or 1), optional  with default: 1
+			plot: string of integer (0 or 1), optional  with default: 1
 					Show information during the processing on the command line (0 - no, 1 - yes)
 
 			Examples
@@ -538,7 +545,7 @@ def findPeaksAuto_drp(in_image, out_peaks, nfibers,  disp_axis='X', threshold='5
 	median_box=int(median_box)
 	median_cross=int(median_cross)
 	init_sigma = float(init_sigma)
-	verbose = int(verbose)
+	plot = int(plot)
 
 	# Load Image
 	img = loadImage(in_image)
@@ -556,38 +563,46 @@ def findPeaksAuto_drp(in_image, out_peaks, nfibers,  disp_axis='X', threshold='5
 		img = img.medianImg((median_cross, median_box))
 
 	# if no slice is given find the cross-dispersion cut with the highest signal
-	if slice=='':
-		median_cut=img.collapseImg(axis='y', mode='median') #median collapse of image along cross-dispersion axis
+	if slice == '':
+		image_logger.info("collapsing image along Y-axis using a median statistic")
+		median_cut = img.collapseImg(axis='y', mode='median') #median collapse of image along cross-dispersion axis
 		maximum = median_cut.max() #get maximum value along dispersion axis
-		column=maximum[2] # pixel position of maximum value
+		column = maximum[2] # pixel position of maximum value
+		image_logger.info(f"selecting {column = } to locate fibers")
 		cut = img.getSlice(column, axis='y') # extract this column from image
 	else:
 		column = int(slice) # convert column to integer value
+		image_logger.info(f"selecting {column = } to locate fibers")
 		cut = img.getSlice(column, axis='y') # extract this column from image
 
 	# find location of peaks (local maxima) either above a fixed threshold or to reach a fixed number of peaks
+	image_logger.info("locating fibers")
 	peaks = cut.findPeaks(threshold=threshold, npeaks=npeaks)
+	image_logger.info(f"found {len(peaks[0])} fibers")
 
 	# find the subpixel centroids of the peaks from the central 3 pixels using either a hyperbolic approximation
 	# or perform a leastsq fit with a Gaussian
+	image_logger.info(f"refining fiber location")
 	centers = cut.measurePeaks(peaks[0], method, init_sigma, threshold=0, max_diff=1.0)[0]
 	round_cent = numpy.round(centers).astype('int16') # round the subpixel peak positions to their nearest integer value
+	image_logger.info(f"final number of fibers found {len(round_cent)}")
 	# write number of peaks and their position to an ASCII file NEED TO BE REPLACE WITH XML OUTPUT
 	file_out = open(out_peaks, 'w')
 	file_out.write('%i\n' %(column))
 	for i in range(len(centers)):
 		file_out.write('%i %i %e %i\n'%(i, round_cent[i], centers[i], 0))
 	file_out.close()
-	if verbose==1:
-		# control plot for the peaks NEED TO BE REPLACE BY A PROPER VERSION AND POSSIBLE IMPLEMENTAION FOR A GUI
-		print('%i Fibers found'%(len(centers)))
-		pylab.figure(figsize=(25,10))
+
+	if plot == 1:
+		fig = pylab.figure(figsize=(25,10))
 		pylab.plot(cut._data, '-k', lw=1)
 		pylab.plot(peaks[0], peaks[2] ,'o', color="tab:red")
-		pylab.plot(centers, numpy.ones(len(centers))*(peaks[2].max()*0.5), 'x', color="tab:blue")
+		pylab.plot(centers, numpy.ones(len(centers))*(numpy.nanmax(peaks[2])*0.5), 'x', color="tab:blue")
 		pylab.xlabel("cross-dispersion axis (pix)")
 		pylab.ylabel("fiber profile")
 		pylab.show()
+	else:
+		save_fig(fig, output_path=out_peaks, figure_path=figure_path, label=None)
 
 def findPeaksOffset_drp(image, peaks_master, out_peaks, disp_axis='X', threshold='1500', median_box='8', median_cross='1', slice='', method='gauss',  init_sigma='1.0',accuracy=1.2):
 
@@ -903,7 +918,7 @@ def findPeaksMaster2_drp(image, peaks_master, out_peaks, disp_axis='X', threshol
 		pylab.plot(centers._data, numpy.ones(len(centers._data))*2000.0, 'xg')
 		pylab.show()
 
-def tracePeaks_drp(in_image, in_peaks, out_trace, disp_axis='X', method='gauss', median_box='7', median_cross='1', steps='30', coadd='30', poly_disp='-6', init_sigma='1.0', threshold_peak='100.0', max_diff='2', verbose='1'):
+def tracePeaks_drp(in_image, in_peaks, out_trace, disp_axis='X', method='gauss', median_box='7', median_cross='1', steps='30', coadd='30', poly_disp='-6', init_sigma='1.0', threshold_peak='100.0', max_diff='2', verbose='1', plot='1'):
 	"""
 			Traces the peaks of fibers along the dispersion axis. The peaks at a specific dispersion column had to be determined before.
 			Two scheme of measuring the subpixel peak positionare available: A hyperbolic approximation or fitting a Gaussian profile to the brightest 3 pixels of a peak.
@@ -952,6 +967,8 @@ def tracePeaks_drp(in_image, in_peaks, out_trace, disp_axis='X', method='gauss',
 	threshold_peak=float(threshold_peak)
 	max_diff = float(max_diff)
 	init_sigma = float(init_sigma)
+	verbose = bool(verbose)
+	plot = int(plot)
 
 	# load continuum image  from file
 	img = loadImage(in_image)
@@ -1009,41 +1026,18 @@ def tracePeaks_drp(in_image, in_peaks, out_trace, disp_axis='X', method='gauss',
 	nslice = numpy.sum(select_first)+numpy.sum(select_second)
 	m=1
 	# iterate towards index 0 along dispersion axis
-	if verbose=='1':
-		print('Trace peaks along dispersion axis:')
-	for i in first[select_first]:
-		if verbose=='1':
-			sys.stdout.write('Processing....%.0f%%\r'%(m/float(nslice)*100))
-			sys.stdout.flush()
+	image_logger.info("tracing fibers along dispersion axis")
+	if verbose:
+		iterator = tqdm(first[select_first], total=select_first.sum(), desc=f"tracing fiber left from pixel {column}", ascii=True, unit="pixel")
+	else:
+		iterator = first[select_first]
+	for i in iterator:
 		cut_iter = img.getSlice(i, axis='y') # extract cross-dispersion slice
 		# infer pixel position of the previous slice
 		if i==first[select_first][0]:
 			pix = numpy.round(trace.getData()[0][:, column]).astype('int16')
 		else:
 			pix = numpy.round(trace.getData()[0][:, i+steps]).astype('int16')
-
-		#measure the peaks for the slice and store it in the trace
-		centers = cut_iter.measurePeaks(pix, method,  init_sigma, threshold=threshold, max_diff=float(max_diff))
-		if numpy.sum(bad_fibers)>0:
-			diff = Spectrum1D(wave=positions,  data=(centers[0]-positions), mask=bad_fibers)
-			diff.smoothPoly(-1, ref_base=positions)
-			centers[0][bad_fibers]=diff._data[bad_fibers]+positions[bad_fibers]
-			centers[1][bad_fibers]=False
-		trace.setSlice(i, axis='y', data = centers[0], mask = centers[1])
-		m+=1
-
-
-	# iterate towards the last index along dispersion axis
-	for i in second[select_second]:
-		if verbose=='1':
-			sys.stdout.write('Processing....%.0f%%\r'%(m/float(nslice)*100))
-			sys.stdout.flush()
-		cut_iter = img.getSlice(i, axis='y')# extract cross-dispersion slice
-		# infer pixel position of the previous slice
-		if i==second[select_second][0]:
-			pix = numpy.round(trace.getData()[0][:, column]).astype('int16')
-		else:
-			pix = numpy.round(trace.getData()[0][:, i-steps]).astype('int16')
 
 		#measure the peaks for the slice and store it in the trace
 		centers = cut_iter.measurePeaks(pix, method, init_sigma, threshold=threshold, max_diff=float(max_diff))
@@ -1055,11 +1049,35 @@ def tracePeaks_drp(in_image, in_peaks, out_trace, disp_axis='X', method='gauss',
 		trace.setSlice(i, axis='y', data = centers[0], mask = centers[1])
 		m+=1
 
+	# iterate towards the last index along dispersion axis
+	if verbose:
+		iterator = tqdm(second[select_second], total=select_second.sum(), desc=f"tracing fiber right from pixel {column}", ascii=True, unit="pixel")
+	else:
+		iterator = second[select_second]
+	for i in iterator:
+		cut_iter = img.getSlice(i, axis='y')# extract cross-dispersion slice
+		# infer pixel position of the previous slice
+		if i==second[select_second][0]:
+			pix = numpy.round(trace.getData()[0][:, column]).astype('int16')
+		else:
+			pix = numpy.round(trace.getData()[0][:, i-steps]).astype('int16')
+
+		#measure the peaks for the slice and store it in the trace
+		centers = cut_iter.measurePeaks(pix, method, init_sigma, threshold=threshold, max_diff=float(max_diff))
+		if numpy.sum(bad_fibers)>0:
+			diff = Spectrum1D(wave=positions, data=(centers[0]-positions), mask=bad_fibers)
+			diff.smoothPoly(-1, ref_base=positions)
+			centers[0][bad_fibers] = diff._data[bad_fibers]+positions[bad_fibers]
+			centers[1][bad_fibers] = False
+		trace.setSlice(i, axis='y', data = centers[0], mask = centers[1])
+		m+=1
+
 	# smooth all trace by a polynomial
+	image_logger.info(f"fitting trace with {numpy.abs(poly_disp)}-deg polynomial")
 	trace.smoothTracePoly(poly_disp)
 
 	for i in range(fibers):
-		if bad_fibers[i]==False:
+		if bad_fibers[i] == False:
 			trace._mask[i, :] = False
 		else:
 			trace._mask[i, :] = True
@@ -2090,12 +2108,13 @@ def old_preprocRawFrame_drp(in_image, out_image, boundary_x, boundary_y, positio
 	full_img.writeFitsData(out_image)
 	return full_img
 
-def preprocRawFrame_drp(in_image, out_image, positions="00,10,01,11", orientation="S,S,S,S", subtract_overscan='1', os_bound_x='', os_bound_y='', compute_error='1', assume_gain="1.0", assume_rdnoise="5", gain_field='GAIN', rdnoise_field='RDNOISE', unit="ADU", assume_imagetyp="bias"):
+def preprocRawFrame_drp(in_image, out_image, positions="00,10,01,11", orientation="S,S,S,S", subtract_overscan='1', os_bound_x='', os_bound_y='', compute_error='1', assume_gain="1.0", assume_rdnoise="5", gain_field='GAIN', rdnoise_field='RDNOISE', unit="ADU", assume_imagetyp="bias", plot='2', figure_path=".figures"):
 	# convert input parameters to proper type
 	orient = orientation.split(',')
 	pos = positions.split(',')
 	subtract_overscan = bool(int(subtract_overscan))
 	compute_error = bool(int(compute_error))
+	plot = int(plot)
 
 	# load image
 	org_image = loadImage(in_image)
@@ -2103,41 +2122,63 @@ def preprocRawFrame_drp(in_image, out_image, positions="00,10,01,11", orientatio
 	try:
 		org_image._header["IMAGETYP"]
 	except KeyError:
+		image_logger.warning(f"header keyword 'IMAGETYP' not found. Assuming IMAGETYP='{assume_imagetyp}'")
 		org_image._header["IMAGETYP"] = assume_imagetyp
 
 	# parse overscan (OS) section:
 	# * extract BIASSEC
-	if "BIASSEC" in org_image._header:
+	if os_bound_x and os_bound_y:
+		os_y, os_x = os_bound_y.split(','), os_bound_x.split(',')
+		image_logger.info(f"using given overscan region Y = {os_y}, X = {os_x}")
+		infer_trimsec = True
+	elif "BIASSEC" in org_image._header:
 		os_x, os_y = org_image._header["BIASSEC"].strip("[]").split(",")
 		os_y, os_x = os_y.split(":"), os_x.split(":")
-	elif os_bound_x and os_bound_y:
-		os_y, os_x = os_bound_y.split(','), os_bound_x.split(',')
+		image_logger.info(f"parsed overscan region from 'BIASSEC', Y = {os_y}, X = {os_x}")
+		infer_trimsec = False
 	else:
 		os_x, os_y = '[2021:2060, 1:4080]'.strip("[]").split(",")
 		os_y, os_x = os_y.split(":"), os_x.split(":")
+		image_logger.warning(f"no overscan region given. Assuming Y = {os_y}, X = {os_x}")
+		infer_trimsec = True
 
 	os_y, os_x = (int(os_y[0])-1, int(os_y[1])), (int(os_x[0])-1, int(os_x[1]))
 
-	infer_trimsec = False
-	if "TRIMSEC" in org_image._header:
+	if not infer_trimsec:
 		try:
 			sc_x_i, sc_y_i, sc_x_f, sc_y_f = org_image._header["TRIMSEC"].replace("[", "").replace("]", "").split(",")
 			sc_y_i, sc_x_i, sc_y_f, sc_x_f = sc_y_i.split(":"), sc_x_i.split(":"), sc_y_f.split(":"), sc_x_f.split(":")
+			image_logger.info(f"parsed data region from 'TRIMSEC', YX_i = {sc_y_i, sc_x_i}, YX_f = {sc_y_f, sc_x_f}")
 		except (KeyError, ValueError) as error:
-			# show a warning and fallback to infer TRIMSEC
+			image_logger.warning("no valid 'TRIMSEC' found in header")
 			infer_trimsec = True
-
-	if not "TRIMSEC" in org_image._header or infer_trimsec:
+	elif infer_trimsec:
 		# assume OS region is in the middle column
 		ysize, xsize = org_image._dim
 		xsize = xsize // 2
 		os_xsize = (os_x[1] - os_x[0]) // 2
 		sc_y_i, sc_x_i = ["1", str(ysize)], ["1", str(xsize-os_xsize)]
 		sc_y_f, sc_x_f = ["1", str(ysize)], [str(xsize+os_xsize+1), str(2*xsize)]
+		image_logger.warning(f"assuming 'TRIMSEC' YX_i = {sc_y_i, sc_x_i}, YX_f = {sc_y_f, sc_x_f}")
+
 	sc_i, sc_f = ((int(sc_y_i[0])-1, int(sc_y_i[1])), (int(sc_x_i[0])-1, int(sc_x_i[1]))), ((int(sc_y_f[0])-1, int(sc_y_f[1])), (int(sc_x_f[0])-1, int(sc_x_f[1])))
 
 	# select data outside the cut out region (overscan)
 	os_region = Image(data=org_image._data[os_y[0]:os_y[1], os_x[0]:os_x[1]])
+	if plot:
+		fig, ax = plt.subplots()
+		norm = ImageNormalize(os_region._data, interval=PercentileInterval(50), stretch=AsinhStretch())
+		im = ax.imshow(os_region._data, origin="lower", aspect="auto", norm=norm, cmap=plt.cm.gray)
+		cb = plt.colorbar(im)
+		ax.set_title(f"{org_image._header.get('BIASSEC') = } -> {os_x}, {os_y}")
+		ax.set_xlabel("X (pix)")
+		ax.set_ylabel("Y (pix)")
+		cb.set_label("counts (ADU)")
+		if plot == 1:
+			plt.show()
+		else:
+			save_fig(fig, output_path=out_image, figure_path=figure_path, label="preproc")
+	
 	# * split OS in four amplifier sections
 	os_ab, os_cd = os_region.split(2, axis="Y")
 	(os_a, os_b), (os_c, os_d) = os_ab.split(2, "X"), os_cd.split(2, "X")
@@ -2145,6 +2186,8 @@ def preprocRawFrame_drp(in_image, out_image, positions="00,10,01,11", orientatio
 	# * compute statistics on each OS section
 	os_bias_med = [numpy.nanmedian(os_quad._data) for os_quad in os_quads]
 	os_bias_std = [numpy.nanstd(os_quad._data) for os_quad in os_quads]
+	image_logger.info(f"median counts in overscan sections { {k: v for k, v in zip('abcd', os_bias_med)} }")
+	image_logger.info(f"standard deviation in overscan sections { {k: v for k, v in zip('abcd', os_bias_std)} }")
 
 	# parse science section:
 	# * extract science section
@@ -2161,16 +2204,20 @@ def preprocRawFrame_drp(in_image, out_image, positions="00,10,01,11", orientatio
 	# parse gain and read noise from header if possible
 	try:
 		gains = [org_image.getHdrValue(f"{gain_field}{i+1}") for i in range(nquad)]
+		image_logger.info(f"extracted gain values '{gain_field}' = { {k: v for k, v in zip('abcd', gains)} }")
 	except KeyError:
 		try:
 			assume_gain = org_image.getHdrValue(gain_field)
+			image_logger.warning(f"no gain per amplifier found, extracted '{gain_field}' = {assume_gain}")
 		except KeyError:
 			if assume_gain:
 				assume_gain = assume_gain.split(",")
 				try:
 					assume_gain = [float(gain) for gain in assume_gain]
+					image_logger.warning(f"no valid '{gain_field}' found in header. Using given values { {k: v for k, v in zip('abcd', assume_gain)} }")
 				except ValueError:
 					assume_gain = 1.0
+					image_logger.warning(f"no valid '{gain_field}' found in header. Assuming constant value {assume_gain}")
 		if len(assume_gain) == 1:
 			gains = nquad * assume_gain
 		elif len(assume_gain) >= nquad:
@@ -2180,16 +2227,20 @@ def preprocRawFrame_drp(in_image, out_image, positions="00,10,01,11", orientatio
 
 	try:
 		rdnoises = [org_image.getHdrValue(f"{rdnoise_field}{i+1}") for i in range(nquad)]
+		image_logger.info(f"extracted rdnoise values '{rdnoise_field}' = { {k: v for k, v in zip('abcd', rdnoises)} }")
 	except KeyError:
 		try:
 			assume_rdnoise = org_image.getHdrValue(rdnoise_field)
+			image_logger.warning(f"no rdnoise per amplifier found, extracted '{rdnoise_field}' = {assume_rdnoise}")
 		except KeyError:
 			if assume_rdnoise:
 				assume_rdnoise = assume_rdnoise.split(",")
 				try:
 					assume_rdnoise = [float(rdnoise) for rdnoise in assume_rdnoise]
+					image_logger.warning(f"no valid '{rdnoise_field}' found in header. Using given values { {k: v for k, v in zip('abcd', assume_rdnoise)} }")
 				except ValueError:
 					assume_rdnoise = 5.0
+					image_logger.warning(f"no valid '{rdnoise_field}' found in header. Assuming constant value {assume_rdnoise}")
 		if len(assume_rdnoise) == 1:
 			rdnoises = nquad * assume_rdnoise
 		elif len(assume_rdnoise) >= nquad:
@@ -2201,10 +2252,12 @@ def preprocRawFrame_drp(in_image, out_image, positions="00,10,01,11", orientatio
 	[quad.orientImage(orient[i]) for i, quad in enumerate(quads)]
 	# convert to specified unit
 	if unit == "e-":
+		image_logger.info("converting from ADU to e-")
 		for i in range(nquad):
 			quads[i] *= gains[i]
 			if compute_error:
 				quads[i].computePoissonError(rdnoise=rdnoises[i])
+				image_logger.info(f"calculated Poisson errors for amplifier '{'abcd'[i]}'")
 	elif unit.upper() == "ADU":
 		unit = unit.upper()
 	else:
@@ -2219,14 +2272,19 @@ def preprocRawFrame_drp(in_image, out_image, positions="00,10,01,11", orientatio
 		ccd = os.path.basename(in_image).split(".")[0].split("-")[1]
 		org_image._header["CCD"] = ccd
 	if ccd.startswith("z") or ccd.startswith("b"):
+		image_logger.info("flipping along X-axis")
 		preproc_image.orientImage("X")
 
 	# define initial pixel mask
+	image_logger.info("building pixel mask")
 	preproc_image._mask = numpy.zeros_like(preproc_image._data, dtype=bool)
 	preproc_image._mask |= (preproc_image._data>=2**16)
 	preproc_image._mask |= (preproc_image._data<=0)
+	masked_pixels = preproc_image._mask.sum()
+	image_logger.info(f"{masked_pixels} ({masked_pixels / preproc_image._mask.size * 100:.2g} %) pixels masked")
 
 	# update header
+	image_logger.info(f"updating header and writing pre-processed frame to '{out_image}'")
 	preproc_image.setHeader(org_image.getHeader())
 	# update/set unit
 	preproc_image.setHdrValue("BUNIT", unit, "physical units of the array values")
@@ -2318,17 +2376,28 @@ def createMasterFrame_drp(in_images, out_image, reject_cr=False, exptime_thresh=
         applied. In the special case that CR rejection is needed, the combination of images is selective:
 
             * where cosmic ray in one frame, select the other
-            * where cosmic ray in none of the frames, calculate an average of both.
+            * where cosmic ray in none of the frames, calculate an average of both
 
         When only one frame is given, it is still flagged as master, but a warning will be thrown.
 
         Parameters
         ----------
-
+		im_images : string
+			comma-separated list of paths to images that are going to be combined into a master frame
+		out_image : string
+			path to output master frame
+		reject_cr : boolean, optional
+			whether to reject or not cosmic rays. Deafults to False. If true this task will decide if
+			cosmic ray rejection is needed or not based on the exposure time of the frame and the number
+			of frames being combined
+		exptime_thresh : integer, optional
+			minimum exposure time belowe which no cosmic rejection routine will be run
+		cr_kwargs :
+			additional keyword arguments to be passed to the cosmic ray rejection routine
 
         Examples
         --------
-
+		drp image createMasterFrame IN_IMAGE1,IN_IMAGE2,... OUT_IMAGE
 
     """
     if not isinstance(in_images, (list, tuple)): in_images = [in_images]
@@ -2393,7 +2462,7 @@ def createMasterFrame_drp(in_images, out_image, reject_cr=False, exptime_thresh=
         master_frame.setData(mask=new_mask)
     else:
         if master_type == "bias":
-            master_frame = combineImages(proc_images, method="clipped_mean", k=3)
+            master_frame = combineImages(proc_images, method="median")
         elif master_type == "dark":
             master_frame = combineImages(proc_images, method="clipped_mean", k=3)
         elif master_type == "flat" or master_type == "flatfield":

@@ -69,14 +69,15 @@ def get_frames_metadata(path, suffix=".fits.gz", ignore_cache=False):
     
     frames = [os.path.join(root, frame_name) for root, _, frame_names in os.walk(path) for frame_name in frame_names if frame_name.endswith(suffix)]
     examples_logger.info(f"extracting metadata from {len(frames)} frames")
-    frames_table = Table(names=["imagetyp", "spec", "camera", "expnum", "exptime", "path"], dtype=[str, str, str, str, float, str])
+    frames_table = Table(names=["imagetyp", "spec", "mjd", "camera", "expnum", "exptime", "path"], dtype=[str, str, int, str, str, float, str])
     for frame_path in tqdm(frames, ascii=True):
         header = fits.getheader(frame_path, ext=0)
-        exptime = header["EXPTIME"]
+        mjd = header.get("MJD")
+        imagetyp = header.get("FLAVOR", header.get("IMAGETYP"))
         camera, expnum = parse_sdr_name(frame_path)
         spec = f"sp{camera[-1]}"
-        imagetyp = header.get("FLAVOR", header.get("IMAGETYP"))
-        frames_table.add_row([imagetyp, spec, camera, expnum, exptime, frame_path])
+        exptime = header["EXPTIME"]
+        frames_table.add_row([imagetyp, spec, mjd, camera, expnum, exptime, frame_path])
     examples_logger.info("successfully extracted metadata")
 
     examples_logger.info(f"caching metadata to '{CACHE_PATH}'")

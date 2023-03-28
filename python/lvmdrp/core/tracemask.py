@@ -1,12 +1,13 @@
 from lvmdrp.core.fiberrows import FiberRows
 from lvmdrp.core import fit_profile
 import numpy
+from numpy import polynomial
 
 
 class TraceMask(FiberRows):
-    def __init__(self, data=None, header = None, mask = None, shape=None, size=None, arc_position_x=None, arc_position_y=None, good_fibers=None,  fiber_type=None):
-        FiberRows.__init__(self, data,  header, None, mask, shape, size, arc_position_x, arc_position_y, good_fibers, fiber_type )
-        
+    def __init__(self, data=None, header = None, mask = None, shape=None, size=None, arc_position_x=None, arc_position_y=None, good_fibers=None, fiber_type=None):
+        FiberRows.__init__(self, data,  header, None, mask, shape, size, arc_position_x, arc_position_y, good_fibers, fiber_type)
+
     def getRound(self):
         """
             Insert data to a slice of the trace mask
@@ -28,7 +29,7 @@ class TraceMask(FiberRows):
             return dist, dist_mask
         else:
             return dist, None  
-    
+
     def smoothTracePoly(self, order, clip=None):
         """
             Smooth the traces along the dispersion direction with a polynomical function for each individual fiber
@@ -38,27 +39,28 @@ class TraceMask(FiberRows):
             order: int
                 Order of the polynomial function to describe the trace along diserpsion direction
         """
-        
         pixels = numpy.arange(self._data.shape[1]) # pixel position in dispersion direction
+        self._coeffs = numpy.zeros((self._data.shape[0], numpy.abs(order)+1))
         # iterate over each fiber
         for i in range(self._fibers):
-            good_pix = numpy.logical_not(self._mask[i, :]) # select only good pixels
-            if numpy.sum(good_pix)!=0:
+            good_pix = numpy.logical_not(self._mask[i, :])
+            if numpy.sum(good_pix) != 0:
                 if order>0:
-                    fit = numpy.polyfit(pixels[good_pix], self._data[i, good_pix], order)  # fit polynomial of given order to good pixels
-                    fit_trace = numpy.polyval(fit, pixels)
+                    poly = polynomial.Polynomial.fit(pixels[good_pix], self._data[i, good_pix], deg=order)
+                    fit_trace = poly(pixels)
                 if order<0:
-                    leg_poly=fit_profile.LegandrePoly(numpy.zeros(-1*order), min_x=pixels[0], max_x=pixels[-1])
-                    leg_poly.fit(pixels[good_pix], self._data[i, good_pix])
-                    fit_trace=leg_poly(pixels)
-                self._data[i, :] =  fit_trace# insert the polynomial smoothed trace back into the trace mask
+                    poly = polynomial.Legendre.fit(pixels[good_pix], self._data[i, good_pix], deg=-1*order)
+                    fit_trace = poly(pixels)
+                
+                self._coeffs[i, :] = poly.coef
+                self._data[i, :] =  fit_trace
             
                 if clip is not None:
-                    self._data=numpy.clip(self._data, clip[0], clip[1])
+                    self._data = numpy.clip(self._data, clip[0], clip[1])
                 self._mask[i, :] = False
             else:
                 self._mask[i, :] = True
-              
+
     def smoothTraceDist(self, start_slice, poly_cross=[4, 1, 4], poly_disp=8, bound=[350, 2000]):
         """
             Smooth the traces along the dispersion direction assuming that their distance is a smooth function of wavelength.
@@ -101,11 +103,11 @@ class TraceMask(FiberRows):
                 good_mask= numpy.logical_not(bad_mask)
                 select_good = numpy.logical_and(numpy.logical_and(change>0.5, change<2.0), good_mask) # masked unrealstic changes
    
-  #             select_good = numpy.logical_and(change>0.5, change<1.5) # masked unrealstic changes
- #               fit = numpy.polyfit(x[select_good], change[select_good],  len(poly_cross)-1) # fit the relative change in the fiber distance with a polynomial of given order
-  #              res = change[select_good]-numpy.polyval(fit, x[select_good])
-   #             select = numpy.abs(res)<=3*numpy.std(res)
-   #             fit = numpy.polyfit(x[select_good][select], change[select_good][select],  len(poly_cross)-1) # fit the relative change in the fiber distance with a polynomial of given order
+                # select_good = numpy.logical_and(change>0.5, change<1.5) # masked unrealstic changes
+                # fit = numpy.polyfit(x[select_good], change[select_good],  len(poly_cross)-1) # fit the relative change in the fiber distance with a polynomial of given order
+                # res = change[select_good]-numpy.polyval(fit, x[select_good])
+                # select = numpy.abs(res)<=3*numpy.std(res)
+                # fit = numpy.polyfit(x[select_good][select], change[select_good][select],  len(poly_cross)-1) # fit the relative change in the fiber distance with a polynomial of given order
                 select = numpy.logical_and(numpy.logical_and(change>0.5, change<2.0), good_mask) # masked unrealstic changes
                 fit = numpy.polyfit(x[select], change[select],  len(poly_cross)-1) # fit the relative change in the fiber distance with a polynomial of given order
                 fit_par[:, i] = fit # store parameters into array
@@ -120,11 +122,11 @@ class TraceMask(FiberRows):
                 change_dist[:, i] = change # store the changes into array
                 good_mask= numpy.logical_not(bad_mask)
                 select_good = numpy.logical_and(numpy.logical_and(change>0.5, change<2.0), good_mask) # masked unrealstic changes
-     #           select_good = numpy.logical_and(change>0.5, change<1.5) # masked unrealstic changes
-      #          fit = numpy.polyfit(x[select_good], change[select_good],  len(poly_cross)-1) # fit the relative change in the fiber distance with a polynomial of given order
-       #         res = change[select_good]-numpy.polyval(fit, x[select_good])
-        #        select = numpy.abs(res)<=3*numpy.std(res)
-         #       fit = numpy.polyfit(x[select_good][select], change[select_good][select],  len(poly_cross)-1) # fit the relative change in the fiber distance with a polynomial of given order
+                # select_good = numpy.logical_and(change>0.5, change<1.5) # masked unrealstic changes
+                # fit = numpy.polyfit(x[select_good], change[select_good],  len(poly_cross)-1) # fit the relative change in the fiber distance with a polynomial of given order
+                # res = change[select_good]-numpy.polyval(fit, x[select_good])
+                # select = numpy.abs(res)<=3*numpy.std(res)
+                # fit = numpy.polyfit(x[select_good][select], change[select_good][select],  len(poly_cross)-1) # fit the relative change in the fiber distance with a polynomial of given order
                 select = numpy.logical_and(numpy.logical_and(change>0.5, change<2.0), good_mask) # masked unrealstic changes
                 fit = numpy.polyfit(x[select], change[select],  len(poly_cross)-1) # fit the relative change in the fiber distance with a polynomial of given order
                 fit_par[:, i] = fit # store parameters into array
@@ -150,12 +152,12 @@ class TraceMask(FiberRows):
             fit = numpy.polyfit(wave[select_wave][select]-fit_par.shape[1]/2.0, fit_par[j, select_wave][select], poly_cross[len(poly_cross)-j-1]) # fit polynomial along dispersion axis
             fit_par_smooth[j, :] = numpy.polyval(fit, wave-fit_par.shape[1]/2.0) # store the resulting polynomial
             
-  #          pylab.subplot(len(poly_cross), 1, len(poly_cross)-j) 
- #           pylab.plot(wave[select_wave], res, '-k')
-   #         pylab.plot(wave[select_wave], fit_par[j, select_wave], 'ok')
-    #        pylab.plot(wave[select_wave][select], fit_par[j, select_wave][select], 'or')
-    #        pylab.plot(wave, fit_par_smooth[j, :], '-r')
-    #    pylab.show()
+            # pylab.subplot(len(poly_cross), 1, len(poly_cross)-j) 
+            # pylab.plot(wave[select_wave], res, '-k')
+            # pylab.plot(wave[select_wave], fit_par[j, select_wave], 'ok')
+            # pylab.plot(wave[select_wave][select], fit_par[j, select_wave][select], 'or')
+            # pylab.plot(wave, fit_par_smooth[j, :], '-r')
+        # pylab.show()
         
         for i in range(len(wave)):
            change_dist[:, i] = numpy.polyval(fit_par_smooth[:, i], x) # replace the relative fiber distance with their polynomial smoothed values
@@ -179,8 +181,6 @@ class TraceMask(FiberRows):
         out_trace =  new_trace+ext_offset[numpy.newaxis, :] # match the trace offsets
         self._data =  out_trace
 
-
-      
     def getPixelCoor(self):
         x_cor=numpy.zeros((self._nfibers, self._data.shape[1]), dtype='int16')
         x_cor=numpy.arange(self._data.shape[1])[numpy.newaxis, :]

@@ -48,172 +48,153 @@ from lvmdrp.core.rss import RSS, loadRSS
 from lvmdrp.external import ancillary_func
 
 
-description = "Provides with flux calibration tasks"
+description = "provides flux calibration tasks"
 
 __all__ = ["createSensFunction_drp", "createSensFunction2_drp", "quickFluxCalibration_drp", "correctTelluric_drp"]
 
 
-def createSensFunction_drp(in_rss, out_throughput,  ref_spec, airmass, exptime, smooth_poly='5', smooth_ref='6.0', smooth_ref2='6.0', median_filt='0',coadd='1', extinct_v='0.0', extinct_curve='mean', aper_correct='1.0',  ref_units='1e-16', target_units='1e-16',column_wave='0', column_flux='1', delimiter='', header='1' , split='', mask_wave='', mask_telluric='', overlap='100', out_star='', verbose='0'):
-	smooth_poly=int(smooth_poly)
-	smooth_ref=float(smooth_ref)
-	smooth_ref2=float(smooth_ref2)
-	median_filt=int(median_filt)
-	coadd = int(coadd)
-	ref_units=float(ref_units)
-	target_units=float(target_units)
-	aper_correct=float(aper_correct)
-	column_wave = int(column_wave)
-	column_flux = int(column_flux)
-	header = int(header)
-	if mask_wave != '':
-		mask_wave = np.array(mask_wave.split(',')).astype('float32')
-	else:
-		mask_wave=None
-		
-	if mask_telluric != '':
-		mask_telluric = np.array(mask_telluric.split(',')).astype('float32')
-	else:
-		mask_telluric=None
-	verbose=int(verbose)
+def createSensFunction_drp(in_rss, out_throughput, ref_spec, airmass, exptime, smooth_poly='5', smooth_ref='6.0', smooth_ref2='6.0', median_filt='0',coadd='1', extinct_v='0.0', extinct_curve='mean', aper_correct='1.0',  ref_units='1e-16', target_units='1e-16', column_wave='0', column_flux='1', delimiter='', header='1' , split='', mask_wave='', mask_telluric='', overlap='100', out_star='', verbose='0'):
+    smooth_poly=int(smooth_poly)
+    smooth_ref=float(smooth_ref)
+    smooth_ref2=float(smooth_ref2)
+    median_filt=int(median_filt)
+    coadd = int(coadd)
+    ref_units = float(ref_units)
+    target_units = float(target_units)
+    aper_correct = float(aper_correct)
+    column_wave = int(column_wave)
+    column_flux = int(column_flux)
+    header = int(header)
+    if mask_wave != '':
+        mask_wave = np.array(mask_wave.split(',')).astype('float32')
+    else:
+        mask_wave = None
+
+    if mask_telluric != '':
+        mask_telluric = np.array(mask_telluric.split(',')).astype('float32')
+    else:
+        mask_telluric = None
+    verbose=int(verbose)
 
 
-	ref_star_spec = Spectrum1D()
+    ref_star_spec = Spectrum1D()
 
-	if coadd>0:
-		rss = RSS()
-		rss.loadFitsData(in_rss)
-		select = rss.selectSpec(min=0, max=coadd, method='median')
-		star_rss=rss.subRSS(select)
-		star_spec = star_rss.create1DSpec(method='sum')/aper_correct
-	else:
-		star_spec = Spectrum1D()
-		if '.fits' in in_rss:
-			star_spec.loadFitsData(in_rss)
-		elif '.txt' in in_rss:
-			star_spec.loadTxtData(in_rss)
+    if coadd>0:
+        rss = RSS()
+        rss.loadFitsData(in_rss)
+        select = rss.selectSpec(min=0, max=coadd, method='median')
+        star_rss=rss.subRSS(select)
+        star_spec = star_rss.create1DSpec(method='sum')/aper_correct
+    else:
+        star_spec = Spectrum1D()
+        if '.fits' in in_rss:
+            star_spec.loadFitsData(in_rss)
+        elif '.txt' in in_rss:
+            star_spec.loadTxtData(in_rss)
 
-	try:
-		extinct_v = rss.getHdrValue(extinct_v)
-	except:
-		extinct_v= float(extinct_v)
+    try:
+        extinct_v = rss.getHdrValue(extinct_v)
+    except:
+        extinct_v = float(extinct_v)
 
-	try:
-		airmass = rss.getHdrValue(airmass)
-	except:
-		airmass = float(airmass)
+    try:
+        airmass = rss.getHdrValue(airmass)
+    except:
+        airmass = float(airmass)
 
-	try:
-		exptime = rss.getHdrValue(exptime)
-	except:
-		exptime = float(exptime)
+    try:
+        exptime = rss.getHdrValue(exptime)
+    except:
+        exptime = float(exptime)
 
+    if extinct_curve=='mean' or extinct_curve=='summer' or extinct_curve=='winter':
+        extinct = 10**(ancillary_func.extinctCAHA(star_spec._wave, extinct_v, type=extinct_curve)*airmass*-0.4)
+    elif extinct_curve=='Paranal':
+        extinct = 10**(ancillary_func.extinctParanal(star_spec._wave)*airmass*-0.4)
+    else:
+        extinct=Spectrum1D()
+        extinct.loadTxtData(extinct_curve)
+        extinct = 10**(extinct*airmass*-0.4)
+        extinct=extinct.resampleSpec(star_spec._wave)
+    ref_star_spec.loadSTDref(ref_spec,column_wave=column_wave, column_flux=column_flux, delimiter=delimiter, header=header)
+    ref_star_resamp = ref_star_spec.resampleSpec(star_spec._wave, method='linear')
 
+    ref_star_resamp.smoothSpec(smooth_ref/2.354/(star_spec._wave[1]-star_spec._wave[0]))
+    if out_star != '':
+        star_out = open(out_star, 'w')
+        for i in range(star_spec._dim):
+            star_out.write('%i %.3f %e\n'%(i, star_spec._wave[i], star_spec._data[i]))
+        star_out.close()
 
-	if extinct_curve=='mean' or extinct_curve=='summer' or extinct_curve=='winter':
-		extinct = 10**(ancillary_func.extinctCAHA(star_spec._wave, extinct_v, type=extinct_curve)*airmass*-0.4)
-	elif extinct_curve=='Paranal':
-		extinct = 10**(ancillary_func.extinctParanal(star_spec._wave)*airmass*-0.4)
-	else:
-		extinct=Spectrum1D()
-		extinct.loadTxtData(extinct_curve)
-		extinct = 10**(extinct*airmass*-0.4)
-		extinct=extinct.resampleSpec(star_spec._wave)
-	ref_star_spec.loadSTDref(ref_spec,column_wave=column_wave, column_flux=column_flux, delimiter=delimiter, header=header)
-	ref_star_resamp = ref_star_spec.resampleSpec(star_spec._wave, method='linear')
+    star_spec.smoothSpec(smooth_ref)
+    #print(exptime,extinct._wave,star_spec._wave)
+    star_corr = star_spec/extinct/exptime
 
-	ref_star_resamp.smoothSpec(smooth_ref/2.354/(star_spec._wave[1]-star_spec._wave[0]))
-	if out_star != '':
-		star_out = open(out_star, 'w')
-		for i in range(star_spec._dim):
-			star_out.write('%i %.3f %e\n'%(i, star_spec._wave[i], star_spec._data[i]))
-		star_out.close()
+    throughput = ref_star_resamp/star_corr
+    if mask_wave is not None:
+        regions = len(mask_wave)/2
+        for i in range(regions):
+            select_region = np.logical_and(throughput._wave>mask_wave[i*2], throughput._wave<mask_wave[i*2+1])
+            select_blue = np.logical_and(throughput._wave>mask_wave[i*2]-20, throughput._wave<mask_wave[i*2])
+            select_red = np.logical_and(throughput._wave>mask_wave[i*2+1], throughput._wave<mask_wave[i*2+1]+20)
+            line_par = stats.linregress([mask_wave[i*2]-10,mask_wave[i*2+1]+10], [np.median(throughput._data[select_blue]), np.median(throughput._data[select_red])])
 
-	star_spec.smoothSpec(smooth_ref)
-	#print(exptime,extinct._wave,star_spec._wave)
-	star_corr = star_spec/extinct/exptime
+            throughput._data[select_region] = (line_par[0]*throughput._wave[select_region]+line_par[1]).astype('float32')
+            #select = np.logical_and(throughput._wave>mask_wave[i*2], throughput._wave<mask_wave[i*2+1])
+            #throughput._mask[select]=True
+    if mask_telluric is not None:
+        star_telluric1 = star_rss.create1DSpec(method='sum')
+        star_telluric2 = star_rss.create1DSpec(method='sum')
+        regions = len(mask_telluric)/2
+        for i in range(regions):
+            select_region = np.logical_and(star_telluric1._wave>mask_telluric[i*2], star_telluric1._wave<mask_telluric[i*2+1])
+            select_blue = np.logical_and(star_telluric1._wave>mask_telluric[i*2]-20, star_telluric1._wave<mask_telluric[i*2])
+            select_red = np.logical_and(star_telluric1._wave>mask_telluric[i*2+1], star_telluric1._wave<mask_telluric[i*2+1]+20)
+            line_par = stats.linregress([mask_telluric[i*2]-10,mask_telluric[i*2+1]+10], [np.median(star_telluric1._data[select_blue]), np.median(star_telluric1._data[select_red])])
+            star_telluric2._data[select_region] = (line_par[0]*star_telluric1._wave[select_region]+line_par[1]).astype('float32')
+        telluric_spec = (star_telluric1 / star_telluric2)**(1.0/airmass)
+        telluric_spec.writeFitsData('telluric_spec.fits')
+    good_pix = np.logical_not(throughput._mask)
+    if median_filt>0:
+        throughput.smoothSpec(median_filt, method='median')
+    if verbose==1:
+        plt.plot(throughput._wave[good_pix][10:-10], throughput._data[good_pix][10:-10], '-k')
+    if split=='':
+        mask = throughput._mask
+        throughput_s = 1.0/Spectrum1D(wave=throughput._wave, data=throughput._data, mask=mask)        
+        throughput_s.smoothPoly(smooth_poly)
+        mask = np.logical_or(throughput_s._mask, throughput_s._data<=0)
+        throughput_s = 1.0/throughput_s
+        throughput_s._mask = mask
+        if verbose==1:
+            plt.plot(throughput_s._wave,  throughput_s._data, '-r')
+            plt.plot(throughput_s._wave,  throughput._data/throughput_s._data, '-g')
+            # sens_test_out = open('test_sens.txt', 'w')
+            # for i in range(throughput_s._dim):
+            #     sens_test_out.write('%i %.2f %e %e %e\n'%(i, throughput_s._wave[i], throughput._data[i], throughput_s._data[i], throughput._data[i]/throughput_s._data[i]))
+            # sens_test_out.close()
+    else:
+        split = float(split)
+        overlap = float(overlap)
+        select = throughput._wave>split
+        mask = throughput._mask[select]
+        mask[-10:]=True
+        throughput_s2 = Spectrum1D(wave=throughput._wave[select], data=throughput._data[select], mask=mask)
+        throughput_s2.smoothPoly(smooth_poly)
 
-	throughput = ref_star_resamp/star_corr
-	if mask_wave is not None:
-		regions = len(mask_wave)/2
-		for i in range(regions):
-			select_region = np.logical_and(throughput._wave>mask_wave[i*2], throughput._wave<mask_wave[i*2+1])
-			select_blue = np.logical_and(throughput._wave>mask_wave[i*2]-20, throughput._wave<mask_wave[i*2])
-			select_red = np.logical_and(throughput._wave>mask_wave[i*2+1], throughput._wave<mask_wave[i*2+1]+20)
-			line_par = stats.linregress([mask_wave[i*2]-10,mask_wave[i*2+1]+10], [np.median(throughput._data[select_blue]), np.median(throughput._data[select_red])])
+        select = throughput._wave<split+overlap
+        mask = throughput._mask[select]
+        mask[-10:]=True
+        throughput_s1 = Spectrum1D(wave=throughput._wave[select], data=throughput._data[select], mask=mask)
+        throughput_s1.smoothPoly(smooth_poly)
 
-			throughput._data[select_region] = (line_par[0]*throughput._wave[select_region]+line_par[1]).astype('float32')
-			#select = np.logical_and(throughput._wave>mask_wave[i*2], throughput._wave<mask_wave[i*2+1])
-			#throughput._mask[select]=True
-	if mask_telluric is not None:
-		star_telluric1 = star_rss.create1DSpec(method='sum')
-		star_telluric2 = star_rss.create1DSpec(method='sum')
-		regions = len(mask_telluric)/2
-		for i in range(regions):
-			select_region = np.logical_and(star_telluric1._wave>mask_telluric[i*2], star_telluric1._wave<mask_telluric[i*2+1])
-			select_blue = np.logical_and(star_telluric1._wave>mask_telluric[i*2]-20, star_telluric1._wave<mask_telluric[i*2])
-			select_red = np.logical_and(star_telluric1._wave>mask_telluric[i*2+1], star_telluric1._wave<mask_telluric[i*2+1]+20)
-			line_par = stats.linregress([mask_telluric[i*2]-10,mask_telluric[i*2+1]+10], [np.median(star_telluric1._data[select_blue]), np.median(star_telluric1._data[select_red])])
-			star_telluric2._data[select_region] = (line_par[0]*star_telluric1._wave[select_region]+line_par[1]).astype('float32')
-		telluric_spec = (star_telluric1 / star_telluric2)**(1.0/airmass)
-		telluric_spec.writeFitsData('telluric_spec.fits')
-	good_pix = np.logical_not(throughput._mask)
-	if median_filt>0:
-		throughput.smoothSpec(median_filt,method='median')
-	if verbose==1:
-		plt.plot(throughput._wave[good_pix][10:-10], throughput._data[good_pix][10:-10], '-k')
-	if split=='':
-		mask = throughput._mask
-		#mask[:10]=True
-		#mask[-10:]=True
-		throughput_s = 1.0/Spectrum1D(wave=throughput._wave, data=throughput._data, mask=mask)
-		throughput_s.smoothPoly(smooth_poly)
-		throughput_s = 1.0/throughput_s
-		if verbose==1:
-			plt.plot(throughput_s._wave,  throughput_s._data, '-r')
-			plt.plot(throughput_s._wave,  throughput._data/throughput_s._data, '-g')
-			sens_test_out = open('test_sens.txt', 'w')
-			for i in range(throughput_s._dim):
-				sens_test_out.write('%i %.2f %e %e %e\n'%(i, throughput_s._wave[i], throughput._data[i], throughput_s._data[i], throughput._data[i]/throughput_s._data[i]))
-			sens_test_out.close()
-	else:
-		split = float(split)
-		overlap = float(overlap)
-		select = throughput._wave>split
-		mask = throughput._mask[select]
-		mask[-10:]=True
-		throughput_s2 = Spectrum1D(wave=throughput._wave[select], data=throughput._data[select], mask=mask)
-		throughput_s2.smoothPoly(smooth_poly)
+        if verbose==1:
+            plt.plot(throughput_s1._wave,  throughput_s1._data, '-r')
+            plt.plot(throughput_s2._wave,  throughput_s2._data, '-r')
+    if verbose==1:
+        plt.show()
 
-		select = throughput._wave<split+overlap
-		mask = throughput._mask[select]
-		mask[-10:]=True
-		throughput_s1 = Spectrum1D(wave=throughput._wave[select], data=throughput._data[select], mask=mask)
-		throughput_s1.smoothPoly(smooth_poly)
-
-		if verbose==1:
-			plt.plot(throughput_s1._wave,  throughput_s1._data, '-r')
-			plt.plot(throughput_s2._wave,  throughput_s2._data, '-r')
-	if verbose==1:
-		plt.show()
-
-	# need to replace with XML output
-	out = open(out_throughput, 'w')
-
-	if split=='':
-		for i in range(throughput._dim):
-			out.write('%i %.3f %e\n'%(i,  throughput_s._wave[i], throughput_s._data[i]))
-	else:
-		min = np.argmin(np.abs(throughput_s1._data[throughput_s1._wave>split]-throughput_s2._data[throughput_s2._wave<split+overlap]))
-	#    print min
-		start2 = np.sum(throughput._wave<=split)
-		change = min+start2
-		for i in range(throughput._dim):
-			if i<change:
-				out.write('%i %.3f %e\n'%(i, throughput_s1._wave[i], throughput_s1._data[i]))
-			else:
-				out.write('%i %.3f %e\n'%(i, throughput_s2._wave[i-start2], throughput_s2._data[i-start2]))
-
-	out.close()
+    throughput_s.writeFitsData(out_throughput)
 
 
 def createSensFunction2_drp(in_rss, out_sens, ref_spec, airmass, exptime, smooth_bspline='0.3', smooth_ref='6.0', smooth_ref2='6.0', median_filt='0',coadd='1', extinct_v='0.0', extinct_curve='mean', aper_correct='1.0',  ref_units='1e-16', target_units='1e-16',column_wave='0', column_flux='1', delimiter='', header='1' , mask_wave='', out_star='', verbose='0'):

@@ -56,7 +56,7 @@ You will find tutorial notebooks to run different DRP routines in the [examples]
 - [Basic Calibration](): reduction of calibration images: bias, dark and pixel flats; as well as reduction of arcs and fiber flats.
 - [Wavelength Calibration](): automatic pixel to wavelength mapping and wavelength and LSF fitting.
 - [Flux Calibration](): conversion of the extracted spectra from electrons to flux calibrated spectra.
-- [Sky Module](): several procedures to sky-subtract science spectra.
+- [Sky Module](https://github.com/sdss/lvmdrp/tree/development/examples/sky_module): several procedures to sky-subtract science spectra.
 
 In each of the links above you will find a short description of what's going on in each example and also the order in which those are intended to be followed.
 
