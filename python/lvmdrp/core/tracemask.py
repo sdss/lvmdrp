@@ -5,7 +5,7 @@ from numpy import polynomial
 
 
 class TraceMask(FiberRows):
-    def __init__(self, data=None, header = None, mask = None, shape=None, size=None, arc_position_x=None, arc_position_y=None, good_fibers=None, fiber_type=None):
+    def __init__(self, data=None, header=None, mask=None, shape=None, size=None, arc_position_x=None, arc_position_y=None, good_fibers=None, fiber_type=None):
         FiberRows.__init__(self, data,  header, None, mask, shape, size, arc_position_x, arc_position_y, good_fibers, fiber_type)
 
     def getRound(self):
@@ -47,13 +47,11 @@ class TraceMask(FiberRows):
             if numpy.sum(good_pix) != 0:
                 if order>0:
                     poly = polynomial.Polynomial.fit(pixels[good_pix], self._data[i, good_pix], deg=order)
-                    fit_trace = poly(pixels)
                 if order<0:
                     poly = polynomial.Legendre.fit(pixels[good_pix], self._data[i, good_pix], deg=-1*order)
-                    fit_trace = poly(pixels)
                 
                 self._coeffs[i, :] = poly.coef
-                self._data[i, :] =  fit_trace
+                self._data[i, :] = poly(pixels)
             
                 if clip is not None:
                     self._data = numpy.clip(self._data, clip[0], clip[1])
