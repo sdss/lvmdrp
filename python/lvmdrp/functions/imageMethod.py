@@ -1708,50 +1708,53 @@ def traceFWHM_drp(
     steps="100",
     coadd="10",
     poly_disp="5",
+    poly_kind="poly",
     threshold_flux="50.0",
     init_fwhm="2.0",
     clip="",
     parallel="auto",
 ):
     """
-                Measures the FWHM of the cross-dispersion fiber profile across the CCD.  It assumes that the profiles have a Gaussian shape and that the width  is CONSTANT for
-                a BLOCK of fibers in cross-dispersion direction.  If the FITS image contains an extension with the error, the error frame will be taken into account in the Gaussian fitting.
-                To increase the speed only the cross-dispersion profiles at certain position along the dispersion axis with a certain distance (steps)
-                in pixels are modelled. The FWHM are then extrapolate by fitting a polynomial of given order along the dispersion axis.
+    Measures the FWHM of the cross-dispersion fiber profile across the CCD.  It assumes that the profiles have a Gaussian shape and that the width  is CONSTANT for
+    a BLOCK of fibers in cross-dispersion direction.  If the FITS image contains an extension with the error, the error frame will be taken into account in the Gaussian fitting.
+    To increase the speed only the cross-dispersion profiles at certain position along the dispersion axis with a certain distance (steps)
+    in pixels are modelled. The FWHM are then extrapolate by fitting a polynomial of given order along the dispersion axis.
 
-                Parameters
-                --------------
-                image: string
-                                Name of the Continuum FITS image from which the fiber profile width should be estimate.
-                trace: string
-                                Name of the  FITS file representing the trace mask of the fibers
-                fwhm_out: string
-                                Name of the FITS file in which the FWHM trace image will be stored
-                disp_axis: string of float, optional  with default: 'X'
-                                Define the dispersion axis, either 'X','x', or 0 for the  x axis or 'Y','y', or 1 for the y axis.
-                blocks: string of integer, optional  with default: '20'
-                                Number of fiber blocks that are modelled simultaneously with the same FWHM in cross-dispersion direction.
-                                The actual number of fibers per block is roughly the total number of fibers divided by the number of blocks.
-                steps : string of int, optional with default :'100'
-                                Steps in dispersions direction columns to measure the cross-dispersion fibre positions
-                coadd: string of integer, optional with default: '10'
-                                Coadd number of pixels in dispersion direction to increase the S/N of the data
-                poly_disp: string of integer, optional with default: '5'
-                                Order of the polynomial used to extrapolate the FWHM  values along dispersion direction for each block
-                                (positiv: normal polynomial, negativ: Legandre polynomial)
-                threshold_flux: sting of float, optional with default: '50.0'
-                                Minimum integrated counts for a valid fiber per dispersion element
-                init_fwhm: string of float, optional with default: '2.0'
-                                Initial guess of the cross-dispersion fiber FWHM
-                clip: string of two comma separated floats, optional with default: ''
-                                Minimum and maximum number of FWHM in the resulting FWHM trace image. If some value are below or above
-                                the given limits they are replaced by those limits.
-                parallel: either string of integer (>0) or  'auto', optional with default: 'auto'
-                                Number of CPU cores used in parallel for the computation. If set to auto, the maximum number of CPUs
-                                for the given system is used.
+    Parameters
+    ----------
+    image: string
+        Name of the Continuum FITS image from which the fiber profile width should be estimate.
+    trace: string
+        Name of the  FITS file representing the trace mask of the fibers
+    fwhm_out: string
+        Name of the FITS file in which the FWHM trace image will be stored
+    disp_axis: string of float, optional  with default: 'X'
+        Define the dispersion axis, either 'X','x', or 0 for the  x axis or 'Y','y', or 1 for the y axis.
+    blocks: string of integer, optional  with default: '20'
+        Number of fiber blocks that are modelled simultaneously with the same FWHM in cross-dispersion direction.
+        The actual number of fibers per block is roughly the total number of fibers divided by the number of blocks.
+    steps : string of int, optional with default :'100'
+        Steps in dispersions direction columns to measure the cross-dispersion fibre positions
+    coadd: string of integer, optional with default: '10'
+        Coadd number of pixels in dispersion direction to increase the S/N of the data
+    poly_disp: string of integer, optional with default: '5'
+        Order of the polynomial used to extrapolate the FWHM  values along dispersion direction for each block
+        (positiv: normal polynomial, negativ: Legandre polynomial)
+    poly_kind : string, optional with default: 'poly'
+        the type of polynomial to use when extrapolating the FWHM
+    threshold_flux: sting of float, optional with default: '50.0'
+        Minimum integrated counts for a valid fiber per dispersion element
+    init_fwhm: string of float, optional with default: '2.0'
+        Initial guess of the cross-dispersion fiber FWHM
+    clip: string of two comma separated floats, optional with default: ''
+        Minimum and maximum number of FWHM in the resulting FWHM trace image. If some value are below or above
+        the given limits they are replaced by those limits.
+    parallel: either string of integer (>0) or  'auto', optional with default: 'auto'
+        Number of CPU cores used in parallel for the computation. If set to auto, the maximum number of CPUs
+        for the given system is used.
 
-                Examples
-                ----------------
+    Examples
+    --------
     user:> lvmdrp image traceFWHM IMAGE.fits TRACE.fits FWHM.fits x blocks=32 steps=50 poly_disp=20 clip=2,6 parallel=2
     """
 
@@ -1845,7 +1848,7 @@ def traceFWHM_drp(
     # traceFWHM = img.traceFWHM()
 
     # smooth the FWHM trace with a polynomial fit along dispersion axis (uncertain pixels are not used)
-    traceFWHM.smoothTracePoly(poly_disp, clip=clip)
+    traceFWHM.smoothTracePoly(deg=poly_disp, poly_kind=poly_kind, clip=clip)
 
     # write out FWHM trace to FITS file
     traceFWHM.writeFitsData(out_fwhm)
