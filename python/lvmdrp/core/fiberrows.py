@@ -10,12 +10,13 @@ class FiberRows(Header, PositionTable):
 
     def __init__(self, data=None, header=None, error=None, mask=None, shape=None, size=None, arc_position_x=None, arc_position_y=None, good_fibers=None, fiber_type=None, coeffs=None):
         Header.__init__(self, header=header)
-        PositionTable.__init__(self,  shape=shape, size=size, arc_position_x=arc_position_x, arc_position_y=arc_position_y, good_fibers=good_fibers,  fiber_type=fiber_type)
+        PositionTable.__init__(self, shape=shape, size=size, arc_position_x=arc_position_x, arc_position_y=arc_position_y, good_fibers=good_fibers, fiber_type=fiber_type)
         if data is None:
             self._data = None
         else:
             self._data = data
             self._fibers = data.shape[0]
+            self._pixels = numpy.arange(data.shape[1])
 
         if error is None:
             self._error = None
@@ -26,7 +27,7 @@ class FiberRows(Header, PositionTable):
             self._mask = None
         else:
             self._mask = numpy.array(mask)
-        
+
         if coeffs is None:
             self._coeffs = None
         else:
@@ -135,7 +136,6 @@ class FiberRows(Header, PositionTable):
             else:
                 img.setData(mask=self._mask)
             return img
-
 
         elif isinstance(other,  numpy.ndarray):
             img = FiberRows(error=self._error, mask=self._mask, header = self._header, shape=self._shape, size=self._size, arc_position_x=self._arc_position_x, arc_position_y=self._arc_position_y, good_fibers=self._good_fibers, fiber_type=self._fiber_type )
@@ -333,8 +333,7 @@ class FiberRows(Header, PositionTable):
             fibers: int
                 Number of fibers
         """
-        self._fibers=fibers
-
+        self._fibers = fibers
 
     def setSlice(self, slice, axis='x', data=None, error=None, mask=None, select=None):
         """
@@ -391,7 +390,6 @@ class FiberRows(Header, PositionTable):
                     self._error[:, slice] = error
                 if mask is not None:
                     self._mask[:, slice] = mask
-#        print(self._data[:, slice])
 
     def getSlice(self, slice, axis='x'):
         if axis=='X' or axis=='x' or axis==1:
@@ -426,18 +424,18 @@ class FiberRows(Header, PositionTable):
         return slice_data, slice_error, slice_mask
 
     def getSpec(self, fiber):
-            data = self._data[fiber, :]
-            if self._error is not None:
-                error = self._error[fiber, :]
-            else:
-                error = None
-            if self._mask is not None:
-                mask = self._mask[fiber, :]
-            else:
-                mask=None
-            spec = Spectrum1D(numpy.arange(self._data.shape[1]), data,  error=error, mask=mask)
+        data = self._data[fiber, :]
+        if self._error is not None:
+            error = self._error[fiber, :]
+        else:
+            error = None
+        if self._mask is not None:
+            mask = self._mask[fiber, :]
+        else:
+            mask=None
+        spec = Spectrum1D(numpy.arange(self._data.shape[1]), data,  error=error, mask=mask)
 
-            return spec
+        return spec
 
     def getData(self):
         """
@@ -457,23 +455,32 @@ class FiberRows(Header, PositionTable):
         data = self._data
         error = self._error
         mask = self._mask
-        return data,  error,  mask
+        return data, error, mask
 
     def setData(self, select=None , data=None, mask=None, error=None):
         if select is not None:
             if data is not None:
                 self._data[select] = data
+                nfibers, npixels = data.shape
             if mask is not None:
                 self._mask[select] = mask
+                nfibers, npixels = mask.shape
             if error is not None:
                 self._error[select] = error
+                nfibers, npixels = error.shape
         else:
             if data is not None:
                 self._data = data
+                nfibers, npixels = data.shape
             if mask is not None:
                 self._mask = mask
+                nfibers, npixels = mask.shape
             if error is not None:
                 self._error = error
+                nfibers, npixels = error.shape
+            
+            self._fibers = nfibers
+            self._pixels = numpy.arange(npixels)
 
     def split(self,  fragments, axis='x'):
         list = []
@@ -517,7 +524,8 @@ class FiberRows(Header, PositionTable):
         hdu = pyfits.open(file, uint=True, do_not_scale_image_data=True)
         if extension_data is None and extension_mask is None and extension_error is None and extension_coeffs is None:
                 self._data = hdu[0].data
-                self._fibers = self._data.shape[0] # set fibers
+                self._fibers = self._data.shape[0]
+                self._pixels = numpy.arange(self._data.shape[1])
                 self.setHeader(hdu[0].header)
                 if len(hdu)>1:
                     for i in range(1, len(hdu)):
@@ -532,6 +540,7 @@ class FiberRows(Header, PositionTable):
             if extension_data is not None:
                 self._data = hdu[extension_data].data
                 self._fibers = self._data.shape[0]
+                self._pixels = numpy.arange(self._data.shape[1])
             if extension_mask is not None:
                 self._mask = hdu[extension_mask].data
             if extension_error is not None:
@@ -645,7 +654,7 @@ class FiberRows(Header, PositionTable):
         second = numpy.arange(ref_fiber+1, self._fibers, 1)
 
         if verbose:
-            iterator = tqdm(first, total=first.size, desc=f"measuring arc lines upwards from {ref_fiber}", ascii=True, unit="fiber")
+            iterator = tqdm(first, total=first.size, desc=f"measuring arc lines upwards from {ref_fiber = }", ascii=True, unit="fiber")
         else:
             iterator = first
         plot=False
@@ -672,7 +681,7 @@ class FiberRows(Header, PositionTable):
                 plot=False
 
         if verbose:
-            iterator = tqdm(second, total=second.size, desc=f"measuring arc lines downwards from {ref_fiber}", ascii=True, unit="fiber")
+            iterator = tqdm(second, total=second.size, desc=f"measuring arc lines downwards from {ref_fiber = }", ascii=True, unit="fiber")
         else:
             iterator = second
         for i in iterator:
@@ -710,10 +719,10 @@ class FiberRows(Header, PositionTable):
                 smaller = good_fibers[sorted][good_fibers[sorted]<j]
 
                 if len(smaller)==0:
-                    cent_wave[j,   i] =cent_wave[greater[0], i]
+                    cent_wave[j, i] =cent_wave[greater[0], i]
                     fwhm[j, i] = fwhm[greater[0], i]
                 elif len(greater)==0:
-                    cent_wave[j,  i] =cent_wave[smaller[0], i]
+                    cent_wave[j, i] =cent_wave[smaller[0], i]
                     fwhm[j, i] = fwhm[smaller[0], i]
                 else:
                     cent_wave[j, i] = (cent_wave[smaller[0], i]+cent_wave[greater[0], i])/2.0
