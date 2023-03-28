@@ -2381,12 +2381,12 @@ def DAR_registerSDSS_drp(
 
     spec_y = Spectrum1D(data=position_y, wave=mean_wave)
     spec_x = Spectrum1D(data=position_x, wave=mean_wave)
-    # poly_x = spec_x.smoothPoly(
-    #     order=smooth_poly, ref_base=rss._wave, start_wave=start_wave, end_wave=end_wave
-    # )
-    # poly_y = spec_y.smoothPoly(
-    #     order=smooth_poly, ref_base=rss._wave, start_wave=start_wave, end_wave=end_wave
-    # )
+    spec_x.smoothPoly(
+        order=smooth_poly, ref_base=rss._wave, start_wave=start_wave, end_wave=end_wave
+    )
+    spec_y.smoothPoly(
+        order=smooth_poly, ref_base=rss._wave, start_wave=start_wave, end_wave=end_wave
+    )
     spec_x.writeFitsData(out_prefix + ".cent_x.fits")
     spec_y.writeFitsData(out_prefix + ".cent_y.fits")
     if verbose == 1:
