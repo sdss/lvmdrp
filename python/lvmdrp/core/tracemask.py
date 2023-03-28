@@ -146,7 +146,7 @@ class TraceMask(FiberRows):
         fit_par[-1, start_slice] = 1.0
         # start iteration towards the dispersion column 0
         for i in first:
-            if select_wave[i] == True:
+            if select_wave[i]:
                 (dist, bad_mask) = self.getFiberDist(
                     i
                 )  # get the fiber distance for the dispersion column i
@@ -175,7 +175,7 @@ class TraceMask(FiberRows):
         second = numpy.arange(start_slice, self._data.shape[1], 1)
         # start iteration towards the last dispersion column
         for i in second:
-            if select_wave[i] == True:
+            if select_wave[i]:
                 (dist, mask) = self.getFiberDist(
                     i
                 )  # get the fiber distance for the dispersion column i
@@ -260,14 +260,14 @@ class TraceMask(FiberRows):
         )  # create absolute positions with an arbitrary zero-point
         select_wave = numpy.sum(self._mask, axis=0) < self._fibers
 
-        offset1 = self._data[150, select_wave] - new_trace[150, select_wave]
-        offset2 = self._data[200, select_wave] - new_trace[200, select_wave]
+        # offset1 = self._data[150, select_wave] - new_trace[150, select_wave]
+        # offset2 = self._data[200, select_wave] - new_trace[200, select_wave]
         offset_mean = numpy.median(
             self._data[:, select_wave] - new_trace[:, select_wave], axis=0
         )  # computes that absolut trace position between the initially measured and estimated trace to compute the zero-point
-        offset_rms = numpy.std(
-            self._data[:, select_wave] - new_trace[:, select_wave], axis=0
-        )  # compute the rms scatter of the measured positions for each dispersion column
+        # offset_rms = numpy.std(
+        #     self._data[:, select_wave] - new_trace[:, select_wave], axis=0
+        # )  # compute the rms scatter of the measured positions for each dispersion column
         fit_offset = numpy.polyfit(wave[select_wave], offset_mean, poly_disp)
         ext_offset = numpy.polyval(fit_offset, wave)
         #   plt.plot(wave[select_wave], offset_mean, 'ok')

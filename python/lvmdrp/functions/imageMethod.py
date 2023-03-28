@@ -1,28 +1,14 @@
+import multiprocessing
 import os
 import sys
+from multiprocessing import Pool, cpu_count
 
 import numpy
 from astropy.io import fits as pyfits
-from astropy.visualization import (
-    AsinhStretch,
-    ImageNormalize,
-    LogStretch,
-    PercentileInterval,
-)
-from tqdm import tqdm
-
-
-try:
-    import pylab
-    from matplotlib import pyplot as plt
-except:
-    pass
-import multiprocessing
-import time
-from multiprocessing import Pool, cpu_count
-from types import *
-
+from astropy.visualization import AsinhStretch, ImageNormalize, PercentileInterval
+from matplotlib import pyplot as plt
 from scipy import interpolate
+from tqdm import tqdm
 
 from lvmdrp.core.fiberrows import FiberRows
 from lvmdrp.core.image import Image, combineImages, glueImages, loadImage
@@ -30,7 +16,6 @@ from lvmdrp.core.plot import save_fig
 from lvmdrp.core.rss import RSS
 from lvmdrp.core.spectrum1d import Spectrum1D
 from lvmdrp.core.tracemask import TraceMask
-from lvmdrp.utils.decorators import missing_files
 from lvmdrp.utils.logger import get_logger
 
 
@@ -121,10 +106,10 @@ def detCos_drp(
     box_x = int(replace_box[0])
     box_y = int(replace_box[1])
     increase_radius = int(increase_radius)
-    verbose = int(verbose)
+    verbose = bool(verbose)
     try:
         replace_error = float(replace_error)
-    except:
+    except Exception:
         replace_error = None
 
     # load image from FITS file
@@ -135,7 +120,7 @@ def detCos_drp(
         pass
     gain = float(gain)
 
-    if gain != 1.0 and verbose == True:
+    if gain != 1.0 and verbose:
         print("Convert image from ADUs to electrons using a gain factor of %f" % (gain))
 
     img = img * gain
@@ -159,7 +144,7 @@ def detCos_drp(
         rdnoise = float(img.getHdrValue(rdnoise))
     except KeyError:
         rdnoise = float(rdnoise)
-    if verbose == True:
+    if verbose:
         print("A value of %f is used for the electron read-out noise." % (rdnoise))
 
     # create empty mask
@@ -189,7 +174,7 @@ def detCos_drp(
             cpus = cpu_count()
             if cpus > 1:
                 cpus = 2
-        except:
+        except Exception:
             cpus = 1
 
     else:
@@ -273,7 +258,7 @@ def detCos_drp(
         # print information on the screen if demanded
         if verbose:
             dim = img_original.getDim()
-            det_pix = numpy.sum(select)
+            # det_pix = numpy.sum(select)
             print(
                 "Total number of detected cosmics: %i out of %i pixels"
                 % (numpy.sum(select), dim[0] * dim[1])
@@ -382,7 +367,7 @@ def LACosmic_drp(
     increase_radius = int(increase_radius)
     try:
         replace_error = float(replace_error)
-    except:
+    except (TypeError, ValueError):
         replace_error = None
 
     # load image from FITS file
@@ -516,7 +501,7 @@ def old_LACosmic_drp(
     verbose = int(verbose)
     try:
         replace_error = float(replace_error)
-    except:
+    except (TypeError, ValueError):
         replace_error = None
 
     # load image from FITS file
@@ -538,7 +523,7 @@ def old_LACosmic_drp(
     # estimate Poisson noise after roughly cleaning cosmics using a median filter
     try:
         rdnoise = float(rdnoise)
-    except:
+    except (TypeError, ValueError):
         rdnoise = img.getHdrValue(rdnoise)
 
     # create empty mask
@@ -644,7 +629,7 @@ def old_LACosmic_drp(
         # print information on the screen if demanded
         if verbose == 1:
             dim = img_original.getDim()
-            det_pix = numpy.sum(select)
+            # det_pix = numpy.sum(select)
             print(
                 "Detected pixels: %i out of %i " % (numpy.sum(select), dim[0] * dim[1])
             )
@@ -815,10 +800,10 @@ def findPeaksAuto_drp(
     file_out.close()
 
     if plot == 1:
-        fig = pylab.figure(figsize=(25, 10))
-        pylab.plot(cut._data, "-k", lw=1)
-        pylab.plot(peaks[0], peaks[2], "o", color="tab:red", mew=0, ms=5)
-        pylab.plot(
+        fig = plt.figure(figsize=(25, 10))
+        plt.plot(cut._data, "-k", lw=1)
+        plt.plot(peaks[0], peaks[2], "o", color="tab:red", mew=0, ms=5)
+        plt.plot(
             centers,
             numpy.ones(len(centers)) * numpy.nanmax(peaks[2]) * 0.5,
             "x",
@@ -826,9 +811,9 @@ def findPeaksAuto_drp(
             ms=7,
             color="tab:blue",
         )
-        pylab.xlabel("cross-dispersion axis (pix)")
-        pylab.ylabel("fiber profile")
-        pylab.show()
+        plt.xlabel("cross-dispersion axis (pix)")
+        plt.ylabel("fiber profile")
+        plt.show()
     else:
         save_fig(fig, output_path=out_peaks, figure_path=figure_path, label=None)
 
@@ -901,7 +886,7 @@ def findPeaksOffset_drp(
     while accepted is False:
         # if numpy.sum(select_weak)>0:
         #    select = numpy.logical_and(select_good_weak, select_weak)
-        #    pylab.plot(peaks_weak_good[0][select[select_good_weak]],peaks_weak_good[2] [select[select_good_weak]],'ob')
+        #    plt.plot(peaks_weak_good[0][select[select_good_weak]],peaks_weak_good[2] [select[select_good_weak]],'ob')
         peaks = cut.findPeaks(threshold=threshold)
         centers = cut.measurePeaks(
             peaks[0], method, init_sigma, threshold=0, max_diff=1.0
@@ -910,7 +895,7 @@ def findPeaksOffset_drp(
         plt.plot(cut._data, "-k")
         plt.plot(peaks[0], peaks[2], "or")
         plt.plot(centers, numpy.ones(len(centers)) * 2000.0, "xg")
-        mpeaks = plt.plot(
+        plt.plot(
             ref_positions + (ref_positions - ref_positions[0]) * slope + offset,
             numpy.ones(numpy.sum(select_good)) * 2000.0,
             "+b",
@@ -920,19 +905,19 @@ def findPeaksOffset_drp(
         line = sys.stdin.readline()
         try:
             threshold = float(line)
-        except:
+        except (TypeError, ValueError):
             accepted = True
         print("New Offset (%.1f):" % (offset))
         line = sys.stdin.readline()
         try:
             offset = float(line)
-        except:
+        except (TypeError, ValueError):
             pass
         print("New slope (%.1f):" % (slope))
         line = sys.stdin.readline()
         try:
             slope = float(line)
-        except:
+        except (TypeError, ValueError):
             pass
 
     # expect_first = ref_pos[select_good][0]
@@ -1092,17 +1077,17 @@ def findPeaksMaster_drp(
     if verbose == 1:
         # control plot for the peaks NEED TO BE REPLACE BY A PROPER VERSION AND POSSIBLE IMPLEMENTAION FOR A GUI
         print("%i Fibers found" % (len(centers._data)))
-        pylab.plot(cut._data, "-k")
-        pylab.plot(peaks_good[0], peaks_good[2], "or")
+        plt.plot(cut._data, "-k")
+        plt.plot(peaks_good[0], peaks_good[2], "or")
         if numpy.sum(select_weak) > 0:
             select = numpy.logical_and(select_good_weak, select_weak)
-            pylab.plot(
+            plt.plot(
                 peaks_weak_good[0][select[select_good_weak]],
                 peaks_weak_good[2][select[select_good_weak]],
                 "ob",
             )
-        pylab.plot(centers._data, numpy.ones(len(centers._data)) * 2000.0, "xg")
-        pylab.show()
+        plt.plot(centers._data, numpy.ones(len(centers._data)) * 2000.0, "xg")
+        plt.show()
 
 
 def findPeaksMaster2_drp(
@@ -1168,7 +1153,7 @@ def findPeaksMaster2_drp(
     fib_qual = numpy.array(fib_qual)
 
     select_good = fib_qual == "GOOD"
-    npeaks = numpy.sum(select_good)
+    # npeaks = numpy.sum(select_good)
     # find location of peaks (local maxima) either above a fixed threshold or to reach a fixed number of peaks
 
     peaks_good = []
@@ -1190,7 +1175,7 @@ def findPeaksMaster2_drp(
             shift_peaks = peaks_good[-1] - expect_last
 
         # print peaks_good
-        ref_pos_temp = ref_pos[:] + shift_peaks
+        # ref_pos_temp = ref_pos[:] + shift_peaks
         select_good = (
             (fib_qual == "GOOD")
             & (numpy.rint(ref_pos + shift_peaks) > border)
@@ -1230,10 +1215,10 @@ def findPeaksMaster2_drp(
     if verbose == 1:
         # control plot for the peaks NEED TO BE REPLACE BY A PROPER VERSION AND POSSIBLE IMPLEMENTAION FOR A GUI
         print("%i Fibers found" % (len(centers._data)))
-        pylab.plot(cut._data, "-k")
-        pylab.plot(peaks_good, peaks_flux, "or")
-        pylab.plot(centers._data, numpy.ones(len(centers._data)) * 2000.0, "xg")
-        pylab.show()
+        plt.plot(cut._data, "-k")
+        plt.plot(peaks_good, peaks_flux, "or")
+        plt.plot(centers._data, numpy.ones(len(centers._data)) * 2000.0, "xg")
+        plt.show()
 
 
 def tracePeaks_drp(
@@ -1356,6 +1341,7 @@ def tracePeaks_drp(
     trace = TraceMask()
     trace.createEmpty(data_dim=(fibers, dim[1]), mask_dim=(fibers, dim[1]))
     trace.setFibers(fibers)
+    trace._good_fibers = good_fibers
     # add the positions of the previous identified peaks
     trace.setSlice(
         column, axis="y", data=positions, mask=numpy.zeros(len(positions), dtype="bool")
@@ -1366,7 +1352,7 @@ def tracePeaks_drp(
     select_first = first % steps == 0
     second = numpy.arange(column + 1, dim[1], 1)
     select_second = second % steps == 0
-    nslice = numpy.sum(select_first) + numpy.sum(select_second)
+    # nslice = numpy.sum(select_first) + numpy.sum(select_second)
     m = 1
     # iterate towards index 0 along dispersion axis
     image_logger.info("tracing fibers along dispersion axis")
@@ -1440,7 +1426,7 @@ def tracePeaks_drp(
     trace.smoothTracePoly(poly_disp)
 
     for i in range(fibers):
-        if bad_fibers[i] == False:
+        if not bad_fibers[i]:
             trace._mask[i, :] = False
         else:
             trace._mask[i, :] = True
@@ -1590,7 +1576,7 @@ def glueCCDFrames_drp(
         extension_error = 1
     else:
         extension_error = None
-    full_img.writeFitsData(out_image)
+    full_img.writeFitsData(out_image, extension_error=extension_error)
 
 
 def combineImages_drp(images, out_image, method="median", k="3.0"):
@@ -1930,19 +1916,19 @@ def offsetTrace_drp(
     try:
         log = open(logfile, "r")
         log_lines = log.readlines()
-        l = 0
-        offset_files = []
-        while l < len(log_lines):
-            if len(log_lines[l].split()) == 1:
-                l += 1
+        i = 0
+        # offset_files = []
+        while i < len(log_lines):
+            if len(log_lines[i].split()) == 1:
+                i += 1
                 offsets = []
             else:
                 offsets.append(
                     numpy.median(
-                        numpy.array(log_lines[l + 2].split()[1:]).astype("float32")
+                        numpy.array(log_lines[i + 2].split()[1:]).astype("float32")
                     )
                 )
-                l += 3
+                i += 3
         log.close()
     except IOError:
         offsets = []
@@ -2284,36 +2270,36 @@ def extractSpec_drp(
 
     if error is not None:
         error[mask] = replace_error
-    rss = FiberRows(data=data, mask=mask, error=error, header=img.getHeader())
+    rss = FiberRows(
+        data=data,
+        mask=mask,
+        error=error,
+        good_fibers=numpy.logical_not(trace_mask._mask),
+        header=img.getHeader(),
+    )
     rss.setHdrValue("NAXIS2", data.shape[0])
     rss.setHdrValue("NAXIS1", data.shape[1])
     rss.setHdrValue("DISPAXIS", 1)
     if method == "optimal":
         rss.setHdrValue(
             "HIERARCH PIPE CDISP FWHM MIN",
-            numpy.min(trace_fwhm._data[trace_mask._mask == False], initial=0),
+            numpy.min(trace_fwhm._data[rss._good_fibers]),
         )
         rss.setHdrValue(
             "HIERARCH PIPE CDISP FWHM MAX",
-            numpy.max(trace_fwhm._data[trace_mask._mask == False], initial=0),
+            numpy.max(trace_fwhm._data[rss._good_fibers]),
         )
         rss.setHdrValue(
             "HIERARCH PIPE CDISP FWHM AVG",
-            numpy.mean(trace_fwhm._data[trace_mask._mask == False])
-            if data.size != 0
-            else 0,
+            numpy.mean(trace_fwhm._data[rss._good_fibers]) if data.size != 0 else 0,
         )
         rss.setHdrValue(
             "HIERARCH PIPE CDISP FWHM MED",
-            numpy.median(trace_fwhm._data[trace_mask._mask == False])
-            if data.size != 0
-            else 0,
+            numpy.median(trace_fwhm._data[rss._good_fibers]) if data.size != 0 else 0,
         )
         rss.setHdrValue(
             "HIERARCH PIPE CDISP FWHM SIG",
-            numpy.std(trace_fwhm._data[trace_mask._mask == False])
-            if data.size != 0
-            else 0,
+            numpy.std(trace_fwhm._data[rss._good_fibers]) if data.size != 0 else 0,
         )
     rss.writeFitsData(out_rss)
 
@@ -2361,14 +2347,6 @@ def subtractBias_drp(
 
     clean = image - bias_frame
     # print('clean',clean._data)
-    if boundary_x != "":
-        bound_x = boundary_x.split(",")
-    else:
-        bound_x = [1, clean._dim[1]]
-    if boundary_y != "":
-        bound_y = boundary_y.split(",")
-    else:
-        bound_y = [1, clean._dim[0]]
 
     if gain != "":
         # get gain value
@@ -2389,9 +2367,16 @@ def subtractBias_drp(
     if compute_error:
         clean.computePoissonError(rdnoise=rdnoise)
 
-    if boundary_x != "" or boundary_y != "":
-        straylight = clean.cutOverscan(bound_x, bound_y, subtract_light)
-        # print(straylight)
+    # if boundary_x != "":
+    #     bound_x = boundary_x.split(",")
+    # else:
+    #     bound_x = [1, clean._dim[1]]
+    # if boundary_y != "":
+    #     bound_y = boundary_y.split(",")
+    # else:
+    #     bound_y = [1, clean._dim[0]]
+    # straylight = clean.cutOverscan(bound_x, bound_y, subtract_light)
+    # print(straylight)
 
     clean.writeFitsData(out_image)
 
@@ -2547,7 +2532,7 @@ def testres_drp(image, trace, fwhm, flux):
     Historic task used for debugging of the the extraction routine...
     """
     img = Image()
-    t1 = time.time()
+    # t1 = time.time()
     img.loadFitsData(image, extension_data=0)
     trace_mask = TraceMask()
     trace_mask.loadFitsData(trace, extension_data=0)
@@ -2577,9 +2562,9 @@ def testres_drp(image, trace, fwhm, flux):
         spec = numpy.dot(A, trace_flux._data[:, i])
         out[:, i] = spec
         if i == 1000:
-            pylab.plot(spec, "-r")
-            pylab.plot(img._data[:, i], "ok")
-            pylab.show()
+            plt.plot(spec, "-r")
+            plt.plot(img._data[:, i], "ok")
+            plt.show()
 
     hdu = pyfits.PrimaryHDU(img._data - out)
     hdu.writeto("res.fits", overwrite=True)
@@ -2818,7 +2803,7 @@ def preprocRawFrame_drp(
             image_logger.info(
                 f"parsed data region from 'TRIMSEC', YX_i = {sc_y_i, sc_x_i}, YX_f = {sc_y_f, sc_x_f}"
             )
-        except (KeyError, ValueError) as error:
+        except (KeyError, ValueError):
             image_logger.warning("no valid 'TRIMSEC' found in header")
             infer_trimsec = True
     elif infer_trimsec:

@@ -2,13 +2,10 @@ import numpy
 from astropy.io import fits as pyfits
 
 
-try:
-    import pylab
-except:
-    pass
+import matplotlib.pyplot as plt
 from copy import deepcopy
 
-from scipy import interpolate, ndimage, optimize, sparse
+from scipy import interpolate, ndimage, sparse
 
 from lvmdrp.core import fit_profile
 from lvmdrp.core.header import Header
@@ -171,7 +168,7 @@ class Spectrum1D(Header):
                         error = error.astype(numpy.float32)
                 spec = Spectrum1D(wave=self._wave, data=data, error=error, mask=mask)
                 return spec
-            except:
+            except Exception:
                 # raise exception if the type are not matching in general
                 raise TypeError(
                     "unsupported operand type(s) for -: %s and %s"
@@ -242,7 +239,7 @@ class Spectrum1D(Header):
                         error = error.astype(numpy.float32)
                 spec = Spectrum1D(wave=self._wave, data=data, error=error, mask=mask)
                 return spec
-            except:
+            except Exception:
                 # raise exception if the type are not matching in general
                 raise TypeError(
                     "unsupported operand type(s) for -: %s and %s"
@@ -347,7 +344,7 @@ class Spectrum1D(Header):
                         error = error.astype(numpy.float32)
                 spec = Spectrum1D(wave=self._wave, data=data, error=error, mask=mask)
                 return spec
-            except:
+            except Exception:
                 # raise exception if the type are not matching in general
                 raise TypeError(
                     "unsupported operand type(s) for /: %s and %s"
@@ -743,7 +740,7 @@ class Spectrum1D(Header):
         for i in range(len(hdus)):
             try:
                 hdus.remove(None)
-            except:
+            except Exception:
                 break
 
         if len(hdus) > 0:
@@ -946,7 +943,7 @@ class Spectrum1D(Header):
                 clean_inst_fwhm = intp(self._wave)
 
                 select_interp = clean_inst_fwhm != 0
-                wave_interp = self._wave[select_interp]
+                # wave_interp = self._wave[select_interp]
                 # perform the interpolation on the data
                 if method == "spline":
                     intp = interpolate.UnivariateSpline(
@@ -981,7 +978,7 @@ class Spectrum1D(Header):
 
             # select pixels that were interpolated (excluding extrapolated ones)
             select_interp = clean_data != 0
-            wave_interp = self._wave[select_interp]
+            # wave_interp = self._wave[select_interp]
             # perform the interpolation on the data
             if method == "spline":
                 intp = interpolate.UnivariateSpline(
@@ -1155,7 +1152,7 @@ class Spectrum1D(Header):
             mask_in = numpy.logical_and(self._mask)
         else:
             mask_in = numpy.ones(len(self._wave), dtype="bool")
-        masked_data = self._wave[mask_in]
+        # masked_data = self._wave[mask_in]
         masked_wave = self._wave[mask_in]
         if self._error is not None:
             error_out = numpy.zeros(len(new_wave), dtype=numpy.float32)
@@ -1165,7 +1162,7 @@ class Spectrum1D(Header):
         bound_min = new_wave - new_disp / 2.0
         bound_max = new_wave + new_disp / 2.0
 
-        disp = bound_max - bound_min
+        # disp = bound_max - bound_min
         for i in range(len(new_wave)):
             select = numpy.logical_and(
                 masked_wave >= bound_min[i], masked_wave <= bound_max[i]
@@ -1268,7 +1265,7 @@ class Spectrum1D(Header):
         if self._inst_fwhm is not None:
             inst_fwhm = numpy.sqrt(self._inst_fwhm**2 + diff_fwhm**2)
         else:
-            inst_fwhm = fwhm
+            inst_fwhm = diff_fwhm
 
         spec = Spectrum1D(
             wave=self._wave,
@@ -1513,7 +1510,7 @@ class Spectrum1D(Header):
             )  # create empty array
             for j in range(len(init_pos)):
                 # only pixels with enough contrast are fitted
-                if mask[j] == False:
+                if not mask[j]:
                     gauss = fit_profile.Gaussian(
                         [
                             self._data[init_pos[j]] * numpy.sqrt(2 * numpy.pi),
@@ -1910,15 +1907,15 @@ class Spectrum1D(Header):
                 out[i] = out_fit[0]
                 out[ncomp + i] = out_fit[1]
                 out[2 * ncomp + i] = out_fit[2]
-                if plot == True:
+                if plot:
                     gauss.plot(self._wave[select], self._data[select])
 
             else:
                 out[i] = 0.0
                 out[ncomp + i] = 0.0
                 out[2 * ncomp + i] = 0.0
-        if plot == True:
-            pylab.show()
+        if plot:
+            plt.show()
         return out
 
     def obtainGaussFluxPeaks(self, pos, sigma, indices, replace_error=1e10, plot=False):
@@ -1965,11 +1962,11 @@ class Spectrum1D(Header):
         error = numpy.sqrt(1 / numpy.sum((A**2), 0))
         if bad_pix is not None and numpy.sum(bad_pix) > 0:
             error[bad_pix] = replace_error
-        if plot == True:
-            pylab.plot(self._data, "ok")
-            pylab.plot(numpy.dot(A * self._error[:, numpy.newaxis], out[0]), "-r")
-            # pylab.plot(numpy.dot(A, out[0]), '-r')
-            pylab.show()
+        if plot:
+            plt.plot(self._data, "ok")
+            plt.plot(numpy.dot(A * self._error[:, numpy.newaxis], out[0]), "-r")
+            # plt.plot(numpy.dot(A, out[0]), '-r')
+            plt.show()
         return out[0], error, bad_pix
 
     def collapseSpec(self, method="mean", start=None, end=None, transmission_func=None):

@@ -758,7 +758,7 @@ def correctPixTable_drp(
             ref_wave.append(float(log_lines[i].split()[0]))
             fibers = numpy.array(log_lines[i + 1].split()).astype("float")
             offset_pix = numpy.array(log_lines[i + 2].split()).astype("float")
-            offset_wave = numpy.array(log_lines[i + 3].split()).astype("float")
+            # offset_wave = numpy.array(log_lines[i + 3].split()).astype("float")
 
             if smooth_poly_cross == "":
                 offsets.append(offset_pix)
@@ -774,7 +774,7 @@ def correctPixTable_drp(
                     plt.plot(numpy.arange(rss._fibers), spec._data)
                 offsets.append(spec._data)
 
-        if len(log_lines[i].split()) == 1 and not (ref_id in log_lines[i]) and m == 1:
+        if len(log_lines[i].split()) == 1 and (ref_id not in log_lines[i]) and m == 1:
             m = 0
     if verbose == 1:
         plt.show()
@@ -995,7 +995,6 @@ def matchResolution_drp(in_rss, out_rss, targetFWHM, parallel="auto"):
         pool = Pool(cpus)
         threads = []
         for i in range(len(rss)):
-            spec = rss[i]
             threads.append(
                 pool.apply_async(rss[i].smoothGaussVariable, ([smoothFWHM[i, :]]))
             )
@@ -1097,7 +1096,7 @@ def createFiberFlat_drp(
 
     # perform some statistic about the fiberflat
     if fiberflat._mask is not None:
-        select = fiberflat._mask == False
+        select = numpy.logical_not(fiberflat._mask)
     else:
         select = fiberflat._data == fiberflat._data
     min = numpy.min(fiberflat._data[select])
@@ -1157,30 +1156,30 @@ def correctTraceMask_drp(trace_in, trace_out, logfile, ref_file, poly_smooth="")
     """
     log = open(logfile, "r")
     log_lines = log.readlines()
-    l = 0
-    while l < len(log_lines):
-        split = log_lines[l].split()
+    i = 0
+    while i < len(log_lines):
+        split = log_lines[i].split()
         z = 1
         if len(split) == 1 and split[0] == ref_file:
             offsets = []
             lines = []
             cross_pos = []
             disp_pos = []
-            while l + z < len(log_lines):
-                split1 = log_lines[l + z].split()
-                split2 = log_lines[l + z + 1].split()
-                split3 = log_lines[l + z + 2].split()
+            while i + z < len(log_lines):
+                split1 = log_lines[i + z].split()
+                split2 = log_lines[i + z + 1].split()
+                split3 = log_lines[i + z + 2].split()
                 if len(split1) > 1:
                     offsets.append(numpy.array(split3[1:]).astype("float32"))
                     cross_pos.append(numpy.array(split1[1:]).astype("float32"))
                     disp_pos.append(numpy.array(split2[1:]).astype("float32"))
                     lines.append(float(split3[0]))
                 else:
-                    incomplete = False
+                    # incomplete = False
                     break
                 z += 3
             break
-        l += 1
+        i += 1
 
         log.close()
     offsets = numpy.array(offsets)
@@ -1351,7 +1350,7 @@ def matchFluxRSS_drp(
     if end_wave != "":
         end_wave = float(end_wave)
     else:
-        end_Wave = None
+        end_wave = None
     hdr_prefixes = hdr_prefixes.split(",")
     arc_radius = float(arc_radius)
     polyorder = int(polyorder)
@@ -1643,7 +1642,7 @@ def createCube_drp(
             max_y = float(max_y)
 
         elif rss._shape == "R":
-            if full_field == False:
+            if not full_field:
                 min_x = numpy.round(numpy.min(rss._arc_position_x), 4)
                 max_x = numpy.round(numpy.max(rss._arc_position_x), 4)
                 min_y = numpy.round(numpy.min(rss._arc_position_y), 4)
@@ -2053,7 +2052,7 @@ def registerSDSS_drp(
 
     filter = filter.split(",")
     posTab = rss.getPositionTable()
-    fiber_area = numpy.pi * posTab._size[0] ** 2
+    # fiber_area = numpy.pi * posTab._size[0] ** 2
     img = loadImage(sdss_file)
     sdssimg = img.calibrateSDSS(sdss_field)
     spa = -1 * img.getHdrValue(angle_key)
@@ -2096,7 +2095,7 @@ def registerSDSS_drp(
             offset_y,
             parallel=parallel,
         )
-        idx = numpy.indices(chisq.shape)
+        # idx = numpy.indices(chisq.shape)
         # select_valid = numpy.max(valid_fibers)-2<valid_fibers
         # select_best=numpy.min(chisq[select_valid])==chisq
         select_best = numpy.min(chisq) == chisq
@@ -2118,7 +2117,7 @@ def registerSDSS_drp(
         rss.offsetPosTab(-1 * best_offset_x, -1 * best_offset_y)
     rss = rss * best_scale
     rss._data = rss._data.astype(numpy.float32)
-    rss_error = rss._error.astype(numpy.float32)
+    # rss_error = rss._error.astype(numpy.float32)
     rss.setHdrValue(
         hdr_prefix + " PIPE OFFX",
         float("%.2f" % (best_offset_x)),
@@ -2226,7 +2225,7 @@ def registerSDSS_drp(
             ],
         )
         ax3.plot(best_offset_x, best_offset_y, "ok", ms=8)
-        cb = plt.colorbar(chi_map, ax=ax3, pad=0.0)
+        plt.colorbar(chi_map, ax=ax3, pad=0.0)
         ax3.set_xlabel("offset in RA [arcsec]", fontsize=18)
         ax3.set_ylabel("offset in DEC [arcsec]", fontsize=18)
         ax3.minorticks_on()
@@ -2321,10 +2320,10 @@ def DAR_registerSDSS_drp(
     flux_rss = flux_rss * fiber_area
     error_rss = error_rss * fiber_area
 
-    rss_mag = passband.fluxToMag(flux_rss)
-    AB_flux = 10 ** (rss_mag / -2.5)
-    AB_eflux = error_rss * (AB_flux / flux_rss)
-    good_rss = flux_rss / error_rss > 3.0
+    # rss_mag = passband.fluxToMag(flux_rss)
+    # AB_flux = 10 ** (rss_mag / -2.5)
+    # AB_eflux = error_rss * (AB_flux / flux_rss)
+    # good_rss = flux_rss / error_rss > 3.0
     for i in range(len(search_box)):
         result = rss.registerImage(
             sdssimg,
@@ -2382,12 +2381,12 @@ def DAR_registerSDSS_drp(
 
     spec_y = Spectrum1D(data=position_y, wave=mean_wave)
     spec_x = Spectrum1D(data=position_x, wave=mean_wave)
-    poly_x = spec_x.smoothPoly(
-        order=smooth_poly, ref_base=rss._wave, start_wave=start_wave, end_wave=end_wave
-    )
-    poly_y = spec_y.smoothPoly(
-        order=smooth_poly, ref_base=rss._wave, start_wave=start_wave, end_wave=end_wave
-    )
+    # poly_x = spec_x.smoothPoly(
+    #     order=smooth_poly, ref_base=rss._wave, start_wave=start_wave, end_wave=end_wave
+    # )
+    # poly_y = spec_y.smoothPoly(
+    #     order=smooth_poly, ref_base=rss._wave, start_wave=start_wave, end_wave=end_wave
+    # )
     spec_x.writeFitsData(out_prefix + ".cent_x.fits")
     spec_y.writeFitsData(out_prefix + ".cent_y.fits")
     if verbose == 1:
