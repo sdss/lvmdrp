@@ -113,48 +113,48 @@ def detWaveSolution_drp(
     Parameters
     --------------
     arc_rss : string
-                    Input RSS FITS file name of the uncalibrated arc lamp exposure
+        Input RSS FITS file name of the uncalibrated arc lamp exposure
     prefix_out : string
-                    PREFIX for the output RSS file containing the wavelength RSS pixel table (PREFIX.disp.fits) and
-                    the spectral resolution (FWHM) RSS pixel table (PREFIX.res.fits)
+        PREFIX for the output RSS file containing the wavelength RSS pixel table (PREFIX.disp.fits) and
+        the spectral resolution (FWHM) RSS pixel table (PREFIX.res.fits)
     ref_line_file : string, optional with default: ''
-                    ASCII file name containing the number of the reference fiber in the first row,
-                    reference wavelength of emission line, its rough centroid pixel position a flag if the width of the
-                    line should be considered for the spectral resolution measurements (space separated) in
-                    each subsquent row.
-                    If no ASCII file is provided those information must be given in the ref_fiber, pixel and ref_lines parameters.
+        ASCII file name containing the number of the reference fiber in the first row,
+        reference wavelength of emission line, its rough centroid pixel position a flag if the width of the
+        line should be considered for the spectral resolution measurements (space separated) in
+        each subsquent row.
+        If no ASCII file is provided those information must be given in the ref_fiber, pixel and ref_lines parameters.
     ref_fiber : string of integer, optional with default: ''
-                    Number of the fiber in the RSS for which the rough guess for their centroid pixel position (x-direction) are given.
-                    Only used if no ASCII file is given.
+        Number of the fiber in the RSS for which the rough guess for their centroid pixel position (x-direction) are given.
+        Only used if no ASCII file is given.
     pixel : string of integers, optional with default: ''
-                    Comma-separated list of rough centroid pixel position for each emission line for the corresponding reference fiber.
-                    Only used if no ASCII file is given.
+        Comma-separated list of rough centroid pixel position for each emission line for the corresponding reference fiber.
+        Only used if no ASCII file is given.
     ref_lines : string of floats, optional with default: ''
-                    Comma-separated list of reference emission-line wavelength. Need to be same number of values as for the pixel guess
-                    Only used if no ASCII file is given.
+        Comma-separated list of reference emission-line wavelength. Need to be same number of values as for the pixel guess
+        Only used if no ASCII file is given.
     poly_dispersion : string of integer, optional with default: '-5'
-                    Degree of polynomial used to construct the wavelength solution for each fiber. (positiv: normal polynomial, negative: Legandre polynomial)
+        Degree of polynomial used to construct the wavelength solution for each fiber. (positiv: normal polynomial, negative: Legandre polynomial)
     poly_fwhm : string of two integers, optional with default: '-3,-5'
-                    First integer is the degree of polynomial used to smooth the measured FWHM of each line as a function of fiber number (cross-dispersion).
-                    Second integer is the degree of polynomial used to subsquently extrapolate the line FWHM across the disperion direction,
-                    (positiv: normal polynomial, negative: Legandre polynomial)
+        First integer is the degree of polynomial used to smooth the measured FWHM of each line as a function of fiber number (cross-dispersion).
+        Second integer is the degree of polynomial used to subsquently extrapolate the line FWHM across the disperion direction,
+        (positiv: normal polynomial, negative: Legandre polynomial)
     init_back : string of float, optinal with default: '10.0'
-                    Initial guess for the constant background level that can be fitted in addition to the Gaussian for each line.
-                    If this parameter is left empty, the background level is fixed to zero.
+        Initial guess for the constant background level that can be fitted in addition to the Gaussian for each line.
+        If this parameter is left empty, the background level is fixed to zero.
     aperture : string of integer, optional with default: '13'
-                    Aperture centered on the guess of the pixel position from which pixel with the maximum flux is used as the guess for the Gaussian fitting.
-                    This is also the size of the fitted region for each line.
+        Aperture centered on the guess of the pixel position from which pixel with the maximum flux is used as the guess for the Gaussian fitting.
+        This is also the size of the fitted region for each line.
     flux_min : string of float, optional with default: '200.0'
-                    Required minimum integrated flux of the best-fit Gaussian model to be considered as a reliable value.
-                    The measurement for this emission line for the specific fiber is masked if it falls below this threshold.
+        Required minimum integrated flux of the best-fit Gaussian model to be considered as a reliable value.
+        The measurement for this emission line for the specific fiber is masked if it falls below this threshold.
     fwhm_max : string of float, optional with default: '10.0'
-                    Maximum FWHM of the best-fit Gaussian model to be considered as a reliable value.
+        Maximum FWHM of the best-fit Gaussian model to be considered as a reliable value.
     rel_flux_limits : string of two floats, optional with default: '0.1,5.0'
-                    Required relative integrated fluxes with respect to the measured fluxes  for the reference fiber.
-                    If relative fluxes are outside this range, they will be masked.
+        Required relative integrated fluxes with respect to the measured fluxes  for the reference fiber.
+        If relative fluxes are outside this range, they will be masked.
     negative :
     plot: string of integer (0 or 1), optional  with default: 1
-                    Show information during the processing on the command line (0 - no, 1 - yes)
+        Show information during the processing on the command line (0 - no, 1 - yes)
 
     Examples
     ----------------
@@ -233,6 +233,7 @@ def detWaveSolution_drp(
     # plot if requested
     if plot:
         fig, axs = plt.subplots(3, 1, figsize=(25, 15))
+        axs = numpy.append(axs, axs[2].twinx())
         for pix in pixel:
             axs[0].axvspan(
                 pix - (aperture - 1) // 2,
@@ -361,8 +362,8 @@ def detWaveSolution_drp(
     if plot:
         axs[1].axhline(len(ref_lines), ls="--", color="0.2", lw=1)
         axs[1].bar(fibers, masked_fib, color="tab:blue")
-        axs[1].set_xlabel("cross-dispersion axis (pix)")
-        axs[1].set_ylabel("number of lines")
+        axs[1].set_xlabel("fiber ID")
+        axs[1].set_ylabel("# of guess lines")
         axs[1].set_title("# of masked lines per fiber", loc="left")
 
         axs[2].fill_between(
@@ -370,9 +371,10 @@ def detWaveSolution_drp(
             wave_sol.mean(0) - wave_sol.std(0),
             wave_sol.mean(0) + wave_sol.std(0),
             lw=0,
-            fc="0.5",
+            fc="tab:blue",
             alpha=0.5,
         )
+        axs[2].plot(arc._pixels, wave_sol.mean(0), lw=1, color="tab:blue")
         for i in fibers:
             select = masked[i, select_lines]
             masked_fib[i] = numpy.sum(select)
@@ -391,17 +393,10 @@ def detWaveSolution_drp(
         axs[2].set_xlabel("dispersion axis (pix)")
         axs[2].set_ylabel("wavelength (AA)")
         axs[2].set_title(
-            f"wavelength solutions with a polynomial of {poly_dispersion}-deg",
+            f"wavelength solutions with a {poly_dispersion}-deg polynomial",
             loc="left",
+            color="tab:blue",
         )
-
-        fig.tight_layout()
-        if plot == 1:
-            plt.show()
-        else:
-            save_fig(
-                fig, output_path=out_image, figure_path=figure_path, label="fit_wave"
-            )
 
     # Estimate the spectral resolution pattern
     dwave = (
@@ -429,6 +424,40 @@ def detWaveSolution_drp(
 
         lsf_coeffs[i, :] = poly.coef
         fwhm_sol[i, :] = poly(arc._pixels)
+
+    if plot:
+        axs[3].fill_between(
+            arc._pixels,
+            fwhm_sol.mean(0) - fwhm_sol.std(0),
+            fwhm_sol.mean(0) + fwhm_sol.std(0),
+            lw=0,
+            fc="tab:red",
+            alpha=0.5,
+        )
+        axs[3].plot(arc._pixels, fwhm_sol.mean(0), lw=1, color="tab:red")
+        for i in fibers:
+            fwhm_wave = numpy.fabs(dwave[i, cent_round[i, :]]) * fwhm[i, :]
+
+            axs[3].plot(
+                cent_wave[i, select_lines],
+                fwhm_wave[select_lines],
+                ",",
+                color="tab:red",
+            )
+        axs[3].set_ylabel("FWHM LSF (AA)")
+        axs[3].set_title(
+            f"LSF solutions with a {poly_fwhm_disp}-deg polynomial",
+            loc="right",
+            color="tab:red",
+        )
+
+        fig.tight_layout()
+        if plot == 1:
+            plt.show()
+        else:
+            save_fig(
+                fig, output_path=out_wave, figure_path=figure_path, label="fit_wave"
+            )
 
     # update header
     arc.setHdrValue(
