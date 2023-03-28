@@ -1,10 +1,8 @@
-import sys
-
 import numpy
 from astropy.io import fits as pyfits
 from tqdm import tqdm
 
-from lvmdrp.core.header import Header
+from lvmdrp.core.header import Header, combineHdr
 from lvmdrp.core.positionTable import PositionTable
 from lvmdrp.core.spectrum1d import Spectrum1D
 
@@ -267,9 +265,9 @@ class FiberRows(Header, PositionTable):
                     fiber_type=self._fiber_type,
                 )
                 return img
-            except:
+            except Exception:
                 # raise exception if the type are not matching in general
-                raise exceptions.TypeError(
+                raise TypeError(
                     "unsupported operand type(s) for +: %s and %s"
                     % (str(type(self)).split("'")[1], str(type(other)).split("'")[1])
                 )
@@ -367,9 +365,9 @@ class FiberRows(Header, PositionTable):
                     fiber_type=self._fiber_type,
                 )
                 return img
-            except:
+            except Exception:
                 # raise exception if the type are not matching in general
-                raise exceptions.TypeError(
+                raise TypeError(
                     "unsupported operand type(s) for *: %s and %s"
                     % (str(type(self)).split("'")[1], str(type(other)).split("'")[1])
                 )
@@ -783,7 +781,7 @@ class FiberRows(Header, PositionTable):
         for i in range(len(hdus)):
             try:
                 hdus.remove(None)
-            except:
+            except Exception:
                 break
 
         if len(hdus) > 0:
