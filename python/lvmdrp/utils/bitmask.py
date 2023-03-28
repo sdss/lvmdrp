@@ -12,8 +12,10 @@ from enum import IntFlag, auto
 
 class classproperty(object):
     """taken from https://bit.ly/3yrErQr"""
+
     def __init__(self, f):
         self.f = f
+
     def __get__(self, obj, owner):
         return self.f(owner)
 
@@ -98,8 +100,8 @@ class BaseBitmask(IntFlag):
 class ReductionStatus(BaseBitmask):
     # mutually exclusive bits
     IN_PROGRESS = auto()  # bit whether a reduction is in progress
-    FINISHED = auto()     # bit whether a reduction has succesfully finished
-    FAILED = auto()       # bit whether a reduction has failed
+    FINISHED = auto()  # bit whether a reduction has succesfully finished
+    FAILED = auto()  # bit whether a reduction has failed
 
     @classproperty
     def MUTUALLY_EXCLUSIVE_BITS(cls):
@@ -119,12 +121,15 @@ class ReductionStatus(BaseBitmask):
                 raise
 
         new = copy(self)
-        flag_exclusive = set(flag.get_name().split(",")).intersection(self.MUTUALLY_EXCLUSIVE_BITS)
+        flag_exclusive = set(flag.get_name().split(",")).intersection(
+            self.MUTUALLY_EXCLUSIVE_BITS
+        )
         if flag_exclusive:
             to_remove = set(self.MUTUALLY_EXCLUSIVE_BITS).difference(flag_exclusive)
             for bit in to_remove:
                 bit = self.__class__[bit]
-                if bit in self: new = self ^ bit
+                if bit in self:
+                    new = self ^ bit
         return new | flag
 
 
@@ -132,40 +137,44 @@ class ReductionStatus(BaseBitmask):
 #   - add flag for each step in the reduction, for example: "calib", "cosmic", "stray", etc.
 class ReductionStage(BaseBitmask):
     # completed reduction steps
-    UNREDUCED = auto()              # exposure not reduced
-    PREPROCESSED = auto()           # trimmed overscan region
-    CALIBRATED = auto()             # bias, dark and pixelflat calibrated
-    COSMIC_CLEAN = auto()           # cosmic ray cleaned
-    STRAY_CLEAN = auto()            # stray light subtracted
-    FIBERS_FOUND = auto()           # fiberflat fibers located along the column
-    FIBERS_TRACED = auto()          # fiberflat fibers traces along the dispersion axis
-    SPECTRA_EXTRACTED = auto()      # extracted the fiber spectra of any arc, flat, or science frames
-    WAVELENGTH_SOLVED = auto()      # arc fiber wavelength solution found
-    WAVELENGTH_RESAMPLED = auto()   # fiber wavelength resampled to common wavelength/LSF vector
+    UNREDUCED = auto()  # exposure not reduced
+    PREPROCESSED = auto()  # trimmed overscan region
+    CALIBRATED = auto()  # bias, dark and pixelflat calibrated
+    COSMIC_CLEAN = auto()  # cosmic ray cleaned
+    STRAY_CLEAN = auto()  # stray light subtracted
+    FIBERS_FOUND = auto()  # fiberflat fibers located along the column
+    FIBERS_TRACED = auto()  # fiberflat fibers traces along the dispersion axis
+    SPECTRA_EXTRACTED = (
+        auto()
+    )  # extracted the fiber spectra of any arc, flat, or science frames
+    WAVELENGTH_SOLVED = auto()  # arc fiber wavelength solution found
+    WAVELENGTH_RESAMPLED = (
+        auto()
+    )  # fiber wavelength resampled to common wavelength/LSF vector
 
 
 class QualityFlag(BaseBitmask):
-    EXTRACTBAD = auto()	    # Many bad values in extracted frame.
-    EXTRACTBRIGHT = auto()	# Extracted spectra abnormally bright.
-    LOWEXPTIME = auto()	    # Exposure time less than 10 minutes.
-    BADIFU = auto()	        # One or more IFUs missing/bad in this frame.
-    HIGHSCAT = auto()	    # High scattered light levels.
-    SCATFAIL = auto()	    # Failure to correct high scattered light levels.
-    BADDITHER = auto()	    # Bad dither location information.
-    ARCFOCUS = auto()	    # Bad focus on arc frames.
-    RAMPAGINGBUNNY = auto()	# Rampaging dust bunnies in IFU flats.
-    SKYSUBBAD = auto()	    # Bad sky subtraction.
-    SKYSUBFAIL = auto()	    # Failed sky subtraction.
-    FULLCLOUD = auto()	    # Completely cloudy exposure.
-    BADFLEXURE = auto()	    # Abnormally high flexure LSF correction.
-    BGROOVEFAIL = auto()	# Possible B-groove glue failure.
-    RGROOVEFAIL = auto()	# Possible R-groove glue failure.
-    NOGUIDER = auto()	    # No guider data available.
-    NOSPEC1 = auto()	    # No data from spec1.
-    NOSPEC2 = auto()	    # No data from spec2.
-    NOSPEC3 = auto()        # No data from spec3.
-    BLOWTORCH = auto()	    # Blowtorch artifact detected.
-    SEVEREBT = auto()	    # Severe blowtorch artifact.
+    EXTRACTBAD = auto()  # Many bad values in extracted frame.
+    EXTRACTBRIGHT = auto()  # Extracted spectra abnormally bright.
+    LOWEXPTIME = auto()  # Exposure time less than 10 minutes.
+    BADIFU = auto()  # One or more IFUs missing/bad in this frame.
+    HIGHSCAT = auto()  # High scattered light levels.
+    SCATFAIL = auto()  # Failure to correct high scattered light levels.
+    BADDITHER = auto()  # Bad dither location information.
+    ARCFOCUS = auto()  # Bad focus on arc frames.
+    RAMPAGINGBUNNY = auto()  # Rampaging dust bunnies in IFU flats.
+    SKYSUBBAD = auto()  # Bad sky subtraction.
+    SKYSUBFAIL = auto()  # Failed sky subtraction.
+    FULLCLOUD = auto()  # Completely cloudy exposure.
+    BADFLEXURE = auto()  # Abnormally high flexure LSF correction.
+    BGROOVEFAIL = auto()  # Possible B-groove glue failure.
+    RGROOVEFAIL = auto()  # Possible R-groove glue failure.
+    NOGUIDER = auto()  # No guider data available.
+    NOSPEC1 = auto()  # No data from spec1.
+    NOSPEC2 = auto()  # No data from spec2.
+    NOSPEC3 = auto()  # No data from spec3.
+    BLOWTORCH = auto()  # Blowtorch artifact detected.
+    SEVEREBT = auto()  # Severe blowtorch artifact.
 
 
 class PixMask(BaseBitmask):
@@ -201,6 +210,7 @@ class PixMask(BaseBitmask):
     BADFLUXFACTOR = auto()
     BADSKYCHI = auto()
 
+
 # define flag name constants
 STATUS = list(ReductionStatus.__members__.keys())
 STAGE = list(ReductionStage.__members__.keys())
@@ -227,5 +237,5 @@ if __name__ == "__main__":
     print("finished" in status)
     status = ReductionStatus.IN_PROGRESS
     print(status.get_name(), stage.get_name())
-    stage += ReductionStage.PREPROCESSED|ReductionStage.CALIBRATED
+    stage += ReductionStage.PREPROCESSED | ReductionStage.CALIBRATED
     print(status.get_name(), stage.get_name())

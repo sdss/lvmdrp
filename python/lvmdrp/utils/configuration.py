@@ -18,7 +18,7 @@ from lvmdrp.core.constants import MASTER_CONFIG_PATH
 from lvmdrp.utils.namespace import DictLoader, NamespaceLoader
 
 
-__all__ = ['get_config']
+__all__ = ["get_config"]
 
 
 def merge_config(user, default):
@@ -34,8 +34,9 @@ def merge_config(user, default):
     return user
 
 
-def get_config(name, allow_user=True, user_path=None, config_envvar=None,
-               merge_mode='update'):
+def get_config(
+    name, allow_user=True, user_path=None, config_envvar=None, merge_mode="update"
+):
     """Returns a configuration dictionary.
 
     The configuration dictionary is created by merging the default
@@ -73,26 +74,26 @@ def get_config(name, allow_user=True, user_path=None, config_envvar=None,
 
     """
 
-    assert merge_mode in ['update', 'replace'], 'invalid merge mode.'
+    assert merge_mode in ["update", "replace"], "invalid merge mode."
 
     yaml_kwds = dict()
-    if parse_version(yaml.__version__) >= parse_version('5.1'):
+    if parse_version(yaml.__version__) >= parse_version("5.1"):
         yaml_kwds.update(Loader=yaml.FullLoader)
 
     # Loads config
-    config_path = os.path.join(os.path.dirname(__file__), '../etc/{0}.yml'.format(name))
-    with open(config_path, 'r') as fp:
+    config_path = os.path.join(os.path.dirname(__file__), "../etc/{0}.yml".format(name))
+    with open(config_path, "r") as fp:
         config = yaml.load(fp, **yaml_kwds)
 
     if allow_user is False:
         return config
 
-    config_envvar = config_envvar or '{}_CONFIG_PATH'.format(name.upper())
+    config_envvar = config_envvar or "{}_CONFIG_PATH".format(name.upper())
 
     if user_path is not None:
         user_path = os.path.expanduser(os.path.expandvars(user_path))
     else:
-        user_path = os.path.expanduser('~/.config/{0}/{0}.yml'.format(name))
+        user_path = os.path.expanduser("~/.config/{0}/{0}.yml".format(name))
 
     if config_envvar in os.environ:
         custom_config_fn = os.environ[config_envvar]
@@ -101,17 +102,18 @@ def get_config(name, allow_user=True, user_path=None, config_envvar=None,
     else:
         return config
 
-    with open(custom_config_fn, 'r') as fp:
+    with open(custom_config_fn, "r") as fp:
         user_config = yaml.load(fp, **yaml_kwds)
 
-    if merge_mode == 'update':
+    if merge_mode == "update":
         return merge_config(user_config, config)
     else:
         return user_config
 
+
 def load_master_config(master_config_path=MASTER_CONFIG_PATH, fmt="namespace"):
     """Returns the master configuration object in namespace or a dictionary structure
-    
+
     BUG: fmt='dict' is failing because the standard yaml loader doesn't know how to handle definitions
     """
     # if no path is given, load from hard-coded path
@@ -121,5 +123,7 @@ def load_master_config(master_config_path=MASTER_CONFIG_PATH, fmt="namespace"):
         elif fmt == "dict":
             master_config = yaml.load(config_file, Loader=DictLoader)
         else:
-            raise ValueError(f"format '{fmt}' not implemented. Valid values are: 'namespace' (default) and 'dict'")
+            raise ValueError(
+                f"format '{fmt}' not implemented. Valid values are: 'namespace' (default) and 'dict'"
+            )
     return master_config

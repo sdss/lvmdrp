@@ -25,7 +25,7 @@ from pygments.lexers import get_lexer_by_name
 from .color_print import color_text
 
 
-__all__ = ['get_logger']
+__all__ = ["get_logger"]
 
 
 class TqdmLoggingHandler(logging.Handler):
@@ -38,13 +38,14 @@ class TqdmLoggingHandler(logging.Handler):
             tqdm.tqdm.write(msg)
             self.flush()
         except Exception:
-            self.handleError(record)  
+            self.handleError(record)
+
 
 def get_exception_formatted(tp, value, tb):
     """Adds colours to tracebacks."""
 
-    tbtext = ''.join(traceback.format_exception(tp, value, tb))
-    lexer = get_lexer_by_name('pytb', stripall=True)
+    tbtext = "".join(traceback.format_exception(tp, value, tb))
+    lexer = get_lexer_by_name("pytb", stripall=True)
     formatter = TerminalFormatter()
     return highlight(tbtext, lexer, formatter)
 
@@ -52,30 +53,35 @@ def get_exception_formatted(tp, value, tb):
 def colored_formatter(record):
     """Prints log messages with colours."""
 
-    colours = {'info': 'blue',
-               'debug': 'magenta',
-               'warning': 'yellow',
-               'critical': 'red',
-               'error': 'red'}
+    colours = {
+        "info": "blue",
+        "debug": "magenta",
+        "warning": "yellow",
+        "critical": "red",
+        "error": "red",
+    }
 
     levelname = record.levelname.lower()
 
     if levelname.lower() in colours:
         levelname_color = colours[levelname]
-        header = color_text('[{}]: '.format(levelname.upper()),
-                            levelname_color)
+        header = color_text("[{}]: ".format(levelname.upper()), levelname_color)
 
     message = record.getMessage()
 
-    if levelname == 'warning':
-        warning_category_groups = re.match(r'^.*?\s*?(\w*?Warning): (.*)', message)
+    if levelname == "warning":
+        warning_category_groups = re.match(r"^.*?\s*?(\w*?Warning): (.*)", message)
         if warning_category_groups is not None:
             warning_category, warning_text = warning_category_groups.groups()
 
-            warning_category_colour = color_text('({})'.format(warning_category), 'cyan')
-            message = '{} {}'.format(color_text(warning_text, ''), warning_category_colour)
+            warning_category_colour = color_text(
+                "({})".format(warning_category), "cyan"
+            )
+            message = "{} {}".format(
+                color_text(warning_text, ""), warning_category_colour
+            )
 
-    sys.__stdout__.write('{}{}\n'.format(header, message))
+    sys.__stdout__.write("{}{}\n".format(header, message))
     sys.__stdout__.flush()
 
     return
@@ -84,28 +90,27 @@ def colored_formatter(record):
 class SDSSFormatter(logging.Formatter):
     """Custom `Formatter <logging.Formatter>`."""
 
-    base_fmt = '%(asctime)s - %(levelname)s - %(message)s'
-    ansi_escape = re.compile(r'\x1b[^m]*m')
+    base_fmt = "%(asctime)s - %(levelname)s - %(message)s"
+    ansi_escape = re.compile(r"\x1b[^m]*m")
 
     def __init__(self, fmt=base_fmt):
         logging.Formatter.__init__(self, fmt)
 
     def format(self, record):
-
         # Copy the record so that any modifications we make do not
         # affect how the record is displayed in other handlers.
         record_cp = copy.copy(record)
 
-        record_cp.msg = self.ansi_escape.sub('', record_cp.msg)
+        record_cp.msg = self.ansi_escape.sub("", record_cp.msg)
 
         # The format of a warnings redirected with warnings.captureWarnings
         # has the format <path>: <category>: message\n  <some-other-stuff>.
         # We reorganise that into a cleaner message. For some reason in this
         # case the message is in record.args instead of in record.msg.
         if record_cp.levelno == logging.WARNING and len(record_cp.args) > 0:
-            match = re.match(r'^(.*?):\s*?(\w*?Warning): (.*)', record_cp.args[0])
+            match = re.match(r"^(.*?):\s*?(\w*?Warning): (.*)", record_cp.args[0])
             if match:
-                message = '{1} - {2} [{0}]'.format(*match.groups())
+                message = "{1} - {2} [{0}]".format(*match.groups())
                 record_cp.args = tuple([message] + list(record_cp.args[1:]))
 
         return logging.Formatter.format(self, record_cp)
@@ -126,11 +131,9 @@ class SDSSLogger(logging.Logger):
     """
 
     def __init__(self, name):
-
         super(SDSSLogger, self).__init__(name)
 
     def init(self, log_level=logging.INFO, capture_warnings=True):
-
         # Set levels
         self.setLevel(logging.DEBUG)
 
@@ -168,7 +171,7 @@ class SDSSLogger(logging.Logger):
 
         logging.captureWarnings(True)
 
-        self.warnings_logger = logging.getLogger('py.warnings')
+        self.warnings_logger = logging.getLogger("py.warnings")
 
         # Only enable the sh handler if none is attached to the warnings
         # logger yet. Prevents duplicated prints of the warnings.
@@ -188,27 +191,27 @@ class SDSSLogger(logging.Logger):
         logdir = os.path.dirname(log_file_path)
 
         try:
-
             if not os.path.exists(logdir):
                 os.makedirs(logdir)
 
             if os.path.exists(log_file_path):
-                strtime = datetime.datetime.utcnow().strftime('%Y-%m-%d_%H:%M:%S')
-                shutil.move(log_file_path, log_file_path + '.' + strtime)
+                strtime = datetime.datetime.utcnow().strftime("%Y-%m-%d_%H:%M:%S")
+                shutil.move(log_file_path, log_file_path + "." + strtime)
 
             self.fh = TimedRotatingFileHandler(
-                str(log_file_path), when='midnight', utc=True)
+                str(log_file_path), when="midnight", utc=True
+            )
 
-            self.fh.suffix = '%Y-%m-%d_%H:%M:%S'
+            self.fh.suffix = "%Y-%m-%d_%H:%M:%S"
 
         except (IOError, OSError) as ee:
-
-            warnings.warn('log file {0!r} could not be opened for '
-                          'writing: {1}'.format(log_file_path, ee),
-                          RuntimeWarning)
+            warnings.warn(
+                "log file {0!r} could not be opened for "
+                "writing: {1}".format(log_file_path, ee),
+                RuntimeWarning,
+            )
 
         else:
-
             self.fh.setFormatter(SDSSFormatter())
             self.addHandler(self.fh)
             self.fh.setLevel(log_level)
