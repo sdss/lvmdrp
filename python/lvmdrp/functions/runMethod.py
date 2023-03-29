@@ -6,6 +6,37 @@
 # @License: BSD 3-Clause
 # @Copyright: SDSS-V LVM
 
+"""DRP module to prepare and run several types of reductions
+
+The first step is to prepare the configuration file(s) given target frame(s).
+The frame(s) can be targeted using a number of parameters:
+    * MJD
+    * exposure number
+    * spectrograph
+    * CCD / camera
+
+and for each target frame a configuration file will be written specifying the
+corresponding reduction steps. Such steps will depend on the type of frame
+(e.g., bias, flat, science), for each of which configuration templates are in
+place under lvmdrp/etc. The functions destined to write such configuration
+files are prefixed with 'prep', e.g. prepCalib for calibration frames (bias,
+dark, flat, arc, etc.) or prepReduction for science, sky, etc.
+
+The second functionality of this module is to actually run the DRP from those
+configuration files. For that the 'fromConfig' function is defined.
+
+This module can also be imported and contains the following functions:
+
+    * prepCalib - writes configuration files for calibration frames
+    * prepMasterCalib - writes configuration files for master calibration creation
+    * prepReduction - writes configuration files for reduction of science frames
+    * fromConfig - runs DRP tasks given in a configuration file
+    * checkDone - verifies if a DRP run is done given a configuration file
+    * dumpScript - writes a bash script for running DRP tasks in a configuration file
+    * getConfigs - writes the corresponding configuration file from a given bash script
+"""
+
+
 import io
 import os
 import re
@@ -19,7 +50,9 @@ from lvmdrp.core.constants import CONFIG_PATH, DATAPRODUCT_BP_PATH
 from lvmdrp.utils.configuration import load_master_config
 
 
-description = "provides tasks for running the DRP"
+description = (
+    "provides tasks for writing configuration files and running DRP steps from those"
+)
 
 __all__ = [
     "prepCalib_drp",
@@ -126,6 +159,29 @@ def prepCalib_drp(
     ccd=None,
     calib_config="lvm_{imagetyp}_config",
 ):
+    """writes a configuration file for a calibration frame reduction
+
+    Given a set of parameters to determine the target frame(s) and a
+    configuration template, this task will parse and fill in the missing
+    fields in the configuration template to produce a configuration file
+
+    Parameters
+    ----------
+    path : str
+        file path where the raw frames are located
+    calib_type : str
+        frame type corresponding to a calibration frame
+    mjd : int, optional
+        MJD of the target calibration frame(s), by default None
+    exposure : int, optional
+        exposure number of the target calibration frame(s), by default None
+    spec : str, optional
+        spectrograph of the target calibration frame(s) (e.g., spec1), by default None
+    ccd : str, optional
+        CCD of the target calibration frame(s) (e.g., r1, z3), by default None
+    calib_config : str, optional
+        configuration file template to use, by default "lvm_{imagetyp}_config"
+    """
     # expand path
     path = os.path.expandvars(path)
 
@@ -242,6 +298,30 @@ def prepMasterCalib_drp(
     ccd=None,
     mcalib_config="lvm_mcalib_config",
 ):
+    """writes a configuration file for a master calibration frame creation
+
+    Given a set of parameters to determine the target processed calibration
+    frame(s) and a configuration template, this task will parse and fill in the
+    missing fields in the configuration template to produce a configuration
+    file
+
+    Parameters
+    ----------
+    path : str
+        file path where the raw frames are located
+    calib_type : str
+        frame type corresponding to a calibration frame
+    mjd : int, optional
+        MJD of the target calibration frame(s), by default None
+    exposure : int, optional
+        exposure number of the target calibration frame(s), by default None
+    spec : str, optional
+        spectrograph of the target calibration frame(s) (e.g., spec1), by default None
+    ccd : str, optional
+        CCD of the target calibration frame(s) (e.g., r1, z3), by default None
+    calib_config : str, optional
+        configuration file template to use, by default "lvm_mcalib_config"
+    """
     # expand path
     path = os.path.expandvars(path)
 
@@ -305,10 +385,7 @@ def prepMasterCalib_drp(
 
 # TODO: allow for several MJDs
 def prepReduction_drp(config_template, mjd=None, exposure=None, spec=None, ccd=None):
-    """
-
-    Writes to disk configuration file(s) to perform the reduction of the target
-    raw frames
+    """writes to disk configuration file(s) to reduce the target frame(s)
 
     Steps carried out by this task:
         * read a configuration template
@@ -447,6 +524,13 @@ def prepReduction_drp(config_template, mjd=None, exposure=None, spec=None, ccd=N
 #   * parse each DRP step in config
 #   * run each DRP step
 def fromConfig_drp(config, **registered_modules):
+    """runs DRP tasks defined in the given configuration file
+
+    Parameters
+    ----------
+    config : str
+        path to the target configuration file
+    """
     config = yaml.safe_load(config)
 
     # TODO: show target frame info
