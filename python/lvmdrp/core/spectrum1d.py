@@ -1,5 +1,9 @@
+from copy import deepcopy
+
+import matplotlib.pyplot as plt
 import numpy
 from astropy.io import fits as pyfits
+from scipy import interpolate, ndimage, sparse
 
 
 import matplotlib.pyplot as plt
