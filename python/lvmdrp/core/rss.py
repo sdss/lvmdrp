@@ -1,6 +1,3 @@
-from copy import deepcopy
-from multiprocessing import Pool, cpu_count
-
 import numpy
 from astropy.io import fits as pyfits
 from scipy import ndimage
@@ -264,7 +261,7 @@ class RSS(FiberRows):
                     fiber_type=self._fiber_type,
                 )
                 return rss
-            except:
+            except (TypeError, ValueError):
                 # raise exception if the type are not matching in general
                 raise TypeError(
                     "unsupported operand type(s) for *: %s and %s"
@@ -336,11 +333,11 @@ class RSS(FiberRows):
             self._wave_start = self._wave[0]
             self._res_elements = self._wave.shape[0]
             if self._header is not None:
-                self.setHdrValue(f"CRVAL1", float("%.3f" % self._wave_start))
-                self.setHdrValue(f"CDELT1", float("%.3f" % self._wave_disp))
-                self.setHdrValue(f"CRPIX1", 1.0)
-                self.setHdrValue(f"CTYPE1", "WAVE")
-                self.setHdrValue(f"CUNIT1", unit)
+                self.setHdrValue("CRVAL1", float("%.3f" % self._wave_start))
+                self.setHdrValue("CDELT1", float("%.3f" % self._wave_disp))
+                self.setHdrValue("CRPIX1", 1.0)
+                self.setHdrValue("CTYPE1", "WAVE")
+                self.setHdrValue("CUNIT1", unit)
         if len(wave.shape) == 2:
             self._res_elements = self._wave.shape[1]
 
@@ -348,7 +345,7 @@ class RSS(FiberRows):
         try:
             if len(inst_fwhm) > 0:
                 self._inst_fwhm = numpy.array(inst_fwhm)
-        except:
+        except Exception:
             self._inst_fwhm = inst_fwhm
 
     def maskFiber(self, fiber, replace_error=1e10):
@@ -370,7 +367,7 @@ class RSS(FiberRows):
                 )
                 if logwave:
                     self._wave = 10 ** (self._wave)
-            except:
+            except Exception:
                 pass
 
     def loadFitsData(
@@ -527,7 +524,7 @@ class RSS(FiberRows):
             elif extension_error > 0 and extension_error is not None:
                 hdus[extension_error] = pyfits.ImageHDU(self._error, name="ERROR")
 
-        if include_PT == True:
+        if include_PT:
             try:
                 table = self.writeFitsPosTable()
                 hdus[-1] = pyfits.BinTableHDU(
@@ -540,7 +537,7 @@ class RSS(FiberRows):
         for i in range(len(hdus)):
             try:
                 hdus.remove(None)
-            except:
+            except Exception:
                 break
 
         if len(hdus) > 0:
@@ -602,9 +599,8 @@ class RSS(FiberRows):
         combined_error = numpy.zeros(dim, dtype=numpy.float32)
         if method == "mean":
             if mask is not None:
-                select = mask == True
-                data[select] = 0
-                good_pix = numpy.sum(numpy.logical_not(select), 0)
+                data[mask] = 0
+                good_pix = numpy.sum(numpy.logical_not(mask), 0)
                 select_mean = good_pix > 0
                 #   print(combined_data.shape, data.shape, good_pix.shape, select_mean.shape, error)
                 combined_data[select_mean] = (
@@ -613,7 +609,7 @@ class RSS(FiberRows):
                 #    print(combined_data.dtype)
                 combined_mask = good_pix == 0
                 if error is not None:
-                    error[select] = replace_error
+                    error[mask] = replace_error
                     combined_error[select_mean] = numpy.sqrt(
                         numpy.sum(error**2, 0)[select_mean]
                         / good_pix[select_mean] ** 2
@@ -632,8 +628,7 @@ class RSS(FiberRows):
 
         if method == "weighted_mean" and error is not None:
             if mask is not None:
-                select = mask == True
-                good_pix = numpy.sum(numpy.logical_not(select), 0)
+                good_pix = numpy.sum(numpy.logical_not(mask), 0)
                 select_mean = good_pix > 0
                 combined_data = numpy.sum(data / error**2, 0) / numpy.sum(
                     1 / error**2, 0
@@ -650,8 +645,7 @@ class RSS(FiberRows):
 
         if method == "median":
             if mask is not None:
-                select = mask == True
-                good_pix = numpy.sum(numpy.logical_not(select), 0)
+                good_pix = numpy.sum(numpy.logical_not(mask), 0)
                 select_mean = good_pix > 0
                 combined_data = numpy.nanmedian(data, 0)
                 combined_mask = good_pix == 0
@@ -820,7 +814,8 @@ class RSS(FiberRows):
             if self._error is not None:
                 var = self._error**2
                 inv_var = numpy.zeros_like(var)
-                inv_var[self._mask == False] = 1.0 / var[self._mask == False]
+                good_pix = numpy.logical_not(self._mask)
+                inv_var[good_pix] = 1.0 / var[good_pix]
             else:
                 inv_var = numpy.ones_like(self._data)
             if mode == "inverseDistance":
@@ -980,7 +975,8 @@ class RSS(FiberRows):
             if self._error is not None:
                 var = self._error**2
                 inv_var = numpy.zeros_like(var)
-                inv_var[self._mask == False] = 1.0 / var[self._mask == False]
+                good_pix = numpy.logical_not(self._mask)
+                inv_var[good_pix] = 1.0 / var[good_pix]
             else:
                 inv_var = numpy.ones_like(self._data)
 
@@ -1056,7 +1052,7 @@ class RSS(FiberRows):
             corr_cube = corr_cube**0.5
         else:
             corr_cube = None
-        if store_cover == False:
+        if not store_cover:
             cover = None
         Cube_out = Cube(
             data=cube,
@@ -1101,7 +1097,8 @@ class RSS(FiberRows):
         if self._error is not None:
             var = self._error**2
             inv_var = numpy.zeros_like(var)
-            inv_var[self._mask == False] = 1.0 / var[self._mask == False]
+            good_pix = numpy.logical_not(self._mask)
+            inv_var[good_pix] = 1.0 / var[good_pix]
         else:
             inv_var = numpy.ones_like(self._data)
 
@@ -1287,7 +1284,8 @@ class RSS(FiberRows):
             if self._error is not None:
                 var = self._error**2
                 inv_var = numpy.zeros_like(var)
-                inv_var[self._mask == False] = 1.0 / var[self._mask == False]
+                good_pix = numpy.logical_not(self._mask)
+                inv_var[good_pix] = 1.0 / var[good_pix]
             else:
                 inv_var = numpy.ones_like(self._data)
 
@@ -1297,140 +1295,140 @@ class RSS(FiberRows):
                 error = numpy.zeros(cube.shape, dtype=numpy.float32)
                 corr_cube = numpy.zeros(cube.shape, dtype=numpy.float32)
 
-                position = numpy.indices((dim_y, dim_x))
-                position_y = position[0].astype(numpy.float32) * resolution + min_y
-                position_x = position[1].astype(numpy.float32) * resolution + min_x
-                dist_test = numpy.sqrt(
-                    (position_x - position_x[dim_x / 2.0, dim_y / 2.0]) ** 2
-                    + (position_y - position_y[dim_x / 2.0, dim_y / 2.0]) ** 2
-                )
-                select = dist_test <= radius_limit
-                int_kernel = float(
-                    numpy.sum(numpy.exp(-0.5 * (dist_test[select] / sigma) ** slope))
-                )
+                # position = numpy.indices((dim_y, dim_x))
+                # position_y = position[0].astype(numpy.float32) * resolution + min_y
+                # position_x = position[1].astype(numpy.float32) * resolution + min_x
+                # dist_test = numpy.sqrt(
+                #     (position_x - position_x[dim_x / 2.0, dim_y / 2.0]) ** 2
+                #     + (position_y - position_y[dim_x / 2.0, dim_y / 2.0]) ** 2
+                # )
+                # select = dist_test <= radius_limit
+                # int_kernel = float(
+                #     numpy.sum(numpy.exp(-0.5 * (dist_test[select] / sigma) ** slope))
+                # )
                 dim_x = int(dim_x)
                 dim_y = int(dim_y)
-                fibers = self._fibers
-                points = self._res_elements
-                arc_position_x = self._arc_position_x.astype(numpy.float32)
-                arc_position_y = self._arc_position_y.astype(numpy.float32)
+                # fibers = self._fibers
+                # points = self._res_elements
+                # arc_position_x = self._arc_position_x.astype(numpy.float32)
+                # arc_position_y = self._arc_position_y.astype(numpy.float32)
                 good_pix = good_pix.astype(numpy.uint8)
-                data = self._data.astype(numpy.float32)
+                # data = self._data.astype(numpy.float32)
 
-                if self._mask is not None:
-                    mask_in = self._mask.astype(numpy.uint8)
-                else:
-                    mask_in = numpy.zeros_like(good_pix)
-                if self._error is not None:
-                    error_in = self._error.astype(numpy.float32)
-                else:
-                    error_in = numpy.zeros_like(self._data)
-                mask = numpy.zeros(cube.shape, dtype=numpy.uint8)
-                weights_0 = numpy.zeros((dim_y, dim_x), dtype=numpy.float32)
-                cover_img = numpy.zeros((dim_y, dim_x), dtype=numpy.float32)
-                temp2 = numpy.zeros((dim_y, dim_x), dtype=numpy.float32)
-                c_code = r"""
-                int j,i,k,l;
-                float distance;
-                int coadd;
-                for(i=0; i<points; i++) {
-                    temp2(blitz::Range::all(),blitz::Range::all())=0;
-                    cover_img(blitz::Range::all(),blitz::Range::all())=0;
-                    for(j = 0; j<fibers; j++) {
-                        weights_0(blitz::Range::all(),blitz::Range::all()) = 0;
-                        coadd=0;
-                        for(k=0; k<dim_y;k++) {
-                            for(l=0; l<dim_x; l++) {
-                                distance = sqrt(pow(position_x(k,l)- (arc_position_x(j)+offset_x(j,i)),2)+pow(position_y(k,l)- (arc_position_y(j)+offset_y(j,i)),2));
-                                if  (distance<radius_limit) {
-                                    weights_0(k,l) = exp(-0.5*pow(distance/sigma,slope));
-                                    if (good_pix(j,i)==1) {
-                                        temp2(k,l)+=weights_0(k,l);
-                                        cube(i,k,l)+=weights_0(k,l)*data(j,i);
-                                        cover_img(k,l)+=1;
-                                        coadd++;
-                                        if (mask_in(j,i)==0) {
-                                            error(i,k,l)+=pow(weights_0(k,l)*error_in(j,i),2);
-                                        }
-                                    }
-                                    if ((mask_in(j,i)==1) && ((weights_0(k,l)/int_kernel)>bad_threshold)) {
-                                        mask(i,k,l)=1;
-                                    }
-                                }
-                            }
-                        }
+                # if self._mask is not None:
+                #     mask_in = self._mask.astype(numpy.uint8)
+                # else:
+                #     mask_in = numpy.zeros_like(good_pix)
+                # if self._error is not None:
+                #     error_in = self._error.astype(numpy.float32)
+                # else:
+                #     error_in = numpy.zeros_like(self._data)
+                # mask = numpy.zeros(cube.shape, dtype=numpy.uint8)
+                # weights_0 = numpy.zeros((dim_y, dim_x), dtype=numpy.float32)
+                # cover_img = numpy.zeros((dim_y, dim_x), dtype=numpy.float32)
+                # temp2 = numpy.zeros((dim_y, dim_x), dtype=numpy.float32)
+                # c_code = r"""
+                # int j,i,k,l;
+                # float distance;
+                # int coadd;
+                # for(i=0; i<points; i++) {
+                #     temp2(blitz::Range::all(),blitz::Range::all())=0;
+                #     cover_img(blitz::Range::all(),blitz::Range::all())=0;
+                #     for(j = 0; j<fibers; j++) {
+                #         weights_0(blitz::Range::all(),blitz::Range::all()) = 0;
+                #         coadd=0;
+                #         for(k=0; k<dim_y;k++) {
+                #             for(l=0; l<dim_x; l++) {
+                #                 distance = sqrt(pow(position_x(k,l)- (arc_position_x(j)+offset_x(j,i)),2)+pow(position_y(k,l)- (arc_position_y(j)+offset_y(j,i)),2));
+                #                 if  (distance<radius_limit) {
+                #                     weights_0(k,l) = exp(-0.5*pow(distance/sigma,slope));
+                #                     if (good_pix(j,i)==1) {
+                #                         temp2(k,l)+=weights_0(k,l);
+                #                         cube(i,k,l)+=weights_0(k,l)*data(j,i);
+                #                         cover_img(k,l)+=1;
+                #                         coadd++;
+                #                         if (mask_in(j,i)==0) {
+                #                             error(i,k,l)+=pow(weights_0(k,l)*error_in(j,i),2);
+                #                         }
+                #                     }
+                #                     if ((mask_in(j,i)==1) && ((weights_0(k,l)/int_kernel)>bad_threshold)) {
+                #                         mask(i,k,l)=1;
+                #                     }
+                #                 }
+                #             }
+                #         }
 
-                        for(k=0; k<dim_y;k++) {
-                            for(l=0; l<dim_x; l++) {
-                                corr_cube(i,k,l)+=coadd*weights_0(k,l);
-                            }
-                        }
-                    }
+                #         for(k=0; k<dim_y;k++) {
+                #             for(l=0; l<dim_x; l++) {
+                #                 corr_cube(i,k,l)+=coadd*weights_0(k,l);
+                #             }
+                #         }
+                #     }
 
-                    for(k=0; k<dim_y;k++) {
-                        for(l=0; l<dim_x; l++) {
-                            if (temp2(k,l)>0) {
-                                cube(i,k,l) = cube(i,k,l)/temp2(k,l)*pow(resolution,2);
-                                corr_cube(i,k,l) = sqrt(corr_cube(i,k,l)/temp2(k,l));
-                                if (mask(i,k,l)==0) {
-                                    error(i,k,l) = sqrt(error(i,k,l))/temp2(k,l)*pow(resolution,2);
-                                }
-                                else {
-                                    error(i,k,l) = replace_error;
-                                }
-                            }
-                           cover(i,k,l)=cover_img(k,l);
-                           if (cover_img(k,l)<(min_fibers+1)) {
-                                cube(i,k,l) = 0;
-                                error(i,k,l) = replace_error;
-                                corr_cube(i,k,l)=0;
-                                mask(i,k,l)=1;
-                           }
-                        }
-                    }
-                   // if (i==200) break;
-                }
-                """
+                #     for(k=0; k<dim_y;k++) {
+                #         for(l=0; l<dim_x; l++) {
+                #             if (temp2(k,l)>0) {
+                #                 cube(i,k,l) = cube(i,k,l)/temp2(k,l)*pow(resolution,2);
+                #                 corr_cube(i,k,l) = sqrt(corr_cube(i,k,l)/temp2(k,l));
+                #                 if (mask(i,k,l)==0) {
+                #                     error(i,k,l) = sqrt(error(i,k,l))/temp2(k,l)*pow(resolution,2);
+                #                 }
+                #                 else {
+                #                     error(i,k,l) = replace_error;
+                #                 }
+                #             }
+                #            cover(i,k,l)=cover_img(k,l);
+                #            if (cover_img(k,l)<(min_fibers+1)) {
+                #                 cube(i,k,l) = 0;
+                #                 error(i,k,l) = replace_error;
+                #                 corr_cube(i,k,l)=0;
+                #                 mask(i,k,l)=1;
+                #            }
+                #         }
+                #     }
+                #    // if (i==200) break;
+                # }
+                # """
 
                 # distance = sqrt(pow(position_x(k,l)- (arc_position_x(j)+offset_x(i)),2)+pow(position_y(k,l)- (arc_position_y(j)+offset_y(i)),2);
-                weave.inline(
-                    c_code,
-                    [
-                        "fibers",
-                        "points",
-                        "dim_y",
-                        "dim_x",
-                        "position_x",
-                        "position_y",
-                        "arc_position_x",
-                        "arc_position_y",
-                        "offset_x",
-                        "offset_y",
-                        "radius_limit",
-                        "sigma",
-                        "slope",
-                        "min_fibers",
-                        "bad_threshold",
-                        "replace_error",
-                        "weights_0",
-                        "good_pix",
-                        "resolution",
-                        "data",
-                        "error_in",
-                        "cube",
-                        "error",
-                        "mask_in",
-                        "mask",
-                        "corr_cube",
-                        "temp2",
-                        "cover_img",
-                        "cover",
-                        "int_kernel",
-                    ],
-                    headers=["<math.h>"],
-                    type_converters=converters.blitz,
-                    compiler="gcc",
-                )
+                # weave.inline(
+                #     c_code,
+                #     [
+                #         "fibers",
+                #         "points",
+                #         "dim_y",
+                #         "dim_x",
+                #         "position_x",
+                #         "position_y",
+                #         "arc_position_x",
+                #         "arc_position_y",
+                #         "offset_x",
+                #         "offset_y",
+                #         "radius_limit",
+                #         "sigma",
+                #         "slope",
+                #         "min_fibers",
+                #         "bad_threshold",
+                #         "replace_error",
+                #         "weights_0",
+                #         "good_pix",
+                #         "resolution",
+                #         "data",
+                #         "error_in",
+                #         "cube",
+                #         "error",
+                #         "mask_in",
+                #         "mask",
+                #         "corr_cube",
+                #         "temp2",
+                #         "cover_img",
+                #         "cover",
+                #         "int_kernel",
+                #     ],
+                #     headers=["<math.h>"],
+                #     type_converters=converters.blitz,
+                #     compiler="gcc",
+                # )
 
             elif mode == "drizzle":
                 if self._error is not None:
@@ -1519,128 +1517,128 @@ class RSS(FiberRows):
 
         elif self._shape == "R":
             resolution = float(resolution)
-            points = self._res_elements
-            fibers = self._fibers
-            good_pix = self._mask == False
-            arc_position_x = self._arc_position_x.astype(numpy.float32)
-            arc_position_y = self._arc_position_y.astype(numpy.float32)
-            size_x = self._size[0]
-            size_y = self._size[1]
-            data = self._data.astype(numpy.float32)
+            # points = self._res_elements
+            # fibers = self._fibers
+            good_pix = numpy.logical_not(self._mask)
+            # arc_position_x = self._arc_position_x.astype(numpy.float32)
+            # arc_position_y = self._arc_position_y.astype(numpy.float32)
+            # size_x = self._size[0]
+            # size_y = self._size[1]
+            # data = self._data.astype(numpy.float32)
             cube = numpy.zeros((self._res_elements, dim_y, dim_x), dtype=numpy.float32)
             if self._error is not None:
                 error = numpy.zeros(cube.shape, dtype=numpy.float32)
                 corr_cube = numpy.zeros(cube.shape, dtype=numpy.float32)
                 var = self._error**2
                 inv_var = numpy.zeros_like(var)
-                inv_var[self._mask == False] = 1.0 / var[self._mask == False]
-                error_in = self._error.astype(numpy.float32)
+                inv_var[good_pix] = 1.0 / var[good_pix]
+                # error_in = self._error.astype(numpy.float32)
             else:
-                error_in = numpy.zeros_like(self._data)
+                # error_in = numpy.zeros_like(self._data)
                 inv_var = numpy.ones_like(self._data)
 
-            if self._mask is not None:
-                mask_in = self._mask.astype(numpy.uint8)
-            else:
-                mask_in = numpy.zeros_like(good_pix)
+            # if self._mask is not None:
+            #     mask_in = self._mask.astype(numpy.uint8)
+            # else:
+            #     mask_in = numpy.zeros_like(good_pix)
 
             mask = numpy.zeros(cube.shape, dtype=numpy.uint8)
-            weights_0 = numpy.zeros((dim_y, dim_x), dtype=numpy.float32)
+            # weights_0 = numpy.zeros((dim_y, dim_x), dtype=numpy.float32)
             cover = numpy.zeros((dim_y, dim_x), dtype=numpy.float32)
-            temp2 = numpy.zeros((dim_y, dim_x), dtype=numpy.float32)
+            # temp2 = numpy.zeros((dim_y, dim_x), dtype=numpy.float32)
 
             if mode == "drizzle":
-                c_code = r"""
-                    int j,i,k,l;
-                    float dist_x;
-                    float dist_y;
-                    int coadd;
-                    for(i=0; i<points; i++) {
-                        temp2(blitz::Range::all(),blitz::Range::all())=0;
-                        cover(blitz::Range::all(),blitz::Range::all())=0;
-                        for(j = 0; j<fibers; j++) {
-                            weights_0(blitz::Range::all(),blitz::Range::all()) = 0;
-                            coadd=0;
-                            for(k=0; k<dim_y; k++) {
-                                for(l=0; l<dim_x; l++) {
-                                    dist_x= (l*resolution)+min_x-(arc_position_x(j)+(offset_x(j,i)*resolution));
-                                    dist_y= (k*resolution)+min_y-(arc_position_y(j)+(offset_y(j,i)*resolution));
-                                    if  ((resolution==size_x) && (resolution==size_y)) {
-                                        if  ((fabs(dist_x)<resolution) && (fabs(dist_y)<resolution)) {
-                                            weights_0(k,l) = resolution*resolution-fabs(dist_x)*resolution-fabs(dist_y)*(resolution-fabs(dist_x));
-                                            if (good_pix(j,i)==1) {
-                                                temp2(k,l)+=weights_0(k,l);
-                                                cube(i,k,l)+=weights_0(k,l)*data(j,i);
-                                                error(i,k,l)+=pow(weights_0(k,l)*error_in(j,i),2);
-                                                cover(k,l)+=1;
-                                                coadd++;
-                                               // if (mask_in(j,i)==0) {
-                                               //     error(i,k,l)+=pow(weights_0(k,l)*error_in(j,i),2);
-                                               // }
-                                            }
+                # c_code = r"""
+                #     int j,i,k,l;
+                #     float dist_x;
+                #     float dist_y;
+                #     int coadd;
+                #     for(i=0; i<points; i++) {
+                #         temp2(blitz::Range::all(),blitz::Range::all())=0;
+                #         cover(blitz::Range::all(),blitz::Range::all())=0;
+                #         for(j = 0; j<fibers; j++) {
+                #             weights_0(blitz::Range::all(),blitz::Range::all()) = 0;
+                #             coadd=0;
+                #             for(k=0; k<dim_y; k++) {
+                #                 for(l=0; l<dim_x; l++) {
+                #                     dist_x= (l*resolution)+min_x-(arc_position_x(j)+(offset_x(j,i)*resolution));
+                #                     dist_y= (k*resolution)+min_y-(arc_position_y(j)+(offset_y(j,i)*resolution));
+                #                     if  ((resolution==size_x) && (resolution==size_y)) {
+                #                         if  ((fabs(dist_x)<resolution) && (fabs(dist_y)<resolution)) {
+                #                             weights_0(k,l) = resolution*resolution-fabs(dist_x)*resolution-fabs(dist_y)*(resolution-fabs(dist_x));
+                #                             if (good_pix(j,i)==1) {
+                #                                 temp2(k,l)+=weights_0(k,l);
+                #                                 cube(i,k,l)+=weights_0(k,l)*data(j,i);
+                #                                 error(i,k,l)+=pow(weights_0(k,l)*error_in(j,i),2);
+                #                                 cover(k,l)+=1;
+                #                                 coadd++;
+                #                                // if (mask_in(j,i)==0) {
+                #                                //     error(i,k,l)+=pow(weights_0(k,l)*error_in(j,i),2);
+                #                                // }
+                #                             }
 
-                                            //if ((mask_in(j,i)==1) && ((weights_0(k,l))>0)) {
-                                            //    mask(i,k,l)=1;
-                                            //}
-                                        }
-                                    }
-                                }
-                            }
+                #                             //if ((mask_in(j,i)==1) && ((weights_0(k,l))>0)) {
+                #                             //    mask(i,k,l)=1;
+                #                             //}
+                #                         }
+                #                     }
+                #                 }
+                #             }
 
-                            for(k=0; k<dim_y;k++) {
-                                for(l=0; l<dim_x; l++) {
-                                    corr_cube(i,k,l)+=coadd*weights_0(k,l);
-                                }
-                            }
-                        }
-                        for(k=0; k<dim_y;k++) {
-                            for(l=0; l<dim_x; l++) {
-                                if (temp2(k,l)>0) {
-                                    cube(i,k,l) = cube(i,k,l)/temp2(k,l)*pow(resolution,2);
-                                    corr_cube(i,k,l) = sqrt(corr_cube(i,k,l)/temp2(k,l));
-                                    error(i,k,l) = sqrt(error(i,k,l))/temp2(k,l)*pow(resolution,2);
-                                 }
-                                 else {
-				    mask(i,k,l) = 1;
-				    error(i,k,l) = replace_error;
-                                }
-                            }
-                        }
-                    }
-                """
-                weave.inline(
-                    c_code,
-                    [
-                        "fibers",
-                        "points",
-                        "dim_y",
-                        "dim_x",
-                        "min_x",
-                        "min_y",
-                        "size_x",
-                        "size_y",
-                        "arc_position_x",
-                        "arc_position_y",
-                        "offset_x",
-                        "offset_y",
-                        "replace_error",
-                        "weights_0",
-                        "good_pix",
-                        "resolution",
-                        "data",
-                        "error_in",
-                        "cube",
-                        "error",
-                        "mask_in",
-                        "mask",
-                        "corr_cube",
-                        "temp2",
-                        "cover",
-                    ],
-                    headers=["<math.h>"],
-                    type_converters=converters.blitz,
-                    compiler="gcc",
-                )
+                #             for(k=0; k<dim_y;k++) {
+                #                 for(l=0; l<dim_x; l++) {
+                #                     corr_cube(i,k,l)+=coadd*weights_0(k,l);
+                #                 }
+                #             }
+                #         }
+                #         for(k=0; k<dim_y;k++) {
+                #             for(l=0; l<dim_x; l++) {
+                #                 if (temp2(k,l)>0) {
+                #                     cube(i,k,l) = cube(i,k,l)/temp2(k,l)*pow(resolution,2);
+                #                     corr_cube(i,k,l) = sqrt(corr_cube(i,k,l)/temp2(k,l));
+                #                     error(i,k,l) = sqrt(error(i,k,l))/temp2(k,l)*pow(resolution,2);
+                #                  }
+                #                  else {
+                #     mask(i,k,l) = 1;
+                #     error(i,k,l) = replace_error;
+                #                 }
+                #             }
+                #         }
+                #     }
+                # """
+                # weave.inline(
+                #     c_code,
+                #     [
+                #         "fibers",
+                #         "points",
+                #         "dim_y",
+                #         "dim_x",
+                #         "min_x",
+                #         "min_y",
+                #         "size_x",
+                #         "size_y",
+                #         "arc_position_x",
+                #         "arc_position_y",
+                #         "offset_x",
+                #         "offset_y",
+                #         "replace_error",
+                #         "weights_0",
+                #         "good_pix",
+                #         "resolution",
+                #         "data",
+                #         "error_in",
+                #         "cube",
+                #         "error",
+                #         "mask_in",
+                #         "mask",
+                #         "corr_cube",
+                #         "temp2",
+                #         "cover",
+                #     ],
+                #     headers=["<math.h>"],
+                #     type_converters=converters.blitz,
+                #     compiler="gcc",
+                # )
                 cover = None
 
         if self._header is not None:
@@ -1654,7 +1652,7 @@ class RSS(FiberRows):
             self.setHdrValue("CRPIX2", 1.0)
             self.setHdrValue("CRPIX1", 1.0)
             self.setHdrValue("DISPAXIS", 3)
-        if store_cover == False:
+        if not store_cover:
             cover = None
         if self._error is None:
             Cube_out = Cube(data=cube, mask=mask, header=self._header, cover=cover)
@@ -1678,13 +1676,13 @@ class RSS(FiberRows):
                     self._data, (1, smooth_median)
                 )
             if valid is not None:
-                medians = numpy.median(self._data[valid[0] : valid[1], :], axis=1)
+                # medians = numpy.median(self._data[valid[0] : valid[1], :], axis=1)
                 norm = numpy.median(self._data[valid[0] : valid[1], :], axis=0)
             else:
                 norm = numpy.median(self._data, axis=0)
-                medians = numpy.median(self._data, axis=1)
-            max = numpy.max(medians)
-            select_max = numpy.median(self._data, axis=1) == max
+                # medians = numpy.median(self._data, axis=1)
+            # max = numpy.max(medians)
+            # select_max = numpy.median(self._data, axis=1) == max
             #    print(numpy.arange(len(medians))[select_max]+1)
             # norm = numpy.amax(self._data[select_ma], axis=0)
             # norm = self._data[select_max, :][0]
@@ -1772,7 +1770,7 @@ class RSS(FiberRows):
 
         try:
             fiber_type = self._fiber_type[select]
-        except:
+        except Exception:
             fiber_type = None
 
         if self._wave is not None:

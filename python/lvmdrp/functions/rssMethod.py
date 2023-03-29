@@ -53,21 +53,23 @@ rss_logger = get_logger(__name__)
 
 def mergeRSS_drp(files_in, file_out, mergeHdr="1"):
     """
-                Different RSS are merged into a common file by extending the number of fibers.
-                Note that the number of spectral pixel need to be the same and that all input RSS must have the same extension.
+    Different RSS are merged into a common file by extending the number of fibers.
 
-                Parameters
-                --------------
-                files_in : string
-                                Comma-separates name of RSS FITS files to be merged into a signal RSS
-                file_out : string
-                                Name of the merged RSS FITS file
-                mergeHdr : string of integer (0 or 1), optional with default: '1'
-                                Flag to indicate if the header of the input RSS files are also merger and stored in the merged RSS.
-                                1 if yes, 0 if not
+    Note that the number of spectral pixel need to be the same and that all input RSS
+    must have the same extensions.
 
-                Examples
-                ----------------
+    Parameters
+    ----------
+    files_in : string
+        Comma-separates name of RSS FITS files to be merged into a signal RSS
+    file_out : string
+        Name of the merged RSS FITS file
+    mergeHdr : string of integer (0 or 1), optional with default: '1'
+        Flag to indicate if the header of the input RSS files are also merger and stored
+        in the merged RSS. 1 if yes, 0 if not
+
+    Examples
+    --------
     user:> lvmdrp rss mergeRSS RSS1.fits,RSS2.fits,RSS3.fits RSS_OUT.fits
     """
 
@@ -203,63 +205,87 @@ def detWaveSolution_drp(
     figure_path=".figures",
 ):
     """
-    Measures the pixel position of emission lines in wavelength UNCALIBRATED for all fibers of the RSS.
-    Starting from the initial guess of pixel positions for a given fiber, the program measures the position using
-    Gaussian fitting to the first and last fiber of the RSS. The best fit emission line position of the previous fiber
-    are used as guess parameters. Certain criterion can be imposed to reject certain measurements and flag those
-    as bad. They will be ignored for the dispersion solution, which is estimated for each fiber independently.
-    Two RSS FITS file containing the wavelength pixel table and the FWHM pixel table will be stored.
+    Solves for the wavelength and the LSF using polynomial fitting
+
+    Measures the pixel position of emission lines in wavelength UNCALIBRATED
+    for all fibers of the RSS. Starting from the initial guess of pixel
+    positions for a given fiber, the program measures the position using
+    Gaussian fitting to the first and last fiber of the RSS. The best fit
+    emission line position of the previous fiber are used as guess parameters.
+    Certain criterion can be imposed to reject certain measurements and flag
+    those as bad. They will be ignored for the dispersion solution, which is
+    estimated for each fiber independently. Two RSS FITS file containing the
+    wavelength pixel table and the FWHM pixel table will be stored.
 
     Parameters
     --------------
     arc_rss : string
                     Input RSS FITS file name of the uncalibrated arc lamp exposure
     prefix_out : string
-                    PREFIX for the output RSS file containing the wavelength RSS pixel table (PREFIX.disp.fits) and
-                    the spectral resolution (FWHM) RSS pixel table (PREFIX.res.fits)
+        PREFIX for the output RSS file containing the wavelength RSS pixel
+        table (PREFIX.disp.fits) and the spectral resolution (FWHM) RSS pixel
+        table (PREFIX.res.fits)
     ref_line_file : string, optional with default: ''
-                    ASCII file name containing the number of the reference fiber in the first row,
-                    reference wavelength of emission line, its rough centroid pixel position a flag if the width of the
-                    line should be considered for the spectral resolution measurements (space separated) in
-                    each subsquent row.
-                    If no ASCII file is provided those information must be given in the ref_fiber, pixel and ref_lines parameters.
+        ASCII file name containing the number of the reference fiber in the
+        first row, reference wavelength of emission line, its rough centroid
+        pixel position a flag if the width of the line should be considered for
+        the spectral resolution measurements (space separated) in each
+        subsquent row. If no ASCII file is provided those information must be
+        given in the ref_fiber, pixel and ref_lines parameters.
     ref_fiber : string of integer, optional with default: ''
-                    Number of the fiber in the RSS for which the rough guess for their centroid pixel position (x-direction) are given.
-                    Only used if no ASCII file is given.
+        Number of the fiber in the RSS for which the rough guess for their
+        centroid pixel position (x-direction) are given. Only used if no ASCII
+        file is given.
     pixel : string of integers, optional with default: ''
-                    Comma-separated list of rough centroid pixel position for each emission line for the corresponding reference fiber.
-                    Only used if no ASCII file is given.
+        Comma-separated list of rough centroid pixel position for each emission
+        line for the corresponding reference fiber. Only used if no ASCII file
+        is given.
     ref_lines : string of floats, optional with default: ''
-                    Comma-separated list of reference emission-line wavelength. Need to be same number of values as for the pixel guess
-                    Only used if no ASCII file is given.
+        Comma-separated list of reference emission-line wavelength. Need to be
+        same number of values as for the pixel guess Only used if no ASCII file
+        is given.
     poly_dispersion : string of integer, optional with default: '-5'
-                    Degree of polynomial used to construct the wavelength solution for each fiber. (positiv: normal polynomial, negative: Legandre polynomial)
+        Degree of polynomial used to construct the wavelength solution for each
+        fiber. (positiv: normal polynomial, negative: Legandre polynomial)
     poly_fwhm : string of two integers, optional with default: '-3,-5'
-                    First integer is the degree of polynomial used to smooth the measured FWHM of each line as a function of fiber number (cross-dispersion).
-                    Second integer is the degree of polynomial used to subsquently extrapolate the line FWHM across the disperion direction,
-                    (positiv: normal polynomial, negative: Legandre polynomial)
+        First integer is the degree of polynomial used to smooth the measured
+        FWHM of each line as a function of fiber number (cross-dispersion).
+        Second integer is the degree of polynomial used to subsquently
+        extrapolate the line FWHM across the disperion direction, (positiv:
+        normal polynomial, negative: Legandre polynomial)
     init_back : string of float, optinal with default: '10.0'
-                    Initial guess for the constant background level that can be fitted in addition to the Gaussian for each line.
-                    If this parameter is left empty, the background level is fixed to zero.
+        Initial guess for the constant background level that can be fitted in
+        addition to the Gaussian for each line. If this parameter is left
+        empty, the background level is fixed to zero.
     aperture : string of integer, optional with default: '13'
-                    Aperture centered on the guess of the pixel position from which pixel with the maximum flux is used as the guess for the Gaussian fitting.
-                    This is also the size of the fitted region for each line.
+        Aperture centered on the guess of the pixel position from which pixel
+        with the maximum flux is used as the guess for the Gaussian fitting.
+        This is also the size of the fitted region for each line.
     flux_min : string of float, optional with default: '200.0'
-                    Required minimum integrated flux of the best-fit Gaussian model to be considered as a reliable value.
-                    The measurement for this emission line for the specific fiber is masked if it falls below this threshold.
+        Required minimum integrated flux of the best-fit Gaussian model to be
+        considered as a reliable value. The measurement for this emission line
+        for the specific fiber is masked if it falls below this threshold.
     fwhm_max : string of float, optional with default: '10.0'
-                    Maximum FWHM of the best-fit Gaussian model to be considered as a reliable value.
+        Maximum FWHM of the best-fit Gaussian model to be considered as a
+        reliable value.
     rel_flux_limits : string of two floats, optional with default: '0.1,5.0'
-                    Required relative integrated fluxes with respect to the measured fluxes  for the reference fiber.
-                    If relative fluxes are outside this range, they will be masked.
-    negative :
+        Required relative integrated fluxes with respect to the measured fluxes
+        for the reference fiber. If relative fluxes are outside this range,
+        they will be masked.
+    negative : bool, optional with default: False
+        whether to flip the arc spectra slong the flux axis to make the emission
+        lines look like absortion lines.
     plot: string of integer (0 or 1), optional  with default: 1
-                    Show information during the processing on the command line (0 - no, 1 - yes)
+        Show information during the processing on the command line (0 - no, 1 -
+        yes)
 
     Examples
-    ----------------
-    user:> lvmdrp rss detWaveSolution ARC_RSS.fits arc REF_FILE.txt poly_dispersion='-7' poly_fwhm='-4,-5'
-    user:> lvmdrp rss detWaveSolution ARC_RSS.fits arc ref_fiber=100 pixel=200,500,1000 ref_lines=3000.0,5000.0,8000.0 flux_min=100.0
+    --------
+    user:> lvmdrp rss detWaveSolution ARC_RSS.fits arc REF_FILE.txt /
+    > poly_dispersion='-7' poly_fwhm='-4,-5'
+
+    user:> lvmdrp rss detWaveSolution ARC_RSS.fits arc ref_fiber=100 /
+    > pixel=200,500,1000 ref_lines=3000.0,5000.0,8000.0 flux_min=100.0
     """
 
     # convert parameters to the correct type
@@ -279,22 +305,22 @@ def detWaveSolution_drp(
         fiberflat = fiberflat.split(",")
 
     if in_ref_lines != "":
-        # load initial pixel positions and reference wavelength from txt config file NEED TO BE REPLACE BY XML SCHEMA
-        file_in = open(in_ref_lines, "r")  # load file
-        lines = file_in.readlines()  # read lines
-        nlines = len(lines) - 1
-        pixel = numpy.zeros(nlines, dtype=numpy.float32)  # empty for pixel position
-        ref_lines = numpy.zeros(
-            nlines, dtype=numpy.float32
-        )  # empty for reference wavelength
-        use_line = numpy.zeros(nlines, dtype=bool)  # empty for reference wavelength
-        ref_fiber = int(lines[0])  # the reference fiber for the initial positions
-        # read the information from file
-        for i in range(1, nlines + 1):
-            line = lines[i].split()
-            pixel[i - 1] = float(line[0])
-            ref_lines[i - 1] = float(line[1])
-            use_line[i - 1] = int(line[2])
+        rss_logger.info(f"reading guess lines from '{in_ref_lines}'")
+        # load initial pixel positions and reference wavelength from txt config file
+        with open(in_ref_lines, "r") as file_in:
+            ref_fiber = int(file_in.readline()[:-1])
+            rss_logger.info(f"going to use fiber {ref_fiber} as reference")
+            pixel, ref_lines, use_line = numpy.loadtxt(
+                file_in, dtype=float, unpack=True
+            )
+        use_line = use_line.astype(bool)
+        rss_logger.info(
+            (
+                f"number of guess lines in file "
+                f"{pixel.size} "
+                f"(masked {(~use_line).sum() / pixel.size * 100: g} %)"
+            )
+        )
         pixel = pixel[use_line]
         ref_lines = ref_lines[use_line]
         use_line = use_line[use_line]
@@ -382,6 +408,15 @@ def detWaveSolution_drp(
     )  # empty for rms of wavelength solution for each fiber
 
     # measure the ARC lines with individual Gaussian across the CCD
+    rss_logger.info(
+        (
+            f"measuring arc lines for each fiber from "
+            f"{ref_fiber = }, "
+            f"{flux_min = }, "
+            f"{fwhm_max = } and "
+            f"{rel_flux_limits = }"
+        )
+    )
     fibers, flux, cent_wave, fwhm, masked = arc.measureArcLines(
         ref_fiber,
         pixel,
@@ -397,6 +432,14 @@ def detWaveSolution_drp(
         norm_flux[n] = numpy.mean(flux[numpy.logical_not(masked[:, n]), n])
     if fiberflat != "":
         flat_flux = numpy.mean(flux / norm_flux[numpy.newaxis, :], 1)
+        rss_logger.info(
+            (
+                f"assuming wavelength range "
+                f"[{fiberflat[0]}, "
+                f"{fiberflat[1]}] "
+                f"and sampling {fiberflat[2]} AA"
+            )
+        )
         wave = numpy.arange(
             float(fiberflat[0]),
             float(fiberflat[1]) + float(fiberflat[2]),
@@ -408,6 +451,12 @@ def detWaveSolution_drp(
         rss_flat.writeFitsData("%s.fits" % (fiberflat[3]))
 
     # smooth the FWHM values for each ARC line in cross-dispersion direction
+    rss_logger.info(
+        (
+            "smoothing FWHM of guess lines along "
+            f"cross-dispersion axis using {poly_fwhm_cross}-deg polynomials"
+        )
+    )
     for i in range(nlines):  # iterate over modelled emission lines
         select = numpy.logical_and(
             numpy.logical_not(masked[:, i]), flux[:, i] > flux_min
@@ -570,23 +619,25 @@ def detWaveSolution_drp(
 # * merge arc_wave and arc_fwhm into lvmArc product, change variable name to in_arc
 def createPixTable_drp(in_rss, out_rss, arc_wave, arc_fwhm="", cropping=""):
     """
-    Adds the wavelength and possibly also the spectral resolution (FWHM) pixel table as new extension to
-    the RSS that is stored as a seperate RSS file.
+    Applies the wavelength and possibly also the spectral resolution (FWHM) to an RSS
 
     Parameters
-    --------------
+    ----------
     in_rss : string
-                    Input RSS FITS file
+        Input RSS FITS file
     out_rss : string
-                    Output RSS FITS file with the wavelength and spectral resolution pixel table added as extensions
+        Output RSS FITS file with the wavelength and spectral resolution pixel
+        table added as extensions
     arc_wave : string
-                    RSS FITS file containing the wavelength pixel table in its primary (0th) extension
+        RSS FITS file containing the wavelength pixel table in its primary
+        (0th) extension
     arc_fwhm : string, optional with default: ''
-                    RSS FITS file containing the spectral resolution (FWHM) pixel table in its primary (0th) extension.
-                    No spectral resolution will not be added if the string is empty.
+        RSS FITS file containing the spectral resolution (FWHM) pixel table in
+        its primary (0th) extension. No spectral resolution will not be added
+        if the string is empty.
 
     Examples
-    ----------------
+    --------
     user:> lvmdrp rss createPixTable RSS_IN.fits RSS_OUT.fits WAVE.fits
     user:> lvmdrp rss createPixTable RSS_IN.fits RSS_OUT.fits WAVE.fits FWHM.fits
     """
@@ -625,32 +676,40 @@ def checkPixTable_drp(
     in_rss, ref_lines, logfile, blocks="15", init_back="100.0", aperture="10"
 ):
     """
-    Measures the offset in dispersion direction between the object frame and the used calibration frames.
-    It compares the wavelength of emission lines (i.e. night sky line) in the RSS as measured by Gaussian fitting
-    with their reference wavelength. The offset in pixels is computed and stored in a log file for future processing.
+    Measures the offset in dispersion axis between the target and the calibration RSS.
+
+    It compares the wavelength of emission lines (i.e. night sky line) in the
+    RSS as measured by Gaussian fitting with their reference wavelength. The
+    offset in pixels is computed and stored in a log file for future
+    processing.
 
     Parameters
-    --------------
+    ----------
     in_rss : string
-                    Input RSS FITS file
+        Input RSS FITS file
     ref_lines : string
-                    Comma-separated list of emission lines to be fit in the RSS for each fiber
+        Comma-separated list of emission lines to be fit in the RSS for each fiber
     logfile : string
-                    Output ASCII logfile that stores the position and deviation from the expected wavelength for
-                    each reference emission line
+        Output ASCII logfile that stores the position and deviation from the
+        expected wavelength for each reference emission line
     blocks: string of integer, optional  with default: '20'
-                    Number of fiber blocks over which the fitted central wavelength are averaged to increase the accuary of the measurement.
-                    The actual number of fibers per block is roughly the total number of fibers divided by the number of blocks.
+        Number of fiber blocks over which the fitted central wavelength are
+        averaged to increase the accuary of the measurement. The actual number
+        of fibers per block is roughly the total number of fibers divided by
+        the number of blocks.
     init_back : string of float, optional with default: '100.0'
-                    The initial guess for a constant background level included in the Gaussian model.
-                    If this parameter is empty, no background level is fitted and set to zero instead.
+        The initial guess for a constant background level included in the
+        Gaussian model. If this parameter is empty, no background level is
+        fitted and set to zero instead.
     aperture : string of integer (>0), optional with default: '10'
-                    Number of pixel used for the fitting of each emission line centered on the pixel position of the line's expected wavelength
+        Number of pixel used for the fitting of each emission line centered on
+        the pixel position of the line's expected wavelength
 
     Examples
-    ----------------
+    --------
     user:> lvmdrp rss checkPixTable RSS_IN.fits 4500.0,5577.4,6300.3 OFFSETWAVE.log
-    user:> lvmdrp rss checkPixTable RSS_IN.fits 4500.0,5577.4,6300.3 OFFSETWAVE.log aperture=14
+    user:> lvmdrp rss checkPixTable RSS_IN.fits 4500.0,5577.4,6300.3 OFFSETWAVE.log /
+    > aperture=14
     """
     centres = numpy.array(ref_lines.split(",")).astype("float")
     init_back = float(init_back)
@@ -752,41 +811,48 @@ def correctPixTable_drp(
     verbose="0",
 ):
     """
-    Corrects the RSS wavelength pixel table for possible offsets in dispersion direction due to flexure effects
-    with respect to the calibration frames taken for this object. The offfsets need to be determined beforehand
-    via the checkPixTable task. The offsets can be smoothed and/or extrapolated along the dispersion axis, but
-    a global median offset is strongly recommended due to measurement inaccuracies.
+    Corrects the RSS wavelength vectors for offsets in dispersion axis due to flexures
+
+    The offfsets need to be determined beforehand via the checkPixTable task.
+    The offsets can be smoothed and/or extrapolated along the dispersion axis,
+    but a global median offset is strongly recommended due to measurement
+    inaccuracies.
 
     Parameters
     --------------
     in_rss : string
-                    Input RSS FITS file
+        Input RSS FITS file
     out_rss : string
-                    Output RSS FITS file with corrected wavelength pixel table
+        Output RSS FITS file with corrected wavelength pixel table
     logfile : string
-                    Input ASCII logfile containing the previously measured offset for certain reference emission line
-                    in dispersion direction
+        Input ASCII logfile containing the previously measured offset for
+        certain reference emission line in dispersion direction
     ref_id : string
-                    Reference ID under which the offsets are stored in the logfile for this specific RSS
+        Reference ID under which the offsets are stored in the logfile for this
+        specific RSS
     smooth_poly_cross : string of integer, optional with default: ''
-                    Degree of the polynomial which is used to smooth the offset value for each reference emission line
-                    as a function of fiber number (i.e. along cross-disperion direction on the CCD)
-                    (positiv: normal polynomial, negative: Legandre polynomial)
-                    No smoothing is performed if this parameter is empty.
+        Degree of the polynomial which is used to smooth the offset value for
+        each reference emission line as a function of fiber number (i.e. along
+        cross-disperion direction on the CCD) (positiv: normal polynomial,
+        negative: Legandre polynomial) No smoothing is performed if this
+        parameter is empty.
     smooth_poly_disp : string of integer, optional with default: ''
-                    Degree of the polynomial which is used to extrapolated the offsets along the wavelength direction
-                    for each block of fibers individually. (positiv: normal polynomial, negative: Legandre polynomial)
-                    A median value of all measured shifts is used if this parameter is empty.
+        Degree of the polynomial which is used to extrapolated the offsets
+        along the wavelength direction for each block of fibers individually.
+        (positiv: normal polynomial, negative: Legandre polynomial) A median
+        value of all measured shifts is used if this parameter is empty.
     poly_disp : string of integer (>0), optional with default: '6'
-                    Degree of polynomial used to construct the wavelength solution. This is needed to properly shift
-                    the wavelength table according to the offset in pixel units.
+        Degree of polynomial used to construct the wavelength solution. This is
+        needed to properly shift the wavelength table according to the offset
+        in pixel units.
     verbose: string of integer (0 or 1), optional  with default: 1
-                    Show information during the processing on the command line (0 - no, 1 - yes)
+        Show information during the processing on the command line (0 - no, 1 -
+        yes)
 
     Examples
-    ----------------
-    user:> lvmdrp rss correctPixTable RSS_in.fits RSS_out.fits OFFSETWAVE.log RSS_REF_ID poly_disp=7
-
+    --------
+    user:> lvmdrp rss correctPixTable RSS_in.fits RSS_out.fits OFFSETWAVE.log /
+    > RSS_REF_ID poly_disp=7
     """
 
     poly_disp = int(poly_disp)
@@ -866,43 +932,46 @@ def resampleWave_drp(
     parallel="auto",
 ):
     """
-    Resamples the RSS with a wavelength in pixel table format to an RSS with a common wavelength solution for each fiber.
-    A Monte Carlo scheme can be used to propagte the error to the resample spectrum. Note that correlated noise is not taken
-    into account with the procedure.
+    Resamples the RSS wavelength solutions a common wavelength solution for each fiber
+
+    A Monte Carlo scheme can be used to propagte the error to the resample spectrum.
+    Note that correlated noise is not taken into account with the procedure.
 
     Parameters
-    --------------
+    ----------
     in_rss : string
-                    Input RSS FITS file where the wavelength is stored as a pixel table
+        Input RSS FITS file where the wavelength is stored as a pixel table
     out_rss : string
-                    Output RSS FITS file with a common wavelength solution
+        Output RSS FITS file with a common wavelength solution
     method : string, optional with default: 'spline'
-                    Interpolation scheme used for the spectral resampling of the data.
-                    Available are
-                    1. spline
-                    2. linear
+        Interpolation scheme used for the spectral resampling of the data.
+        Available options are:
+            - spline
+            - linear
     start_wave : string of float, optional with default: ''
-                    Start wavelength for the common resampled wavelength solution.
-                    The "optimal" wavelength will be used if the paramter is empty.
+        Start wavelength for the common resampled wavelength solution.
+        The "optimal" wavelength will be used if the paramter is empty.
     endt_wave : string of float, optional with default: ''
-                    End wavelength for the common resampled wavelength solution
-                    The "optimal" wavelength will be used if the paramter is empty.
+        End wavelength for the common resampled wavelength solution
+        The "optimal" wavelength will be used if the paramter is empty.
     disp_pix : string of float, optional with default: ''
-                    Dispersion per pixel for the common resampled wavelength solution.
-                    The "optimal" dispersion will be used if the paramter is empty.
+        Dispersion per pixel for the common resampled wavelength solution.
+        The "optimal" dispersion will be used if the paramter is empty.
     err_sim : string of integer (>0), optional with default: '500'
-                    Number of Monte Carlo simulation per fiber in the RSS to estimate the error of the resampled spectrum.
-                    If err_sim is set to 0, no error will be estimated for the resampled RSS.
+        Number of Monte Carlo simulation per fiber in the RSS to estimate the
+        error of the resampled spectrum. If err_sim is set to 0, no error will
+        be estimated for the resampled RSS.
     replace_error: strong of float, optional with default: '1e10'
-                    Error value for bad pixels resampled data, will be ignored if empty
+        Error value for bad pixels resampled data, will be ignored if empty
     parallel: either string of integer (>0) or  'auto', optional with default: 'auto'
-                    Number of CPU cores used in parallel for the computation. If set to auto, the maximum number of CPUs
-                    for the given system is used.
+        Number of CPU cores used in parallel for the computation. If set to
+        auto, the maximum number of CPUs for the given system is used.
 
     Examples
-    ----------------
+    --------
     user:> lvmdrp rss resampleWave RSS_in.fits RSS_out.fits
-    user:> lvmdrp rss resampleWave RSS_in.fits RSS_out.fits start_wave=3700.0 end_wave=7000.0 disp_pix=2.0 err_sim=0
+    user:> lvmdrp rss resampleWave RSS_in.fits RSS_out.fits start_wave=3700.0 /
+    > end_wave=7000.0 disp_pix=2.0 err_sim=0
     """
     err_sim = int(err_sim)
     replace_error = float(replace_error)
@@ -1005,25 +1074,27 @@ def resampleWave_drp(
 
 def matchResolution_drp(in_rss, out_rss, targetFWHM, parallel="auto"):
     """
-                Homogenise the spectral resolution of the RSS to a common spectral resolution (FWHM) by smoothing
-                with a corresponding Gaussian. A pixel table with the spectral resolution needs to be present in the RSS.
-                If the spectral resolution is higher than than the target spectral resolution for certain pixel, no smoothing
-                is applied for those pixels.
+    Homogenise the LSF of the RSS to a common spectral resolution (FWHM)
 
-                Parameters
-                --------------
-                in_rss : string
-                                Input RSS FITS file with a pixel table for the spectral resolution
-                out_rss : string
-                                Output RSS FITS file with a homogenised spectral resolution
-                targetFWHM : string of float
-                                Spectral resolution in FWHM to which the RSS shall be homogenised
-                parallel: either string of integer (>0) or  'auto', optional with default: 'auto'
-                                Number of CPU cores used in parallel for the computation. If set to auto, the maximum number of CPUs
-                                for the given system is used.
+    This task smooths the RSS with a Gaussian kernel of the corresponding
+    width. A pixel table with the spectral resolution needs to be present in
+    the RSS. If the spectral resolution is higher than than the target spectral
+    resolution for certain pixel, no smoothing is applied for those pixels.
 
-                Examples
-                ----------------
+    Parameters
+    ----------
+    in_rss : string
+        Input RSS FITS file with a pixel table for the spectral resolution
+    out_rss : string
+        Output RSS FITS file with a homogenised spectral resolution
+    targetFWHM : string of float
+        Spectral resolution in FWHM to which the RSS shall be homogenised
+    parallel: either string of integer (>0) or  'auto', optional with default: 'auto'
+        Number of CPU cores used in parallel for the computation. If set to
+        auto, the maximum number of CPUs for the given system is used.
+
+    Examples
+    --------
     user:> lvmdrp rss matchResolution RSS_in.fits RSS_out.fits 6.0
     """
     targetFWHM = float(targetFWHM)
@@ -1064,24 +1135,24 @@ def matchResolution_drp(in_rss, out_rss, targetFWHM, parallel="auto"):
 
 def splitFibers_drp(in_rss, splitted_out, contains):
     """
-                Subtracts a (sky) spectrum, which was stored as a FITS file, from the whole RSS.
-                The error will be propagated if the spectrum AND the RSS contain error information.
+    Subtracts a (sky) spectrum, which was stored as a FITS file, from the whole RSS.
+    The error will be propagated if the spectrum AND the RSS contain error information.
 
-                Parameters
-                --------------
-                in_rss : string
-                                Input RSS FITS file including a position table as an extension
-                splitted_out : string
-                                Comma-separated list of output RSS FITS files
-                contains : string
-                                Comma-Separated list of fiber "types" included in the respective output RSS file.
-                                Available fiber types are OBJ, SKY and CAL, corresponding to target fibers, dedicated
-                                sky fibers and calibration fibers, respectively.
-                                If more than one type of fibers should be contained in one of the splitted RSS, they need to
-                                be ";" separated.
+    Parameters
+    ----------
+    in_rss : string
+        Input RSS FITS file including a position table as an extension
+    splitted_out : string
+        Comma-separated list of output RSS FITS files
+    contains : string
+        Comma-Separated list of fiber "types" included in the respective output
+        RSS file. Available fiber types are OBJ, SKY and CAL, corresponding to
+        target fibers, dedicated sky fibers and calibration fibers,
+        respectively. If more than one type of fibers should be contained in
+        one of the splitted RSS, they need to be ";" separated.
 
-                Examples
-                ----------------
+    Examples
+    ----------------
     user:> lvmdrp rss splitFibers RSS_IN.fits RSS_OBJ.fits,RSS_SKY.fits SKY,OBJ
     user:> lvmdrp rss splitFibers RSS_IN.fits RSS_OBJ_SKY.fits,RSS_CAL.fits SKY;OBJ,SKY
     """
@@ -1094,7 +1165,8 @@ def splitFibers_drp(in_rss, splitted_out, contains):
         splitted_rss[i].writeFitsData(splitted_out[i])
 
 
-# TODO: for twilight fiber flats, normalize the individual flats before combining to remove the time dependence
+# TODO: for twilight fiber flats, normalize the individual flats before combining to
+# remove the time dependence
 def createFiberFlat_drp(
     in_rss, out_rss, smooth_poly="0", smooth_median="0", clip="", valid=""
 ):
@@ -1104,26 +1176,30 @@ def createFiberFlat_drp(
 
 
     Parameters
-    --------------
+    ----------
     in_rss : string
-                    Input RSS FITS of a skyflat observations
+        Input RSS FITS of a skyflat observations
     out_rss : string
-                    Output RSS FITS file with fiberflat RSS
+        Output RSS FITS file with fiberflat RSS
     smooth_poly : string of integer (>0), optional with default: '-5'
-                    Degree of polynomial with which the fiberflat may be fitted along
-                    the dispersion axis for each fiber indepenently. (positiv: normal polynomial, negative: Legandre polynomial)
-                    However, not recommended....
+        Degree of polynomial with which the fiberflat may be fitted along the
+        dispersion axis for each fiber indepenently. (positiv: normal
+        polynomial, negative: Legandre polynomial)
     clip : string of two comma separated floats, optional with default: ''
-                    Minimum and maximum number of relative transmission in the resulting fiberflat. If some value are below or above
-                    the given limits they are replaced by zeros and added to the mask as bad pixels.
+        Minimum and maximum number of relative transmission in the resulting
+        fiberflat. If some value are below or above the given limits they are
+        replaced by zeros and added to the mask as bad pixels.
     valid : string of two comma separated integers, optional with default: ''
-                    Minimum and maximum fiber number used to create the reference median spectrum.
-                    This is mainly required if there is a wavelength dependent vignetting effect, so that those
-                    fibers can be rejected from the median spectrum.
+        Minimum and maximum fiber number used to create the reference median
+        spectrum. This is mainly required if there is a wavelength dependent
+        vignetting effect, so that those fibers can be rejected from the median
+        spectrum.
 
     Examples
     ----------------
-    user:> lvmdrp rss createFiberFlat RSS_IN.fits FIBERFLAT.fits clip=0.3,1.5 valid=100,250
+    user:> lvmdrp rss createFiberFlat RSS_IN.fits FIBERFLAT.fits /
+    > clip=0.3,1.5 valid=100,250
+
     user:> lvmdrp rss createFiberFlat RSS_IN.fits FIBERFLAT.fits -6 clip=0.1,2.0
     """
     smooth_poly = int(smooth_poly)
@@ -1178,30 +1254,37 @@ def createFiberFlat_drp(
 
 def correctTraceMask_drp(trace_in, trace_out, logfile, ref_file, poly_smooth=""):
     """
-           Corrects the trace mask of the central fiber position for possible offsets in cross-dispersion direction due to
-           flexure effects with respect to the calibration frames taken for this object. The offfsets need to be determined
-           beforehand via the offsetTrace task. The offsets can be smoothed and/or extrapolated along the dispersion axis.
+    Corrects the trace mask of the central fiber position for possible offsets
+    in cross-dispersion direction due to flexure effects with respect to the
+    calibration frames taken for this object. The offfsets need to be
+    determined beforehand via the offsetTrace task. The offsets can be smoothed
+    and/or extrapolated along the dispersion axis.
 
-                Parameters
-                --------------
-                trace_in : string
-                                Input RSS FITS file containing the traces of the fiber position on the CCD
-                trace_out : string
-                                Output RSS FITS file with offset corrected fiber position traces
-                logfile : string
-                                Input ASCII logfile containing the previously measured offset for certain reference emission line
-                                in cross-dispersion direction
-                ref_file : string
-                                Reference file under which the offsets are stored in the logfile for this specific RSS
-                poly_smooth: string of integer, optional with default: ''
-                                Degree of the polynomial which is used to smooth/extrapolate the offsets as a function
-                                of wavelength (positiv: normal polynomial, negative: Legandre polynomial)
-                                No smoothing is performed if this parameter is empty an a median offset is used instead.
+    Parameters
+    ----------
+    trace_in : string
+        Input RSS FITS file containing the traces of the fiber position on the CCD
+    trace_out : string
+        Output RSS FITS file with offset corrected fiber position traces
+    logfile : string
+        Input ASCII logfile containing the previously measured offset for
+        certain reference emission line in cross-dispersion direction
+    ref_file : string
+        Reference file under which the offsets are stored in the logfile for
+        this specific RSS
+    poly_smooth: string of integer, optional with default: ''
+        Degree of the polynomial which is used to smooth/extrapolate the
+        offsets as a function of wavelength (positiv: normal polynomial,
+        negative: Legandre polynomial) No smoothing is performed if this
+        parameter is empty an a median offset is used instead.
 
-                Examples
-                ----------------
-    user:> lvmdrp rss correctTraceMask TRACE_IN.fits TRACE_OUT.fits OFFSET_TRACE.log REF_File_name
-    user:> lvmdrp rss correctTraceMask TRACE_IN.fits TRACE_OUT.fits OFFSET_TRACE.log REF_File_name poly_smooth= -6
+    Examples
+    --------
+    user:> lvmdrp rss correctTraceMask TRACE_IN.fits TRACE_OUT.fits OFFSET_TRACE.log /
+     > REF_File_name
+
+    user:> lvmdrp rss correctTraceMask TRACE_IN.fits TRACE_OUT.fits OFFSET_TRACE.log /
+    > REF_File_name poly_smooth= -6
     """
     log = open(logfile, "r")
     log_lines = log.readlines()
@@ -1263,24 +1346,28 @@ def correctTraceMask_drp(trace_in, trace_out, logfile, ref_file, poly_smooth="")
 
 def correctFiberFlat_drp(in_rss, out_rss, in_fiberflat, clip="0.2"):
     """
-    Correct an RSS frame for the effect of the different fiber transmission as measured by a fiberflat.
+    Correct an RSS frame for the effect of the different fiber transmission as
+    measured by a fiberflat.
 
     Parameters
-    --------------
+    ----------
     in_rss : string
-                    Input RSS FITS file
+        Input RSS FITS file
     out_rss : string
-                    Output RSS FITS file which is fiberflat corrected.
+        Output RSS FITS file which is fiberflat corrected.
     in_fiberflat : string
-                    Fiberflat RSS FITS file containing the relative transmission of each fiber
+        Fiberflat RSS FITS file containing the relative transmission of each fiber
     clip : string of float, optional with default: ''
-                    Minimum relative transmission considered for the used fiberflat. Value below the given limits are replaced
-                    by zeros and added to the mask as bad pixels in the output RSS.
+        Minimum relative transmission considered for the used fiberflat. Value
+        below the given limits are replaced by zeros and added to the mask as
+        bad pixels in the output RSS.
 
     Examples
-    ----------------
+    --------
     user:> lvmdrp rss correctFiberFlat RSS_IN.fits RSS_OUT.fits FIBERFLAT_IN.fits
-    user:> lvmdrp rss correctFiberFlat RSS_IN.fits RSS_OUT.fits FIBERFLAT_IN.fits clip='0.4'
+
+    user:> lvmdrp rss correctFiberFlat RSS_IN.fits RSS_OUT.fits FIBERFLAT_IN.fits /
+    > clip='0.4'
     """
     clip = float(clip)
     rss = RSS()
@@ -1303,6 +1390,17 @@ def correctFiberFlat_drp(in_rss, out_rss, in_fiberflat, clip="0.2"):
 
 
 def combineRSS_drp(in_rsss, out_rss, method="mean"):
+    """combines the given RSS list to a single RSS using a statistic
+
+    Parameters
+    ----------
+    in_rsss : array_like
+        list of RSS file paths
+    out_rss : str
+        output RSS file path
+    method : str, optional
+        statistic to use for combining the RSS objects, by default "mean"
+    """
     # convert input parameters to proper type
     list_rss = in_rsss.split(",")
 
@@ -1320,13 +1418,39 @@ def combineRSS_drp(in_rsss, out_rss, method="mean"):
 
 
 def glueRSS_drp(rsss, out_rss):
+    """concatenates the given RSS list to a single RSS
+
+    Parameters
+    ----------
+    rsss : array_like
+        list of RSS file paths
+    out_rss : str
+        output RSS file path
+    """
     list_rss = rsss.split(",")
     glueRSS(list_rss, out_rss)
 
 
 def apertureFluxRSS_drp(
-    in_rss, center_x, center_y, hdr_prefix, arc_radius, flux_type="mean,3900,4600"
+    in_rss, center_x, center_y, arc_radius, hdr_prefix, flux_type="mean,3900,4600"
 ):
+    """combines a selection of fibers within a set aperture into a single spectrum
+
+    Parameters
+    ----------
+    in_rss : str
+        intput RSS file path
+    center_x : float
+        X coordinate of the aperture center
+    center_y : float
+        Y coordinate of the aperture center
+    arc_radius : float
+        aperture radius in spaxels
+    hdr_prefix : str
+        header prefix
+    flux_type : str, optional
+        collapse resulting spectrum, by default "mean,3900,4600"
+    """
     flux_type = flux_type.split(",")
     center_x = float(center_x)
     center_y = float(center_y)
@@ -1379,13 +1503,36 @@ def matchFluxRSS_drp(
     rsss,
     center_x,
     center_y,
-    hdr_prefixes,
     arc_radius,
+    hdr_prefixes,
     start_wave="3800",
     end_wave="4600",
     polyorder="2",
     verbose="0",
 ):
+    """matches the flux level of the given RSS list within an aperture
+
+    Parameters
+    ----------
+    rsss : array_like
+        input RSS file paths
+    center_x : float
+        X coordinate of fiber center
+    center_y : float
+        Y coordinate of fiber center
+    arc_radius : float
+        aperture radius in spaxels
+    hdr_prefixes : str
+        header prefix
+    start_wave : str, optional
+        initial wavelength value, by default "3800"
+    end_wave : str, optional
+        final wavelength value, by default "4600"
+    polyorder : str, optional
+        polynomial degree, by default "2"
+    verbose : str, optional
+        whether to show information and plots or not, by default "0"
+    """
     verbose = int(verbose)
     list_rss = rsss.split(",")
     center_x = float(center_x)
@@ -1449,22 +1596,24 @@ def matchFluxRSS_drp(
 
 def includePosTab_drp(in_rss, position_table, offset_x="0.0", offset_y="0.0"):
     """
-           Adds an ASCII file position table as a FITS table extension to the RSS file.
-           An offset may be applied to the fiber positions in x and y direction independently.
+    Adds an ASCII file position table as a FITS table extension to the RSS file.
+    An offset may be applied to the fiber positions in x and y direction independently.
 
-                Parameters
-                --------------
-                in_rss : string
-                                Input RSS FITS file for which the position table will be added
-                position_table : string
-                                Input position table ASCII file name
-                offset_x : string of float, optional with default: '0.0'
-                                Offset applied to the fiber positions in x direction before being added to the RSS.
-                offset_y : string of float, optional with default: '0.0'
-                                Offset applied to the fiber positions in y direction before being added to the RSS.
+    Parameters
+    ----------
+    in_rss : string
+        Input RSS FITS file for which the position table will be added
+    position_table : string
+        Input position table ASCII file name
+    offset_x : string of float, optional with default: '0.0'
+        Offset applied to the fiber positions in x direction before being added
+        to the RSS.
+    offset_y : string of float, optional with default: '0.0'
+        Offset applied to the fiber positions in y direction before being added
+        to the RSS.
 
-                Examples
-                ----------------
+    Examples
+    --------
     user:> lvmdrp rss includePosTab RSS.fits POSTAB.txt
     user:> lvmdrp rss includePosTab RSS.fits POSTAB.txt  offset_x=-5.0 offset_y=3.0
     """
@@ -1479,17 +1628,18 @@ def includePosTab_drp(in_rss, position_table, offset_x="0.0", offset_y="0.0"):
 
 def copyPosTab_drp(in_rss, out_rss):
     """
-         Copies the position table FITS extension from one RSS to another RSS FITS file.
+    Copies the position table FITS extension from one RSS to another RSS FITS file.
 
-                Parameters
-                --------------
-                in_rss : string
-                                Input RSS FITS file from which the position table will be taken.
-                out_rss : string
-                                Output RSS FITS file (must already exist) in which the position table will be added.
+    Parameters
+    ----------
+    in_rss : string
+        Input RSS FITS file from which the position table will be taken.
+    out_rss : string
+        Output RSS FITS file (must already exist) in which the position table
+        will be added.
 
-                Examples
-                ----------------
+    Examples
+    --------
     user:> lvmdrp rss copyPosTab RSS1.fits RSS2.fits
     """
     rss1 = RSS()
@@ -1508,19 +1658,19 @@ def copyPosTab_drp(in_rss, out_rss):
 
 def offsetPosTab_drp(in_rss, offset_x, offset_y):
     """
-                Applies an offset to the fiber positions in x and y direction independently.
+    Applies an offset to the fiber positions in x and y direction independently.
 
-                Parameters
-                --------------
-                in_rss : string
-                                Input RSS FITS file in which the position table will be changed by fiber offsets
-                offset_x : string of float, optional with default: '0.0'
-                                Offset applied to the fiber positions in x direction.
-                offset_y : string of float, optional with default: '0.0'
-                                Offset applied to the fiber positions in y direction.
+    Parameters
+    ----------
+    in_rss : string
+        Input RSS FITS file in which the position table will be changed by fiber offsets
+    offset_x : string of float, optional with default: '0.0'
+        Offset applied to the fiber positions in x direction.
+    offset_y : string of float, optional with default: '0.0'
+        Offset applied to the fiber positions in y direction.
 
-                Examples
-                ----------------
+    Examples
+    --------
     user:> lvmdrp rss offsetPosTab RSS.fits offset_x=-5.0 offset_y=3.0
     """
     offset_x = float(offset_x)
@@ -1533,17 +1683,18 @@ def offsetPosTab_drp(in_rss, offset_x, offset_y):
 
 def rotatePosTab_drp(in_rss, angle="0.0"):
     """
-                Applies an offset to the fiber positions in x and y direction independently.
+    Applies an offset to the fiber positions in x and y direction independently.
 
-                Parameters
-                --------------
-                in_rss : string
-                                Input RSS FITS file in which the position table will be rotated around the bundle zero-point 0,0 by an angle
-                angle : string of float, optional with default: '0.0'
-                                Angle applied to rotate the fiber positions counter-clockwise
+    Parameters
+    ----------
+    in_rss : string
+        Input RSS FITS file in which the position table will be rotated around
+        the bundle zero-point 0,0 by an angle
+    angle : string of float, optional with default: '0.0'
+        Angle applied to rotate the fiber positions counter-clockwise
 
-                Examples
-                ----------------
+    Examples
+    --------
     user:> lvmdrp rss  RSS.fits rotate=152.0
     """
     angle = float(angle)
@@ -1575,6 +1726,51 @@ def createCube_drp(
     parallel="auto",
     verbose="0",
 ):
+    """create cube from given RSS
+
+    Parameters
+    ----------
+    in_rss : str
+        input RSS file path
+    cube_out : str
+        output cube file path
+    position_x : str, optional
+        input RSS file path for X coordinates, by default ""
+    position_y : str, optional
+        input RSS file path for Y coordinates, by default ""
+    ref_pos_wave : str, optional
+        reference wavelength, by default ""
+    int_ref : str, optional
+        reference kind, by default "1"
+    mode : str, optional
+        metric to use, by default "inverseDistance"
+    resolution : str, optional
+        spatial resolution, by default "1.0"
+    sigma : str, optional
+        standard deviation for the Gaussian weights, by default "1.0"
+    radius_limit : str, optional
+        maximum radius value, by default "5.0"
+    min_fibers : str, optional
+        minimum number of fibers, by default "3"
+    slope : str, optional
+        sharpness of the Gaussian weights, by default "2"
+    bad_threshold : str, optional
+        fraction of bad spaxels, by default "0.01"
+    replace_error : str, optional
+        error replacement for bad spaxels, by default "1e10"
+    flip_x : str, optional
+        whether to flip positions along X axis, by default "0"
+    flip_y : str, optional
+        whether to flip positions along Y axis, by default "0"
+    full_field : str, optional
+        whether to use the whole field or not, by default "0"
+    store_cover : str, optional
+        whether to store the cover or not, by default "0"
+    parallel : str, optional
+        whether to run in parallel or not, by default "auto"
+    verbose : str, optional
+        whether to show information and plots or not, by default "0"
+    """
     resolution = float(resolution)
     sigma = float(sigma)
     radius_limit = float(radius_limit)
@@ -1793,7 +1989,6 @@ def createCube_drp(
 
         for i in range(cpus):
             if pos_x is not None and pos_y is not None and ref_pos_wave is not None:
-                # cube = part_rss[i].createCubeInterDAR_new(part_offsets_x[i]._data, part_offsets_y[i]._data, mode=mode, sigma=sigma, resolution=resolution, radius_limit=radius_limit, min_fibers=min_fibers,slope=slope, bad_threshold=bad_threshold,  replace_error=replace_error)
                 threads.append(
                     pool.apply_async(
                         part_rss[i].createCubeInterDAR_new,
@@ -1922,20 +2117,20 @@ def correctGalExtinct_drp(in_rss, out_rss, Av, Rv="3.1", verbose="0"):
     the galactic extinction curve from Cardelli et al. (1989).
 
     Parameters
-    --------------
+    ----------
     in_rss : string
-                    Input RSS FITS file
+        Input RSS FITS file
     out_rss : string
-                    Output RSS FITS file with the corrected spectra
+        Output RSS FITS file with the corrected spectra
     Av : string of float
-                    V-band galactic extinction in magnitudes along the line of sight
+        V-band galactic extinction in magnitudes along the line of sight
     Rv : string of float, optional with default: '3.1'
-                    average E(B-V)/A(V) ratio
+        average E(B-V)/A(V) ratio
     verbose: string of integer (0 or 1), optional  with default: 1
-                    Show information during the processing on the command line (0 - no, 1 - yes)
+        Show information during the processing on the command line (0 - no, 1 - yes)
 
     Examples
-    ----------------
+    --------
     user:> lvmdrp rss correctGalExtinct RSS_IN.fits RSS_OUT.fits 0.33
     """
 
@@ -1962,21 +2157,23 @@ def splitFile_drp(
     Copies the different extension of the RSS into separate files.
 
     Parameters
-    --------------
+    ----------
     in_rss : string
-                    Input RSS FITS file
+        Input RSS FITS file
     data : string, optional with default: ''
-                    Ouput FITS file name containing only the data RSS in its primary extension
+        Ouput FITS file name containing only the data RSS in its primary extension
     error : string, optional with default: ''
-                    Ouput FITS file name containing only the error RSS in its primary extension
+        Ouput FITS file name containing only the error RSS in its primary extension
     mask : string, optional with default: ''
-                    Ouput FITS file name containing only the bad pixel mask RSS in its primary extension
+        Ouput FITS file name containing only the bad pixel mask RSS in its
+        primary extension
     wave : string, optional with default: ''
-                    Ouput FITS file name containing only the wavelength RSS in its primary extension
+        Ouput FITS file name containing only the wavelength RSS in its primary extension
     fwhm : string, optional with default: ''
-                    Ouput FITS file name containing only the spectral resolution RSS in its primary extension
+        Ouput FITS file name containing only the spectral resolution RSS in its
+        primary extension
     position_table : string, optional with default: ''
-                    Ouput ASCII file of the position table in E3D format
+        Ouput ASCII file of the position table in E3D format
 
     Examples
     ----------------
@@ -1999,6 +2196,19 @@ def splitFile_drp(
 
 
 def maskFibers_drp(in_rss, out_rss, fibers, replace_error="1e10"):
+    """masks fibers in the given RSS
+
+    Parameters
+    ----------
+    in_rss : str
+        input RSS file path
+    out_rss : str
+        output RSS file path
+    fibers : array_like
+        list of fibers to mask
+    replace_error : str, optional
+        replacement for masked error pixels, by default "1e10"
+    """
     replace_error = float(replace_error)
     mask_fibers = fibers.split(",")
 
@@ -2014,6 +2224,15 @@ def maskFibers_drp(in_rss, out_rss, fibers, replace_error="1e10"):
 
 
 def maskNAN_drp(in_rss, replace_error="1e12"):
+    """mask NaN values in given RSS
+
+    Parameters
+    ----------
+    in_rss : str
+        input RSS file path
+    replace_error : str, optional
+        replacement for masked error pixels, by default "1e12"
+    """
     rss = loadRSS(in_rss)
     select = numpy.isnan(rss._data)
     if numpy.sum(select) > 0:
@@ -2049,44 +2268,53 @@ def registerSDSS_drp(
     Copies the different extension of the RSS into separate files.
 
     Parameters
-    --------------
+    ----------
     in_rss : string
-                    Input RSS FITS file
+        Input RSS FITS file
     out_rss : string
-                    Output RSS FITS file
+        Output RSS FITS file
     sdss_file : string
-                    Original SDSS file in a given filter band that contains the object given in in_rss
+        Original SDSS file in a given filter band that contains the object
+        given in in_rss
     sdss_field : string
-                    Corresponding SDSS field calibration field for photometric calibration
+        Corresponding SDSS field calibration field for photometric calibration
     filter : string
-                    Filter response curve correponding to the SDSS file and covered by the data.
-                    The number of columns containing the wavelength and transmission are followed comma separated
+        Filter response curve correponding to the SDSS file and covered by the
+        data. The number of columns containing the wavelength and transmission
+        are followed comma separated
     ra : string of float
-                    Right ascension of reference point to center the IFU in degrees
+        Right ascension of reference point to center the IFU in degrees
     dec: string of float
-                    Declination of reference point to center the IFU in degrees
+        Declination of reference point to center the IFU in degrees
     hdr_prefix : string
-                    Prefix for the FITS keywords in which the measurement parameters are stored. Need to start with 'HIERARCH'
+        Prefix for the FITS keywords in which the measurement parameters are
+        stored. Need to start with 'HIERARCH'
     search_box : string list of floats with default '20.0,2.6'
-                    Search box size  for subsequent iterations to construct the chi-square plane of the matching
+        Search box size for subsequent iterations to construct the chi-square
+        plane of the matching
     step : string list of floats with default '1.0,0.2'
-                    Sampling for subsequent iterations to construct the chi-square plane of the matching
+        Sampling for subsequent iterations to construct the chi-square plane of
+        the matching
     offset_x : string of float with default '0.0'
-                    Inital guess for the offset in x (right ascension ) direction
+        Inital guess for the offset in x (right ascension ) direction
     offset_y : string of float with default '0.0'
-                    Inital guess for the offset in y (declination ) direction
+        Inital guess for the offset in y (declination ) direction
     quality_figure : string with default  ''
-                    Name of the output quality control figure. If empty no figure will be produced
-            parallel: either string of integer (>0) or  'auto', optional with default: 'auto'
-                    Number of CPU cores used in parallel for the computation. If set to auto, the maximum number of CPUs
-                    for the given system is used.
-            verbose: string of integer (0 or 1), optional  with default: 1
-                    Show information during the processing on the command line (0 - no, 1 - yes)
+        Name of the output quality control figure. If empty no figure will be produced
+    parallel: either string of integer (>0) or  'auto', optional with default: 'auto'
+        Number of CPU cores used in parallel for the computation. If set to
+        auto, the maximum number of CPUs for the given system is used.
+    verbose: string of integer (0 or 1), optional  with default: 1
+        Show information during the processing on the command line (0 - no, 1 - yes)
 
     Examples
     ----------------
-    user:> lvmdrp rss registerSDSS RSS_IN.fits RSS_OUT.fits SDSS_r_IMG.fits SDSS_FIELD.fit sloan_r.dat,0,1 234.0 20.3 'HIERARCH TEST'
-    user:> lvmdrp rss registerSDSS RSS_IN.fits RSS_OUT.fits SDSS_r_IMG.fits SDSS_FIELD.fit sloan_r.dat,0,1 234.0 20.3 'HIERARCH TEST'  search_box=20,2 step=2,0.5 quality_figure='test.png' parralel=3 verbose=1
+    user:> lvmdrp rss registerSDSS RSS_IN.fits RSS_OUT.fits SDSS_r_IMG.fits /
+    > SDSS_FIELD.fit sloan_r.dat,0,1 234.0 20.3 'HIERARCH TEST'
+
+    user:> lvmdrp rss registerSDSS RSS_IN.fits RSS_OUT.fits SDSS_r_IMG.fits /
+    > SDSS_FIELD.fit sloan_r.dat,0,1 234.0 20.3 'HIERARCH TEST'  search_box=20,2 /
+    > step=2,0.5 quality_figure='test.png' parralel=3 verbose=1
     """
 
     search_box = numpy.array(search_box.split(",")).astype(numpy.float32)
@@ -2443,6 +2671,17 @@ def DAR_registerSDSS_drp(
 
 
 def joinSpecChannels(in_rss, out_rss, parallel="auto"):
+    """combine the given RSS list through the overlaping wavelength range
+
+    Parameters
+    ----------
+    in_rss : array_like
+        list of RSS file paths
+    out_rss : str
+        output RSS file path
+    parallel : str, optional
+        whether to run in parallel or not, by default "auto"
+    """
     rss_b = loadRSS(in_rss[0])
     rss_r = loadRSS(in_rss[1])
     rss_z = loadRSS(in_rss[2])
@@ -2517,6 +2756,25 @@ def createMasterFiberFlat_drp(
     start_wave=None,
     end_wave=None,
 ):
+    """create mater fiberflat from RSS fiberflat
+
+    Parameters
+    ----------
+    in_fiberflat : str
+        input RSS file path
+    out_masterflat : str
+        output RSS file path
+    weighted : bool, optional
+        whether to use errors as weights or not, by default True
+    degree : int, optional
+        degree of the B-spline, by default 3
+    smooth : int, optional
+        degree of the smoothing B-spline, by default 3
+    start_wave : float, optional
+        initial wavelength value, by default None
+    end_wave : float, optional
+        final wavelength value, by default None
+    """
     fiberflat = RSS()
     fiberflat.loadFitsData(in_fiberflat)
 
@@ -2576,6 +2834,29 @@ def quickQuality(
     pct_level=98,
     passbands="gri",
 ):
+    """builds a quality report from the quick DRP outputs
+
+    Parameters
+    ----------
+    in_std : str
+        input RSS file path for standard stars
+    in_sky : str
+        input RSS file path for sky
+    in_biases : array_like
+        list of input image file path for biases
+    in_fiberflat : str
+        input RSS file path for fiberflat
+    in_arc : str
+        input RSS file path for arc
+    out_report : str
+        output file path for final report
+    ref_values : str
+        input YAML file contaning the reference values
+    pct_level : int, optional
+        percentile used in report, by default 98
+    passbands : str, optional
+        passbands names, by default "gri"
+    """
     # TODO: load reference values for qualitative quality flags
     ref_values = yaml.load(open(ref_values, "r"))
 

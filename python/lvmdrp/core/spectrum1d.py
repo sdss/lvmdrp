@@ -1,14 +1,9 @@
-import numpy
-from astropy.io import fits as pyfits
-
-
-try:
-    import pylab
-except:
-    pass
 from copy import deepcopy
 
-from scipy import interpolate, ndimage, optimize, sparse
+import matplotlib.pyplot as plt
+import numpy
+from astropy.io import fits as pyfits
+from scipy import interpolate, ndimage, sparse
 
 from lvmdrp.core import fit_profile
 from lvmdrp.core.header import Header
