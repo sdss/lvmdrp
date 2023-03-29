@@ -35,8 +35,8 @@ __all__ = [
 def _get_missing_fields_in(template):
     """Return config template keywords that need to be filled in
 
-    This function creates an (dictionary) structure to parse fields in the given configuration
-    template. Those fields are:
+    This function creates an (dictionary) structure to parse fields in the
+    given configuration template. Those fields are:
 
         * location
         * naming_convention
@@ -49,22 +49,23 @@ def _get_missing_fields_in(template):
         }
 
     where template is the original value of the field (e.g., location) in the
-    configuration template and the list of kw corresponds to the missing values to evaluate
-    the corresponding template field.
+    configuration template and the list of kw corresponds to the missing values
+    to evaluate the corresponding template field.
 
-    This structure can then be used to fill in the missing fields using information from other
-    sources such as DBs and/or FITS headers.
+    This structure can then be used to fill in the missing fields using
+    information from other sources such as DBs and/or FITS headers.
 
     Parameters
     ----------
     template : string or dict_like
-        the path to the template file to parse information from or the already loaded YAML
-        template.
+        the path to the template file to parse information from or the already
+        loaded YAML template.
 
     Returns
     -------
     missing_fields : dict_like
-        a structure to evaluate the missing fields in the given configuration template
+        a structure to evaluate the missing fields in the given configuration
+        template
     """
     if isinstance(template, (list, dict)):
         temp = template
@@ -306,7 +307,8 @@ def prepMasterCalib_drp(
 def prepReduction_drp(config_template, mjd=None, exposure=None, spec=None, ccd=None):
     """
 
-    Writes to disk configuration file(s) to perform the reduction of the target raw frames
+    Writes to disk configuration file(s) to perform the reduction of the target
+    raw frames
 
     Steps carried out by this task:
         * read a configuration template
@@ -315,16 +317,17 @@ def prepReduction_drp(config_template, mjd=None, exposure=None, spec=None, ccd=N
         * update configuration template(s)
         * write the filled-in configuration to YAML file(s)
 
-    all parameters (mjd, exposure. spec and ccd) are optional and are used to constrain the
-    search for *raw* target frames in the database. Once the intended frame(s) is(are) found,
-    this task will locate in the database the matching calibration frames needed to carry out
-    the reduction. The i/o file paths for each reduction step will be automatically filled-in
-    as well.
+    all parameters (mjd, exposure. spec and ccd) are optional and are used to
+    constrain the search for *raw* target frames in the database. Once the
+    intended frame(s) is(are) found, this task will locate in the database the
+    matching calibration frames needed to carry out the reduction. The i/o file
+    paths for each reduction step will be automatically filled-in as well.
 
     Parameters
     ----------
     config_template : string
-        the name of the configuration template to prepare the reduction of the target frame(s)
+        the name of the configuration template to prepare the reduction of the
+        target frame(s)
     mjd : int, optional
         the MJD constrain to add to the raw frames list
     exposure : int, optional
@@ -332,7 +335,8 @@ def prepReduction_drp(config_template, mjd=None, exposure=None, spec=None, ccd=N
     spec : string of 'spec1', 'spec2' or 'spec3', optional
         the spectrograph to target for reduction
     ccd : string of b1, r1, z1, b2, r2, z2, b3, r3, or z3
-        the CCD to target for reduction. Note that setting ccd also constrains spec
+        the CCD to target for reduction. Note that setting ccd also constrains
+        spec
 
     """
     # get DRP configuration template
@@ -440,7 +444,7 @@ def prepReduction_drp(config_template, mjd=None, exposure=None, spec=None, ccd=N
 
 # TODO: define fromConfig_drp(config, **registered_modules):
 #   * read config
-#   * parse each DRP step in config (match config.steps to each module.step in registered_modules)
+#   * parse each DRP step in config
 #   * run each DRP step
 def fromConfig_drp(config, **registered_modules):
     config = yaml.safe_load(config)
