@@ -4,7 +4,7 @@ short: the extracted arc frame
 description: |
   This is the extracted arc frame, including wavelength calibration and removal of fiber-to-fiber
   flat field variations. The format is similar to MaNGA mgArc files.
-location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[OBSERVATORY]/[MJD]/
+location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[MJD]/
 created_by: module.py
 used_by: module.py
 naming_convention: |

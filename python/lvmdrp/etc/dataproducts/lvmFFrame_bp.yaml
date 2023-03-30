@@ -3,7 +3,7 @@ short: the flux-calibrated science frames
 description: |
   The per-exposure science frame after extraction, sky subtraction, and flux calibration.
   Made from input lvmSFrame files. Note that the 'F' in the name means Flux-calibrated.
-location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[OBSERVATORY]/[MJD]/
+location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[MJD]/
 created_by: module.py
 used_by: module.py
 naming_convention: |

@@ -1,13 +1,13 @@
-name: lvm-fwhm
-short: the width traceset of each fiber
+name: lvmTrace
+short: the peak traceset of each fiber
 description: |
-  contains a table describing the polynomial fittings of each fiber width (in FWHM) along the dispersion axis.
+  contains a table describing the polynomial fittings of each fiber peak along the dispersion axis.
 created_by: imageMethod.traceFWHM
 used_by:
   - imageMethod.extractSpec
-location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[OBSERVATORY]/[MJD]/
+location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[MJD]/
 naming_convention: |
-  lvm-fwhm-[CAMERA]-[EXPNUM].fits.gz, where [CAMERA] is one of the nine cameras on the instrument, b1, r1, z1,
+  lvm-trace-[CAMERA]-[EXPNUM].fits.gz, where [CAMERA] is one of the nine cameras on the instrument, b1, r1, z1,
   or b2, r2, z2, or b3, r3, or z3 for the blue, red, nir cameras on each LVM spectrograph, and
   [EXPNUM] is the (zero-padded) 8-digit exposure number.
 hdu0:
@@ -16,8 +16,8 @@ hdu0:
   is_image: true
   header:
 hdu1:
-  name: WIDTHSET
-  description: fiber width (FWHM) traceset in pixels
+  name: TSET
+  description: fiber peak traceset in pixels
   is_image: false
   shape: BINARY FITS TABLE
   columns:
@@ -25,7 +25,7 @@ hdu1:
       name: FUNC
       type: char[8]
       unit: null
-      description: polynomial function used to fit the fiber width along the dispersion axis
+      description: polynomial function used to fit the fiber peak along the dispersion axis
     XMIN:
       name: XMIN
       type: float64

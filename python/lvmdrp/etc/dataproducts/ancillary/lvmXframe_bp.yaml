@@ -1,8 +1,8 @@
-name: lvm-xframe
+name: lvmXframe
 short: frame extracted in row-stacked format
 description: |
   this is the frame extracted into a row-stacked format.
-location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[OBSERVATORY]/[MJD]/
+location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[MJD]/
 created_by: imageMethod.extractSpec
 used_by:
   - rssMethod.correctFiberFlat

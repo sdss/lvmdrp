@@ -6,7 +6,7 @@ description: |
     those from spectrograph 1 (i.e., in order of fiberid). All spectra in this file have been
     resampled to a common wavelength grid for ALL LVM observations.  Note that 'C' in the
     name means Camera Combined on a Common wavelength grid.
-location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[OBSERVATORY]/[MJD]/
+location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[MJD]/
 created_by: module.py
 used_by: module.py
 naming_convention: |

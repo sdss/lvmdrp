@@ -1,11 +1,11 @@
-name: lvm-throughput
+name: lvmThroughput
 short: the throughput function
 description: |
   contains a table of the throughput as a function of the wavelength vector for the combined blue, red and NIR channels.
 created_by: rssMethod.quickThroughput
 used_by:
   - rssMethod.quickFluxCalib
-location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[OBSERVATORY]/[MJD]/
+location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[MJD]/
 naming_convention: |
   lvm-throughput-[EXPNUM].fits.gz, where [EXPNUM] is the (zero-padded) 8-digit exposure number.
 hdu0:

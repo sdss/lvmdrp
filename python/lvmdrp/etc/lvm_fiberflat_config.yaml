@@ -3,7 +3,7 @@ name: lvm-fiberflat
 short: configuration file for fiberflat reduction
 description: |
   defines the reduction steps to create a reduced fiberflat.
-location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[OBSERVATORY]/[MJD]
+location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[MJD]
 naming_convention: lvm-fiberflat-[CAMERA]-[EXPNUM]-config.yaml
 target_frame: lvmSdr
 calibration_frames:

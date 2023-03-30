@@ -2,7 +2,7 @@ name: lvmRss
 short: the row-stacked fiber spectra
 description: |
   The row-stacked, flux-calibrated fiber spectra for a given tile across all exposures.
-location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[OBSERVATORY]/[MJD]/
+location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[MJD]/
 created_by: lvmdrp.functions.fluxCalMethod.
 used_by: lvmdap._cmdline._main
 naming_convention: lvm-[TILEID]-RSS.fits.gz where [TILEID] is the id of survey tile sky pointing
