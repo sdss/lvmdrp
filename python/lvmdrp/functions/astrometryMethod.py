@@ -8,16 +8,22 @@
 
 description = "Provides tasks for calculating astrometry"
 
-__all__ = ["createReferenceLibrary_drp", "astrometricSolution_drp", "refineAstrometry_drp"]
+__all__ = [
+    "createReferenceLibrary_drp",
+    "astrometricSolution_drp",
+    "refineAstrometry_drp",
+]
 
 
 # TODO: implement downloading reference images from PanSTARRS for all LVM pointings
 def createReferenceLibrary_drp():
     pass
 
+
 # TODO: implement astrometry solution for a given RSS
 def astrometricSolution_drp():
     pass
+
 
 # TODO: fine astrometric solution
 def refineAstrometry_drp():

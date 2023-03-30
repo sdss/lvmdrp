@@ -7,8 +7,8 @@
 # @License: BSD 3-Clause
 # @Copyright: SDSS-V LVM
 
-import sys
 import argparse
+import sys
 
 from lvmdrp.utils import database
 from lvmdrp.utils.configuration import load_master_config

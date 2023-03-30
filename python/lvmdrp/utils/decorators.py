@@ -8,8 +8,8 @@
 
 import os
 
-from lvmdrp.utils.bitmask import QualityFlag
 from lvmdrp.core import image
+from lvmdrp.utils.bitmask import QualityFlag
 
 
 # TODO: implement a decorator for validating outputs
@@ -49,19 +49,26 @@ def missing_files(potential_flags, *par_files):
             files_exist = dict.fromkeys(par_files, False)
             for par_name in par_files:
                 file_path = kwargs.get(par_name)
-                files_exist[par_name] = os.path.isfile(file_path) if isinstance(file_path, str) else False
-            
+                files_exist[par_name] = (
+                    os.path.isfile(file_path) if isinstance(file_path, str) else False
+                )
+
             # define OK flag
             flags = QualityFlag["OK"]
             if all(files_exist.values()):
                 result = f(*args, **kwargs)
-                return (*result, flags) if isinstance(result, tuple) else (result, flags)
+                return (
+                    (*result, flags) if isinstance(result, tuple) else (result, flags)
+                )
             else:
                 for flag in potential_flags:
                     flags += flag
                 return None, flags
+
         return inner
+
     return decorator
+
 
 def validate_fibers(potential_flags, config, target_frame):
     def decorator(f):
@@ -78,17 +85,19 @@ def validate_fibers(potential_flags, config, target_frame):
                 for flag in potential_flags:
                     flags += flag
             return result, flags
+
         return inner
+
     return decorator
 
+
 if __name__ == "__main__":
+
     @missing_files(["BAD_CALIBRATION_FRAMES"], "in_file")
     def simple_func(in_file, a, b, c):
         print(in_file)
         print(a, b, c)
         return a
-    
+
     r = simple_func(in_file="a_file.txt", a=1, b=2, c=3)
     print(r)
-    
-

@@ -7,14 +7,16 @@ import sys
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
-from lvmdrp.core import rss
-from lvmdrp.utils import logger, spec_from_lines
 from matplotlib.lines import Line2D
 from matplotlib.widgets import TextBox
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from numpy.polynomial.hermite import hermfit, hermval
 from numpy.polynomial.polynomial import polyfit, polyval
 from scipy import signal
+
+from lvmdrp.core import rss
+from lvmdrp.utils import logger, spec_from_lines
+
 
 font = {"family" : "sans-serif",
         "weight" : "bold",

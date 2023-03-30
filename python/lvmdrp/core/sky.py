@@ -7,30 +7,37 @@
 # @Copyright: SDSS-V LVM
 
 
-import os
 import json
-import yaml
-from io import BytesIO
+import os
 import shutil
 import subprocess
-import numpy as np
 from datetime import timedelta
-from astropy.io import fits
-from astropy.time import Time
-from astropy.table import Table, hstack
+from io import BytesIO
+
+import numpy as np
+import yaml
 from astropy import units as u
-from skycalc_cli.skycalc import SkyModel, AlmanacQuery
+from astropy.io import fits
+from astropy.table import Table, hstack
+from astropy.time import Time
+from skycalc_cli.skycalc import AlmanacQuery, SkyModel
 from skycalc_cli.skycalc_cli import fixObservatory
-from skyfield.api import load, wgs84, Star
 from skyfield import almanac
+from skyfield.api import Star, load, wgs84
 from skyfield.framelib import ecliptic_frame
 
-from lvmdrp.core.constants import EPHEMERIS_PATH
-from lvmdrp.core.constants import ALMANAC_CONFIG_PATH, SKYCALC_CONFIG_PATH
-from lvmdrp.core.constants import SKYMODEL_INST_PATH, SKYCORR_INST_PATH, SKYCORR_CONFIG_PATH, SKYCORR_PAR_MAP
-from lvmdrp.core.constants import SKYMODEL_INST_CONFIG_PATH, SKYMODEL_MODEL_CONFIG_PATH
-from lvmdrp.external.skycorr import fitstabSkyCorrWrapper, createParFile, runSkyCorr
-
+from lvmdrp.core.constants import (
+    ALMANAC_CONFIG_PATH,
+    EPHEMERIS_PATH,
+    SKYCALC_CONFIG_PATH,
+    SKYCORR_CONFIG_PATH,
+    SKYCORR_INST_PATH,
+    SKYCORR_PAR_MAP,
+    SKYMODEL_INST_CONFIG_PATH,
+    SKYMODEL_INST_PATH,
+    SKYMODEL_MODEL_CONFIG_PATH,
+)
+from lvmdrp.external.skycorr import createParFile, fitstabSkyCorrWrapper, runSkyCorr
 from lvmdrp.utils.configuration import load_master_config
 from lvmdrp.utils.logger import get_logger
 
@@ -44,24 +51,24 @@ os.environ["LD_LIBRARY_PATH"] = os.path.join(SKYCORR_INST_PATH, "lib")
 
 
 def ang_distance(r1, d1, r2, d2):
-    '''
+    """
     distance(r1,d1,r2,d2)
     Return the angular offset between two ra,dec positions
     All variables are expected to be in degrees.
     Output is in degrees
 
     Note - This routine could easily be made more general
-    
+
     author: Knox Long
 
-    '''
+    """
     RADIAN = 57.29578
 
     r1 = r1 / RADIAN
     d1 = d1 / RADIAN
     r2 = r2 / RADIAN
     d2 = d2 / RADIAN
-    xlambda = np.sin(d1)*np.sin(d2)+np.cos(d1)*np.cos(d2)*np.cos(r1-r2)
+    xlambda = np.sin(d1) * np.sin(d2) + np.cos(d1) * np.cos(d2) * np.cos(r1 - r2)
     if xlambda >= 1.0:
         xlambda = 0.0
     else:
@@ -74,7 +81,7 @@ def ang_distance(r1, d1, r2, d2):
 
 def read_skymodel_par(parfile_path, verify=True):
     """Returns a dictionary with the ESO skymodel input .par file contents
-    
+
     Parameters
     ----------
     parfile: string
@@ -83,7 +90,7 @@ def read_skymodel_par(parfile_path, verify=True):
         whether to verify or not the integrity of the configuration file. Defaults to True
     """
     config = {}
-    with open(parfile_path, "r") as f:        
+    with open(parfile_path, "r") as f:
         lines = f.readlines()
         for line in lines:
             if line.startswith("#") or not line.strip():
@@ -104,11 +111,11 @@ def read_skymodel_par(parfile_path, verify=True):
                     val_new = val
 
             config[key] = val_new
-    
+
     # TODO: verify integrity of the configuration parameters
     if verify:
         pass
-    
+
     # TODO: add units support
 
     return config
@@ -116,7 +123,7 @@ def read_skymodel_par(parfile_path, verify=True):
 
 def write_skymodel_par(parfile_path, config, verify=True):
     """Writes the configuration dictionary in a given .par file(s)
-    
+
     Parameters
     ----------
     par_path: string
@@ -145,12 +152,16 @@ def skymodel_pars_from_header(header):
     try:
         observatory = header["OBSERVAT"]
     except KeyError:
-        sky_logger.warning(f"'OBSERVAT' is not in reference sky header. Assuming OBSERVAT='LCO'")
+        sky_logger.warning(
+            f"'OBSERVAT' is not in reference sky header. Assuming OBSERVAT='LCO'"
+        )
         observatory = "LCO"
     try:
         obstime = Time(header["OBSTIME"], scale="tai")
     except KeyError:
-        sky_logger.warning(f"'OBSTIME' is not in reference sky header. Falling back to 'MJD'")
+        sky_logger.warning(
+            f"'OBSTIME' is not in reference sky header. Falling back to 'MJD'"
+        )
     try:
         obstime = Time(header["MJD"], format="mjd")
     except KeyError:
@@ -162,15 +173,21 @@ def skymodel_pars_from_header(header):
     try:
         obs_pars = master_config["LVM_OBSERVATORIES"][observatory]
     except KeyError:
-        sky_logger.error(f"observatory '{observatory}' not found in master configuration file.")
+        sky_logger.error(
+            f"observatory '{observatory}' not found in master configuration file."
+        )
         sky_logger.warning("falling back to 'LCO'")
         obs_pars = master_config["LVM_OBSERVATORIES"]["LCO"]
-    
+
     # define ephemeris object
     astros = load(EPHEMERIS_PATH)
     sun, earth, moon = astros["sun"], astros["earth"], astros["moon"]
     # define location
-    obs_topos = wgs84.latlon(latitude_degrees=obs_pars["lat"], longitude_degrees=obs_pars["lon"], elevation_m=obs_pars["height"])
+    obs_topos = wgs84.latlon(
+        latitude_degrees=obs_pars["lat"],
+        longitude_degrees=obs_pars["lon"],
+        elevation_m=obs_pars["height"],
+    )
     obs = earth + obs_topos
     # define observation datetime
     ts = load.timescale()
@@ -182,12 +199,12 @@ def skymodel_pars_from_header(header):
     s, m = obs.observe(sun).apparent(), obs.observe(moon).apparent()
 
     # define target
-    target_ra, target_dec = ra*u.deg, dec*u.deg
+    target_ra, target_dec = ra * u.deg, dec * u.deg
     target = Star(ra_hours=target_ra.to(u.hourangle), dec_degrees=target_dec.to(u.deg))
     t = obs.observe(target).apparent()
 
     # observatory height ('sm_h' in km)
-    sm_h = obs_pars["height"]*u.m
+    sm_h = obs_pars["height"] * u.m
 
     # TODO: - ** lower height limit ('sm_hmin' in km)
     # altitude of object above the horizon (alt, 0 -- 90)
@@ -204,7 +221,7 @@ def skymodel_pars_from_header(header):
 
     # TODO: - ** distance to moon ('moondist', 0.91 -- 1.08; 1: mean distance)
     moondist = moondist.to(u.m) / MEAN_MOON_DIST
-    
+
     # TODO: - ** pressure at observatory altitude ('pres' in hPa)
     # TODO: - ** single scattering albedo for aerosols ('ssa')
     # TODO: - ** calculation of double scattering of moonlight ('calcds', Y or N)
@@ -233,15 +250,19 @@ def skymodel_pars_from_header(header):
         season = 5
     else:
         season = 6
-        
+
     # time of the observation ('time' in x/3 of the night; 0: entire night)
     t_ini, t_fin = obs_time - timedelta(days=2), obs_time + timedelta(days=2)
 
-    risings_and_settings, _ = almanac.find_discrete(t_ini, t_fin, almanac.sunrise_sunset(ephemeris=astros, topos=obs_topos))
+    risings_and_settings, _ = almanac.find_discrete(
+        t_ini, t_fin, almanac.sunrise_sunset(ephemeris=astros, topos=obs_topos)
+    )
     i = np.digitize(obs_time.tt, bins=risings_and_settings.tt, right=False)
-    risings_and_settings[i-1].tt <= obs_time.tt < risings_and_settings[i].tt, _[[i-1,i]]
+    risings_and_settings[i - 1].tt <= obs_time.tt < risings_and_settings[i].tt, _[
+        [i - 1, i]
+    ]
 
-    night_thirds = np.linspace(*risings_and_settings[[i-1, i]].tt, 4)
+    night_thirds = np.linspace(*risings_and_settings[[i - 1, i]].tt, 4)
     time = np.digitize(obs_time.tt, bins=night_thirds)
     # assume whole night if the target obstime was observed during 'daylight'
     if time == 4:
@@ -252,16 +273,16 @@ def skymodel_pars_from_header(header):
     # TODO: - ** radiative transfer code for molecular spectra ('rtcode', L or R)
     # TODO: - ** resolving power of molecular spectra in library ('resol')
     # TODO: - ** sky model components
-    
+
     return {
         "sm_h": max(2.4, max(3.06, sm_h.to(u.km).value)),
-        "sm_hmin": (2.0*u.km).value, 
+        "sm_hmin": (2.0 * u.km).value,
         "alt": alt.to(u.deg).value,
         "alpha": alpha.to(u.deg).value,
         "rho": rho.to(u.deg).value,
         "altmoon": altmoon.to(u.deg).value,
         "moondist": moondist.value,
-        "pres": (744*u.hPa).value,
+        "pres": (744 * u.hPa).value,
         "ssa": 0.97,
         "calcds": "N",
         "o2column": 1.0,
@@ -269,16 +290,16 @@ def skymodel_pars_from_header(header):
         "lon_ecl": lon_ecl.to(u.deg).value,
         "lat_ecl": lat_ecl.to(u.deg).value,
         "emis_str": ",".join(map(str, [0.2])),
-        "temp_str": ",".join(map(str, [(290.0*u.K).value])),
-        "msolflux": 130.0, # 1 sfu = 1e-19 erg/s/cm**2/Hz,
+        "temp_str": ",".join(map(str, [(290.0 * u.K).value])),
+        "msolflux": 130.0,  # 1 sfu = 1e-19 erg/s/cm**2/Hz,
         "season": season,
-        "time": time
+        "time": time,
     }
 
 
 def get_bright_fiber_selection(rss):
     """Returns a selection (mask) of fibers with known stars given an RSS object
-    
+
     TODO: ask Kathryn about this, she and Max have made progress on identifying bright fibers
     """
     # extract tile information from rss header
@@ -289,7 +310,7 @@ def get_bright_fiber_selection(rss):
 
 def run_skymodel(skymodel_path=SKYMODEL_INST_PATH, **kwargs):
     """run ESO sky model for observation parameters (ephemeris, atmospheric conditions, site, etc)
-    
+
     Parameters
     ----------
     skymodel_path: string
@@ -313,13 +334,23 @@ def run_skymodel(skymodel_path=SKYMODEL_INST_PATH, **kwargs):
     skymodel_inst_par.update(read_skymodel_par(SKYMODEL_INST_CONFIG_PATH))
     skymodel_model_par.update(read_skymodel_par(SKYMODEL_MODEL_CONFIG_PATH))
     # ---------------------------------------------------------------------------------------------
-     
+
     # update original configuration settings with kwargs ------------------------------------------
-    skymodel_inst_par.update((k, kwargs[k]) for k in skymodel_inst_par.keys() & kwargs.keys())
-    skymodel_model_par.update((k, kwargs[k]) for k in skymodel_model_par.keys() & kwargs.keys())
+    skymodel_inst_par.update(
+        (k, kwargs[k]) for k in skymodel_inst_par.keys() & kwargs.keys()
+    )
+    skymodel_model_par.update(
+        (k, kwargs[k]) for k in skymodel_model_par.keys() & kwargs.keys()
+    )
     # save configuration files with the names expected by calcskymodel
-    write_skymodel_par(parfile_path=SKYMODEL_INST_CONFIG_PATH.replace("_ref", ""), config=skymodel_inst_par)
-    write_skymodel_par(parfile_path=SKYMODEL_MODEL_CONFIG_PATH.replace("_ref", ""), config=skymodel_model_par)
+    write_skymodel_par(
+        parfile_path=SKYMODEL_INST_CONFIG_PATH.replace("_ref", ""),
+        config=skymodel_inst_par,
+    )
+    write_skymodel_par(
+        parfile_path=SKYMODEL_MODEL_CONFIG_PATH.replace("_ref", ""),
+        config=skymodel_model_par,
+    )
     # ---------------------------------------------------------------------------------------------
 
     # run calcskymodel with the requested input parameters ----------------------------------------
@@ -327,21 +358,32 @@ def run_skymodel(skymodel_path=SKYMODEL_INST_PATH, **kwargs):
     # clean output directory
     # shutil.rmtree("output", ignore_errors=True)
     os.makedirs("output", exist_ok=True)
-    
+
     sky_logger.info("trying skymodel from pre-computed airglow lines")
     out = subprocess.run("bin/calcskymodel".split(), capture_output=True)
     if out.returncode != 0 or "error" in out.stderr.decode("utf-8").lower():
         sky_logger.warning("no suitable airglow spectrum found")
-        
+
         # extract parameters from config for radiative transfer run
-        alt, time, season, resol, pwv = skymodel_model_par["alt"], skymodel_model_par["time"], skymodel_model_par["season"], skymodel_model_par["resol"], skymodel_model_par["pwv"]
-        airmass = np.round(1/np.cos((90 - alt) * np.pi / 180), 1)
+        alt, time, season, resol, pwv = (
+            skymodel_model_par["alt"],
+            skymodel_model_par["time"],
+            skymodel_model_par["season"],
+            skymodel_model_par["resol"],
+            skymodel_model_par["pwv"],
+        )
+        airmass = np.round(1 / np.cos((90 - alt) * np.pi / 180), 1)
         resol = int(float(resol))
         pwv = int(pwv) if pwv == "-1" else float(pwv)
 
-        sky_logger.info(f"calculating airglow lines with parameters {airmass = }, {time = }, {season = }, {resol = } {pwv = }")
+        sky_logger.info(
+            f"calculating airglow lines with parameters {airmass = }, {time = }, {season = }, {resol = } {pwv = }"
+        )
         os.chdir(os.path.join(skymodel_path, "sm-01_mod1"))
-        out = subprocess.run(f"bin/create_spec {airmass} {time} {season} . {resol} {pwv}".split(), capture_output=True)
+        out = subprocess.run(
+            f"bin/create_spec {airmass} {time} {season} . {resol} {pwv}".split(),
+            capture_output=True,
+        )
         if out.returncode == 0:
             sky_logger.info("successfully finished airglow lines calculations")
         else:
@@ -350,7 +392,13 @@ def run_skymodel(skymodel_path=SKYMODEL_INST_PATH, **kwargs):
 
         # copy library files to corresponding path according to libpath
         try:
-            shutil.copytree(os.path.join(skymodel_path, "sm-01_mod1", "output"), os.path.join(skymodel_path, "sm-01_mod2", "data", "lib"), dirs_exist_ok=True, symlinks=True, ignore_dangling_symlinks=True)
+            shutil.copytree(
+                os.path.join(skymodel_path, "sm-01_mod1", "output"),
+                os.path.join(skymodel_path, "sm-01_mod2", "data", "lib"),
+                dirs_exist_ok=True,
+                symlinks=True,
+                ignore_dangling_symlinks=True,
+            )
         except shutil.Error as e:
             sky_logger.warning(e.args[0])
 
@@ -358,9 +406,13 @@ def run_skymodel(skymodel_path=SKYMODEL_INST_PATH, **kwargs):
         os.chdir(os.path.join(skymodel_path, "sm-01_mod2"))
         out = subprocess.run(f"bin/preplinetrans".split(), capture_output=True)
         if out.returncode == 0:
-            sky_logger.info("successfully finished effective atmospheric transmission calculations")
+            sky_logger.info(
+                "successfully finished effective atmospheric transmission calculations"
+            )
         else:
-            sky_logger.error("failed while running effective atmospheric transmission calculations")
+            sky_logger.error(
+                "failed while running effective atmospheric transmission calculations"
+            )
             sky_logger.error(out.stderr.decode("utf-8"))
 
         out = subprocess.run(f"bin/calcskymodel".split(), capture_output=True)
@@ -376,18 +428,26 @@ def run_skymodel(skymodel_path=SKYMODEL_INST_PATH, **kwargs):
     # ---------------------------------------------------------------------------------------------
 
     # read output files and organize in a FITS table ----------------------------------------------
-    trans_table = Table(fits.getdata(os.path.join("output","transspec.fits"), ext=1))
-    lines_table = Table(fits.getdata(os.path.join("output","radspec.fits"), ext=1))
+    trans_table = Table(fits.getdata(os.path.join("output", "transspec.fits"), ext=1))
+    lines_table = Table(fits.getdata(os.path.join("output", "radspec.fits"), ext=1))
     os.chdir(curdir)
 
     trans_table.remove_column("lam")
     sky_comps = hstack([lines_table, trans_table])
-    sky_comps["lam"] = sky_comps["lam"]*1e4
+    sky_comps["lam"] = sky_comps["lam"] * 1e4
 
     return skymodel_inst_par, skymodel_model_par, sky_comps
 
 
-def run_skycorr(sci_spec, sky_spec, spec_label, skycorr_path=SKYCORR_INST_PATH, specs_dir="./", out_dir="./", **kwargs):
+def run_skycorr(
+    sci_spec,
+    sky_spec,
+    spec_label,
+    skycorr_path=SKYCORR_INST_PATH,
+    specs_dir="./",
+    out_dir="./",
+    **kwargs,
+):
     # invert masks if present
     if sci_spec._mask is not None:
         sci_spec._mask = ~sci_spec._mask
@@ -406,11 +466,13 @@ def run_skycorr(sci_spec, sky_spec, spec_label, skycorr_path=SKYCORR_INST_PATH, 
         timeVal=kwargs.pop("TIME"),
         telAltVal=kwargs.pop("TELALT"),
         label=spec_label,
-        specs_dir=specs_dir
+        specs_dir=specs_dir,
     )
-    
+
     # update config pars with keyword arguments
-    skycorr_config_.update((k, kwargs[k]) for k in skycorr_config_.keys() & kwargs.keys())
+    skycorr_config_.update(
+        (k, kwargs[k]) for k in skycorr_config_.keys() & kwargs.keys()
+    )
     # convert from yaml to skycorr keys
     skycorr_config = {val: skycorr_config_[key] for key, val in SKYCORR_PAR_MAP.items()}
     skycorr_config["install"] = skycorr_path
@@ -426,15 +488,19 @@ def run_skycorr(sci_spec, sky_spec, spec_label, skycorr_path=SKYCORR_INST_PATH, 
     runSkyCorr(parfile=par_file)
 
     # read outputs
-    skycorr_fit = Table(fits.getdata(os.path.join(out_dir, f"{out_file}_fit.fits"), ext=1))
+    skycorr_fit = Table(
+        fits.getdata(os.path.join(out_dir, f"{out_file}_fit.fits"), ext=1)
+    )
     skycorr_fit["lambda"] = skycorr_fit["lambda"] * 1e4
-    
+
     return skycorr_config, skycorr_fit
 
 
-def run_skycalc(skycalc_config=SKYCALC_CONFIG_PATH, almanac_config=ALMANAC_CONFIG_PATH, **kwargs):
+def run_skycalc(
+    skycalc_config=SKYCALC_CONFIG_PATH, almanac_config=ALMANAC_CONFIG_PATH, **kwargs
+):
     """run web version of the ESO sky model for observation parameters (ephemeris, atmospheric conditions, site, etc)
-    
+
     Parameters
     ----------
     skycalc_config: str path
@@ -450,11 +516,11 @@ def run_skycalc(skycalc_config=SKYCALC_CONFIG_PATH, almanac_config=ALMANAC_CONFI
     sky_components: fits.BinTableDU
         table contaning different components of the sky
     """
-    with open(skycalc_config, 'r') as f:
+    with open(skycalc_config, "r") as f:
         inputdic = json.load(f)
-    with open(almanac_config, 'r') as f:
+    with open(almanac_config, "r") as f:
         inputalmdic = json.load(f)
-    
+
     # update dictionary with parameters passed as keyword arguments
     inputdic.update((k, kwargs[k]) for k in inputdic.keys() & kwargs.keys())
     inputalmdic.update((k, kwargs[k]) for k in inputalmdic.keys() & kwargs.keys())
@@ -462,11 +528,12 @@ def run_skycalc(skycalc_config=SKYCALC_CONFIG_PATH, almanac_config=ALMANAC_CONFI
     alm = AlmanacQuery(inputalmdic)
     dic = alm.query()
     # TODO: investigate if this parameter has data in the future (this may be important for geocoronal subtraction)
-    if dic["msolflux"] < 0: dic["msolflux"] = 130.0
+    if dic["msolflux"] < 0:
+        dic["msolflux"] = 130.0
 
     for key, value in dic.items():
         inputdic[key] = value
-    
+
     try:
         dic = fixObservatory(inputdic)
     except ValueError:
@@ -475,15 +542,16 @@ def run_skycalc(skycalc_config=SKYCALC_CONFIG_PATH, almanac_config=ALMANAC_CONFI
     sky_model = SkyModel()
     sky_model.callwith(dic)
 
-    
     sky_hdus = fits.open(BytesIO(sky_model.data))
     sky_metadata = sky_hdus[0].header
     sky_components = Table(sky_hdus[1].data)
 
     # TODO: convert to flux units / normalize to apply scaling factors
     # TODO: convert wavelengths to Angstroms
-    sky_components["lam"] = sky_components["lam"]*10*u.AA
-    sky_components["flux"] = sky_components["flux"] * (1/u.s/u.m**2*u.arcsec**2) #photons/s/m2/μm/arcsec2
+    sky_components["lam"] = sky_components["lam"] * 10 * u.AA
+    sky_components["flux"] = sky_components["flux"] * (
+        1 / u.s / u.m**2 * u.arcsec**2
+    )  # photons/s/m2/μm/arcsec2
 
     return sky_metadata, dic, sky_components
 
@@ -498,14 +566,14 @@ def optimize_sky(factor, test_spec, sky_spec, start_wave, end_wave):
     wave = test_spec._wave
     if test_spec._mask is not None:
         good_pix = np.logical_not(test_spec._mask)
-        select1 = np.logical_and(wave>start_wave, wave<end_wave)
-        if np.sum(good_pix[select1])>1:
+        select1 = np.logical_and(wave > start_wave, wave < end_wave)
+        if np.sum(good_pix[select1]) > 1:
             select = np.logical_and(select1, good_pix)
         else:
             select = select1
     else:
-        select = np.logical_and(wave>start_wave, wave<end_wave)
-    if (np.sum(select)==0) or (np.sum(test_spec._data[select])==0):
+        select = np.logical_and(wave > start_wave, wave < end_wave)
+    if (np.sum(select) == 0) or (np.sum(test_spec._data[select]) == 0):
         raise RuntimeError
-    rms = np.std(test_spec._data[select]-sky_spec._data[select]*factor)
+    rms = np.std(test_spec._data[select] - sky_spec._data[select] * factor)
     return rms

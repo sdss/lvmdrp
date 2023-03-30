@@ -1,9 +1,12 @@
 from __future__ import absolute_import
-from . import headerMethod
-from . import imageMethod
-from . import rssMethod
-from . import cubeMethod
-from . import plotMethod
-from . import specialMethod
-from . import vimosMethod
-from . import commandMethod
+
+from . import (
+    commandMethod,
+    cubeMethod,
+    headerMethod,
+    imageMethod,
+    plotMethod,
+    rssMethod,
+    specialMethod,
+    vimosMethod,
+)
