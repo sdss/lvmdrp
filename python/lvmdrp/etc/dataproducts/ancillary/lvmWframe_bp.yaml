@@ -2,7 +2,7 @@ name: lvmWframe
 short: extracted and wavelength calibrated RSS
 description: |
   this is the extracted frame with wavelenth calibration.
-location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[MJD]/
+location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[MJD]/ancillary/
 created_by: imageMethod.createPixTable
 used_by:
   - joinSpecChannels

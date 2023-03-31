@@ -2,7 +2,7 @@ name: lvmFframe
 short: frame after fiber flat corrections
 description: |
   this is the frame after correcting for fiber-to-fiber variations across the field.
-location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[MJD]/
+location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[MJD]/ancillary/
 created_by: imageMethod.correctFiberFlat
 used_by:
   - createPixTable

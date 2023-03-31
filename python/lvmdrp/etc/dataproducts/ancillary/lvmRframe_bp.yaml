@@ -2,7 +2,7 @@ name: lvmRframe
 short: cosmic ray cleaned frame
 description: |
   this is the frame after cosmic ray (CR) rejection, it contains the CR pixel mask in the COSMIC HDU.
-location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[MJD]/
+location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[MJD]/ancillary/
 created_by: imageMethod.LACosmic
 used_by:
   - imageMethod.basicCalibration

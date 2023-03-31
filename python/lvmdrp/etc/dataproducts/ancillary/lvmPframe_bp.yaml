@@ -3,7 +3,7 @@ short: pre-processed frame
 description: |
   this is the frame after trimming overscan region, subtracted overscan bias, converted to e- units
   and calculated pixel-to-pixel errors.
-location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[MJD]/
+location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[MJD]/ancillary/
 created_by: imageMethod.preprocRawFrame
 used_by:
   - imageMethod.LACosmic

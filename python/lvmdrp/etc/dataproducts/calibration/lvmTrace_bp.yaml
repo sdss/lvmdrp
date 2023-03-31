@@ -5,7 +5,7 @@ description: |
 created_by: imageMethod.traceFWHM
 used_by:
   - imageMethod.extractSpec
-location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[MJD]/
+location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[MJD]/calib/
 naming_convention: |
   lvm-trace-[CAMERA]-[EXPNUM].fits.gz, where [CAMERA] is one of the nine cameras on the instrument, b1, r1, z1,
   or b2, r2, z2, or b3, r3, or z3 for the blue, red, nir cameras on each LVM spectrograph, and

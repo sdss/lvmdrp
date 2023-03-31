@@ -2,7 +2,7 @@ name: lvmCframe
 short: bias-, dark- and pixel flat-calibrated frame
 description: |
   this is the frame after bias, dark and pixel flat corrections.
-location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[MJD]/
+location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[MJD]/ancillary/
 created_by: imageMethod.basicCalibration
 used_by:
   - imageMethod.LACosmic

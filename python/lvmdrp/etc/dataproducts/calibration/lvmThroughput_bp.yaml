@@ -5,7 +5,7 @@ description: |
 created_by: rssMethod.quickThroughput
 used_by:
   - rssMethod.quickFluxCalib
-location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[MJD]/
+location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[MJD]/calib/
 naming_convention: |
   lvm-throughput-[EXPNUM].fits.gz, where [EXPNUM] is the (zero-padded) 8-digit exposure number.
 hdu0:

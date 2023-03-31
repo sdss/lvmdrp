@@ -2,7 +2,7 @@ name: lvmSframe
 short: stray light subtracted frame
 description: |
   this is the frame after stray light subtraction, it contains the stray light field in the STRAY HDU.
-location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[MJD]/
+location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[MJD]/ancillary/
 created_by: imageMethod.subtractStraylight
 used_by:
   - imageMethod.traceFWHM

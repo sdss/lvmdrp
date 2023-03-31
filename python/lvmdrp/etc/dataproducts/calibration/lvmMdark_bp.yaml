@@ -3,7 +3,7 @@ short: reduced and combined (master) dark frames
 description: |
   this is the frame after combining several reduced dark frames, in units of e-,
   Poisson errors calculated and CR rejected.
-location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[MJD]/
+location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[MJD]/calib/
 created_by: imageMethod.createMasterFrame
 used_by:
   - imageMethod.basicCalibration
