@@ -16,7 +16,7 @@ from lvmdrp.core.plot import save_fig
 from lvmdrp.core.rss import RSS
 from lvmdrp.core.spectrum1d import Spectrum1D
 from lvmdrp.core.tracemask import TraceMask
-from lvmdrp.utils.logger import get_logger
+from lvmdrp import log
 
 
 description = "Provides Methods to process 2D images"
@@ -33,9 +33,6 @@ __all__ = [
     "basicCalibration_drp",
     "createMasterFrame_drp",
 ]
-
-
-image_logger = get_logger(__name__)
 
 
 def detCos_drp(
@@ -764,34 +761,34 @@ def findPeaksAuto_drp(
 
     # if no slice is given find the cross-dispersion cut with the highest signal
     if slice == "":
-        image_logger.info("collapsing image along Y-axis using a median statistic")
+        log.info("collapsing image along Y-axis using a median statistic")
         median_cut = img.collapseImg(
             axis="y", mode="median"
         )  # median collapse of image along cross-dispersion axis
         maximum = median_cut.max()  # get maximum value along dispersion axis
         column = maximum[2]  # pixel position of maximum value
-        image_logger.info(f"selecting {column = } to locate fibers")
+        log.info(f"selecting {column = } to locate fibers")
         cut = img.getSlice(column, axis="y")  # extract this column from image
     else:
         column = int(slice)  # convert column to integer value
-        image_logger.info(f"selecting {column = } to locate fibers")
+        log.info(f"selecting {column = } to locate fibers")
         cut = img.getSlice(column, axis="y")  # extract this column from image
 
     # find location of peaks (local maxima) either above a fixed threshold or to reach a fixed number of peaks
-    image_logger.info("locating fibers")
+    log.info("locating fibers")
     peaks = cut.findPeaks(threshold=threshold, npeaks=npeaks)
-    image_logger.info(f"found {len(peaks[0])} fibers")
+    log.info(f"found {len(peaks[0])} fibers")
 
     # find the subpixel centroids of the peaks from the central 3 pixels using either a hyperbolic approximation
     # or perform a leastsq fit with a Gaussian
-    image_logger.info(f"refining fiber location")
+    log.info(f"refining fiber location")
     centers = cut.measurePeaks(peaks[0], method, init_sigma, threshold=0, max_diff=1.0)[
         0
     ]
     round_cent = numpy.round(centers).astype(
         "int16"
     )  # round the subpixel peak positions to their nearest integer value
-    image_logger.info(f"final number of fibers found {len(round_cent)}")
+    log.info(f"final number of fibers found {len(round_cent)}")
     # write number of peaks and their position to an ASCII file NEED TO BE REPLACE WITH XML OUTPUT
     file_out = open(out_peaks, "w")
     file_out.write("%i\n" % (column))
@@ -1355,7 +1352,7 @@ def tracePeaks_drp(
     # nslice = numpy.sum(select_first) + numpy.sum(select_second)
     m = 1
     # iterate towards index 0 along dispersion axis
-    image_logger.info("tracing fibers along dispersion axis")
+    log.info("tracing fibers along dispersion axis")
     if verbose:
         iterator = tqdm(
             first[select_first],
@@ -1422,7 +1419,7 @@ def tracePeaks_drp(
         m += 1
 
     # smooth all trace by a polynomial
-    image_logger.info(f"fitting trace with {numpy.abs(poly_disp)}-deg polynomial")
+    log.info(f"fitting trace with {numpy.abs(poly_disp)}-deg polynomial")
     trace.smoothTracePoly(poly_disp)
 
     for i in range(fibers):
@@ -2761,7 +2758,7 @@ def preprocRawFrame_drp(
     try:
         org_image._header["IMAGETYP"]
     except KeyError:
-        image_logger.warning(
+        log.warning(
             f"header keyword 'IMAGETYP' not found. Assuming IMAGETYP='{assume_imagetyp}'"
         )
         org_image._header["IMAGETYP"] = assume_imagetyp
@@ -2770,19 +2767,19 @@ def preprocRawFrame_drp(
     # * extract BIASSEC
     if os_bound_x and os_bound_y:
         os_y, os_x = os_bound_y.split(","), os_bound_x.split(",")
-        image_logger.info(f"using given overscan region Y = {os_y}, X = {os_x}")
+        log.info(f"using given overscan region Y = {os_y}, X = {os_x}")
         infer_trimsec = True
     elif "BIASSEC" in org_image._header:
         os_x, os_y = org_image._header["BIASSEC"].strip("[]").split(",")
         os_y, os_x = os_y.split(":"), os_x.split(":")
-        image_logger.info(
+        log.info(
             f"parsed overscan region from 'BIASSEC', Y = {os_y}, X = {os_x}"
         )
         infer_trimsec = False
     else:
         os_x, os_y = "[2021:2060, 1:4080]".strip("[]").split(",")
         os_y, os_x = os_y.split(":"), os_x.split(":")
-        image_logger.warning(
+        log.warning(
             f"no overscan region given. Assuming Y = {os_y}, X = {os_x}"
         )
         infer_trimsec = True
@@ -2803,11 +2800,11 @@ def preprocRawFrame_drp(
                 sc_y_f.split(":"),
                 sc_x_f.split(":"),
             )
-            image_logger.info(
+            log.info(
                 f"parsed data region from 'TRIMSEC', YX_i = {sc_y_i, sc_x_i}, YX_f = {sc_y_f, sc_x_f}"
             )
         except (KeyError, ValueError):
-            image_logger.warning("no valid 'TRIMSEC' found in header")
+            log.warning("no valid 'TRIMSEC' found in header")
             infer_trimsec = True
     elif infer_trimsec:
         # assume OS region is in the middle column
@@ -2816,7 +2813,7 @@ def preprocRawFrame_drp(
         os_xsize = (os_x[1] - os_x[0]) // 2
         sc_y_i, sc_x_i = ["1", str(ysize)], ["1", str(xsize - os_xsize)]
         sc_y_f, sc_x_f = ["1", str(ysize)], [str(xsize + os_xsize + 1), str(2 * xsize)]
-        image_logger.warning(
+        log.warning(
             f"assuming 'TRIMSEC' YX_i = {sc_y_i, sc_x_i}, YX_f = {sc_y_f, sc_x_f}"
         )
 
@@ -2854,10 +2851,10 @@ def preprocRawFrame_drp(
     # * compute statistics on each OS section
     os_bias_med = [numpy.nanmedian(os_quad._data) for os_quad in os_quads]
     os_bias_std = [numpy.nanstd(os_quad._data) for os_quad in os_quads]
-    image_logger.info(
+    log.info(
         f"median counts in overscan sections { {k: v for k, v in zip('abcd', os_bias_med)} }"
     )
-    image_logger.info(
+    log.info(
         f"standard deviation in overscan sections { {k: v for k, v in zip('abcd', os_bias_std)} }"
     )
 
@@ -2882,13 +2879,13 @@ def preprocRawFrame_drp(
     # parse gain and read noise from header if possible
     try:
         gains = [org_image.getHdrValue(f"{gain_field}{i+1}") for i in range(nquad)]
-        image_logger.info(
+        log.info(
             f"extracted gain values '{gain_field}' = { {k: v for k, v in zip('abcd', gains)} }"
         )
     except KeyError:
         try:
             assume_gain = org_image.getHdrValue(gain_field)
-            image_logger.warning(
+            log.warning(
                 f"no gain per amplifier found, extracted '{gain_field}' = {assume_gain}"
             )
         except KeyError:
@@ -2896,12 +2893,12 @@ def preprocRawFrame_drp(
                 assume_gain = assume_gain.split(",")
                 try:
                     assume_gain = [float(gain) for gain in assume_gain]
-                    image_logger.warning(
+                    log.warning(
                         f"no valid '{gain_field}' found in header. Using given values { {k: v for k, v in zip('abcd', assume_gain)} }"
                     )
                 except ValueError:
                     assume_gain = 1.0
-                    image_logger.warning(
+                    log.warning(
                         f"no valid '{gain_field}' found in header. Assuming constant value {assume_gain}"
                     )
         if len(assume_gain) == 1:
@@ -2915,13 +2912,13 @@ def preprocRawFrame_drp(
         rdnoises = [
             org_image.getHdrValue(f"{rdnoise_field}{i+1}") for i in range(nquad)
         ]
-        image_logger.info(
+        log.info(
             f"extracted rdnoise values '{rdnoise_field}' = { {k: v for k, v in zip('abcd', rdnoises)} }"
         )
     except KeyError:
         try:
             assume_rdnoise = org_image.getHdrValue(rdnoise_field)
-            image_logger.warning(
+            log.warning(
                 f"no rdnoise per amplifier found, extracted '{rdnoise_field}' = {assume_rdnoise}"
             )
         except KeyError:
@@ -2929,12 +2926,12 @@ def preprocRawFrame_drp(
                 assume_rdnoise = assume_rdnoise.split(",")
                 try:
                     assume_rdnoise = [float(rdnoise) for rdnoise in assume_rdnoise]
-                    image_logger.warning(
+                    log.warning(
                         f"no valid '{rdnoise_field}' found in header. Using given values { {k: v for k, v in zip('abcd', assume_rdnoise)} }"
                     )
                 except ValueError:
                     assume_rdnoise = 5.0
-                    image_logger.warning(
+                    log.warning(
                         f"no valid '{rdnoise_field}' found in header. Assuming constant value {assume_rdnoise}"
                     )
         if len(assume_rdnoise) == 1:
@@ -2948,18 +2945,18 @@ def preprocRawFrame_drp(
     [quad.orientImage(orient[i]) for i, quad in enumerate(quads)]
     # convert to specified unit
     if unit == "electron":
-        image_logger.info("converting from ADU to e-")
+        log.info("converting from ADU to e-")
         for i in range(nquad):
             quads[i] *= gains[i]
             if compute_error:
                 quads[i].computePoissonError(rdnoise=rdnoises[i])
-                image_logger.info(
+                log.info(
                     f"calculated Poisson errors for amplifier '{'abcd'[i]}'"
                 )
     elif unit == "adu":
-        image_logger.info("using original ADU units")
+        log.info("using original ADU units")
     else:
-        image_logger.warning("unrecongnized CCD pixel unit. Assuming 'ADU'")
+        log.warning("unrecongnized CCD pixel unit. Assuming 'ADU'")
         unit = "adu"
 
     # join images
@@ -2971,21 +2968,21 @@ def preprocRawFrame_drp(
         ccd = os.path.basename(in_image).split(".")[0].split("-")[1]
         org_image._header["CCD"] = ccd
     if ccd.startswith("z") or ccd.startswith("b"):
-        image_logger.info("flipping along X-axis")
+        log.info("flipping along X-axis")
         preproc_image.orientImage("X")
 
     # define initial pixel mask
-    image_logger.info("building pixel mask")
+    log.info("building pixel mask")
     preproc_image._mask = numpy.zeros_like(preproc_image._data, dtype=bool)
     preproc_image._mask |= preproc_image._data >= 2**16
     preproc_image._mask |= preproc_image._data <= 0
     masked_pixels = preproc_image._mask.sum()
-    image_logger.info(
+    log.info(
         f"{masked_pixels} ({masked_pixels / preproc_image._mask.size * 100:.2g} %) pixels masked"
     )
 
     # update header
-    image_logger.info(
+    log.info(
         f"updating header and writing pre-processed frame to '{out_image}'"
     )
     preproc_image.setHeader(org_image.getHeader())

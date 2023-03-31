@@ -48,7 +48,7 @@ from lvmdrp.core.sky import (
 )
 from lvmdrp.core.spectrum1d import Spectrum1D
 from lvmdrp.utils import rc_symlink
-from lvmdrp.utils.logger import get_logger
+from lvmdrp import log
 
 
 description = "Provides methods for sky subtraction"
@@ -69,8 +69,6 @@ __all__ = [
 ]
 
 
-sky_logger = get_logger(name=__name__)
-
 
 SYSTEM = struct.calcsize("P") * 8
 
@@ -87,32 +85,32 @@ def installESOSky_drp():
     # - download compressed source files ----------------------------------------------------------------------------
     os.makedirs(SRC_PATH, exist_ok=True)
     os.chdir(SRC_PATH)
-    sky_logger.info(f"downloading ESO sky source code from '{LVM_SRC_URL}'")
+    log.info(f"downloading ESO sky source code from '{LVM_SRC_URL}'")
     out = subprocess.run(
         f"curl {LVM_SRC_URL} --output lvmdrp_src.zip".split(), capture_output=True
     )
     if out.returncode == 0:
-        sky_logger.info("successfully downloaded ESO source files")
+        log.info("successfully downloaded ESO source files")
     else:
-        sky_logger.error("error while downloading source files")
-        sky_logger.error("full report:")
-        sky_logger.error(out.stderr.decode("utf-8"))
+        log.error("error while downloading source files")
+        log.error("full report:")
+        log.error(out.stderr.decode("utf-8"))
     with zipfile.ZipFile("lvmdrp_src.zip", "r") as src_compressed:
         src_compressed.extractall(os.path.curdir)
     os.remove("lvmdrp_src.zip")
     # ---------------------------------------------------------------------------------------------------------------
 
     # - install skycorr ---------------------------------------------------------------------------------------------
-    sky_logger.info(f"preparing to install skycorr at '{SKYCORR_INST_PATH}'")
+    log.info(f"preparing to install skycorr at '{SKYCORR_INST_PATH}'")
     out = subprocess.run(f"tar xzvf {SKYCORR_SRC_PATH}".split(), capture_output=True)
     if out.returncode == 0:
-        sky_logger.info("successfully extracted skycorr installer")
+        log.info("successfully extracted skycorr installer")
     else:
-        sky_logger.error("error while preparing skycorr files")
-        sky_logger.error("full report:")
-        sky_logger.error(out.stderr.decode("utf-8"))
+        log.error("error while preparing skycorr files")
+        log.error("full report:")
+        log.error(out.stderr.decode("utf-8"))
 
-    sky_logger.info(
+    log.info(
         f"installing skycorr on a {SYSTEM}-bit {sys.platform.capitalize()} system"
     )
     os.chdir("skycorr")
@@ -152,38 +150,38 @@ def installESOSky_drp():
     skycorr_installer.close()
 
     if skycorr_installer.exitstatus == 0:
-        sky_logger.info("successfully installed skycorr")
+        log.info("successfully installed skycorr")
     else:
-        sky_logger.error(f"error while installing skycorr")
+        log.error(f"error while installing skycorr")
 
     out = subprocess.run(
         f"{os.path.join(SKYCORR_INST_PATH, 'bin', 'skycorr')} {os.path.join(SKYCORR_INST_PATH, 'examples', 'config', 'sctest_sinfo_H.par')}".split(),
         capture_output=True,
     )
     if out.returncode == 0:
-        sky_logger.info("successfully tested skycorr")
+        log.info("successfully tested skycorr")
     else:
-        sky_logger.error("error while testing skycorr")
-        sky_logger.error(f"rolling back changes in '{SKYCORR_INST_PATH}'")
+        log.error("error while testing skycorr")
+        log.error(f"rolling back changes in '{SKYCORR_INST_PATH}'")
         shutil.rmtree(SKYCORR_INST_PATH, ignore_errors=True)
-        sky_logger.error("full report:")
-        sky_logger.error(out.stderr.decode("utf-8"))
+        log.error("full report:")
+        log.error(out.stderr.decode("utf-8"))
 
     # defining environment variables for CPL
     cpl_path = os.path.join(SKYCORR_INST_PATH, "lib")
-    sky_logger.info(f"setting $LD_LIBRARY_PATH={cpl_path} for CPL discovery")
+    log.info(f"setting $LD_LIBRARY_PATH={cpl_path} for CPL discovery")
     os.environ["LD_LIBRARY_PATH"] = cpl_path
 
     # - install skymodel ---------------------------------------------------------------------------------------------
-    sky_logger.info(f"preparing to install skymodel at '{SKYMODEL_INST_PATH}'")
+    log.info(f"preparing to install skymodel at '{SKYMODEL_INST_PATH}'")
     os.chdir(SRC_PATH)
     out = subprocess.run(f"tar xzvf {SKYMODEL_SRC_PATH}".split(), capture_output=True)
     if out.returncode == 0:
-        sky_logger.info("successfully extracted skymodel installer")
+        log.info("successfully extracted skymodel installer")
     else:
-        sky_logger.error("error while extracting skymodel")
-        sky_logger.error("full report:")
-        sky_logger.error(out.stderr.decode("utf-8"))
+        log.error("error while extracting skymodel")
+        log.error("full report:")
+        log.error(out.stderr.decode("utf-8"))
 
     # create directory structure in installation path
     os.chdir(os.path.join(SRC_PATH, "SM-01", "sm-01_mod1"))
@@ -236,11 +234,11 @@ def installESOSky_drp():
     os.chdir(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "third_party_code"))
     out = subprocess.run("tar xzvf lnfl_lblrtm_aer.tar.gz".split(), capture_output=True)
     if out.returncode == 0:
-        sky_logger.info("successfully extracted third-party codes")
+        log.info("successfully extracted third-party codes")
     else:
-        sky_logger.error("error while extracting third-party codes")
-        sky_logger.error("full report:")
-        sky_logger.error(out.stderr.decode("utf-8"))
+        log.error("error while extracting third-party codes")
+        log.error("full report:")
+        log.error(out.stderr.decode("utf-8"))
 
     shutil.copyfile(
         os.path.join(
@@ -259,7 +257,7 @@ def installESOSky_drp():
             SKYMODEL_INST_PATH, "sm-01_mod1", "third_party_code", "lnfl", "build"
         )
     )
-    sky_logger.info("installing LNFL")
+    log.info("installing LNFL")
     if sys.platform == "linux":
         out = subprocess.run(
             "make -f make_lnfl linuxGNUsgl".split(), capture_output=True
@@ -272,11 +270,11 @@ def installESOSky_drp():
         )
 
     if out.returncode == 0:
-        sky_logger.info("successfully installed LNFL")
+        log.info("successfully installed LNFL")
     else:
-        sky_logger.error("error while installing LNFL")
-        sky_logger.error("full report:")
-        sky_logger.error(out.stderr.decode("utf-8"))
+        log.error("error while installing LNFL")
+        log.error("full report:")
+        log.error(out.stderr.decode("utf-8"))
 
     os.chdir(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "third_party_code", "lnfl"))
 
@@ -312,7 +310,7 @@ def installESOSky_drp():
             SKYMODEL_INST_PATH, "sm-01_mod1", "third_party_code", "lblrtm", "build"
         )
     )
-    sky_logger.info("installing LBLRTM")
+    log.info("installing LBLRTM")
     if sys.platform == "linux":
         out = subprocess.run(
             "make -f make_lblrtm linuxGNUsgl".split(), capture_output=True
@@ -331,13 +329,13 @@ def installESOSky_drp():
         )
 
     if out.returncode == 0:
-        sky_logger.info("successfully installed LBLRTM")
+        log.info("successfully installed LBLRTM")
     else:
-        sky_logger.error("error while installing LBLRTM")
-        sky_logger.error("full report:")
-        sky_logger.error(out.stderr.decode("utf-8"))
+        log.error("error while installing LBLRTM")
+        log.error("full report:")
+        log.error(out.stderr.decode("utf-8"))
 
-    sky_logger.info("installing skymodel")
+    log.info("installing skymodel")
     os.chdir(
         os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "third_party_code", "lblrtm")
     )
@@ -353,35 +351,35 @@ def installESOSky_drp():
     os.chdir(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1"))
     out = subprocess.run("bash bootstrap".split(), capture_output=True)
     if out.returncode == 0:
-        sky_logger.info("successfully finished bootstrap for module 01")
+        log.info("successfully finished bootstrap for module 01")
     else:
-        sky_logger.error("error while running bootstrap for module 01")
-        sky_logger.error("full report:")
-        sky_logger.error(out.stderr.decor("utf-8"))
+        log.error("error while running bootstrap for module 01")
+        log.error("full report:")
+        log.error(out.stderr.decor("utf-8"))
     out = subprocess.run(
         f"bash configure --prefix={os.path.join(SKYMODEL_INST_PATH, 'sm-01_mod1')} --with-cpl={cpl_path}".split(),
         capture_output=True,
     )
     if out.returncode == 0:
-        sky_logger.info("successfully finished configure for module 01")
+        log.info("successfully finished configure for module 01")
     else:
-        sky_logger.error("error while running configure for module 01")
-        sky_logger.error("full report:")
-        sky_logger.error(out.stderr.decode("utf-8"))
+        log.error("error while running configure for module 01")
+        log.error("full report:")
+        log.error(out.stderr.decode("utf-8"))
     out = subprocess.run("make".split(), capture_output=True)
     if out.returncode == 0:
-        sky_logger.info("successfully finished make for module 01")
+        log.info("successfully finished make for module 01")
     else:
-        sky_logger.error("error while running make for module 01")
-        sky_logger.error("full report:")
-        sky_logger.error(out.stderr.decode("utf-8"))
+        log.error("error while running make for module 01")
+        log.error("full report:")
+        log.error(out.stderr.decode("utf-8"))
     out = subprocess.run("make install".split(), capture_output=True)
     if out.returncode == 0:
-        sky_logger.info("successfully installed skymodel module 01")
+        log.info("successfully installed skymodel module 01")
     else:
-        sky_logger.error("error while installing skymodel module 01")
-        sky_logger.error("full report:")
-        sky_logger.error(out.stderr.decode("utf-8"))
+        log.error("error while installing skymodel module 01")
+        log.error("full report:")
+        log.error(out.stderr.decode("utf-8"))
 
     # make symbolic links of binary files in python_dir/bin
     rc_symlink(
@@ -449,28 +447,28 @@ def installESOSky_drp():
     os.chdir(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod2"))
     out = subprocess.run("bash bootstrap".split(), capture_output=True)
     if out.returncode == 0:
-        sky_logger.info("successfully finished bootstrap for module 02")
+        log.info("successfully finished bootstrap for module 02")
     else:
-        sky_logger.error("error while running bootstrap for module 02")
-        sky_logger.error("full report:")
-        sky_logger.error(out.stderr.decode("utf-8"))
+        log.error("error while running bootstrap for module 02")
+        log.error("full report:")
+        log.error(out.stderr.decode("utf-8"))
     out = subprocess.run(
         f"bash configure --prefix={os.path.join(SKYMODEL_INST_PATH, 'sm-01_mod2')} --with-cpl={cpl_path}".split(),
         capture_output=True,
     )
     if out.returncode == 0:
-        sky_logger.info("successfully finished configure for module 02")
+        log.info("successfully finished configure for module 02")
     else:
-        sky_logger.error("error while running configure for module 02")
-        sky_logger.error("full report:")
-        sky_logger.error(out.stderr.decode("utf-8"))
+        log.error("error while running configure for module 02")
+        log.error("full report:")
+        log.error(out.stderr.decode("utf-8"))
     out = subprocess.run("make install".split(), capture_output=True)
     if out.returncode == 0:
-        sky_logger.info("successfully installed skymodel module 02")
+        log.info("successfully installed skymodel module 02")
     else:
-        sky_logger.error("error while installing skymodel module 02")
-        sky_logger.error("full report:")
-        sky_logger.error(out.stderr.decode("utf-8"))
+        log.error("error while installing skymodel module 02")
+        log.error("full report:")
+        log.error(out.stderr.decode("utf-8"))
 
     rc_symlink(
         os.path.join(SKYMODEL_INST_PATH, "sm-01_mod2", "bin", "preplinetrans"),
@@ -561,7 +559,7 @@ def configureSkyModel_drp(
     ori_path = os.path.abspath(os.curdir)
 
     if method == "run":
-        sky_logger.info(
+        log.info(
             f"writing configuration files using '{skymodel_config_path}' as source"
         )
         # read master configuration file
@@ -596,7 +594,7 @@ def configureSkyModel_drp(
         ) as cf:
             for key, val in skymodel_master_config[config_names[4]].items():
                 cf.write(f"{key} = {val}\n")
-        sky_logger.info("successfully written config files")
+        log.info("successfully written config files")
 
         # create sky library
         if run_library:
@@ -665,7 +663,7 @@ def configureSkyModel_drp(
             else:
                 cpus = int(parallel)
             if cpus > 1:
-                sky_logger.info(
+                log.info(
                     f"going to generate an airglow lines library of {nlib} spectra with {cpus} concurrent workers"
                 )
                 pool = Pool(cpus)
@@ -688,23 +686,23 @@ def configureSkyModel_drp(
                 pool.close()
                 pool.join()
             else:
-                sky_logger.info(
+                log.info(
                     f"going to generate an airglow lines library of {nlib} spectra"
                 )
 
             for i, (airmass, time, season, res) in enumerate(spec_pars):
                 if all(map(os.path.isfile, spec_nams[i])):
-                    sky_logger.info(
+                    log.info(
                         f"skipping parameters {airmass = }, {time = }, {season = }, {res = }, {pwv = }, files {spec_nams[i]} already exist"
                     )
                     continue
                 if cpus > 1:
-                    sky_logger.info(
+                    log.info(
                         f"[{i+1:04d}/{nlib:04d}] retrieving airglow lines with parameters: {airmass = }, {time = }, {season = }, {res = }, {pwv = }"
                     )
                     out = result[i].get()
                 else:
-                    sky_logger.info(
+                    log.info(
                         f"[{i+1:04d}/{nlib:04d}] creating airglow lines with parameters: {airmass = }, {time = }, {season = }, {res = }, {pwv = }"
                     )
                     out = subprocess.run(
@@ -712,46 +710,46 @@ def configureSkyModel_drp(
                         capture_output=True,
                     )
                 if out.returncode == 0:
-                    sky_logger.info("successfully finished airglow lines calculations")
+                    log.info("successfully finished airglow lines calculations")
                 else:
-                    sky_logger.error("failed while running airglow lines calculations")
-                    sky_logger.error(out.stderr.decode("utf-8"))
+                    log.error("failed while running airglow lines calculations")
+                    log.error(out.stderr.decode("utf-8"))
 
             # copy airglow library to intended destination
             out = subprocess.run(
                 f"mv output/*.fits {lib_path}/.".split(), capture_output=True
             )
             if out.returncode == 0:
-                sky_logger.info("successfully copied airglow library")
+                log.info("successfully copied airglow library")
             else:
-                sky_logger.error("failed while copying airglow library")
-                sky_logger.error(out.stderr.decode("utf-8"))
+                log.error("failed while copying airglow library")
+                log.error(out.stderr.decode("utf-8"))
 
             # run prelinetrans
-            sky_logger.info("calculating effective atmospheric transmission")
+            log.info("calculating effective atmospheric transmission")
             os.chdir(os.path.join(skymodel_path, "sm-01_mod2"))
             out = subprocess.run(
                 os.path.join("bin", "preplinetrans").split(), capture_output=True
             )
             if out.returncode == 0:
-                sky_logger.info(
+                log.info(
                     "successfully finished effective atmospheric transmission calculations"
                 )
             else:
-                sky_logger.error(
+                log.error(
                     "failed while running effective atmospheric transmission calculations"
                 )
-                sky_logger.error(out.stderr.decode("utf-8"))
+                log.error(out.stderr.decode("utf-8"))
 
             if run_multiscat:
                 out = subprocess.run(
                     os.path.join("bin", "estmultiscat").split(), capture_output=True
                 )
                 if out.returncode == 0:
-                    sky_logger.info("successfully finished 'estmultiscat'")
+                    log.info("successfully finished 'estmultiscat'")
                 else:
-                    sky_logger.error("failed while running 'estmultiscat'")
-                    sky_logger.error(out.stderr.decode("utf-8"))
+                    log.error("failed while running 'estmultiscat'")
+                    log.error(out.stderr.decode("utf-8"))
         # return to original path
         os.chdir(ori_path)
     elif method == "download":
@@ -801,7 +799,7 @@ def createMasterSky_drp(
     user:> drp sky constructSkySpec IN_RSS.fits OUT_SKY.fits 3.0
     user:> drp sky constructSkySpec IN_RSS.fits OUT_SKY.txt
     """
-    sky_logger.info(f"preparing to create master 'sky' from '{in_rss}'")
+    log.info(f"preparing to create master 'sky' from '{in_rss}'")
 
     clip_sigma = float(clip_sigma)
     nsky = int(nsky)
@@ -812,7 +810,7 @@ def createMasterSky_drp(
     rss = RSS()
     rss.loadFitsData(in_rss)
 
-    sky_logger.info("calculating median value for each fiber")
+    log.info("calculating median value for each fiber")
     median = np.zeros(len(rss), dtype=np.float32)
     for i in range(len(rss)):
         spec = rss[i]
@@ -830,7 +828,7 @@ def createMasterSky_drp(
 
     # sigma clipping around the median sky spectrum
     if clip_sigma > 0.0 and nsky == 0:
-        sky_logger.info(
+        log.info(
             f"calculating sigma clipping with sigma = {clip_sigma} within {select_good.sum()} fibers"
         )
         select = np.logical_and(
@@ -850,10 +848,10 @@ def createMasterSky_drp(
         idx = np.argsort(median[select_good])
         max_value = np.max(median[select_good][idx[:nsky]])
         if non_neg == 1:
-            sky_logger.info(f"selecting non-negative (maximum) {nsky} fibers")
+            log.info(f"selecting non-negative (maximum) {nsky} fibers")
             select = (median <= max_value) & (median > 0.0)
         else:
-            sky_logger.info(
+            log.info(
                 f"selecting (maximum) {nsky} fibers with median below {max_value = }"
             )
             select = median <= max_value
@@ -865,7 +863,7 @@ def createMasterSky_drp(
 
     # calculates the sky magnitude within a given filter response function
     if filter[0] != "":
-        sky_logger.info(
+        log.info(
             f"calculating 'sky' magnitude in Vega system using filter in {filter[0]}"
         )
         passband = PassBand()
@@ -902,10 +900,10 @@ def createMasterSky_drp(
             float("%.2f" % mag_std),
             "RMS sky brightness of sky fibers",
         )
-        sky_logger.info(f"{mag_mean = }, {mag_min = }, {mag_max = }, {mag_std = }")
+        log.info(f"{mag_mean = }, {mag_min = }, {mag_max = }, {mag_std = }")
 
     # create master sky spectrum by computing the average spectrum across selected fibers
-    sky_logger.info(f"creating master (averaged) sky out of {subRSS._fibers}")
+    log.info(f"creating master (averaged) sky out of {subRSS._fibers}")
     skySpec = subRSS.create1DSpec()
 
     if plot == 1:
@@ -913,7 +911,7 @@ def createMasterSky_drp(
         plt.step(skySpec._wave, skySpec._data, color="k")
         plt.show()
 
-    sky_logger.info(f"storing master sky in '{out_sky}'")
+    log.info(f"storing master sky in '{out_sky}'")
     skySpec.writeFitsData(out_sky)
 
 
@@ -1178,10 +1176,10 @@ def evalESOSky_drp(
             resample_step = eval(resample_step)
         except ValueError:
             eval_failed = True
-            sky_logger.error(
+            log.error(
                 f"resample_step should be either 'optimal' or a floating point. '{resample_step}' is none of those."
             )
-            sky_logger.warning("falling back to resample_step='optimal'")
+            log.warning("falling back to resample_step='optimal'")
     if eval_failed or resample_step == "optimal":
         # determine sampling based on wavelength resolution
         # if not present LSF in reference spectrum, use the reference sampling step
