@@ -3,12 +3,7 @@ from copy import deepcopy
 import matplotlib.pyplot as plt
 import numpy
 from astropy.io import fits as pyfits
-from scipy import interpolate, ndimage, sparse
-
-
-import matplotlib.pyplot as plt
-from copy import deepcopy
-
+from numpy import polynomial
 from scipy import interpolate, ndimage, sparse
 
 from lvmdrp.core import fit_profile
@@ -1280,7 +1275,9 @@ class Spectrum1D(Header):
         )
         return spec
 
-    def smoothPoly(self, order=-5, start_wave=None, end_wave=None, ref_base=None):
+    def smoothPoly(
+        self, deg=5, poly_kind="legendre", start_wave=None, end_wave=None, ref_base=None
+    ):
         if self._mask is not None:
             mask = numpy.logical_not(self._mask)
         else:
@@ -1290,53 +1287,26 @@ class Spectrum1D(Header):
         if end_wave is not None:
             mask = numpy.logical_and(mask, self._wave <= end_wave)
         mask = numpy.logical_and(mask, numpy.logical_not(numpy.isnan(self._data)))
-        if numpy.sum(mask) > numpy.fabs(order):
-            if order >= 0:
-                fit_poly = numpy.polyfit(
-                    self._wave[mask], self._data[mask], order
-                )  # fit the spectrum with a normal polynomial
-                if ref_base is None:
-                    self._data = numpy.polyval(
-                        fit_poly, self._wave
-                    )  # replace data with the modelled polynomial
-                else:
-                    self._data = numpy.polyval(fit_poly, ref_base)
-                    self._wave = ref_base
-                    self._dim = len(ref_base)
-                    self._pixels = numpy.arange(self._dim)
-                    if self._mask is not None:
-                        mask = numpy.zeros(self._dim, dtype="bool")
-                out_par = fit_poly
-            elif order < 0:
-                if ref_base is None:
-                    legandre_fit = fit_profile.LegandrePoly(
-                        numpy.zeros(-1 * order + 1),
-                        min_x=self._wave[0],
-                        max_x=self._wave[-1],
-                    )  # initialize a legandre polynom
-                    legandre_fit.fit(
-                        self._wave[mask], self._data[mask]
-                    )  # fit the data by the polynomial
+        if numpy.sum(mask) > numpy.fabs(deg):
+            if poly_kind == "poly":
+                poly = polynomial.Polynomial.fit(
+                    self._wave[mask], self._data[mask], deg=deg
+                )
+            elif poly_kind == "legendre":
+                poly = polynomial.Legendre.fit(
+                    self._wave[mask], self._data[mask], deg=deg
+                )
+            out_par = poly.coef
 
-                    self._data = legandre_fit(
-                        self._wave
-                    )  # replace data with the modelled polynomial
-                else:
-                    legandre_fit = fit_profile.LegandrePoly(
-                        numpy.zeros(-1 * order + 1),
-                        min_x=ref_base[0],
-                        max_x=ref_base[-1],
-                    )  # initialize a legandre polynom
-                    legandre_fit.fit(
-                        self._wave[mask], self._data[mask]
-                    )  # fit the data by the polynomial
-                    self._data = legandre_fit(
-                        ref_base
-                    )  # replace data with the modelled polynomial
-                    self._wave = ref_base
-                    self._dim = len(ref_base)
-                    self._pixels = numpy.arange(self._dim)
-                out_par = legandre_fit._coeff
+            if ref_base is None:
+                self._data = poly(self._wave)
+            else:
+                self._data = poly(ref_base)
+                self._wave = ref_base
+                self._dim = len(ref_base)
+                self._pixels = numpy.arange(self._dim)
+                if self._mask is not None:
+                    mask = numpy.zeros(self._dim, dtype="bool")
         else:
             self._data[:] = 0
             if self._mask is not None:
