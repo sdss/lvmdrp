@@ -300,30 +300,36 @@ def detWaveSolution_drp(
         rss_flat.writeFitsData(f"{fiberflat[3]}.fits")
 
     # smooth the FWHM values for each ARC line in cross-dispersion direction
-    rss_logger.info(
-        (
-            "smoothing FWHM of guess lines along "
-            f"cross-dispersion axis using {poly_cros}-deg polynomials"
-        )
-    )
-    for i in range(nlines):
-        select = numpy.logical_and(
-            numpy.logical_not(masked[:, i]), flux[:, i] > flux_min
-        )
-        fwhm_med = ndimage.filters.median_filter(numpy.fabs(fwhm[select, i]), 4)
-        if kind_cros not in ["poly", "legendre", "chebyshev"]:
-            rss_logger.warning(
-                ("invalid polynomial kind " f"'{kind_cros = }'. Falling back to 'poly'")
+    if poly_cros != 0:
+        rss_logger.info(
+            (
+                "smoothing FWHM of guess lines along "
+                f"cross-dispersion axis using {poly_cros}-deg polynomials"
             )
-            kind_cros = "poly"
-        if kind_cros == "poly":
-            poly = polynomial.Polynomial.fit(fibers[select], fwhm_med, deg=poly_cros)
-        elif kind_cros == "legendre":
-            poly = polynomial.Legendre.fit(fibers[select], fwhm_med, deg=poly_cros)
-        elif kind_cros == "chebyshev":
-            poly = polynomial.Chebyshev.fit(fibers[select], fwhm_med, deg=poly_cros)
+        )
+        for i in range(nlines):
+            select = numpy.logical_and(
+                numpy.logical_not(masked[:, i]), flux[:, i] > flux_min
+            )
+            fwhm_med = ndimage.filters.median_filter(numpy.fabs(fwhm[select, i]), 4)
+            if kind_cros not in ["poly", "legendre", "chebyshev"]:
+                rss_logger.warning(
+                    (
+                        "invalid polynomial kind "
+                        f"'{kind_cros = }'. Falling back to 'poly'"
+                    )
+                )
+                kind_cros = "poly"
+            if kind_cros == "poly":
+                poly = polynomial.Polynomial.fit(
+                    fibers[select], fwhm_med, deg=poly_cros
+                )
+            elif kind_cros == "legendre":
+                poly = polynomial.Legendre.fit(fibers[select], fwhm_med, deg=poly_cros)
+            elif kind_cros == "chebyshev":
+                poly = polynomial.Chebyshev.fit(fibers[select], fwhm_med, deg=poly_cros)
 
-        fwhm[:, i] = poly(fibers)
+            fwhm[:, i] = poly(fibers)
 
     # Determine the wavelength solution
     rss_logger.info(f"fitting wavelength solutions using {poly_disp}-deg polynomials")
