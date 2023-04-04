@@ -103,8 +103,8 @@ def detWaveSolution_drp(
     fwhm_max="10.0",
     rel_flux_limits="0.1,5.0",
     fiberflat="",
-    negative=False,
-    cc_correction=True,
+    negative="False",
+    cc_correction="True",
     plot="2",
     figure_path=".figures",
 ):
@@ -187,7 +187,8 @@ def detWaveSolution_drp(
     poly_fwhm = int(poly_fwhm)
     kind_disp, kind_fwhm, kind_cros = poly_kinds.split(",")
     rel_flux_limits = [float(v) for v in rel_flux_limits.split(",")]
-    negative = bool(negative)
+    negative = eval(negative)
+    cc_correction = eval(cc_correction)
     plot = int(plot)
 
     if fiberflat != "":
@@ -197,7 +198,11 @@ def detWaveSolution_drp(
         rss_logger.info(f"reading guess lines from '{in_ref_lines}'")
         # load initial pixel positions and reference wavelength from txt config file
         with open(in_ref_lines, "r") as file_in:
-            ref_fiber = int(file_in.readline()[:-1])
+            if ref_fiber:
+                file_in.readline()
+                ref_fiber = int(ref_fiber)
+            else:
+                ref_fiber = int(file_in.readline()[:-1])
             rss_logger.info(f"going to use fiber {ref_fiber} as reference")
             pixel, ref_lines, use_line = numpy.loadtxt(
                 file_in, dtype=float, unpack=True
@@ -260,7 +265,7 @@ def detWaveSolution_drp(
     rss_logger.info(
         (
             f"measuring arc lines for each fiber from "
-            f"reference fiber {ref_fiber+1}, "
+            f"reference fiber {ref_fiber}, "
             f"flux limits [{flux_min}, {fwhm_max}] and "
             f"relative flux limits {rel_flux_limits}"
         )
