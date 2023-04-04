@@ -28,7 +28,6 @@ __all__ = [
     "subtractStraylight_drp",
     "traceFWHM_drp",
     "extractSpec_drp",
-    "subtractBias_drp",
     "preprocRawFrame_drp",
     "basicCalibration_drp",
     "createMasterFrame_drp",
@@ -3096,42 +3095,47 @@ def createMasterFrame_drp(
     in_images, out_image, reject_cr=False, exptime_thresh=5, **cr_kwargs
 ):
     """
+    Combines the given calibration frames (bias, dark, or pixelflat) into a
+    master calibration frame.
 
-    Combines the given calibration frames (bias, dark, or pixelflat) into a master calibration frame.
-
-    Optionally this task will apply a cosmic ray rejection algorithm (reject_cr=True) if the
-    following conditions apply:
+    Optionally this task will apply a cosmic ray rejection algorithm
+    (reject_cr=True) if the following conditions apply:
 
         * exposure time < exptime_thresh OR
         * number of frames is <= 2
 
-    The combination of the images will be carried out using a sigma clipped median statistic if the
-    number of exposures is > 2. If the number of exposures <= 2, a simple average statistic is
-    applied. In the special case that CR rejection is needed, the combination of images is selective:
+    The combination of the images will be carried out using a sigma clipped
+    median statistic if the number of exposures is > 2. If the number of
+    exposures <= 2, a simple average statistic is applied. In the special case
+    that CR rejection is needed, the combination of images is selective:
 
         * where cosmic ray in one frame, select the other
         * where cosmic ray in none of the frames, calculate an average of both
 
-    When only one frame is given, it is still flagged as master, but a warning will be thrown.
+    When only one frame is given, it is still flagged as master, but a warning
+    will be thrown.
 
     Parameters
     ----------
-            im_images : string
-                    comma-separated list of paths to images that are going to be combined into a master frame
-            out_image : string
-                    path to output master frame
-            reject_cr : boolean, optional
-                    whether to reject or not cosmic rays. Deafults to False. If true this task will decide if
-                    cosmic ray rejection is needed or not based on the exposure time of the frame and the number
-                    of frames being combined
-            exptime_thresh : integer, optional
-                    minimum exposure time belowe which no cosmic rejection routine will be run
-            cr_kwargs :
-                    additional keyword arguments to be passed to the cosmic ray rejection routine
+    in_images : string
+        comma-separated list of paths to images that are going to be combined
+        into a master frame
+    out_image : string
+        path to output master frame
+    reject_cr : boolean, optional
+        whether to reject or not cosmic rays. Deafults to False. If true this
+        task will decide if cosmic ray rejection is needed or not based on the
+        exposure time of the frame and the number of frames being combined
+    exptime_thresh : integer, optional
+        minimum exposure time belowe which no cosmic rejection routine will be
+        run
+    cr_kwargs : dict_like
+        additional keyword arguments to be passed to the cosmic ray rejection
+        routine
 
     Examples
     --------
-            drp image createMasterFrame IN_IMAGE1,IN_IMAGE2,... OUT_IMAGE
+    drp image createMasterFrame IN_IMAGE1,IN_IMAGE2,... OUT_IMAGE
 
     """
     if not isinstance(in_images, (list, tuple)):
@@ -3216,6 +3220,8 @@ def createMasterFrame_drp(
                 method="clipped_mean",
                 k=3,
             )
+        elif master_type == "arc":
+            master_frame = combineImages(proc_images, method="mean")
 
     # TODO:
     # * add binary table with columns: MJD, EXPNUM, SPEC, CHANNEL, EXPTIME
@@ -3226,5 +3232,6 @@ def createMasterFrame_drp(
     master_frame.writeFitsData(out_image)
 
 
-# TODO: for fiberflats, calculate an average over an X range (around the center) of the extracted fibers and normalize by it
+# TODO: for fiberflats, calculate an average over an X range (around the center) of the
+# extracted fibers and normalize by it
 # TODO: then combine them using the RSS method implemented
