@@ -432,17 +432,20 @@ def detWaveSolution_drp(
 
     # plot if requested
     if plot:
-        fig = plt.figure(figsize=(16, 8), tight_layout=True)
+        fig = plt.figure(figsize=(16, 10), tight_layout=True)
         gs = gridspec.GridSpec(10, max(poly_disp + 1, poly_fwhm + 1))
 
         ax_spec = fig.add_subplot(gs[:3, :])
+        ax_spec.tick_params(labelbottom=False)
+        ax_sol_wave = fig.add_subplot(gs[3:6, :], sharex=ax_spec)
+        ax_sol_fwhm = ax_sol_wave.twinx()
+        ax_sol_wave.tick_params("y", labelcolor="tab:blue")
+        ax_sol_fwhm.tick_params("y", labelcolor="tab:red")
         ax_coe_wave, ax_coe_fwhm = [], []
         for i in range(poly_disp + 1):
-            ax_coe_wave.append(fig.add_subplot(gs[3:5, i]))
+            ax_coe_wave.append(fig.add_subplot(gs[6:8, i]))
         for i in range(poly_fwhm + 1):
-            ax_coe_fwhm.append(fig.add_subplot(gs[5:7, i]))
-        ax_sol_wave = fig.add_subplot(gs[7:, :])
-        ax_sol_fwhm = ax_sol_wave.twinx()
+            ax_coe_fwhm.append(fig.add_subplot(gs[8:, i]))
 
         # add reference spectrum plot with reference lines & corrected lines
         for pix in pixel:
@@ -472,11 +475,10 @@ def detWaveSolution_drp(
         )
         ax_spec.step(arc._pixels, arc._data[ref_fiber], color="0.2", lw=1)
         ax_spec.set_title(f"reference arc spectrum {ref_fiber}", loc="left")
-        ax_spec.set_xlabel("dispersion axis (pix)")
         ax_spec.set_ylabel("count (e-/pix)")
         ax_spec.legend(loc=1)
 
-        # add coefficients boxplots
+        # add coefficients plots
         for icoef in range(poly_disp + 1):
             data = wave_coeffs[:, icoef]
             mean, std = data.mean(), data.std()
@@ -490,6 +492,8 @@ def detWaveSolution_drp(
                 transform=ax_coe_wave[icoef].transAxes,
             )
             ax_coe_wave[icoef].tick_params(labelsize="x-small")
+            if icoef == 0:
+                ax_coe_wave[icoef].set_title("wavelength coefficients", loc="left")
         for icoef in range(poly_fwhm + 1):
             data = lsf_coeffs[:, icoef]
             mean, std = data.mean(), data.std()
@@ -503,6 +507,8 @@ def detWaveSolution_drp(
                 transform=ax_coe_fwhm[icoef].transAxes,
             )
             ax_coe_fwhm[icoef].tick_params(labelsize="x-small")
+            if icoef == 0:
+                ax_coe_fwhm[icoef].set_title("LSF coefficients", loc="left")
 
         # add wavelength and LSF solutions plot
         ax_sol_wave.fill_between(
