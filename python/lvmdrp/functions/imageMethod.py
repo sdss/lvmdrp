@@ -16,7 +16,7 @@ from lvmdrp.core.plot import save_fig
 from lvmdrp.core.rss import RSS
 from lvmdrp.core.spectrum1d import Spectrum1D
 from lvmdrp.core.tracemask import TraceMask
-from lvmdrp import log
+from lvmdrp import log, path, __version__ as drpver
 
 
 description = "Provides Methods to process 2D images"
@@ -29,7 +29,7 @@ __all__ = [
     "traceFWHM_drp",
     "extractSpec_drp",
     "subtractBias_drp",
-    "preprocRawFrame_drp",
+    "preproc_raw_frame",
     "basicCalibration_drp",
     "createMasterFrame_drp",
 ]
@@ -2726,42 +2726,38 @@ def old_preprocRawFrame_drp(
     full_img.writeFitsData(out_image)
     return full_img
 
+# def preprocRawFrame_drp(*args, **kwargs):
+#     preprocRawFrame_drp(*args, **kwargs)
 
-def preprocRawFrame_drp(
-    in_image,
-    out_image,
-    positions="00,10,01,11",
-    orientation="S,S,S,S",
-    subtract_overscan="1",
-    os_bound_x="",
-    os_bound_y="",
-    compute_error="1",
-    assume_gain="1.0",
-    assume_rdnoise="5",
-    gain_field="GAIN",
-    rdnoise_field="RDNOISE",
-    unit="adu",
-    assume_imagetyp="bias",
-    plot="2",
-    figure_path=".figures",
-):
+def preproc_raw_frame(in_image: str, kind: str = 'p', flavor: str = 'bias',
+                      mjd: int = None, camera: str = None, expnum: int = None,
+                      tileid: int = None,
+                      positions: str = "00,10,01,11",
+                      orientation: str = "S,S,S,S", subtract_overscan: bool = True,
+                      os_bound_x: str = "2044,2077", os_bound_y: str = "1,4080",
+                      compute_error: bool = True, assume_gain: float = 1.0,
+                      assume_rdnoise: int = 5, gain_field: str = 'GAIN',
+                      rdnoise_field: str = "RDNOISE", unit: str = None,
+                      plot_fig: bool = False, show_fig: bool = False):
+
     # convert input parameters to proper type
     orient = orientation.split(",")
     pos = positions.split(",")
-    subtract_overscan = bool(int(subtract_overscan))
-    compute_error = bool(int(compute_error))
-    plot = int(plot)
 
     # load image
     org_image = loadImage(in_image)
+
+    # get output file path
+    output_file = path.full('lvm_anc', kind=kind, imagetype=flavor, mjd=mjd,
+                            camera=camera, drpver=drpver, expnum=expnum,
+                            tileid=tileid)
+
     # header quick check
-    try:
-        org_image._header["IMAGETYP"]
-    except KeyError:
+    if 'IMAGETYP' not in org_image._header:
         log.warning(
-            f"header keyword 'IMAGETYP' not found. Assuming IMAGETYP='{assume_imagetyp}'"
+            f"header keyword 'IMAGETYP' not found. Assuming IMAGETYP='{flavor}'"
         )
-        org_image._header["IMAGETYP"] = assume_imagetyp
+        org_image._header["IMAGETYP"] = flavor
 
     # parse overscan (OS) section:
     # * extract BIASSEC
@@ -2824,7 +2820,7 @@ def preprocRawFrame_drp(
 
     # select data outside the cut out region (overscan)
     os_region = Image(data=org_image._data[os_y[0] : os_y[1], os_x[0] : os_x[1]])
-    if plot:
+    if plot_fig:
         fig, ax = plt.subplots()
         norm = ImageNormalize(
             os_region._data, interval=PercentileInterval(50), stretch=AsinhStretch()
@@ -2837,11 +2833,13 @@ def preprocRawFrame_drp(
         ax.set_xlabel("X (pix)")
         ax.set_ylabel("Y (pix)")
         cb.set_label("counts (ADU)")
-        if plot == 1:
+
+        # set qa directory
+        if show_fig:
             plt.show()
         else:
             save_fig(
-                fig, output_path=out_image, figure_path=figure_path, label="preproc"
+                fig, output_path=output_file, figure_path='qa', label="preproc"
             )
 
     # * split OS in four amplifier sections
@@ -2983,7 +2981,7 @@ def preprocRawFrame_drp(
 
     # update header
     log.info(
-        f"updating header and writing pre-processed frame to '{out_image}'"
+        f"updating header and writing pre-processed frame to '{output_file}'"
     )
     preproc_image.setHeader(org_image.getHeader())
     # update/set unit
@@ -3028,7 +3026,7 @@ def preprocRawFrame_drp(
             f"Overscan std of amp. {i+1} [adu]",
         )
     # write out FITS file
-    preproc_image.writeFitsData(out_image)
+    preproc_image.writeFitsData(output_file)
 
 
 def basicCalibration_drp(

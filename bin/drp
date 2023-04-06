@@ -1,159 +1,45 @@
 #!/usr/bin/env python
 # encoding: utf-8
 #
-# @Author: Bernd Husemann, Alfredo Mejía-Narváez
-# @Date: Dec 7, 2022
-# @Filename: drp
-# @License: BSD 3-Clause
-# @Copyright: SDSS-V LVM
 
-import sys
+import click
 
-from lvmdrp.functions import (
-    astrometryMethod,
-    fluxCalMethod,
-    headerMethod,
-    imageMethod,
-    rssMethod,
-    runMethod,
-    skyMethod,
-)
-from lvmdrp import log
+from astropy.io import fits
+from lvmdrp.functions.run_drp import run_drp, get_config_options
+from lvmdrp.functions.imageMethod import preproc_raw_frame
 
 
-REGISTERED_MODULES = [
-    astrometryMethod,
-    fluxCalMethod,
-    headerMethod,
-    imageMethod,
-    rssMethod,
-    runMethod,
-    skyMethod,
-]
-MODULES = {
-    module.__name__.split(".")[-1].replace("Method", ""): module
-    for module in REGISTERED_MODULES
-}
+@click.group('drp', short_help='run the drp reduction')
+def cli():
+    pass
 
-# TODO: implement special 'run' task for running a given configuration file
-# TODO: implement 'out_bp' argument in each task to produce an output in the correct
-# format
+
+@cli.command('run', short_help='run the drp end-to-end')
+@click.option('-m', '--mjd', type=int, help='an MJD to reduce', required=True)
+@click.option('--bias', is_flag=True, default=False, help='Flag to only reduce bias frames')
+def run(mjd, bias):
+    run_drp(mjd=mjd, bias=bias)
+
+
+@cli.command('preprocess', short_help='preprocess raw frames')
+@click.argument('filename', type=click.Path(exists=True))
+@click.option('-f', '--flavor', type=str, help='the flavor of the file', required=True)
+def preprocess(filename, flavor):
+
+    # get metadata for a single file
+    hdr = fits.getheader(filename)
+    camera = hdr.get("CCD")
+    mjd = hdr.get("MJD")
+    tileid = hdr.get("TILEID", 1111)
+    expnum = f'{hdr.get("EXPOSURE"):0>8}'
+
+    # get custom config options
+    kwargs = get_config_options('reduction_steps.preproc_raw_frame', flavor)
+
+    # preprocess the frame
+    preproc_raw_frame(filename, flavor=flavor, kind='p', camera=camera,
+                      mjd=mjd, expnum=expnum, tileid=tileid, **kwargs)
+
 
 if __name__ == "__main__":
-    args = sys.argv[1:]
-
-    # show basic help
-    if len(args) == 0:
-        log.info("no <MODULE> given")
-        log.info("use 'drp help' for a list of available MODULES")
-
-    # show detailed help
-    elif args[0] == "help":
-        # modules list
-        if len(args) == 1:
-            log.info("")
-            log.info("Available MODULES in the DRP:")
-            max_length = max(map(len, MODULES.keys()))
-            for module in MODULES:
-                name = module.ljust(max_length, " ")
-                log.info(f" * {name} : {MODULES[module].description}")
-            log.info("")
-            log.info(
-                (
-                    "use 'drp help <MODULE>' to get a list "
-                    "of available TASKS within the MODULE"
-                )
-            )
-            log.info("")
-        # modules tasks
-        elif len(args) == 2:
-            module = args[1]
-            if module in MODULES:
-                tasks = MODULES[module].__all__
-                log.info("")
-                log.info(f"available DRP TASKS within MODULE '{module}':")
-                for task in tasks:
-                    task = task.replace("_drp", "")
-                    log.info(f" * {task}")
-                log.info("")
-                log.info(
-                    (
-                        f"use 'drp help {module} <TASK>' to get "
-                        "detailed information on <TASK>"
-                    )
-                )
-                log.info(
-                    (
-                        "you can run the routine by call "
-                        "'drp <MODULE> <TASK> [<ARG1> <ARG2> ...]'"
-                    )
-                )
-            elif module not in MODULES:
-                log.error(
-                    (
-                        "you have asked for help about a "
-                        f"non-existing MODULE '{args[1]}' in the DRP"
-                    )
-                )
-                log.error('use "drp help" for a list of available MODULES')
-        # task help
-        elif len(args) == 3:
-            module = args[1]
-            task = args[2]
-            try:
-                log.info(getattr(MODULES[module], f"{task}_drp").__doc__)
-            except Exception:
-                log.error(
-                    (
-                        "you asked for help on a non-existing MODULE "
-                        f"'{module}' and/or TASK '{task}' in the DRP"
-                    )
-                )
-                log.error("use 'drp help' for a list of available MODULES")
-    # try run
-    else:
-        if len(args) < 2:
-            log.error(
-                "the correct command line is 'drp <MODULE> <TASK> [<ARG1> <ARG2> ...]'"
-            )
-            log.info("use 'drp help' for a list of available MODULES")
-            log.info(
-                (
-                    "use 'drp help <MODULE>' to get a list of "
-                    "available TASKS within the MODULE"
-                )
-            )
-            sys.exit(-1)
-
-        module = args[0]
-        task = args[1]
-
-        if module not in MODULES:
-            log.error(f"no MODULE '{module}' in the DRP")
-            sys.exit(-1)
-        if f"{task}_drp" not in MODULES[module].__all__:
-            log.error(f"no TASK '{task}' within MODULE '{module}' in the DRP")
-            sys.exit(-1)
-
-        error = False
-        key = False
-
-        run_task = f"{module}Method.{task}_drp("
-        for arg in args[2:]:
-            if "=" not in arg and not key:
-                run_task += '"' + arg + '"'
-            elif "=" in arg:
-                entry = arg.split("=")
-                run_task += entry[0] + '="' + entry[1] + '"'
-                key = True
-            else:
-                error = True
-                log.error(f"the TASK '{run_task}' does not exist in the DRP")
-                break
-            run_task += ","
-        if not error:
-            run_task = (run_task[:-1] if run_task.endswith(",") else run_task) + ")"
-            try:
-                eval(run_task)
-            except Exception as e:
-                log.error(*e.args)
+    cli()
