@@ -43,10 +43,10 @@ import re
 from copy import deepcopy as copy
 
 import h5py
+import pandas as pd
 import yaml
 from astropy.io import fits
 from tqdm import tqdm
-import pandas as pd
 
 import lvmdrp
 import lvmdrp.utils.database as db
@@ -216,7 +216,6 @@ def metadataCaching_drp(path, observatory, mjd, overwrite="0"):
             frames_indices,
         )
     )
-    # frames_indices = frames_indices[:119]
     nfilter_frames = len(frames_indices)
 
     logger.info(
@@ -264,10 +263,6 @@ def metadataCaching_drp(path, observatory, mjd, overwrite="0"):
     # merge metadata with existing one
     if str(mjd) in store[observatory]:
         logger.info("updating store with new metadata")
-        metadata_old.reset_index(inplace=True)
-        metadata = pd.concat(
-            (metadata_old, metadata), axis="index", join="inner", ignore_index=True
-        )
         array = metadata.to_records(index=False)
         dtypes = array.dtype
         array = array.astype(
