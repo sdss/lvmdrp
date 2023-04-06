@@ -7,42 +7,36 @@
 # @Copyright: SDSS-V LVM
 
 import os
-
-import numpy as np
 import yaml
-from astropy import units as u
+
 from astropy.io import fits
-from astropy.table import Table
-
 from lvmdrp.core.constants import CONFIG_PATH
-
 
 # path to blueprints, all should be defined in this same path
 DATAPRODUCT_BLUEPRINTS_PATH = os.path.join(CONFIG_PATH, "dataproducts")
 
 
-def load_blueprint(name):
-    """
-    Returns the blueprint for the LVM-DRP dataproduct given a file path
+def load_blueprint(name: str) -> dict:
+    """ Reads a datamodel blueprint
+
+    Returns the blueprint for the LVM-DRP dataproduct given a file path.
+    The ``name`` argument is the blueprint name relative to the
+    ``etc/dataproducts`` directory, e.g. "lvmArc" or "ancillary/lvmPframe".
 
     Parameters
     ----------
-    name: string
+    name : str
         name of the YAML file containing dataproduct blueprint
 
     Returns
     -------
-    dict_like
+    dict:
         a dictionary containing a dataproduct definition
 
     """
-    if not name.endswith(".yaml"):
-        _name = f"{name}.yaml"
-    else:
-        _name = name
-
-    dataproduct_bp = yaml.safe_load(os.path.join(DATAPRODUCT_BLUEPRINTS_PATH, _name))
-    return dataproduct_bp
+    _name = name if name.endswith(".yaml") else f"{name}.yaml"
+    with open(os.path.join(DATAPRODUCT_BLUEPRINTS_PATH, _name), 'r') as f:
+        return yaml.safe_load(f)
 
 
 def dump_template(dataproduct_bp, save=False):
