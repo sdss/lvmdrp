@@ -42,6 +42,7 @@ def fetch_example_data(url, name, dest_path, ext="zip"):
     """Download 2D examples data"""
     file_name = f"{name}.{ext}"
     file_path = os.path.join(dest_path, file_name)
+    os.makedirs(dest_path, exist_ok=True)
     if not os.path.exists(os.path.join(dest_path, name)):
         examples_logger.info(f"downloading example data to {file_path}")
         process = subprocess.Popen(
