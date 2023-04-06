@@ -128,10 +128,9 @@ def get_frames_metadata(mjd: Union[str, int] = None, path: str = None, suffix: s
     log.info(f"successfully extracted metadata for {len(frames_table)} frames.")
 
     # create the cache file
-    if not ignore_cache:
-        if not cache_file.parent.exists():
-            cache_file.parent.mkdir(parents=True, exist_ok=True)
-        log.info(f"caching metadata to '{cache_file}'")
-        pickle.dump(frames_table, open(cache_file, "wb"))
+    if not cache_file.parent.exists():
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+    log.info(f"caching metadata to '{cache_file}'")
+    pickle.dump(frames_table, open(cache_file, "wb"))
 
     return frames_table
