@@ -1,0 +1,15 @@
+
+reduction_steps:
+  preproc_raw_frame:
+    bias:
+      unit: electron
+      subtract_overscan: true
+      compute_error: true
+      os_bound_y: 1,4080
+      os_bound_x: 2044,2077
+    dark:
+      unit: electron
+      subtract_overscan: true
+      compute_error: false
+      os_bound_y: 5,4077
+      os_bound_x: 2040,2080
