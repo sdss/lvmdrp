@@ -12,6 +12,7 @@ naming_convention: |
   instrument, b1, r1, z1, or b2, r2, z2, or b3, r3, or z3 for the blue, red, nir cameras on each
   LVM spectrograph, and [EXPNUM] is the (zero-padded) 8-digit exposure number. The "r" before the
   frame flavor stands for "rejected cosmic ray".
+access_name: lvm_anc
 hdu0:
   name: PRIMARY
   description: primary header metadata
