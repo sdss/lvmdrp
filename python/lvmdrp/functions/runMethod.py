@@ -42,12 +42,18 @@ import os
 import re
 from copy import deepcopy as copy
 
+import h5py
 import yaml
+from astropy.io import fits
+from tqdm import tqdm
+import pandas as pd
 
 import lvmdrp
 import lvmdrp.utils.database as db
 from lvmdrp.core.constants import CONFIG_PATH, DATAPRODUCT_BP_PATH
 from lvmdrp.utils.configuration import load_master_config
+from lvmdrp.utils.examples import parse_sdr_name
+from lvmdrp.utils.logger import get_logger
 
 
 description = (
@@ -62,7 +68,10 @@ __all__ = [
     "checkDone_drp",
     "dumpScript_drp",
     "getConfigs_drp",
+    "metadataCaching_drp",
 ]
+
+logger = get_logger(__name__)
 
 
 def _get_missing_fields_in(template):
@@ -142,6 +151,155 @@ def _get_path_from_bp(bp_name):
     kws_path = re.findall(r"\{(\w+)\}", name)
 
     return dataproduct_path, kws_path
+
+
+def metadataCaching_drp(path, observatory, mjd, overwrite="0"):
+
+    """caches the header metadata into a HD5 table given a target MJD
+
+    this task will write an HD5 table where the quick data reduction
+    information will be available for running the actual reduction.
+
+    Parameters
+    ----------
+    path : str
+        path where the raw frames are stored
+    observatory : str
+        name of the observatory in the data path structure (e.g., lco, lab)
+    mjd : int
+        target MJD from which to extract frames metadata
+    overwrite : bool
+        whether to overwrite the metadata table or not, by default False
+    """
+
+    overwrite = bool(int(overwrite))
+
+    metadata_path = os.path.join(path, "metadata.hdf5")
+
+    # remove metadata store if overwrite == True
+    if overwrite and os.path.isfile(metadata_path):
+        logger.info(f"removing metadata store '{metadata_path}'")
+        os.remove(metadata_path)
+
+    # load or create metadata store
+    if os.path.isfile(metadata_path):
+        logger.info(f"loading metadata store from '{metadata_path}'")
+        store = h5py.File(metadata_path, mode="a")
+    else:
+        logger.info(f"creating metadata store '{metadata_path}'")
+        store = h5py.File(metadata_path, mode="w")
+
+    # add observatory group if needed
+    if observatory not in store:
+        store.create_group(observatory)
+
+    # get existing metadata
+    if str(mjd) in store[observatory]:
+        metadata_old = pd.DataFrame(store[observatory][str(mjd)][()])
+        metadata_old.set_index(["mjd", "camera", "expnum"], inplace=True)
+    else:
+        metadata_old = pd.DataFrame()
+
+    # filter frames path list
+    frames_indices = [
+        (os.path.join(root, frame_name), (mjd, *parse_sdr_name(frame_name)))
+        for root, _, frame_names in os.walk(path)
+        for frame_name in frame_names
+        if str(mjd) in root and frame_name.endswith(".fits.gz")
+    ]
+    ntotal_frames = len(frames_indices)
+    # filter out frames in store
+    frames_indices = list(
+        filter(
+            lambda item: tuple(map(lambda s: s.encode("utf-8"), item[1]))
+            not in metadata_old.index,
+            frames_indices,
+        )
+    )
+    # frames_indices = frames_indices[:119]
+    nfilter_frames = len(frames_indices)
+
+    logger.info(
+        (
+            f"found {ntotal_frames}, skipping {ntotal_frames-nfilter_frames} "
+            f"({(ntotal_frames-nfilter_frames)/ntotal_frames*100:g} %) "
+            "already present in store"
+        )
+    )
+    if nfilter_frames == 0:
+        return
+
+    # initialize table
+    metadata = {}
+    # extract metadata
+    logger.info(f"extracting metadata from {len(frames_indices)} frames")
+    iterator = tqdm(
+        enumerate(frames_indices),
+        total=nfilter_frames,
+        desc=f"extracting metadata from MJD = {mjd}",
+        ascii=True,
+        unit="file",
+    )
+    for i, (frame_path, (mjd, camera, expnum)) in iterator:
+        header = fits.getheader(frame_path, ext=0)
+        imagetyp = header.get("FLAVOR", header.get("IMAGETYP"))
+        spec = int(camera[-1])
+        exptime = header["EXPTIME"]
+
+        metadata[i] = [mjd, camera, expnum, imagetyp, spec, exptime, frame_path]
+
+    # set index
+    metadata = pd.DataFrame.from_dict(metadata, orient="index")
+    metadata.columns = [
+        "mjd",
+        "camera",
+        "expnum",
+        "imagetyp",
+        "spec",
+        "exptime",
+        "path",
+    ]
+    logger.info("successfully extracted metadata")
+
+    # merge metadata with existing one
+    if str(mjd) in store[observatory]:
+        logger.info("updating store with new metadata")
+        metadata_old.reset_index(inplace=True)
+        metadata = pd.concat(
+            (metadata_old, metadata), axis="index", join="inner", ignore_index=True
+        )
+        array = metadata.to_records(index=False)
+        dtypes = array.dtype
+        array = array.astype(
+            [
+                (n, dtypes[n])
+                if dtypes[n] != object
+                else (n, h5py.string_dtype("utf-8", length=None))
+                for n in dtypes.names
+            ]
+        )
+        dataset = store[observatory][str(mjd)]
+        dataset.resize(dataset.shape[0] + array.shape[0], axis=0)
+        dataset[-array.shape[0] :] = array
+    else:
+        logger.info("adding new data to store")
+        array = metadata.to_records(index=False)
+        dtypes = array.dtype
+        array = array.astype(
+            [
+                (n, dtypes[n])
+                if dtypes[n] != object
+                else (n, h5py.string_dtype("utf-8", length=None))
+                for n in dtypes.names
+            ]
+        )
+        store[observatory].create_dataset(
+            name=str(mjd), data=array, maxshape=(None,), chunks=True
+        )
+
+    # write to disk metadata in HDF5 format
+    logger.info(f"writing metadata to store '{metadata_path}'")
+    store.close()
 
 
 # TODO:

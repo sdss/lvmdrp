@@ -20,3 +20,5 @@ pandas==1.5.3
 astroquery==0.4.6
 keyring>=4.0
 sbpy==0.3.0
+h5py==3.8.0
+tables==3.8.0
