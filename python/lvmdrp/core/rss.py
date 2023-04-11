@@ -597,16 +597,38 @@ class RSS(FiberRows):
 
         combined_data = numpy.zeros(dim, dtype=numpy.float32)
         combined_error = numpy.zeros(dim, dtype=numpy.float32)
+        if method == "sum":
+            if mask is not None:
+                data[mask] = 0
+                good_pix = numpy.sum(numpy.logical_not(mask), 0)
+                select_mean = good_pix > 0
+                combined_data[select_mean] = numpy.sum(data, 0)[select_mean]
+                combined_mask = good_pix == 0
+                if error is not None:
+                    error[mask] = replace_error
+                    combined_error[select_mean] = numpy.sqrt(
+                        numpy.sum(error**2, 0)[select_mean]
+                    )
+                else:
+                    combined_error = None
+            else:
+                combined_mask = None
+                combined_data = numpy.sum(data, 0) / data.shape[0]
+                if error is not None:
+                    combined_error = numpy.sqrt(
+                        numpy.sum(error**2, 0) / error.shape[0]
+                    )
+                else:
+                    combined_error = None
+
         if method == "mean":
             if mask is not None:
                 data[mask] = 0
                 good_pix = numpy.sum(numpy.logical_not(mask), 0)
                 select_mean = good_pix > 0
-                #   print(combined_data.shape, data.shape, good_pix.shape, select_mean.shape, error)
                 combined_data[select_mean] = (
                     numpy.sum(data, 0)[select_mean] / good_pix[select_mean]
                 )
-                #    print(combined_data.dtype)
                 combined_mask = good_pix == 0
                 if error is not None:
                     error[mask] = replace_error
