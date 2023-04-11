@@ -83,17 +83,54 @@ def get_frames_metadata(path, suffix=".fits.gz", ignore_cache=False):
     ]
     examples_logger.info(f"extracting metadata from {len(frames)} frames")
     frames_table = Table(
-        names=["imagetyp", "spec", "mjd", "camera", "expnum", "exptime", "path"],
-        dtype=[str, str, int, str, str, float, str],
+        names=[
+            "imagetyp",
+            "spec",
+            "mjd",
+            "camera",
+            "expnum",
+            "exptime",
+            "argon",
+            "neon",
+            "ldls",
+            "hgne",
+            "xenon",
+            "path",
+        ],
+        dtype=[str, str, int, str, str, float, bool, bool, bool, bool, bool, str],
     )
     for frame_path in tqdm(frames, ascii=True):
-        header = fits.getheader(frame_path, ext=0)
+        try:
+            header = fits.getheader(frame_path, ext=0)
+        except Exception:
+            examples_logger.error(f"error while reading frame '{frame_path}'")
+            continue
         mjd = header.get("MJD")
         imagetyp = header.get("FLAVOR", header.get("IMAGETYP"))
         camera, expnum = parse_sdr_name(frame_path)
         spec = f"sp{camera[-1]}"
         exptime = header["EXPTIME"]
-        frames_table.add_row([imagetyp, spec, mjd, camera, expnum, exptime, frame_path])
+        argon = header.get("ARGON", "OFF") == "ON"
+        neon = header.get("NEON", "OFF") == "ON"
+        ldls = header.get("LDLS", "OFF") == "ON"
+        hgne = header.get("HGNE", "OFF") == "ON"
+        xenon = header.get("XENON", "OFF") == "ON"
+        frames_table.add_row(
+            [
+                imagetyp,
+                spec,
+                mjd,
+                camera,
+                expnum,
+                exptime,
+                argon,
+                neon,
+                ldls,
+                hgne,
+                xenon,
+                frame_path,
+            ]
+        )
     examples_logger.info("successfully extracted metadata")
 
     examples_logger.info(f"caching metadata to '{CACHE_PATH}'")
