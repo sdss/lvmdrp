@@ -31,6 +31,7 @@ from lvmdrp.utils.logger import get_logger
 description = "Provides Methods to process Row Stacked Spectra (RSS) files"
 
 __all__ = [
+    "combineRSS_drp",
     "detWaveSolution_drp",
     "createPixTable_drp",
     "checkPixTable_drp",
@@ -266,7 +267,7 @@ def detWaveSolution_drp(
         (
             f"measuring arc lines for each fiber from "
             f"reference fiber {ref_fiber}, "
-            f"flux limits [{flux_min}, {fwhm_max}] and "
+            f"{flux_min = }, {fwhm_max = } and "
             f"relative flux limits {rel_flux_limits}"
         )
     )
@@ -612,14 +613,9 @@ def detWaveSolution_drp(
         "%.4f" % (numpy.max(fwhm_rms[good_fibers])),
         "Max RMS of disp sol",
     )
-
-    wave_trace = FiberRows(
-        data=wave_sol, good_fibers=good_fibers, header=arc.getHeader()
-    )
+    wave_trace = FiberRows(data=wave_sol, good_fibers=good_fibers)
     wave_trace._coeffs = wave_coeffs
-    fwhm_trace = FiberRows(
-        data=fwhm_sol, good_fibers=good_fibers, header=arc.getHeader()
-    )
+    fwhm_trace = FiberRows(data=fwhm_sol, good_fibers=good_fibers)
     fwhm_trace._coeffs = lsf_coeffs
 
     wave_trace.writeFitsData(out_wave)
@@ -1421,10 +1417,10 @@ def combineRSS_drp(in_rsss, out_rss, method="mean"):
         # load subimages from disc and append them to a list
         rss = loadRSS(i)
         rss_list.append(rss)
-    combined_header = combineHdr(rss_list)
+    # combined_header = combineHdr(rss_list)
     combined_rss = RSS()
     combined_rss.combineRSS(rss_list, method=method)
-    combined_rss.setHeader(header=combined_header._header)
+    # combined_rss.setHeader(header=combined_header._header)
     # write out FITS file
     combined_rss.writeFitsData(out_rss)
 
