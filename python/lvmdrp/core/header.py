@@ -1,5 +1,3 @@
-from distutils.version import LooseVersion
-
 from astropy.io import fits as pyfits
 
 
@@ -96,7 +94,7 @@ class Header(object):
         keys = self._header.keys()
         new_hdr = pyfits.Header()
         for k in keys:
-            if not k in keywords:
+            if k not in keywords:
                 new_hdr[k] = (self._header[k], self._header.comments[k])
         self._header = new_hdr
 
@@ -174,12 +172,12 @@ def combineHdr(headers):
         if i == 0:
             final_cards = headers[i]._header.cards
             final_keys = headers[i]._header.keys()
-        final_header = pyfits.Header(cards=final_cards)
-        if i > 0:
+            final_header = pyfits.Header(cards=final_cards)
+        else:
             card = headers[i]._header.cards
             keys = headers[i]._header.keys()
             for k in keys:
-                if not k in final_keys:
+                if k not in final_keys:
                     final_header.append(card[k])
     outHdr = Header(final_header)
     return outHdr
