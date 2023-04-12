@@ -62,7 +62,9 @@ def fetch_example_data(url, name, dest_path, ext="zip"):
             examples_logger.error("full report:")
             examples_logger.error(process.stderr.decode("utf-8"))
         with zipfile.ZipFile(file_path, "r") as src_compressed:
+            examples_logger.info(f"decompressing file '{file_path}' to '{dest_path}'")
             src_compressed.extractall(dest_path)
+        examples_logger.info("removing compressed file")
         os.remove(file_path)
     else:
         examples_logger.info("example data already exists")
