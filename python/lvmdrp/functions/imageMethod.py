@@ -2888,7 +2888,9 @@ def preproc_raw_frame(in_image: str, kind: str = 'p', flavor: str = 'bias',
             )
         except KeyError:
             if assume_gain:
-                assume_gain = assume_gain.split(",")
+                if not isinstance(assume_gain, list):
+                    assume_gain = [assume_gain]
+                #assume_gain = assume_gain.split(",")
                 try:
                     assume_gain = [float(gain) for gain in assume_gain]
                     log.warning(
@@ -2921,7 +2923,9 @@ def preproc_raw_frame(in_image: str, kind: str = 'p', flavor: str = 'bias',
             )
         except KeyError:
             if assume_rdnoise:
-                assume_rdnoise = assume_rdnoise.split(",")
+                if not isinstance(assume_rdnoise, list):
+                    assume_rdnoise = [assume_rdnoise]
+                #assume_rdnoise = assume_rdnoise.split(",")
                 try:
                     assume_rdnoise = [float(rdnoise) for rdnoise in assume_rdnoise]
                     log.warning(
