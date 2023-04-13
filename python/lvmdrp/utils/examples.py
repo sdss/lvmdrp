@@ -101,7 +101,7 @@ def get_frames_metadata(mjd: Union[str, int] = None, path: str = None, suffix: s
 
     # load from a cache file
     cache_path = pathlib.Path(os.getenv("LVM_SANDBOX", os.path.expanduser('~')))
-    cache_file = cache_path / "lvm_raw_frames_table.pkl"
+    cache_file = cache_path / f"lvm_metadata_{mjd}.pkl"
     if cache_file.exists() and not ignore_cache:
         log.info(f"loading cached metadata from '{cache_file}'")
         return pickle.load(open(cache_file, "rb"))
