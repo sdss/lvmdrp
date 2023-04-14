@@ -13,6 +13,7 @@ from astropy.table import Table
 from tqdm import tqdm
 
 from lvmdrp import log
+from lvmdrp.utils.hdrfix import apply_hdrfix
 
 
 FC = [0.88, 0.94]
@@ -119,6 +120,11 @@ def get_frames_metadata(mjd: Union[str, int] = None, path: str = None, suffix: s
     for frame_path in tqdm(frames, ascii=True, unit='files', total=len(frames)):
         header = fits.getheader(frame_path, ext=0)
         mjd = header.get("MJD")
+
+        # apply any header fix or if none, use old header
+        header = apply_hdrfix(mjd, hdr=header) or header
+
+        # get certain keys
         imagetyp = header.get("FLAVOR", header.get("IMAGETYP"))
         camera, expnum = parse_sdr_name(frame_path)
         spec = f"sp{camera[-1]}"
