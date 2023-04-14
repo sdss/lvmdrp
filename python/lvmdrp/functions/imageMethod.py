@@ -17,14 +17,15 @@ from lvmdrp.core.rss import RSS
 from lvmdrp.core.spectrum1d import Spectrum1D
 from lvmdrp.core.tracemask import TraceMask
 from lvmdrp import log, path, __version__ as drpver
+from lvmdrp.utils.hdrfix import apply_hdrfix
 
 
 description = "Provides Methods to process 2D images"
 
 __all__ = [
     "LACosmic_drp",
-    "findPeaksAuto_drp",
-    "tracePeaks_drp",
+    "find_peaks_auto",
+    "trace_peaks",
     "subtractStraylight_drp",
     "traceFWHM_drp",
     "extractSpec_drp",
@@ -688,20 +689,10 @@ def addCCDMask_drp(image, mask, replaceError="1e10"):
     img.writeFitsData(image)
 
 
-def findPeaksAuto_drp(
-    in_image,
-    out_peaks,
-    nfibers,
-    disp_axis="X",
-    threshold="5000",
-    median_box="8",
-    median_cross="1",
-    slice="",
-    method="gauss",
-    init_sigma="1.0",
-    plot="1",
-    figure_path=".figures",
-):
+def find_peaks_auto(in_image: str, out_peaks: str, nfibers: int, disp_axis: str = "X",
+                    threshold: int = 5000, median_box: int = 8, median_cross: int = 1,
+                    slice: str = "", method: str = "gauss", init_sigma: float = 1.0,
+                    plot_fig: bool = False, show_fig: bool = False):
     """
     Finds the exact subpixel cross-dispersion position of a given number of fibers at a certain dispersion column on the raw CCD frame.
     If a predefined number of pixel are expected, the initial threshold value for the minimum peak height will varied until the expected number
@@ -736,13 +727,7 @@ def findPeaksAuto_drp(
     --------
     user:> lvmdrp image findPeaksAuto IMAGE.fits OUT_PEAKS.txt 382  method='gauss', init_sigma=1.3
     """
-    # convert all parameters to proper type
-    npeaks = int(nfibers)
-    threshold = float(threshold)
-    median_box = int(median_box)
-    median_cross = int(median_cross)
-    init_sigma = float(init_sigma)
-    plot = int(plot)
+    npeaks = nfibers
 
     # Load Image
     img = loadImage(in_image)
@@ -781,7 +766,7 @@ def findPeaksAuto_drp(
 
     # find the subpixel centroids of the peaks from the central 3 pixels using either a hyperbolic approximation
     # or perform a leastsq fit with a Gaussian
-    log.info(f"refining fiber location")
+    log.info("refining fiber location")
     centers = cut.measurePeaks(peaks[0], method, init_sigma, threshold=0, max_diff=1.0)[
         0
     ]
@@ -796,23 +781,25 @@ def findPeaksAuto_drp(
         file_out.write("%i %i %e %i\n" % (i, round_cent[i], centers[i], 0))
     file_out.close()
 
-    if plot == 1:
-        fig = plt.figure(figsize=(25, 10))
-        plt.plot(cut._data, "-k", lw=1)
-        plt.plot(peaks[0], peaks[2], "o", color="tab:red", mew=0, ms=5)
-        plt.plot(
-            centers,
-            numpy.ones(len(centers)) * numpy.nanmax(peaks[2]) * 0.5,
-            "x",
-            mew=1,
-            ms=7,
-            color="tab:blue",
-        )
-        plt.xlabel("cross-dispersion axis (pix)")
-        plt.ylabel("fiber profile")
-        plt.show()
-    else:
-        save_fig(fig, output_path=out_peaks, figure_path=figure_path, label=None)
+    if plot_fig:
+        fig, ax = plt.subplots()
+        ax.plot(cut._data, "-k", lw=1)
+        if peaks[2].any():
+            ax.plot(peaks[0], peaks[2], "o", color="tab:red", mew=0, ms=5)
+            ax.plot(
+                centers,
+                numpy.ones(len(centers)) * numpy.nanmax(peaks[2]) * 0.5,
+                "x",
+                mew=1,
+                ms=7,
+                color="tab:blue",
+            )
+        ax.set_xlabel("cross-dispersion axis (pix)")
+        ax.set_ylabel("fiber profile")
+        if show_fig:
+            plt.show()
+        else:
+            save_fig(fig, output_path=out_peaks, figure_path='qa', label=None)
 
 
 def findPeaksOffset_drp(
@@ -1218,27 +1205,16 @@ def findPeaksMaster2_drp(
         plt.show()
 
 
-def tracePeaks_drp(
-    in_image,
-    in_peaks,
-    out_trace,
-    disp_axis="X",
-    method="gauss",
-    median_box="7",
-    median_cross="1",
-    steps="30",
-    coadd="30",
-    poly_disp="-6",
-    init_sigma="1.0",
-    threshold_peak="100.0",
-    max_diff="2",
-    verbose="1",
-    plot="1",
-):
+def trace_peaks(in_image: str, in_peaks: str, out_trace: str, disp_axis: str = "X",
+                method: str = "gauss", median_box: int = 7, median_cross: int = 1, steps: int = 30,
+                coadd: int = 30, poly_disp: int = -6, init_sigma: float = 1.0,
+                threshold_peak: float = 100.0, max_diff: int = 2, verbose: bool = True):
     """
-    Traces the peaks of fibers along the dispersion axis. The peaks at a specific dispersion column had to be determined before.
-    Two scheme of measuring the subpixel peak positionare available: A hyperbolic approximation or fitting a Gaussian profile to the brightest 3 pixels of a peak.
-    In both cases the resulting fiber traces along the dispersion axis are smoothed by modelling it with a polynomial function.
+    Traces the peaks of fibers along the dispersion axis. The peaks at a specific dispersion
+    column had to be determined before. Two scheme of measuring the subpixel peak positionare
+    available: A hyperbolic approximation or fitting a Gaussian profile to the brightest
+    3 pixels of a peak. In both cases the resulting fiber traces along the dispersion axis are
+    smoothed by modelling it with a polynomial function.
 
     Parameters
     ----------
@@ -1284,7 +1260,6 @@ def tracePeaks_drp(
     max_diff = float(max_diff)
     init_sigma = float(init_sigma)
     verbose = bool(verbose)
-    plot = int(plot)
 
     # load continuum image  from file
     img = loadImage(in_image)
@@ -2747,17 +2722,21 @@ def preproc_raw_frame(in_image: str, kind: str = 'p', flavor: str = 'bias',
     # load image
     org_image = loadImage(in_image)
 
+    # apply the header fix
+    hdr = apply_hdrfix(mjd, hdr=org_image._header)
+
     # get output file path
+    flavor = 'fiberflat' if flavor == 'flat' else flavor
     output_file = path.full('lvm_anc', kind=kind, imagetype=flavor, mjd=mjd,
                             camera=camera, drpver=drpver, expnum=expnum,
                             tileid=tileid)
 
     # header quick check
-    if 'IMAGETYP' not in org_image._header:
+    if 'IMAGETYP' not in hdr:
         log.warning(
             f"header keyword 'IMAGETYP' not found. Assuming IMAGETYP='{flavor}'"
         )
-        org_image._header["IMAGETYP"] = flavor
+        hdr["IMAGETYP"] = flavor
 
     # parse overscan (OS) section:
     # * extract BIASSEC
@@ -2765,8 +2744,8 @@ def preproc_raw_frame(in_image: str, kind: str = 'p', flavor: str = 'bias',
         os_y, os_x = os_bound_y.split(","), os_bound_x.split(",")
         log.info(f"using given overscan region Y = {os_y}, X = {os_x}")
         infer_trimsec = True
-    elif "BIASSEC" in org_image._header:
-        os_x, os_y = org_image._header["BIASSEC"].strip("[]").split(",")
+    elif "BIASSEC" in hdr:
+        os_x, os_y = hdr["BIASSEC"].strip("[]").split(",")
         os_y, os_x = os_y.split(":"), os_x.split(":")
         log.info(
             f"parsed overscan region from 'BIASSEC', Y = {os_y}, X = {os_x}"
@@ -2785,7 +2764,7 @@ def preproc_raw_frame(in_image: str, kind: str = 'p', flavor: str = 'bias',
     if not infer_trimsec:
         try:
             sc_x_i, sc_y_i, sc_x_f, sc_y_f = (
-                org_image._header["TRIMSEC"]
+                hdr["TRIMSEC"]
                 .replace("[", "")
                 .replace("]", "")
                 .split(",")
@@ -2829,7 +2808,7 @@ def preproc_raw_frame(in_image: str, kind: str = 'p', flavor: str = 'bias',
             os_region._data, origin="lower", aspect="auto", norm=norm, cmap=plt.cm.gray
         )
         cb = plt.colorbar(im)
-        ax.set_title(f"{org_image._header.get('BIASSEC') = } -> {os_x}, {os_y}")
+        ax.set_title(f"{hdr.get('BIASSEC') = } -> {os_x}, {os_y}")
         ax.set_xlabel("X (pix)")
         ax.set_ylabel("Y (pix)")
         cb.set_label("counts (ADU)")
