@@ -7,9 +7,28 @@ reduction_steps:
       compute_error: true
       os_bound_y: 1,4080
       os_bound_x: 2044,2077
+      plot_fig: true
     dark:
       unit: electron
       subtract_overscan: true
-      compute_error: false
-      os_bound_y: 5,4077
-      os_bound_x: 2040,2080
+      compute_error: true
+      os_bound_y: 1,4080
+      os_bound_x: 2044,2077
+      plot_fig: true
+  find_peaks_auto:
+    nfibers: 0
+    slice: 1870
+    threshold: 10
+    method: hyperbolic
+    median_box: 5
+    median_cross: 1
+    plot_fig: true
+  trace_peaks:
+    steps: 10
+    coadd: 30
+    threshold_peak: 10
+    max_diff: 2
+    method: hyperbolic
+    median_box: 5
+    median_cross: 1
+    poly_disp: 2
