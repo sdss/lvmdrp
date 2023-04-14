@@ -689,9 +689,9 @@ def addCCDMask_drp(image, mask, replaceError="1e10"):
     img.writeFitsData(image)
 
 
-def find_peaks_auto(in_image: str, out_peaks: str, nfibers: int, disp_axis: str = "X",
-                    threshold: int = 5000, median_box: int = 8, median_cross: int = 1,
-                    slice: str = "", method: str = "gauss", init_sigma: float = 1.0,
+def find_peaks_auto(in_image: str, out_peaks: str, nfibers: int = 0, disp_axis: str = "X",
+                    threshold: int = 1000, median_box: int = 5, median_cross: int = 1,
+                    slice: str = "", method: str = "hyperbolic", init_sigma: float = 1.0,
                     plot_fig: bool = False, show_fig: bool = False):
     """
     Finds the exact subpixel cross-dispersion position of a given number of fibers at a certain dispersion column on the raw CCD frame.
@@ -1206,9 +1206,9 @@ def findPeaksMaster2_drp(
 
 
 def trace_peaks(in_image: str, in_peaks: str, out_trace: str, disp_axis: str = "X",
-                method: str = "gauss", median_box: int = 7, median_cross: int = 1, steps: int = 30,
-                coadd: int = 30, poly_disp: int = -6, init_sigma: float = 1.0,
-                threshold_peak: float = 100.0, max_diff: int = 2, verbose: bool = True):
+                method: str = "hyperbolic", median_box: int = 5, median_cross: int = 1,
+                steps: int = 30, coadd: int = 30, poly_disp: int = -6, init_sigma: float = 1.0,
+                threshold_peak: float = 1000.0, max_diff: int = 2, verbose: bool = True):
     """
     Traces the peaks of fibers along the dispersion axis. The peaks at a specific dispersion
     column had to be determined before. Two scheme of measuring the subpixel peak positionare
@@ -1249,17 +1249,6 @@ def trace_peaks(in_image: str, in_peaks: str, out_trace: str, disp_axis: str = "
     --------
     user:> lvmdrp image tracePeaks IMAGE.fits OUT_PEAKS.txt x method=gauss steps=40 coadd=20 smooth_poly=-8
     """
-
-    # convert all parameters to proper type
-    coadd = int(coadd)
-    poly_disp = int(poly_disp)
-    steps = int(steps)
-    median_box = int(median_box)
-    median_cross = int(median_cross)
-    threshold_peak = float(threshold_peak)
-    max_diff = float(max_diff)
-    init_sigma = float(init_sigma)
-    verbose = bool(verbose)
 
     # load continuum image  from file
     img = loadImage(in_image)
