@@ -4,12 +4,13 @@
 import os
 import pathlib
 from lvmdrp.functions.imageMethod import (preproc_raw_frame, create_master_frame,
-                                          basic_calibration, find_peaks_auto, trace_peaks)
+                                          basic_calibration, find_peaks_auto, trace_peaks,
+                                          extractSpec_drp)
 from lvmdrp.utils.examples import get_frames_metadata
 from lvmdrp import config, log, path, __version__ as drpver
 
 
-def get_config_options(level: str, flavor: str) -> dict:
+def get_config_options(level: str, flavor: str = None) -> dict:
     """ Get the DRP config options
 
     Get the DRP custom configuration options for
@@ -35,7 +36,7 @@ def get_config_options(level: str, flavor: str) -> dict:
     cfg = config.copy()
     for lvl in level.split('.'):
         cfg = cfg.get(lvl, {})
-    return cfg.get(flavor, {})
+    return cfg.get(flavor, {}) if flavor else cfg
 
 
 def create_masters(flavor, frames):
@@ -59,9 +60,11 @@ def create_masters(flavor, frames):
 
         # get the master path
         if flavor == 'bias':
-            master = path.full("lvm_cal_mbias", mjd=mjd, drpver=drpver, camera=camera, tileid=tileid)
+            master = path.full("lvm_cal_mbias", mjd=mjd, drpver=drpver, camera=camera,
+                               tileid=tileid)
         elif flavor == 'dark':
-            master = path.full("lvm_cal_time", kind='mdark', mjd=mjd, drpver=drpver, camera=camera, tileid=tileid, exptime=exptime)
+            master = path.full("lvm_cal_time", kind='mdark', mjd=mjd, drpver=drpver, camera=camera,
+                               tileid=tileid, exptime=exptime)
 
         # create parent directries if need be
         if not pathlib.Path(master).parent.exists():
@@ -69,20 +72,24 @@ def create_masters(flavor, frames):
 
         # create the master frame
         kwargs = get_config_options('reduction_steps.create_master_frame', flavor)
+        log.info(f'custom configuration parameters for create_master_frame: {repr(kwargs)}')
         create_master_frame(in_images=ff, out_image=master, **kwargs)
 
 
 def trace_fibers(in_file, camera, expnum, tileid, mjd):
 
-    out_peaks = path.full("lvm_cal", drpver=drpver, tileid=tileid, mjd=mjd, camera=camera, expnum=expnum, kind='peaks', ext='txt')
-    out_trace = path.full("lvm_cal", drpver=drpver, tileid=tileid, mjd=mjd, camera=camera, expnum=expnum, kind='trace', ext='fits')
+    out_peaks = path.full("lvm_cal", drpver=drpver, tileid=tileid, mjd=mjd, camera=camera,
+                          expnum=expnum, kind='peaks', ext='txt')
+    out_trace = path.full("lvm_cal", drpver=drpver, tileid=tileid, mjd=mjd, camera=camera,
+                          expnum=expnum, kind='trace', ext='fits')
 
-    find_peaks_auto(in_image=in_file, out_peaks=out_peaks, nfibers=0, slice=1870,
-                    threshold=1000, method="gauss", median_box=5, median_cross=1, plot_fig=True)
+    kwargs = get_config_options('reduction_steps.find_peaks_auto')
+    log.info(f'custom configuration parameters for find_peaks_auto: {repr(kwargs)}')
+    find_peaks_auto(in_image=in_file, out_peaks=out_peaks, **kwargs)
 
-    trace_peaks(in_image=in_file, out_trace=out_trace, in_peaks=out_peaks, steps=10,
-                coadd=30, threshold_peak=1000, max_diff=2, method="gauss", median_box=5,
-                median_cross=1, poly_disp=2)
+    kwargs = get_config_options('reduction_steps.trace_peaks')
+    log.info(f'custom configuration parameters for trace_peaks: {repr(kwargs)}')
+    trace_peaks(in_image=in_file, out_trace=out_trace, in_peaks=out_peaks, **kwargs)
 
 
 def reduce_frame(filename: str, camera: str = None, mjd: int = None,
@@ -112,6 +119,7 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
 
     # preprocess the frames
     kwargs = get_config_options('reduction_steps.preproc_raw_frame', flavor)
+    log.info(f'custom configuration parameters for preproc_raw_frame: {repr(kwargs)}')
     preproc_raw_frame(filename, flavor=flavor, kind='p', camera=camera,
                       mjd=mjd, expnum=expnum, tileid=tileid, **kwargs)
 
@@ -121,8 +129,11 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
 
     # check master frames
     mbias = path.full("lvm_cal_mbias", mjd=mjd, drpver=drpver, camera=camera, tileid=tileid)
-    mdark = path.full("lvm_cal_time", kind='mdark', mjd=mjd, drpver=drpver, camera=camera, tileid=tileid, exptime=exptime)
-    if not pathlib.Path(mbias).exists() or not pathlib.Path(mbias).exists():
+    mdark = path.full("lvm_cal_time", kind='mdark', mjd=mjd, drpver=drpver, camera=camera,
+                      tileid=tileid, exptime=300)
+    print('bias', mbias)
+    print('mdark', mdark)
+    if not pathlib.Path(mbias).exists() or not pathlib.Path(mdark).exists():
         raise ValueError('master bias/dark does not exist yet')
 
     # process the flat/arc frames
@@ -132,13 +143,26 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
     out_cal = path.full("lvm_anc", kind='c', imagetype=flavor, mjd=mjd, drpver=drpver,
                         camera=camera, tileid=tileid, expnum=expnum)
 
+    print('p-anc, input', in_cal)
+    print('c-anc, output', out_cal)
     kwargs = get_config_options('reduction_steps.basic_calibration', flavor)
+    log.info(f'custom configuration parameters for basic_calibration: {repr(kwargs)}')
     basic_calibration(in_image=in_cal, out_image=out_cal,
                       in_bias=mbias, in_dark=mdark, **kwargs)
 
     # fiber tracing
     if 'flat' in flavor and not camera.startswith('b') and camera.endswith('1'):
         trace_fibers(out_cal, camera, expnum, tileid, mjd)
+
+    # extract fiber spectra
+    # arc_file = path.full("lvm_anc", kind='c', imagetype='arc', mjd=mjd, drpver=drpver,
+    #                      camera=camera, tileid=tileid, expnum=expnum)
+    # trace_file = path.full("lvm_cal", drpver=drpver, tileid=tileid, mjd=mjd, camera=camera,
+    #                        expnum=expnum, kind='trace', ext='fits')
+    # exarc_file = path.full("lvm_anc", kind='x', imagetype='arc', mjd=mjd, drpver=drpver,
+    #                        camera=camera, tileid=tileid, expnum=expnum)
+    # extractSpec_drp(in_image=arc_file, out_rss=exarc_file, in_trace=trace_file,
+    #                 method="aperture", aperture=4, plot=1, parallel="auto")
 
     # process the science frame
 
