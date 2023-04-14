@@ -31,8 +31,8 @@ __all__ = [
     "extractSpec_drp",
     "subtractBias_drp",
     "preproc_raw_frame",
-    "basicCalibration_drp",
-    "createMasterFrame_drp",
+    "basic_calibration",
+    "create_master_frame",
 ]
 
 
@@ -3012,9 +3012,8 @@ def preproc_raw_frame(in_image: str, kind: str = 'p', flavor: str = 'bias',
     preproc_image.writeFitsData(output_file)
 
 
-def basicCalibration_drp(
-    in_image, out_image, in_bias=None, in_dark=None, in_pixelflat=None
-):
+def basic_calibration(in_image: str, out_image: str, in_bias: str = None, in_dark: str = None,
+                      in_pixelflat: str = None):
     proc_image = loadImage(in_image).convertUnit(unit="electron")
     exptime = proc_image._header["EXPTIME"]
     img_type = proc_image._header["IMAGETYP"].lower()
@@ -3070,9 +3069,8 @@ def basicCalibration_drp(
     calib_image.writeFitsData(out_image)
 
 
-def createMasterFrame_drp(
-    in_images, out_image, reject_cr=False, exptime_thresh=5, **cr_kwargs
-):
+def create_master_frame(in_images: list, out_image: str, reject_cr: bool = False,
+                        exptime_thresh: int = 5, **cr_kwargs):
     """
 
     Combines the given calibration frames (bias, dark, or pixelflat) into a master calibration frame.

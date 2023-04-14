@@ -3,8 +3,8 @@
 
 import os
 import pathlib
-from lvmdrp.functions.imageMethod import (preproc_raw_frame, createMasterFrame_drp,
-                                          basicCalibration_drp, find_peaks_auto, trace_peaks)
+from lvmdrp.functions.imageMethod import (preproc_raw_frame, create_master_frame,
+                                          basic_calibration, find_peaks_auto, trace_peaks)
 from lvmdrp.utils.examples import get_frames_metadata
 from lvmdrp import config, log, path, __version__ as drpver
 
@@ -69,7 +69,7 @@ def create_masters(flavor, frames):
 
         # create the master frame
         kwargs = get_config_options('reduction_steps.create_master_frame', flavor)
-        createMasterFrame_drp(in_images=ff, out_image=master, **kwargs)
+        create_master_frame(in_images=ff, out_image=master, **kwargs)
 
 
 def trace_fibers(in_file, camera, expnum, tileid, mjd):
@@ -82,7 +82,7 @@ def trace_fibers(in_file, camera, expnum, tileid, mjd):
 
     trace_peaks(in_image=in_file, out_trace=out_trace, in_peaks=out_peaks, steps=10,
                 coadd=30, threshold_peak=1000, max_diff=2, method="gauss", median_box=5,
-                median_cross=1, plot_fig=False, poly_disp=2)
+                median_cross=1, poly_disp=2)
 
 
 def reduce_frame(filename: str, camera: str = None, mjd: int = None,
@@ -133,8 +133,8 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
                         camera=camera, tileid=tileid, expnum=expnum)
 
     kwargs = get_config_options('reduction_steps.basic_calibration', flavor)
-    basicCalibration_drp(in_image=in_cal, out_image=out_cal,
-                         in_bias=mbias, in_dark=mdark, **kwargs)
+    basic_calibration(in_image=in_cal, out_image=out_cal,
+                      in_bias=mbias, in_dark=mdark, **kwargs)
 
     # fiber tracing
     if 'flat' in flavor and not camera.startswith('b') and camera.endswith('1'):
