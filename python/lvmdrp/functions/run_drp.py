@@ -5,7 +5,7 @@ import os
 import pathlib
 from lvmdrp.functions.imageMethod import (preproc_raw_frame, create_master_frame,
                                           basic_calibration, find_peaks_auto, trace_peaks,
-                                          extractSpec_drp)
+                                          extract_spectra)
 from lvmdrp.functions.rssMethod import (detWaveSolution_drp, createPixTable_drp, resampleWave_drp)
 from lvmdrp.utils.examples import get_frames_metadata
 from lvmdrp import config, log, path, __version__ as drpver
@@ -37,7 +37,7 @@ def get_config_options(level: str, flavor: str = None) -> dict:
     cfg = config.copy()
     for lvl in level.split('.'):
         cfg = cfg.get(lvl, {})
-    return cfg.get(flavor, {}) if flavor else cfg
+    return cfg.get(flavor, {}) if flavor else cfg.get("default", cfg)
 
 
 def create_masters(flavor, frames):
@@ -179,8 +179,7 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
     print('xfile', xout_file)
     kwargs = get_config_options('reduction_steps.extract_spectra', flavor)
     log.info(f'custom configuration parameters for extract_spectra: {repr(kwargs)}')
-    extractSpec_drp(in_image=cal_file, out_rss=xout_file, in_trace=trace_file,
-                    method="aperture", aperture=4, plot=1, parallel="auto", **kwargs)
+    extract_spectra(in_image=cal_file, out_rss=xout_file, in_trace=trace_file, **kwargs)
 
     # determine the wavelength solution
     if flavor == 'arc':

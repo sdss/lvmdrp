@@ -1561,7 +1561,7 @@ class Image(Header):
             mask[:, i] = bad_pix[:, i]
         return data, error, mask
 
-    def extractSpecOptimal(self, TraceMask, TraceFWHM, plot=-1):
+    def extractSpecOptimal(self, TraceMask, TraceFWHM, plot_fig=False):
         data = numpy.zeros((TraceMask._fibers, self._dim[1]), dtype=numpy.float32)
         if self._error is not None:
             error = numpy.zeros((TraceMask._fibers, self._dim[1]), dtype=numpy.float32)
@@ -1586,14 +1586,8 @@ class Image(Header):
             select_nan = numpy.isnan(slice_img._data)
             slice_img._data[select_nan] = 0
             indices = numpy.indices((self._dim[0], numpy.sum(good_fiber)))
-            if i == plot:
-                result = slice_img.obtainGaussFluxPeaks(
-                    trace[good_fiber], fwhm[good_fiber], indices, plot=True
-                )
-            else:
-                result = slice_img.obtainGaussFluxPeaks(
-                    trace[good_fiber], fwhm[good_fiber], indices, plot=False
-                )
+            result = slice_img.obtainGaussFluxPeaks(
+                trace[good_fiber], fwhm[good_fiber], indices, plot=plot_fig)
             data[good_fiber, i] = result[0]
             if self._error is not None:
                 error[good_fiber, i] = result[1]

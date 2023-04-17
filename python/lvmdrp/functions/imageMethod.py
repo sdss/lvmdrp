@@ -28,7 +28,7 @@ __all__ = [
     "trace_peaks",
     "subtractStraylight_drp",
     "traceFWHM_drp",
-    "extractSpec_drp",
+    "extract_spectra",
     "subtractBias_drp",
     "preproc_raw_frame",
     "basic_calibration",
@@ -2121,18 +2121,9 @@ def offsetTrace2_drp(
 # it might be better in dealing with cross-talk
 # TODO:
 # * define lvm-frame ancillary product to replace for out_rss
-def extractSpec_drp(
-    in_image,
-    out_rss,
-    in_trace,
-    method="optimal",
-    aperture="7",
-    fwhm="2.5",
-    disp_axis="X",
-    replace_error="1e10",
-    plot="-1",
-    parallel="auto",
-):
+def extract_spectra(in_image: str, out_rss: str, in_trace: str, method: str = "optimal",
+                    aperture: int = 7, fwhm: float = 2.5, disp_axis: str = "X",
+                    replace_error: float = 1.e10, plot_fig: bool = False, parallel: str = "auto"):
     """
     Extracts the flux for each fiber along the dispersion direction which is written into an RSS FITS file format.
     Either a simple aperture or an optimal extraction scheme may be used.
@@ -2169,10 +2160,7 @@ def extractSpec_drp(
     user:> lvmdrp image extractSpec IMAGE.fits TRACE.fits RSS.fits optimal fwhm=FWHM.fits
     """
 
-    aperture = int(aperture)
-    replace_error = float(replace_error)
     img = loadImage(in_image)
-    plot = int(plot)
 
     # orient image so that the cross-dispersion is along the first and the dispersion is along the second array axis
     if disp_axis == "X" or disp_axis == "x":
@@ -2227,7 +2215,7 @@ def extractSpec_drp(
                 mask = None
         else:
             (data, error, mask) = img.extractSpecOptimal(
-                trace_mask, trace_fwhm, plot=plot
+                trace_mask, trace_fwhm, plot_fig=plot_fig
             )
     elif method == "aperture":
         (data, error, mask) = img.extractSpecAperture(trace_mask, aperture)
