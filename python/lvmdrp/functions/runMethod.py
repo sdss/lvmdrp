@@ -154,7 +154,6 @@ def _get_path_from_bp(bp_name):
 
 
 def metadataCaching_drp(path, observatory, mjd, overwrite="0"):
-
     """caches the header metadata into a HD5 table given a target MJD
 
     this task will write an HD5 table where the quick data reduction
@@ -196,7 +195,7 @@ def metadataCaching_drp(path, observatory, mjd, overwrite="0"):
     # get existing metadata
     if str(mjd) in store[observatory]:
         metadata_old = pd.DataFrame(store[observatory][str(mjd)][()])
-        metadata_old.set_index(["mjd", "camera", "expnum"], inplace=True)
+        metadata_old.set_index(["mjd", "ccd", "expnum"], inplace=True)
     else:
         metadata_old = pd.DataFrame()
 
@@ -220,7 +219,7 @@ def metadataCaching_drp(path, observatory, mjd, overwrite="0"):
 
     logger.info(
         (
-            f"found {ntotal_frames}, skipping {ntotal_frames-nfilter_frames} "
+            f"found new {ntotal_frames}, skipping {ntotal_frames-nfilter_frames} "
             f"({(ntotal_frames-nfilter_frames)/ntotal_frames*100:g} %) "
             "already present in store"
         )
@@ -239,19 +238,19 @@ def metadataCaching_drp(path, observatory, mjd, overwrite="0"):
         ascii=True,
         unit="file",
     )
-    for i, (frame_path, (mjd, camera, expnum)) in iterator:
+    for i, (frame_path, (mjd, ccd, expnum)) in iterator:
         header = fits.getheader(frame_path, ext=0)
         imagetyp = header.get("FLAVOR", header.get("IMAGETYP"))
-        spec = int(camera[-1])
+        spec = int(ccd[-1])
         exptime = header["EXPTIME"]
 
-        metadata[i] = [mjd, camera, expnum, imagetyp, spec, exptime, frame_path]
+        metadata[i] = [mjd, ccd, expnum, imagetyp, spec, exptime, frame_path]
 
     # set index
     metadata = pd.DataFrame.from_dict(metadata, orient="index")
     metadata.columns = [
         "mjd",
-        "camera",
+        "ccd",
         "expnum",
         "imagetyp",
         "spec",
