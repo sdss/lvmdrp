@@ -177,8 +177,10 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
     if not trace_file:
         return
     print('xfile', xout_file)
+    kwargs = get_config_options('reduction_steps.extract_spectra', flavor)
+    log.info(f'custom configuration parameters for extract_spectra: {repr(kwargs)}')
     extractSpec_drp(in_image=cal_file, out_rss=xout_file, in_trace=trace_file,
-                    method="aperture", aperture=4, plot=1, parallel="auto")
+                    method="aperture", aperture=4, plot=1, parallel="auto", **kwargs)
 
     # determine the wavelength solution
     if flavor == 'arc':
@@ -187,9 +189,11 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
         lsf_file = path.expand('lvm_cal', kind='lsf', drpver=drpver, mjd=mjd, tileid=tileid,
                                camera=camera, expnum=expnum, ext='fits')
         line_ref = pathlib.Path(__file__).parent.parent / f"etc/lvm-neon_nist_{camera}.txt"
+        kwargs = get_config_options('reduction_steps.determine_wave_solution')
+        log.info(f'custom configuration parameters for determine_wave_solution: {repr(kwargs)}')
         detWaveSolution_drp(in_arc=xout_file, out_wave=wave_file, out_lsf=lsf_file,
                             in_ref_lines=line_ref, ref_fiber=319, poly_dispersion=5,
-                            poly_fwhm='2,5', aperture=13, plot=2)
+                            poly_fwhm='2,5', aperture=13, plot=2, **kwargs)
 
     # create pixel table
     wave_file = find_file('wave', mjd=mjd, tileid=tileid, camera=camera)
@@ -205,10 +209,11 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
     # resample wavelength
     hout_file = path.full("lvm_anc", kind='h', imagetype=flavor, mjd=mjd, drpver=drpver,
                           camera=camera, tileid=tileid, expnum=expnum)
-
+    kwargs = get_config_options('reduction_steps.resample_wave', flavor)
+    log.info(f'custom configuration parameters for resample_wave: {repr(kwargs)}')
     resampleWave_drp(in_rss=wout_file, out_rss=hout_file, start_wave=wave_range[0],
                      end_wave=wave_range[1], disp_pix=1.0, method="linear", err_sim=10,
-                     parallel="auto", extrapolate=True)
+                     parallel="auto", extrapolate=True, **kwargs)
 
     # process the science frame
 
