@@ -65,18 +65,50 @@ def read_hdrfix_file(mjd: int) -> pd.DataFrame:
         return pd.json_normalize(yaml.safe_load(f)['fixes'])
 
 
-def write_hdrfix_file(mjd: int):
+def write_hdrfix_file(mjd: int, fileroot: str, keyword: str, value: str):
+    """ Write or update a new header fix file
+
+    Write a new, or update an existing, header fix file. For the given
+    input MJD, add a new header fix entry for the given ``fileroot`` frame
+    match pattern, and new header ``keyword`` and ``value``.
+
+    Parameters
+    ----------
+    mjd : int
+        The MJD to update or write
+    fileroot : str
+        The fileroot pattern
+    keyword : str
+        The header keyword to add
+    value : str
+        The new value of the header key
+    """
     # get the file path
     path = get_hdrfix_path(mjd)
     if not path.parent.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
 
-    #data = df.to_dict(orient='records')
-    data = {}
+    fix = read_hdrfix_file(mjd)
+    if fix is None or fix.empty:
+        fix = pd.DataFrame.from_dict([{'fileroot': fileroot, 'keyword': keyword, 'value': value}])
+    else:
+        fix.loc[len(fix)] = {'fileroot': fileroot, 'keyword': keyword, 'value': value}
+
+    # get schema
+    schema = [{'name': 'fileroot', 'dtype': 'str',
+               'description': 'the raw frame file root with * as wildcard'},
+              {'name': 'keyword', 'dtype': 'str',
+               'description': 'the name of the header keyword to fix'},
+              {'name': 'value', 'dtype': 'str',
+               'description': 'the value of the header keyword to update'}]
+
+    # get data
+    data = fix.to_dict(orient='records')
+    data = {'schema': schema, 'fixes': data}
 
     # write the file
-    with open(path, 'w') as f:
-        f.write(yaml.safe_dump(data))
+    with open(path, 'w+') as f:
+        f.write(yaml.safe_dump(data, sort_keys=False, indent=2))
 
 
 def apply_hdrfix(mjd: int, camera: str = None, expnum: int = None,
