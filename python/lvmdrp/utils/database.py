@@ -8,30 +8,19 @@
 
 import datetime as dt
 import os
-import pickle
-from sqlite3 import Error
+import h5py
 
 import numpy as np
-from astropy.io import fits
+import pandas as pd
 from astropy.table import Table
 from lvmsurveysim.utils.sqlite2astropy import *
 from peewee import *
 from tqdm import tqdm
 
-from lvmdrp.core.constants import (
-    CALIBRATION_TYPES,
-    CONFIG_PATH,
-    FRAMES_CALIB_NEEDS,
-    FRAMES_PRIORITY,
-)
-from lvmdrp.utils.bitmask import QualityFlag, ReductionStage, ReductionStatus
+from lvmdrp.utils.logger import get_logger
 
 
-SQLITE_MAX_VARIABLE_NUMBER = 32766
-# TODO:
-#   - add frame regions (overscan, prescan, science) to check if those are correct
-# TODO: add table for DRP products, from preprocessed frames to final science-ready frames
-# TODO: add weather table for data quality monitoring purposes
+logger = get_logger(__name__)
 
 db = SqliteDatabase(None)
 
@@ -59,275 +48,73 @@ class StatusField(IntegerField):
     def python_value(self, db_val):
         return ReductionStatus(db_val)
 
+def get_raws_metadata(
+    path,
+    observatory="lco",
+    imagetyp=None,
+    mjd=None,
+    expnum=None,
+    spec=None,
+    ccd=None,
+):
+    """return raw frames metadata from precached HDF5 store
 
-class StageField(IntegerField):
-    def db_value(self, status_val):
-        if not isinstance(status_val, ReductionStage):
-            raise TypeError(
-                f"Wrong type '{type(status_val)}', '{ReductionStage}' instance expected"
-            )
-        return super().adapt(status_val.value)
+    Parameters
+    ----------
+    path : str
+        path where the raw frames are located
+    observatory : str
+        observatory where the data was observed
+    imagetyp : str, optional
+        type/flavor of frame to locate`IMAGETYP`, by default None
+    mjd : int, optional
+        MJD where the target frames is located, by default None
+    expnum : str, optional
+        zero-padded exposure number of the target frames, by default None
+    spec : int, optional
+        spectrograph of the target frames, by default None
+    ccd : str, optional
+        CCD ID of the target frames, by default None
+    """
 
-    def python_value(self, db_val):
-        return ReductionStage(db_val)
+    logger.info(f"loading store from '{path}'")
+    metadata_path = os.path.join(path, "metadata.hdf5")
 
+    store = h5py.File(metadata_path, "r")
+    dataset = store[observatory]
 
-class BaseModel(Model):
-    class Meta:
-        database = db
-        only_save_dirty = True
-
-
-class BasicMixin(Model):
-    datetime = DateTimeField(default=dt.datetime.now)
-    mjd = IntegerField(null=True)
-    spec = CharField(null=True)
-    camera = CharField(null=True)
-    exposure = IntegerField(null=True)
-    exptime = FloatField(null=True)
-    imagetyp = CharField(null=True)
-    obstime = DateTimeField(null=True)
-    observat = CharField(null=True)
-    hemi = CharField(null=True)
-    label = CharField(null=True)
-    path = CharField(null=True)
-    naxis1 = IntegerField(null=True)
-    naxis2 = IntegerField(null=True)
-
-
-class LabMixin(Model):
-    ccdtemp1 = FloatField(null=True)
-    ccdtemp2 = FloatField(null=True)
-    presure = FloatField(null=True)
-    labtemp = FloatField(null=True)
-    labhumid = FloatField(null=True)
-
-
-class ArcMixin(Model):
-    argon = BooleanField(default=False)
-    xenon = BooleanField(default=False)
-    hgar = BooleanField(default=False)
-    krypton = BooleanField(default=False)
-    neon = BooleanField(default=False)
-    hgne = BooleanField(default=False)
-
-
-class ContMixin(Model):
-    m625l4 = BooleanField(default=False)
-    ffs = BooleanField(default=False)
-    mi150 = BooleanField(default=False)
-    ts = BooleanField(default=False)
-    ldls = BooleanField(default=False)
-    nirled = BooleanField(default=False)
-
-
-class StatusMixin(Model):
-    reduction_started = DateTimeField(null=True)
-    reduction_finished = DateTimeField(null=True)
-    stage = StageField(default=ReductionStage.UNREDUCED)
-    status = StatusField(default=0)
-    flags = FlagsField(default=0)
-
-
-# TODO:
-#   - turn this into a master calibration frame
-#   - store normal calibration frames in 'lvm_frames' table
-class CalibrationFrames(BaseModel, StatusMixin):
-    id = IntegerField(primary_key=True)
-    label = CharField(null=True)
-    path = CharField(null=True)
-    is_master = BooleanField(default=False)
-
-    class Meta:
-        table_name = "calibration_frames"
-
-
-class LVMFrames(BaseModel, BasicMixin, LabMixin, ArcMixin, ContMixin, StatusMixin):
-    id = IntegerField(primary_key=True)
-    calib = ForeignKeyField(CalibrationFrames, backref="frames", null=True)
-
-    class Meta:
-        table_name = "lvm_frames"
-
-
-# define auto columns
-AUTO_COLUMNS = ["id", "calib", "datetime"]
-# define mandatory columns
-MANDATORY_COLUMNS = [
-    name for name in BasicMixin._meta.columns if name not in AUTO_COLUMNS
-]
-# define raw columns excluding auto columns
-FRAME_COLUMNS = [name for name in LVMFrames._meta.columns if name not in AUTO_COLUMNS]
-# define arc/continuum names using peewee model definitions
-ARC_NAMES = list(ArcMixin._meta.columns.keys())
-CON_NAMES = list(ContMixin._meta.columns.keys())
-ARC_NAMES.remove("id")
-CON_NAMES.remove("id")
-LAMP_NAMES = ARC_NAMES + CON_NAMES
-# define calibration table columns excluding auto columns
-CALIBRATION_COLUMNS = [
-    name for name in CalibrationFrames._meta.columns if name not in AUTO_COLUMNS
-]
-
-
-def create_or_connect_db(config):
-    try:
-        db.init(os.path.join(CONFIG_PATH, config.LVM_DB_NAME))
-        db.connect()
-        db.create_tables([LVMFrames, CalibrationFrames])
-    except Error as e:
-        print(e)
-    return db
-
-
-def delete_tables_db(config):
-    try:
-        db.init(os.path.join(CONFIG_PATH, config.LVM_DB_NAME))
-        db.connect()
-        db.drop_tables([LVMFrames, CalibrationFrames])
-    except Error as e:
-        print(e)
-    return None
-
-
-def delete_db(config):
-    os.remove(os.path.join(CONFIG_PATH, config.LVM_DB_NAME))
-    return None
-
-
-def record_db(config, target_paths=None, ignore_cache=False):
-    if target_paths is None:
-        target_paths = config.RAW_DATA_PATHS
-    # extract records from frames header
-    if os.path.isfile(config.DB_PATH) and not ignore_cache:
-        metadata = pickle.load(open(config.DB_PATH, "rb"))
-        with db.atomic():
-            for i, batch in enumerate(
-                chunked(metadata, n=SQLITE_MAX_VARIABLE_NUMBER // len(metadata[0]))
-            ):
-                try:
-                    LVMFrames.insert_many(batch).execute()
-                except Error as e:
-                    print(e)
-                    print(f"in chunk={i}, {batch}")
+    # extract MJD if given, else extract all MJDs
+    if mjd is not None:
+        metadata = pd.DataFrame(dataset[str(mjd)][()])
     else:
         metadata = []
-        for target_path in target_paths:
-            for root, _, frames in os.walk(target_path):
-                tqdm.write(f"exploring path '{os.path.basename(root)}'")
-                for frame in tqdm(
-                    frames,
-                    total=len(frames),
-                    desc="extracting metadata",
-                    ascii=True,
-                    unit="frame",
-                ):
-                    new_frame_path = os.path.join(root, frame)
-                    new_frame_label = frame.replace(".fits.gz", "")
-                    if frame.endswith(".fits.gz"):
-                        # NOTE: remove this once testing is finished
-                        # if len(metadata) >= 1000: break
-                        try:
-                            header = fits.getheader(new_frame_path, ext=0)
-                        except OSError as e:
-                            print(f"{new_frame_path}: {e}")
-                            continue
-                        # update/add metadata keywords
-                        for key in LAMP_NAMES:
-                            header[key] = True if header.get(key) == "ON" else False
+        for mjd in dataset.keys():
+            metadata.append(dataset[mjd])
+        metadata = pd.DataFrame(np.concatenate(metadata, axis=0))
+    # close store
+    store.close()
 
-                        # BUG: fix imagetyp key because the header is messed up. This will be done only for lab data (hopefully!)
-                        if header.get("IMAGETYP") and header["IMAGETYP"] in [
-                            "continuum",
-                            "arc",
-                            "object",
-                        ]:
-                            lamps = [lamp for lamp in LAMP_NAMES if header[lamp]]
-                            if lamps:
-                                has_cont = np.isin(CON_NAMES, lamps)
-                                has_arcs = np.isin(ARC_NAMES, lamps)
-                                if (
-                                    header["IMAGETYP"] == "continuum"
-                                    or has_cont.any()
-                                    or has_arcs.all()
-                                ):
-                                    header["IMAGETYP"] = "continuum"
-                                elif header["IMAGETYP"] == "arc" or (
-                                    not has_cont.any()
-                                    and has_arcs.any()
-                                    and not has_arcs.all()
-                                ):
-                                    header["IMAGETYP"] = "arc"
-                                else:
-                                    raise ValueError(
-                                        f"unrecognized case for lamps: '{lamps}'."
-                                    )
-                            else:
-                                header["IMAGETYP"] = "object"
+    logger.info(f"found {len(metadata)} frames in store")
 
-                        header["LABEL"] = new_frame_label
-                        header["PATH"] = new_frame_path
-                        header["STAGE"] = ReductionStage.UNREDUCED
-                        header["STATUS"] = 0
-                        header["FLAGS"] = 0
+    # filter by exposure number, spectrograph and/or CCD
+    query = []
+    if spec is not None:
+        logger.info(f"filtering by {spec = }")
+        query.append("spec == @spec")
+    if expnum is not None:
+        logger.info(f"filtering by {expnum = }")
+        query.append("expnum == @expnum")
+    if ccd is not None:
+        logger.info(f"filtering by {ccd = }")
+        query.append("ccd == @ccd")
 
-                        record = {
-                            key: header.get(key, LVMFrames._meta.columns[key].default)
-                            for key in FRAME_COLUMNS
-                        }
-                        # update hemisphere field
-                        record["hemi"] = "s" if record["observat"] == "LCO" else "n"
-                        # update status in case there are missing metadata with the exception of those fields that are allowed to be NULL
-                        # nonnull_values = [record[name] for name in MANDATORY_COLUMNS]
-                        # record["flags"] += "MISSING_METADATA" if None in nonnull_values else "OK"
-                        # append to list for cache
-                        metadata.append(record)
-        # store cache
-        pickle.dump(metadata, open(config.DB_PATH, "wb"))
-        # add record to DB
-        with db.atomic():
-            for i, batch in enumerate(
-                chunked(metadata, n=SQLITE_MAX_VARIABLE_NUMBER // len(metadata[0]))
-            ):
-                try:
-                    LVMFrames.insert_many(batch).execute()
-                except Error as e:
-                    print(e)
-                    print(f"in chunk={i}, {batch}")
-    return None
+    if query:
+        query = " | ".join(query)
+        metadata.query(query, inplace=True)
 
+    logger.info(f"final number of frames after filtering {len(metadata)}")
 
-def get_raws_metadata(imagetyp=None, mjd=None, exposure=None, spec=None, camera=None):
-    try:
-        priority = Case(
-            LVMFrames.imagetyp,
-            tuple((frame_type, i) for i, frame_type in enumerate(FRAMES_PRIORITY)),
-        )
-        query = (
-            LVMFrames.select()
-            .where(
-                (LVMFrames.status == ReductionStage.UNREDUCED)
-                & (LVMFrames.imagetyp << FRAMES_PRIORITY)
-            )
-            .order_by(priority)
-        )
-
-        # filter by MJD if present
-        if imagetyp is not None and imagetyp in FRAMES_PRIORITY:
-            query = query.where(LVMFrames.imagetyp == imagetyp)
-        if mjd is not None:
-            query = query.where(LVMFrames.mjd == mjd)
-        if exposure is not None:
-            query = query.where(LVMFrames.exposure == exposure)
-        if spec is not None and camera is None:
-            query = query.where(LVMFrames.spec == spec)
-        if camera is not None:
-            query = query.where(LVMFrames.camera == camera)
-    except Error as e:
-        print(e)
-
-    new_frames = [new_frame for new_frame in query]
-    return new_frames
+    return metadata
 
 
 def get_calib_metadata():

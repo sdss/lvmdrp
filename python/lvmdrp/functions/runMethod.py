@@ -306,7 +306,7 @@ def prepCalib_drp(
     path,
     calib_type,
     mjd=None,
-    exposure=None,
+    expnum=None,
     spec=None,
     ccd=None,
     calib_config="lvm_{imagetyp}_config",
@@ -325,7 +325,7 @@ def prepCalib_drp(
         frame type corresponding to a calibration frame
     mjd : int, optional
         MJD of the target calibration frame(s), by default None
-    exposure : int, optional
+    expnum : int, optional
         exposure number of the target calibration frame(s), by default None
     spec : str, optional
         spectrograph of the target calibration frame(s) (e.g., spec1), by default None
@@ -347,8 +347,8 @@ def prepCalib_drp(
     db.create_or_connect_db(master_config)
 
     # get target calibration frames from DB
-    calib_frames = db.get_raws_metadata_where(
-        imagetyp=calib_type, mjd=mjd, exposure=exposure, spec=spec, ccd=ccd
+    calib_frames = db.get_raws_metadata(
+        path=path, imagetyp=calib_type, mjd=mjd, expnum=expnum, spec=spec, ccd=ccd
     )
     # create preproc configuration files
     for calib_frame in calib_frames:
