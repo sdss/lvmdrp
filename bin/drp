@@ -16,9 +16,13 @@ def cli():
 
 @cli.command('run', short_help='run the drp end-to-end')
 @click.option('-m', '--mjd', type=int, help='an MJD to reduce', required=True)
-@click.option('--bias', is_flag=True, default=False, help='Flag to only reduce bias frames')
-def run(mjd, bias):
-    run_drp(mjd=mjd, bias=bias)
+@click.option('--skip-bp', is_flag=True, default=False, help='Flag to only skip bias/dark reduction')
+@click.option('--arc', is_flag=True, default=False, help='Flag to only reduce arc frames')
+@click.option('--flat', is_flag=True, default=False, help='Flag to only reduce flat frames')
+@click.option('--only-cal', is_flag=True, default=False, help='Flag to only reduce calibration frames')
+@click.option('--only-sci', is_flag=True, default=False, help='Flag to only reduce science frames')
+def run(mjd, skip_bp, arc, flat, only_cal, only_sci):
+    run_drp(mjd=mjd, flat=flat, arc=arc, skip_bp=skip_bp, only_cal=only_cal, only_sci=only_sci)
 
 
 @cli.command('preprocess', short_help='preprocess raw frames')
