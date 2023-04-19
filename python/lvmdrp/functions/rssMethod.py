@@ -30,7 +30,7 @@ from lvmdrp import log
 description = "Provides Methods to process Row Stacked Spectra (RSS) files"
 
 __all__ = [
-    "detWaveSolution_drp",
+    "determine_wavelength_solution",
     "createPixTable_drp",
     "checkPixTable_drp",
     "correctPixTable_drp",
@@ -80,27 +80,14 @@ def mergeRSS_drp(files_in, file_out, mergeHdr="1"):
 # * define ancillary product lvm-arc (rss arc) for replace arc_rss
 # * define ancillary product lvm-wave to contain wavelength solutions
 # * merge disp_rss and res_rss products into lvmArc product, change variable to out_arc
-def detWaveSolution_drp(
-    in_arc,
-    out_wave,
-    out_lsf,
-    in_ref_lines="",
-    ref_fiber="",
-    pixel="",
-    ref_lines="",
-    poly_dispersion="-5",
-    poly_fwhm="-3,-5",
-    init_back="10.0",
-    aperture="13",
-    flux_min="200.0",
-    fwhm_max="10.0",
-    rel_flux_limits="0.1,5.0",
-    fiberflat="",
-    negative=False,
-    cc_correction=True,
-    plot="2",
-    figure_path=".figures",
-):
+def determine_wavelength_solution(in_arc: str, out_wave: str, out_lsf: str, in_ref_lines: str = "",
+                                  ref_fiber: str = "", pixel: str = "", ref_lines: str = "",
+                                  poly_dispersion: int = -5, poly_fwhm: list = [-3, -5],
+                                  init_back: float = 10.0, aperture: int = 13,
+                                  flux_min: float = 200.0, fwhm_max: float = 10.0,
+                                  rel_flux_limits: list = [0.1, 5.0], fiberflat: str = "",
+                                  negative: bool = False, cc_correction: bool = True,
+                                  plot_fig: bool = False, show_fig: bool = False):
     """
     Solves for the wavelength and the LSF using polynomial fitting
 
@@ -170,17 +157,7 @@ def detWaveSolution_drp(
     """
 
     # convert parameters to the correct type
-    flux_min = float(flux_min)
-    fwhm_max = float(fwhm_max)
-    init_back = float(init_back)
-    aperture = float(aperture)
-    poly_dispersion = int(poly_dispersion)
-    poly_fwhm_cross = int(poly_fwhm.split(",")[0])
-    poly_fwhm_disp = int(poly_fwhm.split(",")[1])
-    limits = rel_flux_limits.split(",")
-    rel_flux_limits = [float(limits[0]), float(limits[1])]
-    negative = bool(negative)
-    plot = int(plot)
+    poly_fwhm_cross, poly_fwhm_disp = poly_fwhm
 
     if fiberflat != "":
         fiberflat = fiberflat.split(",")
@@ -235,7 +212,7 @@ def detWaveSolution_drp(
         shift = 0
 
     # plot if requested
-    if plot:
+    if plot_fig:
         fig, axs = plt.subplots(3, 1, figsize=(25, 15))
         axs = numpy.append(axs, axs[2].twinx())
         for pix in pixel:
@@ -326,13 +303,23 @@ def detWaveSolution_drp(
         )
         fwhm_med = ndimage.filters.median_filter(numpy.fabs(fwhm[select, i]), 4)
         if poly_fwhm_cross > 0:
-            poly = polynomial.Polynomial.fit(
-                fibers[select], fwhm_med, deg=poly_fwhm_cross
-            )
+            msg = f'Failed to fit poly for arc line {i}'
+            try:
+                poly = polynomial.Polynomial.fit(fibers[select], fwhm_med, deg=poly_fwhm_cross)
+            except ValueError as e:
+                log.error(f'{msg}: {e}')
+                continue
+            except numpy.linalg.LinAlgError as e:
+                log.error(f'{msg}: {e}')
         elif poly_fwhm_cross < 0:
-            poly = polynomial.Legendre.fit(
-                fibers[select], fwhm_med, deg=-1 * poly_fwhm_cross
-            )
+            msg = f'Failed to fit legendre for arc line {i}'
+            try:
+                poly = polynomial.Legendre.fit(fibers[select], fwhm_med, deg=-1 * poly_fwhm_cross)
+            except ValueError as e:
+                log.error(f'{msg}: {e}')
+                continue
+            except numpy.linalg.LinAlgError as e:
+                log.error(f'{msg}: {e}')
 
         fwhm[:, i] = poly(fibers)
 
@@ -375,7 +362,7 @@ def detWaveSolution_drp(
         f"finished wavelength fitting with median RMS = {numpy.median(wave_rms):g} AA"
     )
 
-    if plot:
+    if plot_fig:
         axs[1].axhline(len(ref_lines), ls="--", color="0.2", lw=1)
         axs[1].bar(fibers, nmasked, color="tab:blue")
         axs[1].set_xlabel("fiber ID")
@@ -433,7 +420,7 @@ def detWaveSolution_drp(
         f"finished LSF fitting with median RMS = {numpy.median(fwhm_rms):g} AA"
     )
 
-    if plot:
+    if plot_fig:
         axs[3].fill_between(
             arc._pixels,
             fwhm_sol.mean(0) - fwhm_sol.std(0),
@@ -460,11 +447,11 @@ def detWaveSolution_drp(
         )
 
         fig.tight_layout()
-        if plot == 1:
+        if show_fig == 1:
             plt.show()
         else:
             save_fig(
-                fig, output_path=out_wave, figure_path=figure_path, label="fit_wave"
+                fig, output_path=out_wave, figure_path="qa", label="fit_wave"
             )
 
     # update header
