@@ -96,7 +96,7 @@ def get_raws_metadata(
     mjd=None,
     expnum=None,
     spec=None,
-    ccd=None,
+    camera=None,
 ):
     """return raw frames metadata from precached HDF5 store
 
@@ -112,8 +112,8 @@ def get_raws_metadata(
         zero-padded exposure number of the target frames, by default None
     spec : int, optional
         spectrograph of the target frames, by default None
-    ccd : str, optional
-        CCD ID of the target frames, by default None
+    camera : str, optional
+        camera ID of the target frames, by default None
     """
 
     store = load_or_create_store(observatory=observatory)
@@ -131,7 +131,7 @@ def get_raws_metadata(
 
     logger.info(f"found {len(metadata)} frames in store")
 
-    # filter by exposure number, spectrograph and/or CCD
+    # filter by exposure number, spectrograph and/or camera
     query = []
     if spec is not None:
         logger.info(f"filtering by {spec = }")
@@ -139,9 +139,9 @@ def get_raws_metadata(
     if expnum is not None:
         logger.info(f"filtering by {expnum = }")
         query.append("expnum == @expnum")
-    if ccd is not None:
-        logger.info(f"filtering by {ccd = }")
-        query.append("ccd == @ccd")
+    if camera is not None:
+        logger.info(f"filtering by {camera = }")
+        query.append("camera == @camera")
 
     if query:
         query = " and ".join(query)

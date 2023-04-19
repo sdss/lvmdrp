@@ -13,7 +13,7 @@ The frame(s) can be targeted using a number of parameters:
     * MJD
     * exposure number
     * spectrograph
-    * CCD / camera
+    * camera
 
 and for each target frame a configuration file will be written specifying the
 corresponding reduction steps. Such steps will depend on the type of frame
@@ -148,7 +148,7 @@ def _get_path_from_bp(bp_name):
     loc = os.path.expandvars(bp["location"])
     name = bp["naming_convention"].split(",")[0]
     dataproduct_path = os.path.join(loc, name).replace("[", "{").replace("]", "}")
-    kws_path = re.findall(r"\{(\w+)\}", name)
+    kws_path = re.findall(r"\{(\w+)\}", dataproduct_path)
 
     return dataproduct_path, kws_path
 
@@ -194,7 +194,7 @@ def metadataCaching_drp(observatory, mjd, overwrite="0"):
             (frame_path, index)
             for frame_path, index in filter(
                 lambda x: list(map(lambda s: s.encode("utf-8"), x[1]))
-                not in metadata_old[["mjd", "ccd", "expnum"]].values,
+                not in metadata_old[["mjd", "camera", "expnum"]].values,
                 zip(frames_paths, frames_indices),
             )
         ]
@@ -223,14 +223,15 @@ def metadataCaching_drp(observatory, mjd, overwrite="0"):
         ascii=True,
         unit="file",
     )
-    for i, (frame_path, (mjd, ccd, expnum)) in iterator:
+    for i, (frame_path, (mjd, camera, expnum)) in iterator:
         header = fits.getheader(frame_path, ext=0)
         row = [
             mjd,
-            ccd,
+            "s",
+            camera,
             expnum,
             header.get("IMAGETYP"),
-            int(ccd[-1]),
+            int(camera[-1]),
             header.get("EXPTIME"),
             QualityFlag(0),
             ReductionStage.UNREDUCED,
@@ -242,7 +243,8 @@ def metadataCaching_drp(observatory, mjd, overwrite="0"):
     metadata = pd.DataFrame.from_dict(metadata, orient="index")
     metadata.columns = [
         "mjd",
-        "ccd",
+        "hemi",
+        "camera",
         "expnum",
         "imagetyp",
         "spec",
@@ -300,7 +302,7 @@ def prepCalib_drp(
     mjd=None,
     expnum=None,
     spec=None,
-    ccd=None,
+    camera=None,
     calib_config="lvm_{imagetyp}_config",
 ):
     """writes a configuration file for a calibration frame reduction
@@ -321,26 +323,27 @@ def prepCalib_drp(
         exposure number of the target calibration frame(s), by default None
     spec : str, optional
         spectrograph of the target calibration frame(s) (e.g., spec1), by default None
-    ccd : str, optional
-        CCD of the target calibration frame(s) (e.g., r1, z3), by default None
+    camera : str, optional
+        camera ID of the target calibration frame(s) (e.g., r1, z3), by default None
     calib_config : str, optional
         configuration file template to use, by default "lvm_{imagetyp}_config"
     """
-    # expand path
-    path = os.path.expandvars(path)
+
+    if mjd is not None:
+        mjd = int(mjd)
+    if expnum is not None:
+        expnum = f"{expnum:08d}"
+    if spec is not None:
+        spec = int(spec)
 
     # get calibration DRP configuration template
     calib_config_path = os.path.join(CONFIG_PATH, f"{calib_config}.yaml")
     calib_config_path = calib_config_path.format(imagetyp=calib_type)
     calib_config_template = _load_template(template_path=calib_config_path)
 
-    # connect to DB
-    master_config = load_master_config()
-    db.create_or_connect_db(master_config)
-
     # get target calibration frames from DB
     calib_frames = db.get_raws_metadata(
-        path=path, imagetyp=calib_type, mjd=mjd, expnum=expnum, spec=spec, ccd=ccd
+        imagetyp=calib_type, mjd=mjd, expnum=expnum, spec=spec, camera=camera
     )
     # create preproc configuration files
     for calib_frame in calib_frames:
