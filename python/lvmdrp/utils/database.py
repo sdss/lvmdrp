@@ -68,27 +68,8 @@ def _load_or_create_store(observatory, overwrite=False):
     return store[observatory]
 
 
-def get_old_metadata(store, mjd):
-    """return existing metadata from store given an observatory and MJD
-
-    Parameters
-    ----------
-    store : h5py.Group
-        store from which the existing dataset will be retrieved
-    mjd : int
-        MJD of the target dataset
-
-    Returns
-    -------
-    pandas.DataFrame
-        existing metadata for the given observatory and MJD
-    """
-    if str(mjd) in store:
-        metadata = pd.DataFrame(store[str(mjd)][()])
-    else:
-        metadata = pd.DataFrame()
-
-    return metadata
+def record_db(config, target_paths=None, ignore_cache=False):
+    pass
 
 
 def get_metadata(
@@ -177,78 +158,96 @@ def get_metadata(
     return metadata
 
 
-def get_calib_metadata():
-    try:
-        query = CalibrationFrames.select().where(
-            (~CalibrationFrames.is_master) & (CalibrationFrames.flags == 0)
-        )
-    except Error as e:
-        print(e)
-
-    calibration_metadata = [calib_metadata for calib_metadata in query]
-    return calibration_metadata
-
-
 def get_nonanalogs_groups(metadata_list):
-    """Return filtered metadata list filtered by analog attributes: imagetyp, mjd, ccd and exptime"""
-    # build metadata table containing columns relevant for analog selection: imagetyp, mjd, ccd, exptime
+    """Return filtered metadata list filtered by analog attributes: imagetyp, mjd, camera and exptime"""
+    # build metadata table containing columns relevant for analog selection: imagetyp, mjd, camera, exptime
     metadata_table = Table(data=[metadata.__dict__ for metadata in metadata_list])
-    metadata_group = metadata_table.group_by(["imagetyp", "mjd", "ccd", "exptime"])
+    metadata_group = metadata_table.group_by(["imagetyp", "mjd", "camera", "exptime"])
     # return filtered list containing non-analog frames metadata for which to find analogs
     return [metadata_list[idx] for idx in metadata_group.groups.indices]
 
 
-def get_analogs_metadata(metadata):
-    # define empty metadata in case current frame has already a master
-    analogs_metadata = []
-    if metadata.imagetyp in CALIBRATION_TYPES and not metadata.calib.is_master:
-        try:
-            query = LVMFrames.select().where(
-                (
-                    LVMFrames.stage
-                    == ReductionStage.PREPROCESSED | ReductionStage.CALIBRATED
-                )
-                & (LVMFrames.flags == 0)
-                & (LVMFrames.imagetyp == metadata.imagetyp)
-                & (LVMFrames.camera == metadata.camera)
-                & (LVMFrames.mjd == metadata.mjd)
-                & (LVMFrames.exptime == metadata.exptime)
-            )
-        except Error as e:
-            print(f"{metadata.imagetyp}: {e}")
-    else:
-        return analogs_metadata
-    analogs_metadata = [analog_metadata for analog_metadata in query]
-    return analogs_metadata
+def get_analogs_metadata(target_metadata, calib_metadata):
+    """return analog frames given a target frame metadata
 
-
-def get_master_metadata(metadata):
-    """finds and retrieve calibration frames given a target frame
-
-    Depending on the type of the target frame, a set of calibration
-    frames may be needed. These are stored in lvmdrp.core.constants.FRAMES_CALIB_NEEDS.
-    This function retrieves the closest in time set of calibration frames
-    according to that mapping.
-
-    NOTE: When frame_type=='bias', an empty list is returned.
+    This function will match a target calibration frame metadata `target_metadata`
+    against a list of calibration frames metadata to find its analogs in order to
+    build a master calibration frame. The criteria used to match calibration frames
+    are:
+        * reduction stage has to be `CALIBRATED`
+        * quality_flag == 0
+        * imagetyp, camera, mjd and exptime must be the same
 
     Parameters
     ----------
-    db: mysql.connection object
-        connection to DB from which calibration frames can be retrieved
-    metadata: namespace
-        the metadata for the target frame
+    target_metadata : pandas.Series
+        the metadata of the target calibration frame
+    calib_metadata : pandas.DataFrame
+        the metadata of the calibration frames from which to pick analogs
 
     Returns
     -------
-    calib_frames: list_like
-        list containing the calibration frames needed by the target frame
+    pandas.DataFrame
+        the analog frames metadata
+    """
+    # define empty metadata in case current frame has already a master
+    analogs_metadata = []
+    if target_metadata.imagetyp in CALIBRATION_TYPES:
+        # define query in calib_metadata to match target frame metadata
+        bmask = ReductionStage.PREPROCESSED | ReductionStage.CALIBRATED
+        q = (
+            "@calib_metadata.stage == @bmask "
+            "and @calib_metadata.quality_flag == 0 "
+            "and @calib_metadata.imagetyp == @target_metadata.imagetyp "
+            "and @calib_metadata.camera == @target_metadata.camera "
+            "and @calib_metadata.mjd == @target_metadata.mjd "
+            "and @calib_metadata.exptime == @target_metadata.exptime"
+        )
+    else:
+        # no analogs needed for this type of target frame
+        logger.info(
+            (
+                f"target frame of type '{target_metadata.imagetyp}' "
+                "does not need calibration frames"
+            )
+        )
+        return analogs_metadata
+
+    # filter calibration metadata find matching analogs
+    analogs_metadata = calib_metadata.query(q)
+    logger.info(f"found {len(analogs_metadata)}:")
+    logger.info(f"{analogs_metadata.to_string()}")
+
+    return analogs_metadata
+
+
+def get_master_metadata(target_metadata, masters_metadata):
+    """return the matched master calibration frames given a target frame
+
+    Depending on the type of the target frame, a set of calibration frames may
+    be needed. These are stored in lvmdrp.core.constants.FRAMES_CALIB_NEEDS.
+    This function retrieves the closest in time set of calibration frames
+    according to that mapping.
+
+    Parameters
+    ----------
+    target_metadata : pandas.Series
+        the target frame metadata
+    masters_metadata : pandas.DataFrame
+        the master calibration frames metadata to pick from
+
+    Returns
+    -------
+    dict_like
+        a dictionary containing the matched master calibration frames
     """
     # retrieve calibration needs
-    frame_needs = FRAMES_CALIB_NEEDS.get(metadata.imagetyp)
+    frame_needs = FRAMES_CALIB_NEEDS.get(target_metadata.imagetyp)
     # raise error in case current frame is not recognized in FRAMES_CALIB_NEEDS
     if frame_needs is None:
-        raise ValueError(f"Unrecognized frame type '{metadata.imagetyp}'")
+        logger.error(
+            f"no calibration frames found for '{target_metadata.imagetyp}' type"
+        )
 
     calib_frames = dict.fromkeys(frame_needs)
     # handle empty list cases (e.g., bias)
@@ -258,7 +257,7 @@ def get_master_metadata(metadata):
 
     for calib_type in frame_needs:
         bmask = ReductionStage.PREPROCESSED | ReductionStage.CALIBRATED
-        if calib_type in ["continuum", "arc"]:
+        if calib_type in ["flat", "arc"]:
             bmask += (
                 ReductionStage.COSMIC_CLEAN
                 | ReductionStage.STRAY_CLEAN
@@ -267,29 +266,34 @@ def get_master_metadata(metadata):
                 | ReductionStage.SPECTRA_EXTRACTED
                 | ReductionStage.WAVELENGTH_SOLVED
             )
-        try:
-            query = (
-                LVMFrames.select()
-                .where(
-                    (LVMFrames.stage == bmask)
-                    & (LVMFrames.flags == 0)
-                    & (LVMFrames.imagetyp == calib_type)
-                    & (LVMFrames.camera == metadata.camera)
-                    & (LVMFrames.calib_id is not None)
-                )
-                .order_by(fn.ABS(metadata.mjd - LVMFrames.mjd).asc())
-            )
-        except Error as e:
-            print(f"{calib_type}: {e}")
+        q = (
+            "@masters_metadata.stage == @bmask "
+            "and @masters_metadata.quality_flag == 0 "
+            "and @masters_metadata.imagetyp == @calib_type "
+            "and @masters_metadata.camera == @target_metadata.camera "
+            "and @masters_metadata.calib_id is not None"
+        )
 
-        # TODO: handle the case in which the retrieved frame is stale and/or has quality flags
+        # TODO: handle the case in which the retrieved frame is stale and/or has quality
+        # flags
         # BUG: there may be cases in which no frame is found
-        # BUG: this is retrieving only the first (closest) calibration frame, not necessarily the best
-        #      Should retrieve all possible calibration frames & decide which one is the best based on
-        #      quality
-        calib_frame = query.get_or_none()
-        if calib_frame is not None:
-            calib_frames[calib_type] = calib_frame.calib
+        # BUG: this is retrieving only the first (closest) calibration frame, not
+        #      necessarily the best. Should retrieve all possible calibration frames
+        #      & decide which one is the best based on quality
+        calib_frame = masters_metadata.query(q)
+        calib_frame["mjd_diff"] = calib_frame.mjd.apply(
+            lambda v: abs(v - target_metadata.mjd)
+        )
+        calib_frame = (
+            calib_frame.sort_values(by="mjd_diff", ascending=True)
+            .drop(columns="mjd_diff")
+            .iloc[0]
+        )
+        if len(calib_frame) == 0:
+            logger.error(f"no master {calib_type} frame found")
+        else:
+            logger.info(f"found master {calib_type}")
+            calib_frames[calib_type] = calib_frame
     return calib_frames
 
 
