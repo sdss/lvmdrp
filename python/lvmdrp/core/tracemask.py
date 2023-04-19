@@ -87,7 +87,7 @@ class TraceMask(FiberRows):
 
                 # try to fit
                 try:
-                    poly = poly_cls(pixels[good_pix], self._data[i, good_pix], deg=deg)
+                    poly = poly_cls.fit(pixels[good_pix], self._data[i, good_pix], deg=deg)
                 except numpy.linalg.LinAlgError as e:
                     log.error(f'Fiber trace failure at fiber {i}: {e}')
 
