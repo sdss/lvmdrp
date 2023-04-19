@@ -91,7 +91,6 @@ def get_old_metadata(store, mjd):
     return metadata
 
 def get_raws_metadata(
-    path,
     observatory="lco",
     imagetyp=None,
     mjd=None,
@@ -103,8 +102,6 @@ def get_raws_metadata(
 
     Parameters
     ----------
-    path : str
-        path where the raw frames are located
     observatory : str
         observatory where the data was observed
     imagetyp : str, optional
@@ -119,22 +116,18 @@ def get_raws_metadata(
         CCD ID of the target frames, by default None
     """
 
-    logger.info(f"loading store from '{path}'")
-    metadata_path = os.path.join(path, "metadata.hdf5")
-
-    store = h5py.File(metadata_path, "r")
-    dataset = store[observatory]
+    store = load_or_create_store(observatory=observatory)
 
     # extract MJD if given, else extract all MJDs
     if mjd is not None:
-        metadata = pd.DataFrame(dataset[str(mjd)][()])
+        metadata = pd.DataFrame(store[str(mjd)][()])
     else:
         metadata = []
-        for mjd in dataset.keys():
-            metadata.append(dataset[mjd])
+        for mjd in store.keys():
+            metadata.append(store[mjd])
         metadata = pd.DataFrame(np.concatenate(metadata, axis=0))
     # close store
-    store.close()
+    store.file.close()
 
     logger.info(f"found {len(metadata)} frames in store")
 
@@ -151,7 +144,7 @@ def get_raws_metadata(
         query.append("ccd == @ccd")
 
     if query:
-        query = " | ".join(query)
+        query = " and ".join(query)
         metadata.query(query, inplace=True)
 
     logger.info(f"final number of frames after filtering {len(metadata)}")
