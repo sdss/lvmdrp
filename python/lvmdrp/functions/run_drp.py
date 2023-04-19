@@ -6,7 +6,7 @@ import pathlib
 from lvmdrp.functions.imageMethod import (preproc_raw_frame, create_master_frame,
                                           basic_calibration, find_peaks_auto, trace_peaks,
                                           extract_spectra)
-from lvmdrp.functions.rssMethod import (detWaveSolution_drp, createPixTable_drp, resampleWave_drp)
+from lvmdrp.functions.rssMethod import (determine_wavelength_solution, createPixTable_drp, resampleWave_drp)
 from lvmdrp.utils.examples import get_frames_metadata
 from lvmdrp import config, log, path, __version__ as drpver
 
@@ -35,7 +35,7 @@ def get_config_options(level: str, flavor: str = None) -> dict:
     # load custom config options
 
     cfg = config.copy()
-    for lvl in level.split('.'):
+    for lvl in level.split(' ---'):
         cfg = cfg.get(lvl, {})
     return cfg.get(flavor, {}) if flavor else cfg.get("default", cfg)
 
@@ -84,13 +84,17 @@ def trace_fibers(in_file, camera, expnum, tileid, mjd):
     out_trace = path.full("lvm_cal", drpver=drpver, tileid=tileid, mjd=mjd, camera=camera,
                           expnum=expnum, kind='trace', ext='fits')
 
+    log.info('--- Running auto peak finder ---')
     kwargs = get_config_options('reduction_steps.find_peaks_auto')
     log.info(f'custom configuration parameters for find_peaks_auto: {repr(kwargs)}')
     find_peaks_auto(in_image=in_file, out_peaks=out_peaks, **kwargs)
+    log.info(f'Output peak finder file: {out_peaks}')
 
+    log.info('--- Tracing fiber peaks ---')
     kwargs = get_config_options('reduction_steps.trace_peaks')
     log.info(f'custom configuration parameters for trace_peaks: {repr(kwargs)}')
     trace_peaks(in_image=in_file, out_trace=out_trace, in_peaks=out_peaks, **kwargs)
+    log.info(f'Output trace fiber peaks file: {out_trace}')
 
 
 def find_file(kind, camera=None, mjd=None, tileid=None):
@@ -129,7 +133,10 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
     # start logging for this mjd
     start_logging(mjd, tileid)
 
+    log.info(f'--- Starting reduction of raw frame: {filename}')
+
     # preprocess the frames
+    log.info('--- Preprocessing raw frame ---')
     kwargs = get_config_options('reduction_steps.preproc_raw_frame', flavor)
     log.info(f'custom configuration parameters for preproc_raw_frame: {repr(kwargs)}')
     preproc_raw_frame(filename, flavor=flavor, kind='p', camera=camera,
@@ -143,9 +150,10 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
     mbias = path.full("lvm_cal_mbias", mjd=mjd, drpver=drpver, camera=camera, tileid=tileid)
     mdark = path.full("lvm_cal_time", kind='mdark', mjd=mjd, drpver=drpver, camera=camera,
                       tileid=tileid, exptime=300)
-    print('bias', mbias)
-    print('mdark', mdark)
+    log.info(f'Using master bias: {mbias}')
+    log.info(f'Using master dark: {mdark}')
     if not pathlib.Path(mbias).exists() or not pathlib.Path(mdark).exists():
+        log.error('No master bias or dark frames exist ---')
         raise ValueError('master bias/dark does not exist yet')
 
     # process the flat/arc frames
@@ -155,14 +163,16 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
     out_cal = path.full("lvm_anc", kind='c', imagetype=flavor, mjd=mjd, drpver=drpver,
                         camera=camera, tileid=tileid, expnum=expnum)
 
-    print('p-anc, input', in_cal)
-    print('c-anc, output', out_cal)
+    log.info(f'Output preproc file: {in_cal}')
+    log.info('--- Running basic calibration ---')
     kwargs = get_config_options('reduction_steps.basic_calibration', flavor)
     log.info(f'custom configuration parameters for basic_calibration: {repr(kwargs)}')
     basic_calibration(in_image=in_cal, out_image=out_cal,
                       in_bias=mbias, in_dark=mdark, **kwargs)
+    log.info(f'Output calibrated file: {out_cal}')
 
     # fiber tracing
+    log.info('--- Running fiber trace ---')
     if 'flat' in flavor and not camera.startswith('b') and camera.endswith('1'):
         trace_fibers(out_cal, camera, expnum, tileid, mjd)
 
@@ -176,32 +186,37 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
     trace_file = find_file('trace', mjd=mjd, tileid=tileid, camera=camera)
     if not trace_file:
         return
-    print('xfile', xout_file)
+    log.info('--- Extracting fiber spectra ---')
     kwargs = get_config_options('reduction_steps.extract_spectra', flavor)
     log.info(f'custom configuration parameters for extract_spectra: {repr(kwargs)}')
     extract_spectra(in_image=cal_file, out_rss=xout_file, in_trace=trace_file, **kwargs)
+    log.info(f'Output extracted file: {xout_file}')
 
     # determine the wavelength solution
     if flavor == 'arc':
-        wave_file = path.expand('lvm_cal', kind='wave', drpver=drpver, mjd=mjd, tileid=tileid,
-                                camera=camera, expnum=expnum, ext='fits')
-        lsf_file = path.expand('lvm_cal', kind='lsf', drpver=drpver, mjd=mjd, tileid=tileid,
-                               camera=camera, expnum=expnum, ext='fits')
+        wave_file = path.full('lvm_cal', kind='wave', drpver=drpver, mjd=mjd, tileid=tileid,
+                              camera=camera, expnum=expnum, ext='fits')
+        lsf_file = path.full('lvm_cal', kind='lsf', drpver=drpver, mjd=mjd, tileid=tileid,
+                             camera=camera, expnum=expnum, ext='fits')
         line_ref = pathlib.Path(__file__).parent.parent / f"etc/lvm-neon_nist_{camera}.txt"
-        kwargs = get_config_options('reduction_steps.determine_wave_solution')
+        kwargs = get_config_options('reduction_steps.determine_wavesol')
+        log.info('--- Determining wavelength solution ---')
         log.info(f'custom configuration parameters for determine_wave_solution: {repr(kwargs)}')
-        detWaveSolution_drp(in_arc=xout_file, out_wave=wave_file, out_lsf=lsf_file,
-                            in_ref_lines=line_ref, ref_fiber=319, poly_dispersion=5,
-                            poly_fwhm='2,5', aperture=13, plot=2, **kwargs)
+        determine_wavelength_solution(in_arc=xout_file, out_wave=wave_file, out_lsf=lsf_file,
+                                      in_ref_lines=line_ref, **kwargs)
+        log.info(f'Output wave peak traceset file: {wave_file}')
+        log.info(f'Output lsf traceset file: {lsf_file}')
 
     # create pixel table
     wave_file = find_file('wave', mjd=mjd, tileid=tileid, camera=camera)
     lsf_file = find_file('lsf', mjd=mjd, tileid=tileid, camera=camera)
     wout_file = path.full("lvm_anc", kind='w', imagetype=flavor, mjd=mjd, drpver=drpver,
                           camera=camera, tileid=tileid, expnum=expnum)
+    log.info('--- Creating pixel table ---')
     createPixTable_drp(in_rss=xout_file, out_rss=wout_file, arc_wave=wave_file, arc_fwhm=lsf_file)
+    log.info(f'Output calibrated wavelength file: {wout_file}')
 
-
+    # set wavelength resample params
     CHANNEL_WL = {"b1": (3600, 5930), "r1": (5660, 7720), "z1": (7470, 9800)}
     wave_range = CHANNEL_WL[camera]
 
@@ -209,10 +224,13 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
     hout_file = path.full("lvm_anc", kind='h', imagetype=flavor, mjd=mjd, drpver=drpver,
                           camera=camera, tileid=tileid, expnum=expnum)
     kwargs = get_config_options('reduction_steps.resample_wave', flavor)
+    log.info('--- Resampling wavelength grid ---')
     log.info(f'custom configuration parameters for resample_wave: {repr(kwargs)}')
     resampleWave_drp(in_rss=wout_file, out_rss=hout_file, start_wave=wave_range[0],
                      end_wave=wave_range[1], disp_pix=1.0, method="linear", err_sim=10,
                      parallel="auto", extrapolate=True, **kwargs)
+    log.info(f'Output resampled wave file: {hout_file}')
+
 
     # process the science frame
 
@@ -311,8 +329,8 @@ def start_logging(mjd: int, tileid: int):
     logpath = lpath.format(drpver=drpver, mjd=mjd, tileid=tileid)
     logpath = pathlib.Path(logpath)
 
-    if logpath.exists():
-        return
+    # if logpath.exists():
+    #     return
 
     if not logpath.parent.exists():
         logpath.parent.mkdir(parents=True, exist_ok=True)
