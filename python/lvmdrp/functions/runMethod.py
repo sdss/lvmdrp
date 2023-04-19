@@ -189,14 +189,17 @@ def metadataCaching_drp(observatory, mjd, overwrite="0"):
     ]
     ntotal_frames = len(frames_indices)
     # filter out frames in store
-    frames_indices = [
-        (frame_path, index)
-        for frame_path, index in filter(
-            lambda x: tuple(map(lambda s: s.encode("utf-8"), x[1]))
-            not in metadata_old.index,
-            zip(frames_paths, frames_indices),
-        )
-    ]
+    if len(metadata_old) != 0:
+        frames_indices = [
+            (frame_path, index)
+            for frame_path, index in filter(
+                lambda x: list(map(lambda s: s.encode("utf-8"), x[1]))
+                not in metadata_old[["mjd", "ccd", "expnum"]].values,
+                zip(frames_paths, frames_indices),
+            )
+        ]
+    else:
+        frames_indices = list(zip(frames_paths, frames_indices))
     nfilter_frames = len(frames_indices)
 
     logger.info(
@@ -251,7 +254,7 @@ def metadataCaching_drp(observatory, mjd, overwrite="0"):
     logger.info("successfully extracted metadata")
 
     # merge metadata with existing one
-    if str(mjd) in store[observatory]:
+    if str(mjd) in store:
         logger.info("updating store with new metadata")
         array = metadata.to_records(index=False)
         dtypes = array.dtype
@@ -263,7 +266,7 @@ def metadataCaching_drp(observatory, mjd, overwrite="0"):
                 for n in dtypes.names
             ]
         )
-        dataset = store[observatory][str(mjd)]
+        dataset = store[str(mjd)]
         dataset.resize(dataset.shape[0] + array.shape[0], axis=0)
         dataset[-array.shape[0] :] = array
     else:
@@ -278,13 +281,11 @@ def metadataCaching_drp(observatory, mjd, overwrite="0"):
                 for n in dtypes.names
             ]
         )
-        store[observatory].create_dataset(
-            name=str(mjd), data=array, maxshape=(None,), chunks=True
-        )
+        store.create_dataset(name=str(mjd), data=array, maxshape=(None,), chunks=True)
 
     # write to disk metadata in HDF5 format
     logger.info(f"writing metadata to store '{db.access.base_dir}'")
-    store.close()
+    store.file.close()
 
 
 # TODO:

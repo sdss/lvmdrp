@@ -43,7 +43,7 @@ def load_or_create_store(observatory, overwrite=False):
 
     Returns
     -------
-    h5py.File object
+    h5py.Group
         store found in the given path
     """
     metadata_path = os.path.join(access.base_dir, "metadata.hdf5")
@@ -65,29 +65,26 @@ def load_or_create_store(observatory, overwrite=False):
     if observatory not in store:
         store.create_group(observatory)
 
-    return store
+    return store[observatory]
 
 
-def get_old_metadata(store, mjd, observatory="lco"):
+def get_old_metadata(store, mjd):
     """return existing metadata from store given an observatory and MJD
 
     Parameters
     ----------
-    store : h5py.File
+    store : h5py.Group
         store from which the existing dataset will be retrieved
     mjd : int
         MJD of the target dataset
-    observatory : str, optional
-        name of the observatory, by default 'lco'
 
     Returns
     -------
     pandas.DataFrame
         existing metadata for the given observatory and MJD
     """
-    if str(mjd) in store[observatory]:
-        metadata = pd.DataFrame(store[observatory][str(mjd)][()])
-        metadata.set_index(["mjd", "ccd", "expnum"], inplace=True)
+    if str(mjd) in store:
+        metadata = pd.DataFrame(store[str(mjd)][()])
     else:
         metadata = pd.DataFrame()
 
