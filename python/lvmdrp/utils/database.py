@@ -30,11 +30,13 @@ access = Access(release="sdss5")
 logger = get_logger(__name__)
 
 
-def load_store(overwrite=False):
+def load_or_create_store(observatory, overwrite=False):
     """return the metadata store given a path
 
     Parameters
     ----------
+    observatory: str
+        name of the observatory from which data will be retrieved/cached
     overwrite: bool, optional
         whether to overwrite the store or not, by default False
 
@@ -57,6 +59,11 @@ def load_store(overwrite=False):
     else:
         logger.info(f"creating metadata store '{metadata_path}'")
         store = h5py.File(metadata_path, mode="w")
+
+    # add observatory group if needed
+    if observatory not in store:
+        store.create_group(observatory)
+
     return store
 
 

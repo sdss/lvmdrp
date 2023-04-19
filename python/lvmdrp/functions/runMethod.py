@@ -171,26 +171,10 @@ def metadataCaching_drp(path, observatory, mjd, overwrite="0"):
         whether to overwrite the metadata table or not, by default False
     """
 
-    overwrite = bool(int(overwrite))
-
-    metadata_path = os.path.join(path, "metadata.hdf5")
-
-    # remove metadata store if overwrite == True
-    if overwrite and os.path.isfile(metadata_path):
-        logger.info(f"removing metadata store '{metadata_path}'")
-        os.remove(metadata_path)
-
-    # load or create metadata store
-    if os.path.isfile(metadata_path):
-        logger.info(f"loading metadata store from '{metadata_path}'")
-        store = h5py.File(metadata_path, mode="a")
-    else:
-        logger.info(f"creating metadata store '{metadata_path}'")
-        store = h5py.File(metadata_path, mode="w")
-
-    # add observatory group if needed
-    if observatory not in store:
-        store.create_group(observatory)
+    # load store
+    store = db.load_or_create_store(
+        observatory=observatory, overwrite=bool(int(overwrite))
+    )
 
     # get existing metadata
     if str(mjd) in store[observatory]:
