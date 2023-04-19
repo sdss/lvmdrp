@@ -24,6 +24,7 @@ from sdss_access.path import Path
 
 path = Path(release="sdss5")
 access = Access(release="sdss5")
+access.set_base_dir()
 # -------------------------------------------------------------------------------
 
 

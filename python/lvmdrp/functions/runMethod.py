@@ -51,8 +51,8 @@ from tqdm import tqdm
 import lvmdrp
 import lvmdrp.utils.database as db
 from lvmdrp.core.constants import CONFIG_PATH, DATAPRODUCT_BP_PATH
+from lvmdrp.utils.bitmask import ReductionStatus, ReductionStage, QualityFlag
 from lvmdrp.utils.configuration import load_master_config
-from lvmdrp.utils.examples import parse_sdr_name
 from lvmdrp.utils.logger import get_logger
 
 
@@ -153,7 +153,7 @@ def _get_path_from_bp(bp_name):
     return dataproduct_path, kws_path
 
 
-def metadataCaching_drp(path, observatory, mjd, overwrite="0"):
+def metadataCaching_drp(observatory, mjd, overwrite="0"):
     """caches the header metadata into a HD5 table given a target MJD
 
     this task will write an HD5 table where the quick data reduction
@@ -161,8 +161,6 @@ def metadataCaching_drp(path, observatory, mjd, overwrite="0"):
 
     Parameters
     ----------
-    path : str
-        path where the raw frames are stored
     observatory : str
         name of the observatory in the data path structure (e.g., lco, lab)
     mjd : int
@@ -177,24 +175,28 @@ def metadataCaching_drp(path, observatory, mjd, overwrite="0"):
     )
 
     # get existing metadata
-    metadata_old = db.get_old_metadata(mjd=mjd)
+    metadata_old = db.get_old_metadata(store, mjd=mjd)
 
     # filter frames path list
+    frames_paths = db.path.expand(
+        "lvm_raw", hemi="s", mjd=mjd, camspec="*", expnum="???"
+    )
     frames_indices = [
-        (os.path.join(root, frame_name), (mjd, *parse_sdr_name(frame_name)))
-        for root, _, frame_names in os.walk(path)
-        for frame_name in frame_names
-        if str(mjd) in root and frame_name.endswith(".fits.gz")
+        (x["mjd"], x["camspec"], x["expnum"])
+        for x in map(
+            lambda frame_path: db.path.extract("lvm_raw", frame_path), frames_paths
+        )
     ]
     ntotal_frames = len(frames_indices)
     # filter out frames in store
-    frames_indices = list(
-        filter(
-            lambda item: tuple(map(lambda s: s.encode("utf-8"), item[1]))
+    frames_indices = [
+        (frame_path, index)
+        for frame_path, index in filter(
+            lambda x: tuple(map(lambda s: s.encode("utf-8"), x[1]))
             not in metadata_old.index,
-            frames_indices,
+            zip(frames_paths, frames_indices),
         )
-    )
+    ]
     nfilter_frames = len(frames_indices)
 
     logger.info(
@@ -220,11 +222,18 @@ def metadataCaching_drp(path, observatory, mjd, overwrite="0"):
     )
     for i, (frame_path, (mjd, ccd, expnum)) in iterator:
         header = fits.getheader(frame_path, ext=0)
-        imagetyp = header.get("FLAVOR", header.get("IMAGETYP"))
-        spec = int(ccd[-1])
-        exptime = header["EXPTIME"]
-
-        metadata[i] = [mjd, ccd, expnum, imagetyp, spec, exptime, frame_path]
+        row = [
+            mjd,
+            ccd,
+            expnum,
+            header.get("IMAGETYP"),
+            int(ccd[-1]),
+            header.get("EXPTIME"),
+            QualityFlag(0),
+            ReductionStage.UNREDUCED,
+            ReductionStatus(0),
+        ]
+        metadata[i] = row
 
     # set index
     metadata = pd.DataFrame.from_dict(metadata, orient="index")
@@ -235,7 +244,9 @@ def metadataCaching_drp(path, observatory, mjd, overwrite="0"):
         "imagetyp",
         "spec",
         "exptime",
-        "path",
+        "quality",
+        "stage",
+        "status",
     ]
     logger.info("successfully extracted metadata")
 
@@ -272,7 +283,7 @@ def metadataCaching_drp(path, observatory, mjd, overwrite="0"):
         )
 
     # write to disk metadata in HDF5 format
-    logger.info(f"writing metadata to store '{metadata_path}'")
+    logger.info(f"writing metadata to store '{db.access.base_dir}'")
     store.close()
 
 
