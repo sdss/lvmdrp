@@ -6,47 +6,59 @@
 # @License: BSD 3-Clause
 # @Copyright: SDSS-V LVM
 
-import datetime as dt
 import os
-import h5py
 
+import h5py
 import numpy as np
 import pandas as pd
 from astropy.table import Table
-from lvmsurveysim.utils.sqlite2astropy import *
-from peewee import *
-from tqdm import tqdm
 
+from lvmdrp.core.constants import CALIBRATION_TYPES, FRAMES_CALIB_NEEDS
+from lvmdrp.utils.bitmask import QualityFlag, ReductionStage, ReductionStatus
 from lvmdrp.utils.logger import get_logger
+
+# NOTE: replace these lines with Brian's integration of sdss_access and sdss_tree
+from sdss_access import Access
+from sdss_access.path import Path
+
+
+path = Path(release="sdss5")
+access = Access(release="sdss5")
+# -------------------------------------------------------------------------------
 
 
 logger = get_logger(__name__)
 
-db = SqliteDatabase(None)
 
+def load_store(overwrite=False):
+    """return the metadata store given a path
 
-class FlagsField(IntegerField):
-    def db_value(self, flags_val):
-        if not isinstance(flags_val, QualityFlag):
-            raise TypeError(
-                f"Wrong type '{type(flags_val)}', '{QualityFlag}' instance expected"
-            )
-        return super().adapt(flags_val.value)
+    Parameters
+    ----------
+    overwrite: bool, optional
+        whether to overwrite the store or not, by default False
 
-    def python_value(self, db_val):
-        return QualityFlag(db_val)
+    Returns
+    -------
+    h5py.File object
+        store found in the given path
+    """
+    metadata_path = os.path.join(access.base_dir, "metadata.hdf5")
 
+    # remove metadata store if overwrite == True
+    if overwrite and os.path.isfile(metadata_path):
+        logger.info(f"removing metadata store '{metadata_path}'")
+        os.remove(metadata_path)
 
-class StatusField(IntegerField):
-    def db_value(self, status_val):
-        if not isinstance(status_val, ReductionStatus):
-            raise TypeError(
-                f"Wrong type '{type(status_val)}', '{ReductionStatus}' instance expected"
-            )
-        return super().adapt(status_val.value)
+    # load or create metadata store
+    if os.path.isfile(metadata_path):
+        logger.info(f"loading metadata store from '{metadata_path}'")
+        store = h5py.File(metadata_path, mode="a")
+    else:
+        logger.info(f"creating metadata store '{metadata_path}'")
+        store = h5py.File(metadata_path, mode="w")
+    return store
 
-    def python_value(self, db_val):
-        return ReductionStatus(db_val)
 
 def get_raws_metadata(
     path,
