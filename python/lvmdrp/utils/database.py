@@ -31,7 +31,7 @@ access.set_base_dir()
 logger = get_logger(__name__)
 
 
-def load_or_create_store(observatory, overwrite=False):
+def _load_or_create_store(observatory, overwrite=False):
     """return the metadata store given a path
 
     Parameters
@@ -90,13 +90,15 @@ def get_old_metadata(store, mjd):
 
     return metadata
 
-def get_raws_metadata(
+
+def get_metadata(
     observatory="lco",
     imagetyp=None,
     mjd=None,
     expnum=None,
     spec=None,
     camera=None,
+    **kwargs,
 ):
     """return raw frames metadata from precached HDF5 store
 
@@ -105,7 +107,7 @@ def get_raws_metadata(
     observatory : str
         observatory where the data was observed
     imagetyp : str, optional
-        type/flavor of frame to locate`IMAGETYP`, by default None
+        type/flavor of frame to locate `IMAGETYP`, by default None
     mjd : int, optional
         MJD where the target frames is located, by default None
     expnum : str, optional
@@ -128,6 +130,12 @@ def get_raws_metadata(
         metadata = pd.DataFrame(np.concatenate(metadata, axis=0))
     # close store
     store.file.close()
+
+    # convert bytes to literal strings
+    metadata_str = metadata.select_dtypes(object).apply(
+        lambda s: s.str.decode("utf-8"), axis="columns"
+    )
+    metadata[metadata_str.columns] = metadata_str
 
     logger.info(f"found {len(metadata)} frames in store")
 

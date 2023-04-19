@@ -43,6 +43,7 @@ import re
 from copy import deepcopy as copy
 
 import h5py
+import numpy as np
 import pandas as pd
 import yaml
 from astropy.io import fits
@@ -143,12 +144,18 @@ def _get_path_from_bp(bp_name):
     """Return dataproduct BP path information"""
     # define BP path
     bp_path = os.path.join(DATAPRODUCT_BP_PATH, f"{bp_name}_bp.yaml")
-    # build dataproduct path template
+    # load BP
     bp = yaml.safe_load(open(bp_path, "r"))
+    # build dataproduct path template
     loc = os.path.expandvars(bp["location"])
     name = bp["naming_convention"].split(",")[0]
     dataproduct_path = os.path.join(loc, name).replace("[", "{").replace("]", "}")
-    kws_path = re.findall(r"\{(\w+)\}", dataproduct_path)
+
+    # replace all keywords with lowercase
+    pattern = re.compile(r"\{(\w+)\}")
+    dataproduct_path = re.sub(pattern, lambda s: s.group(0).lower(), dataproduct_path)
+    # define dictionary keyword
+    kws_path = re.findall(pattern, dataproduct_path)
 
     return dataproduct_path, kws_path
 
@@ -170,19 +177,26 @@ def metadataCaching_drp(observatory, mjd, overwrite="0"):
     """
 
     # load store
-    store = db.load_or_create_store(
+    store = db._load_or_create_store(
         observatory=observatory, overwrite=bool(int(overwrite))
     )
 
     # get existing metadata
-    metadata_old = db.get_old_metadata(store, mjd=mjd)
+    if str(mjd) in store.keys():
+        metadata_old = store[str(mjd)][()][["mjd", "camera", "expnum"]].tolist()
+    else:
+        metadata_old = []
 
     # filter frames path list
     frames_paths = db.path.expand(
         "lvm_raw", hemi="s", mjd=mjd, camspec="*", expnum="???"
     )
     frames_indices = [
-        (x["mjd"], x["camspec"], x["expnum"])
+        (
+            x["mjd"].encode("utf-8"),
+            x["camspec"].encode("utf-8"),
+            x["expnum"].encode("utf-8"),
+        )
         for x in map(
             lambda frame_path: db.path.extract("lvm_raw", frame_path), frames_paths
         )
@@ -190,14 +204,13 @@ def metadataCaching_drp(observatory, mjd, overwrite="0"):
     ntotal_frames = len(frames_indices)
     # filter out frames in store
     if len(metadata_old) != 0:
-        frames_indices = [
-            (frame_path, index)
-            for frame_path, index in filter(
-                lambda x: list(map(lambda s: s.encode("utf-8"), x[1]))
-                not in metadata_old[["mjd", "camera", "expnum"]].values,
-                zip(frames_paths, frames_indices),
+        in_store = np.isin(frames_indices, metadata_old).all(axis=1)
+        frames_indices = list(
+            zip(
+                np.asarray(frames_indices)[~in_store],
+                np.asarray(frames_paths)[~in_store],
             )
-        ]
+        )
     else:
         frames_indices = list(zip(frames_paths, frames_indices))
     nfilter_frames = len(frames_indices)
