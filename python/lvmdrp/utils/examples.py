@@ -114,8 +114,9 @@ def get_frames_metadata(mjd: Union[str, int] = None, path: str = None, suffix: s
 
     # build the table data
     frames_table = Table(
-        names=["imagetyp", "spec", "mjd", "camera", "expnum", "exptime", "tileid", "path"],
-        dtype=[str, str, int, str, str, float, int, str],
+        names=["imagetyp", "spec", "mjd", "camera", "expnum", "exptime", "tileid",
+               "quality", "path", "name"],
+        dtype=[str, str, int, str, str, float, int, str, str, str],
     )
     for frame_path in tqdm(frames, ascii=True, unit='files', total=len(frames)):
         header = fits.getheader(frame_path, ext=0)
@@ -130,7 +131,9 @@ def get_frames_metadata(mjd: Union[str, int] = None, path: str = None, suffix: s
         spec = f"sp{camera[-1]}"
         exptime = header["EXPTIME"]
         tileid = header.get("TILEID", 1111)
-        frames_table.add_row([imagetyp, spec, mjd, camera, expnum, exptime, tileid, str(frame_path)])
+        qual = header.get("QUALITY", "excellent")
+        frames_table.add_row([imagetyp, spec, mjd, camera, expnum, exptime,
+                              tileid, qual, str(frame_path), frame_path.stem])
     log.info(f"successfully extracted metadata for {len(frames_table)} frames.")
 
     # create the cache file

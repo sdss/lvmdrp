@@ -35,7 +35,7 @@ def get_config_options(level: str, flavor: str = None) -> dict:
     # load custom config options
 
     cfg = config.copy()
-    for lvl in level.split(' ---'):
+    for lvl in level.split('.'):
         cfg = cfg.get(lvl, {})
     return cfg.get(flavor, {}) if flavor else cfg.get("default", cfg)
 
@@ -187,7 +187,7 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
     if not trace_file:
         return
     log.info('--- Extracting fiber spectra ---')
-    kwargs = get_config_options('reduction_steps.extract_spectra', flavor)
+    kwargs = get_config_options('reduction_steps.extract_spectra')
     log.info(f'custom configuration parameters for extract_spectra: {repr(kwargs)}')
     extract_spectra(in_image=cal_file, out_rss=xout_file, in_trace=trace_file, **kwargs)
     log.info(f'Output extracted file: {xout_file}')
@@ -283,6 +283,11 @@ def run_drp(mjd: int = None, bias: bool = False, dark: bool = False,
     if not skip_bd:
         # reduce biases / darks
         for frame in precals:
+            # skip bad or test quality
+            if frame['quality'].lower() != 'excellent':
+                log.info(f"Skipping frame {frame['name']} with quality: {frame['quality']}")
+                continue
+
             reduce_frame(frame['path'], camera=frame['camera'],
                          mjd=frame['mjd'],
                          expnum=frame['expnum'], tileid=frame['tileid'],
@@ -306,6 +311,11 @@ def run_drp(mjd: int = None, bias: bool = False, dark: bool = False,
 
     # reduce remaining files
     for frame in sub:
+        # skip bad or test quality
+        if frame['quality'].lower() != 'excellent':
+            log.info(f"Skipping frame {frame['name']} with quality: {frame['quality']}")
+            continue
+
         reduce_frame(frame['path'], camera=frame['camera'],
                      mjd=frame['mjd'],
                      expnum=frame['expnum'], tileid=frame['tileid'],
