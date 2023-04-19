@@ -180,7 +180,6 @@ def metadataCaching_drp(observatory, mjd, overwrite="0"):
     store = db._load_or_create_store(
         observatory=observatory, overwrite=bool(int(overwrite))
     )
-
     # get existing metadata
     if str(mjd) in store.keys():
         metadata_old = store[str(mjd)][()][["mjd", "camera", "expnum"]].tolist()
@@ -244,7 +243,7 @@ def metadataCaching_drp(observatory, mjd, overwrite="0"):
             camera,
             expnum,
             header.get("IMAGETYP"),
-            int(camera[-1]),
+            int(camera.decode("utf-8")[-1]),
             header.get("EXPTIME"),
             QualityFlag(0),
             ReductionStage.UNREDUCED,
@@ -269,7 +268,7 @@ def metadataCaching_drp(observatory, mjd, overwrite="0"):
     logger.info("successfully extracted metadata")
 
     # merge metadata with existing one
-    if str(mjd) in store:
+    if str(mjd, "utf-8") in store:
         logger.info("updating store with new metadata")
         array = metadata.to_records(index=False)
         dtypes = array.dtype
@@ -281,7 +280,7 @@ def metadataCaching_drp(observatory, mjd, overwrite="0"):
                 for n in dtypes.names
             ]
         )
-        dataset = store[str(mjd)]
+        dataset = store[str(mjd, "utf-8")]
         dataset.resize(dataset.shape[0] + array.shape[0], axis=0)
         dataset[-array.shape[0] :] = array
     else:
@@ -296,7 +295,9 @@ def metadataCaching_drp(observatory, mjd, overwrite="0"):
                 for n in dtypes.names
             ]
         )
-        store.create_dataset(name=str(mjd), data=array, maxshape=(None,), chunks=True)
+        store.create_dataset(
+            name=str(mjd, "utf-8"), data=array, maxshape=(None,), chunks=True
+        )
 
     # write to disk metadata in HDF5 format
     logger.info(f"writing metadata to store '{db.access.base_dir}'")
