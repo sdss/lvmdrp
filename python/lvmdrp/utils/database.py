@@ -98,7 +98,9 @@ def get_metadata(
     expnum=None,
     spec=None,
     camera=None,
-    **kwargs,
+    stage=None,
+    status=None,
+    quality=None,
 ):
     """return raw frames metadata from precached HDF5 store
 
@@ -116,9 +118,15 @@ def get_metadata(
         spectrograph of the target frames, by default None
     camera : str, optional
         camera ID of the target frames, by default None
+    stage : int, optional
+        bitmask representing stage of the reduction, by default None
+    status : int, optional
+        bitmask representing status of the reduction, by default None
+    quality : int, optional
+        bitmask representing quality of the recution, by default None
     """
 
-    store = load_or_create_store(observatory=observatory)
+    store = _load_or_create_store(observatory=observatory)
 
     # extract MJD if given, else extract all MJDs
     if mjd is not None:
@@ -150,6 +158,15 @@ def get_metadata(
     if camera is not None:
         logger.info(f"filtering by {camera = }")
         query.append("camera == @camera")
+    if stage is not None:
+        logger.info(f"filtering by {stage = }")
+        query.append("stage == @stage")
+    if status is not None:
+        logger.info(f"filtering by {status = }")
+        query.append("status == @status")
+    if quality is not None:
+        logger.info(f"filtering by {quality = }")
+        query.append("quality == @quality")
 
     if query:
         query = " and ".join(query)
