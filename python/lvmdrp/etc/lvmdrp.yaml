@@ -18,7 +18,7 @@ reduction_steps:
   find_peaks_auto:
     nfibers: 0
     slice: 1870
-    threshold: 10
+    threshold: 2
     method: hyperbolic
     median_box: 5
     median_cross: 1
@@ -26,9 +26,21 @@ reduction_steps:
   trace_peaks:
     steps: 10
     coadd: 30
-    threshold_peak: 10
+    threshold_peak: 2
     max_diff: 2
     method: hyperbolic
     median_box: 5
     median_cross: 1
     poly_disp: 2
+  extract_spectra:
+    default:
+      method: aperture
+      aperture: 4
+      parallel: auto
+  determine_wavesol:
+    default:
+      ref_fiber: 319
+      poly_dispersion: 5
+      poly_fwhm: [2, 5]
+      aperture: 13
+      plot_fig: true
