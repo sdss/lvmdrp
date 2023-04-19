@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # encoding: utf-8
 
+import os
 import pathlib
 from sdsstools import get_config, get_logger, get_package_version
 from tree import Tree
@@ -33,4 +34,4 @@ def setup_paths(release: str = 'sdss5', replant: bool = False):
 path = setup_paths()
 
 
-__version__ = get_package_version(path=__file__, package_name=NAME)
+__version__ = get_package_version(path=__file__, package_name=NAME) or os.getenv("LVMDRP_VERSION", "dev")
