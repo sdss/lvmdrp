@@ -177,11 +177,7 @@ def metadataCaching_drp(path, observatory, mjd, overwrite="0"):
     )
 
     # get existing metadata
-    if str(mjd) in store[observatory]:
-        metadata_old = pd.DataFrame(store[observatory][str(mjd)][()])
-        metadata_old.set_index(["mjd", "ccd", "expnum"], inplace=True)
-    else:
-        metadata_old = pd.DataFrame()
+    metadata_old = db.get_old_metadata(mjd=mjd)
 
     # filter frames path list
     frames_indices = [

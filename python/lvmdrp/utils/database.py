@@ -67,6 +67,31 @@ def load_or_create_store(observatory, overwrite=False):
     return store
 
 
+def get_old_metadata(store, mjd, observatory="lco"):
+    """return existing metadata from store given an observatory and MJD
+
+    Parameters
+    ----------
+    store : h5py.File
+        store from which the existing dataset will be retrieved
+    mjd : int
+        MJD of the target dataset
+    observatory : str, optional
+        name of the observatory, by default 'lco'
+
+    Returns
+    -------
+    pandas.DataFrame
+        existing metadata for the given observatory and MJD
+    """
+    if str(mjd) in store[observatory]:
+        metadata = pd.DataFrame(store[observatory][str(mjd)][()])
+        metadata.set_index(["mjd", "ccd", "expnum"], inplace=True)
+    else:
+        metadata = pd.DataFrame()
+
+    return metadata
+
 def get_raws_metadata(
     path,
     observatory="lco",
