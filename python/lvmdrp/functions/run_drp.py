@@ -151,8 +151,9 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
 
     # check master frames
     mbias = path.full("lvm_cal_mbias", mjd=mjd, drpver=drpver, camera=camera, tileid=tileid)
-    mdark = path.full("lvm_cal_time", kind='mdark', mjd=mjd, drpver=drpver, camera=camera,
-                      tileid=tileid, exptime=300)
+    # mdark = path.full("lvm_cal_time", kind='mdark', mjd=mjd, drpver=drpver, camera=camera,
+    #                   tileid=tileid, exptime=300)
+    mdark = find_best_mdark(tileid, mjd, camera)
     log.info(f'Using master bias: {mbias}')
     log.info(f'Using master dark: {mdark}')
     if not pathlib.Path(mbias).exists() or not pathlib.Path(mdark).exists():
@@ -233,8 +234,11 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
                         end_wave=wave_range[1], **kwargs)
     log.info(f'Output resampled wave file: {hout_file}')
 
-
-    # process the science frame
+    # perform camera combination
+    # log.info('--- Combining spec. cameras ---')
+    # kwargs = get_config_options('reduction_steps.combine_cameras')
+    # log.info(f'custom configuration parameters for combine cameras: {repr(kwargs)}')
+    # join_spec_channels(in_rss=[], out_rss=[], **kwargs)
 
     # write out RSS
 
@@ -370,3 +374,10 @@ def sort_cals(table: Table) -> Table:
     ss = df.sort_values(['camera', 'expnum'])
     ee = ss.set_index('imagetyp', drop=False).loc[['flat', 'arc', 'object']].reset_index(drop=True)
     return table.from_pandas(ee)
+
+
+def find_best_mdark(tileid: int, mjd: int, camera: str) -> str:
+    darks = path.expand("lvm_cal_time", kind='mdark', mjd=mjd, drpver=drpver,
+                        camera=camera, tileid=tileid, exptime="*")
+
+    return max(darks, key=lambda x: int(pathlib.Path(x).stem.rsplit('-', 1)[-1]))
