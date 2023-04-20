@@ -176,24 +176,20 @@ def metadataCaching_drp(observatory, mjd, overwrite="0"):
         whether to overwrite the metadata table or not, by default False
     """
 
-    # load store
-    store = db._load_or_create_store(
-        observatory=observatory, overwrite=bool(int(overwrite))
-    )
-    # focus on raw frames metadata
-    raw = store["raw"]
-
     # get existing metadata
-    if str(mjd) in raw.keys():
-        metadata_old = raw[str(mjd)][()][["mjd", "camera", "expnum"]].tolist()
+    if not bool(int(overwrite)) == 1:
+        stored_indices = db.get_metadata(observatory=observatory, mjd=mjd)[
+            ["mjd", "camera", "expnum"]
+        ].values.tolist()
     else:
-        metadata_old = []
+        db.del_metadata(observatory=observatory, mjd=mjd)
+        stored_indices = []
 
     # filter frames path list
     frames_paths = db.path.expand(
         "lvm_raw", hemi="s", mjd=mjd, camspec="*", expnum="???"
     )
-    frames_indices = [
+    local_indices = [
         (
             x["mjd"].encode("utf-8"),
             x["camspec"].encode("utf-8"),
@@ -203,19 +199,16 @@ def metadataCaching_drp(observatory, mjd, overwrite="0"):
             lambda frame_path: db.path.extract("lvm_raw", frame_path), frames_paths
         )
     ]
-    ntotal_frames = len(frames_indices)
+    ntotal_frames = len(local_indices)
     # filter out frames in store
-    if len(metadata_old) != 0:
-        in_store = np.isin(frames_indices, metadata_old).all(axis=1)
-        frames_indices = list(
-            zip(
-                np.asarray(frames_indices)[~in_store],
-                np.asarray(frames_paths)[~in_store],
-            )
+    in_store = np.isin(local_indices, stored_indices).all(axis=1)
+    new_indices = list(
+        zip(
+            np.asarray(frames_paths)[~in_store],
+            np.asarray(local_indices)[~in_store],
         )
-    else:
-        frames_indices = list(zip(frames_paths, frames_indices))
-    nfilter_frames = len(frames_indices)
+    )
+    nfilter_frames = len(new_indices)
 
     logger.info(
         (
@@ -227,84 +220,12 @@ def metadataCaching_drp(observatory, mjd, overwrite="0"):
     if nfilter_frames == 0:
         return
 
-    # initialize table
-    metadata = {}
     # extract metadata
-    logger.info(f"extracting metadata from {len(frames_indices)} frames")
-    iterator = tqdm(
-        enumerate(frames_indices),
-        total=nfilter_frames,
-        desc=f"extracting metadata from MJD = {mjd}",
-        ascii=True,
-        unit="file",
-    )
-    for i, (frame_path, (mjd, camera, expnum)) in iterator:
-        header = fits.getheader(frame_path, ext=0)
-        row = [
-            mjd,
-            "s",
-            camera,
-            expnum,
-            header.get("IMAGETYP"),
-            int(camera.decode("utf-8")[-1]),
-            header.get("EXPTIME"),
-            QualityFlag(0),
-            ReductionStage.UNREDUCED,
-            ReductionStatus(0),
-        ]
-        metadata[i] = row
-
-    # set index
-    metadata = pd.DataFrame.from_dict(metadata, orient="index")
-    metadata.columns = [
-        "mjd",
-        "hemi",
-        "camera",
-        "expnum",
-        "imagetyp",
-        "spec",
-        "exptime",
-        "quality",
-        "stage",
-        "status",
-    ]
+    new_metadata = db.extract_metadata(mjd=mjd, frames_indices=new_indices)
     logger.info("successfully extracted metadata")
 
     # merge metadata with existing one
-    if str(mjd, "utf-8") in store:
-        logger.info("updating store with new metadata")
-        array = metadata.to_records(index=False)
-        dtypes = array.dtype
-        array = array.astype(
-            [
-                (n, dtypes[n])
-                if dtypes[n] != object
-                else (n, h5py.string_dtype("utf-8", length=None))
-                for n in dtypes.names
-            ]
-        )
-        dataset = store[str(mjd, "utf-8")]
-        dataset.resize(dataset.shape[0] + array.shape[0], axis=0)
-        dataset[-array.shape[0] :] = array
-    else:
-        logger.info("adding new data to store")
-        array = metadata.to_records(index=False)
-        dtypes = array.dtype
-        array = array.astype(
-            [
-                (n, dtypes[n])
-                if dtypes[n] != object
-                else (n, h5py.string_dtype("utf-8", length=None))
-                for n in dtypes.names
-            ]
-        )
-        store.create_dataset(
-            name=str(mjd, "utf-8"), data=array, maxshape=(None,), chunks=True
-        )
-
-    # write to disk metadata in HDF5 format
-    logger.info(f"writing metadata to store '{db.access.base_dir}'")
-    store.file.close()
+    db.put_metadata(observatory=observatory, mjd=mjd, metadata=new_metadata)
 
 
 # TODO:
