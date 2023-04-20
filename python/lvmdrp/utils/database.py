@@ -130,6 +130,9 @@ def get_metadata(
 
     # filter by exposure number, spectrograph and/or camera
     query = []
+    if imagetyp is not None:
+        logger.info(f"filtering by {imagetyp = }")
+        query.append("imagetyp == @imagetyp")
     if spec is not None:
         logger.info(f"filtering by {spec = }")
         query.append("spec == @spec")
