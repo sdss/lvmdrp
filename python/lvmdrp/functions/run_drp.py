@@ -8,7 +8,8 @@ from astropy.table import Table
 from lvmdrp.functions.imageMethod import (preproc_raw_frame, create_master_frame,
                                           basic_calibration, find_peaks_auto, trace_peaks,
                                           extract_spectra)
-from lvmdrp.functions.rssMethod import (determine_wavelength_solution, createPixTable_drp, resampleWave_drp)
+from lvmdrp.functions.rssMethod import (determine_wavelength_solution, create_pixel_table,
+                                        resample_wavelength)
 from lvmdrp.utils.examples import get_frames_metadata
 from lvmdrp import config, log, path, __version__ as drpver
 
@@ -39,7 +40,7 @@ def get_config_options(level: str, flavor: str = None) -> dict:
     cfg = config.copy()
     for lvl in level.split('.'):
         cfg = cfg.get(lvl, {})
-    return cfg.get(flavor, {}) if flavor else cfg.get("default", cfg)
+    return cfg.get(flavor, cfg.get("default", {})) if flavor else cfg.get("default", cfg)
 
 
 def create_masters(flavor, frames):
@@ -209,28 +210,27 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
         log.info(f'Output wave peak traceset file: {wave_file}')
         log.info(f'Output lsf traceset file: {lsf_file}')
 
-    # create pixel table
+    # perform wavelength calibration
     wave_file = find_file('wave', mjd=mjd, tileid=tileid, camera=camera)
     lsf_file = find_file('lsf', mjd=mjd, tileid=tileid, camera=camera)
     wout_file = path.full("lvm_anc", kind='w', imagetype=flavor, mjd=mjd, drpver=drpver,
                           camera=camera, tileid=tileid, expnum=expnum)
     log.info('--- Creating pixel table ---')
-    createPixTable_drp(in_rss=xout_file, out_rss=wout_file, arc_wave=wave_file, arc_fwhm=lsf_file)
+    create_pixel_table(in_rss=xout_file, out_rss=wout_file, arc_wave=wave_file, arc_fwhm=lsf_file)
     log.info(f'Output calibrated wavelength file: {wout_file}')
 
     # set wavelength resample params
     CHANNEL_WL = {"b1": (3600, 5930), "r1": (5660, 7720), "z1": (7470, 9800)}
     wave_range = CHANNEL_WL[camera]
 
-    # resample wavelength
+    # resample onto a common wavelength
     hout_file = path.full("lvm_anc", kind='h', imagetype=flavor, mjd=mjd, drpver=drpver,
                           camera=camera, tileid=tileid, expnum=expnum)
     kwargs = get_config_options('reduction_steps.resample_wave', flavor)
     log.info('--- Resampling wavelength grid ---')
     log.info(f'custom configuration parameters for resample_wave: {repr(kwargs)}')
-    resampleWave_drp(in_rss=wout_file, out_rss=hout_file, start_wave=wave_range[0],
-                     end_wave=wave_range[1], disp_pix=1.0, method="linear", err_sim=10,
-                     parallel="auto", extrapolate=True, **kwargs)
+    resample_wavelength(in_rss=wout_file, out_rss=hout_file, start_wave=wave_range[0],
+                        end_wave=wave_range[1], **kwargs)
     log.info(f'Output resampled wave file: {hout_file}')
 
 

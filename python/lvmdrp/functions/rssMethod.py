@@ -34,10 +34,10 @@ description = "Provides Methods to process Row Stacked Spectra (RSS) files"
 
 __all__ = [
     "determine_wavelength_solution",
-    "createPixTable_drp",
+    "create_pixel_table",
     "checkPixTable_drp",
     "correctPixTable_drp",
-    "resampleWave_drp",
+    "resample_wavelength",
     "includePosTab_drp",
 ]
 
@@ -517,7 +517,8 @@ def determine_wavelength_solution(in_arc: str, out_wave: str, out_lsf: str, in_r
 
 # TODO:
 # * merge arc_wave and arc_fwhm into lvmArc product, change variable name to in_arc
-def createPixTable_drp(in_rss, out_rss, arc_wave, arc_fwhm="", cropping=""):
+def create_pixel_table(in_rss: str, out_rss: str, arc_wave: str, arc_fwhm: str = "",
+                       cropping: list = None):
     """
     Applies the wavelength and possibly also the spectral resolution (FWHM) to an RSS
 
@@ -543,9 +544,9 @@ def createPixTable_drp(in_rss, out_rss, arc_wave, arc_fwhm="", cropping=""):
     """
     rss = RSS()
     rss.loadFitsData(in_rss)
-    if cropping != "":
-        crop_start = int(cropping.split(",")[0]) - 1
-        crop_end = int(cropping.split(",")[1]) - 1
+    if cropping:
+        crop_start = int(cropping[0]) - 1
+        crop_end = int(cropping[1]) - 1
     else:
         crop_start = 0
         crop_end = rss._data.shape[1] - 1
@@ -817,20 +818,12 @@ def correctPixTable_drp(
     rss.writeFitsData(out_rss)
 
 
-def resampleWave_drp(
-    in_rss,
-    out_rss,
-    method="spline",
-    start_wave="",
-    end_wave="",
-    disp_pix="",
-    err_sim="500",
-    replace_error="1e10",
-    correctHvel="",
-    compute_densities=0,
-    extrapolate=1,
-    parallel="auto",
-):
+def resample_wavelength(in_rss: str, out_rss: str, method: str = "spline",
+                        start_wave: float = None, end_wave: float = None,
+                        disp_pix: float = None, err_sim: int = 500,
+                        replace_error: float = 1.e10, correctHvel: float = None,
+                        compute_densities: bool = False, extrapolate: bool = True,
+                        parallel: str = "auto"):
     """
     Resamples the RSS wavelength solutions a common wavelength solution for each fiber
 
@@ -873,26 +866,24 @@ def resampleWave_drp(
     user:> lvmdrp rss resampleWave RSS_in.fits RSS_out.fits start_wave=3700.0 /
     > end_wave=7000.0 disp_pix=2.0 err_sim=0
     """
-    err_sim = int(err_sim)
-    replace_error = float(replace_error)
-    compute_densities = bool(compute_densities)
+
     rss = loadRSS(in_rss)
-    # print(rss._error)
-    if start_wave == "":
+
+    if not start_wave:
         start_wave = numpy.min(rss._wave)
     else:
         start_wave = float(start_wave)
-    if disp_pix == "":
+    if not disp_pix:
         disp_pix = numpy.min(rss._wave[:, 1:] - rss._wave[:, :-1])
     else:
         disp_pix = float(disp_pix)
 
-    if end_wave == "":
+    if not end_wave:
         end_wave = numpy.max(rss._wave)
     else:
         end_wave = float(end_wave)
 
-    if correctHvel == "":
+    if not correctHvel:
         offset_vel = 0.0
     else:
         try:

@@ -44,3 +44,10 @@ reduction_steps:
       poly_fwhm: [2, 5]
       aperture: 13
       plot_fig: true
+  resample_wave:
+    default:
+      disp_pix: 1.0
+      method: linear
+      err_sim: 10
+      parallel: auto
+      extrapolate: true
