@@ -9,7 +9,7 @@ from lvmdrp.functions.imageMethod import (preproc_raw_frame, create_master_frame
                                           basic_calibration, find_peaks_auto, trace_peaks,
                                           extract_spectra)
 from lvmdrp.functions.rssMethod import (determine_wavelength_solution, create_pixel_table,
-                                        resample_wavelength)
+                                        resample_wavelength, join_spec_channels)
 from lvmdrp.utils.examples import get_frames_metadata
 from lvmdrp import config, log, path, __version__ as drpver
 

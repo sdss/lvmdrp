@@ -39,6 +39,7 @@ __all__ = [
     "correctPixTable_drp",
     "resample_wavelength",
     "includePosTab_drp",
+    "join_spec_channels"
 ]
 
 
@@ -2564,7 +2565,7 @@ def DAR_registerSDSS_drp(
         plt.show()
 
 
-def joinSpecChannels(in_rss, out_rss, parallel="auto"):
+def join_spec_channels(in_rss: list, out_rss: list, parallel: str = "auto"):
     """combine the given RSS list through the overlaping wavelength range
 
     Parameters
@@ -2576,9 +2577,16 @@ def joinSpecChannels(in_rss, out_rss, parallel="auto"):
     parallel : str, optional
         whether to run in parallel or not, by default "auto"
     """
-    rss_b = loadRSS(in_rss[0])
-    rss_r = loadRSS(in_rss[1])
-    rss_z = loadRSS(in_rss[2])
+    rss_b = loadRSS(in_rss[0]) if in_rss[0] else None
+    rss_r = loadRSS(in_rss[1]) if in_rss[1] else None
+    rss_z = loadRSS(in_rss[2]) if in_rss[2] else None
+
+    if not all([rss_b, rss_r, rss_z]):
+        log.error('Not all cameras provided.  Cannot combine right now.')
+        return
+
+    # select one of them
+    rr = rss_b or rss_r or rss_z
 
     # TODO: verify all RSS files have the same number of fibers
     # TODO: verify overlapping wavelength ranges
@@ -2592,10 +2600,10 @@ def joinSpecChannels(in_rss, out_rss, parallel="auto"):
         pool = Pool(cpus)
 
         result_spec = []
-        for ifiber in range(rss_b._fibers):
-            spec_b = rss_b.getSpec(ifiber)
-            spec_r = rss_r.getSpec(ifiber)
-            spec_z = rss_z.getSpec(ifiber)
+        for ifiber in range(rr._fibers):
+            spec_b = rss_b.getSpec(ifiber) if rss_b else None
+            spec_r = rss_r.getSpec(ifiber) if rss_r else None
+            spec_z = rss_z.getSpec(ifiber) if rss_z else None
 
             result_spec.append(
                 pool.apply_async(_chain_join, args=(spec_b, spec_r, spec_z))
@@ -2605,13 +2613,13 @@ def joinSpecChannels(in_rss, out_rss, parallel="auto"):
 
     # combine channels
     spectra = []
-    for ifiber in range(rss_b._data.shape[0]):
+    for ifiber in range(rr._data.shape[0]):
         if cpus > 1:
             spec_brz = result_spec[ifiber].get()
         else:
-            spec_b = rss_b.getSpec(ifiber)
-            spec_r = rss_r.getSpec(ifiber)
-            spec_z = rss_z.getSpec(ifiber)
+            spec_b = rss_b.getSpec(ifiber) if rss_b else None
+            spec_r = rss_r.getSpec(ifiber) if rss_r else None
+            spec_z = rss_z.getSpec(ifiber) if rss_z else None
 
             spec_br = spec_b.coaddSpec(spec_r)
             spec_brz = spec_br.coaddSpec(spec_z)
