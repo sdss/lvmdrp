@@ -7,13 +7,15 @@
 # @Copyright: SDSS-V LVM
 
 import os
+from tqdm import tqdm
+from astropy.io import fits
 
 import h5py
 import numpy as np
 import pandas as pd
 
 from lvmdrp.core.constants import CALIBRATION_TYPES, FRAMES_CALIB_NEEDS
-from lvmdrp.utils.bitmask import ReductionStage
+from lvmdrp.utils.bitmask import ReductionStage, ReductionStatus, QualityFlag
 from lvmdrp.utils.logger import get_logger
 
 # NOTE: replace these lines with Brian's integration of sdss_access and sdss_tree
@@ -125,7 +127,7 @@ def _load_or_create_store(observatory, overwrite=False):
     Parameters
     ----------
     observatory: str
-        name of the observatory from which data will be retrieved/cached
+        name of the observatory from/for which data will be retrieved/cached
     overwrite: bool, optional
         whether to overwrite the store or not, by default False
 
@@ -157,8 +159,98 @@ def _load_or_create_store(observatory, overwrite=False):
     return store[observatory]
 
 
-def record_db(config, target_paths=None, ignore_cache=False):
-    pass
+def extract_metadata(mjd, frames_indices):
+    new_metadata = {}
+    # extract metadata
+    nfilter_frames = len(frames_indices)
+    logger.info(f"extracting metadata from {nfilter_frames} frames")
+    iterator = tqdm(
+        enumerate(frames_indices),
+        total=nfilter_frames,
+        desc=f"extracting metadata from MJD = {mjd}",
+        ascii=True,
+        unit="file",
+    )
+    for i, (frame_path, (mjd, camera, expnum)) in iterator:
+        header = fits.getheader(frame_path, ext=0)
+        row = [
+            mjd,
+            "s",
+            camera,
+            expnum,
+            header.get("IMAGETYP"),
+            int(camera.decode("utf-8")[-1]),
+            header.get("EXPTIME"),
+            QualityFlag(0),
+            ReductionStage.UNREDUCED,
+            ReductionStatus(0),
+        ]
+        new_metadata[i] = row
+
+    # set index
+    new_metadata = pd.DataFrame.from_dict(new_metadata, orient="index")
+    new_metadata.columns = [
+        "mjd",
+        "hemi",
+        "camera",
+        "expnum",
+        "imagetyp",
+        "spec",
+        "exptime",
+        "quality",
+        "stage",
+        "status",
+    ]
+    return new_metadata
+
+
+def put_metadata(observatory, mjd, metadata):
+    """add new metadata to store
+
+    Parameters
+    ----------
+    observatory: str
+        name of the observatory for which data will be cached
+    mjd : int
+        MJD where the target frames is located
+    metadata : pandas.DataFrame
+        dataframe to containing new metadata to add to store
+    """
+    store = _load_or_create_store(observatory=observatory)
+    raw = store["raw"]
+
+    if str(mjd) in raw:
+        logger.info("updating store with new metadata")
+        array = metadata.to_records(index=False)
+        dtypes = array.dtype
+        array = array.astype(
+            [
+                (n, dtypes[n])
+                if dtypes[n] != object
+                else (n, h5py.string_dtype("utf-8", length=None))
+                for n in dtypes.names
+            ]
+        )
+        dataset = raw[str(mjd)]
+        dataset.resize(dataset.shape[0] + array.shape[0], axis=0)
+        dataset[-array.shape[0] :] = array
+    else:
+        logger.info("adding new data to store")
+        array = metadata.to_records(index=False)
+        dtypes = array.dtype
+        array = array.astype(
+            [
+                (n, dtypes[n])
+                if dtypes[n] != object
+                else (n, h5py.string_dtype("utf-8", length=None))
+                for n in dtypes.names
+            ]
+        )
+        raw.create_dataset(name=str(mjd), data=array, maxshape=(None,), chunks=True)
+
+    # write to disk metadata in HDF5 format
+    logger.info(f"writing metadata to store '{access.base_dir}'")
+    store.file.close()
 
 
 def get_metadata(
