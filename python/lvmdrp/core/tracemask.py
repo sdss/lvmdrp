@@ -1,3 +1,6 @@
+#!/usr/bin/env python
+# encoding: utf-8
+
 import matplotlib.pyplot as plt
 import numpy
 from numpy import polynomial

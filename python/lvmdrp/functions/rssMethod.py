@@ -1,3 +1,6 @@
+#!/usr/bin/env python
+# encoding: utf-8
+
 import os
 from multiprocessing import Pool, cpu_count
 

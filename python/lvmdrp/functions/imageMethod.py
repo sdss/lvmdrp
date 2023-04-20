@@ -1,5 +1,9 @@
+#!/usr/bin/env python
+# encoding: utf-8
+
 import multiprocessing
 import os
+import pathlib
 import sys
 from multiprocessing import Pool, cpu_count
 
@@ -2707,6 +2711,8 @@ def preproc_raw_frame(in_image: str, kind: str = 'p', flavor: str = 'bias',
     output_file = path.full('lvm_anc', kind=kind, imagetype=flavor, mjd=mjd,
                             camera=camera, drpver=drpver, expnum=expnum,
                             tileid=tileid)
+    if not pathlib.Path(output_file).parent.exists():
+        pathlib.Path(output_file).parent.mkdir(parents=True, exist_ok=True)
 
     # header quick check
     if 'IMAGETYP' not in hdr:
