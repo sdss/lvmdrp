@@ -266,13 +266,19 @@ def get_master_metadata(target_metadata, masters_metadata):
     """
     # retrieve calibration needs
     frame_needs = FRAMES_CALIB_NEEDS.get(target_metadata.imagetyp)
+    logger.info(
+        (
+            f"target frame of type '{target_metadata.imagetyp}' "
+            f"needs calibration frames: {', '.join(frame_needs) or None}"
+        )
+    )
     # raise error in case current frame is not recognized in FRAMES_CALIB_NEEDS
     if frame_needs is None:
         logger.error(
             f"no calibration frames found for '{target_metadata.imagetyp}' type"
         )
 
-    calib_frames = dict.fromkeys(frame_needs)
+    calib_frames = dict.fromkeys(CALIBRATION_TYPES)
     # handle empty list cases (e.g., bias)
     if not frame_needs:
         return calib_frames

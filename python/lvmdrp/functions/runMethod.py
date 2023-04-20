@@ -180,9 +180,12 @@ def metadataCaching_drp(observatory, mjd, overwrite="0"):
     store = db._load_or_create_store(
         observatory=observatory, overwrite=bool(int(overwrite))
     )
+    # focus on raw frames metadata
+    raw = store["raw"]
+
     # get existing metadata
-    if str(mjd) in store.keys():
-        metadata_old = store[str(mjd)][()][["mjd", "camera", "expnum"]].tolist()
+    if str(mjd) in raw.keys():
+        metadata_old = raw[str(mjd)][()][["mjd", "camera", "expnum"]].tolist()
     else:
         metadata_old = []
 
