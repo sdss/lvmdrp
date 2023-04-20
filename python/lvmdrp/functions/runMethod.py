@@ -42,17 +42,12 @@ import os
 import re
 from copy import deepcopy as copy
 
-import h5py
 import numpy as np
-import pandas as pd
 import yaml
-from astropy.io import fits
-from tqdm import tqdm
 
 import lvmdrp
 import lvmdrp.utils.database as db
 from lvmdrp.core.constants import CONFIG_PATH, DATAPRODUCT_BP_PATH
-from lvmdrp.utils.bitmask import ReductionStatus, ReductionStage, QualityFlag
 from lvmdrp.utils.configuration import load_master_config
 from lvmdrp.utils.logger import get_logger
 
@@ -176,56 +171,62 @@ def metadataCaching_drp(observatory, mjd, overwrite="0"):
         whether to overwrite the metadata table or not, by default False
     """
 
-    # get existing metadata
-    if not bool(int(overwrite)) == 1:
-        stored_indices = db.get_metadata(observatory=observatory, mjd=mjd)[
-            ["mjd", "camera", "expnum"]
-        ].values.tolist()
-    else:
-        db.del_metadata(observatory=observatory, mjd=mjd)
-        stored_indices = []
+    mjds = list(map(lambda s: int(s), mjd.split(",")))
 
-    # filter frames path list
-    frames_paths = db.path.expand(
-        "lvm_raw", hemi="s", mjd=mjd, camspec="*", expnum="???"
-    )
-    local_indices = [
-        (
-            x["mjd"].encode("utf-8"),
-            x["camspec"].encode("utf-8"),
-            x["expnum"].encode("utf-8"),
-        )
-        for x in map(
-            lambda frame_path: db.path.extract("lvm_raw", frame_path), frames_paths
-        )
-    ]
-    ntotal_frames = len(local_indices)
-    # filter out frames in store
-    in_store = np.isin(local_indices, stored_indices).all(axis=1)
-    new_indices = list(
-        zip(
-            np.asarray(frames_paths)[~in_store],
-            np.asarray(local_indices)[~in_store],
-        )
-    )
-    nfilter_frames = len(new_indices)
+    for mjd in mjds:
+        logger.info(f"locating local data for MJD = {mjd}")
+        # get existing metadata
+        if not bool(int(overwrite)) == 1:
+            stored_indices = db.get_metadata(observatory=observatory, mjd=mjd)[
+                ["mjd", "camera", "expnum"]
+            ].values.tolist()
+        else:
+            db.del_metadata(observatory=observatory, mjd=mjd)
+            stored_indices = []
 
-    logger.info(
-        (
-            f"found new {ntotal_frames}, skipping {ntotal_frames-nfilter_frames} "
-            f"({(ntotal_frames-nfilter_frames)/ntotal_frames*100:g} %) "
-            "already present in store"
+        # locate local raw frames
+        frames_paths = db.path.expand(
+            "lvm_raw", hemi="s", mjd=mjd, camspec="*", expnum="???"
         )
-    )
-    if nfilter_frames == 0:
-        return
+        # define index (mjd, camera and expnum) for each existing frame
+        local_indices = [
+            (
+                x["mjd"].encode("utf-8"),
+                x["camspec"].encode("utf-8"),
+                x["expnum"].encode("utf-8"),
+            )
+            for x in map(
+                lambda frame_path: db.path.extract("lvm_raw", frame_path), frames_paths
+            )
+        ]
+        # filter out frames in store
+        in_store = np.isin(local_indices, stored_indices).all(axis=1)
+        new_indices = list(
+            zip(
+                np.asarray(frames_paths)[~in_store],
+                np.asarray(local_indices)[~in_store],
+            )
+        )
 
-    # extract metadata
-    new_metadata = db.extract_metadata(mjd=mjd, frames_indices=new_indices)
-    logger.info("successfully extracted metadata")
+        ntotal_frames = len(local_indices)
+        nfilter_frames = len(new_indices)
 
-    # merge metadata with existing one
-    db.put_metadata(observatory=observatory, mjd=mjd, metadata=new_metadata)
+        logger.info(
+            (
+                f"found new {ntotal_frames}, skipping {ntotal_frames-nfilter_frames} "
+                f"({(ntotal_frames-nfilter_frames)/ntotal_frames*100:g} %) "
+                "already present in store"
+            )
+        )
+        if nfilter_frames == 0:
+            continue
+
+        # extract metadata
+        new_metadata = db.extract_metadata(mjd=mjd, frames_indices=new_indices)
+        logger.info(f"successfully extracted metadata for MJD = {mjd}")
+
+        # merge metadata with existing one
+        db.put_metadata(observatory=observatory, mjd=mjd, metadata=new_metadata)
 
 
 # TODO:
