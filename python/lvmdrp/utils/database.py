@@ -253,6 +253,18 @@ def put_metadata(observatory, mjd, metadata):
     store.file.close()
 
 
+def del_metadata(observatory, mjd=None):
+    if mjd is None:
+        store = _load_or_create_store(observatory=observatory, overwrite=True)
+    else:
+        store = _load_or_create_store(observatory=observatory)
+        # BUG: this isn't working
+        if f"raw/{mjd}" in store.keys():
+            del store[f"raw/{mjd}"], store[f"master/{mjd}"]
+
+    store.file.close()
+
+
 def get_metadata(
     observatory="lco",
     imagetyp=None,
