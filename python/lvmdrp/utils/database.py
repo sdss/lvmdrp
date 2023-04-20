@@ -254,13 +254,23 @@ def put_metadata(observatory, mjd, metadata):
 
 
 def del_metadata(observatory, mjd=None):
+    """delete dataset(s) from a target store
+
+    Parameters
+    ----------
+    observatory: str
+        name of the observatory for which data will be cached
+    mjd : int
+        MJD where the target dataset is located
+    """
     if mjd is None:
         store = _load_or_create_store(observatory=observatory, overwrite=True)
     else:
         store = _load_or_create_store(observatory=observatory)
-        # BUG: this isn't working
-        if f"raw/{mjd}" in store.keys():
-            del store[f"raw/{mjd}"], store[f"master/{mjd}"]
+        if f"raw/{mjd}" in store:
+            del store[f"raw/{mjd}"]
+        if f"master/{mjd}" in store:
+            del store[f"master/{mjd}"]
 
     store.file.close()
 
