@@ -3,6 +3,8 @@
 
 import os
 import pathlib
+import yaml
+from astropy.table import Table
 from lvmdrp.functions.imageMethod import (preproc_raw_frame, create_master_frame,
                                           basic_calibration, find_peaks_auto, trace_peaks,
                                           extract_spectra)
@@ -98,7 +100,7 @@ def trace_fibers(in_file, camera, expnum, tileid, mjd):
 
 
 def find_file(kind, camera=None, mjd=None, tileid=None):
-    files = sorted(path.expand('lvm_cal', kind='trace', drpver=drpver, mjd=mjd, tileid=tileid,
+    files = sorted(path.expand('lvm_cal', kind=kind, drpver=drpver, mjd=mjd, tileid=tileid,
                    camera=camera, expnum='****', ext='fits'))
     if not files:
         log.warning(f"No {kind} files found for {tileid}, {mjd}, {camera}.  Discontinuing reduction.")
@@ -259,6 +261,9 @@ def run_drp(mjd: int = None, bias: bool = False, dark: bool = False,
     skip_bd : bool, optional
         Flag to skip reduction of bias/darks
     """
+    # write the drp parameter configuration
+    write_config_file()
+
     # find files
     frames = get_frames_metadata(mjd=mjd)
     sub = frames.copy()
@@ -309,6 +314,10 @@ def run_drp(mjd: int = None, bias: bool = False, dark: bool = False,
     # group the frames
     sub = sub.group_by(['expnum', 'camera'])
 
+    # sort the table by flat, arc, science
+    if not only_sci:
+        sub = sort_cals(sub)
+
     # reduce remaining files
     for frame in sub:
         # skip bad or test quality
@@ -346,3 +355,18 @@ def start_logging(mjd: int, tileid: int):
         logpath.parent.mkdir(parents=True, exist_ok=True)
 
     log.start_file_logger(logpath)
+
+
+def write_config_file():
+    """ Write out the DRP configuration file """
+    cpath = pathlib.Path(os.getenv('LVM_SPECTRO_REDUX')) / drpver / f"lvm-config-{drpver}.yaml"
+    with open(cpath, 'w') as f:
+        f.write(yaml.safe_dump(dict(config), sort_keys=False, indent=2))
+
+
+def sort_cals(table: Table) -> Table:
+    """ sort the astropy table by flat, arcs, sci """
+    df = table.to_pandas()
+    ss = df.sort_values(['camera', 'expnum'])
+    ee = ss.set_index('imagetyp', drop=False).loc[['flat', 'arc', 'object']].reset_index(drop=True)
+    return table.from_pandas(ee)
