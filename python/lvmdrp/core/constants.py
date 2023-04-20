@@ -101,13 +101,13 @@ SKYCORR_PAR_MAP = {
 }
 
 BASIC_CALIBRATION_TYPES = ["bias", "dark", "pixelflat"]
-CALIBRATION_TYPES = BASIC_CALIBRATION_TYPES + ["fiberflat", "arc"]
+CALIBRATION_TYPES = BASIC_CALIBRATION_TYPES + ["flat", "arc"]
 FRAMES_PRIORITY = CALIBRATION_TYPES + ["object"]
 FRAMES_CALIB_NEEDS = {
     "bias": [],
     "dark": ["bias"],
     "pixelflat": ["bias", "dark"],
-    "fiberflat": ["bias", "dark", "flat"],
-    "arc": ["bias", "dark", "flat", "fiberflat"],
-    "object": ["bias", "dark", "flat", "fiberflat", "arc"],
+    "flat": ["bias", "dark", "pixelflat"],
+    "arc": ["bias", "dark", "pixelflat", "flat"],
+    "object": ["bias", "dark", "pixelflat", "flat", "arc"],
 }

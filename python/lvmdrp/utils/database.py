@@ -63,7 +63,8 @@ def _load_or_create_store(observatory, overwrite=False):
 
     # add observatory group if needed
     if observatory not in store:
-        store.create_group(observatory)
+        store.create_group(f"{observatory}/raw")
+        store.create_group(f"{observatory}/master")
 
     return store[observatory]
 
@@ -74,6 +75,7 @@ def record_db(config, target_paths=None, ignore_cache=False):
 
 def get_metadata(
     observatory="lco",
+    return_masters=False,
     imagetyp=None,
     mjd=None,
     expnum=None,
@@ -89,6 +91,8 @@ def get_metadata(
     ----------
     observatory : str
         observatory where the data was observed
+    return_masters : bool
+        whether the target frames are master calibration frames or not, by default False
     imagetyp : str, optional
         type/flavor of frame to locate `IMAGETYP`, by default None
     mjd : int, optional
@@ -111,12 +115,20 @@ def get_metadata(
 
     # extract MJD if given, else extract all MJDs
     if mjd is not None:
-        metadata = pd.DataFrame(store[str(mjd)][()])
+        metadata = pd.DataFrame(store[f"raw/{mjd}"][()])
     else:
-        metadata = []
+        metadata = pd.DataFrame()
         for mjd in store.keys():
             metadata.append(store[mjd])
         metadata = pd.DataFrame(np.concatenate(metadata, axis=0))
+
+    # retreive master calibration frames if requested
+    if return_masters:
+        try:
+            master_metadata = pd.DataFrame(store[f"master/{mjd}"][()])
+        except KeyError:
+            master_metadata = pd.DataFrame()
+
     # close store
     store.file.close()
 
@@ -125,6 +137,12 @@ def get_metadata(
         lambda s: s.str.decode("utf-8"), axis="columns"
     )
     metadata[metadata_str.columns] = metadata_str
+
+    master_str = master_metadata.select_dtypes(object).apply(
+        lambda s: s.str.decode("utf-8"), axis="columns"
+    )
+    master_metadata[master_str.columns] = master_str
+    del metadata_str, master_str
 
     logger.info(f"found {len(metadata)} frames in store")
 
@@ -158,6 +176,8 @@ def get_metadata(
 
     logger.info(f"final number of frames after filtering {len(metadata)}")
 
+    if return_masters:
+        return metadata, master_metadata
     return metadata
 
 
