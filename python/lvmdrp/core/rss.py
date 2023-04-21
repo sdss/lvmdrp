@@ -10,9 +10,16 @@ from lvmdrp.core.positionTable import PositionTable
 from lvmdrp.core.spectrum1d import Spectrum1D
 
 
-def _chain_join(b, r, z):
-    return b.coaddSpec(r).coaddSpec(z)
+# def _chain_join(b, r, z):
+#     return b.coaddSpec(r).coaddSpec(z)
 
+
+def _chain_join(b, r, z):
+    ii = [i for i in [b, r, z] if i]
+    x = ii[0]
+    for e in ii[1:]:
+        x.coaddSpec(e)
+    return x
 
 class RSS(FiberRows):
     @classmethod

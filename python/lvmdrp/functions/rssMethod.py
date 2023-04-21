@@ -2568,6 +2568,12 @@ def DAR_registerSDSS_drp(
 def join_spec_channels(in_rss: list, out_rss: list, parallel: str = "auto"):
     """combine the given RSS list through the overlaping wavelength range
 
+    Run once per exposure, for one spectrograph at a time.
+    in_rss is a list of 3 files, one for each channel, for a given
+    exposure and spectrograph id.
+
+    #TODO refactor this code - vectorize the fiber coadds
+
     Parameters
     ----------
     in_rss : array_like
@@ -2580,10 +2586,6 @@ def join_spec_channels(in_rss: list, out_rss: list, parallel: str = "auto"):
     rss_b = loadRSS(in_rss[0]) if in_rss[0] else None
     rss_r = loadRSS(in_rss[1]) if in_rss[1] else None
     rss_z = loadRSS(in_rss[2]) if in_rss[2] else None
-
-    if not all([rss_b, rss_r, rss_z]):
-        log.error('Not all cameras provided.  Cannot combine right now.')
-        return
 
     # select one of them
     rr = rss_b or rss_r or rss_z
@@ -2621,15 +2623,16 @@ def join_spec_channels(in_rss: list, out_rss: list, parallel: str = "auto"):
             spec_r = rss_r.getSpec(ifiber) if rss_r else None
             spec_z = rss_z.getSpec(ifiber) if rss_z else None
 
-            spec_br = spec_b.coaddSpec(spec_r)
-            spec_brz = spec_br.coaddSpec(spec_z)
+            #spec_br = spec_b.coaddSpec(spec_r)
+            #spec_brz = spec_br.coaddSpec(spec_z)
+            spec_brz = _chain_join(spec_b, spec_r, spec_z)
 
         spectra.append(spec_brz)
 
     # update header
-    header = rss_b._header
+    header = rr._header.copy()
     header["CCD"] = ",".join(
-        [rss_b._header["CCD"], rss_r._header["CCD"], rss_z._header["CCD"]]
+        [i._header["CCD"] for i in [rss_b, rss_r, rss_z] if i]
     )
     if "CAMERAS" in header:
         header["CAMERAS"] = header["CCD"].translate({ord(i): None for i in "123"})

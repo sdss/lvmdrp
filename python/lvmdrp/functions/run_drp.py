@@ -335,12 +335,14 @@ def run_drp(mjd: int = None, bias: bool = False, dark: bool = False,
                      expnum=frame['expnum'], tileid=frame['tileid'],
                      flavor=frame['imagetyp'])
 
+    # TODO - check for single elements
+    mjd = list(set(sub['mjd']))[0]
+    tileid = list(set(sub['tileid']))[0]
+
     # perform camera combination
-    # perform camera combination
-    # log.info('--- Combining spec. cameras ---')
-    # kwargs = get_config_options('reduction_steps.combine_cameras')
-    # log.info(f'custom configuration parameters for combine cameras: {repr(kwargs)}')
-    # join_spec_channels(in_rss=[], out_rss=[], **kwargs)
+    combine_cameras(tileid, mjd, spec=1)
+    combine_cameras(tileid, mjd, spec=2)
+    combine_cameras(tileid, mjd, spec=3)
 
     # perform sky subtraction
 
@@ -395,3 +397,43 @@ def find_best_mdark(tileid: int, mjd: int, camera: str) -> str:
                         camera=camera, tileid=tileid, exptime="*")
 
     return max(darks, key=lambda x: int(pathlib.Path(x).stem.rsplit('-', 1)[-1]))
+
+
+def _parse_expnum_cam(name):
+    pp = pathlib.Path(name).stem
+    ss = pp.split('-')
+    return int(ss[-1]), ss[-2]
+
+
+def combine_cameras(tileid, mjd, spec: int = 1):
+    from itertools import groupby
+
+    # pattern = f'*hobject-*-*{spec}-*'
+    # hfiles = sorted(list(pathlib.Path(os.getenv('LVM_SPECTRO_REDUX')).rglob(pattern)),
+    #                 key=_parse_expnum_cam)
+
+    hfiles = path.expand('lvm_anc', mjd=mjd, tileid=tileid, drpver=drpver,
+                         imagetype='object', expnum='****', kind='h', camera=f'*{spec}')
+    hfiles = map(pathlib.Path, sorted(hfiles, key=_parse_expnum_cam))
+
+    log.info(f'--- Combining cameras from spec {spec} ---')
+    kwargs = get_config_options('reduction_steps.combine_cameras')
+    log.info(f'custom configuration parameters for combine cameras: {repr(kwargs)}')
+
+    m = [f'b{spec}', f'r{spec}', f'z{spec}']
+
+    for key, exps in groupby(hfiles, lambda x: int(x.stem.split('-')[-1])):
+        log.info(f'combining cameras for exposure {key}')
+
+        bout_file = path.full('lvm_anc', mjd=mjd, tileid=tileid, drpver=drpver,
+                              imagetype='object', expnum=key, kind='b', camera=f'sp{spec}')
+
+        # pad the exposure list for missing cameras
+        exps = list(exps)
+        if len(exps) == 2:
+            x = [any(e.match(f'*{n}*') for e in exps) for n in m]
+            exps.insert(x.index(False), None)
+
+        join_spec_channels(in_rss=list(exps), out_rss=bout_file, **kwargs)
+        log.info(f'Output combined camera file: {bout_file}')
+
