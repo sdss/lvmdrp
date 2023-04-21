@@ -244,51 +244,62 @@ def extract_metadata(mjd, frames_paths):
     return new_metadata
 
 
-def put_metadata(observatory, mjd, metadata):
+def add_metadata(
+    metadata,
+    mjd,
+    observatory="lco",
+    kind="raw",
+):
     """add new metadata to store
 
     Parameters
     ----------
-    observatory: str
-        name of the observatory for which data will be cached
-    mjd : int
-        MJD where the target frames is located
     metadata : pandas.DataFrame
         dataframe to containing new metadata to add to store
+    mjd : int
+        MJD where the target frames is located
+    observatory: str, optional
+        name of the observatory for which data will be cached, by default 'lco'
     """
-    store = _load_or_create_store(observatory=observatory)
-    raw = store["raw"]
 
-    if str(mjd) in raw:
-        logger.info("updating store with new metadata")
-        array = metadata.to_records(index=False)
-        dtypes = array.dtype
-        array = array.astype(
-            [
-                (n, dtypes[n])
-                if dtypes[n] != object
-                else (n, h5py.string_dtype("utf-8", length=None))
-                for n in dtypes.names
-            ]
+    # extract target dataset from store
+    store = _load_or_create_store(observatory=observatory)
+    if kind not in ["raw", "master"]:
+        logger.warning(
+            f"unrecognised dataset {kind = }, falling back to kind = 'master'"
         )
-        dataset = raw[str(mjd)]
+        kind = "master"
+    dataset = store[kind]
+
+    # prepare metadata to be added to the store
+    if kind == "raw":
+        columns = list(zip(*RAW_METADATA_COLUMNS))[0]
+        array = metadata.filter(items=columns).to_records(index=False)
+    else:
+        columns = list(zip(*MASTER_METADATA_COLUMNS))[0]
+        array = metadata.filter(items=columns).to_records(index=False)
+
+    # convert to proper dtypes
+    dtypes = array.dtype
+    array = array.astype(
+        [
+            (n, dtypes[n])
+            if dtypes[n] != object
+            else (n, h5py.string_dtype("utf-8", length=None))
+            for n in dtypes.names
+        ]
+    )
+
+    if str(mjd) in dataset:
+        logger.info("updating store with new metadata")
+        dataset = dataset[str(mjd)]
         dataset.resize(dataset.shape[0] + array.shape[0], axis=0)
         dataset[-array.shape[0] :] = array
     else:
         logger.info("adding new data to store")
-        array = metadata.to_records(index=False)
-        dtypes = array.dtype
-        array = array.astype(
-            [
-                (n, dtypes[n])
-                if dtypes[n] != object
-                else (n, h5py.string_dtype("utf-8", length=None))
-                for n in dtypes.names
-            ]
-        )
-        raw.create_dataset(name=str(mjd), data=array, maxshape=(None,), chunks=True)
+        dataset.create_dataset(name=str(mjd), data=array, maxshape=(None,), chunks=True)
 
-    # write to disk metadata in HDF5 format
+    # write metadata in HDF5 format
     logger.info(f"writing metadata to store '{access.base_dir}'")
     store.file.close()
 
