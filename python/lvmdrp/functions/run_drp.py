@@ -4,6 +4,7 @@
 import os
 import pathlib
 import yaml
+import pandas as pd
 from astropy.table import Table
 from lvmdrp.functions.imageMethod import (preproc_raw_frame, create_master_frame,
                                           basic_calibration, find_peaks_auto, trace_peaks,
@@ -86,6 +87,10 @@ def trace_fibers(in_file, camera, expnum, tileid, mjd):
                           expnum=expnum, kind='peaks', ext='txt')
     out_trace = path.full("lvm_cal", drpver=drpver, tileid=tileid, mjd=mjd, camera=camera,
                           expnum=expnum, kind='trace', ext='fits')
+
+    if os.path.exists(out_trace):
+        log.info('Trace file already exists.')
+        return
 
     log.info('--- Running auto peak finder ---')
     kwargs = get_config_options('reduction_steps.find_peaks_auto')
@@ -176,8 +181,8 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
     log.info(f'Output calibrated file: {out_cal}')
 
     # fiber tracing
-    log.info('--- Running fiber trace ---')
-    if 'flat' in flavor and not camera.startswith('b') and camera.endswith('1'):
+    if 'flat' in flavor:  # and not camera.startswith('b') and camera.endswith('1'):
+        log.info('--- Running fiber trace ---')
         trace_fibers(out_cal, camera, expnum, tileid, mjd)
 
     # extract fiber spectra
@@ -214,6 +219,8 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
     # perform wavelength calibration
     wave_file = find_file('wave', mjd=mjd, tileid=tileid, camera=camera)
     lsf_file = find_file('lsf', mjd=mjd, tileid=tileid, camera=camera)
+    if not (wave_file and lsf_file):
+        return
     wout_file = path.full("lvm_anc", kind='w', imagetype=flavor, mjd=mjd, drpver=drpver,
                           camera=camera, tileid=tileid, expnum=expnum)
     log.info('--- Creating pixel table ---')
@@ -233,12 +240,6 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
     resample_wavelength(in_rss=wout_file, out_rss=hout_file, start_wave=wave_range[0],
                         end_wave=wave_range[1], **kwargs)
     log.info(f'Output resampled wave file: {hout_file}')
-
-    # perform camera combination
-    # log.info('--- Combining spec. cameras ---')
-    # kwargs = get_config_options('reduction_steps.combine_cameras')
-    # log.info(f'custom configuration parameters for combine cameras: {repr(kwargs)}')
-    # join_spec_channels(in_rss=[], out_rss=[], **kwargs)
 
     # write out RSS
 
@@ -318,7 +319,7 @@ def run_drp(mjd: int = None, bias: bool = False, dark: bool = False,
     # group the frames
     sub = sub.group_by(['expnum', 'camera'])
 
-    # sort the table by flat, arc, science
+    # sort the table by flat, arc, flat, science
     if not only_sci:
         sub = sort_cals(sub)
 
@@ -333,6 +334,17 @@ def run_drp(mjd: int = None, bias: bool = False, dark: bool = False,
                      mjd=frame['mjd'],
                      expnum=frame['expnum'], tileid=frame['tileid'],
                      flavor=frame['imagetyp'])
+
+    # perform camera combination
+    # perform camera combination
+    # log.info('--- Combining spec. cameras ---')
+    # kwargs = get_config_options('reduction_steps.combine_cameras')
+    # log.info(f'custom configuration parameters for combine cameras: {repr(kwargs)}')
+    # join_spec_channels(in_rss=[], out_rss=[], **kwargs)
+
+    # perform sky subtraction
+
+    # perform flux calibration
 
 
 def start_logging(mjd: int, tileid: int):
@@ -372,8 +384,10 @@ def sort_cals(table: Table) -> Table:
     """ sort the astropy table by flat, arcs, sci """
     df = table.to_pandas()
     ss = df.sort_values(['camera', 'expnum'])
-    ee = ss.set_index('imagetyp', drop=False).loc[['flat', 'arc', 'object']].reset_index(drop=True)
-    return table.from_pandas(ee)
+    ee = ss.set_index('imagetyp', drop=False).loc[['flat', 'arc', 'object']]
+    calibs = pd.concat([ee.loc[['flat', 'arc']], ee.loc['flat']]).reset_index(drop=True)
+    new = pd.concat([calibs, ee.loc['object']]).reset_index(drop=True)
+    return table.from_pandas(new)
 
 
 def find_best_mdark(tileid: int, mjd: int, camera: str) -> str:
