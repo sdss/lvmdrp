@@ -2693,7 +2693,7 @@ def preproc_raw_frame(in_image: str, kind: str = 'p', flavor: str = 'bias',
                       os_bound_x: str = "2044,2077", os_bound_y: str = "1,4080",
                       compute_error: bool = True, assume_gain: float = 1.0,
                       assume_rdnoise: int = 5, gain_field: str = 'GAIN',
-                      rdnoise_field: str = "RDNOISE", unit: str = None,
+                      rdnoise_field: str = "RDNOISE", unit: str = "electron",
                       plot_fig: bool = False, show_fig: bool = False):
 
     # convert input parameters to proper type
