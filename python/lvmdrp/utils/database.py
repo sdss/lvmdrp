@@ -28,6 +28,37 @@ access = Access(release="sdss5")
 access.set_base_dir()
 # -------------------------------------------------------------------------------
 
+RAW_METADATA_COLUMNS = [
+    ("hemi", str),
+    ("imagetyp", str),
+    ("camera", str),
+    ("expnum", int),
+    ("exptime", float),
+    ("neon", bool),
+    ("hgne", bool),
+    ("krypton", bool),
+    ("xenon", bool),
+    ("ldls", bool),
+    ("quartz", bool),
+    ("quality", QualityFlag),
+    ("stage", ReductionStage),
+    ("status", ReductionStatus),
+]
+MASTER_METADATA_COLUMNS = [
+    ("imagetyp", str),
+    ("camera", str),
+    ("exptime", float),
+    ("neon", bool),
+    ("hgne", bool),
+    ("krypton", bool),
+    ("xenon", bool),
+    ("ldls", bool),
+    ("quartz", bool),
+    ("quality", QualityFlag),
+    ("stage", ReductionStage),
+    ("status", ReductionStatus),
+]
+
 
 logger = get_logger(__name__)
 
@@ -159,48 +190,57 @@ def _load_or_create_store(observatory, overwrite=False):
     return store[observatory]
 
 
-def extract_metadata(mjd, frames_indices):
+def extract_metadata(mjd, frames_paths):
+    """return dataframe with metadata extracted from given frames list
+
+    this function will extract metadata from FITS headers given a list of
+    frames.
+
+    Parameters
+    ----------
+    mjd : int
+        MJD from which the metadata will be extracted
+    frames_paths : list_like
+        list of frames paths in the local mirror of SAS
+
+    Returns
+    -------
+    pandas.DataFrame
+        dataframe containing the extracted metadata
+    """
     new_metadata = {}
     # extract metadata
-    nfilter_frames = len(frames_indices)
-    logger.info(f"extracting metadata from {nfilter_frames} frames")
+    nframes = len(frames_paths)
+    logger.info(f"extracting metadata from {nframes} frames")
     iterator = tqdm(
-        enumerate(frames_indices),
-        total=nfilter_frames,
+        enumerate(frames_paths),
+        total=nframes,
         desc=f"extracting metadata from MJD = {mjd}",
         ascii=True,
-        unit="file",
+        unit="frame",
     )
-    for i, (frame_path, (mjd, camera, expnum)) in iterator:
+    for i, frame_path in iterator:
         header = fits.getheader(frame_path, ext=0)
-        row = [
-            mjd,
-            "s",
-            camera,
-            expnum,
+        new_metadata[i] = [
+            "n" if header.get("OBSERVAT") != "LCO" else "s",
             header.get("IMAGETYP"),
-            int(camera.decode("utf-8")[-1]),
+            header.get("CCD"),
+            header.get("EXPOSURE"),
             header.get("EXPTIME"),
-            QualityFlag(0),
+            header.get("NEON", "OFF") == "ON",
+            header.get("HGNE", "OFF") == "ON",
+            header.get("KRYPTON", "OFF") == "ON",
+            header.get("XENON", "OFF") == "ON",
+            header.get("LDLS", "OFF") == "ON",
+            header.get("QUARTZ", "OFF") == "ON",
+            header.get("QUALITY", QualityFlag(0)),
             ReductionStage.UNREDUCED,
             ReductionStatus(0),
         ]
-        new_metadata[i] = row
 
-    # set index
+    # define dataframe
     new_metadata = pd.DataFrame.from_dict(new_metadata, orient="index")
-    new_metadata.columns = [
-        "mjd",
-        "hemi",
-        "camera",
-        "expnum",
-        "imagetyp",
-        "spec",
-        "exptime",
-        "quality",
-        "stage",
-        "status",
-    ]
+    new_metadata.columns = list(zip(*RAW_METADATA_COLUMNS))[0]
     return new_metadata
 
 
