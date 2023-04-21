@@ -559,13 +559,51 @@ def get_master_metadata(
     return calib_frames
 
 
-def put_redux_stage(metadata, stage=None):
-    pass
+def put_reduction_stage(
+    stage,
+    mjd,
+    camera,
+    expnum,
+    observatory="lco",
+):
+    """update frame metadata with given reduction stage
 
+    Given a values of mjd, camera and exposure number to uniquely identify a
+    frame, this function will update the corresponding metadata reduction
+    stage.
 
-def add_calib(calib_metadata, raw_metadata, stage=None):
-    pass
+    Parameters
+    ----------
+    stage : ReductionStage
+        the reduction stage value
+    mjd : int, optional
+        MJD where the target frames is located, by default None
+    imagetyp : str, optional
+        type/flavor of frame to locate `IMAGETYP`, by default None
+    spec : int, optional
+        spectrograph of the target frames, by default None
+    camera : str, optional
+        camera ID of the target frames, by default None
+    expnum : str, optional
+        zero-padded exposure number of the target frames, by default None
+    observatory : str, optional
+        name of the observatory, by default 'lco'
+    """
+    store = _load_or_create_store(observatory=observatory)
 
+    # extract MJD if given, else extract all MJDs
+    if mjd is not None:
+        metadata = pd.DataFrame(store[f"raw/{mjd}"][()])
+    else:
+        metadata = []
+        for mjd in store.keys():
+            metadata.append(store[str(mjd)][()])
+        metadata = pd.DataFrame(np.concatenate(metadata, axis=0))
 
-def add_master(master_metadata, analogs_metadata, stage=None):
-    pass
+    # update stage to a subset of the metadata
+    selection = (metadata.camera == camera) & (metadata.expnum == expnum)
+    metadata.loc[selection, "stage"] = stage
+
+    # update store
+    store[f"raw/{mjd}"][...] = metadata.to_records()
+    store.file.close()
