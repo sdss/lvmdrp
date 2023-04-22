@@ -152,40 +152,57 @@ def _filter_metadata(
     return metadata
 
 
-def _load_or_create_store(observatory, overwrite=False):
+def _create_store(observatory):
     """return the metadata store given a path
 
     Parameters
     ----------
     observatory: str
-        name of the observatory from/for which data will be retrieved/cached
-    overwrite: bool, optional
-        whether to overwrite the store or not, by default False
-
-    Returns
-    -------
-    h5py.Group
-        store found in the given path
+        observatory for which a metadata store will be created
     """
     metadata_path = os.path.join(access.base_dir, "metadata.hdf5")
 
-    # remove metadata store if overwrite == True
-    if overwrite and os.path.isfile(metadata_path):
-        logger.info(f"removing metadata store '{metadata_path}'")
-        os.remove(metadata_path)
-
-    # load or create metadata store
-    if os.path.isfile(metadata_path):
-        logger.info(f"loading metadata store from '{metadata_path}'")
-        store = h5py.File(metadata_path, mode="a")
-    else:
-        logger.info(f"creating metadata store '{metadata_path}'")
-        store = h5py.File(metadata_path, mode="w")
+    logger.info(f"creating metadata store '{metadata_path}'")
+    store = h5py.File(metadata_path, mode="w")
 
     # add observatory group if needed
     if observatory not in store:
         store.create_group(f"{observatory}/raw")
         store.create_group(f"{observatory}/master")
+
+    store.close()
+
+
+def _del_store():
+    """delete the entire HDF store if exists"""
+    metadata_path = os.path.join(access.base_dir, "metadata.hdf5")
+
+    if os.path.isfile(metadata_path):
+        logger.info(f"removing metadata store '{metadata_path}'")
+        os.remove(metadata_path)
+    else:
+        logger.warning(f"no '{metadata_path}' store found")
+
+
+def _load_store(observatory, mode="r"):
+    """return the metadata store given a observatory
+
+    Parameters
+    ----------
+    observatory : str
+        metadata observatory from which a store will be loaded
+    mode : str, optional
+        the mode in which to open the HDF5 store, by default 'r'
+
+    Returns
+    -------
+    h5py.Group
+        the metadata store for the given observatory
+    """
+    metadata_path = os.path.join(access.base_dir, "metadata.hdf5")
+
+    logger.info(f"loading metadata store from '{metadata_path}'")
+    store = h5py.File(metadata_path, mode=mode)
 
     return store[observatory]
 
@@ -263,7 +280,7 @@ def add_metadata(
     """
 
     # extract target dataset from store
-    store = _load_or_create_store(observatory=observatory)
+    store = _load_store(observatory=observatory, mode="a")
     if kind not in ["raw", "master"]:
         logger.warning(
             f"unrecognised dataset {kind = }, falling back to kind = 'master'"
@@ -291,12 +308,12 @@ def add_metadata(
     )
 
     if str(mjd) in dataset:
-        logger.info("updating store with new metadata")
+        logger.info(f"updating store with new metadata for MJD = {mjd}")
         dataset = dataset[str(mjd)]
         dataset.resize(dataset.shape[0] + array.shape[0], axis=0)
         dataset[-array.shape[0] :] = array
     else:
-        logger.info("adding new data to store")
+        logger.info(f"adding new data to store for MJD = {mjd}")
         dataset.create_dataset(name=str(mjd), data=array, maxshape=(None,), chunks=True)
 
     # write metadata in HDF5 format
@@ -314,6 +331,7 @@ def del_metadata(observatory, mjd):
     mjd : int
         MJD where the target dataset is located
     """
+    store = _load_store(observatory=observatory, mode="a")
     logger.info(f"deleting MJD = {mjd} from '{observatory}' metadata store")
     if f"raw/{mjd}" in store:
         del store[f"raw/{mjd}"]
@@ -363,7 +381,7 @@ def get_metadata(
         the metadata dataframe filtered following the given criteria
     """
 
-    store = _load_or_create_store(observatory=observatory)
+    store = _load_store(observatory=observatory)
 
     # extract MJD if given, else extract all MJDs
     if mjd is not None:
@@ -437,7 +455,7 @@ def get_analog_groups(
     pandas.DataFrame
         the grouped metadata filtered following the given criteria
     """
-    store = _load_or_create_store(observatory=observatory)
+    store = _load_store(observatory=observatory)
 
     # extract MJD if given, else extract all MJDs
     if mjd is not None:
@@ -521,7 +539,7 @@ def get_master_metadata(
     # initialize master calibration matches
     calib_frames = dict.fromkeys(CALIBRATION_TYPES)
 
-    store = _load_or_create_store(observatory=observatory)
+    store = _load_store(observatory=observatory)
 
     masters = store["master"]
     if len(masters) == 0:
@@ -637,7 +655,7 @@ def put_reduction_stage(
     observatory : str, optional
         name of the observatory, by default 'lco'
     """
-    store = _load_or_create_store(observatory=observatory)
+    store = _load_store(observatory=observatory, mode="a")
 
     # extract MJD if given, else extract all MJDs
     if mjd is not None:
