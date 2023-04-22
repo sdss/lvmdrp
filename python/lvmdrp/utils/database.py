@@ -304,7 +304,7 @@ def add_metadata(
     store.file.close()
 
 
-def del_metadata(observatory, mjd=None):
+def del_metadata(observatory, mjd):
     """delete dataset(s) from a target store
 
     Parameters
@@ -314,14 +314,11 @@ def del_metadata(observatory, mjd=None):
     mjd : int
         MJD where the target dataset is located
     """
-    if mjd is None:
-        store = _load_or_create_store(observatory=observatory, overwrite=True)
-    else:
-        store = _load_or_create_store(observatory=observatory)
-        if f"raw/{mjd}" in store:
-            del store[f"raw/{mjd}"]
-        if f"master/{mjd}" in store:
-            del store[f"master/{mjd}"]
+    logger.info(f"deleting MJD = {mjd} from '{observatory}' metadata store")
+    if f"raw/{mjd}" in store:
+        del store[f"raw/{mjd}"]
+    if f"master/{mjd}" in store:
+        del store[f"master/{mjd}"]
 
     store.file.close()
 
