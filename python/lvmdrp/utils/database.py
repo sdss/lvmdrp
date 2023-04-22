@@ -38,6 +38,7 @@ RAW_METADATA_COLUMNS = [
     ("hgne", bool),
     ("krypton", bool),
     ("xenon", bool),
+    ("argon", bool),
     ("ldls", bool),
     ("quartz", bool),
     ("quality", QualityFlag),
@@ -52,6 +53,7 @@ MASTER_METADATA_COLUMNS = [
     ("hgne", bool),
     ("krypton", bool),
     ("xenon", bool),
+    ("argon", bool),
     ("ldls", bool),
     ("quartz", bool),
     ("quality", QualityFlag),
@@ -87,12 +89,19 @@ def _filter_metadata(
     metadata,
     mjd=None,
     imagetyp=None,
-    spec=None,
     camera=None,
     expnum=None,
+    exptime=None,
+    neon=None,
+    hgne=None,
+    krypton=None,
+    xenon=None,
+    argon=None,
+    ldls=None,
+    quartz=None,
+    quality=None,
     stage=None,
     status=None,
-    quality=None,
 ):
     """return filtered metadata dataframe
 
@@ -100,22 +109,34 @@ def _filter_metadata(
     ----------
     metadata : pandas.DataFrame
         dataframe to filter out using the given criteria
-    mjd : int, optional
-        MJD where the target frames is located, by default None
     imagetyp : str, optional
         type/flavor of frame to locate `IMAGETYP`, by default None
-    spec : int, optional
-        spectrograph of the target frames, by default None
     camera : str, optional
         camera ID of the target frames, by default None
-    expnum : str, optional
-        zero-padded exposure number of the target frames, by default None
+    expnum : int, optional
+        exposure number of the target frames, by default None
+    exptime : float, optional
+        exposure time of the target frames, by default None
+    neon : bool, optional
+        whether is Neon lamp on or not, by default None
+    hgne : bool, optional
+        whether is HGNE lamp on or not, by default None
+    krypton : bool, optional
+        whether is Krypton lamp on or not, by default None
+    xenon : bool, optional
+        whether is Xenon lamp on or not, by default None
+    argon : bool, optional
+        whether is Argon lamp on or not, by default None
+    ldls : bool, optional
+        whether is LDLS lamp on or not, by default None
+    quartz : bool, optional
+        whether is Quartz lamp on or not, by default None
+    quality : int, optional
+        bitmask representing quality of the recution, by default None
     stage : int, optional
         bitmask representing stage of the reduction, by default None
     status : int, optional
         bitmask representing status of the reduction, by default None
-    quality : int, optional
-        bitmask representing quality of the recution, by default None
 
     Returns
     -------
@@ -126,24 +147,45 @@ def _filter_metadata(
     if imagetyp is not None:
         logger.info(f"filtering by {imagetyp = }")
         query.append("imagetyp == @imagetyp")
-    if spec is not None:
-        logger.info(f"filtering by {spec = }")
-        query.append("spec == @spec")
-    if expnum is not None:
-        logger.info(f"filtering by {expnum = }")
-        query.append("expnum == @expnum")
     if camera is not None:
         logger.info(f"filtering by {camera = }")
         query.append("camera == @camera")
+    if expnum is not None:
+        logger.info(f"filtering by {expnum = }")
+        query.append("expnum == @expnum")
+    if exptime is not None:
+        logger.info(f"filtering by {exptime = }")
+        query.append("exptime == @exptime")
+    if neon is not None:
+        logger.info(f"filtering by {neon = }")
+        query.append("neon == @neon")
+    if hgne is not None:
+        logger.info(f"filtering by {hgne = }")
+        query.append("hgne == @hgne")
+    if krypton is not None:
+        logger.info(f"filtering by {krypton = }")
+        query.append("krypton == @krypton")
+    if xenon is not None:
+        logger.info(f"filtering by {xenon = }")
+        query.append("xenon == @xenon")
+    if argon is not None:
+        logger.info(f"filtering by {argon = }")
+        query.append("argon == @argon")
+    if ldls is not None:
+        logger.info(f"filtering by {ldls = }")
+        query.append("ldls == @ldls")
+    if quartz is not None:
+        logger.info(f"filtering by {quartz = }")
+        query.append("quartz == @quartz")
+    if quality is not None:
+        logger.info(f"filtering by {quality = }")
+        query.append("quality == @quality")
     if stage is not None:
         logger.info(f"filtering by {stage = }")
         query.append("stage == @stage")
     if status is not None:
         logger.info(f"filtering by {status = }")
         query.append("status == @status")
-    if quality is not None:
-        logger.info(f"filtering by {quality = }")
-        query.append("quality == @quality")
 
     if query:
         query = " and ".join(query)
@@ -248,6 +290,7 @@ def extract_metadata(mjd, frames_paths):
             header.get("HGNE", "OFF") == "ON",
             header.get("KRYPTON", "OFF") == "ON",
             header.get("XENON", "OFF") == "ON",
+            header.get("ARGON", "OFF") == "ON",
             header.get("LDLS", "OFF") == "ON",
             header.get("QUARTZ", "OFF") == "ON",
             header.get("QUALITY", QualityFlag(0)),
@@ -277,6 +320,8 @@ def add_metadata(
         MJD where the target frames is located
     observatory: str, optional
         name of the observatory for which data will be cached, by default 'lco'
+    kind : str, optional
+        name of the dataset to add data to, by default 'raw'
     """
 
     # extract target dataset from store
@@ -342,38 +387,62 @@ def del_metadata(observatory, mjd):
 
 
 def get_metadata(
-    observatory="lco",
-    imagetyp=None,
     mjd=None,
-    expnum=None,
-    spec=None,
+    imagetyp=None,
     camera=None,
+    expnum=None,
+    exptime=None,
+    neon=None,
+    hgne=None,
+    krypton=None,
+    xenon=None,
+    argon=None,
+    ldls=None,
+    quartz=None,
+    quality=None,
     stage=None,
     status=None,
-    quality=None,
+    observatory="lco",
+    kind="raw",
 ):
     """return raw frames metadata from precached HDF5 store
 
     Parameters
     ----------
-    observatory : str, optional
-        name of the observatory, by default 'lco'
     mjd : int, optional
         MJD where the target frames is located, by default None
     imagetyp : str, optional
         type/flavor of frame to locate `IMAGETYP`, by default None
-    spec : int, optional
-        spectrograph of the target frames, by default None
     camera : str, optional
         camera ID of the target frames, by default None
-    expnum : str, optional
-        zero-padded exposure number of the target frames, by default None
+    expnum : int, optional
+        exposure number of the target frames, by default None
+    exptime : float, optional
+        exposure time of the target frames, by default None
+    neon : bool, optional
+        whether is Neon lamp on or not, by default None
+    hgne : bool, optional
+        whether is HGNE lamp on or not, by default None
+    krypton : bool, optional
+        whether is Krypton lamp on or not, by default None
+    xenon : bool, optional
+        whether is Xenon lamp on or not, by default None
+    argon : bool, optional
+        whether is Argon lamp on or not, by default None
+    ldls : bool, optional
+        whether is LDLS lamp on or not, by default None
+    quartz : bool, optional
+        whether is Quartz lamp on or not, by default None
+    quality : int, optional
+        bitmask representing quality of the recution, by default None
     stage : int, optional
         bitmask representing stage of the reduction, by default None
     status : int, optional
         bitmask representing status of the reduction, by default None
-    quality : int, optional
-        bitmask representing quality of the recution, by default None
+    observatory : str, optional
+        name of the observatory, by default 'lco'
+    kind : str, optional
+        name of the dataset to get data from, by default 'raw'
 
     Returns
     -------
@@ -381,15 +450,17 @@ def get_metadata(
         the metadata dataframe filtered following the given criteria
     """
 
+    # extract metadata
     store = _load_store(observatory=observatory)
+    dataset = store[kind]
 
     # extract MJD if given, else extract all MJDs
     if mjd is not None:
-        metadata = pd.DataFrame(store[f"raw/{mjd}"][()])
+        metadata = pd.DataFrame(dataset[str(mjd)][()])
     else:
         metadata = []
-        for mjd in store.keys():
-            metadata.append(store[str(mjd)][()])
+        for mjd in dataset.keys():
+            metadata.append(dataset[str(mjd)][()])
         metadata = pd.DataFrame(np.concatenate(metadata, axis=0))
 
     # close store
@@ -402,7 +473,22 @@ def get_metadata(
 
     # filter by exposure number, spectrograph and/or camera
     metadata = _filter_metadata(
-        metadata, mjd, imagetyp, spec, camera, expnum, stage, status, quality
+        metadata=metadata,
+        mjd=mjd,
+        imagetyp=imagetyp,
+        camera=camera,
+        expnum=expnum,
+        exptime=exptime,
+        neon=neon,
+        hgne=hgne,
+        krypton=krypton,
+        xenon=xenon,
+        argon=argon,
+        ldls=ldls,
+        quartz=quartz,
+        quality=quality,
+        stage=stage,
+        status=status,
     )
     logger.info(f"final number of frames after filtering {len(metadata)}")
 
@@ -410,60 +496,79 @@ def get_metadata(
 
 
 def get_analog_groups(
-    observatory="lco",
-    imagetyp=None,
     mjd=None,
-    expnum=None,
-    spec=None,
+    imagetyp=None,
     camera=None,
+    exptime=None,
+    neon=None,
+    hgne=None,
+    krypton=None,
+    xenon=None,
+    argon=None,
+    ldls=None,
+    quartz=None,
+    quality=None,
     stage=None,
     status=None,
-    quality=None,
+    observatory="lco",
 ):
     """return a list of metadata groups considered to be analogs
 
     the given metadata dataframe is grouped in analog frames using
     the following criteria:
-        * mjd
         * imagetyp
         * camera
         * exptime
 
     Parameters
     ----------
-    observatory : str, optional
-        name of the observatory, by default 'lco'
     mjd : int, optional
         MJD where the target frames is located, by default None
     imagetyp : str, optional
         type/flavor of frame to locate `IMAGETYP`, by default None
-    spec : int, optional
-        spectrograph of the target frames, by default None
     camera : str, optional
         camera ID of the target frames, by default None
-    expnum : str, optional
-        zero-padded exposure number of the target frames, by default None
+    exptime : float, optional
+        exposure time of the target frames, by default None
+    neon : bool, optional
+        whether is Neon lamp on or not, by default None
+    hgne : bool, optional
+        whether is HGNE lamp on or not, by default None
+    krypton : bool, optional
+        whether is Krypton lamp on or not, by default None
+    xenon : bool, optional
+        whether is Xenon lamp on or not, by default None
+    argon : bool, optional
+        whether is Argon lamp on or not, by default None
+    ldls : bool, optional
+        whether is LDLS lamp on or not, by default None
+    quartz : bool, optional
+        whether is Quartz lamp on or not, by default None
+    quality : int, optional
+        bitmask representing quality of the recution, by default None
     stage : int, optional
         bitmask representing stage of the reduction, by default None
     status : int, optional
         bitmask representing status of the reduction, by default None
-    quality : int, optional
-        bitmask representing quality of the recution, by default None
+    observatory : str, optional
+        name of the observatory, by default 'lco'
 
     Returns
     -------
     pandas.DataFrame
         the grouped metadata filtered following the given criteria
     """
+    # extract raw frame metadata
     store = _load_store(observatory=observatory)
+    dataset = store["raw"]
 
     # extract MJD if given, else extract all MJDs
     if mjd is not None:
-        metadata = pd.DataFrame(store[f"raw/{mjd}"][()])
+        metadata = pd.DataFrame(dataset[f"{mjd}"][()])
     else:
         metadata = []
-        for mjd in store.keys():
-            metadata.append(store[str(mjd)][()])
+        for mjd in dataset.keys():
+            metadata.append(dataset[str(mjd)][()])
         metadata = pd.DataFrame(np.concatenate(metadata, axis=0))
     # close store
     store.file.close()
@@ -475,12 +580,26 @@ def get_analog_groups(
 
     # filter by exposure number, spectrograph and/or camera
     metadata = _filter_metadata(
-        metadata, mjd, imagetyp, spec, camera, expnum, stage, status, quality
+        metadata=metadata,
+        mjd=mjd,
+        imagetyp=imagetyp,
+        camera=camera,
+        exptime=exptime,
+        neon=neon,
+        hgne=hgne,
+        krypton=krypton,
+        xenon=xenon,
+        argon=argon,
+        ldls=ldls,
+        quartz=quartz,
+        quality=quality,
+        stage=stage,
+        status=status,
     )
     logger.info(f"final number of frames after filtering {len(metadata)}")
 
     logger.info("grouping analogs")
-    metadata_groups = metadata.groupby(["imagetyp", "mjd", "camera", "exptime"])
+    metadata_groups = metadata.groupby(["imagetyp", "camera", "exptime"])
 
     logger.info(f"found {len(metadata_groups)} groups of analogs:")
     analogs = []
@@ -490,18 +609,17 @@ def get_analog_groups(
     return analogs
 
 
-def get_master_metadata(
-    observatory="lco",
-    imagetyp=None,
-    mjd=None,
-    expnum=None,
-    spec=None,
-    camera=None,
+def match_master_metadata(
+    target_mjd,
+    target_imagetyp,
+    target_camera,
+    target_exptime,
+    quality=None,
     stage=None,
     status=None,
-    quality=None,
+    observatory="lco",
 ):
-    """return the matched master calibration frames given a target frame
+    """return the matched master calibration frames given a target frame metadata
 
     Depending on the type of the target frame, a set of calibration frames may
     be needed. These are stored in lvmdrp.core.constants.FRAMES_CALIB_NEEDS.
@@ -510,24 +628,22 @@ def get_master_metadata(
 
     Parameters
     ----------
-    observatory : str, optional
-        name of the observatory, by default 'lco'
-    mjd : int, optional
-        MJD where the target frames is located, by default None
-    imagetyp : str, optional
-        type/flavor of frame to locate `IMAGETYP`, by default None
-    spec : int, optional
-        spectrograph of the target frames, by default None
-    camera : str, optional
-        camera ID of the target frames, by default None
-    expnum : str, optional
-        zero-padded exposure number of the target frames, by default None
+    target_mjd : int
+        MJD where the target frames is located
+    target_imagetyp : str
+        type/flavor of frame to locate `IMAGETYP`
+    target_camera : str
+        camera ID of the target frames
+    target_exptime : float
+        exposure time of the target frames
+    quality : int, optional
+        bitmask representing quality of the recution, by default None
     stage : int, optional
         bitmask representing stage of the reduction, by default None
     status : int, optional
         bitmask representing status of the reduction, by default None
-    quality : int, optional
-        bitmask representing quality of the recution, by default None
+    observatory : str, optional
+        name of the observatory, by default 'lco'
 
     Returns
     -------
@@ -535,12 +651,12 @@ def get_master_metadata(
         a dictionary containing the matched master calibration frames
     """
     # locate calibration needs
-    frame_needs = FRAMES_CALIB_NEEDS.get(imagetyp)
+    frame_needs = FRAMES_CALIB_NEEDS.get(target_imagetyp)
     # initialize master calibration matches
     calib_frames = dict.fromkeys(CALIBRATION_TYPES)
 
+    # extract master calibration frames metadata
     store = _load_store(observatory=observatory)
-
     masters = store["master"]
     if len(masters) == 0:
         store.file.close()
@@ -548,13 +664,7 @@ def get_master_metadata(
         return calib_frames
 
     # extract MJD if given, else extract all MJDs
-    if mjd is not None:
-        masters_metadata = pd.DataFrame(masters[str(mjd)][()])
-    else:
-        masters_metadata = []
-        for mjd in masters.keys():
-            masters_metadata.append(masters[str(mjd)][()])
-        masters_metadata = pd.DataFrame(np.concatenate(masters_metadata, axis=0))
+    masters_metadata = pd.DataFrame(masters[str(target_mjd)][()])
     # close store
     store.file.close()
 
@@ -565,27 +675,27 @@ def get_master_metadata(
 
     # filter by exposure number, spectrograph and/or camera
     masters_metadata = _filter_metadata(
-        masters_metadata,
-        mjd=mjd,
-        spec=spec,
-        camera=camera,
-        expnum=expnum,
+        metadata=masters_metadata,
+        mjd=target_mjd,
+        imagetyp=target_imagetyp,
+        camera=target_camera,
+        exptime=target_exptime,
+        quality=quality,
         stage=stage,
         status=status,
-        quality=quality,
     )
     logger.info(
         f"final number of master frames after filtering {len(masters_metadata)}"
     )
     logger.info(
         (
-            f"target frame of type '{imagetyp}' "
+            f"target frame of type '{target_imagetyp}' "
             f"needs calibration frames: {', '.join(frame_needs) or None}"
         )
     )
     # raise error in case current frame is not recognized in FRAMES_CALIB_NEEDS
     if frame_needs is None:
-        logger.error(f"no calibration frames found for '{imagetyp}' type")
+        logger.error(f"no calibration frames found for '{target_imagetyp}' type")
         return calib_frames
     # handle empty list cases (e.g., bias)
     if not frame_needs:
@@ -611,7 +721,9 @@ def get_master_metadata(
         #      necessarily the best. Should retrieve all possible calibration frames
         #      & decide which one is the best based on quality
         calib_frame = masters_metadata.query(q)
-        calib_frame["mjd_diff"] = calib_frame.mjd.apply(lambda v: abs(v - mjd))
+        calib_frame["mjd_diff"] = calib_frame.mjd.apply(
+            lambda mjd: abs(mjd - target_mjd)
+        )
         calib_frame = (
             calib_frame.sort_values(by="mjd_diff", ascending=True)
             .drop(columns="mjd_diff")
