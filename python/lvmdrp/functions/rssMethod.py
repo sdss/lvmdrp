@@ -2587,6 +2587,14 @@ def join_spec_channels(in_rss: list, out_rss: list, parallel: str = "auto"):
     rss_r = loadRSS(in_rss[1]) if in_rss[1] else None
     rss_z = loadRSS(in_rss[2]) if in_rss[2] else None
 
+    # check number of fibers in b, r, z
+    n_fibers = [i._data.shape[0] if i else None for i in [rss_b, rss_r, rss_z]]
+    uniq_nfib = len(set([i for i in n_fibers if i]))
+    if uniq_nfib != 1:
+        log.error(f'Unequal number of fibers in b, r, z: {n_fibers}.  Check fiber id and trace.')
+        log.error('Cannot combine cameras.')
+        return
+
     # select one of them
     rr = rss_b or rss_r or rss_z
 
