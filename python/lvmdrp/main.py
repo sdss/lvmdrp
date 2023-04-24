@@ -18,7 +18,7 @@ from lvmdrp.core import image
 from lvmdrp.core.constants import CALIBRATION_TYPES, FRAMES_PRIORITY
 from lvmdrp.functions import imageMethod, rssMethod
 from lvmdrp.utils.bitmask import ReductionStatus
-from lvmdrp.utils.database import LAMP_NAMES, get_master_metadata
+from lvmdrp.utils.metadata import LAMP_NAMES, match_master_metadata
 from lvmdrp.utils.decorators import validate_fibers
 
 
@@ -256,7 +256,7 @@ def setup_reduction(config, metadata):
     )
 
     # TODO: get calibration frames
-    calib_metadata = get_master_metadata(metadata=metadata)
+    calib_metadata = match_master_metadata(metadata=metadata)
 
     settings.steps = {}
     settings.param = {}

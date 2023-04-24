@@ -2,7 +2,7 @@
 #
 # @Author: Alfredo Mejía-Narváez
 # @Date: May 16, 2022
-# @Filename: database.py
+# @Filename: metadata.py
 # @License: BSD 3-Clause
 # @Copyright: SDSS-V LVM
 
@@ -14,7 +14,7 @@ import h5py
 import numpy as np
 import pandas as pd
 
-from lvmdrp.core.constants import CALIBRATION_TYPES, FRAMES_CALIB_NEEDS
+from lvmdrp.core.constants import FRAMES_CALIB_NEEDS
 from lvmdrp.utils.bitmask import ReductionStage, ReductionStatus, QualityFlag
 from lvmdrp.utils.logger import get_logger
 

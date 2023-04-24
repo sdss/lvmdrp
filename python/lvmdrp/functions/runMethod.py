@@ -46,7 +46,7 @@ import numpy as np
 import yaml
 
 import lvmdrp
-import lvmdrp.utils.database as db
+import lvmdrp.utils.metadata as md
 from lvmdrp.core.constants import CONFIG_PATH, DATAPRODUCT_BP_PATH
 from lvmdrp.utils.configuration import load_master_config
 from lvmdrp.utils.logger import get_logger
@@ -155,7 +155,7 @@ def _get_path_from_bp(bp_name):
     return dataproduct_path, kws_path
 
 
-def metadataCaching_drp(observatory, mjd, overwrite="0"):
+def metadataCaching_drp(observatory, mjd, overwrite="none"):
     """caches the header metadata into a HD5 table given a target MJD
 
     this task will write an HD5 table where the quick data reduction
@@ -167,8 +167,8 @@ def metadataCaching_drp(observatory, mjd, overwrite="0"):
         name of the observatory in the data path structure (e.g., lco, lab)
     mjd : int
         target MJD from which to extract frames metadata
-    overwrite : bool
-        whether to overwrite the metadata table or not, by default False
+    overwrite : str, optional
+        overwrite 'store', 'metadata' or 'none', by default 'none'
     """
 
     mjds = list(map(lambda s: int(s), mjd.split(",")))
@@ -176,40 +176,33 @@ def metadataCaching_drp(observatory, mjd, overwrite="0"):
     for mjd in mjds:
         logger.info(f"locating local data for MJD = {mjd}")
         # get existing metadata
-        if not bool(int(overwrite)) == 1:
-            stored_indices = db.get_metadata(observatory=observatory, mjd=mjd)[
-                ["mjd", "camera", "expnum"]
-            ].values.tolist()
-        else:
-            db.del_metadata(observatory=observatory, mjd=mjd)
+        if overwrite == "none":
+            stored_indices = md.get_metadata(
+                observatory=observatory,
+                mjd=mjd,
+            )[["camera", "expnum"]].values.tolist()
+        elif overwrite == "metadata":
+            md.del_metadata(observatory=observatory, mjd=mjd)
+            stored_indices = []
+        elif overwrite == "store":
+            md._del_store()
+            md._create_store(observatory=observatory)
             stored_indices = []
 
         # locate local raw frames
-        frames_paths = db.path.expand(
+        local_paths = md.path.expand(
             "lvm_raw", hemi="s", mjd=mjd, camspec="*", expnum="???"
         )
-        # define index (mjd, camera and expnum) for each existing frame
-        local_indices = [
-            (
-                x["mjd"].encode("utf-8"),
-                x["camspec"].encode("utf-8"),
-                x["expnum"].encode("utf-8"),
-            )
-            for x in map(
-                lambda frame_path: db.path.extract("lvm_raw", frame_path), frames_paths
-            )
-        ]
+        # define index (camera and expnum) for each existing frame
+        pars = map(lambda p: md.path.extract("lvm_raw", p), local_paths)
+        local_indices = [[_["camspec"], int(_["expnum"])] for _ in pars]
+
         # filter out frames in store
         in_store = np.isin(local_indices, stored_indices).all(axis=1)
-        new_indices = list(
-            zip(
-                np.asarray(frames_paths)[~in_store],
-                np.asarray(local_indices)[~in_store],
-            )
-        )
+        new_paths = np.asarray(local_paths)[~in_store]
 
-        ntotal_frames = len(local_indices)
-        nfilter_frames = len(new_indices)
+        ntotal_frames = len(local_paths)
+        nfilter_frames = len(new_paths)
 
         logger.info(
             (
@@ -222,11 +215,13 @@ def metadataCaching_drp(observatory, mjd, overwrite="0"):
             continue
 
         # extract metadata
-        new_metadata = db.extract_metadata(mjd=mjd, frames_indices=new_indices)
+        new_metadata = md.extract_metadata(mjd=mjd, frames_paths=new_paths)
         logger.info(f"successfully extracted metadata for MJD = {mjd}")
 
         # merge metadata with existing one
-        db.put_metadata(observatory=observatory, mjd=mjd, metadata=new_metadata)
+        md.add_metadata(
+            kind="raw", observatory=observatory, mjd=mjd, metadata=new_metadata
+        )
 
 
 # TODO:
@@ -236,7 +231,6 @@ def metadataCaching_drp(observatory, mjd, overwrite="0"):
 #   * update calibration frame configuration template(s)
 #   * write configuration file(s) to disk
 def prepCalib_drp(
-    path,
     calib_type,
     mjd=None,
     expnum=None,
@@ -252,8 +246,6 @@ def prepCalib_drp(
 
     Parameters
     ----------
-    path : str
-        file path where the raw frames are located
     calib_type : str
         frame type corresponding to a calibration frame
     mjd : int, optional
@@ -281,23 +273,31 @@ def prepCalib_drp(
     calib_config_template = _load_template(template_path=calib_config_path)
 
     # get target calibration frames from DB
-    calib_frames = db.get_raws_metadata(
-        imagetyp=calib_type, mjd=mjd, expnum=expnum, spec=spec, camera=camera
+    target_frames, master_frames = md.get_metadata(
+        imagetyp=calib_type,
+        mjd=mjd,
+        expnum=expnum,
+        spec=spec,
+        camera=camera,
+        stage=1,
+        return_masters=True,
     )
     # create preproc configuration files
-    for calib_frame in calib_frames:
+    for idx, target_frame in target_frames.iterrows():
         # copy preproc template for modification
         _ = copy(calib_config_template)
         # fill-in location
-        _["location"] = _["location"].format(CALIB_PATH=path, DRPVER=lvmdrp.__version__)
+        _["location"] = _["location"].format(
+            CALIB_PATH=md.access.base_dir, DRPVER=lvmdrp.__version__
+        )
         # fill-in naming_convention
         _["naming_convention"] = _["naming_convention"].format(
-            IMAGETYP=calib_type, CAMERA=calib_frame.ccd, EXPNUM=calib_frame.expnum
+            IMAGETYP=calib_type, CAMERA=target_frame.camera, EXPNUM=target_frame.expnum
         )
         # fill-in target_frame
         path, path_kws = _get_path_from_bp(_["target_frame"])
         _["target_frame"] = path.format(
-            **{key: calib_frame.__dict__[key.lower()] for key in path_kws}
+            **{key: target_frame[key.lower()] for key in path_kws}
         )
         # fill-in image type
         _["reduction_steps"]["imageMethod.preprocRawFrame"]["out_image"] = _[
@@ -305,37 +305,34 @@ def prepCalib_drp(
         ]["imageMethod.preprocRawFrame"]["out_image"].format(IMAGETYP=calib_type)
 
         # fill-in calibration_frames
-        master_calib = db.get_master_metadata(metadata=calib_frame)
-        if master_calib["bias"] is not None:
+
+        masters = md.match_master_metadata(
+            target_metadata=target_frame, masters_metadata=master_frames
+        )
+        if masters["bias"] is not None:
             path, path_kws = _get_path_from_bp(_["calib_frames"]["bias"])
             _["calib_frames"]["bias"] = path.format(
-                **{key: master_calib["bias"].__dict__[key.lower()] for key in path_kws}
+                **{key: masters["bias"][key.lower()] for key in path_kws}
             )
-        if master_calib["dark"] is not None:
+        if masters["dark"] is not None:
             path, path_kws = _get_path_from_bp(_["calib_frames"]["dark"])
             _["calib_frames"]["dark"] = path.format(
-                **{key: master_calib["dark"].__dict__[key.lower()] for key in path_kws}
+                **{key: masters["dark"][key.lower()] for key in path_kws}
             )
-        if master_calib["pixelflat"] is not None:
+        if masters["pixelflat"] is not None:
             path, path_kws = _get_path_from_bp(_["calib_frames"]["pixelflat"])
             _["calib_frames"]["pixelflat"] = path.format(
-                **{
-                    key: master_calib["pixelflat"].__dict__[key.lower()]
-                    for key in path_kws
-                }
+                **{key: masters["pixelflat"][key.lower()] for key in path_kws}
             )
-        if master_calib["fiberflat"] is not None:
-            path, path_kws = _get_path_from_bp(_["calib_frames"]["fiberflat"])
-            _["calib_frames"]["fiberflat"] = path.format(
-                **{
-                    key: master_calib["fiberflat"].__dict__[key.lower()]
-                    for key in path_kws
-                }
+        if masters["flat"] is not None:
+            path, path_kws = _get_path_from_bp(_["calib_frames"]["flat"])
+            _["calib_frames"]["flat"] = path.format(
+                **{key: masters["flat"][key.lower()] for key in path_kws}
             )
-        if master_calib["arc"] is not None:
+        if masters["arc"] is not None:
             path, path_kws = _get_path_from_bp(_["calib_frames"]["arc"])
             _["calib_frames"]["arc"] = path.format(
-                **{key: master_calib["arc"].__dict__[key.lower()] for key in path_kws}
+                **{key: masters["arc"][key.lower()] for key in path_kws}
             )
 
         # fill-in reduction steps
@@ -363,13 +360,11 @@ def prepCalib_drp(
                     else:
                         path, path_kws = _get_path_from_bp(par)
                         _["reduction_steps"][step][par] = path.format(
-                            **{
-                                key: calib_frame.__dict__[key.lower()]
-                                for key in path_kws
-                            }
+                            **{key: target_frame[key.lower()] for key in path_kws}
                         )
 
         # dump calibration configuration file(s)
+        os.makedirs(_["location"], exist_ok=True)
         yaml.safe_dump(
             _, open(os.path.join(_["location"], _["naming_convention"]), "w")
         )
@@ -381,7 +376,7 @@ def prepMasterCalib_drp(
     mjd=None,
     exposure=None,
     spec=None,
-    ccd=None,
+    camera=None,
     mcalib_config="lvm_mcalib_config",
 ):
     """writes a configuration file for a master calibration frame creation
@@ -403,8 +398,8 @@ def prepMasterCalib_drp(
         exposure number of the target calibration frame(s), by default None
     spec : str, optional
         spectrograph of the target calibration frame(s) (e.g., spec1), by default None
-    ccd : str, optional
-        CCD of the target calibration frame(s) (e.g., r1, z3), by default None
+    camera : str, optional
+        camera ID of the target calibration frame(s) (e.g., r1, z3), by default None
     calib_config : str, optional
         configuration file template to use, by default "lvm_mcalib_config"
     """
@@ -417,15 +412,15 @@ def prepMasterCalib_drp(
 
     # connect to DB
     master_config = load_master_config()
-    db.create_or_connect_db(master_config)
+    md.create_or_connect_db(master_config)
 
     # get target calibration frames from DB
-    calib_frames = db.get_raws_metadata_where(
-        imagetyp=calib_type, mjd=mjd, exposure=exposure, spec=spec, ccd=ccd
+    calib_frames = md.get_raws_metadata_where(
+        imagetyp=calib_type, mjd=mjd, exposure=exposure, spec=spec, camera=camera
     )
 
     # separate non-analog frames in target list
-    non_analogs = db.get_analogs_groups(metadata=calib_frames)
+    non_analogs = md.get_analogs_groups(metadata=calib_frames)
     # get analog calibration frames for each target frame
     # conditions to be analog:
     #   * be the same calibration type (bias, dark, etc.)
@@ -433,7 +428,7 @@ def prepMasterCalib_drp(
     #   * have the same exposure time if applies
     for non_analog in non_analogs:
         # get analog for each non-analog
-        analogs = db.get_analogs_metadata(metadata=non_analog)
+        analogs = md.get_analogs_metadata(metadata=non_analog)
 
         # copy calib template for modification
         _ = copy(mcalib_config_template)
@@ -441,7 +436,7 @@ def prepMasterCalib_drp(
         _["location"] = _["location"].format(CALIB_PATH=path, DRPVER=lvmdrp.__version__)
         # fill-in naming_convention
         _["naming_convention"] = _["naming_convention"].format(
-            IMAGETYP=calib_type, CAMERA=non_analog.ccd, EXPNUM=non_analog.expnum
+            IMAGETYP=calib_type, CAMERA=non_analog.camera, EXPNUM=non_analog.expnum
         )
         # fill-in target_frame
         path, path_kws = _get_path_from_bp(
@@ -470,7 +465,7 @@ def prepMasterCalib_drp(
 
 
 # TODO: allow for several MJDs
-def prepReduction_drp(config_template, mjd=None, exposure=None, spec=None, ccd=None):
+def prepReduction_drp(config_template, mjd=None, exposure=None, spec=None, camera=None):
     """writes to disk configuration file(s) to reduce the target frame(s)
 
     Steps carried out by this task:
@@ -480,7 +475,7 @@ def prepReduction_drp(config_template, mjd=None, exposure=None, spec=None, ccd=N
         * update configuration template(s)
         * write the filled-in configuration to YAML file(s)
 
-    all parameters (mjd, exposure. spec and ccd) are optional and are used to
+    all parameters (mjd, exposure. spec and camera) are optional and are used to
     constrain the search for *raw* target frames in the database. Once the
     intended frame(s) is(are) found, this task will locate in the database the
     matching calibration frames needed to carry out the reduction. The i/o file
@@ -497,8 +492,8 @@ def prepReduction_drp(config_template, mjd=None, exposure=None, spec=None, ccd=N
         the exposure number to target for reduction
     spec : string of 'spec1', 'spec2' or 'spec3', optional
         the spectrograph to target for reduction
-    ccd : string of b1, r1, z1, b2, r2, z2, b3, r3, or z3
-        the CCD to target for reduction. Note that setting ccd also constrains
+    camera : string of b1, r1, z1, b2, r2, z2, b3, r3, or z3
+        camera ID to target for reduction. Note that setting camera also constrains
         spec
 
     """
@@ -509,13 +504,13 @@ def prepReduction_drp(config_template, mjd=None, exposure=None, spec=None, ccd=N
 
     # connect to DB
     master_config = load_master_config()
-    db.create_or_connect_db(master_config)
+    md.create_or_connect_db(master_config)
 
-    target_frames = db.get_raws_metadata_where(
-        mjd=mjd, exposure=exposure, spec=spec, ccd=ccd
+    target_frames = md.get_raws_metadata_where(
+        mjd=mjd, exposure=exposure, spec=spec, camera=camera
     )
     for target_frame in target_frames:
-        master_calib = db.get_master_metadata(metadata=target_frame)
+        master_calib = md.match_master_metadata(metadata=target_frame)
 
         # copy configuration template
         _ = copy(config_template)
@@ -527,7 +522,7 @@ def prepReduction_drp(config_template, mjd=None, exposure=None, spec=None, ccd=N
         )
         # fill-in naming_convention
         _["naming_convention"] = _["naming_convention"].format(
-            HEMI=hemi, CAMERA=target_frame.ccd, EXPNUM=target_frame.expnum
+            HEMI=hemi, CAMERA=target_frame.camera, EXPNUM=target_frame.expnum
         )
         # fill-in target_frame
         path, path_kws = _get_path_from_bp(_["target_frame"])
