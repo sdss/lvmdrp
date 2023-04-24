@@ -459,14 +459,28 @@ def get_metadata(
     store = _load_store(observatory=observatory)
     dataset = store[kind]
 
+    # default output
+    default_output = pd.DataFrame(
+        columns=list(zip(*RAW_METADATA_COLUMNS))[0]
+        if kind == "raw"
+        else list(zip(*MASTER_METADATA_COLUMNS))[0]
+    )
+
     # extract MJD if given, else extract all MJDs
     if mjd is not None:
-        metadata = pd.DataFrame(dataset[str(mjd)][()])
+        try:
+            metadata = pd.DataFrame(dataset[str(mjd)][()])
+        except KeyError:
+            return default_output
     else:
         metadata = []
         for mjd in dataset.keys():
             metadata.append(dataset[str(mjd)][()])
-        metadata = pd.DataFrame(np.concatenate(metadata, axis=0))
+
+        if len(metadata) > 0:
+            metadata = pd.DataFrame(np.concatenate(metadata, axis=0))
+        else:
+            return default_output
 
     # close store
     store.file.close()
@@ -567,14 +581,25 @@ def get_analog_groups(
     store = _load_store(observatory=observatory)
     dataset = store["raw"]
 
+    # default output
+    default_output = pd.DataFrame(columns=list(zip(*MASTER_METADATA_COLUMNS))[0])
+
     # extract MJD if given, else extract all MJDs
     if mjd is not None:
-        metadata = pd.DataFrame(dataset[f"{mjd}"][()])
+        try:
+            metadata = pd.DataFrame(dataset[str(mjd)][()])
+        except KeyError:
+            return default_output
     else:
         metadata = []
         for mjd in dataset.keys():
             metadata.append(dataset[str(mjd)][()])
-        metadata = pd.DataFrame(np.concatenate(metadata, axis=0))
+
+        if len(metadata) > 0:
+            metadata = pd.DataFrame(np.concatenate(metadata, axis=0))
+        else:
+            return default_output
+
     # close store
     store.file.close()
 
