@@ -340,9 +340,10 @@ def run_drp(mjd: int = None, bias: bool = False, dark: bool = False,
     tileid = list(set(sub['tileid']))[0]
 
     # perform camera combination
-    combine_cameras(tileid, mjd, spec=1)
-    combine_cameras(tileid, mjd, spec=2)
-    combine_cameras(tileid, mjd, spec=3)
+    for tileid, mjd in sub.group_by(['tileid', 'mjd']).groups.keys:
+        combine_cameras(tileid, mjd, spec=1)
+        combine_cameras(tileid, mjd, spec=2)
+        combine_cameras(tileid, mjd, spec=3)
 
     # perform sky subtraction
 
@@ -384,11 +385,27 @@ def write_config_file():
 
 def sort_cals(table: Table) -> Table:
     """ sort the astropy table by flat, arcs, sci """
+
+    # get unique flavors
+    imtypes = set(table['imagetyp'])
+
+    # return if no flat or arcs in dataset
+    if {'flat', 'arc'} - imtypes:
+        log.info("No flats or arcs found in dataset. No need to sort.")
+        return table
+
+    # check for image types and remove missing flavors from the index list
+    flavors = ['flat', 'arc', 'object']
+    missing = set(flavors) - imtypes
+    __ = [flavors.remove(i) for i in missing]
+
     df = table.to_pandas()
     ss = df.sort_values(['camera', 'expnum'])
-    ee = ss.set_index('imagetyp', drop=False).loc[['flat', 'arc', 'object']]
+    ee = ss.set_index('imagetyp', drop=False).loc[flavors]
+
     calibs = pd.concat([ee.loc[['flat', 'arc']], ee.loc['flat']]).reset_index(drop=True)
-    new = pd.concat([calibs, ee.loc['object']]).reset_index(drop=True)
+    new = (pd.concat([calibs, ee.loc['object']]).reset_index(drop=True)
+           if 'object' in imtypes else calibs)
     return table.from_pandas(new)
 
 
