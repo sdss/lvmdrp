@@ -933,8 +933,8 @@ class Image(Header):
             filename, output_verify="silentfix", overwrite=True
         )  # write FITS file to disc
 
-    def computePoissonError(self, rdnoise=0.0, replace_masked=1e20):
-        image = self._data
+    def computePoissonError(self, gain=1.0, rdnoise=0.0, replace_masked=1e20):
+        image = self._data * gain
         self._error = numpy.zeros_like(image)
         select = image > 0
         self._error[select] = numpy.sqrt(image[select] + rdnoise**2)
