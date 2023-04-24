@@ -353,12 +353,12 @@ def add_metadata(
     )
 
     if str(mjd) in dataset:
-        logger.info(f"updating store with new metadata for MJD = {mjd}")
+        logger.info(f"updating {kind}/{mjd} metadata with {len(array)} new rows")
         dataset = dataset[str(mjd)]
         dataset.resize(dataset.shape[0] + array.shape[0], axis=0)
         dataset[-array.shape[0] :] = array
     else:
-        logger.info(f"adding new data to store for MJD = {mjd}")
+        logger.info(f"starting {kind}/{mjd} metadata with {len(array)} new rows")
         dataset.create_dataset(name=str(mjd), data=array, maxshape=(None,), chunks=True)
 
     # write metadata in HDF5 format
@@ -619,6 +619,13 @@ def match_master_metadata(
     target_imagetyp,
     target_camera,
     target_exptime,
+    neon=None,
+    hgne=None,
+    krypton=None,
+    xenon=None,
+    argon=None,
+    ldls=None,
+    quartz=None,
     quality=None,
     stage=None,
     status=None,
@@ -641,6 +648,20 @@ def match_master_metadata(
         camera ID of the target frames
     target_exptime : float
         exposure time of the target frames
+    neon : bool, optional
+        whether is Neon lamp on or not, by default None
+    hgne : bool, optional
+        whether is HGNE lamp on or not, by default None
+    krypton : bool, optional
+        whether is Krypton lamp on or not, by default None
+    xenon : bool, optional
+        whether is Xenon lamp on or not, by default None
+    argon : bool, optional
+        whether is Argon lamp on or not, by default None
+    ldls : bool, optional
+        whether is LDLS lamp on or not, by default None
+    quartz : bool, optional
+        whether is Quartz lamp on or not, by default None
     quality : int, optional
         bitmask representing quality of the recution, by default None
     stage : int, optional
@@ -657,8 +678,14 @@ def match_master_metadata(
     """
     # locate calibration needs
     frame_needs = FRAMES_CALIB_NEEDS.get(target_imagetyp)
+    logger.info(
+        (
+            f"target frame of type '{target_imagetyp}' "
+            f"needs calibration frames: {', '.join(frame_needs) or None}"
+        )
+    )
     # initialize master calibration matches
-    calib_frames = dict.fromkeys(CALIBRATION_TYPES)
+    calib_frames = dict.fromkeys(frame_needs)
 
     # extract master calibration frames metadata
     store = _load_store(observatory=observatory)
@@ -669,7 +696,12 @@ def match_master_metadata(
         return calib_frames
 
     # extract MJD if given, else extract all MJDs
-    masters_metadata = pd.DataFrame(masters[str(target_mjd)][()])
+    masters_metadata, mjds = [], []
+    for mjd_ in masters.keys():
+        masters_metadata.append(masters[mjd_][()])
+        mjds.append(np.ones(masters_metadata[-1].size, dtype=int) * int(mjd_))
+    masters_metadata = pd.DataFrame(np.concatenate(masters_metadata, axis=0))
+    masters_metadata["mjd"] = np.concatenate(mjds, axis=0)
     # close store
     store.file.close()
 
@@ -679,24 +711,8 @@ def match_master_metadata(
     logger.info(f"found {len(masters_metadata)} master frames in store")
 
     # filter by exposure number, spectrograph and/or camera
-    masters_metadata = _filter_metadata(
-        metadata=masters_metadata,
-        mjd=target_mjd,
-        imagetyp=target_imagetyp,
-        camera=target_camera,
-        exptime=target_exptime,
-        quality=quality,
-        stage=stage,
-        status=status,
-    )
     logger.info(
         f"final number of master frames after filtering {len(masters_metadata)}"
-    )
-    logger.info(
-        (
-            f"target frame of type '{target_imagetyp}' "
-            f"needs calibration frames: {', '.join(frame_needs) or None}"
-        )
     )
     # raise error in case current frame is not recognized in FRAMES_CALIB_NEEDS
     if frame_needs is None:
@@ -707,38 +723,33 @@ def match_master_metadata(
         return calib_frames
 
     for calib_type in frame_needs:
-        bmask = ReductionStage.PREPROCESSED | ReductionStage.CALIBRATED
-        if calib_type in ["flat", "arc"]:
-            bmask += (
-                ReductionStage.COSMIC_CLEAN
-                | ReductionStage.STRAY_CLEAN
-                | ReductionStage.FIBERS_FOUND
-                | ReductionStage.FIBERS_TRACED
-                | ReductionStage.SPECTRA_EXTRACTED
-                | ReductionStage.WAVELENGTH_SOLVED
-            )
-        q = "@masters_metadata.stage == @bmask"
-
-        # TODO: handle the case in which the retrieved frame is stale and/or has quality
-        # flags
-        # BUG: there may be cases in which no frame is found
-        # BUG: this is retrieving only the first (closest) calibration frame, not
-        #      necessarily the best. Should retrieve all possible calibration frames
-        #      & decide which one is the best based on quality
-        calib_frame = masters_metadata.query(q)
-        calib_frame["mjd_diff"] = calib_frame.mjd.apply(
+        calib_metadata = _filter_metadata(
+            metadata=masters_metadata,
+            imagetyp=calib_type,
+            camera=target_camera,
+            exptime=target_exptime if calib_type != "bias" else None,
+            neon=neon,
+            hgne=hgne,
+            krypton=krypton,
+            xenon=xenon,
+            argon=argon,
+            ldls=ldls,
+            quartz=quartz,
+            quality=quality,
+            stage=stage,
+            status=status,
+        )
+        calib_metadata["mjd_diff"] = calib_metadata.mjd.apply(
             lambda mjd: abs(mjd - target_mjd)
         )
-        calib_frame = (
-            calib_frame.sort_values(by="mjd_diff", ascending=True)
-            .drop(columns="mjd_diff")
-            .iloc[0]
+        calib_metadata = calib_metadata.sort_values(by="mjd_diff", ascending=True).drop(
+            columns="mjd_diff"
         )
-        if len(calib_frame) == 0:
+        if len(calib_metadata) == 0:
             logger.error(f"no master {calib_type} frame found")
         else:
             logger.info(f"found master {calib_type}")
-            calib_frames[calib_type] = calib_frame
+            calib_frames[calib_type] = calib_metadata.iloc[0]
     return calib_frames
 
 
