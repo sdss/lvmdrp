@@ -2803,7 +2803,10 @@ def preprocRawFrame_drp(
                 sc_x_f.split(":"),
             )
             image_logger.info(
-                f"parsed data region from 'TRIMSEC', YX_i = {sc_y_i, sc_x_i}, YX_f = {sc_y_f, sc_x_f}"
+                (
+                    "parsed data region from 'TRIMSEC', "
+                    f"YX_i = {sc_y_i, sc_x_i}, YX_f = {sc_y_f, sc_x_f}"
+                )
             )
         except (KeyError, ValueError):
             image_logger.warning("no valid 'TRIMSEC' found in header")
@@ -2854,10 +2857,16 @@ def preprocRawFrame_drp(
     os_bias_med = [numpy.nanmedian(os_quad._data) for os_quad in os_quads]
     os_bias_std = [numpy.nanstd(os_quad._data) for os_quad in os_quads]
     image_logger.info(
-        f"median counts in overscan sections { {k: v for k, v in zip('abcd', os_bias_med)} }"
+        (
+            "median counts in overscan sections "
+            f"{ {k: v for k, v in zip('abcd', os_bias_med)} }"
+        )
     )
     image_logger.info(
-        f"standard deviation in overscan sections { {k: v for k, v in zip('abcd', os_bias_std)} }"
+        (
+            "standard deviation in overscan sections "
+            f"{ {k: v for k, v in zip('abcd', os_bias_std)} }"
+        )
     )
 
     # parse science section:
@@ -2882,7 +2891,10 @@ def preprocRawFrame_drp(
     try:
         gains = [org_image.getHdrValue(f"{gain_field}{i+1}") for i in range(nquad)]
         image_logger.info(
-            f"extracted gain values '{gain_field}' = { {k: v for k, v in zip('abcd', gains)} }"
+            (
+                f"extracted gain values '{gain_field}' = "
+                f"{ {k: v for k, v in zip('abcd', gains)} }"
+            )
         )
     except KeyError:
         try:
@@ -2896,12 +2908,18 @@ def preprocRawFrame_drp(
                 try:
                     assume_gain = [float(gain) for gain in assume_gain]
                     image_logger.warning(
-                        f"no valid '{gain_field}' found in header. Using given values { {k: v for k, v in zip('abcd', assume_gain)} }"
+                        (
+                            f"no valid '{gain_field}' found in header. "
+                            f"Using given values { {k: v for k, v in zip('abcd', assume_gain)} }"
+                        )
                     )
                 except ValueError:
                     assume_gain = 1.0
                     image_logger.warning(
-                        f"no valid '{gain_field}' found in header. Assuming constant value {assume_gain}"
+                        (
+                            f"no valid '{gain_field}' found in header. "
+                            f"Assuming constant value {assume_gain}"
+                        )
                     )
         if len(assume_gain) == 1:
             gains = nquad * assume_gain
@@ -2973,16 +2991,6 @@ def preprocRawFrame_drp(
         image_logger.info("flipping along X-axis")
         preproc_image.orientImage("X")
 
-    # define initial pixel mask
-    image_logger.info("building pixel mask")
-    preproc_image._mask = numpy.zeros_like(preproc_image._data, dtype=bool)
-    preproc_image._mask |= preproc_image._data >= 2**16
-    preproc_image._mask |= preproc_image._data <= 0
-    masked_pixels = preproc_image._mask.sum()
-    image_logger.info(
-        f"{masked_pixels} ({masked_pixels / preproc_image._mask.size * 100:.2g} %) pixels masked"
-    )
-
     # update header
     image_logger.info(
         f"updating header and writing pre-processed frame to '{out_image}'"
@@ -3029,6 +3037,17 @@ def preprocRawFrame_drp(
             os_bias_std[i],
             f"Overscan std of amp. {i+1} [adu]",
         )
+
+    # create pixel mask on the original image
+    image_logger.info("building pixel mask")
+    preproc_image._mask = numpy.zeros_like(preproc_image._data, dtype=bool)
+    preproc_image._mask |= preproc_image.convertUnit(unit="adu") >= 2**16
+    # preproc_image._mask |= preproc_image._data <= 0
+    masked_pixels = preproc_image._mask.sum()
+    image_logger.info(
+        f"{masked_pixels} ({masked_pixels / preproc_image._mask.size * 100:.2g} %) pixels masked"
+    )
+
     # write out FITS file
     preproc_image.writeFitsData(out_image)
 
