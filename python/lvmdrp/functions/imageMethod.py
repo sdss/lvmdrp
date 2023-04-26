@@ -3058,6 +3058,14 @@ def basicCalibration_drp(
     proc_image = loadImage(in_image).convertUnit(unit="electron")
     exptime = proc_image._header["EXPTIME"]
     img_type = proc_image._header["IMAGETYP"].lower()
+    image_logger.info(
+        (
+            "target frame parameters: "
+            f"MJD = {proc_image._header['MJD']}, "
+            f"exptime = {proc_image._header['EXPTIME']}, "
+            f"camera = {proc_image._header['CCD']}"
+        )
+    )
 
     # dummy calibration images
     dummy_bias = Image(data=numpy.zeros_like(proc_image._data))
@@ -3066,40 +3074,55 @@ def basicCalibration_drp(
 
     # read master bias
     if img_type in ["bias"] or (in_bias is None or not os.path.isfile(in_bias)):
+        if in_bias and not os.path.isfile(in_bias):
+            image_logger.warning(f"master bias '{in_bias}' not found")
         master_bias = dummy_bias
     else:
+        image_logger.info(f"using bias calibration frame '{in_bias}'")
         master_bias = loadImage(in_bias).convertUnit(unit="electron")
 
     # read master dark
     if img_type in ["bias", "dark"] or (in_dark is None or not os.path.isfile(in_dark)):
+        if in_dark and not os.path.isfile(in_dark):
+            image_logger.warning(f"master dark '{in_dark}' not found")
         master_dark = dummy_dark
     else:
+        image_logger.info(f"using dark calibration frame '{in_dark}'")
         master_dark = loadImage(in_dark).convertUnit(unit="electron")
+
         # scale down the dark if needed
         factor = exptime / master_dark._header["EXPTIME"]
         if factor > 1.0:
-            # WARNING: scaling up
-            pass
+            image_logger.warning("scaling-up master dark frame")
         master_dark *= factor
 
     # read master flat
     if img_type in ["bias", "dark", "flat", "flatfield"] or (
         in_pixelflat is None or not os.path.isfile(in_pixelflat)
     ):
-        master_flat = dummy_flat
+        if in_pixelflat and not os.path.isfile(in_pixelflat):
+            image_logger.warning(f"master flat '{in_pixelflat}' not found")
+        master_pixelflat = dummy_flat
     else:
-        master_flat = loadImage(in_pixelflat).convertUnit(unit="electron")
+        image_logger.info(f"using pixelflat calibration frame '{in_pixelflat}'")
+        master_pixelflat = loadImage(in_pixelflat).convertUnit(unit="electron")
 
     # run basic calibration
-    calib_image = (proc_image - master_dark - master_bias) / master_flat
+    calib_image = (proc_image - master_dark - master_bias) / master_pixelflat
+
     # propagate pixel mask
-    calib_image._mask = numpy.logical_or(
-        proc_image._mask, numpy.isnan(calib_image._data)
-    )
-    calib_image._mask = numpy.logical_or(
-        calib_image._mask, numpy.isinf(calib_image._data)
-    )
+    image_logger.info("propagating pixel mask")
+    nanpixels = numpy.isnan(calib_image._data)
+    infpixels = numpy.isinf(calib_image._data)
+    calib_image._mask = numpy.logical_or(proc_image._mask, nanpixels)
+    calib_image._mask = numpy.logical_or(calib_image._mask, infpixels)
     # fix infinities & nans
+    image_logger.info(
+        (
+            f"replacing NaNs and infinities ({nanpixels.sum()} and "
+            f"{infpixels.sum()} pix) with zeros"
+        )
+    )
     calib_image._data = numpy.nan_to_num(calib_image._data, nan=0, posinf=0, neginf=0)
     calib_image._error = numpy.nan_to_num(calib_image._error, nan=0, posinf=0, neginf=0)
 
