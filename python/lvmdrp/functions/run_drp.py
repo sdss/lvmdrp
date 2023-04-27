@@ -168,8 +168,8 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
     log.info(f'Using master bias: {mbias}')
     log.info(f'Using master dark: {mdark}')
     if not pathlib.Path(mbias).exists() or not pathlib.Path(mdark).exists():
-        log.error('No master bias or dark frames exist ---')
-        raise ValueError('master bias/dark does not exist yet')
+        log.error('No master bias or dark frames exist. Discontinuing reduction.')
+        return
 
     # process the flat/arc frames
     flavor = 'fiberflat' if flavor == 'flat' else flavor
