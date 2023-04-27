@@ -47,6 +47,12 @@ def get_config_options(level: str, flavor: str = None) -> dict:
 def create_masters(flavor, frames):
 
     sub = frames[frames['imagetyp'] == flavor]
+
+    # check for empty rows
+    if len(sub) == 0:
+        log.error(f'No exposures of flavor {flavor} found.  Cannot create master frame.')
+        return
+
     mjd = sub['mjd'][0]
     tileid = sub['tileid'][0]
 
@@ -318,6 +324,11 @@ def run_drp(mjd: int = None, bias: bool = False, dark: bool = False,
         sub = sub[~(sub['imagetyp'] == 'object')]
     elif only_sci:
         sub = sub[sub['imagetyp'] == 'object']
+
+    # exit if not arcs, flats, or science frames in mjd
+    if len(sub) == 0:
+        log.error(f'No cals or science frames found for mjd {mjd}. Discontinuing reduction.')
+        return
 
     # group the frames
     sub = sub.group_by(['expnum', 'camera'])
