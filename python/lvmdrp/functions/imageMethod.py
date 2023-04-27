@@ -3180,8 +3180,14 @@ def createMasterFrame_drp(
     drp image createMasterFrame IN_IMAGE1,IN_IMAGE2,... OUT_IMAGE
 
     """
-    if not isinstance(in_images, (list, tuple)):
-        in_images = [in_images]
+    if isinstance(in_images, str):
+        in_images = in_images.split(",")
+
+    if len(in_images) <= 1:
+        image_logger.error(
+            f"skipping master frame calculation, {len(in_images)} frame to combine"
+        )
+        return
 
     nexp = len(in_images)
     proc_images, exptimes, img_types = [], [], []
@@ -3252,7 +3258,7 @@ def createMasterFrame_drp(
         if master_type == "bias":
             master_frame = combineImages(proc_images, method="median")
         elif master_type == "dark":
-            master_frame = combineImages(proc_images, method="clipped_mean", k=3)
+            master_frame = combineImages(proc_images, method="median")
         elif master_type == "flat" or master_type == "flatfield":
             master_frame = combineImages(
                 [
