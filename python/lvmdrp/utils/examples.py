@@ -119,7 +119,11 @@ def get_frames_metadata(mjd: Union[str, int] = None, path: str = None, suffix: s
         dtype=[str, str, int, str, str, float, int, str, str, str],
     )
     for frame_path in tqdm(frames, ascii=True, unit='files', total=len(frames)):
-        header = fits.getheader(frame_path, ext=0)
+        try:
+            header = fits.getheader(frame_path, ext=0)
+        except OSError as e:
+            log.error(f'Cannot read FITS header: {e}')
+            continue
         mjd = header.get("MJD")
 
         # apply any header fix or if none, use old header
