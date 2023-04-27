@@ -3200,61 +3200,64 @@ def createMasterFrame_drp(
     master_type, counts = numpy.unique(img_types, return_counts=True)
     master_type = master_type[numpy.argmax(counts)]
     if numpy.any(master_type != img_types):
+        image_logger.warning(f"not all imagetyp = {master_type}")
         # TODO: drop minority type
         # TODO: throw warning: dropping frames != frames[0]
-        pass
 
     master_exptime = exptimes[0]
     if numpy.any(master_exptime != exptimes):
+        image_logger.warning(f"not all exptime = {master_exptime}")
         # TODO: scale frames to a common exptime
         # TODO: throw warning: scale frames to a common exptime
-        pass
 
-    if reject_cr and (master_exptime < exptime_thresh or nexp <= 2):
+    if reject_cr and (master_exptime < exptime_thresh or nexp == 2):
+        image_logger.info(
+            f"rejecting CR for exposure {proc_images[0]._header['EXPNUM']}"
+        )
         cr_select_1 = proc_images[0].createCosmicMask(**cr_kwargs)
-        if nexp == 2:
-            cr_select_2 = proc_images[1].createCosmicMask(**cr_kwargs)
+        image_logger.info(
+            f"rejecting CR for exposure {proc_images[1]._header['EXPNUM']}"
+        )
+        cr_select_2 = proc_images[1].createCosmicMask(**cr_kwargs)
 
-            # filter out cosmic rays by selecting pixels where no CR were detected
-            # normalize counts if pixelflat
-            new_data_1 = numpy.where(
-                cr_select_1, x=proc_images[1]._data, y=proc_images[0]._data
-            )
-            new_data_2 = numpy.where(
-                cr_select_2, x=proc_images[0]._data, y=proc_images[1]._data
-            )
-            if master_type == "flat" or master_type == "flatfield":
-                new_data = [
-                    new_data_1 / numpy.nanmedian(new_data_1),
-                    new_data_2 / numpy.nanmedian(new_data_2),
-                ]
-            else:
-                new_data = [new_data_1, new_data_2]
+        # filter out cosmic rays by selecting pixels where no CR were detected
+        # normalize counts if pixelflat
+        image_logger.info("selecting pixels with no CR for master frame")
+        new_data_1 = numpy.where(
+            cr_select_1, x=proc_images[1]._data, y=proc_images[0]._data
+        )
+        new_data_2 = numpy.where(
+            cr_select_2, x=proc_images[0]._data, y=proc_images[1]._data
+        )
+        if master_type == "flat" or master_type == "flatfield":
+            new_data = [
+                new_data_1 / numpy.nanmedian(new_data_1),
+                new_data_2 / numpy.nanmedian(new_data_2),
+            ]
+        else:
+            new_data = [new_data_1, new_data_2]
 
-            # average images
-            new_data = numpy.mean(new_data, axis=0)
+        image_logger.info(f"combining {nexp} frames into master frame")
+        # average images
+        new_data = numpy.nanmean(new_data, axis=0)
 
-            new_header = proc_images[0]._header
-            # combine CR pixel selection
-            cr_mask = numpy.logical_and(cr_select_1, cr_select_2)
-            # combine original masks
-            new_mask = numpy.logical_and(proc_images[0]._mask, proc_images[1]._mask)
-
-        elif nexp == 1:
-            new_data = proc_images[0]._data
-            new_header = proc_images[0]._header
-            cr_mask = cr_select_1
-            new_mask = proc_images[0]._mask
+        new_header = proc_images[0]._header
+        # combine original masks
+        new_mask = numpy.logical_and(proc_images[0]._mask, proc_images[1]._mask)
 
         # prepare image for CRR
-        master_frame = Image(data=new_data, header=new_header, mask=cr_mask)
-        replace_box = cr_kwargs.get("replace_box", (20, 1))
-        replace_error = cr_kwargs.get("replace_error", 1e10)
+        master_frame = Image(data=new_data, header=new_header, mask=new_mask)
+
+        # combine CR pixel selection
+        # cr_mask = numpy.logical_and(cr_select_1, cr_select_2)
+        # replace_box = cr_kwargs.get("replace_box", (20, 1))
+        # replace_error = cr_kwargs.get("replace_error", 1e10)
         # filter out remaining cosmic rays
-        master_frame.replaceMaskMedian(*replace_box, replace_error=replace_error)
+        # master_frame.replaceMaskMedian(*replace_box, replace_error=replace_error)
         # add original masks
-        master_frame.setData(mask=new_mask)
+        # master_frame.setData(mask=new_mask)
     else:
+        image_logger.info(f"combining {nexp} frames into master frame")
         if master_type == "bias":
             master_frame = combineImages(proc_images, method="median")
         elif master_type == "dark":
@@ -3271,6 +3274,7 @@ def createMasterFrame_drp(
         elif master_type == "arc":
             master_frame = combineImages(proc_images, method="mean")
 
+    image_logger.info(f"updating header for new master frame '{out_image}'")
     # TODO:
     # * add binary table with columns: MJD, EXPNUM, SPEC, CHANNEL, EXPTIME
     master_frame._header["EXPTIME"] = master_exptime
