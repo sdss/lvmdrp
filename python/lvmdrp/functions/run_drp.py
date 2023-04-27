@@ -398,7 +398,24 @@ def write_config_file():
 
 
 def sort_cals(table: Table) -> Table:
-    """ sort the astropy table by flat, arcs, sci """
+    """ Sort raw frames table by calibrations
+
+    Sorts and orders the table of raw frames by calibration,
+    then science frames.  Calibration frames are ordered by flats,
+    then arcs, then flats again, to be reduced in that order.
+    This is so flats can be properly wavelength calibration after
+    arc reduction.
+
+    Parameters
+    ----------
+    table : Table
+        the table of raw frames to process
+
+    Returns
+    -------
+    Table
+        a sorted table of raw frames
+    """
 
     # get unique flavors
     imtypes = set(table['imagetyp'])
@@ -413,10 +430,12 @@ def sort_cals(table: Table) -> Table:
     missing = set(flavors) - imtypes
     __ = [flavors.remove(i) for i in missing]
 
+    # convert to pandas, sort and set index
     df = table.to_pandas()
     ss = df.sort_values(['camera', 'expnum'])
     ee = ss.set_index('imagetyp', drop=False).loc[flavors]
 
+    # append flats to end of calibration frames, and build new dataframe
     calibs = pd.concat([ee.loc[['flat', 'arc']], ee.loc['flat']]).reset_index(drop=True)
     new = (pd.concat([calibs, ee.loc['object']]).reset_index(drop=True)
            if 'object' in imtypes else calibs)
@@ -424,25 +443,81 @@ def sort_cals(table: Table) -> Table:
 
 
 def find_best_mdark(tileid: int, mjd: int, camera: str) -> str:
+    """ Find the best master dark frame
+
+    Finds the master dark frame with the largest exposure time, for an
+    input tileid, MJD, and camera.
+
+    Parameters
+    ----------
+    tileid : int
+        the sky tileid
+    mjd : int
+        the MJD of observation
+    camera : str
+        the camera name
+
+    Returns
+    -------
+    str
+        the filepath to the master dark
+    """
     darks = path.expand("lvm_cal_time", kind='mdark', mjd=mjd, drpver=drpver,
                         camera=camera, tileid=tileid, exptime="*")
 
+    # return if no master dark found
+    if not darks:
+        log.warning(f'No master dark frame found for {tileid}, {mjd}, {camera}.')
+        return
+
+    # return the master dark with the largest exposure time
     return max(darks, key=lambda x: int(pathlib.Path(x).stem.rsplit('-', 1)[-1]))
 
 
-def _parse_expnum_cam(name):
+def _parse_expnum_cam(name: str) -> tuple:
+    """ Parse the filename
+
+    Parse the camera and exposure number from the
+    filename.
+
+    Parameters
+    ----------
+    name : str
+        the name of the file
+
+    Returns
+    -------
+    tuple
+        the camera and exposure number
+    """
     pp = pathlib.Path(name).stem
     ss = pp.split('-')
     return int(ss[-1]), ss[-2]
 
 
-def combine_cameras(tileid, mjd, spec: int = 1):
+def combine_cameras(tileid: int, mjd: int, spec: int = 1):
+    """ Combine the cameras together
+
+    Combines all available cameras (b, r, z) together on a given
+    spectrograph. For all exposures, combines all "hobject" ancillary
+    files into a single "bobject" ancillary file, per spectrograph.
+
+    Parameters
+    ----------
+    tileid : int
+        the sky tileid
+    mjd : int
+        the MJD of observation
+    spec : int, optional
+        the spectrograph id, by default 1
+    """
     from itertools import groupby
 
     # pattern = f'*hobject-*-*{spec}-*'
     # hfiles = sorted(list(pathlib.Path(os.getenv('LVM_SPECTRO_REDUX')).rglob(pattern)),
     #                 key=_parse_expnum_cam)
 
+    # find all the h object files
     hfiles = path.expand('lvm_anc', mjd=mjd, tileid=tileid, drpver=drpver,
                          imagetype='object', expnum='****', kind='h', camera=f'*{spec}')
     hfiles = map(pathlib.Path, sorted(hfiles, key=_parse_expnum_cam))
@@ -453,9 +528,11 @@ def combine_cameras(tileid, mjd, spec: int = 1):
 
     m = [f'b{spec}', f'r{spec}', f'z{spec}']
 
+    # loop over all files, grouped by exposure
     for key, exps in groupby(hfiles, lambda x: int(x.stem.split('-')[-1])):
         log.info(f'combining cameras for exposure {key}')
 
+        # create the output b object file, 1 per spectrograph
         bout_file = path.full('lvm_anc', mjd=mjd, tileid=tileid, drpver=drpver,
                               imagetype='object', expnum=key, kind='b', camera=f'sp{spec}')
 
@@ -465,6 +542,7 @@ def combine_cameras(tileid, mjd, spec: int = 1):
             x = [any(e.match(f'*{n}*') for e in exps) for n in m]
             exps.insert(x.index(False), None)
 
+        # combine the b, r, z channels together
         join_spec_channels(in_rss=list(exps), out_rss=bout_file, **kwargs)
         log.info(f'Output combined camera file: {bout_file}')
 
