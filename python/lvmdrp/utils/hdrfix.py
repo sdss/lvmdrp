@@ -169,7 +169,7 @@ def apply_hdrfix(mjd: int, camera: str = None, expnum: int = None,
 
     # find matching files
     for fileroot, key, val in zip(fix['fileroot'], fix['keyword'], fix['value']):
-        root = f'60010/{fileroot}{"" if fileroot.endswith("*") else "*"}'
+        root = f'{mjd}/{fileroot}{"" if fileroot.endswith("*") else "*"}'
         files = pathlib.Path(os.getenv('LVM_DATA_S')).rglob(root)
 
         pattern = re.compile(f'{camera}-{expnum:0>8}')
