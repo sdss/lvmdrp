@@ -288,6 +288,9 @@ def run_drp(mjd: int = None, bias: bool = False, dark: bool = False,
     # get biases and darks
     cond = (frames['imagetyp'] == 'bias') | (frames['imagetyp'] == 'dark')
     precals = frames[cond]
+    if len(precals) == 0:
+        log.error(f'No biases or darks found for mjd {mjd}. Discontinuing reduction.')
+        return
     precals = precals.group_by(['expnum', 'camera'])
 
     if not skip_bd:
