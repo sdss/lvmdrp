@@ -2743,7 +2743,7 @@ def preprocRawFrame_drp(
     gain_field="GAIN",
     rdnoise_field="RDNOISE",
     unit="adu",
-    assume_imagetyp="bias",
+    assume_imagetyp="",
     plot="2",
     figure_path=".figures",
 ):
@@ -2757,11 +2757,12 @@ def preprocRawFrame_drp(
     # load image
     org_image = loadImage(in_image)
     # header quick check
-    try:
-        org_image._header["IMAGETYP"]
-    except KeyError:
+    if assume_imagetyp:
+        image_logger.warning(f"assuming IMAGETYP = '{assume_imagetyp}'")
+        org_image._header["IMAGETYP"] = assume_imagetyp
+    elif "IMAGETYP" not in org_image._header:
         image_logger.warning(
-            f"header keyword 'IMAGETYP' not found. Assuming IMAGETYP='{assume_imagetyp}'"
+            f"header keyword 'IMAGETYP' not found. Assuming IMAGETYP = '{assume_imagetyp}'"
         )
         org_image._header["IMAGETYP"] = assume_imagetyp
 
@@ -3207,23 +3208,27 @@ def createMasterFrame_drp(
     nexp = len(in_images)
     proc_images, exptimes, img_types = [], [], []
     for in_image in in_images:
-        proc_image = loadImage(in_image).convertUnit(unit="ADU")
+        proc_image = loadImage(in_image).convertUnit(unit="electron")
         exptimes.append(proc_image._header["EXPTIME"])
         img_types.append(proc_image._header["IMAGETYP"].lower())
         proc_images.append(proc_image)
 
     master_type, counts = numpy.unique(img_types, return_counts=True)
     master_type = master_type[numpy.argmax(counts)]
-    if numpy.any(master_type != img_types):
+    if numpy.any(master_type != numpy.asarray(img_types)):
         image_logger.warning(f"not all imagetyp = {master_type}")
         # TODO: drop minority type
         # TODO: throw warning: dropping frames != frames[0]
 
     master_exptime = exptimes[0]
-    if numpy.any(master_exptime != exptimes):
-        image_logger.warning(f"not all exptime = {master_exptime}")
-        # TODO: scale frames to a common exptime
-        # TODO: throw warning: scale frames to a common exptime
+    if numpy.any(master_exptime != numpy.asarray(exptimes)):
+        image_logger.warning(f"not all exptime = {master_exptime}. Scaling images")
+        factors = numpy.nan_to_num(
+            master_exptime / numpy.asarray(exptimes), nan=1.0, posinf=1.0, neginf=1.0
+        )
+        proc_images = [
+            proc_image * factor for factor, proc_image in zip(factors, proc_images)
+        ]
 
     if reject_cr and (master_exptime < exptime_thresh or nexp == 2):
         image_logger.info(
@@ -3285,7 +3290,7 @@ def createMasterFrame_drp(
                 ],
                 method="mean",
             )
-        elif master_type == "arc":
+        elif master_type == "arc" or master_type == "fiberflat":
             master_frame = combineImages(proc_images, method="mean")
 
     image_logger.info(f"updating header for new master frame '{out_image}'")
