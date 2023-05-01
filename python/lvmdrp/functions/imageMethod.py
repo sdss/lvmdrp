@@ -3134,7 +3134,12 @@ def basicCalibration_drp(
 
 
 def createMasterFrame_drp(
-    in_images, out_image, reject_cr=False, exptime_thresh=5, **cr_kwargs
+    in_images,
+    out_image,
+    reject_cr=False,
+    exptime_thresh=5,
+    force_master=True,
+    **cr_kwargs,
 ):
     """
     Combines the given calibration frames (bias, dark, or pixelflat) into a
@@ -3171,6 +3176,8 @@ def createMasterFrame_drp(
     exptime_thresh : integer, optional
         minimum exposure time belowe which no cosmic rejection routine will be
         run
+    force_master : bool, optional
+        whether to force or not creation of master frame, by default True
     cr_kwargs : dict_like
         additional keyword arguments to be passed to the cosmic ray rejection
         routine
@@ -3183,11 +3190,19 @@ def createMasterFrame_drp(
     if isinstance(in_images, str):
         in_images = in_images.split(",")
 
-    if len(in_images) <= 1:
-        image_logger.error(
-            f"skipping master frame calculation, {len(in_images)} frame to combine"
-        )
+    if len(in_images) == 0:
+        image_logger.error("skipping master frame calculation, no input images given")
         return
+    elif len(in_images) == 1:
+        if not force_master:
+            image_logger.error(
+                f"skipping master frame calculation, {len(in_images)} frame to combine"
+            )
+            return
+        else:
+            image_logger.warning("building master frame with one image file")
+
+    image_logger.info(f"input frames: {','.join(in_images)}")
 
     nexp = len(in_images)
     proc_images, exptimes, img_types = [], [], []
@@ -3268,8 +3283,7 @@ def createMasterFrame_drp(
                     proc_image / numpy.nanmedian(proc_image._data)
                     for proc_image in proc_images
                 ],
-                method="clipped_mean",
-                k=3,
+                method="mean",
             )
         elif master_type == "arc":
             master_frame = combineImages(proc_images, method="mean")
