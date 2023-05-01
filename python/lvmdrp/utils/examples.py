@@ -2,6 +2,8 @@ import os
 import pickle
 import subprocess
 import zipfile
+from glob import glob
+import pandas as pd
 
 from astropy.io import fits
 from astropy.table import Table
@@ -137,3 +139,28 @@ def get_frames_metadata(path, suffix=".fits.gz", ignore_cache=False):
     pickle.dump(frames_table, open(CACHE_PATH, "wb"))
 
     return frames_table
+
+
+def get_masters_metadata(
+    path_pattern, mjd=None, kind=None, camera=None, exptime=None, ext="fits"
+):
+    """return master metadata given a path where master calibration frames are stored"""
+    masters_path = path_pattern.format(
+        mjd=mjd or "*",
+        kind=kind or "*",
+        camera=camera or "*",
+        exptime=exptime or "*",
+        ext=ext,
+    )
+    masters_path = glob(masters_path)
+
+    metadata = []
+    for path in masters_path:
+        p = os.path.basename(path).split(".")[0]
+        mjd, kind, camera, exptime = p.split("-")[1:]
+        metadata.append(
+            [int(mjd) if mjd != "super" else mjd, kind, camera, float(exptime), path]
+        )
+    return pd.DataFrame(
+        columns=["mjd", "kind", "camera", "exptime", "path"], data=metadata
+    )
