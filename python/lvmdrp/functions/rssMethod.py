@@ -106,6 +106,7 @@ def detWaveSolution_drp(
     fiberflat="",
     negative="False",
     cc_correction="True",
+    cc_max_shift="40",
     plot="2",
     figure_path=".figures",
 ):
@@ -190,6 +191,7 @@ def detWaveSolution_drp(
     rel_flux_limits = [float(v) for v in rel_flux_limits.split(",")]
     negative = eval(negative)
     cc_correction = eval(cc_correction)
+    cc_max_shift = int(cc_max_shift)
     plot = int(plot)
 
     if fiberflat != "":
@@ -245,8 +247,18 @@ def detWaveSolution_drp(
         rss_logger.info("calculating shift in guess lines using CC")
         # determine maximum correlation shift
         pix_spec = spec_from_lines(pixel, sigma=2, wavelength=arc._pixels)
-        corr = signal.correlate(arc._data[ref_fiber], pix_spec, mode="full")
-        shift = numpy.argmax(corr) - pix_spec.size
+        shifts = signal.correlation_lags(
+            (arc._data * (~arc._mask))[ref_fiber].size, pix_spec.size, mode="full"
+        )
+        corr = signal.correlate(
+            (arc._data * (~arc._mask))[ref_fiber], pix_spec, mode="full"
+        )
+        if cc_max_shift != 0:
+            shifts_mask = (shifts >= -cc_max_shift) & (shifts <= cc_max_shift)
+            shifts = shifts[shifts_mask]
+            corr = corr[shifts_mask]
+
+        shift = shifts[numpy.argmax(corr)]
         rss_logger.info(f"maximum CC {shift = } pix")
     else:
         shift = 0
@@ -438,6 +450,7 @@ def detWaveSolution_drp(
 
         ax_spec = fig.add_subplot(gs[:3, :])
         ax_spec.tick_params(labelbottom=False)
+        ax_spec.set_yscale("log")
         ax_sol_wave = fig.add_subplot(gs[3:6, :], sharex=ax_spec)
         ax_sol_fwhm = ax_sol_wave.twinx()
         ax_sol_wave.tick_params("y", labelcolor="tab:blue")
@@ -449,32 +462,33 @@ def detWaveSolution_drp(
             ax_coe_fwhm.append(fig.add_subplot(gs[8:, i]))
 
         # add reference spectrum plot with reference lines & corrected lines
+        good_pix = ~arc._mask
         for pix in pixel:
             ax_spec.axvspan(
                 pix - (aperture - 1) // 2,
                 pix + (aperture - 1) // 2,
-                numpy.nanmin(arc._data[ref_fiber]),
-                numpy.nanmax(arc._data[ref_fiber]),
+                numpy.nanmin((arc._data * good_pix)[ref_fiber]),
+                numpy.nanmax((arc._data * good_pix)[ref_fiber]),
                 fc="0.7",
                 alpha=0.5,
             )
         ax_spec.vlines(
             pixel - shift,
-            numpy.nanmin(arc._data[ref_fiber]),
-            numpy.nanmax(arc._data[ref_fiber]),
+            numpy.nanmin((arc._data * good_pix)[ref_fiber]),
+            numpy.nanmax((arc._data * good_pix)[ref_fiber]),
             color="tab:red",
             lw=0.5,
             label="orig. ref. lines",
         )
         ax_spec.vlines(
             pixel,
-            numpy.nanmin(arc._data[ref_fiber]),
-            numpy.nanmax(arc._data[ref_fiber]),
+            numpy.nanmin((arc._data * good_pix)[ref_fiber]),
+            numpy.nanmax((arc._data * good_pix)[ref_fiber]),
             color="tab:blue",
             lw=0.5,
             label=f"corr. lines ({shift = } pix)",
         )
-        ax_spec.step(arc._pixels, arc._data[ref_fiber], color="0.2", lw=1)
+        ax_spec.step(arc._pixels, (arc._data * good_pix)[ref_fiber], color="0.2", lw=1)
         ax_spec.set_title(f"reference arc spectrum {ref_fiber}", loc="left")
         ax_spec.set_ylabel("count (e-/pix)")
         ax_spec.legend(loc=1)
