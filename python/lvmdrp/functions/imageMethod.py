@@ -3042,7 +3042,7 @@ def preprocRawFrame_drp(
 
     # load master pixel mask
     if in_mask != "":
-        master_mask = loadImage(in_mask)
+        master_mask = loadImage(in_mask)._mask.astype(bool)
     else:
         master_mask = numpy.zeros_like(preproc_image._mask, dtype=bool)
 
@@ -3050,7 +3050,7 @@ def preprocRawFrame_drp(
     image_logger.info("building pixel mask")
     preproc_image._mask = numpy.zeros_like(preproc_image._data, dtype=bool)
     preproc_image._mask |= preproc_image.convertUnit(unit="adu") >= 2**16
-    preproc_image._mask |= master_mask._mask
+    preproc_image._mask |= master_mask
     masked_pixels = preproc_image._mask.sum()
     image_logger.info(
         f"{masked_pixels} ({masked_pixels / preproc_image._mask.size * 100:.2g} %) pixels masked"
