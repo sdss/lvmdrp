@@ -159,7 +159,13 @@ def get_masters_metadata(
         p = os.path.basename(path).split(".")[0]
         mjd, kind, camera, exptime = p.split("-")[1:]
         metadata.append(
-            [int(mjd) if mjd != "super" else mjd, kind, camera, float(exptime), path]
+            [
+                int(mjd) if mjd != "super" else mjd,
+                kind,
+                camera,
+                float(exptime) if exptime != "x" else exptime,
+                path,
+            ]
         )
     return pd.DataFrame(
         columns=["mjd", "kind", "camera", "exptime", "path"], data=metadata

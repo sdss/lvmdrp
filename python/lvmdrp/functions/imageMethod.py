@@ -1232,7 +1232,7 @@ def tracePeaks_drp(
     coadd="30",
     poly_disp="-6",
     init_sigma="1.0",
-    threshold_peak="100.0",
+    threshold="100.0",
     max_diff="2",
     verbose="1",
     plot="1",
@@ -1264,7 +1264,7 @@ def tracePeaks_drp(
         Order of the polynomial used to smooth the measured peak position along dispersion axis (positiv: normal polynomial, negative: Legandre polynomial)
     init_sigma: string of float, optional with default: '1.0'
         Initial guess for the width of the Gaussian profiles to measure the peak positions (only used in with method 'gauss')
-    threshold_peak: string of float, optional  with default: '100.0'
+    threshold: string of float, optional  with default: '100.0'
         Minimum contrast between peak height and the adjacent continuuml counts to be considered as a good measurement
     max_diff: string of float, optional with default: '1.0'
         Maximum difference between the peak position of each fiber in adjacent measurements (steps) along  dispersion direction
@@ -1282,7 +1282,7 @@ def tracePeaks_drp(
     steps = int(steps)
     median_box = int(median_box)
     median_cross = int(median_cross)
-    threshold_peak = float(threshold_peak)
+    threshold = float(threshold)
     max_diff = float(max_diff)
     init_sigma = float(init_sigma)
     verbose = bool(verbose)
@@ -1311,7 +1311,7 @@ def tracePeaks_drp(
         )  # create convolution kernel array for coaddition
         img = img.convolveImg(coadd_kernel)  # perform convolution to coadd the signal
         threshold = (
-            threshold_peak * coadd
+            threshold * coadd
         )  # adjust the minimum contrast threshold for the peaks
 
     # load the initial positions of the fibers at a certain column NEED TO BE REPLACED WITH XML handling
@@ -3291,7 +3291,7 @@ def createMasterFrame_drp(
                 method="mean",
             )
         elif master_type == "arc" or master_type == "fiberflat":
-            master_frame = combineImages(proc_images, method="mean")
+            master_frame = combineImages(proc_images, method="median")
 
     image_logger.info(f"updating header for new master frame '{out_image}'")
     # TODO:
