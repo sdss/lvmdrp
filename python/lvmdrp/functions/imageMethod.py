@@ -2732,6 +2732,7 @@ def old_preprocRawFrame_drp(
 def preprocRawFrame_drp(
     in_image,
     out_image,
+    in_mask="",
     positions="00,10,01,11",
     orientation="S,S,S,S",
     subtract_overscan="1",
@@ -3039,11 +3040,17 @@ def preprocRawFrame_drp(
             f"Overscan std of amp. {i+1} [adu]",
         )
 
+    # load master pixel mask
+    if in_mask != "":
+        master_mask = loadImage(in_mask)
+    else:
+        master_mask = numpy.zeros_like(preproc_image._mask, dtype=bool)
+
     # create pixel mask on the original image
     image_logger.info("building pixel mask")
     preproc_image._mask = numpy.zeros_like(preproc_image._data, dtype=bool)
     preproc_image._mask |= preproc_image.convertUnit(unit="adu") >= 2**16
-    # preproc_image._mask |= preproc_image._data <= 0
+    preproc_image._mask |= master_mask._mask
     masked_pixels = preproc_image._mask.sum()
     image_logger.info(
         f"{masked_pixels} ({masked_pixels / preproc_image._mask.size * 100:.2g} %) pixels masked"
@@ -3301,6 +3308,39 @@ def createMasterFrame_drp(
     master_frame._header["NFRAMES"] = (nexp, "Number of exposures combined")
 
     master_frame.writeFitsData(out_image)
+
+
+def createPixelMask_drp(in_image, out_image, cen_stat="median", nstd=3):
+    """create a pixel mask using a simple sigma clipping
+
+    given an image with potentially bad pixels (hot, dead), this function
+    will calculate a sigma clipping pixel mask to reject those pixels.
+
+    Parameters
+    ----------
+    in_image : str
+        input image from which the pixel mask will be created
+    out_image : str
+        output image where the resulting pixel mask will be stored
+    cen_stat : str, optional
+        central statistic to use when sigma-clipping, by default "median"
+    nstd : int, optional
+        number of sigmas above which a pixel will be masked, by default 3
+    """
+    image = loadImage(in_image)
+
+    marray = numpy.ma.masked_array(image._data, mask=image._mask)
+    if cen_stat == "mean":
+        cen = numpy.ma.mean(marray)
+    elif cen_stat == "median":
+        cen = numpy.ma.median(marray)
+
+    std = numpy.ma.std(marray)
+
+    mask = (marray.data < cen - nstd * std) | (marray.data > cen + nstd * std)
+
+    new_mask = Image(data=mask * 0, mask=mask)
+    new_mask.writeFitsData(out_image)
 
 
 # TODO: for fiberflats, calculate an average over an X range (around the center) of the
