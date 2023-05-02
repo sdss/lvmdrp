@@ -2187,18 +2187,21 @@ def combineImages(images, method="median", k=3):
         if images[i]._mask is not None:
             stack_mask[i, :, :] = images[i].getMask()
 
+    # mask invalid values
+    stack_image = numpy.ma.masked_array(stack_image, mask=stack_mask)
+
     # combine the images according to the selected method
     if method == "median":
-        new_image = numpy.median(stack_image, 0)
+        new_image = numpy.ma.median(stack_image, 0)
     elif method == "sum":
-        new_image = numpy.sum(stack_image, 0)
+        new_image = numpy.ma.sum(stack_image, 0)
     elif method == "mean":
-        new_image = numpy.mean(stack_image, 0)
+        new_image = numpy.ma.mean(stack_image, 0)
     elif method == "nansum":
-        new_image = numpy.nansum(stack_image, 0)
+        new_image = numpy.ma.sum(stack_image, 0)
     elif method == "clipped_mean":
-        median = numpy.median(stack_image, 0)
-        rms = numpy.std(stack_image, 0)
+        median = numpy.ma.median(stack_image, 0)
+        rms = numpy.ma.std(stack_image, 0)
         # select pixels within given sigma limits around the median
         select = numpy.logical_and(
             stack_image < median + k * rms, stack_image > median - k * rms
@@ -2209,11 +2212,14 @@ def combineImages(images, method="median", k=3):
         stack_image[:, numpy.logical_not(good_pixels)] = 0
         new_image = numpy.sum(stack_image, 0) / good_pixels
 
+    # return new image to normal array
+    new_image = new_image.data
+
     # mask bad pixels
     old_mask = numpy.sum(stack_mask, 0).astype(bool)
     new_mask = numpy.logical_or(old_mask, numpy.isnan(new_image))
     # replace masked pixels
-    # new_image[new_mask] = 0
+    new_image[new_mask] = 0
 
     # TODO: add new header keywords:
     #   - NCOMBINE: number of frames combined
