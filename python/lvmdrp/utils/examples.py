@@ -97,9 +97,10 @@ def get_frames_metadata(path, suffix=".fits.gz", ignore_cache=False):
             "ldls",
             "hgne",
             "xenon",
+            "krypton",
             "path",
         ],
-        dtype=[str, str, int, str, str, float, bool, bool, bool, bool, bool, str],
+        dtype=[str, str, int, str, str, float, bool, bool, bool, bool, bool, bool, str],
     )
     for frame_path in tqdm(frames, ascii=True):
         try:
@@ -117,6 +118,7 @@ def get_frames_metadata(path, suffix=".fits.gz", ignore_cache=False):
         ldls = header.get("LDLS", "OFF") == "ON"
         hgne = header.get("HGNE", "OFF") == "ON"
         xenon = header.get("XENON", "OFF") == "ON"
+        krypton = header.get("KRYPTON", "OFF") == "ON"
         frames_table.add_row(
             [
                 imagetyp,
@@ -130,6 +132,7 @@ def get_frames_metadata(path, suffix=".fits.gz", ignore_cache=False):
                 ldls,
                 hgne,
                 xenon,
+                krypton,
                 frame_path,
             ]
         )
