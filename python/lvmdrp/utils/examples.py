@@ -1,4 +1,5 @@
 import os
+import re
 import pickle
 import subprocess
 import zipfile
@@ -144,32 +145,22 @@ def get_frames_metadata(path, suffix=".fits.gz", ignore_cache=False):
     return frames_table
 
 
-def get_masters_metadata(
-    path_pattern, mjd=None, kind=None, camera=None, exptime=None, ext="fits"
-):
+def get_masters_metadata(path_pattern, **kwargs):
     """return master metadata given a path where master calibration frames are stored"""
-    masters_path = path_pattern.format(
-        mjd=mjd or "*",
-        kind=kind or "*",
-        camera=camera or "*",
-        exptime=exptime or "*",
-        ext=ext,
-    )
+    path_params = re.findall(r"\{(\w+)\}", path_pattern)
+    params = dict.fromkeys(path_params, "*")
+    params.update(kwargs)
+
+    masters_path = path_pattern.format(**params)
     masters_path = glob(masters_path)
 
     metadata = []
     for path in masters_path:
-        p = os.path.basename(path).split(".")[0]
-        mjd, kind, camera, exptime = p.split("-")[1:]
-        metadata.append(
-            [
-                int(mjd) if mjd != "super" else mjd,
-                kind,
-                camera,
-                float(exptime) if exptime != "x" else exptime,
-                path,
-            ]
-        )
-    return pd.DataFrame(
-        columns=["mjd", "kind", "camera", "exptime", "path"], data=metadata
-    )
+        name = os.path.basename(path).split(".")[0]
+        metadata.append(name.split("-")[1:])
+
+    metadata = pd.DataFrame(columns=path_params, data=metadata)
+    metadata = metadata.apply(lambda s: pd.to_numeric(s, errors="ignore"), axis="index")
+    metadata["path"] = masters_path
+
+    return metadata
