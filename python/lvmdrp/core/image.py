@@ -2218,8 +2218,6 @@ def combineImages(images, method="median", k=3):
     # mask bad pixels
     old_mask = numpy.sum(stack_mask, 0).astype(bool)
     new_mask = numpy.logical_or(old_mask, numpy.isnan(new_image))
-    # replace masked pixels
-    new_image[new_mask] = 0
 
     # TODO: add new header keywords:
     #   - NCOMBINE: number of frames combined
