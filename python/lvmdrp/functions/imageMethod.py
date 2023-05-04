@@ -2965,16 +2965,15 @@ def preprocRawFrame_drp(
 
     # orient quadrants as requested
     [quad.orientImage(orient[i]) for i, quad in enumerate(quads)]
-    # convert to specified unit
-    if unit == "electron":
+    # compute error image and/or convert to specified unit
+    if compute_error:
         image_logger.info("converting from ADU to e-")
         for i in range(nquad):
+            quads[i].computePoissonError(gain=gains[i], rdnoise=rdnoises[i])
+        image_logger.info(f"calculated Poisson errors for amplifier '{'abcd'[i]}'")
+    elif unit == "electron":
+        for i in range(nquad):
             quads[i] *= gains[i]
-            if compute_error:
-                quads[i].computePoissonError(rdnoise=rdnoises[i])
-                image_logger.info(
-                    f"calculated Poisson errors for amplifier '{'abcd'[i]}'"
-                )
     elif unit == "adu":
         image_logger.info("using original ADU units")
     else:
