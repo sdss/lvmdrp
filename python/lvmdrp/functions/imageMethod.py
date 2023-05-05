@@ -2588,12 +2588,12 @@ def old_preprocRawFrame_drp(
     compute_error="1",
     gain="none",
     rdnoise="none",
-    gain_field="GAIN",
-    rdnoise_field="RDNOISE",
+    gain_prefix="GAIN",
+    rdnoise_prefix="RDNOISE",
 ):
     """
     Preprocess LVM raw image with different amplifiers to a full science CCD images. The orientations of the sub images are taken into account as well as their
-    overscan regions. A Poission error image can be automatically computed during this process. This requires that the {gain_field} and the Read-Out Noise are stored
+    overscan regions. A Poission error image can be automatically computed during this process. This requires that the {gain_prefix} and the Read-Out Noise are stored
     as header keywords in the raw image.
 
     Parameters
@@ -2646,11 +2646,11 @@ def old_preprocRawFrame_drp(
 
     try:
         gains = [
-            org_image.getHdrValue(f"{gain_field}{i+1}") for i in range(len(images))
+            org_image.getHdrValue(f"{gain_prefix}{i+1}") for i in range(len(images))
         ]
     except KeyError:
         try:
-            gain = org_image.getHdrValue(gain_field)
+            gain = org_image.getHdrValue(gain_prefix)
         except KeyError:
             if gain != "":
                 try:
@@ -2661,11 +2661,11 @@ def old_preprocRawFrame_drp(
 
     try:
         rdnoises = [
-            org_image.getHdrValue(f"{rdnoise_field}{i+1}") for i in range(len(images))
+            org_image.getHdrValue(f"{rdnoise_prefix}{i+1}") for i in range(len(images))
         ]
     except KeyError:
         try:
-            rdnoise = org_image.getHdrValue(rdnoise_field)
+            rdnoise = org_image.getHdrValue(rdnoise_prefix)
         except KeyError:
             if rdnoise != "":
                 try:
@@ -2702,18 +2702,18 @@ def old_preprocRawFrame_drp(
         full_img.orientImage("X")
 
     # adjust FITS header information
-    full_img.removeHdrEntries(["{gain_field}", f"{rdnoise_field}", ""])
+    full_img.removeHdrEntries(["{gain_prefix}", f"{rdnoise_prefix}", ""])
     # add gain keywords for the different subimages (CCDs/Amplifiers)
     for i in range(len(images)):
         full_img.setHdrValue(
-            f"HIERARCH AMP%i {gain_field}" % (i + 1),
+            f"HIERARCH AMP%i {gain_prefix}" % (i + 1),
             gains[i],
             "Gain value of CCD amplifier %i" % (i + 1),
         )
     # add read-out noise keywords for the different subimages (CCDs/Amplifiers)
     for i in range(len(images)):
         full_img.setHdrValue(
-            f"HIERARCH AMP%i {rdnoise_field}" % (i + 1),
+            f"HIERARCH AMP%i {rdnoise_prefix}" % (i + 1),
             rdnoises[i],
             "Read-out noise of CCD amplifier %i" % (i + 1),
         )
@@ -2741,13 +2741,62 @@ def preprocRawFrame_drp(
     compute_error="1",
     assume_gain="1.0",
     assume_rdnoise="5",
-    gain_field="GAIN",
-    rdnoise_field="RDNOISE",
+    gain_prefix="GAIN",
+    rdnoise_prefix="RDNOISE",
     unit="adu",
     assume_imagetyp="",
     plot="2",
     figure_path=".figures",
 ):
+    """produces a preprocessed frame given a raw frame
+
+    this taks performs the following steps:
+
+        - identifies and extracts the overscan region, per quadrant
+        - identifies extracts the science regions per quadrant
+        - optionally subtracts the averaged overscan region from the science regions
+        - optionally computes the Poisson errors
+        - computes the saturated pixel mask
+        - optionally propagates the "dead" and "hot" pixels mask to the final frame
+
+
+    Parameters
+    ----------
+    in_image : str
+        input raw frame
+    out_image : str
+        preprcessed frame
+    in_mask : str, optional
+        pixel mask considering dead pixels and hot pixels, by default ""
+    positions : str, optional
+        positions of each quadrant in the frame, by default "00,10,01,11"
+    orientation : str, optional
+        orientation of each quadrant in the frame, by default "S,S,S,S"
+    subtract_overscan : str, optional
+        whether to compute an average bias from the overscan region and subtract it or not, by default "1"
+    os_bound_x : str, optional
+        overscan boundary in the X direction, by default ""
+    os_bound_y : str, optional
+        overscan boundary in the Y direction, by default ""
+    compute_error : str, optional
+        whether to compute Poisson errors or not, by default "1"
+    assume_gain : str, optional
+        assume gain values if not in the header, by default "1.0"
+    assume_rdnoise : str, optional
+        assume read noise values if not in the header, by default "5"
+    gain_prefix : str, optional
+        prefix of the gain key in the header, by default "GAIN"
+    rdnoise_prefix : str, optional
+        prefix of the read key noise in the header, by default "RDNOISE"
+    unit : str, optional
+        units of the preprocessed frame (electron, adu), by default "adu"
+    assume_imagetyp : str, optional
+        overwrite IIMAGETYP in the header to this value even if present, by default ""
+    plot : str, optional
+        plot preprocessed frame, by default "2"
+    figure_path : str, optional
+        store plots in this folder, by default ".figures"
+    """
     # convert input parameters to proper type
     orient = orientation.split(",")
     pos = positions.split(",")
@@ -2891,18 +2940,18 @@ def preprocRawFrame_drp(
 
     # parse gain and read noise from header if possible
     try:
-        gains = [org_image.getHdrValue(f"{gain_field}{i+1}") for i in range(nquad)]
+        gains = [org_image.getHdrValue(f"{gain_prefix}{i+1}") for i in range(nquad)]
         image_logger.info(
             (
-                f"extracted gain values '{gain_field}' = "
+                f"extracted gain values '{gain_prefix}' = "
                 f"{ {k: v for k, v in zip('abcd', gains)} }"
             )
         )
     except KeyError:
         try:
-            assume_gain = org_image.getHdrValue(gain_field)
+            assume_gain = org_image.getHdrValue(gain_prefix)
             image_logger.warning(
-                f"no gain per amplifier found, extracted '{gain_field}' = {assume_gain}"
+                f"no gain per amplifier found, extracted '{gain_prefix}' = {assume_gain}"
             )
         except KeyError:
             if assume_gain:
@@ -2911,7 +2960,7 @@ def preprocRawFrame_drp(
                     assume_gain = [float(gain) for gain in assume_gain]
                     image_logger.warning(
                         (
-                            f"no valid '{gain_field}' found in header. "
+                            f"no valid '{gain_prefix}' found in header. "
                             f"Using given values { {k: v for k, v in zip('abcd', assume_gain)} }"
                         )
                     )
@@ -2919,7 +2968,7 @@ def preprocRawFrame_drp(
                     assume_gain = 1.0
                     image_logger.warning(
                         (
-                            f"no valid '{gain_field}' found in header. "
+                            f"no valid '{gain_prefix}' found in header. "
                             f"Assuming constant value {assume_gain}"
                         )
                     )
@@ -2932,16 +2981,16 @@ def preprocRawFrame_drp(
 
     try:
         rdnoises = [
-            org_image.getHdrValue(f"{rdnoise_field}{i+1}") for i in range(nquad)
+            org_image.getHdrValue(f"{rdnoise_prefix}{i+1}") for i in range(nquad)
         ]
         image_logger.info(
-            f"extracted rdnoise values '{rdnoise_field}' = { {k: v for k, v in zip('abcd', rdnoises)} }"
+            f"extracted rdnoise values '{rdnoise_prefix}' = { {k: v for k, v in zip('abcd', rdnoises)} }"
         )
     except KeyError:
         try:
-            assume_rdnoise = org_image.getHdrValue(rdnoise_field)
+            assume_rdnoise = org_image.getHdrValue(rdnoise_prefix)
             image_logger.warning(
-                f"no rdnoise per amplifier found, extracted '{rdnoise_field}' = {assume_rdnoise}"
+                f"no rdnoise per amplifier found, extracted '{rdnoise_prefix}' = {assume_rdnoise}"
             )
         except KeyError:
             if assume_rdnoise:
@@ -2949,12 +2998,12 @@ def preprocRawFrame_drp(
                 try:
                     assume_rdnoise = [float(rdnoise) for rdnoise in assume_rdnoise]
                     image_logger.warning(
-                        f"no valid '{rdnoise_field}' found in header. Using given values { {k: v for k, v in zip('abcd', assume_rdnoise)} }"
+                        f"no valid '{rdnoise_prefix}' found in header. Using given values { {k: v for k, v in zip('abcd', assume_rdnoise)} }"
                     )
                 except ValueError:
                     assume_rdnoise = 5.0
                     image_logger.warning(
-                        f"no valid '{rdnoise_field}' found in header. Assuming constant value {assume_rdnoise}"
+                        f"no valid '{rdnoise_prefix}' found in header. Assuming constant value {assume_rdnoise}"
                     )
         if len(assume_rdnoise) == 1:
             rdnoises = nquad * assume_rdnoise
@@ -3013,14 +3062,14 @@ def preprocRawFrame_drp(
     # add gain keywords for the different subimages (CCDs/Amplifiers)
     for i in range(nquad):
         preproc_image.setHdrValue(
-            f"HIERARCH AMP{i+1} {gain_field}",
+            f"HIERARCH AMP{i+1} {gain_prefix}",
             gains[i],
             f"Gain value of amp. {i+1} [electron/adu]",
         )
     # add read-out noise keywords for the different subimages (CCDs/Amplifiers)
     for i in range(nquad):
         preproc_image.setHdrValue(
-            f"HIERARCH AMP{i+1} {rdnoise_field}",
+            f"HIERARCH AMP{i+1} {rdnoise_prefix}",
             rdnoises[i],
             f"Read-out noise of amp. {i+1} [electron]",
         )
