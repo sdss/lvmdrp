@@ -7,6 +7,7 @@
 # @Copyright: SDSS-V LVM
 
 import os
+from glob import glob, has_magic
 from tqdm import tqdm
 from astropy.io import fits
 
@@ -100,7 +101,7 @@ def _decode_string(metadata):
     return metadata
 
 
-def _get_metadata_path(tileid=None, mjd=None, kind="raw"):
+def _get_metadata_paths(tileid=None, mjd=None, kind="raw"):
     """return metadata path depending on the kind
 
     this function will define a path for a metadata store
@@ -133,15 +134,20 @@ def _get_metadata_path(tileid=None, mjd=None, kind="raw"):
             raise ValueError(
                 "`tileid` and `mjd` are needed to define a path for raw metadata"
             )
-        metadata_path = os.path.join(
+        path_pattern = os.path.join(
             METADATA_PATH, str(tileid), str(mjd), "raw_metadata.hdf5"
         )
     elif kind == "master":
-        metadata_path = os.path.join(METADATA_PATH, "master_metadata.hdf5")
+        path_pattern = os.path.join(METADATA_PATH, "master_metadata.hdf5")
     else:
         raise ValueError("valid values for `kind` are: 'raw' and 'master'")
 
-    return metadata_path
+    if has_magic(path_pattern):
+        metadata_paths = glob(path_pattern)
+    else:
+        metadata_paths = [path_pattern]
+
+    return metadata_paths
 
 
 def _filter_metadata(
@@ -280,8 +286,13 @@ def _filter_metadata(
     return metadata
 
 
-def _load_or_create_store(tileid=None, mjd=None, kind="raw"):
+def _load_or_create_store(tileid=None, mjd=None, kind="raw", mode="r"):
     """return the metadata store given a tile ID and an MJD
+
+    if loading/creating a store for raw frames metadata, this function will
+    require `tileid` and `mjd` to be passed with not values. Multiple stores
+    can be created/loaded at the same time using wildcards in `tileid` and/or
+    `mjd`.
 
     Parameters
     ----------
@@ -291,6 +302,8 @@ def _load_or_create_store(tileid=None, mjd=None, kind="raw"):
         MJD for which a store will be loaded, by default None
     kind : str, optional
         metadata kind for which a store will be loaded/created, by default "raw"
+    mode : str, optional
+        instantiate store in read/write mode ("r", "a"), by default "r"
 
     Returns
     -------
@@ -298,19 +311,34 @@ def _load_or_create_store(tileid=None, mjd=None, kind="raw"):
         the metadata store for the given observatory
     """
     # define metadata path depending on the kind
-    metadata_path = _get_metadata_path(tileid=tileid, mjd=mjd, kind=kind)
+    metadata_paths = _get_metadata_paths(tileid=tileid, mjd=mjd, kind=kind)
+    if mode == "r" and metadata_paths:
+        stores = []
+        for metadata_path in metadata_paths:
+            logger.info(
+                f"loading metadata store of {kind = }, {tileid = } and {mjd = }"
+            )
+            stores.append(h5py.File(metadata_path, mode=mode))
 
-    # change mode to "r+" if the store does not exist
-    if not os.path.exists(metadata_path):
-        logger.info(f"creating metadata store of {kind = }, {tileid = } and {mjd = }")
-        mode = "a"
+    elif mode == "a" and metadata_paths:
+        stores = []
+        for metadata_path in metadata_paths:
+            logger.info(
+                f"creating metadata store of {kind = }, {tileid = } and {mjd = }"
+            )
+            os.makedirs(os.path.dirname(metadata_path), exist_ok=True)
+            stores.append(h5py.File(metadata_path, mode=mode))
     else:
-        logger.info(f"loading metadata store of {kind = }, {tileid = } and {mjd = }")
-        mode = "r"
+        if mode == "r":
+            raise FileNotFoundError(
+                f"no stores of {kind = } found matching {tileid = } and {mjd = }"
+            )
+        elif mode == "a":
+            raise ValueError(f"specific values for {tileid = } and {mjd = } are needed")
+        else:
+            raise ValueError(f"invalid value for {mode = }")
 
-    store = h5py.File(metadata_path, mode=mode)
-
-    return store
+    return stores
 
 
 def _del_store(tileid=None, mjd=None, kind="raw"):
@@ -326,16 +354,19 @@ def _del_store(tileid=None, mjd=None, kind="raw"):
         metadata kind for which a store will be deleted, by default "raw"
     """
     # define metadata path depending on the kind
-    metadata_path = _get_metadata_path(tileid=tileid, mjd=mjd, kind=kind)
+    metadata_paths = _get_metadata_paths(tileid=tileid, mjd=mjd, kind=kind)
 
-    if os.path.exists(metadata_path):
-        logger.info(f"removing metadata store of {kind = }, {tileid = } and {mjd = }")
-        os.remove(metadata_path)
-    else:
-        logger.warning(
-            f"no metadata store of {kind = }, {tileid = } and {mjd = } found, "
-            "nothing to do"
-        )
+    for metadata_path in metadata_paths:
+        if os.path.exists(metadata_path):
+            logger.info(
+                f"removing metadata store of {kind = }, {tileid = } and {mjd = }"
+            )
+            os.remove(metadata_path)
+        else:
+            logger.warning(
+                f"no metadata store of {kind = }, {tileid = } and {mjd = } found, "
+                "nothing to do"
+            )
 
 
 def extract_metadata(frames_paths):
@@ -416,7 +447,7 @@ def add_raws(metadata):
         metadata_group = metadata_groups.get_group((tileid, mjd))
 
         # extract target dataset from store
-        store = _load_or_create_store(tileid=tileid, mjd=mjd, kind="raw")
+        store = _load_or_create_store(tileid=tileid, mjd=mjd, kind="raw", mode="a")[0]
 
         # prepare metadata to be added to the store
         columns = list(zip(*RAW_METADATA_COLUMNS))[0]
@@ -457,7 +488,14 @@ def add_raws(metadata):
 
 
 def add_masters(metadata):
-    store = _load_or_create_store(kind="master")
+    """add master calibration frame metadata to store
+
+    Parameters
+    ----------
+    metadata : pd.DataFrame
+        metadata dataframe to be added to the corresponding store
+    """
+    store = _load_or_create_store(kind="master", mode="a")[0]
 
     columns = list(zip(*MASTER_METADATA_COLUMNS))[0]
     array = metadata.filter(items=columns).to_records(index=False)
@@ -506,18 +544,19 @@ def del_metadata(tileid=None, mjd=None, kind="raw"):
     kind : str, optional
         name of the dataset to delete: 'raw', 'master', by default 'raw'
     """
-    store = _load_or_create_store(tileid=tileid, mjd=mjd, kind=kind)
-    if kind in store:
-        logger.info(
-            f"deleting metadata from store for {kind = }, {tileid = } and {mjd = }"
-        )
-        del store[kind]
-    else:
-        logger.warning(
-            f"no metadata of {kind = }, {tileid = } and {mjd = }, nothing to do"
-        )
+    stores = _load_or_create_store(tileid=tileid, mjd=mjd, kind=kind, mode="a")
+    for store in stores:
+        if kind in store:
+            logger.info(
+                f"deleting metadata from store for {kind = }, {tileid = } and {mjd = }"
+            )
+            del store[kind]
+        else:
+            logger.warning(
+                f"no metadata of {kind = }, {tileid = } and {mjd = }, nothing to do"
+            )
 
-    store.file.close()
+        store.close()
 
 
 def get_metadata(
@@ -600,48 +639,54 @@ def get_metadata(
     )
 
     # extract metadata
-    store = _load_or_create_store(tileid=tileid, mjd=mjd, kind=kind)
-    if kind not in store:
-        logger.warning(f"no metadata found of {kind = }, {tileid = } and {mjd = }")
-        return default_output
-    else:
-        dataset = store[kind]
+    stores = _load_or_create_store(tileid=tileid, mjd=mjd, kind=kind, mode="r")
 
-    # extract metadata as dataframe
-    metadata = pd.DataFrame(dataset[()])
+    metadatas = []
+    for store in stores:
+        if kind not in store:
+            logger.warning(f"no metadata found of {kind = }, {tileid = } and {mjd = }")
+            return default_output
+        else:
+            dataset = store[kind]
 
-    # close store
-    dataset.file.close()
+        # extract metadata as dataframe
+        metadata = pd.DataFrame(dataset[()])
+        logger.info(f"found {len(metadata)} frames in store '{store.file.filename}'")
 
-    # convert bytes to literal strings
-    metadata = _decode_string(metadata)
+        # close store
+        store.close()
 
-    logger.info(f"found {len(metadata)} frames in store")
+        # convert bytes to literal strings
+        metadata = _decode_string(metadata)
 
-    # filter by exposure number, spectrograph and/or camera
-    metadata = _filter_metadata(
-        metadata=metadata,
-        hemi=hemi,
-        tileid=tileid,
-        mjd=mjd,
-        imagetyp=imagetyp,
-        spec=spec,
-        camera=camera,
-        expnum=expnum,
-        exptime=exptime,
-        neon=neon,
-        hgne=hgne,
-        krypton=krypton,
-        xenon=xenon,
-        argon=argon,
-        ldls=ldls,
-        quartz=quartz,
-        quality=quality,
-        stage=stage,
-        status=status,
-        drpqual=drpqual,
-    )
-    logger.info(f"final number of frames after filtering {len(metadata)}")
+        # filter by exposure number, spectrograph and/or camera
+        metadata = _filter_metadata(
+            metadata=metadata,
+            hemi=hemi,
+            imagetyp=imagetyp,
+            spec=spec,
+            camera=camera,
+            expnum=expnum,
+            exptime=exptime,
+            neon=neon,
+            hgne=hgne,
+            krypton=krypton,
+            xenon=xenon,
+            argon=argon,
+            ldls=ldls,
+            quartz=quartz,
+            quality=quality,
+            stage=stage,
+            status=status,
+            drpqual=drpqual,
+        )
+        logger.info(f"number of frames after filtering {len(metadata)}")
+
+        metadatas.append(metadata)
+
+    metadata = pd.concat(metadatas, axis="index", ignore_index=True)
+
+    logger.info(f"total number of frames found {len(metadata)}")
 
     return metadata
 
@@ -722,47 +767,51 @@ def get_analog_groups(
     default_output = [pd.DataFrame(columns=list(zip(*RAW_METADATA_COLUMNS))[0])]
 
     # extract raw frame metadata
-    store = _load_or_create_store(tileid=tileid, mjd=mjd, kind="raw")
-    if "raw" not in store:
-        logger.warning(f"no metadata found for {tileid = } and {mjd = }")
-        return default_output
-    else:
-        dataset = store["raw"]
+    stores = _load_or_create_store(tileid=tileid, mjd=mjd, kind="raw", mode="r")
 
-    # extract metadata as dataframe
-    metadata = pd.DataFrame(dataset[()])
+    metadatas = []
+    for store in stores:
+        if "raw" not in store:
+            logger.warning(f"no metadata found for {tileid = } and {mjd = }")
+            return default_output
+        else:
+            dataset = store["raw"]
 
-    # close store
-    dataset.file.close()
+        # extract metadata as dataframe
+        metadata = pd.DataFrame(dataset[()])
+        logger.info(f"found {len(metadata)} frames in store")
 
-    # convert bytes to literal strings
-    metadata = _decode_string(metadata)
+        # close store
+        store.close()
 
-    logger.info(f"found {len(metadata)} frames in store")
+        # convert bytes to literal strings
+        metadata = _decode_string(metadata)
 
-    # filter by exposure number, spectrograph and/or camera
-    metadata = _filter_metadata(
-        metadata=metadata,
-        hemi=hemi,
-        tileid=tileid,
-        mjd=mjd,
-        imagetyp=imagetyp,
-        spec=spec,
-        camera=camera,
-        exptime=exptime,
-        neon=neon,
-        hgne=hgne,
-        krypton=krypton,
-        xenon=xenon,
-        argon=argon,
-        ldls=ldls,
-        quartz=quartz,
-        quality=quality,
-        stage=stage,
-        status=status,
-        drpqual=drpqual,
-    )
-    logger.info(f"final number of frames after filtering {len(metadata)}")
+        # filter by exposure number, spectrograph and/or camera
+        metadata = _filter_metadata(
+            metadata=metadata,
+            hemi=hemi,
+            tileid=tileid,
+            mjd=mjd,
+            imagetyp=imagetyp,
+            spec=spec,
+            camera=camera,
+            exptime=exptime,
+            neon=neon,
+            hgne=hgne,
+            krypton=krypton,
+            xenon=xenon,
+            argon=argon,
+            ldls=ldls,
+            quartz=quartz,
+            quality=quality,
+            stage=stage,
+            status=status,
+            drpqual=drpqual,
+        )
+        logger.info(f"final number of frames after filtering {len(metadata)}")
+
+    metadatas.append(metadata)
 
     logger.info("grouping analogs")
     metadata_groups = metadata.groupby(["imagetyp", "camera", "exptime"])
@@ -852,7 +901,7 @@ def match_master_metadata(
     calib_frames = dict.fromkeys(frame_needs)
 
     # extract master calibration frames metadata
-    store = _load_or_create_store(kind="master")
+    store = _load_or_create_store(kind="master")[0]
     if "master" not in store:
         logger.warning("no metadata found for master calibration frames")
         return calib_frames
@@ -918,7 +967,6 @@ def put_reduction_stage(
     mjd,
     camera,
     expnum,
-    observatory="lco",
 ):
     """update frame metadata with given reduction stage
 
@@ -938,18 +986,27 @@ def put_reduction_stage(
         spectrograph of the target frames, by default None
     camera : str, optional
         camera ID of the target frames, by default None
-    expnum : str, optional
-        zero-padded exposure number of the target frames, by default None
+    expnum : int, optional
+        exposure number of the target frames, by default None
     """
-    store = _load_or_create_store(tileid=tileid, mjd=mjd, kind="raw")
+    stores = _load_or_create_store(tileid=tileid, mjd=mjd, kind="raw")
 
-    # extract raw frames metadata
-    metadata = pd.DataFrame(store["raw"][()])
+    for store in stores:
+        if "raw" not in store:
+            logger.warning(
+                f"no metadata found for {tileid = } and {mjd = }, nothing to do"
+            )
+            return
+        else:
+            dataset = store["raw"]
 
-    # update stage to a subset of the metadata
-    selection = (metadata.camera == camera) & (metadata.expnum == expnum)
-    metadata.loc[selection, "stage"] = stage
+        # extract raw frames metadata
+        metadata = pd.DataFrame(dataset[()])
 
-    # update store
-    store["raw"][...] = metadata.to_records()
-    store.file.close()
+        # update stage to a subset of the metadata
+        selection = (metadata.camera == camera) & (metadata.expnum == expnum)
+        metadata.loc[selection, "stage"] = stage
+
+        # update store
+        dataset[...] = metadata.to_records()
+        store.close()
