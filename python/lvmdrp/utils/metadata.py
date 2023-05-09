@@ -11,11 +11,15 @@ from tqdm import tqdm
 from astropy.io import fits
 
 import h5py
-import numpy as np
 import pandas as pd
 
 from lvmdrp.core.constants import FRAMES_CALIB_NEEDS
-from lvmdrp.utils.bitmask import ReductionStage, ReductionStatus, QualityFlag
+from lvmdrp.utils.bitmask import (
+    RawFrameQuality,
+    ReductionStage,
+    ReductionStatus,
+    QualityFlag,
+)
 from lvmdrp.utils.logger import get_logger
 
 # NOTE: replace these lines with Brian's integration of sdss_access and sdss_tree
@@ -26,11 +30,18 @@ from sdss_access.path import Path
 path = Path(release="sdss5")
 access = Access(release="sdss5")
 access.set_base_dir()
+
+DRPVER = "0.1.0"
+
+METADATA_PATH = os.path.join(os.path.expandvars("$LVM_SPECTRO_REDUX"), DRPVER)
 # -------------------------------------------------------------------------------
 
 RAW_METADATA_COLUMNS = [
     ("hemi", str),
+    ("tileid", int),
+    ("mjd", int),
     ("imagetyp", str),
+    ("spec", str),
     ("camera", str),
     ("expnum", int),
     ("exptime", float),
@@ -41,12 +52,15 @@ RAW_METADATA_COLUMNS = [
     ("argon", bool),
     ("ldls", bool),
     ("quartz", bool),
-    ("quality", QualityFlag),
+    ("quality", RawFrameQuality),
     ("stage", ReductionStage),
     ("status", ReductionStatus),
+    ("drpqual", QualityFlag),
 ]
 MASTER_METADATA_COLUMNS = [
+    ("mjd", int),
     ("imagetyp", str),
+    ("spec", str),
     ("camera", str),
     ("exptime", float),
     ("neon", bool),
@@ -56,9 +70,10 @@ MASTER_METADATA_COLUMNS = [
     ("argon", bool),
     ("ldls", bool),
     ("quartz", bool),
-    ("quality", QualityFlag),
+    ("quality", RawFrameQuality),
     ("stage", ReductionStage),
     ("status", ReductionStatus),
+    ("drpqual", QualityFlag),
 ]
 
 
@@ -85,10 +100,57 @@ def _decode_string(metadata):
     return metadata
 
 
+def _get_metadata_path(tileid=None, mjd=None, kind="raw"):
+    """return metadata path depending on the kind
+
+    this function will define a path for a metadata store
+    depending on the kind of the metadata that will be stored
+    ("raw" or "master").
+
+    Parameters
+    ----------
+    tileid : int, optional
+        tile ID of the target frames, by default None
+    mjd : int, optional
+        MJD of the target frames, by default None
+    kind : str, optional
+        metadata kind for which to define a store path, by default "raw"
+
+    Returns
+    -------
+    str
+        path for the corresponding metadata store
+
+    Raises
+    ------
+    ValueError
+        if `tileid` and/or `mjd` are not given when `kind=="raw"`
+    ValueError
+        if kind is not "raw" or "master"
+    """
+    if kind == "raw":
+        if tileid is None or mjd is None:
+            raise ValueError(
+                "`tileid` and `mjd` are needed to define a path for raw metadata"
+            )
+        metadata_path = os.path.join(
+            METADATA_PATH, str(tileid), str(mjd), "raw_metadata.hdf5"
+        )
+    elif kind == "master":
+        metadata_path = os.path.join(METADATA_PATH, "master_metadata.hdf5")
+    else:
+        raise ValueError("valid values for `kind` are: 'raw' and 'master'")
+
+    return metadata_path
+
+
 def _filter_metadata(
     metadata,
+    hemi=None,
+    tileid=None,
     mjd=None,
     imagetyp=None,
+    spec=None,
     camera=None,
     expnum=None,
     exptime=None,
@@ -102,6 +164,7 @@ def _filter_metadata(
     quality=None,
     stage=None,
     status=None,
+    drpqual=None,
 ):
     """return filtered metadata dataframe
 
@@ -109,8 +172,14 @@ def _filter_metadata(
     ----------
     metadata : pandas.DataFrame
         dataframe to filter out using the given criteria
+    hemi : str, optional
+        hemisphere of the target frames ('s' or 'n'), by default None
+    tileid : int, optional
+        tile ID of the target frames, by default None
     imagetyp : str, optional
         type/flavor of frame to locate `IMAGETYP`, by default None
+    spec : str, optional
+        name of the spectrograph ('sp1', 'sp2' or 'sp3'), by default None
     camera : str, optional
         camera ID of the target frames, by default None
     expnum : int, optional
@@ -134,9 +203,11 @@ def _filter_metadata(
     quality : int, optional
         bitmask representing quality of the recution, by default None
     stage : int, optional
-        bitmask representing stage of the reduction, by default None
+        bitmask representing stage of the raw frames, by default None
     status : int, optional
         bitmask representing status of the reduction, by default None
+    drpqual : int, optional
+        bitmask representing the quality of the reduction, by default None
 
     Returns
     -------
@@ -144,9 +215,21 @@ def _filter_metadata(
         filtered dataframe following the given criteria
     """
     query = []
+    if hemi is not None:
+        logger.info(f"filtering by {hemi = }")
+        query.append("hemi == @hemi")
+    if tileid is not None:
+        logger.info(f"filtering by {tileid = }")
+        query.append("tileid == @tileid")
+    if mjd is not None:
+        logger.info(f"filtering by {mjd = }")
+        query.append("mjd == @mjd")
     if imagetyp is not None:
         logger.info(f"filtering by {imagetyp = }")
         query.append("imagetyp == @imagetyp")
+    if spec is not None:
+        logger.info(f"filtering by {spec = }")
+        query.append("spec == @spec")
     if camera is not None:
         logger.info(f"filtering by {camera = }")
         query.append("camera == @camera")
@@ -186,6 +269,9 @@ def _filter_metadata(
     if status is not None:
         logger.info(f"filtering by {status = }")
         query.append("status == @status")
+    if drpqual is not None:
+        logger.info(f"filtering by {drpqual = }")
+        query.append("drpqual == @drpqual")
 
     if query:
         query = " and ".join(query)
@@ -194,62 +280,65 @@ def _filter_metadata(
     return metadata
 
 
-def _create_store(observatory):
-    """return the metadata store given a path
+def _load_or_create_store(tileid=None, mjd=None, kind="raw"):
+    """return the metadata store given a tile ID and an MJD
 
     Parameters
     ----------
-    observatory: str
-        observatory for which a metadata store will be created
-    """
-    metadata_path = os.path.join(access.base_dir, "metadata.hdf5")
-
-    logger.info(f"creating metadata store '{metadata_path}'")
-    store = h5py.File(metadata_path, mode="w")
-
-    # add observatory group if needed
-    if observatory not in store:
-        store.create_group(f"{observatory}/raw")
-        store.create_group(f"{observatory}/master")
-
-    store.close()
-
-
-def _del_store():
-    """delete the entire HDF store if exists"""
-    metadata_path = os.path.join(access.base_dir, "metadata.hdf5")
-
-    if os.path.isfile(metadata_path):
-        logger.info(f"removing metadata store '{metadata_path}'")
-        os.remove(metadata_path)
-    else:
-        logger.warning(f"no '{metadata_path}' store found")
-
-
-def _load_store(observatory, mode="r"):
-    """return the metadata store given a observatory
-
-    Parameters
-    ----------
-    observatory : str
-        metadata observatory from which a store will be loaded
-    mode : str, optional
-        the mode in which to open the HDF5 store, by default 'r'
+    tileid : int, optional
+        tile ID for which a store will be loaded, by default None
+    mjd : int, optional
+        MJD for which a store will be loaded, by default None
+    kind : str, optional
+        metadata kind for which a store will be loaded/created, by default "raw"
 
     Returns
     -------
     h5py.Group
         the metadata store for the given observatory
     """
-    metadata_path = os.path.join(access.base_dir, "metadata.hdf5")
+    # define metadata path depending on the kind
+    metadata_path = _get_metadata_path(tileid=tileid, mjd=mjd, kind=kind)
 
-    logger.info(f"loading metadata store from '{metadata_path}'")
+    # change mode to "r+" if the store does not exist
+    if not os.path.exists(metadata_path):
+        logger.info(f"creating metadata store of {kind = }, {tileid = } and {mjd = }")
+        mode = "a"
+    else:
+        logger.info(f"loading metadata store of {kind = }, {tileid = } and {mjd = }")
+        mode = "r"
+
     store = h5py.File(metadata_path, mode=mode)
 
-    return store[observatory]
+    return store
 
 
-def extract_metadata(mjd, frames_paths):
+def _del_store(tileid=None, mjd=None, kind="raw"):
+    """delete the entire HDF store if exists
+
+    Parameters
+    ----------
+    tileid: int, optional
+        tile ID for which a metadata store will be deleted, by default None
+    mjd: int, optional
+        MJD for which a metadata store will be deleted, by default None
+    kind : str, optional
+        metadata kind for which a store will be deleted, by default "raw"
+    """
+    # define metadata path depending on the kind
+    metadata_path = _get_metadata_path(tileid=tileid, mjd=mjd, kind=kind)
+
+    if os.path.exists(metadata_path):
+        logger.info(f"removing metadata store of {kind = }, {tileid = } and {mjd = }")
+        os.remove(metadata_path)
+    else:
+        logger.warning(
+            f"no metadata store of {kind = }, {tileid = } and {mjd = } found, "
+            "nothing to do"
+        )
+
+
+def extract_metadata(frames_paths):
     """return dataframe with metadata extracted from given frames list
 
     this function will extract metadata from FITS headers given a list of
@@ -257,8 +346,6 @@ def extract_metadata(mjd, frames_paths):
 
     Parameters
     ----------
-    mjd : int
-        MJD from which the metadata will be extracted
     frames_paths : list_like
         list of frames paths in the local mirror of SAS
 
@@ -270,11 +357,11 @@ def extract_metadata(mjd, frames_paths):
     new_metadata = {}
     # extract metadata
     nframes = len(frames_paths)
-    logger.info(f"extracting metadata from {nframes} frames")
+    logger.info(f"going to extract metadata from {nframes} frames")
     iterator = tqdm(
         enumerate(frames_paths),
         total=nframes,
-        desc=f"extracting metadata from MJD = {mjd}",
+        desc="extracting metadata",
         ascii=True,
         unit="frame",
     )
@@ -282,7 +369,10 @@ def extract_metadata(mjd, frames_paths):
         header = fits.getheader(frame_path, ext=0)
         new_metadata[i] = [
             "n" if header.get("OBSERVAT") != "LCO" else "s",
+            header.get("TILEID", 1111),
+            header.get("MJD"),
             header.get("IMAGETYP"),
+            header.get("SPEC"),
             header.get("CCD"),
             header.get("EXPOSURE"),
             header.get("EXPTIME"),
@@ -293,9 +383,10 @@ def extract_metadata(mjd, frames_paths):
             header.get("ARGON", "OFF") == "ON",
             header.get("LDLS", "OFF") == "ON",
             header.get("QUARTZ", "OFF") == "ON",
-            header.get("QUALITY", QualityFlag(0)),
+            header.get("QUALITY", RawFrameQuality(0)),
             ReductionStage.UNREDUCED,
             ReductionStatus(0),
+            QualityFlag(0),
         ]
 
     # define dataframe
@@ -304,42 +395,72 @@ def extract_metadata(mjd, frames_paths):
     return new_metadata
 
 
-def add_metadata(
-    metadata,
-    mjd,
-    observatory="lco",
-    kind="raw",
-):
+def add_raws(metadata):
     """add new metadata to store
+
+    this function will add new records to a HDF5 store given a metadata
+    dataframe. If several MJD/TILEIDs are present in the metadata, the
+    dataframe will be arranged into MJD/TILEID groups to be added to the
+    corresponding MJD.
 
     Parameters
     ----------
     metadata : pandas.DataFrame
         dataframe to containing new metadata to add to store
-    mjd : int
-        MJD where the target frames is located
-    observatory: str, optional
-        name of the observatory for which data will be cached, by default 'lco'
-    kind : str, optional
-        name of the dataset to add data to, by default 'raw'
     """
 
-    # extract target dataset from store
-    store = _load_store(observatory=observatory, mode="a")
-    if kind not in ["raw", "master"]:
-        logger.warning(
-            f"unrecognised dataset {kind = }, falling back to kind = 'master'"
-        )
-        kind = "master"
-    dataset = store[kind]
+    # group metadata in unique MJDs and tile IDs
+    metadata_groups = metadata.groupby(["tileid", "mjd"])
+    for tileid, mjd in metadata_groups.groups:
+        # define current group
+        metadata_group = metadata_groups.get_group((tileid, mjd))
 
-    # prepare metadata to be added to the store
-    if kind == "raw":
+        # extract target dataset from store
+        store = _load_or_create_store(tileid=tileid, mjd=mjd, kind="raw")
+
+        # prepare metadata to be added to the store
         columns = list(zip(*RAW_METADATA_COLUMNS))[0]
-        array = metadata.filter(items=columns).to_records(index=False)
-    else:
-        columns = list(zip(*MASTER_METADATA_COLUMNS))[0]
-        array = metadata.filter(items=columns).to_records(index=False)
+        array = metadata_group.filter(items=columns).to_records(index=False)
+
+        # convert to proper dtypes
+        dtypes = array.dtype
+        array = array.astype(
+            [
+                (n, dtypes[n])
+                if dtypes[n] != object
+                else (n, h5py.string_dtype("utf-8", length=None))
+                for n in dtypes.names
+            ]
+        )
+
+        if "raw" in store:
+            logger.info(
+                f"updating metadata store for {tileid = } and {mjd = } "
+                f"with {len(array)} new rows"
+            )
+            dataset = store["raw"]
+            dataset.resize(dataset.shape[0] + array.shape[0], axis=0)
+            dataset[-array.shape[0] :] = array
+            logger.info(f"final number of rows {dataset.size}")
+        else:
+            logger.info(
+                f"creating metadata store for {tileid = } and {mjd = } "
+                f"with {len(array)} new rows"
+            )
+            dataset = store.create_dataset(
+                "raw", data=array, maxshape=(None,), chunks=True
+            )
+
+        # write metadata in HDF5 format
+        logger.info("writing raw metadata store to disk")
+        dataset.file.close()
+
+
+def add_masters(metadata):
+    store = _load_or_create_store(kind="master")
+
+    columns = list(zip(*MASTER_METADATA_COLUMNS))[0]
+    array = metadata.filter(items=columns).to_records(index=False)
 
     # convert to proper dtypes
     dtypes = array.dtype
@@ -352,48 +473,59 @@ def add_metadata(
         ]
     )
 
-    if str(mjd) in dataset:
-        logger.info(f"updating {kind}/{mjd} metadata with {len(array)} new rows")
-        dataset = dataset[str(mjd)]
+    if "master" in store:
+        logger.info(
+            f"updating metadata store for master frames with {len(array)} new rows"
+        )
+        dataset = store["master"]
         dataset.resize(dataset.shape[0] + array.shape[0], axis=0)
         dataset[-array.shape[0] :] = array
+        logger.info(f"final number of rows {dataset.size}")
     else:
-        logger.info(f"starting {kind}/{mjd} metadata with {len(array)} new rows")
-        dataset.create_dataset(name=str(mjd), data=array, maxshape=(None,), chunks=True)
+        logger.info(
+            f"creating metadata store for master frames with {len(array)} new rows"
+        )
+        dataset = store.create_dataset(
+            "master", data=array, maxshape=(None,), chunks=True
+        )
 
     # write metadata in HDF5 format
-    logger.info(f"writing metadata to store '{access.base_dir}'")
-    store.file.close()
+    logger.info("writing master metadata store to disk")
+    store.close()
 
 
-def del_metadata(observatory, mjd, kind="both"):
+def del_metadata(tileid=None, mjd=None, kind="raw"):
     """delete dataset(s) from a target store
 
     Parameters
     ----------
-    observatory: str
-        name of the observatory for which data will be cached
-    mjd : int
-        MJD where the target dataset is located
+    tileid : int, optional
+        tile ID where the target dataset is located, by default None
+    mjd : int, optional
+        MJD where the target dataset is located, by default None
     kind : str, optional
-        name of the dataset to delete: 'raw', 'master' or 'both', by default 'both'
+        name of the dataset to delete: 'raw', 'master', by default 'raw'
     """
-    store = _load_store(observatory=observatory, mode="a")
-    logger.info(f"deleting MJD = {mjd} from '{observatory}' metadata store")
-    if f"{kind}/{mjd}" in store:
-        del store[f"{kind}/{mjd}"]
-    if kind == "both":
-        if f"raw/{mjd}" in store:
-            del store[f"raw/{mjd}"]
-        if f"master/{mjd}" in store:
-            del store[f"master/{mjd}"]
+    store = _load_or_create_store(tileid=tileid, mjd=mjd, kind=kind)
+    if kind in store:
+        logger.info(
+            f"deleting metadata from store for {kind = }, {tileid = } and {mjd = }"
+        )
+        del store[kind]
+    else:
+        logger.warning(
+            f"no metadata of {kind = }, {tileid = } and {mjd = }, nothing to do"
+        )
 
     store.file.close()
 
 
 def get_metadata(
+    tileid=None,
     mjd=None,
+    hemi=None,
     imagetyp=None,
+    spec=None,
     camera=None,
     expnum=None,
     exptime=None,
@@ -407,17 +539,23 @@ def get_metadata(
     quality=None,
     stage=None,
     status=None,
-    observatory="lco",
+    drpqual=None,
     kind="raw",
 ):
     """return raw frames metadata from precached HDF5 store
 
     Parameters
     ----------
+    tileid : int, optional
+        tile ID of the target frames, by default None
     mjd : int, optional
         MJD where the target frames is located, by default None
+    hemi : str, optional
+        hemisphere where the target frames were taken, by default None
     imagetyp : str, optional
         type/flavor of frame to locate `IMAGETYP`, by default None
+    spec : str, optional
+        name of the spectrograph ('sp1', 'sp2' or 'sp3'), by default None
     camera : str, optional
         camera ID of the target frames, by default None
     expnum : int, optional
@@ -439,13 +577,13 @@ def get_metadata(
     quartz : bool, optional
         whether is Quartz lamp on or not, by default None
     quality : int, optional
-        bitmask representing quality of the recution, by default None
+        bitmask representing quality of the raw frames, by default None
     stage : int, optional
         bitmask representing stage of the reduction, by default None
     status : int, optional
         bitmask representing status of the reduction, by default None
-    observatory : str, optional
-        name of the observatory, by default 'lco'
+    drpqual : int, optional
+        bitmask representing the quality of the reduction, by default None
     kind : str, optional
         name of the dataset to get data from, by default 'raw'
 
@@ -454,11 +592,6 @@ def get_metadata(
     pandas.DataFrame
         the metadata dataframe filtered following the given criteria
     """
-
-    # extract metadata
-    store = _load_store(observatory=observatory)
-    dataset = store[kind]
-
     # default output
     default_output = pd.DataFrame(
         columns=list(zip(*RAW_METADATA_COLUMNS))[0]
@@ -466,24 +599,19 @@ def get_metadata(
         else list(zip(*MASTER_METADATA_COLUMNS))[0]
     )
 
-    # extract MJD if given, else extract all MJDs
-    if mjd is not None:
-        try:
-            metadata = pd.DataFrame(dataset[str(mjd)][()])
-        except KeyError:
-            return default_output
+    # extract metadata
+    store = _load_or_create_store(tileid=tileid, mjd=mjd, kind=kind)
+    if kind not in store:
+        logger.warning(f"no metadata found of {kind = }, {tileid = } and {mjd = }")
+        return default_output
     else:
-        metadata = []
-        for mjd in dataset.keys():
-            metadata.append(dataset[str(mjd)][()])
+        dataset = store[kind]
 
-        if len(metadata) > 0:
-            metadata = pd.DataFrame(np.concatenate(metadata, axis=0))
-        else:
-            return default_output
+    # extract metadata as dataframe
+    metadata = pd.DataFrame(dataset[()])
 
     # close store
-    store.file.close()
+    dataset.file.close()
 
     # convert bytes to literal strings
     metadata = _decode_string(metadata)
@@ -493,8 +621,11 @@ def get_metadata(
     # filter by exposure number, spectrograph and/or camera
     metadata = _filter_metadata(
         metadata=metadata,
+        hemi=hemi,
+        tileid=tileid,
         mjd=mjd,
         imagetyp=imagetyp,
+        spec=spec,
         camera=camera,
         expnum=expnum,
         exptime=exptime,
@@ -508,6 +639,7 @@ def get_metadata(
         quality=quality,
         stage=stage,
         status=status,
+        drpqual=drpqual,
     )
     logger.info(f"final number of frames after filtering {len(metadata)}")
 
@@ -515,8 +647,11 @@ def get_metadata(
 
 
 def get_analog_groups(
-    mjd=None,
+    tileid,
+    mjd,
+    hemi=None,
     imagetyp=None,
+    spec=None,
     camera=None,
     exptime=None,
     neon=None,
@@ -529,7 +664,7 @@ def get_analog_groups(
     quality=None,
     stage=None,
     status=None,
-    observatory="lco",
+    drpqual=None,
 ):
     """return a list of metadata groups considered to be analogs
 
@@ -541,10 +676,16 @@ def get_analog_groups(
 
     Parameters
     ----------
-    mjd : int, optional
-        MJD where the target frames is located, by default None
+    tileid : int
+        tile ID of the target frames
+    mjd : int
+        MJD where the target frames is located
+    hemi : str, optional
+        hemisphere where the target frames were taken, by default None
     imagetyp : str, optional
         type/flavor of frame to locate `IMAGETYP`, by default None
+    spec : str, optional
+        name of the spectrograph ('sp1', 'sp2' or 'sp3'), by default None
     camera : str, optional
         camera ID of the target frames, by default None
     exptime : float, optional
@@ -564,44 +705,35 @@ def get_analog_groups(
     quartz : bool, optional
         whether is Quartz lamp on or not, by default None
     quality : int, optional
-        bitmask representing quality of the recution, by default None
+        bitmask representing quality of the raw frames, by default None
     stage : int, optional
         bitmask representing stage of the reduction, by default None
     status : int, optional
         bitmask representing status of the reduction, by default None
-    observatory : str, optional
-        name of the observatory, by default 'lco'
+    drpqual : int, optional
+        bitmask representing the quality of the reduction, by default None
 
     Returns
     -------
     pandas.DataFrame
         the grouped metadata filtered following the given criteria
     """
-    # extract raw frame metadata
-    store = _load_store(observatory=observatory)
-    dataset = store["raw"]
-
     # default output
-    default_output = pd.DataFrame(columns=list(zip(*MASTER_METADATA_COLUMNS))[0])
+    default_output = [pd.DataFrame(columns=list(zip(*RAW_METADATA_COLUMNS))[0])]
 
-    # extract MJD if given, else extract all MJDs
-    if mjd is not None:
-        try:
-            metadata = pd.DataFrame(dataset[str(mjd)][()])
-        except KeyError:
-            return default_output
+    # extract raw frame metadata
+    store = _load_or_create_store(tileid=tileid, mjd=mjd, kind="raw")
+    if "raw" not in store:
+        logger.warning(f"no metadata found for {tileid = } and {mjd = }")
+        return default_output
     else:
-        metadata = []
-        for mjd in dataset.keys():
-            metadata.append(dataset[str(mjd)][()])
+        dataset = store["raw"]
 
-        if len(metadata) > 0:
-            metadata = pd.DataFrame(np.concatenate(metadata, axis=0))
-        else:
-            return default_output
+    # extract metadata as dataframe
+    metadata = pd.DataFrame(dataset[()])
 
     # close store
-    store.file.close()
+    dataset.file.close()
 
     # convert bytes to literal strings
     metadata = _decode_string(metadata)
@@ -611,8 +743,11 @@ def get_analog_groups(
     # filter by exposure number, spectrograph and/or camera
     metadata = _filter_metadata(
         metadata=metadata,
+        hemi=hemi,
+        tileid=tileid,
         mjd=mjd,
         imagetyp=imagetyp,
+        spec=spec,
         camera=camera,
         exptime=exptime,
         neon=neon,
@@ -625,6 +760,7 @@ def get_analog_groups(
         quality=quality,
         stage=stage,
         status=status,
+        drpqual=drpqual,
     )
     logger.info(f"final number of frames after filtering {len(metadata)}")
 
@@ -640,10 +776,11 @@ def get_analog_groups(
 
 
 def match_master_metadata(
-    target_mjd,
     target_imagetyp,
     target_camera,
     target_exptime,
+    mjd=None,
+    hemi=None,
     neon=None,
     hgne=None,
     krypton=None,
@@ -654,7 +791,7 @@ def match_master_metadata(
     quality=None,
     stage=None,
     status=None,
-    observatory="lco",
+    drpqual=None,
 ):
     """return the matched master calibration frames given a target frame metadata
 
@@ -665,14 +802,16 @@ def match_master_metadata(
 
     Parameters
     ----------
-    target_mjd : int
-        MJD where the target frames is located
     target_imagetyp : str
         type/flavor of frame to locate `IMAGETYP`
     target_camera : str
         camera ID of the target frames
     target_exptime : float
         exposure time of the target frames
+    mjd : int, optional
+        MJD where the target frames is located, by default None
+    hemi : str, optional
+        hemisphere where the target frames were taken, by default None
     neon : bool, optional
         whether is Neon lamp on or not, by default None
     hgne : bool, optional
@@ -688,13 +827,13 @@ def match_master_metadata(
     quartz : bool, optional
         whether is Quartz lamp on or not, by default None
     quality : int, optional
-        bitmask representing quality of the recution, by default None
+        bitmask representing quality of the raw frames, by default None
     stage : int, optional
         bitmask representing stage of the reduction, by default None
     status : int, optional
         bitmask representing status of the reduction, by default None
-    observatory : str, optional
-        name of the observatory, by default 'lco'
+    drpqual : int, optional
+        bitmask representing quality of the reduction, by default None
 
     Returns
     -------
@@ -713,22 +852,22 @@ def match_master_metadata(
     calib_frames = dict.fromkeys(frame_needs)
 
     # extract master calibration frames metadata
-    store = _load_store(observatory=observatory)
-    masters = store["master"]
+    store = _load_or_create_store(kind="master")
+    if "master" not in store:
+        logger.warning("no metadata found for master calibration frames")
+        return calib_frames
+    else:
+        masters = store["master"]
+
     if len(masters) == 0:
-        store.file.close()
+        masters.file.close()
         logger.error("no master calibration frames found in store")
         return calib_frames
 
     # extract MJD if given, else extract all MJDs
-    masters_metadata, mjds = [], []
-    for mjd_ in masters.keys():
-        masters_metadata.append(masters[mjd_][()])
-        mjds.append(np.ones(masters_metadata[-1].size, dtype=int) * int(mjd_))
-    masters_metadata = pd.DataFrame(np.concatenate(masters_metadata, axis=0))
-    masters_metadata["mjd"] = np.concatenate(mjds, axis=0)
+    masters_metadata = pd.DataFrame(masters[()])
     # close store
-    store.file.close()
+    masters.file.close()
 
     # convert bytes to literal strings
     masters_metadata = _decode_string(masters_metadata)
@@ -750,6 +889,7 @@ def match_master_metadata(
     for calib_type in frame_needs:
         calib_metadata = _filter_metadata(
             metadata=masters_metadata,
+            mjd=mjd,
             imagetyp=calib_type,
             camera=target_camera,
             exptime=target_exptime if calib_type != "bias" else None,
@@ -764,12 +904,6 @@ def match_master_metadata(
             stage=stage,
             status=status,
         )
-        calib_metadata["mjd_diff"] = calib_metadata.mjd.apply(
-            lambda mjd: abs(mjd - target_mjd)
-        )
-        calib_metadata = calib_metadata.sort_values(by="mjd_diff", ascending=True).drop(
-            columns="mjd_diff"
-        )
         if len(calib_metadata) == 0:
             logger.error(f"no master {calib_type} frame found")
         else:
@@ -780,6 +914,7 @@ def match_master_metadata(
 
 def put_reduction_stage(
     stage,
+    tileid,
     mjd,
     camera,
     expnum,
@@ -805,24 +940,16 @@ def put_reduction_stage(
         camera ID of the target frames, by default None
     expnum : str, optional
         zero-padded exposure number of the target frames, by default None
-    observatory : str, optional
-        name of the observatory, by default 'lco'
     """
-    store = _load_store(observatory=observatory, mode="a")
+    store = _load_or_create_store(tileid=tileid, mjd=mjd, kind="raw")
 
-    # extract MJD if given, else extract all MJDs
-    if mjd is not None:
-        metadata = pd.DataFrame(store[f"raw/{mjd}"][()])
-    else:
-        metadata = []
-        for mjd in store.keys():
-            metadata.append(store[str(mjd)][()])
-        metadata = pd.DataFrame(np.concatenate(metadata, axis=0))
+    # extract raw frames metadata
+    metadata = pd.DataFrame(store["raw"][()])
 
     # update stage to a subset of the metadata
     selection = (metadata.camera == camera) & (metadata.expnum == expnum)
     metadata.loc[selection, "stage"] = stage
 
     # update store
-    store[f"raw/{mjd}"][...] = metadata.to_records()
+    store["raw"][...] = metadata.to_records()
     store.file.close()

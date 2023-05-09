@@ -97,6 +97,12 @@ class BaseBitmask(IntFlag):
         return (self & flag) == flag
 
 
+class RawFrameQuality(BaseBitmask):
+    GOOD = auto()  # bit whether a raw frame is good for reduction
+    TEST = auto()  # bit whether a raw frame is for instrument testing purposes
+    BAD = auto()  # bit whether a raw frame is bad for reduction
+
+
 class ReductionStatus(BaseBitmask):
     # mutually exclusive bits
     IN_PROGRESS = auto()  # bit whether a reduction is in progress
@@ -133,8 +139,6 @@ class ReductionStatus(BaseBitmask):
         return new | flag
 
 
-# TODO:
-#   - add flag for each step in the reduction, for example: "calib", "cosmic", "stray", etc.
 class ReductionStage(BaseBitmask):
     # completed reduction steps
     UNREDUCED = auto()  # exposure not reduced
