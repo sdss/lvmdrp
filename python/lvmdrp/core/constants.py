@@ -111,3 +111,6 @@ FRAMES_CALIB_NEEDS = {
     "arc": ["bias", "dark", "flat", "fiberflat"],
     "object": ["bias", "dark", "flat", "fiberflat", "arc"],
 }
+
+# spectrograph channels
+SPEC_CHANNELS = {"b": (3600, 5930), "r": (5660, 7720), "z": (7470, 9800)}

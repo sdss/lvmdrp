@@ -14,6 +14,7 @@ from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from numpy import polynomial
 from scipy import signal
 
+from lvmdrp.core.constants import SPEC_CHANNELS
 from lvmdrp.core import rss
 from lvmdrp.utils import logger, spec_from_lines
 
@@ -445,13 +446,6 @@ if __name__ == "__main__":
         "poly_deg", metavar="DEG", type=int, help="degree of the polynomial to fit."
     )
     parser.add_argument(
-        "wave_range",
-        metavar="WAVE_RANGE",
-        nargs=2,
-        type=float,
-        help="guess wavelength range.",
-    )
-    parser.add_argument(
         "pixmap_table",
         metavar="PIXMAP_TABLE.txt",
         help="ASCII file to store mapping table.",
@@ -465,6 +459,13 @@ if __name__ == "__main__":
             "2nd column: Wavelength, "
             "3rd column: Spectrum"
         ),
+    )
+    parser.add_argument(
+        "-s",
+        "--spec-channel",
+        default="b",
+        choices=["b", "r", "z"],
+        help="spectrograph channel",
     )
     parser.add_argument(
         "--poly-kind",
@@ -501,7 +502,7 @@ if __name__ == "__main__":
         aperture=args.aperture,
         poly_degree=args.poly_deg,
         poly_kind=args.poly_kind,
-        wave_range=args.wave_range,
+        wave_range=SPEC_CHANNELS.get(args.spec_channel),
         pixmap_table=args.pixmap_table,
         reflines_table=args.reflines_table,
         fiber_id=args.fiber_id,
