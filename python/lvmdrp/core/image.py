@@ -1558,7 +1558,6 @@ class Image(Header):
                 )
             if self._mask is not None:
                 mask[good_pix[:, i], i] = numpy.sum(self._mask[:, i][pixels], 1) > 0
-            mask[:, i] = bad_pix[:, i]
         return data, error, mask
 
     def extractSpecOptimal(self, TraceMask, TraceFWHM, plot=-1):

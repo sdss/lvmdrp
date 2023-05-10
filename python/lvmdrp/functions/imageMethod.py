@@ -3097,7 +3097,7 @@ def preprocRawFrame_drp(
     # create pixel mask on the original image
     image_logger.info("building pixel mask")
     preproc_image._mask = numpy.zeros_like(preproc_image._data, dtype=bool)
-    preproc_image._mask |= preproc_image.convertUnit(unit="adu") >= 2**16
+    preproc_image._mask |= preproc_image.convertUnit(unit="adu") >= 0.7 * 2**16
     preproc_image._mask |= master_mask
     masked_pixels = preproc_image._mask.sum()
     image_logger.info(
