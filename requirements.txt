@@ -20,6 +20,11 @@ pandas==1.5.3
 astroquery==0.4.6
 keyring>=4.0
 sbpy==0.3.0
+<<<<<<< HEAD
 sdsstools>=1.0
 sdss-tree>=3.1
 sdss-access>=2.0
+=======
+h5py==3.8.0
+tables==3.8.0
+>>>>>>> development
