@@ -164,3 +164,35 @@ def get_masters_metadata(path_pattern, **kwargs):
     metadata["path"] = masters_path
 
     return metadata
+
+
+def fix_lamps_metadata(metadata, lamp_names, inplace=True):
+    """fix arc lamps to be ON for consistent exposure numbers
+
+    Parameters
+    ----------
+    metadata : pd.DataFrame
+        frames metadata
+    lamp_names : list_like
+        list of names for lamps found in the metadata
+    inplace : bool, optional
+        whether fix is in place or not, by default True
+
+    Returns
+    -------
+    pd.DataFrame
+        frames metadata with arc lamps fixed
+    """
+    if inplace:
+        md = metadata
+    else:
+        md = metadata.copy()
+
+    for lamp_name in lamp_names:
+        # get unique exposure number where lamp_name is ON
+        expnums = md[md[lamp_name]].expnum.drop_duplicates().tolist()
+        # set lamp_name to ON for defined expnums
+        md.loc[md.expnum.isin(expnums), lamp_name] = True
+
+    if not inplace:
+        return md
