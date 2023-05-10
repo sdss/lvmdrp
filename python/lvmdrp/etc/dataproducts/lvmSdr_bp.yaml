@@ -5,7 +5,7 @@ location: $LVM_DATA_S/[MJD]/
 created_by: null
 used_by: imageMethod.preprocRawFrame_drp
 naming_convention: |
-  $LVM_DATA_S/[MJD]/sdR-[HEMI]-[CAMERA]-[EXPNUM].fits.gz, where [HEMI] is either s or n, [CAMERA] is one of the nine cameras on the instrument, b1, r1, z1,
+  sdR-[HEMI]-[CAMERA]-[EXPNUM].fits.gz, where [HEMI] is either s or n, [CAMERA] is one of the nine cameras on the instrument, b1, r1, z1,
   or b2, r2, z2, or b3, r3, or z3 for the blue, red, nir cameras on each LVM spectrograph, and
   [EXPNUM] is the (zero-padded) 8-digit exposure number.
 hdu0:

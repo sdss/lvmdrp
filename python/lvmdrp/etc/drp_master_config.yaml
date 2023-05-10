@@ -9,11 +9,6 @@ LVM_OBSERVATORIES:
     lat: -29.0146  # [deg]
     height: 2380.0 # [m]
 
-# database credentials
-LVM_DB_HOST: "localhost"
-LVM_DB_USER: "lvmdrp"
-LVM_DB_PASS: "1234"
-LVM_DB_NAME: "lvmdrp.db"
 # define root path of the installation
 LVM_DRP_ROOT: &root_path "/home/mejia/Research/UNAM/lvm-drp/"
 # LVM_DRP_ROOT: &root_path "/disk-a/mejia/Research/UNAM/lvm-drp/"
