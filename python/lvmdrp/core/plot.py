@@ -15,6 +15,54 @@ import numpy as np
 plt.style.use("seaborn-v0_8-talk")
 
 
+def plot_strips(image, axis, nstrip, ax, mu_stat=np.median, sg_stat=np.std):
+    """plots a number of strips of the image along a given direction
+
+    given an image, a number of strips, and central and deviation statistics,
+    this function extracts a strips and plots those statistics along the given
+    axis.
+
+    Parameters
+    ----------
+    image : lvmdrp.core.image.Image
+        the image from which the strips will be extracted
+    axis : int
+        the axis along which the strips are going to be extracted
+    nstrip : int
+        number of strips
+    ax : plt.Axes
+        matplotlib axes in which to plot the strips
+    mu_stat : function, optional
+        the function to compute the central statistic, by default np.median
+    sg_stat : function, optional
+        the function to compute the deviation statistic, by default np.std
+
+    Returns
+    -------
+    plt.Axes
+        the axes updated with the plotted strips
+    """
+    data = image._data
+    width = (data.shape[0] if axis == 1 else data.shape[1]) // nstrip
+    for i in range(nstrip):
+        strip_mu = mu_stat(image._data[i * width : (i + 1) * width], axis=axis)
+        strip_sg = sg_stat(image._data[i * width : (i + 1) * width], axis=axis)
+
+        pixels = np.arange(strip_mu.size)
+        ax.fill_between(
+            pixels,
+            strip_mu - 2 * strip_sg,
+            strip_mu + 2 * strip_sg,
+            step="pre",
+            lw=0,
+            fc="tab:blue",
+            alpha=0.5,
+        )
+        ax.step(pixels, strip_mu, color="tab:red", lw=1)
+
+    return ax
+
+
 def save_fig(fig, output_path, figure_path=None, label=None, fmt="png", close=True):
     """Saves the given matplotlib figure to the given output/figure path"""
     # define figure path
