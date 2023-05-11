@@ -9,6 +9,7 @@
 import os
 import pathlib
 from glob import glob, has_magic
+from typing import Union
 from tqdm import tqdm
 from astropy.io import fits
 
@@ -23,6 +24,7 @@ from lvmdrp.utils.bitmask import (
     QualityFlag,
 )
 from lvmdrp import log, __version__
+from lvmdrp.utils.hdrfix import apply_hdrfix
 
 # # NOTE: replace these lines with Brian's integration of sdss_access and sdss_tree
 # from sdss_access import Access
@@ -321,7 +323,7 @@ def _load_or_create_store(tileid=None, mjd=None, kind="raw", mode="a"):
     if mode not in {'r', 'a'}:
         raise ValueError(f"invalid value for {mode = }")
 
-    if not tileid and not mjd:
+    if kind == 'raw' and not tileid and not mjd:
         raise ValueError(f"specific values for {tileid = } and {mjd = } are needed")
 
     # define metadata path depending on the kind
@@ -366,8 +368,41 @@ def _del_store(tileid=None, mjd=None, kind="raw"):
                 "nothing to do"
             )
 
-from typing import Union
-from lvmdrp.utils.hdrfix import apply_hdrfix
+
+def get_master_metadata(overwrite: bool = None) -> pd.DataFrame:
+    """ Extract metadata from the master calibration files
+
+    Builds an Pandas DataFrame table containing extracted metadata for all the
+    master calibration files found in the calib/ subdirectory of LVM_SPECTRO_REDUX.
+    Globs for all files matching the pattern "*calib/*lvm-m*". Writes the dataframe to
+    an HDF store and if found, will load the cached content from there.  The cache is written
+    at the top level LVM_SPECTRO_REDUX/[DRPVER] reduction folder.
+
+    Parameters
+    ----------
+    overwrite : bool, optional
+        Flag to ignore the HDF cache, by default None
+
+    Returns
+    -------
+    pd.DataFrame
+        a Pandas DataFrame of metadata
+    """
+
+    files = list(pathlib.Path(os.getenv('LVM_SPECTRO_REDUX')).rglob('*calib/*lvm-m*'))
+
+    if _load_or_create_store(kind='master') and not overwrite:
+        log.info("Loading existing metadata store.")
+        meta = get_metadata(kind='master')
+    else:
+        if overwrite:
+            _del_store(kind='master')
+
+        log.info('Creating new metadata store.')
+        meta = extract_metadata(files)
+        add_masters(meta)
+
+    return meta
 
 
 def get_frames_metadata(mjd: Union[str, int] = None, suffix: str = "fits",

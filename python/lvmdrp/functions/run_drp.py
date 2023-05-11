@@ -11,7 +11,7 @@ from lvmdrp.functions.imageMethod import (preproc_raw_frame, create_master_frame
                                           extract_spectra)
 from lvmdrp.functions.rssMethod import (determine_wavelength_solution, create_pixel_table,
                                         resample_wavelength, join_spec_channels)
-from lvmdrp.utils.metadata import get_frames_metadata
+from lvmdrp.utils.metadata import get_frames_metadata, get_master_metadata
 from lvmdrp import config, log, path, __version__ as drpver
 
 
@@ -321,6 +321,9 @@ def run_drp(mjd: int = None, bias: bool = False, dark: bool = False,
         # create master biases and darks
         create_masters('bias', precals)
         create_masters('dark', precals)
+
+        # build the master metadata cache
+        get_master_metadata()
 
     # returning if only reducing bias/darks
     if only_bd:
