@@ -49,7 +49,7 @@ import lvmdrp
 import lvmdrp.utils.metadata as md
 from lvmdrp.core.constants import CONFIG_PATH, DATAPRODUCT_BP_PATH
 from lvmdrp.utils.configuration import load_master_config
-from lvmdrp.utils.logger import get_logger
+from lvmdrp import log
 
 
 description = (
@@ -67,7 +67,6 @@ __all__ = [
     "metadataCaching_drp",
 ]
 
-logger = get_logger(__name__)
 
 
 def _get_missing_fields_in(template):
@@ -174,7 +173,7 @@ def metadataCaching_drp(observatory, mjd, overwrite="none"):
     mjds = list(map(lambda s: int(s), mjd.split(",")))
 
     for mjd in mjds:
-        logger.info(f"locating local data for MJD = {mjd}")
+        log.info(f"locating local data for MJD = {mjd}")
         # get existing metadata
         if overwrite == "none":
             stored_indices = md.get_metadata(
@@ -204,7 +203,7 @@ def metadataCaching_drp(observatory, mjd, overwrite="none"):
         ntotal_frames = len(local_paths)
         nfilter_frames = len(new_paths)
 
-        logger.info(
+        log.info(
             (
                 f"found new {ntotal_frames}, skipping {ntotal_frames-nfilter_frames} "
                 f"({(ntotal_frames-nfilter_frames)/ntotal_frames*100:g} %) "
@@ -216,7 +215,7 @@ def metadataCaching_drp(observatory, mjd, overwrite="none"):
 
         # extract metadata
         new_metadata = md.extract_metadata(mjd=mjd, frames_paths=new_paths)
-        logger.info(f"successfully extracted metadata for MJD = {mjd}")
+        log.info(f"successfully extracted metadata for MJD = {mjd}")
 
         # merge metadata with existing one
         md.add_metadata(

@@ -164,35 +164,13 @@ def determine_wavelength_solution(in_arc: str, out_wave: str, out_lsf: str, in_r
     """
 
     # convert parameters to the correct type
-<<<<<<< ours
-    poly_fwhm_cross, poly_fwhm_disp = poly_fwhm
-=======
-    flux_min = float(flux_min)
-    fwhm_max = float(fwhm_max)
-    init_back = float(init_back)
-    aperture = float(aperture)
-    poly_disp = int(poly_disp)
-    poly_cros = int(poly_cros)
-    poly_fwhm = int(poly_fwhm)
     kind_disp, kind_fwhm, kind_cros = poly_kinds.split(",")
-    rel_flux_limits = [float(v) for v in rel_flux_limits.split(",")]
-    negative = eval(negative)
-    cc_correction = eval(cc_correction)
-    plot = int(plot)
->>>>>>> theirs
 
     if fiberflat != "":
         fiberflat = fiberflat.split(",")
 
     if in_ref_lines != "":
-<<<<<<< ours
         log.info(f"reading guess lines from '{in_ref_lines}'")
-        # load initial pixel positions and reference wavelength from txt config file NEED TO BE REPLACE BY XML SCHEMA
-        with open(in_ref_lines, "r") as file_in:
-            ref_fiber = int(file_in.readline()[:-1])
-            log.info(f"going to use fiber {ref_fiber} as reference")
-=======
-        rss_logger.info(f"reading guess lines from '{in_ref_lines}'")
         # load initial pixel positions and reference wavelength from txt config file
         with open(in_ref_lines, "r") as file_in:
             if ref_fiber:
@@ -200,23 +178,13 @@ def determine_wavelength_solution(in_arc: str, out_wave: str, out_lsf: str, in_r
                 ref_fiber = int(ref_fiber)
             else:
                 ref_fiber = int(file_in.readline()[:-1])
-            rss_logger.info(f"going to use fiber {ref_fiber} as reference")
->>>>>>> theirs
+            log.info(f"going to use fiber {ref_fiber} as reference")
             pixel, ref_lines, use_line = numpy.loadtxt(
                 file_in, dtype=float, unpack=True
             )
         use_line = use_line.astype(bool)
-<<<<<<< ours
-        log.info(
-            f"number of guess lines in file {pixel.size} percentage masked {(~use_line).sum() / pixel.size * 100: g} %"
-=======
-        rss_logger.info(
-            (
-                f"number of guess lines in file {pixel.size} "
-                f"percentage masked {(~use_line).sum() / pixel.size * 100: g} %"
-            )
->>>>>>> theirs
-        )
+        log.info(f"number of guess lines in file {pixel.size} percentage masked {(~use_line).sum() / pixel.size * 100: g} %")
+
         pixel = pixel[use_line]
         ref_lines = ref_lines[use_line]
         use_line = use_line[use_line]
@@ -253,45 +221,6 @@ def determine_wavelength_solution(in_arc: str, out_wave: str, out_lsf: str, in_r
     else:
         shift = 0
 
-<<<<<<< ours
-    # plot if requested
-    if plot_fig:
-        fig, axs = plt.subplots(3, 1, figsize=(25, 15))
-        axs = numpy.append(axs, axs[2].twinx())
-        for pix in pixel:
-            axs[0].axvspan(
-                pix - (aperture - 1) // 2,
-                pix + (aperture - 1) // 2,
-                numpy.nanmin(arc._data[ref_fiber]),
-                numpy.nanmax(arc._data[ref_fiber]),
-                fc="0.5",
-                alpha=0.5,
-            )
-        axs[0].vlines(
-            pixel,
-            numpy.nanmin(arc._data[ref_fiber]),
-            numpy.nanmax(arc._data[ref_fiber]),
-            color="tab:red",
-            lw=1,
-            label="orig. ref. lines",
-        )
-        if shift != 0:
-            axs[0].vlines(
-                pixel + shift,
-                numpy.nanmin(arc._data[ref_fiber]),
-                numpy.nanmax(arc._data[ref_fiber]),
-                color="tab:blue",
-                lw=1,
-                label=f"corr. lines ({shift = } pix)",
-            )
-        axs[0].step(arc._pixels, arc._data[ref_fiber], color="0.2", lw=1)
-        axs[0].set_title(f"reference arc spectrum {ref_fiber}", loc="left")
-        axs[0].set_xlabel("dispersion axis (pix)")
-        axs[0].set_ylabel("count (e-/pix)")
-        axs[0].legend(loc=1)
-
-=======
->>>>>>> theirs
     # correct initial pixel map by shifting
     pixel += shift
 
@@ -304,19 +233,10 @@ def determine_wavelength_solution(in_arc: str, out_wave: str, out_lsf: str, in_r
     fwhm_rms = numpy.zeros(arc._fibers, dtype=numpy.float32)
 
     # measure the ARC lines with individual Gaussian across the CCD
-<<<<<<< ours
     log.info(
-        f"measuring arc lines for each fiber from {ref_fiber = }, {flux_min = }, {fwhm_max = } and {rel_flux_limits = }"
-=======
-    rss_logger.info(
-        (
-            f"measuring arc lines for each fiber from "
-            f"reference fiber {ref_fiber}, "
-            f"flux limits [{flux_min}, {fwhm_max}] and "
-            f"relative flux limits {rel_flux_limits}"
-        )
->>>>>>> theirs
-    )
+        f"measuring arc lines for each fiber from reference fiber {ref_fiber}, "
+        f"flux limits [{flux_min}, {fwhm_max}] and relative flux limits {rel_flux_limits }")
+
     fibers, flux, cent_wave, fwhm, masked = arc.measureArcLines(
         ref_fiber,
         pixel,
@@ -334,17 +254,8 @@ def determine_wavelength_solution(in_arc: str, out_wave: str, out_lsf: str, in_r
         for n in range(len(ref_lines)):
             norm_flux[n] = numpy.mean(flux[numpy.logical_not(masked[:, n]), n])
         flat_flux = numpy.mean(flux / norm_flux[numpy.newaxis, :], 1)
-<<<<<<< ours
         log.info(
-            f"assuming wavelength range [{fiberflat[0]}, {fiberflat[1]}] and sampling {fiberflat[2]} AA"
-=======
-        rss_logger.info(
-            (
-                f"assuming wavelength range [{fiberflat[0]}, "
-                f"{fiberflat[1]}] and sampling {fiberflat[2]} AA"
-            )
->>>>>>> theirs
-        )
+            f"assuming wavelength range [{fiberflat[0]}, {fiberflat[1]}] and sampling {fiberflat[2]} AA")
         wave = numpy.arange(
             float(fiberflat[0]),
             float(fiberflat[1]) + float(fiberflat[2]),
@@ -357,74 +268,42 @@ def determine_wavelength_solution(in_arc: str, out_wave: str, out_lsf: str, in_r
         rss_flat.writeFitsData(f"{fiberflat[3]}.fits")
 
     # smooth the FWHM values for each ARC line in cross-dispersion direction
-<<<<<<< ours
-    log.info(
-        f"smoothing FWHM of guess lines along cross-dispersion axis using {poly_fwhm_cross}-deg polynomials"
-    )
-    for i in range(nlines):  # iterate over modelled emission lines
-        select = numpy.logical_and(
-            numpy.logical_not(masked[:, i]), flux[:, i] > flux_min
-        )
-        fwhm_med = ndimage.filters.median_filter(numpy.fabs(fwhm[select, i]), 4)
-        if poly_fwhm_cross > 0:
-            msg = f'Failed to fit poly for arc line {i}'
-            try:
-                poly = polynomial.Polynomial.fit(fibers[select], fwhm_med, deg=poly_fwhm_cross)
-            except ValueError as e:
-                log.error(f'{msg}: {e}')
-                continue
-            except numpy.linalg.LinAlgError as e:
-                log.error(f'{msg}: {e}')
-        elif poly_fwhm_cross < 0:
-            msg = f'Failed to fit legendre for arc line {i}'
-            try:
-                poly = polynomial.Legendre.fit(fibers[select], fwhm_med, deg=-1 * poly_fwhm_cross)
-            except ValueError as e:
-                log.error(f'{msg}: {e}')
-                continue
-            except numpy.linalg.LinAlgError as e:
-                log.error(f'{msg}: {e}')
-=======
     if poly_cros != 0:
-        rss_logger.info(
-            (
-                "smoothing FWHM of guess lines along "
-                f"cross-dispersion axis using {poly_cros}-deg polynomials"
-            )
-        )
+        log.info(
+            f"smoothing FWHM of guess lines along cross-dispersion axis using {poly_cros}-deg polynomials")
         for i in range(nlines):
             select = numpy.logical_and(
                 numpy.logical_not(masked[:, i]), flux[:, i] > flux_min
             )
             fwhm_med = ndimage.filters.median_filter(numpy.fabs(fwhm[select, i]), 4)
+            msg = f'Failed to fit {kind_cros} for arc line {i}'
             if kind_cros not in ["poly", "legendre", "chebyshev"]:
-                rss_logger.warning(
-                    (
-                        "invalid polynomial kind "
-                        f"'{kind_cros = }'. Falling back to 'poly'"
-                    )
-                )
+                log.warning(f"invalid polynomial kind '{kind_cros}'. Falling back to 'poly'")
                 kind_cros = "poly"
+
             if kind_cros == "poly":
-                poly = polynomial.Polynomial.fit(
-                    fibers[select], fwhm_med, deg=poly_cros
-                )
+                poly_cls = polynomial.Polynomial
             elif kind_cros == "legendre":
-                poly = polynomial.Legendre.fit(fibers[select], fwhm_med, deg=poly_cros)
+                poly_cls = polynomial.Legendre
             elif kind_cros == "chebyshev":
-                poly = polynomial.Chebyshev.fit(fibers[select], fwhm_med, deg=poly_cros)
->>>>>>> theirs
+                poly_cls = polynomial.Chebyshev
+
+            try:
+                poly = poly_cls.fit(fibers[select], fwhm_med, deg=poly_cros)
+            except ValueError as e:
+                log.error(f'{msg}: {e}')
+                continue
+            except numpy.linalg.LinAlgError as e:
+                log.error(f'{msg}: {e}')
+                continue
 
             fwhm[:, i] = poly(fibers)
 
     # Determine the wavelength solution
-<<<<<<< ours
     log.info(
-        f"fitting wavelength solutions using {poly_dispersion}-deg polynomials"
+        f"fitting wavelength solutions using {poly_disp}-deg polynomials"
     )
-=======
-    rss_logger.info(f"fitting wavelength solutions using {poly_disp}-deg polynomials")
->>>>>>> theirs
+
     # Iterate over the fibers
     good_fibers = numpy.zeros(len(fibers), dtype="bool")
     nmasked = numpy.zeros(len(fibers), dtype="uint16")
@@ -466,47 +345,11 @@ def determine_wavelength_solution(in_arc: str, out_wave: str, out_lsf: str, in_r
         wave_sol[i, :] = poly(arc._pixels)
         wave_rms[i] = numpy.std(ref_lines[use_line] - poly(cent_wave[i, use_line]))
 
-<<<<<<< ours
     log.info(
-        f"finished wavelength fitting with median RMS = {numpy.median(wave_rms):g} AA"
-    )
-
-    if plot_fig:
-        axs[1].axhline(len(ref_lines), ls="--", color="0.2", lw=1)
-        axs[1].bar(fibers, nmasked, color="tab:blue")
-        axs[1].set_xlabel("fiber ID")
-        axs[1].set_ylabel("# of guess lines")
-        axs[1].set_title("# of masked lines per fiber", loc="left")
-
-        axs[2].fill_between(
-            arc._pixels,
-            wave_sol.mean(0) - wave_sol.std(0),
-            wave_sol.mean(0) + wave_sol.std(0),
-            lw=0,
-            fc="tab:blue",
-            alpha=0.5,
-        )
-        axs[2].plot(arc._pixels, wave_sol.mean(0), lw=1, color="tab:blue")
-        for i in fibers:
-            axs[2].plot(
-                cent_wave[i, use_line],
-                ref_lines[use_line],
-                ",",
-                color="tab:blue",
-            )
-        axs[2].set_xlabel("dispersion axis (pix)")
-        axs[2].set_ylabel("wavelength (AA)")
-        axs[2].set_title(
-            f"wavelength solutions with a {poly_dispersion}-deg polynomial",
-            loc="left",
-            color="tab:blue",
-=======
-    rss_logger.info(
         (
             "finished wavelength fitting with median "
             f"RMS = {numpy.median(wave_rms):g} AA "
             f"({numpy.median(wave_rms[:,None]/numpy.diff(wave_sol, axis=1)):g} pix)"
->>>>>>> theirs
         )
     )
 
@@ -515,11 +358,7 @@ def determine_wavelength_solution(in_arc: str, out_wave: str, out_lsf: str, in_r
     cent_round = numpy.round(cent_wave).astype(int)
 
     # Iterate over the fibers
-<<<<<<< ours
-    log.info(f"fitting LSF solutions using {poly_fwhm_disp}-deg polynomials")
-=======
-    rss_logger.info(f"fitting LSF solutions using {poly_fwhm}-deg polynomials")
->>>>>>> theirs
+    log.info(f"fitting LSF solutions using {poly_fwhm}-deg polynomials")
     for i in fibers:
         fwhm_wave = numpy.fabs(dwave[i, cent_round[i, :]]) * fwhm[i, :]
 
@@ -549,15 +388,7 @@ def determine_wavelength_solution(in_arc: str, out_wave: str, out_lsf: str, in_r
         fwhm_sol[i, :] = poly(arc._pixels)
         fwhm_rms[i] = numpy.std(fwhm_wave[use_line] - poly(cent_wave[i, use_line]))
 
-<<<<<<< ours
     log.info(
-        f"finished LSF fitting with median RMS = {numpy.median(fwhm_rms):g} AA"
-    )
-
-    if plot_fig:
-        axs[3].fill_between(
-=======
-    rss_logger.info(
         (
             "finished LSF fitting with median "
             f"RMS = {numpy.median(fwhm_rms):g} AA "
@@ -566,7 +397,7 @@ def determine_wavelength_solution(in_arc: str, out_wave: str, out_lsf: str, in_r
     )
 
     # plot if requested
-    if plot:
+    if plot_fig:
         fig = plt.figure(figsize=(16, 10), tight_layout=True)
         gs = gridspec.GridSpec(10, max(poly_disp + 1, poly_fwhm + 1))
 
@@ -671,7 +502,6 @@ def determine_wavelength_solution(in_arc: str, out_wave: str, out_lsf: str, in_r
         )
 
         ax_sol_fwhm.fill_between(
->>>>>>> theirs
             arc._pixels,
             fwhm_sol.mean(0) - fwhm_sol.std(0),
             fwhm_sol.mean(0) + fwhm_sol.std(0),

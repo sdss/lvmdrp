@@ -32,18 +32,10 @@ __all__ = [
     "trace_peaks",
     "subtractStraylight_drp",
     "traceFWHM_drp",
-<<<<<<< HEAD
     "extract_spectra",
-    "subtractBias_drp",
     "preproc_raw_frame",
     "basic_calibration",
     "create_master_frame",
-=======
-    "extractSpec_drp",
-    "preprocRawFrame_drp",
-    "basicCalibration_drp",
-    "createMasterFrame_drp",
->>>>>>> development
 ]
 
 

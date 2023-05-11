@@ -21,7 +21,7 @@ from lvmdrp.utils.bitmask import (
     ReductionStatus,
     QualityFlag,
 )
-from lvmdrp.utils.logger import get_logger
+from lvmdrp import log
 
 # NOTE: replace these lines with Brian's integration of sdss_access and sdss_tree
 from sdss_access import Access
@@ -76,9 +76,6 @@ MASTER_METADATA_COLUMNS = [
     ("status", ReductionStatus),
     ("drpqual", QualityFlag),
 ]
-
-
-logger = get_logger(__name__)
 
 
 def _decode_string(metadata):
@@ -222,61 +219,61 @@ def _filter_metadata(
     """
     query = []
     if hemi is not None:
-        logger.info(f"filtering by {hemi = }")
+        log.info(f"filtering by {hemi = }")
         query.append("hemi == @hemi")
     if tileid is not None:
-        logger.info(f"filtering by {tileid = }")
+        log.info(f"filtering by {tileid = }")
         query.append("tileid == @tileid")
     if mjd is not None:
-        logger.info(f"filtering by {mjd = }")
+        log.info(f"filtering by {mjd = }")
         query.append("mjd == @mjd")
     if imagetyp is not None:
-        logger.info(f"filtering by {imagetyp = }")
+        log.info(f"filtering by {imagetyp = }")
         query.append("imagetyp == @imagetyp")
     if spec is not None:
-        logger.info(f"filtering by {spec = }")
+        log.info(f"filtering by {spec = }")
         query.append("spec == @spec")
     if camera is not None:
-        logger.info(f"filtering by {camera = }")
+        log.info(f"filtering by {camera = }")
         query.append("camera == @camera")
     if expnum is not None:
-        logger.info(f"filtering by {expnum = }")
+        log.info(f"filtering by {expnum = }")
         query.append("expnum == @expnum")
     if exptime is not None:
-        logger.info(f"filtering by {exptime = }")
+        log.info(f"filtering by {exptime = }")
         query.append("exptime == @exptime")
     if neon is not None:
-        logger.info(f"filtering by {neon = }")
+        log.info(f"filtering by {neon = }")
         query.append("neon == @neon")
     if hgne is not None:
-        logger.info(f"filtering by {hgne = }")
+        log.info(f"filtering by {hgne = }")
         query.append("hgne == @hgne")
     if krypton is not None:
-        logger.info(f"filtering by {krypton = }")
+        log.info(f"filtering by {krypton = }")
         query.append("krypton == @krypton")
     if xenon is not None:
-        logger.info(f"filtering by {xenon = }")
+        log.info(f"filtering by {xenon = }")
         query.append("xenon == @xenon")
     if argon is not None:
-        logger.info(f"filtering by {argon = }")
+        log.info(f"filtering by {argon = }")
         query.append("argon == @argon")
     if ldls is not None:
-        logger.info(f"filtering by {ldls = }")
+        log.info(f"filtering by {ldls = }")
         query.append("ldls == @ldls")
     if quartz is not None:
-        logger.info(f"filtering by {quartz = }")
+        log.info(f"filtering by {quartz = }")
         query.append("quartz == @quartz")
     if quality is not None:
-        logger.info(f"filtering by {quality = }")
+        log.info(f"filtering by {quality = }")
         query.append("quality == @quality")
     if stage is not None:
-        logger.info(f"filtering by {stage = }")
+        log.info(f"filtering by {stage = }")
         query.append("stage == @stage")
     if status is not None:
-        logger.info(f"filtering by {status = }")
+        log.info(f"filtering by {status = }")
         query.append("status == @status")
     if drpqual is not None:
-        logger.info(f"filtering by {drpqual = }")
+        log.info(f"filtering by {drpqual = }")
         query.append("drpqual == @drpqual")
 
     if query:
@@ -315,7 +312,7 @@ def _load_or_create_store(tileid=None, mjd=None, kind="raw", mode="r"):
     if mode == "r" and metadata_paths:
         stores = []
         for metadata_path in metadata_paths:
-            logger.info(
+            log.info(
                 f"loading metadata store of {kind = }, {tileid = } and {mjd = }"
             )
             stores.append(h5py.File(metadata_path, mode=mode))
@@ -323,7 +320,7 @@ def _load_or_create_store(tileid=None, mjd=None, kind="raw", mode="r"):
     elif mode == "a" and metadata_paths:
         stores = []
         for metadata_path in metadata_paths:
-            logger.info(
+            log.info(
                 f"creating metadata store of {kind = }, {tileid = } and {mjd = }"
             )
             os.makedirs(os.path.dirname(metadata_path), exist_ok=True)
@@ -358,12 +355,12 @@ def _del_store(tileid=None, mjd=None, kind="raw"):
 
     for metadata_path in metadata_paths:
         if os.path.exists(metadata_path):
-            logger.info(
+            log.info(
                 f"removing metadata store of {kind = }, {tileid = } and {mjd = }"
             )
             os.remove(metadata_path)
         else:
-            logger.warning(
+            log.warning(
                 f"no metadata store of {kind = }, {tileid = } and {mjd = } found, "
                 "nothing to do"
             )
@@ -388,7 +385,7 @@ def extract_metadata(frames_paths):
     new_metadata = {}
     # extract metadata
     nframes = len(frames_paths)
-    logger.info(f"going to extract metadata from {nframes} frames")
+    log.info(f"going to extract metadata from {nframes} frames")
     iterator = tqdm(
         enumerate(frames_paths),
         total=nframes,
@@ -465,16 +462,16 @@ def add_raws(metadata):
         )
 
         if "raw" in store:
-            logger.info(
+            log.info(
                 f"updating metadata store for {tileid = } and {mjd = } "
                 f"with {len(array)} new rows"
             )
             dataset = store["raw"]
             dataset.resize(dataset.shape[0] + array.shape[0], axis=0)
             dataset[-array.shape[0] :] = array
-            logger.info(f"final number of rows {dataset.size}")
+            log.info(f"final number of rows {dataset.size}")
         else:
-            logger.info(
+            log.info(
                 f"creating metadata store for {tileid = } and {mjd = } "
                 f"with {len(array)} new rows"
             )
@@ -483,7 +480,7 @@ def add_raws(metadata):
             )
 
         # write metadata in HDF5 format
-        logger.info("writing raw metadata store to disk")
+        log.info("writing raw metadata store to disk")
         dataset.file.close()
 
 
@@ -512,15 +509,15 @@ def add_masters(metadata):
     )
 
     if "master" in store:
-        logger.info(
+        log.info(
             f"updating metadata store for master frames with {len(array)} new rows"
         )
         dataset = store["master"]
         dataset.resize(dataset.shape[0] + array.shape[0], axis=0)
         dataset[-array.shape[0] :] = array
-        logger.info(f"final number of rows {dataset.size}")
+        log.info(f"final number of rows {dataset.size}")
     else:
-        logger.info(
+        log.info(
             f"creating metadata store for master frames with {len(array)} new rows"
         )
         dataset = store.create_dataset(
@@ -528,7 +525,7 @@ def add_masters(metadata):
         )
 
     # write metadata in HDF5 format
-    logger.info("writing master metadata store to disk")
+    log.info("writing master metadata store to disk")
     store.close()
 
 
@@ -547,12 +544,12 @@ def del_metadata(tileid=None, mjd=None, kind="raw"):
     stores = _load_or_create_store(tileid=tileid, mjd=mjd, kind=kind, mode="a")
     for store in stores:
         if kind in store:
-            logger.info(
+            log.info(
                 f"deleting metadata from store for {kind = }, {tileid = } and {mjd = }"
             )
             del store[kind]
         else:
-            logger.warning(
+            log.warning(
                 f"no metadata of {kind = }, {tileid = } and {mjd = }, nothing to do"
             )
 
@@ -644,14 +641,14 @@ def get_metadata(
     metadatas = []
     for store in stores:
         if kind not in store:
-            logger.warning(f"no metadata found of {kind = }, {tileid = } and {mjd = }")
+            log.warning(f"no metadata found of {kind = }, {tileid = } and {mjd = }")
             return default_output
         else:
             dataset = store[kind]
 
         # extract metadata as dataframe
         metadata = pd.DataFrame(dataset[()])
-        logger.info(f"found {len(metadata)} frames in store '{store.file.filename}'")
+        log.info(f"found {len(metadata)} frames in store '{store.file.filename}'")
 
         # close store
         store.close()
@@ -680,13 +677,13 @@ def get_metadata(
             status=status,
             drpqual=drpqual,
         )
-        logger.info(f"number of frames after filtering {len(metadata)}")
+        log.info(f"number of frames after filtering {len(metadata)}")
 
         metadatas.append(metadata)
 
     metadata = pd.concat(metadatas, axis="index", ignore_index=True)
 
-    logger.info(f"total number of frames found {len(metadata)}")
+    log.info(f"total number of frames found {len(metadata)}")
 
     return metadata
 
@@ -772,14 +769,14 @@ def get_analog_groups(
     metadatas = []
     for store in stores:
         if "raw" not in store:
-            logger.warning(f"no metadata found for {tileid = } and {mjd = }")
+            log.warning(f"no metadata found for {tileid = } and {mjd = }")
             return default_output
         else:
             dataset = store["raw"]
 
         # extract metadata as dataframe
         metadata = pd.DataFrame(dataset[()])
-        logger.info(f"found {len(metadata)} frames in store")
+        log.info(f"found {len(metadata)} frames in store")
 
         # close store
         store.close()
@@ -809,17 +806,17 @@ def get_analog_groups(
             status=status,
             drpqual=drpqual,
         )
-        logger.info(f"final number of frames after filtering {len(metadata)}")
+        log.info(f"final number of frames after filtering {len(metadata)}")
 
     metadatas.append(metadata)
 
-    logger.info("grouping analogs")
+    log.info("grouping analogs")
     metadata_groups = metadata.groupby(["imagetyp", "camera", "exptime"])
 
-    logger.info(f"found {len(metadata_groups)} groups of analogs:")
+    log.info(f"found {len(metadata_groups)} groups of analogs:")
     analogs = []
     for g in metadata_groups.groups:
-        logger.info(g)
+        log.info(g)
         analogs.append(metadata_groups.get_group(g))
     return analogs
 
@@ -891,7 +888,7 @@ def match_master_metadata(
     """
     # locate calibration needs
     frame_needs = FRAMES_CALIB_NEEDS.get(target_imagetyp)
-    logger.info(
+    log.info(
         (
             f"target frame of type '{target_imagetyp}' "
             f"needs calibration frames: {', '.join(frame_needs) or None}"
@@ -903,14 +900,14 @@ def match_master_metadata(
     # extract master calibration frames metadata
     store = _load_or_create_store(kind="master")[0]
     if "master" not in store:
-        logger.warning("no metadata found for master calibration frames")
+        log.warning("no metadata found for master calibration frames")
         return calib_frames
     else:
         masters = store["master"]
 
     if len(masters) == 0:
         masters.file.close()
-        logger.error("no master calibration frames found in store")
+        log.error("no master calibration frames found in store")
         return calib_frames
 
     # extract MJD if given, else extract all MJDs
@@ -921,15 +918,15 @@ def match_master_metadata(
     # convert bytes to literal strings
     masters_metadata = _decode_string(masters_metadata)
 
-    logger.info(f"found {len(masters_metadata)} master frames in store")
+    log.info(f"found {len(masters_metadata)} master frames in store")
 
     # filter by exposure number, spectrograph and/or camera
-    logger.info(
+    log.info(
         f"final number of master frames after filtering {len(masters_metadata)}"
     )
     # raise error in case current frame is not recognized in FRAMES_CALIB_NEEDS
     if frame_needs is None:
-        logger.error(f"no calibration frames found for '{target_imagetyp}' type")
+        log.error(f"no calibration frames found for '{target_imagetyp}' type")
         return calib_frames
     # handle empty list cases (e.g., bias)
     if not frame_needs:
@@ -954,9 +951,9 @@ def match_master_metadata(
             status=status,
         )
         if len(calib_metadata) == 0:
-            logger.error(f"no master {calib_type} frame found")
+            log.error(f"no master {calib_type} frame found")
         else:
-            logger.info(f"found master {calib_type}")
+            log.info(f"found master {calib_type}")
             calib_frames[calib_type] = calib_metadata.iloc[0]
     return calib_frames
 
@@ -993,7 +990,7 @@ def put_reduction_stage(
 
     for store in stores:
         if "raw" not in store:
-            logger.warning(
+            log.warning(
                 f"no metadata found for {tileid = } and {mjd = }, nothing to do"
             )
             return
