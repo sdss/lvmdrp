@@ -11,7 +11,7 @@ from lvmdrp.functions.imageMethod import (preproc_raw_frame, create_master_frame
                                           extract_spectra)
 from lvmdrp.functions.rssMethod import (determine_wavelength_solution, create_pixel_table,
                                         resample_wavelength, join_spec_channels)
-from lvmdrp.utils.examples import get_frames_metadata
+from lvmdrp.utils.metadata import get_frames_metadata
 from lvmdrp import config, log, path, __version__ as drpver
 
 
@@ -53,21 +53,22 @@ def create_masters(flavor, frames):
         log.error(f'No exposures of flavor {flavor} found.  Cannot create master frame.')
         return
 
-    mjd = sub['mjd'][0]
-    tileid = sub['tileid'][0]
+    mjd = sub['mjd'].iloc[0]
+    tileid = sub['tileid'].iloc[0]
 
     if flavor == 'bias':
-        grp = sub.group_by('camera')
+        grp = sub.sort_values('camera')
     elif flavor == 'dark':
-        grp = sub.group_by(['camera', 'exptime'])
+        grp = sub.sort_values(['camera', 'exptime'])
 
     # get the ancillary preproc files
     rpath = (pathlib.Path(os.getenv("LVM_SPECTRO_REDUX")) / f'{drpver}/{tileid}/{mjd}')
     ff = [str(i) for i in rpath.rglob(f'*p{flavor}*fits')]
 
-    for row in grp:
-        camera = row['camera'] if 'camera' in row.columns else None
-        exptime = int(row['exptime']) if 'exptime' in row.columns else None
+    rows = grp.to_dict('records')
+    for row in rows:
+        camera = row['camera'] if 'camera' in row else None
+        exptime = int(row['exptime']) if 'exptime' in row else None
 
         # get the master path
         if flavor == 'bias':
@@ -254,8 +255,8 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
 
 def run_drp(mjd: int = None, bias: bool = False, dark: bool = False,
             skip_bd: bool = False, arc: bool = False, flat: bool = False,
-            only_cal: bool = False, only_sci: bool = False, spec: int = None,
-            camera: str = None):
+            only_bd: bool = False, only_cal: bool = False, only_sci: bool = False,
+            spec: int = None, camera: str = None):
     """ Run the LVM DRP
 
     Run the LVM data reduction pipeline on.  Optionally set flags
@@ -289,25 +290,30 @@ def run_drp(mjd: int = None, bias: bool = False, dark: bool = False,
     if spec:
         sub = sub[sub['spec'] == f'sp{spec}']
     if camera:
-        sub = sub[[camera in i for i in sub['camera']]]
+        sub = sub[sub['camera'].str.contains(camera)]
 
     # get biases and darks
-    cond = (frames['imagetyp'] == 'bias') | (frames['imagetyp'] == 'dark')
+    cond = frames['imagetyp'].isin(['bias', 'dark'])
     precals = frames[cond]
     if len(precals) == 0:
         log.error(f'No biases or darks found for mjd {mjd}. Discontinuing reduction.')
         return
-    precals = precals.group_by(['expnum', 'camera'])
+    precals = precals.sort_values(['expnum', 'camera'])
 
     if not skip_bd:
         # reduce biases / darks
-        for frame in precals:
+        rows = precals.to_dict('records')
+        for frame in rows:
             # skip bad or test quality
             if frame['quality'].lower() != 'excellent':
                 log.info(f"Skipping frame {frame['name']} with quality: {frame['quality']}")
                 continue
 
-            reduce_frame(frame['path'], camera=frame['camera'],
+            # get raw frame filepath
+            filepath = path.full('lvm_raw', mjd=frame['mjd'], expnum=frame['expnum'],
+                                 hemi='s', camspec=frame['camera'])
+
+            reduce_frame(filepath, camera=frame['camera'],
                          mjd=frame['mjd'],
                          expnum=frame['expnum'], tileid=frame['tileid'],
                          flavor=frame['imagetyp'])
@@ -315,6 +321,10 @@ def run_drp(mjd: int = None, bias: bool = False, dark: bool = False,
         # create master biases and darks
         create_masters('bias', precals)
         create_masters('dark', precals)
+
+    # returning if only reducing bias/darks
+    if only_bd:
+        return
 
     # get all other image types
     sub = frames[~cond]
@@ -331,20 +341,25 @@ def run_drp(mjd: int = None, bias: bool = False, dark: bool = False,
         return
 
     # group the frames
-    sub = sub.group_by(['expnum', 'camera'])
+    sub = sub.sort_values(['expnum', 'camera'])
 
     # sort the table by flat, arc, flat, science
     if not only_sci:
         sub = sort_cals(sub)
 
     # reduce remaining files
-    for frame in sub:
+    rows = sub.to_dict('records')
+    for frame in rows:
         # skip bad or test quality
         if frame['quality'].lower() != 'excellent':
             log.info(f"Skipping frame {frame['name']} with quality: {frame['quality']}")
             continue
 
-        reduce_frame(frame['path'], camera=frame['camera'],
+        # get raw frame filepath
+        filepath = path.full('lvm_raw', mjd=frame['mjd'], expnum=frame['expnum'],
+                             hemi='s', camspec=frame['camera'])
+
+        reduce_frame(filepath, camera=frame['camera'],
                      mjd=frame['mjd'],
                      expnum=frame['expnum'], tileid=frame['tileid'],
                      flavor=frame['imagetyp'])
@@ -354,10 +369,15 @@ def run_drp(mjd: int = None, bias: bool = False, dark: bool = False,
     tileid = list(set(sub['tileid']))[0]
 
     # perform camera combination
-    for tileid, mjd in sub.group_by(['tileid', 'mjd']).groups.keys:
+    for tileid, mjd in sub.groupby(['tileid', 'mjd']).groups.keys():
         combine_cameras(tileid, mjd, spec=1)
         combine_cameras(tileid, mjd, spec=2)
         combine_cameras(tileid, mjd, spec=3)
+
+    # perform spectrograph combination
+    # one file per exposure
+    # needs to have fiber slit info in fits extension
+    # output fed into sky
 
     # perform sky subtraction
 
@@ -397,7 +417,7 @@ def write_config_file():
         f.write(yaml.safe_dump(dict(config), sort_keys=False, indent=2))
 
 
-def sort_cals(table: Table) -> Table:
+def sort_cals(df: pd.DataFrame) -> pd.DataFrame:
     """ Sort raw frames table by calibrations
 
     Sorts and orders the table of raw frames by calibration,
@@ -408,38 +428,36 @@ def sort_cals(table: Table) -> Table:
 
     Parameters
     ----------
-    table : Table
-        the table of raw frames to process
+    df : pd.DataFrame
+        the dataframe of raw frames to process
 
     Returns
     -------
-    Table
-        a sorted table of raw frames
+    pd.DataFrame
+        a sorted dataframe of raw frames
     """
 
     # get unique flavors
-    imtypes = set(table['imagetyp'])
+    imtypes = set(df['imagetyp'])
 
     # return if no flat or arcs in dataset
     if {'flat', 'arc'} - imtypes:
         log.info("No flats or arcs found in dataset. No need to sort.")
-        return table
+        return df
 
     # check for image types and remove missing flavors from the index list
     flavors = ['flat', 'arc', 'object']
     missing = set(flavors) - imtypes
     __ = [flavors.remove(i) for i in missing]
 
-    # convert to pandas, sort and set index
-    df = table.to_pandas()
+    # sort and set index
     ss = df.sort_values(['camera', 'expnum'])
     ee = ss.set_index('imagetyp', drop=False).loc[flavors]
 
     # append flats to end of calibration frames, and build new dataframe
     calibs = pd.concat([ee.loc[['flat', 'arc']], ee.loc['flat']]).reset_index(drop=True)
-    new = (pd.concat([calibs, ee.loc['object']]).reset_index(drop=True)
-           if 'object' in imtypes else calibs)
-    return table.from_pandas(new)
+    return (pd.concat([calibs, ee.loc['object']]).reset_index(drop=True)
+            if 'object' in imtypes else calibs)
 
 
 def find_best_mdark(tileid: int, mjd: int, camera: str) -> str:

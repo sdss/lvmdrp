@@ -33,8 +33,10 @@ reduction_steps:
   determine_wavesol:
     default:
       ref_fiber: 319
-      poly_dispersion: 5
-      poly_fwhm: [2, 5]
+      poly_disp: 5
+      poly_fwhm: 5
+      poly_cros: 3
+      poly_kinds: ['poly', 'poly', 'poly']
       aperture: 13
       plot_fig: true
   resample_wave:

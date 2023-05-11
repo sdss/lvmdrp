@@ -88,7 +88,7 @@ def mergeRSS_drp(files_in, file_out, mergeHdr="1"):
 def determine_wavelength_solution(in_arc: str, out_wave: str, out_lsf: str, in_ref_lines: str = "",
                                   ref_fiber: str = "", pixel: str = "", ref_lines: str = "",
                                   poly_disp: int = 5, poly_fwhm: int = 5,
-                                  poly_cros:int = 3, poly_kinds: list = ['poly', 'poly', 'poly'],
+                                  poly_cros: int = 3, poly_kinds: list = ['poly', 'poly', 'poly'],
                                   init_back: float = 10.0, aperture: int = 13,
                                   flux_min: float = 200.0, fwhm_max: float = 10.0,
                                   rel_flux_limits: list = [0.1, 5.0], fiberflat: str = "",
@@ -164,7 +164,7 @@ def determine_wavelength_solution(in_arc: str, out_wave: str, out_lsf: str, in_r
     """
 
     # convert parameters to the correct type
-    kind_disp, kind_fwhm, kind_cros = poly_kinds.split(",")
+    kind_disp, kind_fwhm, kind_cros = poly_kinds.split(",") if isinstance(poly_kinds, str) else poly_kinds
 
     if fiberflat != "":
         fiberflat = fiberflat.split(",")
