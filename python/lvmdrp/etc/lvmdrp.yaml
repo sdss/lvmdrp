@@ -9,17 +9,17 @@ reduction_steps:
       os_bound_x: 2044,2077
       plot_fig: true
   find_peaks_auto:
-    nfibers: 0
-    slice: 1870
-    threshold: 2
+    nfibers: 638
+    slice: 1500
+    threshold: 0
     method: hyperbolic
-    median_box: 5
+    median_box: 8
     median_cross: 1
     plot_fig: true
   trace_peaks:
-    steps: 10
+    steps: 30
     coadd: 30
-    threshold_peak: 2
+    threshold_peak: 0
     max_diff: 2
     method: hyperbolic
     median_box: 5
@@ -33,11 +33,11 @@ reduction_steps:
   determine_wavesol:
     default:
       ref_fiber: 319
-      poly_disp: 5
-      poly_fwhm: 5
+      poly_disp: 3
+      poly_fwhm: 3
       poly_cros: 3
       poly_kinds: ['poly', 'poly', 'poly']
-      aperture: 13
+      aperture: 10
       plot_fig: true
   resample_wave:
     default:

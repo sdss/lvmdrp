@@ -692,9 +692,9 @@ def addCCDMask_drp(image, mask, replaceError="1e10"):
     img.writeFitsData(image)
 
 
-def find_peaks_auto(in_image: str, out_peaks: str, nfibers: int = 0, disp_axis: str = "X",
+def find_peaks_auto(in_image: str, out_peaks: str, nfibers: int = 638, disp_axis: str = "X",
                     threshold: int = 1000, median_box: int = 5, median_cross: int = 1,
-                    slice: str = "", method: str = "hyperbolic", init_sigma: float = 1.0,
+                    slice: int = 1500, method: str = "hyperbolic", init_sigma: float = 1.0,
                     plot_fig: bool = False, show_fig: bool = False):
     """
     Finds the exact subpixel cross-dispersion position of a given number of fibers at a certain dispersion column on the raw CCD frame.

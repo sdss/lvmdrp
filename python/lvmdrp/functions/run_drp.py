@@ -555,7 +555,7 @@ def combine_cameras(tileid: int, mjd: int, spec: int = 1):
 
         # create the output b object file, 1 per spectrograph
         bout_file = path.full('lvm_anc', mjd=mjd, tileid=tileid, drpver=drpver,
-                              imagetype='object', expnum=key, kind='b', camera=f'sp{spec}')
+                              imagetype='object', expnum=key, kind='', camera=f'sp{spec}')
 
         # pad the exposure list for missing cameras
         exps = list(exps)

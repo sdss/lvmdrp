@@ -86,12 +86,12 @@ def mergeRSS_drp(files_in, file_out, mergeHdr="1"):
 # * define ancillary product lvm-wave to contain wavelength solutions
 # * merge disp_rss and res_rss products into lvmArc product, change variable to out_arc
 def determine_wavelength_solution(in_arc: str, out_wave: str, out_lsf: str, in_ref_lines: str = "",
-                                  ref_fiber: str = "", pixel: str = "", ref_lines: str = "",
-                                  poly_disp: int = 5, poly_fwhm: int = 5,
+                                  ref_fiber: int = 319, pixel: str = "", ref_lines: str = "",
+                                  poly_disp: int = 3, poly_fwhm: int = 5,
                                   poly_cros: int = 3, poly_kinds: list = ['poly', 'poly', 'poly'],
-                                  init_back: float = 10.0, aperture: int = 13,
-                                  flux_min: float = 200.0, fwhm_max: float = 10.0,
-                                  rel_flux_limits: list = [0.1, 5.0], fiberflat: str = "",
+                                  init_back: float = 10.0, aperture: int = 10,
+                                  flux_min: float = 10.0, fwhm_max: float = 5.0,
+                                  rel_flux_limits: list = [0.001, 100.0], fiberflat: str = "",
                                   negative: bool = False, cc_correction: bool = True,
                                   plot_fig: bool = False, show_fig: bool = False):
     """
