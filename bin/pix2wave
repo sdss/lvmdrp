@@ -101,6 +101,7 @@ class SolveWavelength:
             )
 
         # mask lines out of guess wavelength range
+        log.info(f"selecting pixels within {self.wave_range}")
         mask_range = (self.wave_range[0] <= self.reflines["Wavelength"]) & (
             self.reflines["Wavelength"] <= self.wave_range[1]
         )
@@ -110,6 +111,8 @@ class SolveWavelength:
         # read given image
         log.info(f"loading extracted RSS '{self.extracted_fits}'")
         spectra = rss.loadRSS(self.extracted_fits)
+        # apply pixel mask
+        spectra._data = spectra._data * (~spectra._mask)
         # select spectra
         iy = self.fiber_id - self.ncoadd // 2
         fy = self.fiber_id + self.ncoadd // 2
