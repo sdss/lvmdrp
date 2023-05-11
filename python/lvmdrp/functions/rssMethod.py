@@ -450,7 +450,7 @@ def detWaveSolution_drp(
 
         ax_spec = fig.add_subplot(gs[:3, :])
         ax_spec.tick_params(labelbottom=False)
-        ax_spec.set_yscale("log")
+        # ax_spec.set_yscale("log")
         ax_sol_wave = fig.add_subplot(gs[3:6, :], sharex=ax_spec)
         ax_sol_fwhm = ax_sol_wave.twinx()
         ax_sol_wave.tick_params("y", labelcolor="tab:blue")
