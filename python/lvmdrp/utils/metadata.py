@@ -7,6 +7,7 @@
 # @Copyright: SDSS-V LVM
 
 import os
+import pathlib
 from glob import glob, has_magic
 from tqdm import tqdm
 from astropy.io import fits
@@ -21,20 +22,21 @@ from lvmdrp.utils.bitmask import (
     ReductionStatus,
     QualityFlag,
 )
-from lvmdrp import log
+from lvmdrp import log, __version__
 
-# NOTE: replace these lines with Brian's integration of sdss_access and sdss_tree
-from sdss_access import Access
-from sdss_access.path import Path
+# # NOTE: replace these lines with Brian's integration of sdss_access and sdss_tree
+# from sdss_access import Access
+# from sdss_access.path import Path
 
 
-path = Path(release="sdss5")
-access = Access(release="sdss5")
-access.set_base_dir()
+# path = Path(release="sdss5")
+# access = Access(release="sdss5")
+# access.set_base_dir()
 
-DRPVER = "0.1.0"
+DRPVER = __version__
 
-METADATA_PATH = os.path.join(os.path.expandvars("$LVM_SPECTRO_REDUX"), DRPVER)
+
+METADATA_PATH = os.path.join(os.getenv("LVM_SPECTRO_REDUX"), DRPVER)
 # -------------------------------------------------------------------------------
 
 RAW_METADATA_COLUMNS = [
@@ -53,10 +55,12 @@ RAW_METADATA_COLUMNS = [
     ("argon", bool),
     ("ldls", bool),
     ("quartz", bool),
-    ("quality", RawFrameQuality),
+    ('quality', str),
+    ("qual", RawFrameQuality),
     ("stage", ReductionStage),
     ("status", ReductionStatus),
     ("drpqual", QualityFlag),
+    ('name', str)
 ]
 MASTER_METADATA_COLUMNS = [
     ("mjd", int),
@@ -75,6 +79,7 @@ MASTER_METADATA_COLUMNS = [
     ("stage", ReductionStage),
     ("status", ReductionStatus),
     ("drpqual", QualityFlag),
+    ('name', str)
 ]
 
 
@@ -140,9 +145,9 @@ def _get_metadata_paths(tileid=None, mjd=None, kind="raw"):
         raise ValueError("valid values for `kind` are: 'raw' and 'master'")
 
     if has_magic(path_pattern):
-        metadata_paths = glob(path_pattern)
+        metadata_paths = [pathlib.Path(i) for i in glob(path_pattern)]
     else:
-        metadata_paths = [path_pattern]
+        metadata_paths = [pathlib.Path(path_pattern)]
 
     return metadata_paths
 
@@ -165,6 +170,7 @@ def _filter_metadata(
     ldls=None,
     quartz=None,
     quality=None,
+    qual=None,
     stage=None,
     status=None,
     drpqual=None,
@@ -203,7 +209,9 @@ def _filter_metadata(
         whether is LDLS lamp on or not, by default None
     quartz : bool, optional
         whether is Quartz lamp on or not, by default None
-    quality : int, optional
+    quality : str, optional
+        string of original raw frame quality, by default None
+    qual : int, optional
         bitmask representing quality of the recution, by default None
     stage : int, optional
         bitmask representing stage of the raw frames, by default None
@@ -266,6 +274,9 @@ def _filter_metadata(
     if quality is not None:
         log.info(f"filtering by {quality = }")
         query.append("quality == @quality")
+    if qual is not None:
+        log.info(f"filtering by {qual = }")
+        query.append("qual == @qual")
     if stage is not None:
         log.info(f"filtering by {stage = }")
         query.append("stage == @stage")
@@ -283,7 +294,7 @@ def _filter_metadata(
     return metadata
 
 
-def _load_or_create_store(tileid=None, mjd=None, kind="raw", mode="r"):
+def _load_or_create_store(tileid=None, mjd=None, kind="raw", mode="a"):
     """return the metadata store given a tile ID and an MJD
 
     if loading/creating a store for raw frames metadata, this function will
@@ -300,40 +311,30 @@ def _load_or_create_store(tileid=None, mjd=None, kind="raw", mode="r"):
     kind : str, optional
         metadata kind for which a store will be loaded/created, by default "raw"
     mode : str, optional
-        instantiate store in read/write mode ("r", "a"), by default "r"
+        instantiate store in read/write mode ("r", "a"), by default "a"
 
     Returns
     -------
     h5py.Group
         the metadata store for the given observatory
     """
+    if mode not in {'r', 'a'}:
+        raise ValueError(f"invalid value for {mode = }")
+
+    if not tileid and not mjd:
+        raise ValueError(f"specific values for {tileid = } and {mjd = } are needed")
+
     # define metadata path depending on the kind
     metadata_paths = _get_metadata_paths(tileid=tileid, mjd=mjd, kind=kind)
-    if mode == "r" and metadata_paths:
-        stores = []
-        for metadata_path in metadata_paths:
-            log.info(
-                f"loading metadata store of {kind = }, {tileid = } and {mjd = }"
-            )
-            stores.append(h5py.File(metadata_path, mode=mode))
 
-    elif mode == "a" and metadata_paths:
-        stores = []
-        for metadata_path in metadata_paths:
-            log.info(
-                f"creating metadata store of {kind = }, {tileid = } and {mjd = }"
-            )
-            os.makedirs(os.path.dirname(metadata_path), exist_ok=True)
-            stores.append(h5py.File(metadata_path, mode=mode))
-    else:
-        if mode == "r":
-            raise FileNotFoundError(
-                f"no stores of {kind = } found matching {tileid = } and {mjd = }"
-            )
-        elif mode == "a":
-            raise ValueError(f"specific values for {tileid = } and {mjd = } are needed")
-        else:
-            raise ValueError(f"invalid value for {mode = }")
+    stores = []
+    for metadata_path in metadata_paths:
+        # create the directory if needed
+        metadata_path.parent.mkdir(parents=True, exist_ok=True)
+
+        msg = 'loading' if metadata_path.exists() else 'creating'
+        log.info(f"{msg} metadata store of {kind = }, {tileid = } and {mjd = }")
+        stores.append(h5py.File(metadata_path, mode=mode))
 
     return stores
 
@@ -365,8 +366,54 @@ def _del_store(tileid=None, mjd=None, kind="raw"):
                 "nothing to do"
             )
 
+from typing import Union
+from lvmdrp.utils.hdrfix import apply_hdrfix
 
-def extract_metadata(frames_paths):
+
+def get_frames_metadata(mjd: Union[str, int] = None, suffix: str = "fits",
+                        overwrite: bool = None) -> pd.DataFrame:
+    """ Extract metadata from the 2d raw frames
+
+    Builds an Pandas DataFrame table containing extracted metadata for each of the 2d raw sdR
+    frame files.  Globs for all files in the ``mjd`` subdirectory of the raw LVM data.
+    If no mjd is specified, searches all of them. Writes the dataframe to an HDF store
+    and if found, will load the cached content from there.  The cache is written
+    into the MJD subdirectory of the LVM_SPECTRO_REDUX reduction folder
+
+    Parameters
+    ----------
+    mjd : Union[str, int], optional
+        The MJD of the data sub-directory to search in, by default None
+    suffix : str, optional
+        The raw data file suffix, by default "fits"
+    overwrite : bool, optional
+        Flag to ignore the HDF cache, by default None
+
+    Returns
+    -------
+    pd.DataFrame
+        a Pandas DataFrame of metadata
+    """
+    # look up raw data in the relevant MJD path
+    raw_data_path = os.getenv("LVM_DATA_S")
+    raw_frame = f'{mjd}/sdR*{suffix}*' if mjd else f'*/sdR*{suffix}*'
+    frames = list(pathlib.Path(raw_data_path).rglob(raw_frame))
+
+    if _load_or_create_store(tileid='*', mjd=mjd, kind='raw') and not overwrite:
+        log.info("Loading existing metadata store.")
+        meta = get_metadata(mjd=mjd, tileid='*')
+    else:
+        if overwrite:
+            _del_store(mjd=mjd, tileid='*')
+
+        log.info('Creating new metadata store.')
+        meta = extract_metadata(frames)
+        add_raws(meta)
+
+    return meta
+
+
+def extract_metadata(frames_paths: list) -> pd.DataFrame:
     """return dataframe with metadata extracted from given frames list
 
     this function will extract metadata from FITS headers given a list of
@@ -394,7 +441,18 @@ def extract_metadata(frames_paths):
         unit="frame",
     )
     for i, frame_path in iterator:
-        header = fits.getheader(frame_path, ext=0)
+        try:
+            header = fits.getheader(frame_path, ext=0)
+        except OSError as e:
+            log.error(f'Cannot read FITS header: {e}')
+            continue
+
+        frame_path = pathlib.Path(frame_path)
+
+        # apply any header fix or if none, use old header
+        mjd = header.get("MJD")
+        header = apply_hdrfix(mjd, hdr=header) or header
+
         new_metadata[i] = [
             "n" if header.get("OBSERVAT") != "LCO" else "s",
             header.get("TILEID", 1111),
@@ -411,10 +469,12 @@ def extract_metadata(frames_paths):
             header.get("ARGON", "OFF") == "ON",
             header.get("LDLS", "OFF") == "ON",
             header.get("QUARTZ", "OFF") == "ON",
-            header.get("QUALITY", RawFrameQuality(0)),
+            header.get("QUALITY", 'excellent'),
+            header.get("QUAL", RawFrameQuality(0)),
             ReductionStage.UNREDUCED,
             ReductionStatus(0),
             QualityFlag(0),
+            frame_path.stem
         ]
 
     # define dataframe
@@ -636,7 +696,7 @@ def get_metadata(
     )
 
     # extract metadata
-    stores = _load_or_create_store(tileid=tileid, mjd=mjd, kind=kind, mode="r")
+    stores = _load_or_create_store(tileid=tileid, mjd=mjd, kind=kind)
 
     metadatas = []
     for store in stores:
