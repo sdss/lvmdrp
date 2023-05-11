@@ -933,14 +933,11 @@ class Image(Header):
             filename, output_verify="silentfix", overwrite=True
         )  # write FITS file to disc
 
-    def computePoissonError(self, gain=1.0, rdnoise=0.0, replace_masked=1e20):
-        image = self._data * gain
-        self._error = numpy.zeros_like(image)
-        select = image > 0
-        self._error[select] = numpy.sqrt(image[select] + rdnoise**2)
+    def computePoissonError(self, rdnoise):
+        self._error = numpy.zeros_like(self._data)
+        select = self._data > 0
+        self._error[select] = numpy.sqrt(self._data[select] + rdnoise**2)
         self._error[numpy.logical_not(select)] = rdnoise
-        if self._mask is not None and replace_masked != 0:
-            self._error[self._mask] = replace_masked
 
     def replaceMaskMedian(self, box_x, box_y, replace_error=1e20):
         """
