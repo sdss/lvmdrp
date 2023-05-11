@@ -1,6 +1,7 @@
 import multiprocessing
 import os
 import sys
+from copy import deepcopy as copy
 from multiprocessing import Pool, cpu_count
 
 import numpy
@@ -12,7 +13,7 @@ from tqdm import tqdm
 
 from lvmdrp.core.fiberrows import FiberRows
 from lvmdrp.core.image import Image, combineImages, glueImages, loadImage
-from lvmdrp.core.plot import save_fig
+from lvmdrp.core.plot import plot_strips, save_fig
 from lvmdrp.core.rss import RSS
 from lvmdrp.core.spectrum1d import Spectrum1D
 from lvmdrp.core.tracemask import TraceMask
@@ -2738,13 +2739,12 @@ def preprocRawFrame_drp(
     subtract_overscan="1",
     os_bound_x="",
     os_bound_y="",
-    compute_error="1",
     assume_gain="1.0",
     assume_rdnoise="5",
     gain_prefix="GAIN",
     rdnoise_prefix="RDNOISE",
-    unit="adu",
     assume_imagetyp="",
+    replace_with_nan="0",
     plot="2",
     figure_path=".figures",
 ):
@@ -2778,8 +2778,6 @@ def preprocRawFrame_drp(
         overscan boundary in the X direction, by default ""
     os_bound_y : str, optional
         overscan boundary in the Y direction, by default ""
-    compute_error : str, optional
-        whether to compute Poisson errors or not, by default "1"
     assume_gain : str, optional
         assume gain values if not in the header, by default "1.0"
     assume_rdnoise : str, optional
@@ -2788,20 +2786,22 @@ def preprocRawFrame_drp(
         prefix of the gain key in the header, by default "GAIN"
     rdnoise_prefix : str, optional
         prefix of the read key noise in the header, by default "RDNOISE"
-    unit : str, optional
-        units of the preprocessed frame (electron, adu), by default "adu"
     assume_imagetyp : str, optional
         overwrite IIMAGETYP in the header to this value even if present, by default ""
+    replace_with_nan : str, optional
+        whether to replace badpixels with NaNs in the data and the error extensions or not, by default 0
     plot : str, optional
         plot preprocessed frame, by default "2"
     figure_path : str, optional
         store plots in this folder, by default ".figures"
     """
+    # TODO: specify the data sections for each quadrant (hardcoded in this function for now)
+    #
     # convert input parameters to proper type
     orient = orientation.split(",")
     pos = positions.split(",")
     subtract_overscan = bool(int(subtract_overscan))
-    compute_error = bool(int(compute_error))
+    replace_with_nan = bool(int(replace_with_nan))
     plot = int(plot)
 
     # load image
@@ -2897,7 +2897,7 @@ def preprocRawFrame_drp(
             plt.show()
         else:
             save_fig(
-                fig, output_path=out_image, figure_path=figure_path, label="preproc"
+                fig, output_path=out_image, figure_path=figure_path, label="preproc_os"
             )
 
     # * split OS in four amplifier sections
@@ -2907,6 +2907,30 @@ def preprocRawFrame_drp(
     # * compute statistics on each OS section
     os_bias_med = [numpy.nanmedian(os_quad._data) for os_quad in os_quads]
     os_bias_std = [numpy.nanstd(os_quad._data) for os_quad in os_quads]
+
+    if plot:
+        fig, axs = plt.subplots(2, 1, figsize=(20, 10), sharex=True, sharey=True)
+        axs = axs.flatten()
+        axs[-1].set_xlabel("X (pixel)")
+        for i, os_quad in enumerate([os_ab, os_cd]):
+            plot_strips(os_quad, axis=0, nstrip=1, ax=axs[i])
+
+        fig, axs = plt.subplots(2, 1, figsize=(20, 10), sharex=True, sharey=True)
+        axs = axs.flatten()
+        axs[-1].set_xlabel("Y (pixel)")
+        for i, os_quad in enumerate(os_region.split(2, axis="X")):
+            plot_strips(os_quad, axis=1, nstrip=1, ax=axs[i])
+        if plot == 1:
+            plt.show()
+        else:
+            save_fig(
+                fig,
+                output_path=out_image,
+                figure_path=figure_path,
+                label="preproc_strips",
+            )
+
+    # TODO: ask Nick or Jose to add bias values for each quadrant in raw frames header
     image_logger.info(
         (
             "median counts in overscan sections "
@@ -3010,27 +3034,23 @@ def preprocRawFrame_drp(
         elif len(assume_rdnoise) >= nquad:
             rdnoises = assume_rdnoise[:nquad]
         else:
-            rdnoises = nquad * [5.0]
+            image_logger.warning(f"setting rdnoise values to {os_bias_std}")
+            rdnoises = [r * g for r, g in zip(os_bias_std, gains)]
 
     # orient quadrants as requested
     [quad.orientImage(orient[i]) for i, quad in enumerate(quads)]
     # compute error image and/or convert to specified unit
-    if compute_error:
-        image_logger.info("converting from ADU to e-")
-        for i in range(nquad):
-            quads[i].computePoissonError(gain=gains[i], rdnoise=rdnoises[i])
+    image_logger.info("converting from ADU to e-")
+    for i in range(nquad):
+        quads[i] *= gains[i]
+        quads[i].computePoissonError(rdnoise=rdnoises[i])
         image_logger.info(f"calculated Poisson errors for amplifier '{'abcd'[i]}'")
-    elif unit == "electron":
-        for i in range(nquad):
-            quads[i] *= gains[i]
-    elif unit == "adu":
-        image_logger.info("using original ADU units")
-    else:
-        image_logger.warning("unrecongnized CCD pixel unit. Assuming 'ADU'")
-        unit = "adu"
 
     # join images
     preproc_image = glueImages(quads, pos)
+    preproc_image.setHeader(org_image.getHeader())
+    # update/set unit
+    preproc_image.setHdrValue("BUNIT", "electron", "physical units of the array values")
     # flip along dispersion axis
     try:
         ccd = org_image._header["CCD"]
@@ -3045,9 +3065,6 @@ def preprocRawFrame_drp(
     image_logger.info(
         f"updating header and writing pre-processed frame to '{out_image}'"
     )
-    preproc_image.setHeader(org_image.getHeader())
-    # update/set unit
-    preproc_image.setHdrValue("BUNIT", unit, "physical units of the array values")
     # add amplifier quadrants
     for i in range(nquad):
         ysize, xsize = quads[i]._dim
@@ -3092,13 +3109,24 @@ def preprocRawFrame_drp(
     if in_mask != "":
         master_mask = loadImage(in_mask)._mask.astype(bool)
     else:
-        master_mask = numpy.zeros_like(preproc_image._mask, dtype=bool)
+        master_mask = numpy.zeros_like(preproc_image._data, dtype=bool)
 
     # create pixel mask on the original image
     image_logger.info("building pixel mask")
-    preproc_image._mask = numpy.zeros_like(preproc_image._data, dtype=bool)
-    preproc_image._mask |= preproc_image.convertUnit(unit="adu") >= 0.7 * 2**16
-    preproc_image._mask |= master_mask
+    preproc_image._mask = master_mask
+    # convert temp image to ADU for saturated pixel masking
+    sects = preproc_image._header["AMP? TRIMSEC"]
+    _ = copy(preproc_image)
+    for i in range(nquad):
+        quad = _.getSection(sects[i]) / gains[i]
+        _.setSection(sects[i], quad, inplace=True)
+    preproc_image._mask |= _ >= 0.7 * 2**16
+    # update masked pixels with NaNs if needed
+    if replace_with_nan:
+        preproc_image._data[preproc_image._mask] = numpy.nan
+        preproc_image._error[preproc_image._mask] = numpy.nan
+
+    # log number of masked pixels
     masked_pixels = preproc_image._mask.sum()
     image_logger.info(
         f"{masked_pixels} ({masked_pixels / preproc_image._mask.size * 100:.2g} %) pixels masked"
