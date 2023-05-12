@@ -77,7 +77,8 @@ MASTER_METADATA_COLUMNS = [
     ("argon", bool),
     ("ldls", bool),
     ("quartz", bool),
-    ("quality", RawFrameQuality),
+    ('quality', str),
+    ("qual", RawFrameQuality),
     ("stage", ReductionStage),
     ("status", ReductionStatus),
     ("drpqual", QualityFlag),
@@ -563,7 +564,7 @@ def add_raws(metadata):
             )
             dataset = store["raw"]
             dataset.resize(dataset.shape[0] + array.shape[0], axis=0)
-            dataset[-array.shape[0] :] = array
+            dataset[-array.shape[0]:] = array
             log.info(f"final number of rows {dataset.size}")
         else:
             log.info(

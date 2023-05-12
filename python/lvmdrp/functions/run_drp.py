@@ -5,7 +5,8 @@ import os
 import pathlib
 import yaml
 import pandas as pd
-from astropy.table import Table
+from typing import Union
+
 from lvmdrp.functions.imageMethod import (preproc_raw_frame, create_master_frame,
                                           basic_calibration, find_peaks_auto, trace_peaks,
                                           extract_spectra)
@@ -44,7 +45,20 @@ def get_config_options(level: str, flavor: str = None) -> dict:
     return cfg.get(flavor, cfg.get("default", {})) if flavor else cfg.get("default", cfg)
 
 
-def create_masters(flavor, frames):
+def create_masters(flavor: str, frames: pd.DataFrame):
+    """ Create the master calibration frames
+
+    Create the master calibration frames for a given flavor
+    or imagetyp.  These files live in the "calib" subdirectory
+    with the "lvm-m(flavor)-*" prefix.
+
+    Parameters
+    ----------
+    flavor : str
+        The image type of the exposure
+    frames : pd.DataFrame
+        The dataframe of raw frame metadata
+    """
 
     sub = frames[frames['imagetyp'] == flavor]
 
@@ -88,7 +102,25 @@ def create_masters(flavor, frames):
         create_master_frame(in_images=ff, out_image=master, **kwargs)
 
 
-def trace_fibers(in_file, camera, expnum, tileid, mjd):
+def trace_fibers(in_file: str, camera: str, expnum: int, tileid: int, mjd: int):
+    """ Perform flat fiber tracing
+
+    Runs the fiber trace peak finder algorithm and traces the peaks to
+    identify the fibers.
+
+    Parameters
+    ----------
+    in_file : str
+        the input preprocessed file path
+    camera : str
+        the name of the camera
+    expnum : int
+        the frame exposure number
+    tileid : int
+        the sky tile id
+    mjd : int
+        the MJD of observation
+    """
 
     out_peaks = path.full("lvm_cal", drpver=drpver, tileid=tileid, mjd=mjd, camera=camera,
                           expnum=expnum, kind='peaks', ext='txt')
@@ -253,7 +285,75 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
     # perform quality checks
 
 
-def run_drp(mjd: int = None, bias: bool = False, dark: bool = False,
+def parse_mjds(mjd: Union[int, str, list, tuple]) -> Union[int, list]:
+    """ Parse the input MJD
+
+    Parses the input MJD into a single integer MJD or a list
+    of integer MJD.  Valid inputs are a single int 60010,
+    a list of specific MJDs [60010, 60040], or a string
+    range of MJDs 60010-60040.
+
+    Parameters
+    ----------
+    mjd : Union[int, str, list, tuple]
+        the input MJD range or value to parse
+
+    Returns
+    -------
+    Union[int, list]
+        Either a single integer MJD or list of MJDs
+    """
+
+    if isinstance(mjd, int):
+        return mjd
+    elif isinstance(mjd, (tuple, list)):
+        return sorted(map(int, mjd))
+    elif isinstance(mjd, str) and mjd.isdigit():
+        return int(mjd)
+    elif isinstance(mjd, str) and '-' in mjd:
+        return split_mjds(mjd)
+
+
+def split_mjds(mjd: str) -> list:
+    """ Split a string range of MJDs
+
+    Splits a string range of MJDs, e.g. "60010-60040", into
+    a list of all (inclusive) MJDs within the range
+    specified.  A range can also be specified as
+    "-60040" or "60010-" to indicate that the range
+    includes all mjds prior to or following the
+    given MJD.
+
+    Parameters
+    ----------
+    mjd : str
+        An hyphen-separated MJD range
+
+    Returns
+    -------
+    list
+        A list of MJDs
+    """
+    start_mjd, end_mjd = mjd.split('-')
+    start_mjd = int(start_mjd) if start_mjd else None
+    end_mjd = int(end_mjd) if end_mjd else None
+
+    p = pathlib.Path(os.getenv('LVM_DATA_S'))
+    mjds = []
+    for d in p.iterdir():
+        if not d.stem.isdigit():
+            continue
+        mm = int(d.stem)
+        if start_mjd and end_mjd and (mm >= start_mjd and mm <= end_mjd):
+            mjds.append(mm)
+        elif start_mjd and not end_mjd and (mm >= start_mjd):
+            mjds.append(mm)
+        elif not start_mjd and end_mjd and (mm <= end_mjd):
+            mjds.append(mm)
+    return sorted(mjds)
+
+
+def run_drp(mjd: Union[int, str, list], bias: bool = False, dark: bool = False,
             skip_bd: bool = False, arc: bool = False, flat: bool = False,
             only_bd: bool = False, only_cal: bool = False, only_sci: bool = False,
             spec: int = None, camera: str = None):
@@ -264,7 +364,7 @@ def run_drp(mjd: int = None, bias: bool = False, dark: bool = False,
 
     Parameters
     ----------
-    mjd : int, optional
+    mjd : Union[int, str, list], optional
         The MJD of the raw data to reduce, by default None
     arc : bool, optional
         Flag to only reduce arc frames, by default False
@@ -275,6 +375,22 @@ def run_drp(mjd: int = None, bias: bool = False, dark: bool = False,
     """
     # write the drp parameter configuration
     write_config_file()
+
+    # parse the input MJD and loop over all reductions
+    mjds = parse_mjds(mjd)
+    if isinstance(mjds, list):
+        for mjd in mjds:
+            run_drp(mjd=mjd, bias=bias, dark=dark, skip_bd=skip_bd, arc=arc, flat=flat,
+                    only_bd=only_bd, only_cal=only_cal, only_sci=only_sci, spec=spec, camera=camera)
+        return
+
+    log.info(f'Processing MJD {mjd}')
+
+    # check the MJD data directory path
+    mjd_path = pathlib.Path("LVM_DATA_S") / str(mjd)
+    if not mjd_path.is_dir():
+        log.warning(f'{mjd = } is not valid raw data directory.')
+        return
 
     # find files
     frames = get_frames_metadata(mjd=mjd)
