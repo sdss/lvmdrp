@@ -3,29 +3,43 @@
 #
 
 import click
+import cloup
+from cloup.constraints import mutually_exclusive, RequireExactly
 
 from astropy.io import fits
 from lvmdrp.functions.run_drp import run_drp, get_config_options
 from lvmdrp.functions.imageMethod import preproc_raw_frame
 
 
-@click.group('drp', short_help='run the drp reduction')
+@click.group('drp', short_help='CLI for the LVM data reduction')
 def cli():
     pass
 
 
-@cli.command('run', short_help='run the drp end-to-end')
-@click.option('-m', '--mjd', type=int, help='an MJD to reduce', required=True)
-@click.option('--skip-bp', is_flag=True, default=False, help='Flag to only skip bias/dark reduction')
+@cloup.command(short_help='Run the DRP reduction', show_constraints=True)
+@click.option('-m', '--mjd', type=int, help='an MJD to reduce')
+@click.option('-l', '--mjd-list', type=int, multiple=True, help='a list of specific MJDs to reduce')
+@click.option('-r', '--mjd-range', type=str, help='a range of MJDs to reduce')
+@click.option('--skip-bd', is_flag=True, default=False, help='Flag to skip bias/dark reduction')
 @click.option('--arc', is_flag=True, default=False, help='Flag to only reduce arc frames')
 @click.option('--flat', is_flag=True, default=False, help='Flag to only reduce flat frames')
+@click.option('--only-bd', is_flag=True, default=False, help='Flag to only reduce bias/dark frames')
 @click.option('--only-cal', is_flag=True, default=False, help='Flag to only reduce calibration frames')
 @click.option('--only-sci', is_flag=True, default=False, help='Flag to only reduce science frames')
-def run(mjd, skip_bp, arc, flat, only_cal, only_sci):
-    run_drp(mjd=mjd, flat=flat, arc=arc, skip_bp=skip_bp, only_cal=only_cal, only_sci=only_sci)
+@click.option('-s', '--spec', type=click.Choice(['1', '2', '3']), help='The spectrograph id to reduce')
+@click.option('-c', '--camera', type=click.Choice(['b', 'r', 'z']), help='The camera to reduce')
+@cloup.constraint(mutually_exclusive, ['mjd', 'mjd_list', 'mjd_range'])
+@cloup.constraint(RequireExactly(1), ['mjd', 'mjd_list', 'mjd_range'])
+def run(mjd, mjd_list, mjd_range, skip_bd, arc, flat, only_bd, only_cal, only_sci, camera, spec):
+    """ Run the DRP reduction for a given MJD or range of MJDs """
+    mjd = mjd or mjd_list or mjd_range
+    run_drp(mjd=mjd, flat=flat, arc=arc, skip_bd=skip_bd, only_bd=only_bd,
+            only_cal=only_cal, only_sci=only_sci, camera=camera, spec=spec)
+
+cli.add_command(run)
 
 
-@cli.command('preprocess', short_help='preprocess raw frames')
+@cli.command('preprocess', short_help='Preprocess raw frames')
 @click.argument('filename', type=click.Path(exists=True))
 @click.option('-f', '--flavor', type=str, help='the flavor of the file', required=True)
 def preprocess(filename, flavor):
