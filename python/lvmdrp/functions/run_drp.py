@@ -6,7 +6,10 @@ import pathlib
 import yaml
 import pandas as pd
 from typing import Union
+from functools import lru_cache
 
+from astropy.io import fits
+from astropy.table import Table
 from lvmdrp.functions.imageMethod import (preproc_raw_frame, create_master_frame,
                                           basic_calibration, find_peaks_auto, trace_peaks,
                                           extract_spectra)
@@ -683,3 +686,69 @@ def combine_cameras(tileid: int, mjd: int, spec: int = 1):
         join_spec_channels(in_rss=list(exps), out_rss=bout_file, **kwargs)
         log.info(f'Output combined camera file: {bout_file}')
 
+
+@lru_cache
+def read_fibermap(as_table: bool = None, as_hdu: bool = None) -> Union[pd.DataFrame, Table, fits.BinTableHDU]:
+    """ Read the LVM fibermap
+
+    Reads the LVM fibermap yaml file into a pandas
+    DataFrame or Astropy Table or Astropy fits.BinTableHDU.
+
+    Parameters
+    ----------
+    as_table : bool, optional
+        If True, returns an Astropy Table, by default None
+    as_hdu : bool, optional
+        If True, returns an Astropy fits.BinTableHDU, by default None
+
+    Returns
+    -------
+    Union[pd.DataFrame, Table, fits.BinTableHDU]
+        the fibermap as a dataframe, table, or hdu
+    """
+
+    p = pathlib.Path(os.getenv('LVMCORE_DIR')) / 'metrology/lvm_fiducial_fibermap.yaml'
+    if not p.is_file():
+        log.warning("Cannot read fibermap from lvmcore.")
+        return
+
+    with open(p, 'r') as f:
+        data = yaml.safe_load(f)
+        cols = [i['name'] for i in data['schema']]
+        df = pd.DataFrame(data['fibers'], columns=cols)
+        if as_table:
+            return Table.from_pandas(df)
+        if as_hdu:
+            return fits.BinTableHDU(Table.from_pandas(df), name='SLITMAP')
+        return df
+
+
+def select_fibers(specid: int = None, flag: str = 'SAIT') -> pd.DataFrame:
+    """ Select fibers from the fibermap
+
+    Select fibers from the fibermap dataframe. Use the flag keyword
+    to set a predefined selection filter.  The default flag of SAIT
+    selects on non-standard targets (targettype != "standard") and
+    good fibers (fibstatus != 1), where good is both "good" (0) and "fibers
+    with low throughput" (2).
+
+    Parameters
+    ----------
+    specid : int, optional
+        the spectrograph id, by default None
+    flag : str, optional
+        flag for setting a predefined seletion query, by default 'SAIT'
+
+    Returns
+    -------
+    pd.DataFrame
+        the fiber subset matching the query
+    """
+    df = read_fibermap()
+
+    if flag == 'SAIT':
+        query = 'targettype != "standard" & fibstatus != 1'
+        if specid:
+            query += f' & spectrographid == {specid}'
+
+    return df.query(query)
