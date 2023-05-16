@@ -3148,7 +3148,7 @@ def preprocRawFrame_drp(
 def basicCalibration_drp(
     in_image, out_image, in_bias=None, in_dark=None, in_pixelflat=None
 ):
-    proc_image = loadImage(in_image).convertUnit(unit="electron")
+    proc_image = loadImage(in_image)
     exptime = proc_image._header["EXPTIME"]
     img_type = proc_image._header["IMAGETYP"].lower()
     image_logger.info(
@@ -3172,7 +3172,7 @@ def basicCalibration_drp(
         master_bias = dummy_bias
     else:
         image_logger.info(f"using bias calibration frame '{in_bias}'")
-        master_bias = loadImage(in_bias).convertUnit(unit="electron")
+        master_bias = loadImage(in_bias)
 
     # read master dark
     if img_type in ["bias", "dark"] or (in_dark is None or not os.path.isfile(in_dark)):
@@ -3181,7 +3181,7 @@ def basicCalibration_drp(
         master_dark = dummy_dark
     else:
         image_logger.info(f"using dark calibration frame '{in_dark}'")
-        master_dark = loadImage(in_dark).convertUnit(unit="electron")
+        master_dark = loadImage(in_dark)
 
         # scale down the dark if needed
         factor = exptime / master_dark._header["EXPTIME"]
@@ -3198,7 +3198,7 @@ def basicCalibration_drp(
         master_pixelflat = dummy_flat
     else:
         image_logger.info(f"using pixelflat calibration frame '{in_pixelflat}'")
-        master_pixelflat = loadImage(in_pixelflat).convertUnit(unit="electron")
+        master_pixelflat = loadImage(in_pixelflat)
 
     # run basic calibration
     calib_image = (proc_image - master_dark - master_bias) / master_pixelflat
@@ -3216,6 +3216,7 @@ def basicCalibration_drp(
             f"{infpixels.sum()} pix) with zeros"
         )
     )
+    # TODO: implement this replacement of bad pixels optionally
     calib_image._data = numpy.nan_to_num(calib_image._data, nan=0, posinf=0, neginf=0)
     calib_image._error = numpy.nan_to_num(calib_image._error, nan=0, posinf=0, neginf=0)
 
