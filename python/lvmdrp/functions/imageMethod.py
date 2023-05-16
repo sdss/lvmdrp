@@ -2914,6 +2914,15 @@ def preprocRawFrame_drp(
         axs[-1].set_xlabel("X (pixel)")
         for i, os_quad in enumerate([os_ab, os_cd]):
             plot_strips(os_quad, axis=0, nstrip=1, ax=axs[i])
+        if plot == 1:
+            plt.show()
+        else:
+            save_fig(
+                fig,
+                output_path=out_image,
+                figure_path=figure_path,
+                label="preproc_strips",
+            )
 
         fig, axs = plt.subplots(2, 1, figsize=(20, 10), sharex=True, sharey=True)
         axs = axs.flatten()
