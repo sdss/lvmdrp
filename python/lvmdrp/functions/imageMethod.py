@@ -3148,6 +3148,11 @@ def preprocRawFrame_drp(
 def basicCalibration_drp(
     in_image, out_image, in_bias=None, in_dark=None, in_pixelflat=None
 ):
+    # TODO: Change name from "calibration" to "detrending"
+    # TODO: Normalization of flats. This is for combining them right? Need to make sure median is not dominated by diferences in background. We need bright pixels on fiber cores to be scaled to the same level.
+    # TODO: Confirm that dark is not being flat fielded in current logic
+    # TODO: What is the difference between "flat" and "flatfield"? Pixel flats should not be pixel flatted but regular flats (dome and twilight) yes.
+    # TODO: Bad Pixel Mask: you should look for two types of bad pixels in two different frames: "hot pixels", for which you co-add all your bias subtracted darks, no matter the exposure time, and look for pixels that stand out of their local background. And "low QE pixels", for which you look for local outliers with respect to the local background in a master pixel flat.
     proc_image = loadImage(in_image)
     exptime = proc_image._header["EXPTIME"]
     img_type = proc_image._header["IMAGETYP"].lower()

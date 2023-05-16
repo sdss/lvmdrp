@@ -1970,11 +1970,7 @@ class Image(Header):
         LA_kernel = (
             numpy.array(
                 [
-                    [
-                        0,
-                        -1,
-                        0,
-                    ],
+                    [0, -1, 0],
                     [-1, 4, -1],
                     [0, -1, 0],
                 ]
@@ -2215,7 +2211,7 @@ def glueImages(images, positions):
     return out_image
 
 
-def combineImages(images, method="median", k=3):
+def combineImages(images, method="median", k=3, normalize=True, subtract_offset=True):
     """
     Combines several image to a single one according to a certain average methods
 
@@ -2228,9 +2224,15 @@ def combineImages(images, method="median", k=3):
     k : float
         Only used for the clipped_mean method. Only values within k*sigma around the median value are averaged.
     """
+    # TODO: I think medians are fine, as long as we are careful of subtracting a
+    # background, and scaling images robustly (i.e. with outlier rejection).
+    # You might want to do different things when dealing with different types of frames.
+    # We should discuss this.,
+
     # creates an empty empty array to store the images in a stack
     dim = images[0].getDim()
-    stack_image = numpy.zeros((len(images), dim[0], dim[1]), dtype=numpy.float32)
+    stack_image = numpy.zeros((len(images), dim[0], dim[1]), dtype=float)
+    stack_error = numpy.zeros((len(images)), dim[0], dim[1], dtype=float)
     stack_mask = numpy.zeros((len(images), dim[0], dim[1]), dtype=bool)
 
     # load image data in to stack
@@ -2238,6 +2240,19 @@ def combineImages(images, method="median", k=3):
         stack_image[i, :, :] = images[i].getData()
         if images[i]._mask is not None:
             stack_mask[i, :, :] = images[i].getMask()
+
+    if subtract_offset:
+        # plot histogram of the images to get a feeling of the pixel distributions
+        # identify pixels without fibers and calculate the median, per image
+        # subtract median value per image
+        pass
+
+    if normalize:
+        # plot distribution of pixels (detect outliers e.g., CR)
+        # select pixels that exposed
+        # calculate the median of the selected pixels
+        # scale illuminated pixels to a common scale, for the whole image
+        pass
 
     # mask invalid values
     stack_image = numpy.ma.masked_array(stack_image, mask=stack_mask)
@@ -2267,6 +2282,7 @@ def combineImages(images, method="median", k=3):
 
     # return new image to normal array
     new_image = new_image.data
+    # TODO: new error
 
     # mask bad pixels
     old_mask = numpy.sum(stack_mask, 0).astype(bool)
