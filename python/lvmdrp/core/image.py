@@ -646,13 +646,13 @@ class Image(Header):
                     update_header=False,
                     inplace=True,
                 )
-            else:
-                factor = (
-                    self._header.get(gain_field, assume_gain)
-                    if current == "adu"
-                    else 1 / self._header.get(gain_field, assume_gain)
-                )
-                new_image *= factor
+        else:
+            factor = (
+                self._header.get(gain_field, assume_gain)
+                if current == "adu"
+                else 1 / self._header.get(gain_field, assume_gain)
+            )
+            new_image *= factor
 
             new_image._header["BUNIT"] = unit
 
