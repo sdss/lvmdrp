@@ -2069,6 +2069,7 @@ class Image(Header):
                 Lap = conv.rebin(2, 2)  # rebin the data to original resolution
 
                 norm = simple_norm(Lap._data, stretch="log", clip=True)
+                axs[0].set_title("laplacian of input image")
                 axs[0].imshow(Lap._data, origin="lower", norm=norm)
 
                 S = Lap / (noise * 4)  # normalize Laplacian image by the noise
@@ -2077,6 +2078,7 @@ class Image(Header):
                 )  # cleaning of the normalized Laplacian image
 
                 norm = simple_norm(S_prime._data, stretch="log", clip=True)
+                axs[1].set_title("noise normalized and background subtracted laplacian (S_prime)")
                 axs[1].imshow(S_prime._data, origin="lower", norm=norm)
 
                 # NOTE: convolve with a Gaussian kernel
@@ -2088,6 +2090,7 @@ class Image(Header):
                 fine_norm.setData(data=0, select=select_neg)
 
                 norm = simple_norm(fine_norm._data, stretch="log", clip=True)
+                axs[2].set_title("normalized input")
                 axs[2].imshow(fine_norm._data, origin="lower", norm=norm)
 
                 sub_norm = fine_norm.subsampleImg()  # subsample image
@@ -2095,6 +2098,7 @@ class Image(Header):
                 Lap2 = Lap2.rebin(2, 2)  # rebin the data to original resolution
 
                 norm = simple_norm(Lap2._data, stretch="log", clip=True)
+                axs[3].set_title("laplacian of normalized input (Lap2)")
                 axs[3].imshow(Lap2._data, origin="lower", norm=norm)
 
                 plt.show()
@@ -2199,7 +2203,6 @@ def glueImages(images, positions):
         full_CCD_mask = numpy.concatenate(columns, axis=1)
     else:
         full_CCD_mask = None
-
     # ingest the combined data to the object attribute
     out_image = Image(
         data=full_CCD_data,
@@ -2238,8 +2241,13 @@ def combineImages(images, method="median", k=3, normalize=True, subtract_offset=
     # load image data in to stack
     for i in range(len(images)):
         stack_image[i, :, :] = images[i].getData()
+        # TODO: if imagetyp != "bias":
+        # TODO: else: initialize a dummy error array
+        stack_error[i, :, :] = images[i].getError()
         if images[i]._mask is not None:
             stack_mask[i, :, :] = images[i].getMask()
+        else:
+            stack_mask[i, :, :] = numpy.zeros_like(stack_images, dtype=bool)
 
     if subtract_offset:
         # plot histogram of the images to get a feeling of the pixel distributions
@@ -2260,8 +2268,10 @@ def combineImages(images, method="median", k=3, normalize=True, subtract_offset=
     # combine the images according to the selected method
     if method == "median":
         new_image = numpy.ma.median(stack_image, 0)
+        new_error = numpy.sqrt(np.ma.median(stack_error**2, 0))
     elif method == "sum":
         new_image = numpy.ma.sum(stack_image, 0)
+        # TODO: add error poropagation in other methods
     elif method == "mean":
         new_image = numpy.ma.mean(stack_image, 0)
     elif method == "nansum":
@@ -2280,22 +2290,27 @@ def combineImages(images, method="median", k=3, normalize=True, subtract_offset=
         stack_image[:, numpy.logical_not(good_pixels)] = 0
         new_image = numpy.ma.sum(stack_image, 0) / good_pixels
 
-    # return new image to normal array
+    # return new image and error to normal array
     new_image = new_image.data
-    # TODO: new error
+    new_error = new_error.data
 
     # mask bad pixels
-    old_mask = numpy.sum(stack_mask, 0).astype(bool)
-    new_mask = numpy.logical_or(old_mask, numpy.isnan(new_image))
+    # old_mask = numpy.sum(stack_mask, 0).astype(bool)
+    # TODO: numpy seems to be doing this already, but need to test it
+    new_mask = numpy.zeros_like(new_image, dtype=bool)
+    for i in range(len(images)):
+        new_mask = new_mask | (~stack_mask[i])
+    new_mask = new_mask | numpy.isnan(new_image) | numpy.isnan(new_error)
 
     # TODO: add new header keywords:
     #   - NCOMBINE: number of frames combined
     #   - STATCOMB: statistic used to combine
+    #   - table HDU conataining basic metadata from the individual images
     if images[0]._header is not None:
         new_header = images[0]._header
     else:
         new_header = None
 
-    outImage = Image(data=new_image, mask=new_mask, header=new_header)
+    outImage = Image(data=new_image, error=new_error, mask=new_mask, header=new_header)
 
     return outImage
