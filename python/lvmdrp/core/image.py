@@ -4,12 +4,8 @@ from astropy.io import fits as pyfits
 from lvmdrp.core.apertures import *
 from lvmdrp.core.header import *
 from lvmdrp.core.spectrum1d import Spectrum1D
-
-
-try:
-    import pylab
-except:
-    pass
+import matplotlib.pyplot as plt
+from astropy.visualization import simple_norm
 from multiprocessing import Pool, cpu_count
 
 from astropy.modeling import fitting, models
@@ -1422,8 +1418,8 @@ class Image(Header):
                         order,
                     )  # fit #refit polynomial with clipped data
                     if plot == i:
-                        pylab.plot(x, self._data[:, i], "-b")
-                        pylab.plot(
+                        plt.plot(x, self._data[:, i], "-b")
+                        plt.plot(
                             x[valid[:, i]][select],
                             self._data[valid[:, i], i][select],
                             "ok",
@@ -1447,14 +1443,14 @@ class Image(Header):
                     x[select], self._data[:, i][select], order
                 )  # refit polynomial with clipped data
                 if plot == i:
-                    pylab.plot(x[select], self._data[:, i][select], "ok")
+                    plt.plot(x[select], self._data[:, i][select], "ok")
                 fit_result[:, i] = numpy.polyval(
                     fit_par[:, i], x
                 )  # evalute the polynom
             if plot == i:
-                pylab.plot(x, fit_result[:, i], "-r")
-                pylab.ylim([0, max])
-                pylab.show()
+                plt.plot(x, fit_result[:, i], "-r")
+                plt.ylim([0, max])
+                plt.show()
         # match orientation of the output array
         if axis == "y" or axis == "Y" or axis == 0:
             pass
@@ -1920,7 +1916,35 @@ class Image(Header):
         replace_box=(20, 2),
         parallel="auto",
     ):
-        """Return the cosmic ray pixel mask computed using the LA algorithm"""
+        """create a pixel mask for cosmic rays using the LA algorithm
+
+        Parameters
+        ----------
+        sigma_det : int, optional
+            sigma level above the noise to be detected as comics, by default 5
+        flim : float, optional
+            threshold between Laplacian edged and Gaussian smoothed image (>1), by default 1.1
+        iter : int, optional
+            number of iterations, recommended >1 to fully detect extended cosmics, by default 3
+        sig_gauss : tuple, optional
+            sigma of the Gaussian smoothing kernel in x and y direction, by default (0.8, 0.8)
+        error_box : tuple, optional
+            box size used to estimate the electron counts for a given pixel by taken a median to estimate the noise level.
+        replace_box : tuple, optional
+            box size in used to estimate replacement values from valid pixels, by default (20, 2)
+        parallel : str or int, optional
+            whether to run in parallel ("auto" or >1) or not (<=1), by default "auto"
+
+        Returns
+        -------
+        np.ndarray
+            pixel mask with cosmic rays (1) and clean pixels (0)
+        """
+        # TODO: Cosmic ray rejection should happen after detrending, not before.
+        # TODO: Not clear to me how noise image is used. You should already have an error image at this point. Why create a new one?
+        # TODO: Is this noise image an rms in a median box or Poisson per pixel?
+        # TODO: It looks like things picked up as CRs are really bad columns/pixels. If you detrend first and apply bad pixel mask this might solve this.
+        # TODO: Looks like CR mask leaves out fainter parts of the CRs. Need to fine tune parameters (thresholds and number of iterations)
         err_box_x = error_box[0]
         err_box_y = error_box[1]
         sigma_x = sig_gauss[0]
@@ -1935,7 +1959,8 @@ class Image(Header):
             error=None,
             mask=numpy.zeros(self.getDim(), dtype=bool),
         )
-        out.convertUnit("e-")
+        # TODO: conversion deprecated
+        # out.convertUnit("e-")
         # out.removeError()
 
         # initial CR selection
@@ -1968,7 +1993,7 @@ class Image(Header):
 
         # start iteration
         for i in range(iter):
-            # quick and dirty CRR on current iteration
+            # quick and dirty pixel noise calculation
             noise = out.medianImg((err_box_y, err_box_x))
             for iquad in range(len(quads)):
                 quad = noise.getSection(quads[iquad])
@@ -2024,28 +2049,59 @@ class Image(Header):
                     (err_box_y, err_box_x)
                 )  # cleaning of the normalized Laplacian image
             else:
+                fig, axs = plt.subplots(
+                    2, 2, figsize=(20, 20), sharex=True, sharey=True
+                )
+                axs = axs.flatten()
+
+                # norm = simple_norm(out._data, stretch="log", clip=True)
+                # axs[0].imshow(out._data, origin="lower", norm=norm)
+
+                # NOTE: subsample and convolve with Laplacian kernel
+                # to highlight cosmic ray edges
                 sub = out.subsampleImg()  # subsample image
                 conv = sub.convolveImg(
                     LA_kernel
                 )  # convolve subsampled image with kernel
+
                 select_neg = conv < 0
                 conv.setData(
                     data=0, select=select_neg
                 )  # replace all negative values with 0
+
+                # NOTE: return data to the original sampling
                 Lap = conv.rebin(2, 2)  # rebin the data to original resolution
+
+                norm = simple_norm(Lap._data, stretch="log", clip=True)
+                axs[0].imshow(Lap._data, origin="lower", norm=norm)
+
                 S = Lap / (noise * 4)  # normalize Laplacian image by the noise
                 S_prime = S - S.medianImg(
                     (err_box_y, err_box_x)
                 )  # cleaning of the normalized Laplacian image
+
+                norm = simple_norm(S_prime._data, stretch="log", clip=True)
+                axs[1].imshow(S_prime._data, origin="lower", norm=norm)
+
+                # NOTE: convolve with a Gaussian kernel
                 fine = out.convolveGaussImg(
                     sigma_x, sigma_y
                 )  # convolve image with a 2D Gaussian
                 fine_norm = out / fine
                 select_neg = fine_norm < 0
                 fine_norm.setData(data=0, select=select_neg)
+
+                norm = simple_norm(fine_norm._data, stretch="log", clip=True)
+                axs[2].imshow(fine_norm._data, origin="lower", norm=norm)
+
                 sub_norm = fine_norm.subsampleImg()  # subsample image
                 Lap2 = (sub_norm).convolveImg(LA_kernel)
                 Lap2 = Lap2.rebin(2, 2)  # rebin the data to original resolution
+
+                norm = simple_norm(Lap2._data, stretch="log", clip=True)
+                axs[3].imshow(Lap2._data, origin="lower", norm=norm)
+
+                plt.show()
 
             # define cosmic ray selection
             select = numpy.logical_or(
@@ -2203,10 +2259,11 @@ def combineImages(images, method="median", k=3):
             stack_image < median + k * rms, stack_image > median - k * rms
         )
         # compute the number of good pixels
-        good_pixels = numpy.sum(select, 0).astype(bool)
+        good_pixels = numpy.ma.sum(select, 0).astype(bool)
         # set all bad pixel to 0 to compute the mean
+        # TODO: make this optional, by default not replacement
         stack_image[:, numpy.logical_not(good_pixels)] = 0
-        new_image = numpy.sum(stack_image, 0) / good_pixels
+        new_image = numpy.ma.sum(stack_image, 0) / good_pixels
 
     # return new image to normal array
     new_image = new_image.data
