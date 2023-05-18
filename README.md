@@ -17,7 +17,8 @@ To install the DRP along with its dependencies, you need to run the following st
     > `conda activate lvmdrp`
 
 3. Clone the Github repository:
-    > `git clone --recurse-submodules -j8 git@github.com:sdss/lvmdrp.git`
+    > `git clone --recurse-submodules -j8 git@github.com:sdss/lvmdrp.git` # assuming you have an SSH key
+    > `git clone --recurse-submodules -j8 https://github.com/sdss/lvmdrp.git` # using HTTPS
 
 4. Go into the lvmdrp directory:
     > `cd lvmdrp`
