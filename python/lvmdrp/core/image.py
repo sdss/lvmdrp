@@ -1945,12 +1945,14 @@ class Image(Header):
         # TODO: Is this noise image an rms in a median box or Poisson per pixel?
         # TODO: It looks like things picked up as CRs are really bad columns/pixels. If you detrend first and apply bad pixel mask this might solve this.
         # TODO: Looks like CR mask leaves out fainter parts of the CRs. Need to fine tune parameters (thresholds and number of iterations)
+        # TODO: try this: https://lacosmic.readthedocs.io/en/stable/_modules/lacosmic/core.html#lacosmic with the long kernel convolution
+        # https://github.com/larrybradley/lacosmic
         err_box_x = error_box[0]
         err_box_y = error_box[1]
         sigma_x = sig_gauss[0]
         sigma_y = sig_gauss[1]
-        box_x = replace_box[0]
-        box_y = replace_box[1]
+        # box_x = replace_box[0]
+        # box_y = replace_box[1]
 
         # create a new Image instance to store the initial data array
         out = Image(
@@ -2078,7 +2080,9 @@ class Image(Header):
                 )  # cleaning of the normalized Laplacian image
 
                 norm = simple_norm(S_prime._data, stretch="log", clip=True)
-                axs[1].set_title("noise normalized and background subtracted laplacian (S_prime)")
+                axs[1].set_title(
+                    "noise normalized and background subtracted laplacian (S_prime)"
+                )
                 axs[1].imshow(S_prime._data, origin="lower", norm=norm)
 
                 # NOTE: convolve with a Gaussian kernel
@@ -2097,19 +2101,20 @@ class Image(Header):
                 Lap2 = (sub_norm).convolveImg(LA_kernel)
                 Lap2 = Lap2.rebin(2, 2)  # rebin the data to original resolution
 
-                norm = simple_norm(Lap2._data, stretch="log", clip=True)
+                norm = simple_norm(Lap2._data, stretch="log", max_percent=90)
                 axs[3].set_title("laplacian of normalized input (Lap2)")
                 axs[3].imshow(Lap2._data, origin="lower", norm=norm)
 
                 plt.show()
 
             # define cosmic ray selection
-            select = numpy.logical_or(
-                numpy.logical_and((Lap2) > flim, S_prime > sigma_det), select
-            )
+            # select = numpy.logical_or(
+            #     numpy.logical_and((Lap2) > flim, S_prime > sigma_det), select
+            # )
+            select |= (Lap2._data > flim) & (S_prime._data > sigma_det)
             # update mask in clean image for next iteration
-            out.setData(mask=True, select=select)
-            out = out.replaceMaskMedian(box_x, box_y, replace_error=None)
+            # out.setData(mask=True, select=select)
+            # out = out.replaceMaskMedian(box_x, box_y, replace_error=None)
 
         return select
 
