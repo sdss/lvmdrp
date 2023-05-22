@@ -22,3 +22,5 @@ keyring>=4.0
 sbpy==0.3.0
 ccdproc==2.4.0
 bottleneck==1.3.7
+h5py==3.8.0
+tables==3.8.0

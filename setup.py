@@ -35,7 +35,7 @@ def run(packages, install_requires):
         packages=packages,
         install_requires=install_requires,
         package_dir={"": "python"},
-        scripts=["bin/drp", "bin/pix2wave", "bin/prime-db"],
+        scripts=["bin/drp", "bin/pix2wave"],
         classifiers=[
             "Development Status :: 4 - Beta",
             "Intended Audience :: Science/Research",

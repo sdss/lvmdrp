@@ -1,10 +1,10 @@
 # Local Volume Mapper (LVM) Data Reduction Pipeline (DRP)
 
-The LVM DRP in it's current incarnation installs a collection of routines which make use of the [Py3D]().
+The LVM DRP is based in a collection of routines from [Py3D](https://github.com/brandherd/Py3D).
 
 ## Installation
 
-This code is being developed/tested in a Ubuntu-based OS, using **Python 3.8**. We recommend to use a Python environment manager such as Anaconda or similar, in order to avoid cluttering the OS's python installation.
+This code is being developed/tested in a Ubuntu-based OS, using **Python 3.8**. We recommend to use a Python environment manager such as Anaconda or similar, in order to avoid cluttering the OS's python installation. We assume you are a member of the [Github sdss organization](https://github.com/sdss). We also assume that you have an SSH key configure on your local machine and registered in your Github account. If not, please follow [these instructions](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/adding-a-new-ssh-key-to-your-github-account) to set up one.
 
 If you are planning on installing the DRP on a different OS, please read the [troubleshooting section](#troubleshooting) before you continue with the steps below.
 
@@ -17,7 +17,9 @@ To install the DRP along with its dependencies, you need to run the following st
     > `conda activate lvmdrp`
 
 3. Clone the Github repository:
-    > `git clone --recurse-submodules -j8 git@github.com:sdss/lvmdrp.git`
+    > `git clone --recurse-submodules -j8 git@github.com:sdss/lvmdrp.git` # assuming you have an SSH key
+
+    > `git clone --recurse-submodules -j8 https://github.com/sdss/lvmdrp.git` # using HTTPS
 
 4. Go into the lvmdrp directory:
     > `cd lvmdrp`
