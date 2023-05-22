@@ -1231,7 +1231,7 @@ def tracePeaks_drp(
     median_cross="1",
     steps="30",
     coadd="30",
-    poly_disp="-6",
+    poly_disp="6",
     init_sigma="1.0",
     threshold="100.0",
     max_diff="2",
@@ -3386,7 +3386,7 @@ def createMasterFrame_drp(
                     proc_image / numpy.nanmedian(proc_image._data)
                     for proc_image in proc_images
                 ],
-                method="mean",
+                method="median",
             )
         elif master_type == "arc" or master_type == "fiberflat":
             master_frame = combineImages(proc_images, method="median")
