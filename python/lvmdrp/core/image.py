@@ -2235,7 +2235,7 @@ def combineImages(images, method="median", k=3, normalize=True, subtract_offset=
     # creates an empty empty array to store the images in a stack
     dim = images[0].getDim()
     stack_image = numpy.zeros((len(images), dim[0], dim[1]), dtype=float)
-    stack_error = numpy.zeros((len(images)), dim[0], dim[1], dtype=float)
+    stack_error = numpy.zeros((len(images), dim[0], dim[1]), dtype=float)
     stack_mask = numpy.zeros((len(images), dim[0], dim[1]), dtype=bool)
 
     # load image data in to stack
@@ -2243,11 +2243,12 @@ def combineImages(images, method="median", k=3, normalize=True, subtract_offset=
         stack_image[i, :, :] = images[i].getData()
         # TODO: if imagetyp != "bias":
         # TODO: else: initialize a dummy error array
-        stack_error[i, :, :] = images[i].getError()
+        if images[0]._header["IMAGETYP"] != "bias":
+            stack_error[i, :, :] = images[i].getError()
         if images[i]._mask is not None:
             stack_mask[i, :, :] = images[i].getMask()
         else:
-            stack_mask[i, :, :] = numpy.zeros_like(stack_images, dtype=bool)
+            stack_mask[i, :, :] = numpy.zeros_like(stack_image, dtype=bool)
 
     if subtract_offset:
         # plot histogram of the images to get a feeling of the pixel distributions
@@ -2264,11 +2265,12 @@ def combineImages(images, method="median", k=3, normalize=True, subtract_offset=
 
     # mask invalid values
     stack_image = numpy.ma.masked_array(stack_image, mask=stack_mask)
+    stack_error = numpy.ma.masked_array(stack_image, mask=stack_mask)
 
     # combine the images according to the selected method
     if method == "median":
         new_image = numpy.ma.median(stack_image, 0)
-        new_error = numpy.sqrt(np.ma.median(stack_error**2, 0))
+        new_error = numpy.sqrt(numpy.ma.median(stack_error**2, 0))
     elif method == "sum":
         new_image = numpy.ma.sum(stack_image, 0)
         # TODO: add error poropagation in other methods
@@ -2291,15 +2293,16 @@ def combineImages(images, method="median", k=3, normalize=True, subtract_offset=
         new_image = numpy.ma.sum(stack_image, 0) / good_pixels
 
     # return new image and error to normal array
+    new_mask = new_image.mask
     new_image = new_image.data
     new_error = new_error.data
 
     # mask bad pixels
     # old_mask = numpy.sum(stack_mask, 0).astype(bool)
     # TODO: numpy seems to be doing this already, but need to test it
-    new_mask = numpy.zeros_like(new_image, dtype=bool)
-    for i in range(len(images)):
-        new_mask = new_mask | (~stack_mask[i])
+    # new_mask = numpy.zeros_like(new_image, dtype=bool)
+    # for i in range(len(images)):
+    #     new_mask = new_mask & stack_mask[i]
     new_mask = new_mask | numpy.isnan(new_image) | numpy.isnan(new_error)
 
     # TODO: add new header keywords:
