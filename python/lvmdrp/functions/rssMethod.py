@@ -431,6 +431,7 @@ def detWaveSolution_drp(
                 deg=poly_fwhm,
             )
 
+        # TODO: select one column and plot coeffs vs Y coord in pixels
         lsf_coeffs[i, :] = poly.coef
         fwhm_sol[i, :] = poly(arc._pixels)
         fwhm_rms[i] = numpy.std(fwhm_wave[use_line] - poly(cent_wave[i, use_line]))

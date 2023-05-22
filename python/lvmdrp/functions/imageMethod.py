@@ -1347,6 +1347,9 @@ def tracePeaks_drp(
         column, axis="y", data=positions, mask=numpy.zeros(len(positions), dtype="bool")
     )
 
+    # peaks points
+    xs, ys = [], []
+
     # select cross-dispersion slice for the measurements of the peaks
     first = numpy.arange(column - 1, -1, -1)
     select_first = first % steps == 0
@@ -1388,6 +1391,9 @@ def tracePeaks_drp(
         trace.setSlice(i, axis="y", data=centers[0], mask=centers[1])
         m += 1
 
+        xs.append(i)
+        ys.append(centers[0].tolist())
+
     # iterate towards the last index along dispersion axis
     if verbose:
         iterator = tqdm(
@@ -1420,6 +1426,15 @@ def tracePeaks_drp(
             centers[1][bad_fibers] = False
         trace.setSlice(i, axis="y", data=centers[0], mask=centers[1])
         m += 1
+
+        xs.append(i)
+        ys.append(centers[0].tolist())
+
+    with open("peaks_xy.txt", "w") as f:
+        f.write(" ".join(xs) + "\n")
+        for row in numpy.asarray(ys).T.tolist():
+            f.write(" ".join(row) + "\n")
+    exit()
 
     # smooth all trace by a polynomial
     image_logger.info(f"fitting trace with {numpy.abs(poly_disp)}-deg polynomial")
