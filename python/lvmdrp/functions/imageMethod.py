@@ -2618,7 +2618,6 @@ def preprocRawFrame_drp(
     gain_prefix="GAIN",
     rdnoise_prefix="RDNOISE",
     orientation="S,S,S,S",
-    positions="01,11,00,10",
     subtract_overscan="1",
     replace_with_nan="0",
     plot="2",
@@ -2680,7 +2679,6 @@ def preprocRawFrame_drp(
 
     # convert input parameters to proper type
     orient = orientation.split(",")
-    pos = positions.split(",")
     subtract_overscan = bool(int(subtract_overscan))
     replace_with_nan = bool(int(replace_with_nan))
     plot = int(plot)
@@ -2809,7 +2807,8 @@ def preprocRawFrame_drp(
     [quad.orientImage(orient[i]) for i, quad in enumerate(sc_quads)]
 
     # join images
-    preproc_image = glueImages(sc_quads, positions=pos)
+    QUAD_POSITIONS = ["01", "11", "00", "10"]
+    preproc_image = glueImages(sc_quads, positions=QUAD_POSITIONS)
     preproc_image.setHeader(org_image.getHeader())
     # update/set unit
     preproc_image.setHdrValue("BUNIT", "electron", "physical units of the array values")
@@ -2828,7 +2827,7 @@ def preprocRawFrame_drp(
     # add amplifier quadrants
     for i in range(NQUADS):
         ysize, xsize = sc_quads[i]._dim
-        x, y = int(pos[i][0]), int(pos[i][1])
+        x, y = int(QUAD_POSITIONS[i][0]), int(QUAD_POSITIONS[i][1])
         # flip y-axis
         y = 1 if y == 0 else 0
         preproc_image.setHdrValue(
