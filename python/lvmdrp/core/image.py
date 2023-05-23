@@ -15,8 +15,10 @@ from scipy import ndimage
 def _parse_ccd_section(section):
     """Parse a CCD section in the format [1:NCOL, 1:NROW] to python tuples"""
     slice_x, slice_y = section.strip("[]").split(",")
-    slice_x = list(map(lambda str: int(str) - 1, slice_x.split(":")))
-    slice_y = list(map(lambda str: int(str) - 1, slice_y.split(":")))
+    slice_x = list(map(lambda str: int(str), slice_x.split(":")))
+    slice_y = list(map(lambda str: int(str), slice_y.split(":")))
+    slice_x[0] -= 1
+    slice_y[0] -= 1
     return slice_x, slice_y
 
 
