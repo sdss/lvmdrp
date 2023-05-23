@@ -2689,15 +2689,15 @@ def preprocRawFrame_drp(
     org_header = org_image._header
     # assume imagetyp or not
     if assume_imagetyp:
-        log.info(f"assuming IMAGETYP = '{assume_imagetyp}'")
+        log.warning(f"assuming IMAGETYP = '{assume_imagetyp}'")
         org_header["IMAGETYP"] = assume_imagetyp
     elif "IMAGETYP" not in org_header:
-        log.error("keyword IMAGETYP not found in header. Assuming IMAGETYP = 'object'")
-        org_header["IMAGETYP"] = "object"
-    else:
-        log.info(
-            f"pre-processing frame {in_image} of IMAGETYP = '{org_header['IMAGETYP']}'"
+        log.error(
+            f"IMAGETYP not found in header. Assuming IMAGETYP = {DEFAULT_IMAGETYP}"
         )
+        org_header["IMAGETYP"] = DEFAULT_IMAGETYP
+    else:
+        log.info(f"using header IMAGETYP = '{org_header['IMAGETYP']}'")
 
     # extract TRIMSEC or assume default value
     if assume_trimsec:
@@ -2719,17 +2719,18 @@ def preprocRawFrame_drp(
         os_sec = iter(DEFAULT_BIASSEC)
     else:
         os_sec = org_header["BIASSEC?"].values()
+        log.info(f"using header BIASSEC = {org_header['BIASSEC?']}")
 
     # extract gain
     gain = numpy.ones(NQUADS)
     if assume_gain:
-        log.info(f"using given GAIN = {assume_gain}")
+        log.info(f"using given GAIN = {assume_gain} (e-/ADU)")
         gain = numpy.asarray(assume_gain)
     elif not org_header[f"{gain_prefix}?"]:
-        log.warning(f"assuming GAIN = {gain.tolist()}")
+        log.warning(f"assuming GAIN = {gain.tolist()} (e-/ADU)")
     else:
         gain = numpy.asarray(list(org_header[f"{gain_prefix}?"].values()))
-        log.info(f"using header GAIN = {gain.tolist()}")
+        log.info(f"using header GAIN = {gain.tolist()} (e-/ADU)")
 
     # initialize overscan stats, quadrants lists and, gains and rnoise
     os_bias_med, os_bias_std = numpy.zeros(NQUADS), numpy.zeros(NQUADS)
@@ -2737,77 +2738,40 @@ def preprocRawFrame_drp(
     # process each quadrant
     for i, (sc_xy, os_xy) in enumerate(zip(sc_sec, os_sec)):
         # get overscan and science quadrant
-        sc_quad = org_image.getSection(section=sc_xy)
-        os_quad = org_image.getSection(section=os_xy)
+        sc_quad = org_image.getSection(section=sc_xy) * gain[i]
+        os_quad = org_image.getSection(section=os_xy) * gain[i]
         # compute overscan stats
         os_bias_med[i] = numpy.nanmedian(os_quad._data)
         os_bias_std[i] = numpy.nanstd(os_quad._data)
         log.info(
             f"median and standard deviation in OS quadrant {i+1}: "
-            f"{os_bias_med[i]:.2f} +/- {os_bias_std[i]:.2f} (ADU)"
+            f"{os_bias_med[i]:.2f} +/- {os_bias_std[i]:.2f} (e-)"
         )
         # subtract overscan bias from image if requested
         if subtract_overscan:
             sc_quad -= os_bias_med[i]
 
         # convert to electron
-        sc_quads.append(sc_quad * gain[i])
-        os_quads.append(os_quad * gain[i])
+        sc_quads.append(sc_quad)
+        os_quads.append(os_quad)
 
     # extract rdnoise
     rdnoise = os_bias_std * gain
     if assume_rdnoise:
-        log.info(f"using given RDNOISE = {assume_rdnoise}")
+        log.info(f"using given RDNOISE = {assume_rdnoise} (e-)")
         rdnoise = numpy.asarray(assume_rdnoise)
     elif not org_header[f"{rdnoise_prefix}?"]:
-        log.warning(f"assuming RDNOISE = {rdnoise.tolist()}")
+        log.warning(f"assuming RDNOISE = {rdnoise.tolist()} (e-)")
     else:
         rdnoise = numpy.asarray(list(org_header[f"{rdnoise_prefix}?"].values()))
-        log.info(f"using header RDNOISE = {rdnoise.tolist()}")
-
-    # plot overscan strips along X and Y axes
-    if plot:
-        fig, axs = plt.subplots(2, 1, figsize=(20, 10), sharex=True, sharey=True)
-        axs = axs.flatten()
-        axs[-1].set_xlabel("X (pixel)")
-
-        os_ab = glueImages(os_quads[:2], positions=["00", "10"])
-        os_cd = glueImages(os_quads[2:], positions=["00", "10"])
-        for i, os_quad in enumerate([os_ab, os_cd]):
-            plot_strips(os_quad, axis=0, nstrip=1, ax=axs[i])
-        if plot == 1:
-            plt.show()
-        else:
-            save_fig(
-                fig,
-                output_path=out_image,
-                figure_path=figure_path,
-                label="preproc_strips_x",
-            )
-
-        fig, axs = plt.subplots(2, 1, figsize=(20, 10), sharex=True, sharey=True)
-        axs = axs.flatten()
-        axs[-1].set_xlabel("Y (pixel)")
-
-        os_ac = glueImages(os_quads[::2], positions=["00", "01"])
-        os_bd = glueImages(os_quads[1::2], positions=["00", "01"])
-        for i, os_quad in enumerate([os_ac, os_bd]):
-            plot_strips(os_quad, axis=1, nstrip=1, ax=axs[i])
-        if plot == 1:
-            plt.show()
-        else:
-            save_fig(
-                fig,
-                output_path=out_image,
-                figure_path=figure_path,
-                label="preproc_strips_y",
-            )
+        log.info(f"using header RDNOISE = {rdnoise.tolist()} (e-)")
 
     # orient quadrants as requested
     [quad.orientImage(orient[i]) for i, quad in enumerate(sc_quads)]
 
     # join images
     QUAD_POSITIONS = ["01", "11", "00", "10"]
+    print([quad._data.shape for quad in sc_quads])
     preproc_image = glueImages(sc_quads, positions=QUAD_POSITIONS)
     preproc_image.setHeader(org_image.getHeader())
     # update/set unit
@@ -2854,14 +2818,14 @@ def preprocRawFrame_drp(
         preproc_image.setHdrValue(
             f"HIERARCH AMP{i+1} OVERSCAN",
             os_bias_med[i],
-            f"Overscan median of amp. {i+1} [adu]",
+            f"Overscan median of amp. {i+1} [electron]",
         )
     # add bias std of overscan region for the different subimages (CCDs/Amplifiers)
     for i in range(NQUADS):
         preproc_image.setHdrValue(
             f"HIERARCH AMP{i+1} OVERSCAN_STD",
             os_bias_std[i],
-            f"Overscan std of amp. {i+1} [adu]",
+            f"Overscan std of amp. {i+1} [electron]",
         )
 
     # load master pixel mask
@@ -2894,6 +2858,45 @@ def preprocRawFrame_drp(
     # write out FITS file
     log.info(f"writing output image to {os.path.basename(out_image)}")
     preproc_image.writeFitsData(out_image)
+
+    # plot overscan strips along X and Y axes
+    log.info("plotting results")
+    if plot:
+        fig, axs = plt.subplots(2, 1, figsize=(20, 10), sharex=True, sharey=True)
+        axs = axs.flatten()
+        axs[-1].set_xlabel("X (pixel)")
+
+        os_ab = glueImages(os_quads[:2], positions=["00", "10"])
+        os_cd = glueImages(os_quads[2:], positions=["00", "10"])
+        for i, os_quad in enumerate([os_ab, os_cd]):
+            plot_strips(os_quad, axis=0, nstrip=1, ax=axs[i])
+        if plot == 1:
+            plt.show()
+        else:
+            save_fig(
+                fig,
+                output_path=out_image,
+                figure_path=figure_path,
+                label="preproc_strips_x",
+            )
+
+        fig, axs = plt.subplots(2, 1, figsize=(20, 10), sharex=True, sharey=True)
+        axs = axs.flatten()
+        axs[-1].set_xlabel("Y (pixel)")
+
+        os_ac = glueImages(os_quads[::2], positions=["00", "01"])
+        os_bd = glueImages(os_quads[1::2], positions=["00", "01"])
+        for i, os_quad in enumerate([os_ac, os_bd]):
+            plot_strips(os_quad, axis=1, nstrip=1, ax=axs[i])
+        if plot == 1:
+            plt.show()
+        else:
+            save_fig(
+                fig,
+                output_path=out_image,
+                figure_path=figure_path,
+                label="preproc_strips_y",
+            )
 
 
 def basicCalibration_drp(
