@@ -939,6 +939,8 @@ def correctPixTable_drp(
     rss.writeFitsData(out_rss)
 
 
+# TODO: aplicar correccion a la solucion de longitud de onda comparando lineas de cielo
+# TODO: hacer esto antes de hacer el rasampling en wl
 def resampleWave_drp(
     in_rss,
     out_rss,

@@ -691,6 +691,13 @@ def addCCDMask_drp(image, mask, replaceError="1e10"):
     img.writeFitsData(image)
 
 
+# TODO: en un frame de ciencia colapsar 100 columnas centrales y correr la deteccion de picos
+# TODO: comparar con picos del fiberflat, medir shift en las mismas 100 columnas
+# TODO: tener en cuenta stretching, no solo cc
+# TODO: agregar informacion del fibermap en la salida de esta funcion
+# TODO: independientemente de cuantas fibras se detecten, el output tiene que tener todas las fibras + flags
+# TODO: agregar informacion de posicion de las fibras al fibermap, para usar como referencia
+# esta funcion se corre solo una vez o con frecuencia baja
 def findPeaksAuto_drp(
     in_image,
     out_peaks,
@@ -1221,6 +1228,9 @@ def findPeaksMaster2_drp(
         plt.show()
 
 
+# TODO: guardar tabla con los pixeles usados en el trazado (antes del fitting)
+# TODO: guardar polinomio evaluado (con buen muestreo)
+# TODO: graficar los coeficientes versus los puntos usados en el ajuste polinomial
 def tracePeaks_drp(
     in_image,
     in_peaks,
