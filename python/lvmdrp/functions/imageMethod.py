@@ -2617,7 +2617,6 @@ def preprocRawFrame_drp(
     assume_rdnoise="",
     gain_prefix="GAIN",
     rdnoise_prefix="RDNOISE",
-    orientation="S,S,S,S",
     subtract_overscan="1",
     replace_with_nan="0",
     plot="2",
@@ -2634,51 +2633,38 @@ def preprocRawFrame_drp(
         - computes the saturated pixel mask
         - optionally propagates the "dead" and "hot" pixels mask to the final frame
 
-
     Parameters
     ----------
     in_image : str
-        input raw frame
+        input raw frame path
     out_image : str
-        preprcessed frame
+        output preprocessed frame path
     in_mask : str, optional
-        pixel mask considering dead pixels and hot pixels, by default ""
-    positions : str, optional
-        positions of each quadrant in the frame, by default "00,10,01,11"
-    orientation : str, optional
-        orientation of each quadrant in the frame, by default "S,S,S,S"
-    subtract_overscan : str, optional
-        whether to compute an average bias from the overscan region and subtract it or not, by default "1"
-    os_bound_x : str, optional
-        overscan boundary in the X direction, by default ""
-    os_bound_y : str, optional
-        overscan boundary in the Y direction, by default ""
-    assume_gain : str, optional
-        assume gain values if not in the header, by default "1.0"
-    assume_rdnoise : str, optional
-        assume read noise values if not in the header, by default "5"
-    gain_prefix : str, optional
-        prefix of the gain key in the header, by default "GAIN"
-    rdnoise_prefix : str, optional
-        prefix of the read key noise in the header, by default "RDNOISE"
+        input pixel mask path, by default ""
     assume_imagetyp : str, optional
-        overwrite IIMAGETYP in the header to this value even if present, by default ""
+        whether to assume this image type or use the one in header, by default ""
+    assume_trimsec : str, optional
+        useful data section for each quadrant, by default ""
+    assume_biassec : str, optional
+        overscan section for each quadrant, by default ""
+    assume_gain : str, optional
+        gain values for each quadrant, by default ""
+    assume_rdnoise : str, optional
+        read noise for each quadrant, by default ""
+    gain_prefix : str, optional
+        gain keyword prefix, by default "GAIN"
+    rdnoise_prefix : str, optional
+        read noise keyword prefix, by default "RDNOISE"
+    subtract_overscan : str, optional
+        whether to subtract the overscan median for each quadrant or not, by default "1"
     replace_with_nan : str, optional
-        whether to replace badpixels with NaNs in the data and the error extensions or not, by default 0
+        whether to replace masked pixels with NaNs or not, by default "0"
     plot : str, optional
-        plot preprocessed frame, by default "2"
+        plotting mode, by default "2"
     figure_path : str, optional
-        store plots in this folder, by default ".figures"
+        directory where figures will be saved, by default "qa"
     """
-    # TODO: add ability to pass rdnoise and gain values for each quadrant (instead of just one for all quadrants, as it is now)
-    # TODO: add ability to pass OS regions in FITS formats for each quadrant
-    # TODO: maybe add the same functionality for the DATASEC/TRIMSEC? (although I've been using only TRIMSEC which is more explicit in the raw frames header)
-    # TODO: change default units from 'adu' to 'electron'
-    # TODO: change default figures_path from '.figures' to 'qa', this is consistent with past iterations of the SDSS (e.g. MaNGA), as I understand
-    # TODO: specify the data sections for each quadrant (hardcoded in this function for now)
-
     # convert input parameters to proper type
-    orient = orientation.split(",")
     subtract_overscan = bool(int(subtract_overscan))
     replace_with_nan = bool(int(replace_with_nan))
     plot = int(plot)
@@ -2733,6 +2719,7 @@ def preprocRawFrame_drp(
         log.info(f"using header GAIN = {gain.tolist()} (e-/ADU)")
 
     # initialize overscan stats, quadrants lists and, gains and rnoise
+    # TODO: calcular la mediana de la RMS en el corte en Y para manejar mejor los outliers
     os_bias_med, os_bias_std = numpy.zeros(NQUADS), numpy.zeros(NQUADS)
     sc_quads, os_quads = [], []
     # process each quadrant
@@ -2765,9 +2752,6 @@ def preprocRawFrame_drp(
     else:
         rdnoise = numpy.asarray(list(org_header[f"{rdnoise_prefix}?"].values()))
         log.info(f"using header RDNOISE = {rdnoise.tolist()} (e-)")
-
-    # orient quadrants as requested
-    [quad.orientImage(orient[i]) for i, quad in enumerate(sc_quads)]
 
     # join images
     QUAD_POSITIONS = ["01", "11", "00", "10"]
@@ -2859,6 +2843,7 @@ def preprocRawFrame_drp(
     preproc_image.writeFitsData(out_image)
 
     # plot overscan strips along X and Y axes
+    # TODO: plot por cuadrante, graficar la mediana del OS y el read noise
     log.info("plotting results")
     if plot:
         fig, axs = plt.subplots(2, 1, figsize=(20, 10), sharex=True, sharey=True)
