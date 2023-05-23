@@ -22,9 +22,9 @@ NQUADS = 4
 DEFAULT_IMAGETYP = "object"
 DEFAULT_TRIMSEC = [
     "[1:2043, 2041:4080]",
-    "[2044:4086, 2041:4080]",
+    "[2078:4120, 2041:4080]",
     "[1:2043, 1:2040]",
-    "[2044:4086, 1:2040]",
+    "[2078:4120, 1:2040]",
 ]
 DEFAULT_BIASSEC = [
     "[2044:2060, 2041:4080]",
@@ -2771,7 +2771,6 @@ def preprocRawFrame_drp(
 
     # join images
     QUAD_POSITIONS = ["01", "11", "00", "10"]
-    print([quad._data.shape for quad in sc_quads])
     preproc_image = glueImages(sc_quads, positions=QUAD_POSITIONS)
     preproc_image.setHeader(org_image.getHeader())
     # update/set unit
