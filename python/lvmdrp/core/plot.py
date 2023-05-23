@@ -45,8 +45,8 @@ def plot_strips(image, axis, nstrip, ax, mu_stat=np.median, sg_stat=np.std):
     data = image._data
     width = (data.shape[0] if axis == 1 else data.shape[1]) // nstrip
     for i in range(nstrip):
-        strip_mu = mu_stat(image._data[i * width : (i + 1) * width], axis=axis)
-        strip_sg = sg_stat(image._data[i * width : (i + 1) * width], axis=axis)
+        strip_mu = mu_stat(data[i * width : (i + 1) * width], axis=axis)
+        strip_sg = sg_stat(data[i * width : (i + 1) * width], axis=axis)
 
         pixels = np.arange(strip_mu.size)
         ax.fill_between(
