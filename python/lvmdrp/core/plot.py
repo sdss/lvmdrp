@@ -15,7 +15,7 @@ import numpy as np
 plt.style.use("seaborn-v0_8-talk")
 
 
-def plot_strips(image, axis, nstrip, ax, mu_stat=np.median, sg_stat=np.std):
+def plot_strips(image, axis, nstrip, ax, mu_stat=np.median, sg_stat=np.std, n_sg=1):
     """plots a number of strips of the image along a given direction
 
     given an image, a number of strips, and central and deviation statistics,
@@ -36,6 +36,8 @@ def plot_strips(image, axis, nstrip, ax, mu_stat=np.median, sg_stat=np.std):
         the function to compute the central statistic, by default np.median
     sg_stat : function, optional
         the function to compute the deviation statistic, by default np.std
+    n_sg : int, optional
+        the number of deviations from the median to plot, by default 1
 
     Returns
     -------
@@ -51,8 +53,8 @@ def plot_strips(image, axis, nstrip, ax, mu_stat=np.median, sg_stat=np.std):
         pixels = np.arange(strip_mu.size)
         ax.fill_between(
             pixels,
-            strip_mu - 2 * strip_sg,
-            strip_mu + 2 * strip_sg,
+            strip_mu - n_sg * strip_sg,
+            strip_mu + n_sg * strip_sg,
             step="pre",
             lw=0,
             fc="tab:blue",
