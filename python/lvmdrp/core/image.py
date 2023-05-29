@@ -1556,6 +1556,7 @@ class Image(Header):
         return data, error, mask
 
     def extractSpecOptimal(self, TraceMask, TraceFWHM, plot=-1):
+        # initialize RSS arrays
         data = numpy.zeros((TraceMask._fibers, self._dim[1]), dtype=numpy.float32)
         if self._error is not None:
             error = numpy.zeros((TraceMask._fibers, self._dim[1]), dtype=numpy.float32)
@@ -1563,23 +1564,37 @@ class Image(Header):
             error = None
         mask = numpy.zeros((TraceMask._fibers, self._dim[1]), dtype="bool")
 
+        # convert FWHM trace to sigma
         TraceFWHM = TraceFWHM / 2.354
 
         for i in range(self._dim[1]):
+            # get i-column from image and trace
             slice_img = self.getSlice(i, axis="y")
             slice_trace = TraceMask.getSlice(i, axis="y")
             trace = slice_trace[0]
-            bad_fiber = numpy.logical_or(
-                (slice_trace[2] == 1),
-                numpy.logical_or(
-                    slice_trace[0] < 0, slice_trace[0] > len(slice_img._data) - 1
-                ),
+
+            # define fiber mask
+            bad_fiber = (slice_trace[2] == 1) | (
+                (slice_trace[0] < 0) | slice_trace[0] > len(slice_img._data) - 1
             )
-            good_fiber = numpy.logical_not(bad_fiber)
+            # bad_fiber = numpy.logical_or(
+            #     (slice_trace[2] == 1),
+            #     numpy.logical_or(
+            #         slice_trace[0] < 0, slice_trace[0] > len(slice_img._data) - 1
+            #     ),
+            # )
+            good_fiber = ~bad_fiber
+
+            # get i-column from FWHM trace
             fwhm = TraceFWHM.getSlice(i, axis="y")[0]
+
+            # set NaNs to zero in image slice
             select_nan = numpy.isnan(slice_img._data)
             slice_img._data[select_nan] = 0
+
+            # define fiber index
             indices = numpy.indices((self._dim[0], numpy.sum(good_fiber)))
+            # measure flux along the given columns
             if i == plot:
                 result = slice_img.obtainGaussFluxPeaks(
                     trace[good_fiber], fwhm[good_fiber], indices, plot=True
