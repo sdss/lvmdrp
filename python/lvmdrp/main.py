@@ -25,7 +25,7 @@ from lvmdrp.utils.decorators import validate_fibers
 # TODO: define values in this dictionary as strings and move it to the constants module
 REDUCTION_METHODS = {
     "pre": imageMethod.preprocRawFrame_drp,
-    "calib": imageMethod.basicCalibration_drp,
+    "calib": imageMethod.detrendFrame_drp,
     "cosmic": imageMethod.LACosmic_drp,
     "peaks": imageMethod.findPeaksAuto_drp,
     "trace": imageMethod.tracePeaks_drp,

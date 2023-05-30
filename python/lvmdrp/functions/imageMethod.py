@@ -50,7 +50,7 @@ __all__ = [
     "traceFWHM_drp",
     "extractSpec_drp",
     "preprocRawFrame_drp",
-    "basicCalibration_drp",
+    "detrendFrame_drp",
     "createMasterFrame_drp",
 ]
 
@@ -2958,24 +2958,38 @@ def preprocRawFrame_drp(
         )
 
 
-def basicCalibration_drp(
+def detrendFrame_drp(
     in_image, out_image, in_bias=None, in_dark=None, in_pixelflat=None
 ):
-    # TODO: Change name from "calibration" to "detrending"
+    """detrends input image by subtracting bias, dark and flatfielding
+
+    Parameters
+    ----------
+    in_image : str
+        path to input image
+    out_image : str
+        path to output detrended image
+    in_bias : str, optional
+        path to bias frame, by default None
+    in_dark : str, optional
+        path to dark frame, by default None
+    in_pixelflat : str, optional
+        path to pixelflat frame, by default None
+    """
     # TODO: Normalization of flats. This is for combining them right? Need to make sure median is not dominated by diferences in background. We need bright pixels on fiber cores to be scaled to the same level.
     # TODO: Confirm that dark is not being flat fielded in current logic
     # TODO: What is the difference between "flat" and "flatfield"? Pixel flats should not be pixel flatted but regular flats (dome and twilight) yes.
-    # TODO: Bad Pixel Mask: you should look for two types of bad pixels in two different frames: "hot pixels", for which you co-add all your bias subtracted darks, no matter the exposure time, and look for pixels that stand out of their local background. And "low QE pixels", for which you look for local outliers with respect to the local background in a master pixel flat.
+    # TODO: Bad Pixel Mask: you should look for two types of bad pixels in two different frames:
+    # "hot pixels", for which you co-add all your bias subtracted darks, no matter the exposure time, and look for pixels that stand out of their local background.
+    # And "low QE pixels", for which you look for local outliers with respect to the local background in a master pixel flat.
     proc_image = loadImage(in_image)
     exptime = proc_image._header["EXPTIME"]
     img_type = proc_image._header["IMAGETYP"].lower()
     log.info(
-        (
-            "target frame parameters: "
-            f"MJD = {proc_image._header['MJD']}, "
-            f"exptime = {proc_image._header['EXPTIME']}, "
-            f"camera = {proc_image._header['CCD']}"
-        )
+        "target frame parameters: "
+        f"MJD = {proc_image._header['MJD']}, "
+        f"exptime = {proc_image._header['EXPTIME']}, "
+        f"camera = {proc_image._header['CCD']}"
     )
 
     # dummy calibration images
@@ -3029,10 +3043,8 @@ def basicCalibration_drp(
     calib_image._mask = numpy.logical_or(calib_image._mask, infpixels)
     # fix infinities & nans
     log.info(
-        (
-            f"replacing NaNs and infinities ({nanpixels.sum()} and "
-            f"{infpixels.sum()} pix) with zeros"
-        )
+        f"replacing NaNs and infinities ({nanpixels.sum()} and "
+        f"{infpixels.sum()} pix) with zeros"
     )
     # TODO: implement this replacement of bad pixels optionally
     calib_image._data = numpy.nan_to_num(calib_image._data, nan=0, posinf=0, neginf=0)
