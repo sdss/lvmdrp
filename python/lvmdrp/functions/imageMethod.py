@@ -8,10 +8,17 @@ import numpy
 from astropy.io import fits as pyfits
 from matplotlib import pyplot as plt
 from scipy import interpolate
+from scipy.stats import median_abs_deviation as mad
 from tqdm import tqdm
 
 from lvmdrp.core.fiberrows import FiberRows
-from lvmdrp.core.image import Image, combineImages, glueImages, loadImage
+from lvmdrp.core.image import (
+    Image,
+    combineImages,
+    glueImages,
+    loadImage,
+    _parse_ccd_section,
+)
 from lvmdrp.core.plot import plot_strips, save_fig
 from lvmdrp.core.rss import RSS
 from lvmdrp.core.spectrum1d import Spectrum1D
@@ -2268,13 +2275,13 @@ def extractSpec_drp(
             trace_fwhm.setData(data=numpy.ones(trace_mask._data.shape) * fwhm)
         except ValueError:
             trace_fwhm.loadFitsData(fwhm, extension_data=0)
-        
+
         # set up parallel run
         if parallel == "auto":
             fragments = multiprocessing.cpu_count()
         else:
             fragments = int(parallel)
-        
+
         # run extraction algorithm
         if fragments > 1:
             split_img = img.split(fragments)
@@ -2634,7 +2641,7 @@ def preprocRawFrame_drp(
     rdnoise_prefix="RDNOISE",
     subtract_overscan="1",
     replace_with_nan="0",
-    plot="2",
+    display_plots="0",
     figure_path="qa",
 ):
     """produces a preprocessed frame given a raw frame
@@ -2674,15 +2681,15 @@ def preprocRawFrame_drp(
         whether to subtract the overscan median for each quadrant or not, by default "1"
     replace_with_nan : str, optional
         whether to replace masked pixels with NaNs or not, by default "0"
-    plot : str, optional
-        plotting mode, by default "2"
+    display_plots : str, optional
+        whether to show plots on display or not, by default "0"
     figure_path : str, optional
         directory where figures will be saved, by default "qa"
     """
     # convert input parameters to proper type
     subtract_overscan = bool(int(subtract_overscan))
     replace_with_nan = bool(int(replace_with_nan))
-    plot = int(plot)
+    display_plots = bool(int(display_plots))
 
     # load image
     log.info(f"starting preprocessing of raw image '{os.path.basename(in_image)}'")
@@ -2703,23 +2710,23 @@ def preprocRawFrame_drp(
     # extract TRIMSEC or assume default value
     if assume_trimsec:
         log.info(f"using given TRIMSEC = {assume_trimsec}")
-        sc_sec = (sec for sec in assume_trimsec)
+        sc_sec = [sec for sec in assume_trimsec]
     elif not org_header["TRIMSEC?"]:
         log.warning(f"assuming TRIMSEC = {DEFAULT_TRIMSEC}")
-        sc_sec = iter(DEFAULT_TRIMSEC)
+        sc_sec = DEFAULT_TRIMSEC
     else:
-        sc_sec = org_header["TRIMSEC?"].values()
+        sc_sec = list(org_header["TRIMSEC?"].values())
         log.info(f"using header TRIMSEC = {org_header['TRIMSEC?']}")
 
     # extract BIASSEC or assume default value
     if assume_biassec:
         log.info(f"using given BIASSEC = {assume_biassec}")
-        os_sec = (sec for sec in assume_biassec)
+        os_sec = [sec for sec in assume_biassec]
     elif not org_header["BIASSEC?"]:
         log.warning(f"assuming BIASSEC = {DEFAULT_BIASSEC}")
-        os_sec = iter(DEFAULT_BIASSEC)
+        os_sec = DEFAULT_BIASSEC
     else:
-        os_sec = org_header["BIASSEC?"].values()
+        os_sec = list(org_header["BIASSEC?"].values())
         log.info(f"using header BIASSEC = {org_header['BIASSEC?']}")
 
     # extract gain
@@ -2743,8 +2750,8 @@ def preprocRawFrame_drp(
         sc_quad = org_image.getSection(section=sc_xy) * gain[i]
         os_quad = org_image.getSection(section=os_xy) * gain[i]
         # compute overscan stats
-        os_bias_med[i] = numpy.nanmedian(os_quad._data)
-        os_bias_std[i] = numpy.nanstd(os_quad._data)
+        os_bias_med[i] = numpy.median(os_quad._data)
+        os_bias_std[i] = numpy.std(os_quad._data)
         log.info(
             f"median and standard deviation in OS quadrant {i+1}: "
             f"{os_bias_med[i]:.2f} +/- {os_bias_std[i]:.2f} (e-)"
@@ -2860,42 +2867,81 @@ def preprocRawFrame_drp(
     # plot overscan strips along X and Y axes
     # TODO: plot por cuadrante, graficar la mediana del OS y el read noise
     log.info("plotting results")
-    if plot:
-        fig, axs = plt.subplots(2, 1, figsize=(20, 10), sharex=True, sharey=True)
+    if display_plots:
+        # show column between ac and bd
+        fig, axs = plt.subplots(2, 1, figsize=(15, 10), sharex=True, sharey=False)
         axs = axs.flatten()
         axs[-1].set_xlabel("X (pixel)")
+        fig.supylabel("median counts (e-)")
+        fig.suptitle("overscan cut along X-axis", size="xx-large")
 
         os_ab = glueImages(os_quads[:2], positions=["00", "10"])
         os_cd = glueImages(os_quads[2:], positions=["00", "10"])
         for i, os_quad in enumerate([os_ab, os_cd]):
-            plot_strips(os_quad, axis=0, nstrip=1, ax=axs[i])
-        if plot == 1:
-            plt.show()
-        else:
-            save_fig(
-                fig,
-                output_path=out_image,
-                figure_path=figure_path,
-                label="preproc_strips_x",
-            )
+            plot_strips(os_quad, axis=0, nstrip=1, ax=axs[i], labels=True)
+            os_x, os_y = _parse_ccd_section(list(os_sec)[0])
+            axs[i].axvline(os_x[1] - os_x[0], ls="--", color="0.5", lw=1)
+            axs[i].set_title(f"overscan for quadrants {['12','34'][i]}", loc="left")
+        save_fig(
+            fig,
+            output_path=out_image,
+            figure_path=figure_path,
+            label="os_strips_12-34_x",
+            close=not display_plots,
+        )
 
-        fig, axs = plt.subplots(2, 1, figsize=(20, 10), sharex=True, sharey=True)
+        # show median counts along Y-axis
+        fig, axs = plt.subplots(2, 1, figsize=(15, 10), sharex=True, sharey=False)
         axs = axs.flatten()
         axs[-1].set_xlabel("Y (pixel)")
-
+        fig.supylabel("median counts (e-)")
+        fig.suptitle("overscan cut along Y-axis", size="xx-large")
         os_ac = glueImages(os_quads[::2], positions=["00", "01"])
         os_bd = glueImages(os_quads[1::2], positions=["00", "01"])
         for i, os_quad in enumerate([os_ac, os_bd]):
-            plot_strips(os_quad, axis=1, nstrip=1, ax=axs[i])
-        if plot == 1:
-            plt.show()
-        else:
-            save_fig(
-                fig,
-                output_path=out_image,
-                figure_path=figure_path,
-                label="preproc_strips_y",
+            plot_strips(os_quad, axis=1, nstrip=1, ax=axs[i], labels=True)
+            os_x, os_y = _parse_ccd_section(list(os_sec)[0])
+            axs[i].axvline(os_y[1] - os_y[0], ls="--", color="0.5", lw=1)
+            axs[i].set_title(f"overscan for quadrants {['13','24'][i]}", loc="left")
+        save_fig(
+            fig,
+            output_path=out_image,
+            figure_path=figure_path,
+            label="os_strips_13-24_y",
+            close=not display_plots,
+        )
+
+        # show median counts for all quadrants along Y-axis
+        fig_strips, axs_strips = plt.subplots(4, 1, figsize=(15, 10), sharex=True)
+        axs_strips = axs_strips.flatten()
+        axs_strips[-1].set_xlabel("Y (pixel)")
+        fig_strips.supylabel("counts (e-)")
+        fig_strips.suptitle("median counts for all quadrants", size="xx-large")
+        for i, os_quad in enumerate(os_quads):
+            plot_strips(
+                os_quad,
+                axis=1,
+                nstrip=1,
+                ax=axs_strips[i],
+                mu_stat=numpy.median,
+                sg_stat=mad,
+                labels=True,
             )
+            axs_strips[i].axhline(
+                numpy.median(os_quad._data.flatten()) + rdnoise[i],
+                ls="--",
+                color="tab:purple",
+                lw=1,
+                label=f"median + {rdnoise_prefix}",
+            )
+            axs_strips[i].set_title(f"median counts for quadrant {i+1}", loc="left")
+        save_fig(
+            fig,
+            output_path=out_image,
+            figure_path=figure_path,
+            label="os_strips",
+            close=not display_plots,
+        )
 
 
 def basicCalibration_drp(

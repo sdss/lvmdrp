@@ -15,7 +15,9 @@ import numpy as np
 plt.style.use("seaborn-v0_8-talk")
 
 
-def plot_strips(image, axis, nstrip, ax, mu_stat=np.median, sg_stat=np.std, n_sg=1):
+def plot_strips(
+    image, axis, nstrip, ax, mu_stat=np.median, sg_stat=np.std, n_sg=1, labels=False
+):
     """plots a number of strips of the image along a given direction
 
     given an image, a number of strips, and central and deviation statistics,
@@ -38,6 +40,8 @@ def plot_strips(image, axis, nstrip, ax, mu_stat=np.median, sg_stat=np.std, n_sg
         the function to compute the deviation statistic, by default np.std
     n_sg : int, optional
         the number of deviations from the median to plot, by default 1
+    labels : bool, optional
+        whether to show or not the plot legend, by default False
 
     Returns
     -------
@@ -55,12 +59,20 @@ def plot_strips(image, axis, nstrip, ax, mu_stat=np.median, sg_stat=np.std, n_sg
             pixels,
             strip_mu - n_sg * strip_sg,
             strip_mu + n_sg * strip_sg,
-            step="pre",
+            step="post",
             lw=0,
             fc="tab:blue",
             alpha=0.5,
+            label=f"{mu_stat}" if labels else None,
         )
-        ax.step(pixels, strip_mu, color="tab:red", lw=1)
+        ax.step(
+            pixels,
+            strip_mu,
+            where="post",
+            color="tab:red",
+            lw=1,
+            label=f"{sg_stat}" if labels else None,
+        )
 
     return ax
 
@@ -90,5 +102,7 @@ def save_fig(fig, output_path, figure_path=None, label=None, fmt="png", close=Tr
     fig.savefig(fig_path, bbox_inches="tight")
     if close:
         plt.close(fig)
+    else:
+        plt.show()
 
     return fig_path
