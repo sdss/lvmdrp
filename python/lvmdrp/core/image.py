@@ -1,4 +1,5 @@
 import numpy
+from copy import deepcopy as copy
 from astropy.io import fits as pyfits
 
 from lvmdrp.core.apertures import Apertures
@@ -102,7 +103,7 @@ class Image(Header):
                     origin=self._origin,
                 )
                 return img
-            except:
+            except Exception:
                 # raise exception if the type are not matching in general
                 raise TypeError(
                     "unsupported operand type(s) for +: %s and %s"
@@ -180,7 +181,7 @@ class Image(Header):
                     origin=self._origin,
                 )
                 return img
-            except:
+            except Exception:
                 # raise exception if the type are not matching in general
                 raise TypeError(
                     "unsupported operand type(s) for -: %s and %s"
@@ -271,7 +272,7 @@ class Image(Header):
                     origin=self._origin,
                 )
                 return img
-            except:
+            except Exception:
                 # raise exception if the type are not matching in general
                 raise TypeError(
                     "unsupported operand type(s) for /: %s and %s"
@@ -345,7 +346,7 @@ class Image(Header):
                     origin=self._origin,
                 )
                 return img
-            except:
+            except Exception:
                 # raise exception if the type are not matching in general
                 raise TypeError(
                     "unsupported operand type(s) for *: %s and %s"
@@ -392,26 +393,55 @@ class Image(Header):
         return Image(data=data, header=header, error=error, mask=mask)
 
     def setSection(self, section, subimg, update_header=False, inplace=True):
+        """replaces a section in the current frame with given subimage
+
+        this function will replace the information in `section` of the current
+        frame with the information contained in the `subimg`. If the current
+        frame does not contain an extension present in the `subimg`, it will be
+        created in the new frame, filling in the remaining sections with dummy
+        data. The rest of the sections will be kept if already present in the
+        original frame.
+
+        Parameters
+        ----------
+        section : str
+            CCD section for which to set the new subimage
+        subimg : lvmdrp.core.image.Image
+            subimage to be added to the current image
+        update_header : bool, optional
+            whether to update the header with `subimg` header, by default False
+        inplace : bool, optional
+            whether to create a copy of the current image or not, by default True
+
+        Returns
+        -------
+        lvmdrp.core.image.Image
+            image with the section information replaced by the given subimage
+        """
+        # initialize new image
+        if inplace:
+            new_image = self
+        else:
+            new_image = copy(self)
+
+        # parse frame section
         sec_x, sec_y = _parse_ccd_section(section)
 
-        new_image = (
-            self
-            if inplace
-            else Image(
-                data=self._data,
-                header=self._header,
-                mask=self._mask,
-                error=self._error,
-                origin=self._origin,
-            )
-        )
+        # create dummy mask and error images in case those are not in the original image
+        # and subimg contains that information
+        if new_image._mask is None and subimg._mask is not None:
+            new_image.setData(mask=numpy.zeros_like(new_image._data), inplace=True)
+        if new_image._error is None and subimg._error is not None:
+            new_image.setData(error=numpy.zeros_like(new_image._data), inplace=True)
 
+        # replace original image section with given subimg
         new_image._data[sec_y[0] : sec_y[1], sec_x[0] : sec_x[1]] = subimg._data
         if new_image._error is not None:
             new_image._error[sec_y[0] : sec_y[1], sec_x[0] : sec_x[1]] = subimg._error
         if new_image._mask is not None:
             new_image._mask[sec_y[0] : sec_y[1], sec_x[0] : sec_x[1]] = subimg._mask
 
+        # update header if needed
         if update_header:
             new_image._header.update(subimg._header)
 
@@ -569,48 +599,64 @@ class Image(Header):
                 numpy.arange(self._dim[0]), self._data[:, slice], error, mask
             )
 
-    def setData(self, data=None, error=None, mask=None, header=None, select=None):
-        """
-        Set data for an Image. Specific data values can replaced according to a specific selection.
+    def setData(
+        self, data=None, error=None, mask=None, header=None, select=None, inplace=True
+    ):
+        """sets data for the current frame
 
         Parameters
-        --------------
-        data : numpy.ndarray(float), optional with default = None
-            array corresponding to the data to be set
-        error : numpy.ndarray(float), optional with default = None
-            array corresponding to the data to be set
-        mask : numpy.ndarray(bool), optional with default = None
-            array corresponding to the bad pixel to be set
-        header : Header object, optional with default = None
-        select : numpy.ndarray(bool), optional with default = None
-            array defining the selection of pixel to be set
+        ----------
+        data : array_like, optional
+            image to be set in the `data` extension, by default None
+        error : array_like, optional
+            image to be set in the `error` extension, by default None
+        mask : array_like, optional
+            image to be set in the `mask` extension, by default None
+        header : lvmdrp.core.header.Header, optional
+            header object to be set, by default None
+        select : array_like, optional
+            boolean image to select pixels to be replaced, by default None
+        inplace : bool, optional
+            whether the original image is overwritten or not, by default True
 
+        Returns
+        -------
+        lvmdrp.core.image.Image
+            image with the given data replaced
         """
+        # initialize new image
+        if inplace:
+            new_image = self
+        else:
+            new_image = copy(self)
+
         # if not select given set the full image
         if select is None:
             if data is not None:
-                self._data = data  # set data if given
-                self._dim = data.shape  # set dimension
+                new_image._data = data  # set data if given
+                new_image._dim = data.shape  # set dimension
 
             if mask is not None:
-                self._mask = mask  # set mask if given
-                self._dim = mask.shape  # set dimension
+                new_image._mask = mask  # set mask if given
+                new_image._dim = mask.shape  # set dimension
 
             if error is not None:
-                self._error = error  # set mask if given
-                self._dim = error.shape  # set dimension
+                new_image._error = error  # set mask if given
+                new_image._dim = error.shape  # set dimension
             if header is not None:
-                self.setHeader(header)  # set header
+                new_image.setHeader(header)  # set header
         else:
             # with select definied only partial data are set
             if data is not None:
-                self._data[select] = data
+                new_image._data[select] = data
             if mask is not None:
-                self._mask[select] = mask
+                new_image._mask[select] = mask
             if error is not None:
-                self._error[select] = error
+                new_image._error[select] = error
             if header is not None:
-                self.setHeader(header)  # set header
+                new_image.setHeader(header)  # set header
+
+        return new_image
 
     def convertUnit(
         self, unit, assume="adu", gain_field="GAIN", assume_gain=1.0, inplace=True
@@ -629,8 +675,8 @@ class Image(Header):
             )
         )
         if current != unit:
-            gains = self._header[f"AMP? {gain_field}"]
-            sects = self._header[f"AMP? TRIMSEC"]
+            gains = self.getHdrValue[f"AMP? {gain_field}"]
+            sects = self.getHdrValue["AMP? TRIMSEC"]
             n_amp = len(gains)
             for i in range(n_amp):
                 factor = (
@@ -1257,14 +1303,14 @@ class Image(Header):
         """
         # convolve the data array with the 2D Gaussian convolution kernel
 
-        if self._mask is not None and mask == True:
+        if self._mask is not None and mask is True:
             mask_data = self._data[self._mask]
             self._data[self._mask] = 0
             gauss = ndimage.filters.gaussian_filter(
                 self._data, (sigma_y, sigma_x), mode=mode
             )
             scale = ndimage.filters.gaussian_filter(
-                (self._mask == False).astype("float32"), (sigma_y, sigma_x), mode=mode
+                (self._mask is False).astype("float32"), (sigma_y, sigma_x), mode=mode
             )
             new = gauss / scale
             self._data[self._mask] = mask_data
@@ -1394,7 +1440,7 @@ class Image(Header):
         x = x - numpy.mean(x)
         # if self._mask is not None:
         #    self._mask = numpy.logical_and(self._mask, numpy.logical_not(numpy.isnan(self._data)))
-        valid = self._mask.astype("bool") == False
+        valid = ~self._mask.astype("bool")
         # iterate over the image
         for i in range(slices):
             # decide on the bad pixel mask

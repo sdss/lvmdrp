@@ -8,7 +8,6 @@ import numpy
 from astropy.io import fits as pyfits
 from matplotlib import pyplot as plt
 from scipy import interpolate
-from scipy.stats import median_abs_deviation as mad
 from tqdm import tqdm
 
 from lvmdrp.core.fiberrows import FiberRows
