@@ -2741,7 +2741,6 @@ def preprocRawFrame_drp(
         log.info(f"using header GAIN = {gain.tolist()} (e-/ADU)")
 
     # initialize overscan stats, quadrants lists and, gains and rnoise
-    # TODO: calcular la mediana de la RMS en el corte en Y para manejar mejor los outliers
     os_bias_med, os_bias_std = numpy.zeros(NQUADS), numpy.zeros(NQUADS)
     sc_quads, os_quads = [], []
     # process each quadrant
@@ -2750,8 +2749,8 @@ def preprocRawFrame_drp(
         sc_quad = org_image.getSection(section=sc_xy) * gain[i]
         os_quad = org_image.getSection(section=os_xy) * gain[i]
         # compute overscan stats
-        os_bias_med[i] = numpy.median(os_quad._data)
-        os_bias_std[i] = numpy.std(os_quad._data)
+        os_bias_med[i] = numpy.median(os_quad._data, axis=None)
+        os_bias_std[i] = numpy.median(numpy.std(os_quad._data, axis=1), axis=None)
         log.info(
             f"median and standard deviation in OS quadrant {i+1}: "
             f"{os_bias_med[i]:.2f} +/- {os_bias_std[i]:.2f} (e-)"
@@ -2865,7 +2864,6 @@ def preprocRawFrame_drp(
     preproc_image.writeFitsData(out_image)
 
     # plot overscan strips along X and Y axes
-    # TODO: plot por cuadrante, graficar la mediana del OS y el read noise
     log.info("plotting results")
     if display_plots:
         # show column between ac and bd
@@ -2878,7 +2876,15 @@ def preprocRawFrame_drp(
         os_ab = glueImages(os_quads[:2], positions=["00", "10"])
         os_cd = glueImages(os_quads[2:], positions=["00", "10"])
         for i, os_quad in enumerate([os_ab, os_cd]):
-            plot_strips(os_quad, axis=0, nstrip=1, ax=axs[i], labels=True)
+            plot_strips(
+                os_quad,
+                axis=0,
+                nstrip=1,
+                ax=axs[i],
+                mu_stat=numpy.median,
+                sg_stat=lambda x, axis: numpy.median(numpy.std(x, axis=axis)),
+                labels=True,
+            )
             os_x, os_y = _parse_ccd_section(list(os_sec)[0])
             axs[i].axvline(os_x[1] - os_x[0], ls="--", color="0.5", lw=1)
             axs[i].set_title(f"overscan for quadrants {['12','34'][i]}", loc="left")
@@ -2899,7 +2905,15 @@ def preprocRawFrame_drp(
         os_ac = glueImages(os_quads[::2], positions=["00", "01"])
         os_bd = glueImages(os_quads[1::2], positions=["00", "01"])
         for i, os_quad in enumerate([os_ac, os_bd]):
-            plot_strips(os_quad, axis=1, nstrip=1, ax=axs[i], labels=True)
+            plot_strips(
+                os_quad,
+                axis=1,
+                nstrip=1,
+                ax=axs[i],
+                mu_stat=numpy.median,
+                sg_stat=lambda x, axis: numpy.median(numpy.std(x, axis=axis)),
+                labels=True,
+            )
             os_x, os_y = _parse_ccd_section(list(os_sec)[0])
             axs[i].axvline(os_y[1] - os_y[0], ls="--", color="0.5", lw=1)
             axs[i].set_title(f"overscan for quadrants {['13','24'][i]}", loc="left")
@@ -2924,7 +2938,7 @@ def preprocRawFrame_drp(
                 nstrip=1,
                 ax=axs_strips[i],
                 mu_stat=numpy.median,
-                sg_stat=mad,
+                sg_stat=lambda x, axis: numpy.median(numpy.std(x, axis=axis)),
                 labels=True,
             )
             axs_strips[i].axhline(
