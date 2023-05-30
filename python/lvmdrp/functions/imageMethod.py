@@ -2959,7 +2959,13 @@ def preprocRawFrame_drp(
 
 
 def detrendFrame_drp(
-    in_image, out_image, in_bias=None, in_dark=None, in_pixelflat=None
+    in_image,
+    out_image,
+    in_bias=None,
+    in_dark=None,
+    in_pixelflat=None,
+    calculate_error=True,
+    replace_nan=True,
 ):
     """detrends input image by subtracting bias, dark and flatfielding
 
@@ -2975,13 +2981,15 @@ def detrendFrame_drp(
         path to dark frame, by default None
     in_pixelflat : str, optional
         path to pixelflat frame, by default None
+    calculate_error : bool, optional
+        whether to calculate Poisson errors or not, by default True
+    replace_nan : bool, optional
+        whether to replace or not NaN values by zeros, by default True
     """
-    # TODO: Normalization of flats. This is for combining them right? Need to make sure median is not dominated by diferences in background. We need bright pixels on fiber cores to be scaled to the same level.
+    # TODO: Normalization of flats. This is for combining them right? Need to make sure median is not dominated by diferences in background.
+    # We need bright pixels on fiber cores to be scaled to the same level.
     # TODO: Confirm that dark is not being flat fielded in current logic
     # TODO: What is the difference between "flat" and "flatfield"? Pixel flats should not be pixel flatted but regular flats (dome and twilight) yes.
-    # TODO: Bad Pixel Mask: you should look for two types of bad pixels in two different frames:
-    # "hot pixels", for which you co-add all your bias subtracted darks, no matter the exposure time, and look for pixels that stand out of their local background.
-    # And "low QE pixels", for which you look for local outliers with respect to the local background in a master pixel flat.
     proc_image = loadImage(in_image)
     exptime = proc_image._header["EXPTIME"]
     img_type = proc_image._header["IMAGETYP"].lower()
@@ -3000,7 +3008,7 @@ def detrendFrame_drp(
     # read master bias
     if img_type in ["bias"] or (in_bias is None or not os.path.isfile(in_bias)):
         if in_bias and not os.path.isfile(in_bias):
-            log.warning(f"master bias '{in_bias}' not found")
+            log.error(f"master bias '{in_bias}' not found")
         master_bias = dummy_bias
     else:
         log.info(f"using bias calibration frame '{in_bias}'")
@@ -3009,7 +3017,7 @@ def detrendFrame_drp(
     # read master dark
     if img_type in ["bias", "dark"] or (in_dark is None or not os.path.isfile(in_dark)):
         if in_dark and not os.path.isfile(in_dark):
-            log.warning(f"master dark '{in_dark}' not found")
+            log.error(f"master dark '{in_dark}' not found")
         master_dark = dummy_dark
     else:
         log.info(f"using dark calibration frame '{in_dark}'")
@@ -3026,14 +3034,23 @@ def detrendFrame_drp(
         in_pixelflat is None or not os.path.isfile(in_pixelflat)
     ):
         if in_pixelflat and not os.path.isfile(in_pixelflat):
-            log.warning(f"master flat '{in_pixelflat}' not found")
+            log.error(f"master flat '{in_pixelflat}' not found")
         master_pixelflat = dummy_flat
     else:
         log.info(f"using pixelflat calibration frame '{in_pixelflat}'")
         master_pixelflat = loadImage(in_pixelflat)
 
-    # run basic calibration
-    calib_image = (proc_image - master_dark - master_bias) / master_pixelflat
+    # bias correct image
+    bcorr_image = proc_image - master_bias
+
+    # calculate Poisson errors
+    for i, quad_sec in enumerate(bcorr_image.getHdrValue("AMP? TRIMSEC")):
+        quad = bcorr_image.getSection(quad_sec)
+        quad.computePoissonError(quad.getHdrValue(f"AMP{i+1} RDNOISE"))
+        bcorr_image.setSection(section=quad_sec, subimg=quad)
+
+    # complete image detrending
+    calib_image = (proc_image - master_dark) / master_pixelflat
 
     # propagate pixel mask
     log.info("propagating pixel mask")
@@ -3046,11 +3063,16 @@ def detrendFrame_drp(
         f"replacing NaNs and infinities ({nanpixels.sum()} and "
         f"{infpixels.sum()} pix) with zeros"
     )
-    # TODO: implement this replacement of bad pixels optionally
-    calib_image._data = numpy.nan_to_num(calib_image._data, nan=0, posinf=0, neginf=0)
-    calib_image._error = numpy.nan_to_num(calib_image._error, nan=0, posinf=0, neginf=0)
+    if replace_nan:
+        calib_image._data = numpy.nan_to_num(
+            calib_image._data, nan=0, posinf=0, neginf=0
+        )
+        calib_image._error = numpy.nan_to_num(
+            calib_image._error, nan=0, posinf=0, neginf=0
+        )
 
     # normalize in case of flat calibration
+    # 'flat' and 'flatfield' are the imagetyp that a pixel flat can have
     if img_type == "flat" or img_type == "flatfield":
         calib_image = calib_image / numpy.median(calib_image._data)
 
@@ -3239,6 +3261,9 @@ def createPixelMask_drp(in_image, out_image, cen_stat="median", nstd=3):
     nstd : int, optional
         number of sigmas above which a pixel will be masked, by default 3
     """
+    # TODO: Bad Pixel Mask: you should look for two types of bad pixels in two different frames:
+    # "hot pixels", for which you co-add all your bias subtracted darks, no matter the exposure time, and look for pixels that stand out of their local background.
+    # And "low QE pixels", for which you look for local outliers with respect to the local background in a master pixel flat.
     image = loadImage(in_image)
 
     marray = numpy.ma.masked_array(image._data, mask=image._mask)
