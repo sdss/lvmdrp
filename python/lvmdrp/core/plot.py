@@ -9,10 +9,89 @@
 import os
 
 import matplotlib.pyplot as plt
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 import numpy as np
-
+from astropy.visualization import PercentileInterval, AsinhStretch, ImageNormalize
 
 plt.style.use("seaborn-v0_8-talk")
+
+
+def plot_image(
+    image, ax, title=None, use_mask=True, labels=True, colorbar=True, extension="data"
+):
+    """plots the given image, optionally specifying the extension of the same
+
+    Parameters
+    ----------
+    image : lvmdrp.core.image.Image
+        image from which to make a plot
+    ax : plt.Axes
+        _description_
+    title : str, optional
+        title of the axes, by default None
+    use_mask : bool, optional
+        whether to use masked arrays or not, by default True
+    labels : bool, optional
+        whether to display axes labels or not, by default True
+    colorbar : bool, optional
+        whether to show colorbar or not, by default True
+    extension : str, optional
+        image extension to plot, by default "data"
+
+    Returns
+    -------
+    plt.Axes
+        matplotlib axes containing the image
+
+    Raises
+    ------
+    ValueError
+        if the `extension` is not valid
+    """
+    # pick the extension image to plot
+    if extension == "data":
+        data = (
+            np.ma.masked_array(image._data, mask=image._mask)
+            if use_mask
+            else image._data
+        )
+    elif extension == "error":
+        data = (
+            np.ma.masked_array(image._error, mask=image._mask)
+            if use_mask
+            else image._error
+        )
+    elif extension == "mask":
+        data = image._mask
+    else:
+        raise ValueError(
+            f"invalid value for {extension = }. Choices are: 'data', 'error' and 'mask'"
+        )
+
+    norm = ImageNormalize(data, interval=PercentileInterval(95), stretch=AsinhStretch())
+    im = ax.imshow(
+        data,
+        cmap="binary",
+        norm=norm,
+        interpolation="none",
+        aspect="auto",
+    )
+
+    fig = ax.get_figure()
+    if labels:
+        fig.supxlabel("X (pixel)")
+        fig.supylabel("Y (pixel)")
+    if colorbar:
+        axins = inset_axes(ax, width="20%", height="3%", loc="upper right")
+        axins.xaxis.set_ticks_position("bottom")
+        cb = fig.colorbar(im, cax=axins, orientation="horizontal")
+        if labels:
+            cb.set_label("counts (e-)", size="x-small")
+
+    if title is not None:
+        ax.set_title(title, loc="left")
+
+    return ax
 
 
 def plot_strips(
