@@ -6,6 +6,7 @@ from multiprocessing import Pool, cpu_count
 
 import numpy
 from astropy.io import fits as pyfits
+from lacosmic import lacosmic
 from matplotlib import pyplot as plt
 from scipy import interpolate
 from tqdm import tqdm
@@ -18,7 +19,7 @@ from lvmdrp.core.image import (
     loadImage,
     _parse_ccd_section,
 )
-from lvmdrp.core.plot import plot_strips, save_fig
+from lvmdrp.core.plot import plot_strips, plot_image, save_fig
 from lvmdrp.core.rss import RSS
 from lvmdrp.core.spectrum1d import Spectrum1D
 from lvmdrp.core.tracemask import TraceMask
@@ -2959,11 +2960,15 @@ def preprocRawFrame_drp(
 def detrendFrame_drp(
     in_image,
     out_image,
-    in_bias=None,
-    in_dark=None,
-    in_pixelflat=None,
-    calculate_error=True,
-    replace_nan=True,
+    in_bias="",
+    in_dark="",
+    in_pixelflat="",
+    calculate_error="1",
+    replace_nan="1",
+    bg_box="10,10",
+    reject_cr="1",
+    display_plots="0",
+    figure_path="qa",
 ):
     """detrends input image by subtracting bias, dark and flatfielding
 
@@ -2974,16 +2979,32 @@ def detrendFrame_drp(
     out_image : str
         path to output detrended image
     in_bias : str, optional
-        path to bias frame, by default None
+        path to bias frame, by default ""
     in_dark : str, optional
-        path to dark frame, by default None
+        path to dark frame, by default ""
     in_pixelflat : str, optional
-        path to pixelflat frame, by default None
+        path to pixelflat frame, by default ""
     calculate_error : bool, optional
-        whether to calculate Poisson errors or not, by default True
+        whether to calculate Poisson errors or not, by default "1"
     replace_nan : bool, optional
-        whether to replace or not NaN values by zeros, by default True
+        whether to replace or not NaN values by zeros, by default "1"
+    bg_box : str, optional
+        box size for background determination using a median filter, by default (10,10)
+    reject_cr : bool, optional
+        whether to reject or not cosmic rays from detrended image, by default "1"
+    display_plots : str, optional
+        whether to show plots on display or not, by default "0"
+    figure_path : str, optional
+        directory where figures will be saved, by default "qa"
     """
+
+    calculate_error = bool(int(calculate_error))
+    replace_nan = bool(int(replace_nan))
+    bg_box = bg_box.split(",")
+    bg_box = (int(bg_box[0]), int(bg_box[1]))
+    reject_cr = bool(int(reject_cr))
+    display_plots = bool(int(display_plots))
+
     # TODO: Normalization of flats. This is for combining them right? Need to make sure median is not dominated by diferences in background.
     # We need bright pixels on fiber cores to be scaled to the same level.
     # TODO: Confirm that dark is not being flat fielded in current logic
@@ -3045,10 +3066,10 @@ def detrendFrame_drp(
     for i, quad_sec in enumerate(bcorr_image.getHdrValue("AMP? TRIMSEC")):
         quad = bcorr_image.getSection(quad_sec)
         quad.computePoissonError(quad.getHdrValue(f"AMP{i+1} RDNOISE"))
-        bcorr_image.setSection(section=quad_sec, subimg=quad)
+        bcorr_image.setSection(section=quad_sec, subimg=quad, inplace=True)
 
     # complete image detrending
-    calib_image = (proc_image - master_dark) / master_pixelflat
+    calib_image = (bcorr_image - master_dark) / master_pixelflat
 
     # propagate pixel mask
     log.info("propagating pixel mask")
@@ -3069,12 +3090,55 @@ def detrendFrame_drp(
             calib_image._error, nan=0, posinf=0, neginf=0
         )
 
+    # subtract background
+    bg_image = calib_image.medianImg(size=bg_box, use_mask=True)
+    calib_image = calib_image - bg_image
+
+    # reject cosmic rays
+    if reject_cr:
+        clean_array, cr_mask = lacosmic(
+            data=calib_image._data,
+            error=calib_image._error,
+            mask=calib_image._mask,
+            background=bg_image._data,
+            contrast=1.1,
+            cr_threshold=5,
+            neighbor_threshold=2,
+        )
+        clean_image = Image(data=clean_array, error=calib_image._error, mask=cr_mask)
+        calib_image.setData(mask=(calib_image._mask | clean_image._mask))
+    else:
+        clean_image = Image(data=numpy.ones_like(calib_image._data) * numpy.nan)
+
     # normalize in case of flat calibration
     # 'flat' and 'flatfield' are the imagetyp that a pixel flat can have
     if img_type == "flat" or img_type == "flatfield":
         calib_image = calib_image / numpy.median(calib_image._data)
 
+    # save detrended figure
+    log.info(f"saving detrended figure at '{out_image}'")
     calib_image.writeFitsData(out_image)
+
+    # show plots
+    log.info("plotting results")
+    fig, axs = plt.subplots(2, 3, figsize=(15, 10), sharex=True, sharey=True)
+    axs = axs.flatten()
+    plot_image(proc_image, ax=axs[0], title="original")
+    plot_image(bcorr_image, ax=axs[1], title="bias corrected")
+    plot_image(bcorr_image, ax=axs[2], title="error", extension="error")
+    plot_image(calib_image, ax=axs[3], title="detrended")
+    plot_image(bg_image, ax=axs[4], title="background")
+    plot_image(
+        clean_image, ax=axs[5], title=f"CR clean {reject_cr = }", extension="mask"
+    )
+    fig.tight_layout()
+    save_fig(
+        fig,
+        output_path=out_image,
+        figure_path=figure_path,
+        label="detrended",
+        close=not display_plots,
+    )
 
 
 def createMasterFrame_drp(
