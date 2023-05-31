@@ -3063,7 +3063,7 @@ def detrendFrame_drp(
     bcorr_image = proc_image - master_bias
 
     # calculate Poisson errors
-    for i, quad_sec in enumerate(bcorr_image.getHdrValue("AMP? TRIMSEC")):
+    for i, quad_sec in enumerate(bcorr_image.getHdrValue("AMP? TRIMSEC").values()):
         quad = bcorr_image.getSection(quad_sec)
         quad.computePoissonError(quad.getHdrValue(f"AMP{i+1} RDNOISE"))
         bcorr_image.setSection(section=quad_sec, subimg=quad, inplace=True)
