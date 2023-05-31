@@ -12,6 +12,7 @@ import re
 import shutil
 import struct
 import subprocess
+import time
 import sys
 import zipfile
 from datetime import datetime
@@ -148,13 +149,23 @@ def installESOSky_drp():
             "will overwrite existing files without further warning"
         )
         skycorr_installer.sendline("y")
-    skycorr_installer.wait()
+    # wait only if the process is still alive
+    i, imax = 0, 0.1 * 200
+    while skycorr_installer.isalive():
+        if i == imax:
+            sky_logger.warning("skycorr installer took too long, killing the process")
+            skycorr_installer.close(force=True)
+        if i == 0:
+            sky_logger.info("waiting for skycorr installation to finish")
+        time.sleep(0.1)
+        skycorr_installer.wait()
+        i += 1
     skycorr_installer.close()
 
     if skycorr_installer.exitstatus == 0:
         sky_logger.info("successfully installed skycorr")
     else:
-        sky_logger.error(f"error while installing skycorr")
+        sky_logger.error("error while installing skycorr")
 
     out = subprocess.run(
         f"{os.path.join(SKYCORR_INST_PATH, 'bin', 'skycorr')} {os.path.join(SKYCORR_INST_PATH, 'examples', 'config', 'sctest_sinfo_H.par')}".split(),
