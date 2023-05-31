@@ -2864,97 +2864,96 @@ def preprocRawFrame_drp(
 
     # plot overscan strips along X and Y axes
     log.info("plotting results")
-    if display_plots:
-        # show column between ac and bd
-        fig, axs = plt.subplots(2, 1, figsize=(15, 10), sharex=True, sharey=False)
-        axs = axs.flatten()
-        axs[-1].set_xlabel("X (pixel)")
-        fig.supylabel("median counts (e-)")
-        fig.suptitle("overscan cut along X-axis", size="xx-large")
+    # show column between ac and bd
+    fig, axs = plt.subplots(2, 1, figsize=(15, 10), sharex=True, sharey=False)
+    axs = axs.flatten()
+    axs[-1].set_xlabel("X (pixel)")
+    fig.supylabel("median counts (e-)")
+    fig.suptitle("overscan cut along X-axis", size="xx-large")
 
-        os_ab = glueImages(os_quads[:2], positions=["00", "10"])
-        os_cd = glueImages(os_quads[2:], positions=["00", "10"])
-        for i, os_quad in enumerate([os_ab, os_cd]):
-            plot_strips(
-                os_quad,
-                axis=0,
-                nstrip=1,
-                ax=axs[i],
-                mu_stat=numpy.median,
-                sg_stat=lambda x, axis: numpy.median(numpy.std(x, axis=axis)),
-                labels=True,
-            )
-            os_x, os_y = _parse_ccd_section(list(os_sec)[0])
-            axs[i].axvline(os_x[1] - os_x[0], ls="--", color="0.5", lw=1)
-            axs[i].set_title(f"overscan for quadrants {['12','34'][i]}", loc="left")
-        save_fig(
-            fig,
-            output_path=out_image,
-            figure_path=figure_path,
-            label="os_strips_12-34_x",
-            close=not display_plots,
+    os_ab = glueImages(os_quads[:2], positions=["00", "10"])
+    os_cd = glueImages(os_quads[2:], positions=["00", "10"])
+    for i, os_quad in enumerate([os_ab, os_cd]):
+        plot_strips(
+            os_quad,
+            axis=0,
+            nstrip=1,
+            ax=axs[i],
+            mu_stat=numpy.median,
+            sg_stat=lambda x, axis: numpy.median(numpy.std(x, axis=axis)),
+            labels=True,
         )
+        os_x, os_y = _parse_ccd_section(list(os_sec)[0])
+        axs[i].axvline(os_x[1] - os_x[0], ls="--", color="0.5", lw=1)
+        axs[i].set_title(f"overscan for quadrants {['12','34'][i]}", loc="left")
+    save_fig(
+        fig,
+        output_path=out_image,
+        figure_path=figure_path,
+        label="os_strips_12-34_x",
+        close=not display_plots,
+    )
 
-        # show median counts along Y-axis
-        fig, axs = plt.subplots(2, 1, figsize=(15, 10), sharex=True, sharey=False)
-        axs = axs.flatten()
-        axs[-1].set_xlabel("Y (pixel)")
-        fig.supylabel("median counts (e-)")
-        fig.suptitle("overscan cut along Y-axis", size="xx-large")
-        os_ac = glueImages(os_quads[::2], positions=["00", "01"])
-        os_bd = glueImages(os_quads[1::2], positions=["00", "01"])
-        for i, os_quad in enumerate([os_ac, os_bd]):
-            plot_strips(
-                os_quad,
-                axis=1,
-                nstrip=1,
-                ax=axs[i],
-                mu_stat=numpy.median,
-                sg_stat=lambda x, axis: numpy.median(numpy.std(x, axis=axis)),
-                labels=True,
-            )
-            os_x, os_y = _parse_ccd_section(list(os_sec)[0])
-            axs[i].axvline(os_y[1] - os_y[0], ls="--", color="0.5", lw=1)
-            axs[i].set_title(f"overscan for quadrants {['13','24'][i]}", loc="left")
-        save_fig(
-            fig,
-            output_path=out_image,
-            figure_path=figure_path,
-            label="os_strips_13-24_y",
-            close=not display_plots,
+    # show median counts along Y-axis
+    fig, axs = plt.subplots(2, 1, figsize=(15, 10), sharex=True, sharey=False)
+    axs = axs.flatten()
+    axs[-1].set_xlabel("Y (pixel)")
+    fig.supylabel("median counts (e-)")
+    fig.suptitle("overscan cut along Y-axis", size="xx-large")
+    os_ac = glueImages(os_quads[::2], positions=["00", "01"])
+    os_bd = glueImages(os_quads[1::2], positions=["00", "01"])
+    for i, os_quad in enumerate([os_ac, os_bd]):
+        plot_strips(
+            os_quad,
+            axis=1,
+            nstrip=1,
+            ax=axs[i],
+            mu_stat=numpy.median,
+            sg_stat=lambda x, axis: numpy.median(numpy.std(x, axis=axis)),
+            labels=True,
         )
+        os_x, os_y = _parse_ccd_section(list(os_sec)[0])
+        axs[i].axvline(os_y[1] - os_y[0], ls="--", color="0.5", lw=1)
+        axs[i].set_title(f"overscan for quadrants {['13','24'][i]}", loc="left")
+    save_fig(
+        fig,
+        output_path=out_image,
+        figure_path=figure_path,
+        label="os_strips_13-24_y",
+        close=not display_plots,
+    )
 
-        # show median counts for all quadrants along Y-axis
-        fig_strips, axs_strips = plt.subplots(4, 1, figsize=(15, 10), sharex=True)
-        axs_strips = axs_strips.flatten()
-        axs_strips[-1].set_xlabel("Y (pixel)")
-        fig_strips.supylabel("counts (e-)")
-        fig_strips.suptitle("median counts for all quadrants", size="xx-large")
-        for i, os_quad in enumerate(os_quads):
-            plot_strips(
-                os_quad,
-                axis=1,
-                nstrip=1,
-                ax=axs_strips[i],
-                mu_stat=numpy.median,
-                sg_stat=lambda x, axis: numpy.median(numpy.std(x, axis=axis)),
-                labels=True,
-            )
-            axs_strips[i].axhline(
-                numpy.median(os_quad._data.flatten()) + rdnoise[i],
-                ls="--",
-                color="tab:purple",
-                lw=1,
-                label=f"median + {rdnoise_prefix}",
-            )
-            axs_strips[i].set_title(f"median counts for quadrant {i+1}", loc="left")
-        save_fig(
-            fig,
-            output_path=out_image,
-            figure_path=figure_path,
-            label="os_strips",
-            close=not display_plots,
+    # show median counts for all quadrants along Y-axis
+    fig_strips, axs_strips = plt.subplots(4, 1, figsize=(15, 10), sharex=True)
+    axs_strips = axs_strips.flatten()
+    axs_strips[-1].set_xlabel("Y (pixel)")
+    fig_strips.supylabel("counts (e-)")
+    fig_strips.suptitle("median counts for all quadrants", size="xx-large")
+    for i, os_quad in enumerate(os_quads):
+        plot_strips(
+            os_quad,
+            axis=1,
+            nstrip=1,
+            ax=axs_strips[i],
+            mu_stat=numpy.median,
+            sg_stat=lambda x, axis: numpy.median(numpy.std(x, axis=axis)),
+            labels=True,
         )
+        axs_strips[i].axhline(
+            numpy.median(os_quad._data.flatten()) + rdnoise[i],
+            ls="--",
+            color="tab:purple",
+            lw=1,
+            label=f"median + {rdnoise_prefix}",
+        )
+        axs_strips[i].set_title(f"median counts for quadrant {i+1}", loc="left")
+    save_fig(
+        fig,
+        output_path=out_image,
+        figure_path=figure_path,
+        label="os_strips",
+        close=not display_plots,
+    )
 
 
 def detrendFrame_drp(
