@@ -10,7 +10,7 @@ from astropy.visualization import simple_norm
 from multiprocessing import Pool, cpu_count
 
 from astropy.modeling import fitting, models
-from scipy import ndimage
+from scipy import ndimage, signal
 
 
 def _parse_ccd_section(section):
@@ -1329,42 +1329,47 @@ class Image(Header):
         return new_image
 
     def medianImg(self, size, mode="nearest", use_mask=False):
-        """
-        Return a new Image that has been median filtered with a filter window of given size.
+        """return median filtered image with the given kernel size
+
+        optionally the method for handling boundary can be set with the `mode`
+        parameter (see documentation for `scipy.ndimage.median_filter`). Masked
+        pixels are handledby setting `use_mask=True`. In this last case, the
+        `mode` is ignored (see documentation for `scipy.signal.medfilt2d`).
 
         Parameters
-        --------------
-        size : tuple of int
-            Size of the filter window
-        mode : string, optional with default: nearest
-            Set the mode how to handle the boundarys within the convolution
-            Possilbe modes are: reflect, constant, nearest, mirror,  wrap
+        ----------
+        size : tuple
+            2-value tuple for the size of the median box
+        mode : str, optional
+            method to handle boundary pixels, by default "nearest"
+        use_mask : bool, optional
+            whether to take into account masked pixels or not, by default False
 
         Returns
-        -----------
-        image :  Image object
-            An Image object with the median filter data
+        -------
+        lvmdrp.core.image.Image
+            median filtered image
         """
-        if self._mask is None and use_mask is True:
-            new_data = ndimage.filters.median_filter(
-                self._data, size, mode=mode
-            )  # applying the median filter
+        if self._mask is None and use_mask:
+            new_data = ndimage.median_filter(self._data, size, mode=mode)
             new_mask = None
-        elif self._mask is not None and use_mask is False:
-            new_data = ndimage.filters.median_filter(
-                self._data, size, mode=mode
-            )  # applying the median filter
+        elif self._mask is not None and not use_mask:
+            new_data = ndimage.median_filter(self._data, size, mode=mode)
             new_mask = self._mask
         else:
-            self._data[self._mask == 1] = numpy.nan
-            new_data = ndimage.filters.generic_filter(
-                self._data, numpy.nanmedian, size, mode=mode
-            )
+            # copy data and replace masked with nans
+            new_data = copy(self._data)
+            new_data[self._mask] = numpy.nan
+            # perform median filter
+            new_data = signal.medfilt2d(new_data, size)
+            # update mask
             new_mask = numpy.isnan(new_data)
+            # reset original masked values in new array
+            new_data[new_mask] = self._data[new_mask]
 
         image = Image(
             data=new_data, header=self._header, error=self._error, mask=new_mask
-        )  # create a new Image object
+        )
         return image
 
     def collapseImg(self, axis, mode="mean"):
