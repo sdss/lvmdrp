@@ -2341,12 +2341,11 @@ def combineImages(images, method="median", k=3, normalize=True, subtract_offset=
         new_error = numpy.sqrt(numpy.ma.median(stack_error**2, 0))
     elif method == "sum":
         new_image = numpy.ma.sum(stack_image, 0)
-        # TODO: add error poropagation in other methods
+        new_error = numpy.sqrt(numpy.ma.sum(stack_error**2, 0))
     elif method == "mean":
         new_image = numpy.ma.mean(stack_image, 0)
-    elif method == "nansum":
-        new_image = numpy.ma.sum(stack_image, 0)
-    elif method == "clipped_mean":
+        new_error = numpy.sqrt(numpy.ma.mean(stack_error**2, 0))
+    elif method == "clipped_median":
         median = numpy.ma.median(stack_image, 0)
         rms = numpy.ma.std(stack_image, 0)
         # select pixels within given sigma limits around the median
