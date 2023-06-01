@@ -3122,35 +3122,37 @@ def detrendFrame_drp(
         bg_value = numpy.ma.median(bg_array, axis=None)
         bg_error = numpy.ma.std(bg_array, axis=None)
         log.info(
-            f"median error in quadrant {i+1}: {bg_value:.2f} +/- {bg_error:.2f} (e-)"
+            f"median and standard deviation in BG image for quadrant {i+1}: "
+            f"{bg_value:.2f} +/- {bg_error:.2f} (e-)"
         )
         # set background section
         bg_quad = bg_image.getSection(quad_sec)
         bg_quad._data, bg_quad._error = bg_value, bg_error
         bg_image.setSection(section=quad_sec, subimg=bg_quad, inplace=True)
     calib_image = calib_image - bg_image
-    log.info(
-        "mean and standard deviation counts in BG image: "
-        f"{numpy.mean(bg_image._data):.2f} +/- {numpy.std(bg_image._data):.2f} (e-)"
-    )
 
     # reject cosmic rays
     if reject_cr:
         log.info("rejecting cosmic rays")
-        clean_array, cr_mask = lacosmic(
-            data=calib_image._data,
-            error=calib_image._error,
-            mask=calib_image._mask,
-            background=bg_image._data,
-            contrast=1.1,
-            cr_threshold=5,
-            neighbor_threshold=2,
-        )
-
+        # clean_array, cr_mask = lacosmic(
+        #     data=calib_image._data,
+        #     error=calib_image._error,
+        #     mask=calib_image._mask,
+        #     background=bg_image._data,
+        #     contrast=1.1,
+        #     cr_threshold=5,
+        #     neighbor_threshold=2,
+        # )
+        cr_mask = calib_image.createCosmicMask()
+        clean_array = copy(calib_image._data)
+        clean_array[cr_mask] = numpy.nan
         clean_image = Image(data=clean_array, error=calib_image._error, mask=cr_mask)
         calib_image.setData(mask=(calib_image._mask | clean_image._mask))
     else:
-        clean_image = Image(data=numpy.ones_like(calib_image._data) * numpy.nan)
+        clean_image = Image(
+            data=numpy.ones(calib_image._dim) * numpy.nan,
+            mask=numpy.zeros(calib_image._dim),
+        )
 
     # normalize in case of flat calibration
     # 'flat' and 'flatfield' are the imagetyp that a pixel flat can have
@@ -3171,7 +3173,7 @@ def detrendFrame_drp(
     plot_image(calib_image, ax=axs[3], title="detrended")
     plot_image(bg_image, ax=axs[4], title="background")
     plot_image(
-        clean_image, ax=axs[5], title=f"CR clean {reject_cr = }", extension="mask"
+        clean_image, ax=axs[5], title=f"CR clean ({reject_cr = })", extension="mask"
     )
     fig.tight_layout()
     save_fig(
