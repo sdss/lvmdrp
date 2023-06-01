@@ -3180,7 +3180,19 @@ def detrendFrame_drp(
         fig,
         output_path=out_image,
         figure_path=figure_path,
-        label="detrended",
+        label="detrending",
+        close=not display_plots,
+    )
+
+    fig, axs = plt.subplots(2, 2, figsize=(15, 2), sharex=True, sharey=True)
+    axs = axs.flatten()
+    for i, bg_sec in enumerate(bg_sections):
+        plot_image(bg_sec, ax=axs[i], labels=False, colorbar=False)
+    save_fig(
+        fig,
+        output_path=out_image,
+        figure_path=figure_path,
+        label="bg_sections",
         close=not display_plots,
     )
 
