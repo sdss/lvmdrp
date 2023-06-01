@@ -28,6 +28,7 @@ from scipy import optimize
 
 from lvmdrp.core.constants import (
     BIN_PATH,
+    LVM_UNAM_URL,
     LVM_SRC_URL,
     SKYCORR_CONFIG_PATH,
     SKYCORR_INST_PATH,
@@ -50,6 +51,7 @@ from lvmdrp.core.sky import (
 from lvmdrp.core.spectrum1d import Spectrum1D
 from lvmdrp.utils import rc_symlink
 from lvmdrp.utils.logger import get_logger
+from lvmdrp.utils.examples import fetch_example_data
 
 
 description = "Provides methods for sky subtraction"
@@ -631,56 +633,57 @@ def configureSkyModel_drp(
 
     ori_path = os.path.abspath(os.curdir)
 
+    sky_logger.info(
+        f"writing configuration files using '{skymodel_config_path}' as source"
+    )
+    # read master configuration file
+    skymodel_master_config = yaml.load(
+        open(skymodel_config_path, "r"), Loader=yaml.Loader
+    )
+
+    # write default parameters for the ESO skymodel
+    config_names = list(skymodel_master_config.keys())
+    with open(
+        os.path.join(skymodel_path, "sm-01_mod1", "config", config_names[0]), "w"
+    ) as cf:
+        for key, val in skymodel_master_config[config_names[0]].items():
+            cf.write(f"{key} = {val}\n")
+    with open(
+        os.path.join(skymodel_path, "sm-01_mod2", "data", config_names[1]), "w"
+    ) as cf:
+        for par in skymodel_master_config[config_names[1]]:
+            cf.write(f"{par}\n")
+    with open(
+        os.path.join(skymodel_path, "sm-01_mod2", "data", config_names[2]), "w"
+    ) as cf:
+        for key, val in skymodel_master_config[config_names[2]].items():
+            cf.write(f"{key} = {val}\n")
+    with open(
+        os.path.join(skymodel_path, "sm-01_mod2", "config", config_names[3]), "w"
+    ) as cf:
+        for key, val in skymodel_master_config[config_names[3]].items():
+            cf.write(f"{key} = {val}\n")
+    with open(
+        os.path.join(skymodel_path, "sm-01_mod2", "config", config_names[4]), "w"
+    ) as cf:
+        for key, val in skymodel_master_config[config_names[4]].items():
+            cf.write(f"{key} = {val}\n")
+    sky_logger.info("successfully written config files")
+
+    # parse library path
+    lib_path = os.path.abspath(
+        os.path.join(
+            skymodel_path,
+            "sm-01_mod2",
+            "data",
+            skymodel_master_config["sm_filenames.dat"]["libpath"],
+        )
+    )
+
     if method == "run":
-        sky_logger.info(
-            f"writing configuration files using '{skymodel_config_path}' as source"
-        )
-        # read master configuration file
-        skymodel_master_config = yaml.load(
-            open(skymodel_config_path, "r"), Loader=yaml.Loader
-        )
-
-        # write default parameters for the ESO skymodel
-        config_names = list(skymodel_master_config.keys())
-        with open(
-            os.path.join(skymodel_path, "sm-01_mod1", "config", config_names[0]), "w"
-        ) as cf:
-            for key, val in skymodel_master_config[config_names[0]].items():
-                cf.write(f"{key} = {val}\n")
-        with open(
-            os.path.join(skymodel_path, "sm-01_mod2", "data", config_names[1]), "w"
-        ) as cf:
-            for par in skymodel_master_config[config_names[1]]:
-                cf.write(f"{par}\n")
-        with open(
-            os.path.join(skymodel_path, "sm-01_mod2", "data", config_names[2]), "w"
-        ) as cf:
-            for key, val in skymodel_master_config[config_names[2]].items():
-                cf.write(f"{key} = {val}\n")
-        with open(
-            os.path.join(skymodel_path, "sm-01_mod2", "config", config_names[3]), "w"
-        ) as cf:
-            for key, val in skymodel_master_config[config_names[3]].items():
-                cf.write(f"{key} = {val}\n")
-        with open(
-            os.path.join(skymodel_path, "sm-01_mod2", "config", config_names[4]), "w"
-        ) as cf:
-            for key, val in skymodel_master_config[config_names[4]].items():
-                cf.write(f"{key} = {val}\n")
-        sky_logger.info("successfully written config files")
-
         # create sky library
         if run_library:
-            # parse library path
             cur_path = os.path.join(skymodel_path, "sm-01_mod1")
-            lib_path = os.path.abspath(
-                os.path.join(
-                    skymodel_path,
-                    "sm-01_mod2",
-                    "data",
-                    skymodel_master_config["sm_filenames.dat"]["libpath"],
-                )
-            )
             # set hard-coded pwv (no scaling)
             pwv = -1
             # parse create_spec parameters
@@ -826,13 +829,11 @@ def configureSkyModel_drp(
         # return to original path
         os.chdir(ori_path)
     elif method == "download":
-        # TODO: download master configuration file and overwrite current one
-        # TODO: write individual configuration files (as above)
-        # TODO: download create_spec outputs and overwrite current ones
-        # TODO: download preplinetrans outputs and overwrite current ones
-        # TODO: download multiscat outputs and overwrite current ones
-        raise NotImplementedError(
-            f"'{method}' is not implemented yet. Please try again using the 'run' method"
+        fetch_example_data(
+            url=LVM_UNAM_URL,
+            name="skymodel_lib",
+            dest_path=lib_path,
+            ext="zip",
         )
     else:
         raise ValueError(

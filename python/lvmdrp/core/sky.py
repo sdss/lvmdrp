@@ -439,6 +439,8 @@ def run_skymodel(skymodel_path=SKYMODEL_INST_PATH, **kwargs):
     return skymodel_inst_par, skymodel_model_par, sky_comps
 
 
+# TODO: list a set of parameters I want the users
+# to modify
 def run_skycorr(
     sci_spec,
     sky_spec,
