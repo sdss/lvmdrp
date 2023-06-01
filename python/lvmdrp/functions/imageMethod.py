@@ -39,6 +39,12 @@ DEFAULT_BIASSEC = [
     "[2044:2060, 1:2040]",
     "[2061:2077, 1:2040]",
 ]
+DEFAULT_BGSEC = [
+    "[1:2043, 61:70]",
+    "[1:2043, 61:70]",
+    "[1:2043, 1991:2000]",
+    "[1:2043, 1991:2000]",
+]
 
 description = "Provides Methods to process 2D images"
 
@@ -2965,7 +2971,7 @@ def detrendFrame_drp(
     in_pixelflat="",
     calculate_error="1",
     replace_nan="1",
-    bg_box="10,10",
+    bgsec="",
     reject_cr="1",
     display_plots="0",
     figure_path="qa",
@@ -2988,8 +2994,8 @@ def detrendFrame_drp(
         whether to calculate Poisson errors or not, by default "1"
     replace_nan : bool, optional
         whether to replace or not NaN values by zeros, by default "1"
-    bg_box : str, optional
-        box size for background determination using a median filter, by default (10,10)
+    bgsec : str, optional
+        background sections for each quadrant, by default ""
     reject_cr : bool, optional
         whether to reject or not cosmic rays from detrended image, by default "1"
     display_plots : str, optional
@@ -3000,8 +3006,10 @@ def detrendFrame_drp(
 
     calculate_error = bool(int(calculate_error))
     replace_nan = bool(int(replace_nan))
-    bg_box = bg_box.split(",")
-    bg_box = (int(bg_box[0]), int(bg_box[1]))
+    if bgsec:
+        bgsec = bgsec.split(",")
+    else:
+        bgsec = DEFAULT_BGSEC
     reject_cr = bool(int(reject_cr))
     display_plots = bool(int(display_plots))
 
@@ -3027,7 +3035,7 @@ def detrendFrame_drp(
     # read master bias
     if img_type in ["bias"] or (in_bias is None or not os.path.isfile(in_bias)):
         if in_bias and not os.path.isfile(in_bias):
-            log.error(f"master bias '{in_bias}' not found")
+            log.error(f"master bias '{in_bias}' not found. Using dummy bias")
         master_bias = dummy_bias
     else:
         log.info(f"using bias calibration frame '{in_bias}'")
@@ -3036,7 +3044,7 @@ def detrendFrame_drp(
     # read master dark
     if img_type in ["bias", "dark"] or (in_dark is None or not os.path.isfile(in_dark)):
         if in_dark and not os.path.isfile(in_dark):
-            log.error(f"master dark '{in_dark}' not found")
+            log.error(f"master dark '{in_dark}' not found. Using dummy dark")
         master_dark = dummy_dark
     else:
         log.info(f"using dark calibration frame '{in_dark}'")
@@ -3053,22 +3061,32 @@ def detrendFrame_drp(
         in_pixelflat is None or not os.path.isfile(in_pixelflat)
     ):
         if in_pixelflat and not os.path.isfile(in_pixelflat):
-            log.error(f"master flat '{in_pixelflat}' not found")
+            log.error(f"master flat '{in_pixelflat}' not found. Using dummy flat")
         master_pixelflat = dummy_flat
     else:
         log.info(f"using pixelflat calibration frame '{in_pixelflat}'")
         master_pixelflat = loadImage(in_pixelflat)
 
     # bias correct image
+    if in_bias:
+        log.info("subtracting master bias")
     bcorr_image = proc_image - master_bias
 
     # calculate Poisson errors
+    log.info("calculating Poisson errors per quadrant")
     for i, quad_sec in enumerate(bcorr_image.getHdrValue("AMP? TRIMSEC").values()):
         quad = bcorr_image.getSection(quad_sec)
         quad.computePoissonError(quad.getHdrValue(f"AMP{i+1} RDNOISE"))
         bcorr_image.setSection(section=quad_sec, subimg=quad, inplace=True)
+        log.info(
+            f"median error in quadrant {i+1}: {numpy.median(quad._error):.2f} (e-)"
+        )
 
     # complete image detrending
+    if in_dark:
+        log.info("subtracting master dark")
+    elif in_dark and in_pixelflat:
+        log.info("subtracting master dark and dividing by master pixelflat")
     calib_image = (bcorr_image - master_dark) / master_pixelflat
 
     # propagate pixel mask
@@ -3078,11 +3096,11 @@ def detrendFrame_drp(
     calib_image._mask = numpy.logical_or(proc_image._mask, nanpixels)
     calib_image._mask = numpy.logical_or(calib_image._mask, infpixels)
     # fix infinities & nans
-    log.info(
-        f"replacing NaNs and infinities ({nanpixels.sum()} and "
-        f"{infpixels.sum()} pix) with zeros"
-    )
     if replace_nan:
+        log.info(
+            f"replacing NaNs and infinities ({nanpixels.sum()} and "
+            f"{infpixels.sum()} pix) with zeros"
+        )
         calib_image._data = numpy.nan_to_num(
             calib_image._data, nan=0, posinf=0, neginf=0
         )
@@ -3091,11 +3109,34 @@ def detrendFrame_drp(
         )
 
     # subtract background
-    bg_image = calib_image.medianImg(size=bg_box, use_mask=True)
+    log.info(f"calculating background using sections = {bgsec}")
+    bg_sections = []
+    bg_image = Image(numpy.ones(calib_image._dim), error=numpy.ones(calib_image._dim))
+    for i, quad_sec in enumerate(bcorr_image.getHdrValue("AMP? TRIMSEC").values()):
+        quad = calib_image.getSection(quad_sec)
+        # extract quad sections for BG calculation
+        bg_sec = quad.getSection(bgsec[i])
+        bg_sections.append(bg_sec)
+        # calculate BG value
+        bg_array = numpy.ma.masked_array(bg_sec._data, mask=bg_sec._mask)
+        bg_value = numpy.ma.median(bg_array, axis=None)
+        bg_error = numpy.ma.std(bg_array, axis=None)
+        log.info(
+            f"median error in quadrant {i+1}: {bg_value:.2f} +/- {bg_error:.2f} (e-)"
+        )
+        # set background section
+        bg_quad = bg_image.getSection(quad_sec)
+        bg_quad._data, bg_quad._error = bg_value, bg_error
+        bg_image.setSection(section=quad_sec, subimg=bg_quad, inplace=True)
     calib_image = calib_image - bg_image
+    log.info(
+        "mean and standard deviation counts in BG image: "
+        f"{numpy.mean(bg_image._data):.2f} +/- {numpy.std(bg_image._data):.2f} (e-)"
+    )
 
     # reject cosmic rays
     if reject_cr:
+        log.info("rejecting cosmic rays")
         clean_array, cr_mask = lacosmic(
             data=calib_image._data,
             error=calib_image._error,
@@ -3105,6 +3146,7 @@ def detrendFrame_drp(
             cr_threshold=5,
             neighbor_threshold=2,
         )
+
         clean_image = Image(data=clean_array, error=calib_image._error, mask=cr_mask)
         calib_image.setData(mask=(calib_image._mask | clean_image._mask))
     else:

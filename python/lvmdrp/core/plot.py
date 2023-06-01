@@ -71,6 +71,7 @@ def plot_image(
     norm = ImageNormalize(data, interval=PercentileInterval(95), stretch=AsinhStretch())
     im = ax.imshow(
         data,
+        origin="lower",
         cmap="binary",
         norm=norm,
         interpolation="none",
@@ -79,14 +80,14 @@ def plot_image(
 
     fig = ax.get_figure()
     if labels:
-        fig.supxlabel("X (pixel)")
-        fig.supylabel("Y (pixel)")
+        ax.set_xlabel("X (pixel)")
+        ax.set_ylabel("Y (pixel)")
     if colorbar:
         axins = inset_axes(ax, width="20%", height="3%", loc="upper right")
         axins.xaxis.set_ticks_position("bottom")
         cb = fig.colorbar(im, cax=axins, orientation="horizontal")
         if labels:
-            cb.set_label("counts (e-)", size="x-small")
+            cb.set_label("counts (e-)", size="small")
 
     if title is not None:
         ax.set_title(title, loc="left")
