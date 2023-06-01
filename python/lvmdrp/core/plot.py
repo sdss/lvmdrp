@@ -68,12 +68,15 @@ def plot_image(
             f"invalid value for {extension = }. Choices are: 'data', 'error' and 'mask'"
         )
 
-    norm = ImageNormalize(data, interval=PercentileInterval(95), stretch=AsinhStretch())
     im = ax.imshow(
         data,
         origin="lower",
         cmap="binary",
-        norm=norm,
+        norm=ImageNormalize(
+            data, interval=PercentileInterval(95), stretch=AsinhStretch()
+        )
+        if extension != "mask"
+        else None,
         interpolation="none",
         aspect="auto",
     )
