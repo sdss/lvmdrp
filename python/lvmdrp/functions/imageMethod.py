@@ -6,7 +6,10 @@ from multiprocessing import Pool, cpu_count
 
 import numpy
 from astropy.io import fits as pyfits
+from astropy import units as u
+from astropy.nddata import CCDData
 from lacosmic import lacosmic
+from ccdproc import cosmicray_lacosmic
 from matplotlib import pyplot as plt
 from scipy import interpolate
 from tqdm import tqdm
@@ -2973,6 +2976,7 @@ def detrendFrame_drp(
     replace_nan="1",
     bgsec="",
     reject_cr="1",
+    median_box="1,15",
     display_plots="0",
     figure_path="qa",
 ):
@@ -2998,6 +3002,8 @@ def detrendFrame_drp(
         background sections for each quadrant, by default ""
     reject_cr : bool, optional
         whether to reject or not cosmic rays from detrended image, by default "1"
+    median_box : tuple, optional
+        size of the median box to refine pixel mask, by default "1,15"
     display_plots : str, optional
         whether to show plots on display or not, by default "0"
     figure_path : str, optional
@@ -3011,6 +3017,8 @@ def detrendFrame_drp(
     else:
         bgsec = DEFAULT_BGSEC
     reject_cr = bool(int(reject_cr))
+    median_box = median_box.split(",")
+    median_box = (int(median_box[0]), int(median_box[1]))
     display_plots = bool(int(display_plots))
 
     # TODO: Normalization of flats. This is for combining them right? Need to make sure median is not dominated by diferences in background.
@@ -3134,6 +3142,7 @@ def detrendFrame_drp(
     # reject cosmic rays
     if reject_cr:
         log.info("rejecting cosmic rays")
+        # NOTE: this function hangs up
         # clean_array, cr_mask = lacosmic(
         #     data=calib_image._data,
         #     error=calib_image._error,
@@ -3143,21 +3152,41 @@ def detrendFrame_drp(
         #     cr_threshold=5,
         #     neighbor_threshold=2,
         # )
-        cr_mask = calib_image.createCosmicMask()
-        clean_array = copy(calib_image._data)
-        clean_array[cr_mask] = numpy.nan
-        clean_image = Image(data=clean_array, error=calib_image._error, mask=cr_mask)
+        # NOTE: faster solution
+        ccd = CCDData(
+            calib_image._data,
+            uncertainty=calib_image._error,
+            unit=u.electron,
+            mask=calib_image._mask,
+        )
+        clean_ccd = cosmicray_lacosmic(ccd, sigclip=30, objlim=35, psfsize=0.8)
+        cr_mask = ~calib_image._mask & clean_ccd.mask
+        clean_image = Image(data=clean_ccd.data, mask=cr_mask)
+        # NOTE: original CR rejection
+        # cr_mask = calib_image.createCosmicMask()
+        # clean_array = copy(calib_image._data)
+        # clean_array[cr_mask] = numpy.nan
+        # clean_image = Image(data=clean_array, error=calib_image._error, mask=cr_mask)
+
+        # update image with cosmic ray mask
         calib_image.setData(mask=(calib_image._mask | clean_image._mask))
+        log.info(f"found cosmic ray {cr_mask.sum()} pixels")
     else:
         clean_image = Image(
             data=numpy.ones(calib_image._dim) * numpy.nan,
             mask=numpy.zeros(calib_image._dim),
         )
 
+    # refine mask
+    log.info(f"refining pixel mask with {median_box = }")
+    median_image = calib_image.medianImg(size=median_box, use_mask=True)
+    calib_image.setData(mask=(calib_image._mask | median_image._mask), inplace=True)
+
     # normalize in case of flat calibration
     # 'flat' and 'flatfield' are the imagetyp that a pixel flat can have
     if img_type == "flat" or img_type == "flatfield":
-        calib_image = calib_image / numpy.median(calib_image._data)
+        flat_array = numpy.ma.masked_array(calib_image._data, mask=calib_image._mask)
+        calib_image = calib_image / numpy.ma.median(flat_array)
 
     # save detrended figure
     log.info(f"saving detrended figure at '{out_image}'")
@@ -3165,34 +3194,46 @@ def detrendFrame_drp(
 
     # show plots
     log.info("plotting results")
+    fig, axs = plt.subplots(2, 2, figsize=(15, 3), sharex=True, sharey=True)
+    axs = axs.flatten()
+    for i, bg_sec in enumerate(bg_sections):
+        plot_image(
+            bg_sec, ax=axs[i], labels=False, colorbar=False, title=f"quadrant {i+1}"
+        )
+    fig.suptitle("background sections", size="xx-large")
+    fig.supxlabel("X (pixel)")
+    fig.supylabel("Y (pixel)")
+    fig.tight_layout()
+    save_fig(
+        fig,
+        output_path=out_image,
+        figure_path=figure_path,
+        label="bg_sections",
+        close=not display_plots,
+    )
+
     fig, axs = plt.subplots(2, 3, figsize=(15, 10), sharex=True, sharey=True)
     axs = axs.flatten()
-    plot_image(proc_image, ax=axs[0], title="original")
-    plot_image(bcorr_image, ax=axs[1], title="bias corrected")
-    plot_image(bcorr_image, ax=axs[2], title="error", extension="error")
-    plot_image(calib_image, ax=axs[3], title="detrended")
-    plot_image(bg_image, ax=axs[4], title="background")
+    plot_image(proc_image, ax=axs[0], title="original", labels=False)
+    plot_image(bcorr_image, ax=axs[1], title="bias corrected", labels=False)
+    plot_image(bcorr_image, ax=axs[2], title="error", extension="error", labels=False)
+    plot_image(calib_image, ax=axs[3], title="detrended", labels=False)
+    plot_image(bg_image, ax=axs[4], title="background", labels=False)
     plot_image(
-        clean_image, ax=axs[5], title=f"CR clean ({reject_cr = })", extension="mask"
+        clean_image,
+        ax=axs[5],
+        title=f"CR mask ({reject_cr = })",
+        extension="mask",
+        labels=False,
     )
+    fig.supxlabel("X (pixel)")
+    fig.supylabel("Y (pixel)")
     fig.tight_layout()
     save_fig(
         fig,
         output_path=out_image,
         figure_path=figure_path,
         label="detrending",
-        close=not display_plots,
-    )
-
-    fig, axs = plt.subplots(2, 2, figsize=(15, 2), sharex=True, sharey=True)
-    axs = axs.flatten()
-    for i, bg_sec in enumerate(bg_sections):
-        plot_image(bg_sec, ax=axs[i], labels=False, colorbar=False)
-    save_fig(
-        fig,
-        output_path=out_image,
-        figure_path=figure_path,
-        label="bg_sections",
         close=not display_plots,
     )
 
