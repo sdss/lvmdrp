@@ -2026,12 +2026,9 @@ class Image(Header):
         out = Image(
             data=self.getData(),
             header=self.getHeader(),
-            error=None,
+            error=self.getError(),
             mask=numpy.zeros(self.getDim(), dtype=bool),
         )
-        # TODO: conversion deprecated
-        # out.convertUnit("e-")
-        # out.removeError()
 
         # initial CR selection
         select = numpy.zeros_like(out._mask, dtype=bool)
@@ -2054,24 +2051,24 @@ class Image(Header):
             cpus = int(parallel)
 
         # get rdnoise from header or assume given value
-        quads = list(self._header["AMP? TRIMSEC"].values())
-        rdnoises = list(self._header["AMP? RDNOISE"].values())
+        # quads = list(self._header["AMP? TRIMSEC"].values())
+        # rdnoises = list(self._header["AMP? RDNOISE"].values())
 
         # start iteration
         for i in range(iter):
             # quick and dirty pixel noise calculation
-            noise = out.medianImg((err_box_y, err_box_x))
-            for iquad in range(len(quads)):
-                quad = noise.getSection(quads[iquad])
-                select_noise = quad.getData() <= 0
-                quad.setData(data=0, select=select_noise)
-                quad = (quad + rdnoises[iquad] ** 2).sqrt()
-                noise = noise.setSection(
-                    quads[iquad], subimg=quad, update_header=False, inplace=False
-                )
-            noise.setData(
-                data=noise._data[noise._data > 0].min(), select=noise._data <= 0
-            )
+            # noise = out.medianImg((err_box_y, err_box_x))
+            # for iquad in range(len(quads)):
+            #     quad = noise.getSection(quads[iquad])
+            #     select_noise = quad.getData() <= 0
+            #     quad.setData(data=0, select=select_noise)
+            #     quad = (quad + rdnoises[iquad] ** 2).sqrt()
+            #     noise = noise.setSection(
+            #         quads[iquad], subimg=quad, update_header=False, inplace=False
+            #     )
+            # noise.setData(
+            #     data=noise._data[noise._data > 0].min(), select=noise._data <= 0
+            # )
             if cpus > 1:
                 result = []
                 fine = out.convolveGaussImg(sigma_x, sigma_y)
@@ -2110,7 +2107,7 @@ class Image(Header):
                 Lap2 = result[1].get()
                 pool.terminate()
 
-                S = Lap / (noise * 4)  # normalize Laplacian image by the noise
+                S = Lap / (out._error)  # normalize Laplacian image by the noise
                 S_prime = S - S.medianImg(
                     (err_box_y, err_box_x)
                 )  # cleaning of the normalized Laplacian image
@@ -2142,7 +2139,7 @@ class Image(Header):
                 axs[0].set_title("laplacian of input image")
                 axs[0].imshow(Lap._data, origin="lower", norm=norm)
 
-                S = Lap / (noise * 4)  # normalize Laplacian image by the noise
+                S = Lap / (out._error)  # normalize Laplacian image by the noise
                 S_prime = S - S.medianImg(
                     (err_box_y, err_box_x)
                 )  # cleaning of the normalized Laplacian image
@@ -2181,7 +2178,7 @@ class Image(Header):
             # )
             select |= (Lap2._data > flim) & (S_prime._data > sigma_det)
             # update mask in clean image for next iteration
-            # out.setData(mask=True, select=select)
+            out.setData(mask=True, select=select)
             # out = out.replaceMaskMedian(box_x, box_y, replace_error=None)
 
         return select
