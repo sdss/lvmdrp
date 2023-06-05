@@ -101,7 +101,7 @@ def _decode_string(metadata):
     return metadata
 
 
-def _get_metadata_paths(tileid=None, mjd=None, kind="raw"):
+def _get_metadata_paths(tileid=None, mjd=None, kind="raw", filter_exist=True):
     """return metadata path depending on the kind
 
     this function will define a path for a metadata store
@@ -116,6 +116,8 @@ def _get_metadata_paths(tileid=None, mjd=None, kind="raw"):
         MJD of the target frames, by default None
     kind : str, optional
         metadata kind for which to define a store path, by default "raw"
+    filter_exist : bool, optional
+        whether the paths should be filtered by existence, by default True
 
     Returns
     -------
@@ -146,6 +148,10 @@ def _get_metadata_paths(tileid=None, mjd=None, kind="raw"):
         metadata_paths = glob(path_pattern)
     else:
         metadata_paths = [path_pattern]
+
+    # return list of existing paths
+    if filter_exist:
+        metadata_paths = list(filter(os.path.exists, metadata_paths))
 
     return metadata_paths
 
@@ -311,27 +317,25 @@ def _load_or_create_store(tileid=None, mjd=None, kind="raw", mode="r"):
         the metadata store for the given observatory
     """
     # define metadata path depending on the kind
-    metadata_paths = _get_metadata_paths(tileid=tileid, mjd=mjd, kind=kind)
+    metadata_paths = _get_metadata_paths(
+        tileid=tileid, mjd=mjd, kind=kind, filter_exist=mode == "r"
+    )
     if mode == "r" and metadata_paths:
         stores = []
         for metadata_path in metadata_paths:
-            logger.info(
-                f"loading metadata store of {kind = }, {tileid = } and {mjd = }"
-            )
+            logger.info(f"loading metadata store of {kind = } and {metadata_path = }")
             stores.append(h5py.File(metadata_path, mode=mode))
 
     elif mode == "a" and metadata_paths:
         stores = []
         for metadata_path in metadata_paths:
-            logger.info(
-                f"creating metadata store of {kind = }, {tileid = } and {mjd = }"
-            )
+            logger.info(f"creating metadata store of {kind = } and {metadata_path = }")
             os.makedirs(os.path.dirname(metadata_path), exist_ok=True)
             stores.append(h5py.File(metadata_path, mode=mode))
     else:
         if mode == "r":
             raise FileNotFoundError(
-                f"no stores of {kind = } found matching {tileid = } and {mjd = }"
+                f"no stores matching {kind = }, {tileid = } and {mjd = } found"
             )
         elif mode == "a":
             raise ValueError(f"specific values for {tileid = } and {mjd = } are needed")
@@ -355,18 +359,18 @@ def _del_store(tileid=None, mjd=None, kind="raw"):
     """
     # define metadata path depending on the kind
     metadata_paths = _get_metadata_paths(tileid=tileid, mjd=mjd, kind=kind)
-
-    for metadata_path in metadata_paths:
-        if os.path.exists(metadata_path):
+    if metadata_paths:
+        for metadata_path in metadata_paths:
             logger.info(
-                f"removing metadata store of {kind = }, {tileid = } and {mjd = }"
+                f"removing metadata store matching {kind = }, {tileid = } and {mjd = } "
+                f"at {metadata_path}"
             )
             os.remove(metadata_path)
-        else:
-            logger.warning(
-                f"no metadata store of {kind = }, {tileid = } and {mjd = } found, "
-                "nothing to do"
-            )
+    else:
+        logger.warning(
+            f"no metadata store matching {kind = }, {tileid = } and {mjd = } "
+            "found, nothing to do"
+        )
 
 
 def extract_metadata(frames_paths):
