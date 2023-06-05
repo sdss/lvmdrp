@@ -2966,6 +2966,7 @@ def preprocRawFrame_drp(
     )
 
 
+# NOTE: basicCalibration
 def detrendFrame_drp(
     in_image,
     out_image,

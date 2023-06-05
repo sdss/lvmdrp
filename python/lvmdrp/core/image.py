@@ -2320,11 +2320,11 @@ def combineImages(images, method="median", k=3, normalize=True, subtract_offset=
         else:
             stack_mask[i, :, :] = numpy.zeros_like(stack_image, dtype=bool)
 
-    if subtract_offset:
-        # plot histogram of the images to get a feeling of the pixel distributions
-        # identify pixels without fibers and calculate the median, per image
-        # subtract median value per image
-        pass
+    # if subtract_offset:
+    #     # plot histogram of the images to get a feeling of the pixel distributions
+    #     # identify pixels without fibers and calculate the median, per image
+    #     # subtract median value per image
+    #     pass
 
     if normalize:
         # plot distribution of pixels (detect outliers e.g., CR)
