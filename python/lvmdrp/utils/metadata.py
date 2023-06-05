@@ -7,27 +7,29 @@
 # @Copyright: SDSS-V LVM
 
 import os
+import numpy as np
 from glob import glob, has_magic
-from tqdm import tqdm
-from astropy.io import fits
 
 import h5py
+import numpy as np
 import pandas as pd
+from astropy.io import fits
+
+from sdss_access import Access
+from sdss_access.path import Path
+from tqdm import tqdm
 
 from lvmdrp.core.constants import FRAMES_CALIB_NEEDS
 from lvmdrp.utils.bitmask import (
+    QualityFlag,
     RawFrameQuality,
     ReductionStage,
     ReductionStatus,
-    QualityFlag,
 )
 from lvmdrp.utils.logger import get_logger
 
+
 # NOTE: replace these lines with Brian's integration of sdss_access and sdss_tree
-from sdss_access import Access
-from sdss_access.path import Path
-
-
 path = Path(release="sdss5")
 access = Access(release="sdss5")
 access.set_base_dir()
@@ -371,6 +373,71 @@ def _del_store(tileid=None, mjd=None, kind="raw"):
             f"no metadata store matching {kind = }, {tileid = } and {mjd = } "
             "found, nothing to do"
         )
+
+
+def locate_new_frames(hemi, camera, mjd, expnum, return_excluded=False):
+    """return paths to new frames not present in the metadata store
+
+    this function will expand the path to raw frames in the local SAS and
+    filter out those paths to frames already present in the metadata stores.
+
+    Parameters
+    ----------
+    hemi : str
+        hemisphere of the observatory where the data was taken
+    camera : str
+        camera ID of the target frames
+    mjd : int
+        MJD of the target frames
+    expnum : int
+        exposure number of the target frames
+    return_excluded : bool, optional
+        whether to return the excluded paths or not, by default False
+
+    Returns
+    -------
+    array_like
+        list of raw frame paths not present in metadata stores
+    """
+    keys = ["mjd", "hemi", "camera", "expnum"]
+    paths = sorted(
+        path.expand("lvm_raw", hemi=hemi, camspec=camera, mjd=mjd, expnum=expnum)
+    )
+    npath = len(paths)
+    logger.info(f"found {npath} pontentially new raw frame paths in local SAS")
+
+    # extract path parameters
+    new_path_params = pd.DataFrame(
+        [path.extract(name="lvm_raw", example=p) for p in paths]
+    )
+    new_path_params.rename(columns={"camspec": "camera"}, inplace=True)
+    new_path_params[["mjd", "expnum"]] = new_path_params[["mjd", "expnum"]].astype(int)
+    new_path_params["x"] = 0
+    new_path_params.set_index(keys, inplace=True)
+
+    # load all stores if they exist
+    logger.info("locating all existing metadata stores")
+    try:
+        stores = _load_or_create_store(tileid="*", mjd="*", mode="r")
+        logger.info(f"found {len(stores)} metadata stores")
+    except FileNotFoundError:
+        logger.info(f"no metadata stores found, returning {npath} new paths")
+        return paths
+
+    # convert to dataframe
+    gen_path_params = map(lambda store: pd.DataFrame(store["raw"][()])[keys], stores)
+    old_path_params = pd.concat(gen_path_params, ignore_index=True)
+    old_path_params = _decode_string(old_path_params)
+    old_path_params["x"] = 0
+    old_path_params.set_index(keys, inplace=True)
+    # filter out paths in stores
+    news = ~new_path_params.isin(old_path_params).x.values
+    logger.info(f"filtered {news.sum()} paths of new frames present in stores")
+
+    new_paths = np.asarray(paths)[news].tolist()
+    if return_excluded:
+        return new_paths, np.asarray(paths)[~news].tolist()
+    return new_paths
 
 
 def extract_metadata(frames_paths):
