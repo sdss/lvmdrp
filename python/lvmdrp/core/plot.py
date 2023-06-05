@@ -9,9 +9,10 @@
 import os
 
 import matplotlib.pyplot as plt
-from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 import numpy as np
-from astropy.visualization import PercentileInterval, AsinhStretch, ImageNormalize
+from astropy.visualization import AsinhStretch, ImageNormalize, PercentileInterval
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+
 
 plt.style.use("seaborn-v0_8-talk")
 

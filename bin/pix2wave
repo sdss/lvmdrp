@@ -8,14 +8,13 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.lines import Line2D
-from matplotlib.widgets import TextBox
-from matplotlib.widgets import MultiCursor
+from matplotlib.widgets import MultiCursor, TextBox
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from numpy import polynomial
 from scipy import signal
 
-from lvmdrp.core.constants import SPEC_CHANNELS
 from lvmdrp.core import rss
+from lvmdrp.core.constants import SPEC_CHANNELS
 from lvmdrp.utils import logger, spec_from_lines
 
 

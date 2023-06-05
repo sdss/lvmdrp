@@ -1,16 +1,16 @@
-import numpy
 from copy import deepcopy as copy
+from multiprocessing import Pool, cpu_count
+
+import matplotlib.pyplot as plt
+import numpy
 from astropy.io import fits as pyfits
+from astropy.modeling import fitting, models
+from astropy.visualization import simple_norm
+from scipy import ndimage, signal
 
 from lvmdrp.core.apertures import Apertures
 from lvmdrp.core.header import Header
 from lvmdrp.core.spectrum1d import Spectrum1D
-import matplotlib.pyplot as plt
-from astropy.visualization import simple_norm
-from multiprocessing import Pool, cpu_count
-
-from astropy.modeling import fitting, models
-from scipy import ndimage, signal
 
 
 def _parse_ccd_section(section):
@@ -2320,11 +2320,11 @@ def combineImages(images, method="median", k=3, normalize=True, subtract_offset=
         else:
             stack_mask[i, :, :] = numpy.zeros_like(stack_image, dtype=bool)
 
-    if subtract_offset:
-        # plot histogram of the images to get a feeling of the pixel distributions
-        # identify pixels without fibers and calculate the median, per image
-        # subtract median value per image
-        pass
+    # if subtract_offset:
+    #     # plot histogram of the images to get a feeling of the pixel distributions
+    #     # identify pixels without fibers and calculate the median, per image
+    #     # subtract median value per image
+    #     pass
 
     if normalize:
         # plot distribution of pixels (detect outliers e.g., CR)

@@ -1,11 +1,11 @@
 import os
-import re
 import pickle
+import re
 import subprocess
 import zipfile
 from glob import glob
-import pandas as pd
 
+import pandas as pd
 from astropy.io import fits
 from astropy.table import Table
 from tqdm import tqdm

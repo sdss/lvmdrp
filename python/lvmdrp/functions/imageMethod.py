@@ -5,28 +5,23 @@ from copy import deepcopy as copy
 from multiprocessing import Pool, cpu_count
 
 import numpy
-from astropy.io import fits as pyfits
 from astropy import units as u
+from astropy.io import fits as pyfits
 from astropy.nddata import CCDData
-from lacosmic import lacosmic
 from ccdproc import cosmicray_lacosmic
+from lacosmic import lacosmic
 from matplotlib import pyplot as plt
 from scipy import interpolate
 from tqdm import tqdm
 
 from lvmdrp.core.fiberrows import FiberRows
-from lvmdrp.core.image import (
-    Image,
-    combineImages,
-    glueImages,
-    loadImage,
-    _parse_ccd_section,
-)
-from lvmdrp.core.plot import plot_strips, plot_image, save_fig
+from lvmdrp.core.image import Image, _parse_ccd_section, combineImages, glueImages, loadImage
+from lvmdrp.core.plot import plot_image, plot_strips, save_fig
 from lvmdrp.core.rss import RSS
 from lvmdrp.core.spectrum1d import Spectrum1D
 from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.utils.logger import get_logger
+
 
 NQUADS = 4
 DEFAULT_IMAGETYP = "object"
@@ -2966,6 +2961,7 @@ def preprocRawFrame_drp(
     )
 
 
+# NOTE: basicCalibration
 def detrendFrame_drp(
     in_image,
     out_image,
