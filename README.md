@@ -34,10 +34,9 @@ To install the DRP along with its dependencies, you need to run the following st
 
 <!-- write a script to test everything finished correctly with the installation -->
 
-## Advanced ESO sky model configuration
+## ESO sky routines installation and configuration
 
-If you are planning on using the sky module, you will need to install the ESO routines first. In order to install to do so
-you need to run the following commands, **also within DRP python environment**.
+If you are planning on using the sky module, you will need to install the ESO routines first. In order to do so, you need to run the following commands, **also within DRP python environment**. Additionally, if you want to control where the eso routines will be installed, you can define the environment variable `ESOSKY` on your system to point to the desired directory.
 
 1. Install the ESO skycorr and skymodel routines:
     > `drp sky installESOSky`
