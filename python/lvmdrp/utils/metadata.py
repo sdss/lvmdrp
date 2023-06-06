@@ -456,10 +456,13 @@ def extract_metadata(frames_paths):
     pandas.DataFrame
         dataframe containing the extracted metadata
     """
-    new_metadata = {}
     # extract metadata
     nframes = len(frames_paths)
+    if nframes == 0:
+        logger.warning("zero paths given, nothing to do")
+        return pd.DataFrame(columns=[column for column, _ in RAW_METADATA_COLUMNS])
     logger.info(f"going to extract metadata from {nframes} frames")
+    new_metadata = {}
     iterator = tqdm(
         enumerate(frames_paths),
         total=nframes,
