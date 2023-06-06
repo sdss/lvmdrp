@@ -1,4 +1,5 @@
 import os
+from functools import partial
 from multiprocessing import Pool, cpu_count
 
 import matplotlib
@@ -13,11 +14,11 @@ from astropy.wcs import WCS
 from matplotlib import pyplot as plt
 from numpy import polynomial
 from scipy import interpolate, ndimage, signal
+from scipy.optimize import least_squares
 
 from lvmdrp.core.constants import CONFIG_PATH
 from lvmdrp.core.cube import Cube
 from lvmdrp.core.fiberrows import FiberRows
-from lvmdrp.core.header import combineHdr
 from lvmdrp.core.image import loadImage
 from lvmdrp.core.passband import PassBand
 from lvmdrp.core.plot import save_fig
@@ -43,6 +44,29 @@ __all__ = [
 
 
 rss_logger = get_logger(__name__)
+
+
+DONE_PASS = "gi"
+DONE_MAGS = numpy.asarray([22, 21])
+DONE_LIMS = numpy.asarray([1.7, 5.0])
+
+
+def _linear_model(pars, xdata):
+    """simple linear model
+
+    Parameters
+    ----------
+    pars : array_like
+        2-tuple for slope and y-offset
+    xdata : array_like
+        x-values to evaluate the model
+
+    Returns
+    -------
+    array_like
+        evaluated linear model
+    """
+    return pars[0] * xdata + pars[1]
 
 
 def mergeRSS_drp(files_in, file_out, mergeHdr="1"):
@@ -2860,7 +2884,6 @@ def quickQuality(
     out_report,
     ref_values,
     pct_level=98,
-    passbands="gri",
 ):
     """builds a quality report from the quick DRP outputs
 
@@ -2882,11 +2905,17 @@ def quickQuality(
         input YAML file contaning the reference values
     pct_level : int, optional
         percentile used in report, by default 98
-    passbands : str, optional
-        passbands names, by default "gri"
     """
     # TODO: load reference values for qualitative quality flags
     ref_values = yaml.load(open(ref_values, "r"))
+
+    # load passbands
+    responses = []
+    for passband in DONE_PASS:
+        # read passband
+        response = PassBand()
+        response.loadTxtFile(os.path.join(CONFIG_PATH, f"{passband}_passband.txt"))
+        responses.append(response)
 
     # bias quality
     # 	- exposure name
@@ -2894,7 +2923,7 @@ def quickQuality(
     # 	- temperature of specs room (need for a bias?)
     # 	- UT (of observation or reduction?)
     # 	- qualitative quality (GOOD, BAD)
-    frame_names = []
+    frame_name = []
     avg_count, std_count, pct_count = [], [], []
     temps, times, flags = [], [], []
     for in_bias in in_biases:
@@ -2903,7 +2932,7 @@ def quickQuality(
         # extract frame name
         frame_name = os.path.basename(in_bias).split(".")[0]
         _, camera, expnum = frame_name.split("-")
-        frame_names.append(frame_name)
+        frame_name.append(frame_name)
 
         # compute statistics
         quads_avg, quads_std, quads_pct = [], [], []
@@ -2925,7 +2954,7 @@ def quickQuality(
     # build bias table
     bias_table = Table(
         data={
-            "frame_name": frame_names,
+            "frame_name": frame_name,
             "avg_count": numpy.asarray(avg_count),
             "std_count": numpy.asarray(std_count),
             f"{pct_level}p_count": numpy.asarray(pct_count),
@@ -2969,8 +2998,8 @@ def quickQuality(
     # 	- sky level for each channel
     # 	- S/N**2 for each channel
     # 	- quality (GOOD, BAD)
-    frame_names = []
-    flx_count, err_count, sn2_count, mag_count = [], [], [], []
+    frame_name, fiber_flavor = [], []
+    flx, err, snr, sn2, mag = [], [], [], [], []
     temps, times, rfibs, expos, flags = [], [], []
     for kind, in_fiber in zip(
         ["flat", "arc", "std", "sky"], [in_fiberflat, in_arc, in_std, in_sky]
@@ -2978,36 +3007,36 @@ def quickQuality(
         rss = loadRSS(in_fiber)
 
         # extract frame name
-        frame_name = os.path.basename(in_bias).split(".")[0]
-        _, camera, expnum = frame_name.split("-")
-        frame_names.append(frame_name)
-
+        frame_name = os.path.basename(in_fiber).split(".")[0]
+        frame_name.extend([frame_name] * rss._fibers)
+        # extract fiber flavor
+        fiber_flavor.extend([kind] * rss._fibers)
         # extract passband fluxes, errors and SN2
-        flx_pass, err_pass, sn2_pass, mag_pass = [], [], [], []
-        for passband in passbands:
-            # read passband
-            response = PassBand()
-            response.loadTxtFile(os.path.join(CONFIG_PATH, f"{passband}_passband.txt"))
-            # collapse flat into superflat
-            superflat = rss.get1DSpec()
-            # calculate flux/error through
-            flx, err = response.getFluxSpec(superflat)
-            flx_pass.append(flx)
-            err_pass.append(err)
-            sn2_pass.append((flx / err) ** 2)
-        flx_count.append(flx_pass)
-        err_count.append(err_pass)
-        sn2_count.append(sn2_pass)
-        mag_count.append(mag_pass)
+        flx_pass = numpy.zeros((rss._fibers, 2))
+        err_pass = numpy.zeros((rss._fibers, 2))
+        mag_pass = numpy.zeros((rss._fibers, 2))
+        snr_pass = numpy.zeros((rss._fibers, 2))
+        sn2_pass = numpy.zeros((rss._fibers, 2))
+        for i in enumerate(responses):
+            flx_pass[:, i], err_pass[:, i], _, _, _ = responses[i].getFluxRSS(rss)
+            mag_pass[:, i] = responses[i].fluxToMag(flx_pass)
+            snr_pass[:, i] = flx_pass / err_pass
+            sn2_pass[:, i] = snr_pass**2
+        flx.extend(flx_pass)
+        err.extend(err_pass)
+        snr.extend(snr_pass)
+        sn2.extend(sn2_pass)
+        mag.extend(mag_pass)
 
         # extract other quantities
-        temps.append(rss._header["TRUSTEMP"])
-        times.append(Time(rss._header["OBS-TIME"], scale="tai"))
-        rfibs.append(rss._good_fibers.size / rss._fibers)
-        expos.append(rss._header["EXPTIME"])
+        temps.extend([rss._header["TRUSTEMP"]] * rss._fibers)
+        times.extend([Time(rss._header["OBS-TIME"], scale="tai")] * rss._fibers)
+        rfibs.extend(rss._good_fibers / rss._fibers)
+        expos.extend([rss._header["EXPTIME"]] * rss._fibers)
         # TODO: set quality flags
-        flags.append("GOOD")
+        flags.extend(["GOOD"] * rss._fibers)
 
+        # calculations specific to each image type
         if kind == "flat":
             # TODO: calculate fiber transparency
             # 	- pull flat information from past (fiducial) fiberflats
@@ -3030,39 +3059,31 @@ def quickQuality(
         elif kind == "sky":
             # TODO:
             # 	- calculate sky flux in passbands
-            # 	-
             pass
         else:
             pass
 
-    # build flat/arc table
+    # build fibers table
     fiber_table = Table(
         data={
-            "frame_name": frame_names,
-            "flx_count": numpy.asarray(flx_count),
-            "err_count": numpy.asarray(err_count),
-            "sn2_count": numpy.asarray(sn2_count),
-            "temp": numpy.asarray(temps),
-            "time": numpy.asarray(times),
-            "fibers_frac": numpy.asarray(rfibs),
-            "exp_time": numpy.asarray(expos),
-            "flag": numpy.asarray(flags),
+            "frame_name": frame_name,
+            "fiber_flavor": fiber_flavor,
+            "flx": flx,
+            "err": err,
+            "snr": snr,
+            "sn2": sn2,
+            "temp": temps,
+            "time": times,
+            "fibers_frac": rfibs,
+            "exp_time": expos,
+            "flag": flags,
         },
-        names=[
-            "frame_name",
-            "flx_count",
-            "err_count",
-            "sn2_count",
-            "temp",
-            "time",
-            "fibers_frac",
-            "exp_time",
-            "flag",
-        ],
         unit=[
+            None,
             None,
             u.electron,
             u.electron,
+            None,
             None,
             u.Celcius,
             "UT",
@@ -3072,8 +3093,18 @@ def quickQuality(
         ],
     )
 
+    # observation depth
+    depth = numpy.zeros(len(DONE_PASS))
+    for i, passband in enumerate(DONE_PASS):
+        std_table = fiber_table[fiber_table["fiber_flavor"] == "std"]
+        model = partial(_linear_model, xdata=std_table["mag"])
+        res = least_squares(lambda pars: model(pars) - std_table["snr"], x0=(1, 0))
+
+        depth[i] = _linear_model(res.x, DONE_MAGS[i]) ** 2
+
     # dump all tables in a multi-extension FITS
     metadata = fits.PrimaryHDU()
+    metadata["DONE"] = ((depth >= DONE_LIMS).all(), "is this tile ID done?")
     report_fits = fits.HDUList(
         [metadata] + [fits.table_to_hdu(bias_table), fits.table_to_hdu(fiber_table)]
     )
