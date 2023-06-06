@@ -82,6 +82,9 @@ def dict_update(d, u):
 
 def rc_symlink(src, dst):
     """Forces creation of symbolic link if already exists"""
+    # create directory if does not exist
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    # bypass existing link
     if os.path.islink(dst):
         os.remove(dst)
     os.symlink(src, dst)
