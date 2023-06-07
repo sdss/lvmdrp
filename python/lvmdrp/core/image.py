@@ -23,6 +23,77 @@ def _parse_ccd_section(section):
     return slice_x, slice_y
 
 
+def _percentile_normalize(images, pct=0.75):
+    """percentile normalize a given stacked images
+
+    Parameters
+    ----------
+    images : array_like
+        3-dimensional array with first axis the image index
+    pct : float, optional
+        percentile at which the calculate the normalization factor, by default 0.75
+
+    Returns
+    -------
+    array_like
+        3-dimensional array of normalized images
+    array_like
+        vector containing normalization factors for each image
+    """
+    # calculate normalization factor
+    pcts = numpy.nanpercentile(images.fill(numpy.nan), pct, axis=(1, 2))
+    norm = numpy.ma.median(pcts) / pcts
+
+    return norm[:, None, None] * images, norm
+
+
+def _bg_subtraction(images, quad_sections, bg_sections):
+    """returns a background subtracted set of images
+
+    The background is calculated as the median in the given `bg_sections` of
+    the given `images`. The actual sections used to calculate the background,
+    the median background and the standard deviation of the background are also
+    returned matching the shape of the given `images`.
+
+
+    Parameters
+    ----------
+    images : array_like
+        3-dimensional array of stacked images
+    quad_sections : list_like
+        4-element list containing the FITS formatted sections of each quadrant
+    bg_sections : list_like
+        4-element list containing the FITS formatted sections for the background
+
+    Returns
+    -------
+    array_like
+        3-dimensional background subtracted images
+    array_like
+        3-dimensional median and standard deviation background images
+    list_like
+        4-element list containing the sections used to calculate the background
+    """
+    bg_images_med = numpy.ma.masked_array(numpy.zeros_like(images), mask=images.mask)
+    bg_images_std = numpy.ma.masked_array(numpy.zeros_like(images), mask=images.mask)
+    bg_sections = []
+    for i, quad_sec in enumerate(quad_sections):
+        xquad, yquad = [slice(idx) for idx in _parse_ccd_section(quad_sec)]
+        xbg, ybg = [slice(idx) for idx in _parse_ccd_section(bg_sections[i])]
+        # extract quad sections for BG calculation
+        bg_array = images[:, xbg, ybg]
+        bg_sections.append(bg_array)
+        # calculate median and standard deviation BG
+        bg_med = numpy.ma.median(bg_array, axis=(1, 2))
+        bg_std = numpy.ma.std(bg_array, axis=(1, 2))
+        # set background sections in corresponding images
+        bg_images_med[:, yquad, xquad] = bg_med[:, None, None]
+        bg_images_std[:, yquad, xquad] = bg_std[:, None, None]
+    images_bgcorr = images - bg_images_med
+
+    return images_bgcorr, bg_images_med, bg_images_std, bg_sections
+
+
 class Image(Header):
     def __init__(self, data=None, header=None, mask=None, error=None, origin=None):
         Header.__init__(self, header=header, origin=origin)
@@ -2284,7 +2355,15 @@ def glueImages(images, positions):
     return out_image
 
 
-def combineImages(images, method="median", k=3, normalize=True, subtract_offset=True):
+def combineImages(
+    images,
+    method="median",
+    k=3,
+    normalize=True,
+    normalize_percentile=75,
+    background_subtract=False,
+    background_sections=None,
+):
     """
     Combines several image to a single one according to a certain average methods
 
@@ -2311,31 +2390,40 @@ def combineImages(images, method="median", k=3, normalize=True, subtract_offset=
     # load image data in to stack
     for i in range(len(images)):
         stack_image[i, :, :] = images[i].getData()
-        # TODO: if imagetyp != "bias":
-        # TODO: else: initialize a dummy error array
+
+        # read error image if not a bias image
         if images[0]._header["IMAGETYP"] != "bias":
             stack_error[i, :, :] = images[i].getError()
+
+        # read pixel mask image
         if images[i]._mask is not None:
             stack_mask[i, :, :] = images[i].getMask()
-        else:
-            stack_mask[i, :, :] = numpy.zeros_like(stack_image, dtype=bool)
-
-    # if subtract_offset:
-    #     # plot histogram of the images to get a feeling of the pixel distributions
-    #     # identify pixels without fibers and calculate the median, per image
-    #     # subtract median value per image
-    #     pass
-
-    if normalize:
-        # plot distribution of pixels (detect outliers e.g., CR)
-        # select pixels that exposed
-        # calculate the median of the selected pixels
-        # scale illuminated pixels to a common scale, for the whole image
-        pass
 
     # mask invalid values
     stack_image = numpy.ma.masked_array(stack_image, mask=stack_mask)
-    stack_error = numpy.ma.masked_array(stack_image, mask=stack_mask)
+    stack_error = numpy.ma.masked_array(stack_error, mask=stack_mask)
+
+    if background_subtract:
+        quad_sections = images[0].getHdrValues("AMP? TRIMSEC")
+        (
+            stack_image,
+            background_images_med,
+            background_images_std,
+            bg_sections,
+        ) = _bg_subtraction(
+            images=stack_image,
+            quad_sections=quad_sections,
+            bg_sections=background_sections,
+        )
+
+    if normalize:
+        # plot distribution of pixels (detect outliers e.g., CR)
+        # select pixels that are exposed
+        # calculate the median of the selected pixels
+        # scale illuminated pixels to a common scale, for the whole image
+        stack_image, norm_vector = _percentile_normalize(
+            stack_image, normalize_percentile
+        )
 
     # combine the images according to the selected method
     if method == "median":
@@ -2367,11 +2455,6 @@ def combineImages(images, method="median", k=3, normalize=True, subtract_offset=
     new_error = new_error.data
 
     # mask bad pixels
-    # old_mask = numpy.sum(stack_mask, 0).astype(bool)
-    # TODO: numpy seems to be doing this already, but need to test it
-    # new_mask = numpy.zeros_like(new_image, dtype=bool)
-    # for i in range(len(images)):
-    #     new_mask = new_mask & stack_mask[i]
     new_mask = new_mask | numpy.isnan(new_image) | numpy.isnan(new_error)
 
     # TODO: add new header keywords:
@@ -2383,6 +2466,8 @@ def combineImages(images, method="median", k=3, normalize=True, subtract_offset=
     else:
         new_header = None
 
-    outImage = Image(data=new_image, error=new_error, mask=new_mask, header=new_header)
+    combined_image = Image(
+        data=new_image, error=new_error, mask=new_mask, header=new_header
+    )
 
-    return outImage
+    return combined_image
