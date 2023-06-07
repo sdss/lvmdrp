@@ -41,7 +41,7 @@ def _percentile_normalize(images, pct=0.75):
         vector containing normalization factors for each image
     """
     # calculate normalization factor
-    pcts = numpy.nanpercentile(images.fill(numpy.nan), pct, axis=(1, 2))
+    pcts = numpy.nanpercentile(images.filled(numpy.nan), pct, axis=(1, 2))
     norm = numpy.ma.median(pcts) / pcts
 
     return norm[:, None, None] * images, norm
