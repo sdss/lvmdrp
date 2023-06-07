@@ -2935,29 +2935,29 @@ def preprocRawFrame_drp(
     )
 
     # show median counts for all quadrants along Y-axis
-    fig_strips, axs_strips = plt.subplots(4, 1, figsize=(15, 10), sharex=True)
-    axs_strips = axs_strips.flatten()
-    axs_strips[-1].set_xlabel("Y (pixel)")
-    fig_strips.supylabel("counts (e-)")
-    fig_strips.suptitle("median counts for all quadrants", size="xx-large")
+    fig, axs = plt.subplots(4, 1, figsize=(15, 10), sharex=True)
+    axs = axs.flatten()
+    fig.supxlabel("Y (pixel)")
+    fig.supylabel("counts (e-)")
+    fig.suptitle("median counts for all quadrants", size="xx-large")
     for i, os_quad in enumerate(os_quads):
         plot_strips(
             os_quad,
             axis=1,
             nstrip=1,
-            ax=axs_strips[i],
+            ax=axs[i],
             mu_stat=numpy.median,
             sg_stat=lambda x, axis: numpy.median(numpy.std(x, axis=axis)),
             labels=True,
         )
-        axs_strips[i].axhline(
+        axs[i].axhline(
             numpy.median(os_quad._data.flatten()) + rdnoise[i],
             ls="--",
             color="tab:purple",
             lw=1,
             label=f"median + {rdnoise_prefix}",
         )
-        axs_strips[i].set_title(f"median counts for quadrant {i+1}", loc="left")
+        axs[i].set_title(f"median counts for quadrant {i+1}", loc="left")
     save_fig(
         fig,
         output_path=out_image,
@@ -3145,12 +3145,16 @@ def detrendFrame_drp(
     # refine mask
     log.info(f"refining pixel mask with {median_box = }")
     median_image = detrended_image.medianImg(size=median_box, use_mask=True)
-    detrended_image.setData(mask=(detrended_image._mask | median_image._mask), inplace=True)
+    detrended_image.setData(
+        mask=(detrended_image._mask | median_image._mask), inplace=True
+    )
 
     # normalize in case of flat calibration
     # 'flat' and 'flatfield' are the imagetyp that a pixel flat can have
     if img_type == "flat" or img_type == "flatfield":
-        flat_array = numpy.ma.masked_array(detrended_image._data, mask=detrended_image._mask)
+        flat_array = numpy.ma.masked_array(
+            detrended_image._data, mask=detrended_image._mask
+        )
         detrended_image = detrended_image / numpy.ma.median(flat_array)
 
     # save detrended figure
@@ -3336,15 +3340,15 @@ def createMasterFrame_drp(
                 ],
                 method="median",
                 normalize=True,
-                percentile=75,
+                normalize_percentile=75,
             )
         elif master_type == "arc":
             master_frame = combineImages(
-                proc_images, method="median", normalize=True, percentile=99
+                proc_images, method="median", normalize=True, normalize_percentile=99
             )
         elif master_type == "fiberflat":
             master_frame = combineImages(
-                proc_images, method="median", normalize=True, percentile=75
+                proc_images, method="median", normalize=True, normalize_percentile=75
             )
 
     log.info(f"updating header for new master frame '{out_image}'")
