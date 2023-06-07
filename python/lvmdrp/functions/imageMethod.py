@@ -2860,8 +2860,8 @@ def preprocRawFrame_drp(
     preproc_image._mask |= _ >= 0.7 * 2**16
     # update masked pixels with NaNs if needed
     if replace_with_nan:
+        log.info(f"replacing {preproc_image._mask.sum()} masked pixels with NaNs")
         preproc_image._data[preproc_image._mask] = numpy.nan
-        preproc_image._error[preproc_image._mask] = numpy.nan
 
     # log number of masked pixels
     nmasked = preproc_image._mask.sum()
@@ -2975,7 +2975,7 @@ def detrendFrame_drp(
     in_dark="",
     in_pixelflat="",
     calculate_error="1",
-    replace_nan="1",
+    replace_with_nan="0",
     reject_cr="1",
     median_box="1,15",
     display_plots="0",
@@ -2997,8 +2997,8 @@ def detrendFrame_drp(
         path to pixelflat frame, by default ""
     calculate_error : bool, optional
         whether to calculate Poisson errors or not, by default "1"
-    replace_nan : bool, optional
-        whether to replace or not NaN values by zeros, by default "1"
+    replace_with_nan : bool, optional
+        whether to replace or not NaN values by zeros, by default "0"
     reject_cr : bool, optional
         whether to reject or not cosmic rays from detrended image, by default "1"
     median_box : tuple, optional
@@ -3010,7 +3010,7 @@ def detrendFrame_drp(
     """
 
     calculate_error = bool(int(calculate_error))
-    replace_nan = bool(int(replace_nan))
+    replace_with_nan = bool(int(replace_with_nan))
     reject_cr = bool(int(reject_cr))
     median_box = median_box.split(",")
     median_box = (int(median_box[0]), int(median_box[1]))
@@ -3099,17 +3099,10 @@ def detrendFrame_drp(
     calib_image._mask = numpy.logical_or(proc_image._mask, nanpixels)
     calib_image._mask = numpy.logical_or(calib_image._mask, infpixels)
     # fix infinities & nans
-    if replace_nan:
-        log.info(
-            f"replacing NaNs and infinities ({nanpixels.sum()} and "
-            f"{infpixels.sum()} pix) with zeros"
-        )
-        calib_image._data = numpy.nan_to_num(
-            calib_image._data, nan=0, posinf=0, neginf=0
-        )
-        calib_image._error = numpy.nan_to_num(
-            calib_image._error, nan=0, posinf=0, neginf=0
-        )
+    if replace_with_nan:
+        log.info(f"replacing {calib_image._mask.sum()} masked pixels with NaNs")
+        calib_image._data[calib_image._mask] = numpy.nan
+        calib_image._error[calib_image._mask] = numpy.nan
 
     # reject cosmic rays
     if reject_cr:
