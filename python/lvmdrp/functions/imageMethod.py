@@ -15,7 +15,13 @@ from scipy import interpolate
 from tqdm import tqdm
 
 from lvmdrp.core.fiberrows import FiberRows
-from lvmdrp.core.image import Image, _parse_ccd_section, combineImages, glueImages, loadImage
+from lvmdrp.core.image import (
+    Image,
+    _parse_ccd_section,
+    combineImages,
+    glueImages,
+    loadImage,
+)
 from lvmdrp.core.plot import plot_image, plot_strips, save_fig
 from lvmdrp.core.rss import RSS
 from lvmdrp.core.spectrum1d import Spectrum1D
@@ -2970,7 +2976,6 @@ def detrendFrame_drp(
     in_pixelflat="",
     calculate_error="1",
     replace_nan="1",
-    bgsec="",
     reject_cr="1",
     median_box="1,15",
     display_plots="0",
@@ -2994,8 +2999,6 @@ def detrendFrame_drp(
         whether to calculate Poisson errors or not, by default "1"
     replace_nan : bool, optional
         whether to replace or not NaN values by zeros, by default "1"
-    bgsec : str, optional
-        background sections for each quadrant, by default ""
     reject_cr : bool, optional
         whether to reject or not cosmic rays from detrended image, by default "1"
     median_box : tuple, optional
@@ -3008,10 +3011,6 @@ def detrendFrame_drp(
 
     calculate_error = bool(int(calculate_error))
     replace_nan = bool(int(replace_nan))
-    if bgsec:
-        bgsec = bgsec.split(",")
-    else:
-        bgsec = DEFAULT_BGSEC
     reject_cr = bool(int(reject_cr))
     median_box = median_box.split(",")
     median_box = (int(median_box[0]), int(median_box[1]))
@@ -3112,29 +3111,6 @@ def detrendFrame_drp(
             calib_image._error, nan=0, posinf=0, neginf=0
         )
 
-    # subtract background
-    log.info(f"calculating background using sections = {bgsec}")
-    bg_sections = []
-    bg_image = Image(numpy.ones(calib_image._dim), error=numpy.ones(calib_image._dim))
-    for i, quad_sec in enumerate(bcorr_image.getHdrValue("AMP? TRIMSEC").values()):
-        quad = calib_image.getSection(quad_sec)
-        # extract quad sections for BG calculation
-        bg_sec = quad.getSection(bgsec[i])
-        bg_sections.append(bg_sec)
-        # calculate BG value
-        bg_array = numpy.ma.masked_array(bg_sec._data, mask=bg_sec._mask)
-        bg_value = numpy.ma.median(bg_array, axis=None)
-        bg_error = numpy.ma.std(bg_array, axis=None)
-        log.info(
-            f"median and standard deviation in BG image for quadrant {i+1}: "
-            f"{bg_value:.2f} +/- {bg_error:.2f} (e-)"
-        )
-        # set background section
-        bg_quad = bg_image.getSection(quad_sec)
-        bg_quad._data, bg_quad._error = bg_value, bg_error
-        bg_image.setSection(section=quad_sec, subimg=bg_quad, inplace=True)
-    calib_image = calib_image - bg_image
-
     # reject cosmic rays
     if reject_cr:
         log.info("rejecting cosmic rays")
@@ -3190,38 +3166,19 @@ def detrendFrame_drp(
 
     # show plots
     log.info("plotting results")
-    fig, axs = plt.subplots(2, 2, figsize=(15, 3), sharex=True, sharey=True)
-    axs = axs.flatten()
-    for i, bg_sec in enumerate(bg_sections):
-        plot_image(
-            bg_sec, ax=axs[i], labels=False, colorbar=False, title=f"quadrant {i+1}"
-        )
-    fig.suptitle("background sections", size="xx-large")
-    fig.supxlabel("X (pixel)")
-    fig.supylabel("Y (pixel)")
-    fig.tight_layout()
-    save_fig(
-        fig,
-        output_path=out_image,
-        figure_path=figure_path,
-        label="bg_sections",
-        close=not display_plots,
-    )
-
-    fig, axs = plt.subplots(2, 3, figsize=(15, 10), sharex=True, sharey=True)
+    # detrending process
+    fig, axs = plt.subplots(2, 2, figsize=(15, 15), sharex=True, sharey=True)
     axs = axs.flatten()
     plot_image(proc_image, ax=axs[0], title="original", labels=False)
-    plot_image(bcorr_image, ax=axs[1], title="bias corrected", labels=False)
-    plot_image(bcorr_image, ax=axs[2], title="error", extension="error", labels=False)
-    plot_image(calib_image, ax=axs[3], title="detrended", labels=False)
-    plot_image(bg_image, ax=axs[4], title="background", labels=False)
+    plot_image(bcorr_image, ax=axs[1], title="error", extension="error", labels=False)
     plot_image(
         clean_image,
-        ax=axs[5],
+        ax=axs[2],
         title=f"CR mask ({reject_cr = })",
         extension="mask",
         labels=False,
     )
+    plot_image(calib_image, ax=axs[3], title="detrended", labels=False)
     fig.supxlabel("X (pixel)")
     fig.supylabel("Y (pixel)")
     fig.tight_layout()
