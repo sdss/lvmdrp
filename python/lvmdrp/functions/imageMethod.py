@@ -3090,19 +3090,19 @@ def detrendFrame_drp(
         log.info("subtracting master dark")
     elif in_dark and in_pixelflat:
         log.info("subtracting master dark and dividing by master pixelflat")
-    calib_image = (bcorr_image - master_dark) / master_pixelflat
+    detrended_image = (bcorr_image - master_dark) / master_pixelflat
 
     # propagate pixel mask
     log.info("propagating pixel mask")
-    nanpixels = numpy.isnan(calib_image._data)
-    infpixels = numpy.isinf(calib_image._data)
-    calib_image._mask = numpy.logical_or(proc_image._mask, nanpixels)
-    calib_image._mask = numpy.logical_or(calib_image._mask, infpixels)
+    nanpixels = numpy.isnan(detrended_image._data)
+    infpixels = numpy.isinf(detrended_image._data)
+    detrended_image._mask = numpy.logical_or(proc_image._mask, nanpixels)
+    detrended_image._mask = numpy.logical_or(detrended_image._mask, infpixels)
     # fix infinities & nans
     if replace_with_nan:
-        log.info(f"replacing {calib_image._mask.sum()} masked pixels with NaNs")
-        calib_image._data[calib_image._mask] = numpy.nan
-        calib_image._error[calib_image._mask] = numpy.nan
+        log.info(f"replacing {detrended_image._mask.sum()} masked pixels with NaNs")
+        detrended_image._data[detrended_image._mask] = numpy.nan
+        detrended_image._error[detrended_image._mask] = numpy.nan
 
     # reject cosmic rays
     if reject_cr:
@@ -3119,13 +3119,13 @@ def detrendFrame_drp(
         # )
         # NOTE: faster solution
         ccd = CCDData(
-            calib_image._data,
-            uncertainty=calib_image._error,
+            detrended_image._data,
+            uncertainty=detrended_image._error,
             unit=u.electron,
-            mask=calib_image._mask,
+            mask=detrended_image._mask,
         )
         clean_ccd = cosmicray_lacosmic(ccd, sigclip=30, objlim=35, psfsize=0.8)
-        cr_mask = ~calib_image._mask & clean_ccd.mask
+        cr_mask = ~detrended_image._mask & clean_ccd.mask
         clean_image = Image(data=clean_ccd.data, mask=cr_mask)
         # NOTE: original CR rejection
         # cr_mask = calib_image.createCosmicMask()
@@ -3134,28 +3134,28 @@ def detrendFrame_drp(
         # clean_image = Image(data=clean_array, error=calib_image._error, mask=cr_mask)
 
         # update image with cosmic ray mask
-        calib_image.setData(mask=(calib_image._mask | clean_image._mask))
+        detrended_image.setData(mask=(detrended_image._mask | clean_image._mask))
         log.info(f"found cosmic ray {cr_mask.sum()} pixels")
     else:
         clean_image = Image(
-            data=numpy.ones(calib_image._dim) * numpy.nan,
-            mask=numpy.zeros(calib_image._dim),
+            data=numpy.ones(detrended_image._dim) * numpy.nan,
+            mask=numpy.zeros(detrended_image._dim),
         )
 
     # refine mask
     log.info(f"refining pixel mask with {median_box = }")
-    median_image = calib_image.medianImg(size=median_box, use_mask=True)
-    calib_image.setData(mask=(calib_image._mask | median_image._mask), inplace=True)
+    median_image = detrended_image.medianImg(size=median_box, use_mask=True)
+    detrended_image.setData(mask=(detrended_image._mask | median_image._mask), inplace=True)
 
     # normalize in case of flat calibration
     # 'flat' and 'flatfield' are the imagetyp that a pixel flat can have
     if img_type == "flat" or img_type == "flatfield":
-        flat_array = numpy.ma.masked_array(calib_image._data, mask=calib_image._mask)
-        calib_image = calib_image / numpy.ma.median(flat_array)
+        flat_array = numpy.ma.masked_array(detrended_image._data, mask=detrended_image._mask)
+        detrended_image = detrended_image / numpy.ma.median(flat_array)
 
     # save detrended figure
     log.info(f"saving detrended figure at '{out_image}'")
-    calib_image.writeFitsData(out_image)
+    detrended_image.writeFitsData(out_image)
 
     # show plots
     log.info("plotting results")
@@ -3171,7 +3171,7 @@ def detrendFrame_drp(
         extension="mask",
         labels=False,
     )
-    plot_image(calib_image, ax=axs[3], title="detrended", labels=False)
+    plot_image(detrended_image, ax=axs[3], title="detrended", labels=False)
     fig.supxlabel("X (pixel)")
     fig.supylabel("Y (pixel)")
     fig.tight_layout()
@@ -3325,9 +3325,9 @@ def createMasterFrame_drp(
     else:
         log.info(f"combining {nexp} frames into master frame")
         if master_type == "bias":
-            master_frame = combineImages(proc_images, method="median")
+            master_frame = combineImages(proc_images, method="median", normalize=False)
         elif master_type == "dark":
-            master_frame = combineImages(proc_images, method="median")
+            master_frame = combineImages(proc_images, method="median", normalize=False)
         elif master_type == "flat" or master_type == "flatfield":
             master_frame = combineImages(
                 [
@@ -3335,9 +3335,17 @@ def createMasterFrame_drp(
                     for proc_image in proc_images
                 ],
                 method="median",
+                normalize=True,
+                percentile=75,
             )
-        elif master_type == "arc" or master_type == "fiberflat":
-            master_frame = combineImages(proc_images, method="median")
+        elif master_type == "arc":
+            master_frame = combineImages(
+                proc_images, method="median", normalize=True, percentile=99
+            )
+        elif master_type == "fiberflat":
+            master_frame = combineImages(
+                proc_images, method="median", normalize=True, percentile=75
+            )
 
     log.info(f"updating header for new master frame '{out_image}'")
     # TODO:
