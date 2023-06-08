@@ -2405,12 +2405,7 @@ def combineImages(
 
     if background_subtract:
         quad_sections = images[0].getHdrValues("AMP? TRIMSEC")
-        (
-            stack_image,
-            background_images_med,
-            background_images_std,
-            bg_sections,
-        ) = _bg_subtraction(
+        stack_image, _, _, _ = _bg_subtraction(
             images=stack_image,
             quad_sections=quad_sections,
             bg_sections=background_sections,
@@ -2421,9 +2416,7 @@ def combineImages(
         # select pixels that are exposed
         # calculate the median of the selected pixels
         # scale illuminated pixels to a common scale, for the whole image
-        stack_image, norm_vector = _percentile_normalize(
-            stack_image, normalize_percentile
-        )
+        stack_image, _ = _percentile_normalize(stack_image, normalize_percentile)
 
     # combine the images according to the selected method
     if method == "median":

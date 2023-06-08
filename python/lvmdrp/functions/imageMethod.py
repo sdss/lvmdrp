@@ -3147,8 +3147,8 @@ def detrendFrame_drp(
         )
         detrended_image = detrended_image / numpy.ma.median(flat_array)
 
-    # save detrended figure
-    log.info(f"saving detrended figure at '{out_image}'")
+    # save detrended image
+    log.info(f"saving detrended image at '{out_image}'")
     detrended_image.writeFitsData(out_image)
 
     # show plots
