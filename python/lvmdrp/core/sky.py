@@ -180,7 +180,7 @@ def skymodel_pars_from_header(header):
         obs_pars = master_config["LVM_OBSERVATORIES"]["LCO"]
 
     # define ephemeris object
-    astros = load(EPHEMERIS_PATH)
+    astros = load(os.path.basename(EPHEMERIS_PATH))
     sun, earth, moon = astros["sun"], astros["earth"], astros["moon"]
     # define location
     obs_topos = wgs84.latlon(
