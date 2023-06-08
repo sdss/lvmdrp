@@ -422,7 +422,7 @@ def installESOSky_drp(reinstall_skycorr="0", reinstall_skymodel="0"):
         else:
             sky_logger.error("error while running bootstrap for module 01")
             sky_logger.error("full report:")
-            sky_logger.error(out.stderr.decor("utf-8"))
+            sky_logger.error(out.stderr.decode("utf-8"))
         out = subprocess.run(
             f"bash configure --prefix={os.path.join(SKYMODEL_INST_PATH, 'sm-01_mod1')} --with-cpl={cpl_path}".split(),
             capture_output=True,
