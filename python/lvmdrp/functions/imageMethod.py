@@ -3107,35 +3107,25 @@ def detrendFrame_drp(
     # reject cosmic rays
     if reject_cr:
         log.info("rejecting cosmic rays")
-        # NOTE: this function hangs up
-        # clean_array, cr_mask = lacosmic(
-        #     data=calib_image._data,
-        #     error=calib_image._error,
-        #     mask=calib_image._mask,
-        #     background=bg_image._data,
-        #     contrast=1.1,
-        #     cr_threshold=5,
-        #     neighbor_threshold=2,
-        # )
-        # NOTE: faster solution
         ccd = CCDData(
             detrended_image._data,
             uncertainty=detrended_image._error,
             unit=u.electron,
             mask=detrended_image._mask,
         )
-        clean_ccd = cosmicray_lacosmic(ccd, sigclip=30, objlim=35, psfsize=0.8)
-        cr_mask = ~detrended_image._mask & clean_ccd.mask
+        clean_ccd = cosmicray_lacosmic(ccd, sigclip=4000 / exptime)
+        cr_mask = clean_ccd.mask
+        cr_mask[detrended_image._mask] = False
+        if cr_mask.sum() > 100000:
+            log.error(f"found cosmic ray {cr_mask.sum()} pixels, ignoring CR")
+            cr_mask[:, :] = False
+        elif cr_mask.sum() > 1000:
+            log.warning(f"found cosmic ray {cr_mask.sum()} pixels")
+        else:
+            log.info(f"found cosmic ray {cr_mask.sum()} pixels")
         clean_image = Image(data=clean_ccd.data, mask=cr_mask)
-        # NOTE: original CR rejection
-        # cr_mask = calib_image.createCosmicMask()
-        # clean_array = copy(calib_image._data)
-        # clean_array[cr_mask] = numpy.nan
-        # clean_image = Image(data=clean_array, error=calib_image._error, mask=cr_mask)
-
         # update image with cosmic ray mask
         detrended_image.setData(mask=(detrended_image._mask | clean_image._mask))
-        log.info(f"found cosmic ray {cr_mask.sum()} pixels")
     else:
         clean_image = Image(
             data=numpy.ones(detrended_image._dim) * numpy.nan,
@@ -3188,34 +3178,13 @@ def detrendFrame_drp(
     )
 
 
-def createMasterFrame_drp(
-    in_images,
-    out_image,
-    reject_cr=False,
-    exptime_thresh=5,
-    force_master=True,
-    **cr_kwargs,
-):
+def createMasterFrame_drp(in_images, out_image, force_master=True):
     """
     Combines the given calibration frames (bias, dark, or pixelflat) into a
     master calibration frame.
 
-    Optionally this task will apply a cosmic ray rejection algorithm
-    (reject_cr=True) if the following conditions apply:
-
-        * exposure time < exptime_thresh OR
-        * number of frames is <= 2
-
-    The combination of the images will be carried out using a sigma clipped
-    median statistic if the number of exposures is > 2. If the number of
-    exposures <= 2, a simple average statistic is applied. In the special case
-    that CR rejection is needed, the combination of images is selective:
-
-        * where cosmic ray in one frame, select the other
-        * where cosmic ray in none of the frames, calculate an average of both
-
-    When only one frame is given, it is still flagged as master, but a warning
-    will be thrown.
+    When only one frame is given and `force_master==True`, it is still flagged
+    as master, but a warning will be thrown.
 
     Parameters
     ----------
@@ -3224,18 +3193,8 @@ def createMasterFrame_drp(
         into a master frame
     out_image : string
         path to output master frame
-    reject_cr : boolean, optional
-        whether to reject or not cosmic rays. Deafults to False. If true this
-        task will decide if cosmic ray rejection is needed or not based on the
-        exposure time of the frame and the number of frames being combined
-    exptime_thresh : integer, optional
-        minimum exposure time belowe which no cosmic rejection routine will be
-        run
     force_master : bool, optional
         whether to force or not creation of master frame, by default True
-    cr_kwargs : dict_like
-        additional keyword arguments to be passed to the cosmic ray rejection
-        routine
 
     Examples
     --------
@@ -3284,72 +3243,29 @@ def createMasterFrame_drp(
             proc_image * factor for factor, proc_image in zip(factors, proc_images)
         ]
 
-    if reject_cr and (master_exptime < exptime_thresh or nexp == 2):
-        log.info(f"rejecting CR for exposure {proc_images[0]._header['EXPNUM']}")
-        cr_select_1 = proc_images[0].createCosmicMask(**cr_kwargs)
-        log.info(f"rejecting CR for exposure {proc_images[1]._header['EXPNUM']}")
-        cr_select_2 = proc_images[1].createCosmicMask(**cr_kwargs)
-
-        # filter out cosmic rays by selecting pixels where no CR were detected
-        # normalize counts if pixelflat
-        log.info("selecting pixels with no CR for master frame")
-        new_data_1 = numpy.where(
-            cr_select_1, x=proc_images[1]._data, y=proc_images[0]._data
+    log.info(f"combining {nexp} frames into master frame")
+    if master_type == "bias":
+        master_frame = combineImages(proc_images, method="median", normalize=False)
+    elif master_type == "dark":
+        master_frame = combineImages(proc_images, method="median", normalize=False)
+    elif master_type == "flat" or master_type == "flatfield":
+        master_frame = combineImages(
+            [
+                proc_image / numpy.nanmedian(proc_image._data)
+                for proc_image in proc_images
+            ],
+            method="median",
+            normalize=True,
+            normalize_percentile=75,
         )
-        new_data_2 = numpy.where(
-            cr_select_2, x=proc_images[0]._data, y=proc_images[1]._data
+    elif master_type == "arc":
+        master_frame = combineImages(
+            proc_images, method="median", normalize=True, normalize_percentile=99
         )
-        if master_type == "flat" or master_type == "flatfield":
-            new_data = [
-                new_data_1 / numpy.nanmedian(new_data_1),
-                new_data_2 / numpy.nanmedian(new_data_2),
-            ]
-        else:
-            new_data = [new_data_1, new_data_2]
-
-        log.info(f"combining {nexp} frames into master frame")
-        # average images
-        new_data = numpy.nanmean(new_data, axis=0)
-
-        new_header = proc_images[0]._header
-        # combine original masks
-        new_mask = numpy.logical_and(proc_images[0]._mask, proc_images[1]._mask)
-
-        # prepare image for CRR
-        master_frame = Image(data=new_data, header=new_header, mask=new_mask)
-
-        # combine CR pixel selection
-        # cr_mask = numpy.logical_and(cr_select_1, cr_select_2)
-        # replace_box = cr_kwargs.get("replace_box", (20, 1))
-        # replace_error = cr_kwargs.get("replace_error", 1e10)
-        # filter out remaining cosmic rays
-        # master_frame.replaceMaskMedian(*replace_box, replace_error=replace_error)
-        # add original masks
-        # master_frame.setData(mask=new_mask)
-    else:
-        log.info(f"combining {nexp} frames into master frame")
-        if master_type == "bias":
-            master_frame = combineImages(proc_images, method="median", normalize=False)
-        elif master_type == "dark":
-            master_frame = combineImages(proc_images, method="median", normalize=False)
-        elif master_type == "flat" or master_type == "flatfield":
-            master_frame = combineImages(
-                [
-                    proc_image / numpy.nanmedian(proc_image._data)
-                    for proc_image in proc_images
-                ],
-                method="median",
-                normalize=True,
-                normalize_percentile=75,
-            )
-        elif master_type == "arc":
-            master_frame = combineImages(
-                proc_images, method="median", normalize=True, normalize_percentile=99
-            )
-        elif master_type == "fiberflat":
-            master_frame = combineImages(
-                proc_images, method="median", normalize=True, normalize_percentile=75
-            )
+    elif master_type == "fiberflat":
+        master_frame = combineImages(
+            proc_images, method="median", normalize=True, normalize_percentile=75
+        )
 
     log.info(f"updating header for new master frame '{out_image}'")
     # TODO:
