@@ -576,8 +576,8 @@ def configureSkyModel_drp(
     skymodel_config_path=SKYMODEL_CONFIG_PATH,
     skymodel_path=SKYMODEL_INST_PATH,
     method="run",
-    run_library=False,
-    run_multiscat=False,
+    run_library="0",
+    run_multiscat="0",
     source="",
     parallel="auto",
 ):
@@ -630,6 +630,11 @@ def configureSkyModel_drp(
     user:> drp sky configureSkyModel method=run run_library=True run_multiscat=False
 
     """
+
+    run_library = bool(int(run_library))
+    run_multiscat = bool(int(run_multiscat))
+
+    print(run_library, run_library, method)
 
     ori_path = os.path.abspath(os.curdir)
 
