@@ -764,7 +764,8 @@ def get_metadata(
 
     return metadata
 
-
+# TODO: implement matching of analogs and calibration masters
+# in Brian's run_drp code
 def get_analog_groups(
     tileid,
     mjd,
@@ -1034,7 +1035,8 @@ def match_master_metadata(
             calib_frames[calib_type] = calib_metadata.iloc[0]
     return calib_frames
 
-
+# TODO: implement update of reduction status
+# in Brian's run_drp code
 def put_reduction_stage(
     stage,
     tileid,
