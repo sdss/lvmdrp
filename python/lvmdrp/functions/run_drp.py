@@ -361,6 +361,49 @@ def split_mjds(mjd: str) -> list:
     return sorted(mjds)
 
 
+def filter_expnum(frame: pd.DataFrame, expnum: Union[int, str, list]) -> pd.DataFrame:
+    """ Filter the dataframe by exposure number
+
+    Filters the metadata dataframe by the input exposure numbers.  expnum
+    can be a single integer value, a list of individual exposure numbers,
+    or a string range, i.e. "190-200".  A range can also be specified as
+    "-200" or "190-" to indicate that the range includes all exposures prior to
+    or following the given exposure number.  Ranges are inclusive to input
+    boundaries.
+
+    Parameters
+    ----------
+    frame : pd.DataFrame
+        the metadata of exposure information
+    expnum : Union[int, str, list]
+        the input exposure number range or value to parse
+
+    Returns
+    -------
+    pd.DataFrame
+        The subset of frames matching the condition
+    """
+
+    if isinstance(expnum, int):
+        query = f"expnum == {expnum}"
+    elif isinstance(expnum, (tuple, list)):
+        query = f" expnum in {sorted(map(int, expnum))}"
+    elif isinstance(expnum, str) and expnum.isdigit():
+        query = f"expnum == {int(expnum)}"
+    elif isinstance(expnum, str) and '-' in expnum:
+        start_exp, end_exp = expnum.split('-')
+        start_exp = int(start_exp) if start_exp else None
+        end_exp = int(end_exp) if end_exp else None
+        if start_exp and end_exp:
+            query = f"{start_exp} <= expnum <= {end_exp}"
+        elif start_exp:
+            query = f"expnum >= {start_exp}"
+        elif end_exp:
+            query = f"expnum <= {end_exp}"
+    return frame.query(query)
+
+
+
 # def reduce_file(filename: str):
 #     meta = extract_metadata([filename])
 #     frame = meta.iloc[0]
@@ -373,7 +416,7 @@ def split_mjds(mjd: str) -> list:
 def run_drp(mjd: Union[int, str, list], bias: bool = False, dark: bool = False,
             skip_bd: bool = False, arc: bool = False, flat: bool = False,
             only_bd: bool = False, only_cal: bool = False, only_sci: bool = False,
-            spec: int = None, camera: str = None):
+            spec: int = None, camera: str = None, expnum: Union[int, str, list] = None):
     """ Run the LVM DRP
 
     Run the LVM data reduction pipeline on.  Optionally set flags
@@ -398,7 +441,8 @@ def run_drp(mjd: Union[int, str, list], bias: bool = False, dark: bool = False,
     if isinstance(mjds, list):
         for mjd in mjds:
             run_drp(mjd=mjd, bias=bias, dark=dark, skip_bd=skip_bd, arc=arc, flat=flat,
-                    only_bd=only_bd, only_cal=only_cal, only_sci=only_sci, spec=spec, camera=camera)
+                    only_bd=only_bd, only_cal=only_cal, only_sci=only_sci, spec=spec, camera=camera,
+                    expnum=expnum)
         return
 
     log.info(f'Processing MJD {mjd}')
@@ -426,10 +470,15 @@ def run_drp(mjd: Union[int, str, list], bias: bool = False, dark: bool = False,
     if camera:
         sub = sub[sub['camera'].str.contains(camera)]
 
+    # filter on exposure number
+    if expnum:
+        log.info(f'Filtering on exposure numbers {expnum}.')
+        sub = filter_expnum(sub, expnum)
+
     # get biases and darks
-    cond = frames['imagetyp'].isin(['bias', 'dark'])
-    precals = frames[cond]
-    if len(precals) == 0:
+    cond = sub['imagetyp'].isin(['bias', 'dark'])
+    precals = sub[cond]
+    if len(precals) == 0 and not skip_bd:
         log.error(f'No biases or darks found for mjd {mjd}. Discontinuing reduction.')
         return
     precals = precals.sort_values(['expnum', 'camera'])
@@ -464,7 +513,7 @@ def run_drp(mjd: Union[int, str, list], bias: bool = False, dark: bool = False,
         return
 
     # get all other image types
-    sub = frames[~cond]
+    sub = sub[~cond]
     if flat or arc:
         sub = sub[sub['imagetyp'] == ('arc' if arc else 'flat')]
     elif only_cal:
@@ -500,6 +549,10 @@ def run_drp(mjd: Union[int, str, list], bias: bool = False, dark: bool = False,
                      mjd=frame['mjd'],
                      expnum=frame['expnum'], tileid=frame['tileid'],
                      flavor=frame['imagetyp'])
+
+    # return if only calibration set
+    if only_cal or flat or arc:
+        return
 
     # TODO - check for single elements
     mjd = list(set(sub['mjd']))[0]
@@ -727,8 +780,11 @@ def read_fibermap(as_table: bool = None, as_hdu: bool = None) -> Union[pd.DataFr
     Union[pd.DataFrame, Table, fits.BinTableHDU]
         the fibermap as a dataframe, table, or hdu
     """
+    core_dir = os.getenv('LVMCORE_DIR')
+    if not core_dir:
+        raise ValueError("Environment variable LVMCORE_DIR not set. Set it or load lvmcore module file.")
 
-    p = pathlib.Path(os.getenv('LVMCORE_DIR')) / 'metrology/lvm_fiducial_fibermap.yaml'
+    p = pathlib.Path(core_dir) / 'metrology/lvm_fiducial_fibermap.yaml'
     if not p.is_file():
         log.warning("Cannot read fibermap from lvmcore.")
         return
