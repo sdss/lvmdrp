@@ -7,7 +7,7 @@ import cloup
 from cloup.constraints import mutually_exclusive, RequireExactly
 
 from astropy.io import fits
-from lvmdrp.functions.run_drp import run_drp, get_config_options
+from lvmdrp.functions.run_drp import run_drp, get_config_options, reduce_file
 from lvmdrp.functions.imageMethod import preproc_raw_frame
 
 
@@ -44,6 +44,13 @@ def run(mjd, mjd_list, mjd_range, skip_bd, arc, flat, only_bd, only_cal, only_sc
             expnum=expnum)
 
 cli.add_command(run)
+
+
+@cli.command('reduce_file', short_help='Reduce a single file')
+@click.option('-f', '--filename', type=str, help='a full path filename to reduce')
+def run_reduce_file(filename):
+    """ Run a single raw sdR frame file through the LVM DRP """
+    reduce_file(filename)
 
 
 @cli.command('preprocess', short_help='Preprocess raw frames')

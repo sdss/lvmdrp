@@ -403,14 +403,22 @@ def filter_expnum(frame: pd.DataFrame, expnum: Union[int, str, list]) -> pd.Data
     return frame.query(query)
 
 
+def reduce_file(filename: str):
+    """ Reduce a single file
 
-# def reduce_file(filename: str):
-#     meta = extract_metadata([filename])
-#     frame = meta.iloc[0]
+    Run a single raw frame through the LVM DRP
 
-#     reduce_frame(filename, camera=frame['camera'],
-#                  mjd=frame['mjd'], expnum=frame['expnum'], tileid=frame['tileid'],
-#                  flavor=frame['imagetyp'])
+    Parameters
+    ----------
+    filename : str
+        The full filepath name
+    """
+    meta = extract_metadata([filename])
+    frame = meta.iloc[0]
+
+    reduce_frame(filename, camera=frame.camera, mjd=frame.mjd,
+                 expnum=frame.expnum.item(), tileid=frame.tileid,
+                 flavor=frame.imagetyp)
 
 
 def run_drp(mjd: Union[int, str, list], bias: bool = False, dark: bool = False,
