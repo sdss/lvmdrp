@@ -18,11 +18,11 @@ reduction_steps:
     plot_fig: true
   trace_peaks:
     steps: 30
-    coadd: 30
+    coadd: 1
     threshold_peak: 0
     max_diff: 2
     method: hyperbolic
-    median_box: 5
+    median_box: 10
     median_cross: 1
     poly_disp: 2
   extract_spectra:
