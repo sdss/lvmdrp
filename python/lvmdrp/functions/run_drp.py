@@ -15,7 +15,7 @@ from lvmdrp.functions.imageMethod import (preproc_raw_frame, create_master_frame
                                           extract_spectra)
 from lvmdrp.functions.rssMethod import (determine_wavelength_solution, create_pixel_table,
                                         resample_wavelength, join_spec_channels)
-from lvmdrp.utils.metadata import get_frames_metadata, get_master_metadata
+from lvmdrp.utils.metadata import get_frames_metadata, get_master_metadata, extract_metadata
 from lvmdrp import config, log, path, __version__ as drpver
 
 
@@ -198,8 +198,6 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
 
     # check master frames
     mbias = path.full("lvm_cal_mbias", mjd=mjd, drpver=drpver, camera=camera, tileid=tileid)
-    # mdark = path.full("lvm_cal_time", kind='mdark', mjd=mjd, drpver=drpver, camera=camera,
-    #                   tileid=tileid, exptime=300)
     mdark = find_best_mdark(tileid, mjd, camera)
     log.info(f'Using master bias: {mbias}')
     log.info(f'Using master dark: {mdark}')
@@ -222,6 +220,11 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
                       in_bias=mbias, in_dark=mdark, **kwargs)
     log.info(f'Output calibrated file: {out_cal}')
 
+    # add the fibermap to all flat and science files
+    if flavor in {'fiberflat', 'flat', 'pixelflat', 'object', 'science'}:
+        log.info('Adding slitmap extension')
+        add_extension(fibermap, out_cal)
+
     # fiber tracing
     if 'flat' in flavor:  # and not camera.startswith('b') and camera.endswith('1'):
         log.info('--- Running fiber trace ---')
@@ -237,6 +240,8 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
     trace_file = find_file('trace', mjd=mjd, tileid=tileid, camera=camera)
     if not trace_file:
         return
+
+    # perform the fiber extraction
     log.info('--- Extracting fiber spectra ---')
     kwargs = get_config_options('reduction_steps.extract_spectra')
     log.info(f'custom configuration parameters for extract_spectra: {repr(kwargs)}')
@@ -356,6 +361,15 @@ def split_mjds(mjd: str) -> list:
     return sorted(mjds)
 
 
+# def reduce_file(filename: str):
+#     meta = extract_metadata([filename])
+#     frame = meta.iloc[0]
+
+#     reduce_frame(filename, camera=frame['camera'],
+#                  mjd=frame['mjd'], expnum=frame['expnum'], tileid=frame['tileid'],
+#                  flavor=frame['imagetyp'])
+
+
 def run_drp(mjd: Union[int, str, list], bias: bool = False, dark: bool = False,
             skip_bd: bool = False, arc: bool = False, flat: bool = False,
             only_bd: bool = False, only_cal: bool = False, only_sci: bool = False,
@@ -390,7 +404,8 @@ def run_drp(mjd: Union[int, str, list], bias: bool = False, dark: bool = False,
     log.info(f'Processing MJD {mjd}')
 
     # check the MJD data directory path
-    mjd_path = pathlib.Path("LVM_DATA_S") / str(mjd)
+    mjd_path = pathlib.Path(os.getenv('LVM_DATA_S')) / str(mjd)
+    log.info(f'MJD processing path: {mjd_path}')
     if not mjd_path.is_dir():
         log.warning(f'{mjd = } is not valid raw data directory.')
         return
@@ -535,6 +550,12 @@ def start_logging(mjd: int, tileid: int):
 def write_config_file():
     """ Write out the DRP configuration file """
     cpath = pathlib.Path(os.getenv('LVM_SPECTRO_REDUX')) / drpver / f"lvm-config-{drpver}.yaml"
+
+    # create dir if needed
+    if not cpath.parent.is_dir():
+        cpath.parent.mkdir(parents=True, exist_ok=True)
+
+    # write the config file
     with open(cpath, 'w') as f:
         f.write(yaml.safe_dump(dict(config), sort_keys=False, indent=2))
 
@@ -723,6 +744,9 @@ def read_fibermap(as_table: bool = None, as_hdu: bool = None) -> Union[pd.DataFr
         return df
 
 
+fibermap = read_fibermap(as_hdu=True)
+
+
 def select_fibers(specid: int = None, flag: str = 'SAIT') -> pd.DataFrame:
     """ Select fibers from the fibermap
 
@@ -752,3 +776,35 @@ def select_fibers(specid: int = None, flag: str = 'SAIT') -> pd.DataFrame:
             query += f' & spectrographid == {specid}'
 
     return df.query(query)
+
+
+def add_extension(hdu: Union[fits.ImageHDU, fits.BinTableHDU], filename: str):
+    """ Add an astropy HDU to an existing FITS file
+
+    _extended_summary_
+
+    Parameters
+    ----------
+    hdu : Union[fits.ImageHDU, fits.BinTableHDU]
+        the HDU to add
+    filename : str
+        the name of the file on disk
+
+    Raises
+    ------
+    ValueError
+        when the input hdu is not a valid image or table hdu
+    ValueError
+        when the input hdu does not a proper name
+    """
+
+    if not isinstance(hdu, (fits.ImageHDU, fits.BinTableHDU)):
+        raise ValueError('Input hdu is not valid astropy FITS ImageHDU or BinTableHDU.')
+
+    if not hdu.name:
+        raise ValueError(f'Input hdu does not have a valid extension name: {hdu.name}. Cannot add.')
+
+    with fits.open(filename, mode='update') as hdulist:
+        if hdu.name not in hdulist:
+            hdulist.append(hdu)
+            hdulist.flush()
