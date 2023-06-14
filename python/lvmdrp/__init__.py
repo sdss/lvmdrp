@@ -24,11 +24,11 @@ except FileNotFoundError:
 
 
 # setup the sdss tree environment and paths
-def setup_paths(release: str = 'sdss5', replant: bool = False):
+def setup_paths(release: str = 'sdsswork', replant: bool = False):
     tree = Tree(release)
     if replant:
         tree.replant_tree(release)
-    return Path(release='sdss5')
+    return Path(release='sdsswork')
 
 
 path = setup_paths()
