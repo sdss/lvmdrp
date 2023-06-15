@@ -9,6 +9,7 @@ from cloup.constraints import mutually_exclusive, RequireExactly
 from astropy.io import fits
 from lvmdrp.functions.run_drp import run_drp, get_config_options, reduce_file
 from lvmdrp.functions.imageMethod import preproc_raw_frame
+from lvmdrp.functions.skyMethod import installESOSky_drp, configureSkyModel_drp
 
 
 @click.group('drp', short_help='CLI for the LVM data reduction')
@@ -77,6 +78,30 @@ def preprocess(filename, flavor):
     # preprocess the frame
     preproc_raw_frame(filename, flavor=flavor, kind='p', camera=camera,
                       mjd=mjd, expnum=expnum, tileid=tileid, **kwargs)
+
+
+@click.group('sky', short_help='Run routines related to sky subtraction')
+def skycli():
+    pass
+
+
+@skycli.command('install', short_help='Install the ESO sky routines')
+def sky_install():
+    """ Install the ESO skycorr and skymodel routines """
+    installESOSky_drp()
+
+
+@skycli.command('configure', short_help='Configure the ESO sky routines')
+@click.option('--library', is_flag=True, default=False, show_default=True,
+              help='Flag to run ESO routines to build a spectral library')
+@click.option('--multiscat', is_flag=True, default=False, show_default=True,
+              help='Flag to run ESO "estmultiscat" routine for multiple scattering corrections')
+def sky_configure(library, multiscat):
+    """ Run the sky module configuration """
+    configureSkyModel_drp(run_libary=library, run_multiscat=multiscat)
+
+
+cli.add_command(skycli)
 
 
 if __name__ == "__main__":
