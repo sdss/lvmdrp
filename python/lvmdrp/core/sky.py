@@ -178,7 +178,7 @@ def skymodel_pars_from_header(header):
         obs_pars = master_config["LVM_OBSERVATORIES"]["LCO"]
 
     # define ephemeris object
-    astros = load(EPHEMERIS_PATH)
+    astros = load(os.path.basename(EPHEMERIS_PATH))
     sun, earth, moon = astros["sun"], astros["earth"], astros["moon"]
     # define location
     obs_topos = wgs84.latlon(
@@ -437,6 +437,8 @@ def run_skymodel(skymodel_path=SKYMODEL_INST_PATH, **kwargs):
     return skymodel_inst_par, skymodel_model_par, sky_comps
 
 
+# TODO: list a set of parameters I want the users
+# to modify
 def run_skycorr(
     sci_spec,
     sky_spec,
