@@ -3120,16 +3120,22 @@ def detrendFrame_drp(
             unit=u.electron,
             mask=detrended_image._mask,
         )
-        clean_ccd = cosmicray_lacosmic(ccd, sigclip=4000 / exptime)
+        array = copy(detrended_image._data)
+        array[detrended_image._mask] = numpy.nan
+        clean_ccd = cosmicray_lacosmic(
+            ccd, sigclip=30.0, objlim=numpy.nanpercentile(array, q=99.9)
+        )
         cr_mask = clean_ccd.mask
         cr_mask[detrended_image._mask] = False
-        if cr_mask.sum() > 100000:
-            log.error(f"found cosmic ray {cr_mask.sum()} pixels, ignoring CR")
+
+        ncosmic = cr_mask.sum()
+        if ncosmic > 100000:
+            log.error(f"found cosmic ray {ncosmic} pixels, ignoring CR")
             cr_mask[:, :] = False
-        elif cr_mask.sum() > 1000:
-            log.warning(f"found cosmic ray {cr_mask.sum()} pixels")
+        elif ncosmic > 1000:
+            log.warning(f"found cosmic ray {ncosmic} pixels")
         else:
-            log.info(f"found cosmic ray {cr_mask.sum()} pixels")
+            log.info(f"found cosmic ray {ncosmic} pixels")
         clean_image = Image(data=clean_ccd.data, mask=cr_mask)
         # update image with cosmic ray mask
         detrended_image.setData(mask=(detrended_image._mask | clean_image._mask))
