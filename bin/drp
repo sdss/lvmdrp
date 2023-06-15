@@ -86,15 +86,19 @@ def skycli():
 
 
 @skycli.command('install', short_help='Install the ESO sky routines')
-def sky_install():
+@click.option('-c', '--reinstall-skycorr', is_flag=True, default=False, show_default=True,
+              help='Flag to reinstall the ESO skycorr routines')
+@click.option('-m', '--reinstall-model', is_flag=True, default=False, show_default=True,
+              help='Flag to resinstall the ESO sky models')
+def sky_install(reinstall_skycorr, reinstall_skymodel):
     """ Install the ESO skycorr and skymodel routines """
-    installESOSky_drp()
+    installESOSky_drp(reinstall_skycorr=reinstall_skycorr, reinstall_skymodel=reinstall_skymodel)
 
 
 @skycli.command('configure', short_help='Configure the ESO sky routines')
-@click.option('--library', is_flag=True, default=False, show_default=True,
+@click.option('-l', '--library', is_flag=True, default=False, show_default=True,
               help='Flag to run ESO routines to build a spectral library')
-@click.option('--multiscat', is_flag=True, default=False, show_default=True,
+@click.option('-m', '--multiscat', is_flag=True, default=False, show_default=True,
               help='Flag to run ESO "estmultiscat" routine for multiple scattering corrections')
 def sky_configure(library, multiscat):
     """ Run the sky module configuration """
