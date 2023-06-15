@@ -77,15 +77,12 @@ SYSTEM = struct.calcsize("P") * 8
 
 
 # TODO: implement installation path parameters and defaults
-def installESOSky_drp(reinstall_skycorr="0", reinstall_skymodel="0"):
+def installESOSky_drp(reinstall_skycorr: bool = False, reinstall_skymodel: bool = False):
     """
     Installs the ESO sky routines in the current python environment
 
 
     """
-
-    reinstall_skycorr = bool(int(reinstall_skycorr))
-    reinstall_skymodel = bool(int(reinstall_skymodel))
 
     # get original current directory
     initial_path = os.getcwd()
