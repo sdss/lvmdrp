@@ -3049,7 +3049,7 @@ def detrendFrame_drp(
         master_bias = dummy_bias
     else:
         log.info(f"using bias calibration frame '{in_bias}'")
-        master_bias = loadImage(in_bias)
+        master_bias = loadImage(in_bias) / exptime
 
     # read master dark
     if img_type in ["bias", "dark"] or (in_dark is None or not os.path.isfile(in_dark)):
@@ -3058,7 +3058,7 @@ def detrendFrame_drp(
         master_dark = dummy_dark
     else:
         log.info(f"using dark calibration frame '{in_dark}'")
-        master_dark = loadImage(in_dark)
+        master_dark = loadImage(in_dark) / exptime
 
         # scale down the dark if needed
         factor = exptime / master_dark._header["EXPTIME"]
@@ -3089,7 +3089,7 @@ def detrendFrame_drp(
         quad.computePoissonError(quad.getHdrValue(f"AMP{i+1} RDNOISE"))
         bcorr_image.setSection(section=quad_sec, subimg=quad, inplace=True)
         log.info(
-            f"median error in quadrant {i+1}: {numpy.median(quad._error):.2f} (e-)"
+            f"median error in quadrant {i+1}: {numpy.median(quad._error):.2f} (e-/s)"
         )
 
     # complete image detrending
@@ -3228,7 +3228,7 @@ def createMasterFrame_drp(in_images, out_image, force_master=True):
     nexp = len(in_images)
     proc_images, exptimes, img_types = [], [], []
     for in_image in in_images:
-        proc_image = loadImage(in_image).convertUnit(unit="electron")
+        proc_image = loadImage(in_image)
         exptimes.append(proc_image._header["EXPTIME"])
         img_types.append(proc_image._header["IMAGETYP"].lower())
         proc_images.append(proc_image)

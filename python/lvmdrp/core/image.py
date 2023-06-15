@@ -746,8 +746,8 @@ class Image(Header):
             )
         )
         if current != unit:
-            gains = self.getHdrValue[f"AMP? {gain_field}"]
-            sects = self.getHdrValue["AMP? TRIMSEC"]
+            gains = self.getHdrValue(f"AMP? {gain_field}")
+            sects = self.getHdrValue("AMP? TRIMSEC")
             n_amp = len(gains)
             for i in range(n_amp):
                 factor = (
