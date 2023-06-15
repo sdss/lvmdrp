@@ -9,8 +9,6 @@ from astropy import units as u
 from astropy.io import fits as pyfits
 from astropy.nddata import CCDData
 from ccdproc import cosmicray_lacosmic
-from lacosmic import lacosmic
-from matplotlib import pyplot as plt
 from scipy import interpolate
 from tqdm import tqdm
 
@@ -22,7 +20,7 @@ from lvmdrp.core.image import (
     glueImages,
     loadImage,
 )
-from lvmdrp.core.plot import plot_image, plot_strips, save_fig
+from lvmdrp.core.plot import plt, create_subplots, plot_image, plot_strips, save_fig
 from lvmdrp.core.rss import RSS
 from lvmdrp.core.spectrum1d import Spectrum1D
 from lvmdrp.core.tracemask import TraceMask
@@ -739,7 +737,7 @@ def findPeaksAuto_drp(
     slice="",
     method="gauss",
     init_sigma="1.0",
-    plot="1",
+    display_plots="1",
     figure_path=".figures",
 ):
     """
@@ -769,7 +767,7 @@ def findPeaksAuto_drp(
         Set the method to measure the peaks positions, either 'gauss' or 'hyperbolic'.
     init_sigma: string of  float, optional with default: '1.0'
         Init guess for the  sigma width (in pixels units)  for the Gaussian fitting, only used if method 'gauss' is selected
-    plot: string of integer (0 or 1), optional  with default: 1
+    display_plots: string of integer (0 or 1), optional  with default: 1
         Show information during the processing on the command line (0 - no, 1 - yes)
 
     Examples
@@ -782,7 +780,7 @@ def findPeaksAuto_drp(
     median_box = int(median_box)
     median_cross = int(median_cross)
     init_sigma = float(init_sigma)
-    plot = int(plot)
+    display_plots = bool(int(display_plots))
 
     # Load Image
     img = loadImage(in_image)
@@ -836,23 +834,26 @@ def findPeaksAuto_drp(
         file_out.write("%i %i %e %i\n" % (i, round_cent[i], centers[i], 0))
     file_out.close()
 
-    if plot == 1:
-        fig = plt.figure(figsize=(25, 10))
-        plt.plot(cut._data, "-k", lw=1)
-        plt.plot(peaks[0], peaks[2], "o", color="tab:red", mew=0, ms=5)
-        plt.plot(
-            centers,
-            numpy.ones(len(centers)) * numpy.nanmax(peaks[2]) * 0.5,
-            "x",
-            mew=1,
-            ms=7,
-            color="tab:blue",
-        )
-        plt.xlabel("cross-dispersion axis (pix)")
-        plt.ylabel("fiber profile")
-        plt.show()
-    else:
-        save_fig(fig, output_path=out_peaks, figure_path=figure_path, label=None)
+    fig, ax = create_subplots(to_display=display_plots, figsize=(25, 10))
+    ax.plot(cut._data, "-k", lw=1)
+    ax.plot(peaks[0], peaks[2], "o", color="tab:red", mew=0, ms=5)
+    ax.plot(
+        centers,
+        numpy.ones(len(centers)) * numpy.nanmax(peaks[2]) * 0.5,
+        "x",
+        mew=1,
+        ms=7,
+        color="tab:blue",
+    )
+    ax.set_xlabel("cross-dispersion axis (pix)")
+    ax.set_ylabel("fiber profile")
+    save_fig(
+        fig,
+        product_path=out_peaks,
+        to_display=display_plots,
+        figure_path=figure_path,
+        label=None,
+    )
 
 
 def findPeaksOffset_drp(
@@ -2883,10 +2884,11 @@ def preprocRawFrame_drp(
     # plot overscan strips along X and Y axes
     log.info("plotting results")
     # show column between ac and bd
-    fig, axs = plt.subplots(2, 1, figsize=(15, 10), sharex=True, sharey=False)
-    axs = axs.flatten()
+    fig, axs = create_subplots(
+        display_plots, nrows=2, ncols=1, figsize=(15, 10), sharex=True, sharey=False
+    )
     axs[-1].set_xlabel("X (pixel)")
-    fig.supylabel("median counts (e-)")
+    fig.supylabel(f"median counts ({preproc_image._header['BUNIT']})")
     fig.suptitle("overscan cut along X-axis", size="xx-large")
 
     os_ab = glueImages(os_quads[:2], positions=["00", "10"])
@@ -2906,17 +2908,23 @@ def preprocRawFrame_drp(
         axs[i].set_title(f"overscan for quadrants {['12','34'][i]}", loc="left")
     save_fig(
         fig,
-        output_path=out_image,
+        product_path=out_image,
+        to_display=display_plots,
         figure_path=figure_path,
         label="os_strips_12-34_x",
-        close=not display_plots,
     )
 
     # show median counts along Y-axis
-    fig, axs = plt.subplots(2, 1, figsize=(15, 10), sharex=True, sharey=False)
-    axs = axs.flatten()
+    fig, axs = create_subplots(
+        to_display=display_plots,
+        nrows=2,
+        ncols=1,
+        figsize=(15, 10),
+        sharex=True,
+        sharey=False,
+    )
     axs[-1].set_xlabel("Y (pixel)")
-    fig.supylabel("median counts (e-)")
+    fig.supylabel(f"median counts ({preproc_image._header['BUNIT']})")
     fig.suptitle("overscan cut along Y-axis", size="xx-large")
     os_ac = glueImages(os_quads[::2], positions=["00", "01"])
     os_bd = glueImages(os_quads[1::2], positions=["00", "01"])
@@ -2935,17 +2943,18 @@ def preprocRawFrame_drp(
         axs[i].set_title(f"overscan for quadrants {['13','24'][i]}", loc="left")
     save_fig(
         fig,
-        output_path=out_image,
+        product_path=out_image,
+        to_display=display_plots,
         figure_path=figure_path,
         label="os_strips_13-24_y",
-        close=not display_plots,
     )
 
     # show median counts for all quadrants along Y-axis
-    fig, axs = plt.subplots(4, 1, figsize=(15, 10), sharex=True)
-    axs = axs.flatten()
+    fig, axs = create_subplots(
+        to_display=display_plots, nrows=4, ncols=1, figsize=(15, 10), sharex=True
+    )
     fig.supxlabel("Y (pixel)")
-    fig.supylabel("counts (e-)")
+    fig.supylabel(f"counts ({preproc_image._header['BUNIT']})")
     fig.suptitle("median counts for all quadrants", size="xx-large")
     for i, os_quad in enumerate(os_quads):
         plot_strips(
@@ -2967,10 +2976,10 @@ def preprocRawFrame_drp(
         axs[i].set_title(f"median counts for quadrant {i+1}", loc="left")
     save_fig(
         fig,
-        output_path=out_image,
+        product_path=out_image,
+        to_display=display_plots,
         figure_path=figure_path,
         label="os_strips",
-        close=not display_plots,
     )
 
 
@@ -3167,8 +3176,14 @@ def detrendFrame_drp(
     # show plots
     log.info("plotting results")
     # detrending process
-    fig, axs = plt.subplots(2, 2, figsize=(15, 15), sharex=True, sharey=True)
-    axs = axs.flatten()
+    fig, axs = create_subplots(
+        to_display=display_plots,
+        nrows=2,
+        ncols=2,
+        figsize=(15, 15),
+        sharex=True,
+        sharey=True,
+    )
     plot_image(proc_image, ax=axs[0], title="original", labels=False)
     plot_image(bcorr_image, ax=axs[1], title="error", extension="error", labels=False)
     plot_image(
@@ -3184,10 +3199,10 @@ def detrendFrame_drp(
     fig.tight_layout()
     save_fig(
         fig,
-        output_path=out_image,
+        product_path=out_image,
+        to_display=display_plots,
         figure_path=figure_path,
         label="detrending",
-        close=not display_plots,
     )
 
 

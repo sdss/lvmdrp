@@ -13,8 +13,54 @@ import numpy as np
 from astropy.visualization import AsinhStretch, ImageNormalize, PercentileInterval
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
+DEFAULT_BACKEND = plt.get_backend()
+BACKEND = "Agg"
 
+plt.switch_backend(newbackend=BACKEND)
 plt.style.use("seaborn-v0_8-talk")
+
+
+def _switch_backend(event):
+    """switch matplotlib backend to performance one `BACKEND`
+
+    Since a figure would be open on display, the current backend cannot be
+    `BACKEND`. Hence we need to switch back to the performance `BACKEND` in
+    case a different call of plt.figure is triggered.
+
+    This function ensures we are always in the performance `BACKEND`.
+
+    Parameters
+    ----------
+    event : matplotlib event
+        figure close event
+    """
+    plt.switch_backend(newbackend=BACKEND)
+
+
+def create_subplots(to_display, flatten_axes=True, **subplots_params):
+    """creates a figure and axes given a plt.subplots set of parameters
+
+    Parameters
+    ----------
+    to_display : bool
+        whether this figure will be displayed or not. This controls the backend used
+    flatten_axes : bool, optional
+        whether to flatten the axes array or not, by default True
+
+    Returns
+    -------
+    plt.Figure
+        created figure
+    array_like
+        create array of plt.Axes
+    """
+    if to_display:
+        plt.switch_backend(newbackend=DEFAULT_BACKEND)
+    fig, axs = plt.subplots(**subplots_params)
+    fig.canvas.mpl_connect("close_event", _switch_backend)
+    if flatten_axes:
+        axs = axs.flatten()
+    return fig, axs
 
 
 def plot_image(
@@ -92,7 +138,8 @@ def plot_image(
         axins.tick_params(colors="tab:red", labelsize="small")
         cb = fig.colorbar(im, cax=axins, orientation="horizontal")
         if labels:
-            cb.set_label("counts (e-)", size="small", color="tab:red")
+            unit = image._header["BUNIT"]
+            cb.set_label(f"counts ({unit})", size="small", color="tab:red")
 
     if title is not None:
         ax.set_title(title, loc="left")
@@ -162,19 +209,19 @@ def plot_strips(
     return ax
 
 
-def save_fig(fig, output_path, figure_path=None, label=None, fmt="png", close=True):
+def save_fig(fig, product_path, to_display, figure_path=None, label=None, fmt="png"):
     """Saves the given matplotlib figure to the given output/figure path"""
     # define figure path
     if figure_path is not None:
-        fig_path = os.path.join(os.path.dirname(output_path), figure_path)
+        fig_path = os.path.join(os.path.dirname(product_path), figure_path)
     else:
-        fig_path = os.path.dirname(output_path)
+        fig_path = os.path.dirname(product_path)
     # create figure path if needed
     if not os.path.isdir(fig_path):
         os.makedirs(fig_path, exist_ok=True)
 
     # define figure name
-    fig_name = os.path.basename(output_path)
+    fig_name = os.path.basename(product_path)
     if label is not None:
         fig_name = f"{fig_name.replace('.fits', '')}_{label}.{fmt}"
     else:
@@ -185,9 +232,9 @@ def save_fig(fig, output_path, figure_path=None, label=None, fmt="png", close=Tr
 
     # save fig and close if requested
     fig.savefig(fig_path, bbox_inches="tight")
-    if close:
-        plt.close(fig)
-    else:
+    if to_display:
         plt.show()
+    else:
+        plt.close(fig)
 
     return fig_path

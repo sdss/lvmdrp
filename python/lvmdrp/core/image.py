@@ -1,13 +1,13 @@
 from copy import deepcopy as copy
 from multiprocessing import Pool, cpu_count
 
-import matplotlib.pyplot as plt
 import numpy
 from astropy.io import fits as pyfits
 from astropy.modeling import fitting, models
 from astropy.visualization import simple_norm
 from scipy import ndimage, signal
 
+from lvmdrp.core.plot import plt
 from lvmdrp.core.apertures import Apertures
 from lvmdrp.core.header import Header
 from lvmdrp.core.spectrum1d import Spectrum1D
