@@ -116,30 +116,30 @@ def installESOSky_drp(reinstall_skycorr="0", reinstall_skymodel="0"):
             capture_output=True,
         )
         if out.returncode == 0:
-            sky_logger.info("found existing skycorr installation")
+            log.info("found existing skycorr installation")
             skycorr_installed = True
         else:
-            sky_logger.error(
+            log.error(
                 "found existing skycorr installation, but it is not working"
             )
             shutil.rmtree(SKYCORR_INST_PATH, ignore_errors=True)
-            sky_logger.error("full report:")
-            sky_logger.error(out.stderr.decode("utf-8"))
+            log.error("full report:")
+            log.error(out.stderr.decode("utf-8"))
 
     # check if reinstall skycorr
     if not skycorr_installed or reinstall_skycorr:
-        sky_logger.info(f"preparing to install skycorr at '{SKYCORR_INST_PATH}'")
+        log.info(f"preparing to install skycorr at '{SKYCORR_INST_PATH}'")
         out = subprocess.run(
             f"tar xzvf {SKYCORR_SRC_PATH}".split(), capture_output=True
         )
         if out.returncode == 0:
-            sky_logger.info("successfully extracted skycorr installer")
+            log.info("successfully extracted skycorr installer")
         else:
-            sky_logger.error("error while preparing skycorr files")
-            sky_logger.error("full report:")
-            sky_logger.error(out.stderr.decode("utf-8"))
+            log.error("error while preparing skycorr files")
+            log.error("full report:")
+            log.error(out.stderr.decode("utf-8"))
 
-        sky_logger.info(
+        log.info(
             f"installing skycorr on a {SYSTEM}-bit {sys.platform.capitalize()} system"
         )
         os.chdir("skycorr")
@@ -179,59 +179,59 @@ def installESOSky_drp(reinstall_skycorr="0", reinstall_skymodel="0"):
         i, imax = 0, 0.1 * 200
         while skycorr_installer.isalive():
             if i == imax:
-                sky_logger.warning(
+                log.warning(
                     "skycorr installer took too long, killing the process"
                 )
                 skycorr_installer.close(force=True)
             if i == 0:
-                sky_logger.info("waiting for skycorr installation to finish")
+                log.info("waiting for skycorr installation to finish")
             time.sleep(0.5)
             i += 1
         skycorr_installer.close()
 
         if skycorr_installer.exitstatus == 0:
-            sky_logger.info("successfully installed skycorr")
+            log.info("successfully installed skycorr")
         else:
-            sky_logger.error("error while installing skycorr")
+            log.error("error while installing skycorr")
 
         out = subprocess.run(
             f"{os.path.join(SKYCORR_INST_PATH, 'bin', 'skycorr')} {os.path.join(SKYCORR_INST_PATH, 'examples', 'config', 'sctest_sinfo_H.par')}".split(),
             capture_output=True,
         )
         if out.returncode == 0:
-            sky_logger.info("successfully tested skycorr")
+            log.info("successfully tested skycorr")
         else:
-            sky_logger.error("error while testing skycorr")
-            sky_logger.error(f"rolling back changes in '{SKYCORR_INST_PATH}'")
+            log.error("error while testing skycorr")
+            log.error(f"rolling back changes in '{SKYCORR_INST_PATH}'")
             shutil.rmtree(SKYCORR_INST_PATH, ignore_errors=True)
-            sky_logger.error("full report:")
-            sky_logger.error(out.stderr.decode("utf-8"))
+            log.error("full report:")
+            log.error(out.stderr.decode("utf-8"))
 
     # - install skymodel ---------------------------------------------------------------------------------------------
     # check if skymodel is installed
     skymodel_installed = False
     if os.path.isdir(SKYMODEL_INST_PATH):
         skymodel_installed = True
-        sky_logger.info("found existing installation of skymodel")
+        log.info("found existing installation of skymodel")
 
     # check if reinstall skymodel
     if not skymodel_installed or reinstall_skycorr:
         # defining environment variables for CPL
         cpl_path = os.path.join(SKYCORR_INST_PATH, "lib")
-        sky_logger.info(f"setting $LD_LIBRARY_PATH={cpl_path} for CPL discovery")
+        log.info(f"setting $LD_LIBRARY_PATH={cpl_path} for CPL discovery")
         os.environ["LD_LIBRARY_PATH"] = cpl_path
 
-        sky_logger.info(f"preparing to install skymodel at '{SKYMODEL_INST_PATH}'")
+        log.info(f"preparing to install skymodel at '{SKYMODEL_INST_PATH}'")
         os.chdir(SRC_PATH)
         out = subprocess.run(
             f"tar xzvf {SKYMODEL_SRC_PATH}".split(), capture_output=True
         )
         if out.returncode == 0:
-            sky_logger.info("successfully extracted skymodel installer")
+            log.info("successfully extracted skymodel installer")
         else:
-            sky_logger.error("error while extracting skymodel")
-            sky_logger.error("full report:")
-            sky_logger.error(out.stderr.decode("utf-8"))
+            log.error("error while extracting skymodel")
+            log.error("full report:")
+            log.error(out.stderr.decode("utf-8"))
 
         # create directory structure in installation path
         os.chdir(os.path.join(SRC_PATH, "SM-01", "sm-01_mod1"))
@@ -295,11 +295,11 @@ def installESOSky_drp(reinstall_skycorr="0", reinstall_skymodel="0"):
             "tar xzvf lnfl_lblrtm_aer.tar.gz".split(), capture_output=True
         )
         if out.returncode == 0:
-            sky_logger.info("successfully extracted third-party codes")
+            log.info("successfully extracted third-party codes")
         else:
-            sky_logger.error("error while extracting third-party codes")
-            sky_logger.error("full report:")
-            sky_logger.error(out.stderr.decode("utf-8"))
+            log.error("error while extracting third-party codes")
+            log.error("full report:")
+            log.error(out.stderr.decode("utf-8"))
 
         shutil.copyfile(
             os.path.join(
@@ -318,7 +318,7 @@ def installESOSky_drp(reinstall_skycorr="0", reinstall_skymodel="0"):
                 SKYMODEL_INST_PATH, "sm-01_mod1", "third_party_code", "lnfl", "build"
             )
         )
-        sky_logger.info("installing LNFL")
+        log.info("installing LNFL")
         if sys.platform == "linux":
             out = subprocess.run(
                 "make -f make_lnfl linuxGNUsgl".split(), capture_output=True
@@ -333,11 +333,11 @@ def installESOSky_drp(reinstall_skycorr="0", reinstall_skymodel="0"):
             )
 
         if out.returncode == 0:
-            sky_logger.info("successfully installed LNFL")
+            log.info("successfully installed LNFL")
         else:
-            sky_logger.error("error while installing LNFL")
-            sky_logger.error("full report:")
-            sky_logger.error(out.stderr.decode("utf-8"))
+            log.error("error while installing LNFL")
+            log.error("full report:")
+            log.error(out.stderr.decode("utf-8"))
 
         os.chdir(
             os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "third_party_code", "lnfl")
@@ -375,7 +375,7 @@ def installESOSky_drp(reinstall_skycorr="0", reinstall_skymodel="0"):
                 SKYMODEL_INST_PATH, "sm-01_mod1", "third_party_code", "lblrtm", "build"
             )
         )
-        sky_logger.info("installing LBLRTM")
+        log.info("installing LBLRTM")
         if sys.platform == "linux":
             out = subprocess.run(
                 "make -f make_lblrtm linuxGNUsgl".split(), capture_output=True
@@ -394,13 +394,13 @@ def installESOSky_drp(reinstall_skycorr="0", reinstall_skymodel="0"):
             )
 
         if out.returncode == 0:
-            sky_logger.info("successfully installed LBLRTM")
+            log.info("successfully installed LBLRTM")
         else:
-            sky_logger.error("error while installing LBLRTM")
-            sky_logger.error("full report:")
-            sky_logger.error(out.stderr.decode("utf-8"))
+            log.error("error while installing LBLRTM")
+            log.error("full report:")
+            log.error(out.stderr.decode("utf-8"))
 
-        sky_logger.info("installing skymodel")
+        log.info("installing skymodel")
         os.chdir(
             os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1", "third_party_code", "lblrtm")
         )
@@ -416,35 +416,35 @@ def installESOSky_drp(reinstall_skycorr="0", reinstall_skymodel="0"):
         os.chdir(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod1"))
         out = subprocess.run("bash bootstrap".split(), capture_output=True)
         if out.returncode == 0:
-            sky_logger.info("successfully finished bootstrap for module 01")
+            log.info("successfully finished bootstrap for module 01")
         else:
-            sky_logger.error("error while running bootstrap for module 01")
-            sky_logger.error("full report:")
-            sky_logger.error(out.stderr.decode("utf-8"))
+            log.error("error while running bootstrap for module 01")
+            log.error("full report:")
+            log.error(out.stderr.decode("utf-8"))
         out = subprocess.run(
             f"bash configure --prefix={os.path.join(SKYMODEL_INST_PATH, 'sm-01_mod1')} --with-cpl={cpl_path}".split(),
             capture_output=True,
         )
         if out.returncode == 0:
-            sky_logger.info("successfully finished configure for module 01")
+            log.info("successfully finished configure for module 01")
         else:
-            sky_logger.error("error while running configure for module 01")
-            sky_logger.error("full report:")
-            sky_logger.error(out.stderr.decode("utf-8"))
+            log.error("error while running configure for module 01")
+            log.error("full report:")
+            log.error(out.stderr.decode("utf-8"))
         out = subprocess.run("make".split(), capture_output=True)
         if out.returncode == 0:
-            sky_logger.info("successfully finished make for module 01")
+            log.info("successfully finished make for module 01")
         else:
-            sky_logger.error("error while running make for module 01")
-            sky_logger.error("full report:")
-            sky_logger.error(out.stderr.decode("utf-8"))
+            log.error("error while running make for module 01")
+            log.error("full report:")
+            log.error(out.stderr.decode("utf-8"))
         out = subprocess.run("make install".split(), capture_output=True)
         if out.returncode == 0:
-            sky_logger.info("successfully installed skymodel module 01")
+            log.info("successfully installed skymodel module 01")
         else:
-            sky_logger.error("error while installing skymodel module 01")
-            sky_logger.error("full report:")
-            sky_logger.error(out.stderr.decode("utf-8"))
+            log.error("error while installing skymodel module 01")
+            log.error("full report:")
+            log.error(out.stderr.decode("utf-8"))
 
         # make symbolic links of binary files in python_dir/bin
         rc_symlink(
@@ -519,28 +519,28 @@ def installESOSky_drp(reinstall_skycorr="0", reinstall_skymodel="0"):
         os.chdir(os.path.join(SKYMODEL_INST_PATH, "sm-01_mod2"))
         out = subprocess.run("bash bootstrap".split(), capture_output=True)
         if out.returncode == 0:
-            sky_logger.info("successfully finished bootstrap for module 02")
+            log.info("successfully finished bootstrap for module 02")
         else:
-            sky_logger.error("error while running bootstrap for module 02")
-            sky_logger.error("full report:")
-            sky_logger.error(out.stderr.decode("utf-8"))
+            log.error("error while running bootstrap for module 02")
+            log.error("full report:")
+            log.error(out.stderr.decode("utf-8"))
         out = subprocess.run(
             f"bash configure --prefix={os.path.join(SKYMODEL_INST_PATH, 'sm-01_mod2')} --with-cpl={cpl_path}".split(),
             capture_output=True,
         )
         if out.returncode == 0:
-            sky_logger.info("successfully finished configure for module 02")
+            log.info("successfully finished configure for module 02")
         else:
-            sky_logger.error("error while running configure for module 02")
-            sky_logger.error("full report:")
-            sky_logger.error(out.stderr.decode("utf-8"))
+            log.error("error while running configure for module 02")
+            log.error("full report:")
+            log.error(out.stderr.decode("utf-8"))
         out = subprocess.run("make install".split(), capture_output=True)
         if out.returncode == 0:
-            sky_logger.info("successfully installed skymodel module 02")
+            log.info("successfully installed skymodel module 02")
         else:
-            sky_logger.error("error while installing skymodel module 02")
-            sky_logger.error("full report:")
-            sky_logger.error(out.stderr.decode("utf-8"))
+            log.error("error while installing skymodel module 02")
+            log.error("full report:")
+            log.error(out.stderr.decode("utf-8"))
 
         rc_symlink(
             os.path.join(SKYMODEL_INST_PATH, "sm-01_mod2", "bin", "preplinetrans"),
@@ -636,7 +636,7 @@ def configureSkyModel_drp(
 
     ori_path = os.path.abspath(os.curdir)
 
-    sky_logger.info(
+    log.info(
         f"writing configuration files using '{skymodel_config_path}' as source"
     )
     # read master configuration file
@@ -671,7 +671,7 @@ def configureSkyModel_drp(
     ) as cf:
         for key, val in skymodel_master_config[config_names[4]].items():
             cf.write(f"{key} = {val}\n")
-    sky_logger.info("successfully written config files")
+    log.info("successfully written config files")
 
     # parse library path
     lib_path = os.path.abspath(
