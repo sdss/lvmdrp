@@ -2717,6 +2717,10 @@ def preprocRawFrame_drp(
     else:
         log.info(f"using header IMAGETYP = '{org_header['IMAGETYP']}'")
 
+    # extract exptime
+    exptime = org_header["EXPTIME"]
+    log.info(f"exposure time {exptime} (s)")
+
     # extract TRIMSEC or assume default value
     if assume_trimsec:
         log.info(f"using given TRIMSEC = {assume_trimsec}")
@@ -2755,7 +2759,7 @@ def preprocRawFrame_drp(
     sc_quads, os_quads = [], []
     # process each quadrant
     for i, (sc_xy, os_xy) in enumerate(zip(sc_sec, os_sec)):
-        # get overscan and science quadrant
+        # get overscan and science quadrant & convert to electron
         sc_quad = org_image.getSection(section=sc_xy) * gain[i]
         os_quad = org_image.getSection(section=os_xy) * gain[i]
         # compute overscan stats
@@ -2769,12 +2773,11 @@ def preprocRawFrame_drp(
         if subtract_overscan:
             sc_quad -= os_bias_med[i]
 
-        # convert to electron
         sc_quads.append(sc_quad)
         os_quads.append(os_quad)
 
     # extract rdnoise
-    rdnoise = os_bias_std * gain
+    rdnoise = os_bias_std
     if assume_rdnoise:
         log.info(f"using given RDNOISE = {assume_rdnoise} (e-)")
         rdnoise = numpy.asarray(assume_rdnoise)
@@ -2787,9 +2790,13 @@ def preprocRawFrame_drp(
     # join images
     QUAD_POSITIONS = ["01", "11", "00", "10"]
     preproc_image = glueImages(sc_quads, positions=QUAD_POSITIONS)
+    # convert to electron/s (avoid zero division)
+    preproc_image /= max(1, exptime)
     preproc_image.setHeader(org_image.getHeader())
     # update/set unit
-    preproc_image.setHdrValue("BUNIT", "electron", "physical units of the array values")
+    preproc_image.setHdrValue(
+        "BUNIT", "electron/s", "physical units of the array values"
+    )
     # flip along dispersion axis
     try:
         ccd = org_header["CCD"]
