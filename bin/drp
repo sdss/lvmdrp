@@ -88,7 +88,7 @@ def skycli():
 @skycli.command('install', short_help='Install the ESO sky routines')
 @click.option('-c', '--reinstall-skycorr', is_flag=True, default=False, show_default=True,
               help='Flag to reinstall the ESO skycorr routines')
-@click.option('-m', '--reinstall-model', is_flag=True, default=False, show_default=True,
+@click.option('-m', '--reinstall-skymodel', is_flag=True, default=False, show_default=True,
               help='Flag to resinstall the ESO sky models')
 def sky_install(reinstall_skycorr, reinstall_skymodel):
     """ Install the ESO skycorr and skymodel routines """
