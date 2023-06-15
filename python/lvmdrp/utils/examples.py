@@ -45,35 +45,6 @@ def fetch_example_data(url, name, dest_path, ext="zip"):
     """Download 2D examples data"""
     file_name = f"{name}.{ext}"
     file_path = os.path.join(dest_path, file_name)
-<<<<<<< HEAD
-=======
-    os.makedirs(dest_path, exist_ok=True)
-    if not os.path.exists(os.path.join(dest_path, name)):
-        examples_logger.info(f"downloading example data to {file_path}")
-        process = subprocess.Popen(
-            f"curl {url}/{file_name} --output {file_path}".split(),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            universal_newlines=True,
-        )
-        for stdout_line in iter(process.stdout.readline, ""):
-            examples_logger.info(stdout_line[:-1])
-        process.stdout.close()
-        returncode = process.wait()
-        if returncode == 0:
-            examples_logger.info("successfully downloaded example data")
-        else:
-            examples_logger.error("error while downloading example data")
-            examples_logger.error("full report:")
-            examples_logger.error(process.stderr.decode("utf-8"))
-        with zipfile.ZipFile(file_path, "r") as src_compressed:
-            examples_logger.info(f"decompressing file '{file_path}' to '{dest_path}'")
-            src_compressed.extractall(dest_path)
-        examples_logger.info("removing compressed file")
-        os.remove(file_path)
-    else:
-        examples_logger.info("example data already exists")
->>>>>>> development
 
     if os.path.exists(os.path.join(dest_path, name)):
         log.info("example data already exists")
