@@ -2771,6 +2771,7 @@ def preprocRawFrame_drp(
             f"{os_bias_med[i]:.2f} +/- {os_bias_std[i]:.2f} (e-)"
         )
         # subtract overscan bias from image if requested
+        # TODO: subtract OS per row
         if subtract_overscan:
             sc_quad -= os_bias_med[i]
 

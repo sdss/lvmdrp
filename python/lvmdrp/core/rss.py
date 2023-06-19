@@ -1692,11 +1692,14 @@ class RSS(FiberRows):
     def createFiberFlat(
         self, smooth_poly=-5, smooth_median=0, clip=[0.2, 2], valid=None
     ):
+        # if wavelength homogeneous
         if len(self._wave.shape) == 1:
+            # apply median smoothing to data
             if smooth_median > 0:
                 self._data = ndimage.filters.median_filter(
                     self._data, (1, smooth_median)
                 )
+            # calculate normalization within a given window or on the full array
             if valid is not None:
                 # medians = numpy.median(self._data[valid[0] : valid[1], :], axis=1)
                 norm = numpy.median(self._data[valid[0] : valid[1], :], axis=0)
@@ -1709,6 +1712,8 @@ class RSS(FiberRows):
             # norm = numpy.amax(self._data[select_ma], axis=0)
             # norm = self._data[select_max, :][0]
             # norm = numpy.mean(self._data[100:280, :], axis=0)
+
+            # normalize fibers where norm > 0
             select = norm > 0
             #    pylab.plot(norm)
             #    pylab.show()
@@ -1717,6 +1722,8 @@ class RSS(FiberRows):
                 self._data[:, select] / norm[select][numpy.newaxis, :]
             )
             self._data = normalize
+
+            # apply clipping
             if clip is not None:
                 mask = numpy.logical_or(self._data < clip[0], self._data > clip[1])
                 ##sky_resamp.setData(data=0, select=mask)
@@ -1724,12 +1731,14 @@ class RSS(FiberRows):
                     mask = numpy.logical_or(self._mask, mask)
                 self.setData(mask=mask)
 
-            #   sky_resamp._mask= numpy.logical_not(select)
+            # apply smoothing
+            # sky_resamp._mask= numpy.logical_not(select)
             if smooth_poly != 0:
                 for i in range(self._fibers):
                     spec = self.getSpec(i)
+                    # gaussian smoothing
                     spec.smoothSpec(5, method="gauss")
-
+                    # polynomial smoothing
                     spec.smoothPoly(smooth_poly)
                     self._data[i, :] = spec._data
                     if self._mask is not None:
