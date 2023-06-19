@@ -834,7 +834,7 @@ def findPeaksAuto_drp(
         file_out.write("%i %i %e %i\n" % (i, round_cent[i], centers[i], 0))
     file_out.close()
 
-    fig, ax = create_subplots(to_display=display_plots, figsize=(25, 10))
+    fig, ax = create_subplots(to_display=display_plots, figsize=(15, 10))
     ax.plot(cut._data, "-k", lw=1)
     ax.plot(peaks[0], peaks[2], "o", color="tab:red", mew=0, ms=5)
     ax.plot(
