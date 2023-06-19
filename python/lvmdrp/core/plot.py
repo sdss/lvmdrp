@@ -58,7 +58,7 @@ def create_subplots(to_display, flatten_axes=True, **subplots_params):
         plt.switch_backend(newbackend=DEFAULT_BACKEND)
     fig, axs = plt.subplots(**subplots_params)
     fig.canvas.mpl_connect("close_event", _switch_backend)
-    if flatten_axes:
+    if flatten_axes and isinstance(axs, np.ndarray):
         axs = axs.flatten()
     return fig, axs
 
