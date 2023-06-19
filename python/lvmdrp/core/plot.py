@@ -6,6 +6,7 @@
 # @License: BSD 3-Clause
 # @Copyright: SDSS-V LVM
 
+import sys
 import os
 
 import matplotlib.pyplot as plt
@@ -13,28 +14,12 @@ import numpy as np
 from astropy.visualization import AsinhStretch, ImageNormalize, PercentileInterval
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
+
+IS_INTERACTIVE = hasattr(sys, "ps1")
 DEFAULT_BACKEND = plt.get_backend()
-BACKEND = "Agg"
-
-plt.switch_backend(newbackend=BACKEND)
+if not IS_INTERACTIVE:
+    plt.switch_backend(newbackend="Agg")
 plt.style.use("seaborn-v0_8-talk")
-
-
-def _switch_backend(event):
-    """switch matplotlib backend to performance one `BACKEND`
-
-    Since a figure would be open on display, the current backend cannot be
-    `BACKEND`. Hence we need to switch back to the performance `BACKEND` in
-    case a different call of plt.figure is triggered.
-
-    This function ensures we are always in the performance `BACKEND`.
-
-    Parameters
-    ----------
-    event : matplotlib event
-        figure close event
-    """
-    plt.switch_backend(newbackend=BACKEND)
 
 
 def create_subplots(to_display, flatten_axes=True, **subplots_params):
@@ -54,10 +39,7 @@ def create_subplots(to_display, flatten_axes=True, **subplots_params):
     array_like
         create array of plt.Axes
     """
-    if to_display:
-        plt.switch_backend(newbackend=DEFAULT_BACKEND)
     fig, axs = plt.subplots(**subplots_params)
-    fig.canvas.mpl_connect("close_event", _switch_backend)
     if flatten_axes and isinstance(axs, np.ndarray):
         axs = axs.flatten()
     return fig, axs
@@ -234,6 +216,7 @@ def save_fig(fig, product_path, to_display, figure_path=None, label=None, fmt="p
     fig.savefig(fig_path, bbox_inches="tight")
     if to_display:
         plt.show()
+        plt.tight_layout()
     else:
         plt.close(fig)
 
