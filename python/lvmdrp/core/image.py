@@ -4,8 +4,10 @@ from multiprocessing import Pool, cpu_count
 import numpy
 from astropy.io import fits as pyfits
 from astropy.modeling import fitting, models
+from astropy.stats.biweight import biweight_location
 from astropy.visualization import simple_norm
 from scipy import ndimage, signal
+from scipy import interpolate
 
 from lvmdrp.core.plot import plt
 from lvmdrp.core.apertures import Apertures
@@ -21,6 +23,60 @@ def _parse_ccd_section(section):
     slice_x[0] -= 1
     slice_y[0] -= 1
     return slice_x, slice_y
+
+
+def _model_overscan(os_quad, axis=1, stat=biweight_location, model="spline", **kwargs):
+    """fits a parametric model to the given overscan region
+
+    Given an overscan section corresponding to a quadrant in a raw frame, this function
+    coadds the counts along a given `axis` using a given statistics `stat`. Additionally,
+    a model can be fitted to the resulting profile, which options are:
+        * const: a constant model by further collapsing along using the same `stat`
+        * profile: the raw profile (`os_model = os_profile`)
+        * polynomial: a polynomial model fitted on `os_profile`
+        * spline: a cubic-spline fitting on `os_profile`
+
+    Additional keyword parameters are passed to the fitted model.
+
+    Parameters
+    ----------
+    os_quad : lvmdrp.core.image.Image
+        image section corresponding to a overscan quadrant
+    axis : int, optional
+        axis along which the overscan will be fitted, by default 1
+    stat : function, optional
+        function to use for coadding pixels along `axis`, by default biweight_location
+    model : str, optional
+        parametric function to fit ("const", "profile", "poly", "spline"), by default "spline"
+
+    Returns
+    -------
+    os_profile : array_like
+        overscan profile after coadding pixels along `axis`
+    os_model : array_like, float
+        overscan model
+    """
+    assert axis == 0 or axis == 1
+
+    os_profile = stat(os_quad._data, axis=axis)
+    pixels = numpy.arange(os_profile.size)
+    if model == "const":
+        os_model = numpy.ones_like(pixels) * stat(os_profile)
+    elif model == "profile":
+        os_model = os_profile
+    elif model == "poly":
+        model = numpy.polynomial.Polynomial.fit(pixels, os_profile, **kwargs)
+        os_model = model(pixels)
+    elif model == "spline":
+        model = interpolate.UnivariateSpline(pixels, os_profile, **kwargs)
+        os_model = model(pixels)
+
+    if axis == 1:
+        os_model = os_model[:, None]
+    elif axis == 0:
+        os_model = os_model[None, :]
+
+    return os_profile, os_model
 
 
 def _percentile_normalize(images, pct=0.75):

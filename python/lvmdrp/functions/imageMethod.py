@@ -8,6 +8,7 @@ import numpy
 from astropy import units as u
 from astropy.io import fits as pyfits
 from astropy.nddata import CCDData
+from astropy.stats.biweight import biweight_location
 from ccdproc import cosmicray_lacosmic
 from scipy import interpolate
 from tqdm import tqdm
@@ -16,6 +17,7 @@ from lvmdrp.core.fiberrows import FiberRows
 from lvmdrp.core.image import (
     Image,
     _parse_ccd_section,
+    _model_overscan,
     combineImages,
     glueImages,
     loadImage,
@@ -2651,6 +2653,8 @@ def preprocRawFrame_drp(
     gain_prefix="GAIN",
     rdnoise_prefix="RDNOISE",
     subtract_overscan="1",
+    overscan_stat="biweight",
+    overscan_model="spline",
     replace_with_nan="0",
     display_plots="0",
     figure_path="qa",
@@ -2690,6 +2694,10 @@ def preprocRawFrame_drp(
         read noise keyword prefix, by default "RDNOISE"
     subtract_overscan : str, optional
         whether to subtract the overscan median for each quadrant or not, by default "1"
+    overscan_stat : str, optional
+        statistics to use when coadding pixels along the X axis, by default "biweight"
+    overscan_model : str, optional
+        model to used for fitting the overscan profile of each quadrant, by default "spline"
     replace_with_nan : str, optional
         whether to replace masked pixels with NaNs or not, by default "0"
     display_plots : str, optional
@@ -2758,6 +2766,7 @@ def preprocRawFrame_drp(
     # initialize overscan stats, quadrants lists and, gains and rnoise
     os_bias_med, os_bias_std = numpy.zeros(NQUADS), numpy.zeros(NQUADS)
     sc_quads, os_quads = [], []
+    os_profiles, os_models = [], []
     # process each quadrant
     for i, (sc_xy, os_xy) in enumerate(zip(sc_sec, os_sec)):
         # get overscan and science quadrant & convert to electron
@@ -2771,9 +2780,37 @@ def preprocRawFrame_drp(
             f"{os_bias_med[i]:.2f} +/- {os_bias_std[i]:.2f} (e-)"
         )
         # subtract overscan bias from image if requested
-        # TODO: subtract OS per row
         if subtract_overscan:
-            sc_quad -= os_bias_med[i]
+            if overscan_stat == "biweight":
+                os_stat = biweight_location
+            elif overscan_stat == "median":
+                os_stat = numpy.median
+            else:
+                log.warning(
+                    f"overscan statistic '{overscan_stat}' not implemented, "
+                    "falling back to 'biweight'"
+                )
+                os_stat = biweight_location
+
+            if overscan_model not in ["poly", "spline"]:
+                log.warning(
+                    f"overscan model '{overscan_model}' not implemented, "
+                    "falling back to 'spline'"
+                )
+                overscan_model = "spline"
+            if overscan_model == "spline":
+                os_profile, os_model = _model_overscan(
+                    os_quad, axis=1, stat=os_stat, s=180 * gain[i] ** 2
+                )
+            elif overscan_model == "poly":
+                os_profile, os_model = _model_overscan(
+                    os_quad, axis=1, stat=os_stat, model="poly", deg=9
+                )
+
+            sc_quad -= os_model
+
+            os_profiles.append(os_profile)
+            os_models.append(os_model)
 
         sc_quads.append(sc_quad)
         os_quads.append(os_quad)
@@ -2889,7 +2926,7 @@ def preprocRawFrame_drp(
         display_plots, nrows=2, ncols=1, figsize=(15, 10), sharex=True, sharey=False
     )
     axs[-1].set_xlabel("X (pixel)")
-    fig.supylabel(f"median counts ({preproc_image._header['BUNIT']})")
+    fig.supylabel("median counts (e-)")
     fig.suptitle("overscan cut along X-axis", size="xx-large")
 
     os_ab = glueImages(os_quads[:2], positions=["00", "10"])
@@ -2925,7 +2962,7 @@ def preprocRawFrame_drp(
         sharey=False,
     )
     axs[-1].set_xlabel("Y (pixel)")
-    fig.supylabel(f"median counts ({preproc_image._header['BUNIT']})")
+    fig.supylabel("counts (e-)")
     fig.suptitle("overscan cut along Y-axis", size="xx-large")
     os_ac = glueImages(os_quads[::2], positions=["00", "01"])
     os_bd = glueImages(os_quads[1::2], positions=["00", "01"])
@@ -2955,8 +2992,8 @@ def preprocRawFrame_drp(
         to_display=display_plots, nrows=4, ncols=1, figsize=(15, 10), sharex=True
     )
     fig.supxlabel("Y (pixel)")
-    fig.supylabel(f"counts ({preproc_image._header['BUNIT']})")
-    fig.suptitle("median counts for all quadrants", size="xx-large")
+    fig.supylabel("counts (e-)")
+    fig.suptitle("overscan for all quadrants", size="xx-large")
     for i, os_quad in enumerate(os_quads):
         plot_strips(
             os_quad,
@@ -2967,6 +3004,10 @@ def preprocRawFrame_drp(
             sg_stat=lambda x, axis: numpy.median(numpy.std(x, axis=axis)),
             labels=True,
         )
+        axs[i].step(
+            numpy.arange(os_profiles[i].size), os_profiles[i], color="tab:orange", lw=1
+        )
+        axs[i].step(numpy.arange(os_profiles[i].size), os_models[i], color="k", lw=1)
         axs[i].axhline(
             numpy.median(os_quad._data.flatten()) + rdnoise[i],
             ls="--",
@@ -2974,7 +3015,7 @@ def preprocRawFrame_drp(
             lw=1,
             label=f"median + {rdnoise_prefix}",
         )
-        axs[i].set_title(f"median counts for quadrant {i+1}", loc="left")
+        axs[i].set_title(f"quadrant {i+1}", loc="left")
     save_fig(
         fig,
         product_path=out_image,
