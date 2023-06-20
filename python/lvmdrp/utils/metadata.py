@@ -7,14 +7,12 @@
 # @Copyright: SDSS-V LVM
 
 import os
-import numpy as np
 from glob import glob, has_magic
 
 import h5py
 import numpy as np
 import pandas as pd
 from astropy.io import fits
-
 from sdss_access import Access
 from sdss_access.path import Path
 from tqdm import tqdm
@@ -764,6 +762,7 @@ def get_metadata(
 
     return metadata
 
+
 # TODO: implement matching of analogs and calibration masters
 # in Brian's run_drp code
 def get_analog_groups(
@@ -785,14 +784,18 @@ def get_analog_groups(
     stage=None,
     status=None,
     drpqual=None,
+    analog_fields=[],
 ):
     """return a list of metadata groups considered to be analogs
 
     the given metadata dataframe is grouped in analog frames using
     the following criteria:
+        * mjd
         * imagetyp
         * camera
         * exptime
+    Optionally, these criteria can be expanded using the `analog_fields`.
+    The final critaria will always include the above mentioned fields.
 
     Parameters
     ----------
@@ -832,12 +835,16 @@ def get_analog_groups(
         bitmask representing status of the reduction, by default None
     drpqual : int, optional
         bitmask representing the quality of the reduction, by default None
+    analog_fields : list, optional
+        a list of additional fields to include when grouping analogs, by default []
 
     Returns
     -------
     pandas.DataFrame
         the grouped metadata filtered following the given criteria
     """
+    # default fields
+    default_fields = {"mjd", "imagetyp", "camera", "exptime"}
     # default output
     default_output = [pd.DataFrame(columns=list(zip(*RAW_METADATA_COLUMNS))[0])]
 
@@ -866,8 +873,6 @@ def get_analog_groups(
         metadata = _filter_metadata(
             metadata=metadata,
             hemi=hemi,
-            tileid=tileid,
-            mjd=mjd,
             imagetyp=imagetyp,
             spec=spec,
             camera=camera,
@@ -890,14 +895,60 @@ def get_analog_groups(
     metadata = pd.concat(metadatas, axis="index", ignore_index=True)
 
     logger.info("grouping analogs")
-    metadata_groups = metadata.groupby(["imagetyp", "camera", "exptime"])
+    analog_fields = list(default_fields.union(analog_fields))
+    metadata_groups = metadata.groupby(analog_fields)
 
     logger.info(f"found {len(metadata_groups)} groups of analogs:")
-    analogs = []
+    analogs = {}
+    analog_paths = []
+    master_paths = []
     for g in metadata_groups.groups:
         logger.info(g)
-        analogs.append(metadata_groups.get_group(g))
-    return analogs
+
+        # create groups dictionary
+        metadata = metadata_groups.get_group(g)
+        analogs[g] = metadata
+
+        # create input paths for master creation task
+        for _, row in metadata.iterrows():
+            analog_paths.append(
+                path.full(
+                    "lvm_anc",
+                    drpver=DRPVER,
+                    tileid=row.tileid,
+                    mjd=row.mjd,
+                    kind="c" if row.imagetyp != "bias" else "p",
+                    imagetype=row.imagetyp,
+                    camera=row.camera,
+                    expnum=row.expnum,
+                )
+            )
+
+        # create output path for master frame
+        if imagetyp == "bias":
+            master_paths.append(
+                path.full(
+                    "lvm_cal_mbias",
+                    drpver=DRPVER,
+                    tileid=row.tileid,
+                    mjd=row.mjd,
+                    camera=row.camera,
+                )
+            )
+        else:
+            master_paths.append(
+                path.full(
+                    "lvm_cal_time",
+                    drpver=DRPVER,
+                    tileid=row.tileid,
+                    mjd=row.mjd,
+                    kind=f"m{row.imagetyp}",
+                    camera=row.camera,
+                    exptime=int(row.exptime),
+                )
+            )
+
+    return analogs, analog_paths, master_paths
 
 
 def match_master_metadata(
@@ -1035,6 +1086,7 @@ def match_master_metadata(
             logger.info(f"found master {calib_type}")
             calib_frames[calib_type] = calib_metadata.iloc[0]
     return calib_frames
+
 
 # TODO: implement update of reduction status
 # in Brian's run_drp code
