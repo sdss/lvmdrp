@@ -885,8 +885,9 @@ def get_analog_groups(
             drpqual=drpqual,
         )
         logger.info(f"final number of frames after filtering {len(metadata)}")
+        metadatas.append(metadata)
 
-    metadatas.append(metadata)
+    metadata = pd.concat(metadatas, axis="index", ignore_index=True)
 
     logger.info("grouping analogs")
     metadata_groups = metadata.groupby(["imagetyp", "camera", "exptime"])
