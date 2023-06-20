@@ -8,26 +8,26 @@
 
 import os
 from glob import glob, has_magic
-from tqdm import tqdm
-from astropy.io import fits
 
 import h5py
+import numpy as np
 import pandas as pd
+from astropy.io import fits
+from sdss_access import Access
+from sdss_access.path import Path
+from tqdm import tqdm
 
 from lvmdrp.core.constants import FRAMES_CALIB_NEEDS
 from lvmdrp.utils.bitmask import (
+    QualityFlag,
     RawFrameQuality,
     ReductionStage,
     ReductionStatus,
-    QualityFlag,
 )
 from lvmdrp.utils.logger import get_logger
 
+
 # NOTE: replace these lines with Brian's integration of sdss_access and sdss_tree
-from sdss_access import Access
-from sdss_access.path import Path
-
-
 path = Path(release="sdss5")
 access = Access(release="sdss5")
 access.set_base_dir()
@@ -101,7 +101,7 @@ def _decode_string(metadata):
     return metadata
 
 
-def _get_metadata_paths(tileid=None, mjd=None, kind="raw"):
+def _get_metadata_paths(tileid=None, mjd=None, kind="raw", filter_exist=True):
     """return metadata path depending on the kind
 
     this function will define a path for a metadata store
@@ -116,6 +116,8 @@ def _get_metadata_paths(tileid=None, mjd=None, kind="raw"):
         MJD of the target frames, by default None
     kind : str, optional
         metadata kind for which to define a store path, by default "raw"
+    filter_exist : bool, optional
+        whether the paths should be filtered by existence, by default True
 
     Returns
     -------
@@ -146,6 +148,10 @@ def _get_metadata_paths(tileid=None, mjd=None, kind="raw"):
         metadata_paths = glob(path_pattern)
     else:
         metadata_paths = [path_pattern]
+
+    # return list of existing paths
+    if filter_exist:
+        metadata_paths = list(filter(os.path.exists, metadata_paths))
 
     return metadata_paths
 
@@ -311,27 +317,25 @@ def _load_or_create_store(tileid=None, mjd=None, kind="raw", mode="r"):
         the metadata store for the given observatory
     """
     # define metadata path depending on the kind
-    metadata_paths = _get_metadata_paths(tileid=tileid, mjd=mjd, kind=kind)
+    metadata_paths = _get_metadata_paths(
+        tileid=tileid, mjd=mjd, kind=kind, filter_exist=mode == "r"
+    )
     if mode == "r" and metadata_paths:
         stores = []
         for metadata_path in metadata_paths:
-            logger.info(
-                f"loading metadata store of {kind = }, {tileid = } and {mjd = }"
-            )
+            logger.info(f"loading metadata store of {kind = } and {metadata_path = }")
             stores.append(h5py.File(metadata_path, mode=mode))
 
     elif mode == "a" and metadata_paths:
         stores = []
         for metadata_path in metadata_paths:
-            logger.info(
-                f"creating metadata store of {kind = }, {tileid = } and {mjd = }"
-            )
+            logger.info(f"creating metadata store of {kind = } and {metadata_path = }")
             os.makedirs(os.path.dirname(metadata_path), exist_ok=True)
             stores.append(h5py.File(metadata_path, mode=mode))
     else:
         if mode == "r":
             raise FileNotFoundError(
-                f"no stores of {kind = } found matching {tileid = } and {mjd = }"
+                f"no stores matching {kind = }, {tileid = } and {mjd = } found"
             )
         elif mode == "a":
             raise ValueError(f"specific values for {tileid = } and {mjd = } are needed")
@@ -355,18 +359,83 @@ def _del_store(tileid=None, mjd=None, kind="raw"):
     """
     # define metadata path depending on the kind
     metadata_paths = _get_metadata_paths(tileid=tileid, mjd=mjd, kind=kind)
-
-    for metadata_path in metadata_paths:
-        if os.path.exists(metadata_path):
+    if metadata_paths:
+        for metadata_path in metadata_paths:
             logger.info(
-                f"removing metadata store of {kind = }, {tileid = } and {mjd = }"
+                f"removing metadata store matching {kind = }, {tileid = } and {mjd = } "
+                f"at {metadata_path}"
             )
             os.remove(metadata_path)
-        else:
-            logger.warning(
-                f"no metadata store of {kind = }, {tileid = } and {mjd = } found, "
-                "nothing to do"
-            )
+    else:
+        logger.warning(
+            f"no metadata store matching {kind = }, {tileid = } and {mjd = } "
+            "found, nothing to do"
+        )
+
+
+def locate_new_frames(hemi, camera, mjd, expnum, return_excluded=False):
+    """return paths to new frames not present in the metadata store
+
+    this function will expand the path to raw frames in the local SAS and
+    filter out those paths to frames already present in the metadata stores.
+
+    Parameters
+    ----------
+    hemi : str
+        hemisphere of the observatory where the data was taken
+    camera : str
+        camera ID of the target frames
+    mjd : int
+        MJD of the target frames
+    expnum : int
+        exposure number of the target frames
+    return_excluded : bool, optional
+        whether to return the excluded paths or not, by default False
+
+    Returns
+    -------
+    array_like
+        list of raw frame paths not present in metadata stores
+    """
+    keys = ["mjd", "hemi", "camera", "expnum"]
+    paths = sorted(
+        path.expand("lvm_raw", hemi=hemi, camspec=camera, mjd=mjd, expnum=expnum)
+    )
+    npath = len(paths)
+    logger.info(f"found {npath} pontentially new raw frame paths in local SAS")
+
+    # extract path parameters
+    new_path_params = pd.DataFrame(
+        [path.extract(name="lvm_raw", example=p) for p in paths]
+    )
+    new_path_params.rename(columns={"camspec": "camera"}, inplace=True)
+    new_path_params[["mjd", "expnum"]] = new_path_params[["mjd", "expnum"]].astype(int)
+    new_path_params["x"] = 0
+    new_path_params.set_index(keys, inplace=True)
+
+    # load all stores if they exist
+    logger.info("locating all existing metadata stores")
+    try:
+        stores = _load_or_create_store(tileid="*", mjd="*", mode="r")
+        logger.info(f"found {len(stores)} metadata stores")
+    except FileNotFoundError:
+        logger.info(f"no metadata stores found, returning {npath} new paths")
+        return paths
+
+    # convert to dataframe
+    gen_path_params = map(lambda store: pd.DataFrame(store["raw"][()])[keys], stores)
+    old_path_params = pd.concat(gen_path_params, ignore_index=True)
+    old_path_params = _decode_string(old_path_params)
+    old_path_params["x"] = 0
+    old_path_params.set_index(keys, inplace=True)
+    # filter out paths in stores
+    news = ~new_path_params.isin(old_path_params).x.values
+    logger.info(f"filtered {news.sum()} paths of new frames present in stores")
+
+    new_paths = np.asarray(paths)[news].tolist()
+    if return_excluded:
+        return new_paths, np.asarray(paths)[~news].tolist()
+    return new_paths
 
 
 def extract_metadata(frames_paths):
@@ -385,10 +454,13 @@ def extract_metadata(frames_paths):
     pandas.DataFrame
         dataframe containing the extracted metadata
     """
-    new_metadata = {}
     # extract metadata
     nframes = len(frames_paths)
+    if nframes == 0:
+        logger.warning("zero paths given, nothing to do")
+        return pd.DataFrame(columns=[column for column, _ in RAW_METADATA_COLUMNS])
     logger.info(f"going to extract metadata from {nframes} frames")
+    new_metadata = {}
     iterator = tqdm(
         enumerate(frames_paths),
         total=nframes,
@@ -691,6 +763,8 @@ def get_metadata(
     return metadata
 
 
+# TODO: implement matching of analogs and calibration masters
+# in Brian's run_drp code
 def get_analog_groups(
     tileid,
     mjd,
@@ -710,14 +784,18 @@ def get_analog_groups(
     stage=None,
     status=None,
     drpqual=None,
+    analog_fields=[],
 ):
     """return a list of metadata groups considered to be analogs
 
     the given metadata dataframe is grouped in analog frames using
     the following criteria:
+        * mjd
         * imagetyp
         * camera
         * exptime
+    Optionally, these criteria can be expanded using the `analog_fields`.
+    The final critaria will always include the above mentioned fields.
 
     Parameters
     ----------
@@ -757,12 +835,16 @@ def get_analog_groups(
         bitmask representing status of the reduction, by default None
     drpqual : int, optional
         bitmask representing the quality of the reduction, by default None
+    analog_fields : list, optional
+        a list of additional fields to include when grouping analogs, by default []
 
     Returns
     -------
     pandas.DataFrame
         the grouped metadata filtered following the given criteria
     """
+    # default fields
+    default_fields = {"mjd", "imagetyp", "camera", "exptime"}
     # default output
     default_output = [pd.DataFrame(columns=list(zip(*RAW_METADATA_COLUMNS))[0])]
 
@@ -791,8 +873,6 @@ def get_analog_groups(
         metadata = _filter_metadata(
             metadata=metadata,
             hemi=hemi,
-            tileid=tileid,
-            mjd=mjd,
             imagetyp=imagetyp,
             spec=spec,
             camera=camera,
@@ -810,18 +890,65 @@ def get_analog_groups(
             drpqual=drpqual,
         )
         logger.info(f"final number of frames after filtering {len(metadata)}")
+        metadatas.append(metadata)
 
-    metadatas.append(metadata)
+    metadata = pd.concat(metadatas, axis="index", ignore_index=True)
 
     logger.info("grouping analogs")
-    metadata_groups = metadata.groupby(["imagetyp", "camera", "exptime"])
+    analog_fields = list(default_fields.union(analog_fields))
+    metadata_groups = metadata.groupby(analog_fields)
 
     logger.info(f"found {len(metadata_groups)} groups of analogs:")
-    analogs = []
+    analogs = {}
+    analog_paths = []
+    master_paths = []
     for g in metadata_groups.groups:
         logger.info(g)
-        analogs.append(metadata_groups.get_group(g))
-    return analogs
+
+        # create groups dictionary
+        metadata = metadata_groups.get_group(g)
+        analogs[g] = metadata
+
+        # create input paths for master creation task
+        for _, row in metadata.iterrows():
+            analog_paths.append(
+                path.full(
+                    "lvm_anc",
+                    drpver=DRPVER,
+                    tileid=row.tileid,
+                    mjd=row.mjd,
+                    kind="c" if row.imagetyp != "bias" else "p",
+                    imagetype=row.imagetyp,
+                    camera=row.camera,
+                    expnum=row.expnum,
+                )
+            )
+
+        # create output path for master frame
+        if imagetyp == "bias":
+            master_paths.append(
+                path.full(
+                    "lvm_cal_mbias",
+                    drpver=DRPVER,
+                    tileid=row.tileid,
+                    mjd=row.mjd,
+                    camera=row.camera,
+                )
+            )
+        else:
+            master_paths.append(
+                path.full(
+                    "lvm_cal_time",
+                    drpver=DRPVER,
+                    tileid=row.tileid,
+                    mjd=row.mjd,
+                    kind=f"m{row.imagetyp}",
+                    camera=row.camera,
+                    exptime=int(row.exptime),
+                )
+            )
+
+    return analogs, analog_paths, master_paths
 
 
 def match_master_metadata(
@@ -961,6 +1088,8 @@ def match_master_metadata(
     return calib_frames
 
 
+# TODO: implement update of reduction status
+# in Brian's run_drp code
 def put_reduction_stage(
     stage,
     tileid,
