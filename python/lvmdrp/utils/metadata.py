@@ -25,6 +25,7 @@ from lvmdrp.utils.bitmask import (
 )
 from lvmdrp import log, __version__
 from lvmdrp.utils.hdrfix import apply_hdrfix
+from lvmdrp.utils.convert import dateobs_to_sjd
 
 # # NOTE: replace these lines with Brian's integration of sdss_access and sdss_tree
 # from sdss_access import Access
@@ -44,7 +45,8 @@ METADATA_PATH = os.path.join(os.getenv("LVM_SPECTRO_REDUX"), DRPVER)
 RAW_METADATA_COLUMNS = [
     ("hemi", str),
     ("tileid", int),
-    ("mjd", int),
+    ("mjd", int),  # actually SJD
+    ("rmjd", int),  # the real MJD
     ("imagetyp", str),
     ("spec", str),
     ("camera", str),
@@ -65,7 +67,8 @@ RAW_METADATA_COLUMNS = [
     ('name', str)
 ]
 MASTER_METADATA_COLUMNS = [
-    ("mjd", int),
+    ("mjd", int),   # actually SJD
+    ("rmjd", int),  # the real MJD
     ("imagetyp", str),
     ("spec", str),
     ("camera", str),
@@ -160,6 +163,7 @@ def _filter_metadata(
     hemi=None,
     tileid=None,
     mjd=None,
+    rmjd=None,
     imagetyp=None,
     spec=None,
     camera=None,
@@ -238,6 +242,9 @@ def _filter_metadata(
     if mjd is not None:
         log.info(f"filtering by {mjd = }")
         query.append("mjd == @mjd")
+    if rmjd is not None:
+        log.info(f"filtering by {rmjd = }")
+        query.append("rmjd == @rmjd")
     if imagetyp is not None:
         log.info(f"filtering by {imagetyp = }")
         query.append("imagetyp == @imagetyp")
@@ -485,13 +492,16 @@ def extract_metadata(frames_paths: list) -> pd.DataFrame:
 
         frame_path = pathlib.Path(frame_path)
 
+        # convert real MJD to SJD
+        sjd = int(dateobs_to_sjd(header.get("OBSTIME")))
+
         # apply any header fix or if none, use old header
-        mjd = header.get("MJD")
-        header = apply_hdrfix(mjd, hdr=header) or header
+        header = apply_hdrfix(sjd, hdr=header) or header
 
         new_metadata[i] = [
             "n" if header.get("OBSERVAT") != "LCO" else "s",
             header.get("TILEID", 1111),
+            sjd,
             header.get("MJD"),
             header.get("IMAGETYP"),
             header.get("SPEC"),
@@ -655,6 +665,7 @@ def del_metadata(tileid=None, mjd=None, kind="raw"):
 def get_metadata(
     tileid=None,
     mjd=None,
+    rmjd=None,
     hemi=None,
     imagetyp=None,
     spec=None,
@@ -681,7 +692,9 @@ def get_metadata(
     tileid : int, optional
         tile ID of the target frames, by default None
     mjd : int, optional
-        MJD where the target frames is located, by default None
+        SJD where the target frames is located, by default None
+    rmjd : int, optional
+        the real MJD, by default None
     hemi : str, optional
         hemisphere where the target frames were taken, by default None
     imagetyp : str, optional
@@ -756,6 +769,7 @@ def get_metadata(
         metadata = _filter_metadata(
             metadata=metadata,
             hemi=hemi,
+            rmjd=rmjd,
             imagetyp=imagetyp,
             spec=spec,
             camera=camera,
@@ -787,6 +801,7 @@ def get_metadata(
 def get_analog_groups(
     tileid,
     mjd,
+    rmjd=None,
     hemi=None,
     imagetyp=None,
     spec=None,
@@ -817,7 +832,9 @@ def get_analog_groups(
     tileid : int
         tile ID of the target frames
     mjd : int
-        MJD where the target frames is located
+        SJD where the target frames is located
+    rmjd : int
+        the real MJD
     hemi : str, optional
         hemisphere where the target frames were taken, by default None
     imagetyp : str, optional
@@ -886,6 +903,7 @@ def get_analog_groups(
             hemi=hemi,
             tileid=tileid,
             mjd=mjd,
+            rmjd=rmjd,
             imagetyp=imagetyp,
             spec=spec,
             camera=camera,
@@ -922,6 +940,7 @@ def match_master_metadata(
     target_camera,
     target_exptime,
     mjd=None,
+    rmjd=None,
     hemi=None,
     neon=None,
     hgne=None,
@@ -951,7 +970,9 @@ def match_master_metadata(
     target_exptime : float
         exposure time of the target frames
     mjd : int, optional
-        MJD where the target frames is located, by default None
+        SJD where the target frames is located, by default None
+    rmjd : int, optional
+        the real MJD
     hemi : str, optional
         hemisphere where the target frames were taken, by default None
     neon : bool, optional
@@ -1032,6 +1053,7 @@ def match_master_metadata(
         calib_metadata = _filter_metadata(
             metadata=masters_metadata,
             mjd=mjd,
+            rmjd=rmjd,
             imagetyp=calib_type,
             camera=target_camera,
             exptime=target_exptime if calib_type != "bias" else None,
