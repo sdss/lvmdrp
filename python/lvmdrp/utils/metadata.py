@@ -57,6 +57,7 @@ RAW_METADATA_COLUMNS = [
     ("stage", ReductionStage),
     ("status", ReductionStatus),
     ("drpqual", QualityFlag),
+    ("path", str),
 ]
 MASTER_METADATA_COLUMNS = [
     ("mjd", int),
@@ -75,6 +76,7 @@ MASTER_METADATA_COLUMNS = [
     ("stage", ReductionStage),
     ("status", ReductionStatus),
     ("drpqual", QualityFlag),
+    ("path", str),
 ]
 
 
@@ -490,6 +492,7 @@ def extract_metadata(frames_paths):
             ReductionStage.UNREDUCED,
             ReductionStatus(0),
             QualityFlag(0),
+            frame_path,
         ]
 
     # define dataframe
