@@ -837,6 +837,7 @@ def get_analog_groups(
     stage=None,
     status=None,
     drpqual=None,
+    include_fields=[],
     analog_fields=[],
 ):
     """return a list of metadata groups considered to be analogs
@@ -847,7 +848,7 @@ def get_analog_groups(
         * imagetyp
         * camera
         * exptime
-    Optionally, these criteria can be expanded using the `analog_fields`.
+    Optionally, these criteria can be expanded using the `include_fields`.
     The final critaria will always include the above mentioned fields.
 
     Parameters
@@ -888,7 +889,7 @@ def get_analog_groups(
         bitmask representing status of the reduction, by default None
     drpqual : int, optional
         bitmask representing the quality of the reduction, by default None
-    analog_fields : list, optional
+    include_fields : list, optional
         a list of additional fields to include when grouping analogs, by default []
 
     Returns
@@ -901,7 +902,7 @@ def get_analog_groups(
         the list of master paths
     """
     # default fields
-    default_fields = {"tileid", "mjd", "imagetyp", "camera", "exptime"}
+    default_fields = ["tileid", "mjd", "imagetyp", "camera", "exptime"]
     # default output
     default_output = [pd.DataFrame(columns=list(zip(*RAW_METADATA_COLUMNS))[0])]
 
@@ -952,8 +953,10 @@ def get_analog_groups(
     metadata = pd.concat(metadatas, axis="index", ignore_index=True)
 
     logger.info("grouping analogs")
-    analog_fields = list(default_fields.union(analog_fields))
-    metadata_groups = metadata.groupby(analog_fields)
+    include_fields = default_fields + list(
+        filter(lambda i: i not in default_fields, include_fields)
+    )
+    metadata_groups = metadata.groupby(include_fields)
 
     logger.info(f"found {len(metadata_groups)} groups of analogs:")
     analogs = {}
