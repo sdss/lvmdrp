@@ -1,27 +1,161 @@
-import numpy
-from astropy.io import fits as pyfits
-
-from lvmdrp.core.apertures import *
-from lvmdrp.core.header import *
-from lvmdrp.core.spectrum1d import Spectrum1D
-
-
-try:
-    import pylab
-except:
-    pass
+from copy import deepcopy as copy
 from multiprocessing import Pool, cpu_count
 
+import numpy
+from astropy.io import fits as pyfits
 from astropy.modeling import fitting, models
-from scipy import ndimage
+from astropy.stats.biweight import biweight_location
+from astropy.visualization import simple_norm
+from scipy import ndimage, signal
+from scipy import interpolate
+
+from lvmdrp.core.plot import plt
+from lvmdrp.core.apertures import Apertures
+from lvmdrp.core.header import Header
+from lvmdrp.core.spectrum1d import Spectrum1D
 
 
 def _parse_ccd_section(section):
     """Parse a CCD section in the format [1:NCOL, 1:NROW] to python tuples"""
     slice_x, slice_y = section.strip("[]").split(",")
-    slice_x = list(map(lambda str: int(str) - 1, slice_x.split(":")))
-    slice_y = list(map(lambda str: int(str) - 1, slice_y.split(":")))
+    slice_x = list(map(lambda str: int(str), slice_x.split(":")))
+    slice_y = list(map(lambda str: int(str), slice_y.split(":")))
+    slice_x[0] -= 1
+    slice_y[0] -= 1
     return slice_x, slice_y
+
+
+def _model_overscan(os_quad, axis=1, stat=biweight_location, model="spline", **kwargs):
+    """fits a parametric model to the given overscan region
+
+    Given an overscan section corresponding to a quadrant in a raw frame, this function
+    coadds the counts along a given `axis` using a given statistics `stat`. Additionally,
+    a model can be fitted to the resulting profile, which options are:
+        * const: a constant model by further collapsing along using the same `stat`
+        * profile: the raw profile (`os_model = os_profile`)
+        * polynomial: a polynomial model fitted on `os_profile`
+        * spline: a cubic-spline fitting on `os_profile`
+
+    Additional keyword parameters are passed to the fitted model.
+
+    Parameters
+    ----------
+    os_quad : lvmdrp.core.image.Image
+        image section corresponding to a overscan quadrant
+    axis : int, optional
+        axis along which the overscan will be fitted, by default 1
+    stat : function, optional
+        function to use for coadding pixels along `axis`, by default biweight_location
+    model : str, optional
+        parametric function to fit ("const", "profile", "poly", "spline"), by default "spline"
+
+    Returns
+    -------
+    os_profile : array_like
+        overscan profile after coadding pixels along `axis`
+    os_model : array_like, float
+        overscan model
+    """
+    assert axis == 0 or axis == 1
+
+    os_profile = stat(os_quad._data, axis=axis)
+    pixels = numpy.arange(os_profile.size)
+    if model == "const":
+        os_model = numpy.ones_like(pixels) * stat(os_profile)
+    elif model == "profile":
+        os_model = os_profile
+    elif model == "poly":
+        model = numpy.polynomial.Polynomial.fit(pixels, os_profile, **kwargs)
+        os_model = model(pixels)
+    elif model == "spline":
+        nknots = 300
+        knots = numpy.linspace(
+            pixels[len(pixels) // nknots],
+            pixels[-1 * len(pixels) // nknots],
+            nknots,
+        )
+        model = interpolate.splrep(pixels, os_profile, task=-1, t=knots)
+        os_model = interpolate.splev(pixels, model)
+        # model = interpolate.UnivariateSpline(pixels, os_profile, **kwargs)
+        # os_model = model(pixels)
+
+    if axis == 1:
+        os_model = os_model[:, None]
+    elif axis == 0:
+        os_model = os_model[None, :]
+
+    return os_profile, os_model
+
+
+def _percentile_normalize(images, pct=0.75):
+    """percentile normalize a given stacked images
+
+    Parameters
+    ----------
+    images : array_like
+        3-dimensional array with first axis the image index
+    pct : float, optional
+        percentile at which the calculate the normalization factor, by default 0.75
+
+    Returns
+    -------
+    array_like
+        3-dimensional array of normalized images
+    array_like
+        vector containing normalization factors for each image
+    """
+    # calculate normalization factor
+    pcts = numpy.nanpercentile(images.filled(numpy.nan), pct, axis=(1, 2))
+    norm = numpy.ma.median(pcts) / pcts
+
+    return norm[:, None, None] * images, norm
+
+
+def _bg_subtraction(images, quad_sections, bg_sections):
+    """returns a background subtracted set of images
+
+    The background is calculated as the median in the given `bg_sections` of
+    the given `images`. The actual sections used to calculate the background,
+    the median background and the standard deviation of the background are also
+    returned matching the shape of the given `images`.
+
+
+    Parameters
+    ----------
+    images : array_like
+        3-dimensional array of stacked images
+    quad_sections : list_like
+        4-element list containing the FITS formatted sections of each quadrant
+    bg_sections : list_like
+        4-element list containing the FITS formatted sections for the background
+
+    Returns
+    -------
+    array_like
+        3-dimensional background subtracted images
+    array_like
+        3-dimensional median and standard deviation background images
+    list_like
+        4-element list containing the sections used to calculate the background
+    """
+    bg_images_med = numpy.ma.masked_array(numpy.zeros_like(images), mask=images.mask)
+    bg_images_std = numpy.ma.masked_array(numpy.zeros_like(images), mask=images.mask)
+    bg_sections = []
+    for i, quad_sec in enumerate(quad_sections):
+        xquad, yquad = [slice(idx) for idx in _parse_ccd_section(quad_sec)]
+        xbg, ybg = [slice(idx) for idx in _parse_ccd_section(bg_sections[i])]
+        # extract quad sections for BG calculation
+        bg_array = images[:, xbg, ybg]
+        bg_sections.append(bg_array)
+        # calculate median and standard deviation BG
+        bg_med = numpy.ma.median(bg_array, axis=(1, 2))
+        bg_std = numpy.ma.std(bg_array, axis=(1, 2))
+        # set background sections in corresponding images
+        bg_images_med[:, yquad, xquad] = bg_med[:, None, None]
+        bg_images_std[:, yquad, xquad] = bg_std[:, None, None]
+    images_bgcorr = images - bg_images_med
+
+    return images_bgcorr, bg_images_med, bg_images_std, bg_sections
 
 
 class Image(Header):
@@ -104,7 +238,7 @@ class Image(Header):
                     origin=self._origin,
                 )
                 return img
-            except:
+            except Exception:
                 # raise exception if the type are not matching in general
                 raise TypeError(
                     "unsupported operand type(s) for +: %s and %s"
@@ -182,7 +316,7 @@ class Image(Header):
                     origin=self._origin,
                 )
                 return img
-            except:
+            except Exception:
                 # raise exception if the type are not matching in general
                 raise TypeError(
                     "unsupported operand type(s) for -: %s and %s"
@@ -273,7 +407,7 @@ class Image(Header):
                     origin=self._origin,
                 )
                 return img
-            except:
+            except Exception:
                 # raise exception if the type are not matching in general
                 raise TypeError(
                     "unsupported operand type(s) for /: %s and %s"
@@ -347,7 +481,7 @@ class Image(Header):
                     origin=self._origin,
                 )
                 return img
-            except:
+            except Exception:
                 # raise exception if the type are not matching in general
                 raise TypeError(
                     "unsupported operand type(s) for *: %s and %s"
@@ -394,26 +528,55 @@ class Image(Header):
         return Image(data=data, header=header, error=error, mask=mask)
 
     def setSection(self, section, subimg, update_header=False, inplace=True):
+        """replaces a section in the current frame with given subimage
+
+        this function will replace the information in `section` of the current
+        frame with the information contained in the `subimg`. If the current
+        frame does not contain an extension present in the `subimg`, it will be
+        created in the new frame, filling in the remaining sections with dummy
+        data. The rest of the sections will be kept if already present in the
+        original frame.
+
+        Parameters
+        ----------
+        section : str
+            CCD section for which to set the new subimage
+        subimg : lvmdrp.core.image.Image
+            subimage to be added to the current image
+        update_header : bool, optional
+            whether to update the header with `subimg` header, by default False
+        inplace : bool, optional
+            whether to create a copy of the current image or not, by default True
+
+        Returns
+        -------
+        lvmdrp.core.image.Image
+            image with the section information replaced by the given subimage
+        """
+        # initialize new image
+        if inplace:
+            new_image = self
+        else:
+            new_image = copy(self)
+
+        # parse frame section
         sec_x, sec_y = _parse_ccd_section(section)
 
-        new_image = (
-            self
-            if inplace
-            else Image(
-                data=self._data,
-                header=self._header,
-                mask=self._mask,
-                error=self._error,
-                origin=self._origin,
-            )
-        )
+        # create dummy mask and error images in case those are not in the original image
+        # and subimg contains that information
+        if new_image._mask is None and subimg._mask is not None:
+            new_image.setData(mask=numpy.zeros_like(new_image._data), inplace=True)
+        if new_image._error is None and subimg._error is not None:
+            new_image.setData(error=numpy.zeros_like(new_image._data), inplace=True)
 
+        # replace original image section with given subimg
         new_image._data[sec_y[0] : sec_y[1], sec_x[0] : sec_x[1]] = subimg._data
         if new_image._error is not None:
             new_image._error[sec_y[0] : sec_y[1], sec_x[0] : sec_x[1]] = subimg._error
         if new_image._mask is not None:
             new_image._mask[sec_y[0] : sec_y[1], sec_x[0] : sec_x[1]] = subimg._mask
 
+        # update header if needed
         if update_header:
             new_image._header.update(subimg._header)
 
@@ -571,48 +734,64 @@ class Image(Header):
                 numpy.arange(self._dim[0]), self._data[:, slice], error, mask
             )
 
-    def setData(self, data=None, error=None, mask=None, header=None, select=None):
-        """
-        Set data for an Image. Specific data values can replaced according to a specific selection.
+    def setData(
+        self, data=None, error=None, mask=None, header=None, select=None, inplace=True
+    ):
+        """sets data for the current frame
 
         Parameters
-        --------------
-        data : numpy.ndarray(float), optional with default = None
-            array corresponding to the data to be set
-        error : numpy.ndarray(float), optional with default = None
-            array corresponding to the data to be set
-        mask : numpy.ndarray(bool), optional with default = None
-            array corresponding to the bad pixel to be set
-        header : Header object, optional with default = None
-        select : numpy.ndarray(bool), optional with default = None
-            array defining the selection of pixel to be set
+        ----------
+        data : array_like, optional
+            image to be set in the `data` extension, by default None
+        error : array_like, optional
+            image to be set in the `error` extension, by default None
+        mask : array_like, optional
+            image to be set in the `mask` extension, by default None
+        header : lvmdrp.core.header.Header, optional
+            header object to be set, by default None
+        select : array_like, optional
+            boolean image to select pixels to be replaced, by default None
+        inplace : bool, optional
+            whether the original image is overwritten or not, by default True
 
+        Returns
+        -------
+        lvmdrp.core.image.Image
+            image with the given data replaced
         """
+        # initialize new image
+        if inplace:
+            new_image = self
+        else:
+            new_image = copy(self)
+
         # if not select given set the full image
         if select is None:
             if data is not None:
-                self._data = data  # set data if given
-                self._dim = data.shape  # set dimension
+                new_image._data = data  # set data if given
+                new_image._dim = data.shape  # set dimension
 
             if mask is not None:
-                self._mask = mask  # set mask if given
-                self._dim = mask.shape  # set dimension
+                new_image._mask = mask  # set mask if given
+                new_image._dim = mask.shape  # set dimension
 
             if error is not None:
-                self._error = error  # set mask if given
-                self._dim = error.shape  # set dimension
+                new_image._error = error  # set mask if given
+                new_image._dim = error.shape  # set dimension
             if header is not None:
-                self.setHeader(header)  # set header
+                new_image.setHeader(header)  # set header
         else:
             # with select definied only partial data are set
             if data is not None:
-                self._data[select] = data
+                new_image._data[select] = data
             if mask is not None:
-                self._mask[select] = mask
+                new_image._mask[select] = mask
             if error is not None:
-                self._error[select] = error
+                new_image._error[select] = error
             if header is not None:
-                self.setHeader(header)  # set header
+                new_image.setHeader(header)  # set header
+
+        return new_image
 
     def convertUnit(
         self, unit, assume="adu", gain_field="GAIN", assume_gain=1.0, inplace=True
@@ -631,8 +810,8 @@ class Image(Header):
             )
         )
         if current != unit:
-            gains = self._header[f"AMP? {gain_field}"]
-            sects = self._header[f"AMP? TRIMSEC"]
+            gains = self.getHdrValue(f"AMP? {gain_field}")
+            sects = self.getHdrValue("AMP? TRIMSEC")
             n_amp = len(gains)
             for i in range(n_amp):
                 factor = (
@@ -646,13 +825,13 @@ class Image(Header):
                     update_header=False,
                     inplace=True,
                 )
-            else:
-                factor = (
-                    self._header.get(gain_field, assume_gain)
-                    if current == "adu"
-                    else 1 / self._header.get(gain_field, assume_gain)
-                )
-                new_image *= factor
+        else:
+            factor = (
+                self._header.get(gain_field, assume_gain)
+                if current == "adu"
+                else 1 / self._header.get(gain_field, assume_gain)
+            )
+            new_image *= factor
 
             new_image._header["BUNIT"] = unit
 
@@ -933,14 +1112,11 @@ class Image(Header):
             filename, output_verify="silentfix", overwrite=True
         )  # write FITS file to disc
 
-    def computePoissonError(self, rdnoise=0.0, replace_masked=1e20):
-        image = self._data
-        self._error = numpy.zeros_like(image)
-        select = image > 0
-        self._error[select] = numpy.sqrt(image[select] + rdnoise**2)
+    def computePoissonError(self, rdnoise):
+        self._error = numpy.zeros_like(self._data)
+        select = self._data > 0
+        self._error[select] = numpy.sqrt(self._data[select] + rdnoise**2)
         self._error[numpy.logical_not(select)] = rdnoise
-        if self._mask is not None and replace_masked != 0:
-            self._error[self._mask] = replace_masked
 
     def replaceMaskMedian(self, box_x, box_y, replace_error=1e20):
         """
@@ -1262,14 +1438,14 @@ class Image(Header):
         """
         # convolve the data array with the 2D Gaussian convolution kernel
 
-        if self._mask is not None and mask == True:
+        if self._mask is not None and mask is True:
             mask_data = self._data[self._mask]
             self._data[self._mask] = 0
             gauss = ndimage.filters.gaussian_filter(
                 self._data, (sigma_y, sigma_x), mode=mode
             )
             scale = ndimage.filters.gaussian_filter(
-                (self._mask == False).astype("float32"), (sigma_y, sigma_x), mode=mode
+                (self._mask is False).astype("float32"), (sigma_y, sigma_x), mode=mode
             )
             new = gauss / scale
             self._data[self._mask] = mask_data
@@ -1288,42 +1464,47 @@ class Image(Header):
         return new_image
 
     def medianImg(self, size, mode="nearest", use_mask=False):
-        """
-        Return a new Image that has been median filtered with a filter window of given size.
+        """return median filtered image with the given kernel size
+
+        optionally the method for handling boundary can be set with the `mode`
+        parameter (see documentation for `scipy.ndimage.median_filter`). Masked
+        pixels are handledby setting `use_mask=True`. In this last case, the
+        `mode` is ignored (see documentation for `scipy.signal.medfilt2d`).
 
         Parameters
-        --------------
-        size : tuple of int
-            Size of the filter window
-        mode : string, optional with default: nearest
-            Set the mode how to handle the boundarys within the convolution
-            Possilbe modes are: reflect, constant, nearest, mirror,  wrap
+        ----------
+        size : tuple
+            2-value tuple for the size of the median box
+        mode : str, optional
+            method to handle boundary pixels, by default "nearest"
+        use_mask : bool, optional
+            whether to take into account masked pixels or not, by default False
 
         Returns
-        -----------
-        image :  Image object
-            An Image object with the median filter data
+        -------
+        lvmdrp.core.image.Image
+            median filtered image
         """
-        if self._mask is None and use_mask is True:
-            new_data = ndimage.filters.median_filter(
-                self._data, size, mode=mode
-            )  # applying the median filter
+        if self._mask is None and use_mask:
+            new_data = ndimage.median_filter(self._data, size, mode=mode)
             new_mask = None
-        elif self._mask is not None and use_mask is False:
-            new_data = ndimage.filters.median_filter(
-                self._data, size, mode=mode
-            )  # applying the median filter
+        elif self._mask is not None and not use_mask:
+            new_data = ndimage.median_filter(self._data, size, mode=mode)
             new_mask = self._mask
         else:
-            self._data[self._mask == 1] = numpy.nan
-            new_data = ndimage.filters.generic_filter(
-                self._data, numpy.nanmedian, size, mode=mode
-            )
+            # copy data and replace masked with nans
+            new_data = copy(self._data)
+            new_data[self._mask] = numpy.nan
+            # perform median filter
+            new_data = signal.medfilt2d(new_data, size)
+            # update mask
             new_mask = numpy.isnan(new_data)
+            # reset original masked values in new array
+            new_data[new_mask] = self._data[new_mask]
 
         image = Image(
             data=new_data, header=self._header, error=self._error, mask=new_mask
-        )  # create a new Image object
+        )
         return image
 
     def collapseImg(self, axis, mode="mean"):
@@ -1399,7 +1580,7 @@ class Image(Header):
         x = x - numpy.mean(x)
         # if self._mask is not None:
         #    self._mask = numpy.logical_and(self._mask, numpy.logical_not(numpy.isnan(self._data)))
-        valid = self._mask.astype("bool") == False
+        valid = ~self._mask.astype("bool")
         # iterate over the image
         for i in range(slices):
             # decide on the bad pixel mask
@@ -1425,8 +1606,8 @@ class Image(Header):
                         order,
                     )  # fit #refit polynomial with clipped data
                     if plot == i:
-                        pylab.plot(x, self._data[:, i], "-b")
-                        pylab.plot(
+                        plt.plot(x, self._data[:, i], "-b")
+                        plt.plot(
                             x[valid[:, i]][select],
                             self._data[valid[:, i], i][select],
                             "ok",
@@ -1450,14 +1631,14 @@ class Image(Header):
                     x[select], self._data[:, i][select], order
                 )  # refit polynomial with clipped data
                 if plot == i:
-                    pylab.plot(x[select], self._data[:, i][select], "ok")
+                    plt.plot(x[select], self._data[:, i][select], "ok")
                 fit_result[:, i] = numpy.polyval(
                     fit_par[:, i], x
                 )  # evalute the polynom
             if plot == i:
-                pylab.plot(x, fit_result[:, i], "-r")
-                pylab.ylim([0, max])
-                pylab.show()
+                plt.plot(x, fit_result[:, i], "-r")
+                plt.ylim([0, max])
+                plt.show()
         # match orientation of the output array
         if axis == "y" or axis == "Y" or axis == 0:
             pass
@@ -1558,10 +1739,10 @@ class Image(Header):
                 )
             if self._mask is not None:
                 mask[good_pix[:, i], i] = numpy.sum(self._mask[:, i][pixels], 1) > 0
-            mask[:, i] = bad_pix[:, i]
         return data, error, mask
 
     def extractSpecOptimal(self, TraceMask, TraceFWHM, plot_fig=False):
+        # initialize RSS arrays
         data = numpy.zeros((TraceMask._fibers, self._dim[1]), dtype=numpy.float32)
         if self._error is not None:
             error = numpy.zeros((TraceMask._fibers, self._dim[1]), dtype=numpy.float32)
@@ -1569,25 +1750,41 @@ class Image(Header):
             error = None
         mask = numpy.zeros((TraceMask._fibers, self._dim[1]), dtype="bool")
 
+        # convert FWHM trace to sigma
         TraceFWHM = TraceFWHM / 2.354
 
         for i in range(self._dim[1]):
+            # get i-column from image and trace
             slice_img = self.getSlice(i, axis="y")
             slice_trace = TraceMask.getSlice(i, axis="y")
             trace = slice_trace[0]
-            bad_fiber = numpy.logical_or(
-                (slice_trace[2] == 1),
-                numpy.logical_or(
-                    slice_trace[0] < 0, slice_trace[0] > len(slice_img._data) - 1
-                ),
+
+            # define fiber mask
+            bad_fiber = (slice_trace[2] == 1) | (
+                (slice_trace[0] < 0) | slice_trace[0] > len(slice_img._data) - 1
             )
-            good_fiber = numpy.logical_not(bad_fiber)
+            # bad_fiber = numpy.logical_or(
+            #     (slice_trace[2] == 1),
+            #     numpy.logical_or(
+            #         slice_trace[0] < 0, slice_trace[0] > len(slice_img._data) - 1
+            #     ),
+            # )
+            good_fiber = ~bad_fiber
+
+            # get i-column from FWHM trace
             fwhm = TraceFWHM.getSlice(i, axis="y")[0]
+
+            # set NaNs to zero in image slice
             select_nan = numpy.isnan(slice_img._data)
             slice_img._data[select_nan] = 0
+
+            # define fiber index
             indices = numpy.indices((self._dim[0], numpy.sum(good_fiber)))
+
+            # measure flux along the given columns
             result = slice_img.obtainGaussFluxPeaks(
-                trace[good_fiber], fwhm[good_fiber], indices, plot=plot_fig)
+                trace[good_fiber], fwhm[good_fiber], indices, plot=plot_fig
+            )
             data[good_fiber, i] = result[0]
             if self._error is not None:
                 error[good_fiber, i] = result[1]
@@ -1918,23 +2115,51 @@ class Image(Header):
         replace_box=(20, 2),
         parallel="auto",
     ):
-        """Return the cosmic ray pixel mask computed using the LA algorithm"""
+        """create a pixel mask for cosmic rays using the LA algorithm
+
+        Parameters
+        ----------
+        sigma_det : int, optional
+            sigma level above the noise to be detected as comics, by default 5
+        flim : float, optional
+            threshold between Laplacian edged and Gaussian smoothed image (>1), by default 1.1
+        iter : int, optional
+            number of iterations, recommended >1 to fully detect extended cosmics, by default 3
+        sig_gauss : tuple, optional
+            sigma of the Gaussian smoothing kernel in x and y direction, by default (0.8, 0.8)
+        error_box : tuple, optional
+            box size used to estimate the electron counts for a given pixel by taken a median to estimate the noise level.
+        replace_box : tuple, optional
+            box size in used to estimate replacement values from valid pixels, by default (20, 2)
+        parallel : str or int, optional
+            whether to run in parallel ("auto" or >1) or not (<=1), by default "auto"
+
+        Returns
+        -------
+        np.ndarray
+            pixel mask with cosmic rays (1) and clean pixels (0)
+        """
+        # TODO: Cosmic ray rejection should happen after detrending, not before.
+        # TODO: Not clear to me how noise image is used. You should already have an error image at this point. Why create a new one?
+        # TODO: Is this noise image an rms in a median box or Poisson per pixel?
+        # TODO: It looks like things picked up as CRs are really bad columns/pixels. If you detrend first and apply bad pixel mask this might solve this.
+        # TODO: Looks like CR mask leaves out fainter parts of the CRs. Need to fine tune parameters (thresholds and number of iterations)
+        # TODO: try this: https://lacosmic.readthedocs.io/en/stable/_modules/lacosmic/core.html#lacosmic with the long kernel convolution
+        # https://github.com/larrybradley/lacosmic
         err_box_x = error_box[0]
         err_box_y = error_box[1]
         sigma_x = sig_gauss[0]
         sigma_y = sig_gauss[1]
-        box_x = replace_box[0]
-        box_y = replace_box[1]
+        # box_x = replace_box[0]
+        # box_y = replace_box[1]
 
         # create a new Image instance to store the initial data array
         out = Image(
             data=self.getData(),
             header=self.getHeader(),
-            error=None,
+            error=self.getError(),
             mask=numpy.zeros(self.getDim(), dtype=bool),
         )
-        out.convertUnit("e-")
-        # out.removeError()
 
         # initial CR selection
         select = numpy.zeros_like(out._mask, dtype=bool)
@@ -1943,11 +2168,7 @@ class Image(Header):
         LA_kernel = (
             numpy.array(
                 [
-                    [
-                        0,
-                        -1,
-                        0,
-                    ],
+                    [0, -1, 0],
                     [-1, 4, -1],
                     [0, -1, 0],
                 ]
@@ -1961,24 +2182,24 @@ class Image(Header):
             cpus = int(parallel)
 
         # get rdnoise from header or assume given value
-        quads = list(self._header["AMP? TRIMSEC"].values())
-        rdnoises = list(self._header["AMP? RDNOISE"].values())
+        # quads = list(self._header["AMP? TRIMSEC"].values())
+        # rdnoises = list(self._header["AMP? RDNOISE"].values())
 
         # start iteration
         for i in range(iter):
-            # quick and dirty CRR on current iteration
-            noise = out.medianImg((err_box_y, err_box_x))
-            for iquad in range(len(quads)):
-                quad = noise.getSection(quads[iquad])
-                select_noise = quad.getData() <= 0
-                quad.setData(data=0, select=select_noise)
-                quad = (quad + rdnoises[iquad] ** 2).sqrt()
-                noise = noise.setSection(
-                    quads[iquad], subimg=quad, update_header=False, inplace=False
-                )
-            noise.setData(
-                data=noise._data[noise._data > 0].min(), select=noise._data <= 0
-            )
+            # quick and dirty pixel noise calculation
+            # noise = out.medianImg((err_box_y, err_box_x))
+            # for iquad in range(len(quads)):
+            #     quad = noise.getSection(quads[iquad])
+            #     select_noise = quad.getData() <= 0
+            #     quad.setData(data=0, select=select_noise)
+            #     quad = (quad + rdnoises[iquad] ** 2).sqrt()
+            #     noise = noise.setSection(
+            #         quads[iquad], subimg=quad, update_header=False, inplace=False
+            #     )
+            # noise.setData(
+            #     data=noise._data[noise._data > 0].min(), select=noise._data <= 0
+            # )
             if cpus > 1:
                 result = []
                 fine = out.convolveGaussImg(sigma_x, sigma_y)
@@ -2017,41 +2238,79 @@ class Image(Header):
                 Lap2 = result[1].get()
                 pool.terminate()
 
-                S = Lap / (noise * 4)  # normalize Laplacian image by the noise
+                S = Lap / (out._error)  # normalize Laplacian image by the noise
                 S_prime = S - S.medianImg(
                     (err_box_y, err_box_x)
                 )  # cleaning of the normalized Laplacian image
             else:
+                fig, axs = plt.subplots(
+                    2, 2, figsize=(20, 20), sharex=True, sharey=True
+                )
+                axs = axs.flatten()
+
+                # norm = simple_norm(out._data, stretch="log", clip=True)
+                # axs[0].imshow(out._data, origin="lower", norm=norm)
+
+                # NOTE: subsample and convolve with Laplacian kernel
+                # to highlight cosmic ray edges
                 sub = out.subsampleImg()  # subsample image
                 conv = sub.convolveImg(
                     LA_kernel
                 )  # convolve subsampled image with kernel
+
                 select_neg = conv < 0
                 conv.setData(
                     data=0, select=select_neg
                 )  # replace all negative values with 0
+
+                # NOTE: return data to the original sampling
                 Lap = conv.rebin(2, 2)  # rebin the data to original resolution
-                S = Lap / (noise * 4)  # normalize Laplacian image by the noise
+
+                norm = simple_norm(Lap._data, stretch="log", clip=True)
+                axs[0].set_title("laplacian of input image")
+                axs[0].imshow(Lap._data, origin="lower", norm=norm)
+
+                S = Lap / (out._error)  # normalize Laplacian image by the noise
                 S_prime = S - S.medianImg(
                     (err_box_y, err_box_x)
                 )  # cleaning of the normalized Laplacian image
+
+                norm = simple_norm(S_prime._data, stretch="log", clip=True)
+                axs[1].set_title(
+                    "noise normalized and background subtracted laplacian (S_prime)"
+                )
+                axs[1].imshow(S_prime._data, origin="lower", norm=norm)
+
+                # NOTE: convolve with a Gaussian kernel
                 fine = out.convolveGaussImg(
                     sigma_x, sigma_y
                 )  # convolve image with a 2D Gaussian
                 fine_norm = out / fine
                 select_neg = fine_norm < 0
                 fine_norm.setData(data=0, select=select_neg)
+
+                norm = simple_norm(fine_norm._data, stretch="log", clip=True)
+                axs[2].set_title("normalized input")
+                axs[2].imshow(fine_norm._data, origin="lower", norm=norm)
+
                 sub_norm = fine_norm.subsampleImg()  # subsample image
                 Lap2 = (sub_norm).convolveImg(LA_kernel)
                 Lap2 = Lap2.rebin(2, 2)  # rebin the data to original resolution
 
+                norm = simple_norm(Lap2._data, stretch="log", max_percent=90)
+                axs[3].set_title("laplacian of normalized input (Lap2)")
+                axs[3].imshow(Lap2._data, origin="lower", norm=norm)
+
+                plt.show()
+
             # define cosmic ray selection
-            select = numpy.logical_or(
-                numpy.logical_and((Lap2) > flim, S_prime > sigma_det), select
-            )
+            # select = numpy.logical_or(
+            #     numpy.logical_and((Lap2) > flim, S_prime > sigma_det), select
+            # )
+            select |= (Lap2._data > flim) & (S_prime._data > sigma_det)
             # update mask in clean image for next iteration
             out.setData(mask=True, select=select)
-            out = out.replaceMaskMedian(box_x, box_y, replace_error=None)
+            # out = out.replaceMaskMedian(box_x, box_y, replace_error=None)
 
         return select
 
@@ -2145,7 +2404,6 @@ def glueImages(images, positions):
         full_CCD_mask = numpy.concatenate(columns, axis=1)
     else:
         full_CCD_mask = None
-
     # ingest the combined data to the object attribute
     out_image = Image(
         data=full_CCD_data,
@@ -2157,7 +2415,15 @@ def glueImages(images, positions):
     return out_image
 
 
-def combineImages(images, method="median", k=3):
+def combineImages(
+    images,
+    method="median",
+    k=3,
+    normalize=True,
+    normalize_percentile=75,
+    background_subtract=False,
+    background_sections=None,
+):
     """
     Combines several image to a single one according to a certain average methods
 
@@ -2170,53 +2436,91 @@ def combineImages(images, method="median", k=3):
     k : float
         Only used for the clipped_mean method. Only values within k*sigma around the median value are averaged.
     """
+    # TODO: I think medians are fine, as long as we are careful of subtracting a
+    # background, and scaling images robustly (i.e. with outlier rejection).
+    # You might want to do different things when dealing with different types of frames.
+    # We should discuss this.,
+
     # creates an empty empty array to store the images in a stack
     dim = images[0].getDim()
-    stack_image = numpy.zeros((len(images), dim[0], dim[1]), dtype=numpy.float32)
+    stack_image = numpy.zeros((len(images), dim[0], dim[1]), dtype=float)
+    stack_error = numpy.zeros((len(images), dim[0], dim[1]), dtype=float)
     stack_mask = numpy.zeros((len(images), dim[0], dim[1]), dtype=bool)
 
     # load image data in to stack
     for i in range(len(images)):
         stack_image[i, :, :] = images[i].getData()
+
+        # read error image if not a bias image
+        if images[0]._header["IMAGETYP"] != "bias":
+            stack_error[i, :, :] = images[i].getError()
+
+        # read pixel mask image
         if images[i]._mask is not None:
             stack_mask[i, :, :] = images[i].getMask()
 
+    # mask invalid values
+    stack_image = numpy.ma.masked_array(stack_image, mask=stack_mask)
+    stack_error = numpy.ma.masked_array(stack_error, mask=stack_mask)
+
+    if background_subtract:
+        quad_sections = images[0].getHdrValues("AMP? TRIMSEC")
+        stack_image, _, _, _ = _bg_subtraction(
+            images=stack_image,
+            quad_sections=quad_sections,
+            bg_sections=background_sections,
+        )
+
+    if normalize:
+        # plot distribution of pixels (detect outliers e.g., CR)
+        # select pixels that are exposed
+        # calculate the median of the selected pixels
+        # scale illuminated pixels to a common scale, for the whole image
+        stack_image, _ = _percentile_normalize(stack_image, normalize_percentile)
+
     # combine the images according to the selected method
     if method == "median":
-        new_image = numpy.median(stack_image, 0)
+        new_image = numpy.ma.median(stack_image, 0)
+        new_error = numpy.sqrt(numpy.ma.median(stack_error**2, 0))
     elif method == "sum":
-        new_image = numpy.sum(stack_image, 0)
+        new_image = numpy.ma.sum(stack_image, 0)
+        new_error = numpy.sqrt(numpy.ma.sum(stack_error**2, 0))
     elif method == "mean":
-        new_image = numpy.mean(stack_image, 0)
-    elif method == "nansum":
-        new_image = numpy.nansum(stack_image, 0)
-    elif method == "clipped_mean":
-        median = numpy.median(stack_image, 0)
-        rms = numpy.std(stack_image, 0)
+        new_image = numpy.ma.mean(stack_image, 0)
+        new_error = numpy.sqrt(numpy.ma.mean(stack_error**2, 0))
+    elif method == "clipped_median":
+        median = numpy.ma.median(stack_image, 0)
+        rms = numpy.ma.std(stack_image, 0)
         # select pixels within given sigma limits around the median
         select = numpy.logical_and(
             stack_image < median + k * rms, stack_image > median - k * rms
         )
         # compute the number of good pixels
-        good_pixels = numpy.sum(select, 0).astype(bool)
+        good_pixels = numpy.ma.sum(select, 0).astype(bool)
         # set all bad pixel to 0 to compute the mean
+        # TODO: make this optional, by default not replacement
         stack_image[:, numpy.logical_not(good_pixels)] = 0
-        new_image = numpy.sum(stack_image, 0) / good_pixels
+        new_image = numpy.ma.sum(stack_image, 0) / good_pixels
+
+    # return new image and error to normal array
+    new_mask = new_image.mask
+    new_image = new_image.data
+    new_error = new_error.data
 
     # mask bad pixels
-    old_mask = numpy.sum(stack_mask, 0).astype(bool)
-    new_mask = numpy.logical_or(old_mask, numpy.isnan(new_image))
-    # replace masked pixels
-    # new_image[new_mask] = 0
+    new_mask = new_mask | numpy.isnan(new_image) | numpy.isnan(new_error)
 
     # TODO: add new header keywords:
     #   - NCOMBINE: number of frames combined
     #   - STATCOMB: statistic used to combine
+    #   - table HDU conataining basic metadata from the individual images
     if images[0]._header is not None:
         new_header = images[0]._header
     else:
         new_header = None
 
-    outImage = Image(data=new_image, mask=new_mask, header=new_header)
+    combined_image = Image(
+        data=new_image, error=new_error, mask=new_mask, header=new_header
+    )
 
-    return outImage
+    return combined_image

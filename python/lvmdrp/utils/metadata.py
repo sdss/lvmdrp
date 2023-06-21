@@ -10,31 +10,23 @@ import os
 import pathlib
 from glob import glob, has_magic
 from typing import Union
-from tqdm import tqdm
-from astropy.io import fits
-
 import h5py
+import numpy as np
 import pandas as pd
+from astropy.io import fits
+from tqdm import tqdm
 
 from lvmdrp.core.constants import FRAMES_CALIB_NEEDS
 from lvmdrp.utils.bitmask import (
+    QualityFlag,
     RawFrameQuality,
     ReductionStage,
     ReductionStatus,
-    QualityFlag,
 )
-from lvmdrp import log, __version__
+from lvmdrp import log, __version__, path
 from lvmdrp.utils.hdrfix import apply_hdrfix
 from lvmdrp.utils.convert import dateobs_to_sjd
 
-# # NOTE: replace these lines with Brian's integration of sdss_access and sdss_tree
-# from sdss_access import Access
-# from sdss_access.path import Path
-
-
-# path = Path(release="sdss5")
-# access = Access(release="sdss5")
-# access.set_base_dir()
 
 DRPVER = __version__
 
@@ -67,6 +59,7 @@ RAW_METADATA_COLUMNS = [
     ('name', str)
 ]
 MASTER_METADATA_COLUMNS = [
+    ("tileid", int),
     ("mjd", int),   # actually SJD
     ("rmjd", int),  # the real MJD
     ("imagetyp", str),
@@ -85,7 +78,8 @@ MASTER_METADATA_COLUMNS = [
     ("stage", ReductionStage),
     ("status", ReductionStatus),
     ("drpqual", QualityFlag),
-    ('name', str)
+    ('name', str),
+    ("nframes", int),
 ]
 
 
@@ -109,7 +103,7 @@ def _decode_string(metadata):
     return metadata
 
 
-def _get_metadata_paths(tileid=None, mjd=None, kind="raw"):
+def _get_metadata_paths(tileid=None, mjd=None, kind="raw", filter_exist=True):
     """return metadata path depending on the kind
 
     this function will define a path for a metadata store
@@ -124,6 +118,8 @@ def _get_metadata_paths(tileid=None, mjd=None, kind="raw"):
         MJD of the target frames, by default None
     kind : str, optional
         metadata kind for which to define a store path, by default "raw"
+    filter_exist : bool, optional
+        whether the paths should be filtered by existence, by default True
 
     Returns
     -------
@@ -154,6 +150,10 @@ def _get_metadata_paths(tileid=None, mjd=None, kind="raw"):
         metadata_paths = [pathlib.Path(i) for i in glob(path_pattern)]
     else:
         metadata_paths = [pathlib.Path(path_pattern)]
+
+    # return list of existing paths
+    if filter_exist:
+        metadata_paths = list(filter(os.path.exists, metadata_paths))
 
     return metadata_paths
 
@@ -377,6 +377,71 @@ def _del_store(tileid=None, mjd=None, kind="raw"):
             )
 
 
+def locate_new_frames(hemi, camera, mjd, expnum, return_excluded=False):
+    """return paths to new frames not present in the metadata store
+
+    this function will expand the path to raw frames in the local SAS and
+    filter out those paths to frames already present in the metadata stores.
+
+    Parameters
+    ----------
+    hemi : str
+        hemisphere of the observatory where the data was taken
+    camera : str
+        camera ID of the target frames
+    mjd : int
+        MJD of the target frames
+    expnum : int
+        exposure number of the target frames
+    return_excluded : bool, optional
+        whether to return the excluded paths or not, by default False
+
+    Returns
+    -------
+    array_like
+        list of raw frame paths not present in metadata stores
+    """
+    keys = ["mjd", "hemi", "camera", "expnum"]
+    paths = sorted(
+        path.expand("lvm_raw", hemi=hemi, camspec=camera, mjd=mjd, expnum=expnum)
+    )
+    npath = len(paths)
+    log.info(f"found {npath} potentially new raw frame paths in local SAS")
+
+    # extract path parameters
+    new_path_params = pd.DataFrame(
+        [path.extract(name="lvm_raw", example=p) for p in paths]
+    )
+    new_path_params.rename(columns={"camspec": "camera"}, inplace=True)
+    new_path_params[["mjd", "expnum"]] = new_path_params[["mjd", "expnum"]].astype(int)
+    new_path_params["x"] = 0
+    new_path_params.set_index(keys, inplace=True)
+
+    # load all stores if they exist
+    log.info("locating all existing metadata stores")
+    try:
+        stores = _load_or_create_store(tileid="*", mjd="*", mode="r")
+        log.info(f"found {len(stores)} metadata stores")
+    except FileNotFoundError:
+        log.info(f"no metadata stores found, returning {npath} new paths")
+        return paths
+
+    # convert to dataframe
+    gen_path_params = map(lambda store: pd.DataFrame(store["raw"][()])[keys], stores)
+    old_path_params = pd.concat(gen_path_params, ignore_index=True)
+    old_path_params = _decode_string(old_path_params)
+    old_path_params["x"] = 0
+    old_path_params.set_index(keys, inplace=True)
+    # filter out paths in stores
+    news = ~new_path_params.isin(old_path_params).x.values
+    log.info(f"filtered {news.sum()} paths of new frames present in stores")
+
+    new_paths = np.asarray(paths)[news].tolist()
+    if return_excluded:
+        return new_paths, np.asarray(paths)[~news].tolist()
+    return new_paths
+
+
 def get_master_metadata(overwrite: bool = None) -> pd.DataFrame:
     """ Extract metadata from the master calibration files
 
@@ -456,7 +521,7 @@ def get_frames_metadata(mjd: Union[str, int] = None, suffix: str = "fits",
     return meta
 
 
-def extract_metadata(frames_paths: list) -> pd.DataFrame:
+def extract_metadata(frames_paths: list, kind: str = "raw") -> pd.DataFrame:
     """return dataframe with metadata extracted from given frames list
 
     this function will extract metadata from FITS headers given a list of
@@ -472,10 +537,20 @@ def extract_metadata(frames_paths: list) -> pd.DataFrame:
     pandas.DataFrame
         dataframe containing the extracted metadata
     """
-    new_metadata = {}
+    # define target columns
+    if kind == "raw":
+        columns = RAW_METADATA_COLUMNS
+    elif kind == "master":
+        columns = MASTER_METADATA_COLUMNS
+    else:
+        pass
     # extract metadata
     nframes = len(frames_paths)
+    if nframes == 0:
+        log.warning("zero paths given, nothing to do")
+        return pd.DataFrame(columns=[column for column, _ in columns])
     log.info(f"going to extract metadata from {nframes} frames")
+    new_metadata = {}
     iterator = tqdm(
         enumerate(frames_paths),
         total=nframes,
@@ -498,34 +573,59 @@ def extract_metadata(frames_paths: list) -> pd.DataFrame:
         # apply any header fix or if none, use old header
         header = apply_hdrfix(sjd, hdr=header) or header
 
-        new_metadata[i] = [
-            "n" if header.get("OBSERVAT") != "LCO" else "s",
-            header.get("TILEID", 1111),
-            sjd,
-            header.get("MJD"),
-            header.get("IMAGETYP"),
-            header.get("SPEC"),
-            header.get("CCD"),
-            header.get("EXPOSURE"),
-            header.get("EXPTIME"),
-            header.get("NEON", "OFF") == "ON",
-            header.get("HGNE", "OFF") == "ON",
-            header.get("KRYPTON", "OFF") == "ON",
-            header.get("XENON", "OFF") == "ON",
-            header.get("ARGON", "OFF") == "ON",
-            header.get("LDLS", "OFF") == "ON",
-            header.get("QUARTZ", "OFF") == "ON",
-            header.get("QUALITY", 'excellent'),
-            header.get("QUAL", RawFrameQuality(0)),
-            ReductionStage.UNREDUCED,
-            ReductionStatus(0),
-            QualityFlag(0),
-            frame_path.stem
-        ]
+        if kind == "raw":
+            new_metadata[i] = [
+                "n" if header.get("OBSERVAT") != "LCO" else "s",
+                header.get("TILEID", 1111),
+                sjd,
+                header.get("MJD"),
+                header.get("IMAGETYP"),
+                header.get("SPEC"),
+                header.get("CCD"),
+                header.get("EXPOSURE"),
+                header.get("EXPTIME"),
+                header.get("NEON", "OFF") == "ON",
+                header.get("HGNE", "OFF") == "ON",
+                header.get("KRYPTON", "OFF") == "ON",
+                header.get("XENON", "OFF") == "ON",
+                header.get("ARGON", "OFF") == "ON",
+                header.get("LDLS", "OFF") == "ON",
+                header.get("QUARTZ", "OFF") == "ON",
+                header.get("QUALITY", 'excellent'),
+                header.get("QUAL", RawFrameQuality(0)),
+                header.get("DRPSTAGE", ReductionStage.UNREDUCED),
+                header.get("DRPSTAT", ReductionStatus(0)),
+                header.get("DRPQUAL", QualityFlag(0)),
+                frame_path.stem,
+            ]
+        elif kind == "master":
+            new_metadata[i] = [
+                header.get("TILEID", 1111),
+                sjd,
+                header.get("MJD"),
+                header.get("IMAGETYP"),
+                header.get("SPEC"),
+                header.get("CCD"),
+                header.get("EXPTIME"),
+                header.get("NEON", "OFF") == "ON",
+                header.get("HGNE", "OFF") == "ON",
+                header.get("KRYPTON", "OFF") == "ON",
+                header.get("XENON", "OFF") == "ON",
+                header.get("ARGON", "OFF") == "ON",
+                header.get("LDLS", "OFF") == "ON",
+                header.get("QUARTZ", "OFF") == "ON",
+                header.get("QUALITY", 'excellent'),
+                header.get("QUAL", RawFrameQuality(0)),
+                header.get("DRPSTAGE", ReductionStage.UNREDUCED),
+                header.get("DRPSTAT", ReductionStatus(0)),
+                header.get("DRPQUAL", QualityFlag(0)),
+                header.get("NFRAMES", 1),
+                frame_path.stem,
+            ]
 
     # define dataframe
     new_metadata = pd.DataFrame.from_dict(new_metadata, orient="index")
-    new_metadata.columns = list(zip(*RAW_METADATA_COLUMNS))[0]
+    new_metadata.columns = list(zip(*columns))[0]
     return new_metadata
 
 
@@ -568,18 +668,30 @@ def add_raws(metadata):
         )
 
         if "raw" in store:
+            dataset = store["raw"]
+            nolds = len(dataset)
+
+            # filter out existing frames using the paths
+            old_paths = dataset["name"].astype(str)
+            new_paths = array["name"].astype(str)
+            fil_paths = ~np.isin(new_paths, old_paths)
+            array = array[fil_paths]
+            nnews = len(array)
+
             log.info(
                 f"updating metadata store for {tileid = } and {mjd = } "
-                f"with {len(array)} new rows"
+                f"with {nnews} new rows"
             )
-            dataset = store["raw"]
-            dataset.resize(dataset.shape[0] + array.shape[0], axis=0)
-            dataset[-array.shape[0]:] = array
-            log.info(f"final number of rows {dataset.size}")
+
+            if nnews > 0:
+                dataset.resize(nolds + nnews, axis=0)
+                dataset[-nnews:] = array
+            log.info(f"final number of rows {nolds + nnews}")
         else:
+            nnews = len(array)
             log.info(
                 f"creating metadata store for {tileid = } and {mjd = } "
-                f"with {len(array)} new rows"
+                f"with {nnews} new rows"
             )
             dataset = store.create_dataset(
                 "raw", data=array, maxshape=(None,), chunks=True
@@ -615,17 +727,24 @@ def add_masters(metadata):
     )
 
     if "master" in store:
-        log.info(
-            f"updating metadata store for master frames with {len(array)} new rows"
-        )
         dataset = store["master"]
-        dataset.resize(dataset.shape[0] + array.shape[0], axis=0)
-        dataset[-array.shape[0] :] = array
-        log.info(f"final number of rows {dataset.size}")
+        nolds = len(dataset)
+
+        # filter out existing frames using the paths
+        old_paths = dataset["name"].astype(str)
+        new_paths = array["name"].astype(str)
+        fil_paths = ~np.isin(new_paths, old_paths)
+        array = array[fil_paths]
+        nnews = len(array)
+
+        log.info(f"updating metadata store for masters with {nnews} new rows")
+        if nnews > 0:
+            dataset.resize(nolds + nnews, axis=0)
+            dataset[-nnews:] = array
+        log.info(f"final number of rows {nolds+nnews}")
     else:
-        log.info(
-            f"creating metadata store for master frames with {len(array)} new rows"
-        )
+        nnews = len(array)
+        log.info(f"creating metadata store for masters with {nnews} new rows")
         dataset = store.create_dataset(
             "master", data=array, maxshape=(None,), chunks=True
         )
@@ -798,6 +917,8 @@ def get_metadata(
     return metadata
 
 
+# TODO: implement matching of analogs and calibration masters
+# in Brian's run_drp code
 def get_analog_groups(
     tileid,
     mjd,
@@ -818,14 +939,19 @@ def get_analog_groups(
     stage=None,
     status=None,
     drpqual=None,
+    include_fields=[],
+    analog_fields=[],
 ):
     """return a list of metadata groups considered to be analogs
 
     the given metadata dataframe is grouped in analog frames using
     the following criteria:
+        * mjd
         * imagetyp
         * camera
         * exptime
+    Optionally, these criteria can be expanded using the `include_fields`.
+    The final critaria will always include the above mentioned fields.
 
     Parameters
     ----------
@@ -867,12 +993,20 @@ def get_analog_groups(
         bitmask representing status of the reduction, by default None
     drpqual : int, optional
         bitmask representing the quality of the reduction, by default None
+    include_fields : list, optional
+        a list of additional fields to include when grouping analogs, by default []
 
     Returns
     -------
-    pandas.DataFrame
+    dict_like
         the grouped metadata filtered following the given criteria
+    dict_like
+        the grouped analog frame paths to be combined into masters
+    list_like
+        the list of master paths
     """
+    # default fields
+    default_fields = ["tileid", "mjd", "imagetyp", "camera", "exptime"]
     # default output
     default_output = [pd.DataFrame(columns=list(zip(*RAW_METADATA_COLUMNS))[0])]
 
@@ -921,18 +1055,68 @@ def get_analog_groups(
             drpqual=drpqual,
         )
         log.info(f"final number of frames after filtering {len(metadata)}")
+        metadatas.append(metadata)
 
-    metadatas.append(metadata)
+    metadata = pd.concat(metadatas, axis="index", ignore_index=True)
 
     log.info("grouping analogs")
-    metadata_groups = metadata.groupby(["imagetyp", "camera", "exptime"])
+    include_fields = default_fields + list(
+        filter(lambda i: i not in default_fields, include_fields)
+    )
+    metadata_groups = metadata.groupby(include_fields)
 
     log.info(f"found {len(metadata_groups)} groups of analogs:")
-    analogs = []
+    analogs = {}
+    analog_paths = {}
+    master_paths = []
     for g in metadata_groups.groups:
         log.info(g)
-        analogs.append(metadata_groups.get_group(g))
-    return analogs
+
+        # create groups dictionary
+        metadata = metadata_groups.get_group(g)
+        analogs[g] = metadata
+
+        # create input paths for master creation task
+        analog_paths[g] = [
+            path.full(
+                "lvm_anc",
+                drpver=DRPVER,
+                tileid=row.tileid,
+                mjd=row.mjd,
+                kind="c" if row.imagetyp != "bias" else "p",
+                imagetype=row.imagetyp,
+                camera=row.camera,
+                expnum=row.expnum,
+            )
+            for _, row in metadata.iterrows()
+        ]
+
+        # create output path for master frame
+        row = metadata.iloc[0]
+        if imagetyp == "bias":
+            master_paths.append(
+                path.full(
+                    "lvm_cal_mbias",
+                    drpver=DRPVER,
+                    tileid=row.tileid,
+                    mjd=row.mjd,
+                    camera=row.camera,
+                )
+            )
+        else:
+            master_paths.append(
+                path.full(
+                    "lvm_cal_time",
+                    drpver=DRPVER,
+                    tileid=row.tileid,
+                    mjd=row.mjd,
+                    kind=f"m{row.imagetyp}",
+                    camera=row.camera,
+                    exptime=int(row.exptime),
+                )
+            )
+
+    return analogs, analog_paths, master_paths
 
 
 def match_master_metadata(
@@ -1076,6 +1260,8 @@ def match_master_metadata(
     return calib_frames
 
 
+# TODO: implement update of reduction status
+# in Brian's run_drp code
 def put_reduction_stage(
     stage,
     tileid,

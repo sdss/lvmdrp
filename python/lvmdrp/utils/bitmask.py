@@ -158,6 +158,7 @@ class ReductionStage(BaseBitmask):
 
 
 class QualityFlag(BaseBitmask):
+    # TODO: add flag for overscan quality
     EXTRACTBAD = auto()  # Many bad values in extracted frame.
     EXTRACTBRIGHT = auto()  # Extracted spectra abnormally bright.
     LOWEXPTIME = auto()  # Exposure time less than 10 minutes.

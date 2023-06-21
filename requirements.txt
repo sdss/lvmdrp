@@ -5,7 +5,7 @@ numpy==1.24.1
 peewee==3.15.4
 pexpect==4.8.0
 pydl==0.7.0
-scipy==1.10.0
+scipy==1.9.1
 skycalc_cli==1.4
 skyfield==1.45
 tqdm==4.64.1
@@ -25,5 +25,7 @@ sdss-tree>=4.0
 sdss-access>=3.0
 click>=8.0
 cloup>=2.0
+ccdproc==2.4.0
+bottleneck==1.3.7
 h5py==3.8.0
 tables==3.8.0

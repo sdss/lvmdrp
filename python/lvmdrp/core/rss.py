@@ -604,16 +604,38 @@ class RSS(FiberRows):
 
         combined_data = numpy.zeros(dim, dtype=numpy.float32)
         combined_error = numpy.zeros(dim, dtype=numpy.float32)
+        if method == "sum":
+            if mask is not None:
+                data[mask] = 0
+                good_pix = numpy.sum(numpy.logical_not(mask), 0)
+                select_mean = good_pix > 0
+                combined_data[select_mean] = numpy.sum(data, 0)[select_mean]
+                combined_mask = good_pix == 0
+                if error is not None:
+                    error[mask] = replace_error
+                    combined_error[select_mean] = numpy.sqrt(
+                        numpy.sum(error**2, 0)[select_mean]
+                    )
+                else:
+                    combined_error = None
+            else:
+                combined_mask = None
+                combined_data = numpy.sum(data, 0) / data.shape[0]
+                if error is not None:
+                    combined_error = numpy.sqrt(
+                        numpy.sum(error**2, 0) / error.shape[0]
+                    )
+                else:
+                    combined_error = None
+
         if method == "mean":
             if mask is not None:
                 data[mask] = 0
                 good_pix = numpy.sum(numpy.logical_not(mask), 0)
                 select_mean = good_pix > 0
-                #   print(combined_data.shape, data.shape, good_pix.shape, select_mean.shape, error)
                 combined_data[select_mean] = (
                     numpy.sum(data, 0)[select_mean] / good_pix[select_mean]
                 )
-                #    print(combined_data.dtype)
                 combined_mask = good_pix == 0
                 if error is not None:
                     error[mask] = replace_error
@@ -1677,11 +1699,14 @@ class RSS(FiberRows):
     def createFiberFlat(
         self, smooth_poly=-5, smooth_median=0, clip=[0.2, 2], valid=None
     ):
+        # if wavelength homogeneous
         if len(self._wave.shape) == 1:
+            # apply median smoothing to data
             if smooth_median > 0:
                 self._data = ndimage.filters.median_filter(
                     self._data, (1, smooth_median)
                 )
+            # calculate normalization within a given window or on the full array
             if valid is not None:
                 # medians = numpy.median(self._data[valid[0] : valid[1], :], axis=1)
                 norm = numpy.median(self._data[valid[0] : valid[1], :], axis=0)
@@ -1694,6 +1719,8 @@ class RSS(FiberRows):
             # norm = numpy.amax(self._data[select_ma], axis=0)
             # norm = self._data[select_max, :][0]
             # norm = numpy.mean(self._data[100:280, :], axis=0)
+
+            # normalize fibers where norm > 0
             select = norm > 0
             #    pylab.plot(norm)
             #    pylab.show()
@@ -1702,6 +1729,8 @@ class RSS(FiberRows):
                 self._data[:, select] / norm[select][numpy.newaxis, :]
             )
             self._data = normalize
+
+            # apply clipping
             if clip is not None:
                 mask = numpy.logical_or(self._data < clip[0], self._data > clip[1])
                 ##sky_resamp.setData(data=0, select=mask)
@@ -1709,12 +1738,14 @@ class RSS(FiberRows):
                     mask = numpy.logical_or(self._mask, mask)
                 self.setData(mask=mask)
 
-            #   sky_resamp._mask= numpy.logical_not(select)
+            # apply smoothing
+            # sky_resamp._mask= numpy.logical_not(select)
             if smooth_poly != 0:
                 for i in range(self._fibers):
                     spec = self.getSpec(i)
+                    # gaussian smoothing
                     spec.smoothSpec(5, method="gauss")
-
+                    # polynomial smoothing
                     spec.smoothPoly(smooth_poly)
                     self._data[i, :] = spec._data
                     if self._mask is not None:

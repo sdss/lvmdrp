@@ -1893,12 +1893,41 @@ class Spectrum1D(Header):
         return out
 
     def obtainGaussFluxPeaks(self, pos, sigma, indices, replace_error=1e10, plot=False):
+        """returns Gaussian peaks parameters, flux error and mask
+
+        this runs fiber fitting assuming that we only need to know the sigma of the Gaussian,
+        this runs in a full image column
+
+        Parameters
+        ----------
+        pos : array_like
+            peaks positions
+        sigma : array_like
+            Gaussian widths
+        indices : array_like
+            peaks indices
+        replace_error : float, optional
+            replace error in bad pixels with this value, by default 1e10
+        plot : bool, optional
+            whether to plot or not the results, by default False
+
+        Returns
+        -------
+        flux : array_like
+            measured flux
+        error : array_like
+            propagated error
+        mask : array_like
+            propagated pixel mask
+        """
+
         fibers = len(pos)
         aperture = 3
+        # round up fiber locations
         pixels = numpy.round(
-            pos[:, numpy.newaxis]
-            + numpy.arange(-aperture / 2.0, aperture / 2.0, 1.0)[numpy.newaxis, :]
+            pos[:, None] + numpy.arange(-aperture / 2.0, aperture / 2.0, 1.0)[None, :]
         ).astype("int")
+        # defining bad pixels for each fiber if needed
         if self._mask is not None:
             bad_pix = numpy.zeros(fibers, dtype="bool")
             select = numpy.sum(pixels >= self._mask.shape[0], 1)
@@ -1914,34 +1943,38 @@ class Spectrum1D(Header):
         A = (
             1.0
             * numpy.exp(
-                -0.5
-                * (
-                    (self._wave[:, numpy.newaxis] - pos[numpy.newaxis, :])
-                    / sigma[numpy.newaxis, :]
-                )
-                ** 2
+                -0.5 * ((self._wave[:, None] - pos[None, :]) / sigma[None, :]) ** 2
             )
-            / (fact * sigma[numpy.newaxis, :])
+            / (fact * sigma[None, :])
         )
+        # making positive definite
         select = A > 0.0001
-        A = A / self._error[:, numpy.newaxis]
+        A = A / self._error[:, None]
+
+        plt.figure(figsize=(10, 10))
+        plt.imshow(A, origin="lower")
+        plt.show()
 
         B = sparse.csr_matrix(
             (A[select], (indices[0][select], indices[1][select])),
             shape=(self._dim, fibers),
         ).todense()
+        print(B)
         out = sparse.linalg.lsqr(
             B, self._data / self._error, atol=1e-7, btol=1e-7, conlim=1e13
         )
+        print(out)
+
         error = numpy.sqrt(1 / numpy.sum((A**2), 0))
         if bad_pix is not None and numpy.sum(bad_pix) > 0:
             error[bad_pix] = replace_error
         if plot:
+            plt.figure(figsize=(15, 10))
             plt.plot(self._data, "ok")
-            plt.plot(numpy.dot(A * self._error[:, numpy.newaxis], out[0]), "-r")
+            plt.plot(numpy.dot(A * self._error[:, None], out[0]), "-r")
             # plt.plot(numpy.dot(A, out[0]), '-r')
             plt.show()
-        return out[0], error, bad_pix
+        return out[0], error, bad_pix, B, A
 
     def collapseSpec(self, method="mean", start=None, end=None, transmission_func=None):
         if start is not None:

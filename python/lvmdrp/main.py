@@ -18,14 +18,14 @@ from lvmdrp.core import image
 from lvmdrp.core.constants import CALIBRATION_TYPES, FRAMES_PRIORITY
 from lvmdrp.functions import imageMethod, rssMethod
 from lvmdrp.utils.bitmask import ReductionStatus
-from lvmdrp.utils.metadata import LAMP_NAMES, match_master_metadata
 from lvmdrp.utils.decorators import validate_fibers
+from lvmdrp.utils.metadata import LAMP_NAMES, match_master_metadata
 
 
 # TODO: define values in this dictionary as strings and move it to the constants module
 REDUCTION_METHODS = {
     "pre": imageMethod.preprocRawFrame_drp,
-    "calib": imageMethod.basicCalibration_drp,
+    "calib": imageMethod.detrendFrame_drp,
     "cosmic": imageMethod.LACosmic_drp,
     "peaks": imageMethod.findPeaksAuto_drp,
     "trace": imageMethod.tracePeaks_drp,
