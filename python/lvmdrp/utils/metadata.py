@@ -572,18 +572,29 @@ def add_raws(metadata):
         )
 
         if "raw" in store:
+            dataset = store["raw"]
+            nolds = len(dataset)
+
+            # filter out existing frames using the paths
+            old_paths = dataset["path"].astype(str)
+            new_paths = array["path"].astype(str)
+            fil_paths = ~np.isin(new_paths, old_paths)
+            array = array[fil_paths]
+            nnews = len(array)
+
             logger.info(
                 f"updating metadata store for {tileid = } and {mjd = } "
-                f"with {len(array)} new rows"
+                f"with {nnews} new rows"
             )
-            dataset = store["raw"]
-            dataset.resize(dataset.shape[0] + array.shape[0], axis=0)
-            dataset[-array.shape[0] :] = array
-            logger.info(f"final number of rows {dataset.size}")
+            if nnews > 0:
+                dataset.resize(nolds + nnews, axis=0)
+                dataset[-nnews:] = array
+            logger.info(f"final number of rows {nolds+nnews}")
         else:
+            nnews = len(array)
             logger.info(
                 f"creating metadata store for {tileid = } and {mjd = } "
-                f"with {len(array)} new rows"
+                f"with {nnews} new rows"
             )
             dataset = store.create_dataset(
                 "raw", data=array, maxshape=(None,), chunks=True
@@ -619,17 +630,24 @@ def add_masters(metadata):
     )
 
     if "master" in store:
-        logger.info(
-            f"updating metadata store for master frames with {len(array)} new rows"
-        )
         dataset = store["master"]
-        dataset.resize(dataset.shape[0] + array.shape[0], axis=0)
-        dataset[-array.shape[0] :] = array
-        logger.info(f"final number of rows {dataset.size}")
+        nolds = len(dataset)
+
+        # filter out existing frames using the paths
+        old_paths = dataset["path"].astype(str)
+        new_paths = array["path"].astype(str)
+        fil_paths = ~np.isin(new_paths, old_paths)
+        array = array[fil_paths]
+        nnews = len(array)
+
+        logger.info(f"updating metadata store for masters with {nnews} new rows")
+        if nnews > 0:
+            dataset.resize(nolds + nnews, axis=0)
+            dataset[-nnews:] = array
+        logger.info(f"final number of rows {nolds+nnews}")
     else:
-        logger.info(
-            f"creating metadata store for master frames with {len(array)} new rows"
-        )
+        nnews = len(array)
+        logger.info(f"creating metadata store for masters with {nnews} new rows")
         dataset = store.create_dataset(
             "master", data=array, maxshape=(None,), chunks=True
         )
