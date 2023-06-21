@@ -60,6 +60,7 @@ RAW_METADATA_COLUMNS = [
     ("path", str),
 ]
 MASTER_METADATA_COLUMNS = [
+    ("tileid", int),
     ("mjd", int),
     ("imagetyp", str),
     ("spec", str),
@@ -76,6 +77,7 @@ MASTER_METADATA_COLUMNS = [
     ("stage", ReductionStage),
     ("status", ReductionStatus),
     ("drpqual", QualityFlag),
+    ("nframes", int),
     ("path", str),
 ]
 
@@ -440,7 +442,7 @@ def locate_new_frames(hemi, camera, mjd, expnum, return_excluded=False):
     return new_paths
 
 
-def extract_metadata(frames_paths):
+def extract_metadata(frames_paths, kind="raw"):
     """return dataframe with metadata extracted from given frames list
 
     this function will extract metadata from FITS headers given a list of
@@ -456,11 +458,18 @@ def extract_metadata(frames_paths):
     pandas.DataFrame
         dataframe containing the extracted metadata
     """
+    # define target columns
+    if kind == "raw":
+        columns = RAW_METADATA_COLUMNS
+    elif kind == "master":
+        columns = MASTER_METADATA_COLUMNS
+    else:
+        pass
     # extract metadata
     nframes = len(frames_paths)
     if nframes == 0:
         logger.warning("zero paths given, nothing to do")
-        return pd.DataFrame(columns=[column for column, _ in RAW_METADATA_COLUMNS])
+        return pd.DataFrame(columns=[column for column, _ in columns])
     logger.info(f"going to extract metadata from {nframes} frames")
     new_metadata = {}
     iterator = tqdm(
@@ -472,32 +481,55 @@ def extract_metadata(frames_paths):
     )
     for i, frame_path in iterator:
         header = fits.getheader(frame_path, ext=0)
-        new_metadata[i] = [
-            "n" if header.get("OBSERVAT") != "LCO" else "s",
-            header.get("TILEID", 1111),
-            header.get("MJD"),
-            header.get("IMAGETYP"),
-            header.get("SPEC"),
-            header.get("CCD"),
-            header.get("EXPOSURE"),
-            header.get("EXPTIME"),
-            header.get("NEON", "OFF") == "ON",
-            header.get("HGNE", "OFF") == "ON",
-            header.get("KRYPTON", "OFF") == "ON",
-            header.get("XENON", "OFF") == "ON",
-            header.get("ARGON", "OFF") == "ON",
-            header.get("LDLS", "OFF") == "ON",
-            header.get("QUARTZ", "OFF") == "ON",
-            header.get("QUALITY", RawFrameQuality(0)),
-            ReductionStage.UNREDUCED,
-            ReductionStatus(0),
-            QualityFlag(0),
-            frame_path,
-        ]
+        if kind == "raw":
+            new_metadata[i] = [
+                "n" if header.get("OBSERVAT") != "LCO" else "s",
+                header.get("TILEID", 1111),
+                header.get("MJD"),
+                header.get("IMAGETYP"),
+                header.get("SPEC"),
+                header.get("CCD"),
+                header.get("EXPOSURE"),
+                header.get("EXPTIME"),
+                header.get("NEON", "OFF") == "ON",
+                header.get("HGNE", "OFF") == "ON",
+                header.get("KRYPTON", "OFF") == "ON",
+                header.get("XENON", "OFF") == "ON",
+                header.get("ARGON", "OFF") == "ON",
+                header.get("LDLS", "OFF") == "ON",
+                header.get("QUARTZ", "OFF") == "ON",
+                header.get("QUALITY", RawFrameQuality(0)),
+                header.get("DRPSTAGE", ReductionStage.UNREDUCED),
+                header.get("DRPSTAT", ReductionStatus(0)),
+                header.get("DRPQUAL", QualityFlag(0)),
+                frame_path,
+            ]
+        elif kind == "master":
+            new_metadata[i] = [
+                header.get("TILEID", 1111),
+                header.get("MJD"),
+                header.get("IMAGETYP"),
+                header.get("SPEC"),
+                header.get("CCD"),
+                header.get("EXPTIME"),
+                header.get("NEON", "OFF") == "ON",
+                header.get("HGNE", "OFF") == "ON",
+                header.get("KRYPTON", "OFF") == "ON",
+                header.get("XENON", "OFF") == "ON",
+                header.get("ARGON", "OFF") == "ON",
+                header.get("LDLS", "OFF") == "ON",
+                header.get("QUARTZ", "OFF") == "ON",
+                header.get("QUALITY", RawFrameQuality(0)),
+                header.get("DRPSTAGE", ReductionStage.UNREDUCED),
+                header.get("DRPSTAT", ReductionStatus(0)),
+                header.get("DRPQUAL", QualityFlag(0)),
+                header.get("NFRAMES", 1),
+                frame_path,
+            ]
 
     # define dataframe
     new_metadata = pd.DataFrame.from_dict(new_metadata, orient="index")
-    new_metadata.columns = list(zip(*RAW_METADATA_COLUMNS))[0]
+    new_metadata.columns = list(zip(*columns))[0]
     return new_metadata
 
 
@@ -843,11 +875,15 @@ def get_analog_groups(
 
     Returns
     -------
-    pandas.DataFrame
+    dict_like
         the grouped metadata filtered following the given criteria
+    dict_like
+        the grouped analog frame paths to be combined into masters
+    list_like
+        the list of master paths
     """
     # default fields
-    default_fields = {"mjd", "imagetyp", "camera", "exptime"}
+    default_fields = {"tileid", "mjd", "imagetyp", "camera", "exptime"}
     # default output
     default_output = [pd.DataFrame(columns=list(zip(*RAW_METADATA_COLUMNS))[0])]
 
@@ -903,7 +939,7 @@ def get_analog_groups(
 
     logger.info(f"found {len(metadata_groups)} groups of analogs:")
     analogs = {}
-    analog_paths = []
+    analog_paths = {}
     master_paths = []
     for g in metadata_groups.groups:
         logger.info(g)
@@ -913,21 +949,22 @@ def get_analog_groups(
         analogs[g] = metadata
 
         # create input paths for master creation task
-        for _, row in metadata.iterrows():
-            analog_paths.append(
-                path.full(
-                    "lvm_anc",
-                    drpver=DRPVER,
-                    tileid=row.tileid,
-                    mjd=row.mjd,
-                    kind="c" if row.imagetyp != "bias" else "p",
-                    imagetype=row.imagetyp,
-                    camera=row.camera,
-                    expnum=row.expnum,
-                )
+        analog_paths[g] = [
+            path.full(
+                "lvm_anc",
+                drpver=DRPVER,
+                tileid=row.tileid,
+                mjd=row.mjd,
+                kind="c" if row.imagetyp != "bias" else "p",
+                imagetype=row.imagetyp,
+                camera=row.camera,
+                expnum=row.expnum,
             )
+            for _, row in metadata.iterrows()
+        ]
 
         # create output path for master frame
+        row = metadata.iloc[0]
         if imagetyp == "bias":
             master_paths.append(
                 path.full(
