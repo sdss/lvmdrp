@@ -11,7 +11,7 @@ from functools import lru_cache
 from astropy.io import fits
 from astropy.table import Table
 from lvmdrp.functions.imageMethod import (preproc_raw_frame, create_master_frame,
-                                          basic_calibration, find_peaks_auto, trace_peaks,
+                                          detrend_frame, find_peaks_auto, trace_peaks,
                                           extract_spectra)
 from lvmdrp.functions.rssMethod import (determine_wavelength_solution, create_pixel_table,
                                         resample_wavelength, join_spec_channels)
@@ -189,8 +189,14 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
     log.info('--- Preprocessing raw frame ---')
     kwargs = get_config_options('reduction_steps.preproc_raw_frame', flavor)
     log.info(f'custom configuration parameters for preproc_raw_frame: {repr(kwargs)}')
-    preproc_raw_frame(filename, flavor=flavor, kind='p', camera=camera,
-                      mjd=mjd, expnum=expnum, tileid=tileid, **kwargs)
+    flavor = 'fiberflat' if flavor == 'flat' else flavor
+    out_pre = path.full('lvm_anc', kind='p', imagetype=flavor, mjd=mjd, camera=camera,
+                        drpver=drpver, expnum=expnum, tileid=tileid)
+    # create the root dir if needed
+    if not pathlib.Path(out_pre).parent.exists():
+        pathlib.Path(out_pre).parent.mkdir(parents=True, exist_ok=True)
+
+    preproc_raw_frame(filename, out_image=out_pre, **kwargs)
 
     # end reduction for bias and darks
     if flavor in {'bias', 'dark'}:
@@ -206,18 +212,17 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
         return
 
     # process the flat/arc frames
-    flavor = 'fiberflat' if flavor == 'flat' else flavor
     in_cal = path.full("lvm_anc", kind='p', imagetype=flavor, mjd=mjd, drpver=drpver,
                        camera=camera, tileid=tileid, expnum=expnum)
     out_cal = path.full("lvm_anc", kind='c', imagetype=flavor, mjd=mjd, drpver=drpver,
                         camera=camera, tileid=tileid, expnum=expnum)
 
     log.info(f'Output preproc file: {in_cal}')
-    log.info('--- Running basic calibration ---')
-    kwargs = get_config_options('reduction_steps.basic_calibration', flavor)
-    log.info(f'custom configuration parameters for basic_calibration: {repr(kwargs)}')
-    basic_calibration(in_image=in_cal, out_image=out_cal,
-                      in_bias=mbias, in_dark=mdark, **kwargs)
+    log.info('--- Running detrend frame ---')
+    kwargs = get_config_options('reduction_steps.detrend_frame', flavor)
+    log.info(f'custom configuration parameters for detrend_frame: {repr(kwargs)}')
+    detrend_frame(in_image=in_cal, out_image=out_cal,
+                  in_bias=mbias, in_dark=mdark, **kwargs)
     log.info(f'Output calibrated file: {out_cal}')
 
     # add the fibermap to all flat and science files

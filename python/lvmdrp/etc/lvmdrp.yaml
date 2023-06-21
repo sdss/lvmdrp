@@ -2,12 +2,7 @@
 reduction_steps:
   preproc_raw_frame:
     default:
-      unit: electron
       subtract_overscan: true
-      compute_error: true
-      os_bound_y: 1,4080
-      os_bound_x: 2044,2077
-      plot_fig: true
   find_peaks_auto:
     nfibers: 638
     slice: 1500
@@ -15,11 +10,10 @@ reduction_steps:
     method: hyperbolic
     median_box: 8
     median_cross: 1
-    plot_fig: true
   trace_peaks:
     steps: 30
     coadd: 1
-    threshold_peak: 0
+    threshold: 0
     max_diff: 2
     method: hyperbolic
     median_box: 10
