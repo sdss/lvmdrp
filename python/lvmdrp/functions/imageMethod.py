@@ -3109,7 +3109,7 @@ def detrendFrame_drp(
         master_dark = dummy_dark
     else:
         log.info(f"using dark calibration frame '{in_dark}'")
-        master_dark = loadImage(in_dark) / exptime
+        master_dark = loadImage(in_dark)
 
         # scale down the dark if needed
         factor = exptime / master_dark._header["EXPTIME"]
