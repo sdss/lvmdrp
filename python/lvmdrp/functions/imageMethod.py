@@ -2731,12 +2731,16 @@ def preproc_raw_frame(in_image: str, out_image: str,
                 )
                 os_stat = biweight_location
 
-            if overscan_model not in ["poly", "spline"]:
+            if overscan_model not in ["const", "poly", "spline"]:
                 log.warning(
                     f"overscan model '{overscan_model}' not implemented, "
                     "falling back to 'spline'"
                 )
                 overscan_model = "spline"
+            if overscan_model == "const":
+                os_profile, os_model = _model_overscan(
+                    os_quad, axis=1, stat=os_stat, model="const"
+                )
             if overscan_model == "spline":
                 os_profile, os_model = _model_overscan(
                     os_quad, axis=1, stat=os_stat, s=180 * gain[i] ** 2
@@ -2746,7 +2750,7 @@ def preproc_raw_frame(in_image: str, out_image: str,
                     os_quad, axis=1, stat=os_stat, model="poly", deg=9
                 )
 
-            sc_quad -= os_model
+            sc_quad._data = sc_quad._data - os_model
 
             os_profiles.append(os_profile)
             os_models.append(os_model)
