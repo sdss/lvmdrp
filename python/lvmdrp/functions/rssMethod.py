@@ -2979,7 +2979,7 @@ def quickQuality(
             "time",
             "flag",
         ],
-        unit=[None, u.electron, u.electron, u.electron, u.Celcius, "UT", None],
+        units=[None, u.electron, u.electron, u.electron, u.Celsius, "UT", None],
     )
 
     # fiberflat
@@ -3008,7 +3008,7 @@ def quickQuality(
     # 	- quality (GOOD, BAD)
     frame_name, fiber_flavor = [], []
     flx, err, snr, sn2, mag = [], [], [], [], []
-    temps, times, rfibs, expos, flags = [], [], []
+    temps, times, rfibs, expos, flags = [], [], [], [], []
     for kind, in_fiber in zip(
         ["flat", "arc", "sci", "std", "sky"],
         [in_fiberflat, in_arc, in_sci, in_std, in_sky],
