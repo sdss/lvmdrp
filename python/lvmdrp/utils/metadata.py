@@ -78,8 +78,8 @@ MASTER_METADATA_COLUMNS = [
     ("stage", ReductionStage),
     ("status", ReductionStatus),
     ("drpqual", QualityFlag),
-    ('name', str),
     ("nframes", int),
+    ('name', str)
 ]
 
 
@@ -335,7 +335,7 @@ def _load_or_create_store(tileid=None, mjd=None, kind="raw", mode="a"):
         raise ValueError(f"specific values for {tileid = } and {mjd = } are needed")
 
     # define metadata path depending on the kind
-    metadata_paths = _get_metadata_paths(tileid=tileid, mjd=mjd, kind=kind)
+    metadata_paths = _get_metadata_paths(tileid=tileid, mjd=mjd, kind=kind, filter_exist=(mode == "r"))
 
     stores = []
     for metadata_path in metadata_paths:
@@ -464,7 +464,7 @@ def get_master_metadata(overwrite: bool = None) -> pd.DataFrame:
 
     files = list(pathlib.Path(os.getenv('LVM_SPECTRO_REDUX')).rglob('*calib/*lvm-m*'))
 
-    if _load_or_create_store(kind='master') and not overwrite:
+    if _load_or_create_store(kind='master', mode='r') and not overwrite:
         log.info("Loading existing metadata store.")
         meta = get_metadata(kind='master')
     else:
@@ -472,7 +472,7 @@ def get_master_metadata(overwrite: bool = None) -> pd.DataFrame:
             _del_store(kind='master')
 
         log.info('Creating new metadata store.')
-        meta = extract_metadata(files)
+        meta = extract_metadata(files, kind='master')
         add_masters(meta)
 
     return meta
@@ -515,7 +515,7 @@ def get_frames_metadata(mjd: Union[str, int] = None, suffix: str = "fits",
             _del_store(mjd=mjd, tileid='*')
 
         log.info('Creating new metadata store.')
-        meta = extract_metadata(frames)
+        meta = extract_metadata(frames, kind='raw')
         add_raws(meta)
 
     return meta
@@ -864,7 +864,7 @@ def get_metadata(
     )
 
     # extract metadata
-    stores = _load_or_create_store(tileid=tileid, mjd=mjd, kind=kind)
+    stores = _load_or_create_store(tileid=tileid, mjd=mjd, kind=kind, mode="r")
 
     metadatas = []
     for store in stores:
@@ -1070,7 +1070,7 @@ def get_analog_groups(
     analog_paths = {}
     master_paths = []
     for g in metadata_groups.groups:
-        log.info(g)
+        log.info(f"{g}")
 
         # create groups dictionary
         metadata = metadata_groups.get_group(g)
@@ -1093,7 +1093,7 @@ def get_analog_groups(
 
         # create output path for master frame
         row = metadata.iloc[0]
-        if imagetyp == "bias":
+        if row.imagetyp == "bias":
             master_paths.append(
                 path.full(
                     "lvm_cal_mbias",
@@ -1199,7 +1199,7 @@ def match_master_metadata(
     calib_frames = dict.fromkeys(frame_needs)
 
     # extract master calibration frames metadata
-    store = _load_or_create_store(kind="master")[0]
+    store = _load_or_create_store(kind="master", mode='r')[0]
     if "master" not in store:
         log.warning("no metadata found for master calibration frames")
         return calib_frames

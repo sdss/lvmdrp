@@ -2828,7 +2828,7 @@ def preproc_raw_frame(in_image: str, out_image: str,
         )
 
     # load master pixel mask
-    if in_mask != "":
+    if in_mask:
         master_mask = loadImage(in_mask)._mask.astype(bool)
     else:
         master_mask = numpy.zeros_like(preproc_image._data, dtype=bool)
