@@ -1,2 +1,1 @@
 lvmsurveysim @ git+https://github.com/sdss/lvmsurveysim.git@0.8.3
-sdss-tree @ git+https://github.com/sdss/tree@d5c54636b1cbd1a6f269030d24a3a13da358224c#egg=sdss_tree
