@@ -1188,6 +1188,10 @@ def match_master_metadata(
     dict_like
         a dictionary containing the matched master calibration frames
     """
+    # normalize flat flavor
+    if target_imagetyp in {"fiberflat", "pixelflat"}:
+        target_imagetyp = "flat"
+
     # locate calibration needs
     frame_needs = FRAMES_CALIB_NEEDS.get(target_imagetyp)
     log.info(

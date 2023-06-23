@@ -15,7 +15,8 @@ from lvmdrp.functions.imageMethod import (preproc_raw_frame, create_master_frame
                                           extract_spectra)
 from lvmdrp.functions.rssMethod import (determine_wavelength_solution, create_pixel_table,
                                         resample_wavelength, join_spec_channels)
-from lvmdrp.utils.metadata import get_frames_metadata, get_master_metadata, extract_metadata
+from lvmdrp.utils.metadata import (get_frames_metadata, get_master_metadata, extract_metadata,
+                                   get_analog_groups, match_master_metadata, create_master_path)
 from lvmdrp import config, log, path, __version__ as drpver
 
 
@@ -63,46 +64,62 @@ def create_masters(flavor: str, frames: pd.DataFrame):
         The dataframe of raw frame metadata
     """
 
+    # get flavor subset
     sub = frames[frames['imagetyp'] == flavor]
 
     # check for empty rows
     if len(sub) == 0:
-        log.error(f'No exposures of flavor {flavor} found.  Cannot create master frame.')
+        log.error(f'No exposures found for flavor {flavor}.  Cannot create master frame.')
         return
 
     mjd = sub['mjd'].iloc[0]
     tileid = sub['tileid'].iloc[0]
 
-    if flavor == 'bias':
-        grp = sub.sort_values('camera')
-    elif flavor == 'dark':
-        grp = sub.sort_values(['camera', 'exptime'])
-
-    # get the ancillary preproc files
-    rpath = (pathlib.Path(os.getenv("LVM_SPECTRO_REDUX")) / f'{drpver}/{tileid}/{mjd}')
-    ff = [str(i) for i in rpath.rglob(f'*p{flavor}*fits')]
-
-    rows = grp.to_dict('records')
-    for row in rows:
-        camera = row['camera'] if 'camera' in row else None
-        exptime = int(row['exptime']) if 'exptime' in row else None
-
-        # get the master path
-        if flavor == 'bias':
-            master = path.full("lvm_cal_mbias", mjd=mjd, drpver=drpver, camera=camera,
-                               tileid=tileid)
-        elif flavor == 'dark':
-            master = path.full("lvm_cal_time", kind='mdark', mjd=mjd, drpver=drpver, camera=camera,
-                               tileid=tileid, exptime=exptime)
-
-        # create parent directries if need be
+    # get the analog input files to create the master frame
+    kwargs = get_config_options('reduction_steps.create_master_frame', flavor)
+    frames, in_files, out_files = get_analog_groups(tileid, mjd, imagetyp=flavor, quality='excellent')
+    for i, in_f in enumerate(in_files.values()):
+        master = out_files[i]
+        # create parent dir if needed
         if not pathlib.Path(master).parent.exists():
             pathlib.Path(master).parent.mkdir(parents=True, exist_ok=True)
 
         # create the master frame
-        kwargs = get_config_options('reduction_steps.create_master_frame', flavor)
-        log.info(f'custom configuration parameters for create_master_frame: {repr(kwargs)}')
-        create_master_frame(in_images=ff, out_image=master, **kwargs)
+        create_master_frame(in_images=in_f, out_image=master, **kwargs)
+
+
+def find_masters(flavor: str, camera: str, exptime: str) -> dict:
+    """ Find the matching master frames
+
+    Find the matching master frames for a given flavor, camera
+    and exposure time.  Returns a dict of each bias, dark, flat flavors
+    and the appropriate master frame for that type.
+
+    Parameters
+    ----------
+    flavor : str
+        The image type
+    camera : str
+        The camera
+    exptime : str
+        The exposure time
+
+    Returns
+    -------
+    dict
+        The output master frame paths for each flavor
+    """
+    # try to match the master frames for a given flavor, camera, exptime
+    matches = match_master_metadata(target_imagetyp=flavor, target_camera=camera,
+                                    target_exptime=float(exptime))
+
+    # construct the dict of filepaths
+    files = dict.fromkeys(matches.keys())
+    for key, val in matches.items():
+        if val is None:
+            continue
+        files[key] = create_master_path(val)
+    return files
 
 
 def trace_fibers(in_file: str, camera: str, expnum: int, tileid: int, mjd: int):
@@ -160,7 +177,7 @@ def find_file(kind, camera=None, mjd=None, tileid=None):
 
 def reduce_frame(filename: str, camera: str = None, mjd: int = None,
                  expnum: int = None, tileid: int = None,
-                 flavor: str = None):
+                 flavor: str = None, **fkwargs):
     """ Reduce a single raw frame exposure
 
     Reduces a single LVM raw frame sdR exposure
@@ -185,11 +202,14 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
 
     log.info(f'--- Starting reduction of raw frame: {filename}')
 
+    # set flavor
+    flavor = flavor or fkwargs.get('imagetyp')
+    flavor = 'fiberflat' if flavor == 'flat' else flavor
+
     # preprocess the frames
     log.info('--- Preprocessing raw frame ---')
     kwargs = get_config_options('reduction_steps.preproc_raw_frame', flavor)
     log.info(f'custom configuration parameters for preproc_raw_frame: {repr(kwargs)}')
-    flavor = 'fiberflat' if flavor == 'flat' else flavor
     out_pre = path.full('lvm_anc', kind='p', imagetype=flavor, mjd=mjd, camera=camera,
                         drpver=drpver, expnum=expnum, tileid=tileid)
     # create the root dir if needed
@@ -198,18 +218,14 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
 
     preproc_raw_frame(filename, out_image=out_pre, **kwargs)
 
-    # end reduction for bias and darks
-    if flavor in {'bias', 'dark'}:
-        return
-
     # check master frames
-    mbias = path.full("lvm_cal_mbias", mjd=mjd, drpver=drpver, camera=camera, tileid=tileid)
-    mdark = find_best_mdark(tileid, mjd, camera)
+    masters = find_masters(flavor, camera, fkwargs.get('exptime'))
+    mbias = masters.get('bias')
+    mdark = masters.get('dark')
+    mflat = masters.get('pixelflat')
     log.info(f'Using master bias: {mbias}')
     log.info(f'Using master dark: {mdark}')
-    if not pathlib.Path(mbias).exists() or not pathlib.Path(mdark).exists():
-        log.error('No master bias or dark frames exist. Discontinuing reduction.')
-        return
+    log.info(f'Using master flat: {mflat}')
 
     # process the flat/arc frames
     in_cal = path.full("lvm_anc", kind='p', imagetype=flavor, mjd=mjd, drpver=drpver,
@@ -222,8 +238,12 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
     kwargs = get_config_options('reduction_steps.detrend_frame', flavor)
     log.info(f'custom configuration parameters for detrend_frame: {repr(kwargs)}')
     detrend_frame(in_image=in_cal, out_image=out_cal,
-                  in_bias=mbias, in_dark=mdark, **kwargs)
+                  in_bias=mbias, in_dark=mdark, in_pixelflat=mflat, **kwargs)
     log.info(f'Output calibrated file: {out_cal}')
+
+    # end reduction for bias and darks
+    if flavor in {'bias', 'dark'}:
+        return
 
     # add the fibermap to all flat and science files
     if flavor in {'fiberflat', 'flat', 'pixelflat', 'object', 'science'}:
@@ -231,7 +251,7 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
         add_extension(fibermap, out_cal)
 
     # fiber tracing
-    if 'flat' in flavor:  # and not camera.startswith('b') and camera.endswith('1'):
+    if 'flat' in flavor:
         log.info('--- Running fiber trace ---')
         trace_fibers(out_cal, camera, expnum, tileid, mjd)
 
@@ -259,7 +279,7 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
                               camera=camera, expnum=expnum, ext='fits')
         lsf_file = path.full('lvm_cal', kind='lsf', drpver=drpver, mjd=mjd, tileid=tileid,
                              camera=camera, expnum=expnum, ext='fits')
-        line_ref = pathlib.Path(__file__).parent.parent / f"etc/lvm-neon_nist_{camera}.txt"
+        line_ref = pathlib.Path(__file__).parent.parent / f"etc/lvm-neon_nist_{camera[0]}.txt"
         kwargs = get_config_options('reduction_steps.determine_wavesol')
         log.info('--- Determining wavelength solution ---')
         log.info(f'custom configuration parameters for determine_wave_solution: {repr(kwargs)}')
@@ -419,11 +439,40 @@ def reduce_file(filename: str):
         The full filepath name
     """
     meta = extract_metadata([filename])
-    frame = meta.iloc[0]
+    params = meta.iloc[0].to_dict()
 
-    reduce_frame(filename, camera=frame.camera, mjd=frame.mjd,
-                 expnum=frame.expnum.item(), tileid=frame.tileid,
-                 flavor=frame.imagetyp)
+    reduce_frame(filename, **params)
+
+
+def reduce_set(frame: pd.DataFrame, settype: str = None):
+    """ Reduce a set of precals, cals, or science """
+
+    if settype not in {"precals", "cals", "science"}:
+        raise ValueError('settype can only be "precals", "cals", or "science".')
+
+    # reduce frames
+    rows = frame.to_dict('records')
+    for row in rows:
+        # get raw frame filepath
+        filepath = path.full('lvm_raw', mjd=row['mjd'], expnum=row['expnum'],
+                             hemi='s', camspec=row['camera'])
+
+        # reduce the frame, pass in entire parameter set
+        reduce_frame(filepath, **row)
+
+    # don't create masters for science frames
+    if settype == 'science':
+        return
+
+    # set the master flavors
+    flavors = {'bias', 'dark'} if settype == 'precals' else {'arc', 'flat'}
+
+    # create master frames
+    for flavor in flavors:
+        create_masters(flavor, frame)
+
+    # build the master metadata cache ; always update it
+    get_master_metadata(overwrite=True)
 
 
 def run_drp(mjd: Union[int, str, list], bias: bool = False, dark: bool = False,
@@ -471,6 +520,9 @@ def run_drp(mjd: Union[int, str, list], bias: bool = False, dark: bool = False,
     frames = get_frames_metadata(mjd=mjd)
     sub = frames.copy()
 
+    # remove bad or test quality frames
+    sub = sub[~(sub['quality'] != 'excellent')]
+
     # filter on files
     if bias:
         sub = sub[sub['imagetyp'] == 'bias']
@@ -498,28 +550,7 @@ def run_drp(mjd: Union[int, str, list], bias: bool = False, dark: bool = False,
 
     if not skip_bd:
         # reduce biases / darks
-        rows = precals.to_dict('records')
-        for frame in rows:
-            # skip bad or test quality
-            if frame['quality'].lower() != 'excellent':
-                log.info(f"Skipping frame {frame['name']} with quality: {frame['quality']}")
-                continue
-
-            # get raw frame filepath
-            filepath = path.full('lvm_raw', mjd=frame['mjd'], expnum=frame['expnum'],
-                                 hemi='s', camspec=frame['camera'])
-
-            reduce_frame(filepath, camera=frame['camera'],
-                         mjd=frame['mjd'],
-                         expnum=frame['expnum'], tileid=frame['tileid'],
-                         flavor=frame['imagetyp'])
-
-        # create master biases and darks
-        create_masters('bias', precals)
-        create_masters('dark', precals)
-
-        # build the master metadata cache
-        get_master_metadata()
+        reduce_set(precals, settype="precals")
 
     # returning if only reducing bias/darks
     if only_bd:
@@ -546,26 +577,20 @@ def run_drp(mjd: Union[int, str, list], bias: bool = False, dark: bool = False,
     if not only_sci:
         sub = sort_cals(sub)
 
-    # reduce remaining files
-    rows = sub.to_dict('records')
-    for frame in rows:
-        # skip bad or test quality
-        if frame['quality'].lower() != 'excellent':
-            log.info(f"Skipping frame {frame['name']} with quality: {frame['quality']}")
-            continue
+    # split into cals, and science
+    cals = sub[~(sub['imagetyp'] == 'object')]
+    sci = sub[sub['imagetyp'] == 'object']
 
-        # get raw frame filepath
-        filepath = path.full('lvm_raw', mjd=frame['mjd'], expnum=frame['expnum'],
-                             hemi='s', camspec=frame['camera'])
-
-        reduce_frame(filepath, camera=frame['camera'],
-                     mjd=frame['mjd'],
-                     expnum=frame['expnum'], tileid=frame['tileid'],
-                     flavor=frame['imagetyp'])
+    # reduce the flats/arcs
+    if not only_sci:
+        reduce_set(cals, settype='cals')
 
     # return if only calibration set
     if only_cal or flat or arc:
         return
+
+    # reduce science files
+    reduce_set(sci, settype='science')
 
     # TODO - check for single elements
     mjd = list(set(sub['mjd']))[0]
@@ -663,9 +688,15 @@ def sort_cals(df: pd.DataFrame) -> pd.DataFrame:
     ss = df.sort_values(['camera', 'expnum'])
     ee = ss.set_index('imagetyp', drop=False).loc[flavors]
 
+    # check dimensions
+    flats = ee.loc['flat']
+    flats = flats.to_frame().transpose() if flats.ndim == 1 else flats
+    obj = ee.loc['object']
+    obj = obj.to_frame().transpose() if obj.ndim == 1 else obj
+
     # append flats to end of calibration frames, and build new dataframe
-    calibs = pd.concat([ee.loc[['flat', 'arc']], ee.loc['flat']]).reset_index(drop=True)
-    return (pd.concat([calibs, ee.loc['object']]).reset_index(drop=True)
+    calibs = pd.concat([ee.loc[['flat', 'arc']], flats]).reset_index(drop=True)
+    return (pd.concat([calibs, obj]).reset_index(drop=True)
             if 'object' in imtypes else calibs)
 
 
