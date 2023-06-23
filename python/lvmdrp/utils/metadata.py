@@ -25,7 +25,7 @@ from lvmdrp.utils.bitmask import (
 )
 from lvmdrp import log, __version__, path
 from lvmdrp.utils.hdrfix import apply_hdrfix
-from lvmdrp.utils.convert import dateobs_to_sjd
+from lvmdrp.utils.convert import dateobs_to_sjd, correct_sjd
 
 
 DRPVER = __version__
@@ -299,7 +299,7 @@ def _filter_metadata(
 
     if query:
         query = " and ".join(query)
-        metadata.query(query, inplace=True)
+        return metadata.query(query)
 
     return metadata
 
@@ -569,6 +569,7 @@ def extract_metadata(frames_paths: list, kind: str = "raw") -> pd.DataFrame:
 
         # convert real MJD to SJD
         sjd = int(dateobs_to_sjd(header.get("OBSTIME")))
+        sjd = correct_sjd(frame_path, sjd)
 
         # apply any header fix or if none, use old header
         header = apply_hdrfix(sjd, hdr=header) or header
@@ -1084,7 +1085,7 @@ def get_analog_groups(
                 tileid=row.tileid,
                 mjd=row.mjd,
                 kind="c" if row.imagetyp != "bias" else "p",
-                imagetype=row.imagetyp,
+                imagetype='fiberflat' if row.imagetyp == 'flat' else row.imagetyp,
                 camera=row.camera,
                 expnum=row.expnum,
             )
@@ -1093,30 +1094,30 @@ def get_analog_groups(
 
         # create output path for master frame
         row = metadata.iloc[0]
-        if row.imagetyp == "bias":
-            master_paths.append(
-                path.full(
-                    "lvm_cal_mbias",
-                    drpver=DRPVER,
-                    tileid=row.tileid,
-                    mjd=row.mjd,
-                    camera=row.camera,
-                )
-            )
-        else:
-            master_paths.append(
-                path.full(
-                    "lvm_cal_time",
-                    drpver=DRPVER,
-                    tileid=row.tileid,
-                    mjd=row.mjd,
-                    kind=f"m{row.imagetyp}",
-                    camera=row.camera,
-                    exptime=int(row.exptime),
-                )
-            )
+        master_paths.append(create_master_path(row))
 
     return analogs, analog_paths, master_paths
+
+
+def create_master_path(row: pd.Series) -> str:
+    """ Construct the path to a master frame
+
+    Parameters
+    ----------
+    row : pd.Series
+        A pandas row of metadata
+
+    Returns
+    -------
+    str
+        A fully resolved path to the master frame
+    """
+    if row.imagetyp == "bias":
+        return path.full("lvm_cal_mbias", drpver=DRPVER, tileid=row.tileid,
+                         mjd=row.mjd, camera=row.camera)
+    else:
+        return path.full("lvm_cal_time", drpver=DRPVER, tileid=row.tileid, mjd=row.mjd,
+                         kind=f"m{row.imagetyp}", camera=row.camera, exptime=int(row.exptime))
 
 
 def match_master_metadata(
@@ -1213,11 +1214,12 @@ def match_master_metadata(
 
     # extract MJD if given, else extract all MJDs
     masters_metadata = pd.DataFrame(masters[()])
+
     # close store
     masters.file.close()
 
     # convert bytes to literal strings
-    masters_metadata = _decode_string(masters_metadata)
+    masters_metadata = _decode_string(masters_metadata.copy())
 
     log.info(f"found {len(masters_metadata)} master frames in store")
 
@@ -1225,10 +1227,12 @@ def match_master_metadata(
     log.info(
         f"final number of master frames after filtering {len(masters_metadata)}"
     )
+
     # raise error in case current frame is not recognized in FRAMES_CALIB_NEEDS
     if frame_needs is None:
         log.error(f"no calibration frames found for '{target_imagetyp}' type")
         return calib_frames
+
     # handle empty list cases (e.g., bias)
     if not frame_needs:
         return calib_frames
@@ -1253,7 +1257,7 @@ def match_master_metadata(
             status=status,
         )
         if len(calib_metadata) == 0:
-            log.error(f"no master {calib_type} frame found")
+            log.warning(f"no master {calib_type} frame found")
         else:
             log.info(f"found master {calib_type}")
             calib_frames[calib_type] = calib_metadata.iloc[0]
