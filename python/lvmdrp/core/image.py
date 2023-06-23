@@ -301,7 +301,7 @@ class Image(Header):
                     elif self._dim[1] == dim[0]:
                         new_data = self._data - other[numpy.newaxis, :]
                 else:
-                    new_data = self._data
+                    new_data = self._data - other
                 img.setData(data=new_data)
             return img
         else:
