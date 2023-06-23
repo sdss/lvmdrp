@@ -32,7 +32,6 @@ reduction_steps:
       poly_cros: 3
       poly_kinds: ['poly', 'poly', 'poly']
       aperture: 10
-      plot_fig: true
   resample_wave:
     default:
       disp_pix: 1.0
