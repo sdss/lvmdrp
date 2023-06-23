@@ -30,8 +30,9 @@ from lvmdrp.core.plot import plt, create_subplots, plot_image, plot_strips, save
 from lvmdrp.core.rss import RSS
 from lvmdrp.core.spectrum1d import Spectrum1D
 from lvmdrp.core.tracemask import TraceMask
-from lvmdrp import log, path, __version__ as drpver
+from lvmdrp import log
 from lvmdrp.utils.hdrfix import apply_hdrfix
+from lvmdrp.utils.convert import dateobs_to_sjd, correct_sjd
 
 
 NQUADS = 4
@@ -2652,7 +2653,14 @@ def preproc_raw_frame(in_image: str, out_image: str,
     # load image
     log.info(f"starting preprocessing of raw image '{os.path.basename(in_image)}'")
     org_image = loadImage(in_image)
-    org_header = org_image._header
+    org_header = org_image.getHeader()
+
+    # fix the header with header fix file
+    # convert real MJD to SJD
+    sjd = int(dateobs_to_sjd(org_header.get("OBSTIME")))
+    sjd = correct_sjd(in_image, sjd)
+    org_header = apply_hdrfix(sjd, hdr=org_header) or org_header
+
     # assume imagetyp or not
     if assume_imagetyp:
         log.warning(f"assuming IMAGETYP = '{assume_imagetyp}'")
@@ -2774,7 +2782,7 @@ def preproc_raw_frame(in_image: str, out_image: str,
     preproc_image = glueImages(sc_quads, positions=QUAD_POSITIONS)
     # convert to electron/s (avoid zero division)
     preproc_image /= max(1, exptime)
-    preproc_image.setHeader(org_image.getHeader())
+    preproc_image.setHeader(org_header)
     # update/set unit
     preproc_image.setHdrValue(
         "BUNIT", "electron/s", "physical units of the array values"
@@ -3022,7 +3030,7 @@ def detrend_frame(in_image: str, out_image: str, in_bias: str = None, in_dark: s
     # read master bias
     if img_type in ["bias"] or (in_bias is None or not os.path.isfile(in_bias)):
         if in_bias and not os.path.isfile(in_bias):
-            log.error(f"master bias '{in_bias}' not found. Using dummy bias")
+            log.warning(f"master bias '{in_bias}' not found. Using dummy bias")
         master_bias = dummy_bias
     else:
         log.info(f"using bias calibration frame '{in_bias}'")
@@ -3031,7 +3039,7 @@ def detrend_frame(in_image: str, out_image: str, in_bias: str = None, in_dark: s
     # read master dark
     if img_type in ["bias", "dark"] or (in_dark is None or not os.path.isfile(in_dark)):
         if in_dark and not os.path.isfile(in_dark):
-            log.error(f"master dark '{in_dark}' not found. Using dummy dark")
+            log.warning(f"master dark '{in_dark}' not found. Using dummy dark")
         master_dark = dummy_dark
     else:
         log.info(f"using dark calibration frame '{in_dark}'")
@@ -3048,7 +3056,7 @@ def detrend_frame(in_image: str, out_image: str, in_bias: str = None, in_dark: s
         in_pixelflat is None or not os.path.isfile(in_pixelflat)
     ):
         if in_pixelflat and not os.path.isfile(in_pixelflat):
-            log.error(f"master flat '{in_pixelflat}' not found. Using dummy flat")
+            log.warning(f"master flat '{in_pixelflat}' not found. Using dummy flat")
         master_pixelflat = dummy_flat
     else:
         log.info(f"using pixelflat calibration frame '{in_pixelflat}'")

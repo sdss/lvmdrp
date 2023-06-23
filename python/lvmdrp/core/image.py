@@ -999,6 +999,7 @@ class Image(Header):
         extension_error : int, optional with default: None
             Number of the FITS extension containing the errors for the values
         """
+        self.filename = filename
         hdu = pyfits.open(
             filename, ignore_missing_end=True, uint=False
         )  # open FITS file
