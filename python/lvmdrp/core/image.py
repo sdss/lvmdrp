@@ -68,16 +68,18 @@ def _model_overscan(os_quad, axis=1, stat=biweight_location, model="spline", **k
         model = numpy.polynomial.Polynomial.fit(pixels, os_profile, **kwargs)
         os_model = model(pixels)
     elif model == "spline":
-        nknots = 300
-        knots = numpy.linspace(
-            pixels[len(pixels) // nknots],
-            pixels[-1 * len(pixels) // nknots],
-            nknots,
+        nknots = kwargs.pop("nknots", 300)
+        kwargs.setdefault(
+            "t",
+            numpy.linspace(
+                pixels[len(pixels) // nknots],
+                pixels[-1 * len(pixels) // nknots],
+                nknots,
+            ),
         )
-        model = interpolate.splrep(pixels, os_profile, task=-1, t=knots)
+        kwargs.setdefault("task", -1)
+        model = interpolate.splrep(pixels, os_profile, **kwargs)
         os_model = interpolate.splev(pixels, model)
-        # model = interpolate.UnivariateSpline(pixels, os_profile, **kwargs)
-        # os_model = model(pixels)
 
     if axis == 1:
         os_model = os_model[:, None]
