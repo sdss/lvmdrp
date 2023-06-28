@@ -3244,62 +3244,47 @@ def create_master_frame(in_images: list, out_image: str, force_master: bool = Tr
     log.info(f"input frames: {','.join(in_images)}")
 
     nexp = len(in_images)
-    proc_images, exptimes, img_types = [], [], []
+    org_imgs, imagetyps = [], []
     for in_image in in_images:
-        proc_image = loadImage(in_image)
-        exptimes.append(proc_image._header["EXPTIME"])
-        img_types.append(proc_image._header["IMAGETYP"].lower())
-        proc_images.append(proc_image)
+        img = loadImage(in_image)
+        imagetyps.append(img._header["IMAGETYP"].lower())
+        org_imgs.append(img)
 
-    master_type, counts = numpy.unique(img_types, return_counts=True)
+    master_type, counts = numpy.unique(imagetyps, return_counts=True)
     master_type = master_type[numpy.argmax(counts)]
-    if numpy.any(master_type != numpy.asarray(img_types)):
+    if numpy.any(master_type != numpy.asarray(imagetyps)):
         log.warning(f"not all imagetyp = {master_type}")
-        # TODO: drop minority type
-        # TODO: throw warning: dropping frames != frames[0]
-
-    master_exptime = exptimes[0]
-    if numpy.any(master_exptime != numpy.asarray(exptimes)):
-        log.warning(f"not all exptime = {master_exptime}. Scaling images")
-        factors = numpy.nan_to_num(
-            master_exptime / numpy.asarray(exptimes), nan=1.0, posinf=1.0, neginf=1.0
-        )
-        proc_images = [
-            proc_image * factor for factor, proc_image in zip(factors, proc_images)
-        ]
 
     log.info(f"combining {nexp} frames into master frame")
     if master_type == "bias":
-        master_frame = combineImages(proc_images, method="median", normalize=False)
+        master_img = combineImages(org_imgs, method="median", normalize=False)
     elif master_type == "dark":
-        master_frame = combineImages(proc_images, method="median", normalize=False)
+        master_img = combineImages(org_imgs, method="median", normalize=False)
     elif master_type == "flat" or master_type == "flatfield":
-        master_frame = combineImages(
-            [
-                proc_image / numpy.nanmedian(proc_image._data)
-                for proc_image in proc_images
-            ],
+        master_img = combineImages(
+            [img / numpy.nanmedian(img._data) for img in org_imgs],
             method="median",
             normalize=True,
             normalize_percentile=75,
         )
     elif master_type == "arc":
-        master_frame = combineImages(
-            proc_images, method="median", normalize=True, normalize_percentile=99
+        master_img = combineImages(
+            org_imgs, method="median", normalize=True, normalize_percentile=99
         )
     elif master_type == "fiberflat":
-        master_frame = combineImages(
-            proc_images, method="median", normalize=True, normalize_percentile=75
+        master_img = combineImages(
+            org_imgs, method="median", normalize=True, normalize_percentile=75
         )
 
     log.info(f"updating header for new master frame '{out_image}'")
     # TODO:
     # * add binary table with columns: MJD, EXPNUM, SPEC, CHANNEL, EXPTIME
-    master_frame._header["EXPTIME"] = master_exptime
-    master_frame._header["ISMASTER"] = (True, "Is this a combined (master) frame")
-    master_frame._header["NFRAMES"] = (nexp, "Number of exposures combined")
+    master_img._header["ISMASTER"] = (nexp > 1, "Is this a combined (master) frame")
+    master_img._header["NFRAMES"] = (nexp, "Number of exposures combined")
 
-    master_frame.writeFitsData(out_image)
+    master_img.writeFitsData(out_image)
+
+    return org_imgs, master_img
 
 
 def createPixelMask_drp(in_image, out_image, cen_stat="median", nstd=3):
