@@ -2657,8 +2657,8 @@ def preproc_raw_frame(
 
     # load image
     log.info(f"starting preprocessing of raw image '{os.path.basename(in_image)}'")
-    org_image = loadImage(in_image)
-    org_header = org_image.getHeader()
+    org_img = loadImage(in_image)
+    org_header = org_img.getHeader()
 
     # fix the header with header fix file
     # convert real MJD to SJD
@@ -2722,8 +2722,8 @@ def preproc_raw_frame(
     # process each quadrant
     for i, (sc_xy, os_xy) in enumerate(zip(sc_sec, os_sec)):
         # get overscan and science quadrant & convert to electron
-        sc_quad = org_image.getSection(section=sc_xy)
-        os_quad = org_image.getSection(section=os_xy)
+        sc_quad = org_img.getSection(section=sc_xy)
+        os_quad = org_img.getSection(section=os_xy)
         # compute overscan stats
         os_bias_med[i] = numpy.median(os_quad._data, axis=None)
         os_bias_std[i] = numpy.median(numpy.std(os_quad._data, axis=1), axis=None)
@@ -2784,10 +2784,10 @@ def preproc_raw_frame(
 
     # join images
     QUAD_POSITIONS = ["01", "11", "00", "10"]
-    preproc_image = glueImages(sc_quads, positions=QUAD_POSITIONS)
-    preproc_image.setHeader(org_header)
+    proc_img = glueImages(sc_quads, positions=QUAD_POSITIONS)
+    proc_img.setHeader(org_header)
     # update/set unit
-    preproc_image.setHdrValue("BUNIT", "adu", "physical units of the array values")
+    proc_img.setHdrValue("BUNIT", "adu", "physical units of the array values")
     # flip along dispersion axis
     try:
         ccd = org_header["CCD"]
@@ -2796,7 +2796,7 @@ def preproc_raw_frame(
         org_header["CCD"] = ccd
     if ccd.startswith("z") or ccd.startswith("b"):
         log.info("flipping along X-axis")
-        preproc_image.orientImage("X")
+        proc_img.orientImage("X")
 
     # update header
     log.info("updating header with per quadrant stats")
@@ -2806,35 +2806,35 @@ def preproc_raw_frame(
         x, y = int(QUAD_POSITIONS[i][0]), int(QUAD_POSITIONS[i][1])
         # flip y-axis
         y = 1 if y == 0 else 0
-        preproc_image.setHdrValue(
+        proc_img.setHdrValue(
             f"HIERARCH AMP{i+1} TRIMSEC",
             f"[{x*xsize+1}:{xsize*(x+1)}, {y*ysize+1}:{ysize*(y+1)}]",
             f"Region of amp. {i+1}",
         )
     # add gain keywords for the different subimages (CCDs/Amplifiers)
     for i in range(NQUADS):
-        preproc_image.setHdrValue(
+        proc_img.setHdrValue(
             f"HIERARCH AMP{i+1} {gain_prefix}",
             gain[i],
             f"Gain value of amp. {i+1} [electron/adu]",
         )
     # add read-out noise keywords for the different subimages (CCDs/Amplifiers)
     for i in range(NQUADS):
-        preproc_image.setHdrValue(
+        proc_img.setHdrValue(
             f"HIERARCH AMP{i+1} {rdnoise_prefix}",
             rdnoise[i],
             f"Read-out noise of amp. {i+1} [electron]",
         )
     # add bias of overscan region for the different subimages (CCDs/Amplifiers)
     for i in range(NQUADS):
-        preproc_image.setHdrValue(
+        proc_img.setHdrValue(
             f"HIERARCH AMP{i+1} OVERSCAN",
             os_bias_med[i],
             f"Overscan median of amp. {i+1} [adu]",
         )
     # add bias std of overscan region for the different subimages (CCDs/Amplifiers)
     for i in range(NQUADS):
-        preproc_image.setHdrValue(
+        proc_img.setHdrValue(
             f"HIERARCH AMP{i+1} OVERSCAN_STD",
             os_bias_std[i],
             f"Overscan std of amp. {i+1} [adu]",
@@ -2844,32 +2844,30 @@ def preproc_raw_frame(
     if in_mask:
         master_mask = loadImage(in_mask)._mask.astype(bool)
     else:
-        master_mask = numpy.zeros_like(preproc_image._data, dtype=bool)
+        master_mask = numpy.zeros_like(proc_img._data, dtype=bool)
 
     # create pixel mask on the original image
     log.info("building pixel mask")
-    preproc_image._mask = master_mask
+    proc_img._mask = master_mask
     # convert temp image to ADU for saturated pixel masking
-    sects = preproc_image._header["AMP? TRIMSEC"]
-    _ = copy(preproc_image)
+    sects = proc_img._header["AMP? TRIMSEC"]
+    _ = copy(proc_img)
     for i in range(NQUADS):
-        quad = _.getSection(sects[i]) / gain[i]
+        quad = _.getSection(sects[i])
         _.setSection(sects[i], quad, inplace=True)
-    preproc_image._mask |= _ >= 0.7 * 2**16
+    proc_img._mask |= _ >= 0.7 * 2**16
     # update masked pixels with NaNs if needed
     if replace_with_nan:
-        log.info(f"replacing {preproc_image._mask.sum()} masked pixels with NaNs")
-        preproc_image._data[preproc_image._mask] = numpy.nan
+        log.info(f"replacing {proc_img._mask.sum()} masked pixels with NaNs")
+        proc_img._data[proc_img._mask] = numpy.nan
 
     # log number of masked pixels
-    nmasked = preproc_image._mask.sum()
-    log.info(
-        f"{nmasked} ({nmasked / preproc_image._mask.size * 100:.2g} %) pixels masked"
-    )
+    nmasked = proc_img._mask.sum()
+    log.info(f"{nmasked} ({nmasked / proc_img._mask.size * 100:.2g} %) pixels masked")
 
     # write out FITS file
     log.info(f"writing output image to {os.path.basename(out_image)}")
-    preproc_image.writeFitsData(out_image)
+    proc_img.writeFitsData(out_image)
 
     # plot overscan strips along X and Y axes
     log.info("plotting results")
@@ -2976,6 +2974,8 @@ def preproc_raw_frame(
         label="os_strips",
     )
 
+    return org_img, os_profiles, os_models, proc_img
+
 
 def detrend_frame(
     in_image: str,
@@ -3019,14 +3019,14 @@ def detrend_frame(
     # We need bright pixels on fiber cores to be scaled to the same level.
     # TODO: Confirm that dark is not being flat fielded in current logic
     # TODO: What is the difference between "flat" and "flatfield"? Pixel flats should not be pixel flatted but regular flats (dome and twilight) yes.
-    proc_image = loadImage(in_image)
-    exptime = proc_image._header["EXPTIME"]
-    img_type = proc_image._header["IMAGETYP"].lower()
+    org_img = loadImage(in_image)
+    exptime = org_img._header["EXPTIME"]
+    img_type = org_img._header["IMAGETYP"].lower()
     log.info(
         "target frame parameters: "
-        f"MJD = {proc_image._header['MJD']}, "
-        f"exptime = {proc_image._header['EXPTIME']}, "
-        f"camera = {proc_image._header['CCD']}"
+        f"MJD = {org_img._header['MJD']}, "
+        f"exptime = {org_img._header['EXPTIME']}, "
+        f"camera = {org_img._header['CCD']}"
     )
 
     # dummy calibration images
@@ -3038,25 +3038,19 @@ def detrend_frame(
     if img_type in ["bias"] or (in_bias is None or not os.path.isfile(in_bias)):
         if in_bias and not os.path.isfile(in_bias):
             log.warning(f"master bias '{in_bias}' not found. Using dummy bias")
-        master_bias = dummy_bias
+        mbias_img = Image(data=numpy.zeros_like(org_img._data))
     else:
         log.info(f"using bias calibration frame '{in_bias}'")
-        master_bias = loadImage(in_bias)
+        mbias_img = loadImage(in_bias)
 
     # read master dark
     if img_type in ["bias", "dark"] or (in_dark is None or not os.path.isfile(in_dark)):
         if in_dark and not os.path.isfile(in_dark):
             log.warning(f"master dark '{in_dark}' not found. Using dummy dark")
-        master_dark = dummy_dark
+        mdark_img = Image(data=numpy.zeros_like(org_img._data))
     else:
         log.info(f"using dark calibration frame '{in_dark}'")
-        master_dark = loadImage(in_dark)
-
-        # scale down the dark if needed
-        factor = exptime / master_dark._header["EXPTIME"]
-        if factor > 1.0:
-            log.warning("scaling-up master dark frame")
-        master_dark *= factor
+        mdark_img = loadImage(in_dark)
 
     # read master flat
     if img_type in ["bias", "dark", "flat", "flatfield"] or (
@@ -3064,21 +3058,21 @@ def detrend_frame(
     ):
         if in_pixelflat and not os.path.isfile(in_pixelflat):
             log.warning(f"master flat '{in_pixelflat}' not found. Using dummy flat")
-        master_pixelflat = dummy_flat
+        mflat_img = Image(data=numpy.ones_like(org_img._data))
     else:
         log.info(f"using pixelflat calibration frame '{in_pixelflat}'")
-        master_pixelflat = loadImage(in_pixelflat)
+        mflat_img = loadImage(in_pixelflat)
 
     # bias correct image
     if in_bias:
         log.info("subtracting master bias")
-    bcorr_image = proc_image - master_bias
+    bcorr_img = org_img - mbias_img
 
     # calculate Poisson errors
     log.info("calculating Poisson errors per quadrant")
-    for i, quad_sec in enumerate(bcorr_image.getHdrValue("AMP? TRIMSEC").values()):
+    for i, quad_sec in enumerate(bcorr_img.getHdrValue("AMP? TRIMSEC").values()):
         # extract quadrant image
-        quad = bcorr_image.getSection(quad_sec)
+        quad = bcorr_img.getSection(quad_sec)
         # extract quadrant gain and rdnoise values
         gain = quad.getHdrValue(f"AMP{i+1} GAIN")
         rdnoise = quad.getHdrValue(f"AMP{i+1} RDNOISE")
@@ -3086,49 +3080,50 @@ def detrend_frame(
         quad *= gain
 
         quad.computePoissonError(rdnoise)
-        bcorr_image.setSection(section=quad_sec, subimg=quad, inplace=True)
+        bcorr_img.setSection(section=quad_sec, subimg=quad, inplace=True)
         log.info(
-            f"median error in quadrant {i+1}: {numpy.median(quad._error):.2f} (e-/s)"
+            f"median error in quadrant {i+1}: {numpy.median(quad._error):.2f} (e-)"
         )
 
     # convert to electron/s (avoid zero division)
-    bcorr_image /= max(1, exptime)
+    bcorr_img /= max(1, exptime)
+    bcorr_img.setHdrValue("BUNIT", "electron/s", "physical units of the image")
 
     # complete image detrending
     if in_dark:
         log.info("subtracting master dark")
     elif in_dark and in_pixelflat:
         log.info("subtracting master dark and dividing by master pixelflat")
-    detrended_image = (bcorr_image - master_dark) / master_pixelflat
+    detrended_img = (bcorr_img - mdark_img) / mflat_img
 
     # propagate pixel mask
     log.info("propagating pixel mask")
-    nanpixels = numpy.isnan(detrended_image._data)
-    infpixels = numpy.isinf(detrended_image._data)
-    detrended_image._mask = numpy.logical_or(proc_image._mask, nanpixels)
-    detrended_image._mask = numpy.logical_or(detrended_image._mask, infpixels)
+    nanpixels = numpy.isnan(detrended_img._data)
+    infpixels = numpy.isinf(detrended_img._data)
+    detrended_img._mask = numpy.logical_or(org_img._mask, nanpixels)
+    detrended_img._mask = numpy.logical_or(detrended_img._mask, infpixels)
     # fix infinities & nans
     if replace_with_nan:
-        log.info(f"replacing {detrended_image._mask.sum()} masked pixels with NaNs")
-        detrended_image._data[detrended_image._mask] = numpy.nan
-        detrended_image._error[detrended_image._mask] = numpy.nan
+        log.info(f"replacing {detrended_img._mask.sum()} masked pixels with NaNs")
+        detrended_img._data[detrended_img._mask] = numpy.nan
+        detrended_img._error[detrended_img._mask] = numpy.nan
 
     # reject cosmic rays
     if reject_cr:
         log.info("rejecting cosmic rays")
         ccd = CCDData(
-            detrended_image._data,
-            uncertainty=StdDevUncertainty(detrended_image._error),
+            detrended_img._data,
+            uncertainty=StdDevUncertainty(detrended_img._error),
             unit=u.electron,
-            mask=detrended_image._mask,
+            mask=detrended_img._mask,
         )
-        array = copy(detrended_image._data)
-        array[detrended_image._mask] = numpy.nan
+        array = copy(detrended_img._data)
+        array[detrended_img._mask] = numpy.nan
         clean_ccd = cosmicray_lacosmic(
             ccd, sigclip=30.0, objlim=numpy.nanpercentile(array, q=99.9)
         )
         cr_mask = clean_ccd.mask
-        cr_mask[detrended_image._mask] = False
+        cr_mask[detrended_img._mask] = False
 
         ncosmic = cr_mask.sum()
         if ncosmic > 100000:
@@ -3138,34 +3133,33 @@ def detrend_frame(
             log.warning(f"found cosmic ray {ncosmic} pixels")
         else:
             log.info(f"found cosmic ray {ncosmic} pixels")
-        clean_image = Image(data=clean_ccd.data, mask=cr_mask)
+        clean_img = Image(data=clean_ccd.data, mask=cr_mask)
         # update image with cosmic ray mask
-        detrended_image.setData(mask=(detrended_image._mask | clean_image._mask))
+        detrended_img.setData(mask=(detrended_img._mask | clean_img._mask))
     else:
-        clean_image = Image(
-            data=numpy.ones(detrended_image._dim) * numpy.nan,
-            mask=numpy.zeros(detrended_image._dim),
+        cr_mask = numpy.zeros(detrended_img._dim, dtype=bool)
+        clean_img = Image(
+            data=numpy.ones(detrended_img._dim) * numpy.nan,
+            mask=numpy.zeros(detrended_img._dim),
         )
 
     # refine mask
     if all(median_box):
         log.info(f"refining pixel mask with {median_box = }")
-        median_image = detrended_image.medianImg(size=median_box, use_mask=True)
-        detrended_image.setData(
-            mask=(detrended_image._mask | median_image._mask), inplace=True
-        )
+        med_img = detrended_img.medianImg(size=median_box, use_mask=True)
+        detrended_img.setData(mask=(detrended_img._mask | med_img._mask), inplace=True)
 
     # normalize in case of flat calibration
     # 'flat' and 'flatfield' are the imagetyp that a pixel flat can have
     if img_type == "flat" or img_type == "flatfield":
         flat_array = numpy.ma.masked_array(
-            detrended_image._data, mask=detrended_image._mask
+            detrended_img._data, mask=detrended_img._mask
         )
-        detrended_image = detrended_image / numpy.ma.median(flat_array)
+        detrended_img = detrended_img / numpy.ma.median(flat_array)
 
     # save detrended image
     log.info(f"saving detrended image at '{out_image}'")
-    detrended_image.writeFitsData(out_image)
+    detrended_img.writeFitsData(out_image)
 
     # show plots
     log.info("plotting results")
@@ -3178,16 +3172,16 @@ def detrend_frame(
         sharex=True,
         sharey=True,
     )
-    plot_image(proc_image, ax=axs[0], title="original", labels=False)
-    plot_image(bcorr_image, ax=axs[1], title="error", extension="error", labels=False)
+    plot_image(org_img, ax=axs[0], title="original", labels=False)
+    plot_image(bcorr_img, ax=axs[1], title="error", extension="error", labels=False)
     plot_image(
-        clean_image,
+        clean_img,
         ax=axs[2],
         title=f"CR mask ({reject_cr = })",
         extension="mask",
         labels=False,
     )
-    plot_image(detrended_image, ax=axs[3], title="detrended", labels=False)
+    plot_image(detrended_img, ax=axs[3], title="detrended", labels=False)
     fig.supxlabel("X (pixel)")
     fig.supylabel("Y (pixel)")
     fig.tight_layout()
@@ -3197,6 +3191,15 @@ def detrend_frame(
         to_display=display_plots,
         figure_path="qa",
         label="detrending",
+    )
+
+    return (
+        org_img,
+        mbias_img,
+        mdark_img,
+        mflat_img,
+        cr_mask,
+        detrended_img,
     )
 
 
