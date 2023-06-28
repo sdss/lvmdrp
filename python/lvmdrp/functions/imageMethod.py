@@ -2588,27 +2588,35 @@ def testres_drp(image, trace, fwhm, flux):
     hdu.writeto("res_rel.fits", overwrite=True)
 
 
-def preproc_raw_frame(in_image: str, out_image: str,
-                      in_mask : str = None,
-                      assume_imagetyp: str = None,
-                      assume_trimsec: str = None,
-                      assume_biassec: str = None,
-                      assume_gain: list = None,
-                      assume_rdnoise: list = None, gain_prefix: str = 'GAIN',
-                      rdnoise_prefix: str = "RDNOISE", subtract_overscan: bool = True,
-                      overscan_stat: str = "biweight", overscan_model: str = "spline",
-                      replace_with_nan: bool = False,
-                      display_plots: bool = False):
-    """produces a preprocessed frame given a raw frame
+def preproc_raw_frame(
+    in_image: str,
+    out_image: str,
+    in_mask: str = None,
+    assume_imagetyp: str = None,
+    assume_trimsec: str = None,
+    assume_biassec: str = None,
+    assume_gain: list = None,
+    assume_rdnoise: list = None,
+    gain_prefix: str = "GAIN",
+    rdnoise_prefix: str = "RDNOISE",
+    subtract_overscan: bool = True,
+    overscan_stat: str = "biweight",
+    overscan_model: str = "spline",
+    replace_with_nan: bool = True,
+    display_plots: bool = False,
+):
+    """produces a preprocessed frame given an LVM raw frame
 
     this taks performs the following steps:
 
         - identifies and extracts the overscan region, per quadrant
         - identifies extracts the science regions per quadrant
-        - optionally subtracts the averaged overscan region from the science regions
-        - optionally computes the Poisson errors
+        - optionally subtracts the overscan regions in three possible modes:
+            * median value (constant)
+            * spline fit
+            * polynomial fit
         - computes the saturated pixel mask
-        - optionally propagates the "dead" and "hot" pixels mask to the final frame
+        - optionally propagates the "dead" and "hot" pixel mask into the processed frame
 
     Parameters
     ----------
@@ -2617,33 +2625,31 @@ def preproc_raw_frame(in_image: str, out_image: str,
     out_image : str
         output preprocessed frame path
     in_mask : str, optional
-        input pixel mask path, by default ""
+        input pixel mask path, by default None
     assume_imagetyp : str, optional
-        whether to assume this image type or use the one in header, by default ""
+        whether to assume this image type or use the one in header, by default None
     assume_trimsec : str, optional
-        useful data section for each quadrant, by default ""
+        useful data section for each quadrant, by default None
     assume_biassec : str, optional
-        overscan section for each quadrant, by default ""
-    assume_gain : str, optional
-        gain values for each quadrant, by default ""
-    assume_rdnoise : str, optional
-        read noise for each quadrant, by default ""
+        overscan section for each quadrant, by default None
+    assume_gain : list, optional
+        gain values for each quadrant, by default None
+    assume_rdnoise : list, optional
+        read noise for each quadrant, by default None
     gain_prefix : str, optional
         gain keyword prefix, by default "GAIN"
     rdnoise_prefix : str, optional
         read noise keyword prefix, by default "RDNOISE"
-    subtract_overscan : str, optional
-        whether to subtract the overscan median for each quadrant or not, by default "1"
+    subtract_overscan : bool, optional
+        whether to subtract the overscan for each quadrant or not, by default True
     overscan_stat : str, optional
         statistics to use when coadding pixels along the X axis, by default "biweight"
     overscan_model : str, optional
-        model to used for fitting the overscan profile of each quadrant, by default "spline"
-    replace_with_nan : str, optional
-        whether to replace masked pixels with NaNs or not, by default "0"
-    display_plots : str, optional
-        whether to show plots on display or not, by default "0"
-    figure_path : str, optional
-        directory where figures will be saved, by default "qa"
+        model used to fit the overscan profile of each quadrant, by default "spline"
+    replace_with_nan : bool, optional
+        whether to replace masked pixels with NaNs or not, by default True
+    display_plots : bool, optional
+        whether to show plots on display or not, by default False
     """
     # convert input parameters to proper type
     subtract_overscan = bool(int(subtract_overscan))
@@ -2717,14 +2723,14 @@ def preproc_raw_frame(in_image: str, out_image: str,
     # process each quadrant
     for i, (sc_xy, os_xy) in enumerate(zip(sc_sec, os_sec)):
         # get overscan and science quadrant & convert to electron
-        sc_quad = org_image.getSection(section=sc_xy) * gain[i]
-        os_quad = org_image.getSection(section=os_xy) * gain[i]
+        sc_quad = org_image.getSection(section=sc_xy)
+        os_quad = org_image.getSection(section=os_xy)
         # compute overscan stats
         os_bias_med[i] = numpy.median(os_quad._data, axis=None)
         os_bias_std[i] = numpy.median(numpy.std(os_quad._data, axis=1), axis=None)
         log.info(
             f"median and standard deviation in OS quadrant {i+1}: "
-            f"{os_bias_med[i]:.2f} +/- {os_bias_std[i]:.2f} (e-)"
+            f"{os_bias_med[i]:.2f} +/- {os_bias_std[i]:.2f} (ADU)"
         )
         # subtract overscan bias from image if requested
         if subtract_overscan:
@@ -2751,14 +2757,14 @@ def preproc_raw_frame(in_image: str, out_image: str,
                 )
             if overscan_model == "spline":
                 os_profile, os_model = _model_overscan(
-                    os_quad, axis=1, stat=os_stat, s=180 * gain[i] ** 2
+                    os_quad, axis=1, stat=os_stat, nknots=300
                 )
             elif overscan_model == "poly":
                 os_profile, os_model = _model_overscan(
                     os_quad, axis=1, stat=os_stat, model="poly", deg=9
                 )
 
-            sc_quad._data = sc_quad._data - os_model
+            sc_quad = sc_quad - os_model
 
             os_profiles.append(os_profile)
             os_models.append(os_model)
@@ -2769,24 +2775,20 @@ def preproc_raw_frame(in_image: str, out_image: str,
     # extract rdnoise
     rdnoise = os_bias_std
     if assume_rdnoise:
-        log.info(f"using given RDNOISE = {assume_rdnoise} (e-)")
+        log.info(f"using given RDNOISE = {assume_rdnoise} (ADU)")
         rdnoise = numpy.asarray(assume_rdnoise)
     elif not org_header[f"{rdnoise_prefix}?"]:
-        log.warning(f"assuming RDNOISE = {rdnoise.tolist()} (e-)")
+        log.warning(f"assuming RDNOISE = {rdnoise.tolist()} (ADU)")
     else:
         rdnoise = numpy.asarray(list(org_header[f"{rdnoise_prefix}?"].values()))
-        log.info(f"using header RDNOISE = {rdnoise.tolist()} (e-)")
+        log.info(f"using header RDNOISE = {rdnoise.tolist()} (ADU)")
 
     # join images
     QUAD_POSITIONS = ["01", "11", "00", "10"]
     preproc_image = glueImages(sc_quads, positions=QUAD_POSITIONS)
-    # convert to electron/s (avoid zero division)
-    preproc_image /= max(1, exptime)
     preproc_image.setHeader(org_header)
     # update/set unit
-    preproc_image.setHdrValue(
-        "BUNIT", "electron/s", "physical units of the array values"
-    )
+    preproc_image.setHdrValue("BUNIT", "adu", "physical units of the array values")
     # flip along dispersion axis
     try:
         ccd = org_header["CCD"]
@@ -2829,14 +2831,14 @@ def preproc_raw_frame(in_image: str, out_image: str,
         preproc_image.setHdrValue(
             f"HIERARCH AMP{i+1} OVERSCAN",
             os_bias_med[i],
-            f"Overscan median of amp. {i+1} [electron]",
+            f"Overscan median of amp. {i+1} [adu]",
         )
     # add bias std of overscan region for the different subimages (CCDs/Amplifiers)
     for i in range(NQUADS):
         preproc_image.setHdrValue(
             f"HIERARCH AMP{i+1} OVERSCAN_STD",
             os_bias_std[i],
-            f"Overscan std of amp. {i+1} [electron]",
+            f"Overscan std of amp. {i+1} [adu]",
         )
 
     # load master pixel mask
@@ -2877,7 +2879,7 @@ def preproc_raw_frame(in_image: str, out_image: str,
         display_plots, nrows=2, ncols=1, figsize=(15, 10), sharex=True, sharey=False
     )
     axs[-1].set_xlabel("X (pixel)")
-    fig.supylabel("median counts (e-)")
+    fig.supylabel("median counts (ADU)")
     fig.suptitle("overscan cut along X-axis", size="xx-large")
 
     os_ab = glueImages(os_quads[:2], positions=["00", "10"])
@@ -2899,7 +2901,7 @@ def preproc_raw_frame(in_image: str, out_image: str,
         fig,
         product_path=out_image,
         to_display=display_plots,
-        figure_path='qa',
+        figure_path="qa",
         label="os_strips_12-34_x",
     )
 
@@ -2913,7 +2915,7 @@ def preproc_raw_frame(in_image: str, out_image: str,
         sharey=False,
     )
     axs[-1].set_xlabel("Y (pixel)")
-    fig.supylabel("counts (e-)")
+    fig.supylabel("counts (ADU)")
     fig.suptitle("overscan cut along Y-axis", size="xx-large")
     os_ac = glueImages(os_quads[::2], positions=["00", "01"])
     os_bd = glueImages(os_quads[1::2], positions=["00", "01"])
@@ -2934,7 +2936,7 @@ def preproc_raw_frame(in_image: str, out_image: str,
         fig,
         product_path=out_image,
         to_display=display_plots,
-        figure_path='qa',
+        figure_path="qa",
         label="os_strips_13-24_y",
     )
 
@@ -2943,7 +2945,7 @@ def preproc_raw_frame(in_image: str, out_image: str,
         to_display=display_plots, nrows=4, ncols=1, figsize=(15, 10), sharex=True
     )
     fig.supxlabel("Y (pixel)")
-    fig.supylabel("counts (e-)")
+    fig.supylabel("counts (ADU)")
     fig.suptitle("overscan for all quadrants", size="xx-large")
     for i, os_quad in enumerate(os_quads):
         plot_strips(
@@ -2971,7 +2973,7 @@ def preproc_raw_frame(in_image: str, out_image: str,
         fig,
         product_path=out_image,
         to_display=display_plots,
-        figure_path='qa',
+        figure_path="qa",
         label="os_strips",
     )
 
