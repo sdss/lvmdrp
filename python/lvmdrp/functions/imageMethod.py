@@ -3029,10 +3029,10 @@ def detrend_frame(
         f"camera = {org_img._header['CCD']}"
     )
 
-    # dummy calibration images
-    dummy_bias = Image(data=numpy.zeros_like(proc_image._data))
-    dummy_dark = Image(data=numpy.zeros_like(proc_image._data))
-    dummy_flat = Image(data=numpy.ones_like(proc_image._data))
+    # skip detrending for bias frame
+    if img_type == "bias":
+        log.info(f"skipping detrending for bias frame: {img_type =}")
+        return org_img, None, None, None, None, None
 
     # read master bias
     if img_type in ["bias"] or (in_bias is None or not os.path.isfile(in_bias)):
