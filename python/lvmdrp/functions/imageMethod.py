@@ -3133,11 +3133,12 @@ def detrend_frame(in_image: str, out_image: str, in_bias: str = None, in_dark: s
         )
 
     # refine mask
-    log.info(f"refining pixel mask with {median_box = }")
-    median_image = detrended_image.medianImg(size=median_box, use_mask=True)
-    detrended_image.setData(
-        mask=(detrended_image._mask | median_image._mask), inplace=True
-    )
+    if all(median_box):
+        log.info(f"refining pixel mask with {median_box = }")
+        median_image = detrended_image.medianImg(size=median_box, use_mask=True)
+        detrended_image.setData(
+            mask=(detrended_image._mask | median_image._mask), inplace=True
+        )
 
     # normalize in case of flat calibration
     # 'flat' and 'flatfield' are the imagetyp that a pixel flat can have
