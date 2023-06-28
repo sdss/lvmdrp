@@ -3,7 +3,6 @@
 
 import multiprocessing
 import os
-import pathlib
 import sys
 from copy import deepcopy as copy
 from multiprocessing import Pool, cpu_count
@@ -11,7 +10,7 @@ from multiprocessing import Pool, cpu_count
 import numpy
 from astropy import units as u
 from astropy.io import fits as pyfits
-from astropy.nddata import CCDData
+from astropy.nddata import CCDData, StdDevUncertainty
 from astropy.stats.biweight import biweight_location
 from ccdproc import cosmicray_lacosmic
 from scipy import interpolate
@@ -2978,10 +2977,18 @@ def preproc_raw_frame(
     )
 
 
-def detrend_frame(in_image: str, out_image: str, in_bias: str = None, in_dark: str = None,
-                  in_pixelflat: str = None, calculate_error: bool = True,
-                  replace_with_nan: bool = False, reject_cr: bool = True,
-                  median_box: list = [1, 15], display_plots: bool = False):
+def detrend_frame(
+    in_image: str,
+    out_image: str,
+    in_bias: str = None,
+    in_dark: str = None,
+    in_pixelflat: str = None,
+    calculate_error: bool = True,
+    replace_with_nan: bool = True,
+    reject_cr: bool = True,
+    median_box: list = [0, 0],
+    display_plots: bool = False,
+):
     """detrends input image by subtracting bias, dark and flatfielding
 
     Parameters
@@ -3003,11 +3010,9 @@ def detrend_frame(in_image: str, out_image: str, in_bias: str = None, in_dark: s
     reject_cr : bool, optional
         whether to reject or not cosmic rays from detrended image, by default "1"
     median_box : tuple, optional
-        size of the median box to refine pixel mask, by default "1,15"
+        size of the median box to refine pixel mask, by default [0,0]
     display_plots : str, optional
         whether to show plots on display or not, by default "0"
-    figure_path : str, optional
-        directory where figures will be saved, by default "qa"
     """
 
     # TODO: Normalization of flats. This is for combining them right? Need to make sure median is not dominated by diferences in background.
@@ -3036,7 +3041,7 @@ def detrend_frame(in_image: str, out_image: str, in_bias: str = None, in_dark: s
         master_bias = dummy_bias
     else:
         log.info(f"using bias calibration frame '{in_bias}'")
-        master_bias = loadImage(in_bias) / exptime
+        master_bias = loadImage(in_bias)
 
     # read master dark
     if img_type in ["bias", "dark"] or (in_dark is None or not os.path.isfile(in_dark)):
@@ -3072,12 +3077,22 @@ def detrend_frame(in_image: str, out_image: str, in_bias: str = None, in_dark: s
     # calculate Poisson errors
     log.info("calculating Poisson errors per quadrant")
     for i, quad_sec in enumerate(bcorr_image.getHdrValue("AMP? TRIMSEC").values()):
+        # extract quadrant image
         quad = bcorr_image.getSection(quad_sec)
-        quad.computePoissonError(quad.getHdrValue(f"AMP{i+1} RDNOISE"))
+        # extract quadrant gain and rdnoise values
+        gain = quad.getHdrValue(f"AMP{i+1} GAIN")
+        rdnoise = quad.getHdrValue(f"AMP{i+1} RDNOISE")
+        # gain-correct quadrant
+        quad *= gain
+
+        quad.computePoissonError(rdnoise)
         bcorr_image.setSection(section=quad_sec, subimg=quad, inplace=True)
         log.info(
             f"median error in quadrant {i+1}: {numpy.median(quad._error):.2f} (e-/s)"
         )
+
+    # convert to electron/s (avoid zero division)
+    bcorr_image /= max(1, exptime)
 
     # complete image detrending
     if in_dark:
@@ -3103,7 +3118,7 @@ def detrend_frame(in_image: str, out_image: str, in_bias: str = None, in_dark: s
         log.info("rejecting cosmic rays")
         ccd = CCDData(
             detrended_image._data,
-            uncertainty=detrended_image._error,
+            uncertainty=StdDevUncertainty(detrended_image._error),
             unit=u.electron,
             mask=detrended_image._mask,
         )
@@ -3180,7 +3195,7 @@ def detrend_frame(in_image: str, out_image: str, in_bias: str = None, in_dark: s
         fig,
         product_path=out_image,
         to_display=display_plots,
-        figure_path='qa',
+        figure_path="qa",
         label="detrending",
     )
 
