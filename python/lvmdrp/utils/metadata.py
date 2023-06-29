@@ -51,16 +51,16 @@ RAW_METADATA_COLUMNS = [
     ("argon", bool),
     ("ldls", bool),
     ("quartz", bool),
-    ('quality', str),
+    ("quality", str),
     ("qual", RawFrameQuality),
     ("stage", ReductionStage),
     ("status", ReductionStatus),
     ("drpqual", QualityFlag),
-    ('name', str)
+    ("name", str),
 ]
 MASTER_METADATA_COLUMNS = [
     ("tileid", int),
-    ("mjd", int),   # actually SJD
+    ("mjd", int),  # actually SJD
     ("rmjd", int),  # the real MJD
     ("imagetyp", str),
     ("spec", str),
@@ -73,13 +73,13 @@ MASTER_METADATA_COLUMNS = [
     ("argon", bool),
     ("ldls", bool),
     ("quartz", bool),
-    ('quality', str),
+    ("quality", str),
     ("qual", RawFrameQuality),
     ("stage", ReductionStage),
     ("status", ReductionStatus),
     ("drpqual", QualityFlag),
     ("nframes", int),
-    ('name', str)
+    ("name", str),
 ]
 
 
@@ -328,21 +328,23 @@ def _load_or_create_store(tileid=None, mjd=None, kind="raw", mode="a"):
     h5py.Group
         the metadata store for the given observatory
     """
-    if mode not in {'r', 'a'}:
+    if mode not in {"r", "a"}:
         raise ValueError(f"invalid value for {mode = }")
 
-    if kind == 'raw' and not tileid and not mjd:
+    if kind == "raw" and not tileid and not mjd:
         raise ValueError(f"specific values for {tileid = } and {mjd = } are needed")
 
     # define metadata path depending on the kind
-    metadata_paths = _get_metadata_paths(tileid=tileid, mjd=mjd, kind=kind, filter_exist=(mode == "r"))
+    metadata_paths = _get_metadata_paths(
+        tileid=tileid, mjd=mjd, kind=kind, filter_exist=(mode == "r")
+    )
 
     stores = []
     for metadata_path in metadata_paths:
         # create the directory if needed
         metadata_path.parent.mkdir(parents=True, exist_ok=True)
 
-        msg = 'loading' if metadata_path.exists() else 'creating'
+        msg = "loading" if metadata_path.exists() else "creating"
         log.info(f"{msg} metadata store of {kind = }, {tileid = } and {mjd = }")
         stores.append(h5py.File(metadata_path, mode=mode))
 
@@ -366,9 +368,7 @@ def _del_store(tileid=None, mjd=None, kind="raw"):
 
     for metadata_path in metadata_paths:
         if os.path.exists(metadata_path):
-            log.info(
-                f"removing metadata store of {kind = }, {tileid = } and {mjd = }"
-            )
+            log.info(f"removing metadata store of {kind = }, {tileid = } and {mjd = }")
             os.remove(metadata_path)
         else:
             log.warning(
@@ -443,7 +443,7 @@ def locate_new_frames(hemi, camera, mjd, expnum, return_excluded=False):
 
 
 def get_master_metadata(overwrite: bool = None) -> pd.DataFrame:
-    """ Extract metadata from the master calibration files
+    """Extract metadata from the master calibration files
 
     Builds an Pandas DataFrame table containing extracted metadata for all the
     master calibration files found in the calib/ subdirectory of LVM_SPECTRO_REDUX.
@@ -462,25 +462,26 @@ def get_master_metadata(overwrite: bool = None) -> pd.DataFrame:
         a Pandas DataFrame of metadata
     """
 
-    files = list(pathlib.Path(os.getenv('LVM_SPECTRO_REDUX')).rglob('*calib/*lvm-m*'))
+    files = list(pathlib.Path(os.getenv("LVM_SPECTRO_REDUX")).rglob("*calib/*lvm-m*"))
 
-    if _load_or_create_store(kind='master', mode='r') and not overwrite:
+    if _load_or_create_store(kind="master", mode="r") and not overwrite:
         log.info("Loading existing metadata store.")
-        meta = get_metadata(kind='master')
+        meta = get_metadata(kind="master")
     else:
         if overwrite:
-            _del_store(kind='master')
+            _del_store(kind="master")
 
-        log.info('Creating new metadata store.')
-        meta = extract_metadata(files, kind='master')
+        log.info("Creating new metadata store.")
+        meta = extract_metadata(files, kind="master")
         add_masters(meta)
 
     return meta
 
 
-def get_frames_metadata(mjd: Union[str, int] = None, suffix: str = "fits",
-                        overwrite: bool = None) -> pd.DataFrame:
-    """ Extract metadata from the 2d raw frames
+def get_frames_metadata(
+    mjd: Union[str, int] = None, suffix: str = "fits", overwrite: bool = None
+) -> pd.DataFrame:
+    """Extract metadata from the 2d raw frames
 
     Builds an Pandas DataFrame table containing extracted metadata for each of the 2d raw sdR
     frame files.  Globs for all files in the ``mjd`` subdirectory of the raw LVM data.
@@ -504,18 +505,18 @@ def get_frames_metadata(mjd: Union[str, int] = None, suffix: str = "fits",
     """
     # look up raw data in the relevant MJD path
     raw_data_path = os.getenv("LVM_DATA_S")
-    raw_frame = f'{mjd}/sdR*{suffix}*' if mjd else f'*/sdR*{suffix}*'
+    raw_frame = f"{mjd}/sdR*{suffix}*" if mjd else f"*/sdR*{suffix}*"
     frames = list(pathlib.Path(raw_data_path).rglob(raw_frame))
 
-    if _load_or_create_store(tileid='*', mjd=mjd, kind='raw') and not overwrite:
+    if _load_or_create_store(tileid="*", mjd=mjd, kind="raw") and not overwrite:
         log.info("Loading existing metadata store.")
-        meta = get_metadata(mjd=mjd, tileid='*')
+        meta = get_metadata(mjd=mjd, tileid="*")
     else:
         if overwrite:
-            _del_store(mjd=mjd, tileid='*')
+            _del_store(mjd=mjd, tileid="*")
 
-        log.info('Creating new metadata store.')
-        meta = extract_metadata(frames, kind='raw')
+        log.info("Creating new metadata store.")
+        meta = extract_metadata(frames, kind="raw")
         add_raws(meta)
 
     return meta
@@ -562,7 +563,7 @@ def extract_metadata(frames_paths: list, kind: str = "raw") -> pd.DataFrame:
         try:
             header = fits.getheader(frame_path, ext=0)
         except OSError as e:
-            log.error(f'Cannot read FITS header: {e}')
+            log.error(f"Cannot read FITS header: {e}")
             continue
 
         frame_path = pathlib.Path(frame_path)
@@ -592,7 +593,7 @@ def extract_metadata(frames_paths: list, kind: str = "raw") -> pd.DataFrame:
                 header.get("ARGON", "OFF") == "ON",
                 header.get("LDLS", "OFF") == "ON",
                 header.get("QUARTZ", "OFF") == "ON",
-                header.get("QUALITY", 'excellent'),
+                header.get("QUALITY", "excellent"),
                 header.get("QUAL", RawFrameQuality(0)),
                 header.get("DRPSTAGE", ReductionStage.UNREDUCED),
                 header.get("DRPSTAT", ReductionStatus(0)),
@@ -615,7 +616,7 @@ def extract_metadata(frames_paths: list, kind: str = "raw") -> pd.DataFrame:
                 header.get("ARGON", "OFF") == "ON",
                 header.get("LDLS", "OFF") == "ON",
                 header.get("QUARTZ", "OFF") == "ON",
-                header.get("QUALITY", 'excellent'),
+                header.get("QUALITY", "excellent"),
                 header.get("QUAL", RawFrameQuality(0)),
                 header.get("DRPSTAGE", ReductionStage.UNREDUCED),
                 header.get("DRPSTAT", ReductionStatus(0)),
@@ -1092,7 +1093,7 @@ def get_analog_groups(
                 tileid=row.tileid,
                 mjd=row.mjd,
                 kind="c" if row.imagetyp != "bias" else "p",
-                imagetype='fiberflat' if row.imagetyp == 'flat' else row.imagetyp,
+                imagetype="fiberflat" if row.imagetyp == "flat" else row.imagetyp,
                 camera=row.camera,
                 expnum=row.expnum,
             )
@@ -1107,7 +1108,7 @@ def get_analog_groups(
 
 
 def create_master_path(row: pd.Series) -> str:
-    """ Construct the path to a master frame
+    """Construct the path to a master frame
 
     Parameters
     ----------
@@ -1120,20 +1121,32 @@ def create_master_path(row: pd.Series) -> str:
         A fully resolved path to the master frame
     """
     if row.imagetyp == "bias":
-        return path.full("lvm_cal_mbias", drpver=DRPVER, tileid=row.tileid,
-                         mjd=row.mjd, camera=row.camera)
+        return path.full(
+            "lvm_cal_mbias",
+            drpver=DRPVER,
+            tileid=row.tileid,
+            mjd=row.mjd,
+            camera=row.camera,
+        )
     else:
-        return path.full("lvm_cal_time", drpver=DRPVER, tileid=row.tileid, mjd=row.mjd,
-                         kind=f"m{row.imagetyp}", camera=row.camera, exptime=int(row.exptime))
+        return path.full(
+            "lvm_cal_time",
+            drpver=DRPVER,
+            tileid=row.tileid,
+            mjd=row.mjd,
+            kind=f"m{row.imagetyp}",
+            camera=row.camera,
+            exptime=int(row.exptime),
+        )
 
 
 def match_master_metadata(
     target_imagetyp,
     target_camera,
-    target_exptime,
     mjd=None,
     rmjd=None,
     hemi=None,
+    exptime=None,
     neon=None,
     hgne=None,
     krypton=None,
@@ -1159,14 +1172,14 @@ def match_master_metadata(
         type/flavor of frame to locate `IMAGETYP`
     target_camera : str
         camera ID of the target frames
-    target_exptime : float
-        exposure time of the target frames
     mjd : int, optional
         SJD where the target frames is located, by default None
     rmjd : int, optional
         the real MJD
     hemi : str, optional
         hemisphere where the target frames were taken, by default None
+    exptime : float, optional
+        exposure time of the target frames, by default None
     neon : bool, optional
         whether is Neon lamp on or not, by default None
     hgne : bool, optional
@@ -1211,7 +1224,7 @@ def match_master_metadata(
     calib_frames = dict.fromkeys(frame_needs)
 
     # extract master calibration frames metadata
-    store = _load_or_create_store(kind="master", mode='r')
+    store = _load_or_create_store(kind="master", mode="r")
     if not store:
         log.warning("No master store found.")
         return {}
@@ -1240,9 +1253,7 @@ def match_master_metadata(
     log.info(f"found {len(masters_metadata)} master frames in store")
 
     # filter by exposure number, spectrograph and/or camera
-    log.info(
-        f"final number of master frames after filtering {len(masters_metadata)}"
-    )
+    log.info(f"final number of master frames after filtering {len(masters_metadata)}")
 
     # raise error in case current frame is not recognized in FRAMES_CALIB_NEEDS
     if frame_needs is None:
@@ -1260,7 +1271,7 @@ def match_master_metadata(
             rmjd=rmjd,
             imagetyp=calib_type,
             camera=target_camera,
-            exptime=target_exptime if calib_type != "bias" else None,
+            exptime=exptime,
             neon=neon,
             hgne=hgne,
             krypton=krypton,
