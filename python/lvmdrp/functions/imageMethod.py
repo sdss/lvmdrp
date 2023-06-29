@@ -2772,7 +2772,7 @@ def preproc_raw_frame(
         os_quads.append(os_quad)
 
     # extract rdnoise
-    rdnoise = os_bias_std
+    rdnoise = os_bias_std * gain
     if assume_rdnoise:
         log.info(f"using given RDNOISE = {assume_rdnoise} (ADU)")
         rdnoise = numpy.asarray(assume_rdnoise)
@@ -2780,7 +2780,7 @@ def preproc_raw_frame(
         log.warning(f"assuming RDNOISE = {rdnoise.tolist()} (ADU)")
     else:
         rdnoise = numpy.asarray(list(org_header[f"{rdnoise_prefix}?"].values()))
-        log.info(f"using header RDNOISE = {rdnoise.tolist()} (ADU)")
+        log.info(f"using header RDNOISE = {rdnoise.tolist()} (e-)")
 
     # join images
     QUAD_POSITIONS = ["01", "11", "00", "10"]
