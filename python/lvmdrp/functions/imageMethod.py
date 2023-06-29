@@ -2856,17 +2856,18 @@ def preproc_raw_frame(
         quad = _.getSection(sects[i])
         _.setSection(sects[i], quad, inplace=True)
     proc_img._mask |= _ >= 0.7 * 2**16
-    # update masked pixels with NaNs if needed
-    if replace_with_nan:
-        log.info(f"replacing {proc_img._mask.sum()} masked pixels with NaNs")
-        proc_img._data[proc_img._mask] = numpy.nan
 
     # log number of masked pixels
     nmasked = proc_img._mask.sum()
     log.info(f"{nmasked} ({nmasked / proc_img._mask.size * 100:.2g} %) pixels masked")
 
+    # update masked pixels with NaNs if needed
+    if replace_with_nan:
+        log.info(f"replacing {nmasked} masked pixels with NaNs")
+        proc_img._data[proc_img._mask] = numpy.nan
+
     # write out FITS file
-    log.info(f"writing output image to {os.path.basename(out_image)}")
+    log.info(f"writing preprocessed image to {os.path.basename(out_image)}")
     proc_img.writeFitsData(out_image)
 
     # plot overscan strips along X and Y axes
