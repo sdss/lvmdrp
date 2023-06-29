@@ -11,7 +11,7 @@ import numpy
 from astropy import units as u
 from astropy.io import fits as pyfits
 from astropy.nddata import CCDData, StdDevUncertainty
-from astropy.stats.biweight import biweight_location
+from astropy.stats.biweight import biweight_location, biweight_scale
 from ccdproc import cosmicray_lacosmic
 from scipy import interpolate
 from tqdm import tqdm
@@ -3288,11 +3288,29 @@ def create_master_frame(in_images: list, out_image: str, force_master: bool = Tr
     return org_imgs, master_img
 
 
-def createPixelMask_drp(in_image, out_image, cen_stat="median", nstd=3):
+def create_pixelmask(
+    in_bias: str,
+    in_dark: str,
+    out_mask: str,
+    in_pixelflat: str = None,
+    median_box: int = [30, 30],
+    cen_stat: str = "median",
+    low_nsigma: int = 1,
+    high_nsigma: int = 5,
+    column_threshold: float = 0.2,
+):
     """create a pixel mask using a simple sigma clipping
 
-    given an image with potentially bad pixels (hot, dead), this function
-    will calculate a sigma clipping pixel mask to reject those pixels.
+    Given a bias, dark, and pixelflat image, this function will calculate a
+    a pixel mask by performing the following steps:
+        * smooth images with a median filter set by `median_box`
+        * subtract smoothed images from original images
+        * calculate a sigma clipping mask using `cen_stat` and `low_/high_nsigma`
+        * mask whole column if fraction of masked pixels is above `column_threshold`
+        * combine all masks into a single mask
+
+    By using a low threshold we should be able to pick up weak bad columns, while the
+    high threshold should be able to pick up hot pixels.
 
     Parameters
     ----------
@@ -3308,20 +3326,70 @@ def createPixelMask_drp(in_image, out_image, cen_stat="median", nstd=3):
     # TODO: Bad Pixel Mask: you should look for two types of bad pixels in two different frames:
     # "hot pixels", for which you co-add all your bias subtracted darks, no matter the exposure time, and look for pixels that stand out of their local background.
     # And "low QE pixels", for which you look for local outliers with respect to the local background in a master pixel flat.
-    image = loadImage(in_image)
+    # TODO: set a small nsigma threshold to pick up weak bad column
+    # TODO: add threshold for fraction of bad pixels in a column
+    # TODO: apply high threshold for hot pixels (don't follow a structure)
 
-    marray = numpy.ma.masked_array(image._data, mask=image._mask)
-    if cen_stat == "mean":
-        cen = numpy.ma.mean(marray)
-    elif cen_stat == "median":
-        cen = numpy.ma.median(marray)
+    # NOTE: hot pixels are found in the darks, not in the flats
+    # NOTE: in the flats we find low QE pixels
+    # NOTE: run this funtion on bias, darks and pixelflats
+    # NOTE: combine all masks into a single one using OR
 
-    std = numpy.ma.std(marray)
+    imgs, med_imgs, masks = [], [], []
+    for in_image in filter(lambda i: i is not None, [in_bias, in_dark, in_pixelflat]):
+        img = loadImage(in_image)
 
-    mask = (marray.data < cen - nstd * std) | (marray.data > cen + nstd * std)
+        log.info(f"creating pixel mask for '{in_image}'")
 
-    new_mask = Image(data=mask * 0, mask=mask)
-    new_mask.writeFitsData(out_image)
+        # create a smoothed image using a median rolling box
+        log.info(f"smoothing image with median box {median_box = }")
+        med_img = img.medianImg(size=median_box)
+        # subtract that smoothed image from the master dark
+        img = img - med_img
+
+        # calculate central value
+        log.info(f"calculating central value using '{cen_stat = }'")
+        if cen_stat == "mean":
+            cen = numpy.mean(img._data)
+        elif cen_stat == "median":
+            cen = numpy.median(img._data)
+        log.info(f"central value = {cen = }")
+
+        # calculate standard deviation
+        log.info("calculating standard deviation using biweight_scale")
+        std = biweight_scale(img._data, M=cen)
+        log.info(f"standard deviation = {std = }")
+
+        # create pixel masks for low and high nsigmas
+        log.info(f"creating pixel mask for {low_nsigma = } sigma")
+        badcol_mask = (img._data < cen - low_nsigma * std) | (
+            img._data > cen + low_nsigma * std
+        )
+        log.info(f"creating pixel mask for {high_nsigma = } sigma")
+        hotpix_mask = (img._data < cen - high_nsigma * std) | (
+            img._data > cen + high_nsigma * std
+        )
+
+        # mask whole columns if fraction of masked pixels is above threshold
+        bad_columns = numpy.sum(badcol_mask, axis=0) > column_threshold * img._dim[0]
+        log.info(f"masking {numpy.sum(bad_columns)} bad columns")
+        # reset mask to clean good pixels
+        badcol_mask[...] = False
+        # mask only bad columns
+        badcol_mask[:, bad_columns] = True
+
+        # combine bad column and hot pixel masks
+        mask = badcol_mask | hotpix_mask
+        log.info(f"masking {numpy.sum(mask)} dead and hot pixels")
+
+        imgs.append(img)
+        masks.append(mask)
+
+    new_mask = Image(data=mask * numpy.nan, mask=numpy.any(masks, axis=0))
+    log.info(f"writing pixel mask to '{os.path.basename(out_mask)}'")
+    new_mask.writeFitsData(out_mask)
+
+    return imgs, med_imgs, masks
 
 
 # TODO: for fiberflats, calculate an average over an X range (around the center) of the
