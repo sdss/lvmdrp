@@ -70,7 +70,6 @@ __all__ = [
 ]
 
 
-
 def detCos_drp(
     image,
     out_image,
@@ -731,10 +730,19 @@ def addCCDMask_drp(image, mask, replaceError="1e10"):
 # TODO: independientemente de cuantas fibras se detecten, el output tiene que tener todas las fibras + flags
 # TODO: agregar informacion de posicion de las fibras al fibermap, para usar como referencia
 # esta funcion se corre solo una vez o con frecuencia baja
-def find_peaks_auto(in_image: str, out_peaks: str, nfibers: int = 638, disp_axis: str = "X",
-                    threshold: int = 1000, median_box: int = 5, median_cross: int = 1,
-                    slice: int = 1500, method: str = "hyperbolic", init_sigma: float = 1.0,
-                    display_plots: bool = False):
+def find_peaks_auto(
+    in_image: str,
+    out_peaks: str,
+    nfibers: int = 638,
+    disp_axis: str = "X",
+    threshold: int = 1000,
+    median_box: int = 5,
+    median_cross: int = 1,
+    slice: int = 1500,
+    method: str = "hyperbolic",
+    init_sigma: float = 1.0,
+    display_plots: bool = False,
+):
     """
     Finds the exact subpixel cross-dispersion position of a given number of fibers at a certain dispersion column on the raw CCD frame.
     If a predefined number of pixel are expected, the initial threshold value for the minimum peak height will varied until the expected number
@@ -837,7 +845,13 @@ def find_peaks_auto(in_image: str, out_peaks: str, nfibers: int = 638, disp_axis
     )
     ax.set_xlabel("cross-dispersion axis (pix)")
     ax.set_ylabel("fiber profile")
-    save_fig(fig, product_path=out_peaks, to_display=display_plots, figure_path='qa', label=None)
+    save_fig(
+        fig,
+        product_path=out_peaks,
+        to_display=display_plots,
+        figure_path="qa",
+        label=None,
+    )
 
 
 def findPeaksOffset_drp(
@@ -1242,13 +1256,26 @@ def findPeaksMaster2_drp(
         plt.plot(centers._data, numpy.ones(len(centers._data)) * 2000.0, "xg")
         plt.show()
 
+
 # TODO: guardar tabla con los pixeles usados en el trazado (antes del fitting)
 # TODO: guardar polinomio evaluado (con buen muestreo)
 # TODO: graficar los coeficientes versus los puntos usados en el ajuste polinomial
-def trace_peaks(in_image: str, in_peaks: str, out_trace: str, disp_axis: str = "X",
-                method: str = "hyperbolic", median_box: int = 5, median_cross: int = 1,
-                steps: int = 30, coadd: int = 30, poly_disp: int = -6, init_sigma: float = 1.0,
-                threshold: float = 1000.0, max_diff: int = 2, verbose: bool = True):
+def trace_peaks(
+    in_image: str,
+    in_peaks: str,
+    out_trace: str,
+    disp_axis: str = "X",
+    method: str = "hyperbolic",
+    median_box: int = 5,
+    median_cross: int = 1,
+    steps: int = 30,
+    coadd: int = 30,
+    poly_disp: int = -6,
+    init_sigma: float = 1.0,
+    threshold: float = 1000.0,
+    max_diff: int = 2,
+    verbose: bool = True,
+):
     """
     Traces the peaks of fibers along the dispersion axis. The peaks at a specific dispersion
     column had to be determined before. Two scheme of measuring the subpixel peak positionare
@@ -1510,7 +1537,7 @@ def glueCCDFrames_drp(
     user:>  lvmdrp image glueCCDFrame FRAME1.fits, FRAME2.fits, FRAME3.fits, FRAME4.fits  FULLFRAME.fits  50,800 1,900  00,10,01,11 X,90,Y,180 gain='GAIN'
     """
     # convert input parameters to proper type
-    list_imgs = images.split(",")
+    images = images.split(",")
     bound_x = boundary_x.split(",")
     bound_y = boundary_y.split(",")
     orient = orientation.split(",")
@@ -1518,15 +1545,15 @@ def glueCCDFrames_drp(
     subtract_overscan = bool(int(subtract_overscan))
     compute_error = bool(int(compute_error))
     # create empty lists
-    imgs = []  # list of images
+    org_imgs = []  # list of images
     gains = []  # list of gains
     rdnoises = []  # list of read-out noises
     bias = []  # list of biasses
 
-    for i in list_imgs:
+    for i in images:
         # load subimages from disc and append them to a list
         img = loadImage(i, extension_data=0)
-        imgs.append(img)
+        org_imgs.append(img)
         if gain != "":
             # get gain value
             try:
@@ -1542,29 +1569,29 @@ def glueCCDFrames_drp(
         else:
             rdnoises.append(0.0)
 
-    for i in range(len(list_imgs)):
+    for i in range(len(images)):
         # append the bias from the overscane region
-        bias.append(imgs[i].cutOverscan(bound_x, bound_y, subtract_overscan))
+        bias.append(org_imgs[i].cutOverscan(bound_x, bound_y, subtract_overscan))
         # multiplication with the gain factor
         if gain == "":
             mult = 1.0
         else:
             mult = gains[i]
-        imgs[i] = imgs[i] * mult
+        org_imgs[i] = org_imgs[i] * mult
 
         # change orientation of subimages
-        imgs[i].orientImage(orient[i])
+        org_imgs[i].orientImage(orient[i])
         if compute_error:
-            imgs[i].computePoissonError(rdnoise=rdnoises[i])
+            org_imgs[i].computePoissonError(rdnoise=rdnoises[i])
 
     # create glued image
-    full_img = glueImages(imgs, pos)
+    full_img = glueImages(org_imgs, pos)
 
     # adjust FITS header information
     full_img.removeHdrEntries(["GAIN", "RDNOISE", "COMMENT", ""])
     # add gain keywords for the different subimages (CDDs/Amplifies)
     if gain != "":
-        for i in range(len(imgs)):
+        for i in range(len(org_imgs)):
             full_img.setHdrValue(
                 "HIERARCH AMP%i GAIN" % (i + 1),
                 gains[i],
@@ -1572,14 +1599,14 @@ def glueCCDFrames_drp(
             )
     # add read-out noise keywords for the different subimages (CDDs/Amplifies)
     if rdnoise != "":
-        for i in range(len(imgs)):
+        for i in range(len(org_imgs)):
             full_img.setHdrValue(
                 "HIERARCH AMP%i RDNOISE" % (i + 1),
                 rdnoises[i],
                 "Read-out noise of CCD amplifier %i" % (i + 1),
             )
     # add bias of overscan region for the different subimages (CDDs/Amplifies)
-    for i in range(len(imgs)):
+    for i in range(len(org_imgs)):
         if subtract_overscan:
             full_img.setHdrValue(
                 "HIERARCH AMP%i OVERSCAN" % (i + 1),
@@ -1597,18 +1624,18 @@ def glueCCDFrames_drp(
 
 def combineImages_drp(images, out_image, method="median", k="3.0"):
     # convert input parameters to proper type
-    list_imgs = images.split(",")
-    if len(list_imgs) == 1:
+    images = images.split(",")
+    if len(images) == 1:
         file_list = open(images, "r")
-        list_imgs = file_list.readlines()
+        images = file_list.readlines()
         file_list.close()
     k = float(k)
-    imgs = []
-    for i in list_imgs:
+    org_imgs = []
+    for i in images:
         # load subimages from disc and append them to a list
-        imgs.append(loadImage(i.replace("\n", "")))
+        org_imgs.append(loadImage(i.replace("\n", "")))
 
-    combined_img = combineImages(imgs, method=method, k=k)
+    combined_img = combineImages(org_imgs, method=method, k=k)
     # write out FITS file
     combined_img.writeFitsData(out_image)
 
@@ -1637,7 +1664,7 @@ def subtractStraylight_drp(
                                 Name of the  FITS file with the trace mask of the fibers
                 stray_image: string
                                 Name of the FITS file in which the pure straylight image is stored
-                clean_image: string
+                clean_img: string
                                 Name of the FITS file in which the straylight subtracted image is stored
                 disp_axis: string of float, optional  with default: 'X'
                                 Define the dispersion axis, either 'X','x', or 0 for the  x axis or 'Y','y', or 1 for the y axis.
@@ -2176,9 +2203,18 @@ def offsetTrace2_drp(
 # it might be better in dealing with cross-talk
 # TODO:
 # * define lvm-frame ancillary product to replace for out_rss
-def extract_spectra(in_image: str, out_rss: str, in_trace: str, method: str = "optimal",
-                    aperture: int = 7, fwhm: float = 2.5, disp_axis: str = "X",
-                    replace_error: float = 1.e10, plot_fig: bool = False, parallel: str = "auto"):
+def extract_spectra(
+    in_image: str,
+    out_rss: str,
+    in_trace: str,
+    method: str = "optimal",
+    aperture: int = 7,
+    fwhm: float = 2.5,
+    disp_axis: str = "X",
+    replace_error: float = 1.0e10,
+    plot_fig: bool = False,
+    parallel: str = "auto",
+):
     """
     Extracts the flux for each fiber along the dispersion direction which is written into an RSS FITS file format.
     Either a simple aperture or an optimal extraction scheme may be used.
@@ -3159,7 +3195,7 @@ def detrend_frame(
         detrended_img = detrended_img / numpy.ma.median(flat_array)
 
     # save detrended image
-    log.info(f"saving detrended image at '{out_image}'")
+    log.info(f"writing detrended image to '{os.path.basename(out_image)}'")
     detrended_img.writeFitsData(out_image)
 
     # show plots
@@ -3283,6 +3319,7 @@ def create_master_frame(in_images: list, out_image: str, force_master: bool = Tr
     master_img._header["ISMASTER"] = (nexp > 1, "Is this a combined (master) frame")
     master_img._header["NFRAMES"] = (nexp, "Number of exposures combined")
 
+    log.info(f"writing master image to '{os.path.basename(out_image)}'")
     master_img.writeFitsData(out_image)
 
     return org_imgs, master_img
