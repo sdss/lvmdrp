@@ -444,11 +444,15 @@ def reduce_file(filename: str):
     reduce_frame(filename, **params)
 
 
-def reduce_set(frame: pd.DataFrame, settype: str = None):
+def reduce_set(frame: pd.DataFrame, settype: str = None, flavor: str = None):
     """ Reduce a set of precals, cals, or science """
 
     if settype not in {"precals", "cals", "science"}:
         raise ValueError('settype can only be "precals", "cals", or "science".')
+
+    # if flavor is set, only reduce those
+    if flavor:
+        frame = frame[frame['imagetyp'] == flavor]
 
     # reduce frames
     rows = frame.to_dict('records')
@@ -466,6 +470,10 @@ def reduce_set(frame: pd.DataFrame, settype: str = None):
 
     # set the master flavors
     flavors = {'bias', 'dark'} if settype == 'precals' else {'arc', 'flat'}
+
+    # if a flavor is set, only create those masters
+    if flavor:
+        flavors = {flavor}
 
     # create master frames
     for flavor in flavors:
@@ -550,7 +558,8 @@ def run_drp(mjd: Union[int, str, list], bias: bool = False, dark: bool = False,
 
     if not skip_bd:
         # reduce biases / darks
-        reduce_set(precals, settype="precals")
+        reduce_set(precals, settype="precals", flavor='bias')
+        reduce_set(precals, settype="precals", flavor='dark')
 
     # returning if only reducing bias/darks
     if only_bd:
