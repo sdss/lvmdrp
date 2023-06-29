@@ -345,7 +345,7 @@ def _load_or_create_store(tileid=None, mjd=None, kind="raw", mode="a"):
         metadata_path.parent.mkdir(parents=True, exist_ok=True)
 
         msg = "loading" if metadata_path.exists() else "creating"
-        log.info(f"{msg} metadata store of {kind = }, {tileid = } and {mjd = }")
+        log.info(f"{msg} metadata store at {metadata_path}")
         stores.append(h5py.File(metadata_path, mode=mode))
 
     return stores
@@ -368,13 +368,10 @@ def _del_store(tileid=None, mjd=None, kind="raw"):
 
     for metadata_path in metadata_paths:
         if os.path.exists(metadata_path):
-            log.info(f"removing metadata store of {kind = }, {tileid = } and {mjd = }")
+            log.info(f"removing metadata store at {metadata_path}")
             os.remove(metadata_path)
         else:
-            log.warning(
-                f"no metadata store of {kind = }, {tileid = } and {mjd = } found, "
-                "nothing to do"
-            )
+            log.warning(f"no metadata store at {metadata_path} found, " "nothing to do")
 
 
 def locate_new_frames(hemi, camera, mjd, expnum, return_excluded=False):
@@ -894,10 +891,10 @@ def get_metadata(
         metadata = _decode_string(metadata)
 
         # filter by exposure number, spectrograph and/or camera
+        # NOTE: we don't filter by tileid or mjd because we already done it when loading the stores
         metadata = _filter_metadata(
             metadata=metadata,
             hemi=hemi,
-            rmjd=rmjd,
             imagetyp=imagetyp,
             spec=spec,
             camera=camera,
