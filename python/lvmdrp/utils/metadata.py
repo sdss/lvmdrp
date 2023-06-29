@@ -627,6 +627,13 @@ def extract_metadata(frames_paths: list, kind: str = "raw") -> pd.DataFrame:
     # define dataframe
     new_metadata = pd.DataFrame.from_dict(new_metadata, orient="index")
     new_metadata.columns = list(zip(*columns))[0]
+
+    # store metadata in HDF5 store
+    if kind == "raw":
+        add_raws(new_metadata)
+    elif kind == "master":
+        add_masters(new_metadata)
+
     return new_metadata
 
 
