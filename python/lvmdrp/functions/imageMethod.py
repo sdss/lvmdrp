@@ -16,6 +16,8 @@ from ccdproc import cosmicray_lacosmic
 from scipy import interpolate
 from tqdm import tqdm
 
+from typing import List
+
 from lvmdrp.core.fiberrows import FiberRows
 from lvmdrp.core.image import (
     Image,
@@ -733,12 +735,12 @@ def addCCDMask_drp(image, mask, replaceError="1e10"):
 def find_peaks_auto(
     in_image: str,
     out_peaks: str,
-    nfibers: int = 638,
+    slice: int = None,
+    fibers_dmin: int = 5,
+    nfibers: int = None,
+    threshold: int = 1.0,
     disp_axis: str = "X",
-    threshold: int = 1000,
-    median_box: int = 5,
-    median_cross: int = 1,
-    slice: int = 1500,
+    median_box: List[int] = [1, 10],
     method: str = "hyperbolic",
     init_sigma: float = 1.0,
     display_plots: bool = False,
@@ -777,6 +779,8 @@ def find_peaks_auto(
     --------
     user:> lvmdrp image findPeaksAuto IMAGE.fits OUT_PEAKS.txt 382  method='gauss', init_sigma=1.3
     """
+    # TODO: read fibermap information (with the initial position of the fibers)
+    # TODO: flag saturated fibers around those initial positions
     npeaks = nfibers
 
     # Load Image
@@ -789,13 +793,11 @@ def find_peaks_auto(
         img.swapaxes()
 
     # perform median filtering along the dispersion axis to clean cosmic rays
-    if median_box or median_cross:
-        median_box = max(median_box, 1)
-        median_cross = max(median_cross, 1)
-        img = img.medianImg((median_cross, median_box))
+    if 0 not in median_box:
+        img = img.medianImg(median_box)
 
     # if no slice is given find the cross-dispersion cut with the highest signal
-    if slice == "":
+    if slice is None:
         log.info("collapsing image along Y-axis using a median statistic")
         median_cut = img.collapseImg(
             axis="y", mode="median"
@@ -811,18 +813,15 @@ def find_peaks_auto(
 
     # find location of peaks (local maxima) either above a fixed threshold or to reach a fixed number of peaks
     log.info("locating fibers")
-    peaks = cut.findPeaks(threshold=threshold, npeaks=npeaks)
-    log.info(f"found {len(peaks[0])} fibers")
+    pixels, _, peaks = cut.findPeaks(fibers_dmin, threshold=threshold, npeaks=npeaks)
+    log.info(f"found {len(pixels)} fibers")
 
     # find the subpixel centroids of the peaks from the central 3 pixels using either a hyperbolic approximation
     # or perform a leastsq fit with a Gaussian
     log.info("refining fiber location")
-    centers = cut.measurePeaks(peaks[0], method, init_sigma, threshold=0, max_diff=1.0)[
-        0
-    ]
-    round_cent = numpy.round(centers).astype(
-        "int16"
-    )  # round the subpixel peak positions to their nearest integer value
+    centers = cut.measurePeaks(pixels, method, init_sigma, threshold=0, max_diff=1.0)[0]
+    # round the subpixel peak positions to their nearest integer value
+    round_cent = numpy.round(centers).astype(int)
     log.info(f"final number of fibers found {len(round_cent)}")
     # write number of peaks and their position to an ASCII file NEED TO BE REPLACE WITH XML OUTPUT
     file_out = open(out_peaks, "w")
@@ -833,11 +832,11 @@ def find_peaks_auto(
 
     # plot figure
     fig, ax = create_subplots(to_display=display_plots, figsize=(15, 10))
-    ax.plot(cut._data, "-k", lw=1)
-    ax.plot(peaks[0], peaks[2], "o", color="tab:red", mew=0, ms=5)
+    ax.step(cut._pixels, cut._data, "-k", lw=1, where="mid")
+    ax.plot(pixels, peaks, "o", color="tab:red", mew=0, ms=5)
     ax.plot(
         centers,
-        numpy.ones(len(centers)) * numpy.nanmax(peaks[2]) * 0.5,
+        numpy.ones(len(centers)) * numpy.nanmax(peaks) * 0.5,
         "x",
         mew=1,
         ms=7,
