@@ -1314,21 +1314,25 @@ class Spectrum1D(Header):
             out_par = 0
         return out_par
 
-    def findPeaks(self, threshold=100.0, npeaks=0, add_doubles=1e-1, maxiter=400):
+    def findPeaks(
+        self, min_dwave=5.0, threshold=100.0, npeaks=None, add_doubles=1e-1, maxiter=400
+    ):
         """
         Select local maxima in a Spectrum without taken subpixels into account.
 
         Parameters
         --------------
+        min_dwave : float, optional with default=3.5
+            Minimum distance between two maxima in pixels.
         threshold : float, optional with default=100.0
             Threshold above all pixels are assumed to be maxima,
             it is not used if an expected number of peaks is given.
-
         npeaks : int, optional with default=0
             Number of expected maxima that should be matched.
             If 0 is given the number of maxima is not constrained.
-
         add_doubles : float, optional with defaul=1e-3
+        maxiter : int, optional with default=400
+            Maximum number of iterations to find the peaks, when npeaks is set.
 
         Returns (pixel, wave, data)
         -----------
@@ -1340,60 +1344,70 @@ class Spectrum1D(Header):
             Array of the data values at the peak position
 
         """
-        doubles = (
-            self._data[1:] == self._data[:-1]
-        )  # check for identical adjacent values
+        # check for identical adjacent values to use derivative for maxima detection
+        doubles = self._data[1:] == self._data[:-1]
         doubles = numpy.insert(doubles, 0, False)
         idx = numpy.arange(len(doubles))
         # add some value to one of those adjacent data points
         if numpy.sum(doubles) > 0:
             double_idx = idx[doubles]
             self._data[double_idx] += add_doubles
+
+        # define arrays for the peaks detection
         if self._mask is not None:
-            data = self._data[numpy.logical_not(self._mask)]
-            wave = self._wave[numpy.logical_not(self._mask)]
-            pixels = self._pixels[numpy.logical_not(self._mask)]
+            data = self._data[~self._mask]
+            wave = self._wave[~self._mask]
+            pixels = self._pixels[~self._mask]
         else:
             data = self._data
             wave = self._wave
             pixels = self._pixels
-        pos_diff = (data[1:] - data[:-1]) / (
-            wave[1:] - wave[:-1]
-        )  # compute the discrete derivative
-        select_peaks = numpy.logical_and(
-            pos_diff[1:] < 0, pos_diff[:-1] > 0
-        )  # select all maxima
 
-        if npeaks == 0:
-            # if no number of peaks are given select all maxima over a given threshold
-            select_thres = data[1:-1][select_peaks] > threshold
+        # compute the discrete derivative
+        dwave = wave[1:] - wave[:-1]
+        pos_diff = (data[1:] - data[:-1]) / dwave
+        # all peaks selected by derivative sign change
+        select_peaks = (pos_diff[1:] < 0) & (pos_diff[:-1] > 0)
+
+        # define initial peaks
+        peaks = wave[1:-1][select_peaks]
+
+        # peaks selection by minimum distance in pixels
+        if min_dwave is not None:
+            select_dwave = numpy.diff(peaks) >= min_dwave
         else:
-            # if a specific number of peaks are expected iterate until correct number of peaks are found
+            select_dwave = numpy.ones(peaks.size - 1, dtype=bool)
+
+        # if no number of peaks are given select all maxima over a given threshold
+        if npeaks is None or npeaks <= 0:
+            select_thres = data[1:-1][select_peaks][:-1][select_dwave] > threshold
+        # if a specific number of peaks are expected iterate until correct number of peaks are found
+        else:
             matched_peaks = True
             threshold = self.max()[0] / 10.0  # set starting threshold
             m = 0
             while matched_peaks and m < maxiter:
-                select_thres = (
-                    data[1:-1][select_peaks] > threshold
-                )  # select all maxima above threshold
-                peaks = numpy.sum(
-                    select_thres
-                )  # check if the number of peaks match expectation
+                # select all maxima above threshold
+                select_thres = data[1:-1][select_peaks][:-1][select_dwave] > threshold
+                # check if the number of peaks match expectation
+                peaks = numpy.sum(select_thres)
                 # if the number of peaks mismatch adjust threshold value to a new value
                 if peaks < npeaks:
                     threshold = threshold / 2.0
                 elif peaks > npeaks:
                     threshold = threshold * 1.5
                 else:
-                    matched_peaks = False  # indicate that the correct number of peaks are not  found
+                    # indicate that the correct number of peaks are not  found
+                    matched_peaks = False
                 m += 1
-        pixels = pixels[1:-1][select_peaks][
-            select_thres
-        ]  # select pixel positions of peaks
-        wave = wave[1:-1][select_peaks][
-            select_thres
-        ]  # select wavelength positions of peaks
-        data = data[1:-1][select_peaks][select_thres]  # select data valuesof peaks
+
+        # select pixel positions of peaks
+        pixels = pixels[1:-1][select_peaks][:-1][select_dwave][select_thres]
+        # select wavelength positions of peaks
+        wave = wave[1:-1][select_peaks][:-1][select_dwave][select_thres]
+        # select data valuesof peaks
+        data = data[1:-1][select_peaks][:-1][select_dwave][select_thres]
+
         return pixels, wave, data
 
     def measurePeaks(
