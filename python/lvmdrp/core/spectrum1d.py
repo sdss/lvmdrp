@@ -819,7 +819,7 @@ class Spectrum1D(Header):
             Pixel position of the maximum data value
 
         """
-        max = numpy.max(self._data)  # get max
+        max = numpy.nanmax(self._data)  # get max
         select = self._data == max  # select max value
         max_wave = self._wave[select][0]  # get corresponding wavelength
         max_pos = self._pixels[select][0]  # get corresponding position
@@ -841,7 +841,7 @@ class Spectrum1D(Header):
             Pixel position of the minimum data value
 
         """
-        min = numpy.min(self._data)  # get min
+        min = numpy.nanmin(self._data)  # get min
         select = self._data == min  # select min value
         min_wave = self._wave[select][0]  # get corresponding waveength
         min_pos = self._pixels[select][0]  # get corresponding position
