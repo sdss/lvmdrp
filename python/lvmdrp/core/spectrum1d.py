@@ -1315,13 +1315,21 @@ class Spectrum1D(Header):
         return out_par
 
     def findPeaks(
-        self, min_dwave=5.0, threshold=100.0, npeaks=None, add_doubles=1e-1, maxiter=400
+        self,
+        pix_range=None,
+        min_dwave=5.0,
+        threshold=100.0,
+        npeaks=None,
+        add_doubles=1e-1,
+        maxiter=400,
     ):
         """
         Select local maxima in a Spectrum without taken subpixels into account.
 
         Parameters
         --------------
+        pix_range : tuple, optional with default=None
+            Tuple of the pixel range to be considered.
         min_dwave : float, optional with default=3.5
             Minimum distance between two maxima in pixels.
         threshold : float, optional with default=100.0
@@ -1344,24 +1352,33 @@ class Spectrum1D(Header):
             Array of the data values at the peak position
 
         """
+
+        # select pixels within given range
+        if pix_range is not None:
+            ini = max(0, pix_range[0] - 1)
+            fin = min(self._data.size, pix_range[1] - 2)
+            s = slice(ini, fin)
+            data = self._data[s]
+            wave = self._wave[s]
+            pixels = self._pixels[s]
+            if self._mask is not None:
+                mask = self._mask[s]
+            else:
+                mask = numpy.zeros_like(data, dtype=bool)
+
         # check for identical adjacent values to use derivative for maxima detection
-        doubles = self._data[1:] == self._data[:-1]
+        doubles = data[1:] == data[:-1]
         doubles = numpy.insert(doubles, 0, False)
         idx = numpy.arange(len(doubles))
         # add some value to one of those adjacent data points
         if numpy.sum(doubles) > 0:
             double_idx = idx[doubles]
-            self._data[double_idx] += add_doubles
+            data[double_idx] += add_doubles
 
-        # define arrays for the peaks detection
-        if self._mask is not None:
-            data = self._data[~self._mask]
-            wave = self._wave[~self._mask]
-            pixels = self._pixels[~self._mask]
-        else:
-            data = self._data
-            wave = self._wave
-            pixels = self._pixels
+        # mask bad pixels
+        data = data[~mask]
+        wave = wave[~mask]
+        pixels = pixels[~mask]
 
         # compute the discrete derivative
         dwave = wave[1:] - wave[:-1]

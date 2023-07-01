@@ -736,9 +736,10 @@ def find_peaks_auto(
     in_image: str,
     out_peaks: str,
     slice: int = None,
+    pixel_range: List[int] = [0, 4080],
     fibers_dmin: int = 5,
-    nfibers: int = None,
     threshold: int = 1.0,
+    nfibers: int = None,
     disp_axis: str = "X",
     median_box: List[int] = [1, 10],
     method: str = "hyperbolic",
@@ -758,6 +759,10 @@ def find_peaks_auto(
         Name of the Continuum FITS file in which the fiber position along cross-dispersion direction will be measured
     out_peaks : string
         Name of the ASCII file in which the resulting fiber peak positions are stored
+    slice: string of integer, optional with default: ''
+        Traces the peaks along a given dispersion slice column number. If empty, the dispersion column with the average maximum counts will be used
+    pixel_range: string of integer, optional with default: '[0,4080]'
+        Defines the range of pixels along the cross-dispersion axis to be considered for the peak finding
     nfibers: string of integer > 0
         Number of fibers for which need to be identified in cross-dispersion
     disp_axies: string of float, optional  with default: 'X'
@@ -766,8 +771,6 @@ def find_peaks_auto(
         Init threshold for the peak heights to be considered as a fiber peak.
     median_box: string of integer, optional  with default: '8'
         Defines a median smoothing box along dispersion axis to  reduce effects of cosmics or bad pixels
-    slice: string of integer, optional with default: ''
-        Traces the peaks along a given dispersion slice column number. If empty, the dispersion column with the average maximum counts will be used
     method: string, optional with default: 'gauss'
         Set the method to measure the peaks positions, either 'gauss' or 'hyperbolic'.
     init_sigma: string of  float, optional with default: '1.0'
@@ -813,7 +816,9 @@ def find_peaks_auto(
 
     # find location of peaks (local maxima) either above a fixed threshold or to reach a fixed number of peaks
     log.info("locating fibers")
-    pixels, _, peaks = cut.findPeaks(fibers_dmin, threshold=threshold, npeaks=npeaks)
+    pixels, _, peaks = cut.findPeaks(
+        pix_range=pixel_range, min_dwave=fibers_dmin, threshold=threshold, npeaks=npeaks
+    )
     log.info(f"found {len(pixels)} fibers")
 
     # find the subpixel centroids of the peaks from the central 3 pixels using either a hyperbolic approximation
