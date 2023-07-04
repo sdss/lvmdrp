@@ -511,6 +511,21 @@ class Image(Header):
     def __ge__(self, other):
         return self._data >= other
 
+    def apply_pixelmask(self, mask=None):
+        """Applies the mask to the data and error arrays, setting to nan when True and leaving the same value otherwise"""
+        if mask is None:
+            mask = self._mask
+        if mask is None:
+            return self._data, self._error
+
+        self._data[mask] = numpy.nan
+        if self._error is not None:
+            self._error[mask] = numpy.nan
+
+        self.is_masked = True
+
+        return self._data, self._error
+
     def getSection(self, section):
         """get image section"""
         sec_x, sec_y = _parse_ccd_section(section)

@@ -2899,7 +2899,7 @@ def preproc_raw_frame(
     # update masked pixels with NaNs if needed
     if replace_with_nan:
         log.info(f"replacing {nmasked} masked pixels with NaNs")
-        proc_img._data[proc_img._mask] = numpy.nan
+        proc_img.apply_pixelmask()
 
     # write out FITS file
     log.info(f"writing preprocessed image to {os.path.basename(out_image)}")
@@ -3138,11 +3138,6 @@ def detrend_frame(
     infpixels = numpy.isinf(detrended_img._data)
     detrended_img._mask = numpy.logical_or(org_img._mask, nanpixels)
     detrended_img._mask = numpy.logical_or(detrended_img._mask, infpixels)
-    # fix infinities & nans
-    if replace_with_nan:
-        log.info(f"replacing {detrended_img._mask.sum()} masked pixels with NaNs")
-        detrended_img._data[detrended_img._mask] = numpy.nan
-        detrended_img._error[detrended_img._mask] = numpy.nan
 
     # reject cosmic rays
     if reject_cr:
@@ -3178,6 +3173,11 @@ def detrend_frame(
             data=numpy.ones(detrended_img._dim) * numpy.nan,
             mask=numpy.zeros(detrended_img._dim),
         )
+
+    # replace masked pixels with NaNs
+    if replace_with_nan:
+        log.info(f"replacing {detrended_img._mask.sum()} masked pixels with NaNs")
+        detrended_img.apply_pixelmask()
 
     # refine mask
     if all(median_box):
