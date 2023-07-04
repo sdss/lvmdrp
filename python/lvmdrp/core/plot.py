@@ -13,7 +13,17 @@ import matplotlib.pyplot as plt
 import numpy as np
 from astropy.visualization import AsinhStretch, ImageNormalize, PercentileInterval
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+import warnings
 
+warnings.filterwarnings(
+    action="ignore",
+    module="matplotlib.figure",
+    category=UserWarning,
+    message=(
+        "This figure includes Axes that are not compatible with tight_layout, "
+        "so results might be incorrect."
+    ),
+)
 
 IS_INTERACTIVE = hasattr(sys, "ps1")
 DEFAULT_BACKEND = plt.get_backend()

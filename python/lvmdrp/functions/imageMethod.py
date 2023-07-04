@@ -3224,7 +3224,6 @@ def detrend_frame(
     plot_image(detrended_img, ax=axs[3], title="detrended", labels=False)
     fig.supxlabel("X (pixel)")
     fig.supylabel("Y (pixel)")
-    fig.tight_layout()
     save_fig(
         fig,
         product_path=out_image,
