@@ -1,6 +1,8 @@
 from copy import deepcopy as copy
 from multiprocessing import Pool, cpu_count
 
+from typing import List, Optional, Tuple, Union
+
 import numpy
 from astropy.io import fits as pyfits
 from astropy.modeling import fitting, models
@@ -108,7 +110,7 @@ def _percentile_normalize(images, pct=75):
     """
     # calculate normalization factor
     pcts = numpy.nanpercentile(images.filled(numpy.nan), pct, axis=(1, 2))
-    norm = numpy.ma.median(pcts) / pcts
+    norm = numpy.nanmedian(pcts) / pcts
 
     return norm[:, None, None] * images, norm
 
@@ -140,8 +142,12 @@ def _bg_subtraction(images, quad_sections, bg_sections):
     list_like
         4-element list containing the sections used to calculate the background
     """
-    bg_images_med = numpy.ma.masked_array(numpy.zeros_like(images), mask=images.mask)
-    bg_images_std = numpy.ma.masked_array(numpy.zeros_like(images), mask=images.mask)
+    bg_images_med = numpy.ma.masked_array(
+        numpy.zeros_like(images), mask=images.mask, fill_value=numpy.nan, hard_mask=True
+    )
+    bg_images_std = numpy.ma.masked_array(
+        numpy.zeros_like(images), mask=images.mask, fill_value=numpy.nan, hard_mask=True
+    )
     bg_sections = []
     for i, quad_sec in enumerate(quad_sections):
         xquad, yquad = [slice(idx) for idx in _parse_ccd_section(quad_sec)]
@@ -150,12 +156,14 @@ def _bg_subtraction(images, quad_sections, bg_sections):
         bg_array = images[:, xbg, ybg]
         bg_sections.append(bg_array)
         # calculate median and standard deviation BG
-        bg_med = numpy.ma.median(bg_array, axis=(1, 2))
-        bg_std = numpy.ma.std(bg_array, axis=(1, 2))
+        bg_med = numpy.nanmedian(bg_array.filled(), axis=(1, 2))
+        bg_std = numpy.nanstd(bg_array.filled(), axis=(1, 2))
         # set background sections in corresponding images
         bg_images_med[:, yquad, xquad] = bg_med[:, None, None]
         bg_images_std[:, yquad, xquad] = bg_std[:, None, None]
     images_bgcorr = images - bg_images_med
+    # update mask to propagate NaNs in resulting images
+    images_bgcorr.mask = images.mask | numpy.isnan(images_bgcorr)
 
     return images_bgcorr, bg_images_med, bg_images_std, bg_sections
 
@@ -1050,9 +1058,11 @@ class Image(Header):
                 self._error = hdu[extension_error].data  # take data
                 self._dim = self._error.shape  # set dimension
 
-        self.setHeader(
-            hdu[extension_header].header
-        )  # get header  from the first FITS extension
+        # set is_masked attribute
+        self.is_masked = numpy.isnan(self._data).any()
+
+        # get header  from the first FITS extension
+        self.setHeader(hdu[extension_header].header)
         hdu.close()
 
     def writeFitsData(
@@ -1111,7 +1121,7 @@ class Image(Header):
         for i in range(len(hdus)):
             try:
                 hdus.remove(None)
-            except:
+            except Exception:
                 break
         # if len(hdus)>1:
         #    hdus[0].update_ext_name('T')
@@ -2434,13 +2444,14 @@ def glueImages(images, positions):
 
 
 def combineImages(
-    images,
-    method="median",
-    k=3,
-    normalize=True,
-    normalize_percentile=75,
-    background_subtract=False,
-    background_sections=None,
+    images: List[Image],
+    method: str = "median",
+    k: int = 3,
+    normalize: bool = True,
+    normalize_percentile: int = 75,
+    background_subtract: bool = False,
+    background_sections: List[str] = None,
+    replace_with_nan: bool = True,
 ):
     """
     Combines several image to a single one according to a certain average methods
@@ -2478,8 +2489,12 @@ def combineImages(
             stack_mask[i, :, :] = images[i].getMask()
 
     # mask invalid values
-    stack_image = numpy.ma.masked_array(stack_image, mask=stack_mask)
-    stack_error = numpy.ma.masked_array(stack_error, mask=stack_mask)
+    stack_image = numpy.ma.masked_array(
+        stack_image, mask=stack_mask, fill_value=numpy.nan
+    )
+    stack_error = numpy.ma.masked_array(
+        stack_error, mask=stack_mask, fill_value=numpy.nan
+    )
 
     if background_subtract:
         quad_sections = images[0].getHdrValues("AMP? TRIMSEC")
@@ -2498,32 +2513,32 @@ def combineImages(
 
     # combine the images according to the selected method
     if method == "median":
-        new_image = numpy.ma.median(stack_image, 0)
-        new_error = numpy.sqrt(numpy.ma.median(stack_error**2, 0))
+        new_image = numpy.nanmedian(stack_image.filled(), 0)
+        new_error = numpy.sqrt(numpy.nanmedian(stack_error.filled() ** 2, 0))
     elif method == "sum":
-        new_image = numpy.ma.sum(stack_image, 0)
-        new_error = numpy.sqrt(numpy.ma.sum(stack_error**2, 0))
+        new_image = numpy.nansum(stack_image.filled(), 0)
+        new_error = numpy.sqrt(numpy.nansum(stack_error.filled() ** 2, 0))
     elif method == "mean":
-        new_image = numpy.ma.mean(stack_image, 0)
-        new_error = numpy.sqrt(numpy.ma.mean(stack_error**2, 0))
+        new_image = numpy.nanmean(stack_image.filled(), 0)
+        new_error = numpy.sqrt(numpy.nanmean(stack_error.filled() ** 2, 0))
     elif method == "clipped_median":
-        median = numpy.ma.median(stack_image, 0)
-        rms = numpy.ma.std(stack_image, 0)
+        median = numpy.nanmedian(stack_image.filled(), 0)
+        rms = numpy.nanstd(stack_image.filled(), 0)
         # select pixels within given sigma limits around the median
-        select = numpy.logical_and(
-            stack_image < median + k * rms, stack_image > median - k * rms
+        select = (stack_image.filled() < median + k * rms) & (
+            stack_image.filled() > median - k * rms
         )
         # compute the number of good pixels
-        good_pixels = numpy.ma.sum(select, 0).astype(bool)
+        good_pixels = numpy.nansum(select, 0).astype(bool)
         # set all bad pixel to 0 to compute the mean
         # TODO: make this optional, by default not replacement
-        stack_image[:, numpy.logical_not(good_pixels)] = 0
-        new_image = numpy.ma.sum(stack_image, 0) / good_pixels
+        stack_image[:, ~good_pixels] = 0
+        new_image = numpy.nansum(stack_image.filled(), 0) / good_pixels
 
     # return new image and error to normal array
-    new_mask = new_image.mask
-    new_image = new_image.data
-    new_error = new_error.data
+    new_mask = numpy.all(stack_mask, 0)
+    new_image = new_image
+    new_error = new_error
 
     # mask bad pixels
     new_mask = new_mask | numpy.isnan(new_image) | numpy.isnan(new_error)
@@ -2540,5 +2555,8 @@ def combineImages(
     combined_image = Image(
         data=new_image, error=new_error, mask=new_mask, header=new_header
     )
+
+    if replace_with_nan:
+        combined_image.apply_pixelmask()
 
     return combined_image
