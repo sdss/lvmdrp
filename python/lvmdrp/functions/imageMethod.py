@@ -1197,8 +1197,8 @@ def findPeaksMaster2_drp(
     # find location of peaks (local maxima) either above a fixed threshold or to reach a fixed number of peaks
 
     peaks_good = []
-    if numpy.max(cut._data) < threshold:
-        threshold = numpy.max(cut._data) * 0.8
+    if numpy.nanmax(cut._data) < threshold:
+        threshold = numpy.nanmax(cut._data) * 0.8
     while len(peaks_good) != numpy.sum(select_good):
         (peaks_good, temp, peaks_flux) = cut.findPeaks(threshold=threshold, npeaks=0)
         if peaks_good[0] < border:
@@ -1974,7 +1974,7 @@ def offsetTrace_drp(
                 offsets = []
             else:
                 offsets.append(
-                    numpy.median(
+                    numpy.nanmedian(
                         numpy.array(log_lines[i + 2].split()[1:]).astype("float32")
                     )
                 )
@@ -2036,11 +2036,11 @@ def offsetTrace_drp(
         for j in range(len(out[0])):
             string_x += " %.3f" % (out[1][j])
             string_y += " %.3f" % (out[0][j])
-            string_pix += " %.3f" % (numpy.median(block_line_pos[j]))
+            string_pix += " %.3f" % (numpy.nanmedian(block_line_pos[j]))
         log.write(string_x + "\n")
         log.write(string_pix + "\n")
         log.write(string_y + "\n")
-    off_trace_median = numpy.median(numpy.array(off_trace_all))
+    off_trace_median = numpy.nanmedian(numpy.array(off_trace_all))
     off_trace_rms = numpy.std(numpy.array(off_trace_all))
     off_trace_rms = "%.4f" % off_trace_rms if numpy.isfinite(off_trace_rms) else "NAN"
     img.setHdrValue(
@@ -2182,12 +2182,12 @@ def offsetTrace2_drp(
         for j in range(len(out[0])):
             string_x += " %.3f" % (out[1][j])
             string_y += " %.3f" % (out[0][j] * -1)
-            string_pix += " %.3f" % (numpy.median(block_line_pos[j]))
+            string_pix += " %.3f" % (numpy.nanmedian(block_line_pos[j]))
         log.write(string_x + "\n")
         log.write(string_pix + "\n")
         log.write(string_y + "\n")
 
-    off_trace_median = numpy.median(numpy.array(off_trace_all))
+    off_trace_median = numpy.nanmedian(numpy.array(off_trace_all))
     off_trace_rms = numpy.std(numpy.array(off_trace_all))
     img.setHdrValue(
         "HIERARCH PIPE FLEX YOFF",
@@ -2335,19 +2335,21 @@ def extract_spectra(
     if method == "optimal":
         rss.setHdrValue(
             "HIERARCH PIPE CDISP FWHM MIN",
-            numpy.min(trace_fwhm._data[rss._good_fibers]),
+            numpy.nanmin(trace_fwhm._data[rss._good_fibers]),
         )
         rss.setHdrValue(
             "HIERARCH PIPE CDISP FWHM MAX",
-            numpy.max(trace_fwhm._data[rss._good_fibers]),
+            numpy.nanmax(trace_fwhm._data[rss._good_fibers]),
         )
         rss.setHdrValue(
             "HIERARCH PIPE CDISP FWHM AVG",
-            numpy.mean(trace_fwhm._data[rss._good_fibers]) if data.size != 0 else 0,
+            numpy.nanmean(trace_fwhm._data[rss._good_fibers]) if data.size != 0 else 0,
         )
         rss.setHdrValue(
             "HIERARCH PIPE CDISP FWHM MED",
-            numpy.median(trace_fwhm._data[rss._good_fibers]) if data.size != 0 else 0,
+            numpy.nanmedian(trace_fwhm._data[rss._good_fibers])
+            if data.size != 0
+            else 0,
         )
         rss.setHdrValue(
             "HIERARCH PIPE CDISP FWHM SIG",
@@ -2760,8 +2762,8 @@ def preproc_raw_frame(
         sc_quad = org_img.getSection(section=sc_xy)
         os_quad = org_img.getSection(section=os_xy)
         # compute overscan stats
-        os_bias_med[i] = numpy.median(os_quad._data, axis=None)
-        os_bias_std[i] = numpy.median(numpy.std(os_quad._data, axis=1), axis=None)
+        os_bias_med[i] = numpy.nanmedian(os_quad._data, axis=None)
+        os_bias_std[i] = numpy.nanmedian(numpy.std(os_quad._data, axis=1), axis=None)
         log.info(
             f"median and standard deviation in OS quadrant {i+1}: "
             f"{os_bias_med[i]:.2f} +/- {os_bias_std[i]:.2f} (ADU)"
@@ -2771,7 +2773,7 @@ def preproc_raw_frame(
             if overscan_stat == "biweight":
                 os_stat = biweight_location
             elif overscan_stat == "median":
-                os_stat = numpy.median
+                os_stat = numpy.nanmedian
             else:
                 log.warning(
                     f"overscan statistic '{overscan_stat}' not implemented, "
@@ -2923,8 +2925,8 @@ def preproc_raw_frame(
             axis=0,
             nstrip=1,
             ax=axs[i],
-            mu_stat=numpy.median,
-            sg_stat=lambda x, axis: numpy.median(numpy.std(x, axis=axis)),
+            mu_stat=numpy.nanmedian,
+            sg_stat=lambda x, axis: numpy.nanmedian(numpy.std(x, axis=axis)),
             labels=True,
         )
         os_x, os_y = _parse_ccd_section(list(os_sec)[0])
@@ -2958,8 +2960,8 @@ def preproc_raw_frame(
             axis=1,
             nstrip=1,
             ax=axs[i],
-            mu_stat=numpy.median,
-            sg_stat=lambda x, axis: numpy.median(numpy.std(x, axis=axis)),
+            mu_stat=numpy.nanmedian,
+            sg_stat=lambda x, axis: numpy.nanmedian(numpy.std(x, axis=axis)),
             labels=True,
         )
         os_x, os_y = _parse_ccd_section(list(os_sec)[0])
@@ -2986,8 +2988,8 @@ def preproc_raw_frame(
             axis=1,
             nstrip=1,
             ax=axs[i],
-            mu_stat=numpy.median,
-            sg_stat=lambda x, axis: numpy.median(numpy.std(x, axis=axis)),
+            mu_stat=numpy.nanmedian,
+            sg_stat=lambda x, axis: numpy.nanmedian(numpy.std(x, axis=axis)),
             labels=True,
         )
         axs[i].step(
@@ -2995,7 +2997,7 @@ def preproc_raw_frame(
         )
         axs[i].step(numpy.arange(os_profiles[i].size), os_models[i], color="k", lw=1)
         axs[i].axhline(
-            numpy.median(os_quad._data.flatten()) + rdnoise[i],
+            numpy.nanmedian(os_quad._data.flatten()) + rdnoise[i],
             ls="--",
             color="tab:purple",
             lw=1,
@@ -3120,7 +3122,7 @@ def detrend_frame(
         quad.computePoissonError(rdnoise)
         bcorr_img.setSection(section=quad_sec, subimg=quad, inplace=True)
         log.info(
-            f"median error in quadrant {i+1}: {numpy.median(quad._error):.2f} (e-)"
+            f"median error in quadrant {i+1}: {numpy.nanmedian(quad._error):.2f} (e-)"
         )
 
     # convert to electron/s (avoid zero division)
@@ -3388,9 +3390,9 @@ def create_pixelmask(
         # calculate central value
         log.info(f"calculating central value using '{cen_stat = }'")
         if cen_stat == "mean":
-            cen = numpy.mean(img._data)
+            cen = numpy.nanmean(img._data)
         elif cen_stat == "median":
-            cen = numpy.median(img._data)
+            cen = numpy.nanmedian(img._data)
         log.info(f"central value = {cen = }")
 
         # calculate standard deviation

@@ -898,7 +898,7 @@ class Image(Header):
         )
         overscan = self._data[numpy.logical_not(select)]
         # compute the median of the ovserscan
-        bias_overscan = numpy.median(overscan)
+        bias_overscan = numpy.nanmedian(overscan)
         # get the data of the cut out region
         self._data = self._data[
             int(bound_y[0]) - 1 : int(bound_y[1]), int(bound_x[0]) - 1 : int(bound_x[1])
@@ -1188,7 +1188,7 @@ class Image(Header):
             )
             # compute the masked median within the filter window and replace data
             select = self._mask[range_y[0] : range_y[1], range_x[0] : range_x[1]] == 0
-            out_data[y_cors[m], x_cors[m]] = numpy.median(
+            out_data[y_cors[m], x_cors[m]] = numpy.nanmedian(
                 self._data[range_y[0] : range_y[1], range_x[0] : range_x[1]][select]
             )
             if self._error is not None and replace_error is not None:
@@ -1230,7 +1230,7 @@ class Image(Header):
             try:
                 sky = self.getHdrValue("sky")
             except KeyError:
-                sky = numpy.median(calibratedImage)
+                sky = numpy.nanmedian(calibratedImage)
             # print('Sky Background %s: %.2f Counts' %(filters[filter_select][0],sky))
             calibratedImage = calibratedImage - sky
             error = numpy.sqrt((calibratedImage + sky) / gain + dark_var)
@@ -1562,17 +1562,15 @@ class Image(Header):
             dim = self._dim[1]
         # collapse the image to Spectrum1D object with requested operation
         if mode == "mean":
-            return Spectrum1D(numpy.arange(dim), numpy.mean(self._data, axis))
+            return Spectrum1D(numpy.arange(dim), numpy.nanmean(self._data, axis))
         elif mode == "sum":
-            return Spectrum1D(numpy.arange(dim), numpy.sum(self._data, axis))
-        elif mode == "nansum":
             return Spectrum1D(numpy.arange(dim), numpy.nansum(self._data, axis))
         elif mode == "median":
-            return Spectrum1D(numpy.arange(dim), numpy.median(self._data, axis))
+            return Spectrum1D(numpy.arange(dim), numpy.nanmedian(self._data, axis))
         elif mode == "min":
-            return Spectrum1D(numpy.arange(dim), numpy.amin(self._data, axis))
+            return Spectrum1D(numpy.arange(dim), numpy.nanmin(self._data, axis))
         elif mode == "max":
-            return Spectrum1D(numpy.arange(dim), numpy.amax(self._data, axis))
+            return Spectrum1D(numpy.arange(dim), numpy.nanmax(self._data, axis))
 
     def fitPoly(self, axis="y", order=4, plot=-1):
         """
@@ -1605,7 +1603,7 @@ class Image(Header):
         # setup the base line for the polynomial fitting
         slices = self._dim[1]
         x = numpy.arange(self._dim[0])
-        x = x - numpy.mean(x)
+        x = x - numpy.nanmean(x)
         # if self._mask is not None:
         #    self._mask = numpy.logical_and(self._mask, numpy.logical_not(numpy.isnan(self._data)))
         valid = ~self._mask.astype("bool")
@@ -1640,7 +1638,7 @@ class Image(Header):
                             self._data[valid[:, i], i][select],
                             "ok",
                         )
-                        max = numpy.max(self._data[valid[:, i], i][select])
+                        max = numpy.nanmax(self._data[valid[:, i], i][select])
                     fit_result[:, i] = numpy.polyval(
                         fit_par[:, i], x
                     )  # evalute the polynom
