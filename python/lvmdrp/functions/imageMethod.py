@@ -2690,11 +2690,6 @@ def preproc_raw_frame(
     display_plots : bool, optional
         whether to show plots on display or not, by default False
     """
-    # convert input parameters to proper type
-    subtract_overscan = bool(int(subtract_overscan))
-    replace_with_nan = bool(int(replace_with_nan))
-    display_plots = bool(int(display_plots))
-
     # load image
     log.info(f"starting preprocessing of raw image '{os.path.basename(in_image)}'")
     org_img = loadImage(in_image)
