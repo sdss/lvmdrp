@@ -4,10 +4,160 @@ import matplotlib.pyplot as plt
 import numpy
 from astropy.io import fits as pyfits
 from numpy import polynomial
-from scipy import interpolate, ndimage, sparse
+from scipy.linalg import norm
+from scipy import signal, interpolate, ndimage, sparse
+from scipy.ndimage import zoom
+from typing import List, Tuple
 
 from lvmdrp.core import fit_profile
 from lvmdrp.core.header import Header
+
+
+def _shift_spectrum(spectrum, shift):
+    if shift > 0:
+        return numpy.pad(spectrum, (shift, 0), "constant")[:-shift]
+    elif shift < 0:
+        return numpy.pad(spectrum, (0, -shift), "constant")[-shift:]
+    else:
+        return spectrum
+
+
+def _cross_match(
+    ref_spec: numpy.ndarray,
+    obs_spec: numpy.ndarray,
+    stretch_factors: numpy.ndarray,
+    shift_range: List[int],
+    peak_num: int = None,
+) -> Tuple[float, int, float]:
+    """Find the best cross correlation between two spectra.
+
+    This function finds the best cross correlation between two spectra by
+    stretching and shifting the first spectrum and computing the cross
+    correlation with the second spectrum. The best cross correlation is
+    defined as the one with the highest correlation value and the correct
+    number of peaks.
+
+    Parameters
+    ----------
+    ref_spec : ndarray
+        The reference spectrum.
+    obs_spec : ndarray
+        The observed spectrum.
+    stretch_factors : ndarray
+        The stretch factors to use.
+    shift_range : tuple
+        The range of shifts to use.
+    peak_num : int, optional
+        The number of peaks to match.
+
+    Returns
+    -------
+    max_correlation : float
+        The maximum correlation value.
+    best_shift : int
+        The best shift.
+    best_stretch_factor : float
+        The best stretch factor.
+    """
+    min_shift, max_shift = shift_range
+    max_correlation = -numpy.inf
+    best_shift = 0
+    best_stretch_factor = 1
+
+    for factor in stretch_factors:
+        # Stretch the first signal
+        stretched_signal1 = zoom(ref_spec, factor, mode="constant", prefilter=True)
+
+        # Make the lengths equal
+        len_diff = len(obs_spec) - len(stretched_signal1)
+        if len_diff > 0:
+            # Zero pad the stretched signal at the end if it's shorter
+            stretched_signal1 = numpy.pad(stretched_signal1, (0, len_diff))
+        elif len_diff < 0:
+            # Or crop the stretched signal at the end if it's longer
+            stretched_signal1 = stretched_signal1[:len_diff]
+
+        # Compute the cross correlation
+        cross_corr = signal.correlate(obs_spec, stretched_signal1, mode="same")
+
+        # Normalize the cross correlation
+        cross_corr = cross_corr.astype(numpy.float64)
+        cross_corr /= norm(stretched_signal1) * norm(obs_spec)
+
+        # Get the correlation shifts
+        shifts = signal.correlation_lags(
+            len(obs_spec), len(stretched_signal1), mode="same"
+        )
+
+        # Constrain the cross_corr and shifts to the shift_range
+        mask = (shifts >= min_shift) & (shifts <= max_shift)
+        cross_corr = cross_corr[mask]
+        shifts = shifts[mask]
+
+        # Find the max correlation and the corresponding shift for this stretch factor
+        idx_max_corr = numpy.argmax(cross_corr)
+        max_corr = cross_corr[idx_max_corr]
+        shift = shifts[idx_max_corr]
+
+        # Shift the stretched signal1
+        shifted_signal1 = _shift_spectrum(stretched_signal1, shift)
+
+        # Find the peaks in the shifted and stretched signal1
+        peaks1, _ = signal.find_peaks(shifted_signal1)
+
+        # Check if the number of peaks matches peak_num, if given
+        if peak_num is not None:
+            condition = max_corr > max_correlation and len(peaks1) == peak_num
+        else:
+            condition = max_corr > max_correlation
+
+        if condition:
+            max_correlation = max_corr
+            best_shift = shift
+            best_stretch_factor = factor
+
+    return max_correlation, best_shift, best_stretch_factor
+
+
+def _apply_shift_and_stretch(
+    spectrum: numpy.ndarray, shift: int, stretch_factor: float
+) -> numpy.ndarray:
+    """Apply a shift and stretch to a spectrum.
+
+    This function applies a shift and stretch to a spectrum.
+
+    Parameters
+    ----------
+    spectrum : ndarray
+        The spectrum.
+    shift : int
+        The shift to apply.
+    stretch_factor : float
+        The stretch factor to apply.
+
+    Returns
+    -------
+    shifted_stretched_spectrum : ndarray
+        The shifted and stretched spectrum.
+    """
+    # Stretch the spectrum
+    stretched_spectrum = zoom(spectrum, stretch_factor, mode="constant", prefilter=True)
+
+    # Shift the stretched spectrum
+    shifted_stretched_spectrum = _shift_spectrum(stretched_spectrum, shift)
+
+    # If the shifted and stretched spectrum is shorter than the original spectrum, pad it with zeros
+    if len(shifted_stretched_spectrum) < len(spectrum):
+        shifted_stretched_spectrum = numpy.pad(
+            shifted_stretched_spectrum,
+            (0, len(spectrum) - len(shifted_stretched_spectrum)),
+        )
+
+    # If the shifted and stretched spectrum is longer than the original spectrum, crop it
+    elif len(shifted_stretched_spectrum) > len(spectrum):
+        shifted_stretched_spectrum = shifted_stretched_spectrum[: len(spectrum)]
+
+    return shifted_stretched_spectrum
 
 
 def wave_little_interpol(wavelist):
@@ -851,8 +1001,8 @@ class Spectrum1D(Header):
         """
         Return the content of the spectrum
 
-        Returns: (pix, wave, data, error mask)
-        -----------
+        Returns
+        -------
         pix : numpy.ndarray (int)
             Array of the pixel positions
 
@@ -868,12 +1018,8 @@ class Spectrum1D(Header):
         mask : numpy.ndarray (bool)
             Array of the bad pixel mask
         """
-        pix = self._pixels
-        wave = self._wave
-        data = self._data
-        error = self._error
-        mask = self._mask
-        return pix, wave, data, error, mask
+
+        return self._pixels, self._wave, self._data, self._error, self._mask
 
     def resampleSpec(
         self,
