@@ -13,7 +13,23 @@ from lvmdrp.core import fit_profile
 from lvmdrp.core.header import Header
 
 
-def _shift_spectrum(spectrum, shift):
+def _shift_spectrum(spectrum: numpy.ndarray, shift: int) -> numpy.ndarray:
+    """
+    Shifts a spectrum by a given number of bins.
+
+    Parameters
+    ----------
+    spectrum : numpy.ndarray
+        The spectrum to shift.
+    shift : int
+        The number of bins to shift the spectrum. Positive values shift the
+        spectrum to the right, negative values shift it to the left.
+
+    Returns
+    -------
+    numpy.ndarray
+        The shifted spectrum.
+    """
     if shift > 0:
         return numpy.pad(spectrum, (shift, 0), "constant")[:-shift]
     elif shift < 0:
