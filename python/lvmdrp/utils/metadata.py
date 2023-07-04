@@ -955,7 +955,6 @@ def get_analog_groups(
         * mjd
         * imagetyp
         * camera
-        * exptime
     Optionally, these criteria can be expanded using the `include_fields`.
     The final critaria will always include the above mentioned fields.
 
@@ -1012,7 +1011,7 @@ def get_analog_groups(
         the list of master paths
     """
     # default fields
-    default_fields = ["tileid", "mjd", "imagetyp", "camera", "exptime"]
+    default_fields = ["tileid", "mjd", "imagetyp", "camera"]
     # default output
     default_output = [pd.DataFrame(columns=list(zip(*RAW_METADATA_COLUMNS))[0])]
 
