@@ -89,7 +89,7 @@ def _model_overscan(os_quad, axis=1, stat=biweight_location, model="spline", **k
     return os_profile, os_model
 
 
-def _percentile_normalize(images, pct=0.75):
+def _percentile_normalize(images, pct=75):
     """percentile normalize a given stacked images
 
     Parameters
@@ -97,7 +97,7 @@ def _percentile_normalize(images, pct=0.75):
     images : array_like
         3-dimensional array with first axis the image index
     pct : float, optional
-        percentile at which the calculate the normalization factor, by default 0.75
+        percentile at which the calculate the normalization factor, by default 75
 
     Returns
     -------
