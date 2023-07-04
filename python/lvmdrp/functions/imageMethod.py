@@ -3076,7 +3076,7 @@ def detrend_frame(
             log.warning(f"master bias '{in_bias}' not found. Using dummy bias")
         mbias_img = Image(data=numpy.zeros_like(org_img._data))
     else:
-        log.info(f"using bias calibration frame '{in_bias}'")
+        log.info(f"using bias calibration frame '{os.path.basename(in_bias)}'")
         mbias_img = loadImage(in_bias)
 
     # read master dark
@@ -3085,7 +3085,7 @@ def detrend_frame(
             log.warning(f"master dark '{in_dark}' not found. Using dummy dark")
         mdark_img = Image(data=numpy.zeros_like(org_img._data))
     else:
-        log.info(f"using dark calibration frame '{in_dark}'")
+        log.info(f"using dark calibration frame '{os.path.basename(in_dark)}'")
         mdark_img = loadImage(in_dark)
 
     # read master flat
@@ -3096,7 +3096,9 @@ def detrend_frame(
             log.warning(f"master flat '{in_pixelflat}' not found. Using dummy flat")
         mflat_img = Image(data=numpy.ones_like(org_img._data))
     else:
-        log.info(f"using pixelflat calibration frame '{in_pixelflat}'")
+        log.info(
+            f"using pixelflat calibration frame '{os.path.basename(in_pixelflat)}'"
+        )
         mflat_img = loadImage(in_pixelflat)
 
     # bias correct image
