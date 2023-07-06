@@ -147,6 +147,10 @@ def trace_fibers(in_file: str, camera: str, expnum: int, tileid: int, mjd: int):
     out_trace = path.full("lvm_cal", drpver=drpver, tileid=tileid, mjd=mjd, camera=camera,
                           expnum=expnum, kind='trace', ext='fits')
 
+    # check for parent dir existence
+    if not pathlib.Path(out_peaks).parent.is_dir():
+        pathlib.Path(out_peaks).parent.mkdir(parents=True, exist_ok=True)
+
     if os.path.exists(out_trace):
         log.info('Trace file already exists.')
         return
@@ -700,8 +704,9 @@ def sort_cals(df: pd.DataFrame) -> pd.DataFrame:
     # check dimensions
     flats = ee.loc['flat']
     flats = flats.to_frame().transpose() if flats.ndim == 1 else flats
-    obj = ee.loc['object']
-    obj = obj.to_frame().transpose() if obj.ndim == 1 else obj
+    if 'object' in imtypes:
+        obj = ee.loc['object']
+        obj = obj.to_frame().transpose() if obj.ndim == 1 else obj
 
     # append flats to end of calibration frames, and build new dataframe
     calibs = pd.concat([ee.loc[['flat', 'arc']], flats]).reset_index(drop=True)
