@@ -1204,7 +1204,12 @@ def match_master_metadata(
     calib_frames = dict.fromkeys(frame_needs)
 
     # extract master calibration frames metadata
-    store = _load_or_create_store(kind="master", mode='r')[0]
+    store = _load_or_create_store(kind="master", mode='r')
+    if not store:
+        log.warning("No master store found.")
+        return {}
+    store = store[0]
+
     if "master" not in store:
         log.warning("no metadata found for master calibration frames")
         return calib_frames
