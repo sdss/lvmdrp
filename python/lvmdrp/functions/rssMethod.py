@@ -185,7 +185,9 @@ def determine_wavelength_solution(in_arc: str, out_wave: str, out_lsf: str, in_r
                 file_in, dtype=float, unpack=True
             )
         use_line = use_line.astype(bool)
-        log.info(f"number of guess lines in file {pixel.size} percentage masked {(~use_line).sum() / pixel.size * 100: g} %")
+        log.info(
+            f"number of guess lines in file {pixel.size} percentage masked {(~use_line).sum() / pixel.size * 100: g} %"
+        )
 
         pixel = pixel[use_line]
         ref_lines = ref_lines[use_line]
@@ -208,9 +210,15 @@ def determine_wavelength_solution(in_arc: str, out_wave: str, out_lsf: str, in_r
     log.info(f"reading arc from '{in_arc}'")
     arc = FiberRows()  # create object
     arc.loadFitsData(in_arc)  # load data
+
+    # replace NaNs
+    mask_nan = numpy.isnan(arc._data)
+    arc._data[mask_nan] = 0
+    arc._error[mask_nan] = 0
+
     if negative:
         log.info("flipping arc along flux direction")
-        arc = -1 * arc + numpy.median(arc._data)
+        arc = -1 * arc + numpy.nanmedian(arc._data)
 
     # apply cc correction to lines if needed
     if cc_correction:
@@ -228,7 +236,7 @@ def determine_wavelength_solution(in_arc: str, out_wave: str, out_lsf: str, in_r
             shifts = shifts[shifts_mask]
             corr = corr[shifts_mask]
 
-        shift = shifts[numpy.argmax(corr)]
+        shift = shifts[numpy.nanargmax(corr)]
         log.info(f"maximum CC {shift = } pix")
     else:
         shift = 0
@@ -265,10 +273,11 @@ def determine_wavelength_solution(in_arc: str, out_wave: str, out_lsf: str, in_r
         log.info("computing fiberflat from measured lines")
         norm_flux = numpy.zeros_like(ref_lines)
         for n in range(len(ref_lines)):
-            norm_flux[n] = numpy.mean(flux[numpy.logical_not(masked[:, n]), n])
-        flat_flux = numpy.mean(flux / norm_flux[numpy.newaxis, :], 1)
+            norm_flux[n] = numpy.nanmean(flux[numpy.logical_not(masked[:, n]), n])
+        flat_flux = numpy.nanmean(flux / norm_flux[numpy.newaxis, :], 1)
         log.info(
-            f"assuming wavelength range [{fiberflat[0]}, {fiberflat[1]}] and sampling {fiberflat[2]} AA")
+            f"assuming wavelength range [{fiberflat[0]}, {fiberflat[1]}] and sampling {fiberflat[2]} AA"
+        )
         wave = numpy.arange(
             float(fiberflat[0]),
             float(fiberflat[1]) + float(fiberflat[2]),
