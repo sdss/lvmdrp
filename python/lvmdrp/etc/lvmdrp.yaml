@@ -4,12 +4,11 @@ reduction_steps:
     default:
       subtract_overscan: true
   find_peaks_auto:
-    nfibers: 638
-    slice: 1500
-    threshold: 0
+    pixel_range: [20, 4000]
+    fibers_dmin: 5
+    threshold: 1.0
     method: hyperbolic
-    median_box: 8
-    median_cross: 1
+    median_box: [1, 10]
   trace_peaks:
     steps: 30
     coadd: 1
@@ -32,6 +31,9 @@ reduction_steps:
       poly_cros: 3
       poly_kinds: ['poly', 'poly', 'poly']
       aperture: 10
+      flux_min: 0.001
+      fwhm_max: 5.0
+      rel_flux_limits: [0.01, 1]
   resample_wave:
     default:
       disp_pix: 1.0
