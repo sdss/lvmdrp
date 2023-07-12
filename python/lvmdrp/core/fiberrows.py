@@ -847,11 +847,11 @@ class FiberRows(Header, PositionTable):
             cent_wave[i, :] = fit[nlines : 2 * nlines]
             fwhm[i, :] = fit[2 * nlines : 3 * nlines] * 2.354
 
-            rel_flux_med = numpy.median(flux[i, :] / ref_flux)
+            rel_flux_med = numpy.nanmedian(flux[i, :] / ref_flux)
             if (
                 rel_flux_med < rel_flux_limits[0]
                 or rel_flux_med > rel_flux_limits[1]
-                or numpy.median(fwhm[i, :]) > fwhm_max
+                or numpy.nanmedian(fwhm[i, :]) > fwhm_max
             ):
                 select = numpy.ones(len(flux[i, :]), dtype="bool")
             else:
@@ -863,7 +863,7 @@ class FiberRows(Header, PositionTable):
                     fwhm[i, :] > fwhm_max,
                 )
 
-            if numpy.sum(select) > 0:
+            if numpy.nansum(select) > 0:
                 cent_wave[i, select] = cent_wave[i + 1, select]
                 fwhm[i, select] = fwhm[i + 1, select]
                 masked[i, select] = True
@@ -891,11 +891,11 @@ class FiberRows(Header, PositionTable):
             cent_wave[i, :] = fit[nlines : 2 * nlines]
             fwhm[i, :] = fit[2 * nlines : 3 * nlines] * 2.354
 
-            rel_flux_med = numpy.median(flux[i, :] / ref_flux)
+            rel_flux_med = numpy.nanmedian(flux[i, :] / ref_flux)
             if (
                 rel_flux_med < rel_flux_limits[0]
                 or rel_flux_med > rel_flux_limits[1]
-                or numpy.median(fwhm[i, :]) > fwhm_max
+                or numpy.nanmedian(fwhm[i, :]) > fwhm_max
             ):
                 select = numpy.ones(len(flux[i, :]), dtype="bool")
             else:
@@ -907,7 +907,7 @@ class FiberRows(Header, PositionTable):
                     fwhm[i, :] > fwhm_max,
                 )
 
-            if numpy.sum(select) > 0:
+            if numpy.nansum(select) > 0:
                 cent_wave[i, select] = cent_wave[i - 1, select]
                 fwhm[i, select] = fwhm[i - 1, select]
                 masked[i, select] = True
