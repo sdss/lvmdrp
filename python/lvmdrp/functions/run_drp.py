@@ -304,8 +304,8 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
     log.info(f'Output calibrated wavelength file: {wout_file}')
 
     # set wavelength resample params
-    CHANNEL_WL = {"b1": (3600, 5930), "r1": (5660, 7720), "z1": (7470, 9800)}
-    wave_range = CHANNEL_WL[camera]
+    CHANNEL_WL = {"b": (3600, 5930), "r": (5660, 7720), "z": (7470, 9800)}
+    wave_range = CHANNEL_WL[camera[0]]
 
     # resample onto a common wavelength
     hout_file = path.full("lvm_anc", kind='h', imagetype=flavor, mjd=mjd, drpver=drpver,
