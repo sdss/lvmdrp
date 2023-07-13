@@ -4,6 +4,7 @@ from multiprocessing import Pool, cpu_count
 from typing import List
 
 import numpy
+import bottleneck as bn
 from astropy.table import Table
 from astropy.io import fits as pyfits
 from astropy.modeling import fitting, models
@@ -111,7 +112,7 @@ def _percentile_normalize(images, pct=75):
     """
     # calculate normalization factor
     pcts = numpy.nanpercentile(images.filled(numpy.nan), pct, axis=(1, 2))
-    norm = numpy.nanmedian(pcts) / pcts
+    norm = bn.nanmedian(pcts) / pcts
 
     return norm[:, None, None] * images, norm
 
@@ -157,8 +158,8 @@ def _bg_subtraction(images, quad_sections, bg_sections):
         bg_array = images[:, xbg, ybg]
         bg_sections.append(bg_array)
         # calculate median and standard deviation BG
-        bg_med = numpy.nanmedian(bg_array.filled(), axis=(1, 2))
-        bg_std = numpy.nanstd(bg_array.filled(), axis=(1, 2))
+        bg_med = bn.nanmedian(bg_array.filled(), axis=(1, 2))
+        bg_std = bn.nanstd(bg_array.filled(), axis=(1, 2))
         # set background sections in corresponding images
         bg_images_med[:, yquad, xquad] = bg_med[:, None, None]
         bg_images_std[:, yquad, xquad] = bg_std[:, None, None]
@@ -901,7 +902,7 @@ class Image(Header):
         )
         overscan = self._data[numpy.logical_not(select)]
         # compute the median of the ovserscan
-        bias_overscan = numpy.nanmedian(overscan)
+        bias_overscan = bn.nanmedian(overscan)
         # get the data of the cut out region
         self._data = self._data[
             int(bound_y[0]) - 1 : int(bound_y[1]), int(bound_x[0]) - 1 : int(bound_x[1])
@@ -1206,7 +1207,7 @@ class Image(Header):
             )
             # compute the masked median within the filter window and replace data
             select = self._mask[range_y[0] : range_y[1], range_x[0] : range_x[1]] == 0
-            out_data[y_cors[m], x_cors[m]] = numpy.nanmedian(
+            out_data[y_cors[m], x_cors[m]] = bn.nanmedian(
                 self._data[range_y[0] : range_y[1], range_x[0] : range_x[1]][select]
             )
             if self._error is not None and replace_error is not None:
@@ -1248,7 +1249,7 @@ class Image(Header):
             try:
                 sky = self.getHdrValue("sky")
             except KeyError:
-                sky = numpy.nanmedian(calibratedImage)
+                sky = bn.nanmedian(calibratedImage)
             # print('Sky Background %s: %.2f Counts' %(filters[filter_select][0],sky))
             calibratedImage = calibratedImage - sky
             error = numpy.sqrt((calibratedImage + sky) / gain + dark_var)
@@ -1580,15 +1581,15 @@ class Image(Header):
             dim = self._dim[1]
         # collapse the image to Spectrum1D object with requested operation
         if mode == "mean":
-            return Spectrum1D(numpy.arange(dim), numpy.nanmean(self._data, axis))
+            return Spectrum1D(numpy.arange(dim), bn.nanmean(self._data, axis))
         elif mode == "sum":
-            return Spectrum1D(numpy.arange(dim), numpy.nansum(self._data, axis))
+            return Spectrum1D(numpy.arange(dim), bn.nansum(self._data, axis))
         elif mode == "median":
-            return Spectrum1D(numpy.arange(dim), numpy.nanmedian(self._data, axis))
+            return Spectrum1D(numpy.arange(dim), bn.nanmedian(self._data, axis))
         elif mode == "min":
-            return Spectrum1D(numpy.arange(dim), numpy.nanmin(self._data, axis))
+            return Spectrum1D(numpy.arange(dim), bn.nanmin(self._data, axis))
         elif mode == "max":
-            return Spectrum1D(numpy.arange(dim), numpy.nanmax(self._data, axis))
+            return Spectrum1D(numpy.arange(dim), bn.nanmax(self._data, axis))
 
     def fitPoly(self, axis="y", order=4, plot=-1):
         """
@@ -1621,7 +1622,7 @@ class Image(Header):
         # setup the base line for the polynomial fitting
         slices = self._dim[1]
         x = numpy.arange(self._dim[0])
-        x = x - numpy.nanmean(x)
+        x = x - bn.nanmean(x)
         # if self._mask is not None:
         #    self._mask = numpy.logical_and(self._mask, numpy.logical_not(numpy.isnan(self._data)))
         valid = ~self._mask.astype("bool")
@@ -1656,7 +1657,7 @@ class Image(Header):
                             self._data[valid[:, i], i][select],
                             "ok",
                         )
-                        max = numpy.nanmax(self._data[valid[:, i], i][select])
+                        max = bn.nanmax(self._data[valid[:, i], i][select])
                     fit_result[:, i] = numpy.polyval(
                         fit_par[:, i], x
                     )  # evalute the polynom
@@ -2520,12 +2521,8 @@ def combineImages(
             stack_mask[i, :, :] = images[i].getMask()
 
     # mask invalid values
-    stack_image = numpy.ma.masked_array(
-        stack_image, mask=stack_mask, fill_value=numpy.nan
-    )
-    stack_error = numpy.ma.masked_array(
-        stack_error, mask=stack_mask, fill_value=numpy.nan
-    )
+    stack_image[stack_mask] = numpy.nan
+    stack_error[stack_mask] = numpy.nan
 
     if background_subtract:
         quad_sections = images[0].getHdrValues("AMP? TRIMSEC")
@@ -2544,32 +2541,30 @@ def combineImages(
 
     # combine the images according to the selected method
     if method == "median":
-        new_image = numpy.nanmedian(stack_image.filled(), 0)
-        new_error = numpy.sqrt(numpy.nanmedian(stack_error.filled() ** 2, 0))
+        new_image = bn.nanmedian(stack_image, 0)
+        new_error = numpy.sqrt(bn.nanmedian(stack_error ** 2, 0))
     elif method == "sum":
-        new_image = numpy.nansum(stack_image.filled(), 0)
-        new_error = numpy.sqrt(numpy.nansum(stack_error.filled() ** 2, 0))
+        new_image = bn.nansum(stack_image, 0)
+        new_error = numpy.sqrt(bn.nansum(stack_error ** 2, 0))
     elif method == "mean":
-        new_image = numpy.nanmean(stack_image.filled(), 0)
-        new_error = numpy.sqrt(numpy.nanmean(stack_error.filled() ** 2, 0))
+        new_image = bn.nanmean(stack_image, 0)
+        new_error = numpy.sqrt(bn.nanmean(stack_error ** 2, 0))
     elif method == "clipped_median":
-        median = numpy.nanmedian(stack_image.filled(), 0)
-        rms = numpy.nanstd(stack_image.filled(), 0)
+        median = bn.nanmedian(stack_image, 0)
+        rms = bn.nanstd(stack_image, 0)
         # select pixels within given sigma limits around the median
-        select = (stack_image.filled() < median + k * rms) & (
-            stack_image.filled() > median - k * rms
+        select = (stack_image < median + k * rms) & (
+            stack_image > median - k * rms
         )
         # compute the number of good pixels
-        good_pixels = numpy.nansum(select, 0).astype(bool)
+        good_pixels = bn.nansum(select, 0).astype(bool)
         # set all bad pixel to 0 to compute the mean
         # TODO: make this optional, by default not replacement
         stack_image[:, ~good_pixels] = 0
-        new_image = numpy.nansum(stack_image.filled(), 0) / good_pixels
+        new_image = bn.nansum(stack_image, 0) / good_pixels
 
     # return new image and error to normal array
     new_mask = numpy.all(stack_mask, 0)
-    new_image = new_image
-    new_error = new_error
 
     # mask bad pixels
     new_mask = new_mask | numpy.isnan(new_image) | numpy.isnan(new_error)
