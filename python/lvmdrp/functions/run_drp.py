@@ -906,7 +906,7 @@ def read_fibermap(as_table: bool = None, as_hdu: bool = None) -> Union[pd.DataFr
         return
 
     with open(p, 'r') as f:
-        data = yaml.safe_load(f)
+        data = yaml.load(f, Loader=yaml.CSafeLoader)
         cols = [i['name'] for i in data['schema']]
         df = pd.DataFrame(data['fibers'], columns=cols)
         if as_table:
