@@ -3328,12 +3328,6 @@ def create_master_frame(in_images: list, out_image: str, force_master: bool = Tr
             org_imgs, method="median", normalize=True, normalize_percentile=75
         )
 
-    log.info(f"updating header for new master frame '{out_image}'")
-    # TODO:
-    # * add binary table with columns: MJD, EXPNUM, SPEC, CHANNEL, EXPTIME
-    master_img._header["ISMASTER"] = (nexp > 1, "Is this a combined (master) frame")
-    master_img._header["NFRAMES"] = (nexp, "Number of exposures combined")
-
     log.info(f"writing master image to '{os.path.basename(out_image)}'")
     master_img.writeFitsData(out_image)
 
