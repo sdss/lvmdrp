@@ -15,7 +15,7 @@ from setuptools import find_packages, setup
 # The NAME variable should be of the format "sdss-drp".
 # Please check your NAME adheres to that format.
 NAME = "lvmdrp"
-VERSION = "0.1.0"
+VERSION = "0.1.1dev"
 
 
 def run(packages, install_requires):
