@@ -18,7 +18,7 @@ from tqdm import tqdm
 
 from typing import List
 
-from lvmdrp.core.fiberrows import FiberRows
+from lvmdrp.core.fiberrows import FiberRows, _read_fiber_ypix
 from lvmdrp.core.image import (
     Image,
     _parse_ccd_section,
@@ -735,6 +735,7 @@ def addCCDMask_drp(image, mask, replaceError="1e10"):
 def find_peaks_auto(
     in_image: str,
     out_peaks: str,
+    out_region: str = None,
     slice: int = None,
     pixel_range: List[int] = [0, 4080],
     fibers_dmin: int = 5,
@@ -828,25 +829,31 @@ def find_peaks_auto(
     # round the subpixel peak positions to their nearest integer value
     round_cent = numpy.round(centers).astype(int)
     log.info(f"final number of fibers found {len(round_cent)}")
-    # write number of peaks and their position to an ASCII file NEED TO BE REPLACE WITH XML OUTPUT
-    file_out = open(out_peaks, "w")
-    file_out.write("%i\n" % (column))
-    for i in range(len(centers)):
-        file_out.write("%i %i %e %i\n" % (i, round_cent[i], centers[i], 0))
-    file_out.close()
+    
+    # write number of peaks and their position
+    log.info(f"writing {os.path.basename(out_peaks)}")
+    columns = [
+        pyfits.Column(name="FIBER", format="I", array=numpy.arange(centers.size)),
+        pyfits.Column(name="PIXEL", format="I", array=round_cent),
+        pyfits.Column(name="SUBPIX", format="D", array=centers),
+        pyfits.Column(name="QUALITY", format="I", array=numpy.zeros_like(centers)),
+    ]
+    table = pyfits.BinTableHDU().from_columns(columns)
+    table.header["XPIX"] = (column, "X coordinate of the fibers [pix]")
+    table.writeto(out_peaks, overwrite=True)
     # write .reg file for ds9
-    file_out = open(out_peaks.replace(".txt", f"-{column}.reg"), "w")
-    file_out.write("# Region file format: DS9 version 4.1\n")
-    file_out.write(
-        'global color=green dashlist=8 3 width=1 font="helvetica 10 normal roman" select=1 highlite=1 dash=0 fixed=0 edit=1 move=1 delete=1 include=1 source=1\n'
-    )
-    file_out.write("physical\n")
-    for i in range(len(centers)):
-        file_out.write(
-            "# text(%.4f,%.4f) text={%i, %i}\n"
-            % (column, centers[i], i + 1, round_cent[i])
-        )
-    file_out.close()
+    if out_region is not None:
+        with open(out_region, "w") as reg_out:
+            reg_out.write("# Region file format: DS9 version 4.1\n")
+            reg_out.write(
+                'global color=green dashlist=8 3 width=1 font="helvetica 10 normal roman" select=1 highlite=1 dash=0 fixed=0 edit=1 move=1 delete=1 include=1 source=1\n'
+            )
+            reg_out.write("physical\n")
+            for i in range(len(centers)):
+                reg_out.write(
+                    "# text(%.4f,%.4f) text={%i, %i}\n"
+                    % (column, centers[i], i + 1, round_cent[i])
+                )
 
     # plot figure
     fig, ax = create_subplots(to_display=display_plots, figsize=(15, 10))
@@ -1361,20 +1368,8 @@ def trace_peaks(
         )  # adjust the minimum contrast threshold for the peaks
 
     # load the initial positions of the fibers at a certain column NEED TO BE REPLACED WITH XML handling
-    file_in_peaks = open(in_peaks, "r")  # load file
-    lines = file_in_peaks.readlines()  # read lines
-    column = int(
-        lines[0]
-    )  # read the pixel column of the initially measured fiber positions as a starting value
-    fibers = len(lines) - 1  # number of fibers
-    positions = numpy.zeros(
-        fibers, dtype=numpy.float32
-    )  # empty array to store positions
-    bad_fibers = numpy.zeros(fibers, dtype="bool")  # empty array to store positions
-    for i in range(1, fibers + 1):
-        line = lines[i].split()
-        positions[i - 1] = float(line[2])
-        bad_fibers[i - 1] = bool(int(line[3]))
+    column, _, _, positions, bad_fibers = _read_fiber_ypix(in_peaks)
+    fibers = positions.size
     good_fibers = numpy.logical_not(bad_fibers)
     # choose between  methods to measure the subpixel peak
     if method == "hyperbolic":
@@ -3327,12 +3322,6 @@ def create_master_frame(in_images: list, out_image: str, force_master: bool = Tr
         master_img = combineImages(
             org_imgs, method="median", normalize=True, normalize_percentile=75
         )
-
-    log.info(f"updating header for new master frame '{out_image}'")
-    # TODO:
-    # * add binary table with columns: MJD, EXPNUM, SPEC, CHANNEL, EXPTIME
-    master_img._header["ISMASTER"] = (nexp > 1, "Is this a combined (master) frame")
-    master_img._header["NFRAMES"] = (nexp, "Number of exposures combined")
 
     log.info(f"writing master image to '{os.path.basename(out_image)}'")
     master_img.writeFitsData(out_image)

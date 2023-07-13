@@ -1,9 +1,11 @@
 from copy import deepcopy as copy
 from multiprocessing import Pool, cpu_count
 
-from typing import List, Optional, Tuple, Union
+from typing import List
 
 import numpy
+import bottleneck as bn
+from astropy.table import Table
 from astropy.io import fits as pyfits
 from astropy.modeling import fitting, models
 from astropy.stats.biweight import biweight_location
@@ -109,8 +111,8 @@ def _percentile_normalize(images, pct=75):
         vector containing normalization factors for each image
     """
     # calculate normalization factor
-    pcts = numpy.nanpercentile(images.filled(numpy.nan), pct, axis=(1, 2))
-    norm = numpy.nanmedian(pcts) / pcts
+    pcts = numpy.nanpercentile(images, pct, axis=(1, 2))
+    norm = bn.nanmedian(pcts) / pcts
 
     return norm[:, None, None] * images, norm
 
@@ -156,8 +158,8 @@ def _bg_subtraction(images, quad_sections, bg_sections):
         bg_array = images[:, xbg, ybg]
         bg_sections.append(bg_array)
         # calculate median and standard deviation BG
-        bg_med = numpy.nanmedian(bg_array.filled(), axis=(1, 2))
-        bg_std = numpy.nanstd(bg_array.filled(), axis=(1, 2))
+        bg_med = bn.nanmedian(bg_array, axis=(1, 2))
+        bg_std = bn.nanstd(bg_array, axis=(1, 2))
         # set background sections in corresponding images
         bg_images_med[:, yquad, xquad] = bg_med[:, None, None]
         bg_images_std[:, yquad, xquad] = bg_std[:, None, None]
@@ -169,7 +171,7 @@ def _bg_subtraction(images, quad_sections, bg_sections):
 
 
 class Image(Header):
-    def __init__(self, data=None, header=None, mask=None, error=None, origin=None):
+    def __init__(self, data=None, header=None, mask=None, error=None, origin=None, individual_frames=None):
         Header.__init__(self, header=header, origin=origin)
         self._data = data
         if self._data is not None:
@@ -179,6 +181,8 @@ class Image(Header):
         self._mask = mask
         self._error = error
         self._origin = origin
+        # individual frames that went into the master creation
+        self._individual_frames = individual_frames
 
     def __add__(self, other):
         """
@@ -898,7 +902,7 @@ class Image(Header):
         )
         overscan = self._data[numpy.logical_not(select)]
         # compute the median of the ovserscan
-        bias_overscan = numpy.nanmedian(overscan)
+        bias_overscan = bn.nanmedian(overscan)
         # get the data of the cut out region
         self._data = self._data[
             int(bound_y[0]) - 1 : int(bound_y[1]), int(bound_x[0]) - 1 : int(bound_x[1])
@@ -1006,6 +1010,7 @@ class Image(Header):
         extension_data=None,
         extension_mask=None,
         extension_error=None,
+        extension_frames=None,
         extension_header=0,
     ):
         """
@@ -1035,6 +1040,7 @@ class Image(Header):
             extension_data is None
             and extension_mask is None
             and extension_error is None
+            and extension_frames is None
         ):
             self._data = hdu[0].data
             self._dim = self._data.shape  # set dimension
@@ -1044,6 +1050,8 @@ class Image(Header):
                         self._error = hdu[i].data
                     elif hdu[i].header["EXTNAME"].split()[0] == "BADPIX":
                         self._mask = hdu[i].data.astype("bool")
+                    elif hdu[i].header["EXTNAME"].split()[0] == "FRAMES":
+                        self._individual_frames = Table(hdu[i].data)
 
         else:
             if extension_data is not None:
@@ -1057,16 +1065,18 @@ class Image(Header):
             if extension_error is not None:
                 self._error = hdu[extension_error].data  # take data
                 self._dim = self._error.shape  # set dimension
+            if extension_frames is not None:
+                self._individual_frames = Table(hdu[extension_frames].data)
 
         # set is_masked attribute
         self.is_masked = numpy.isnan(self._data).any()
 
-        # get header  from the first FITS extension
+        # get header from the first FITS extension
         self.setHeader(hdu[extension_header].header)
         hdu.close()
 
     def writeFitsData(
-        self, filename, extension_data=None, extension_mask=None, extension_error=None
+        self, filename, extension_data=None, extension_mask=None, extension_error=None, extension_frames=None
     ):
         """
         Save information from an Image into a FITS file. A single or multiple extension file can be created.
@@ -1083,7 +1093,7 @@ class Image(Header):
         extension_error : int (0, 1, or 2), optional with default: None
             Number of the FITS extension containing the errors for the values
         """
-        hdus = [None, None, None]  # create empty list for hdu storage
+        hdus = [None, None, None, None]  # create empty list for hdu storage
 
         # create primary hdus and image hdus
         # data hdu
@@ -1091,12 +1101,15 @@ class Image(Header):
             extension_data is None
             and extension_error is None
             and extension_mask is None
+            and extension_frames is None
         ):
             hdus[0] = pyfits.PrimaryHDU(self._data)
             if self._error is not None:
                 hdus[1] = pyfits.ImageHDU(self._error, name="ERROR")
             if self._mask is not None:
                 hdus[2] = pyfits.ImageHDU(self._mask.astype("uint8"), name="BADPIX")
+            if self._individual_frames is not None:
+                hdus[3] = pyfits.BinTableHDU(self._individual_frames, name="FRAMES")
         else:
             if extension_data == 0:
                 hdus[0] = pyfits.PrimaryHDU(self._data)
@@ -1116,6 +1129,12 @@ class Image(Header):
                 hdu = pyfits.PrimaryHDU(self._error)
             elif extension_error > 0 and extension_error is not None:
                 hdus[extension_error] = pyfits.ImageHDU(self._error, name="ERROR")
+            
+            # frames hdu
+            if extension_frames == 0:
+                hdu = pyfits.PrimaryHDU(self._individual_frames)
+            elif extension_frames > 0 and extension_frames is not None:
+                hdus[extension_frames] = pyfits.BinTableHDU(self._individual_frames, name="FRAMES")
 
         # remove not used hdus
         for i in range(len(hdus)):
@@ -1188,7 +1207,7 @@ class Image(Header):
             )
             # compute the masked median within the filter window and replace data
             select = self._mask[range_y[0] : range_y[1], range_x[0] : range_x[1]] == 0
-            out_data[y_cors[m], x_cors[m]] = numpy.nanmedian(
+            out_data[y_cors[m], x_cors[m]] = bn.nanmedian(
                 self._data[range_y[0] : range_y[1], range_x[0] : range_x[1]][select]
             )
             if self._error is not None and replace_error is not None:
@@ -1230,7 +1249,7 @@ class Image(Header):
             try:
                 sky = self.getHdrValue("sky")
             except KeyError:
-                sky = numpy.nanmedian(calibratedImage)
+                sky = bn.nanmedian(calibratedImage)
             # print('Sky Background %s: %.2f Counts' %(filters[filter_select][0],sky))
             calibratedImage = calibratedImage - sky
             error = numpy.sqrt((calibratedImage + sky) / gain + dark_var)
@@ -1562,15 +1581,15 @@ class Image(Header):
             dim = self._dim[1]
         # collapse the image to Spectrum1D object with requested operation
         if mode == "mean":
-            return Spectrum1D(numpy.arange(dim), numpy.nanmean(self._data, axis))
+            return Spectrum1D(numpy.arange(dim), bn.nanmean(self._data, axis))
         elif mode == "sum":
-            return Spectrum1D(numpy.arange(dim), numpy.nansum(self._data, axis))
+            return Spectrum1D(numpy.arange(dim), bn.nansum(self._data, axis))
         elif mode == "median":
-            return Spectrum1D(numpy.arange(dim), numpy.nanmedian(self._data, axis))
+            return Spectrum1D(numpy.arange(dim), bn.nanmedian(self._data, axis))
         elif mode == "min":
-            return Spectrum1D(numpy.arange(dim), numpy.nanmin(self._data, axis))
+            return Spectrum1D(numpy.arange(dim), bn.nanmin(self._data, axis))
         elif mode == "max":
-            return Spectrum1D(numpy.arange(dim), numpy.nanmax(self._data, axis))
+            return Spectrum1D(numpy.arange(dim), bn.nanmax(self._data, axis))
 
     def fitPoly(self, axis="y", order=4, plot=-1):
         """
@@ -1603,7 +1622,7 @@ class Image(Header):
         # setup the base line for the polynomial fitting
         slices = self._dim[1]
         x = numpy.arange(self._dim[0])
-        x = x - numpy.nanmean(x)
+        x = x - bn.nanmean(x)
         # if self._mask is not None:
         #    self._mask = numpy.logical_and(self._mask, numpy.logical_not(numpy.isnan(self._data)))
         valid = ~self._mask.astype("bool")
@@ -1638,7 +1657,7 @@ class Image(Header):
                             self._data[valid[:, i], i][select],
                             "ok",
                         )
-                        max = numpy.nanmax(self._data[valid[:, i], i][select])
+                        max = bn.nanmax(self._data[valid[:, i], i][select])
                     fit_result[:, i] = numpy.polyval(
                         fit_par[:, i], x
                     )  # evalute the polynom
@@ -2340,6 +2359,21 @@ class Image(Header):
 
         return select
 
+    def getIndividualFrames(self):
+        return self._individual_frames
+
+    def setIndividualFrames(self, images):
+        self._individual_frames = Table(names=["TILEID", "MJD", "EXPNUM", "SPEC", "CAMERA", "EXPTIME"], dtype=(int, int, int, str, str, float))
+        for img in images:
+            self._individual_frames.add_row([
+                img._header.get("TILEID", 1111),
+                img._header.get("MJD"),
+                img._header.get("EXPOSURE"),
+                img._header.get("SPEC"),
+                img._header.get("CCD"),
+                img._header.get("EXPTIME"),
+            ])
+
 
 def loadImage(
     infile,
@@ -2487,12 +2521,8 @@ def combineImages(
             stack_mask[i, :, :] = images[i].getMask()
 
     # mask invalid values
-    stack_image = numpy.ma.masked_array(
-        stack_image, mask=stack_mask, fill_value=numpy.nan
-    )
-    stack_error = numpy.ma.masked_array(
-        stack_error, mask=stack_mask, fill_value=numpy.nan
-    )
+    stack_image[stack_mask] = numpy.nan
+    stack_error[stack_mask] = numpy.nan
 
     if background_subtract:
         quad_sections = images[0].getHdrValues("AMP? TRIMSEC")
@@ -2511,50 +2541,54 @@ def combineImages(
 
     # combine the images according to the selected method
     if method == "median":
-        new_image = numpy.nanmedian(stack_image.filled(), 0)
-        new_error = numpy.sqrt(numpy.nanmedian(stack_error.filled() ** 2, 0))
+        new_image = bn.nanmedian(stack_image, 0)
+        new_error = numpy.sqrt(bn.nanmedian(stack_error ** 2, 0))
     elif method == "sum":
-        new_image = numpy.nansum(stack_image.filled(), 0)
-        new_error = numpy.sqrt(numpy.nansum(stack_error.filled() ** 2, 0))
+        new_image = bn.nansum(stack_image, 0)
+        new_error = numpy.sqrt(bn.nansum(stack_error ** 2, 0))
     elif method == "mean":
-        new_image = numpy.nanmean(stack_image.filled(), 0)
-        new_error = numpy.sqrt(numpy.nanmean(stack_error.filled() ** 2, 0))
+        new_image = bn.nanmean(stack_image, 0)
+        new_error = numpy.sqrt(bn.nanmean(stack_error ** 2, 0))
     elif method == "clipped_median":
-        median = numpy.nanmedian(stack_image.filled(), 0)
-        rms = numpy.nanstd(stack_image.filled(), 0)
+        median = bn.nanmedian(stack_image, 0)
+        rms = bn.nanstd(stack_image, 0)
         # select pixels within given sigma limits around the median
-        select = (stack_image.filled() < median + k * rms) & (
-            stack_image.filled() > median - k * rms
+        select = (stack_image < median + k * rms) & (
+            stack_image > median - k * rms
         )
         # compute the number of good pixels
-        good_pixels = numpy.nansum(select, 0).astype(bool)
+        good_pixels = bn.nansum(select, 0).astype(bool)
         # set all bad pixel to 0 to compute the mean
         # TODO: make this optional, by default not replacement
         stack_image[:, ~good_pixels] = 0
-        new_image = numpy.nansum(stack_image.filled(), 0) / good_pixels
+        new_image = bn.nansum(stack_image, 0) / good_pixels
 
     # return new image and error to normal array
     new_mask = numpy.all(stack_mask, 0)
-    new_image = new_image
-    new_error = new_error
 
     # mask bad pixels
     new_mask = new_mask | numpy.isnan(new_image) | numpy.isnan(new_error)
 
-    # TODO: add new header keywords:
-    #   - NCOMBINE: number of frames combined
-    #   - STATCOMB: statistic used to combine
-    #   - table HDU conataining basic metadata from the individual images
+    # define new header
     if images[0]._header is not None:
         new_header = images[0]._header
+
+        nexp = len(images)
+        new_header["ISMASTER"] = (nexp > 1, "Is this a combined (master) frame")
+        new_header["NFRAMES"] = (nexp, "Number of exposures combined")
+        new_header["STATCOMB"] = (method, "Statistic used to combine images")
     else:
         new_header = None
 
+    # create combined image
     combined_image = Image(
         data=new_image, error=new_error, mask=new_mask, header=new_header
     )
-
+    # update masked pixels if needed
     if replace_with_nan:
         combined_image.apply_pixelmask()
+
+    # add metadata of individual images
+    combined_image.setIndividualFrames(images)
 
     return combined_image
