@@ -18,7 +18,7 @@ from tqdm import tqdm
 
 from typing import List
 
-from lvmdrp.core.fiberrows import FiberRows
+from lvmdrp.core.fiberrows import FiberRows, _read_fiber_ypix
 from lvmdrp.core.image import (
     Image,
     _parse_ccd_section,
@@ -1368,20 +1368,8 @@ def trace_peaks(
         )  # adjust the minimum contrast threshold for the peaks
 
     # load the initial positions of the fibers at a certain column NEED TO BE REPLACED WITH XML handling
-    file_in_peaks = open(in_peaks, "r")  # load file
-    lines = file_in_peaks.readlines()  # read lines
-    column = int(
-        lines[0]
-    )  # read the pixel column of the initially measured fiber positions as a starting value
-    fibers = len(lines) - 1  # number of fibers
-    positions = numpy.zeros(
-        fibers, dtype=numpy.float32
-    )  # empty array to store positions
-    bad_fibers = numpy.zeros(fibers, dtype="bool")  # empty array to store positions
-    for i in range(1, fibers + 1):
-        line = lines[i].split()
-        positions[i - 1] = float(line[2])
-        bad_fibers[i - 1] = bool(int(line[3]))
+    column, _, _, positions, bad_fibers = _read_fiber_ypix(in_peaks)
+    fibers = positions.size
     good_fibers = numpy.logical_not(bad_fibers)
     # choose between  methods to measure the subpixel peak
     if method == "hyperbolic":
