@@ -829,7 +829,7 @@ def find_peaks_auto(
     # round the subpixel peak positions to their nearest integer value
     round_cent = numpy.round(centers).astype(int)
     log.info(f"final number of fibers found {len(round_cent)}")
-    
+
     # write number of peaks and their position
     log.info(f"writing {os.path.basename(out_peaks)}")
     columns = [

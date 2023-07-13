@@ -145,7 +145,7 @@ def trace_fibers(in_file: str, camera: str, expnum: int, tileid: int, mjd: int):
     # or maybe the "kind" keyword is changed to "mpeaks" or "mtrace"
 
     out_peaks = path.full("lvm_cal", drpver=drpver, tileid=tileid, mjd=mjd, camera=camera,
-                          expnum=expnum, kind='peaks', ext='txt')
+                          expnum=expnum, kind='peaks', ext='fits')
     out_trace = path.full("lvm_cal", drpver=drpver, tileid=tileid, mjd=mjd, camera=camera,
                           expnum=expnum, kind='trace', ext='fits')
 
