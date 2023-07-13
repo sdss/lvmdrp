@@ -1,9 +1,10 @@
 from copy import deepcopy as copy
 from multiprocessing import Pool, cpu_count
 
-from typing import List, Optional, Tuple, Union
+from typing import List
 
 import numpy
+from astropy.table import Table
 from astropy.io import fits as pyfits
 from astropy.modeling import fitting, models
 from astropy.stats.biweight import biweight_location
@@ -169,7 +170,7 @@ def _bg_subtraction(images, quad_sections, bg_sections):
 
 
 class Image(Header):
-    def __init__(self, data=None, header=None, mask=None, error=None, origin=None):
+    def __init__(self, data=None, header=None, mask=None, error=None, origin=None, individual_frames=None):
         Header.__init__(self, header=header, origin=origin)
         self._data = data
         if self._data is not None:
@@ -179,6 +180,8 @@ class Image(Header):
         self._mask = mask
         self._error = error
         self._origin = origin
+        # individual frames that went into the master creation
+        self._individual_frames = individual_frames
 
     def __add__(self, other):
         """
@@ -1006,6 +1009,7 @@ class Image(Header):
         extension_data=None,
         extension_mask=None,
         extension_error=None,
+        extension_frames=None,
         extension_header=0,
     ):
         """
@@ -1035,6 +1039,7 @@ class Image(Header):
             extension_data is None
             and extension_mask is None
             and extension_error is None
+            and extension_frames is None
         ):
             self._data = hdu[0].data
             self._dim = self._data.shape  # set dimension
@@ -1044,6 +1049,8 @@ class Image(Header):
                         self._error = hdu[i].data
                     elif hdu[i].header["EXTNAME"].split()[0] == "BADPIX":
                         self._mask = hdu[i].data.astype("bool")
+                    elif hdu[i].header["EXTNAME"].split()[0] == "FRAMES":
+                        self._individual_frames = Table(hdu[i].data)
 
         else:
             if extension_data is not None:
@@ -1057,16 +1064,18 @@ class Image(Header):
             if extension_error is not None:
                 self._error = hdu[extension_error].data  # take data
                 self._dim = self._error.shape  # set dimension
+            if extension_frames is not None:
+                self._individual_frames = Table(hdu[extension_frames].data)
 
         # set is_masked attribute
         self.is_masked = numpy.isnan(self._data).any()
 
-        # get header  from the first FITS extension
+        # get header from the first FITS extension
         self.setHeader(hdu[extension_header].header)
         hdu.close()
 
     def writeFitsData(
-        self, filename, extension_data=None, extension_mask=None, extension_error=None
+        self, filename, extension_data=None, extension_mask=None, extension_error=None, extension_frames=None
     ):
         """
         Save information from an Image into a FITS file. A single or multiple extension file can be created.
@@ -1083,7 +1092,7 @@ class Image(Header):
         extension_error : int (0, 1, or 2), optional with default: None
             Number of the FITS extension containing the errors for the values
         """
-        hdus = [None, None, None]  # create empty list for hdu storage
+        hdus = [None, None, None, None]  # create empty list for hdu storage
 
         # create primary hdus and image hdus
         # data hdu
@@ -1091,12 +1100,15 @@ class Image(Header):
             extension_data is None
             and extension_error is None
             and extension_mask is None
+            and extension_frames is None
         ):
             hdus[0] = pyfits.PrimaryHDU(self._data)
             if self._error is not None:
                 hdus[1] = pyfits.ImageHDU(self._error, name="ERROR")
             if self._mask is not None:
                 hdus[2] = pyfits.ImageHDU(self._mask.astype("uint8"), name="BADPIX")
+            if self._individual_frames is not None:
+                hdus[3] = pyfits.BinTableHDU(self._individual_frames, name="FRAMES")
         else:
             if extension_data == 0:
                 hdus[0] = pyfits.PrimaryHDU(self._data)
@@ -1116,6 +1128,12 @@ class Image(Header):
                 hdu = pyfits.PrimaryHDU(self._error)
             elif extension_error > 0 and extension_error is not None:
                 hdus[extension_error] = pyfits.ImageHDU(self._error, name="ERROR")
+            
+            # frames hdu
+            if extension_frames == 0:
+                hdu = pyfits.PrimaryHDU(self._individual_frames)
+            elif extension_frames > 0 and extension_frames is not None:
+                hdus[extension_frames] = pyfits.BinTableHDU(self._individual_frames, name="FRAMES")
 
         # remove not used hdus
         for i in range(len(hdus)):
@@ -2340,6 +2358,21 @@ class Image(Header):
 
         return select
 
+    def getIndividualFrames(self):
+        return self._individual_frames
+
+    def setIndividualFrames(self, images):
+        self._individual_frames = Table(names=["TILEID", "MJD", "EXPNUM", "SPEC", "CAMERA", "EXPTIME"], dtype=(int, int, int, str, str, float))
+        for img in images:
+            self._individual_frames.add_row([
+                img._header.get("TILEID", 1111),
+                img._header.get("MJD"),
+                img._header.get("EXPOSURE"),
+                img._header.get("SPEC"),
+                img._header.get("CCD"),
+                img._header.get("EXPTIME"),
+            ])
+
 
 def loadImage(
     infile,
@@ -2541,20 +2574,26 @@ def combineImages(
     # mask bad pixels
     new_mask = new_mask | numpy.isnan(new_image) | numpy.isnan(new_error)
 
-    # TODO: add new header keywords:
-    #   - NCOMBINE: number of frames combined
-    #   - STATCOMB: statistic used to combine
-    #   - table HDU conataining basic metadata from the individual images
+    # define new header
     if images[0]._header is not None:
         new_header = images[0]._header
+
+        nexp = len(images)
+        new_header["ISMASTER"] = (nexp > 1, "Is this a combined (master) frame")
+        new_header["NFRAMES"] = (nexp, "Number of exposures combined")
+        new_header["STATCOMB"] = (method, "Statistic used to combine images")
     else:
         new_header = None
 
+    # create combined image
     combined_image = Image(
         data=new_image, error=new_error, mask=new_mask, header=new_header
     )
-
+    # update masked pixels if needed
     if replace_with_nan:
         combined_image.apply_pixelmask()
+
+    # add metadata of individual images
+    combined_image.setIndividualFrames(images)
 
     return combined_image
