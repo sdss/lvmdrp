@@ -7,6 +7,20 @@ from lvmdrp.core.positionTable import PositionTable
 from lvmdrp.core.spectrum1d import Spectrum1D
 
 
+def _read_fiber_ypix(peaks_file):
+    """
+    Read peaks file and return the fiber number, pixel position, subpixel position
+    and quality flag.
+    """
+    peaks = pyfits.open(peaks_file)
+    xpos = peaks[1].header["XPIX"]
+    fiber = peaks[1].data["FIBER"]
+    pixel = peaks[1].data["PIXEL"]
+    subpix = peaks[1].data["SUBPIX"]
+    qual = peaks[1].data["QUALITY"].astype(bool)
+    return xpos, fiber, pixel, subpix, qual
+
+
 class FiberRows(Header, PositionTable):
     def __init__(
         self,
