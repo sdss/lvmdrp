@@ -171,11 +171,10 @@ def trace_fibers(in_file: str, camera: str, expnum: int, tileid: int, mjd: int):
 
     # TODO
     # add new function to trace the width
-    # this only runs for full reductions at Utah
     # output of this file goes into extract_spectra
-    # add new config / cli option for quick redux flag
-    # if something_says_full:
-    #    trace_peaks(new config )
+    # trace widths only for full reductions
+    if not config.get('quick'):
+        pass
 
 
 def find_file(kind, camera=None, mjd=None, tileid=None):
@@ -544,11 +543,11 @@ def reduce_set(frame: pd.DataFrame, settype: str = None, flavor: str = None):
         pass
 
 
-
 def run_drp(mjd: Union[int, str, list], bias: bool = False, dark: bool = False,
             skip_bd: bool = False, arc: bool = False, flat: bool = False,
             only_bd: bool = False, only_cal: bool = False, only_sci: bool = False,
-            spec: int = None, camera: str = None, expnum: Union[int, str, list] = None):
+            spec: int = None, camera: str = None, expnum: Union[int, str, list] = None,
+            quick: bool = False):
     """ Run the LVM DRP
 
     Run the LVM data reduction pipeline on.  Optionally set flags
@@ -565,6 +564,10 @@ def run_drp(mjd: Union[int, str, list], bias: bool = False, dark: bool = False,
     skip_bd : bool, optional
         Flag to skip reduction of bias/darks
     """
+    # update the quick redux flag if necessary
+    if not config.get('quick') and quick:
+        config['quick'] = quick
+
     # write the drp parameter configuration
     write_config_file()
 
@@ -574,7 +577,7 @@ def run_drp(mjd: Union[int, str, list], bias: bool = False, dark: bool = False,
         for mjd in mjds:
             run_drp(mjd=mjd, bias=bias, dark=dark, skip_bd=skip_bd, arc=arc, flat=flat,
                     only_bd=only_bd, only_cal=only_cal, only_sci=only_sci, spec=spec, camera=camera,
-                    expnum=expnum)
+                    expnum=expnum, quick=quick)
         return
 
     log.info(f'Processing MJD {mjd}')

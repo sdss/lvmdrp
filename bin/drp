@@ -32,11 +32,12 @@ def cli():
 @click.option('-e', '--expnum', type=int, help='an exposure number to reduce')
 @click.option('-el', '--exp-list', type=int, multiple=True, help='a list of specific exposures to reduce')
 @click.option('-er', '--exp-range', type=str, help='a range of exposure numbers to reduce')
+@click.option('-q', '--quick', is_flag=True, default=False, help='Flag for quick reductions only')
 @cloup.constraint(mutually_exclusive, ['mjd', 'mjd_list', 'mjd_range'])
 @cloup.constraint(RequireExactly(1), ['mjd', 'mjd_list', 'mjd_range'])
 @cloup.constraint(mutually_exclusive, ['expnum', 'exp_list', 'exp_range'])
 def run(mjd, mjd_list, mjd_range, skip_bd, arc, flat, only_bd, only_cal, only_sci, camera, spec,
-        expnum, exp_list, exp_range):
+        expnum, exp_list, exp_range, quick):
     """ Run the DRP reduction for a given MJD or range of MJDs
 
     Run the DRP for an MJD or range of MJDs.  Various flags and options are available
@@ -48,7 +49,7 @@ def run(mjd, mjd_list, mjd_range, skip_bd, arc, flat, only_bd, only_cal, only_sc
     expnum = expnum or exp_list or exp_range
     run_drp(mjd=mjd, flat=flat, arc=arc, skip_bd=skip_bd, only_bd=only_bd,
             only_cal=only_cal, only_sci=only_sci, camera=camera, spec=spec,
-            expnum=expnum)
+            expnum=expnum, quick=quick)
 
 cli.add_command(run)
 

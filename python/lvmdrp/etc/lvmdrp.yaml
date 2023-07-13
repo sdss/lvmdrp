@@ -1,4 +1,5 @@
 
+quick: false
 reduction_steps:
   preproc_raw_frame:
     default:
