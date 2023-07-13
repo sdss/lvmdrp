@@ -111,7 +111,7 @@ def _percentile_normalize(images, pct=75):
         vector containing normalization factors for each image
     """
     # calculate normalization factor
-    pcts = numpy.nanpercentile(images.filled(numpy.nan), pct, axis=(1, 2))
+    pcts = numpy.nanpercentile(images, pct, axis=(1, 2))
     norm = bn.nanmedian(pcts) / pcts
 
     return norm[:, None, None] * images, norm
@@ -158,8 +158,8 @@ def _bg_subtraction(images, quad_sections, bg_sections):
         bg_array = images[:, xbg, ybg]
         bg_sections.append(bg_array)
         # calculate median and standard deviation BG
-        bg_med = bn.nanmedian(bg_array.filled(), axis=(1, 2))
-        bg_std = bn.nanstd(bg_array.filled(), axis=(1, 2))
+        bg_med = bn.nanmedian(bg_array, axis=(1, 2))
+        bg_std = bn.nanstd(bg_array, axis=(1, 2))
         # set background sections in corresponding images
         bg_images_med[:, yquad, xquad] = bg_med[:, None, None]
         bg_images_std[:, yquad, xquad] = bg_std[:, None, None]
