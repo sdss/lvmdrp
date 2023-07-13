@@ -735,6 +735,7 @@ def addCCDMask_drp(image, mask, replaceError="1e10"):
 def find_peaks_auto(
     in_image: str,
     out_peaks: str,
+    out_region: str = None,
     slice: int = None,
     pixel_range: List[int] = [0, 4080],
     fibers_dmin: int = 5,
@@ -841,18 +842,18 @@ def find_peaks_auto(
     table.header["XPIX"] = (column, "X coordinate of the fibers [pix]")
     table.writeto(out_peaks, overwrite=True)
     # write .reg file for ds9
-    file_out = open(out_peaks.replace(".txt", f"-{column}.reg"), "w")
-    file_out.write("# Region file format: DS9 version 4.1\n")
-    file_out.write(
-        'global color=green dashlist=8 3 width=1 font="helvetica 10 normal roman" select=1 highlite=1 dash=0 fixed=0 edit=1 move=1 delete=1 include=1 source=1\n'
-    )
-    file_out.write("physical\n")
-    for i in range(len(centers)):
-        file_out.write(
-            "# text(%.4f,%.4f) text={%i, %i}\n"
-            % (column, centers[i], i + 1, round_cent[i])
-        )
-    file_out.close()
+    if out_region is not None:
+        with open(out_region, "w") as reg_out:
+            reg_out.write("# Region file format: DS9 version 4.1\n")
+            reg_out.write(
+                'global color=green dashlist=8 3 width=1 font="helvetica 10 normal roman" select=1 highlite=1 dash=0 fixed=0 edit=1 move=1 delete=1 include=1 source=1\n'
+            )
+            reg_out.write("physical\n")
+            for i in range(len(centers)):
+                reg_out.write(
+                    "# text(%.4f,%.4f) text={%i, %i}\n"
+                    % (column, centers[i], i + 1, round_cent[i])
+                )
 
     # plot figure
     fig, ax = create_subplots(to_display=display_plots, figsize=(15, 10))
