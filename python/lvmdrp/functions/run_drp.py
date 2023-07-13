@@ -88,7 +88,7 @@ def create_masters(flavor: str, frames: pd.DataFrame):
         create_master_frame(in_images=in_f, out_image=master, **kwargs)
 
 
-def find_masters(flavor: str, camera: str, exptime: str) -> dict:
+def find_masters(flavor: str, camera: str) -> dict:
     """ Find the matching master frames
 
     Find the matching master frames for a given flavor, camera
@@ -109,9 +109,8 @@ def find_masters(flavor: str, camera: str, exptime: str) -> dict:
     dict
         The output master frame paths for each flavor
     """
-    # try to match the master frames for a given flavor, camera, exptime
-    matches = match_master_metadata(target_imagetyp=flavor, target_camera=camera,
-                                    target_exptime=float(exptime))
+    # try to match the master frames for a given flavor, camera
+    matches = match_master_metadata(target_imagetyp=flavor, target_camera=camera)
 
     # construct the dict of filepaths
     files = dict.fromkeys(matches.keys())
@@ -141,6 +140,9 @@ def trace_fibers(in_file: str, camera: str, expnum: int, tileid: int, mjd: int):
     mjd : int
         the MJD of observation
     """
+    # TODO
+    # check these output paths names; may need to change the tree paths to update the names
+    # or maybe the "kind" keyword is changed to "mpeaks" or "mtrace"
 
     out_peaks = path.full("lvm_cal", drpver=drpver, tileid=tileid, mjd=mjd, camera=camera,
                           expnum=expnum, kind='peaks', ext='txt')
@@ -166,6 +168,14 @@ def trace_fibers(in_file: str, camera: str, expnum: int, tileid: int, mjd: int):
     log.info(f'custom configuration parameters for trace_peaks: {repr(kwargs)}')
     trace_peaks(in_image=in_file, out_trace=out_trace, in_peaks=out_peaks, **kwargs)
     log.info(f'Output trace fiber peaks file: {out_trace}')
+
+    # TODO
+    # add new function to trace the width
+    # this only runs for full reductions at Utah
+    # output of this file goes into extract_spectra
+    # add new config / cli option for quick redux flag
+    # if something_says_full:
+    #    trace_peaks(new config )
 
 
 def find_file(kind, camera=None, mjd=None, tileid=None):
@@ -223,13 +233,15 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
     preproc_raw_frame(filename, out_image=out_pre, **kwargs)
 
     # check master frames
-    masters = find_masters(flavor, camera, fkwargs.get('exptime'))
+    masters = find_masters(flavor, camera)
     mbias = masters.get('bias')
     mdark = masters.get('dark')
-    mflat = masters.get('pixelflat')
+    mflat = masters.get('flat')
+    mpixflat = masters.get('pixelflat')
     log.info(f'Using master bias: {mbias}')
     log.info(f'Using master dark: {mdark}')
     log.info(f'Using master flat: {mflat}')
+    log.info(f'Using master pixel flat: {mpixflat}')
 
     # process the flat/arc frames
     in_cal = path.full("lvm_anc", kind='p', imagetype=flavor, mjd=mjd, drpver=drpver,
@@ -245,14 +257,26 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
                   in_bias=mbias, in_dark=mdark, in_pixelflat=mflat, **kwargs)
     log.info(f'Output calibrated file: {out_cal}')
 
+    # TODO
+    # reduce individual frames for bias/darks/flats/arcs up to detrend
+    # exit after indivi arcs/flats
+    # reduce_set creates marc and mflat master frames
+
     # end reduction for bias and darks
     if flavor in {'bias', 'dark'}:
         return
 
+    # TODO
+    # add this extension also to the master flat file
     # add the fibermap to all flat and science files
     if flavor in {'fiberflat', 'flat', 'pixelflat', 'object', 'science'}:
         log.info('Adding slitmap extension')
         add_extension(fibermap, out_cal)
+
+    # TODO
+    # input to fiber tracing is the master flat file, change out_cal to the mflat file
+
+    # TODO - mflat and marc redutions start here
 
     # fiber tracing
     if 'flat' in flavor:
@@ -270,12 +294,25 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
     if not trace_file:
         return
 
+    # TODO
+    # we want to extract the individual science frames, master flats and master arcs
+    # input trace_file is the input master mtrace_file
+    # input cal_file is either the indiv science or the master file name
+    # output xout file is the same, lvm-xobject of indiv (has expnum), or lvm-xarc, or lvm-xfiberflat (no expnum)
+
+    # reduce indiv flats, arcs - creates mflat, marc
+    # reduce mflat, marc, mflat again (as like the original flat/arc)
+
     # perform the fiber extraction
     log.info('--- Extracting fiber spectra ---')
     kwargs = get_config_options('reduction_steps.extract_spectra')
     log.info(f'custom configuration parameters for extract_spectra: {repr(kwargs)}')
     extract_spectra(in_image=cal_file, out_rss=xout_file, in_trace=trace_file, **kwargs)
     log.info(f'Output extracted file: {xout_file}')
+
+    # TODO
+    # input to wavelength solution is the master arc file, change xout_file to the marc file
+    # and change output paths wave/lsf to "mwave" and "mlsf"
 
     # determine the wavelength solution
     if flavor == 'arc':
@@ -292,6 +329,10 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
         log.info(f'Output wave peak traceset file: {wave_file}')
         log.info(f'Output lsf traceset file: {lsf_file}')
 
+    # TODO
+    # same as the extract_spectra steps, indiv science and master flats/arcs
+    # check the wave_file, and lsf_file names and wout_file names
+
     # perform wavelength calibration
     wave_file = find_file('wave', mjd=mjd, tileid=tileid, camera=camera)
     lsf_file = find_file('lsf', mjd=mjd, tileid=tileid, camera=camera)
@@ -306,6 +347,10 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
     # set wavelength resample params
     CHANNEL_WL = {"b": (3600, 5930), "r": (5660, 7720), "z": (7470, 9800)}
     wave_range = CHANNEL_WL[camera[0]]
+
+    # TODO
+    # same as the extract_spectra steps, indiv science and master flats/arcs
+    # check the hout_file lvm-hobject, lvm-harc, lvm-hflat (these are based on the masters)
 
     # resample onto a common wavelength
     hout_file = path.full("lvm_anc", kind='h', imagetype=flavor, mjd=mjd, drpver=drpver,
@@ -485,6 +530,19 @@ def reduce_set(frame: pd.DataFrame, settype: str = None, flavor: str = None):
 
     # build the master metadata cache ; always update it
     get_master_metadata(overwrite=True)
+
+    # TODO
+    # add step after master bias/darks creation to create
+    # a new master pixel mask which is used in the preproc step of all indiv reductions
+    # also input is master pixel flat when it is available
+    # Alfredo to do this
+    if settype == 'precals':
+        # loop over set of cameras in frame
+        # get names of the master files (find_masters)
+        # pass master filenames into new function
+        # add new function here
+        pass
+
 
 
 def run_drp(mjd: Union[int, str, list], bias: bool = False, dark: bool = False,
@@ -734,16 +792,16 @@ def find_best_mdark(tileid: int, mjd: int, camera: str) -> str:
     str
         the filepath to the master dark
     """
-    darks = path.expand("lvm_cal_time", kind='mdark', mjd=mjd, drpver=drpver,
-                        camera=camera, tileid=tileid, exptime="*")
+    darks = path.expand("lvm_master", kind='mdark', mjd=mjd, drpver=drpver,
+                        camera=camera, tileid=tileid)
 
     # return if no master dark found
     if not darks:
         log.warning(f'No master dark frame found for {tileid}, {mjd}, {camera}.')
         return
 
-    # return the master dark with the largest exposure time
-    return max(darks, key=lambda x: int(pathlib.Path(x).stem.rsplit('-', 1)[-1]))
+    # return first master dark in the list
+    return darks[0]
 
 
 def _parse_expnum_cam(name: str) -> tuple:

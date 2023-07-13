@@ -1116,24 +1116,8 @@ def create_master_path(row: pd.Series) -> str:
     str
         A fully resolved path to the master frame
     """
-    if row.imagetyp == "bias":
-        return path.full(
-            "lvm_cal_mbias",
-            drpver=DRPVER,
-            tileid=row.tileid,
-            mjd=row.mjd,
-            camera=row.camera,
-        )
-    else:
-        return path.full(
-            "lvm_cal_time",
-            drpver=DRPVER,
-            tileid=row.tileid,
-            mjd=row.mjd,
-            kind=f"m{row.imagetyp}",
-            camera=row.camera,
-            exptime=int(row.exptime),
-        )
+    return path.full("lvm_master", drpver=DRPVER, kind=f'm{row.imagetyp}',
+                     tileid=row.tileid, mjd=row.mjd, camera=row.camera)
 
 
 def match_master_metadata(
