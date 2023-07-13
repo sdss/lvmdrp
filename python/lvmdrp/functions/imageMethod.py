@@ -18,6 +18,8 @@ from tqdm import tqdm
 
 from typing import List
 
+from lvmdrp import log
+from lvmdrp.utils.decorators import skip_on_missing_input_path, drop_missing_input_paths
 from lvmdrp.core.fiberrows import FiberRows, _read_fiber_ypix
 from lvmdrp.core.image import (
     Image,
@@ -31,7 +33,6 @@ from lvmdrp.core.plot import plt, create_subplots, plot_image, plot_strips, save
 from lvmdrp.core.rss import RSS
 from lvmdrp.core.spectrum1d import Spectrum1D
 from lvmdrp.core.tracemask import TraceMask
-from lvmdrp import log
 from lvmdrp.utils.hdrfix import apply_hdrfix
 from lvmdrp.utils.convert import dateobs_to_sjd, correct_sjd
 
@@ -732,6 +733,7 @@ def addCCDMask_drp(image, mask, replaceError="1e10"):
 # TODO: independientemente de cuantas fibras se detecten, el output tiene que tener todas las fibras + flags
 # TODO: agregar informacion de posicion de las fibras al fibermap, para usar como referencia
 # esta funcion se corre solo una vez o con frecuencia baja
+@skip_on_missing_input_path(["in_image"])
 def find_peaks_auto(
     in_image: str,
     out_peaks: str,
@@ -2215,6 +2217,7 @@ def offsetTrace2_drp(
 # it might be better in dealing with cross-talk
 # TODO:
 # * define lvm-frame ancillary product to replace for out_rss
+@skip_on_missing_input_path(["in_image", "in_trace"])
 def extract_spectra(
     in_image: str,
     out_rss: str,
@@ -2637,6 +2640,7 @@ def testres_drp(image, trace, fwhm, flux):
     hdu.writeto("res_rel.fits", overwrite=True)
 
 
+@skip_on_missing_input_path(["in_image"])
 def preproc_raw_frame(
     in_image: str,
     out_image: str,
@@ -3023,6 +3027,7 @@ def preproc_raw_frame(
     return org_img, os_profiles, os_models, proc_img
 
 
+@skip_on_missing_input_path(["in_image"])
 def detrend_frame(
     in_image: str,
     out_image: str,
@@ -3250,7 +3255,7 @@ def detrend_frame(
     )
 
 
-def create_master_frame(in_images: list, out_image: str, force_master: bool = True):
+@drop_missing_input_paths(["in_images"])
     """
     Combines the given calibration frames (bias, dark, or pixelflat) into a
     master calibration frame.
@@ -3329,6 +3334,7 @@ def create_master_frame(in_images: list, out_image: str, force_master: bool = Tr
     return org_imgs, master_img
 
 
+@skip_on_missing_input_path(["in_bias", "in_dark"])
 def create_pixelmask(
     in_bias: str,
     in_dark: str,

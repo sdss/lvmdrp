@@ -17,10 +17,10 @@ from matplotlib import pyplot as plt
 from numpy import polynomial
 from scipy import interpolate, ndimage, signal
 
+from lvmdrp.utils.decorators import skip_on_missing_input_path, drop_missing_input_paths
 from lvmdrp.core.constants import CONFIG_PATH
 from lvmdrp.core.cube import Cube
 from lvmdrp.core.fiberrows import FiberRows
-from lvmdrp.core.header import combineHdr
 from lvmdrp.core.image import loadImage
 from lvmdrp.core.passband import PassBand
 from lvmdrp.core.plot import save_fig
@@ -86,6 +86,7 @@ def mergeRSS_drp(files_in, file_out, mergeHdr="1"):
 # * define ancillary product lvm-arc (rss arc) for replace arc_rss
 # * define ancillary product lvm-wave to contain wavelength solutions
 # * merge disp_rss and res_rss products into lvmArc product, change variable to out_arc
+@skip_on_missing_input_path(["in_arc"])
 def determine_wavelength_solution(in_arc: str, out_wave: str, out_lsf: str, in_ref_lines: str = "",
                                   ref_fiber: int = 319, pixel: str = "", ref_lines: str = "",
                                   poly_disp: int = 3, poly_fwhm: int = 5,
@@ -609,6 +610,7 @@ def determine_wavelength_solution(in_arc: str, out_wave: str, out_lsf: str, in_r
 
 # TODO:
 # * merge arc_wave and arc_fwhm into lvmArc product, change variable name to in_arc
+@skip_on_missing_input_path(["in_rss", "arc_wave", "arc_fwhm"])
 def create_pixel_table(in_rss: str, out_rss: str, arc_wave: str, arc_fwhm: str = "",
                        cropping: list = None):
     """
@@ -911,6 +913,7 @@ def correctPixTable_drp(
 
 # TODO: aplicar correccion a la solucion de longitud de onda comparando lineas de cielo
 # TODO: hacer esto antes de hacer el rasampling en wl
+@skip_on_missing_input_path(["in_rss"])
 def resample_wavelength(in_rss: str, out_rss: str, method: str = "spline",
                         start_wave: float = None, end_wave: float = None,
                         disp_pix: float = None, err_sim: int = 500,
@@ -2657,6 +2660,7 @@ def DAR_registerSDSS_drp(
         plt.show()
 
 
+@drop_missing_input_paths(["in_rss"])
 def join_spec_channels(in_rss: list, out_rss: list, parallel: str = "auto"):
     """combine the given RSS list through the overlaping wavelength range
 
@@ -2829,6 +2833,7 @@ def createMasterFiberFlat_drp(
         master_fiberflat.writeFitsData(out_masterflat)
 
 
+@skip_on_missing_input_path(["in_std", "in_sky", "in_biases", "in_fiberflat", "in_arc", "ref_values"])
 def quickQuality(
     in_std,
     in_sky,
