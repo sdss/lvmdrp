@@ -828,12 +828,18 @@ def find_peaks_auto(
     # round the subpixel peak positions to their nearest integer value
     round_cent = numpy.round(centers).astype(int)
     log.info(f"final number of fibers found {len(round_cent)}")
-    # write number of peaks and their position to an ASCII file NEED TO BE REPLACE WITH XML OUTPUT
-    file_out = open(out_peaks, "w")
-    file_out.write("%i\n" % (column))
-    for i in range(len(centers)):
-        file_out.write("%i %i %e %i\n" % (i, round_cent[i], centers[i], 0))
-    file_out.close()
+    
+    # write number of peaks and their position
+    log.info(f"writing {os.path.basename(out_peaks)}")
+    columns = [
+        pyfits.Column(name="FIBER", format="I", array=numpy.arange(centers.size)),
+        pyfits.Column(name="PIXEL", format="I", array=round_cent),
+        pyfits.Column(name="SUBPIX", format="D", array=centers),
+        pyfits.Column(name="QUALITY", format="I", array=numpy.zeros_like(centers)),
+    ]
+    table = pyfits.BinTableHDU().from_columns(columns)
+    table.header["XPIX"] = (column, "X coordinate of the fibers [pix]")
+    table.writeto(out_peaks, overwrite=True)
     # write .reg file for ds9
     file_out = open(out_peaks.replace(".txt", f"-{column}.reg"), "w")
     file_out.write("# Region file format: DS9 version 4.1\n")
