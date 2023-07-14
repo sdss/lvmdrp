@@ -10,7 +10,10 @@ import os
 from functools import wraps
 from typing import List
 
+from astropy.io import fits
+
 from lvmdrp import log
+from lvmdrp.utils.bitmask import QualityFlag
 
 
 def skip_on_missing_input_path(input_file_args: list):
@@ -82,6 +85,34 @@ def drop_missing_input_paths(input_file_args: List[list]):
 
     return decorator
 
+
+def skip_if_drpqual_flags(flags: List[str], input_file_arg: str):
+    """decorator to skip a task if any of the drpqual flags is True
+
+    Parameters
+    ----------
+    flags : List[str]
+        list of drpqual flag names
+
+    Returns
+    -------
+    function
+        decorated function
+    """
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            # quickly extract the drpqual bitmaks from the header
+            drpqual = QualityFlag(fits.getheader(kwargs[input_file_arg])["DRPQUAL"])
+            if any([flag in drpqual for flag in flags]):
+                log.error(f"skipping {func.__name__} due to drpqual flags: {flags}")
+                return
+            return func(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
 
 # TODO: implement a decorator for validating outputs
 # it should validate the following characteristics:
