@@ -104,9 +104,9 @@ def skip_if_drpqual_flags(flags: List[str], input_file_arg: str):
         @wraps(func)
         def wrapper(*args, **kwargs):
             # quickly extract the drpqual bitmaks from the header
-            drpqual = QualityFlag(fits.getheader(kwargs[input_file_arg])["DRPQUAL"])
-            if any([flag in drpqual for flag in flags]):
-                log.error(f"skipping {func.__name__} due to drpqual flags: {flags}")
+            drpqual = QualityFlag(fits.getheader(kwargs[input_file_arg]).get("DRPQUAL", QualityFlag(0)))
+            if len(flags_set := set(flags).intersection(drpqual.get_name().split(","))) > 0:
+                log.error(f"skipping {func.__name__} due to drpqual flags: {flags_set}")
                 return
             return func(*args, **kwargs)
 
