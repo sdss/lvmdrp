@@ -459,7 +459,8 @@ def get_master_metadata(overwrite: bool = None) -> pd.DataFrame:
         a Pandas DataFrame of metadata
     """
 
-    files = list(pathlib.Path(os.getenv("LVM_SPECTRO_REDUX")).rglob("*calib/*lvm-m*"))
+    # glob for all file master calibration files, only include bias,darks,arcs,flats
+    files = list(pathlib.Path(os.getenv("LVM_SPECTRO_REDUX")).rglob("*calib/*lvm-m[bdaf]*"))
 
     if _load_or_create_store(kind="master", mode="r") and not overwrite:
         log.info("Loading existing metadata store.")
@@ -572,6 +573,9 @@ def extract_metadata(frames_paths: list, kind: str = "raw") -> pd.DataFrame:
         # apply any header fix or if none, use old header
         header = apply_hdrfix(sjd, hdr=header) or header
 
+        # set on-lamp conditions
+        onlamp = ["ON", True, 'T', 1]
+
         if kind == "raw":
             new_metadata[i] = [
                 "n" if header.get("OBSERVAT") != "LCO" else "s",
@@ -583,13 +587,13 @@ def extract_metadata(frames_paths: list, kind: str = "raw") -> pd.DataFrame:
                 header.get("CCD"),
                 header.get("EXPOSURE"),
                 header.get("EXPTIME"),
-                header.get("NEON", "OFF") == "ON",
-                header.get("HGNE", "OFF") == "ON",
-                header.get("KRYPTON", "OFF") == "ON",
-                header.get("XENON", "OFF") == "ON",
-                header.get("ARGON", "OFF") == "ON",
-                header.get("LDLS", "OFF") == "ON",
-                header.get("QUARTZ", "OFF") == "ON",
+                header.get("NEON", "OFF") in onlamp,
+                header.get("HGNE", "OFF") in onlamp,
+                header.get("KRYPTON", "OFF") in onlamp,
+                header.get("XENON", "OFF") in onlamp,
+                header.get("ARGON", "OFF") in onlamp,
+                header.get("LDLS", "OFF") in onlamp,
+                header.get("QUARTZ", "OFF") in onlamp,
                 header.get("QUALITY", "excellent"),
                 header.get("QUAL", RawFrameQuality(0)),
                 header.get("DRPSTAGE", ReductionStage.UNREDUCED),
@@ -606,13 +610,13 @@ def extract_metadata(frames_paths: list, kind: str = "raw") -> pd.DataFrame:
                 header.get("SPEC"),
                 header.get("CCD"),
                 header.get("EXPTIME"),
-                header.get("NEON", "OFF") == "ON",
-                header.get("HGNE", "OFF") == "ON",
-                header.get("KRYPTON", "OFF") == "ON",
-                header.get("XENON", "OFF") == "ON",
-                header.get("ARGON", "OFF") == "ON",
-                header.get("LDLS", "OFF") == "ON",
-                header.get("QUARTZ", "OFF") == "ON",
+                header.get("NEON", "OFF") in onlamp,
+                header.get("HGNE", "OFF") in onlamp,
+                header.get("KRYPTON", "OFF") in onlamp,
+                header.get("XENON", "OFF") in onlamp,
+                header.get("ARGON", "OFF") in onlamp,
+                header.get("LDLS", "OFF") in onlamp,
+                header.get("QUARTZ", "OFF") in onlamp,
                 header.get("QUALITY", "excellent"),
                 header.get("QUAL", RawFrameQuality(0)),
                 header.get("DRPSTAGE", ReductionStage.UNREDUCED),
