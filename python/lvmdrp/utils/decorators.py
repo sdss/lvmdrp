@@ -38,7 +38,7 @@ def skip_on_missing_input_path(input_file_args: list):
                 if name not in kwargs:
                     continue
                 if not os.path.isfile(file_path := kwargs[name]):
-                    log.error(f"missing input '{name} = {file_path}' at {func.__name__}")
+                    log.error(f"missing input {name} = '{file_path}' at {func.__name__}")
                     return
             return func(*args, **kwargs)
 
@@ -71,7 +71,7 @@ def drop_missing_input_paths(input_file_args: List[list]):
                 org_file_paths = kwargs[name]
                 file_paths = list(filter(os.path.isfile, org_file_paths))
                 if len(file_paths) == 0:
-                    log.error(f"no input paths found for '{name}' at {func.__name__}")
+                    log.error(f"no input paths found for {name} = '{org_file_paths}' at {func.__name__}")
                     return
                 elif len(file_paths) < len(org_file_paths):
                     log.warning(

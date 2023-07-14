@@ -114,3 +114,6 @@ FRAMES_CALIB_NEEDS = {
 
 # spectrograph channels
 SPEC_CHANNELS = {"b": (3600, 5930), "r": (5660, 7720), "z": (7470, 9800)}
+
+ARC_LAMPS = ["NEON", "HGNE", "ARGON", "XENON", "KRYPTON"]
+CON_LAMPS = ["LDLS", "QUARTZ"]
