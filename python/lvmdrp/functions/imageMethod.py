@@ -2899,12 +2899,8 @@ def preproc_raw_frame(
     log.info("building pixel mask")
     proc_img._mask = master_mask
     # convert temp image to ADU for saturated pixel masking
-    sects = proc_img._header["AMP? TRIMSEC"]
-    _ = copy(proc_img)
-    for i in range(NQUADS):
-        quad = _.getSection(sects[i])
-        _.setSection(sects[i], quad, inplace=True)
-    proc_img._mask |= _ >= 0.7 * 2**16
+    saturated_mask = proc_img._data >= (0.7 * 2**16)
+    proc_img._mask |= saturated_mask
 
     # log number of masked pixels
     nmasked = proc_img._mask.sum()
@@ -2914,6 +2910,12 @@ def preproc_raw_frame(
     if replace_with_nan:
         log.info(f"replacing {nmasked} masked pixels with NaNs")
         proc_img.apply_pixelmask()
+
+    # update data reduction quality flag
+    drpqual = QualityFlag(0)
+    if saturated_mask.sum() / proc_img._mask.size > 0.01:
+        drpqual += "SATURATED"
+    proc_img.setHdrValue("DRPQUAL", value=drpqual.value, comment="data reduction quality flag")
 
     # write out FITS file
     log.info(f"writing preprocessed image to {os.path.basename(out_image)}")
