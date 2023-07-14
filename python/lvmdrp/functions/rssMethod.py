@@ -3,6 +3,7 @@
 
 import os
 from multiprocessing import Pool, cpu_count
+from typing import List
 
 import matplotlib
 import matplotlib.gridspec as gridspec
@@ -17,10 +18,10 @@ from matplotlib import pyplot as plt
 from numpy import polynomial
 from scipy import interpolate, ndimage, signal
 
-from lvmdrp.core.constants import CONFIG_PATH
+from lvmdrp.utils.decorators import skip_on_missing_input_path, drop_missing_input_paths, skip_if_drpqual_flags
+from lvmdrp.core.constants import CONFIG_PATH, ARC_LAMPS
 from lvmdrp.core.cube import Cube
 from lvmdrp.core.fiberrows import FiberRows
-from lvmdrp.core.header import combineHdr
 from lvmdrp.core.image import loadImage
 from lvmdrp.core.passband import PassBand
 from lvmdrp.core.plot import save_fig
@@ -43,6 +44,63 @@ __all__ = [
     "includePosTab_drp",
     "join_spec_channels"
 ]
+
+
+def _read_pixwav_map(lamp: str, channel: str):
+    """read pixel-wavelength map from a lamp and channel
+
+    Parameters
+    ----------
+    lamp : str
+        arc lamp name
+    channel : str
+        spectrograph channel
+
+    Returns
+    -------
+    ref_fiber : int
+        reference fiber used to build the pixel-wavelength map
+    ref_lines : numpy.ndarray
+        reference wavelength of the emission lines
+    pixel : numpy.ndarray
+        pixel position of the emission lines
+    use_line : numpy.ndarray
+        mask to select which lines to use
+    """    
+    pixwav_map_path = os.path.join(CONFIG_PATH, f"lvm-{lamp}_nist_{channel}.txt")
+
+    if pixwav_map_path != "":
+        # load initial pixel positions and reference wavelength from txt config file
+        log.info(f"guess lines in file '{pixwav_map_path}'")
+        with open(pixwav_map_path, "r") as file_in:
+            ref_fiber = int(file_in.readline()[:-1])
+            log.info(f"going to use fiber {ref_fiber} as reference")
+            pixel, ref_lines, use_line = numpy.loadtxt(
+                file_in, dtype=float, unpack=True
+            )
+        use_line = use_line.astype(bool)
+        log.info(
+            f"number of guess lines in file {pixel.size} percentage masked {(~use_line).sum() / pixel.size * 100: g} %"
+        )
+
+        pixel = pixel[use_line]
+        ref_lines = ref_lines[use_line]
+        use_line = use_line[use_line]
+        nlines = use_line.sum()
+        log.info(f"going to use {nlines} guess lines")
+    else:
+        # get the reference spectrum number and the guess pixel map
+        ref_fiber = int(ref_fiber)
+        log.info(f"going to use fiber {ref_fiber} as reference")
+        pixel = numpy.asarray(list(map(float, pixel.split(","))))
+        ref_lines = numpy.asarray(list(map(float, ref_lines.split(","))))
+        use_line = numpy.ones(len(ref_lines), dtype=bool)
+        nlines = len(pixel)
+        log.info(
+            f"going to use {nlines} guess lines ({(~use_line).sum()} lines masked)"
+        )
+    
+    return ref_fiber, ref_lines, pixel, use_line
 
 
 def mergeRSS_drp(files_in, file_out, mergeHdr="1"):
@@ -86,8 +144,10 @@ def mergeRSS_drp(files_in, file_out, mergeHdr="1"):
 # * define ancillary product lvm-arc (rss arc) for replace arc_rss
 # * define ancillary product lvm-wave to contain wavelength solutions
 # * merge disp_rss and res_rss products into lvmArc product, change variable to out_arc
-def determine_wavelength_solution(in_arc: str, out_wave: str, out_lsf: str, in_ref_lines: str = "",
-                                  ref_fiber: int = 319, pixel: str = "", ref_lines: str = "",
+@skip_on_missing_input_path(["in_arc"])
+@skip_if_drpqual_flags(["SATURATED"], "in_arc")
+def determine_wavelength_solution(in_arc: str, out_wave: str, out_lsf: str,
+                                  ref_fiber: int = 319, pixel: List[float] = [], ref_lines: List[float] = [],
                                   poly_disp: int = 3, poly_fwhm: int = 5,
                                   poly_cros: int = 3, poly_kinds: list = ['poly', 'poly', 'poly'],
                                   init_back: float = 10.0, aperture: int = 10,
@@ -171,78 +231,73 @@ def determine_wavelength_solution(in_arc: str, out_wave: str, out_lsf: str, in_r
     if fiberflat != "":
         fiberflat = fiberflat.split(",")
 
-    if in_ref_lines != "":
-        log.info(f"reading guess lines from '{in_ref_lines}'")
-        # load initial pixel positions and reference wavelength from txt config file
-        with open(in_ref_lines, "r") as file_in:
-            if ref_fiber:
-                file_in.readline()
-                ref_fiber = int(ref_fiber)
-            else:
-                ref_fiber = int(file_in.readline()[:-1])
-            log.info(f"going to use fiber {ref_fiber} as reference")
-            pixel, ref_lines, use_line = numpy.loadtxt(
-                file_in, dtype=float, unpack=True
-            )
-        use_line = use_line.astype(bool)
-        log.info(
-            f"number of guess lines in file {pixel.size} percentage masked {(~use_line).sum() / pixel.size * 100: g} %"
-        )
-
-        pixel = pixel[use_line]
-        ref_lines = ref_lines[use_line]
-        use_line = use_line[use_line]
-        nlines = use_line.sum()
-        log.info(f"going to use {nlines} guess lines")
-    else:
-        # get the reference spectrum number and the guess pixel map
-        ref_fiber = int(ref_fiber)
-        log.info(f"going to use fiber {ref_fiber} as reference")
-        pixel = numpy.asarray(list(map(float, pixel.split(","))))
-        ref_lines = numpy.asarray(list(map(float, ref_lines.split(","))))
-        use_line = numpy.ones(len(ref_lines), dtype=bool)
-        nlines = len(pixel)
-        log.info(
-            f"going to use {nlines} guess lines ({(~use_line).sum()} lines masked)"
-        )
-
     # initialize the extracted arc line frame
     log.info(f"reading arc from '{in_arc}'")
     arc = FiberRows()  # create object
     arc.loadFitsData(in_arc)  # load data
 
     # replace NaNs
-    mask_nan = numpy.isnan(arc._data)
+    mask_nan = numpy.isnan(arc._data) | numpy.isnan(arc._error)
     arc._data[mask_nan] = 0
     arc._error[mask_nan] = 0
+
+    channel = arc._header["CCD"][0]
+    lamps = [lamp.lower() for lamp in ARC_LAMPS if arc._header.get(lamp, "OFF") == "ON"]
+    if len(lamps) == 0:
+        log.error("no arc lamps were on during this exposure")
+        return
+    
+    # read reference lines
+    pixel_list, ref_lines_list = [], []
+    for lamp in lamps:
+        log.info(f"loading reference lines for {lamp = } in {channel = }")
+        ref_fiber_, ref_lines, pixel, use_line = _read_pixwav_map(lamp, channel)
+
+        # apply cc correction to lines if needed
+        if cc_correction or ref_fiber != ref_fiber_:
+            log.info("calculating shift in guess lines using CC")
+            # determine maximum correlation shift
+            pix_spec = spec_from_lines(pixel, sigma=2, wavelength=arc._pixels)
+            shifts = signal.correlation_lags(
+                (arc._data * (~arc._mask))[ref_fiber].size, pix_spec.size, mode="full"
+            )
+            corr = signal.correlate(
+                (arc._data * (~arc._mask))[ref_fiber], pix_spec, mode="full"
+            )
+            if cc_max_shift != 0:
+                shifts_mask = (shifts >= -cc_max_shift) & (shifts <= cc_max_shift)
+                shifts = shifts[shifts_mask]
+                corr = corr[shifts_mask]
+            
+            # print(">>>>>>>>>>>>>")
+            # print(numpy.isnan((arc._data * (~arc._mask))[ref_fiber]).sum())
+            # print(corr)
+            # print(shifts)
+
+            shift = shifts[numpy.nanargmax(corr)]
+            log.info(f"maximum CC {shift = } pix")
+        else:
+            shift = 0
+
+        # correct initial pixel map by shifting
+        pixel += shift
+
+        pixel_list.append(pixel)
+        ref_lines_list.append(ref_lines)
+    
+    # combine all reference lines into a long array
+    pixel = numpy.concatenate(pixel_list)
+    ref_lines = numpy.concatenate(ref_lines_list)
+
+    # sort lines by pixel position
+    sort = numpy.argsort(pixel)
+    pixel = pixel[sort]
+    ref_lines = ref_lines[sort]
+    nlines = len(pixel)
 
     if negative:
         log.info("flipping arc along flux direction")
         arc = -1 * arc + numpy.nanmedian(arc._data)
-
-    # apply cc correction to lines if needed
-    if cc_correction:
-        log.info("calculating shift in guess lines using CC")
-        # determine maximum correlation shift
-        pix_spec = spec_from_lines(pixel, sigma=2, wavelength=arc._pixels)
-        shifts = signal.correlation_lags(
-            (arc._data * (~arc._mask))[ref_fiber].size, pix_spec.size, mode="full"
-        )
-        corr = signal.correlate(
-            (arc._data * (~arc._mask))[ref_fiber], pix_spec, mode="full"
-        )
-        if cc_max_shift != 0:
-            shifts_mask = (shifts >= -cc_max_shift) & (shifts <= cc_max_shift)
-            shifts = shifts[shifts_mask]
-            corr = corr[shifts_mask]
-
-        shift = shifts[numpy.nanargmax(corr)]
-        log.info(f"maximum CC {shift = } pix")
-    else:
-        shift = 0
-
-    # correct initial pixel map by shifting
-    pixel += shift
 
     # setup storage array
     wave_coeffs = numpy.zeros((arc._fibers, numpy.abs(poly_disp) + 1))
@@ -609,6 +664,8 @@ def determine_wavelength_solution(in_arc: str, out_wave: str, out_lsf: str, in_r
 
 # TODO:
 # * merge arc_wave and arc_fwhm into lvmArc product, change variable name to in_arc
+@skip_on_missing_input_path(["in_rss", "arc_wave", "arc_fwhm"])
+@skip_if_drpqual_flags(["SATURATED", "EXTRACTBAD", "BADTRACE"], "in_rss")
 def create_pixel_table(in_rss: str, out_rss: str, arc_wave: str, arc_fwhm: str = "",
                        cropping: list = None):
     """
@@ -911,6 +968,8 @@ def correctPixTable_drp(
 
 # TODO: aplicar correccion a la solucion de longitud de onda comparando lineas de cielo
 # TODO: hacer esto antes de hacer el rasampling en wl
+@skip_on_missing_input_path(["in_rss"])
+@skip_if_drpqual_flags(["SATURATED", "BADTRACE", "EXTRACTBAD"], "in_rss")
 def resample_wavelength(in_rss: str, out_rss: str, method: str = "spline",
                         start_wave: float = None, end_wave: float = None,
                         disp_pix: float = None, err_sim: int = 500,
@@ -2657,6 +2716,7 @@ def DAR_registerSDSS_drp(
         plt.show()
 
 
+@drop_missing_input_paths(["in_rss"])
 def join_spec_channels(in_rss: list, out_rss: list, parallel: str = "auto"):
     """combine the given RSS list through the overlaping wavelength range
 
@@ -2829,6 +2889,7 @@ def createMasterFiberFlat_drp(
         master_fiberflat.writeFitsData(out_masterflat)
 
 
+@skip_on_missing_input_path(["in_std", "in_sky", "in_biases", "in_fiberflat", "in_arc", "ref_values"])
 def quickQuality(
     in_std,
     in_sky,

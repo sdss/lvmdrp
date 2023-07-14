@@ -18,6 +18,9 @@ from tqdm import tqdm
 
 from typing import List
 
+from lvmdrp import log
+from lvmdrp.utils.decorators import skip_on_missing_input_path, drop_missing_input_paths, skip_if_drpqual_flags
+from lvmdrp.utils.bitmask import QualityFlag
 from lvmdrp.core.fiberrows import FiberRows, _read_fiber_ypix
 from lvmdrp.core.image import (
     Image,
@@ -31,7 +34,6 @@ from lvmdrp.core.plot import plt, create_subplots, plot_image, plot_strips, save
 from lvmdrp.core.rss import RSS
 from lvmdrp.core.spectrum1d import Spectrum1D
 from lvmdrp.core.tracemask import TraceMask
-from lvmdrp import log
 from lvmdrp.utils.hdrfix import apply_hdrfix
 from lvmdrp.utils.convert import dateobs_to_sjd, correct_sjd
 
@@ -732,6 +734,7 @@ def addCCDMask_drp(image, mask, replaceError="1e10"):
 # TODO: independientemente de cuantas fibras se detecten, el output tiene que tener todas las fibras + flags
 # TODO: agregar informacion de posicion de las fibras al fibermap, para usar como referencia
 # esta funcion se corre solo una vez o con frecuencia baja
+@skip_on_missing_input_path(["in_image"])
 def find_peaks_auto(
     in_image: str,
     out_peaks: str,
@@ -2215,6 +2218,7 @@ def offsetTrace2_drp(
 # it might be better in dealing with cross-talk
 # TODO:
 # * define lvm-frame ancillary product to replace for out_rss
+@skip_on_missing_input_path(["in_image", "in_trace"])
 def extract_spectra(
     in_image: str,
     out_rss: str,
@@ -2637,6 +2641,7 @@ def testres_drp(image, trace, fwhm, flux):
     hdu.writeto("res_rel.fits", overwrite=True)
 
 
+@skip_on_missing_input_path(["in_image"])
 def preproc_raw_frame(
     in_image: str,
     out_image: str,
@@ -2895,12 +2900,8 @@ def preproc_raw_frame(
     log.info("building pixel mask")
     proc_img._mask = master_mask
     # convert temp image to ADU for saturated pixel masking
-    sects = proc_img._header["AMP? TRIMSEC"]
-    _ = copy(proc_img)
-    for i in range(NQUADS):
-        quad = _.getSection(sects[i])
-        _.setSection(sects[i], quad, inplace=True)
-    proc_img._mask |= _ >= 0.7 * 2**16
+    saturated_mask = proc_img._data >= (0.7 * 2**16)
+    proc_img._mask |= saturated_mask
 
     # log number of masked pixels
     nmasked = proc_img._mask.sum()
@@ -2910,6 +2911,12 @@ def preproc_raw_frame(
     if replace_with_nan:
         log.info(f"replacing {nmasked} masked pixels with NaNs")
         proc_img.apply_pixelmask()
+
+    # update data reduction quality flag
+    drpqual = QualityFlag(0)
+    if saturated_mask.sum() / proc_img._mask.size > 0.01:
+        drpqual += "SATURATED"
+    proc_img.setHdrValue("DRPQUAL", value=drpqual.value, comment="data reduction quality flag")
 
     # write out FITS file
     log.info(f"writing preprocessed image to {os.path.basename(out_image)}")
@@ -3023,6 +3030,8 @@ def preproc_raw_frame(
     return org_img, os_profiles, os_models, proc_img
 
 
+@skip_on_missing_input_path(["in_image"])
+@skip_if_drpqual_flags(["SATURATED"], "in_image")
 def detrend_frame(
     in_image: str,
     out_image: str,
@@ -3250,7 +3259,7 @@ def detrend_frame(
     )
 
 
-def create_master_frame(in_images: list, out_image: str, force_master: bool = True):
+@drop_missing_input_paths(["in_images"])
     """
     Combines the given calibration frames (bias, dark, or pixelflat) into a
     master calibration frame.
@@ -3329,6 +3338,10 @@ def create_master_frame(in_images: list, out_image: str, force_master: bool = Tr
     return org_imgs, master_img
 
 
+@skip_on_missing_input_path(["in_bias", "in_dark"])
+@skip_if_drpqual_flags(["SATURATED"], "in_bias")
+@skip_if_drpqual_flags(["SATURATED"], "in_dark")
+@skip_if_drpqual_flags(["SATURATED"], "in_pixelflat")
 def create_pixelmask(
     in_bias: str,
     in_dark: str,

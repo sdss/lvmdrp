@@ -7,10 +7,112 @@
 # @Copyright: SDSS-V LVM
 
 import os
+from functools import wraps
+from typing import List
 
-from lvmdrp.core import image
+from astropy.io import fits
+
+from lvmdrp import log
 from lvmdrp.utils.bitmask import QualityFlag
 
+
+def skip_on_missing_input_path(input_file_args: list):
+    """decorator to skip a task if any of the input files is missing
+
+    Parameters
+    ----------
+    input_file_args : list
+        list of input arguments corresponding to the input file paths
+
+    Returns
+    -------
+    function
+        decorated function
+    """
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            for i, name in enumerate(input_file_args):
+                # skip argument if not present in kwargs
+                if name not in kwargs:
+                    continue
+                if not os.path.isfile(file_path := kwargs[name]):
+                    log.error(f"missing input '{name} = {file_path}' at {func.__name__}")
+                    return
+            return func(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
+def drop_missing_input_paths(input_file_args: List[list]):
+    """decorator to drop input files that are missing
+
+    Parameters
+    ----------
+    input_file_args : list
+        list of input arguments corresponding to the input file paths
+
+    Returns
+    -------
+    function
+        decorated function
+    """
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            for i, name in enumerate(input_file_args):
+                # skip argument if not present in kwargs
+                if name not in kwargs:
+                    continue
+                org_file_paths = kwargs[name]
+                file_paths = list(filter(os.path.isfile, org_file_paths))
+                if len(file_paths) == 0:
+                    log.error(f"no input paths found for '{name}' at {func.__name__}")
+                    return
+                elif len(file_paths) < len(org_file_paths):
+                    log.warning(
+                        f"dropping {len(org_file_paths) - len(file_paths)} "
+                        f"missing input paths: '{set(org_file_paths).difference(file_paths)}' for '{name}' at {func.__name__}"
+                    )
+                kwargs[name] = file_paths
+            return func(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
+def skip_if_drpqual_flags(flags: List[str], input_file_arg: str):
+    """decorator to skip a task if any of the drpqual flags is True
+
+    Parameters
+    ----------
+    flags : List[str]
+        list of drpqual flag names
+
+    Returns
+    -------
+    function
+        decorated function
+    """
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            # quickly extract the drpqual bitmaks from the header
+            drpqual = QualityFlag(fits.getheader(kwargs[input_file_arg]).get("DRPQUAL", QualityFlag(0)))
+            if len(flags_set := set(flags).intersection(drpqual.get_name().split(","))) > 0:
+                log.error(f"skipping {func.__name__} due to drpqual flags: {flags_set}")
+                return
+            return func(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
 
 # TODO: implement a decorator for validating outputs
 # it should validate the following characteristics:
@@ -25,79 +127,5 @@ from lvmdrp.utils.bitmask import QualityFlag
 # where things go wrong
 # TODO: implement (non-)existing files as flags = {"missing": {(par_name, filename): True/False}}
 # this way I can keep track of the files that went missing and report back using the logger
-def missing_files(potential_flags, *par_files):
-    def decorator(f):
-        def inner(*args, **kwargs):
-            """decorator for bypassing calibration step if a needed file is missing
-
-            This decorator checks for the existence of a given set of file paths.
-            If all the files exist, the decorated function proceeds normally and
-            returns a successful state of the step, otherwise the decorator bypasses
-            the current step and returns the list of missing files
-
-            Parameters
-            ----------
-            f: function object
-                the target function to decorate
-
-            Returns
-            -------
-            function returns
-            flags: dict_like
-                a dictionary containing the flags of the run and a list of missing files
-            """
-            files_exist = dict.fromkeys(par_files, False)
-            for par_name in par_files:
-                file_path = kwargs.get(par_name)
-                files_exist[par_name] = (
-                    os.path.isfile(file_path) if isinstance(file_path, str) else False
-                )
-
-            # define OK flag
-            flags = QualityFlag["OK"]
-            if all(files_exist.values()):
-                result = f(*args, **kwargs)
-                return (
-                    (*result, flags) if isinstance(result, tuple) else (result, flags)
-                )
-            else:
-                for flag in potential_flags:
-                    flags += flag
-                return None, flags
-
-        return inner
-
-    return decorator
 
 
-def validate_fibers(potential_flags, config, target_frame):
-    def decorator(f):
-        def inner(*args, **kwargs):
-            # run decorated function
-            result, flags = f(*args, **kwargs)
-            # read output frame
-            frame = image.loadImage(kwargs.get(target_frame))
-            # run peak detection
-            cross = frame.getSlice(slice=config.PEAKS_AT_COLUMN, axis="y")
-            peaks, _, _ = cross.findPeaks(npeaks=config.NFIBERS)
-            # compare output number of fibers with expected one
-            if len(peaks) != config.NFIBERS:
-                for flag in potential_flags:
-                    flags += flag
-            return result, flags
-
-        return inner
-
-    return decorator
-
-
-if __name__ == "__main__":
-
-    @missing_files(["BAD_CALIBRATION_FRAMES"], "in_file")
-    def simple_func(in_file, a, b, c):
-        print(in_file)
-        print(a, b, c)
-        return a
-
-    r = simple_func(in_file="a_file.txt", a=1, b=2, c=3)
-    print(r)
