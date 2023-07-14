@@ -278,19 +278,15 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
     log.info(f'Output extracted file: {xout_file}')
 
     # determine the wavelength solution
-    if flavor == 'arc':
-        wave_file = path.full('lvm_cal', kind='wave', drpver=drpver, mjd=mjd, tileid=tileid,
-                              camera=camera, expnum=expnum, ext='fits')
-        lsf_file = path.full('lvm_cal', kind='lsf', drpver=drpver, mjd=mjd, tileid=tileid,
-                             camera=camera, expnum=expnum, ext='fits')
-        line_ref = pathlib.Path(__file__).parent.parent / f"etc/lvm-neon_nist_{camera[0]}.txt"
-        kwargs = get_config_options('reduction_steps.determine_wavesol')
-        log.info('--- Determining wavelength solution ---')
-        log.info(f'custom configuration parameters for determine_wave_solution: {repr(kwargs)}')
-        determine_wavelength_solution(in_arc=xout_file, out_wave=wave_file, out_lsf=lsf_file,
-                                      in_ref_lines=line_ref, **kwargs)
-        log.info(f'Output wave peak traceset file: {wave_file}')
-        log.info(f'Output lsf traceset file: {lsf_file}')
+        # line_ref = (
+        #     pathlib.Path(__file__).parent.parent / f"etc/lvm-neon_nist_{camera[0]}.txt"
+        # )
+        determine_wavelength_solution(
+            in_arc=xout_file,
+            out_wave=wave_file,
+            out_lsf=lsf_file,
+            **kwargs,
+        )
 
     # perform wavelength calibration
     wave_file = find_file('wave', mjd=mjd, tileid=tileid, camera=camera)
