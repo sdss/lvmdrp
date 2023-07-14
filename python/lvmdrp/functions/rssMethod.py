@@ -66,7 +66,7 @@ def _read_pixwav_map(lamp: str, channel: str):
         pixel position of the emission lines
     use_line : numpy.ndarray
         mask to select which lines to use
-    """    
+    """
     pixwav_map_path = os.path.join(CONFIG_PATH, f"lvm-{lamp}_nist_{channel}.txt")
 
     if pixwav_map_path != "":
@@ -99,7 +99,7 @@ def _read_pixwav_map(lamp: str, channel: str):
         log.info(
             f"going to use {nlines} guess lines ({(~use_line).sum()} lines masked)"
         )
-    
+
     return ref_fiber, ref_lines, pixel, use_line
 
 
@@ -242,11 +242,12 @@ def determine_wavelength_solution(in_arc: str, out_wave: str, out_lsf: str,
     arc._error[mask_nan] = 0
 
     channel = arc._header["CCD"][0]
-    lamps = [lamp.lower() for lamp in ARC_LAMPS if arc._header.get(lamp, "OFF") == "ON"]
+    onlamp = ["ON", True, 'T', 1]
+    lamps = [lamp.lower() for lamp in ARC_LAMPS if arc._header.get(lamp, "OFF") in onlamp]
     if len(lamps) == 0:
         log.error("no arc lamps were on during this exposure")
         return
-    
+
     # read reference lines
     pixel_list, ref_lines_list = [], []
     for lamp in lamps:
@@ -268,7 +269,7 @@ def determine_wavelength_solution(in_arc: str, out_wave: str, out_lsf: str,
                 shifts_mask = (shifts >= -cc_max_shift) & (shifts <= cc_max_shift)
                 shifts = shifts[shifts_mask]
                 corr = corr[shifts_mask]
-            
+
             # print(">>>>>>>>>>>>>")
             # print(numpy.isnan((arc._data * (~arc._mask))[ref_fiber]).sum())
             # print(corr)
@@ -284,7 +285,7 @@ def determine_wavelength_solution(in_arc: str, out_wave: str, out_lsf: str,
 
         pixel_list.append(pixel)
         ref_lines_list.append(ref_lines)
-    
+
     # combine all reference lines into a long array
     pixel = numpy.concatenate(pixel_list)
     ref_lines = numpy.concatenate(ref_lines_list)
