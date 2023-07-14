@@ -19,7 +19,8 @@ from tqdm import tqdm
 from typing import List
 
 from lvmdrp import log
-from lvmdrp.utils.decorators import skip_on_missing_input_path, drop_missing_input_paths
+from lvmdrp.utils.decorators import skip_on_missing_input_path, drop_missing_input_paths, skip_if_drpqual_flags
+from lvmdrp.utils.bitmask import QualityFlag
 from lvmdrp.core.fiberrows import FiberRows, _read_fiber_ypix
 from lvmdrp.core.image import (
     Image,
