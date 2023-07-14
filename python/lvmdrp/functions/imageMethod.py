@@ -3260,8 +3260,8 @@ def detrend_frame(
 
 
 @drop_missing_input_paths(["in_images"])
-    """
-    Combines the given calibration frames (bias, dark, or pixelflat) into a
+def create_master_frame(in_images: List[str], out_image: str, force_master: bool = True):
+    """Combines the given calibration frames (bias, dark, or pixelflat) into a
     master calibration frame.
 
     When only one frame is given and `force_master==True`, it is still flagged
@@ -3269,22 +3269,20 @@ def detrend_frame(
 
     Parameters
     ----------
-    in_images : string
-        comma-separated list of paths to images that are going to be combined
-        into a master frame
-    out_image : string
+    in_images : List[str]
+        list of paths to images that are going to be combined into a master frame
+    out_image : str
         path to output master frame
     force_master : bool, optional
-        whether to force or not creation of master frame, by default True
+        whether to force or not creation of master frame, by default True, by default True
 
-    Examples
-    --------
-    drp image createMasterFrame IN_IMAGE1,IN_IMAGE2,... OUT_IMAGE
-
+    Returns
+    -------
+    org_ims : List[Image]
+        list of original images
+    master_img : Image
+        master image
     """
-    if isinstance(in_images, str):
-        in_images = in_images.split(",")
-
     if len(in_images) == 0:
         log.error("skipping master frame calculation, no input images given")
         return
