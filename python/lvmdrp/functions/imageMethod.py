@@ -3028,6 +3028,7 @@ def preproc_raw_frame(
 
 
 @skip_on_missing_input_path(["in_image"])
+@skip_if_drpqual_flags(["SATURATED"], "in_image")
 def detrend_frame(
     in_image: str,
     out_image: str,
@@ -3335,6 +3336,9 @@ def detrend_frame(
 
 
 @skip_on_missing_input_path(["in_bias", "in_dark"])
+@skip_if_drpqual_flags(["SATURATED"], "in_bias")
+@skip_if_drpqual_flags(["SATURATED"], "in_dark")
+@skip_if_drpqual_flags(["SATURATED"], "in_pixelflat")
 def create_pixelmask(
     in_bias: str,
     in_dark: str,
