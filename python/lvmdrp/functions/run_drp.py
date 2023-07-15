@@ -262,13 +262,13 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
     # reduce_set creates marc and mflat master frames
 
     # end reduction for bias and darks
-    if flavor in {'bias', 'dark'}:
+    if flavor in {'bias', 'dark', 'pixelflat'}:
         return
 
     # TODO
     # add this extension also to the master flat file
     # add the fibermap to all flat and science files
-    if flavor in {'fiberflat', 'flat', 'pixelflat', 'object', 'science'}:
+    if flavor in {'fiberflat', 'flat', 'object', 'science'}:
         log.info('Adding slitmap extension')
         add_extension(fibermap, out_cal)
 
