@@ -253,7 +253,7 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
     kwargs = get_config_options('reduction_steps.detrend_frame', flavor)
     log.info(f'custom configuration parameters for detrend_frame: {repr(kwargs)}')
     detrend_frame(in_image=in_cal, out_image=out_cal,
-                  in_bias=mbias, in_dark=mdark, in_pixelflat=mflat, **kwargs)
+                  in_bias=mbias, in_dark=mdark, in_pixelflat=mpixflat, **kwargs)
     log.info(f'Output calibrated file: {out_cal}')
 
     # TODO
