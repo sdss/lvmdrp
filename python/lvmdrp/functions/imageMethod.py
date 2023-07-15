@@ -3387,6 +3387,11 @@ def create_pixelmask(
     # NOTE: run this funtion on bias, darks and pixelflats
     # NOTE: combine all masks into a single one using OR
 
+    # verify of pixelflat exists, ignore if not
+    if in_pixelflat is not None and not os.path.isfile(in_pixelflat):
+        log.warning(f"pixel flat at '{in_pixelflat}' not found, ignoring")
+        in_pixelflat = None
+
     imgs, med_imgs, masks = [], [], []
     for in_image in filter(lambda i: i is not None, [in_bias, in_dark, in_pixelflat]):
         img = loadImage(in_image)
