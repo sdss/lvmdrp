@@ -260,14 +260,6 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
 
     # only run these steps for individual exposures
     if not master:
-        # create pixel mask if needed
-        if flavor not in {'bias', 'dark', 'pixelflat'} and mpixmask is None:
-            mpixmask = path.full('lvm_master', kind='mpixmask', drpver=drpver, mjd=mjd, tileid=tileid,
-                                    camera=camera)
-            create_pixelmask(in_bias=mbias, in_dark=mdark, in_pixelflat=mflat, out_mask=mpixmask)
-
-            get_master_metadata(overwrite=True)
-
         # preprocess the frames
         log.info('--- Preprocessing raw frame ---')
         kwargs = get_config_options('reduction_steps.preproc_raw_frame', flavor)
@@ -545,7 +537,7 @@ def reduce_file(filename: str):
     reduce_frame(filename, **params)
 
 
-def reduce_set(frame: pd.DataFrame, settype: str = None, flavor: str = None):
+def reduce_set(frame: pd.DataFrame, settype: str = None, flavor: str = None, create_pixmask: bool = False):
     """ Reduce a set of precals, cals, or science """
 
     if settype not in {"precals", "cals", "science"}:
@@ -570,7 +562,7 @@ def reduce_set(frame: pd.DataFrame, settype: str = None, flavor: str = None):
         return
 
     # set the master flavors
-    flavors = {'bias', 'dark'} if settype == 'precals' else {'arc', 'flat'}
+    flavors = {'bias', 'dark', 'pixelflat'} if settype == 'precals' else {'arc', 'flat'}
 
     # if a flavor is set, only create those masters
     if flavor:
@@ -583,12 +575,22 @@ def reduce_set(frame: pd.DataFrame, settype: str = None, flavor: str = None):
     # build the master metadata cache ; always update it
     get_master_metadata(overwrite=True)
 
-    if settype == 'precals':
+    # run pixel mask creation when requested
+    if create_pixmask:
         # loop over set of cameras in frame
         for camera in set(frame['camera']):
-            masters = find_masters(flavor, camera)
-        # pass master filenames into new function
-        # add new function here
+            masters = find_masters("object", camera)
+            mbias = masters.get('bias')
+            mdark = masters.get('dark')
+            mpixflat = masters.get('pixelflat')
+            # pass master filenames into new function
+            mpixmask = path.full('lvm_master', kind='mpixmask', drpver=drpver,
+                                    mjd=frame.mjd.iloc[0], tileid=frame.tileid.iloc[0],
+                                    camera=camera)
+            create_pixelmask(in_bias=mbias, in_dark=mdark, in_pixelflat=mpixflat, out_mask=mpixmask)
+
+        # update masters metadata to include new pixel masks
+        get_master_metadata(overwrite=True)
 
 
 def reduce_masters(mjd: int):
@@ -610,7 +612,7 @@ def reduce_masters(mjd: int):
         reduce_frame(path, master=True, **row)
 
 
-def run_drp(mjd: Union[int, str, list], bias: bool = False, dark: bool = False,
+def run_drp(mjd: Union[int, str, list], bias: bool = False, dark: bool = False, pixelflat: bool = False,
             skip_bd: bool = False, arc: bool = False, flat: bool = False,
             only_bd: bool = False, only_cal: bool = False, only_sci: bool = False,
             spec: int = None, camera: str = None, expnum: Union[int, str, list] = None,
@@ -642,7 +644,7 @@ def run_drp(mjd: Union[int, str, list], bias: bool = False, dark: bool = False,
     mjds = parse_mjds(mjd)
     if isinstance(mjds, list):
         for mjd in mjds:
-            run_drp(mjd=mjd, bias=bias, dark=dark, skip_bd=skip_bd, arc=arc, flat=flat,
+            run_drp(mjd=mjd, bias=bias, dark=dark, pixelflat=pixelflat, skip_bd=skip_bd, arc=arc, flat=flat,
                     only_bd=only_bd, only_cal=only_cal, only_sci=only_sci, spec=spec, camera=camera,
                     expnum=expnum, quick=quick)
         return
@@ -668,6 +670,8 @@ def run_drp(mjd: Union[int, str, list], bias: bool = False, dark: bool = False,
         sub = sub[sub['imagetyp'] == 'bias']
     if dark:
         sub = sub[sub['imagetyp'] == 'dark']
+    if pixelflat:
+        sub = sub[sub['imagetyp'] == 'pixelflat']
 
     # filter on camera or spectrograph
     if spec:
@@ -681,7 +685,7 @@ def run_drp(mjd: Union[int, str, list], bias: bool = False, dark: bool = False,
         sub = filter_expnum(sub, expnum)
 
     # get biases and darks
-    cond = sub['imagetyp'].isin(['bias', 'dark'])
+    cond = sub['imagetyp'].isin(['bias', 'dark', 'pixelflat'])
     precals = sub[cond]
     if len(precals) == 0 and not skip_bd:
         log.error(f'No biases or darks found for mjd {mjd}. Discontinuing reduction.')
@@ -689,9 +693,12 @@ def run_drp(mjd: Union[int, str, list], bias: bool = False, dark: bool = False,
     precals = precals.sort_values(['expnum', 'camera'])
 
     if not skip_bd:
+        # when to create pixel mask
+        on_pixflats = 'pixelflat' in set(precals['imagetyp'])
         # reduce biases / darks
-        reduce_set(precals, settype="precals", flavor='bias')
-        reduce_set(precals, settype="precals", flavor='dark')
+        reduce_set(precals, settype='precals', flavor='bias')
+        reduce_set(precals, settype='precals', flavor='dark', create_pixmask=not on_pixflats)
+        reduce_set(precals, settype='precals', flavor='pixelflat', create_pixmask=on_pixflats)
 
     # returning if only reducing bias/darks
     if only_bd:
