@@ -2380,6 +2380,7 @@ def loadImage(
     extension_data=None,
     extension_mask=None,
     extension_error=None,
+    extension_frames=None,
     extension_header=0,
 ):
     image = Image()
@@ -2388,6 +2389,7 @@ def loadImage(
         extension_data=extension_data,
         extension_mask=extension_mask,
         extension_error=extension_error,
+        extension_frames=extension_frames,
         extension_header=extension_header,
     )
 
