@@ -44,7 +44,7 @@ def skip_on_missing_input_path(input_file_args: list, reset_missing_optionals: b
                 if kwargs[name] is None and pars[name].default is None:
                     continue
                 # warning for optional input files that are missing
-                elif kwargs[name] is not None and pars[name].default is None:
+                elif kwargs[name] is not None and pars[name].default is None and not os.path.isfile(kwargs[name]):
                     log.warning(f"optional input {name} = '{kwargs[name]}' at {func.__name__} is missing")
                     if reset_missing_optionals:
                         kwargs[name] = None
@@ -129,7 +129,7 @@ def skip_if_drpqual_flags(flags: List[str], input_file_arg: str, reset_missing_o
             if kwargs[input_file_arg] is None and pars[input_file_arg].default is None:
                 return func(*args, **kwargs)
             # warning for optional input file that is missing
-            elif kwargs[input_file_arg] is not None and pars[input_file_arg].default is None:
+            elif kwargs[input_file_arg] is not None and pars[input_file_arg].default is None and not os.path.isfile(kwargs[input_file_arg]):
                 log.warning(f"optional input {input_file_arg} = '{kwargs[input_file_arg]}' at {func.__name__} is missing")
                 if reset_missing_optionals:
                     kwargs[input_file_arg] = None
