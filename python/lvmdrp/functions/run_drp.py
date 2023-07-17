@@ -258,6 +258,7 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
     log.info(f'Using master arc: {marc}')
     log.info(f'Using master pixel mask: {mpixmask}')
 
+    # only run these steps for individual exposures
     if not master:
         # create pixel mask if needed
         if flavor not in {'bias', 'dark', 'pixelflat'} and mpixmask is None:
