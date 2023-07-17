@@ -1290,8 +1290,8 @@ def findPeaksMaster2_drp(
 # TODO: graficar los coeficientes versus los puntos usados en el ajuste polinomial
 def trace_peaks(
     in_image: str,
-    in_peaks: str,
     out_trace: str,
+    in_peaks: str = None,
     disp_axis: str = "X",
     method: str = "hyperbolic",
     median_box: int = 5,
@@ -1371,10 +1371,22 @@ def trace_peaks(
             threshold * coadd
         )  # adjust the minimum contrast threshold for the peaks
 
-    # load the initial positions of the fibers at a certain column NEED TO BE REPLACED WITH XML handling
-    column, _, _, positions, bad_fibers = _read_fiber_ypix(in_peaks)
-    fibers = positions.size
-    good_fibers = numpy.logical_not(bad_fibers)
+    # load the initial positions of the fibers at a certain column
+    if in_peaks is None:
+        # read slitmap extension
+        slitmap = img.getSlitmap()
+        # BUG: fix this hardcoded value
+        column = 2000
+        positions = slitmap["ypix"]
+        fibers_status = slitmap["fibstatus"]
+        fibers = positions.size
+        bad_fibers = fibers_status == 1
+        good_fibers = numpy.logical_not(bad_fibers)
+    else:
+        column, _, _, positions, bad_fibers = _read_fiber_ypix(in_peaks)
+        fibers = positions.size
+        good_fibers = numpy.logical_not(bad_fibers)
+    
     # choose between  methods to measure the subpixel peak
     if method == "hyperbolic":
         steps = 1
