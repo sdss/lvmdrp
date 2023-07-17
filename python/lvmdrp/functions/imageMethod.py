@@ -844,7 +844,8 @@ def find_peaks_auto(
     ]
     table = pyfits.BinTableHDU().from_columns(columns)
     table.header["XPIX"] = (column, "X coordinate of the fibers [pix]")
-    table.writeto(out_peaks, overwrite=True)
+    hdu_list = pyfits.HDUList([pyfits.PrimaryHDU(header=img._header), table])
+    hdu_list.writeto(out_peaks, overwrite=True)
     # write .reg file for ds9
     if out_region is not None:
         with open(out_region, "w") as reg_out:
@@ -3389,18 +3390,6 @@ def create_pixelmask(
     nstd : int, optional
         number of sigmas above which a pixel will be masked, by default 3
     """
-    # TODO: Bad Pixel Mask: you should look for two types of bad pixels in two different frames:
-    # "hot pixels", for which you co-add all your bias subtracted darks, no matter the exposure time, and look for pixels that stand out of their local background.
-    # And "low QE pixels", for which you look for local outliers with respect to the local background in a master pixel flat.
-    # TODO: set a small nsigma threshold to pick up weak bad column
-    # TODO: add threshold for fraction of bad pixels in a column
-    # TODO: apply high threshold for hot pixels (don't follow a structure)
-
-    # NOTE: hot pixels are found in the darks, not in the flats
-    # NOTE: in the flats we find low QE pixels
-    # NOTE: run this funtion on bias, darks and pixelflats
-    # NOTE: combine all masks into a single one using OR
-
     # verify of pixelflat exists, ignore if not
     if in_pixelflat is not None and not os.path.isfile(in_pixelflat):
         log.warning(f"pixel flat at '{in_pixelflat}' not found, ignoring")
@@ -3410,7 +3399,7 @@ def create_pixelmask(
     for in_image in filter(lambda i: i is not None, [in_bias, in_dark, in_pixelflat]):
         img = loadImage(in_image)
 
-        log.info(f"creating pixel mask for '{in_image}'")
+        log.info(f"creating pixel mask using '{os.path.basename(in_image)}'")
 
         # define pixelmask image
         mask = Image(data=numpy.ones_like(img._data), mask=numpy.zeros_like(img._data, dtype=bool))
@@ -3475,7 +3464,7 @@ def create_pixelmask(
     new_header["DARKTIME"] = 0
     # define image object to store pixel mask
     new_mask = Image(data=mask._data, mask=numpy.any([mask._mask for mask in masks], axis=0), header=new_header)
-    new_mask._data[new_mask._mask] = numpy.nan
+    new_mask.apply_pixelmask()
     log.info(f"writing pixel mask to '{os.path.basename(out_mask)}'")
     new_mask.writeFitsData(out_mask)
 

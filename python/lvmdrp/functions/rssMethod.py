@@ -237,9 +237,10 @@ def determine_wavelength_solution(in_arc: str, out_wave: str, out_lsf: str,
     arc.loadFitsData(in_arc)  # load data
 
     # replace NaNs
-    mask_nan = numpy.isnan(arc._data) | numpy.isnan(arc._error)
-    arc._data[mask_nan] = 0
-    arc._error[mask_nan] = 0
+    mask = numpy.isnan(arc._data) | numpy.isnan(arc._error)
+    mask |= (arc._data < 0) | (arc._error < 0)
+    arc._data[mask] = 0
+    arc._error[mask] = 0
 
     channel = arc._header["CCD"][0]
     onlamp = ["ON", True, 'T', 1]
@@ -295,6 +296,12 @@ def determine_wavelength_solution(in_arc: str, out_wave: str, out_lsf: str,
     pixel = pixel[sort]
     ref_lines = ref_lines[sort]
     nlines = len(pixel)
+
+    plt.switch_backend("TKAgg")
+    fig, ax = plt.subplots(figsize=(16, 10), tight_layout=True)
+    ax.step(arc._pixels, arc._data[ref_fiber], color="0.2", lw=1)
+    ax.vlines(pixel, 0, numpy.nanmax(arc._data[ref_fiber]), color="tab:red", lw=0.5)
+    plt.show()
 
     if negative:
         log.info("flipping arc along flux direction")

@@ -121,7 +121,7 @@ def find_masters(flavor: str, camera: str) -> dict:
     return files
 
 
-def trace_fibers(in_file: str, camera: str, expnum: int, tileid: int, mjd: int):
+def trace_fibers(in_file: str, camera: str, tileid: int, mjd: int):
     """ Perform flat fiber tracing
 
     Runs the fiber trace peak finder algorithm and traces the peaks to
@@ -140,14 +140,10 @@ def trace_fibers(in_file: str, camera: str, expnum: int, tileid: int, mjd: int):
     mjd : int
         the MJD of observation
     """
-    # TODO
-    # check these output paths names; may need to change the tree paths to update the names
-    # or maybe the "kind" keyword is changed to "mpeaks" or "mtrace"
-
-    out_peaks = path.full("lvm_cal", drpver=drpver, tileid=tileid, mjd=mjd, camera=camera,
-                          expnum=expnum, kind='peaks', ext='fits')
-    out_trace = path.full("lvm_cal", drpver=drpver, tileid=tileid, mjd=mjd, camera=camera,
-                          expnum=expnum, kind='trace', ext='fits')
+    out_peaks = path.full('lvm_master', mjd=mjd, camera=camera, kind='mpeaks', tileid=tileid,
+                          drpver=drpver)
+    out_trace = path.full('lvm_master', mjd=mjd, camera=camera, kind='mtrace', tileid=tileid,
+                          drpver=drpver)
 
     # check for parent dir existence
     if not pathlib.Path(out_peaks).parent.is_dir():
@@ -177,9 +173,32 @@ def trace_fibers(in_file: str, camera: str, expnum: int, tileid: int, mjd: int):
         pass
 
 
-def find_file(kind, camera=None, mjd=None, tileid=None):
-    files = sorted(path.expand('lvm_cal', kind=kind, drpver=drpver, mjd=mjd, tileid=tileid,
-                   camera=camera, expnum='****', ext='fits'))
+def find_file(kind: str, camera: str = None, mjd: int = None, tileid: int = None) -> str:
+    """ Find a master file
+
+    Finds the master trace, wave, and lsf files.  These files are output
+    from the fiber tracing and wavelength calibration routines run on the mflat and marc
+    files.
+
+    Parameters
+    ----------
+    kind : str
+        The kind of file to find
+    camera : str, optional
+        The camera, by default None
+    mjd : int, optional
+        The MJD of the observation, by default None
+    tileid : int, optional
+        The tile id of the observartion, by default None
+
+    Returns
+    -------
+    str
+        the file path
+    """
+    files = sorted(path.expand('lvm_master', kind=kind, drpver=drpver, mjd=mjd, tileid=tileid,
+                   camera=camera))
+
     if not files:
         log.warning(f"No {kind} files found for {tileid}, {mjd}, {camera}.  Discontinuing reduction.")
         return
@@ -190,7 +209,7 @@ def find_file(kind, camera=None, mjd=None, tileid=None):
 
 def reduce_frame(filename: str, camera: str = None, mjd: int = None,
                  expnum: int = None, tileid: int = None,
-                 flavor: str = None, **fkwargs):
+                 flavor: str = None, master: bool = None, **fkwargs):
     """ Reduce a single raw frame exposure
 
     Reduces a single LVM raw frame sdR exposure
@@ -209,6 +228,8 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
         the tile id of the frame, by default None
     flavor : str, optional
         the flavor or image type, by default None
+    master : bool, optional
+        flag if we are reducing master flats/arcs
     """
     # start logging for this mjd
     start_logging(mjd, tileid)
@@ -219,88 +240,78 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
     flavor = flavor or fkwargs.get('imagetyp')
     flavor = 'fiberflat' if flavor == 'flat' else flavor
 
-    # preprocess the frames
-    log.info('--- Preprocessing raw frame ---')
-    kwargs = get_config_options('reduction_steps.preproc_raw_frame', flavor)
-    log.info(f'custom configuration parameters for preproc_raw_frame: {repr(kwargs)}')
-    out_pre = path.full('lvm_anc', kind='p', imagetype=flavor, mjd=mjd, camera=camera,
-                        drpver=drpver, expnum=expnum, tileid=tileid)
-    # create the root dir if needed
-    if not pathlib.Path(out_pre).parent.exists():
-        pathlib.Path(out_pre).parent.mkdir(parents=True, exist_ok=True)
-
-    preproc_raw_frame(filename, out_image=out_pre, **kwargs)
-
-    # check master frames
-    masters = find_masters(flavor, camera)
+    # check master frames; use flavor="object" to get all the master files
+    masters = find_masters("object", camera)
     mbias = masters.get('bias')
     mdark = masters.get('dark')
     mflat = masters.get('flat')
     mpixflat = masters.get('pixelflat')
+    marc = masters.get('arc')
     log.info(f'Using master bias: {mbias}')
     log.info(f'Using master dark: {mdark}')
     log.info(f'Using master flat: {mflat}')
+    log.info(f'Using master arc: {marc}')
     log.info(f'Using master pixel flat: {mpixflat}')
 
-    # process the flat/arc frames
-    in_cal = path.full("lvm_anc", kind='p', imagetype=flavor, mjd=mjd, drpver=drpver,
-                       camera=camera, tileid=tileid, expnum=expnum)
-    out_cal = path.full("lvm_anc", kind='c', imagetype=flavor, mjd=mjd, drpver=drpver,
-                        camera=camera, tileid=tileid, expnum=expnum)
+    # only run these steps for individual exposures
+    if not master:
+        # preprocess the frames
+        log.info('--- Preprocessing raw frame ---')
+        kwargs = get_config_options('reduction_steps.preproc_raw_frame', flavor)
+        log.info(f'custom configuration parameters for preproc_raw_frame: {repr(kwargs)}')
+        out_pre = path.full('lvm_anc', kind='p', imagetype=flavor, mjd=mjd, camera=camera,
+                            drpver=drpver, expnum=expnum, tileid=tileid)
+        # create the root dir if needed
+        if not pathlib.Path(out_pre).parent.exists():
+            pathlib.Path(out_pre).parent.mkdir(parents=True, exist_ok=True)
 
-    log.info(f'Output preproc file: {in_cal}')
-    log.info('--- Running detrend frame ---')
-    kwargs = get_config_options('reduction_steps.detrend_frame', flavor)
-    log.info(f'custom configuration parameters for detrend_frame: {repr(kwargs)}')
-    detrend_frame(in_image=in_cal, out_image=out_cal,
-                  in_bias=mbias, in_dark=mdark, in_pixelflat=mpixflat, **kwargs)
-    log.info(f'Output calibrated file: {out_cal}')
+        preproc_raw_frame(filename, out_image=out_pre, **kwargs)
 
-    # TODO
-    # reduce individual frames for bias/darks/flats/arcs up to detrend
-    # exit after indivi arcs/flats
-    # reduce_set creates marc and mflat master frames
+        # detrend the frames
+        in_cal = path.full("lvm_anc", kind='p', imagetype=flavor, mjd=mjd, drpver=drpver,
+                           camera=camera, tileid=tileid, expnum=expnum)
+        out_cal = path.full("lvm_anc", kind='c', imagetype=flavor, mjd=mjd, drpver=drpver,
+                            camera=camera, tileid=tileid, expnum=expnum)
 
-    # end reduction for bias and darks
-    if flavor in {'bias', 'dark', 'pixelflat'}:
+        log.info(f'Output preproc file: {in_cal}')
+        log.info('--- Running detrend frame ---')
+        kwargs = get_config_options('reduction_steps.detrend_frame', flavor)
+        log.info(f'custom configuration parameters for detrend_frame: {repr(kwargs)}')
+        detrend_frame(in_image=in_cal, out_image=out_cal,
+                      in_bias=mbias, in_dark=mdark, in_pixelflat=mpixflat, **kwargs)
+        log.info(f'Output calibrated file: {out_cal}')
+
+    # end reduction for individual bias, darks, arcs and flats
+    if flavor in {'bias', 'dark', 'arc', 'fiberflat', 'flat'} and not master:
         return
 
-    # TODO
-    # add this extension also to the master flat file
+    # compute the input calibration file path
+    if master:
+        cal_file = marc if flavor == 'arc' else mflat
+    else:
+        cal_file = path.full("lvm_anc", kind='c', imagetype=flavor, mjd=mjd, drpver=drpver,
+                             camera=camera, tileid=tileid, expnum=expnum)
+
     # add the fibermap to all flat and science files
     if flavor in {'fiberflat', 'flat', 'object', 'science'}:
         log.info('Adding slitmap extension')
-        add_extension(fibermap, out_cal)
+        add_extension(fibermap, cal_file)
 
-    # TODO
-    # input to fiber tracing is the master flat file, change out_cal to the mflat file
-
-    # TODO - mflat and marc redutions start here
-
-    # fiber tracing
-    if 'flat' in flavor:
+    # fiber tracing for master flat
+    if master and 'flat' in flavor:
         log.info('--- Running fiber trace ---')
-        trace_fibers(out_cal, camera, expnum, tileid, mjd)
+        trace_fibers(mflat, camera, tileid, mjd)
 
     # extract fiber spectra
-    cal_file = path.full("lvm_anc", kind='c', imagetype=flavor, mjd=mjd, drpver=drpver,
-                         camera=camera, tileid=tileid, expnum=expnum)
-    xout_file = path.full("lvm_anc", kind='x', imagetype=flavor, mjd=mjd, drpver=drpver,
-                          camera=camera, tileid=tileid, expnum=expnum)
+
+    # get the output file path
+    xout_file = create_output_path(kind='x', flavor=flavor, mjd=mjd, tileid=tileid,
+                                   camera=camera, expnum=expnum, master=master)
 
     # find the fiber trace file
-    trace_file = find_file('trace', mjd=mjd, tileid=tileid, camera=camera)
+    trace_file = find_file('mtrace', mjd=mjd, tileid=tileid, camera=camera)
     if not trace_file:
         return
-
-    # TODO
-    # we want to extract the individual science frames, master flats and master arcs
-    # input trace_file is the input master mtrace_file
-    # input cal_file is either the indiv science or the master file name
-    # output xout file is the same, lvm-xobject of indiv (has expnum), or lvm-xarc, or lvm-xfiberflat (no expnum)
-
-    # reduce indiv flats, arcs - creates mflat, marc
-    # reduce mflat, marc, mflat again (as like the original flat/arc)
 
     # perform the fiber extraction
     log.info('--- Extracting fiber spectra ---')
@@ -309,36 +320,28 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
     extract_spectra(in_image=cal_file, out_rss=xout_file, in_trace=trace_file, **kwargs)
     log.info(f'Output extracted file: {xout_file}')
 
-    # TODO
-    # input to wavelength solution is the master arc file, change xout_file to the marc file
-    # and change output paths wave/lsf to "mwave" and "mlsf"
-
     # determine the wavelength solution
-    if flavor == 'arc':
-        wave_file = path.full('lvm_cal', kind='wave', drpver=drpver, mjd=mjd, tileid=tileid,
-                              camera=camera, expnum=expnum, ext='fits')
-        lsf_file = path.full('lvm_cal', kind='lsf', drpver=drpver, mjd=mjd, tileid=tileid,
-                             camera=camera, expnum=expnum, ext='fits')
-        # line_ref = pathlib.Path(__file__).parent.parent / f"etc/lvm-neon_nist_{camera[0]}.txt"
+    if master and flavor == 'arc':
+        wave_file = path.full('lvm_master', mjd=mjd, camera=camera, kind='mwave', tileid=tileid,
+                              drpver=drpver)
+        lsf_file = path.full('lvm_master', mjd=mjd, camera=camera, kind='mlsf', tileid=tileid,
+                             drpver=drpver)
         kwargs = get_config_options('reduction_steps.determine_wavesol')
         log.info('--- Determining wavelength solution ---')
         log.info(f'custom configuration parameters for determine_wave_solution: {repr(kwargs)}')
-        determine_wavelength_solution(in_arc=xout_file, out_wave=wave_file, out_lsf=lsf_file,
+        determine_wavelength_solution(in_arc=marc, out_wave=wave_file, out_lsf=lsf_file,
                                       **kwargs)
         log.info(f'Output wave peak traceset file: {wave_file}')
         log.info(f'Output lsf traceset file: {lsf_file}')
 
-    # TODO
-    # same as the extract_spectra steps, indiv science and master flats/arcs
-    # check the wave_file, and lsf_file names and wout_file names
 
     # perform wavelength calibration
-    wave_file = find_file('wave', mjd=mjd, tileid=tileid, camera=camera)
-    lsf_file = find_file('lsf', mjd=mjd, tileid=tileid, camera=camera)
+    wave_file = find_file('mwave', mjd=mjd, tileid=tileid, camera=camera)
+    lsf_file = find_file('mlsf', mjd=mjd, tileid=tileid, camera=camera)
     if not (wave_file and lsf_file):
         return
-    wout_file = path.full("lvm_anc", kind='w', imagetype=flavor, mjd=mjd, drpver=drpver,
-                          camera=camera, tileid=tileid, expnum=expnum)
+    wout_file = create_output_path(kind='w', flavor=flavor, mjd=mjd, tileid=tileid,
+                                   camera=camera, expnum=expnum, master=master)
     log.info('--- Creating pixel table ---')
     create_pixel_table(in_rss=xout_file, out_rss=wout_file, arc_wave=wave_file, arc_fwhm=lsf_file)
     log.info(f'Output calibrated wavelength file: {wout_file}')
@@ -347,13 +350,10 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
     CHANNEL_WL = {"b": (3600, 5930), "r": (5660, 7720), "z": (7470, 9800)}
     wave_range = CHANNEL_WL[camera[0]]
 
-    # TODO
-    # same as the extract_spectra steps, indiv science and master flats/arcs
-    # check the hout_file lvm-hobject, lvm-harc, lvm-hflat (these are based on the masters)
 
     # resample onto a common wavelength
-    hout_file = path.full("lvm_anc", kind='h', imagetype=flavor, mjd=mjd, drpver=drpver,
-                          camera=camera, tileid=tileid, expnum=expnum)
+    hout_file = create_output_path(kind='h', flavor=flavor, mjd=mjd, tileid=tileid,
+                                   camera=camera, expnum=expnum, master=master)
     kwargs = get_config_options('reduction_steps.resample_wave', flavor)
     log.info('--- Resampling wavelength grid ---')
     log.info(f'custom configuration parameters for resample_wave: {repr(kwargs)}')
@@ -364,6 +364,46 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
     # write out RSS
 
     # perform quality checks
+
+
+def create_output_path(kind: str, flavor: str, mjd: int, tileid: int, camera: str,
+                       expnum: int = None, master: bool = None) -> str:
+    """ Creates the output file path
+
+    Creates the output file path for the science frames or the master arc/flats.
+    For example, the extracted fiber spectra is
+    "1111/60115/ancillary/lvm-xobject-b1-00060115.fits" for science frames
+    or "1111/60115/calib/lvm-xmarc-b1.fits" for the master arc frame.
+
+    Parameters
+    ----------
+    kind : str
+        The kind of file to write
+    flavor : str
+        The flavor or imagetype of the observation
+    mjd : int
+        The MJD of the observation
+    tileid : int
+        The tile id of the observation
+    camera : str
+        The camera name, e.g. b1
+    expnum : int
+        The exposure number
+    master : bool
+        Flag to create the master output path
+
+    Returns
+    -------
+    str
+        the output file path
+    """
+
+    if master:
+        return path.full('lvm_master', mjd=mjd, camera=camera, kind=f'{kind}m{flavor}',
+                         tileid=tileid, drpver=drpver)
+    else:
+        return path.full("lvm_anc", kind=kind, imagetype=flavor, mjd=mjd, drpver=drpver,
+                         camera=camera, tileid=tileid, expnum=expnum)
 
 
 def parse_mjds(mjd: Union[int, str, list, tuple]) -> Union[int, list]:
@@ -537,10 +577,29 @@ def reduce_set(frame: pd.DataFrame, settype: str = None, flavor: str = None):
     # Alfredo to do this
     if settype == 'precals':
         # loop over set of cameras in frame
-        # get names of the master files (find_masters)
+        for camera in set(frame['camera']):
+            masters = find_masters(flavor, camera)
         # pass master filenames into new function
         # add new function here
-        pass
+
+
+def reduce_masters(mjd: int):
+    """ Reduce master arcs and flats """
+    masters = get_master_metadata()
+    sub = masters[(masters['mjd'] == mjd) & (masters['imagetyp'].isin({'arc', 'flat'}))]
+    path = create_master_path(sub.iloc[0])
+
+    # sort the frames to flat, arc, flat
+    sub = sort_cals(sub, master=True)
+
+    # reduce frames
+    rows = sub.to_dict('records')
+    for row in rows:
+        # construct master path
+        path = create_master_path(pd.Series(row))
+
+        # reduce the frame, pass in entire parameter set
+        reduce_frame(path, master=True, **row)
 
 
 def run_drp(mjd: Union[int, str, list], bias: bool = False, dark: bool = False,
@@ -647,17 +706,17 @@ def run_drp(mjd: Union[int, str, list], bias: bool = False, dark: bool = False,
     # group the frames
     sub = sub.sort_values(['expnum', 'camera'])
 
-    # sort the table by flat, arc, flat, science
-    if not only_sci:
-        sub = sort_cals(sub)
-
     # split into cals, and science
     cals = sub[~(sub['imagetyp'] == 'object')]
     sci = sub[sub['imagetyp'] == 'object']
 
-    # reduce the flats/arcs
+    # reduce the individual flats/arcs
     if not only_sci:
         reduce_set(cals, settype='cals')
+
+    # reduce the master flat/arcs
+    if not only_sci:
+        reduce_masters(mjd=mjd)
 
     # return if only calibration set
     if only_cal or flat or arc:
@@ -725,7 +784,7 @@ def write_config_file():
         f.write(yaml.safe_dump(dict(config), sort_keys=False, indent=2))
 
 
-def sort_cals(df: pd.DataFrame) -> pd.DataFrame:
+def sort_cals(df: pd.DataFrame, master: bool = False) -> pd.DataFrame:
     """ Sort raw frames table by calibrations
 
     Sorts and orders the table of raw frames by calibration,
@@ -738,6 +797,8 @@ def sort_cals(df: pd.DataFrame) -> pd.DataFrame:
     ----------
     df : pd.DataFrame
         the dataframe of raw frames to process
+    master : bool
+        Flag indicating the frame is for masters
 
     Returns
     -------
@@ -759,7 +820,8 @@ def sort_cals(df: pd.DataFrame) -> pd.DataFrame:
     __ = [flavors.remove(i) for i in missing]
 
     # sort and set index
-    ss = df.sort_values(['camera', 'expnum'])
+    sort_fields = ['camera'] if master else ['camera', 'expnum']
+    ss = df.sort_values(sort_fields)
     ee = ss.set_index('imagetyp', drop=False).loc[flavors]
 
     # check dimensions
