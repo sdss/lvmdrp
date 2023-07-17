@@ -171,7 +171,7 @@ def _bg_subtraction(images, quad_sections, bg_sections):
 
 
 class Image(Header):
-    def __init__(self, data=None, header=None, mask=None, error=None, origin=None, individual_frames=None):
+    def __init__(self, data=None, header=None, mask=None, error=None, origin=None, individual_frames=None, slitmap=None):
         Header.__init__(self, header=header, origin=origin)
         self._data = data
         if self._data is not None:
@@ -183,6 +183,8 @@ class Image(Header):
         self._origin = origin
         # individual frames that went into the master creation
         self._individual_frames = individual_frames
+        # set slit map extension
+        self._slitmap = slitmap
 
     def __add__(self, other):
         """
@@ -1011,6 +1013,7 @@ class Image(Header):
         extension_mask=None,
         extension_error=None,
         extension_frames=None,
+        extension_slitmap=None,
         extension_header=0,
     ):
         """
@@ -1041,6 +1044,7 @@ class Image(Header):
             and extension_mask is None
             and extension_error is None
             and extension_frames is None
+            and extension_slitmap is None
         ):
             self._data = hdu[0].data
             self._dim = self._data.shape  # set dimension
@@ -1052,6 +1056,8 @@ class Image(Header):
                         self._mask = hdu[i].data.astype("bool")
                     elif hdu[i].header["EXTNAME"].split()[0] == "FRAMES":
                         self._individual_frames = Table(hdu[i].data)
+                    elif hdu[i].header["EXTNAME"].split()[0] == "SLITMAP":
+                        self._slitmap = hdu[i].data
 
         else:
             if extension_data is not None:
@@ -1067,6 +1073,8 @@ class Image(Header):
                 self._dim = self._error.shape  # set dimension
             if extension_frames is not None:
                 self._individual_frames = Table(hdu[extension_frames].data)
+            if extension_slitmap is not None:
+                self._slitmap = Table(hdu[extension_slitmap].data)
 
         # set is_masked attribute
         self.is_masked = numpy.isnan(self._data).any()
@@ -1076,7 +1084,7 @@ class Image(Header):
         hdu.close()
 
     def writeFitsData(
-        self, filename, extension_data=None, extension_mask=None, extension_error=None, extension_frames=None
+        self, filename, extension_data=None, extension_mask=None, extension_error=None, extension_frames=None, extension_slitmap=None
     ):
         """
         Save information from an Image into a FITS file. A single or multiple extension file can be created.
@@ -1093,7 +1101,7 @@ class Image(Header):
         extension_error : int (0, 1, or 2), optional with default: None
             Number of the FITS extension containing the errors for the values
         """
-        hdus = [None, None, None, None]  # create empty list for hdu storage
+        hdus = [None, None, None, None, None]  # create empty list for hdu storage
 
         # create primary hdus and image hdus
         # data hdu
@@ -1102,6 +1110,7 @@ class Image(Header):
             and extension_error is None
             and extension_mask is None
             and extension_frames is None
+            and extension_slitmap is None
         ):
             hdus[0] = pyfits.PrimaryHDU(self._data)
             if self._error is not None:
@@ -1110,6 +1119,8 @@ class Image(Header):
                 hdus[2] = pyfits.ImageHDU(self._mask.astype("uint8"), name="BADPIX")
             if self._individual_frames is not None:
                 hdus[3] = pyfits.BinTableHDU(self._individual_frames, name="FRAMES")
+            if self._slitmap is not None:
+                hdus[4] = pyfits.BinTableHDU(self._slitmap, name="SLITMAP")
         else:
             if extension_data == 0:
                 hdus[0] = pyfits.PrimaryHDU(self._data)
@@ -1135,6 +1146,12 @@ class Image(Header):
                 hdu = pyfits.PrimaryHDU(self._individual_frames)
             elif extension_frames > 0 and extension_frames is not None:
                 hdus[extension_frames] = pyfits.BinTableHDU(self._individual_frames, name="FRAMES")
+            
+            # slitmap hdu
+            if extension_slitmap == 0:
+                hdu = pyfits.PrimaryHDU(self._slitmap)
+            elif extension_slitmap > 0 and extension_slitmap is not None:
+                hdus[extension_slitmap] = pyfits.BinTableHDU(self._slitmap, name="SLITMAP")
 
         # remove not used hdus
         for i in range(len(hdus)):
@@ -2374,12 +2391,20 @@ class Image(Header):
                 img._header.get("EXPTIME"),
             ])
 
+    def getSlitmap(self):
+        return self._slitmap
+    
+    def setSlitmap(self, slitmap):
+        self._slitmap = slitmap
+
 
 def loadImage(
     infile,
     extension_data=None,
     extension_mask=None,
     extension_error=None,
+    extension_frames=None,
+    extension_slitmap=None,
     extension_header=0,
 ):
     image = Image()
@@ -2388,6 +2413,8 @@ def loadImage(
         extension_data=extension_data,
         extension_mask=extension_mask,
         extension_error=extension_error,
+        extension_frames=extension_frames,
+        extension_slitmap=extension_slitmap,
         extension_header=extension_header,
     )
 
@@ -2574,7 +2601,7 @@ def combineImages(
         new_header = images[0]._header
 
         nexp = len(images)
-        new_header["ISMASTER"] = (nexp > 1, "Is this a combined (master) frame")
+        new_header["ISMASTER"] = (True, "Is this a combined (master) frame")
         new_header["NFRAMES"] = (nexp, "Number of exposures combined")
         new_header["STATCOMB"] = (method, "Statistic used to combine images")
     else:

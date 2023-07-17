@@ -13,9 +13,10 @@ from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from numpy import polynomial
 from scipy import signal
 
+from lvmdrp import log
 from lvmdrp.core import rss
 from lvmdrp.core.constants import SPEC_CHANNELS
-from lvmdrp.utils import logger, spec_from_lines
+from lvmdrp.utils import spec_from_lines
 
 
 font = {"family": "sans-serif", "weight": "bold", "size": 12}
@@ -23,7 +24,7 @@ font = {"family": "sans-serif", "weight": "bold", "size": 12}
 matplotlib.rc("font", **font)
 
 
-log = logger.get_logger(__name__)
+plt.switch_backend("TKAgg")
 
 
 class SolveWavelength:
@@ -111,15 +112,19 @@ class SolveWavelength:
         log.info(f"loading extracted RSS '{self.extracted_fits}'")
         spectra = rss.loadRSS(self.extracted_fits)
         # apply pixel mask
-        spectra._data = spectra._data * (~spectra._mask)
+        mask = spectra._mask | np.isnan(spectra._data) | np.isnan(spectra._error)
+        mask |= (spectra._data < 0) | (spectra._error < 0)
+        spectra._data[mask] = 0
+        spectra._error[mask] = 0
+        # spectra._data = spectra._data * (~spectra._mask)
         # select spectra
         iy = self.fiber_id - self.ncoadd // 2
         fy = self.fiber_id + self.ncoadd // 2
         # plot spectrum
         log.info(f"coadding spectra in the fiber range {iy} -- {fy}")
         self.xdata = np.arange(spectra._data.shape[1])
-        self.ydata = spectra._data[iy : fy + 1, :].sum(axis=0)
-        self.ydata /= self.ydata.max()
+        self.ydata = np.nansum(spectra._data[iy : fy + 1, :], axis=0)
+        self.ydata /= np.nanmax(self.ydata)
         self.ydata = np.sqrt(np.abs(np.nanmin(self.ydata)) + self.ydata)
 
     def _fit_wavelength(self):
@@ -191,7 +196,7 @@ class SolveWavelength:
                 self.pixmap[mask, 0], sigma=2, wavelength=self.xdata
             )
             corr = signal.correlate(self.ydata, pix_spec, mode="full")
-            shift = np.argmax(corr) - pix_spec.size
+            shift = np.nanargmax(corr) - pix_spec.size
             log.info(f"best correlation {shift = } pixels")
             self.pixmap[:, 0] = self.pixmap[:, 0] + shift
 
@@ -203,7 +208,11 @@ class SolveWavelength:
                 self.ax_pix.axvspan(x_min, x_max, fc="0.5", lw=0, alpha=0.5)
                 self.ax_pix.plot(
                     [x_peak],
-                    [self.ydata[(x_min <= self.xdata) & (self.xdata <= x_max)].max()],
+                    [
+                        np.nanmax(
+                            self.ydata[(x_min <= self.xdata) & (self.xdata <= x_max)]
+                        )
+                    ],
                     "or",
                     mew=0.5,
                     ms=5,
@@ -224,7 +233,11 @@ class SolveWavelength:
                 self.ax_pix.axvspan(x_min, x_max, fc="0.8", lw=0, alpha=0.5)
                 self.ax_pix.plot(
                     [x_peak],
-                    [self.ydata[(x_min <= self.xdata) & (self.xdata <= x_max)].max()],
+                    [
+                        np.nanmax(
+                            self.ydata[(x_min <= self.xdata) & (self.xdata <= x_max)]
+                        )
+                    ],
                     "ok",
                     mew=0.5,
                     ms=3,

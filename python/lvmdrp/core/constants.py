@@ -100,16 +100,17 @@ SKYCORR_PAR_MAP = {
     "PLOT_TYPE": "plotType",
 }
 
-BASIC_CALIBRATION_TYPES = ["bias", "dark", "pixelflat"]
+BASIC_CALIBRATION_TYPES = ["pixmask", "bias", "dark", "pixelflat"]
 CALIBRATION_TYPES = BASIC_CALIBRATION_TYPES + ["flat", "arc"]
 FRAMES_PRIORITY = CALIBRATION_TYPES + ["object"]
 FRAMES_CALIB_NEEDS = {
     "bias": [],
     "dark": ["bias"],
     "pixelflat": ["bias", "dark"],
-    "flat": ["bias", "dark", "pixelflat"],
-    "arc": ["bias", "dark", "pixelflat", "flat"],
-    "object": ["bias", "dark", "pixelflat", "flat", "arc"],
+    "pixmask": ["bias", "dark", "pixelflat"],
+    "flat": ["pixmask", "bias", "dark", "pixelflat"],
+    "arc": ["pixmask", "bias", "dark", "pixelflat", "flat"],
+    "object": ["pixmask", "bias", "dark", "pixelflat", "flat", "arc"],
 }
 
 # spectrograph channels

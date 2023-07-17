@@ -281,7 +281,6 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
                       in_bias=mbias, in_dark=mdark, in_pixelflat=mpixflat, **kwargs)
         log.info(f'Output calibrated file: {out_cal}')
 
-
     # end reduction for individual bias, darks, arcs and flats
     if flavor in {'bias', 'dark', 'arc', 'fiberflat', 'flat'} and not master:
         return
@@ -294,7 +293,7 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
                              camera=camera, tileid=tileid, expnum=expnum)
 
     # add the fibermap to all flat and science files
-    if flavor in {'fiberflat', 'flat', 'pixelflat', 'object', 'science'}:
+    if flavor in {'fiberflat', 'flat', 'object', 'science'}:
         log.info('Adding slitmap extension')
         add_extension(fibermap, cal_file)
 
