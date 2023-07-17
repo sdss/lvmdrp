@@ -112,7 +112,11 @@ class SolveWavelength:
         log.info(f"loading extracted RSS '{self.extracted_fits}'")
         spectra = rss.loadRSS(self.extracted_fits)
         # apply pixel mask
-        spectra._data = spectra._data * (~spectra._mask)
+        mask = spectra._mask | np.isnan(spectra._data) | np.isnan(spectra._error)
+        mask |= (spectra._data < 0) | (spectra._error < 0)
+        spectra._data[mask] = 0
+        spectra._error[mask] = 0
+        # spectra._data = spectra._data * (~spectra._mask)
         # select spectra
         iy = self.fiber_id - self.ncoadd // 2
         fy = self.fiber_id + self.ncoadd // 2
