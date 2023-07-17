@@ -2576,7 +2576,7 @@ def combineImages(
         new_header = images[0]._header
 
         nexp = len(images)
-        new_header["ISMASTER"] = (nexp > 1, "Is this a combined (master) frame")
+        new_header["ISMASTER"] = (True, "Is this a combined (master) frame")
         new_header["NFRAMES"] = (nexp, "Number of exposures combined")
         new_header["STATCOMB"] = (method, "Statistic used to combine images")
     else:
