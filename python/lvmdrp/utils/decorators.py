@@ -7,6 +7,7 @@
 # @Copyright: SDSS-V LVM
 
 import os
+import inspect
 from functools import wraps
 from typing import List
 
@@ -16,7 +17,7 @@ from lvmdrp import log
 from lvmdrp.utils.bitmask import QualityFlag
 
 
-def skip_on_missing_input_path(input_file_args: list):
+def skip_on_missing_input_path(input_file_args: list, reset_missing_optionals: bool = True):
     """decorator to skip a task if any of the input files is missing
 
     Parameters
@@ -37,6 +38,22 @@ def skip_on_missing_input_path(input_file_args: list):
                 # skip argument if not present in kwargs
                 if name not in kwargs:
                     continue
+                # get function parameters
+                pars = inspect.signature(func).parameters
+                # silently continue if input file is optional, is set to None and has default None
+                if kwargs[name] is None and pars[name].default is None:
+                    continue
+                # warning for optional input files that are missing
+                elif kwargs[name] is not None and pars[name].default is None:
+                    log.warning(f"optional input {name} = '{kwargs[name]}' at {func.__name__} is missing")
+                    if reset_missing_optionals:
+                        kwargs[name] = None
+                    continue
+                # skip task if input file is required and is set to None
+                elif kwargs[name] is None and pars[name].default == inspect._empty:
+                    log.error(f"required input {name} is set to None at {func.__name__}")
+                    return
+                # skip task if input file is missing
                 if not os.path.isfile(file_path := kwargs[name]):
                     log.error(f"missing input {name} = '{file_path}' at {func.__name__}")
                     return
@@ -86,7 +103,7 @@ def drop_missing_input_paths(input_file_args: List[list]):
     return decorator
 
 
-def skip_if_drpqual_flags(flags: List[str], input_file_arg: str):
+def skip_if_drpqual_flags(flags: List[str], input_file_arg: str, reset_missing_optionals: bool = True):
     """decorator to skip a task if any of the drpqual flags is True
 
     Parameters
@@ -103,6 +120,24 @@ def skip_if_drpqual_flags(flags: List[str], input_file_arg: str):
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
+            # skip argument if not present in kwargs
+            if input_file_arg not in kwargs:
+                return func(*args, **kwargs)
+            # get function parameters
+            pars = inspect.signature(func).parameters
+            # silently return if input file is optional, is set to None and has default None
+            if kwargs[input_file_arg] is None and pars[input_file_arg].default is None:
+                return func(*args, **kwargs)
+            # warning for optional input file that is missing
+            elif kwargs[input_file_arg] is not None and pars[input_file_arg].default is None:
+                log.warning(f"optional input {input_file_arg} = '{kwargs[input_file_arg]}' at {func.__name__} is missing")
+                if reset_missing_optionals:
+                    kwargs[input_file_arg] = None
+                return func(*args, **kwargs)
+            # skip task if input file is required and is set to None
+            elif kwargs[input_file_arg] is None and pars[input_file_arg].default == inspect._empty:
+                log.error(f"required input {input_file_arg} is set to None at {func.__name__}")
+                return
             # quickly extract the drpqual bitmaks from the header
             drpqual = QualityFlag(fits.getheader(kwargs[input_file_arg]).get("DRPQUAL", QualityFlag(0)))
             if len(flags_set := set(flags).intersection(drpqual.get_name().split(","))) > 0:
