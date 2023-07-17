@@ -460,7 +460,7 @@ def get_master_metadata(overwrite: bool = None) -> pd.DataFrame:
     """
 
     # glob for all file master calibration files, only include bias,darks,arcs,flats
-    files = list(pathlib.Path(os.getenv("LVM_SPECTRO_REDUX")).rglob("*calib/*lvm-m[bdaf]*"))
+    files = list(pathlib.Path(os.getenv("LVM_SPECTRO_REDUX")).rglob("*calib/*lvm-m[bdpaf]*"))
 
     if _load_or_create_store(kind="master", mode="r") and not overwrite:
         log.info("Loading existing metadata store.")
@@ -1193,16 +1193,14 @@ def match_master_metadata(
         a dictionary containing the matched master calibration frames
     """
     # normalize flat flavor
-    if target_imagetyp in {"fiberflat", "pixelflat"}:
+    if target_imagetyp in {"fiberflat", "flat"}:
         target_imagetyp = "flat"
 
     # locate calibration needs
     frame_needs = FRAMES_CALIB_NEEDS.get(target_imagetyp)
     log.info(
-        (
-            f"target frame of type '{target_imagetyp}' "
-            f"needs calibration frames: {', '.join(frame_needs) or None}"
-        )
+        f"target frame of type '{target_imagetyp}' "
+        f"needs calibration frames: {', '.join(frame_needs) or None}"
     )
     # initialize master calibration matches
     calib_frames = dict.fromkeys(frame_needs)
