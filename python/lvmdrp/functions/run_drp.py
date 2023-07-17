@@ -10,8 +10,9 @@ from functools import lru_cache
 
 from astropy.io import fits
 from astropy.table import Table
-from lvmdrp.functions.imageMethod import (preproc_raw_frame, create_master_frame,
-                                          detrend_frame, find_peaks_auto, trace_peaks,
+from lvmdrp.functions.imageMethod import (preproc_raw_frame, create_master_frame, 
+                                          create_pixelmask, detrend_frame,
+                                          find_peaks_auto, trace_peaks,
                                           extract_spectra)
 from lvmdrp.functions.rssMethod import (determine_wavelength_solution, create_pixel_table,
                                         resample_wavelength, join_spec_channels)
@@ -219,6 +220,29 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
     flavor = flavor or fkwargs.get('imagetyp')
     flavor = 'fiberflat' if flavor == 'flat' else flavor
 
+    # check master frames
+    masters = find_masters(flavor, camera)
+    mbias = masters.get('bias')
+    mdark = masters.get('dark')
+    mflat = masters.get('flat')
+    mpixflat = masters.get('pixelflat')
+    mpixmask = masters.get('pixmask')
+
+    # create pixel mask if needed
+    if flavor not in {'bias', 'dark', 'pixelflat'} and mpixmask is None:
+        mpixmask = path.full('lvm_master', kind='mpixmask', drpver=drpver, mjd=mjd, tileid=tileid,
+                                camera=camera)
+        create_pixelmask(in_bias=mbias, in_dark=mdark, in_pixelflat=mflat, out_mask=mpixmask)
+
+        get_master_metadata(overwrite=True)
+
+    # log the master frames
+    log.info(f'Using master bias: {mbias}')
+    log.info(f'Using master dark: {mdark}')
+    log.info(f'Using master flat: {mflat}')
+    log.info(f'Using master pixel flat: {mpixflat}')
+    log.info(f'Using master pixel mask: {mpixmask}')
+
     # preprocess the frames
     log.info('--- Preprocessing raw frame ---')
     kwargs = get_config_options('reduction_steps.preproc_raw_frame', flavor)
@@ -229,18 +253,7 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
     if not pathlib.Path(out_pre).parent.exists():
         pathlib.Path(out_pre).parent.mkdir(parents=True, exist_ok=True)
 
-    preproc_raw_frame(filename, out_image=out_pre, **kwargs)
-
-    # check master frames
-    masters = find_masters(flavor, camera)
-    mbias = masters.get('bias')
-    mdark = masters.get('dark')
-    mflat = masters.get('flat')
-    mpixflat = masters.get('pixelflat')
-    log.info(f'Using master bias: {mbias}')
-    log.info(f'Using master dark: {mdark}')
-    log.info(f'Using master flat: {mflat}')
-    log.info(f'Using master pixel flat: {mpixflat}')
+    preproc_raw_frame(in_image=filename, in_mask=mpixmask, out_image=out_pre, **kwargs)
 
     # process the flat/arc frames
     in_cal = path.full("lvm_anc", kind='p', imagetype=flavor, mjd=mjd, drpver=drpver,
@@ -530,11 +543,6 @@ def reduce_set(frame: pd.DataFrame, settype: str = None, flavor: str = None):
     # build the master metadata cache ; always update it
     get_master_metadata(overwrite=True)
 
-    # TODO
-    # add step after master bias/darks creation to create
-    # a new master pixel mask which is used in the preproc step of all indiv reductions
-    # also input is master pixel flat when it is available
-    # Alfredo to do this
     if settype == 'precals':
         # loop over set of cameras in frame
         # get names of the master files (find_masters)
