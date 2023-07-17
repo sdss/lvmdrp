@@ -241,16 +241,24 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
     flavor = flavor or fkwargs.get('imagetyp')
     flavor = 'fiberflat' if flavor == 'flat' else flavor
 
-    if not master:
-        # check master frames
-        masters = find_masters("object", camera)
-        mbias = masters.get('bias')
-        mdark = masters.get('dark')
-        mpixflat = masters.get('pixelflat')
-        mflat = masters.get('flat')
-        marc = masters.get('arc')
-        mpixmask = masters.get('pixmask')
+    # check master frames
+    masters = find_masters("object", camera)
+    mbias = masters.get('bias')
+    mdark = masters.get('dark')
+    mpixflat = masters.get('pixelflat')
+    mflat = masters.get('flat')
+    marc = masters.get('arc')
+    mpixmask = masters.get('pixmask')
 
+    # log the master frames
+    log.info(f'Using master bias: {mbias}')
+    log.info(f'Using master dark: {mdark}')
+    log.info(f'Using master pixel flat: {mpixflat}')
+    log.info(f'Using master flat: {mflat}')
+    log.info(f'Using master arc: {marc}')
+    log.info(f'Using master pixel mask: {mpixmask}')
+
+    if not master:
         # create pixel mask if needed
         if flavor not in {'bias', 'dark', 'pixelflat'} and mpixmask is None:
             mpixmask = path.full('lvm_master', kind='mpixmask', drpver=drpver, mjd=mjd, tileid=tileid,
@@ -258,14 +266,6 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
             create_pixelmask(in_bias=mbias, in_dark=mdark, in_pixelflat=mflat, out_mask=mpixmask)
 
             get_master_metadata(overwrite=True)
-
-        # log the master frames
-        log.info(f'Using master bias: {mbias}')
-        log.info(f'Using master dark: {mdark}')
-        log.info(f'Using master pixel flat: {mpixflat}')
-        log.info(f'Using master flat: {mflat}')
-        log.info(f'Using master arc: {marc}')
-        log.info(f'Using master pixel mask: {mpixmask}')
 
         # preprocess the frames
         log.info('--- Preprocessing raw frame ---')
