@@ -8,6 +8,7 @@ from copy import deepcopy as copy
 from multiprocessing import Pool, cpu_count
 
 import numpy
+import bottleneck as bn
 from astropy import units as u
 from astropy.io import fits as pyfits
 from astropy.nddata import CCDData, StdDevUncertainty
@@ -2641,7 +2642,7 @@ def testres_drp(image, trace, fwhm, flux):
     hdu.writeto("res_rel.fits", overwrite=True)
 
 
-@skip_on_missing_input_path(["in_image"])
+@skip_on_missing_input_path(["in_image", "in_mask"])
 def preproc_raw_frame(
     in_image: str,
     out_image: str,
@@ -2892,6 +2893,7 @@ def preproc_raw_frame(
 
     # load master pixel mask
     if in_mask:
+        log.info(f"loading master pixel mask from {os.path.basename(in_mask)}")
         master_mask = loadImage(in_mask)._mask.astype(bool)
     else:
         master_mask = numpy.zeros_like(proc_img._data, dtype=bool)
@@ -3336,7 +3338,7 @@ def create_master_frame(in_images: List[str], out_image: str, force_master: bool
     return org_imgs, master_img
 
 
-@skip_on_missing_input_path(["in_bias", "in_dark"])
+@skip_on_missing_input_path(["in_bias", "in_dark", "in_pixelflat"])
 @skip_if_drpqual_flags(["SATURATED"], "in_bias")
 @skip_if_drpqual_flags(["SATURATED"], "in_dark")
 @skip_if_drpqual_flags(["SATURATED"], "in_pixelflat")
@@ -3345,10 +3347,10 @@ def create_pixelmask(
     in_dark: str,
     out_mask: str,
     in_pixelflat: str = None,
-    median_box: int = [30, 30],
+    median_box: int = [31, 31],
     cen_stat: str = "median",
-    low_nsigma: int = 1,
-    high_nsigma: int = 5,
+    low_nsigma: int = 2,
+    high_nsigma: int = 6,
     column_threshold: float = 0.2,
 ):
     """create a pixel mask using a simple sigma clipping
@@ -3398,51 +3400,70 @@ def create_pixelmask(
 
         log.info(f"creating pixel mask for '{in_image}'")
 
-        # create a smoothed image using a median rolling box
-        log.info(f"smoothing image with median box {median_box = }")
-        med_img = img.medianImg(size=median_box)
-        # subtract that smoothed image from the master dark
-        img = img - med_img
+        # define pixelmask image
+        mask = Image(data=numpy.ones_like(img._data), mask=numpy.zeros_like(img._data, dtype=bool))
 
-        # calculate central value
-        log.info(f"calculating central value using '{cen_stat = }'")
-        if cen_stat == "mean":
-            cen = numpy.nanmean(img._data)
-        elif cen_stat == "median":
-            cen = numpy.nanmedian(img._data)
-        log.info(f"central value = {cen = }")
+        quad_sections = img.getHdrValue("AMP? TRIMSEC").values()
+        for sec in quad_sections:
+            log.info(f"processing quadrant = {sec}")
+            quad = img.getSection(sec)
+            msk_quad = mask.getSection(sec)
 
-        # calculate standard deviation
-        log.info("calculating standard deviation using biweight_scale")
-        std = biweight_scale(img._data, M=cen)
-        log.info(f"standard deviation = {std = }")
+            # create a smoothed image using a median rolling box
+            log.info(f"smoothing image with median box {median_box = }")
+            med_quad = quad.medianImg(size=median_box)
+            # subtract that smoothed image from the master dark
+            quad = quad - med_quad
 
-        # create pixel masks for low and high nsigmas
-        log.info(f"creating pixel mask for {low_nsigma = } sigma")
-        badcol_mask = (img._data < cen - low_nsigma * std) | (
-            img._data > cen + low_nsigma * std
-        )
-        log.info(f"creating pixel mask for {high_nsigma = } sigma")
-        hotpix_mask = (img._data < cen - high_nsigma * std) | (
-            img._data > cen + high_nsigma * std
-        )
+            # calculate central value
+            # log.info(f"calculating central value using {cen_stat = }")
+            if cen_stat == "mean":
+                cen = bn.nanmean(quad._data)
+            elif cen_stat == "median":
+                cen = bn.nanmedian(quad._data)
+            log.info(f"central value = {cen = }")
 
-        # mask whole columns if fraction of masked pixels is above threshold
-        bad_columns = numpy.sum(badcol_mask, axis=0) > column_threshold * img._dim[0]
-        log.info(f"masking {numpy.sum(bad_columns)} bad columns")
-        # reset mask to clean good pixels
-        badcol_mask[...] = False
-        # mask only bad columns
-        badcol_mask[:, bad_columns] = True
+            # calculate standard deviation
+            # log.info("calculating standard deviation using biweight_scale")
+            std = biweight_scale(quad._data, M=cen, ignore_nan=True)
+            log.info(f"standard deviation = {std}")
 
-        # combine bad column and hot pixel masks
-        mask = badcol_mask | hotpix_mask
-        log.info(f"masking {numpy.sum(mask)} dead and hot pixels")
+            # create pixel masks for low and high nsigmas
+            # log.info(f"creating pixel mask for {low_nsigma = } sigma")
+            badcol_mask = (quad._data < cen - low_nsigma * std) | (
+                quad._data > cen + low_nsigma * std
+            )
+            # log.info(f"creating pixel mask for {high_nsigma = } sigma")
+            hotpix_mask = (quad._data < cen - high_nsigma * std) | (
+                quad._data > cen + high_nsigma * std
+            )
+
+            # mask whole columns if fraction of masked pixels is above threshold
+            bad_columns = numpy.sum(badcol_mask, axis=0) > column_threshold * quad._dim[0]
+            log.info(f"masking {bad_columns.sum()} bad columns")
+            # reset mask to clean good pixels
+            badcol_mask[...] = False
+            # mask only bad columns
+            badcol_mask[:, bad_columns] = True
+
+            # combine bad column and hot pixel masks
+            msk_quad._mask = badcol_mask | hotpix_mask
+            log.info(f"masking {msk_quad._mask.sum()} pixels in total")
+
+            # set section to pixelmask image
+            mask.setSection(section=sec, subimg=msk_quad, inplace=True)
 
         imgs.append(img)
         masks.append(mask)
 
-    new_mask = Image(data=mask * numpy.nan, mask=numpy.any(masks, axis=0))
+    # define header for pixel mask
+    new_header = img._header
+    new_header["IMAGETYP"] = "pixmask"
+    new_header["EXPTIME"] = 0
+    new_header["DARKTIME"] = 0
+    # define image object to store pixel mask
+    new_mask = Image(data=mask._data, mask=numpy.any([mask._mask for mask in masks], axis=0), header=new_header)
+    new_mask._data[new_mask._mask] = numpy.nan
     log.info(f"writing pixel mask to '{os.path.basename(out_mask)}'")
     new_mask.writeFitsData(out_mask)
 
