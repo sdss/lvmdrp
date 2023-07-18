@@ -19,7 +19,7 @@ def _spec_from_lines(lines: numpy.ndarray, sigma: float, wavelength: numpy.ndarr
     for i, line in enumerate(lines):
         rss[i] = gaussian(wavelength, mean=line, stddev=sigma)
     if heights is not None:
-        rss * heights[None]
+        rss = rss / rss.max() * heights[:, None]
     return rss.sum(axis=0)
 
 
