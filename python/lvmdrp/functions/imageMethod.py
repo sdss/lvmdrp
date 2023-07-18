@@ -33,7 +33,7 @@ from lvmdrp.core.image import (
 )
 from lvmdrp.core.plot import plt, create_subplots, plot_image, plot_strips, save_fig
 from lvmdrp.core.rss import RSS
-from lvmdrp.core.spectrum1d import Spectrum1D
+from lvmdrp.core.spectrum1d import Spectrum1D, _spec_from_lines, _cross_match
 from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.utils.hdrfix import apply_hdrfix
 from lvmdrp.utils.convert import dateobs_to_sjd, correct_sjd
@@ -1348,6 +1348,7 @@ def trace_peaks(
 
     # load continuum image  from file
     img = loadImage(in_image)
+    img.setData(data=numpy.nan_to_num(img._data), error=numpy.nan_to_num(img._error))
 
     # orient image so that the cross-dispersion is along the first and the dispersion is along the second array axis
     if disp_axis == "X" or disp_axis == "x":
@@ -1381,8 +1382,20 @@ def trace_peaks(
         positions = slitmap["ypix"]
         fibers_status = slitmap["fibstatus"]
         fibers = positions.size
-        bad_fibers = fibers_status == 1
+        bad_fibers = (fibers_status == 1) | (fibers_status == 2)
         good_fibers = numpy.logical_not(bad_fibers)
+
+        # correct reference fiber positions
+        profile = img.getSlice(column, axis="y")._data
+        ypix = numpy.arange(profile.size)
+        guess_heights = numpy.ones_like(positions) * numpy.nanmax(profile)
+        ref_profile = _spec_from_lines(positions, sigma=1.2, wavelength=ypix, heights=guess_heights)
+        cc, bhat, mhat = _cross_match(
+            ref_spec=ref_profile,
+            obs_spec=profile,
+            stretch_factors=numpy.linspace(0.7,1.3,5000),
+            shift_range=[-100, 100])
+        positions = positions * mhat + bhat
     else:
         column, _, _, positions, bad_fibers = _read_fiber_ypix(in_peaks)
         fibers = positions.size
@@ -1436,7 +1449,7 @@ def trace_peaks(
             diff = Spectrum1D(
                 wave=positions, data=(centers[0] - positions), mask=bad_fibers
             )
-            diff.smoothPoly(-1, ref_base=positions)
+            diff.smoothPoly(1, poly_kind="poly", ref_base=positions)
             centers[0][bad_fibers] = diff._data[bad_fibers] + positions[bad_fibers]
             centers[1][bad_fibers] = False
         trace.setSlice(i, axis="y", data=centers[0], mask=centers[1])
@@ -1472,7 +1485,7 @@ def trace_peaks(
             diff = Spectrum1D(
                 wave=positions, data=(centers[0] - positions), mask=bad_fibers
             )
-            diff.smoothPoly(-1, ref_base=positions)
+            diff.smoothPoly(1, poly_kind="poly", ref_base=positions)
             centers[0][bad_fibers] = diff._data[bad_fibers] + positions[bad_fibers]
             centers[1][bad_fibers] = False
         trace.setSlice(i, axis="y", data=centers[0], mask=centers[1])
@@ -1489,7 +1502,7 @@ def trace_peaks(
 
     # smooth all trace by a polynomial
     log.info(f"fitting trace with {numpy.abs(poly_disp)}-deg polynomial")
-    trace.smoothTracePoly(poly_disp)
+    trace.smoothTracePoly(poly_disp, poly_kind="poly")
 
     for i in range(fibers):
         if not bad_fibers[i]:
