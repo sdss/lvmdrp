@@ -334,7 +334,7 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
         kwargs = get_config_options('reduction_steps.determine_wavesol')
         log.info('--- Determining wavelength solution ---')
         log.info(f'custom configuration parameters for determine_wave_solution: {repr(kwargs)}')
-        determine_wavelength_solution(in_arc=marc, out_wave=wave_file, out_lsf=lsf_file,
+        determine_wavelength_solution(in_arc=xout_file, out_wave=wave_file, out_lsf=lsf_file,
                                       **kwargs)
         log.info(f'Output wave peak traceset file: {wave_file}')
         log.info(f'Output lsf traceset file: {lsf_file}')
