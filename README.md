@@ -70,16 +70,19 @@ There are two ways in which you can contribute:
 
 For those willing to contribute by coding, there are some steps to streamline the development process:
 
-1. Before you start coding on a new feature/bug-fix, make sure your **local** `development` branch is up to date:
+0. Make sure you install the pipeline on your environment in edit (developer) mode, like this:
+    > `pip install -e .`
+
+2. Before you start coding on a new feature/bug-fix, make sure your **local** `development` branch is up to date:
     > `git pull development`
 
-2. Create a branch to work on and make sure the name can be easily mappable to the work you intend to do:
+3. Create a branch to work on and make sure the name can be easily mappable to the work you intend to do:
     > `git checkout -b <feature_name>`
 
-3. Afterwards, you can push your updates to the remote branch on Github:
+4. Afterwards, you can push your updates to the remote branch on Github:
     > `git push`
 
-4. Finally, if you consider your feature is ready to be merged to the `development` branch, you can create a new [pull request at Github](https://github.com/sdss/lvmdrp/pulls).
+5. Finally, if you consider your feature is ready to be merged to the `development` branch, you can create a new [pull request at Github](https://github.com/sdss/lvmdrp/pulls).
 
 Regarding commits, I'm trying to go for an *atomic* approach, where each commit has a single purpose. So please try to avoid as much as possible pushing lots of unrelated changes in one commit.
 
