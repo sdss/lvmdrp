@@ -844,7 +844,8 @@ def find_peaks_auto(
     ]
     table = pyfits.BinTableHDU().from_columns(columns)
     table.header["XPIX"] = (column, "X coordinate of the fibers [pix]")
-    table.writeto(out_peaks, overwrite=True)
+    hdu_list = pyfits.HDUList([pyfits.PrimaryHDU(header=img._header), table])
+    hdu_list.writeto(out_peaks, overwrite=True)
     # write .reg file for ds9
     if out_region is not None:
         with open(out_region, "w") as reg_out:
