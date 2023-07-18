@@ -10,7 +10,7 @@ from functools import lru_cache
 
 from astropy.io import fits
 from astropy.table import Table
-from lvmdrp.functions.imageMethod import (preproc_raw_frame, create_master_frame, 
+from lvmdrp.functions.imageMethod import (preproc_raw_frame, create_master_frame,
                                           create_pixelmask, detrend_frame,
                                           find_peaks_auto, trace_peaks,
                                           extract_spectra)
@@ -535,7 +535,8 @@ def reduce_file(filename: str):
     reduce_frame(filename, **params)
 
 
-def reduce_set(frame: pd.DataFrame, settype: str = None, flavor: str = None, create_pixmask: bool = False):
+def reduce_set(frame: pd.DataFrame, settype: str = None, flavor: str = None,
+               create_pixmask: bool = False):
     """ Reduce a set of precals, cals, or science """
 
     if settype not in {"precals", "cals", "science"}:
@@ -583,8 +584,8 @@ def reduce_set(frame: pd.DataFrame, settype: str = None, flavor: str = None, cre
             mpixflat = masters.get('pixelflat')
             # pass master filenames into new function
             mpixmask = path.full('lvm_master', kind='mpixmask', drpver=drpver,
-                                    mjd=frame.mjd.iloc[0], tileid=frame.tileid.iloc[0],
-                                    camera=camera)
+                                 mjd=frame.mjd.iloc[0], tileid=frame.tileid.iloc[0],
+                                 camera=camera)
             create_pixelmask(in_bias=mbias, in_dark=mdark, in_pixelflat=mpixflat, out_mask=mpixmask)
 
         # update masters metadata to include new pixel masks
@@ -610,8 +611,8 @@ def reduce_masters(mjd: int):
         reduce_frame(path, master=True, **row)
 
 
-def run_drp(mjd: Union[int, str, list], bias: bool = False, dark: bool = False, pixelflat: bool = False,
-            skip_bd: bool = False, arc: bool = False, flat: bool = False,
+def run_drp(mjd: Union[int, str, list], bias: bool = False, dark: bool = False,
+            pixelflat: bool = False, skip_bd: bool = False, arc: bool = False, flat: bool = False,
             only_bd: bool = False, only_cal: bool = False, only_sci: bool = False,
             spec: int = None, camera: str = None, expnum: Union[int, str, list] = None,
             quick: bool = False):
@@ -642,9 +643,9 @@ def run_drp(mjd: Union[int, str, list], bias: bool = False, dark: bool = False, 
     mjds = parse_mjds(mjd)
     if isinstance(mjds, list):
         for mjd in mjds:
-            run_drp(mjd=mjd, bias=bias, dark=dark, pixelflat=pixelflat, skip_bd=skip_bd, arc=arc, flat=flat,
-                    only_bd=only_bd, only_cal=only_cal, only_sci=only_sci, spec=spec, camera=camera,
-                    expnum=expnum, quick=quick)
+            run_drp(mjd=mjd, bias=bias, dark=dark, pixelflat=pixelflat, skip_bd=skip_bd, arc=arc,
+                    flat=flat, only_bd=only_bd, only_cal=only_cal, only_sci=only_sci, spec=spec,
+                    camera=camera, expnum=expnum, quick=quick)
         return
 
     log.info(f'Processing MJD {mjd}')
