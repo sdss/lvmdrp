@@ -26,9 +26,9 @@ from lvmdrp.core.image import loadImage
 from lvmdrp.core.passband import PassBand
 from lvmdrp.core.plot import save_fig
 from lvmdrp.core.rss import RSS, _chain_join, glueRSS, loadRSS
-from lvmdrp.core.spectrum1d import Spectrum1D
+from lvmdrp.core.spectrum1d import Spectrum1D, _spec_from_lines
 from lvmdrp.external import ancillary_func
-from lvmdrp.utils import flatten, spec_from_lines
+from lvmdrp.utils import flatten
 from lvmdrp import log
 
 
@@ -259,7 +259,7 @@ def determine_wavelength_solution(in_arc: str, out_wave: str, out_lsf: str,
         if cc_correction or ref_fiber != ref_fiber_:
             log.info("calculating shift in guess lines using CC")
             # determine maximum correlation shift
-            pix_spec = spec_from_lines(pixel, sigma=2, wavelength=arc._pixels)
+            pix_spec = _spec_from_lines(pixel, sigma=2, wavelength=arc._pixels)
             shifts = signal.correlation_lags(
                 (arc._data * (~arc._mask))[ref_fiber].size, pix_spec.size, mode="full"
             )

@@ -9,8 +9,18 @@ from scipy import signal, interpolate, ndimage, sparse
 from scipy.ndimage import zoom
 from typing import List, Tuple
 
+from lvmdrp.utils import gaussian
 from lvmdrp.core import fit_profile
 from lvmdrp.core.header import Header
+
+
+def _spec_from_lines(lines: numpy.ndarray, sigma: float, wavelength: numpy.ndarray, heights: numpy.ndarray = None, names: numpy.ndarray = None):
+    rss = numpy.zeros((len(lines), wavelength.size))
+    for i, line in enumerate(lines):
+        rss[i] = gaussian(wavelength, mean=line, stddev=sigma)
+    if heights is not None:
+        rss * heights[None]
+    return rss.sum(axis=0)
 
 
 def _shift_spectrum(spectrum: numpy.ndarray, shift: int) -> numpy.ndarray:
