@@ -192,7 +192,6 @@ class Image(Header):
         """
         if isinstance(other, Image):
             # define behaviour if the other is of the same instance
-
             img = Image(header=self._header, origin=self._origin)
 
             # add data if contained in both
@@ -221,13 +220,7 @@ class Image(Header):
             return img
 
         elif isinstance(other, numpy.ndarray):
-            img = Image(
-                error=self._error,
-                mask=self._mask,
-                header=self._header,
-                origin=self._origin,
-            )
-
+            img = copy(self)
             if self._data is not None:  # check if there is data in the object
                 dim = other.shape
                 # add ndarray according do its dimensions
@@ -245,14 +238,8 @@ class Image(Header):
         else:
             # try to do addtion for other types, e.g. float, int, etc.
             try:
-                new_data = self._data + other
-                img = Image(
-                    data=new_data,
-                    error=self._error,
-                    mask=self._mask,
-                    header=self._header,
-                    origin=self._origin,
-                )
+                img = copy(self)
+                img.setData(self._data + other)
                 return img
             except Exception:
                 # raise exception if the type are not matching in general
@@ -270,8 +257,7 @@ class Image(Header):
         """
         if isinstance(other, Image):
             # define behaviour if the other is of the same instance
-
-            img = Image(header=self._header, origin=self._origin)
+            img = copy(self)
 
             # subtract data if contained in both
             if self._data is not None and other._data is not None:
@@ -299,13 +285,7 @@ class Image(Header):
             return img
 
         elif isinstance(other, numpy.ndarray):
-            img = Image(
-                error=self._error,
-                mask=self._mask,
-                header=self._header,
-                origin=self._origin,
-            )
-
+            img = copy(self)
             if self._data is not None:  # check if there is data in the object
                 dim = other.shape
                 # add ndarray according do its dimensions
@@ -323,14 +303,8 @@ class Image(Header):
         else:
             # try to do addtion for other types, e.g. float, int, etc.
             try:
-                new_data = self._data - other
-                img = Image(
-                    data=new_data,
-                    error=self._error,
-                    mask=self._mask,
-                    header=self._header,
-                    origin=self._origin,
-                )
+                img = copy(self)
+                img.setData(self._data - other)
                 return img
             except Exception:
                 # raise exception if the type are not matching in general
@@ -345,8 +319,7 @@ class Image(Header):
         """
         if isinstance(other, Image):
             # define behaviour if the other is of the same instance
-
-            img = Image(header=self._header, origin=self._origin)
+            img = copy(self)
 
             # subtract data if contained in both
             if self._data is not None and other._data is not None:
@@ -374,13 +347,7 @@ class Image(Header):
             return img
 
         elif isinstance(other, numpy.ndarray):
-            img = Image(
-                error=self._error,
-                mask=self._mask,
-                header=self._header,
-                origin=self._origin,
-            )
-
+            img = copy(self)
             if self._data is not None:  # check if there is data in the object
                 dim = other.shape
                 # add ndarray according do its dimensions
@@ -415,13 +382,9 @@ class Image(Header):
                     new_error = self._error / other
                 else:
                     new_error = None
-                img = Image(
-                    data=new_data,
-                    error=new_error,
-                    mask=self._mask,
-                    header=self._header,
-                    origin=self._origin,
-                )
+                
+                img = copy(self)
+                img.setData(data=new_data, error=new_error)
                 return img
             except Exception:
                 # raise exception if the type are not matching in general
@@ -436,8 +399,7 @@ class Image(Header):
         """
         if isinstance(other, Image):
             # define behaviour if the other is of the same instance
-
-            img = Image(header=self._header, origin=self._origin)
+            img = copy(self)
 
             # subtract data if contained in both
             if self._data is not None and other._data is not None:
@@ -464,13 +426,7 @@ class Image(Header):
             return img
 
         elif isinstance(other, numpy.ndarray):
-            img = Image(
-                error=self._error,
-                mask=self._mask,
-                header=self._header,
-                origin=self._origin,
-            )
-
+            img = copy(self)
             if self._data is not None:  # check if there is data in the object
                 dim = other.shape
                 # add ndarray according do its dimensions
@@ -488,14 +444,8 @@ class Image(Header):
         else:
             # try to do addtion for other types, e.g. float, int, etc.
             try:
-                new_data = self._data * other
-                img = Image(
-                    data=new_data,
-                    error=self._error,
-                    mask=self._mask,
-                    header=self._header,
-                    origin=self._origin,
-                )
+                img = copy(self)
+                img.setData(data=self._data * other)
                 return img
             except Exception:
                 # raise exception if the type are not matching in general
@@ -556,7 +506,7 @@ class Image(Header):
 
         header = self._header
 
-        return Image(data=data, header=header, error=error, mask=mask)
+        return Image(data=data, error=error, mask=mask, header=header, origin=self._origin, individual_frames=self._individual_frames, slitmap=self._slitmap)
 
     def setSection(self, section, subimg, update_header=False, inplace=True):
         """replaces a section in the current frame with given subimage
@@ -641,6 +591,8 @@ class Image(Header):
             mask=self._mask,
             header=self._header,
             origin=self._origin,
+            individual_frames=self._individual_frames,
+            slitmap=self._slitmap,
         )  # return new Image object with corresponding data
 
     def swapaxes(self):
@@ -838,6 +790,8 @@ class Image(Header):
                 mask=self._mask,
                 error=self._error,
                 origin=self._origin,
+                individual_frames=self._individual_frames,
+                slitmap=self._slitmap,
             )
         )
         if current != unit:
@@ -1235,9 +1189,8 @@ class Image(Header):
         out_mask = numpy.logical_or(self._mask, numpy.isnan(out_data))
         out_data = numpy.nan_to_num(out_data)
         # create new Image object
-        new_image = Image(
-            data=out_data, error=out_error, mask=out_mask, header=self._header
-        )
+        new_image = copy(self)
+        new_image.setData(data=out_data, error=out_error, mask=out_mask, inplace=True)
         return new_image
 
     def calibrateSDSS(self, fieldPhot, subtractSky=True):
@@ -1273,9 +1226,9 @@ class Image(Header):
         else:
             error = numpy.sqrt((calibratedImage) / gain + dark_var)
         self.setHdrValue("FIELD", 0)
-        sdssImage = Image(
-            data=calibratedImage * factor, error=error * factor, header=self._header
-        )
+
+        sdssImage = copy(self)
+        sdssImage.setData(data=calibratedImage * factor, error=error * factor, inplace=True)
         return sdssImage
 
     def split(self, fragments, axis="X"):
@@ -1296,7 +1249,7 @@ class Image(Header):
             split_mask = [None] * fragments
         for i in range(fragments):
             image_list.append(
-                Image(data=split_data[i], error=split_error[i], mask=split_mask[i])
+                Image(data=split_data[i], error=split_error[i], mask=split_mask[i], header=self._header, origin=self._origin, individual_frames=self._individual_frames, slitmap=self._slitmap)
             )
 
         return image_list
@@ -1372,7 +1325,8 @@ class Image(Header):
             new_mask[select3] = self._mask.flatten()
             new_mask[select4] = self._mask.flatten()
         # create new Image object with the new subsample data
-        new_image = Image(data=new_data, error=new_error, mask=new_mask)
+        new_image = copy(self)
+        new_image.setData(data=new_data, error=new_error, mask=new_mask, inplace=True)
         return new_image
 
     def rebin(self, bin_x, bin_y):
@@ -1442,6 +1396,8 @@ class Image(Header):
             mask=new_mask,
             header=self._header,
             origin=self._origin,
+            individual_frames=self._individual_frames,
+            slitmap=self._slitmap,
         )
         return new_img
 
@@ -1472,13 +1428,8 @@ class Image(Header):
         else:
             new_error = None
         # create new Image object with the error and the mask unchanged and return
-        new_image = Image(
-            data=new,
-            error=new_error,
-            mask=self._mask,
-            header=self._header,
-            origin=self._origin,
-        )
+        new_image = copy(self)
+        new_image.setData(data=new, error=new_error, inplace=True)
         return new_image
 
     def convolveGaussImg(self, sigma_x, sigma_y, mode="nearest", mask=False):
@@ -1518,13 +1469,8 @@ class Image(Header):
                 self._data, (sigma_y, sigma_x), mode=mode
             )
         # create new Image object with the error and the mask unchanged and return
-        new_image = Image(
-            data=new,
-            error=self._error,
-            mask=self._mask,
-            header=self._header,
-            origin=self._origin,
-        )
+        new_image = copy(self)
+        new_image.setData(data=new, inplace=True)
         return new_image
 
     def medianImg(self, size, mode="nearest", use_mask=False):
@@ -1566,9 +1512,8 @@ class Image(Header):
             # reset original masked values in new array
             new_data[new_mask] = self._data[new_mask]
 
-        image = Image(
-            data=new_data, header=self._header, error=self._error, mask=new_mask
-        )
+        image = copy(self)
+        image.setData(data=new_data, mask=new_mask)
         return image
 
     def collapseImg(self, axis, mode="mean"):
@@ -1713,9 +1658,9 @@ class Image(Header):
             new_mask = numpy.isnan(fit_result)
         else:
             new_mask = None
-        new_img = Image(
-            data=fit_result, error=self._error, header=self._header, mask=new_mask
-        )
+        
+        new_img = copy(self)
+        new_img.setData(data=fit_result, mask=new_mask)
         return new_img
 
     def traceFWHM(
@@ -2221,6 +2166,8 @@ class Image(Header):
             header=self.getHeader(),
             error=self.getError(),
             mask=numpy.zeros(self.getDim(), dtype=bool),
+            individual_frames=self.getIndividualFrames(),
+            slitmap=self.getSlitMap(),
         )
 
         # initial CR selection
@@ -2497,6 +2444,8 @@ def glueImages(images, positions):
         error=full_CCD_error,
         mask=full_CCD_mask,
         header=images[0].getHeader(),
+        individual_frames=images[0].getIndividualFrames(),
+        slitmap=images[0].getSlitmap(),
     )
 
     return out_image
@@ -2609,7 +2558,7 @@ def combineImages(
 
     # create combined image
     combined_image = Image(
-        data=new_image, error=new_error, mask=new_mask, header=new_header
+        data=new_image, error=new_error, mask=new_mask, header=new_header, slitmap=images[0].getSlitmap()
     )
     # update masked pixels if needed
     if replace_with_nan:
