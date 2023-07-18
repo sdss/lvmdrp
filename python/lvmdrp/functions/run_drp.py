@@ -334,7 +334,6 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
         log.info(f'Output wave peak traceset file: {wave_file}')
         log.info(f'Output lsf traceset file: {lsf_file}')
 
-
     # perform wavelength calibration
     wave_file = find_file('mwave', mjd=mjd, tileid=tileid, camera=camera)
     lsf_file = find_file('mlsf', mjd=mjd, tileid=tileid, camera=camera)
@@ -349,7 +348,6 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
     # set wavelength resample params
     CHANNEL_WL = {"b": (3600, 5930), "r": (5660, 7720), "z": (7470, 9800)}
     wave_range = CHANNEL_WL[camera[0]]
-
 
     # resample onto a common wavelength
     hout_file = create_output_path(kind='h', flavor=flavor, mjd=mjd, tileid=tileid,
