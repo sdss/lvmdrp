@@ -1387,12 +1387,6 @@ def trace_peaks(
         column, _, _, positions, bad_fibers = _read_fiber_ypix(in_peaks)
         fibers = positions.size
         good_fibers = numpy.logical_not(bad_fibers)
-    
-    # choose between  methods to measure the subpixel peak
-    if method == "hyperbolic":
-        steps = 1
-    elif method == "gauss":
-        steps = int(steps)
 
     # create empty trace mask for the image
     trace = TraceMask()
