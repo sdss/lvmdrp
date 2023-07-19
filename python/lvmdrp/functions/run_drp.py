@@ -89,7 +89,7 @@ def create_masters(flavor: str, frames: pd.DataFrame):
         create_master_frame(in_images=in_f, out_image=master, **kwargs)
 
 
-def find_masters(flavor: str, camera: str) -> dict:
+def find_masters(mjd: int, flavor: str, camera: str) -> dict:
     """ Find the matching master frames
 
     Find the matching master frames for a given flavor, camera
@@ -111,7 +111,7 @@ def find_masters(flavor: str, camera: str) -> dict:
         The output master frame paths for each flavor
     """
     # try to match the master frames for a given flavor, camera
-    matches = match_master_metadata(target_imagetyp=flavor, target_camera=camera)
+    matches = match_master_metadata(target_mjd=mjd, target_imagetyp=flavor, target_camera=camera)
 
     # construct the dict of filepaths
     files = dict.fromkeys(matches.keys())
@@ -242,7 +242,7 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
     flavor = 'fiberflat' if flavor == 'flat' else flavor
 
     # check master frames
-    masters = find_masters("object", camera)
+    masters = find_masters(mjd, "object", camera)
     mbias = masters.get('bias')
     mdark = masters.get('dark')
     mpixflat = masters.get('pixelflat')
@@ -578,7 +578,7 @@ def reduce_set(frame: pd.DataFrame, settype: str = None, flavor: str = None,
     if create_pixmask:
         # loop over set of cameras in frame
         for camera in set(frame['camera']):
-            masters = find_masters("object", camera)
+            masters = find_masters(frame.mjd.iloc[0], "object", camera)
             mbias = masters.get('bias')
             mdark = masters.get('dark')
             mpixflat = masters.get('pixelflat')
