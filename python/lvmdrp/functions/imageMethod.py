@@ -1492,15 +1492,10 @@ def trace_peaks(
         trace.setSlice(i, axis="y", data=centers[0], mask=centers[1])
         m += 1
 
-        # xs.append(i)
-        # ys.append(centers[0].tolist())
-
-    # with open("peaks_xy.txt", "w") as f:
-    #     f.write(" ".join(xs) + "\n")
-    #     for row in numpy.asarray(ys).T.tolist():
-    #         f.write(" ".join(row) + "\n")
-    # exit()
-
+    # define trace data before polynomial smoothing
+    trace_data = copy(trace)
+    # set to mask zero values in trace to avoid problems with the polynomial fitting
+    trace._mask = trace._data <= 0
     # smooth all trace by a polynomial
     log.info(f"fitting trace with {numpy.abs(poly_disp)}-deg polynomial")
     trace.smoothTracePoly(poly_disp, poly_kind="poly")
