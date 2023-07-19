@@ -7,9 +7,12 @@ import yaml
 import pandas as pd
 from typing import Union
 from functools import lru_cache
+import numpy as np
 
+import astropy.units as u
 from astropy.io import fits
 from astropy.table import Table
+from astropy.wcs import WCS
 from lvmdrp.functions.imageMethod import (preproc_raw_frame, create_master_frame,
                                           create_pixelmask, detrend_frame,
                                           find_peaks_auto, trace_peaks,
@@ -733,7 +736,7 @@ def run_drp(mjd: Union[int, str, list], bias: bool = False, dark: bool = False,
         reduce_masters(mjd=mjd)
 
     # return if only calibration set
-    if only_cal or flat or arc:
+    if only_cal or flat or arc or bias or dark or pixelflat:
         return
 
     # reduce science files
@@ -744,15 +747,17 @@ def run_drp(mjd: Union[int, str, list], bias: bool = False, dark: bool = False,
     tileid = list(set(sub['tileid']))[0]
 
     # perform camera combination
+    # produces ancillary/lvm-object-sp[id]-[expnum] files
     for tileid, mjd in sub.groupby(['tileid', 'mjd']).groups.keys():
         combine_cameras(tileid, mjd, spec=1)
         combine_cameras(tileid, mjd, spec=2)
         combine_cameras(tileid, mjd, spec=3)
 
     # perform spectrograph combination
-    # one file per exposure
-    # needs to have fiber slit info in fits extension
-    # output fed into sky
+    # produces lvm-CFrame file
+    exposures = set(sci['expnum'].sort_values())
+    for expnum in exposures:
+        combine_spectrographs(tileid, mjd, expnum)
 
     # perform sky subtraction
 
@@ -954,6 +959,102 @@ def combine_cameras(tileid: int, mjd: int, spec: int = 1):
         # combine the b, r, z channels together
         join_spec_channels(in_rss=list(exps), out_rss=bout_file, **kwargs)
         log.info(f'Output combined camera file: {bout_file}')
+
+
+def combine_spectrographs(tileid: int, mjd: int, expnum: int) -> fits.HDUList:
+    """ Combine the spectrographs together for a given exposure
+
+    For a given exposure, combines the three spectographs together
+    into a single output lvm-CFrame file.  The input files are the
+    ancillary camera-combined lvm-object-sp[id]-[expnum] files.
+
+    Parameters
+    ----------
+    tileid : int
+        The tileid of the observation
+    mjd : int
+        The MJD of the observation
+    expnum : int
+        The exposure number of the frames to combines
+
+    Returns
+    -------
+    fits.HDUList
+        the output FITS file
+    """
+
+    files = sorted(path.expand('lvm_anc', mjd=mjd, tileid=tileid, drpver=drpver,
+                               kind='', camera='sp*', imagetype='object', expnum=expnum))
+
+    if not files:
+        log.error(f'No camera-combined files found for expnum: {expnum}')
+        return
+
+    if len(files) != 3:
+        log.warning(f'Warning: Not all specids found for expnum: {expnum}')
+
+    # construct output path
+    cframe = path.full('lvm_frame', mjd=mjd, tileid=tileid, drpver=drpver,
+                       kind='CFrame', expnum=expnum)
+
+    # get the first header
+    with fits.open(files[0]) as hdu:
+        hdr = hdu[0].header.copy()
+
+    # build the wavelength axis
+    wcs = WCS(hdr)
+    n_wave = hdr['NAXIS1']
+    wl = wcs.spectral.all_pix2world(np.arange(n_wave), 0)[0]
+    wave = fits.ImageHDU((wl * u.m).to(u.angstrom).value, name='WAVE')
+
+    # get total number of fibers from the fibermap
+    # do we use this to check the total output fiber number? should be the same?
+    total_fibers = len(fibermap.data)
+
+    # stack the data in the extensions
+    flux_data = stack_ext(files, ext=0)
+    err_data = stack_ext(files, ext='ERROR')
+    mask_data = stack_ext(files, ext='BADPIX')
+    fwhm_data = stack_ext(files, ext='INSTFWHM')
+
+    # create the new FITS file
+    prim = fits.PrimaryHDU(header=hdr)
+    flux = fits.ImageHDU(flux_data, name='FLUX')
+    err = fits.ImageHDU(err_data, name='ERROR')
+    mask = fits.ImageHDU(mask_data, name='MASK')
+    fwhm = fits.ImageHDU(fwhm_data, name='FWHM')
+
+    hdulist = fits.HDUList([prim, flux, err, mask, wave, fwhm, fibermap])
+
+    # write out new file
+    hdulist.writeto(cframe)
+
+
+def stack_ext(files: list, ext: Union[int, str] = 0) -> np.array:
+    """ Stack the FITS data from a list of files
+
+    Stack the FITS data for the given extension name or number,
+    from the input list of files.  The output stack is in the order
+    of the input list of files, i.e. for a list of sp1, sp2, sp3,
+    the 0-index of the output array is the start of sp1.
+
+    Parameters
+    ----------
+    files : list
+        A list of files to stack
+    ext : Union[int, str], optional
+        The FITS extension name or number, by default 0
+
+    Returns
+    -------
+    np.array
+        The stacked data
+    """
+    new = []
+    for i in files:
+        with fits.open(i) as hdu:
+            new.append(hdu[ext].data)
+    return np.vstack(new)
 
 
 @lru_cache
