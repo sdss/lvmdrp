@@ -1377,7 +1377,7 @@ def trace_peaks(
     if in_peaks is None:
         # read slitmap extension
         slitmap = img.getSlitmap()
-        slitmap = slitmap["spectrographid" == int(img._header["CCD"][1])]
+        slitmap = slitmap[slitmap["spectrographid"] == int(img._header["CCD"][1])]
         # BUG: fix this hardcoded value
         column = 2000
         positions = slitmap["ypix"]
