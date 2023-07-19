@@ -1017,9 +1017,17 @@ def combine_spectrographs(tileid: int, mjd: int, expnum: int) -> fits.HDUList:
     mask_data = stack_ext(files, ext='BADPIX')
     fwhm_data = stack_ext(files, ext='INSTFWHM')
 
+    # update the primary header
+    hdr['SPEC'] = ', '.join([i.split('-')[2] for i in files])
+    hdr['FILENAME'] = pathlib.Path(cframe).name
+    hdr['VERSDRP'] = drpver
+
+    # remove the wcs from the primary header; add it to flux header
+    [hdr.pop(i, None) for i in wcs.to_header().keys()]
+
     # create the new FITS file
     prim = fits.PrimaryHDU(header=hdr)
-    flux = fits.ImageHDU(flux_data, name='FLUX')
+    flux = fits.ImageHDU(flux_data, name='FLUX', header=wcs.to_header())
     err = fits.ImageHDU(err_data, name='ERROR')
     mask = fits.ImageHDU(mask_data, name='MASK')
     fwhm = fits.ImageHDU(fwhm_data, name='FWHM')
@@ -1027,7 +1035,7 @@ def combine_spectrographs(tileid: int, mjd: int, expnum: int) -> fits.HDUList:
     hdulist = fits.HDUList([prim, flux, err, mask, wave, fwhm, fibermap])
 
     # write out new file
-    hdulist.writeto(cframe)
+    hdulist.writeto(cframe, overwrite=True)
 
 
 def stack_ext(files: list, ext: Union[int, str] = 0) -> np.array:
