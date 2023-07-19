@@ -141,29 +141,29 @@ def trace_fibers(in_file: str, camera: str, tileid: int, mjd: int):
     mjd : int
         the MJD of observation
     """
-    out_peaks = path.full('lvm_master', mjd=mjd, camera=camera, kind='mpeaks', tileid=tileid,
-                          drpver=drpver)
+    # out_peaks = path.full('lvm_master', mjd=mjd, camera=camera, kind='mpeaks', tileid=tileid,
+    #                       drpver=drpver)
     out_trace = path.full('lvm_master', mjd=mjd, camera=camera, kind='mtrace', tileid=tileid,
                           drpver=drpver)
 
     # check for parent dir existence
-    if not pathlib.Path(out_peaks).parent.is_dir():
-        pathlib.Path(out_peaks).parent.mkdir(parents=True, exist_ok=True)
+    # if not pathlib.Path(out_peaks).parent.is_dir():
+    #     pathlib.Path(out_peaks).parent.mkdir(parents=True, exist_ok=True)
 
     if os.path.exists(out_trace):
         log.info('Trace file already exists.')
         return
 
-    log.info('--- Running auto peak finder ---')
-    kwargs = get_config_options('reduction_steps.find_peaks_auto')
-    log.info(f'custom configuration parameters for find_peaks_auto: {repr(kwargs)}')
-    find_peaks_auto(in_image=in_file, out_peaks=out_peaks, **kwargs)
-    log.info(f'Output peak finder file: {out_peaks}')
+    # log.info('--- Running auto peak finder ---')
+    # kwargs = get_config_options('reduction_steps.find_peaks_auto')
+    # log.info(f'custom configuration parameters for find_peaks_auto: {repr(kwargs)}')
+    # find_peaks_auto(in_image=in_file, out_peaks=out_peaks, **kwargs)
+    # log.info(f'Output peak finder file: {out_peaks}')
 
     log.info('--- Tracing fiber peaks ---')
     kwargs = get_config_options('reduction_steps.trace_peaks')
     log.info(f'custom configuration parameters for trace_peaks: {repr(kwargs)}')
-    trace_peaks(in_image=in_file, out_trace=out_trace, in_peaks=out_peaks, **kwargs)
+    trace_peaks(in_image=in_file, out_trace=out_trace, in_peaks=None, **kwargs)
     log.info(f'Output trace fiber peaks file: {out_trace}')
 
     # TODO
