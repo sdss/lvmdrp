@@ -297,12 +297,6 @@ def determine_wavelength_solution(in_arc: str, out_wave: str, out_lsf: str,
     ref_lines = ref_lines[sort]
     nlines = len(pixel)
 
-    plt.switch_backend("TKAgg")
-    fig, ax = plt.subplots(figsize=(16, 10), tight_layout=True)
-    ax.step(arc._pixels, arc._data[ref_fiber], color="0.2", lw=1)
-    ax.vlines(pixel, 0, numpy.nanmax(arc._data[ref_fiber]), color="tab:red", lw=0.5)
-    plt.show()
-
     if negative:
         log.info("flipping arc along flux direction")
         arc = -1 * arc + numpy.nanmedian(arc._data)
