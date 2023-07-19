@@ -11,10 +11,10 @@ reduction_steps:
     method: hyperbolic
     median_box: [1, 10]
   trace_peaks:
-    steps: 30
-    coadd: 1
+    steps: 100
+    coadd: 20
     threshold: 0
-    max_diff: 2
+    max_diff: 0.1
     method: hyperbolic
     median_box: 10
     median_cross: 1
