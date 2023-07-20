@@ -18,8 +18,7 @@ def _chain_join(b, r, z):
     ii = [i for i in [b, r, z] if i]
     x = ii[0]
     for e in ii[1:]:
-        x.coaddSpec(e)
-        x = e
+        x = x.coaddSpec(e)
     return x
 
 class RSS(FiberRows):
