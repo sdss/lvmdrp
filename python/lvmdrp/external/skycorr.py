@@ -186,7 +186,8 @@ def runSkyCorr(parfile, installdir=skycorrinstall, bin="bin/skycorr"):
     """
 
     FNULL = open(os.devnull, "w")
-    sp.call([installdir + bin, parfile])
+    os.system('skycorr %s'% parfile)
+    # sp.call([installdir + bin, parfile])
     FNULL.close()
 
 

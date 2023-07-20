@@ -49,10 +49,17 @@ def fetch_example_data(url, name, dest_path, ext="zip"):
     file_name = f"{name}.{ext}"
     file_path = os.path.join(dest_path, file_name)
 
+    if os.path.isdir(dest_path)==False:
+        log.info("Creating destination directory %s" % (dest_path))
+        os.makedirs(dest_path)
+
+
     if os.path.exists(os.path.join(dest_path, name)):
         log.info("example data already exists")
         return
 
+    log.info("fetching %s" % f"{url}/{file_name}")
+    log.info("command %s"  % f"curl {url}/{file_name} --create-dirs -output {file_path}")
     log.info(f"downloading example data to {file_path}")
     process = subprocess.Popen(
         f"curl {url}/{file_name} --output {file_path}".split(),

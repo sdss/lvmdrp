@@ -11,6 +11,8 @@ from typing import List, Tuple
 
 from lvmdrp.core import fit_profile
 from lvmdrp.core.header import Header
+from lvmdrp import log
+import os
 
 
 def _shift_spectrum(spectrum: numpy.ndarray, shift: int) -> numpy.ndarray:
@@ -771,6 +773,10 @@ class Spectrum1D(Header):
             Number of the FITS extension containing the errors for the values
         """
 
+        print('Trying to open %s' % file)
+        if os.path.isfile(file)==False:
+            log.error('File not found')
+            return
         hdu = pyfits.open(file, uint=True, do_not_scale_image_data=True)
         if (
             extension_data is None

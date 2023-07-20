@@ -389,6 +389,12 @@ def run_skymodel(skymodel_path=SKYMODEL_INST_PATH, **kwargs):
             log.error(out.stderr.decode("utf-8"))
 
         # copy library files to corresponding path according to libpath
+        xin=os.path.join(skymodel_path, "sm-01_mod1", "output")
+        xout=os.path.join(skymodel_path, "sm-01_mod2", "data", "lib")
+
+        log.info('copytree in : %s' % xin)
+        log.info('copytree out:  %s' % xout)
+
         try:
             shutil.copytree(
                 os.path.join(skymodel_path, "sm-01_mod1", "output"),
@@ -398,6 +404,8 @@ def run_skymodel(skymodel_path=SKYMODEL_INST_PATH, **kwargs):
                 ignore_dangling_symlinks=True,
             )
         except shutil.Error as e:
+            for src, dst, exc in e.args[0]:
+                print(f"Error copying {src} to {dst}: {exc}")
             log.warning(e.args[0])
 
         log.info("calculating effective atmospheric transmission")

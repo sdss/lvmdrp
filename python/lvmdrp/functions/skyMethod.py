@@ -1242,6 +1242,7 @@ def evalESOSky_drp(
 
     # read sky spectrum
     sky_spec = Spectrum1D()
+    log.info('Reading %s' % (sky_ref))
     sky_spec.loadFitsData(sky_ref, extension_hdr=0)
 
     eval_failed = False
