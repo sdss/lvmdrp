@@ -69,16 +69,20 @@ class RSS(FiberRows):
         for i in range(n_spectra):
             rss[i] = spectra_list[i]
 
-        # handle uniform wavelength
+        # set wavelength and LSF in RSS object
         if numpy.allclose(
             numpy.repeat(rss._wave[0][None, :], rss._fibers, axis=0), rss._wave
         ):
             rss.setWave(rss._wave[0])
+        else:
+            rss.setWave(rss._wave)
         if numpy.allclose(
             numpy.repeat(rss._inst_fwhm[0][None, :], rss._fibers, axis=0),
             rss._inst_fwhm,
         ):
             rss.setInstFWHM(rss._inst_fwhm[0])
+        else:
+            rss.setInstFWHM(rss._inst_fwhm)
         return rss
 
     def __init__(
