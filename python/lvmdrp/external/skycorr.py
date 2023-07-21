@@ -185,6 +185,9 @@ def runSkyCorr(parfile, installdir=skycorrinstall, bin="bin/skycorr"):
 
     """
 
+    print('ESOSKY is %s' % os.environ['ESOSKY'])
+    print('installdir %s' % installdir)
+
     FNULL = open(os.devnull, "w")
     sp.call([installdir + bin, parfile])
     FNULL.close()

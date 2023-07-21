@@ -800,6 +800,7 @@ def configureSkyModel_drp(
             else:
                 log.error("failed while copying airglow library")
                 log.error(out.stderr.decode("utf-8"))
+                return
 
             # run prelinetrans
             log.info("calculating effective atmospheric transmission")
@@ -807,6 +808,9 @@ def configureSkyModel_drp(
             out = subprocess.run(
                 os.path.join("bin", "preplinetrans").split(), capture_output=True
             )
+
+            log.info("returned from calculting atomospheric tranmisson")
+
             if out.returncode == 0:
                 log.info(
                     "successfully finished effective atmospheric transmission calculations"
@@ -816,6 +820,7 @@ def configureSkyModel_drp(
                     "failed while running effective atmospheric transmission calculations"
                 )
                 log.error(out.stderr.decode("utf-8"))
+                return
 
             if run_multiscat:
                 out = subprocess.run(

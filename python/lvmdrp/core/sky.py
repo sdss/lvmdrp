@@ -389,16 +389,36 @@ def run_skymodel(skymodel_path=SKYMODEL_INST_PATH, **kwargs):
             log.error(out.stderr.decode("utf-8"))
 
         # copy library files to corresponding path according to libpath
+        # Remove the destination directory if it exists
+        origin_dir=os.path.join(skymodel_path, "sm-01_mod1", "output")
+        destination_dir=os.path.join(skymodel_path, "sm-01_mod2", "data", "lib")
+
+
+
+        if shutil.os.path.exists(destination_dir):
+            shutil.rmtree(destination_dir)
+            print('The destination directory already exists %s' % destination_dir)
+        else:
+            print('The destination directory DID NOT exists %s' % destination_dir)
+
+
         try:
             shutil.copytree(
-                os.path.join(skymodel_path, "sm-01_mod1", "output"),
-                os.path.join(skymodel_path, "sm-01_mod2", "data", "lib"),
+                origin_dir, destination_dir,
+                # os.path.join(skymodel_path, "sm-01_mod1", "output"),
+                # os.path.join(skymodel_path, "sm-01_mod2", "data", "lib"),
                 dirs_exist_ok=True,
                 symlinks=True,
                 ignore_dangling_symlinks=True,
             )
         except shutil.Error as e:
             log.warning(e.args[0])
+
+        if shutil.os.path.exists(destination_dir):
+            print('Afterward, the destination directory  exists %s' % destination_dir)
+        else:
+            print('Aterward,the destination directory DID NOT exists %s' % destination_dir)
+
 
         log.info("calculating effective atmospheric transmission")
         os.chdir(os.path.join(skymodel_path, "sm-01_mod2"))
@@ -424,6 +444,11 @@ def run_skymodel(skymodel_path=SKYMODEL_INST_PATH, **kwargs):
     else:
         log.info("successfully finished 'calcskymodel'")
     # ---------------------------------------------------------------------------------------------
+
+    zz=os.path.join("output", "transspec.fits")
+    if os.path.isfile(zz)==False:
+        print('Cannot found %s from dir %s' % (zz,os.getcwd()))
+        
 
     # read output files and organize in a FITS table ----------------------------------------------
     trans_table = Table(fits.getdata(os.path.join("output", "transspec.fits"), ext=1))
