@@ -1020,7 +1020,7 @@ def combine_spectrographs(tileid: int, mjd: int, expnum: int) -> fits.HDUList:
     # update the primary header
     hdr['SPEC'] = ', '.join([i.split('-')[2] for i in files])
     hdr['FILENAME'] = pathlib.Path(cframe).name
-    hdr['VERSDRP'] = drpver
+    hdr['DRPVER'] = drpver
 
     # remove the wcs from the primary header; add it to flux header
     [hdr.pop(i, None) for i in wcs.to_header().keys()]
