@@ -1025,9 +1025,15 @@ def combine_spectrographs(tileid: int, mjd: int, expnum: int) -> fits.HDUList:
     # remove the wcs from the primary header; add it to flux header
     [hdr.pop(i, None) for i in wcs.to_header().keys()]
 
+    # create new hdr for flux extension
+    newhdr = {'BUNIT': hdr.pop("BUNIT", None)}
+    newhdr['BSCALE'] = hdr.pop("BSCALE", None)
+    newhdr['BZERO'] = hdr.pop("BZERO", None)
+    newhdr |= wcs.to_header()
+
     # create the new FITS file
     prim = fits.PrimaryHDU(header=hdr)
-    flux = fits.ImageHDU(flux_data, name='FLUX', header=wcs.to_header())
+    flux = fits.ImageHDU(flux_data, name='FLUX', header=newhdr)
     err = fits.ImageHDU(err_data, name='ERROR')
     mask = fits.ImageHDU(mask_data, name='MASK')
     fwhm = fits.ImageHDU(fwhm_data, name='FWHM')
