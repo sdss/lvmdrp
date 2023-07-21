@@ -201,6 +201,54 @@ def plot_strips(
     return ax
 
 
+def plot_wavesol_residuals(data, poly_model, true_wavelengths, ax=None, fig_path=None, to_display=False):
+    # data [X, Y] of emission lines in a given lamp
+    # wavelength model poly_model(lines_centroids)
+    # true_wavelengths is an X array of the true wavelengths
+
+    ref_fiber = 319
+    nfibers = 648
+    residuals = poly_model(data[ref_fiber, :]) - true_wavelengths
+    
+    ax.scatter(data[ref_fiber, :], residuals, s=1)
+    for i in range(residuals.size):
+        x, y = data[ref_fiber, :], residuals
+        ax.annotation((x, y), true_wavelengths[i], fontsize=8)
+    ax.set_xlabel("X (pixel)")
+    ax.set_ylabel("Residuals (angstrom)")
+
+    # save fig and close if requested
+    fig = ax.get_figure()
+    fig.savefig(fig_path, bbox_inches="tight")
+    if to_display:
+        plt.show()
+        plt.tight_layout()
+    else:
+        plt.close(fig)
+    
+    return fig_path
+
+
+def plot_wavesol_coeffs(ypix, coeffs, fig_path=None, to_display=False):
+    # ypix is the Y coordinate of each fiber in the middle of the chip
+    # coeffs is a 2D array of coefficients for each fiber [nfiber, ncoeff]
+
+    fig, axs = plt.subplots(coeffs.shape[1], figsize=(10, 15))
+    for icoeff in range(coeffs.shape[1]):
+        axs[icoeff].scatter(ypix, coeffs[:, icoeff], label=f"coeff {icoeff}")
+    
+    fig.tight_layout()
+
+    # save fig and close if requested
+    fig.savefig(fig_path, bbox_inches="tight")
+    if to_display:
+        plt.show()
+        plt.tight_layout()
+    else:
+        plt.close(fig)
+
+    return fig_path, fig, axs
+
 def save_fig(fig, product_path, to_display, figure_path=None, label=None, fmt="png"):
     """Saves the given matplotlib figure to the given output/figure path"""
     # define figure path
