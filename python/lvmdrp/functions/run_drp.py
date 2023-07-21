@@ -658,7 +658,7 @@ def run_drp(mjd: Union[int, str, list], bias: bool = False, dark: bool = False,
         return
 
     # find files
-    frames = get_frames_metadata(mjd=mjd, overwrite=True)
+    frames = get_frames_metadata(mjd=mjd)
     sub = frames.copy()
 
     # remove bad or test quality frames
