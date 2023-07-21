@@ -1412,10 +1412,8 @@ def trace_peaks(
         column, axis="y", data=positions, mask=numpy.zeros(len(positions), dtype="bool")
     )
 
-    # peaks points
-    # xs, ys = [], []
-
     # select cross-dispersion slice for the measurements of the peaks
+    # TODO: fix this mess with the steps
     first = numpy.arange(column - 1, -1, -1)
     select_first = first % steps == 0
     second = numpy.arange(column + 1, dim[1], 1)
@@ -1447,17 +1445,12 @@ def trace_peaks(
             pix, method, init_sigma, threshold=threshold, max_diff=float(max_diff)
         )
         if numpy.sum(bad_fibers) > 0:
-            diff = Spectrum1D(
-                wave=positions, data=(centers[0] - positions), mask=bad_fibers
-            )
+            diff = Spectrum1D(wave=positions, data=(centers[0] - positions), mask=bad_fibers)
             diff.smoothPoly(1, poly_kind="poly", ref_base=positions)
             centers[0][bad_fibers] = diff._data[bad_fibers] + positions[bad_fibers]
             centers[1][bad_fibers] = False
         trace.setSlice(i, axis="y", data=centers[0], mask=centers[1])
         m += 1
-
-        # xs.append(i)
-        # ys.append(centers[0].tolist())
 
     # iterate towards the last index along dispersion axis
     if verbose:
@@ -1483,9 +1476,7 @@ def trace_peaks(
             pix, method, init_sigma, threshold=threshold, max_diff=float(max_diff)
         )
         if numpy.sum(bad_fibers) > 0:
-            diff = Spectrum1D(
-                wave=positions, data=(centers[0] - positions), mask=bad_fibers
-            )
+            diff = Spectrum1D(wave=positions, data=(centers[0] - positions), mask=bad_fibers)
             diff.smoothPoly(1, poly_kind="poly", ref_base=positions)
             centers[0][bad_fibers] = diff._data[bad_fibers] + positions[bad_fibers]
             centers[1][bad_fibers] = False
@@ -1513,6 +1504,8 @@ def trace_peaks(
     ##    trace.smoothTraceDist(column, poly_cross=poly_cross, poly_disp=poly_disp)
 
     trace.writeFitsData(out_trace)
+
+    return trace_data, trace
 
 
 def glueCCDFrames_drp(
@@ -2657,7 +2650,13 @@ def testres_drp(image, trace, fwhm, flux):
     hdu = pyfits.PrimaryHDU((img._data - out) / img._data)
     hdu.writeto("res_rel.fits", overwrite=True)
 
-
+# TODO: for arcs take short exposures for bright lines & long exposures for faint lines
+# TODO: Argon: 10s + 300s
+# TODO: Neon: 10s + 300s
+# TODO: HgNe: 15s (particularly helpful for r and NIR strong lines) + 300s (not so many lines in NIR or r)
+# TODO: Xenon: 300s
+# TODO: correct non-linear region using the PTC
+# TODO: Quartz lamp flat-fielding, 10 exptime is fine
 @skip_on_missing_input_path(["in_image", "in_mask"])
 def preproc_raw_frame(
     in_image: str,
