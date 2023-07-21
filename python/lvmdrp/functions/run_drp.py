@@ -957,7 +957,8 @@ def combine_cameras(tileid: int, mjd: int, spec: int = 1):
 
 
 @lru_cache
-def read_fibermap(as_table: bool = None, as_hdu: bool = None) -> Union[pd.DataFrame, Table, fits.BinTableHDU]:
+def read_fibermap(as_table: bool = None, as_hdu: bool = None,
+                  filename: str = 'lvm_fiducial_fibermap.yaml') -> Union[pd.DataFrame, Table, fits.BinTableHDU]:
     """ Read the LVM fibermap
 
     Reads the LVM fibermap yaml file into a pandas
@@ -969,6 +970,8 @@ def read_fibermap(as_table: bool = None, as_hdu: bool = None) -> Union[pd.DataFr
         If True, returns an Astropy Table, by default None
     as_hdu : bool, optional
         If True, returns an Astropy fits.BinTableHDU, by default None
+    filename : str, optional
+        Optional name of the fibermap file, by default "lvm_fiducial_fibermap.yaml"
 
     Returns
     -------
@@ -979,7 +982,7 @@ def read_fibermap(as_table: bool = None, as_hdu: bool = None) -> Union[pd.DataFr
     if not core_dir:
         raise ValueError("Environment variable LVMCORE_DIR not set. Set it or load lvmcore module file.")
 
-    p = pathlib.Path(core_dir) / 'metrology/lvm_fiducial_fibermap.yaml'
+    p = pathlib.Path(core_dir) / f'metrology/{filename}'
     if not p.is_file():
         log.warning("Cannot read fibermap from lvmcore.")
         return
