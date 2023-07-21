@@ -2758,7 +2758,7 @@ def preproc_raw_frame(
         sc_sec = DEFAULT_TRIMSEC
     else:
         sc_sec = list(org_header["TRIMSEC?"].values())
-        log.info(f"using header TRIMSEC = {org_header['TRIMSEC?']}")
+        log.info(f"using header TRIMSEC = {sc_sec}")
 
     # extract BIASSEC or assume default value
     if assume_biassec:
@@ -2769,7 +2769,7 @@ def preproc_raw_frame(
         os_sec = DEFAULT_BIASSEC
     else:
         os_sec = list(org_header["BIASSEC?"].values())
-        log.info(f"using header BIASSEC = {org_header['BIASSEC?']}")
+        log.info(f"using header BIASSEC = {os_sec}")
 
     # extract gain
     gain = numpy.ones(NQUADS)
