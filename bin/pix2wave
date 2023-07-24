@@ -255,7 +255,11 @@ class SolveWavelength:
         self.spans = {}
         for i, (x_peak, wavelength, good) in enumerate(self.pixmap):
             span_range = x_peak - self.aperture, x_peak + self.aperture
-            vspan, point, text = self._draw_mapped_line(span_range, x_peak, wavelength, int(good))
+            try:
+                vspan, point, text = self._draw_mapped_line(span_range, x_peak, wavelength, int(good))
+            except Exception:
+                log.error(f"error drawing line at {x_peak}")
+                continue
             self.spans[vspan] = (i, point, text)
         self.ax_pix.set_xlabel("dispersion axis (pixel)")
         self.ax_pix.set_ylabel("counts (e-/pix)")
@@ -345,7 +349,7 @@ class SolveWavelength:
             log.info(f"no new lines to add to '{self.pixmap_table}'")
 
     def on_pick(self, event):
-        if event.artist == self.line:
+        if event.artist == self.line and event.mouseevent.button == 1:
             # take the middle pixel of the recorded ones
             self.pix = event.ind[len(event.ind) // 2]
             # capture {x,y} where pick event happened
@@ -362,16 +366,15 @@ class SolveWavelength:
             )
             label.set_text(f"wavelength for {self.x_peak:.2f}:")
             value.set_text("")
-        elif mapped_line := self.spans.get(event.artist):
-            # if right click mouse, toggle line mask
-            if event.mouseevent.button == 3:
-                vspan = event.artist
-                i, point, text = mapped_line
-                masked_status = int(not self.pixmap[i, -1])
-                self.pixmap[i, -1] = masked_status
-                plt.setp(vspan, **VSPAN_PROPS[masked_status])
-                plt.setp(point, **POINT_PROPS[masked_status])
-                plt.setp(text, **TEXT_PROPS[masked_status])
+        # if right click mouse, toggle line mask
+        elif mapped_line := self.spans.get(event.artist) and event.mouseevent.button == 3:
+            vspan = event.artist
+            i, point, text = mapped_line
+            masked_status = int(not self.pixmap[i, -1])
+            self.pixmap[i, -1] = masked_status
+            plt.setp(vspan, **VSPAN_PROPS[masked_status])
+            plt.setp(point, **POINT_PROPS[masked_status])
+            plt.setp(text, **TEXT_PROPS[masked_status])
 
     def on_close(self, event):
         # fit the wavelength solution
