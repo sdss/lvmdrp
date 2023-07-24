@@ -2908,7 +2908,7 @@ def preproc_raw_frame(
         )
 
     # load master pixel mask
-    if in_mask:
+    if in_mask and proc_img._header["IMAGETYP"] not in {"bias", "dark", "pixelflat"}:
         log.info(f"loading master pixel mask from {os.path.basename(in_mask)}")
         master_mask = loadImage(in_mask)._mask.astype(bool)
     else:
