@@ -14,7 +14,6 @@ from astropy.io import fits
 from astropy.table import Table
 from astropy.time import Time
 from astropy.wcs import WCS
-from matplotlib import pyplot as plt
 from numpy import polynomial
 from scipy import interpolate, ndimage
 
@@ -24,7 +23,7 @@ from lvmdrp.core.cube import Cube
 from lvmdrp.core.fiberrows import FiberRows
 from lvmdrp.core.image import loadImage
 from lvmdrp.core.passband import PassBand
-from lvmdrp.core.plot import save_fig
+from lvmdrp.core.plot import plt, create_subplots, save_fig
 from lvmdrp.core.rss import RSS, _read_pixwav_map, _chain_join, glueRSS, loadRSS
 from lvmdrp.core.spectrum1d import Spectrum1D, _cross_match
 from lvmdrp.external import ancillary_func
@@ -257,6 +256,14 @@ def determine_wavelength_solution(in_arc: str, out_wave: str, out_lsf: str,
         f"{flux_min = }, {fwhm_max = } and relative flux limits {rel_flux_limits}"
         )
 
+    # initialize plots for arc lines fitting
+    fig, axs = create_subplots(to_display=display_plots, nrows=1, ncols=nlines, figsize=(10*nlines, 7))
+    fig.suptitle("Gaussian fitting")
+    fig.supylabel("counts (e-/pixel)")
+    for i, ax in enumerate(axs):
+        ax.axvline(pixel[i], ls="--", lw=1, color="tab:red")
+        ax.set_title(f"line @ {pixel[i]:.1f} (pixel) - {ref_lines[i]:.2f} (angstrom)")
+        ax.set_xlabel("X (pixel)")
     fibers, flux, cent_wave, fwhm, masked = arc.measureArcLines(
         ref_fiber,
         pixel,
@@ -265,7 +272,14 @@ def determine_wavelength_solution(in_arc: str, out_wave: str, out_lsf: str,
         flux_min=flux_min,
         fwhm_max=fwhm_max,
         rel_flux_limits=rel_flux_limits,
-        verbose=True,
+        axs=axs,
+    )
+    save_fig(
+        fig,
+        product_path=out_wave,
+        to_display=display_plots,
+        figure_path="qa",
+        label="lines_fitting",
     )
 
     if fiberflat != "":

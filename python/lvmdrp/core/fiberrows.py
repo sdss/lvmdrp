@@ -825,7 +825,7 @@ class FiberRows(Header, PositionTable):
         flux_min=100,
         fwhm_max=10,
         rel_flux_limits=[0.2, 5],
-        verbose=True,
+        axs=None,
     ):
         nlines = len(ref_cent)
         cent_wave = numpy.zeros((self._fibers, nlines), dtype=numpy.float32)
@@ -834,11 +834,7 @@ class FiberRows(Header, PositionTable):
         masked = numpy.zeros((self._fibers, nlines), dtype="bool")
 
         spec = self.getSpec(ref_fiber)
-        fit, ax = spec.fitSepGauss(ref_cent, aperture, init_back, plot=True)
-        ax.set_xlabel("X (pix)")
-        ax.set_ylabel("counts (e-/pix)")
-        ax.set_title(f"lines fitting at {ref_fiber = }")
-        plt.show()
+        fit = spec.fitSepGauss(ref_cent, aperture, init_back, axs=axs)
         masked[ref_fiber, :] = False
         flux[ref_fiber, :] = fit[:nlines]
         ref_flux = flux[ref_fiber, :]
@@ -847,20 +843,17 @@ class FiberRows(Header, PositionTable):
         first = numpy.arange(ref_fiber - 1, -1, -1)
         second = numpy.arange(ref_fiber + 1, self._fibers, 1)
 
-        if verbose:
-            iterator = tqdm(
-                first,
-                total=first.size,
-                desc=f"measuring arc lines upwards from {ref_fiber = }",
-                ascii=True,
-                unit="fiber",
-            )
-        else:
-            iterator = first
+        iterator = tqdm(
+            first,
+            total=first.size,
+            desc=f"measuring arc lines upwards from {ref_fiber = }",
+            ascii=True,
+            unit="fiber",
+        )
         for i in iterator:
             spec = self.getSpec(i)
 
-            fit, ax = spec.fitSepGauss(cent_wave[i + 1], aperture, init_back, plot=False)
+            fit = spec.fitSepGauss(cent_wave[i + 1], aperture, init_back, axs=None)
             flux[i, :] = numpy.fabs(fit[:nlines])
             cent_wave[i, :] = fit[nlines : 2 * nlines]
             fwhm[i, :] = fit[2 * nlines : 3 * nlines] * 2.354
@@ -886,20 +879,17 @@ class FiberRows(Header, PositionTable):
                 fwhm[i, select] = fwhm[i + 1, select]
                 masked[i, select] = True
 
-        if verbose:
-            iterator = tqdm(
-                second,
-                total=second.size,
-                desc=f"measuring arc lines downwards from {ref_fiber = }",
-                ascii=True,
-                unit="fiber",
-            )
-        else:
-            iterator = second
+        iterator = tqdm(
+            second,
+            total=second.size,
+            desc=f"measuring arc lines downwards from {ref_fiber = }",
+            ascii=True,
+            unit="fiber",
+        )
         for i in iterator:
             spec = self.getSpec(i)
             
-            fit, ax = spec.fitSepGauss(cent_wave[i - 1], aperture, init_back, plot=False)
+            fit = spec.fitSepGauss(cent_wave[i - 1], aperture, init_back, axs=None)
             flux[i, :] = numpy.fabs(fit[:nlines])
             cent_wave[i, :] = fit[nlines : 2 * nlines]
             fwhm[i, :] = fit[2 * nlines : 3 * nlines] * 2.354

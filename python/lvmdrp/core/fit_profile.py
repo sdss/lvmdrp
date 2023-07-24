@@ -223,11 +223,11 @@ class fit_profile1D(object):
         else:
             self._par_err = None
 
-    def plot(self, x, y=None):
+    def plot(self, x, y=None, ax=None):
         if y is not None:
-            plt.plot(x, y, "ok")
-        plt.plot(x, self(x), "-r")
-        return plt.gca()
+            ax.step(x, y, color="0.2", lw=1, where="mid")
+        ax.step(x, self(x), color="tab:blue", lw=1.5, where="mid")
+        return ax
 
 
 class fit_profile2D(object):

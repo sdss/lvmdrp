@@ -2016,7 +2016,7 @@ class Spectrum1D(Header):
         init_back=0.0,
         ftol=1e-8,
         xtol=1e-8,
-        plot=False,
+        axs=None,
         warning=False,
     ):
         ncomp = len(centres)
@@ -2041,14 +2041,12 @@ class Spectrum1D(Header):
                 out[ncomp + i] = out_fit[1]
                 out[2 * ncomp + i] = out_fit[2]
 
-                if plot:
-                    ax = gauss.plot(self._wave[select], self._data[select])
-                else:
-                    ax = None
+                if axs is not None:
+                    axs[i] = gauss.plot(self._wave[select], self._data[select], ax=axs[i])
             else:
                 out[i:ncomp + i + 1] = 0.0
 
-        return out, ax
+        return out
 
     def _get_select(self, centre, aperture, mask):
         return numpy.logical_and(
