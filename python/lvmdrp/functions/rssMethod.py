@@ -2718,7 +2718,6 @@ def DAR_registerSDSS_drp(
         plt.show()
 
 
-@drop_missing_input_paths(["in_rss"])
 def join_spec_channels(in_rss: list, out_rss: list, parallel: str = "auto"):
     """combine the given RSS list through the overlaping wavelength range
 
