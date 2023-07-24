@@ -376,7 +376,7 @@ def determine_wavelength_solution(in_arc: str, out_wave: str, out_lsf: str,
                 deg=poly_disp,
             )
 
-        wave_coeffs[i, :] = poly.coef
+        wave_coeffs[i, :] = poly.convert().coef
         wave_sol[i, :] = poly(arc._pixels)
         wave_rms[i] = numpy.std(ref_lines[use_line] - poly(cent_wave[i, use_line]))
 
@@ -404,7 +404,10 @@ def determine_wavelength_solution(in_arc: str, out_wave: str, out_lsf: str,
             kind_fwhm = "poly"
         if kind_fwhm == "poly":
             poly = polynomial.Polynomial.fit(
-                cent_wave[i, use_line], fwhm_wave[use_line], deg=poly_fwhm
+                cent_wave[i, use_line],
+                fwhm_wave[use_line],
+                deg=poly_fwhm,
+                domain=[0, arc._pixels[-1]]
             )
         elif kind_fwhm == "legendre":
             poly = polynomial.Legendre.fit(
@@ -420,7 +423,7 @@ def determine_wavelength_solution(in_arc: str, out_wave: str, out_lsf: str,
             )
 
         # TODO: select one column and plot coeffs vs Y coord in pixels
-        lsf_coeffs[i, :] = poly.coef
+        lsf_coeffs[i, :] = poly.convert().coef
         fwhm_sol[i, :] = poly(arc._pixels)
         fwhm_rms[i] = numpy.std(fwhm_wave[use_line] - poly(cent_wave[i, use_line]))
 
