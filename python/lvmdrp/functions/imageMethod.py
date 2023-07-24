@@ -3236,7 +3236,7 @@ def detrend_frame(
         detrended_img = detrended_img / numpy.ma.median(flat_array)
 
     # add slitmap information if given
-    if in_slitmap is not None:
+    if in_slitmap is not None and detrended_img._header["IMAGETYP"] in {'fiberflat', 'flat', 'object', 'science'}:
         log.info("adding slitmap information")
         detrended_img.setSlitmap(in_slitmap)
     else:

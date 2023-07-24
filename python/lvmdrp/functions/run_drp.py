@@ -287,7 +287,7 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
         log.info(f'custom configuration parameters for detrend_frame: {repr(kwargs)}')
         detrend_frame(in_image=in_cal, out_image=out_cal,
                       in_bias=mbias, in_dark=mdark, in_pixelflat=mpixflat,
-                      in_slitmap=Table(fibermap.data) if flavor in {'fiberflat', 'flat', 'object', 'science'} else None,
+                      in_slitmap=Table(fibermap),
                       **kwargs)
         log.info(f'Output calibrated file: {out_cal}')
 
