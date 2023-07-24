@@ -64,7 +64,7 @@ def _read_pixwav_map(lamp: str, channel: str, pixels=None, waves=None):
             f"going to use {nlines} lines ({(~use_line).sum()} lines masked)"
         )
     else:
-        log.warning(f"no pixel-to-wavelength map foind for {lamp = } in {channel = }")
+        log.warning(f"no pixel-to-wavelength map found for {lamp = } in {channel = }")
         # initialize new table to create a new pixel-to-wave map
         ref_fiber = None
         pixels = numpy.empty((0,))

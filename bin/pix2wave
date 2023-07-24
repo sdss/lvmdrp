@@ -6,7 +6,6 @@ import sys
 
 import matplotlib
 import numpy as np
-from matplotlib.lines import Line2D
 from matplotlib.widgets import MultiCursor, TextBox
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from numpy import polynomial
@@ -20,11 +19,21 @@ from lvmdrp.utils import spec_from_lines
 
 
 font = {"family": "sans-serif", "weight": "bold", "size": 12}
-
 matplotlib.rc("font", **font)
-
-
 plt.switch_backend("TKAgg")
+
+VSPAN_PROPS = [
+    dict(fc="0.8", lw=0, alpha=0.5),
+    dict(fc="0.5", lw=0, alpha=0.5)
+    ]
+POINT_PROPS = [
+    dict(marker="o", mec="k", mfc="none", mew=0.5, ms=3),
+    dict(marker="o", mec="r", mfc="none", mew=0.5, ms=5)
+]
+TEXT_PROPS = [
+    dict(va="top", ha="left", size="x-small", color="0.8", rotation=90),
+    dict(va="top", ha="left", size="x-small", weight="bold", color="0.5", rotation=90)
+]
 
 
 class SolveWavelength:
@@ -76,9 +85,11 @@ class SolveWavelength:
         lamps = "_".join(self.lamps)
         self.pixmap_table = os.path.join(CONFIG_PATH, "wavelength", f"lvm-pixwav-{lamps}_{self.channel}.txt")
         self.table_exist = os.path.isfile(self.pixmap_table)
+        # read combined table
         if self.table_exist:
             _, ref_fiber, pixels, waves, masks = rss._read_pixwav_map(lamps, self.channel)
             self.pixmap = np.column_stack((pixels, waves, masks))
+        # read per-lamp table
         else:
             pixmaps = []
             for lamp in self.lamps:
@@ -93,7 +104,8 @@ class SolveWavelength:
             self.pixmap = np.concatenate(pixmaps, axis=0)
             # sort by pixels
             self.pixmap = self.pixmap[np.argsort(self.pixmap[:,0])]
-
+        
+        # define number of rows
         self.nrows = self.pixmap.shape[0]
 
     def _load_reflines(self):
@@ -121,9 +133,8 @@ class SolveWavelength:
 
         # mask lines out of guess wavelength range
         log.info(f"selecting pixels within {self.wave_range}")
-        mask_range = (self.wave_range[0] <= self.reflines["Wavelength"]) & (
-            self.reflines["Wavelength"] <= self.wave_range[1]
-        )
+        mask_range = (self.wave_range[0] <= self.reflines["Wavelength"])
+        mask_range &= (self.reflines["Wavelength"] <= self.wave_range[1])
         self.reflines = self.reflines[mask_range]
 
     def _set_spectrum(self):
@@ -176,6 +187,26 @@ class SolveWavelength:
                 )
         return poly
 
+    def _draw_mapped_line(self, span_range, x_peak, wavelength, is_good):
+        x_min, x_max = span_range
+        vspan = self.ax_pix.axvspan(x_min, x_max, picker=True, **VSPAN_PROPS[is_good])
+        point = self.ax_pix.plot(
+            [x_peak],
+            [
+                np.nanmax(
+                    self.ydata[(x_min <= self.xdata) & (self.xdata <= x_max)]
+                )
+            ],
+            **POINT_PROPS[is_good]
+        )
+        text = self.ax_pix.text(
+            x_max,
+            0.95,
+            f"{wavelength:.4f}",
+            **TEXT_PROPS[is_good]
+        )
+        return vspan, point, text
+
     def _init_plot(self):
         # initialize plot spectrum
         self.ax_pix.set_title(os.path.basename(self.extracted_fits))
@@ -212,10 +243,10 @@ class SolveWavelength:
 
         # fix table with quick correlation
         if self.table_exist and self.correct_lines:
-            mask = self.pixmap[:, -1].astype(bool)
-            log.info(f"running cross-correlation on {mask.sum()} good lines")
+            is_good = self.pixmap[:, -1].astype(bool)
+            log.info(f"running cross-correlation on {is_good.sum()} good lines")
             pix_spec = spec_from_lines(
-                self.pixmap[mask, 0], sigma=2, wavelength=self.xdata
+                self.pixmap[is_good, 0], sigma=2, wavelength=self.xdata
             )
             corr = signal.correlate(self.ydata, pix_spec, mode="full")
             shift = np.nanargmax(corr) - pix_spec.size
@@ -224,58 +255,11 @@ class SolveWavelength:
 
         # adding known peaks
         log.info(f"displaying {self.pixmap.shape[0]} known lines (including masked)")
-        for x_peak, wavelength, mask in self.pixmap:
-            x_min, x_max = x_peak - self.aperture, x_peak + self.aperture
-            if mask:
-                self.ax_pix.axvspan(x_min, x_max, fc="0.5", lw=0, alpha=0.5)
-                self.ax_pix.plot(
-                    [x_peak],
-                    [
-                        np.nanmax(
-                            self.ydata[(x_min <= self.xdata) & (self.xdata <= x_max)]
-                        )
-                    ],
-                    "or",
-                    mew=0.5,
-                    ms=5,
-                    mfc="none",
-                )
-                self.ax_pix.text(
-                    x_max,
-                    0.95,
-                    f"{wavelength:.4f}",
-                    va="top",
-                    ha="left",
-                    size="x-small",
-                    weight="bold",
-                    color="0.5",
-                    rotation=90,
-                )
-            else:
-                self.ax_pix.axvspan(x_min, x_max, fc="0.8", lw=0, alpha=0.5)
-                self.ax_pix.plot(
-                    [x_peak],
-                    [
-                        np.nanmax(
-                            self.ydata[(x_min <= self.xdata) & (self.xdata <= x_max)]
-                        )
-                    ],
-                    "ok",
-                    mew=0.5,
-                    ms=3,
-                    mfc="none",
-                )
-                self.ax_pix.text(
-                    x_max,
-                    0.95,
-                    f"{wavelength:.4f}",
-                    va="top",
-                    ha="left",
-                    size="x-small",
-                    color="0.8",
-                    rotation=90,
-                )
-        # self.ax_pix.set_xlim(self.xdata[[0, -1]])
+        self.spans = {}
+        for i, (x_peak, wavelength, good) in enumerate(self.pixmap):
+            span_range = x_peak - self.aperture, x_peak + self.aperture
+            vspan, point, text = self._draw_mapped_line(span_range, x_peak, wavelength, int(good))
+            self.spans[vspan] = (i, point, text)
         self.ax_pix.set_xlabel("dispersion axis (pixel)")
         self.ax_pix.set_ylabel("counts (e-/pix)")
 
@@ -348,7 +332,7 @@ class SolveWavelength:
         self.pixmap = self.pixmap[self.pixmap[:, 0].argsort()]
 
         new_lines = self.pixmap.shape[0]-self.nrows
-        if new_lines != 0:
+        if len(self.pixmap) != 0:
             log.info(
                 f"saving pixel table with {new_lines} "
                 f"new lines to '{self.pixmap_table}'"
@@ -363,7 +347,7 @@ class SolveWavelength:
             log.info(f"no new lines to add to '{self.pixmap_table}'")
 
     def on_pick(self, event):
-        if isinstance(event.artist, Line2D):
+        if event.artist == self.line:
             # take the middle pixel of the recorded ones
             self.pix = event.ind[len(event.ind) // 2]
             # capture {x,y} where pick event happened
@@ -380,14 +364,16 @@ class SolveWavelength:
             )
             label.set_text(f"wavelength for {self.x_peak:.2f}:")
             value.set_text("")
-        # elif isinstance(event.artist, Polygon):
-        #     # get span x range
-        #     # compute middle x
-        #     # find closest value in self.pixmap
-        #     # remove value
-        #     # remove span
-        #     # remove point
-        #     pass
+        elif mapped_line := self.spans.get(event.artist):
+            # if right click mouse, toggle line mask
+            if event.mouseevent.button == 3:
+                vspan = event.artist
+                i, point, text = mapped_line
+                masked_status = int(not self.pixmap[i, -1])
+                self.pixmap[i, -1] = masked_status
+                plt.setp(vspan, **VSPAN_PROPS[masked_status])
+                plt.setp(point, **POINT_PROPS[masked_status])
+                plt.setp(text, **TEXT_PROPS[masked_status])
 
     def on_close(self, event):
         # fit the wavelength solution
