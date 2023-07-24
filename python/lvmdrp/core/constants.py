@@ -17,6 +17,7 @@ LVM_SRC_URL = f"{LVM_UNAM_URL}/lvmdrp_src.zip"
 
 # installation path
 INS_PATH = os.getenv("ESOSKY", get_env_lib_directory())
+INS_PATH='/Users/long/SDSS/'
 
 LIB_PATH = os.path.join(INS_PATH, "lib")
 BIN_PATH = os.path.join(INS_PATH, "bin")
