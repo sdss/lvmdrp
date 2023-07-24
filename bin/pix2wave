@@ -5,7 +5,6 @@ import os
 import sys
 
 import matplotlib
-import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.lines import Line2D
 from matplotlib.widgets import MultiCursor, TextBox
@@ -15,7 +14,8 @@ from scipy import signal
 
 from lvmdrp import log
 from lvmdrp.core import rss
-from lvmdrp.core.constants import SPEC_CHANNELS
+from lvmdrp.core.plot import plt
+from lvmdrp.core.constants import ARC_LAMPS, SPEC_CHANNELS, CONFIG_PATH
 from lvmdrp.utils import spec_from_lines
 
 
@@ -36,69 +36,88 @@ class SolveWavelength:
         self,
         axes,
         extracted_fits,
-        aperture,
-        poly_degree,
-        poly_kind,
-        wave_range,
-        pixmap_table,
-        reflines_table,
         fiber_id,
-        ncoadd,
-        correct_lines,
-        plot,
+        aperture=5,
+        correct_lines=False,
+        ncoadd=5,
+        poly_degree=5,
+        poly_kind="poly",
+        plot=True,
     ):
+        # define plot attributes
         self.ax_pix = axes[0]
         self.ax_wav = axes[1].twiny()
+
+        # define wavelength fitting attributes
         self.extracted_fits = extracted_fits
+        self.fiber_id = fiber_id
         self.aperture = aperture
-        self.poly_degree = poly_degree
-        self.poly_kind = poly_kind
-        self.wave_range = wave_range
-        self.pixmap_table = pixmap_table
-        self.reflines_table = reflines_table
         self.correct_lines = correct_lines
         self.ncoadd = ncoadd
+        self.poly_degree = poly_degree
+        self.poly_kind = poly_kind
         self.plot = plot
 
+        # initialize pixel
         self.pix = None
 
+        # compute coadded spectrum
+        self._set_spectrum()
         # open pixel map table
         self._load_pixmap(fiber_id)
         # load reference lines table
         self._load_reflines()
-        # compute coadded spectrum
-        self._set_spectrum()
         # initialize plot
         self._init_plot()
 
     def _load_pixmap(self, fiber_id):
-        self.table_exist = os.path.isfile(self.pixmap_table)
+        self.fiber_id = fiber_id
 
+        lamps = "_".join(self.lamps)
+        self.pixmap_table = os.path.join(CONFIG_PATH, "wavelength", f"lvm-pixwav-{lamps}_{self.channel}.txt")
+        self.table_exist = os.path.isfile(self.pixmap_table)
         if self.table_exist:
-            log.info(f"loading existing pixel table '{self.pixmap_table}'")
-            with open(self.pixmap_table) as t:
-                self.fiber_id = int(t.readline()[:-1])
-                if fiber_id != self.fiber_id:
-                    log.warning(
-                        f"current pixel table seem to map to {self.fiber_id}, which is "
-                        f"different than what you asked {fiber_id = }, turning "
-                        "cross-correlation correction 'on'"
-                    )
-                    self.fiber_id = fiber_id
-                    self.correct_lines = True
-                self.pixmap = np.loadtxt(t)
+            _, ref_fiber, pixels, waves, masks = rss._read_pixwav_map(lamps, self.channel)
+            self.pixmap = np.column_stack((pixels, waves, masks))
         else:
-            log.info(f"initializing new pixel table '{self.pixmap_table}'")
-            self.fiber_id = fiber_id
-            self.pixmap = np.empty((0, 3))
+            pixmaps = []
+            for lamp in self.lamps:
+                _, ref_fiber, pixels, waves, masks = rss._read_pixwav_map(lamp, self.channel)
+                if ref_fiber is not None:
+                    pixmaps.append(np.column_stack((pixels, waves, masks)))
+                else:
+                    log.info(f"no pixel-to-wavelength map found for {lamp = } in channel = {self.channel}")
+                    continue
+
+            # define joint pixel-to-wavelength map
+            self.pixmap = np.concatenate(pixmaps, axis=0)
+            # sort by pixels
+            self.pixmap = self.pixmap[np.argsort(self.pixmap[:,0])]
 
         self.nrows = self.pixmap.shape[0]
 
     def _load_reflines(self):
-        if os.path.isfile(self.reflines_table):
-            self.reflines = np.genfromtxt(
-                self.reflines_table, names=True, encoding=None, dtype=None
-            )
+        reflines = []
+        for lamp in self.lamps:
+            # define reference lines path
+            self.reflines_table = os.path.join(CONFIG_PATH, "wavelength", f"lvm-reflines-{lamp}.txt")
+            # skip if missing
+            if not os.path.isfile(self.reflines_table):
+                log.warning(f"missing reference lines for {lamp = }")
+                continue
+
+            if os.path.isfile(self.reflines_table):
+                reflines.append(np.genfromtxt(
+                    self.reflines_table, names=True, encoding=None, dtype=None
+                ))
+        
+        if len(reflines) == 0:
+            log.warning("no reference lines found")
+            self.reflines = np.array([], dtype=[("Intensity", float), ("Wavelength", float), ("Spectrum", str)])
+            return
+
+        self.reflines = np.concatenate((reflines), axis=0)
+        self.reflines = self.reflines[np.argsort(self.reflines["Wavelength"])]
 
         # mask lines out of guess wavelength range
         log.info(f"selecting pixels within {self.wave_range}")
@@ -111,12 +130,15 @@ class SolveWavelength:
         # read given image
         log.info(f"loading extracted RSS '{self.extracted_fits}'")
         spectra = rss.loadRSS(self.extracted_fits)
+        # extract relevant metadata
+        self.lamps = [lamp.lower() for lamp in ARC_LAMPS if spectra._header.get(lamp, "OFF") == "ON"]
+        self.channel = spectra._header["CCD"][0]
+        self.wave_range = SPEC_CHANNELS[self.channel]
         # apply pixel mask
         mask = spectra._mask | np.isnan(spectra._data) | np.isnan(spectra._error)
         mask |= (spectra._data < 0) | (spectra._error < 0)
         spectra._data[mask] = 0
         spectra._error[mask] = 0
-        # spectra._data = spectra._data * (~spectra._mask)
         # select spectra
         iy = self.fiber_id - self.ncoadd // 2
         fy = self.fiber_id + self.ncoadd // 2
@@ -324,18 +346,21 @@ class SolveWavelength:
 
     def _save_table(self):
         self.pixmap = self.pixmap[self.pixmap[:, 0].argsort()]
-        log.info(
-            (
-                f"saving pixel table with {self.pixmap.shape[0]-self.nrows} "
+
+        new_lines = self.pixmap.shape[0]-self.nrows
+        if new_lines != 0:
+            log.info(
+                f"saving pixel table with {new_lines} "
                 f"new lines to '{self.pixmap_table}'"
             )
-        )
-        self.nrows = self.pixmap.shape[0]
-        with open(self.pixmap_table, "w") as t:
-            t.write(f"{self.fiber_id}\n")
-            for i in range(self.nrows):
-                x, y, m = self.pixmap[i]
-                t.write(f"{x:>.2f} {y:>9.4f} {int(m):>1d}\n")
+            self.nrows = self.pixmap.shape[0]
+            with open(self.pixmap_table, "w") as t:
+                t.write(f"{self.fiber_id}\n")
+                for i in range(self.nrows):
+                    x, y, m = self.pixmap[i]
+                    t.write(f"{x:>.2f} {y:>9.4f} {int(m):>1d}\n")
+        else:
+            log.info(f"no new lines to add to '{self.pixmap_table}'")
 
     def on_pick(self, event):
         if isinstance(event.artist, Line2D):
@@ -369,17 +394,13 @@ class SolveWavelength:
         ndata = self.pixmap.shape[0]
         if ndata < self.poly_degree:
             log.error(
-                (
-                    f"not enough points ({ndata}) to "
-                    f"fit a {self.poly_degree}-deg polynomial"
-                )
+                f"not enough points ({ndata}) to "
+                f"fit a {self.poly_degree}-deg polynomial"
             )
             if self.nrows > 1:
                 log.info(
-                    (
-                        "your table will still be stored at "
-                        f"{self.pixmap_table} to save your progress"
-                    )
+                    "your table will still be stored at "
+                    f"{self.pixmap_table} to save your progress"
                 )
                 self._save_table()
             return None
@@ -440,47 +461,28 @@ if __name__ == "__main__":
         help="FITS containing the extracted spectra.",
     )
     parser.add_argument(
-        "aperture",
+        "--aperture",
         metavar="APERTURE",
         type=int,
         help="size in pixels of the tolerance window.",
+        default=5,
     )
     parser.add_argument(
-        "fiber_id",
+        "--fiber_id",
         metavar="FIBER_ID",
         type=int,
         help="pixel row of reference spectrum.",
+        default=319,
     )
     parser.add_argument(
-        "ncoadd",
+        "--ncoadd",
         metavar="NCOADD",
         type=int,
         help="number of spectra to coadd to improve SNR.",
+        default=10,
     )
     parser.add_argument(
-        "poly_deg", metavar="DEG", type=int, help="degree of the polynomial to fit."
-    )
-    parser.add_argument(
-        "pixmap_table",
-        metavar="PIXMAP_TABLE.txt",
-        help="ASCII file to store mapping table.",
-    )
-    parser.add_argument(
-        "reflines_table",
-        metavar="REFLINES_TABLE.txt",
-        help=(
-            "ASCII file with reference lines. "
-            "1st column: Intensity, "
-            "2nd column: Wavelength, "
-            "3rd column: Spectrum"
-        ),
-    )
-    parser.add_argument(
-        "-s",
-        "--spec-channel",
-        default="b",
-        choices=["b", "r", "z"],
-        help="spectrograph channel",
+        "--poly_deg", metavar="DEG", type=int, help="degree of the polynomial to fit.", default=5,
     )
     parser.add_argument(
         "--poly-kind",
@@ -517,9 +519,6 @@ if __name__ == "__main__":
         aperture=args.aperture,
         poly_degree=args.poly_deg,
         poly_kind=args.poly_kind,
-        wave_range=SPEC_CHANNELS.get(args.spec_channel),
-        pixmap_table=args.pixmap_table,
-        reflines_table=args.reflines_table,
         fiber_id=args.fiber_id,
         ncoadd=args.ncoadd,
         correct_lines=args.correct_lines,
