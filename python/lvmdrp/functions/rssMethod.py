@@ -16,7 +16,7 @@ from astropy.time import Time
 from astropy.wcs import WCS
 from matplotlib import pyplot as plt
 from numpy import polynomial
-from scipy import interpolate, ndimage, signal
+from scipy import interpolate, ndimage
 
 from lvmdrp.utils.decorators import skip_on_missing_input_path, drop_missing_input_paths, skip_if_drpqual_flags
 from lvmdrp.core.constants import CONFIG_PATH, ARC_LAMPS
@@ -26,7 +26,7 @@ from lvmdrp.core.image import loadImage
 from lvmdrp.core.passband import PassBand
 from lvmdrp.core.plot import save_fig
 from lvmdrp.core.rss import RSS, _read_pixwav_map, _chain_join, glueRSS, loadRSS
-from lvmdrp.core.spectrum1d import Spectrum1D
+from lvmdrp.core.spectrum1d import Spectrum1D, _cross_match
 from lvmdrp.external import ancillary_func
 from lvmdrp.utils import flatten, spec_from_lines
 from lvmdrp import log
@@ -205,32 +205,26 @@ def determine_wavelength_solution(in_arc: str, out_wave: str, out_lsf: str,
 
         # apply cc correction to lines if needed
         if cc_correction or ref_fiber != ref_fiber_:
-            log.info("calculating shift in guess lines using CC")
+            log.info(f"running cross matching on {pixel.size} good lines")
             # determine maximum correlation shift
             pix_spec = spec_from_lines(pixel, sigma=2, wavelength=arc._pixels)
-            shifts = signal.correlation_lags(
-                (arc._data * (~arc._mask))[ref_fiber].size, pix_spec.size, mode="full"
-            )
-            corr = signal.correlate(
-                (arc._data * (~arc._mask))[ref_fiber], pix_spec, mode="full"
-            )
-            if cc_max_shift != 0:
-                shifts_mask = (shifts >= -cc_max_shift) & (shifts <= cc_max_shift)
-                shifts = shifts[shifts_mask]
-                corr = corr[shifts_mask]
 
-            # print(">>>>>>>>>>>>>")
-            # print(numpy.isnan((arc._data * (~arc._mask))[ref_fiber]).sum())
-            # print(corr)
-            # print(shifts)
-
-            shift = shifts[numpy.nanargmax(corr)]
-            log.info(f"maximum CC {shift = } pix")
+            # fix cc_max_shift
+            cc_max_shift = max(cc_max_shift, 50)
+            # cross-match spectrum and pixwav map
+            cc, bhat, mhat = _cross_match(
+                ref_spec=pix_spec,
+                obs_spec=arc._data[ref_fiber],
+                stretch_factors=numpy.linspace(0.8,1.2,10000),
+                shift_range=[-cc_max_shift, cc_max_shift]
+            )
+            
+            log.info(f"max CC = {cc:.2f} for strech = {mhat:.2f} and shift = {bhat:.2f}")
         else:
-            shift = 0
+            mhat, bhat = 1.0, 0.0
 
         # correct initial pixel map by shifting
-        pixel += shift
+        pixel = mhat * pixel + bhat
 
         pixel_list.append(pixel)
         ref_lines_list.append(ref_lines)
@@ -459,7 +453,7 @@ def determine_wavelength_solution(in_arc: str, out_wave: str, out_lsf: str,
             alpha=0.5,
         )
     ax_spec.vlines(
-        pixel - shift,
+        (pixel - bhat) / mhat,
         numpy.nanmin((arc._data * good_pix)[ref_fiber]),
         numpy.nanmax((arc._data * good_pix)[ref_fiber]),
         color="tab:red",
@@ -472,7 +466,7 @@ def determine_wavelength_solution(in_arc: str, out_wave: str, out_lsf: str,
         numpy.nanmax((arc._data * good_pix)[ref_fiber]),
         color="tab:blue",
         lw=0.5,
-        label=f"corr. lines ({shift = } pix)",
+        label=f"corr. lines ({mhat = :.2f}, {bhat = :.2f})",
     )
     ax_spec.step(arc._pixels, (arc._data * good_pix)[ref_fiber], color="0.2", lw=1)
     ax_spec.set_title(f"reference arc spectrum {ref_fiber}", loc="left")
