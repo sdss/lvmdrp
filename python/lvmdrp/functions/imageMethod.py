@@ -3375,9 +3375,9 @@ def create_pixelmask(
     in_pixelflat: str = None,
     median_box: int = [31, 31],
     cen_stat: str = "median",
-    low_nsigma: int = 2,
-    high_nsigma: int = 6,
-    column_threshold: float = 0.2,
+    low_nsigma: int = 3,
+    high_nsigma: int = 7,
+    column_threshold: float = 0.3,
 ):
     """create a pixel mask using a simple sigma clipping
 
@@ -3444,13 +3444,14 @@ def create_pixelmask(
 
             # create pixel masks for low and high nsigmas
             # log.info(f"creating pixel mask for {low_nsigma = } sigma")
-            badcol_mask = (quad._data < cen - low_nsigma * std) | (
-                quad._data > cen + low_nsigma * std
-            )
+            badcol_mask = (quad._data < cen - low_nsigma * std)
+            badcol_mask |= (quad._data > cen + low_nsigma * std)
             # log.info(f"creating pixel mask for {high_nsigma = } sigma")
-            hotpix_mask = (quad._data < cen - high_nsigma * std) | (
-                quad._data > cen + high_nsigma * std
-            )
+            if img._header["IMAGETYP"] != "bias":
+                hotpix_mask = (quad._data < cen - high_nsigma * std)
+                hotpix_mask |= (quad._data > cen + high_nsigma * std)
+            else:
+                hotpix_mask = numpy.zeros_like(quad._data, dtype=bool)
 
             # mask whole columns if fraction of masked pixels is above threshold
             bad_columns = numpy.sum(badcol_mask, axis=0) > column_threshold * quad._dim[0]
