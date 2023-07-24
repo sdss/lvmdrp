@@ -2020,70 +2020,63 @@ class Spectrum1D(Header):
         warning=False,
     ):
         ncomp = len(centres)
-        cent = numpy.zeros(ncomp, dtype=numpy.float32)
+
         out = numpy.zeros(3 * ncomp, dtype=numpy.float32)
-        back = numpy.zeros(ncomp, dtype=numpy.float32)
-        if self._error is not None:
-            error = self._error
-        else:
-            error = numpy.ones(self._dim, dtype=numpy.float32)
-        if self._mask is not None:
-            mask = self._mask
-        else:
-            mask = numpy.zero(self._dim, dtype="bool")
-        for i in range(len(centres)):
-            back[i] = deepcopy(init_back)
-            select = numpy.logical_and(
-                numpy.logical_and(
-                    self._wave >= centres[i] - aperture / 2.0,
-                    self._wave <= centres[i] + aperture / 2.0,
-                ),
-                numpy.logical_not(mask),
-            )
+        back = [deepcopy(init_back) for _ in centres]
+
+        error = self._error if self._error is not None else numpy.ones(self._dim, dtype=numpy.float32)
+        mask = self._mask if self._mask is not None else numpy.zeros(self._dim, dtype=bool)
+
+        for i, centre in enumerate(centres):
+            select = self._get_select(centre, aperture, mask)
             if numpy.sum(select) > 0:
                 max = numpy.max(self._data[select])
                 cent = numpy.median(self._wave[select][self._data[select] == max])
-                select = numpy.logical_and(
-                    self._wave >= cent - aperture / 2.0,
-                    self._wave <= cent + aperture / 2.0,
-                    numpy.logical_not(mask),
-                )
-                if back[i] == 0.0:
-                    par = [0.0, 0.0, 0.0]
-                    gauss = fit_profile.Gaussian(par)
-                    gauss.fit(
-                        self._wave[select],
-                        self._data[select],
-                        sigma=error[select],
-                        ftol=ftol,
-                        xtol=xtol,
-                        warning=warning,
-                    )
-                else:
-                    par = [0.0, 0.0, 0.0, 0.0]
-                    gauss = fit_profile.Gaussian_const(par)
-                    gauss.fit(
-                        self._wave[select],
-                        self._data[select],
-                        sigma=error[select],
-                        ftol=ftol,
-                        xtol=xtol,
-                        warning=warning,
-                    )
+                select = self._get_select(cent, aperture, mask)
+
+                gauss = self._fit_gaussian(select, back[i], error, ftol, xtol, warning)
+
                 out_fit = gauss.getPar()
                 out[i] = out_fit[0]
                 out[ncomp + i] = out_fit[1]
                 out[2 * ncomp + i] = out_fit[2]
-                if plot:
-                    gauss.plot(self._wave[select], self._data[select])
 
+                if plot:
+                    ax = gauss.plot(self._wave[select], self._data[select])
+                else:
+                    ax = None
             else:
-                out[i] = 0.0
-                out[ncomp + i] = 0.0
-                out[2 * ncomp + i] = 0.0
-        if plot:
-            plt.show()
-        return out
+                out[i:ncomp + i + 1] = 0.0
+
+        return out, ax
+
+    def _get_select(self, centre, aperture, mask):
+        return numpy.logical_and(
+            numpy.logical_and(
+                self._wave >= centre - aperture / 2.0,
+                self._wave <= centre + aperture / 2.0,
+            ),
+            numpy.logical_not(mask),
+        )
+
+    def _fit_gaussian(self, select, back, error, ftol, xtol, warning):
+        if back == 0.0:
+            par = [0.0, 0.0, 0.0]
+            gauss = fit_profile.Gaussian(par)
+        else:
+            par = [0.0, 0.0, 0.0, 0.0]
+            gauss = fit_profile.Gaussian_const(par)
+
+        gauss.fit(
+            self._wave[select],
+            self._data[select],
+            sigma=error[select],
+            ftol=ftol,
+            xtol=xtol,
+            warning=warning,
+        )
+
+        return gauss
 
     def obtainGaussFluxPeaks(self, pos, sigma, indices, replace_error=1e10, plot=False):
         """returns Gaussian peaks parameters, flux error and mask

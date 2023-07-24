@@ -2,6 +2,7 @@ import numpy
 from astropy.io import fits as pyfits
 from tqdm import tqdm
 
+from lvmdrp.core.plot import plt
 from lvmdrp.core.header import Header, combineHdr
 from lvmdrp.core.positionTable import PositionTable
 from lvmdrp.core.spectrum1d import Spectrum1D
@@ -833,7 +834,11 @@ class FiberRows(Header, PositionTable):
         masked = numpy.zeros((self._fibers, nlines), dtype="bool")
 
         spec = self.getSpec(ref_fiber)
-        fit = spec.fitSepGauss(ref_cent, aperture, init_back)
+        fit, ax = spec.fitSepGauss(ref_cent, aperture, init_back, plot=True)
+        ax.set_xlabel("X (pix)")
+        ax.set_ylabel("counts (e-/pix)")
+        ax.set_title(f"lines fitting at {ref_fiber = }")
+        plt.show()
         masked[ref_fiber, :] = False
         flux[ref_fiber, :] = fit[:nlines]
         ref_flux = flux[ref_fiber, :]
@@ -852,11 +857,10 @@ class FiberRows(Header, PositionTable):
             )
         else:
             iterator = first
-        plot = False
         for i in iterator:
             spec = self.getSpec(i)
 
-            fit = spec.fitSepGauss(cent_wave[i + 1], aperture, init_back, plot=plot)
+            fit, ax = spec.fitSepGauss(cent_wave[i + 1], aperture, init_back, plot=False)
             flux[i, :] = numpy.fabs(fit[:nlines])
             cent_wave[i, :] = fit[nlines : 2 * nlines]
             fwhm[i, :] = fit[2 * nlines : 3 * nlines] * 2.354
@@ -881,8 +885,6 @@ class FiberRows(Header, PositionTable):
                 cent_wave[i, select] = cent_wave[i + 1, select]
                 fwhm[i, select] = fwhm[i + 1, select]
                 masked[i, select] = True
-            else:
-                plot = False
 
         if verbose:
             iterator = tqdm(
@@ -896,11 +898,8 @@ class FiberRows(Header, PositionTable):
             iterator = second
         for i in iterator:
             spec = self.getSpec(i)
-            if i == 10:
-                plot = True
-            else:
-                plot = False
-            fit = spec.fitSepGauss(cent_wave[i - 1], aperture, init_back, plot=plot)
+            
+            fit, ax = spec.fitSepGauss(cent_wave[i - 1], aperture, init_back, plot=False)
             flux[i, :] = numpy.fabs(fit[:nlines])
             cent_wave[i, :] = fit[nlines : 2 * nlines]
             fwhm[i, :] = fit[2 * nlines : 3 * nlines] * 2.354

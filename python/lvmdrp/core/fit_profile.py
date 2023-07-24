@@ -2,16 +2,11 @@
 from copy import deepcopy
 from multiprocessing import Pool, cpu_count
 
-# from lvmdrp.core.spectrum1d import Spectrum1D
+from lvmdrp.core.plot import plt
 import astropy.io.fits as pyfits
 import numpy
 from scipy import interpolate, optimize, special
 
-
-try:
-    import pylab
-except:
-    pass
 
 
 fact = numpy.sqrt(2.0 * numpy.pi)
@@ -230,9 +225,9 @@ class fit_profile1D(object):
 
     def plot(self, x, y=None):
         if y is not None:
-            pylab.plot(x, y, "ok")
-        pylab.plot(x, self(x), "-r")
-        pylab.show()
+            plt.plot(x, y, "ok")
+        plt.plot(x, self(x), "-r")
+        return plt.gca()
 
 
 class fit_profile2D(object):
@@ -1139,11 +1134,11 @@ def fit_gaussian_const(x, y, sigma=1.0, p0=None, ftol=1e-6, xtol=1e-6, warning=T
     ]  # , Dfun=dev_gaussian_const, col_deriv=True)
 
     ##print sol
-    # pylab.clf()
-    ##pylab.axvline(5577.347, ls='--', c='k')
-    # pylab.plot(x,y,'k',drawstyle='steps-mid')
-    # pylab.plot(x,gaussian_const(sol, x),'r')#,drawstyle='steps-mid')
-    # pylab.draw()
+    # plt.clf()
+    ##plt.axvline(5577.347, ls='--', c='k')
+    # plt.plot(x,y,'k',drawstyle='steps-mid')
+    # plt.plot(x,gaussian_const(sol, x),'r')#,drawstyle='steps-mid')
+    # plt.draw()
     ###raw_input()
 
     return sol
@@ -1162,11 +1157,11 @@ def fit_gaussian_poly(x, y, sigma=1.0, npoly=0):
         res_gaussian_poly, p0, (x, y, sigma)
     )  # , Dfun=dev_gaussian_poly, col_deriv=True)
 
-    # pylab.plot(x,y,'k', drawstyle='steps-mid')
-    # pylab.plot(x,gaussian_poly(sol[0], x),'-r')#,drawstyle='steps-mid')
-    # pylab.draw()
+    # plt.plot(x,y,'k', drawstyle='steps-mid')
+    # plt.plot(x,gaussian_poly(sol[0], x),'-r')#,drawstyle='steps-mid')
+    # plt.draw()
     # raw_input()
-    # pylab.clf()
+    # plt.clf()
 
     return sol[0]
 
@@ -1214,11 +1209,11 @@ def fit_gaussian_width_multi_offset(x, y, pos, sigma=1.0, flux0=1.0, width0=1.0)
     )  # , ftol=0.1)
 
     # print sol[0][0], sol[0][-1]
-    # pylab.plot(x,y,'k')#,drawstyle='steps-mid')
-    # pylab.plot(x,gaussian_width_multi_offset(sol[0], x, pos),'r')#,drawstyle='steps-mid')
-    # pylab.draw()
+    # plt.plot(x,y,'k')#,drawstyle='steps-mid')
+    # plt.plot(x,gaussian_width_multi_offset(sol[0], x, pos),'r')#,drawstyle='steps-mid')
+    # plt.draw()
     # raw_input()
-    # pylab.clf()
+    # plt.clf()
 
     return sol[0]
 
