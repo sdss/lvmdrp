@@ -25,9 +25,9 @@ from lvmdrp.core.image import loadImage
 from lvmdrp.core.passband import PassBand
 from lvmdrp.core.plot import plt, create_subplots, save_fig
 from lvmdrp.core.rss import RSS, _read_pixwav_map, _chain_join, glueRSS, loadRSS
-from lvmdrp.core.spectrum1d import Spectrum1D, _cross_match
+from lvmdrp.core.spectrum1d import Spectrum1D, _spec_from_lines, _cross_match
 from lvmdrp.external import ancillary_func
-from lvmdrp.utils import flatten, spec_from_lines
+from lvmdrp.utils import flatten
 from lvmdrp import log
 
 
@@ -206,7 +206,7 @@ def determine_wavelength_solution(in_arc: str, out_wave: str, out_lsf: str,
         if cc_correction or ref_fiber != ref_fiber_:
             log.info(f"running cross matching on {pixel.size} good lines")
             # determine maximum correlation shift
-            pix_spec = spec_from_lines(pixel, sigma=2, wavelength=arc._pixels)
+            pix_spec = _spec_from_lines(pixel, sigma=2, wavelength=arc._pixels)
 
             # fix cc_max_shift
             cc_max_shift = max(cc_max_shift, 50)
@@ -2674,7 +2674,6 @@ def DAR_registerSDSS_drp(
         plt.show()
 
 
-@drop_missing_input_paths(["in_rss"])
 def join_spec_channels(in_rss: list, out_rss: list, parallel: str = "auto"):
     """combine the given RSS list through the overlaping wavelength range
 

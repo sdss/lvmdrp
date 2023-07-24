@@ -14,7 +14,6 @@ from lvmdrp import log
 from lvmdrp.core import rss, spectrum1d
 from lvmdrp.core.plot import plt
 from lvmdrp.core.constants import ARC_LAMPS, SPEC_CHANNELS, CONFIG_PATH
-from lvmdrp.utils import spec_from_lines
 
 
 font = {"family": "sans-serif", "weight": "bold", "size": 12}
@@ -221,7 +220,7 @@ class SolveWavelength:
         # fix table with cross-matching
         if self.table_exist and self.correct_lines:
             is_good = self.pixmap[:, -1].astype(bool)
-            pix_spec = spec_from_lines(self.pixmap[is_good, 0], sigma=2, wavelength=self.xdata)
+            pix_spec = spectrum1d._spec_from_lines(self.pixmap[is_good, 0], sigma=2, wavelength=self.xdata)
 
             log.info(f"running cross matching on {is_good.sum()} good lines")
             cc, self.bhat, self.mhat = spectrum1d._cross_match(ref_spec=pix_spec, obs_spec=self.ydata, stretch_factors=np.linspace(0.8,1.2,10000), shift_range=[-50,50])

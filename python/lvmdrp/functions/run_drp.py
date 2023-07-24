@@ -7,11 +7,15 @@ import yaml
 import pandas as pd
 from typing import Union
 from functools import lru_cache
+import numpy as np
 
+import astropy.units as u
 from astropy.io import fits
 from astropy.table import Table
+from astropy.wcs import WCS
 from lvmdrp.functions.imageMethod import (preproc_raw_frame, create_master_frame,
-                                          detrend_frame, find_peaks_auto, trace_peaks,
+                                          create_pixelmask, detrend_frame,
+                                          find_peaks_auto, trace_peaks,
                                           extract_spectra)
 from lvmdrp.functions.rssMethod import (determine_wavelength_solution, create_pixel_table,
                                         resample_wavelength, join_spec_channels)
@@ -88,7 +92,7 @@ def create_masters(flavor: str, frames: pd.DataFrame):
         create_master_frame(in_images=in_f, out_image=master, **kwargs)
 
 
-def find_masters(flavor: str, camera: str) -> dict:
+def find_masters(mjd: int, flavor: str, camera: str) -> dict:
     """ Find the matching master frames
 
     Find the matching master frames for a given flavor, camera
@@ -110,7 +114,7 @@ def find_masters(flavor: str, camera: str) -> dict:
         The output master frame paths for each flavor
     """
     # try to match the master frames for a given flavor, camera
-    matches = match_master_metadata(target_imagetyp=flavor, target_camera=camera)
+    matches = match_master_metadata(target_mjd=mjd, target_imagetyp=flavor, target_camera=camera)
 
     # construct the dict of filepaths
     files = dict.fromkeys(matches.keys())
@@ -140,29 +144,29 @@ def trace_fibers(in_file: str, camera: str, tileid: int, mjd: int):
     mjd : int
         the MJD of observation
     """
-    out_peaks = path.full('lvm_master', mjd=mjd, camera=camera, kind='mpeaks', tileid=tileid,
-                          drpver=drpver)
+    # out_peaks = path.full('lvm_master', mjd=mjd, camera=camera, kind='mpeaks', tileid=tileid,
+    #                       drpver=drpver)
     out_trace = path.full('lvm_master', mjd=mjd, camera=camera, kind='mtrace', tileid=tileid,
                           drpver=drpver)
 
     # check for parent dir existence
-    if not pathlib.Path(out_peaks).parent.is_dir():
-        pathlib.Path(out_peaks).parent.mkdir(parents=True, exist_ok=True)
+    # if not pathlib.Path(out_peaks).parent.is_dir():
+    #     pathlib.Path(out_peaks).parent.mkdir(parents=True, exist_ok=True)
 
     if os.path.exists(out_trace):
         log.info('Trace file already exists.')
         return
 
-    log.info('--- Running auto peak finder ---')
-    kwargs = get_config_options('reduction_steps.find_peaks_auto')
-    log.info(f'custom configuration parameters for find_peaks_auto: {repr(kwargs)}')
-    find_peaks_auto(in_image=in_file, out_peaks=out_peaks, **kwargs)
-    log.info(f'Output peak finder file: {out_peaks}')
+    # log.info('--- Running auto peak finder ---')
+    # kwargs = get_config_options('reduction_steps.find_peaks_auto')
+    # log.info(f'custom configuration parameters for find_peaks_auto: {repr(kwargs)}')
+    # find_peaks_auto(in_image=in_file, out_peaks=out_peaks, **kwargs)
+    # log.info(f'Output peak finder file: {out_peaks}')
 
     log.info('--- Tracing fiber peaks ---')
     kwargs = get_config_options('reduction_steps.trace_peaks')
     log.info(f'custom configuration parameters for trace_peaks: {repr(kwargs)}')
-    trace_peaks(in_image=in_file, out_trace=out_trace, in_peaks=out_peaks, **kwargs)
+    trace_peaks(in_image=in_file, out_trace=out_trace, in_peaks=None, **kwargs)
     log.info(f'Output trace fiber peaks file: {out_trace}')
 
     # TODO
@@ -240,18 +244,22 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
     flavor = flavor or fkwargs.get('imagetyp')
     flavor = 'fiberflat' if flavor == 'flat' else flavor
 
-    # check master frames; use flavor="object" to get all the master files
-    masters = find_masters("object", camera)
+    # check master frames
+    masters = find_masters(mjd, "object", camera)
     mbias = masters.get('bias')
     mdark = masters.get('dark')
-    mflat = masters.get('flat')
     mpixflat = masters.get('pixelflat')
+    mflat = masters.get('flat')
     marc = masters.get('arc')
+    mpixmask = masters.get('pixmask')
+
+    # log the master frames
     log.info(f'Using master bias: {mbias}')
     log.info(f'Using master dark: {mdark}')
+    log.info(f'Using master pixel flat: {mpixflat}')
     log.info(f'Using master flat: {mflat}')
     log.info(f'Using master arc: {marc}')
-    log.info(f'Using master pixel flat: {mpixflat}')
+    log.info(f'Using master pixel mask: {mpixmask}')
 
     # only run these steps for individual exposures
     if not master:
@@ -265,11 +273,11 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
         if not pathlib.Path(out_pre).parent.exists():
             pathlib.Path(out_pre).parent.mkdir(parents=True, exist_ok=True)
 
-        preproc_raw_frame(filename, out_image=out_pre, **kwargs)
+        preproc_raw_frame(in_image=filename, in_mask=mpixmask, out_image=out_pre, **kwargs)
 
-        # detrend the frames
+        # process the flat/arc frames
         in_cal = path.full("lvm_anc", kind='p', imagetype=flavor, mjd=mjd, drpver=drpver,
-                           camera=camera, tileid=tileid, expnum=expnum)
+                        camera=camera, tileid=tileid, expnum=expnum)
         out_cal = path.full("lvm_anc", kind='c', imagetype=flavor, mjd=mjd, drpver=drpver,
                             camera=camera, tileid=tileid, expnum=expnum)
 
@@ -278,7 +286,9 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
         kwargs = get_config_options('reduction_steps.detrend_frame', flavor)
         log.info(f'custom configuration parameters for detrend_frame: {repr(kwargs)}')
         detrend_frame(in_image=in_cal, out_image=out_cal,
-                      in_bias=mbias, in_dark=mdark, in_pixelflat=mpixflat, **kwargs)
+                      in_bias=mbias, in_dark=mdark, in_pixelflat=mpixflat,
+                      in_slitmap=Table(fibermap.data) if flavor in {'fiberflat', 'flat', 'object', 'science'} else None,
+                      **kwargs)
         log.info(f'Output calibrated file: {out_cal}')
 
     # end reduction for individual bias, darks, arcs and flats
@@ -291,11 +301,6 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
     else:
         cal_file = path.full("lvm_anc", kind='c', imagetype=flavor, mjd=mjd, drpver=drpver,
                              camera=camera, tileid=tileid, expnum=expnum)
-
-    # add the fibermap to all flat and science files
-    if flavor in {'fiberflat', 'flat', 'object', 'science'}:
-        log.info('Adding slitmap extension')
-        add_extension(fibermap, cal_file)
 
     # fiber tracing for master flat
     if master and 'flat' in flavor:
@@ -329,7 +334,7 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
         kwargs = get_config_options('reduction_steps.determine_wavesol')
         log.info('--- Determining wavelength solution ---')
         log.info(f'custom configuration parameters for determine_wave_solution: {repr(kwargs)}')
-        determine_wavelength_solution(in_arc=marc, out_wave=wave_file, out_lsf=lsf_file,
+        determine_wavelength_solution(in_arc=xout_file, out_wave=wave_file, out_lsf=lsf_file,
                                       **kwargs)
         log.info(f'Output wave peak traceset file: {wave_file}')
         log.info(f'Output lsf traceset file: {lsf_file}')
@@ -530,7 +535,8 @@ def reduce_file(filename: str):
     reduce_frame(filename, **params)
 
 
-def reduce_set(frame: pd.DataFrame, settype: str = None, flavor: str = None):
+def reduce_set(frame: pd.DataFrame, settype: str = None, flavor: str = None,
+               create_pixmask: bool = False):
     """ Reduce a set of precals, cals, or science """
 
     if settype not in {"precals", "cals", "science"}:
@@ -555,7 +561,7 @@ def reduce_set(frame: pd.DataFrame, settype: str = None, flavor: str = None):
         return
 
     # set the master flavors
-    flavors = {'bias', 'dark'} if settype == 'precals' else {'arc', 'flat'}
+    flavors = {'bias', 'dark', 'pixelflat'} if settype == 'precals' else {'arc', 'flat'}
 
     # if a flavor is set, only create those masters
     if flavor:
@@ -568,17 +574,22 @@ def reduce_set(frame: pd.DataFrame, settype: str = None, flavor: str = None):
     # build the master metadata cache ; always update it
     get_master_metadata(overwrite=True)
 
-    # TODO
-    # add step after master bias/darks creation to create
-    # a new master pixel mask which is used in the preproc step of all indiv reductions
-    # also input is master pixel flat when it is available
-    # Alfredo to do this
-    if settype == 'precals':
+    # run pixel mask creation when requested
+    if create_pixmask:
         # loop over set of cameras in frame
         for camera in set(frame['camera']):
-            masters = find_masters(flavor, camera)
-        # pass master filenames into new function
-        # add new function here
+            masters = find_masters(frame.mjd.iloc[0], "object", camera)
+            mbias = masters.get('bias')
+            mdark = masters.get('dark')
+            mpixflat = masters.get('pixelflat')
+            # pass master filenames into new function
+            mpixmask = path.full('lvm_master', kind='mpixmask', drpver=drpver,
+                                 mjd=frame.mjd.iloc[0], tileid=frame.tileid.iloc[0],
+                                 camera=camera)
+            create_pixelmask(in_bias=mbias, in_dark=mdark, in_pixelflat=mpixflat, out_mask=mpixmask)
+
+        # update masters metadata to include new pixel masks
+        get_master_metadata(overwrite=True)
 
 
 def reduce_masters(mjd: int):
@@ -601,7 +612,7 @@ def reduce_masters(mjd: int):
 
 
 def run_drp(mjd: Union[int, str, list], bias: bool = False, dark: bool = False,
-            skip_bd: bool = False, arc: bool = False, flat: bool = False,
+            pixelflat: bool = False, skip_bd: bool = False, arc: bool = False, flat: bool = False,
             only_bd: bool = False, only_cal: bool = False, only_sci: bool = False,
             spec: int = None, camera: str = None, expnum: Union[int, str, list] = None,
             quick: bool = False):
@@ -632,9 +643,9 @@ def run_drp(mjd: Union[int, str, list], bias: bool = False, dark: bool = False,
     mjds = parse_mjds(mjd)
     if isinstance(mjds, list):
         for mjd in mjds:
-            run_drp(mjd=mjd, bias=bias, dark=dark, skip_bd=skip_bd, arc=arc, flat=flat,
-                    only_bd=only_bd, only_cal=only_cal, only_sci=only_sci, spec=spec, camera=camera,
-                    expnum=expnum, quick=quick)
+            run_drp(mjd=mjd, bias=bias, dark=dark, pixelflat=pixelflat, skip_bd=skip_bd, arc=arc,
+                    flat=flat, only_bd=only_bd, only_cal=only_cal, only_sci=only_sci, spec=spec,
+                    camera=camera, expnum=expnum, quick=quick)
         return
 
     log.info(f'Processing MJD {mjd}')
@@ -658,6 +669,8 @@ def run_drp(mjd: Union[int, str, list], bias: bool = False, dark: bool = False,
         sub = sub[sub['imagetyp'] == 'bias']
     if dark:
         sub = sub[sub['imagetyp'] == 'dark']
+    if pixelflat:
+        sub = sub[sub['imagetyp'] == 'pixelflat']
 
     # filter on camera or spectrograph
     if spec:
@@ -671,7 +684,7 @@ def run_drp(mjd: Union[int, str, list], bias: bool = False, dark: bool = False,
         sub = filter_expnum(sub, expnum)
 
     # get biases and darks
-    cond = sub['imagetyp'].isin(['bias', 'dark'])
+    cond = sub['imagetyp'].isin(['bias', 'dark', 'pixelflat'])
     precals = sub[cond]
     if len(precals) == 0 and not skip_bd:
         log.error(f'No biases or darks found for mjd {mjd}. Discontinuing reduction.')
@@ -679,9 +692,12 @@ def run_drp(mjd: Union[int, str, list], bias: bool = False, dark: bool = False,
     precals = precals.sort_values(['expnum', 'camera'])
 
     if not skip_bd:
+        # when to create pixel mask
+        on_pixflats = 'pixelflat' in set(precals['imagetyp'])
         # reduce biases / darks
-        reduce_set(precals, settype="precals", flavor='bias')
-        reduce_set(precals, settype="precals", flavor='dark')
+        reduce_set(precals, settype='precals', flavor='bias')
+        reduce_set(precals, settype='precals', flavor='dark', create_pixmask=not on_pixflats)
+        reduce_set(precals, settype='precals', flavor='pixelflat', create_pixmask=on_pixflats)
 
     # returning if only reducing bias/darks
     if only_bd:
@@ -717,7 +733,7 @@ def run_drp(mjd: Union[int, str, list], bias: bool = False, dark: bool = False,
         reduce_masters(mjd=mjd)
 
     # return if only calibration set
-    if only_cal or flat or arc:
+    if only_cal or flat or arc or bias or dark or pixelflat:
         return
 
     # reduce science files
@@ -728,15 +744,17 @@ def run_drp(mjd: Union[int, str, list], bias: bool = False, dark: bool = False,
     tileid = list(set(sub['tileid']))[0]
 
     # perform camera combination
+    # produces ancillary/lvm-object-sp[id]-[expnum] files
     for tileid, mjd in sub.groupby(['tileid', 'mjd']).groups.keys():
         combine_cameras(tileid, mjd, spec=1)
         combine_cameras(tileid, mjd, spec=2)
         combine_cameras(tileid, mjd, spec=3)
 
     # perform spectrograph combination
-    # one file per exposure
-    # needs to have fiber slit info in fits extension
-    # output fed into sky
+    # produces lvm-CFrame file
+    exposures = set(sci['expnum'].sort_values())
+    for expnum in exposures:
+        combine_spectrographs(tileid, mjd, expnum)
 
     # perform sky subtraction
 
@@ -940,8 +958,119 @@ def combine_cameras(tileid: int, mjd: int, spec: int = 1):
         log.info(f'Output combined camera file: {bout_file}')
 
 
+def combine_spectrographs(tileid: int, mjd: int, expnum: int) -> fits.HDUList:
+    """ Combine the spectrographs together for a given exposure
+
+    For a given exposure, combines the three spectographs together
+    into a single output lvm-CFrame file.  The input files are the
+    ancillary camera-combined lvm-object-sp[id]-[expnum] files.
+
+    Parameters
+    ----------
+    tileid : int
+        The tileid of the observation
+    mjd : int
+        The MJD of the observation
+    expnum : int
+        The exposure number of the frames to combines
+
+    Returns
+    -------
+    fits.HDUList
+        the output FITS file
+    """
+
+    files = sorted(path.expand('lvm_anc', mjd=mjd, tileid=tileid, drpver=drpver,
+                               kind='', camera='sp*', imagetype='object', expnum=expnum))
+
+    if not files:
+        log.error(f'No camera-combined files found for expnum: {expnum}')
+        return
+
+    if len(files) != 3:
+        log.warning(f'Warning: Not all specids found for expnum: {expnum}')
+
+    # construct output path
+    cframe = path.full('lvm_frame', mjd=mjd, tileid=tileid, drpver=drpver,
+                       kind='CFrame', expnum=expnum)
+
+    # get the first header
+    with fits.open(files[0]) as hdu:
+        hdr = hdu[0].header.copy()
+
+    # build the wavelength axis
+    wcs = WCS(hdr)
+    n_wave = hdr['NAXIS1']
+    wl = wcs.spectral.all_pix2world(np.arange(n_wave), 0)[0]
+    wave = fits.ImageHDU((wl * u.m).to(u.angstrom).value, name='WAVE')
+
+    # get total number of fibers from the fibermap
+    # do we use this to check the total output fiber number? should be the same?
+    total_fibers = len(fibermap.data)
+
+    # stack the data in the extensions
+    flux_data = stack_ext(files, ext=0)
+    err_data = stack_ext(files, ext='ERROR')
+    mask_data = stack_ext(files, ext='BADPIX')
+    fwhm_data = stack_ext(files, ext='INSTFWHM')
+
+    # update the primary header
+    hdr['SPEC'] = ', '.join([i.split('-')[2] for i in files])
+    hdr['FILENAME'] = pathlib.Path(cframe).name
+    hdr['DRPVER'] = drpver
+
+    # remove the wcs from the primary header; add it to flux header
+    [hdr.pop(i, None) for i in wcs.to_header().keys()]
+
+    # create new hdr for flux extension
+    newhdr = {'BUNIT': hdr.pop("BUNIT", None)}
+    newhdr['BSCALE'] = hdr.pop("BSCALE", None)
+    newhdr['BZERO'] = hdr.pop("BZERO", None)
+    newhdr |= wcs.to_header()
+
+    # create the new FITS file
+    prim = fits.PrimaryHDU(header=hdr)
+    flux = fits.ImageHDU(flux_data, name='FLUX', header=newhdr)
+    err = fits.ImageHDU(err_data, name='ERROR')
+    mask = fits.ImageHDU(mask_data, name='MASK')
+    fwhm = fits.ImageHDU(fwhm_data, name='FWHM')
+
+    hdulist = fits.HDUList([prim, flux, err, mask, wave, fwhm, fibermap])
+
+    # write out new file
+    hdulist.writeto(cframe, overwrite=True)
+
+
+def stack_ext(files: list, ext: Union[int, str] = 0) -> np.array:
+    """ Stack the FITS data from a list of files
+
+    Stack the FITS data for the given extension name or number,
+    from the input list of files.  The output stack is in the order
+    of the input list of files, i.e. for a list of sp1, sp2, sp3,
+    the 0-index of the output array is the start of sp1.
+
+    Parameters
+    ----------
+    files : list
+        A list of files to stack
+    ext : Union[int, str], optional
+        The FITS extension name or number, by default 0
+
+    Returns
+    -------
+    np.array
+        The stacked data
+    """
+    new = []
+    for i in files:
+        with fits.open(i) as hdu:
+            new.append(hdu[ext].data)
+    return np.vstack(new)
+
+
 @lru_cache
-def read_fibermap(as_table: bool = None, as_hdu: bool = None) -> Union[pd.DataFrame, Table, fits.BinTableHDU]:
+def read_fibermap(as_table: bool = None, as_hdu: bool = None,
+                  filename: str = 'lvm_fiducial_fibermap.yaml') -> Union[pd.DataFrame, Table, fits.BinTableHDU]:
     """ Read the LVM fibermap
 
     Reads the LVM fibermap yaml file into a pandas
@@ -953,6 +1082,8 @@ def read_fibermap(as_table: bool = None, as_hdu: bool = None) -> Union[pd.DataFr
         If True, returns an Astropy Table, by default None
     as_hdu : bool, optional
         If True, returns an Astropy fits.BinTableHDU, by default None
+    filename : str, optional
+        Optional name of the fibermap file, by default "lvm_fiducial_fibermap.yaml"
 
     Returns
     -------
@@ -963,7 +1094,7 @@ def read_fibermap(as_table: bool = None, as_hdu: bool = None) -> Union[pd.DataFr
     if not core_dir:
         raise ValueError("Environment variable LVMCORE_DIR not set. Set it or load lvmcore module file.")
 
-    p = pathlib.Path(core_dir) / 'metrology/lvm_fiducial_fibermap.yaml'
+    p = pathlib.Path(core_dir) / f'metrology/{filename}'
     if not p.is_file():
         log.warning("Cannot read fibermap from lvmcore.")
         return

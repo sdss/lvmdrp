@@ -10,6 +10,7 @@ from multiprocessing import Pool, cpu_count
 import numpy
 import bottleneck as bn
 from astropy import units as u
+from astropy.table import Table
 from astropy.io import fits as pyfits
 from astropy.nddata import CCDData, StdDevUncertainty
 from astropy.stats.biweight import biweight_location, biweight_scale
@@ -33,7 +34,7 @@ from lvmdrp.core.image import (
 )
 from lvmdrp.core.plot import plt, create_subplots, plot_image, plot_strips, save_fig
 from lvmdrp.core.rss import RSS
-from lvmdrp.core.spectrum1d import Spectrum1D
+from lvmdrp.core.spectrum1d import Spectrum1D, _spec_from_lines, _cross_match
 from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.utils.hdrfix import apply_hdrfix
 from lvmdrp.utils.convert import dateobs_to_sjd, correct_sjd
@@ -1291,8 +1292,8 @@ def findPeaksMaster2_drp(
 # TODO: graficar los coeficientes versus los puntos usados en el ajuste polinomial
 def trace_peaks(
     in_image: str,
-    in_peaks: str,
     out_trace: str,
+    in_peaks: str = None,
     disp_axis: str = "X",
     method: str = "hyperbolic",
     median_box: int = 5,
@@ -1348,6 +1349,7 @@ def trace_peaks(
 
     # load continuum image  from file
     img = loadImage(in_image)
+    img.setData(data=numpy.nan_to_num(img._data), error=numpy.nan_to_num(img._error))
 
     # orient image so that the cross-dispersion is along the first and the dispersion is along the second array axis
     if disp_axis == "X" or disp_axis == "x":
@@ -1372,15 +1374,34 @@ def trace_peaks(
             threshold * coadd
         )  # adjust the minimum contrast threshold for the peaks
 
-    # load the initial positions of the fibers at a certain column NEED TO BE REPLACED WITH XML handling
-    column, _, _, positions, bad_fibers = _read_fiber_ypix(in_peaks)
-    fibers = positions.size
-    good_fibers = numpy.logical_not(bad_fibers)
-    # choose between  methods to measure the subpixel peak
-    if method == "hyperbolic":
-        steps = 1
-    elif method == "gauss":
-        steps = int(steps)
+    # load the initial positions of the fibers at a certain column
+    if in_peaks is None:
+        # read slitmap extension
+        slitmap = img.getSlitmap()
+        slitmap = slitmap[slitmap["spectrographid"] == int(img._header["CCD"][1])]
+        # BUG: fix this hardcoded value
+        column = 2000
+        positions = slitmap["ypix"]
+        fibers_status = slitmap["fibstatus"]
+        fibers = positions.size
+        bad_fibers = (fibers_status == 1) | (fibers_status == 2)
+        good_fibers = numpy.logical_not(bad_fibers)
+
+        # correct reference fiber positions
+        profile = img.getSlice(column, axis="y")._data
+        ypix = numpy.arange(profile.size)
+        guess_heights = numpy.ones_like(positions) * numpy.nanmax(profile)
+        ref_profile = _spec_from_lines(positions, sigma=1.2, wavelength=ypix, heights=guess_heights)
+        cc, bhat, mhat = _cross_match(
+            ref_spec=ref_profile,
+            obs_spec=profile,
+            stretch_factors=numpy.linspace(0.7,1.3,5000),
+            shift_range=[-100, 100])
+        positions = positions * mhat + bhat
+    else:
+        column, _, _, positions, bad_fibers = _read_fiber_ypix(in_peaks)
+        fibers = positions.size
+        good_fibers = numpy.logical_not(bad_fibers)
 
     # create empty trace mask for the image
     trace = TraceMask()
@@ -1392,10 +1413,8 @@ def trace_peaks(
         column, axis="y", data=positions, mask=numpy.zeros(len(positions), dtype="bool")
     )
 
-    # peaks points
-    # xs, ys = [], []
-
     # select cross-dispersion slice for the measurements of the peaks
+    # TODO: fix this mess with the steps
     first = numpy.arange(column - 1, -1, -1)
     select_first = first % steps == 0
     second = numpy.arange(column + 1, dim[1], 1)
@@ -1427,17 +1446,12 @@ def trace_peaks(
             pix, method, init_sigma, threshold=threshold, max_diff=float(max_diff)
         )
         if numpy.sum(bad_fibers) > 0:
-            diff = Spectrum1D(
-                wave=positions, data=(centers[0] - positions), mask=bad_fibers
-            )
-            diff.smoothPoly(-1, ref_base=positions)
+            diff = Spectrum1D(wave=positions, data=(centers[0] - positions), mask=bad_fibers)
+            diff.smoothPoly(1, poly_kind="poly", ref_base=positions)
             centers[0][bad_fibers] = diff._data[bad_fibers] + positions[bad_fibers]
             centers[1][bad_fibers] = False
         trace.setSlice(i, axis="y", data=centers[0], mask=centers[1])
         m += 1
-
-        # xs.append(i)
-        # ys.append(centers[0].tolist())
 
     # iterate towards the last index along dispersion axis
     if verbose:
@@ -1463,27 +1477,20 @@ def trace_peaks(
             pix, method, init_sigma, threshold=threshold, max_diff=float(max_diff)
         )
         if numpy.sum(bad_fibers) > 0:
-            diff = Spectrum1D(
-                wave=positions, data=(centers[0] - positions), mask=bad_fibers
-            )
-            diff.smoothPoly(-1, ref_base=positions)
+            diff = Spectrum1D(wave=positions, data=(centers[0] - positions), mask=bad_fibers)
+            diff.smoothPoly(1, poly_kind="poly", ref_base=positions)
             centers[0][bad_fibers] = diff._data[bad_fibers] + positions[bad_fibers]
             centers[1][bad_fibers] = False
         trace.setSlice(i, axis="y", data=centers[0], mask=centers[1])
         m += 1
 
-        # xs.append(i)
-        # ys.append(centers[0].tolist())
-
-    # with open("peaks_xy.txt", "w") as f:
-    #     f.write(" ".join(xs) + "\n")
-    #     for row in numpy.asarray(ys).T.tolist():
-    #         f.write(" ".join(row) + "\n")
-    # exit()
-
+    # define trace data before polynomial smoothing
+    trace_data = copy(trace)
+    # set to mask zero values in trace to avoid problems with the polynomial fitting
+    trace._mask = trace._data <= 0
     # smooth all trace by a polynomial
     log.info(f"fitting trace with {numpy.abs(poly_disp)}-deg polynomial")
-    trace.smoothTracePoly(poly_disp)
+    trace.smoothTracePoly(poly_disp, poly_kind="poly")
 
     for i in range(fibers):
         if not bad_fibers[i]:
@@ -1498,6 +1505,8 @@ def trace_peaks(
     ##    trace.smoothTraceDist(column, poly_cross=poly_cross, poly_disp=poly_disp)
 
     trace.writeFitsData(out_trace)
+
+    return trace_data, trace
 
 
 def glueCCDFrames_drp(
@@ -2642,7 +2651,13 @@ def testres_drp(image, trace, fwhm, flux):
     hdu = pyfits.PrimaryHDU((img._data - out) / img._data)
     hdu.writeto("res_rel.fits", overwrite=True)
 
-
+# TODO: for arcs take short exposures for bright lines & long exposures for faint lines
+# TODO: Argon: 10s + 300s
+# TODO: Neon: 10s + 300s
+# TODO: HgNe: 15s (particularly helpful for r and NIR strong lines) + 300s (not so many lines in NIR or r)
+# TODO: Xenon: 300s
+# TODO: correct non-linear region using the PTC
+# TODO: Quartz lamp flat-fielding, 10 exptime is fine
 @skip_on_missing_input_path(["in_image", "in_mask"])
 def preproc_raw_frame(
     in_image: str,
@@ -2743,7 +2758,7 @@ def preproc_raw_frame(
         sc_sec = DEFAULT_TRIMSEC
     else:
         sc_sec = list(org_header["TRIMSEC?"].values())
-        log.info(f"using header TRIMSEC = {org_header['TRIMSEC?']}")
+        log.info(f"using header TRIMSEC = {sc_sec}")
 
     # extract BIASSEC or assume default value
     if assume_biassec:
@@ -2754,7 +2769,7 @@ def preproc_raw_frame(
         os_sec = DEFAULT_BIASSEC
     else:
         os_sec = list(org_header["BIASSEC?"].values())
-        log.info(f"using header BIASSEC = {org_header['BIASSEC?']}")
+        log.info(f"using header BIASSEC = {os_sec}")
 
     # extract gain
     gain = numpy.ones(NQUADS)
@@ -3041,6 +3056,7 @@ def detrend_frame(
     in_bias: str = None,
     in_dark: str = None,
     in_pixelflat: str = None,
+    in_slitmap: Table = None,
     calculate_error: bool = True,
     replace_with_nan: bool = True,
     reject_cr: bool = True,
@@ -3061,6 +3077,8 @@ def detrend_frame(
         path to dark frame, by default ""
     in_pixelflat : str, optional
         path to pixelflat frame, by default ""
+    in_slitmap: fits.BinTableHDU, optional
+        FITS binary table containing the slitmap to be added to `out_image`, by default None
     calculate_error : bool, optional
         whether to calculate Poisson errors or not, by default "1"
     replace_with_nan : bool, optional
@@ -3217,6 +3235,13 @@ def detrend_frame(
         )
         detrended_img = detrended_img / numpy.ma.median(flat_array)
 
+    # add slitmap information if given
+    if in_slitmap is not None:
+        log.info("adding slitmap information")
+        detrended_img.setSlitmap(in_slitmap)
+    else:
+        log.warning("no slitmap information to be added")
+    
     # save detrended image
     log.info(f"writing detrended image to '{os.path.basename(out_image)}'")
     detrended_img.writeFitsData(out_image)
