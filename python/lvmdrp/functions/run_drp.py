@@ -286,7 +286,9 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
         kwargs = get_config_options('reduction_steps.detrend_frame', flavor)
         log.info(f'custom configuration parameters for detrend_frame: {repr(kwargs)}')
         detrend_frame(in_image=in_cal, out_image=out_cal,
-                      in_bias=mbias, in_dark=mdark, in_pixelflat=mpixflat, **kwargs)
+                      in_bias=mbias, in_dark=mdark, in_pixelflat=mpixflat,
+                      in_slitmap=Table(fibermap.data) if flavor in {'fiberflat', 'flat', 'object', 'science'} else None,
+                      **kwargs)
         log.info(f'Output calibrated file: {out_cal}')
 
     # end reduction for individual bias, darks, arcs and flats
@@ -299,11 +301,6 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
     else:
         cal_file = path.full("lvm_anc", kind='c', imagetype=flavor, mjd=mjd, drpver=drpver,
                              camera=camera, tileid=tileid, expnum=expnum)
-
-    # add the fibermap to all flat and science files
-    if flavor in {'fiberflat', 'flat', 'object', 'science'}:
-        log.info('Adding slitmap extension')
-        add_extension(fibermap, cal_file)
 
     # fiber tracing for master flat
     if master and 'flat' in flavor:

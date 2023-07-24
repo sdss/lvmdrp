@@ -10,6 +10,7 @@ from multiprocessing import Pool, cpu_count
 import numpy
 import bottleneck as bn
 from astropy import units as u
+from astropy.table import Table
 from astropy.io import fits as pyfits
 from astropy.nddata import CCDData, StdDevUncertainty
 from astropy.stats.biweight import biweight_location, biweight_scale
@@ -3055,6 +3056,7 @@ def detrend_frame(
     in_bias: str = None,
     in_dark: str = None,
     in_pixelflat: str = None,
+    in_slitmap: Table = None,
     calculate_error: bool = True,
     replace_with_nan: bool = True,
     reject_cr: bool = True,
@@ -3075,6 +3077,8 @@ def detrend_frame(
         path to dark frame, by default ""
     in_pixelflat : str, optional
         path to pixelflat frame, by default ""
+    in_slitmap: fits.BinTableHDU, optional
+        FITS binary table containing the slitmap to be added to `out_image`, by default None
     calculate_error : bool, optional
         whether to calculate Poisson errors or not, by default "1"
     replace_with_nan : bool, optional
@@ -3231,6 +3235,13 @@ def detrend_frame(
         )
         detrended_img = detrended_img / numpy.ma.median(flat_array)
 
+    # add slitmap information if given
+    if in_slitmap is not None:
+        log.info("adding slitmap information")
+        detrended_img.setSlitmap(in_slitmap)
+    else:
+        log.warning("no slitmap information to be added")
+    
     # save detrended image
     log.info(f"writing detrended image to '{os.path.basename(out_image)}'")
     detrended_img.writeFitsData(out_image)
