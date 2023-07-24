@@ -25,7 +25,7 @@ from lvmdrp.core.fiberrows import FiberRows
 from lvmdrp.core.image import loadImage
 from lvmdrp.core.passband import PassBand
 from lvmdrp.core.plot import save_fig
-from lvmdrp.core.rss import RSS, _chain_join, glueRSS, loadRSS
+from lvmdrp.core.rss import RSS, _read_pixwav_map, _chain_join, glueRSS, loadRSS
 from lvmdrp.core.spectrum1d import Spectrum1D
 from lvmdrp.external import ancillary_func
 from lvmdrp.utils import flatten, spec_from_lines
@@ -44,63 +44,6 @@ __all__ = [
     "includePosTab_drp",
     "join_spec_channels"
 ]
-
-
-def _read_pixwav_map(lamp: str, channel: str):
-    """read pixel-wavelength map from a lamp and channel
-
-    Parameters
-    ----------
-    lamp : str
-        arc lamp name
-    channel : str
-        spectrograph channel
-
-    Returns
-    -------
-    ref_fiber : int
-        reference fiber used to build the pixel-wavelength map
-    ref_lines : numpy.ndarray
-        reference wavelength of the emission lines
-    pixel : numpy.ndarray
-        pixel position of the emission lines
-    use_line : numpy.ndarray
-        mask to select which lines to use
-    """
-    pixwav_map_path = os.path.join(CONFIG_PATH, f"lvm-{lamp}_nist_{channel}.txt")
-
-    if pixwav_map_path != "":
-        # load initial pixel positions and reference wavelength from txt config file
-        log.info(f"guess lines in file '{pixwav_map_path}'")
-        with open(pixwav_map_path, "r") as file_in:
-            ref_fiber = int(file_in.readline()[:-1])
-            log.info(f"going to use fiber {ref_fiber} as reference")
-            pixel, ref_lines, use_line = numpy.loadtxt(
-                file_in, dtype=float, unpack=True
-            )
-        use_line = use_line.astype(bool)
-        log.info(
-            f"number of guess lines in file {pixel.size} percentage masked {(~use_line).sum() / pixel.size * 100: g} %"
-        )
-
-        pixel = pixel[use_line]
-        ref_lines = ref_lines[use_line]
-        use_line = use_line[use_line]
-        nlines = use_line.sum()
-        log.info(f"going to use {nlines} guess lines")
-    else:
-        # get the reference spectrum number and the guess pixel map
-        ref_fiber = int(ref_fiber)
-        log.info(f"going to use fiber {ref_fiber} as reference")
-        pixel = numpy.asarray(list(map(float, pixel.split(","))))
-        ref_lines = numpy.asarray(list(map(float, ref_lines.split(","))))
-        use_line = numpy.ones(len(ref_lines), dtype=bool)
-        nlines = len(pixel)
-        log.info(
-            f"going to use {nlines} guess lines ({(~use_line).sum()} lines masked)"
-        )
-
-    return ref_fiber, ref_lines, pixel, use_line
 
 
 def mergeRSS_drp(files_in, file_out, mergeHdr="1"):
@@ -253,7 +196,12 @@ def determine_wavelength_solution(in_arc: str, out_wave: str, out_lsf: str,
     pixel_list, ref_lines_list = [], []
     for lamp in lamps:
         log.info(f"loading reference lines for {lamp = } in {channel = }")
-        ref_fiber_, ref_lines, pixel, use_line = _read_pixwav_map(lamp, channel)
+        _, ref_fiber_, pixel, ref_lines, use_line = _read_pixwav_map(lamp, channel)
+
+        # remove masked lines
+        pixel = pixel[use_line]
+        ref_lines = ref_lines[use_line]
+        use_line = use_line[use_line]
 
         # apply cc correction to lines if needed
         if cc_correction or ref_fiber != ref_fiber_:

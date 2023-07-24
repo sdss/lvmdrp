@@ -1,7 +1,10 @@
+import os
 import numpy
 from astropy.io import fits as pyfits
 from scipy import ndimage
 
+from lvmdrp import log
+from lvmdrp.core.constants import CONFIG_PATH
 from lvmdrp.core.apertures import Aperture
 from lvmdrp.core.cube import Cube
 from lvmdrp.core.fiberrows import FiberRows
@@ -10,8 +13,65 @@ from lvmdrp.core.positionTable import PositionTable
 from lvmdrp.core.spectrum1d import Spectrum1D
 
 
-# def _chain_join(b, r, z):
-#     return b.coaddSpec(r).coaddSpec(z)
+def _read_pixwav_map(lamp: str, channel: str, pixels=None, waves=None):
+    """read pixel-wavelength map from a lamp and channel
+
+    Parameters
+    ----------
+    lamp : str
+        arc lamp name
+    channel : str
+        spectrograph channel
+
+    Returns
+    -------
+    ref_fiber : int
+        reference fiber used to build the pixel-wavelength map
+    ref_lines : numpy.ndarray
+        reference wavelength of the emission lines
+    pixel : numpy.ndarray
+        pixel position of the emission lines
+    use_line : numpy.ndarray
+        mask to select which lines to use
+    """
+    pixwav_map_path = os.path.join(CONFIG_PATH, "wavelength", f"lvm-pixwav-{lamp}_{channel}.txt")
+
+    if os.path.isfile(pixwav_map_path):
+        # load initial pixel positions and reference wavelength from txt config file
+        log.info(f"pixel-to-wavelength map in file '{pixwav_map_path}'")
+        with open(pixwav_map_path, "r") as file_in:
+            ref_fiber = int(file_in.readline()[:-1])
+            log.info(f"going to use fiber {ref_fiber} as reference")
+            pixels, waves, use_line = numpy.loadtxt(
+                file_in, dtype=float, unpack=True
+            )
+        use_line = use_line.astype(bool)
+        log.info(
+            f"number of lines in file {pixels.size} percentage masked {(~use_line).sum() / pixels.size * 100: g} %"
+        )
+
+        nlines = use_line.sum()
+        log.info(f"going to use {nlines} lines")
+    elif pixels is not None and waves is not None:
+        # get the reference spectrum number and the guess pixel map
+        ref_fiber = int(ref_fiber)
+        log.info(f"going to use fiber {ref_fiber} as reference")
+        pixels = numpy.asarray(list(map(float, pixels.split(","))))
+        waves = numpy.asarray(list(map(float, waves.split(","))))
+        use_line = numpy.ones(len(waves), dtype=bool)
+        nlines = len(pixels)
+        log.info(
+            f"going to use {nlines} lines ({(~use_line).sum()} lines masked)"
+        )
+    else:
+        log.warning(f"no pixel-to-wavelength map foind for {lamp = } in {channel = }")
+        # initialize new table to create a new pixel-to-wave map
+        ref_fiber = None
+        pixels = numpy.empty((0,))
+        waves = numpy.empty((0,))
+        use_line = numpy.empty((0,), dtype=bool)
+
+    return pixwav_map_path, ref_fiber, pixels, waves, use_line
 
 
 def _chain_join(b, r, z):
