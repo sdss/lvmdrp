@@ -9,10 +9,9 @@ import numpy as np
 from matplotlib.widgets import MultiCursor, TextBox
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from numpy import polynomial
-from scipy import signal
 
 from lvmdrp import log
-from lvmdrp.core import rss
+from lvmdrp.core import rss, spectrum1d
 from lvmdrp.core.plot import plt
 from lvmdrp.core.constants import ARC_LAMPS, SPEC_CHANNELS, CONFIG_PATH
 from lvmdrp.utils import spec_from_lines
@@ -219,6 +218,16 @@ class SolveWavelength:
             color="k",
         )
 
+        # fix table with cross-matching
+        if self.table_exist and self.correct_lines:
+            is_good = self.pixmap[:, -1].astype(bool)
+            pix_spec = spec_from_lines(self.pixmap[is_good, 0], sigma=2, wavelength=self.xdata)
+
+            log.info(f"running cross matching on {is_good.sum()} good lines")
+            cc, self.bhat, self.mhat = spectrum1d._cross_match(ref_spec=pix_spec, obs_spec=self.ydata, stretch_factors=np.linspace(0.8,1.2,10000), shift_range=[-50,50])
+            log.info(f"max CC = {cc:.2f} for strech = {self.mhat:.2f} and shift = {self.bhat:.2f}")
+            self.pixmap[:, 0] = self.mhat * self.pixmap[:, 0] + self.bhat
+
         # create guess wavelength function
         poly = self._fit_wavelength()
         waves_guess = poly(self.xdata)
@@ -240,18 +249,6 @@ class SolveWavelength:
         # self.ax_wav.set_xlim(*self.wave_range)
         self.ax_wav.set_xlabel("wavelength (A)")
         self.ax_wav.set_ylabel("counts (e-/pix)")
-
-        # fix table with quick correlation
-        if self.table_exist and self.correct_lines:
-            is_good = self.pixmap[:, -1].astype(bool)
-            log.info(f"running cross-correlation on {is_good.sum()} good lines")
-            pix_spec = spec_from_lines(
-                self.pixmap[is_good, 0], sigma=2, wavelength=self.xdata
-            )
-            corr = signal.correlate(self.ydata, pix_spec, mode="full")
-            shift = np.nanargmax(corr) - pix_spec.size
-            log.info(f"best correlation {shift = } pixels")
-            self.pixmap[:, 0] = self.pixmap[:, 0] + shift
 
         # adding known peaks
         log.info(f"displaying {self.pixmap.shape[0]} known lines (including masked)")
@@ -330,6 +327,7 @@ class SolveWavelength:
 
     def _save_table(self):
         self.pixmap = self.pixmap[self.pixmap[:, 0].argsort()]
+        self.pixmap[:, 0] = (self.pixmap[:, 0] - self.bhat) / self.mhat
 
         new_lines = self.pixmap.shape[0]-self.nrows
         if len(self.pixmap) != 0:
@@ -454,7 +452,7 @@ if __name__ == "__main__":
         default=5,
     )
     parser.add_argument(
-        "--fiber_id",
+        "--fiber-id",
         metavar="FIBER_ID",
         type=int,
         help="pixel row of reference spectrum.",
@@ -468,7 +466,7 @@ if __name__ == "__main__":
         default=10,
     )
     parser.add_argument(
-        "--poly_deg", metavar="DEG", type=int, help="degree of the polynomial to fit.", default=5,
+        "--poly-deg", metavar="DEG", type=int, help="degree of the polynomial to fit.", default=5,
     )
     parser.add_argument(
         "--poly-kind",
