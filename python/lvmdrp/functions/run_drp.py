@@ -692,12 +692,15 @@ def run_drp(mjd: Union[int, str, list], bias: bool = False, dark: bool = False,
     precals = precals.sort_values(['expnum', 'camera'])
 
     if not skip_bd:
-        # when to create pixel mask
-        on_pixflats = pixmask and 'pixelflat' in set(precals['imagetyp'])
-        # reduce biases / darks
-        # reduce_set(precals, settype='precals', flavor='bias')
-        reduce_set(precals, settype='precals', flavor='dark', create_pixmask=not on_pixflats)
-        # reduce_set(precals, settype='precals', flavor='pixelflat', create_pixmask=on_pixflats)
+        # reduce biases / darks / pixelflats
+        reduce_set(precals, settype='precals', flavor='bias')
+        if not pixmask:
+            reduce_set(precals, settype='precals', flavor='dark')
+            reduce_set(precals, settype='precals', flavor='pixelflat')
+        else:
+            on_pixflats = 'pixelflat' in set(precals['imagetyp'])
+            reduce_set(precals, settype='precals', flavor='dark', create_pixmask=not on_pixflats)
+            reduce_set(precals, settype='precals', flavor='pixelflat', create_pixmask=on_pixflats)
 
     # returning if only reducing bias/darks
     if only_bd:
