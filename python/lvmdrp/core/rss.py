@@ -1,5 +1,6 @@
 import os
 import numpy
+import bottleneck as bn
 from astropy.io import fits as pyfits
 from astropy.table import Table
 from scipy import ndimage
@@ -693,23 +694,23 @@ class RSS(FiberRows):
         if method == "sum":
             if mask is not None:
                 data[mask] = 0
-                good_pix = numpy.sum(numpy.logical_not(mask), 0)
+                good_pix = bn.nansum(numpy.logical_not(mask), 0)
                 select_mean = good_pix > 0
-                combined_data[select_mean] = numpy.sum(data, 0)[select_mean]
+                combined_data[select_mean] = bn.nansum(data, 0)[select_mean]
                 combined_mask = good_pix == 0
                 if error is not None:
                     error[mask] = replace_error
                     combined_error[select_mean] = numpy.sqrt(
-                        numpy.sum(error**2, 0)[select_mean]
+                        bn.nansum(error**2, 0)[select_mean]
                     )
                 else:
                     combined_error = None
             else:
                 combined_mask = None
-                combined_data = numpy.sum(data, 0) / data.shape[0]
+                combined_data = bn.nansum(data, 0) / data.shape[0]
                 if error is not None:
                     combined_error = numpy.sqrt(
-                        numpy.sum(error**2, 0) / error.shape[0]
+                        bn.nansum(error**2, 0) / error.shape[0]
                     )
                 else:
                     combined_error = None
@@ -717,56 +718,56 @@ class RSS(FiberRows):
         if method == "mean":
             if mask is not None:
                 data[mask] = 0
-                good_pix = numpy.sum(numpy.logical_not(mask), 0)
+                good_pix = bn.nansum(numpy.logical_not(mask), 0)
                 select_mean = good_pix > 0
                 combined_data[select_mean] = (
-                    numpy.sum(data, 0)[select_mean] / good_pix[select_mean]
+                    bn.nansum(data, 0)[select_mean] / good_pix[select_mean]
                 )
                 combined_mask = good_pix == 0
                 if error is not None:
                     error[mask] = replace_error
                     combined_error[select_mean] = numpy.sqrt(
-                        numpy.sum(error**2, 0)[select_mean]
+                        bn.nansum(error**2, 0)[select_mean]
                         / good_pix[select_mean] ** 2
                     )
                 else:
                     combined_error = None
             else:
                 combined_mask = None
-                combined_data = numpy.sum(data, 0) / data.shape[0]
+                combined_data = bn.nansum(data, 0) / data.shape[0]
                 if error is not None:
                     combined_error = numpy.sqrt(
-                        numpy.sum(error**2, 0) / error.shape[0]
+                        bn.nansum(error**2, 0) / error.shape[0]
                     )
                 else:
                     combined_error = None
 
         if method == "weighted_mean" and error is not None:
             if mask is not None:
-                good_pix = numpy.sum(numpy.logical_not(mask), 0)
+                good_pix = bn.nansum(numpy.logical_not(mask), 0)
                 select_mean = good_pix > 0
-                combined_data = numpy.sum(data / error**2, 0) / numpy.sum(
+                combined_data = bn.nansum(data / error**2, 0) / bn.nansum(
                     1 / error**2, 0
                 )
                 combined_mask = good_pix == 0
-                combined_error = 1.0 / numpy.sqrt(numpy.sum(1 / error**2, 0))
+                combined_error = 1.0 / numpy.sqrt(bn.nansum(1 / error**2, 0))
                 combined_error[combined_mask] = replace_error
             else:
-                combined_data = numpy.sum(data / error**2, 0) / numpy.sum(
+                combined_data = bn.nansum(data / error**2, 0) / bn.nansum(
                     1 / error**2, 0
                 )
-                combined_error = 1.0 / numpy.sqrt(numpy.sum(1.0 / error**2, 0))
+                combined_error = 1.0 / numpy.sqrt(bn.nansum(1.0 / error**2, 0))
                 combined_mask = None
 
         if method == "median":
             if mask is not None:
-                good_pix = numpy.sum(numpy.logical_not(mask), 0)
+                good_pix = bn.nansum(numpy.logical_not(mask), 0)
                 select_mean = good_pix > 0
-                combined_data = numpy.nanmedian(data, 0)
+                combined_data = bn.nanmedian(data, 0)
                 combined_mask = good_pix == 0
                 combined_error = None
             else:
-                combined_data = numpy.nanmedian(data, 0) / numpy.sum(1 / error**2, 0)
+                combined_data = bn.nanmedian(data, 0) / bn.nansum(1 / error**2, 0)
                 combined_error = None
                 combined_mask = None
 

@@ -186,12 +186,6 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
         arc = RSS()
         arc.loadFitsData(in_arc)
 
-        # replace NaNs
-        mask = numpy.isnan(arc._data) | numpy.isnan(arc._error)
-        mask |= (arc._data < 0) | (arc._error < 0)
-        arc._data[mask] = 0
-        arc._error[mask] = 0
-
         channel = arc._header["CCD"][0]
         onlamp = ["ON", True, 'T', 1]
         lamps = [lamp.lower() for lamp in ARC_LAMPS if arc._header.get(lamp, "OFF") in onlamp]
@@ -206,9 +200,15 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
     
     # combine RSS objects
     arc = RSS()
-    arc.combineRSS(iarcs)
+    arc.combineRSS(iarcs, method="sum")
     # update lamps status
     lamps = set(ilamps)
+
+    # replace NaNs
+    mask = numpy.isnan(arc._data) | numpy.isnan(arc._error)
+    mask |= (arc._data < 0) | (arc._error < 0)
+    arc._data[mask] = 0
+    arc._error[mask] = 0
 
     # read reference lines
     pixel_list, ref_lines_list, use_line_list = [], [], []
