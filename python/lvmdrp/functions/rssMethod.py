@@ -23,7 +23,7 @@ from lvmdrp.core.cube import Cube
 from lvmdrp.core.fiberrows import FiberRows
 from lvmdrp.core.image import loadImage
 from lvmdrp.core.passband import PassBand
-from lvmdrp.core.plot import plt, create_subplots, save_fig
+from lvmdrp.core.plot import plt, create_subplots, save_fig, plot_wavesol_residuals, plot_wavesol_coeffs
 from lvmdrp.core.rss import RSS, _read_pixwav_map, _chain_join, glueRSS, loadRSS
 from lvmdrp.core.spectrum1d import Spectrum1D, _spec_from_lines, _cross_match
 from lvmdrp.external import ancillary_func
@@ -358,27 +358,27 @@ def determine_wavelength_solution(in_arc: str, out_wave: str, out_lsf: str,
                 ("invalid polynomial kind " f"'{kind_disp = }'. Falling back to 'poly'")
             )
         if kind_disp == "poly":
-            poly = polynomial.Polynomial.fit(
+            wave_poly = polynomial.Polynomial.fit(
                 cent_wave[i, use_line],
                 ref_lines[use_line],
                 deg=poly_disp,
             )
         elif kind_disp == "legendre":
-            poly = polynomial.Legendre.fit(
+            wave_poly = polynomial.Legendre.fit(
                 cent_wave[i, use_line],
                 ref_lines[use_line],
                 deg=poly_disp,
             )
         elif kind_disp == "chebyshev":
-            poly = polynomial.Chebyshev.fit(
+            wave_poly = polynomial.Chebyshev.fit(
                 cent_wave[i, use_line],
                 ref_lines[use_line],
                 deg=poly_disp,
             )
 
-        wave_coeffs[i, :] = poly.convert().coef
-        wave_sol[i, :] = poly(arc._pixels)
-        wave_rms[i] = numpy.std(ref_lines[use_line] - poly(cent_wave[i, use_line]))
+        wave_coeffs[i, :] = wave_poly.convert().coef
+        wave_sol[i, :] = wave_poly(arc._pixels)
+        wave_rms[i] = numpy.std(ref_lines[use_line] - wave_poly(cent_wave[i, use_line]))
 
     log.info(
         (
@@ -403,29 +403,28 @@ def determine_wavelength_solution(in_arc: str, out_wave: str, out_lsf: str,
             )
             kind_fwhm = "poly"
         if kind_fwhm == "poly":
-            poly = polynomial.Polynomial.fit(
+            fwhm_poly = polynomial.Polynomial.fit(
                 cent_wave[i, use_line],
                 fwhm_wave[use_line],
                 deg=poly_fwhm,
                 domain=[0, arc._pixels[-1]]
             )
         elif kind_fwhm == "legendre":
-            poly = polynomial.Legendre.fit(
+            fwhm_poly = polynomial.Legendre.fit(
                 cent_wave[i, use_line],
                 fwhm_wave[use_line],
                 deg=poly_fwhm,
             )
         elif kind_fwhm == "chebyshev":
-            poly = polynomial.Chebyshev.fit(
+            fwhm_poly = polynomial.Chebyshev.fit(
                 cent_wave[i, use_line],
                 fwhm_wave[use_line],
                 deg=poly_fwhm,
             )
 
-        # TODO: select one column and plot coeffs vs Y coord in pixels
-        lsf_coeffs[i, :] = poly.convert().coef
-        fwhm_sol[i, :] = poly(arc._pixels)
-        fwhm_rms[i] = numpy.std(fwhm_wave[use_line] - poly(cent_wave[i, use_line]))
+        lsf_coeffs[i, :] = fwhm_poly.convert().coef
+        fwhm_sol[i, :] = fwhm_poly(arc._pixels)
+        fwhm_rms[i] = numpy.std(fwhm_wave[use_line] - fwhm_poly(cent_wave[i, use_line]))
 
     log.info(
         (
@@ -435,7 +434,28 @@ def determine_wavelength_solution(in_arc: str, out_wave: str, out_lsf: str,
         )
     )
 
-    # create plot
+    # create plot of polynomial coefficients
+    fig, axs = create_subplots(to_display=display_plots, nrows=wave_coeffs.shape[1], figsize=(10, 15), sharex=True)
+    axs = plot_wavesol_coeffs(numpy.arange(arc._fibers), coeffs=wave_coeffs, axs=axs, labels=True)
+    save_fig(
+        fig,
+        product_path=out_wave,
+        to_display=display_plots,
+        figure_path="qa",
+        label="coeffs_wave",
+    )
+    # create plot of wavelength fitting residuals
+    fig, ax = create_subplots(to_display=display_plots, figsize=(15, 7))
+    axs = plot_wavesol_residuals(lines_pixels=pixel, lines_waves=ref_lines, model_waves=wave_poly(pixel), ax=ax, labels=True)
+    save_fig(
+        fig,
+        product_path=out_wave,
+        to_display=display_plots,
+        figure_path="qa",
+        label="residuals_wave",
+    )
+
+    # create plot of polynomial fittings
     fig = plt.figure(figsize=(16, 10), tight_layout=True)
     gs = gridspec.GridSpec(10, max(poly_disp + 1, poly_fwhm + 1))
 
