@@ -1,6 +1,7 @@
 import os
 import numpy
 from astropy.io import fits as pyfits
+from astropy.table import Table
 from scipy import ndimage
 
 from lvmdrp import log
@@ -157,6 +158,7 @@ class RSS(FiberRows):
         size=None,
         arc_position_x=None,
         arc_position_y=None,
+        slitmap=None,
         good_fibers=None,
         fiber_type=None,
         logwave=False,
@@ -185,6 +187,8 @@ class RSS(FiberRows):
             self.createWavefromHdr(logwave=logwave)
         if inst_fwhm is not None:
             self.setInstFWHM(inst_fwhm)
+        
+        self._slitmap = slitmap
 
     def __mul__(self, other):
         """
@@ -451,6 +455,7 @@ class RSS(FiberRows):
         extension_fwhm=None,
         extension_hdr=None,
         extension_PT=None,
+        extension_slitmap=None,
         logwave=False,
     ):
         """
@@ -477,6 +482,7 @@ class RSS(FiberRows):
             and extension_error is None
             and extension_wave is None
             and extension_fwhm is None
+            and extension_slitmap is None
         ):
             self._data = hdu[0].data
             self._fibers = self._data.shape[0]  # set fibers
@@ -493,6 +499,8 @@ class RSS(FiberRows):
                         self.setInstFWHM(hdu[i].data)
                     if hdu[i].header["EXTNAME"].split()[0] == "POSTABLE":
                         self.loadFitsPosTable(hdu[i])
+                    if hdu[i].header["EXTNAME"].split()[0] == "SLITMAP":
+                        self._slitmap = Table(hdu[i].data)
             else:
                 self.createWavefromHdr(logwave=logwave)
             if self._wave is None:
@@ -509,6 +517,8 @@ class RSS(FiberRows):
                 self.setWave(hdu[extension_wave].data)
             if extension_fwhm is not None:
                 self.setInstFWHM(hdu[extension_fwhm].data)
+            if extension_slitmap is not None:
+                self._slitmap = Table(hdu[extension_slitmap].data)
         hdu.close()
 
         if extension_hdr is not None:
@@ -522,6 +532,7 @@ class RSS(FiberRows):
         extension_error=None,
         extension_wave=None,
         extension_fwhm=None,
+        extension_slitmap=None,
         include_PT=True,
     ):
         """
@@ -542,7 +553,7 @@ class RSS(FiberRows):
         extension_error : int (0, 1, or 2), optional with default: None
             Number of the FITS extension containing the errors for the values
         """
-        hdus = [None, None, None, None, None, None]  # create empty list for hdu storage
+        hdus = [None, None, None, None, None, None, None]  # create empty list for hdu storage
 
         # create primary hdus and image hdus
         # data hdu
@@ -551,6 +562,7 @@ class RSS(FiberRows):
             and extension_error is None
             and extension_mask is None
             and extension_wave is None
+            and extension_slitmap is None
         ):
             hdus[0] = pyfits.PrimaryHDU(self._data)
             if self._wave is not None:
@@ -562,6 +574,8 @@ class RSS(FiberRows):
                 hdus[3] = pyfits.ImageHDU(self._error, name="ERROR")
             if self._mask is not None:
                 hdus[4] = pyfits.ImageHDU(self._mask.astype("uint8"), name="BADPIX")
+            if self._slitmap is not None:
+                hdus[5] = pyfits.BinTableHDU(self._slitmap, name="SLITMAP")
 
         else:
             if extension_data == 0:
@@ -594,6 +608,12 @@ class RSS(FiberRows):
                 hdu = pyfits.PrimaryHDU(self._error)
             elif extension_error > 0 and extension_error is not None:
                 hdus[extension_error] = pyfits.ImageHDU(self._error, name="ERROR")
+
+            # slitmap hdu
+            if extension_slitmap == 0:
+                hdu = pyfits.PrimaryHDU(self._slitmap)
+            elif extension_slitmap > 0 and extension_slitmap is not None:
+                hdus[extension_slitmap] = pyfits.BinTableHDU(self._slitmap, name="SLITMAP")
 
         if include_PT:
             try:
@@ -1991,6 +2011,11 @@ class RSS(FiberRows):
         )
         return posTab
 
+    def getSlitmap(self):
+        return self._slitmap
+    
+    def setSlitmap(self, slitmap):
+        self._slitmap = slitmap
 
 def loadRSS(infile, extension_data=None, extension_mask=None, extension_error=None):
     rss = RSS()

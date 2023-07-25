@@ -2378,6 +2378,9 @@ def extract_spectra(
             "HIERARCH PIPE CDISP FWHM SIG",
             numpy.std(trace_fwhm._data[rss._good_fibers]) if data.size != 0 else 0,
         )
+    # propagate slitmap
+    rss.setSlitmap(img.getSlitmap())
+    # save extracted RSS
     rss.writeFitsData(out_rss)
 
 
