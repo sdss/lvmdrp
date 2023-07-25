@@ -613,7 +613,7 @@ def reduce_masters(mjd: int):
 
 def run_drp(mjd: Union[int, str, list], bias: bool = False, dark: bool = False,
             pixelflat: bool = False, skip_bd: bool = False, arc: bool = False, flat: bool = False,
-            only_bd: bool = False, only_cal: bool = False, only_sci: bool = False,
+            only_bd: bool = False, only_cal: bool = False, only_sci: bool = False, pixmask: bool = False,
             spec: int = None, camera: str = None, expnum: Union[int, str, list] = None,
             quick: bool = False):
     """ Run the LVM DRP
@@ -644,8 +644,8 @@ def run_drp(mjd: Union[int, str, list], bias: bool = False, dark: bool = False,
     if isinstance(mjds, list):
         for mjd in mjds:
             run_drp(mjd=mjd, bias=bias, dark=dark, pixelflat=pixelflat, skip_bd=skip_bd, arc=arc,
-                    flat=flat, only_bd=only_bd, only_cal=only_cal, only_sci=only_sci, spec=spec,
-                    camera=camera, expnum=expnum, quick=quick)
+                    flat=flat, only_bd=only_bd, only_cal=only_cal, only_sci=only_sci, pixmask=pixmask,
+                    spec=spec, camera=camera, expnum=expnum, quick=quick)
         return
 
     log.info(f'Processing MJD {mjd}')
@@ -693,11 +693,11 @@ def run_drp(mjd: Union[int, str, list], bias: bool = False, dark: bool = False,
 
     if not skip_bd:
         # when to create pixel mask
-        on_pixflats = 'pixelflat' in set(precals['imagetyp'])
+        on_pixflats = pixmask and 'pixelflat' in set(precals['imagetyp'])
         # reduce biases / darks
-        reduce_set(precals, settype='precals', flavor='bias')
+        # reduce_set(precals, settype='precals', flavor='bias')
         reduce_set(precals, settype='precals', flavor='dark', create_pixmask=not on_pixflats)
-        reduce_set(precals, settype='precals', flavor='pixelflat', create_pixmask=on_pixflats)
+        # reduce_set(precals, settype='precals', flavor='pixelflat', create_pixmask=on_pixflats)
 
     # returning if only reducing bias/darks
     if only_bd:
