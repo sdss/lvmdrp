@@ -1,0 +1,113 @@
+#!/usr/bin/env python
+# encoding: utf-8
+#
+# @Author: Alfredo Mejía-Narváez
+# @Date: Jul 24, 2023
+# @Filename: build-super-pixmask
+# @License: BSD 3-Clause
+# @Copyright: SDSS-V LVM
+
+import argparse
+import os
+import sys
+
+from lvmdrp.functions import imageMethod
+from lvmdrp.utils import metadata as md
+from lvmdrp import log, path, __version__ as drpver
+
+
+# number of cameras
+N_CAMERA = 9
+# default MJD pattern
+DEFAULT_MJDS = "6014?"
+# define default number of bias and darks
+N_BIAS = 10
+N_DARK = 10
+
+def parse_arguments(args=None):
+    parser = argparse.ArgumentParser(
+        prog=os.path.basename(sys.argv[0]),
+        description="build super pixelmasks by using the most recent bias/darks",
+    )
+    parser.add_argument(
+        "--mjds", "-m",
+        help=f"wildcard pattern to match several MJDs in the local SAS. By default {DEFAULT_MJDS}",
+        default=DEFAULT_MJDS
+    )
+
+    args = parser.parse_args()
+    return args
+
+if __name__ == "__main__":
+
+	# parse arguments
+	cmd_args = parse_arguments(args=sys.argv[1:])
+
+	# get all metadata from MJDs
+	metadata = md.get_metadata(tileid="*", mjd=cmd_args.mjds)
+
+	# get N_BIAS most recent biases
+	bias_all = metadata.query("imagetyp == 'bias'").sort_values(["camera", "mjd"])
+	nbias = bias_all.shape[0] // N_CAMERA
+	log.info(f"found {nbias} exposures")
+	if nbias < N_BIAS:
+		log.error(f"number of bias < {N_BIAS}, try adding more MJDs")
+		exit(1)
+	
+	bias_idx = [j for i in range(1, N_CAMERA + 1) for j in range(i*nbias - N_BIAS, i*nbias)]
+	bias_all = metadata.iloc[bias_idx]
+
+	# get N_DARK most recent long-exposure darks
+	dark_all = metadata.query("imagetyp == 'dark' & exptime >= 900")
+	ndark = dark_all.shape[0] // N_CAMERA
+	log.info(f"found {ndark} exposures")
+	if ndark < N_DARK:
+		log.error(f"number of darks < {N_DARK}, try adding more MJDs")
+		exit(1)
+	
+	dark_idx = [j for i in range(1, N_CAMERA + 1) for j in range(i*ndark - N_DARK, i*ndark)]
+	dark_all = metadata.iloc[dark_idx]
+
+	log.info(f"selected {N_BIAS} bias and {N_DARK} darks")
+
+	# get max MJD and tileid for new supers
+	max_mjd = bias_all.mjd.max()
+	max_tileid = bias_all.loc[bias_all.mjd == max_mjd].tileid.max()
+
+	# create super bias
+	bias_cam = bias_all.groupby("camera")
+	for cam in bias_cam.groups:
+		biases = bias_cam.get_group(cam)
+
+		# define preproc bias paths
+		pbias_paths = [path.full("lvm_anc", drpver=drpver, kind="p", imagetype=bias.imagetyp, **bias.to_dict()) for _, bias in biases.iterrows()]
+		# define super bias path
+		sbias_path = path.full("lvm_master", drpver=drpver, kind="sbias", camera=cam, tileid=max_tileid, mjd=max_mjd)
+		if os.path.isfile(sbias_path):
+			log.info(f"skipping {sbias_path}, file already exist")
+			continue
+		
+		imageMethod.create_master_frame(in_images=pbias_paths, out_image=sbias_path)
+
+	# create super dark
+	darks_cam = dark_all.groupby("camera")
+	for cam in darks_cam.groups:
+		darks = darks_cam.get_group(cam)
+
+		# get max MJD and tileid for new master
+		max_mjd = biases.mjd.max()
+		max_tileid = biases.loc[biases.mjd == max_mjd].tileid.max()
+
+		# define detrende dark paths
+		cdark_paths = [path.full("lvm_anc", drpver=drpver, kind="c", imagetype=dark.imagetyp, **dark.to_dict()) for _, dark in darks.iterrows()]
+		# define super dark path
+		sdark_path = path.full("lvm_master", drpver=drpver, kind="sdark", camera=cam, tileid=max_tileid, mjd=max_mjd)
+		imageMethod.create_master_frame(in_images=cdark_paths, out_image=sdark_path)
+
+
+	# create pixel mask using super bias and super darks
+	for cam in set(metadata.camera):
+		sbias_path = path.full("lvm_master", drpver=drpver, kind="sbias", camera=cam, tileid=max_tileid, mjd=max_mjd)
+		sdark_path = path.full("lvm_master", drpver=drpver, kind="sdark", camera=cam, tileid=max_tileid, mjd=max_mjd)
+		smask_path = path.full("lvm_master", drpver=drpver, kind="spixmask", camera=cam, tileid=max_tileid, mjd=max_mjd)
+		imageMethod.create_pixelmask(in_bias=sbias_path, in_dark=sdark_path, out_mask=smask_path)
