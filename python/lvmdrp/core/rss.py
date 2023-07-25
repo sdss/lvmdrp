@@ -485,7 +485,6 @@ class RSS(FiberRows):
             and extension_slitmap is None
         ):
             self._data = hdu[0].data
-            self._fibers = self._data.shape[0]  # set fibers
             self.setHeader(header=hdu[0].header, origin=file)
             if len(hdu) > 1:
                 for i in range(1, len(hdu)):
@@ -508,7 +507,6 @@ class RSS(FiberRows):
         else:
             if extension_data is not None:
                 self._data = hdu[extension_data].data
-                self._fibers = self._data.shape[0]
             if extension_mask is not None:
                 self._mask = hdu[extension_mask].data
             if extension_error is not None:
@@ -519,10 +517,14 @@ class RSS(FiberRows):
                 self.setInstFWHM(hdu[extension_fwhm].data)
             if extension_slitmap is not None:
                 self._slitmap = Table(hdu[extension_slitmap].data)
-        hdu.close()
 
         if extension_hdr is not None:
             self.setHeader(hdu[extension_hdr].header, origin=file)
+        
+        self._fibers = self._data.shape[0]
+        self._pixels = numpy.arange(self._data.shape[1])
+
+        hdu.close()
 
     def writeFitsData(
         self,
@@ -771,13 +773,15 @@ class RSS(FiberRows):
         self._data = combined_data
         self._wave = rss_in[0]._wave
         self._inst_fwhm = rss_in[0]._inst_fwhm
-        self._header = None
+        self._header = rss_in[0]._header
         self._mask = combined_mask
         self._error = combined_error
         self._arc_position_x = rss_in[i]._arc_position_x
         self._arc_position_y = rss_in[i]._arc_position_y
         self._shape = rss_in[i]._shape
         self._size = rss_in[i]._size
+        self._pixels = rss_in[i]._pixels
+        self._fibers = rss_in[i]._fibers
         self._good_fibers = rss_in[i]._good_fibers
         self._fiber_type = rss_in[i]._fiber_type
 
