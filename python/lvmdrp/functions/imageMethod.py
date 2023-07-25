@@ -2345,7 +2345,7 @@ def extract_spectra(
 
     if error is not None:
         error[mask] = replace_error
-    rss = FiberRows(
+    rss = RSS(
         data=data,
         mask=mask,
         error=error,
