@@ -279,13 +279,16 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
         )
 
     # initialize plots for arc lines fitting
-    fig, axs = create_subplots(to_display=display_plots, nrows=1, ncols=nlines, figsize=(10*nlines, 7))
-    fig.suptitle("Gaussian fitting")
-    fig.supylabel("counts (e-/pixel)")
-    for i, ax in enumerate(axs):
-        ax.axvline(pixel[i], ls="--", lw=1, color="tab:red")
-        ax.set_title(f"line @ {pixel[i]:.1f} (pixel) - {ref_lines[i]:.2f} (angstrom)")
-        ax.set_xlabel("X (pixel)")
+    # nrows = 4
+    # ncols = int(numpy.round(nlines / nrows))
+    # fig, axs = create_subplots(to_display=display_plots, nrows=nrows, ncols=ncols, figsize=(10*ncols, 7*nrows))
+    # fig.suptitle("Gaussian fitting")
+    # fig.supylabel("counts (e-/pixel)")
+    # for i, ax in enumerate(axs):
+    #     ax.axvline(pixel[i], ls="--", lw=1, color="tab:red")
+    #     ax.set_title(f"line @ {pixel[i]:.1f} (pixel) - {ref_lines[i]:.2f} (angstrom)")
+    #     ax.set_xlabel("X (pixel)")
+    axs = None
     fibers, flux, cent_wave, fwhm, masked = arc.measureArcLines(
         ref_fiber,
         pixel,
@@ -296,13 +299,13 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
         rel_flux_limits=rel_flux_limits,
         axs=axs,
     )
-    save_fig(
-        fig,
-        product_path=out_wave,
-        to_display=display_plots,
-        figure_path="qa",
-        label="lines_fitting",
-    )
+    # save_fig(
+    #     fig,
+    #     product_path=out_wave,
+    #     to_display=display_plots,
+    #     figure_path="qa",
+    #     label="lines_fitting",
+    # )
 
     if fiberflat != "":
         log.info("computing fiberflat from measured lines")
