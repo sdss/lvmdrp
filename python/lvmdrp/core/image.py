@@ -1011,7 +1011,7 @@ class Image(Header):
                     elif hdu[i].header["EXTNAME"].split()[0] == "FRAMES":
                         self._individual_frames = Table(hdu[i].data)
                     elif hdu[i].header["EXTNAME"].split()[0] == "SLITMAP":
-                        self._slitmap = hdu[i].data
+                        self._slitmap = Table(hdu[i].data)
 
         else:
             if extension_data is not None:
