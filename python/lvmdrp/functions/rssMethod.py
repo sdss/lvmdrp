@@ -88,7 +88,7 @@ def mergeRSS_drp(files_in, file_out, mergeHdr="1"):
 # * merge disp_rss and res_rss products into lvmArc product, change variable to out_arc
 @skip_on_missing_input_path(["in_arc"])
 @skip_if_drpqual_flags(["SATURATED"], "in_arc")
-def determine_wavelength_solution(in_arc: str, out_wave: str, out_lsf: str,
+def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: str,
                                   ref_fiber: int = 319, pixel: List[float] = [], ref_lines: List[float] = [],
                                   poly_disp: int = 3, poly_fwhm: int = 5,
                                   poly_cros: int = 3, poly_kinds: list = ['poly', 'poly', 'poly'],
@@ -170,29 +170,48 @@ def determine_wavelength_solution(in_arc: str, out_wave: str, out_lsf: str,
     # convert parameters to the correct type
     kind_disp, kind_fwhm, kind_cros = poly_kinds.split(",") if isinstance(poly_kinds, str) else poly_kinds
 
+    if isinstance(in_arcs, (list, tuple)):
+        pass
+    else:
+        in_arcs = [in_arcs]
+
     if fiberflat != "":
         fiberflat = fiberflat.split(",")
 
-    # initialize the extracted arc line frame
-    log.info(f"reading arc from '{in_arc}'")
-    arc = FiberRows()  # create object
-    arc.loadFitsData(in_arc)  # load data
+    iarcs = []
+    ilamps = []
+    for in_arc in in_arcs:
+        # initialize the extracted arc line frame
+        log.info(f"reading arc from '{in_arc}'")
+        arc = RSS()
+        arc.loadFitsData(in_arc)
 
-    # replace NaNs
-    mask = numpy.isnan(arc._data) | numpy.isnan(arc._error)
-    mask |= (arc._data < 0) | (arc._error < 0)
-    arc._data[mask] = 0
-    arc._error[mask] = 0
+        # replace NaNs
+        mask = numpy.isnan(arc._data) | numpy.isnan(arc._error)
+        mask |= (arc._data < 0) | (arc._error < 0)
+        arc._data[mask] = 0
+        arc._error[mask] = 0
 
-    channel = arc._header["CCD"][0]
-    onlamp = ["ON", True, 'T', 1]
-    lamps = [lamp.lower() for lamp in ARC_LAMPS if arc._header.get(lamp, "OFF") in onlamp]
-    if len(lamps) == 0:
-        log.error("no arc lamps were on during this exposure")
-        return
+        channel = arc._header["CCD"][0]
+        onlamp = ["ON", True, 'T', 1]
+        lamps = [lamp.lower() for lamp in ARC_LAMPS if arc._header.get(lamp, "OFF") in onlamp]
+        if len(lamps) == 0:
+            log.error("no arc lamps were on during this exposure")
+            continue
+
+        # update current lamps
+        ilamps.extend(lamps)
+        # append arc
+        iarcs.append(arc)
+    
+    # combine RSS objects
+    arc = RSS()
+    arc.combineRSS(iarcs)
+    # update lamps status
+    lamps = set(ilamps)
 
     # read reference lines
-    pixel_list, ref_lines_list = [], []
+    pixel_list, ref_lines_list, use_line_list = [], [], []
     for lamp in lamps:
         log.info(f"loading reference lines for {lamp = } in {channel = }")
         _, ref_fiber_, pixel, ref_lines, use_line = _read_pixwav_map(lamp, channel)
@@ -202,41 +221,44 @@ def determine_wavelength_solution(in_arc: str, out_wave: str, out_lsf: str,
         ref_lines = ref_lines[use_line]
         use_line = use_line[use_line]
 
-        # apply cc correction to lines if needed
-        if cc_correction or ref_fiber != ref_fiber_:
-            log.info(f"running cross matching on {pixel.size} good lines")
-            # determine maximum correlation shift
-            pix_spec = _spec_from_lines(pixel, sigma=2, wavelength=arc._pixels)
-
-            # fix cc_max_shift
-            cc_max_shift = max(cc_max_shift, 50)
-            # cross-match spectrum and pixwav map
-            cc, bhat, mhat = _cross_match(
-                ref_spec=pix_spec,
-                obs_spec=arc._data[ref_fiber],
-                stretch_factors=numpy.linspace(0.8,1.2,10000),
-                shift_range=[-cc_max_shift, cc_max_shift]
-            )
-            
-            log.info(f"max CC = {cc:.2f} for strech = {mhat:.2f} and shift = {bhat:.2f}")
-        else:
-            mhat, bhat = 1.0, 0.0
-
-        # correct initial pixel map by shifting
-        pixel = mhat * pixel + bhat
-
         pixel_list.append(pixel)
         ref_lines_list.append(ref_lines)
+        use_line_list.append(use_line)
 
     # combine all reference lines into a long array
     pixel = numpy.concatenate(pixel_list)
     ref_lines = numpy.concatenate(ref_lines_list)
+    use_line = numpy.concatenate(use_line_list)
 
     # sort lines by pixel position
     sort = numpy.argsort(pixel)
     pixel = pixel[sort]
     ref_lines = ref_lines[sort]
+    use_line = use_line[sort]
     nlines = len(pixel)
+
+    # apply cc correction to lines if needed
+    if cc_correction or ref_fiber != ref_fiber_:
+        log.info(f"running cross matching on {pixel.size} good lines")
+        # determine maximum correlation shift
+        pix_spec = _spec_from_lines(pixel, sigma=2, wavelength=arc._pixels)
+
+        # fix cc_max_shift
+        cc_max_shift = max(cc_max_shift, 50)
+        # cross-match spectrum and pixwav map
+        cc, bhat, mhat = _cross_match(
+            ref_spec=pix_spec,
+            obs_spec=arc._data[ref_fiber],
+            stretch_factors=numpy.linspace(0.8,1.2,10000),
+            shift_range=[-cc_max_shift, cc_max_shift]
+        )
+        
+        log.info(f"max CC = {cc:.2f} for strech = {mhat:.2f} and shift = {bhat:.2f}")
+    else:
+        mhat, bhat = 1.0, 0.0
+
+    # correct initial pixel map by shifting
+    pixel = mhat * pixel + bhat
 
     if negative:
         log.info("flipping arc along flux direction")
