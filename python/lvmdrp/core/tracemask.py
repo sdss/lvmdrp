@@ -75,7 +75,6 @@ class TraceMask(FiberRows):
             self._data.shape[1]
         )  # pixel position in dispersion direction
         self._coeffs = numpy.zeros((self._data.shape[0], numpy.abs(deg) + 1))
-        log.info(f'Fitting "{poly_kind}" class of polynomial.')
         # iterate over each fiber
         for i in range(self._fibers):
             good_pix = numpy.logical_not(self._mask[i, :])

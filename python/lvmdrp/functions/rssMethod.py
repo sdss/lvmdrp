@@ -26,9 +26,9 @@ from lvmdrp.core.image import loadImage
 from lvmdrp.core.passband import PassBand
 from lvmdrp.core.plot import save_fig
 from lvmdrp.core.rss import RSS, _chain_join, glueRSS, loadRSS
-from lvmdrp.core.spectrum1d import Spectrum1D
+from lvmdrp.core.spectrum1d import Spectrum1D, _spec_from_lines
 from lvmdrp.external import ancillary_func
-from lvmdrp.utils import flatten, spec_from_lines
+from lvmdrp.utils import flatten
 from lvmdrp import log
 
 
@@ -259,7 +259,7 @@ def determine_wavelength_solution(in_arc: str, out_wave: str, out_lsf: str,
         if cc_correction or ref_fiber != ref_fiber_:
             log.info("calculating shift in guess lines using CC")
             # determine maximum correlation shift
-            pix_spec = spec_from_lines(pixel, sigma=2, wavelength=arc._pixels)
+            pix_spec = _spec_from_lines(pixel, sigma=2, wavelength=arc._pixels)
             shifts = signal.correlation_lags(
                 (arc._data * (~arc._mask))[ref_fiber].size, pix_spec.size, mode="full"
             )
@@ -296,12 +296,6 @@ def determine_wavelength_solution(in_arc: str, out_wave: str, out_lsf: str,
     pixel = pixel[sort]
     ref_lines = ref_lines[sort]
     nlines = len(pixel)
-
-    plt.switch_backend("TKAgg")
-    fig, ax = plt.subplots(figsize=(16, 10), tight_layout=True)
-    ax.step(arc._pixels, arc._data[ref_fiber], color="0.2", lw=1)
-    ax.vlines(pixel, 0, numpy.nanmax(arc._data[ref_fiber]), color="tab:red", lw=0.5)
-    plt.show()
 
     if negative:
         log.info("flipping arc along flux direction")
@@ -2724,7 +2718,6 @@ def DAR_registerSDSS_drp(
         plt.show()
 
 
-@drop_missing_input_paths(["in_rss"])
 def join_spec_channels(in_rss: list, out_rss: list, parallel: str = "auto"):
     """combine the given RSS list through the overlaping wavelength range
 

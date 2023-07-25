@@ -15,8 +15,8 @@ from scipy import signal
 
 from lvmdrp import log
 from lvmdrp.core import rss
+from lvmdrp.core.spectrum1d import _spec_from_lines
 from lvmdrp.core.constants import SPEC_CHANNELS
-from lvmdrp.utils import spec_from_lines
 
 
 font = {"family": "sans-serif", "weight": "bold", "size": 12}
@@ -192,7 +192,7 @@ class SolveWavelength:
         if self.table_exist and self.correct_lines:
             mask = self.pixmap[:, -1].astype(bool)
             log.info(f"running cross-correlation on {mask.sum()} good lines")
-            pix_spec = spec_from_lines(
+            pix_spec = _spec_from_lines(
                 self.pixmap[mask, 0], sigma=2, wavelength=self.xdata
             )
             corr = signal.correlate(self.ydata, pix_spec, mode="full")
