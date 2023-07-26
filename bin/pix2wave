@@ -366,7 +366,7 @@ class SolveWavelength:
             label.set_text(f"wavelength for {self.x_peak:.2f}:")
             value.set_text("")
         # if right click mouse, toggle line mask
-        elif mapped_line := self.spans.get(event.artist) and event.mouseevent.button == 3:
+        elif (mapped_line := self.spans.get(event.artist)) and event.mouseevent.button == 3:
             vspan = event.artist
             i, point, text = mapped_line
             masked_status = int(not self.pixmap[i, -1])
