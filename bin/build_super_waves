@@ -10,11 +10,12 @@
 import argparse
 import os
 import sys
+from astropy.io import fits
 
-from lvmdrp import log, path, __version__ as drpver
+from lvmdrp import path, __version__ as drpver
 from lvmdrp.utils import metadata as md
 
-from lvmdrp.core.constants import ARC_LAMPS, SPEC_CHANNELS
+from lvmdrp.core.constants import ARC_LAMPS
 from lvmdrp.functions import rssMethod
 
 
@@ -26,6 +27,14 @@ lamps = [lamp.lower() for lamp in ARC_LAMPS]
 # initialize lamps status (OFF)
 lamps_status = dict.fromkeys(lamps, False)
 
+
+def _header_fix(fits_file, target_mjd, target_tileid=None):
+	with fits.open(fits_file) as f:
+		f[0].header["MJD"] = target_mjd
+		if target_tileid is not None:
+			f[0].header["TILE_ID"] = target_tileid
+	
+		f.writeto(fits_file, overwrite=True)
 
 def parse_arguments(args=None):
     parser = argparse.ArgumentParser(
@@ -62,9 +71,11 @@ if __name__ == "__main__":
     master_arcs = md.extract_metadata(kind="master", frames_paths=master_paths)
     master_arcs = md.get_metadata(kind="master", )
     master_arcs.sort_values("camera", inplace=True)
+
+    # initialize masters paths list
+    masters_paths = []
     
     # process arc frames
-    xarcs = []
     for _, marc in master_arcs.iterrows():
         lamp = marc[lamps].astype(int).idxmax(0)
         xarc = path.full("lvm_master", drpver=drpver, kind=f"xmarc_{lamp}", **marc.to_dict())
@@ -75,7 +86,8 @@ if __name__ == "__main__":
         rssMethod.determine_wavelength_solution(
             in_arc=xarc, out_wave=mwave, out_lsf=mlsf, **wavelength_parameters)
         
-        xarcs.append(xarc)
+        # update masters paths list
+        masters_paths.extend([mwave, mlsf])
     
     # build combined arc wavelength solutions
     arcs_cam = master_arcs.groupby("camera")
@@ -95,3 +107,10 @@ if __name__ == "__main__":
         mlsf = path.full("lvm_master", drpver=drpver, kind=f"mlsf_{lamp}", **marc.to_dict())
         # determine wavelengths for all arcs combined
         rssMethod.determine_wavelength_solution(in_arcs=master_paths, out_wave=mwave, out_lsf=mlsf, **wavelength_parameters)
+
+        # update masters paths list
+        masters_paths.extend([mwave, mlsf])
+    
+    # update masters metadata
+    new_masters = md.extract_metadata(kind="master", frames_paths=masters_paths)
+    print(new_masters.to_string())

@@ -10,14 +10,13 @@
 import argparse
 import os
 import sys
+from astropy.io import fits
 
 from lvmdrp import log, path, __version__ as drpver
 from lvmdrp.utils import metadata as md
 
 from lvmdrp.core.constants import ARC_LAMPS
 from lvmdrp.functions import imageMethod
-
-from build_super_pixmask import _header_fix
 
 
 # default MJD pattern
@@ -28,6 +27,14 @@ lamps = [lamp.lower() for lamp in ARC_LAMPS]
 # initialize lamps status (OFF)
 lamps_status = dict.fromkeys(lamps, False)
 
+
+def _header_fix(fits_file, target_mjd, target_tileid=None):
+	with fits.open(fits_file) as f:
+		f[0].header["MJD"] = target_mjd
+		if target_tileid is not None:
+			f[0].header["TILE_ID"] = target_tileid
+	
+		f.writeto(fits_file, overwrite=True)
 
 def parse_arguments(args=None):
     parser = argparse.ArgumentParser(
@@ -58,6 +65,9 @@ if __name__ == "__main__":
     target_mjd = arcs.mjd.max()
     target_tileid = arcs.loc[arcs.mjd == target_mjd].tileid.max()
     
+    # initialize the masters paths list
+    masters_paths = []
+
     # process arc frames
     for lamp in lamps[:-1]:
         # set current lamp status
@@ -71,7 +81,7 @@ if __name__ == "__main__":
             # unpack keys
             tileid, mjd, imagetyp, camera = keys
             # match masters
-            masters = md.match_master_metadata(target_imagetyp="arc", target_camera=camera)
+            masters = md.match_master_metadata(target_imagetyp="arc", target_mjd=target_mjd, target_camera=camera)
             mpixmask = path.full("lvm_master", drpver=drpver, kind="mpixmask", **masters["pixmask"])
             mbias = path.full("lvm_master", drpver=drpver, kind="mbias", **masters["bias"])
             mdark = path.full("lvm_master", drpver=drpver, kind="mdark", **masters["dark"])
@@ -98,6 +108,9 @@ if __name__ == "__main__":
             imageMethod.create_master_frame(in_images=cpaths[keys], out_image=mpath)
             # fix header for metadata reconstruction
             _header_fix(mpath, target_mjd, target_tileid)
+
+            # update masters paths list
+            masters_paths.append(mpath)
     
     # extract frames
     master_paths = [os.path.join(root, file) for root, _, files in os.walk(os.getenv("LVM_SPECTRO_REDUX")) for file in files if file.startswith("lvm-marc_") and file.endswith(".fits")]
@@ -109,3 +122,10 @@ if __name__ == "__main__":
         
         mtrace = path.full("lvm_master", drpver=drpver, kind="mtrace", **marc.to_dict())
         imageMethod.extract_spectra(in_image=mpath, out_rss=xpath, in_trace=mtrace, method="aperture", aperture=3)
+
+        # update masters paths list
+        masters_paths.append(xpath)
+    
+    # update masters metadata
+    new_masters = md.extract_metadata(kind="master", frames_paths=masters_paths)
+    print(new_masters.to_string())
