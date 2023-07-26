@@ -87,6 +87,9 @@ if __name__ == "__main__":
 	target_mjd = bias_all.mjd.max()
 	target_tileid = bias_all.loc[bias_all.mjd == target_mjd].tileid.max()
 
+	# initialize the masters paths list
+	masters_paths = []
+
 	# create super bias
 	bias_cam = bias_all.groupby("camera")
 	for cam in bias_cam.groups:
@@ -121,3 +124,10 @@ if __name__ == "__main__":
 		imageMethod.create_pixelmask(in_bias=mbias_path, in_dark=mdark_path, out_mask=mmask_path)
 		# fix header to reconstruct metadata
 		_header_fix(mmask_path, target_mjd, target_tileid)
+
+		# update masters paths list
+		masters_paths.extend([mbias_path, mdark_path, mmask_path])
+
+	# update masters metadata
+	new_masters = md.extract_metadata(kind="master", frames_paths=masters_paths)
+	print(new_masters.to_string())
