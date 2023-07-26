@@ -111,6 +111,7 @@ class SolveWavelength:
         for lamp in self.lamps:
             # define reference lines path
             self.reflines_table = os.path.join(CONFIG_PATH, "wavelength", f"lvm-reflines-{lamp}.txt")
+            log.info(f"loading reference lines from '{self.reflines_table}")
             # skip if missing
             if not os.path.isfile(self.reflines_table):
                 log.warning(f"missing reference lines for {lamp = }")
@@ -399,12 +400,16 @@ class SolveWavelength:
         poly = self._fit_wavelength()
         waves_fit = poly(x)
 
+        # coeffs
+        coeffs = poly.convert().coef
+        log.info(f"best fitting coeffs: {coeffs}")
+
         # display plot
         fig, ax = plt.subplots(figsize=(20, 20))
         ax.axhline(ls="--", lw=1, color="0.7")
         wav_residuals = waves_fit - y
-        pixel_size = np.diff(waves_fit)
-        pix_residuals = wav_residuals / pixel_size.mean()
+        pixel_size = coeffs[1] #np.diff(waves_fit)
+        pix_residuals = wav_residuals# / pixel_size.mean()
         ax.plot(x[m], pix_residuals[m], "or", mew=1, ms=10, mfc="none")
         ylim = ax.get_ylim()
         ax.plot(x[~m], pix_residuals[~m], "o", mec="0.5", mew=1, ms=8, mfc="none")
@@ -420,14 +425,14 @@ class SolveWavelength:
 
         for i in range(x.size):
             ax.annotate(
-                f"{pix_residuals[i]:.4f}",
+                f"{self.pixmap[i,1]}",
                 xy=(x[i], pix_residuals[i]),
                 xytext=(9, -9),
                 textcoords="offset pixels",
-                color=("r" if m[i] else "0.5"),
+                color=("b" if m[i] else "0.5"),
             )
         ax.set_xlabel("dispersion axis (pixel)")
-        ax.set_ylabel("residuals (pixel)")
+        ax.set_ylabel("residuals (angstrom)")
         fig.show()
         if self.plot:
             plot_name = os.path.basename(self.extracted_fits.replace(".fits", ""))
