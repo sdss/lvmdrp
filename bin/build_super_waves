@@ -66,11 +66,10 @@ if __name__ == "__main__":
         flux_min=1e-5, fwhm_max=5, display_plots=False
     )
 
-    # update master
-    master_paths = [os.path.join(root, file) for root, _, files in os.walk(os.getenv("LVM_SPECTRO_REDUX")) for file in files if file.startswith("lvm-xmarc_") and file.endswith(".fits")]
-    master_arcs = md.extract_metadata(kind="master", frames_paths=master_paths)
-    master_arcs = md.get_metadata(kind="master", )
+    # get extracted master arcs
+    master_arcs = md.get_metadata(kind="master", imagetyp="arc", tileid=cmd_args.tileid, mjd=cmd_args.mjd)
     master_arcs.sort_values("camera", inplace=True)
+    print(master_arcs.to_string())
 
     # initialize masters paths list
     masters_paths = []
@@ -84,7 +83,7 @@ if __name__ == "__main__":
         
         # determine wavelengths for individual arcs
         rssMethod.determine_wavelength_solution(
-            in_arc=xarc, out_wave=mwave, out_lsf=mlsf, **wavelength_parameters)
+            in_arcs=xarc, out_wave=mwave, out_lsf=mlsf, **wavelength_parameters)
         
         # update masters paths list
         masters_paths.extend([mwave, mlsf])
