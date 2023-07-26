@@ -13,7 +13,7 @@ def _read_fiber_ypix(peaks_file):
     Read peaks file and return the fiber number, pixel position, subpixel position
     and quality flag.
     """
-    peaks = pyfits.open(peaks_file)
+    peaks = pyfits.open(peaks_file, memmap=False)
     xpos = peaks[1].header["XPIX"]
     fiber = peaks[1].data["FIBER"]
     pixel = peaks[1].data["PIXEL"]
@@ -682,7 +682,7 @@ class FiberRows(Header, PositionTable):
         extension_error : int, optional with default: None
             Number of the FITS extension containing the errors for the values
         """
-        hdu = pyfits.open(file, uint=True, do_not_scale_image_data=True)
+        hdu = pyfits.open(file, uint=True, do_not_scale_image_data=True, memmap=False)
         if (
             extension_data is None
             and extension_mask is None

@@ -987,9 +987,8 @@ class Image(Header):
             Number of the FITS extension containing the errors for the values
         """
         self.filename = filename
-        hdu = pyfits.open(
-            filename, ignore_missing_end=True, uint=False
-        )  # open FITS file
+        # open FITS file
+        hdu = pyfits.open(filename, ignore_missing_end=True, uint=False, memmap=False)
         if ".fz" in filename[-4:]:
             extension_data = 1
             extension_header = 1
@@ -1203,7 +1202,7 @@ class Image(Header):
         photHeader.loadFitsHeader(fieldPhot)
         filters = numpy.array(photHeader.getHdrValue("filters").split(" "))
         filter_select = filters == filter
-        f = pyfits.open(fieldPhot)
+        f = pyfits.open(fieldPhot, memmap=False)
         tbfield = f[1].data
         aa = float(tbfield.field("aa")[0][filter_select])
         kk = float(tbfield.field("kk")[0][filter_select])

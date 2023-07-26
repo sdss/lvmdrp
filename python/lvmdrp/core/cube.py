@@ -2,7 +2,7 @@ import numpy
 from astropy.io import fits as pyfits
 from scipy import ndimage
 
-from lvmdrp.core.header import Header
+from lvmdrp.core.header import Header, combineHdr
 from lvmdrp.core.image import Image
 from lvmdrp.core.passband import PassBand
 from lvmdrp.core.positionTable import PositionTable
@@ -151,7 +151,7 @@ class Cube(Header, PositionTable):
         extension_error : int, optional with default: None
             Number of the FITS extension containing the errors for the values
         """
-        hdu = pyfits.open(file, uint=True, do_not_scale_image_data=True)
+        hdu = pyfits.open(file, uint=True, do_not_scale_image_data=True, memmap=False)
         if (
             extension_data is None
             and extension_mask is None

@@ -225,7 +225,7 @@ def loadPosTable(infile):
     if ".txt" in infile:
         posTab.loadTxtPosTab(infile)
     elif ".fits" in infile or ".fit" in infile:
-        hdu = pyfits.open(infile)
+        hdu = pyfits.open(infile, memmap=False)
         found = False
         for i in range(1, len(hdu)):
             if hdu[i].header["EXTNAME"].split()[0] == "POSTABLE":

@@ -26,7 +26,7 @@ def createCCDfromArchive_drp(
 ):
     single = bool(single)
     splits = numpy.array(splits.split(",")).astype(numpy.int16)
-    hdu = pyfits.open(infile, do_not_scale_image_data=False)
+    hdu = pyfits.open(infile, do_not_scale_image_data=False, memmap=False)
     hdr = hdu[0].header
     bins = numpy.array(hdu[1].header["CCDSUM"].split()).astype("int")
     if "Hamamatsu" in hdr["DETECTOR"]:
@@ -42,7 +42,7 @@ def createCCDfromArchive_drp(
     if single == True:
         sections = sections / 3
     if master_bias is not None:
-        hdu_bias = pyfits.open(master_bias, do_not_scale_image_data=True)
+        hdu_bias = pyfits.open(master_bias, do_not_scale_image_data=True, memmap=False)
 
     for i in range(1, sections + 1):
         temp_sec = hdu[i].header["DETSEC"].replace("[", "").replace("]", "").split(",")
@@ -214,11 +214,11 @@ def createCCDfromArchive_drp(
 def combineBias_drp(file_list, file_out):
     files = open(file_list, "r")
     lines = files.readlines()
-    hdu = pyfits.open(lines[0][:-1], do_not_scale_image_data=True)
+    hdu = pyfits.open(lines[0][:-1], do_not_scale_image_data=True, memmap=False)
     hdulist = [pyfits.PrimaryHDU()]
     for j in range(1, len(hdu)):
         for i in range(len(lines)):
-            hdu = pyfits.open(lines[i][:-1], do_not_scale_image_data=True)
+            hdu = pyfits.open(lines[i][:-1], do_not_scale_image_data=True, memmap=False)
             if i == 0:
                 dim = hdu[j].data.shape
                 frames = numpy.zeros((len(lines), dim[0], dim[1]), dtype=numpy.float32)
