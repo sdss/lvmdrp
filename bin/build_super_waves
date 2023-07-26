@@ -1,0 +1,97 @@
+#!/usr/bin/env python
+# encoding: utf-8
+#
+# @Author: Alfredo Mejía-Narváez
+# @Date: Jul 24, 2023
+# @Filename: build-super-arc
+# @License: BSD 3-Clause
+# @Copyright: SDSS-V LVM
+
+import argparse
+import os
+import sys
+
+from lvmdrp import log, path, __version__ as drpver
+from lvmdrp.utils import metadata as md
+
+from lvmdrp.core.constants import ARC_LAMPS, SPEC_CHANNELS
+from lvmdrp.functions import rssMethod
+
+
+# default MJD pattern
+DEFAULT_MJDS = "6014?"
+
+# define list of lamps
+lamps = [lamp.lower() for lamp in ARC_LAMPS]
+# initialize lamps status (OFF)
+lamps_status = dict.fromkeys(lamps, False)
+
+
+def parse_arguments(args=None):
+    parser = argparse.ArgumentParser(
+        prog=os.path.basename(sys.argv[0]),
+        description="build super arc by combining individual 2D arc frames across MJDs",
+    )
+    parser.add_argument(
+        "--mjd", "-m",
+        type=int,
+        help="MJD for which a wavelength solution is going to be calculated"
+    )
+    parser.add_argument(
+        "--tileid", "-t",
+        type=int,
+        help="tile ID for which a wavelength solution is going to be calculated"
+    )
+
+    args = parser.parse_args()
+    return args
+
+if __name__ == "__main__":
+    # parse arguments
+    cmd_args = parse_arguments(args=sys.argv[1:])
+
+    # wavelength parameters
+    wavelength_parameters = dict(
+        ref_fiber=319, aperture=10,
+        poly_disp=5, poly_fwhm=5, poly_cros=3,
+        flux_min=1e-5, fwhm_max=5, display_plots=False
+    )
+
+    # update master
+    master_paths = [os.path.join(root, file) for root, _, files in os.walk(os.getenv("LVM_SPECTRO_REDUX")) for file in files if file.startswith("lvm-xmarc_") and file.endswith(".fits")]
+    master_arcs = md.extract_metadata(kind="master", frames_paths=master_paths)
+    master_arcs = md.get_metadata(kind="master", )
+    master_arcs.sort_values("camera", inplace=True)
+    
+    # process arc frames
+    xarcs = []
+    for _, marc in master_arcs.iterrows():
+        lamp = marc[lamps].astype(int).idxmax(0)
+        xarc = path.full("lvm_master", drpver=drpver, kind=f"xmarc_{lamp}", **marc.to_dict())
+        mwave = path.full("lvm_master", drpver=drpver, kind=f"mwave_{lamp}", **marc.to_dict())
+        mlsf = path.full("lvm_master", drpver=drpver, kind=f"mlsf_{lamp}", **marc.to_dict())
+        
+        # determine wavelengths for individual arcs
+        rssMethod.determine_wavelength_solution(
+            in_arc=xarc, out_wave=mwave, out_lsf=mlsf, **wavelength_parameters)
+        
+        xarcs.append(xarc)
+    
+    # build combined arc wavelength solutions
+    arcs_cam = master_arcs.groupby("camera")
+    for cam in arcs_cam.groups:
+        marcs = arcs_cam.get_group(cam)
+        
+        # define lamps string for file names
+        s = (master_arcs.filter(lamps).sum()>0)
+        lamp = "_".join(s.index[s.values].tolist())
+        
+        # define input master arcs of the same camera
+        master_paths = [path.full("lvm_master", drpver=drpver, kind=f"xmarc_{marc[lamps].astype(int).idxmax(0)}", **marc.to_dict()) for _, marc in marcs.iterrows()]
+        
+        # define output paths
+        marc = marcs.iloc[0]
+        mwave = path.full("lvm_master", drpver=drpver, kind=f"mwave_{lamp}", **marc.to_dict())
+        mlsf = path.full("lvm_master", drpver=drpver, kind=f"mlsf_{lamp}", **marc.to_dict())
+        # determine wavelengths for all arcs combined
+        rssMethod.determine_wavelength_solution(in_arcs=master_paths, out_wave=mwave, out_lsf=mlsf, **wavelength_parameters)

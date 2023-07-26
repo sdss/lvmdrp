@@ -11,6 +11,8 @@ import argparse
 import os
 import sys
 
+from astropy.io import fits
+
 from lvmdrp.functions import imageMethod
 from lvmdrp.utils import metadata as md
 from lvmdrp import log, path, __version__ as drpver
@@ -23,6 +25,15 @@ DEFAULT_MJDS = "6014?"
 # define default number of bias and darks
 N_BIAS = 10
 N_DARK = 10
+
+
+def _header_fix(fits_file, target_mjd, target_tileid=None):
+	with fits.open(fits_file) as f:
+		f[0].header["MJD"] = target_mjd
+		if target_tileid is not None:
+			f[0].header["TILE_ID"] = target_tileid
+	
+	f.writeto(fits_file, overwrite=True)
 
 def parse_arguments(args=None):
     parser = argparse.ArgumentParser(
@@ -71,8 +82,8 @@ if __name__ == "__main__":
 	log.info(f"selected {N_BIAS} bias and {N_DARK} darks")
 
 	# get max MJD and tileid for new supers
-	max_mjd = bias_all.mjd.max()
-	max_tileid = bias_all.loc[bias_all.mjd == max_mjd].tileid.max()
+	target_mjd = bias_all.mjd.max()
+	target_tileid = bias_all.loc[bias_all.mjd == target_mjd].tileid.max()
 
 	# create super bias
 	bias_cam = bias_all.groupby("camera")
@@ -82,32 +93,29 @@ if __name__ == "__main__":
 		# define preproc bias paths
 		pbias_paths = [path.full("lvm_anc", drpver=drpver, kind="p", imagetype=bias.imagetyp, **bias.to_dict()) for _, bias in biases.iterrows()]
 		# define super bias path
-		sbias_path = path.full("lvm_master", drpver=drpver, kind="sbias", camera=cam, tileid=max_tileid, mjd=max_mjd)
-		if os.path.isfile(sbias_path):
-			log.info(f"skipping {sbias_path}, file already exist")
-			continue
-		
-		imageMethod.create_master_frame(in_images=pbias_paths, out_image=sbias_path)
+		mbias_path = path.full("lvm_master", drpver=drpver, kind="mbias", camera=cam, tileid=target_tileid, mjd=target_mjd)
+		imageMethod.create_master_frame(in_images=pbias_paths, out_image=mbias_path)
+		# fix header to reconstruct metadata
+		_header_fix(mbias_path, target_mjd, target_tileid)
 
 	# create super dark
 	darks_cam = dark_all.groupby("camera")
 	for cam in darks_cam.groups:
 		darks = darks_cam.get_group(cam)
 
-		# get max MJD and tileid for new master
-		max_mjd = biases.mjd.max()
-		max_tileid = biases.loc[biases.mjd == max_mjd].tileid.max()
-
 		# define detrende dark paths
 		cdark_paths = [path.full("lvm_anc", drpver=drpver, kind="c", imagetype=dark.imagetyp, **dark.to_dict()) for _, dark in darks.iterrows()]
 		# define super dark path
-		sdark_path = path.full("lvm_master", drpver=drpver, kind="sdark", camera=cam, tileid=max_tileid, mjd=max_mjd)
-		imageMethod.create_master_frame(in_images=cdark_paths, out_image=sdark_path)
-
+		mdark_path = path.full("lvm_master", drpver=drpver, kind="mdark", camera=cam, tileid=target_tileid, mjd=target_mjd)
+		imageMethod.create_master_frame(in_images=cdark_paths, out_image=mdark_path)
+		# fix header to reconstruct metadata
+		_header_fix(mdark_path, target_mjd, target_tileid)
 
 	# create pixel mask using super bias and super darks
 	for cam in set(metadata.camera):
-		sbias_path = path.full("lvm_master", drpver=drpver, kind="sbias", camera=cam, tileid=max_tileid, mjd=max_mjd)
-		sdark_path = path.full("lvm_master", drpver=drpver, kind="sdark", camera=cam, tileid=max_tileid, mjd=max_mjd)
-		smask_path = path.full("lvm_master", drpver=drpver, kind="spixmask", camera=cam, tileid=max_tileid, mjd=max_mjd)
-		imageMethod.create_pixelmask(in_bias=sbias_path, in_dark=sdark_path, out_mask=smask_path)
+		mbias_path = path.full("lvm_master", drpver=drpver, kind="mbias", camera=cam, tileid=target_tileid, mjd=target_mjd)
+		mdark_path = path.full("lvm_master", drpver=drpver, kind="mdark", camera=cam, tileid=target_tileid, mjd=target_mjd)
+		mmask_path = path.full("lvm_master", drpver=drpver, kind="mpixmask", camera=cam, tileid=target_tileid, mjd=target_mjd)
+		imageMethod.create_pixelmask(in_bias=mbias_path, in_dark=mdark_path, out_mask=mmask_path)
+		# fix header to reconstruct metadata
+		_header_fix(mmask_path, target_mjd, target_tileid)

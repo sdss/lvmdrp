@@ -10,14 +10,14 @@
 import argparse
 import os
 import sys
-import numpy as np
 
 from lvmdrp import log, path, __version__ as drpver
 from lvmdrp.utils import metadata as md
 
-from lvmdrp.core.constants import ARC_LAMPS, SPEC_CHANNELS
-from lvmdrp.core import rss, image, spectrum1d
+from lvmdrp.core.constants import ARC_LAMPS
 from lvmdrp.functions import imageMethod
+
+from build_super_pixmask import _header_fix
 
 
 # default MJD pattern
@@ -46,7 +46,6 @@ def parse_arguments(args=None):
 if __name__ == "__main__":
     # parse arguments
     cmd_args = parse_arguments(args=sys.argv[1:])
-    print(cmd_args)
     
     # extract metadata for target MJDs
     raw_paths = md.locate_new_frames(hemi="s", mjd=cmd_args.mjds, camera="*", expnum="????????")
@@ -54,6 +53,10 @@ if __name__ == "__main__":
     # filter metadata to get only arcs
     arcs = md.get_metadata(tileid="*", mjd=cmd_args.mjds, kind="raw", imagetyp="arc")
     log.info(f"processing arcs from MJDs = {set(arcs.mjd)}")
+
+    # get max MJD and tileid for new supers
+    target_mjd = arcs.mjd.max()
+    target_tileid = arcs.loc[arcs.mjd == target_mjd].tileid.max()
     
     # process arc frames
     for lamp in lamps[:-1]:
@@ -62,7 +65,7 @@ if __name__ == "__main__":
         lamps_current[lamp] = True
         
         # group arcs into analogs of current lamp
-        analogs, cpaths, mpaths = md.get_analog_groups(tileid=1111, mjd=60145, imagetyp="arc", **lamps_current)
+        analogs, cpaths, mpaths = md.get_analog_groups(tileid=1111, mjd=target_mjd, imagetyp="arc", **lamps_current)
         
         for i, (keys, analog) in enumerate(analogs.items()):
             # unpack keys
@@ -88,12 +91,13 @@ if __name__ == "__main__":
                 imageMethod.preproc_raw_frame(in_image=rpath, out_image=ppath, in_mask=mpixmask)
                 imageMethod.detrend_frame(in_image=ppath, out_image=cpath, in_bias=mbias, in_dark=mdark)
             
+            # define master path
+            mpath = mpaths[i].replace("marc", f"marc_{lamp}")
             # create master arcs
-            if os.path.isfile(mpaths[i]):
-                log.info(f"skipping {mpaths[i]}, file already exist")
-                continue
             os.makedirs(os.path.dirname(mpaths[i]), exist_ok=True)
-            imageMethod.create_master_frame(in_images=cpaths[keys], out_image=mpaths[i].replace("marc", f"marc_{lamp}"))
+            imageMethod.create_master_frame(in_images=cpaths[keys], out_image=mpath)
+            # fix header for metadata reconstruction
+            _header_fix(mpath, target_mjd, target_tileid)
     
     # extract frames
     master_paths = [os.path.join(root, file) for root, _, files in os.walk(os.getenv("LVM_SPECTRO_REDUX")) for file in files if file.startswith("lvm-marc_") and file.endswith(".fits")]
@@ -104,9 +108,4 @@ if __name__ == "__main__":
         xpath = path.full("lvm_master", drpver=drpver, kind=f"xmarc_{lamp}", **marc.to_dict())
         
         mtrace = path.full("lvm_master", drpver=drpver, kind="mtrace", **marc.to_dict())
-
-        if os.path.isfile(xpath):
-            log.info(f"skipping {xpath}, file already exist")
-            continue
-        
         imageMethod.extract_spectra(in_image=mpath, out_rss=xpath, in_trace=mtrace, method="aperture", aperture=3)

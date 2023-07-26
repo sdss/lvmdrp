@@ -34,7 +34,11 @@ def run(packages, install_requires):
         packages=packages,
         install_requires=install_requires,
         package_dir={"": "python"},
-        scripts=["bin/drp", "bin/pix2wave", "bin/build-super-arc", "bin/build-super-pixmask"],
+        scripts=["bin/drp", "bin/pix2wave",
+            "bin/build_super_pixmask",
+            "bin/build_super_arc",
+            "bin/build_super_waves",
+        ],
         classifiers=[
             "Development Status :: 4 - Beta",
             "Intended Audience :: Science/Research",
