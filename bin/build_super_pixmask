@@ -33,7 +33,7 @@ def _header_fix(fits_file, target_mjd, target_tileid=None):
 		if target_tileid is not None:
 			f[0].header["TILE_ID"] = target_tileid
 	
-	f.writeto(fits_file, overwrite=True)
+		f.writeto(fits_file, overwrite=True)
 
 def parse_arguments(args=None):
     parser = argparse.ArgumentParser(
@@ -60,7 +60,7 @@ if __name__ == "__main__":
 	# get N_BIAS most recent biases
 	bias_all = metadata.query("imagetyp == 'bias'").sort_values(["camera", "mjd"])
 	nbias = bias_all.shape[0] // N_CAMERA
-	log.info(f"found {nbias} exposures")
+	log.info(f"found {nbias} bias exposures")
 	if nbias < N_BIAS:
 		log.error(f"number of bias < {N_BIAS}, try adding more MJDs")
 		exit(1)
@@ -71,7 +71,7 @@ if __name__ == "__main__":
 	# get N_DARK most recent long-exposure darks
 	dark_all = metadata.query("imagetyp == 'dark' & exptime >= 900")
 	ndark = dark_all.shape[0] // N_CAMERA
-	log.info(f"found {ndark} exposures")
+	log.info(f"found {ndark} bias exposures")
 	if ndark < N_DARK:
 		log.error(f"number of darks < {N_DARK}, try adding more MJDs")
 		exit(1)
