@@ -11,12 +11,14 @@ import argparse
 import os
 import sys
 from astropy.io import fits
+from astropy.table import Table
 
 from lvmdrp import log, path, __version__ as drpver
 from lvmdrp.utils import metadata as md
 
 from lvmdrp.core.constants import ARC_LAMPS
 from lvmdrp.functions import imageMethod
+from lvmdrp.functions import run_drp as drp
 
 
 # default MJD pattern
@@ -93,13 +95,15 @@ if __name__ == "__main__":
                 ppath = path.full("lvm_anc", drpver=drpver, kind="p", imagetype=arc.imagetyp, **arc.to_dict())
                 cpath = cpaths[keys][j]
                 
+                os.makedirs(os.path.dirname(ppath), exist_ok=True)
                 if os.path.isfile(ppath):
                     log.info(f"skipping {ppath}, file already exist")
-                    continue
-                
-                os.makedirs(os.path.dirname(ppath), exist_ok=True)
-                imageMethod.preproc_raw_frame(in_image=rpath, out_image=ppath, in_mask=mpixmask)
-                imageMethod.detrend_frame(in_image=ppath, out_image=cpath, in_bias=mbias, in_dark=mdark)
+                else:
+                    imageMethod.preproc_raw_frame(in_image=rpath, out_image=ppath, in_mask=mpixmask)
+                if os.path.isfile(cpath):
+                    log.info(f"skipping {cpath}, file already exist")
+                else:
+                    imageMethod.detrend_frame(in_image=ppath, out_image=cpath, in_bias=mbias, in_dark=mdark, in_slitmap=Table(drp.fibermap.data))
             
             # define master path
             mpath = mpaths[i].replace("marc", f"marc_{lamp}")
