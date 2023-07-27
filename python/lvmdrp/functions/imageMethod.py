@@ -3353,7 +3353,7 @@ def create_master_frame(in_images: List[str], out_image: str, batch_size: int = 
         master_img = combineImages(org_imgs, method="median", normalize=False)
     elif master_type == "dark":
         master_img = combineImages(org_imgs, method="median", normalize=False)
-    elif master_type == "flat" or master_type == "flatfield":
+    elif master_type == "pixelflat":
         master_img = combineImages(
             [img / numpy.nanmedian(img._data) for img in org_imgs],
             method="median",
@@ -3364,7 +3364,7 @@ def create_master_frame(in_images: List[str], out_image: str, batch_size: int = 
         master_img = combineImages(
             org_imgs, method="median", normalize=True, normalize_percentile=99
         )
-    elif master_type == "fiberflat":
+    elif master_type == "flat":
         master_img = combineImages(
             org_imgs, method="median", normalize=True, normalize_percentile=75
         )
