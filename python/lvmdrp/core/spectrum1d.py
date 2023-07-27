@@ -2153,11 +2153,11 @@ class Spectrum1D(Header):
             (A[select], (indices[0][select], indices[1][select])),
             shape=(self._dim, fibers),
         ).todense()
-        print(B)
+        # print(B)
         out = sparse.linalg.lsqr(
             B, self._data / self._error, atol=1e-7, btol=1e-7, conlim=1e13
         )
-        print(out)
+        # print(out)
 
         error = numpy.sqrt(1 / numpy.sum((A**2), 0))
         if bad_pix is not None and numpy.sum(bad_pix) > 0:
