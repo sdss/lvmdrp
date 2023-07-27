@@ -1294,6 +1294,7 @@ def trace_peaks(
     in_image: str,
     out_trace: str,
     in_peaks: str = None,
+    write_trace_data: bool = False,
     disp_axis: str = "X",
     method: str = "hyperbolic",
     median_box: int = 5,
@@ -1486,6 +1487,15 @@ def trace_peaks(
 
     # define trace data before polynomial smoothing
     trace_data = copy(trace)
+
+    if write_trace_data:
+        pixels = numpy.arange(trace_data._data.shape[1])
+        x = pixels[trace_data._data[0]!=0]
+        y = trace_data._data[:, trace_data._data[0]!=0]
+
+        coords_file = out_trace.replace("calib", "ancillary").replace(".fits", "_coords.txt")
+        numpy.savetxt(coords_file, numpy.column_stack((numpy.tile(x, trace._fibers), y.flatten())))
+
     # set to mask zero values in trace to avoid problems with the polynomial fitting
     trace._mask = trace._data <= 0
     # smooth all trace by a polynomial
