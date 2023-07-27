@@ -38,6 +38,7 @@ def run(packages, install_requires):
             "bin/build_super_pixmask",
             "bin/build_super_arc",
             "bin/build_super_waves",
+            "bin/build_super_trace"
         ],
         classifiers=[
             "Development Status :: 4 - Beta",
