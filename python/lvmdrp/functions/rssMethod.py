@@ -461,6 +461,7 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
 
     # create plot of polynomial coefficients
     fig, axs = create_subplots(to_display=display_plots, nrows=wave_coeffs.shape[1], figsize=(10, 15), sharex=True)
+    # TODO: use ypix for the fibers instead of fiber ids
     axs = plot_wavesol_coeffs(numpy.arange(arc._fibers), coeffs=wave_coeffs, axs=axs, labels=True)
     save_fig(
         fig,
