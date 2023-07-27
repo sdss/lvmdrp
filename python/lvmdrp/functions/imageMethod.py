@@ -3291,7 +3291,7 @@ def detrend_frame(
 
 
 @drop_missing_input_paths(["in_images"])
-def create_master_frame(in_images: List[str], out_image: str, force_master: bool = True):
+def create_master_frame(in_images: List[str], out_image: str, batch_size: int = 30, force_master: bool = True):
     """Combines the given calibration frames (bias, dark, or pixelflat) into a
     master calibration frame.
 
@@ -3328,18 +3328,26 @@ def create_master_frame(in_images: List[str], out_image: str, force_master: bool
 
     log.info(f"input frames: {','.join(in_images)}")
 
+    # select only a maximum of `batch_size` images
+    if len(in_images) > batch_size:
+        log.info(f"selecting {batch_size} random images")
+        in_images = numpy.random.choice(in_images, batch_size, replace=False)
     nexp = len(in_images)
+    
+    # load images
     org_imgs, imagetyps = [], []
     for in_image in in_images:
         img = loadImage(in_image)
         imagetyps.append(img._header["IMAGETYP"].lower())
         org_imgs.append(img)
 
+    # check if all images have the same imagetyp
     master_type, counts = numpy.unique(imagetyps, return_counts=True)
     master_type = master_type[numpy.argmax(counts)]
     if numpy.any(master_type != numpy.asarray(imagetyps)):
         log.warning(f"not all imagetyp = {master_type}")
 
+    # combine images
     log.info(f"combining {nexp} frames into master frame")
     if master_type == "bias":
         master_img = combineImages(org_imgs, method="median", normalize=False)
@@ -3361,7 +3369,8 @@ def create_master_frame(in_images: List[str], out_image: str, force_master: bool
             org_imgs, method="median", normalize=True, normalize_percentile=75
         )
 
-    log.info(f"writing master image to '{os.path.basename(out_image)}'")
+    # write output master 
+    log.info(f"writing master frame to '{os.path.basename(out_image)}'")
     master_img.writeFitsData(out_image)
 
     return org_imgs, master_img
