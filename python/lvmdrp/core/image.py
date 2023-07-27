@@ -1767,7 +1767,7 @@ class Image(Header):
 
             # define fiber mask
             bad_fiber = (slice_trace[2] == 1) | (
-                (slice_trace[0] < 0) | slice_trace[0] > len(slice_img._data) - 1
+                (slice_trace[0] < 0) | (slice_trace[0] > len(slice_img._data) - 1)
             )
             # bad_fiber = numpy.logical_or(
             #     (slice_trace[2] == 1),
