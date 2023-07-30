@@ -31,25 +31,25 @@ lamps_status = dict.fromkeys(lamps, False)
 
 # peaks params
 trace_peaks_params = {
-    "steps": 100,
-    "coadd": 20,
-    "threshold": 0,
-    "max_diff": 0.1,
-    "method": "hyperbolic",
+    "steps": 30,
+    "coadd": 5,
+    "threshold": 0.5,
+    "max_diff": 1,
+    "method": "gauss",
     "median_box": 10,
     "median_cross": 1,
-    "poly_disp": 2,
+    "poly_disp": 5,
 }
 trace_fwhm_params = {
     "blocks": "20",
     "steps": "100",
-    "coadd": "10",
+    "coadd": "0",
     "poly_disp": "5",
     "poly_kind": "poly",
-    "threshold_flux": "50.0",
+    "threshold_flux": "10.0",
     "init_fwhm": "2.0",
     "clip": "",
-    "parallel": "auto",
+    "parallel": "0",
 }
 
 
@@ -161,7 +161,7 @@ if __name__ == "__main__":
         imageMethod.traceFWHM_drp(in_image=mpath, out_fwhm=mtrace_fwhm, in_trace=mtrace_peak, **trace_fwhm_params)
 
         # extract fiberflats
-        imageMethod.extract_spectra(in_image=mpath, out_rss=xpath, in_trace=mtrace_peak, fwhm=mtrace_fwhm, method="optimal")
+        imageMethod.extract_spectra(in_image=mpath, out_rss=xpath, in_trace=mtrace_peak, fwhm=mtrace_fwhm, method="optimal", plot_fig=False)
 
         # update masters paths list
         masters_paths.append(xpath)
