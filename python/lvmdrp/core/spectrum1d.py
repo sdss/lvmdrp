@@ -1647,6 +1647,7 @@ class Spectrum1D(Header):
             ],
             axis=0,
         )
+        # minimum counts of three pixels around each peak
         max = numpy.amax(
             [
                 numpy.take(self._data, init_pos[select] + 1),
@@ -1655,9 +1656,10 @@ class Spectrum1D(Header):
             ],
             axis=0,
         )
-        mask[select] = (
-            max - min
-        ) < threshold  # mask all peaks where the contrast between maximum and minimum is below a threshold
+        # print(init_pos, max)
+        # mask all peaks where the contrast between maximum and minimum is below a threshold
+        mask[select] = (max) < threshold
+        # masking fibers outside the detector
         mask[numpy.logical_not(select)] = True
 
         if method == "hyperbolic":
