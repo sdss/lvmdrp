@@ -31,7 +31,7 @@ distribute-*.tar.gz
 *~
 
 # Test directories and files
-data
+data*
 lib
 *.tar.gz*
 test-*.fits
