@@ -1635,10 +1635,12 @@ class Spectrum1D(Header):
             Array of pixels with uncertain measurements
         """
         # compute the minimum and maximum value for the 3 pixels around all peaks
+        # selection of fibers within the boundaries of the detector
         select = numpy.logical_and(
             init_pos - 1 >= [0], init_pos + 1 <= self._data.shape[0] - 1
         )
         mask = numpy.zeros(len(init_pos), dtype="bool")
+        # minimum counts of three pixels around each peak
         min = numpy.amin(
             [
                 numpy.take(self._data, init_pos[select] + 1),
@@ -2156,9 +2158,9 @@ class Spectrum1D(Header):
         select = A > 0.0001
         A = A / self._error[:, None]
 
-        plt.figure(figsize=(10, 10))
-        plt.imshow(A, origin="lower")
-        plt.show()
+        # plt.figure(figsize=(10, 10))
+        # plt.imshow(A, origin="lower")
+        # plt.show()
 
         B = sparse.csr_matrix(
             (A[select], (indices[0][select], indices[1][select])),
@@ -2173,12 +2175,12 @@ class Spectrum1D(Header):
         error = numpy.sqrt(1 / numpy.sum((A**2), 0))
         if bad_pix is not None and numpy.sum(bad_pix) > 0:
             error[bad_pix] = replace_error
-        if plot:
-            plt.figure(figsize=(15, 10))
-            plt.plot(self._data, "ok")
-            plt.plot(numpy.dot(A * self._error[:, None], out[0]), "-r")
-            # plt.plot(numpy.dot(A, out[0]), '-r')
-            plt.show()
+        # if plot:
+        #     plt.figure(figsize=(15, 10))
+        #     plt.plot(self._data, "ok")
+        #     plt.plot(numpy.dot(A * self._error[:, None], out[0]), "-r")
+        #     # plt.plot(numpy.dot(A, out[0]), '-r')
+        #     plt.show()
         return out[0], error, bad_pix, B, A
 
     def collapseSpec(self, method="mean", start=None, end=None, transmission_func=None):
