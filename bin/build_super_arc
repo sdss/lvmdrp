@@ -109,7 +109,10 @@ if __name__ == "__main__":
             mpath = mpaths[i].replace("marc", f"marc_{lamp}")
             # create master arcs
             os.makedirs(os.path.dirname(mpaths[i]), exist_ok=True)
-            imageMethod.create_master_frame(in_images=cpaths[keys], out_image=mpath)
+            if os.path.isfile(mpath):
+                log.info(f"skipping {mpath}, file already exist")
+            else:
+                imageMethod.create_master_frame(in_images=cpaths[keys], out_image=mpath)
             # fix header for metadata reconstruction
             _header_fix(mpath, target_mjd, target_tileid)
 
