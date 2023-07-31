@@ -87,7 +87,7 @@ def mergeRSS_drp(files_in, file_out, mergeHdr="1"):
 # * define ancillary product lvm-wave to contain wavelength solutions
 # * merge disp_rss and res_rss products into lvmArc product, change variable to out_arc
 @skip_on_missing_input_path(["in_arc"])
-@skip_if_drpqual_flags(["SATURATED"], "in_arc")
+# @skip_if_drpqual_flags(["SATURATED"], "in_arc")
 def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: str,
                                   ref_fiber: int = 319, pixel: List[float] = [], ref_lines: List[float] = [],
                                   poly_disp: int = 3, poly_fwhm: int = 5,
@@ -672,7 +672,7 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
 # TODO:
 # * merge arc_wave and arc_fwhm into lvmArc product, change variable name to in_arc
 @skip_on_missing_input_path(["in_rss", "arc_wave", "arc_fwhm"])
-@skip_if_drpqual_flags(["SATURATED", "EXTRACTBAD", "BADTRACE"], "in_rss")
+@skip_if_drpqual_flags(["EXTRACTBAD", "BADTRACE"], "in_rss")
 def create_pixel_table(in_rss: str, out_rss: str, arc_wave: str, arc_fwhm: str = "",
                        cropping: list = None):
     """
@@ -976,7 +976,7 @@ def correctPixTable_drp(
 # TODO: aplicar correccion a la solucion de longitud de onda comparando lineas de cielo
 # TODO: hacer esto antes de hacer el rasampling en wl
 @skip_on_missing_input_path(["in_rss"])
-@skip_if_drpqual_flags(["SATURATED", "BADTRACE", "EXTRACTBAD"], "in_rss")
+@skip_if_drpqual_flags(["BADTRACE", "EXTRACTBAD"], "in_rss")
 def resample_wavelength(in_rss: str, out_rss: str, method: str = "spline",
                         start_wave: float = None, end_wave: float = None,
                         disp_pix: float = None, err_sim: int = 500,

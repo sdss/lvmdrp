@@ -3146,7 +3146,7 @@ def preproc_raw_frame(
 
 
 @skip_on_missing_input_path(["in_image"])
-@skip_if_drpqual_flags(["SATURATED"], "in_image")
+# @skip_if_drpqual_flags(["SATURATED"], "in_image")
 def detrend_frame(
     in_image: str,
     out_image: str,
