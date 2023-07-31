@@ -460,7 +460,7 @@ def get_master_metadata(overwrite: bool = None) -> pd.DataFrame:
     """
 
     # glob for all file master calibration files, only include bias,darks,arcs,flats
-    files = list(pathlib.Path(os.getenv("LVM_SPECTRO_REDUX")).rglob("*calib/*lvm-m[bdpaf]*"))
+    files = list(pathlib.Path(os.getenv("LVM_SPECTRO_REDUX")).rglob("*calib/*lvm-m[bdpaft]*"))
 
     if _load_or_create_store(kind="master", mode="r") and not overwrite:
         log.info("Loading existing metadata store.")
