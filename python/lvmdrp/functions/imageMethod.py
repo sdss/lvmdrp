@@ -1298,17 +1298,19 @@ def trace_peaks(
     in_image: str,
     out_trace: str,
     in_peaks: str = None,
+    ref_column: int = 2000,
+    correct_ref: bool = False,
     write_trace_data: bool = False,
     disp_axis: str = "X",
-    method: str = "hyperbolic",
-    median_box: int = 5,
+    method: str = "gauss",
+    median_box: int = 10,
     median_cross: int = 1,
     steps: int = 30,
-    coadd: int = 30,
-    poly_disp: int = -6,
+    coadd: int = 5,
+    poly_disp: int = 6,
     init_sigma: float = 1.0,
-    threshold: float = 1000.0,
-    max_diff: int = 2,
+    threshold: float = 0.5,
+    max_diff: int = 1,
     display_plots: bool = True,
 ):
     """
@@ -1353,6 +1355,7 @@ def trace_peaks(
     """
 
     # load continuum image  from file
+    log.info(f"using flat image {os.path.basename(in_image)} for tracing")
     img = loadImage(in_image)
     img.setData(data=numpy.nan_to_num(img._data), error=numpy.nan_to_num(img._error))
 
@@ -1384,39 +1387,32 @@ def trace_peaks(
         # read slitmap extension
         slitmap = img.getSlitmap()
         slitmap = slitmap[slitmap["spectrographid"] == int(img._header["CCD"][1])]
-        # BUG: fix this hardcoded value
-        column = 2000
+        
+        ref_column = 2000
         channel = img._header["CCD"][0]
-        try:
-            positions = slitmap[f"ypix_{channel}"]
-        except KeyError as e:
-            log.warning(f"column not found: {e}, using 'r' channel instead")
-            positions = slitmap[f"ypix_r"]
-        fibers_status = slitmap["fibstatus"]
+        positions = slitmap[f"ypix_{channel}"]
         fibers = positions.size
-        bad_fibers = (fibers_status == 1)# | (fibers_status == 2)
-        good_fibers = numpy.logical_not(bad_fibers)
 
         # correct reference fiber positions
-        profile = img.getSlice(column, axis="y")._data
-        ypix = numpy.arange(profile.size)
-        guess_heights = numpy.ones_like(positions) * numpy.nanmax(profile)
-        ref_profile = _spec_from_lines(positions, sigma=1.2, wavelength=ypix, heights=guess_heights)
-        log.info(f"correcting guess positions for column {column}")
-        cc, bhat, mhat = _cross_match(
-            ref_spec=ref_profile,
-            obs_spec=profile,
-            stretch_factors=numpy.linspace(0.7,1.3,5000),
-            shift_range=[-100, 100])
-        log.info(f"stretch factor: {mhat:.3f}, shift: {bhat:.3f}")
-        positions = positions * mhat + bhat
-        # plt.figure(figsize=(15,5))
-        # plt.step(ypix, profile, "-k", lw=1)
-        # plt.vlines(positions, 0, profile.max())
-        # plt.show()
-        # return
+        profile = img.getSlice(ref_column, axis="y")._data
+        if correct_ref:
+            ypix = numpy.arange(profile.size)
+            guess_heights = numpy.ones_like(positions) * numpy.nanmax(profile)
+            ref_profile = _spec_from_lines(positions, sigma=1.2, wavelength=ypix, heights=guess_heights)
+            log.info(f"correcting guess positions for column {ref_column}")
+            cc, bhat, mhat = _cross_match(
+                ref_spec=ref_profile,
+                obs_spec=profile,
+                stretch_factors=numpy.linspace(0.7,1.3,5000),
+                shift_range=[-100, 100])
+            log.info(f"stretch factor: {mhat:.3f}, shift: {bhat:.3f}")
+            positions = positions * mhat + bhat
+        # set mask
+        fibers_status = slitmap["fibstatus"]
+        bad_fibers = (fibers_status == 1) | (profile[positions.astype(int)] < threshold)
+        good_fibers = numpy.logical_not(bad_fibers)
     else:
-        column, _, _, positions, bad_fibers = _read_fiber_ypix(in_peaks)
+        ref_column, _, _, positions, bad_fibers = _read_fiber_ypix(in_peaks)
         fibers = positions.size
         good_fibers = numpy.logical_not(bad_fibers)
 
@@ -1427,123 +1423,106 @@ def trace_peaks(
     trace._good_fibers = good_fibers
     # add the positions of the previous identified peaks
     trace.setSlice(
-        column, axis="y", data=positions, mask=numpy.zeros(len(positions), dtype="bool")
+        ref_column, axis="y", data=positions, mask=numpy.zeros(len(positions), dtype="bool")
     )
 
-    # select cross-dispersion slice for the measurements of the peaks
+    # select cross-dispersion ref_column for the measurements of the peaks
     # TODO: fix this mess with the steps
-    first = numpy.arange(column - 1, -1, -1)
+    first = numpy.arange(ref_column - 1, -1, -1)
     select_first = first % steps == 0
-    second = numpy.arange(column + 1, dim[1], 1)
-    # log.info(f"left: {first}")
-    # log.info(f"right: {second}")
+    second = numpy.arange(ref_column + 1, dim[1], 1)
     select_second = second % steps == 0
-    # nslice = numpy.sum(select_first) + numpy.sum(select_second)
-    m = 1
     # iterate towards index 0 along dispersion axis
     log.info("tracing fibers along dispersion axis")
     iterator = tqdm(
         first[select_first],
         total=select_first.sum(),
-        desc=f"tracing fiber left from pixel {column}",
+        desc=f"tracing fiber left from pixel {ref_column}",
         ascii=True,
         unit="pixel",
     )
     for i in iterator:
-        cut_iter = img.getSlice(i, axis="y")  # extract cross-dispersion slice
-        # infer pixel position of the previous slice
+        cut_iter = img.getSlice(i, axis="y")  # extract cross-dispersion ref_column
+        # infer pixel position of the previous ref_column
         # log.info(f"counter: {i}")
         if i == first[select_first][0]:
-            pix = numpy.round(trace.getData()[0][:, column]).astype("int16")
+            pix = numpy.round(trace.getData()[0][:, ref_column]).astype("int16")
         else:
             pix = numpy.round(trace.getData()[0][:, i + steps]).astype("int16")
 
-        # log.info(f"pix: {pix}")
-
-        # measure the peaks for the slice and store it in the trace
+        # measure the peaks for the ref_column and store it in the trace
         centers = cut_iter.measurePeaks(
             pix, method, init_sigma, threshold=threshold, max_diff=float(max_diff)
         )
-        # log.info(f"new positions: {centers[0][0]}")
-        # this is an interpolation in bad peaks
-        if numpy.sum(bad_fibers) > 0:
-            diff = Spectrum1D(wave=positions, data=(centers[0] - positions), mask=bad_fibers)
-            diff.smoothPoly(1, poly_kind="poly", ref_base=positions)
-            centers[0][bad_fibers] = diff._data[bad_fibers] + positions[bad_fibers]
-            centers[1][bad_fibers] = False
         trace.setSlice(i, axis="y", data=centers[0], mask=centers[1])
-        m += 1
 
     # iterate towards the last index along dispersion axis
     iterator = tqdm(
         second[select_second],
         total=select_second.sum(),
-        desc=f"tracing fiber right from pixel {column}",
+        desc=f"tracing fiber right from pixel {ref_column}",
         ascii=True,
         unit="pixel",
     )
     for i in iterator:
-        cut_iter = img.getSlice(i, axis="y")  # extract cross-dispersion slice
-        # infer pixel position of the previous slice
-        # log.info(f"counter: {i}")
+        cut_iter = img.getSlice(i, axis="y")  # extract cross-dispersion ref_column
+        # infer pixel position of the previous ref_column
         if i == second[select_second][0]:
-            pix = numpy.round(trace.getData()[0][:, column]).astype("int16")
+            pix = numpy.round(trace.getData()[0][:, ref_column]).astype("int16")
         else:
             pix = numpy.round(trace.getData()[0][:, i - steps]).astype("int16")
-        
-        # log.info(f"pixel: {pix}")
 
-        # measure the peaks for the slice and store it in the trace
+        # measure the peaks for the ref_column and store it in the trace
         centers = cut_iter.measurePeaks(
             pix, method, init_sigma, threshold=threshold, max_diff=float(max_diff)
         )
-        # log.info(f"new positions: {centers[0][0]}")
-        if numpy.sum(bad_fibers) > 0:
-            diff = Spectrum1D(wave=positions, data=(centers[0] - positions), mask=bad_fibers)
-            diff.smoothPoly(1, poly_kind="poly", ref_base=positions)
-            centers[0][bad_fibers] = diff._data[bad_fibers] + positions[bad_fibers]
-            centers[1][bad_fibers] = False
         trace.setSlice(i, axis="y", data=centers[0], mask=centers[1])
-        m += 1
 
     # define trace data before polynomial smoothing
     trace_data = copy(trace)
 
-    # trace_data._data[trace_data._mask] = 0
-    # pixels = numpy.arange(trace_data._data.shape[1])
-    # mask = (trace_data._data != 0).sum(axis=0).astype(bool)
-    # x_peak = copy(1 + pixels[mask])
-    # y_peak = copy(1 + trace_data._data[:, mask])
-
-    # set to mask zero values in trace to avoid problems with the polynomial fitting
+    # mask zeros and data outside threshold and max_diff
     trace._mask |= (trace._data <= 0)
     # smooth all trace by a polynomial
     log.info(f"fitting trace with {numpy.abs(poly_disp)}-deg polynomial")
     table, table_poly, table_poly_all = trace.smoothTracePoly(poly_disp, poly_kind="poly")
+    # set bad fibers in trace mask
+    trace._mask[bad_fibers] = True
 
     if write_trace_data:
         coords_file = out_trace.replace("calib", "ancillary").replace(".fits", "_coords.txt")
+        poly_file = coords_file.replace("_coords.txt", "_poly.txt")
+        poly_all_file = coords_file.replace("_coords.txt", "_poly_all.txt")
+        log.info(f"writing trace data to files: {os.path.basename(coords_file)}, {os.path.basename(poly_file)} and {os.path.basename(poly_all_file)}")
         numpy.savetxt(coords_file, 1+numpy.asarray(table), fmt="%.5f")
-        numpy.savetxt(coords_file.replace("_coords.txt", "_poly.txt"), 1+numpy.asarray(table_poly), fmt="%.5f")
-        numpy.savetxt(coords_file.replace("_coords.txt", "_poly_all.txt"), 1+numpy.asarray(table_poly_all), fmt="%.5f")
+        numpy.savetxt(poly_file, 1+numpy.asarray(table_poly), fmt="%.5f")
+        numpy.savetxt(poly_all_file, 1+numpy.asarray(table_poly_all), fmt="%.5f")
+    
+    # linearly interpolate coefficients at masked fibers
+    log.info(f"interpolating coefficients at {bad_fibers.sum()} masked fibers")
+    x_pixels = numpy.arange(trace._data.shape[1])
+    y_pixels = numpy.arange(trace._fibers)
+    for column in range(trace._data.shape[1]):
+        mask = trace._mask[:, column]
+        for order in range(trace._coeffs.shape[1]):
+            trace._coeffs[mask, order] = numpy.interp(y_pixels[mask], y_pixels[~mask], trace._coeffs[~mask, order])
+    # evaluate trace at interpolated fibers
+    for ifiber in y_pixels[bad_fibers]:
+        poly = numpy.polynomial.Polynomial(trace._coeffs[ifiber, :])
+        trace._data[ifiber, :] = poly(x_pixels)
 
-    for i in range(fibers):
-        if not bad_fibers[i]:
-            trace._mask[i, :] = False
-        else:
-            trace._mask[i, :] = True
-
-    # This part is not working correctly and therefore taken out at the moment
-    ## smooth all traces assuming that their distances are changing smoothly along dispersion axis
-    ##if poly_cross!='':
-    ##    poly_cross = numpy.array(poly_cross.split(',')).astype('int16')
-    ##    trace.smoothTraceDist(column, poly_cross=poly_cross, poly_disp=poly_disp)
-
+    # create new header
+    log.info(f"writing output trace at {os.path.basename(out_trace)}")
+    new_header = img._header.copy()
+    new_header["IMAGETYP"] = "trace"
+    trace.setHeader(new_header)
+    # write trace mask to file
     trace.writeFitsData(out_trace)
 
     # plot traces and data used in the fitting
+    log.info("plotting traces and data used in the fitting")
     pix_ranges = [(0, 300), (1900, 2200), (3700, trace._data.shape[1])]
-    fig, axs = plt.subplots(1, len(pix_ranges), figsize=(10 * len(pix_ranges), 10), sharey=True)
+    fig, axs = plt.subplots(1, len(pix_ranges), figsize=(5 * len(pix_ranges), 10), sharey=True)
 
     figtitle = os.path.basename(out_trace.replace(".fits", ""))
     fig.suptitle(f"{figtitle}", size="large")
@@ -1567,7 +1546,7 @@ def trace_peaks(
             axs[i].plot(fiber._pixels, fiber._data, color=plt.cm.rainbow(ifiber/trace._fibers), lw=0.5)
 
         axs[i].set_xlim(*pix_range)
-        axs[i].set_ylim(3850, 4100)
+        axs[i].set_ylim(3500, 4100)
 
     fig.tight_layout()
     save_fig(
@@ -1577,28 +1556,6 @@ def trace_peaks(
         figure_path="qa",
         label="traces",
     )
-
-    # if write_trace_data:
-        # # pixels = numpy.arange(trace_data._data.shape[1])
-        # # mask = (trace_data._data != 0).sum(axis=0).astype(bool)
-        # # x_poly = 1 + pixels[mask]
-        # # y = 1 + trace_data._data[:, mask]
-
-        # # x_poly = numpy.tile(x_peak, trace._fibers)
-        # y_poly = numpy.zeros_like(trace_data._data)
-        # x_poly = []
-        # for i in range(trace._fibers):
-        #     poly = numpy.polynomial.Polynomial(trace._coeffs[i, :], domain=[0, trace._data.shape[1]])
-        #     mask = trace._data[i, :] > 0
-        #     x_poly.append(trace_data._data[i, mask])
-        #     y_poly[i,] = 1+poly(trace_data._data[i, mask])
-
-        # table = numpy.column_stack((numpy.tile(x_peak, trace._fibers), y_peak.flatten()))
-        # table_poly = numpy.column_stack((numpy.asarray(x_poly).flatten(), y_poly.flatten()))
-
-        # coords_file = out_trace.replace("calib", "ancillary").replace(".fits", "_coords.txt")
-        # numpy.savetxt(coords_file, numpy.asarray(table), fmt="%.5f")
-        # numpy.savetxt(coords_file.replace("_coords.txt", "_poly.txt"), table_poly, fmt="%.5f")
 
     return trace_data, trace
 

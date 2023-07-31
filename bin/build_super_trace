@@ -158,13 +158,13 @@ if __name__ == "__main__":
         mtrace_fwhm = path.full("lvm_master", drpver=drpver, kind="mfwhm", **mflat.to_dict())
         # run tracing
         imageMethod.trace_peaks(in_image=mpath, out_trace=mtrace_peak, **trace_peaks_params)
-        imageMethod.traceFWHM_drp(in_image=mpath, out_trace=mtrace_fwhm, in_trace=mtrace_peak, **trace_fwhm_params)
+        # imageMethod.traceFWHM_drp(in_image=mpath, out_fwhm=mtrace_fwhm, in_trace=mtrace_peak, **trace_fwhm_params)
 
         # extract fiberflats
-        imageMethod.extract_spectra(in_image=mpath, out_rss=xpath, in_trace=mtrace_peak, fwhm=mtrace_fwhm, method="optimal", plot_fig=False)
+        # imageMethod.extract_spectra(in_image=mpath, out_rss=xpath, in_trace=mtrace_peak, fwhm=mtrace_fwhm, method="optimal", plot_fig=False)
 
         # update masters paths list
-        masters_paths.append(xpath)
+        # masters_paths.append(xpath)
     
     # update masters metadata
     new_masters = md.extract_metadata(kind="master", frames_paths=masters_paths)
