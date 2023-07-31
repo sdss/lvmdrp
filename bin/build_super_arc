@@ -87,7 +87,6 @@ if __name__ == "__main__":
             mpixmask = path.full("lvm_master", drpver=drpver, kind="mpixmask", **masters["pixmask"])
             mbias = path.full("lvm_master", drpver=drpver, kind="mbias", **masters["bias"])
             mdark = path.full("lvm_master", drpver=drpver, kind="mdark", **masters["dark"])
-            mflat = path.full("lvm_master", drpver=drpver, kind="mflat", **masters["flat"])
             
             # preproc and detrend raw arcs
             for j, (_, arc) in enumerate(analog.iterrows()):
@@ -127,7 +126,10 @@ if __name__ == "__main__":
         mpath = path.full("lvm_master", drpver=drpver, kind=f"marc_{lamp}", **marc.to_dict())
         xpath = path.full("lvm_master", drpver=drpver, kind=f"xmarc_{lamp}", **marc.to_dict())
         
-        mtrace = path.full("lvm_master", drpver=drpver, kind="mtrace", **marc.to_dict())
+        # match masters
+        masters = md.match_master_metadata(target_imagetyp="arc", target_mjd=target_mjd, target_camera=camera)
+
+        mtrace = path.full("lvm_master", drpver=drpver, kind="mtrace", **masters["trace"])
         imageMethod.extract_spectra(in_image=mpath, out_rss=xpath, in_trace=mtrace, method="aperture", aperture=3)
 
         # update masters paths list
