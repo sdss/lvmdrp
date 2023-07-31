@@ -81,7 +81,7 @@ class TraceMask(FiberRows):
         poly_all_table = []
         for i in range(self._fibers):
             good_pix = numpy.logical_not(self._mask[i, :])
-            if numpy.sum(good_pix) != 0:
+            if numpy.sum(good_pix) >= deg + 1:
                 # select the polynomial class
                 if poly_kind == "poly":
                     poly_cls = polynomial.Polynomial
@@ -89,7 +89,6 @@ class TraceMask(FiberRows):
                     poly_cls = polynomial.Legendre
                 elif poly_kind == "chebyshev":
                     poly_cls = polynomial.Chebyshev
-
 
                 # try to fit
                 try:
@@ -102,7 +101,7 @@ class TraceMask(FiberRows):
                     self._mask[i, :] = True
                     continue
 
-                self._coeffs[i, :] = poly.coef
+                self._coeffs[i, :] = poly.convert().coef
                 self._data[i, :] = poly(pixels)
 
                 if clip is not None:
