@@ -15,15 +15,15 @@ from lvmdrp.core.positionTable import PositionTable
 from lvmdrp.core.spectrum1d import Spectrum1D
 
 
-def _read_pixwav_map(lamp: str, channel: str, pixels=None, waves=None):
-    """read pixel-wavelength map from a lamp and channel
+def _read_pixwav_map(lamp: str, camera: str, pixels=None, waves=None):
+    """read pixel-wavelength map from a lamp and camera
 
     Parameters
     ----------
     lamp : str
         arc lamp name
-    channel : str
-        spectrograph channel
+    camera : str
+        one of cameras (e.g., b1, r1, z1)
 
     Returns
     -------
@@ -36,7 +36,7 @@ def _read_pixwav_map(lamp: str, channel: str, pixels=None, waves=None):
     use_line : numpy.ndarray
         mask to select which lines to use
     """
-    pixwav_map_path = os.path.join(CONFIG_PATH, "wavelength", f"lvm-pixwav-{lamp}_{channel}.txt")
+    pixwav_map_path = os.path.join(CONFIG_PATH, "wavelength", f"lvm-pixwav-{lamp}_{camera}.txt")
 
     if os.path.isfile(pixwav_map_path):
         # load initial pixel positions and reference wavelength from txt config file
@@ -66,7 +66,7 @@ def _read_pixwav_map(lamp: str, channel: str, pixels=None, waves=None):
             f"going to use {nlines} lines ({(~use_line).sum()} lines masked)"
         )
     else:
-        log.warning(f"no pixel-to-wavelength map found for {lamp = } in {channel = }")
+        log.warning(f"no pixel-to-wavelength map found for {lamp = } in {camera = }")
         # initialize new table to create a new pixel-to-wave map
         ref_fiber = None
         pixels = numpy.empty((0,))

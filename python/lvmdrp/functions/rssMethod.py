@@ -186,7 +186,7 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
         arc = RSS()
         arc.loadFitsData(in_arc)
 
-        channel = arc._header["CCD"][0]
+        camera = arc._header["CCD"]
         onlamp = ["ON", True, 'T', 1]
         lamps = [lamp.lower() for lamp in ARC_LAMPS if arc._header.get(lamp, "OFF") in onlamp]
         if len(lamps) == 0:
@@ -213,8 +213,8 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
     # read reference lines
     pixel_list, ref_lines_list, use_line_list = [], [], []
     for lamp in lamps:
-        log.info(f"loading reference lines for {lamp = } in {channel = }")
-        _, ref_fiber_, pixel, ref_lines, use_line = _read_pixwav_map(lamp, channel)
+        log.info(f"loading reference lines for {lamp = } in {camera = }")
+        _, ref_fiber_, pixel, ref_lines, use_line = _read_pixwav_map(lamp, camera)
 
         # remove masked lines
         pixel = pixel[use_line]

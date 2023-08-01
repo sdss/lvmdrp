@@ -81,17 +81,17 @@ class SolveWavelength:
         self.fiber_id = fiber_id
 
         lamps = "_".join(self.lamps)
-        self.pixmap_table = os.path.join(CONFIG_PATH, "wavelength", f"lvm-pixwav-{lamps}_{self.channel}.txt")
+        self.pixmap_table = os.path.join(CONFIG_PATH, "wavelength", f"lvm-pixwav-{lamps}_{self.camera}.txt")
         self.table_exist = os.path.isfile(self.pixmap_table)
         # read combined table
         if self.table_exist:
-            _, ref_fiber, pixels, waves, masks = rss._read_pixwav_map(lamps, self.channel)
+            _, ref_fiber, pixels, waves, masks = rss._read_pixwav_map(lamps, self.camera)
             self.pixmap = np.column_stack((pixels, waves, masks))
         # read per-lamp table
         else:
             pixmaps = []
             for lamp in self.lamps:
-                _, ref_fiber, pixels, waves, masks = rss._read_pixwav_map(lamp, self.channel)
+                _, ref_fiber, pixels, waves, masks = rss._read_pixwav_map(lamp, self.camera)
                 if ref_fiber is not None:
                     pixmaps.append(np.column_stack((pixels, waves, masks)))
                 else:
@@ -142,8 +142,8 @@ class SolveWavelength:
         spectra = rss.loadRSS(self.extracted_fits)
         # extract relevant metadata
         self.lamps = [lamp.lower() for lamp in ARC_LAMPS if spectra._header.get(lamp, "OFF") == "ON"]
-        self.channel = spectra._header["CCD"][0]
-        self.wave_range = SPEC_CHANNELS[self.channel]
+        self.camera = spectra._header["CCD"]
+        self.wave_range = SPEC_CHANNELS[self.camera[0]]
         # apply pixel mask
         mask = spectra._mask | np.isnan(spectra._data) | np.isnan(spectra._error)
         mask |= (spectra._data < 0) | (spectra._error < 0)
