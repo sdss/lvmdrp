@@ -2783,9 +2783,12 @@ def preproc_raw_frame(
 
     # fix the header with header fix file
     # convert real MJD to SJD
-    sjd = int(dateobs_to_sjd(org_header.get("OBSTIME")))
-    sjd = correct_sjd(in_image, sjd)
-    org_header = apply_hdrfix(sjd, hdr=org_header) or org_header
+    try:
+        sjd = int(dateobs_to_sjd(org_header.get("OBSTIME")))
+        sjd = correct_sjd(in_image, sjd)
+        org_header = apply_hdrfix(sjd, hdr=org_header) or org_header
+    except ValueError as e:
+        log.error(f"cannot apply header fix: {e}")
 
     # assume imagetyp or not
     if assume_imagetyp:
