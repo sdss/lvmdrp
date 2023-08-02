@@ -3186,7 +3186,7 @@ def detrend_frame(
         mdark_img = loadImage(in_dark)
 
     # read master flat
-    if img_type in ["bias", "dark", "flat", "flatfield"] or (
+    if img_type in ["bias", "dark", "pixelflat"] or (
         in_pixelflat is None or not os.path.isfile(in_pixelflat)
     ):
         if in_pixelflat and not os.path.isfile(in_pixelflat):
@@ -3284,9 +3284,9 @@ def detrend_frame(
         med_img = detrended_img.medianImg(size=median_box, use_mask=True)
         detrended_img.setData(mask=(detrended_img._mask | med_img._mask), inplace=True)
 
-    # normalize in case of flat calibration
-    # 'flat' and 'flatfield' are the imagetyp that a pixel flat can have
-    if img_type == "flat" or img_type == "flatfield":
+    # normalize in case of pixel flat calibration
+    # 'pixelflat' is the imagetyp that a pixel flat can have
+    if img_type == "pixelflat":
         flat_array = numpy.ma.masked_array(
             detrended_img._data, mask=detrended_img._mask
         )
