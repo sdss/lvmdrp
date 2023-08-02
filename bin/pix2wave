@@ -95,8 +95,15 @@ class SolveWavelength:
                 if ref_fiber is not None:
                     pixmaps.append(np.column_stack((pixels, waves, masks)))
                 else:
-                    log.info(f"no pixel-to-wavelength map found for {lamp = } in channel = {self.channel}")
+                    log.warning(f"missing reference fiber for {lamp = }")
                     continue
+
+            # handle empty pixmaps
+            if len(pixmaps) == 0:
+                self.pixmap = np.empty((0, 3))
+                self.nrows = 0
+                self.nmasked = 0
+                return
 
             # define joint pixel-to-wavelength map
             self.pixmap = np.concatenate(pixmaps, axis=0)
@@ -105,6 +112,8 @@ class SolveWavelength:
         
         # define number of rows
         self.nrows = self.pixmap.shape[0]
+        # define number of masked lines
+        self.nmasked = self.pixmap[:, -1].sum()
 
     def _load_reflines(self):
         reflines = []
@@ -227,6 +236,9 @@ class SolveWavelength:
             cc, self.bhat, self.mhat = spectrum1d._cross_match(ref_spec=pix_spec, obs_spec=self.ydata, stretch_factors=np.linspace(0.8,1.2,10000), shift_range=[-50,50])
             log.info(f"max CC = {cc:.2f} for strech = {self.mhat:.2f} and shift = {self.bhat:.2f}")
             self.pixmap[:, 0] = self.mhat * self.pixmap[:, 0] + self.bhat
+        else:
+            self.mhat = 1.0
+            self.bhat = 0.0
 
         # create guess wavelength function
         poly = self._fit_wavelength()
@@ -331,14 +343,16 @@ class SolveWavelength:
 
     def _save_table(self):
         self.pixmap = self.pixmap[self.pixmap[:, 0].argsort()]
-        self.pixmap[:, 0] = (self.pixmap[:, 0] - self.bhat) / self.mhat
+        # self.pixmap[:, 0] = (self.pixmap[:, 0] - self.bhat) / self.mhat
 
         new_lines = self.pixmap.shape[0]-self.nrows
-        if len(self.pixmap) != 0:
+        new_masked = self.pixmap[:, -1].sum()
+        if len(self.pixmap) != 0 and (self.nmasked != new_masked or new_lines != 0 or (~np.isclose(self.mhat, 1.0, rtol=0.01) or self.bhat != 0)):
             log.info(
                 f"saving pixel table with {new_lines} "
                 f"new lines to '{self.pixmap_table}'"
             )
+            log.info(f"table shifted by {self.bhat} and stretched by {self.mhat:.2f}")
             self.nrows = self.pixmap.shape[0]
             with open(self.pixmap_table, "w") as t:
                 t.write(f"{self.fiber_id}\n")
@@ -346,7 +360,7 @@ class SolveWavelength:
                     x, y, m = self.pixmap[i]
                     t.write(f"{x:>.2f} {y:>9.4f} {int(m):>1d}\n")
         else:
-            log.info(f"no new lines to add to '{self.pixmap_table}'")
+            log.info(f"no modifications to '{self.pixmap_table}'")
 
     def on_pick(self, event):
         if event.artist == self.line and event.mouseevent.button == 1:
@@ -408,8 +422,8 @@ class SolveWavelength:
         fig, ax = plt.subplots(figsize=(20, 20))
         ax.axhline(ls="--", lw=1, color="0.7")
         wav_residuals = waves_fit - y
-        pixel_size = coeffs[1] #np.diff(waves_fit)
-        pix_residuals = wav_residuals# / pixel_size.mean()
+        pixel_size = coeffs[1]
+        pix_residuals = wav_residuals
         ax.plot(x[m], pix_residuals[m], "or", mew=1, ms=10, mfc="none")
         ylim = ax.get_ylim()
         ax.plot(x[~m], pix_residuals[~m], "o", mec="0.5", mew=1, ms=8, mfc="none")
