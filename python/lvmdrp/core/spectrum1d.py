@@ -2057,6 +2057,7 @@ class Spectrum1D(Header):
 
                 if axs is not None:
                     axs[i] = gauss.plot(self._wave[select], self._data[select], ax=axs[i])
+                    axs[i].axvline(centres[i], ls="--", lw=1, color="tab:red")
             else:
                 out[i:ncomp + i + 1] = 0.0
 
