@@ -2396,11 +2396,12 @@ def extract_spectra(
 
     if error is not None:
         error[mask] = replace_error
+    
     rss = FiberRows(
         data=data,
         mask=mask,
         error=error,
-        good_fibers=numpy.logical_not(trace_mask._mask),
+        good_fibers=trace_mask._good_fibers,
         header=img.getHeader(),
     )
     rss.setHdrValue("NAXIS2", data.shape[0])
