@@ -347,14 +347,14 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
                 kind_cros = "poly"
 
             if kind_cros == "poly":
-                poly_cls = polynomial.Polynomial
+                cros_cls = polynomial.Polynomial
             elif kind_cros == "legendre":
-                poly_cls = polynomial.Legendre
+                cros_cls = polynomial.Legendre
             elif kind_cros == "chebyshev":
-                poly_cls = polynomial.Chebyshev
+                cros_cls = polynomial.Chebyshev
 
             try:
-                poly = poly_cls.fit(fibers[select], fwhm_med, deg=poly_cros)
+                poly = cros_cls.fit(fibers[select], fwhm_med, deg=poly_cros)
             except ValueError as e:
                 log.error(f'{msg}: {e}')
                 continue
@@ -388,27 +388,17 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
                 ("invalid polynomial kind " f"'{kind_disp = }'. Falling back to 'poly'")
             )
         if kind_disp == "poly":
-            wave_poly = polynomial.Polynomial.fit(
-                cent_wave[i, use_line],
-                ref_lines[use_line],
-                deg=poly_disp,
-            )
+            wave_cls = polynomial.Polynomial
         elif kind_disp == "legendre":
-            wave_poly = polynomial.Legendre.fit(
-                cent_wave[i, use_line],
-                ref_lines[use_line],
-                deg=poly_disp,
-            )
+            wave_cls = polynomial.Legendre
         elif kind_disp == "chebyshev":
-            wave_poly = polynomial.Chebyshev.fit(
-                cent_wave[i, use_line],
-                ref_lines[use_line],
-                deg=poly_disp,
-            )
+            wave_cls = polynomial.Chebyshev
+        
+        wave_poly = wave_cls.fit(cent_wave[i, use_line], ref_lines[use_line], deg=poly_disp)
 
         wave_coeffs[i, :] = wave_poly.convert().coef
         wave_sol[i, :] = wave_poly(arc._pixels)
-        wave_rms[i] = numpy.std(ref_lines[use_line] - wave_poly(cent_wave[i, use_line]))
+        wave_rms[i] = numpy.std(wave_poly(cent_wave[i, use_line]) - ref_lines[use_line])
 
     log.info(
         (
@@ -433,24 +423,13 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
             )
             kind_fwhm = "poly"
         if kind_fwhm == "poly":
-            fwhm_poly = polynomial.Polynomial.fit(
-                cent_wave[i, use_line],
-                fwhm_wave[use_line],
-                deg=poly_fwhm,
-                domain=[0, arc._pixels[-1]]
-            )
+            fwhm_cls = polynomial.Polynomial
         elif kind_fwhm == "legendre":
-            fwhm_poly = polynomial.Legendre.fit(
-                cent_wave[i, use_line],
-                fwhm_wave[use_line],
-                deg=poly_fwhm,
-            )
+            fwhm_cls = polynomial.Legendre
         elif kind_fwhm == "chebyshev":
-            fwhm_poly = polynomial.Chebyshev.fit(
-                cent_wave[i, use_line],
-                fwhm_wave[use_line],
-                deg=poly_fwhm,
-            )
+            fwhm_cls = polynomial.Chebyshev
+        
+        fwhm_poly = fwhm_cls.fit(cent_wave[i, use_line], fwhm_wave[use_line], deg=poly_fwhm)
 
         lsf_coeffs[i, :] = fwhm_poly.convert().coef
         fwhm_sol[i, :] = fwhm_poly(arc._pixels)
@@ -477,7 +456,7 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
     )
     # create plot of wavelength fitting residuals
     fig, ax = create_subplots(to_display=display_plots, figsize=(15, 7))
-    axs = plot_wavesol_residuals(lines_pixels=pixel, lines_waves=ref_lines, model_waves=wave_poly(pixel), ax=ax, labels=True)
+    axs = plot_wavesol_residuals(lines_pixels=pixel, lines_waves=ref_lines, model_waves=wave_cls(wave_coeffs[ref_fiber])(pixel), ax=ax, labels=True)
     save_fig(
         fig,
         product_path=out_wave,
