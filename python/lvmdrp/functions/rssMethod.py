@@ -380,7 +380,7 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
             good_fibers[i] = True
         elif nmasked[i] == len(masked_lines):
             log.warning(f"fiber {i} has all lines masked")
-            masked_lines[:] = False
+            good_fibers[i] = False
         # select = numpy.logical_not(masked_lines)
 
         if kind_disp not in ["poly", "legendre", "chebyshev"]:
@@ -401,11 +401,9 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
         wave_rms[i] = numpy.std(wave_poly(cent_wave[i, use_line]) - ref_lines[use_line])
 
     log.info(
-        (
-            "finished wavelength fitting with median "
-            f"RMS = {numpy.median(wave_rms):g} AA "
-            f"({numpy.median(wave_rms[:,None]/numpy.diff(wave_sol, axis=1)):g} pix)"
-        )
+        "finished wavelength fitting with median "
+        f"RMS = {numpy.median(wave_rms):g} AA "
+        f"({numpy.median(wave_rms[:,None]/numpy.diff(wave_sol, axis=1)):g} pix)"
     )
 
     # Estimate the spectral resolution pattern
@@ -419,7 +417,7 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
 
         if kind_fwhm not in ["poly", "legendre", "chebyshev"]:
             log.warning(
-                ("invalid polynomial kind " f"'{kind_fwhm = }'. Falling back to 'poly'")
+                f"invalid polynomial kind '{kind_fwhm = }'. Falling back to 'poly'"
             )
             kind_fwhm = "poly"
         if kind_fwhm == "poly":
@@ -436,11 +434,9 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
         fwhm_rms[i] = numpy.std(fwhm_wave[use_line] - fwhm_poly(cent_wave[i, use_line]))
 
     log.info(
-        (
-            "finished LSF fitting with median "
-            f"RMS = {numpy.median(fwhm_rms):g} AA "
-            f"({numpy.median(fwhm_rms[:,None]/numpy.diff(wave_sol, axis=1)):g} pix)"
-        )
+        "finished LSF fitting with median "
+        f"RMS = {numpy.median(fwhm_rms):g} AA "
+        f"({numpy.median(fwhm_rms[:,None]/numpy.diff(wave_sol, axis=1)):g} pix)"
     )
 
     # create plot of polynomial coefficients
@@ -644,10 +640,10 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
         "%.4f" % (numpy.max(fwhm_rms[good_fibers])),
         "Max RMS of disp sol",
     )
-    wave_trace = FiberRows(data=wave_sol, good_fibers=good_fibers)
-    wave_trace._coeffs = wave_coeffs
-    fwhm_trace = FiberRows(data=fwhm_sol, good_fibers=good_fibers)
-    fwhm_trace._coeffs = lsf_coeffs
+    mask = numpy.zeros(arc._data.shape, dtype=bool)
+    mask[~good_fibers] = True
+    wave_trace = FiberRows(data=wave_sol, mask=mask, coeffs=wave_coeffs)
+    fwhm_trace = FiberRows(data=fwhm_sol, mask=mask, coeffs=lsf_coeffs)
 
     wave_trace.writeFitsData(out_wave)
     fwhm_trace.writeFitsData(out_lsf)
