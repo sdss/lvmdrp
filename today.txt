@@ -1,0 +1,263 @@
+Processing /home/sanchez/sda2/code/python/lvmdrp
+  Preparing metadata (setup.py): started
+  Preparing metadata (setup.py): finished with status 'done'
+Collecting lvmsurveysim@ git+https://github.com/sdss/lvmsurveysim.git@0.8.3
+  Cloning https://github.com/sdss/lvmsurveysim.git (to revision 0.8.3) to /tmp/pip-install-cptjlchz/lvmsurveysim_cdacdc1f84b141f6bf8e080ac696358c
+  Running command git clone --filter=blob:none --quiet https://github.com/sdss/lvmsurveysim.git /tmp/pip-install-cptjlchz/lvmsurveysim_cdacdc1f84b141f6bf8e080ac696358c
+  Running command git checkout -q 0884e783c1fb8b71e6cee5cdd8a0bcdcba00440a
+  Resolved https://github.com/sdss/lvmsurveysim.git to commit 0884e783c1fb8b71e6cee5cdd8a0bcdcba00440a
+  Preparing metadata (setup.py): started
+  Preparing metadata (setup.py): finished with status 'done'
+Requirement already satisfied: astropy==5.2 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmdrp==0.1.1.dev0) (5.2)
+Requirement already satisfied: dust_extinction==1.1 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmdrp==0.1.1.dev0) (1.1)
+Requirement already satisfied: matplotlib==3.6.2 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmdrp==0.1.1.dev0) (3.6.2)
+Requirement already satisfied: numpy==1.24.1 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmdrp==0.1.1.dev0) (1.24.1)
+Requirement already satisfied: peewee==3.15.4 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmdrp==0.1.1.dev0) (3.15.4)
+Requirement already satisfied: pexpect==4.8.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmdrp==0.1.1.dev0) (4.8.0)
+Requirement already satisfied: pydl==0.7.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmdrp==0.1.1.dev0) (0.7.0)
+Collecting scipy==1.9.1
+  Downloading scipy-1.9.1-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (43.4 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 43.4/43.4 MB 3.0 MB/s eta 0:00:00
+Requirement already satisfied: skycalc_cli==1.4 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmdrp==0.1.1.dev0) (1.4)
+Requirement already satisfied: skyfield==1.45 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmdrp==0.1.1.dev0) (1.45)
+Requirement already satisfied: tqdm==4.64.1 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmdrp==0.1.1.dev0) (4.64.1)
+Requirement already satisfied: tornado>=4 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmdrp==0.1.1.dev0) (6.3.2)
+Requirement already satisfied: jsonschema!=2.5.0,>=2.4 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmdrp==0.1.1.dev0) (4.17.3)
+Requirement already satisfied: entrypoints>=0.2.2 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmdrp==0.1.1.dev0) (0.4)
+Requirement already satisfied: jinja2>=2.4 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmdrp==0.1.1.dev0) (3.1.2)
+Requirement already satisfied: jupyter==1.0.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmdrp==0.1.1.dev0) (1.0.0)
+Requirement already satisfied: jupyterlab==3.6.1 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmdrp==0.1.1.dev0) (3.6.1)
+Requirement already satisfied: ipython==8.10.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmdrp==0.1.1.dev0) (8.10.0)
+Requirement already satisfied: pandas==1.5.3 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmdrp==0.1.1.dev0) (1.5.3)
+Requirement already satisfied: astroquery==0.4.6 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmdrp==0.1.1.dev0) (0.4.6)
+Requirement already satisfied: keyring>=4.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmdrp==0.1.1.dev0) (23.13.1)
+Requirement already satisfied: sbpy==0.3.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmdrp==0.1.1.dev0) (0.3.0)
+Requirement already satisfied: sdsstools>=1.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmdrp==0.1.1.dev0) (1.0.2)
+Collecting sdss-tree>=4.0
+  Downloading sdss_tree-4.0.2-py2.py3-none-any.whl (49 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 49.8/49.8 kB 13.5 MB/s eta 0:00:00
+Collecting sdss-access>=3.0
+  Downloading sdss_access-3.0.0-py2.py3-none-any.whl (37 kB)
+Requirement already satisfied: click>=8.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmdrp==0.1.1.dev0) (8.1.3)
+Collecting cloup>=2.0
+  Downloading cloup-3.0.0-py2.py3-none-any.whl (53 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 53.9/53.9 kB 4.6 MB/s eta 0:00:00
+Collecting ccdproc==2.4.0
+  Downloading ccdproc-2.4.0-py3-none-any.whl (355 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 355.4/355.4 kB 5.9 MB/s eta 0:00:00
+Collecting bottleneck==1.3.7
+  Downloading Bottleneck-1.3.7-cp38-cp38-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl (355 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 355.2/355.2 kB 4.1 MB/s eta 0:00:00
+Requirement already satisfied: h5py==3.8.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmdrp==0.1.1.dev0) (3.8.0)
+Requirement already satisfied: tables==3.8.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmdrp==0.1.1.dev0) (3.8.0)
+Requirement already satisfied: PyYAML>=3.13 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from astropy==5.2->lvmdrp==0.1.1.dev0) (6.0)
+Requirement already satisfied: packaging>=19.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from astropy==5.2->lvmdrp==0.1.1.dev0) (23.1)
+Requirement already satisfied: pyerfa>=2.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from astropy==5.2->lvmdrp==0.1.1.dev0) (2.0.0.3)
+Requirement already satisfied: beautifulsoup4>=4.3.2 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from astroquery==0.4.6->lvmdrp==0.1.1.dev0) (4.12.2)
+Requirement already satisfied: html5lib>=0.999 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from astroquery==0.4.6->lvmdrp==0.1.1.dev0) (1.1)
+Requirement already satisfied: requests>=2.4.3 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from astroquery==0.4.6->lvmdrp==0.1.1.dev0) (2.30.0)
+Requirement already satisfied: pyvo>=1.1 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from astroquery==0.4.6->lvmdrp==0.1.1.dev0) (1.4.1)
+Collecting reproject>=0.7
+  Downloading reproject-0.11.0-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (1.5 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.5/1.5 MB 2.7 MB/s eta 0:00:00
+Collecting scikit-image
+  Downloading scikit_image-0.21.0-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (13.9 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 13.9/13.9 MB 3.0 MB/s eta 0:00:00
+Collecting astroscrappy>=1.0.8
+  Downloading astroscrappy-1.1.0-cp38-cp38-manylinux_2_12_x86_64.manylinux2010_x86_64.whl (1.4 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.4/1.4 MB 4.1 MB/s eta 0:00:00
+Requirement already satisfied: decorator in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from ipython==8.10.0->lvmdrp==0.1.1.dev0) (5.1.1)
+Requirement already satisfied: stack-data in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from ipython==8.10.0->lvmdrp==0.1.1.dev0) (0.6.2)
+Requirement already satisfied: jedi>=0.16 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from ipython==8.10.0->lvmdrp==0.1.1.dev0) (0.18.2)
+Requirement already satisfied: traitlets>=5 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from ipython==8.10.0->lvmdrp==0.1.1.dev0) (5.9.0)
+Requirement already satisfied: matplotlib-inline in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from ipython==8.10.0->lvmdrp==0.1.1.dev0) (0.1.6)
+Requirement already satisfied: pickleshare in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from ipython==8.10.0->lvmdrp==0.1.1.dev0) (0.7.5)
+Requirement already satisfied: pygments>=2.4.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from ipython==8.10.0->lvmdrp==0.1.1.dev0) (2.15.1)
+Requirement already satisfied: backcall in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from ipython==8.10.0->lvmdrp==0.1.1.dev0) (0.2.0)
+Requirement already satisfied: prompt-toolkit<3.1.0,>=3.0.30 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from ipython==8.10.0->lvmdrp==0.1.1.dev0) (3.0.38)
+Requirement already satisfied: ipywidgets in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyter==1.0.0->lvmdrp==0.1.1.dev0) (8.0.6)
+Requirement already satisfied: qtconsole in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyter==1.0.0->lvmdrp==0.1.1.dev0) (5.4.3)
+Requirement already satisfied: notebook in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyter==1.0.0->lvmdrp==0.1.1.dev0) (6.5.4)
+Requirement already satisfied: ipykernel in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyter==1.0.0->lvmdrp==0.1.1.dev0) (6.23.0)
+Requirement already satisfied: nbconvert in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyter==1.0.0->lvmdrp==0.1.1.dev0) (7.4.0)
+Requirement already satisfied: jupyter-console in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyter==1.0.0->lvmdrp==0.1.1.dev0) (6.6.3)
+Requirement already satisfied: tomli in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (2.0.1)
+Requirement already satisfied: jupyter-server<3,>=1.16.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (2.5.0)
+Requirement already satisfied: jupyterlab-server~=2.19 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (2.22.1)
+Requirement already satisfied: nbclassic in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (1.0.0)
+Requirement already satisfied: jupyter-ydoc~=0.2.2 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (0.2.4)
+Requirement already satisfied: jupyter-server-ydoc<0.7.0,>=0.6.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (0.6.1)
+Requirement already satisfied: jupyter-core in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (5.3.0)
+Requirement already satisfied: python-dateutil>=2.7 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from matplotlib==3.6.2->lvmdrp==0.1.1.dev0) (2.8.2)
+Requirement already satisfied: cycler>=0.10 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from matplotlib==3.6.2->lvmdrp==0.1.1.dev0) (0.11.0)
+Requirement already satisfied: contourpy>=1.0.1 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from matplotlib==3.6.2->lvmdrp==0.1.1.dev0) (1.0.7)
+Requirement already satisfied: kiwisolver>=1.0.1 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from matplotlib==3.6.2->lvmdrp==0.1.1.dev0) (1.4.4)
+Requirement already satisfied: fonttools>=4.22.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from matplotlib==3.6.2->lvmdrp==0.1.1.dev0) (4.39.4)
+Requirement already satisfied: pyparsing>=2.2.1 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from matplotlib==3.6.2->lvmdrp==0.1.1.dev0) (3.0.9)
+Requirement already satisfied: pillow>=6.2.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from matplotlib==3.6.2->lvmdrp==0.1.1.dev0) (9.5.0)
+Requirement already satisfied: pytz>=2020.1 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from pandas==1.5.3->lvmdrp==0.1.1.dev0) (2023.3)
+Requirement already satisfied: ptyprocess>=0.5 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from pexpect==4.8.0->lvmdrp==0.1.1.dev0) (0.7.0)
+Requirement already satisfied: synphot>=1.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from sbpy==0.3.0->lvmdrp==0.1.1.dev0) (1.2.0)
+Requirement already satisfied: ads>=0.12 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from sbpy==0.3.0->lvmdrp==0.1.1.dev0) (0.12.3)
+Requirement already satisfied: setuptools in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from skycalc_cli==1.4->lvmdrp==0.1.1.dev0) (66.0.0)
+Requirement already satisfied: certifi>=2017.4.17 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from skyfield==1.45->lvmdrp==0.1.1.dev0) (2023.5.7)
+Requirement already satisfied: sgp4>=2.2 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from skyfield==1.45->lvmdrp==0.1.1.dev0) (2.22)
+Requirement already satisfied: jplephem>=2.13 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from skyfield==1.45->lvmdrp==0.1.1.dev0) (2.18)
+Requirement already satisfied: numexpr>=2.6.2 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from tables==3.8.0->lvmdrp==0.1.1.dev0) (2.8.4)
+Requirement already satisfied: cython>=0.29.21 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from tables==3.8.0->lvmdrp==0.1.1.dev0) (0.29.34)
+Requirement already satisfied: blosc2~=2.0.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from tables==3.8.0->lvmdrp==0.1.1.dev0) (2.0.0)
+Requirement already satisfied: py-cpuinfo in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from tables==3.8.0->lvmdrp==0.1.1.dev0) (9.0.0)
+Requirement already satisfied: typing-extensions in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from cloup>=2.0->lvmdrp==0.1.1.dev0) (4.5.0)
+Requirement already satisfied: MarkupSafe>=2.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jinja2>=2.4->lvmdrp==0.1.1.dev0) (2.1.2)
+Requirement already satisfied: importlib-resources>=1.4.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jsonschema!=2.5.0,>=2.4->lvmdrp==0.1.1.dev0) (5.12.0)
+Requirement already satisfied: attrs>=17.4.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jsonschema!=2.5.0,>=2.4->lvmdrp==0.1.1.dev0) (23.1.0)
+Requirement already satisfied: pkgutil-resolve-name>=1.3.10 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jsonschema!=2.5.0,>=2.4->lvmdrp==0.1.1.dev0) (1.3.10)
+Requirement already satisfied: pyrsistent!=0.17.0,!=0.17.1,!=0.17.2,>=0.14.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jsonschema!=2.5.0,>=2.4->lvmdrp==0.1.1.dev0) (0.19.3)
+Requirement already satisfied: jaraco.classes in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from keyring>=4.0->lvmdrp==0.1.1.dev0) (3.2.3)
+Requirement already satisfied: importlib-metadata>=4.11.4 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from keyring>=4.0->lvmdrp==0.1.1.dev0) (6.6.0)
+Requirement already satisfied: SecretStorage>=3.2 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from keyring>=4.0->lvmdrp==0.1.1.dev0) (3.3.3)
+Requirement already satisfied: jeepney>=0.4.2 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from keyring>=4.0->lvmdrp==0.1.1.dev0) (0.8.0)
+Requirement already satisfied: six>=1.11 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from sdss-access>=3.0->lvmdrp==0.1.1.dev0) (1.16.0)
+Collecting configparser>=3.5.0
+  Downloading configparser-6.0.0-py3-none-any.whl (19 kB)
+Requirement already satisfied: invoke<2.0.0,>=1.3.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from sdsstools>=1.0->lvmdrp==0.1.1.dev0) (1.7.3)
+Requirement already satisfied: daemonocle<2.0.0,>=1.0.2 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from sdsstools>=1.0->lvmdrp==0.1.1.dev0) (1.2.3)
+Requirement already satisfied: healpy>=1.12.8 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmsurveysim@ git+https://github.com/sdss/lvmsurveysim.git@0.8.3->lvmdrp==0.1.1.dev0) (1.16.2)
+Requirement already satisfied: astropy_healpix>=0.6 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmsurveysim@ git+https://github.com/sdss/lvmsurveysim.git@0.8.3->lvmdrp==0.1.1.dev0) (0.7)
+Requirement already satisfied: astral>=1.10.1 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmsurveysim@ git+https://github.com/sdss/lvmsurveysim.git@0.8.3->lvmdrp==0.1.1.dev0) (2.2)
+Requirement already satisfied: spherical_geometry>=1.2.18 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmsurveysim@ git+https://github.com/sdss/lvmsurveysim.git@0.8.3->lvmdrp==0.1.1.dev0) (1.2.23)
+Requirement already satisfied: mock in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from ads>=0.12->sbpy==0.3.0->lvmdrp==0.1.1.dev0) (5.0.2)
+Requirement already satisfied: werkzeug in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from ads>=0.12->sbpy==0.3.0->lvmdrp==0.1.1.dev0) (2.3.4)
+Requirement already satisfied: httpretty==0.8.10 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from ads>=0.12->sbpy==0.3.0->lvmdrp==0.1.1.dev0) (0.8.10)
+Requirement already satisfied: soupsieve>1.2 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from beautifulsoup4>=4.3.2->astroquery==0.4.6->lvmdrp==0.1.1.dev0) (2.4.1)
+Requirement already satisfied: msgpack in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from blosc2~=2.0.0->tables==3.8.0->lvmdrp==0.1.1.dev0) (1.0.5)
+Requirement already satisfied: psutil in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from daemonocle<2.0.0,>=1.0.2->sdsstools>=1.0->lvmdrp==0.1.1.dev0) (5.9.5)
+Requirement already satisfied: webencodings in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from html5lib>=0.999->astroquery==0.4.6->lvmdrp==0.1.1.dev0) (0.5.1)
+Requirement already satisfied: zipp>=0.5 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from importlib-metadata>=4.11.4->keyring>=4.0->lvmdrp==0.1.1.dev0) (3.15.0)
+Requirement already satisfied: parso<0.9.0,>=0.8.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jedi>=0.16->ipython==8.10.0->lvmdrp==0.1.1.dev0) (0.8.3)
+Requirement already satisfied: prometheus-client in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (0.16.0)
+Requirement already satisfied: pyzmq>=24 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (25.0.2)
+Requirement already satisfied: argon2-cffi in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (21.3.0)
+Requirement already satisfied: send2trash in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (1.8.2)
+Requirement already satisfied: terminado>=0.8.3 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (0.17.1)
+Requirement already satisfied: jupyter-client>=7.4.4 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (8.2.0)
+Requirement already satisfied: nbformat>=5.3.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (5.8.0)
+Requirement already satisfied: anyio>=3.1.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (3.6.2)
+Requirement already satisfied: jupyter-server-terminals in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (0.4.4)
+Requirement already satisfied: websocket-client in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (1.5.1)
+Requirement already satisfied: jupyter-events>=0.4.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (0.6.3)
+Requirement already satisfied: platformdirs>=2.5 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyter-core->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (3.5.1)
+Requirement already satisfied: ypy-websocket<0.9.0,>=0.8.2 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyter-server-ydoc<0.7.0,>=0.6.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (0.8.2)
+Requirement already satisfied: jupyter-server-fileid<1,>=0.6.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyter-server-ydoc<0.7.0,>=0.6.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (0.9.0)
+Requirement already satisfied: y-py<0.6.0,>=0.5.3 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyter-ydoc~=0.2.2->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (0.5.9)
+Requirement already satisfied: babel>=2.10 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyterlab-server~=2.19->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (2.12.1)
+Requirement already satisfied: json5>=0.9.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyterlab-server~=2.19->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (0.9.14)
+Requirement already satisfied: jupyterlab-pygments in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from nbconvert->jupyter==1.0.0->lvmdrp==0.1.1.dev0) (0.2.2)
+Requirement already satisfied: nbclient>=0.5.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from nbconvert->jupyter==1.0.0->lvmdrp==0.1.1.dev0) (0.7.4)
+Requirement already satisfied: defusedxml in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from nbconvert->jupyter==1.0.0->lvmdrp==0.1.1.dev0) (0.7.1)
+Requirement already satisfied: tinycss2 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from nbconvert->jupyter==1.0.0->lvmdrp==0.1.1.dev0) (1.2.1)
+Requirement already satisfied: pandocfilters>=1.4.1 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from nbconvert->jupyter==1.0.0->lvmdrp==0.1.1.dev0) (1.5.0)
+Requirement already satisfied: mistune<3,>=2.0.3 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from nbconvert->jupyter==1.0.0->lvmdrp==0.1.1.dev0) (2.0.5)
+Requirement already satisfied: bleach in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from nbconvert->jupyter==1.0.0->lvmdrp==0.1.1.dev0) (6.0.0)
+Requirement already satisfied: nest-asyncio>=1.5 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from notebook->jupyter==1.0.0->lvmdrp==0.1.1.dev0) (1.5.6)
+Requirement already satisfied: ipython-genutils in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from notebook->jupyter==1.0.0->lvmdrp==0.1.1.dev0) (0.2.0)
+Requirement already satisfied: notebook-shim>=0.2.3 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from nbclassic->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (0.2.3)
+Requirement already satisfied: wcwidth in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from prompt-toolkit<3.1.0,>=3.0.30->ipython==8.10.0->lvmdrp==0.1.1.dev0) (0.2.6)
+Collecting dask[array]>=2020
+  Downloading dask-2023.5.0-py3-none-any.whl (1.2 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.2/1.2 MB 3.1 MB/s eta 0:00:00
+Collecting cloudpickle
+  Downloading cloudpickle-2.2.1-py3-none-any.whl (25 kB)
+Collecting fsspec
+  Downloading fsspec-2023.6.0-py3-none-any.whl (163 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 163.8/163.8 kB 3.5 MB/s eta 0:00:00
+Collecting zarr
+  Downloading zarr-2.16.0-py3-none-any.whl (206 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 206.5/206.5 kB 7.9 MB/s eta 0:00:00
+Requirement already satisfied: idna<4,>=2.5 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from requests>=2.4.3->astroquery==0.4.6->lvmdrp==0.1.1.dev0) (3.4)
+Requirement already satisfied: urllib3<3,>=1.21.1 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from requests>=2.4.3->astroquery==0.4.6->lvmdrp==0.1.1.dev0) (2.0.2)
+Requirement already satisfied: charset-normalizer<4,>=2 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from requests>=2.4.3->astroquery==0.4.6->lvmdrp==0.1.1.dev0) (3.1.0)
+Requirement already satisfied: cryptography>=2.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from SecretStorage>=3.2->keyring>=4.0->lvmdrp==0.1.1.dev0) (40.0.2)
+Requirement already satisfied: comm>=0.1.1 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from ipykernel->jupyter==1.0.0->lvmdrp==0.1.1.dev0) (0.1.3)
+Requirement already satisfied: debugpy>=1.6.5 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from ipykernel->jupyter==1.0.0->lvmdrp==0.1.1.dev0) (1.6.7)
+Requirement already satisfied: jupyterlab-widgets~=3.0.7 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from ipywidgets->jupyter==1.0.0->lvmdrp==0.1.1.dev0) (3.0.7)
+Requirement already satisfied: widgetsnbextension~=4.0.7 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from ipywidgets->jupyter==1.0.0->lvmdrp==0.1.1.dev0) (4.0.7)
+Requirement already satisfied: more-itertools in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jaraco.classes->keyring>=4.0->lvmdrp==0.1.1.dev0) (9.1.0)
+Requirement already satisfied: qtpy>=2.0.1 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from qtconsole->jupyter==1.0.0->lvmdrp==0.1.1.dev0) (2.3.1)
+Collecting lazy_loader>=0.2
+  Downloading lazy_loader-0.3-py3-none-any.whl (9.1 kB)
+Collecting networkx>=2.8
+  Downloading networkx-3.1-py3-none-any.whl (2.1 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.1/2.1 MB 4.5 MB/s eta 0:00:00
+Collecting imageio>=2.27
+  Downloading imageio-2.31.1-py3-none-any.whl (313 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 313.2/313.2 kB 4.8 MB/s eta 0:00:00
+Collecting PyWavelets>=1.1.1
+  Downloading PyWavelets-1.4.1-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (6.9 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 6.9/6.9 MB 2.2 MB/s eta 0:00:00
+Collecting tifffile>=2022.8.12
+  Downloading tifffile-2023.7.10-py3-none-any.whl (220 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 220.9/220.9 kB 5.5 MB/s eta 0:00:00
+Requirement already satisfied: pure-eval in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from stack-data->ipython==8.10.0->lvmdrp==0.1.1.dev0) (0.2.2)
+Requirement already satisfied: executing>=1.2.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from stack-data->ipython==8.10.0->lvmdrp==0.1.1.dev0) (1.2.0)
+Requirement already satisfied: asttokens>=2.1.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from stack-data->ipython==8.10.0->lvmdrp==0.1.1.dev0) (2.2.1)
+Requirement already satisfied: sniffio>=1.1 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from anyio>=3.1.0->jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (1.3.0)
+Requirement already satisfied: cffi>=1.12 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from cryptography>=2.0->SecretStorage>=3.2->keyring>=4.0->lvmdrp==0.1.1.dev0) (1.15.1)
+Collecting toolz>=0.10.0
+  Downloading toolz-0.12.0-py3-none-any.whl (55 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 55.8/55.8 kB 4.0 MB/s eta 0:00:00
+Collecting partd>=1.2.0
+  Downloading partd-1.4.0-py3-none-any.whl (18 kB)
+Requirement already satisfied: rfc3986-validator>=0.1.1 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyter-events>=0.4.0->jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (0.1.1)
+Requirement already satisfied: python-json-logger>=2.0.4 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyter-events>=0.4.0->jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (2.0.7)
+Requirement already satisfied: rfc3339-validator in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyter-events>=0.4.0->jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (0.1.4)
+Requirement already satisfied: fastjsonschema in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from nbformat>=5.3.0->jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (2.16.3)
+Requirement already satisfied: aiosqlite<1,>=0.17.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from ypy-websocket<0.9.0,>=0.8.2->jupyter-server-ydoc<0.7.0,>=0.6.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (0.19.0)
+Requirement already satisfied: aiofiles<23,>=22.1.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from ypy-websocket<0.9.0,>=0.8.2->jupyter-server-ydoc<0.7.0,>=0.6.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (22.1.0)
+Requirement already satisfied: argon2-cffi-bindings in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from argon2-cffi->jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (21.2.0)
+Collecting asciitree
+  Downloading asciitree-0.3.3.tar.gz (4.0 kB)
+  Preparing metadata (setup.py): started
+  Preparing metadata (setup.py): finished with status 'done'
+Collecting fasteners
+  Downloading fasteners-0.18-py3-none-any.whl (18 kB)
+Collecting numcodecs>=0.10.0
+  Downloading numcodecs-0.11.0-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (6.7 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 6.7/6.7 MB 4.9 MB/s eta 0:00:00
+Requirement already satisfied: pycparser in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from cffi>=1.12->cryptography>=2.0->SecretStorage>=3.2->keyring>=4.0->lvmdrp==0.1.1.dev0) (2.21)
+Requirement already satisfied: webcolors>=1.11 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jsonschema!=2.5.0,>=2.4->lvmdrp==0.1.1.dev0) (1.13)
+Requirement already satisfied: fqdn in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jsonschema!=2.5.0,>=2.4->lvmdrp==0.1.1.dev0) (1.5.1)
+Requirement already satisfied: uri-template in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jsonschema!=2.5.0,>=2.4->lvmdrp==0.1.1.dev0) (1.2.0)
+Requirement already satisfied: jsonpointer>1.13 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jsonschema!=2.5.0,>=2.4->lvmdrp==0.1.1.dev0) (2.3)
+Requirement already satisfied: isoduration in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jsonschema!=2.5.0,>=2.4->lvmdrp==0.1.1.dev0) (20.11.0)
+Collecting locket
+  Downloading locket-1.0.0-py2.py3-none-any.whl (4.4 kB)
+Requirement already satisfied: arrow>=0.15.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from isoduration->jsonschema!=2.5.0,>=2.4->lvmdrp==0.1.1.dev0) (1.2.3)
+Building wheels for collected packages: lvmdrp, lvmsurveysim, asciitree
+  Building wheel for lvmdrp (setup.py): started
+  Building wheel for lvmdrp (setup.py): finished with status 'done'
+  Created wheel for lvmdrp: filename=lvmdrp-0.1.1.dev0-py3-none-any.whl size=342997 sha256=4b63a136e011d241ffce52b359a755be36803a11e1cba08a4a3afe8177d21d6b
+  Stored in directory: /tmp/pip-ephem-wheel-cache-n4b7d78l/wheels/dc/93/cf/0f83fc9426302dd46e72a85858521d0c96fd914636a8bad93d
+  Building wheel for lvmsurveysim (setup.py): started
+  Building wheel for lvmsurveysim (setup.py): finished with status 'done'
+  Created wheel for lvmsurveysim: filename=lvmsurveysim-0.8.3-py3-none-any.whl size=75516 sha256=e86e96a4baf1b9ff800d6969bc59979ca01d143e71863e7e1dfa52bd17a067ea
+  Stored in directory: /tmp/pip-ephem-wheel-cache-n4b7d78l/wheels/9e/0f/b0/de718cb014eddecac1fbeee6b9ceccd056ef7feb6654d9ff3d
+  Building wheel for asciitree (setup.py): started
+  Building wheel for asciitree (setup.py): finished with status 'done'
+  Created wheel for asciitree: filename=asciitree-0.3.3-py3-none-any.whl size=5032 sha256=e016bbe1fcc4b4e17e0bd1a2b61056cbd9be5b7bfd524a117e0c69233088c163
+  Stored in directory: /tmp/pip-ephem-wheel-cache-n4b7d78l/wheels/a3/d7/75/19cd0d2a893cad4bb0b2b16dd572ad2916d19c0d5ee9612511
+Successfully built lvmdrp lvmsurveysim asciitree
+Installing collected packages: asciitree, toolz, tifffile, scipy, PyWavelets, numcodecs, networkx, locket, lazy_loader, imageio, fsspec, fasteners, configparser, cloup, cloudpickle, bottleneck, zarr, scikit-image, partd, sdss-tree, dask, astroscrappy, sdss-access, lvmsurveysim, reproject, ccdproc, lvmdrp
+  Attempting uninstall: scipy
+    Found existing installation: scipy 1.10.0
+    Uninstalling scipy-1.10.0:
+      Successfully uninstalled scipy-1.10.0
+  Attempting uninstall: lvmsurveysim
+    Found existing installation: lvmsurveysim 0.9.0a0
+    Uninstalling lvmsurveysim-0.9.0a0:
+      Successfully uninstalled lvmsurveysim-0.9.0a0
+  Attempting uninstall: lvmdrp
+    Found existing installation: lvmdrp 0.1.0
+    Uninstalling lvmdrp-0.1.0:
+      Successfully uninstalled lvmdrp-0.1.0
+Successfully installed PyWavelets-1.4.1 asciitree-0.3.3 astroscrappy-1.1.0 bottleneck-1.3.7 ccdproc-2.4.0 cloudpickle-2.2.1 cloup-3.0.0 configparser-6.0.0 dask-2023.5.0 fasteners-0.18 fsspec-2023.6.0 imageio-2.31.1 lazy_loader-0.3 locket-1.0.0 lvmdrp-0.1.1.dev0 lvmsurveysim-0.8.4 networkx-3.1 numcodecs-0.11.0 partd-1.4.0 reproject-0.11.0 scikit-image-0.21.0 scipy-1.9.1 sdss-access-3.0.0 sdss-tree-4.0.2 tifffile-2023.7.10 toolz-0.12.0 zarr-2.16.0
