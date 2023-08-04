@@ -1,263 +1,708 @@
 Processing /home/sanchez/sda2/code/python/lvmdrp
   Preparing metadata (setup.py): started
   Preparing metadata (setup.py): finished with status 'done'
-Collecting lvmsurveysim@ git+https://github.com/sdss/lvmsurveysim.git@0.8.3
-  Cloning https://github.com/sdss/lvmsurveysim.git (to revision 0.8.3) to /tmp/pip-install-cptjlchz/lvmsurveysim_cdacdc1f84b141f6bf8e080ac696358c
-  Running command git clone --filter=blob:none --quiet https://github.com/sdss/lvmsurveysim.git /tmp/pip-install-cptjlchz/lvmsurveysim_cdacdc1f84b141f6bf8e080ac696358c
+Collecting lvmsurveysim@ git+https://github.com/sdss/lvmsurveysim.git@0.8.3 (from lvmdrp==0.1.1.dev0)
+  Cloning https://github.com/sdss/lvmsurveysim.git (to revision 0.8.3) to /tmp/pip-install-_n20gqok/lvmsurveysim_5445e5358f204996b27434522a80f2c0
+  Running command git clone --filter=blob:none --quiet https://github.com/sdss/lvmsurveysim.git /tmp/pip-install-_n20gqok/lvmsurveysim_5445e5358f204996b27434522a80f2c0
   Running command git checkout -q 0884e783c1fb8b71e6cee5cdd8a0bcdcba00440a
   Resolved https://github.com/sdss/lvmsurveysim.git to commit 0884e783c1fb8b71e6cee5cdd8a0bcdcba00440a
   Preparing metadata (setup.py): started
   Preparing metadata (setup.py): finished with status 'done'
-Requirement already satisfied: astropy==5.2 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmdrp==0.1.1.dev0) (5.2)
-Requirement already satisfied: dust_extinction==1.1 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmdrp==0.1.1.dev0) (1.1)
-Requirement already satisfied: matplotlib==3.6.2 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmdrp==0.1.1.dev0) (3.6.2)
-Requirement already satisfied: numpy==1.24.1 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmdrp==0.1.1.dev0) (1.24.1)
-Requirement already satisfied: peewee==3.15.4 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmdrp==0.1.1.dev0) (3.15.4)
-Requirement already satisfied: pexpect==4.8.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmdrp==0.1.1.dev0) (4.8.0)
-Requirement already satisfied: pydl==0.7.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmdrp==0.1.1.dev0) (0.7.0)
-Collecting scipy==1.9.1
+Collecting astropy==5.2 (from lvmdrp==0.1.1.dev0)
+  Downloading astropy-5.2-cp38-cp38-manylinux_2_12_x86_64.manylinux2010_x86_64.whl (11.4 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 11.4/11.4 MB 51.3 MB/s eta 0:00:00
+Collecting dust_extinction==1.1 (from lvmdrp==0.1.1.dev0)
+  Downloading dust_extinction-1.1.tar.gz (445 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 445.1/445.1 kB 164.2 MB/s eta 0:00:00
+  Installing build dependencies: started
+  Installing build dependencies: finished with status 'done'
+  Getting requirements to build wheel: started
+  Getting requirements to build wheel: finished with status 'done'
+  Preparing metadata (pyproject.toml): started
+  Preparing metadata (pyproject.toml): finished with status 'done'
+Collecting matplotlib==3.6.2 (from lvmdrp==0.1.1.dev0)
+  Downloading matplotlib-3.6.2-cp38-cp38-manylinux_2_12_x86_64.manylinux2010_x86_64.whl (9.4 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 9.4/9.4 MB 68.1 MB/s eta 0:00:00
+Collecting numpy==1.24.1 (from lvmdrp==0.1.1.dev0)
+  Downloading numpy-1.24.1-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (17.3 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 17.3/17.3 MB 76.2 MB/s eta 0:00:00
+Collecting peewee==3.15.4 (from lvmdrp==0.1.1.dev0)
+  Downloading peewee-3.15.4.tar.gz (860 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 860.9/860.9 kB 123.7 MB/s eta 0:00:00
+  Preparing metadata (setup.py): started
+  Preparing metadata (setup.py): finished with status 'done'
+Collecting pexpect==4.8.0 (from lvmdrp==0.1.1.dev0)
+  Downloading pexpect-4.8.0-py2.py3-none-any.whl (59 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 59.0/59.0 kB 145.2 MB/s eta 0:00:00
+Collecting pydl==0.7.0 (from lvmdrp==0.1.1.dev0)
+  Downloading pydl-0.7.0.tar.gz (798 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 798.8/798.8 kB 110.6 MB/s eta 0:00:00
+  Preparing metadata (setup.py): started
+  Preparing metadata (setup.py): still running...
+  Preparing metadata (setup.py): finished with status 'done'
+Collecting scipy==1.9.1 (from lvmdrp==0.1.1.dev0)
   Downloading scipy-1.9.1-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (43.4 MB)
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 43.4/43.4 MB 3.0 MB/s eta 0:00:00
-Requirement already satisfied: skycalc_cli==1.4 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmdrp==0.1.1.dev0) (1.4)
-Requirement already satisfied: skyfield==1.45 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmdrp==0.1.1.dev0) (1.45)
-Requirement already satisfied: tqdm==4.64.1 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmdrp==0.1.1.dev0) (4.64.1)
-Requirement already satisfied: tornado>=4 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmdrp==0.1.1.dev0) (6.3.2)
-Requirement already satisfied: jsonschema!=2.5.0,>=2.4 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmdrp==0.1.1.dev0) (4.17.3)
-Requirement already satisfied: entrypoints>=0.2.2 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmdrp==0.1.1.dev0) (0.4)
-Requirement already satisfied: jinja2>=2.4 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmdrp==0.1.1.dev0) (3.1.2)
-Requirement already satisfied: jupyter==1.0.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmdrp==0.1.1.dev0) (1.0.0)
-Requirement already satisfied: jupyterlab==3.6.1 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmdrp==0.1.1.dev0) (3.6.1)
-Requirement already satisfied: ipython==8.10.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmdrp==0.1.1.dev0) (8.10.0)
-Requirement already satisfied: pandas==1.5.3 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmdrp==0.1.1.dev0) (1.5.3)
-Requirement already satisfied: astroquery==0.4.6 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmdrp==0.1.1.dev0) (0.4.6)
-Requirement already satisfied: keyring>=4.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmdrp==0.1.1.dev0) (23.13.1)
-Requirement already satisfied: sbpy==0.3.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmdrp==0.1.1.dev0) (0.3.0)
-Requirement already satisfied: sdsstools>=1.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmdrp==0.1.1.dev0) (1.0.2)
-Collecting sdss-tree>=4.0
-  Downloading sdss_tree-4.0.2-py2.py3-none-any.whl (49 kB)
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 49.8/49.8 kB 13.5 MB/s eta 0:00:00
-Collecting sdss-access>=3.0
-  Downloading sdss_access-3.0.0-py2.py3-none-any.whl (37 kB)
-Requirement already satisfied: click>=8.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmdrp==0.1.1.dev0) (8.1.3)
-Collecting cloup>=2.0
-  Downloading cloup-3.0.0-py2.py3-none-any.whl (53 kB)
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 53.9/53.9 kB 4.6 MB/s eta 0:00:00
-Collecting ccdproc==2.4.0
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 43.4/43.4 MB 78.5 MB/s eta 0:00:00
+Collecting skycalc_cli==1.4 (from lvmdrp==0.1.1.dev0)
+  Downloading skycalc_cli-1.4-py2.py3-none-any.whl (9.3 kB)
+Collecting skyfield==1.45 (from lvmdrp==0.1.1.dev0)
+  Downloading skyfield-1.45-py3-none-any.whl (442 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 442.5/442.5 kB 133.1 MB/s eta 0:00:00
+Collecting tqdm==4.64.1 (from lvmdrp==0.1.1.dev0)
+  Downloading tqdm-4.64.1-py2.py3-none-any.whl (78 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 78.5/78.5 kB 184.3 MB/s eta 0:00:00
+Collecting tornado>=4 (from lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for tornado>=4 from https://files.pythonhosted.org/packages/31/51/894f260c1380853cc268f661fe599a4523a47d07e867386abb58f1f11278/tornado-6.3.2-cp38-abi3-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata
+  Downloading tornado-6.3.2-cp38-abi3-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (2.5 kB)
+Collecting jsonschema!=2.5.0,>=2.4 (from lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for jsonschema!=2.5.0,>=2.4 from https://files.pythonhosted.org/packages/b5/5c/ae834dd4160bbe9a4feb6e1f3e6189ab7772408823e294bd12eb6b4b4f44/jsonschema-4.18.6-py3-none-any.whl.metadata
+  Downloading jsonschema-4.18.6-py3-none-any.whl.metadata (7.8 kB)
+Collecting entrypoints>=0.2.2 (from lvmdrp==0.1.1.dev0)
+  Downloading entrypoints-0.4-py3-none-any.whl (5.3 kB)
+Collecting jinja2>=2.4 (from lvmdrp==0.1.1.dev0)
+  Downloading Jinja2-3.1.2-py3-none-any.whl (133 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 133.1/133.1 kB 178.5 MB/s eta 0:00:00
+Collecting jupyter==1.0.0 (from lvmdrp==0.1.1.dev0)
+  Downloading jupyter-1.0.0-py2.py3-none-any.whl (2.7 kB)
+Collecting jupyterlab==3.6.1 (from lvmdrp==0.1.1.dev0)
+  Downloading jupyterlab-3.6.1-py3-none-any.whl (8.9 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 8.9/8.9 MB 81.3 MB/s eta 0:00:00
+Collecting ipython==8.10.0 (from lvmdrp==0.1.1.dev0)
+  Downloading ipython-8.10.0-py3-none-any.whl (784 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 784.3/784.3 kB 115.9 MB/s eta 0:00:00
+Collecting pandas==1.5.3 (from lvmdrp==0.1.1.dev0)
+  Downloading pandas-1.5.3-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (12.2 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 12.2/12.2 MB 79.0 MB/s eta 0:00:00
+Collecting astroquery==0.4.6 (from lvmdrp==0.1.1.dev0)
+  Downloading astroquery-0.4.6-py3-none-any.whl (4.5 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 4.5/4.5 MB 87.6 MB/s eta 0:00:00
+Collecting keyring>=4.0 (from lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for keyring>=4.0 from https://files.pythonhosted.org/packages/0e/8f/5772801169cf62e8232721034f91f81e33b0cfa6e51d3bf6ff65c503af2a/keyring-24.2.0-py3-none-any.whl.metadata
+  Downloading keyring-24.2.0-py3-none-any.whl.metadata (20 kB)
+Collecting sbpy==0.3.0 (from lvmdrp==0.1.1.dev0)
+  Downloading sbpy-0.3.0.tar.gz (1.2 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.2/1.2 MB 122.1 MB/s eta 0:00:00
+  Installing build dependencies: started
+  Installing build dependencies: finished with status 'done'
+  Getting requirements to build wheel: started
+  Getting requirements to build wheel: finished with status 'done'
+  Preparing metadata (pyproject.toml): started
+  Preparing metadata (pyproject.toml): finished with status 'done'
+Collecting sdsstools>=1.0 (from lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for sdsstools>=1.0 from https://files.pythonhosted.org/packages/fe/37/1cece991635df1f646e13493500754e82a6f45e3e3308db5d44d164303d0/sdsstools-1.1.0-py3-none-any.whl.metadata
+  Downloading sdsstools-1.1.0-py3-none-any.whl.metadata (12 kB)
+Collecting sdss-tree>=4.0 (from lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for sdss-tree>=4.0 from https://files.pythonhosted.org/packages/3c/e4/6111b5375135a72a125be953a8c638620a809bc036b7c763a9fb6605faab/sdss_tree-4.0.2-py2.py3-none-any.whl.metadata
+  Downloading sdss_tree-4.0.2-py2.py3-none-any.whl.metadata (5.6 kB)
+Collecting sdss-access>=3.0 (from lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for sdss-access>=3.0 from https://files.pythonhosted.org/packages/aa/32/171f30ae7edb895f677edd6385f73aba880a372cd959f9269d701e2434df/sdss_access-3.0.0-py2.py3-none-any.whl.metadata
+  Downloading sdss_access-3.0.0-py2.py3-none-any.whl.metadata (5.0 kB)
+Collecting click>=8.0 (from lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for click>=8.0 from https://files.pythonhosted.org/packages/1a/70/e63223f8116931d365993d4a6b7ef653a4d920b41d03de7c59499962821f/click-8.1.6-py3-none-any.whl.metadata
+  Downloading click-8.1.6-py3-none-any.whl.metadata (3.0 kB)
+Collecting cloup>=2.0 (from lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for cloup>=2.0 from https://files.pythonhosted.org/packages/b3/04/58445385ec8de1eec847355af21a8738835e515ad3a5cda30ab82d605679/cloup-3.0.0-py2.py3-none-any.whl.metadata
+  Downloading cloup-3.0.0-py2.py3-none-any.whl.metadata (7.2 kB)
+Collecting ccdproc==2.4.0 (from lvmdrp==0.1.1.dev0)
   Downloading ccdproc-2.4.0-py3-none-any.whl (355 kB)
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 355.4/355.4 kB 5.9 MB/s eta 0:00:00
-Collecting bottleneck==1.3.7
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 355.4/355.4 kB 170.5 MB/s eta 0:00:00
+Collecting bottleneck==1.3.7 (from lvmdrp==0.1.1.dev0)
   Downloading Bottleneck-1.3.7-cp38-cp38-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl (355 kB)
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 355.2/355.2 kB 4.1 MB/s eta 0:00:00
-Requirement already satisfied: h5py==3.8.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmdrp==0.1.1.dev0) (3.8.0)
-Requirement already satisfied: tables==3.8.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmdrp==0.1.1.dev0) (3.8.0)
-Requirement already satisfied: PyYAML>=3.13 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from astropy==5.2->lvmdrp==0.1.1.dev0) (6.0)
-Requirement already satisfied: packaging>=19.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from astropy==5.2->lvmdrp==0.1.1.dev0) (23.1)
-Requirement already satisfied: pyerfa>=2.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from astropy==5.2->lvmdrp==0.1.1.dev0) (2.0.0.3)
-Requirement already satisfied: beautifulsoup4>=4.3.2 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from astroquery==0.4.6->lvmdrp==0.1.1.dev0) (4.12.2)
-Requirement already satisfied: html5lib>=0.999 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from astroquery==0.4.6->lvmdrp==0.1.1.dev0) (1.1)
-Requirement already satisfied: requests>=2.4.3 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from astroquery==0.4.6->lvmdrp==0.1.1.dev0) (2.30.0)
-Requirement already satisfied: pyvo>=1.1 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from astroquery==0.4.6->lvmdrp==0.1.1.dev0) (1.4.1)
-Collecting reproject>=0.7
-  Downloading reproject-0.11.0-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (1.5 MB)
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.5/1.5 MB 2.7 MB/s eta 0:00:00
-Collecting scikit-image
-  Downloading scikit_image-0.21.0-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (13.9 MB)
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 13.9/13.9 MB 3.0 MB/s eta 0:00:00
-Collecting astroscrappy>=1.0.8
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 355.2/355.2 kB 171.6 MB/s eta 0:00:00
+Collecting h5py==3.8.0 (from lvmdrp==0.1.1.dev0)
+  Downloading h5py-3.8.0-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (4.7 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 4.7/4.7 MB 87.3 MB/s eta 0:00:00
+Collecting tables==3.8.0 (from lvmdrp==0.1.1.dev0)
+  Downloading tables-3.8.0-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (6.5 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 6.5/6.5 MB 42.6 MB/s eta 0:00:00
+Collecting pyerfa>=2.0 (from astropy==5.2->lvmdrp==0.1.1.dev0)
+  Downloading pyerfa-2.0.0.3-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (749 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 749.7/749.7 kB 125.5 MB/s eta 0:00:00
+Collecting PyYAML>=3.13 (from astropy==5.2->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for PyYAML>=3.13 from https://files.pythonhosted.org/packages/c8/6b/6600ac24725c7388255b2f5add93f91e58a5d7efaf4af244fdbcc11a541b/PyYAML-6.0.1-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata
+  Downloading PyYAML-6.0.1-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (2.1 kB)
+Collecting packaging>=19.0 (from astropy==5.2->lvmdrp==0.1.1.dev0)
+  Downloading packaging-23.1-py3-none-any.whl (48 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 48.9/48.9 kB 159.3 MB/s eta 0:00:00
+Collecting requests>=2.4.3 (from astroquery==0.4.6->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for requests>=2.4.3 from https://files.pythonhosted.org/packages/70/8e/0e2d847013cb52cd35b38c009bb167a1a26b2ce6cd6965bf26b47bc0bf44/requests-2.31.0-py3-none-any.whl.metadata
+  Downloading requests-2.31.0-py3-none-any.whl.metadata (4.6 kB)
+Collecting beautifulsoup4>=4.3.2 (from astroquery==0.4.6->lvmdrp==0.1.1.dev0)
+  Downloading beautifulsoup4-4.12.2-py3-none-any.whl (142 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 143.0/143.0 kB 186.5 MB/s eta 0:00:00
+Collecting html5lib>=0.999 (from astroquery==0.4.6->lvmdrp==0.1.1.dev0)
+  Downloading html5lib-1.1-py2.py3-none-any.whl (112 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 112.2/112.2 kB 156.6 MB/s eta 0:00:00
+Collecting pyvo>=1.1 (from astroquery==0.4.6->lvmdrp==0.1.1.dev0)
+  Downloading pyvo-1.4.1-py3-none-any.whl (887 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 887.9/887.9 kB 109.4 MB/s eta 0:00:00
+Collecting astroscrappy>=1.0.8 (from ccdproc==2.4.0->lvmdrp==0.1.1.dev0)
   Downloading astroscrappy-1.1.0-cp38-cp38-manylinux_2_12_x86_64.manylinux2010_x86_64.whl (1.4 MB)
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.4/1.4 MB 4.1 MB/s eta 0:00:00
-Requirement already satisfied: decorator in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from ipython==8.10.0->lvmdrp==0.1.1.dev0) (5.1.1)
-Requirement already satisfied: stack-data in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from ipython==8.10.0->lvmdrp==0.1.1.dev0) (0.6.2)
-Requirement already satisfied: jedi>=0.16 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from ipython==8.10.0->lvmdrp==0.1.1.dev0) (0.18.2)
-Requirement already satisfied: traitlets>=5 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from ipython==8.10.0->lvmdrp==0.1.1.dev0) (5.9.0)
-Requirement already satisfied: matplotlib-inline in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from ipython==8.10.0->lvmdrp==0.1.1.dev0) (0.1.6)
-Requirement already satisfied: pickleshare in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from ipython==8.10.0->lvmdrp==0.1.1.dev0) (0.7.5)
-Requirement already satisfied: pygments>=2.4.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from ipython==8.10.0->lvmdrp==0.1.1.dev0) (2.15.1)
-Requirement already satisfied: backcall in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from ipython==8.10.0->lvmdrp==0.1.1.dev0) (0.2.0)
-Requirement already satisfied: prompt-toolkit<3.1.0,>=3.0.30 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from ipython==8.10.0->lvmdrp==0.1.1.dev0) (3.0.38)
-Requirement already satisfied: ipywidgets in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyter==1.0.0->lvmdrp==0.1.1.dev0) (8.0.6)
-Requirement already satisfied: qtconsole in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyter==1.0.0->lvmdrp==0.1.1.dev0) (5.4.3)
-Requirement already satisfied: notebook in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyter==1.0.0->lvmdrp==0.1.1.dev0) (6.5.4)
-Requirement already satisfied: ipykernel in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyter==1.0.0->lvmdrp==0.1.1.dev0) (6.23.0)
-Requirement already satisfied: nbconvert in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyter==1.0.0->lvmdrp==0.1.1.dev0) (7.4.0)
-Requirement already satisfied: jupyter-console in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyter==1.0.0->lvmdrp==0.1.1.dev0) (6.6.3)
-Requirement already satisfied: tomli in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (2.0.1)
-Requirement already satisfied: jupyter-server<3,>=1.16.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (2.5.0)
-Requirement already satisfied: jupyterlab-server~=2.19 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (2.22.1)
-Requirement already satisfied: nbclassic in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (1.0.0)
-Requirement already satisfied: jupyter-ydoc~=0.2.2 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (0.2.4)
-Requirement already satisfied: jupyter-server-ydoc<0.7.0,>=0.6.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (0.6.1)
-Requirement already satisfied: jupyter-core in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (5.3.0)
-Requirement already satisfied: python-dateutil>=2.7 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from matplotlib==3.6.2->lvmdrp==0.1.1.dev0) (2.8.2)
-Requirement already satisfied: cycler>=0.10 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from matplotlib==3.6.2->lvmdrp==0.1.1.dev0) (0.11.0)
-Requirement already satisfied: contourpy>=1.0.1 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from matplotlib==3.6.2->lvmdrp==0.1.1.dev0) (1.0.7)
-Requirement already satisfied: kiwisolver>=1.0.1 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from matplotlib==3.6.2->lvmdrp==0.1.1.dev0) (1.4.4)
-Requirement already satisfied: fonttools>=4.22.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from matplotlib==3.6.2->lvmdrp==0.1.1.dev0) (4.39.4)
-Requirement already satisfied: pyparsing>=2.2.1 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from matplotlib==3.6.2->lvmdrp==0.1.1.dev0) (3.0.9)
-Requirement already satisfied: pillow>=6.2.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from matplotlib==3.6.2->lvmdrp==0.1.1.dev0) (9.5.0)
-Requirement already satisfied: pytz>=2020.1 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from pandas==1.5.3->lvmdrp==0.1.1.dev0) (2023.3)
-Requirement already satisfied: ptyprocess>=0.5 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from pexpect==4.8.0->lvmdrp==0.1.1.dev0) (0.7.0)
-Requirement already satisfied: synphot>=1.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from sbpy==0.3.0->lvmdrp==0.1.1.dev0) (1.2.0)
-Requirement already satisfied: ads>=0.12 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from sbpy==0.3.0->lvmdrp==0.1.1.dev0) (0.12.3)
-Requirement already satisfied: setuptools in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from skycalc_cli==1.4->lvmdrp==0.1.1.dev0) (66.0.0)
-Requirement already satisfied: certifi>=2017.4.17 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from skyfield==1.45->lvmdrp==0.1.1.dev0) (2023.5.7)
-Requirement already satisfied: sgp4>=2.2 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from skyfield==1.45->lvmdrp==0.1.1.dev0) (2.22)
-Requirement already satisfied: jplephem>=2.13 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from skyfield==1.45->lvmdrp==0.1.1.dev0) (2.18)
-Requirement already satisfied: numexpr>=2.6.2 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from tables==3.8.0->lvmdrp==0.1.1.dev0) (2.8.4)
-Requirement already satisfied: cython>=0.29.21 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from tables==3.8.0->lvmdrp==0.1.1.dev0) (0.29.34)
-Requirement already satisfied: blosc2~=2.0.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from tables==3.8.0->lvmdrp==0.1.1.dev0) (2.0.0)
-Requirement already satisfied: py-cpuinfo in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from tables==3.8.0->lvmdrp==0.1.1.dev0) (9.0.0)
-Requirement already satisfied: typing-extensions in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from cloup>=2.0->lvmdrp==0.1.1.dev0) (4.5.0)
-Requirement already satisfied: MarkupSafe>=2.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jinja2>=2.4->lvmdrp==0.1.1.dev0) (2.1.2)
-Requirement already satisfied: importlib-resources>=1.4.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jsonschema!=2.5.0,>=2.4->lvmdrp==0.1.1.dev0) (5.12.0)
-Requirement already satisfied: attrs>=17.4.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jsonschema!=2.5.0,>=2.4->lvmdrp==0.1.1.dev0) (23.1.0)
-Requirement already satisfied: pkgutil-resolve-name>=1.3.10 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jsonschema!=2.5.0,>=2.4->lvmdrp==0.1.1.dev0) (1.3.10)
-Requirement already satisfied: pyrsistent!=0.17.0,!=0.17.1,!=0.17.2,>=0.14.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jsonschema!=2.5.0,>=2.4->lvmdrp==0.1.1.dev0) (0.19.3)
-Requirement already satisfied: jaraco.classes in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from keyring>=4.0->lvmdrp==0.1.1.dev0) (3.2.3)
-Requirement already satisfied: importlib-metadata>=4.11.4 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from keyring>=4.0->lvmdrp==0.1.1.dev0) (6.6.0)
-Requirement already satisfied: SecretStorage>=3.2 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from keyring>=4.0->lvmdrp==0.1.1.dev0) (3.3.3)
-Requirement already satisfied: jeepney>=0.4.2 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from keyring>=4.0->lvmdrp==0.1.1.dev0) (0.8.0)
-Requirement already satisfied: six>=1.11 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from sdss-access>=3.0->lvmdrp==0.1.1.dev0) (1.16.0)
-Collecting configparser>=3.5.0
-  Downloading configparser-6.0.0-py3-none-any.whl (19 kB)
-Requirement already satisfied: invoke<2.0.0,>=1.3.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from sdsstools>=1.0->lvmdrp==0.1.1.dev0) (1.7.3)
-Requirement already satisfied: daemonocle<2.0.0,>=1.0.2 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from sdsstools>=1.0->lvmdrp==0.1.1.dev0) (1.2.3)
-Requirement already satisfied: healpy>=1.12.8 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmsurveysim@ git+https://github.com/sdss/lvmsurveysim.git@0.8.3->lvmdrp==0.1.1.dev0) (1.16.2)
-Requirement already satisfied: astropy_healpix>=0.6 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmsurveysim@ git+https://github.com/sdss/lvmsurveysim.git@0.8.3->lvmdrp==0.1.1.dev0) (0.7)
-Requirement already satisfied: astral>=1.10.1 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmsurveysim@ git+https://github.com/sdss/lvmsurveysim.git@0.8.3->lvmdrp==0.1.1.dev0) (2.2)
-Requirement already satisfied: spherical_geometry>=1.2.18 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from lvmsurveysim@ git+https://github.com/sdss/lvmsurveysim.git@0.8.3->lvmdrp==0.1.1.dev0) (1.2.23)
-Requirement already satisfied: mock in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from ads>=0.12->sbpy==0.3.0->lvmdrp==0.1.1.dev0) (5.0.2)
-Requirement already satisfied: werkzeug in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from ads>=0.12->sbpy==0.3.0->lvmdrp==0.1.1.dev0) (2.3.4)
-Requirement already satisfied: httpretty==0.8.10 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from ads>=0.12->sbpy==0.3.0->lvmdrp==0.1.1.dev0) (0.8.10)
-Requirement already satisfied: soupsieve>1.2 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from beautifulsoup4>=4.3.2->astroquery==0.4.6->lvmdrp==0.1.1.dev0) (2.4.1)
-Requirement already satisfied: msgpack in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from blosc2~=2.0.0->tables==3.8.0->lvmdrp==0.1.1.dev0) (1.0.5)
-Requirement already satisfied: psutil in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from daemonocle<2.0.0,>=1.0.2->sdsstools>=1.0->lvmdrp==0.1.1.dev0) (5.9.5)
-Requirement already satisfied: webencodings in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from html5lib>=0.999->astroquery==0.4.6->lvmdrp==0.1.1.dev0) (0.5.1)
-Requirement already satisfied: zipp>=0.5 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from importlib-metadata>=4.11.4->keyring>=4.0->lvmdrp==0.1.1.dev0) (3.15.0)
-Requirement already satisfied: parso<0.9.0,>=0.8.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jedi>=0.16->ipython==8.10.0->lvmdrp==0.1.1.dev0) (0.8.3)
-Requirement already satisfied: prometheus-client in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (0.16.0)
-Requirement already satisfied: pyzmq>=24 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (25.0.2)
-Requirement already satisfied: argon2-cffi in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (21.3.0)
-Requirement already satisfied: send2trash in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (1.8.2)
-Requirement already satisfied: terminado>=0.8.3 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (0.17.1)
-Requirement already satisfied: jupyter-client>=7.4.4 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (8.2.0)
-Requirement already satisfied: nbformat>=5.3.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (5.8.0)
-Requirement already satisfied: anyio>=3.1.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (3.6.2)
-Requirement already satisfied: jupyter-server-terminals in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (0.4.4)
-Requirement already satisfied: websocket-client in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (1.5.1)
-Requirement already satisfied: jupyter-events>=0.4.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (0.6.3)
-Requirement already satisfied: platformdirs>=2.5 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyter-core->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (3.5.1)
-Requirement already satisfied: ypy-websocket<0.9.0,>=0.8.2 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyter-server-ydoc<0.7.0,>=0.6.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (0.8.2)
-Requirement already satisfied: jupyter-server-fileid<1,>=0.6.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyter-server-ydoc<0.7.0,>=0.6.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (0.9.0)
-Requirement already satisfied: y-py<0.6.0,>=0.5.3 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyter-ydoc~=0.2.2->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (0.5.9)
-Requirement already satisfied: babel>=2.10 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyterlab-server~=2.19->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (2.12.1)
-Requirement already satisfied: json5>=0.9.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyterlab-server~=2.19->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (0.9.14)
-Requirement already satisfied: jupyterlab-pygments in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from nbconvert->jupyter==1.0.0->lvmdrp==0.1.1.dev0) (0.2.2)
-Requirement already satisfied: nbclient>=0.5.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from nbconvert->jupyter==1.0.0->lvmdrp==0.1.1.dev0) (0.7.4)
-Requirement already satisfied: defusedxml in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from nbconvert->jupyter==1.0.0->lvmdrp==0.1.1.dev0) (0.7.1)
-Requirement already satisfied: tinycss2 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from nbconvert->jupyter==1.0.0->lvmdrp==0.1.1.dev0) (1.2.1)
-Requirement already satisfied: pandocfilters>=1.4.1 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from nbconvert->jupyter==1.0.0->lvmdrp==0.1.1.dev0) (1.5.0)
-Requirement already satisfied: mistune<3,>=2.0.3 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from nbconvert->jupyter==1.0.0->lvmdrp==0.1.1.dev0) (2.0.5)
-Requirement already satisfied: bleach in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from nbconvert->jupyter==1.0.0->lvmdrp==0.1.1.dev0) (6.0.0)
-Requirement already satisfied: nest-asyncio>=1.5 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from notebook->jupyter==1.0.0->lvmdrp==0.1.1.dev0) (1.5.6)
-Requirement already satisfied: ipython-genutils in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from notebook->jupyter==1.0.0->lvmdrp==0.1.1.dev0) (0.2.0)
-Requirement already satisfied: notebook-shim>=0.2.3 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from nbclassic->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (0.2.3)
-Requirement already satisfied: wcwidth in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from prompt-toolkit<3.1.0,>=3.0.30->ipython==8.10.0->lvmdrp==0.1.1.dev0) (0.2.6)
-Collecting dask[array]>=2020
-  Downloading dask-2023.5.0-py3-none-any.whl (1.2 MB)
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.2/1.2 MB 3.1 MB/s eta 0:00:00
-Collecting cloudpickle
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.4/1.4 MB 113.2 MB/s eta 0:00:00
+Collecting reproject>=0.7 (from ccdproc==2.4.0->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for reproject>=0.7 from https://files.pythonhosted.org/packages/42/5d/97efc3a18cedae89d2b237e785d23d094d013b0173e2b1772d9a2ecc578c/reproject-0.11.0-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata
+  Downloading reproject-0.11.0-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (3.2 kB)
+Collecting scikit-image (from ccdproc==2.4.0->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for scikit-image from https://files.pythonhosted.org/packages/33/29/1d696450464d6e13358d3ef185a1fb14a11181c5dab1eb2837c02be86373/scikit_image-0.21.0-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata
+  Downloading scikit_image-0.21.0-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (14 kB)
+Collecting backcall (from ipython==8.10.0->lvmdrp==0.1.1.dev0)
+  Downloading backcall-0.2.0-py2.py3-none-any.whl (11 kB)
+Collecting decorator (from ipython==8.10.0->lvmdrp==0.1.1.dev0)
+  Downloading decorator-5.1.1-py3-none-any.whl (9.1 kB)
+Collecting jedi>=0.16 (from ipython==8.10.0->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for jedi>=0.16 from https://files.pythonhosted.org/packages/8e/46/7e3ae3aa2dcfcffc5138c6cef5448523218658411c84a2000bf75c8d3ec1/jedi-0.19.0-py2.py3-none-any.whl.metadata
+  Downloading jedi-0.19.0-py2.py3-none-any.whl.metadata (22 kB)
+Collecting matplotlib-inline (from ipython==8.10.0->lvmdrp==0.1.1.dev0)
+  Downloading matplotlib_inline-0.1.6-py3-none-any.whl (9.4 kB)
+Collecting pickleshare (from ipython==8.10.0->lvmdrp==0.1.1.dev0)
+  Downloading pickleshare-0.7.5-py2.py3-none-any.whl (6.9 kB)
+Collecting prompt-toolkit<3.1.0,>=3.0.30 (from ipython==8.10.0->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for prompt-toolkit<3.1.0,>=3.0.30 from https://files.pythonhosted.org/packages/a9/b4/ba77c84edf499877317225d7b7bc047a81f7c2eed9628eeb6bab0ac2e6c9/prompt_toolkit-3.0.39-py3-none-any.whl.metadata
+  Downloading prompt_toolkit-3.0.39-py3-none-any.whl.metadata (6.4 kB)
+Collecting pygments>=2.4.0 (from ipython==8.10.0->lvmdrp==0.1.1.dev0)
+  Downloading Pygments-2.15.1-py3-none-any.whl (1.1 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.1/1.1 MB 126.0 MB/s eta 0:00:00
+Collecting stack-data (from ipython==8.10.0->lvmdrp==0.1.1.dev0)
+  Downloading stack_data-0.6.2-py3-none-any.whl (24 kB)
+Collecting traitlets>=5 (from ipython==8.10.0->lvmdrp==0.1.1.dev0)
+  Downloading traitlets-5.9.0-py3-none-any.whl (117 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 117.4/117.4 kB 3.4 MB/s eta 0:00:00
+Collecting notebook (from jupyter==1.0.0->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for notebook from https://files.pythonhosted.org/packages/85/76/51777158391e1784cc5a892ff355fd0a0b0b5189aeffce9baf51f514b9a2/notebook-7.0.2-py3-none-any.whl.metadata
+  Downloading notebook-7.0.2-py3-none-any.whl.metadata (10 kB)
+Collecting qtconsole (from jupyter==1.0.0->lvmdrp==0.1.1.dev0)
+  Downloading qtconsole-5.4.3-py3-none-any.whl (121 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 121.9/121.9 kB 179.0 MB/s eta 0:00:00
+Collecting jupyter-console (from jupyter==1.0.0->lvmdrp==0.1.1.dev0)
+  Downloading jupyter_console-6.6.3-py3-none-any.whl (24 kB)
+Collecting nbconvert (from jupyter==1.0.0->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for nbconvert from https://files.pythonhosted.org/packages/51/bd/ede955c9e981abf6d0e12a7583fd0f9256eedfb461073f25045770f3e717/nbconvert-7.7.3-py3-none-any.whl.metadata
+  Downloading nbconvert-7.7.3-py3-none-any.whl.metadata (8.0 kB)
+Collecting ipykernel (from jupyter==1.0.0->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for ipykernel from https://files.pythonhosted.org/packages/d2/22/a56cfaf62b29aabb038b22959051061c0486e9ccfcd803f945972da3bc20/ipykernel-6.25.0-py3-none-any.whl.metadata
+  Downloading ipykernel-6.25.0-py3-none-any.whl.metadata (6.3 kB)
+Collecting ipywidgets (from jupyter==1.0.0->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for ipywidgets from https://files.pythonhosted.org/packages/b8/d4/ce436660098b2f456e2b8fdf76d4f33cbc3766c874c4aa2f772c7a5e943f/ipywidgets-8.1.0-py3-none-any.whl.metadata
+  Downloading ipywidgets-8.1.0-py3-none-any.whl.metadata (2.4 kB)
+Collecting jupyter-core (from jupyterlab==3.6.1->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for jupyter-core from https://files.pythonhosted.org/packages/8c/e0/3f9061c5e99a03612510f892647b15a91f910c5275b7b77c6c72edae1494/jupyter_core-5.3.1-py3-none-any.whl.metadata
+  Downloading jupyter_core-5.3.1-py3-none-any.whl.metadata (3.4 kB)
+Collecting jupyterlab-server~=2.19 (from jupyterlab==3.6.1->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for jupyterlab-server~=2.19 from https://files.pythonhosted.org/packages/a7/0d/6d4eab0391bd4df1c43f308368d5e177b0fa8ac632267222a23b71317091/jupyterlab_server-2.24.0-py3-none-any.whl.metadata
+  Downloading jupyterlab_server-2.24.0-py3-none-any.whl.metadata (5.8 kB)
+Collecting jupyter-server<3,>=1.16.0 (from jupyterlab==3.6.1->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for jupyter-server<3,>=1.16.0 from https://files.pythonhosted.org/packages/f2/8f/914785ff2a0c4e2a7e15217710d57568f6ed6a84befa83a5a8c8b22ed3c6/jupyter_server-2.7.0-py3-none-any.whl.metadata
+  Downloading jupyter_server-2.7.0-py3-none-any.whl.metadata (8.6 kB)
+Collecting jupyter-ydoc~=0.2.2 (from jupyterlab==3.6.1->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for jupyter-ydoc~=0.2.2 from https://files.pythonhosted.org/packages/e1/36/66e6cb851a43c95f00f47b36d2cb3e17d37f862449dc8258b2c04f02544b/jupyter_ydoc-0.2.5-py3-none-any.whl.metadata
+  Downloading jupyter_ydoc-0.2.5-py3-none-any.whl.metadata (2.2 kB)
+Collecting jupyter-server-ydoc<0.7.0,>=0.6.0 (from jupyterlab==3.6.1->lvmdrp==0.1.1.dev0)
+  Downloading jupyter_server_ydoc-0.6.1-py3-none-any.whl (11 kB)
+Collecting nbclassic (from jupyterlab==3.6.1->lvmdrp==0.1.1.dev0)
+  Downloading nbclassic-1.0.0-py3-none-any.whl (10.0 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 10.0/10.0 MB 84.7 MB/s eta 0:00:00
+Collecting notebook (from jupyter==1.0.0->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for notebook from https://files.pythonhosted.org/packages/d0/68/889706e46864e743e530e68f47c4a8b1682a1c62c761d4a57c00dc3c4626/notebook-6.5.5-py3-none-any.whl.metadata
+  Downloading notebook-6.5.5-py3-none-any.whl.metadata (2.5 kB)
+Collecting tomli (from jupyterlab==3.6.1->lvmdrp==0.1.1.dev0)
+  Downloading tomli-2.0.1-py3-none-any.whl (12 kB)
+Collecting contourpy>=1.0.1 (from matplotlib==3.6.2->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for contourpy>=1.0.1 from https://files.pythonhosted.org/packages/32/c8/aa9e87941002150b1a8e7087e48da1c76290268b9fdfa3034a98a5806198/contourpy-1.1.0-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata
+  Downloading contourpy-1.1.0-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (5.7 kB)
+Collecting cycler>=0.10 (from matplotlib==3.6.2->lvmdrp==0.1.1.dev0)
+  Downloading cycler-0.11.0-py3-none-any.whl (6.4 kB)
+Collecting fonttools>=4.22.0 (from matplotlib==3.6.2->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for fonttools>=4.22.0 from https://files.pythonhosted.org/packages/d3/e2/0dc07c946b98a036b25b97899bf38d51aef24f793b80ac686f07f817b7ac/fonttools-4.42.0-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata
+  Downloading fonttools-4.42.0-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (150 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 150.6/150.6 kB 179.0 MB/s eta 0:00:00
+Collecting kiwisolver>=1.0.1 (from matplotlib==3.6.2->lvmdrp==0.1.1.dev0)
+  Downloading kiwisolver-1.4.4-cp38-cp38-manylinux_2_5_x86_64.manylinux1_x86_64.whl (1.2 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.2/1.2 MB 108.0 MB/s eta 0:00:00
+Collecting pillow>=6.2.0 (from matplotlib==3.6.2->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for pillow>=6.2.0 from https://files.pythonhosted.org/packages/8b/b3/d7b6ee16358d829ca482c74a96e2b9079bf33f8d7d37d16f8ebb19ddf5a4/Pillow-10.0.0-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata
+  Downloading Pillow-10.0.0-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (9.5 kB)
+Collecting pyparsing>=2.2.1 (from matplotlib==3.6.2->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for pyparsing>=2.2.1 from https://files.pythonhosted.org/packages/39/92/8486ede85fcc088f1b3dba4ce92dd29d126fd96b0008ea213167940a2475/pyparsing-3.1.1-py3-none-any.whl.metadata
+  Downloading pyparsing-3.1.1-py3-none-any.whl.metadata (5.1 kB)
+Collecting python-dateutil>=2.7 (from matplotlib==3.6.2->lvmdrp==0.1.1.dev0)
+  Downloading python_dateutil-2.8.2-py2.py3-none-any.whl (247 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 247.7/247.7 kB 197.8 MB/s eta 0:00:00
+Collecting pytz>=2020.1 (from pandas==1.5.3->lvmdrp==0.1.1.dev0)
+  Downloading pytz-2023.3-py2.py3-none-any.whl (502 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 502.3/502.3 kB 149.8 MB/s eta 0:00:00
+Collecting ptyprocess>=0.5 (from pexpect==4.8.0->lvmdrp==0.1.1.dev0)
+  Downloading ptyprocess-0.7.0-py2.py3-none-any.whl (13 kB)
+Collecting ads>=0.12 (from sbpy==0.3.0->lvmdrp==0.1.1.dev0)
+  Downloading ads-0.12.3.tar.gz (32 kB)
+  Preparing metadata (setup.py): started
+  Preparing metadata (setup.py): finished with status 'done'
+Collecting synphot>=1.0 (from sbpy==0.3.0->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for synphot>=1.0 from https://files.pythonhosted.org/packages/5e/ee/919063211c98ab70f031043039a0e59592b1680d66fde25f3a7e1f355a29/synphot-1.2.1-cp38-cp38-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata
+  Downloading synphot-1.2.1-cp38-cp38-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (1.2 kB)
+Requirement already satisfied: setuptools in /home/sanchez/miniconda3/envs/lvmdrp/lib/python3.8/site-packages (from skycalc_cli==1.4->lvmdrp==0.1.1.dev0) (68.0.0)
+Collecting certifi>=2017.4.17 (from skyfield==1.45->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for certifi>=2017.4.17 from https://files.pythonhosted.org/packages/4c/dd/2234eab22353ffc7d94e8d13177aaa050113286e93e7b40eae01fbf7c3d9/certifi-2023.7.22-py3-none-any.whl.metadata
+  Downloading certifi-2023.7.22-py3-none-any.whl.metadata (2.2 kB)
+Collecting jplephem>=2.13 (from skyfield==1.45->lvmdrp==0.1.1.dev0)
+  Downloading jplephem-2.18-py3-none-any.whl (46 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 46.7/46.7 kB 131.5 MB/s eta 0:00:00
+Collecting sgp4>=2.2 (from skyfield==1.45->lvmdrp==0.1.1.dev0)
+  Downloading sgp4-2.22-cp38-cp38-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl (232 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 232.2/232.2 kB 188.6 MB/s eta 0:00:00
+Collecting cython>=0.29.21 (from tables==3.8.0->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for cython>=0.29.21 from https://files.pythonhosted.org/packages/d1/06/54c30ddfc9268fae14bd8c0755155680f62db89c7d67d7740d8f811f65b0/Cython-3.0.0-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata
+  Downloading Cython-3.0.0-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (3.1 kB)
+Collecting numexpr>=2.6.2 (from tables==3.8.0->lvmdrp==0.1.1.dev0)
+  Downloading numexpr-2.8.4-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (381 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 381.7/381.7 kB 173.4 MB/s eta 0:00:00
+Collecting blosc2~=2.0.0 (from tables==3.8.0->lvmdrp==0.1.1.dev0)
+  Downloading blosc2-2.0.0-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (3.9 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 3.9/3.9 MB 87.4 MB/s eta 0:00:00
+Collecting py-cpuinfo (from tables==3.8.0->lvmdrp==0.1.1.dev0)
+  Downloading py_cpuinfo-9.0.0-py3-none-any.whl (22 kB)
+Collecting typing-extensions (from cloup>=2.0->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for typing-extensions from https://files.pythonhosted.org/packages/ec/6b/63cc3df74987c36fe26157ee12e09e8f9db4de771e0f3404263117e75b95/typing_extensions-4.7.1-py3-none-any.whl.metadata
+  Downloading typing_extensions-4.7.1-py3-none-any.whl.metadata (3.1 kB)
+Collecting MarkupSafe>=2.0 (from jinja2>=2.4->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for MarkupSafe>=2.0 from https://files.pythonhosted.org/packages/de/e2/32c14301bb023986dff527a49325b6259cab4ebb4633f69de54af312fc45/MarkupSafe-2.1.3-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata
+  Downloading MarkupSafe-2.1.3-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (3.0 kB)
+Collecting attrs>=22.2.0 (from jsonschema!=2.5.0,>=2.4->lvmdrp==0.1.1.dev0)
+  Downloading attrs-23.1.0-py3-none-any.whl (61 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 61.2/61.2 kB 155.5 MB/s eta 0:00:00
+Collecting importlib-resources>=1.4.0 (from jsonschema!=2.5.0,>=2.4->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for importlib-resources>=1.4.0 from https://files.pythonhosted.org/packages/29/d1/bed03eca30aa05aaf6e0873de091f9385c48705c4a607c2dfe3edbe543e8/importlib_resources-6.0.0-py3-none-any.whl.metadata
+  Downloading importlib_resources-6.0.0-py3-none-any.whl.metadata (4.2 kB)
+Collecting jsonschema-specifications>=2023.03.6 (from jsonschema!=2.5.0,>=2.4->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for jsonschema-specifications>=2023.03.6 from https://files.pythonhosted.org/packages/1c/24/83349ac2189cc2435e84da3f69ba3c97314d3c0622628e55171c6798ed80/jsonschema_specifications-2023.7.1-py3-none-any.whl.metadata
+  Downloading jsonschema_specifications-2023.7.1-py3-none-any.whl.metadata (2.8 kB)
+Collecting pkgutil-resolve-name>=1.3.10 (from jsonschema!=2.5.0,>=2.4->lvmdrp==0.1.1.dev0)
+  Downloading pkgutil_resolve_name-1.3.10-py3-none-any.whl (4.7 kB)
+Collecting referencing>=0.28.4 (from jsonschema!=2.5.0,>=2.4->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for referencing>=0.28.4 from https://files.pythonhosted.org/packages/ea/c3/f75f0ce2cdacca3d68a70b1756635092a1add1002e34afb4895b9fb62598/referencing-0.30.0-py3-none-any.whl.metadata
+  Downloading referencing-0.30.0-py3-none-any.whl.metadata (2.7 kB)
+Collecting rpds-py>=0.7.1 (from jsonschema!=2.5.0,>=2.4->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for rpds-py>=0.7.1 from https://files.pythonhosted.org/packages/7f/19/aa000240fa9343858a967b08037792695a66560ce5054528198190ce291b/rpds_py-0.9.2-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata
+  Downloading rpds_py-0.9.2-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (3.7 kB)
+Collecting jaraco.classes (from keyring>=4.0->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for jaraco.classes from https://files.pythonhosted.org/packages/c7/6b/1bc8fa93ea85146e08f0e0883bc579b7c7328364ed7df90b1628dcb36e10/jaraco.classes-3.3.0-py3-none-any.whl.metadata
+  Downloading jaraco.classes-3.3.0-py3-none-any.whl.metadata (2.9 kB)
+Collecting importlib-metadata>=4.11.4 (from keyring>=4.0->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for importlib-metadata>=4.11.4 from https://files.pythonhosted.org/packages/cc/37/db7ba97e676af155f5fcb1a35466f446eadc9104e25b83366e8088c9c926/importlib_metadata-6.8.0-py3-none-any.whl.metadata
+  Downloading importlib_metadata-6.8.0-py3-none-any.whl.metadata (5.1 kB)
+Collecting SecretStorage>=3.2 (from keyring>=4.0->lvmdrp==0.1.1.dev0)
+  Downloading SecretStorage-3.3.3-py3-none-any.whl (15 kB)
+Collecting jeepney>=0.4.2 (from keyring>=4.0->lvmdrp==0.1.1.dev0)
+  Downloading jeepney-0.8.0-py3-none-any.whl (48 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 48.4/48.4 kB 234.3 MB/s eta 0:00:00
+Collecting six>=1.11 (from sdss-access>=3.0->lvmdrp==0.1.1.dev0)
+  Downloading six-1.16.0-py2.py3-none-any.whl (11 kB)
+Collecting configparser>=3.5.0 (from sdss-tree>=4.0->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for configparser>=3.5.0 from https://files.pythonhosted.org/packages/81/a3/0e5ed11da4b7770c15f6f319abf053f46b5a06c7d4273c48469b7899bd89/configparser-6.0.0-py3-none-any.whl.metadata
+  Downloading configparser-6.0.0-py3-none-any.whl.metadata (11 kB)
+Collecting daemonocle<2.0.0,>=1.0.2 (from sdsstools>=1.0->lvmdrp==0.1.1.dev0)
+  Downloading daemonocle-1.2.3.tar.gz (41 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 41.4/41.4 kB 158.1 MB/s eta 0:00:00
+  Preparing metadata (setup.py): started
+  Preparing metadata (setup.py): finished with status 'done'
+Collecting invoke<2.0.0,>=1.3.0 (from sdsstools>=1.0->lvmdrp==0.1.1.dev0)
+  Downloading invoke-1.7.3-py3-none-any.whl (216 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 216.4/216.4 kB 163.0 MB/s eta 0:00:00
+Collecting healpy>=1.12.8 (from lvmsurveysim@ git+https://github.com/sdss/lvmsurveysim.git@0.8.3->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for healpy>=1.12.8 from https://files.pythonhosted.org/packages/3e/a0/eeb799459aed38b53cdc6797e7f01a990e85e1b06363905010f292b2f452/healpy-1.16.3-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata
+  Downloading healpy-1.16.3-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (8.5 kB)
+Collecting astropy_healpix>=0.6 (from lvmsurveysim@ git+https://github.com/sdss/lvmsurveysim.git@0.8.3->lvmdrp==0.1.1.dev0)
+  Downloading astropy_healpix-0.7-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (198 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 198.8/198.8 kB 191.0 MB/s eta 0:00:00
+Collecting astral>=1.10.1 (from lvmsurveysim@ git+https://github.com/sdss/lvmsurveysim.git@0.8.3->lvmdrp==0.1.1.dev0)
+  Downloading astral-3.2-py3-none-any.whl (38 kB)
+Collecting spherical_geometry>=1.2.18 (from lvmsurveysim@ git+https://github.com/sdss/lvmsurveysim.git@0.8.3->lvmdrp==0.1.1.dev0)
+  Downloading spherical_geometry-1.2.23-cp38-cp38-manylinux_2_12_x86_64.manylinux2010_x86_64.whl (947 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 947.6/947.6 kB 115.2 MB/s eta 0:00:00
+Collecting httpretty==0.8.10 (from ads>=0.12->sbpy==0.3.0->lvmdrp==0.1.1.dev0)
+  Downloading httpretty-0.8.10.tar.gz (41 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 41.7/41.7 kB 137.1 MB/s eta 0:00:00
+  Preparing metadata (setup.py): started
+  Preparing metadata (setup.py): finished with status 'done'
+Collecting werkzeug (from ads>=0.12->sbpy==0.3.0->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for werkzeug from https://files.pythonhosted.org/packages/ba/d6/8040faecaba2feb84e1647af174b3243c9b90c163c7ea407820839931efe/Werkzeug-2.3.6-py3-none-any.whl.metadata
+  Downloading Werkzeug-2.3.6-py3-none-any.whl.metadata (4.1 kB)
+Collecting mock (from ads>=0.12->sbpy==0.3.0->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for mock from https://files.pythonhosted.org/packages/6b/20/471f41173930550f279ccb65596a5ac19b9ac974a8d93679bcd3e0c31498/mock-5.1.0-py3-none-any.whl.metadata
+  Downloading mock-5.1.0-py3-none-any.whl.metadata (3.0 kB)
+Collecting backports.zoneinfo (from astral>=1.10.1->lvmsurveysim@ git+https://github.com/sdss/lvmsurveysim.git@0.8.3->lvmdrp==0.1.1.dev0)
+  Downloading backports.zoneinfo-0.2.1-cp38-cp38-manylinux1_x86_64.whl (74 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 74.0/74.0 kB 155.1 MB/s eta 0:00:00
+Collecting soupsieve>1.2 (from beautifulsoup4>=4.3.2->astroquery==0.4.6->lvmdrp==0.1.1.dev0)
+  Downloading soupsieve-2.4.1-py3-none-any.whl (36 kB)
+Collecting msgpack (from blosc2~=2.0.0->tables==3.8.0->lvmdrp==0.1.1.dev0)
+  Downloading msgpack-1.0.5-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (322 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 322.4/322.4 kB 267.7 MB/s eta 0:00:00
+Collecting psutil (from daemonocle<2.0.0,>=1.0.2->sdsstools>=1.0->lvmdrp==0.1.1.dev0)
+  Downloading psutil-5.9.5-cp36-abi3-manylinux_2_12_x86_64.manylinux2010_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl (282 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 282.1/282.1 kB 207.8 MB/s eta 0:00:00
+Collecting webencodings (from html5lib>=0.999->astroquery==0.4.6->lvmdrp==0.1.1.dev0)
+  Downloading webencodings-0.5.1-py2.py3-none-any.whl (11 kB)
+Collecting zipp>=0.5 (from importlib-metadata>=4.11.4->keyring>=4.0->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for zipp>=0.5 from https://files.pythonhosted.org/packages/8c/08/d3006317aefe25ea79d3b76c9650afabaf6d63d1c8443b236e7405447503/zipp-3.16.2-py3-none-any.whl.metadata
+  Downloading zipp-3.16.2-py3-none-any.whl.metadata (3.7 kB)
+Collecting parso<0.9.0,>=0.8.3 (from jedi>=0.16->ipython==8.10.0->lvmdrp==0.1.1.dev0)
+  Downloading parso-0.8.3-py2.py3-none-any.whl (100 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100.8/100.8 kB 174.9 MB/s eta 0:00:00
+Collecting anyio>=3.1.0 (from jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for anyio>=3.1.0 from https://files.pythonhosted.org/packages/19/24/44299477fe7dcc9cb58d0a57d5a7588d6af2ff403fdd2d47a246c91a3246/anyio-3.7.1-py3-none-any.whl.metadata
+  Downloading anyio-3.7.1-py3-none-any.whl.metadata (4.7 kB)
+Collecting argon2-cffi (from jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0)
+  Downloading argon2_cffi-21.3.0-py3-none-any.whl (14 kB)
+Collecting jupyter-client>=7.4.4 (from jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for jupyter-client>=7.4.4 from https://files.pythonhosted.org/packages/29/24/0491f7837cedf39ae0f96d9b3e4db2fae31cc4dd5eac00a98ab0db996c9b/jupyter_client-8.3.0-py3-none-any.whl.metadata
+  Downloading jupyter_client-8.3.0-py3-none-any.whl.metadata (8.5 kB)
+Collecting jupyter-events>=0.6.0 (from jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for jupyter-events>=0.6.0 from https://files.pythonhosted.org/packages/15/0d/3c67f6c432d8085a3cee250e1e235f27b764be90cc2d16fdcc0b1cee9572/jupyter_events-0.7.0-py3-none-any.whl.metadata
+  Downloading jupyter_events-0.7.0-py3-none-any.whl.metadata (5.5 kB)
+Collecting jupyter-server-terminals (from jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0)
+  Downloading jupyter_server_terminals-0.4.4-py3-none-any.whl (13 kB)
+Collecting nbformat>=5.3.0 (from jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for nbformat>=5.3.0 from https://files.pythonhosted.org/packages/f4/e7/ef30a90b70eba39e675689b9eaaa92530a71d7435ab8f9cae520814e0caf/nbformat-5.9.2-py3-none-any.whl.metadata
+  Downloading nbformat-5.9.2-py3-none-any.whl.metadata (3.4 kB)
+Collecting overrides (from jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0)
+  Downloading overrides-7.3.1-py3-none-any.whl (17 kB)
+Collecting prometheus-client (from jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for prometheus-client from https://files.pythonhosted.org/packages/ad/b3/6e18c89bf6bd120590ea538a62cae16dc763ff2745b18377c4be5495c4aa/prometheus_client-0.17.1-py3-none-any.whl.metadata
+  Downloading prometheus_client-0.17.1-py3-none-any.whl.metadata (24 kB)
+Collecting pyzmq>=24 (from jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for pyzmq>=24 from https://files.pythonhosted.org/packages/3e/71/3f41e23f14b04b87776497d5d5150335e6d7e06debf1571fd5ca4c6ff82a/pyzmq-25.1.0-cp38-cp38-manylinux_2_12_x86_64.manylinux2010_x86_64.whl.metadata
+  Downloading pyzmq-25.1.0-cp38-cp38-manylinux_2_12_x86_64.manylinux2010_x86_64.whl.metadata (4.8 kB)
+Collecting send2trash (from jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0)
+  Downloading Send2Trash-1.8.2-py3-none-any.whl (18 kB)
+Collecting terminado>=0.8.3 (from jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0)
+  Downloading terminado-0.17.1-py3-none-any.whl (17 kB)
+Collecting websocket-client (from jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for websocket-client from https://files.pythonhosted.org/packages/d3/a3/63e9329c8cc9be6153e919e17d0ef5b60d537fed78564872951b95bcc17c/websocket_client-1.6.1-py3-none-any.whl.metadata
+  Downloading websocket_client-1.6.1-py3-none-any.whl.metadata (7.6 kB)
+Collecting platformdirs>=2.5 (from jupyter-core->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for platformdirs>=2.5 from https://files.pythonhosted.org/packages/14/51/fe5a0d6ea589f0d4a1b97824fb518962ad48b27cd346dcdfa2405187997a/platformdirs-3.10.0-py3-none-any.whl.metadata
+  Downloading platformdirs-3.10.0-py3-none-any.whl.metadata (11 kB)
+Collecting jupyter-server-fileid<1,>=0.6.0 (from jupyter-server-ydoc<0.7.0,>=0.6.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0)
+  Downloading jupyter_server_fileid-0.9.0-py3-none-any.whl (15 kB)
+Collecting ypy-websocket<0.9.0,>=0.8.2 (from jupyter-server-ydoc<0.7.0,>=0.6.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0)
+  Downloading ypy_websocket-0.8.4-py3-none-any.whl (10 kB)
+Collecting y-py<0.7.0,>=0.6.0 (from jupyter-ydoc~=0.2.2->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0)
+  Downloading y_py-0.6.0-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (1.6 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.6/1.6 MB 113.2 MB/s eta 0:00:00
+Collecting babel>=2.10 (from jupyterlab-server~=2.19->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0)
+  Downloading Babel-2.12.1-py3-none-any.whl (10.1 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 10.1/10.1 MB 85.3 MB/s eta 0:00:00
+Collecting json5>=0.9.0 (from jupyterlab-server~=2.19->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for json5>=0.9.0 from https://files.pythonhosted.org/packages/70/ba/fa37123a86ae8287d6678535a944f9c3377d8165e536310ed6f6cb0f0c0e/json5-0.9.14-py2.py3-none-any.whl.metadata
+  Downloading json5-0.9.14-py2.py3-none-any.whl.metadata (10 kB)
+Collecting bleach!=5.0.0 (from nbconvert->jupyter==1.0.0->lvmdrp==0.1.1.dev0)
+  Downloading bleach-6.0.0-py3-none-any.whl (162 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 162.5/162.5 kB 249.0 MB/s eta 0:00:00
+Collecting defusedxml (from nbconvert->jupyter==1.0.0->lvmdrp==0.1.1.dev0)
+  Downloading defusedxml-0.7.1-py2.py3-none-any.whl (25 kB)
+Collecting jupyterlab-pygments (from nbconvert->jupyter==1.0.0->lvmdrp==0.1.1.dev0)
+  Downloading jupyterlab_pygments-0.2.2-py2.py3-none-any.whl (21 kB)
+Collecting mistune<4,>=2.0.3 (from nbconvert->jupyter==1.0.0->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for mistune<4,>=2.0.3 from https://files.pythonhosted.org/packages/cc/c0/ac9587149e37cde62ae338e9db8241ae2fdc79a84bde8c8ba7caea2c22d8/mistune-3.0.1-py3-none-any.whl.metadata
+  Downloading mistune-3.0.1-py3-none-any.whl.metadata (1.7 kB)
+Collecting nbclient>=0.5.0 (from nbconvert->jupyter==1.0.0->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for nbclient>=0.5.0 from https://files.pythonhosted.org/packages/ac/5a/d670ca51e6c3d98574b9647599821590efcd811d71f58e9c89fc59a17685/nbclient-0.8.0-py3-none-any.whl.metadata
+  Downloading nbclient-0.8.0-py3-none-any.whl.metadata (7.8 kB)
+Collecting pandocfilters>=1.4.1 (from nbconvert->jupyter==1.0.0->lvmdrp==0.1.1.dev0)
+  Downloading pandocfilters-1.5.0-py2.py3-none-any.whl (8.7 kB)
+Collecting tinycss2 (from nbconvert->jupyter==1.0.0->lvmdrp==0.1.1.dev0)
+  Downloading tinycss2-1.2.1-py3-none-any.whl (21 kB)
+Collecting pyzmq>=24 (from jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0)
+  Downloading pyzmq-24.0.1-cp38-cp38-manylinux_2_12_x86_64.manylinux2010_x86_64.whl (1.1 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.1/1.1 MB 121.1 MB/s eta 0:00:00
+Collecting jupyter-client>=7.4.4 (from jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0)
+  Downloading jupyter_client-7.4.9-py3-none-any.whl (133 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 133.5/133.5 kB 176.8 MB/s eta 0:00:00
+Collecting ipython-genutils (from notebook->jupyter==1.0.0->lvmdrp==0.1.1.dev0)
+  Downloading ipython_genutils-0.2.0-py2.py3-none-any.whl (26 kB)
+Collecting nest-asyncio>=1.5 (from notebook->jupyter==1.0.0->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for nest-asyncio>=1.5 from https://files.pythonhosted.org/packages/7e/dd/69a7a6e89bb1fe09f99bde22027154c487b1e8b6769e642d7f56f35696d3/nest_asyncio-1.5.7-py3-none-any.whl.metadata
+  Downloading nest_asyncio-1.5.7-py3-none-any.whl.metadata (2.7 kB)
+Collecting notebook-shim>=0.2.3 (from nbclassic->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0)
+  Downloading notebook_shim-0.2.3-py3-none-any.whl (13 kB)
+Collecting wcwidth (from prompt-toolkit<3.1.0,>=3.0.30->ipython==8.10.0->lvmdrp==0.1.1.dev0)
+  Downloading wcwidth-0.2.6-py2.py3-none-any.whl (29 kB)
+Collecting dask[array]>=2020 (from reproject>=0.7->ccdproc==2.4.0->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for dask[array]>=2020 from https://files.pythonhosted.org/packages/07/93/32d3e317fec6d0fc130284f922ad9bd13d9ae0d52245e6ff6e57647e924c/dask-2023.5.0-py3-none-any.whl.metadata
+  Downloading dask-2023.5.0-py3-none-any.whl.metadata (3.6 kB)
+Collecting cloudpickle (from reproject>=0.7->ccdproc==2.4.0->lvmdrp==0.1.1.dev0)
   Downloading cloudpickle-2.2.1-py3-none-any.whl (25 kB)
-Collecting fsspec
-  Downloading fsspec-2023.6.0-py3-none-any.whl (163 kB)
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 163.8/163.8 kB 3.5 MB/s eta 0:00:00
-Collecting zarr
-  Downloading zarr-2.16.0-py3-none-any.whl (206 kB)
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 206.5/206.5 kB 7.9 MB/s eta 0:00:00
-Requirement already satisfied: idna<4,>=2.5 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from requests>=2.4.3->astroquery==0.4.6->lvmdrp==0.1.1.dev0) (3.4)
-Requirement already satisfied: urllib3<3,>=1.21.1 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from requests>=2.4.3->astroquery==0.4.6->lvmdrp==0.1.1.dev0) (2.0.2)
-Requirement already satisfied: charset-normalizer<4,>=2 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from requests>=2.4.3->astroquery==0.4.6->lvmdrp==0.1.1.dev0) (3.1.0)
-Requirement already satisfied: cryptography>=2.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from SecretStorage>=3.2->keyring>=4.0->lvmdrp==0.1.1.dev0) (40.0.2)
-Requirement already satisfied: comm>=0.1.1 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from ipykernel->jupyter==1.0.0->lvmdrp==0.1.1.dev0) (0.1.3)
-Requirement already satisfied: debugpy>=1.6.5 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from ipykernel->jupyter==1.0.0->lvmdrp==0.1.1.dev0) (1.6.7)
-Requirement already satisfied: jupyterlab-widgets~=3.0.7 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from ipywidgets->jupyter==1.0.0->lvmdrp==0.1.1.dev0) (3.0.7)
-Requirement already satisfied: widgetsnbextension~=4.0.7 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from ipywidgets->jupyter==1.0.0->lvmdrp==0.1.1.dev0) (4.0.7)
-Requirement already satisfied: more-itertools in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jaraco.classes->keyring>=4.0->lvmdrp==0.1.1.dev0) (9.1.0)
-Requirement already satisfied: qtpy>=2.0.1 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from qtconsole->jupyter==1.0.0->lvmdrp==0.1.1.dev0) (2.3.1)
-Collecting lazy_loader>=0.2
-  Downloading lazy_loader-0.3-py3-none-any.whl (9.1 kB)
-Collecting networkx>=2.8
+Collecting zarr (from reproject>=0.7->ccdproc==2.4.0->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for zarr from https://files.pythonhosted.org/packages/57/8e/b74c2a80c7df474c300bab3b761c35d6cfa6468d6d23f891d518ec7c828e/zarr-2.16.0-py3-none-any.whl.metadata
+  Downloading zarr-2.16.0-py3-none-any.whl.metadata (5.4 kB)
+Collecting fsspec (from reproject>=0.7->ccdproc==2.4.0->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for fsspec from https://files.pythonhosted.org/packages/e3/bd/4c0a4619494188a9db5d77e2100ab7d544a42e76b2447869d8e124e981d8/fsspec-2023.6.0-py3-none-any.whl.metadata
+  Downloading fsspec-2023.6.0-py3-none-any.whl.metadata (6.7 kB)
+Collecting charset-normalizer<4,>=2 (from requests>=2.4.3->astroquery==0.4.6->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for charset-normalizer<4,>=2 from https://files.pythonhosted.org/packages/cb/e7/5e43745003bf1f90668c7be23fc5952b3a2b9c2558f16749411c18039b36/charset_normalizer-3.2.0-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata
+  Downloading charset_normalizer-3.2.0-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (31 kB)
+Collecting idna<4,>=2.5 (from requests>=2.4.3->astroquery==0.4.6->lvmdrp==0.1.1.dev0)
+  Downloading idna-3.4-py3-none-any.whl (61 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 61.5/61.5 kB 155.1 MB/s eta 0:00:00
+Collecting urllib3<3,>=1.21.1 (from requests>=2.4.3->astroquery==0.4.6->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for urllib3<3,>=1.21.1 from https://files.pythonhosted.org/packages/9b/81/62fd61001fa4b9d0df6e31d47ff49cfa9de4af03adecf339c7bc30656b37/urllib3-2.0.4-py3-none-any.whl.metadata
+  Downloading urllib3-2.0.4-py3-none-any.whl.metadata (6.6 kB)
+Collecting cryptography>=2.0 (from SecretStorage>=3.2->keyring>=4.0->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for cryptography>=2.0 from https://files.pythonhosted.org/packages/21/74/a7ebb5bcf733b1626e4778941e505792d7f655e799ff3bdbd9a176516ee2/cryptography-41.0.3-cp37-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata
+  Downloading cryptography-41.0.3-cp37-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (5.2 kB)
+Collecting comm>=0.1.1 (from ipykernel->jupyter==1.0.0->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for comm>=0.1.1 from https://files.pythonhosted.org/packages/fe/47/0133ac1b7dc476ed77710715e98077119b3d9bae56b13f6f9055e7da1c53/comm-0.1.4-py3-none-any.whl.metadata
+  Downloading comm-0.1.4-py3-none-any.whl.metadata (4.2 kB)
+Collecting debugpy>=1.6.5 (from ipykernel->jupyter==1.0.0->lvmdrp==0.1.1.dev0)
+  Downloading debugpy-1.6.7-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (3.1 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 3.1/3.1 MB 86.1 MB/s eta 0:00:00
+Collecting widgetsnbextension~=4.0.7 (from ipywidgets->jupyter==1.0.0->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for widgetsnbextension~=4.0.7 from https://files.pythonhosted.org/packages/8e/d4/d31b12ac0b87e8cc9fdb6ea1eb6596de405eaaa2f25606aaa755d0eebbc0/widgetsnbextension-4.0.8-py3-none-any.whl.metadata
+  Downloading widgetsnbextension-4.0.8-py3-none-any.whl.metadata (1.6 kB)
+Collecting jupyterlab-widgets~=3.0.7 (from ipywidgets->jupyter==1.0.0->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for jupyterlab-widgets~=3.0.7 from https://files.pythonhosted.org/packages/74/5e/2475ac62faf2e342b2bf20b8d8e375f49400ecb38f52e4e0a7557eb1cedb/jupyterlab_widgets-3.0.8-py3-none-any.whl.metadata
+  Downloading jupyterlab_widgets-3.0.8-py3-none-any.whl.metadata (4.1 kB)
+Collecting more-itertools (from jaraco.classes->keyring>=4.0->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for more-itertools from https://files.pythonhosted.org/packages/5a/cb/6dce742ea14e47d6f565589e859ad225f2a5de576d7696e0623b784e226b/more_itertools-10.1.0-py3-none-any.whl.metadata
+  Downloading more_itertools-10.1.0-py3-none-any.whl.metadata (33 kB)
+Collecting qtpy>=2.0.1 (from qtconsole->jupyter==1.0.0->lvmdrp==0.1.1.dev0)
+  Downloading QtPy-2.3.1-py3-none-any.whl (84 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 84.9/84.9 kB 174.8 MB/s eta 0:00:00
+Collecting networkx>=2.8 (from scikit-image->ccdproc==2.4.0->lvmdrp==0.1.1.dev0)
   Downloading networkx-3.1-py3-none-any.whl (2.1 MB)
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.1/2.1 MB 4.5 MB/s eta 0:00:00
-Collecting imageio>=2.27
-  Downloading imageio-2.31.1-py3-none-any.whl (313 kB)
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 313.2/313.2 kB 4.8 MB/s eta 0:00:00
-Collecting PyWavelets>=1.1.1
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.1/2.1 MB 106.7 MB/s eta 0:00:00
+Collecting imageio>=2.27 (from scikit-image->ccdproc==2.4.0->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for imageio>=2.27 from https://files.pythonhosted.org/packages/c7/b0/7b6c35b8636ed773325cdb6f5ac3cd36afba63d99e20ed59c521cf5018b4/imageio-2.31.1-py3-none-any.whl.metadata
+  Downloading imageio-2.31.1-py3-none-any.whl.metadata (4.7 kB)
+Collecting tifffile>=2022.8.12 (from scikit-image->ccdproc==2.4.0->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for tifffile>=2022.8.12 from https://files.pythonhosted.org/packages/06/a3/68d17088a4f09565bc7341fd20490da8191ec4cddde479daaabbe07bb603/tifffile-2023.7.10-py3-none-any.whl.metadata
+  Downloading tifffile-2023.7.10-py3-none-any.whl.metadata (31 kB)
+Collecting PyWavelets>=1.1.1 (from scikit-image->ccdproc==2.4.0->lvmdrp==0.1.1.dev0)
   Downloading PyWavelets-1.4.1-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (6.9 MB)
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 6.9/6.9 MB 2.2 MB/s eta 0:00:00
-Collecting tifffile>=2022.8.12
-  Downloading tifffile-2023.7.10-py3-none-any.whl (220 kB)
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 220.9/220.9 kB 5.5 MB/s eta 0:00:00
-Requirement already satisfied: pure-eval in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from stack-data->ipython==8.10.0->lvmdrp==0.1.1.dev0) (0.2.2)
-Requirement already satisfied: executing>=1.2.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from stack-data->ipython==8.10.0->lvmdrp==0.1.1.dev0) (1.2.0)
-Requirement already satisfied: asttokens>=2.1.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from stack-data->ipython==8.10.0->lvmdrp==0.1.1.dev0) (2.2.1)
-Requirement already satisfied: sniffio>=1.1 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from anyio>=3.1.0->jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (1.3.0)
-Requirement already satisfied: cffi>=1.12 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from cryptography>=2.0->SecretStorage>=3.2->keyring>=4.0->lvmdrp==0.1.1.dev0) (1.15.1)
-Collecting toolz>=0.10.0
-  Downloading toolz-0.12.0-py3-none-any.whl (55 kB)
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 55.8/55.8 kB 4.0 MB/s eta 0:00:00
-Collecting partd>=1.2.0
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 6.9/6.9 MB 86.9 MB/s eta 0:00:00
+Collecting lazy_loader>=0.2 (from scikit-image->ccdproc==2.4.0->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for lazy_loader>=0.2 from https://files.pythonhosted.org/packages/a1/c3/65b3814e155836acacf720e5be3b5757130346670ac454fee29d3eda1381/lazy_loader-0.3-py3-none-any.whl.metadata
+  Downloading lazy_loader-0.3-py3-none-any.whl.metadata (4.3 kB)
+Collecting executing>=1.2.0 (from stack-data->ipython==8.10.0->lvmdrp==0.1.1.dev0)
+  Downloading executing-1.2.0-py2.py3-none-any.whl (24 kB)
+Collecting asttokens>=2.1.0 (from stack-data->ipython==8.10.0->lvmdrp==0.1.1.dev0)
+  Downloading asttokens-2.2.1-py2.py3-none-any.whl (26 kB)
+Collecting pure-eval (from stack-data->ipython==8.10.0->lvmdrp==0.1.1.dev0)
+  Downloading pure_eval-0.2.2-py3-none-any.whl (11 kB)
+Collecting sniffio>=1.1 (from anyio>=3.1.0->jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0)
+  Downloading sniffio-1.3.0-py3-none-any.whl (10 kB)
+Collecting exceptiongroup (from anyio>=3.1.0->jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for exceptiongroup from https://files.pythonhosted.org/packages/fe/17/f43b7c9ccf399d72038042ee72785c305f6c6fdc6231942f8ab99d995742/exceptiongroup-1.1.2-py3-none-any.whl.metadata
+  Downloading exceptiongroup-1.1.2-py3-none-any.whl.metadata (6.1 kB)
+Collecting cffi>=1.12 (from cryptography>=2.0->SecretStorage>=3.2->keyring>=4.0->lvmdrp==0.1.1.dev0)
+  Downloading cffi-1.15.1-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (442 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 442.7/442.7 kB 150.3 MB/s eta 0:00:00
+Collecting partd>=1.2.0 (from dask[array]>=2020->reproject>=0.7->ccdproc==2.4.0->lvmdrp==0.1.1.dev0)
   Downloading partd-1.4.0-py3-none-any.whl (18 kB)
-Requirement already satisfied: rfc3986-validator>=0.1.1 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyter-events>=0.4.0->jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (0.1.1)
-Requirement already satisfied: python-json-logger>=2.0.4 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyter-events>=0.4.0->jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (2.0.7)
-Requirement already satisfied: rfc3339-validator in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jupyter-events>=0.4.0->jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (0.1.4)
-Requirement already satisfied: fastjsonschema in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from nbformat>=5.3.0->jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (2.16.3)
-Requirement already satisfied: aiosqlite<1,>=0.17.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from ypy-websocket<0.9.0,>=0.8.2->jupyter-server-ydoc<0.7.0,>=0.6.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (0.19.0)
-Requirement already satisfied: aiofiles<23,>=22.1.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from ypy-websocket<0.9.0,>=0.8.2->jupyter-server-ydoc<0.7.0,>=0.6.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (22.1.0)
-Requirement already satisfied: argon2-cffi-bindings in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from argon2-cffi->jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0) (21.2.0)
-Collecting asciitree
+Collecting toolz>=0.10.0 (from dask[array]>=2020->reproject>=0.7->ccdproc==2.4.0->lvmdrp==0.1.1.dev0)
+  Downloading toolz-0.12.0-py3-none-any.whl (55 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 55.8/55.8 kB 155.5 MB/s eta 0:00:00
+Collecting python-json-logger>=2.0.4 (from jupyter-events>=0.6.0->jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0)
+  Downloading python_json_logger-2.0.7-py3-none-any.whl (8.1 kB)
+Collecting rfc3339-validator (from jupyter-events>=0.6.0->jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0)
+  Downloading rfc3339_validator-0.1.4-py2.py3-none-any.whl (3.5 kB)
+Collecting rfc3986-validator>=0.1.1 (from jupyter-events>=0.6.0->jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0)
+  Downloading rfc3986_validator-0.1.1-py2.py3-none-any.whl (4.2 kB)
+Collecting fastjsonschema (from nbformat>=5.3.0->jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for fastjsonschema from https://files.pythonhosted.org/packages/9d/93/a3ca3cdeb84065d7d8f8df4cb09ab44405f109183c1d2b915ec17574e6b1/fastjsonschema-2.18.0-py3-none-any.whl.metadata
+  Downloading fastjsonschema-2.18.0-py3-none-any.whl.metadata (2.0 kB)
+Collecting aiofiles<23,>=22.1.0 (from ypy-websocket<0.9.0,>=0.8.2->jupyter-server-ydoc<0.7.0,>=0.6.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0)
+  Downloading aiofiles-22.1.0-py3-none-any.whl (14 kB)
+Collecting aiosqlite<1,>=0.17.0 (from ypy-websocket<0.9.0,>=0.8.2->jupyter-server-ydoc<0.7.0,>=0.6.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0)
+  Downloading aiosqlite-0.19.0-py3-none-any.whl (15 kB)
+Collecting argon2-cffi-bindings (from argon2-cffi->jupyter-server<3,>=1.16.0->jupyterlab==3.6.1->lvmdrp==0.1.1.dev0)
+  Downloading argon2_cffi_bindings-21.2.0-cp36-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (86 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 86.2/86.2 kB 167.9 MB/s eta 0:00:00
+Collecting asciitree (from zarr->reproject>=0.7->ccdproc==2.4.0->lvmdrp==0.1.1.dev0)
   Downloading asciitree-0.3.3.tar.gz (4.0 kB)
   Preparing metadata (setup.py): started
   Preparing metadata (setup.py): finished with status 'done'
-Collecting fasteners
+Collecting fasteners (from zarr->reproject>=0.7->ccdproc==2.4.0->lvmdrp==0.1.1.dev0)
   Downloading fasteners-0.18-py3-none-any.whl (18 kB)
-Collecting numcodecs>=0.10.0
+Collecting numcodecs>=0.10.0 (from zarr->reproject>=0.7->ccdproc==2.4.0->lvmdrp==0.1.1.dev0)
   Downloading numcodecs-0.11.0-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (6.7 MB)
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 6.7/6.7 MB 4.9 MB/s eta 0:00:00
-Requirement already satisfied: pycparser in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from cffi>=1.12->cryptography>=2.0->SecretStorage>=3.2->keyring>=4.0->lvmdrp==0.1.1.dev0) (2.21)
-Requirement already satisfied: webcolors>=1.11 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jsonschema!=2.5.0,>=2.4->lvmdrp==0.1.1.dev0) (1.13)
-Requirement already satisfied: fqdn in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jsonschema!=2.5.0,>=2.4->lvmdrp==0.1.1.dev0) (1.5.1)
-Requirement already satisfied: uri-template in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jsonschema!=2.5.0,>=2.4->lvmdrp==0.1.1.dev0) (1.2.0)
-Requirement already satisfied: jsonpointer>1.13 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jsonschema!=2.5.0,>=2.4->lvmdrp==0.1.1.dev0) (2.3)
-Requirement already satisfied: isoduration in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from jsonschema!=2.5.0,>=2.4->lvmdrp==0.1.1.dev0) (20.11.0)
-Collecting locket
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 6.7/6.7 MB 85.9 MB/s eta 0:00:00
+Collecting pycparser (from cffi>=1.12->cryptography>=2.0->SecretStorage>=3.2->keyring>=4.0->lvmdrp==0.1.1.dev0)
+  Downloading pycparser-2.21-py2.py3-none-any.whl (118 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 118.7/118.7 kB 184.6 MB/s eta 0:00:00
+Collecting fqdn (from jsonschema!=2.5.0,>=2.4->lvmdrp==0.1.1.dev0)
+  Downloading fqdn-1.5.1-py3-none-any.whl (9.1 kB)
+Collecting isoduration (from jsonschema!=2.5.0,>=2.4->lvmdrp==0.1.1.dev0)
+  Downloading isoduration-20.11.0-py3-none-any.whl (11 kB)
+Collecting jsonpointer>1.13 (from jsonschema!=2.5.0,>=2.4->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for jsonpointer>1.13 from https://files.pythonhosted.org/packages/12/f6/0232cc0c617e195f06f810534d00b74d2f348fe71b2118009ad8ad31f878/jsonpointer-2.4-py2.py3-none-any.whl.metadata
+  Downloading jsonpointer-2.4-py2.py3-none-any.whl.metadata (2.5 kB)
+Collecting uri-template (from jsonschema!=2.5.0,>=2.4->lvmdrp==0.1.1.dev0)
+  Obtaining dependency information for uri-template from https://files.pythonhosted.org/packages/e7/00/3fca040d7cf8a32776d3d81a00c8ee7457e00f80c649f1e4a863c8321ae9/uri_template-1.3.0-py3-none-any.whl.metadata
+  Downloading uri_template-1.3.0-py3-none-any.whl.metadata (8.8 kB)
+Collecting webcolors>=1.11 (from jsonschema!=2.5.0,>=2.4->lvmdrp==0.1.1.dev0)
+  Downloading webcolors-1.13-py3-none-any.whl (14 kB)
+Collecting locket (from partd>=1.2.0->dask[array]>=2020->reproject>=0.7->ccdproc==2.4.0->lvmdrp==0.1.1.dev0)
   Downloading locket-1.0.0-py2.py3-none-any.whl (4.4 kB)
-Requirement already satisfied: arrow>=0.15.0 in /home/sanchez/anaconda3/envs/lvmdrp/lib/python3.8/site-packages (from isoduration->jsonschema!=2.5.0,>=2.4->lvmdrp==0.1.1.dev0) (1.2.3)
-Building wheels for collected packages: lvmdrp, lvmsurveysim, asciitree
+Collecting arrow>=0.15.0 (from isoduration->jsonschema!=2.5.0,>=2.4->lvmdrp==0.1.1.dev0)
+  Downloading arrow-1.2.3-py3-none-any.whl (66 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 66.4/66.4 kB 159.3 MB/s eta 0:00:00
+Downloading click-8.1.6-py3-none-any.whl (97 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 97.9/97.9 kB 176.0 MB/s eta 0:00:00
+Downloading cloup-3.0.0-py2.py3-none-any.whl (53 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 53.9/53.9 kB 153.8 MB/s eta 0:00:00
+Downloading jsonschema-4.18.6-py3-none-any.whl (83 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 83.2/83.2 kB 163.0 MB/s eta 0:00:00
+Downloading keyring-24.2.0-py3-none-any.whl (37 kB)
+Downloading sdss_access-3.0.0-py2.py3-none-any.whl (37 kB)
+Downloading sdss_tree-4.0.2-py2.py3-none-any.whl (49 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 49.8/49.8 kB 103.3 MB/s eta 0:00:00
+Downloading sdsstools-1.1.0-py3-none-any.whl (38 kB)
+Downloading tornado-6.3.2-cp38-abi3-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl (426 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 426.9/426.9 kB 140.5 MB/s eta 0:00:00
+Downloading certifi-2023.7.22-py3-none-any.whl (158 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 158.3/158.3 kB 171.6 MB/s eta 0:00:00
+Downloading configparser-6.0.0-py3-none-any.whl (19 kB)
+Downloading contourpy-1.1.0-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (300 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 300.4/300.4 kB 166.1 MB/s eta 0:00:00
+Downloading Cython-3.0.0-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (3.6 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 3.6/3.6 MB 87.9 MB/s eta 0:00:00
+Downloading fonttools-4.42.0-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (4.6 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 4.6/4.6 MB 90.3 MB/s eta 0:00:00
+Downloading healpy-1.16.3-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (23.8 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 23.8/23.8 MB 82.8 MB/s eta 0:00:00
+Downloading importlib_metadata-6.8.0-py3-none-any.whl (22 kB)
+Downloading importlib_resources-6.0.0-py3-none-any.whl (31 kB)
+Downloading jedi-0.19.0-py2.py3-none-any.whl (1.6 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.6/1.6 MB 119.6 MB/s eta 0:00:00
+Downloading jsonschema_specifications-2023.7.1-py3-none-any.whl (17 kB)
+Downloading jupyter_server-2.7.0-py3-none-any.whl (375 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 375.1/375.1 kB 139.9 MB/s eta 0:00:00
+Downloading jupyter_core-5.3.1-py3-none-any.whl (93 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 93.7/93.7 kB 174.3 MB/s eta 0:00:00
+Downloading jupyter_ydoc-0.2.5-py3-none-any.whl (6.2 kB)
+Downloading jupyterlab_server-2.24.0-py3-none-any.whl (57 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 57.3/57.3 kB 128.8 MB/s eta 0:00:00
+Downloading MarkupSafe-2.1.3-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (25 kB)
+Downloading nbconvert-7.7.3-py3-none-any.whl (254 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 254.7/254.7 kB 138.6 MB/s eta 0:00:00
+Downloading notebook-6.5.5-py3-none-any.whl (529 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 529.8/529.8 kB 131.2 MB/s eta 0:00:00
+Downloading Pillow-10.0.0-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (3.3 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 3.3/3.3 MB 86.8 MB/s eta 0:00:00
+Downloading prompt_toolkit-3.0.39-py3-none-any.whl (385 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 385.2/385.2 kB 148.4 MB/s eta 0:00:00
+Downloading pyparsing-3.1.1-py3-none-any.whl (103 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 103.1/103.1 kB 288.5 MB/s eta 0:00:00
+Downloading PyYAML-6.0.1-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (736 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 736.6/736.6 kB 126.5 MB/s eta 0:00:00
+Downloading referencing-0.30.0-py3-none-any.whl (25 kB)
+Downloading reproject-0.11.0-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (1.5 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.5/1.5 MB 121.9 MB/s eta 0:00:00
+Downloading requests-2.31.0-py3-none-any.whl (62 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 62.6/62.6 kB 159.5 MB/s eta 0:00:00
+Downloading rpds_py-0.9.2-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (1.2 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.2/1.2 MB 130.5 MB/s eta 0:00:00
+Downloading synphot-1.2.1-cp38-cp38-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl (915 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 915.7/915.7 kB 130.8 MB/s eta 0:00:00
+Downloading typing_extensions-4.7.1-py3-none-any.whl (33 kB)
+Downloading ipykernel-6.25.0-py3-none-any.whl (153 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 153.9/153.9 kB 313.5 MB/s eta 0:00:00
+Downloading ipywidgets-8.1.0-py3-none-any.whl (139 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 139.3/139.3 kB 279.8 MB/s eta 0:00:00
+Downloading jaraco.classes-3.3.0-py3-none-any.whl (5.9 kB)
+Downloading scikit_image-0.21.0-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (13.9 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 13.9/13.9 MB 87.1 MB/s eta 0:00:00
+Downloading anyio-3.7.1-py3-none-any.whl (80 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 80.9/80.9 kB 286.5 MB/s eta 0:00:00
+Downloading charset_normalizer-3.2.0-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (199 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 199.1/199.1 kB 166.5 MB/s eta 0:00:00
+Downloading comm-0.1.4-py3-none-any.whl (6.6 kB)
+Downloading cryptography-41.0.3-cp37-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (4.3 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 4.3/4.3 MB 91.8 MB/s eta 0:00:00
+Downloading fsspec-2023.6.0-py3-none-any.whl (163 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 163.8/163.8 kB 183.9 MB/s eta 0:00:00
+Downloading imageio-2.31.1-py3-none-any.whl (313 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 313.2/313.2 kB 157.4 MB/s eta 0:00:00
+Downloading json5-0.9.14-py2.py3-none-any.whl (19 kB)
+Downloading jupyter_events-0.7.0-py3-none-any.whl (18 kB)
+Downloading jupyterlab_widgets-3.0.8-py3-none-any.whl (214 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 215.0/215.0 kB 196.1 MB/s eta 0:00:00
+Downloading lazy_loader-0.3-py3-none-any.whl (9.1 kB)
+Downloading mistune-3.0.1-py3-none-any.whl (47 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 48.0/48.0 kB 106.2 MB/s eta 0:00:00
+Downloading nbclient-0.8.0-py3-none-any.whl (73 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 73.1/73.1 kB 156.9 MB/s eta 0:00:00
+Downloading nbformat-5.9.2-py3-none-any.whl (77 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 77.6/77.6 kB 117.6 MB/s eta 0:00:00
+Downloading nest_asyncio-1.5.7-py3-none-any.whl (5.3 kB)
+Downloading platformdirs-3.10.0-py3-none-any.whl (17 kB)
+Downloading tifffile-2023.7.10-py3-none-any.whl (220 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 220.9/220.9 kB 191.1 MB/s eta 0:00:00
+Downloading urllib3-2.0.4-py3-none-any.whl (123 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 123.9/123.9 kB 179.1 MB/s eta 0:00:00
+Downloading widgetsnbextension-4.0.8-py3-none-any.whl (2.3 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.3/2.3 MB 116.2 MB/s eta 0:00:00
+Downloading zipp-3.16.2-py3-none-any.whl (7.2 kB)
+Downloading mock-5.1.0-py3-none-any.whl (30 kB)
+Downloading more_itertools-10.1.0-py3-none-any.whl (55 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 55.8/55.8 kB 125.7 MB/s eta 0:00:00
+Downloading prometheus_client-0.17.1-py3-none-any.whl (60 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 60.6/60.6 kB 130.6 MB/s eta 0:00:00
+Downloading websocket_client-1.6.1-py3-none-any.whl (56 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 56.9/56.9 kB 131.3 MB/s eta 0:00:00
+Downloading Werkzeug-2.3.6-py3-none-any.whl (242 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 242.5/242.5 kB 142.8 MB/s eta 0:00:00
+Downloading zarr-2.16.0-py3-none-any.whl (206 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 206.5/206.5 kB 122.0 MB/s eta 0:00:00
+Downloading dask-2023.5.0-py3-none-any.whl (1.2 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.2/1.2 MB 148.1 MB/s eta 0:00:00
+Downloading exceptiongroup-1.1.2-py3-none-any.whl (14 kB)
+Downloading fastjsonschema-2.18.0-py3-none-any.whl (23 kB)
+Downloading jsonpointer-2.4-py2.py3-none-any.whl (7.8 kB)
+Downloading uri_template-1.3.0-py3-none-any.whl (11 kB)
+Building wheels for collected packages: lvmdrp, dust_extinction, peewee, pydl, sbpy, lvmsurveysim, ads, httpretty, daemonocle, asciitree
   Building wheel for lvmdrp (setup.py): started
   Building wheel for lvmdrp (setup.py): finished with status 'done'
-  Created wheel for lvmdrp: filename=lvmdrp-0.1.1.dev0-py3-none-any.whl size=342997 sha256=4b63a136e011d241ffce52b359a755be36803a11e1cba08a4a3afe8177d21d6b
-  Stored in directory: /tmp/pip-ephem-wheel-cache-n4b7d78l/wheels/dc/93/cf/0f83fc9426302dd46e72a85858521d0c96fd914636a8bad93d
+  Created wheel for lvmdrp: filename=lvmdrp-0.1.1.dev0-py3-none-any.whl size=380999 sha256=dcfceddef091207eb494a3e4c79b4d3eb7e53bd4ab540af37173495122c5de07
+  Stored in directory: /tmp/pip-ephem-wheel-cache-nle8xn3t/wheels/dc/93/cf/0f83fc9426302dd46e72a85858521d0c96fd914636a8bad93d
+  Building wheel for dust_extinction (pyproject.toml): started
+  Building wheel for dust_extinction (pyproject.toml): finished with status 'done'
+  Created wheel for dust_extinction: filename=dust_extinction-1.1-py3-none-any.whl size=430940 sha256=5a889d30b28bf01ac493156a70e2d5188b2ef76c22050d31d9173a48913bfdbd
+  Stored in directory: /tmp/pip-ephem-wheel-cache-nle8xn3t/wheels/c0/58/7c/67930f4b7726e9997e4d9afdf10659b80a08072976eb6f07b8
+  Building wheel for peewee (setup.py): started
+  Building wheel for peewee (setup.py): finished with status 'done'
+  Created wheel for peewee: filename=peewee-3.15.4-py3-none-any.whl size=134786 sha256=c21ec607413fcca34954ef7314dae1a142d7e0ac471bec8b7393d7a52bda165a
+  Stored in directory: /tmp/pip-ephem-wheel-cache-nle8xn3t/wheels/85/86/97/f8cb63cd8062bcb1de3973a30bb2629be75d97a413a620022f
+  Building wheel for pydl (setup.py): started
+  Building wheel for pydl (setup.py): still running...
+  Building wheel for pydl (setup.py): finished with status 'done'
+  Created wheel for pydl: filename=pydl-0.7.0-py3-none-any.whl size=572124 sha256=85ec08208fde120937b536ec3790181dca810ec9d1dca2d6a74606a7aee42212
+  Stored in directory: /tmp/pip-ephem-wheel-cache-nle8xn3t/wheels/67/29/00/10c1bf90555698bebd8875adf5ccec8567c534a4405efeb6cc
+  Building wheel for sbpy (pyproject.toml): started
+  Building wheel for sbpy (pyproject.toml): finished with status 'done'
+  Created wheel for sbpy: filename=sbpy-0.3.0-py3-none-any.whl size=447674 sha256=b5e4c989779d801d0ae86bcd4c8be0caab95dd41d00ca9e2b114782baaa0fadb
+  Stored in directory: /tmp/pip-ephem-wheel-cache-nle8xn3t/wheels/b0/a2/02/0de39a265d028ac63aaebfd0dabfd91ec5d439bd2858dbf397
   Building wheel for lvmsurveysim (setup.py): started
   Building wheel for lvmsurveysim (setup.py): finished with status 'done'
-  Created wheel for lvmsurveysim: filename=lvmsurveysim-0.8.3-py3-none-any.whl size=75516 sha256=e86e96a4baf1b9ff800d6969bc59979ca01d143e71863e7e1dfa52bd17a067ea
-  Stored in directory: /tmp/pip-ephem-wheel-cache-n4b7d78l/wheels/9e/0f/b0/de718cb014eddecac1fbeee6b9ceccd056ef7feb6654d9ff3d
+  Created wheel for lvmsurveysim: filename=lvmsurveysim-0.8.3-py3-none-any.whl size=75516 sha256=2ed542d6dceb354977534a0d6110a7debf85329b33cef4c0ec896c44930a913b
+  Stored in directory: /tmp/pip-ephem-wheel-cache-nle8xn3t/wheels/9e/0f/b0/de718cb014eddecac1fbeee6b9ceccd056ef7feb6654d9ff3d
+  Building wheel for ads (setup.py): started
+  Building wheel for ads (setup.py): finished with status 'done'
+  Created wheel for ads: filename=ads-0.12.3-py3-none-any.whl size=37377 sha256=56335c90744ecf45007d6171a945bb945d473ad3e778bf03b1e07b163523a6e4
+  Stored in directory: /tmp/pip-ephem-wheel-cache-nle8xn3t/wheels/7a/ce/82/bdef3e2f7ec5de4d98a8748202c11cb8af7288cdf3b7be4882
+  Building wheel for httpretty (setup.py): started
+  Building wheel for httpretty (setup.py): finished with status 'done'
+  Created wheel for httpretty: filename=httpretty-0.8.10-py3-none-any.whl size=23997 sha256=cc355c7aa7a2ae669785a2dbdfc75a3ffbb6eb2a281c73a4492acfadee68e12d
+  Stored in directory: /tmp/pip-ephem-wheel-cache-nle8xn3t/wheels/6c/68/92/b970c457ae58e02209c65b5f66657c115fa740affe70c03114
+  Building wheel for daemonocle (setup.py): started
+  Building wheel for daemonocle (setup.py): finished with status 'done'
+  Created wheel for daemonocle: filename=daemonocle-1.2.3-py3-none-any.whl size=27547 sha256=29bac2899e5550d08b1f52d71b40758de471b4fdfadd091d3b4173cf83c11d55
+  Stored in directory: /tmp/pip-ephem-wheel-cache-nle8xn3t/wheels/e4/fc/10/0c5798a89c46c7b5f9c0726ad7a0ec291aef51d554afa5c924
   Building wheel for asciitree (setup.py): started
   Building wheel for asciitree (setup.py): finished with status 'done'
-  Created wheel for asciitree: filename=asciitree-0.3.3-py3-none-any.whl size=5032 sha256=e016bbe1fcc4b4e17e0bd1a2b61056cbd9be5b7bfd524a117e0c69233088c163
-  Stored in directory: /tmp/pip-ephem-wheel-cache-n4b7d78l/wheels/a3/d7/75/19cd0d2a893cad4bb0b2b16dd572ad2916d19c0d5ee9612511
-Successfully built lvmdrp lvmsurveysim asciitree
-Installing collected packages: asciitree, toolz, tifffile, scipy, PyWavelets, numcodecs, networkx, locket, lazy_loader, imageio, fsspec, fasteners, configparser, cloup, cloudpickle, bottleneck, zarr, scikit-image, partd, sdss-tree, dask, astroscrappy, sdss-access, lvmsurveysim, reproject, ccdproc, lvmdrp
-  Attempting uninstall: scipy
-    Found existing installation: scipy 1.10.0
-    Uninstalling scipy-1.10.0:
-      Successfully uninstalled scipy-1.10.0
-  Attempting uninstall: lvmsurveysim
-    Found existing installation: lvmsurveysim 0.9.0a0
-    Uninstalling lvmsurveysim-0.9.0a0:
-      Successfully uninstalled lvmsurveysim-0.9.0a0
-  Attempting uninstall: lvmdrp
-    Found existing installation: lvmdrp 0.1.0
-    Uninstalling lvmdrp-0.1.0:
-      Successfully uninstalled lvmdrp-0.1.0
-Successfully installed PyWavelets-1.4.1 asciitree-0.3.3 astroscrappy-1.1.0 bottleneck-1.3.7 ccdproc-2.4.0 cloudpickle-2.2.1 cloup-3.0.0 configparser-6.0.0 dask-2023.5.0 fasteners-0.18 fsspec-2023.6.0 imageio-2.31.1 lazy_loader-0.3 locket-1.0.0 lvmdrp-0.1.1.dev0 lvmsurveysim-0.8.4 networkx-3.1 numcodecs-0.11.0 partd-1.4.0 reproject-0.11.0 scikit-image-0.21.0 scipy-1.9.1 sdss-access-3.0.0 sdss-tree-4.0.2 tifffile-2023.7.10 toolz-0.12.0 zarr-2.16.0
+  Created wheel for asciitree: filename=asciitree-0.3.3-py3-none-any.whl size=5032 sha256=f26f889f9fe643add80f3a03ba65da90dafa523758a1f38a04e61f64eb9f984d
+  Stored in directory: /tmp/pip-ephem-wheel-cache-nle8xn3t/wheels/a3/d7/75/19cd0d2a893cad4bb0b2b16dd572ad2916d19c0d5ee9612511
+Successfully built lvmdrp dust_extinction peewee pydl sbpy lvmsurveysim ads httpretty daemonocle asciitree
+Installing collected packages: y-py, webencodings, wcwidth, sgp4, pytz, py-cpuinfo, pure-eval, ptyprocess, pickleshare, peewee, msgpack, json5, ipython-genutils, invoke, httpretty, fastjsonschema, executing, backcall, asciitree, zipp, widgetsnbextension, websocket-client, webcolors, urllib3, uri-template, typing-extensions, traitlets, tqdm, tornado, toolz, tomli, tinycss2, soupsieve, sniffio, six, send2trash, rpds-py, rfc3986-validator, pyzmq, PyYAML, python-json-logger, pyparsing, pygments, pycparser, psutil, prompt-toolkit, prometheus-client, platformdirs, pkgutil-resolve-name, pillow, pexpect, parso, pandocfilters, packaging, overrides, numpy, networkx, nest-asyncio, more-itertools, mock, mistune, MarkupSafe, locket, lazy_loader, kiwisolver, jupyterlab-widgets, jupyterlab-pygments, jsonpointer, jeepney, idna, fsspec, fqdn, fonttools, fasteners, exceptiongroup, entrypoints, defusedxml, decorator, debugpy, cython, cycler, configparser, cloudpickle, click, charset-normalizer, certifi, blosc2, backports.zoneinfo, babel, attrs, aiosqlite, aiofiles, ypy-websocket, werkzeug, tifffile, terminado, scipy, rfc3339-validator, requests, referencing, qtpy, PyWavelets, python-dateutil, pyerfa, partd, numexpr, numcodecs, matplotlib-inline, jupyter-core, jplephem, jinja2, jedi, jaraco.classes, importlib-resources, importlib-metadata, imageio, html5lib, h5py, daemonocle, contourpy, comm, cloup, cffi, bottleneck, bleach, beautifulsoup4, asttokens, astral, anyio, zarr, tables, stack-data, skyfield, skycalc_cli, sdsstools, scikit-image, pandas, matplotlib, jupyter-ydoc, jupyter-server-terminals, jupyter-client, jsonschema-specifications, dask, cryptography, astropy, arrow, argon2-cffi-bindings, ads, synphot, spherical_geometry, SecretStorage, sdss-tree, pyvo, pydl, jsonschema, isoduration, ipython, healpy, dust_extinction, astroscrappy, astropy_healpix, argon2-cffi, sdss-access, reproject, nbformat, lvmsurveysim, keyring, ipywidgets, ipykernel, qtconsole, nbclient, jupyter-events, jupyter-console, ccdproc, astroquery, sbpy, nbconvert, jupyter-server, notebook-shim, jupyterlab-server, jupyter-server-fileid, nbclassic, jupyter-server-ydoc, notebook, jupyterlab, jupyter, lvmdrp
+Successfully installed MarkupSafe-2.1.3 PyWavelets-1.4.1 PyYAML-6.0.1 SecretStorage-3.3.3 ads-0.12.3 aiofiles-22.1.0 aiosqlite-0.19.0 anyio-3.7.1 argon2-cffi-21.3.0 argon2-cffi-bindings-21.2.0 arrow-1.2.3 asciitree-0.3.3 astral-3.2 astropy-5.2 astropy_healpix-0.7 astroquery-0.4.6 astroscrappy-1.1.0 asttokens-2.2.1 attrs-23.1.0 babel-2.12.1 backcall-0.2.0 backports.zoneinfo-0.2.1 beautifulsoup4-4.12.2 bleach-6.0.0 blosc2-2.0.0 bottleneck-1.3.7 ccdproc-2.4.0 certifi-2023.7.22 cffi-1.15.1 charset-normalizer-3.2.0 click-8.1.6 cloudpickle-2.2.1 cloup-3.0.0 comm-0.1.4 configparser-6.0.0 contourpy-1.1.0 cryptography-41.0.3 cycler-0.11.0 cython-3.0.0 daemonocle-1.2.3 dask-2023.5.0 debugpy-1.6.7 decorator-5.1.1 defusedxml-0.7.1 dust_extinction-1.1 entrypoints-0.4 exceptiongroup-1.1.2 executing-1.2.0 fasteners-0.18 fastjsonschema-2.18.0 fonttools-4.42.0 fqdn-1.5.1 fsspec-2023.6.0 h5py-3.8.0 healpy-1.16.3 html5lib-1.1 httpretty-0.8.10 idna-3.4 imageio-2.31.1 importlib-metadata-6.8.0 importlib-resources-6.0.0 invoke-1.7.3 ipykernel-6.25.0 ipython-8.10.0 ipython-genutils-0.2.0 ipywidgets-8.1.0 isoduration-20.11.0 jaraco.classes-3.3.0 jedi-0.19.0 jeepney-0.8.0 jinja2-3.1.2 jplephem-2.18 json5-0.9.14 jsonpointer-2.4 jsonschema-4.18.6 jsonschema-specifications-2023.7.1 jupyter-1.0.0 jupyter-client-7.4.9 jupyter-console-6.6.3 jupyter-core-5.3.1 jupyter-events-0.7.0 jupyter-server-2.7.0 jupyter-server-fileid-0.9.0 jupyter-server-terminals-0.4.4 jupyter-server-ydoc-0.6.1 jupyter-ydoc-0.2.5 jupyterlab-3.6.1 jupyterlab-pygments-0.2.2 jupyterlab-server-2.24.0 jupyterlab-widgets-3.0.8 keyring-24.2.0 kiwisolver-1.4.4 lazy_loader-0.3 locket-1.0.0 lvmdrp-0.1.1.dev0 lvmsurveysim-0.8.3 matplotlib-3.6.2 matplotlib-inline-0.1.6 mistune-3.0.1 mock-5.1.0 more-itertools-10.1.0 msgpack-1.0.5 nbclassic-1.0.0 nbclient-0.8.0 nbconvert-7.7.3 nbformat-5.9.2 nest-asyncio-1.5.7 networkx-3.1 notebook-6.5.5 notebook-shim-0.2.3 numcodecs-0.11.0 numexpr-2.8.4 numpy-1.24.1 overrides-7.3.1 packaging-23.1 pandas-1.5.3 pandocfilters-1.5.0 parso-0.8.3 partd-1.4.0 peewee-3.15.4 pexpect-4.8.0 pickleshare-0.7.5 pillow-10.0.0 pkgutil-resolve-name-1.3.10 platformdirs-3.10.0 prometheus-client-0.17.1 prompt-toolkit-3.0.39 psutil-5.9.5 ptyprocess-0.7.0 pure-eval-0.2.2 py-cpuinfo-9.0.0 pycparser-2.21 pydl-0.7.0 pyerfa-2.0.0.3 pygments-2.15.1 pyparsing-3.1.1 python-dateutil-2.8.2 python-json-logger-2.0.7 pytz-2023.3 pyvo-1.4.1 pyzmq-24.0.1 qtconsole-5.4.3 qtpy-2.3.1 referencing-0.30.0 reproject-0.11.0 requests-2.31.0 rfc3339-validator-0.1.4 rfc3986-validator-0.1.1 rpds-py-0.9.2 sbpy-0.3.0 scikit-image-0.21.0 scipy-1.9.1 sdss-access-3.0.0 sdss-tree-4.0.2 sdsstools-1.1.0 send2trash-1.8.2 sgp4-2.22 six-1.16.0 skycalc_cli-1.4 skyfield-1.45 sniffio-1.3.0 soupsieve-2.4.1 spherical_geometry-1.2.23 stack-data-0.6.2 synphot-1.2.1 tables-3.8.0 terminado-0.17.1 tifffile-2023.7.10 tinycss2-1.2.1 tomli-2.0.1 toolz-0.12.0 tornado-6.3.2 tqdm-4.64.1 traitlets-5.9.0 typing-extensions-4.7.1 uri-template-1.3.0 urllib3-2.0.4 wcwidth-0.2.6 webcolors-1.13 webencodings-0.5.1 websocket-client-1.6.1 werkzeug-2.3.6 widgetsnbextension-4.0.8 y-py-0.6.0 ypy-websocket-0.8.4 zarr-2.16.0 zipp-3.16.2
