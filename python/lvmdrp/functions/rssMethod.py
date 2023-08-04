@@ -9,6 +9,7 @@ import matplotlib
 import matplotlib.gridspec as gridspec
 import numpy
 import yaml
+import bottleneck as bn
 from astropy import units as u
 from astropy.io import fits
 from astropy.table import Table
@@ -24,8 +25,8 @@ from lvmdrp.core.fiberrows import FiberRows
 from lvmdrp.core.image import loadImage
 from lvmdrp.core.passband import PassBand
 from lvmdrp.core.plot import plt, create_subplots, save_fig, plot_wavesol_residuals, plot_wavesol_coeffs
-from lvmdrp.core.rss import RSS, _read_pixwav_map, _chain_join, glueRSS, loadRSS
-from lvmdrp.core.spectrum1d import Spectrum1D, _spec_from_lines, _cross_match
+from lvmdrp.core.rss import RSS, _read_pixwav_map, glueRSS, loadRSS
+from lvmdrp.core.spectrum1d import Spectrum1D, wave_little_interpol, _spec_from_lines, _cross_match
 from lvmdrp.external import ancillary_func
 from lvmdrp.utils import flatten
 from lvmdrp import log
@@ -2703,92 +2704,72 @@ def DAR_registerSDSS_drp(
         plt.show()
 
 
-def join_spec_channels(in_rss: list, out_rss: list, parallel: str = "auto"):
+def join_spec_channels(in_rss: List[str], out_rss: str):
     """combine the given RSS list through the overlaping wavelength range
 
     Run once per exposure, for one spectrograph at a time.
     in_rss is a list of 3 files, one for each channel, for a given
     exposure and spectrograph id.
 
-    #TODO refactor this code - vectorize the fiber coadds
-
     Parameters
     ----------
     in_rss : array_like
-        list of RSS file paths
+        list of RSS file paths for each spectrograph channel
     out_rss : str
         output RSS file path
-    parallel : str, optional
-        whether to run in parallel or not, by default "auto"
+
+    Returns
+    -------
+    RSS
+        combined RSS
     """
-    rss_b = loadRSS(in_rss[0]) if in_rss[0] else None
-    rss_r = loadRSS(in_rss[1]) if in_rss[1] else None
-    rss_z = loadRSS(in_rss[2]) if in_rss[2] else None
 
-    # check number of fibers in b, r, z
-    n_fibers = [i._data.shape[0] if i else None for i in [rss_b, rss_r, rss_z]]
-    uniq_nfib = len(set([i for i in n_fibers if i]))
-    if uniq_nfib != 1:
-        log.error(f'Unequal number of fibers in b, r, z: {n_fibers}.  Check fiber id and trace.')
-        log.error('Cannot combine cameras.')
-        return
+    # read all three channels
+    log.info(f"loading RSS files: {in_rss}")
+    rsss = [loadRSS(rss_path) for rss_path in in_rss]
+    # set masked pixels to NaN
+    [rss.apply_pixelmask() for rss in rsss]
 
-    # select one of them
-    rr = rss_b or rss_r or rss_z
+    # get wavelengths
+    log.info("computing best wavelength array")
+    waves = [rss._wave for rss in rsss]
+    # compute the combined wavelengths
+    new_wave = wave_little_interpol(waves)
+    sampling = numpy.diff(new_wave)
+    log.info(f"new wavelength sampling: min = {sampling.min()}, max = {sampling.max()}")
 
-    # TODO: verify all RSS files have the same number of fibers
-    # TODO: verify overlapping wavelength ranges
+    # define interpolators
+    log.info("interpolating RSS data in new wavelength array")
+    fluxes_f = [interpolate.interp1d(rss._wave, rss._data, axis=1, bounds_error=False, fill_value=numpy.nan) for rss in rsss]
+    errors_f = [interpolate.interp1d(rss._wave, rss._error, axis=1, bounds_error=False, fill_value=numpy.nan) for rss in rsss]
+    lsfs_f = [interpolate.interp1d(rss._wave, rss._inst_fwhm, axis=1, bounds_error=False, fill_value=numpy.nan) for rss in rsss]
+    # evaluate interpolators
+    fluxes = numpy.asarray([f(new_wave) for f in fluxes_f])
+    errors = numpy.asarray([f(new_wave) for f in errors_f])
+    lsfs = numpy.asarray([f(new_wave) for f in lsfs_f])
 
-    # parallel or not
-    if parallel == "auto":
-        cpus = cpu_count()
-    else:
-        cpus = int(parallel)
-    if cpus > 1:
-        pool = Pool(cpus)
+    # define weights for channel combination
+    log.info("calculating weights for channel combination")
+    weights = 1.0 / errors ** 2
+    norms = bn.nansum(weights, axis=0)
+    weights = weights / norms[None, :, :]
 
-        result_spec = []
-        for ifiber in range(rr._fibers):
-            spec_b = rss_b.getSpec(ifiber) if rss_b else None
-            spec_r = rss_r.getSpec(ifiber) if rss_r else None
-            spec_z = rss_z.getSpec(ifiber) if rss_z else None
+    # channel-combine RSS data
+    log.info("combining channel data")
+    fluxes_spec = bn.nansum(fluxes * weights, axis=0)
+    lsfs_spec = bn.nansum(lsfs * weights, axis=0)
+    errors_spec = numpy.sqrt(1 / bn.nansum(weights * norms[None, :, :], axis=0))
 
-            result_spec.append(
-                pool.apply_async(_chain_join, args=(spec_b, spec_r, spec_z))
-            )
-        pool.close()
-        pool.join()
+    # define new pixel mask
+    mask_spec = bn.nansum([rss._mask for rss in rsss], axis=0).astype(bool)
 
-    # combine channels
-    spectra = []
-    for ifiber in range(rr._data.shape[0]):
-        if cpus > 1:
-            spec_brz = result_spec[ifiber].get()
-        else:
-            spec_b = rss_b.getSpec(ifiber) if rss_b else None
-            spec_r = rss_r.getSpec(ifiber) if rss_r else None
-            spec_z = rss_z.getSpec(ifiber) if rss_z else None
-
-            #spec_br = spec_b.coaddSpec(spec_r)
-            #spec_brz = spec_br.coaddSpec(spec_z)
-            spec_brz = _chain_join(spec_b, spec_r, spec_z)
-
-        spectra.append(spec_brz)
-
-    # update header
-    header = rr._header.copy()
-    header["CCD"] = ",".join(
-        [i._header["CCD"] for i in [rss_b, rss_r, rss_z] if i]
-    )
-    if "CAMERAS" in header:
-        header["CAMERAS"] = header["CCD"].translate({ord(i): None for i in "123"})
     # create RSS
-    rss_brz = RSS.from_spectra1d(spectra, header=header)
-    # update mask
-    rss_brz._mask = numpy.logical_or(rss_brz._mask, numpy.isnan(rss_brz._data))
+    log.info(f"writing output RSS to {os.path.basename(out_rss)}")
+    new_rss = RSS(data=fluxes_spec, error=errors_spec, mask=mask_spec, wave=new_wave, inst_fwhm=lsfs_spec)
+    # write output RSS
+    new_rss.writeFitsData(out_rss)
 
-    rss_brz.writeFitsData(out_rss)
-
+    return new_rss
 
 # TODO: from Law+2016
 # 	* normalize each fiber to unity
