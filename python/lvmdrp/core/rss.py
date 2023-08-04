@@ -1932,6 +1932,22 @@ class RSS(FiberRows):
         return posTab
 
 
+    def apply_pixelmask(self, mask=None):
+        if mask is None:
+            mask = self._mask
+        if mask is None:
+            return self._data, self._error, self._inst_fwhm
+
+        if self._mask is not None:
+            self._data[self._mask] = numpy.nan
+            if self._error is not None:
+                self._error[self._mask] = numpy.nan
+            if self._inst_fwhm is not None:
+                self._inst_fwhm[self._mask] = numpy.nan
+
+        return self._data, self._error, self._inst_fwhm
+
+
 def loadRSS(infile, extension_data=None, extension_mask=None, extension_error=None):
     rss = RSS()
     rss.loadFitsData(
