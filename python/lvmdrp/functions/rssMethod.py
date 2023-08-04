@@ -2757,10 +2757,12 @@ def join_spec_channels(in_rss: List[str], out_rss: str):
     log.info("interpolating RSS data in new wavelength array")
     fluxes_f = [interpolate.interp1d(rss._wave, rss._data, axis=1, bounds_error=False, fill_value=numpy.nan) for rss in rsss]
     errors_f = [interpolate.interp1d(rss._wave, rss._error, axis=1, bounds_error=False, fill_value=numpy.nan) for rss in rsss]
+    masks_f = [interpolate.interp1d(rss._wave, rss._mask, axis=1, kind="nearest", bounds_error=False, fill_value=numpy.nan) for rss in rsss]
     lsfs_f = [interpolate.interp1d(rss._wave, rss._inst_fwhm, axis=1, bounds_error=False, fill_value=numpy.nan) for rss in rsss]
     # evaluate interpolators
     fluxes = numpy.asarray([f(new_wave) for f in fluxes_f])
     errors = numpy.asarray([f(new_wave) for f in errors_f])
+    masks = numpy.asarray([f(new_wave) for f in masks_f])
     lsfs = numpy.asarray([f(new_wave) for f in lsfs_f])
 
     # define weights for channel combination
@@ -2771,16 +2773,19 @@ def join_spec_channels(in_rss: List[str], out_rss: str):
 
     # channel-combine RSS data
     log.info("combining channel data")
-    fluxes_spec = bn.nansum(fluxes * weights, axis=0)
-    lsfs_spec = bn.nansum(lsfs * weights, axis=0)
-    errors_spec = numpy.sqrt(1 / bn.nansum(weights * norms[None, :, :], axis=0))
-
-    # define new pixel mask
-    mask_spec = bn.nansum([rss._mask for rss in rsss], axis=0).astype(bool)
+    new_data = bn.nansum(fluxes * weights, axis=0)
+    new_inst_fwhm = bn.nansum(lsfs * weights, axis=0)
+    new_error = numpy.sqrt(1 / bn.nansum(weights * norms[None, :, :], axis=0))
+    new_mask = bn.nansum(masks, axis=0).astype(bool)
 
     # create RSS
     log.info(f"writing output RSS to {os.path.basename(out_rss)}")
-    new_rss = RSS(data=fluxes_spec, error=errors_spec, mask=mask_spec, wave=new_wave, inst_fwhm=lsfs_spec)
+    new_hdr = rsss[0]._header.copy()
+    new_hdr["CCD"] = ",".join([rss._header["CCD"] for rss in rsss])
+    new_hdr["CDELT1"] = new_wave[1] - new_wave[0]
+    new_hdr["CRVAL1"] = new_wave[0]
+    new_hdr["NAXIS1"] = len(new_wave)
+    new_rss = RSS(data=new_data, error=new_error, mask=new_mask, wave=new_wave, inst_fwhm=new_inst_fwhm, header=new_hdr)
     # write output RSS
     new_rss.writeFitsData(out_rss)
 
