@@ -2,6 +2,7 @@ import numpy
 from astropy.io import fits as pyfits
 from tqdm import tqdm
 
+from lvmdrp.core.plot import plt
 from lvmdrp.core.header import Header, combineHdr
 from lvmdrp.core.positionTable import PositionTable
 from lvmdrp.core.spectrum1d import Spectrum1D
@@ -12,7 +13,7 @@ def _read_fiber_ypix(peaks_file):
     Read peaks file and return the fiber number, pixel position, subpixel position
     and quality flag.
     """
-    peaks = pyfits.open(peaks_file)
+    peaks = pyfits.open(peaks_file, memmap=False)
     xpos = peaks[1].header["XPIX"]
     fiber = peaks[1].data["FIBER"]
     pixel = peaks[1].data["PIXEL"]
@@ -681,7 +682,7 @@ class FiberRows(Header, PositionTable):
         extension_error : int, optional with default: None
             Number of the FITS extension containing the errors for the values
         """
-        hdu = pyfits.open(file, uint=True, do_not_scale_image_data=True)
+        hdu = pyfits.open(file, uint=True, do_not_scale_image_data=True, memmap=False)
         if (
             extension_data is None
             and extension_mask is None
@@ -824,7 +825,7 @@ class FiberRows(Header, PositionTable):
         flux_min=100,
         fwhm_max=10,
         rel_flux_limits=[0.2, 5],
-        verbose=True,
+        axs=None,
     ):
         nlines = len(ref_cent)
         cent_wave = numpy.zeros((self._fibers, nlines), dtype=numpy.float32)
@@ -833,7 +834,7 @@ class FiberRows(Header, PositionTable):
         masked = numpy.zeros((self._fibers, nlines), dtype="bool")
 
         spec = self.getSpec(ref_fiber)
-        fit = spec.fitSepGauss(ref_cent, aperture, init_back)
+        fit = spec.fitSepGauss(ref_cent, aperture, init_back, axs=axs)
         masked[ref_fiber, :] = False
         flux[ref_fiber, :] = fit[:nlines]
         ref_flux = flux[ref_fiber, :]
@@ -842,21 +843,17 @@ class FiberRows(Header, PositionTable):
         first = numpy.arange(ref_fiber - 1, -1, -1)
         second = numpy.arange(ref_fiber + 1, self._fibers, 1)
 
-        if verbose:
-            iterator = tqdm(
-                first,
-                total=first.size,
-                desc=f"measuring arc lines upwards from {ref_fiber = }",
-                ascii=True,
-                unit="fiber",
-            )
-        else:
-            iterator = first
-        plot = False
+        iterator = tqdm(
+            first,
+            total=first.size,
+            desc=f"measuring arc lines upwards from {ref_fiber = }",
+            ascii=True,
+            unit="fiber",
+        )
         for i in iterator:
             spec = self.getSpec(i)
 
-            fit = spec.fitSepGauss(cent_wave[i + 1], aperture, init_back, plot=plot)
+            fit = spec.fitSepGauss(cent_wave[i + 1], aperture, init_back, axs=None)
             flux[i, :] = numpy.fabs(fit[:nlines])
             cent_wave[i, :] = fit[nlines : 2 * nlines]
             fwhm[i, :] = fit[2 * nlines : 3 * nlines] * 2.354
@@ -881,26 +878,18 @@ class FiberRows(Header, PositionTable):
                 cent_wave[i, select] = cent_wave[i + 1, select]
                 fwhm[i, select] = fwhm[i + 1, select]
                 masked[i, select] = True
-            else:
-                plot = False
 
-        if verbose:
-            iterator = tqdm(
-                second,
-                total=second.size,
-                desc=f"measuring arc lines downwards from {ref_fiber = }",
-                ascii=True,
-                unit="fiber",
-            )
-        else:
-            iterator = second
+        iterator = tqdm(
+            second,
+            total=second.size,
+            desc=f"measuring arc lines downwards from {ref_fiber = }",
+            ascii=True,
+            unit="fiber",
+        )
         for i in iterator:
             spec = self.getSpec(i)
-            if i == 10:
-                plot = True
-            else:
-                plot = False
-            fit = spec.fitSepGauss(cent_wave[i - 1], aperture, init_back, plot=plot)
+            
+            fit = spec.fitSepGauss(cent_wave[i - 1], aperture, init_back, axs=None)
             flux[i, :] = numpy.fabs(fit[:nlines])
             cent_wave[i, :] = fit[nlines : 2 * nlines]
             fwhm[i, :] = fit[2 * nlines : 3 * nlines] * 2.354

@@ -12,13 +12,13 @@ reduction_steps:
     median_box: [1, 10]
   trace_peaks:
     steps: 30
-    coadd: 1
-    threshold: 0
-    max_diff: 2
-    method: hyperbolic
+    coadd: 5
+    threshold: 0.5
+    max_diff: 1
+    method: gauss
     median_box: 10
     median_cross: 1
-    poly_disp: 2
+    poly_disp: 5
   extract_spectra:
     default:
       method: aperture

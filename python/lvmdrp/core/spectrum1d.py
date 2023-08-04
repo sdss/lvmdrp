@@ -9,8 +9,18 @@ from scipy import signal, interpolate, ndimage, sparse
 from scipy.ndimage import zoom
 from typing import List, Tuple
 
+from lvmdrp.utils import gaussian
 from lvmdrp.core import fit_profile
 from lvmdrp.core.header import Header
+
+
+def _spec_from_lines(lines: numpy.ndarray, sigma: float, wavelength: numpy.ndarray, heights: numpy.ndarray = None, names: numpy.ndarray = None):
+    rss = numpy.zeros((len(lines), wavelength.size))
+    for i, line in enumerate(lines):
+        rss[i] = gaussian(wavelength, mean=line, stddev=sigma)
+    if heights is not None:
+        rss = rss / rss.max() * heights[:, None]
+    return rss.sum(axis=0)
 
 
 def _shift_spectrum(spectrum: numpy.ndarray, shift: int) -> numpy.ndarray:
@@ -771,7 +781,7 @@ class Spectrum1D(Header):
             Number of the FITS extension containing the errors for the values
         """
 
-        hdu = pyfits.open(file, uint=True, do_not_scale_image_data=True)
+        hdu = pyfits.open(file, uint=True, do_not_scale_image_data=True, memmap=False)
         if (
             extension_data is None
             and extension_mask is None
@@ -1625,10 +1635,12 @@ class Spectrum1D(Header):
             Array of pixels with uncertain measurements
         """
         # compute the minimum and maximum value for the 3 pixels around all peaks
+        # selection of fibers within the boundaries of the detector
         select = numpy.logical_and(
             init_pos - 1 >= [0], init_pos + 1 <= self._data.shape[0] - 1
         )
         mask = numpy.zeros(len(init_pos), dtype="bool")
+        # minimum counts of three pixels around each peak
         min = numpy.amin(
             [
                 numpy.take(self._data, init_pos[select] + 1),
@@ -1637,6 +1649,7 @@ class Spectrum1D(Header):
             ],
             axis=0,
         )
+        # minimum counts of three pixels around each peak
         max = numpy.amax(
             [
                 numpy.take(self._data, init_pos[select] + 1),
@@ -1645,9 +1658,10 @@ class Spectrum1D(Header):
             ],
             axis=0,
         )
-        mask[select] = (
-            max - min
-        ) < threshold  # mask all peaks where the contrast between maximum and minimum is below a threshold
+        # print(init_pos, max)
+        # mask all peaks where the contrast between maximum and minimum is below a threshold
+        mask[select] = (max) < threshold
+        # masking fibers outside the detector
         mask[numpy.logical_not(select)] = True
 
         if method == "hyperbolic":
@@ -2016,74 +2030,65 @@ class Spectrum1D(Header):
         init_back=0.0,
         ftol=1e-8,
         xtol=1e-8,
-        plot=False,
+        axs=None,
         warning=False,
     ):
         ncomp = len(centres)
-        cent = numpy.zeros(ncomp, dtype=numpy.float32)
+
         out = numpy.zeros(3 * ncomp, dtype=numpy.float32)
-        back = numpy.zeros(ncomp, dtype=numpy.float32)
-        if self._error is not None:
-            error = self._error
-        else:
-            error = numpy.ones(self._dim, dtype=numpy.float32)
-        if self._mask is not None:
-            mask = self._mask
-        else:
-            mask = numpy.zero(self._dim, dtype="bool")
-        for i in range(len(centres)):
-            back[i] = deepcopy(init_back)
-            select = numpy.logical_and(
-                numpy.logical_and(
-                    self._wave >= centres[i] - aperture / 2.0,
-                    self._wave <= centres[i] + aperture / 2.0,
-                ),
-                numpy.logical_not(mask),
-            )
+        back = [deepcopy(init_back) for _ in centres]
+
+        error = self._error if self._error is not None else numpy.ones(self._dim, dtype=numpy.float32)
+        mask = self._mask if self._mask is not None else numpy.zeros(self._dim, dtype=bool)
+
+        for i, centre in enumerate(centres):
+            select = self._get_select(centre, aperture, mask)
             if numpy.sum(select) > 0:
                 max = numpy.max(self._data[select])
                 cent = numpy.median(self._wave[select][self._data[select] == max])
-                select = numpy.logical_and(
-                    self._wave >= cent - aperture / 2.0,
-                    self._wave <= cent + aperture / 2.0,
-                    numpy.logical_not(mask),
-                )
-                if back[i] == 0.0:
-                    par = [0.0, 0.0, 0.0]
-                    gauss = fit_profile.Gaussian(par)
-                    gauss.fit(
-                        self._wave[select],
-                        self._data[select],
-                        sigma=error[select],
-                        ftol=ftol,
-                        xtol=xtol,
-                        warning=warning,
-                    )
-                else:
-                    par = [0.0, 0.0, 0.0, 0.0]
-                    gauss = fit_profile.Gaussian_const(par)
-                    gauss.fit(
-                        self._wave[select],
-                        self._data[select],
-                        sigma=error[select],
-                        ftol=ftol,
-                        xtol=xtol,
-                        warning=warning,
-                    )
+                select = self._get_select(cent, aperture, mask)
+
+                gauss = self._fit_gaussian(select, back[i], error, ftol, xtol, warning)
+
                 out_fit = gauss.getPar()
                 out[i] = out_fit[0]
                 out[ncomp + i] = out_fit[1]
                 out[2 * ncomp + i] = out_fit[2]
-                if plot:
-                    gauss.plot(self._wave[select], self._data[select])
 
+                if axs is not None:
+                    axs[i] = gauss.plot(self._wave[select], self._data[select], ax=axs[i])
             else:
-                out[i] = 0.0
-                out[ncomp + i] = 0.0
-                out[2 * ncomp + i] = 0.0
-        if plot:
-            plt.show()
+                out[i:ncomp + i + 1] = 0.0
+
         return out
+
+    def _get_select(self, centre, aperture, mask):
+        return numpy.logical_and(
+            numpy.logical_and(
+                self._wave >= centre - aperture / 2.0,
+                self._wave <= centre + aperture / 2.0,
+            ),
+            numpy.logical_not(mask),
+        )
+
+    def _fit_gaussian(self, select, back, error, ftol, xtol, warning):
+        if back == 0.0:
+            par = [0.0, 0.0, 0.0]
+            gauss = fit_profile.Gaussian(par)
+        else:
+            par = [0.0, 0.0, 0.0, 0.0]
+            gauss = fit_profile.Gaussian_const(par)
+
+        gauss.fit(
+            self._wave[select],
+            self._data[select],
+            sigma=error[select],
+            ftol=ftol,
+            xtol=xtol,
+            warning=warning,
+        )
+
+        return gauss
 
     def obtainGaussFluxPeaks(self, pos, sigma, indices, replace_error=1e10, plot=False):
         """returns Gaussian peaks parameters, flux error and mask
@@ -2144,29 +2149,29 @@ class Spectrum1D(Header):
         select = A > 0.0001
         A = A / self._error[:, None]
 
-        plt.figure(figsize=(10, 10))
-        plt.imshow(A, origin="lower")
-        plt.show()
+        # plt.figure(figsize=(10, 10))
+        # plt.imshow(A, origin="lower")
+        # plt.show()
 
         B = sparse.csr_matrix(
             (A[select], (indices[0][select], indices[1][select])),
             shape=(self._dim, fibers),
         ).todense()
-        print(B)
+        # print(B)
         out = sparse.linalg.lsqr(
             B, self._data / self._error, atol=1e-7, btol=1e-7, conlim=1e13
         )
-        print(out)
+        # print(out)
 
         error = numpy.sqrt(1 / numpy.sum((A**2), 0))
         if bad_pix is not None and numpy.sum(bad_pix) > 0:
             error[bad_pix] = replace_error
-        if plot:
-            plt.figure(figsize=(15, 10))
-            plt.plot(self._data, "ok")
-            plt.plot(numpy.dot(A * self._error[:, None], out[0]), "-r")
-            # plt.plot(numpy.dot(A, out[0]), '-r')
-            plt.show()
+        # if plot:
+        #     plt.figure(figsize=(15, 10))
+        #     plt.plot(self._data, "ok")
+        #     plt.plot(numpy.dot(A * self._error[:, None], out[0]), "-r")
+        #     # plt.plot(numpy.dot(A, out[0]), '-r')
+        #     plt.show()
         return out[0], error, bad_pix, B, A
 
     def collapseSpec(self, method="mean", start=None, end=None, transmission_func=None):

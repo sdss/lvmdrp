@@ -460,7 +460,7 @@ def get_master_metadata(overwrite: bool = None) -> pd.DataFrame:
     """
 
     # glob for all file master calibration files, only include bias,darks,arcs,flats
-    files = list(pathlib.Path(os.getenv("LVM_SPECTRO_REDUX")).rglob("*calib/*lvm-m[bdpaf]*"))
+    files = list(pathlib.Path(os.getenv("LVM_SPECTRO_REDUX")).rglob("*calib/*lvm-m[bdpaft]*"))
 
     if _load_or_create_store(kind="master", mode="r") and not overwrite:
         log.info("Loading existing metadata store.")
@@ -1125,10 +1125,9 @@ def create_master_path(row: pd.Series) -> str:
 
 
 def match_master_metadata(
+    target_mjd,
     target_imagetyp,
     target_camera,
-    mjd=None,
-    rmjd=None,
     hemi=None,
     exptime=None,
     neon=None,
@@ -1152,14 +1151,12 @@ def match_master_metadata(
 
     Parameters
     ----------
+    target_mjd : int
+        SJD where the target frames is located
     target_imagetyp : str
         type/flavor of frame to locate `IMAGETYP`
     target_camera : str
         camera ID of the target frames
-    mjd : int, optional
-        SJD where the target frames is located, by default None
-    rmjd : int, optional
-        the real MJD
     hemi : str, optional
         hemisphere where the target frames were taken, by default None
     exptime : float, optional
@@ -1249,8 +1246,6 @@ def match_master_metadata(
     for calib_type in frame_needs:
         calib_metadata = _filter_metadata(
             metadata=masters_metadata,
-            mjd=mjd,
-            rmjd=rmjd,
             imagetyp=calib_type,
             camera=target_camera,
             exptime=exptime,
@@ -1269,7 +1264,11 @@ def match_master_metadata(
             log.warning(f"no master {calib_type} frame found")
         else:
             log.info(f"found master {calib_type}")
-            calib_frames[calib_type] = calib_metadata.iloc[0]
+            # keep calibration frames with the closest MJD to target_mjd
+            calib_frames[calib_type] = calib_metadata.iloc[
+                np.argmin(np.abs(calib_metadata.mjd - target_mjd))
+            ]
+
     return calib_frames
 
 

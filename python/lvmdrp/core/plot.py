@@ -201,6 +201,44 @@ def plot_strips(
     return ax
 
 
+def plot_wavesol_residuals(lines_pixels, lines_waves, model_waves, ax=None, labels=False):
+    # lines_pixels [X, Y] of emission lines in a given lamp
+    # wavelength model poly_model(lines_centroids)
+    # lines_waves is an X array of the true wavelengths
+
+    residuals = model_waves - lines_waves
+    
+    ax.axhline(ls="--", lw=1, color="0.8")
+    ax.scatter(lines_pixels, residuals, s=10)
+    for i in range(residuals.size):
+        x, y = lines_pixels[i], residuals[i]
+        ax.annotate(f"{lines_waves[i]:.2f}", (x, y), xytext=(9, -9),
+                textcoords="offset pixels")
+    
+    if labels:
+        ax.set_xlabel("X (pixel)")
+        ax.set_ylabel("Residuals (angstrom)")
+    
+    return ax
+
+
+def plot_wavesol_coeffs(ypix, coeffs, axs, title=None, labels=False, to_display=False):
+    # ypix is the Y coordinate of each fiber in the middle of the chip
+    # coeffs is a 2D array of coefficients for each fiber [nfiber, ncoeff]
+
+    for icoeff in range(coeffs.shape[1]):
+        axs[icoeff].scatter(ypix, coeffs[:, icoeff], color="tab:blue")
+        if labels:
+            axs[icoeff].set_title(f"coeff # {icoeff+1}", loc="left")
+    
+    fig = axs[0].get_figure()
+    if labels:
+        fig.supxlabel("X (pixel)")
+    if title is not None:
+        fig.suptitle(title)
+    
+    return axs
+
 def save_fig(fig, product_path, to_display, figure_path=None, label=None, fmt="png"):
     """Saves the given matplotlib figure to the given output/figure path"""
     # define figure path

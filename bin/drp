@@ -4,12 +4,13 @@
 
 import click
 import cloup
-from cloup.constraints import mutually_exclusive, RequireExactly
+from cloup.constraints import mutually_exclusive, RequireExactly, IsSet, If
 
 from astropy.io import fits
 from lvmdrp.functions.run_drp import run_drp, get_config_options, reduce_file
 from lvmdrp.functions.imageMethod import preproc_raw_frame
 from lvmdrp.functions.skyMethod import installESOSky_drp, configureSkyModel_drp
+from lvmdrp.utils.metadata import get_frames_metadata, get_master_metadata
 
 
 @click.group('drp', short_help='CLI for the LVM data reduction')
@@ -27,6 +28,7 @@ def cli():
 @click.option('--only-bd', is_flag=True, default=False, help='Flag to only reduce bias/dark frames')
 @click.option('--only-cal', is_flag=True, default=False, help='Flag to only reduce calibration frames')
 @click.option('--only-sci', is_flag=True, default=False, help='Flag to only reduce science frames')
+@click.option('--pixmask', is_flag=True, default=False, help='Flag to create pixelmask from bias/dark/pixelflat frames')
 @click.option('-s', '--spec', type=click.Choice(['1', '2', '3']), help='The spectrograph id to reduce')
 @click.option('-c', '--camera', type=click.Choice(['b', 'r', 'z']), help='The camera to reduce')
 @click.option('-e', '--expnum', type=int, help='an exposure number to reduce')
@@ -36,7 +38,7 @@ def cli():
 @cloup.constraint(mutually_exclusive, ['mjd', 'mjd_list', 'mjd_range'])
 @cloup.constraint(RequireExactly(1), ['mjd', 'mjd_list', 'mjd_range'])
 @cloup.constraint(mutually_exclusive, ['expnum', 'exp_list', 'exp_range'])
-def run(mjd, mjd_list, mjd_range, skip_bd, arc, flat, only_bd, only_cal, only_sci, camera, spec,
+def run(mjd, mjd_list, mjd_range, skip_bd, arc, flat, only_bd, only_cal, only_sci, pixmask, camera, spec,
         expnum, exp_list, exp_range, quick):
     """ Run the DRP reduction for a given MJD or range of MJDs
 
@@ -48,8 +50,9 @@ def run(mjd, mjd_list, mjd_range, skip_bd, arc, flat, only_bd, only_cal, only_sc
     mjd = mjd or mjd_list or mjd_range
     expnum = expnum or exp_list or exp_range
     run_drp(mjd=mjd, flat=flat, arc=arc, skip_bd=skip_bd, only_bd=only_bd,
-            only_cal=only_cal, only_sci=only_sci, camera=camera, spec=spec,
+            only_cal=only_cal, only_sci=only_sci, pixmask=pixmask, camera=camera, spec=spec,
             expnum=expnum, quick=quick)
+
 
 cli.add_command(run)
 
@@ -107,6 +110,28 @@ def sky_configure(library, multiscat):
 
 
 cli.add_command(skycli)
+
+
+@click.group('metadata', short_help='Run routines related to frame metadata')
+def metacli():
+    pass
+
+
+@cloup.command('regenerate', short_help='Regenerate the frames metadata file')
+@click.option('-m', '--mjd', type=int, help='the MJD to regenerate the metadata for')
+@click.option('-a', '--masters', is_flag=True, default=False, help='Flag to regenerate the masters metadata')
+@cloup.constraint(If(~IsSet('masters'), then=RequireExactly(1)), ['mjd'])
+def regen(mjd: int, masters: bool):
+    """ Regenerate the raw or master frames metadata file """
+    if masters:
+        get_master_metadata(overwrite=True)
+    else:
+        get_frames_metadata(mjd=mjd, overwrite=True)
+
+
+metacli.add_command(regen)
+
+cli.add_command(metacli)
 
 
 if __name__ == "__main__":

@@ -1,7 +1,12 @@
+import os
 import numpy
+import bottleneck as bn
 from astropy.io import fits as pyfits
+from astropy.table import Table
 from scipy import ndimage
 
+from lvmdrp import log
+from lvmdrp.core.constants import CONFIG_PATH
 from lvmdrp.core.apertures import Aperture
 from lvmdrp.core.cube import Cube
 from lvmdrp.core.fiberrows import FiberRows
@@ -10,15 +15,72 @@ from lvmdrp.core.positionTable import PositionTable
 from lvmdrp.core.spectrum1d import Spectrum1D
 
 
-# def _chain_join(b, r, z):
-#     return b.coaddSpec(r).coaddSpec(z)
+def _read_pixwav_map(lamp: str, camera: str, pixels=None, waves=None):
+    """read pixel-wavelength map from a lamp and camera
+
+    Parameters
+    ----------
+    lamp : str
+        arc lamp name
+    camera : str
+        one of cameras (e.g., b1, r1, z1)
+
+    Returns
+    -------
+    ref_fiber : int
+        reference fiber used to build the pixel-wavelength map
+    ref_lines : numpy.ndarray
+        reference wavelength of the emission lines
+    pixel : numpy.ndarray
+        pixel position of the emission lines
+    use_line : numpy.ndarray
+        mask to select which lines to use
+    """
+    pixwav_map_path = os.path.join(CONFIG_PATH, "wavelength", f"lvm-pixwav-{lamp}_{camera}.txt")
+
+    if os.path.isfile(pixwav_map_path):
+        # load initial pixel positions and reference wavelength from txt config file
+        log.info(f"pixel-to-wavelength map in file '{pixwav_map_path}'")
+        with open(pixwav_map_path, "r") as file_in:
+            ref_fiber = int(file_in.readline()[:-1])
+            log.info(f"going to use fiber {ref_fiber} as reference")
+            pixels, waves, use_line = numpy.loadtxt(
+                file_in, dtype=float, unpack=True
+            )
+        use_line = use_line.astype(bool)
+        log.info(
+            f"number of lines in file {pixels.size} percentage masked {(~use_line).sum() / pixels.size * 100: g} %"
+        )
+
+        nlines = use_line.sum()
+        log.info(f"going to use {nlines} lines")
+    elif pixels is not None and waves is not None:
+        # get the reference spectrum number and the guess pixel map
+        ref_fiber = int(ref_fiber)
+        log.info(f"going to use fiber {ref_fiber} as reference")
+        pixels = numpy.asarray(list(map(float, pixels.split(","))))
+        waves = numpy.asarray(list(map(float, waves.split(","))))
+        use_line = numpy.ones(len(waves), dtype=bool)
+        nlines = len(pixels)
+        log.info(
+            f"going to use {nlines} lines ({(~use_line).sum()} lines masked)"
+        )
+    else:
+        log.warning(f"no pixel-to-wavelength map found for {lamp = } in {camera = }")
+        # initialize new table to create a new pixel-to-wave map
+        ref_fiber = None
+        pixels = numpy.empty((0,))
+        waves = numpy.empty((0,))
+        use_line = numpy.empty((0,), dtype=bool)
+
+    return pixwav_map_path, ref_fiber, pixels, waves, use_line
 
 
 def _chain_join(b, r, z):
     ii = [i for i in [b, r, z] if i]
     x = ii[0]
     for e in ii[1:]:
-        x.coaddSpec(e)
+        x = x.coaddSpec(e)
     return x
 
 class RSS(FiberRows):
@@ -69,16 +131,20 @@ class RSS(FiberRows):
         for i in range(n_spectra):
             rss[i] = spectra_list[i]
 
-        # handle uniform wavelength
+        # set wavelength and LSF in RSS object
         if numpy.allclose(
             numpy.repeat(rss._wave[0][None, :], rss._fibers, axis=0), rss._wave
         ):
             rss.setWave(rss._wave[0])
+        else:
+            rss.setWave(rss._wave)
         if numpy.allclose(
             numpy.repeat(rss._inst_fwhm[0][None, :], rss._fibers, axis=0),
             rss._inst_fwhm,
         ):
             rss.setInstFWHM(rss._inst_fwhm[0])
+        else:
+            rss.setInstFWHM(rss._inst_fwhm)
         return rss
 
     def __init__(
@@ -93,6 +159,7 @@ class RSS(FiberRows):
         size=None,
         arc_position_x=None,
         arc_position_y=None,
+        slitmap=None,
         good_fibers=None,
         fiber_type=None,
         logwave=False,
@@ -121,6 +188,8 @@ class RSS(FiberRows):
             self.createWavefromHdr(logwave=logwave)
         if inst_fwhm is not None:
             self.setInstFWHM(inst_fwhm)
+        
+        self._slitmap = slitmap
 
     def __mul__(self, other):
         """
@@ -387,6 +456,7 @@ class RSS(FiberRows):
         extension_fwhm=None,
         extension_hdr=None,
         extension_PT=None,
+        extension_slitmap=None,
         logwave=False,
     ):
         """
@@ -406,16 +476,16 @@ class RSS(FiberRows):
         extension_error : int, optional with default: None
             Number of the FITS extension containing the errors for the values
         """
-        hdu = pyfits.open(file, uint=True, do_not_scale_image_data=True)
+        hdu = pyfits.open(file, uint=True, do_not_scale_image_data=True, memmap=False)
         if (
             extension_data is None
             and extension_mask is None
             and extension_error is None
             and extension_wave is None
             and extension_fwhm is None
+            and extension_slitmap is None
         ):
             self._data = hdu[0].data
-            self._fibers = self._data.shape[0]  # set fibers
             self.setHeader(header=hdu[0].header, origin=file)
             if len(hdu) > 1:
                 for i in range(1, len(hdu)):
@@ -429,6 +499,8 @@ class RSS(FiberRows):
                         self.setInstFWHM(hdu[i].data)
                     if hdu[i].header["EXTNAME"].split()[0] == "POSTABLE":
                         self.loadFitsPosTable(hdu[i])
+                    if hdu[i].header["EXTNAME"].split()[0] == "SLITMAP":
+                        self._slitmap = Table(hdu[i].data)
             else:
                 self.createWavefromHdr(logwave=logwave)
             if self._wave is None:
@@ -436,7 +508,6 @@ class RSS(FiberRows):
         else:
             if extension_data is not None:
                 self._data = hdu[extension_data].data
-                self._fibers = self._data.shape[0]
             if extension_mask is not None:
                 self._mask = hdu[extension_mask].data
             if extension_error is not None:
@@ -445,10 +516,16 @@ class RSS(FiberRows):
                 self.setWave(hdu[extension_wave].data)
             if extension_fwhm is not None:
                 self.setInstFWHM(hdu[extension_fwhm].data)
-        hdu.close()
+            if extension_slitmap is not None:
+                self._slitmap = Table(hdu[extension_slitmap].data)
 
         if extension_hdr is not None:
             self.setHeader(hdu[extension_hdr].header, origin=file)
+        
+        self._fibers = self._data.shape[0]
+        self._pixels = numpy.arange(self._data.shape[1])
+
+        hdu.close()
 
     def writeFitsData(
         self,
@@ -458,6 +535,7 @@ class RSS(FiberRows):
         extension_error=None,
         extension_wave=None,
         extension_fwhm=None,
+        extension_slitmap=None,
         include_PT=True,
     ):
         """
@@ -478,7 +556,7 @@ class RSS(FiberRows):
         extension_error : int (0, 1, or 2), optional with default: None
             Number of the FITS extension containing the errors for the values
         """
-        hdus = [None, None, None, None, None, None]  # create empty list for hdu storage
+        hdus = [None, None, None, None, None, None, None]  # create empty list for hdu storage
 
         # create primary hdus and image hdus
         # data hdu
@@ -487,6 +565,7 @@ class RSS(FiberRows):
             and extension_error is None
             and extension_mask is None
             and extension_wave is None
+            and extension_slitmap is None
         ):
             hdus[0] = pyfits.PrimaryHDU(self._data)
             if self._wave is not None:
@@ -498,6 +577,8 @@ class RSS(FiberRows):
                 hdus[3] = pyfits.ImageHDU(self._error, name="ERROR")
             if self._mask is not None:
                 hdus[4] = pyfits.ImageHDU(self._mask.astype("uint8"), name="BADPIX")
+            if self._slitmap is not None:
+                hdus[5] = pyfits.BinTableHDU(self._slitmap, name="SLITMAP")
 
         else:
             if extension_data == 0:
@@ -530,6 +611,12 @@ class RSS(FiberRows):
                 hdu = pyfits.PrimaryHDU(self._error)
             elif extension_error > 0 and extension_error is not None:
                 hdus[extension_error] = pyfits.ImageHDU(self._error, name="ERROR")
+
+            # slitmap hdu
+            if extension_slitmap == 0:
+                hdu = pyfits.PrimaryHDU(self._slitmap)
+            elif extension_slitmap > 0 and extension_slitmap is not None:
+                hdus[extension_slitmap] = pyfits.BinTableHDU(self._slitmap, name="SLITMAP")
 
         if include_PT:
             try:
@@ -607,23 +694,23 @@ class RSS(FiberRows):
         if method == "sum":
             if mask is not None:
                 data[mask] = 0
-                good_pix = numpy.sum(numpy.logical_not(mask), 0)
+                good_pix = bn.nansum(numpy.logical_not(mask), 0)
                 select_mean = good_pix > 0
-                combined_data[select_mean] = numpy.sum(data, 0)[select_mean]
+                combined_data[select_mean] = bn.nansum(data, 0)[select_mean]
                 combined_mask = good_pix == 0
                 if error is not None:
                     error[mask] = replace_error
                     combined_error[select_mean] = numpy.sqrt(
-                        numpy.sum(error**2, 0)[select_mean]
+                        bn.nansum(error**2, 0)[select_mean]
                     )
                 else:
                     combined_error = None
             else:
                 combined_mask = None
-                combined_data = numpy.sum(data, 0) / data.shape[0]
+                combined_data = bn.nansum(data, 0) / data.shape[0]
                 if error is not None:
                     combined_error = numpy.sqrt(
-                        numpy.sum(error**2, 0) / error.shape[0]
+                        bn.nansum(error**2, 0) / error.shape[0]
                     )
                 else:
                     combined_error = None
@@ -631,69 +718,71 @@ class RSS(FiberRows):
         if method == "mean":
             if mask is not None:
                 data[mask] = 0
-                good_pix = numpy.sum(numpy.logical_not(mask), 0)
+                good_pix = bn.nansum(numpy.logical_not(mask), 0)
                 select_mean = good_pix > 0
                 combined_data[select_mean] = (
-                    numpy.sum(data, 0)[select_mean] / good_pix[select_mean]
+                    bn.nansum(data, 0)[select_mean] / good_pix[select_mean]
                 )
                 combined_mask = good_pix == 0
                 if error is not None:
                     error[mask] = replace_error
                     combined_error[select_mean] = numpy.sqrt(
-                        numpy.sum(error**2, 0)[select_mean]
+                        bn.nansum(error**2, 0)[select_mean]
                         / good_pix[select_mean] ** 2
                     )
                 else:
                     combined_error = None
             else:
                 combined_mask = None
-                combined_data = numpy.sum(data, 0) / data.shape[0]
+                combined_data = bn.nansum(data, 0) / data.shape[0]
                 if error is not None:
                     combined_error = numpy.sqrt(
-                        numpy.sum(error**2, 0) / error.shape[0]
+                        bn.nansum(error**2, 0) / error.shape[0]
                     )
                 else:
                     combined_error = None
 
         if method == "weighted_mean" and error is not None:
             if mask is not None:
-                good_pix = numpy.sum(numpy.logical_not(mask), 0)
+                good_pix = bn.nansum(numpy.logical_not(mask), 0)
                 select_mean = good_pix > 0
-                combined_data = numpy.sum(data / error**2, 0) / numpy.sum(
+                combined_data = bn.nansum(data / error**2, 0) / bn.nansum(
                     1 / error**2, 0
                 )
                 combined_mask = good_pix == 0
-                combined_error = 1.0 / numpy.sqrt(numpy.sum(1 / error**2, 0))
+                combined_error = 1.0 / numpy.sqrt(bn.nansum(1 / error**2, 0))
                 combined_error[combined_mask] = replace_error
             else:
-                combined_data = numpy.sum(data / error**2, 0) / numpy.sum(
+                combined_data = bn.nansum(data / error**2, 0) / bn.nansum(
                     1 / error**2, 0
                 )
-                combined_error = 1.0 / numpy.sqrt(numpy.sum(1.0 / error**2, 0))
+                combined_error = 1.0 / numpy.sqrt(bn.nansum(1.0 / error**2, 0))
                 combined_mask = None
 
         if method == "median":
             if mask is not None:
-                good_pix = numpy.sum(numpy.logical_not(mask), 0)
+                good_pix = bn.nansum(numpy.logical_not(mask), 0)
                 select_mean = good_pix > 0
-                combined_data = numpy.nanmedian(data, 0)
+                combined_data = bn.nanmedian(data, 0)
                 combined_mask = good_pix == 0
                 combined_error = None
             else:
-                combined_data = numpy.nanmedian(data, 0) / numpy.sum(1 / error**2, 0)
+                combined_data = bn.nanmedian(data, 0) / bn.nansum(1 / error**2, 0)
                 combined_error = None
                 combined_mask = None
 
         self._data = combined_data
         self._wave = rss_in[0]._wave
         self._inst_fwhm = rss_in[0]._inst_fwhm
-        self._header = None
+        self._header = rss_in[0]._header
         self._mask = combined_mask
         self._error = combined_error
         self._arc_position_x = rss_in[i]._arc_position_x
         self._arc_position_y = rss_in[i]._arc_position_y
         self._shape = rss_in[i]._shape
         self._size = rss_in[i]._size
+        self._pixels = rss_in[i]._pixels
+        self._fibers = rss_in[i]._fibers
         self._good_fibers = rss_in[i]._good_fibers
         self._fiber_type = rss_in[i]._fiber_type
 
@@ -1927,6 +2016,11 @@ class RSS(FiberRows):
         )
         return posTab
 
+    def getSlitmap(self):
+        return self._slitmap
+    
+    def setSlitmap(self, slitmap):
+        self._slitmap = slitmap
 
 def loadRSS(infile, extension_data=None, extension_mask=None, extension_error=None):
     rss = RSS()
