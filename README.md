@@ -90,6 +90,14 @@ Regarding commits, I'm trying to go for an *atomic* approach, where each commit 
 
 In some MacOS versions there may be the need to perform extra installation steps, before getting into the steps described in the [installation section](#installation).
 
+### Issue importing CSafeLoader
+
+Some Mac users have found the folloring error while importing `CSafeLoader` from the PyYaml package (~6.0):
+
+    AttributeError: module 'yaml' has no attribute 'CSafeLoader'
+
+PyYaml is being installed as a dependency of PyTable. As of **Aug 7, 2023**, the problem seems to be solved by either installing PyTables from conda directly (instead of using pip install) or by installing PyTables from their [master branch](https://github.com/PyTables/PyTables).
+
 ### For MacOS (Monterey v12.6.2)
 
 You will require to run this extra step before continuing with the regular DRP installation:
