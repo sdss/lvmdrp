@@ -493,6 +493,7 @@ class RSS(FiberRows):
                         self._error = hdu[i].data
                     if hdu[i].header["EXTNAME"].split()[0] == "BADPIX":
                         self._mask = hdu[i].data.astype("bool")
+                        self._good_fibers = numpy.where(numpy.sum(self._mask, axis=1) != self._data.shape[1])[0]
                     if hdu[i].header["EXTNAME"].split()[0] == "WAVE":
                         self.setWave(hdu[i].data)
                     if hdu[i].header["EXTNAME"].split()[0] == "INSTFWHM":
@@ -510,6 +511,7 @@ class RSS(FiberRows):
                 self._data = hdu[extension_data].data
             if extension_mask is not None:
                 self._mask = hdu[extension_mask].data
+                self._good_fibers = numpy.where(numpy.sum(self._mask, axis=1) != self._data.shape[1])[0]
             if extension_error is not None:
                 self._error = hdu[extension_error].data
             if extension_wave is not None:
@@ -1759,6 +1761,7 @@ class RSS(FiberRows):
                 # )
                 cover = None
 
+        # TODO: use WCS module from astropy
         if self._header is not None:
             self.setHdrValue("CRVAL3", self.getHdrValue("CRVAL1"))
             self.setHdrValue("CDELT3", self.getHdrValue("CDELT1"))
@@ -1850,8 +1853,8 @@ class RSS(FiberRows):
                     smooth_poly,
                     "Order of polynomial to smooth FLAT",
                 )
-            if self._mask is not None:
-                self.setData(data=0.0, select=self._mask)
+            # if self._mask is not None:
+            #     self.setData(data=0.0, select=self._mask)
 
             fiberflat = RSS(
                 data=self._data,
