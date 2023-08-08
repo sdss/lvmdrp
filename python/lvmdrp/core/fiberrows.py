@@ -699,6 +699,7 @@ class FiberRows(Header, PositionTable):
                         self._error = hdu[i].data
                     elif hdu[i].header["EXTNAME"].split()[0] == "BADPIX":
                         self._mask = hdu[i].data.astype(bool)
+                        self._good_fibers = numpy.where(numpy.sum(self._mask, axis=1) != self._data.shape[1])[0]
                     elif hdu[i].header["EXTNAME"].split()[0] == "COEFFS":
                         self._coeffs = hdu[i].data
 
@@ -709,11 +710,14 @@ class FiberRows(Header, PositionTable):
                 self._pixels = numpy.arange(self._data.shape[1])
             if extension_mask is not None:
                 self._mask = hdu[extension_mask].data.astype(bool)
+                self._good_fibers = numpy.where(numpy.sum(self._mask, axis=1) != self._data.shape[1])[0]
             if extension_error is not None:
                 self._error = hdu[extension_error].data
             if extension_coeffs is not None:
                 self._coeffs = hdu[extension_coeffs].data
+        
         hdu.close()
+        
         if extension_hdr is not None:
             self.setHeader(hdu[extension_hdr].header)
 
