@@ -4,10 +4,186 @@ import matplotlib.pyplot as plt
 import numpy
 from astropy.io import fits as pyfits
 from numpy import polynomial
-from scipy import interpolate, ndimage, sparse
+from scipy.linalg import norm
+from scipy import signal, interpolate, ndimage, sparse
+from scipy.ndimage import zoom
+from typing import List, Tuple
 
+from lvmdrp.utils import gaussian
 from lvmdrp.core import fit_profile
 from lvmdrp.core.header import Header
+
+
+def _spec_from_lines(lines: numpy.ndarray, sigma: float, wavelength: numpy.ndarray, heights: numpy.ndarray = None, names: numpy.ndarray = None):
+    rss = numpy.zeros((len(lines), wavelength.size))
+    for i, line in enumerate(lines):
+        rss[i] = gaussian(wavelength, mean=line, stddev=sigma)
+    if heights is not None:
+        rss = rss / rss.max() * heights[:, None]
+    return rss.sum(axis=0)
+
+
+def _shift_spectrum(spectrum: numpy.ndarray, shift: int) -> numpy.ndarray:
+    """
+    Shifts a spectrum by a given number of bins.
+
+    Parameters
+    ----------
+    spectrum : numpy.ndarray
+        The spectrum to shift.
+    shift : int
+        The number of bins to shift the spectrum. Positive values shift the
+        spectrum to the right, negative values shift it to the left.
+
+    Returns
+    -------
+    numpy.ndarray
+        The shifted spectrum.
+    """
+    if shift > 0:
+        return numpy.pad(spectrum, (shift, 0), "constant")[:-shift]
+    elif shift < 0:
+        return numpy.pad(spectrum, (0, -shift), "constant")[-shift:]
+    else:
+        return spectrum
+
+
+def _cross_match(
+    ref_spec: numpy.ndarray,
+    obs_spec: numpy.ndarray,
+    stretch_factors: numpy.ndarray,
+    shift_range: List[int],
+    peak_num: int = None,
+) -> Tuple[float, int, float]:
+    """Find the best cross correlation between two spectra.
+
+    This function finds the best cross correlation between two spectra by
+    stretching and shifting the first spectrum and computing the cross
+    correlation with the second spectrum. The best cross correlation is
+    defined as the one with the highest correlation value and the correct
+    number of peaks.
+
+    Parameters
+    ----------
+    ref_spec : ndarray
+        The reference spectrum.
+    obs_spec : ndarray
+        The observed spectrum.
+    stretch_factors : ndarray
+        The stretch factors to use.
+    shift_range : tuple
+        The range of shifts to use.
+    peak_num : int, optional
+        The number of peaks to match.
+
+    Returns
+    -------
+    max_correlation : float
+        The maximum correlation value.
+    best_shift : int
+        The best shift.
+    best_stretch_factor : float
+        The best stretch factor.
+    """
+    min_shift, max_shift = shift_range
+    max_correlation = -numpy.inf
+    best_shift = 0
+    best_stretch_factor = 1
+
+    for factor in stretch_factors:
+        # Stretch the first signal
+        stretched_signal1 = zoom(ref_spec, factor, mode="constant", prefilter=True)
+
+        # Make the lengths equal
+        len_diff = len(obs_spec) - len(stretched_signal1)
+        if len_diff > 0:
+            # Zero pad the stretched signal at the end if it's shorter
+            stretched_signal1 = numpy.pad(stretched_signal1, (0, len_diff))
+        elif len_diff < 0:
+            # Or crop the stretched signal at the end if it's longer
+            stretched_signal1 = stretched_signal1[:len_diff]
+
+        # Compute the cross correlation
+        cross_corr = signal.correlate(obs_spec, stretched_signal1, mode="same")
+
+        # Normalize the cross correlation
+        cross_corr = cross_corr.astype(numpy.float64)
+        cross_corr /= norm(stretched_signal1) * norm(obs_spec)
+
+        # Get the correlation shifts
+        shifts = signal.correlation_lags(
+            len(obs_spec), len(stretched_signal1), mode="same"
+        )
+
+        # Constrain the cross_corr and shifts to the shift_range
+        mask = (shifts >= min_shift) & (shifts <= max_shift)
+        cross_corr = cross_corr[mask]
+        shifts = shifts[mask]
+
+        # Find the max correlation and the corresponding shift for this stretch factor
+        idx_max_corr = numpy.argmax(cross_corr)
+        max_corr = cross_corr[idx_max_corr]
+        shift = shifts[idx_max_corr]
+
+        # Shift the stretched signal1
+        shifted_signal1 = _shift_spectrum(stretched_signal1, shift)
+
+        # Find the peaks in the shifted and stretched signal1
+        peaks1, _ = signal.find_peaks(shifted_signal1)
+
+        # Check if the number of peaks matches peak_num, if given
+        if peak_num is not None:
+            condition = max_corr > max_correlation and len(peaks1) == peak_num
+        else:
+            condition = max_corr > max_correlation
+
+        if condition:
+            max_correlation = max_corr
+            best_shift = shift
+            best_stretch_factor = factor
+
+    return max_correlation, best_shift, best_stretch_factor
+
+
+def _apply_shift_and_stretch(
+    spectrum: numpy.ndarray, shift: int, stretch_factor: float
+) -> numpy.ndarray:
+    """Apply a shift and stretch to a spectrum.
+
+    This function applies a shift and stretch to a spectrum.
+
+    Parameters
+    ----------
+    spectrum : ndarray
+        The spectrum.
+    shift : int
+        The shift to apply.
+    stretch_factor : float
+        The stretch factor to apply.
+
+    Returns
+    -------
+    shifted_stretched_spectrum : ndarray
+        The shifted and stretched spectrum.
+    """
+    # Stretch the spectrum
+    stretched_spectrum = zoom(spectrum, stretch_factor, mode="constant", prefilter=True)
+
+    # Shift the stretched spectrum
+    shifted_stretched_spectrum = _shift_spectrum(stretched_spectrum, shift)
+
+    # If the shifted and stretched spectrum is shorter than the original spectrum, pad it with zeros
+    if len(shifted_stretched_spectrum) < len(spectrum):
+        shifted_stretched_spectrum = numpy.pad(
+            shifted_stretched_spectrum,
+            (0, len(spectrum) - len(shifted_stretched_spectrum)),
+        )
+
+    # If the shifted and stretched spectrum is longer than the original spectrum, crop it
+    elif len(shifted_stretched_spectrum) > len(spectrum):
+        shifted_stretched_spectrum = shifted_stretched_spectrum[: len(spectrum)]
+
+    return shifted_stretched_spectrum
 
 
 def wave_little_interpol(wavelist):
@@ -605,7 +781,7 @@ class Spectrum1D(Header):
             Number of the FITS extension containing the errors for the values
         """
 
-        hdu = pyfits.open(file, uint=True, do_not_scale_image_data=True)
+        hdu = pyfits.open(file, uint=True, do_not_scale_image_data=True, memmap=False)
         if (
             extension_data is None
             and extension_mask is None
@@ -819,7 +995,7 @@ class Spectrum1D(Header):
             Pixel position of the maximum data value
 
         """
-        max = numpy.max(self._data)  # get max
+        max = numpy.nanmax(self._data)  # get max
         select = self._data == max  # select max value
         max_wave = self._wave[select][0]  # get corresponding wavelength
         max_pos = self._pixels[select][0]  # get corresponding position
@@ -841,7 +1017,7 @@ class Spectrum1D(Header):
             Pixel position of the minimum data value
 
         """
-        min = numpy.min(self._data)  # get min
+        min = numpy.nanmin(self._data)  # get min
         select = self._data == min  # select min value
         min_wave = self._wave[select][0]  # get corresponding waveength
         min_pos = self._pixels[select][0]  # get corresponding position
@@ -851,8 +1027,8 @@ class Spectrum1D(Header):
         """
         Return the content of the spectrum
 
-        Returns: (pix, wave, data, error mask)
-        -----------
+        Returns
+        -------
         pix : numpy.ndarray (int)
             Array of the pixel positions
 
@@ -868,12 +1044,8 @@ class Spectrum1D(Header):
         mask : numpy.ndarray (bool)
             Array of the bad pixel mask
         """
-        pix = self._pixels
-        wave = self._wave
-        data = self._data
-        error = self._error
-        mask = self._mask
-        return pix, wave, data, error, mask
+
+        return self._pixels, self._wave, self._data, self._error, self._mask
 
     def resampleSpec(
         self,
@@ -1314,21 +1486,33 @@ class Spectrum1D(Header):
             out_par = 0
         return out_par
 
-    def findPeaks(self, threshold=100.0, npeaks=0, add_doubles=1e-1, maxiter=400):
+    def findPeaks(
+        self,
+        pix_range=None,
+        min_dwave=5.0,
+        threshold=100.0,
+        npeaks=None,
+        add_doubles=1e-1,
+        maxiter=400,
+    ):
         """
         Select local maxima in a Spectrum without taken subpixels into account.
 
         Parameters
         --------------
+        pix_range : tuple, optional with default=None
+            Tuple of the pixel range to be considered.
+        min_dwave : float, optional with default=3.5
+            Minimum distance between two maxima in pixels.
         threshold : float, optional with default=100.0
             Threshold above all pixels are assumed to be maxima,
             it is not used if an expected number of peaks is given.
-
         npeaks : int, optional with default=0
             Number of expected maxima that should be matched.
             If 0 is given the number of maxima is not constrained.
-
         add_doubles : float, optional with defaul=1e-3
+        maxiter : int, optional with default=400
+            Maximum number of iterations to find the peaks, when npeaks is set.
 
         Returns (pixel, wave, data)
         -----------
@@ -1340,60 +1524,79 @@ class Spectrum1D(Header):
             Array of the data values at the peak position
 
         """
-        doubles = (
-            self._data[1:] == self._data[:-1]
-        )  # check for identical adjacent values
+
+        # select pixels within given range
+        if pix_range is not None:
+            ini = max(0, pix_range[0] - 1)
+            fin = min(self._data.size, pix_range[1] - 2)
+            s = slice(ini, fin)
+            data = self._data[s]
+            wave = self._wave[s]
+            pixels = self._pixels[s]
+            if self._mask is not None:
+                mask = self._mask[s]
+            else:
+                mask = numpy.zeros_like(data, dtype=bool)
+
+        # check for identical adjacent values to use derivative for maxima detection
+        doubles = data[1:] == data[:-1]
         doubles = numpy.insert(doubles, 0, False)
         idx = numpy.arange(len(doubles))
         # add some value to one of those adjacent data points
         if numpy.sum(doubles) > 0:
             double_idx = idx[doubles]
-            self._data[double_idx] += add_doubles
-        if self._mask is not None:
-            data = self._data[numpy.logical_not(self._mask)]
-            wave = self._wave[numpy.logical_not(self._mask)]
-            pixels = self._pixels[numpy.logical_not(self._mask)]
-        else:
-            data = self._data
-            wave = self._wave
-            pixels = self._pixels
-        pos_diff = (data[1:] - data[:-1]) / (
-            wave[1:] - wave[:-1]
-        )  # compute the discrete derivative
-        select_peaks = numpy.logical_and(
-            pos_diff[1:] < 0, pos_diff[:-1] > 0
-        )  # select all maxima
+            data[double_idx] += add_doubles
 
-        if npeaks == 0:
-            # if no number of peaks are given select all maxima over a given threshold
-            select_thres = data[1:-1][select_peaks] > threshold
+        # mask bad pixels
+        data = data[~mask]
+        wave = wave[~mask]
+        pixels = pixels[~mask]
+
+        # compute the discrete derivative
+        dwave = wave[1:] - wave[:-1]
+        pos_diff = (data[1:] - data[:-1]) / dwave
+        # all peaks selected by derivative sign change
+        select_peaks = (pos_diff[1:] < 0) & (pos_diff[:-1] > 0)
+
+        # define initial peaks
+        peaks = wave[1:-1][select_peaks]
+
+        # peaks selection by minimum distance in pixels
+        if min_dwave is not None:
+            select_dwave = numpy.diff(peaks) >= min_dwave
         else:
-            # if a specific number of peaks are expected iterate until correct number of peaks are found
+            select_dwave = numpy.ones(peaks.size - 1, dtype=bool)
+
+        # if no number of peaks are given select all maxima over a given threshold
+        if npeaks is None or npeaks <= 0:
+            select_thres = data[1:-1][select_peaks][:-1][select_dwave] > threshold
+        # if a specific number of peaks are expected iterate until correct number of peaks are found
+        else:
             matched_peaks = True
             threshold = self.max()[0] / 10.0  # set starting threshold
             m = 0
             while matched_peaks and m < maxiter:
-                select_thres = (
-                    data[1:-1][select_peaks] > threshold
-                )  # select all maxima above threshold
-                peaks = numpy.sum(
-                    select_thres
-                )  # check if the number of peaks match expectation
+                # select all maxima above threshold
+                select_thres = data[1:-1][select_peaks][:-1][select_dwave] > threshold
+                # check if the number of peaks match expectation
+                peaks = numpy.sum(select_thres)
                 # if the number of peaks mismatch adjust threshold value to a new value
                 if peaks < npeaks:
                     threshold = threshold / 2.0
                 elif peaks > npeaks:
                     threshold = threshold * 1.5
                 else:
-                    matched_peaks = False  # indicate that the correct number of peaks are not  found
+                    # indicate that the correct number of peaks are not  found
+                    matched_peaks = False
                 m += 1
-        pixels = pixels[1:-1][select_peaks][
-            select_thres
-        ]  # select pixel positions of peaks
-        wave = wave[1:-1][select_peaks][
-            select_thres
-        ]  # select wavelength positions of peaks
-        data = data[1:-1][select_peaks][select_thres]  # select data valuesof peaks
+
+        # select pixel positions of peaks
+        pixels = pixels[1:-1][select_peaks][:-1][select_dwave][select_thres]
+        # select wavelength positions of peaks
+        wave = wave[1:-1][select_peaks][:-1][select_dwave][select_thres]
+        # select data valuesof peaks
+        data = data[1:-1][select_peaks][:-1][select_dwave][select_thres]
+
         return pixels, wave, data
 
     def measurePeaks(
@@ -1432,10 +1635,12 @@ class Spectrum1D(Header):
             Array of pixels with uncertain measurements
         """
         # compute the minimum and maximum value for the 3 pixels around all peaks
+        # selection of fibers within the boundaries of the detector
         select = numpy.logical_and(
             init_pos - 1 >= [0], init_pos + 1 <= self._data.shape[0] - 1
         )
         mask = numpy.zeros(len(init_pos), dtype="bool")
+        # minimum counts of three pixels around each peak
         min = numpy.amin(
             [
                 numpy.take(self._data, init_pos[select] + 1),
@@ -1444,6 +1649,7 @@ class Spectrum1D(Header):
             ],
             axis=0,
         )
+        # minimum counts of three pixels around each peak
         max = numpy.amax(
             [
                 numpy.take(self._data, init_pos[select] + 1),
@@ -1452,9 +1658,10 @@ class Spectrum1D(Header):
             ],
             axis=0,
         )
-        mask[select] = (
-            max - min
-        ) < threshold  # mask all peaks where the contrast between maximum and minimum is below a threshold
+        # print(init_pos, max)
+        # mask all peaks where the contrast between maximum and minimum is below a threshold
+        mask[select] = (max) < threshold
+        # masking fibers outside the detector
         mask[numpy.logical_not(select)] = True
 
         if method == "hyperbolic":
@@ -1823,74 +2030,65 @@ class Spectrum1D(Header):
         init_back=0.0,
         ftol=1e-8,
         xtol=1e-8,
-        plot=False,
+        axs=None,
         warning=False,
     ):
         ncomp = len(centres)
-        cent = numpy.zeros(ncomp, dtype=numpy.float32)
+
         out = numpy.zeros(3 * ncomp, dtype=numpy.float32)
-        back = numpy.zeros(ncomp, dtype=numpy.float32)
-        if self._error is not None:
-            error = self._error
-        else:
-            error = numpy.ones(self._dim, dtype=numpy.float32)
-        if self._mask is not None:
-            mask = self._mask
-        else:
-            mask = numpy.zero(self._dim, dtype="bool")
-        for i in range(len(centres)):
-            back[i] = deepcopy(init_back)
-            select = numpy.logical_and(
-                numpy.logical_and(
-                    self._wave >= centres[i] - aperture / 2.0,
-                    self._wave <= centres[i] + aperture / 2.0,
-                ),
-                numpy.logical_not(mask),
-            )
+        back = [deepcopy(init_back) for _ in centres]
+
+        error = self._error if self._error is not None else numpy.ones(self._dim, dtype=numpy.float32)
+        mask = self._mask if self._mask is not None else numpy.zeros(self._dim, dtype=bool)
+
+        for i, centre in enumerate(centres):
+            select = self._get_select(centre, aperture, mask)
             if numpy.sum(select) > 0:
                 max = numpy.max(self._data[select])
                 cent = numpy.median(self._wave[select][self._data[select] == max])
-                select = numpy.logical_and(
-                    self._wave >= cent - aperture / 2.0,
-                    self._wave <= cent + aperture / 2.0,
-                    numpy.logical_not(mask),
-                )
-                if back[i] == 0.0:
-                    par = [0.0, 0.0, 0.0]
-                    gauss = fit_profile.Gaussian(par)
-                    gauss.fit(
-                        self._wave[select],
-                        self._data[select],
-                        sigma=error[select],
-                        ftol=ftol,
-                        xtol=xtol,
-                        warning=warning,
-                    )
-                else:
-                    par = [0.0, 0.0, 0.0, 0.0]
-                    gauss = fit_profile.Gaussian_const(par)
-                    gauss.fit(
-                        self._wave[select],
-                        self._data[select],
-                        sigma=error[select],
-                        ftol=ftol,
-                        xtol=xtol,
-                        warning=warning,
-                    )
+                select = self._get_select(cent, aperture, mask)
+
+                gauss = self._fit_gaussian(select, back[i], error, ftol, xtol, warning)
+
                 out_fit = gauss.getPar()
                 out[i] = out_fit[0]
                 out[ncomp + i] = out_fit[1]
                 out[2 * ncomp + i] = out_fit[2]
-                if plot:
-                    gauss.plot(self._wave[select], self._data[select])
 
+                if axs is not None:
+                    axs[i] = gauss.plot(self._wave[select], self._data[select], ax=axs[i])
             else:
-                out[i] = 0.0
-                out[ncomp + i] = 0.0
-                out[2 * ncomp + i] = 0.0
-        if plot:
-            plt.show()
+                out[i:ncomp + i + 1] = 0.0
+
         return out
+
+    def _get_select(self, centre, aperture, mask):
+        return numpy.logical_and(
+            numpy.logical_and(
+                self._wave >= centre - aperture / 2.0,
+                self._wave <= centre + aperture / 2.0,
+            ),
+            numpy.logical_not(mask),
+        )
+
+    def _fit_gaussian(self, select, back, error, ftol, xtol, warning):
+        if back == 0.0:
+            par = [0.0, 0.0, 0.0]
+            gauss = fit_profile.Gaussian(par)
+        else:
+            par = [0.0, 0.0, 0.0, 0.0]
+            gauss = fit_profile.Gaussian_const(par)
+
+        gauss.fit(
+            self._wave[select],
+            self._data[select],
+            sigma=error[select],
+            ftol=ftol,
+            xtol=xtol,
+            warning=warning,
+        )
+
+        return gauss
 
     def obtainGaussFluxPeaks(self, pos, sigma, indices, replace_error=1e10, plot=False):
         """returns Gaussian peaks parameters, flux error and mask
@@ -1951,29 +2149,29 @@ class Spectrum1D(Header):
         select = A > 0.0001
         A = A / self._error[:, None]
 
-        plt.figure(figsize=(10, 10))
-        plt.imshow(A, origin="lower")
-        plt.show()
+        # plt.figure(figsize=(10, 10))
+        # plt.imshow(A, origin="lower")
+        # plt.show()
 
         B = sparse.csr_matrix(
             (A[select], (indices[0][select], indices[1][select])),
             shape=(self._dim, fibers),
         ).todense()
-        print(B)
+        # print(B)
         out = sparse.linalg.lsqr(
             B, self._data / self._error, atol=1e-7, btol=1e-7, conlim=1e13
         )
-        print(out)
+        # print(out)
 
         error = numpy.sqrt(1 / numpy.sum((A**2), 0))
         if bad_pix is not None and numpy.sum(bad_pix) > 0:
             error[bad_pix] = replace_error
-        if plot:
-            plt.figure(figsize=(15, 10))
-            plt.plot(self._data, "ok")
-            plt.plot(numpy.dot(A * self._error[:, None], out[0]), "-r")
-            # plt.plot(numpy.dot(A, out[0]), '-r')
-            plt.show()
+        # if plot:
+        #     plt.figure(figsize=(15, 10))
+        #     plt.plot(self._data, "ok")
+        #     plt.plot(numpy.dot(A * self._error[:, None], out[0]), "-r")
+        #     # plt.plot(numpy.dot(A, out[0]), '-r')
+        #     plt.show()
         return out[0], error, bad_pix, B, A
 
     def collapseSpec(self, method="mean", start=None, end=None, transmission_func=None):

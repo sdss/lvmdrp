@@ -39,10 +39,8 @@ from lvmdrp.core.constants import (
 )
 from lvmdrp.external.skycorr import createParFile, fitstabSkyCorrWrapper, runSkyCorr
 from lvmdrp.utils.configuration import load_master_config
-from lvmdrp.utils.logger import get_logger
+from lvmdrp import log
 
-
-sky_logger = get_logger(name=__name__)
 
 # average moon distance from earth
 MEAN_MOON_DIST = 384979000 * u.m
@@ -152,20 +150,20 @@ def skymodel_pars_from_header(header):
     try:
         observatory = header["OBSERVAT"]
     except KeyError:
-        sky_logger.warning(
+        log.warning(
             f"'OBSERVAT' is not in reference sky header. Assuming OBSERVAT='LCO'"
         )
         observatory = "LCO"
     try:
         obstime = Time(header["OBSTIME"], scale="tai")
     except KeyError:
-        sky_logger.warning(
+        log.warning(
             f"'OBSTIME' is not in reference sky header. Falling back to 'MJD'"
         )
     try:
         obstime = Time(header["MJD"], format="mjd")
     except KeyError:
-        sky_logger.error(f"'MJD' is not in reference sky header.")
+        log.error(f"'MJD' is not in reference sky header.")
         raise ValueError(f"no datetime information found for reference sky.")
     ra, dec = header["RA"], header["DEC"]
 
@@ -173,14 +171,14 @@ def skymodel_pars_from_header(header):
     try:
         obs_pars = master_config["LVM_OBSERVATORIES"][observatory]
     except KeyError:
-        sky_logger.error(
+        log.error(
             f"observatory '{observatory}' not found in master configuration file."
         )
-        sky_logger.warning("falling back to 'LCO'")
+        log.warning("falling back to 'LCO'")
         obs_pars = master_config["LVM_OBSERVATORIES"]["LCO"]
 
     # define ephemeris object
-    astros = load(EPHEMERIS_PATH)
+    astros = load(os.path.basename(EPHEMERIS_PATH))
     sun, earth, moon = astros["sun"], astros["earth"], astros["moon"]
     # define location
     obs_topos = wgs84.latlon(
@@ -359,10 +357,10 @@ def run_skymodel(skymodel_path=SKYMODEL_INST_PATH, **kwargs):
     # shutil.rmtree("output", ignore_errors=True)
     os.makedirs("output", exist_ok=True)
 
-    sky_logger.info("trying skymodel from pre-computed airglow lines")
+    log.info("trying skymodel from pre-computed airglow lines")
     out = subprocess.run("bin/calcskymodel".split(), capture_output=True)
     if out.returncode != 0 or "error" in out.stderr.decode("utf-8").lower():
-        sky_logger.warning("no suitable airglow spectrum found")
+        log.warning("no suitable airglow spectrum found")
 
         # extract parameters from config for radiative transfer run
         alt, time, season, resol, pwv = (
@@ -376,7 +374,7 @@ def run_skymodel(skymodel_path=SKYMODEL_INST_PATH, **kwargs):
         resol = int(float(resol))
         pwv = int(pwv) if pwv == "-1" else float(pwv)
 
-        sky_logger.info(
+        log.info(
             f"calculating airglow lines with parameters {airmass = }, {time = }, {season = }, {resol = } {pwv = }"
         )
         os.chdir(os.path.join(skymodel_path, "sm-01_mod1"))
@@ -385,10 +383,10 @@ def run_skymodel(skymodel_path=SKYMODEL_INST_PATH, **kwargs):
             capture_output=True,
         )
         if out.returncode == 0:
-            sky_logger.info("successfully finished airglow lines calculations")
+            log.info("successfully finished airglow lines calculations")
         else:
-            sky_logger.error("failed while running airglow lines calculations")
-            sky_logger.error(out.stderr.decode("utf-8"))
+            log.error("failed while running airglow lines calculations")
+            log.error(out.stderr.decode("utf-8"))
 
         # copy library files to corresponding path according to libpath
         try:
@@ -400,31 +398,31 @@ def run_skymodel(skymodel_path=SKYMODEL_INST_PATH, **kwargs):
                 ignore_dangling_symlinks=True,
             )
         except shutil.Error as e:
-            sky_logger.warning(e.args[0])
+            log.warning(e.args[0])
 
-        sky_logger.info("calculating effective atmospheric transmission")
+        log.info("calculating effective atmospheric transmission")
         os.chdir(os.path.join(skymodel_path, "sm-01_mod2"))
         out = subprocess.run(f"bin/preplinetrans".split(), capture_output=True)
         if out.returncode == 0:
-            sky_logger.info(
+            log.info(
                 "successfully finished effective atmospheric transmission calculations"
             )
         else:
-            sky_logger.error(
+            log.error(
                 "failed while running effective atmospheric transmission calculations"
             )
-            sky_logger.error(out.stderr.decode("utf-8"))
+            log.error(out.stderr.decode("utf-8"))
 
         out = subprocess.run(f"bin/calcskymodel".split(), capture_output=True)
         if out.returncode == 0:
-            sky_logger.info("successfully finished 'calcskymodel'")
+            log.info("successfully finished 'calcskymodel'")
         else:
             os.chdir(curdir)
-            sky_logger.error("failed while running 'calcskymodel'")
-            sky_logger.error(out.stderr.decode("utf-8"))
+            log.error("failed while running 'calcskymodel'")
+            log.error(out.stderr.decode("utf-8"))
             return skymodel_inst_par, skymodel_model_par, None
     else:
-        sky_logger.info("successfully finished 'calcskymodel'")
+        log.info("successfully finished 'calcskymodel'")
     # ---------------------------------------------------------------------------------------------
 
     # read output files and organize in a FITS table ----------------------------------------------
@@ -439,6 +437,8 @@ def run_skymodel(skymodel_path=SKYMODEL_INST_PATH, **kwargs):
     return skymodel_inst_par, skymodel_model_par, sky_comps
 
 
+# TODO: list a set of parameters I want the users
+# to modify
 def run_skycorr(
     sci_spec,
     sky_spec,

@@ -1,8 +1,12 @@
+#!/usr/bin/env python
+# encoding: utf-8
+
 import matplotlib.pyplot as plt
 import numpy
 from numpy import polynomial
 
 from lvmdrp.core.fiberrows import FiberRows
+from lvmdrp import log
 
 
 class TraceMask(FiberRows):
@@ -72,23 +76,32 @@ class TraceMask(FiberRows):
         )  # pixel position in dispersion direction
         self._coeffs = numpy.zeros((self._data.shape[0], numpy.abs(deg) + 1))
         # iterate over each fiber
+        pix_table = []
+        poly_table = []
+        poly_all_table = []
         for i in range(self._fibers):
             good_pix = numpy.logical_not(self._mask[i, :])
-            if numpy.sum(good_pix) != 0:
+            if numpy.sum(good_pix) >= deg + 1:
+                # select the polynomial class
                 if poly_kind == "poly":
-                    poly = polynomial.Polynomial.fit(
-                        pixels[good_pix], self._data[i, good_pix], deg=deg
-                    )
+                    poly_cls = polynomial.Polynomial
                 elif poly_kind == "legendre":
-                    poly = polynomial.Legendre.fit(
-                        pixels[good_pix], self._data[i, good_pix], deg=deg
-                    )
+                    poly_cls = polynomial.Legendre
                 elif poly_kind == "chebyshev":
-                    poly = polynomial.Chebyshev.fit(
-                        pixels[good_pix], self._data[i, good_pix], deg=deg
-                    )
+                    poly_cls = polynomial.Chebyshev
 
-                self._coeffs[i, :] = poly.coef
+                # try to fit
+                try:
+                    poly = poly_cls.fit(pixels[good_pix], self._data[i, good_pix], deg=deg)
+                    pix_table.extend(numpy.column_stack([pixels[good_pix], self._data[i, good_pix]]).tolist())
+                    poly_table.extend(numpy.column_stack([pixels[good_pix], poly(pixels[good_pix])]).tolist())
+                    poly_all_table.extend(numpy.column_stack([pixels, poly(pixels)]).tolist())
+                except numpy.linalg.LinAlgError as e:
+                    log.error(f'Fiber trace failure at fiber {i}: {e}')
+                    self._mask[i, :] = True
+                    continue
+
+                self._coeffs[i, :] = poly.convert().coef
                 self._data[i, :] = poly(pixels)
 
                 if clip is not None:
@@ -96,6 +109,8 @@ class TraceMask(FiberRows):
                 self._mask[i, :] = False
             else:
                 self._mask[i, :] = True
+
+        return pix_table, poly_table, poly_all_table
 
     def smoothTraceDist(
         self, start_slice, poly_cross=[4, 1, 4], poly_disp=8, bound=[350, 2000]

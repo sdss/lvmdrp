@@ -20,6 +20,11 @@ pandas==1.5.3
 astroquery==0.4.6
 keyring>=4.0
 sbpy==0.3.0
+sdsstools>=1.0
+sdss-tree>=4.0
+sdss-access>=3.0
+click>=8.0
+cloup>=2.0
 ccdproc==2.4.0
 bottleneck==1.3.7
 h5py==3.8.0

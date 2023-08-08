@@ -1,161 +1,138 @@
 #!/usr/bin/env python
 # encoding: utf-8
 #
-# @Author: Bernd Husemann, Alfredo Mejía-Narváez
-# @Date: Dec 7, 2022
-# @Filename: drp
-# @License: BSD 3-Clause
-# @Copyright: SDSS-V LVM
 
-import sys
+import click
+import cloup
+from cloup.constraints import mutually_exclusive, RequireExactly, IsSet, If
 
-from lvmdrp.functions import (
-    astrometryMethod,
-    fluxCalMethod,
-    headerMethod,
-    imageMethod,
-    rssMethod,
-    runMethod,
-    skyMethod,
-)
-from lvmdrp.utils.logger import get_logger
+from astropy.io import fits
+from lvmdrp.functions.run_drp import run_drp, get_config_options, reduce_file
+from lvmdrp.functions.imageMethod import preproc_raw_frame
+from lvmdrp.functions.skyMethod import installESOSky_drp, configureSkyModel_drp
+from lvmdrp.utils.metadata import get_frames_metadata, get_master_metadata
 
 
-drp_logger = get_logger(name=__name__)
+@click.group('drp', short_help='CLI for the LVM data reduction')
+def cli():
+    pass
 
-REGISTERED_MODULES = [
-    astrometryMethod,
-    fluxCalMethod,
-    headerMethod,
-    imageMethod,
-    rssMethod,
-    runMethod,
-    skyMethod,
-]
-MODULES = {
-    module.__name__.split(".")[-1].replace("Method", ""): module
-    for module in REGISTERED_MODULES
-}
 
-# TODO: implement special 'run' task for running a given configuration file
-# TODO: implement 'out_bp' argument in each task to produce an output in the correct
-# format
+@cloup.command(short_help='Run the DRP reduction', show_constraints=True)
+@click.option('-m', '--mjd', type=int, help='an MJD to reduce')
+@click.option('-l', '--mjd-list', type=int, multiple=True, help='a list of specific MJDs to reduce')
+@click.option('-r', '--mjd-range', type=str, help='a range of MJDs to reduce')
+@click.option('--skip-bd', is_flag=True, default=False, help='Flag to skip bias/dark reduction')
+@click.option('--arc', is_flag=True, default=False, help='Flag to only reduce arc frames')
+@click.option('--flat', is_flag=True, default=False, help='Flag to only reduce flat frames')
+@click.option('--only-bd', is_flag=True, default=False, help='Flag to only reduce bias/dark frames')
+@click.option('--only-cal', is_flag=True, default=False, help='Flag to only reduce calibration frames')
+@click.option('--only-sci', is_flag=True, default=False, help='Flag to only reduce science frames')
+@click.option('--pixmask', is_flag=True, default=False, help='Flag to create pixelmask from bias/dark/pixelflat frames')
+@click.option('-s', '--spec', type=click.Choice(['1', '2', '3']), help='The spectrograph id to reduce')
+@click.option('-c', '--camera', type=click.Choice(['b', 'r', 'z']), help='The camera to reduce')
+@click.option('-e', '--expnum', type=int, help='an exposure number to reduce')
+@click.option('-el', '--exp-list', type=int, multiple=True, help='a list of specific exposures to reduce')
+@click.option('-er', '--exp-range', type=str, help='a range of exposure numbers to reduce')
+@click.option('-q', '--quick', is_flag=True, default=False, help='Flag for quick reductions only')
+@cloup.constraint(mutually_exclusive, ['mjd', 'mjd_list', 'mjd_range'])
+@cloup.constraint(RequireExactly(1), ['mjd', 'mjd_list', 'mjd_range'])
+@cloup.constraint(mutually_exclusive, ['expnum', 'exp_list', 'exp_range'])
+def run(mjd, mjd_list, mjd_range, skip_bd, arc, flat, only_bd, only_cal, only_sci, pixmask, camera, spec,
+        expnum, exp_list, exp_range, quick):
+    """ Run the DRP reduction for a given MJD or range of MJDs
+
+    Run the DRP for an MJD or range of MJDs.  Various flags and options are available
+    for filtering on bias/darks, calibration (arc/flats) or science frames, specific
+    cameras or spectrographs, or specific exposures.
+
+    """
+    mjd = mjd or mjd_list or mjd_range
+    expnum = expnum or exp_list or exp_range
+    run_drp(mjd=mjd, flat=flat, arc=arc, skip_bd=skip_bd, only_bd=only_bd,
+            only_cal=only_cal, only_sci=only_sci, pixmask=pixmask, camera=camera, spec=spec,
+            expnum=expnum, quick=quick)
+
+
+cli.add_command(run)
+
+
+@cli.command('reduce_file', short_help='Reduce a single file')
+@click.option('-f', '--filename', type=str, help='a full path filename to reduce')
+def run_reduce_file(filename):
+    """ Run a single raw sdR frame file through the LVM DRP """
+    reduce_file(filename)
+
+
+@cli.command('preprocess', short_help='Preprocess raw frames')
+@click.argument('filename', type=click.Path(exists=True))
+@click.option('-f', '--flavor', type=str, help='the flavor of the file', required=True)
+def preprocess(filename, flavor):
+
+    # get metadata for a single file
+    hdr = fits.getheader(filename)
+    camera = hdr.get("CCD")
+    mjd = hdr.get("MJD")
+    tileid = hdr.get("TILEID", 1111)
+    expnum = f'{hdr.get("EXPOSURE"):0>8}'
+
+    # get custom config options
+    kwargs = get_config_options('reduction_steps.preproc_raw_frame', flavor)
+
+    # preprocess the frame
+    preproc_raw_frame(filename, flavor=flavor, kind='p', camera=camera,
+                      mjd=mjd, expnum=expnum, tileid=tileid, **kwargs)
+
+
+@click.group('sky', short_help='Run routines related to sky subtraction')
+def skycli():
+    pass
+
+
+@skycli.command('install', short_help='Install the ESO sky routines')
+@click.option('-c', '--reinstall-skycorr', is_flag=True, default=False, show_default=True,
+              help='Flag to reinstall the ESO skycorr routines')
+@click.option('-m', '--reinstall-skymodel', is_flag=True, default=False, show_default=True,
+              help='Flag to resinstall the ESO sky models')
+def sky_install(reinstall_skycorr, reinstall_skymodel):
+    """ Install the ESO skycorr and skymodel routines """
+    installESOSky_drp(reinstall_skycorr=reinstall_skycorr, reinstall_skymodel=reinstall_skymodel)
+
+
+@skycli.command('configure', short_help='Configure the ESO sky routines')
+@click.option('-l', '--library', is_flag=True, default=False, show_default=True,
+              help='Flag to run ESO routines to build a spectral library')
+@click.option('-m', '--multiscat', is_flag=True, default=False, show_default=True,
+              help='Flag to run ESO "estmultiscat" routine for multiple scattering corrections')
+def sky_configure(library, multiscat):
+    """ Run the sky module configuration """
+    configureSkyModel_drp(run_libary=library, run_multiscat=multiscat)
+
+
+cli.add_command(skycli)
+
+
+@click.group('metadata', short_help='Run routines related to frame metadata')
+def metacli():
+    pass
+
+
+@cloup.command('regenerate', short_help='Regenerate the frames metadata file')
+@click.option('-m', '--mjd', type=int, help='the MJD to regenerate the metadata for')
+@click.option('-a', '--masters', is_flag=True, default=False, help='Flag to regenerate the masters metadata')
+@cloup.constraint(If(~IsSet('masters'), then=RequireExactly(1)), ['mjd'])
+def regen(mjd: int, masters: bool):
+    """ Regenerate the raw or master frames metadata file """
+    if masters:
+        get_master_metadata(overwrite=True)
+    else:
+        get_frames_metadata(mjd=mjd, overwrite=True)
+
+
+metacli.add_command(regen)
+
+cli.add_command(metacli)
+
 
 if __name__ == "__main__":
-    args = sys.argv[1:]
-
-    # show basic help
-    if len(args) == 0:
-        drp_logger.info("no <MODULE> given")
-        drp_logger.info("use 'drp help' for a list of available MODULES")
-
-    # show detailed help
-    elif args[0] == "help":
-        # modules list
-        if len(args) == 1:
-            drp_logger.info("")
-            drp_logger.info("Available MODULES in the DRP:")
-            max_length = max(map(len, MODULES.keys()))
-            for module in MODULES:
-                name = module.ljust(max_length, " ")
-                drp_logger.info(f" * {name} : {MODULES[module].description}")
-            drp_logger.info("")
-            drp_logger.info(
-                (
-                    "use 'drp help <MODULE>' to get a list "
-                    "of available TASKS within the MODULE"
-                )
-            )
-            drp_logger.info("")
-        # modules tasks
-        elif len(args) == 2:
-            module = args[1]
-            if module in MODULES:
-                tasks = MODULES[module].__all__
-                drp_logger.info("")
-                drp_logger.info(f"available DRP TASKS within MODULE '{module}':")
-                for task in tasks:
-                    task = task.replace("_drp", "")
-                    drp_logger.info(f" * {task}")
-                drp_logger.info("")
-                drp_logger.info(
-                    (
-                        f"use 'drp help {module} <TASK>' to get "
-                        "detailed information on <TASK>"
-                    )
-                )
-                drp_logger.info(
-                    (
-                        "you can run the routine by call "
-                        "'drp <MODULE> <TASK> [<ARG1> <ARG2> ...]'"
-                    )
-                )
-            elif module not in MODULES:
-                drp_logger.error(
-                    (
-                        "you have asked for help about a "
-                        f"non-existing MODULE '{args[1]}' in the DRP"
-                    )
-                )
-                drp_logger.error('use "drp help" for a list of available MODULES')
-        # task help
-        elif len(args) == 3:
-            module = args[1]
-            task = args[2]
-            try:
-                drp_logger.info(getattr(MODULES[module], f"{task}_drp").__doc__)
-            except Exception:
-                drp_logger.error(
-                    (
-                        "you asked for help on a non-existing MODULE "
-                        f"'{module}' and/or TASK '{task}' in the DRP"
-                    )
-                )
-                drp_logger.error("use 'drp help' for a list of available MODULES")
-    # try run
-    else:
-        if len(args) < 2:
-            drp_logger.error(
-                "the correct command line is 'drp <MODULE> <TASK> [<ARG1> <ARG2> ...]'"
-            )
-            drp_logger.info("use 'drp help' for a list of available MODULES")
-            drp_logger.info(
-                (
-                    "use 'drp help <MODULE>' to get a list of "
-                    "available TASKS within the MODULE"
-                )
-            )
-            sys.exit(-1)
-
-        module = args[0]
-        task = args[1]
-
-        if module not in MODULES:
-            drp_logger.error(f"no MODULE '{module}' in the DRP")
-            sys.exit(-1)
-        if f"{task}_drp" not in MODULES[module].__all__:
-            drp_logger.error(f"no TASK '{task}' within MODULE '{module}' in the DRP")
-            sys.exit(-1)
-
-        error = False
-        key = False
-
-        run_task = f"{module}Method.{task}_drp("
-        for arg in args[2:]:
-            if "=" not in arg and not key:
-                run_task += '"' + arg + '"'
-            elif "=" in arg:
-                entry = arg.split("=")
-                run_task += entry[0] + '="' + entry[1] + '"'
-                key = True
-            else:
-                error = True
-                drp_logger.error(f"the TASK '{run_task}' does not exist in the DRP")
-                break
-            run_task += ","
-        if not error:
-            run_task = (run_task[:-1] if run_task.endswith(",") else run_task) + ")"
-            try:
-                eval(run_task)
-            except Exception as e:
-                drp_logger.error(*e.args)
+    cli()

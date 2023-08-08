@@ -15,8 +15,7 @@ from setuptools import find_packages, setup
 # The NAME variable should be of the format "sdss-drp".
 # Please check your NAME adheres to that format.
 NAME = "lvmdrp"
-VERSION = "0.1.0"
-RELEASE = "dev" in VERSION
+VERSION = "0.1.1dev"
 
 
 def run(packages, install_requires):
@@ -35,7 +34,12 @@ def run(packages, install_requires):
         packages=packages,
         install_requires=install_requires,
         package_dir={"": "python"},
-        scripts=["bin/drp", "bin/pix2wave"],
+        scripts=["bin/drp", "bin/pix2wave",
+            "bin/build_super_pixmask",
+            "bin/build_super_arc",
+            "bin/build_super_waves",
+            "bin/build_super_trace"
+        ],
         classifiers=[
             "Development Status :: 4 - Beta",
             "Intended Audience :: Science/Research",

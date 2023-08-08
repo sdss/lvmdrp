@@ -1,3 +1,1 @@
-lvmsurveysim @ git+ssh://git@github.com/sdss/lvmsurveysim.git@0.8.3
-sdss-datamodel @ git+ssh://git@github.com/sdss/datamodel.git@0.5.2
-sdss-tree @ git+ssh://git@github.com/sdss/tree@d5c54636b1cbd1a6f269030d24a3a13da358224c#egg=sdss_tree
+lvmsurveysim @ git+https://github.com/sdss/lvmsurveysim.git@0.8.3

@@ -2,9 +2,24 @@ import numpy
 from astropy.io import fits as pyfits
 from tqdm import tqdm
 
+from lvmdrp.core.plot import plt
 from lvmdrp.core.header import Header, combineHdr
 from lvmdrp.core.positionTable import PositionTable
 from lvmdrp.core.spectrum1d import Spectrum1D
+
+
+def _read_fiber_ypix(peaks_file):
+    """
+    Read peaks file and return the fiber number, pixel position, subpixel position
+    and quality flag.
+    """
+    peaks = pyfits.open(peaks_file, memmap=False)
+    xpos = peaks[1].header["XPIX"]
+    fiber = peaks[1].data["FIBER"]
+    pixel = peaks[1].data["PIXEL"]
+    subpix = peaks[1].data["SUBPIX"]
+    qual = peaks[1].data["QUALITY"].astype(bool)
+    return xpos, fiber, pixel, subpix, qual
 
 
 class FiberRows(Header, PositionTable):
@@ -667,7 +682,7 @@ class FiberRows(Header, PositionTable):
         extension_error : int, optional with default: None
             Number of the FITS extension containing the errors for the values
         """
-        hdu = pyfits.open(file, uint=True, do_not_scale_image_data=True)
+        hdu = pyfits.open(file, uint=True, do_not_scale_image_data=True, memmap=False)
         if (
             extension_data is None
             and extension_mask is None
@@ -683,7 +698,7 @@ class FiberRows(Header, PositionTable):
                     if hdu[i].header["EXTNAME"].split()[0] == "ERROR":
                         self._error = hdu[i].data
                     elif hdu[i].header["EXTNAME"].split()[0] == "BADPIX":
-                        self._mask = hdu[i].data
+                        self._mask = hdu[i].data.astype(bool)
                     elif hdu[i].header["EXTNAME"].split()[0] == "COEFFS":
                         self._coeffs = hdu[i].data
 
@@ -693,7 +708,7 @@ class FiberRows(Header, PositionTable):
                 self._fibers = self._data.shape[0]
                 self._pixels = numpy.arange(self._data.shape[1])
             if extension_mask is not None:
-                self._mask = hdu[extension_mask].data
+                self._mask = hdu[extension_mask].data.astype(bool)
             if extension_error is not None:
                 self._error = hdu[extension_error].data
             if extension_coeffs is not None:
@@ -810,7 +825,7 @@ class FiberRows(Header, PositionTable):
         flux_min=100,
         fwhm_max=10,
         rel_flux_limits=[0.2, 5],
-        verbose=True,
+        axs=None,
     ):
         nlines = len(ref_cent)
         cent_wave = numpy.zeros((self._fibers, nlines), dtype=numpy.float32)
@@ -819,7 +834,7 @@ class FiberRows(Header, PositionTable):
         masked = numpy.zeros((self._fibers, nlines), dtype="bool")
 
         spec = self.getSpec(ref_fiber)
-        fit = spec.fitSepGauss(ref_cent, aperture, init_back)
+        fit = spec.fitSepGauss(ref_cent, aperture, init_back, axs=axs)
         masked[ref_fiber, :] = False
         flux[ref_fiber, :] = fit[:nlines]
         ref_flux = flux[ref_fiber, :]
@@ -828,30 +843,26 @@ class FiberRows(Header, PositionTable):
         first = numpy.arange(ref_fiber - 1, -1, -1)
         second = numpy.arange(ref_fiber + 1, self._fibers, 1)
 
-        if verbose:
-            iterator = tqdm(
-                first,
-                total=first.size,
-                desc=f"measuring arc lines upwards from {ref_fiber = }",
-                ascii=True,
-                unit="fiber",
-            )
-        else:
-            iterator = first
-        plot = False
+        iterator = tqdm(
+            first,
+            total=first.size,
+            desc=f"measuring arc lines upwards from {ref_fiber = }",
+            ascii=True,
+            unit="fiber",
+        )
         for i in iterator:
             spec = self.getSpec(i)
 
-            fit = spec.fitSepGauss(cent_wave[i + 1], aperture, init_back, plot=plot)
+            fit = spec.fitSepGauss(cent_wave[i + 1], aperture, init_back, axs=None)
             flux[i, :] = numpy.fabs(fit[:nlines])
             cent_wave[i, :] = fit[nlines : 2 * nlines]
             fwhm[i, :] = fit[2 * nlines : 3 * nlines] * 2.354
 
-            rel_flux_med = numpy.median(flux[i, :] / ref_flux)
+            rel_flux_med = numpy.nanmedian(flux[i, :] / ref_flux)
             if (
                 rel_flux_med < rel_flux_limits[0]
                 or rel_flux_med > rel_flux_limits[1]
-                or numpy.median(fwhm[i, :]) > fwhm_max
+                or numpy.nanmedian(fwhm[i, :]) > fwhm_max
             ):
                 select = numpy.ones(len(flux[i, :]), dtype="bool")
             else:
@@ -863,39 +874,31 @@ class FiberRows(Header, PositionTable):
                     fwhm[i, :] > fwhm_max,
                 )
 
-            if numpy.sum(select) > 0:
+            if numpy.nansum(select) > 0:
                 cent_wave[i, select] = cent_wave[i + 1, select]
                 fwhm[i, select] = fwhm[i + 1, select]
                 masked[i, select] = True
-            else:
-                plot = False
 
-        if verbose:
-            iterator = tqdm(
-                second,
-                total=second.size,
-                desc=f"measuring arc lines downwards from {ref_fiber = }",
-                ascii=True,
-                unit="fiber",
-            )
-        else:
-            iterator = second
+        iterator = tqdm(
+            second,
+            total=second.size,
+            desc=f"measuring arc lines downwards from {ref_fiber = }",
+            ascii=True,
+            unit="fiber",
+        )
         for i in iterator:
             spec = self.getSpec(i)
-            if i == 10:
-                plot = True
-            else:
-                plot = False
-            fit = spec.fitSepGauss(cent_wave[i - 1], aperture, init_back, plot=plot)
+            
+            fit = spec.fitSepGauss(cent_wave[i - 1], aperture, init_back, axs=None)
             flux[i, :] = numpy.fabs(fit[:nlines])
             cent_wave[i, :] = fit[nlines : 2 * nlines]
             fwhm[i, :] = fit[2 * nlines : 3 * nlines] * 2.354
 
-            rel_flux_med = numpy.median(flux[i, :] / ref_flux)
+            rel_flux_med = numpy.nanmedian(flux[i, :] / ref_flux)
             if (
                 rel_flux_med < rel_flux_limits[0]
                 or rel_flux_med > rel_flux_limits[1]
-                or numpy.median(fwhm[i, :]) > fwhm_max
+                or numpy.nanmedian(fwhm[i, :]) > fwhm_max
             ):
                 select = numpy.ones(len(flux[i, :]), dtype="bool")
             else:
@@ -907,7 +910,7 @@ class FiberRows(Header, PositionTable):
                     fwhm[i, :] > fwhm_max,
                 )
 
-            if numpy.sum(select) > 0:
+            if numpy.nansum(select) > 0:
                 cent_wave[i, select] = cent_wave[i - 1, select]
                 fwhm[i, select] = fwhm[i - 1, select]
                 masked[i, select] = True

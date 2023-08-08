@@ -6,14 +6,53 @@
 # @License: BSD 3-Clause
 # @Copyright: SDSS-V LVM
 
+import sys
 import os
 
 import matplotlib.pyplot as plt
-from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 import numpy as np
-from astropy.visualization import PercentileInterval, AsinhStretch, ImageNormalize
+from astropy.visualization import AsinhStretch, ImageNormalize, PercentileInterval
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+import warnings
 
+warnings.filterwarnings(
+    action="ignore",
+    module="matplotlib.figure",
+    category=UserWarning,
+    message=(
+        "This figure includes Axes that are not compatible with tight_layout, "
+        "so results might be incorrect."
+    ),
+)
+
+IS_INTERACTIVE = hasattr(sys, "ps1")
+DEFAULT_BACKEND = plt.get_backend()
+if not IS_INTERACTIVE:
+    plt.switch_backend(newbackend="Agg")
 plt.style.use("seaborn-v0_8-talk")
+
+
+def create_subplots(to_display, flatten_axes=True, **subplots_params):
+    """creates a figure and axes given a plt.subplots set of parameters
+
+    Parameters
+    ----------
+    to_display : bool
+        whether this figure will be displayed or not. This controls the backend used
+    flatten_axes : bool, optional
+        whether to flatten the axes array or not, by default True
+
+    Returns
+    -------
+    plt.Figure
+        created figure
+    array_like
+        create array of plt.Axes
+    """
+    fig, axs = plt.subplots(**subplots_params)
+    if flatten_axes and isinstance(axs, np.ndarray):
+        axs = axs.flatten()
+    return fig, axs
 
 
 def plot_image(
@@ -71,7 +110,7 @@ def plot_image(
     im = ax.imshow(
         data,
         origin="lower",
-        cmap="binary",
+        cmap="binary_r",
         norm=ImageNormalize(
             data, interval=PercentileInterval(95), stretch=AsinhStretch()
         )
@@ -85,12 +124,14 @@ def plot_image(
     if labels:
         ax.set_xlabel("X (pixel)")
         ax.set_ylabel("Y (pixel)")
-    if colorbar:
-        axins = inset_axes(ax, width="20%", height="3%", loc="upper right")
+    if colorbar and extension != "mask":
+        axins = inset_axes(ax, width="50%", height="3%", loc="upper center")
         axins.xaxis.set_ticks_position("bottom")
+        axins.tick_params(colors="tab:red", labelsize="small")
         cb = fig.colorbar(im, cax=axins, orientation="horizontal")
         if labels:
-            cb.set_label("counts (e-)", size="small")
+            unit = image._header["BUNIT"]
+            cb.set_label(f"counts ({unit})", size="small", color="tab:red")
 
     if title is not None:
         ax.set_title(title, loc="left")
@@ -160,19 +201,57 @@ def plot_strips(
     return ax
 
 
-def save_fig(fig, output_path, figure_path=None, label=None, fmt="png", close=True):
+def plot_wavesol_residuals(lines_pixels, lines_waves, model_waves, ax=None, labels=False):
+    # lines_pixels [X, Y] of emission lines in a given lamp
+    # wavelength model poly_model(lines_centroids)
+    # lines_waves is an X array of the true wavelengths
+
+    residuals = model_waves - lines_waves
+    
+    ax.axhline(ls="--", lw=1, color="0.8")
+    ax.scatter(lines_pixels, residuals, s=10)
+    for i in range(residuals.size):
+        x, y = lines_pixels[i], residuals[i]
+        ax.annotate(f"{lines_waves[i]:.2f}", (x, y), xytext=(9, -9),
+                textcoords="offset pixels")
+    
+    if labels:
+        ax.set_xlabel("X (pixel)")
+        ax.set_ylabel("Residuals (angstrom)")
+    
+    return ax
+
+
+def plot_wavesol_coeffs(ypix, coeffs, axs, title=None, labels=False, to_display=False):
+    # ypix is the Y coordinate of each fiber in the middle of the chip
+    # coeffs is a 2D array of coefficients for each fiber [nfiber, ncoeff]
+
+    for icoeff in range(coeffs.shape[1]):
+        axs[icoeff].scatter(ypix, coeffs[:, icoeff], color="tab:blue")
+        if labels:
+            axs[icoeff].set_title(f"coeff # {icoeff+1}", loc="left")
+    
+    fig = axs[0].get_figure()
+    if labels:
+        fig.supxlabel("X (pixel)")
+    if title is not None:
+        fig.suptitle(title)
+    
+    return axs
+
+def save_fig(fig, product_path, to_display, figure_path=None, label=None, fmt="png"):
     """Saves the given matplotlib figure to the given output/figure path"""
     # define figure path
     if figure_path is not None:
-        fig_path = os.path.join(os.path.dirname(output_path), figure_path)
+        fig_path = os.path.join(os.path.dirname(product_path), figure_path)
     else:
-        fig_path = os.path.dirname(output_path)
+        fig_path = os.path.dirname(product_path)
     # create figure path if needed
     if not os.path.isdir(fig_path):
         os.makedirs(fig_path, exist_ok=True)
 
     # define figure name
-    fig_name = os.path.basename(output_path)
+    fig_name = os.path.basename(product_path)
     if label is not None:
         fig_name = f"{fig_name.replace('.fits', '')}_{label}.{fmt}"
     else:
@@ -183,9 +262,10 @@ def save_fig(fig, output_path, figure_path=None, label=None, fmt="png", close=Tr
 
     # save fig and close if requested
     fig.savefig(fig_path, bbox_inches="tight")
-    if close:
-        plt.close(fig)
-    else:
+    if to_display:
         plt.show()
+        plt.tight_layout()
+    else:
+        plt.close(fig)
 
     return fig_path

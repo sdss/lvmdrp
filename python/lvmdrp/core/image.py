@@ -1,16 +1,22 @@
-import numpy
 from copy import deepcopy as copy
-from astropy.io import fits as pyfits
+from multiprocessing import Pool, cpu_count
 
+from typing import List
+
+import numpy
+import bottleneck as bn
+from astropy.table import Table
+from astropy.io import fits as pyfits
+from astropy.modeling import fitting, models
+from astropy.stats.biweight import biweight_location
+from astropy.visualization import simple_norm
+from scipy import ndimage, signal
+from scipy import interpolate
+
+from lvmdrp.core.plot import plt
 from lvmdrp.core.apertures import Apertures
 from lvmdrp.core.header import Header
 from lvmdrp.core.spectrum1d import Spectrum1D
-import matplotlib.pyplot as plt
-from astropy.visualization import simple_norm
-from multiprocessing import Pool, cpu_count
-
-from astropy.modeling import fitting, models
-from scipy import ndimage, signal
 
 
 def _parse_ccd_section(section):
@@ -23,8 +29,149 @@ def _parse_ccd_section(section):
     return slice_x, slice_y
 
 
+def _model_overscan(os_quad, axis=1, stat=biweight_location, model="spline", **kwargs):
+    """fits a parametric model to the given overscan region
+
+    Given an overscan section corresponding to a quadrant in a raw frame, this function
+    coadds the counts along a given `axis` using a given statistics `stat`. Additionally,
+    a model can be fitted to the resulting profile, which options are:
+        * const: a constant model by further collapsing along using the same `stat`
+        * profile: the raw profile (`os_model = os_profile`)
+        * polynomial: a polynomial model fitted on `os_profile`
+        * spline: a cubic-spline fitting on `os_profile`
+
+    Additional keyword parameters are passed to the fitted model.
+
+    Parameters
+    ----------
+    os_quad : lvmdrp.core.image.Image
+        image section corresponding to a overscan quadrant
+    axis : int, optional
+        axis along which the overscan will be fitted, by default 1
+    stat : function, optional
+        function to use for coadding pixels along `axis`, by default biweight_location
+    model : str, optional
+        parametric function to fit ("const", "profile", "poly", "spline"), by default "spline"
+
+    Returns
+    -------
+    os_profile : array_like
+        overscan profile after coadding pixels along `axis`
+    os_model : array_like, float
+        overscan model
+    """
+    assert axis == 0 or axis == 1
+
+    os_profile = stat(os_quad._data, axis=axis)
+    pixels = numpy.arange(os_profile.size)
+    if model == "const":
+        os_model = numpy.ones_like(pixels) * stat(os_profile)
+    elif model == "profile":
+        os_model = os_profile
+    elif model == "poly":
+        model = numpy.polynomial.Polynomial.fit(pixels, os_profile, **kwargs)
+        os_model = model(pixels)
+    elif model == "spline":
+        nknots = kwargs.pop("nknots", 300)
+        kwargs.setdefault(
+            "t",
+            numpy.linspace(
+                pixels[len(pixels) // nknots],
+                pixels[-1 * len(pixels) // nknots],
+                nknots,
+            ),
+        )
+        kwargs.setdefault("task", -1)
+        model = interpolate.splrep(pixels, os_profile, **kwargs)
+        os_model = interpolate.splev(pixels, model)
+
+    if axis == 1:
+        os_model = os_model[:, None]
+    elif axis == 0:
+        os_model = os_model[None, :]
+
+    return os_profile, os_model
+
+
+def _percentile_normalize(images, pct=75):
+    """percentile normalize a given stacked images
+
+    Parameters
+    ----------
+    images : array_like
+        3-dimensional array with first axis the image index
+    pct : float, optional
+        percentile at which the calculate the normalization factor, by default 75
+
+    Returns
+    -------
+    array_like
+        3-dimensional array of normalized images
+    array_like
+        vector containing normalization factors for each image
+    """
+    # calculate normalization factor
+    pcts = numpy.nanpercentile(images, pct, axis=(1, 2))
+    norm = bn.nanmedian(pcts) / pcts
+
+    return norm[:, None, None] * images, norm
+
+
+def _bg_subtraction(images, quad_sections, bg_sections):
+    """returns a background subtracted set of images
+
+    The background is calculated as the median in the given `bg_sections` of
+    the given `images`. The actual sections used to calculate the background,
+    the median background and the standard deviation of the background are also
+    returned matching the shape of the given `images`.
+
+
+    Parameters
+    ----------
+    images : array_like
+        3-dimensional array of stacked images
+    quad_sections : list_like
+        4-element list containing the FITS formatted sections of each quadrant
+    bg_sections : list_like
+        4-element list containing the FITS formatted sections for the background
+
+    Returns
+    -------
+    array_like
+        3-dimensional background subtracted images
+    array_like
+        3-dimensional median and standard deviation background images
+    list_like
+        4-element list containing the sections used to calculate the background
+    """
+    bg_images_med = numpy.ma.masked_array(
+        numpy.zeros_like(images), mask=images.mask, fill_value=numpy.nan, hard_mask=True
+    )
+    bg_images_std = numpy.ma.masked_array(
+        numpy.zeros_like(images), mask=images.mask, fill_value=numpy.nan, hard_mask=True
+    )
+    bg_sections = []
+    for i, quad_sec in enumerate(quad_sections):
+        xquad, yquad = [slice(idx) for idx in _parse_ccd_section(quad_sec)]
+        xbg, ybg = [slice(idx) for idx in _parse_ccd_section(bg_sections[i])]
+        # extract quad sections for BG calculation
+        bg_array = images[:, xbg, ybg]
+        bg_sections.append(bg_array)
+        # calculate median and standard deviation BG
+        bg_med = bn.nanmedian(bg_array, axis=(1, 2))
+        bg_std = bn.nanstd(bg_array, axis=(1, 2))
+        # set background sections in corresponding images
+        bg_images_med[:, yquad, xquad] = bg_med[:, None, None]
+        bg_images_std[:, yquad, xquad] = bg_std[:, None, None]
+    images_bgcorr = images - bg_images_med
+    # update mask to propagate NaNs in resulting images
+    images_bgcorr.mask = images.mask | numpy.isnan(images_bgcorr)
+
+    return images_bgcorr, bg_images_med, bg_images_std, bg_sections
+
+
 class Image(Header):
-    def __init__(self, data=None, header=None, mask=None, error=None, origin=None):
+    def __init__(self, data=None, header=None, mask=None, error=None, origin=None, individual_frames=None, slitmap=None):
         Header.__init__(self, header=header, origin=origin)
         self._data = data
         if self._data is not None:
@@ -34,6 +181,10 @@ class Image(Header):
         self._mask = mask
         self._error = error
         self._origin = origin
+        # individual frames that went into the master creation
+        self._individual_frames = individual_frames
+        # set slit map extension
+        self._slitmap = slitmap
 
     def __add__(self, other):
         """
@@ -41,7 +192,6 @@ class Image(Header):
         """
         if isinstance(other, Image):
             # define behaviour if the other is of the same instance
-
             img = Image(header=self._header, origin=self._origin)
 
             # add data if contained in both
@@ -70,13 +220,7 @@ class Image(Header):
             return img
 
         elif isinstance(other, numpy.ndarray):
-            img = Image(
-                error=self._error,
-                mask=self._mask,
-                header=self._header,
-                origin=self._origin,
-            )
-
+            img = copy(self)
             if self._data is not None:  # check if there is data in the object
                 dim = other.shape
                 # add ndarray according do its dimensions
@@ -94,14 +238,8 @@ class Image(Header):
         else:
             # try to do addtion for other types, e.g. float, int, etc.
             try:
-                new_data = self._data + other
-                img = Image(
-                    data=new_data,
-                    error=self._error,
-                    mask=self._mask,
-                    header=self._header,
-                    origin=self._origin,
-                )
+                img = copy(self)
+                img.setData(self._data + other)
                 return img
             except Exception:
                 # raise exception if the type are not matching in general
@@ -119,8 +257,7 @@ class Image(Header):
         """
         if isinstance(other, Image):
             # define behaviour if the other is of the same instance
-
-            img = Image(header=self._header, origin=self._origin)
+            img = copy(self)
 
             # subtract data if contained in both
             if self._data is not None and other._data is not None:
@@ -148,13 +285,7 @@ class Image(Header):
             return img
 
         elif isinstance(other, numpy.ndarray):
-            img = Image(
-                error=self._error,
-                mask=self._mask,
-                header=self._header,
-                origin=self._origin,
-            )
-
+            img = copy(self)
             if self._data is not None:  # check if there is data in the object
                 dim = other.shape
                 # add ndarray according do its dimensions
@@ -166,20 +297,14 @@ class Image(Header):
                     elif self._dim[1] == dim[0]:
                         new_data = self._data - other[numpy.newaxis, :]
                 else:
-                    new_data = self._data
+                    new_data = self._data - other
                 img.setData(data=new_data)
             return img
         else:
             # try to do addtion for other types, e.g. float, int, etc.
             try:
-                new_data = self._data - other
-                img = Image(
-                    data=new_data,
-                    error=self._error,
-                    mask=self._mask,
-                    header=self._header,
-                    origin=self._origin,
-                )
+                img = copy(self)
+                img.setData(self._data - other)
                 return img
             except Exception:
                 # raise exception if the type are not matching in general
@@ -194,8 +319,7 @@ class Image(Header):
         """
         if isinstance(other, Image):
             # define behaviour if the other is of the same instance
-
-            img = Image(header=self._header, origin=self._origin)
+            img = copy(self)
 
             # subtract data if contained in both
             if self._data is not None and other._data is not None:
@@ -223,13 +347,7 @@ class Image(Header):
             return img
 
         elif isinstance(other, numpy.ndarray):
-            img = Image(
-                error=self._error,
-                mask=self._mask,
-                header=self._header,
-                origin=self._origin,
-            )
-
+            img = copy(self)
             if self._data is not None:  # check if there is data in the object
                 dim = other.shape
                 # add ndarray according do its dimensions
@@ -264,13 +382,9 @@ class Image(Header):
                     new_error = self._error / other
                 else:
                     new_error = None
-                img = Image(
-                    data=new_data,
-                    error=new_error,
-                    mask=self._mask,
-                    header=self._header,
-                    origin=self._origin,
-                )
+                
+                img = copy(self)
+                img.setData(data=new_data, error=new_error)
                 return img
             except Exception:
                 # raise exception if the type are not matching in general
@@ -285,8 +399,7 @@ class Image(Header):
         """
         if isinstance(other, Image):
             # define behaviour if the other is of the same instance
-
-            img = Image(header=self._header, origin=self._origin)
+            img = copy(self)
 
             # subtract data if contained in both
             if self._data is not None and other._data is not None:
@@ -313,13 +426,7 @@ class Image(Header):
             return img
 
         elif isinstance(other, numpy.ndarray):
-            img = Image(
-                error=self._error,
-                mask=self._mask,
-                header=self._header,
-                origin=self._origin,
-            )
-
+            img = copy(self)
             if self._data is not None:  # check if there is data in the object
                 dim = other.shape
                 # add ndarray according do its dimensions
@@ -337,14 +444,8 @@ class Image(Header):
         else:
             # try to do addtion for other types, e.g. float, int, etc.
             try:
-                new_data = self._data * other
-                img = Image(
-                    data=new_data,
-                    error=self._error,
-                    mask=self._mask,
-                    header=self._header,
-                    origin=self._origin,
-                )
+                img = copy(self)
+                img.setData(data=self._data * other)
                 return img
             except Exception:
                 # raise exception if the type are not matching in general
@@ -374,6 +475,21 @@ class Image(Header):
     def __ge__(self, other):
         return self._data >= other
 
+    def apply_pixelmask(self, mask=None):
+        """Applies the mask to the data and error arrays, setting to nan when True and leaving the same value otherwise"""
+        if mask is None:
+            mask = self._mask
+        if mask is None:
+            return self._data, self._error
+
+        self._data[mask] = numpy.nan
+        if self._error is not None:
+            self._error[mask] = numpy.nan
+
+        self.is_masked = True
+
+        return self._data, self._error
+
     def getSection(self, section):
         """get image section"""
         sec_x, sec_y = _parse_ccd_section(section)
@@ -390,7 +506,7 @@ class Image(Header):
 
         header = self._header
 
-        return Image(data=data, header=header, error=error, mask=mask)
+        return Image(data=data, error=error, mask=mask, header=header, origin=self._origin, individual_frames=self._individual_frames, slitmap=self._slitmap)
 
     def setSection(self, section, subimg, update_header=False, inplace=True):
         """replaces a section in the current frame with given subimage
@@ -475,6 +591,8 @@ class Image(Header):
             mask=self._mask,
             header=self._header,
             origin=self._origin,
+            individual_frames=self._individual_frames,
+            slitmap=self._slitmap,
         )  # return new Image object with corresponding data
 
     def swapaxes(self):
@@ -672,11 +790,13 @@ class Image(Header):
                 mask=self._mask,
                 error=self._error,
                 origin=self._origin,
+                individual_frames=self._individual_frames,
+                slitmap=self._slitmap,
             )
         )
         if current != unit:
-            gains = self.getHdrValue[f"AMP? {gain_field}"]
-            sects = self.getHdrValue["AMP? TRIMSEC"]
+            gains = self.getHdrValue(f"AMP? {gain_field}")
+            sects = self.getHdrValue("AMP? TRIMSEC")
             n_amp = len(gains)
             for i in range(n_amp):
                 factor = (
@@ -738,7 +858,7 @@ class Image(Header):
         )
         overscan = self._data[numpy.logical_not(select)]
         # compute the median of the ovserscan
-        bias_overscan = numpy.median(overscan)
+        bias_overscan = bn.nanmedian(overscan)
         # get the data of the cut out region
         self._data = self._data[
             int(bound_y[0]) - 1 : int(bound_y[1]), int(bound_x[0]) - 1 : int(bound_x[1])
@@ -846,6 +966,8 @@ class Image(Header):
         extension_data=None,
         extension_mask=None,
         extension_error=None,
+        extension_frames=None,
+        extension_slitmap=None,
         extension_header=0,
     ):
         """
@@ -864,9 +986,9 @@ class Image(Header):
         extension_error : int, optional with default: None
             Number of the FITS extension containing the errors for the values
         """
-        hdu = pyfits.open(
-            filename, ignore_missing_end=True, uint=False
-        )  # open FITS file
+        self.filename = filename
+        # open FITS file
+        hdu = pyfits.open(filename, ignore_missing_end=True, uint=False, memmap=False)
         if ".fz" in filename[-4:]:
             extension_data = 1
             extension_header = 1
@@ -874,6 +996,8 @@ class Image(Header):
             extension_data is None
             and extension_mask is None
             and extension_error is None
+            and extension_frames is None
+            and extension_slitmap is None
         ):
             self._data = hdu[0].data
             self._dim = self._data.shape  # set dimension
@@ -883,6 +1007,10 @@ class Image(Header):
                         self._error = hdu[i].data
                     elif hdu[i].header["EXTNAME"].split()[0] == "BADPIX":
                         self._mask = hdu[i].data.astype("bool")
+                    elif hdu[i].header["EXTNAME"].split()[0] == "FRAMES":
+                        self._individual_frames = Table(hdu[i].data)
+                    elif hdu[i].header["EXTNAME"].split()[0] == "SLITMAP":
+                        self._slitmap = Table(hdu[i].data)
 
         else:
             if extension_data is not None:
@@ -896,14 +1024,20 @@ class Image(Header):
             if extension_error is not None:
                 self._error = hdu[extension_error].data  # take data
                 self._dim = self._error.shape  # set dimension
+            if extension_frames is not None:
+                self._individual_frames = Table(hdu[extension_frames].data)
+            if extension_slitmap is not None:
+                self._slitmap = Table(hdu[extension_slitmap].data)
 
-        self.setHeader(
-            hdu[extension_header].header
-        )  # get header  from the first FITS extension
+        # set is_masked attribute
+        self.is_masked = numpy.isnan(self._data).any()
+
+        # get header from the first FITS extension
+        self.setHeader(hdu[extension_header].header)
         hdu.close()
 
     def writeFitsData(
-        self, filename, extension_data=None, extension_mask=None, extension_error=None
+        self, filename, extension_data=None, extension_mask=None, extension_error=None, extension_frames=None, extension_slitmap=None
     ):
         """
         Save information from an Image into a FITS file. A single or multiple extension file can be created.
@@ -920,7 +1054,7 @@ class Image(Header):
         extension_error : int (0, 1, or 2), optional with default: None
             Number of the FITS extension containing the errors for the values
         """
-        hdus = [None, None, None]  # create empty list for hdu storage
+        hdus = [None, None, None, None, None]  # create empty list for hdu storage
 
         # create primary hdus and image hdus
         # data hdu
@@ -928,12 +1062,18 @@ class Image(Header):
             extension_data is None
             and extension_error is None
             and extension_mask is None
+            and extension_frames is None
+            and extension_slitmap is None
         ):
             hdus[0] = pyfits.PrimaryHDU(self._data)
             if self._error is not None:
                 hdus[1] = pyfits.ImageHDU(self._error, name="ERROR")
             if self._mask is not None:
                 hdus[2] = pyfits.ImageHDU(self._mask.astype("uint8"), name="BADPIX")
+            if self._individual_frames is not None:
+                hdus[3] = pyfits.BinTableHDU(self._individual_frames, name="FRAMES")
+            if self._slitmap is not None:
+                hdus[4] = pyfits.BinTableHDU(self._slitmap, name="SLITMAP")
         else:
             if extension_data == 0:
                 hdus[0] = pyfits.PrimaryHDU(self._data)
@@ -953,12 +1093,24 @@ class Image(Header):
                 hdu = pyfits.PrimaryHDU(self._error)
             elif extension_error > 0 and extension_error is not None:
                 hdus[extension_error] = pyfits.ImageHDU(self._error, name="ERROR")
+            
+            # frames hdu
+            if extension_frames == 0:
+                hdu = pyfits.PrimaryHDU(self._individual_frames)
+            elif extension_frames > 0 and extension_frames is not None:
+                hdus[extension_frames] = pyfits.BinTableHDU(self._individual_frames, name="FRAMES")
+            
+            # slitmap hdu
+            if extension_slitmap == 0:
+                hdu = pyfits.PrimaryHDU(self._slitmap)
+            elif extension_slitmap > 0 and extension_slitmap is not None:
+                hdus[extension_slitmap] = pyfits.BinTableHDU(self._slitmap, name="SLITMAP")
 
         # remove not used hdus
         for i in range(len(hdus)):
             try:
                 hdus.remove(None)
-            except:
+            except Exception:
                 break
         # if len(hdus)>1:
         #    hdus[0].update_ext_name('T')
@@ -1025,7 +1177,7 @@ class Image(Header):
             )
             # compute the masked median within the filter window and replace data
             select = self._mask[range_y[0] : range_y[1], range_x[0] : range_x[1]] == 0
-            out_data[y_cors[m], x_cors[m]] = numpy.median(
+            out_data[y_cors[m], x_cors[m]] = bn.nanmedian(
                 self._data[range_y[0] : range_y[1], range_x[0] : range_x[1]][select]
             )
             if self._error is not None and replace_error is not None:
@@ -1036,9 +1188,8 @@ class Image(Header):
         out_mask = numpy.logical_or(self._mask, numpy.isnan(out_data))
         out_data = numpy.nan_to_num(out_data)
         # create new Image object
-        new_image = Image(
-            data=out_data, error=out_error, mask=out_mask, header=self._header
-        )
+        new_image = copy(self)
+        new_image.setData(data=out_data, error=out_error, mask=out_mask, inplace=True)
         return new_image
 
     def calibrateSDSS(self, fieldPhot, subtractSky=True):
@@ -1051,7 +1202,7 @@ class Image(Header):
         photHeader.loadFitsHeader(fieldPhot)
         filters = numpy.array(photHeader.getHdrValue("filters").split(" "))
         filter_select = filters == filter
-        f = pyfits.open(fieldPhot)
+        f = pyfits.open(fieldPhot, memmap=False)
         tbfield = f[1].data
         aa = float(tbfield.field("aa")[0][filter_select])
         kk = float(tbfield.field("kk")[0][filter_select])
@@ -1067,16 +1218,16 @@ class Image(Header):
             try:
                 sky = self.getHdrValue("sky")
             except KeyError:
-                sky = numpy.median(calibratedImage)
+                sky = bn.nanmedian(calibratedImage)
             # print('Sky Background %s: %.2f Counts' %(filters[filter_select][0],sky))
             calibratedImage = calibratedImage - sky
             error = numpy.sqrt((calibratedImage + sky) / gain + dark_var)
         else:
             error = numpy.sqrt((calibratedImage) / gain + dark_var)
         self.setHdrValue("FIELD", 0)
-        sdssImage = Image(
-            data=calibratedImage * factor, error=error * factor, header=self._header
-        )
+
+        sdssImage = copy(self)
+        sdssImage.setData(data=calibratedImage * factor, error=error * factor, inplace=True)
         return sdssImage
 
     def split(self, fragments, axis="X"):
@@ -1097,7 +1248,7 @@ class Image(Header):
             split_mask = [None] * fragments
         for i in range(fragments):
             image_list.append(
-                Image(data=split_data[i], error=split_error[i], mask=split_mask[i])
+                Image(data=split_data[i], error=split_error[i], mask=split_mask[i], header=self._header, origin=self._origin, individual_frames=self._individual_frames, slitmap=self._slitmap)
             )
 
         return image_list
@@ -1173,7 +1324,8 @@ class Image(Header):
             new_mask[select3] = self._mask.flatten()
             new_mask[select4] = self._mask.flatten()
         # create new Image object with the new subsample data
-        new_image = Image(data=new_data, error=new_error, mask=new_mask)
+        new_image = copy(self)
+        new_image.setData(data=new_data, error=new_error, mask=new_mask, inplace=True)
         return new_image
 
     def rebin(self, bin_x, bin_y):
@@ -1243,6 +1395,8 @@ class Image(Header):
             mask=new_mask,
             header=self._header,
             origin=self._origin,
+            individual_frames=self._individual_frames,
+            slitmap=self._slitmap,
         )
         return new_img
 
@@ -1273,13 +1427,8 @@ class Image(Header):
         else:
             new_error = None
         # create new Image object with the error and the mask unchanged and return
-        new_image = Image(
-            data=new,
-            error=new_error,
-            mask=self._mask,
-            header=self._header,
-            origin=self._origin,
-        )
+        new_image = copy(self)
+        new_image.setData(data=new, error=new_error, inplace=True)
         return new_image
 
     def convolveGaussImg(self, sigma_x, sigma_y, mode="nearest", mask=False):
@@ -1319,13 +1468,8 @@ class Image(Header):
                 self._data, (sigma_y, sigma_x), mode=mode
             )
         # create new Image object with the error and the mask unchanged and return
-        new_image = Image(
-            data=new,
-            error=self._error,
-            mask=self._mask,
-            header=self._header,
-            origin=self._origin,
-        )
+        new_image = copy(self)
+        new_image.setData(data=new, inplace=True)
         return new_image
 
     def medianImg(self, size, mode="nearest", use_mask=False):
@@ -1367,9 +1511,8 @@ class Image(Header):
             # reset original masked values in new array
             new_data[new_mask] = self._data[new_mask]
 
-        image = Image(
-            data=new_data, header=self._header, error=self._error, mask=new_mask
-        )
+        image = copy(self)
+        image.setData(data=new_data, mask=new_mask)
         return image
 
     def collapseImg(self, axis, mode="mean"):
@@ -1399,17 +1542,15 @@ class Image(Header):
             dim = self._dim[1]
         # collapse the image to Spectrum1D object with requested operation
         if mode == "mean":
-            return Spectrum1D(numpy.arange(dim), numpy.mean(self._data, axis))
+            return Spectrum1D(numpy.arange(dim), bn.nanmean(self._data, axis))
         elif mode == "sum":
-            return Spectrum1D(numpy.arange(dim), numpy.sum(self._data, axis))
-        elif mode == "nansum":
-            return Spectrum1D(numpy.arange(dim), numpy.nansum(self._data, axis))
+            return Spectrum1D(numpy.arange(dim), bn.nansum(self._data, axis))
         elif mode == "median":
-            return Spectrum1D(numpy.arange(dim), numpy.median(self._data, axis))
+            return Spectrum1D(numpy.arange(dim), bn.nanmedian(self._data, axis))
         elif mode == "min":
-            return Spectrum1D(numpy.arange(dim), numpy.amin(self._data, axis))
+            return Spectrum1D(numpy.arange(dim), bn.nanmin(self._data, axis))
         elif mode == "max":
-            return Spectrum1D(numpy.arange(dim), numpy.amax(self._data, axis))
+            return Spectrum1D(numpy.arange(dim), bn.nanmax(self._data, axis))
 
     def fitPoly(self, axis="y", order=4, plot=-1):
         """
@@ -1442,7 +1583,7 @@ class Image(Header):
         # setup the base line for the polynomial fitting
         slices = self._dim[1]
         x = numpy.arange(self._dim[0])
-        x = x - numpy.mean(x)
+        x = x - bn.nanmean(x)
         # if self._mask is not None:
         #    self._mask = numpy.logical_and(self._mask, numpy.logical_not(numpy.isnan(self._data)))
         valid = ~self._mask.astype("bool")
@@ -1477,7 +1618,7 @@ class Image(Header):
                             self._data[valid[:, i], i][select],
                             "ok",
                         )
-                        max = numpy.max(self._data[valid[:, i], i][select])
+                        max = bn.nanmax(self._data[valid[:, i], i][select])
                     fit_result[:, i] = numpy.polyval(
                         fit_par[:, i], x
                     )  # evalute the polynom
@@ -1516,9 +1657,9 @@ class Image(Header):
             new_mask = numpy.isnan(fit_result)
         else:
             new_mask = None
-        new_img = Image(
-            data=fit_result, error=self._error, header=self._header, mask=new_mask
-        )
+        
+        new_img = copy(self)
+        new_img.setData(data=fit_result, mask=new_mask)
         return new_img
 
     def traceFWHM(
@@ -1606,7 +1747,7 @@ class Image(Header):
                 mask[good_pix[:, i], i] = numpy.sum(self._mask[:, i][pixels], 1) > 0
         return data, error, mask
 
-    def extractSpecOptimal(self, TraceMask, TraceFWHM, plot=-1):
+    def extractSpecOptimal(self, TraceMask, TraceFWHM, plot_fig=False):
         # initialize RSS arrays
         data = numpy.zeros((TraceMask._fibers, self._dim[1]), dtype=numpy.float32)
         if self._error is not None:
@@ -1626,7 +1767,7 @@ class Image(Header):
 
             # define fiber mask
             bad_fiber = (slice_trace[2] == 1) | (
-                (slice_trace[0] < 0) | slice_trace[0] > len(slice_img._data) - 1
+                (slice_trace[0] < 0) | (slice_trace[0] > len(slice_img._data) - 1)
             )
             # bad_fiber = numpy.logical_or(
             #     (slice_trace[2] == 1),
@@ -1645,15 +1786,11 @@ class Image(Header):
 
             # define fiber index
             indices = numpy.indices((self._dim[0], numpy.sum(good_fiber)))
+
             # measure flux along the given columns
-            if i == plot:
-                result = slice_img.obtainGaussFluxPeaks(
-                    trace[good_fiber], fwhm[good_fiber], indices, plot=True
-                )
-            else:
-                result = slice_img.obtainGaussFluxPeaks(
-                    trace[good_fiber], fwhm[good_fiber], indices, plot=False
-                )
+            result = slice_img.obtainGaussFluxPeaks(
+                trace[good_fiber], fwhm[good_fiber], indices, plot=plot_fig
+            )
             data[good_fiber, i] = result[0]
             if self._error is not None:
                 error[good_fiber, i] = result[1]
@@ -2028,6 +2165,8 @@ class Image(Header):
             header=self.getHeader(),
             error=self.getError(),
             mask=numpy.zeros(self.getDim(), dtype=bool),
+            individual_frames=self.getIndividualFrames(),
+            slitmap=self.getSlitMap(),
         )
 
         # initial CR selection
@@ -2183,12 +2322,35 @@ class Image(Header):
 
         return select
 
+    def getIndividualFrames(self):
+        return self._individual_frames
+
+    def setIndividualFrames(self, images):
+        self._individual_frames = Table(names=["TILEID", "MJD", "EXPNUM", "SPEC", "CAMERA", "EXPTIME"], dtype=(int, int, int, str, str, float))
+        for img in images:
+            self._individual_frames.add_row([
+                img._header.get("TILEID", 1111),
+                img._header.get("MJD"),
+                img._header.get("EXPOSURE"),
+                img._header.get("SPEC"),
+                img._header.get("CCD"),
+                img._header.get("EXPTIME"),
+            ])
+
+    def getSlitmap(self):
+        return self._slitmap
+    
+    def setSlitmap(self, slitmap):
+        self._slitmap = slitmap
+
 
 def loadImage(
     infile,
     extension_data=None,
     extension_mask=None,
     extension_error=None,
+    extension_frames=None,
+    extension_slitmap=None,
     extension_header=0,
 ):
     image = Image()
@@ -2197,6 +2359,8 @@ def loadImage(
         extension_data=extension_data,
         extension_mask=extension_mask,
         extension_error=extension_error,
+        extension_frames=extension_frames,
+        extension_slitmap=extension_slitmap,
         extension_header=extension_header,
     )
 
@@ -2279,12 +2443,23 @@ def glueImages(images, positions):
         error=full_CCD_error,
         mask=full_CCD_mask,
         header=images[0].getHeader(),
+        individual_frames=images[0].getIndividualFrames(),
+        slitmap=images[0].getSlitmap(),
     )
 
     return out_image
 
 
-def combineImages(images, method="median", k=3, normalize=True, subtract_offset=True):
+def combineImages(
+    images: List[Image],
+    method: str = "median",
+    k: int = 3,
+    normalize: bool = True,
+    normalize_percentile: int = 75,
+    background_subtract: bool = False,
+    background_sections: List[str] = None,
+    replace_with_nan: bool = True,
+):
     """
     Combines several image to a single one according to a certain average methods
 
@@ -2311,78 +2486,84 @@ def combineImages(images, method="median", k=3, normalize=True, subtract_offset=
     # load image data in to stack
     for i in range(len(images)):
         stack_image[i, :, :] = images[i].getData()
-        # TODO: if imagetyp != "bias":
-        # TODO: else: initialize a dummy error array
+
+        # read error image if not a bias image
         if images[0]._header["IMAGETYP"] != "bias":
             stack_error[i, :, :] = images[i].getError()
+
+        # read pixel mask image
         if images[i]._mask is not None:
             stack_mask[i, :, :] = images[i].getMask()
-        else:
-            stack_mask[i, :, :] = numpy.zeros_like(stack_image, dtype=bool)
 
-    # if subtract_offset:
-    #     # plot histogram of the images to get a feeling of the pixel distributions
-    #     # identify pixels without fibers and calculate the median, per image
-    #     # subtract median value per image
-    #     pass
+    # mask invalid values
+    stack_image[stack_mask] = numpy.nan
+    stack_error[stack_mask] = numpy.nan
+
+    if background_subtract:
+        quad_sections = images[0].getHdrValues("AMP? TRIMSEC")
+        stack_image, _, _, _ = _bg_subtraction(
+            images=stack_image,
+            quad_sections=quad_sections,
+            bg_sections=background_sections,
+        )
 
     if normalize:
         # plot distribution of pixels (detect outliers e.g., CR)
-        # select pixels that exposed
+        # select pixels that are exposed
         # calculate the median of the selected pixels
         # scale illuminated pixels to a common scale, for the whole image
-        pass
-
-    # mask invalid values
-    stack_image = numpy.ma.masked_array(stack_image, mask=stack_mask)
-    stack_error = numpy.ma.masked_array(stack_image, mask=stack_mask)
+        stack_image, _ = _percentile_normalize(stack_image, normalize_percentile)
 
     # combine the images according to the selected method
     if method == "median":
-        new_image = numpy.ma.median(stack_image, 0)
-        new_error = numpy.sqrt(numpy.ma.median(stack_error**2, 0))
+        new_image = bn.nanmedian(stack_image, 0)
+        new_error = numpy.sqrt(bn.nanmedian(stack_error ** 2, 0))
     elif method == "sum":
-        new_image = numpy.ma.sum(stack_image, 0)
-        new_error = numpy.sqrt(numpy.ma.sum(stack_error**2, 0))
+        new_image = bn.nansum(stack_image, 0)
+        new_error = numpy.sqrt(bn.nansum(stack_error ** 2, 0))
     elif method == "mean":
-        new_image = numpy.ma.mean(stack_image, 0)
-        new_error = numpy.sqrt(numpy.ma.mean(stack_error**2, 0))
+        new_image = bn.nanmean(stack_image, 0)
+        new_error = numpy.sqrt(bn.nanmean(stack_error ** 2, 0))
     elif method == "clipped_median":
-        median = numpy.ma.median(stack_image, 0)
-        rms = numpy.ma.std(stack_image, 0)
+        median = bn.nanmedian(stack_image, 0)
+        rms = bn.nanstd(stack_image, 0)
         # select pixels within given sigma limits around the median
-        select = numpy.logical_and(
-            stack_image < median + k * rms, stack_image > median - k * rms
+        select = (stack_image < median + k * rms) & (
+            stack_image > median - k * rms
         )
         # compute the number of good pixels
-        good_pixels = numpy.ma.sum(select, 0).astype(bool)
+        good_pixels = bn.nansum(select, 0).astype(bool)
         # set all bad pixel to 0 to compute the mean
         # TODO: make this optional, by default not replacement
-        stack_image[:, numpy.logical_not(good_pixels)] = 0
-        new_image = numpy.ma.sum(stack_image, 0) / good_pixels
+        stack_image[:, ~good_pixels] = 0
+        new_image = bn.nansum(stack_image, 0) / good_pixels
 
     # return new image and error to normal array
-    new_mask = new_image.mask
-    new_image = new_image.data
-    new_error = new_error.data
+    new_mask = numpy.all(stack_mask, 0)
 
     # mask bad pixels
-    # old_mask = numpy.sum(stack_mask, 0).astype(bool)
-    # TODO: numpy seems to be doing this already, but need to test it
-    # new_mask = numpy.zeros_like(new_image, dtype=bool)
-    # for i in range(len(images)):
-    #     new_mask = new_mask & stack_mask[i]
     new_mask = new_mask | numpy.isnan(new_image) | numpy.isnan(new_error)
 
-    # TODO: add new header keywords:
-    #   - NCOMBINE: number of frames combined
-    #   - STATCOMB: statistic used to combine
-    #   - table HDU conataining basic metadata from the individual images
+    # define new header
     if images[0]._header is not None:
         new_header = images[0]._header
+
+        nexp = len(images)
+        new_header["ISMASTER"] = (True, "Is this a combined (master) frame")
+        new_header["NFRAMES"] = (nexp, "Number of exposures combined")
+        new_header["STATCOMB"] = (method, "Statistic used to combine images")
     else:
         new_header = None
 
-    outImage = Image(data=new_image, error=new_error, mask=new_mask, header=new_header)
+    # create combined image
+    combined_image = Image(
+        data=new_image, error=new_error, mask=new_mask, header=new_header, slitmap=images[0].getSlitmap()
+    )
+    # update masked pixels if needed
+    if replace_with_nan:
+        combined_image.apply_pixelmask()
 
-    return outImage
+    # add metadata of individual images
+    combined_image.setIndividualFrames(images)
+
+    return combined_image

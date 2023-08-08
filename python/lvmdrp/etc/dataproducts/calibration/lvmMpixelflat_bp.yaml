@@ -3,13 +3,14 @@ short: reduced and combined (master) pixelflat frames
 description: |
   this is the frame after combining several reduced pixelflat frames, in units of e-,
   Poisson errors calculated and CR rejected.
-location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[MJD]/
+location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[MJD]/calib/
 created_by: imageMethod.createMasterFrame
 used_by:
   - imageMethod.basicCalibration
 naming_convention: |
-  lvm-mpixelflat-[CAMERA]-[EXPTIME].fits.gz, where [CAMERA] is one of the nine cameras on the instrument, b1, r1, z1,
+  lvm-mpixelflat-[CAMERA].fits.gz, where [CAMERA] is one of the nine cameras on the instrument, b1, r1, z1,
   or b2, r2, z2, or b3, r3, or z3 for the blue, red, nir cameras on each LVM spectrograph.
+access_name: lvm_master
 hdu0:
   name: PRIMARY
   description: primary header metadata

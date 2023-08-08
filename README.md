@@ -17,9 +17,9 @@ To install the DRP along with its dependencies, you need to run the following st
     > `conda activate lvmdrp`
 
 3. Clone the Github repository:
-    > `git clone --recurse-submodules -j8 git@github.com:sdss/lvmdrp.git` # assuming you have an SSH key
+    > `git clone -b development git@github.com:sdss/lvmdrp.git` # assuming you have an SSH key
 
-    > `git clone --recurse-submodules -j8 https://github.com/sdss/lvmdrp.git` # using HTTPS
+    > `git clone -b development https://github.com/sdss/lvmdrp.git` # using HTTPS
 
 4. Go into the lvmdrp directory:
     > `cd lvmdrp`
@@ -34,10 +34,9 @@ To install the DRP along with its dependencies, you need to run the following st
 
 <!-- write a script to test everything finished correctly with the installation -->
 
-## Advanced ESO sky model configuration
+## ESO sky routines installation and configuration
 
-If you are planning on using the sky module, you will need to install the ESO routines first. In order to install to do so
-you need to run the following commands, **also within DRP python environment**.
+If you are planning on using the sky module, you will need to install the ESO routines first. In order to do so, you need to run the following commands, **also within DRP python environment**. Additionally, if you want to control where the eso routines will be installed, you can define the environment variable `ESOSKY` on your system to point to the desired directory.
 
 1. Install the ESO skycorr and skymodel routines:
     > `drp sky installESOSky`
@@ -71,22 +70,33 @@ There are two ways in which you can contribute:
 
 For those willing to contribute by coding, there are some steps to streamline the development process:
 
-1. Before you start coding on a new feature/bug-fix, make sure your **local** `development` branch is up to date:
+0. Make sure you install the pipeline on your environment in edit (developer) mode, like this:
+    > `pip install -e .`
+
+2. Before you start coding on a new feature/bug-fix, make sure your **local** `development` branch is up to date:
     > `git pull development`
 
-2. Create a branch to work on and make sure the name can be easily mappable to the work you intend to do:
+3. Create a branch to work on and make sure the name can be easily mappable to the work you intend to do:
     > `git checkout -b <feature_name>`
 
-3. Afterwards, you can push your updates to the remote branch on Github:
+4. Afterwards, you can push your updates to the remote branch on Github:
     > `git push`
 
-4. Finally, if you consider your feature is ready to be merged to the `development` branch, you can create a new [pull request at Github](https://github.com/sdss/lvmdrp/pulls).
+5. Finally, if you consider your feature is ready to be merged to the `development` branch, you can create a new [pull request at Github](https://github.com/sdss/lvmdrp/pulls).
 
 Regarding commits, I'm trying to go for an *atomic* approach, where each commit has a single purpose. So please try to avoid as much as possible pushing lots of unrelated changes in one commit.
 
 ## Troubleshooting
 
 In some MacOS versions there may be the need to perform extra installation steps, before getting into the steps described in the [installation section](#installation).
+
+### Issue importing CSafeLoader
+
+Some Mac users have found the folloring error while importing `CSafeLoader` from the PyYaml package (~6.0):
+
+    AttributeError: module 'yaml' has no attribute 'CSafeLoader'
+
+PyYaml is being installed as a dependency of PyTable. As of **Aug 7, 2023**, the problem seems to be solved by either installing PyTables from conda directly (instead of using pip install) or by installing PyTables from their [master branch](https://github.com/PyTables/PyTables).
 
 ### For MacOS (Monterey v12.6.2)
 

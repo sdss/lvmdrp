@@ -7,9 +7,9 @@ location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[MJD]
 naming_convention: lvm-arc-[CAMERA]-[EXPNUM]-config.yaml
 target_frame: lvmSdr
 calibration_frames:
-  bias: lvm-mbias
-  dark: lvm-mdark
-  flat: lvm-mpixelflat
+  bias: lvmMbias
+  dark: lvmMdark
+  flat: lvmMpixelflat
 reduction_steps:
   imageMethod.preprocRawFrame:
     in_image: lvmSdr

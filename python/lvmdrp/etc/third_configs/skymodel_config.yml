@@ -166,7 +166,7 @@ lblrtm_setup:
 libstruct.dat:
   # Structure of LBLRTM/RFM library of atmospheric molecular spectra
   # File name structure (increasing field numbers [1-7] from left to right):
-  - "lib/111_A22_t3_s4_R5555555_6.fits"
+  - "skymodel_lib/111_A22_t3_s4_R5555555_6.fits"
   # Meaning of data fields:
   # 1st line: description
   # - ID (number in file name structure -> 1,2,3,...)

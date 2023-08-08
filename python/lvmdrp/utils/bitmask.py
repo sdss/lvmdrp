@@ -158,6 +158,8 @@ class ReductionStage(BaseBitmask):
 
 
 class QualityFlag(BaseBitmask):
+    # TODO: add flag for overscan quality
+    OSFEATURES = auto()  # Overscan region has features.
     EXTRACTBAD = auto()  # Many bad values in extracted frame.
     EXTRACTBRIGHT = auto()  # Extracted spectra abnormally bright.
     LOWEXPTIME = auto()  # Exposure time less than 10 minutes.
@@ -179,6 +181,7 @@ class QualityFlag(BaseBitmask):
     NOSPEC3 = auto()  # No data from spec3.
     BLOWTORCH = auto()  # Blowtorch artifact detected.
     SEVEREBT = auto()  # Severe blowtorch artifact.
+    SATURATED = auto()  # X% of saturated pixels in this frame.
 
 
 class PixMask(BaseBitmask):

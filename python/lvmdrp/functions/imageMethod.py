@@ -1,3 +1,6 @@
+#!/usr/bin/env python
+# encoding: utf-8
+
 import multiprocessing
 import os
 import sys
@@ -5,28 +8,38 @@ from copy import deepcopy as copy
 from multiprocessing import Pool, cpu_count
 
 import numpy
-from astropy.io import fits as pyfits
+import bottleneck as bn
 from astropy import units as u
-from astropy.nddata import CCDData
-from lacosmic import lacosmic
+from astropy.table import Table
+from astropy.io import fits as pyfits
+from astropy.nddata import CCDData, StdDevUncertainty
+from astropy.stats.biweight import biweight_location, biweight_scale
+from astropy.visualization import simple_norm
 from ccdproc import cosmicray_lacosmic
-from matplotlib import pyplot as plt
 from scipy import interpolate
 from tqdm import tqdm
 
-from lvmdrp.core.fiberrows import FiberRows
+from typing import List
+
+from lvmdrp import log
+from lvmdrp.utils.decorators import skip_on_missing_input_path, drop_missing_input_paths, skip_if_drpqual_flags
+from lvmdrp.utils.bitmask import QualityFlag
+from lvmdrp.core.fiberrows import FiberRows, _read_fiber_ypix
 from lvmdrp.core.image import (
     Image,
+    _parse_ccd_section,
+    _model_overscan,
     combineImages,
     glueImages,
     loadImage,
-    _parse_ccd_section,
 )
-from lvmdrp.core.plot import plot_strips, plot_image, save_fig
+from lvmdrp.core.plot import plt, create_subplots, plot_image, plot_strips, save_fig
 from lvmdrp.core.rss import RSS
-from lvmdrp.core.spectrum1d import Spectrum1D
+from lvmdrp.core.spectrum1d import Spectrum1D, _spec_from_lines, _cross_match
 from lvmdrp.core.tracemask import TraceMask
-from lvmdrp.utils.logger import get_logger
+from lvmdrp.utils.hdrfix import apply_hdrfix
+from lvmdrp.utils.convert import dateobs_to_sjd, correct_sjd
+
 
 NQUADS = 4
 DEFAULT_IMAGETYP = "object"
@@ -53,18 +66,15 @@ description = "Provides Methods to process 2D images"
 
 __all__ = [
     "LACosmic_drp",
-    "findPeaksAuto_drp",
-    "tracePeaks_drp",
+    "find_peaks_auto",
+    "trace_peaks",
     "subtractStraylight_drp",
     "traceFWHM_drp",
-    "extractSpec_drp",
-    "preprocRawFrame_drp",
-    "detrendFrame_drp",
-    "createMasterFrame_drp",
+    "extract_spectra",
+    "preproc_raw_frame",
+    "detrend_frame",
+    "create_master_frame",
 ]
-
-
-log = get_logger(__name__)
 
 
 def detCos_drp(
@@ -727,19 +737,21 @@ def addCCDMask_drp(image, mask, replaceError="1e10"):
 # TODO: independientemente de cuantas fibras se detecten, el output tiene que tener todas las fibras + flags
 # TODO: agregar informacion de posicion de las fibras al fibermap, para usar como referencia
 # esta funcion se corre solo una vez o con frecuencia baja
-def findPeaksAuto_drp(
-    in_image,
-    out_peaks,
-    nfibers,
-    disp_axis="X",
-    threshold="5000",
-    median_box="8",
-    median_cross="1",
-    slice="",
-    method="gauss",
-    init_sigma="1.0",
-    plot="1",
-    figure_path=".figures",
+@skip_on_missing_input_path(["in_image"])
+def find_peaks_auto(
+    in_image: str,
+    out_peaks: str,
+    out_region: str = None,
+    slice: int = None,
+    pixel_range: List[int] = [0, 4080],
+    fibers_dmin: int = 5,
+    threshold: int = 1.0,
+    nfibers: int = None,
+    disp_axis: str = "X",
+    median_box: List[int] = [1, 10],
+    method: str = "hyperbolic",
+    init_sigma: float = 1.0,
+    display_plots: bool = False,
 ):
     """
     Finds the exact subpixel cross-dispersion position of a given number of fibers at a certain dispersion column on the raw CCD frame.
@@ -754,6 +766,10 @@ def findPeaksAuto_drp(
         Name of the Continuum FITS file in which the fiber position along cross-dispersion direction will be measured
     out_peaks : string
         Name of the ASCII file in which the resulting fiber peak positions are stored
+    slice: string of integer, optional with default: ''
+        Traces the peaks along a given dispersion slice column number. If empty, the dispersion column with the average maximum counts will be used
+    pixel_range: string of integer, optional with default: '[0,4080]'
+        Defines the range of pixels along the cross-dispersion axis to be considered for the peak finding
     nfibers: string of integer > 0
         Number of fibers for which need to be identified in cross-dispersion
     disp_axies: string of float, optional  with default: 'X'
@@ -762,26 +778,20 @@ def findPeaksAuto_drp(
         Init threshold for the peak heights to be considered as a fiber peak.
     median_box: string of integer, optional  with default: '8'
         Defines a median smoothing box along dispersion axis to  reduce effects of cosmics or bad pixels
-    slice: string of integer, optional with default: ''
-        Traces the peaks along a given dispersion slice column number. If empty, the dispersion column with the average maximum counts will be used
     method: string, optional with default: 'gauss'
         Set the method to measure the peaks positions, either 'gauss' or 'hyperbolic'.
     init_sigma: string of  float, optional with default: '1.0'
         Init guess for the  sigma width (in pixels units)  for the Gaussian fitting, only used if method 'gauss' is selected
-    plot: string of integer (0 or 1), optional  with default: 1
+    display_plots: string of integer (0 or 1), optional  with default: 1
         Show information during the processing on the command line (0 - no, 1 - yes)
 
     Examples
     --------
     user:> lvmdrp image findPeaksAuto IMAGE.fits OUT_PEAKS.txt 382  method='gauss', init_sigma=1.3
     """
-    # convert all parameters to proper type
-    npeaks = int(nfibers)
-    threshold = float(threshold)
-    median_box = int(median_box)
-    median_cross = int(median_cross)
-    init_sigma = float(init_sigma)
-    plot = int(plot)
+    # TODO: read fibermap information (with the initial position of the fibers)
+    # TODO: flag saturated fibers around those initial positions
+    npeaks = nfibers
 
     # Load Image
     img = loadImage(in_image)
@@ -793,13 +803,11 @@ def findPeaksAuto_drp(
         img.swapaxes()
 
     # perform median filtering along the dispersion axis to clean cosmic rays
-    if median_box or median_cross:
-        median_box = max(median_box, 1)
-        median_cross = max(median_cross, 1)
-        img = img.medianImg((median_cross, median_box))
+    if 0 not in median_box:
+        img = img.medianImg(median_box)
 
     # if no slice is given find the cross-dispersion cut with the highest signal
-    if slice == "":
+    if slice is None:
         log.info("collapsing image along Y-axis using a median statistic")
         median_cut = img.collapseImg(
             axis="y", mode="median"
@@ -815,43 +823,69 @@ def findPeaksAuto_drp(
 
     # find location of peaks (local maxima) either above a fixed threshold or to reach a fixed number of peaks
     log.info("locating fibers")
-    peaks = cut.findPeaks(threshold=threshold, npeaks=npeaks)
-    log.info(f"found {len(peaks[0])} fibers")
+    pixels, _, peaks = cut.findPeaks(
+        pix_range=pixel_range, min_dwave=fibers_dmin, threshold=threshold, npeaks=npeaks
+    )
+    log.info(f"found {len(pixels)} fibers")
 
     # find the subpixel centroids of the peaks from the central 3 pixels using either a hyperbolic approximation
     # or perform a leastsq fit with a Gaussian
-    log.info(f"refining fiber location")
-    centers = cut.measurePeaks(peaks[0], method, init_sigma, threshold=0, max_diff=1.0)[
-        0
-    ]
-    round_cent = numpy.round(centers).astype(
-        "int16"
-    )  # round the subpixel peak positions to their nearest integer value
+    log.info("refining fiber location")
+    centers = cut.measurePeaks(pixels, method, init_sigma, threshold=0, max_diff=1.0)[0]
+    # round the subpixel peak positions to their nearest integer value
+    round_cent = numpy.round(centers).astype(int)
     log.info(f"final number of fibers found {len(round_cent)}")
-    # write number of peaks and their position to an ASCII file NEED TO BE REPLACE WITH XML OUTPUT
-    file_out = open(out_peaks, "w")
-    file_out.write("%i\n" % (column))
-    for i in range(len(centers)):
-        file_out.write("%i %i %e %i\n" % (i, round_cent[i], centers[i], 0))
-    file_out.close()
 
-    if plot == 1:
-        fig = plt.figure(figsize=(25, 10))
-        plt.plot(cut._data, "-k", lw=1)
-        plt.plot(peaks[0], peaks[2], "o", color="tab:red", mew=0, ms=5)
-        plt.plot(
-            centers,
-            numpy.ones(len(centers)) * numpy.nanmax(peaks[2]) * 0.5,
-            "x",
-            mew=1,
-            ms=7,
-            color="tab:blue",
-        )
-        plt.xlabel("cross-dispersion axis (pix)")
-        plt.ylabel("fiber profile")
-        plt.show()
-    else:
-        save_fig(fig, output_path=out_peaks, figure_path=figure_path, label=None)
+    # write number of peaks and their position
+    log.info(f"writing {os.path.basename(out_peaks)}")
+    columns = [
+        pyfits.Column(name="FIBER", format="I", array=numpy.arange(centers.size)),
+        pyfits.Column(name="PIXEL", format="I", array=round_cent),
+        pyfits.Column(name="SUBPIX", format="D", array=centers),
+        pyfits.Column(name="QUALITY", format="I", array=numpy.zeros_like(centers)),
+    ]
+    table = pyfits.BinTableHDU().from_columns(columns)
+    table.header["XPIX"] = (column, "X coordinate of the fibers [pix]")
+    hdu_list = pyfits.HDUList([pyfits.PrimaryHDU(header=img._header), table])
+    hdu_list.writeto(out_peaks, overwrite=True)
+    # write .reg file for ds9
+    if out_region is not None:
+        with open(out_region, "w") as reg_out:
+            reg_out.write("# Region file format: DS9 version 4.1\n")
+            reg_out.write(
+                'global color=green dashlist=8 3 width=1 font="helvetica 10 normal roman" select=1 highlite=1 dash=0 fixed=0 edit=1 move=1 delete=1 include=1 source=1\n'
+            )
+            reg_out.write("physical\n")
+            for i in range(len(centers)):
+                reg_out.write(
+                    "# text(%.4f,%.4f) text={%i, %i}\n"
+                    % (column+1, centers[i]+1, i + 1, round_cent[i])
+                )
+        # with open(out_region.replace(".reg", ".txt"), "w") as txt_out:
+        #     for i in range(len(centers)-1, -1, -1):
+        #         txt_out.write("%i %i\n" % (i + 1, round_cent[i]))
+
+    # plot figure
+    fig, ax = create_subplots(to_display=display_plots, figsize=(15, 10))
+    ax.step(cut._pixels, cut._data, "-k", lw=1, where="mid")
+    ax.plot(pixels, peaks, "o", color="tab:red", mew=0, ms=5)
+    ax.plot(
+        centers,
+        numpy.ones(len(centers)) * numpy.nanmax(peaks) * 0.5,
+        "x",
+        mew=1,
+        ms=7,
+        color="tab:blue",
+    )
+    ax.set_xlabel("cross-dispersion axis (pix)")
+    ax.set_ylabel("fiber profile")
+    save_fig(
+        fig,
+        product_path=out_peaks,
+        to_display=display_plots,
+        figure_path="qa",
+        label=None,
+    )
 
 
 def findPeaksOffset_drp(
@@ -1193,8 +1227,8 @@ def findPeaksMaster2_drp(
     # find location of peaks (local maxima) either above a fixed threshold or to reach a fixed number of peaks
 
     peaks_good = []
-    if numpy.max(cut._data) < threshold:
-        threshold = numpy.max(cut._data) * 0.8
+    if numpy.nanmax(cut._data) < threshold:
+        threshold = numpy.nanmax(cut._data) * 0.8
     while len(peaks_good) != numpy.sum(select_good):
         (peaks_good, temp, peaks_flux) = cut.findPeaks(threshold=threshold, npeaks=0)
         if peaks_good[0] < border:
@@ -1260,27 +1294,31 @@ def findPeaksMaster2_drp(
 # TODO: guardar tabla con los pixeles usados en el trazado (antes del fitting)
 # TODO: guardar polinomio evaluado (con buen muestreo)
 # TODO: graficar los coeficientes versus los puntos usados en el ajuste polinomial
-def tracePeaks_drp(
-    in_image,
-    in_peaks,
-    out_trace,
-    disp_axis="X",
-    method="gauss",
-    median_box="7",
-    median_cross="1",
-    steps="30",
-    coadd="30",
-    poly_disp="6",
-    init_sigma="1.0",
-    threshold="100.0",
-    max_diff="2",
-    verbose="1",
-    plot="1",
+def trace_peaks(
+    in_image: str,
+    out_trace: str,
+    in_peaks: str = None,
+    ref_column: int = 2000,
+    correct_ref: bool = False,
+    write_trace_data: bool = False,
+    disp_axis: str = "X",
+    method: str = "gauss",
+    median_box: int = 10,
+    median_cross: int = 1,
+    steps: int = 30,
+    coadd: int = 5,
+    poly_disp: int = 6,
+    init_sigma: float = 1.0,
+    threshold: float = 0.5,
+    max_diff: int = 1,
+    display_plots: bool = True,
 ):
     """
-    Traces the peaks of fibers along the dispersion axis. The peaks at a specific dispersion column had to be determined before.
-    Two scheme of measuring the subpixel peak positionare available: A hyperbolic approximation or fitting a Gaussian profile to the brightest 3 pixels of a peak.
-    In both cases the resulting fiber traces along the dispersion axis are smoothed by modelling it with a polynomial function.
+    Traces the peaks of fibers along the dispersion axis. The peaks at a specific dispersion
+    column had to be determined before. Two scheme of measuring the subpixel peak positionare
+    available: A hyperbolic approximation or fitting a Gaussian profile to the brightest
+    3 pixels of a peak. In both cases the resulting fiber traces along the dispersion axis are
+    smoothed by modelling it with a polynomial function.
 
     Parameters
     ----------
@@ -1316,20 +1354,10 @@ def tracePeaks_drp(
     user:> lvmdrp image tracePeaks IMAGE.fits OUT_PEAKS.txt x method=gauss steps=40 coadd=20 smooth_poly=-8
     """
 
-    # convert all parameters to proper type
-    coadd = int(coadd)
-    poly_disp = int(poly_disp)
-    steps = int(steps)
-    median_box = int(median_box)
-    median_cross = int(median_cross)
-    threshold = float(threshold)
-    max_diff = float(max_diff)
-    init_sigma = float(init_sigma)
-    verbose = bool(verbose)
-    plot = int(plot)
-
     # load continuum image  from file
+    log.info(f"using flat image {os.path.basename(in_image)} for tracing")
     img = loadImage(in_image)
+    img.setData(data=numpy.nan_to_num(img._data), error=numpy.nan_to_num(img._error))
 
     # orient image so that the cross-dispersion is along the first and the dispersion is along the second array axis
     if disp_axis == "X" or disp_axis == "x":
@@ -1339,7 +1367,7 @@ def tracePeaks_drp(
 
     dim = img.getDim()
     # perform median filtering along the dispersion axis to clean cosmic rays
-    if median_box or median_cross:
+    if median_box != 0 or median_cross != 0:
         median_box = max(median_box, 1)
         median_cross = max(median_cross, 1)
         img = img.medianImg((median_cross, median_box))
@@ -1354,27 +1382,39 @@ def tracePeaks_drp(
             threshold * coadd
         )  # adjust the minimum contrast threshold for the peaks
 
-    # load the initial positions of the fibers at a certain column NEED TO BE REPLACED WITH XML handling
-    file_in_peaks = open(in_peaks, "r")  # load file
-    lines = file_in_peaks.readlines()  # read lines
-    column = int(
-        lines[0]
-    )  # read the pixel column of the initially measured fiber positions as a starting value
-    fibers = len(lines) - 1  # number of fibers
-    positions = numpy.zeros(
-        fibers, dtype=numpy.float32
-    )  # empty array to store positions
-    bad_fibers = numpy.zeros(fibers, dtype="bool")  # empty array to store positions
-    for i in range(1, fibers + 1):
-        line = lines[i].split()
-        positions[i - 1] = float(line[2])
-        bad_fibers[i - 1] = bool(int(line[3]))
-    good_fibers = numpy.logical_not(bad_fibers)
-    # choose between  methods to measure the subpixel peak
-    if method == "hyperbolic":
-        steps = 1
-    elif method == "gauss":
-        steps = int(steps)
+    # load the initial positions of the fibers at a certain column
+    if in_peaks is None:
+        # read slitmap extension
+        slitmap = img.getSlitmap()
+        slitmap = slitmap[slitmap["spectrographid"] == int(img._header["CCD"][1])]
+        
+        ref_column = 2000
+        channel = img._header["CCD"][0]
+        positions = slitmap[f"ypix_{channel}"]
+        fibers = positions.size
+
+        # correct reference fiber positions
+        profile = img.getSlice(ref_column, axis="y")._data
+        if correct_ref:
+            ypix = numpy.arange(profile.size)
+            guess_heights = numpy.ones_like(positions) * numpy.nanmax(profile)
+            ref_profile = _spec_from_lines(positions, sigma=1.2, wavelength=ypix, heights=guess_heights)
+            log.info(f"correcting guess positions for column {ref_column}")
+            cc, bhat, mhat = _cross_match(
+                ref_spec=ref_profile,
+                obs_spec=profile,
+                stretch_factors=numpy.linspace(0.7,1.3,5000),
+                shift_range=[-100, 100])
+            log.info(f"stretch factor: {mhat:.3f}, shift: {bhat:.3f}")
+            positions = positions * mhat + bhat
+        # set mask
+        fibers_status = slitmap["fibstatus"]
+        bad_fibers = (fibers_status == 1) | (profile[positions.astype(int)] < threshold)
+        good_fibers = numpy.logical_not(bad_fibers)
+    else:
+        ref_column, _, _, positions, bad_fibers = _read_fiber_ypix(in_peaks)
+        fibers = positions.size
+        good_fibers = numpy.logical_not(bad_fibers)
 
     # create empty trace mask for the image
     trace = TraceMask()
@@ -1383,115 +1423,141 @@ def tracePeaks_drp(
     trace._good_fibers = good_fibers
     # add the positions of the previous identified peaks
     trace.setSlice(
-        column, axis="y", data=positions, mask=numpy.zeros(len(positions), dtype="bool")
+        ref_column, axis="y", data=positions, mask=numpy.zeros(len(positions), dtype="bool")
     )
 
-    # peaks points
-    # xs, ys = [], []
-
-    # select cross-dispersion slice for the measurements of the peaks
-    first = numpy.arange(column - 1, -1, -1)
+    # select cross-dispersion ref_column for the measurements of the peaks
+    # TODO: fix this mess with the steps
+    first = numpy.arange(ref_column - 1, -1, -1)
     select_first = first % steps == 0
-    second = numpy.arange(column + 1, dim[1], 1)
+    second = numpy.arange(ref_column + 1, dim[1], 1)
     select_second = second % steps == 0
-    # nslice = numpy.sum(select_first) + numpy.sum(select_second)
-    m = 1
     # iterate towards index 0 along dispersion axis
     log.info("tracing fibers along dispersion axis")
-    if verbose:
-        iterator = tqdm(
-            first[select_first],
-            total=select_first.sum(),
-            desc=f"tracing fiber left from pixel {column}",
-            ascii=True,
-            unit="pixel",
-        )
-    else:
-        iterator = first[select_first]
+    iterator = tqdm(
+        first[select_first],
+        total=select_first.sum(),
+        desc=f"tracing fiber left from pixel {ref_column}",
+        ascii=True,
+        unit="pixel",
+    )
     for i in iterator:
-        cut_iter = img.getSlice(i, axis="y")  # extract cross-dispersion slice
-        # infer pixel position of the previous slice
+        cut_iter = img.getSlice(i, axis="y")  # extract cross-dispersion ref_column
+        # infer pixel position of the previous ref_column
+        # log.info(f"counter: {i}")
         if i == first[select_first][0]:
-            pix = numpy.round(trace.getData()[0][:, column]).astype("int16")
+            pix = numpy.round(trace.getData()[0][:, ref_column]).astype("int16")
         else:
             pix = numpy.round(trace.getData()[0][:, i + steps]).astype("int16")
 
-        # measure the peaks for the slice and store it in the trace
+        # measure the peaks for the ref_column and store it in the trace
         centers = cut_iter.measurePeaks(
             pix, method, init_sigma, threshold=threshold, max_diff=float(max_diff)
         )
-        if numpy.sum(bad_fibers) > 0:
-            diff = Spectrum1D(
-                wave=positions, data=(centers[0] - positions), mask=bad_fibers
-            )
-            diff.smoothPoly(-1, ref_base=positions)
-            centers[0][bad_fibers] = diff._data[bad_fibers] + positions[bad_fibers]
-            centers[1][bad_fibers] = False
         trace.setSlice(i, axis="y", data=centers[0], mask=centers[1])
-        m += 1
-
-        # xs.append(i)
-        # ys.append(centers[0].tolist())
 
     # iterate towards the last index along dispersion axis
-    if verbose:
-        iterator = tqdm(
-            second[select_second],
-            total=select_second.sum(),
-            desc=f"tracing fiber right from pixel {column}",
-            ascii=True,
-            unit="pixel",
-        )
-    else:
-        iterator = second[select_second]
+    iterator = tqdm(
+        second[select_second],
+        total=select_second.sum(),
+        desc=f"tracing fiber right from pixel {ref_column}",
+        ascii=True,
+        unit="pixel",
+    )
     for i in iterator:
-        cut_iter = img.getSlice(i, axis="y")  # extract cross-dispersion slice
-        # infer pixel position of the previous slice
+        cut_iter = img.getSlice(i, axis="y")  # extract cross-dispersion ref_column
+        # infer pixel position of the previous ref_column
         if i == second[select_second][0]:
-            pix = numpy.round(trace.getData()[0][:, column]).astype("int16")
+            pix = numpy.round(trace.getData()[0][:, ref_column]).astype("int16")
         else:
             pix = numpy.round(trace.getData()[0][:, i - steps]).astype("int16")
 
-        # measure the peaks for the slice and store it in the trace
+        # measure the peaks for the ref_column and store it in the trace
         centers = cut_iter.measurePeaks(
             pix, method, init_sigma, threshold=threshold, max_diff=float(max_diff)
         )
-        if numpy.sum(bad_fibers) > 0:
-            diff = Spectrum1D(
-                wave=positions, data=(centers[0] - positions), mask=bad_fibers
-            )
-            diff.smoothPoly(-1, ref_base=positions)
-            centers[0][bad_fibers] = diff._data[bad_fibers] + positions[bad_fibers]
-            centers[1][bad_fibers] = False
         trace.setSlice(i, axis="y", data=centers[0], mask=centers[1])
-        m += 1
 
-        # xs.append(i)
-        # ys.append(centers[0].tolist())
+    # define trace data before polynomial smoothing
+    trace_data = copy(trace)
 
-    # with open("peaks_xy.txt", "w") as f:
-    #     f.write(" ".join(xs) + "\n")
-    #     for row in numpy.asarray(ys).T.tolist():
-    #         f.write(" ".join(row) + "\n")
-    # exit()
-
+    # mask zeros and data outside threshold and max_diff
+    trace._mask |= (trace._data <= 0)
     # smooth all trace by a polynomial
     log.info(f"fitting trace with {numpy.abs(poly_disp)}-deg polynomial")
-    trace.smoothTracePoly(poly_disp)
+    table, table_poly, table_poly_all = trace.smoothTracePoly(poly_disp, poly_kind="poly")
+    # set bad fibers in trace mask
+    trace._mask[bad_fibers] = True
 
-    for i in range(fibers):
-        if not bad_fibers[i]:
-            trace._mask[i, :] = False
-        else:
-            trace._mask[i, :] = True
+    if write_trace_data:
+        coords_file = out_trace.replace("calib", "ancillary").replace(".fits", "_coords.txt")
+        poly_file = coords_file.replace("_coords.txt", "_poly.txt")
+        poly_all_file = coords_file.replace("_coords.txt", "_poly_all.txt")
+        log.info(f"writing trace data to files: {os.path.basename(coords_file)}, {os.path.basename(poly_file)} and {os.path.basename(poly_all_file)}")
+        numpy.savetxt(coords_file, 1+numpy.asarray(table), fmt="%.5f")
+        numpy.savetxt(poly_file, 1+numpy.asarray(table_poly), fmt="%.5f")
+        numpy.savetxt(poly_all_file, 1+numpy.asarray(table_poly_all), fmt="%.5f")
+    
+    # linearly interpolate coefficients at masked fibers
+    log.info(f"interpolating coefficients at {bad_fibers.sum()} masked fibers")
+    x_pixels = numpy.arange(trace._data.shape[1])
+    y_pixels = numpy.arange(trace._fibers)
+    for column in range(trace._data.shape[1]):
+        mask = trace._mask[:, column]
+        for order in range(trace._coeffs.shape[1]):
+            trace._coeffs[mask, order] = numpy.interp(y_pixels[mask], y_pixels[~mask], trace._coeffs[~mask, order])
+    # evaluate trace at interpolated fibers
+    for ifiber in y_pixels[bad_fibers]:
+        poly = numpy.polynomial.Polynomial(trace._coeffs[ifiber, :])
+        trace._data[ifiber, :] = poly(x_pixels)
 
-    # This part is not working correctly and therefore taken out at the moment
-    ## smooth all traces assuming that their distances are changing smoothly along dispersion axis
-    ##if poly_cross!='':
-    ##    poly_cross = numpy.array(poly_cross.split(',')).astype('int16')
-    ##    trace.smoothTraceDist(column, poly_cross=poly_cross, poly_disp=poly_disp)
-
+    # create new header
+    log.info(f"writing output trace at {os.path.basename(out_trace)}")
+    new_header = img._header.copy()
+    new_header["IMAGETYP"] = "trace"
+    trace.setHeader(new_header)
+    # write trace mask to file
     trace.writeFitsData(out_trace)
+
+    # plot traces and data used in the fitting
+    log.info("plotting traces and data used in the fitting")
+    pix_ranges = [(0, 300), (1900, 2200), (3700, trace._data.shape[1])]
+    fig, axs = plt.subplots(1, len(pix_ranges), figsize=(5 * len(pix_ranges), 10), sharey=True)
+
+    figtitle = os.path.basename(out_trace.replace(".fits", ""))
+    fig.suptitle(f"{figtitle}", size="large")
+
+    img.apply_pixelmask()
+    fiberflat_data = img._data
+
+    pixels = numpy.arange(trace_data._data.shape[1])
+    mask = (trace_data._data != 0).sum(axis=0).astype(bool)
+    x = numpy.tile(pixels[mask], trace_data._fibers)
+    y = trace_data._data[:, mask].flatten()
+
+    for i, pix_range in enumerate(pix_ranges):
+        axs[i].scatter(x, y, c="r", s=10)
+
+        norm = simple_norm(fiberflat_data, stretch="asinh")
+        axs[i].imshow(fiberflat_data, norm=norm, origin="lower", cmap="binary_r")
+
+        for ifiber in range(trace._fibers):
+            fiber = trace.getSpec(ifiber)
+            axs[i].plot(fiber._pixels, fiber._data, color=plt.cm.rainbow(ifiber/trace._fibers), lw=0.5)
+
+        axs[i].set_xlim(*pix_range)
+        axs[i].set_ylim(3500, 4100)
+
+    fig.tight_layout()
+    save_fig(
+        fig,
+        product_path=out_trace,
+        to_display=display_plots,
+        figure_path="qa",
+        label="traces",
+    )
+
+    return trace_data, trace
 
 
 def glueCCDFrames_drp(
@@ -1548,7 +1614,7 @@ def glueCCDFrames_drp(
     user:>  lvmdrp image glueCCDFrame FRAME1.fits, FRAME2.fits, FRAME3.fits, FRAME4.fits  FULLFRAME.fits  50,800 1,900  00,10,01,11 X,90,Y,180 gain='GAIN'
     """
     # convert input parameters to proper type
-    list_imgs = images.split(",")
+    images = images.split(",")
     bound_x = boundary_x.split(",")
     bound_y = boundary_y.split(",")
     orient = orientation.split(",")
@@ -1556,15 +1622,15 @@ def glueCCDFrames_drp(
     subtract_overscan = bool(int(subtract_overscan))
     compute_error = bool(int(compute_error))
     # create empty lists
-    imgs = []  # list of images
+    org_imgs = []  # list of images
     gains = []  # list of gains
     rdnoises = []  # list of read-out noises
     bias = []  # list of biasses
 
-    for i in list_imgs:
+    for i in images:
         # load subimages from disc and append them to a list
         img = loadImage(i, extension_data=0)
-        imgs.append(img)
+        org_imgs.append(img)
         if gain != "":
             # get gain value
             try:
@@ -1580,29 +1646,29 @@ def glueCCDFrames_drp(
         else:
             rdnoises.append(0.0)
 
-    for i in range(len(list_imgs)):
+    for i in range(len(images)):
         # append the bias from the overscane region
-        bias.append(imgs[i].cutOverscan(bound_x, bound_y, subtract_overscan))
+        bias.append(org_imgs[i].cutOverscan(bound_x, bound_y, subtract_overscan))
         # multiplication with the gain factor
         if gain == "":
             mult = 1.0
         else:
             mult = gains[i]
-        imgs[i] = imgs[i] * mult
+        org_imgs[i] = org_imgs[i] * mult
 
         # change orientation of subimages
-        imgs[i].orientImage(orient[i])
+        org_imgs[i].orientImage(orient[i])
         if compute_error:
-            imgs[i].computePoissonError(rdnoise=rdnoises[i])
+            org_imgs[i].computePoissonError(rdnoise=rdnoises[i])
 
     # create glued image
-    full_img = glueImages(imgs, pos)
+    full_img = glueImages(org_imgs, pos)
 
     # adjust FITS header information
     full_img.removeHdrEntries(["GAIN", "RDNOISE", "COMMENT", ""])
     # add gain keywords for the different subimages (CDDs/Amplifies)
     if gain != "":
-        for i in range(len(imgs)):
+        for i in range(len(org_imgs)):
             full_img.setHdrValue(
                 "HIERARCH AMP%i GAIN" % (i + 1),
                 gains[i],
@@ -1610,14 +1676,14 @@ def glueCCDFrames_drp(
             )
     # add read-out noise keywords for the different subimages (CDDs/Amplifies)
     if rdnoise != "":
-        for i in range(len(imgs)):
+        for i in range(len(org_imgs)):
             full_img.setHdrValue(
                 "HIERARCH AMP%i RDNOISE" % (i + 1),
                 rdnoises[i],
                 "Read-out noise of CCD amplifier %i" % (i + 1),
             )
     # add bias of overscan region for the different subimages (CDDs/Amplifies)
-    for i in range(len(imgs)):
+    for i in range(len(org_imgs)):
         if subtract_overscan:
             full_img.setHdrValue(
                 "HIERARCH AMP%i OVERSCAN" % (i + 1),
@@ -1635,18 +1701,18 @@ def glueCCDFrames_drp(
 
 def combineImages_drp(images, out_image, method="median", k="3.0"):
     # convert input parameters to proper type
-    list_imgs = images.split(",")
-    if len(list_imgs) == 1:
+    images = images.split(",")
+    if len(images) == 1:
         file_list = open(images, "r")
-        list_imgs = file_list.readlines()
+        images = file_list.readlines()
         file_list.close()
     k = float(k)
-    imgs = []
-    for i in list_imgs:
+    org_imgs = []
+    for i in images:
         # load subimages from disc and append them to a list
-        imgs.append(loadImage(i.replace("\n", "")))
+        org_imgs.append(loadImage(i.replace("\n", "")))
 
-    combined_img = combineImages(imgs, method=method, k=k)
+    combined_img = combineImages(org_imgs, method=method, k=k)
     # write out FITS file
     combined_img.writeFitsData(out_image)
 
@@ -1675,7 +1741,7 @@ def subtractStraylight_drp(
                                 Name of the  FITS file with the trace mask of the fibers
                 stray_image: string
                                 Name of the FITS file in which the pure straylight image is stored
-                clean_image: string
+                clean_img: string
                                 Name of the FITS file in which the straylight subtracted image is stored
                 disp_axis: string of float, optional  with default: 'X'
                                 Define the dispersion axis, either 'X','x', or 0 for the  x axis or 'Y','y', or 1 for the y axis.
@@ -1981,7 +2047,7 @@ def offsetTrace_drp(
                 offsets = []
             else:
                 offsets.append(
-                    numpy.median(
+                    numpy.nanmedian(
                         numpy.array(log_lines[i + 2].split()[1:]).astype("float32")
                     )
                 )
@@ -2043,11 +2109,11 @@ def offsetTrace_drp(
         for j in range(len(out[0])):
             string_x += " %.3f" % (out[1][j])
             string_y += " %.3f" % (out[0][j])
-            string_pix += " %.3f" % (numpy.median(block_line_pos[j]))
+            string_pix += " %.3f" % (numpy.nanmedian(block_line_pos[j]))
         log.write(string_x + "\n")
         log.write(string_pix + "\n")
         log.write(string_y + "\n")
-    off_trace_median = numpy.median(numpy.array(off_trace_all))
+    off_trace_median = numpy.nanmedian(numpy.array(off_trace_all))
     off_trace_rms = numpy.std(numpy.array(off_trace_all))
     off_trace_rms = "%.4f" % off_trace_rms if numpy.isfinite(off_trace_rms) else "NAN"
     img.setHdrValue(
@@ -2189,12 +2255,12 @@ def offsetTrace2_drp(
         for j in range(len(out[0])):
             string_x += " %.3f" % (out[1][j])
             string_y += " %.3f" % (out[0][j] * -1)
-            string_pix += " %.3f" % (numpy.median(block_line_pos[j]))
+            string_pix += " %.3f" % (numpy.nanmedian(block_line_pos[j]))
         log.write(string_x + "\n")
         log.write(string_pix + "\n")
         log.write(string_y + "\n")
 
-    off_trace_median = numpy.median(numpy.array(off_trace_all))
+    off_trace_median = numpy.nanmedian(numpy.array(off_trace_all))
     off_trace_rms = numpy.std(numpy.array(off_trace_all))
     img.setHdrValue(
         "HIERARCH PIPE FLEX YOFF",
@@ -2214,17 +2280,18 @@ def offsetTrace2_drp(
 # it might be better in dealing with cross-talk
 # TODO:
 # * define lvm-frame ancillary product to replace for out_rss
-def extractSpec_drp(
-    in_image,
-    out_rss,
-    in_trace,
-    method="optimal",
-    aperture="7",
-    fwhm="2.5",
-    disp_axis="X",
-    replace_error="1e10",
-    plot="-1",
-    parallel="auto",
+@skip_on_missing_input_path(["in_image", "in_trace"])
+def extract_spectra(
+    in_image: str,
+    out_rss: str,
+    in_trace: str,
+    method: str = "optimal",
+    aperture: int = 7,
+    fwhm: float = 2.5,
+    disp_axis: str = "X",
+    replace_error: float = 1.0e10,
+    plot_fig: bool = False,
+    parallel: str = "auto",
 ):
     """
     Extracts the flux for each fiber along the dispersion direction which is written into an RSS FITS file format.
@@ -2262,10 +2329,7 @@ def extractSpec_drp(
     user:> lvmdrp image extractSpec IMAGE.fits TRACE.fits RSS.fits optimal fwhm=FWHM.fits
     """
 
-    aperture = int(aperture)
-    replace_error = float(replace_error)
     img = loadImage(in_image)
-    plot = int(plot)
 
     # orient image so that the cross-dispersion is along the first and the dispersion is along the second array axis
     if disp_axis == "X" or disp_axis == "x":
@@ -2325,14 +2389,14 @@ def extractSpec_drp(
                 mask = None
         else:
             (data, error, mask) = img.extractSpecOptimal(
-                trace_mask, trace_fwhm, plot=plot
+                trace_mask, trace_fwhm, plot_fig=plot_fig
             )
     elif method == "aperture":
         (data, error, mask) = img.extractSpecAperture(trace_mask, aperture)
 
     if error is not None:
         error[mask] = replace_error
-    rss = FiberRows(
+    rss = RSS(
         data=data,
         mask=mask,
         error=error,
@@ -2345,24 +2409,29 @@ def extractSpec_drp(
     if method == "optimal":
         rss.setHdrValue(
             "HIERARCH PIPE CDISP FWHM MIN",
-            numpy.min(trace_fwhm._data[rss._good_fibers]),
+            numpy.nanmin(trace_fwhm._data[rss._good_fibers]),
         )
         rss.setHdrValue(
             "HIERARCH PIPE CDISP FWHM MAX",
-            numpy.max(trace_fwhm._data[rss._good_fibers]),
+            numpy.nanmax(trace_fwhm._data[rss._good_fibers]),
         )
         rss.setHdrValue(
             "HIERARCH PIPE CDISP FWHM AVG",
-            numpy.mean(trace_fwhm._data[rss._good_fibers]) if data.size != 0 else 0,
+            numpy.nanmean(trace_fwhm._data[rss._good_fibers]) if data.size != 0 else 0,
         )
         rss.setHdrValue(
             "HIERARCH PIPE CDISP FWHM MED",
-            numpy.median(trace_fwhm._data[rss._good_fibers]) if data.size != 0 else 0,
+            numpy.nanmedian(trace_fwhm._data[rss._good_fibers])
+            if data.size != 0
+            else 0,
         )
         rss.setHdrValue(
             "HIERARCH PIPE CDISP FWHM SIG",
             numpy.std(trace_fwhm._data[rss._good_fibers]) if data.size != 0 else 0,
         )
+    # propagate slitmap
+    rss.setSlitmap(img.getSlitmap())
+    # save extracted RSS
     rss.writeFitsData(out_rss)
 
 
@@ -2636,33 +2705,43 @@ def testres_drp(image, trace, fwhm, flux):
     hdu = pyfits.PrimaryHDU((img._data - out) / img._data)
     hdu.writeto("res_rel.fits", overwrite=True)
 
-
-def preprocRawFrame_drp(
-    in_image,
-    out_image,
-    in_mask="",
-    assume_imagetyp="",
-    assume_trimsec="",
-    assume_biassec="",
-    assume_gain="",
-    assume_rdnoise="",
-    gain_prefix="GAIN",
-    rdnoise_prefix="RDNOISE",
-    subtract_overscan="1",
-    replace_with_nan="0",
-    display_plots="0",
-    figure_path="qa",
+# TODO: for arcs take short exposures for bright lines & long exposures for faint lines
+# TODO: Argon: 10s + 300s
+# TODO: Neon: 10s + 300s
+# TODO: HgNe: 15s (particularly helpful for r and NIR strong lines) + 300s (not so many lines in NIR or r)
+# TODO: Xenon: 300s
+# TODO: correct non-linear region using the PTC
+# TODO: Quartz lamp flat-fielding, 10 exptime is fine
+@skip_on_missing_input_path(["in_image", "in_mask"])
+def preproc_raw_frame(
+    in_image: str,
+    out_image: str,
+    in_mask: str = None,
+    assume_imagetyp: str = None,
+    assume_trimsec: str = None,
+    assume_biassec: str = None,
+    assume_gain: list = None,
+    assume_rdnoise: list = None,
+    gain_prefix: str = "GAIN",
+    rdnoise_prefix: str = "RDNOISE",
+    subtract_overscan: bool = True,
+    overscan_stat: str = "biweight",
+    overscan_model: str = "spline",
+    replace_with_nan: bool = True,
+    display_plots: bool = False,
 ):
-    """produces a preprocessed frame given a raw frame
+    """produces a preprocessed frame given an LVM raw frame
 
     this taks performs the following steps:
 
         - identifies and extracts the overscan region, per quadrant
         - identifies extracts the science regions per quadrant
-        - optionally subtracts the averaged overscan region from the science regions
-        - optionally computes the Poisson errors
+        - optionally subtracts the overscan regions in three possible modes:
+            * median value (constant)
+            * spline fit
+            * polynomial fit
         - computes the saturated pixel mask
-        - optionally propagates the "dead" and "hot" pixels mask to the final frame
+        - optionally propagates the "dead" and "hot" pixel mask into the processed frame
 
     Parameters
     ----------
@@ -2671,39 +2750,46 @@ def preprocRawFrame_drp(
     out_image : str
         output preprocessed frame path
     in_mask : str, optional
-        input pixel mask path, by default ""
+        input pixel mask path, by default None
     assume_imagetyp : str, optional
-        whether to assume this image type or use the one in header, by default ""
+        whether to assume this image type or use the one in header, by default None
     assume_trimsec : str, optional
-        useful data section for each quadrant, by default ""
+        useful data section for each quadrant, by default None
     assume_biassec : str, optional
-        overscan section for each quadrant, by default ""
-    assume_gain : str, optional
-        gain values for each quadrant, by default ""
-    assume_rdnoise : str, optional
-        read noise for each quadrant, by default ""
+        overscan section for each quadrant, by default None
+    assume_gain : list, optional
+        gain values for each quadrant, by default None
+    assume_rdnoise : list, optional
+        read noise for each quadrant, by default None
     gain_prefix : str, optional
         gain keyword prefix, by default "GAIN"
     rdnoise_prefix : str, optional
         read noise keyword prefix, by default "RDNOISE"
-    subtract_overscan : str, optional
-        whether to subtract the overscan median for each quadrant or not, by default "1"
-    replace_with_nan : str, optional
-        whether to replace masked pixels with NaNs or not, by default "0"
-    display_plots : str, optional
-        whether to show plots on display or not, by default "0"
-    figure_path : str, optional
-        directory where figures will be saved, by default "qa"
+    subtract_overscan : bool, optional
+        whether to subtract the overscan for each quadrant or not, by default True
+    overscan_stat : str, optional
+        statistics to use when coadding pixels along the X axis, by default "biweight"
+    overscan_model : str, optional
+        model used to fit the overscan profile of each quadrant, by default "spline"
+    replace_with_nan : bool, optional
+        whether to replace masked pixels with NaNs or not, by default True
+    display_plots : bool, optional
+        whether to show plots on display or not, by default False
     """
-    # convert input parameters to proper type
-    subtract_overscan = bool(int(subtract_overscan))
-    replace_with_nan = bool(int(replace_with_nan))
-    display_plots = bool(int(display_plots))
-
     # load image
     log.info(f"starting preprocessing of raw image '{os.path.basename(in_image)}'")
-    org_image = loadImage(in_image)
-    org_header = org_image._header
+    org_img = loadImage(in_image)
+    org_header = org_img.getHeader()
+
+    # fix the header with header fix file
+    # convert real MJD to SJD
+    try:
+        sjd = int(dateobs_to_sjd(org_header.get("OBSTIME")))
+        sjd = correct_sjd(in_image, sjd)
+        org_header = apply_hdrfix(sjd, hdr=org_header) or org_header
+    except ValueError as e:
+        log.error(f"cannot apply header fix: {e}")
+
     # assume imagetyp or not
     if assume_imagetyp:
         log.warning(f"assuming IMAGETYP = '{assume_imagetyp}'")
@@ -2716,6 +2802,10 @@ def preprocRawFrame_drp(
     else:
         log.info(f"using header IMAGETYP = '{org_header['IMAGETYP']}'")
 
+    # extract exptime
+    exptime = org_header["EXPTIME"]
+    log.info(f"exposure time {exptime} (s)")
+
     # extract TRIMSEC or assume default value
     if assume_trimsec:
         log.info(f"using given TRIMSEC = {assume_trimsec}")
@@ -2725,7 +2815,7 @@ def preprocRawFrame_drp(
         sc_sec = DEFAULT_TRIMSEC
     else:
         sc_sec = list(org_header["TRIMSEC?"].values())
-        log.info(f"using header TRIMSEC = {org_header['TRIMSEC?']}")
+        log.info(f"using header TRIMSEC = {sc_sec}")
 
     # extract BIASSEC or assume default value
     if assume_biassec:
@@ -2736,7 +2826,7 @@ def preprocRawFrame_drp(
         os_sec = DEFAULT_BIASSEC
     else:
         os_sec = list(org_header["BIASSEC?"].values())
-        log.info(f"using header BIASSEC = {org_header['BIASSEC?']}")
+        log.info(f"using header BIASSEC = {os_sec}")
 
     # extract gain
     gain = numpy.ones(NQUADS)
@@ -2752,43 +2842,76 @@ def preprocRawFrame_drp(
     # initialize overscan stats, quadrants lists and, gains and rnoise
     os_bias_med, os_bias_std = numpy.zeros(NQUADS), numpy.zeros(NQUADS)
     sc_quads, os_quads = [], []
+    os_profiles, os_models = [], []
     # process each quadrant
     for i, (sc_xy, os_xy) in enumerate(zip(sc_sec, os_sec)):
-        # get overscan and science quadrant
-        sc_quad = org_image.getSection(section=sc_xy) * gain[i]
-        os_quad = org_image.getSection(section=os_xy) * gain[i]
+        # get overscan and science quadrant & convert to electron
+        sc_quad = org_img.getSection(section=sc_xy)
+        os_quad = org_img.getSection(section=os_xy)
         # compute overscan stats
-        os_bias_med[i] = numpy.median(os_quad._data, axis=None)
-        os_bias_std[i] = numpy.median(numpy.std(os_quad._data, axis=1), axis=None)
+        os_bias_med[i] = numpy.nanmedian(os_quad._data, axis=None)
+        os_bias_std[i] = numpy.nanmedian(numpy.std(os_quad._data, axis=1), axis=None)
         log.info(
             f"median and standard deviation in OS quadrant {i+1}: "
-            f"{os_bias_med[i]:.2f} +/- {os_bias_std[i]:.2f} (e-)"
+            f"{os_bias_med[i]:.2f} +/- {os_bias_std[i]:.2f} (ADU)"
         )
         # subtract overscan bias from image if requested
         if subtract_overscan:
-            sc_quad -= os_bias_med[i]
+            if overscan_stat == "biweight":
+                os_stat = biweight_location
+            elif overscan_stat == "median":
+                os_stat = numpy.nanmedian
+            else:
+                log.warning(
+                    f"overscan statistic '{overscan_stat}' not implemented, "
+                    "falling back to 'biweight'"
+                )
+                os_stat = biweight_location
 
-        # convert to electron
+            if overscan_model not in ["const", "poly", "spline"]:
+                log.warning(
+                    f"overscan model '{overscan_model}' not implemented, "
+                    "falling back to 'spline'"
+                )
+                overscan_model = "spline"
+            if overscan_model == "const":
+                os_profile, os_model = _model_overscan(
+                    os_quad, axis=1, stat=os_stat, model="const"
+                )
+            if overscan_model == "spline":
+                os_profile, os_model = _model_overscan(
+                    os_quad, axis=1, stat=os_stat, nknots=300
+                )
+            elif overscan_model == "poly":
+                os_profile, os_model = _model_overscan(
+                    os_quad, axis=1, stat=os_stat, model="poly", deg=9
+                )
+
+            sc_quad = sc_quad - os_model
+
+            os_profiles.append(os_profile)
+            os_models.append(os_model)
+
         sc_quads.append(sc_quad)
         os_quads.append(os_quad)
 
     # extract rdnoise
     rdnoise = os_bias_std * gain
     if assume_rdnoise:
-        log.info(f"using given RDNOISE = {assume_rdnoise} (e-)")
+        log.info(f"using given RDNOISE = {assume_rdnoise} (ADU)")
         rdnoise = numpy.asarray(assume_rdnoise)
     elif not org_header[f"{rdnoise_prefix}?"]:
-        log.warning(f"assuming RDNOISE = {rdnoise.tolist()} (e-)")
+        log.warning(f"assuming RDNOISE = {rdnoise.tolist()} (ADU)")
     else:
         rdnoise = numpy.asarray(list(org_header[f"{rdnoise_prefix}?"].values()))
         log.info(f"using header RDNOISE = {rdnoise.tolist()} (e-)")
 
     # join images
     QUAD_POSITIONS = ["01", "11", "00", "10"]
-    preproc_image = glueImages(sc_quads, positions=QUAD_POSITIONS)
-    preproc_image.setHeader(org_image.getHeader())
+    proc_img = glueImages(sc_quads, positions=QUAD_POSITIONS)
+    proc_img.setHeader(org_header)
     # update/set unit
-    preproc_image.setHdrValue("BUNIT", "electron", "physical units of the array values")
+    proc_img.setHdrValue("BUNIT", "adu", "physical units of the array values")
     # flip along dispersion axis
     try:
         ccd = org_header["CCD"]
@@ -2797,7 +2920,7 @@ def preprocRawFrame_drp(
         org_header["CCD"] = ccd
     if ccd.startswith("z") or ccd.startswith("b"):
         log.info("flipping along X-axis")
-        preproc_image.orientImage("X")
+        proc_img.orientImage("X")
 
     # update header
     log.info("updating header with per quadrant stats")
@@ -2807,78 +2930,81 @@ def preprocRawFrame_drp(
         x, y = int(QUAD_POSITIONS[i][0]), int(QUAD_POSITIONS[i][1])
         # flip y-axis
         y = 1 if y == 0 else 0
-        preproc_image.setHdrValue(
+        proc_img.setHdrValue(
             f"HIERARCH AMP{i+1} TRIMSEC",
             f"[{x*xsize+1}:{xsize*(x+1)}, {y*ysize+1}:{ysize*(y+1)}]",
             f"Region of amp. {i+1}",
         )
     # add gain keywords for the different subimages (CCDs/Amplifiers)
     for i in range(NQUADS):
-        preproc_image.setHdrValue(
+        proc_img.setHdrValue(
             f"HIERARCH AMP{i+1} {gain_prefix}",
             gain[i],
             f"Gain value of amp. {i+1} [electron/adu]",
         )
     # add read-out noise keywords for the different subimages (CCDs/Amplifiers)
     for i in range(NQUADS):
-        preproc_image.setHdrValue(
+        proc_img.setHdrValue(
             f"HIERARCH AMP{i+1} {rdnoise_prefix}",
             rdnoise[i],
             f"Read-out noise of amp. {i+1} [electron]",
         )
     # add bias of overscan region for the different subimages (CCDs/Amplifiers)
     for i in range(NQUADS):
-        preproc_image.setHdrValue(
+        proc_img.setHdrValue(
             f"HIERARCH AMP{i+1} OVERSCAN",
             os_bias_med[i],
-            f"Overscan median of amp. {i+1} [electron]",
+            f"Overscan median of amp. {i+1} [adu]",
         )
     # add bias std of overscan region for the different subimages (CCDs/Amplifiers)
     for i in range(NQUADS):
-        preproc_image.setHdrValue(
+        proc_img.setHdrValue(
             f"HIERARCH AMP{i+1} OVERSCAN_STD",
             os_bias_std[i],
-            f"Overscan std of amp. {i+1} [electron]",
+            f"Overscan std of amp. {i+1} [adu]",
         )
 
     # load master pixel mask
-    if in_mask != "":
+    if in_mask and proc_img._header["IMAGETYP"] not in {"bias", "dark", "pixelflat"}:
+        log.info(f"loading master pixel mask from {os.path.basename(in_mask)}")
         master_mask = loadImage(in_mask)._mask.astype(bool)
     else:
-        master_mask = numpy.zeros_like(preproc_image._data, dtype=bool)
+        master_mask = numpy.zeros_like(proc_img._data, dtype=bool)
 
     # create pixel mask on the original image
     log.info("building pixel mask")
-    preproc_image._mask = master_mask
+    proc_img._mask = master_mask
     # convert temp image to ADU for saturated pixel masking
-    sects = preproc_image._header["AMP? TRIMSEC"]
-    _ = copy(preproc_image)
-    for i in range(NQUADS):
-        quad = _.getSection(sects[i]) / gain[i]
-        _.setSection(sects[i], quad, inplace=True)
-    preproc_image._mask |= _ >= 0.7 * 2**16
-    # update masked pixels with NaNs if needed
-    if replace_with_nan:
-        preproc_image._data[preproc_image._mask] = numpy.nan
-        preproc_image._error[preproc_image._mask] = numpy.nan
+    saturated_mask = proc_img._data >= (0.9 * 2**16)
+    proc_img._mask |= saturated_mask
 
     # log number of masked pixels
-    nmasked = preproc_image._mask.sum()
-    log.info(
-        f"{nmasked} ({nmasked / preproc_image._mask.size * 100:.2g} %) pixels masked"
-    )
+    nmasked = proc_img._mask.sum()
+    log.info(f"{nmasked} ({nmasked / proc_img._mask.size * 100:.2g} %) pixels masked")
+
+    # update masked pixels with NaNs if needed
+    if replace_with_nan:
+        log.info(f"replacing {nmasked} masked pixels with NaNs")
+        proc_img.apply_pixelmask()
+
+    # update data reduction quality flag
+    drpqual = QualityFlag(0)
+    if saturated_mask.sum() / proc_img._mask.size > 0.01:
+        drpqual += "SATURATED"
+    proc_img.setHdrValue("DRPQUAL", value=drpqual.value, comment="data reduction quality flag")
 
     # write out FITS file
-    log.info(f"writing output image to {os.path.basename(out_image)}")
-    preproc_image.writeFitsData(out_image)
+    log.info(f"writing preprocessed image to {os.path.basename(out_image)}")
+    proc_img.writeFitsData(out_image)
 
     # plot overscan strips along X and Y axes
     log.info("plotting results")
     # show column between ac and bd
-    fig, axs = plt.subplots(2, 1, figsize=(15, 10), sharex=True, sharey=False)
-    axs = axs.flatten()
+    fig, axs = create_subplots(
+        display_plots, nrows=2, ncols=1, figsize=(15, 10), sharex=True, sharey=False
+    )
     axs[-1].set_xlabel("X (pixel)")
-    fig.supylabel("median counts (e-)")
+    fig.supylabel("median counts (ADU)")
     fig.suptitle("overscan cut along X-axis", size="xx-large")
 
     os_ab = glueImages(os_quads[:2], positions=["00", "10"])
@@ -2889,8 +3015,8 @@ def preprocRawFrame_drp(
             axis=0,
             nstrip=1,
             ax=axs[i],
-            mu_stat=numpy.median,
-            sg_stat=lambda x, axis: numpy.median(numpy.std(x, axis=axis)),
+            mu_stat=numpy.nanmedian,
+            sg_stat=lambda x, axis: numpy.nanmedian(numpy.std(x, axis=axis)),
             labels=True,
         )
         os_x, os_y = _parse_ccd_section(list(os_sec)[0])
@@ -2898,17 +3024,23 @@ def preprocRawFrame_drp(
         axs[i].set_title(f"overscan for quadrants {['12','34'][i]}", loc="left")
     save_fig(
         fig,
-        output_path=out_image,
-        figure_path=figure_path,
+        product_path=out_image,
+        to_display=display_plots,
+        figure_path="qa",
         label="os_strips_12-34_x",
-        close=not display_plots,
     )
 
     # show median counts along Y-axis
-    fig, axs = plt.subplots(2, 1, figsize=(15, 10), sharex=True, sharey=False)
-    axs = axs.flatten()
+    fig, axs = create_subplots(
+        to_display=display_plots,
+        nrows=2,
+        ncols=1,
+        figsize=(15, 10),
+        sharex=True,
+        sharey=False,
+    )
     axs[-1].set_xlabel("Y (pixel)")
-    fig.supylabel("median counts (e-)")
+    fig.supylabel("counts (ADU)")
     fig.suptitle("overscan cut along Y-axis", size="xx-large")
     os_ac = glueImages(os_quads[::2], positions=["00", "01"])
     os_bd = glueImages(os_quads[1::2], positions=["00", "01"])
@@ -2918,8 +3050,8 @@ def preprocRawFrame_drp(
             axis=1,
             nstrip=1,
             ax=axs[i],
-            mu_stat=numpy.median,
-            sg_stat=lambda x, axis: numpy.median(numpy.std(x, axis=axis)),
+            mu_stat=numpy.nanmedian,
+            sg_stat=lambda x, axis: numpy.nanmedian(numpy.std(x, axis=axis)),
             labels=True,
         )
         os_x, os_y = _parse_ccd_section(list(os_sec)[0])
@@ -2927,59 +3059,66 @@ def preprocRawFrame_drp(
         axs[i].set_title(f"overscan for quadrants {['13','24'][i]}", loc="left")
     save_fig(
         fig,
-        output_path=out_image,
-        figure_path=figure_path,
+        product_path=out_image,
+        to_display=display_plots,
+        figure_path="qa",
         label="os_strips_13-24_y",
-        close=not display_plots,
     )
 
     # show median counts for all quadrants along Y-axis
-    fig_strips, axs_strips = plt.subplots(4, 1, figsize=(15, 10), sharex=True)
-    axs_strips = axs_strips.flatten()
-    axs_strips[-1].set_xlabel("Y (pixel)")
-    fig_strips.supylabel("counts (e-)")
-    fig_strips.suptitle("median counts for all quadrants", size="xx-large")
+    fig, axs = create_subplots(
+        to_display=display_plots, nrows=4, ncols=1, figsize=(15, 10), sharex=True
+    )
+    fig.supxlabel("Y (pixel)")
+    fig.supylabel("counts (ADU)")
+    fig.suptitle("overscan for all quadrants", size="xx-large")
     for i, os_quad in enumerate(os_quads):
         plot_strips(
             os_quad,
             axis=1,
             nstrip=1,
-            ax=axs_strips[i],
-            mu_stat=numpy.median,
-            sg_stat=lambda x, axis: numpy.median(numpy.std(x, axis=axis)),
+            ax=axs[i],
+            mu_stat=numpy.nanmedian,
+            sg_stat=lambda x, axis: numpy.nanmedian(numpy.std(x, axis=axis)),
             labels=True,
         )
-        axs_strips[i].axhline(
-            numpy.median(os_quad._data.flatten()) + rdnoise[i],
+        axs[i].step(
+            numpy.arange(os_profiles[i].size), os_profiles[i], color="tab:orange", lw=1
+        )
+        axs[i].step(numpy.arange(os_profiles[i].size), os_models[i], color="k", lw=1)
+        axs[i].axhline(
+            numpy.nanmedian(os_quad._data.flatten()) + rdnoise[i],
             ls="--",
             color="tab:purple",
             lw=1,
             label=f"median + {rdnoise_prefix}",
         )
-        axs_strips[i].set_title(f"median counts for quadrant {i+1}", loc="left")
+        axs[i].set_title(f"quadrant {i+1}", loc="left")
     save_fig(
         fig,
-        output_path=out_image,
-        figure_path=figure_path,
+        product_path=out_image,
+        to_display=display_plots,
+        figure_path="qa",
         label="os_strips",
-        close=not display_plots,
     )
 
+    return org_img, os_profiles, os_models, proc_img
 
-# NOTE: basicCalibration
-def detrendFrame_drp(
-    in_image,
-    out_image,
-    in_bias="",
-    in_dark="",
-    in_pixelflat="",
-    calculate_error="1",
-    replace_nan="1",
-    bgsec="",
-    reject_cr="1",
-    median_box="1,15",
-    display_plots="0",
-    figure_path="qa",
+
+@skip_on_missing_input_path(["in_image"])
+# @skip_if_drpqual_flags(["SATURATED"], "in_image")
+def detrend_frame(
+    in_image: str,
+    out_image: str,
+    in_bias: str = None,
+    in_dark: str = None,
+    in_pixelflat: str = None,
+    in_slitmap: Table = None,
+    calculate_error: bool = True,
+    replace_with_nan: bool = True,
+    reject_cr: bool = True,
+    median_box: list = [0, 0],
+    display_plots: bool = False,
 ):
     """detrends input image by subtracting bias, dark and flatfielding
 
@@ -2995,307 +3134,240 @@ def detrendFrame_drp(
         path to dark frame, by default ""
     in_pixelflat : str, optional
         path to pixelflat frame, by default ""
+    in_slitmap: fits.BinTableHDU, optional
+        FITS binary table containing the slitmap to be added to `out_image`, by default None
     calculate_error : bool, optional
         whether to calculate Poisson errors or not, by default "1"
-    replace_nan : bool, optional
-        whether to replace or not NaN values by zeros, by default "1"
-    bgsec : str, optional
-        background sections for each quadrant, by default ""
+    replace_with_nan : bool, optional
+        whether to replace or not NaN values by zeros, by default "0"
     reject_cr : bool, optional
         whether to reject or not cosmic rays from detrended image, by default "1"
     median_box : tuple, optional
-        size of the median box to refine pixel mask, by default "1,15"
+        size of the median box to refine pixel mask, by default [0,0]
     display_plots : str, optional
         whether to show plots on display or not, by default "0"
-    figure_path : str, optional
-        directory where figures will be saved, by default "qa"
     """
-
-    calculate_error = bool(int(calculate_error))
-    replace_nan = bool(int(replace_nan))
-    if bgsec:
-        bgsec = bgsec.split(",")
-    else:
-        bgsec = DEFAULT_BGSEC
-    reject_cr = bool(int(reject_cr))
-    median_box = median_box.split(",")
-    median_box = (int(median_box[0]), int(median_box[1]))
-    display_plots = bool(int(display_plots))
 
     # TODO: Normalization of flats. This is for combining them right? Need to make sure median is not dominated by diferences in background.
     # We need bright pixels on fiber cores to be scaled to the same level.
     # TODO: Confirm that dark is not being flat fielded in current logic
     # TODO: What is the difference between "flat" and "flatfield"? Pixel flats should not be pixel flatted but regular flats (dome and twilight) yes.
-    proc_image = loadImage(in_image)
-    exptime = proc_image._header["EXPTIME"]
-    img_type = proc_image._header["IMAGETYP"].lower()
+    org_img = loadImage(in_image)
+    exptime = org_img._header["EXPTIME"]
+    img_type = org_img._header["IMAGETYP"].lower()
     log.info(
         "target frame parameters: "
-        f"MJD = {proc_image._header['MJD']}, "
-        f"exptime = {proc_image._header['EXPTIME']}, "
-        f"camera = {proc_image._header['CCD']}"
+        f"MJD = {org_img._header['MJD']}, "
+        f"exptime = {org_img._header['EXPTIME']}, "
+        f"camera = {org_img._header['CCD']}"
     )
 
-    # dummy calibration images
-    dummy_bias = Image(data=numpy.zeros_like(proc_image._data))
-    dummy_dark = Image(data=numpy.zeros_like(proc_image._data))
-    dummy_flat = Image(data=numpy.ones_like(proc_image._data))
+    # skip detrending for bias frame
+    if img_type == "bias":
+        log.info(f"skipping detrending for bias frame: {img_type =}")
+        return org_img, None, None, None, None, None
 
     # read master bias
     if img_type in ["bias"] or (in_bias is None or not os.path.isfile(in_bias)):
         if in_bias and not os.path.isfile(in_bias):
-            log.error(f"master bias '{in_bias}' not found. Using dummy bias")
-        master_bias = dummy_bias
+            log.warning(f"master bias '{in_bias}' not found. Using dummy bias")
+        mbias_img = Image(data=numpy.zeros_like(org_img._data))
     else:
-        log.info(f"using bias calibration frame '{in_bias}'")
-        master_bias = loadImage(in_bias)
+        log.info(f"using bias calibration frame '{os.path.basename(in_bias)}'")
+        mbias_img = loadImage(in_bias)
 
     # read master dark
     if img_type in ["bias", "dark"] or (in_dark is None or not os.path.isfile(in_dark)):
         if in_dark and not os.path.isfile(in_dark):
-            log.error(f"master dark '{in_dark}' not found. Using dummy dark")
-        master_dark = dummy_dark
+            log.warning(f"master dark '{in_dark}' not found. Using dummy dark")
+        mdark_img = Image(data=numpy.zeros_like(org_img._data))
     else:
-        log.info(f"using dark calibration frame '{in_dark}'")
-        master_dark = loadImage(in_dark)
-
-        # scale down the dark if needed
-        factor = exptime / master_dark._header["EXPTIME"]
-        if factor > 1.0:
-            log.warning("scaling-up master dark frame")
-        master_dark *= factor
+        log.info(f"using dark calibration frame '{os.path.basename(in_dark)}'")
+        mdark_img = loadImage(in_dark)
 
     # read master flat
-    if img_type in ["bias", "dark", "flat", "flatfield"] or (
+    if img_type in ["bias", "dark", "pixelflat"] or (
         in_pixelflat is None or not os.path.isfile(in_pixelflat)
     ):
         if in_pixelflat and not os.path.isfile(in_pixelflat):
-            log.error(f"master flat '{in_pixelflat}' not found. Using dummy flat")
-        master_pixelflat = dummy_flat
+            log.warning(f"master flat '{in_pixelflat}' not found. Using dummy flat")
+        mflat_img = Image(data=numpy.ones_like(org_img._data))
     else:
-        log.info(f"using pixelflat calibration frame '{in_pixelflat}'")
-        master_pixelflat = loadImage(in_pixelflat)
+        log.info(
+            f"using pixelflat calibration frame '{os.path.basename(in_pixelflat)}'"
+        )
+        mflat_img = loadImage(in_pixelflat)
 
     # bias correct image
     if in_bias:
         log.info("subtracting master bias")
-    bcorr_image = proc_image - master_bias
+    bcorr_img = org_img - mbias_img
 
     # calculate Poisson errors
     log.info("calculating Poisson errors per quadrant")
-    for i, quad_sec in enumerate(bcorr_image.getHdrValue("AMP? TRIMSEC").values()):
-        quad = bcorr_image.getSection(quad_sec)
-        quad.computePoissonError(quad.getHdrValue(f"AMP{i+1} RDNOISE"))
-        bcorr_image.setSection(section=quad_sec, subimg=quad, inplace=True)
+    for i, quad_sec in enumerate(bcorr_img.getHdrValue("AMP? TRIMSEC").values()):
+        # extract quadrant image
+        quad = bcorr_img.getSection(quad_sec)
+        # extract quadrant gain and rdnoise values
+        gain = quad.getHdrValue(f"AMP{i+1} GAIN")
+        rdnoise = quad.getHdrValue(f"AMP{i+1} RDNOISE")
+        # gain-correct quadrant
+        quad *= gain
+
+        quad.computePoissonError(rdnoise)
+        bcorr_img.setSection(section=quad_sec, subimg=quad, inplace=True)
         log.info(
-            f"median error in quadrant {i+1}: {numpy.median(quad._error):.2f} (e-)"
+            f"median error in quadrant {i+1}: {numpy.nanmedian(quad._error):.2f} (e-)"
         )
+
+    # convert to electron/s (avoid zero division)
+    bcorr_img /= max(1, exptime)
+    bcorr_img.setHdrValue("BUNIT", "electron/s", "physical units of the image")
 
     # complete image detrending
     if in_dark:
         log.info("subtracting master dark")
     elif in_dark and in_pixelflat:
         log.info("subtracting master dark and dividing by master pixelflat")
-    calib_image = (bcorr_image - master_dark) / master_pixelflat
+    detrended_img = (bcorr_img - mdark_img) / mflat_img
 
     # propagate pixel mask
     log.info("propagating pixel mask")
-    nanpixels = numpy.isnan(calib_image._data)
-    infpixels = numpy.isinf(calib_image._data)
-    calib_image._mask = numpy.logical_or(proc_image._mask, nanpixels)
-    calib_image._mask = numpy.logical_or(calib_image._mask, infpixels)
-    # fix infinities & nans
-    if replace_nan:
-        log.info(
-            f"replacing NaNs and infinities ({nanpixels.sum()} and "
-            f"{infpixels.sum()} pix) with zeros"
-        )
-        calib_image._data = numpy.nan_to_num(
-            calib_image._data, nan=0, posinf=0, neginf=0
-        )
-        calib_image._error = numpy.nan_to_num(
-            calib_image._error, nan=0, posinf=0, neginf=0
-        )
-
-    # subtract background
-    log.info(f"calculating background using sections = {bgsec}")
-    bg_sections = []
-    bg_image = Image(numpy.ones(calib_image._dim), error=numpy.ones(calib_image._dim))
-    for i, quad_sec in enumerate(bcorr_image.getHdrValue("AMP? TRIMSEC").values()):
-        quad = calib_image.getSection(quad_sec)
-        # extract quad sections for BG calculation
-        bg_sec = quad.getSection(bgsec[i])
-        bg_sections.append(bg_sec)
-        # calculate BG value
-        bg_array = numpy.ma.masked_array(bg_sec._data, mask=bg_sec._mask)
-        bg_value = numpy.ma.median(bg_array, axis=None)
-        bg_error = numpy.ma.std(bg_array, axis=None)
-        log.info(
-            f"median and standard deviation in BG image for quadrant {i+1}: "
-            f"{bg_value:.2f} +/- {bg_error:.2f} (e-)"
-        )
-        # set background section
-        bg_quad = bg_image.getSection(quad_sec)
-        bg_quad._data, bg_quad._error = bg_value, bg_error
-        bg_image.setSection(section=quad_sec, subimg=bg_quad, inplace=True)
-    calib_image = calib_image - bg_image
+    nanpixels = numpy.isnan(detrended_img._data)
+    infpixels = numpy.isinf(detrended_img._data)
+    detrended_img._mask = numpy.logical_or(org_img._mask, nanpixels)
+    detrended_img._mask = numpy.logical_or(detrended_img._mask, infpixels)
 
     # reject cosmic rays
     if reject_cr:
         log.info("rejecting cosmic rays")
-        # NOTE: this function hangs up
-        # clean_array, cr_mask = lacosmic(
-        #     data=calib_image._data,
-        #     error=calib_image._error,
-        #     mask=calib_image._mask,
-        #     background=bg_image._data,
-        #     contrast=1.1,
-        #     cr_threshold=5,
-        #     neighbor_threshold=2,
-        # )
-        # NOTE: faster solution
         ccd = CCDData(
-            calib_image._data,
-            uncertainty=calib_image._error,
+            detrended_img._data,
+            uncertainty=StdDevUncertainty(detrended_img._error),
             unit=u.electron,
-            mask=calib_image._mask,
+            mask=detrended_img._mask,
         )
-        clean_ccd = cosmicray_lacosmic(ccd, sigclip=30, objlim=35, psfsize=0.8)
-        cr_mask = ~calib_image._mask & clean_ccd.mask
-        clean_image = Image(data=clean_ccd.data, mask=cr_mask)
-        # NOTE: original CR rejection
-        # cr_mask = calib_image.createCosmicMask()
-        # clean_array = copy(calib_image._data)
-        # clean_array[cr_mask] = numpy.nan
-        # clean_image = Image(data=clean_array, error=calib_image._error, mask=cr_mask)
+        array = copy(detrended_img._data)
+        array[detrended_img._mask] = numpy.nan
+        clean_ccd = cosmicray_lacosmic(
+            ccd, sigclip=30.0, objlim=numpy.nanpercentile(array, q=99.9)
+        )
+        cr_mask = clean_ccd.mask
+        cr_mask[detrended_img._mask] = False
 
+        ncosmic = cr_mask.sum()
+        if ncosmic > 100000:
+            log.error(f"found cosmic ray {ncosmic} pixels, ignoring CR")
+            cr_mask[:, :] = False
+        elif ncosmic > 1000:
+            log.warning(f"found cosmic ray {ncosmic} pixels")
+        else:
+            log.info(f"found cosmic ray {ncosmic} pixels")
+        clean_img = Image(data=clean_ccd.data, mask=cr_mask)
         # update image with cosmic ray mask
-        calib_image.setData(mask=(calib_image._mask | clean_image._mask))
-        log.info(f"found cosmic ray {cr_mask.sum()} pixels")
+        detrended_img.setData(mask=(detrended_img._mask | clean_img._mask))
     else:
-        clean_image = Image(
-            data=numpy.ones(calib_image._dim) * numpy.nan,
-            mask=numpy.zeros(calib_image._dim),
+        cr_mask = numpy.zeros(detrended_img._dim, dtype=bool)
+        clean_img = Image(
+            data=numpy.ones(detrended_img._dim) * numpy.nan,
+            mask=numpy.zeros(detrended_img._dim),
         )
+
+    # replace masked pixels with NaNs
+    if replace_with_nan:
+        log.info(f"replacing {detrended_img._mask.sum()} masked pixels with NaNs")
+        detrended_img.apply_pixelmask()
 
     # refine mask
-    log.info(f"refining pixel mask with {median_box = }")
-    median_image = calib_image.medianImg(size=median_box, use_mask=True)
-    calib_image.setData(mask=(calib_image._mask | median_image._mask), inplace=True)
+    if all(median_box):
+        log.info(f"refining pixel mask with {median_box = }")
+        med_img = detrended_img.medianImg(size=median_box, use_mask=True)
+        detrended_img.setData(mask=(detrended_img._mask | med_img._mask), inplace=True)
 
-    # normalize in case of flat calibration
-    # 'flat' and 'flatfield' are the imagetyp that a pixel flat can have
-    if img_type == "flat" or img_type == "flatfield":
-        flat_array = numpy.ma.masked_array(calib_image._data, mask=calib_image._mask)
-        calib_image = calib_image / numpy.ma.median(flat_array)
+    # normalize in case of pixel flat calibration
+    # 'pixelflat' is the imagetyp that a pixel flat can have
+    if img_type == "pixelflat":
+        flat_array = numpy.ma.masked_array(
+            detrended_img._data, mask=detrended_img._mask
+        )
+        detrended_img = detrended_img / numpy.ma.median(flat_array)
 
-    # save detrended figure
-    log.info(f"saving detrended figure at '{out_image}'")
-    calib_image.writeFitsData(out_image)
+    # add slitmap information if given
+    if in_slitmap is not None and detrended_img._header["IMAGETYP"] in {'flat', 'arc', 'object', 'science'}:
+        log.info("adding slitmap information")
+        detrended_img.setSlitmap(in_slitmap)
+    else:
+        log.warning("no slitmap information to be added")
+    
+    # save detrended image
+    log.info(f"writing detrended image to '{os.path.basename(out_image)}'")
+    detrended_img.writeFitsData(out_image)
 
     # show plots
     log.info("plotting results")
-    fig, axs = plt.subplots(2, 2, figsize=(15, 3), sharex=True, sharey=True)
-    axs = axs.flatten()
-    for i, bg_sec in enumerate(bg_sections):
-        plot_image(
-            bg_sec, ax=axs[i], labels=False, colorbar=False, title=f"quadrant {i+1}"
-        )
-    fig.suptitle("background sections", size="xx-large")
-    fig.supxlabel("X (pixel)")
-    fig.supylabel("Y (pixel)")
-    fig.tight_layout()
-    save_fig(
-        fig,
-        output_path=out_image,
-        figure_path=figure_path,
-        label="bg_sections",
-        close=not display_plots,
+    # detrending process
+    fig, axs = create_subplots(
+        to_display=display_plots,
+        nrows=2,
+        ncols=2,
+        figsize=(15, 15),
+        sharex=True,
+        sharey=True,
     )
-
-    fig, axs = plt.subplots(2, 3, figsize=(15, 10), sharex=True, sharey=True)
-    axs = axs.flatten()
-    plot_image(proc_image, ax=axs[0], title="original", labels=False)
-    plot_image(bcorr_image, ax=axs[1], title="bias corrected", labels=False)
-    plot_image(bcorr_image, ax=axs[2], title="error", extension="error", labels=False)
-    plot_image(calib_image, ax=axs[3], title="detrended", labels=False)
-    plot_image(bg_image, ax=axs[4], title="background", labels=False)
+    plot_image(org_img, ax=axs[0], title="original", labels=False)
+    plot_image(bcorr_img, ax=axs[1], title="error", extension="error", labels=False)
     plot_image(
-        clean_image,
-        ax=axs[5],
+        clean_img,
+        ax=axs[2],
         title=f"CR mask ({reject_cr = })",
         extension="mask",
         labels=False,
     )
+    plot_image(detrended_img, ax=axs[3], title="detrended", labels=False)
     fig.supxlabel("X (pixel)")
     fig.supylabel("Y (pixel)")
-    fig.tight_layout()
     save_fig(
         fig,
-        output_path=out_image,
-        figure_path=figure_path,
+        product_path=out_image,
+        to_display=display_plots,
+        figure_path="qa",
         label="detrending",
-        close=not display_plots,
+    )
+
+    return (
+        org_img,
+        mbias_img,
+        mdark_img,
+        mflat_img,
+        cr_mask,
+        detrended_img,
     )
 
 
-def createMasterFrame_drp(
-    in_images,
-    out_image,
-    reject_cr=False,
-    exptime_thresh=5,
-    force_master=True,
-    **cr_kwargs,
-):
-    """
-    Combines the given calibration frames (bias, dark, or pixelflat) into a
+@drop_missing_input_paths(["in_images"])
+def create_master_frame(in_images: List[str], out_image: str, batch_size: int = 30, force_master: bool = True):
+    """Combines the given calibration frames (bias, dark, or pixelflat) into a
     master calibration frame.
 
-    Optionally this task will apply a cosmic ray rejection algorithm
-    (reject_cr=True) if the following conditions apply:
-
-        * exposure time < exptime_thresh OR
-        * number of frames is <= 2
-
-    The combination of the images will be carried out using a sigma clipped
-    median statistic if the number of exposures is > 2. If the number of
-    exposures <= 2, a simple average statistic is applied. In the special case
-    that CR rejection is needed, the combination of images is selective:
-
-        * where cosmic ray in one frame, select the other
-        * where cosmic ray in none of the frames, calculate an average of both
-
-    When only one frame is given, it is still flagged as master, but a warning
-    will be thrown.
+    When only one frame is given and `force_master==True`, it is still flagged
+    as master, but a warning will be thrown.
 
     Parameters
     ----------
-    in_images : string
-        comma-separated list of paths to images that are going to be combined
-        into a master frame
-    out_image : string
+    in_images : List[str]
+        list of paths to images that are going to be combined into a master frame
+    out_image : str
         path to output master frame
-    reject_cr : boolean, optional
-        whether to reject or not cosmic rays. Deafults to False. If true this
-        task will decide if cosmic ray rejection is needed or not based on the
-        exposure time of the frame and the number of frames being combined
-    exptime_thresh : integer, optional
-        minimum exposure time belowe which no cosmic rejection routine will be
-        run
     force_master : bool, optional
-        whether to force or not creation of master frame, by default True
-    cr_kwargs : dict_like
-        additional keyword arguments to be passed to the cosmic ray rejection
-        routine
+        whether to force or not creation of master frame, by default True, by default True
 
-    Examples
-    --------
-    drp image createMasterFrame IN_IMAGE1,IN_IMAGE2,... OUT_IMAGE
-
+    Returns
+    -------
+    org_ims : List[Image]
+        list of original images
+    master_img : Image
+        master image
     """
-    if isinstance(in_images, str):
-        in_images = in_images.split(",")
-
     if len(in_images) == 0:
         log.error("skipping master frame calculation, no input images given")
         return
@@ -3310,105 +3382,81 @@ def createMasterFrame_drp(
 
     log.info(f"input frames: {','.join(in_images)}")
 
+    # select only a maximum of `batch_size` images
+    if len(in_images) > batch_size:
+        log.info(f"selecting {batch_size} random images")
+        in_images = numpy.random.choice(in_images, batch_size, replace=False)
     nexp = len(in_images)
-    proc_images, exptimes, img_types = [], [], []
+    
+    # load images
+    org_imgs, imagetyps = [], []
     for in_image in in_images:
-        proc_image = loadImage(in_image).convertUnit(unit="electron")
-        exptimes.append(proc_image._header["EXPTIME"])
-        img_types.append(proc_image._header["IMAGETYP"].lower())
-        proc_images.append(proc_image)
+        img = loadImage(in_image)
+        imagetyps.append(img._header["IMAGETYP"].lower())
+        org_imgs.append(img)
 
-    master_type, counts = numpy.unique(img_types, return_counts=True)
+    # check if all images have the same imagetyp
+    master_type, counts = numpy.unique(imagetyps, return_counts=True)
     master_type = master_type[numpy.argmax(counts)]
-    if numpy.any(master_type != numpy.asarray(img_types)):
+    if numpy.any(master_type != numpy.asarray(imagetyps)):
         log.warning(f"not all imagetyp = {master_type}")
-        # TODO: drop minority type
-        # TODO: throw warning: dropping frames != frames[0]
 
-    master_exptime = exptimes[0]
-    if numpy.any(master_exptime != numpy.asarray(exptimes)):
-        log.warning(f"not all exptime = {master_exptime}. Scaling images")
-        factors = numpy.nan_to_num(
-            master_exptime / numpy.asarray(exptimes), nan=1.0, posinf=1.0, neginf=1.0
+    # combine images
+    log.info(f"combining {nexp} frames into master frame")
+    if master_type == "bias":
+        master_img = combineImages(org_imgs, method="median", normalize=False)
+    elif master_type == "dark":
+        master_img = combineImages(org_imgs, method="median", normalize=False)
+    elif master_type == "pixelflat":
+        master_img = combineImages(
+            [img / numpy.nanmedian(img._data) for img in org_imgs],
+            method="median",
+            normalize=True,
+            normalize_percentile=75,
         )
-        proc_images = [
-            proc_image * factor for factor, proc_image in zip(factors, proc_images)
-        ]
-
-    if reject_cr and (master_exptime < exptime_thresh or nexp == 2):
-        log.info(f"rejecting CR for exposure {proc_images[0]._header['EXPNUM']}")
-        cr_select_1 = proc_images[0].createCosmicMask(**cr_kwargs)
-        log.info(f"rejecting CR for exposure {proc_images[1]._header['EXPNUM']}")
-        cr_select_2 = proc_images[1].createCosmicMask(**cr_kwargs)
-
-        # filter out cosmic rays by selecting pixels where no CR were detected
-        # normalize counts if pixelflat
-        log.info("selecting pixels with no CR for master frame")
-        new_data_1 = numpy.where(
-            cr_select_1, x=proc_images[1]._data, y=proc_images[0]._data
+    elif master_type == "arc":
+        master_img = combineImages(
+            org_imgs, method="median", normalize=True, normalize_percentile=99
         )
-        new_data_2 = numpy.where(
-            cr_select_2, x=proc_images[0]._data, y=proc_images[1]._data
+    elif master_type == "flat":
+        master_img = combineImages(
+            org_imgs, method="median", normalize=True, normalize_percentile=75
         )
-        if master_type == "flat" or master_type == "flatfield":
-            new_data = [
-                new_data_1 / numpy.nanmedian(new_data_1),
-                new_data_2 / numpy.nanmedian(new_data_2),
-            ]
-        else:
-            new_data = [new_data_1, new_data_2]
 
-        log.info(f"combining {nexp} frames into master frame")
-        # average images
-        new_data = numpy.nanmean(new_data, axis=0)
+    # write output master 
+    log.info(f"writing master frame to '{os.path.basename(out_image)}'")
+    master_img.writeFitsData(out_image)
 
-        new_header = proc_images[0]._header
-        # combine original masks
-        new_mask = numpy.logical_and(proc_images[0]._mask, proc_images[1]._mask)
-
-        # prepare image for CRR
-        master_frame = Image(data=new_data, header=new_header, mask=new_mask)
-
-        # combine CR pixel selection
-        # cr_mask = numpy.logical_and(cr_select_1, cr_select_2)
-        # replace_box = cr_kwargs.get("replace_box", (20, 1))
-        # replace_error = cr_kwargs.get("replace_error", 1e10)
-        # filter out remaining cosmic rays
-        # master_frame.replaceMaskMedian(*replace_box, replace_error=replace_error)
-        # add original masks
-        # master_frame.setData(mask=new_mask)
-    else:
-        log.info(f"combining {nexp} frames into master frame")
-        if master_type == "bias":
-            master_frame = combineImages(proc_images, method="median")
-        elif master_type == "dark":
-            master_frame = combineImages(proc_images, method="median")
-        elif master_type == "flat" or master_type == "flatfield":
-            master_frame = combineImages(
-                [
-                    proc_image / numpy.nanmedian(proc_image._data)
-                    for proc_image in proc_images
-                ],
-                method="median",
-            )
-        elif master_type == "arc" or master_type == "fiberflat":
-            master_frame = combineImages(proc_images, method="median")
-
-    log.info(f"updating header for new master frame '{out_image}'")
-    # TODO:
-    # * add binary table with columns: MJD, EXPNUM, SPEC, CHANNEL, EXPTIME
-    master_frame._header["EXPTIME"] = master_exptime
-    master_frame._header["ISMASTER"] = (True, "Is this a combined (master) frame")
-    master_frame._header["NFRAMES"] = (nexp, "Number of exposures combined")
-
-    master_frame.writeFitsData(out_image)
+    return org_imgs, master_img
 
 
-def createPixelMask_drp(in_image, out_image, cen_stat="median", nstd=3):
+@skip_on_missing_input_path(["in_bias", "in_dark", "in_pixelflat"])
+@skip_if_drpqual_flags(["SATURATED"], "in_bias")
+@skip_if_drpqual_flags(["SATURATED"], "in_dark")
+@skip_if_drpqual_flags(["SATURATED"], "in_pixelflat")
+def create_pixelmask(
+    in_bias: str,
+    in_dark: str,
+    out_mask: str,
+    in_pixelflat: str = None,
+    median_box: int = [31, 31],
+    cen_stat: str = "median",
+    low_nsigma: int = 3,
+    high_nsigma: int = 7,
+    column_threshold: float = 0.3,
+):
     """create a pixel mask using a simple sigma clipping
 
-    given an image with potentially bad pixels (hot, dead), this function
-    will calculate a sigma clipping pixel mask to reject those pixels.
+    Given a bias, dark, and pixelflat image, this function will calculate a
+    a pixel mask by performing the following steps:
+        * smooth images with a median filter set by `median_box`
+        * subtract smoothed images from original images
+        * calculate a sigma clipping mask using `cen_stat` and `low_/high_nsigma`
+        * mask whole column if fraction of masked pixels is above `column_threshold`
+        * combine all masks into a single mask
+
+    By using a low threshold we should be able to pick up weak bad columns, while the
+    high threshold should be able to pick up hot pixels.
 
     Parameters
     ----------
@@ -3421,23 +3469,86 @@ def createPixelMask_drp(in_image, out_image, cen_stat="median", nstd=3):
     nstd : int, optional
         number of sigmas above which a pixel will be masked, by default 3
     """
-    # TODO: Bad Pixel Mask: you should look for two types of bad pixels in two different frames:
-    # "hot pixels", for which you co-add all your bias subtracted darks, no matter the exposure time, and look for pixels that stand out of their local background.
-    # And "low QE pixels", for which you look for local outliers with respect to the local background in a master pixel flat.
-    image = loadImage(in_image)
+    # verify of pixelflat exists, ignore if not
+    if in_pixelflat is not None and not os.path.isfile(in_pixelflat):
+        log.warning(f"pixel flat at '{in_pixelflat}' not found, ignoring")
+        in_pixelflat = None
 
-    marray = numpy.ma.masked_array(image._data, mask=image._mask)
-    if cen_stat == "mean":
-        cen = numpy.ma.mean(marray)
-    elif cen_stat == "median":
-        cen = numpy.ma.median(marray)
+    imgs, med_imgs, masks = [], [], []
+    for in_image in filter(lambda i: i is not None, [in_bias, in_dark, in_pixelflat]):
+        img = loadImage(in_image)
 
-    std = numpy.ma.std(marray)
+        log.info(f"creating pixel mask using '{os.path.basename(in_image)}'")
 
-    mask = (marray.data < cen - nstd * std) | (marray.data > cen + nstd * std)
+        # define pixelmask image
+        mask = Image(data=numpy.ones_like(img._data), mask=numpy.zeros_like(img._data, dtype=bool))
 
-    new_mask = Image(data=mask * 0, mask=mask)
-    new_mask.writeFitsData(out_image)
+        quad_sections = img.getHdrValue("AMP? TRIMSEC").values()
+        for sec in quad_sections:
+            log.info(f"processing quadrant = {sec}")
+            quad = img.getSection(sec)
+            msk_quad = mask.getSection(sec)
+
+            # create a smoothed image using a median rolling box
+            log.info(f"smoothing image with median box {median_box = }")
+            med_quad = quad.medianImg(size=median_box)
+            # subtract that smoothed image from the master dark
+            quad = quad - med_quad
+
+            # calculate central value
+            # log.info(f"calculating central value using {cen_stat = }")
+            if cen_stat == "mean":
+                cen = bn.nanmean(quad._data)
+            elif cen_stat == "median":
+                cen = bn.nanmedian(quad._data)
+            log.info(f"central value = {cen = }")
+
+            # calculate standard deviation
+            # log.info("calculating standard deviation using biweight_scale")
+            std = biweight_scale(quad._data, M=cen, ignore_nan=True)
+            log.info(f"standard deviation = {std}")
+
+            # create pixel masks for low and high nsigmas
+            # log.info(f"creating pixel mask for {low_nsigma = } sigma")
+            badcol_mask = (quad._data < cen - low_nsigma * std)
+            badcol_mask |= (quad._data > cen + low_nsigma * std)
+            # log.info(f"creating pixel mask for {high_nsigma = } sigma")
+            if img._header["IMAGETYP"] != "bias":
+                hotpix_mask = (quad._data < cen - high_nsigma * std)
+                hotpix_mask |= (quad._data > cen + high_nsigma * std)
+            else:
+                hotpix_mask = numpy.zeros_like(quad._data, dtype=bool)
+
+            # mask whole columns if fraction of masked pixels is above threshold
+            bad_columns = numpy.sum(badcol_mask, axis=0) > column_threshold * quad._dim[0]
+            log.info(f"masking {bad_columns.sum()} bad columns")
+            # reset mask to clean good pixels
+            badcol_mask[...] = False
+            # mask only bad columns
+            badcol_mask[:, bad_columns] = True
+
+            # combine bad column and hot pixel masks
+            msk_quad._mask = badcol_mask | hotpix_mask
+            log.info(f"masking {msk_quad._mask.sum()} pixels in total")
+
+            # set section to pixelmask image
+            mask.setSection(section=sec, subimg=msk_quad, inplace=True)
+
+        imgs.append(img)
+        masks.append(mask)
+
+    # define header for pixel mask
+    new_header = img._header
+    new_header["IMAGETYP"] = "pixmask"
+    new_header["EXPTIME"] = 0
+    new_header["DARKTIME"] = 0
+    # define image object to store pixel mask
+    new_mask = Image(data=mask._data, mask=numpy.any([mask._mask for mask in masks], axis=0), header=new_header)
+    new_mask.apply_pixelmask()
+    log.info(f"writing pixel mask to '{os.path.basename(out_mask)}'")
+    new_mask.writeFitsData(out_mask)
+
+    return imgs, med_imgs, masks
 
 
 # TODO: for fiberflats, calculate an average over an X range (around the center) of the

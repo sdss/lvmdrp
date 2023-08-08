@@ -77,7 +77,7 @@ class Header(object):
             f_out = self._origin
         else:
             f_out = filename
-        hdu = pyfits.open(f_out)
+        hdu = pyfits.open(f_out, memmap=False)
         hdu[extension].header = self._header
         hdu[extension].update_header()
         hdu.writeto(f_out, overwrite=True)

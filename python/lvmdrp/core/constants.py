@@ -16,7 +16,7 @@ LVM_UNAM_URL = "http://ifs.astroscu.unam.mx/LVM"
 LVM_SRC_URL = f"{LVM_UNAM_URL}/lvmdrp_src.zip"
 
 # installation path
-INS_PATH = get_env_lib_directory()
+INS_PATH = os.getenv("ESOSKY", get_env_lib_directory())
 
 LIB_PATH = os.path.join(INS_PATH, "lib")
 BIN_PATH = os.path.join(INS_PATH, "bin")
@@ -100,17 +100,21 @@ SKYCORR_PAR_MAP = {
     "PLOT_TYPE": "plotType",
 }
 
-BASIC_CALIBRATION_TYPES = ["bias", "dark", "pixelflat"]
+BASIC_CALIBRATION_TYPES = ["pixmask", "bias", "dark", "pixelflat"]
 CALIBRATION_TYPES = BASIC_CALIBRATION_TYPES + ["flat", "arc"]
 FRAMES_PRIORITY = CALIBRATION_TYPES + ["object"]
 FRAMES_CALIB_NEEDS = {
     "bias": [],
     "dark": ["bias"],
     "pixelflat": ["bias", "dark"],
-    "flat": ["bias", "dark", "pixelflat"],
-    "arc": ["bias", "dark", "pixelflat", "flat"],
-    "object": ["bias", "dark", "pixelflat", "flat", "arc"],
+    "pixmask": ["bias", "dark", "pixelflat"],
+    "flat": ["pixmask", "bias", "dark", "pixelflat", "trace", "fwhm", "wave", "lsf"],
+    "arc": ["pixmask", "bias", "dark", "pixelflat", "trace", "fwhm", "wave", "lsf"],
+    "object": ["pixmask", "bias", "dark", "pixelflat", "flat", "trace", "fwhm", "wave", "lsf"],
 }
 
 # spectrograph channels
 SPEC_CHANNELS = {"b": (3600, 5930), "r": (5660, 7720), "z": (7470, 9800)}
+
+ARC_LAMPS = ["NEON", "HGNE", "ARGON", "XENON", "KRYPTON"]
+CON_LAMPS = ["LDLS", "QUARTZ"]
