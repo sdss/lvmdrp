@@ -612,13 +612,10 @@ class FiberRows(Header, PositionTable):
         if select is not None:
             if data is not None:
                 self._data[select] = data
-                nfibers, npixels = data.shape
             if mask is not None:
                 self._mask[select] = mask
-                nfibers, npixels = mask.shape
             if error is not None:
                 self._error[select] = error
-                nfibers, npixels = error.shape
         else:
             if data is not None:
                 self._data = data

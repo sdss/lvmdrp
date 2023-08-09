@@ -2,6 +2,7 @@
 # encoding: utf-8
 
 import os
+from copy import deepcopy as copy
 from multiprocessing import Pool, cpu_count
 from typing import List
 
@@ -1197,69 +1198,161 @@ def splitFibers_drp(in_rss, splitted_out, contains):
 
 # TODO: for twilight fiber flats, normalize the individual flats before combining to
 # remove the time dependence
-def createFiberFlat_drp(
-    in_rss, out_rss, smooth_poly="0", smooth_median="0", clip="", valid=""
-):
-    """
-    Creates a fiberflat from a wavelength calibrated skyflat RSS by computing the
-    relative transmission to the median spectrum.
+def create_fiberflat(in_rss: str, out_rss: str, median_box: int = 0,
+                     gaussian_kernel: int = 5,
+                     poly_deg: int = 0, poly_kind: str = "poly",
+                     clip_range: List[float] = None,
+                     wave_range: List[float] = None,
+                     display_plots: bool = False) -> RSS:
+    """computes a fiberflat from a wavelength calibrated continuum exposure
+    
+    This function computes a fiberflat from a extracted and wavelength calibrated
+    continuum exposure. The fiberflat is computed by dividing the continuum
+    exposure by the median spectrum of the continuum exposure. The fiberflat
+    can be smoothed with a median filter and a gaussian kernel. The fiberflat
+    can be fitted with a polynomial along the dispersion axis for each fiber
+    individually. The fiberflat can be clipped to a given range of relative
+    transmission values.
 
 
     Parameters
     ----------
-    in_rss : string
-        Input RSS FITS of a skyflat observations
-    out_rss : string
-        Output RSS FITS file with fiberflat RSS
-    smooth_poly : string of integer (>0), optional with default: '-5'
-        Degree of polynomial with which the fiberflat may be fitted along the
-        dispersion axis for each fiber indepenently. (positiv: normal
-        polynomial, negative: Legandre polynomial)
-    clip : string of two comma separated floats, optional with default: ''
-        Minimum and maximum number of relative transmission in the resulting
-        fiberflat. If some value are below or above the given limits they are
-        replaced by zeros and added to the mask as bad pixels.
-    valid : string of two comma separated integers, optional with default: ''
-        Minimum and maximum fiber number used to create the reference median
-        spectrum. This is mainly required if there is a wavelength dependent
-        vignetting effect, so that those fibers can be rejected from the median
-        spectrum.
+    in_rss : str
+        path to a extracted and wavelength calibrated continuum exposure
+    out_rss : str
+        path to the output fiberflat
+    median_box : int, optional
+        size along dispersion direction (angstroms) of the median box, by default 0
+    gaussian_kernel : int, optional
+        standard deviation of the Gaussian kernel along dispersion direction (angstroms), by default 5
+    poly_deg : int, optional
+        polynomial degree used to fit the fiberflat, by default 0
+    poly_kind : str, optional
+        type of polynomial used to fit the fiberflat, by default "poly"
+    clip_range : List[float], optional
+        range of valid values for the fiber flat, by default None
+    wave_range : List[float], optional
+        wavelength range where the median spectrum is computed, by default None
+    display_plots : bool, optional
+        whether to display or not the diagnostic plots, by default False
 
-    Examples
-    ----------------
-    user:> lvmdrp rss createFiberFlat RSS_IN.fits FIBERFLAT.fits /
-    > clip=0.3,1.5 valid=100,250
-
-    user:> lvmdrp rss createFiberFlat RSS_IN.fits FIBERFLAT.fits -6 clip=0.1,2.0
+    Returns
+    -------
+    RSS
+        computed fiberflat
     """
-    smooth_poly = int(smooth_poly)
-    smooth_median = int(smooth_median)
-    if valid == "":
-        valid = None
-    else:
-        valid = numpy.array(valid.split(",")).astype("int16")
-    if clip != "":
-        clip = clip.split(",")
-        clip[0] = float(clip[0])
-        clip[1] = float(clip[1])
-    else:
-        clip = None
-
+    # read continuum exposure
+    log.info(f"reading continuum exposure from {os.path.basename(in_rss)}")
     rss = loadRSS(in_rss)
-    #    print rss._wave
-    fiberflat = rss.createFiberFlat(smooth_poly, smooth_median, clip, valid=valid)
+
+    # wavelength calibration check
+    if rss._wave is None:
+        log.error(f"RSS {os.path.basename(in_rss)} has not been wavelength calibrated")
+        return None
+    elif len(rss._wave.shape) != 1:
+        log.error(f"RSS {os.path.basename(in_rss)} has not been resampled to a common wavelength grid")
+        return None
+    else:
+        wdelt = rss._wave[1] - rss._wave[0]
+
+    # copy original data into output fiberflat object
+    fiberflat = copy(rss)
+    fiberflat._error = None
+    fiberflat._header["CUNIT"] = ("dimensionless", "unit of data")
+
+    # apply median smoothing to data
+    if median_box > 0:
+        median_box_pix = int(median_box / wdelt)
+        log.info(f"applying median smoothing with box size {[1, median_box]} angstroms ({[1, median_box_pix]} pixels)")
+        rss._data = ndimage.filters.median_filter(rss._data, (1, median_box_pix))
+    
+    # calculate normalization within a given window or on the full array
+    if wave_range is not None:
+        log.info(f"caculating normalization in wavelength range {wave_range[0]:.2f} - {wave_range[1]:.2f} angstroms")
+        wave_select = (wave_range[0] <= rss._wave) & (wave_range[1] <= rss._wave)
+        norm = numpy.median(rss._data[wave_select, :], axis=0)
+    else:
+        log.info(f"caculating normalization in full wavelength range ({rss._wave[0]:.2f} - {rss._wave[-1]:.2f} angstroms)")
+        norm = bn.nanmedian(rss._data, axis=0)
+
+    # normalize fibers where norm has valid values
+    select = norm > 0
+    log.info(f"computing fiberflat across {rss._fibers} fibers and {numpy.sum(select)} wavelength bins")
+    normalized = numpy.zeros_like(rss._data)
+    normalized[:, select] = rss._data[:, select] / norm[select][None, :]
+    fiberflat._data = normalized
+    fiberflat._mask |= normalized <= 0
+
+    # apply clipping
+    if clip_range is not None:
+        log.info(f"cliping fiberflat to range {clip_range[0]:.2f} - {clip_range[1]:.2f}")
+        mask = numpy.logical_or(fiberflat._data < clip_range[0], fiberflat._data > clip_range[1])
+        if fiberflat._mask is not None:
+            mask = numpy.logical_or(fiberflat._mask, mask)
+        fiberflat.setData(mask=mask)
+
+    # apply gaussian smoothing
+    if gaussian_kernel > 0:
+        gaussian_kernel_pix = int(gaussian_kernel / wdelt)
+        log.info(f"applying gaussian smoothing with kernel size {gaussian_kernel} angstroms ({gaussian_kernel_pix} pixels)")
+        for ifiber in range(rss._fibers):
+            spec = fiberflat.getSpec(ifiber)
+            spec.smoothSpec(gaussian_kernel, method="gauss")
+            fiberflat._data[ifiber, :] = spec._data
+
+    # polynomial smoothing
+    if poly_deg != 0:
+        log.info(f"applying polynomial fitting with degree {poly_deg} and kind '{poly_kind}'")
+        for ifiber in range(fiberflat._fibers):
+            spec = fiberflat.getSpec(ifiber)
+            spec.smoothPoly(deg=poly_deg, poly_kind=poly_kind)
+            fiberflat._data[ifiber, :] = spec._data
+    
+    # create diagnostic plots
+    log.info("creating diagnostic plots for fiberflat")
+    fig, axs = create_subplots(to_display=display_plots, nrows=3, ncols=1, figsize=(12, 15), sharex=True)
+    # plot original continuum exposure, fiberflat and corrected fiberflat per fiber
+    colors = plt.cm.Spectral(numpy.linspace(0, 1, fiberflat._fibers))
+    for ifiber in range(fiberflat._fibers):
+        # input data
+        axs[0].step(rss._wave, rss._data[ifiber], color=colors[ifiber], alpha=0.5, lw=1)
+        # fiberflat
+        axs[1].step(fiberflat._wave, fiberflat._data[ifiber], lw=1, color=colors[ifiber])
+        # corrected fiberflat
+        axs[2].step(fiberflat._wave, rss._data[ifiber] / fiberflat._data[ifiber], lw=1, color=colors[ifiber])
+    # plot median spectrum
+    axs[0].step(fiberflat._wave, norm, color="0.1", lw=2, label="median spectrum")
+    # add labels and titles
+    axs[0].set_ylabel("counts (e-/s)")
+    axs[0].set_title("median spectrum", loc="left")
+    axs[1].set_ylabel("relative transmission")
+    axs[1].set_title("fiberflat", loc="left")
+    axs[2].set_ylabel("corr. counts (e-/s)")
+    axs[2].set_title("corrected fiberflat", loc="left")
+    axs[2].set_xlabel("wavelength (angstroms)")
+    fig.suptitle(f"fiberflat creation from continuum frame '{os.path.basename(in_rss)}'", fontsize=16)
+    # display/save plots
+    save_fig(
+        fig,
+        product_path=out_rss,
+        to_display=display_plots,
+        figure_path="qa",
+        label="fiberflat"
+    )
 
     # perform some statistic about the fiberflat
     if fiberflat._mask is not None:
         select = numpy.logical_not(fiberflat._mask)
     else:
         select = fiberflat._data == fiberflat._data
-    min = numpy.min(fiberflat._data[select])
-    max = numpy.max(fiberflat._data[select])
-    mean = numpy.mean(fiberflat._data[select])
-    median = numpy.median(fiberflat._data[select])
-    std = numpy.std(fiberflat._data[select])
+    min = bn.nanmin(fiberflat._data[select])
+    max = bn.nanmax(fiberflat._data[select])
+    mean = bn.nanmean(fiberflat._data[select])
+    median = bn.nanmedian(fiberflat._data[select])
+    std = bn.nanstd(fiberflat._data[select])
+    log.info(f"fiberflat statistics: {min = :.3f}, {max = :.3f}, {mean = :.2f}, {median = :.2f}, {std = :.3f}")
 
+    log.info(f"writing fiberflat to {os.path.basename(out_rss)}")
     fiberflat.setHdrValue(
         "HIERARCH PIPE FLAT MIN", float("%.3f" % (min)), "Mininum fiberflat value"
     )
@@ -1275,11 +1368,9 @@ def createFiberFlat_drp(
     fiberflat.setHdrValue(
         "HIERARCH PIPE FLAT STD", float("%.3f" % (std)), "rms of fiberflat values"
     )
-
-    if fiberflat is None:
-        print("Please resample the RSS frame to a common wavelength solution!")
-    else:
-        fiberflat.writeFitsData(out_rss)
+    fiberflat.writeFitsData(out_rss)
+    
+    return fiberflat
 
 
 def correctTraceMask_drp(trace_in, trace_out, logfile, ref_file, poly_smooth=""):
@@ -1376,49 +1467,75 @@ def correctTraceMask_drp(trace_in, trace_out, logfile, ref_file, poly_smooth="")
     trace.writeFitsData(trace_out)
 
 
-def correctFiberFlat_drp(in_rss, out_rss, in_fiberflat, clip="0.2"):
-    """
-    Correct an RSS frame for the effect of the different fiber transmission as
-    measured by a fiberflat.
+def apply_fiberflat(in_rss: str, out_rss: str, in_flat: str, clip_below: float = 0.2) -> RSS:
+    """applies fiberflat correction to target RSS file
+
+    This function applies a fiberflat correction to a target RSS file. The
+    fiberflat correction is computed by the create_fiberflat function. The
+    fiberflat correction is applied by dividing the target RSS by the fiberflat
+    RSS. The fiberflat RSS needs to have the same number of fibers and the same
+    wavelength grid as the target RSS.
 
     Parameters
     ----------
-    in_rss : string
-        Input RSS FITS file
-    out_rss : string
-        Output RSS FITS file which is fiberflat corrected.
-    in_fiberflat : string
-        Fiberflat RSS FITS file containing the relative transmission of each fiber
-    clip : string of float, optional with default: ''
-        Minimum relative transmission considered for the used fiberflat. Value
-        below the given limits are replaced by zeros and added to the mask as
-        bad pixels in the output RSS.
+    in_rss : str
+        input RSS file path to be corrected
+    out_rss : str
+        output RSS file path with fiberflat correction applied
+    in_flat : str
+        input RSS file path to the fiberflat
+    clip_below : float, optional
+        minimum relative transmission considered. Values below will be masked, by default 0.2
 
-    Examples
-    --------
-    user:> lvmdrp rss correctFiberFlat RSS_IN.fits RSS_OUT.fits FIBERFLAT_IN.fits
-
-    user:> lvmdrp rss correctFiberFlat RSS_IN.fits RSS_OUT.fits FIBERFLAT_IN.fits /
-    > clip='0.4'
+    Returns
+    -------
+    RSS
+        fiberflat corrected RSS
     """
-    clip = float(clip)
+    # load target data
+    log.info(f"reading target data from {os.path.basename(in_rss)}")
     rss = RSS()
     rss.loadFitsData(in_rss)
+    
+    # load fiberflat
+    log.info(f"reading fiberflat from {os.path.basename(in_flat)}")
     flat = RSS()
-    flat.loadFitsData(in_fiberflat)
+    flat.loadFitsData(in_flat)
 
+    # check if fiberflat has the same number of fibers as the target data
+    if rss._fibers != flat._fibers:
+        log.error(f"number of fibers in target data ({rss._fibers}) and fiberflat ({flat._fibers}) do not match")
+        return None
+    
+    # check if fiberflat has the same wavelength grid as the target data
+    if not numpy.array_equal(rss._wave, flat._wave):
+        log.error("target data and fiberflat have different wavelength grids")
+        return None
+
+    # apply fiberflat
+    log.info(f"applying fiberflat correction to {rss._fibers} fibers with minimum relative transmission of {clip_below}")
     for i in range(flat._fibers):
+        # extract fibers spectra
         spec_flat = flat.getSpec(i)
         spec_data = rss.getSpec(i)
+
+        # interpolate fiberflat to target wavelength grid to fill in missing values
         flat_resamp = spec_flat.resampleSpec(spec_data._wave, err_sim=0)
-        select_clip = numpy.logical_or(
-            (flat_resamp < clip), (numpy.isnan(flat_resamp._data))
-        )
-        flat_resamp._data[select_clip] = 0
-        flat_resamp._mask[select_clip] = True
+        
+        # apply clipping
+        select_clip_below = (flat_resamp < clip_below) | numpy.isnan(flat_resamp._data)
+        flat_resamp._data[select_clip_below] = 0
+        flat_resamp._mask[select_clip_below] = True
+
+        # correct
         spec_new = spec_data / flat_resamp
         rss.setSpec(i, spec_new)
+    
+    # write out corrected RSS
+    log.info(f"writing fiberflat corrected RSS to {os.path.basename(out_rss)}")
     rss.writeFitsData(out_rss)
+
+    return rss
 
 
 def combineRSS_drp(in_rsss, out_rss, method="mean"):
