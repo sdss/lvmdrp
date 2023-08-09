@@ -38,13 +38,13 @@ trace_peaks_params = {
     "method": "gauss",
     "median_box": 10,
     "median_cross": 1,
-    "poly_disp": 5,
+    "poly_disp": 4,
 }
 trace_fwhm_params = {
     "blocks": "20",
     "steps": "100",
     "coadd": "0",
-    "poly_disp": "5",
+    "poly_disp": "4",
     "poly_kind": "poly",
     "threshold_flux": "10.0",
     "init_fwhm": "2.0",
@@ -85,6 +85,7 @@ if __name__ == "__main__":
     # filter metadata to get only flats
     flats = md.get_metadata(tileid="*", mjd=cmd_args.mjds, kind="raw", imagetyp="flat")
     log.info(f"processing flats from MJDs = {set(flats.mjd)}")
+    print(flats.to_string())
 
     # get max MJD and tileid for new supers
     target_mjd = flats.mjd.max()
@@ -136,9 +137,9 @@ if __name__ == "__main__":
                     imageMethod.detrend_frame(in_image=ppath, out_image=cpath, in_bias=mbias, in_dark=mdark, in_slitmap=Table(drp.fibermap.data))
             
             # define master path
-            mpath = mpaths[i].replace("mflat", f"mflat_{lamp}")
+            mpath = path.full("lvm_master", drpver=drpver, kind=f"mflat_{lamp}", tileid=target_tileid, mjd=target_mjd, camera=camera)
             # create master flats
-            os.makedirs(os.path.dirname(mpaths[i]), exist_ok=True)
+            os.makedirs(os.path.dirname(mpath), exist_ok=True)
             imageMethod.create_master_frame(in_images=cpaths[keys], out_image=mpath)
             # fix header for metadata reconstruction
             _header_fix(mpath, target_mjd, target_tileid)
