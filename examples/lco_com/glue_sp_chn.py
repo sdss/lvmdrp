@@ -155,10 +155,10 @@ for file in red_paths:
             badpix[ny1:ny2l,:]=hdu2[3].data
             badpix[ny30:ny3l,:]=hdu3[3].data        
             hdr=hdu1[0].header
-            hdr['CD1_1']=float(hdr['CRVAL1'])
-            hdr['CD1_2']=float(hdr['CDELT1'])
-            hdr['CD2_1']=1.0
-            hdr['CD2_2']=1.0
+            # hdr['CD1_1']=float(hdr['CRVAL1'])
+            # hdr['CD1_2']=float(hdr['CDELT1'])
+            # hdr['CD2_1']=1.0
+            # hdr['CD2_2']=1.0
             primhdu = fits.PrimaryHDU(data=data,header=hdr)
             hdulist=fits.HDUList([primhdu])
             hdulist.append(fits.ImageHDU(data=error,name='ERROR'))

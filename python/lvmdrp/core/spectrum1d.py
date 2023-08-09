@@ -2,6 +2,7 @@ from copy import deepcopy
 
 import matplotlib.pyplot as plt
 import numpy
+import bottleneck as bn
 from astropy.io import fits as pyfits
 from numpy import polynomial
 from scipy.linalg import norm
@@ -2057,6 +2058,7 @@ class Spectrum1D(Header):
 
                 if axs is not None:
                     axs[i] = gauss.plot(self._wave[select], self._data[select], ax=axs[i])
+                    axs[i].axvline(centres[i], ls="--", lw=1, color="tab:red")
             else:
                 out[i:ncomp + i + 1] = 0.0
 
@@ -2232,26 +2234,23 @@ class Spectrum1D(Header):
             if s._mask is not None:
                 masks[i, :] = s_new._mask
 
-        fluxes[masks] = 0
-        errors[masks] = 0
-        fwhms[masks] = 0
+        fluxes[masks] = numpy.nan
+        errors[masks] = numpy.nan
+        fwhms[masks] = numpy.nan
 
         # First, make sure there is no flux defined if there is no error.
-        errors = numpy.ma.fix_invalid(errors)
-        if numpy.ma.is_masked(errors):
-            fluxes[errors.mask] = numpy.ma.masked
+        # errors = numpy.ma.fix_invalid(errors)
+        # if numpy.ma.is_masked(errors):
+        #     fluxes[errors.mask] = numpy.ma.masked
         # This can be simplified considerably as soon as masked quantities exist.
-        fluxes = numpy.ma.fix_invalid(fluxes)
+        # fluxes = numpy.ma.fix_invalid(fluxes)
         # There are no masked quantities yet, so make sure they are filled here.
-        fluxes = numpy.ma.average(fluxes, weights=1.0 / errors**2, axis=0).filled(
-            numpy.nan
-        )
-        fwhms = numpy.ma.average(fwhms, weights=1.0 / errors**2, axis=0).filled(
-            numpy.nan
-        )
-        errors = numpy.sqrt(
-            1.0 / numpy.ma.sum(1.0 / errors**2, axis=0).filled(numpy.nan)
-        )
+        weights = 1.0 / errors**2
+        norm = bn.nansum(weights, axis=0)
+        weights = weights / norm[None,:]
+        fluxes = bn.nansum(fluxes * weights, axis=0)
+        fwhms = bn.nansum(fwhms * weights, axis=0)
+        errors = numpy.sqrt(1.0 / bn.nansum(weights * norm, axis=0))
 
         masks = numpy.logical_and(masks[0], masks[1])
         masks = numpy.logical_or(masks, numpy.isnan(fluxes))

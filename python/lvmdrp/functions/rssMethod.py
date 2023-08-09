@@ -11,6 +11,7 @@ import matplotlib
 import matplotlib.gridspec as gridspec
 import numpy
 import yaml
+import bottleneck as bn
 from astropy import units as u
 from astropy.io import fits
 from astropy.table import Table
@@ -27,8 +28,8 @@ from lvmdrp.core.fiberrows import FiberRows
 from lvmdrp.core.image import loadImage
 from lvmdrp.core.passband import PassBand
 from lvmdrp.core.plot import plt, create_subplots, save_fig, plot_wavesol_residuals, plot_wavesol_coeffs
-from lvmdrp.core.rss import RSS, _read_pixwav_map, _chain_join, glueRSS, loadRSS
-from lvmdrp.core.spectrum1d import Spectrum1D, _spec_from_lines, _cross_match
+from lvmdrp.core.rss import RSS, _read_pixwav_map, glueRSS, loadRSS
+from lvmdrp.core.spectrum1d import Spectrum1D, wave_little_interpol, _spec_from_lines, _cross_match
 from lvmdrp.external import ancillary_func
 from lvmdrp.utils import flatten
 from lvmdrp import log
@@ -304,17 +305,22 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
         f"{flux_min = }, {fwhm_max = } and relative flux limits {rel_flux_limits}"
         )
 
+    # TODO: run peak finder without gaussian fitting in a small running window
+    # centers = cut_iter.measurePeaks(
+    #     pix, method, init_sigma, threshold=threshold, max_diff=float(max_diff)
+    # )
+
     # initialize plots for arc lines fitting
-    # nrows = 4
-    # ncols = int(numpy.round(nlines / nrows))
-    # fig, axs = create_subplots(to_display=display_plots, nrows=nrows, ncols=ncols, figsize=(10*ncols, 7*nrows))
-    # fig.suptitle("Gaussian fitting")
-    # fig.supylabel("counts (e-/pixel)")
-    # for i, ax in enumerate(axs):
-    #     ax.axvline(pixel[i], ls="--", lw=1, color="tab:red")
-    #     ax.set_title(f"line @ {pixel[i]:.1f} (pixel) - {ref_lines[i]:.2f} (angstrom)")
-    #     ax.set_xlabel("X (pixel)")
-    axs = None
+    ncols = 3
+    nrows = int(numpy.ceil(nlines / ncols))
+    fig, axs = create_subplots(to_display=display_plots, nrows=nrows, ncols=ncols, figsize=(6*ncols, 6*nrows))
+    fig.suptitle("Gaussian fitting")
+    fig.supylabel("counts (e-/pixel)")
+    for i, ax in zip(range(nlines), axs):
+        # ax.axvline(pixel[i], ls="--", lw=1, color="tab:red")
+        ax.set_title(f"line @ {pixel[i]:.1f} (pixel) - {ref_lines[i]:.2f} (angstrom)")
+        ax.set_xlabel("X (pixel)")
+    # axs = None
     fibers, flux, cent_wave, fwhm, masked = arc.measureArcLines(
         ref_fiber,
         pixel,
@@ -325,13 +331,13 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
         rel_flux_limits=rel_flux_limits,
         axs=axs,
     )
-    # save_fig(
-    #     fig,
-    #     product_path=out_wave,
-    #     to_display=display_plots,
-    #     figure_path="qa",
-    #     label="lines_fitting",
-    # )
+    save_fig(
+        fig,
+        product_path=out_wave,
+        to_display=display_plots,
+        figure_path="qa",
+        label="lines_fitting",
+    )
 
     if fiberflat != "":
         log.info("computing fiberflat from measured lines")
@@ -368,14 +374,14 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
                 kind_cros = "poly"
 
             if kind_cros == "poly":
-                poly_cls = polynomial.Polynomial
+                cros_cls = polynomial.Polynomial
             elif kind_cros == "legendre":
-                poly_cls = polynomial.Legendre
+                cros_cls = polynomial.Legendre
             elif kind_cros == "chebyshev":
-                poly_cls = polynomial.Chebyshev
+                cros_cls = polynomial.Chebyshev
 
             try:
-                poly = poly_cls.fit(fibers[select], fwhm_med, deg=poly_cros)
+                poly = cros_cls.fit(fibers[select], fwhm_med, deg=poly_cros)
             except ValueError as e:
                 log.error(f'{msg}: {e}')
                 continue
@@ -401,7 +407,7 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
             good_fibers[i] = True
         elif nmasked[i] == len(masked_lines):
             log.warning(f"fiber {i} has all lines masked")
-            masked_lines[:] = False
+            good_fibers[i] = False
         # select = numpy.logical_not(masked_lines)
 
         if kind_disp not in ["poly", "legendre", "chebyshev"]:
@@ -409,34 +415,22 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
                 ("invalid polynomial kind " f"'{kind_disp = }'. Falling back to 'poly'")
             )
         if kind_disp == "poly":
-            wave_poly = polynomial.Polynomial.fit(
-                cent_wave[i, use_line],
-                ref_lines[use_line],
-                deg=poly_disp,
-            )
+            wave_cls = polynomial.Polynomial
         elif kind_disp == "legendre":
-            wave_poly = polynomial.Legendre.fit(
-                cent_wave[i, use_line],
-                ref_lines[use_line],
-                deg=poly_disp,
-            )
+            wave_cls = polynomial.Legendre
         elif kind_disp == "chebyshev":
-            wave_poly = polynomial.Chebyshev.fit(
-                cent_wave[i, use_line],
-                ref_lines[use_line],
-                deg=poly_disp,
-            )
+            wave_cls = polynomial.Chebyshev
+        
+        wave_poly = wave_cls.fit(cent_wave[i, use_line], ref_lines[use_line], deg=poly_disp)
 
         wave_coeffs[i, :] = wave_poly.convert().coef
         wave_sol[i, :] = wave_poly(arc._pixels)
-        wave_rms[i] = numpy.std(ref_lines[use_line] - wave_poly(cent_wave[i, use_line]))
+        wave_rms[i] = numpy.std(wave_poly(cent_wave[i, use_line]) - ref_lines[use_line])
 
     log.info(
-        (
-            "finished wavelength fitting with median "
-            f"RMS = {numpy.median(wave_rms):g} AA "
-            f"({numpy.median(wave_rms[:,None]/numpy.diff(wave_sol, axis=1)):g} pix)"
-        )
+        "finished wavelength fitting with median "
+        f"RMS = {numpy.median(wave_rms):g} AA "
+        f"({numpy.median(wave_rms[:,None]/numpy.diff(wave_sol, axis=1)):g} pix)"
     )
 
     # Estimate the spectral resolution pattern
@@ -450,39 +444,26 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
 
         if kind_fwhm not in ["poly", "legendre", "chebyshev"]:
             log.warning(
-                ("invalid polynomial kind " f"'{kind_fwhm = }'. Falling back to 'poly'")
+                f"invalid polynomial kind '{kind_fwhm = }'. Falling back to 'poly'"
             )
             kind_fwhm = "poly"
         if kind_fwhm == "poly":
-            fwhm_poly = polynomial.Polynomial.fit(
-                cent_wave[i, use_line],
-                fwhm_wave[use_line],
-                deg=poly_fwhm,
-                domain=[0, arc._pixels[-1]]
-            )
+            fwhm_cls = polynomial.Polynomial
         elif kind_fwhm == "legendre":
-            fwhm_poly = polynomial.Legendre.fit(
-                cent_wave[i, use_line],
-                fwhm_wave[use_line],
-                deg=poly_fwhm,
-            )
+            fwhm_cls = polynomial.Legendre
         elif kind_fwhm == "chebyshev":
-            fwhm_poly = polynomial.Chebyshev.fit(
-                cent_wave[i, use_line],
-                fwhm_wave[use_line],
-                deg=poly_fwhm,
-            )
+            fwhm_cls = polynomial.Chebyshev
+        
+        fwhm_poly = fwhm_cls.fit(cent_wave[i, use_line], fwhm_wave[use_line], deg=poly_fwhm)
 
         lsf_coeffs[i, :] = fwhm_poly.convert().coef
         fwhm_sol[i, :] = fwhm_poly(arc._pixels)
         fwhm_rms[i] = numpy.std(fwhm_wave[use_line] - fwhm_poly(cent_wave[i, use_line]))
 
     log.info(
-        (
-            "finished LSF fitting with median "
-            f"RMS = {numpy.median(fwhm_rms):g} AA "
-            f"({numpy.median(fwhm_rms[:,None]/numpy.diff(wave_sol, axis=1)):g} pix)"
-        )
+        "finished LSF fitting with median "
+        f"RMS = {numpy.median(fwhm_rms):g} AA "
+        f"({numpy.median(fwhm_rms[:,None]/numpy.diff(wave_sol, axis=1)):g} pix)"
     )
 
     # create plot of polynomial coefficients
@@ -498,7 +479,7 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
     )
     # create plot of wavelength fitting residuals
     fig, ax = create_subplots(to_display=display_plots, figsize=(15, 7))
-    axs = plot_wavesol_residuals(lines_pixels=pixel, lines_waves=ref_lines, model_waves=wave_poly(pixel), ax=ax, labels=True)
+    axs = plot_wavesol_residuals(lines_pixels=pixel, lines_waves=ref_lines, model_waves=wave_cls(wave_coeffs[ref_fiber])(pixel), ax=ax, labels=True)
     save_fig(
         fig,
         product_path=out_wave,
@@ -686,10 +667,10 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
         "%.4f" % (numpy.max(fwhm_rms[good_fibers])),
         "Max RMS of disp sol",
     )
-    wave_trace = FiberRows(data=wave_sol, good_fibers=good_fibers)
-    wave_trace._coeffs = wave_coeffs
-    fwhm_trace = FiberRows(data=fwhm_sol, good_fibers=good_fibers)
-    fwhm_trace._coeffs = lsf_coeffs
+    mask = numpy.zeros(arc._data.shape, dtype=bool)
+    mask[~good_fibers] = True
+    wave_trace = FiberRows(data=wave_sol, mask=mask, coeffs=wave_coeffs)
+    fwhm_trace = FiberRows(data=fwhm_sol, mask=mask, coeffs=lsf_coeffs)
 
     wave_trace.writeFitsData(out_wave)
     fwhm_trace.writeFitsData(out_lsf)
@@ -2749,92 +2730,77 @@ def DAR_registerSDSS_drp(
         plt.show()
 
 
-def join_spec_channels(in_rss: list, out_rss: list, parallel: str = "auto"):
+def join_spec_channels(in_rss: List[str], out_rss: str):
     """combine the given RSS list through the overlaping wavelength range
 
     Run once per exposure, for one spectrograph at a time.
     in_rss is a list of 3 files, one for each channel, for a given
     exposure and spectrograph id.
 
-    #TODO refactor this code - vectorize the fiber coadds
-
     Parameters
     ----------
     in_rss : array_like
-        list of RSS file paths
+        list of RSS file paths for each spectrograph channel
     out_rss : str
         output RSS file path
-    parallel : str, optional
-        whether to run in parallel or not, by default "auto"
+
+    Returns
+    -------
+    RSS
+        combined RSS
     """
-    rss_b = loadRSS(in_rss[0]) if in_rss[0] else None
-    rss_r = loadRSS(in_rss[1]) if in_rss[1] else None
-    rss_z = loadRSS(in_rss[2]) if in_rss[2] else None
 
-    # check number of fibers in b, r, z
-    n_fibers = [i._data.shape[0] if i else None for i in [rss_b, rss_r, rss_z]]
-    uniq_nfib = len(set([i for i in n_fibers if i]))
-    if uniq_nfib != 1:
-        log.error(f'Unequal number of fibers in b, r, z: {n_fibers}.  Check fiber id and trace.')
-        log.error('Cannot combine cameras.')
-        return
+    # read all three channels
+    log.info(f"loading RSS files: {in_rss}")
+    rsss = [loadRSS(rss_path) for rss_path in in_rss]
+    # set masked pixels to NaN
+    [rss.apply_pixelmask() for rss in rsss]
 
-    # select one of them
-    rr = rss_b or rss_r or rss_z
+    # get wavelengths
+    log.info("computing best wavelength array")
+    waves = [rss._wave for rss in rsss]
+    # compute the combined wavelengths
+    new_wave = wave_little_interpol(waves)
+    sampling = numpy.diff(new_wave)
+    log.info(f"new wavelength sampling: min = {sampling.min()}, max = {sampling.max()}")
 
-    # TODO: verify all RSS files have the same number of fibers
-    # TODO: verify overlapping wavelength ranges
+    # define interpolators
+    log.info("interpolating RSS data in new wavelength array")
+    fluxes_f = [interpolate.interp1d(rss._wave, rss._data, axis=1, bounds_error=False, fill_value=numpy.nan) for rss in rsss]
+    errors_f = [interpolate.interp1d(rss._wave, rss._error, axis=1, bounds_error=False, fill_value=numpy.nan) for rss in rsss]
+    masks_f = [interpolate.interp1d(rss._wave, rss._mask, axis=1, kind="nearest", bounds_error=False, fill_value=numpy.nan) for rss in rsss]
+    lsfs_f = [interpolate.interp1d(rss._wave, rss._inst_fwhm, axis=1, bounds_error=False, fill_value=numpy.nan) for rss in rsss]
+    # evaluate interpolators
+    fluxes = numpy.asarray([f(new_wave) for f in fluxes_f])
+    errors = numpy.asarray([f(new_wave) for f in errors_f])
+    masks = numpy.asarray([f(new_wave) for f in masks_f])
+    lsfs = numpy.asarray([f(new_wave) for f in lsfs_f])
 
-    # parallel or not
-    if parallel == "auto":
-        cpus = cpu_count()
-    else:
-        cpus = int(parallel)
-    if cpus > 1:
-        pool = Pool(cpus)
+    # define weights for channel combination
+    log.info("calculating weights for channel combination")
+    weights = 1.0 / errors ** 2
+    norms = bn.nansum(weights, axis=0)
+    weights = weights / norms[None, :, :]
 
-        result_spec = []
-        for ifiber in range(rr._fibers):
-            spec_b = rss_b.getSpec(ifiber) if rss_b else None
-            spec_r = rss_r.getSpec(ifiber) if rss_r else None
-            spec_z = rss_z.getSpec(ifiber) if rss_z else None
+    # channel-combine RSS data
+    log.info("combining channel data")
+    new_data = bn.nansum(fluxes * weights, axis=0)
+    new_inst_fwhm = bn.nansum(lsfs * weights, axis=0)
+    new_error = numpy.sqrt(1 / bn.nansum(weights * norms[None, :, :], axis=0))
+    new_mask = bn.nansum(masks, axis=0).astype(bool)
 
-            result_spec.append(
-                pool.apply_async(_chain_join, args=(spec_b, spec_r, spec_z))
-            )
-        pool.close()
-        pool.join()
-
-    # combine channels
-    spectra = []
-    for ifiber in range(rr._data.shape[0]):
-        if cpus > 1:
-            spec_brz = result_spec[ifiber].get()
-        else:
-            spec_b = rss_b.getSpec(ifiber) if rss_b else None
-            spec_r = rss_r.getSpec(ifiber) if rss_r else None
-            spec_z = rss_z.getSpec(ifiber) if rss_z else None
-
-            #spec_br = spec_b.coaddSpec(spec_r)
-            #spec_brz = spec_br.coaddSpec(spec_z)
-            spec_brz = _chain_join(spec_b, spec_r, spec_z)
-
-        spectra.append(spec_brz)
-
-    # update header
-    header = rr._header.copy()
-    header["CCD"] = ",".join(
-        [i._header["CCD"] for i in [rss_b, rss_r, rss_z] if i]
-    )
-    if "CAMERAS" in header:
-        header["CAMERAS"] = header["CCD"].translate({ord(i): None for i in "123"})
     # create RSS
-    rss_brz = RSS.from_spectra1d(spectra, header=header)
-    # update mask
-    rss_brz._mask = numpy.logical_or(rss_brz._mask, numpy.isnan(rss_brz._data))
+    log.info(f"writing output RSS to {os.path.basename(out_rss)}")
+    new_hdr = rsss[0]._header.copy()
+    new_hdr["CCD"] = ",".join([rss._header["CCD"] for rss in rsss])
+    new_hdr["CDELT1"] = new_wave[1] - new_wave[0]
+    new_hdr["CRVAL1"] = new_wave[0]
+    new_hdr["NAXIS1"] = len(new_wave)
+    new_rss = RSS(data=new_data, error=new_error, mask=new_mask, wave=new_wave, inst_fwhm=new_inst_fwhm, header=new_hdr)
+    # write output RSS
+    new_rss.writeFitsData(out_rss)
 
-    rss_brz.writeFitsData(out_rss)
-
+    return new_rss
 
 # TODO: from Law+2016
 # 	* normalize each fiber to unity
