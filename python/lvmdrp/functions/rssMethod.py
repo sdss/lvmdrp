@@ -1244,8 +1244,6 @@ def create_fiberflat(in_rss: str, out_rss: str, median_box: int = 0,
     # read continuum exposure
     log.info(f"reading continuum exposure from {os.path.basename(in_rss)}")
     rss = loadRSS(in_rss)
-    # apply pixelmask to original data
-    rss.apply_pixelmask()
 
     # wavelength calibration check
     if rss._wave is None:
@@ -1261,9 +1259,6 @@ def create_fiberflat(in_rss: str, out_rss: str, median_box: int = 0,
     fiberflat = copy(rss)
     fiberflat._error = None
     fiberflat._header["CUNIT"] = ("dimensionless", "unit of data")
-
-    # apply pixelmask (set to NaN masked pixels)
-    fiberflat.apply_pixelmask()
 
     # apply median smoothing to data
     if median_box > 0:
@@ -1286,6 +1281,7 @@ def create_fiberflat(in_rss: str, out_rss: str, median_box: int = 0,
     normalized = numpy.zeros_like(rss._data)
     normalized[:, select] = rss._data[:, select] / norm[select][None, :]
     fiberflat._data = normalized
+    fiberflat._mask |= normalized <= 0
 
     # apply clipping
     if clip_range is not None:
@@ -1294,8 +1290,6 @@ def create_fiberflat(in_rss: str, out_rss: str, median_box: int = 0,
         if fiberflat._mask is not None:
             mask = numpy.logical_or(fiberflat._mask, mask)
         fiberflat.setData(mask=mask)
-        # updating masked pixels
-        fiberflat.apply_pixelmask()
 
     # apply gaussian smoothing
     if gaussian_kernel > 0:
@@ -1473,49 +1467,75 @@ def correctTraceMask_drp(trace_in, trace_out, logfile, ref_file, poly_smooth="")
     trace.writeFitsData(trace_out)
 
 
-def correctFiberFlat_drp(in_rss, out_rss, in_fiberflat, clip="0.2"):
-    """
-    Correct an RSS frame for the effect of the different fiber transmission as
-    measured by a fiberflat.
+def apply_fiberflat(in_rss: str, out_rss: str, in_flat: str, clip_below: float = 0.2) -> RSS:
+    """applies fiberflat correction to target RSS file
+
+    This function applies a fiberflat correction to a target RSS file. The
+    fiberflat correction is computed by the create_fiberflat function. The
+    fiberflat correction is applied by dividing the target RSS by the fiberflat
+    RSS. The fiberflat RSS needs to have the same number of fibers and the same
+    wavelength grid as the target RSS.
 
     Parameters
     ----------
-    in_rss : string
-        Input RSS FITS file
-    out_rss : string
-        Output RSS FITS file which is fiberflat corrected.
-    in_fiberflat : string
-        Fiberflat RSS FITS file containing the relative transmission of each fiber
-    clip : string of float, optional with default: ''
-        Minimum relative transmission considered for the used fiberflat. Value
-        below the given limits are replaced by zeros and added to the mask as
-        bad pixels in the output RSS.
+    in_rss : str
+        input RSS file path to be corrected
+    out_rss : str
+        output RSS file path with fiberflat correction applied
+    in_flat : str
+        input RSS file path to the fiberflat
+    clip_below : float, optional
+        minimum relative transmission considered. Values below will be masked, by default 0.2
 
-    Examples
-    --------
-    user:> lvmdrp rss correctFiberFlat RSS_IN.fits RSS_OUT.fits FIBERFLAT_IN.fits
-
-    user:> lvmdrp rss correctFiberFlat RSS_IN.fits RSS_OUT.fits FIBERFLAT_IN.fits /
-    > clip='0.4'
+    Returns
+    -------
+    RSS
+        fiberflat corrected RSS
     """
-    clip = float(clip)
+    # load target data
+    log.info(f"reading target data from {os.path.basename(in_rss)}")
     rss = RSS()
     rss.loadFitsData(in_rss)
+    
+    # load fiberflat
+    log.info(f"reading fiberflat from {os.path.basename(in_flat)}")
     flat = RSS()
-    flat.loadFitsData(in_fiberflat)
+    flat.loadFitsData(in_flat)
 
+    # check if fiberflat has the same number of fibers as the target data
+    if rss._fibers != flat._fibers:
+        log.error(f"number of fibers in target data ({rss._fibers}) and fiberflat ({flat._fibers}) do not match")
+        return None
+    
+    # check if fiberflat has the same wavelength grid as the target data
+    if not numpy.array_equal(rss._wave, flat._wave):
+        log.error("target data and fiberflat have different wavelength grids")
+        return None
+
+    # apply fiberflat
+    log.info(f"applying fiberflat correction to {rss._fibers} fibers with minimum relative transmission of {clip_below}")
     for i in range(flat._fibers):
+        # extract fibers spectra
         spec_flat = flat.getSpec(i)
         spec_data = rss.getSpec(i)
+
+        # interpolate fiberflat to target wavelength grid to fill in missing values
         flat_resamp = spec_flat.resampleSpec(spec_data._wave, err_sim=0)
-        select_clip = numpy.logical_or(
-            (flat_resamp < clip), (numpy.isnan(flat_resamp._data))
-        )
-        flat_resamp._data[select_clip] = 0
-        flat_resamp._mask[select_clip] = True
+        
+        # apply clipping
+        select_clip_below = (flat_resamp < clip_below) | numpy.isnan(flat_resamp._data)
+        flat_resamp._data[select_clip_below] = 0
+        flat_resamp._mask[select_clip_below] = True
+
+        # correct
         spec_new = spec_data / flat_resamp
         rss.setSpec(i, spec_new)
+    
+    # write out corrected RSS
+    log.info(f"writing fiberflat corrected RSS to {os.path.basename(out_rss)}")
     rss.writeFitsData(out_rss)
+
+    return rss
 
 
 def combineRSS_drp(in_rsss, out_rss, method="mean"):
