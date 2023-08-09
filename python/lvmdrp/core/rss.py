@@ -3,7 +3,6 @@ import numpy
 import bottleneck as bn
 from astropy.io import fits as pyfits
 from astropy.table import Table
-from scipy import ndimage
 
 from lvmdrp import log
 from lvmdrp.core.constants import CONFIG_PATH
@@ -493,6 +492,7 @@ class RSS(FiberRows):
                         self._error = hdu[i].data
                     if hdu[i].header["EXTNAME"].split()[0] == "BADPIX":
                         self._mask = hdu[i].data.astype("bool")
+                        self._good_fibers = numpy.where(numpy.sum(self._mask, axis=1) != self._data.shape[1])[0]
                     if hdu[i].header["EXTNAME"].split()[0] == "WAVE":
                         self.setWave(hdu[i].data)
                     if hdu[i].header["EXTNAME"].split()[0] == "INSTFWHM":
@@ -510,6 +510,7 @@ class RSS(FiberRows):
                 self._data = hdu[extension_data].data
             if extension_mask is not None:
                 self._mask = hdu[extension_mask].data
+                self._good_fibers = numpy.where(numpy.sum(self._mask, axis=1) != self._data.shape[1])[0]
             if extension_error is not None:
                 self._error = hdu[extension_error].data
             if extension_wave is not None:
@@ -1759,6 +1760,7 @@ class RSS(FiberRows):
                 # )
                 cover = None
 
+        # TODO: use WCS module from astropy
         if self._header is not None:
             self.setHdrValue("CRVAL3", self.getHdrValue("CRVAL1"))
             self.setHdrValue("CDELT3", self.getHdrValue("CDELT1"))
@@ -1784,85 +1786,6 @@ class RSS(FiberRows):
                 cover=cover,
             )
         return Cube_out
-
-    def createFiberFlat(
-        self, smooth_poly=-5, smooth_median=0, clip=[0.2, 2], valid=None
-    ):
-        # if wavelength homogeneous
-        if len(self._wave.shape) == 1:
-            # apply median smoothing to data
-            if smooth_median > 0:
-                self._data = ndimage.filters.median_filter(
-                    self._data, (1, smooth_median)
-                )
-            # calculate normalization within a given window or on the full array
-            if valid is not None:
-                # medians = numpy.median(self._data[valid[0] : valid[1], :], axis=1)
-                norm = numpy.median(self._data[valid[0] : valid[1], :], axis=0)
-            else:
-                norm = numpy.median(self._data, axis=0)
-                # medians = numpy.median(self._data, axis=1)
-            # max = numpy.max(medians)
-            # select_max = numpy.median(self._data, axis=1) == max
-            #    print(numpy.arange(len(medians))[select_max]+1)
-            # norm = numpy.amax(self._data[select_ma], axis=0)
-            # norm = self._data[select_max, :][0]
-            # norm = numpy.mean(self._data[100:280, :], axis=0)
-
-            # normalize fibers where norm > 0
-            select = norm > 0
-            #    pylab.plot(norm)
-            #    pylab.show()
-            normalize = numpy.zeros_like(self._data)
-            normalize[:, select] = (
-                self._data[:, select] / norm[select][numpy.newaxis, :]
-            )
-            self._data = normalize
-
-            # apply clipping
-            if clip is not None:
-                mask = numpy.logical_or(self._data < clip[0], self._data > clip[1])
-                ##sky_resamp.setData(data=0, select=mask)
-                if self._mask is not None:
-                    mask = numpy.logical_or(self._mask, mask)
-                self.setData(mask=mask)
-
-            # apply smoothing
-            # sky_resamp._mask= numpy.logical_not(select)
-            if smooth_poly != 0:
-                for i in range(self._fibers):
-                    spec = self.getSpec(i)
-                    # gaussian smoothing
-                    spec.smoothSpec(5, method="gauss")
-                    # polynomial smoothing
-                    spec.smoothPoly(smooth_poly)
-                    self._data[i, :] = spec._data
-                    if self._mask is not None:
-                        self._mask[i, :] = spec._mask
-                self.setHdrValue(
-                    "Hierarch PIPE FLAT POLY",
-                    smooth_poly,
-                    "Order of polynomial to smooth FLAT",
-                )
-            else:
-                self.setHdrValue(
-                    "Hierarch PIPE FLAT POLY",
-                    smooth_poly,
-                    "Order of polynomial to smooth FLAT",
-                )
-            if self._mask is not None:
-                self.setData(data=0.0, select=self._mask)
-
-            fiberflat = RSS(
-                data=self._data,
-                wave=self._wave,
-                mask=self._mask,
-                header=self._header,
-                logwave=False,
-            )
-            return fiberflat
-        else:
-            return None
 
     def subRSS(self, select):
         if self._data is not None:
