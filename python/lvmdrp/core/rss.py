@@ -2,7 +2,9 @@ import os
 import numpy
 import bottleneck as bn
 from astropy.io import fits as pyfits
+from astropy.wcs import WCS
 from astropy.table import Table
+from astropy import units as u
 
 from lvmdrp import log
 from lvmdrp.core.constants import CONFIG_PATH
@@ -403,16 +405,14 @@ class RSS(FiberRows):
         self._wave = numpy.array(wave)
 
         if len(wave.shape) == 1:
-            # NOTE: do this only if wavelength is uniform
             self._wave_disp = self._wave[1] - self._wave[0]
             self._wave_start = self._wave[0]
             self._res_elements = self._wave.shape[0]
             if self._header is not None:
-                self.setHdrValue("CRVAL1", float("%.3f" % self._wave_start))
-                self.setHdrValue("CDELT1", float("%.3f" % self._wave_disp))
-                self.setHdrValue("CRPIX1", 1.0)
-                self.setHdrValue("CTYPE1", "WAVE")
-                self.setHdrValue("CUNIT1", unit)
+                wcs = WCS(header={
+                    "CDELT1": self._wave_disp, "CRVAL1": self._wave_start,
+                    "CUNIT1": unit, "CTYPE1": "WAVE", "CRPIX1": 1.0})
+                self._header.update(wcs.to_header())
         if len(wave.shape) == 2:
             self._res_elements = self._wave.shape[1]
 
@@ -433,13 +433,12 @@ class RSS(FiberRows):
     def createWavefromHdr(self, logwave=False):
         if self._header is not None:
             try:
-                self._wave_disp = self.getHdrValue("CDELT1")
-                self._wave_start = self.getHdrValue("CRVAL1")
+                wcs = WCS(self._header)
                 self._res_elements = self.getHdrValue("NAXIS1")
-                self._wave = (
-                    numpy.arange(self._res_elements) * self._wave_disp
-                    + self._wave_start
-                )
+                wl = wcs.spectral.all_pix2world(numpy.arange(self._res_elements), 0)[0]
+                self._wave = (wl * u.m).to(u.angstrom).value
+                self._wave_disp = self._wave[1] - self._wave[0]
+                self._wave_start = self._wave[0]
                 if logwave:
                     self._wave = 10 ** (self._wave)
             except Exception:
