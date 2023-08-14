@@ -1092,6 +1092,7 @@ def resample_wavelength(in_rss: str, out_rss: str, method: str = "spline",
             if rss._inst_fwhm is not None:
                 inst_fwhm[i, :] = spec._inst_fwhm
             mask[i, :] = spec._mask
+        
         resamp_rss = RSS(
             data=data,
             wave=ref_wave,
@@ -1099,6 +1100,7 @@ def resample_wavelength(in_rss: str, out_rss: str, method: str = "spline",
             header=rss.getHeader(),
             error=error,
             mask=mask,
+            slitmap=rss.getSlitmask(),
         )
 
     resamp_rss.writeFitsData(out_rss)
