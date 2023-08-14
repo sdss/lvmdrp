@@ -128,10 +128,10 @@ if __name__ == "__main__":
         xpath = path.full("lvm_master", drpver=drpver, kind=f"xmarc_{lamp}", **marc.to_dict())
         
         # match masters
-        masters = md.match_master_metadata(target_imagetyp="arc", target_mjd=target_mjd, target_camera=camera)
+        masters = md.match_master_metadata(target_imagetyp="arc", target_mjd=target_mjd, target_camera=marc.camera)
 
-        # mtrace = path.full("lvm_master", drpver=drpver, kind="mtrace", **masters["trace"])
-        mtrace = f"/home/mejia/Research/UNAM/lvm-drp/lvmdrp/examples/lco_com/data_calib/traces_{marc.camera}_p4.fits"
+        mtrace = path.full("lvm_master", drpver=drpver, kind="mtrace", **masters["trace"])
+        # mtrace = f"/home/mejia/Research/UNAM/lvm-drp/lvmdrp/examples/lco_com/data_calib/traces_{marc.camera}_p4.fits"
         imageMethod.extract_spectra(in_image=mpath, out_rss=xpath, in_trace=mtrace, method="aperture", aperture=3)
 
         # update masters paths list
