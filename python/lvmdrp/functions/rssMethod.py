@@ -668,8 +668,10 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
     )
     mask = numpy.zeros(arc._data.shape, dtype=bool)
     mask[~good_fibers] = True
-    wave_trace = FiberRows(data=wave_sol, mask=mask, coeffs=wave_coeffs)
-    fwhm_trace = FiberRows(data=fwhm_sol, mask=mask, coeffs=lsf_coeffs)
+    wave_trace = FiberRows(data=wave_sol, mask=mask, coeffs=wave_coeffs, header=arc._header.copy())
+    wave_trace._header["IMAGETYP"] = "wave"
+    fwhm_trace = FiberRows(data=fwhm_sol, mask=mask, coeffs=lsf_coeffs, header=arc._header.copy())
+    fwhm_trace._header["IMAGETYP"] = "lsf"
 
     wave_trace.writeFitsData(out_wave)
     fwhm_trace.writeFitsData(out_lsf)
@@ -1282,7 +1284,6 @@ def create_fiberflat(in_rss: str, out_rss: str, median_box: int = 0,
     # copy original data into output fiberflat object
     fiberflat = copy(rss)
     fiberflat._error = None
-    fiberflat._header["CUNIT"] = ("dimensionless", "unit of data")
 
     # apply median smoothing to data
     if median_box > 0:
@@ -1392,6 +1393,8 @@ def create_fiberflat(in_rss: str, out_rss: str, median_box: int = 0,
     fiberflat.setHdrValue(
         "HIERARCH PIPE FLAT STD", float("%.3f" % (std)), "rms of fiberflat values"
     )
+    fiberflat._header["CUNIT"] = "dimensionless"
+    fiberflat._header["IMAGETYP"] = "fiberflat"
     fiberflat.writeFitsData(out_rss)
     
     return fiberflat
