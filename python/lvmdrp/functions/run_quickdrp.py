@@ -56,6 +56,7 @@ def quick_reduction(expnum: int, use_fiducial_master: bool = False) -> None:
         xsci_path = path.full("lvm_anc", drpver=drpver, kind="x", imagetype=sci["imagetyp"], **sci)
         wsci_path = path.full("lvm_anc", drpver=drpver, kind="w", imagetype=sci["imagetyp"], **sci)
         hsci_path = path.full("lvm_anc", drpver=drpver, kind="h", imagetype=sci["imagetyp"], **sci)
+        os.makedirs(os.path.dirname(hsci_path), exist_ok=True)
         # define current arc lamps to use for wavelength calibration
         lamps = arc_lamps[sci_camera[0]]
         
