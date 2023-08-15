@@ -77,7 +77,7 @@ def quick_reduction(expnum: int) -> None:
         rss_tasks.resample_wavelength(in_rss=wsci_path, out_rss=hsci_path, method="linear", disp_pix=0.5, start_wave=iwave, end_wave=fwave, err_sim=10, parallel=0)
         
         # apply fiberflat correction
-        rss_tasks.apply_fiberflat(in_rss=wsci_path, out_rss=wsci_path, in_flat=mflat_path)
+        rss_tasks.apply_fiberflat(in_rss=hsci_path, out_rss=hsci_path, in_flat=mflat_path)
 
     # combine channels
     drp.combine_cameras(sci_tileid, sci_mjd, spec=1)
