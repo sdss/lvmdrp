@@ -28,8 +28,8 @@ def quick_reduction(expnum: int, use_fiducial_master: bool = False) -> None:
     """ Run the Quick DRP for a given exposure number.
     """
     # get target frames metadata
-    sci_metadata = md.get_metadata(tileid="*", mjd="*", expnum=expnum)
-    sci_metadata.sort_values("camera", inplace=True)
+    sci_metadata = md.get_metadata(tileid="*", mjd="*", expnum=expnum, imagetyp="object")
+    sci_metadata.sort_values("expnum", ascending=False, inplace=True)
 
     # define general metadata
     sci_tileid = sci_metadata["tileid"].unique()[0]
@@ -37,21 +37,27 @@ def quick_reduction(expnum: int, use_fiducial_master: bool = False) -> None:
     sci_expnum = sci_metadata["expnum"].unique()[0]
     log.info(f"Running Quick DRP for tile {sci_tileid} at MJD {sci_mjd} with exposure number {sci_expnum}")
 
+    # make sure only one exposure number is being reduced
+    sci_metadata.query("expnum == @sci_expnum", inplace=True)
+    sci_metadata.sort_values("camera", inplace=True)
+
     # define arc lamps configuration per spectrograph channel
     arc_lamps = {"b": "hgne", "r": "neon", "z": "neon"}
 
     # run reduction loop for each science camera exposure
     for sci in sci_metadata.to_dict("records"):
-        
+        # define science camera
+        sci_camera = sci["camera"]
+
         # define sci paths
-        sci_path = path.full("lvm_raw", camspec=sci["camera"], **sci)
+        sci_path = path.full("lvm_raw", camspec=sci_camera, **sci)
         psci_path = path.full("lvm_anc", drpver=drpver, kind="p", imagetype=sci["imagetyp"], **sci)
         dsci_path = path.full("lvm_anc", drpver=drpver, kind="d", imagetype=sci["imagetyp"], **sci)
         xsci_path = path.full("lvm_anc", drpver=drpver, kind="x", imagetype=sci["imagetyp"], **sci)
         wsci_path = path.full("lvm_anc", drpver=drpver, kind="w", imagetype=sci["imagetyp"], **sci)
         hsci_path = path.full("lvm_anc", drpver=drpver, kind="h", imagetype=sci["imagetyp"], **sci)
         # define current arc lamps to use for wavelength calibration
-        lamps = arc_lamps[sci["camera"][0]]
+        lamps = arc_lamps[sci_camera[0]]
         
         # define calibration frames paths
         if use_fiducial_master:
@@ -89,7 +95,7 @@ def quick_reduction(expnum: int, use_fiducial_master: bool = False) -> None:
         image_tasks.extract_spectra(in_image=dsci_path, out_rss=xsci_path, in_trace=mtrace_path, method="aperture", aperture=3)
         
         # wavelength calibrate & resample
-        iwave, fwave = SPEC_CHANNELS[sci["camera"][0]]
+        iwave, fwave = SPEC_CHANNELS[sci_camera[0]]
         rss_tasks.create_pixel_table(in_rss=xsci_path, out_rss=wsci_path, arc_wave=mwave_path, arc_fwhm=mlsf_path)
         rss_tasks.resample_wavelength(in_rss=wsci_path, out_rss=hsci_path, method="linear", disp_pix=0.5, start_wave=iwave, end_wave=fwave, err_sim=10, parallel=0)
         
