@@ -1538,8 +1538,7 @@ def apply_fiberflat(in_rss: str, out_rss: str, in_flat: str, clip_below: float =
     
     # check if fiberflat has the same wavelength grid as the target data
     if not numpy.array_equal(rss._wave, flat._wave):
-        log.error("target data and fiberflat have different wavelength grids")
-        return None
+        log.warning("target data and fiberflat have different wavelength grids")
 
     # apply fiberflat
     log.info(f"applying fiberflat correction to {rss._fibers} fibers with minimum relative transmission of {clip_below}")
