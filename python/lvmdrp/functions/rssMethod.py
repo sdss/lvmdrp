@@ -2913,9 +2913,10 @@ def join_spec_channels(in_rss: List[str], out_rss: str):
     log.info(f"writing output RSS to {os.path.basename(out_rss)}")
     new_hdr = rsss[0]._header.copy()
     new_hdr["CCD"] = ",".join([rss._header["CCD"] for rss in rsss])
-    new_hdr["CDELT1"] = new_wave[1] - new_wave[0]
-    new_hdr["CRVAL1"] = new_wave[0]
-    new_hdr["NAXIS1"] = len(new_wave)
+    wcs = WCS(new_hdr)
+    wcs.spectral.wcs.cdelt[0] = new_wave[1] - new_wave[0]
+    wcs.spectral.wcs.crval[0] = new_wave[0]
+    new_hdr.update(wcs.to_header())
     new_rss = RSS(data=new_data, error=new_error, mask=new_mask, wave=new_wave, inst_fwhm=new_inst_fwhm, header=new_hdr)
     # write output RSS
     new_rss.writeFitsData(out_rss)
