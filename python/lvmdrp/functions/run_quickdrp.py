@@ -103,9 +103,9 @@ def quick_reduction(expnum: int, use_fiducial_master: bool = False) -> None:
         rss_tasks.apply_fiberflat(in_rss=hsci_path, out_rss=hsci_path, in_flat=mflat_path)
 
     # combine channels
-    drp.combine_cameras(sci_tileid, sci_mjd, spec=1)
-    drp.combine_cameras(sci_tileid, sci_mjd, spec=2)
-    drp.combine_cameras(sci_tileid, sci_mjd, spec=3)
+    drp.combine_cameras(sci_tileid, sci_mjd, expnum=sci_expnum, spec=1)
+    drp.combine_cameras(sci_tileid, sci_mjd, expnum=sci_expnum, spec=2)
+    drp.combine_cameras(sci_tileid, sci_mjd, expnum=sci_expnum, spec=3)
 
     # combine spectrographs
     drp.combine_spectrographs(sci_tileid, sci_mjd, sci_expnum)
