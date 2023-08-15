@@ -62,8 +62,8 @@ if __name__ == "__main__":
     # wavelength parameters
     wavelength_parameters = dict(
         ref_fiber=319, aperture=10,
-        poly_disp=5, poly_fwhm=5, poly_cros=3,
-        flux_min=1e-5, fwhm_max=5, display_plots=False
+        poly_disp=3, poly_fwhm=2, poly_cros=2,
+        flux_min=1e-12, fwhm_max=5, rel_flux_limits=[0.001, 1e12], display_plots=False
     )
 
     # get extracted master arcs

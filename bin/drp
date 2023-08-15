@@ -12,6 +12,8 @@ from lvmdrp.functions.imageMethod import preproc_raw_frame
 from lvmdrp.functions.skyMethod import installESOSky_drp, configureSkyModel_drp
 from lvmdrp.utils.metadata import get_frames_metadata, get_master_metadata
 
+from lvmdrp.functions.run_quickdrp import quick_reduction
+
 
 @click.group('drp', short_help='CLI for the LVM data reduction')
 def cli():
@@ -54,7 +56,10 @@ def run(mjd, mjd_list, mjd_range, skip_bd, arc, flat, only_bd, only_cal, only_sc
             expnum=expnum, quick=quick)
 
 
+# register full DRP command
 cli.add_command(run)
+# register quick DRP command
+cli.add_command(quick_reduction)
 
 
 @cli.command('reduce_file', short_help='Reduce a single file')

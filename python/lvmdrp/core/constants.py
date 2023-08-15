@@ -110,7 +110,7 @@ FRAMES_CALIB_NEEDS = {
     "pixmask": ["bias", "dark", "pixelflat"],
     "flat": ["pixmask", "bias", "dark", "pixelflat", "trace", "fwhm", "wave", "lsf"],
     "arc": ["pixmask", "bias", "dark", "pixelflat", "trace", "fwhm", "wave", "lsf"],
-    "object": ["pixmask", "bias", "dark", "pixelflat", "flat", "trace", "fwhm", "wave", "lsf"],
+    "object": ["pixmask", "bias", "dark", "pixelflat", "fiberflat", "trace", "fwhm", "wave", "lsf"],
 }
 
 # spectrograph channels
