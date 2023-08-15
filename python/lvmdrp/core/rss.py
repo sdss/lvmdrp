@@ -2,7 +2,9 @@ import os
 import numpy
 import bottleneck as bn
 from astropy.io import fits as pyfits
+from astropy.wcs import WCS
 from astropy.table import Table
+from astropy import units as u
 
 from lvmdrp import log
 from lvmdrp.core.constants import CONFIG_PATH
@@ -188,7 +190,7 @@ class RSS(FiberRows):
         if inst_fwhm is not None:
             self.setInstFWHM(inst_fwhm)
         
-        self._slitmap = slitmap
+        self.setSlitmap(slitmap)
 
     def __mul__(self, other):
         """
@@ -403,16 +405,14 @@ class RSS(FiberRows):
         self._wave = numpy.array(wave)
 
         if len(wave.shape) == 1:
-            # NOTE: do this only if wavelength is uniform
             self._wave_disp = self._wave[1] - self._wave[0]
             self._wave_start = self._wave[0]
             self._res_elements = self._wave.shape[0]
             if self._header is not None:
-                self.setHdrValue("CRVAL1", float("%.3f" % self._wave_start))
-                self.setHdrValue("CDELT1", float("%.3f" % self._wave_disp))
-                self.setHdrValue("CRPIX1", 1.0)
-                self.setHdrValue("CTYPE1", "WAVE")
-                self.setHdrValue("CUNIT1", unit)
+                wcs = WCS(header={
+                    "CDELT1": self._wave_disp, "CRVAL1": self._wave_start,
+                    "CUNIT1": unit, "CTYPE1": "WAVE", "CRPIX1": 1.0})
+                self._header.update(wcs.to_header())
         if len(wave.shape) == 2:
             self._res_elements = self._wave.shape[1]
 
@@ -432,18 +432,14 @@ class RSS(FiberRows):
 
     def createWavefromHdr(self, logwave=False):
         if self._header is not None:
-            try:
-                self._wave_disp = self.getHdrValue("CDELT1")
-                self._wave_start = self.getHdrValue("CRVAL1")
-                self._res_elements = self.getHdrValue("NAXIS1")
-                self._wave = (
-                    numpy.arange(self._res_elements) * self._wave_disp
-                    + self._wave_start
-                )
-                if logwave:
-                    self._wave = 10 ** (self._wave)
-            except Exception:
-                pass
+            wcs = WCS(self._header)
+            self._res_elements = self.getHdrValue("NAXIS1")
+            wl = wcs.spectral.all_pix2world(numpy.arange(self._res_elements), 0)[0]
+            self._wave = (wl * u.m).to(u.angstrom).value
+            self._wave_disp = self._wave[1] - self._wave[0]
+            self._wave_start = self._wave[0]
+            if logwave:
+                self._wave = 10 ** (self._wave)
 
     def loadFitsData(
         self,
@@ -486,6 +482,7 @@ class RSS(FiberRows):
         ):
             self._data = hdu[0].data
             self.setHeader(header=hdu[0].header, origin=file)
+            self.createWavefromHdr(logwave=logwave)
             if len(hdu) > 1:
                 for i in range(1, len(hdu)):
                     if hdu[i].header["EXTNAME"].split()[0] == "ERROR":
@@ -500,12 +497,10 @@ class RSS(FiberRows):
                     if hdu[i].header["EXTNAME"].split()[0] == "POSTABLE":
                         self.loadFitsPosTable(hdu[i])
                     if hdu[i].header["EXTNAME"].split()[0] == "SLITMAP":
-                        self._slitmap = Table(hdu[i].data)
-            else:
-                self.createWavefromHdr(logwave=logwave)
-            if self._wave is None:
-                self.createWavefromHdr(logwave=logwave)
+                        self.setSlitmap(Table(hdu[i].data))
         else:
+            if extension_hdr is not None:
+                self.setHeader(hdu[extension_hdr].header, origin=file)
             if extension_data is not None:
                 self._data = hdu[extension_data].data
             if extension_mask is not None:
@@ -518,10 +513,7 @@ class RSS(FiberRows):
             if extension_fwhm is not None:
                 self.setInstFWHM(hdu[extension_fwhm].data)
             if extension_slitmap is not None:
-                self._slitmap = Table(hdu[extension_slitmap].data)
-
-        if extension_hdr is not None:
-            self.setHeader(hdu[extension_hdr].header, origin=file)
+                self.setSlitmap(Table(hdu[extension_slitmap].data))
         
         self._fibers = self._data.shape[0]
         self._pixels = numpy.arange(self._data.shape[1])
@@ -1944,6 +1936,14 @@ class RSS(FiberRows):
     
     def setSlitmap(self, slitmap):
         self._slitmap = slitmap
+
+        # define fiber positions in WCS
+        if self._header is not None:
+            wcs = WCS(header=self._header).to_header()
+            wcs.update({"NAXIS": 2, "NAXIS2": self._header["NAXIS2"], "CRPIX2": 1,
+                        "CRVAL2": 1, "CDELT2": 1, "CTYPE2": "LINEAR"})
+            self._header.update(wcs)
+
 
     def apply_pixelmask(self, mask=None):
         if mask is None:
