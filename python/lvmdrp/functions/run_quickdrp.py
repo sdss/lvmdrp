@@ -7,12 +7,13 @@
 # @License: BSD 3-Clause
 # @Copyright: SDSS-V LVM
 
+import os
 import click
 import cloup
 
 from astropy.table import Table
 
-from lvmdrp import path, __version__ as drpver
+from lvmdrp import log, path, __version__ as drpver
 from lvmdrp.utils import metadata as md
 from lvmdrp.functions import run_drp as drp
 from lvmdrp.functions import imageMethod as image_tasks
@@ -22,7 +23,8 @@ from lvmdrp.core.constants import SPEC_CHANNELS
 
 @cloup.command(short_help='Run the Quick DRP', show_constraints=True)
 @click.option('-e', '--expnum', type=int, help='an exposure number to reduce')
-def quick_reduction(expnum: int) -> None:
+@click.option('-f', '--use-fiducial-master', is_flag=True, help='use fiducial master calibration frames')
+def quick_reduction(expnum: int, use_fiducial_master: bool = False) -> None:
     """ Run the Quick DRP for a given exposure number.
     """
     # get target frames metadata
@@ -33,6 +35,7 @@ def quick_reduction(expnum: int) -> None:
     sci_tileid = sci_metadata["tileid"].unique()[0]
     sci_mjd = sci_metadata["mjd"].unique()[0]
     sci_expnum = sci_metadata["expnum"].unique()[0]
+    log.info(f"Running Quick DRP for tile {sci_tileid} at MJD {sci_mjd} with exposure number {sci_expnum}")
 
     # define arc lamps configuration per spectrograph channel
     arc_lamps = {"b": "hgne", "r": "neon", "z": "neon"}
@@ -51,16 +54,30 @@ def quick_reduction(expnum: int) -> None:
         lamps = arc_lamps[sci["camera"][0]]
         
         # define calibration frames paths
-        masters = md.match_master_metadata(target_mjd=sci["mjd"],
-                                           target_camera=sci["camera"],
-                                           target_imagetyp=sci["imagetyp"])
-        mpixmask_path = path.full("lvm_master", drpver=drpver, kind="mpixmask", **masters["pixmask"].to_dict())
-        mbias_path = path.full("lvm_master", drpver=drpver, kind="mbias", **masters["bias"].to_dict())
-        mdark_path = path.full("lvm_master", drpver=drpver, kind="mdark", **masters["dark"].to_dict())
-        mtrace_path = path.full("lvm_master", drpver=drpver, kind="mtrace", **masters["trace"].to_dict())
-        mwave_path = path.full("lvm_master", drpver=drpver, kind=f"mwave_{lamps}", **masters["wave"].to_dict())
-        mlsf_path = path.full("lvm_master", drpver=drpver, kind=f"mlsf_{lamps}", **masters["lsf"].to_dict())
-        mflat_path = path.full("lvm_master", drpver=drpver, kind="mfiberflat", **masters["fiberflat"].to_dict())
+        if use_fiducial_master:
+            masters_path = os.getenv("LVM_MASTER_DIR")
+            log.info(f"Using fiducial master calibration frames for {sci_camera} at $LVM_MASTER_DIR = {masters_path}")
+            if masters_path is None:
+                raise ValueError("LVM_MASTER_DIR environment variable is not defined")
+            mpixmask_path = os.path.join(masters_path, f"lvm-mpixmask-{sci_camera}.fits")
+            mbias_path = os.path.join(masters_path, f"lvm-mbias-{sci_camera}.fits")
+            mdark_path = os.path.join(masters_path, f"lvm-mdark-{sci_camera}.fits")
+            mtrace_path = os.path.join(masters_path, f"lvm-mtrace-{sci_camera}.fits")
+            mwave_path = os.path.join(masters_path, f"lvm-mwave_{lamps}-{sci_camera}.fits")
+            mlsf_path = os.path.join(masters_path, f"lvm-mlsf_{lamps}-{sci_camera}.fits")
+            mflat_path = os.path.join(masters_path, f"lvm-mfiberflat-{sci_camera}.fits")
+        else:
+            log.info(f"Using master calibration frames from DRP version {drpver}, mjd = {sci_mjd}, camera = {sci_camera}")
+            masters = md.match_master_metadata(target_mjd=sci_mjd,
+                                               target_camera=sci_camera,
+                                               target_imagetyp=sci["imagetyp"])
+            mpixmask_path = path.full("lvm_master", drpver=drpver, kind="mpixmask", **masters["pixmask"].to_dict())
+            mbias_path = path.full("lvm_master", drpver=drpver, kind="mbias", **masters["bias"].to_dict())
+            mdark_path = path.full("lvm_master", drpver=drpver, kind="mdark", **masters["dark"].to_dict())
+            mtrace_path = path.full("lvm_master", drpver=drpver, kind="mtrace", **masters["trace"].to_dict())
+            mwave_path = path.full("lvm_master", drpver=drpver, kind=f"mwave_{lamps}", **masters["wave"].to_dict())
+            mlsf_path = path.full("lvm_master", drpver=drpver, kind=f"mlsf_{lamps}", **masters["lsf"].to_dict())
+            mflat_path = path.full("lvm_master", drpver=drpver, kind="mfiberflat", **masters["fiberflat"].to_dict())
         
         # preprocess frame
         image_tasks.preproc_raw_frame(in_image=sci_path, out_image=psci_path, in_mask=mpixmask_path)
