@@ -1118,16 +1118,15 @@ def resample_wavelength(in_rss: str, out_rss: str, method: str = "spline",
             if rss._inst_fwhm is not None:
                 inst_fwhm[i, :] = spec._inst_fwhm
             mask[i, :] = spec._mask
-        
-        resamp_rss = RSS(
-            data=data,
-            wave=ref_wave,
-            inst_fwhm=inst_fwhm,
-            header=rss.getHeader(),
-            error=error,
-            mask=mask,
-            slitmap=rss.getSlitmap(),
-        )
+
+    resamp_rss = RSS(
+        data=data,
+        wave=ref_wave,
+        inst_fwhm=inst_fwhm,
+        header=rss.getHeader(),
+        error=error,
+        mask=mask,
+    )
 
     resamp_rss.writeFitsData(out_rss)
 
@@ -1537,7 +1536,7 @@ def apply_fiberflat(in_rss: str, out_rss: str, in_flat: str, clip_below: float =
         return None
     
     # check if fiberflat has the same wavelength grid as the target data
-    if not numpy.array_equal(rss._wave, flat._wave):
+    if not numpy.isclose(rss._wave, flat._wave).all():
         log.warning("target data and fiberflat have different wavelength grids")
 
     # apply fiberflat
