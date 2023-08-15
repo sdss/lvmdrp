@@ -2887,7 +2887,7 @@ def join_spec_channels(in_rss: List[str], out_rss: str):
     log.info("interpolating RSS data in new wavelength array")
     fluxes_f = [interpolate.interp1d(rss._wave, rss._data, axis=1, bounds_error=False, fill_value=numpy.nan) for rss in rsss]
     errors_f = [interpolate.interp1d(rss._wave, rss._error, axis=1, bounds_error=False, fill_value=numpy.nan) for rss in rsss]
-    masks_f = [interpolate.interp1d(rss._wave, rss._mask, axis=1, kind="nearest", bounds_error=False, fill_value=numpy.nan) for rss in rsss]
+    masks_f = [interpolate.interp1d(rss._wave, rss._mask, axis=1, kind="nearest", bounds_error=False, fill_value=0) for rss in rsss]
     lsfs_f = [interpolate.interp1d(rss._wave, rss._inst_fwhm, axis=1, bounds_error=False, fill_value=numpy.nan) for rss in rsss]
     # evaluate interpolators
     fluxes = numpy.asarray([f(new_wave) for f in fluxes_f])
@@ -2906,7 +2906,7 @@ def join_spec_channels(in_rss: List[str], out_rss: str):
     new_data = bn.nansum(fluxes * weights, axis=0)
     new_inst_fwhm = bn.nansum(lsfs * weights, axis=0)
     new_error = numpy.sqrt(1 / bn.nansum(weights * norms[None, :, :], axis=0))
-    new_mask = bn.nansum(masks, axis=0).astype(bool)
+    new_mask = numpy.sum(masks, axis=0).astype(bool)
 
     # create RSS
     log.info(f"writing output RSS to {os.path.basename(out_rss)}")
