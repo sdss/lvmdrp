@@ -957,7 +957,7 @@ def combine_cameras(tileid: int, mjd: int, spec: int = 1):
             exps.insert(x.index(False), None)
 
         # combine the b, r, z channels together
-        join_spec_channels(in_rss=list(exps), out_rss=bout_file, **kwargs)
+        join_spec_channels(in_rss=list(exps), out_rss=bout_file, use_weights=False, **kwargs)
         log.info(f'Output combined camera file: {bout_file}')
 
 

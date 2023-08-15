@@ -2849,7 +2849,7 @@ def DAR_registerSDSS_drp(
         plt.show()
 
 
-def join_spec_channels(in_rss: List[str], out_rss: str):
+def join_spec_channels(in_rss: List[str], out_rss: str, use_weights: bool = True):
     """combine the given RSS list through the overlaping wavelength range
 
     Run once per exposure, for one spectrograph at a time.
@@ -2896,16 +2896,19 @@ def join_spec_channels(in_rss: List[str], out_rss: str):
     lsfs = numpy.asarray([f(new_wave) for f in lsfs_f])
 
     # define weights for channel combination
-    log.info("calculating weights for channel combination")
-    weights = 1.0 / errors ** 2
-    norms = bn.nansum(weights, axis=0)
-    weights = weights / norms[None, :, :]
+    vars = errors ** 2
+    if use_weights:
+        log.info("calculating weights for channel combination")
+        weights = 1.0 / vars
+        weights = weights / bn.nansum(weights, axis=0)[None]
+    else:
+        weights = numpy.ones_like(fluxes)
 
     # channel-combine RSS data
     log.info("combining channel data")
     new_data = bn.nansum(fluxes * weights, axis=0)
     new_inst_fwhm = bn.nansum(lsfs * weights, axis=0)
-    new_error = numpy.sqrt(1 / bn.nansum(weights * norms[None, :, :], axis=0))
+    new_error = numpy.sqrt(bn.nansum(vars, axis=0))
     new_mask = numpy.sum(masks, axis=0).astype(bool)
 
     # create RSS
