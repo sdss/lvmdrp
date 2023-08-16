@@ -1807,7 +1807,7 @@ class RSS(FiberRows):
             arc_position_y = None
 
         if self._good_fibers is not None:
-            good_fibers = self._good_fibers[select]
+            good_fibers = self._good_fibers[select[self._good_fibers]]
         else:
             good_fibers = None
 
