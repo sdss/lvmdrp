@@ -1118,16 +1118,15 @@ def resample_wavelength(in_rss: str, out_rss: str, method: str = "spline",
             if rss._inst_fwhm is not None:
                 inst_fwhm[i, :] = spec._inst_fwhm
             mask[i, :] = spec._mask
-        
-        resamp_rss = RSS(
-            data=data,
-            wave=ref_wave,
-            inst_fwhm=inst_fwhm,
-            header=rss.getHeader(),
-            error=error,
-            mask=mask,
-            slitmap=rss.getSlitmap(),
-        )
+
+    resamp_rss = RSS(
+        data=data,
+        wave=ref_wave,
+        inst_fwhm=inst_fwhm,
+        header=rss.getHeader(),
+        error=error,
+        mask=mask,
+    )
 
     resamp_rss.writeFitsData(out_rss)
 
@@ -1537,9 +1536,8 @@ def apply_fiberflat(in_rss: str, out_rss: str, in_flat: str, clip_below: float =
         return None
     
     # check if fiberflat has the same wavelength grid as the target data
-    if not numpy.array_equal(rss._wave, flat._wave):
-        log.error("target data and fiberflat have different wavelength grids")
-        return None
+    if not numpy.isclose(rss._wave, flat._wave).all():
+        log.warning("target data and fiberflat have different wavelength grids")
 
     # apply fiberflat
     log.info(f"applying fiberflat correction to {rss._fibers} fibers with minimum relative transmission of {clip_below}")
@@ -2850,7 +2848,7 @@ def DAR_registerSDSS_drp(
         plt.show()
 
 
-def join_spec_channels(in_rss: List[str], out_rss: str):
+def join_spec_channels(in_rss: List[str], out_rss: str, use_weights: bool = True):
     """combine the given RSS list through the overlaping wavelength range
 
     Run once per exposure, for one spectrograph at a time.
@@ -2888,7 +2886,7 @@ def join_spec_channels(in_rss: List[str], out_rss: str):
     log.info("interpolating RSS data in new wavelength array")
     fluxes_f = [interpolate.interp1d(rss._wave, rss._data, axis=1, bounds_error=False, fill_value=numpy.nan) for rss in rsss]
     errors_f = [interpolate.interp1d(rss._wave, rss._error, axis=1, bounds_error=False, fill_value=numpy.nan) for rss in rsss]
-    masks_f = [interpolate.interp1d(rss._wave, rss._mask, axis=1, kind="nearest", bounds_error=False, fill_value=numpy.nan) for rss in rsss]
+    masks_f = [interpolate.interp1d(rss._wave, rss._mask, axis=1, kind="nearest", bounds_error=False, fill_value=0) for rss in rsss]
     lsfs_f = [interpolate.interp1d(rss._wave, rss._inst_fwhm, axis=1, bounds_error=False, fill_value=numpy.nan) for rss in rsss]
     # evaluate interpolators
     fluxes = numpy.asarray([f(new_wave) for f in fluxes_f])
@@ -2897,17 +2895,20 @@ def join_spec_channels(in_rss: List[str], out_rss: str):
     lsfs = numpy.asarray([f(new_wave) for f in lsfs_f])
 
     # define weights for channel combination
-    log.info("calculating weights for channel combination")
-    weights = 1.0 / errors ** 2
-    norms = bn.nansum(weights, axis=0)
-    weights = weights / norms[None, :, :]
+    vars = errors ** 2
+    if use_weights:
+        log.info("calculating weights for channel combination")
+        weights = 1.0 / vars
+        weights = weights / bn.nansum(weights, axis=0)[None]
+    else:
+        weights = numpy.ones_like(fluxes)
 
     # channel-combine RSS data
     log.info("combining channel data")
     new_data = bn.nansum(fluxes * weights, axis=0)
     new_inst_fwhm = bn.nansum(lsfs * weights, axis=0)
-    new_error = numpy.sqrt(1 / bn.nansum(weights * norms[None, :, :], axis=0))
-    new_mask = bn.nansum(masks, axis=0).astype(bool)
+    new_error = numpy.sqrt(bn.nansum(vars, axis=0))
+    new_mask = numpy.sum(masks, axis=0).astype(bool)
 
     # create RSS
     log.info(f"writing output RSS to {os.path.basename(out_rss)}")

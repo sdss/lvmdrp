@@ -433,13 +433,14 @@ class RSS(FiberRows):
     def createWavefromHdr(self, logwave=False):
         if self._header is not None:
             wcs = WCS(self._header)
-            self._res_elements = self.getHdrValue("NAXIS1")
-            wl = wcs.spectral.all_pix2world(numpy.arange(self._res_elements), 0)[0]
-            self._wave = (wl * u.m).to(u.angstrom).value
-            self._wave_disp = self._wave[1] - self._wave[0]
-            self._wave_start = self._wave[0]
-            if logwave:
-                self._wave = 10 ** (self._wave)
+            if wcs.spectral.array_shape:
+                self._res_elements = wcs.spectral.array_shape[0]
+                wl = wcs.spectral.all_pix2world(numpy.arange(self._res_elements), 0)[0]
+                self._wave = (wl * u.m).to(u.angstrom).value
+                self._wave_disp = self._wave[1] - self._wave[0]
+                self._wave_start = self._wave[0]
+                if logwave:
+                    self._wave = 10 ** (self._wave)
 
     def loadFitsData(
         self,

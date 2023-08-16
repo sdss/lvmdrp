@@ -909,7 +909,7 @@ def _parse_expnum_cam(name: str) -> tuple:
     return int(ss[-1]), ss[-2]
 
 
-def combine_cameras(tileid: int, mjd: int, spec: int = 1):
+def combine_cameras(tileid: int, mjd: int, expnum: int = None, spec: int = 1):
     """ Combine the cameras together
 
     Combines all available cameras (b, r, z) together on a given
@@ -933,7 +933,7 @@ def combine_cameras(tileid: int, mjd: int, spec: int = 1):
 
     # find all the h object files
     hfiles = path.expand('lvm_anc', mjd=mjd, tileid=tileid, drpver=drpver,
-                         imagetype='object', expnum='****', kind='h', camera=f'*{spec}')
+                         imagetype='object', expnum=expnum or '****', kind='h', camera=f'*{spec}')
     hfiles = map(pathlib.Path, sorted(hfiles, key=_parse_expnum_cam))
 
     log.info(f'--- Combining cameras from spec {spec} ---')
@@ -957,7 +957,7 @@ def combine_cameras(tileid: int, mjd: int, spec: int = 1):
             exps.insert(x.index(False), None)
 
         # combine the b, r, z channels together
-        join_spec_channels(in_rss=list(exps), out_rss=bout_file, **kwargs)
+        join_spec_channels(in_rss=list(exps), out_rss=bout_file, use_weights=False, **kwargs)
         log.info(f'Output combined camera file: {bout_file}')
 
 
