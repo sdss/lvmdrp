@@ -39,7 +39,7 @@ from lvmdrp.core.constants import (
     SKYMODEL_SRC_PATH,
     SRC_PATH,
 )
-from lvmdrp.core.plot import plt
+from lvmdrp.core.plot import plt, create_subplots, save_fig
 from lvmdrp.core.header import Header
 from lvmdrp.core.passband import PassBand
 from lvmdrp.core.rss import RSS
@@ -1812,7 +1812,8 @@ def subtractPCAResiduals_drp():
     pass
 
 
-def interpolate_sky(in_rss: str, out_sky: str, out_rss: str = None, which: str = "both", subtract: bool = False) -> RSS:
+def interpolate_sky(in_rss: str, out_sky: str, out_rss: str = None, which: str = "both",
+                    subtract: bool = False, display_plots: bool = False) -> RSS:
     """Interpolate sky fibers in a given RSS file
 
     Parameters
@@ -1827,6 +1828,8 @@ def interpolate_sky(in_rss: str, out_sky: str, out_rss: str = None, which: str =
         for which sky telescope fibers are going to be interpolated, by default "both"
     subtract : bool, optional
         whether to subtract or not interpolated sky from original data, by default False
+    display_plots : bool, optional
+        whether to display plots or not, by default False
 
     Returns
     -------
@@ -1914,18 +1917,26 @@ def interpolate_sky(in_rss: str, out_sky: str, out_rss: str = None, which: str =
     f_error = interpolate.UnivariateSpline(swave[~smask], svars[~smask], w=weights[~smask], k=1, s=0, check_finite=True)
     f_mask = interpolate.interp1d(swave, smask, kind="nearest", bounds_error=False, fill_value=0)
 
-    # plt.figure(figsize=(20,5))
-    # plt.step(swave, ssky, lw=2, color="tab:red")
-    # plt.step(swave[~smask], f_data(swave[~smask]), lw=1, color="k")
 
-    # calculate residuals on sky fibers
-    residuals = (f_data(sky_wave) - sky_data)
-    residuals = residuals.flatten()
+    fig, axs = create_subplots(to_display=display_plots, figsize=(20,10), nrows=2, ncols=1, sharex=True)
+    axs[0].scatter(swave, ssky, s=1, color="tab:blue", label="super sky")
+    axs[0].step(swave[~smask], f_data(swave[~smask]), lw=1, color="k", label="spline")
 
     # plot residuals
-    # plt.figure(figsize=(20,10))
-    # plt.scatter(sky_wave.flatten(), residuals)
-    # plt.axhline(ls="--", lw=1, color="k")
+    residuals = (f_data(sky_wave) - sky_data)
+    residuals = residuals.flatten()
+    axs[1].scatter(sky_wave.flatten(), residuals)
+    axs[1].axhline(ls="--", lw=1, color="k")
+    axs[1].set_label("lambda (Angstrom)")
+    fig.supylabel("counts (e/s)")
+
+    save_fig(
+        fig,
+        product_path=out_sky,
+        to_display=display_plots,
+        figure_path="qa",
+        label="super_sky",
+    )
     
     # interpolated sky
     new_sky = f_data(rss._wave)
