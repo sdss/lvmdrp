@@ -1910,11 +1910,10 @@ def interpolate_sky(in_rss: str, out_sky: str, out_rss: str = None, which: str =
     
     # calculate weights
     weights = 1 / svars
-    weights /= weights.sum()
 
     # define interpolation functions
-    f_data = interpolate.UnivariateSpline(swave[~smask], ssky[~smask], w=weights[~smask], k=1, s=0, check_finite=True)
-    f_error = interpolate.UnivariateSpline(swave[~smask], svars[~smask], w=weights[~smask], k=1, s=0, check_finite=True)
+    f_data = interpolate.make_smoothing_spline(swave[~smask], ssky[~smask], w=weights[~smask], lam=1)
+    f_error = f_data.derivative()
     f_mask = interpolate.interp1d(swave, smask, kind="nearest", bounds_error=False, fill_value=0)
 
 
@@ -1940,12 +1939,12 @@ def interpolate_sky(in_rss: str, out_sky: str, out_rss: str = None, which: str =
     
     # interpolated sky
     new_sky = f_data(rss._wave)
-    new_error = np.sqrt(f_error(rss._wave))
+    new_error = np.sqrt(f_error(rss._wave) * rss._error ** 2)
     new_mask = f_mask(rss._wave).astype(bool)
     # update mask with new bad pixels
     new_mask |= rss._mask
     new_mask |= (new_sky<0) | np.isnan(new_sky)
-    new_mask |= (new_error<0) | np.isnan(new_error)
+    # new_mask |= (new_error<0) | np.isnan(new_error)
     
     # write output sky RSS
     log.info(f"writing output sky RSS file '{os.path.basename(out_sky)}'")
@@ -1967,7 +1966,7 @@ def interpolate_sky(in_rss: str, out_sky: str, out_rss: str = None, which: str =
         rss_sub.setData(data=new_data, error=new_error, mask=new_mask)
         rss_sub.writeFitsData(out_rss)
     
-    return sky_rss
+    return sky_rss, swave, ssky, svars, smask
 
 
 def quick_sky_subtraction(in_rss: str, out_rss, in_skye: str, in_skyw: str) -> RSS:
