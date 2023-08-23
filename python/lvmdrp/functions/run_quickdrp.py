@@ -57,6 +57,8 @@ def quick_reduction(expnum: int, use_fiducial_master: bool = False) -> None:
         xsci_path = path.full("lvm_anc", drpver=drpver, kind="x", imagetype=sci["imagetyp"], **sci)
         wsci_path = path.full("lvm_anc", drpver=drpver, kind="w", imagetype=sci["imagetyp"], **sci)
         hsci_path = path.full("lvm_anc", drpver=drpver, kind="h", imagetype=sci["imagetyp"], **sci)
+        wskye_path = path.full("lvm_anc", drpver=drpver, kind="w", imagetype="sky_e", **sci)
+        wskyw_path = path.full("lvm_anc", drpver=drpver, kind="w", imagetype="sky_w", **sci)
         hskye_path = path.full("lvm_anc", drpver=drpver, kind="h", imagetype="sky_e", **sci)
         hskyw_path = path.full("lvm_anc", drpver=drpver, kind="h", imagetype="sky_w", **sci)
         os.makedirs(os.path.dirname(hsci_path), exist_ok=True)
@@ -101,26 +103,21 @@ def quick_reduction(expnum: int, use_fiducial_master: bool = False) -> None:
         # wavelength calibrate
         rss_tasks.create_pixel_table(in_rss=xsci_path, out_rss=wsci_path, arc_wave=mwave_path, arc_fwhm=mlsf_path)
 
-        # interpolate & subtract sky fibers
-        # sky_tasks.interpolate_sky(in_rss=wsci_path, out_sky=hskye_path, which="both", subtract=True, out_rss=wsci_path)
-    
-        # resample in wavelength
-        iwave, fwave = SPEC_CHANNELS[sci_camera[0]]
-        rss_tasks.resample_wavelength(in_rss=wsci_path, out_rss=hsci_path, method="linear", disp_pix=0.5, start_wave=iwave, end_wave=fwave, err_sim=10, parallel=0, extrapolate=False)
-
         # apply fiberflat correction
-        rss_tasks.apply_fiberflat(in_rss=hsci_path, out_rss=hsci_path, in_flat=mflat_path)
+        rss_tasks.apply_fiberflat(in_rss=wsci_path, out_rss=wsci_path, in_flat=mflat_path)
 
         # interpolate sky fibers
-        sky_tasks.interpolate_sky(in_rss=wsci_path, out_sky=hskye_path, which="e")
-        rss_tasks.resample_wavelength(in_rss=hskye_path, out_rss=hskye_path, method="linear", disp_pix=0.5, start_wave=iwave, end_wave=fwave, err_sim=10, parallel=0, extrapolate=False)
-        rss_tasks.apply_fiberflat(in_rss=hskye_path, out_rss=hskye_path, in_flat=mflat_path)
-        sky_tasks.interpolate_sky(in_rss=wsci_path, out_sky=hskyw_path, which="w")
-        rss_tasks.resample_wavelength(in_rss=hskyw_path, out_rss=hskyw_path, method="linear", disp_pix=0.5, start_wave=iwave, end_wave=fwave, err_sim=10, parallel=0, extrapolate=False)
-        rss_tasks.apply_fiberflat(in_rss=hskyw_path, out_rss=hskyw_path, in_flat=mflat_path)
+        sky_tasks.interpolate_sky(in_rss=wsci_path, out_sky=wskye_path, in_flat=mflat_path, which="e")
+        sky_tasks.interpolate_sky(in_rss=wsci_path, out_sky=wskyw_path, in_flat=mflat_path, which="w")
 
         # quick sky subtraction
-        sky_tasks.quick_sky_subtraction(in_rss=hsci_path, out_rss=hsci_path, in_skye=hskye_path, in_skyw=hskyw_path)
+        sky_tasks.quick_sky_subtraction(in_rss=wsci_path, out_rss=wsci_path, in_skye=wskye_path, in_skyw=wskyw_path)
+
+        # resample wavelength into uniform grid along fiber IDs
+        iwave, fwave = SPEC_CHANNELS[sci_camera[0]]
+        rss_tasks.resample_wavelength(in_rss=wsci_path, out_rss=hsci_path, method="linear", disp_pix=0.5, start_wave=iwave, end_wave=fwave, err_sim=10, parallel=0, extrapolate=False)
+        rss_tasks.resample_wavelength(in_rss=wskye_path, out_rss=hskye_path, method="linear", disp_pix=0.5, start_wave=iwave, end_wave=fwave, err_sim=10, parallel=0, extrapolate=False)
+        rss_tasks.resample_wavelength(in_rss=wskyw_path, out_rss=hskyw_path, method="linear", disp_pix=0.5, start_wave=iwave, end_wave=fwave, err_sim=10, parallel=0, extrapolate=False)
 
     # combine channels
     drp.combine_cameras(sci_tileid, sci_mjd, expnum=sci_expnum, spec=1)
