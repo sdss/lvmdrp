@@ -1872,6 +1872,35 @@ def interpolate_sky(in_rss: str, out_sky: str, out_rss: str = None, which: str =
     sky_mask = rss._mask[sky_selection]
     sci_data = rss._data[~sky_selection]
 
+    fig, axs = plt.subplots(2, 1, figsize=(20,5), sharex=True)
+    axs = axs.flatten()
+    axs[0].plot(sky_wave[0], sky_data[0], "k", lw=1, label="sky")
+    axs[0].plot(sky_wave[10], sci_data[10], "0.5", lw=1, label="sci")
+    axs[0].legend(loc=2)
+
+    axs[0].plot(sky_wave[0], sky_data[0], "r", lw=1, label="flatfielded sky")
+    axs[0].plot(sky_wave[10], sci_data[10], "b", lw=1, label="flatfielded sci")
+    axs[0].legend(loc=2)
+    # divide by the wavelength sampling step at each pixel
+    dlambda = np.diff(sky_wave, axis=1)
+    dlambda = np.column_stack((dlambda, dlambda[:, -1]))
+    sky_data = sky_data / dlambda
+    sky_vars = sky_vars / dlambda
+
+    axs[1].plot(sky_wave[0], sky_data[0], "b", lw=1, label="densities")
+    axs[1].legend(loc=2)
+    save_fig(
+        fig,
+        product_path=out_sky,
+        to_display=display_plots,
+        figure_path="qa",
+        label="diag",
+    )
+
+    # update mask
+    sky_mask = sky_mask | (~np.isfinite(sky_data))
+    sky_mask = sky_mask | (~np.isfinite(sky_vars))
+
     # build super-sky spectrum
     swave = sky_wave.flatten()
     ssky = sky_data.flatten()
@@ -1913,13 +1942,13 @@ def interpolate_sky(in_rss: str, out_sky: str, out_rss: str = None, which: str =
 
     # define interpolation functions
     f_data = interpolate.make_smoothing_spline(swave[~smask], ssky[~smask], w=weights[~smask], lam=1)
-    f_error = f_data.derivative()
+    f_error = interpolate.make_smoothing_spline(swave[~smask], svars[~smask], w=weights[~smask], lam=1)
     f_mask = interpolate.interp1d(swave, smask, kind="nearest", bounds_error=False, fill_value=0)
 
 
     fig, axs = create_subplots(to_display=display_plots, figsize=(20,10), nrows=2, ncols=1, sharex=True)
     axs[0].scatter(swave, ssky, s=1, color="tab:blue", label="super sky")
-    axs[0].step(swave[~smask], f_data(swave[~smask]), lw=1, color="k", label="spline")
+    axs[0].plot(swave[~smask], f_data(swave[~smask]), lw=1, color="k", label="spline")
 
     # plot residuals
     residuals = (f_data(sky_wave) - sky_data)
@@ -1936,16 +1965,29 @@ def interpolate_sky(in_rss: str, out_sky: str, out_rss: str = None, which: str =
         figure_path="qa",
         label="super_sky",
     )
-    
+
     # interpolated sky
-    new_sky = f_data(rss._wave)
-    new_error = np.sqrt(f_error(rss._wave) * rss._error ** 2)
+    dlambda = np.diff(rss._wave, axis=1)
+    dlambda = np.column_stack((dlambda, dlambda[:, -1]))
+    new_sky = f_data(rss._wave) * dlambda
+    new_error = np.sqrt(f_error(rss._wave)) * dlambda
     new_mask = f_mask(rss._wave).astype(bool)
     # update mask with new bad pixels
-    new_mask |= rss._mask
-    new_mask |= (new_sky<0) | np.isnan(new_sky)
-    # new_mask |= (new_error<0) | np.isnan(new_error)
+    # new_mask |= rss._mask
+    new_mask = (new_sky<0) | np.isnan(new_sky)
+    new_mask |= (new_error<0) | np.isnan(new_error)
     
+    fig, axs = plt.subplots(1, 1, figsize=(20,5), sharex=True)
+    axs.plot(rss._wave[0], new_sky[0], "k", lw=1, label="sky")
+    # axs.plot(sky_wave[10], sci_data[10], "0.5", lw=1, label="sci")
+    save_fig(
+        fig,
+        product_path=out_sky,
+        to_display=display_plots,
+        figure_path="qa",
+        label="sky_comp",
+    )
+
     # write output sky RSS
     log.info(f"writing output sky RSS file '{os.path.basename(out_sky)}'")
     sky_rss = copy(rss)
@@ -1966,7 +2008,7 @@ def interpolate_sky(in_rss: str, out_sky: str, out_rss: str = None, which: str =
         rss_sub.setData(data=new_data, error=new_error, mask=new_mask)
         rss_sub.writeFitsData(out_rss)
     
-    return sky_rss, swave, ssky, svars, smask
+    return f_data, f_error, sky_rss, swave, ssky, svars, smask
 
 
 def quick_sky_subtraction(in_rss: str, out_rss, in_skye: str, in_skyw: str) -> RSS:
@@ -1987,6 +2029,7 @@ def quick_sky_subtraction(in_rss: str, out_rss, in_skye: str, in_skyw: str) -> R
     -------
     RSS
         sky-subtracted RSS object
+
     """
     # load input RSS
     log.info(f"loading input RSS file '{os.path.basename(in_rss)}'")
@@ -2018,7 +2061,7 @@ def quick_sky_subtraction(in_rss: str, out_rss, in_skye: str, in_skyw: str) -> R
     log.info("subtracting interpolated sky from original data")
     new_data = rss._data - sky._data
     new_error = np.sqrt(rss._error ** 2 + sky._error ** 2)
-    new_mask = rss._mask | sky._mask
+    new_mask = rss._mask# | sky._mask
 
     # write output sky-subtracted RSS
     log.info(f"writing output sky-subtracted RSS file '{os.path.basename(out_rss)}'")
