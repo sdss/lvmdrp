@@ -1388,7 +1388,6 @@ def trace_peaks(
         slitmap = img.getSlitmap()
         slitmap = slitmap[slitmap["spectrographid"] == int(img._header["CCD"][1])]
         
-        ref_column = 2000
         channel = img._header["CCD"][0]
         positions = slitmap[f"ypix_{channel}"]
         fibers = positions.size
@@ -3345,7 +3344,7 @@ def detrend_frame(
 
 
 @drop_missing_input_paths(["in_images"])
-def create_master_frame(in_images: List[str], out_image: str, batch_size: int = 30, force_master: bool = True):
+def create_master_frame(in_images: List[str], out_image: str, batch_size: int = 30, force_master: bool = True, master_mjd: int = None):
     """Combines the given calibration frames (bias, dark, or pixelflat) into a
     master calibration frame.
 
@@ -3425,6 +3424,8 @@ def create_master_frame(in_images: List[str], out_image: str, batch_size: int = 
 
     # write output master 
     log.info(f"writing master frame to '{os.path.basename(out_image)}'")
+    if master_mjd is not None:
+        master_img._header["MJD"] = master_mjd
     master_img.writeFitsData(out_image)
 
     return org_imgs, master_img
