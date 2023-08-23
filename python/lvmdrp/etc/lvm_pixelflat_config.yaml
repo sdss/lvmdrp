@@ -1,0 +1,23 @@
+---
+name: lvm-pixelflat
+short: configuration file for pixelflat calibration
+description: |
+  defines the reduction steps to create a calibrated pixelflat.
+location: "[CALIB_PATH]/[DRPVER]/"
+naming_convention: lvm-pixelflat-[CAMERA]-[EXPNUM]-config.yaml
+target_frame: lvmSdr
+calibration_frames:
+  bias: lvm-mbias
+  dark: lvm-mdark
+reduction_steps:
+  imageMethod.preprocRawFrame:
+    in_image: lvmSdr
+    out_image: lvm-pframe
+    unit: ADU
+    compute_error: false
+  imageMethod.basicCalibration:
+    in_image: lvm-pframe
+    out_image: lvm-cframe
+    in_bias: lvm-mbias
+    in_dark: lvm-mdark
+...

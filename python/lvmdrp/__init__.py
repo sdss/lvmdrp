@@ -1,20 +1,37 @@
+#!/usr/bin/env python
 # encoding: utf-8
 
-from __future__ import absolute_import, division, print_function, unicode_literals
-
-from .utils import get_config, get_logger
-
-
-NAME = 'drp'
-
-
-# Loads config
-config = get_config(NAME)
+import os
+import pathlib
+from sdsstools import get_config, get_logger, get_package_version
+from tree import Tree
+from sdss_access.path import Path
 
 
-# Inits the logging system. Only shell logging, and exception and warning catching.
-# File logging can be started by calling log.start_file_logger(path).
+NAME = 'lvmdrp'
+
+
+# init the logger
 log = get_logger(NAME)
 
 
-__version__ = '0.1.0dev'
+# get the DRP package and reduction config
+cpath = pathlib.Path(__file__).parent / 'etc/lvmdrp.yaml'
+try:
+    config = get_config('lvmdrp', config_file=cpath, allow_user=True)
+except FileNotFoundError:
+    config = {}
+
+
+# setup the sdss tree environment and paths
+def setup_paths(release: str = 'sdsswork', replant: bool = False):
+    tree = Tree(release)
+    if replant:
+        tree.replant_tree(release)
+    return Path(release='sdsswork')
+
+
+path = setup_paths()
+
+
+__version__ = get_package_version(path=__file__, package_name=NAME) or os.getenv("LVMDRP_VERSION", "dev")

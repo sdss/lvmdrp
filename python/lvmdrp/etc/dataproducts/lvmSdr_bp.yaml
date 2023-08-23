@@ -1,0 +1,107 @@
+name: lvmSdr
+short: raw LVM spectrograph data
+description: the raw spectro data coming from the LVM CCDs
+location: $LVM_DATA_S/[MJD]/
+created_by: null
+used_by: imageMethod.preprocRawFrame_drp
+naming_convention: |
+  sdR-[HEMI]-[CAMERA]-[EXPNUM].fits.gz, where [HEMI] is either s or n, [CAMERA] is one of the nine cameras on the instrument, b1, r1, z1,
+  or b2, r2, z2, or b3, r3, or z3 for the blue, red, nir cameras on each LVM spectrograph, and
+  [EXPNUM] is the (zero-padded) 8-digit exposure number.
+access_name: 'lvm_raw'
+hdu0:
+  name: PRIMARY
+  description: the primary header of the raw exposure image data
+  is_image: true
+  shape: 4080 x 4120
+  header:
+    - key: V_ARCHON
+      comment:
+    - key: FILENAME
+      comment: File basename
+    - key: EXPOSURE
+      comment: Exposure number
+    - key: SPEC
+      comment: Spectrograph name
+    - key: OBSERVAT
+      comment: Observatory
+    - key: OBSTIME
+      comment: Start of the observation
+    - key: MJD
+      comment: Modified Julian Date
+    - key: EXPTIME
+      comment: Exposure time [s]
+    - key: DARKTIME
+      comment: Dark time [s]
+    - key: IMAGETYP
+      comment: Image type
+    - key: INTSTART
+      comment: Start of the integration
+    - key: INTEND
+      comment: End of the integration
+    - key: CCD
+      comment: CCD name
+    - key: CCDID
+      comment: Unique identifier of the CCD
+    - key: CCDTYPE
+      comment: CCD type
+    - key: GAIN1
+      comment: CCD gain AD1 [e-/ADU]
+    - key: GAIN2
+      comment: CCD gain AD2 [e-/ADU]
+    - key: GAIN3
+      comment: CCD gain AD3 [e-/ADU]
+    - key: GAIN4
+      comment: CCD gain AD4 [e-/ADU]
+    - key: RDNOISE1
+      comment: CCD gain AD1 [e-/ADU]
+    - key: RDNOISE2
+      comment: CCD gain AD2 [e-/ADU]
+    - key: RDNOISE3
+      comment: CCD gain AD3 [e-/ADU]
+    - key: RDNOISE4
+      comment: CCD gain AD4 [e-/ADU]
+    - key: CCDSUM
+      comment: Horizontal and vertical binning
+    - key: ARCHBACK
+      comment: Archon backplane ID
+    - key: ARCHBVER
+      comment: Archon backplane version
+    - key: ARCHACF
+      comment: Archon ACF file loaded
+    - key: CCDTEMP1
+      comment: Temperature of the sensor (HEATERX 12) [C]
+    - key: CCDTEMP2
+      comment: Temperature of the sensor (HEATERX 12) [C]
+    - key: DATASEC
+      comment: Section of the detector containing data
+    - key: CCDSEC
+      comment: Section of the detector read out
+    - key: BIASSEC
+      comment: Section of calibration/bias data
+    - key: TRIMSEC
+      comment: Section with useful data
+    - key: BUFFER
+      comment: The buffer number read
+    - key: BSCALE
+      comment:
+    - key: BZERO
+      comment:
+    - key: HARTMANN
+      comment: Left/right. 0=open 1=closed
+    - key: PRESSURE
+      comment: Cryostat pressure [torr]
+    - key: LABTEMP
+      comment: Lab temperature [C]
+    - key: LABHUMID
+      comment: Lab relative humidity [%]
+    - key: DEPTHA
+      comment: Depth probe A [mm]
+    - key: DEPTHB
+      comment: Depth probe B [mm]
+    - key: DEPTHC
+      comment: Depth probe C [mm]
+    - key: CHECKSUM
+      comment: HDU checksum update YYYY-MM-DDTHH:MM:SS
+    - key: DATASUM
+      comment: data unit checksum updated YYYY-MM-DDTHH:MM:SS

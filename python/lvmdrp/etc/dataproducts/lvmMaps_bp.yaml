@@ -1,0 +1,286 @@
+name: lvmMaps
+short: stellar and nebular physical properties
+description: |
+  general metadata propagated from the DRP solution and describing the contents of this file (HDU0),
+  coefficients of the stellar template fitting (HDU1),
+  fundamental stellar physical properties (teff, logg, [Fe/H], [alpha/Fe]) as probability distribution functions (HDU2) and averages (HDU3),
+  emission line Gaussian fitting (flux, EW, systemic velocity, LOSVD) along with their corresponding inverse variance and bitmasks (HDU5-14),
+  emission line non-parametric (moment) fitting of the same properties above (HDU15-26),
+  ionizing photon flux for all emission lines (HDU27), and
+  fiber map table with information of each fiber position on the sky, the slitmap and a bitmask for quality (HDU30)
+location: $LVM_SPECTRO_ANALYSIS/[DRPVER]/[DAPVER]/[TILEID]
+created_by: lvmdap._cmdline._main
+used_by: null
+naming_convention: lvm-[TILEID]-maps.fits.gz
+# metadata
+hdu0:
+  name: PRIMARY
+  description: general metadata propagated from the DRP
+  is_image: true
+  header:
+  - key: DAPVER
+    comment: DAP version
+  - key: STSNR
+    comment: median S/N for the observed stellar component
+  - key: EMSNR
+    comment: median S/N for the observed emission line component
+# stellar component
+hdu1:
+  name: STELLAR_COEFF
+  description: coefficients for the fitted stellar component templates
+  is_image: false
+  shape: BINARY FITS TABLE
+  columns:
+    MODID:
+      name: MODID
+      type: int32
+      unit: ""
+      description: ID of the stellar template
+    COEFF:
+      name: COEFF
+      type: float32
+      unit: ""
+      description: coefficient of the best fitted model
+    IVAR:
+      name: IVAR
+      type: float32
+      unit: ""
+      description: inverse variance in coefficients
+hdu2:
+  name: STELLAR_PDF
+  description: stellar component properties PDF
+  is_image: true
+  shape: NSUP x NFIBER x NPROP
+  header:
+    - key: NAXIS1
+      comment: PDF support for property
+    - key: NAXIS2
+      comment: fiber ID
+    - key: NAXIS3
+      comment: physical property (TEFF, LOGG, FEH, ALPHA)
+    - key: PROP0
+      value: TEFF
+      comment: effective temperature [log/K]
+    - key: PROP1
+      value: LOGG
+      comment: surface gravity [log/cgs]
+    - key: PROP2
+      value: FEH
+      comment: iron abundance [Fe/H]
+    - key: PROP3
+      value: ALPHA
+      comment: alpha over iron abundance [alpha/Fe]
+hdu3:
+  name: STELLAR_AVE
+  description: averaged stellar properties
+  is_image: false
+  shape: BINARY FITS TABLE
+  columns:
+    FIBERID:
+      name: FIBERID
+      type: int32
+      unit: ""
+      description: index of the fiber in the RSS extensions
+    TEFF:
+      name: TEFF
+      type: float32
+      unit: "log/K"
+      description: effective temperature
+    LOGG:
+      name: LOGG
+      type: float32
+      unit: "log/cgs"
+      description: surface gravity
+    FEH:
+      name: FEH
+      type: float32
+      unit: "[Fe/H]"
+      description: iron abundance
+    ALPHA:
+      name: ALPHA
+      type: float32
+      unit: "[alpha/Fe]"
+      description: alpha over iron abundance
+    VEL:
+      name: VEL
+      type: float32
+      unit: "km/s"
+      description: 
+    LOSVD:
+      name: LOSVD
+      type: float32
+      unit: "km/s"
+      description: line-of-sight velocity dispersion
+    AVDUST:
+      name: AVDUST
+      type: float32
+      unit: "mag"
+      description: dust extinction in the V-band
+    IONFLUX:
+      name: IONFLUX
+      type: float32
+      unit: "photons/cm^2/s"
+    IONFLUX_TOT:
+      name: IONFLUX_TOT
+      type: float32
+      unit: "photons/s"
+hdu4:
+  name: STEINDEX
+  description: spectral index as defined in Worthey+94 and Trager+98
+  is_image: true
+  shape: NINDEX x NFIBER
+  header:
+# nebular component: Gaussian fitting
+hdu5:
+  name: EMLINE_GFLUX
+  description: integrated flux for the Gaussian emission line model
+  is_image: true
+  shape: NLINE x NFIBER
+  header:
+    - key: NAXIS1
+      comment: number of emission lines fitted
+    - key: NAXIS2
+      comment: fiber ID
+    - key: LINE0
+      value: 3686.83
+      comment: "HI"
+      ...
+    - key: LINE192
+      value: 9682.13
+      comment: "[FeII]"
+hdu6:
+  name: EMLINE_GFLUX_IVAR
+  description: inverse variance in EMLINE_GFLUX
+  is_image: true
+  shape: NLINE x NFIBER
+  header:
+hdu7:
+  name: EMLINE_GFLUX_MASK
+  description: bitmask for the Gaussian model flux
+  is_image: true
+  shape: NLINE x NFIBER
+  header:
+hdu8:
+  name: EMLINE_GEW
+  description: equivalent width for the Gaussian emission line model
+  is_image: true
+  shape: NLINE x NFIBER
+  header:
+hdu9:
+  name: EMLINE_GEW_IVAR
+  description: inverse variance in EMLINE_GEW
+  is_image: true
+  shape: NLINE x NFIBER
+  header:
+hdu10:
+  name: EMLINE_GEW_MASK
+  description: bitmask for Gaussian model equivalent width
+  is_image: true
+  shape: NLINE x NFIBER
+  header:
+hdu11:
+  name: EMLINE_GVEL
+  description: systemic velocity for the Gaussian emission line model
+  is_image: true
+  shape: NLINE x NFIBER
+  header:
+hdu12:
+  name: EMLINE_GSIGMA
+  description: LOSVD for the Gaussian emission line model
+  is_image: true
+  shape: NLINE x NFIBER
+  header:
+# nebular component: non-parametric fitting
+hdu15:
+  name: EMLINE_MFLUX
+  description: integrated flux for the non-parametric emission line model
+  is_image: true
+  shape: NLINE x NFIBER
+  header:
+    - key: NAXIS1
+      comment: number of emission lines fitted
+    - key: NAXIS2
+      comment: fiber ID
+    - key: LINE0
+      value: 3686.83
+      comment: "HI"
+      ...
+    - key: LINE192
+      value: 9682.13
+      comment: "[FeII]"
+hdu16:
+  name: EMLINE_MFLUX_IVAR
+  description: inverse variance in EMLINE_MFLUX
+  is_image: true
+  shape: NLINE x NFIBER
+  header:
+hdu17:
+  name: EMLINE_MFLUX_MASK
+  description: bitmask for the non-parametric model flux
+  is_image: true
+  shape: NLINE x NFIBER
+  header:
+hdu18:
+  name: EMLINE_MEW
+  description: equivalent width for the non-parametric emission line model
+  is_image: true
+  shape: NLINE x NFIBER
+  header:
+hdu19:
+  name: EMLINE_MEW_IVAR
+  description: inverse variance in EMLINE_MEW
+  is_image: true
+  shape: NLINE x NFIBER
+  header:
+hdu20:
+  name: EMLINE_MEW_MASK
+  description: bitmask for non-parametric model equivalent width
+  is_image: true
+  shape: NLINE x NFIBER
+  header:
+hdu21:
+  name: EMLINE_MVEL
+  description: systemic velocity for the non-parametric emission line model
+  is_image: true
+  shape: NLINE x NFIBER
+  header:
+hdu24:
+  name: EMLINE_MSIGMA
+  description: LOSVD for the non-parametric emission line model
+  is_image: true
+  shape: NLINE x NFIBER
+  header:
+# nebular component: ionizing photon flux of stellar component
+hdu27:
+  name: STEION
+  description: stellar ionizing photon flux for each emission line
+  is_image: true
+  shape: NLINE x NFIBER
+  header:
+# fiber map table
+hdu30:
+  name: FIBMAP
+  description: mapping of each fiber IDs to sky positions
+  is_image: false
+  shape: BINARY FITS TABLE
+  columns:
+    XPOS:
+      name: XPOS
+      type: float32
+      unit: "arcsec"
+      description: x position of the fiber in sky coordinates
+    YPOS:
+      name: YPOS
+      type: float32
+      unit: "arcsec"
+      description: y position of the fiber in sky coordinates
+    MASK:
+      name: MASK
+      type: bitmask
+      unit: ""
+      description: bitmask for the fiber
+    SLITMAP:
+      name: SLITMAP
+      type: string
+      unit: ""
+      description: fiber position along the slit

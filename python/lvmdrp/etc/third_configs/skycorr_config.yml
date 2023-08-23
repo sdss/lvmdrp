@@ -1,0 +1,32 @@
+INST_DIR: /home/mejia/Research/UNAM/lvm-drp/lvmdrp/lib/skycorr/
+INPUT_OBJECT_SPECTRUM: /home/mejia/Research/UNAM/lvm-drp/lvmdrp/lib/skycorr/examples/data/sky_sinfo_1.fits
+INPUT_SKY_SPECTRUM: /home/mejia/Research/UNAM/lvm-drp/lvmdrp/lib/skycorr/examples/data/sky_sinfo_2.fits
+OUTPUT_DIR: "./"
+OUTPUT_NAME: TEST-SINFO-H
+COL_NAMES: [lambda, flux]
+DEFAULT_ERROR: 0.01
+WLG_TO_MICRON: 1.0
+VAC_AIR: vac
+DATE_KEY: MJD-OBS
+TIME_KEY: TM-START
+TELALT_KEY: ESO TEL ALT
+LINETABNAME: airglow_groups.dat
+VARDATNAME: airglow_var.dat
+SOLDATURL: ftp.geolab.nrcan.gc.ca/data/solar_flux/monthly_averages
+SOLFLUX: -1
+FWHM: 5.0
+VARFWHM: 1
+LTOL: 0.01
+MIN_LINE_DIST: 2.5
+FLUXLIM: -1
+FTOL: 0.001
+XTOL: 0.001
+WTOL: 0.001
+CHEBY_MAX: 7
+CHEBY_MIN: 3
+CHEBY_CONST: 0.0
+REBINTYPE: 1
+WEIGHTLIM: 0.67
+SIGLIM: 15.0
+FITLIM: 0.0
+PLOT_TYPE: N

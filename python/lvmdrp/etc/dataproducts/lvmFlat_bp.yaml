@@ -1,0 +1,91 @@
+name: lvmFlat
+short: the extracted flatfield frame
+description: |
+  This FITS file contains the reduce flat frames. The headers record the status of the telescope
+  when the exposure is taken, and the software version that used to reduce this frame.
+created_by: module.py
+used_by: module.py
+location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[MJD]/
+naming_convention: |
+  lvmFlat-[CAMERA]-[EXPNUM].fits.gz, where [CAMERA] is one of the nine cameras on the instrument, b1, r1, z1,
+  or b2, r2, z2, or b3, r3, or z3 for the blue, red, nir cameras on each LVM spectrograph, and
+  [EXPNUM] is the (zero-padded) 8-digit exposure number.
+hdu0:
+  name: PRIMARY
+  description: the primary header metadata
+  is_image: true
+  header:
+  - key: DRP2QUAL
+    comment: the DRP quality bitmask
+hdu1:
+  name: FLUX
+  description: Flat field vectors to remove relative flat-field variations as function of wavelength
+  is_image: true
+  shape: CCDROW x NFIBER
+hdu2:
+  name: MASK
+  description: the bitmask describing the quality of the fiber
+  is_image: true
+  shape: NFIBER
+hdu3:
+  name: TSET
+  description: Legendre polynomial traceset containing the x,y centers of the fiber traces
+  is_image: false
+  shape: BINARY FITS TABLE
+  columns:
+    FUNC:
+      name: FUNC
+      type: char[8]
+      unit: ''
+      description: ''
+    XMIN:
+      name: XMIN
+      type: float64
+      unit: ''
+      description: ''
+    XMAX:
+      name: XMAX
+      type: float64
+      unit: ''
+      description: ''
+    COEFF:
+      name: COEFF
+      type: float64
+      unit: ''
+      description: ''
+hdu4:
+  name: WIDTH
+  description: Profile width of each fiber
+  is_image: true
+  shape: CCDROW x NFIBER
+hdu5:
+  name: SUPERFLATSET
+  description: Traceset describing superflat
+  is_image: false
+  shape: BINARY FITS TABLE
+  columns:
+    FULLBKPT:
+      name: FULLBKPT
+      type: float32
+      unit: ''
+      description: ''
+    BKMASK:
+      name: BKMASK
+      type: int16
+      unit: ''
+      description: ''
+    NORD:
+      name: NORD
+      type: int32
+      unit: ''
+      description: ''
+    COEFF:
+      name: COEFF
+      type: float32
+      unit: ''
+      description: ''
+    ICOEFF:
+      name: ICOEFF
+      type: float32
+      unit: ''
+      description: ''

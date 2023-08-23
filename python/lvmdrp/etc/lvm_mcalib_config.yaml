@@ -1,0 +1,13 @@
+name: lvm-mcalib
+short: configuration file for creating master calibration frames (bias, dark, pixelflat)
+description: |
+  defines the reduction steps to create a master calibration frame from individual bias, dark and pixelflat calibrated exposures.
+location: "[CALIB_PATH]/[DRPVER]/"
+naming_convention: lvm-m[IMAGETYP]-[CAMERA]-[EXPNUM]-config.yaml
+target_frame: lvm-[IMAGETYP]
+calibration_frames: null
+reduction_steps:
+  imageMethod.createMasterFrame:
+    in_images: lvm-[IMAGETYP]
+    out_image: lvm-m[IMAGETYP]
+    reject_cr: true

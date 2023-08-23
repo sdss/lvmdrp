@@ -1,0 +1,135 @@
+name: lvmRss
+short: the row-stacked fiber spectra
+description: |
+  The row-stacked, flux-calibrated fiber spectra for a given tile across all exposures.
+location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[MJD]/
+created_by: lvmdrp.functions.fluxCalMethod.
+used_by: lvmdap._cmdline._main
+naming_convention: lvm-[TILEID]-RSS.fits.gz where [TILEID] is the id of survey tile sky pointing
+hdu0:
+  name: PRIMARY
+  description: replace me description
+  is_image: true
+  header:
+  - key: SIMPLE
+    value: true
+    comment: conforms to FITS standard
+  - key: BITPIX
+    value: 8
+    comment: array data type
+  - key: NAXIS
+    value: 0
+    comment: number of array dimensions
+  - key: VERSDRP2
+    comment: LVM DRP version
+  - key: VERSCORE
+    comment: the lvmcore version
+  - key: BSCALE
+    comment: flux unit scaling factor
+  - key: BZERO
+    comment: flux unit zero point
+  - key: BUNIT
+    comment: flux units of 1E-17 erg/s/cm2/Ang/fiber
+  - key: NEXP
+    comment: number of exposures combined
+  - key: EXPTIME
+    comment: total exposure time in seconds
+  - key: BLUENSN2
+    comment: Total blue SN2 across all exposures
+  - key: REDSN2
+    comment: Total red SN2 across all exposures
+  - key: NIRSN2
+    comment: Total nir SN2 across all exposures
+  - key: DATEOBS
+    comment: Median MJD across all exposures in date-format
+  - key: MJDRED
+    comment: MJD of the 2d pipeline run
+  - key: DATERED
+    comment: date of the 2d pipeline run
+  - key: MASKNAME
+    comment: Name of the bits in sdssMaskbits.par used by MASK extension of this file
+  - key: IFURA
+    comment: Right ascension of this IFU in J2000
+  - key: IFUDEC
+    comment: Declination of this IFU in J2000
+  - key: TILEID
+    comment: Tile ID number
+  - key: TARGNAME
+    comment: The name of the target on for this tile
+  - key: TARGRA
+    comment: the target right ascension in J2000
+  - key: TARGDEC
+    comment: the target declination in J2000
+  - key: IFULABEL
+    comment: The IFU spectrograph+fiber label for this fiber, e.g. A3-2, S2-300
+  - key: DRPQUAL
+    comment: Quality bitmaks
+  - key: IFUGLON
+    comment: Galactic longitude of IFU
+  - key: IFUGLAT
+    comment: Galactic latitude of IFU
+  - key: IFUGLAT
+    comment: Galactic latitude of IFU
+  - key: LVMTARG1
+    comment: lvm_target1 maskbit for milky way targets
+  - key: LVMTARG2
+    comment: lvm_target2 maskbit for non-milky way targets
+  - key: LVMTARG3
+    comment: lvm_target3 maskbit for ancillary targets
+  - key: CTYPE1
+    comment: Wavelength solution keywords
+  - key: CRPIX1
+    comment: Wavelength solution keywords
+  - key: CRVAL1
+    comment: Wavelength solution keywords
+  - key: CD1_1
+    comment: Wavelength solution keywords
+  - key: CUNIT1
+    comment: Wavelength solution keywords
+  - key: DC-FLAG
+    comment: Wavelength solution keywords
+hdu1:
+  name: FLUX
+  description: Row-stacked spectra from all exposures for the target in units of 10(-17) erg/s/cm2/Ang/fiber
+  is_image: true
+  shape: NWAVE x (NFIBER * NEXP)
+hdu2:
+  name: IVAR
+  description: Inverse variance (1/sigma2) for the above
+  is_image: true
+  shape: NWAVE x (NFIBER * NEXP)
+hdu3:
+  name: MASK
+  description: the quality bitmask for each fiber pixel
+  is_image: true
+  shape: NWAVE x (NFIBER * NEXP)
+hdu4:
+  name: WAVE
+  description: the wavelength vector
+  is_image: true
+  shape: NWAVE
+hdu5:
+  name: SPECRES
+  description: the median spectral resolution as a function of wavelength for the fibers in this IFU
+  is_image: true
+  shape: NWAVE
+hdu6:
+  name: SPECRESD
+  description: standard deviation of spectral resolution as a function of wavelength for the fibers in this IFU
+  is_image: true
+  shape: NWAVE
+hdu7:
+  name: XPOS
+  description: Array of fiber X-positions (units of arcsec) relative to the IFU center
+  is_image: true
+  shape: NWAVE x (NFIBER * NEXP)
+hdu8:
+  name: YPOS
+  description: Array of fiber Y-positions (units of arcsec) relative to the IFU center
+  is_image: true
+  shape: NWAVE x (NFIBER * NEXP)
+hdu9:
+  name: OBSINFO
+  description: Table detailing the exposure and observation metadata that went into this file
+  is_image: false
+  shape: BINARY FITS TABLE

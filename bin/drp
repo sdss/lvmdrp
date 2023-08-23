@@ -1,47 +1,143 @@
 #!/usr/bin/env python
 # encoding: utf-8
 #
-# @Author: José Sánchez-Gallego
-# @Date: Dec 1, 2017
-# @Filename: lvmdrp
-# @License: BSD 3-Clause
-# @Copyright: José Sánchez-Gallego
+
+import click
+import cloup
+from cloup.constraints import mutually_exclusive, RequireExactly, IsSet, If
+
+from astropy.io import fits
+from lvmdrp.functions.run_drp import run_drp, get_config_options, reduce_file
+from lvmdrp.functions.imageMethod import preproc_raw_frame
+from lvmdrp.functions.skyMethod import installESOSky_drp, configureSkyModel_drp
+from lvmdrp.utils.metadata import get_frames_metadata, get_master_metadata
+
+from lvmdrp.functions.run_quickdrp import quick_reduction
 
 
-from __future__ import division
-from __future__ import print_function
-from __future__ import absolute_import
-from __future__ import unicode_literals
-
-import argparse
-import os
-import sys
-
-from drp.main import math
+@click.group('drp', short_help='CLI for the LVM data reduction')
+def cli():
+    pass
 
 
-if __name__ == '__main__':
+@cloup.command(short_help='Run the DRP reduction', show_constraints=True)
+@click.option('-m', '--mjd', type=int, help='an MJD to reduce')
+@click.option('-l', '--mjd-list', type=int, multiple=True, help='a list of specific MJDs to reduce')
+@click.option('-r', '--mjd-range', type=str, help='a range of MJDs to reduce')
+@click.option('--skip-bd', is_flag=True, default=False, help='Flag to skip bias/dark reduction')
+@click.option('--arc', is_flag=True, default=False, help='Flag to only reduce arc frames')
+@click.option('--flat', is_flag=True, default=False, help='Flag to only reduce flat frames')
+@click.option('--only-bd', is_flag=True, default=False, help='Flag to only reduce bias/dark frames')
+@click.option('--only-cal', is_flag=True, default=False, help='Flag to only reduce calibration frames')
+@click.option('--only-sci', is_flag=True, default=False, help='Flag to only reduce science frames')
+@click.option('--pixmask', is_flag=True, default=False, help='Flag to create pixelmask from bias/dark/pixelflat frames')
+@click.option('-s', '--spec', type=click.Choice(['1', '2', '3']), help='The spectrograph id to reduce')
+@click.option('-c', '--camera', type=click.Choice(['b', 'r', 'z']), help='The camera to reduce')
+@click.option('-e', '--expnum', type=int, help='an exposure number to reduce')
+@click.option('-el', '--exp-list', type=int, multiple=True, help='a list of specific exposures to reduce')
+@click.option('-er', '--exp-range', type=str, help='a range of exposure numbers to reduce')
+@click.option('-q', '--quick', is_flag=True, default=False, help='Flag for quick reductions only')
+@cloup.constraint(mutually_exclusive, ['mjd', 'mjd_list', 'mjd_range'])
+@cloup.constraint(RequireExactly(1), ['mjd', 'mjd_list', 'mjd_range'])
+@cloup.constraint(mutually_exclusive, ['expnum', 'exp_list', 'exp_range'])
+def run(mjd, mjd_list, mjd_range, skip_bd, arc, flat, only_bd, only_cal, only_sci, pixmask, camera, spec,
+        expnum, exp_list, exp_range, quick):
+    """ Run the DRP reduction for a given MJD or range of MJDs
 
-    # An example of how to write a command line parser that works with the
-    # main.math function. For more details on how to use argparse, start with
-    # this tutorial: https://kapeli.com/dash_share?docset_file=Python%203&docset_name=Python%203&path=doc/howto/argparse.html%23id1&platform=python&repo=Main&version=3.6.3
+    Run the DRP for an MJD or range of MJDs.  Various flags and options are available
+    for filtering on bias/darks, calibration (arc/flats) or science frames, specific
+    cameras or spectrographs, or specific exposures.
 
-    parser = argparse.ArgumentParser(
-        prog=os.path.basename(sys.argv[0]),
-        description='Performs an arithmetic operation.')
+    """
+    mjd = mjd or mjd_list or mjd_range
+    expnum = expnum or exp_list or exp_range
+    run_drp(mjd=mjd, flat=flat, arc=arc, skip_bd=skip_bd, only_bd=only_bd,
+            only_cal=only_cal, only_sci=only_sci, pixmask=pixmask, camera=camera, spec=spec,
+            expnum=expnum, quick=quick)
 
-    parser.add_argument('VALUE1', type=float, help='The first operand')
-    parser.add_argument('OPERATOR', type=str, help='The operator [+, -, *, /]')
-    parser.add_argument('VALUE2', type=float, help='The second operand')
 
-    parser.add_argument('-v', '--verbose', action='store_true', default=False,
-                        help='sets verbose mode')
+# register full DRP command
+cli.add_command(run)
+# register quick DRP command
+cli.add_command(quick_reduction)
 
-    args = parser.parse_args()
 
-    result = math(args.VALUE1, args.VALUE2, arith_operator=args.OPERATOR)
+@cli.command('reduce_file', short_help='Reduce a single file')
+@click.option('-f', '--filename', type=str, help='a full path filename to reduce')
+def run_reduce_file(filename):
+    """ Run a single raw sdR frame file through the LVM DRP """
+    reduce_file(filename)
 
-    if args.verbose:
-        print('{} {} {} = {}'.format(args.VALUE1, args.OPERATOR, args.VALUE2, result))
+
+@cli.command('preprocess', short_help='Preprocess raw frames')
+@click.argument('filename', type=click.Path(exists=True))
+@click.option('-f', '--flavor', type=str, help='the flavor of the file', required=True)
+def preprocess(filename, flavor):
+
+    # get metadata for a single file
+    hdr = fits.getheader(filename)
+    camera = hdr.get("CCD")
+    mjd = hdr.get("MJD")
+    tileid = hdr.get("TILEID", 1111)
+    expnum = f'{hdr.get("EXPOSURE"):0>8}'
+
+    # get custom config options
+    kwargs = get_config_options('reduction_steps.preproc_raw_frame', flavor)
+
+    # preprocess the frame
+    preproc_raw_frame(filename, flavor=flavor, kind='p', camera=camera,
+                      mjd=mjd, expnum=expnum, tileid=tileid, **kwargs)
+
+
+@click.group('sky', short_help='Run routines related to sky subtraction')
+def skycli():
+    pass
+
+
+@skycli.command('install', short_help='Install the ESO sky routines')
+@click.option('-c', '--reinstall-skycorr', is_flag=True, default=False, show_default=True,
+              help='Flag to reinstall the ESO skycorr routines')
+@click.option('-m', '--reinstall-skymodel', is_flag=True, default=False, show_default=True,
+              help='Flag to resinstall the ESO sky models')
+def sky_install(reinstall_skycorr, reinstall_skymodel):
+    """ Install the ESO skycorr and skymodel routines """
+    installESOSky_drp(reinstall_skycorr=reinstall_skycorr, reinstall_skymodel=reinstall_skymodel)
+
+
+@skycli.command('configure', short_help='Configure the ESO sky routines')
+@click.option('-l', '--library', is_flag=True, default=False, show_default=True,
+              help='Flag to run ESO routines to build a spectral library')
+@click.option('-m', '--multiscat', is_flag=True, default=False, show_default=True,
+              help='Flag to run ESO "estmultiscat" routine for multiple scattering corrections')
+def sky_configure(library, multiscat):
+    """ Run the sky module configuration """
+    configureSkyModel_drp(run_libary=library, run_multiscat=multiscat)
+
+
+cli.add_command(skycli)
+
+
+@click.group('metadata', short_help='Run routines related to frame metadata')
+def metacli():
+    pass
+
+
+@cloup.command('regenerate', short_help='Regenerate the frames metadata file')
+@click.option('-m', '--mjd', type=int, help='the MJD to regenerate the metadata for')
+@click.option('-a', '--masters', is_flag=True, default=False, help='Flag to regenerate the masters metadata')
+@cloup.constraint(If(~IsSet('masters'), then=RequireExactly(1)), ['mjd'])
+def regen(mjd: int, masters: bool):
+    """ Regenerate the raw or master frames metadata file """
+    if masters:
+        get_master_metadata(overwrite=True)
     else:
-        print(result)
+        get_frames_metadata(mjd=mjd, overwrite=True)
+
+
+metacli.add_command(regen)
+
+cli.add_command(metacli)
+
+
+if __name__ == "__main__":
+    cli()

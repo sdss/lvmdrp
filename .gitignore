@@ -31,14 +31,27 @@ distribute-*.tar.gz
 *~
 
 # Test directories and files
+data*
+lib
+*.tar.gz*
 test-*.fits
 test*.fits.gz
 test-*
 test_raw-*
 test_redux-*
+*.png
+*.pdf
 
 # Mac OSX
 .DS_Store
 
-*data*
+_*
+*.zip
 .vscode
+*.db
+
+# DRP specific
+de421.bsp
+
+# notebooks
+*checkpoint*

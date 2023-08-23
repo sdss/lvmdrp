@@ -1,0 +1,119 @@
+name: lvmFFrame
+short: the flux-calibrated science frames
+description: |
+  The per-exposure science frame after extraction, sky subtraction, and flux calibration.
+  Made from input lvmSFrame files. Note that the 'F' in the name means Flux-calibrated.
+location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[MJD]/
+created_by: module.py
+used_by: module.py
+naming_convention: |
+  lvmFFrame-[EXPNUM].fits.gz, where [EXPNUM] is the (zero-padded) 8-digit exposure number.
+hdu0:
+  name: PRIMARY
+  description: primary header metadata
+  is_image: true
+  header:
+  - key: BSCALE
+    comment: Flux unit scaling factor (1.0)
+  - key: BZERO
+    comment: Flux unit zeropoint (0.0)
+  - key: BUNIT
+    comment: Flux units of 1E-17 erg/s/cm2/Ang/fiber
+  - key: SEEING
+    comment: Best guider seeing FWHM in Arcsec
+  - key: TRANSPAR
+    comment: Guider transparency
+  - key: DC-FLAG
+    comment: Indicates logarithmic wavelength solution
+  - key: CTYPE1
+    comment: WAVE-LOG
+  - key: CRPIX1
+    comment: Wavelength starting pixel (1-indexed)
+  - key: CRVAL1
+    comment: Central wavelength (log10) of first pixel
+  - key: CD1_1
+    comment: Log10 dispersion per pixel
+  - key: B1SN2
+    comment: S/N2 in B1 camera
+  - key: R1SN2
+    comment: S/N2 in R1 camera
+  - key: Z1SN2
+    comment: S/N2 in Z1 camera
+  - key: B2SN2
+    comment: S/N2 in B2 camera
+  - key: R2SN2
+    comment: S/N2 in R2 camera
+  - key: Z2SN2
+    comment: S/N2 in Z2 camera
+  - key: B3SN2
+    comment: S/N2 in B3 camera
+  - key: R3SN2
+    comment: S/N2 in R3 camera
+  - key: Z3SN2
+    comment: S/N2 in Z3 camera
+  - key: B1PSTAT
+    comment: Poisson ratio statistic in B1 camera
+  - key: R1PSTAT
+    comment: Poisson ratio statistic in R1 camera
+  - key: Z1PSTAT
+    comment: Poisson ratio statistic in Z1 camera
+  - key: B2PSTAT
+    comment: Poisson ratio statistic in B2 camera
+  - key: R2PSTAT
+    comment: Poisson ratio statistic in R2 camera
+  - key: Z2PSTAT
+    comment: Poisson ratio statistic in Z2 camera
+  - key: B3PSTAT
+    comment: Poisson ratio statistic in B3 camera
+  - key: R3PSTAT
+    comment: Poisson ratio statistic in R3 camera
+  - key: Z3PSTAT
+    comment: Poisson ratio statistic in Z3 camera
+hdu1:
+  name: FLUX
+  description: Sky-subtracted flux in units of 10(-17) erg/s/cm2/Ang/fiber
+  is_image: true
+  shape: NWAVE x NFIBER
+hdu2:
+  name: IVAR
+  description: Inverse variance (1/sigma2) for the above
+  is_image: true
+  shape: NWAVE x NFIBER
+hdu3:
+  name: MASK
+  description: the quality bitmask for each fiber pixel
+  is_image: true
+  shape: NWAVE x NFIBER
+hdu4:
+  name: WAVE
+  description: wavelength solution in log-10 Angstroms (vacuum)
+  is_image: true
+  shape: NWAVE
+hdu5:
+  name: SLITMAP
+  description: slitmap table describing fiber positions for this exposure
+  is_image: false
+  shape: BINARY FITS TABLE
+  columns:
+    pass
+hdu6:
+  name: SKY
+  description: Sky flux in units of 10(-17) erg/s/cm2/Ang/fiber
+  is_image: true
+  shape: NWAVE x NFIBER
+hdu7:
+  name: SUPERSKY
+  description: super sky information
+  is_image: false
+  shape: BINARY FITS TABLE
+  columns:
+    AIRWAVE:
+      name: AIRWAVE
+      type: float32
+      unit: ''
+      description: ''
+    FLUX:
+      name: FLUX
+      type: float32
+      unit: ''
+      description: ''

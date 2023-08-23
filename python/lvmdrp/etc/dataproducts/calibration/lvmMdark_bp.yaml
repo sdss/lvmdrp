@@ -1,0 +1,65 @@
+name: lvmMdark
+short: reduced and combined (master) dark frames
+description: |
+  this is the frame after combining several reduced dark frames, in units of e-,
+  Poisson errors calculated and CR rejected.
+location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[MJD]/calib/
+created_by: imageMethod.createMasterFrame
+used_by:
+  - imageMethod.basicCalibration
+naming_convention: |
+  lvm-mdark-[CAMERA].fits.gz, where [CAMERA] is one of the nine cameras on the instrument, b1, r1, z1,
+  or b2, r2, z2, or b3, r3, or z3 for the blue, red, nir cameras on each LVM spectrograph.
+access_name: lvm_master
+hdu0:
+  name: PRIMARY
+  description: primary header metadata
+  is_image: true
+  header:
+    - key: COSMIC
+      comment: Cosmic ray rejection applied
+    - key: ISMASTER
+      comment: Is this a combined (master) frame
+    - key: NFRAMES
+      comment: Number of exposures combined
+hdu1:
+  name: FLUX
+  description: Flux in electrons
+  is_image: true
+  shape: 4080 x 4080
+hdu2:
+  name: IVAR
+  description: Inverse variance (1/sigma2) for the above
+  is_image: true
+  shape: 4080 x 4080
+hdu3:
+  name: MASK
+  description: Quality bitmask for each fiber pixel
+  is_image: true
+  shape: 4080 x 4080
+hdu4:
+  name: FRAMES
+  description: Original frames combined to produce the master bias
+  is_image: false
+  shape: BINARY FITS TABLE
+  columns:
+    ID:
+      name: ID
+      type: int32
+      unit: null
+      description: ID (in database) of the frame
+    MEAN:
+      name: MEAN
+      type: float32
+      unit: e-
+      description: average counts across the field
+    MEDIAN:
+      name: MEDIAN
+      type: float32
+      unit: e-
+      description: median counts across the field
+    STDDEV:
+      name: STDDEV
+      type: float32
+      unit: e-
+      description: standard deviation in counts across the field

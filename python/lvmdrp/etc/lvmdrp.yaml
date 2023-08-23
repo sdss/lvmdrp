@@ -1,0 +1,44 @@
+
+quick: false
+reduction_steps:
+  preproc_raw_frame:
+    default:
+      subtract_overscan: true
+  find_peaks_auto:
+    pixel_range: [20, 4000]
+    fibers_dmin: 5
+    threshold: 1.0
+    method: hyperbolic
+    median_box: [1, 10]
+  trace_peaks:
+    steps: 30
+    coadd: 5
+    threshold: 0.5
+    max_diff: 1
+    method: gauss
+    median_box: 10
+    median_cross: 1
+    poly_disp: 5
+  extract_spectra:
+    default:
+      method: aperture
+      aperture: 4
+      parallel: auto
+  determine_wavesol:
+    default:
+      ref_fiber: 319
+      poly_disp: 3
+      poly_fwhm: 3
+      poly_cros: 3
+      poly_kinds: ['poly', 'poly', 'poly']
+      aperture: 10
+      flux_min: 0.001
+      fwhm_max: 5.0
+      rel_flux_limits: [0.01, 1]
+  resample_wave:
+    default:
+      disp_pix: 1.0
+      method: linear
+      err_sim: 10
+      parallel: auto
+      extrapolate: true

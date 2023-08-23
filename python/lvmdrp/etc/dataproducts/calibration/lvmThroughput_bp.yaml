@@ -1,0 +1,41 @@
+name: lvmThroughput
+short: the throughput function
+description: |
+  contains a table of the throughput as a function of the wavelength vector for the combined blue, red and NIR channels.
+created_by: rssMethod.quickThroughput
+used_by:
+  - rssMethod.quickFluxCalib
+location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[MJD]/calib/
+naming_convention: |
+  lvm-throughput-[EXPNUM].fits.gz, where [EXPNUM] is the (zero-padded) 8-digit exposure number.
+hdu0:
+  name: PRIMARY
+  description: the primary header metadata
+  is_image: true
+  header:
+hdu1:
+  name: THROUGHPUT
+  description: rough estimate of the instrument throughput from a fiberflat
+  is_image: false
+  shape: BINARY FITS TABLE
+  columns:
+    WAVE:
+      name: WAVE
+      type: float64
+      unit: Angstrom
+      description: wavelength vector
+    THROUGHPUT:
+      name: THROUGHPUT
+      type: int32
+      unit: null
+      description: throughput function
+    IVAR:
+      name: IVAR
+      type: float64
+      unit: null
+      description: associated inverse variance (1/sigma^2) of the above
+    MASK:
+      name: MASK
+      type: int32
+      unit: null
+      description: boolean mask for each wavelength pixel (0 = good; 1 = bad)

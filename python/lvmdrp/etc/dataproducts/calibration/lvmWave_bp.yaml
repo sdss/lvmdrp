@@ -1,0 +1,69 @@
+name: lvmWave
+short: the peak waveset of each fiber
+description: |
+  contains tables describing the polynomial fittings of each fiber peak along the dispersion axis.
+created_by: rssMethod.detWaveSolution
+used_by:
+  - rssMethod.createPixTable
+location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[MJD]/calib/
+naming_convention: |
+  lvm-wave-[CAMERA]-[EXPNUM].fits.gz, where [CAMERA] is one of the nine cameras on the instrument, b1, r1, z1,
+  or b2, r2, z2, or b3, r3, or z3 for the blue, red, nir cameras on each LVM spectrograph, and
+  [EXPNUM] is the (zero-padded) 8-digit exposure number.
+hdu0:
+  name: PRIMARY
+  description: the primary header metadata
+  is_image: true
+  header:
+hdu1:
+  name: WSET
+  description: wavelength solution as polynomials for all fibers
+  is_image: false
+  shape: BINARY FITS TABLE
+  columns:
+    FUNC:
+      name: FUNC
+      type: char[8]
+      unit: null
+      description: polynomial function used to fit the wavelength for all fiber
+    XMIN:
+      name: XMIN
+      type: float64
+      unit: pix
+      description: first pixel for the polynomial fitting
+    XMAX:
+      name: XMAX
+      type: float64
+      unit: pix
+      description: last pixel for the polynomial fitting
+    COEFF:
+      name: COEFF
+      type: float64
+      unit: null
+      description: coefficients fitted
+hdu2:
+  name: LSFSET
+  description: LSF solution as polynomials for all fibers
+  is_image: false
+  shape: BINARY FITS TABLE
+  columns:
+    FUNC:
+      name: FUNC
+      type: char[8]
+      unit: null
+      description: polynomial function used to fit the LSF for all fiber
+    XMIN:
+      name: XMIN
+      type: float64
+      unit: pix
+      description: first pixel for the polynomial fitting
+    XMAX:
+      name: XMAX
+      type: float64
+      unit: pix
+      description: last pixel for the polynomial fitting
+    COEFF:
+      name: COEFF
+      type: float64
+      unit: null
+      description: coefficients fitted

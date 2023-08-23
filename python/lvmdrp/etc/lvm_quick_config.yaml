@@ -1,0 +1,72 @@
+---
+name: lvm-quick
+short: quick Data Reduction Pipeline (DRP) configuration file
+description: |
+  defines the target frame, calibration frames and DRP steps to perform the quick DRP for frame validation.
+location: $LVM_QUICK_[HEMI]/[DRPVER]/
+naming_convention: lvm-quick-[CAMERA]-[EXPNUM]-config.yaml
+target_frame: lvmSdr
+calibration_frames:
+  bias: lvm-mbias
+  dark: lvm-mdark
+  pixelflat: lvm-mpixelflat
+  fiberflat: lvmFlat
+  arc: lvmArc
+reduction_steps:
+  imageMethod.preprocRawFrame:
+    in_image: lvmSdr
+    out_image: lvm-pframe
+    unit: e-
+    compute_error: true
+  imageMethod.basicCalibration:
+    in_image: lvm-pframe
+    out_image: lvm-cframe
+    in_bias: lvm-mbias
+    in_dark: lvm-mdark
+    in_pixelflat: lvm-mpixelflat
+  imageMethod.extractSpec:
+    in_image: lvm-cframe
+    out_rss: lvm-xframe
+    in_fiberflat: lvmFlat
+    method: aperture
+    aperture: 7 #median of the distance between peaks (from the mid region trace)
+  rssMethod.createPixTable:
+    in_rss: lvm-xframe
+    out_rss: lvm-wframe
+    in_arc: lvmArc
+  rssMethod.resampleWave:
+    in_rss: lvm-wframe
+    out_rss: lvm-hframe
+    parallel: auto
+  rssMethod.correctFiberFlat:
+    in_rss: lvm-hframe
+    out_rss: lvm-fframe
+    in_fiberflat: lvmFlat
+  rssMethod.joinSpecChannels:
+    in_rss:
+      - lvm-wframe
+      - lvm-wframe
+      - lvm-wframe
+    out_rss: lvmCFrame
+  rssMethod.quickSkySubtract:
+    in_rss: lvmCFrame
+    out_rss: lvmSFrame
+  rssMethod.quickFluxCalib:
+    in_rss: lvmSFrame
+    out_rss: lvmFFrame
+    in_throughput: lvm-throughput
+    airmass: null
+    exptime: null
+  rssMethod.quickQuality:
+    # SN in several bands (FWHM=100AA)
+    # locate sky lines (match against a known list)
+    # measure sky lines width
+    # sky lines equivalent width
+  # for quick flux calibration:
+  # * get solar spectrum
+  # * normalize solar spectrum by twilight fiberflat
+  # * apply as flux calibration vector to each fiber
+  # * add sky quick subtraction
+  # * quick <15min (including calibration frames)
+  # * add quality flags for calibration frames as well
+...

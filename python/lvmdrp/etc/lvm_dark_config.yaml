@@ -1,0 +1,21 @@
+---
+name: lvm-dark
+short: configuration file for dark calibration
+description: |
+  defines the reduction steps to create a calibrated dark.
+location: "[CALIB_PATH]/[DRPVER]/"
+naming_convention: lvm-dark-[CAMERA]-[EXPNUM]-config.yaml
+target_frame: lvmSdr
+calibration_frames:
+  bias: lvm-mbias
+reduction_steps:
+  imageMethod.preprocRawFrame:
+    in_image: lvmSdr
+    out_image: lvm-pframe
+    unit: ADU
+    compute_error: false
+  imageMethod.basicCalibration:
+    in_image: lvm-pframe
+    out_image: lvm-cframe
+    in_bias: lvm-mbias
+...

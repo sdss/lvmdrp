@@ -1,0 +1,172 @@
+#!/usr/bin/env python
+# encoding: utf-8
+#
+# @Author: Alfredo Mejía-Narváez
+# @Date: Jul 26, 2023
+# @Filename: build_super_trace
+# @License: BSD 3-Clause
+# @Copyright: SDSS-V LVM
+
+import argparse
+import os
+import sys
+from astropy.io import fits
+from astropy.table import Table
+
+from lvmdrp import log, path, __version__ as drpver
+from lvmdrp.utils import metadata as md
+
+from lvmdrp.core.constants import CON_LAMPS
+from lvmdrp.functions import imageMethod
+from lvmdrp.functions import run_drp as drp
+
+
+# default MJD pattern
+DEFAULT_MJDS = "6014?"
+
+# define list of lamps
+lamps = [lamp.lower() for lamp in CON_LAMPS]
+# initialize lamps status (OFF)
+lamps_status = dict.fromkeys(lamps, False)
+
+# peaks params
+trace_peaks_params = {
+    "steps": 30,
+    "coadd": 5,
+    "threshold": 0.5,
+    "max_diff": 1,
+    "method": "gauss",
+    "median_box": 10,
+    "median_cross": 1,
+    "poly_disp": 4,
+}
+trace_fwhm_params = {
+    "blocks": "20",
+    "steps": "100",
+    "coadd": "0",
+    "poly_disp": "4",
+    "poly_kind": "poly",
+    "threshold_flux": "10.0",
+    "init_fwhm": "2.0",
+    "clip": "",
+    "parallel": "0",
+}
+
+
+def _header_fix(fits_file, target_mjd, target_tileid=None):
+	with fits.open(fits_file) as f:
+		f[0].header["MJD"] = target_mjd
+		if target_tileid is not None:
+			f[0].header["TILE_ID"] = target_tileid
+	
+		f.writeto(fits_file, overwrite=True)
+
+def parse_arguments(args=None):
+    parser = argparse.ArgumentParser(
+        prog=os.path.basename(sys.argv[0]),
+        description="build super arc by combining individual 2D arc frames across MJDs",
+    )
+    parser.add_argument(
+        "--mjds", "-m",
+        help=f"wildcard pattern to match several MJDs in the local SAS. By default {DEFAULT_MJDS}",
+        default=DEFAULT_MJDS
+    )
+
+    args = parser.parse_args()
+    return args
+
+if __name__ == "__main__":
+    # parse arguments
+    cmd_args = parse_arguments(args=sys.argv[1:])
+    
+    # extract metadata for target MJDs
+    raw_paths = md.locate_new_frames(hemi="s", mjd=cmd_args.mjds, camera="*", expnum="????????")
+    _ = md.extract_metadata(raw_paths)
+    # filter metadata to get only flats
+    flats = md.get_metadata(tileid="*", mjd=cmd_args.mjds, kind="raw", imagetyp="flat")
+    log.info(f"processing flats from MJDs = {set(flats.mjd)}")
+    print(flats.to_string())
+
+    # get max MJD and tileid for new supers
+    target_mjd = flats.mjd.max()
+    target_tileid = flats.loc[flats.mjd == target_mjd].tileid.max()
+    
+    # initialize the masters paths list
+    masters_paths = []
+
+    # process arc frames
+    cameras = set(flats.camera)
+    for camera in cameras:
+        # # set current lamp status
+        # lamps_current = lamps_status.copy()
+        # lamps_current[lamp] = True
+
+        if camera[0] == "b" or camera[0] == "r":
+            lamps_current = {"ldls": True, "quartz": False}
+            lamp = "ldls"
+        else:
+            lamps_current = {"ldls": False, "quartz": True}
+            lamp = "quartz"
+        
+        # group flats into analogs of current lamp
+        analogs, cpaths, mpaths = md.get_analog_groups(tileid=1111, mjd=target_mjd, imagetyp="flat", camera=camera, **lamps_current)
+        
+        for i, (keys, analog) in enumerate(analogs.items()):
+            # unpack keys
+            tileid, mjd, imagetyp, camera = keys
+            # match masters
+            masters = md.match_master_metadata(target_imagetyp="flat", target_mjd=target_mjd, target_camera=camera)
+            mpixmask = path.full("lvm_master", drpver=drpver, kind="mpixmask", **masters["pixmask"])
+            mbias = path.full("lvm_master", drpver=drpver, kind="mbias", **masters["bias"])
+            mdark = path.full("lvm_master", drpver=drpver, kind="mdark", **masters["dark"])
+            
+            # preproc and detrend raw flats
+            for j, (_, flat) in enumerate(analog.iterrows()):
+                rpath = path.full("lvm_raw", camspec=flat.camera, **flat.to_dict())
+                ppath = path.full("lvm_anc", drpver=drpver, kind="p", imagetype=flat.imagetyp, **flat.to_dict())
+                cpath = cpaths[keys][j]
+                
+                os.makedirs(os.path.dirname(ppath), exist_ok=True)
+                if os.path.isfile(ppath):
+                    log.info(f"skipping {ppath}, file already exist")
+                else:
+                    imageMethod.preproc_raw_frame(in_image=rpath, out_image=ppath, in_mask=mpixmask)
+                if os.path.isfile(cpath):
+                    log.info(f"skipping {cpath}, file already exist")
+                else:
+                    imageMethod.detrend_frame(in_image=ppath, out_image=cpath, in_bias=mbias, in_dark=mdark, in_slitmap=Table(drp.fibermap.data))
+            
+            # define master path
+            mpath = path.full("lvm_master", drpver=drpver, kind=f"mflat_{lamp}", tileid=target_tileid, mjd=target_mjd, camera=camera)
+            # create master flats
+            os.makedirs(os.path.dirname(mpath), exist_ok=True)
+            imageMethod.create_master_frame(in_images=cpaths[keys], out_image=mpath)
+            # fix header for metadata reconstruction
+            _header_fix(mpath, target_mjd, target_tileid)
+
+            # update masters paths list
+            masters_paths.append(mpath)
+    
+    # extract frames
+    master_paths = [os.path.join(root, file) for root, _, files in os.walk(os.getenv("LVM_SPECTRO_REDUX")) for file in files if file.startswith("lvm-mflat_") and file.endswith(".fits")]
+    master_flats = md.extract_metadata(kind="master", frames_paths=master_paths)
+    for _, mflat in master_flats.iterrows():
+        lamp = mflat[lamps].astype(int).idxmax(0)
+        mpath = path.full("lvm_master", drpver=drpver, kind=f"mflat_{lamp}", **mflat.to_dict())
+        xpath = path.full("lvm_master", drpver=drpver, kind=f"xmflat_{lamp}", **mflat.to_dict())
+        
+        mtrace_peak = path.full("lvm_master", drpver=drpver, kind="mtrace", **mflat.to_dict())
+        mtrace_fwhm = path.full("lvm_master", drpver=drpver, kind="mfwhm", **mflat.to_dict())
+        # run tracing
+        imageMethod.trace_peaks(in_image=mpath, out_trace=mtrace_peak, **trace_peaks_params)
+        # imageMethod.traceFWHM_drp(in_image=mpath, out_fwhm=mtrace_fwhm, in_trace=mtrace_peak, **trace_fwhm_params)
+
+        # extract fiberflats
+        # imageMethod.extract_spectra(in_image=mpath, out_rss=xpath, in_trace=mtrace_peak, fwhm=mtrace_fwhm, method="optimal", plot_fig=False)
+
+        # update masters paths list
+        # masters_paths.append(xpath)
+    
+    # update masters metadata
+    new_masters = md.extract_metadata(kind="master", frames_paths=masters_paths)
+    print(new_masters.to_string())

@@ -1,0 +1,547 @@
+#!/usr/bin/env python
+
+import argparse
+import os
+import sys
+
+import matplotlib
+import numpy as np
+from matplotlib.widgets import MultiCursor, TextBox
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+from numpy import polynomial
+
+from lvmdrp import log
+from lvmdrp.core import rss, spectrum1d
+from lvmdrp.core.plot import plt
+from lvmdrp.core.constants import ARC_LAMPS, SPEC_CHANNELS, CONFIG_PATH
+
+
+font = {"family": "sans-serif", "weight": "bold", "size": 12}
+matplotlib.rc("font", **font)
+plt.switch_backend("TKAgg")
+
+VSPAN_PROPS = [
+    dict(fc="0.8", lw=0, alpha=0.5),
+    dict(fc="0.5", lw=0, alpha=0.5)
+    ]
+POINT_PROPS = [
+    dict(marker="o", mec="k", mfc="none", mew=0.5, ms=3),
+    dict(marker="o", mec="r", mfc="none", mew=0.5, ms=5)
+]
+TEXT_PROPS = [
+    dict(va="top", ha="left", size="x-small", color="0.8", rotation=90),
+    dict(va="top", ha="left", size="x-small", weight="bold", color="0.5", rotation=90)
+]
+
+
+class SolveWavelength:
+    """
+    A peak picker.
+    """
+
+    def __init__(
+        self,
+        axes,
+        extracted_fits,
+        fiber_id,
+        aperture=5,
+        correct_lines=False,
+        ncoadd=5,
+        poly_degree=5,
+        poly_kind="poly",
+        plot=True,
+    ):
+        # define plot attributes
+        self.ax_pix = axes[0]
+        self.ax_wav = axes[1].twiny()
+
+        # define wavelength fitting attributes
+        self.extracted_fits = extracted_fits
+        self.fiber_id = fiber_id
+        self.aperture = aperture
+        self.correct_lines = correct_lines
+        self.ncoadd = ncoadd
+        self.poly_degree = poly_degree
+        self.poly_kind = poly_kind
+        self.plot = plot
+
+        # initialize pixel
+        self.pix = None
+
+        # compute coadded spectrum
+        self._set_spectrum()
+        # open pixel map table
+        self._load_pixmap(fiber_id)
+        # load reference lines table
+        self._load_reflines()
+        # initialize plot
+        self._init_plot()
+
+    def _load_pixmap(self, fiber_id):
+        self.fiber_id = fiber_id
+
+        lamps = "_".join(self.lamps)
+        self.pixmap_table = os.path.join(CONFIG_PATH, "wavelength", f"lvm-pixwav-{lamps}_{self.camera}.txt")
+        self.table_exist = os.path.isfile(self.pixmap_table)
+        # read combined table
+        if self.table_exist:
+            _, ref_fiber, pixels, waves, masks = rss._read_pixwav_map(lamps, self.camera)
+            self.pixmap = np.column_stack((pixels, waves, masks))
+        # read per-lamp table
+        else:
+            pixmaps = []
+            for lamp in self.lamps:
+                _, ref_fiber, pixels, waves, masks = rss._read_pixwav_map(lamp, self.camera)
+                if ref_fiber is not None:
+                    pixmaps.append(np.column_stack((pixels, waves, masks)))
+                else:
+                    log.warning(f"missing reference fiber for {lamp = }")
+                    continue
+
+            # handle empty pixmaps
+            if len(pixmaps) == 0:
+                self.pixmap = np.empty((0, 3))
+                self.nrows = 0
+                self.nmasked = 0
+                return
+
+            # define joint pixel-to-wavelength map
+            self.pixmap = np.concatenate(pixmaps, axis=0)
+            # sort by pixels
+            self.pixmap = self.pixmap[np.argsort(self.pixmap[:,0])]
+        
+        # define number of rows
+        self.nrows = self.pixmap.shape[0]
+        # define number of masked lines
+        self.nmasked = self.pixmap[:, -1].sum()
+
+    def _load_reflines(self):
+        reflines = []
+        for lamp in self.lamps:
+            # define reference lines path
+            self.reflines_table = os.path.join(CONFIG_PATH, "wavelength", f"lvm-reflines-{lamp}.txt")
+            log.info(f"loading reference lines from '{self.reflines_table}")
+            # skip if missing
+            if not os.path.isfile(self.reflines_table):
+                log.warning(f"missing reference lines for {lamp = }")
+                continue
+
+            if os.path.isfile(self.reflines_table):
+                reflines.append(np.genfromtxt(
+                    self.reflines_table, names=True, encoding=None, dtype=None
+                ))
+        
+        if len(reflines) == 0:
+            log.warning("no reference lines found")
+            self.reflines = np.array([], dtype=[("Intensity", float), ("Wavelength", float), ("Spectrum", str)])
+            return
+
+        self.reflines = np.concatenate((reflines), axis=0)
+        self.reflines = self.reflines[np.argsort(self.reflines["Wavelength"])]
+
+        # mask lines out of guess wavelength range
+        log.info(f"selecting pixels within {self.wave_range}")
+        mask_range = (self.wave_range[0] <= self.reflines["Wavelength"])
+        mask_range &= (self.reflines["Wavelength"] <= self.wave_range[1])
+        self.reflines = self.reflines[mask_range]
+
+    def _set_spectrum(self):
+        # read given image
+        log.info(f"loading extracted RSS '{self.extracted_fits}'")
+        spectra = rss.loadRSS(self.extracted_fits)
+        # extract relevant metadata
+        self.lamps = [lamp.lower() for lamp in ARC_LAMPS if spectra._header.get(lamp, "OFF") == "ON"]
+        self.camera = spectra._header["CCD"]
+        self.wave_range = SPEC_CHANNELS[self.camera[0]]
+        # apply pixel mask
+        mask = spectra._mask | np.isnan(spectra._data) | np.isnan(spectra._error)
+        mask |= (spectra._data < 0) | (spectra._error < 0)
+        spectra._data[mask] = 0
+        spectra._error[mask] = 0
+        # select spectra
+        iy = self.fiber_id - self.ncoadd // 2
+        fy = self.fiber_id + self.ncoadd // 2
+        # plot spectrum
+        log.info(f"coadding spectra in the fiber range {iy} -- {fy}")
+        self.xdata = np.arange(spectra._data.shape[1])
+        self.ydata = np.nansum(spectra._data[iy : fy + 1, :], axis=0)
+        self.ydata /= np.nanmax(self.ydata)
+        self.ydata = np.sqrt(np.abs(np.nanmin(self.ydata)) + self.ydata)
+
+    def _fit_wavelength(self):
+        if len(self.pixmap):
+            log.info(f"computing {self.poly_degree}-deg polynomial solution")
+            x, y, m = self.pixmap.T
+            m = m.astype(bool)
+            x_m, y_m = x[m], y[m]
+            if self.poly_kind == "poly":
+                poly = polynomial.Polynomial.fit(x_m, y_m, deg=self.poly_degree)
+            elif self.poly_kind == "legendre":
+                poly = polynomial.Legendre.fit(x_m, y_m, deg=self.poly_degree)
+            elif self.poly_kind == "chebyshev":
+                poly = polynomial.Chebyshev.fit(x_m, y_m, deg=self.poly_degree)
+        else:
+            if self.poly_kind == "poly":
+                poly = np.polynomial.Polynomial.fit(
+                    self.xdata, np.linspace(*self.wave_range, self.xdata.size), deg=1
+                )
+            elif self.poly_kind == "legendre":
+                poly = np.polynomial.Legendre.fit(
+                    self.xdata, np.linspace(*self.wave_range, self.xdata.size), deg=1
+                )
+            elif self.poly_kind == "chebyshev":
+                poly = np.polynomial.Chebyshev.fit(
+                    self.xdata, np.linspace(*self.wave_range, self.xdata.size), deg=1
+                )
+        return poly
+
+    def _draw_mapped_line(self, span_range, x_peak, wavelength, is_good):
+        x_min, x_max = span_range
+        vspan = self.ax_pix.axvspan(x_min, x_max, picker=True, **VSPAN_PROPS[is_good])
+        point = self.ax_pix.plot(
+            [x_peak],
+            [
+                np.nanmax(
+                    self.ydata[(x_min <= self.xdata) & (self.xdata <= x_max)]
+                )
+            ],
+            **POINT_PROPS[is_good]
+        )
+        text = self.ax_pix.text(
+            x_max,
+            0.95,
+            f"{wavelength:.4f}",
+            **TEXT_PROPS[is_good]
+        )
+        return vspan, point, text
+
+    def _init_plot(self):
+        # initialize plot spectrum
+        self.ax_pix.set_title(os.path.basename(self.extracted_fits))
+        (self.line,) = self.ax_pix.step(
+            self.xdata,
+            self.ydata,
+            lw=1,
+            picker=True,
+            pickradius=self.aperture,
+            color="k",
+        )
+
+        # fix table with cross-matching
+        if self.table_exist and self.correct_lines:
+            is_good = self.pixmap[:, -1].astype(bool)
+            pix_spec = spectrum1d._spec_from_lines(self.pixmap[is_good, 0], sigma=2, wavelength=self.xdata)
+
+            log.info(f"running cross matching on {is_good.sum()} good lines")
+            cc, self.bhat, self.mhat = spectrum1d._cross_match(ref_spec=pix_spec, obs_spec=self.ydata, stretch_factors=np.linspace(0.8,1.2,10000), shift_range=[-50,50])
+            log.info(f"max CC = {cc:.2f} for strech = {self.mhat:.2f} and shift = {self.bhat:.2f}")
+            self.pixmap[:, 0] = self.mhat * self.pixmap[:, 0] + self.bhat
+        else:
+            self.mhat = 1.0
+            self.bhat = 0.0
+
+        # create guess wavelength function
+        poly = self._fit_wavelength()
+        waves_guess = poly(self.xdata)
+        self.ax_wav.step(waves_guess, self.ydata, lw=1, color="k")
+        for _, ref_wave, name in self.reflines:
+            self.ax_wav.axvline(ref_wave, lw=1, color="tab:red")
+            self.ax_wav.text(
+                ref_wave,
+                0.95,
+                f"{name}:{ref_wave:.4f}",
+                va="top",
+                ha="left",
+                size="x-small",
+                weight="bold",
+                color="0.5",
+                rotation=90,
+                linespacing=1,
+            )
+        # self.ax_wav.set_xlim(*self.wave_range)
+        self.ax_wav.set_xlabel("wavelength (A)")
+        self.ax_wav.set_ylabel("counts (e-/pix)")
+
+        # adding known peaks
+        log.info(f"displaying {self.pixmap.shape[0]} known lines (including masked)")
+        self.spans = {}
+        for i, (x_peak, wavelength, good) in enumerate(self.pixmap):
+            span_range = x_peak - self.aperture, x_peak + self.aperture
+            try:
+                vspan, point, text = self._draw_mapped_line(span_range, x_peak, wavelength, int(good))
+            except Exception:
+                log.error(f"error drawing line at {x_peak}")
+                continue
+            self.spans[vspan] = (i, point, text)
+        self.ax_pix.set_xlabel("dispersion axis (pixel)")
+        self.ax_pix.set_ylabel("counts (e-/pix)")
+
+        # create text box for wavelength
+        ax_tb = inset_axes(self.ax_pix, width="10%", height="3.5%", loc=1)
+        self.text_box = TextBox(
+            ax_tb, "wavelength for 0:", initial="0.0", textalignment="left"
+        )
+        # input corresponding wavelength
+        self.text_box.on_submit(self._append_wavelength)
+
+    def _find_peak(self):
+        i_min = self.pix - self.aperture
+        i_max = self.pix + self.aperture + 1
+        i_peak = i_min + np.argmax(self.ydata[i_min:i_max])
+        log.info(f"found line peak {i_peak} within {i_min} -- {i_max} aperture")
+
+        window = self.ax_pix.axvspan(
+            self.xdata[i_min], self.xdata[i_max], fc="0.5", lw=0, alpha=0.5
+        )
+        window.set_visible(False)
+
+        return i_peak, window
+
+    def _subsample_peak(self):
+        a = self.i_peak - 1
+        b = self.i_peak
+        c = self.i_peak + 1
+        fa = -self.ydata[a]
+        fb = -self.ydata[b]
+        fc = -self.ydata[c]
+        den = fc - 2 * fb + fa
+        if den != 0:
+            x_peak = c - (b - a) * ((fc - fb) / den + 0.5)
+        else:
+            x_peak = self.i_peak
+
+        (peak_point,) = self.ax_pix.plot(
+            [x_peak], [self.ydata[self.i_peak]], "xr", mew=1, ms=7
+        )
+        peak_point.set_visible(False)
+        log.info(f"subsampling pixel peak to {x_peak}")
+
+        return np.round(x_peak, 2), peak_point
+
+    def _append_wavelength(self, wavelength):
+        new_row = np.atleast_2d([self.x_peak, float(wavelength or 0), 1])
+
+        if new_row[0, 1] == 0 or (self.pixmap == new_row[0]).all(axis=1).any():
+            return None
+        # append wavelength and pixel to table
+        self.pixmap = np.append(self.pixmap, new_row, axis=0)
+        log.info(f"adding (pixel, wavelength) pair: {new_row[0,:-1]}")
+        # update plot
+        self.window.set_visible(True)
+        self.peak_point.set_visible(True)
+        self.ax_pix.text(
+            self.x_peak + self.aperture,
+            0.95,
+            f"{float(wavelength or 0):.4f}",
+            va="top",
+            ha="left",
+            size="xx-small",
+            weight="bold",
+            color="b",
+            rotation=90,
+        )
+
+    def _save_table(self):
+        self.pixmap = self.pixmap[self.pixmap[:, 0].argsort()]
+        # self.pixmap[:, 0] = (self.pixmap[:, 0] - self.bhat) / self.mhat
+
+        new_lines = self.pixmap.shape[0]-self.nrows
+        new_masked = self.pixmap[:, -1].sum()
+        if len(self.pixmap) != 0 and (self.nmasked != new_masked or new_lines != 0 or (~np.isclose(self.mhat, 1.0, rtol=0.01) or self.bhat != 0)):
+            log.info(
+                f"saving pixel table with {new_lines} "
+                f"new lines to '{self.pixmap_table}'"
+            )
+            log.info(f"table shifted by {self.bhat} and stretched by {self.mhat:.2f}")
+            self.nrows = self.pixmap.shape[0]
+            with open(self.pixmap_table, "w") as t:
+                t.write(f"{self.fiber_id}\n")
+                for i in range(self.nrows):
+                    x, y, m = self.pixmap[i]
+                    t.write(f"{x:>.2f} {y:>9.4f} {int(m):>1d}\n")
+        else:
+            log.info(f"no modifications to '{self.pixmap_table}'")
+
+    def on_pick(self, event):
+        if event.artist == self.line and event.mouseevent.button == 1:
+            # take the middle pixel of the recorded ones
+            self.pix = event.ind[len(event.ind) // 2]
+            # capture {x,y} where pick event happened
+            self.xpick = self.xdata[self.pix]
+            self.ypick = self.ydata[self.pix]
+            log.info(f"picking pixel {self.xpick}")
+            # find peak and subsample within given window size
+            self.i_peak, self.window = self._find_peak()
+            self.x_peak, self.peak_point = self._subsample_peak()
+            # update text box label
+            label, value = (
+                self.text_box.ax.get_children()[0],
+                self.text_box.ax.get_children()[1],
+            )
+            label.set_text(f"wavelength for {self.x_peak:.2f}:")
+            value.set_text("")
+        # if right click mouse, toggle line mask
+        elif (mapped_line := self.spans.get(event.artist)) and event.mouseevent.button == 3:
+            vspan = event.artist
+            i, point, text = mapped_line
+            masked_status = int(not self.pixmap[i, -1])
+            self.pixmap[i, -1] = masked_status
+            plt.setp(vspan, **VSPAN_PROPS[masked_status])
+            plt.setp(point, **POINT_PROPS[masked_status])
+            plt.setp(text, **TEXT_PROPS[masked_status])
+
+    def on_close(self, event):
+        # fit the wavelength solution
+        ndata = self.pixmap.shape[0]
+        if ndata < self.poly_degree:
+            log.error(
+                f"not enough points ({ndata}) to "
+                f"fit a {self.poly_degree}-deg polynomial"
+            )
+            if self.nrows > 1:
+                log.info(
+                    "your table will still be stored at "
+                    f"{self.pixmap_table} to save your progress"
+                )
+                self._save_table()
+            return None
+        # store table
+        self._save_table()
+
+        # fitting polynomial solutions
+        x, y, m = self.pixmap.T
+        m = m.astype(bool)
+        poly = self._fit_wavelength()
+        waves_fit = poly(x)
+
+        # coeffs
+        coeffs = poly.convert().coef
+        log.info(f"best fitting coeffs: {coeffs}")
+
+        # display plot
+        fig, ax = plt.subplots(figsize=(20, 20))
+        ax.axhline(ls="--", lw=1, color="0.7")
+        wav_residuals = waves_fit - y
+        pixel_size = coeffs[1]
+        pix_residuals = wav_residuals
+        ax.plot(x[m], pix_residuals[m], "or", mew=1, ms=10, mfc="none")
+        ylim = ax.get_ylim()
+        ax.plot(x[~m], pix_residuals[~m], "o", mec="0.5", mew=1, ms=8, mfc="none")
+        ax.set_ylim(*ylim)
+        log.info(
+            f"pixel size = {pixel_size.mean():.2g} +/- {pixel_size.std():.2g} A "
+            f"(min, max = {pixel_size.min():.2g}, {pixel_size.max():.2g} A)"
+        )
+        log.info(
+            f"residuals = {pix_residuals.mean():.2g} +/- {pix_residuals.std():.2g} pix "
+            f"({wav_residuals.mean():.2g} +/- {wav_residuals.std():.2g} A)"
+        )
+
+        for i in range(x.size):
+            ax.annotate(
+                f"{self.pixmap[i,1]}",
+                xy=(x[i], pix_residuals[i]),
+                xytext=(9, -9),
+                textcoords="offset pixels",
+                color=("b" if m[i] else "0.5"),
+            )
+        ax.set_xlabel("dispersion axis (pixel)")
+        ax.set_ylabel("residuals (angstrom)")
+        fig.show()
+        if self.plot:
+            plot_name = os.path.basename(self.extracted_fits.replace(".fits", ""))
+            log.info(f"saving residuals plot to '{plot_name}' PNG file")
+            fig.savefig(f"{plot_name}.png", bbox_inches="tight")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        prog=os.path.basename(sys.argv[0]),
+        description="build a table for mapping pixels to wavelengths",
+    )
+
+    parser.add_argument(
+        "extracted_fits",
+        metavar="EXTRACTED.fits",
+        help="FITS containing the extracted spectra.",
+    )
+    parser.add_argument(
+        "--aperture",
+        metavar="APERTURE",
+        type=int,
+        help="size in pixels of the tolerance window.",
+        default=5,
+    )
+    parser.add_argument(
+        "--fiber-id",
+        metavar="FIBER_ID",
+        type=int,
+        help="pixel row of reference spectrum.",
+        default=319,
+    )
+    parser.add_argument(
+        "--ncoadd",
+        metavar="NCOADD",
+        type=int,
+        help="number of spectra to coadd to improve SNR.",
+        default=10,
+    )
+    parser.add_argument(
+        "--poly-deg", metavar="DEG", type=int, help="degree of the polynomial to fit.", default=5,
+    )
+    parser.add_argument(
+        "--poly-kind",
+        help="type of polynomial to fit. Defaults to 'poly'.",
+        choices=["poly", "legendre", "chebyshev"],
+        default="poly",
+    )
+    parser.add_argument(
+        "-c",
+        "--correct-lines",
+        action="store_true",
+        default=False,
+        help=(
+            "whether to apply a cross-correlation "
+            "correction to the initial pixel table"
+        ),
+    )
+    parser.add_argument(
+        "-p", "--plot", action="store_true", default=False, help="plots result."
+    )
+    parser.add_argument(
+        "-v", "--verbose", action="store_true", default=False, help="sets verbose mode."
+    )
+
+    args = parser.parse_args()
+
+    # display resulting spectrum
+    fig, axes = plt.subplots(2, 1, figsize=(20, 10), sharey=True, sharex=True)
+
+    # enable events for wavelength solver class
+    solve_wave = SolveWavelength(
+        axes=axes,
+        extracted_fits=args.extracted_fits,
+        aperture=args.aperture,
+        poly_degree=args.poly_deg,
+        poly_kind=args.poly_kind,
+        fiber_id=args.fiber_id,
+        ncoadd=args.ncoadd,
+        correct_lines=args.correct_lines,
+        plot=args.plot,
+    )
+    fig.canvas.mpl_connect("pick_event", solve_wave.on_pick)
+    fig.canvas.mpl_connect("close_event", solve_wave.on_close)
+
+    # change cursor
+    cursor = MultiCursor(
+        fig.canvas,
+        (axes[0], axes[1]),
+        color="0.7",
+        ls="--",
+        lw=0.8,
+        horizOn=True,
+        vertOn=True,
+    )
+
+    plt.tight_layout()
+    plt.show()

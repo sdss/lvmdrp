@@ -1,0 +1,43 @@
+name: lvmPeak
+short: the peaks of each fiber at a given row
+description: |
+  contains a table of the center of each fiber in cross-dispersion direction.
+created_by: imageMethod.findPeaksAuto
+used_by:
+  - imageMethod.tracePeaks
+location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[MJD]/calib/
+naming_convention: |
+  lvm-peak-[CAMERA]-[EXPNUM].fits.gz, where [CAMERA] is one of the nine cameras on the instrument, b1, r1, z1,
+  or b2, r2, z2, or b3, r3, or z3 for the blue, red, nir cameras on each LVM spectrograph, and
+  [EXPNUM] is the (zero-padded) 8-digit exposure number.
+hdu0:
+  name: PRIMARY
+  description: the primary header metadata
+  is_image: true
+  header:
+hdu1:
+  name: PEAKS
+  description: fiber peak positions in pixels along the cross-dispersion axis
+  is_image: false
+  shape: BINARY FITS TABLE
+  columns:
+    FIBERID:
+      name: FIBERID
+      type: int32
+      unit: null
+      description: ID of the fiber
+    PIXEL:
+      name: PIXEL
+      type: int32
+      unit: pix
+      description: cross-dispersion pixel of the peak of the fiber
+    SUBPIXEL:
+      name: SUBPIXEL
+      type: float64
+      unit: null
+      description: sub-pixel sampling of the peak of the fiber
+    MASK:
+      name: MASK
+      type: int32
+      unit: null
+      description: boolean mask for the peak of each fiber (0 = good; 1 = bad)

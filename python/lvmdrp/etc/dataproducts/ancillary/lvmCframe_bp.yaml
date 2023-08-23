@@ -1,0 +1,35 @@
+name: lvmCframe
+short: bias-, dark- and pixel flat-calibrated frame
+description: |
+  this is the frame after bias, dark and pixel flat corrections.
+location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[MJD]/ancillary/
+created_by: imageMethod.basicCalibration
+used_by:
+  - imageMethod.LACosmic
+naming_convention: |
+  lvm-c[IMAGETYP]-[CAMERA]-[EXPNUM].fits.gz, where [IMAGETYP] is the flavor of the exposure bias,
+  dark, pixelflat, fiberflat, arc or science, [CAMERA] is one of the nine cameras on the
+  instrument, b1, r1, z1, or b2, r2, z2, or b3, r3, or z3 for the blue, red, nir cameras on each
+  LVM spectrograph, and [EXPNUM] is the (zero-padded) 8-digit exposure number. The "c" before the
+  frame flavor stands for "bias, dark and pixelflat calibrated".
+access_name: lvm_anc
+hdu0:
+  name: PRIMARY
+  description: primary header metadata
+  is_image: true
+  header:
+hdu1:
+  name: FLUX
+  description: Flux corrected by bias, dark and pixel flat, in electrons
+  is_image: true
+  shape: 4080 x 4080
+hdu2:
+  name: IVAR
+  description: Inverse variance (1/sigma2) for the above
+  is_image: true
+  shape: 4080 x 4080
+hdu3:
+  name: MASK
+  description: Quality bitmask for each fiber pixel
+  is_image: true
+  shape: 4080 x 4080
