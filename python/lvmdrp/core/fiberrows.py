@@ -50,14 +50,14 @@ class FiberRows(Header, PositionTable):
         if data is None:
             self._data = None
         else:
-            self._data = data
+            self._data = data.astype("float32")
             self._fibers = data.shape[0]
             self._pixels = numpy.arange(data.shape[1])
 
         if error is None:
             self._error = None
         else:
-            self._error = numpy.array(error)
+            self._error = numpy.array(error).astype("float32")
 
         if mask is None:
             self._mask = None
@@ -67,7 +67,7 @@ class FiberRows(Header, PositionTable):
         if coeffs is None:
             self._coeffs = None
         else:
-            self._coeffs = coeffs
+            self._coeffs = coeffs.astype("float32")
 
     def __len__(self):
         return self._fibers

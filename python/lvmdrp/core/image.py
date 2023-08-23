@@ -175,11 +175,14 @@ class Image(Header):
         Header.__init__(self, header=header, origin=origin)
         self._data = data
         if self._data is not None:
+            self._data = self._data.astype("float32")
             self._dim = self._data.shape
         else:
             self._dim = None
         self._mask = mask
         self._error = error
+        if self._error is not None:
+            self._error = self._error.astype("float32")
         self._origin = origin
         # individual frames that went into the master creation
         self._individual_frames = individual_frames
@@ -204,8 +207,8 @@ class Image(Header):
             # add error if contained in both
             if self._error is not None and other._error is not None:
                 new_error = numpy.sqrt(
-                    self._error.astype(numpy.float64) ** 2
-                    + other._error.astype(numpy.float64) ** 2
+                    self._error.astype(numpy.float32) ** 2
+                    + other._error.astype(numpy.float32) ** 2
                 )
                 img.setData(error=new_error.astype(numpy.float32))
             else:
@@ -269,8 +272,8 @@ class Image(Header):
             # add error if contained in both
             if self._error is not None and other._error is not None:
                 new_error = numpy.sqrt(
-                    self._error.astype(numpy.float64) ** 2
-                    + other._error.astype(numpy.float64) ** 2
+                    self._error.astype(numpy.float32) ** 2
+                    + other._error.astype(numpy.float32) ** 2
                 )
                 img.setData(error=new_error.astype(numpy.float32))
             else:

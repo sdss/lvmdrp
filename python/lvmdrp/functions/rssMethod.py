@@ -1225,7 +1225,7 @@ def splitFibers_drp(in_rss, splitted_out, contains):
 
 # TODO: for twilight fiber flats, normalize the individual flats before combining to
 # remove the time dependence
-def create_fiberflat(in_rss: str, out_rss: str, median_box: int = 0,
+def create_fiberflat(in_rsss: List[str], out_rsss: List[str], median_box: int = 0,
                      gaussian_kernel: int = 5,
                      poly_deg: int = 0, poly_kind: str = "poly",
                      clip_range: List[float] = None,
@@ -1244,10 +1244,10 @@ def create_fiberflat(in_rss: str, out_rss: str, median_box: int = 0,
 
     Parameters
     ----------
-    in_rss : str
-        path to a extracted and wavelength calibrated continuum exposure
-    out_rss : str
-        path to the output fiberflat
+    in_rss : list
+        paths to a extracted and wavelength calibrated continuum exposures for one spectrograph channel
+    out_rss : list
+        paths to the outputs fiberflat
     median_box : int, optional
         size along dispersion direction (angstroms) of the median box, by default 0
     gaussian_kernel : int, optional
@@ -1266,21 +1266,35 @@ def create_fiberflat(in_rss: str, out_rss: str, median_box: int = 0,
     Returns
     -------
     RSS
-        computed fiberflat
+        computed fiberflat spectrograph-combined
     """
     # read continuum exposure
-    log.info(f"reading continuum exposure from {os.path.basename(in_rss)}")
-    rss = loadRSS(in_rss)
+    wave, data, error, mask = [], [], [], []
+    headers = []
+    fibers = []
+    j = 1
+    for in_rss in in_rsss:
+        log.info(f"reading continuum exposure from {os.path.basename(in_rss)}")
+        rss = loadRSS(in_rss)
+        wave.append(rss._wave)
+        data.append(rss._data)
+        error.append(rss._error)
+        mask.append(rss._mask)
+        fibers.append(numpy.zeros(rss._fibers) + j)
+        headers.append(rss._header)
+        j += 1
+    rss = RSS(wave=numpy.vstack(wave), data=numpy.vstack(data), error=numpy.vstack(error), mask=numpy.vstack(mask))
+    fibers = numpy.vstack(fibers).flatten()
 
     # wavelength calibration check
     if rss._wave is None:
         log.error(f"RSS {os.path.basename(in_rss)} has not been wavelength calibrated")
         return None
-    elif len(rss._wave.shape) != 1:
-        log.error(f"RSS {os.path.basename(in_rss)} has not been resampled to a common wavelength grid")
-        return None
+    # elif len(rss._wave.shape) != 1:
+    #     log.error(f"RSS {os.path.basename(in_rss)} has not been resampled to a common wavelength grid")
+    #     return None
     else:
-        wdelt = rss._wave[1] - rss._wave[0]
+        wdelt = numpy.diff(rss._wave, axis=1).mean()
 
     # copy original data into output fiberflat object
     fiberflat = copy(rss)
@@ -1298,7 +1312,7 @@ def create_fiberflat(in_rss: str, out_rss: str, median_box: int = 0,
         wave_select = (wave_range[0] <= rss._wave) & (wave_range[1] <= rss._wave)
         norm = numpy.median(rss._data[wave_select, :], axis=0)
     else:
-        log.info(f"caculating normalization in full wavelength range ({rss._wave[0]:.2f} - {rss._wave[-1]:.2f} angstroms)")
+        log.info(f"caculating normalization in full wavelength range ({rss._wave.min():.2f} - {rss._wave.max():.2f} angstroms)")
         norm = bn.nanmedian(rss._data, axis=0)
 
     # normalize fibers where norm has valid values
@@ -1334,6 +1348,18 @@ def create_fiberflat(in_rss: str, out_rss: str, median_box: int = 0,
             spec.smoothPoly(deg=poly_deg, poly_kind=poly_kind)
             fiberflat._data[ifiber, :] = spec._data
     
+    ff_data, ff_mask = numpy.ones_like(fiberflat._data), numpy.zeros_like(fiberflat._mask, dtype=bool)
+    for ifiber in range(fiberflat._fibers):
+        wave, data, mask = fiberflat._wave[ifiber], fiberflat._data[ifiber], fiberflat._mask[ifiber]
+        mask |= ~numpy.isfinite(data)
+        try:
+            ff_data[ifiber] = interpolate.interp1d(wave[~mask], data[~mask], bounds_error=False, assume_sorted=True)(wave)
+        except Exception as e:
+            log.warning(f"at fiber {ifiber}: {e}")
+            continue
+    fiberflat._data = ff_data
+    fiberflat._mask = ff_mask
+
     # create diagnostic plots
     log.info("creating diagnostic plots for fiberflat")
     fig, axs = create_subplots(to_display=display_plots, nrows=3, ncols=1, figsize=(12, 15), sharex=True)
@@ -1341,13 +1367,13 @@ def create_fiberflat(in_rss: str, out_rss: str, median_box: int = 0,
     colors = plt.cm.Spectral(numpy.linspace(0, 1, fiberflat._fibers))
     for ifiber in range(fiberflat._fibers):
         # input data
-        axs[0].step(rss._wave, rss._data[ifiber], color=colors[ifiber], alpha=0.5, lw=1)
+        axs[0].step(rss._wave[ifiber], rss._data[ifiber], color=colors[ifiber], alpha=0.5, lw=1)
         # fiberflat
-        axs[1].step(fiberflat._wave, fiberflat._data[ifiber], lw=1, color=colors[ifiber])
+        axs[1].step(fiberflat._wave[ifiber], fiberflat._data[ifiber], lw=1, color=colors[ifiber])
         # corrected fiberflat
-        axs[2].step(fiberflat._wave, rss._data[ifiber] / fiberflat._data[ifiber], lw=1, color=colors[ifiber])
+        axs[2].step(fiberflat._wave[ifiber], rss._data[ifiber] / fiberflat._data[ifiber], lw=1, color=colors[ifiber])
     # plot median spectrum
-    axs[0].step(fiberflat._wave, norm, color="0.1", lw=2, label="median spectrum")
+    axs[0].step(fiberflat._wave[ifiber], norm, color="0.1", lw=2, label="median spectrum")
     # add labels and titles
     axs[0].set_ylabel("counts (e-/s)")
     axs[0].set_title("median spectrum", loc="left")
@@ -1360,44 +1386,52 @@ def create_fiberflat(in_rss: str, out_rss: str, median_box: int = 0,
     # display/save plots
     save_fig(
         fig,
-        product_path=out_rss,
+        product_path=out_rsss[0],
         to_display=display_plots,
         figure_path="qa",
         label="fiberflat"
     )
 
-    # perform some statistic about the fiberflat
-    if fiberflat._mask is not None:
-        select = numpy.logical_not(fiberflat._mask)
-    else:
-        select = fiberflat._data == fiberflat._data
-    min = bn.nanmin(fiberflat._data[select])
-    max = bn.nanmax(fiberflat._data[select])
-    mean = bn.nanmean(fiberflat._data[select])
-    median = bn.nanmedian(fiberflat._data[select])
-    std = bn.nanstd(fiberflat._data[select])
-    log.info(f"fiberflat statistics: {min = :.3f}, {max = :.3f}, {mean = :.2f}, {median = :.2f}, {std = :.3f}")
+    for i in range(len(in_rsss)):
+        log.info(f"writing fiberflat to {os.path.basename(out_rsss[i])}")
+        spec_mask = (fibers == (i+1))
+        wave_cam = fiberflat._wave[spec_mask, :]
+        data_cam = fiberflat._data[spec_mask, :]
+        mask_cam = fiberflat._mask[spec_mask, :]
 
-    log.info(f"writing fiberflat to {os.path.basename(out_rss)}")
-    fiberflat.setHdrValue(
-        "HIERARCH PIPE FLAT MIN", float("%.3f" % (min)), "Mininum fiberflat value"
-    )
-    fiberflat.setHdrValue(
-        "HIERARCH PIPE FLAT MAX", float("%.3f" % (max)), "Maximum fiberflat value"
-    )
-    fiberflat.setHdrValue(
-        "HIERARCH PIPE FLAT AVR", float("%.2f" % (mean)), "Mean fiberflat value"
-    )
-    fiberflat.setHdrValue(
-        "HIERARCH PIPE FLAT MED", float("%.2f" % (median)), "Median fiberflat value"
-    )
-    fiberflat.setHdrValue(
-        "HIERARCH PIPE FLAT STD", float("%.3f" % (std)), "rms of fiberflat values"
-    )
-    fiberflat._header["CUNIT"] = "dimensionless"
-    fiberflat._header["IMAGETYP"] = "fiberflat"
-    fiberflat.writeFitsData(out_rss)
-    
+        fiberflat_cam = RSS(wave=wave_cam, data=data_cam, mask=mask_cam, header=headers[i])
+
+        # perform some statistic about the fiberflat
+        if fiberflat_cam._mask is not None:
+            select = numpy.logical_not(fiberflat_cam._mask)
+        else:
+            select = fiberflat_cam._data == fiberflat_cam._data
+        min = bn.nanmin(fiberflat_cam._data[select])
+        max = bn.nanmax(fiberflat_cam._data[select])
+        mean = bn.nanmean(fiberflat_cam._data[select])
+        median = bn.nanmedian(fiberflat_cam._data[select])
+        std = bn.nanstd(fiberflat_cam._data[select])
+        log.info(f"fiberflat statistics: {min = :.3f}, {max = :.3f}, {mean = :.2f}, {median = :.2f}, {std = :.3f}")
+
+        fiberflat_cam.setHdrValue(
+            "HIERARCH PIPE FLAT MIN", float("%.3f" % (min)), "Mininum fiberflat value"
+        )
+        fiberflat_cam.setHdrValue(
+            "HIERARCH PIPE FLAT MAX", float("%.3f" % (max)), "Maximum fiberflat value"
+        )
+        fiberflat_cam.setHdrValue(
+            "HIERARCH PIPE FLAT AVR", float("%.2f" % (mean)), "Mean fiberflat value"
+        )
+        fiberflat_cam.setHdrValue(
+            "HIERARCH PIPE FLAT MED", float("%.2f" % (median)), "Median fiberflat value"
+        )
+        fiberflat_cam.setHdrValue(
+            "HIERARCH PIPE FLAT STD", float("%.3f" % (std)), "rms of fiberflat values"
+        )
+        fiberflat_cam._header["CUNIT"] = "dimensionless"
+        fiberflat_cam._header["IMAGETYP"] = "fiberflat"
+        fiberflat_cam.writeFitsData(out_rsss[i])
+
     return fiberflat
 
 
@@ -1547,15 +1581,16 @@ def apply_fiberflat(in_rss: str, out_rss: str, in_flat: str, clip_below: float =
         spec_data = rss.getSpec(i)
 
         # interpolate fiberflat to target wavelength grid to fill in missing values
-        flat_resamp = spec_flat.resampleSpec(spec_data._wave, err_sim=0)
+        if not numpy.isclose(spec_flat._wave, spec_data._wave).all():
+            spec_flat = spec_flat.resampleSpec(spec_data._wave, err_sim=0)
         
         # apply clipping
-        select_clip_below = (flat_resamp < clip_below) | numpy.isnan(flat_resamp._data)
-        flat_resamp._data[select_clip_below] = 0
-        flat_resamp._mask[select_clip_below] = True
+        select_clip_below = (spec_flat < clip_below) | numpy.isnan(spec_flat._data)
+        spec_flat._data[select_clip_below] = 0
+        spec_flat._mask[select_clip_below] = True
 
         # correct
-        spec_new = spec_data / flat_resamp
+        spec_new = spec_data / spec_flat
         rss.setSpec(i, spec_new)
     
     # write out corrected RSS

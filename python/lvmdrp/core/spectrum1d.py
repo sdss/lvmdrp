@@ -108,7 +108,7 @@ def _cross_match(
         cross_corr = signal.correlate(obs_spec, stretched_signal1, mode="same")
 
         # Normalize the cross correlation
-        cross_corr = cross_corr.astype(numpy.float64)
+        cross_corr = cross_corr.astype(numpy.float32)
         cross_corr /= norm(stretched_signal1) * norm(obs_spec)
 
         # Get the correlation shifts
@@ -1265,6 +1265,31 @@ class Spectrum1D(Header):
         )
         return spec_out
 
+    def resampleSpec_flux_conserving(self, ref_wave, method="spline",
+        err_sim=500,
+        replace_error=1e10,
+        extrapolate=None):
+
+        old_dlambda = numpy.interp(ref_wave, self._wave[:-1], numpy.diff(self._wave))
+
+        # plt.plot(self._wave, self._data, lw=1, color="k")
+        # plt.plot(self._wave, )
+
+        new_dlambda = numpy.diff(ref_wave, append=ref_wave[-1])
+        new_spec = self.resampleSpec(ref_wave, method=method, err_sim=err_sim, replace_error=replace_error, extrapolate=extrapolate)
+        # print(self._data)
+        # print(new_spec._data)
+        new_spec._data *= old_dlambda / new_dlambda
+        if self._error is not None:
+            new_spec._error *= old_dlambda / new_dlambda
+        
+        # print(old_dlambda, new_dlambda, old_dlambda / new_dlambda)
+        # print(new_spec._data)
+        # plt.plot(ref_wave, new_spec._data, lw=1, color="r")
+        # plt.show()
+
+        return new_spec
+
     def matchFWHM(self, target_fwhm, inplace=False):
         if self._inst_fwhm is not None:
             if self._mask is not None:
@@ -1791,7 +1816,7 @@ class Spectrum1D(Header):
 
             # modell each block of peaks with Gaussians with and without associate errors
             par = numpy.insert(
-                flux.astype(numpy.float64), 0, init_fwhm / 2.354
+                flux.astype(numpy.float32), 0, init_fwhm / 2.354
             )  # set initial paramters
             gaussians_fix_width = fit_profile.Gaussians_width(
                 par, pos_block
@@ -1877,7 +1902,7 @@ class Spectrum1D(Header):
 
                 # modell each block of peaks with Gaussians with and without associate errors
                 par = numpy.insert(
-                    flux.astype(numpy.float64), 0, init_fwhm / 2.354
+                    flux.astype(numpy.float32), 0, init_fwhm / 2.354
                 )  # set initial paramters
                 par = numpy.append(par, init_offset)  # set initial paramters
                 gaussians_offset = fit_profile.Gaussians_offset(
