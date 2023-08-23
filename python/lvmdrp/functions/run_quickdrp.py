@@ -22,6 +22,15 @@ from lvmdrp.functions import skyMethod as sky_tasks
 from lvmdrp.core.constants import SPEC_CHANNELS
 
 
+ORIG_MASTER_DIR = os.getenv("LVM_MASTER_DIR")
+
+
+def get_master_mjd(sci_mjd):
+
+    masters_dir = sorted([f for f in os.listdir(ORIG_MASTER_DIR) if os.path.isdir(os.path.join(ORIG_MASTER_DIR, f))])
+    target_master = list(filter(lambda f: sci_mjd >= int(f), masters_dir))
+    return int(target_master[-1])
+
 @cloup.command(short_help='Run the Quick DRP', show_constraints=True)
 @click.option('-e', '--expnum', type=int, help='an exposure number to reduce')
 @click.option('-f', '--use-fiducial-master', is_flag=True, help='use fiducial master calibration frames')
@@ -37,6 +46,13 @@ def quick_reduction(expnum: int, use_fiducial_master: bool = False) -> None:
     sci_mjd = sci_metadata["mjd"].unique()[0]
     sci_expnum = sci_metadata["expnum"].unique()[0]
     log.info(f"Running Quick DRP for tile {sci_tileid} at MJD {sci_mjd} with exposure number {sci_expnum}")
+
+    master_mjd = get_master_mjd(sci_mjd)
+    log.info(f"target master MJD: {master_mjd}")
+
+    # overwrite fiducial masters dir
+    os.environ["LVM_MASTER_DIR"] = os.path.join(ORIG_MASTER_DIR, f"{master_mjd}")
+    log.info(f"target master path: {os.getenv('LVM_MASTER_DIR')}")
 
     # make sure only one exposure number is being reduced
     sci_metadata.query("expnum == @sci_expnum", inplace=True)
