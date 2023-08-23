@@ -108,7 +108,7 @@ def _cross_match(
         cross_corr = signal.correlate(obs_spec, stretched_signal1, mode="same")
 
         # Normalize the cross correlation
-        cross_corr = cross_corr.astype(numpy.float64)
+        cross_corr = cross_corr.astype(numpy.float32)
         cross_corr /= norm(stretched_signal1) * norm(obs_spec)
 
         # Get the correlation shifts
@@ -1791,7 +1791,7 @@ class Spectrum1D(Header):
 
             # modell each block of peaks with Gaussians with and without associate errors
             par = numpy.insert(
-                flux.astype(numpy.float64), 0, init_fwhm / 2.354
+                flux.astype(numpy.float32), 0, init_fwhm / 2.354
             )  # set initial paramters
             gaussians_fix_width = fit_profile.Gaussians_width(
                 par, pos_block
@@ -1877,7 +1877,7 @@ class Spectrum1D(Header):
 
                 # modell each block of peaks with Gaussians with and without associate errors
                 par = numpy.insert(
-                    flux.astype(numpy.float64), 0, init_fwhm / 2.354
+                    flux.astype(numpy.float32), 0, init_fwhm / 2.354
                 )  # set initial paramters
                 par = numpy.append(par, init_offset)  # set initial paramters
                 gaussians_offset = fit_profile.Gaussians_offset(
