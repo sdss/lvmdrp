@@ -107,8 +107,8 @@ def quick_reduction(expnum: int, use_fiducial_master: bool = False) -> None:
         rss_tasks.apply_fiberflat(in_rss=wsci_path, out_rss=wsci_path, in_flat=mflat_path)
 
         # interpolate sky fibers
-        sky_tasks.interpolate_sky(in_rss=wsci_path, out_sky=wskye_path, in_flat=mflat_path, which="e")
-        sky_tasks.interpolate_sky(in_rss=wsci_path, out_sky=wskyw_path, in_flat=mflat_path, which="w")
+        sky_tasks.interpolate_sky(in_rss=wsci_path, out_sky=wskye_path, which="e")
+        sky_tasks.interpolate_sky(in_rss=wsci_path, out_sky=wskyw_path, which="w")
 
         # quick sky subtraction
         sky_tasks.quick_sky_subtraction(in_rss=wsci_path, out_rss=wsci_path, in_skye=wskye_path, in_skyw=wskyw_path)
