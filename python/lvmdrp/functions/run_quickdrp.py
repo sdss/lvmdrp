@@ -28,6 +28,7 @@ ORIG_MASTER_DIR = os.getenv("LVM_MASTER_DIR")
 def get_master_mjd(sci_mjd):
 
     masters_dir = sorted([f for f in os.listdir(ORIG_MASTER_DIR) if os.path.isdir(os.path.join(ORIG_MASTER_DIR, f))])
+    masters_dir = [f for f in masters_dir if f[0]!='.']
     target_master = list(filter(lambda f: sci_mjd >= int(f), masters_dir))
     return int(target_master[-1])
 
