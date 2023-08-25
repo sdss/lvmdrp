@@ -4,82 +4,72 @@ The LVM DRP is based in a collection of routines from [Py3D](https://github.com/
 
 ## Prerequisites
 
-To properly run the DRP you need to prepare your environment by following these steps:
+This code is being developed/tested in an Ubuntu-based OS, using **Python 3.8**. We recommend you use a Python environment manager such as Anaconda or similar, in order to work on the same python version and to avoid cluttering the OS's python installation. We assume you are a member of the [Github sdss organization](https://github.com/sdss). We also assume that you have an SSH key set up on your local machine and registered in your Github account. If not, please follow [these instructions](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/adding-a-new-ssh-key-to-your-github-account) to set up one.
+
+To properly install and run the DRP you'll need to follow these steps first:
 
 1. Download the current version of [LVM Core](https://github.com/sdss/lvmcore):
 
     ```bash
-    git clone git@github.com:sdss/lvmcore.git     # assuming you have an SSH key
-    ```
-    or
-    ```bash
-    git clone https://github.com/sdss/lvmcore.git # using HTTPS
+    git clone git@github.com:sdss/lvmcore.git
     ```
 
-    and set the environment variable `LVM_CORE_DIR` pointing to the root directory `lvmcore` in your `.bashrc` (or equivalent):
+    and set the environment variable `LVMCORE_DIR` pointing to the root directory `lvmcore` in your `.bashrc` (or equivalent):
 
     ```bash
-    export LVM_CORE_DIR="path/to/lvmcore"
+    export LVMCORE_DIR="path/to/lvmcore"
     ```
 
-2. Define the environment variable for your mirror of the SAS:
+2. Define this environment variable in your `.bashrc` (or equivalent) to point to your local mirror of the SAS:
 
     ```bash
     export SAS_BASE_DIR="path/to/sas-root-directory"
     ```
-
-
-## Installation
-
-This code is being developed/tested in a Ubuntu-based OS, using **Python 3.8**. We recommend to use a Python environment manager such as Anaconda or similar, in order to avoid cluttering the OS's python installation. We assume you are a member of the [Github sdss organization](https://github.com/sdss). We also assume that you have an SSH key configure on your local machine and registered in your Github account. If not, please follow [these instructions](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/adding-a-new-ssh-key-to-your-github-account) to set up one.
-
-If you are planning on installing the DRP on a different OS, please read the [troubleshooting section](#troubleshooting) before you continue with the steps below.
-
-To install the DRP along with its dependencies, you need to run the following steps:
-
-1. Create a **Python 3.8** environment. This is optional, but strongly recommended. With conda this is done like this:
-   
-    ```bash
-    conda create -n lvmdrp python=3.8
-    ```
-
-2. Make sure you are in the intended **Python 3.8** environment and directory:
     
-    ```bash
-    conda activate lvmdrp
-    ```
-
-3. Clone the Github repository:
-    
-    ```bash
-    git clone git@github.com:sdss/lvmdrp.git     # assuming you have an SSH key
-    ```
-    or
-
-    ```bash
-    git clone https://github.com/sdss/lvmdrp.git # using HTTPS
-    ```
-
-4. Go into the `lvmdrp` directory:
-    
-    ```bash
-    cd lvmdrp
-    ```
-
-
-5. Install the DRP package in the current python environment (see [contributing](#contributing-to-lvm-drp-development) section below for a replacement of this step):
-    
-    ```bash
-    pip install .
-    ```
-
-6. Download the current set of calibrations from the [SAS sandbox](https://data.sdss5.org/sas/sdsswork/lvm/sandbox/calib/) and add to your `.bashrc` (or equivalent) the following definition:
+3. Download the current set of calibrations from the [SAS sandbox](https://data.sdss5.org/sas/sdsswork/lvm/sandbox/calib/) and add to your `.bashrc` (or equivalent) the following definition:
 
     ```bash
     export LVM_MASTER_DIR="path/to/master-calibrations"
     ```
 
     where `master-calibrations` contains only MJD folders.
+
+4. Create a new python environment. This is optional, but strongly recommended. With conda this is done like this:
+   
+    ```bash
+    conda create -n lvmdrp python=3.8
+    ```
+
+5. Make sure you are in the intended python environment and directory:
+    
+    ```bash
+    conda activate lvmdrp
+    ```
+
+## Installation
+
+If you are planning on installing the DRP on a system other than Ubuntu (e.g., MacOS), please read the [troubleshooting section](#troubleshooting) before you continue with the steps below.
+
+To install the DRP along with its dependencies, you need to run the following steps:
+
+1. Clone the Github repository:
+    
+    ```bash
+    git clone git@github.com:sdss/lvmdrp.git
+    ```
+
+2. Go into the `lvmdrp` directory:
+    
+    ```bash
+    cd lvmdrp
+    ```
+
+
+3. Install the DRP package in the current python environment (see [contributing](#contributing-to-lvm-drp-development) section below for a replacement of this step):
+    
+    ```bash
+    pip install .
+    ```
 
 ## Testing the installation
 
@@ -92,19 +82,19 @@ If you are planning on using the sky module, you will need to install the ESO ro
 - https://wiki.sdss.org/display/LVM/ESO+skycorr
 - https://wiki.sdss.org/display/LVM/ESO+Sky+Model
 
-respectively. Additionaly, you'll need to set following the environment variable on your `.bashrc` (or equivalent):
+respectively. Additionaly, you'll need to set following the environment variable in your `.bashrc` (or equivalent):
 
 ```bash
 export LVM_ESOSKY_DIR="path/to/eso-routines"
 ```
 
-where `eso-routines` is a directory containing the root directories of both, the `skycorr` and the ESO sky model installations.
+where `eso-routines` is a directory containing the root directories of both, the *skycorr* and the *ESO sky model* installations.
 
-## Creating Test Data
+## Creating test data
 
 We encourage the reader to use the [LVM data simulator](https://github.com/sdss/lvmdatasimulator) to generate data for testing the DRP. But if you want to skip that step, we have already some simulations produced using the same simulator, so you don't have to run the simulator yourself, which can be computationally demanding in the case of 2D simulations.
 
-If you follow the [examples](#examples) below, you will have access to the above mentioned simulations.
+If you follow the examples below, you will have access to the above mentioned simulations.
 
 ## Examples
 
@@ -162,7 +152,7 @@ In some MacOS versions there may be the need to perform extra installation steps
 
 Some Mac users have found the folloring error while importing `CSafeLoader` from the PyYaml package (~6.0):
 
-```python
+```
 AttributeError: module 'yaml' has no attribute 'CSafeLoader'
 ```
 
