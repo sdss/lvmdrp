@@ -263,8 +263,8 @@ def save_fig(fig, product_path, to_display, figure_path=None, label=None, fmt="p
     # save fig and close if requested
     fig.savefig(fig_path, bbox_inches="tight")
     if to_display:
-        plt.show()
         plt.tight_layout()
+        plt.show()
     else:
         plt.close(fig)
 
