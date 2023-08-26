@@ -233,7 +233,7 @@ def plot_wavesol_coeffs(ypix, coeffs, axs, title=None, labels=False, to_display=
     
     fig = axs[0].get_figure()
     if labels:
-        fig.supxlabel("X (pixel)")
+        fig.supxlabel("Fiber ID")
     if title is not None:
         fig.suptitle(title)
     

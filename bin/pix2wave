@@ -423,7 +423,7 @@ class SolveWavelength:
         ax.axhline(ls="--", lw=1, color="0.7")
         wav_residuals = waves_fit - y
         pixel_size = coeffs[1]
-        pix_residuals = wav_residuals
+        pix_residuals = wav_residuals / pixel_size
         ax.plot(x[m], pix_residuals[m], "or", mew=1, ms=10, mfc="none")
         ylim = ax.get_ylim()
         ax.plot(x[~m], pix_residuals[~m], "o", mec="0.5", mew=1, ms=8, mfc="none")
@@ -446,7 +446,7 @@ class SolveWavelength:
                 color=("b" if m[i] else "0.5"),
             )
         ax.set_xlabel("dispersion axis (pixel)")
-        ax.set_ylabel("residuals (angstrom)")
+        ax.set_ylabel("residuals (pixel)")
         fig.show()
         if self.plot:
             plot_name = os.path.basename(self.extracted_fits.replace(".fits", ""))
