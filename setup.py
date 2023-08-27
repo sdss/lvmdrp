@@ -1,8 +1,7 @@
 # encoding: utf-8
 #
 # setup.py
-#
-# BUG: this script should take an optional master configuration template, other wise use the one shipped with the package
+
 
 from __future__ import absolute_import, division, print_function
 
@@ -74,7 +73,7 @@ def parse_requirements(reqfile_path):
 def get_requirements():
     """Get the proper requirements file based on the optional argument"""
 
-    requirements_file = os.path.join(os.path.dirname(__file__), "requirements_all.txt")
+    requirements_file = os.path.join(os.path.dirname(__file__), "requirements.txt")
     install_requires = parse_requirements(requirements_file)
     return install_requires
 
