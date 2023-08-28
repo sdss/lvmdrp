@@ -9,7 +9,7 @@ from cloup.constraints import mutually_exclusive, RequireExactly, IsSet, If
 from astropy.io import fits
 from lvmdrp.functions.run_drp import run_drp, get_config_options, reduce_file
 from lvmdrp.functions.imageMethod import preproc_raw_frame
-from lvmdrp.functions.skyMethod import installESOSky_drp, configureSkyModel_drp
+from lvmdrp.functions.skyMethod import configureSkyModel_drp
 from lvmdrp.utils.metadata import get_frames_metadata, get_master_metadata
 
 from lvmdrp.functions.run_quickdrp import quick_reduction
@@ -92,16 +92,6 @@ def preprocess(filename, flavor):
 @click.group('sky', short_help='Run routines related to sky subtraction')
 def skycli():
     pass
-
-
-@skycli.command('install', short_help='Install the ESO sky routines')
-@click.option('-c', '--reinstall-skycorr', is_flag=True, default=False, show_default=True,
-              help='Flag to reinstall the ESO skycorr routines')
-@click.option('-m', '--reinstall-skymodel', is_flag=True, default=False, show_default=True,
-              help='Flag to resinstall the ESO sky models')
-def sky_install(reinstall_skycorr, reinstall_skymodel):
-    """ Install the ESO skycorr and skymodel routines """
-    installESOSky_drp(reinstall_skycorr=reinstall_skycorr, reinstall_skymodel=reinstall_skymodel)
 
 
 @skycli.command('configure', short_help='Configure the ESO sky routines')
