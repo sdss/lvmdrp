@@ -152,7 +152,9 @@ class SolveWavelength:
         # extract relevant metadata
         self.lamps = [lamp.lower() for lamp in ARC_LAMPS if spectra._header.get(lamp, "OFF") == "ON"]
         self.camera = spectra._header["CCD"]
-        self.wave_range = SPEC_CHANNELS[self.camera[0]]
+        self.wave_range = list(SPEC_CHANNELS[self.camera[0]])
+        self.wave_range[0] -= 100
+        self.wave_range[1] += 100
         # apply pixel mask
         mask = spectra._mask | np.isnan(spectra._data) | np.isnan(spectra._error)
         mask |= (spectra._data < 0) | (spectra._error < 0)
@@ -258,7 +260,8 @@ class SolveWavelength:
                 rotation=90,
                 linespacing=1,
             )
-        # self.ax_wav.set_xlim(*self.wave_range)
+        self.ax_pix.set_xlim(0, self.xdata.size)
+        self.ax_wav.set_xlim(*self.wave_range)
         self.ax_wav.set_xlabel("wavelength (A)")
         self.ax_wav.set_ylabel("counts (e-/pix)")
 
@@ -427,6 +430,7 @@ class SolveWavelength:
         ax.plot(x[m], pix_residuals[m], "or", mew=1, ms=10, mfc="none")
         ylim = ax.get_ylim()
         ax.plot(x[~m], pix_residuals[~m], "o", mec="0.5", mew=1, ms=8, mfc="none")
+        ax.set_xlim(0, x.max())
         ax.set_ylim(*ylim)
         log.info(
             f"pixel size = {pixel_size.mean():.2g} +/- {pixel_size.std():.2g} A "
