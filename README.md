@@ -102,6 +102,31 @@ We encourage the reader to use the [LVM data simulator](https://github.com/sdss/
 
 If you follow the examples below, you will have access to the above mentioned simulations.
 
+## Running the DRP
+
+You can run the quick DRP on your shell like:
+
+```bash
+drp quick-reduction -fe <expnum>
+```
+
+This requires that you have correctly setup your environment by following the instructions in the [Prerequisites](#prerequisites) and [Installation](#installation) sections.
+
+Here is a list of reduction steps carried out by the quick DRP:
+
+- **Preprocessing**: overscan trimming and subtraction and pixel masking
+- **Detrending**: bias and dark subtraction, Poisson error calculation, flatfielding (pixel level, when available), units conversion (e-/s)
+- **Extraction**: aperture-based 1D spectra extraction
+- **Wavelength calibration**: pixel-to-wavelength mapping and LSF function per fiber
+- **Fiberflat**: flatfielding (fiber level)
+- **Sky interpolation**: sky fibers interpolation along fiber ID, per sky telescope
+- **Sky subtraction**: sky subtraction of inverse-distance weighted master sky
+- **Wavelength resampling**: wavelength resampling to a common grid (~0.5 Angstrom)
+- **Channel combination**: stitching of spectrographs' channels
+- **Spectrograph combination**: stacking of spectrograph fibers
+
+The main outputs will follow the SAS naming conventions. See the [Data Reduction Pipeline](https://wiki.sdss.org/pages/viewpage.action?spaceKey=LVM&title=Data+Reduction+Pipeline+development+and+testing), sections **3.2** and **3.3**.
+
 ## Examples
 
 You will find tutorial notebooks to run different DRP routines in the [examples](https://github.com/sdss/lvmdrp/tree/master/examples) folder. Here is you will find Jupyter Notebooks that illustrate different tasks in the DRP:
