@@ -73,7 +73,13 @@ To install the DRP along with its dependencies, you need to run the following st
 
 ## Testing the installation
 
-<!-- write a script to test everything finished correctly with the installation -->
+There is a tool to quickly verify that all the needed environment variables are in place. You can run it like this:
+
+```bash
+envcheck
+```
+
+if the variables are correctly set, you should see the values of each and a successful message.
 
 ## ESO sky routines installation and configuration
 
@@ -119,7 +125,7 @@ For those willing to contribute by coding, there are some steps to streamline th
 1. Make sure you install the pipeline on your environment in edit (developer) mode, like this:
 
     ```bash
-    pip install -e .
+    pip install -e .[dev]
     ```
 
 2. Before you start coding on a new feature/bug-fix, make sure your **local** `master` branch is up to date:
