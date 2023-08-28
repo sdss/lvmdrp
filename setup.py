@@ -2,7 +2,7 @@
 #
 # setup.py
 
-from setuptools import setup
+from setuptools import setup, find_packages
 
 
 NAME = "lvmdrp"
@@ -50,7 +50,7 @@ def run():
                 "ipywidgets>=8.1.0"
             ]
         },
-        packages=["lvmdrp"],
+        packages=find_packages(where="python"),
         package_dir={"": "python"},
         scripts=["bin/drp", "bin/pix2wave", "bin/envcheck"],
         classifiers=[
