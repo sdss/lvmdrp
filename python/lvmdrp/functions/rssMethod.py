@@ -483,7 +483,7 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
     )
     # create plot of wavelength fitting residuals
     fig, ax = create_subplots(to_display=display_plots, figsize=(15, 7))
-    axs = plot_wavesol_residuals(lines_pixels=pixel, lines_waves=ref_lines, model_waves=wave_cls(wave_coeffs[ref_fiber])(pixel), ax=ax, labels=True)
+    axs = plot_wavesol_residuals(lines_pixels=cent_wave[ref_fiber], lines_waves=ref_lines, model_waves=wave_cls(wave_coeffs[ref_fiber])(cent_wave[ref_fiber]), ax=ax, labels=True)
     save_fig(
         fig,
         product_path=out_wave,
