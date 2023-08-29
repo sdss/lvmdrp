@@ -77,6 +77,40 @@ __all__ = [
 ]
 
 
+def _nonlinearity_correction(nl_table: Table, gain_value: float, data: Image, iquad: int) -> Image:
+    """calculates non-linearity correction for input data
+
+    Parameters
+    ----------
+    gain_value : float
+        gain value of the input data
+    data : Image
+        input data
+
+    Returns
+    -------
+    Image
+        gain map
+
+    """
+    # implement non-linearity correction
+    # NOTE nl_table: ADU (OS and bias subtracted), corr_b1_q1, ..., corr_z3_q4
+    camera = data._header["CCD"]
+
+    if nl_table is not None:
+        x = nl_table["ADU"]
+        y = nl_table[f"corr_{camera}_q{iquad}"]
+        nl_interp = interpolate.interp1d(x, y, kind="linear")
+
+        z = gain_value / nl_interp(data._data.flatten())
+        gain_map = Image(data=z.reshape(data._data.shape))
+    else:
+        log.error("cannot apply non-linearity correction")
+        log.info(f"using constant gain value {gain_value}")
+        gain_map = Image(data=numpy.ones(data._data.shape)) * gain_value
+    return gain_map
+
+
 def detCos_drp(
     image,
     out_image,
@@ -3112,6 +3146,7 @@ def detrend_frame(
     in_bias: str = None,
     in_dark: str = None,
     in_pixelflat: str = None,
+    in_nonlinearity: str = None,
     in_slitmap: Table = None,
     calculate_error: bool = True,
     replace_with_nan: bool = True,
@@ -3132,7 +3167,8 @@ def detrend_frame(
     in_dark : str, optional
         path to dark frame, by default ""
     in_pixelflat : str, optional
-        path to pixelflat frame, by default ""
+    in_nonlinearity : str, optional
+        path to non-linearity correction table, by default None
     in_slitmap: fits.BinTableHDU, optional
         FITS binary table containing the slitmap to be added to `out_image`, by default None
     calculate_error : bool, optional
@@ -3202,6 +3238,12 @@ def detrend_frame(
         log.info("subtracting master bias")
     bcorr_img = org_img - mbias_img
 
+    # read in non_linearity correction table
+    if in_nonlinearity is not None:
+        nl_table = Table(pyfits.getdata(in_nonlinearity, ext=1))
+    else:
+        nl_table = None
+
     # calculate Poisson errors
     log.info("calculating Poisson errors per quadrant")
     for i, quad_sec in enumerate(bcorr_img.getHdrValue("AMP? TRIMSEC").values()):
@@ -3210,8 +3252,11 @@ def detrend_frame(
         # extract quadrant gain and rdnoise values
         gain = quad.getHdrValue(f"AMP{i+1} GAIN")
         rdnoise = quad.getHdrValue(f"AMP{i+1} RDNOISE")
+
+        # non-linearity correction
+        gain_map = _nonlinearity_correction(nl_table, gain, quad, iquad=i+1)
         # gain-correct quadrant
-        quad *= gain
+        quad *= gain_map
 
         quad.computePoissonError(rdnoise)
         bcorr_img.setSection(section=quad_sec, subimg=quad, inplace=True)
