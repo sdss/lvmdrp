@@ -280,12 +280,12 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
         pix_spec = _spec_from_lines(pixel, sigma=2, wavelength=arc._pixels)
 
         # fix cc_max_shift
-        cc_max_shift = max(cc_max_shift, 50)
+        cc_max_shift = min(cc_max_shift, 50)
         # cross-match spectrum and pixwav map
         cc, bhat, mhat = _cross_match(
             ref_spec=pix_spec,
             obs_spec=arc._data[ref_fiber],
-            stretch_factors=numpy.linspace(0.8,1.2,10000),
+            stretch_factors=numpy.linspace(0.9,1.1,10000),
             shift_range=[-cc_max_shift, cc_max_shift]
         )
         
