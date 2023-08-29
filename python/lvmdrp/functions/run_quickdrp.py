@@ -61,6 +61,7 @@ def quick_reduction(expnum: int, use_fiducial_master: bool = False) -> None:
 
     # define arc lamps configuration per spectrograph channel
     arc_lamps = {"b": "hgne", "r": "neon", "z": "neon"}
+    arc_lamps = {"b": "neon_hgne_argon_xenon", "r": "neon_hgne_argon_xenon", "z": "neon_hgne_argon_xenon"}
 
     # run reduction loop for each science camera exposure
     for sci in sci_metadata.to_dict("records"):
