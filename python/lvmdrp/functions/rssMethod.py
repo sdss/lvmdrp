@@ -237,24 +237,29 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
     arc._error[mask] = 0
 
     # read reference lines
-    pixel_list, ref_lines_list, use_line_list = [], [], []
-    for lamp in lamps:
-        log.info(f"loading reference lines for {lamp = } in {camera = }")
-        _, ref_fiber_, pixel, ref_lines, use_line = _read_pixwav_map(lamp, camera)
+    ilamps = [lamp.lower() for lamp in ARC_LAMPS]
+    lamps_label = "_".join(sorted(lamps, key=lambda x: ilamps.index(x)))
+    _, ref_fiber_, pixel, ref_lines, use_line = _read_pixwav_map(lamps_label, camera)
+    # if no reference file for combined lamps exist, read individual files
+    if ref_fiber is None:
+        pixel_list, ref_lines_list, use_line_list = [], [], []
+        for lamp in lamps:
+            log.info(f"loading reference lines for {lamp = } in {camera = }")
+            _, ref_fiber_, pixel, ref_lines, use_line = _read_pixwav_map(lamp, camera)
 
-        # remove masked lines
-        pixel = pixel[use_line]
-        ref_lines = ref_lines[use_line]
-        use_line = use_line[use_line]
+            # remove masked lines
+            pixel = pixel[use_line]
+            ref_lines = ref_lines[use_line]
+            use_line = use_line[use_line]
 
-        pixel_list.append(pixel)
-        ref_lines_list.append(ref_lines)
-        use_line_list.append(use_line)
+            pixel_list.append(pixel)
+            ref_lines_list.append(ref_lines)
+            use_line_list.append(use_line)
 
-    # combine all reference lines into a long array
-    pixel = numpy.concatenate(pixel_list)
-    ref_lines = numpy.concatenate(ref_lines_list)
-    use_line = numpy.concatenate(use_line_list)
+        # combine all reference lines into a long array
+        pixel = numpy.concatenate(pixel_list)
+        ref_lines = numpy.concatenate(ref_lines_list)
+        use_line = numpy.concatenate(use_line_list)
 
     # sort lines by pixel position
     sort = numpy.argsort(pixel)
