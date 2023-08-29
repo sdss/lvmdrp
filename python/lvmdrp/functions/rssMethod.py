@@ -261,6 +261,11 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
     pixel = pixel[sort]
     ref_lines = ref_lines[sort]
     use_line = use_line[sort]
+
+    # remove bad lines
+    pixel = pixel[use_line]
+    ref_lines = ref_lines[use_line]
+    use_line = use_line[use_line]
     nlines = len(pixel)
 
     # apply cc correction to lines if needed
