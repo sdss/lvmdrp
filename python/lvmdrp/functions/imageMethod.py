@@ -3148,6 +3148,7 @@ def detrend_frame(
     in_pixelflat: str = None,
     in_nonlinearity: str = None,
     in_slitmap: Table = None,
+    convert_to_e: bool = True,
     calculate_error: bool = True,
     replace_with_nan: bool = True,
     reject_cr: bool = True,
@@ -3163,24 +3164,25 @@ def detrend_frame(
     out_image : str
         path to output detrended image
     in_bias : str, optional
-        path to bias frame, by default ""
+        path to bias frame, by default None
     in_dark : str, optional
-        path to dark frame, by default ""
+        path to dark frame, by default None
     in_pixelflat : str, optional
+        path to pixelflat frame, by default None
     in_nonlinearity : str, optional
         path to non-linearity correction table, by default None
     in_slitmap: fits.BinTableHDU, optional
         FITS binary table containing the slitmap to be added to `out_image`, by default None
     calculate_error : bool, optional
-        whether to calculate Poisson errors or not, by default "1"
+        whether to calculate Poisson errors or not, by default True
     replace_with_nan : bool, optional
-        whether to replace or not NaN values by zeros, by default "0"
+        whether to replace or not NaN values by zeros, by default True
     reject_cr : bool, optional
-        whether to reject or not cosmic rays from detrended image, by default "1"
+        whether to reject or not cosmic rays from detrended image, by default True
     median_box : tuple, optional
         size of the median box to refine pixel mask, by default [0,0]
     display_plots : str, optional
-        whether to show plots on display or not, by default "0"
+        whether to show plots on display or not, by default False
     """
 
     # TODO: Normalization of flats. This is for combining them right? Need to make sure median is not dominated by diferences in background.
@@ -3244,36 +3246,40 @@ def detrend_frame(
     else:
         nl_table = None
 
-    # calculate Poisson errors
-    log.info("calculating Poisson errors per quadrant")
-    for i, quad_sec in enumerate(bcorr_img.getHdrValue("AMP? TRIMSEC").values()):
-        # extract quadrant image
-        quad = bcorr_img.getSection(quad_sec)
-        # extract quadrant gain and rdnoise values
-        gain = quad.getHdrValue(f"AMP{i+1} GAIN")
-        rdnoise = quad.getHdrValue(f"AMP{i+1} RDNOISE")
+    # convert to electrons if requested
+    if convert_to_e:
+        # calculate Poisson errors
+        log.info("calculating Poisson errors per quadrant")
+        for i, quad_sec in enumerate(bcorr_img.getHdrValue("AMP? TRIMSEC").values()):
+            # extract quadrant image
+            quad = bcorr_img.getSection(quad_sec)
+            # extract quadrant gain and rdnoise values
+            gain = quad.getHdrValue(f"AMP{i+1} GAIN")
+            rdnoise = quad.getHdrValue(f"AMP{i+1} RDNOISE")
 
-        # non-linearity correction
-        gain_map = _nonlinearity_correction(nl_table, gain, quad, iquad=i+1)
-        # gain-correct quadrant
-        quad *= gain_map
+            # non-linearity correction
+            gain_map = _nonlinearity_correction(nl_table, gain, quad, iquad=i+1)
+            # gain-correct quadrant
+            quad *= gain_map
 
-        quad.computePoissonError(rdnoise)
-        bcorr_img.setSection(section=quad_sec, subimg=quad, inplace=True)
-        log.info(
-            f"median error in quadrant {i+1}: {numpy.nanmedian(quad._error):.2f} (e-)"
-        )
+            quad.computePoissonError(rdnoise)
+            bcorr_img.setSection(section=quad_sec, subimg=quad, inplace=True)
+            log.info(f"median error in quadrant {i+1}: {numpy.nanmedian(quad._error):.2f} (e-)")
 
-    # convert to electron/s (avoid zero division)
-    bcorr_img /= max(1, exptime)
-    bcorr_img.setHdrValue("BUNIT", "electron/s", "physical units of the image")
+        # convert to electron/s (avoid zero division)
+        bcorr_img /= max(1, exptime)
+        bcorr_img.setHdrValue("BUNIT", "electron/s", "physical units of the image")
+    else:
+        # convert to ADU
+        log.info("leaving original ADU units")
+        bcorr_img.setHdrValue("BUNIT", "adu", "physical units of the image")
 
     # complete image detrending
     if in_dark:
         log.info("subtracting master dark")
     elif in_dark and in_pixelflat:
         log.info("subtracting master dark and dividing by master pixelflat")
-    detrended_img = (bcorr_img - mdark_img) / mflat_img
+    detrended_img = (bcorr_img - mdark_img.convertUnit(to=bcorr_img._header["BUNIT"])) / mflat_img
 
     # propagate pixel mask
     log.info("propagating pixel mask")
@@ -3283,7 +3289,7 @@ def detrend_frame(
     detrended_img._mask = numpy.logical_or(detrended_img._mask, infpixels)
 
     # reject cosmic rays
-    if reject_cr:
+    if convert_to_e and reject_cr:
         log.info("rejecting cosmic rays")
         ccd = CCDData(
             detrended_img._data,
