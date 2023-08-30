@@ -73,7 +73,13 @@ To install the DRP along with its dependencies, you need to run the following st
 
 ## Testing the installation
 
-<!-- write a script to test everything finished correctly with the installation -->
+There is a tool to quickly verify that all the needed environment variables are in place. You can run it like this:
+
+```bash
+envcheck
+```
+
+if the variables are correctly set, you should see the values of each and a successful message.
 
 ## ESO sky routines installation and configuration
 
@@ -89,6 +95,47 @@ export LVM_ESOSKY_DIR="path/to/eso-routines"
 ```
 
 where `eso-routines` is a directory containing the root directories of both, the *skycorr* and the *ESO sky model* installations.
+
+## Running the DRP
+
+Say you want to reduce the `<expnum>` under `<mjd>`. You can do it by running in the shell the following:
+
+```bash
+drp metadata regenerate -m <mjd>
+drp quick-reduction -fe <expnum>
+```
+
+This requires that you have correctly setup your environment by following the instructions in the [Prerequisites](#prerequisites) and [Installation](#installation) sections.
+
+The `drp metadata regenerate` command will make sure that you have you target frames metadata in place, the DRP relies on this data to be able to correctly match calibration frames with your target science frames. **NOTE: you only have to do this once per MJD**.
+
+The `drp quick-reduction` will reduce your target exposure. Here is a list of reduction steps carried out by the quick DRP:
+
+- **Preprocessing**: overscan trimming and subtraction and pixel masking
+- **Detrending**: bias and dark subtraction, Poisson error calculation, flatfielding (pixel level, when available), units conversion (e-/s)
+- **Extraction**: aperture-based 1D spectra extraction
+- **Wavelength calibration**: pixel-to-wavelength mapping and LSF function per fiber
+- **Fiberflat**: flatfielding (fiber level)
+- **Sky interpolation**: sky fibers interpolation along fiber ID, per sky telescope
+- **Sky subtraction**: sky subtraction of inverse-distance weighted master sky
+- **Wavelength resampling**: wavelength resampling to a common grid (~0.5 Angstrom)
+- **Channel combination**: stitching together spectrographs' channels
+- **Spectrograph combination**: row-stacking of spectrograph fibers
+
+The main outputs will be stored in the SAS directory:
+
+```bash
+$SAS_BASE_DIR/sdsswork/lvm/spectro/redux/<drpver>/<tileid>/<mjd>/
+```
+
+where you should find your `lvmCFrame-<expnum:08d>.fits` file, the `raw_metadata.hdf5` file and the `ancillary` folder. Within `ancillary` you'll find files following the naming conventions:
+
+- `lvm-[pdxwh]object-<camera>-<expnum:08d>.fits`
+- `lvm-[wh]sky_[ew]-<camera>-<expnum:08d>.fits`
+
+where each letter in **`pdxwh`** stands for preprocessed, detrended, extracted, wavelength-calibrated, wavelength-resampled, respectively. **`ew`** refers to east and west sky telescopes, respectively.
+
+**NOTE: the `ancillary` folder contains files that will eventually be merged into final products of the pipeline and/or deleted from disk on regular (not debugging) pipeline runs.**
 
 ## Creating test data
 
@@ -119,7 +166,7 @@ For those willing to contribute by coding, there are some steps to streamline th
 1. Make sure you install the pipeline on your environment in edit (developer) mode, like this:
 
     ```bash
-    pip install -e .
+    pip install -e .[dev]
     ```
 
 2. Before you start coding on a new feature/bug-fix, make sure your **local** `master` branch is up to date:
