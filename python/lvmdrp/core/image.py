@@ -799,6 +799,10 @@ class Image(Header):
             image with the given unit
         """
         new_image = self if inplace else copy(self)
+
+        # early return if no data or header to compute conversion
+        if new_image._header is None or new_image._data is None:
+            return new_image
         
         current = self._header.get("BUNIT", assume)
         if current == to:
