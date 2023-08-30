@@ -2046,9 +2046,12 @@ def quick_sky_subtraction(in_rss: str, out_rss, in_skye: str, in_skyw: str) -> R
 
     # linearly interpolate in sky coordinates
     log.info("interpolating sky fibers for both telescopes")
-    ra_e, dec_e = rss._header["SKYERA"], rss._header["SKYEDEC"]
-    ra_w, dec_w = rss._header["SKYWRA"], rss._header["SKYWDEC"]
-    ra_s, dec_s = rss._header["SCIRA"], rss._header["SCIDEC"]
+    ra_e = rss._header.get("TESKYERA", rss._header.get("SKYERA"))
+    dec_e = rss._header.get("TESKYEDEC", rss._header.get("SKYEDEC"))
+    ra_w = rss._header.get("TESKYWRA", rss._header.get("SKYWRA"))
+    dec_w = rss._header.get("TESKYWDEC", rss._header.get("SKYWDEC"))
+    ra_s = rss._header.get("TESCIRA", rss._header.get("SCIRA"))
+    dec_s = rss._header.get("TESCIDEC", rss._header.get("SCIDEC"))
 
     w_e = 1 / ang_distance(ra_e, dec_e, ra_s, dec_s)
     w_w = 1 / ang_distance(ra_w, dec_w, ra_s, dec_s)
