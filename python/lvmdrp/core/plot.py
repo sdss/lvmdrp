@@ -94,23 +94,20 @@ def plot_image(
 
     # pick the extension image to plot
     if extension == "data":
-        data = (
-            np.ma.masked_array(image._data, mask=image._mask)
-            if use_mask
-            else image._data
-        )
+        data = image._data
     elif extension == "error" and image._error is not None:
-        data = (
-            np.ma.masked_array(image._error, mask=image._mask)
-            if use_mask
-            else image._error
-        )
+        data = image._error
     elif extension == "mask" and image._mask is not None:
         data = image._mask
     else:
         ax.set_visible("off")
         return
+    
+    # mask data if requested
+    if use_mask and extension != "mask" and image._mask is not None:
+        data[image._mask] = np.nan
 
+    # plot image
     im = ax.imshow(
         data,
         origin="lower",
@@ -124,6 +121,7 @@ def plot_image(
         aspect="auto",
     )
 
+    # add colorbar and labels if requested
     fig = ax.get_figure()
     if labels:
         ax.set_xlabel("X (pixel)")
@@ -136,7 +134,6 @@ def plot_image(
         if labels:
             unit = image._header["BUNIT"]
             cb.set_label(f"counts ({unit})", size="small", color="tab:red")
-
     if title is not None:
         ax.set_title(title, loc="left")
 
