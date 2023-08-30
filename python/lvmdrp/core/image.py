@@ -779,49 +779,64 @@ class Image(Header):
 
         return new_image
 
-    def convertUnit(
-        self, unit, assume="adu", gain_field="GAIN", assume_gain=1.0, inplace=True
-    ):
-        current = self._header.get("BUNIT", assume)
+    def convertUnit(self, to, assume="adu", gain_field="GAIN", inplace=False):
+        """converts the unit of the image
 
-        new_image = (
-            self
-            if inplace
-            else Image(
-                data=self._data,
-                header=self._header,
-                mask=self._mask,
-                error=self._error,
-                origin=self._origin,
-                individual_frames=self._individual_frames,
-                slitmap=self._slitmap,
-            )
-        )
-        if current != unit:
+        Parameters
+        ----------
+        to : str
+            unit to convert to
+        assume : str, optional
+            unit to assume the current image is in, by default "adu"
+        gain_field : str, optional
+            header keyword containing the gain value, by default "GAIN"
+        inplace : bool, optional
+            whether to overwrite the current image or not, by default False
+
+        Returns
+        -------
+        lvmdrp.core.image.Image
+            image with the given unit
+        """
+        new_image = self if inplace else copy(self)
+
+        # early return if no data or header to compute conversion
+        if new_image._header is None or new_image._data is None:
+            return new_image
+        
+        current = self._header.get("BUNIT", assume)
+        if current == to:
+            return new_image
+        
+        if current != to:
+            exptime = self.getHdrValue("EXPTIME")
             gains = self.getHdrValue(f"AMP? {gain_field}")
             sects = self.getHdrValue("AMP? TRIMSEC")
             n_amp = len(gains)
             for i in range(n_amp):
-                factor = (
-                    gains[f"AMP{i+1} {gain_field}"]
-                    if current == "adu"
-                    else 1 / gains[f"AMP{i+1} {gain_field}"]
-                )
+                if current == "adu" and to == "electron":
+                    factor = gains[i]
+                elif current == "adu" and to == "electron/s":
+                    factor = gains[i] / exptime
+                elif current == "electron" and to == "adu":
+                    factor = 1 / gains[i]
+                elif current == "electron" and to == "electron/s":
+                    factor = 1 / exptime
+                elif current == "electron/s" and to == "adu":
+                    factor = gains[i] * exptime
+                elif current == "electron/s" and to == "electron":
+                    factor = exptime
+                else:
+                    raise ValueError(f"Cannot convert from {current} to {to}")
+                
                 new_image.setSection(
                     section=sects[i],
                     subimg=new_image.getSection(section=sects[i]) * factor,
                     update_header=False,
                     inplace=True,
                 )
-        else:
-            factor = (
-                self._header.get(gain_field, assume_gain)
-                if current == "adu"
-                else 1 / self._header.get(gain_field, assume_gain)
-            )
-            new_image *= factor
 
-            new_image._header["BUNIT"] = unit
+            new_image._header["BUNIT"] = to
 
         return new_image
 
