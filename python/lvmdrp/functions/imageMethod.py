@@ -3365,7 +3365,7 @@ def detrend_frame(
         sharey=True,
     )
     plot_image(org_img, ax=axs[0], title="original", labels=False)
-    plot_image(bcorr_img, ax=axs[1], title="error", extension="error", labels=False)
+    plot_image(detrended_img, ax=axs[1], title="error", extension="error", labels=False)
     plot_image(
         clean_img,
         ax=axs[2],

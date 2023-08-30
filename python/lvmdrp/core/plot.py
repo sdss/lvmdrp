@@ -87,6 +87,11 @@ def plot_image(
     ValueError
         if the `extension` is not valid
     """
+    if extension not in ["data", "error", "mask"]:
+        raise ValueError(
+            f"invalid value for {extension = }. Choices are: 'data', 'error' and 'mask'"
+        )
+
     # pick the extension image to plot
     if extension == "data":
         data = (
@@ -94,18 +99,17 @@ def plot_image(
             if use_mask
             else image._data
         )
-    elif extension == "error":
+    elif extension == "error" and image._error is not None:
         data = (
             np.ma.masked_array(image._error, mask=image._mask)
             if use_mask
             else image._error
         )
-    elif extension == "mask":
+    elif extension == "mask" and image._mask is not None:
         data = image._mask
     else:
-        raise ValueError(
-            f"invalid value for {extension = }. Choices are: 'data', 'error' and 'mask'"
-        )
+        ax.set_visible("off")
+        return
 
     im = ax.imshow(
         data,
