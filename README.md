@@ -25,6 +25,13 @@ To properly install and run the DRP you'll need to follow these steps first:
     ```bash
     export SAS_BASE_DIR="path/to/sas-root-directory"
     ```
+
+    you can download a target <mjd> from the SAS while preserving the directory structure using this command:
+
+    ```bash
+    wget -X css --reject html -nH -nc -t0 -r –level=2 -E –ignore-length -x -k -p -erobots=off -np -N https://data.sdss5.org/sas/sdsswork/data/lvm/lco/<mjd>/ --user <user> --password <password>
+    ```
+    **NOTE: we strongly recommend that you use the [SDSS access](https://github.com/sdss/sdss_access) product to achieve the same results.**
     
 3. Download the current set of calibrations from the [SAS sandbox](https://data.sdss5.org/sas/sdsswork/lvm/sandbox/calib/) and add to your `.bashrc` (or equivalent) the following definition:
 
