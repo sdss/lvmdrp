@@ -3008,7 +3008,7 @@ def preproc_raw_frame(
     log.info("building pixel mask")
     proc_img._mask = master_mask
     # convert temp image to ADU for saturated pixel masking
-    saturated_mask = proc_img._data >= (0.9 * 2**16)
+    saturated_mask = proc_img._data >= 2**16
     proc_img._mask |= saturated_mask
 
     # log number of masked pixels
