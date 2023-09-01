@@ -25,6 +25,13 @@ To properly install and run the DRP you'll need to follow these steps first:
     ```bash
     export SAS_BASE_DIR="path/to/sas-root-directory"
     ```
+
+    you can download a target <mjd> from the SAS while preserving the directory structure using this command:
+
+    ```bash
+    wget -X css --reject html -nH -nc -t0 -r –level=2 -E –ignore-length -x -k -p -erobots=off -np -N https://data.sdss5.org/sas/sdsswork/data/lvm/lco/<mjd>/ --user <user> --password <password>
+    ```
+    **NOTE: we strongly recommend that you use the [SDSS access](https://github.com/sdss/sdss_access) product to achieve the same results.**
     
 3. Download the current set of calibrations from the [SAS sandbox](https://data.sdss5.org/sas/sdsswork/lvm/sandbox/calib/) and add to your `.bashrc` (or equivalent) the following definition:
 
@@ -81,21 +88,6 @@ envcheck
 
 if the variables are correctly set, you should see the values of each and a successful message.
 
-## ESO sky routines installation and configuration
-
-If you are planning on using the sky module, you will need to install the ESO routines first. To install [skycorr](https://www.eso.org/sci/software/pipelines/skytools/skycorr) and the [ESO Sky Model](https://www.eso.org/sci/software/pipelines/skytools/skymodel), follow the instructions in the following links:
-
-- https://wiki.sdss.org/display/LVM/ESO+skycorr
-- https://wiki.sdss.org/display/LVM/ESO+Sky+Model
-
-respectively. Additionaly, you'll need to set following the environment variable in your `.bashrc` (or equivalent):
-
-```bash
-export LVM_ESOSKY_DIR="path/to/eso-routines"
-```
-
-where `eso-routines` is a directory containing the root directories of both, the *skycorr* and the *ESO sky model* installations.
-
 ## Running the DRP
 
 Say you want to reduce the `<expnum>` under `<mjd>`. You can do it by running in the shell the following:
@@ -136,6 +128,23 @@ where you should find your `lvmCFrame-<expnum:08d>.fits` file, the `raw_metadata
 where each letter in **`pdxwh`** stands for preprocessed, detrended, extracted, wavelength-calibrated, wavelength-resampled, respectively. **`ew`** refers to east and west sky telescopes, respectively.
 
 **NOTE: the `ancillary` folder contains files that will eventually be merged into final products of the pipeline and/or deleted from disk on regular (not debugging) pipeline runs.**
+
+## ESO sky routines installation and configuration
+
+**NOTE: you don't need to install the ESO sky routines to be able to run the quick reductions as shown in the previous section**
+
+If you are planning on using the sky module, you will need to install the ESO routines first. To install [skycorr](https://www.eso.org/sci/software/pipelines/skytools/skycorr) and the [ESO Sky Model](https://www.eso.org/sci/software/pipelines/skytools/skymodel), follow the instructions in the following links:
+
+- https://wiki.sdss.org/display/LVM/ESO+skycorr
+- https://wiki.sdss.org/display/LVM/ESO+Sky+Model
+
+respectively. Additionaly, you'll need to set following the environment variable in your `.bashrc` (or equivalent):
+
+```bash
+export LVM_ESOSKY_DIR="path/to/eso-routines"
+```
+
+where `eso-routines` is a directory containing the root directories of both, the *skycorr* and the *ESO sky model* installations.
 
 ## Creating test data
 
