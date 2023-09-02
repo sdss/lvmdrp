@@ -2940,10 +2940,11 @@ def join_spec_channels(in_rss: List[str], out_rss: str, use_weights: bool = True
     lsfs = numpy.asarray([f(new_wave) for f in lsfs_f])
 
     # define weights for channel combination
-    vars = errors ** 2
+    vars = 1 / errors ** 2
+    snrs = fluxes**2 * vars
     if use_weights:
         log.info("calculating weights for channel combination")
-        weights = 1.0 / vars
+        weights = snrs
         weights = weights / bn.nansum(weights, axis=0)[None]
     else:
         weights = numpy.ones_like(fluxes)

@@ -146,3 +146,10 @@ def quick_reduction(expnum: int, use_fiducial_master: bool = False) -> None:
 
     # combine spectrographs
     drp.combine_spectrographs(sci_tileid, sci_mjd, sci_expnum)
+
+    # TODO: add quick report routine
+
+    # TODO: combine exposures
+    # TODO: by default remove the extra files for the given expnum
+
+    # TODO: flux calibration 
