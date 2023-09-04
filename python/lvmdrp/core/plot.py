@@ -11,6 +11,7 @@ import os
 
 import matplotlib.pyplot as plt
 import numpy as np
+import bottleneck as bn
 from astropy.visualization import AsinhStretch, ImageNormalize, PercentileInterval
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 import warnings
@@ -202,6 +203,82 @@ def plot_strips(
     return ax
 
 
+def plot_detrend(ori_image, det_image, axs, mbias=None, mdark=None, labels=False):
+    """plots the original and detrended images, optionally with bias and dark levels
+
+    Parameters
+    ----------
+    ori_image : lvmdrp.core.image.Image
+        original image
+    det_image : lvmdrp.core.image.Image
+        detrended image
+    axs : array_like
+        array of matplotlib axes in which to plot the images
+    mbias : lvmdrp.core.image.Image, optional
+        bias image, by default None
+    mdark : lvmdrp.core.image.Image, optional
+        dark image, by default None
+    labels : bool, optional
+        whether to show or not the plot 'x' and 'y' labels, by default False
+
+    Returns
+    -------
+    array_like
+        array of matplotlib axes updated with the plotted images
+
+    Raises
+    ------
+    ValueError
+        if the number of axes is not 4
+    """
+    
+    # define quadrant sections
+    sections = ori_image.getHdrValue("AMP? TRIMSEC")
+    
+    # convert all images to adu
+    unit = "adu"
+    ori_image_ = ori_image.convertUnit("adu", inplace=False)
+    det_image_ = det_image.convertUnit("adu", inplace=False)
+    det_image_.apply_pixelmask()
+    if mbias is not None:
+        mbias_ = mbias.convertUnit("adu", inplace=False)
+    if mdark is not None:
+        mdark_ = mdark.convertUnit("adu", inplace=False)
+    
+    # define counts range
+    counts_range = (np.nanpercentile(ori_image_._data, q=0.1), np.nanpercentile(ori_image_._data, q=95.0))
+    
+    for i in range(4):
+        # plot original image
+        qori = ori_image_.getSection(sections[i])
+        _ = axs[i].hist(qori._data.ravel(), bins=100, range=counts_range, fc="0.9", histtype="stepfilled", label="original")
+
+        # plot bias and dark levels if requested
+        if mbias_ is not None:
+            qbias = mbias_.getSection(sections[i])
+            bias_level = bn.nanmedian(qbias._data)
+            _ = axs[i].axvline(bias_level, lw=1, ls="--", color="tab:red", label=f"bias level ({unit})")
+        if mdark_ is not None:
+            qdark = mdark_.getSection(sections[i])
+            dark_level = bn.nanmedian(qdark._data)
+            _ = axs[i].axvline(dark_level, lw=1, ls="--", color="tab:purple", label=f"dark level ({unit})")
+
+        # plot detrended image
+        qdet = det_image.getSection(sections[i])
+        _ = axs[i].hist(qdet._data.ravel(), bins=100, range=counts_range, fc="none", lw=1, ec="tab:blue", histtype="step", label="detrended")
+        
+        axs[i].legend(loc=1, frameon=False)
+        axs[i].ticklabel_format(axis='y', style='sci', scilimits=(4,4))
+
+    # add labels if requested
+    if labels:
+        fig = axs[0].get_figure()
+        fig.supxlabel(f"counts ({unit})")
+        fig.supylabel("#")
+
+    return axs
+
+
 def plot_wavesol_residuals(lines_pixels, lines_waves, model_waves, ax=None, labels=False):
     # lines_pixels [X, Y] of emission lines in a given lamp
     # wavelength model poly_model(lines_centroids)
@@ -223,7 +300,7 @@ def plot_wavesol_residuals(lines_pixels, lines_waves, model_waves, ax=None, labe
     return ax
 
 
-def plot_wavesol_coeffs(ypix, coeffs, axs, title=None, labels=False, to_display=False):
+def plot_wavesol_coeffs(ypix, coeffs, axs, title=None, labels=False):
     # ypix is the Y coordinate of each fiber in the middle of the chip
     # coeffs is a 2D array of coefficients for each fiber [nfiber, ncoeff]
 
@@ -239,6 +316,7 @@ def plot_wavesol_coeffs(ypix, coeffs, axs, title=None, labels=False, to_display=
         fig.suptitle(title)
     
     return axs
+
 
 def save_fig(fig, product_path, to_display, figure_path=None, label=None, fmt="png"):
     """Saves the given matplotlib figure to the given output/figure path"""
