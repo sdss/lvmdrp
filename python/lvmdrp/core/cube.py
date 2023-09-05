@@ -67,9 +67,9 @@ class Cube(Header, PositionTable):
             else:
                 error = None
             if data.dtype == numpy.float64:
-                data.astype(numpy.float32)
+                data = data.astype(numpy.float32)
             if error is not None and error.dtype == numpy.float64:
-                error.astype(numpy.float32)
+                error = error.astype(numpy.float32)
 
             cube = Cube(
                 wave=self._wave,

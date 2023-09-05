@@ -1017,12 +1017,12 @@ class Image(Header):
             and extension_frames is None
             and extension_slitmap is None
         ):
-            self._data = hdu[0].data
+            self._data = hdu[0].data.astype("float32")
             self._dim = self._data.shape  # set dimension
             if len(hdu) > 1:
                 for i in range(1, len(hdu)):
                     if hdu[i].header["EXTNAME"].split()[0] == "ERROR":
-                        self._error = hdu[i].data
+                        self._error = hdu[i].data.astype("float32")
                     elif hdu[i].header["EXTNAME"].split()[0] == "BADPIX":
                         self._mask = hdu[i].data.astype("bool")
                     elif hdu[i].header["EXTNAME"].split()[0] == "FRAMES":
@@ -1032,7 +1032,7 @@ class Image(Header):
 
         else:
             if extension_data is not None:
-                self._data = hdu[extension_data].data  # take data
+                self._data = hdu[extension_data].data.astype("float32")
                 self._dim = self._data.shape  # set dimension
 
             if extension_mask is not None:
@@ -1040,7 +1040,7 @@ class Image(Header):
                 self._dim = self._mask.shape  # set dimension
 
             if extension_error is not None:
-                self._error = hdu[extension_error].data  # take data
+                self._error = hdu[extension_error].data.astype("flaoat32")
                 self._dim = self._error.shape  # set dimension
             if extension_frames is not None:
                 self._individual_frames = Table(hdu[extension_frames].data)
@@ -1143,9 +1143,7 @@ class Image(Header):
                     pass
                 hdu[0].update_header()
 
-        hdu.writeto(
-            filename, output_verify="silentfix", overwrite=True
-        )  # write FITS file to disc
+        hdu.writeto(filename, output_verify="silentfix", overwrite=True)
 
     def computePoissonError(self, rdnoise):
         self._error = numpy.zeros_like(self._data)

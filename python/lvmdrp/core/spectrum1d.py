@@ -700,7 +700,7 @@ class Spectrum1D(Header):
             if self._error is not None:
                 error = self._error * other
                 if error.dtype == numpy.float64 or error.dtype == numpy.dtype(">f8"):
-                    error.astype(numpy.float32)
+                    error = error.astype(numpy.float32)
             else:
                 error = None
             mask = self._mask

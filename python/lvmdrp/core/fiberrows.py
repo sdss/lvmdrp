@@ -686,32 +686,32 @@ class FiberRows(Header, PositionTable):
             and extension_error is None
             and extension_coeffs is None
         ):
-            self._data = hdu[0].data
+            self._data = hdu[0].data.astype("float32")
             self._fibers = self._data.shape[0]
             self._pixels = numpy.arange(self._data.shape[1])
             self.setHeader(hdu[0].header)
             if len(hdu) > 1:
                 for i in range(1, len(hdu)):
                     if hdu[i].header["EXTNAME"].split()[0] == "ERROR":
-                        self._error = hdu[i].data
+                        self._error = hdu[i].data.astype("float32")
                     elif hdu[i].header["EXTNAME"].split()[0] == "BADPIX":
-                        self._mask = hdu[i].data.astype(bool)
+                        self._mask = hdu[i].data.astype("bool")
                         self._good_fibers = numpy.where(numpy.sum(self._mask, axis=1) != self._data.shape[1])[0]
                     elif hdu[i].header["EXTNAME"].split()[0] == "COEFFS":
-                        self._coeffs = hdu[i].data
+                        self._coeffs = hdu[i].data.astype("float32")
 
         else:
             if extension_data is not None:
-                self._data = hdu[extension_data].data
+                self._data = hdu[extension_data].data.astype("float32")
                 self._fibers = self._data.shape[0]
                 self._pixels = numpy.arange(self._data.shape[1])
             if extension_mask is not None:
-                self._mask = hdu[extension_mask].data.astype(bool)
+                self._mask = hdu[extension_mask].data.astype("bool")
                 self._good_fibers = numpy.where(numpy.sum(self._mask, axis=1) != self._data.shape[1])[0]
             if extension_error is not None:
-                self._error = hdu[extension_error].data
+                self._error = hdu[extension_error].data.astype("float32")
             if extension_coeffs is not None:
-                self._coeffs = hdu[extension_coeffs].data
+                self._coeffs = hdu[extension_coeffs].data.astype("float32")
         
         hdu.close()
         
