@@ -3349,6 +3349,10 @@ def detrend_frame(
     else:
         log.warning("no slitmap information to be added")
 
+    # save detrended image
+    log.info(f"writing detrended image to '{os.path.basename(out_image)}'")
+    detrended_img.writeFitsData(out_image)
+
     # show plots
     log.info("plotting results")
     # detrending process
@@ -3369,10 +3373,6 @@ def detrend_frame(
         figure_path="qa",
         label="detrending",
     )
-
-    # save detrended image
-    log.info(f"writing detrended image to '{os.path.basename(out_image)}'")
-    detrended_img.writeFitsData(out_image)
 
     return (
         org_img,

@@ -257,11 +257,11 @@ def plot_detrend(ori_image, det_image, axs, mbias=None, mdark=None, labels=False
         if mbias_ is not None:
             qbias = mbias_.getSection(sections[i])
             bias_level = bn.nanmedian(qbias._data)
-            _ = axs[i].axvline(bias_level, lw=1, ls="--", color="tab:red", label=f"bias level ({unit})")
+            _ = axs[i].axvline(bias_level, lw=1, ls="--", color="tab:red", label=f"bias level ({bias_level:.2f} {unit})")
         if mdark_ is not None:
             qdark = mdark_.getSection(sections[i])
             dark_level = bn.nanmedian(qdark._data)
-            _ = axs[i].axvline(dark_level, lw=1, ls="--", color="tab:purple", label=f"dark level ({unit})")
+            _ = axs[i].axvline(dark_level, lw=1, ls="--", color="tab:purple", label=f"dark level ({dark_level:.2f} {unit})")
 
         # plot detrended image
         qdet = det_image.getSection(sections[i])
