@@ -2924,10 +2924,10 @@ def join_spec_channels(in_rss: List[str], out_rss: str, use_weights: bool = True
     masks_f = [interpolate.interp1d(rss._wave, rss._mask, axis=1, kind="nearest", bounds_error=False, fill_value=0) for rss in rsss]
     lsfs_f = [interpolate.interp1d(rss._wave, rss._inst_fwhm, axis=1, bounds_error=False, fill_value=numpy.nan) for rss in rsss]
     # evaluate interpolators
-    fluxes = numpy.asarray([f(new_wave) for f in fluxes_f])
-    errors = numpy.asarray([f(new_wave) for f in errors_f])
-    masks = numpy.asarray([f(new_wave) for f in masks_f])
-    lsfs = numpy.asarray([f(new_wave) for f in lsfs_f])
+    fluxes = numpy.asarray([f(new_wave).astype("float32") for f in fluxes_f])
+    errors = numpy.asarray([f(new_wave).astype("float32") for f in errors_f])
+    masks = numpy.asarray([f(new_wave).astype("uint8") for f in masks_f])
+    lsfs = numpy.asarray([f(new_wave).astype("float32") for f in lsfs_f])
 
     # define weights for channel combination
     vars = errors ** 2
@@ -2943,7 +2943,7 @@ def join_spec_channels(in_rss: List[str], out_rss: str, use_weights: bool = True
     new_data = bn.nansum(fluxes * weights, axis=0)
     new_inst_fwhm = bn.nansum(lsfs * weights, axis=0)
     new_error = numpy.sqrt(bn.nansum(vars, axis=0))
-    new_mask = numpy.sum(masks, axis=0).astype(bool)
+    new_mask = numpy.sum(masks, axis=0).astype("bool")
 
     # create RSS
     log.info(f"writing output RSS to {os.path.basename(out_rss)}")

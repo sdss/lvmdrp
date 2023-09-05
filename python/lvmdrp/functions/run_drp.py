@@ -1004,7 +1004,7 @@ def combine_spectrographs(tileid: int, mjd: int, expnum: int) -> fits.HDUList:
     # build the wavelength axis
     wcs = WCS(hdr)
     n_wave = hdr['NAXIS1']
-    wl = wcs.spectral.all_pix2world(np.arange(n_wave), 0)[0]
+    wl = wcs.spectral.all_pix2world(np.arange(n_wave), 0)[0].astype("float32")
     wave = fits.ImageHDU((wl * u.m).to(u.angstrom).value, name='WAVE')
 
     # get total number of fibers from the fibermap

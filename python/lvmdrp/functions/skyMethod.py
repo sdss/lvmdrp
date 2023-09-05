@@ -1439,10 +1439,10 @@ def interpolate_sky(in_rss: str, out_sky: str, out_rss: str = None, which: str =
 
     fig, axs = create_subplots(to_display=display_plots, figsize=(20,10), nrows=2, ncols=1, sharex=True)
     axs[0].scatter(swave, ssky, s=1, color="tab:blue", label="super sky")
-    axs[0].plot(swave[~smask], f_data(swave[~smask]), lw=1, color="k", label="spline")
+    axs[0].plot(swave[~smask], f_data(swave[~smask]).astype("float32"), lw=1, color="k", label="spline")
 
     # plot residuals
-    residuals = (f_data(sky_wave) - sky_data)
+    residuals = (f_data(sky_wave).astype("float32") - sky_data)
     residuals = residuals.flatten()
     axs[1].scatter(sky_wave.flatten(), residuals)
     axs[1].axhline(ls="--", lw=1, color="k")
@@ -1460,8 +1460,8 @@ def interpolate_sky(in_rss: str, out_sky: str, out_rss: str = None, which: str =
     # interpolated sky
     dlambda = np.diff(rss._wave, axis=1)
     dlambda = np.column_stack((dlambda, dlambda[:, -1]))
-    new_sky = f_data(rss._wave) * dlambda
-    new_error = np.sqrt(f_error(rss._wave)) * dlambda
+    new_sky = f_data(rss._wave).astype("float32") * dlambda
+    new_error = np.sqrt(f_error(rss._wave).astype("float32")) * dlambda
     new_mask = f_mask(rss._wave).astype(bool)
     # update mask with new bad pixels
     # new_mask |= rss._mask
