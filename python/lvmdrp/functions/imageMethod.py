@@ -33,7 +33,7 @@ from lvmdrp.core.image import (
     glueImages,
     loadImage,
 )
-from lvmdrp.core.plot import plt, create_subplots, plot_image, plot_strips, save_fig
+from lvmdrp.core.plot import plt, create_subplots, plot_detrend, plot_strips, save_fig
 from lvmdrp.core.rss import RSS
 from lvmdrp.core.spectrum1d import Spectrum1D, _spec_from_lines, _cross_match
 from lvmdrp.core.tracemask import TraceMask
@@ -3348,7 +3348,7 @@ def detrend_frame(
         detrended_img.setSlitmap(in_slitmap)
     else:
         log.warning("no slitmap information to be added")
-    
+
     # save detrended image
     log.info(f"writing detrended image to '{os.path.basename(out_image)}'")
     detrended_img.writeFitsData(out_image)
@@ -3364,18 +3364,8 @@ def detrend_frame(
         sharex=True,
         sharey=True,
     )
-    plot_image(org_img, ax=axs[0], title="original", labels=False)
-    plot_image(bcorr_img, ax=axs[1], title="error", extension="error", labels=False)
-    plot_image(
-        clean_img,
-        ax=axs[2],
-        title=f"CR mask ({reject_cr = })",
-        extension="mask",
-        labels=False,
-    )
-    plot_image(detrended_img, ax=axs[3], title="detrended", labels=False)
-    fig.supxlabel("X (pixel)")
-    fig.supylabel("Y (pixel)")
+    plt.subplots_adjust(wspace=0.15, hspace=0.1)
+    plot_detrend(ori_image=org_img, det_image=detrended_img, axs=axs, mbias=mbias_img, mdark=mdark_img, labels=True)
     save_fig(
         fig,
         product_path=out_image,
