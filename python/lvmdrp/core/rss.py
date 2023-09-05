@@ -550,6 +550,15 @@ class RSS(FiberRows):
         extension_error : int (0, 1, or 2), optional with default: None
             Number of the FITS extension containing the errors for the values
         """
+        # convert all to single precision
+        self._data = self._data.astype(numpy.float32)
+        if self._error is not None:
+            self._error = self._error.astype(numpy.float32)
+        if self._wave is not None:
+            self._wave = self._wave.astype(numpy.float32)
+        if self._inst_fwhm is not None:
+            self._inst_fwhm = self._inst_fwhm.astype(numpy.float32)
+
         hdus = [None, None, None, None, None, None, None]  # create empty list for hdu storage
 
         # create primary hdus and image hdus

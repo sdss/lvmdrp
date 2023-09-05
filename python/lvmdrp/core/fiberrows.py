@@ -750,6 +750,13 @@ class FiberRows(Header, PositionTable):
         extension_error : int (0, 1, or 2), optional with default: None
             Number of the FITS extension containing the errors for the values
         """
+        # convert all to single precision
+        self._data = self._data.astype("float32")
+        if self._error is not None:
+            self._error = self._error.astype("float32")
+        if self._coeffs is not None:
+            self._coeffs = self._coeffs.astype("float32")
+
         hdus = [None, None, None, None]
 
         # create primary hdus and image hdus
@@ -813,9 +820,7 @@ class FiberRows(Header, PositionTable):
             del hdu[0]._header["HISTORY"]
         except KeyError:
             pass
-        hdu.writeto(
-            filename, output_verify="silentfix", overwrite=True
-        )  # write FITS file to disc
+        hdu.writeto(filename, output_verify="silentfix", overwrite=True)
 
     def measureArcLines(
         self,

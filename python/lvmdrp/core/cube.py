@@ -295,6 +295,15 @@ class Cube(Header, PositionTable):
         extension_error : int (0, 1, or 2), optional with default: None
             Number of the FITS extension containing the errors for the values
         """
+        # convert all to single precision
+        self._data = self._data.astype("float32")
+        if self._error is not None:
+            self._error = self._error.astype("float32")
+        if self._error_weight is not None:
+            self._error_weight = self._error_weight.astype("float32")
+        if self._wave is not None:
+            self._wave = self._wave.astype("float32")
+
         hdus = [None, None, None, None, None, None]  # create empty list for hdu storage
 
         # create primary hdus and image hdus
@@ -353,7 +362,7 @@ class Cube(Header, PositionTable):
         for i in range(len(hdus)):
             try:
                 hdus.remove(None)
-            except:
+            except ValueError:
                 break
 
         if len(hdus) > 0:
