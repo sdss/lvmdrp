@@ -222,9 +222,9 @@ class RSS(FiberRows):
             else:
                 mask = self._mask
             if data.dtype == numpy.float64:
-                data.astype(numpy.float32)
+                data = data.astype(numpy.float32)
             if error is not None and error.dtype == numpy.float64:
-                error.astype(numpy.float32)
+                error = error.astype(numpy.float32)
             rss = RSS(
                 data=data,
                 error=error,
@@ -266,9 +266,9 @@ class RSS(FiberRows):
                 mask = self._mask
 
             if data.dtype == numpy.float64:
-                data.astype(numpy.float32)
+                data = data.astype(numpy.float32)
             if error is not None and error.dtype == numpy.float64:
-                error.astype(numpy.float32)
+                error = error.astype(numpy.float32)
             rss = RSS(
                 data=data,
                 error=error,
@@ -298,7 +298,7 @@ class RSS(FiberRows):
                 else:
                     data = self._data
                 if data.dtype == numpy.float64:
-                    data.astype(numpy.float32)
+                    data = data.astype(numpy.float32)
 
                 rss = RSS(
                     data=data,
@@ -322,9 +322,9 @@ class RSS(FiberRows):
                 else:
                     error = self._error
                 if data.dtype == numpy.float64:
-                    data.astype(numpy.float32)
+                    data = data.astype(numpy.float32)
                 if error is not None and error.dtype == numpy.float64:
-                    error.astype(numpy.float32)
+                    error = error.astype(numpy.float32)
                 rss = RSS(
                     data=data,
                     error=error,
@@ -481,20 +481,20 @@ class RSS(FiberRows):
             and extension_fwhm is None
             and extension_slitmap is None
         ):
-            self._data = hdu[0].data
+            self._data = hdu[0].data.astype("float32")
             self.setHeader(header=hdu[0].header, origin=file)
             self.createWavefromHdr(logwave=logwave)
             if len(hdu) > 1:
                 for i in range(1, len(hdu)):
                     if hdu[i].header["EXTNAME"].split()[0] == "ERROR":
-                        self._error = hdu[i].data
+                        self._error = hdu[i].data.astype("float32")
                     if hdu[i].header["EXTNAME"].split()[0] == "BADPIX":
                         self._mask = hdu[i].data.astype("bool")
                         self._good_fibers = numpy.where(numpy.sum(self._mask, axis=1) != self._data.shape[1])[0]
                     if hdu[i].header["EXTNAME"].split()[0] == "WAVE":
-                        self.setWave(hdu[i].data)
+                        self.setWave(hdu[i].data.astype("float32"))
                     if hdu[i].header["EXTNAME"].split()[0] == "INSTFWHM":
-                        self.setInstFWHM(hdu[i].data)
+                        self.setInstFWHM(hdu[i].data.astype("float32"))
                     if hdu[i].header["EXTNAME"].split()[0] == "POSTABLE":
                         self.loadFitsPosTable(hdu[i])
                     if hdu[i].header["EXTNAME"].split()[0] == "SLITMAP":
@@ -503,16 +503,16 @@ class RSS(FiberRows):
             if extension_hdr is not None:
                 self.setHeader(hdu[extension_hdr].header, origin=file)
             if extension_data is not None:
-                self._data = hdu[extension_data].data
+                self._data = hdu[extension_data].data.astype("float32")
             if extension_mask is not None:
                 self._mask = hdu[extension_mask].data
                 self._good_fibers = numpy.where(numpy.sum(self._mask, axis=1) != self._data.shape[1])[0]
             if extension_error is not None:
-                self._error = hdu[extension_error].data
+                self._error = hdu[extension_error].data.astype("float32")
             if extension_wave is not None:
-                self.setWave(hdu[extension_wave].data)
+                self.setWave(hdu[extension_wave].data.astype("float32"))
             if extension_fwhm is not None:
-                self.setInstFWHM(hdu[extension_fwhm].data)
+                self.setInstFWHM(hdu[extension_fwhm].data.astype("float32"))
             if extension_slitmap is not None:
                 self.setSlitmap(Table(hdu[extension_slitmap].data))
         
@@ -550,6 +550,15 @@ class RSS(FiberRows):
         extension_error : int (0, 1, or 2), optional with default: None
             Number of the FITS extension containing the errors for the values
         """
+        # convert all to single precision
+        self._data = self._data.astype(numpy.float32)
+        if self._error is not None:
+            self._error = self._error.astype(numpy.float32)
+        if self._wave is not None:
+            self._wave = self._wave.astype(numpy.float32)
+        if self._inst_fwhm is not None:
+            self._inst_fwhm = self._inst_fwhm.astype(numpy.float32)
+
         hdus = [None, None, None, None, None, None, None]  # create empty list for hdu storage
 
         # create primary hdus and image hdus
