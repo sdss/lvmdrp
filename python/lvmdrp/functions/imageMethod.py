@@ -15,7 +15,7 @@ from astropy.io import fits as pyfits
 from astropy.nddata import CCDData, StdDevUncertainty
 from astropy.stats.biweight import biweight_location, biweight_scale
 from astropy.visualization import simple_norm
-from ccdproc import cosmicray_lacosmic
+from ccdproc import cosmicray_lacosmic, ccdmask
 from scipy import interpolate
 from tqdm import tqdm
 
@@ -3593,7 +3593,7 @@ def create_master_frame(in_images: List[str], out_image: str, batch_size: int = 
 #     return imgs, med_imgs, masks
 
 
-def create_pixelmask(in_short_dark, in_long_dark, out_pixmask, dark_current_threshold=1.0, low_threshold=0.8, high_threshold=1.2, display_plots=False):
+def create_pixelmask(in_short_dark, in_long_dark, out_pixmask, in_flat_a=None, in_flat_b=None, dark_current_threshold=1.0, low_threshold=0.8, high_threshold=1.2, display_plots=False):
     """create a pixel mask using a simple sigma clipping
 
     Given a long and short dark image, this function will calculate a
@@ -3635,6 +3635,17 @@ def create_pixelmask(in_short_dark, in_long_dark, out_pixmask, dark_current_thre
     log.info(f"loading long dark '{os.path.basename(in_long_dark)}'")
     long_dark = loadImage(in_long_dark).convertUnit(unit)
 
+    if in_flat_a is not None:
+        log.info(f"loading flat A '{os.path.basename(in_flat_a)}'")
+        flat_a = loadImage(in_flat_a)
+    else:
+        flat_a = None
+    if in_flat_b is not None:
+        log.info(f"loading flat B '{os.path.basename(in_flat_b)}'")
+        flat_b = loadImage(in_flat_b)
+    else:
+        flat_b = None
+
     # define exposure times
     short_exptime = short_dark._header["EXPTIME"]
     long_exptime = long_dark._header["EXPTIME"]
@@ -3642,7 +3653,7 @@ def create_pixelmask(in_short_dark, in_long_dark, out_pixmask, dark_current_thre
     log.info(f"long exposure time = {long_exptime}s")
 
     # define ratio of darks
-    ratio = short_dark / long_dark
+    ratio_dark = short_dark / long_dark
     
     # define quadrant sections
     sections = short_dark.getHdrValue("AMP? TRIMSEC")
@@ -3665,21 +3676,21 @@ def create_pixelmask(in_short_dark, in_long_dark, out_pixmask, dark_current_thre
         # get sections
         squad = short_dark.getSection(section)
         lquad = long_dark.getSection(section)
-        rquad = ratio.getSection(section)
+        rquad = ratio_dark.getSection(section)
         mquad = pixmask.getSection(section)
 
         # define good current mask
-        good_darkcurrent = (lquad._data > dark_current_threshold)
-        log.info(f"selecting {good_darkcurrent.sum()} pixels with dark current > {dark_current_threshold} {unit}")
+        good_dc = (lquad._data > dark_current_threshold)
+        log.info(f"selecting {good_dc.sum()} pixels with dark current > {dark_current_threshold} {unit}")
         # define quadrant pixelmask
         mask_hotpix = (low_threshold >= rquad._data) | (rquad._data >= high_threshold)
         # set quadrant pixelmask
-        log.info(f"masking {(good_darkcurrent & mask_hotpix).sum()} pixels with ratio < {low_threshold} or > {high_threshold}")
-        mquad.setData(mask=good_darkcurrent & mask_hotpix)
+        log.info(f"masking {(good_dc & mask_hotpix).sum()} pixels with ratio < {low_threshold} or > {high_threshold}")
+        mquad.setData(mask=good_dc & mask_hotpix)
         pixmask.setSection(section, mquad, inplace=True)
 
         # plot count distribution of short / long exposures
-        log.info(f"plotting count distribution of short / long exposures")
+        log.info("plotting count distribution of short / long exposures")
         axs_dis[iquad].hist(squad._data.flatten(), bins=1000, label=f"{short_exptime}s", color="tab:blue", histtype="stepfilled", alpha=0.5)
         axs_dis[iquad].hist(lquad._data.flatten(), bins=1000, label=f"{long_exptime}s", color="tab:red", histtype="stepfilled", alpha=0.5)
         axs_dis[iquad].axvline(dark_current_threshold, lw=1, ls="--", color="0.2")
@@ -3687,10 +3698,10 @@ def create_pixelmask(in_short_dark, in_long_dark, out_pixmask, dark_current_thre
         axs_dis[iquad].set_xscale("log")
         axs_dis[iquad].set_yscale("log")
         # plot ratios and hot/cold pixel rejection
-        log.info(f"plotting ratio of short / long exposures")
+        log.info("plotting ratio of short / long exposures")
         axs_rat[iquad].axhspan(low_threshold, high_threshold, color="0.7", alpha=0.3)
-        axs_rat[iquad].plot(squad._data[good_darkcurrent].flatten(), rquad._data[good_darkcurrent].flatten(), 'o', color="0.2", label='good data')
-        axs_rat[iquad].plot(squad._data[good_darkcurrent&mask_hotpix].flatten(), rquad._data[good_darkcurrent&mask_hotpix].flatten(), '.', color="tab:red", label='hot pixels')
+        axs_rat[iquad].plot(squad._data[good_dc].flatten(), rquad._data[good_dc].flatten(), 'o', color="0.2", label='good data')
+        axs_rat[iquad].plot(squad._data[good_dc&mask_hotpix].flatten(), rquad._data[good_dc&mask_hotpix].flatten(), '.', color="tab:red", label='hot pixels')
         axs_rat[iquad].axhline(1, lw=1, color="tab:blue", label="1:1 relationship")
 
         axs_rat[iquad].set_title(f"quadrant {iquad+1}", loc="left")
@@ -3698,14 +3709,54 @@ def create_pixelmask(in_short_dark, in_long_dark, out_pixmask, dark_current_thre
         axs_rat[iquad].grid()
     axs_dis[0].legend(loc="upper right")
     fig_dis.supxlabel(f'dark current ({unit})')
-    fig_dis.supylabel('Number of pixels')
+    fig_dis.supylabel('number of pixels')
     axs_rat[0].legend(loc="lower right")
     fig_rat.supxlabel(f"dark current ({unit}), {short_exptime}s exposure")
     fig_rat.supylabel("ratio, short / long exposure")
     save_fig(fig_dis, product_path=out_pixmask, to_display=display_plots, figure_path="qa", label="dc_hist")
     save_fig(fig_rat, product_path=out_pixmask, to_display=display_plots, figure_path="qa", label="dc_ratio")
 
-    # mask only reliable dark current measurements
+    # mask pixels using flats ratio if possible
+    ratio_flat = None
+    if flat_a is not None and flat_b is not None:
+        # median normalize flats
+        median_box = 20
+        log.info(f"normalizing flats background with {median_box = }")
+        flat_a = flat_a / flat_a.medianImg(size=median_box)
+        flat_b = flat_b / flat_b.medianImg(size=median_box)
+
+        med_a, med_b = bn.nanmedian(flat_a._data), bn.nanmedian(flat_b._data)
+        log.info(f"normalizing flats by median: {med_a = :.2f}, {med_b = :.2f}")
+        flat_a = flat_a / med_a
+        flat_b = flat_b / med_b
+
+        # calculate ratio of flats
+        ratio_flat = flat_a / flat_b
+        ratio_med = bn.nanmedian(ratio_flat._data)
+        ratio_min = bn.nanmin(ratio_flat._data)
+        ratio_max = bn.nanmax(ratio_flat._data)
+        log.info(f"calculating ratio of flats: {ratio_med = :.2f} [{ratio_min = :.2f}, {ratio_max = :.2f}")
+
+        # plot flats histograms
+        log.info("plotting flats histograms")
+        fig, ax = create_subplots(to_display=display_plots, figsize=(10,5))
+        fig.suptitle(os.path.basename(out_pixmask))
+        ax.hist(flat_a._data.flatten(), bins=1000, color="tab:blue", alpha=0.5, label="flat A")
+        ax.hist(flat_b._data.flatten(), bins=1000, color="tab:red", alpha=0.5, label="flat B")
+        ax.set_xscale("log")
+        ax.set_yscale("log")
+        ax.legend(loc="upper right")
+        ax.set_xlabel("flat")
+        ax.set_ylabel("number of pixels")
+        save_fig(fig, product_path=out_pixmask, to_display=display_plots, figure_path="qa", label="flat_hist")
+
+        # create pixel mask using flat ratio
+        flat_mask = ccdmask(CCDData(data=ratio_flat._data, unit=""), findbadcolumns=True)
+
+        # update pixel mask
+        pixmask.setData(mask=(pixmask._mask | flat_mask), inplace=True)
+
+    # set masked pixels to NaN
     log.info(f"masking {pixmask._mask.sum()} pixels in total ({pixmask._mask.sum()/pixmask._mask.size*100:.2f}%)")
     pixmask.setData(data=numpy.nan, select=pixmask._mask)
 
@@ -3713,7 +3764,7 @@ def create_pixelmask(in_short_dark, in_long_dark, out_pixmask, dark_current_thre
     log.info(f"writing pixel mask to '{os.path.basename(out_pixmask)}'")
     pixmask.writeFitsData(out_pixmask)
     
-    return pixmask
+    return pixmask, ratio_dark, ratio_flat
 
 # TODO: for fiberflats, calculate an average over an X range (around the center) of the
 # extracted fibers and normalize by it
