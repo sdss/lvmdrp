@@ -13,9 +13,9 @@ from astropy import units as u
 from astropy.table import Table
 from astropy.io import fits as pyfits
 from astropy.nddata import CCDData, StdDevUncertainty
-from astropy.stats.biweight import biweight_location, biweight_scale
+from astropy.stats.biweight import biweight_location
 from astropy.visualization import simple_norm
-from ccdproc import cosmicray_lacosmic, ccdmask
+from ccdproc import cosmicray_lacosmic
 from scipy import interpolate
 from tqdm import tqdm
 
@@ -3593,15 +3593,17 @@ def create_master_frame(in_images: List[str], out_image: str, batch_size: int = 
 #     return imgs, med_imgs, masks
 
 
-def create_pixelmask(in_short_dark, in_long_dark, out_pixmask, in_flat_a=None, in_flat_b=None, dark_current_threshold=1.0, low_threshold=0.8, high_threshold=1.2, display_plots=False):
+def create_pixelmask(in_short_dark, in_long_dark, out_pixmask, in_flat_a=None, in_flat_b=None,
+                     dc_low=1.0, dc_high=10, dark_low=0.8, dark_high=1.2,
+                     flat_low=0.2, flat_high=1.1, display_plots=False):
     """create a pixel mask using a simple sigma clipping
 
     Given a long and short dark image, this function will calculate a
     a pixel mask by performing the following steps:
         * calculate dark current
         * calculate ratio of darks
-        * mask pixels with dark current below `dark_current_threshold`
-        * mask pixels with ratio below `low_threshold` or above `high_threshold`
+        * mask pixels with dark current below `dc_low`
+        * mask pixels with ratio below `dark_low` or above `dark_high`
 
     Parameters
     ----------
@@ -3611,19 +3613,33 @@ def create_pixelmask(in_short_dark, in_long_dark, out_pixmask, in_flat_a=None, i
         path to long dark image
     out_pixmask : str
         path to output pixel mask
-    dark_current_threshold : float, optional
+    in_flat_a : str, optional
+        path to flat A image, by default None
+    in_flat_b : str, optional
+        path to flat B image, by default None
+    dc_low : float, optional
         reliable dark current threshold, by default 1.0
-    low_threshold : float, optional
+    dc_high : float, optional
+        high dark current threshold, by default 10
+    dark_low : float, optional
         lower ratio threshold, by default 0.8
-    high_threshold : float, optional
+    dark_high : float, optional
         upper ratio threshold, by default 1.2
+    flat_low : float, optional
+        lower flat threshold, by default 0.2
+    flat_high : float, optional
+        upper flat threshold, by default 1.1
     display_plots : bool, optional
         whether to show plots on display or not, by default False
 
     Returns
     -------
-    _type_
-        _description_
+    pixmask : Image
+        pixelmask image
+    ratio_dark : Image
+        ratio of darks image
+    ratio_flat : Image
+        ratio of flats image, None if no flats were given
     """
 
     # define dark current unit
@@ -3670,7 +3686,7 @@ def create_pixelmask(in_short_dark, in_long_dark, out_pixmask, in_flat_a=None, i
     plt.subplots_adjust(hspace=0.1, wspace=0.1)
     fig_rat.suptitle(os.path.basename(out_pixmask))
     
-    log.info(f"creating pixel mask using dark current threshold = {dark_current_threshold} {unit}")
+    log.info(f"creating pixel mask using dark current threshold = {dc_low} {unit}")
     for iquad, section in enumerate(sections.values()):
         log.info(f"processing quadrant = {section}")
         # get sections
@@ -3680,12 +3696,12 @@ def create_pixelmask(in_short_dark, in_long_dark, out_pixmask, in_flat_a=None, i
         mquad = pixmask.getSection(section)
 
         # define good current mask
-        good_dc = (lquad._data > dark_current_threshold)
-        log.info(f"selecting {good_dc.sum()} pixels with dark current > {dark_current_threshold} {unit}")
+        good_dc = (lquad._data > dc_low)
+        log.info(f"selecting {good_dc.sum()} pixels with dark current > {dc_low} {unit}")
         # define quadrant pixelmask
-        mask_hotpix = (low_threshold >= rquad._data) | (rquad._data >= high_threshold)
+        mask_hotpix = (squad._data > dc_high) | ((dark_low >= rquad._data) | (rquad._data >= dark_high))
         # set quadrant pixelmask
-        log.info(f"masking {(good_dc & mask_hotpix).sum()} pixels with ratio < {low_threshold} or > {high_threshold}")
+        log.info(f"masking {(good_dc & mask_hotpix).sum()} pixels with DC ratio < {dark_low} or > {dark_high}")
         mquad.setData(mask=good_dc & mask_hotpix)
         pixmask.setSection(section, mquad, inplace=True)
 
@@ -3693,20 +3709,20 @@ def create_pixelmask(in_short_dark, in_long_dark, out_pixmask, in_flat_a=None, i
         log.info("plotting count distribution of short / long exposures")
         axs_dis[iquad].hist(squad._data.flatten(), bins=1000, label=f"{short_exptime}s", color="tab:blue", histtype="stepfilled", alpha=0.5)
         axs_dis[iquad].hist(lquad._data.flatten(), bins=1000, label=f"{long_exptime}s", color="tab:red", histtype="stepfilled", alpha=0.5)
-        axs_dis[iquad].axvline(dark_current_threshold, lw=1, ls="--", color="0.2")
+        axs_dis[iquad].axvline(dc_low, lw=1, ls="--", color="0.2")
         axs_dis[iquad].set_title(f"quadrant {iquad+1}", loc="left")
         axs_dis[iquad].set_xscale("log")
         axs_dis[iquad].set_yscale("log")
+        axs_dis[iquad].grid(color="0.9", ls="--", lw=0.5)
         # plot ratios and hot/cold pixel rejection
         log.info("plotting ratio of short / long exposures")
-        axs_rat[iquad].axhspan(low_threshold, high_threshold, color="0.7", alpha=0.3)
-        axs_rat[iquad].plot(squad._data[good_dc].flatten(), rquad._data[good_dc].flatten(), 'o', color="0.2", label='good data')
-        axs_rat[iquad].plot(squad._data[good_dc&mask_hotpix].flatten(), rquad._data[good_dc&mask_hotpix].flatten(), '.', color="tab:red", label='hot pixels')
-        axs_rat[iquad].axhline(1, lw=1, color="tab:blue", label="1:1 relationship")
-
+        axs_rat[iquad].axhspan(dark_low, dark_high, color="0.7", alpha=0.3)
+        axs_rat[iquad].plot(squad._data[good_dc].flatten(), rquad._data[good_dc].flatten(), 'o', color="0.2", label='good DC')
+        axs_rat[iquad].plot(squad._data[good_dc&mask_hotpix].flatten(), rquad._data[good_dc&mask_hotpix].flatten(), '.', color="tab:red", label='bad pixels')
+        axs_rat[iquad].axhline(1, lw=1, ls="--", color="0.2", label="1:1 relationship")
         axs_rat[iquad].set_title(f"quadrant {iquad+1}", loc="left")
         axs_rat[iquad].set_yscale("log")
-        axs_rat[iquad].grid()
+        axs_rat[iquad].grid(color="0.9", ls="--", lw=0.5)
     axs_dis[0].legend(loc="upper right")
     fig_dis.supxlabel(f'dark current ({unit})')
     fig_dis.supylabel('number of pixels')
@@ -3741,23 +3757,27 @@ def create_pixelmask(in_short_dark, in_long_dark, out_pixmask, in_flat_a=None, i
         log.info("plotting flats histograms")
         fig, ax = create_subplots(to_display=display_plots, figsize=(10,5))
         fig.suptitle(os.path.basename(out_pixmask))
-        ax.hist(flat_a._data.flatten(), bins=1000, color="tab:blue", alpha=0.5, label="flat A")
-        ax.hist(flat_b._data.flatten(), bins=1000, color="tab:red", alpha=0.5, label="flat B")
+        ax.axvspan(flat_low, flat_high, color="0.7", alpha=0.3)
+        ax.hist(flat_a._data.flatten(), bins=1000, color="tab:blue", alpha=0.5, label=f"flat A ({os.path.basename(in_flat_a)})")
+        ax.hist(flat_b._data.flatten(), bins=1000, color="tab:red", alpha=0.5, label=f"flat B ({os.path.basename(in_flat_b)})")
+        ax.axvline(ratio_med, lw=1, ls="--", color="0.2")
         ax.set_xscale("log")
         ax.set_yscale("log")
+        ax.grid(color="0.9", ls="--", lw=0.5)
         ax.legend(loc="upper right")
         ax.set_xlabel("flat")
         ax.set_ylabel("number of pixels")
         save_fig(fig, product_path=out_pixmask, to_display=display_plots, figure_path="qa", label="flat_hist")
 
         # create pixel mask using flat ratio
-        flat_mask = ccdmask(CCDData(data=ratio_flat._data, unit=""), findbadcolumns=True)
+        flat_mask = (ratio_flat._data < flat_low) | (ratio_flat._data > flat_high)
+        log.info(f"masking {flat_mask.sum()} pixels with flats ratio < {flat_low} or > {flat_high}")
 
         # update pixel mask
         pixmask.setData(mask=(pixmask._mask | flat_mask), inplace=True)
 
     # set masked pixels to NaN
-    log.info(f"masking {pixmask._mask.sum()} pixels in total ({pixmask._mask.sum()/pixmask._mask.size*100:.2f}%)")
+    log.info(f"masked {pixmask._mask.sum()} pixels in total ({pixmask._mask.sum()/pixmask._mask.size*100:.2f}%)")
     pixmask.setData(data=numpy.nan, select=pixmask._mask)
 
     # write output mask
