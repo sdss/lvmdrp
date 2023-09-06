@@ -91,6 +91,7 @@ def quick_reduction(expnum: int, use_fiducial_master: bool = False) -> None:
             mpixmask_path = os.path.join(masters_path, f"lvm-mpixmask-{sci_camera}.fits")
             mbias_path = os.path.join(masters_path, f"lvm-mbias-{sci_camera}.fits")
             mdark_path = os.path.join(masters_path, f"lvm-mdark-{sci_camera}.fits")
+            mpixflat_path = os.path.join(masters_path, f"lvm-mpixflat-{sci_camera}.fits")
             mtrace_path = os.path.join(masters_path, f"lvm-mtrace-{sci_camera}.fits")
             mwave_path = os.path.join(masters_path, f"lvm-mwave_{lamps}-{sci_camera}.fits")
             mlsf_path = os.path.join(masters_path, f"lvm-mlsf_{lamps}-{sci_camera}.fits")
@@ -103,6 +104,7 @@ def quick_reduction(expnum: int, use_fiducial_master: bool = False) -> None:
             mpixmask_path = path.full("lvm_master", drpver=drpver, kind="mpixmask", **masters["pixmask"].to_dict())
             mbias_path = path.full("lvm_master", drpver=drpver, kind="mbias", **masters["bias"].to_dict())
             mdark_path = path.full("lvm_master", drpver=drpver, kind="mdark", **masters["dark"].to_dict())
+            mpixflat_path = None
             mtrace_path = path.full("lvm_master", drpver=drpver, kind="mtrace", **masters["trace"].to_dict())
             mwave_path = path.full("lvm_master", drpver=drpver, kind=f"mwave_{lamps}", **masters["wave"].to_dict())
             mlsf_path = path.full("lvm_master", drpver=drpver, kind=f"mlsf_{lamps}", **masters["lsf"].to_dict())
@@ -113,7 +115,9 @@ def quick_reduction(expnum: int, use_fiducial_master: bool = False) -> None:
         image_tasks.preproc_raw_frame(in_image=sci_path, out_image=psci_path, in_mask=mpixmask_path)
         
         # detrend frame
-        image_tasks.detrend_frame(in_image=psci_path, out_image=dsci_path, in_bias=mbias_path, in_dark=mdark_path, in_slitmap=Table(drp.fibermap.data), reject_cr=False)
+        image_tasks.detrend_frame(in_image=psci_path, out_image=dsci_path,
+                                  in_bias=mbias_path, in_dark=mdark_path, in_pixelflat=mpixflat_path,
+                                  in_slitmap=Table(drp.fibermap.data), reject_cr=False)
         
         # extract 1d spectra
         image_tasks.extract_spectra(in_image=dsci_path, out_rss=xsci_path, in_trace=mtrace_path, method="aperture", aperture=3)
