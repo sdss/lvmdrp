@@ -3472,126 +3472,248 @@ def create_master_frame(in_images: List[str], out_image: str, batch_size: int = 
     return org_imgs, master_img
 
 
-@skip_on_missing_input_path(["in_bias", "in_dark", "in_pixelflat"])
-@skip_if_drpqual_flags(["SATURATED"], "in_bias")
-@skip_if_drpqual_flags(["SATURATED"], "in_dark")
-@skip_if_drpqual_flags(["SATURATED"], "in_pixelflat")
-def create_pixelmask(
-    in_bias: str,
-    in_dark: str,
-    out_mask: str,
-    in_pixelflat: str = None,
-    median_box: int = [31, 31],
-    cen_stat: str = "median",
-    low_nsigma: int = 3,
-    high_nsigma: int = 7,
-    column_threshold: float = 0.3,
-):
+# @skip_on_missing_input_path(["in_bias", "in_dark", "in_pixelflat"])
+# @skip_if_drpqual_flags(["SATURATED"], "in_bias")
+# @skip_if_drpqual_flags(["SATURATED"], "in_dark")
+# @skip_if_drpqual_flags(["SATURATED"], "in_pixelflat")
+# def create_pixelmask(
+#     in_bias: str,
+#     in_dark: str,
+#     out_mask: str,
+#     in_pixelflat: str = None,
+#     median_box: int = [31, 31],
+#     cen_stat: str = "median",
+#     low_nsigma: int = 3,
+#     high_nsigma: int = 7,
+#     column_threshold: float = 0.3,
+# ):
+#     """create a pixel mask using a simple sigma clipping
+
+#     Given a bias, dark, and pixelflat image, this function will calculate a
+#     a pixel mask by performing the following steps:
+#         * smooth images with a median filter set by `median_box`
+#         * subtract smoothed images from original images
+#         * calculate a sigma clipping mask using `cen_stat` and `low_/high_nsigma`
+#         * mask whole column if fraction of masked pixels is above `column_threshold`
+#         * combine all masks into a single mask
+
+#     By using a low threshold we should be able to pick up weak bad columns, while the
+#     high threshold should be able to pick up hot pixels.
+
+#     Parameters
+#     ----------
+#     in_image : str
+#         input image from which the pixel mask will be created
+#     out_image : str
+#         output image where the resulting pixel mask will be stored
+#     cen_stat : str, optional
+#         central statistic to use when sigma-clipping, by default "median"
+#     nstd : int, optional
+#         number of sigmas above which a pixel will be masked, by default 3
+#     """
+#     # verify of pixelflat exists, ignore if not
+#     if in_pixelflat is not None and not os.path.isfile(in_pixelflat):
+#         log.warning(f"pixel flat at '{in_pixelflat}' not found, ignoring")
+#         in_pixelflat = None
+
+#     imgs, med_imgs, masks = [], [], []
+#     for in_image in filter(lambda i: i is not None, [in_bias, in_dark, in_pixelflat]):
+#         img = loadImage(in_image)
+
+#         log.info(f"creating pixel mask using '{os.path.basename(in_image)}'")
+
+#         # define pixelmask image
+#         mask = Image(data=numpy.ones_like(img._data), mask=numpy.zeros_like(img._data, dtype=bool))
+
+#         quad_sections = img.getHdrValue("AMP? TRIMSEC").values()
+#         for sec in quad_sections:
+#             log.info(f"processing quadrant = {sec}")
+#             quad = img.getSection(sec)
+#             msk_quad = mask.getSection(sec)
+
+#             # create a smoothed image using a median rolling box
+#             log.info(f"smoothing image with median box {median_box = }")
+#             med_quad = quad.medianImg(size=median_box)
+#             # subtract that smoothed image from the master dark
+#             quad = quad - med_quad
+
+#             # calculate central value
+#             # log.info(f"calculating central value using {cen_stat = }")
+#             if cen_stat == "mean":
+#                 cen = bn.nanmean(quad._data)
+#             elif cen_stat == "median":
+#                 cen = bn.nanmedian(quad._data)
+#             log.info(f"central value = {cen = }")
+
+#             # calculate standard deviation
+#             # log.info("calculating standard deviation using biweight_scale")
+#             std = biweight_scale(quad._data, M=cen, ignore_nan=True)
+#             log.info(f"standard deviation = {std}")
+
+#             # create pixel masks for low and high nsigmas
+#             # log.info(f"creating pixel mask for {low_nsigma = } sigma")
+#             badcol_mask = (quad._data < cen - low_nsigma * std)
+#             badcol_mask |= (quad._data > cen + low_nsigma * std)
+#             # log.info(f"creating pixel mask for {high_nsigma = } sigma")
+#             if img._header["IMAGETYP"] != "bias":
+#                 hotpix_mask = (quad._data < cen - high_nsigma * std)
+#                 hotpix_mask |= (quad._data > cen + high_nsigma * std)
+#             else:
+#                 hotpix_mask = numpy.zeros_like(quad._data, dtype=bool)
+
+#             # mask whole columns if fraction of masked pixels is above threshold
+#             bad_columns = numpy.sum(badcol_mask, axis=0) > column_threshold * quad._dim[0]
+#             log.info(f"masking {bad_columns.sum()} bad columns")
+#             # reset mask to clean good pixels
+#             badcol_mask[...] = False
+#             # mask only bad columns
+#             badcol_mask[:, bad_columns] = True
+
+#             # combine bad column and hot pixel masks
+#             msk_quad._mask = badcol_mask | hotpix_mask
+#             log.info(f"masking {msk_quad._mask.sum()} pixels in total")
+
+#             # set section to pixelmask image
+#             mask.setSection(section=sec, subimg=msk_quad, inplace=True)
+
+#         imgs.append(img)
+#         masks.append(mask)
+
+#     # define header for pixel mask
+#     new_header = img._header
+#     new_header["IMAGETYP"] = "pixmask"
+#     new_header["EXPTIME"] = 0
+#     new_header["DARKTIME"] = 0
+#     # define image object to store pixel mask
+#     new_mask = Image(data=mask._data, mask=numpy.any([mask._mask for mask in masks], axis=0), header=new_header)
+#     new_mask.apply_pixelmask()
+#     log.info(f"writing pixel mask to '{os.path.basename(out_mask)}'")
+#     new_mask.writeFitsData(out_mask)
+
+#     return imgs, med_imgs, masks
+
+
+def create_pixelmask(in_short_dark, in_long_dark, out_pixmask, dark_current_threshold=1.0, low_threshold=0.8, high_threshold=1.2, display_plots=False):
     """create a pixel mask using a simple sigma clipping
 
-    Given a bias, dark, and pixelflat image, this function will calculate a
+    Given a long and short dark image, this function will calculate a
     a pixel mask by performing the following steps:
-        * smooth images with a median filter set by `median_box`
-        * subtract smoothed images from original images
-        * calculate a sigma clipping mask using `cen_stat` and `low_/high_nsigma`
-        * mask whole column if fraction of masked pixels is above `column_threshold`
-        * combine all masks into a single mask
-
-    By using a low threshold we should be able to pick up weak bad columns, while the
-    high threshold should be able to pick up hot pixels.
+        * calculate dark current
+        * calculate ratio of darks
+        * mask pixels with dark current below `dark_current_threshold`
+        * mask pixels with ratio below `low_threshold` or above `high_threshold`
 
     Parameters
     ----------
-    in_image : str
-        input image from which the pixel mask will be created
-    out_image : str
-        output image where the resulting pixel mask will be stored
-    cen_stat : str, optional
-        central statistic to use when sigma-clipping, by default "median"
-    nstd : int, optional
-        number of sigmas above which a pixel will be masked, by default 3
+    in_short_dark : str
+        path to short dark image
+    in_long_dark : str
+        path to long dark image
+    out_pixmask : str
+        path to output pixel mask
+    dark_current_threshold : float, optional
+        reliable dark current threshold, by default 1.0
+    low_threshold : float, optional
+        lower ratio threshold, by default 0.8
+    high_threshold : float, optional
+        upper ratio threshold, by default 1.2
+    display_plots : bool, optional
+        whether to show plots on display or not, by default False
+
+    Returns
+    -------
+    _type_
+        _description_
     """
-    # verify of pixelflat exists, ignore if not
-    if in_pixelflat is not None and not os.path.isfile(in_pixelflat):
-        log.warning(f"pixel flat at '{in_pixelflat}' not found, ignoring")
-        in_pixelflat = None
 
-    imgs, med_imgs, masks = [], [], []
-    for in_image in filter(lambda i: i is not None, [in_bias, in_dark, in_pixelflat]):
-        img = loadImage(in_image)
+    # define dark current unit
+    unit = "electron/s"
 
-        log.info(f"creating pixel mask using '{os.path.basename(in_image)}'")
+    # load short/long dark and convert to dark current
+    log.info(f"loading short dark '{os.path.basename(in_short_dark)}'")
+    short_dark = loadImage(in_short_dark).convertUnit(unit)
+    log.info(f"loading long dark '{os.path.basename(in_long_dark)}'")
+    long_dark = loadImage(in_long_dark).convertUnit(unit)
 
-        # define pixelmask image
-        mask = Image(data=numpy.ones_like(img._data), mask=numpy.zeros_like(img._data, dtype=bool))
+    # define exposure times
+    short_exptime = short_dark._header["EXPTIME"]
+    long_exptime = long_dark._header["EXPTIME"]
+    log.info(f"short exposure time = {short_exptime}s")
+    log.info(f"long exposure time = {long_exptime}s")
 
-        quad_sections = img.getHdrValue("AMP? TRIMSEC").values()
-        for sec in quad_sections:
-            log.info(f"processing quadrant = {sec}")
-            quad = img.getSection(sec)
-            msk_quad = mask.getSection(sec)
+    # define ratio of darks
+    ratio = short_dark / long_dark
+    
+    # define quadrant sections
+    sections = short_dark.getHdrValue("AMP? TRIMSEC")
 
-            # create a smoothed image using a median rolling box
-            log.info(f"smoothing image with median box {median_box = }")
-            med_quad = quad.medianImg(size=median_box)
-            # subtract that smoothed image from the master dark
-            quad = quad - med_quad
+    # define pixelmask image
+    pixmask = Image(data=numpy.zeros_like(short_dark._data), mask=numpy.zeros_like(short_dark._data, dtype="bool"))
 
-            # calculate central value
-            # log.info(f"calculating central value using {cen_stat = }")
-            if cen_stat == "mean":
-                cen = bn.nanmean(quad._data)
-            elif cen_stat == "median":
-                cen = bn.nanmedian(quad._data)
-            log.info(f"central value = {cen = }")
+    # create histogram figure
+    fig_dis, axs_dis = create_subplots(to_display=display_plots, nrows=2, ncols=2, figsize=(15,10), sharex=True, sharey=True)
+    plt.subplots_adjust(hspace=0.1, wspace=0.1)
+    fig_dis.suptitle(os.path.basename(out_pixmask))
+    # create ratio figure
+    fig_rat, axs_rat = create_subplots(to_display=display_plots, nrows=2, ncols=2, figsize=(15, 10), sharex=True, sharey=True)
+    plt.subplots_adjust(hspace=0.1, wspace=0.1)
+    fig_rat.suptitle(os.path.basename(out_pixmask))
+    
+    log.info(f"creating pixel mask using dark current threshold = {dark_current_threshold} {unit}")
+    for iquad, section in enumerate(sections.values()):
+        log.info(f"processing quadrant = {section}")
+        # get sections
+        squad = short_dark.getSection(section)
+        lquad = long_dark.getSection(section)
+        rquad = ratio.getSection(section)
+        mquad = pixmask.getSection(section)
 
-            # calculate standard deviation
-            # log.info("calculating standard deviation using biweight_scale")
-            std = biweight_scale(quad._data, M=cen, ignore_nan=True)
-            log.info(f"standard deviation = {std}")
+        # define good current mask
+        good_darkcurrent = (lquad._data > dark_current_threshold)
+        log.info(f"selecting {good_darkcurrent.sum()} pixels with dark current > {dark_current_threshold} {unit}")
+        # define quadrant pixelmask
+        mask_hotpix = (low_threshold >= rquad._data) | (rquad._data >= high_threshold)
+        # set quadrant pixelmask
+        log.info(f"masking {(good_darkcurrent & mask_hotpix).sum()} pixels with ratio < {low_threshold} or > {high_threshold}")
+        mquad.setData(mask=good_darkcurrent & mask_hotpix)
+        pixmask.setSection(section, mquad, inplace=True)
 
-            # create pixel masks for low and high nsigmas
-            # log.info(f"creating pixel mask for {low_nsigma = } sigma")
-            badcol_mask = (quad._data < cen - low_nsigma * std)
-            badcol_mask |= (quad._data > cen + low_nsigma * std)
-            # log.info(f"creating pixel mask for {high_nsigma = } sigma")
-            if img._header["IMAGETYP"] != "bias":
-                hotpix_mask = (quad._data < cen - high_nsigma * std)
-                hotpix_mask |= (quad._data > cen + high_nsigma * std)
-            else:
-                hotpix_mask = numpy.zeros_like(quad._data, dtype=bool)
+        # plot count distribution of short / long exposures
+        log.info(f"plotting count distribution of short / long exposures")
+        axs_dis[iquad].hist(squad._data.flatten(), bins=1000, label=f"{short_exptime}s", color="tab:blue", histtype="stepfilled", alpha=0.5)
+        axs_dis[iquad].hist(lquad._data.flatten(), bins=1000, label=f"{long_exptime}s", color="tab:red", histtype="stepfilled", alpha=0.5)
+        axs_dis[iquad].axvline(dark_current_threshold, lw=1, ls="--", color="0.2")
+        axs_dis[iquad].set_title(f"quadrant {iquad+1}", loc="left")
+        axs_dis[iquad].set_xscale("log")
+        axs_dis[iquad].set_yscale("log")
+        # plot ratios and hot/cold pixel rejection
+        log.info(f"plotting ratio of short / long exposures")
+        axs_rat[iquad].axhspan(low_threshold, high_threshold, color="0.7", alpha=0.3)
+        axs_rat[iquad].plot(squad._data[good_darkcurrent].flatten(), rquad._data[good_darkcurrent].flatten(), 'o', color="0.2", label='good data')
+        axs_rat[iquad].plot(squad._data[good_darkcurrent&mask_hotpix].flatten(), rquad._data[good_darkcurrent&mask_hotpix].flatten(), '.', color="tab:red", label='hot pixels')
+        axs_rat[iquad].axhline(1, lw=1, color="tab:blue", label="1:1 relationship")
 
-            # mask whole columns if fraction of masked pixels is above threshold
-            bad_columns = numpy.sum(badcol_mask, axis=0) > column_threshold * quad._dim[0]
-            log.info(f"masking {bad_columns.sum()} bad columns")
-            # reset mask to clean good pixels
-            badcol_mask[...] = False
-            # mask only bad columns
-            badcol_mask[:, bad_columns] = True
+        axs_rat[iquad].set_title(f"quadrant {iquad+1}", loc="left")
+        axs_rat[iquad].set_yscale("log")
+        axs_rat[iquad].grid()
+    axs_dis[0].legend(loc="upper right")
+    fig_dis.supxlabel(f'dark current ({unit})')
+    fig_dis.supylabel('Number of pixels')
+    axs_rat[0].legend(loc="lower right")
+    fig_rat.supxlabel(f"dark current ({unit}), {short_exptime}s exposure")
+    fig_rat.supylabel("ratio, short / long exposure")
+    save_fig(fig_dis, product_path=out_pixmask, to_display=display_plots, figure_path="qa", label="dc_hist")
+    save_fig(fig_rat, product_path=out_pixmask, to_display=display_plots, figure_path="qa", label="dc_ratio")
 
-            # combine bad column and hot pixel masks
-            msk_quad._mask = badcol_mask | hotpix_mask
-            log.info(f"masking {msk_quad._mask.sum()} pixels in total")
+    # mask only reliable dark current measurements
+    log.info(f"masking {pixmask._mask.sum()} pixels in total ({pixmask._mask.sum()/pixmask._mask.size*100:.2f}%)")
+    pixmask.setData(data=numpy.nan, select=pixmask._mask)
 
-            # set section to pixelmask image
-            mask.setSection(section=sec, subimg=msk_quad, inplace=True)
-
-        imgs.append(img)
-        masks.append(mask)
-
-    # define header for pixel mask
-    new_header = img._header
-    new_header["IMAGETYP"] = "pixmask"
-    new_header["EXPTIME"] = 0
-    new_header["DARKTIME"] = 0
-    # define image object to store pixel mask
-    new_mask = Image(data=mask._data, mask=numpy.any([mask._mask for mask in masks], axis=0), header=new_header)
-    new_mask.apply_pixelmask()
-    log.info(f"writing pixel mask to '{os.path.basename(out_mask)}'")
-    new_mask.writeFitsData(out_mask)
-
-    return imgs, med_imgs, masks
-
+    # write output mask
+    log.info(f"writing pixel mask to '{os.path.basename(out_pixmask)}'")
+    pixmask.writeFitsData(out_pixmask)
+    
+    return pixmask
 
 # TODO: for fiberflats, calculate an average over an X range (around the center) of the
 # extracted fibers and normalize by it
