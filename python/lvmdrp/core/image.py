@@ -2512,7 +2512,7 @@ def combineImages(
         stack_image[i, :, :] = images[i].getData()
 
         # read error image if not a bias image
-        if images[0]._header["IMAGETYP"] != "bias":
+        if images[0]._header["IMAGETYP"] != "bias" and images[0]._error is not None:
             stack_error[i, :, :] = images[i].getError()
 
         # read pixel mask image
