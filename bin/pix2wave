@@ -231,10 +231,9 @@ class SolveWavelength:
 
         # fix table with cross-matching
         if self.table_exist and self.correct_lines:
-            is_good = self.pixmap[:, -1].astype(bool)
-            pix_spec = spectrum1d._spec_from_lines(self.pixmap[is_good, 0], sigma=2, wavelength=self.xdata)
+            pix_spec = spectrum1d._spec_from_lines(self.pixmap[:, 0], sigma=2, wavelength=self.xdata)
 
-            log.info(f"running cross matching on {is_good.sum()} good lines")
+            log.info(f"running cross matching on all {len(self.pixmap)} identified lines")
             cc, self.bhat, self.mhat = spectrum1d._cross_match(ref_spec=pix_spec, obs_spec=self.ydata, stretch_factors=np.linspace(0.8,1.2,10000), shift_range=[-50,50])
             log.info(f"max CC = {cc:.2f} for strech = {self.mhat:.2f} and shift = {self.bhat:.2f}")
             self.pixmap[:, 0] = self.mhat * self.pixmap[:, 0] + self.bhat
@@ -455,7 +454,7 @@ class SolveWavelength:
         if self.plot:
             plot_name = os.path.basename(self.extracted_fits.replace(".fits", ""))
             log.info(f"saving residuals plot to '{plot_name}' PNG file")
-            fig.savefig(f"{plot_name}.png", bbox_inches="tight")
+            fig.savefig(f"{plot_name}.png")
 
 
 if __name__ == "__main__":
@@ -547,5 +546,4 @@ if __name__ == "__main__":
         vertOn=True,
     )
 
-    plt.tight_layout()
     plt.show()

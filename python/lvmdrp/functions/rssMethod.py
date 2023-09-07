@@ -267,15 +267,9 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
     ref_lines = ref_lines[sort]
     use_line = use_line[sort]
 
-    # remove bad lines
-    pixel = pixel[use_line]
-    ref_lines = ref_lines[use_line]
-    use_line = use_line[use_line]
-    nlines = len(pixel)
-
     # apply cc correction to lines if needed
     if cc_correction or ref_fiber != ref_fiber_:
-        log.info(f"running cross matching on {pixel.size} good lines")
+        log.info(f"running cross matching on all {pixel.size} identified lines")
         # determine maximum correlation shift
         pix_spec = _spec_from_lines(pixel, sigma=2, wavelength=arc._pixels)
 
@@ -286,12 +280,18 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
             ref_spec=pix_spec,
             obs_spec=arc._data[ref_fiber],
             stretch_factors=numpy.linspace(0.9,1.1,10000),
-            shift_range=[-cc_max_shift, cc_max_shift]
+            shift_range=[-cc_max_shift, cc_max_shift],
         )
         
         log.info(f"max CC = {cc:.2f} for strech = {mhat:.2f} and shift = {bhat:.2f}")
     else:
         mhat, bhat = 1.0, 0.0
+
+    # remove bad lines
+    pixel = pixel[use_line]
+    ref_lines = ref_lines[use_line]
+    use_line = use_line[use_line]
+    nlines = len(pixel)
 
     # correct initial pixel map by shifting
     pixel = mhat * pixel + bhat
