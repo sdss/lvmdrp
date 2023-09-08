@@ -3157,7 +3157,7 @@ def detrend_frame(
     in_bias: str = None,
     in_dark: str = None,
     in_pixelflat: str = None,
-    in_nonlinearity: str = DEFAULT_PTC_PATH,
+    in_nonlinearity: str = None,
     in_slitmap: Table = None,
     convert_to_e: bool = True,
     calculate_error: bool = True,
