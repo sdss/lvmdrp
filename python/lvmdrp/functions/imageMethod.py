@@ -61,7 +61,7 @@ DEFAULT_BGSEC = [
     "[1:2043, 1991:2000]",
     "[1:2043, 1991:2000]",
 ]
-DEFAULT_PTC_PATH = os.path.join(os.getenv("LVMCORE_DIR"), "metrology", "PTC_fit.txt")
+DEFAULT_PTC_PATH = os.path.join(os.environ["LVMCORE_DIR"], "metrology", "PTC_fit.txt")
 
 
 description = "Provides Methods to process 2D images"
@@ -114,10 +114,10 @@ def _nonlinearity_correction(ptc_params: None | numpy.ndarray, nominal_gain: flo
 
         gain_med = numpy.nanmedian(gain_map._data)
         gain_min, gain_max = numpy.nanmin(gain_map._data), numpy.nanmax(gain_map._data)
-        log.info(f"gain map stats ({nominal_gain}): {gain_med = }, {gain_min = }, {gain_max = } (electron/adu)")
+        log.info(f"gain map stats: {gain_med = :.2f} [{gain_min = :.2f}, {gain_max = :.2f}] ({nominal_gain = :.2f} e-/ADU)")
     else:
         log.warning("cannot apply non-linearity correction")
-        log.info(f"using {nominal_gain = } (electron/adu)")
+        log.info(f"using {nominal_gain = } (e-/ADU)")
         gain_map = Image(data=numpy.ones(quadrant._data.shape) * nominal_gain)
     return gain_map
 
@@ -3768,7 +3768,7 @@ def create_pixelmask(in_short_dark, in_long_dark, out_pixmask, in_flat_a=None, i
         ratio_med = bn.nanmedian(ratio_flat._data)
         ratio_min = bn.nanmin(ratio_flat._data)
         ratio_max = bn.nanmax(ratio_flat._data)
-        log.info(f"calculating ratio of flats: {ratio_med = :.2f} [{ratio_min = :.2f}, {ratio_max = :.2f}")
+        log.info(f"calculating ratio of flats: {ratio_med = :.2f} [{ratio_min = :.2f}, {ratio_max = :.2f}]")
 
         # plot flats histograms
         log.info("plotting flats histograms")
