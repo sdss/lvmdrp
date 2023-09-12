@@ -225,8 +225,11 @@ class fit_profile1D(object):
 
     def plot(self, x, y=None, ax=None):
         if y is not None:
+            if ax is None:
+                ax = plt.gca()
             ax.step(x, y, color="0.2", lw=1, where="mid")
         ax.step(x, self(x), color="tab:blue", lw=1.5, where="mid")
+        plt.show()
         return ax
 
 
