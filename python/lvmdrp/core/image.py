@@ -1493,7 +1493,7 @@ class Image(Header):
         new_image.setData(data=new, inplace=True)
         return new_image
 
-    def medianImg(self, size, mode="nearest", use_mask=False):
+    def medianImg(self, size, mode="nearest", use_mask=False, propagate_error=False):
         """return median filtered image with the given kernel size
 
         optionally the method for handling boundary can be set with the `mode`
@@ -1509,6 +1509,8 @@ class Image(Header):
             method to handle boundary pixels, by default "nearest"
         use_mask : bool, optional
             whether to take into account masked pixels or not, by default False
+        propagate_error : bool, optional
+            whether to propagate the error or not, by default False
 
         Returns
         -------
@@ -1518,9 +1520,13 @@ class Image(Header):
         if self._mask is None and use_mask:
             new_data = ndimage.median_filter(self._data, size, mode=mode)
             new_mask = None
+            if propagate_error and self._error is not None:
+                new_error = numpy.sqrt(ndimage.median_filter(self._error ** 2, size, mode=mode))
         elif self._mask is not None and not use_mask:
             new_data = ndimage.median_filter(self._data, size, mode=mode)
             new_mask = self._mask
+            if propagate_error and self._error is not None:
+                new_error = numpy.sqrt(ndimage.median_filter(self._error ** 2, size, mode=mode))
         else:
             # copy data and replace masked with nans
             new_data = copy(self._data)
@@ -1531,9 +1537,16 @@ class Image(Header):
             new_mask = numpy.isnan(new_data)
             # reset original masked values in new array
             new_data[new_mask] = self._data[new_mask]
+            # update error
+            if propagate_error and self._error is not None:
+                new_error = copy(self._error)
+                new_error[self._mask] = numpy.nan
+                new_error = numpy.sqrt(signal.medfilt2d(new_error ** 2, size))
+                # reset masked errors in new array
+                new_error[new_mask] = self._error[new_mask]
 
         image = copy(self)
-        image.setData(data=new_data, mask=new_mask)
+        image.setData(data=new_data, error=new_error, mask=new_mask)
         return image
 
     def collapseImg(self, axis, mode="mean"):
@@ -1693,7 +1706,7 @@ class Image(Header):
         mask = numpy.ones((TraceMask._fibers, TraceMask._data.shape[1]), dtype="bool")
         pixels = numpy.arange(fwhm.shape[1])
         for i in pixels[axis_select]:
-            # print(i,fwhm.shape[1])
+            # print("column:", i, fwhm.shape[1])
             slice_img = self.getSlice(i, axis="y")  # extract cross-dispersion slice
             slice_trace = TraceMask.getSlice(
                 i, axis="y"
@@ -1712,20 +1725,34 @@ class Image(Header):
             #     plot=4
             #  else:
             #    plot=-1
-            plot = -1
+            # plot = -1
             #   print(slice_img._data.shape, trace)
-            fwhm_fit = slice_img.measureFWHMPeaks(
-                trace,
-                blocks,
-                init_fwhm=init_fwhm,
-                threshold_flux=threshold_flux,
-                plot=plot,
-            )  # obtain the fiber profile FWHM for each slice
-            fwhm[good, i] = fwhm_fit[0]
-            mask[good, i] = fwhm_fit[
-                1
-            ]  #    traceFWHM.setSlice(i, axis='y', data = fwhm_fit[0], mask = fwhm_fit[1]) # insert the result into the trace mask
-            # return traceFWHM
+            # fwhm_fit = slice_img.measureFWHMPeaks(
+            #     trace,
+            #     blocks,
+            #     init_fwhm=init_fwhm,
+            #     threshold_flux=threshold_flux,
+            #     plot=plot,
+            # )  # obtain the fiber profile FWHM for each slice
+            print(">>>>>>>>>>>>", i, init_fwhm)
+            print(trace)
+            # try:
+            #     fig, axs = plt.subplots(54, 12, figsize=(20, 50))
+            #     axs = axs.ravel()
+            fit = slice_img.fitSepGauss(trace, aperture=init_fwhm)#, axs=axs)
+            # except Exception as e:
+            #     print(f"at column {i}: {e}")
+            #     # plt.figure(figsize=(20,5))
+            #     # plt.vlines(trace, 0, slice_img._data.max(), lw=0.5, color="0.7")
+            #     # plt.step(slice_img._wave, slice_img._data, where="mid", lw=1)
+            #     # plt.show()
+            #     continue
+            # finally:
+            #     plt.close(fig)
+            #     del fig
+            fwhm[good, i] = fit[2 * TraceMask._fibers : 3 * TraceMask._fibers] * 2.354
+            mask[good, i] = numpy.fabs(fit[:TraceMask._fibers]) < threshold_flux
+            print("fitted FWHM: ", fwhm[good, i])
         return (fwhm, mask)
 
     def extractSpecAperture(self, TraceMask, aperture):
