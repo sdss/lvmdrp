@@ -5,6 +5,7 @@ from multiprocessing import Pool, cpu_count
 from lvmdrp.core.plot import plt
 import astropy.io.fits as pyfits
 import numpy
+import bottleneck as bn
 from scipy import interpolate, optimize, special
 
 
@@ -54,10 +55,10 @@ class fit_profile1D(object):
 
     def residuum(self, par, x, y, sigma=1.0):
         self._par = par
-        return numpy.sum(((y - self(x)) / sigma) ** 2)
+        return bn.nansum(((y - self(x)) / sigma) ** 2)
 
     def chisq(self, x, y, sigma=1.0):
-        return numpy.sum(((y - self(x)) / sigma) ** 2)
+        return bn.nansum(((y - self(x)) / sigma) ** 2)
 
     def fit(
         self,
@@ -224,12 +225,11 @@ class fit_profile1D(object):
             self._par_err = None
 
     def plot(self, x, y=None, ax=None):
+        if ax is None:
+            fig, ax = plt.subplots(figsize=(15,5))
         if y is not None:
-            if ax is None:
-                ax = plt.gca()
             ax.step(x, y, color="0.2", lw=1, where="mid")
-        ax.step(x, self(x), color="tab:blue", lw=1.5, where="mid")
-        plt.show()
+        ax.step(x, self(x), color="tab:blue", lw=1, where="mid")
         return ax
 
 
@@ -429,7 +429,7 @@ class parFile(fit_profile1D):
 
     def guessPar(self, x, y):
         w = self._guess_window
-        dx = numpy.median(x[1:] - x[:-1])
+        dx = bn.nanmedian(x[1:] - x[:-1])
         temp_y = deepcopy(y)
         for n in self._names:
             if self._profile_type[n] == "TemplateScale":
@@ -444,8 +444,8 @@ class parFile(fit_profile1D):
                         numpy.in1d(self._template_spec[n]._wave, x),
                     )
                     scale_guess = (
-                        numpy.sum(y[select_match])
-                        / numpy.sum(self._template_spec[n]._data[select_match])
+                        bn.nansum(y[select_match])
+                        / bn.nansum(self._template_spec[n]._data[select_match])
                         * 0.95
                     )
                     self._parameters[n]["scale"] = scale_guess
@@ -473,7 +473,7 @@ class parFile(fit_profile1D):
                         x > restwave * (vel / 300000.0 + 1) - w / 2.0,
                         x < restwave * (vel / 300000.0 + 1) + w / 2.0,
                     )
-                    flux = numpy.sum(temp_y[select]) * dx
+                    flux = bn.nansum(temp_y[select]) * dx
                     self._parameters[n]["flux"] = flux
                 if self._fixed[n]["disp"] == 1:
                     try:
@@ -487,12 +487,12 @@ class parFile(fit_profile1D):
                     try:
                         wave_z = restwave * (vel / 300000.0 + 1)
                         width = numpy.sqrt(
-                            numpy.sum((temp_y[select] * (x[select] - wave_z) ** 2))
-                            / (numpy.sum(temp_y[select]))
+                            bn.nansum((temp_y[select] * (x[select] - wave_z) ** 2))
+                            / (bn.nansum(temp_y[select]))
                         )
                         if (
                             width > self._spec_res.getRes(wave_z)
-                            and numpy.isnan(width) == False
+                            and not numpy.isnan(width)
                         ):
                             disp = (
                                 numpy.sqrt(
@@ -504,7 +504,7 @@ class parFile(fit_profile1D):
                             self._parameters[n]["disp"] = disp
                     # else:
                     # self._parameters[n]['disp']=0.0
-                    except:
+                    except Exception:
                         pass
         # print self._parameters
         self.freePar()
@@ -683,11 +683,11 @@ class Gaussian(fit_profile1D):
 
     def _guess_par(self, x, y):
         sel = numpy.isfinite(y)
-        dx = numpy.median(x[1:] - x[:-1])
-        self._par[0] = numpy.sum(y[sel])
-        self._par[1] = numpy.sum(x[sel] * y[sel]) / self._par[0]
+        dx = bn.nanmedian(x[1:] - x[:-1])
+        self._par[0] = bn.nansum(y[sel])
+        self._par[1] = bn.nansum(x[sel] * y[sel]) / self._par[0]
         self._par[2] = numpy.sqrt(
-            numpy.sum((y[sel] * (x[sel] - self._par[1]) ** 2)) / self._par[0]
+            bn.nansum((y[sel] * (x[sel] - self._par[1]) ** 2)) / self._par[0]
         )
         self._par[0] *= dx
 
@@ -706,12 +706,12 @@ class Gaussian_const(fit_profile1D):
 
     def _guess_par(self, x, y):
         sel = numpy.isfinite(y)
-        dx = numpy.median(x[1:] - x[:-1])
-        ymin = numpy.min(y[sel])
-        self._par[0] = numpy.sum(y[sel] - ymin)
-        self._par[1] = numpy.sum(x[sel] * (y[sel] - ymin)) / self._par[0]
+        dx = bn.nanmedian(x[1:] - x[:-1])
+        ymin = bn.nanmin(y[sel])
+        self._par[0] = bn.nansum(y[sel] - ymin)
+        self._par[1] = bn.nansum(x[sel] * (y[sel] - ymin)) / self._par[0]
         self._par[2] = numpy.sqrt(
-            numpy.sum(((y[sel] - ymin) * (x[sel] - self._par[1]) ** 2)) / (self._par[0])
+            bn.nansum(((y[sel] - ymin) * (x[sel] - self._par[1]) ** 2)) / (self._par[0])
         )
         self._par[3] = ymin
         self._par[0] *= dx
@@ -729,10 +729,10 @@ class Gaussian_poly(fit_profile1D):
     def _guess_par(self, x, y):
         sel = numpy.isfinite(y)
         dx = abs(x[1] - x[0])
-        self._par[0] = numpy.sum(y[sel])
-        self._par[1] = numpy.sum(x[sel] * y[sel]) / self._par[0]
+        self._par[0] = bn.nansum(y[sel])
+        self._par[1] = bn.nansum(x[sel] * y[sel]) / self._par[0]
         self._par[2] = numpy.sqrt(
-            numpy.sum((y[sel] * (x[sel] - self._par[1]) ** 2)) / self._par[0]
+            bn.nansum((y[sel] * (x[sel] - self._par[1]) ** 2)) / self._par[0]
         )
         self._par[0] *= dx
 
@@ -743,16 +743,9 @@ class Gaussian_poly(fit_profile1D):
 class Gaussians(fit_profile1D):
     def _profile(self, x):
         y = numpy.zeros(len(x), dtype=numpy.float32)
-        ncomp = len(self._par) / 3
+        ncomp = len(self._par) // 3
         for i in range(ncomp):
-            y += (
-                self._par[i]
-                * numpy.exp(
-                    -0.5
-                    * ((x - self._par[i + ncomp]) / abs(self._par[i + 2 * ncomp])) ** 2
-                )
-                / (fact * abs(self._par[i + 2 * ncomp]))
-            )
+            y += self._par[i] * numpy.exp(-0.5 * ((x - self._par[i + ncomp]) / abs(self._par[i + 2 * ncomp])) ** 2) / (fact * abs(self._par[i + 2 * ncomp]))
         return y
 
     def __init__(self, par):
@@ -765,11 +758,7 @@ class Gaussians_width(fit_profile1D):
         ncomp = len(self._args)
         self._par[0] = numpy.fabs(self._par[0])
         for i in range(ncomp):
-            y += (
-                self._par[i + 1]
-                * numpy.exp(-0.5 * ((x - self._args[i]) / self._par[0]) ** 2)
-                / (fact * self._par[0])
-            )
+            y += self._par[i + 1] * numpy.exp(-0.5 * ((x - self._args[i]) / self._par[0]) ** 2) / (fact * self._par[0])
         return y
 
     def __init__(self, par, args):
@@ -832,10 +821,10 @@ class Gauss_Hermite(fit_profile1D):
 
     def _guess_par(self, x, y):
         sel = numpy.isfinite(y)
-        self._par[0] = numpy.sum(y[sel])
-        self._par[1] = numpy.sum(x[sel] * y[sel]) / self._par[0]
+        self._par[0] = bn.nansum(y[sel])
+        self._par[1] = bn.nansum(x[sel] * y[sel]) / self._par[0]
         self._par[2] = numpy.sqrt(
-            numpy.sum((y[sel] * (x[sel] - self._par[1]) ** 2)) / self._par[0]
+            bn.nansum((y[sel] * (x[sel] - self._par[1]) ** 2)) / self._par[0]
         )
         self._par[3] = 0.0
         self._par[4] = 0.0
@@ -858,10 +847,10 @@ class Moffat(fit_profile1D):
 
     def _guess_par(self, x, y):
         sel = numpy.isfinite(y)
-        self._par[0] = numpy.sum(y[sel])
-        self._par[1] = numpy.sum(x[sel] * y[sel]) / self._par[0]
+        self._par[0] = bn.nansum(y[sel])
+        self._par[1] = bn.nansum(x[sel] * y[sel]) / self._par[0]
         self._par[2] = numpy.sqrt(
-            numpy.sum((y[sel] * (x[sel] - self._par[1]) ** 2)) / self._par[0]
+            bn.nansum((y[sel] * (x[sel] - self._par[1]) ** 2)) / self._par[0]
         )
         self._par[3] = 2.0
 
@@ -894,18 +883,18 @@ class Gaussian2D(fit_profile2D):
         )
 
     def _guess_par(self, x, y, z):
-        self._par[0] = numpy.sum(z)
-        self._par[1] = numpy.sum(x * z) / self._par[0]
-        self._par[2] = numpy.sum(y * z) / self._par[0]
+        self._par[0] = bn.nansum(z)
+        self._par[1] = bn.nansum(x * z) / self._par[0]
+        self._par[2] = bn.nansum(y * z) / self._par[0]
         indcol = numpy.around(x) == numpy.around(self._par[1])
         indrow = numpy.around(y) == numpy.around(self._par[2])
         self._par[3] = numpy.sqrt(
-            numpy.sum(z[indrow] * (x[indrow] - self._par[2]) ** 2)
-            / numpy.sum(z[indrow])
+            bn.nansum(z[indrow] * (x[indrow] - self._par[2]) ** 2)
+            / bn.nansum(z[indrow])
         )
         self._par[4] = numpy.sqrt(
-            numpy.sum(z[indcol] * (y[indcol] - self._par[1]) ** 2)
-            / numpy.sum(z[indcol])
+            bn.nansum(z[indcol] * (y[indcol] - self._par[1]) ** 2)
+            / bn.nansum(z[indcol])
         )
 
     def __init__(self, par):
@@ -924,9 +913,9 @@ class LegandrePoly(object):
     def __call__(self, x):
         y = numpy.zeros(len(x), dtype=numpy.float32)
         if self._min_x is None:
-            self._min_x = numpy.min(x)
+            self._min_x = bn.nanmin(x)
         if self._max_x is None:
-            self._max_x = numpy.max(x)
+            self._max_x = bn.nanmax(x)
         x_poly = (x - self._min_x) * 1.98 / numpy.abs(
             (numpy.abs(self._max_x) - numpy.abs(self._min_x))
         ) - 0.99
@@ -1042,7 +1031,7 @@ def res_gauss_hermite(p, x, y, sigma):
 
 
 def chisq_gaussian_width_multi(p, x, y, pos, sigma):
-    return numpy.sum(((y - gaussian_width_multi(p, x, pos)) / sigma) ** 2)
+    return bn.nansum(((y - gaussian_width_multi(p, x, pos)) / sigma) ** 2)
 
 
 def dev_gaussian(p, x, y, sigma):
@@ -1104,12 +1093,12 @@ def fit_gaussian(x, y, sigma=1.0, p0=None, ftol=1e-4, xtol=1e-4, warning=True):
     sel = numpy.isfinite(y)
     dx = abs(x[1] - x[0])
 
-    # if numpy.sum(sel)>3:
+    # if bn.nansum(sel)>3:
     if p0 is None or len(p0) != 3:
         p0 = numpy.zeros(3)
-        p0[0] = numpy.sum(y[sel])
-        p0[1] = numpy.sum(x[sel] * y[sel]) / p0[0]
-        p0[2] = numpy.sqrt(numpy.sum((y[sel] * (x[sel] - p0[1]) ** 2)) / p0[0])
+        p0[0] = bn.nansum(y[sel])
+        p0[1] = bn.nansum(x[sel] * y[sel]) / p0[0]
+        p0[2] = numpy.sqrt(bn.nansum((y[sel] * (x[sel] - p0[1]) ** 2)) / p0[0])
         p0[0] *= dx
 
     sol = optimize.leastsq(
@@ -1123,10 +1112,10 @@ def fit_gaussian_const(x, y, sigma=1.0, p0=None, ftol=1e-6, xtol=1e-6, warning=T
     cdelt = abs(x[1] - x[0])
     if p0 is None or len(p0) != 4:
         p0 = numpy.zeros(4)
-        ymin = numpy.min(y)
-        p0[0] = numpy.sum(y - ymin)
-        p0[1] = numpy.sum(x * (y - ymin)) / p0[0]
-        p0[2] = numpy.sqrt(numpy.sum(((y - ymin) * (x - p0[1]) ** 2)) / p0[0])
+        ymin = bn.nanmin(y)
+        p0[0] = bn.nansum(y - ymin)
+        p0[1] = bn.nansum(x * (y - ymin)) / p0[0]
+        p0[2] = numpy.sqrt(bn.nansum(((y - ymin) * (x - p0[1]) ** 2)) / p0[0])
         p0[3] = ymin
         p0[0] *= cdelt
 
@@ -1151,9 +1140,9 @@ def fit_gaussian_poly(x, y, sigma=1.0, npoly=0):
     cdelt = abs(x[1] - x[0])
 
     p0 = numpy.zeros(3 + npoly + 1)
-    p0[0] = numpy.sum(y)
-    p0[1] = numpy.sum(x * y) / p0[0]
-    p0[2] = numpy.sqrt(numpy.sum(y * (x - p0[1]) ** 2) / p0[0])
+    p0[0] = bn.nansum(y)
+    p0[1] = bn.nansum(x * y) / p0[0]
+    p0[2] = numpy.sqrt(bn.nansum(y * (x - p0[1]) ** 2) / p0[0])
     p0[0] *= cdelt
 
     sol = optimize.leastsq(
@@ -1223,16 +1212,16 @@ def fit_gaussian_width_multi_offset(x, y, pos, sigma=1.0, flux0=1.0, width0=1.0)
 
 def fit_gaussian2d(x, y, z, sigma=1.0):
     p0 = numpy.zeros(5)
-    p0[0] = numpy.sum(z)
-    p0[1] = numpy.sum(x * z) / p0[0]
-    p0[2] = numpy.sum(y * z) / p0[0]
+    p0[0] = bn.nansum(z)
+    p0[1] = bn.nansum(x * z) / p0[0]
+    p0[2] = bn.nansum(y * z) / p0[0]
     indcol = numpy.around(x) == numpy.around(p0[1])
     indrow = numpy.around(y) == numpy.around(p0[2])
     p0[3] = numpy.sqrt(
-        numpy.sum(z[indrow] * (x[indrow] - p0[2]) ** 2) / numpy.sum(z[indrow])
+        bn.nansum(z[indrow] * (x[indrow] - p0[2]) ** 2) / bn.nansum(z[indrow])
     )
     p0[4] = numpy.sqrt(
-        numpy.sum(z[indcol] * (y[indcol] - p0[1]) ** 2) / numpy.sum(z[indcol])
+        bn.nansum(z[indcol] * (y[indcol] - p0[1]) ** 2) / bn.nansum(z[indcol])
     )
 
     sol = optimize.leastsq(res_gaussian2d, p0, (x, y, z, sigma))
@@ -1243,12 +1232,12 @@ def fit_gaussian2d(x, y, z, sigma=1.0):
 def fit_gauss_hermite(x, y, sigma=1.0, p0=None):
     sel = numpy.isfinite(y)
 
-    # if numpy.sum(sel)>3:
+    # if bn.nansum(sel)>3:
     if p0 is None or len(p0) != 5:
         p0 = numpy.zeros(5)
-        p0[0] = numpy.sum(y[sel])
-        p0[1] = numpy.sum(x[sel] * y[sel]) / p0[0]
-        p0[2] = numpy.sqrt(numpy.sum((y[sel] * (x[sel] - p0[1]) ** 2)) / p0[0])
+        p0[0] = bn.nansum(y[sel])
+        p0[1] = bn.nansum(x[sel] * y[sel]) / p0[0]
+        p0[2] = numpy.sqrt(bn.nansum((y[sel] * (x[sel] - p0[1]) ** 2)) / p0[0])
         p0[3] = 0.0
         p0[4] = 0.0
 
