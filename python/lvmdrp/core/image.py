@@ -1520,11 +1520,13 @@ class Image(Header):
         if self._mask is None and use_mask:
             new_data = ndimage.median_filter(self._data, size, mode=mode)
             new_mask = None
+            new_error = None
             if propagate_error and self._error is not None:
                 new_error = numpy.sqrt(ndimage.median_filter(self._error ** 2, size, mode=mode))
         elif self._mask is not None and not use_mask:
             new_data = ndimage.median_filter(self._data, size, mode=mode)
             new_mask = self._mask
+            new_error = None
             if propagate_error and self._error is not None:
                 new_error = numpy.sqrt(ndimage.median_filter(self._error ** 2, size, mode=mode))
         else:
@@ -1538,6 +1540,7 @@ class Image(Header):
             # reset original masked values in new array
             new_data[new_mask] = self._data[new_mask]
             # update error
+            new_error = None
             if propagate_error and self._error is not None:
                 new_error = copy(self._error)
                 new_error[self._mask] = numpy.nan
