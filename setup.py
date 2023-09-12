@@ -48,7 +48,8 @@ def run():
                 "ipython>=8.10.0",
                 "jupyter>=1.0.0",
                 "jupyterlab>=3.6.1",
-                "ipywidgets>=8.1.0"
+                "ipywidgets>=8.1.0",
+                "ipympl==0.9.3"
             ]
         },
         packages=find_packages(where="python"),
