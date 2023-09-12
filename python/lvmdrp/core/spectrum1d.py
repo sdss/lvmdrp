@@ -2031,7 +2031,7 @@ class Spectrum1D(Header):
         par = numpy.concatenate([flux_in, cent, sig_in])
         gauss_multi = fit_profile.Gaussians(par)
         gauss_multi.fit(self._wave[select], self._data[select], sigma=error[select])
-        return gauss_multi.getPar()
+        return gauss_multi, gauss_multi.getPar()
 
     def fitParFile(
         self, par, err_sim=0, ftol=1e-8, xtol=1e-8, method="leastsq", parallel="auto"
