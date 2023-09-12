@@ -3820,9 +3820,12 @@ def create_pixelmask(in_short_dark, in_long_dark, out_pixmask, in_flat_a=None, i
 
 def trace_fiber_fwhm(in_image, in_centroid_trace, out_fwhm_trace,
                      median_box=10, median_cross=1, ref_column=2000,
-                     nslices=9, nblocks=18, init_fwhm=3, flux_threshold=100,
+                     nslices=9, nblocks=18, guess_fwhm=3, flux_threshold=100,
                      fit_poly=True, display_plots=False):
     """Trace the centroid and FWHM of fibers in a continuum exposure.
+
+    Given a continuum exposure and a centroid trace, this function will trace
+    the centroid and FWHM of each fiber in the image.
 
     Parameters
     ----------
@@ -3842,7 +3845,7 @@ def trace_fiber_fwhm(in_image, in_centroid_trace, out_fwhm_trace,
         Number of slices to use for tracing the fibers.
     nblocks : int, optional
         Number of blocks to use for tracing the fibers.
-    init_fwhm : int, optional
+    guess_fwhm : int, optional
         Initial FWHM to use for fitting the fiber profiles.
     flux_threshold : int, optional
         Threshold to use for masking bad fibers.
@@ -3866,16 +3869,19 @@ def trace_fiber_fwhm(in_image, in_centroid_trace, out_fwhm_trace,
     """
 
     # load continuum exposure
+    log.info(f"loading continuum exposure '{os.path.basename(in_image)}'")
     img = loadImage(in_image)
     img.setData(data=numpy.nan_to_num(img._data), error=numpy.nan_to_num(img._error, nan=numpy.inf))
 
     # median filter continuum exposure to increase S/N and remove cosmic rays
+    log.info(f"median filtering continuum exposure with {median_box = } and {median_cross = }")
     if median_box != 0 or median_cross != 0:
         median_box = max(median_box, 1)
         median_cross = max(median_cross, 1)
-        img = img.medianImg((median_cross, median_box))
+        img = img.medianImg((median_cross, median_box), propagate_error=True)
 
     # load centroid trace
+    log.info(f"loading centroid trace '{os.path.basename(in_centroid_trace)}'")
     centroids = TraceMask()
     centroids.loadFitsData(in_centroid_trace)
 
@@ -3883,12 +3889,10 @@ def trace_fiber_fwhm(in_image, in_centroid_trace, out_fwhm_trace,
     step = img._dim[1] // nslices
     columns = numpy.concatenate((numpy.arange(ref_column, 0, -step), numpy.arange(ref_column+step, img._dim[1], step)))
     columns.sort()
-
-    # fig, ax = plt.subplots(1,1, figsize=(15,10))
-    # ax.vlines(columns, 0, 1, color="r", lw=0.5)
-    # ax.vlines([0, img._dim[1]], 0, 1, color="k", lw=0.5)
+    log.info(f"tracing fibers in {len(columns)} columns: {','.join(map(str, columns))}")
 
     # initialize traces
+    log.info("initializing traces")
     trace_cent = copy(centroids)
     trace_cent.setData(data=numpy.zeros_like(centroids._data), mask=numpy.ones_like(centroids._data, dtype=bool))
     trace_cent._coeffs = None
@@ -3897,8 +3901,10 @@ def trace_fiber_fwhm(in_image, in_centroid_trace, out_fwhm_trace,
     trace_fwhm._coeffs = None
 
     # iterate over each slice of the image and corresponding centroid locations
+    log.info("tracing fibers")
     fit_columns, residuals = [], []
-    for i, icolumn in tqdm(enumerate(columns), total=nslices, desc="tracing fibers", ascii=True, ncols=100, unit="column"):
+    for i, icolumn in enumerate(columns):
+        log.info(f"tracing column {icolumn} ({i+1}/{len(columns)})")
         # get slice of data and trace
         cen_slice, _, msk_slice = centroids.getSlice(icolumn, axis="y")
         img_slice = img.getSlice(icolumn, axis="y")
@@ -3909,13 +3915,14 @@ def trace_fiber_fwhm(in_image, in_centroid_trace, out_fwhm_trace,
 
         # fit each block
         x_blocks = []
-        for cen_block, msk_block in zip(cen_blocks, msk_blocks):
+        for j, (cen_block, msk_block) in enumerate(zip(cen_blocks, msk_blocks)):
             # NOTE: test masking bad fibers before tracing to see if the results improve
             # mask bad fibers
             # cen_block = cen_block[msk_block]
 
             # fit gaussian models to each fiber profile
-            _, x_block = img_slice.fitMultiGauss(cen_block, init_fwhm=init_fwhm)
+            log.info(f"fitting fiber block {j+1}/{nblocks} ({cen_block.size} fibers)")
+            _, x_block = img_slice.fitMultiGauss(cen_block, init_fwhm=guess_fwhm)
             x_blocks.append(x_block)
 
         # combine all parameters in a single array
@@ -3941,12 +3948,19 @@ def trace_fiber_fwhm(in_image, in_centroid_trace, out_fwhm_trace,
         integral_dat = numpy.trapz(img_slice._data, img_slice._pixels)
         residuals.append((integral_dat - integral_mod) / integral_dat * 100)
     
+        # compute fitted model stats
+        chisq_red = bn.nansum((fit_joint(img_slice._pixels) - img_slice._data)**2 / img_slice._error**2) / (img._dim[0] - 1 - 3 * nblocks)
+        min_fwhm, max_fwhm, median_fwhm = numpy.min(fwhm_slice), numpy.max(fwhm_slice), numpy.median(fwhm_slice)
+        log.info(f"joint model stats: {chisq_red = :.2f}, {min_fwhm = :.2f}, {max_fwhm = :.2f}, {median_fwhm = :.2f}")
+
     # interpolate or fit polynomial
     trace_cent_fit, trace_fwhm_fit = copy(trace_cent), copy(trace_fwhm)
     if fit_poly:
+        log.info("fitting polynomial to traces")
         trace_cent_fit.smoothTracePoly(deg=4, poly_kind="poly")
         trace_fwhm_fit.smoothTracePoly(deg=4, poly_kind="poly")
     else:
+        log.info("interpolating traces")
         pixels = numpy.arange(img._dim[1])
         for ifiber in trace_cent._good_fibers:
             good_pix = ~trace_cent._mask[ifiber]
@@ -3958,6 +3972,7 @@ def trace_fiber_fwhm(in_image, in_centroid_trace, out_fwhm_trace,
             trace_fwhm_fit._data[ifiber] = f_fwhm_data(pixels)
     
     # update trace masks
+    log.info("updating trace pixel masks")
     trace_cent._mask |= centroids._mask
     trace_fwhm._mask |= centroids._mask
     trace_cent_fit._mask = centroids._mask
@@ -3971,9 +3986,11 @@ def trace_fiber_fwhm(in_image, in_centroid_trace, out_fwhm_trace,
     # NOTE: interpolate bad fibers
 
     # write traces to disk
+    log.info(f"writing fiber width trace to '{os.path.basename(out_fwhm_trace)}'")
     trace_fwhm_fit.writeFitsData(out_fwhm_trace)
 
     # plot results
+    log.info("plotting results")
     # residuals
     fig, ax = create_subplots(to_display=display_plots, nrows=1, ncols=1, figsize=(15,10))
     ax.plot(columns, residuals, "o", color="tab:red", ms=10)
