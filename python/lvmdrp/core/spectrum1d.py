@@ -1802,10 +1802,11 @@ class Spectrum1D(Header):
 
         # iterate over the blocks
         for i in range(len(brackets) - 1):
+            print("fitting fiber blocks:", i, brackets[i], brackets[i + 1])
             pos_block = pos[
                 brackets[i] : brackets[i + 1]
             ]  # cut out the corresponding peak positions
-            median_dist = numpy.median(
+            median_dist = numpy.nanmedian(
                 pos_block[1:] - pos_block[:-1]
             )  # compute median distance between peaks
             flux = (
@@ -1815,11 +1816,12 @@ class Spectrum1D(Header):
                 / 2.354
             )  # initial guess for the flux
 
+            print("initial flux value:", flux)
             # compute lower and upper bounds of the positions for each block
-            lo = int(numpy.min(pos_block) - median_dist)
+            lo = int(numpy.nanmin(pos_block) - median_dist)
             if lo <= 0:
                 lo = 0
-            hi = int(numpy.max(pos_block) + median_dist)
+            hi = int(numpy.nanmax(pos_block) + median_dist)
             if hi >= self._wave[-1]:
                 hi = self._wave[-1]
 
@@ -1855,7 +1857,7 @@ class Spectrum1D(Header):
             fwhm[brackets[i] : brackets[i + 1]] = (
                 fit_par[0] * 2.354
             )  # convert Gaussian sigma to FWHM
-
+            print(">>>>>>>fitted FWHM: ", fwhm[brackets[i] : brackets[i + 1]])
             # create the bad pixel mask
             if threshold_flux is not None:
                 masked = numpy.logical_or(

@@ -1860,6 +1860,8 @@ def traceFWHM_drp(
     blocks="20",
     steps="100",
     coadd="10",
+    median_box="10",
+    median_cross="1",
     poly_disp="5",
     poly_kind="poly",
     threshold_flux="50.0",
@@ -1917,6 +1919,7 @@ def traceFWHM_drp(
     poly_disp = int(poly_disp)
     init_fwhm = float(init_fwhm)
     coadd = int(coadd)
+    median_box, median_cross = int(median_box), int(median_cross)
     threshold_flux = float(threshold_flux)
     if clip != "":
         clip = clip.split(",")
@@ -1926,6 +1929,21 @@ def traceFWHM_drp(
 
     # load image data
     img = loadImage(in_image)
+    img.setData(data=numpy.nan_to_num(img._data), error=numpy.nan_to_num(img._error))
+
+    # median_box, median_cross = 10, 1
+    if median_box != 0 or median_cross != 0:
+        median_box = max(median_box, 1)
+        median_cross = max(median_cross, 1)
+        img = img.medianImg((median_cross, median_box))
+    
+    img._mask[...] = False
+    
+    # plt.figure(figsize=(20,10))
+    # plt.plot(img.getSlice(1300, axis="y")._error.tolist(), lw=0.6, color="0.7")
+    # plt.plot(img.getSlice(1200, axis="y")._error.tolist(), lw=1)
+    # plt.show()
+    # return
 
     # orient image so that the cross-dispersion is along the first and the dispersion is along the second array axis
     if disp_axis == "X" or disp_axis == "x":
@@ -1947,6 +1965,9 @@ def traceFWHM_drp(
     # load trace
     trace_mask = TraceMask()
     trace_mask.loadFitsData(in_trace)
+
+    orig_trace = copy(trace_mask)
+    trace_mask._mask[...] = False
 
     # create a trace mask for the image
     traceFWHM = TraceMask()
@@ -1994,17 +2015,28 @@ def traceFWHM_drp(
             data=numpy.concatenate(fwhm, axis=1), mask=numpy.concatenate(mask, axis=1)
         )
     else:
-        result = img.traceFWHM(
-            select_steps, trace_mask, blocks, init_fwhm, threshold_flux, max_pix=dim[0]
-        )
-        traceFWHM = TraceMask(data=result[0], mask=result[1])
-    # traceFWHM = img.traceFWHM()
+        fwhm, mask = img.traceFWHM(select_steps, trace_mask, blocks, init_fwhm, threshold_flux, max_pix=dim[0])
 
+    for ifiber in range(orig_trace._fibers):
+        if orig_trace._mask[ifiber].all():
+            continue
+        good_pix = (~mask[ifiber]) & (~numpy.isnan(fwhm[ifiber])) & (fwhm[ifiber] != 0.0) & ((clip[0]<fwhm[ifiber]) & (fwhm[ifiber]<clip[1]))
+        f_data = interpolate.interp1d(axis[good_pix], fwhm[ifiber, good_pix], kind="linear", bounds_error=False, fill_value="extrapolate")
+        f_mask = interpolate.interp1d(axis[good_pix], mask[ifiber, good_pix], kind="nearest", bounds_error=False, fill_value=0)
+        fwhm[ifiber] = f_data(axis)
+        mask[ifiber] = f_mask(axis).astype(bool)
+
+
+
+    traceFWHM = TraceMask(data=fwhm, mask=mask | orig_trace._mask)
+   
     # smooth the FWHM trace with a polynomial fit along dispersion axis (uncertain pixels are not used)
-    traceFWHM.smoothTracePoly(deg=poly_disp, poly_kind=poly_kind, clip=clip)
+    # traceFWHM.smoothTracePoly(deg=poly_disp, poly_kind=poly_kind, clip=clip)
 
     # write out FWHM trace to FITS file
     traceFWHM.writeFitsData(out_fwhm)
+
+    return fwhm[:, select_steps], mask[:, select_steps]
 
 
 def offsetTrace_drp(
