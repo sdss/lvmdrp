@@ -1706,6 +1706,52 @@ class Image(Header):
         mask = numpy.ones((TraceMask._fibers, TraceMask._data.shape[1]), dtype="bool")
         pixels = numpy.arange(fwhm.shape[1])
         for i in pixels[axis_select]:
+            # print(i,fwhm.shape[1])
+            slice_img = self.getSlice(i, axis="y")  # extract cross-dispersion slice
+            slice_trace = TraceMask.getSlice(
+                i, axis="y"
+            )  # extract positions in cross-dispersion
+            if max_pix is None:
+                good = slice_trace[2] == 0
+            else:
+                good = (
+                    (slice_trace[2] == 0)
+                    & (numpy.round(slice_trace[0]) < max_pix)
+                    & (numpy.round(slice_trace[0]) > 0)
+                )
+            trace = slice_trace[0][good]
+
+            #   if i==pixels[axis_select][10]:
+            #     plot=4
+            #  else:
+            #    plot=-1
+            plot = -1
+            #   print(slice_img._data.shape, trace)
+            fwhm_fit = slice_img.measureFWHMPeaks(
+                trace,
+                blocks,
+                init_fwhm=init_fwhm,
+                threshold_flux=threshold_flux,
+                plot=plot,
+            )  # obtain the fiber profile FWHM for each slice
+            fwhm[good, i] = fwhm_fit[0]
+            mask[good, i] = fwhm_fit[
+                1
+            ]  #    traceFWHM.setSlice(i, axis='y', data = fwhm_fit[0], mask = fwhm_fit[1]) # insert the result into the trace mask
+            # return traceFWHM
+        return (fwhm, mask)    
+
+
+    def traceFWHM_new(
+        self, axis_select, TraceMask, blocks, init_fwhm, threshold_flux, max_pix=None
+    ):
+        # create an empty trace  of the given size
+        fwhm = numpy.zeros(
+            (TraceMask._fibers, TraceMask._data.shape[1]), dtype=numpy.float32
+        )
+        mask = numpy.ones((TraceMask._fibers, TraceMask._data.shape[1]), dtype="bool")
+        pixels = numpy.arange(fwhm.shape[1])
+        for i in pixels[axis_select]:
             # print("column:", i, fwhm.shape[1])
             slice_img = self.getSlice(i, axis="y")  # extract cross-dispersion slice
             slice_trace = TraceMask.getSlice(
