@@ -3856,7 +3856,7 @@ def trace_fiber_fwhm(in_image, in_centroid_trace, out_fwhm_trace,
 
     Returns
     -------
-    fit_columns : list
+    mod_columns : list
         List of joint gaussian models fitted to each column.
     trace_cent : TraceMask
         Trace of the centroid of each fiber.
@@ -3902,7 +3902,7 @@ def trace_fiber_fwhm(in_image, in_centroid_trace, out_fwhm_trace,
 
     # iterate over each slice of the image and corresponding centroid locations
     log.info("tracing fibers")
-    fit_columns, residuals = [], []
+    mod_columns, residuals = [], []
     for i, icolumn in enumerate(columns):
         log.info(f"tracing column {icolumn} ({i+1}/{len(columns)})")
         # get slice of data and trace
@@ -3914,43 +3914,46 @@ def trace_fiber_fwhm(in_image, in_centroid_trace, out_fwhm_trace,
         msk_blocks = numpy.split(msk_slice, nblocks)
 
         # fit each block
-        x_blocks = []
+        par_blocks = []
         for j, (cen_block, msk_block) in enumerate(zip(cen_blocks, msk_blocks)):
-            # NOTE: test masking bad fibers before tracing to see if the results improve
             # mask bad fibers
-            # cen_block = cen_block[msk_block]
+            cen_block = cen_block[~msk_block]
+            # initialize parameters with the full block size
+            par_block = numpy.ones(3 * msk_block.size) * numpy.nan
+            par_mask = numpy.tile(msk_block, 3)
 
             # fit gaussian models to each fiber profile
-            log.info(f"fitting fiber block {j+1}/{nblocks} ({cen_block.size} fibers)")
-            _, x_block = img_slice.fitMultiGauss(cen_block, init_fwhm=guess_fwhm)
-            x_blocks.append(x_block)
+            log.info(f"fitting fiber block {j+1}/{nblocks} ({cen_block.size}/{msk_block.size} good fibers)")
+            _, par_block[~par_mask] = img_slice.fitMultiGauss(cen_block, init_fwhm=guess_fwhm)
+            # mask bad fits
+            par_blocks.append(par_block)
 
         # combine all parameters in a single array
-        x_joint = numpy.asarray([numpy.split(x_block, 3) for x_block in x_blocks])
-        x_joint = x_joint.transpose(1, 0, 2).reshape(3, -1)
+        par_joint = numpy.asarray([numpy.split(par_block, 3) for par_block in par_blocks])
+        par_joint = par_joint.transpose(1, 0, 2).reshape(3, -1)
         # define joint gaussian model
-        fit_joint = Gaussians(par=x_joint.ravel())
+        mod_joint = Gaussians(par=par_joint.ravel())
 
         # store joint model
-        fit_columns.append(fit_joint)
+        mod_columns.append(mod_joint)
     
         # get parameters of joint model
-        # flux_slice = x_joint[0]
-        cent_slice = x_joint[1]
-        fwhm_slice = x_joint[2] * 2.354
+        flux_slice = par_joint[0]
+        cent_slice = par_joint[1]
+        fwhm_slice = par_joint[2] * 2.354
 
         # update traces
         trace_cent.setSlice(icolumn, axis="y", data=cent_slice, mask=numpy.zeros_like(cent_slice, dtype=bool))
         trace_fwhm.setSlice(icolumn, axis="y", data=fwhm_slice, mask=numpy.zeros_like(fwhm_slice, dtype=bool))
 
         # compute residuals
-        integral_mod = numpy.trapz(fit_joint(img_slice._pixels), img_slice._pixels)
+        integral_mod = numpy.trapz(mod_joint(img_slice._pixels), img_slice._pixels)
         integral_dat = numpy.trapz(img_slice._data, img_slice._pixels)
         residuals.append((integral_dat - integral_mod) / integral_dat * 100)
     
         # compute fitted model stats
-        chisq_red = bn.nansum((fit_joint(img_slice._pixels) - img_slice._data)**2 / img_slice._error**2) / (img._dim[0] - 1 - 3 * nblocks)
-        min_fwhm, max_fwhm, median_fwhm = numpy.min(fwhm_slice), numpy.max(fwhm_slice), numpy.median(fwhm_slice)
+        chisq_red = bn.nansum((mod_joint(img_slice._pixels) - img_slice._data)**2 / img_slice._error**2) / (img._dim[0] - 1 - 3 * nblocks)
+        min_fwhm, max_fwhm, median_fwhm = bn.nanmin(fwhm_slice), bn.nanmax(fwhm_slice), bn.nanmedian(fwhm_slice)
         log.info(f"joint model stats: {chisq_red = :.2f}, {min_fwhm = :.2f}, {max_fwhm = :.2f}, {median_fwhm = :.2f}")
 
     # interpolate or fit polynomial
@@ -3996,7 +3999,7 @@ def trace_fiber_fwhm(in_image, in_centroid_trace, out_fwhm_trace,
     ax.plot(columns, residuals, "o", color="tab:red", ms=10)
     ax.axhline(0, color="0.2", ls="--", lw=1)
     ax.grid(ls="--", color="0.9", lw=0.5, zorder=0)
-    ax.set_xlabel("Y (pixel)")
+    ax.set_xlabel("X (pixel)")
     ax.set_ylabel("residuals (%)")
     save_fig(
         fig,
@@ -4014,8 +4017,11 @@ def trace_fiber_fwhm(in_image, in_centroid_trace, out_fwhm_trace,
     fig.supylabel("counts (e-/pixel)")
     fig.supxlabel("Y (pixel)")
     for i, icolumn in enumerate(columns):
+        img_slice = img.getSlice(icolumn, axis="y")
+        mod_joint = mod_columns[i]
+
         axs[i].set_title(f"column {icolumn}", loc="left")
-        fit_joint.plot(img_slice._pixels, y=img_slice._data, ax=axs[i])
+        mod_joint.plot(img_slice._pixels, y=img_slice._data, ax=axs[i])
     save_fig(
         fig,
         product_path=out_fwhm_trace,
@@ -4024,7 +4030,7 @@ def trace_fiber_fwhm(in_image, in_centroid_trace, out_fwhm_trace,
         label="fiber_profiles"
     )
 
-    return fit_columns, trace_cent, trace_fwhm, trace_cent_fit, trace_fwhm_fit
+    return mod_columns, trace_cent, trace_fwhm, trace_cent_fit, trace_fwhm_fit
 
 
 # TODO: for fiberflats, calculate an average over an X range (around the center) of the

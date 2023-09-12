@@ -742,11 +742,11 @@ class Gaussian_poly(fit_profile1D):
 
 class Gaussians(fit_profile1D):
     def _profile(self, x):
-        y = numpy.zeros(len(x), dtype=numpy.float32)
         ncomp = len(self._par) // 3
+        y = numpy.zeros((ncomp, len(x)), dtype=numpy.float32)
         for i in range(ncomp):
-            y += self._par[i] * numpy.exp(-0.5 * ((x - self._par[i + ncomp]) / abs(self._par[i + 2 * ncomp])) ** 2) / (fact * abs(self._par[i + 2 * ncomp]))
-        return y
+            y[i] = self._par[i] * numpy.exp(-0.5 * ((x - self._par[i + ncomp]) / abs(self._par[i + 2 * ncomp])) ** 2) / (fact * abs(self._par[i + 2 * ncomp]))
+        return bn.nansum(y, axis=0)
 
     def __init__(self, par):
         fit_profile1D.__init__(self, par, self._profile)
