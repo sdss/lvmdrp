@@ -1745,65 +1745,6 @@ class Image(Header):
         return (fwhm, mask)    
 
 
-    def traceFWHM_new(
-        self, axis_select, TraceMask, blocks, init_fwhm, threshold_flux, max_pix=None
-    ):
-        # create an empty trace  of the given size
-        fwhm = numpy.zeros(
-            (TraceMask._fibers, TraceMask._data.shape[1]), dtype=numpy.float32
-        )
-        mask = numpy.ones((TraceMask._fibers, TraceMask._data.shape[1]), dtype="bool")
-        pixels = numpy.arange(fwhm.shape[1])
-        for i in pixels[axis_select]:
-            # print("column:", i, fwhm.shape[1])
-            slice_img = self.getSlice(i, axis="y")  # extract cross-dispersion slice
-            slice_trace = TraceMask.getSlice(
-                i, axis="y"
-            )  # extract positions in cross-dispersion
-            if max_pix is None:
-                good = slice_trace[2] == 0
-            else:
-                good = (
-                    (slice_trace[2] == 0)
-                    & (numpy.round(slice_trace[0]) < max_pix)
-                    & (numpy.round(slice_trace[0]) > 0)
-                )
-            trace = slice_trace[0][good]
-
-            #   if i==pixels[axis_select][10]:
-            #     plot=4
-            #  else:
-            #    plot=-1
-            # plot = -1
-            #   print(slice_img._data.shape, trace)
-            # fwhm_fit = slice_img.measureFWHMPeaks(
-            #     trace,
-            #     blocks,
-            #     init_fwhm=init_fwhm,
-            #     threshold_flux=threshold_flux,
-            #     plot=plot,
-            # )  # obtain the fiber profile FWHM for each slice
-            print(">>>>>>>>>>>>", i, init_fwhm)
-            print(trace)
-            # try:
-            #     fig, axs = plt.subplots(54, 12, figsize=(20, 50))
-            #     axs = axs.ravel()
-            fit = slice_img.fitSepGauss(trace, aperture=init_fwhm)#, axs=axs)
-            # except Exception as e:
-            #     print(f"at column {i}: {e}")
-            #     # plt.figure(figsize=(20,5))
-            #     # plt.vlines(trace, 0, slice_img._data.max(), lw=0.5, color="0.7")
-            #     # plt.step(slice_img._wave, slice_img._data, where="mid", lw=1)
-            #     # plt.show()
-            #     continue
-            # finally:
-            #     plt.close(fig)
-            #     del fig
-            fwhm[good, i] = fit[2 * TraceMask._fibers : 3 * TraceMask._fibers] * 2.354
-            mask[good, i] = numpy.fabs(fit[:TraceMask._fibers]) < threshold_flux
-            print("fitted FWHM: ", fwhm[good, i])
-        return (fwhm, mask)
-
     def extractSpecAperture(self, TraceMask, aperture):
         pos = TraceMask._data
         bad_pix = TraceMask._mask
