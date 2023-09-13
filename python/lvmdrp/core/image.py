@@ -1797,6 +1797,9 @@ class Image(Header):
             error = None
         mask = numpy.zeros((TraceMask._fibers, self._dim[1]), dtype="bool")
 
+        self._data = numpy.nan_to_num(self._data)
+        self._error = numpy.nan_to_num(self._error, nan=1e10)
+
         # convert FWHM trace to sigma
         TraceFWHM = TraceFWHM / 2.354
 

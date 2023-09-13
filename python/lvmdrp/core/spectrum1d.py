@@ -2162,10 +2162,10 @@ class Spectrum1D(Header):
         # defining bad pixels for each fiber if needed
         if self._mask is not None:
             bad_pix = numpy.zeros(fibers, dtype="bool")
-            select = numpy.sum(pixels >= self._mask.shape[0], 1)
+            select = bn.nansum(pixels >= self._mask.shape[0], 1)
             nselect = numpy.logical_not(select)
             bad_pix[select] = True
-            bad_pix[nselect] = numpy.sum(self._mask[pixels[nselect, :]], 1) == aperture
+            bad_pix[nselect] = bn.nansum(self._mask[pixels[nselect, :]], 1) == aperture
         else:
             bad_pix = None
         if self._error is None:
@@ -2197,8 +2197,8 @@ class Spectrum1D(Header):
         )
         # print(out)
 
-        error = numpy.sqrt(1 / numpy.sum((A**2), 0))
-        if bad_pix is not None and numpy.sum(bad_pix) > 0:
+        error = numpy.sqrt(1 / bn.nansum((A**2), 0))
+        if bad_pix is not None and bn.nansum(bad_pix) > 0:
             error[bad_pix] = replace_error
         # if plot:
         #     plt.figure(figsize=(15, 10))
