@@ -2349,6 +2349,7 @@ def extract_spectra(
     in_image: str,
     out_rss: str,
     in_trace: str,
+    in_acorr: str = None,
     method: str = "optimal",
     aperture: int = 7,
     fwhm: float = 2.5,
@@ -2457,6 +2458,16 @@ def extract_spectra(
             )
     elif method == "aperture":
         (data, error, mask) = img.extractSpecAperture(trace_mask, aperture)
+        
+        # apply aperture correction given in in_acorr
+        if in_acorr is not None and os.path.isfile(in_acorr):
+            log.info(f"applying aperture correction in {os.path.basename(in_acorr)}")
+            acorr = loadImage(in_acorr)
+            data = data * acorr._data
+            if error is not None:
+                error = error * acorr._data
+        else:
+            log.warning("no aperture correction applied")
 
     if error is not None:
         error[mask] = replace_error

@@ -93,6 +93,7 @@ def quick_reduction(expnum: int, use_fiducial_master: bool = False) -> None:
             mdark_path = os.path.join(masters_path, f"lvm-mdark-{sci_camera}.fits")
             mpixflat_path = os.path.join(masters_path, f"lvm-mpixflat-{sci_camera}.fits")
             mtrace_path = os.path.join(masters_path, f"lvm-mtrace-{sci_camera}.fits")
+            macorr_path = os.path.join(masters_path, f"lvm-apercorr-{sci_camera}.fits")
             mwave_path = os.path.join(masters_path, f"lvm-mwave_{lamps}-{sci_camera}.fits")
             mlsf_path = os.path.join(masters_path, f"lvm-mlsf_{lamps}-{sci_camera}.fits")
             mflat_path = os.path.join(masters_path, f"lvm-mfiberflat-{sci_camera}.fits")
@@ -106,12 +107,12 @@ def quick_reduction(expnum: int, use_fiducial_master: bool = False) -> None:
             mdark_path = path.full("lvm_master", drpver=drpver, kind="mdark", **masters["dark"].to_dict())
             mpixflat_path = None
             mtrace_path = path.full("lvm_master", drpver=drpver, kind="mtrace", **masters["trace"].to_dict())
+            macorr_path = path.full("lvm_master", drpver=drpver, kind="apercorr", **masters["acorr"].to_dict())
             mwave_path = path.full("lvm_master", drpver=drpver, kind=f"mwave_{lamps}", **masters["wave"].to_dict())
             mlsf_path = path.full("lvm_master", drpver=drpver, kind=f"mlsf_{lamps}", **masters["lsf"].to_dict())
             mflat_path = path.full("lvm_master", drpver=drpver, kind="mfiberflat", **masters["fiberflat"].to_dict())
         
         # preprocess frame
-        # TODO: check if floats
         image_tasks.preproc_raw_frame(in_image=sci_path, out_image=psci_path, in_mask=mpixmask_path)
         
         # detrend frame
@@ -120,10 +121,9 @@ def quick_reduction(expnum: int, use_fiducial_master: bool = False) -> None:
                                   in_slitmap=Table(drp.fibermap.data), reject_cr=False)
         
         # extract 1d spectra
-        image_tasks.extract_spectra(in_image=dsci_path, out_rss=xsci_path, in_trace=mtrace_path, method="aperture", aperture=3)
-        
+        image_tasks.extract_spectra(in_image=dsci_path, out_rss=xsci_path, in_trace=mtrace_path, in_acorr=macorr_path, method="aperture", aperture=3)
+
         # wavelength calibrate
-        # TODO: change wavelengths and LSFs from double to floats
         rss_tasks.create_pixel_table(in_rss=xsci_path, out_rss=wsci_path, arc_wave=mwave_path, arc_fwhm=mlsf_path)
 
         # apply fiberflat correction
