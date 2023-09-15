@@ -1493,7 +1493,7 @@ class Image(Header):
         new_image.setData(data=new, inplace=True)
         return new_image
 
-    def medianImg(self, size, mode="nearest", use_mask=False):
+    def medianImg(self, size, mode="nearest", use_mask=False, propagate_error=False):
         """return median filtered image with the given kernel size
 
         optionally the method for handling boundary can be set with the `mode`
@@ -1509,6 +1509,8 @@ class Image(Header):
             method to handle boundary pixels, by default "nearest"
         use_mask : bool, optional
             whether to take into account masked pixels or not, by default False
+        propagate_error : bool, optional
+            whether to propagate the error or not, by default False
 
         Returns
         -------
@@ -1518,9 +1520,15 @@ class Image(Header):
         if self._mask is None and use_mask:
             new_data = ndimage.median_filter(self._data, size, mode=mode)
             new_mask = None
+            new_error = None
+            if propagate_error and self._error is not None:
+                new_error = numpy.sqrt(ndimage.median_filter(self._error ** 2, size, mode=mode))
         elif self._mask is not None and not use_mask:
             new_data = ndimage.median_filter(self._data, size, mode=mode)
             new_mask = self._mask
+            new_error = None
+            if propagate_error and self._error is not None:
+                new_error = numpy.sqrt(ndimage.median_filter(self._error ** 2, size, mode=mode))
         else:
             # copy data and replace masked with nans
             new_data = copy(self._data)
@@ -1531,9 +1539,17 @@ class Image(Header):
             new_mask = numpy.isnan(new_data)
             # reset original masked values in new array
             new_data[new_mask] = self._data[new_mask]
+            # update error
+            new_error = None
+            if propagate_error and self._error is not None:
+                new_error = copy(self._error)
+                new_error[self._mask] = numpy.nan
+                new_error = numpy.sqrt(signal.medfilt2d(new_error ** 2, size))
+                # reset masked errors in new array
+                new_error[new_mask] = self._error[new_mask]
 
         image = copy(self)
-        image.setData(data=new_data, mask=new_mask)
+        image.setData(data=new_data, error=new_error, mask=new_mask)
         return image
 
     def collapseImg(self, axis, mode="mean"):
@@ -1726,7 +1742,8 @@ class Image(Header):
                 1
             ]  #    traceFWHM.setSlice(i, axis='y', data = fwhm_fit[0], mask = fwhm_fit[1]) # insert the result into the trace mask
             # return traceFWHM
-        return (fwhm, mask)
+        return (fwhm, mask)    
+
 
     def extractSpecAperture(self, TraceMask, aperture):
         pos = TraceMask._data
@@ -1779,6 +1796,9 @@ class Image(Header):
         else:
             error = None
         mask = numpy.zeros((TraceMask._fibers, self._dim[1]), dtype="bool")
+
+        self._data = numpy.nan_to_num(self._data)
+        self._error = numpy.nan_to_num(self._error, nan=1e10)
 
         # convert FWHM trace to sigma
         TraceFWHM = TraceFWHM / 2.354
