@@ -1195,7 +1195,8 @@ class Spectrum1D(Header):
                 # propagate errors using MC simulation
                 for i in range(err_sim):
                     error[select_goodpix] = numpy.random.normal(
-                        clean_data[select_goodpix], self._error[select_goodpix]
+                        # NOTE: patching negative errors
+                        clean_data[select_goodpix], numpy.abs(self._error[select_goodpix])
                     ).astype(numpy.float32)
 
                     if method == "spline":
