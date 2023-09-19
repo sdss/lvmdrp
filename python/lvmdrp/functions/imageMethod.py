@@ -1525,6 +1525,7 @@ def trace_peaks(
 
     if write_trace_data:
         coords_file = out_trace.replace("calib", "ancillary").replace(".fits", "_coords.txt")
+        os.makedirs(os.path.dirname(coords_file), exist_ok=True)
         poly_file = coords_file.replace("_coords.txt", "_poly.txt")
         poly_all_file = coords_file.replace("_coords.txt", "_poly_all.txt")
         log.info(f"writing trace data to files: {os.path.basename(coords_file)}, {os.path.basename(poly_file)} and {os.path.basename(poly_all_file)}")
