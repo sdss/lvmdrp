@@ -29,24 +29,34 @@ ORIG_MASTER_DIR = os.getenv("LVM_MASTER_DIR")
 def illumination_correction(in_fiberflat=None):
 
     if in_fiberflat is None:
-        factors = {('SkyW', 'b1'): 0.8572736,
-                ('SkyE', 'b1'): 1.0417871,
-                ('SkyW', 'r1'): 0.9083382,
-                ('SkyE', 'r1'): 0.9800609,
-                ('SkyW', 'z1'): 0.8886237,
-                ('SkyE', 'z1'): 0.9526826,
-                ('SkyW', 'b2'): 0.89434826,
-                ('SkyE', 'b2'): 1.0475268,
-                ('SkyW', 'r2'): 0.9104225,
-                ('SkyE', 'r2'): 0.9766497,
-                ('SkyW', 'z2'): 0.89289355,
-                ('SkyE', 'z2'): 0.96238124,
-                ('SkyW', 'b3'): 0.83654237,
-                ('SkyE', 'b3'): 1.0085421,
-                ('SkyW', 'r3'): 0.8803386,
-                ('SkyE', 'r3'): 0.966445,
-                ('SkyW', 'z3'): 0.8581137,
-                ('SkyE', 'z3'): 0.95758134}
+        # NOTE: this was done using exposure 3900
+        factors = {('SkyW', 'b1'): 0.8854398,
+                    ('SkyE', 'b1'): 1.0811657,
+                    ('Sci', 'b1'): 1.0333946,
+                    ('SkyW', 'r1'): 0.9435192,
+                    ('SkyE', 'r1'): 1.0190876,
+                    ('Sci', 'r1'): 1.0373933,
+                    ('SkyW', 'z1'): 0.9378496,
+                    ('SkyE', 'z1'): 1.0072966,
+                    ('Sci', 'z1'): 1.0548539,
+                    ('SkyW', 'b2'): 0.9148656,
+                    ('SkyE', 'b2'): 1.0618604,
+                    ('Sci', 'b2'): 1.023274,
+                    ('SkyW', 'r2'): 0.9465178,
+                    ('SkyE', 'r2'): 1.0136424,
+                    ('Sci', 'r2'): 1.0398397,
+                    ('SkyW', 'z2'): 0.93933785,
+                    ('SkyE', 'z2'): 1.0083715,
+                    ('Sci', 'z2'): 1.0522904,
+                    ('SkyW', 'b3'): 0.88334155,
+                    ('SkyE', 'b3'): 1.0627162,
+                    ('Sci', 'b3'): 1.0539422,
+                    ('SkyW', 'r3'): 0.9305622,
+                    ('SkyE', 'r3'): 1.013976,
+                    ('Sci', 'r3'): 1.0554619,
+                    ('SkyW', 'z3'): 0.9152639,
+                    ('SkyE', 'z3'): 1.0191175,
+                    ('Sci', 'z3'): 1.0656188}
 
         return factors
     
@@ -65,11 +75,14 @@ def illumination_correction(in_fiberflat=None):
             fflat.loadFitsData(f"/home/mejia/Research/lvm/lvmdata/calib/60177/lvm-mfiberflat-{cam}.fits")
             fflat._data[(fflat._mask)|(fflat._data <= 0)] = np.nan
             sci_factor = np.nanmedian(fflat._data[sci1_fibers][:, 1000:3000])
-            print(cam, np.nanmedian(fflat._data[skw1_fibers][:, 1000:3000])/sci_factor, np.nanmedian(fflat._data[ske1_fibers][:, 1000:3000])/sci_factor)
-            factors[("SkyW", cam)] = np.nanmedian(fflat._data[skw1_fibers][:, 1000:3000])/sci_factor
-            factors[("SkyE", cam)] = np.nanmedian(fflat._data[ske1_fibers][:, 1000:3000])/sci_factor
-    
-    return factors
+            skw_factor = np.nanmedian(fflat._data[skw1_fibers][:, 1000:3000])
+            ske_factor = np.nanmedian(fflat._data[ske1_fibers][:, 1000:3000])
+            norm = np.mean([sci_factor, skw_factor, ske_factor])
+            factors[("SkyW", cam)] = skw_factor/norm
+            factors[("SkyE", cam)] = ske_factor/norm
+            factors[("Sci", cam)] = sci_factor/norm
+        
+        return factors
 
 def get_master_mjd(sci_mjd):
 
