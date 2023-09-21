@@ -2191,7 +2191,7 @@ class Spectrum1D(Header):
         B = sparse.csr_matrix(
             (A[select], (indices[0][select], indices[1][select])),
             shape=(self._dim, fibers),
-        ).todense()
+        )
         # print(B)
         out = sparse.linalg.lsmr(
             B, self._data / self._error, atol=1e-4, btol=1e-4
