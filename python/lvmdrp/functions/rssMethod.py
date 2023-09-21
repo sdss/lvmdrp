@@ -70,6 +70,44 @@ def _linear_model(pars, xdata):
     return pars[0] * xdata + pars[1]
 
 
+def _illumination_correction(fiberflat, apply_correction=True):
+    # define fiberflat spectrograph id
+    specid = int(fiberflat._header["CCD"][1])
+    # load fibermap and select fibers
+    fibermap = Table(fiberflat._slitmap)
+    fibermap = fibermap[fibermap["spectrographid"] == specid]
+
+    # define fiber IDs for each telescope
+    sci_fibers = fibermap["ifulabel"] == f"Sci{specid}"
+    skw_fibers = fibermap["ifulabel"] == f"SkyW{specid}"
+    ske_fibers = fibermap["ifulabel"] == f"SkyE{specid}"
+    std_fibers = fibermap["ifulabel"] == f"Std{specid}"
+
+    # define data and set to NaN bad pixels
+    data = copy(fiberflat._data)
+    data[(fiberflat._mask)|(data <= 0)] = numpy.nan
+
+    # compute median factors
+    sci_factor = numpy.nanmedian(data[sci_fibers, 1000:3000])
+    skw_factor = numpy.nanmedian(data[skw_fibers, 1000:3000])
+    ske_factor = numpy.nanmedian(data[ske_fibers, 1000:3000])
+    std_factor = numpy.nanmedian(data[std_fibers, 1000:3000])
+    norm = numpy.mean([sci_factor, skw_factor, ske_factor, std_factor])
+    sci_factor /= norm
+    skw_factor /= norm
+    ske_factor /= norm
+    std_factor /= norm
+
+    # apply correction if requested
+    if apply_correction:
+        fiberflat[sci_fibers] *= sci_factor
+        fiberflat[skw_fibers] *= skw_factor
+        fiberflat[ske_fibers] *= ske_factor
+        fiberflat[std_fibers] *= std_factor
+
+    return fiberflat, dict(zip(("Sci", "SkyW", "SkyE", "Std"), (sci_factor, skw_factor, ske_factor, std_factor)))
+
+
 def mergeRSS_drp(files_in, file_out, mergeHdr="1"):
     """
     Different RSS are merged into a common file by extending the number of fibers.
@@ -1229,6 +1267,7 @@ def create_fiberflat(in_rsss: List[str], out_rsss: List[str], median_box: int = 
                      poly_deg: int = 0, poly_kind: str = "poly",
                      clip_range: List[float] = None,
                      wave_range: List[float] = None,
+                     illumination_corr: bool = False,
                      display_plots: bool = False) -> RSS:
     """computes a fiberflat from a wavelength calibrated continuum exposure
     
@@ -1259,6 +1298,8 @@ def create_fiberflat(in_rsss: List[str], out_rsss: List[str], median_box: int = 
         range of valid values for the fiber flat, by default None
     wave_range : List[float], optional
         wavelength range where the median spectrum is computed, by default None
+    illumination_corr : bool, optional
+        whether to apply an illumination correction to the fiberflat, by default False
     display_plots : bool, optional
         whether to display or not the diagnostic plots, by default False
 
@@ -1418,11 +1459,10 @@ def create_fiberflat(in_rsss: List[str], out_rsss: List[str], median_box: int = 
     for fiberflat in fiberflat_channel:
         for fiberflat_cam in fiberflat.splitRSS(3, axis=1):
             log.info(f"writing fiberflat to {os.path.basename(out_rsss[i])}")
-            # spec_mask = (fibers == (i+1))
-            # wave_cam = fiberflat._wave[spec_mask, :]
-            # data_cam = fiberflat._data[spec_mask, :]
-            # mask_cam = fiberflat._mask[spec_mask, :]
-            # fiberflat_cam = RSS(wave=wave_cam, data=data_cam, mask=mask_cam, header=headers[i])
+
+            if illumination_corr:
+                _, factors = _illumination_correction(fiberflat_cam, apply_correction=True)
+                log.info(f"telescope illumination correction factors: {factors}")
 
             # perform some statistic about the fiberflat
             if fiberflat_cam._mask is not None:
