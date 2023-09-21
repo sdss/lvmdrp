@@ -20,6 +20,7 @@ from astropy.io import fits
 from astropy.time import Time
 from scipy import optimize
 from scipy import interpolate
+from astropy.stats import biweight_location, biweight_scale
 
 from lvmdrp.core.constants import (
     LVM_UNAM_URL,
@@ -1361,16 +1362,35 @@ def interpolate_sky(in_rss: str, out_sky: str, out_rss: str = None, which: str =
     sky_data = rss._data[sky_selection]
     sky_vars = rss._error[sky_selection] ** 2
     sky_mask = rss._mask[sky_selection]
+    sci_wave = rss._wave[~sky_selection]
     sci_data = rss._data[~sky_selection]
+
+    # plt.plot(sky_wave[0].ravel(), sky_data[0].ravel(), ".k")
+    # plt.plot(sky_wave[2].ravel(), sky_data[2].ravel(), ".r")
+    # plt.show()
+
+    # remove outlying sky fibers
+    # TODO: this rejection needs to be done on all-channels data
+    mean_sky_data = np.nanmean(sky_data, axis=1)
+    mean_sky_fiber = biweight_location(mean_sky_data)
+    std_sky_fiber = biweight_scale(mean_sky_data)
+    mask = np.abs(mean_sky_data - mean_sky_fiber) < 3 * std_sky_fiber
+    sky_data = sky_data[mask]
+    sky_wave = sky_wave[mask]
+    sky_vars = sky_vars[mask]
+    sky_mask = sky_mask[mask]
+
+    # plt.plot(sky_wave.ravel(), sky_data.ravel(), ".r")
+    # plt.show()
 
     fig, axs = plt.subplots(2, 1, figsize=(20,5), sharex=True)
     axs = axs.flatten()
     axs[0].plot(sky_wave[0], sky_data[0], "k", lw=1, label="sky")
-    axs[0].plot(sky_wave[10], sci_data[10], "0.5", lw=1, label="sci")
+    axs[0].plot(sci_wave[10], sci_data[10], "0.5", lw=1, label="sci")
     axs[0].legend(loc=2)
 
     axs[0].plot(sky_wave[0], sky_data[0], "r", lw=1, label="flatfielded sky")
-    axs[0].plot(sky_wave[10], sci_data[10], "b", lw=1, label="flatfielded sci")
+    axs[0].plot(sci_wave[10], sci_data[10], "b", lw=1, label="flatfielded sci")
     axs[0].legend(loc=2)
     # divide by the wavelength sampling step at each pixel
     dlambda = np.diff(sky_wave, axis=1)

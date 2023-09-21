@@ -2995,19 +2995,21 @@ def join_spec_channels(in_rss: List[str], out_rss: str, use_weights: bool = True
 
     # define weights for channel combination
     vars = errors ** 2
+    log.info("combining channel data")
     if use_weights:
-        log.info("calculating weights for channel combination")
         weights = 1.0 / vars
         weights = weights / bn.nansum(weights, axis=0)[None]
-    else:
-        weights = numpy.ones_like(fluxes)
 
-    # channel-combine RSS data
-    log.info("combining channel data")
-    new_data = bn.nansum(fluxes * weights, axis=0)
-    new_inst_fwhm = bn.nansum(lsfs * weights, axis=0)
-    new_error = numpy.sqrt(bn.nansum(vars, axis=0))
-    new_mask = numpy.sum(masks, axis=0).astype("bool")
+        new_data = bn.nansum(fluxes * weights, axis=0)
+        new_inst_fwhm = bn.nansum(lsfs * weights, axis=0)
+        new_error = numpy.sqrt(bn.nansum(vars, axis=0))
+        new_mask = numpy.sum(masks, axis=0).astype("bool")
+    else:
+        # channel-combine RSS data
+        new_data = bn.nanmean(fluxes, axis=0)
+        new_inst_fwhm = bn.nanmean(lsfs, axis=0)
+        new_error = numpy.sqrt(bn.nanmean(vars, axis=0))
+        new_mask = numpy.sum(masks, axis=0).astype("bool")
 
     # create RSS
     log.info(f"writing output RSS to {os.path.basename(out_rss)}")
