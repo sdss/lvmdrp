@@ -6,7 +6,7 @@ import bottleneck as bn
 from astropy.io import fits as pyfits
 from numpy import polynomial
 from scipy.linalg import norm
-from scipy import signal, interpolate, ndimage, sparse
+from scipy import signal, interpolate, ndimage, sparse, linalg
 from scipy.ndimage import zoom
 from typing import List, Tuple
 
@@ -2193,9 +2193,10 @@ class Spectrum1D(Header):
             shape=(self._dim, fibers),
         ).todense()
         # print(B)
-        out = sparse.linalg.lsqr(
-            B, self._data / self._error, atol=1e-7, btol=1e-7, conlim=1e13
+        out = sparse.linalg.lsmr(
+            B, self._data / self._error, atol=1e-4, btol=1e-4
         )
+        # out = linalg.lstsq(A, self._data / self._error, lapack_driver='gelsy', check_finite=False)
         # print(out)
 
         error = numpy.sqrt(1 / bn.nansum((A**2), 0))
