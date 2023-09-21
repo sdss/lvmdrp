@@ -94,7 +94,8 @@ def get_master_mjd(sci_mjd):
 @cloup.command(short_help='Run the Quick DRP', show_constraints=True)
 @click.option('-e', '--expnum', type=int, help='an exposure number to reduce')
 @click.option('-f', '--use-fiducial-master', is_flag=True, help='use fiducial master calibration frames')
-def quick_reduction(expnum: int, use_fiducial_master: bool = False) -> None:
+@click.option('-s', '--skip-sky-subtraction', is_flag=True, help='skip sky subtraction')
+def quick_reduction(expnum: int, use_fiducial_master: bool = False, skip_sky_subtraction: bool = False) -> None:
     """ Run the Quick DRP for a given exposure number.
     """
     # get target frames metadata
@@ -212,14 +213,20 @@ def quick_reduction(expnum: int, use_fiducial_master: bool = False) -> None:
         sky_tasks.interpolate_sky(in_rss=fsci_path, out_sky=fskye_path, which="e")
         sky_tasks.interpolate_sky(in_rss=fsci_path, out_sky=fskyw_path, which="w")
 
-        # quick sky subtraction
-        sky_tasks.quick_sky_subtraction(in_rss=fsci_path, out_rss=ssci_path, in_skye=fskye_path, in_skyw=fskyw_path)
+        # TODO: store supersampled sky as an extension
 
-        # resample wavelength into uniform grid along fiber IDs
+        # quick sky subtraction
+        if not skip_sky_subtraction:
+            sky_tasks.quick_sky_subtraction(in_rss=fsci_path, out_rss=ssci_path, in_skye=fskye_path, in_skyw=fskyw_path)
+
+        # resample wavelength into uniform grid along fiber IDs for science and sky fibers
         iwave, fwave = SPEC_CHANNELS[sci_camera[0]]
         rss_tasks.resample_wavelength(in_rss=ssci_path, out_rss=hsci_path, method="linear", disp_pix=0.5, start_wave=iwave, end_wave=fwave, err_sim=10, parallel=0, extrapolate=False)
         rss_tasks.resample_wavelength(in_rss=fskye_path, out_rss=hskye_path, method="linear", disp_pix=0.5, start_wave=iwave, end_wave=fwave, err_sim=10, parallel=0, extrapolate=False)
         rss_tasks.resample_wavelength(in_rss=fskyw_path, out_rss=hskyw_path, method="linear", disp_pix=0.5, start_wave=iwave, end_wave=fwave, err_sim=10, parallel=0, extrapolate=False)
+
+
+    # TODO: store combined sky fibers as an extension of the lvmCFrame file
 
     # combine channels
     drp.combine_cameras(sci_tileid, sci_mjd, expnum=sci_expnum, spec=1)

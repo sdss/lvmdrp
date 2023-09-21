@@ -1452,6 +1452,7 @@ def interpolate_sky(in_rss: str, out_sky: str, out_rss: str = None, which: str =
     weights = 1 / svars
 
     # define interpolation functions
+    # NOTE: store a super sampled version of the splines as an extension of the sky RSS
     f_data = interpolate.make_smoothing_spline(swave[~smask], ssky[~smask], w=weights[~smask], lam=1)
     f_error = interpolate.make_smoothing_spline(swave[~smask], svars[~smask], w=weights[~smask], lam=1)
     f_mask = interpolate.interp1d(swave, smask, kind="nearest", bounds_error=False, fill_value=0)
