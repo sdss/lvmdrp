@@ -62,6 +62,7 @@ DEFAULT_BGSEC = [
     "[1:2043, 1991:2000]",
     "[1:2043, 1991:2000]",
 ]
+LVM_NBLOCKS = 18
 
 description = "Provides Methods to process 2D images"
 
@@ -3832,7 +3833,7 @@ def create_pixelmask(in_short_dark, in_long_dark, out_pixmask, in_flat_a=None, i
 
 def trace_fiber_fwhm(in_image, in_centroid_trace, out_fwhm_trace,
                      median_box=10, median_cross=1, ref_column=2000,
-                     nslices=9, nblocks=18, guess_fwhm=3, flux_threshold=100,
+                     nslices=9, nblocks=LVM_NBLOCKS, iblocks=[], guess_fwhm=3, flux_threshold=100,
                      fit_poly=True, display_plots=False):
     """Trace the centroid and FWHM of fibers in a continuum exposure.
 
@@ -3857,6 +3858,8 @@ def trace_fiber_fwhm(in_image, in_centroid_trace, out_fwhm_trace,
         Number of slices to use for tracing the fibers.
     nblocks : int, optional
         Number of blocks to use for tracing the fibers.
+    iblocks : list, optional
+        List of block indices to use for tracing the fibers.
     guess_fwhm : int, optional
         Initial FWHM to use for fitting the fiber profiles.
     flux_threshold : int, optional
@@ -3928,8 +3931,14 @@ def trace_fiber_fwhm(in_image, in_centroid_trace, out_fwhm_trace,
         img_slice = img.getSlice(icolumn, axis="y")
     
         # define fiber blocks
-        cen_blocks = numpy.split(cen_slice, nblocks)
-        msk_blocks = numpy.split(msk_slice, nblocks)
+        if iblocks and isinstance(iblocks, (list, tuple, numpy.ndarray)):
+            cen_blocks = numpy.split(cen_slice, LVM_NBLOCKS)
+            cen_blocks = numpy.asarray(cen_blocks)[iblocks]
+            msk_blocks = numpy.split(msk_slice, LVM_NBLOCKS)
+            msk_blocks = numpy.asarray(msk_blocks)[iblocks]
+        else:
+            cen_blocks = numpy.split(cen_slice, nblocks)
+            msk_blocks = numpy.split(msk_slice, nblocks)
 
         # fit each block
         par_blocks = []
@@ -3973,10 +3982,40 @@ def trace_fiber_fwhm(in_image, in_centroid_trace, out_fwhm_trace,
         cent_mask = numpy.isnan(cent_slice)
         fwhm_mask = numpy.isnan(fwhm_slice)
 
-        # update traces
-        trace_flux.setSlice(icolumn, axis="y", data=flux_slice, mask=flux_mask)
-        trace_cent.setSlice(icolumn, axis="y", data=cent_slice, mask=cent_mask)
-        trace_fwhm.setSlice(icolumn, axis="y", data=fwhm_slice, mask=fwhm_mask)
+        if flux_slice.size != trace_flux._data.shape[0]:
+            dummy_flux = numpy.split(numpy.zeros(trace_flux._data.shape[0]), LVM_NBLOCKS)
+            dummy_cent = numpy.split(numpy.zeros(trace_cent._data.shape[0]), LVM_NBLOCKS)
+            dummy_fwhm = numpy.split(numpy.zeros(trace_fwhm._data.shape[0]), LVM_NBLOCKS)
+            dummy_flux_mask = numpy.split(numpy.ones(trace_flux._data.shape[0], dtype=bool), LVM_NBLOCKS)
+            dummy_cent_mask = numpy.split(numpy.ones(trace_cent._data.shape[0], dtype=bool), LVM_NBLOCKS)
+            dummy_fwhm_mask = numpy.split(numpy.ones(trace_fwhm._data.shape[0], dtype=bool), LVM_NBLOCKS)
+
+            flux_split = numpy.split(flux_slice, len(iblocks))
+            cent_split = numpy.split(cent_slice, len(iblocks))
+            fwhm_split = numpy.split(fwhm_slice, len(iblocks))
+            flux_mask_split = numpy.split(flux_mask, len(iblocks))
+            cent_mask_split = numpy.split(cent_mask, len(iblocks))
+            fwhm_mask_split = numpy.split(fwhm_mask, len(iblocks))
+            for j, iblock in enumerate(iblocks):
+                dummy_flux[iblock] = flux_split[j]
+                dummy_cent[iblock] = cent_split[j]
+                dummy_fwhm[iblock] = fwhm_split[j]
+                dummy_flux_mask[iblock] = flux_mask_split[j]
+                dummy_cent_mask[iblock] = cent_mask_split[j]
+                dummy_fwhm_mask[iblock] = fwhm_mask_split[j]
+            
+            # update traces
+            trace_flux.setSlice(icolumn, axis="y", data=numpy.concatenate(dummy_flux), mask=numpy.concatenate(dummy_flux_mask))
+            trace_cent.setSlice(icolumn, axis="y", data=numpy.concatenate(dummy_cent), mask=numpy.concatenate(dummy_cent_mask))
+            trace_fwhm.setSlice(icolumn, axis="y", data=numpy.concatenate(dummy_fwhm), mask=numpy.concatenate(dummy_fwhm_mask))
+            trace_flux._good_fibers = numpy.arange(trace_flux._fibers)[~numpy.all(trace_flux._mask, axis=1)]
+            trace_cent._good_fibers = numpy.arange(trace_cent._fibers)[~numpy.all(trace_cent._mask, axis=1)]
+            trace_fwhm._good_fibers = numpy.arange(trace_fwhm._fibers)[~numpy.all(trace_fwhm._mask, axis=1)]
+        else:
+            # update traces
+            trace_flux.setSlice(icolumn, axis="y", data=flux_slice, mask=flux_mask)
+            trace_cent.setSlice(icolumn, axis="y", data=cent_slice, mask=cent_mask)
+            trace_fwhm.setSlice(icolumn, axis="y", data=fwhm_slice, mask=fwhm_mask)
 
         # compute residuals
         integral_mod = numpy.trapz(mod_joint(img_slice._pixels), img_slice._pixels) or numpy.nan
