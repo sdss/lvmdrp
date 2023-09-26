@@ -4,6 +4,7 @@
 import multiprocessing
 import os
 import sys
+from itertools import product
 from copy import deepcopy as copy
 from multiprocessing import Pool, cpu_count
 
@@ -111,6 +112,36 @@ def _nonlinearity_correction(nl_table: Table, gain_value: float, data: Image, iq
         log.info(f"using constant gain value {gain_value}")
         gain_map = Image(data=numpy.ones(data._data.shape)) * gain_value
     return gain_map
+
+
+def _create_peaks_regions(fibermap: Table, column: int = 2000) -> None:
+    """creates a DS9 region file with the fiber peaks
+
+    Parameters
+    ----------
+    fibermap : Table
+        fibermap in the format given in lvmcore repository
+    column : int, optional
+        column number, by default 2000
+    """
+    for camspec in product("brz","123"):
+        camera = "".join(camspec)
+        out_region = f"peaks_{camera}.reg"
+
+        fibermap_cam = fibermap[fibermap["spectrographid"] == int(camspec[1])]
+        centers = fibermap_cam[f"ypix_{camspec[0]}"].data
+
+        with open(out_region, "w") as reg_out:
+            reg_out.write("# Region file format: DS9 version 4.1\n")
+            reg_out.write(
+                'global color=green dashlist=8 3 width=1 font="helvetica 10 normal roman" select=1 highlite=1 dash=0 fixed=0 edit=1 move=1 delete=1 include=1 source=1\n'
+            )
+            reg_out.write("physical\n")
+            for i in range(len(centers)):
+                reg_out.write(
+                    "# text(%.4f,%.4f) text={%i, %i}\n"
+                    % (column+1, centers[i]+1, i + 1, centers[i])
+                )
 
 
 def detCos_drp(
