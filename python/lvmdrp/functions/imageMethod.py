@@ -20,7 +20,7 @@ from ccdproc import cosmicray_lacosmic
 from scipy import interpolate
 from tqdm import tqdm
 
-from typing import List
+from typing import List, Tuple
 
 from lvmdrp import log
 from lvmdrp.utils.decorators import skip_on_missing_input_path, drop_missing_input_paths, skip_if_drpqual_flags
@@ -3872,7 +3872,8 @@ def trace_fibers(
     nslices: int = 18,
     nblocks: int = 18,
     iblocks: list = [],
-    poly_disp: int = 6,
+    fit_poly: bool = False,
+    poly_deg: int | Tuple[int] = 6,
     guess_fwhm: float = 3.0,
     threshold: float = 0.5,
     max_diff: int = 1,
@@ -3916,8 +3917,10 @@ def trace_fibers(
         number of blocks to use for tracing, by default 18
     iblocks : list, optional
         list of blocks to trace, by default []
-    poly_disp : int, optional
-        order of polynomial to use for dispersion solution, by default 6
+    fit_poly : bool, optional
+        whether to fit a polynomial to the dispersion solution, by default False (interpolate in X axis)
+    poly_deg : int or 3-tuple, optional
+        degree of polynomial(s) to use when fitting amplitude, centroid and FWHM, by default 6
     guess_fwhm : float, optional
         guess FWHM of fiber profiles, by default 3.0
     threshold : float, optional
@@ -3936,6 +3939,14 @@ def trace_fibers(
     fwhm : TraceMask
         fiber FWHM
     """
+    # parse polynomial degrees
+    if isinstance(poly_deg, (list, tuple)) and len(poly_deg) == 3:
+            deg_flux, deg_cent, deg_fwhm = poly_deg
+    elif isinstance(poly_deg, int):
+        deg_flux = deg_cent = deg_fwhm = poly_deg
+    else:
+        raise ValueError(f"invalid polynomial degree: {poly_deg}")
+
     # load continuum image  from file
     log.info(f"using flat image {os.path.basename(in_image)} for tracing")
     img = loadImage(in_image)
@@ -3962,14 +3973,14 @@ def trace_fibers(
         threshold = threshold * coadd
 
     # extract guess positions from fibermap
-    positions = slitmap[f"ypix_{channel}"].data
+    ref_cent = slitmap[f"ypix_{channel}"].data
     # correct reference fiber positions
     profile = img.getSlice(LVM_REFERENCE_COLUMN, axis="y")
     pixels = profile._pixels
     if correct_ref:
         pixels = numpy.arange(pixels.size)
-        guess_heights = numpy.ones_like(positions) * numpy.nanmax(profile._data)
-        ref_profile = _spec_from_lines(positions, sigma=1.2, wavelength=pixels, heights=guess_heights)
+        guess_heights = numpy.ones_like(ref_cent) * numpy.nanmax(profile._data)
+        ref_profile = _spec_from_lines(ref_cent, sigma=1.2, wavelength=pixels, heights=guess_heights)
         log.info(f"correcting guess positions for column {LVM_REFERENCE_COLUMN}")
         cc, bhat, mhat = _cross_match(
             ref_spec=ref_profile,
@@ -3977,14 +3988,14 @@ def trace_fibers(
             stretch_factors=numpy.linspace(0.7,1.3,5000),
             shift_range=[-100, 100])
         log.info(f"stretch factor: {mhat:.3f}, shift: {bhat:.3f}")
-        positions = positions * mhat + bhat
+        ref_cent = ref_cent * mhat + bhat
     # set mask
     fibers_status = slitmap["fibstatus"]
-    bad_fibers = (fibers_status == 1) | (profile._data[positions.astype(int)] < threshold)
+    bad_fibers = (fibers_status == 1) | (profile._data[ref_cent.round().astype(int)] < threshold)
     good_fibers = numpy.where(numpy.logical_not(bad_fibers))[0]
 
     # create empty trace_cent mask for the image
-    fibers = positions.size
+    fibers = ref_cent.size
     dim = img.getDim()
     centroids = TraceMask()
     centroids.createEmpty(data_dim=(fibers, dim[1]), mask_dim=(fibers, dim[1]))
@@ -3992,16 +4003,16 @@ def trace_fibers(
     centroids._good_fibers = good_fibers
     # initialize flux and FWHM traces
     trace_cent = copy(centroids)
-    trace_flux = copy(centroids)
+    trace_amp = copy(centroids)
     trace_fwhm = copy(centroids)
 
     # set positions of fibers along reference column
-    trace_cent.setSlice(LVM_REFERENCE_COLUMN, axis="y", data=positions, mask=numpy.zeros(len(positions), dtype="bool"))
+    trace_cent.setSlice(LVM_REFERENCE_COLUMN, axis="y", data=ref_cent, mask=numpy.zeros(len(ref_cent), dtype="bool"))
 
-    # select columns to measure fibers
-    step = img._dim[1] // nslices
+    # select columns to measure centroids
+    step = img._dim[1] // max(140, ncolumns)
     columns = numpy.concatenate((numpy.arange(LVM_REFERENCE_COLUMN, 0, -step), numpy.arange(LVM_REFERENCE_COLUMN, img._dim[1], step)))
-    log.info(f"tracing fibers in {len(columns)} columns: {','.join(map(str, columns))}")
+    log.info(f"tracing centroids in {len(columns)-1} columns: {','.join(map(str, numpy.unique(columns)))}")
 
     # trace centroids in each column
     mod_columns, residuals = [], []
@@ -4012,7 +4023,11 @@ def trace_fibers(
         
         # get fiber positions along previous column
         if icolumn == LVM_REFERENCE_COLUMN:
-            cent_guess, _, mask_guess = centroids.getSlice(LVM_REFERENCE_COLUMN, axis="y")
+            # trace reference column first or skip if already traced
+            if i == 0:
+                cent_guess, _, mask_guess = centroids.getSlice(LVM_REFERENCE_COLUMN, axis="y")
+            else:
+                continue
         else:
             cent_guess, _, mask_guess = centroids.getSlice(columns[i-1], axis="y")
         
@@ -4020,8 +4035,7 @@ def trace_fibers(
         mask_guess |= numpy.isnan(cent_guess)
 
         # fix masked fibers from last iteration
-        fiberid = numpy.arange(centroids._fibers)
-        cent_guess[mask_guess] = copy(positions)[mask_guess]
+        cent_guess[mask_guess] = copy(ref_cent)[mask_guess]
         # cast fiber positions to integers
         cent_guess = cent_guess.round().astype("int16")
 
@@ -4031,8 +4045,8 @@ def trace_fibers(
         centroids.setSlice(icolumn, axis="y", data=cen_slice, mask=msk_slice)
 
     # smooth all trace by a polynomial
-    log.info(f"fitting trace with {numpy.abs(poly_disp)}-deg polynomial")
-    table, table_poly, table_poly_all = centroids.smoothTracePoly(poly_disp, poly_kind="poly")
+    log.info(f"fitting centroid guess trace with {deg_cent}-deg polynomial")
+    table, table_poly, table_poly_all = centroids.smoothTracePoly(deg_cent, poly_kind="poly")
     # set bad fibers in trace mask
     centroids._mask[bad_fibers] = True
 
@@ -4040,6 +4054,11 @@ def trace_fibers(
     log.info(f"interpolating coefficients at {bad_fibers.sum()} masked fibers")
     centroids.interpolate_coeffs()
     
+    # select columns to fit for amplitudes, centroids and FWHMs per fiber block
+    step = img._dim[1] // ncolumns
+    columns = numpy.concatenate((numpy.arange(LVM_REFERENCE_COLUMN, 0, -step), numpy.arange(LVM_REFERENCE_COLUMN+step, img._dim[1], step)))
+    log.info(f"tracing fibers in {len(columns)} columns: {','.join(map(str, columns))}")
+
     # fit peaks, centroids and FWHM in each column
     for i, icolumn in enumerate(columns):
         log.info(f"tracing column {icolumn} ({i+1}/{len(columns)})")
@@ -4099,11 +4118,11 @@ def trace_fibers(
         cent_mask = numpy.isnan(cent_slice) | (flux_slice <= 0)
         fwhm_mask = numpy.isnan(fwhm_slice) | (flux_slice <= 0)
 
-        if flux_slice.size != trace_flux._data.shape[0]:
-            dummy_flux = numpy.split(numpy.zeros(trace_flux._data.shape[0]), LVM_NBLOCKS)
+        if flux_slice.size != trace_amp._data.shape[0]:
+            dummy_flux = numpy.split(numpy.zeros(trace_amp._data.shape[0]), LVM_NBLOCKS)
             dummy_cent = numpy.split(numpy.zeros(trace_cent._data.shape[0]), LVM_NBLOCKS)
             dummy_fwhm = numpy.split(numpy.zeros(trace_fwhm._data.shape[0]), LVM_NBLOCKS)
-            dummy_flux_mask = numpy.split(numpy.ones(trace_flux._data.shape[0], dtype=bool), LVM_NBLOCKS)
+            dummy_flux_mask = numpy.split(numpy.ones(trace_amp._data.shape[0], dtype=bool), LVM_NBLOCKS)
             dummy_cent_mask = numpy.split(numpy.ones(trace_cent._data.shape[0], dtype=bool), LVM_NBLOCKS)
             dummy_fwhm_mask = numpy.split(numpy.ones(trace_fwhm._data.shape[0], dtype=bool), LVM_NBLOCKS)
 
@@ -4122,29 +4141,61 @@ def trace_fibers(
                 dummy_fwhm_mask[iblock] = fwhm_mask_split[j]
             
             # update traces
-            trace_flux.setSlice(icolumn, axis="y", data=numpy.concatenate(dummy_flux), mask=numpy.concatenate(dummy_flux_mask))
+            trace_amp.setSlice(icolumn, axis="y", data=numpy.concatenate(dummy_flux), mask=numpy.concatenate(dummy_flux_mask))
             trace_cent.setSlice(icolumn, axis="y", data=numpy.concatenate(dummy_cent), mask=numpy.concatenate(dummy_cent_mask))
             trace_fwhm.setSlice(icolumn, axis="y", data=numpy.concatenate(dummy_fwhm), mask=numpy.concatenate(dummy_fwhm_mask))
-            trace_flux._good_fibers = numpy.arange(trace_flux._fibers)[~numpy.all(trace_flux._mask, axis=1)]
+            trace_amp._good_fibers = numpy.arange(trace_amp._fibers)[~numpy.all(trace_amp._mask, axis=1)]
             trace_cent._good_fibers = numpy.arange(trace_cent._fibers)[~numpy.all(trace_cent._mask, axis=1)]
             trace_fwhm._good_fibers = numpy.arange(trace_fwhm._fibers)[~numpy.all(trace_fwhm._mask, axis=1)]
         else:
             # update traces
-            trace_flux.setSlice(icolumn, axis="y", data=flux_slice, mask=flux_mask)
+            trace_amp.setSlice(icolumn, axis="y", data=flux_slice, mask=flux_mask)
             trace_cent.setSlice(icolumn, axis="y", data=cent_slice, mask=cent_mask)
             trace_fwhm.setSlice(icolumn, axis="y", data=fwhm_slice, mask=fwhm_mask)
+        
+        # compute residuals
+        integral_mod = numpy.trapz(mod_joint(img_slice._pixels), img_slice._pixels) or numpy.nan
+        integral_dat = numpy.trapz(img_slice._data, img_slice._pixels)
+        residuals.append((integral_dat - integral_mod) / integral_dat * 100)
+    
+        # compute fitted model stats
+        chisq_red = bn.nansum((mod_joint(img_slice._pixels) - img_slice._data)[~img_slice._mask]**2 / img_slice._error[~img_slice._mask]**2) / (img._dim[0] - 1 - 3)
+        log.info(f"joint model {chisq_red = :.2f}")
+        if flux_mask.all() or cent_mask.all() or fwhm_mask.all():
+            continue
+        min_amp, max_amp, median_amp = bn.nanmin(flux_slice[~flux_mask]), bn.nanmax(flux_slice[~flux_mask]), bn.nanmedian(flux_slice[~flux_mask])
+        min_cent, max_cent, median_cent = bn.nanmin(cent_slice[~cent_mask]), bn.nanmax(cent_slice[~cent_mask]), bn.nanmedian(cent_slice[~cent_mask])
+        min_fwhm, max_fwhm, median_fwhm = bn.nanmin(fwhm_slice[~fwhm_mask]), bn.nanmax(fwhm_slice[~fwhm_mask]), bn.nanmedian(fwhm_slice[~fwhm_mask])
+        log.info(f"joint model amplitudes: {min_amp = :.2f}, {max_amp = :.2f}, {median_amp = :.2f}")
+        log.info(f"joint model centroids: {min_cent = :.2f}, {max_cent = :.2f}, {median_cent = :.2f}")
+        log.info(f"joint model FWHMs: {min_fwhm = :.2f}, {max_fwhm = :.2f}, {median_fwhm = :.2f}")
 
     # smooth all trace by a polynomial
-    log.info(f"fitting trace with {numpy.abs(poly_disp)}-deg polynomial")
-    table, table_poly, table_poly_all = trace_cent.smoothTracePoly(poly_disp, poly_kind="poly")
-    # set bad fibers in trace mask
-    trace_cent._mask[bad_fibers] = True
+    if fit_poly:
+        log.info(f"fitting peak trace with {deg_flux}-deg polynomial")
+        trace_amp.smoothTracePoly(deg_flux, poly_kind="poly")
+        log.info(f"fitting centroid trace with {deg_cent}-deg polynomial")
+        trace_cent.smoothTracePoly(deg_cent, poly_kind="poly")
+        log.info(f"fitting FWHM trace with {deg_fwhm}-deg polynomial")
+        trace_fwhm.smoothTracePoly(deg_fwhm, poly_kind="poly")
+        # set bad fibers in trace mask
+        trace_cent._mask[bad_fibers] = True
 
-    # linearly interpolate coefficients at masked fibers
-    log.info(f"interpolating coefficients at {bad_fibers.sum()} masked fibers")
-    trace_cent.interpolate_coeffs()
+        # linearly interpolate coefficients at masked fibers
+        log.info(f"interpolating coefficients at {bad_fibers.sum()} masked fibers")
+        trace_cent.interpolate_coeffs()
+    else:
+        # interpolate traces along X axis to fill in missing data
+        log.info("interpolating traces along X axis to fill in missing data")
+        trace_amp.interpolate_data(axis="X")
+        trace_cent.interpolate_data(axis="X")
+        trace_fwhm.interpolate_data(axis="X")
+        log.info("interpolating bad fibers")
+        trace_amp.interpolate_data(axis="Y")
+        trace_cent.interpolate_data(axis="Y")
+        trace_fwhm.interpolate_data(axis="Y")
 
-    return centroids, trace_cent, trace_flux, trace_fwhm
+    return centroids, trace_cent, trace_amp, trace_fwhm
 
 
 def trace_fiber_fwhm(in_image, in_centroid_trace, out_fwhm_trace,
