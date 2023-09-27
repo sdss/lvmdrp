@@ -1049,8 +1049,15 @@ class FiberRows(Header, PositionTable):
                 self._mask[bad_fibers, :] = False
         elif axis == "X" or axis == "x" or axis == 1:
             for ifiber in y_pixels:
-                bad_pixels = (self._data <= 0) | (self._mask[ifiber, :])
-                f_data = interpolate.interp1d(self._pixels[~bad_pixels], self._data[ifiber, ~bad_pixels], bounds_error=False, fill_value="extrapolate")
+                bad_pixels = (self._data[ifiber] <= 0) | (self._mask[ifiber, :])
+                # skip fiber if all pixels are bad and set mask to True
+                if bad_pixels.all():
+                    self._mask[ifiber] = True
+                    continue
+                # skip fiber if no bad pixels are present, no need to interpolate
+                if bad_pixels.sum() == 0:
+                    continue
+                f_data = interpolate.interp1d(x_pixels[~bad_pixels], self._data[ifiber, ~bad_pixels], bounds_error=False, fill_value="extrapolate")
                 self._data[ifiber, :] = f_data(x_pixels)
                 if self._error is not None:
                     f_error = interpolate.interp1d(x_pixels[~bad_pixels], self._error[ifiber, ~bad_pixels], bounds_error=False, fill_value="extrapolate")
