@@ -1012,27 +1012,52 @@ class FiberRows(Header, PositionTable):
         
         return self
 
-    def interpolate_data(self):
-        """Interpolate data of bad fibers
+    def interpolate_data(self, axis="Y"):
+        """Interpolate data of bad fibers (axis='Y') or bad pixels along the dispersion axis (axis='X')
+
+        Parameters
+        ----------
+        axis : string or int, optional with default: 'Y'
+            Defines the axis of the slice to be inserted, 'X', 'x', or 1 for the x-axis or
+            'Y','y', or 0 for the y-axis.
 
         Returns
         -------
         FiberRows
             Interpolated FiberRows object
+        
+        Raises
+        ------
+        ValueError
+            If axis is not 'X', 'x', 1, 'Y', 'y', or 0
         """
         # define coordinates
+        x_pixels = numpy.arange(self._data.shape[1])
         y_pixels = numpy.arange(self._fibers)
 
         # interpolate data
-        bad_fibers = self._mask.all(axis=1)
-        f_data = interpolate.interp1d(y_pixels[~bad_fibers], self._data[~bad_fibers, :], axis=0, bounds_error=False, fill_value="extrapolate")
-        self._data = f_data(y_pixels)
-        if self._error is not None:
-            f_error = interpolate.interp1d(y_pixels[~bad_fibers], self._error[~bad_fibers, :], axis=0, bounds_error=False, fill_value="extrapolate")
-            self._error = f_error(y_pixels)        
+        if axis == "Y" or axis == "y" or axis == 0:
+            bad_fibers = self._mask.all(axis=1)
+            f_data = interpolate.interp1d(y_pixels[~bad_fibers], self._data[~bad_fibers, :], axis=0, bounds_error=False, fill_value="extrapolate")
+            self._data = f_data(y_pixels)
+            if self._error is not None:
+                f_error = interpolate.interp1d(y_pixels[~bad_fibers], self._error[~bad_fibers, :], axis=0, bounds_error=False, fill_value="extrapolate")
+                self._error = f_error(y_pixels)        
 
-        # unmask interpolated fibers
-        if self._mask is not None:
-            self._mask[bad_fibers, :] = False
+            # unmask interpolated fibers
+            if self._mask is not None:
+                self._mask[bad_fibers, :] = False
+        elif axis == "X" or axis == "x" or axis == 1:
+            for ifiber in y_pixels:
+                bad_pixels = (self._data <= 0) | (self._mask[ifiber, :])
+                f_data = interpolate.interp1d(self._pixels[~bad_pixels], self._data[ifiber, ~bad_pixels], bounds_error=False, fill_value="extrapolate")
+                self._data[ifiber, :] = f_data(x_pixels)
+                if self._error is not None:
+                    f_error = interpolate.interp1d(x_pixels[~bad_pixels], self._error[ifiber, ~bad_pixels], bounds_error=False, fill_value="extrapolate")
+                    self._error[ifiber, :] = f_error(x_pixels)
+                if self._mask is not None:
+                    self._mask[ifiber, bad_pixels] = False
+        else:
+            raise ValueError(f"axis {axis} not supported")
 
         return self
