@@ -1,8 +1,8 @@
 import numpy
 from astropy.io import fits as pyfits
+from scipy import interpolate
 from tqdm import tqdm
 
-from lvmdrp.core.plot import plt
 from lvmdrp.core.header import Header, combineHdr
 from lvmdrp.core.positionTable import PositionTable
 from lvmdrp.core.spectrum1d import Spectrum1D
@@ -982,3 +982,57 @@ class FiberRows(Header, PositionTable):
         if append_hdr:
             combined_hdr = combineHdr([self, rows])
             self.setHeader(combined_hdr._header)
+
+    def interpolate_coeffs(self):
+        """Interpolate coefficients or data of bad fibers
+
+        Returns
+        -------
+        FiberRows
+            Interpolated FiberRows object
+        """
+        # early return if no coefficients are available
+        if self._coeffs is None:
+            return self
+        
+        # define coordinates
+        x_pixels = numpy.arange(self._data.shape[1])
+        y_pixels = numpy.arange(self._fibers)
+
+        # interpolate coefficients
+        bad_fibers = self._mask.all(axis=1)
+        f_coeffs = interpolate.interp1d(y_pixels[~bad_fibers], self._coeffs[~bad_fibers, :], axis=0, bounds_error=False, fill_value="extrapolate")
+        self._coeffs = f_coeffs(y_pixels)
+        
+        # evaluate trace at interpolated fibers
+        for ifiber in y_pixels[bad_fibers]:
+            poly = numpy.polynomial.Polynomial(self._coeffs[ifiber, :])
+            self._data[ifiber, :] = poly(x_pixels)
+            self._mask[ifiber, :] = False
+        
+        return self
+
+    def interpolate_data(self):
+        """Interpolate data of bad fibers
+
+        Returns
+        -------
+        FiberRows
+            Interpolated FiberRows object
+        """
+        # define coordinates
+        y_pixels = numpy.arange(self._fibers)
+
+        # interpolate data
+        bad_fibers = self._mask.all(axis=1)
+        f_data = interpolate.interp1d(y_pixels[~bad_fibers], self._data[~bad_fibers, :], axis=0, bounds_error=False, fill_value="extrapolate")
+        self._data = f_data(y_pixels)
+        if self._error is not None:
+            f_error = interpolate.interp1d(y_pixels[~bad_fibers], self._error[~bad_fibers, :], axis=0, bounds_error=False, fill_value="extrapolate")
+            self._error = f_error(y_pixels)        
+
+        # unmask interpolated fibers
+        if self._mask is not None:
+            self._mask[bad_fibers, :] = False
+
+        return self
