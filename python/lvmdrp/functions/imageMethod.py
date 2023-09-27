@@ -4038,17 +4038,7 @@ def trace_fibers(
 
     # linearly interpolate coefficients at masked fibers
     log.info(f"interpolating coefficients at {bad_fibers.sum()} masked fibers")
-    x_pixels = numpy.arange(centroids._data.shape[1])
-    y_pixels = numpy.arange(centroids._fibers)
-    for column in range(centroids._data.shape[1]):
-        mask = centroids._mask[:, column]
-        for order in range(centroids._coeffs.shape[1]):
-            centroids._coeffs[mask, order] = numpy.interp(y_pixels[mask], y_pixels[~mask], centroids._coeffs[~mask, order])
-    # evaluate trace at interpolated fibers
-    for ifiber in y_pixels[bad_fibers]:
-        poly = numpy.polynomial.Polynomial(centroids._coeffs[ifiber, :])
-        centroids._data[ifiber, :] = poly(x_pixels)
-        centroids._mask[ifiber, :] = False
+    centroids.interpolate_coeffs()
     
     # fit peaks, centroids and FWHM in each column
     for i, icolumn in enumerate(columns):
@@ -4152,17 +4142,7 @@ def trace_fibers(
 
     # linearly interpolate coefficients at masked fibers
     log.info(f"interpolating coefficients at {bad_fibers.sum()} masked fibers")
-    x_pixels = numpy.arange(trace_cent._data.shape[1])
-    y_pixels = numpy.arange(trace_cent._fibers)
-    for column in range(trace_cent._data.shape[1]):
-        mask = trace_cent._mask[:, column]
-        for order in range(trace_cent._coeffs.shape[1]):
-            trace_cent._coeffs[mask, order] = numpy.interp(y_pixels[mask], y_pixels[~mask], trace_cent._coeffs[~mask, order])
-    # evaluate trace at interpolated fibers
-    for ifiber in y_pixels[bad_fibers]:
-        poly = numpy.polynomial.Polynomial(trace_cent._coeffs[ifiber, :])
-        trace_cent._data[ifiber, :] = poly(x_pixels)
-        trace_cent._mask[ifiber, :] = False
+    trace_cent.interpolate_coeffs()
 
     return centroids, trace_cent, trace_flux, trace_fwhm
 
@@ -4407,14 +4387,10 @@ def trace_fiber_fwhm(in_image, in_centroid_trace, out_fwhm_trace,
     trace_fwhm_fit._data[trace_fwhm_fit._mask] = 0.0
 
     # interpolate bad fibers
-    bad_fibers = trace_cent_fit._mask.sum(axis=1) == trace_cent_fit._data.shape[1]
-    log.info(f"interpolating {bad_fibers.sum()} / {trace_cent_fit._fibers} masked fibers")
-    x_pixels = numpy.arange(trace_cent_fit._data.shape[1])
-    y_pixels = numpy.arange(trace_cent_fit._fibers)
-    for col in x_pixels:
-        trace_flux_fit._data[bad_fibers, col] = numpy.interp(y_pixels[bad_fibers], y_pixels[~bad_fibers], trace_flux_fit._data[~bad_fibers, col])
-        trace_cent_fit._data[bad_fibers, col] = numpy.interp(y_pixels[bad_fibers], y_pixels[~bad_fibers], trace_cent_fit._data[~bad_fibers, col])
-        trace_fwhm_fit._data[bad_fibers, col] = numpy.interp(y_pixels[bad_fibers], y_pixels[~bad_fibers], trace_fwhm_fit._data[~bad_fibers, col])
+    log.info(f"interpolating {trace_cent_fit._fibers-trace_cent_fit._good_fibers.size} / {trace_cent_fit._fibers} masked fibers")
+    trace_flux_fit.interpolate_data()
+    trace_cent_fit.interpolate_data()
+    trace_fwhm_fit.interpolate_data()
 
     # write traces to disk
     log.info(f"writing fiber width trace to '{os.path.basename(out_fwhm_trace)}'")
