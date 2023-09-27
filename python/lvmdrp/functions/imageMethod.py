@@ -1476,11 +1476,11 @@ def trace_peaks(
         # set mask
         fibers_status = slitmap["fibstatus"]
         bad_fibers = (fibers_status == 1) | (profile[positions.astype(int)] < threshold)
-        good_fibers = numpy.logical_not(bad_fibers)
+        good_fibers = numpy.where(numpy.logical_not(bad_fibers))[0]
     else:
         ref_column, _, _, positions, bad_fibers = _read_fiber_ypix(in_peaks)
         fibers = positions.size
-        good_fibers = numpy.logical_not(bad_fibers)
+        good_fibers = numpy.where(numpy.logical_not(bad_fibers))[0]
 
     # create empty trace mask for the image
     trace = TraceMask()
@@ -1517,9 +1517,7 @@ def trace_peaks(
             pix = numpy.round(trace.getData()[0][:, i + steps]).astype("int16")
 
         # measure the peaks for the ref_column and store it in the trace
-        centers = cut_iter.measurePeaks(
-            pix, method, init_sigma, threshold=threshold, max_diff=float(max_diff)
-        )
+        centers = cut_iter.measurePeaks(pix, method, init_sigma, threshold=threshold, max_diff=float(max_diff))
         trace.setSlice(i, axis="y", data=centers[0], mask=centers[1])
 
     # iterate towards the last index along dispersion axis
