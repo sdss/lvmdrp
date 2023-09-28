@@ -4020,7 +4020,7 @@ def trace_fibers(
     bad_fibers = (fibers_status == 1) | (profile._data[ref_cent.round().astype(int)] < counts_threshold)
     good_fibers = numpy.where(numpy.logical_not(bad_fibers))[0]
 
-    # create empty trace_cent mask for the image
+    # create empty traces mask for the image
     fibers = ref_cent.size
     dim = img.getDim()
     centroids = TraceMask()
@@ -4072,7 +4072,7 @@ def trace_fibers(
 
     # smooth all trace by a polynomial
     log.info(f"fitting centroid guess trace with {deg_cent}-deg polynomial")
-    table, table_poly, table_poly_all = centroids.smoothTracePoly(deg_cent, poly_kind="poly")
+    centroids.smoothTracePoly(deg_cent, poly_kind="poly")
     # set bad fibers in trace mask
     centroids._mask[bad_fibers] = True
 
@@ -4210,7 +4210,9 @@ def trace_fibers(
         # linearly interpolate coefficients at masked fibers
         if interpolate_missing:
             log.info(f"interpolating coefficients at {bad_fibers.sum()} masked fibers")
+            trace_amp.interpolate_coeffs()
             trace_cent.interpolate_coeffs()
+            trace_fwhm.interpolate_coeffs()
     else:
         # interpolate traces along X axis to fill in missing data
         log.info("interpolating traces along X axis to fill in missing data")
@@ -4254,19 +4256,23 @@ def trace_fibers(
     )
     
     # profile models vs data
-    ncols = 2
-    nrows = int(numpy.ceil(ncolumns / ncols))
-    fig, axs = create_subplots(to_display=display_plots, nrows=nrows, ncols=ncols, sharex=True, figsize=(15*ncols, 5*nrows))
-    fig.subplots_adjust(hspace=0.1, wspace=0.1, top=0.95, bottom=0.05, left=0.1, right=0.95)
-    fig.suptitle("Profile fitting")
-    fig.supylabel("counts (e-/pixel)")
+    fig, ax = create_subplots(to_display=display_plots, figsize=(15,10))
+    fig.suptitle("Profile fitting residuals")
+    fig.supylabel("residuals (%)")
     fig.supxlabel("Y (pixel)")
-    for i, icolumn in enumerate(columns):
-        img_slice = img.getSlice(icolumn, axis="y")
-        mod_joint = mod_columns[i]
 
-        axs[i].set_title(f"column {icolumn}", loc="left")
-        mod_joint.plot(img_slice._pixels, y=img_slice._data, ax=axs[i])
+    colors = plt.cm.coolwarm(numpy.linspace(0, 1, len(columns)))
+    idx = numpy.argsort(columns)
+    for i in idx:
+        icolumn = columns[i]
+
+        joint_mod = mod_columns[i](img_slice._pixels)
+
+        img_slice = img.getSlice(icolumn, axis="y")
+        img_slice._data[(img_slice._mask)|(joint_mod<=0)] = numpy.nan
+
+        residuals = (joint_mod - img_slice._data) / img_slice._data * 100
+        ax.plot(img_slice._pixels, residuals, ".", ms=2, mew=0, mfc=colors[i])
     save_fig(
         fig,
         product_path=out_trace_amp,
