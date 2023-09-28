@@ -217,9 +217,9 @@ def quick_reduction(expnum: int, use_fiducial_master: bool = False) -> None:
 
         # resample wavelength into uniform grid along fiber IDs
         iwave, fwave = SPEC_CHANNELS[sci_camera[0]]
-        rss_tasks.resample_wavelength(in_rss=ssci_path, out_rss=hsci_path, method="linear", disp_pix=0.5, start_wave=iwave, end_wave=fwave, err_sim=10, parallel=0, extrapolate=False)
-        rss_tasks.resample_wavelength(in_rss=fskye_path, out_rss=hskye_path, method="linear", disp_pix=0.5, start_wave=iwave, end_wave=fwave, err_sim=10, parallel=0, extrapolate=False)
-        rss_tasks.resample_wavelength(in_rss=fskyw_path, out_rss=hskyw_path, method="linear", disp_pix=0.5, start_wave=iwave, end_wave=fwave, err_sim=10, parallel=0, extrapolate=False)
+        rss_tasks.resample_wavelength(in_rss=ssci_path, out_rss=hsci_path, method="linear", compute_densities=True, disp_pix=0.5, start_wave=iwave, end_wave=fwave, err_sim=10, parallel=0, extrapolate=False)
+        rss_tasks.resample_wavelength(in_rss=fskye_path, out_rss=hskye_path, method="linear", compute_densities=True, disp_pix=0.5, start_wave=iwave, end_wave=fwave, err_sim=10, parallel=0, extrapolate=False)
+        rss_tasks.resample_wavelength(in_rss=fskyw_path, out_rss=hskyw_path, method="linear", compute_densities=True, disp_pix=0.5, start_wave=iwave, end_wave=fwave, err_sim=10, parallel=0, extrapolate=False)
 
     # combine channels
     drp.combine_cameras(sci_tileid, sci_mjd, expnum=sci_expnum, spec=1)
