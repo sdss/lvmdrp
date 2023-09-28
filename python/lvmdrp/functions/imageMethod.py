@@ -3875,7 +3875,7 @@ def trace_fibers(
     guess_fwhm: float = 3.0,
     counts_threshold: float = 0.5,
     max_diff: int = 1.5,
-    ncolumns: int = 18,
+    ncolumns: int | Tuple[int] = 18,
     nblocks: int = 18,
     iblocks: list = [],
     fit_poly: bool = False,
@@ -3941,7 +3941,7 @@ def trace_fibers(
         threshold to use for fiber detection, by default 0.5
     max_diff : int, optional
         maximum difference between consecutive fiber positions, by default 1.5
-    ncolumns : int, optional
+    ncolumns : int or 2-tuple, optional
         number of columns to use for tracing, by default 18
     nblocks : int, optional
         number of blocks to use for tracing, by default 18
@@ -3964,6 +3964,13 @@ def trace_fibers(
         fiber flux
     fwhm : TraceMask
         fiber FWHM
+
+    Raises
+    ------
+    ValueError
+        invalid polynomial degree
+    ValueError
+        invalid number of columns
     """
     # parse polynomial degrees
     if isinstance(poly_deg, (list, tuple)) and len(poly_deg) == 3:
@@ -3972,6 +3979,13 @@ def trace_fibers(
         deg_amp = deg_cent = deg_fwhm = poly_deg
     else:
         raise ValueError(f"invalid polynomial degree: {poly_deg}")
+
+    if isinstance(ncolumns, (list, tuple)) and len(ncolumns) == 2:
+        ncolumns_cent, ncolumns_full = ncolumns
+    elif isinstance(ncolumns, int):
+        ncolumns_cent = ncolumns_full = ncolumns
+    else:
+        raise ValueError(f"invalid number of columns: {ncolumns}")
 
     # load continuum image  from file
     log.info(f"using flat image {os.path.basename(in_image)} for tracing")
@@ -4036,7 +4050,7 @@ def trace_fibers(
     centroids.setSlice(LVM_REFERENCE_COLUMN, axis="y", data=ref_cent, mask=numpy.zeros_like(ref_cent, dtype="bool"))
 
     # select columns to measure centroids
-    step = img._dim[1] // max(140, ncolumns)
+    step = img._dim[1] // ncolumns_cent
     columns = numpy.concatenate((numpy.arange(LVM_REFERENCE_COLUMN, 0, -step), numpy.arange(LVM_REFERENCE_COLUMN, img._dim[1], step)))
     log.info(f"tracing centroids in {len(columns)-1} columns: {','.join(map(str, numpy.unique(columns)))}")
 
@@ -4081,7 +4095,7 @@ def trace_fibers(
     centroids.interpolate_coeffs()
     
     # select columns to fit for amplitudes, centroids and FWHMs per fiber block
-    step = img._dim[1] // ncolumns
+    step = img._dim[1] // ncolumns_full
     columns = numpy.concatenate((numpy.arange(LVM_REFERENCE_COLUMN, 0, -step), numpy.arange(LVM_REFERENCE_COLUMN+step, img._dim[1], step)))
     log.info(f"tracing fibers in {len(columns)} columns: {','.join(map(str, columns))}")
 
