@@ -4041,10 +4041,14 @@ def trace_fibers(
     centroids.createEmpty(data_dim=(fibers, dim[1]), mask_dim=(fibers, dim[1]))
     centroids.setFibers(fibers)
     centroids._good_fibers = good_fibers
+    centroids.setHeader(img._header.copy())
+    centroids._header["IMAGETYP"] = "trace_centroid"
     # initialize flux and FWHM traces
     trace_cent = copy(centroids)
     trace_amp = copy(centroids)
+    trace_amp._header["IMAGETYP"] = "trace_amplitude"
     trace_fwhm = copy(centroids)
+    trace_fwhm._header["IMAGETYP"] = "trace_fwhm"
 
     # set positions of fibers along reference column
     centroids.setSlice(LVM_REFERENCE_COLUMN, axis="y", data=ref_cent, mask=numpy.zeros_like(ref_cent, dtype="bool"))
@@ -4255,7 +4259,7 @@ def trace_fibers(
     log.info("plotting results")
     
     # residuals
-    fig, ax = create_subplots(to_display=display_plots, nrows=1, ncols=1, figsize=(15,10))
+    fig, ax = create_subplots(to_display=display_plots, nrows=1, ncols=1, figsize=(15,7))
     ax.plot(columns, residuals, "o", color="tab:red", ms=10)
     ax.axhline(0, color="0.2", ls="--", lw=1)
     ax.grid(ls="--", color="0.9", lw=0.5, zorder=0)
@@ -4270,7 +4274,7 @@ def trace_fibers(
     )
     
     # profile models vs data
-    fig, ax = create_subplots(to_display=display_plots, figsize=(15,10))
+    fig, ax = create_subplots(to_display=display_plots, figsize=(15,7))
     fig.suptitle("Profile fitting residuals")
     fig.supylabel("residuals (%)")
     fig.supxlabel("Y (pixel)")
