@@ -2382,9 +2382,10 @@ def extract_spectra(
     in_image: str,
     out_rss: str,
     in_trace: str,
+    in_fwhm: str = None,
     in_acorr: str = None,
     method: str = "optimal",
-    aperture: int = 7,
+    aperture: int = 3,
     fwhm: float = 2.5,
     disp_axis: str = "X",
     replace_error: float = 1.0e10,
@@ -2440,13 +2441,12 @@ def extract_spectra(
     trace_fwhm = TraceMask()
 
     if method == "optimal":
-        # load FWHM trace
-        try:
-            fwhm = float(fwhm)
-            trace_fwhm.setData(data=numpy.ones(trace_mask._data.shape) * fwhm)
-        except ValueError:
-            trace_fwhm.loadFitsData(fwhm, extension_data=0)
-
+        # check if fwhm trace is given and exists
+        if in_fwhm is None or not os.path.isfile(in_fwhm):
+            trace_fwhm.setData(data=numpy.ones(trace_mask._data.shape) * float(fwhm))
+        else:
+            trace_fwhm.loadFitsData(in_fwhm, extension_data=0)
+        
         # set up parallel run
         if parallel == "auto":
             fragments = multiprocessing.cpu_count()
@@ -3341,8 +3341,6 @@ def detrend_frame(
             bcorr_img.setSection(section=quad_sec, subimg=quad, inplace=True)
             log.info(f"median error in quadrant {i+1}: {numpy.nanmedian(quad._error):.2f} (e-)")
 
-        # convert to electron/s (avoid zero division)
-        bcorr_img /= max(1, exptime)
         bcorr_img.setHdrValue("BUNIT", "electron/s", "physical units of the image")
     else:
         # convert to ADU

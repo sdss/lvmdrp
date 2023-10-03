@@ -1568,8 +1568,10 @@ def quick_sky_subtraction(in_rss: str, out_rss, in_skye: str, in_skyw: str) -> R
         f"(SKYERA, SKYEDEC: {ra_e, dec_e}; SKYWRA, SKYWDEC: {ra_w, dec_w}) "
         f"in science telescope pointing (SCIRA, SCIDEC: {ra_s, dec_s})")
 
-    w_e = 1 / ang_distance(ra_e, dec_e, ra_s, dec_s)
-    w_w = 1 / ang_distance(ra_w, dec_w, ra_s, dec_s)
+    ad = ang_distance(ra_e, dec_e, ra_s, dec_s)
+    w_e = 1 / (ad if ad>0 else 1)
+    ad = ang_distance(ra_w, dec_w, ra_s, dec_s)
+    w_w = 1 / (ad if ad>0 else 1)
     w_norm = w_e + w_w
     w_e, w_w = w_e / w_norm, w_w / w_norm
 
