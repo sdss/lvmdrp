@@ -2350,9 +2350,10 @@ def extract_spectra(
     in_image: str,
     out_rss: str,
     in_trace: str,
+    in_fwhm: str = None,
     in_acorr: str = None,
     method: str = "optimal",
-    aperture: int = 7,
+    aperture: int = 3,
     fwhm: float = 2.5,
     disp_axis: str = "X",
     replace_error: float = 1.0e10,
@@ -2408,13 +2409,12 @@ def extract_spectra(
     trace_fwhm = TraceMask()
 
     if method == "optimal":
-        # load FWHM trace
-        try:
-            fwhm = float(fwhm)
-            trace_fwhm.setData(data=numpy.ones(trace_mask._data.shape) * fwhm)
-        except ValueError:
-            trace_fwhm.loadFitsData(fwhm, extension_data=0)
-
+        # check if fwhm trace is given and exists
+        if in_fwhm is None or not os.path.isfile(in_fwhm):
+            trace_fwhm.setData(data=numpy.ones(trace_mask._data.shape) * float(fwhm))
+        else:
+            trace_fwhm.loadFitsData(in_fwhm, extension_data=0)
+        
         # set up parallel run
         if parallel == "auto":
             fragments = multiprocessing.cpu_count()

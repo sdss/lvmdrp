@@ -186,8 +186,7 @@ def quick_reduction(expnum: int, use_fiducial_master: bool = False) -> None:
                                   in_slitmap=Table(drp.fibermap.data), reject_cr=False)
         
         # # extract 1d spectra
-        image_tasks.extract_spectra(in_image=dsci_path, out_rss=xsci_path, in_trace=mtrace_path, fwhm=mwidth_path, method="optimal", parallel=2)
-        # image_tasks.extract_spectra(in_image=dsci_path, out_rss=xsci_path, in_acorr=macorr_path, in_trace=mtrace_path, method="aperture", aperture=3)
+        image_tasks.extract_spectra(in_image=dsci_path, out_rss=xsci_path, in_trace=mtrace_path, in_fwhm=mwidth_path, method="optimal", parallel=2)
 
         # wavelength calibrate
         rss_tasks.create_pixel_table(in_rss=xsci_path, out_rss=wsci_path, arc_wave=mwave_path, arc_fwhm=mlsf_path)
