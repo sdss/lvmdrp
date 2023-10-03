@@ -4257,9 +4257,10 @@ def trace_fibers(
 
     # plot results
     log.info("plotting results")
-    
+    camera = img._header["CCD"]
     # residuals
     fig, ax = create_subplots(to_display=display_plots, nrows=1, ncols=1, figsize=(15,7))
+    fig.suptitle(f"Residuals of joint model for {camera = }")
     ax.plot(columns, residuals, "o", color="tab:red", ms=10)
     ax.axhline(0, color="0.2", ls="--", lw=1)
     ax.grid(ls="--", color="0.9", lw=0.5, zorder=0)
@@ -4270,12 +4271,12 @@ def trace_fibers(
         product_path=out_trace_amp,
         to_display=display_plots,
         figure_path="qa",
-        label="residuals"
+        label="residuals_int_columns"
     )
     
     # profile models vs data
     fig, ax = create_subplots(to_display=display_plots, figsize=(15,7))
-    fig.suptitle("Profile fitting residuals")
+    fig.suptitle(f"Profile fitting residuals for {camera = }")
     fig.supylabel("residuals (%)")
     fig.supxlabel("Y (pixel)")
 
@@ -4289,14 +4290,16 @@ def trace_fibers(
         img_slice = img.getSlice(icolumn, axis="y")
         img_slice._data[(img_slice._mask)|(joint_mod<=0)] = numpy.nan
 
+        weights = img_slice._data / bn.nansum(img_slice._data)
         residuals = (joint_mod - img_slice._data) / img_slice._data * 100
+        residuals *= weights
         ax.plot(img_slice._pixels, residuals, ".", ms=2, mew=0, mfc=colors[i])
     save_fig(
         fig,
         product_path=out_trace_amp,
         to_display=display_plots,
         figure_path="qa",
-        label="fiber_profiles"
+        label="residuals_columns"
     )
 
     return centroids, trace_cent, trace_amp, trace_fwhm
