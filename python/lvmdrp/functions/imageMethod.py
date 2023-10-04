@@ -63,9 +63,10 @@ DEFAULT_BGSEC = [
     "[1:2043, 1991:2000]",
     "[1:2043, 1991:2000]",
 ]
+DEFAULT_PTC_PATH = os.path.join(os.environ["LVMCORE_DIR"], "metrology", "PTC_fit.txt")
+
 LVM_NBLOCKS = 18
 LVM_REFERENCE_COLUMN = 2000
-
 
 description = "Provides Methods to process 2D images"
 
@@ -82,15 +83,19 @@ __all__ = [
 ]
 
 
-def _nonlinearity_correction(nl_table: Table, gain_value: float, data: Image, iquad: int) -> Image:
-    """calculates non-linearity correction for input data
+def _nonlinearity_correction(ptc_params: None | numpy.ndarray, nominal_gain: float, quadrant: Image, iquad: int) -> Image:
+    """calculates non-linearity correction for input quadrant
 
     Parameters
     ----------
-    gain_value : float
-        gain value of the input data
-    data : Image
-        input data
+    ptc_params : numpy.ndarray
+        table with non-linearity correction parameters
+    nominal_gain : float
+        gain value of the input quadrant
+    quadrant : Image
+        input quadrant
+    iquad : int
+        quadrant number (1-index based)
 
     Returns
     -------
@@ -98,21 +103,26 @@ def _nonlinearity_correction(nl_table: Table, gain_value: float, data: Image, iq
         gain map
 
     """
-    # implement non-linearity correction
-    # NOTE nl_table: ADU (OS and bias subtracted), corr_b1_q1, ..., corr_z3_q4
-    camera = data._header["CCD"]
+    quad = {1: "TL", 2: "TR", 3: "BL", 4: "BR"}[iquad]
+    camera = quadrant._header["CCD"]
 
-    if nl_table is not None:
-        x = nl_table["ADU"]
-        y = nl_table[f"corr_{camera}_q{iquad}"]
-        nl_interp = interpolate.interp1d(x, y, kind="linear")
 
-        z = gain_value / nl_interp(data._data.flatten())
-        gain_map = Image(data=z.reshape(data._data.shape))
+    if ptc_params is not None:
+        row_qc = (ptc_params["C"] == camera) & (ptc_params["Q"] == quad)
+        col_coeffs = "a1 a2 a3".split()
+
+        a1, a2, a3 = ptc_params[row_qc][col_coeffs][0]
+        log.info(f"calculating gain map using parameters: {a1 = :.2g}, {a2 = :.2g}, {a3 = :.2g}")
+        gain_map = Image(data=1 / (a1 + a2*a3 * quadrant._data**(a3-1)))
+        gain_map.setData(data=nominal_gain, select=numpy.isnan(gain_map._data), inplace=True)
+
+        gain_med = numpy.nanmedian(gain_map._data)
+        gain_min, gain_max = numpy.nanmin(gain_map._data), numpy.nanmax(gain_map._data)
+        log.info(f"gain map stats: {gain_med = :.2f} [{gain_min = :.2f}, {gain_max = :.2f}] ({nominal_gain = :.2f} e-/ADU)")
     else:
-        log.error("cannot apply non-linearity correction")
-        log.info(f"using constant gain value {gain_value}")
-        gain_map = Image(data=numpy.ones(data._data.shape)) * gain_value
+        log.warning("cannot apply non-linearity correction")
+        log.info(f"using {nominal_gain = } (e-/ADU)")
+        gain_map = Image(data=numpy.ones(quadrant._data.shape) * nominal_gain)
     return gain_map
 
 
@@ -3317,15 +3327,19 @@ def detrend_frame(
 
     # read in non_linearity correction table
     if in_nonlinearity is not None:
-        nl_table = Table(pyfits.getdata(in_nonlinearity, ext=1))
+        ptc_params = numpy.loadtxt(in_nonlinearity, comments="#",
+                                 dtype=[("C", "|U2",), ("Q", "|U2",),
+                                        ("a1", float,), ("a2", float,),
+                                        ("a3", float,)])
     else:
-        nl_table = None
+        ptc_params = None
 
     # convert to electrons if requested
     if convert_to_e:
         # calculate Poisson errors
-        log.info("calculating Poisson errors per quadrant")
+        log.info("applying gain correction per quadrant")
         for i, quad_sec in enumerate(bcorr_img.getHdrValue("AMP? TRIMSEC").values()):
+            log.info(f"processing quadrant {i+1}")
             # extract quadrant image
             quad = bcorr_img.getSection(quad_sec)
             # extract quadrant gain and rdnoise values
@@ -3333,9 +3347,11 @@ def detrend_frame(
             rdnoise = quad.getHdrValue(f"AMP{i+1} RDNOISE")
 
             # non-linearity correction
-            gain_map = _nonlinearity_correction(nl_table, gain, quad, iquad=i+1)
+            gain_map = _nonlinearity_correction(ptc_params, gain, quad, iquad=i+1)
             # gain-correct quadrant
             quad *= gain_map
+            # propagate new NaNs to the mask
+            quad._mask |= numpy.isnan(quad._data)
 
             quad.computePoissonError(rdnoise)
             bcorr_img.setSection(section=quad_sec, subimg=quad, inplace=True)
@@ -3824,7 +3840,7 @@ def create_pixelmask(in_short_dark, in_long_dark, out_pixmask, in_flat_a=None, i
         ratio_med = bn.nanmedian(ratio_flat._data)
         ratio_min = bn.nanmin(ratio_flat._data)
         ratio_max = bn.nanmax(ratio_flat._data)
-        log.info(f"calculating ratio of flats: {ratio_med = :.2f} [{ratio_min = :.2f}, {ratio_max = :.2f}")
+        log.info(f"calculating ratio of flats: {ratio_med = :.2f} [{ratio_min = :.2f}, {ratio_max = :.2f}]")
 
         # plot flats histograms
         log.info("plotting flats histograms")
