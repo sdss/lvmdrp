@@ -6,7 +6,7 @@ import bottleneck as bn
 from astropy.io import fits as pyfits
 from numpy import polynomial
 from scipy.linalg import norm
-from scipy import signal, interpolate, ndimage, sparse
+from scipy import signal, interpolate, ndimage, sparse, linalg
 from scipy.ndimage import zoom
 from typing import List, Tuple
 
@@ -1195,7 +1195,8 @@ class Spectrum1D(Header):
                 # propagate errors using MC simulation
                 for i in range(err_sim):
                     error[select_goodpix] = numpy.random.normal(
-                        clean_data[select_goodpix], self._error[select_goodpix]
+                        # NOTE: patching negative errors
+                        clean_data[select_goodpix], numpy.abs(self._error[select_goodpix])
                     ).astype(numpy.float32)
 
                     if method == "spline":
@@ -2190,11 +2191,12 @@ class Spectrum1D(Header):
         B = sparse.csr_matrix(
             (A[select], (indices[0][select], indices[1][select])),
             shape=(self._dim, fibers),
-        ).todense()
-        # print(B)
-        out = sparse.linalg.lsqr(
-            B, self._data / self._error, atol=1e-7, btol=1e-7, conlim=1e13
         )
+        # print(B)
+        out = sparse.linalg.lsmr(
+            B, self._data / self._error, atol=1e-4, btol=1e-4
+        )
+        # out = linalg.lstsq(A, self._data / self._error, lapack_driver='gelsy', check_finite=False)
         # print(out)
 
         error = numpy.sqrt(1 / bn.nansum((A**2), 0))
