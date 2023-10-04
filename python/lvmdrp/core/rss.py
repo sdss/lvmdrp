@@ -1857,35 +1857,64 @@ class RSS(FiberRows):
         )
         return rss
 
-    def splitRSS(self, parts):
+    def splitRSS(self, parts, axis=0):
         # print(self._res_elements)
-        indicies = numpy.arange(self._res_elements)
-        parts = numpy.array_split(indicies, parts)
+        if axis == 0:
+            indices = numpy.arange(self._res_elements)
+        elif axis == 1:
+            indices = numpy.arange(self._fibers)
+        parts = numpy.array_split(indices, parts)
         rss_parts = []
         for i in range(len(parts)):
-            data = self._data[:, parts[i]]
-            if self._error is not None:
-                error = self._error[:, parts[i]]
-            else:
-                error = None
-            if self._mask is not None:
-                mask = self._mask[:, parts[i]]
-            else:
-                mask = None
-            if self._wave is not None:
-                if len(self._wave.shape) == 2:
-                    wave = self._wave[:, parts[i]]
+            if axis == 0:
+                data = self._data[:, parts[i]]
+                if self._error is not None:
+                    error = self._error[:, parts[i]]
                 else:
-                    wave = self._wave[parts[i]]
-            else:
-                wave = None
-            if self._inst_fwhm is not None:
-                if len(self._inst_fwhm.shape) == 2:
-                    inst_fwhm = self._inst_fwhm[:, parts[i]]
+                    error = None
+                if self._mask is not None:
+                    mask = self._mask[:, parts[i]]
                 else:
-                    inst_fwhm = self._inst_fwhm[parts[i]]
-            else:
-                inst_fwhm = None
+                    mask = None
+                if self._wave is not None:
+                    if len(self._wave.shape) == 2:
+                        wave = self._wave[:, parts[i]]
+                    else:
+                        wave = self._wave[parts[i]]
+                else:
+                    wave = None
+                if self._inst_fwhm is not None:
+                    if len(self._inst_fwhm.shape) == 2:
+                        inst_fwhm = self._inst_fwhm[:, parts[i]]
+                    else:
+                        inst_fwhm = self._inst_fwhm[parts[i]]
+                else:
+                    inst_fwhm = None
+            elif axis == 1:
+                data = self._data[parts[i]]
+                if self._error is not None:
+                    error = self._error[parts[i]]
+                else:
+                    error = None
+                if self._mask is not None:
+                    mask = self._mask[parts[i]]
+                else:
+                    mask = None
+                if self._wave is not None:
+                    if len(self._wave.shape) == 2:
+                        wave = self._wave[parts[i]]
+                    else:
+                        wave = self._wave[parts[i]]
+                else:
+                    wave = None
+                if self._inst_fwhm is not None:
+                    if len(self._inst_fwhm.shape) == 2:
+                        inst_fwhm = self._inst_fwhm[parts[i]]
+                    else:
+                        inst_fwhm = self._inst_fwhm[parts[i]]
+                else:
+                    inst_fwhm = None
+
             rss = RSS(
                 data=data,
                 error=error,

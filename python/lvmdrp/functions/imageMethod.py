@@ -13,7 +13,7 @@ from astropy import units as u
 from astropy.table import Table
 from astropy.io import fits as pyfits
 from astropy.nddata import CCDData, StdDevUncertainty
-from astropy.stats.biweight import biweight_location, biweight_scale
+from astropy.stats.biweight import biweight_location
 from astropy.visualization import simple_norm
 from ccdproc import cosmicray_lacosmic
 from scipy import interpolate
@@ -24,6 +24,7 @@ from typing import List
 from lvmdrp import log
 from lvmdrp.utils.decorators import skip_on_missing_input_path, drop_missing_input_paths, skip_if_drpqual_flags
 from lvmdrp.utils.bitmask import QualityFlag
+from lvmdrp.core.fit_profile import Gaussians
 from lvmdrp.core.fiberrows import FiberRows, _read_fiber_ypix
 from lvmdrp.core.image import (
     Image,
@@ -61,6 +62,8 @@ DEFAULT_BGSEC = [
     "[1:2043, 1991:2000]",
     "[1:2043, 1991:2000]",
 ]
+DEFAULT_PTC_PATH = os.path.join(os.environ["LVMCORE_DIR"], "metrology", "PTC_fit.txt")
+
 
 description = "Provides Methods to process 2D images"
 
@@ -77,15 +80,19 @@ __all__ = [
 ]
 
 
-def _nonlinearity_correction(nl_table: Table, gain_value: float, data: Image, iquad: int) -> Image:
-    """calculates non-linearity correction for input data
+def _nonlinearity_correction(ptc_params: None | numpy.ndarray, nominal_gain: float, quadrant: Image, iquad: int) -> Image:
+    """calculates non-linearity correction for input quadrant
 
     Parameters
     ----------
-    gain_value : float
-        gain value of the input data
-    data : Image
-        input data
+    ptc_params : numpy.ndarray
+        table with non-linearity correction parameters
+    nominal_gain : float
+        gain value of the input quadrant
+    quadrant : Image
+        input quadrant
+    iquad : int
+        quadrant number (1-index based)
 
     Returns
     -------
@@ -93,21 +100,26 @@ def _nonlinearity_correction(nl_table: Table, gain_value: float, data: Image, iq
         gain map
 
     """
-    # implement non-linearity correction
-    # NOTE nl_table: ADU (OS and bias subtracted), corr_b1_q1, ..., corr_z3_q4
-    camera = data._header["CCD"]
+    quad = {1: "TL", 2: "TR", 3: "BL", 4: "BR"}[iquad]
+    camera = quadrant._header["CCD"]
 
-    if nl_table is not None:
-        x = nl_table["ADU"]
-        y = nl_table[f"corr_{camera}_q{iquad}"]
-        nl_interp = interpolate.interp1d(x, y, kind="linear")
 
-        z = gain_value / nl_interp(data._data.flatten())
-        gain_map = Image(data=z.reshape(data._data.shape))
+    if ptc_params is not None:
+        row_qc = (ptc_params["C"] == camera) & (ptc_params["Q"] == quad)
+        col_coeffs = "a1 a2 a3".split()
+
+        a1, a2, a3 = ptc_params[row_qc][col_coeffs][0]
+        log.info(f"calculating gain map using parameters: {a1 = :.2g}, {a2 = :.2g}, {a3 = :.2g}")
+        gain_map = Image(data=1 / (a1 + a2*a3 * quadrant._data**(a3-1)))
+        gain_map.setData(data=nominal_gain, select=numpy.isnan(gain_map._data), inplace=True)
+
+        gain_med = numpy.nanmedian(gain_map._data)
+        gain_min, gain_max = numpy.nanmin(gain_map._data), numpy.nanmax(gain_map._data)
+        log.info(f"gain map stats: {gain_med = :.2f} [{gain_min = :.2f}, {gain_max = :.2f}] ({nominal_gain = :.2f} e-/ADU)")
     else:
-        log.error("cannot apply non-linearity correction")
-        log.info(f"using constant gain value {gain_value}")
-        gain_map = Image(data=numpy.ones(data._data.shape)) * gain_value
+        log.warning("cannot apply non-linearity correction")
+        log.info(f"using {nominal_gain = } (e-/ADU)")
+        gain_map = Image(data=numpy.ones(quadrant._data.shape) * nominal_gain)
     return gain_map
 
 
@@ -1524,6 +1536,7 @@ def trace_peaks(
 
     if write_trace_data:
         coords_file = out_trace.replace("calib", "ancillary").replace(".fits", "_coords.txt")
+        os.makedirs(os.path.dirname(coords_file), exist_ok=True)
         poly_file = coords_file.replace("_coords.txt", "_poly.txt")
         poly_all_file = coords_file.replace("_coords.txt", "_poly_all.txt")
         log.info(f"writing trace data to files: {os.path.basename(coords_file)}, {os.path.basename(poly_file)} and {os.path.basename(poly_all_file)}")
@@ -1860,6 +1873,8 @@ def traceFWHM_drp(
     blocks="20",
     steps="100",
     coadd="10",
+    median_box="10",
+    median_cross="1",
     poly_disp="5",
     poly_kind="poly",
     threshold_flux="50.0",
@@ -1917,6 +1932,7 @@ def traceFWHM_drp(
     poly_disp = int(poly_disp)
     init_fwhm = float(init_fwhm)
     coadd = int(coadd)
+    median_box, median_cross = int(median_box), int(median_cross)
     threshold_flux = float(threshold_flux)
     if clip != "":
         clip = clip.split(",")
@@ -1926,6 +1942,21 @@ def traceFWHM_drp(
 
     # load image data
     img = loadImage(in_image)
+    img.setData(data=numpy.nan_to_num(img._data), error=numpy.nan_to_num(img._error))
+
+    # median_box, median_cross = 10, 1
+    if median_box != 0 or median_cross != 0:
+        median_box = max(median_box, 1)
+        median_cross = max(median_cross, 1)
+        img = img.medianImg((median_cross, median_box))
+    
+    img._mask[...] = False
+    
+    # plt.figure(figsize=(20,10))
+    # plt.plot(img.getSlice(1300, axis="y")._error.tolist(), lw=0.6, color="0.7")
+    # plt.plot(img.getSlice(1200, axis="y")._error.tolist(), lw=1)
+    # plt.show()
+    # return
 
     # orient image so that the cross-dispersion is along the first and the dispersion is along the second array axis
     if disp_axis == "X" or disp_axis == "x":
@@ -1947,6 +1978,9 @@ def traceFWHM_drp(
     # load trace
     trace_mask = TraceMask()
     trace_mask.loadFitsData(in_trace)
+
+    orig_trace = copy(trace_mask)
+    trace_mask._mask[...] = False
 
     # create a trace mask for the image
     traceFWHM = TraceMask()
@@ -1990,21 +2024,30 @@ def traceFWHM_drp(
 
         pool.close()
         pool.join()
-        traceFWHM = TraceMask(
-            data=numpy.concatenate(fwhm, axis=1), mask=numpy.concatenate(mask, axis=1)
-        )
+        traceFWHM = TraceMask(data=numpy.concatenate(fwhm, axis=1), mask=numpy.concatenate(mask, axis=1))
     else:
-        result = img.traceFWHM(
-            select_steps, trace_mask, blocks, init_fwhm, threshold_flux, max_pix=dim[0]
-        )
-        traceFWHM = TraceMask(data=result[0], mask=result[1])
-    # traceFWHM = img.traceFWHM()
+        fwhm, mask = img.traceFWHM(select_steps, trace_mask, blocks, init_fwhm, threshold_flux, max_pix=dim[0])
 
+    for ifiber in range(orig_trace._fibers):
+        if orig_trace._mask[ifiber].all():
+            continue
+        good_pix = (~mask[ifiber]) & (~numpy.isnan(fwhm[ifiber])) & (fwhm[ifiber] != 0.0) & ((clip[0]<fwhm[ifiber]) & (fwhm[ifiber]<clip[1]))
+        f_data = interpolate.interp1d(axis[good_pix], fwhm[ifiber, good_pix], kind="linear", bounds_error=False, fill_value="extrapolate")
+        f_mask = interpolate.interp1d(axis[good_pix], mask[ifiber, good_pix], kind="nearest", bounds_error=False, fill_value=0)
+        fwhm[ifiber] = f_data(axis)
+        mask[ifiber] = f_mask(axis).astype(bool)
+
+
+
+    traceFWHM = TraceMask(data=fwhm, mask=mask | orig_trace._mask)
+   
     # smooth the FWHM trace with a polynomial fit along dispersion axis (uncertain pixels are not used)
-    traceFWHM.smoothTracePoly(deg=poly_disp, poly_kind=poly_kind, clip=clip)
+    # traceFWHM.smoothTracePoly(deg=poly_disp, poly_kind=poly_kind, clip=clip)
 
     # write out FWHM trace to FITS file
     traceFWHM.writeFitsData(out_fwhm)
+
+    return fwhm[:, select_steps], mask[:, select_steps]
 
 
 def offsetTrace_drp(
@@ -2318,8 +2361,10 @@ def extract_spectra(
     in_image: str,
     out_rss: str,
     in_trace: str,
+    in_fwhm: str = None,
+    in_acorr: str = None,
     method: str = "optimal",
-    aperture: int = 7,
+    aperture: int = 3,
     fwhm: float = 2.5,
     disp_axis: str = "X",
     replace_error: float = 1.0e10,
@@ -2375,13 +2420,12 @@ def extract_spectra(
     trace_fwhm = TraceMask()
 
     if method == "optimal":
-        # load FWHM trace
-        try:
-            fwhm = float(fwhm)
-            trace_fwhm.setData(data=numpy.ones(trace_mask._data.shape) * fwhm)
-        except ValueError:
-            trace_fwhm.loadFitsData(fwhm, extension_data=0)
-
+        # check if fwhm trace is given and exists
+        if in_fwhm is None or not os.path.isfile(in_fwhm):
+            trace_fwhm.setData(data=numpy.ones(trace_mask._data.shape) * float(fwhm))
+        else:
+            trace_fwhm.loadFitsData(in_fwhm, extension_data=0)
+        
         # set up parallel run
         if parallel == "auto":
             fragments = multiprocessing.cpu_count()
@@ -2426,6 +2470,16 @@ def extract_spectra(
             )
     elif method == "aperture":
         (data, error, mask) = img.extractSpecAperture(trace_mask, aperture)
+        
+        # apply aperture correction given in in_acorr
+        if in_acorr is not None and os.path.isfile(in_acorr):
+            log.info(f"applying aperture correction in {os.path.basename(in_acorr)}")
+            acorr = loadImage(in_acorr)
+            data = data * acorr._data
+            if error is not None:
+                error = error * acorr._data
+        else:
+            log.warning("no aperture correction applied")
 
     if error is not None:
         error[mask] = replace_error
@@ -3242,15 +3296,19 @@ def detrend_frame(
 
     # read in non_linearity correction table
     if in_nonlinearity is not None:
-        nl_table = Table(pyfits.getdata(in_nonlinearity, ext=1))
+        ptc_params = numpy.loadtxt(in_nonlinearity, comments="#",
+                                 dtype=[("C", "|U2",), ("Q", "|U2",),
+                                        ("a1", float,), ("a2", float,),
+                                        ("a3", float,)])
     else:
-        nl_table = None
+        ptc_params = None
 
     # convert to electrons if requested
     if convert_to_e:
         # calculate Poisson errors
-        log.info("calculating Poisson errors per quadrant")
+        log.info("applying gain correction per quadrant")
         for i, quad_sec in enumerate(bcorr_img.getHdrValue("AMP? TRIMSEC").values()):
+            log.info(f"processing quadrant {i+1}")
             # extract quadrant image
             quad = bcorr_img.getSection(quad_sec)
             # extract quadrant gain and rdnoise values
@@ -3258,16 +3316,16 @@ def detrend_frame(
             rdnoise = quad.getHdrValue(f"AMP{i+1} RDNOISE")
 
             # non-linearity correction
-            gain_map = _nonlinearity_correction(nl_table, gain, quad, iquad=i+1)
+            gain_map = _nonlinearity_correction(ptc_params, gain, quad, iquad=i+1)
             # gain-correct quadrant
             quad *= gain_map
+            # propagate new NaNs to the mask
+            quad._mask |= numpy.isnan(quad._data)
 
             quad.computePoissonError(rdnoise)
             bcorr_img.setSection(section=quad_sec, subimg=quad, inplace=True)
             log.info(f"median error in quadrant {i+1}: {numpy.nanmedian(quad._error):.2f} (e-)")
 
-        # convert to electron/s (avoid zero division)
-        bcorr_img /= max(1, exptime)
         bcorr_img.setHdrValue("BUNIT", "electron/s", "physical units of the image")
     else:
         # convert to ADU
@@ -3472,125 +3530,575 @@ def create_master_frame(in_images: List[str], out_image: str, batch_size: int = 
     return org_imgs, master_img
 
 
-@skip_on_missing_input_path(["in_bias", "in_dark", "in_pixelflat"])
-@skip_if_drpqual_flags(["SATURATED"], "in_bias")
-@skip_if_drpqual_flags(["SATURATED"], "in_dark")
-@skip_if_drpqual_flags(["SATURATED"], "in_pixelflat")
-def create_pixelmask(
-    in_bias: str,
-    in_dark: str,
-    out_mask: str,
-    in_pixelflat: str = None,
-    median_box: int = [31, 31],
-    cen_stat: str = "median",
-    low_nsigma: int = 3,
-    high_nsigma: int = 7,
-    column_threshold: float = 0.3,
-):
+# @skip_on_missing_input_path(["in_bias", "in_dark", "in_pixelflat"])
+# @skip_if_drpqual_flags(["SATURATED"], "in_bias")
+# @skip_if_drpqual_flags(["SATURATED"], "in_dark")
+# @skip_if_drpqual_flags(["SATURATED"], "in_pixelflat")
+# def create_pixelmask(
+#     in_bias: str,
+#     in_dark: str,
+#     out_mask: str,
+#     in_pixelflat: str = None,
+#     median_box: int = [31, 31],
+#     cen_stat: str = "median",
+#     low_nsigma: int = 3,
+#     high_nsigma: int = 7,
+#     column_threshold: float = 0.3,
+# ):
+#     """create a pixel mask using a simple sigma clipping
+
+#     Given a bias, dark, and pixelflat image, this function will calculate a
+#     a pixel mask by performing the following steps:
+#         * smooth images with a median filter set by `median_box`
+#         * subtract smoothed images from original images
+#         * calculate a sigma clipping mask using `cen_stat` and `low_/high_nsigma`
+#         * mask whole column if fraction of masked pixels is above `column_threshold`
+#         * combine all masks into a single mask
+
+#     By using a low threshold we should be able to pick up weak bad columns, while the
+#     high threshold should be able to pick up hot pixels.
+
+#     Parameters
+#     ----------
+#     in_image : str
+#         input image from which the pixel mask will be created
+#     out_image : str
+#         output image where the resulting pixel mask will be stored
+#     cen_stat : str, optional
+#         central statistic to use when sigma-clipping, by default "median"
+#     nstd : int, optional
+#         number of sigmas above which a pixel will be masked, by default 3
+#     """
+#     # verify of pixelflat exists, ignore if not
+#     if in_pixelflat is not None and not os.path.isfile(in_pixelflat):
+#         log.warning(f"pixel flat at '{in_pixelflat}' not found, ignoring")
+#         in_pixelflat = None
+
+#     imgs, med_imgs, masks = [], [], []
+#     for in_image in filter(lambda i: i is not None, [in_bias, in_dark, in_pixelflat]):
+#         img = loadImage(in_image)
+
+#         log.info(f"creating pixel mask using '{os.path.basename(in_image)}'")
+
+#         # define pixelmask image
+#         mask = Image(data=numpy.ones_like(img._data), mask=numpy.zeros_like(img._data, dtype=bool))
+
+#         quad_sections = img.getHdrValue("AMP? TRIMSEC").values()
+#         for sec in quad_sections:
+#             log.info(f"processing quadrant = {sec}")
+#             quad = img.getSection(sec)
+#             msk_quad = mask.getSection(sec)
+
+#             # create a smoothed image using a median rolling box
+#             log.info(f"smoothing image with median box {median_box = }")
+#             med_quad = quad.medianImg(size=median_box)
+#             # subtract that smoothed image from the master dark
+#             quad = quad - med_quad
+
+#             # calculate central value
+#             # log.info(f"calculating central value using {cen_stat = }")
+#             if cen_stat == "mean":
+#                 cen = bn.nanmean(quad._data)
+#             elif cen_stat == "median":
+#                 cen = bn.nanmedian(quad._data)
+#             log.info(f"central value = {cen = }")
+
+#             # calculate standard deviation
+#             # log.info("calculating standard deviation using biweight_scale")
+#             std = biweight_scale(quad._data, M=cen, ignore_nan=True)
+#             log.info(f"standard deviation = {std}")
+
+#             # create pixel masks for low and high nsigmas
+#             # log.info(f"creating pixel mask for {low_nsigma = } sigma")
+#             badcol_mask = (quad._data < cen - low_nsigma * std)
+#             badcol_mask |= (quad._data > cen + low_nsigma * std)
+#             # log.info(f"creating pixel mask for {high_nsigma = } sigma")
+#             if img._header["IMAGETYP"] != "bias":
+#                 hotpix_mask = (quad._data < cen - high_nsigma * std)
+#                 hotpix_mask |= (quad._data > cen + high_nsigma * std)
+#             else:
+#                 hotpix_mask = numpy.zeros_like(quad._data, dtype=bool)
+
+#             # mask whole columns if fraction of masked pixels is above threshold
+#             bad_columns = numpy.sum(badcol_mask, axis=0) > column_threshold * quad._dim[0]
+#             log.info(f"masking {bad_columns.sum()} bad columns")
+#             # reset mask to clean good pixels
+#             badcol_mask[...] = False
+#             # mask only bad columns
+#             badcol_mask[:, bad_columns] = True
+
+#             # combine bad column and hot pixel masks
+#             msk_quad._mask = badcol_mask | hotpix_mask
+#             log.info(f"masking {msk_quad._mask.sum()} pixels in total")
+
+#             # set section to pixelmask image
+#             mask.setSection(section=sec, subimg=msk_quad, inplace=True)
+
+#         imgs.append(img)
+#         masks.append(mask)
+
+#     # define header for pixel mask
+#     new_header = img._header
+#     new_header["IMAGETYP"] = "pixmask"
+#     new_header["EXPTIME"] = 0
+#     new_header["DARKTIME"] = 0
+#     # define image object to store pixel mask
+#     new_mask = Image(data=mask._data, mask=numpy.any([mask._mask for mask in masks], axis=0), header=new_header)
+#     new_mask.apply_pixelmask()
+#     log.info(f"writing pixel mask to '{os.path.basename(out_mask)}'")
+#     new_mask.writeFitsData(out_mask)
+
+#     return imgs, med_imgs, masks
+
+
+def create_pixelmask(in_short_dark, in_long_dark, out_pixmask, in_flat_a=None, in_flat_b=None,
+                     dc_low=1.0, dc_high=10, dark_low=0.8, dark_high=1.2,
+                     flat_low=0.2, flat_high=1.1, display_plots=False):
     """create a pixel mask using a simple sigma clipping
 
-    Given a bias, dark, and pixelflat image, this function will calculate a
+    Given a long and short dark image, this function will calculate a
     a pixel mask by performing the following steps:
-        * smooth images with a median filter set by `median_box`
-        * subtract smoothed images from original images
-        * calculate a sigma clipping mask using `cen_stat` and `low_/high_nsigma`
-        * mask whole column if fraction of masked pixels is above `column_threshold`
-        * combine all masks into a single mask
+        * calculate dark current
+        * calculate ratio of darks
+        * mask pixels with dark current below `dc_low`
+        * mask pixels with ratio below `dark_low` or above `dark_high`
 
-    By using a low threshold we should be able to pick up weak bad columns, while the
-    high threshold should be able to pick up hot pixels.
+    Parameters
+    ----------
+    in_short_dark : str
+        path to short dark image
+    in_long_dark : str
+        path to long dark image
+    out_pixmask : str
+        path to output pixel mask
+    in_flat_a : str, optional
+        path to flat A image, by default None
+    in_flat_b : str, optional
+        path to flat B image, by default None
+    dc_low : float, optional
+        reliable dark current threshold, by default 1.0
+    dc_high : float, optional
+        high dark current threshold, by default 10
+    dark_low : float, optional
+        lower ratio threshold, by default 0.8
+    dark_high : float, optional
+        upper ratio threshold, by default 1.2
+    flat_low : float, optional
+        lower flat threshold, by default 0.2
+    flat_high : float, optional
+        upper flat threshold, by default 1.1
+    display_plots : bool, optional
+        whether to show plots on display or not, by default False
+
+    Returns
+    -------
+    pixmask : Image
+        pixelmask image
+    ratio_dark : Image
+        ratio of darks image
+    ratio_flat : Image
+        ratio of flats image, None if no flats were given
+    """
+
+    # define dark current unit
+    unit = "electron/s"
+
+    # load short/long dark and convert to dark current
+    log.info(f"loading short dark '{os.path.basename(in_short_dark)}'")
+    short_dark = loadImage(in_short_dark).convertUnit(unit)
+    log.info(f"loading long dark '{os.path.basename(in_long_dark)}'")
+    long_dark = loadImage(in_long_dark).convertUnit(unit)
+
+    if in_flat_a is not None:
+        log.info(f"loading flat A '{os.path.basename(in_flat_a)}'")
+        flat_a = loadImage(in_flat_a)
+    else:
+        flat_a = None
+    if in_flat_b is not None:
+        log.info(f"loading flat B '{os.path.basename(in_flat_b)}'")
+        flat_b = loadImage(in_flat_b)
+    else:
+        flat_b = None
+
+    # define exposure times
+    short_exptime = short_dark._header["EXPTIME"]
+    long_exptime = long_dark._header["EXPTIME"]
+    log.info(f"short exposure time = {short_exptime}s")
+    log.info(f"long exposure time = {long_exptime}s")
+
+    # define ratio of darks
+    ratio_dark = short_dark / long_dark
+    
+    # define quadrant sections
+    sections = short_dark.getHdrValue("AMP? TRIMSEC")
+
+    # define pixelmask image
+    pixmask = Image(data=numpy.zeros_like(short_dark._data), mask=numpy.zeros_like(short_dark._data, dtype="bool"))
+
+    # create histogram figure
+    fig_dis, axs_dis = create_subplots(to_display=display_plots, nrows=2, ncols=2, figsize=(15,10), sharex=True, sharey=True)
+    plt.subplots_adjust(hspace=0.1, wspace=0.1)
+    fig_dis.suptitle(os.path.basename(out_pixmask))
+    # create ratio figure
+    fig_rat, axs_rat = create_subplots(to_display=display_plots, nrows=2, ncols=2, figsize=(15, 10), sharex=True, sharey=True)
+    plt.subplots_adjust(hspace=0.1, wspace=0.1)
+    fig_rat.suptitle(os.path.basename(out_pixmask))
+    
+    log.info(f"creating pixel mask using dark current threshold = {dc_low} {unit}")
+    for iquad, section in enumerate(sections.values()):
+        log.info(f"processing quadrant = {section}")
+        # get sections
+        squad = short_dark.getSection(section)
+        lquad = long_dark.getSection(section)
+        rquad = ratio_dark.getSection(section)
+        mquad = pixmask.getSection(section)
+
+        # define good current mask
+        good_dc = (lquad._data > dc_low)
+        log.info(f"selecting {good_dc.sum()} pixels with dark current > {dc_low} {unit}")
+        # define quadrant pixelmask
+        mask_hotpix = (squad._data > dc_high) | ((dark_low >= rquad._data) | (rquad._data >= dark_high))
+        # set quadrant pixelmask
+        log.info(f"masking {(good_dc & mask_hotpix).sum()} pixels with DC ratio < {dark_low} or > {dark_high}")
+        mquad.setData(mask=good_dc & mask_hotpix)
+        pixmask.setSection(section, mquad, inplace=True)
+
+        # plot count distribution of short / long exposures
+        log.info("plotting count distribution of short / long exposures")
+        axs_dis[iquad].hist(squad._data.flatten(), bins=1000, label=f"{short_exptime}s", color="tab:blue", histtype="stepfilled", alpha=0.5)
+        axs_dis[iquad].hist(lquad._data.flatten(), bins=1000, label=f"{long_exptime}s", color="tab:red", histtype="stepfilled", alpha=0.5)
+        axs_dis[iquad].axvline(dc_low, lw=1, ls="--", color="0.2")
+        axs_dis[iquad].set_title(f"quadrant {iquad+1}", loc="left")
+        axs_dis[iquad].set_xscale("log")
+        axs_dis[iquad].set_yscale("log")
+        axs_dis[iquad].grid(color="0.9", ls="--", lw=0.5)
+        # plot ratios and hot/cold pixel rejection
+        log.info("plotting ratio of short / long exposures")
+        axs_rat[iquad].axhspan(dark_low, dark_high, color="0.7", alpha=0.3)
+        axs_rat[iquad].plot(squad._data[good_dc].flatten(), rquad._data[good_dc].flatten(), 'o', color="0.2", label='good DC')
+        axs_rat[iquad].plot(squad._data[good_dc&mask_hotpix].flatten(), rquad._data[good_dc&mask_hotpix].flatten(), '.', color="tab:red", label='bad pixels')
+        axs_rat[iquad].axhline(1, lw=1, ls="--", color="0.2", label="1:1 relationship")
+        axs_rat[iquad].set_title(f"quadrant {iquad+1}", loc="left")
+        axs_rat[iquad].set_yscale("log")
+        axs_rat[iquad].grid(color="0.9", ls="--", lw=0.5)
+    axs_dis[0].legend(loc="upper right")
+    fig_dis.supxlabel(f'dark current ({unit})')
+    fig_dis.supylabel('number of pixels')
+    axs_rat[0].legend(loc="lower right")
+    fig_rat.supxlabel(f"dark current ({unit}), {short_exptime}s exposure")
+    fig_rat.supylabel("ratio, short / long exposure")
+    save_fig(fig_dis, product_path=out_pixmask, to_display=display_plots, figure_path="qa", label="dc_hist")
+    save_fig(fig_rat, product_path=out_pixmask, to_display=display_plots, figure_path="qa", label="dc_ratio")
+
+    # mask pixels using flats ratio if possible
+    ratio_flat = None
+    if flat_a is not None and flat_b is not None:
+        # median normalize flats
+        median_box = 20
+        log.info(f"normalizing flats background with {median_box = }")
+        flat_a = flat_a / flat_a.medianImg(size=median_box)
+        flat_b = flat_b / flat_b.medianImg(size=median_box)
+
+        med_a, med_b = bn.nanmedian(flat_a._data), bn.nanmedian(flat_b._data)
+        log.info(f"normalizing flats by median: {med_a = :.2f}, {med_b = :.2f}")
+        flat_a = flat_a / med_a
+        flat_b = flat_b / med_b
+
+        # calculate ratio of flats
+        ratio_flat = flat_a / flat_b
+        ratio_med = bn.nanmedian(ratio_flat._data)
+        ratio_min = bn.nanmin(ratio_flat._data)
+        ratio_max = bn.nanmax(ratio_flat._data)
+        log.info(f"calculating ratio of flats: {ratio_med = :.2f} [{ratio_min = :.2f}, {ratio_max = :.2f}]")
+
+        # plot flats histograms
+        log.info("plotting flats histograms")
+        fig, ax = create_subplots(to_display=display_plots, figsize=(10,5))
+        fig.suptitle(os.path.basename(out_pixmask))
+        ax.axvspan(flat_low, flat_high, color="0.7", alpha=0.3)
+        ax.hist(flat_a._data.flatten(), bins=1000, color="tab:blue", alpha=0.5, label=f"flat A ({os.path.basename(in_flat_a)})")
+        ax.hist(flat_b._data.flatten(), bins=1000, color="tab:red", alpha=0.5, label=f"flat B ({os.path.basename(in_flat_b)})")
+        ax.axvline(ratio_med, lw=1, ls="--", color="0.2")
+        ax.set_xscale("log")
+        ax.set_yscale("log")
+        ax.grid(color="0.9", ls="--", lw=0.5)
+        ax.legend(loc="upper right")
+        ax.set_xlabel("flat")
+        ax.set_ylabel("number of pixels")
+        save_fig(fig, product_path=out_pixmask, to_display=display_plots, figure_path="qa", label="flat_hist")
+
+        # create pixel mask using flat ratio
+        flat_mask = (ratio_flat._data < flat_low) | (ratio_flat._data > flat_high)
+        log.info(f"masking {flat_mask.sum()} pixels with flats ratio < {flat_low} or > {flat_high}")
+
+        # update pixel mask
+        pixmask.setData(mask=(pixmask._mask | flat_mask), inplace=True)
+
+    # set masked pixels to NaN
+    log.info(f"masked {pixmask._mask.sum()} pixels in total ({pixmask._mask.sum()/pixmask._mask.size*100:.2f}%)")
+    pixmask.setData(data=numpy.nan, select=pixmask._mask)
+
+    # write output mask
+    log.info(f"writing pixel mask to '{os.path.basename(out_pixmask)}'")
+    pixmask.writeFitsData(out_pixmask)
+    
+    return pixmask, ratio_dark, ratio_flat
+
+
+def trace_fiber_fwhm(in_image, in_centroid_trace, out_fwhm_trace,
+                     median_box=10, median_cross=1, ref_column=2000,
+                     nslices=9, nblocks=18, guess_fwhm=3, flux_threshold=100,
+                     fit_poly=True, display_plots=False):
+    """Trace the centroid and FWHM of fibers in a continuum exposure.
+
+    Given a continuum exposure and a centroid trace, this function will trace
+    the centroid and FWHM of each fiber in the image.
 
     Parameters
     ----------
     in_image : str
-        input image from which the pixel mask will be created
-    out_image : str
-        output image where the resulting pixel mask will be stored
-    cen_stat : str, optional
-        central statistic to use when sigma-clipping, by default "median"
-    nstd : int, optional
-        number of sigmas above which a pixel will be masked, by default 3
+        Path to the continuum exposure.
+    in_centroid_trace : str
+        Path to the centroid trace.
+    out_fwhm_trace : str
+        Path to the output FWHM trace.
+    median_box : int, optional
+        Size of the median box to use for median filtering the continuum exposure.
+    median_cross : int, optional
+        Size of the median cross to use for median filtering the continuum exposure.
+    ref_column : int, optional
+        Reference column to use for tracing the fibers.
+    nslices : int, optional
+        Number of slices to use for tracing the fibers.
+    nblocks : int, optional
+        Number of blocks to use for tracing the fibers.
+    guess_fwhm : int, optional
+        Initial FWHM to use for fitting the fiber profiles.
+    flux_threshold : int, optional
+        Threshold to use for masking bad fibers.
+    fit_poly : bool, optional
+        Whether to fit a polynomial to the traced fibers or to interpolate them.
+    display_plots : bool, optional
+        Whether to display plots.
+
+    Returns
+    -------
+    mod_columns : list
+        List of joint gaussian models fitted to each column.
+    trace_cent : TraceMask
+        Trace of the centroid of each fiber.
+    trace_fwhm : TraceMask
+        Trace of the FWHM of each fiber.
+    trace_cent_fit : TraceMask
+        Trace of the centroid of each fiber after fitting a polynomial.
+    trace_fwhm_fit : TraceMask
+        Trace of the FWHM of each fiber after fitting a polynomial.
     """
-    # verify of pixelflat exists, ignore if not
-    if in_pixelflat is not None and not os.path.isfile(in_pixelflat):
-        log.warning(f"pixel flat at '{in_pixelflat}' not found, ignoring")
-        in_pixelflat = None
 
-    imgs, med_imgs, masks = [], [], []
-    for in_image in filter(lambda i: i is not None, [in_bias, in_dark, in_pixelflat]):
-        img = loadImage(in_image)
+    # load continuum exposure
+    log.info(f"loading continuum exposure '{os.path.basename(in_image)}'")
+    img = loadImage(in_image)
+    img.setData(data=numpy.nan_to_num(img._data), error=numpy.nan_to_num(img._error, nan=numpy.inf))
 
-        log.info(f"creating pixel mask using '{os.path.basename(in_image)}'")
+    # median filter continuum exposure to increase S/N and remove cosmic rays
+    log.info(f"median filtering continuum exposure with {median_box = } and {median_cross = }")
+    if median_box != 0 or median_cross != 0:
+        median_box = max(median_box, 1)
+        median_cross = max(median_cross, 1)
+        img = img.medianImg((median_cross, median_box), propagate_error=True)
+    
+    # set flux threshold if not given
+    if flux_threshold is None:
+        flux_threshold = 0.0
 
-        # define pixelmask image
-        mask = Image(data=numpy.ones_like(img._data), mask=numpy.zeros_like(img._data, dtype=bool))
+    # load centroid trace
+    log.info(f"loading centroid trace '{os.path.basename(in_centroid_trace)}'")
+    centroids = TraceMask()
+    centroids.loadFitsData(in_centroid_trace)
 
-        quad_sections = img.getHdrValue("AMP? TRIMSEC").values()
-        for sec in quad_sections:
-            log.info(f"processing quadrant = {sec}")
-            quad = img.getSection(sec)
-            msk_quad = mask.getSection(sec)
+    # define columns where to run the fwhm tracing
+    step = img._dim[1] // nslices
+    columns = numpy.concatenate((numpy.arange(ref_column, 0, -step), numpy.arange(ref_column+step, img._dim[1], step)))
+    columns.sort()
+    log.info(f"tracing fibers in {len(columns)} columns: {','.join(map(str, columns))}")
 
-            # create a smoothed image using a median rolling box
-            log.info(f"smoothing image with median box {median_box = }")
-            med_quad = quad.medianImg(size=median_box)
-            # subtract that smoothed image from the master dark
-            quad = quad - med_quad
+    # initialize traces
+    log.info("initializing traces")
+    trace_flux = copy(centroids)
+    trace_flux.setData(data=numpy.zeros_like(centroids._data), mask=numpy.ones_like(centroids._data, dtype=bool))
+    trace_cent = copy(centroids)
+    trace_cent.setData(data=numpy.zeros_like(centroids._data), mask=numpy.ones_like(centroids._data, dtype=bool))
+    trace_cent._coeffs = None
+    trace_fwhm = copy(centroids)
+    trace_fwhm.setData(data=numpy.zeros_like(centroids._data), mask=numpy.ones_like(centroids._data, dtype=bool))
+    trace_fwhm._coeffs = None
 
-            # calculate central value
-            # log.info(f"calculating central value using {cen_stat = }")
-            if cen_stat == "mean":
-                cen = bn.nanmean(quad._data)
-            elif cen_stat == "median":
-                cen = bn.nanmedian(quad._data)
-            log.info(f"central value = {cen = }")
+    # iterate over each slice of the image and corresponding centroid locations
+    log.info("tracing fibers")
+    mod_columns, residuals = [], []
+    for i, icolumn in enumerate(columns):
+        log.info(f"tracing column {icolumn} ({i+1}/{len(columns)})")
+        # get slice of data and trace
+        cen_slice, _, msk_slice = centroids.getSlice(icolumn, axis="y")
+        img_slice = img.getSlice(icolumn, axis="y")
+    
+        # define fiber blocks
+        cen_blocks = numpy.split(cen_slice, nblocks)
+        msk_blocks = numpy.split(msk_slice, nblocks)
 
-            # calculate standard deviation
-            # log.info("calculating standard deviation using biweight_scale")
-            std = biweight_scale(quad._data, M=cen, ignore_nan=True)
-            log.info(f"standard deviation = {std}")
+        # fit each block
+        par_blocks = []
+        for j, (cen_block, msk_block) in enumerate(zip(cen_blocks, msk_blocks)):
+            # apply flux threshold
+            cen_idx = cen_block.astype(int)
+            msk_block |= (img_slice._data[cen_idx] < flux_threshold)
 
-            # create pixel masks for low and high nsigmas
-            # log.info(f"creating pixel mask for {low_nsigma = } sigma")
-            badcol_mask = (quad._data < cen - low_nsigma * std)
-            badcol_mask |= (quad._data > cen + low_nsigma * std)
-            # log.info(f"creating pixel mask for {high_nsigma = } sigma")
-            if img._header["IMAGETYP"] != "bias":
-                hotpix_mask = (quad._data < cen - high_nsigma * std)
-                hotpix_mask |= (quad._data > cen + high_nsigma * std)
+            # mask bad fibers
+            cen_block = cen_block[~msk_block]
+            # initialize parameters with the full block size
+            par_block = numpy.ones(3 * msk_block.size) * numpy.nan
+            par_mask = numpy.tile(msk_block, 3)
+
+            # skip block if all fibers are masked
+            if msk_block.sum() > 0.5 * msk_block.size:
+                log.info(f"skipping fiber block {j+1}/{nblocks} (most fibers masked)")
             else:
-                hotpix_mask = numpy.zeros_like(quad._data, dtype=bool)
+                # fit gaussian models to each fiber profile
+                log.info(f"fitting fiber block {j+1}/{nblocks} ({cen_block.size}/{msk_block.size} good fibers)")
+                _, par_block[~par_mask] = img_slice.fitMultiGauss(cen_block, init_fwhm=guess_fwhm)
 
-            # mask whole columns if fraction of masked pixels is above threshold
-            bad_columns = numpy.sum(badcol_mask, axis=0) > column_threshold * quad._dim[0]
-            log.info(f"masking {bad_columns.sum()} bad columns")
-            # reset mask to clean good pixels
-            badcol_mask[...] = False
-            # mask only bad columns
-            badcol_mask[:, bad_columns] = True
+            par_blocks.append(par_block)
 
-            # combine bad column and hot pixel masks
-            msk_quad._mask = badcol_mask | hotpix_mask
-            log.info(f"masking {msk_quad._mask.sum()} pixels in total")
+        # combine all parameters in a single array
+        par_joint = numpy.asarray([numpy.split(par_block, 3) for par_block in par_blocks])
+        par_joint = par_joint.transpose(1, 0, 2).reshape(3, -1)
+        # define joint gaussian model
+        mod_joint = Gaussians(par=par_joint.ravel())
 
-            # set section to pixelmask image
-            mask.setSection(section=sec, subimg=msk_quad, inplace=True)
+        # store joint model
+        mod_columns.append(mod_joint)
+    
+        # get parameters of joint model
+        flux_slice = par_joint[0]
+        cent_slice = par_joint[1]
+        fwhm_slice = par_joint[2] * 2.354
 
-        imgs.append(img)
-        masks.append(mask)
+        # mask fibers with NaN parameters
+        flux_mask = numpy.isnan(flux_slice)
+        cent_mask = numpy.isnan(cent_slice)
+        fwhm_mask = numpy.isnan(fwhm_slice)
 
-    # define header for pixel mask
-    new_header = img._header
-    new_header["IMAGETYP"] = "pixmask"
-    new_header["EXPTIME"] = 0
-    new_header["DARKTIME"] = 0
-    # define image object to store pixel mask
-    new_mask = Image(data=mask._data, mask=numpy.any([mask._mask for mask in masks], axis=0), header=new_header)
-    new_mask.apply_pixelmask()
-    log.info(f"writing pixel mask to '{os.path.basename(out_mask)}'")
-    new_mask.writeFitsData(out_mask)
+        # update traces
+        trace_flux.setSlice(icolumn, axis="y", data=flux_slice, mask=flux_mask)
+        trace_cent.setSlice(icolumn, axis="y", data=cent_slice, mask=cent_mask)
+        trace_fwhm.setSlice(icolumn, axis="y", data=fwhm_slice, mask=fwhm_mask)
 
-    return imgs, med_imgs, masks
+        # compute residuals
+        integral_mod = numpy.trapz(mod_joint(img_slice._pixels), img_slice._pixels) or numpy.nan
+        integral_dat = numpy.trapz(img_slice._data, img_slice._pixels)
+        residuals.append((integral_dat - integral_mod) / integral_dat * 100)
+    
+        # compute fitted model stats
+        chisq_red = bn.nansum((mod_joint(img_slice._pixels) - img_slice._data)**2 / img_slice._error**2) / (img._dim[0] - 1 - 3 * nblocks)
+        min_fwhm, max_fwhm, median_fwhm = bn.nanmin(fwhm_slice), bn.nanmax(fwhm_slice), bn.nanmedian(fwhm_slice)
+        log.info(f"joint model stats: {chisq_red = :.2f}, {min_fwhm = :.2f}, {max_fwhm = :.2f}, {median_fwhm = :.2f}")
+
+    # interpolate or fit polynomial
+    trace_flux_fit, trace_cent_fit, trace_fwhm_fit = copy(trace_flux), copy(trace_cent), copy(trace_fwhm)
+    if fit_poly:
+        log.info("fitting polynomial to traces")
+        trace_flux_fit.smoothTracePoly(deg=4, poly_kind="poly")
+        trace_cent_fit.smoothTracePoly(deg=4, poly_kind="poly")
+        trace_fwhm_fit.smoothTracePoly(deg=4, poly_kind="poly")
+    else:
+        log.info("interpolating traces")
+        pixels = numpy.arange(img._dim[1])
+        for ifiber in trace_cent._good_fibers:
+            good_pix = (~trace_flux._mask[ifiber]) & numpy.isfinite(trace_flux._data[ifiber]) & (trace_flux._data[ifiber] > 0)
+            x, y = pixels[good_pix], trace_flux._data[ifiber, good_pix]
+            f_flux_data = interpolate.interp1d(x, y, kind="linear", bounds_error=False, fill_value=(y[0], y[-1]))
+            good_pix = (~trace_cent._mask[ifiber]) & numpy.isfinite(trace_cent._data[ifiber]) & (trace_cent._data[ifiber] > 0)
+            x, y = pixels[good_pix], trace_cent._data[ifiber, good_pix]
+            f_cent_data = interpolate.interp1d(x, y, kind="linear", bounds_error=False, fill_value=(y[0], y[-1]))
+            good_pix = (~trace_fwhm._mask[ifiber]) & numpy.isfinite(trace_fwhm._data[ifiber]) & (trace_fwhm._data[ifiber] > 0)
+            x, y = pixels[good_pix], trace_fwhm._data[ifiber, good_pix]
+            f_fwhm_data = interpolate.interp1d(x, y, kind="linear", bounds_error=False, fill_value=(y[0], y[-1]))
+
+            trace_flux_fit._data[ifiber] = f_flux_data(pixels)
+            trace_cent_fit._data[ifiber] = f_cent_data(pixels)
+            trace_fwhm_fit._data[ifiber] = f_fwhm_data(pixels)
+    
+    # update trace masks
+    log.info("updating trace pixel masks")
+    trace_flux._mask |= centroids._mask
+    trace_cent._mask |= centroids._mask
+    trace_fwhm._mask |= centroids._mask
+    # reset fitted traces masks & mask only bad fibers
+    trace_flux._mask[...], trace_cent_fit._mask[...], trace_fwhm_fit._mask[...] = True, True, True
+    trace_flux_fit._mask[centroids._good_fibers, :] = False
+    trace_cent_fit._mask[centroids._good_fibers, :] = False
+    trace_fwhm_fit._mask[centroids._good_fibers, :] = False
+    # update trace data according to mask
+    trace_flux._data[trace_flux._mask] = 0.0
+    trace_cent._data[trace_cent._mask] = 0.0
+    trace_fwhm._data[trace_fwhm._mask] = 0.0
+    trace_flux_fit._data[trace_flux_fit._mask] = 0.0
+    trace_cent_fit._data[trace_cent_fit._mask] = 0.0
+    trace_fwhm_fit._data[trace_fwhm_fit._mask] = 0.0
+
+    # interpolate bad fibers
+    bad_fibers = trace_cent_fit._mask.sum(axis=1) == trace_cent_fit._data.shape[1]
+    log.info(f"interpolating {bad_fibers.sum()} / {trace_cent_fit._fibers} masked fibers")
+    x_pixels = numpy.arange(trace_cent_fit._data.shape[1])
+    y_pixels = numpy.arange(trace_cent_fit._fibers)
+    for col in x_pixels:
+        trace_flux_fit._data[bad_fibers, col] = numpy.interp(y_pixels[bad_fibers], y_pixels[~bad_fibers], trace_flux_fit._data[~bad_fibers, col])
+        trace_cent_fit._data[bad_fibers, col] = numpy.interp(y_pixels[bad_fibers], y_pixels[~bad_fibers], trace_cent_fit._data[~bad_fibers, col])
+        trace_fwhm_fit._data[bad_fibers, col] = numpy.interp(y_pixels[bad_fibers], y_pixels[~bad_fibers], trace_fwhm_fit._data[~bad_fibers, col])
+
+    # write traces to disk
+    log.info(f"writing fiber width trace to '{os.path.basename(out_fwhm_trace)}'")
+    trace_fwhm_fit.writeFitsData(out_fwhm_trace)
+
+    # plot results
+    log.info("plotting results")
+    # residuals
+    fig, ax = create_subplots(to_display=display_plots, nrows=1, ncols=1, figsize=(15,10))
+    ax.plot(columns, residuals, "o", color="tab:red", ms=10)
+    ax.axhline(0, color="0.2", ls="--", lw=1)
+    ax.grid(ls="--", color="0.9", lw=0.5, zorder=0)
+    ax.set_xlabel("X (pixel)")
+    ax.set_ylabel("residuals (%)")
+    save_fig(
+        fig,
+        product_path=out_fwhm_trace,
+        to_display=display_plots,
+        figure_path="qa",
+        label="residuals"
+    )
+    # profile models vs data
+    ncols = 2
+    nrows = int(numpy.ceil(nslices / ncols))
+    fig, axs = create_subplots(to_display=display_plots, nrows=nrows, ncols=ncols, sharex=True, figsize=(15*ncols, 5*nrows))
+    fig.subplots_adjust(hspace=0.1, wspace=0.1, top=0.95, bottom=0.05, left=0.1, right=0.95)
+    fig.suptitle("Profile fitting")
+    fig.supylabel("counts (e-/pixel)")
+    fig.supxlabel("Y (pixel)")
+    for i, icolumn in enumerate(columns):
+        img_slice = img.getSlice(icolumn, axis="y")
+        mod_joint = mod_columns[i]
+
+        axs[i].set_title(f"column {icolumn}", loc="left")
+        mod_joint.plot(img_slice._pixels, y=img_slice._data, ax=axs[i])
+    save_fig(
+        fig,
+        product_path=out_fwhm_trace,
+        to_display=display_plots,
+        figure_path="qa",
+        label="fiber_profiles"
+    )
+
+    return mod_columns, trace_flux, trace_cent, trace_fwhm, trace_flux_fit, trace_cent_fit, trace_fwhm_fit
 
 
 # TODO: for fiberflats, calculate an average over an X range (around the center) of the

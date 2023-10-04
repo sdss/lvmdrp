@@ -6,7 +6,7 @@ import bottleneck as bn
 from astropy.io import fits as pyfits
 from numpy import polynomial
 from scipy.linalg import norm
-from scipy import signal, interpolate, ndimage, sparse
+from scipy import signal, interpolate, ndimage, sparse, linalg
 from scipy.ndimage import zoom
 from typing import List, Tuple
 
@@ -1195,7 +1195,8 @@ class Spectrum1D(Header):
                 # propagate errors using MC simulation
                 for i in range(err_sim):
                     error[select_goodpix] = numpy.random.normal(
-                        clean_data[select_goodpix], self._error[select_goodpix]
+                        # NOTE: patching negative errors
+                        clean_data[select_goodpix], numpy.abs(self._error[select_goodpix])
                     ).astype(numpy.float32)
 
                     if method == "spline":
@@ -1805,7 +1806,7 @@ class Spectrum1D(Header):
             pos_block = pos[
                 brackets[i] : brackets[i + 1]
             ]  # cut out the corresponding peak positions
-            median_dist = numpy.median(
+            median_dist = numpy.nanmedian(
                 pos_block[1:] - pos_block[:-1]
             )  # compute median distance between peaks
             flux = (
@@ -1816,10 +1817,10 @@ class Spectrum1D(Header):
             )  # initial guess for the flux
 
             # compute lower and upper bounds of the positions for each block
-            lo = int(numpy.min(pos_block) - median_dist)
+            lo = int(numpy.nanmin(pos_block) - median_dist)
             if lo <= 0:
                 lo = 0
-            hi = int(numpy.max(pos_block) + median_dist)
+            hi = int(numpy.nanmax(pos_block) + median_dist)
             if hi >= self._wave[-1]:
                 hi = self._wave[-1]
 
@@ -1849,13 +1850,11 @@ class Spectrum1D(Header):
                 )  # fit without errors
             fit_par = gaussians_fix_width.getPar()
             if plot == i:
-                print(i, plot)
                 gaussians_fix_width.plot(self._wave[lo:hi], self._data[lo:hi])
 
             fwhm[brackets[i] : brackets[i + 1]] = (
                 fit_par[0] * 2.354
             )  # convert Gaussian sigma to FWHM
-
             # create the bad pixel mask
             if threshold_flux is not None:
                 masked = numpy.logical_or(
@@ -2029,7 +2028,7 @@ class Spectrum1D(Header):
         par = numpy.concatenate([flux_in, cent, sig_in])
         gauss_multi = fit_profile.Gaussians(par)
         gauss_multi.fit(self._wave[select], self._data[select], sigma=error[select])
-        return gauss_multi.getPar()
+        return gauss_multi, gauss_multi.getPar()
 
     def fitParFile(
         self, par, err_sim=0, ftol=1e-8, xtol=1e-8, method="leastsq", parallel="auto"
@@ -2164,10 +2163,10 @@ class Spectrum1D(Header):
         # defining bad pixels for each fiber if needed
         if self._mask is not None:
             bad_pix = numpy.zeros(fibers, dtype="bool")
-            select = numpy.sum(pixels >= self._mask.shape[0], 1)
+            select = bn.nansum(pixels >= self._mask.shape[0], 1)
             nselect = numpy.logical_not(select)
             bad_pix[select] = True
-            bad_pix[nselect] = numpy.sum(self._mask[pixels[nselect, :]], 1) == aperture
+            bad_pix[nselect] = bn.nansum(self._mask[pixels[nselect, :]], 1) == aperture
         else:
             bad_pix = None
         if self._error is None:
@@ -2192,15 +2191,16 @@ class Spectrum1D(Header):
         B = sparse.csr_matrix(
             (A[select], (indices[0][select], indices[1][select])),
             shape=(self._dim, fibers),
-        ).todense()
-        # print(B)
-        out = sparse.linalg.lsqr(
-            B, self._data / self._error, atol=1e-7, btol=1e-7, conlim=1e13
         )
+        # print(B)
+        out = sparse.linalg.lsmr(
+            B, self._data / self._error, atol=1e-4, btol=1e-4
+        )
+        # out = linalg.lstsq(A, self._data / self._error, lapack_driver='gelsy', check_finite=False)
         # print(out)
 
-        error = numpy.sqrt(1 / numpy.sum((A**2), 0))
-        if bad_pix is not None and numpy.sum(bad_pix) > 0:
+        error = numpy.sqrt(1 / bn.nansum((A**2), 0))
+        if bad_pix is not None and bn.nansum(bad_pix) > 0:
             error[bad_pix] = replace_error
         # if plot:
         #     plt.figure(figsize=(15, 10))
