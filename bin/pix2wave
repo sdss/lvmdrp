@@ -152,7 +152,9 @@ class SolveWavelength:
         # extract relevant metadata
         self.lamps = [lamp.lower() for lamp in ARC_LAMPS if spectra._header.get(lamp, "OFF") == "ON"]
         self.camera = spectra._header["CCD"]
-        self.wave_range = SPEC_CHANNELS[self.camera[0]]
+        self.wave_range = list(SPEC_CHANNELS[self.camera[0]])
+        self.wave_range[0] -= 100
+        self.wave_range[1] += 100
         # apply pixel mask
         mask = spectra._mask | np.isnan(spectra._data) | np.isnan(spectra._error)
         mask |= (spectra._data < 0) | (spectra._error < 0)
@@ -229,10 +231,9 @@ class SolveWavelength:
 
         # fix table with cross-matching
         if self.table_exist and self.correct_lines:
-            is_good = self.pixmap[:, -1].astype(bool)
-            pix_spec = spectrum1d._spec_from_lines(self.pixmap[is_good, 0], sigma=2, wavelength=self.xdata)
+            pix_spec = spectrum1d._spec_from_lines(self.pixmap[:, 0], sigma=2, wavelength=self.xdata)
 
-            log.info(f"running cross matching on {is_good.sum()} good lines")
+            log.info(f"running cross matching on all {len(self.pixmap)} identified lines")
             cc, self.bhat, self.mhat = spectrum1d._cross_match(ref_spec=pix_spec, obs_spec=self.ydata, stretch_factors=np.linspace(0.8,1.2,10000), shift_range=[-50,50])
             log.info(f"max CC = {cc:.2f} for strech = {self.mhat:.2f} and shift = {self.bhat:.2f}")
             self.pixmap[:, 0] = self.mhat * self.pixmap[:, 0] + self.bhat
@@ -258,7 +259,8 @@ class SolveWavelength:
                 rotation=90,
                 linespacing=1,
             )
-        # self.ax_wav.set_xlim(*self.wave_range)
+        self.ax_pix.set_xlim(0, self.xdata.size)
+        self.ax_wav.set_xlim(*self.wave_range)
         self.ax_wav.set_xlabel("wavelength (A)")
         self.ax_wav.set_ylabel("counts (e-/pix)")
 
@@ -423,10 +425,11 @@ class SolveWavelength:
         ax.axhline(ls="--", lw=1, color="0.7")
         wav_residuals = waves_fit - y
         pixel_size = coeffs[1]
-        pix_residuals = wav_residuals
+        pix_residuals = wav_residuals / pixel_size
         ax.plot(x[m], pix_residuals[m], "or", mew=1, ms=10, mfc="none")
         ylim = ax.get_ylim()
         ax.plot(x[~m], pix_residuals[~m], "o", mec="0.5", mew=1, ms=8, mfc="none")
+        ax.set_xlim(0, x.max())
         ax.set_ylim(*ylim)
         log.info(
             f"pixel size = {pixel_size.mean():.2g} +/- {pixel_size.std():.2g} A "
@@ -446,12 +449,12 @@ class SolveWavelength:
                 color=("b" if m[i] else "0.5"),
             )
         ax.set_xlabel("dispersion axis (pixel)")
-        ax.set_ylabel("residuals (angstrom)")
+        ax.set_ylabel("residuals (pixel)")
         fig.show()
         if self.plot:
             plot_name = os.path.basename(self.extracted_fits.replace(".fits", ""))
             log.info(f"saving residuals plot to '{plot_name}' PNG file")
-            fig.savefig(f"{plot_name}.png", bbox_inches="tight")
+            fig.savefig(f"{plot_name}.png")
 
 
 if __name__ == "__main__":
@@ -543,5 +546,4 @@ if __name__ == "__main__":
         vertOn=True,
     )
 
-    plt.tight_layout()
     plt.show()

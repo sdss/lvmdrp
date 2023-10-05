@@ -120,6 +120,7 @@ def quick_reduction(expnum: int, use_fiducial_master: bool = False) -> None:
 
     # define arc lamps configuration per spectrograph channel
     arc_lamps = {"b": "hgne", "r": "neon", "z": "neon"}
+    arc_lamps = {"b": "neon_hgne_argon_xenon", "r": "neon_hgne_argon_xenon", "z": "neon_hgne_argon_xenon"}
 
     # run reduction loop for each science camera exposure
     for sci in sci_metadata.to_dict("records"):
@@ -227,3 +228,10 @@ def quick_reduction(expnum: int, use_fiducial_master: bool = False) -> None:
 
     # combine spectrographs
     drp.combine_spectrographs(sci_tileid, sci_mjd, sci_expnum)
+
+    # TODO: add quick report routine
+
+    # TODO: combine exposures
+    # TODO: by default remove the extra files for the given expnum
+
+    # TODO: flux calibration 

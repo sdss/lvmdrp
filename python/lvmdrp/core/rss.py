@@ -54,7 +54,7 @@ def _read_pixwav_map(lamp: str, camera: str, pixels=None, waves=None):
         )
 
         nlines = use_line.sum()
-        log.info(f"going to use {nlines} lines")
+        log.info(f"{nlines} good lines found")
     elif pixels is not None and waves is not None:
         # get the reference spectrum number and the guess pixel map
         ref_fiber = int(ref_fiber)
@@ -64,7 +64,7 @@ def _read_pixwav_map(lamp: str, camera: str, pixels=None, waves=None):
         use_line = numpy.ones(len(waves), dtype=bool)
         nlines = len(pixels)
         log.info(
-            f"going to use {nlines} lines ({(~use_line).sum()} lines masked)"
+            f"{nlines} good lines found ({(~use_line).sum()} lines masked)"
         )
     else:
         log.warning(f"no pixel-to-wavelength map found for {lamp = } in {camera = }")
