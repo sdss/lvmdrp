@@ -1387,7 +1387,7 @@ def create_fiberflat(in_rsss: List[str], out_rsss: List[str], median_box: int = 
         log.info(f"applying gaussian smoothing with kernel size {gaussian_kernel} angstroms ({gaussian_kernel_pix} pixels)")
         for ifiber in range(rss._fibers):
             spec = fiberflat.getSpec(ifiber)
-            spec.smoothSpec(gaussian_kernel, method="gauss")
+            spec.smoothSpec(gaussian_kernel_pix, method="gauss")
             fiberflat._data[ifiber, :] = spec._data
 
     # polynomial smoothing
