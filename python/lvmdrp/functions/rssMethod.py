@@ -1398,17 +1398,14 @@ def create_fiberflat(in_rsss: List[str], out_rsss: List[str], median_box: int = 
             spec.smoothPoly(deg=poly_deg, poly_kind=poly_kind)
             fiberflat._data[ifiber, :] = spec._data
     
-    ff_data, ff_mask = numpy.ones_like(fiberflat._data), numpy.zeros_like(fiberflat._mask, dtype=bool)
+    # interpolate masked pixels in fiberflat
     for ifiber in range(fiberflat._fibers):
         wave, data, mask = fiberflat._wave[ifiber], fiberflat._data[ifiber], fiberflat._mask[ifiber]
         mask |= ~numpy.isfinite(data)
-        try:
-            ff_data[ifiber] = interpolate.interp1d(wave[~mask], data[~mask], bounds_error=False, assume_sorted=True)(wave)
-        except Exception as e:
-            log.warning(f"at fiber {ifiber}: {e}")
+        if numpy.sum(~mask) == 0:
             continue
-    fiberflat._data = ff_data
-    fiberflat._mask = ff_mask
+        fiberflat._data[ifiber, mask] = interpolate.interp1d(wave[~mask], data[~mask], bounds_error=False, assume_sorted=True)(wave[mask])
+        fiberflat._mask[ifiber, mask] = False
 
     # create diagnostic plots
     log.info("creating diagnostic plots for fiberflat")
