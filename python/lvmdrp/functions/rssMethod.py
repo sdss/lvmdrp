@@ -1340,12 +1340,9 @@ def create_fiberflat(in_rsss: List[str], out_rsss: List[str], median_box: int = 
     if rss._wave is None:
         log.error(f"RSS {os.path.basename(in_rss)} has not been wavelength calibrated")
         return None
-    # elif len(rss._wave.shape) != 1:
-    #     log.error(f"RSS {os.path.basename(in_rss)} has not been resampled to a common wavelength grid")
-    #     return None
     else:
         wdelt = numpy.diff(rss._wave, axis=1).mean()
-
+    
     # copy original data into output fiberflat object
     fiberflat = copy(rss)
     fiberflat._error = None
@@ -1356,30 +1353,27 @@ def create_fiberflat(in_rsss: List[str], out_rsss: List[str], median_box: int = 
         log.info(f"applying median smoothing with box size {[1, median_box]} angstroms ({[1, median_box_pix]} pixels)")
         rss._data = ndimage.filters.median_filter(rss._data, (1, median_box_pix))
     
-    # calculate normalization within a given window or on the full array
-    if wave_range is not None:
-        log.info(f"caculating normalization in wavelength range {wave_range[0]:.2f} - {wave_range[1]:.2f} angstroms")
-        wave_select = (wave_range[0] <= rss._wave) & (wave_range[1] <= rss._wave)
-        norm = numpy.median(rss._data[wave_select, :], axis=0)
-    else:
-        log.info(f"caculating normalization in full wavelength range ({rss._wave.min():.2f} - {rss._wave.max():.2f} angstroms)")
-        norm = bn.nanmedian(rss._data, axis=0)
+    # calculate median spectrum
+    log.info(f"caculating normalization in full wavelength range ({rss._wave.min():.2f} - {rss._wave.max():.2f} angstroms)")
+    norm = bn.nanmedian(rss._data, axis=0)
+    norm_wave = bn.nanmedian(rss._wave, axis=0)
 
+    # limit wavelength range
+    if wave_range is not None:
+        log.info(f"limiting wavelength range to {wave_range[0]:.2f} - {wave_range[1]:.2f} angstroms")
+        wave_select = (wave_range[0] <= norm_wave) & (norm_wave <= wave_range[1])
+        norm[~wave_select] = numpy.nan
+    
     # normalize fibers where norm has valid values
-    select = norm > 0
-    log.info(f"computing fiberflat across {rss._fibers} fibers and {numpy.sum(select)} wavelength bins")
-    normalized = numpy.zeros_like(rss._data)
-    normalized[:, select] = rss._data[:, select] / norm[select][None, :]
+    log.info(f"computing fiberflat across {rss._fibers} fibers and {(~numpy.isnan(norm)).sum()} wavelength bins")
+    normalized = rss._data / norm[None, :]
     fiberflat._data = normalized
     fiberflat._mask |= normalized <= 0
 
     # apply clipping
     if clip_range is not None:
         log.info(f"cliping fiberflat to range {clip_range[0]:.2f} - {clip_range[1]:.2f}")
-        mask = numpy.logical_or(fiberflat._data < clip_range[0], fiberflat._data > clip_range[1])
-        if fiberflat._mask is not None:
-            mask = numpy.logical_or(fiberflat._mask, mask)
-        fiberflat.setData(mask=mask)
+        fiberflat._data = numpy.clip(fiberflat._data, clip_range[0], clip_range[1])
 
     # apply gaussian smoothing
     if gaussian_kernel > 0:
