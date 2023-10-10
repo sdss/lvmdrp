@@ -113,8 +113,10 @@ FRAMES_CALIB_NEEDS = {
     "object": ["pixmask", "bias", "dark", "pixelflat", "fiberflat", "trace", "fwhm", "wave", "lsf"],
 }
 
-# spectrograph channels
-SPEC_CHANNELS = {"b": (3600, 5930), "r": (5660, 7720), "z": (7470, 9800)}
+# spectrograph channels as spec
+# SPEC_CHANNELS = {"b": (3600, 5930), "r": (5660, 7720), "z": (7470, 9800)}
+# spectrograph channels as built, removing regions past the dichroics passbands
+SPEC_CHANNELS = {"b": (3600, 5800), "r": (5750, 7570), "z": (7520, 9800)}
 
 ARC_LAMPS = ["NEON", "HGNE", "ARGON", "XENON"]
 CON_LAMPS = ["LDLS", "QUARTZ"]
