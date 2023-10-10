@@ -119,8 +119,8 @@ def quick_reduction(expnum: int, use_fiducial_master: bool = False) -> None:
     sci_metadata.sort_values("camera", inplace=True)
 
     # define arc lamps configuration per spectrograph channel
-    arc_lamps = {"b": "hgne", "r": "neon", "z": "neon"}
-    # arc_lamps = {"b": "neon_hgne_argon_xenon", "r": "neon_hgne_argon_xenon", "z": "neon_hgne_argon_xenon"}
+    # arc_lamps = {"b": "hgne", "r": "neon", "z": "neon"}
+    arc_lamps = {"b": "neon_hgne_argon_xenon", "r": "neon_hgne_argon_xenon", "z": "neon_hgne_argon_xenon"}
 
     # run reduction loop for each science camera exposure
     for sci in sci_metadata.to_dict("records"):
@@ -185,7 +185,7 @@ def quick_reduction(expnum: int, use_fiducial_master: bool = False) -> None:
                                   in_slitmap=Table(drp.fibermap.data), reject_cr=False)
         
         # # extract 1d spectra
-        image_tasks.extract_spectra(in_image=dsci_path, out_rss=xsci_path, in_trace=mtrace_path, in_fwhm=mwidth_path, method="optimal", parallel=2)
+        image_tasks.extract_spectra(in_image=dsci_path, out_rss=xsci_path, in_trace=mtrace_path, in_fwhm=mwidth_path, method="optimal", parallel=10)
 
         # wavelength calibrate
         rss_tasks.create_pixel_table(in_rss=xsci_path, out_rss=wsci_path, arc_wave=mwave_path, arc_fwhm=mlsf_path)
