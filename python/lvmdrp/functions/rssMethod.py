@@ -1130,6 +1130,7 @@ def resample_wavelength(in_rss: str, out_rss: str, method: str = "spline",
         width_pix[:, :-1] = numpy.fabs(rss._wave[:, 1:] - rss._wave[:, :-1])
         width_pix[:, -1] = width_pix[:, -2]
         rss._data = rss._data / width_pix
+        rss._header["BUNIT"] = rss._header["BUNIT"] + "/angstrom"
         if rss._error is not None:
             rss._error = rss._error / width_pix
     if rss._wave is not None and len(rss._wave.shape) == 2:
@@ -1339,6 +1340,7 @@ def create_fiberflat(in_rsss: List[str], out_rsss: List[str], median_box: int = 
 
     # extract useful metadata
     channel = headers[0]["CCD"][0]
+    unit = headers[0]["BUNIT"]
 
     # wavelength calibration check
     if rss._wave is None:
@@ -1424,13 +1426,13 @@ def create_fiberflat(in_rsss: List[str], out_rsss: List[str], median_box: int = 
     # add labels and titles and set axis limits
     ymax = norm.mean() + bn.nanstd(rss._data) * 3
     axs[0].set_ylim(0, ymax)
-    axs[0].set_ylabel("counts (e-/s)")
+    axs[0].set_ylabel(f"counts ({unit})")
     axs[0].set_title("median spectrum", loc="left")
     axs[1].set_ylim(0, 3.0)
     axs[1].set_ylabel("relative transmission")
     axs[1].set_title("fiberflat", loc="left")
     axs[2].set_ylim(0, ymax)
-    axs[2].set_ylabel("corr. counts (e-/s)")
+    axs[2].set_ylabel(f"corr. counts ({unit})")
     axs[2].set_title("corrected fiberflat", loc="left")
     axs[2].set_xlabel("wavelength (angstroms)")
     fig.suptitle(f"fiberflat creation for {channel = }", fontsize=16)

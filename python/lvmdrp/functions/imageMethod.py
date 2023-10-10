@@ -3365,7 +3365,7 @@ def detrend_frame(
             bcorr_img.setSection(section=quad_sec, subimg=quad, inplace=True)
             log.info(f"median error in quadrant {i+1}: {numpy.nanmedian(quad._error):.2f} (e-)")
 
-        bcorr_img.setHdrValue("BUNIT", "electron/s", "physical units of the image")
+        bcorr_img.setHdrValue("BUNIT", "electron", "physical units of the image")
     else:
         # convert to ADU
         log.info("leaving original ADU units")
