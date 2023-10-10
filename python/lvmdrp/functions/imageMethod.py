@@ -2440,6 +2440,11 @@ def extract_spectra(
     user:> lvmdrp image extractSpec IMAGE.fits TRACE.fits RSS.fits optimal fwhm=FWHM.fits
     """
 
+    if method == 'optimal':
+        log.info(f"extracting fiber spectra using fiber profile fitting from {os.path.basename(in_image)}")
+    else:
+        log.info(f"extraction using aperture of {aperture} pixels")
+
     img = loadImage(in_image)
 
     # orient image so that the cross-dispersion is along the first and the dispersion is along the second array axis
@@ -2552,6 +2557,7 @@ def extract_spectra(
     # propagate slitmap
     rss.setSlitmap(img.getSlitmap())
     # save extracted RSS
+    log.info(f"writing extracted spectra to {os.path.basename(out_rss)}")
     rss.writeFitsData(out_rss)
 
 
