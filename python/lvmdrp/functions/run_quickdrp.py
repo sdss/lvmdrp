@@ -27,36 +27,44 @@ ORIG_MASTER_DIR = os.getenv("LVM_MASTER_DIR")
 
 
 def illumination_correction(in_fiberflat=None):
-
     if in_fiberflat is None:
         # NOTE: this was done using exposure 3900
         factors = {('SkyW', 'b1'): 0.8854398,
                     ('SkyE', 'b1'): 1.0811657,
                     ('Sci', 'b1'): 1.0333946,
+                    ('Spec', 'b1'): 1.3,
                     ('SkyW', 'r1'): 0.9435192,
                     ('SkyE', 'r1'): 1.0190876,
                     ('Sci', 'r1'): 1.0373933,
+                    ('Spec', 'r1'): 1.3,
                     ('SkyW', 'z1'): 0.9378496,
                     ('SkyE', 'z1'): 1.0072966,
                     ('Sci', 'z1'): 1.0548539,
+                    ('Spec', 'z1'): 1.3,
                     ('SkyW', 'b2'): 0.9148656,
                     ('SkyE', 'b2'): 1.0618604,
                     ('Sci', 'b2'): 1.023274,
+                    ('Spec', 'b2'): 1.3,
                     ('SkyW', 'r2'): 0.9465178,
                     ('SkyE', 'r2'): 1.0136424,
                     ('Sci', 'r2'): 1.0398397,
+                    ('Spec', 'r2'): 1.3,
                     ('SkyW', 'z2'): 0.93933785,
                     ('SkyE', 'z2'): 1.0083715,
                     ('Sci', 'z2'): 1.0522904,
+                    ('Spec', 'z2'): 1.3,
                     ('SkyW', 'b3'): 0.88334155,
                     ('SkyE', 'b3'): 1.0627162,
                     ('Sci', 'b3'): 1.0539422,
+                    ('Spec', 'b3'): 1.3,
                     ('SkyW', 'r3'): 0.9305622,
                     ('SkyE', 'r3'): 1.013976,
                     ('Sci', 'r3'): 1.0554619,
+                    ('Spec', 'r3'): 1.3,
                     ('SkyW', 'z3'): 0.9152639,
                     ('SkyE', 'z3'): 1.0191175,
-                    ('Sci', 'z3'): 1.0656188}
+                    ('Sci', 'z3'): 1.0656188,
+                    ('Spec', 'z3'): 1.3}
 
         return factors
     
