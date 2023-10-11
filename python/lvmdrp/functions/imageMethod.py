@@ -4245,7 +4245,9 @@ def trace_fibers(
         log.info(f"fitting FWHM trace with {deg_fwhm}-deg polynomial")
         trace_fwhm.smoothTracePoly(deg_fwhm, poly_kind="poly")
         # set bad fibers in trace mask
+        trace_amp._mask[bad_fibers] = True
         trace_cent._mask[bad_fibers] = True
+        trace_fwhm._mask[bad_fibers] = True
 
         # linearly interpolate coefficients at masked fibers
         if interpolate_missing:
@@ -4259,6 +4261,10 @@ def trace_fibers(
         trace_amp.interpolate_data(axis="X")
         trace_cent.interpolate_data(axis="X")
         trace_fwhm.interpolate_data(axis="X")
+        # set bad fibers in trace mask
+        trace_amp._mask[bad_fibers] = True
+        trace_cent._mask[bad_fibers] = True
+        trace_fwhm._mask[bad_fibers] = True
 
         if interpolate_missing:
             log.info("interpolating bad fibers")
