@@ -4028,6 +4028,7 @@ def trace_fibers(
     median_box = tuple(map(lambda x: max(x, 1), median_box))
     if median_box != (1, 1):
         log.info(f"performing median filtering with box {median_box} pixels")
+        img = img.replaceMaskMedian(*median_box)
         img = img.medianImg(median_box)
 
     # coadd images along the dispersion axis to increase the S/N of the peaks
