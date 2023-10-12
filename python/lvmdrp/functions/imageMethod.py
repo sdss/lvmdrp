@@ -3900,11 +3900,12 @@ def trace_fibers(
     ncolumns: int | Tuple[int] = 18,
     nblocks: int = 18,
     iblocks: list = [],
+    fwhm_limits: Tuple[float] = (1.0, 3.5),
     fit_poly: bool = False,
     poly_deg: int | Tuple[int] = 6,
     interpolate_missing: bool = True,
     display_plots: bool = True
-):
+) -> Tuple[TraceMask, TraceMask, TraceMask]:
     """Trace fibers in a given image
 
     Given a continuum exposure, this function will trace the fibers
@@ -3969,6 +3970,8 @@ def trace_fibers(
         number of blocks to use for tracing, by default 18
     iblocks : list, optional
         list of blocks to trace, by default []
+    fwhm_limits: tuple, optional
+        limits to use for FWHM fitting, by default (1.0, 3.5)
     fit_poly : bool, optional
         whether to fit a polynomial to the dispersion solution, by default False (interpolate in X axis)
     poly_deg : int or 3-tuple, optional
@@ -4235,6 +4238,12 @@ def trace_fibers(
         log.info(f"joint model amplitudes: {min_amp = :.2f}, {max_amp = :.2f}, {median_amp = :.2f}")
         log.info(f"joint model centroids: {min_cent = :.2f}, {max_cent = :.2f}, {median_cent = :.2f}")
         log.info(f"joint model FWHMs: {min_fwhm = :.2f}, {max_fwhm = :.2f}, {median_fwhm = :.2f}")
+    
+    # drop FWHM trace samples outside limits
+    if fwhm_limits is not None:
+        log.info(f"dropping FWHM trace samples outside {fwhm_limits[0]} - {fwhm_limits[1]} pixels")
+        trace_fwhm._data[trace_fwhm._data < fwhm_limits[0]] = 0.0
+        trace_fwhm._data[trace_fwhm._data > fwhm_limits[1]] = 0.0
 
     # smooth all trace by a polynomial
     if fit_poly:
