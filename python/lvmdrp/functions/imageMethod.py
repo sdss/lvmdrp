@@ -4019,6 +4019,7 @@ def trace_fibers(
 
     # extract usefull metadata from the image
     channel = img._header["CCD"][0]
+    unit = img._header["BUNIT"]
 
     # read slitmap extension
     slitmap = img.getSlitmap()
@@ -4183,10 +4184,16 @@ def trace_fibers(
         cent_slice = par_joint[1]
         fwhm_slice = par_joint[2] * 2.354
 
-        # mask fibers with NaN parameters
-        amp_mask = numpy.isnan(amp_slice) | (amp_slice <= counts_threshold)
-        cent_mask = numpy.isnan(cent_slice) | (cent_slice <= 0)
-        fwhm_mask = numpy.isnan(fwhm_slice) | (fwhm_slice <= 0)
+        # mask fibers with invalid values
+        amp_off = (amp_slice <= counts_threshold)
+        log.info(f"masking {amp_off.sum()} samples with amplitude < {counts_threshold} {unit}")
+        cent_off = numpy.abs(1 - cent_slice / numpy.concatenate(cen_blocks)) > 0.01
+        log.info(f"masking {cent_off.sum()} samples with centroids refined by > 1 %")
+        fwhm_off = (fwhm_slice < fwhm_limits[0]) | (fwhm_slice > fwhm_limits[1])
+        log.info(f"masking {fwhm_off.sum()} samples with FWHM outside {fwhm_limits} pixels")
+        amp_mask = numpy.isnan(amp_slice) | amp_off | cent_off | fwhm_off
+        cent_mask = numpy.isnan(cent_slice) | amp_off | cent_off | fwhm_off
+        fwhm_mask = numpy.isnan(fwhm_slice) | amp_off | cent_off | fwhm_off
 
         if amp_slice.size != trace_amp._data.shape[0]:
             dummy_amp = numpy.split(numpy.zeros(trace_amp._data.shape[0]), LVM_NBLOCKS)
@@ -4240,12 +4247,6 @@ def trace_fibers(
         log.info(f"joint model centroids: {min_cent = :.2f}, {max_cent = :.2f}, {median_cent = :.2f}")
         log.info(f"joint model FWHMs: {min_fwhm = :.2f}, {max_fwhm = :.2f}, {median_fwhm = :.2f}")
     
-    # drop FWHM trace samples outside limits
-    if fwhm_limits is not None:
-        log.info(f"dropping FWHM trace samples outside {fwhm_limits[0]} - {fwhm_limits[1]} pixels")
-        trace_fwhm._data[trace_fwhm._data < fwhm_limits[0]] = 0.0
-        trace_fwhm._data[trace_fwhm._data > fwhm_limits[1]] = 0.0
-
     # smooth all trace by a polynomial
     if fit_poly:
         log.info(f"fitting peak trace with {deg_amp}-deg polynomial")
