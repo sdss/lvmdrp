@@ -102,7 +102,7 @@ def get_master_mjd(sci_mjd):
 @cloup.command(short_help='Run the Quick DRP', show_constraints=True)
 @click.option('-e', '--expnum', type=int, help='an exposure number to reduce')
 @click.option('-f', '--use-fiducial-master', is_flag=True, default=False, help='use fiducial master calibration frames')
-@click.option('--sky-master', type=click.Choice(['combine', 'east', 'west', "e", "w", "skye", "skyw"]), default='combine', help='type of sky master')
+@click.option('--master-sky', type=click.Choice(['combine', 'east', 'west', "e", "w", "skye", "skyw"]), default='combine', help='type of master sky to use')
 def quick_reduction(expnum: int, use_fiducial_master: bool, master_sky: str) -> None:
     """ Run the Quick DRP for a given exposure number.
     """
