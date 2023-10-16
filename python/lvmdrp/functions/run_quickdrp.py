@@ -101,8 +101,9 @@ def get_master_mjd(sci_mjd):
 
 @cloup.command(short_help='Run the Quick DRP', show_constraints=True)
 @click.option('-e', '--expnum', type=int, help='an exposure number to reduce')
-@click.option('-f', '--use-fiducial-master', is_flag=True, help='use fiducial master calibration frames')
-def quick_reduction(expnum: int, use_fiducial_master: bool = False) -> None:
+@click.option('-f', '--use-fiducial-master', is_flag=True, default=False, help='use fiducial master calibration frames')
+@click.option('--sky-master', type=click.Choice(['combine', 'east', 'west', "e", "w", "skye", "skyw"]), default='combine', help='type of sky master')
+def quick_reduction(expnum: int, use_fiducial_master: bool, master_sky: str) -> None:
     """ Run the Quick DRP for a given exposure number.
     """
     # get target frames metadata
@@ -219,7 +220,7 @@ def quick_reduction(expnum: int, use_fiducial_master: bool = False) -> None:
         sky_tasks.interpolate_sky(in_rss=fsci_path, out_sky=fskyw_path, which="w")
 
         # quick sky subtraction
-        sky_tasks.quick_sky_subtraction(in_rss=fsci_path, out_rss=ssci_path, in_skye=fskye_path, in_skyw=fskyw_path)
+        sky_tasks.quick_sky_subtraction(in_rss=fsci_path, out_rss=ssci_path, in_skye=fskye_path, in_skyw=fskyw_path, master_sky=master_sky)
 
         # resample wavelength into uniform grid along fiber IDs
         iwave, fwave = SPEC_CHANNELS[sci_camera[0]]

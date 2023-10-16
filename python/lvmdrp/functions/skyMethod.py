@@ -1569,7 +1569,7 @@ def interpolate_sky(in_rss: str, out_sky: str, out_rss: str = None, which: str =
     return f_data, f_error, sky_rss, swave, ssky, svars, smask
 
 
-def quick_sky_subtraction(in_rss: str, out_rss, in_skye: str, in_skyw: str) -> RSS:
+def quick_sky_subtraction(in_rss: str, out_rss, in_skye: str, in_skyw: str, master_sky: str = "combine") -> RSS:
     """Quick sky subtraction using the sky fibers from both telescopes
 
     Parameters
@@ -1582,6 +1582,8 @@ def quick_sky_subtraction(in_rss: str, out_rss, in_skye: str, in_skyw: str) -> R
         input SkyE RSS file
     in_skyw : str
         input SkyW RSS file
+    master_sky : str, optional
+        which sky telescope to use as master, by default "combine"
 
     Returns
     -------
@@ -1615,14 +1617,25 @@ def quick_sky_subtraction(in_rss: str, out_rss, in_skye: str, in_skyw: str) -> R
         f"(SKYERA, SKYEDEC: {ra_e, dec_e}; SKYWRA, SKYWDEC: {ra_w, dec_w}) "
         f"in science telescope pointing (SCIRA, SCIDEC: {ra_s, dec_s})")
 
-    ad = ang_distance(ra_e, dec_e, ra_s, dec_s)
-    w_e = 1 / (ad if ad>0 else 1)
-    ad = ang_distance(ra_w, dec_w, ra_s, dec_s)
-    w_w = 1 / (ad if ad>0 else 1)
-    w_norm = w_e + w_w
-    w_e, w_w = w_e / w_norm, w_w / w_norm
+    master_sky = master_sky.lower()
+    if master_sky == "combine":
+        log.info("using master sky: weighted average of both telescopes")
+        ad = ang_distance(ra_e, dec_e, ra_s, dec_s)
+        w_e = 1 / (ad if ad>0 else 1)
+        ad = ang_distance(ra_w, dec_w, ra_s, dec_s)
+        w_w = 1 / (ad if ad>0 else 1)
+        w_norm = w_e + w_w
+        w_e, w_w = w_e / w_norm, w_w / w_norm
 
-    sky = sky_e * w_e + sky_w * w_w
+        sky = sky_e * w_e + sky_w * w_w
+    elif master_sky in {"east", "e", "skye"}:
+        log.info(f"using master sky: SkyE ({os.path.basename(in_skye)})")
+        sky = sky_e
+    elif master_sky in {"west", "w", "skyw"}:
+        log.info(f"using master sky: SkyW ({os.path.basename(in_skyw)})")
+        sky = sky_w
+    else:
+        raise ValueError(f"invalid value for 'master_sky' parameter: '{master_sky}'")
 
     # subtract sky from data
     log.info("subtracting interpolated sky from original data")
