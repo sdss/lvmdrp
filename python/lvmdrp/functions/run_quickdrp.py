@@ -11,6 +11,7 @@ import os
 import click
 import cloup
 import numpy as np
+from typing import Tuple
 
 from astropy.table import Table
 
@@ -103,7 +104,8 @@ def get_master_mjd(sci_mjd):
 @click.option('-e', '--expnum', type=int, help='an exposure number to reduce')
 @click.option('-f', '--use-fiducial-master', is_flag=True, default=False, help='use fiducial master calibration frames')
 @click.option('--master-sky', type=click.Choice(['combine', 'east', 'west', "e", "w", "skye", "skyw"]), default='combine', help='type of master sky to use')
-def quick_reduction(expnum: int, use_fiducial_master: bool, master_sky: str) -> None:
+@click.option('--sky-weights', type=(float, float), default=None, help='weights for the master sky combination')
+def quick_reduction(expnum: int, use_fiducial_master: bool, master_sky: str, sky_weights: Tuple[float, float]) -> None:
     """ Run the Quick DRP for a given exposure number.
     """
     # get target frames metadata
@@ -220,7 +222,7 @@ def quick_reduction(expnum: int, use_fiducial_master: bool, master_sky: str) -> 
         sky_tasks.interpolate_sky(in_rss=fsci_path, out_sky=fskyw_path, which="w")
 
         # quick sky subtraction
-        sky_tasks.quick_sky_subtraction(in_rss=fsci_path, out_rss=ssci_path, in_skye=fskye_path, in_skyw=fskyw_path, master_sky=master_sky)
+        sky_tasks.quick_sky_subtraction(in_rss=fsci_path, out_rss=ssci_path, in_skye=fskye_path, in_skyw=fskyw_path, master_sky=master_sky, sky_weights=sky_weights)
 
         # resample wavelength into uniform grid along fiber IDs
         iwave, fwave = SPEC_CHANNELS[sci_camera[0]]

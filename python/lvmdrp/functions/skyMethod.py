@@ -13,6 +13,7 @@ import subprocess
 from datetime import datetime
 from multiprocessing import Pool, cpu_count
 from copy import deepcopy as copy
+from typing import Tuple
 
 import numpy as np
 import yaml
@@ -1569,7 +1570,7 @@ def interpolate_sky(in_rss: str, out_sky: str, out_rss: str = None, which: str =
     return f_data, f_error, sky_rss, swave, ssky, svars, smask
 
 
-def quick_sky_subtraction(in_rss: str, out_rss, in_skye: str, in_skyw: str, master_sky: str = "combine") -> RSS:
+def quick_sky_subtraction(in_rss: str, out_rss, in_skye: str, in_skyw: str, master_sky: str = "combine", sky_weights: Tuple[float, float] = None) -> RSS:
     """Quick sky subtraction using the sky fibers from both telescopes
 
     Parameters
@@ -1584,6 +1585,8 @@ def quick_sky_subtraction(in_rss: str, out_rss, in_skye: str, in_skyw: str, mast
         input SkyW RSS file
     master_sky : str, optional
         which sky telescope to use as master, by default "combine"
+    sky_weights : Tuple[float, float]
+        weights for each telescope when master_sky = 'combine', by default None
 
     Returns
     -------
@@ -1620,12 +1623,23 @@ def quick_sky_subtraction(in_rss: str, out_rss, in_skye: str, in_skyw: str, mast
     master_sky = master_sky.lower()
     if master_sky == "combine":
         log.info("using master sky: weighted average of both telescopes")
-        ad = ang_distance(ra_e, dec_e, ra_s, dec_s)
-        w_e = 1 / (ad if ad>0 else 1)
-        ad = ang_distance(ra_w, dec_w, ra_s, dec_s)
-        w_w = 1 / (ad if ad>0 else 1)
-        w_norm = w_e + w_w
-        w_e, w_w = w_e / w_norm, w_w / w_norm
+        
+        if sky_weights is None:
+            ad = ang_distance(ra_e, dec_e, ra_s, dec_s)
+            w_e = 1 / (ad if ad>0 else 1)
+            ad = ang_distance(ra_w, dec_w, ra_s, dec_s)
+            w_w = 1 / (ad if ad>0 else 1)
+            w_norm = w_e + w_w
+            w_e, w_w = w_e / w_norm, w_w / w_norm
+            log.info(f"calculated weights SkyE: {w_e:.3f}, SkyW: {w_w:.3f}")
+        elif len(sky_weights) == 2:
+            w_e, w_w = sky_weights
+            w_norm = w_e + w_w
+            if w_norm != 1:
+                w_e, w_w = w_e / w_norm, w_w / w_norm
+            log.info(f"assuming user-provided weights SkyE: {w_e:.3f}, SkyW: {w_w:.3f}")
+        else:
+            raise ValueError(f"invalid value for 'sky_weights' parameter: '{sky_weights}'")
 
         sky = sky_e * w_e + sky_w * w_w
     elif master_sky in {"east", "e", "skye"}:
