@@ -1453,8 +1453,8 @@ def interpolate_sky(in_rss: str, out_sky: str, out_rss: str = None, which: str =
 
     # define interpolation functions
     # NOTE: store a super sampled version of the splines as an extension of the sky RSS
-    f_data = interpolate.make_smoothing_spline(swave[~smask], ssky[~smask], w=weights[~smask], lam=1)
-    f_error = interpolate.make_smoothing_spline(swave[~smask], svars[~smask], w=weights[~smask], lam=1)
+    f_data = interpolate.make_smoothing_spline(swave[~smask], ssky[~smask], w=weights[~smask], lam=1e-6)
+    f_error = interpolate.make_smoothing_spline(swave[~smask], svars[~smask], w=weights[~smask], lam=1e-6)
     f_mask = interpolate.interp1d(swave, smask, kind="nearest", bounds_error=False, fill_value=0)
 
 
@@ -1569,8 +1569,10 @@ def quick_sky_subtraction(in_rss: str, out_rss, in_skye: str, in_skyw: str) -> R
         f"(SKYERA, SKYEDEC: {ra_e, dec_e}; SKYWRA, SKYWDEC: {ra_w, dec_w}) "
         f"in science telescope pointing (SCIRA, SCIDEC: {ra_s, dec_s})")
 
-    w_e = 1 / ang_distance(ra_e, dec_e, ra_s, dec_s)
-    w_w = 1 / ang_distance(ra_w, dec_w, ra_s, dec_s)
+    ad = ang_distance(ra_e, dec_e, ra_s, dec_s)
+    w_e = 1 / (ad if ad>0 else 1)
+    ad = ang_distance(ra_w, dec_w, ra_s, dec_s)
+    w_w = 1 / (ad if ad>0 else 1)
     w_norm = w_e + w_w
     w_e, w_w = w_e / w_norm, w_w / w_norm
 

@@ -1788,41 +1788,41 @@ class Image(Header):
         mask |= bad_pix
         return data, error, mask
 
-    def extractSpecOptimal(self, TraceMask, TraceFWHM, plot_fig=False):
+    def extractSpecOptimal(self, trace_cent, trace_fwhm, plot_fig=False):
         # initialize RSS arrays
-        data = numpy.zeros((TraceMask._fibers, self._dim[1]), dtype=numpy.float32)
+        data = numpy.zeros((trace_cent._fibers, self._dim[1]), dtype=numpy.float32)
         if self._error is not None:
-            error = numpy.zeros((TraceMask._fibers, self._dim[1]), dtype=numpy.float32)
+            error = numpy.zeros((trace_cent._fibers, self._dim[1]), dtype=numpy.float32)
         else:
             error = None
-        mask = numpy.zeros((TraceMask._fibers, self._dim[1]), dtype="bool")
+        mask = numpy.zeros((trace_cent._fibers, self._dim[1]), dtype="bool")
 
         self._data = numpy.nan_to_num(self._data)
         self._error = numpy.nan_to_num(self._error, nan=1e10)
 
         # convert FWHM trace to sigma
-        TraceFWHM = TraceFWHM / 2.354
+        trace_sigma = trace_fwhm / 2.354
 
         for i in range(self._dim[1]):
             # get i-column from image and trace
             slice_img = self.getSlice(i, axis="y")
-            slice_trace = TraceMask.getSlice(i, axis="y")
-            trace = slice_trace[0]
+            slice_cent = trace_cent.getSlice(i, axis="y")
+            cent = slice_cent[0]
 
             # define fiber mask
-            bad_fiber = (slice_trace[2] == 1) | (
-                (slice_trace[0] < 0) | (slice_trace[0] > len(slice_img._data) - 1)
+            bad_fiber = (slice_cent[2] == 1) | (
+                (slice_cent[0] < 0) | (slice_cent[0] > len(slice_img._data) - 1)
             )
             # bad_fiber = numpy.logical_or(
-            #     (slice_trace[2] == 1),
+            #     (slice_cent[2] == 1),
             #     numpy.logical_or(
-            #         slice_trace[0] < 0, slice_trace[0] > len(slice_img._data) - 1
+            #         slice_cent[0] < 0, slice_cent[0] > len(slice_img._data) - 1
             #     ),
             # )
             good_fiber = ~bad_fiber
 
-            # get i-column from FWHM trace
-            fwhm = TraceFWHM.getSlice(i, axis="y")[0]
+            # get i-column from sigma trace
+            sigma = trace_sigma.getSlice(i, axis="y")[0]
 
             # set NaNs to zero in image slice
             select_nan = numpy.isnan(slice_img._data)
@@ -1833,7 +1833,7 @@ class Image(Header):
 
             # measure flux along the given columns
             result = slice_img.obtainGaussFluxPeaks(
-                trace[good_fiber], fwhm[good_fiber], indices, plot=plot_fig
+                cent[good_fiber], sigma[good_fiber], indices, plot=plot_fig
             )
             data[good_fiber, i] = result[0]
             if self._error is not None:

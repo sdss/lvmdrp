@@ -70,6 +70,44 @@ def _linear_model(pars, xdata):
     return pars[0] * xdata + pars[1]
 
 
+def _illumination_correction(fiberflat, apply_correction=True):
+    # define fiberflat spectrograph id
+    specid = int(fiberflat._header["CCD"][1])
+    # load fibermap and select fibers
+    fibermap = Table(fiberflat._slitmap)
+    fibermap = fibermap[fibermap["spectrographid"] == specid]
+
+    # define fiber IDs for each telescope
+    sci_fibers = fibermap["ifulabel"] == f"Sci{specid}"
+    skw_fibers = fibermap["ifulabel"] == f"SkyW{specid}"
+    ske_fibers = fibermap["ifulabel"] == f"SkyE{specid}"
+    std_fibers = fibermap["ifulabel"] == f"Std{specid}"
+
+    # define data and set to NaN bad pixels
+    data = copy(fiberflat._data)
+    data[(fiberflat._mask)|(data <= 0)] = numpy.nan
+
+    # compute median factors
+    sci_factor = numpy.nanmedian(data[sci_fibers, 1000:3000])
+    skw_factor = numpy.nanmedian(data[skw_fibers, 1000:3000])
+    ske_factor = numpy.nanmedian(data[ske_fibers, 1000:3000])
+    std_factor = numpy.nanmedian(data[std_fibers, 1000:3000])
+    norm = numpy.mean([sci_factor, skw_factor, ske_factor, std_factor])
+    sci_factor /= norm
+    skw_factor /= norm
+    ske_factor /= norm
+    std_factor /= norm
+
+    # apply correction if requested
+    if apply_correction:
+        fiberflat[sci_fibers] *= sci_factor
+        fiberflat[skw_fibers] *= skw_factor
+        fiberflat[ske_fibers] *= ske_factor
+        fiberflat[std_fibers] *= std_factor
+
+    return fiberflat, dict(zip(("Sci", "SkyW", "SkyE", "Std"), (sci_factor, skw_factor, ske_factor, std_factor)))
+
+
 def mergeRSS_drp(files_in, file_out, mergeHdr="1"):
     """
     Different RSS are merged into a common file by extending the number of fibers.
@@ -229,58 +267,75 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
     # update lamps status
     lamps = set(ilamps)
 
+    # mask std fibers since they are not regularly illuminated during arc exposures
+    fibermap = arc._slitmap[arc._slitmap["spectrographid"] == 2]
+    select = fibermap["telescope"] == "Spec"
+    arc._mask[select] = True
+    arc._data[select] = 0.0
+    arc._error[select] = 0.0
+
     # replace NaNs
     mask = numpy.isnan(arc._data) | numpy.isnan(arc._error)
-    mask |= (arc._data < 0) | (arc._error < 0)
-    arc._data[mask] = 0
-    arc._error[mask] = 0
+    mask |= (arc._data < 0.0) | (arc._error < 0.0)
+    arc._data[mask] = 0.0
+    arc._error[mask] = 0.0
 
     # read reference lines
-    pixel_list, ref_lines_list, use_line_list = [], [], []
-    for lamp in lamps:
-        log.info(f"loading reference lines for {lamp = } in {camera = }")
-        _, ref_fiber_, pixel, ref_lines, use_line = _read_pixwav_map(lamp, camera)
+    ilamps = [lamp.lower() for lamp in ARC_LAMPS]
+    lamps_label = "_".join(sorted(lamps, key=lambda x: ilamps.index(x)))
+    _, ref_fiber_, pixel, ref_lines, use_line = _read_pixwav_map(lamps_label, camera)
+    # if no reference file for combined lamps exist, read individual files
+    if ref_fiber is None:
+        pixel_list, ref_lines_list, use_line_list = [], [], []
+        for lamp in lamps:
+            log.info(f"loading reference lines for {lamp = } in {camera = }")
+            _, ref_fiber_, pixel, ref_lines, use_line = _read_pixwav_map(lamp, camera)
 
-        # remove masked lines
-        pixel = pixel[use_line]
-        ref_lines = ref_lines[use_line]
-        use_line = use_line[use_line]
+            # remove masked lines
+            pixel = pixel[use_line]
+            ref_lines = ref_lines[use_line]
+            use_line = use_line[use_line]
 
-        pixel_list.append(pixel)
-        ref_lines_list.append(ref_lines)
-        use_line_list.append(use_line)
+            pixel_list.append(pixel)
+            ref_lines_list.append(ref_lines)
+            use_line_list.append(use_line)
 
-    # combine all reference lines into a long array
-    pixel = numpy.concatenate(pixel_list)
-    ref_lines = numpy.concatenate(ref_lines_list)
-    use_line = numpy.concatenate(use_line_list)
+        # combine all reference lines into a long array
+        pixel = numpy.concatenate(pixel_list)
+        ref_lines = numpy.concatenate(ref_lines_list)
+        use_line = numpy.concatenate(use_line_list)
 
     # sort lines by pixel position
     sort = numpy.argsort(pixel)
     pixel = pixel[sort]
     ref_lines = ref_lines[sort]
     use_line = use_line[sort]
-    nlines = len(pixel)
 
     # apply cc correction to lines if needed
     if cc_correction or ref_fiber != ref_fiber_:
-        log.info(f"running cross matching on {pixel.size} good lines")
+        log.info(f"running cross matching on all {pixel.size} identified lines")
         # determine maximum correlation shift
         pix_spec = _spec_from_lines(pixel, sigma=2, wavelength=arc._pixels)
 
         # fix cc_max_shift
-        cc_max_shift = max(cc_max_shift, 50)
+        cc_max_shift = min(cc_max_shift, 50)
         # cross-match spectrum and pixwav map
         cc, bhat, mhat = _cross_match(
             ref_spec=pix_spec,
             obs_spec=arc._data[ref_fiber],
-            stretch_factors=numpy.linspace(0.8,1.2,10000),
-            shift_range=[-cc_max_shift, cc_max_shift]
+            stretch_factors=numpy.linspace(0.9,1.1,10000),
+            shift_range=[-cc_max_shift, cc_max_shift],
         )
         
         log.info(f"max CC = {cc:.2f} for strech = {mhat:.2f} and shift = {bhat:.2f}")
     else:
         mhat, bhat = 1.0, 0.0
+
+    # remove bad lines
+    pixel = pixel[use_line]
+    ref_lines = ref_lines[use_line]
+    use_line = use_line[use_line]
+    nlines = len(pixel)
 
     # correct initial pixel map by shifting
     pixel = mhat * pixel + bhat
@@ -477,7 +532,7 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
     )
     # create plot of wavelength fitting residuals
     fig, ax = create_subplots(to_display=display_plots, figsize=(15, 7))
-    axs = plot_wavesol_residuals(lines_pixels=pixel, lines_waves=ref_lines, model_waves=wave_cls(wave_coeffs[ref_fiber])(pixel), ax=ax, labels=True)
+    axs = plot_wavesol_residuals(lines_pixels=cent_wave[ref_fiber], lines_waves=ref_lines, model_waves=wave_cls(wave_coeffs[ref_fiber])(cent_wave[ref_fiber]), ax=ax, labels=True)
     save_fig(
         fig,
         product_path=out_wave,
@@ -1082,6 +1137,7 @@ def resample_wavelength(in_rss: str, out_rss: str, method: str = "spline",
         width_pix[:, :-1] = numpy.fabs(rss._wave[:, 1:] - rss._wave[:, :-1])
         width_pix[:, -1] = width_pix[:, -2]
         rss._data = rss._data / width_pix
+        rss._header["BUNIT"] = rss._header["BUNIT"] + "/angstrom"
         if rss._error is not None:
             rss._error = rss._error / width_pix
     if rss._wave is not None and len(rss._wave.shape) == 2:
@@ -1229,6 +1285,7 @@ def create_fiberflat(in_rsss: List[str], out_rsss: List[str], median_box: int = 
                      poly_deg: int = 0, poly_kind: str = "poly",
                      clip_range: List[float] = None,
                      wave_range: List[float] = None,
+                     illumination_corr: bool = False,
                      display_plots: bool = False) -> RSS:
     """computes a fiberflat from a wavelength calibrated continuum exposure
     
@@ -1259,6 +1316,8 @@ def create_fiberflat(in_rsss: List[str], out_rsss: List[str], median_box: int = 
         range of valid values for the fiber flat, by default None
     wave_range : List[float], optional
         wavelength range where the median spectrum is computed, by default None
+    illumination_corr : bool, optional
+        whether to apply an illumination correction to the fiberflat, by default False
     display_plots : bool, optional
         whether to display or not the diagnostic plots, by default False
 
@@ -1272,7 +1331,6 @@ def create_fiberflat(in_rsss: List[str], out_rsss: List[str], median_box: int = 
     headers = []
     fibers = []
     j = 1
-    cameras = []
     for in_rss in in_rsss:
         log.info(f"reading continuum exposure from {os.path.basename(in_rss)}")
         rss = loadRSS(in_rss)
@@ -1282,179 +1340,162 @@ def create_fiberflat(in_rsss: List[str], out_rsss: List[str], median_box: int = 
         mask.append(rss._mask)
         fibers.append(numpy.zeros(rss._fibers) + j)
         headers.append(rss._header)
-        cameras.append(rss._header["CCD"])
         j += 1
-    
-    # NOTE: fix this assumption of channels sorted
-    rss_all = RSS(wave=numpy.vstack(wave), data=numpy.vstack(data), error=numpy.vstack(error), mask=numpy.vstack(mask))
+    rss = RSS(wave=numpy.vstack(wave), data=numpy.vstack(data), error=numpy.vstack(error), mask=numpy.vstack(mask))
+    rss._data = numpy.clip(rss._data, 0, None)
     fibers = numpy.vstack(fibers).flatten()
 
+    # extract useful metadata
+    channel = headers[0]["CCD"][0]
+    unit = headers[0]["BUNIT"]
+
     # wavelength calibration check
-    if rss_all._wave is None:
+    if rss._wave is None:
         log.error(f"RSS {os.path.basename(in_rss)} has not been wavelength calibrated")
         return None
-    # elif len(rss_all._wave.shape) != 1:
-    #     log.error(f"RSS {os.path.basename(in_rss)} has not been resampled to a common wavelength grid")
-    #     return None
     else:
-        wdelt = numpy.diff(rss_all._wave, axis=1).mean()
-
+        wdelt = numpy.diff(rss._wave, axis=1).mean()
+    
     # copy original data into output fiberflat object
-    fiberflat_all = copy(rss_all)
-    fiberflat_all._error = None
+    fiberflat = copy(rss)
+    fiberflat._error = None
 
     # apply median smoothing to data
     if median_box > 0:
         median_box_pix = int(median_box / wdelt)
         log.info(f"applying median smoothing with box size {[1, median_box]} angstroms ({[1, median_box_pix]} pixels)")
-        rss_all._data = ndimage.filters.median_filter(rss_all._data, (1, median_box_pix))
+        fiberflat._data = ndimage.filters.median_filter(fiberflat._data, (1, median_box_pix))
     
-    # calculate normalization within a given window or on the full array
-    rss_cameras = rss_all.splitRSS(3, axis=1)
-    median_cams = []
-    for rss_cam in rss_cameras:
-        # NOTE: this won't work for all 9 cameras, implement different wavelength ranges
-        # if wave_range is not None:
-        #     log.info(f"caculating normalization in wavelength range {wave_range[0]:.2f} - {wave_range[1]:.2f} angstroms")
-        #     wave_select = (wave_range[0] <= rss_cam._wave) & (wave_range[1] <= rss_cam._wave)
-        #     norm = numpy.median(rss_cam._data[wave_select, :], axis=0)
-        # else:
-        log.info(f"caculating normalization in full wavelength range ({rss_cam._wave.min():.2f} - {rss_cam._wave.max():.2f} angstroms)")
-        norm = bn.nanmedian(rss_cam._data, axis=0)
-        median_cams.append(norm)
-    
-    # normalize each channel by the overall median spectrum
-    median_cams = numpy.asarray(median_cams)
-    # median_all = [numpy.nanmedian(median_cam) for median_cam in median_cams]
-    # norm_all = numpy.array(median_all) / median_all[1]
-    # print(norm_all)
-    # print(median_cams[:, 1500:2500])
-    # median_cams = median_cams / norm_all[:, None]
-    # print(median_cams[:, 1500:2500])
+    # calculate median spectrum
+    log.info(f"caculating normalization in full wavelength range ({fiberflat._wave.min():.2f} - {fiberflat._wave.max():.2f} angstroms)")
+    norm = bn.nanmedian(fiberflat._data, axis=0)
+    norm_wave = bn.nanmedian(fiberflat._wave, axis=0)
 
+    # clip wavelength range for median spectrum
+    if wave_range is not None:
+        log.info(f"limiting wavelength range to {wave_range[0]:.2f} - {wave_range[1]:.2f} angstroms")
+        wave_select = (wave_range[0] <= norm_wave) & (norm_wave <= wave_range[1])
+        norm[~wave_select] = numpy.nan
+    
     # normalize fibers where norm has valid values
-    rss_channel, fiberflat_channel = rss_all.splitRSS(3, axis=1), fiberflat_all.splitRSS(3, axis=1)
-    for ichannel, (rss, fiberflat) in enumerate(zip(rss_channel, fiberflat_channel)):
-        norm = median_cams[ichannel]
-        select = norm > 0
-        log.info(f"computing fiberflat across {rss._fibers} fibers and {numpy.sum(select)} wavelength bins")
-        normalized = numpy.zeros_like(rss._data)
-        normalized[:, select] = rss._data[:, select] / norm[select][None, :]
-        fiberflat._data = normalized
-        fiberflat._mask |= normalized <= 0
+    log.info(f"computing fiberflat across {fiberflat._fibers} fibers and {(~numpy.isnan(norm)).sum()} wavelength bins")
+    normalized = fiberflat._data / norm[None, :]
+    fiberflat._data = normalized
+    fiberflat._mask |= normalized <= 0
 
-        # apply clipping
-        if clip_range is not None:
-            log.info(f"cliping fiberflat to range {clip_range[0]:.2f} - {clip_range[1]:.2f}")
-            mask = numpy.logical_or(fiberflat._data < clip_range[0], fiberflat._data > clip_range[1])
-            if fiberflat._mask is not None:
-                mask = numpy.logical_or(fiberflat._mask, mask)
-            fiberflat.setData(mask=fiberflat._mask | mask)
+    # apply clipping
+    if clip_range is not None:
+        log.info(f"cliping fiberflat to range {clip_range[0]:.2f} - {clip_range[1]:.2f}")
+        fiberflat._data = numpy.clip(fiberflat._data, clip_range[0], clip_range[1])
 
-        # apply gaussian smoothing
-        if gaussian_kernel > 0:
-            gaussian_kernel_pix = int(gaussian_kernel / wdelt)
-            log.info(f"applying gaussian smoothing with kernel size {gaussian_kernel} angstroms ({gaussian_kernel_pix} pixels)")
-            for ifiber in range(rss._fibers):
-                spec = fiberflat.getSpec(ifiber)
-                spec.smoothSpec(gaussian_kernel, method="gauss")
-                fiberflat._data[ifiber, :] = spec._data
+    # apply gaussian smoothing
+    if gaussian_kernel > 0:
+        gaussian_kernel_pix = int(gaussian_kernel / wdelt)
+        log.info(f"applying gaussian smoothing with kernel size {gaussian_kernel} angstroms ({gaussian_kernel_pix} pixels)")
+        for ifiber in range(rss._fibers):
+            spec = fiberflat.getSpec(ifiber)
+            spec.smoothSpec(gaussian_kernel_pix, method="gauss")
+            fiberflat._data[ifiber, :] = spec._data
 
-        # polynomial smoothing
-        if poly_deg != 0:
-            log.info(f"applying polynomial fitting with degree {poly_deg} and kind '{poly_kind}'")
-            for ifiber in range(fiberflat._fibers):
-                spec = fiberflat.getSpec(ifiber)
-                spec.smoothPoly(deg=poly_deg, poly_kind=poly_kind)
-                fiberflat._data[ifiber, :] = spec._data
-        
-        ff_data, ff_mask = numpy.ones_like(fiberflat._data), numpy.zeros_like(fiberflat._mask, dtype=bool)
+    # polynomial smoothing
+    if poly_deg != 0:
+        log.info(f"applying polynomial fitting with degree {poly_deg} and kind '{poly_kind}'")
         for ifiber in range(fiberflat._fibers):
-            wave, data, mask = fiberflat._wave[ifiber], fiberflat._data[ifiber], fiberflat._mask[ifiber]
-            mask |= ~numpy.isfinite(data)
-            try:
-                ff_data[ifiber] = interpolate.interp1d(wave[~mask], data[~mask], bounds_error=False, assume_sorted=True)(wave)
-            except Exception as e:
-                log.warning(f"at fiber {ifiber}: {e}")
-                continue
-        fiberflat._data = ff_data
-        fiberflat._mask = ff_mask
-
-        # create diagnostic plots
-        log.info("creating diagnostic plots for fiberflat")
-        fig, axs = create_subplots(to_display=display_plots, nrows=3, ncols=1, figsize=(12, 15), sharex=True)
-        # plot original continuum exposure, fiberflat and corrected fiberflat per fiber
-        colors = plt.cm.Spectral(numpy.linspace(0, 1, fiberflat._fibers))
-        for ifiber in range(fiberflat._fibers):
-            # input data
-            axs[0].step(rss._wave[ifiber], rss._data[ifiber], color=colors[ifiber], alpha=0.5, lw=1)
-            # fiberflat
-            axs[1].step(fiberflat._wave[ifiber], fiberflat._data[ifiber], lw=1, color=colors[ifiber])
-            # corrected fiberflat
-            axs[2].step(fiberflat._wave[ifiber], rss._data[ifiber] / fiberflat._data[ifiber], lw=1, color=colors[ifiber])
-        # plot median spectrum
-        axs[0].step(fiberflat._wave[ifiber], norm, color="0.1", lw=2, label="median spectrum")
-        # add labels and titles
-        axs[0].set_ylabel("counts (e-/s)")
-        axs[0].set_title("median spectrum", loc="left")
-        axs[1].set_ylabel("relative transmission")
-        axs[1].set_title("fiberflat", loc="left")
-        axs[2].set_ylabel("corr. counts (e-/s)")
-        axs[2].set_title("corrected fiberflat", loc="left")
-        axs[2].set_xlabel("wavelength (angstroms)")
-        fig.suptitle(f"fiberflat creation from continuum frame '{os.path.basename(in_rss)}'", fontsize=16)
-        # display/save plots
-        save_fig(
-            fig,
-            product_path=out_rsss[0],
-            to_display=display_plots,
-            figure_path="qa",
-            label="fiberflat"
-        )
+            spec = fiberflat.getSpec(ifiber)
+            spec.smoothPoly(deg=poly_deg, poly_kind=poly_kind)
+            fiberflat._data[ifiber, :] = spec._data
     
-        fiberflat_channel[ichannel] = fiberflat
+    # interpolate masked pixels in fiberflat
+    for ifiber in range(fiberflat._fibers):
+        wave, data, mask = fiberflat._wave[ifiber], fiberflat._data[ifiber], fiberflat._mask[ifiber]
+        mask |= ~numpy.isfinite(data)
+        if numpy.sum(~mask) == 0:
+            continue
+        fiberflat._data[ifiber, mask] = interpolate.interp1d(wave[~mask], data[~mask], bounds_error=False, assume_sorted=True)(wave[mask])
+        fiberflat._mask[ifiber, mask] = False
 
-    i = 0
-    for fiberflat in fiberflat_channel:
-        for fiberflat_cam in fiberflat.splitRSS(3, axis=1):
-            log.info(f"writing fiberflat to {os.path.basename(out_rsss[i])}")
-            # spec_mask = (fibers == (i+1))
-            # wave_cam = fiberflat._wave[spec_mask, :]
-            # data_cam = fiberflat._data[spec_mask, :]
-            # mask_cam = fiberflat._mask[spec_mask, :]
-            # fiberflat_cam = RSS(wave=wave_cam, data=data_cam, mask=mask_cam, header=headers[i])
+    # create diagnostic plots
+    log.info("creating diagnostic plots for fiberflat")
+    fig, axs = create_subplots(to_display=display_plots, nrows=3, ncols=1, figsize=(12, 15), sharex=True)
+    # plot original continuum exposure, fiberflat and corrected fiberflat per fiber
+    colors = plt.cm.Spectral(numpy.linspace(0, 1, fiberflat._fibers))
+    rss._data[rss._mask] = numpy.nan
+    for ifiber in range(fiberflat._fibers):
+        # input data
+        axs[0].step(rss._wave[ifiber], rss._data[ifiber], color=colors[ifiber], alpha=0.5, lw=1)
+        # fiberflat
+        axs[1].step(fiberflat._wave[ifiber], fiberflat._data[ifiber], lw=1, color=colors[ifiber])
+        # corrected fiberflat
+        axs[2].step(fiberflat._wave[ifiber], rss._data[ifiber] / fiberflat._data[ifiber], lw=1, color=colors[ifiber])
+    # plot median spectrum
+    axs[0].step(norm_wave, norm, color="0.1", lw=2, label="median spectrum")
+    axs[2].step(norm_wave, norm, color="0.1", lw=2, label="median spectrum")
+    # add labels and titles and set axis limits
+    ymax = norm.mean() + bn.nanstd(rss._data) * 3
+    axs[0].set_ylim(0, ymax)
+    axs[0].set_ylabel(f"counts ({unit})")
+    axs[0].set_title("median spectrum", loc="left")
+    axs[1].set_ylim(0, 3.0)
+    axs[1].set_ylabel("relative transmission")
+    axs[1].set_title("fiberflat", loc="left")
+    axs[2].set_ylim(0, ymax)
+    axs[2].set_ylabel(f"corr. counts ({unit})")
+    axs[2].set_title("corrected fiberflat", loc="left")
+    axs[2].set_xlabel("wavelength (angstroms)")
+    fig.suptitle(f"fiberflat creation for {channel = }", fontsize=16)
+    # display/save plots
+    save_fig(
+        fig,
+        product_path=out_rsss[0],
+        to_display=display_plots,
+        figure_path="qa",
+        label="fiberflat"
+    )
 
-            # perform some statistic about the fiberflat
-            if fiberflat_cam._mask is not None:
-                select = numpy.logical_not(fiberflat_cam._mask)
-            else:
-                select = fiberflat_cam._data == fiberflat_cam._data
-            min = bn.nanmin(fiberflat_cam._data[select])
-            max = bn.nanmax(fiberflat_cam._data[select])
-            mean = bn.nanmean(fiberflat_cam._data[select])
-            median = bn.nanmedian(fiberflat_cam._data[select])
-            std = bn.nanstd(fiberflat_cam._data[select])
-            log.info(f"fiberflat statistics: {min = :.3f}, {max = :.3f}, {mean = :.2f}, {median = :.2f}, {std = :.3f}")
+    for i in range(len(in_rsss)):
+        log.info(f"writing fiberflat to {os.path.basename(out_rsss[i])}")
+        spec_mask = (fibers == (i+1))
+        wave_cam = fiberflat._wave[spec_mask, :]
+        data_cam = fiberflat._data[spec_mask, :]
+        mask_cam = fiberflat._mask[spec_mask, :]
 
-            fiberflat_cam.setHdrValue(
-                "HIERARCH PIPE FLAT MIN", float("%.3f" % (min)), "Mininum fiberflat value"
-            )
-            fiberflat_cam.setHdrValue(
-                "HIERARCH PIPE FLAT MAX", float("%.3f" % (max)), "Maximum fiberflat value"
-            )
-            fiberflat_cam.setHdrValue(
-                "HIERARCH PIPE FLAT AVR", float("%.2f" % (mean)), "Mean fiberflat value"
-            )
-            fiberflat_cam.setHdrValue(
-                "HIERARCH PIPE FLAT MED", float("%.2f" % (median)), "Median fiberflat value"
-            )
-            fiberflat_cam.setHdrValue(
-                "HIERARCH PIPE FLAT STD", float("%.3f" % (std)), "rms of fiberflat values"
-            )
-            fiberflat_cam._header["CUNIT"] = "dimensionless"
-            fiberflat_cam._header["IMAGETYP"] = "fiberflat"
-            fiberflat_cam.writeFitsData(out_rsss[i])
-            i += 1
+        fiberflat_cam = RSS(wave=wave_cam, data=data_cam, mask=mask_cam, header=headers[i])
+
+        # apply illumination correction if requested
+        if illumination_corr:
+            _, factors = _illumination_correction(fiberflat_cam, apply_correction=True)
+            log.info(f"telescope illumination correction factors: {factors}")
+
+        # perform some statistic about the fiberflat
+        if fiberflat_cam._mask is not None:
+            select = numpy.logical_not(fiberflat_cam._mask)
+        else:
+            select = fiberflat_cam._data == fiberflat_cam._data
+        min = bn.nanmin(fiberflat_cam._data[select])
+        max = bn.nanmax(fiberflat_cam._data[select])
+        mean = bn.nanmean(fiberflat_cam._data[select])
+        median = bn.nanmedian(fiberflat_cam._data[select])
+        std = bn.nanstd(fiberflat_cam._data[select])
+        log.info(f"fiberflat statistics: {min = :.3f}, {max = :.3f}, {mean = :.2f}, {median = :.2f}, {std = :.3f}")
+
+        fiberflat_cam.setHdrValue(
+            "HIERARCH PIPE FLAT MIN", float("%.3f" % (min)), "Mininum fiberflat value"
+        )
+        fiberflat_cam.setHdrValue(
+            "HIERARCH PIPE FLAT MAX", float("%.3f" % (max)), "Maximum fiberflat value"
+        )
+        fiberflat_cam.setHdrValue(
+            "HIERARCH PIPE FLAT AVR", float("%.2f" % (mean)), "Mean fiberflat value"
+        )
+        fiberflat_cam.setHdrValue(
+            "HIERARCH PIPE FLAT MED", float("%.2f" % (median)), "Median fiberflat value"
+        )
+        fiberflat_cam.setHdrValue(
+            "HIERARCH PIPE FLAT STD", float("%.3f" % (std)), "rms of fiberflat values"
+        )
+        fiberflat_cam._header["CUNIT"] = "dimensionless"
+        fiberflat_cam._header["IMAGETYP"] = "fiberflat"
+        fiberflat_cam.writeFitsData(out_rsss[i])
 
     return fiberflat
 
