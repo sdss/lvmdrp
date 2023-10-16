@@ -1181,6 +1181,7 @@ def resample_wavelength(in_rss: str, out_rss: str, method: str = "spline",
         header=rss.getHeader(),
         error=error,
         mask=mask,
+        slitmap=rss.getSlitmap()
     )
 
     resamp_rss.writeFitsData(out_rss)
