@@ -1038,10 +1038,10 @@ class FiberRows(Header, PositionTable):
         # interpolate data
         if axis == "Y" or axis == "y" or axis == 0:
             bad_fibers = self._mask.all(axis=1)
-            f_data = interpolate.interp1d(y_pixels[~bad_fibers], self._data[~bad_fibers, :], axis=0, bounds_error=False, fill_value="extrapolate")
+            f_data = interpolate.interp1d(y_pixels[~bad_fibers], self._data[~bad_fibers, :], axis=0, bounds_error=False)
             self._data = f_data(y_pixels)
             if self._error is not None:
-                f_error = interpolate.interp1d(y_pixels[~bad_fibers], self._error[~bad_fibers, :], axis=0, bounds_error=False, fill_value="extrapolate")
+                f_error = interpolate.interp1d(y_pixels[~bad_fibers], self._error[~bad_fibers, :], axis=0, bounds_error=False)
                 self._error = f_error(y_pixels)        
 
             # unmask interpolated fibers
@@ -1057,10 +1057,10 @@ class FiberRows(Header, PositionTable):
                 # skip fiber if no bad pixels are present, no need to interpolate
                 if bad_pixels.sum() == 0:
                     continue
-                f_data = interpolate.interp1d(x_pixels[~bad_pixels], self._data[ifiber, ~bad_pixels], bounds_error=False, fill_value="extrapolate")
+                f_data = interpolate.interp1d(x_pixels[~bad_pixels], self._data[ifiber, ~bad_pixels], bounds_error=False)
                 self._data[ifiber, :] = f_data(x_pixels)
                 if self._error is not None:
-                    f_error = interpolate.interp1d(x_pixels[~bad_pixels], self._error[ifiber, ~bad_pixels], bounds_error=False, fill_value="extrapolate")
+                    f_error = interpolate.interp1d(x_pixels[~bad_pixels], self._error[ifiber, ~bad_pixels], bounds_error=False)
                     self._error[ifiber, :] = f_error(x_pixels)
                 if self._mask is not None:
                     self._mask[ifiber, bad_pixels] = False

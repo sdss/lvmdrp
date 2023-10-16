@@ -3900,11 +3900,12 @@ def trace_fibers(
     ncolumns: int | Tuple[int] = 18,
     nblocks: int = 18,
     iblocks: list = [],
+    fwhm_limits: Tuple[float] = (1.0, 3.5),
     fit_poly: bool = False,
     poly_deg: int | Tuple[int] = 6,
     interpolate_missing: bool = True,
     display_plots: bool = True
-):
+) -> Tuple[TraceMask, TraceMask, TraceMask]:
     """Trace fibers in a given image
 
     Given a continuum exposure, this function will trace the fibers
@@ -3969,6 +3970,8 @@ def trace_fibers(
         number of blocks to use for tracing, by default 18
     iblocks : list, optional
         list of blocks to trace, by default []
+    fwhm_limits: tuple, optional
+        limits to use for FWHM fitting, by default (1.0, 3.5)
     fit_poly : bool, optional
         whether to fit a polynomial to the dispersion solution, by default False (interpolate in X axis)
     poly_deg : int or 3-tuple, optional
@@ -4016,6 +4019,7 @@ def trace_fibers(
 
     # extract usefull metadata from the image
     channel = img._header["CCD"][0]
+    unit = img._header["BUNIT"]
 
     # read slitmap extension
     slitmap = img.getSlitmap()
@@ -4025,6 +4029,7 @@ def trace_fibers(
     median_box = tuple(map(lambda x: max(x, 1), median_box))
     if median_box != (1, 1):
         log.info(f"performing median filtering with box {median_box} pixels")
+        img = img.replaceMaskMedian(*median_box)
         img = img.medianImg(median_box)
 
     # coadd images along the dispersion axis to increase the S/N of the peaks
@@ -4179,10 +4184,16 @@ def trace_fibers(
         cent_slice = par_joint[1]
         fwhm_slice = par_joint[2] * 2.354
 
-        # mask fibers with NaN parameters
-        amp_mask = numpy.isnan(amp_slice) | (amp_slice <= counts_threshold)
-        cent_mask = numpy.isnan(cent_slice) | (cent_slice <= 0)
-        fwhm_mask = numpy.isnan(fwhm_slice) | (fwhm_slice <= 0)
+        # mask fibers with invalid values
+        amp_off = (amp_slice <= counts_threshold)
+        log.info(f"masking {amp_off.sum()} samples with amplitude < {counts_threshold} {unit}")
+        cent_off = numpy.abs(1 - cent_slice / numpy.concatenate(cen_blocks)) > 0.01
+        log.info(f"masking {cent_off.sum()} samples with centroids refined by > 1 %")
+        fwhm_off = (fwhm_slice < fwhm_limits[0]) | (fwhm_slice > fwhm_limits[1])
+        log.info(f"masking {fwhm_off.sum()} samples with FWHM outside {fwhm_limits} pixels")
+        amp_mask = numpy.isnan(amp_slice) | amp_off | cent_off | fwhm_off
+        cent_mask = numpy.isnan(cent_slice) | amp_off | cent_off | fwhm_off
+        fwhm_mask = numpy.isnan(fwhm_slice) | amp_off | cent_off | fwhm_off
 
         if amp_slice.size != trace_amp._data.shape[0]:
             dummy_amp = numpy.split(numpy.zeros(trace_amp._data.shape[0]), LVM_NBLOCKS)
@@ -4235,7 +4246,7 @@ def trace_fibers(
         log.info(f"joint model amplitudes: {min_amp = :.2f}, {max_amp = :.2f}, {median_amp = :.2f}")
         log.info(f"joint model centroids: {min_cent = :.2f}, {max_cent = :.2f}, {median_cent = :.2f}")
         log.info(f"joint model FWHMs: {min_fwhm = :.2f}, {max_fwhm = :.2f}, {median_fwhm = :.2f}")
-
+    
     # smooth all trace by a polynomial
     if fit_poly:
         log.info(f"fitting peak trace with {deg_amp}-deg polynomial")
@@ -4245,7 +4256,9 @@ def trace_fibers(
         log.info(f"fitting FWHM trace with {deg_fwhm}-deg polynomial")
         trace_fwhm.smoothTracePoly(deg_fwhm, poly_kind="poly")
         # set bad fibers in trace mask
+        trace_amp._mask[bad_fibers] = True
         trace_cent._mask[bad_fibers] = True
+        trace_fwhm._mask[bad_fibers] = True
 
         # linearly interpolate coefficients at masked fibers
         if interpolate_missing:
@@ -4259,6 +4272,10 @@ def trace_fibers(
         trace_amp.interpolate_data(axis="X")
         trace_cent.interpolate_data(axis="X")
         trace_fwhm.interpolate_data(axis="X")
+        # set bad fibers in trace mask
+        trace_amp._mask[bad_fibers] = True
+        trace_cent._mask[bad_fibers] = True
+        trace_fwhm._mask[bad_fibers] = True
 
         if interpolate_missing:
             log.info("interpolating bad fibers")
