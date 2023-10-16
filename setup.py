@@ -41,7 +41,8 @@ def run():
             "cloup>=2.0",
             "bottleneck>=1.3.7",
             "h5py>=3.8.0",
-            "numexpr==2.8.4"
+            "numexpr==2.8.4",
+            "gaiaxpy>=2.1.0"
         ],
         extras_require={
             "dev": [
