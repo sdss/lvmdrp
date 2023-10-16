@@ -39,13 +39,24 @@
 
 # FROM THE CODE BASE (PY3D) -----------------------------------------------------------------------
 
-import matplotlib.pyplot as plt
+import os
 import numpy as np
+from scipy import interpolate
 from scipy import stats
+from scipy import signal
+
+from astropy.time import Time
+from astropy.coordinates import SkyCoord, EarthLocation, AltAz
+from astropy import units as u
+from astropy.io import fits
 
 from lvmdrp.core.rss import RSS, loadRSS
 from lvmdrp.core.spectrum1d import Spectrum1D
 from lvmdrp.external import ancillary_func
+from lvmdrp.functions import skyMethod
+from lvmdrp import log
+
+from lvmdrp.core.plot import plt, create_subplots, save_fig
 
 
 description = "provides flux calibration tasks"
@@ -56,6 +67,168 @@ __all__ = [
     "quickFluxCalibration_drp",
     "correctTelluric_drp",
 ]
+
+def fluxcal_Gaia(camera, in_rss, plot=True):
+    '''
+    Flux calibrate LVM data using the 12 spectra of stars observed through
+    the Spec telescope.
+
+    Uses Gaia BP-RP spectra for calibration. To be replaced or extended by using fitted stellar 
+    atmmospheres.
+    '''
+    # get the list of standards from the header
+    stds = retrieve_header_stars(in_rss)
+
+    # load input RSS
+    log.info(f"loading input RSS file '{os.path.basename(in_rss)}'")
+    rss = RSS()
+    rss.loadFitsData(in_rss)
+
+    sci_exptime = rss._header['EXPTIME']
+    sci_exptime = rss._header['TESCIAM']
+
+    # load fibermap and filter for current spectrograph
+    slitmap = rss._slitmap[rss._slitmap["spectrographid"] == int(camera[1])]
+
+    # wavelength array
+    w = rss._wave
+
+    # load extinction curve
+    # Note that we assume a constant extinction curve here!
+    txt = np.genfromtxt(os.getenv('LVMCORE_DIR')+'/etc/lco_extinction.txt')
+    lext, ext = txt[:,0], txt[:,1]
+    ext = np.interp(w, lext, ext)
+
+    if plot:
+        plt.subplot
+        res = []
+        fig1 = plt.figure(1)
+        frame1 = fig1.add_axes((.1,.3,.8,.6))
+        frame1.set_xticklabels([])
+
+    # load the sky masks
+    m = skyMethod.get_sky_mask_uves(w, width=3)
+    m2 = None
+    if camera[0] == 'z':
+        m2 = skyMethod.get_z_continuum_mask(w)
+
+    GAIA_CACHE_DIR=os.getenv('LVM_MASTER_DIR')+'/gaia_cache'
+    log.info(f"Using Gaia CACHE DIR '{GAIA_CACHE_DIR}'")
+
+    # iterate over standard stars, derive sensitivity curve for each
+    res = []
+    for s in stds:
+        fiber, gaia_id, exptime, secz = s   # unpack standard star tuple
+        
+        # load Gaia BP-RP spectrum from cache, or download from webapp
+        gw, gf = ancillary_func.retrive_gaia_star(gaia_id, GAIA_CACHE_DIR=GAIA_CACHE_DIR)
+        
+        # find the fiber with our spectrum of that Gaia star
+        select = (slitmap["orig_ifulabel"] == fiber)
+        fibidx = np.where(select)[0]
+        if len(fibidx) == 0:
+            continue
+
+        log.info(f"Standard fiber '{fiber}', index '{fibidx}', star '{gaia_id}', exptime '{exptime}', secz '{secz}")
+
+        # divide by our exptime for that standard
+        spec = rss._data[fibidx[0],:]/exptime
+        
+        # interpolate over bright sky lines
+        spec = ancillary_func.interpolate_mask(w, spec, m, fill_value='extrapolate')
+        if camera[0] == 'z':
+            spec = ancillary_func.interpolate_mask(w, spec, ~m2, fill_value='extrapolate')
+        
+        # correct for extinction
+        spec *= 10**(0.4*ext*secz)
+
+        # divide to find sensitivity
+        stdflux = np.interp(w, gw, gf)
+        sens = stdflux/spec
+        
+        wgood, sgood = filter_channel(w, sens, 2)
+        s = interpolate.make_smoothing_spline(wgood, sgood, lam=1e4)
+        if plot:
+            plt.plot(wgood, sgood, 'r.', markersize=4)
+            plt.plot(w, s(w), linewidth=0.5)
+            #plt.ylim(0,0.1e-11)
+            res.append(s(w))
+
+    res = np.array(res)
+    rms = np.nanstd(res, axis=0)
+    mean = np.nanmean(res, axis=0)
+
+    if plot:
+        plt.ylabel('sensitivity [e-/(ergs/s/A)]')
+        plt.xlabel('wavelength [A]')
+        plt.ylim(1e-14, 0.1e-11)
+        plt.semilogy()
+        frame2 = fig1.add_axes((.1,.1,.8,.2))        
+        plt.plot([w[0],w[-1]], [0.05, 0.05], color='k', linewidth=1, linestyle='dotted')
+        plt.plot([w[0],w[-1]], [-0.05, -0.05], color='k', linewidth=1, linestyle='dotted')
+        plt.plot([w[0],w[-1]], [0.1, 0.1], color='k', linewidth=1, linestyle='dashed')
+        plt.plot([w[0],w[-1]], [-0.1, -0.1], color='k', linewidth=1, linestyle='dashed')
+        plt.plot(w, rms/mean)
+        plt.plot(w, -rms/mean)
+        plt.ylim(-0.2, 0.2)
+        plt.ylabel('relative residuals')
+        plt.xlabel('wavelength [A]')
+
+    save_fig(plt.gcf(), product_path=in_rss, to_display=False, figure_path="qa", label="fluxcal")
+
+    return
+
+def retrieve_header_stars(in_rss):
+    '''
+    Retrieve fiber, Gaia ID, exposure time and airmass for the 12 standard stars in the header.
+    return a list of tuples of the above quatities.
+    '''
+    lco = EarthLocation(lat=-29.008999964*u.deg, lon=-70.688663912*u.deg, height=2800*u.m)   
+    with fits.open(in_rss) as hdub:
+        h = hdub[0].header
+    # retrieve the data for the 12 standards from the header
+    stddata = []
+    for i in range(12):
+        stdi = 'STD'+str(i+1)
+        if h[stdi+'ACQ']:
+            gaia_id = h[stdi+'ID']
+            fiber = h[stdi+'FIB']
+            obstime = Time(h[stdi+'T0'])
+            exptime = h[stdi+'EXP']
+            c = SkyCoord(float(h[stdi+'RA']), float(h[stdi+'DE']), unit="deg") 
+            stdT = c.transform_to(AltAz(obstime=obstime,location=lco))  
+            secz = stdT.secz.value
+            #print(gid, fib, et, secz)
+        stddata.append((fiber, gaia_id, exptime, secz))
+    return stddata
+
+def mean_absolute_deviation(vals):
+    '''
+    Robust estimate of RMS
+    - see https://en.wikipedia.org/wiki/Median_absolute_deviation
+    '''
+    mval = np.nanmedian(vals)
+    rms = 1.4826*np.nanmedian(np.abs(vals-mval))
+    return mval, rms
+    #ok=np.abs(vals-mval)<4*rms
+
+def butter_lowpass_filter(data, cutoff_freq, nyq_freq, order=4):
+    normal_cutoff = float(cutoff_freq) / nyq_freq
+    b, a = signal.butter(order, normal_cutoff, btype='lowpass') 
+    y = signal.filtfilt(b, a, data)
+    return y
+
+def filter_channel(w, f, k=3):
+    c = np.where(np.isfinite(f))
+    s = butter_lowpass_filter(f[c], 0.01, 2)
+    res = s - f[c]
+    #plt.plot(w[c], f[c], 'k.')
+    #plt.plot(w[c], s, 'b-')
+    mres, rms = mean_absolute_deviation(res)
+    good = np.where(np.abs(res-mres)<k*rms)
+    #plt.plot(w[c][good], f[c][good], 'r.', markersize=5)
+    return w[c][good], f[c][good]
+
 
 
 def createSensFunction_drp(
