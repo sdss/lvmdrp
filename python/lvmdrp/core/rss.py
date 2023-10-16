@@ -788,6 +788,7 @@ class RSS(FiberRows):
         self._fibers = rss_in[i]._fibers
         self._good_fibers = rss_in[i]._good_fibers
         self._fiber_type = rss_in[i]._fiber_type
+        self._slitmap = rss_in[i]._slitmap
 
     def setSpec(self, fiber, spec):
         if spec._data is not None and self._data is not None:
