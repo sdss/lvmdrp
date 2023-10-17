@@ -163,6 +163,7 @@ class RSS(FiberRows):
         error=None,
         mask=None,
         sky=None,
+        sky_error=None,
         shape=None,
         size=None,
         arc_position_x=None,
@@ -199,7 +200,9 @@ class RSS(FiberRows):
         if inst_fwhm is not None:
             self.setInstFWHM(inst_fwhm)
         if sky is not None:
-            self.set_sky(rss_sky=sky)
+            self._sky = sky
+        if sky_error is not None:
+            self._sky_error = sky_error
         
         self.setSlitmap(slitmap)
 
