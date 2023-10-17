@@ -1505,7 +1505,6 @@ def interpolate_sky(in_rss: str, out_sky: str, out_rss: str = None, which: str =
     f_error = interpolate.make_smoothing_spline(swave[~smask], svars[~smask], w=weights[~smask], lam=1e-6)
     f_mask = interpolate.interp1d(swave, smask, kind="nearest", bounds_error=False, fill_value=0)
 
-
     fig, axs = create_subplots(to_display=display_plots, figsize=(20,10), nrows=2, ncols=1, sharex=True)
     axs[0].scatter(swave, ssky, s=1, color="tab:blue", label="super sky")
     axs[0].plot(swave[~smask], f_data(swave[~smask]).astype("float32"), lw=1, color="k", label="spline")
@@ -1571,7 +1570,7 @@ def interpolate_sky(in_rss: str, out_sky: str, out_rss: str = None, which: str =
     return f_data, f_error, sky_rss, swave, ssky, svars, smask
 
 
-def quick_sky_subtraction(in_rss: str, out_rss, in_skye: str, in_skyw: str, master_sky: str = "combine", sky_weights: Tuple[float, float] = None) -> RSS:
+def quick_sky_subtraction(in_rss: str, out_rss, in_skye: str, in_skyw: str, master_sky: str = "combine", sky_weights: Tuple[float, float] = None, skip_subtraction: bool = False) -> RSS:
     """Quick sky subtraction using the sky fibers from both telescopes
 
     Parameters
@@ -1588,6 +1587,8 @@ def quick_sky_subtraction(in_rss: str, out_rss, in_skye: str, in_skyw: str, mast
         which sky telescope to use as master, by default "combine"
     sky_weights : Tuple[float, float]
         weights for each telescope when master_sky = 'combine', by default None
+    skip_subtraction : bool, optional
+        whether to skip sky subtraction or not, by default False
 
     Returns
     -------
@@ -1653,14 +1654,20 @@ def quick_sky_subtraction(in_rss: str, out_rss, in_skye: str, in_skyw: str, mast
         raise ValueError(f"invalid value for 'master_sky' parameter: '{master_sky}'")
 
     # subtract sky from data
-    log.info("subtracting interpolated sky from original data")
-    new_data = rss._data - sky._data
-    new_error = np.sqrt(rss._error ** 2 + sky._error ** 2)
-    new_mask = rss._mask# | sky._mask
+    if skip_subtraction:
+        log.info(f"skipping sky subtraction, saving master sky in '{os.path.basename(out_rss)}'")
+        rss.setHdrValue("SKYSUB", False, "sky subtracted?")
+    else:
+        log.info("subtracting interpolated sky from original data")
+        new_data = rss._data - sky._data
+        new_error = np.sqrt(rss._error ** 2 + sky._error ** 2)
+        new_mask = rss._mask# | sky._mask
+        rss.setHdrValue("SKYSUB", True, "sky subtracted?")
 
     # write output sky-subtracted RSS
     log.info(f"writing output sky-subtracted RSS file '{os.path.basename(out_rss)}'")
     rss.setData(data=new_data, error=new_error, mask=new_mask)
+    rss.set_sky(rss_sky=sky)
     rss.writeFitsData(out_rss)
 
     return rss

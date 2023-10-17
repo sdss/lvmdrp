@@ -224,12 +224,8 @@ def quick_reduction(expnum: int, use_fiducial_master: bool, skip_sky_subtraction
 
         # TODO: store supersampled sky as an extension
 
-        # quick sky subtraction
-        if not skip_sky_subtraction:
-            sky_tasks.quick_sky_subtraction(in_rss=fsci_path, out_rss=ssci_path, in_skye=fskye_path, in_skyw=fskyw_path, master_sky=master_sky, sky_weights=sky_weights)
-        else:
-            ssci_path = fsci_path
-            log.info("skipping sky subtraction")
+        # compute master sky and subtract if requested
+        sky_tasks.quick_sky_subtraction(in_rss=fsci_path, out_rss=ssci_path, in_skye=fskye_path, in_skyw=fskyw_path, master_sky=master_sky, sky_weights=sky_weights, skip_subtraction=skip_sky_subtraction)
 
         # resample wavelength into uniform grid along fiber IDs for science and sky fibers
         iwave, fwave = SPEC_CHANNELS[sci_camera[0]]
