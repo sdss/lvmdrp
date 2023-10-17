@@ -1123,6 +1123,7 @@ def resample_wavelength(in_rss: str, out_rss: str, method: str = "spline",
         collapsed_spec = None
 
     data = numpy.zeros((rss._fibers, len(ref_wave)), dtype=numpy.float32)
+    mask = numpy.zeros((rss._fibers, len(ref_wave)), dtype="bool")
     if rss._error is not None and err_sim != 0:
         error = numpy.zeros((rss._fibers, len(ref_wave)), dtype=numpy.float32)
     else:
@@ -1131,7 +1132,15 @@ def resample_wavelength(in_rss: str, out_rss: str, method: str = "spline",
         inst_fwhm = numpy.zeros((rss._fibers, len(ref_wave)), dtype=numpy.float32)
     else:
         inst_fwhm = None
-    mask = numpy.zeros((rss._fibers, len(ref_wave)), dtype="bool")
+    if rss._sky is not None:
+        sky = numpy.zeros((rss._fibers, len(ref_wave)), dtype=numpy.float32)
+    else:
+        sky = None
+    if rss._sky_error is not None:
+        sky_error = numpy.zeros((rss._fibers, len(ref_wave)), dtype=numpy.float32)
+    else:
+        sky_error = None
+    
     if compute_densities:
         width_pix = numpy.zeros_like(rss._data)
         width_pix[:, :-1] = numpy.fabs(rss._wave[:, 1:] - rss._wave[:, :-1])
@@ -1140,6 +1149,7 @@ def resample_wavelength(in_rss: str, out_rss: str, method: str = "spline",
         rss._header["BUNIT"] = rss._header["BUNIT"] + "/angstrom"
         if rss._error is not None:
             rss._error = rss._error / width_pix
+    
     if rss._wave is not None and len(rss._wave.shape) == 2:
         if parallel == "auto":
             cpus = cpu_count()
@@ -1172,16 +1182,22 @@ def resample_wavelength(in_rss: str, out_rss: str, method: str = "spline",
                 error[i, :] = spec._error
             if rss._inst_fwhm is not None:
                 inst_fwhm[i, :] = spec._inst_fwhm
+            if rss._sky is not None:
+                sky[i, :] = spec._sky
+            if rss._sky_error is not None:
+                sky_error[i, :] = spec._sky_error
             mask[i, :] = spec._mask
 
     resamp_rss = RSS(
         data=data,
         wave=ref_wave,
         inst_fwhm=inst_fwhm,
-        header=rss.getHeader(),
+        header=rss._header,
         error=error,
         mask=mask,
-        slitmap=rss.getSlitmap()
+        slitmap=rss._slitmap,
+        sky=sky,
+        sky_error=sky_error
     )
 
     resamp_rss.writeFitsData(out_rss)
