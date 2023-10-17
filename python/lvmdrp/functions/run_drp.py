@@ -1016,6 +1016,8 @@ def combine_spectrographs(tileid: int, mjd: int, expnum: int) -> fits.HDUList:
     err_data = stack_ext(files, ext='ERROR')
     mask_data = stack_ext(files, ext='BADPIX')
     fwhm_data = stack_ext(files, ext='INSTFWHM')
+    sky_data = stack_ext(files, ext="SKY")
+    sky_error = stack_ext(files, ext="SKY_ERROR")
 
     # update the primary header
     hdr['SPEC'] = ', '.join([i.split('-')[2] for i in files])
@@ -1037,8 +1039,10 @@ def combine_spectrographs(tileid: int, mjd: int, expnum: int) -> fits.HDUList:
     err = fits.ImageHDU(err_data, name='ERROR')
     mask = fits.ImageHDU(mask_data, name='MASK')
     fwhm = fits.ImageHDU(fwhm_data, name='FWHM')
+    sky = fits.ImageHDU(sky_data, name="SKY")
+    sky_error = fits.ImageHDU(sky_error, name="SKY_ERROR")
 
-    hdulist = fits.HDUList([prim, flux, err, mask, wave, fwhm, fibermap])
+    hdulist = fits.HDUList([prim, flux, err, mask, wave, fwhm, sky, sky_error, fibermap])
 
     # write out new file
     hdulist.writeto(cframe, overwrite=True)
