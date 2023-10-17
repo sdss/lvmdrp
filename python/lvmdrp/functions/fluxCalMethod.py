@@ -154,8 +154,8 @@ def fluxcal_Gaia(camera, in_rss, plot=True, GAIA_CACHE_DIR=None):
 
         # caluculate SDSS g band magnitudes for QC
         mAB_std = ancillary_func.spec_to_LVM_mAB(camera, w, stdflux)
-        mAB_obs = ancillary_func.spec_to_LVM_mAB(camera, w, s(w)*spec)
-        log.info(f"AB mag in LVM_{camera[0]}: Gaia {mAB_std:.2f}, observed {mAB_obs:.2f}")
+        mAB_obs = ancillary_func.spec_to_LVM_mAB(camera, w[np.isfinite(spec)], spec[np.isfinite(spec)])
+        log.info(f"AB mag in LVM_{camera[0]}: Gaia {mAB_std:.2f}, instrumental {mAB_obs:.2f}")
         if plot:
             plt.plot(wgood, sgood, 'r.', markersize=4)
             plt.plot(w, s(w), linewidth=0.5)
