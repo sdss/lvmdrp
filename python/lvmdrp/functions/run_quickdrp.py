@@ -20,6 +20,7 @@ from lvmdrp.functions import run_drp as drp
 from lvmdrp.functions import imageMethod as image_tasks
 from lvmdrp.functions import rssMethod as rss_tasks
 from lvmdrp.functions import skyMethod as sky_tasks
+from lvmdrp.functions import fluxCalMethod as flux_tasks
 from lvmdrp.core.constants import SPEC_CHANNELS
 
 
@@ -95,7 +96,7 @@ def illumination_correction(in_fiberflat=None):
 def get_master_mjd(sci_mjd):
 
     masters_dir = sorted([f for f in os.listdir(ORIG_MASTER_DIR) if os.path.isdir(os.path.join(ORIG_MASTER_DIR, f))])
-    masters_dir = [f for f in masters_dir if f[0]!='.']
+    masters_dir = [f for f in masters_dir if f.isdigit()]
     target_master = list(filter(lambda f: sci_mjd >= int(f), masters_dir))
     return int(target_master[-1])
 
@@ -226,6 +227,10 @@ def quick_reduction(expnum: int, use_fiducial_master: bool = False) -> None:
         rss_tasks.resample_wavelength(in_rss=ssci_path,  out_rss=hsci_path, method="linear", compute_densities=True, disp_pix=0.5, start_wave=iwave, end_wave=fwave, err_sim=10, parallel=0, extrapolate=False)
         rss_tasks.resample_wavelength(in_rss=fskye_path, out_rss=hskye_path, method="linear", compute_densities=True, disp_pix=0.5, start_wave=iwave, end_wave=fwave, err_sim=10, parallel=0, extrapolate=False)
         rss_tasks.resample_wavelength(in_rss=fskyw_path, out_rss=hskyw_path, method="linear", compute_densities=True, disp_pix=0.5, start_wave=iwave, end_wave=fwave, err_sim=10, parallel=0, extrapolate=False)
+
+        # use sky subtracted resampled frames for flux calibration in each camera
+        # add sensitivity curve as FLUXCAL extension
+        flux_tasks.fluxcal_Gaia(sci_camera, hsci_path, GAIA_CACHE_DIR=ORIG_MASTER_DIR)
 
     # combine channels
     drp.combine_cameras(sci_tileid, sci_mjd, expnum=sci_expnum, spec=1)
