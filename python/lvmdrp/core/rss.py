@@ -600,7 +600,7 @@ class RSS(FiberRows):
             if self._slitmap is not None:
                 hdus[5] = pyfits.BinTableHDU(self._slitmap, name="SLITMAP")
             if self._sky is not None:
-                hdus[6] = pyfits.ImageHDU(self._sky._data, name="SKY")
+                hdus[6] = pyfits.ImageHDU(self._sky, name="SKY")
         else:
             if extension_data == 0:
                 hdus[0] = pyfits.PrimaryHDU(self._data)
