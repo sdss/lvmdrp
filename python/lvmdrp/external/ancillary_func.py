@@ -1,11 +1,43 @@
 import numpy
-from lvmdrp.core.spectrum1d import *
 
 import os.path as path
 import requests
 from gaiaxpy import calibrate
 from astropy.table import Table
 import pathlib
+from scipy.integrate import simps
+
+from lvmdrp.core.spectrum1d import *
+
+sdss_g_w = numpy.array([3630,3640,3680,3780,3880,3980,4080,4180,4280,4380,4480,4580,4680,4780,\
+                        4880,4980,5080,5180,5280,5380,5480,5580,5680,5780,5880, 5980])
+sdss_g_f = numpy.array([0.0000,0.0000,0.0013,0.0055,0.0500,0.1629,0.2609,0.3105,0.3385,0.3596,\
+                        0.3736,0.3863,0.3973,0.4019,0.4073,0.4147,0.4201,0.4147,0.3233,0.1043,0.0128,\
+                        0.0024,0.0010,0.0003,0.0000,0.0000])
+
+def spec_to_mAB(lam, spec, lamf, filt):
+    '''
+    Calculate AB magnitude in filter (lamf, filt) given a spectrum
+    (lam, spec) in ergs/s/cm^2/A
+    '''
+    c_AAs     = 2.99792458e18                 # Speed of light in Angstrom/s
+    filt_int  = numpy.interp(lam,lamf,filt)   # Interpolate to common wavelength axis
+    I1        = simps(spec*filt_int*lam,lam)            
+    I2        = simps(filt_int/lam,lam)            
+    fnu       = I1/I2 / c_AAs                 # Average flux density
+    return -2.5*numpy.log10(fnu) - 48.6       # AB magnitude
+
+def spec_to_LVM_mAB(camera, w, f):
+    '''
+    LVM photometric system: Gaussian filter with sigma 250A centered in channels
+    at 4500, 6500, and 8500A
+    '''
+    if camera[0] == 'b':
+        return spec_to_mAB(w,f,w,numpy.exp(-0.5*((w-4500)/250)**2))
+    elif camera[0] == 'r':
+        return spec_to_mAB(w,f,w,numpy.exp(-0.5*((w-6500)/250)**2))
+    else:
+        return spec_to_mAB(w,f,w,numpy.exp(-0.5*((w-8500)/250)**2))
 
 
 def interpolate_mask(x, y, mask, kind='linear', fill_value=0):

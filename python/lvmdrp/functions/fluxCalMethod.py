@@ -131,6 +131,7 @@ def fluxcal_Gaia(camera, in_rss, plot=True, GAIA_CACHE_DIR=None):
         # load Gaia BP-RP spectrum from cache, or download from webapp
         try:
             gw, gf = ancillary_func.retrive_gaia_star(gaia_id, GAIA_CACHE_DIR=GAIA_CACHE_DIR)
+            stdflux = np.interp(w, gw, gf)   # interpolate to our wavelength grid
         except ancillary_func.GaiaStarNotFound as e:
             log.warning(e)
             continue
@@ -146,12 +147,15 @@ def fluxcal_Gaia(camera, in_rss, plot=True, GAIA_CACHE_DIR=None):
         # correct for extinction
         spec *= 10**(0.4*ext*secz)
 
-        # divide to find sensitivity
-        stdflux = np.interp(w, gw, gf)
-        sens = stdflux/spec
-        
+        # divide to find sensitivity and smooth
+        sens = stdflux/spec        
         wgood, sgood = filter_channel(w, sens, 2)
         s = interpolate.make_smoothing_spline(wgood, sgood, lam=1e4)
+
+        # caluculate SDSS g band magnitudes for QC
+        mAB_std = ancillary_func.spec_to_LVM_mAB(camera, w, stdflux)
+        mAB_obs = ancillary_func.spec_to_LVM_mAB(camera, w, s(w)*spec)
+        log.info(f"AB mag in LVM_{camera[0]}: Gaia {mAB_std:.2f}, observed {mAB_obs:.2f}")
         if plot:
             plt.plot(wgood, sgood, 'r.', markersize=4)
             plt.plot(w, s(w), linewidth=0.5)
