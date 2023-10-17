@@ -1656,6 +1656,9 @@ def quick_sky_subtraction(in_rss: str, out_rss, in_skye: str, in_skyw: str, mast
     # subtract sky from data
     if skip_subtraction:
         log.info(f"skipping sky subtraction, saving master sky in '{os.path.basename(out_rss)}'")
+        new_data = rss._data
+        new_error = rss._error
+        new_mask = rss._mask
         rss.setHdrValue("SKYSUB", False, "sky subtracted?")
     else:
         log.info("subtracting interpolated sky from original data")
