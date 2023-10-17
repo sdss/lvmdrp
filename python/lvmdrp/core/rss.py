@@ -449,7 +449,10 @@ class RSS(FiberRows):
 
     def set_sky(self, rss_sky):
         assert rss_sky._data.shape == self._data.shape
-        self._sky = rss_sky
+        self._sky = rss_sky._data
+
+    def get_sky(self):
+        return self._sky
 
     def loadFitsData(
         self,
@@ -2117,7 +2120,6 @@ class RSS(FiberRows):
             wcs.update({"NAXIS": 2, "NAXIS2": self._header["NAXIS2"], "CRPIX2": 1,
                         "CRVAL2": 1, "CDELT2": 1, "CTYPE2": "LINEAR"})
             self._header.update(wcs)
-
 
     def apply_pixelmask(self, mask=None):
         if mask is None:
