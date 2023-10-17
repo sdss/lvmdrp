@@ -1,6 +1,78 @@
 import numpy
-
 from lvmdrp.core.spectrum1d import *
+
+import os.path as path
+import requests
+from gaiaxpy import calibrate
+from astropy.table import Table
+import pathlib
+
+
+def interpolate_mask(x, y, mask, kind='linear', fill_value=0):
+    """
+    :param x, y: numpy arrays, samples and values
+    :param mask: boolean mask, True for masked values
+    :param method: interpolation method, one of linear, nearest, 
+    nearest-up, zero, slinear, quadratic, cubic, previous, or next.
+    :param fill_value: which value to use for filling up data outside the
+        convex hull of known pixel values.
+        Default is 0, Has no effect for 'nearest'.
+    :return: the image with missing values interpolated
+    """
+    if not numpy.any(mask):
+        return y
+    known_x, known_v = x[~mask], y[~mask]
+    missing_x = x[mask]
+    missing_idx = numpy.where(mask)
+
+    f = interpolate.interp1d(known_x, known_v, kind=kind, fill_value=fill_value)
+    yy = y.copy()
+    yy[missing_idx] = f(missing_x)
+
+    return yy
+
+
+def retrive_gaia_star(gaiaID, GAIA_CACHE_DIR):
+    '''
+    Load or download and load from cache the spectrum of a gaia star, converted to erg/s/cm^2/A
+    '''
+    # create cache dir if it does not exist
+    pathlib.Path(GAIA_CACHE_DIR).mkdir(parents=True, exist_ok=True)
+
+    if path.exists(GAIA_CACHE_DIR+'/gaia_spec_'+str(gaiaID)+'.csv') == True:
+        # read the tables from our cache
+        gaiaflux = Table.read(GAIA_CACHE_DIR+"/gaia_spec_"+str(gaiaID)+".csv", format="csv")
+        gaiawave = Table.read(GAIA_CACHE_DIR+"/gaia_spec_"+str(gaiaID)+"_sampling.csv", format="csv")
+    else:
+        # need to download from Gaia archive
+        CSV_URL = 'https://gea.esac.esa.int/data-server/data?RETRIEVAL_TYPE=XP_CONTINUOUS&ID=Gaia+DR3+'+\
+                str(gaiaID)+'&format=CSV&DATA_STRUCTURE=RAW'
+        FILE = GAIA_CACHE_DIR+'/XP_'+str(gaiaID)+'_RAW.csv'
+
+        with open(FILE, 'w') as f, \
+                requests.get(CSV_URL, stream=True) as r:
+            f.write(r.content.decode('utf-8'))
+
+        # convert coefficients to sampled spectrum
+        _, _ = calibrate(FILE, output_path=GAIA_CACHE_DIR, output_file='gaia_spec_'+str(gaiaID), output_format='csv')
+        # read the flux and wavelength tables
+        gaiaflux = Table.read(GAIA_CACHE_DIR+"/gaia_spec_"+str(gaiaID)+".csv", format="csv")
+        gaiawave = Table.read(GAIA_CACHE_DIR+"/gaia_spec_"+str(gaiaID)+"_sampling.csv", format="csv")
+
+    # make numpy arrays from whatever weird objects the Gaia stuff creates
+    wave = numpy.fromstring(gaiawave['pos'][0][1:-1], sep=',')*10 # in Angstrom
+    flux = 1e7*1e-1*1e-4*numpy.fromstring(gaiaflux['flux'][0][1:-1], sep=',') # W/s/micron -> in erg/s/cm^2/A
+    return wave, flux
+
+
+def extinctLaSilla(wave):
+    # digitized version of LaSilla extinctin curve from 
+    w = [3520.83333,3562.50000,3979.16667,4489.58333,4802.08333,5312.50000,5614.58333,5760.41667,\
+         6041.66667,6572.91667,7145.83333,7541.66667,8052.08333,8770.83333,9781.25000,10197.91667]
+    f = [0.53533,0.52174,0.34511,0.22283,0.18071,0.14402,0.13315,0.14130,0.11685,0.07880,0.05299,\
+         0.04348,0.03533,0.02717,0.01902,0.02038]
+    spec_raw = Spectrum1D(wave=w, data=f)
+    return spec_raw.resampleSpec(wave)
 
 
 def extinctCAHA(wave, extinct_v, type="mean"):

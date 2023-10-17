@@ -13,6 +13,7 @@ import subprocess
 from datetime import datetime
 from multiprocessing import Pool, cpu_count
 from copy import deepcopy as copy
+from typing import Tuple
 
 import numpy as np
 import yaml
@@ -59,6 +60,53 @@ __all__ = [
     "refineContinuum_drp",
     "subtractPCAResiduals_drp",
 ]
+
+
+def get_sky_mask_uves(wave, width=3, threshold=2):
+    """
+    Generate a mask for the bright sky lines. 
+    mask every line at +-width, where width in same units as wave (Angstroms)
+    Only lines with a flux larger than threshold (in 10E-16 ergs/cm^2/s/A) are masked
+    The line list is from https://www.eso.org/observing/dfo/quality/UVES/pipeline/sky_spectrum.html
+
+    Returns a bool np.array the same size as wave with sky line wavelengths marked as True
+    """
+    p = os.path.join(os.getenv('LVMCORE_DIR'), 'etc', 'UVES_sky_lines.txt')
+    txt = np.genfromtxt(p)
+    skyw, skyf = txt[:,1], txt[:,4]
+    #plt.plot(skyw, skyw*0, 'k.')
+    #plt.plot(skyw, skyf, 'k.')
+    select = (skyf>threshold)
+    lines = skyw[select]
+    # do NOT mask Ha if it is present in the sky table
+    ha = (lines>6562) & (lines<6564)
+    lines = lines[~ha]
+    mask = np.zeros_like(wave, dtype=bool)
+    if width > 0.0:
+        for line in lines :
+            if (line<=wave[0]) or (line>=wave[-1]):
+                continue
+            ii=np.where((wave>=line-width)&(wave<=line+width))[0]
+            mask[ii]=True
+
+    return mask
+
+
+def get_z_continuum_mask(w):
+    '''
+    Some clean regions at the red edge of the NIR channel (hand picked)
+    '''
+    good = [[9230,9280], [9408,9415], [9464,9472], [9608,9512], [9575,9590], [9593,9603], [9640,9650], [9760,9775]]
+    mask = np.zeros_like(w, dtype=bool)
+    for r in good :
+        if (r[0]<=w[0]) or (r[1]>=w[-1]):
+            continue
+        ii=np.where((w>=r[0])&(w<=r[1]))[0]
+        mask[ii]=True
+
+    # do not mask before first region
+    mask[np.where(w<=good[0][0])] = True
+    return mask
 
 
 def configureSkyModel_drp(
@@ -1523,7 +1571,7 @@ def interpolate_sky(in_rss: str, out_sky: str, out_rss: str = None, which: str =
     return f_data, f_error, sky_rss, swave, ssky, svars, smask
 
 
-def quick_sky_subtraction(in_rss: str, out_rss, in_skye: str, in_skyw: str) -> RSS:
+def quick_sky_subtraction(in_rss: str, out_rss, in_skye: str, in_skyw: str, master_sky: str = "combine", sky_weights: Tuple[float, float] = None) -> RSS:
     """Quick sky subtraction using the sky fibers from both telescopes
 
     Parameters
@@ -1536,6 +1584,10 @@ def quick_sky_subtraction(in_rss: str, out_rss, in_skye: str, in_skyw: str) -> R
         input SkyE RSS file
     in_skyw : str
         input SkyW RSS file
+    master_sky : str, optional
+        which sky telescope to use as master, by default "combine"
+    sky_weights : Tuple[float, float]
+        weights for each telescope when master_sky = 'combine', by default None
 
     Returns
     -------
@@ -1569,14 +1621,36 @@ def quick_sky_subtraction(in_rss: str, out_rss, in_skye: str, in_skyw: str) -> R
         f"(SKYERA, SKYEDEC: {ra_e, dec_e}; SKYWRA, SKYWDEC: {ra_w, dec_w}) "
         f"in science telescope pointing (SCIRA, SCIDEC: {ra_s, dec_s})")
 
-    ad = ang_distance(ra_e, dec_e, ra_s, dec_s)
-    w_e = 1 / (ad if ad>0 else 1)
-    ad = ang_distance(ra_w, dec_w, ra_s, dec_s)
-    w_w = 1 / (ad if ad>0 else 1)
-    w_norm = w_e + w_w
-    w_e, w_w = w_e / w_norm, w_w / w_norm
+    master_sky = master_sky.lower()
+    if master_sky == "combine":
+        log.info("using master sky: weighted average of both telescopes")
+        
+        if sky_weights is None:
+            ad = ang_distance(ra_e, dec_e, ra_s, dec_s)
+            w_e = 1 / (ad if ad>0 else 1)
+            ad = ang_distance(ra_w, dec_w, ra_s, dec_s)
+            w_w = 1 / (ad if ad>0 else 1)
+            w_norm = w_e + w_w
+            w_e, w_w = w_e / w_norm, w_w / w_norm
+            log.info(f"calculated weights SkyE: {w_e:.3f}, SkyW: {w_w:.3f}")
+        elif len(sky_weights) == 2:
+            w_e, w_w = sky_weights
+            w_norm = w_e + w_w
+            if w_norm != 1:
+                w_e, w_w = w_e / w_norm, w_w / w_norm
+            log.info(f"assuming user-provided weights SkyE: {w_e:.3f}, SkyW: {w_w:.3f}")
+        else:
+            raise ValueError(f"invalid value for 'sky_weights' parameter: '{sky_weights}'")
 
-    sky = sky_e * w_e + sky_w * w_w
+        sky = sky_e * w_e + sky_w * w_w
+    elif master_sky in {"east", "e", "skye"}:
+        log.info(f"using master sky: SkyE ({os.path.basename(in_skye)})")
+        sky = sky_e
+    elif master_sky in {"west", "w", "skyw"}:
+        log.info(f"using master sky: SkyW ({os.path.basename(in_skyw)})")
+        sky = sky_w
+    else:
+        raise ValueError(f"invalid value for 'master_sky' parameter: '{master_sky}'")
 
     # subtract sky from data
     log.info("subtracting interpolated sky from original data")
