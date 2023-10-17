@@ -3005,11 +3005,15 @@ def join_spec_channels(in_rss: List[str], out_rss: str, use_weights: bool = True
     errors_f = [interpolate.interp1d(rss._wave, rss._error, axis=1, bounds_error=False, fill_value=numpy.nan) for rss in rsss]
     masks_f = [interpolate.interp1d(rss._wave, rss._mask, axis=1, kind="nearest", bounds_error=False, fill_value=0) for rss in rsss]
     lsfs_f = [interpolate.interp1d(rss._wave, rss._inst_fwhm, axis=1, bounds_error=False, fill_value=numpy.nan) for rss in rsss]
+    sky_f = [interpolate.interp1d(rss._wave, rss._sky, axis=1, bounds_error=False, fill_value=numpy.nan) for rss in rsss]
+    sky_error_f = [interpolate.interp1d(rss._wave, rss._sky_error, axis=1, bounds_error=False, fill_value=numpy.nan) for rss in rsss]
     # evaluate interpolators
     fluxes = numpy.asarray([f(new_wave).astype("float32") for f in fluxes_f])
     errors = numpy.asarray([f(new_wave).astype("float32") for f in errors_f])
     masks = numpy.asarray([f(new_wave).astype("uint8") for f in masks_f])
     lsfs = numpy.asarray([f(new_wave).astype("float32") for f in lsfs_f])
+    skies = numpy.asarray([f(new_wave).astype("float32") for f in sky_f])
+    sky_errors = numpy.asarray([f(new_wave).astype("float32") for f in sky_error_f])
 
     # define weights for channel combination
     vars = errors ** 2
@@ -3022,12 +3026,16 @@ def join_spec_channels(in_rss: List[str], out_rss: str, use_weights: bool = True
         new_inst_fwhm = bn.nansum(lsfs * weights, axis=0)
         new_error = numpy.sqrt(bn.nansum(vars, axis=0))
         new_mask = numpy.sum(masks, axis=0).astype("bool")
+        new_sky = bn.nansum(skies * weights, axis=0)
+        new_sky_error = numpy.sqrt(bn.nansum(sky_errors ** 2 * weights ** 2, axis=0))
     else:
         # channel-combine RSS data
         new_data = bn.nanmean(fluxes, axis=0)
         new_inst_fwhm = bn.nanmean(lsfs, axis=0)
         new_error = numpy.sqrt(bn.nanmean(vars, axis=0))
         new_mask = numpy.sum(masks, axis=0).astype("bool")
+        new_sky = bn.nansum(skies, axis=0)
+        new_sky_error = numpy.sqrt(bn.nanmean(sky_errors ** 2, axis=0))
 
     # create RSS
     log.info(f"writing output RSS to {os.path.basename(out_rss)}")
@@ -3037,7 +3045,7 @@ def join_spec_channels(in_rss: List[str], out_rss: str, use_weights: bool = True
     wcs.spectral.wcs.cdelt[0] = new_wave[1] - new_wave[0]
     wcs.spectral.wcs.crval[0] = new_wave[0]
     new_hdr.update(wcs.to_header())
-    new_rss = RSS(data=new_data, error=new_error, mask=new_mask, wave=new_wave, inst_fwhm=new_inst_fwhm, header=new_hdr)
+    new_rss = RSS(data=new_data, error=new_error, mask=new_mask, wave=new_wave, inst_fwhm=new_inst_fwhm, sky=new_sky, sky_error=new_sky_error, header=new_hdr)
     # write output RSS
     new_rss.writeFitsData(out_rss)
 
