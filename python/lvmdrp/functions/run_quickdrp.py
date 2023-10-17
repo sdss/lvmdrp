@@ -117,7 +117,7 @@ def quick_reduction(expnum: int, use_fiducial_master: bool, skip_sky_subtraction
     sci_tileid = sci_metadata["tileid"].unique()[0]
     sci_mjd = sci_metadata["mjd"].unique()[0]
     sci_expnum = sci_metadata["expnum"].unique()[0]
-    log.info(f"Running Quick DRP for tile {sci_tileid} at MJD {sci_mjd} with exposure number {sci_expnum}")
+    log.info(f"running Quick DRP for tile {sci_tileid} at MJD {sci_mjd} with exposure number {sci_expnum}")
 
     master_mjd = get_master_mjd(sci_mjd)
     log.info(f"target master MJD: {master_mjd}")
@@ -159,7 +159,7 @@ def quick_reduction(expnum: int, use_fiducial_master: bool, skip_sky_subtraction
         # define calibration frames paths
         if use_fiducial_master:
             masters_path = os.getenv("LVM_MASTER_DIR")
-            log.info(f"Using fiducial master calibration frames for {sci_camera} at $LVM_MASTER_DIR = {masters_path}")
+            log.info(f"using fiducial master calibration frames for {sci_camera} at $LVM_MASTER_DIR = {masters_path}")
             if masters_path is None:
                 raise ValueError("LVM_MASTER_DIR environment variable is not defined")
             mpixmask_path = os.path.join(masters_path, f"lvm-mpixmask-{sci_camera}.fits")
@@ -173,7 +173,7 @@ def quick_reduction(expnum: int, use_fiducial_master: bool, skip_sky_subtraction
             mlsf_path = os.path.join(masters_path, f"lvm-mlsf_{lamps}-{sci_camera}.fits")
             mflat_path = os.path.join(masters_path, f"lvm-mfiberflat-{sci_camera}.fits")
         else:
-            log.info(f"Using master calibration frames from DRP version {drpver}, mjd = {sci_mjd}, camera = {sci_camera}")
+            log.info(f"using master calibration frames from DRP version {drpver}, mjd = {sci_mjd}, camera = {sci_camera}")
             masters = md.match_master_metadata(target_mjd=sci_mjd,
                                                target_camera=sci_camera,
                                                target_imagetyp=sci["imagetyp"])
@@ -197,7 +197,7 @@ def quick_reduction(expnum: int, use_fiducial_master: bool, skip_sky_subtraction
                                   in_slitmap=Table(drp.fibermap.data), reject_cr=False)
         
         # # extract 1d spectra
-        image_tasks.extract_spectra(in_image=dsci_path, out_rss=xsci_path, in_trace=mtrace_path, in_fwhm=mwidth_path, method="optimal", parallel=10)
+        image_tasks.extract_spectra(in_image=dsci_path, out_rss=xsci_path, in_trace=mtrace_path, in_fwhm=mwidth_path, method="optimal", parallel="auto")
 
         # wavelength calibrate
         rss_tasks.create_pixel_table(in_rss=xsci_path, out_rss=wsci_path, arc_wave=mwave_path, arc_fwhm=mlsf_path)
@@ -227,6 +227,9 @@ def quick_reduction(expnum: int, use_fiducial_master: bool, skip_sky_subtraction
         # quick sky subtraction
         if not skip_sky_subtraction:
             sky_tasks.quick_sky_subtraction(in_rss=fsci_path, out_rss=ssci_path, in_skye=fskye_path, in_skyw=fskyw_path, master_sky=master_sky, sky_weights=sky_weights)
+        else:
+            ssci_path = fsci_path
+            log.info("skipping sky subtraction")
 
         # resample wavelength into uniform grid along fiber IDs for science and sky fibers
         iwave, fwave = SPEC_CHANNELS[sci_camera[0]]
