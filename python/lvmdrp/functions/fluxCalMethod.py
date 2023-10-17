@@ -163,7 +163,7 @@ def fluxcal_Gaia(camera, in_rss, plot=True, GAIA_CACHE_DIR=None):
     mean = np.nanmean(res, axis=0)
 
     if plot:
-        plt.ylabel('sensitivity [e-/(ergs/s/A)]')
+        plt.ylabel('sensitivity [(ergs/s/cm^2/A) / e-]')
         plt.xlabel('wavelength [A]')
         plt.ylim(1e-14, 0.1e-11)
         plt.semilogy()
