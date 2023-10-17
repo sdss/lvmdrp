@@ -68,7 +68,7 @@ __all__ = [
     "correctTelluric_drp",
 ]
 
-def fluxcal_Gaia(camera, in_rss, plot=True):
+def fluxcal_Gaia(camera, in_rss, plot=True, GAIA_CACHE_DIR=None):
     '''
     Flux calibrate LVM data using the 12 spectra of stars observed through
     the Spec telescope.
@@ -76,6 +76,9 @@ def fluxcal_Gaia(camera, in_rss, plot=True):
     Uses Gaia BP-RP spectra for calibration. To be replaced or extended by using fitted stellar 
     atmmospheres.
     '''
+    GAIA_CACHE_DIR = './' if None else GAIA_CACHE_DIR
+    log.info(f"Using Gaia CACHE DIR '{GAIA_CACHE_DIR}'")
+
     # get the list of standards from the header
     stds = retrieve_header_stars(in_rss)
 
@@ -112,18 +115,12 @@ def fluxcal_Gaia(camera, in_rss, plot=True):
     if camera[0] == 'z':
         m2 = skyMethod.get_z_continuum_mask(w)
 
-    GAIA_CACHE_DIR=os.getenv('LVM_MASTER_DIR')+'/gaia_cache'
-    log.info(f"Using Gaia CACHE DIR '{GAIA_CACHE_DIR}'")
-
     # iterate over standard stars, derive sensitivity curve for each
     res = []
     for s in stds:
         fiber, gaia_id, exptime, secz = s   # unpack standard star tuple
         
-        # load Gaia BP-RP spectrum from cache, or download from webapp
-        gw, gf = ancillary_func.retrive_gaia_star(gaia_id, GAIA_CACHE_DIR=GAIA_CACHE_DIR)
-        
-        # find the fiber with our spectrum of that Gaia star
+        # find the fiber with our spectrum of that Gaia star, if it is not in the current spectrograph, continue
         select = (slitmap["orig_ifulabel"] == fiber)
         fibidx = np.where(select)[0]
         if len(fibidx) == 0:
@@ -131,6 +128,13 @@ def fluxcal_Gaia(camera, in_rss, plot=True):
 
         log.info(f"Standard fiber '{fiber}', index '{fibidx}', star '{gaia_id}', exptime '{exptime}', secz '{secz}")
 
+        # load Gaia BP-RP spectrum from cache, or download from webapp
+        try:
+            gw, gf = ancillary_func.retrive_gaia_star(gaia_id, GAIA_CACHE_DIR=GAIA_CACHE_DIR)
+        except ancillary_func.GaiaStarNotFound as e:
+            log.warning(e)
+            continue
+    
         # divide by our exptime for that standard
         spec = rss._data[fibidx[0],:]/exptime
         

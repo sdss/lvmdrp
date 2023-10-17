@@ -31,6 +31,12 @@ def interpolate_mask(x, y, mask, kind='linear', fill_value=0):
 
     return yy
 
+class GaiaStarNotFound(Exception):
+    '''
+        Signal that the star has no BP-RP spectrum
+    '''
+    pass
+
 
 def retrive_gaia_star(gaiaID, GAIA_CACHE_DIR):
     '''
@@ -49,9 +55,12 @@ def retrive_gaia_star(gaiaID, GAIA_CACHE_DIR):
                 str(gaiaID)+'&format=CSV&DATA_STRUCTURE=RAW'
         FILE = GAIA_CACHE_DIR+'/XP_'+str(gaiaID)+'_RAW.csv'
 
-        with open(FILE, 'w') as f, \
-                requests.get(CSV_URL, stream=True) as r:
-            f.write(r.content.decode('utf-8'))
+        with requests.get(CSV_URL, stream=True) as r:
+            r.raise_for_status()
+            if len(r.content) < 2:
+                raise GaiaStarNotFound(f"Gaia DR3 {gaiaID} has no BP-RP spectrum!")
+            with open(FILE, 'w') as f:
+                f.write(r.content.decode('utf-8'))
 
         # convert coefficients to sampled spectrum
         _, _ = calibrate(FILE, output_path=GAIA_CACHE_DIR, output_file='gaia_spec_'+str(gaiaID), output_format='csv')
