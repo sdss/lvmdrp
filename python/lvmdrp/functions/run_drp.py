@@ -7,12 +7,14 @@ import yaml
 import pandas as pd
 from typing import Union
 from functools import lru_cache
+from itertools import groupby
 import numpy as np
 
 import astropy.units as u
 from astropy.io import fits
 from astropy.table import Table
 from astropy.wcs import WCS
+from lvmdrp.core.rss import RSS
 from lvmdrp.functions.imageMethod import (preproc_raw_frame, create_master_frame,
                                           create_pixelmask, detrend_frame,
                                           find_peaks_auto, trace_peaks,
@@ -909,6 +911,71 @@ def _parse_expnum_cam(name: str) -> tuple:
     return int(ss[-1]), ss[-2]
 
 
+def build_supersky(tileid: int, mjd: int, expnum: int) -> fits.BinTableHDU:
+    """return super sky FITS table for a given exposure
+
+    Parameters
+    ----------
+    tileid : int
+        the sky tileid
+    mjd : int
+        the MJD of observation
+    expnum : int
+        the exposure number
+
+    Returns
+    -------
+    fits.BinTableHDU
+        the super sky table
+    """
+    # select files for sky fibers
+    fsci_paths = sorted(path.expand("lvm_anc", mjd=mjd, tileid=tileid, drpver=drpver,
+                                kind="f", camera="*", imagetype="object", expnum=expnum))
+    
+    fsci_paths_cam = groupby(fsci_paths, lambda x: x.split("-")[-2])
+    sky_wave = []
+    sky = []
+    sky_error = []
+    fiberidx = []
+    spec = []
+    telescope = []
+    for cam, paths in fsci_paths_cam:
+        specid = int(cam[-1])
+        paths = sorted(list(paths))
+
+        for sci_path in paths:
+            
+            # load flafielded camera frame
+            fsci = RSS()
+            fsci.loadFitsData(sci_path)
+            # sky fiber selection
+            slitmap = fsci._slitmap[fsci._slitmap["spectrographid"] == specid]
+            select_skye = slitmap["telescope"] == "SkyE"
+            select_skyw = slitmap["telescope"] == "SkyW"
+            fiberidx_e = np.repeat(np.where(select_skye)[0][:, None], fsci._pixels.size, axis=1)
+            fiberidx_w = np.repeat(np.where(select_skyw)[0][:, None], fsci._pixels.size, axis=1)
+
+            # create super sky table
+            nsam_e = np.sum(select_skye) * fsci._pixels.size
+            nsam_w = np.sum(select_skyw) * fsci._pixels.size
+            sky_wave.extend(fsci._wave[select_skye].ravel().tolist() + fsci._wave[select_skyw].ravel().tolist())
+            sky.extend(fsci._data[select_skye].ravel().tolist() + fsci._data[select_skyw].ravel().tolist())
+            sky_error.extend(fsci._error[select_skye].ravel().tolist() + fsci._error[select_skyw].ravel().tolist())
+            fiberidx.extend(fiberidx_e.ravel().tolist() + fiberidx_w.ravel().tolist())
+            spec.extend([specid] * (nsam_e + nsam_w))
+            telescope.extend(["east"] * nsam_e + ["west"] * nsam_w)
+    sort_idx = np.argsort(sky_wave)
+    wave_c = fits.Column(name="wave", array=np.array(sky_wave)[sort_idx], unit="angstrom", format="E")
+    sky_c = fits.Column(name="sky", array=np.array(sky)[sort_idx], unit=fsci._header["BUNIT"], format="E")
+    sky_error_c = fits.Column(name="sky_error", array=np.array(sky_error)[sort_idx], unit=fsci._header["BUNIT"], format="E")
+    fiberidx_c = fits.Column(name="fiberidx", array=np.array(fiberidx)[sort_idx], format="J")
+    spec_c = fits.Column(name="spectrographid", array=np.array(spec)[sort_idx], format="J")
+    telescope_c = fits.Column(name="telescope", array=np.array(telescope)[sort_idx], format="4A")
+    supersky = fits.BinTableHDU.from_columns([wave_c, sky_c, sky_error_c, fiberidx_c, spec_c, telescope_c], name="SUPERSKY")
+
+    return supersky
+
+
 def combine_cameras(tileid: int, mjd: int, expnum: int = None, spec: int = 1):
     """ Combine the cameras together
 
@@ -1016,6 +1083,8 @@ def combine_spectrographs(tileid: int, mjd: int, expnum: int) -> fits.HDUList:
     err_data = stack_ext(files, ext='ERROR')
     mask_data = stack_ext(files, ext='BADPIX')
     fwhm_data = stack_ext(files, ext='INSTFWHM')
+    sky_data = stack_ext(files, ext="SKY")
+    sky_error = stack_ext(files, ext="SKY_ERROR")
 
     # update the primary header
     hdr['SPEC'] = ', '.join([i.split('-')[2] for i in files])
@@ -1037,8 +1106,13 @@ def combine_spectrographs(tileid: int, mjd: int, expnum: int) -> fits.HDUList:
     err = fits.ImageHDU(err_data, name='ERROR')
     mask = fits.ImageHDU(mask_data, name='MASK')
     fwhm = fits.ImageHDU(fwhm_data, name='FWHM')
+    sky = fits.ImageHDU(sky_data, name="SKY")
+    sky_error = fits.ImageHDU(sky_error, name="SKY_ERROR")
 
-    hdulist = fits.HDUList([prim, flux, err, mask, wave, fwhm, fibermap])
+    # build super sky
+    supersky = build_supersky(tileid, mjd, expnum)
+
+    hdulist = fits.HDUList([prim, flux, err, mask, wave, fwhm, sky, sky_error, supersky, fibermap])
 
     # write out new file
     hdulist.writeto(cframe, overwrite=True)
