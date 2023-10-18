@@ -169,6 +169,7 @@ class RSS(FiberRows):
         arc_position_x=None,
         arc_position_y=None,
         slitmap=None,
+        fluxcal=None,
         good_fibers=None,
         fiber_type=None,
         logwave=False,
@@ -205,6 +206,7 @@ class RSS(FiberRows):
             self._sky_error = sky_error
         
         self.setSlitmap(slitmap)
+        self.set_fluxcal(fluxcal)
 
     def __mul__(self, other):
         """
@@ -482,6 +484,7 @@ class RSS(FiberRows):
         extension_hdr=None,
         extension_PT=None,
         extension_slitmap=None,
+        extension_fluxcal=None,
         logwave=False,
     ):
         """
@@ -511,6 +514,7 @@ class RSS(FiberRows):
             and extension_sky is None
             and extension_skyerror is None
             and extension_slitmap is None
+            and extension_fluxcal is None
         ):
             self._data = hdu[0].data.astype("float32")
             self.setHeader(header=hdu[0].header, origin=file)
@@ -526,14 +530,16 @@ class RSS(FiberRows):
                         self.setWave(hdu[i].data.astype("float32"))
                     if hdu[i].header["EXTNAME"].split()[0] == "INSTFWHM":
                         self.setInstFWHM(hdu[i].data.astype("float32"))
-                    if hdu[i].header["EXTNAME"].split()[0] == "POSTABLE":
-                        self.loadFitsPosTable(hdu[i])
                     if hdu[i].header["EXTNAME"].split()[0] == "SLITMAP":
                         self.setSlitmap(Table(hdu[i].data))
                     if hdu[i].header["EXTNAME"].split()[0] == "SKY":
                         self._sky = hdu[i].data.astype("float32")
                     if hdu[i].header["EXTNAME"].split()[0] == "SKY_ERROR":
                         self._sky_error = hdu[i].data.astype("float32")
+                    if hdu[i].header["EXTNAME"].split()[0] == "FLUXCAL":
+                        self.set_fluxcal(Table(hdu[i].data))
+                    if hdu[i].header["EXTNAME"].split()[0] == "POSTABLE":
+                        self.loadFitsPosTable(hdu[i])
         else:
             if extension_hdr is not None:
                 self.setHeader(hdu[extension_hdr].header, origin=file)
@@ -554,6 +560,8 @@ class RSS(FiberRows):
                 self._sky = hdu[extension_sky].data.astype("float32")
             if extension_skyerror is not None:
                 self._sky_error = hdu[extension_skyerror].data.astype("float32")
+            if extension_fluxcal is not None:
+                self.set_fluxcal(Table(hdu[extension_fluxcal].data))
         
         self._fibers = self._data.shape[0]
         self._pixels = numpy.arange(self._data.shape[1])
@@ -571,6 +579,7 @@ class RSS(FiberRows):
         extension_sky=None,
         extension_skyerror=None,
         extension_slitmap=None,
+        extension_fluxcal=None,
         include_PT=True,
     ):
         """
@@ -604,7 +613,7 @@ class RSS(FiberRows):
         if self._sky_error is not None:
             self._sky_error = self._sky_error.astype(numpy.float32)
 
-        hdus = [None, None, None, None, None, None, None, None]  # create empty list for hdu storage
+        hdus = [None, None, None, None, None, None, None, None, None]  # create empty list for hdu storage
 
         # create primary hdus and image hdus
         # data hdu
@@ -616,6 +625,7 @@ class RSS(FiberRows):
             and extension_slitmap is None
             and extension_sky is None
             and extension_skyerror is None
+            and extension_fluxcal is None
         ):
             hdus[0] = pyfits.PrimaryHDU(self._data)
             if self._wave is not None:
@@ -633,6 +643,8 @@ class RSS(FiberRows):
                 hdus[6] = pyfits.ImageHDU(self._sky, name="SKY")
             if self._sky_error is not None:
                 hdus[7] = pyfits.ImageHDU(self._sky_error, name="SKY_ERROR")
+            if self._fluxcal is not None:
+                hdus[8] = pyfits.BinTableHDU(self._fluxcal, name="FLUXCAL")
         else:
             if extension_data == 0:
                 hdus[0] = pyfits.PrimaryHDU(self._data)
@@ -682,6 +694,12 @@ class RSS(FiberRows):
                 hdu = pyfits.PrimaryHDU(self._sky_error)
             elif extension_skyerror > 0 and extension_skyerror is not None:
                 hdus[extension_skyerror] = pyfits.ImageHDU(self._sky_error, name="SKY_ERROR")
+            
+            # fluxcal hdu
+            if extension_fluxcal == 0:
+                hdu = pyfits.PrimaryHDU(self._fluxcal)
+            elif extension_fluxcal > 0 and extension_fluxcal is not None:
+                hdus[extension_fluxcal] = pyfits.BinTableHDU(self._fluxcal, name="FLUXCAL")
 
         if include_PT:
             try:
@@ -2175,6 +2193,12 @@ class RSS(FiberRows):
                 self._inst_fwhm[self._mask] = numpy.nan
 
         return self._data, self._error, self._inst_fwhm
+
+    def set_fluxcal(self, fluxcal):
+        self._fluxcal = fluxcal
+    
+    def get_fluxcal(self):
+        return self._fluxcal
 
 
 def loadRSS(infile, extension_data=None, extension_mask=None, extension_error=None, extension_sky=None):
