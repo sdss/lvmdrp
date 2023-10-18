@@ -80,7 +80,11 @@ def fluxcal_Gaia(camera, in_rss, plot=True, GAIA_CACHE_DIR=None):
     log.info(f"Using Gaia CACHE DIR '{GAIA_CACHE_DIR}'")
 
     # get the list of standards from the header
-    stds = retrieve_header_stars(in_rss)
+    try:
+        stds = retrieve_header_stars(in_rss)
+    except KeyError:
+        log.warning("no standard star information found, skipping flux calibration")
+        return
 
     # load input RSS
     log.info(f"loading input RSS file '{os.path.basename(in_rss)}'")
