@@ -1500,10 +1500,10 @@ def interpolate_sky(in_rss: str, out_sky: str, out_rss: str = None, which: str =
     weights = 1 / svars
 
     # define interpolation functions
+    # NOTE: store a super sampled version of the splines as an extension of the sky RSS
     f_data = interpolate.make_smoothing_spline(swave[~smask], ssky[~smask], w=weights[~smask], lam=1e-6)
     f_error = interpolate.make_smoothing_spline(swave[~smask], svars[~smask], w=weights[~smask], lam=1e-6)
     f_mask = interpolate.interp1d(swave, smask, kind="nearest", bounds_error=False, fill_value=0)
-
 
     fig, axs = create_subplots(to_display=display_plots, figsize=(20,10), nrows=2, ncols=1, sharex=True)
     axs[0].scatter(swave, ssky, s=1, color="tab:blue", label="super sky")
@@ -1570,7 +1570,7 @@ def interpolate_sky(in_rss: str, out_sky: str, out_rss: str = None, which: str =
     return f_data, f_error, sky_rss, swave, ssky, svars, smask
 
 
-def quick_sky_subtraction(in_rss: str, out_rss, in_skye: str, in_skyw: str, master_sky: str = "combine", sky_weights: Tuple[float, float] = None) -> RSS:
+def quick_sky_subtraction(in_rss: str, out_rss, in_skye: str, in_skyw: str, sky_weights: Tuple[float, float] = None, skip_subtraction: bool = False) -> RSS:
     """Quick sky subtraction using the sky fibers from both telescopes
 
     Parameters
@@ -1583,10 +1583,10 @@ def quick_sky_subtraction(in_rss: str, out_rss, in_skye: str, in_skyw: str, mast
         input SkyE RSS file
     in_skyw : str
         input SkyW RSS file
-    master_sky : str, optional
-        which sky telescope to use as master, by default "combine"
     sky_weights : Tuple[float, float]
         weights for each telescope when master_sky = 'combine', by default None
+    skip_subtraction : bool, optional
+        whether to skip sky subtraction or not, by default False
 
     Returns
     -------
@@ -1620,46 +1620,45 @@ def quick_sky_subtraction(in_rss: str, out_rss, in_skye: str, in_skyw: str, mast
         f"(SKYERA, SKYEDEC: {ra_e, dec_e}; SKYWRA, SKYWDEC: {ra_w, dec_w}) "
         f"in science telescope pointing (SCIRA, SCIDEC: {ra_s, dec_s})")
 
-    master_sky = master_sky.lower()
-    if master_sky == "combine":
-        log.info("using master sky: weighted average of both telescopes")
-        
-        if sky_weights is None:
-            ad = ang_distance(ra_e, dec_e, ra_s, dec_s)
-            w_e = 1 / (ad if ad>0 else 1)
-            ad = ang_distance(ra_w, dec_w, ra_s, dec_s)
-            w_w = 1 / (ad if ad>0 else 1)
-            w_norm = w_e + w_w
+    if sky_weights is None:
+        ad = ang_distance(ra_e, dec_e, ra_s, dec_s)
+        w_e = 1 / (ad if ad>0 else 1)
+        ad = ang_distance(ra_w, dec_w, ra_s, dec_s)
+        w_w = 1 / (ad if ad>0 else 1)
+        w_norm = w_e + w_w
+        w_e, w_w = w_e / w_norm, w_w / w_norm
+        log.info(f"calculated weights SkyE: {w_e:.3f}, SkyW: {w_w:.3f}")
+    elif len(sky_weights) == 2:
+        w_e, w_w = sky_weights
+        w_norm = w_e + w_w
+        if w_norm != 1:
             w_e, w_w = w_e / w_norm, w_w / w_norm
-            log.info(f"calculated weights SkyE: {w_e:.3f}, SkyW: {w_w:.3f}")
-        elif len(sky_weights) == 2:
-            w_e, w_w = sky_weights
-            w_norm = w_e + w_w
-            if w_norm != 1:
-                w_e, w_w = w_e / w_norm, w_w / w_norm
-            log.info(f"assuming user-provided weights SkyE: {w_e:.3f}, SkyW: {w_w:.3f}")
-        else:
-            raise ValueError(f"invalid value for 'sky_weights' parameter: '{sky_weights}'")
-
-        sky = sky_e * w_e + sky_w * w_w
-    elif master_sky in {"east", "e", "skye"}:
-        log.info(f"using master sky: SkyE ({os.path.basename(in_skye)})")
-        sky = sky_e
-    elif master_sky in {"west", "w", "skyw"}:
-        log.info(f"using master sky: SkyW ({os.path.basename(in_skyw)})")
-        sky = sky_w
+        log.info(f"assuming user-provided weights SkyE: {w_e:.3f}, SkyW: {w_w:.3f}")
     else:
-        raise ValueError(f"invalid value for 'master_sky' parameter: '{master_sky}'")
+        raise ValueError(f"invalid value for 'sky_weights' parameter: '{sky_weights}'")
 
-    # subtract sky from data
-    log.info("subtracting interpolated sky from original data")
-    new_data = rss._data - sky._data
-    new_error = np.sqrt(rss._error ** 2 + sky._error ** 2)
-    new_mask = rss._mask# | sky._mask
+    # define master sky
+    sky = sky_e * w_e + sky_w * w_w
+    
+    # subtract master sky from data
+    if skip_subtraction:
+        log.info(f"skipping sky subtraction, saving master sky in '{os.path.basename(out_rss)}'")
+        new_data = rss._data
+        new_error = rss._error
+        new_mask = rss._mask
+    else:
+        log.info("subtracting interpolated sky from original data")
+        new_data = rss._data - sky._data
+        new_error = np.sqrt(rss._error ** 2 + sky._error ** 2)
+        new_mask = rss._mask
 
     # write output sky-subtracted RSS
     log.info(f"writing output sky-subtracted RSS file '{os.path.basename(out_rss)}'")
+    rss.setHdrValue("SKYSUB", not skip_subtraction, "sky subtracted?")
+    rss.setHdrValue("SKYEW", w_e, "SkyE weight")
+    rss.setHdrValue("SKYWW", w_w, "SkyW weight")
     rss.setData(data=new_data, error=new_error, mask=new_mask)
+    rss.set_sky(rss_sky=sky)
     rss.writeFitsData(out_rss)
 
     return rss

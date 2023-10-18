@@ -120,6 +120,12 @@ class RSS(FiberRows):
             mask=numpy.zeros((n_spectra, ref_spec._mask.size), dtype=bool)
             if ref_spec._mask is not None
             else None,
+            sky=numpy.zeros((n_spectra, ref_spec._data.size))
+            if ref_spec._sky is not None
+            else None,
+            sky_error=numpy.zeros((n_spectra, ref_spec._data.size))
+            if ref_spec._sky_error is not None
+            else None,
             header=header,
             shape=shape,
             size=size,
@@ -156,6 +162,8 @@ class RSS(FiberRows):
         header=None,
         error=None,
         mask=None,
+        sky=None,
+        sky_error=None,
         shape=None,
         size=None,
         arc_position_x=None,
@@ -183,12 +191,18 @@ class RSS(FiberRows):
         self._wave_start = None
         self._res_elements = None
         self._inst_fwhm = None
+        self._sky = None
+        self._sky_error = None
         if wave is not None:
             self.setWave(wave)
         else:
             self.createWavefromHdr(logwave=logwave)
         if inst_fwhm is not None:
             self.setInstFWHM(inst_fwhm)
+        if sky is not None:
+            self._sky = sky
+        if sky_error is not None:
+            self._sky_error = sky_error
         
         self.setSlitmap(slitmap)
 
@@ -442,6 +456,19 @@ class RSS(FiberRows):
                 if logwave:
                     self._wave = 10 ** (self._wave)
 
+    def set_sky(self, rss_sky):
+        assert rss_sky._data.shape == self._data.shape
+        self._sky = rss_sky._data
+        if rss_sky._error is not None:
+            self._sky_error = rss_sky._error
+
+    def get_sky(self):
+        header = self._header
+        if header is not None:
+            header["IMAGETYP"] = "sky"
+            header["OBJECT"] = "sky"
+        return RSS(data=self._sky, error=self._sky_error, mask=self._mask, wave=self._wave, inst_fwhm=self._inst_fwhm, header=header)
+
     def loadFitsData(
         self,
         file,
@@ -450,6 +477,8 @@ class RSS(FiberRows):
         extension_error=None,
         extension_wave=None,
         extension_fwhm=None,
+        extension_sky=None,
+        extension_skyerror=None,
         extension_hdr=None,
         extension_PT=None,
         extension_slitmap=None,
@@ -479,6 +508,8 @@ class RSS(FiberRows):
             and extension_error is None
             and extension_wave is None
             and extension_fwhm is None
+            and extension_sky is None
+            and extension_skyerror is None
             and extension_slitmap is None
         ):
             self._data = hdu[0].data.astype("float32")
@@ -499,6 +530,10 @@ class RSS(FiberRows):
                         self.loadFitsPosTable(hdu[i])
                     if hdu[i].header["EXTNAME"].split()[0] == "SLITMAP":
                         self.setSlitmap(Table(hdu[i].data))
+                    if hdu[i].header["EXTNAME"].split()[0] == "SKY":
+                        self._sky = hdu[i].data.astype("float32")
+                    if hdu[i].header["EXTNAME"].split()[0] == "SKY_ERROR":
+                        self._sky_error = hdu[i].data.astype("float32")
         else:
             if extension_hdr is not None:
                 self.setHeader(hdu[extension_hdr].header, origin=file)
@@ -515,6 +550,10 @@ class RSS(FiberRows):
                 self.setInstFWHM(hdu[extension_fwhm].data.astype("float32"))
             if extension_slitmap is not None:
                 self.setSlitmap(Table(hdu[extension_slitmap].data))
+            if extension_sky is not None:
+                self._sky = hdu[extension_sky].data.astype("float32")
+            if extension_skyerror is not None:
+                self._sky_error = hdu[extension_skyerror].data.astype("float32")
         
         self._fibers = self._data.shape[0]
         self._pixels = numpy.arange(self._data.shape[1])
@@ -529,6 +568,8 @@ class RSS(FiberRows):
         extension_error=None,
         extension_wave=None,
         extension_fwhm=None,
+        extension_sky=None,
+        extension_skyerror=None,
         extension_slitmap=None,
         include_PT=True,
     ):
@@ -558,8 +599,12 @@ class RSS(FiberRows):
             self._wave = self._wave.astype(numpy.float32)
         if self._inst_fwhm is not None:
             self._inst_fwhm = self._inst_fwhm.astype(numpy.float32)
+        if self._sky is not None:
+            self._sky = self._sky.astype(numpy.float32)
+        if self._sky_error is not None:
+            self._sky_error = self._sky_error.astype(numpy.float32)
 
-        hdus = [None, None, None, None, None, None, None]  # create empty list for hdu storage
+        hdus = [None, None, None, None, None, None, None, None]  # create empty list for hdu storage
 
         # create primary hdus and image hdus
         # data hdu
@@ -569,6 +614,8 @@ class RSS(FiberRows):
             and extension_mask is None
             and extension_wave is None
             and extension_slitmap is None
+            and extension_sky is None
+            and extension_skyerror is None
         ):
             hdus[0] = pyfits.PrimaryHDU(self._data)
             if self._wave is not None:
@@ -582,7 +629,10 @@ class RSS(FiberRows):
                 hdus[4] = pyfits.ImageHDU(self._mask.astype("uint8"), name="BADPIX")
             if self._slitmap is not None:
                 hdus[5] = pyfits.BinTableHDU(self._slitmap, name="SLITMAP")
-
+            if self._sky is not None:
+                hdus[6] = pyfits.ImageHDU(self._sky, name="SKY")
+            if self._sky_error is not None:
+                hdus[7] = pyfits.ImageHDU(self._sky_error, name="SKY_ERROR")
         else:
             if extension_data == 0:
                 hdus[0] = pyfits.PrimaryHDU(self._data)
@@ -620,6 +670,18 @@ class RSS(FiberRows):
                 hdu = pyfits.PrimaryHDU(self._slitmap)
             elif extension_slitmap > 0 and extension_slitmap is not None:
                 hdus[extension_slitmap] = pyfits.BinTableHDU(self._slitmap, name="SLITMAP")
+
+            # sky hdu
+            if extension_sky == 0:
+                hdu = pyfits.PrimaryHDU(self._sky)
+            elif extension_sky > 0 and extension_sky is not None:
+                hdus[extension_sky] = pyfits.ImageHDU(self._sky, name="SKY")
+            
+            # sky error hdu
+            if extension_skyerror == 0:
+                hdu = pyfits.PrimaryHDU(self._sky_error)
+            elif extension_skyerror > 0 and extension_skyerror is not None:
+                hdus[extension_skyerror] = pyfits.ImageHDU(self._sky_error, name="SKY_ERROR")
 
         if include_PT:
             try:
@@ -671,7 +733,19 @@ class RSS(FiberRows):
             mask = self._mask[fiber, :]
         else:
             mask = None
-        spec = Spectrum1D(wave, data, error=error, mask=mask, inst_fwhm=inst_fwhm)
+        
+        if self._sky is not None:
+            sky = self._sky[fiber, :]
+        else:
+            sky = None
+        
+        if self._sky_error is not None:
+            sky_error = self._sky_error[fiber, :]
+        else:
+            sky_error = None
+
+        spec = Spectrum1D(wave, data, error=error, mask=mask, inst_fwhm=inst_fwhm, sky=sky, sky_error=sky_error)
+        
         return spec
 
     def combineRSS(self, rss_in, method="mean", replace_error=1e10):
@@ -681,19 +755,30 @@ class RSS(FiberRows):
             mask = numpy.zeros((len(rss_in), dim[0], dim[1]), dtype="bool")
         else:
             mask = None
+       
         if rss_in[0]._error is not None:
             error = numpy.zeros((len(rss_in), dim[0], dim[1]), dtype=numpy.float32)
         else:
             error = None
+        
+        if rss_in[0]._sky is not None:
+            sky = numpy.zeros((len(rss_in), dim[0], dim[1]), dtype=numpy.float32)
+        else:
+            sky = None
+        
         for i in range(len(rss_in)):
             data[i, :, :] = rss_in[i]._data
             if mask is not None:
                 mask[i, :, :] = rss_in[i]._mask
             if error is not None:
                 error[i, :, :] = rss_in[i]._error
+            if sky is not None:
+                sky[i, :, :] = rss_in[i]._sky
 
         combined_data = numpy.zeros(dim, dtype=numpy.float32)
         combined_error = numpy.zeros(dim, dtype=numpy.float32)
+        combined_sky = numpy.zeros(dim, dtype=numpy.float32)
+        
         if method == "sum":
             if mask is not None:
                 data[mask] = 0
@@ -708,6 +793,9 @@ class RSS(FiberRows):
                     )
                 else:
                     combined_error = None
+                if sky is not None:
+                    sky[mask] = 0
+                    combined_sky[select_mean] = bn.nansum(sky, 0)[select_mean]
             else:
                 combined_mask = None
                 combined_data = bn.nansum(data, 0) / data.shape[0]
@@ -717,6 +805,10 @@ class RSS(FiberRows):
                     )
                 else:
                     combined_error = None
+                if sky is not None:
+                    combined_sky = bn.nansum(sky, 0) / sky.shape[0]
+                else:
+                    combined_sky = None
 
         if method == "mean":
             if mask is not None:
@@ -735,6 +827,13 @@ class RSS(FiberRows):
                     )
                 else:
                     combined_error = None
+                if sky is not None:
+                    sky[mask] = 0
+                    combined_sky[select_mean] = (
+                        bn.nansum(sky, 0)[select_mean] / good_pix[select_mean]
+                    )
+                else:
+                    combined_sky = None
             else:
                 combined_mask = None
                 combined_data = bn.nansum(data, 0) / data.shape[0]
@@ -744,35 +843,69 @@ class RSS(FiberRows):
                     )
                 else:
                     combined_error = None
+                if sky is not None:
+                    combined_sky = bn.nansum(sky, 0) / sky.shape[0]
+                else:
+                    combined_sky = None
 
         if method == "weighted_mean" and error is not None:
             if mask is not None:
                 good_pix = bn.nansum(numpy.logical_not(mask), 0)
                 select_mean = good_pix > 0
-                combined_data = bn.nansum(data / error**2, 0) / bn.nansum(
-                    1 / error**2, 0
-                )
-                combined_mask = good_pix == 0
-                combined_error = 1.0 / numpy.sqrt(bn.nansum(1 / error**2, 0))
+                
+                var = error**2
+                weights = numpy.divide(1, var, out=numpy.zeros_like(var), where=var != 0)
+                weights /= bn.nansum(weights, 0)
+                combined_data[good_pix] = bn.nansum(data[good_pix] * var[good_pix], 0)
+                combined_error[good_pix] = numpy.sqrt(bn.nansum(var[good_pix], 0))
+                combined_mask = ~good_pix
                 combined_error[combined_mask] = replace_error
+                if sky is not None:
+                    combined_sky[good_pix] = bn.nansum(sky[good_pix] * var[good_pix], 0)
+                else:
+                    combined_sky = None
             else:
-                combined_data = bn.nansum(data / error**2, 0) / bn.nansum(
-                    1 / error**2, 0
-                )
-                combined_error = 1.0 / numpy.sqrt(bn.nansum(1.0 / error**2, 0))
+                var = error**2
+                weights = numpy.divide(1, var, out=numpy.zeros_like(var), where=var != 0)
+                weights /= bn.nansum(weights, 0)
+                combined_data = bn.nansum(data * weights, 0)
+                combined_error = numpy.sqrt(bn.nansum(var, 0))
                 combined_mask = None
+                if sky is not None:
+                    combined_sky = bn.nansum(sky * weights, 0)
+                else:
+                    combined_sky = None
 
         if method == "median":
             if mask is not None:
                 good_pix = bn.nansum(numpy.logical_not(mask), 0)
-                select_mean = good_pix > 0
-                combined_data = bn.nanmedian(data, 0)
-                combined_mask = good_pix == 0
-                combined_error = None
+                combined_data[good_pix] = bn.nanmedian(data[good_pix], 0)
+                combined_mask = ~good_pix
+                if error is not None:
+                    combined_error[good_pix] = numpy.sqrt(bn.nanmedian(error[good_pix] ** 2, 0))
+                    combined_error[combined_mask] = replace_error
+                else:
+                    combined_error = None
+                if sky is not None:
+                    combined_sky[good_pix] = bn.nanmedian(sky[good_pix], 0)
+                else:
+                    combined_sky = None
             else:
-                combined_data = bn.nanmedian(data, 0) / bn.nansum(1 / error**2, 0)
-                combined_error = None
+                combined_data = bn.nanmedian(data, 0)
+                if error is not None:
+                    combined_error = numpy.sqrt(bn.nanmedian(error**2, 0))
+                else:
+                    combined_error = None
                 combined_mask = None
+                if sky is not None:
+                    combined_sky = bn.nanmedian(sky, 0)
+                else:
+                    combined_sky = None
+            
+        else:
+            if method == "weighted_mean":
+                raise ValueError(f"Method {method} is not supported when error is None")
+            raise ValueError(f"Method {method} is not supported")
 
         self._data = combined_data
         self._wave = rss_in[0]._wave
@@ -789,6 +922,7 @@ class RSS(FiberRows):
         self._good_fibers = rss_in[i]._good_fibers
         self._fiber_type = rss_in[i]._fiber_type
         self._slitmap = rss_in[i]._slitmap
+        self._sky = combined_sky
 
     def setSpec(self, fiber, spec):
         if spec._data is not None and self._data is not None:
@@ -799,6 +933,9 @@ class RSS(FiberRows):
 
         if spec._mask is not None and self._mask is not None:
             self._mask[fiber, :] = spec._mask
+
+        if spec._sky is not None and self._sky is not None:
+            self._sky[fiber, :] = spec._sky
 
     def createAperSpec(self, cent_x, cent_y, radius):
         if self._arc_position_x is not None and self._arc_position_y is not None:
@@ -825,7 +962,9 @@ class RSS(FiberRows):
             # idx = numpy.argsort(wave)
             _, idx = numpy.unique(wave, return_index=True)
             wave = wave[idx]
+            
             data = self._data[select].flatten()[idx]
+            
             if self._error is not None:
                 error = self._error[select].flatten()[idx]
             else:
@@ -838,16 +977,25 @@ class RSS(FiberRows):
                 mask = self._mask[select].flatten()[idx]
             else:
                 mask = None
+            if self._sky is not None:
+                sky = self._sky[select].flatten()[idx]
         else:
             if self._mask is not None:
                 select = numpy.logical_not(self._mask)
             else:
                 select = numpy.ones(self._data.shape, dtype="bool")
+            
             data = numpy.zeros(self._data.shape[1], dtype=numpy.float32)
+            
             if self._error is not None:
                 error = numpy.zeros(self._data.shape[1], dtype=numpy.float32)
             else:
                 error = None
+            if self._sky is not None:
+                sky = numpy.zeros(self._data.shape[1], dtype=numpy.float32)
+            else:
+                sky = None
+            
             for i in range(self._data.shape[1]):
                 if numpy.sum(select[:, i]) > 0:
                     if method == "mean":
@@ -857,27 +1005,39 @@ class RSS(FiberRows):
                                 numpy.sum(self._error[select[:, i], i] ** 2)
                                 / numpy.sum(select[:, i]) ** 2
                             )
+                        if sky is not None:
+                            sky[i] = numpy.mean(self._sky[select[:, i], i])
                     elif method == "sum":
                         data[i] = numpy.sum(self._data[select[:, i], i])
                         if error is not None:
                             error[i] = numpy.sqrt(
                                 numpy.sum(self._error[select[:, i], i] ** 2)
                             )
+                        if sky is not None:
+                            sky[i] = numpy.sum(self._sky[select[:, i], i])
+            
             if self._mask is not None:
                 bad = numpy.sum(self._mask, 0)
                 mask = bad == self._fibers
             else:
                 mask = None
-            inst_fwhm = self._inst_fwhm
+            
             wave = self._wave
+            if self._inst_fwhm is not None and len(self._inst_fwhm.shape) == 2:
+                inst_fwhm = numpy.mean(self._inst_fwhm, 0)
+            else:
+                inst_fwhm = self._inst_fwhm
+        
         header = self._header
+        
         spec = Spectrum1D(
             wave=wave,
             data=data,
             error=error,
             inst_fwhm=inst_fwhm,
             mask=mask,
-            header=header,
+            sky=sky,
+            header=header
         )
         return spec
 
@@ -885,10 +1045,12 @@ class RSS(FiberRows):
         collapsed = numpy.zeros(self._fibers, dtype=numpy.float32)
         for i in range(self._fibers):
             spec = self[i]
+            
             if spec._mask is not None:
                 goodpix = numpy.logical_not(spec._mask)
             else:
                 goodpix = numpy.ones(spec._data.dim[0], dtype=numpy.float32)
+            
             if numpy.sum(goodpix) > 0:
                 if method == "median":
                     collapsed[i] = numpy.median(spec._data[goodpix])
@@ -1841,6 +2003,11 @@ class RSS(FiberRows):
                 inst_fwhm = self._inst_fwhm
         else:
             inst_fwhm = None
+        
+        if self._sky is not None:
+            sky = self._sky[select, :]
+        else:
+            sky = None
 
         rss = RSS(
             data=data,
@@ -1849,6 +2016,7 @@ class RSS(FiberRows):
             header=self.getHeader(),
             error=error,
             mask=mask,
+            sky=sky,
             shape=self._shape,
             size=self._size,
             arc_position_x=arc_position_x,
@@ -1877,6 +2045,10 @@ class RSS(FiberRows):
                     mask = self._mask[:, parts[i]]
                 else:
                     mask = None
+                if self._sky is not None:
+                    sky = self._sky[:, parts[i]]
+                else:
+                    sky = None
                 if self._wave is not None:
                     if len(self._wave.shape) == 2:
                         wave = self._wave[:, parts[i]]
@@ -1901,6 +2073,10 @@ class RSS(FiberRows):
                     mask = self._mask[parts[i]]
                 else:
                     mask = None
+                if self._sky is not None:
+                    sky = self._sky[parts[i]]
+                else:
+                    sky = None
                 if self._wave is not None:
                     if len(self._wave.shape) == 2:
                         wave = self._wave[parts[i]]
@@ -1922,6 +2098,7 @@ class RSS(FiberRows):
                 mask=mask,
                 wave=wave,
                 inst_fwhm=inst_fwhm,
+                sky=sky,
                 header=Header(header=self._header)._header,
                 shape=self._shape,
                 size=self._size,
@@ -1984,7 +2161,6 @@ class RSS(FiberRows):
                         "CRVAL2": 1, "CDELT2": 1, "CTYPE2": "LINEAR"})
             self._header.update(wcs)
 
-
     def apply_pixelmask(self, mask=None):
         if mask is None:
             mask = self._mask
@@ -2001,10 +2177,10 @@ class RSS(FiberRows):
         return self._data, self._error, self._inst_fwhm
 
 
-def loadRSS(infile, extension_data=None, extension_mask=None, extension_error=None):
+def loadRSS(infile, extension_data=None, extension_mask=None, extension_error=None, extension_sky=None):
     rss = RSS()
     rss.loadFitsData(
-        infile, extension_data=None, extension_mask=None, extension_error=None
+        infile, extension_data=None, extension_mask=None, extension_error=None, extension_sky=None
     )
 
     return rss
@@ -2024,6 +2200,8 @@ def glueRSS(infiles, outfile):
                 wave_out = rss._wave
             if rss._inst_fwhm is not None:
                 fwhm_out = rss._inst_fwhm
+            if rss._sky is not None:
+                sky_out = rss._sky
             if rss._header is not None:
                 hdrs.append(Header(rss.getHeader()))
         else:
@@ -2044,6 +2222,10 @@ def glueRSS(infiles, outfile):
                 fwhm_out = numpy.concatenate((fwhm_out, rss._inst_fwhm), axis=1)
             else:
                 fwhm_out = None
+            if rss._sky is not None:
+                sky_out = numpy.concatenate((sky_out, rss._sky), axis=1)
+            else:
+                sky_out = None
             if rss._header is not None:
                 hdrs.append(Header(rss.getHeader()))
     if len(hdrs) > 0:
@@ -2056,6 +2238,7 @@ def glueRSS(infiles, outfile):
         error=error_out,
         mask=mask_out,
         inst_fwhm=fwhm_out,
+        sky=sky_out,
         header=hdr_out.getHeader(),
     )
     rss_out.writeFitsData(outfile)
