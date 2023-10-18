@@ -106,7 +106,8 @@ def get_master_mjd(sci_mjd):
 @click.option('-f', '--use-fiducial-master', is_flag=True, default=False, help='use fiducial master calibration frames')
 @click.option('-s', '--skip-sky-subtraction', is_flag=True, help='skip sky subtraction')
 @click.option('--sky-weights', type=(float, float), default=None, help='weights for the master sky combination')
-def quick_reduction(expnum: int, use_fiducial_master: bool, skip_sky_subtraction: bool, sky_weights: Tuple[float, float]) -> None:
+@click.option('-n', '--ncpus', type=int, default=None, help='number of CPUs to use during extraction')
+def quick_reduction(expnum: int, use_fiducial_master: bool, skip_sky_subtraction: bool, sky_weights: Tuple[float, float], ncpus: int) -> None:
     """ Run the Quick DRP for a given exposure number.
     """
     # validate parameters
@@ -209,7 +210,7 @@ def quick_reduction(expnum: int, use_fiducial_master: bool, skip_sky_subtraction
                                   in_slitmap=Table(drp.fibermap.data), reject_cr=False)
         
         # # extract 1d spectra
-        image_tasks.extract_spectra(in_image=dsci_path, out_rss=xsci_path, in_trace=mtrace_path, in_fwhm=mwidth_path, method="optimal", parallel="auto")
+        image_tasks.extract_spectra(in_image=dsci_path, out_rss=xsci_path, in_trace=mtrace_path, in_fwhm=mwidth_path, method="optimal", parallel="auto" if ncpus is None else ncpus)
 
         # wavelength calibrate
         rss_tasks.create_pixel_table(in_rss=xsci_path, out_rss=wsci_path, arc_wave=mwave_path, arc_fwhm=mlsf_path)
