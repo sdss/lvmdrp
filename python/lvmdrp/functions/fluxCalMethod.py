@@ -47,8 +47,10 @@ from scipy import signal
 
 from astropy.time import Time
 from astropy.coordinates import SkyCoord, EarthLocation, AltAz
+from astropy.stats import biweight_location, biweight_scale
 from astropy import units as u
 from astropy.io import fits
+from astropy.table import Table
 
 from lvmdrp.core.rss import RSS, loadRSS
 from lvmdrp.core.spectrum1d import Spectrum1D
@@ -121,8 +123,9 @@ def fluxcal_Gaia(camera, in_rss, plot=True, GAIA_CACHE_DIR=None):
 
     # iterate over standard stars, derive sensitivity curve for each
     res = []
+    res_columns = []
     for s in stds:
-        fiber, gaia_id, exptime, secz = s   # unpack standard star tuple
+        nn, fiber, gaia_id, exptime, secz = s   # unpack standard star tuple
         
         # find the fiber with our spectrum of that Gaia star, if it is not in the current spectrograph, continue
         select = (slitmap["orig_ifulabel"] == fiber)
@@ -155,7 +158,9 @@ def fluxcal_Gaia(camera, in_rss, plot=True, GAIA_CACHE_DIR=None):
         sens = stdflux/spec        
         wgood, sgood = filter_channel(w, sens, 2)
         s = interpolate.make_smoothing_spline(wgood, sgood, lam=1e4)        
-        res.append(s(w))
+        r = s(w).astype(np.float32)
+        res.append(r)
+        res_columns.append(Table.Column(name=f"STD{nn}SEN", dtype="f8", data=r))
 
         # caluculate SDSS g band magnitudes for QC
         # put in header as
@@ -170,8 +175,8 @@ def fluxcal_Gaia(camera, in_rss, plot=True, GAIA_CACHE_DIR=None):
             #plt.ylim(0,0.1e-11)
 
     res = np.array(res)            # list of sensitivity functions in (ergs/s/cm^2/A) / e-
-    rms = np.nanstd(res, axis=0)   # change to biweight_variance
-    mean = np.nanmean(res, axis=0) # change to biweight
+    rms = biweight_location(res, axis=0, ignore_nan=True)
+    mean = biweight_scale(res, axis=0, ignore_nan=True)
 
     if plot:
         plt.ylabel('sensitivity [(ergs/s/cm^2/A) / e-]')
@@ -191,7 +196,23 @@ def fluxcal_Gaia(camera, in_rss, plot=True, GAIA_CACHE_DIR=None):
 
     save_fig(plt.gcf(), product_path=in_rss, to_display=False, figure_path="qa", label="fluxcal")
 
-    return
+    # update input file header
+    if camera[0] == "b":
+        rss.setHdrValue(f"STD{nn}BAB", mAB_std, "AB mag in B-band")
+        rss.setHdrValue(f"STD{nn}BIN", mAB_obs, "AB mag in B-band")
+    elif camera[0] == "r":
+        rss.setHdrValue(f"STD{nn}RAB", mAB_std, "AB mag in R-band")
+        rss.setHdrValue(f"STD{nn}RIN", mAB_obs, "AB mag in R-band")
+    elif camera[0] == "z":
+        rss.setHdrValue(f"STD{nn}ZAB", mAB_std, "AB mag in Z-band")
+        rss.setHdrValue(f"STD{nn}ZIN", mAB_obs, "AB mag in Z-band")
+    # add sensitivity extension
+    sens_table = Table()
+    sens_table.add_columns(res_columns)
+    rss.set_fluxcal(fluxcal=sens_table)
+    rss.writeFitsData(in_rss)
+
+    return res, mean, rms, rss
 
 def retrieve_header_stars(in_rss):
     '''
@@ -214,7 +235,7 @@ def retrieve_header_stars(in_rss):
             stdT = c.transform_to(AltAz(obstime=obstime,location=lco))  
             secz = stdT.secz.value
             #print(gid, fib, et, secz)
-        stddata.append((fiber, gaia_id, exptime, secz))
+        stddata.append((i+1, fiber, gaia_id, exptime, secz))
     return stddata
 
 def mean_absolute_deviation(vals):
