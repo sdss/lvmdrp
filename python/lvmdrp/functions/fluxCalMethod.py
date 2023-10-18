@@ -150,21 +150,24 @@ def fluxcal_Gaia(camera, in_rss, plot=True, GAIA_CACHE_DIR=None):
         # divide to find sensitivity and smooth
         sens = stdflux/spec        
         wgood, sgood = filter_channel(w, sens, 2)
-        s = interpolate.make_smoothing_spline(wgood, sgood, lam=1e4)
+        s = interpolate.make_smoothing_spline(wgood, sgood, lam=1e4)        
+        res.append(s(w))
 
         # caluculate SDSS g band magnitudes for QC
+        # put in header as
+        # STDNNBAB, RAB, ZAB and STDNNBIN, RIN, ZIN
         mAB_std = ancillary_func.spec_to_LVM_mAB(camera, w, stdflux)
         mAB_obs = ancillary_func.spec_to_LVM_mAB(camera, w[np.isfinite(spec)], spec[np.isfinite(spec)])
         log.info(f"AB mag in LVM_{camera[0]}: Gaia {mAB_std:.2f}, instrumental {mAB_obs:.2f}")
+
         if plot:
             plt.plot(wgood, sgood, 'r.', markersize=4)
             plt.plot(w, s(w), linewidth=0.5)
             #plt.ylim(0,0.1e-11)
-            res.append(s(w))
 
-    res = np.array(res)
-    rms = np.nanstd(res, axis=0)
-    mean = np.nanmean(res, axis=0)
+    res = np.array(res)            # list of sensitivity functions in (ergs/s/cm^2/A) / e-
+    rms = np.nanstd(res, axis=0)   # change to biweight_variance
+    mean = np.nanmean(res, axis=0) # change to biweight
 
     if plot:
         plt.ylabel('sensitivity [(ergs/s/cm^2/A) / e-]')
