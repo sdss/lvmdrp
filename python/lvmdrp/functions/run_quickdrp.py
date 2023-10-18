@@ -110,15 +110,16 @@ def quick_reduction(expnum: int, use_fiducial_master: bool, skip_sky_subtraction
     """ Run the Quick DRP for a given exposure number.
     """
     # validate parameters
-    if len(sky_weights) != 2:
-        log.error("sky weights must be a tuple of two floats")
-        return
-    elif any([w < 0.0 for w in sky_weights]):
-        log.error("sky weights must be positive")
-        return
-    elif sum(sky_weights) == 0.0:
-        log.error("sum of sky weights must be non-zero")
-        return
+    if sky_weights is not None:
+        if len(sky_weights) != 2:
+            log.error("sky weights must be a tuple of two floats")
+            return
+        elif any([w < 0.0 for w in sky_weights]):
+            log.error("sky weights must be positive")
+            return
+        elif sum(sky_weights) == 0.0:
+            log.error("sum of sky weights must be non-zero")
+            return
 
     # get target frames metadata
     sci_metadata = md.get_metadata(tileid="*", mjd="*", expnum=expnum, imagetyp="object")
