@@ -463,7 +463,11 @@ class RSS(FiberRows):
             self._sky_error = rss_sky._error
 
     def get_sky(self):
-        return RSS(data=self._sky, error=self._sky_error)
+        header = self._header
+        if header is not None:
+            header["IMAGETYP"] = "sky"
+            header["OBJECT"] = "sky"
+        return RSS(data=self._sky, error=self._sky_error, mask=self._mask, wave=self._wave, inst_fwhm=self._inst_fwhm, header=header)
 
     def loadFitsData(
         self,
