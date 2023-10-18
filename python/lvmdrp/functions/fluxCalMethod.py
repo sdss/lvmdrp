@@ -76,7 +76,7 @@ def fluxcal_Gaia(camera, in_rss, plot=True, GAIA_CACHE_DIR=None):
     Uses Gaia BP-RP spectra for calibration. To be replaced or extended by using fitted stellar 
     atmmospheres.
     '''
-    GAIA_CACHE_DIR = './' if None else GAIA_CACHE_DIR
+    GAIA_CACHE_DIR = './' if GAIA_CACHE_DIR is None else GAIA_CACHE_DIR
     log.info(f"Using Gaia CACHE DIR '{GAIA_CACHE_DIR}'")
 
     # get the list of standards from the header
