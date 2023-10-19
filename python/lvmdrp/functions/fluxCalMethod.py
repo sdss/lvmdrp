@@ -98,7 +98,7 @@ def apply_fluxcal(in_rss: str, out_rss: str, display_plots: bool = False):
     fig, ax = create_subplots(to_display=display_plots, figsize=(15, 5))
     fig.suptitle(f"Flux calibration for {expnum = }, {channel = }")
     log.info(f"computing joint sensitivity curve for channel {channel}")
-    # scale by exposure time (each std star has slightly different exposure time)
+    # calculate the biweight mean sensitivity
     sens_arr = rss._fluxcal.to_pandas().values
     sens_ave = biweight_location(sens_arr, axis=1, ignore_nan=True)
     sens_rms = biweight_scale(sens_arr, axis=1, ignore_nan=True)
@@ -118,10 +118,16 @@ def apply_fluxcal(in_rss: str, out_rss: str, display_plots: bool = False):
     ax.set_ylabel("sensitivity [(ergs/s/cm^2/A) / e-]")
     ax.legend(loc="upper right")
     save_fig(fig, product_path=out_rss, to_display=display_plots, figure_path="qa", label="fluxcal")
+    # flux-calibrate and extinction correct data
+    # Note that we assume a constant extinction curve here!
+    log.info(f"Extinction correcting science and sky spectra, curve {os.getenv('LVMCORE_DIR')+'/etc/lco_extinction.txt'}")
+    txt = np.genfromtxt(os.getenv('LVMCORE_DIR')+'/etc/lco_extinction.txt')
+    lext, ext = txt[:,0], txt[:,1]
+    ext = np.interp(rss._wave, lext, ext)
+    sci_secz = rss._header['TESCIAM']
 
-    # flux-calibrate data
     log.info("flux-calibrating data science and sky spectra")
-    rss._data *= sens_ave
+    rss._data *= sens_ave * 10**(0.4*ext*(sci_secz))
     rss._error *= sens_ave
     rss._sky *= sens_ave
     rss._sky_error *= sens_ave
