@@ -248,13 +248,13 @@ def quick_reduction(expnum: int, use_fiducial_master: bool, skip_sky_subtraction
         # add sensitivity curve as FLUXCAL extension
         flux_tasks.fluxcal_Gaia(sci_camera, hsci_path, GAIA_CACHE_DIR=ORIG_MASTER_DIR)
 
-    # combine channels
-    drp.combine_cameras(sci_tileid, sci_mjd, expnum=sci_expnum, spec=1)
-    drp.combine_cameras(sci_tileid, sci_mjd, expnum=sci_expnum, spec=2)
-    drp.combine_cameras(sci_tileid, sci_mjd, expnum=sci_expnum, spec=3)
-
     # combine spectrographs
-    drp.combine_spectrographs(sci_tileid, sci_mjd, sci_expnum)
+    drp.combine_spectrographs(tileid=sci_tileid, mjd=sci_mjd, channel="b", expnum=sci_expnum)
+    drp.combine_spectrographs(tileid=sci_tileid, mjd=sci_mjd, channel="r", expnum=sci_expnum)
+    drp.combine_spectrographs(tileid=sci_tileid, mjd=sci_mjd, channel="z", expnum=sci_expnum)
+
+    # combine channels
+    drp.combine_channels(tileid=sci_tileid, mjd=sci_mjd, expnum=sci_expnum)
 
     # TODO: add quick report routine
 

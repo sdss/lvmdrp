@@ -11,7 +11,7 @@ from lvmdrp.core.constants import CONFIG_PATH
 from lvmdrp.core.apertures import Aperture
 from lvmdrp.core.cube import Cube
 from lvmdrp.core.fiberrows import FiberRows
-from lvmdrp.core.header import Header, combineHdr
+from lvmdrp.core.header import Header
 from lvmdrp.core.positionTable import PositionTable
 from lvmdrp.core.spectrum1d import Spectrum1D
 
@@ -2208,61 +2208,3 @@ def loadRSS(infile, extension_data=None, extension_mask=None, extension_error=No
     )
 
     return rss
-
-
-def glueRSS(infiles, outfile):
-    for i in range(len(infiles)):
-        rss = loadRSS(infiles[i])
-        hdrs = []
-        if i == 0:
-            data_out = rss._data
-            if rss._error is not None:
-                error_out = rss._error
-            if rss._mask is not None:
-                mask_out = rss._mask
-            if rss._wave is not None:
-                wave_out = rss._wave
-            if rss._inst_fwhm is not None:
-                fwhm_out = rss._inst_fwhm
-            if rss._sky is not None:
-                sky_out = rss._sky
-            if rss._header is not None:
-                hdrs.append(Header(rss.getHeader()))
-        else:
-            data_out = numpy.concatenate((data_out, rss._data), axis=1)
-            if rss._error is not None:
-                error_out = numpy.concatenate((error_out, rss._error), axis=1)
-            else:
-                error_out = None
-            if rss._mask is not None:
-                mask_out = numpy.concatenate((mask_out, rss._mask), axis=1)
-            else:
-                mask_out = None
-            if rss._wave is not None:
-                wave_out = numpy.concatenate((wave_out, rss._wave), axis=1)
-            else:
-                wave_out = None
-            if rss._inst_fwhm is not None:
-                fwhm_out = numpy.concatenate((fwhm_out, rss._inst_fwhm), axis=1)
-            else:
-                fwhm_out = None
-            if rss._sky is not None:
-                sky_out = numpy.concatenate((sky_out, rss._sky), axis=1)
-            else:
-                sky_out = None
-            if rss._header is not None:
-                hdrs.append(Header(rss.getHeader()))
-    if len(hdrs) > 0:
-        hdr_out = combineHdr(hdrs)
-    else:
-        hdr_out = None
-    rss_out = RSS(
-        wave=wave_out,
-        data=data_out,
-        error=error_out,
-        mask=mask_out,
-        inst_fwhm=fwhm_out,
-        sky=sky_out,
-        header=hdr_out.getHeader(),
-    )
-    rss_out.writeFitsData(outfile)

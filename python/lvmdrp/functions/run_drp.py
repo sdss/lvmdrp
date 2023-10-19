@@ -9,6 +9,7 @@ from typing import Union
 from functools import lru_cache
 from itertools import groupby
 import numpy as np
+from numpy.lib import recfunctions as rfn
 
 import astropy.units as u
 from astropy.io import fits
@@ -20,7 +21,7 @@ from lvmdrp.functions.imageMethod import (preproc_raw_frame, create_master_frame
                                           find_peaks_auto, trace_peaks,
                                           extract_spectra)
 from lvmdrp.functions.rssMethod import (determine_wavelength_solution, create_pixel_table,
-                                        resample_wavelength, join_spec_channels)
+                                        resample_wavelength, join_spec_channels, stack_rss)
 from lvmdrp.utils.metadata import (get_frames_metadata, get_master_metadata, extract_metadata,
                                    get_analog_groups, match_master_metadata, create_master_path)
 from lvmdrp import config, log, path, __version__ as drpver
@@ -748,18 +749,19 @@ def run_drp(mjd: Union[int, str, list], bias: bool = False, dark: bool = False,
     mjd = list(set(sub['mjd']))[0]
     tileid = list(set(sub['tileid']))[0]
 
-    # perform camera combination
-    # produces ancillary/lvm-object-sp[id]-[expnum] files
-    for tileid, mjd in sub.groupby(['tileid', 'mjd']).groups.keys():
-        combine_cameras(tileid, mjd, spec=1)
-        combine_cameras(tileid, mjd, spec=2)
-        combine_cameras(tileid, mjd, spec=3)
-
     # perform spectrograph combination
-    # produces lvm-CFrame file
+    # produces ancillary/lvm-object-[channel]-[expnum] files
     exposures = set(sci['expnum'].sort_values())
     for expnum in exposures:
-        combine_spectrographs(tileid, mjd, expnum)
+        combine_spectrographs(tileid, mjd, "b", expnum)
+        combine_spectrographs(tileid, mjd, "r", expnum)
+        combine_spectrographs(tileid, mjd, "z", expnum)
+    
+    # perform camera combination
+    # produces lvm-CFrame file
+    for tileid, mjd, expnum in sub.groupby(['tileid', 'mjd', 'expnum']).groups.keys():
+        combine_channels(tileid, mjd, expnum)
+
 
     # perform sky subtraction
 
@@ -976,12 +978,12 @@ def build_supersky(tileid: int, mjd: int, expnum: int) -> fits.BinTableHDU:
     return supersky
 
 
-def combine_cameras(tileid: int, mjd: int, expnum: int = None, spec: int = 1):
-    """ Combine the cameras together
+def combine_channels(tileid: int, mjd: int, expnum: int):
+    """ Combine the spectrograph channels together
 
-    Combines all available cameras (b, r, z) together on a given
-    spectrograph. For all exposures, combines all "hobject" ancillary
-    files into a single "bobject" ancillary file, per spectrograph.
+    For a given exposure, combines the three spectograph channels together
+    into a single output lvm-CFrame file.  The input files are the
+    ancillary spectrograph-combined lvm-object-[channel]-[expnum] files.
 
     Parameters
     ----------
@@ -989,106 +991,34 @@ def combine_cameras(tileid: int, mjd: int, expnum: int = None, spec: int = 1):
         the sky tileid
     mjd : int
         the MJD of observation
-    spec : int, optional
-        the spectrograph id, by default 1
+    expnum : int
+        the exposure number
     """
-    from itertools import groupby
-
-    # pattern = f'*hobject-*-*{spec}-*'
-    # hfiles = sorted(list(pathlib.Path(os.getenv('LVM_SPECTRO_REDUX')).rglob(pattern)),
-    #                 key=_parse_expnum_cam)
 
     # find all the h object files
-    hfiles = path.expand('lvm_anc', mjd=mjd, tileid=tileid, drpver=drpver,
-                         imagetype='object', expnum=expnum or '****', kind='h', camera=f'*{spec}')
-    hfiles = map(pathlib.Path, sorted(hfiles, key=_parse_expnum_cam))
+    files = path.expand('lvm_anc', mjd=mjd, tileid=tileid, drpver=drpver,
+                         imagetype='object', expnum=expnum, kind='', camera='*')
+    files = sorted(files, key=_parse_expnum_cam)
 
-    log.info(f'--- Combining cameras from spec {spec} ---')
-    kwargs = get_config_options('reduction_steps.combine_cameras')
+    cframe_path = path.full("lvm_frame", mjd=mjd, drpver=drpver, tileid=tileid, expnum=expnum, kind='CFrame')
+
+    log.info(f'combining channels for {expnum = }')
+    kwargs = get_config_options('reduction_steps.combine_channels')
     log.info(f'custom configuration parameters for combine cameras: {repr(kwargs)}')
 
-    m = [f'b{spec}', f'r{spec}', f'z{spec}']
-
-    # loop over all files, grouped by exposure
-    for key, exps in groupby(hfiles, lambda x: int(x.stem.split('-')[-1])):
-        log.info(f'combining cameras for exposure {key}')
-
-        # create the output b object file, 1 per spectrograph
-        bout_file = path.full('lvm_anc', mjd=mjd, tileid=tileid, drpver=drpver,
-                              imagetype='object', expnum=key, kind='', camera=f'sp{spec}')
-
-        # pad the exposure list for missing cameras
-        exps = list(exps)
-        if len(exps) == 2:
-            x = [any(e.match(f'*{n}*') for e in exps) for n in m]
-            exps.insert(x.index(False), None)
-
-        # combine the b, r, z channels together
-        join_spec_channels(in_rss=list(exps), out_rss=bout_file, use_weights=True, **kwargs)
-        log.info(f'Output combined camera file: {bout_file}')
-
-
-def combine_spectrographs(tileid: int, mjd: int, expnum: int) -> fits.HDUList:
-    """ Combine the spectrographs together for a given exposure
-
-    For a given exposure, combines the three spectographs together
-    into a single output lvm-CFrame file.  The input files are the
-    ancillary camera-combined lvm-object-sp[id]-[expnum] files.
-
-    Parameters
-    ----------
-    tileid : int
-        The tileid of the observation
-    mjd : int
-        The MJD of the observation
-    expnum : int
-        The exposure number of the frames to combines
-
-    Returns
-    -------
-    fits.HDUList
-        the output FITS file
-    """
-
-    files = sorted(path.expand('lvm_anc', mjd=mjd, tileid=tileid, drpver=drpver,
-                               kind='', camera='sp*', imagetype='object', expnum=expnum))
-
-    if not files:
-        log.error(f'No camera-combined files found for expnum: {expnum}')
-        return
-
-    if len(files) != 3:
-        log.warning(f'Warning: Not all specids found for expnum: {expnum}')
-
-    # construct output path
-    cframe = path.full('lvm_frame', mjd=mjd, tileid=tileid, drpver=drpver,
-                       kind='CFrame', expnum=expnum)
-
-    # get the first header
-    with fits.open(files[0]) as hdu:
-        hdr = hdu[0].header.copy()
+    # combine the b, r, z channels together
+    rss_comb = join_spec_channels(in_rsss=files, out_rss=None, use_weights=True, **kwargs)
 
     # build the wavelength axis
+    hdr = rss_comb._header
     wcs = WCS(hdr)
     n_wave = hdr['NAXIS1']
     wl = wcs.spectral.all_pix2world(np.arange(n_wave), 0)[0].astype("float32")
     wave = fits.ImageHDU((wl * u.m).to(u.angstrom).value, name='WAVE')
 
-    # get total number of fibers from the fibermap
-    # do we use this to check the total output fiber number? should be the same?
-    total_fibers = len(fibermap.data)
-
-    # stack the data in the extensions
-    flux_data = stack_ext(files, ext=0)
-    err_data = stack_ext(files, ext='ERROR')
-    mask_data = stack_ext(files, ext='BADPIX')
-    fwhm_data = stack_ext(files, ext='INSTFWHM')
-    sky_data = stack_ext(files, ext="SKY")
-    sky_error = stack_ext(files, ext="SKY_ERROR")
-
     # update the primary header
-    hdr['SPEC'] = ', '.join([i.split('-')[2] for i in files])
-    hdr['FILENAME'] = pathlib.Path(cframe).name
+    hdr['SPEC'] = ', '.join([f"sp{specid+1}" for specid in range(3)])
+    hdr['FILENAME'] = pathlib.Path(cframe_path).name
     hdr['DRPVER'] = drpver
 
     # remove the wcs from the primary header; add it to flux header
@@ -1102,20 +1032,65 @@ def combine_spectrographs(tileid: int, mjd: int, expnum: int) -> fits.HDUList:
 
     # create the new FITS file
     prim = fits.PrimaryHDU(header=hdr)
-    flux = fits.ImageHDU(flux_data, name='FLUX', header=fits.Header(newhdr))
-    err = fits.ImageHDU(err_data, name='ERROR')
-    mask = fits.ImageHDU(mask_data, name='MASK')
-    fwhm = fits.ImageHDU(fwhm_data, name='FWHM')
-    sky = fits.ImageHDU(sky_data, name="SKY")
-    sky_error = fits.ImageHDU(sky_error, name="SKY_ERROR")
+    flux = fits.ImageHDU(rss_comb._data, name='FLUX', header=fits.Header(newhdr))
+    err = fits.ImageHDU(rss_comb._error, name='ERROR')
+    mask = fits.ImageHDU(rss_comb._mask.astype("uint8"), name='MASK')
+    fwhm = fits.ImageHDU(rss_comb._inst_fwhm, name='FWHM')
+    sky = fits.ImageHDU(rss_comb._sky, name="SKY")
+    sky_error = fits.ImageHDU(rss_comb._sky_error, name="SKY_ERROR")
 
     # build super sky
     supersky = build_supersky(tileid, mjd, expnum)
 
-    hdulist = fits.HDUList([prim, flux, err, mask, wave, fwhm, sky, sky_error, supersky, fibermap])
-
     # write out new file
-    hdulist.writeto(cframe, overwrite=True)
+    log.info(f'writing output file in {os.path.basename(cframe_path)}')
+    hdulist = fits.HDUList([prim, flux, err, mask, wave, fwhm, sky, sky_error, supersky, fibermap])
+    hdulist.writeto(cframe_path, overwrite=True)
+
+
+def combine_spectrographs(tileid: int, mjd: int, channel: str, expnum: int) -> RSS:
+    """ Combine the spectrographs together for a given exposure
+
+    For a given exposure, combines the three spectographs together into a
+    single output lvm-object-[channel]-[expnum] file. The input files are the
+    ancillary rectified frames lvm-object-hobject-[channel]*-[expnum] files.
+
+    Parameters
+    ----------
+    tileid : int
+        The tileid of the observation
+    mjd : int
+        The MJD of the observation
+    channel : str
+        The channel of the spectrograph, e.g. b, r, z
+    expnum : int
+        The exposure number of the frames to combines
+
+    Returns
+    -------
+    RSS
+        The combined RSS object
+    """
+
+    hsci_paths = sorted(path.expand('lvm_anc', mjd=mjd, tileid=tileid, drpver=drpver,
+                               kind='h', camera=f'{channel}*', imagetype='object', expnum=expnum))
+
+    if not hsci_paths:
+        log.error(f'no rectified frames found for {expnum = }, {channel = }')
+        return
+
+    if len(hsci_paths) != 3:
+        log.warning(f'not all spectrographs found for {expnum = }, {channel = }')
+
+    # construct output path
+    frame_path = path.full('lvm_anc', mjd=mjd, tileid=tileid, drpver=drpver,
+                        kind='', camera=channel, imagetype="object", expnum=expnum)
+
+
+    # combine RSS files along fiber ID direction
+    spec_comb = stack_rss(hsci_paths, frame_path, axis=0)
+
+    return spec_comb
 
 
 def stack_ext(files: list, ext: Union[int, str] = 0) -> np.array:
