@@ -9,6 +9,7 @@ from typing import List
 import matplotlib
 import matplotlib.gridspec as gridspec
 import numpy
+from numpy.lib import recfunctions as rfn
 import yaml
 import bottleneck as bn
 from astropy import units as u
@@ -1728,6 +1729,9 @@ def stack_rss(in_rsss: List[str], out_rss: str, axis: int = 0) -> RSS:
     RSS
         stacked RSS object
     """
+
+    # load and stack each extension
+    log.info(f"stacking frames in {','.join([os.path.basename(in_rss) for in_rss in in_rsss])} along axis {axis}")
     for i in range(len(in_rsss)):
         rss = loadRSS(in_rsss[i])
         hdrs = []
@@ -1747,6 +1751,8 @@ def stack_rss(in_rsss: List[str], out_rss: str, axis: int = 0) -> RSS:
                 sky_error_out = rss._sky_error
             if rss._header is not None:
                 hdrs.append(Header(rss.getHeader()))
+            if rss._fluxcal is not None:
+                fluxcal_out = rss._fluxcal
         else:
             data_out = numpy.concatenate((data_out, rss._data), axis=axis)
             if rss._wave is not None:
@@ -1783,10 +1789,21 @@ def stack_rss(in_rsss: List[str], out_rss: str, axis: int = 0) -> RSS:
                 sky_error_out = numpy.concatenate((sky_error_out, rss._sky_error), axis=axis)
             if rss._header is not None:
                 hdrs.append(Header(rss.getHeader()))
+            if rss._fluxcal is not None:
+                fluxcal_out = rfn.merge_arrays((fluxcal_out, rss._fluxcal), asrecarray=True, flatten=True)
+
+    # update header
+    log.info("updating header")
     if len(hdrs) > 0:
         hdr_out = combineHdr(hdrs)
     else:
         hdr_out = None
+    
+    # update slitmap
+    slitmap_out = rss._slitmap
+
+    # write output
+    log.info(f"writing stacked RSS to {os.path.basename(out_rss)}")
     rss_out = RSS(
         wave=wave_out,
         data=data_out,
@@ -1796,6 +1813,8 @@ def stack_rss(in_rsss: List[str], out_rss: str, axis: int = 0) -> RSS:
         sky=sky_out,
         sky_error=sky_error_out,
         header=hdr_out.getHeader(),
+        slitmap=slitmap_out,
+        fluxcal=fluxcal_out
     )
     rss_out.writeFitsData(out_rss)
 

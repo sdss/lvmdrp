@@ -9,7 +9,6 @@ from typing import Union
 from functools import lru_cache
 from itertools import groupby
 import numpy as np
-from numpy.lib import recfunctions as rfn
 
 import astropy.units as u
 from astropy.io import fits
