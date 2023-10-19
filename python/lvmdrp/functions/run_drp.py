@@ -749,18 +749,19 @@ def run_drp(mjd: Union[int, str, list], bias: bool = False, dark: bool = False,
     mjd = list(set(sub['mjd']))[0]
     tileid = list(set(sub['tileid']))[0]
 
-    # perform camera combination
-    # produces ancillary/lvm-object-sp[id]-[expnum] files
-    for tileid, mjd in sub.groupby(['tileid', 'mjd']).groups.keys():
-        combine_channels(tileid, mjd, spec=1)
-        combine_channels(tileid, mjd, spec=2)
-        combine_channels(tileid, mjd, spec=3)
-
     # perform spectrograph combination
-    # produces lvm-CFrame file
+    # produces ancillary/lvm-object-[channel]-[expnum] files
     exposures = set(sci['expnum'].sort_values())
     for expnum in exposures:
-        combine_spectrographs(tileid, mjd, expnum)
+        combine_spectrographs(tileid, mjd, "b", expnum)
+        combine_spectrographs(tileid, mjd, "r", expnum)
+        combine_spectrographs(tileid, mjd, "z", expnum)
+    
+    # perform camera combination
+    # produces lvm-CFrame file
+    for tileid, mjd, expnum in sub.groupby(['tileid', 'mjd', 'expnum']).groups.keys():
+        combine_channels(tileid, mjd, expnum)
+
 
     # perform sky subtraction
 
