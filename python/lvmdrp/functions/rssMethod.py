@@ -3116,7 +3116,6 @@ def join_spec_channels(in_rss: List[str], out_rss: str, use_weights: bool = True
         new_sky_error = numpy.sqrt(bn.nanmean(sky_errors ** 2, axis=0))
 
     # create RSS
-    log.info(f"writing output RSS to {os.path.basename(out_rss)}")
     new_hdr = rsss[0]._header.copy()
     new_hdr["CCD"] = ",".join([rss._header["CCD"] for rss in rsss])
     wcs = WCS(new_hdr)
@@ -3125,7 +3124,9 @@ def join_spec_channels(in_rss: List[str], out_rss: str, use_weights: bool = True
     new_hdr.update(wcs.to_header())
     new_rss = RSS(data=new_data, error=new_error, mask=new_mask, wave=new_wave, inst_fwhm=new_inst_fwhm, sky=new_sky, sky_error=new_sky_error, header=new_hdr)
     # write output RSS
-    new_rss.writeFitsData(out_rss)
+    if out_rss is not None:
+        log.info(f"writing output RSS to {os.path.basename(out_rss)}")
+        new_rss.writeFitsData(out_rss)
 
     return new_rss
 
