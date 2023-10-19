@@ -133,7 +133,7 @@ def fluxcal_Gaia(camera, in_rss, plot=True, GAIA_CACHE_DIR=None):
         if len(fibidx) == 0:
             continue
 
-        log.info(f"Standard fiber '{fiber}', index '{fibidx}', star '{gaia_id}', exptime '{exptime}', secz '{secz}")
+        log.info(f"Standard fiber '{fiber}', index '{fibidx}', star '{gaia_id}', exptime '{exptime:.2f}', secz '{secz:.2f}'")
 
         # load Gaia BP-RP spectrum from cache, or download from webapp
         try:

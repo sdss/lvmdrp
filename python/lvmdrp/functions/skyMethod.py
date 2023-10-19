@@ -1547,11 +1547,29 @@ def interpolate_sky(in_rss: str, out_sky: str, out_rss: str = None, which: str =
         label="sky_comp",
     )
 
-    # write output sky RSS
-    log.info(f"writing output sky RSS file '{os.path.basename(out_sky)}'")
+    # define sky RSS
     sky_rss = copy(rss)
     sky_rss.setData(data=new_sky, error=new_error, mask=new_mask)
     sky_rss._header["IMAGETYP"] = "sky"
+
+    # extract standard fibers metadata
+    std_acq = np.asarray(list(rss._header["STD*ACQ"].values()))
+    # filter by acquired 
+    std_ids = np.asarray(list(rss._header["STD*FIB"].values()))[std_acq]
+    std_exp = np.asarray(list(rss._header["STD*EXP"].values()))[std_acq]
+    # select only standard fibers in current exposure
+    std_idx = np.where(np.isin(fibermap["orig_ifulabel"], std_ids))
+    log.info(f"calculating correction factors for standard fibers: {fibermap[std_idx]['orig_ifulabel'].value}")
+    # calculate scaling factors for standard fibers
+    std_fac = ((stdid, stdexp / rss._header["EXPTIME"]) for stdid, stdexp in zip(std_ids, std_exp) if stdid in fibermap["orig_ifulabel"])
+    std_fac = {stdid: np.round(factor,4) for stdid, factor in sorted(std_fac, key=lambda item: int(item[0].split("-")[1]))}
+    log.info(f"correction factors for standard fibers: {std_fac}")
+    # apply factors to standard sky fibers
+    sky_rss._data[std_idx] *= np.asarray(list(std_fac.values()))[:, None]
+    sky_rss._error[std_idx] *= np.asarray(list(std_fac.values()))[:, None]
+    
+    # write output sky RSS
+    log.info(f"writing output sky RSS file '{os.path.basename(out_sky)}'")
     sky_rss.writeFitsData(out_sky)
 
     if subtract:
@@ -1653,7 +1671,7 @@ def quick_sky_subtraction(in_rss: str, out_rss, in_skye: str, in_skyw: str, sky_
         new_mask = rss._mask
 
     # write output sky-subtracted RSS
-    log.info(f"writing output sky-subtracted RSS file '{os.path.basename(out_rss)}'")
+    log.info(f"writing output RSS file '{os.path.basename(out_rss)}'")
     rss.setHdrValue("SKYSUB", not skip_subtraction, "sky subtracted?")
     rss.setHdrValue("SKYEW", w_e, "SkyE weight")
     rss.setHdrValue("SKYWW", w_w, "SkyW weight")
