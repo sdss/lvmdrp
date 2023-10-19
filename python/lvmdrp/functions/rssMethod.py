@@ -1791,6 +1791,8 @@ def stack_rss(in_rsss: List[str], out_rss: str, axis: int = 0) -> RSS:
                 hdrs.append(Header(rss.getHeader()))
             if rss._fluxcal is not None:
                 fluxcal_out = rfn.merge_arrays((fluxcal_out, rss._fluxcal), asrecarray=True, flatten=True)
+            else:
+                fluxcal_out = None
 
     # update header
     log.info("updating header")
