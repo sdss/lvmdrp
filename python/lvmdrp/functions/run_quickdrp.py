@@ -153,7 +153,7 @@ def quick_reduction(expnum: int, use_fiducial_master: bool, skip_sky_subtraction
         sci_camera = sci["camera"]
 
         # define sci paths
-        sci_path = path.full("lvm_raw", camspec=sci_camera, **sci)
+        rsci_path = path.full("lvm_raw", camspec=sci_camera, **sci)
         psci_path = path.full("lvm_anc", drpver=drpver, kind="p", imagetype=sci["imagetyp"], **sci)
         dsci_path = path.full("lvm_anc", drpver=drpver, kind="d", imagetype=sci["imagetyp"], **sci)
         xsci_path = path.full("lvm_anc", drpver=drpver, kind="x", imagetype=sci["imagetyp"], **sci)
@@ -202,7 +202,7 @@ def quick_reduction(expnum: int, use_fiducial_master: bool, skip_sky_subtraction
             mflat_path = path.full("lvm_master", drpver=drpver, kind="mfiberflat", **masters["fiberflat"].to_dict())
         
         # preprocess frame
-        image_tasks.preproc_raw_frame(in_image=sci_path, out_image=psci_path, in_mask=mpixmask_path)
+        image_tasks.preproc_raw_frame(in_image=rsci_path, out_image=psci_path, in_mask=mpixmask_path)
         
         # detrend frame
         image_tasks.detrend_frame(in_image=psci_path, out_image=dsci_path,
@@ -245,13 +245,17 @@ def quick_reduction(expnum: int, use_fiducial_master: bool, skip_sky_subtraction
         rss_tasks.resample_wavelength(in_rss=fskyw_path, out_rss=hskyw_path, method="linear", compute_densities=True, disp_pix=0.5, start_wave=iwave, end_wave=fwave, err_sim=10, parallel=0, extrapolate=False)
 
         # use sky subtracted resampled frames for flux calibration in each camera
-        # add sensitivity curve as FLUXCAL extension
         flux_tasks.fluxcal_Gaia(sci_camera, hsci_path, GAIA_CACHE_DIR=ORIG_MASTER_DIR)
 
     # combine spectrographs
     drp.combine_spectrographs(tileid=sci_tileid, mjd=sci_mjd, channel="b", expnum=sci_expnum)
     drp.combine_spectrographs(tileid=sci_tileid, mjd=sci_mjd, channel="r", expnum=sci_expnum)
     drp.combine_spectrographs(tileid=sci_tileid, mjd=sci_mjd, channel="z", expnum=sci_expnum)
+
+    # flux-calibrate each channel
+    sci_paths = sorted(drp.path.expand("lvm_anc", drpver=drpver, tileid=sci_tileid, mjd=sci_mjd, kind="", imagetype="object", camera="*", expnum=sci_expnum))
+    for sci_path in sci_paths:
+        flux_tasks.apply_fluxcal(in_rss=sci_path, out_rss=sci_path)
 
     # combine channels
     drp.combine_channels(tileid=sci_tileid, mjd=sci_mjd, expnum=sci_expnum)

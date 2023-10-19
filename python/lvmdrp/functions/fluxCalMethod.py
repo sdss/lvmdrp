@@ -70,6 +70,67 @@ __all__ = [
     "correctTelluric_drp",
 ]
 
+def apply_fluxcal(in_rss: str, out_rss: str, display_plots: bool = False):
+    """applies flux calibration to spectrograph-combined data
+
+    Parameters
+    ----------
+    in_rss : str
+        input RSS file
+    out_rss : str
+        output RSS file
+    display_plots : bool, optional
+
+    Returns
+    -------
+    rss : RSS
+        flux-calibrated RSS object
+    """
+    # read all three channels
+    log.info(f"loading RSS file {os.path.basename(in_rss)}")
+    rss = loadRSS(in_rss)
+    expnum = rss._header["EXPOSURE"]
+    channel = rss._header["CCD"][0]
+    # set masked pixels to NaN
+    rss.apply_pixelmask()
+
+    # apply joint sensitivity curve
+    fig, ax = create_subplots(to_display=display_plots, figsize=(15, 5))
+    fig.suptitle(f"Flux calibration for {expnum = }, {channel = }")
+    log.info(f"computing joint sensitivity curve for channel {channel}")
+    # scale by exposure time (each std star has slightly different exposure time)
+    sens_arr = rss._fluxcal.to_pandas().values
+    sens_ave = biweight_location(sens_arr, axis=1, ignore_nan=True)
+    sens_rms = biweight_scale(sens_arr, axis=1, ignore_nan=True)
+
+    rss._fluxcal["mean"] = sens_ave
+    rss._fluxcal["rms"] = sens_rms
+
+    ax.set_title(f"{channel = }", loc="left")
+    for j in range(sens_arr.shape[1]):
+        std_hd = rss._fluxcal.colnames[j][:-3]
+        std_id = rss._header[f"{std_hd}FIB"]
+
+        ax.plot(rss._wave, sens_arr[:,j], "-", lw=1, label=std_id)
+    ax.plot(rss._wave, sens_ave, "-r", lw=2, label="mean")
+    ax.set_yscale("log")
+    ax.set_xlabel("wavelength (Angstrom)")
+    ax.set_ylabel("sensitivity [(ergs/s/cm^2/A) / e-]")
+    ax.legend(loc="upper right")
+    save_fig(fig, product_path=out_rss, to_display=display_plots, figure_path="qa", label="fluxcal")
+
+    # flux-calibrate data
+    log.info("flux-calibrating data science and sky spectra")
+    rss._data *= sens_ave
+    rss._error *= sens_ave
+    rss._sky *= sens_ave
+    rss._sky_error *= sens_ave
+
+    log.info(f"writing output file in {os.path.basename(out_rss)}")
+    rss.writeFitsData(out_rss)
+
+    return rss
+
 def fluxcal_Gaia(camera, in_rss, plot=True, GAIA_CACHE_DIR=None):
     '''
     Flux calibrate LVM data using the 12 spectra of stars observed through
@@ -153,6 +214,8 @@ def fluxcal_Gaia(camera, in_rss, plot=True, GAIA_CACHE_DIR=None):
         
         # correct for extinction
         spec *= 10**(0.4*ext*secz)
+
+        # TODO: mask telluric spectral regions
 
         # divide to find sensitivity and smooth
         sens = stdflux/spec        
