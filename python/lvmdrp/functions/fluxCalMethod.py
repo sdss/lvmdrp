@@ -175,8 +175,8 @@ def fluxcal_Gaia(camera, in_rss, plot=True, GAIA_CACHE_DIR=None):
             #plt.ylim(0,0.1e-11)
 
     res = np.array(res)            # list of sensitivity functions in (ergs/s/cm^2/A) / e-
-    rms = biweight_location(res, axis=0, ignore_nan=True)
-    mean = biweight_scale(res, axis=0, ignore_nan=True)
+    rms = biweight_scale(res, axis=0, ignore_nan=True)
+    mean = biweight_location(res, axis=0, ignore_nan=True)
 
     if plot:
         plt.ylabel('sensitivity [(ergs/s/cm^2/A) / e-]')
