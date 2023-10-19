@@ -998,7 +998,7 @@ def combine_channels(tileid: int, mjd: int, expnum: int):
     # find all the h object files
     files = path.expand('lvm_anc', mjd=mjd, tileid=tileid, drpver=drpver,
                          imagetype='object', expnum=expnum, kind='', camera='*')
-    files = map(pathlib.Path, sorted(files, key=_parse_expnum_cam))
+    files = sorted(files, key=_parse_expnum_cam)
 
     cframe_path = path.full("lvm_frame", mjd=mjd, drpver=drpver, tileid=tileid, expnum=expnum, kind='CFrame')
 
@@ -1007,7 +1007,7 @@ def combine_channels(tileid: int, mjd: int, expnum: int):
     log.info(f'custom configuration parameters for combine cameras: {repr(kwargs)}')
 
     # combine the b, r, z channels together
-    rss_comb = join_spec_channels(in_rss=files, out_rss=None, use_weights=True, **kwargs)
+    rss_comb = join_spec_channels(in_rsss=files, out_rss=None, use_weights=True, **kwargs)
 
     # build the wavelength axis
     hdr = rss_comb._header
@@ -1076,11 +1076,11 @@ def combine_spectrographs(tileid: int, mjd: int, channel: str, expnum: int) -> R
                                kind='h', camera=f'{channel}*', imagetype='object', expnum=expnum))
 
     if not hsci_paths:
-        log.error(f'No rectified frames found for {expnum = }, {channel = }')
+        log.error(f'no rectified frames found for {expnum = }, {channel = }')
         return
 
     if len(hsci_paths) != 3:
-        log.warning(f'Not all spectrographs found for {expnum = }, {channel = }')
+        log.warning(f'not all spectrographs found for {expnum = }, {channel = }')
 
     # construct output path
     frame_path = path.full('lvm_anc', mjd=mjd, tileid=tileid, drpver=drpver,

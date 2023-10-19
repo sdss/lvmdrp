@@ -3043,7 +3043,7 @@ def DAR_registerSDSS_drp(
         plt.show()
 
 
-def join_spec_channels(in_rss: List[str], out_rss: str, use_weights: bool = True):
+def join_spec_channels(in_rsss: List[str], out_rss: str, use_weights: bool = True):
     """combine the given RSS list through the overlaping wavelength range
 
     Run once per exposure, for one spectrograph at a time.
@@ -3052,7 +3052,7 @@ def join_spec_channels(in_rss: List[str], out_rss: str, use_weights: bool = True
 
     Parameters
     ----------
-    in_rss : array_like
+    in_rsss : array_like
         list of RSS file paths for each spectrograph channel
     out_rss : str
         output RSS file path
@@ -3064,8 +3064,8 @@ def join_spec_channels(in_rss: List[str], out_rss: str, use_weights: bool = True
     """
 
     # read all three channels
-    log.info(f"loading RSS files: {in_rss}")
-    rsss = [loadRSS(rss_path) for rss_path in in_rss]
+    log.info(f"loading RSS files: {', '.join([os.path.basename(in_rss) for in_rss in in_rsss])}")
+    rsss = [loadRSS(in_rss) for in_rss in in_rsss]
     # set masked pixels to NaN
     [rss.apply_pixelmask() for rss in rsss]
 
@@ -3075,7 +3075,7 @@ def join_spec_channels(in_rss: List[str], out_rss: str, use_weights: bool = True
     # compute the combined wavelengths
     new_wave = wave_little_interpol(waves)
     sampling = numpy.diff(new_wave)
-    log.info(f"new wavelength sampling: min = {sampling.min()}, max = {sampling.max()}")
+    log.info(f"new wavelength sampling: min = {sampling.min():.2f}, max = {sampling.max():.2f}")
 
     # define interpolators
     log.info("interpolating RSS data in new wavelength array")
