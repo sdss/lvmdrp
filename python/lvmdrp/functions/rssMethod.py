@@ -21,12 +21,13 @@ from scipy import interpolate, ndimage
 
 from lvmdrp.utils.decorators import skip_on_missing_input_path, drop_missing_input_paths, skip_if_drpqual_flags
 from lvmdrp.core.constants import CONFIG_PATH, ARC_LAMPS
+from lvmdrp.core.header import Header, combineHdr
 from lvmdrp.core.cube import Cube
 from lvmdrp.core.fiberrows import FiberRows
 from lvmdrp.core.image import loadImage
 from lvmdrp.core.passband import PassBand
 from lvmdrp.core.plot import plt, create_subplots, save_fig, plot_wavesol_residuals, plot_wavesol_coeffs
-from lvmdrp.core.rss import RSS, _read_pixwav_map, glueRSS, loadRSS
+from lvmdrp.core.rss import RSS, _read_pixwav_map, loadRSS
 from lvmdrp.core.spectrum1d import Spectrum1D, wave_little_interpol, _spec_from_lines, _cross_match
 from lvmdrp.external import ancillary_func
 from lvmdrp.utils import flatten
@@ -1710,18 +1711,95 @@ def combineRSS_drp(in_rsss, out_rss, method="mean"):
     combined_rss.writeFitsData(out_rss)
 
 
-def glueRSS_drp(rsss, out_rss):
-    """concatenates the given RSS list to a single RSS
+def stack_rss(in_rsss: List[str], out_rss: str, axis: int = 0) -> RSS:
+    """stacks a list of RSS objects along a given axis
 
     Parameters
     ----------
-    rsss : array_like
+    in_rsss : List[str]
         list of RSS file paths
     out_rss : str
         output RSS file path
+    axis : int, optional
+        axis along which to stack the RSS objects, by default 0
+
+    Returns
+    -------
+    RSS
+        stacked RSS object
     """
-    list_rss = rsss.split(",")
-    glueRSS(list_rss, out_rss)
+    for i in range(len(in_rsss)):
+        rss = loadRSS(in_rsss[i])
+        hdrs = []
+        if i == 0:
+            data_out = rss._data
+            if rss._error is not None:
+                error_out = rss._error
+            if rss._mask is not None:
+                mask_out = rss._mask
+            if rss._wave is not None:
+                wave_out = rss._wave
+            if rss._inst_fwhm is not None:
+                fwhm_out = rss._inst_fwhm
+            if rss._sky is not None:
+                sky_out = rss._sky
+            if rss._sky_error is not None:
+                sky_error_out = rss._sky_error
+            if rss._header is not None:
+                hdrs.append(Header(rss.getHeader()))
+        else:
+            data_out = numpy.concatenate((data_out, rss._data), axis=axis)
+            if rss._wave is not None:
+                if len(wave_out.shape) == 2 and len(rss._wave.shape) == 2:
+                    wave_out = numpy.concatenate((wave_out, rss._wave), axis=axis)
+                elif len(wave_out.shape) == 1 and len(rss._wave.shape) == 1 and numpy.isclose(wave_out, rss._wave).all():
+                    wave_out = wave_out
+                else:
+                    raise ValueError(f"Cannot concatenate wavelength arrays of different shapes: {wave_out.shape} and {rss._wave.shape} or inhomogeneous wavelength arrays")
+            else:
+                wave_out = None
+            if rss._inst_fwhm is not None:
+                if len(fwhm_out.shape) == 2 and len(rss._inst_fwhm.shape) == 2:
+                    fwhm_out = numpy.concatenate((fwhm_out, rss._inst_fwhm), axis=axis)
+                elif len(fwhm_out.shape) == 1 and len(rss._inst_fwhm.shape) == 1 and numpy.isclose(fwhm_out, rss._inst_fwhm).all():
+                    fwhm_out = fwhm_out
+                else:
+                    raise ValueError(f"Cannot concatenate FWHM arrays of different shapes: {fwhm_out.shape} and {rss._inst_fwhm.shape} or inhomogeneous FWHM arrays")
+            else:
+                fwhm_out = None
+            if rss._error is not None:
+                error_out = numpy.concatenate((error_out, rss._error), axis=axis)
+            else:
+                error_out = None
+            if rss._mask is not None:
+                mask_out = numpy.concatenate((mask_out, rss._mask), axis=axis)
+            else:
+                mask_out = None
+            if rss._sky is not None:
+                sky_out = numpy.concatenate((sky_out, rss._sky), axis=axis)
+            else:
+                sky_out = None
+            if rss._sky_error is not None:
+                sky_error_out = numpy.concatenate((sky_error_out, rss._sky_error), axis=axis)
+            if rss._header is not None:
+                hdrs.append(Header(rss.getHeader()))
+    if len(hdrs) > 0:
+        hdr_out = combineHdr(hdrs)
+    else:
+        hdr_out = None
+    rss_out = RSS(
+        wave=wave_out,
+        data=data_out,
+        error=error_out,
+        mask=mask_out,
+        inst_fwhm=fwhm_out,
+        sky=sky_out,
+        sky_error=sky_error_out,
+        header=hdr_out.getHeader(),
+    )
+    rss_out.writeFitsData(out_rss)
+
+    return rss_out
 
 
 def apertureFluxRSS_drp(
