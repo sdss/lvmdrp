@@ -98,8 +98,10 @@ def apply_fluxcal(in_rss: str, out_rss: str, display_plots: bool = False):
     fig, ax = create_subplots(to_display=display_plots, figsize=(15, 5))
     fig.suptitle(f"Flux calibration for {expnum = }, {channel = }")
     log.info(f"computing joint sensitivity curve for channel {channel}")
+    # calculate exposure time factors
+    std_exp = np.asarray([rss._header[f"{std_hd[:-3]}EXP"] for std_hd in rss._fluxcal.colnames])
     # calculate the biweight mean sensitivity
-    sens_arr = rss._fluxcal.to_pandas().values
+    sens_arr = rss._fluxcal.to_pandas().values * (std_exp / std_exp.sum())[None]
     sens_ave = biweight_location(sens_arr, axis=1, ignore_nan=True)
     sens_rms = biweight_scale(sens_arr, axis=1, ignore_nan=True)
 
@@ -128,9 +130,9 @@ def apply_fluxcal(in_rss: str, out_rss: str, display_plots: bool = False):
 
     log.info("flux-calibrating data science and sky spectra")
     rss._data *= sens_ave * 10**(0.4*ext*(sci_secz))
-    rss._error *= sens_ave
-    rss._sky *= sens_ave
-    rss._sky_error *= sens_ave
+    rss._error *= sens_ave * 10**(0.4*ext*(sci_secz))
+    rss._sky *= sens_ave * 10**(0.4*ext*(sci_secz))
+    rss._sky_error *= sens_ave * 10**(0.4*ext*(sci_secz))
 
     log.info(f"writing output file in {os.path.basename(out_rss)}")
     rss.writeFitsData(out_rss)
