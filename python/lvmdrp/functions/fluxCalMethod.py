@@ -149,27 +149,34 @@ def fluxcal_Gaia(camera, in_rss, plot=True, GAIA_CACHE_DIR=None):
     '''
     GAIA_CACHE_DIR = './' if GAIA_CACHE_DIR is None else GAIA_CACHE_DIR
     log.info(f"Using Gaia CACHE DIR '{GAIA_CACHE_DIR}'")
-
-    # get the list of standards from the header
-    try:
-        stds = retrieve_header_stars(in_rss)
-    except KeyError:
-        log.warning("no standard star information found, skipping flux calibration")
-        return
-
+    
     # load input RSS
     log.info(f"loading input RSS file '{os.path.basename(in_rss)}'")
     rss = RSS()
     rss.loadFitsData(in_rss)
 
+    # extract useful metadata
+    sci_spec = rss._header["SPEC"]
     sci_exptime = rss._header['EXPTIME']
     sci_exptime = rss._header['TESCIAM']
+
+    # wavelength array
+    w = rss._wave
 
     # load fibermap and filter for current spectrograph
     slitmap = rss._slitmap[rss._slitmap["spectrographid"] == int(camera[1])]
 
-    # wavelength array
-    w = rss._wave
+    # get the list of standards from the header
+    try:
+        stds = retrieve_header_stars(rss=rss)
+    except KeyError:
+        log.warning("no standard star metadata found, skipping sensitivity measurement")
+        return
+    
+    # early stop if not standards exposed in current spectrograph
+    if len(stds) == 0:
+        log.warning(f"no standard star acquired/exposed in spectrograph {sci_spec}, skipping sensitivity measurement")
+        return 
 
     # load extinction curve
     # Note that we assume a constant extinction curve here!
@@ -199,8 +206,6 @@ def fluxcal_Gaia(camera, in_rss, plot=True, GAIA_CACHE_DIR=None):
         # find the fiber with our spectrum of that Gaia star, if it is not in the current spectrograph, continue
         select = (slitmap["orig_ifulabel"] == fiber)
         fibidx = np.where(select)[0]
-        if len(fibidx) == 0:
-            continue
 
         log.info(f"Standard fiber '{fiber}', index '{fibidx}', star '{gaia_id}', exptime '{exptime:.2f}', secz '{secz:.2f}'")
 
@@ -285,19 +290,19 @@ def fluxcal_Gaia(camera, in_rss, plot=True, GAIA_CACHE_DIR=None):
 
     return res, mean, rms, rss
 
-def retrieve_header_stars(in_rss):
+def retrieve_header_stars(rss):
     '''
     Retrieve fiber, Gaia ID, exposure time and airmass for the 12 standard stars in the header.
     return a list of tuples of the above quatities.
     '''
     lco = EarthLocation(lat=-29.008999964*u.deg, lon=-70.688663912*u.deg, height=2800*u.m)   
-    with fits.open(in_rss) as hdub:
-        h = hdub[0].header
+    h = rss._header
+    slitmap = rss._slitmap[rss._slitmap["spectrographid"] == int(h['SPEC'][-1])]
     # retrieve the data for the 12 standards from the header
     stddata = []
     for i in range(12):
         stdi = 'STD'+str(i+1)
-        if h[stdi+'ACQ']:
+        if h[stdi+'ACQ'] and h[stdi+'FIB'] in slitmap['orig_ifulabel']:
             gaia_id = h[stdi+'ID']
             fiber = h[stdi+'FIB']
             obstime = Time(h[stdi+'T0'])
@@ -306,7 +311,7 @@ def retrieve_header_stars(in_rss):
             stdT = c.transform_to(AltAz(obstime=obstime,location=lco))  
             secz = stdT.secz.value
             #print(gid, fib, et, secz)
-        stddata.append((i+1, fiber, gaia_id, exptime, secz))
+            stddata.append((i+1, fiber, gaia_id, exptime, secz))
     return stddata
 
 def mean_absolute_deviation(vals):
