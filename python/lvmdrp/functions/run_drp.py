@@ -949,6 +949,14 @@ def build_supersky(tileid: int, mjd: int, expnum: int) -> fits.BinTableHDU:
             # load flafielded camera frame
             fsci = RSS()
             fsci.loadFitsData(sci_path)
+            
+            # convert to density units if necessary
+            if fsci._header["BUNIT"] == "electron":
+                dlambda = np.diff(fsci._wave, axis=1, append=2*(fsci._wave[:, -1] - fsci._wave[:, -2])[:, None])
+                fsci._data /= dlambda
+                fsci._error /= dlambda
+                fsci._header["BUNIT"] = "electron/angstrom"
+
             # sky fiber selection
             slitmap = fsci._slitmap[fsci._slitmap["spectrographid"] == specid]
             select_skye = slitmap["telescope"] == "SkyE"
