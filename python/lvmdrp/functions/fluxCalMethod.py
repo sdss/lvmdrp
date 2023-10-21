@@ -143,6 +143,7 @@ def fluxcal_Gaia(camera, in_rss, plot=True, GAIA_CACHE_DIR=None):
             stdflux = np.interp(w, gw, gf)   # interpolate to our wavelength grid
         except ancillary_func.GaiaStarNotFound as e:
             log.warning(e)
+            res.append(np.ones_like(w) * np.nan)
             continue
     
         # divide by our exptime for that standard
