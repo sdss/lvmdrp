@@ -256,12 +256,12 @@ def fluxcal_Gaia(camera, in_rss, plot=True, GAIA_CACHE_DIR=None):
         res[f"STD{nn}SEN"] = s(w).astype(np.float32)
 
         # caluculate SDSS g band magnitudes for QC
-        mAB_std = ancillary_func.spec_to_LVM_mAB(camera, w, stdflux)
-        mAB_obs = ancillary_func.spec_to_LVM_mAB(camera, w[np.isfinite(spec)], spec[np.isfinite(spec)])
+        mAB_std = np.round(ancillary_func.spec_to_LVM_mAB(camera, w, stdflux), 2)
+        mAB_obs = np.round(ancillary_func.spec_to_LVM_mAB(camera, w[np.isfinite(spec)], spec[np.isfinite(spec)]), 2)
         # update input file header
         label = camera[0].upper()
-        rss.setHdrValue(f"STD{nn}{label}AB", mAB_std, f"AB mag in {label}-band")
-        rss.setHdrValue(f"STD{nn}{label}IN", mAB_obs, f"AB mag in {label}-band")
+        rss.setHdrValue(f"STD{nn}{label}AB", mAB_std, f"Gaia AB mag in {label}-band")
+        rss.setHdrValue(f"STD{nn}{label}IN", mAB_obs, f"Obs AB mag in {label}-band")
         log.info(f"AB mag in LVM_{camera[0]}: Gaia {mAB_std:.2f}, instrumental {mAB_obs:.2f}")
 
         if plot:
