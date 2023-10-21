@@ -1061,7 +1061,7 @@ def combine_spectrographs(tileid: int, mjd: int, channel: str, expnum: int) -> R
 
     For a given exposure, combines the three spectographs together into a
     single output lvm-object-[channel]-[expnum] file. The input files are the
-    ancillary rectified frames lvm-object-hobject-[channel]*-[expnum] files.
+    ancillary rectified frames lvm-hobject-[channel]*-[expnum] files.
 
     Parameters
     ----------
