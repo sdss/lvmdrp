@@ -1790,7 +1790,8 @@ def stack_rss(in_rsss: List[str], out_rss: str, axis: int = 0) -> RSS:
             if rss._header is not None:
                 hdrs.append(Header(rss.getHeader()))
             if rss._fluxcal is not None:
-                fluxcal_out = rfn.merge_arrays((fluxcal_out, rss._fluxcal), asrecarray=True, flatten=True)
+                f = fluxcal_out.to_pandas()
+                fluxcal_out = Table.from_pandas(f.combine_first(rss._fluxcal.to_pandas()))
             else:
                 fluxcal_out = None
 

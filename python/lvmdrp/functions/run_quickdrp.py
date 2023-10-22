@@ -254,6 +254,7 @@ def quick_reduction(expnum: int, use_fiducial_master: bool, skip_sky_subtraction
 
     # flux-calibrate each channel
     sci_paths = sorted(drp.path.expand("lvm_anc", drpver=drpver, tileid=sci_tileid, mjd=sci_mjd, kind="", imagetype="object", camera="*", expnum=sci_expnum))
+    sci_paths = [sci_path for sci_path in sci_paths if "lvm-object-sp" not in sci_path]
     for sci_path in sci_paths:
         flux_tasks.apply_fluxcal(in_rss=sci_path, out_rss=sci_path)
 

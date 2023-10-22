@@ -1552,21 +1552,24 @@ def interpolate_sky(in_rss: str, out_sky: str, out_rss: str = None, which: str =
     sky_rss.setData(data=new_sky, error=new_error, mask=new_mask)
     sky_rss._header["IMAGETYP"] = "sky"
 
-    # extract standard fibers metadata
+    # extract standard star metadata if exists
     std_acq = np.asarray(list(rss._header["STD*ACQ"].values()))
-    # filter by acquired 
-    std_ids = np.asarray(list(rss._header["STD*FIB"].values()))[std_acq]
-    std_exp = np.asarray(list(rss._header["STD*EXP"].values()))[std_acq]
-    # select only standard fibers in current exposure
-    std_idx = np.where(np.isin(fibermap["orig_ifulabel"], std_ids))
-    log.info(f"calculating correction factors for standard fibers: {fibermap[std_idx]['orig_ifulabel'].value}")
-    # calculate scaling factors for standard fibers
-    std_fac = ((stdid, stdexp / rss._header["EXPTIME"]) for stdid, stdexp in zip(std_ids, std_exp) if stdid in fibermap["orig_ifulabel"])
-    std_fac = {stdid: np.round(factor,4) for stdid, factor in sorted(std_fac, key=lambda item: int(item[0].split("-")[1]))}
-    log.info(f"correction factors for standard fibers: {std_fac}")
-    # apply factors to standard sky fibers
-    sky_rss._data[std_idx] *= np.asarray(list(std_fac.values()))[:, None]
-    sky_rss._error[std_idx] *= np.asarray(list(std_fac.values()))[:, None]
+    if std_acq.size == 0:
+        log.warning("no standard star metadata found, skipping sky reescaling")
+    else:
+        # filter by acquired
+        std_ids = np.asarray(list(rss._header["STD*FIB"].values()))[std_acq]
+        std_exp = np.asarray(list(rss._header["STD*EXP"].values()))[std_acq]
+        # select only standard star in current exposure
+        std_idx = np.where(np.isin(fibermap["orig_ifulabel"], std_ids))
+        log.info(f"calculating correction factors for standard star: {fibermap[std_idx]['orig_ifulabel'].value}")
+        # calculate scaling factors for standard star
+        std_fac = ((stdid, stdexp / rss._header["EXPTIME"]) for stdid, stdexp in zip(std_ids, std_exp) if stdid in fibermap["orig_ifulabel"])
+        std_fac = {stdid: np.round(factor,4) for stdid, factor in sorted(std_fac, key=lambda item: int(item[0].split("-")[1]))}
+        log.info(f"correction factors for standard star: {std_fac}")
+        # apply factors to standard star sky
+        sky_rss._data[std_idx] *= np.asarray(list(std_fac.values()))[:, None]
+        sky_rss._error[std_idx] *= np.asarray(list(std_fac.values()))[:, None]
     
     # write output sky RSS
     log.info(f"writing output sky RSS file '{os.path.basename(out_sky)}'")
@@ -1635,8 +1638,8 @@ def quick_sky_subtraction(in_rss: str, out_rss, in_skye: str, in_skyw: str, sky_
     dec_s = rss._header.get("TESCIDE", rss._header.get("SCIDEC"))
 
     log.info("interpolating sky telescopes pointings "
-        f"(SKYERA, SKYEDEC: {ra_e, dec_e}; SKYWRA, SKYWDEC: {ra_w, dec_w}) "
-        f"in science telescope pointing (SCIRA, SCIDEC: {ra_s, dec_s})")
+        f"(SKYERA, SKYEDEC: {ra_e:.2f}, {dec_e:.2f}; SKYWRA, SKYWDEC: {ra_w:.2f}, {dec_w:.2f}) "
+        f"in science telescope pointing (SCIRA, SCIDEC: {ra_s:.2f}, {dec_s:.2f})")
 
     if sky_weights is None:
         ad = ang_distance(ra_e, dec_e, ra_s, dec_s)
