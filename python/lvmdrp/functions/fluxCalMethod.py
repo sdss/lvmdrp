@@ -101,7 +101,7 @@ def apply_fluxcal(in_rss: str, out_rss: str, display_plots: bool = False):
     # calculate exposure time factors
     std_exp = np.asarray([rss._header.get(f"{std_hd[:-3]}EXP", 1.0) for std_hd in rss._fluxcal.colnames])
     # calculate the biweight mean sensitivity
-    sens_arr = rss._fluxcal.to_pandas().values * (std_exp / std_exp.sum())[None]
+    sens_arr = rss._fluxcal.to_pandas().values# * (std_exp / std_exp.sum())[None]
     sens_ave = biweight_location(sens_arr, axis=1, ignore_nan=True)
     sens_rms = biweight_scale(sens_arr, axis=1, ignore_nan=True)
 
