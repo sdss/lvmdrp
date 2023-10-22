@@ -245,9 +245,9 @@ def quick_reduction(expnum: int, use_fiducial_master: bool, skip_sky_subtraction
         rss_tasks.resample_wavelength(in_rss=fskyw_path, out_rss=hskyw_path, method="linear", compute_densities=True, disp_pix=0.5, start_wave=iwave, end_wave=fwave, err_sim=10, parallel=0, extrapolate=False)
 
         # use sky subtracted resampled frames for flux calibration in each camera
-        flux_tasks.fluxcal_Gaia(sci_camera, hsci_path, GAIA_CACHE_DIR=ORIG_MASTER_DIR)
+        flux_tasks.fluxcal_Gaia(sci_camera, hsci_path, GAIA_CACHE_DIR=ORIG_MASTER_DIR+'/gaia_cache')
 
-    # combine spectrographs
+    # # combine spectrographs
     drp.combine_spectrographs(tileid=sci_tileid, mjd=sci_mjd, channel="b", expnum=sci_expnum)
     drp.combine_spectrographs(tileid=sci_tileid, mjd=sci_mjd, channel="r", expnum=sci_expnum)
     drp.combine_spectrographs(tileid=sci_tileid, mjd=sci_mjd, channel="z", expnum=sci_expnum)
