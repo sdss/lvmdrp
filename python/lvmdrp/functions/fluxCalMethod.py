@@ -287,8 +287,7 @@ def fluxcal_Gaia(camera, in_rss, plot=True, GAIA_CACHE_DIR=None):
         plt.ylim(-0.2, 0.2)
         plt.ylabel('relative residuals')
         plt.xlabel('wavelength [A]')
-
-    save_fig(plt.gcf(), product_path=in_rss, to_display=False, figure_path="qa", label="fluxcal")
+        save_fig(plt.gcf(), product_path=in_rss, to_display=False, figure_path="qa", label="fluxcal")
 
     # update sensitivity extension
     rss.set_fluxcal(fluxcal=res)
