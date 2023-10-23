@@ -1732,9 +1732,9 @@ def stack_rss(in_rsss: List[str], out_rss: str, axis: int = 0) -> RSS:
 
     # load and stack each extension
     log.info(f"stacking frames in {','.join([os.path.basename(in_rss) for in_rss in in_rsss])} along axis {axis}")
+    hdrs = []
     for i in range(len(in_rsss)):
         rss = loadRSS(in_rsss[i])
-        hdrs = []
         if i == 0:
             data_out = rss._data
             if rss._error is not None:
