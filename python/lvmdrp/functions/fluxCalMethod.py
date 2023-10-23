@@ -128,7 +128,7 @@ def apply_fluxcal(in_rss: str, out_rss: str, display_plots: bool = False):
     ax.plot(rss._wave, sens_ave, "-r", lw=2, label="mean")
     ax.set_yscale("log")
     ax.set_xlabel("wavelength (Angstrom)")
-    ax.set_ylabel("sensitivity [(ergs/s/cm^2/A) / e-]")
+    ax.set_ylabel("sensitivity [(ergs/s/cm^2/A) / (e-/s/A)]")
     ax.legend(loc="upper right")
     save_fig(fig, product_path=out_rss, to_display=display_plots, figure_path="qa", label="fluxcal")
     # flux-calibrate and extinction correct data
@@ -140,10 +140,10 @@ def apply_fluxcal(in_rss: str, out_rss: str, display_plots: bool = False):
     sci_secz = rss._header['TESCIAM']
 
     log.info("flux-calibrating data science and sky spectra")
-    rss._data *= sens_ave * 10**(0.4*ext*(sci_secz))
-    rss._error *= sens_ave * 10**(0.4*ext*(sci_secz))
-    rss._sky *= sens_ave * 10**(0.4*ext*(sci_secz))
-    rss._sky_error *= sens_ave * 10**(0.4*ext*(sci_secz))
+    rss._data *= sens_ave * 10**(0.4*ext*(sci_secz)) / rss._header["EXPTIME"]
+    rss._error *= sens_ave * 10**(0.4*ext*(sci_secz)) / rss._header["EXPTIME"]
+    rss._sky *= sens_ave * 10**(0.4*ext*(sci_secz)) / rss._header["EXPTIME"]
+    rss._sky_error *= sens_ave * 10**(0.4*ext*(sci_secz)) / rss._header["EXPTIME"]
 
     log.info(f"writing output file in {os.path.basename(out_rss)}")
     rss.writeFitsData(out_rss)
@@ -175,7 +175,7 @@ def fluxcal_Gaia(camera, in_rss, plot=True, GAIA_CACHE_DIR=None):
     # load fibermap and filter for current spectrograph
     slitmap = rss._slitmap[rss._slitmap["spectrographid"] == int(camera[1])]
 
-    # define dummy sensitivity array in (ergs/s/cm^2/A) / e-
+    # define dummy sensitivity array in (ergs/s/cm^2/A) / (e-/s/A)
     colnames = [f"{std_fib[:-3]}SEN" for std_fib in rss._header["STD*FIB"]]
     if len(colnames) == 0:
         NSTD = 15
@@ -273,7 +273,7 @@ def fluxcal_Gaia(camera, in_rss, plot=True, GAIA_CACHE_DIR=None):
     mean = biweight_location(res.to_pandas().values, axis=1, ignore_nan=True)
 
     if plot:
-        plt.ylabel('sensitivity [(ergs/s/cm^2/A) / e-]')
+        plt.ylabel('sensitivity [(ergs/s/cm^2/A) / (e-/s/A)]')
         plt.xlabel('wavelength [A]')
         plt.ylim(1e-14, 0.1e-11)
         plt.semilogy()
