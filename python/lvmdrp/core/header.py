@@ -171,11 +171,11 @@ def combineHdr(headers):
     for i in range(len(headers)):
         if i == 0:
             final_cards = headers[i]._header.cards
-            final_keys = headers[i]._header.keys()
+            final_keys = list(headers[i]._header.keys())
             final_header = pyfits.Header(cards=final_cards)
         else:
             card = headers[i]._header.cards
-            keys = headers[i]._header.keys()
+            keys = list(headers[i]._header.keys())
             for k in keys:
                 if k not in final_keys:
                     final_header.append(card[k])

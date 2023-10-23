@@ -9,7 +9,6 @@ from typing import Union
 from functools import lru_cache
 from itertools import groupby
 import numpy as np
-from numpy.lib import recfunctions as rfn
 
 import astropy.units as u
 from astropy.io import fits
@@ -1062,7 +1061,7 @@ def combine_spectrographs(tileid: int, mjd: int, channel: str, expnum: int) -> R
 
     For a given exposure, combines the three spectographs together into a
     single output lvm-object-[channel]-[expnum] file. The input files are the
-    ancillary rectified frames lvm-object-hobject-[channel]*-[expnum] files.
+    ancillary rectified frames lvm-hobject-[channel]*-[expnum] files.
 
     Parameters
     ----------

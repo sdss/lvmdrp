@@ -25,7 +25,10 @@ def spec_to_mAB(lam, spec, lamf, filt):
     I1        = simps(spec*filt_int*lam,lam)            
     I2        = simps(filt_int/lam,lam)            
     fnu       = I1/I2 / c_AAs                 # Average flux density
-    return -2.5*numpy.log10(fnu) - 48.6       # AB magnitude
+    mab       = -2.5*numpy.log10(fnu) - 48.6  # AB magnitude
+    if numpy.isnan(mab):
+        mab = -9999.9
+    return mab
 
 def spec_to_LVM_mAB(camera, w, f):
     '''
