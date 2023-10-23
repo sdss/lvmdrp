@@ -3139,6 +3139,8 @@ def join_spec_channels(in_rsss: List[str], out_rss: str, use_weights: bool = Tru
 
     # create RSS
     new_hdr = rsss[0]._header.copy()
+    for rss in rsss[1:]:
+        new_hdr.update(rss._header)
     new_hdr["NAXIS1"] = new_data.shape[1]
     new_hdr["NAXIS2"] = new_data.shape[0]
     new_hdr["CCD"] = ",".join([rss._header["CCD"] for rss in rsss])
