@@ -107,7 +107,8 @@ def get_master_mjd(sci_mjd):
 @click.option('-s', '--skip-sky-subtraction', is_flag=True, help='skip sky subtraction')
 @click.option('--sky-weights', type=(float, float), default=None, help='weights for the master sky combination')
 @click.option('-n', '--ncpus', type=int, default=None, help='number of CPUs to use during extraction')
-def quick_reduction(expnum: int, use_fiducial_master: bool, skip_sky_subtraction: bool, sky_weights: Tuple[float, float], ncpus: int) -> None:
+@click.option("-a", "--aperture-extraction", is_flag=True, default=False, help="run quick reduction with aperture extraction")
+def quick_reduction(expnum: int, use_fiducial_master: bool, skip_sky_subtraction: bool, sky_weights: Tuple[float, float], ncpus: int, aperture_extraction: bool) -> None:
     """ Run the Quick DRP for a given exposure number.
     """
     # validate parameters
@@ -121,6 +122,9 @@ def quick_reduction(expnum: int, use_fiducial_master: bool, skip_sky_subtraction
         elif sum(sky_weights) == 0.0:
             log.error("sum of sky weights must be non-zero")
             return
+    # define extraction method
+    extraction_parallel = "auto" if ncpus is None else ncpus
+    extraction_method = "aperture" if aperture_extraction else "optimal"
 
     # get target frames metadata
     sci_metadata = md.get_metadata(tileid="*", mjd="*", expnum=expnum, imagetyp="object")
@@ -210,7 +214,7 @@ def quick_reduction(expnum: int, use_fiducial_master: bool, skip_sky_subtraction
                                   in_slitmap=Table(drp.fibermap.data), reject_cr=False)
         
         # # extract 1d spectra
-        image_tasks.extract_spectra(in_image=dsci_path, out_rss=xsci_path, in_trace=mtrace_path, in_fwhm=mwidth_path, method="optimal", parallel="auto" if ncpus is None else ncpus)
+        image_tasks.extract_spectra(in_image=dsci_path, out_rss=xsci_path, in_trace=mtrace_path, in_fwhm=mwidth_path, method=extraction_method, parallel=extraction_parallel)
 
         # wavelength calibrate
         rss_tasks.create_pixel_table(in_rss=xsci_path, out_rss=wsci_path, arc_wave=mwave_path, arc_fwhm=mlsf_path)

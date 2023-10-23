@@ -629,8 +629,7 @@ class RSS(FiberRows):
         ):
             hdus[0] = pyfits.PrimaryHDU(self._data)
             if self._wave is not None:
-                if len(self._wave.shape) > 1:
-                    hdus[1] = pyfits.ImageHDU(self._wave, name="WAVE")
+                hdus[1] = pyfits.ImageHDU(self._wave, name="WAVE")
             if self._inst_fwhm is not None:
                 hdus[2] = pyfits.ImageHDU(self._inst_fwhm, name="INSTFWHM")
             if self._error is not None:
