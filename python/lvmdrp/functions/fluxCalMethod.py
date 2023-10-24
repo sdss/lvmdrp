@@ -90,16 +90,29 @@ def apply_fluxcal(in_rss: str, out_rss: str, display_plots: bool = False):
     log.info(f"loading RSS file {os.path.basename(in_rss)}")
     rss = loadRSS(in_rss)
     expnum = rss._header["EXPOSURE"]
-    channel = rss._header["CCD"][0]
+    camera = rss._header["CCD"]
+    channel = camera[0]
     # set masked pixels to NaN
     rss.apply_pixelmask()
+    # load fibermap and filter for current spectrograph
+    slitmap = rss._slitmap[rss._slitmap["spectrographid"] == int(camera[1])]
+
+    # define exposure time factors
+    exptimes = np.zeros(len(slitmap))
+    exptimes[(slitmap["telescope"] == "Sci") | (slitmap["telescope"] == "Sky")] = rss._header["EXPTIME"]
+    for std_hd in rss._fluxcal.colnames:
+        exptime = rss._header[f"{std_hd[:-3]}EXP"]
+        fiberid = rss._header[f"{std_hd[:-3]}FIB"]
+        exptimes[slitmap["orig_ifulabel"] == fiberid] = exptime
 
     # apply joint sensitivity curve
     fig, ax = create_subplots(to_display=display_plots, figsize=(15, 5))
     fig.suptitle(f"Flux calibration for {expnum = }, {channel = }")
     log.info(f"computing joint sensitivity curve for channel {channel}")
     # calculate exposure time factors
-    std_exp = np.asarray([rss._header.get(f"{std_hd[:-3]}EXP", 1.0) for std_hd in rss._fluxcal.colnames])
+    # std_exp = np.asarray([rss._header.get(f"{std_hd[:-3]}EXP", 1.0) for std_hd in rss._fluxcal.colnames])
+    # weights = std_exp / std_exp.sum()
+    # TODO: reject sensitivity curves based on the overall shape by normalizing using a median curve
     # calculate the biweight mean sensitivity
     sens_arr = rss._fluxcal.to_pandas().values# * (std_exp / std_exp.sum())[None]
     sens_ave = biweight_location(sens_arr, axis=1, ignore_nan=True)
@@ -140,10 +153,11 @@ def apply_fluxcal(in_rss: str, out_rss: str, display_plots: bool = False):
     sci_secz = rss._header['TESCIAM']
 
     log.info("flux-calibrating data science and sky spectra")
-    rss._data *= sens_ave * 10**(0.4*ext*(sci_secz)) / rss._header["EXPTIME"]
-    rss._error *= sens_ave * 10**(0.4*ext*(sci_secz)) / rss._header["EXPTIME"]
-    rss._sky *= sens_ave * 10**(0.4*ext*(sci_secz)) / rss._header["EXPTIME"]
-    rss._sky_error *= sens_ave * 10**(0.4*ext*(sci_secz)) / rss._header["EXPTIME"]
+
+    rss._data *= sens_ave * 10**(0.4*ext*(sci_secz)) / exptimes
+    rss._error *= sens_ave * 10**(0.4*ext*(sci_secz)) / exptimes
+    rss._sky *= sens_ave * 10**(0.4*ext*(sci_secz)) / exptimes
+    rss._sky_error *= sens_ave * 10**(0.4*ext*(sci_secz)) / exptimes
 
     log.info(f"writing output file in {os.path.basename(out_rss)}")
     rss.writeFitsData(out_rss)
