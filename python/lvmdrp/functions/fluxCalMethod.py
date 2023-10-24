@@ -154,10 +154,10 @@ def apply_fluxcal(in_rss: str, out_rss: str, display_plots: bool = False):
 
     log.info("flux-calibrating data science and sky spectra")
 
-    rss._data *= sens_ave * 10**(0.4*ext*(sci_secz)) / exptimes
-    rss._error *= sens_ave * 10**(0.4*ext*(sci_secz)) / exptimes
-    rss._sky *= sens_ave * 10**(0.4*ext*(sci_secz)) / exptimes
-    rss._sky_error *= sens_ave * 10**(0.4*ext*(sci_secz)) / exptimes
+    rss._data *= sens_ave * 10**(0.4*ext*(sci_secz)) / exptimes[:, None]
+    rss._error *= sens_ave * 10**(0.4*ext*(sci_secz)) / exptimes[:, None]
+    rss._sky *= sens_ave * 10**(0.4*ext*(sci_secz)) / exptimes[:, None]
+    rss._sky_error *= sens_ave * 10**(0.4*ext*(sci_secz)) / exptimes[:, None]
 
     log.info(f"writing output file in {os.path.basename(out_rss)}")
     rss.writeFitsData(out_rss)
