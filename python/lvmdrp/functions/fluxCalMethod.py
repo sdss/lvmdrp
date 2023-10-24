@@ -95,7 +95,7 @@ def apply_fluxcal(in_rss: str, out_rss: str, display_plots: bool = False):
     # set masked pixels to NaN
     rss.apply_pixelmask()
     # load fibermap and filter for current spectrograph
-    slitmap = rss._slitmap[rss._slitmap["spectrographid"] == int(camera[1])]
+    slitmap = rss._slitmap
 
     # define exposure time factors
     exptimes = np.zeros(len(slitmap))
