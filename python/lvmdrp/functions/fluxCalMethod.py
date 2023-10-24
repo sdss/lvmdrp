@@ -321,7 +321,7 @@ def retrieve_header_stars(rss):
     stddata = []
     for i in range(12):
         stdi = 'STD'+str(i+1)
-        if h[stdi+'ACQ'] and h[stdi+'FIB'] in slitmap['orig_ifulabel']:
+        if h[stdi+'ACQ']=='T' and h[stdi+'FIB'] in slitmap['orig_ifulabel']:
             gaia_id = h[stdi+'ID']
             fiber = h[stdi+'FIB']
             obstime = Time(h[stdi+'T0'])
