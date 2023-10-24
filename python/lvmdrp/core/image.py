@@ -13,6 +13,7 @@ from astropy.visualization import simple_norm
 from scipy import ndimage, signal
 from scipy import interpolate
 
+from lvmdrp.core.constants import CON_LAMPS, ARC_LAMPS
 from lvmdrp.core.plot import plt
 from lvmdrp.core.apertures import Apertures
 from lvmdrp.core.header import Header
@@ -2596,6 +2597,23 @@ def combineImages(
         new_header["ISMASTER"] = (True, "Is this a combined (master) frame")
         new_header["NFRAMES"] = (nexp, "Number of exposures combined")
         new_header["STATCOMB"] = (method, "Statistic used to combine images")
+        
+        # add combined lamps to header
+        if images[0]._header["IMAGETYP"] == "flat":
+            lamps = CON_LAMPS
+        elif images[0]._header["IMAGETYP"] == "arc":
+            lamps = ARC_LAMPS
+        else:
+            lamps = []
+        
+        if lamps:
+            new_lamps = set()
+            for image in images:
+                for lamp in lamps:
+                    if image._header.get(lamp) == "ON":
+                        new_lamps.add(lamp)
+            for lamp in new_lamps:
+                new_header[lamp] = "ON"
     else:
         new_header = None
 
