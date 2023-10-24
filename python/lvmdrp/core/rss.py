@@ -827,7 +827,7 @@ class RSS(FiberRows):
                 else:
                     combined_sky = None
 
-        if method == "mean":
+        elif method == "mean":
             if mask is not None:
                 data[mask] = 0
                 good_pix = bn.nansum(numpy.logical_not(mask), 0)
@@ -865,7 +865,7 @@ class RSS(FiberRows):
                 else:
                     combined_sky = None
 
-        if method == "weighted_mean" and error is not None:
+        elif method == "weighted_mean" and error is not None:
             if mask is not None:
                 good_pix = bn.nansum(numpy.logical_not(mask), 0)
                 select_mean = good_pix > 0
@@ -893,7 +893,7 @@ class RSS(FiberRows):
                 else:
                     combined_sky = None
 
-        if method == "median":
+        elif method == "median":
             if mask is not None:
                 good_pix = bn.nansum(numpy.logical_not(mask), 0)
                 combined_data[good_pix] = bn.nanmedian(data[good_pix], 0)
