@@ -1006,7 +1006,7 @@ def combine_channels(tileid: int, mjd: int, expnum: int):
     files = path.expand('lvm_anc', mjd=mjd, tileid=tileid, drpver=drpver,
                          imagetype='object', expnum=expnum, kind='', camera='*')
     # filter out old lvm-object-sp?-*.fits files
-    files = sorted([f for f in files if not f.startswith("lvm-object-sp")], key=_parse_expnum_cam)
+    files = sorted([f for f in files if not os.path.basename(f).startswith("lvm-object-sp")], key=_parse_expnum_cam)
 
     cframe_path = path.full("lvm_frame", mjd=mjd, drpver=drpver, tileid=tileid, expnum=expnum, kind='CFrame')
 
