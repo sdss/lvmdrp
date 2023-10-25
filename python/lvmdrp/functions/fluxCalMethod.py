@@ -99,7 +99,7 @@ def apply_fluxcal(in_rss: str, out_rss: str, display_plots: bool = False):
 
     # define exposure time factors
     exptimes = np.zeros(len(slitmap))
-    exptimes[(slitmap["telescope"] == "Sci") | (slitmap["telescope"] == "Sky")] = rss._header["EXPTIME"]
+    exptimes[(slitmap["targettype"] == "science") | (slitmap["targettype"] == "SKY")] = rss._header["EXPTIME"]
     for std_hd in rss._fluxcal.colnames:
         exptime = rss._header[f"{std_hd[:-3]}EXP"]
         fiberid = rss._header[f"{std_hd[:-3]}FIB"]
