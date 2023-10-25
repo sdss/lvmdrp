@@ -105,7 +105,7 @@ def get_master_mjd(sci_mjd):
 @click.option('-e', '--expnum', type=int, help='an exposure number to reduce')
 @click.option('-f', '--use-fiducial-master', is_flag=True, default=False, help='use fiducial master calibration frames')
 @click.option('-s', '--skip-sky-subtraction', is_flag=True, help='skip sky subtraction')
-@click.option('--sky-weights', type=(float, float), default=None, help='weights for the master sky combination')
+@click.option('--sky-weights', type=(float, float), default=None, help='weights (east, west) for the master sky combination')
 @click.option('-n', '--ncpus', type=int, default=None, help='number of CPUs to use during extraction')
 @click.option("-a", "--aperture-extraction", is_flag=True, default=False, help="run quick reduction with aperture extraction")
 def quick_reduction(expnum: int, use_fiducial_master: bool, skip_sky_subtraction: bool, sky_weights: Tuple[float, float], ncpus: int, aperture_extraction: bool) -> None:
