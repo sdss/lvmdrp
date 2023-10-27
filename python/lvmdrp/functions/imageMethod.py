@@ -4329,10 +4329,11 @@ def trace_fibers(
         img_slice = img.getSlice(icolumn, axis="y")
         img_slice._data[(img_slice._mask)|(joint_mod<=0)] = numpy.nan
 
-        weights = img_slice._data / bn.nansum(img_slice._data)
+        # weights = img_slice._data / bn.nansum(img_slice._data)
         residuals = (joint_mod - img_slice._data) / img_slice._data * 100
-        residuals *= weights
+        # residuals *= weights
         ax.plot(img_slice._pixels, residuals, ".", ms=2, mew=0, mfc=colors[i])
+        ax.set_ylim(-50, 50)
     save_fig(
         fig,
         product_path=out_trace_amp,

@@ -17,6 +17,7 @@ from astropy.io import fits
 from astropy.table import Table
 from astropy.time import Time
 from astropy.wcs import WCS
+from astropy.stats import biweight_scale
 from numpy import polynomial
 from scipy import interpolate, ndimage
 
@@ -1439,6 +1440,9 @@ def create_fiberflat(in_rsss: List[str], out_rsss: List[str], median_box: int = 
     # plot original continuum exposure, fiberflat and corrected fiberflat per fiber
     colors = plt.cm.Spectral(numpy.linspace(0, 1, fiberflat._fibers))
     rss._data[rss._mask] = numpy.nan
+    stdev_ori = biweight_scale(rss._data, axis=0, ignore_nan=True)[1950:2050].mean()
+    stdev_new = biweight_scale(rss._data/fiberflat._data, axis=0, ignore_nan=True)[1950:2050].mean()
+    log.info(f"flatfield statistics: {stdev_ori = :.2f}, {stdev_new = :.2f} ({stdev_new/stdev_ori*100:.2f}%)")
     for ifiber in range(fiberflat._fibers):
         # input data
         axs[0].step(rss._wave[ifiber], rss._data[ifiber], color=colors[ifiber], alpha=0.5, lw=1)
@@ -1512,7 +1516,7 @@ def create_fiberflat(in_rsss: List[str], out_rsss: List[str], median_box: int = 
         fiberflat_cam.setHdrValue(
             "HIERARCH PIPE FLAT STD", float("%.3f" % (std)), "rms of fiberflat values"
         )
-        fiberflat_cam._header["CUNIT"] = "dimensionless"
+        fiberflat_cam._header["BUNIT"] = "dimensionless"
         fiberflat_cam._header["IMAGETYP"] = "fiberflat"
         fiberflat_cam.writeFitsData(out_rsss[i])
 

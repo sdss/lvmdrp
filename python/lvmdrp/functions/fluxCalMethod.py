@@ -106,7 +106,7 @@ def apply_fluxcal(in_rss: str, out_rss: str, display_plots: bool = False):
         exptimes[slitmap["orig_ifulabel"] == fiberid] = exptime
 
     # apply joint sensitivity curve
-    fig, ax = create_subplots(to_display=display_plots, figsize=(15, 5))
+    fig, ax = create_subplots(to_display=display_plots, figsize=(10, 5))
     fig.suptitle(f"Flux calibration for {expnum = }, {channel = }")
     log.info(f"computing joint sensitivity curve for channel {channel}")
     # calculate exposure time factors
@@ -143,6 +143,7 @@ def apply_fluxcal(in_rss: str, out_rss: str, display_plots: bool = False):
     ax.set_xlabel("wavelength (Angstrom)")
     ax.set_ylabel("sensitivity [(ergs/s/cm^2/A) / (e-/s/A)]")
     ax.legend(loc="upper right")
+    fig.tight_layout()
     save_fig(fig, product_path=out_rss, to_display=display_plots, figure_path="qa", label="fluxcal")
     # flux-calibrate and extinction correct data
     # Note that we assume a constant extinction curve here!
