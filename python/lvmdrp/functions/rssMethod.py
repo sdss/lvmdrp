@@ -1791,6 +1791,8 @@ def stack_rss(in_rsss: List[str], out_rss: str, axis: int = 0) -> RSS:
                 sky_out = None
             if rss._sky_error is not None:
                 sky_error_out = numpy.concatenate((sky_error_out, rss._sky_error), axis=axis)
+            else:
+                sky_error_out = None
             if rss._header is not None:
                 hdrs.append(Header(rss.getHeader()))
             if rss._fluxcal is not None:
