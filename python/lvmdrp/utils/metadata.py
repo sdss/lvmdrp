@@ -576,10 +576,14 @@ def extract_metadata(frames_paths: list, kind: str = "raw") -> pd.DataFrame:
         # set on-lamp conditions
         onlamp = ["ON", True, 'T', 1]
 
+        # get the tile id; set null tile ids -999 to 1111
+        tileid = header.get("TILE_ID", header.get("TILEID", 1111))
+        tileid = 1111 if tileid == -999 else tileid
+
         if kind == "raw":
             new_metadata[i] = [
                 "n" if header.get("OBSERVAT") != "LCO" else "s",
-                header.get("TILEID", 1111),
+                tileid,
                 sjd,
                 header.get("MJD"),
                 header.get("IMAGETYP"),
@@ -603,7 +607,7 @@ def extract_metadata(frames_paths: list, kind: str = "raw") -> pd.DataFrame:
             ]
         elif kind == "master":
             new_metadata[i] = [
-                header.get("TILEID", 1111),
+                tileid,
                 sjd,
                 header.get("MJD"),
                 header.get("IMAGETYP"),
