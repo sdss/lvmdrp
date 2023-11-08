@@ -34,4 +34,4 @@ def setup_paths(release: str = 'sdsswork', replant: bool = False):
 path = setup_paths()
 
 
-__version__ = get_package_version(path=__file__, package_name=NAME) or os.getenv("LVMDRP_VERSION", "dev")
+__version__ = os.getenv("LVMDRP_VERSION") or get_package_version(path=__file__, package_name=NAME)
