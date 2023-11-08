@@ -1416,44 +1416,50 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
         log.info(f'Filtering on exposure numbers {expnum}.')
         sub = filter_expnum(sub, expnum)
 
-    # group the frames
+    # sort the frames
     sub = sub.sort_values(['expnum', 'camera'])
 
-    # split into cals, and science
-    cals = sub[~(sub['imagetyp'] == 'object')]
-    sci = sub[sub['imagetyp'] == 'object']
+    # group by tileid, mjd
+    groups = sub.groupby(['tileid', 'mjd'])
 
-    # start logging for this mjd
-    tileid = sci["tileid"].unique()[0]
-    start_logging(mjd, tileid)
+    # iterate over each group and reduce
+    for key, group in groups:
+        tileid, mjd = key
 
-    # create start status
-    create_status_file(tileid, mjd, status='started')
+        # split into cals, and science
+        cals = group[~(group['imagetyp'] == 'object')]
+        sci = group[group['imagetyp'] == 'object']
 
-    # attempt to reduce individual calibration files
-    if not cals.empty and with_cals:
-        for row in cals.to_dict("records"):
-            try:
-                reduce_calib_frame(row)
-            except Exception as e:
-                log.error(f'Failed to reduce calib frame mjd {mjd} exposure {row["expnum"]}: {e}')
-                trace = traceback.format_exc()
-                log.error(trace)
+        # start logging for this tileid, mjd
+        start_logging(mjd, tileid)
 
-    # reduce the science data
-    if not sci.empty and not no_sci:
-        for expnum in sci['expnum'].unique():
-            try:
-                quick_science_reduction(expnum, use_fiducial_master=True)
-            except Exception as e:
-                log.error(f'Failed to reduce science frame mjd {mjd} exposure {expnum}: {e}')
-                create_status_file(tileid, mjd, status='error')
-                trace = traceback.format_exc()
-                log.error(trace)
-                return
+        # create start status
+        create_status_file(tileid, mjd, status='started')
 
-    # create done status
-    create_status_file(tileid, mjd, status='done')
+        # attempt to reduce individual calibration files
+        if not cals.empty and with_cals:
+            for row in cals.to_dict("records"):
+                try:
+                    reduce_calib_frame(row)
+                except Exception as e:
+                    log.error(f'Failed to reduce calib frame mjd {mjd} exposure {row["expnum"]}: {e}')
+                    trace = traceback.format_exc()
+                    log.error(trace)
+
+        # reduce the science data
+        if not sci.empty and not no_sci:
+            for expnum in sci['expnum'].unique():
+                try:
+                    quick_science_reduction(expnum, use_fiducial_master=True)
+                except Exception as e:
+                    log.error(f'Failed to reduce science frame mjd {mjd} exposure {expnum}: {e}')
+                    create_status_file(tileid, mjd, status='error')
+                    trace = traceback.format_exc()
+                    log.error(trace)
+                    break
+
+        # create done status
+        create_status_file(tileid, mjd, status='done')
 
 
 def reduce_calib_frame(row: dict):
