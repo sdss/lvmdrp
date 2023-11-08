@@ -1289,7 +1289,10 @@ def should_run(mjd: int) -> bool:
     # if no directory or no raw_metadata file in it, we run the DRP
     root = pathlib.Path(os.getenv("LVM_SPECTRO_REDUX")) / f'{drpver}'
     mjddir = list(_yield_dir(root, mjd))
-    return not any(mjddir[0].glob('raw_meta*')) if mjddir else True
+    no_files = not any(mjddir[0].glob('raw_meta*')) if mjddir else True
+    if not no_files:
+        log.info(f"DRP for mjd {mjd} already running.")
+    return no_files
 
 
 def check_daily_mjd(test: bool = False, with_cals: bool = False):
