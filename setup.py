@@ -6,7 +6,7 @@ from setuptools import setup, find_packages
 
 
 NAME = "lvmdrp"
-VERSION = "0.1.1dev"
+VERSION = "0.1.2dev"
 
 
 def run():
