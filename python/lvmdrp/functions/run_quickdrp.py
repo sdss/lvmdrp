@@ -117,14 +117,11 @@ def get_master_mjd(sci_mjd: int) -> int:
     return int(target_master[-1])
 
 
-@click.command(short_help='Run the Quick DRP')
-@click.option('-e', '--expnum', type=int, help='an exposure number to reduce')
-@click.option('-f', '--use-fiducial-master', is_flag=True, default=False, help='use fiducial master calibration frames')
-@click.option('-s', '--skip-sky-subtraction', is_flag=True, help='skip sky subtraction')
-@click.option('--sky-weights', type=(float, float), default=None, help='weights (east, west) for the master sky combination')
-@click.option('-n', '--ncpus', type=int, default=None, help='number of CPUs to use during extraction')
-@click.option("-a", "--aperture-extraction", is_flag=True, default=False, help="run quick reduction with aperture extraction")
-def quick_reduction(expnum: int, use_fiducial_master: bool, skip_sky_subtraction: bool, sky_weights: Tuple[float, float], ncpus: int, aperture_extraction: bool) -> None:
+def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
+                            skip_sky_subtraction: bool = False,
+                            sky_weights: Tuple[float, float] = None,
+                            ncpus: int = None,
+                            aperture_extraction: bool = False) -> None:
     """ Run the Quick DRP for a given exposure number.
     """
     # validate parameters
@@ -221,6 +218,8 @@ def quick_reduction(expnum: int, use_fiducial_master: bool, skip_sky_subtraction
             mwave_path = path.full("lvm_master", drpver=drpver, kind=f"mwave_{lamps}", **masters["wave"].to_dict())
             mlsf_path = path.full("lvm_master", drpver=drpver, kind=f"mlsf_{lamps}", **masters["lsf"].to_dict())
             mflat_path = path.full("lvm_master", drpver=drpver, kind="mfiberflat", **masters["fiberflat"].to_dict())
+
+        log.info(f'--- Starting science reduction of raw frame: {rsci_path}')
 
         # preprocess frame
         image_tasks.preproc_raw_frame(in_image=rsci_path, out_image=psci_path, in_mask=mpixmask_path)
