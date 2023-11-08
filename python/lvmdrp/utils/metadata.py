@@ -577,8 +577,8 @@ def extract_metadata(frames_paths: list, kind: str = "raw") -> pd.DataFrame:
         onlamp = ["ON", True, 'T', 1]
 
         # get the tile id; set null tile ids -999 to 1111
-        tileid = header.get("TILE_ID", header.get("TILEID", 1111))
-        tileid = 1111 if tileid == -999 else tileid
+        tileid = header.get("TILE_ID") or header.get("TILEID", 1111)
+        tileid = 1111 if tileid in (-999, None) else tileid
 
         if kind == "raw":
             new_metadata[i] = [
