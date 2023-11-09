@@ -795,7 +795,7 @@ def start_logging(mjd: int, tileid: int):
     if not logpath.parent.exists():
         logpath.parent.mkdir(parents=True, exist_ok=True)
 
-    log.start_file_logger(logpath)
+    log.start_file_logger(logpath, rotating=False)
 
 
 def write_config_file():
@@ -1433,14 +1433,20 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
         cals = group[~(group['imagetyp'] == 'object')]
         sci = group[group['imagetyp'] == 'object']
 
-        # start logging for this tileid, mjd
-        start_logging(mjd, tileid)
+        # avoid creating logs / status files for tileid+mjd groups with
+        # no science files, unless explicitly reducing cals
+        cal_cond = not cals.empty and with_cals
+        sci_cond = not sci.empty and not no_sci
 
-        # create start status
-        create_status_file(tileid, mjd, status='started')
+        if sci_cond or cal_cond:
+            # start logging for this tileid, mjd
+            start_logging(mjd, tileid)
+
+            # create start status
+            create_status_file(tileid, mjd, status='started')
 
         # attempt to reduce individual calibration files
-        if not cals.empty and with_cals:
+        if cal_cond:
             for row in cals.to_dict("records"):
                 try:
                     reduce_calib_frame(row)
@@ -1450,7 +1456,7 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
                     log.error(trace)
 
         # reduce the science data
-        if not sci.empty and not no_sci:
+        if sci_cond:
             for expnum in sci['expnum'].unique():
                 try:
                     quick_science_reduction(expnum, use_fiducial_master=True)
