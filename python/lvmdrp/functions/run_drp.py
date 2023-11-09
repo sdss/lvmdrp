@@ -1367,6 +1367,28 @@ def remove_status_file(tileid: int, mjd: int, remove_all: bool = False):
         file.unlink()
 
 
+def status_file_exists(tileid: int, mjd: int, status: str = 'started') -> bool:
+    """ Check if a status file exists
+
+    Parameters
+    ----------
+    tileid : int
+        the tile iD
+    mjd : int
+        the MJD
+    status : str, optional
+        the DRP status, by default 'started'
+
+    Returns
+    -------
+    bool
+        Flag if the file exists
+    """
+    root = pathlib.Path(os.getenv("LVM_SPECTRO_REDUX")) / f'{drpver}' / 'logs'
+    path = root / f'lvm-drp-{tileid}-{mjd}.{status}'
+    return path.exists()
+
+
 def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
             with_cals: bool = False, no_sci: bool = False):
     """ Run the quick DRP
@@ -1468,7 +1490,8 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
                     break
 
         # create done status
-        create_status_file(tileid, mjd, status='done')
+        if status_file_exists(tileid, mjd, 'started'):
+            create_status_file(tileid, mjd, status='done')
 
 
 def reduce_calib_frame(row: dict):
