@@ -6,9 +6,7 @@ import click
 import cloup
 from cloup.constraints import mutually_exclusive, RequireExactly, IsSet, If
 
-from astropy.io import fits
-from lvmdrp.functions.run_drp import run_drp, get_config_options, reduce_file, check_daily_mjd
-from lvmdrp.functions.imageMethod import preproc_raw_frame
+from lvmdrp.functions.run_drp import run_drp, reduce_file, check_daily_mjd
 from lvmdrp.functions.skyMethod import configureSkyModel_drp
 from lvmdrp.utils.metadata import get_frames_metadata, get_master_metadata
 
