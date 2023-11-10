@@ -68,26 +68,6 @@ def run_reduce_file(filename):
     reduce_file(filename)
 
 
-@cli.command('preprocess', short_help='Preprocess raw frames')
-@click.argument('filename', type=click.Path(exists=True))
-@click.option('-f', '--flavor', type=str, help='the flavor of the file', required=True)
-def preprocess(filename, flavor):
-
-    # get metadata for a single file
-    hdr = fits.getheader(filename)
-    camera = hdr.get("CCD")
-    mjd = hdr.get("MJD")
-    tileid = hdr.get("TILEID", 1111)
-    expnum = f'{hdr.get("EXPOSURE"):0>8}'
-
-    # get custom config options
-    kwargs = get_config_options('reduction_steps.preproc_raw_frame', flavor)
-
-    # preprocess the frame
-    preproc_raw_frame(filename, flavor=flavor, kind='p', camera=camera,
-                      mjd=mjd, expnum=expnum, tileid=tileid, **kwargs)
-
-
 @click.group('sky', short_help='Run routines related to sky subtraction')
 def skycli():
     pass
