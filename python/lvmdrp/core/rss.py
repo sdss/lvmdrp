@@ -304,12 +304,12 @@ class RSS(FiberRows):
             if self._data is not None:  # check if there is data in the object
                 dim = other.shape
                 # add ndarray according do its dimensions
-                if self._dim == dim:
+                if self._data.shape == dim:
                     data = self._data * other
                 elif len(dim) == 1:
-                    if self._dim[0] == dim[0]:
+                    if self._data.shape[0] == dim[0]:
                         data = self._data * other[:, numpy.newaxis]
-                    elif self._dim[1] == dim[0]:
+                    elif self._data.shape[1] == dim[0]:
                         data = self._data * other[numpy.newaxis, :]
                 else:
                     data = self._data
