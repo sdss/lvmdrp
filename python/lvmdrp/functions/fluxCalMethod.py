@@ -262,7 +262,10 @@ def fluxcal_Gaia(camera, in_rss, plot=True, GAIA_CACHE_DIR=None):
         # correct for extinction
         spec *= 10**(0.4*ext*secz)
 
-        # TODO: mask telluric spectral regions
+        # TODO: fit continuum to instrumental std spectrum (stdflux) and normalize
+        # TODO: mask telluric absorption lines from stdflux
+        # TODO: match gaia spectrum and stdflux against a set of theoretical stellar templates
+        # TODO: downgrade best fit template to instrumental LSF and calculate sensitivity curve (after lifting telluric mask)
 
         # divide to find sensitivity and smooth
         sens = stdflux/spec        
