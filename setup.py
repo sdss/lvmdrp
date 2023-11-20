@@ -34,7 +34,7 @@ def run():
             "skyfield>=1.45",
             "pydl>=0.7.0",
             "skycalc_cli==1.4",
-            "sdsstools>=1.0",
+            "sdsstools>=1.4",
             "sdss-tree>=4.0",
             "sdss-access>=3.0",
             "click>=8.0",
