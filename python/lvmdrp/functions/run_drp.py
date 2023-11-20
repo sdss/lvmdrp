@@ -795,7 +795,7 @@ def start_logging(mjd: int, tileid: int):
     if not logpath.parent.exists():
         logpath.parent.mkdir(parents=True, exist_ok=True)
 
-    log.start_file_logger(logpath, rotating=False)
+    log.start_file_logger(logpath, rotating=False, with_json=True)
 
 
 def write_config_file():
@@ -1335,7 +1335,7 @@ def create_status_file(tileid: int, mjd: int, status: str = 'started'):
     status : str, optional
         the DRP status, by default 'started'
     """
-    root = pathlib.Path(os.getenv("LVM_SPECTRO_REDUX")) / f'{drpver}' / 'logs'
+    root = pathlib.Path(os.getenv("LVM_SPECTRO_REDUX")) / f'{drpver}' / f'{tileid}' / 'logs'
     root.mkdir(parents=True, exist_ok=True)
     path = root / f'lvm-drp-{tileid}-{mjd}.{status}'
     path.touch()
@@ -1356,7 +1356,7 @@ def remove_status_file(tileid: int, mjd: int, remove_all: bool = False):
     remove_all : bool, optional
         Flag to remove all status files, by default False
     """
-    root = pathlib.Path(os.getenv("LVM_SPECTRO_REDUX")) / f'{drpver}' / 'logs'
+    root = pathlib.Path(os.getenv("LVM_SPECTRO_REDUX")) / f'{drpver}' / f'{tileid}' / 'logs'
 
     if remove_all:
         shutil.rmtree(root)
@@ -1384,9 +1384,42 @@ def status_file_exists(tileid: int, mjd: int, status: str = 'started') -> bool:
     bool
         Flag if the file exists
     """
-    root = pathlib.Path(os.getenv("LVM_SPECTRO_REDUX")) / f'{drpver}' / 'logs'
+    root = pathlib.Path(os.getenv("LVM_SPECTRO_REDUX")) / f'{drpver}' / f'{tileid}' / 'logs'
     path = root / f'lvm-drp-{tileid}-{mjd}.{status}'
     return path.exists()
+
+
+def update_error_file(tileid: int, mjd: int, expnum: int, error: str,
+                      reset: bool = False):
+    """_summary_
+
+    _extended_summary_
+
+    Parameters
+    ----------
+    tileid : int
+        _description_
+    mjd : int
+        _description_
+    expnum : int
+        _description_
+    error : str
+        _description_
+    reset : bool, optional
+        _description_, by default False
+    """
+
+    path = pathlib.Path(os.getenv("LVM_SPECTRO_REDUX")) / f'{drpver}' / 'drp_errors.txt'
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    if reset:
+        path.unlink()
+        return
+
+    with open(path, '+a') as f:
+        f.write(f'ERROR on tileid, mjd, exposure: {tileid}, {mjd}, {expnum}\n')
+        f.write(error)
+        f.write('\n')
 
 
 def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
@@ -1460,12 +1493,12 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
         cal_cond = not cals.empty and with_cals
         sci_cond = not sci.empty and not no_sci
 
+        # create start status
+        create_status_file(tileid, mjd, status='started')
+
         if sci_cond or cal_cond:
             # start logging for this tileid, mjd
             start_logging(mjd, tileid)
-
-            # create start status
-            create_status_file(tileid, mjd, status='started')
 
         # attempt to reduce individual calibration files
         if cal_cond:
@@ -1473,9 +1506,9 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
                 try:
                     reduce_calib_frame(row)
                 except Exception as e:
-                    log.error(f'Failed to reduce calib frame mjd {mjd} exposure {row["expnum"]}: {e}')
+                    log.exception(f'Failed to reduce calib frame mjd {mjd} exposure {row["expnum"]}: {e}')
                     trace = traceback.format_exc()
-                    log.error(trace)
+                    update_error_file(tileid, mjd, row['expnum'], trace)
 
         # reduce the science data
         if sci_cond:
@@ -1483,14 +1516,14 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
                 try:
                     quick_science_reduction(expnum, use_fiducial_master=True)
                 except Exception as e:
-                    log.error(f'Failed to reduce science frame mjd {mjd} exposure {expnum}: {e}')
+                    log.exception(f'Failed to reduce science frame mjd {mjd} exposure {expnum}: {e}')
                     create_status_file(tileid, mjd, status='error')
                     trace = traceback.format_exc()
-                    log.error(trace)
-                    break
+                    update_error_file(tileid, mjd, expnum, trace)
+                    continue
 
-        # create done status
-        if status_file_exists(tileid, mjd, 'started'):
+        # create done status on successful run
+        if not status_file_exists(tileid, mjd, status='error'):
             create_status_file(tileid, mjd, status='done')
 
 
