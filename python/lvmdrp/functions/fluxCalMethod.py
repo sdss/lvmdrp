@@ -89,6 +89,12 @@ def apply_fluxcal(in_rss: str, out_rss: str, display_plots: bool = False):
     # read all three channels
     log.info(f"loading RSS file {os.path.basename(in_rss)}")
     rss = loadRSS(in_rss)
+
+    # check for flux calibration data
+    if np.isnan(rss._fluxcal.to_pandas().values).all():
+        log.warning("no standard star metadata found, skipping flux calibration")
+        return rss
+
     expnum = rss._header["EXPOSURE"]
     camera = rss._header["CCD"]
     channel = camera[0]
