@@ -13,13 +13,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: [3.8] #[3.8, 3.9, "3.10"]
+        python-version: [3.8, 3.9, "3.10"]
         allow_failure: [false]
         os: [ubuntu-latest]
-        # include:
-        #   - python: "3.11"
-        #     os: ubuntu-latest
-        #     allow_failure: true
+        include:
+          - python: "3.11"
+            os: ubuntu-latest
+            allow_failure: true
 
     steps:
     - uses: actions/checkout@v4
