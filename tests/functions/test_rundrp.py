@@ -9,7 +9,8 @@ from astropy.time import Time
 from lvmdrp import __version__ as drpver
 from lvmdrp.functions.run_drp import (create_status_file, remove_status_file,
                                       status_file_exists, update_error_file,
-                                      should_run, check_daily_mjd)
+                                      should_run, check_daily_mjd, parse_mjds,
+                                      filter_expnum)
 
 
 @pytest.fixture()
@@ -104,5 +105,36 @@ def test_check_daily_no(check):
 def test_check_daily_yes(transfer, check):
     """ test we are running the drp """
     assert 'Running DRP for mjd 61234' in check
+
+
+@pytest.mark.parametrize('mjd, exp',
+                         [(61234, 61234),
+                          ('61234', 61234),
+                          ([61230, 61234, 61237], [61230, 61234, 61237]),
+                          ('61230-61240', [61231, 61234, 61238]),
+                          ('-61234', [61231, 61234]),
+                          ('61234-', [61234, 61238])],
+                         ids=['int', 'str', 'list', 'range', 'upper', 'lower'])
+def test_parse_mjds(datadir, mjd, exp):
+    """ test we can parse different mjd inputs """
+    datadir([61231, 61234, 61238])
+    out = parse_mjds(mjd)
+    assert out == exp
+
+
+@pytest.mark.parametrize('expnum, exp',
+                         [(6817, [6817]),
+                          ('6817', [6817]),
+                          ([6817, 6819], [6817, 6819]),
+                          ('6817-6818', [6817, 6818]),
+                          ('-6818', [6817, 6818]),
+                          ('6818-', [6818, 6819]),
+                          ],
+                         ids=['int', 'str', 'list', 'range', 'upper', 'lower'])
+def test_filter_expnum(multimeta, expnum, exp):
+    """ test we can filter out exposures from a metaframe """
+    out = filter_expnum(multimeta, expnum)
+    uni = out['expnum'].unique()
+    assert all(uni == exp)
 
 
