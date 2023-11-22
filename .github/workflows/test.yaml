@@ -35,9 +35,11 @@ jobs:
         echo "LVMCORE_DIR=$GITHUB_WORKSPACE/lvmcore" >> "$GITHUB_ENV"
 
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v2
+      uses: actions/setup-python@v4
       with:
         python-version: ${{ matrix.python-version }}
+        cache: 'pip'
+        cache-dependency-path: '**/setup.cfg'
 
     - name: Install dependencies
       run: |
