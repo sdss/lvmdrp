@@ -986,7 +986,7 @@ class FiberRows(Header, PositionTable):
             combined_hdr = combineHdr([self, rows])
             self.setHeader(combined_hdr._header)
 
-    def smoothTracePoly(self, deg, poly_kind="poly", clip=None):
+    def fit_polynomial(self, deg, poly_kind="poly", clip=None):
         """
         smooths the traces along the dispersion direction with a polynomical function for each individual fiber
 
