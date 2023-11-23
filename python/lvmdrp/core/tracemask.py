@@ -1,12 +1,8 @@
 #!/usr/bin/env python
 # encoding: utf-8
 
-import matplotlib.pyplot as plt
 import numpy
-from numpy import polynomial
-
 from lvmdrp.core.fiberrows import FiberRows
-from lvmdrp import log
 
 
 class TraceMask(FiberRows):
