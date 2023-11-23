@@ -76,10 +76,10 @@ class FiberRows(Header, PositionTable):
         """
         Operator to divide two Images or divide by another type if possible
         """
-        if isinstance(other, FiberRows):
+        if isinstance(other, self.__class__):
             # define behaviour if the other is of the same instance
 
-            img = FiberRows(
+            img = self.__class__(
                 header=self._header,
                 shape=self._shape,
                 size=self._size,
@@ -118,7 +118,7 @@ class FiberRows(Header, PositionTable):
             return img
 
         elif isinstance(other, numpy.ndarray):
-            img = FiberRows(
+            img = self.__class__(
                 error=self._error,
                 mask=self._mask,
                 header=self._header,
@@ -133,12 +133,12 @@ class FiberRows(Header, PositionTable):
             if self._data is not None:  # check if there is data in the object
                 dim = other.shape
                 # add ndarray according do its dimensions
-                if self._dim == dim:
+                if self._data.shape == dim:
                     new_data = self._data / other
                 elif len(dim) == 1:
-                    if self._dim[0] == dim[0]:
+                    if self._data.shape[0] == dim[0]:
                         new_data = self._data / other[:, numpy.newaxis]
-                    elif self._dim[1] == dim[0]:
+                    elif self._data.shape[1] == dim[0]:
                         new_data = self._data / other[numpy.newaxis, :]
                 else:
                     new_data = self._data
@@ -156,7 +156,7 @@ class FiberRows(Header, PositionTable):
                 new_error = self._error / other
             else:
                 new_error = None
-            img = FiberRows(
+            img = self.__class__(
                 data=new_data,
                 error=new_error,
                 mask=self._mask,
@@ -177,10 +177,10 @@ class FiberRows(Header, PositionTable):
         """
         Operator to add two FiberRow or divide by another type if possible
         """
-        if isinstance(other, FiberRows):
+        if isinstance(other, self.__class__):
             # define behaviour if the other is of the same instance
 
-            img = FiberRows(
+            img = self.__class__(
                 header=self._header,
                 shape=self._shape,
                 size=self._size,
@@ -213,7 +213,7 @@ class FiberRows(Header, PositionTable):
             return img
 
         elif isinstance(other, numpy.ndarray):
-            img = FiberRows(
+            img = self.__class__(
                 error=self._error,
                 mask=self._mask,
                 header=self._header,
@@ -241,7 +241,7 @@ class FiberRows(Header, PositionTable):
             return img
 
         elif isinstance(other, Spectrum1D):
-            img = FiberRows(
+            img = self.__class__(
                 error=self._error,
                 mask=self._mask,
                 header=self._header,
@@ -267,7 +267,7 @@ class FiberRows(Header, PositionTable):
             # try to do addtion for other types, e.g. float, int, etc.
             try:
                 new_data = self._data + other
-                img = FiberRows(
+                img = self.__class__(
                     data=new_data,
                     error=self._error,
                     mask=self._mask,
@@ -291,10 +291,10 @@ class FiberRows(Header, PositionTable):
         """
         Operator to add two FiberRow or divide by another type if possible
         """
-        if isinstance(other, FiberRows):
+        if isinstance(other, self.__class__):
             # define behaviour if the other is of the same instance
 
-            img = FiberRows(
+            img = self.__class__(
                 header=self._header,
                 shape=self._shape,
                 size=self._size,
@@ -333,7 +333,7 @@ class FiberRows(Header, PositionTable):
             return img
 
         elif isinstance(other, numpy.ndarray):
-            img = FiberRows(
+            img = self.__class__(
                 error=self._error,
                 mask=self._mask,
                 header=self._header,
@@ -367,7 +367,7 @@ class FiberRows(Header, PositionTable):
                     new_error = self._error * other
                 else:
                     new_error = self._error
-                img = FiberRows(
+                img = self.__class__(
                     data=new_data,
                     error=new_error,
                     mask=self._mask,
@@ -442,7 +442,7 @@ class FiberRows(Header, PositionTable):
         else:
             mask = None
 
-        return FiberRows(data=data, error=error, mask=mask)
+        return self.__class__(data=data, error=error, mask=mask)
 
     def createEmpty(self, data_dim=None, error_dim=None, mask_dim=None):
         """
@@ -648,7 +648,7 @@ class FiberRows(Header, PositionTable):
             split_mask = [None] * fragments
         for i in range(fragments):
             list.append(
-                FiberRows(data=split_data[i], error=split_error[i], mask=split_mask[i])
+                self.__class__(data=split_data[i], error=split_error[i], mask=split_mask[i])
             )
 
         return list
