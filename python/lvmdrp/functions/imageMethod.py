@@ -4117,7 +4117,7 @@ def trace_fibers(
 
     # smooth all trace by a polynomial
     log.info(f"fitting centroid guess trace with {deg_cent}-deg polynomial")
-    centroids.smoothTracePoly(deg_cent, poly_kind="poly")
+    centroids.fit_polynomial(deg_cent, poly_kind="poly")
     # set bad fibers in trace mask
     centroids._mask[bad_fibers] = True
 
