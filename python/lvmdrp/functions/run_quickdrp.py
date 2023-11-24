@@ -265,6 +265,9 @@ def quick_reduction(expnum: int, use_fiducial_master: bool, skip_sky_subtraction
     # combine channels
     drp.combine_channels(tileid=sci_tileid, mjd=sci_mjd, expnum=sci_expnum)
 
+    # refine sky subtraction
+    sky_tasks.quick_sky_refinement(in_cframe=path.full("lvm_frame", mjd=sci_mjd, drpver=drpver, tileid=sci_tileid, expnum=sci_expnum, kind='CFrame'))
+
     # TODO: add quick report routine
 
     # TODO: combine exposures
