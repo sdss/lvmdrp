@@ -11,6 +11,7 @@ import lvmdrp
 import importlib
 
 import pandas as pd
+from astropy.io import fits
 
 """
 Here you can add fixtures that will be used for all the tests in this
@@ -36,15 +37,19 @@ def mock_sas(tmp_path_factory, session_mocker):
     os.environ = os_copy
 
 
-@pytest.fixture()
+@pytest.fixture(scope='module')
 def datadir():
     """ fixture factory to create empty data directories for a list of mjds """
+
     path = pathlib.Path(os.getenv("LVM_DATA_S"))
     path.mkdir(parents=True, exist_ok=True)
+    outs = []
 
     def _datadir(mjds):
         for mjd in mjds:
             (path / f'{mjd}').mkdir(exist_ok=True)
+            outs.append(path / f'{mjd}')
+        return outs
     yield _datadir
 
 
@@ -90,3 +95,32 @@ def multimeta(make_multi):
     """ fixture to create a metadata frame with multiple exposures """
     yield make_multi(expnum=[6818, 6819])
 
+
+def create_fake_fits(path, tileid=1111, mjd=61234, expnum=6817, cameras=None):
+    """ create a fake raw frame FITS file """
+    out = {}
+    cameras = cameras or ['b1']
+    for cam in cameras:
+        # create fake header
+        filename = f'sdR-s-{cam}-{expnum:0>8}.fits.gz'
+        hdr = {'TILE_ID': tileid, 'MJD': mjd, 'EXPOSURE': expnum, "CCD": cam,
+               'EXPTIME': 900.0,
+               'IMAGETYP': 'object', 'FILENAME': filename, 'SPEC': f'sp{cam[-1]}',
+               'OBSTIME': '2023-10-18T07:56:23.289', 'OBSERVAT': 'LCO',
+               'TELESCOP': 'SDSS 0.16m', 'SURVEY': 'LVM'}
+        prim = fits.PrimaryHDU(header=fits.Header(hdr))
+
+        # create fake file
+        full = path / filename
+        hdulist = fits.HDUList(prim)
+        hdulist.writeto(full)
+        out[cam] = full
+    return out
+
+
+@pytest.fixture(scope='module')
+def make_fits(datadir):
+    """ fixture to create fake fits files """
+    mjd = 61234
+    paths = datadir([mjd])
+    create_fake_fits(paths[0], mjd=mjd, cameras=['b1', 'b2', 'b3'])
