@@ -21,6 +21,7 @@ def mock_meta():
 def test_get_frames_metadata(make_fits):
     """ test we can extract metadata from a fits file """
     meta = get_frames_metadata(61234)
+    meta = meta.sort_values('camera')
     assert len(meta) == 3
     assert 61234 in meta['mjd'].unique()
     assert 1111 in meta['tileid'].unique()
