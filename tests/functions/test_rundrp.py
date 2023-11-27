@@ -80,10 +80,12 @@ ValueError: This is a bad error on b2
 
 
 def test_should_run_no():
+    """ test we should not run the drp """
     assert not should_run(61234)
 
 
 def test_should_run_yes(transfer):
+    """ test that we should now run the drp """
     assert should_run(61234)
 
 
