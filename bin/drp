@@ -6,13 +6,11 @@ import click
 import cloup
 from cloup.constraints import mutually_exclusive, RequireExactly, IsSet, If
 
-from astropy.io import fits
-from lvmdrp.functions.run_drp import run_drp, get_config_options, reduce_file
-from lvmdrp.functions.imageMethod import preproc_raw_frame
+from lvmdrp.functions.run_drp import run_drp, reduce_file, check_daily_mjd
 from lvmdrp.functions.skyMethod import configureSkyModel_drp
 from lvmdrp.utils.metadata import get_frames_metadata, get_master_metadata
 
-from lvmdrp.functions.run_quickdrp import quick_reduction
+from lvmdrp.functions.run_quickdrp import quick_science_reduction
 
 
 @click.group('drp', short_help='CLI for the LVM data reduction')
@@ -24,42 +22,41 @@ def cli():
 @click.option('-m', '--mjd', type=int, help='an MJD to reduce')
 @click.option('-l', '--mjd-list', type=int, multiple=True, help='a list of specific MJDs to reduce')
 @click.option('-r', '--mjd-range', type=str, help='a range of MJDs to reduce')
-@click.option('--skip-bd', is_flag=True, default=False, help='Flag to skip bias/dark reduction')
-@click.option('--arc', is_flag=True, default=False, help='Flag to only reduce arc frames')
-@click.option('--flat', is_flag=True, default=False, help='Flag to only reduce flat frames')
-@click.option('--only-bd', is_flag=True, default=False, help='Flag to only reduce bias/dark frames')
-@click.option('--only-cal', is_flag=True, default=False, help='Flag to only reduce calibration frames')
-@click.option('--only-sci', is_flag=True, default=False, help='Flag to only reduce science frames')
-@click.option('--pixmask', is_flag=True, default=False, help='Flag to create pixelmask from bias/dark/pixelflat frames')
-@click.option('-s', '--spec', type=click.Choice(['1', '2', '3']), help='The spectrograph id to reduce')
-@click.option('-c', '--camera', type=click.Choice(['b', 'r', 'z']), help='The camera to reduce')
+@click.option('--with-cals', is_flag=True, default=False, help='Flag to include indiviual calibration frames')
+@click.option('--no-sci', is_flag=True, default=False, help='Flag to exclude science frame reductions')
 @click.option('-e', '--expnum', type=int, help='an exposure number to reduce')
 @click.option('-el', '--exp-list', type=int, multiple=True, help='a list of specific exposures to reduce')
 @click.option('-er', '--exp-range', type=str, help='a range of exposure numbers to reduce')
-@click.option('-q', '--quick', is_flag=True, default=False, help='Flag for quick reductions only')
 @cloup.constraint(mutually_exclusive, ['mjd', 'mjd_list', 'mjd_range'])
 @cloup.constraint(RequireExactly(1), ['mjd', 'mjd_list', 'mjd_range'])
 @cloup.constraint(mutually_exclusive, ['expnum', 'exp_list', 'exp_range'])
-def run(mjd, mjd_list, mjd_range, skip_bd, arc, flat, only_bd, only_cal, only_sci, pixmask, camera, spec,
-        expnum, exp_list, exp_range, quick):
+def run(mjd, mjd_list, mjd_range, with_cals, no_sci, expnum, exp_list, exp_range):
     """ Run the DRP reduction for a given MJD or range of MJDs
 
     Run the DRP for an MJD or range of MJDs.  Various flags and options are available
-    for filtering on bias/darks, calibration (arc/flats) or science frames, specific
-    cameras or spectrographs, or specific exposures.
+    for filtering on calibration or science frames, or specific exposures.
 
     """
     mjd = mjd or mjd_list or mjd_range
     expnum = expnum or exp_list or exp_range
-    run_drp(mjd=mjd, flat=flat, arc=arc, skip_bd=skip_bd, only_bd=only_bd,
-            only_cal=only_cal, only_sci=only_sci, pixmask=pixmask, camera=camera, spec=spec,
-            expnum=expnum, quick=quick)
+    run_drp(mjd=mjd, expnum=expnum, no_sci=no_sci, with_cals=with_cals)
 
 
 # register full DRP command
 cli.add_command(run)
-# register quick DRP command
-cli.add_command(quick_reduction)
+
+
+@cli.command('check', short_help='Check for daily run of the DRP at Utah')
+@click.option('-t', '--test', is_flag=True, default=False, help='Test the check without running the DRP')
+@click.option('--with-cals', is_flag=True, default=False, help='Flag to include indiviual calibration frames')
+def check_daily(test, with_cals):
+    """ Checks the current MJD and starts the DRP
+
+    Checks the current daily MJD againt the Utah data transfer, and if
+    complete, starts the DRP run at Utah.
+
+    """
+    check_daily_mjd(test=test, with_cals=with_cals)
 
 
 @cli.command('reduce_file', short_help='Reduce a single file')
@@ -67,26 +64,6 @@ cli.add_command(quick_reduction)
 def run_reduce_file(filename):
     """ Run a single raw sdR frame file through the LVM DRP """
     reduce_file(filename)
-
-
-@cli.command('preprocess', short_help='Preprocess raw frames')
-@click.argument('filename', type=click.Path(exists=True))
-@click.option('-f', '--flavor', type=str, help='the flavor of the file', required=True)
-def preprocess(filename, flavor):
-
-    # get metadata for a single file
-    hdr = fits.getheader(filename)
-    camera = hdr.get("CCD")
-    mjd = hdr.get("MJD")
-    tileid = hdr.get("TILEID", 1111)
-    expnum = f'{hdr.get("EXPOSURE"):0>8}'
-
-    # get custom config options
-    kwargs = get_config_options('reduction_steps.preproc_raw_frame', flavor)
-
-    # preprocess the frame
-    preproc_raw_frame(filename, flavor=flavor, kind='p', camera=camera,
-                      mjd=mjd, expnum=expnum, tileid=tileid, **kwargs)
 
 
 @click.group('sky', short_help='Run routines related to sky subtraction')
@@ -127,6 +104,23 @@ def regen(mjd: int, masters: bool):
 metacli.add_command(regen)
 
 cli.add_command(metacli)
+
+
+@click.command(short_help='Run the Quick DRP')
+@click.option('-e', '--expnum', type=int, help='an exposure number to reduce')
+@click.option('-f', '--use-fiducial-master', is_flag=True, default=False, help='use fiducial master calibration frames')
+@click.option('-s', '--skip-sky-subtraction', is_flag=True, help='skip sky subtraction')
+@click.option('--sky-weights', type=(float, float), default=None, help='weights (east, west) for the master sky combination')
+@click.option('-n', '--ncpus', type=int, default=None, help='number of CPUs to use during extraction')
+@click.option("-a", "--aperture-extraction", is_flag=True, default=False, help="run quick reduction with aperture extraction")
+def quick_reduction(expnum: int, use_fiducial_master: bool, skip_sky_subtraction: bool,
+                    sky_weights: tuple, ncpus: int, aperture_extraction: bool) -> None:
+    quick_science_reduction(expnum, use_fiducial_master, skip_sky_subtraction,
+                            sky_weights, ncpus, aperture_extraction)
+
+
+# register quick DRP command
+cli.add_command(quick_reduction)
 
 
 if __name__ == "__main__":
