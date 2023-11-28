@@ -89,6 +89,12 @@ def apply_fluxcal(in_rss: str, out_rss: str, display_plots: bool = False):
     # read all three channels
     log.info(f"loading RSS file {os.path.basename(in_rss)}")
     rss = loadRSS(in_rss)
+
+    # check for flux calibration data
+    if np.isnan(rss._fluxcal.to_pandas().values).all():
+        log.warning("no standard star metadata found, skipping flux calibration")
+        return rss
+
     expnum = rss._header["EXPOSURE"]
     camera = rss._header["CCD"]
     channel = camera[0]
@@ -106,7 +112,7 @@ def apply_fluxcal(in_rss: str, out_rss: str, display_plots: bool = False):
         exptimes[slitmap["orig_ifulabel"] == fiberid] = exptime
 
     # apply joint sensitivity curve
-    fig, ax = create_subplots(to_display=display_plots, figsize=(15, 5))
+    fig, ax = create_subplots(to_display=display_plots, figsize=(10, 5))
     fig.suptitle(f"Flux calibration for {expnum = }, {channel = }")
     log.info(f"computing joint sensitivity curve for channel {channel}")
     # calculate exposure time factors
@@ -143,6 +149,7 @@ def apply_fluxcal(in_rss: str, out_rss: str, display_plots: bool = False):
     ax.set_xlabel("wavelength (Angstrom)")
     ax.set_ylabel("sensitivity [(ergs/s/cm^2/A) / (e-/s/A)]")
     ax.legend(loc="upper right")
+    fig.tight_layout()
     save_fig(fig, product_path=out_rss, to_display=display_plots, figure_path="qa", label="fluxcal")
     # flux-calibrate and extinction correct data
     # Note that we assume a constant extinction curve here!
@@ -261,7 +268,10 @@ def fluxcal_Gaia(camera, in_rss, plot=True, GAIA_CACHE_DIR=None):
         # correct for extinction
         spec *= 10**(0.4*ext*secz)
 
-        # TODO: mask telluric spectral regions
+        # TODO: fit continuum to instrumental std spectrum (stdflux) and normalize
+        # TODO: mask telluric absorption lines from stdflux
+        # TODO: match gaia spectrum and stdflux against a set of theoretical stellar templates
+        # TODO: downgrade best fit template to instrumental LSF and calculate sensitivity curve (after lifting telluric mask)
 
         # divide to find sensitivity and smooth
         sens = stdflux/spec        

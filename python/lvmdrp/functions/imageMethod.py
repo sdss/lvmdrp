@@ -1563,7 +1563,7 @@ def trace_peaks(
     trace._mask |= (trace._data <= 0)
     # smooth all trace by a polynomial
     log.info(f"fitting trace with {numpy.abs(poly_disp)}-deg polynomial")
-    table, table_poly, table_poly_all = trace.smoothTracePoly(poly_disp, poly_kind="poly")
+    table, table_poly, table_poly_all = trace.fit_polynomial(poly_disp, poly_kind="poly")
     # set bad fibers in trace mask
     trace._mask[bad_fibers] = True
 
@@ -2075,7 +2075,7 @@ def traceFWHM_drp(
     traceFWHM = TraceMask(data=fwhm, mask=mask | orig_trace._mask)
    
     # smooth the FWHM trace with a polynomial fit along dispersion axis (uncertain pixels are not used)
-    # traceFWHM.smoothTracePoly(deg=poly_disp, poly_kind=poly_kind, clip=clip)
+    # traceFWHM.fit_polynomial(deg=poly_disp, poly_kind=poly_kind, clip=clip)
 
     # write out FWHM trace to FITS file
     traceFWHM.writeFitsData(out_fwhm)
@@ -4117,7 +4117,7 @@ def trace_fibers(
 
     # smooth all trace by a polynomial
     log.info(f"fitting centroid guess trace with {deg_cent}-deg polynomial")
-    centroids.smoothTracePoly(deg_cent, poly_kind="poly")
+    centroids.fit_polynomial(deg_cent, poly_kind="poly")
     # set bad fibers in trace mask
     centroids._mask[bad_fibers] = True
 
@@ -4250,11 +4250,11 @@ def trace_fibers(
     # smooth all trace by a polynomial
     if fit_poly:
         log.info(f"fitting peak trace with {deg_amp}-deg polynomial")
-        trace_amp.smoothTracePoly(deg_amp, poly_kind="poly")
+        trace_amp.fit_polynomial(deg_amp, poly_kind="poly")
         log.info(f"fitting centroid trace with {deg_cent}-deg polynomial")
-        trace_cent.smoothTracePoly(deg_cent, poly_kind="poly")
+        trace_cent.fit_polynomial(deg_cent, poly_kind="poly")
         log.info(f"fitting FWHM trace with {deg_fwhm}-deg polynomial")
-        trace_fwhm.smoothTracePoly(deg_fwhm, poly_kind="poly")
+        trace_fwhm.fit_polynomial(deg_fwhm, poly_kind="poly")
         # set bad fibers in trace mask
         trace_amp._mask[bad_fibers] = True
         trace_cent._mask[bad_fibers] = True
@@ -4329,10 +4329,11 @@ def trace_fibers(
         img_slice = img.getSlice(icolumn, axis="y")
         img_slice._data[(img_slice._mask)|(joint_mod<=0)] = numpy.nan
 
-        weights = img_slice._data / bn.nansum(img_slice._data)
+        # weights = img_slice._data / bn.nansum(img_slice._data)
         residuals = (joint_mod - img_slice._data) / img_slice._data * 100
-        residuals *= weights
+        # residuals *= weights
         ax.plot(img_slice._pixels, residuals, ".", ms=2, mew=0, mfc=colors[i])
+        ax.set_ylim(-50, 50)
     save_fig(
         fig,
         product_path=out_trace_amp,
