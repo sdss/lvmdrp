@@ -188,7 +188,7 @@ def quick_reduction(expnum: int, use_fiducial_master: bool, skip_sky_subtraction
             macorr_path = os.path.join(masters_path, f"lvm-apercorr-{sci_camera}.fits")
             mwave_path = os.path.join(masters_path, f"lvm-mwave_{lamps}-{sci_camera}.fits")
             mlsf_path = os.path.join(masters_path, f"lvm-mlsf_{lamps}-{sci_camera}.fits")
-            mflat_path = os.path.join(masters_path, f"lvm-mfiberflat-{sci_camera}.fits")
+            mflat_path = os.path.join(masters_path, f"lvm-mfiberflat_twilight-{sci_camera}.fits")
         else:
             log.info(f"using master calibration frames from DRP version {drpver}, mjd = {sci_mjd}, camera = {sci_camera}")
             masters = md.match_master_metadata(target_mjd=sci_mjd,
@@ -223,17 +223,17 @@ def quick_reduction(expnum: int, use_fiducial_master: bool, skip_sky_subtraction
         rss_tasks.apply_fiberflat(in_rss=wsci_path, out_rss=fsci_path, in_flat=mflat_path)
 
         # NOTE: this is a temporary fix for the illumination bias across telescopes whe using dome flats
-        rss = rss_tasks.RSS()
-        factors = illumination_correction(in_fiberflat=None)
-        rss.loadFitsData(fsci_path)
-        fibermap = rss._slitmap
-        fibermap = fibermap[fibermap["spectrographid"] == int(sci_camera[1])]
-        for ifiber in range(rss._fibers):
-            f = factors.get((fibermap[ifiber]["telescope"], sci_camera), 1)
-            # print(f"applying factor {(fibermap[ifiber]['telescope'], sci_camera)} : {f}")
-            rss._data[ifiber] *= f
-            rss._error[ifiber] *= f
-        rss.writeFitsData(fsci_path)
+        # rss = rss_tasks.RSS()
+        # factors = illumination_correction(in_fiberflat=None)
+        # rss.loadFitsData(fsci_path)
+        # fibermap = rss._slitmap
+        # fibermap = fibermap[fibermap["spectrographid"] == int(sci_camera[1])]
+        # for ifiber in range(rss._fibers):
+        #     f = factors.get((fibermap[ifiber]["telescope"], sci_camera), 1)
+        #     # print(f"applying factor {(fibermap[ifiber]['telescope'], sci_camera)} : {f}")
+        #     rss._data[ifiber] *= f
+        #     rss._error[ifiber] *= f
+        # rss.writeFitsData(fsci_path)
 
         # interpolate sky fibers
         sky_tasks.interpolate_sky(in_rss=fsci_path, out_sky=fskye_path, which="e")
@@ -267,6 +267,10 @@ def quick_reduction(expnum: int, use_fiducial_master: bool, skip_sky_subtraction
 
     # refine sky subtraction
     sky_tasks.quick_sky_refinement(in_cframe=path.full("lvm_frame", mjd=sci_mjd, drpver=drpver, tileid=sci_tileid, expnum=sci_expnum, kind='CFrame'))
+
+    # TODO: add Guillermo's code to create astrometry, don't create images/maps
+    # TODO: create astrometry for sky and std telescopes
+    
 
     # TODO: add quick report routine
 
