@@ -1396,22 +1396,23 @@ def status_file_exists(tileid: int, mjd: int, status: str = 'started') -> bool:
 
 def update_error_file(tileid: int, mjd: int, expnum: int, error: str,
                       reset: bool = False):
-    """_summary_
+    """ Update the DRP error file
 
-    _extended_summary_
+    Appends to the "drp_errors.txt" file whenever
+    there is an error during a reduction.
 
     Parameters
     ----------
     tileid : int
-        _description_
+        the tile id
     mjd : int
-        _description_
+        the MJD
     expnum : int
-        _description_
+        the exposure number
     error : str
-        _description_
+        the traceback
     reset : bool, optional
-        _description_, by default False
+        Flag to reset the text file, by default False
     """
 
     path = pathlib.Path(os.getenv("LVM_SPECTRO_REDUX")) / f'{drpver}' / 'drp_errors.txt'
