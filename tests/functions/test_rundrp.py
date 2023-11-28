@@ -16,9 +16,9 @@ from lvmdrp.functions.run_drp import (create_status_file, remove_status_file,
 @pytest.fixture()
 def status_file():
     """ fixture to create a status file """
-    create_status_file(1111, 61234, status='started')
+    create_status_file(11111, 61234, status='started')
     yield (pathlib.Path(os.getenv("LVM_SPECTRO_REDUX"))
-           / f'{drpver}/1111/logs/lvm-drp-1111-61234.started')
+           / f'{drpver}/0011XX/11111/logs/lvm-drp-11111-61234.started')
 
 
 @pytest.fixture()
@@ -38,16 +38,16 @@ def test_create_status_file(status_file):
 
 def test_remove_status_file(status_file):
     """ test we can remove the status file """
-    remove_status_file(1111, 61234)
+    remove_status_file(11111, 61234)
     assert not status_file.exists()
 
 
 def test_remove_status_all(status_file):
     """ test we can remove all the status files """
-    create_status_file(1111, 61235, status='started')
-    remove_status_file(1111, 61234, remove_all=True)
+    create_status_file(11111, 61235, status='started')
+    remove_status_file(11111, 61234, remove_all=True)
 
-    path2 = pathlib.Path(os.getenv("LVM_SPECTRO_REDUX")) / f'{drpver}/1111/logs/lvm-drp-1111-61235.started'
+    path2 = pathlib.Path(os.getenv("LVM_SPECTRO_REDUX")) / f'{drpver}/0011XX/11111/logs/lvm-drp-11111-61235.started'
 
     assert not status_file.exists()
     assert not path2.exists()
@@ -55,7 +55,7 @@ def test_remove_status_all(status_file):
 
 def test_status_exists(status_file):
     """ test we can check the status file """
-    assert status_file_exists(1111, 61234, status='started')
+    assert status_file_exists(11111, 61234, status='started')
 
 
 def test_update_error_file():
@@ -70,12 +70,12 @@ def test_update_error_file():
 ValueError: This is a bad error on b2
     """
 
-    update_error_file(1111, 61234, 1011, errors)
+    update_error_file(11111, 61234, 1011, errors)
     assert path.exists()
 
     with open(path) as f:
         data = f.read()
-        assert 'ERROR on tileid, mjd, exposure: 1111, 61234, 1011' in data
+        assert 'ERROR on tileid, mjd, exposure: 11111, 61234, 1011' in data
         assert 'This is a bad error on b2' in data
 
 
