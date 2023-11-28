@@ -26,6 +26,7 @@ from lvmdrp.functions.rssMethod import (determine_wavelength_solution, create_pi
                                         resample_wavelength, join_spec_channels, stack_rss)
 from lvmdrp.utils.metadata import (get_frames_metadata, get_master_metadata, extract_metadata,
                                    get_analog_groups, match_master_metadata, create_master_path)
+from lvmdrp.utils.convert import tileid_grp
 from lvmdrp.functions.run_quickdrp import quick_science_reduction
 
 from lvmdrp import config, log, path, __version__ as drpver
@@ -784,9 +785,10 @@ def start_logging(mjd: int, tileid: int):
     tileid : int
         The tile ID of the observations
     """
+    tilegrp = tileid_grp(tileid)
     lpath = (os.path.join(os.getenv('LVM_SPECTRO_REDUX'),
-             "{drpver}/{tileid}/{mjd}/lvm-drp-{tileid}-{mjd}.log"))
-    logpath = lpath.format(drpver=drpver, mjd=mjd, tileid=tileid)
+             "{drpver}/{tilegrp}/{tileid}/{mjd}/lvm-drp-{tileid}-{mjd}.log"))
+    logpath = lpath.format(drpver=drpver, mjd=mjd, tileid=tileid, tilegrp=tilegrp)
     logpath = pathlib.Path(logpath)
 
     # if logpath.exists():
@@ -1335,7 +1337,8 @@ def create_status_file(tileid: int, mjd: int, status: str = 'started'):
     status : str, optional
         the DRP status, by default 'started'
     """
-    root = pathlib.Path(os.getenv("LVM_SPECTRO_REDUX")) / f'{drpver}' / f'{tileid}' / 'logs'
+    tilegrp = tileid_grp(tileid)
+    root = pathlib.Path(os.getenv("LVM_SPECTRO_REDUX")) / f'{drpver}/{tilegrp}/{tileid}/logs'
     root.mkdir(parents=True, exist_ok=True)
     path = root / f'lvm-drp-{tileid}-{mjd}.{status}'
     path.touch()
@@ -1356,7 +1359,8 @@ def remove_status_file(tileid: int, mjd: int, remove_all: bool = False):
     remove_all : bool, optional
         Flag to remove all status files, by default False
     """
-    root = pathlib.Path(os.getenv("LVM_SPECTRO_REDUX")) / f'{drpver}' / f'{tileid}' / 'logs'
+    tilegrp = tileid_grp(tileid)
+    root = pathlib.Path(os.getenv("LVM_SPECTRO_REDUX")) / f'{drpver}/{tilegrp}/{tileid}/logs'
 
     if remove_all:
         shutil.rmtree(root)
@@ -1384,7 +1388,8 @@ def status_file_exists(tileid: int, mjd: int, status: str = 'started') -> bool:
     bool
         Flag if the file exists
     """
-    root = pathlib.Path(os.getenv("LVM_SPECTRO_REDUX")) / f'{drpver}' / f'{tileid}' / 'logs'
+    tilegrp = tileid_grp(tileid)
+    root = pathlib.Path(os.getenv("LVM_SPECTRO_REDUX")) / f'{drpver}/{tilegrp}/{tileid}/logs'
     path = root / f'lvm-drp-{tileid}-{mjd}.{status}'
     return path.exists()
 
