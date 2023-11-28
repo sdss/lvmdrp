@@ -5,6 +5,7 @@ __pycache__/
 # Other generated files
 htmlcov
 .coverage
+coverage.xml
 
 # Sphinx
 doc/api
@@ -41,6 +42,8 @@ test_raw-*
 test_redux-*
 *.png
 *.pdf
+tests/htmlcov
+tests/*coverage*
 
 # Mac OSX
 .DS_Store
