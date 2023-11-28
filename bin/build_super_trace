@@ -58,7 +58,7 @@ def _header_fix(fits_file, target_mjd, target_tileid=None):
 		f[0].header["MJD"] = target_mjd
 		if target_tileid is not None:
 			f[0].header["TILE_ID"] = target_tileid
-	
+
 		f.writeto(fits_file, overwrite=True)
 
 def parse_arguments(args=None):
@@ -78,7 +78,7 @@ def parse_arguments(args=None):
 if __name__ == "__main__":
     # parse arguments
     cmd_args = parse_arguments(args=sys.argv[1:])
-    
+
     # extract metadata for target MJDs
     raw_paths = md.locate_new_frames(hemi="s", mjd=cmd_args.mjds, camera="*", expnum="????????")
     _ = md.extract_metadata(raw_paths)
@@ -90,7 +90,7 @@ if __name__ == "__main__":
     # get max MJD and tileid for new supers
     target_mjd = flats.mjd.max()
     target_tileid = flats.loc[flats.mjd == target_mjd].tileid.max()
-    
+
     # initialize the masters paths list
     masters_paths = []
 
@@ -107,10 +107,10 @@ if __name__ == "__main__":
         else:
             lamps_current = {"ldls": False, "quartz": True}
             lamp = "quartz"
-        
+
         # group flats into analogs of current lamp
-        analogs, cpaths, mpaths = md.get_analog_groups(tileid=1111, mjd=target_mjd, imagetyp="flat", camera=camera, **lamps_current)
-        
+        analogs, cpaths, mpaths = md.get_analog_groups(tileid=11111, mjd=target_mjd, imagetyp="flat", camera=camera, **lamps_current)
+
         for i, (keys, analog) in enumerate(analogs.items()):
             # unpack keys
             tileid, mjd, imagetyp, camera = keys
@@ -119,13 +119,13 @@ if __name__ == "__main__":
             mpixmask = path.full("lvm_master", drpver=drpver, kind="mpixmask", **masters["pixmask"])
             mbias = path.full("lvm_master", drpver=drpver, kind="mbias", **masters["bias"])
             mdark = path.full("lvm_master", drpver=drpver, kind="mdark", **masters["dark"])
-            
+
             # preproc and detrend raw flats
             for j, (_, flat) in enumerate(analog.iterrows()):
                 rpath = path.full("lvm_raw", camspec=flat.camera, **flat.to_dict())
                 ppath = path.full("lvm_anc", drpver=drpver, kind="p", imagetype=flat.imagetyp, **flat.to_dict())
                 cpath = cpaths[keys][j]
-                
+
                 os.makedirs(os.path.dirname(ppath), exist_ok=True)
                 if os.path.isfile(ppath):
                     log.info(f"skipping {ppath}, file already exist")
@@ -135,7 +135,7 @@ if __name__ == "__main__":
                     log.info(f"skipping {cpath}, file already exist")
                 else:
                     imageMethod.detrend_frame(in_image=ppath, out_image=cpath, in_bias=mbias, in_dark=mdark, in_slitmap=Table(drp.fibermap.data))
-            
+
             # define master path
             mpath = path.full("lvm_master", drpver=drpver, kind=f"mflat_{lamp}", tileid=target_tileid, mjd=target_mjd, camera=camera)
             # create master flats
@@ -146,7 +146,7 @@ if __name__ == "__main__":
 
             # update masters paths list
             masters_paths.append(mpath)
-    
+
     # extract frames
     master_paths = [os.path.join(root, file) for root, _, files in os.walk(os.getenv("LVM_SPECTRO_REDUX")) for file in files if file.startswith("lvm-mflat_") and file.endswith(".fits")]
     master_flats = md.extract_metadata(kind="master", frames_paths=master_paths)
@@ -154,7 +154,7 @@ if __name__ == "__main__":
         lamp = mflat[lamps].astype(int).idxmax(0)
         mpath = path.full("lvm_master", drpver=drpver, kind=f"mflat_{lamp}", **mflat.to_dict())
         xpath = path.full("lvm_master", drpver=drpver, kind=f"xmflat_{lamp}", **mflat.to_dict())
-        
+
         mtrace_peak = path.full("lvm_master", drpver=drpver, kind="mtrace", **mflat.to_dict())
         mtrace_fwhm = path.full("lvm_master", drpver=drpver, kind="mfwhm", **mflat.to_dict())
         # run tracing
@@ -166,7 +166,7 @@ if __name__ == "__main__":
 
         # update masters paths list
         # masters_paths.append(xpath)
-    
+
     # update masters metadata
     new_masters = md.extract_metadata(kind="master", frames_paths=masters_paths)
     print(new_masters.to_string())

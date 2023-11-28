@@ -383,8 +383,8 @@ def create_output_path(kind: str, flavor: str, mjd: int, tileid: int, camera: st
 
     Creates the output file path for the science frames or the master arc/flats.
     For example, the extracted fiber spectra is
-    "1111/60115/ancillary/lvm-xobject-b1-00060115.fits" for science frames
-    or "1111/60115/calib/lvm-xmarc-b1.fits" for the master arc frame.
+    "11111/60115/ancillary/lvm-xobject-b1-00060115.fits" for science frames
+    or "11111/60115/calib/lvm-xmarc-b1.fits" for the master arc frame.
 
     Parameters
     ----------
