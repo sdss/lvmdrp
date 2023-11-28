@@ -6,7 +6,7 @@ from setuptools import setup, find_packages
 
 
 NAME = "lvmdrp"
-VERSION = "0.1.1dev"
+VERSION = "0.1.2dev"
 
 
 def run():
@@ -34,7 +34,7 @@ def run():
             "skyfield>=1.45",
             "pydl>=0.7.0",
             "skycalc_cli==1.4",
-            "sdsstools>=1.0",
+            "sdsstools>=1.4",
             "sdss-tree>=4.0",
             "sdss-access>=3.0",
             "click>=8.0",
@@ -68,6 +68,7 @@ def run():
             "Topic :: Software Development :: Libraries :: Python Modules",
         ],
     )
+
 
 if __name__ == "__main__":
     run()
