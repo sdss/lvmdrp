@@ -87,7 +87,7 @@ def createParFile(
     """
 
     # create output parfilename
-    if parfile == None:
+    if parfile is None:
         parfile = objfile[0 : objfile.rfind(".fits")] + ".skycorr.par"
 
     # open file handler
@@ -120,24 +120,24 @@ def createParFile(
     fp.write("\nVAC_AIR=" + vacOrAir)
 
     # expert mode
-    if dateVal != None:
-        if dateVal == None:
+    if dateVal is not None:
+        if dateVal is None:
             raise ValueError("Must give dateVal if dateKey=DATE_VAL")
         fp.write("\nDATE_KEY=DATE_VAL")
         fp.write("\nDATE_VAL=" + str(dateVal))
     else:
         fp.write("\nDATE_KEY=" + dateKey)
 
-    if timeVal != None:
-        if timeVal == None:
+    if timeVal is not None:
+        if timeVal is None:
             raise ValueError("Must give timeVal if timeKey=TIME_VAL")
         fp.write("\nTIME_KEY=TIME_VAL")
         fp.write("\nTIME_VAL=" + str(timeVal))
     else:
         fp.write("\nTIME_KEY=" + timeKey)
 
-    if telAltVal != None:
-        if telAltVal == None:
+    if telAltVal is not None:
+        if telAltVal is None:
             raise ValueError("Must give telAltVal if telAltKey=TELALT_VAL")
         fp.write("\nTELALT_KEY=TELALT_VAL")
         fp.write("\nTELALT_VAL=" + str(telAltVal))
@@ -362,7 +362,7 @@ def asciiSkyCorrWrapper(
     try:
         results = ap.Table()
         results.read(newfile, type="fits", verbose=False)
-    except:
+    except Exception:
         # print "Failed to open skycorr results...."
         # pdb.set_trace()
         results = None
@@ -371,7 +371,7 @@ def asciiSkyCorrWrapper(
     # get new wave axis if asked
     if calcNewWave & (type(results) != type(None)):
         coefs = readWaveInfo(dirname, resFile)
-        if coefs != None:
+        if coefs is not None:
             x = 2.0 * (wave - wave.min()) / (wave.max() - wave.min()) - 1.0
             newx = cheby(x, coefs)
             newwave = 0.5 * (newx + 1.0) * (wave.max() - wave.min()) + wave.min()
@@ -509,7 +509,7 @@ def test2(
 
     ofh.close()
 
-    results = asciiSkyCorrWrapper(
+    asciiSkyCorrWrapper(
         otab["lambda"],
         otab["flux"],
         stab["flux"],
