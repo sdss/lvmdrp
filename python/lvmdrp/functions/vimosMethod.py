@@ -4,10 +4,12 @@ from multiprocessing import Pool, cpu_count
 from astropy.io import fits as pyfits
 
 from lvmdrp.core.spectrum1d import Spectrum1D
-from lvmdrp.functions.headerMethod import *
-from lvmdrp.functions.imageMethod import *
-from lvmdrp.functions.rssMethod import *
-from lvmdrp.functions.specialMethod import *
+from lvmdrp.functions import headerMethod as head
+from lvmdrp.functions import imageMethod as im
+from lvmdrp.functions import rssMethod as rss
+from lvmdrp.functions import specialMethod as spec
+from lvmdrp.functions import fluxCalMethod as flux
+from lvmdrp.functions import skyMethod as sky
 
 
 description = "Provides Methods to reduce VIMOS data"
@@ -28,32 +30,32 @@ def renameFiles_drp(year):
 def createBIAS_drp(night):
     night = int(night)
     os.system("ls VIMOS_SPEC_BIAS%03d_*_B.1.fits* > combine_BIAS.B1" % (night))
-    combineImages_drp("combine_BIAS.B1", "BIAS_B.1.fits", method="median")
+    im.combineImages_drp("combine_BIAS.B1", "BIAS_B.1.fits", method="median")
     os.system("rm combine_BIAS.B1")
     os.system("ls VIMOS_SPEC_BIAS%03d_*_A.2.fits* > combine_BIAS.A2" % (night))
-    combineImages_drp("combine_BIAS.A2", "BIAS_A.2.fits", method="median")
+    im.combineImages_drp("combine_BIAS.A2", "BIAS_A.2.fits", method="median")
     os.system("rm combine_BIAS.A2")
     os.system("ls VIMOS_SPEC_BIAS%03d_*_A.3.fits* > combine_BIAS.A3" % (night))
-    combineImages_drp("combine_BIAS.A3", "BIAS_A.3.fits", method="median")
+    im.combineImages_drp("combine_BIAS.A3", "BIAS_A.3.fits", method="median")
     os.system("rm combine_BIAS.A3")
     os.system("ls VIMOS_SPEC_BIAS%03d_*_B.4.fits* > combine_BIAS.B4" % (night))
-    combineImages_drp("combine_BIAS.B4", "BIAS_B.4.fits", method="median")
+    im.combineImages_drp("combine_BIAS.B4", "BIAS_B.4.fits", method="median")
     os.system("rm combine_BIAS.B4")
 
 
 def combineLAMP_drp(night):
     night = int(night)
     os.system("ls VIMOS_IFU_LAMP%03d_*_B.1.fits* > combine_LAMP.B1" % (night))
-    combineImages_drp("combine_LAMP.B1", "LAMP_B.1.fits", method="median")
+    im.combineImages_drp("combine_LAMP.B1", "LAMP_B.1.fits", method="median")
     os.system("rm combine_LAMP.B1")
     os.system("ls VIMOS_IFU_LAMP%03d_*_A.2.fits* > combine_LAMP.A2" % (night))
-    combineImages_drp("combine_LAMP.A2", "LAMP_A.2.fits", method="median")
+    im.combineImages_drp("combine_LAMP.A2", "LAMP_A.2.fits", method="median")
     os.system("rm combine_LAMP.A2")
     os.system("ls VIMOS_IFU_LAMP%03d_*_A.3.fits* > combine_LAMP.A3" % (night))
-    combineImages_drp("combine_LAMP.A3", "LAMP_A.3.fits", method="median")
+    im.combineImages_drp("combine_LAMP.A3", "LAMP_A.3.fits", method="median")
     os.system("rm combine_LAMP.A3")
     os.system("ls VIMOS_IFU_LAMP%03d_*_B.4.fits* > combine_LAMP.B4" % (night))
-    combineImages_drp("combine_LAMP.B4", "LAMP_B.4.fits", method="median")
+    im.combineImages_drp("combine_LAMP.B4", "LAMP_B.4.fits", method="median")
     os.system("rm combine_LAMP.B4")
 
 
@@ -97,10 +99,10 @@ def combineTwilight_drp(night, numbers):
                 % (night, int(list[i]))
             )
 
-    combineImages_drp("combine_LAMP.B1", "LAMP_B.1.fits", method="mean")
-    combineImages_drp("combine_LAMP.A2", "LAMP_A.2.fits", method="mean")
-    combineImages_drp("combine_LAMP.A3", "LAMP_A.3.fits", method="mean")
-    combineImages_drp("combine_LAMP.B4", "LAMP_B.4.fits", method="mean")
+    im.combineImages_drp("combine_LAMP.B1", "LAMP_B.1.fits", method="mean")
+    im.combineImages_drp("combine_LAMP.A2", "LAMP_A.2.fits", method="mean")
+    im.combineImages_drp("combine_LAMP.A3", "LAMP_A.3.fits", method="mean")
+    im.combineImages_drp("combine_LAMP.B4", "LAMP_B.4.fits", method="mean")
     os.system("rm combine_LAMP.B1")
     os.system("rm combine_LAMP.A2")
     os.system("rm combine_LAMP.A3")
@@ -132,7 +134,7 @@ def prepareCalib_drp(
     disp_wave = float(disp_wave)
     fiberflat = int(fiberflat)
     fiberflat_wave = int(fiberflat_wave)
-    subtractBias_drp(
+    im.subtractBias_drp(
         "LAMP_%s.fits" % (chip),
         "LAMP_%s.sub.fits" % (chip),
         "BIAS_%s.fits" % (chip),
@@ -143,12 +145,12 @@ def prepareCalib_drp(
         subtract_light="1",
     )
     if CCD_mask != "":
-        addCCDMask_drp(
+        im.addCCDMask_drp(
             "LAMP_%s.sub.fits" % (chip),
             "%s/CCDMASK_%s_%s.fits" % (vimos_calib, chip, CCD_mask),
         )
     if setup != "" and setup == "orange":
-        findPeaksMaster2_drp(
+        im.findPeaksMaster2_drp(
             "LAMP_%s.sub.fits" % (chip),
             peaks_ref,
             "peaks_%s.txt" % (chip),
@@ -158,7 +160,7 @@ def prepareCalib_drp(
             verbose=0,
         )
     elif setup != "" and setup == "blue":
-        findPeaksMaster2_drp(
+        im.findPeaksMaster2_drp(
             "LAMP_%s.sub.fits" % (chip),
             peaks_ref,
             "peaks_%s.txt" % (chip),
@@ -168,7 +170,7 @@ def prepareCalib_drp(
             verbose=0,
         )
     else:
-        findPeaksMaster2_drp(
+        im.findPeaksMaster2_drp(
             "LAMP_%s.sub.fits" % (chip),
             peaks_ref,
             "peaks_%s.txt" % (chip),
@@ -177,7 +179,7 @@ def prepareCalib_drp(
             verbose=0,
         )
 
-    tracePeaks_drp(
+    im.trace_peaks(
         "LAMP_%s.sub.fits" % (chip),
         "peaks_%s.txt" % (chip),
         "tjunk_%s.trc.fits" % (chip),
@@ -189,7 +191,7 @@ def prepareCalib_drp(
         verbose=0,
     )
     if trace_master == "":
-        subtractStraylight_drp(
+        im.subtractStraylight_drp(
             "LAMP_%s.sub.fits" % (chip),
             "tjunk_%s.trc.fits" % (chip),
             "LAMP_%s.back.fits" % (chip),
@@ -200,7 +202,7 @@ def prepareCalib_drp(
             smooth_disp=30,
             parallel=parallel,
         )
-        traceFWHM_drp(
+        im.traceFWHM_drp(
             "LAMP_%s.stray.fits" % (chip),
             "tjunk_%s.trc.fits" % (chip),
             "tjunk.fwhm_%s.fits" % (chip),
@@ -213,7 +215,7 @@ def prepareCalib_drp(
             parallel=parallel,
         )
     else:
-        matchMasterTrace_drp(
+        spec.matchMasterTrace_drp(
             "tjunk_%s.trc.fits" % (chip),
             "master_%s.trc.fits" % (chip),
             "tjunk_%s.trc.fits" % (chip),
@@ -223,7 +225,7 @@ def prepareCalib_drp(
             start_pix=trace_master[0],
             end_pix=trace_master[1],
         )
-        subtractStraylight_drp(
+        im.subtractStraylight_drp(
             "LAMP_%s.sub.fits" % (chip),
             "tjunk_%s.trc.fits" % (chip),
             "LAMP_%s.back.fits" % (chip),
@@ -236,7 +238,7 @@ def prepareCalib_drp(
         )
         os.system("cp master.fwhm_%s.fits tjunk.fwhm_%s.fits" % (chip, chip))
     if fiberflat_wave == 1:
-        extractSpec_drp(
+        im.extract_spectra(
             "WAVE_%s.sub.fits" % (chip),
             "tjunk_%s.trc.fits" % (chip),
             "WAVE_%s.ms.fits" % (chip),
@@ -245,7 +247,7 @@ def prepareCalib_drp(
             disp_axis="y",
             parallel=parallel,
         )
-        detWaveSolution_drp(
+        rss.determine_wavelength_solution(
             "WAVE_%s.ms.fits" % (chip),
             "WAVE_%s" % (chip),
             ARC_ref,
@@ -260,7 +262,7 @@ def prepareCalib_drp(
             verbose="1",
         )
     else:
-        extractSpec_drp(
+        im.extract_spectra(
             "WAVE_%s.sub.fits" % (chip),
             "tjunk_%s.trc.fits" % (chip),
             "WAVE_%s.ms.fits" % (chip),
@@ -269,7 +271,7 @@ def prepareCalib_drp(
             disp_axis="y",
             parallel=parallel,
         )
-        detWaveSolution_drp(
+        rss.determine_wavelength_solution(
             "WAVE_%s.ms.fits" % (chip),
             "WAVE_%s" % (chip),
             ARC_ref,
@@ -281,13 +283,13 @@ def prepareCalib_drp(
             rel_flux_limits="0.1,6.0",
             verbose="0",
         )
-    createPixTable_drp(
+    rss.create_pixel_table(
         "WAVE_%s.ms.fits" % (chip),
         "WAVE_%s.rss.fits" % (chip),
         "WAVE_%s.disp.fits" % (chip),
         "WAVE_%s.res.fits" % (chip),
     )
-    resampleWave_drp(
+    rss.resample_wavelength(
         "WAVE_%s.rss.fits" % (chip),
         "WAVE_%s.disp_cor.fits" % (chip),
         start_wave=start_wave,
@@ -297,7 +299,7 @@ def prepareCalib_drp(
         parallel=parallel,
     )
     if fiberflat == 1:
-        extractSpec_drp(
+        im.extract_spectra(
             "LAMP_%s.stray.fits" % (chip),
             "tjunk_%s.trc.fits" % (chip),
             "LAMP_%s.ms.fits" % (chip),
@@ -306,13 +308,13 @@ def prepareCalib_drp(
             disp_axis="y",
             parallel=parallel,
         )
-        createPixTable_drp(
+        rss.create_pixel_table(
             "LAMP_%s.ms.fits" % (chip),
             "LAMP_%s.rss.fits" % (chip),
             "WAVE_%s.disp.fits" % (chip),
             "WAVE_%s.res.fits" % (chip),
         )
-        resampleWave_drp(
+        rss.resample_wavelength(
             "LAMP_%s.rss.fits" % (chip),
             "LAMP_%s.disp_cor.fits" % (chip),
             start_wave=start_wave,
@@ -323,7 +325,7 @@ def prepareCalib_drp(
             parallel=parallel,
         )
     if fiberflat == 1 or fiberflat_wave == 1:
-        includePosTab_drp(
+        rss.includePosTab_drp(
             "LAMP_%s.disp_cor.fits" % (chip),
             "%s/vimos_HR_%s_pt.txt" % (vimos_calib, chip),
         )
@@ -348,10 +350,10 @@ def prepareObject_drp(
     parallel="1",
 ):
     # if CCD_mask!='':
-    #  addCCDMask_drp('%s_%s.cosmic.fits'%(name_obj,chip),'%s/CCDMASK_%s_%s.fits'%(vimos_calib,chip,CCD_mask))
+    #  im.addCCDMask_drp('%s_%s.cosmic.fits'%(name_obj,chip),'%s/CCDMASK_%s_%s.fits'%(vimos_calib,chip,CCD_mask))
     if sky_line_list != "":
         # offsetTrace_drp('%s_%s.cosmic.fits'%(name_obj, chip), 'tjunk_%s.trc.fits'%(chip),  'WAVE_%s.disp.fits'%(chip),  sky_line_list,  'offsetTrace_%s.log'%(chip),  blocks='10',  disp_axis='y',  size='30')
-        correctTraceMask_drp(
+        rss.correctTraceMask_drp(
             "tjunk_%s.trc.fits" % (chip),
             "tjunk_%s_temp.trc.fits" % (chip),
             "offsetTrace_%s.log" % (chip),
@@ -362,7 +364,7 @@ def prepareObject_drp(
         os.system("cp tjunk_%s.trc.fits tjunk_%s_temp.trc.fits" % (chip, chip))
 
     if straylight:
-        subtractStraylight_drp(
+        im.subtractStraylight_drp(
             "%s_%s.cosmic.fits" % (name_obj, chip),
             "tjunk_%s_temp.trc.fits" % (chip),
             "%s_%s.back.fits" % (name_obj, chip),
@@ -378,7 +380,7 @@ def prepareObject_drp(
             "cp %s_%s.cosmic.fits %s_%s.stray.fits" % (name_obj, chip, name_obj, chip)
         )
 
-    extractSpec_drp(
+    im.extract_spectra(
         "%s_%s.stray.fits" % (name_obj, chip),
         "tjunk_%s_temp.trc.fits" % (chip),
         "%s_%s.ms.fits" % (name_obj, chip),
@@ -388,14 +390,14 @@ def prepareObject_drp(
         parallel=parallel,
     )
 
-    createPixTable_drp(
+    rss.create_pixel_table(
         "%s_%s.ms.fits" % (name_obj, chip),
         "%s_%s.pix_tab.fits" % (name_obj, chip),
         "WAVE_%s.disp.fits" % (chip),
         "WAVE_%s.res.fits" % (chip),
     )
 
-    addHvelcorHdr_drp(
+    head.addHvelcorHdr_drp(
         "%s_%s.pix_tab.fits" % (name_obj, chip),
         "HVEL_COR",
         RAKey="RA",
@@ -414,13 +416,13 @@ def prepareObject_drp(
         HVEL_key = ""
 
     if sky_line_list != "":
-        checkPixTable_drp(
+        rss.checkPixTable_drp(
             "%s_%s.pix_tab.fits" % (name_obj, chip),
             sky_line_list,
             "offsetWave_%s.log" % (chip),
             aperture="12",
         )
-        correctPixTable_drp(
+        rss.correctPixTable_drp(
             "%s_%s.pix_tab.fits" % (name_obj, chip),
             "%s_%s.pix_tab.fits" % (name_obj, chip),
             "offsetWave_%s.log" % (chip),
@@ -430,13 +432,13 @@ def prepareObject_drp(
             poly_disp="5",
         )
     if float(resolution_fwhm) != 0.0:
-        matchResolution_drp(
+        rss.matchResolution_drp(
             "%s_%s.pix_tab.fits" % (name_obj, chip),
             "%s_%s.res.fits" % (name_obj, chip),
             resolution_fwhm,
             parallel=parallel,
         )
-        resampleWave_drp(
+        rss.resample_wavelength(
             "%s_%s.res.fits" % (name_obj, chip),
             "%s_%s.disp_cor.fits" % (name_obj, chip),
             start_wave=start_wave,
@@ -448,7 +450,7 @@ def prepareObject_drp(
             parallel=parallel,
         )
     else:
-        resampleWave_drp(
+        rss.resample_wavelength(
             "%s_%s.pix_tab.fits" % (name_obj, chip),
             "%s_%s.disp_cor.fits" % (name_obj, chip),
             start_wave=start_wave,
@@ -459,7 +461,7 @@ def prepareObject_drp(
             correctHvel=HVEL_key,
             parallel=parallel,
         )
-    includePosTab_drp(
+    rss.includePosTab_drp(
         "%s_%s.disp_cor.fits" % (name_obj, chip),
         "%s/vimos_HR_%s_pt.txt" % (vimos_calib, chip),
     )
@@ -479,7 +481,7 @@ def reduceCalibMR_drp(
     fiberflat = int(fiberflat)
     fiberflat_wave = int(fiberflat_wave)
 
-    image = loadImage("LAMP_B.1.fits")
+    image = im.loadImage("LAMP_B.1.fits")
     date = image.getHdrValue("ESO OBS START").split("T")[0]
     year = int(date.split("-")[0])
 
@@ -509,7 +511,7 @@ def reduceCalibMR_drp(
                 "VIMOS_IFU_WAVE%03d" % (int(night)) in file_name
                 and chips[i] in file_name
             ):
-                subtractBias_drp(
+                im.subtractBias_drp(
                     file_name,
                     "WAVE_%s.sub.fits" % (chips[i]),
                     "BIAS_%s.fits" % (chips[i]),
@@ -576,11 +578,11 @@ def reduceCalibMR_drp(
             )
 
     if fiberflat == 1:
-        mergeRSS_drp(
+        rss.mergeRSS_drp(
             "LAMP_B.1.disp_cor.fits,LAMP_A.2.disp_cor.fits,LAMP_A.3.disp_cor.fits,LAMP_B.4.disp_cor.fits",
             "LAMP.disp_cor.fits",
         )
-        createFiberFlat_drp("LAMP.disp_cor.fits", "fiberflat.fits", valid="1200,1600")
+        rss.create_fiberflat("LAMP.disp_cor.fits", "fiberflat.fits", valid="1200,1600")
 
 
 def reduceCalibHR_drp(
@@ -603,7 +605,7 @@ def reduceCalibHR_drp(
     fiberflat = int(fiberflat)
     fiberflat_wave = int(fiberflat_wave)
 
-    image = loadImage("LAMP_B.1.fits")
+    image = im.loadImage("LAMP_B.1.fits")
     date = image.getHdrValue("ESO OBS START").split("T")[0]
     year = int(date.split("-")[0])
     if date > "2012-04-15" and setup == "blue":
@@ -659,7 +661,7 @@ def reduceCalibHR_drp(
                 "VIMOS_IFU_WAVE%03d" % (int(night)) in file_name
                 and chips[i] in file_name
             ):
-                subtractBias_drp(
+                im.subtractBias_drp(
                     file_name,
                     "WAVE_%s.sub.fits" % (chips[i]),
                     "BIAS_%s.fits" % (chips[i]),
@@ -670,11 +672,11 @@ def reduceCalibHR_drp(
                 )
 
     if setup == "orange":
-        set = "O"
+        ss = "O"
     elif setup == "blue":
-        set = "B"
+        ss = "B"
     elif setup == "red":
-        set = "R"
+        ss = "R"
     if parallel == "auto":
         cpus = cpu_count()
     else:
@@ -697,7 +699,7 @@ def reduceCalibHR_drp(
                         boundaries_y[i],
                         "%s/master_VIMOS_%s_%s" % (vimos_calib, chips[i], peaks_guess),
                         "%s/ref_lines_ARC_VIMOS_HR%s_%s%s"
-                        % (vimos_calib, set, chips[i], wave_guess),
+                        % (vimos_calib, ss, chips[i], wave_guess),
                         wave_start,
                         wave_end,
                         wave_disp,
@@ -727,7 +729,7 @@ def reduceCalibHR_drp(
                 boundaries_y[i],
                 "%s/master_VIMOS_%s_%s" % (vimos_calib, chips[i], peaks_guess),
                 "%s/ref_lines_ARC_VIMOS_HR%s_%s%s"
-                % (vimos_calib, set, chips[i], wave_guess),
+                % (vimos_calib, ss, chips[i], wave_guess),
                 wave_start,
                 wave_end,
                 wave_disp,
@@ -745,17 +747,17 @@ def reduceCalibHR_drp(
         merge_flat = ""
         for i in range(len(chips)):
             merge_flat = merge_flat + "LAMP_%s.disp_cor.fits," % (chips[i])
-        mergeRSS_drp(merge_flat[:-1], "LAMP.disp_cor.fits")
+        rss.mergeRSS_drp(merge_flat[:-1], "LAMP.disp_cor.fits")
         if setup == "orange":
             if len(chips) > 2:
-                createFiberFlat_drp(
+                rss.create_fiberflat(
                     "LAMP.disp_cor.fits",
                     "fiberflat.fits",
                     valid="800,1200",
                     clip="0.3,1.7",
                 )
             else:
-                createFiberFlat_drp(
+                rss.create_fiberflat(
                     "LAMP.disp_cor.fits",
                     "fiberflat.fits",
                     valid="400,800",
@@ -763,31 +765,31 @@ def reduceCalibHR_drp(
                 )
         elif setup == "blue" and date < "2012-04-15":
             if len(chips) > 2:
-                createFiberFlat_drp(
+                rss.create_fiberflat(
                     "LAMP.disp_cor.fits",
                     "fiberflat.fits",
                     valid="800,1200",
                     clip="0.2,4.0",
                 )
             else:
-                createFiberFlat_drp(
+                rss.create_fiberflat(
                     "LAMP.disp_cor.fits",
                     "fiberflat.fits",
                     valid="400,800",
                     clip="0.3,1.7",
                 )
         elif setup == "blue" and date >= "2012-04-15":
-            createFiberFlat_drp("LAMP.disp_cor.fits", "fiberflat.fits", clip="0.3,1.7")
+            rss.create_fiberflat("LAMP.disp_cor.fits", "fiberflat.fits", clip="0.3,1.7")
         elif setup == "red":
             if len(chips) > 2:
-                createFiberFlat_drp(
+                rss.create_fiberflat(
                     "LAMP.disp_cor.fits",
                     "fiberflat.fits",
                     valid="800,1200",
                     clip="0.2,4.0",
                 )
             else:
-                createFiberFlat_drp(
+                rss.create_fiberflat(
                     "LAMP.disp_cor.fits",
                     "fiberflat.fits",
                     valid="400,800",
@@ -816,14 +818,14 @@ def reduceObjectMR_drp(
     night = int(night)
     flexure_correct = int(flexure_correct)
     straylight = int(straylight)
-    correctHVEL = bool(int(correct_HVEL))
+    #correctHVEL = bool(int(correct_HVEL))
     chips = ["B.1", "A.2", "A.3", "B.4"]
     try:
-        image = loadImage(
+        image = im.loadImage(
             "VIMOS_IFU_OBS%03d_%04d_%s.fits.gz" % (night, object_nr, "B.1")
         )
     except IOError:
-        image = loadImage("VIMOS_IFU_OBS%03d_%04d_%s.fits" % (night, object_nr, "B.1"))
+        image = im.loadImage("VIMOS_IFU_OBS%03d_%04d_%s.fits" % (night, object_nr, "B.1"))
     date = image.getHdrValue("ESO OBS START").split("T")[0]
     year = int(date.split("-")[0])
 
@@ -854,7 +856,7 @@ def reduceObjectMR_drp(
 
     for i in range(len(chips)):
         try:
-            subtractBias_drp(
+            im.subtractBias_drp(
                 "VIMOS_IFU_OBS%03d_%04d_%s.fits.gz" % (night, object_nr, chips[i]),
                 "%s_%s.sub.fits" % (name_obj, chips[i]),
                 "BIAS_%s.fits" % (chips[i]),
@@ -864,7 +866,7 @@ def reduceObjectMR_drp(
                 rdnoise="ESO DET OUT1 RON",
             )
         except IOError:
-            subtractBias_drp(
+            im.subtractBias_drp(
                 "VIMOS_IFU_OBS%03d_%04d_%s.fits" % (night, object_nr, chips[i]),
                 "%s_%s.sub.fits" % (name_obj, chips[i]),
                 "BIAS_%s.fits" % (chips[i]),
@@ -873,7 +875,7 @@ def reduceObjectMR_drp(
                 gain="ESO DET OUT1 CONAD",
                 rdnoise="ESO DET OUT1 RON",
             )
-        LACosmic_drp(
+        im.LACosmic_drp(
             "%s_%s.sub.fits" % (name_obj, chips[i]),
             "%s_%s.cosmic.fits" % (name_obj, chips[i]),
             sigma_det="5.0",
@@ -941,17 +943,17 @@ def reduceObjectMR_drp(
                 4,
             )
 
-    expandHdrKeys_drp("%s_B.1.disp_cor.fits" % (name_obj), "CCD1")
-    expandHdrKeys_drp("%s_A.2.disp_cor.fits" % (name_obj), "CCD2")
-    expandHdrKeys_drp("%s_A.3.disp_cor.fits" % (name_obj), "CCD3")
-    expandHdrKeys_drp("%s_B.4.disp_cor.fits" % (name_obj), "CCD4")
-    mergeRSS_drp(
+    head.expandHdrKeys_drp("%s_B.1.disp_cor.fits" % (name_obj), "CCD1")
+    head.expandHdrKeys_drp("%s_A.2.disp_cor.fits" % (name_obj), "CCD2")
+    head.expandHdrKeys_drp("%s_A.3.disp_cor.fits" % (name_obj), "CCD3")
+    head.expandHdrKeys_drp("%s_B.4.disp_cor.fits" % (name_obj), "CCD4")
+    rss.mergeRSS_drp(
         "%s_B.1.disp_cor.fits,%s_A.2.disp_cor.fits,%s_A.3.disp_cor.fits,%s_B.4.disp_cor.fits"
         % (name_obj, name_obj, name_obj, name_obj),
         "%s.disp_cor.fits" % (name_obj),
     )
     if fiberflat == 1:
-        correctFiberFlat_drp(
+        rss.correctFiberFlat_drp(
             "%s.disp_cor.fits" % (name_obj),
             "%s.flat.fits" % (name_obj),
             "fiberflat.fits",
@@ -959,7 +961,7 @@ def reduceObjectMR_drp(
 
     if flux_calib == 1:
         if fiberflat == 1:
-            fluxCalibration_drp(
+            flux.fluxCalibration_drp(
                 "%s.flat.fits" % (name_obj),
                 "%s.fobj.fits" % (name_obj),
                 "ratio.txt",
@@ -971,7 +973,7 @@ def reduceObjectMR_drp(
                 norm_sb_fib="",
             )
             # else:
-            fluxCalibration_drp(
+            flux.fluxCalibration_drp(
                 "%s.disp_cor.fits" % (name_obj),
                 "%s.fobj.fits" % (name_obj),
                 "ratio.txt",
@@ -983,7 +985,7 @@ def reduceObjectMR_drp(
                 norm_sb_fib="",
             )
     if telluric_cor == 1:
-        correctTelluric_drp(
+        flux.correctTelluric_drp(
             "%s.fobj.fits" % (name_obj),
             "%s.fobj.fits" % (name_obj),
             "telluric_template.fits",
@@ -1025,7 +1027,7 @@ def reduceObjectHR_drp(
     flux_calib = int(flux_calib)
     telluric_cor = int(telluric_cor)
 
-    image = loadImage("VIMOS_IFU_OBS%03d_%04d_%s.fits.gz" % (night, object_nr, "B.1"))
+    image = im.loadImage("VIMOS_IFU_OBS%03d_%04d_%s.fits.gz" % (night, object_nr, "B.1"))
     date = image.getHdrValue("ESO OBS START").split("T")[0]
     year = int(date.split("-")[0])
     if year == 2009:
@@ -1043,7 +1045,7 @@ def reduceObjectHR_drp(
         boundaries_y = ["1,4096", "1,4096", "1,4096", "1,4096"]
 
     if setup == "orange":
-        set = "O"
+        # ss = "O"
         if flexure_correct == 1:
             sky_line_list = "5577.34,6300.30,6863.97,7276.42"
             flexure_order = 2
@@ -1051,7 +1053,7 @@ def reduceObjectHR_drp(
             sky_line_list = ""
             flexure_order = 0
     elif setup == "blue" and date < "2012-04-15":
-        set = "B"
+        # ss = "B"
         if flexure_correct == 1:
             sky_line_list = "5577.34"
             flexure_order = 0
@@ -1060,12 +1062,12 @@ def reduceObjectHR_drp(
             flexure_order = 0
 
     elif setup == "blue" and date >= "2012-04-15":
-        set = "B"
+        # ss = "B"
         sky_line_list = ""
         flexure_order = 0
 
     elif setup == "red":
-        set = "R"
+        # ss = "R"
         if flexure_correct == 1:
             sky_line_list = "6863.97,7276.42,7913.72,8344.61"
             flexure_order = 2
@@ -1074,7 +1076,7 @@ def reduceObjectHR_drp(
             flexure_order = 0
 
     for i in range(len(chips)):
-        subtractBias_drp(
+        im.subtractBias_drp(
             "VIMOS_IFU_OBS%03d_%04d_%s.fits.gz" % (night, object_nr, chips[i]),
             "%s_%s.sub.fits" % (name_obj, chips[i]),
             "BIAS_%s.fits" % (chips[i]),
@@ -1083,7 +1085,7 @@ def reduceObjectHR_drp(
             gain="ESO DET OUT1 CONAD",
             rdnoise="ESO DET OUT1 RON",
         )
-        LACosmic_drp(
+        im.LACosmic_drp(
             "%s_%s.sub.fits" % (name_obj, chips[i]),
             "%s_%s.cosmic.fits" % (name_obj, chips[i]),
             sigma_det="5.0",
@@ -1152,13 +1154,13 @@ def reduceObjectHR_drp(
                 4,
             )
     for i in range(len(chips)):
-        expandHdrKeys_drp(
+        head.expandHdrKeys_drp(
             "%s_%s.disp_cor.fits" % (name_obj, chips[i]),
             "CCD%s" % (chips[i].split(".")[1]),
             exclude="ESO TEL AIRM START,EXPTIME",
         )
         if flux_calib == 1:
-            fluxCalibration_drp(
+            flux.fluxCalibration_drp(
                 "%s_%s.disp_cor.fits" % (name_obj, chips[i]),
                 "%s_%s.fobj.fits" % (name_obj, chips[i]),
                 "ratio.txt",
@@ -1175,7 +1177,7 @@ def reduceObjectHR_drp(
                 % (name_obj, chips[i], name_obj, chips[i])
             )
     if telluric_cor == 1:
-        correctTelluric_drp(
+        flux.correctTelluric_drp(
             "%s.fobj.fits" % (name_obj),
             "%s.fobj.fits" % (name_obj),
             "telluric_template.fits",
@@ -1184,10 +1186,10 @@ def reduceObjectHR_drp(
     merge_obj = ""
     for i in range(len(chips)):
         merge_obj = merge_obj + "%s_%s.fobj.fits," % (name_obj, chips[i])
-    mergeRSS_drp(merge_obj[:-1], "%s.fobj.fits" % (name_obj))
+    rss.mergeRSS_drp(merge_obj[:-1], "%s.fobj.fits" % (name_obj))
 
     if fiberflat == 1:
-        correctFiberFlat_drp(
+        rss.correctFiberFlat_drp(
             "%s.fobj.fits" % (name_obj), "%s.flat.fits" % (name_obj), "fiberflat.fits"
         )
 
@@ -1207,6 +1209,16 @@ def reduceStdMR_drp(
     parallel="auto",
 ):
     chips = ["B.1", "A.2", "A.3", "B.4"]
+
+    sky_line_list = "5577.34,6300.30,6863.97,7276.42,7750.65,8344.61,8885.85"
+    night = int(night)
+    std_nr = int(std_nr)
+    straylight = int(straylight)
+
+    image = im.loadImage("VIMOS_IFU_STD%03d_%04d_%s.fits.gz" % (night, std_nr, "B.1"))
+    date = image.getHdrValue("ESO OBS START").split("T")[0]
+    year = int(date.split("-")[0])
+
     if year >= 2013:
         boundaries_x = ["51,2098", "51,2098", "51,2098", "51,2098"]
         boundaries_y = ["1300,3450", "1360,3510", "1165,3215", "900,3100"]
@@ -1214,22 +1226,13 @@ def reduceStdMR_drp(
         boundaries_x = ["51,2098", "51,2098", "51,2098", "51,2098"]
         boundaries_y = ["1300,3450", "1340,3490", "1150,3300", "900,3150"]
 
-    sky_line_list = "5577.34,6300.30,6863.97,7276.42,7750.65,8344.61,8885.85"
-    night = int(night)
-    std_nr = int(std_nr)
-    straylight = int(straylight)
-
-    image = loadImage("VIMOS_IFU_STD%03d_%04d_%s.fits.gz" % (night, std_nr, "B.1"))
-    date = image.getHdrValue("ESO OBS START").split("T")[0]
-    year = int(date.split("-")[0])
-
     if year == 2009:
         CCD_mask = "2009"
     else:
         CCD_mask = ""
 
     for i in range(len(chips)):
-        subtractBias_drp(
+        im.subtractBias_drp(
             "VIMOS_IFU_STD%03d_%04d_%s.fits.gz" % (night, std_nr + i, chips[i]),
             "%s_%s.sub.fits" % ("STD" + str(i + 1), chips[i]),
             "BIAS_%s.fits" % (chips[i]),
@@ -1238,7 +1241,7 @@ def reduceStdMR_drp(
             gain="ESO DET OUT1 CONAD",
             rdnoise="ESO DET OUT1 RON",
         )
-        LACosmic_drp(
+        im.LACosmic_drp(
             "%s_%s.sub.fits" % ("STD" + str(i + 1), chips[i]),
             "%s_%s.cosmic.fits" % ("STD" + str(i + 1), chips[i]),
             sigma_det="5.0",
@@ -1306,38 +1309,39 @@ def reduceStdMR_drp(
                 4,
             )
 
-    mergeRSS_drp(
+    rss.mergeRSS_drp(
         "STD1_B.1.disp_cor.fits,STD2_A.2.disp_cor.fits,STD3_A.3.disp_cor.fits,STD4_B.4.disp_cor.fits",
         "STD.disp_cor.fits",
     )
-    correctFiberFlat_drp("STD.disp_cor.fits", "STD.flat.fits", "fiberflat.fits")
+    rss.correctFiberFlat_drp("STD.disp_cor.fits", "STD.flat.fits", "fiberflat.fits")
 
-    splitFibers_drp(
+    rss.splitFibers_drp(
         "STD.flat.fits",
         "STD1.flat.fits,STD2.flat.fits,STD3.flat.fits,STD4.flat.fits",
         "QD1,QD2,QD3,QD4",
     )
     std_ratios = []
     for i in range(len(chips)):
-        constructSkySpec_drp(
+        sky.constructSkySpec_drp(
             "STD%d.flat.fits" % (i + 1),
             "STD%d.sky_spec.fits" % (i + 1),
             clip_sigma=0.0,
             nsky=150,
         )
-        subtractSkySpec_drp(
+        sky.subtractSkySpec_drp(
             "STD%d.flat.fits" % (i + 1),
             "STD%d.sobj.fits" % (i + 1),
             "STD%d.sky_spec.fits" % (i + 1),
         )
-        copyHdrKey_drp(
+        head.copyHdrKey_drp(
             "VIMOS_IFU_STD%03d_%04d_%s.fits.gz" % (night, std_nr + i, chips[i]),
             "STD%d.sobj.fits" % (i + 1),
             "ESO TEL AIRM START",
         )
 
+        std_telluric = []
         if ref_star != "":
-            createSensFunction_drp(
+            flux.createSensFunction_drp(
                 "STD%d.sobj.fits" % (i + 1),
                 "ratio_%d.txt" % (i + 1),
                 ref_star,
@@ -1410,7 +1414,7 @@ def reduceStdHR_drp(
     std_nr = int(std_nr)
     straylight = int(straylight)
 
-    image = loadImage("VIMOS_IFU_STD%03d_%04d_%s.fits.gz" % (night, std_nr, "B.1"))
+    image = im.loadImage("VIMOS_IFU_STD%03d_%04d_%s.fits.gz" % (night, std_nr, "B.1"))
     date = image.getHdrValue("ESO OBS START").split("T")[0]
 
     year = int(date.split("-")[0])
@@ -1429,7 +1433,7 @@ def reduceStdHR_drp(
         CCD_mask = ""
 
     for i in range(len(chips)):
-        subtractBias_drp(
+        im.subtractBias_drp(
             "VIMOS_IFU_STD%03d_%04d_%s.fits.gz"
             % (night, std_nr + int(chips[i].split(".")[1]) - 1, chips[i]),
             "%s_%s.sub.fits" % ("STD" + str(i + 1), chips[i]),
@@ -1439,7 +1443,7 @@ def reduceStdHR_drp(
             gain="ESO DET OUT1 CONAD",
             rdnoise="ESO DET OUT1 RON",
         )
-        LACosmic_drp(
+        im.LACosmic_drp(
             "%s_%s.sub.fits" % ("STD" + str(i + 1), chips[i]),
             "%s_%s.cosmic.fits" % ("STD" + str(i + 1), chips[i]),
             sigma_det="5.0",
@@ -1510,38 +1514,38 @@ def reduceStdHR_drp(
     merge_obj = ""
     for i in range(len(chips)):
         merge_obj = merge_obj + "STD%d_%s.disp_cor.fits," % (i + 1, chips[i])
-    mergeRSS_drp(merge_obj[:-1], "STD.disp_cor.fits")
-    correctFiberFlat_drp("STD.disp_cor.fits", "STD.flat.fits", "fiberflat.fits")
+    rss.mergeRSS_drp(merge_obj[:-1], "STD.disp_cor.fits")
+    rss.correctFiberFlat_drp("STD.disp_cor.fits", "STD.flat.fits", "fiberflat.fits")
 
     QDs = ""
     files = ""
     for i in range(len(chips)):
         QDs = QDs + "QD%s," % (chips[i].split(".")[1])
         files = files + "STD%s.flat.fits," % (chips[i].split(".")[1])
-    splitFibers_drp("STD.flat.fits", files[:-1], QDs[:-1])
+    rss.splitFibers_drp("STD.flat.fits", files[:-1], QDs[:-1])
     std_ratios = []
     std_telluric = []
     for i in range(len(chips)):
-        constructSkySpec_drp(
+        sky.constructSkySpec_drp(
             "STD%s.flat.fits" % (chips[i].split(".")[1]),
             "STD%s.sky_spec.fits" % (chips[i].split(".")[1]),
             clip_sigma=0.0,
             nsky=70,
             non_neg=0,
         )
-        subtractSkySpec_drp(
+        sky.subtractSkySpec_drp(
             "STD%s.flat.fits" % (chips[i].split(".")[1]),
             "STD%s.sobj.fits" % (chips[i].split(".")[1]),
             "STD%s.sky_spec.fits" % (chips[i].split(".")[1]),
         )
-        copyHdrKey_drp(
+        head.copyHdrKey_drp(
             "VIMOS_IFU_STD%03d_%04d_%s.fits.gz" % (night, std_nr + i, chips[i]),
             "STD%s.sobj.fits" % (chips[i].split(".")[1]),
             "ESO TEL AIRM START",
         )
 
         if ref_star != "":
-            createSensFunction_drp(
+            flux.createSensFunction_drp(
                 "STD%s.sobj.fits" % (chips[i].split(".")[1]),
                 "ratio_%s.txt" % (chips[i].split(".")[1]),
                 ref_star,
@@ -1596,25 +1600,25 @@ def subtractSkyField_drp(
     clip_sigma=0.0,
     nsky=200,
 ):
-    splitFibers_drp(
+    rss.splitFibers_drp(
         object_in,
         "obj_QD1.fits,obj_QD2.fits,obj_QD3.fits,obj_QD4.fits",
         "QD1,QD2,QD3,QD4",
     )
-    splitFibers_drp(
+    rss.splitFibers_drp(
         sky_field,
         "sky_QD1.fits,sky_QD2.fits,sky_QD3.fits,sky_QD4.fits",
         "QD1,QD2,QD3,QD4",
     )
     for i in range(4):
-        constructSkySpec_drp(
+        sky.constructSkySpec_drp(
             "sky_QD%d.fits" % (i + 1),
             "sky_spec_QD%d.fits" % (i + 1),
             clip_sigma=clip_sigma,
             filter=vimos_calib + "R_Johnson.txt,0,1",
             nsky=nsky,
         )
-        subtractSkySpec_drp(
+        sky.subtractSkySpec_drp(
             "obj_QD%d.fits" % (i + 1),
             "sobj_QD%d.fits" % (i + 1),
             "sky_spec_QD%d.fits" % (i + 1),
@@ -1622,35 +1626,35 @@ def subtractSkyField_drp(
             scale_ind=scale_ind,
             scale_region=scale_region,
         )
-        copyHdrKey_drp(
+        head.copyHdrKey_drp(
             "sky_QD%d.fits" % (i + 1),
             "sobj_QD%d.fits" % (i + 1),
             "hierarch PIPE NSKY FIB",
         )
-        copyHdrKey_drp(
+        head.copyHdrKey_drp(
             "sky_QD%d.fits" % (i + 1),
             "sobj_QD%d.fits" % (i + 1),
             "hierarch PIPE SKY MEAN",
         )
-        copyHdrKey_drp(
+        head.copyHdrKey_drp(
             "sky_QD%d.fits" % (i + 1),
             "sobj_QD%d.fits" % (i + 1),
             "hierarch PIPE SKY MIN",
         )
-        copyHdrKey_drp(
+        head.copyHdrKey_drp(
             "sky_QD%d.fits" % (i + 1),
             "sobj_QD%d.fits" % (i + 1),
             "hierarch PIPE SKY MAX",
         )
-        copyHdrKey_drp(
+        head.copyHdrKey_drp(
             "sky_QD%d.fits" % (i + 1),
             "sobj_QD%d.fits" % (i + 1),
             "hierarch PIPE SKY RMS",
         )
-        expandHdrKeys_drp(
+        head.expandHdrKeys_drp(
             "sobj_QD%d.fits" % (i + 1),
             "CCD%d" % (i + 1),
             "PIPE NSKY FIB,PIPE SKY MEAN,PIPE SKY MIN,PIPE SKY MAX,PIPE SKY RMS,PIPE SKY SCALE",
         )
-    mergeRSS_drp("sobj_QD1.fits,sobj_QD2.fits,sobj_QD3.fits,sobj_QD4.fits", object_out)
+    rss.mergeRSS_drp("sobj_QD1.fits,sobj_QD2.fits,sobj_QD3.fits,sobj_QD4.fits", object_out)
     os.system("rm *QD?.fits")

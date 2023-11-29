@@ -1,12 +1,13 @@
 import os
-
+import numpy
 from astropy.io import fits as pyfits
 
 from lvmdrp.core.header import Header
 from lvmdrp.core.image import Image
-from lvmdrp.functions.headerMethod import *
-from lvmdrp.functions.imageMethod import *
-from lvmdrp.functions.rssMethod import *
+from lvmdrp.functions import skyMethod as sky
+from lvmdrp.functions import imageMethod as im
+from lvmdrp.functions import rssMethod as rss
+from lvmdrp.functions import fluxCalMethod as flux
 
 
 description = "Provides Methods to reduce GMOS data"
@@ -38,7 +39,7 @@ def createCCDfromArchive_drp(
         CCD = numpy.zeros((4608, 6144), dtype=numpy.float32)
         CCD_err = numpy.zeros((4608, 6144), dtype=numpy.float32)
         CCD_mask = numpy.zeros((4608, 6144), dtype="bool")
-    if single == True:
+    if single is True:
         sections = sections / 3
     if master_bias is not None:
         hdu_bias = pyfits.open(master_bias, do_not_scale_image_data=True, memmap=False)
@@ -61,7 +62,7 @@ def createCCDfromArchive_drp(
         temp_dat = hdu[i].header["DATASEC"].replace("[", "").replace("]", "").split(",")
         DATAsec_x = [int(temp_dat[0].split(":")[0]) - 1, int(temp_dat[0].split(":")[1])]
         DATAsec_y = [int(temp_dat[1].split(":")[0]) - 1, int(temp_dat[1].split(":")[1])]
-        img = hdu[i].data[DATAsec_y[0] : DATAsec_y[1], DATAsec_x[0] : DATAsec_x[1]]
+        img = hdu[i].data[DATAsec_y[0]: DATAsec_y[1], DATAsec_x[0]: DATAsec_x[1]]
 
         temp_bias = (
             hdu[i].header["BIASSEC"].replace("[", "").replace("]", "").split(",")
@@ -75,7 +76,7 @@ def createCCDfromArchive_drp(
             int(temp_bias[1].split(":")[1]),
         )
         bias = numpy.median(
-            hdu[i].data[BIASsec_y[0] : BIASsec_y[1], BIASsec_x[0] : BIASsec_x[1]]
+            hdu[i].data[BIASsec_y[0]: BIASsec_y[1], BIASsec_x[0]: BIASsec_x[1]]
         )
         gain = float(hdu[i].header["gain"])
         rdnoise = float(hdu[i].header["rdnoise"])
@@ -85,125 +86,125 @@ def createCCDfromArchive_drp(
             # gain = hdu_bias[i].header['GAINORIG']
             # rdnoise = hdu_bias[i].header['RONORIG']
             bias_bias = numpy.median(
-                img_bias[BIASsec_y[0] : BIASsec_y[1], BIASsec_x[0] : BIASsec_x[1]]
+                img_bias[BIASsec_y[0]: BIASsec_y[1], BIASsec_x[0]: BIASsec_x[1]]
             )
             bias = img_bias[
-                DATAsec_y[0] : DATAsec_y[1], DATAsec_x[0] : DATAsec_x[1]
+                DATAsec_y[0]: DATAsec_y[1], DATAsec_x[0]: DATAsec_x[1]
             ] - (bias_bias - bias)
         if master_bias is not None:
             img[(img - bias) <= 0] = bias[(img - bias) <= 0]
         else:
             img[(img - bias) <= 0] = bias
-        CCD[CCDsec_y[0] : CCDsec_y[1], CCDsec_x[0] : CCDsec_x[1]] = (img - bias) * gain
-        CCD_err[CCDsec_y[0] : CCDsec_y[1], CCDsec_x[0] : CCDsec_x[1]] = numpy.sqrt(
+        CCD[CCDsec_y[0]: CCDsec_y[1], CCDsec_x[0]: CCDsec_x[1]] = (img - bias) * gain
+        CCD_err[CCDsec_y[0]: CCDsec_y[1], CCDsec_x[0]: CCDsec_x[1]] = numpy.sqrt(
             (img - bias) * gain + rdnoise**2
         )
         select_nan = numpy.isnan(CCD_err)
         CCD_err[select_nan] = rdnoise
         if mask_saturated:
             select = img == saturate_value
-            CCD_mask[CCDsec_y[0] : CCDsec_y[1], CCDsec_x[0] : CCDsec_x[1]] = select
+            CCD_mask[CCDsec_y[0]: CCDsec_y[1], CCDsec_x[0]: CCDsec_x[1]] = select
 
     if splits[0] == 0:
         if not mask_saturated:
             CCD1_out = Image(
-                data=CCD[:, 0 : 2046 / bins[0] + 1],
-                error=CCD_err[:, 0 : 0 : 2046 / bins[0] + 1],
+                data=CCD[:, 0: 2046 / bins[0] + 1],
+                error=CCD_err[:, 0: 0: 2046 / bins[0] + 1],
                 header=hdr,
             )
         else:
             CCD1_out = Image(
-                data=CCD[:, 0 : 2046 / bins[0] + 1],
-                error=CCD_err[:, 0 : 2046 / bins[0] + 1],
-                mask=CCD_mask[:, 0 : 2046 / bins[0] + 1],
+                data=CCD[:, 0: 2046 / bins[0] + 1],
+                error=CCD_err[:, 0: 2046 / bins[0] + 1],
+                mask=CCD_mask[:, 0: 2046 / bins[0] + 1],
                 header=hdr,
             )
     else:
         if not mask_saturated:
             CCD1_out = Image(
-                data=CCD[:, splits[0] / bins[0] : 2046 / bins[0] + 1],
-                error=CCD_err[:, splits[0] / bins[0] : 2046 / bins[0] + 1],
+                data=CCD[:, splits[0] / bins[0]: 2046 / bins[0] + 1],
+                error=CCD_err[:, splits[0] / bins[0]: 2046 / bins[0] + 1],
                 header=hdr,
             )
         else:
             CCD1_out = Image(
-                data=CCD[:, splits[0] / bins[0] : 2046 / bins[0] + 1],
-                error=CCD_err[:, splits[0] / bins[0] : 2046 / bins[0] + 1],
-                mask=CCD_mask[:, splits[0] / bins[0] : 2046 / bins[0] + 1],
+                data=CCD[:, splits[0] / bins[0]: 2046 / bins[0] + 1],
+                error=CCD_err[:, splits[0] / bins[0]: 2046 / bins[0] + 1],
+                mask=CCD_mask[:, splits[0] / bins[0]: 2046 / bins[0] + 1],
                 header=hdr,
             )
     CCD1_out.writeFitsData(prefix + ".CCD1.fits")
     if splits[1] == 0 and splits[2] == 0:
         if not mask_saturated:
             CCD2_out = Image(
-                data=CCD[:, 2048 / bins[0] : 4094 / bins[0] + 1],
-                error=CCD_err[:, 2048 / bins[0] : 4094 / bins[0] + 1],
+                data=CCD[:, 2048 / bins[0]: 4094 / bins[0] + 1],
+                error=CCD_err[:, 2048 / bins[0]: 4094 / bins[0] + 1],
                 header=hdr,
             )
         else:
             CCD2_out = Image(
-                data=CCD[:, 2048 / bins[0] : 4094 / bins[0] + 1],
-                error=CCD_err[:, 2048 / bins[0] : 4094 / bins[0] + 1],
-                mask=CCD_mask[:, 2048 / bins[0] : 4094 / bins[0] + 1],
+                data=CCD[:, 2048 / bins[0]: 4094 / bins[0] + 1],
+                error=CCD_err[:, 2048 / bins[0]: 4094 / bins[0] + 1],
+                mask=CCD_mask[:, 2048 / bins[0]: 4094 / bins[0] + 1],
                 header=hdr,
             )
         CCD2_out.writeFitsData(prefix + ".CCD2.fits")
     else:
         if not mask_saturated:
             CCD2_out = Image(
-                data=CCD[:, 2048 : 2048 + splits[1]],
-                error=CCD_err[:, 2048 : 2048 + splits[1]],
+                data=CCD[:, 2048: 2048 + splits[1]],
+                error=CCD_err[:, 2048: 2048 + splits[1]],
                 header=hdr,
             )
         else:
             CCD2_out = Image(
-                data=CCD[:, 2048 : 2048 + splits[1]],
-                error=CCD_err[:, 2048 : 2048 + splits[1]],
-                mask=CCD_mask[:, 2048 : 2048 + splits[1]],
+                data=CCD[:, 2048: 2048 + splits[1]],
+                error=CCD_err[:, 2048: 2048 + splits[1]],
+                mask=CCD_mask[:, 2048: 2048 + splits[1]],
                 header=hdr,
             )
         CCD2_out.writeFitsData(prefix + ".CCD2L.fits")
         if not mask_saturated:
             CCD2_out = Image(
-                data=CCD[:, 2048 + splits[2] : 4095],
-                error=CCD_err[:, 2048 + splits[2] : 4095],
+                data=CCD[:, 2048 + splits[2]: 4095],
+                error=CCD_err[:, 2048 + splits[2]: 4095],
                 header=hdr,
             )
         else:
             CCD2_out = Image(
-                data=CCD[:, 2048 + splits[2] : 4095],
-                error=CCD_err[:, 2048 + splits[2] : 4095],
-                mask=CCD_mask[:, 2048 + splits[2] : 4095],
+                data=CCD[:, 2048 + splits[2]: 4095],
+                error=CCD_err[:, 2048 + splits[2]: 4095],
+                mask=CCD_mask[:, 2048 + splits[2]: 4095],
                 header=hdr,
             )
         CCD2_out.writeFitsData(prefix + ".CCD2R.fits")
     if splits[3] == 0:
         if not mask_saturated:
             CCD3_out = Image(
-                data=CCD[:, 4096 / bins[0] : 6142 / bins[0] + 1],
-                error=CCD_err[:, 4096 / bins[0] : 6142 / bins[0] + 1],
+                data=CCD[:, 4096 / bins[0]: 6142 / bins[0] + 1],
+                error=CCD_err[:, 4096 / bins[0]: 6142 / bins[0] + 1],
                 header=hdr,
             )
         else:
             CCD3_out = Image(
-                data=CCD[:, 4096 / bins[0] : 6142 / bins[0] + 1],
-                error=CCD_err[:, 4096 / bins[0] : 6142 / bins[0] + 1],
-                mask=CCD_mask[:, 4096 / bins[0] : 6142 / bins[0] + 1],
+                data=CCD[:, 4096 / bins[0]: 6142 / bins[0] + 1],
+                error=CCD_err[:, 4096 / bins[0]: 6142 / bins[0] + 1],
+                mask=CCD_mask[:, 4096 / bins[0]: 6142 / bins[0] + 1],
                 header=hdr,
             )
 
     else:
         if not mask_saturated:
             CCD3_out = Image(
-                data=CCD[:, 4096 / bins[0] : 4096 / bins[0] + splits[3]],
-                error=CCD_err[:, 4096 / bins[0] : 4096 / bins[0] + splits[3]],
+                data=CCD[:, 4096 / bins[0]: 4096 / bins[0] + splits[3]],
+                error=CCD_err[:, 4096 / bins[0]: 4096 / bins[0] + splits[3]],
                 header=hdr,
             )
         else:
             CCD3_out = Image(
-                data=CCD[:, 4096 / bins[0] : 4096 / bins[0] + splits[3]],
-                error=CCD_err[:, 4096 / bins[0] : 4096 / bins[0] + splits[3]],
-                mask=CCD_mask[:, 4096 / bins[0] : 4096 / bins[0] + splits[3]],
+                data=CCD[:, 4096 / bins[0]: 4096 / bins[0] + splits[3]],
+                error=CCD_err[:, 4096 / bins[0]: 4096 / bins[0] + splits[3]],
+                mask=CCD_mask[:, 4096 / bins[0]: 4096 / bins[0] + splits[3]],
                 header=hdr,
             )
     CCD3_out.writeFitsData(prefix + ".CCD3.fits")
@@ -301,7 +302,7 @@ def reduceCalib_drp(trace, master_bias, arc="", fiberflat="1", reduce_ccd="ALL")
         )
         if arc != "":
             createCCDfromArchive_drp(arc, "ARC", master_bias=master_bias, splits=splits)
-        findPeaksAuto_drp(
+        im.find_peaks_auto(
             "FLAT.CCD1.fits",
             "peaks.CCD1",
             nfibers=750,
@@ -310,7 +311,7 @@ def reduceCalib_drp(trace, master_bias, arc="", fiberflat="1", reduce_ccd="ALL")
             median_box=20,
             verbose=0,
         )
-        findPeaksAuto_drp(
+        im.find_peaks_auto(
             "FLAT.CCD2L.fits",
             "peaks.CCD2L",
             nfibers=750,
@@ -319,7 +320,7 @@ def reduceCalib_drp(trace, master_bias, arc="", fiberflat="1", reduce_ccd="ALL")
             median_box=20,
             verbose=0,
         )
-        findPeaksMaster2_drp(
+        im.findPeaksMaster2_drp(
             "FLAT.CCD2R.fits",
             "%s/master_peaks.BLUE_slit_2019" % (gmos_calib),
             "peaks.CCD2R",
@@ -329,7 +330,7 @@ def reduceCalib_drp(trace, master_bias, arc="", fiberflat="1", reduce_ccd="ALL")
             median_box=20,
             verbose=0,
         )
-        findPeaksMaster2_drp(
+        im.findPeaksMaster2_drp(
             "FLAT.CCD3.fits",
             "%s/master_peaks.BLUE_slit_2019" % (gmos_calib),
             "peaks.CCD3",
@@ -339,7 +340,7 @@ def reduceCalib_drp(trace, master_bias, arc="", fiberflat="1", reduce_ccd="ALL")
             median_box=20,
             verbose=0,
         )
-        tracePeaks_drp(
+        im.trace_peaks(
             "FLAT.CCD1.fits",
             "peaks.CCD1",
             "tjunk.CCD1.trc.fits",
@@ -350,7 +351,7 @@ def reduceCalib_drp(trace, master_bias, arc="", fiberflat="1", reduce_ccd="ALL")
             median_cross=1,
             threshold_peak=400,
         )
-        tracePeaks_drp(
+        im.trace_peaks(
             "FLAT.CCD2L.fits",
             "peaks.CCD2L",
             "tjunk.CCD2L.trc.fits",
@@ -361,7 +362,7 @@ def reduceCalib_drp(trace, master_bias, arc="", fiberflat="1", reduce_ccd="ALL")
             threshold_peak=400,
             median_cross=1,
         )
-        tracePeaks_drp(
+        im.trace_peaks(
             "FLAT.CCD2R.fits",
             "peaks.CCD2R",
             "tjunk.CCD2R.trc.fits",
@@ -372,7 +373,7 @@ def reduceCalib_drp(trace, master_bias, arc="", fiberflat="1", reduce_ccd="ALL")
             median_cross=1,
             threshold_peak=400,
         )
-        tracePeaks_drp(
+        im.trace_peaks(
             "FLAT.CCD3.fits",
             "peaks.CCD3",
             "tjunk.CCD3.trc.fits",
@@ -384,7 +385,7 @@ def reduceCalib_drp(trace, master_bias, arc="", fiberflat="1", reduce_ccd="ALL")
             threshold_peak=400,
         )
         for i in range(len(ccds)):
-            subtractStraylight_drp(
+            im.subtractStraylight_drp(
                 "FLAT.%s.fits" % (ccds[i]),
                 "tjunk.%s.trc.fits" % (ccds[i]),
                 "FLAT.%s.back.fits" % (ccds[i]),
@@ -395,7 +396,7 @@ def reduceCalib_drp(trace, master_bias, arc="", fiberflat="1", reduce_ccd="ALL")
                 minfit=20,
                 maxfit=-10,
             )
-            traceFWHM_drp(
+            im.traceFWHM_drp(
                 "FLAT.%s.stray.fits" % (ccds[i]),
                 "tjunk.%s.trc.fits" % (ccds[i]),
                 "tjunk.%s.fwhm.fits" % (ccds[i]),
@@ -407,7 +408,7 @@ def reduceCalib_drp(trace, master_bias, arc="", fiberflat="1", reduce_ccd="ALL")
                 threshold_flux=2000,
             )
             if arc != "":
-                LACosmic_drp(
+                im.LACosmic_drp(
                     "ARC.%s.fits" % (ccds[i]),
                     "ARC.%s.cosmic.fits" % (ccds[i]),
                     sigma_det=5.0,
@@ -420,7 +421,7 @@ def reduceCalib_drp(trace, master_bias, arc="", fiberflat="1", reduce_ccd="ALL")
                     increase_radius=1,
                     parallel=2,
                 )
-                subtractStraylight_drp(
+                im.subtractStraylight_drp(
                     "ARC.%s.fits" % (ccds[i]),
                     "tjunk.%s.trc.fits" % (ccds[i]),
                     "ARC.%s.back.fits" % (ccds[i]),
@@ -431,14 +432,14 @@ def reduceCalib_drp(trace, master_bias, arc="", fiberflat="1", reduce_ccd="ALL")
                     minfit=20,
                     maxfit=-10,
                 )
-                extractSpec_drp(
+                im.extract_spectra(
                     "ARC.%s.cosmic.fits" % (ccds[i]),
                     "tjunk.%s.trc.fits" % (ccds[i]),
                     "ARC.%s.ms.fits" % (ccds[i]),
                     method="aperture",
                     aperture=5,
                 )
-                detWaveSolution_drp(
+                rss.determine_wavelength_solution(
                     "ARC.%s.ms.fits" % (ccds[i]),
                     "ARC.%s" % (ccds[i]),
                     "%s/arc.%s.%s.txt" % (gmos_calib, ccds[i], setup),
@@ -450,7 +451,7 @@ def reduceCalib_drp(trace, master_bias, arc="", fiberflat="1", reduce_ccd="ALL")
                     aperture=20,
                 )
             if fiberflat == 1:
-                extractSpec_drp(
+                im.extract_spectra(
                     "FLAT.%s.stray.fits" % (ccds[i]),
                     "tjunk.%s.trc.fits" % (ccds[i]),
                     "FLAT.%s.ms.fits" % (ccds[i]),
@@ -458,16 +459,16 @@ def reduceCalib_drp(trace, master_bias, arc="", fiberflat="1", reduce_ccd="ALL")
                     fwhm="tjunk.%s.fwhm.fits" % (ccds[i]),
                     parallel=1,
                 )
-                createPixTable_drp(
+                rss.create_pixel_table(
                     "FLAT.%s.ms.fits" % (ccds[i]),
                     "FLAT.%s.rss.fits" % (ccds[i]),
                     "ARC.%s.disp.fits" % (ccds[i]),
                     "ARC.%s.res.fits" % (ccds[i]),
                 )
         if fiberflat == 1:
-            glueRSS_drp("FLAT.CCD1.rss.fits,FLAT.CCD2L.rss.fits", "FLAT_red.rss.fits")
-            glueRSS_drp("FLAT.CCD2R.rss.fits,FLAT.CCD3.rss.fits", "FLAT_blue.rss.fits")
-            resampleWave_drp(
+            rss.glueRSS_drp("FLAT.CCD1.rss.fits,FLAT.CCD2L.rss.fits", "FLAT_red.rss.fits")
+            rss.glueRSS_drp("FLAT.CCD2R.rss.fits,FLAT.CCD3.rss.fits", "FLAT_blue.rss.fits")
+            rss.resample_wavelength(
                 "FLAT_blue.rss.fits",
                 "FLAT_blue.disp_cor.fits",
                 start_wave=start_wave,
@@ -477,7 +478,7 @@ def reduceCalib_drp(trace, master_bias, arc="", fiberflat="1", reduce_ccd="ALL")
                 method="linear",
                 parallel=1,
             )
-            resampleWave_drp(
+            rss.resample_wavelength(
                 "FLAT_red.rss.fits",
                 "FLAT_red.disp_cor.fits",
                 start_wave=start_wave,
@@ -486,10 +487,10 @@ def reduceCalib_drp(trace, master_bias, arc="", fiberflat="1", reduce_ccd="ALL")
                 err_sim=0,
                 method="linear",
             )
-            mergeRSS_drp(
+            rss.mergeRSS_drp(
                 "FLAT_red.disp_cor.fits,FLAT_blue.disp_cor.fits", "FLAT.disp_cor.fits"
             )
-            createFiberFlat_drp("FLAT.disp_cor.fits", "FIBERFLAT.fits", clip="0.25,2.0")
+            rss.create_fiberflat("FLAT.disp_cor.fits", "FIBERFLAT.fits", clip="0.25,2.0")
 
     elif IFU_mask == "IFU-R" or IFU_mask == "IFU-B":
         ccds = numpy.array(["CCD1", "CCD2", "CCD3"])
@@ -550,12 +551,12 @@ def reduceCalib_drp(trace, master_bias, arc="", fiberflat="1", reduce_ccd="ALL")
         elif reduce_ccd == "CCD3":
             indices = [2]
         for i in indices:
-            addCCDMask_drp(
+            im.addCCDMask_drp(
                 "FLAT.%s.fits" % (ccds[i]),
                 "%s/MASK.%s.Hamamatsu.fits" % (gmos_calib, ccds[i]),
             )
             if instrument == "GMOS-N":
-                findPeaksAuto_drp(
+                im.find_peaks_auto(
                     "FLAT.%s.fits" % (ccds[i]),
                     "peaks.%s" % (ccds[i]),
                     nfibers=750,
@@ -566,7 +567,7 @@ def reduceCalib_drp(trace, master_bias, arc="", fiberflat="1", reduce_ccd="ALL")
                 )
             else:
                 # findPeaksOffset_drp('FLAT.%s.fits'%(ccds[i]), '%s/master_peaks.RED_slit'%(gmos_calib), 'peaks.%s'%(ccds[i]), threshold=7000, slice=slice_CCD[i],median_cross=1, median_box=20)
-                findPeaksMaster_drp(
+                im.findPeaksMaster_drp(
                     "FLAT.%s.fits" % (ccds[i]),
                     "%s/master_peaks.RED_slit" % (gmos_calib),
                     "peaks.%s" % (ccds[i]),
@@ -574,20 +575,20 @@ def reduceCalib_drp(trace, master_bias, arc="", fiberflat="1", reduce_ccd="ALL")
                     median_cross=1,
                     median_box=10,
                 )
-            # tracePeaks_drp('FLAT.%s.fits'%(ccds[i]), 'peaks.%s'%(ccds[i]), 'tjunk.%s.trc.fits'%(ccds[i]), poly_disp='-5', steps=20/bins[1], max_diff=1,threshold_peak=50, median_box=50, verbose=1)
-            # subtractStraylight_drp('FLAT.%s.fits' % (ccds[i]), 'tjunk.%s.trc.fits' % (ccds[i]), 'FLAT.%s.back.fits' % (ccds[i]), 'FLAT.%s.stray.fits' % (ccds[i]), aperture=10, poly_cross=6, smooth_disp=70/bins[0],smooth_gauss=10)
-            # traceFWHM_drp('FLAT.%s.stray.fits'%(ccds[i]), 'tjunk.%s.trc.fits'%(ccds[i]), 'tjunk.%s.fwhm.fits'%(ccds[i]), blocks=16, steps=50/bins[0], poly_disp=-5, init_fwhm=3, clip='1.0,8.0', threshold_flux=500)
+            # im.trace_peaks('FLAT.%s.fits'%(ccds[i]), 'peaks.%s'%(ccds[i]), 'tjunk.%s.trc.fits'%(ccds[i]), poly_disp='-5', steps=20/bins[1], max_diff=1,threshold_peak=50, median_box=50, verbose=1)
+            # im.subtractStraylight_drp('FLAT.%s.fits' % (ccds[i]), 'tjunk.%s.trc.fits' % (ccds[i]), 'FLAT.%s.back.fits' % (ccds[i]), 'FLAT.%s.stray.fits' % (ccds[i]), aperture=10, poly_cross=6, smooth_disp=70/bins[0],smooth_gauss=10)
+            # im.traceFWHM_drp('FLAT.%s.stray.fits'%(ccds[i]), 'tjunk.%s.trc.fits'%(ccds[i]), 'tjunk.%s.fwhm.fits'%(ccds[i]), blocks=16, steps=50/bins[0], poly_disp=-5, init_fwhm=3, clip='1.0,8.0', threshold_flux=500)
             if arc != "":
-                #   LACosmic_drp('ARC.%s.fits'%(ccds[i]), 'ARC.%s.cosmic.fits'%(ccds[i]), sigma_det=5.0, flim=2.0, iter=4, error_box='20,3', replace_box='20,3', rdnoise=3.5,sig_gauss='1.4,1.4', increase_radius=1, parallel=2)
-                #  addCCDMask_drp('ARC.%s.cosmic.fits'%(ccds[i]),'%s/MASK.%s.Hamamatsu.fits'%(gmos_calib,ccds[i]))
-                extractSpec_drp(
+                #   im.LACosmic_drp('ARC.%s.fits'%(ccds[i]), 'ARC.%s.cosmic.fits'%(ccds[i]), sigma_det=5.0, flim=2.0, iter=4, error_box='20,3', replace_box='20,3', rdnoise=3.5,sig_gauss='1.4,1.4', increase_radius=1, parallel=2)
+                #  im.addCCDMask_drp('ARC.%s.cosmic.fits'%(ccds[i]),'%s/MASK.%s.Hamamatsu.fits'%(gmos_calib,ccds[i]))
+                im.extract_spectra(
                     "ARC.%s.cosmic.fits" % (ccds[i]),
                     "tjunk.%s.trc.fits" % (ccds[i]),
                     "ARC.%s.ms.fits" % (ccds[i]),
                     method="aperture",
                     aperture=5,
                 )
-                detWaveSolution_drp(
+                rss.determine_wavelength_solution(
                     "ARC.%s.ms.fits" % (ccds[i]),
                     "ARC.%s" % (ccds[i]),
                     "%s/arc.%s.%s.txt" % (gmos_calib, ccds[i], setup),
@@ -599,7 +600,7 @@ def reduceCalib_drp(trace, master_bias, arc="", fiberflat="1", reduce_ccd="ALL")
                     rel_flux_limits="0.1,6.0",
                 )
             if fiberflat == 1:
-                extractSpec_drp(
+                im.extract_spectra(
                     "FLAT.%s.stray.fits" % (ccds[i]),
                     "tjunk.%s.trc.fits" % (ccds[i]),
                     "FLAT.%s.ms.fits" % (ccds[i]),
@@ -607,7 +608,7 @@ def reduceCalib_drp(trace, master_bias, arc="", fiberflat="1", reduce_ccd="ALL")
                     fwhm="tjunk.%s.fwhm.fits" % (ccds[i]),
                     parallel=1,
                 )
-                createPixTable_drp(
+                rss.create_pixel_table(
                     "FLAT.%s.ms.fits" % (ccds[i]),
                     "FLAT.%s.rss.fits" % (ccds[i]),
                     "ARC.%s.disp.fits" % (ccds[i]),
@@ -616,9 +617,9 @@ def reduceCalib_drp(trace, master_bias, arc="", fiberflat="1", reduce_ccd="ALL")
 
         if fiberflat == 1:
             if reduce_ccd == "ALL":
-                glueRSS_drp("FLAT.CCD1.rss.fits,FLAT.CCD2.rss.fits", "FLAT.rss.fits")
+                rss.glueRSS_drp("FLAT.CCD1.rss.fits,FLAT.CCD2.rss.fits", "FLAT.rss.fits")
 
-                resampleWave_drp(
+                rss.resample_wavelength(
                     "FLAT.rss.fits",
                     "FLAT.disp_cor.fits",
                     start_wave=start_wave,
@@ -630,7 +631,7 @@ def reduceCalib_drp(trace, master_bias, arc="", fiberflat="1", reduce_ccd="ALL")
                     parallel=1,
                 )
             else:
-                resampleWave_drp(
+                rss.resample_wavelength(
                     "FLAT.%s.rss.fits" % (reduce_ccd),
                     "FLAT.disp_cor.fits",
                     start_wave=start_wave,
@@ -641,7 +642,7 @@ def reduceCalib_drp(trace, master_bias, arc="", fiberflat="1", reduce_ccd="ALL")
                     method="linear",
                     parallel=1,
                 )
-            createFiberFlat_drp(
+            rss.create_fiberflat(
                 "FLAT.disp_cor.fits",
                 "FIBERFLAT.fits",
                 smooth_median=smooth_median_flat,
@@ -685,16 +686,16 @@ def reduceSTD_drp(
             smooth_poly = -40
         elif grating == "R150+_G5308" and centwave == 730.0:
             splits = "0,700,1200,1900"
-            setup = "2R150_730"
+            # setup = "2R150_730"
             start_wave = 4800
             end_wave = 9900
             disp_pix = 2.0
         ccds = ["CCD1", "CCD2L", "CCD2R", "CCD3"]
-        steps = [40, 20, 20, 40]
+        # steps = [40, 20, 20, 40]
 
         createCCDfromArchive_drp(std, "STD", master_bias=master_bias, splits=splits)
         for i in range(len(ccds)):
-            LACosmic_drp(
+            im.LACosmic_drp(
                 "STD.%s.fits" % (ccds[i]),
                 "STD.%s.cosmic.fits" % (ccds[i]),
                 sigma_det=5.0,
@@ -707,12 +708,12 @@ def reduceSTD_drp(
                 increase_radius=1,
                 parallel=2,
             )
-            addCCDMask_drp(
+            im.addCCDMask_drp(
                 "STD.%s.cosmic.fits" % (ccds[i]),
                 "%s/MASK.%s.Hamamatsu.fits" % (gmos_calib, ccds[i]),
             )
             if int(straylight) == 1:
-                subtractStraylight_drp(
+                im.subtractStraylight_drp(
                     "STD.%s.cosmic.fits" % (ccds[i]),
                     "tjunk.%s.trc.fits" % (ccds[i]),
                     "STD.%s.back.fits" % (ccds[i]),
@@ -723,7 +724,7 @@ def reduceSTD_drp(
                     minfit=20,
                     maxfit=10,
                 )
-                extractSpec_drp(
+                im.extract_spectra(
                     "STD.%s.cosmic.fits" % (ccds[i]),
                     "tjunk.%s.trc.fits" % (ccds[i]),
                     "STD.%s.ms.fits" % (ccds[i]),
@@ -732,7 +733,7 @@ def reduceSTD_drp(
                     parallel=1,
                 )
             else:
-                extractSpec_drp(
+                im.extract_spectra(
                     "STD.%s.stray.fits" % (ccds[i]),
                     "tjunk.%s.trc.fits" % (ccds[i]),
                     "STD.%s.ms.fits" % (ccds[i]),
@@ -740,15 +741,15 @@ def reduceSTD_drp(
                     fwhm="tjunk.%s.fwhm.fits" % (ccds[i]),
                     parallel=1,
                 )
-            createPixTable_drp(
+            rss.create_pixel_table(
                 "STD.%s.ms.fits" % (ccds[i]),
                 "STD.%s.rss.fits" % (ccds[i]),
                 "ARC.%s.disp.fits" % (ccds[i]),
                 "ARC.%s.res.fits" % (ccds[i]),
             )
-        glueRSS_drp("STD.CCD1.rss.fits,STD.CCD2L.rss.fits", "STD_red.rss.fits")
-        glueRSS_drp("STD.CCD2R.rss.fits,STD.CCD3.rss.fits", "STD_blue.rss.fits")
-        resampleWave_drp(
+        rss.glueRSS_drp("STD.CCD1.rss.fits,STD.CCD2L.rss.fits", "STD_red.rss.fits")
+        rss.glueRSS_drp("STD.CCD2R.rss.fits,STD.CCD3.rss.fits", "STD_blue.rss.fits")
+        rss.resample_wavelength(
             "STD_blue.rss.fits",
             "STD_blue.disp_cor.fits",
             start_wave=start_wave,
@@ -758,7 +759,7 @@ def reduceSTD_drp(
             method="linear",
             parallel=1,
         )
-        resampleWave_drp(
+        rss.resample_wavelength(
             "STD_red.rss.fits",
             "STD_red.disp_cor.fits",
             start_wave=start_wave,
@@ -767,26 +768,26 @@ def reduceSTD_drp(
             err_sim=0,
             method="linear",
         )
-        mergeRSS_drp(
+        rss.mergeRSS_drp(
             "STD_red.disp_cor.fits,STD_blue.disp_cor.fits", "STD.disp_cor.fits"
         )
-        correctFiberFlat_drp("STD.disp_cor.fits", "STD.flat.fits", "FIBERFLAT.fits")
-        includePosTab_drp("STD.flat.fits", "%s/GMOS_2slit_pt.txt" % (gmos_calib))
-        splitFibers_drp(
+        rss.correctFiberFlat_drp("STD.disp_cor.fits", "STD.flat.fits", "FIBERFLAT.fits")
+        rss.includePosTab_drp("STD.flat.fits", "%s/GMOS_2slit_pt.txt" % (gmos_calib))
+        rss.splitFibers_drp(
             "STD.flat.fits",
             "STD.obj_red.fits,STD.sky_red.fits,STD.obj_blue.fits,STD.sky_blue.fits",
             "O_R,S_R,O_B,S_B",
         )
-        constructSkySpec_drp("STD.sky_red.fits", "STD.skyspec_red.fits", nsky=200)
-        constructSkySpec_drp("STD.sky_blue.fits", "STD.skyspec_blue.fits", nsky=200)
-        subtractSkySpec_drp(
+        sky.constructSkySpec_drp("STD.sky_red.fits", "STD.skyspec_red.fits", nsky=200)
+        sky.constructSkySpec_drp("STD.sky_blue.fits", "STD.skyspec_blue.fits", nsky=200)
+        sky.subtractSkySpec_drp(
             "STD.obj_red.fits", "STD.sobj_red.fits", "STD.skyspec_red.fits"
         )
-        subtractSkySpec_drp(
+        sky.subtractSkySpec_drp(
             "STD.obj_blue.fits", "STD.sobj_blue.fits", "STD.skyspec_blue.fits"
         )
-        mergeRSS_drp("STD.sobj_red.fits,STD.sobj_blue.fits", "STD.sobj.fits")
-        createCube_drp(
+        rss.mergeRSS_drp("STD.sobj_red.fits,STD.sobj_blue.fits", "STD.sobj.fits")
+        rss.createCube_drp(
             "STD.sobj.fits", "STD.cube.fits", mode="drizzle", resolution=0.2, parallel=1
         )
     elif IFU_mask == "IFU-R" or IFU_mask == "IFU-B":
@@ -801,7 +802,7 @@ def reduceSTD_drp(
             )
             smooth_poly = -15
         elif grating == "R400+_G5325" and centwave == 690.0 and IFU_mask == "IFU-R":
-            setup = "1RR400_690"
+            # setup = "1RR400_690"
             if reduce_ccd == "ALL":
                 start_wave = 4600
                 end_wave = 9000
@@ -825,7 +826,7 @@ def reduceSTD_drp(
             indices = [2]
         for i in indices:
             # print(i)
-            LACosmic_drp(
+            im.LACosmic_drp(
                 "STD.%s.fits" % (ccds[i]),
                 "STD.%s.cosmic.fits" % (ccds[i]),
                 sigma_det=5.0,
@@ -838,12 +839,12 @@ def reduceSTD_drp(
                 increase_radius=1,
                 parallel=2,
             )
-            addCCDMask_drp(
+            im.addCCDMask_drp(
                 "STD.%s.cosmic.fits" % (ccds[i]),
                 "%s/MASK.%s.Hamamatsu.fits" % (gmos_calib, ccds[i]),
             )
             if int(straylight) == 1:
-                subtractStraylight_drp(
+                im.subtractStraylight_drp(
                     "STD.%s.cosmic.fits" % (ccds[i]),
                     "tjunk.%s.trc.fits" % (ccds[i]),
                     "STD.%s.back.fits" % (ccds[i]),
@@ -853,7 +854,7 @@ def reduceSTD_drp(
                     smooth_disp=70,
                     smooth_gauss=10,
                 )
-                extractSpec_drp(
+                im.extract_spectra(
                     "STD.%s.stray.fits" % (ccds[i]),
                     "tjunk.%s.trc.fits" % (ccds[i]),
                     "STD.%s.ms.fits" % (ccds[i]),
@@ -862,7 +863,7 @@ def reduceSTD_drp(
                     parallel=1,
                 )
             else:
-                extractSpec_drp(
+                im.extract_spectra(
                     "STD.%s.cosmic.fits" % (ccds[i]),
                     "tjunk.%s.trc.fits" % (ccds[i]),
                     "STD.%s.ms.fits" % (ccds[i]),
@@ -870,17 +871,17 @@ def reduceSTD_drp(
                     fwhm="tjunk.%s.fwhm.fits" % (ccds[i]),
                     parallel=1,
                 )
-            createPixTable_drp(
+            rss.create_pixel_table(
                 "STD.%s.ms.fits" % (ccds[i]),
                 "STD.%s.rss.fits" % (ccds[i]),
                 "ARC.%s.disp.fits" % (ccds[i]),
                 "ARC.%s.res.fits" % (ccds[i]),
             )
         if reduce_ccd == "ALL":
-            glueRSS_drp(
+            rss.glueRSS_drp(
                 "STD.CCD1.rss.fits,STD.CCD2.rss.fits,STD.CCD3.rss.fits", "STD.rss.fits"
             )
-            resampleWave_drp(
+            rss.resample_wavelength(
                 "STD.rss.fits",
                 "STD.disp_cor.fits",
                 start_wave=start_wave,
@@ -890,7 +891,7 @@ def reduceSTD_drp(
                 method="linear",
             )
         else:
-            resampleWave_drp(
+            rss.resample_wavelength(
                 "STD.%s.rss.fits" % (ccds[i]),
                 "STD.disp_cor.fits",
                 start_wave=start_wave,
@@ -899,20 +900,20 @@ def reduceSTD_drp(
                 err_sim=0,
                 method="linear",
             )
-        correctFiberFlat_drp("STD.disp_cor.fits", "STD.flat.fits", "FIBERFLAT.fits")
+        rss.correctFiberFlat_drp("STD.disp_cor.fits", "STD.flat.fits", "FIBERFLAT.fits")
         if IFU_mask == "IFU-R":
-            includePosTab_drp("STD.flat.fits", "%s/GMOS_1slitR_pt.txt" % (gmos_calib))
-            splitFibers_drp("STD.flat.fits", "STD.obj.fits,STD.sky.fits", "O_R,S_R")
+            rss.includePosTab_drp("STD.flat.fits", "%s/GMOS_1slitR_pt.txt" % (gmos_calib))
+            rss.splitFibers_drp("STD.flat.fits", "STD.obj.fits,STD.sky.fits", "O_R,S_R")
         elif IFU_mask == "IFU-B":
-            includePosTab_drp("STD.flat.fits", "%s/GMOS_1slitB_pt.txt" % (gmos_calib))
-            splitFibers_drp("STD.flat.fits", "STD.obj.fits,STD.sky.fits", "O_B,S_B")
-    constructSkySpec_drp("STD.sky.fits", "STD.skyspec_red.fits", nsky=200)
-    subtractSkySpec_drp("STD.obj.fits", "STD.sobj.fits", "STD.skyspec_red.fits")
-    createCube_drp(
+            rss.includePosTab_drp("STD.flat.fits", "%s/GMOS_1slitB_pt.txt" % (gmos_calib))
+            rss.splitFibers_drp("STD.flat.fits", "STD.obj.fits,STD.sky.fits", "O_B,S_B")
+    sky.constructSkySpec_drp("STD.sky.fits", "STD.skyspec_red.fits", nsky=200)
+    sky.subtractSkySpec_drp("STD.obj.fits", "STD.sobj.fits", "STD.skyspec_red.fits")
+    rss.createCube_drp(
         "STD.obj.fits", "STD.cube.fits", mode="drizzle", resolution=0.2, parallel=1
     )
     if ref_star != "":
-        createSensFunction_drp(
+        flux.createSensFunction_drp(
             "STD.sobj.fits",
             "ratio.txt",
             "%s/%s" % (gmos_calib, ref_star),
@@ -1017,7 +1018,7 @@ def reduceObject_drp(
     elif reduce_ccd == "CCD3":
         indices = [2]
     for i in indices:
-        LACosmic_drp(
+        im.LACosmic_drp(
             "OBJ.%s.fits" % (ccds[i]),
             "OBJ.%s.cosmic.fits" % (ccds[i]),
             sigma_det=5.0,
@@ -1031,12 +1032,12 @@ def reduceObject_drp(
             parallel=2,
         )
         if instrument == "GMOS-S":
-            addCCDMask_drp(
+            im.addCCDMask_drp(
                 "OBJ.%s.cosmic.fits" % (ccds[i]),
                 "%s/MASK.%s.Hamamatsu.fits" % (gmos_calib, ccds[i]),
             )
         if sky_line_list != "":
-            offsetTrace_drp(
+            im.offsetTrace_drp(
                 "OBJ.%s.cosmic.fits" % (ccds[i]),
                 "tjunk.%s.trc.fits" % (ccds[i]),
                 "ARC.%s.disp.fits" % (ccds[i]),
@@ -1045,19 +1046,19 @@ def reduceObject_drp(
                 blocks="10",
                 size="30",
             )
-            correctTraceMask_drp(
+            rss.correctTraceMask_drp(
                 "tjunk.%s.trc.fits" % (ccds[i]),
                 "tjunk.%s.trc_temp.fits" % (ccds[i]),
                 "offsetTrace_%s.log" % (ccds[i]),
                 "OBJ.%s.cosmic.fits" % (ccds[i]),
-                poly_smooth=flexure_order,
+                poly_smooth=flexure_correct,
             )
         else:
             os.system(
                 "cp tjunk.%s.trc.fits tjunk.%s.trc_temp.fits" % (ccds[i], ccds[i])
             )
         if straylight == 1:
-            subtractStraylight_drp(
+            im.subtractStraylight_drp(
                 "OBJ.%s.cosmic.fits" % (ccds[i]),
                 "tjunk.%s.trc_temp.fits" % (ccds[i]),
                 "OBJ.%s.back.fits" % (ccds[i]),
@@ -1067,7 +1068,7 @@ def reduceObject_drp(
                 smooth_disp=70,
                 smooth_gauss=15,
             )
-            extractSpec_drp(
+            im.extract_spectra(
                 "OBJ.%s.stray.fits" % (ccds[i]),
                 "tjunk.%s.trc_temp.fits" % (ccds[i]),
                 "OBJ.%s.ms.fits" % (ccds[i]),
@@ -1076,7 +1077,7 @@ def reduceObject_drp(
                 parallel=3,
             )
         else:
-            extractSpec_drp(
+            im.extract_spectra(
                 "OBJ.%s.cosmic.fits" % (ccds[i]),
                 "tjunk.%s.trc_temp.fits" % (ccds[i]),
                 "OBJ.%s.ms.fits" % (ccds[i]),
@@ -1084,21 +1085,21 @@ def reduceObject_drp(
                 fwhm="tjunk.%s.fwhm.fits" % (ccds[i]),
                 parallel=2,
             )
-        createPixTable_drp(
+        rss.create_pixel_table(
             "OBJ.%s.ms.fits" % (ccds[i]),
             "OBJ.%s.rss.fits" % (ccds[i]),
             "ARC.%s.disp.fits" % (ccds[i]),
             "ARC.%s.res.fits" % (ccds[i]),
         )
         if sky_line_list != "":
-            checkPixTable_drp(
+            rss.checkPixTable_drp(
                 "OBJ.%s.rss.fits" % (ccds[i]),
                 sky_line_list,
                 "offsetWave_%s.log" % (ccds[i]),
                 aperture="12",
             )
         if float(res_fwhm) != 0.0:
-            matchResolution_drp(
+            rss.matchResolution_drp(
                 "OBJ.%s.rss.fits" % (ccds[i]),
                 "OBJ.%s.rss.fits" % (ccds[i]),
                 res_fwhm,
@@ -1106,9 +1107,9 @@ def reduceObject_drp(
             )
 
     if IFU_mask == "IFU-2":
-        glueRSS_drp("OBJ.CCD1.rss.fits,OBJ.CCD2L.rss.fits", "OBJ_red.rss.fits")
-        glueRSS_drp("OBJ.CCD2R.rss.fits,OBJ.CCD3.rss.fits", "OBJ_blue.rss.fits")
-        resampleWave_drp(
+        rss.glueRSS_drp("OBJ.CCD1.rss.fits,OBJ.CCD2L.rss.fits", "OBJ_red.rss.fits")
+        rss.glueRSS_drp("OBJ.CCD2R.rss.fits,OBJ.CCD3.rss.fits", "OBJ_blue.rss.fits")
+        rss.resample_wavelength(
             "OBJ_blue.rss.fits",
             "OBJ_blue.disp_cor.fits",
             start_wave=start_wave,
@@ -1118,7 +1119,7 @@ def reduceObject_drp(
             method="linear",
             parallel=1,
         )
-        resampleWave_drp(
+        rss.resample_wavelength(
             "OBJ_red.rss.fits",
             "OBJ_red.disp_cor.fits",
             start_wave=start_wave,
@@ -1127,16 +1128,16 @@ def reduceObject_drp(
             err_sim=200,
             method="linear",
         )
-        mergeRSS_drp(
+        rss.mergeRSS_drp(
             "OBJ_red.disp_cor.fits,OBJ_blue.disp_cor.fits", "OBJ.disp_cor.fits"
         )
-        includePosTab_drp("OBJ.disp_cor.fits", "%s/GMOS_2slit_pt.txt" % (gmos_calib))
+        rss.includePosTab_drp("OBJ.disp_cor.fits", "%s/GMOS_2slit_pt.txt" % (gmos_calib))
     elif IFU_mask == "IFU-R":
         if reduce_ccd == "ALL":
-            glueRSS_drp(
+            rss.glueRSS_drp(
                 "OBJ.CCD1.rss.fits,OBJ.CCD2.rss.fits,OBJ.CCD3.rss.fits", "OBJ.rss.fits"
             )
-            resampleWave_drp(
+            rss.resample_wavelength(
                 "OBJ.rss.fits",
                 "OBJ.disp_cor.fits",
                 start_wave=start_wave,
@@ -1146,7 +1147,7 @@ def reduceObject_drp(
                 method="linear",
             )
         else:
-            resampleWave_drp(
+            rss.resample_wavelength(
                 "OBJ.%s.rss.fits" % (reduce_ccd),
                 "OBJ.disp_cor.fits",
                 start_wave=start_wave,
@@ -1155,14 +1156,14 @@ def reduceObject_drp(
                 err_sim=200,
                 method="linear",
             )
-    includePosTab_drp("OBJ.disp_cor.fits", "%s/GMOS_1slitR_pt.txt" % (gmos_calib))
+    rss.includePosTab_drp("OBJ.disp_cor.fits", "%s/GMOS_1slitR_pt.txt" % (gmos_calib))
 
     if fiberflat == 1:
-        correctFiberFlat_drp("OBJ.disp_cor.fits", "OBJ.flat.fits", "FIBERFLAT.fits")
+        rss.correctFiberFlat_drp("OBJ.disp_cor.fits", "OBJ.flat.fits", "FIBERFLAT.fits")
 
     if flux_calib == 1:
         if fiberflat == 1:
-            fluxCalibration_drp(
+            flux.fluxCalibration_drp(
                 "OBJ.flat.fits",
                 "OBJ.fobj.fits",
                 "ratio.txt",
@@ -1174,7 +1175,7 @@ def reduceObject_drp(
                 norm_sb_fib="",
             )
         else:
-            fluxCalibration_drp(
+            flux.fluxCalibration_drp(
                 "OBJ.disp_cor.fits",
                 "OBJ.fobj.fits",
                 "ratio.txt",
@@ -1186,7 +1187,7 @@ def reduceObject_drp(
                 norm_sb_fib="",
             )
         if telluric_cor == 1:
-            correctTelluric_drp(
+            flux.correctTelluric_drp(
                 "OBJ.fobj.fits",
                 "OBJ.fobj.fits",
                 "telluric_template.fits",
