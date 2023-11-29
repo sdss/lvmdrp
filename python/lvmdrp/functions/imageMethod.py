@@ -25,7 +25,7 @@ from tqdm import tqdm
 from typing import List, Tuple
 
 from lvmdrp import log
-from lvmdrp.utils.decorators import skip_on_missing_input_path, drop_missing_input_paths, skip_if_drpqual_flags
+from lvmdrp.utils.decorators import skip_on_missing_input_path, drop_missing_input_paths
 from lvmdrp.utils.bitmask import QualityFlag
 from lvmdrp.core.fit_profile import Gaussians
 from lvmdrp.core.fiberrows import FiberRows, _read_fiber_ypix

@@ -1,4 +1,3 @@
-import sys
 
 import numpy
 
@@ -119,7 +118,7 @@ def expandHdrKeys_drp(
     hdr.loadFitsHeader(file, extension=int(extension), removeEmpty=int(removeEmpty))
     keys = hdr.getHdrKeys()
     for k in keys:
-        if not k in exclude_list:
+        if k not in exclude_list:
             if keywords == "" or k in key_list:
                 hdr.extendHierarch(k, prefix, verbose=int(verbose))
     hdr.writeFitsHeader()

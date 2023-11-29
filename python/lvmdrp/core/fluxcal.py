@@ -14,7 +14,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 from dust_extinction.parameter_averages import F99
 from pydl.pydlspec2d.spec2d import filter_thru
-from pydl.pydlutils.bspline import bspline
 from pydl.pydlutils.sdss import sdss_flagval
 from scipy.interpolate import BSpline, interp1d, splrep
 from scipy.ndimage import median_filter

@@ -1,5 +1,5 @@
 import numpy
-from scipy import stats
+import pylab
 
 from lvmdrp.core.fiberrows import FiberRows
 from lvmdrp.core.fit_profile import Exponential_constant

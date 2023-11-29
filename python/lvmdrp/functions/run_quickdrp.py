@@ -8,7 +8,6 @@
 # @Copyright: SDSS-V LVM
 
 import os
-import click
 import numpy as np
 from typing import Tuple
 

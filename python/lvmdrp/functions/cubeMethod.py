@@ -1,5 +1,4 @@
 import sys
-import time
 
 import numpy
 
@@ -9,7 +8,8 @@ try:
     from matplotlib import pyplot as plt
 except:
     pass
-from scipy import ndimage, stats
+from copy import deepcopy
+from scipy import stats
 
 from lvmdrp.core.cube import Cube
 from lvmdrp.core.passband import PassBand

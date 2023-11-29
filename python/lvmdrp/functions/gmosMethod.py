@@ -1,5 +1,4 @@
 import os
-from multiprocessing import Pool, cpu_count
 
 from astropy.io import fits as pyfits
 

@@ -49,7 +49,6 @@ from astropy.time import Time
 from astropy.coordinates import SkyCoord, EarthLocation, AltAz
 from astropy.stats import biweight_location, biweight_scale
 from astropy import units as u
-from astropy.io import fits
 from astropy.table import Table
 
 from lvmdrp.core.rss import RSS, loadRSS
