@@ -2026,7 +2026,7 @@ class Spectrum1D(Header):
                 poly = polynomial.Legendre.fit(
                     self._wave[mask], self._data[mask], deg=deg
                 )
-            out_par = poly.coef
+            out_par = poly.convert().coef
 
             if ref_base is None:
                 self._data = poly(self._wave)
