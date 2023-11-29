@@ -2,6 +2,7 @@
 # encoding: utf-8
 
 import pathlib
+from typing import Union
 from astropy.time import Time
 
 
@@ -108,3 +109,29 @@ def correct_sjd(path: pathlib.Path, sjd: int) -> int:
         # raw
         exp_sjd = int(path.parent.stem)
     return sjd if exp_sjd == sjd else exp_sjd
+
+
+def tileid_grp(tileid: Union[int, str]) -> str:
+    """ Convert a tile id to a tile group
+
+    This is for manual use without ``sdss_access``.  If the
+    group definition changes, the definition in the
+    ``tilegrp`` function in ``sdss_access.path.path.py``
+    also needs updating.
+
+    The raw_metadata code uses a tileid of "*" for
+    pattern matching.  In this case, we use "*XX" for
+    the tile group.
+
+    Parameters
+    ----------
+    tileid : Union[int, str]
+        the LVM tile id
+
+    Returns
+    -------
+    str
+        the LVM tile id group
+    """
+    return '*XX' if tileid == '*' else f'{int(tileid) // 1000:0>4d}XX'
+

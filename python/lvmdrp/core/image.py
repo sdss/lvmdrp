@@ -386,7 +386,7 @@ class Image(Header):
                     new_error = self._error / other
                 else:
                     new_error = None
-                
+
                 img = copy(self)
                 img.setData(data=new_data, error=new_error)
                 return img
@@ -804,11 +804,11 @@ class Image(Header):
         # early return if no data or header to compute conversion
         if new_image._header is None or new_image._data is None:
             return new_image
-        
+
         current = self._header.get("BUNIT", assume)
         if current == to:
             return new_image
-        
+
         if current != to:
             exptime = self.getHdrValue("EXPTIME")
             gains = self.getHdrValue(f"AMP? {gain_field}")
@@ -829,7 +829,7 @@ class Image(Header):
                     factor = exptime
                 else:
                     raise ValueError(f"Cannot convert from {current} to {to}")
-                
+
                 new_image.setSection(
                     section=sects[i],
                     subimg=new_image.getSection(section=sects[i]) * factor,
@@ -1117,13 +1117,13 @@ class Image(Header):
                 hdu = pyfits.PrimaryHDU(self._error)
             elif extension_error > 0 and extension_error is not None:
                 hdus[extension_error] = pyfits.ImageHDU(self._error, name="ERROR")
-            
+
             # frames hdu
             if extension_frames == 0:
                 hdu = pyfits.PrimaryHDU(self._individual_frames)
             elif extension_frames > 0 and extension_frames is not None:
                 hdus[extension_frames] = pyfits.BinTableHDU(self._individual_frames, name="FRAMES")
-            
+
             # slitmap hdu
             if extension_slitmap == 0:
                 hdu = pyfits.PrimaryHDU(self._slitmap)
@@ -1695,7 +1695,7 @@ class Image(Header):
             new_mask = numpy.isnan(fit_result)
         else:
             new_mask = None
-        
+
         new_img = copy(self)
         new_img.setData(data=fit_result, mask=new_mask)
         return new_img
@@ -1743,7 +1743,7 @@ class Image(Header):
                 1
             ]  #    traceFWHM.setSlice(i, axis='y', data = fwhm_fit[0], mask = fwhm_fit[1]) # insert the result into the trace mask
             # return traceFWHM
-        return (fwhm, mask)    
+        return (fwhm, mask)
 
 
     def extractSpecAperture(self, TraceMask, aperture):
@@ -1784,7 +1784,7 @@ class Image(Header):
                 )
             if self._mask is not None:
                 mask[good_pix[:, i], i] = numpy.sum(self._mask[:, i][pixels], 1) > 0
-        
+
         # update mask with trace mask
         mask |= bad_pix
         return data, error, mask
@@ -2374,7 +2374,7 @@ class Image(Header):
         self._individual_frames = Table(names=["TILEID", "MJD", "EXPNUM", "SPEC", "CAMERA", "EXPTIME"], dtype=(int, int, int, str, str, float))
         for img in images:
             self._individual_frames.add_row([
-                img._header.get("TILEID", 1111),
+                img._header.get("TILEID", 11111),
                 img._header.get("MJD"),
                 img._header.get("EXPOSURE"),
                 img._header.get("SPEC"),
@@ -2384,7 +2384,7 @@ class Image(Header):
 
     def getSlitmap(self):
         return self._slitmap
-    
+
     def setSlitmap(self, slitmap):
         self._slitmap = slitmap
 
@@ -2597,7 +2597,7 @@ def combineImages(
         new_header["ISMASTER"] = (True, "Is this a combined (master) frame")
         new_header["NFRAMES"] = (nexp, "Number of exposures combined")
         new_header["STATCOMB"] = (method, "Statistic used to combine images")
-        
+
         # add combined lamps to header
         if images[0]._header["IMAGETYP"] == "flat":
             lamps = CON_LAMPS
@@ -2605,7 +2605,7 @@ def combineImages(
             lamps = ARC_LAMPS
         else:
             lamps = []
-        
+
         if lamps:
             new_lamps = set()
             for image in images:

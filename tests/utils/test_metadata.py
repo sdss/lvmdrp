@@ -24,7 +24,8 @@ def test_get_frames_metadata(make_fits):
     meta = meta.sort_values('camera')
     assert len(meta) == 3
     assert 61234 in meta['mjd'].unique()
-    assert 1111 in meta['tileid'].unique()
+    assert 11111 in meta['tileid'].unique()
+    assert '0011XX' in meta['tilegrp'].unique()
     assert 6817 in meta['expnum'].unique()
     assert meta.iloc[0]['name'] == 'sdR-s-b1-00006817.fits'
     assert set(meta['camera']) == {'b1', 'b2', 'b3'}
