@@ -166,14 +166,8 @@ def matchMasterTrace_drp(
     poly_cross = int(poly_cross)
     if poly_disp != "":
         poly_disp = int(poly_disp)
-    if start_pix == "":
-        start_wave = None
-    else:
-        start_wave = int(start_pix)
-    if end_pix == "":
-        end_wave = None
-    else:
-        end_wave = int(end_pix)
+    #start_wave = None if start_pix == "" else int(start_pix)
+    #end_wave = None if end_pix == "" else int(end_pix)
     calib_trc = loadRSS(CALIB_trace)
     master_trc = loadRSS(Master_trace)
     if split != "":
@@ -307,7 +301,7 @@ def matchARCLamp_drp(
         spec = Spectrum1D(wave=fibers[good_pix], data=pix_shift[good_pix, i])
         spec.smoothPoly(order=poly_cross, ref_base=fibers)
         pix_shift[:, i] = spec._data
-    pix_shift_mean = numpy.mean(pix_shift, 1)
+    #pix_shift_mean = numpy.mean(pix_shift, 1)
 
     rss_disp = loadRSS(disp_ref)
     for i in range(rss_disp._fibers):
@@ -504,7 +498,7 @@ def matchSkySpecTime_drp(
                 for j in range(err_sim):
                     try:
                         rnormal = numpy.random.normal(sky_data[:, i], sky_error[:, i])
-                    except:
+                    except Exception:
                         rnormal = numpy.zeros(sky_data[:, i].shape)
                     err_fit = numpy.polyfit(sky_time, rnormal, poly_order)
                     out[j] = numpy.mean(numpy.polyval(err_fit, object_time))

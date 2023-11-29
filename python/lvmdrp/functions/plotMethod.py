@@ -2,7 +2,7 @@ from lvmdrp.core.header import Header
 
 try:
     from matplotlib import pyplot as plt
-except:
+except ImportError:
     pass
 import numpy
 

@@ -198,7 +198,7 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
             mpixflat_path = os.path.join(masters_path, f"lvm-mpixflat-{sci_camera}.fits")
             mtrace_path = os.path.join(masters_path, f"lvm-mtrace-{sci_camera}.fits")
             mwidth_path = os.path.join(masters_path, f"lvm-mwidth-{sci_camera}.fits")
-            macorr_path = os.path.join(masters_path, f"lvm-apercorr-{sci_camera}.fits")
+            # macorr_path = os.path.join(masters_path, f"lvm-apercorr-{sci_camera}.fits")
             mwave_path = os.path.join(masters_path, f"lvm-mwave_{lamps}-{sci_camera}.fits")
             mlsf_path = os.path.join(masters_path, f"lvm-mlsf_{lamps}-{sci_camera}.fits")
             mflat_path = os.path.join(masters_path, f"lvm-mfiberflat-{sci_camera}.fits")
@@ -213,7 +213,7 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
             mpixflat_path = None
             mtrace_path = path.full("lvm_master", drpver=drpver, kind="mtrace", **masters["trace"].to_dict())
             mwidth_path = None
-            macorr_path = None
+            # macorr_path = None
             mwave_path = path.full("lvm_master", drpver=drpver, kind=f"mwave_{lamps}", **masters["wave"].to_dict())
             mlsf_path = path.full("lvm_master", drpver=drpver, kind=f"mlsf_{lamps}", **masters["lsf"].to_dict())
             mflat_path = path.full("lvm_master", drpver=drpver, kind="mfiberflat", **masters["fiberflat"].to_dict())
