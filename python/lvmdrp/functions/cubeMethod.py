@@ -6,12 +6,15 @@ import numpy
 try:
     import pylab
     from matplotlib import pyplot as plt
-except:
+except ImportError:
     pass
 from copy import deepcopy
 from scipy import stats
 
-from lvmdrp.core.cube import Cube
+from lvdrp.core import fit_profile
+from lvmdrp.core.cube import Cube, loadCube
+from lvmdrp.core.image import Image
+from lvmdrp.core.rss import RSS
 from lvmdrp.core.passband import PassBand
 from lvmdrp.core.spectrum1d import Spectrum1D
 from lvmdrp.external import ancillary_func
@@ -147,7 +150,7 @@ def measureDARPeak_drp(
     cube = Cube()
     cube.loadFitsData(cube_in)
     # kernel = numpy.ones((coadd,1,1),dtype='uint8')
-    coadd_cube = cube.medianFilter(coadd)
+    # coadd_cube = cube.medianFilter(coadd)
 
     select_slice = numpy.arange(cube._res_elements) % steps == 0
     select_slice[0] = True
@@ -158,7 +161,7 @@ def measureDARPeak_drp(
     cent_x = numpy.zeros(len(slices))
     cent_y = numpy.zeros(len(slices))
 
-    ref = int(numpy.rint(cube._res_elements / 2.0))
+    # ref = int(numpy.rint(cube._res_elements / 2.0))
     collapsed_img = cube.collapseCube("median", start_wave, end_wave)
     cent_guess = collapsed_img.centreMax(
         cent_x=collapsed_img._dim[1] / 2.0,
@@ -167,7 +170,7 @@ def measureDARPeak_drp(
     )
 
     m = 0
-    plot = False
+    # plot = False
     for i in slices:
         if verbose == 1:
             print(i)
@@ -180,13 +183,13 @@ def measureDARPeak_drp(
         m += 1
 
     spec_x = Spectrum1D(data=cent_x, wave=wave)
-    poly_x = spec_x.smoothPoly(
-        order=smooth_poly, start_wave=start_wave, end_wave=end_wave
-    )
+    # poly_x = spec_x.smoothPoly(
+    #     order=smooth_poly, start_wave=start_wave, end_wave=end_wave
+    # )
     spec_y = Spectrum1D(data=cent_y, wave=wave)
-    poly_y = spec_y.smoothPoly(
-        order=smooth_poly, start_wave=start_wave, end_wave=end_wave
-    )
+    # poly_y = spec_y.smoothPoly(
+    #     order=smooth_poly, start_wave=start_wave, end_wave=end_wave
+    # )
 
     if start_wave is not None and end_wave is not None:
         select = numpy.logical_and(wave >= start_wave, wave <= end_wave)
@@ -208,8 +211,8 @@ def measureDARPeak_drp(
 
     spec2_y = Spectrum1D(data=cent_y[select][select2], wave=wave[select][select2])
     spec2_x = Spectrum1D(data=cent_x[select][select2], wave=wave[select][select2])
-    poly_x = spec2_x.smoothPoly(order=smooth_poly, ref_base=cube._wave)
-    poly_y = spec2_y.smoothPoly(order=smooth_poly, ref_base=cube._wave)
+    #poly_x = spec2_x.smoothPoly(order=smooth_poly, ref_base=cube._wave)
+    #poly_y = spec2_y.smoothPoly(order=smooth_poly, ref_base=cube._wave)
 
     if fibers is None:
         fibers = cube._dim_x * cube._dim_y
@@ -343,7 +346,7 @@ def fitDARPeak_drp(
     cube = Cube()
     cube.loadFitsData(cube_in)
     # kernel = numpy.ones((coadd,1,1),dtype='uint8')
-    coadd_cube = cube.medianFilter(coadd)
+    # coadd_cube = cube.medianFilter(coadd)
 
     select_slice = numpy.arange(cube._res_elements) % steps == 0
     select_slice[0] = True
@@ -354,7 +357,7 @@ def fitDARPeak_drp(
     cent_x = numpy.zeros(len(slices))
     cent_y = numpy.zeros(len(slices))
 
-    ref = int(numpy.rint(cube._res_elements / 2.0))
+    #ref = int(numpy.rint(cube._res_elements / 2.0))
     collapsed_img = cube.collapseCube("median", start_wave, end_wave)
     cent_guess = collapsed_img.centreMax(
         cent_x=collapsed_img._dim[1] / 2.0,
@@ -363,7 +366,7 @@ def fitDARPeak_drp(
     )
 
     m = 0
-    plot = False
+    #plot = False
     for i in slices:
         if verbose == 1:
             print(i)
@@ -376,13 +379,13 @@ def fitDARPeak_drp(
         m += 1
 
     spec_x = Spectrum1D(data=cent_x, wave=wave)
-    poly_x = spec_x.smoothPoly(
-        order=smooth_poly, start_wave=start_wave, end_wave=end_wave
-    )
+    # poly_x = spec_x.smoothPoly(
+    #     order=smooth_poly, start_wave=start_wave, end_wave=end_wave
+    # )
     spec_y = Spectrum1D(data=cent_y, wave=wave)
-    poly_y = spec_y.smoothPoly(
-        order=smooth_poly, start_wave=start_wave, end_wave=end_wave
-    )
+    # poly_y = spec_y.smoothPoly(
+    #     order=smooth_poly, start_wave=start_wave, end_wave=end_wave
+    # )
 
     if start_wave is not None and end_wave is not None:
         select = numpy.logical_and(wave >= start_wave, wave <= end_wave)
@@ -404,8 +407,8 @@ def fitDARPeak_drp(
 
     spec2_y = Spectrum1D(data=cent_y[select][select2], wave=wave[select][select2])
     spec2_x = Spectrum1D(data=cent_x[select][select2], wave=wave[select][select2])
-    poly_x = spec2_x.smoothPoly(order=smooth_poly, ref_base=cube._wave)
-    poly_y = spec2_y.smoothPoly(order=smooth_poly, ref_base=cube._wave)
+    # poly_x = spec2_x.smoothPoly(order=smooth_poly, ref_base=cube._wave)
+    # poly_y = spec2_y.smoothPoly(order=smooth_poly, ref_base=cube._wave)
 
     if fibers is None:
         fibers = cube._dim_x * cube._dim_y
@@ -634,12 +637,12 @@ def matchCubeAperSpec_drp(
     ratio = spec_ref_resamp / spec_in_resamp
     # if verbose==1:
     #    pylab.plot(ratio._wave, ratio._data, '-k')
-    out_par = ratio.smoothPoly(
-        order=poly_correct,
-        start_wave=start_wave,
-        end_wave=end_wave,
-        ref_base=cube1._wave,
-    )
+    # out_par = ratio.smoothPoly(
+    #     order=poly_correct,
+    #     start_wave=start_wave,
+    #     end_wave=end_wave,
+    #     ref_base=cube1._wave,
+    # )
     new_cube = cube1 * ratio
     new_cube.writeFitsData(cube_out)
     if verbose == 1 or outfig != "":
@@ -957,7 +960,7 @@ def combineCubes_drp(incubes, outcube, method="mean", replace_error="1e10"):
                     error_img[j, :, :] = cubes[j]._error[i, :, :]
                 image[j, :, :] = cubes[j]._data[i, :, :]
                 image2[j, :, :] = cubes[j]._data[i, :, :]
-            select = mask_img == True
+            select = mask_img is True
             image[select] = 0
             error_img[select] = 0
             good_pix = numpy.sum(numpy.logical_not(select), 0)
@@ -970,8 +973,7 @@ def combineCubes_drp(incubes, outcube, method="mean", replace_error="1e10"):
                 data[i, select_bad] = numpy.sum(image2, 0)[select_bad] / len(incubes)
             if error is not None:
                 error[i, select_good] = numpy.sqrt(
-                    numpy.sum(error_img**2, 0)[select_good]
-                    / good_pix[select_good] ** 2
+                    numpy.sum(error_img**2, 0)[select_good] / good_pix[select_good] ** 2
                 )
                 error[i, select_bad] = replace_error
             if mask is not None:

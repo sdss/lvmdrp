@@ -339,13 +339,13 @@ def cholesky_solve(a, b):
 
     kd = bw - 1
 
-    ### first round
+    # first round
     spot = np.linspace(kd) + 1
     for j in range(0, n - 1):
         b[j] = b[j] / a[0, j]
         b[j + spot] = b[j + spot] - b[j] * a[spot, j]
 
-    #### second round
+    # second round
 
     spot = kd - np.linspace(kd)
     for j in range(n - 1, 0, -1):
@@ -415,10 +415,10 @@ def bsplvn(bkpt, nord, x, ileft):
         imj = ileft - j
         deltam[:, j] = x - bkpt[imj]
         vmprev = 0.0
-        for l in range(0, j):
-            vm = vnikx[:, l] / (deltap[:, l] + deltam[:, j - l])
-            vnikx[:, l] = vm * deltap[:, l] + vmprev
-            vmprev = vm * deltam[:, j - l]
+        for num in range(0, j):
+            vm = vnikx[:, num] / (deltap[:, num] + deltam[:, j - num])
+            vnikx[:, num] = vm * deltap[:, num] + vmprev
+            vmprev = vm * deltam[:, j - num]
 
         j = j + 1
         vnikx[:, j] = vmprev
@@ -430,7 +430,7 @@ def bsplvn(bkpt, nord, x, ileft):
 def bspline_action(x, sset, x2=None):
     if not isinstance(sset, dict):
         print("Please send in a proper B-spline structure")
-        return -1, lower, upper
+        return -1  # , lower, upper
 
     npoly = 1
     nx = len(x)
@@ -441,7 +441,7 @@ def bspline_action(x, sset, x2=None):
     if x2 is not None:
         if len(x2) != nx:
             print("dimensions do not match between x and x2")
-            return -1, lower, upper
+            return -1  # , lower, upper
 
         if "npoly" in sset.keys():
             npoly = sset["npoly"]
@@ -450,7 +450,7 @@ def bspline_action(x, sset, x2=None):
     goodbk = np.where(sset["bkmask"] != 0)
     nbkpt = goodbk.size
     if nbkpt < 2 * nord:
-        return -2, lower, upper
+        return -2  # , lower, upper
     n = nbkpt - nord
 
     gb = sset["fullbkpt"][goodbk]
@@ -586,8 +586,8 @@ def bspline_valu(x, sset, x2=None, action=None, upper=None, lower=None):
         ict = upper[i] - lower[i] + 1
 
         if ict > 0:
-            yfit[lower[i] : upper[i]] = (
-                goodcoeff[i * npoly + spot] @ action[lower[i] : upper[i], :]
+            yfit[lower[i]: upper[i]] = (
+                goodcoeff[i * npoly + spot] @ action[lower[i]: upper[i], :]
             )
 
     yy = yfit
@@ -1133,8 +1133,8 @@ def spflux_medianfilt(loglam, objflux, objivar, width, **kwargs):
         # which will force the ratio of the two to be unity.
         hwidth = np.ceil((width - 1) / 2.0)
         thisback[0:hwidth] = objflux[0:hwidth, ispec]
-        thisback[npix - 1 - hwidth : npix - 1] = objflux[
-            npix - 1 - hwidth : npix - 1, ispec
+        thisback[npix - 1 - hwidth: npix - 1] = objflux[
+            npix - 1 - hwidth: npix - 1, ispec
         ]
         czero2 = np.where(thisback == 0)[0]
         count2 = czero2.size
@@ -1202,11 +1202,11 @@ def spflux_bestmodel(
     #
     # NOTE: what is dslgpsize?
     if template == "kurucz":
-        _, kindx, dslgpsize = spflux_read_kurucz()  ##Yanping test
+        _, kindx, dslgpsize = spflux_read_kurucz()  # Yanping test
     elif template == "munari":
-        _, kindx, dslgpsize = spflux_read_munari()  ##Yanping added
+        _, kindx, dslgpsize = spflux_read_munari()  # Yanping added
     elif template == "BOSZ":
-        _, kindx, dslgpsize = spflux_read_bosz()  ##Yanping added
+        _, kindx, dslgpsize = spflux_read_bosz()  # Yanping added
     else:
         print(
             "Flux calibration templates has to be specified and be one of the three: 'kurucz','munari', 'BOSZ'."
@@ -1277,15 +1277,15 @@ def spflux_bestmodel(
     if template == "kurucz":
         modflux, kindx, dslgpsize = spflux_read_kurucz(
             loglam - np.log10(1 + zpeak), dispimg
-        )  ##Yanping test
+        )  # Yanping test
     elif template == "munari":
         modflux, kindx, dslgpsize = spflux_read_munari(
             loglam - np.log10(1 + zpeak), dispimg
-        )  ##Yanping added
+        )  # Yanping added
     elif template == "BOSZ":
         modflux, kindx, dslgpsize = spflux_read_bosz(
             loglam - np.log10(1 + zpeak), dispimg
-        )  ##Yanping added
+        )  # Yanping added
     else:
         print(
             "Flux calibration templates has to be specified and be one of the three: 'kurucz','munari', 'BOSZ'."
@@ -1493,10 +1493,10 @@ def spflux_bspline(
     )
 
     outmask1 = 0
-    if disp is not None:
-        x2 = disp[isort]
-    else:
-        pass
+    # if disp is not None:
+    #     x2 = disp[isort]
+    # else:
+    #     pass
 
     # BUG: this is actually done by bspline_iterfit
     sset = BSpline(*fullbkpt)
