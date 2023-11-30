@@ -94,6 +94,7 @@ class RSS(FiberRows):
         size=None,
         arc_position_x=None,
         arc_position_y=None,
+        slitmap=None,
         good_fibers=None,
         fiber_type=None,
         logwave=False,
@@ -131,6 +132,7 @@ class RSS(FiberRows):
             size=size,
             arc_position_x=arc_position_x,
             arc_position_y=arc_position_y,
+            slitmap=slitmap,
             good_fibers=good_fibers,
             fiber_type=fiber_type,
             logwave=logwave,
@@ -2111,6 +2113,7 @@ class RSS(FiberRows):
             size=self._size,
             arc_position_x=arc_position_x,
             arc_position_y=arc_position_y,
+            slitmap=self._slitmap,
             good_fibers=good_fibers
         )
         return rss
