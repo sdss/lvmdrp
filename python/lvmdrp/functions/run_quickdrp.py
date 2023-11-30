@@ -236,7 +236,7 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
         rss_tasks.create_pixel_table(in_rss=xsci_path, out_rss=wsci_path, arc_wave=mwave_path, arc_fwhm=mlsf_path)
 
         # apply fiberflat correction
-        rss_tasks.apply_fiberflat(in_rss=wsci_path, out_rss=fsci_path, in_flat=mflat_path)
+        rss_tasks.apply_fiberflat(in_rss=wsci_path, out_rss=fsci_path, in_flat=mflat_path, clip_below=0)
 
         # NOTE: this is a temporary fix for the illumination bias across telescopes whe using dome flats
         # rss = rss_tasks.RSS()
