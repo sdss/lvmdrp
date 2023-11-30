@@ -141,13 +141,14 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
     extraction_method = "aperture" if aperture_extraction else "optimal"
 
     # get target frames metadata
-    sci_metadata = md.get_metadata(tileid="*", mjd="*", expnum=expnum, imagetyp="object")
+    sci_metadata = md.get_metadata(tileid="*", mjd="*", expnum=expnum)
     sci_metadata.sort_values("expnum", ascending=False, inplace=True)
 
     # define general metadata
     sci_tileid = sci_metadata["tileid"].unique()[0]
     sci_mjd = sci_metadata["mjd"].unique()[0]
     sci_expnum = sci_metadata["expnum"].unique()[0]
+    sci_imagetyp = sci_metadata["imagetyp"].unique()[0]
     log.info(f"running Quick DRP for tile {sci_tileid} at MJD {sci_mjd} with exposure number {sci_expnum}")
 
     master_mjd = get_master_mjd(sci_mjd)
@@ -267,7 +268,7 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
         # use sky subtracted resampled frames for flux calibration in each camera
         flux_tasks.fluxcal_Gaia(sci_camera, hsci_path, GAIA_CACHE_DIR=ORIG_MASTER_DIR+'/gaia_cache')
 
-    # # combine spectrographs
+    # combine spectrographs
     drp.combine_spectrographs(tileid=sci_tileid, mjd=sci_mjd, channel="b", expnum=sci_expnum)
     drp.combine_spectrographs(tileid=sci_tileid, mjd=sci_mjd, channel="r", expnum=sci_expnum)
     drp.combine_spectrographs(tileid=sci_tileid, mjd=sci_mjd, channel="z", expnum=sci_expnum)

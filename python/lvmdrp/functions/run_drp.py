@@ -992,7 +992,7 @@ def build_supersky(tileid: int, mjd: int, expnum: int) -> fits.BinTableHDU:
     return supersky
 
 
-def combine_channels(tileid: int, mjd: int, expnum: int):
+def combine_channels(tileid: int, mjd: int, expnum: int, imagetype: str):
     """ Combine the spectrograph channels together
 
     For a given exposure, combines the three spectograph channels together
@@ -1011,9 +1011,9 @@ def combine_channels(tileid: int, mjd: int, expnum: int):
 
     # find all the h object files
     files = path.expand('lvm_anc', mjd=mjd, tileid=tileid, drpver=drpver,
-                         imagetype='object', expnum=expnum, kind='', camera='*')
+                         imagetype=imagetype, expnum=expnum, kind='', camera='*')
     # filter out old lvm-object-sp?-*.fits files
-    files = sorted([f for f in files if not os.path.basename(f).startswith("lvm-object-sp")], key=_parse_expnum_cam)
+    files = sorted([f for f in files if not os.path.basename(f).startswith(f"lvm-{imagetype}-sp")], key=_parse_expnum_cam)
 
     cframe_path = path.full("lvm_frame", mjd=mjd, drpver=drpver, tileid=tileid, expnum=expnum, kind='CFrame')
 
