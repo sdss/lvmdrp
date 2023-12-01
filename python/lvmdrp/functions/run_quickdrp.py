@@ -269,18 +269,18 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
         flux_tasks.fluxcal_Gaia(sci_camera, hsci_path, GAIA_CACHE_DIR=ORIG_MASTER_DIR+'/gaia_cache')
 
     # combine spectrographs
-    drp.combine_spectrographs(tileid=sci_tileid, mjd=sci_mjd, channel="b", expnum=sci_expnum)
-    drp.combine_spectrographs(tileid=sci_tileid, mjd=sci_mjd, channel="r", expnum=sci_expnum)
-    drp.combine_spectrographs(tileid=sci_tileid, mjd=sci_mjd, channel="z", expnum=sci_expnum)
+    drp.combine_spectrographs(tileid=sci_tileid, mjd=sci_mjd, channel="b", expnum=sci_expnum, imagetype=sci_imagetyp)
+    drp.combine_spectrographs(tileid=sci_tileid, mjd=sci_mjd, channel="r", expnum=sci_expnum, imagetype=sci_imagetyp)
+    drp.combine_spectrographs(tileid=sci_tileid, mjd=sci_mjd, channel="z", expnum=sci_expnum, imagetype=sci_imagetyp)
 
     # flux-calibrate each channel
-    sci_paths = sorted(drp.path.expand("lvm_anc", drpver=drpver, tileid=sci_tileid, mjd=sci_mjd, kind="", imagetype="object", camera="*", expnum=sci_expnum))
-    sci_paths = [sci_path for sci_path in sci_paths if "lvm-object-sp" not in sci_path]
+    sci_paths = sorted(drp.path.expand("lvm_anc", drpver=drpver, tileid=sci_tileid, mjd=sci_mjd, kind="", imagetype=sci_imagetyp, camera="*", expnum=sci_expnum))
+    sci_paths = [sci_path for sci_path in sci_paths if f"lvm-{sci_imagetyp}-sp" not in sci_path]
     for sci_path in sci_paths:
         flux_tasks.apply_fluxcal(in_rss=sci_path, out_rss=sci_path)
 
     # combine channels
-    drp.combine_channels(tileid=sci_tileid, mjd=sci_mjd, expnum=sci_expnum)
+    drp.combine_channels(tileid=sci_tileid, mjd=sci_mjd, expnum=sci_expnum, imagetype=sci_imagetyp)
 
     # refine sky subtraction
     sky_tasks.quick_sky_refinement(in_cframe=path.full("lvm_frame", mjd=sci_mjd, drpver=drpver, tileid=sci_tileid, expnum=sci_expnum, kind='CFrame'))
