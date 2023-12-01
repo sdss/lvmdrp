@@ -120,6 +120,7 @@ def get_master_mjd(sci_mjd: int) -> int:
 def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
                             skip_sky_subtraction: bool = False,
                             sky_weights: Tuple[float, float] = None,
+                            skip_flux_calibration: bool = False,
                             ncpus: int = None,
                             aperture_extraction: bool = False) -> None:
     """ Run the Quick DRP for a given exposure number.
@@ -276,7 +277,7 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
     sci_paths = sorted(drp.path.expand("lvm_anc", drpver=drpver, tileid=sci_tileid, mjd=sci_mjd, kind="", imagetype="object", camera="*", expnum=sci_expnum))
     sci_paths = [sci_path for sci_path in sci_paths if "lvm-object-sp" not in sci_path]
     for sci_path in sci_paths:
-        flux_tasks.apply_fluxcal(in_rss=sci_path, out_rss=sci_path)
+        flux_tasks.apply_fluxcal(in_rss=sci_path, out_rss=sci_path, skip_fluxcal=skip_flux_calibration)
 
     # combine channels
     drp.combine_channels(tileid=sci_tileid, mjd=sci_mjd, expnum=sci_expnum)
