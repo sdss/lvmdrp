@@ -279,9 +279,11 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
         flux_tasks.apply_fluxcal(in_rss=sci_path, out_rss=sci_path)
 
     # combine channels
+    # TODO: write spline fitting in the super-sky table
     drp.combine_channels(tileid=sci_tileid, mjd=sci_mjd, expnum=sci_expnum)
 
     # refine sky subtraction
+    # TODO: make sure the the master sky being subtracted in this step is stored in the correct extension
     sky_tasks.quick_sky_refinement(in_cframe=path.full("lvm_frame", mjd=sci_mjd, drpver=drpver, tileid=sci_tileid, expnum=sci_expnum, kind='CFrame'))
 
     # TODO: add quick report routine
