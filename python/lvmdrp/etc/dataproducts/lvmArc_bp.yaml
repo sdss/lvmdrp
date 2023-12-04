@@ -30,9 +30,9 @@ hdu2:
   shape: NFIBER
 hdu3:
   name: LXPEAK
-  description: |
-    wavelength and x positions of good arc lamp lines. 1st column element contains wavelengths, the
-    remaining NFIBER contains the lamp line positions along the CCD.
+  description:
+    wavelength and x positions of good arc lamp lines. 1st column element contains wavelengths,
+    the remaining NFIBER contains the lamp line positions along the CCD.
   is_image: true
   shape: NFIBER+1 x NLAMP
 hdu4:
@@ -43,7 +43,7 @@ hdu4:
   columns:
     FUNC:
       name: FUNC
-      type: char[8]
+      type: str
       unit: ''
       description: ''
     XMIN:
