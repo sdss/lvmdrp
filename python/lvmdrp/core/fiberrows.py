@@ -39,6 +39,8 @@ class FiberRows(Header, PositionTable):
         good_fibers=None,
         fiber_type=None,
         coeffs=None,
+        poly_kind=None,
+        poly_deg=None
     ):
         Header.__init__(self, header=header)
         PositionTable.__init__(
@@ -67,10 +69,13 @@ class FiberRows(Header, PositionTable):
         else:
             self._mask = numpy.array(mask)
 
+        self._poly_kind = poly_kind
+        self._poly_deg = poly_deg
         if coeffs is None:
             self._coeffs = None
         else:
             self._coeffs = coeffs.astype("float32")
+        
 
     def __len__(self):
         return self._fibers
@@ -702,6 +707,8 @@ class FiberRows(Header, PositionTable):
                         self._good_fibers = numpy.where(numpy.sum(self._mask, axis=1) != self._data.shape[1])[0]
                     elif hdu[i].header["EXTNAME"].split()[0] == "COEFFS":
                         self._coeffs = hdu[i].data.astype("float32")
+                        self._poly_kind = self._header.get("POLYKIND", "poly")
+                        self._poly_deg = self._header.get("POLYDEG", self._coeffs.shape[1]-1)
 
         else:
             if extension_data is not None:
@@ -715,6 +722,8 @@ class FiberRows(Header, PositionTable):
                 self._error = hdu[extension_error].data.astype("float32")
             if extension_coeffs is not None:
                 self._coeffs = hdu[extension_coeffs].data.astype("float32")
+                self._poly_kind = self._header.get("POLYKIND", "poly")
+                self._poly_deg = self._header.get("POLYDEG", self._coeffs.shape[1]-1)
         
         hdu.close()
         
