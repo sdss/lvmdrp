@@ -26,6 +26,30 @@ def _read_fiber_ypix(peaks_file):
 
 
 class FiberRows(Header, PositionTable):
+
+    @classmethod
+    def from_coeff_table(cls, coeff_table, **kwargs):
+        """Creates an FiberRows instance from a table of coefficients"""
+
+        nfibers = len(coeff_table)
+        npixels = coeff_table["XMAX"].max() - coeff_table["XMIN"].min() + 1
+        x_pixels = numpy.arange(npixels)
+
+        data = numpy.zeros((nfibers, npixels), dtype=numpy.float32)
+        coeffs = numpy.zeros((nfibers, coeff_table["COEFF"].shape[1]), dtype=numpy.float32)
+        for ifiber in range(nfibers):
+            if coeff_table[ifiber]["FUNC"] == "poly":
+                poly_cls = numpy.polynomial.Polynomial
+            elif coeff_table[ifiber]["FUNC"] == "chebyshev":
+                poly_cls = numpy.polynomial.Chebyshev
+            elif coeff_table[ifiber]["FUNC"] == "legendre":
+                poly_cls = numpy.polynomial.Legendre
+            
+            data[ifiber] = poly_cls(coeff_table[ifiber]["COEFF"])(x_pixels)
+            coeffs[ifiber] = coeff_table[ifiber]["COEFF"]
+        
+        return cls(data=data, coeffs=coeffs, **kwargs)
+
     def __init__(
         self,
         data=None,
