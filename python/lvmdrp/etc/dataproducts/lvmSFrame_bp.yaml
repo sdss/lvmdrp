@@ -48,7 +48,101 @@ hdu5:
   is_image: false
   shape: BINARY FITS TABLE
   columns:
-    pass
+    FIBEID:
+      name: fiberid
+      type: uint16
+      description: number of the fiber along the slithead
+      unit: null
+    SPECTROGRAPHID:
+      name: spectrographid
+      type: uint16
+      description: the spectrograph id number, either 1, 2 or 3
+      unit: null
+    BLOCKID:
+      name: blockid
+      type: str
+      description: the ID label of the block along the slit
+      unit: null
+    FINBLOCK:
+      name: finblock
+      type: uint16
+      description: the fiber number within the v-groove block
+      unit: null
+    TARGETTYPE:
+      name: targettype
+      type: str
+      description: the type of fiber, either science, standard or sky
+      unit: null
+    IFULABEL:
+      name: ifulabel
+      type: str
+      description: an ID label for the telescope + sector
+      unit: null
+    FINIFU:
+      name: finifu
+      type: uint16
+      description: a running fiber number within the IFU from 1 to N
+      unit: null
+    TELESCOPE:
+      name: telescope
+      type: str
+      description: the name of the telescope; Sci, Spec, SkyE/W for science, standards, or skies
+      unit: null
+    XPMM:
+      name: xpmm
+      type: float32
+      description: the x coordinate in mm of the fiber relative to the centroid
+      unit: mm
+    YPMM:
+      name: ypmm
+      type: float32
+      description: the x coordinate in mm of the fiber relative to the centroid
+      unit: mm
+    RINGNUM:
+      name: ringnum
+      type: uint16
+      description: the number of the IFU ring the fiber belongs to
+      unit: null
+    ORIG_IFULABEL:
+      name: orig_ifulabel
+      type: str
+      description: the original IFU label from the Excel document. WRONG! DO NOT USE!
+      unit: null
+    ORIG_SLITLABEL:
+      name: orig_slitlabel
+      type: str
+      description: the original slitblock label from the Excel document. WRONG! DO NOT USE!
+      unit: null
+    FINSECTOR:
+      name: finsector
+      type: uint16
+      description: the original fiber number within the IFU sector
+      unit: null
+    FMAP:
+      name: fmap
+      type: str
+      description: the current fiber flow FROM:TO from the IFU position to the SLIT position.
+      unit: null
+    YPIX_B:
+      name: ypix_b
+      type: uint32
+      description: the y coordinate in pixels of the fiber at column 2000 for channel b
+      unit: pixels
+    YPIX_R:
+      name: ypix_r
+      type: uint32
+      description: the y coordinate in pixels of the fiber at column 2000 for channel r
+      unit: pixels
+    YPIX_Z:
+      name: ypix_z
+      type: uint32
+      description: the y coordinate in pixels of the fiber at column 2000 for channel z
+      unit: pixels
+    FIBSTATUS:
+      name: fibstatus
+      type: uint16
+      description: the status of the fiber, 0=good, 1=dead, 2=low, 3=repair, 4=short
+      unit: null
 hdu6:
   name: SKY
   description: sky flux in flat-fielded electrons

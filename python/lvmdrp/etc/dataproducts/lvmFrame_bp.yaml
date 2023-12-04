@@ -205,8 +205,8 @@ hdu5:
       description: the status of the fiber, 0=good, 1=dead, 2=low, 3=repair, 4=short
       unit: null
 hdu6:
-  name: XPOS
-  description: x position on the CCD
+  name: YPOS
+  description: y position on the CCD
   is_image: true
   shape: CCDROW x NFIBER
 hdu7:
@@ -214,29 +214,3 @@ hdu7:
   description: superflat vector from quartz lamps
   is_image: true
   shape: CCDROW x NFIBER
-hdu8:
-  name: AIRSET
-  description: observed wavelength traceset in log-10 Angstroms (air)
-  is_image: false
-  shape: BINARY FITS TABLE
-  columns:
-    FUNC:
-      name: FUNC
-      type: str
-      unit: ''
-      description: ''
-    XMIN:
-      name: XMIN
-      type: float64
-      unit: ''
-      description: ''
-    XMAX:
-      name: XMAX
-      type: float64
-      unit: ''
-      description: ''
-    COEFF:
-      name: COEFF
-      type: float64
-      unit: ''
-      description: ''
