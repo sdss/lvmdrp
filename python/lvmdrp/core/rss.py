@@ -14,6 +14,7 @@ from lvmdrp.core.fiberrows import FiberRows
 from lvmdrp.core.header import Header
 from lvmdrp.core.positionTable import PositionTable
 from lvmdrp.core.spectrum1d import Spectrum1D
+from lvmdrp.core import dataproducts as dp
 
 
 def _read_pixwav_map(lamp: str, camera: str, pixels=None, waves=None):
@@ -2207,3 +2208,162 @@ def loadRSS(infile, extension_data=None, extension_mask=None, extension_error=No
     )
 
     return rss
+
+
+class lvmFrame(RSS):
+    """lvmFrame class"""
+
+    @classmethod
+    def from_hdulist(cls, hdulist):
+        header = hdulist["PRIMARY"].header
+        data = hdulist["FLUX"].data
+        error = numpy.divide(1, hdulist["IVAR"].data, where=hdulist["IVAR"].data != 0, out=numpy.zeros_like(hdulist["IVAR"].data))
+        error = numpy.sqrt(error)
+        mask = hdulist["MASK"].data
+        wave_trace = Table(hdulist["WAVE_TRACE"].data)
+        lsf_trace = Table(hdulist["LSF_TRACE"].data)
+        cent_trace = Table(hdulist["CENT_TRACE"].data)
+        width_trace = Table(hdulist["WIDTH_TRACE"].data)
+        superflat = hdulist["SUPERFLAT"].data
+        slitmap = Table(hdulist["SLITMAP"].data)
+        return cls(data=data, error=error, mask=mask, header=header,
+                   wave_trace=wave_trace, lsf_trace=lsf_trace,
+                   cent_trace=cent_trace, width_trace=width_trace,
+                   superflat=superflat, slitmap=slitmap)
+
+    def __init__(self, data=None, error=None, mask=None, header=None, slitmap=None, wave_trace=None, superflat=None, **kwargs):        
+        RSS.__init__(self, data=data, error=error, mask=mask, header=header, slitmap=slitmap)
+
+        if wave_trace is not None:
+            self.setWaveTrace(wave_trace)
+        else:
+            self._wave_trace = None
+        if superflat is not None:
+            self.setSuperflat(superflat)
+        else:
+            self._superflat = None
+        if header is not None:
+            self.setHeader(header, **kwargs)
+    
+    def _convertTrace(self, trace):
+        """Converts a given trace into its polynomial coefficients representation"""
+        if isinstance(trace, FiberRows):
+            coeffs = trace._coeffs
+            columns = [
+                pyfits.Column(name="FUNC", format="A10", array=numpy.asarray([trace._poly_kind] * self._fibers)),
+                pyfits.Column(name="XMIN", format="I", unit="pix", array=numpy.asarray([0] * self._fibers)),
+                pyfits.Column(name="XMAX", format="I", unit="pix", array=numpy.asarray([self._data.shape[1]-1] * self._fibers)),
+                pyfits.Column(name="COEFF", format=f"{coeffs.shape[1]}E", dim=f"({coeffs.shape[0]},)", array=trace._coeffs)
+            ]
+            self._trace = Table(pyfits.BinTableHDU.from_columns(columns).data)
+            return self._trace
+        elif isinstance(trace, Table):
+            self._trace = trace
+            return self._trace
+        else:
+            raise TypeError("wave_trace must be lvmdrp.core.fiberrows.FiberRows or an Astropy Table")
+
+    def setHeader(self, orig_header, **kwargs):
+        """Set header"""
+        blueprint = dp.load_blueprint(name="lvmFrame")
+        new_header = orig_header
+        new_cards = []
+        for card in blueprint["hdu0"]["header"]:
+            kw = card["key"]
+            cm = card["comment"]
+            if kw.lower() in kwargs:
+                new_cards.append((kw, kwargs[kw.lower()], cm))
+        new_header.update(new_cards)
+        self._header = new_header
+        return self._header
+
+    def getWaveTrace(self):
+        """Wavelength trace representation as FiberRows"""
+        if self._wave_trace is not None:
+            return FiberRows.from_table(self._wave_trace)
+        else:
+            return None
+
+        if self._lsf_trace is not None:
+            return FiberRows.from_table(self._lsf_trace)
+        else:
+            return None
+
+    def setWaveTrace(self, wave_trace, lsf_trace):
+        """Set wavelength/LSF trace representation"""
+        self._wave_trace = self._convertTrace(wave_trace)
+        self._lsf_trace = self._convertTrace(lsf_trace)
+        return self._wave_trace, self._lsf_trace
+
+    def getSuperflat(self):
+        """Get superflat representation as numpy array"""
+        return self._superflat
+
+    def setSuperflat(self, superflat):
+        """Set superflat representation"""
+        self._superflat = superflat
+        return self._superflat
+
+    def getFiberTrace(self):
+        """Get fiber centroid/width trace representation as FiberRows"""
+        if self._cent_trace is not None:
+            cent_trace = FiberRows.from_coeff_table(self._cent_trace)
+        else:
+            cent_trace = None
+        if self._width_trace is not None:
+            width_trace = FiberRows.from_coeff_table(self._wave_trace)
+        else:
+            width_trace = None
+        return cent_trace, width_trace
+
+    def setFiberTrace(self, cent_trace, width_trace):
+        self._cent_trace = self._convertTrace(cent_trace)
+        self._width_trace = self._convertTrace(width_trace)
+        return self._cent_trace, self._width_trace
+
+    def loadFitsData(self, in_file):
+        with pyfits.open(in_file) as hdulist:
+            self._header = hdulist["PRIMARY"].header
+            self._data = hdulist["FLUX"].data
+            self._error = numpy.divide(1, hdulist["IVAR"].data, where=hdulist["IVAR"].data != 0, out=numpy.zeros_like(hdulist["IVAR"].data))
+            self._error = numpy.sqrt(self._error)
+            self._mask = hdulist["MASK"].data.astype("bool")
+            self._wave_trace = Table(hdulist["WAVE_TRACE"].data)
+            self._lsf_trace = Table(hdulist["LSF_TRACE"].data)
+            self._cent_trace = Table(hdulist["CENT_TRACE"].data)
+            self._width_trace = Table(hdulist["WIDTH_TRACE"].data)
+            self._superflat = hdulist["SUPERFLAT"].data
+            self._slitmap = Table(hdulist["SLITMAP"].data)
+
+    def writeFitsData(self, out_file):
+        bp = dp.load_blueprint(name="lvmFrame")
+        hdulist = dp.dump_template(dataproduct_bp=bp, save=False)
+
+        # fill in template
+        hdulist["PRIMARY"].header.update(self._header)
+        hdulist["FLUX"].data = self._data
+        hdulist["IVAR"].data = numpy.divide(1, self._error**2, where=self._error != 0, out=numpy.zeros_like(self._error))
+        hdulist["MASK"].data = self._mask.astype("uint8")
+        hdulist["WAVE_TRACE"] = pyfits.BinTableHDU(data=self._wave_trace, name="WAVE_TRACE")
+        hdulist["LSF_TRACE"] = pyfits.BinTableHDU(data=self._lsf_trace, name="LSF_TRACE")
+        hdulist["CENT_TRACE"] = pyfits.BinTableHDU(data=self._cent_trace, name="CENT_TRACE")
+        hdulist["WIDTH_TRACE"] = pyfits.BinTableHDU(data=self._width_trace, name="WIDTH_TRACE")
+        hdulist["SUPERFLAT"].data = self._superflat
+        hdulist["SLITMAP"] = pyfits.BinTableHDU(data=self._slitmap, name="SLITMAP")
+        hdulist.writeto(out_file, overwrite=True)
+
+
+class lvmCFrame(RSS):
+    pass
+
+
+class lvmFFrame(RSS):
+    pass
+
+
+class lvmSFrame(RSS):
+    pass
+
+
+class lvmRSS(RSS):
+    pass

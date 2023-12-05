@@ -3,8 +3,8 @@ short: the extracted fiber science spectra
 description: |
   The lvmFrame files are the extracted fiber spectra for each camera for the science exposures.
 location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[MJD]/
-created_by: module.py
-used_by: module.py
+created_by: lvmdrp.rssMethod.apply_fiberflat
+used_by: null
 naming_convention: |
   lvmFrame-[CAMERA]-[EXPNUM].fits.gz, where [CAMERA] is one of the nine cameras on the instrument, b1, r1, z1,
   or b2, r2, z2, or b3, r3, or z3 for the blue, red, nir cameras on each LVM spectrograph, and
@@ -14,54 +14,12 @@ hdu0:
   description: primary header metadata
   is_image: true
   header:
-  - key: DPOS
-    comment: LVM dither position
-  - key: DRA
-    comment: LVM dither right ascension
-  - key: DDEC
-    comment: LVM dither declination
-  - key: VERSDRP2
-    comment: LVM DRP version (2d processing)
-  - key: VERSCORE
-    comment: lvmcore version
-  - key: VERSPY
-    comment: python version
-  - key: SLITFILE
-    comment: Associated slitmap name
-  - key: AIRMSBEG
-    comment: airmass at beginning of exposure
-  - key: AIRMSMID
-    comment: airmass at midpoint of exposure
-  - key: AIRMSEND
-    comment: airmass at end of exposure
-  - key: LSTBEG
-    comment: LST (hours) at beginning of exposure
-  - key: LSTMID
-    comment: LST (hours) at midpoint of exposure
-  - key: LSTEND
-    comment: LST (hours) at end of exposure
-  - key: HRANGBEG
-    comment: hour angle (hours) at beginning of exposure
-  - key: HRANGMID
-    comment: hour angle (hours) at midpoint of exposure
-  - key: HRANGEND
-    comment: hour angle (hours) at end of exposure
-  - key: DRP2QUAL
-    comment: DRP-2d quality bitmask
-  - key: MASKNAME
-    comment: Name of the bits in sdssMaskbits.par used by MASK extension of this file
-  - key: SCATVAL0
-    comment: Median scattered light around all edges
-  - key: SCATVAL1
-    comment: Scattered light in quadrant 1
-  - key: SCATVAL2
-    comment: Scattered light in quadrant 2
-  - key: SCATVAL3
-    comment: Scattered light in quadrant 3
-  - key: SCATVAL4
-    comment: Scattered light in quadrant 4
-  - key: SCATSIG
-    comment: Deviation in SCATVAL between quadrants
+  - key: FLATNAME
+    comment: fiberflat used to flatfield the data
+  - key: IFIBVAR
+    comment: fiber-to-fiber variance before flatfielding
+  - key: FFIBVAR
+    comment: fiber-to-fiber variance after flatfielding
 hdu1:
   name: FLUX
   description: Flux in flat fielded electrons
@@ -78,32 +36,115 @@ hdu3:
   is_image: true
   shape: CCDROW x NFIBER
 hdu4:
-  name: WSET
-  description: wavelength solution traceset in log-10 Angstroms (vacuum)
+  name: WAVE_TRACE
+  description: wavelength solution traceset in log-10 Angstroms (air)
   is_image: false
   shape: BINARY FITS TABLE
   columns:
     FUNC:
       name: FUNC
       type: str
-      unit: ''
-      description: ''
+      unit: null
+      description: 'polynomial function type: poly, chebyshev, legendre'
     XMIN:
       name: XMIN
-      type: float64
-      unit: ''
-      description: ''
+      type: float32
+      unit: pix
+      description: 'initial pixel in the wavelength trace'
     XMAX:
       name: XMAX
-      type: float64
-      unit: ''
-      description: ''
+      type: float32
+      unit: pix
+      description: 'final pixel in the wavelength trace'
     COEFF:
       name: COEFF
-      type: float64
-      unit: ''
-      description: ''
+      type: float32
+      unit: null
+      description: 'polynomial coefficients'
 hdu5:
+  name: LSF_TRACE
+  description: wavelength solution traceset in log-10 Angstroms (air)
+  is_image: false
+  shape: BINARY FITS TABLE
+  columns:
+    FUNC:
+      name: FUNC
+      type: str
+      unit: null
+      description: 'polynomial function type: poly, chebyshev, legendre'
+    XMIN:
+      name: XMIN
+      type: float32
+      unit: pix
+      description: 'initial pixel in the LSF trace'
+    XMAX:
+      name: XMAX
+      type: float32
+      unit: pix
+      description: 'final pixel in the LSF trace'
+    COEFF:
+      name: COEFF
+      type: float32
+      unit: null
+      description: 'polynomial coefficients'
+hdu6:
+  name: CENT_TRACE
+  description: fiber centroid positions in the CCD
+  is_image: false
+  shape: BINARY FITS TABLE
+  columns:
+    FUNC:
+      name: FUNC
+      type: str
+      unit: null
+      description: 'polynomial function type: poly, chebyshev, legendre'
+    XMIN:
+      name: XMIN
+      type: float32
+      unit: pix
+      description: 'initial pixel in the fiber centroid trace'
+    XMAX:
+      name: XMAX
+      type: float32
+      unit: pix
+      description: 'final pixel in the fiber centroid trace'
+    COEFF:
+      name: COEFF
+      type: float32
+      unit: null
+      description: 'polynomial coefficients'
+hdu7:
+  name: WIDTH_TRACE
+  description: fiber width (FWHM) in the CCD
+  is_image: false
+  shape: BINARY FITS TABLE
+  columns:
+    FUNC:
+      name: FUNC
+      type: str
+      unit: null
+      description: 'polynomial function type: poly, chebyshev, legendre'
+    XMIN:
+      name: XMIN
+      type: float32
+      unit: pix
+      description: 'initial pixel in fiber width (FWHM) trace'
+    XMAX:
+      name: XMAX
+      type: float32
+      unit: pix
+      description: 'final pixel in fiber width (FWHM) trace'
+    COEFF:
+      name: COEFF
+      type: float32
+      unit: null
+      description: 'polynomial coefficients'
+hdu8:
+  name: SUPERFLAT
+  description: superflat vector from quartz lamps
+  is_image: true
+  shape: CCDROW x NFIBER
+hdu9:
   name: SLITMAP
   description: slitmap table describing fiber positions for this exposure
   is_image: false
@@ -188,29 +229,19 @@ hdu5:
       name: ypix_b
       type: uint32
       description: the y coordinate in pixels of the fiber at column 2000 for channel b
-      unit: pixels
+      unit: pix
     YPIX_R:
       name: ypix_r
       type: uint32
       description: the y coordinate in pixels of the fiber at column 2000 for channel r
-      unit: pixels
+      unit: pix
     YPIX_Z:
       name: ypix_z
       type: uint32
       description: the y coordinate in pixels of the fiber at column 2000 for channel z
-      unit: pixels
+      unit: pix
     FIBSTATUS:
       name: fibstatus
       type: uint16
       description: the status of the fiber, 0=good, 1=dead, 2=low, 3=repair, 4=short
       unit: null
-hdu6:
-  name: YPOS
-  description: y position on the CCD
-  is_image: true
-  shape: CCDROW x NFIBER
-hdu7:
-  name: SUPERFLAT
-  description: superflat vector from quartz lamps
-  is_image: true
-  shape: CCDROW x NFIBER
