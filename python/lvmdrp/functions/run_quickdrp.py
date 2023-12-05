@@ -170,7 +170,7 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
         # define science camera
         sci_camera = sci["camera"]
 
-        # define sci paths
+        # define ancillary product paths
         rsci_path = path.full("lvm_raw", camspec=sci_camera, **sci)
         psci_path = path.full("lvm_anc", drpver=drpver, kind="p", imagetype=sci["imagetyp"], **sci)
         dsci_path = path.full("lvm_anc", drpver=drpver, kind="d", imagetype=sci["imagetyp"], **sci)
@@ -184,6 +184,9 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
         hskye_path = path.full("lvm_anc", drpver=drpver, kind="h", imagetype="sky_e", **sci)
         hskyw_path = path.full("lvm_anc", drpver=drpver, kind="h", imagetype="sky_w", **sci)
         os.makedirs(os.path.dirname(hsci_path), exist_ok=True)
+        
+        # define science product paths
+        frame_path = path.full("lvm_frame", drpver=drpver, tileid=sci_tileid, mjd=sci_mjd, expnum=sci_expnum, kind=f"Frame-{sci_camera}")
         # define current arc lamps to use for wavelength calibration
         lamps = arc_lamps[sci_camera[0]]
 
@@ -229,14 +232,18 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
                                   in_bias=mbias_path, in_dark=mdark_path, in_pixelflat=mpixflat_path,
                                   in_slitmap=Table(drp.fibermap.data), reject_cr=False)
 
-        # # extract 1d spectra
+        # extract 1d spectra
         image_tasks.extract_spectra(in_image=dsci_path, out_rss=xsci_path, in_trace=mtrace_path, in_fwhm=mwidth_path, method=extraction_method, parallel=extraction_parallel)
 
         # wavelength calibrate
         rss_tasks.create_pixel_table(in_rss=xsci_path, out_rss=wsci_path, arc_wave=mwave_path, arc_fwhm=mlsf_path)
 
         # apply fiberflat correction
-        rss_tasks.apply_fiberflat(in_rss=wsci_path, out_rss=fsci_path, in_flat=mflat_path)
+        rss_tasks.apply_fiberflat(in_rss=wsci_path, out_rss=fsci_path,
+                                  in_flat=mflat_path, in_cent=mtrace_path,
+                                  in_width=mwidth_path,
+                                  in_wave=mwave_path, in_lsf=mlsf_path,
+                                  out_lvmframe=frame_path)
 
         # NOTE: this is a temporary fix for the illumination bias across telescopes whe using dome flats
         rss = rss_tasks.RSS()
@@ -275,13 +282,16 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
     # flux-calibrate each channel
     sci_paths = sorted(drp.path.expand("lvm_anc", drpver=drpver, tileid=sci_tileid, mjd=sci_mjd, kind="", imagetype="object", camera="*", expnum=sci_expnum))
     sci_paths = [sci_path for sci_path in sci_paths if "lvm-object-sp" not in sci_path]
+    # TODO: write lvmFFrame
     for sci_path in sci_paths:
         flux_tasks.apply_fluxcal(in_rss=sci_path, out_rss=sci_path)
 
     # combine channels
+    # TODO: write lvmCFrame
     drp.combine_channels(tileid=sci_tileid, mjd=sci_mjd, expnum=sci_expnum)
 
     # refine sky subtraction
+    # TODO: write lvmSFrame
     sky_tasks.quick_sky_refinement(in_cframe=path.full("lvm_frame", mjd=sci_mjd, drpver=drpver, tileid=sci_tileid, expnum=sci_expnum, kind='CFrame'))
 
     # TODO: add quick report routine

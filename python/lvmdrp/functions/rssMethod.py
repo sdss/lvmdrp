@@ -29,7 +29,7 @@ from lvmdrp.core.fiberrows import FiberRows
 from lvmdrp.core.image import loadImage
 from lvmdrp.core.passband import PassBand
 from lvmdrp.core.plot import plt, create_subplots, save_fig, plot_wavesol_residuals, plot_wavesol_coeffs
-from lvmdrp.core.rss import RSS, _read_pixwav_map, loadRSS
+from lvmdrp.core.rss import RSS, _read_pixwav_map, loadRSS, lvmFrame
 from lvmdrp.core.spectrum1d import Spectrum1D, wave_little_interpol, _spec_from_lines, _cross_match
 from lvmdrp.external import ancillary_func
 from lvmdrp.utils import flatten
@@ -1617,7 +1617,10 @@ def correctTraceMask_drp(trace_in, trace_out, logfile, ref_file, poly_smooth="")
     trace.writeFitsData(trace_out)
 
 
-def apply_fiberflat(in_rss: str, out_rss: str, in_flat: str, clip_below: float = 0.2) -> RSS:
+def apply_fiberflat(in_rss: str, out_rss: str, out_lvmframe: str,
+                    in_flat: str, in_cent: str, in_width: str,
+                    in_wave: str, in_lsf: str,
+                    clip_below: float = 0.2) -> RSS:
     """applies fiberflat correction to target RSS file
 
     This function applies a fiberflat correction to a target RSS file. The
@@ -1632,8 +1635,18 @@ def apply_fiberflat(in_rss: str, out_rss: str, in_flat: str, clip_below: float =
         input RSS file path to be corrected
     out_rss : str
         output RSS file path with fiberflat correction applied
+    out_lvmframe : str
+        output lvmFrame file path with fiberflat correction applied
     in_flat : str
         input RSS file path to the fiberflat
+    in_cent : str
+        input RSS file path to the fiber centroid trace
+    in_width : str
+        input RSS file path to the fiber width (FWHM) trace
+    in_wave : str
+        input RSS file path to the wavelength solution
+    in_lsf : str
+        intput RSS file path to the LSF solution
     clip_below : float, optional
         minimum relative transmission considered. Values below will be masked, by default 0.2
 
@@ -1647,6 +1660,9 @@ def apply_fiberflat(in_rss: str, out_rss: str, in_flat: str, clip_below: float =
     rss = RSS()
     rss.loadFitsData(in_rss)
     
+    # compute initial variance
+    ifibvar = bn.nanmean(bn.nanvar(rss._data, axis=0))
+
     # load fiberflat
     log.info(f"reading fiberflat from {os.path.basename(in_flat)}")
     flat = RSS()
@@ -1670,7 +1686,8 @@ def apply_fiberflat(in_rss: str, out_rss: str, in_flat: str, clip_below: float =
 
         # interpolate fiberflat to target wavelength grid to fill in missing values
         if not numpy.isclose(spec_flat._wave, spec_data._wave).all():
-            spec_flat = spec_flat.resampleSpec(spec_data._wave, err_sim=0)
+            log.warning("resampling fiberflat to target wavelength grid")
+            spec_flat = spec_flat.resampleSpec(spec_data._wave, err_sim=5)
         
         # apply clipping
         select_clip_below = (spec_flat < clip_below) | numpy.isnan(spec_flat._data)
@@ -1681,11 +1698,34 @@ def apply_fiberflat(in_rss: str, out_rss: str, in_flat: str, clip_below: float =
         spec_new = spec_data / spec_flat
         rss.setSpec(i, spec_new)
     
+    # compute final variance
+    ffibvar = bn.nanmean(bn.nanvar(rss._data, axis=0))
+
     # write out corrected RSS
     log.info(f"writing fiberflat corrected RSS to {os.path.basename(out_rss)}")
     rss.writeFitsData(out_rss)
 
-    return rss
+    # load ancillary data
+    log.info(f"writing lvmFrame to {os.path.basename(out_lvmframe)}")
+    cent_trace = FiberRows()
+    cent_trace.loadFitsData(in_cent)
+    width_trace = FiberRows()
+    width_trace.loadFitsData(in_width)
+    wave_trace = FiberRows()
+    wave_trace.loadFitsData(in_wave)
+    lsf_trace = FiberRows()
+    lsf_trace.loadFitsData(in_lsf)
+
+    # create lvmFrame
+    lvmframe = lvmFrame(data=rss._data, mask=rss._mask, error=rss._error, slitmap=rss._slitmap)
+    lvmframe.setHeader(orig_header=rss._header, flatname=os.path.basename(in_flat), ifibvar=ifibvar, ffibvar=ffibvar)
+    lvmframe.setFiberTrace(cent_trace=cent_trace, width_trace=width_trace)
+    lvmframe.setWaveTrace(wave_trace=wave_trace, lsf_trace=lsf_trace)
+    lvmframe.setSuperflat(superflat=flat._data)
+    # write lvmFrame
+    lvmframe.writeFitsData(out_lvmframe)
+
+    return rss, lvmframe
 
 
 def combineRSS_drp(in_rsss, out_rss, method="mean"):
