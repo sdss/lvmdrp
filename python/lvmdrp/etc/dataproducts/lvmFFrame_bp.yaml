@@ -1,8 +1,8 @@
 name: lvmFFrame
 short: the flux-calibrated science frames
 description: |
-  The per-exposure science frame after extraction, sky subtraction, and flux calibration.
-  Made from input lvmSFrame files. Note that the 'F' in the name means Flux-calibrated.
+  The per-exposure science frame after extraction, flatfielding, and flux calibration.
+  Made from input lvmCFrame files. Note that the 'F' in the name means Flux-calibrated.
 location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[MJD]/
 created_by: module.py
 used_by: module.py
@@ -71,8 +71,15 @@ hdu0:
     comment: Poisson ratio statistic in Z3 camera
 hdu1:
   name: FLUX
-  description: Sky-subtracted flux in units of 10(-17) erg/s/cm2/Ang/fiber
+  description: flux in units of 10(-17) erg/s/cm2/Ang/fiber
   is_image: true
+  header:
+  - key: BUNIT
+    comment: flux units
+  - key: BSCALE
+    comment: linear scaling factor
+  - key: BZERO
+    comment: zero point
   shape: NWAVE x NFIBER
 hdu2:
   name: IVAR
@@ -190,24 +197,3 @@ hdu5:
       type: uint16
       description: the status of the fiber, 0=good, 1=dead, 2=low, 3=repair, 4=short
       unit: null
-hdu6:
-  name: SKY
-  description: Sky flux in units of 10(-17) erg/s/cm2/Ang/fiber
-  is_image: true
-  shape: NWAVE x NFIBER
-hdu7:
-  name: SUPERSKY
-  description: super sky information
-  is_image: false
-  shape: BINARY FITS TABLE
-  columns:
-    AIRWAVE:
-      name: AIRWAVE
-      type: float32
-      unit: ''
-      description: ''
-    FLUX:
-      name: FLUX
-      type: float32
-      unit: ''
-      description: ''

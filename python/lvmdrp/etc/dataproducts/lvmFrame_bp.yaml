@@ -23,6 +23,13 @@ hdu0:
 hdu1:
   name: FLUX
   description: Flux in flat fielded electrons
+  header:
+  - key: BUNIT
+    comment: flux units
+  - key: BSCALE
+    comment: linear scaling factor
+  - key: BZERO
+    comment: zero point
   is_image: true
   shape: CCDROW x NFIBER
 hdu2:
@@ -37,7 +44,7 @@ hdu3:
   shape: CCDROW x NFIBER
 hdu4:
   name: WAVE_TRACE
-  description: wavelength solution traceset in log-10 Angstroms (air)
+  description: wavelength solution traceset Angstroms (air)
   is_image: false
   shape: BINARY FITS TABLE
   columns:
@@ -63,7 +70,7 @@ hdu4:
       description: 'polynomial coefficients'
 hdu5:
   name: LSF_TRACE
-  description: wavelength solution traceset in log-10 Angstroms (air)
+  description: LSF solution traceset Angstroms
   is_image: false
   shape: BINARY FITS TABLE
   columns:

@@ -2,7 +2,7 @@ name: lvmSFrame
 short: the sky-subtracted science frames
 description: |
     The science frames after extraction, wavelength calibration, and camera
-    combination has been applied. Made from the lvmCFrame files.
+    combination has been applied. Made from the lvmFFrame files.
     Note that the 'S' in the name means Sky-Subtracted.
 location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[MJD]/
 created_by: module.py
@@ -26,6 +26,13 @@ hdu1:
   name: FLUX
   description: Sky-subtracted flux in flat fielded electrons
   is_image: true
+  header:
+  - key: BUNIT
+    comment: flux units
+  - key: BSCALE
+    comment: linear scaling factor
+  - key: BZERO
+    comment: zero point
   shape: NWAVE x NFIBER
 hdu2:
   name: IVAR

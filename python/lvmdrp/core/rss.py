@@ -2336,21 +2336,23 @@ class lvmFrame(RSS):
             self._slitmap = Table(hdulist["SLITMAP"].data)
 
     def writeFitsData(self, out_file):
-        bp = dp.load_blueprint(name="lvmFrame")
-        hdulist = dp.dump_template(dataproduct_bp=bp, save=False)
-
-        # fill in template
-        hdulist["PRIMARY"].header.update(self._header)
-        hdulist["FLUX"].data = self._data
-        hdulist["IVAR"].data = numpy.divide(1, self._error**2, where=self._error != 0, out=numpy.zeros_like(self._error))
-        hdulist["MASK"].data = self._mask.astype("uint8")
-        hdulist["WAVE_TRACE"] = pyfits.BinTableHDU(data=self._wave_trace, name="WAVE_TRACE")
-        hdulist["LSF_TRACE"] = pyfits.BinTableHDU(data=self._lsf_trace, name="LSF_TRACE")
-        hdulist["CENT_TRACE"] = pyfits.BinTableHDU(data=self._cent_trace, name="CENT_TRACE")
-        hdulist["WIDTH_TRACE"] = pyfits.BinTableHDU(data=self._width_trace, name="WIDTH_TRACE")
-        hdulist["SUPERFLAT"].data = self._superflat
-        hdulist["SLITMAP"] = pyfits.BinTableHDU(data=self._slitmap, name="SLITMAP")
-        hdulist.writeto(out_file, overwrite=True)
+        # update flux header
+        for kw in ["BUNIT", "BSCALE", "BZERO"]:
+            if kw in self._header:
+                self._template["FLUX"].header[kw] = self._header.pop(kw, None)
+        # update primary header
+        self._template["PRIMARY"].header.update(self._header)
+        # fill in rest of the template
+        self._template["FLUX"].data = self._data
+        self._template["IVAR"].data = numpy.divide(1, self._error**2, where=self._error != 0, out=numpy.zeros_like(self._error))
+        self._template["MASK"].data = self._mask.astype("uint8")
+        self._template["WAVE_TRACE"] = pyfits.BinTableHDU(data=self._wave_trace, name="WAVE_TRACE")
+        self._template["LSF_TRACE"] = pyfits.BinTableHDU(data=self._lsf_trace, name="LSF_TRACE")
+        self._template["CENT_TRACE"] = pyfits.BinTableHDU(data=self._cent_trace, name="CENT_TRACE")
+        self._template["WIDTH_TRACE"] = pyfits.BinTableHDU(data=self._width_trace, name="WIDTH_TRACE")
+        self._template["SUPERFLAT"].data = self._superflat
+        self._template["SLITMAP"] = pyfits.BinTableHDU(data=self._slitmap, name="SLITMAP")
+        self._template.writeto(out_file, overwrite=True)
 
 
 class lvmCFrame(RSS):
