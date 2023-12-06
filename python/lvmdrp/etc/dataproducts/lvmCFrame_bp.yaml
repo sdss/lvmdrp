@@ -46,12 +46,33 @@ hdu4:
   description: wavelength solution in Angstroms (air)
   is_image: true
   shape: NWAVE
+hdu5:
+  name: LSF_TRACE
+  description: LSF solution traceset Angstroms
+  is_image: false
+  shape: BINARY FITS TABLE
+  columns:
+    FUNC:
+      name: FUNC
+      type: str
+      unit: null
+      description: 'polynomial function type: poly, chebyshev, legendre'
+    XMIN:
+      name: XMIN
+      type: float32
+      unit: pix
+      description: 'initial pixel in the LSF trace'
+    XMAX:
+      name: XMAX
+      type: float32
+      unit: pix
+      description: 'final pixel in the LSF trace'
+    COEFF:
+      name: COEFF
+      type: float32
+      unit: null
+      description: 'polynomial coefficients'
 hdu6:
-  name: SUPERFLAT
-  description: superflat vector from quartz lamps
-  is_image: true
-  shape: NWAVE x NFIBER
-hdu7:
   name: SLITMAP
   description: slitmap table describing fiber positions for this exposure
   is_image: false
@@ -152,3 +173,13 @@ hdu7:
       type: uint16
       description: the status of the fiber, 0=good, 1=dead, 2=low, 3=repair, 4=short
       unit: null
+    RA:
+      name: ra
+      type: float64
+      description: the right ascension of the fiber in J2000
+      unit: deg
+    DEC:
+      name: dec
+      type: float64
+      description: the declination of the fiber in J2000
+      unit: deg

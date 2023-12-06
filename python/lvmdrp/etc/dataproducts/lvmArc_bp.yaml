@@ -36,7 +36,7 @@ hdu3:
   is_image: true
   shape: NFIBER+1 x NLAMP
 hdu4:
-  name: WSET
+  name: WAVE_TRACE
   description: wavelength solution as Legendre polynomials for all fibers
   is_image: false
   shape: BINARY FITS TABLE
@@ -61,3 +61,29 @@ hdu4:
       type: float64
       unit: ''
       description: ''
+hdu5:
+  name: LSF_TRACE
+  description: LSF solution traceset Angstroms
+  is_image: false
+  shape: BINARY FITS TABLE
+  columns:
+    FUNC:
+      name: FUNC
+      type: str
+      unit: null
+      description: 'polynomial function type: poly, chebyshev, legendre'
+    XMIN:
+      name: XMIN
+      type: float32
+      unit: pix
+      description: 'initial pixel in the LSF trace'
+    XMAX:
+      name: XMAX
+      type: float32
+      unit: pix
+      description: 'final pixel in the LSF trace'
+    COEFF:
+      name: COEFF
+      type: float32
+      unit: null
+      description: 'polynomial coefficients'  

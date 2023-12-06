@@ -23,33 +23,63 @@ hdu0:
     value: 0
     comment: number of array dimensions
 hdu1:
-  name: FLUX
-  description: Sky-subtracted flux in flat fielded electrons
+  name: WAVE
+  description: wavelength solution in Angstroms (air)
   is_image: true
-  header:
-  - key: BUNIT
-    comment: flux units
-  - key: BSCALE
-    comment: linear scaling factor
-  - key: BZERO
-    comment: zero point
-  shape: NWAVE x NFIBER
+  shape: NWAVE
 hdu2:
-  name: IVAR
-  description: Inverse variance (1/sigma2) for the above
-  is_image: true
-  shape: NWAVE x NFIBER
+  name: LSF_TRACE
+  description: LSF solution traceset Angstroms
+  is_image: false
+  shape: BINARY FITS TABLE
+  columns:
+    FUNC:
+      name: FUNC
+      type: str
+      unit: null
+      description: 'polynomial function type: poly, chebyshev, legendre'
+    XMIN:
+      name: XMIN
+      type: float32
+      unit: pix
+      description: 'initial pixel in the LSF trace'
+    XMAX:
+      name: XMAX
+      type: float32
+      unit: pix
+      description: 'final pixel in the LSF trace'
+    COEFF:
+      name: COEFF
+      type: float32
+      unit: null
+      description: 'polynomial coefficients'
 hdu3:
-  name: MASK
-  description: the quality bitmask for each fiber pixel
+  name: SKY
+  description: sky flux in flux-calibrated units (10(-17) erg/s/cm2/Ang/fiber)
   is_image: true
   shape: NWAVE x NFIBER
 hdu4:
-  name: WAVE
-  description: wavelength solution in log-10 Angstroms (vacuum)
+  name: SKY_IVAR
+  description: sky inverse variance (1/sigma^2) in flux-calibrated units (10(-17) erg/s/cm2/Ang/fiber)
   is_image: true
-  shape: NWAVE
+  shape: NWAVE x NFIBER
 hdu5:
+  name: SUPERSKY
+  description: super sky information
+  is_image: false
+  shape: BINARY FITS TABLE
+  columns:
+    AIRWAVE:
+      name: AIRWAVE
+      type: float32
+      unit: '(10(-17) erg/s/cm2/Ang/fiber)'
+      description: 'super sampled wavelength grid'
+    FLUX:
+      name: FLUX
+      type: float32
+      unit: '(10(-17) erg/s/cm2/Ang/fiber)'
+      description: 'spline fitting in super sampled grid'
+hdu7:
   name: SLITMAP
   description: slitmap table describing fiber positions for this exposure
   is_image: false
@@ -150,24 +180,13 @@ hdu5:
       type: uint16
       description: the status of the fiber, 0=good, 1=dead, 2=low, 3=repair, 4=short
       unit: null
-hdu6:
-  name: SKY
-  description: sky flux in flat-fielded electrons
-  is_image: true
-  shape: NWAVE x NFIBER
-hdu7:
-  name: SUPERSKY
-  description: super sky information
-  is_image: false
-  shape: BINARY FITS TABLE
-  columns:
-    AIRWAVE:
-      name: AIRWAVE
-      type: float32
-      unit: ''
-      description: ''
-    FLUX:
-      name: FLUX
-      type: float32
-      unit: ''
-      description: ''
+    RA:
+      name: ra
+      type: float64
+      description: the right ascension of the fiber in J2000
+      unit: deg
+    DEC:
+      name: dec
+      type: float64
+      description: the declination of the fiber in J2000
+      unit: deg
