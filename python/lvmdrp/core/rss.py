@@ -765,6 +765,75 @@ class RSS(FiberRows):
         
         return spec
 
+    def extendData(self, new_wave):
+        """Extends data, error, mask, and sky to new wavelength array
+        
+        Given a new wavelength array `new_wave`, this function extends
+        the data, error, mask, and sky arrays to the new wavelength array,
+        filling in the new pixels with NaNs.
+
+        Parameters
+        ----------
+        new_wave : array-like
+            New wavelength array to extend to
+
+        Returns
+        -------
+        self : RSS
+            Returns self with extended arrays
+        """
+        if self._wave is None:
+            raise ValueError("No wavelength array found in RSS object")
+        
+        if self._data is None:
+            raise ValueError("No data array found in RSS object")
+        
+        if len(new_wave) == 0:
+            raise ValueError("New wavelength array is empty")
+
+        # find positions in new wavelength array that contain self._wave
+        ipix, fpix = numpy.searchsorted(new_wave, self._wave[[0, -1]], side="left")
+
+        # define new arrays filled with NaNs
+        new_data = numpy.full((self._data.shape[0], new_wave.size), numpy.nan, dtype=numpy.float32)
+        new_data[:, ipix:fpix+1] = self._data
+        if self._error is not None:
+            new_error = numpy.full((self._error.shape[0], new_wave.size), numpy.nan, dtype=numpy.float32)
+            new_error[:, ipix:fpix+1] = self._error
+        else:
+            new_error = None
+        if self._mask is not None:
+            new_mask = numpy.full((self._mask.shape[0], new_wave.size), False, dtype=bool)
+            new_mask[:, ipix:fpix+1] = self._mask
+        else:
+            new_mask = None
+        if self._sky is not None:
+            new_sky = numpy.full((self._sky.shape[0], new_wave.size), numpy.nan, dtype=numpy.float32)
+            new_sky[:, ipix:fpix+1] = self._sky
+        else:
+            new_sky = None
+        if self._sky_error is not None:
+            new_sky_error = numpy.full((self._sky_error.shape[0], new_wave.size), numpy.nan, dtype=numpy.float32)
+            new_sky_error[:, ipix:fpix+1] = self._sky_error
+        else:
+            new_sky_error = None
+        if self._inst_fwhm is not None:
+            new_inst_fwhm = numpy.full((self._inst_fwhm.shape[0], new_wave.size), numpy.nan, dtype=numpy.float32)
+            new_inst_fwhm[:, ipix:fpix+1] = self._inst_fwhm
+        else:
+            new_inst_fwhm = None
+
+        # set new arrays
+        self._data = new_data
+        self._error = new_error
+        self._mask = new_mask
+        self._sky = new_sky
+        self._sky_error = new_sky_error
+        self._inst_fwhm = new_inst_fwhm
+        self._wave = new_wave
+    
+        return self
+
     def combineRSS(self, rss_in, method="mean", replace_error=1e10):
         dim = rss_in[0]._data.shape
         data = numpy.zeros((len(rss_in), dim[0], dim[1]), dtype=numpy.float32)
