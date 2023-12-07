@@ -87,9 +87,9 @@ class RSS(FiberRows):
         Parameters
         ----------
         rss_b : RSS
-            RSS object for the blue channel
+            RSS object for the b channel
         rss_r : RSS
-            RSS object for the red channel
+            RSS object for the r channel
         rss_z : RSS
             RSS object for the z channel
         use_weights : bool, optional
@@ -98,6 +98,7 @@ class RSS(FiberRows):
         Returns
         -------
         RSS
+            RSS object with data from all three channels
         """
         
         rsss = [rss_b, rss_r, rss_z]
@@ -112,13 +113,21 @@ class RSS(FiberRows):
         if numpy.all(numpy.isclose(sampling, sampling[0])):
             log.info(f"current wavelength sampling: min = {sampling.min():.2f}, max = {sampling.max():.2f}")
             # extend rss._data to new_wave filling with NaNs
-            rsss = [rss.extendData(new_wave) for rss in rsss]
-            fluxes = numpy.asarray([rss._data for rss in rsss])
-            errors = numpy.asarray([rss._error for rss in rsss])
-            masks = numpy.asarray([rss._mask for rss in rsss])
-            lsfs = numpy.asarray([rss._inst_fwhm for rss in rsss])
-            skies = numpy.asarray([rss._sky for rss in rsss])
-            sky_errors = numpy.asarray([rss._sky_error for rss in rsss])
+            fluxes, errors, masks, lsfs, skies, sky_errors = [], [], [], [], [], []
+            for rss in rsss:
+                rss = rss.extendData(new_wave)
+                fluxes.append(rss._data)
+                errors.append(rss._error)
+                masks.append(rss._mask)
+                lsfs.append(rss._inst_fwhm)
+                skies.append(rss._sky)
+                sky_errors.append(rss._sky_error)
+            fluxes = numpy.asarray(fluxes)
+            errors = numpy.asarray(errors)
+            masks = numpy.asarray(masks)
+            lsfs = numpy.asarray(lsfs)
+            skies = numpy.asarray(skies)
+            sky_errors = numpy.asarray(sky_errors)
         else:
             log.warning("merged wavelengths are not monotonic, interpolation needed")
             # compute the combined wavelengths
@@ -128,19 +137,26 @@ class RSS(FiberRows):
 
             # define interpolators
             log.info("interpolating RSS data in new wavelength array")
-            fluxes_f = [interpolate.interp1d(rss._wave, rss._data, axis=1, bounds_error=False, fill_value=numpy.nan) for rss in rsss]
-            errors_f = [interpolate.interp1d(rss._wave, rss._error, axis=1, bounds_error=False, fill_value=numpy.nan) for rss in rsss]
-            masks_f = [interpolate.interp1d(rss._wave, rss._mask, axis=1, kind="nearest", bounds_error=False, fill_value=0) for rss in rsss]
-            lsfs_f = [interpolate.interp1d(rss._wave, rss._inst_fwhm, axis=1, bounds_error=False, fill_value=numpy.nan) for rss in rsss]
-            sky_f = [interpolate.interp1d(rss._wave, rss._sky, axis=1, bounds_error=False, fill_value=numpy.nan) for rss in rsss]
-            sky_error_f = [interpolate.interp1d(rss._wave, rss._sky_error, axis=1, bounds_error=False, fill_value=numpy.nan) for rss in rsss]
-            # evaluate interpolators
-            fluxes = numpy.asarray([f(new_wave).astype("float32") for f in fluxes_f])
-            errors = numpy.asarray([f(new_wave).astype("float32") for f in errors_f])
-            masks = numpy.asarray([f(new_wave).astype("uint8") for f in masks_f])
-            lsfs = numpy.asarray([f(new_wave).astype("float32") for f in lsfs_f])
-            skies = numpy.asarray([f(new_wave).astype("float32") for f in sky_f])
-            sky_errors = numpy.asarray([f(new_wave).astype("float32") for f in sky_error_f])
+            fluxes, errors, masks, lsfs, skies, sky_errors = [], [], [], [], [], []
+            for rss in rsss:
+                f = interpolate.interp1d(rss._wave, rss._data, axis=1, bounds_error=False, fill_value=numpy.nan)
+                fluxes.append(f(new_wave).astype("float32"))
+                f = interpolate.interp1d(rss._wave, rss._error, axis=1, bounds_error=False, fill_value=numpy.nan)
+                errors.append(f(new_wave).astype("float32"))
+                f = interpolate.interp1d(rss._wave, rss._mask, axis=1, kind="nearest", bounds_error=False, fill_value=0)
+                masks.append(f(new_wave).astype("uint8"))
+                f = interpolate.interp1d(rss._wave, rss._inst_fwhm, axis=1, bounds_error=False, fill_value=numpy.nan)
+                lsfs.append(f(new_wave).astype("float32"))
+                f = interpolate.interp1d(rss._wave, rss._sky, axis=1, bounds_error=False, fill_value=numpy.nan)
+                skies.append(f(new_wave).astype("float32"))
+                f = interpolate.interp1d(rss._wave, rss._sky_error, axis=1, bounds_error=False, fill_value=numpy.nan)
+                sky_errors.append(f(new_wave).astype("float32"))
+            fluxes = numpy.asarray(fluxes)
+            errors = numpy.asarray(errors)
+            masks = numpy.asarray(masks)
+            lsfs = numpy.asarray(lsfs)
+            skies = numpy.asarray(skies)
+            sky_errors = numpy.asarray(sky_errors)
 
         # define weights for channel combination
         vars = errors ** 2
