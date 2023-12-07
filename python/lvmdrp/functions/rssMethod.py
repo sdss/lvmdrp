@@ -1716,120 +1716,6 @@ def combineRSS_drp(in_rsss, out_rss, method="mean"):
     combined_rss.writeFitsData(out_rss)
 
 
-def stack_rss(in_rsss: List[str], out_rss: str, axis: int = 0) -> RSS:
-    """stacks a list of RSS objects along a given axis
-
-    Parameters
-    ----------
-    in_rsss : List[str]
-        list of RSS file paths
-    out_rss : str
-        output RSS file path
-    axis : int, optional
-        axis along which to stack the RSS objects, by default 0
-
-    Returns
-    -------
-    RSS
-        stacked RSS object
-    """
-
-    # load and stack each extension
-    log.info(f"stacking frames in {','.join([os.path.basename(in_rss) for in_rss in in_rsss])} along axis {axis}")
-    hdrs = []
-    for i in range(len(in_rsss)):
-        rss = loadRSS(in_rsss[i])
-        if i == 0:
-            data_out = rss._data
-            if rss._error is not None:
-                error_out = rss._error
-            if rss._mask is not None:
-                mask_out = rss._mask
-            if rss._wave is not None:
-                wave_out = rss._wave
-            if rss._inst_fwhm is not None:
-                fwhm_out = rss._inst_fwhm
-            if rss._sky is not None:
-                sky_out = rss._sky
-            if rss._sky_error is not None:
-                sky_error_out = rss._sky_error
-            if rss._header is not None:
-                hdrs.append(Header(rss.getHeader()))
-            if rss._fluxcal is not None:
-                fluxcal_out = rss._fluxcal
-        else:
-            data_out = numpy.concatenate((data_out, rss._data), axis=axis)
-            if rss._wave is not None:
-                if len(wave_out.shape) == 2 and len(rss._wave.shape) == 2:
-                    wave_out = numpy.concatenate((wave_out, rss._wave), axis=axis)
-                elif len(wave_out.shape) == 1 and len(rss._wave.shape) == 1 and numpy.isclose(wave_out, rss._wave).all():
-                    wave_out = wave_out
-                else:
-                    raise ValueError(f"Cannot concatenate wavelength arrays of different shapes: {wave_out.shape} and {rss._wave.shape} or inhomogeneous wavelength arrays")
-            else:
-                wave_out = None
-            if rss._inst_fwhm is not None:
-                if len(fwhm_out.shape) == 2 and len(rss._inst_fwhm.shape) == 2:
-                    fwhm_out = numpy.concatenate((fwhm_out, rss._inst_fwhm), axis=axis)
-                elif len(fwhm_out.shape) == 1 and len(rss._inst_fwhm.shape) == 1 and numpy.isclose(fwhm_out, rss._inst_fwhm).all():
-                    fwhm_out = fwhm_out
-                else:
-                    raise ValueError(f"Cannot concatenate FWHM arrays of different shapes: {fwhm_out.shape} and {rss._inst_fwhm.shape} or inhomogeneous FWHM arrays")
-            else:
-                fwhm_out = None
-            if rss._error is not None:
-                error_out = numpy.concatenate((error_out, rss._error), axis=axis)
-            else:
-                error_out = None
-            if rss._mask is not None:
-                mask_out = numpy.concatenate((mask_out, rss._mask), axis=axis)
-            else:
-                mask_out = None
-            if rss._sky is not None:
-                sky_out = numpy.concatenate((sky_out, rss._sky), axis=axis)
-            else:
-                sky_out = None
-            if rss._sky_error is not None:
-                sky_error_out = numpy.concatenate((sky_error_out, rss._sky_error), axis=axis)
-            else:
-                sky_error_out = None
-            if rss._header is not None:
-                hdrs.append(Header(rss.getHeader()))
-            if rss._fluxcal is not None:
-                f = fluxcal_out.to_pandas()
-                fluxcal_out = Table.from_pandas(f.combine_first(rss._fluxcal.to_pandas()))
-            else:
-                fluxcal_out = None
-
-    # update header
-    log.info("updating header")
-    if len(hdrs) > 0:
-        hdr_out = combineHdr(hdrs)
-    else:
-        hdr_out = None
-    
-    # update slitmap
-    slitmap_out = rss._slitmap
-
-    # write output
-    log.info(f"writing stacked RSS to {os.path.basename(out_rss)}")
-    rss_out = RSS(
-        wave=wave_out,
-        data=data_out,
-        error=error_out,
-        mask=mask_out,
-        inst_fwhm=fwhm_out,
-        sky=sky_out,
-        sky_error=sky_error_out,
-        header=hdr_out.getHeader(),
-        slitmap=slitmap_out,
-        fluxcal=fluxcal_out
-    )
-    rss_out.writeFitsData(out_rss)
-
-    return rss_out
-
-
 def apertureFluxRSS_drp(
     in_rss, center_x, center_y, arc_radius, hdr_prefix, flux_type="mean,3900,4600"
 ):
@@ -3069,6 +2955,38 @@ def DAR_registerSDSS_drp(
         plt.plot(mean_wave, position_y, "ok")
         plt.plot(spec_y._wave, spec_y._data, "-k")
         plt.show()
+
+
+def stack_spectrographs(in_rsss: List[str], out_rss: str) -> RSS:
+    """Stacks the given RSS list spectrograph-wise
+
+    Given a list of RSS files, this function stacks them spectrograph-wise
+    (i.e. the RSS objects are stacked along the fiber ID axis). The output
+    RSS object will have the full set of fibers (i.e. 1944).
+
+    Parameters
+    ----------
+    in_rsss : List[str]
+        list of RSS file paths
+    out_rss : str
+        output RSS file path
+
+    Returns
+    -------
+    RSS
+        stacked RSS object
+    """
+
+    rsss = [loadRSS(in_rss) for in_rss in in_rsss]
+
+    log.info(f"stacking frames in {','.join([os.path.basename(in_rss) for in_rss in in_rsss])} along fiber ID axis")
+    rss_out = RSS.from_spectrographs(*rsss)
+
+    # write output
+    log.info(f"writing stacked RSS to {os.path.basename(out_rss)}")
+    rss_out.writeFitsData(out_rss)
+
+    return rss_out
 
 
 def join_spec_channels(in_rsss: List[str], out_rss: str, use_weights: bool = True):

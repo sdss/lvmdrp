@@ -12,7 +12,7 @@ from lvmdrp.core.constants import CONFIG_PATH
 from lvmdrp.core.apertures import Aperture
 from lvmdrp.core.cube import Cube
 from lvmdrp.core.fiberrows import FiberRows
-from lvmdrp.core.header import Header
+from lvmdrp.core.header import Header, combineHdr
 from lvmdrp.core.positionTable import PositionTable
 from lvmdrp.core.spectrum1d import Spectrum1D, wave_little_interpol
 
@@ -79,6 +79,113 @@ def _read_pixwav_map(lamp: str, camera: str, pixels=None, waves=None):
 
 
 class RSS(FiberRows):
+
+    @classmethod
+    def from_spectrographs(cls, rss_sp1, rss_sp2, rss_sp3):
+        """Stacks together RSS objects from the three spectrographs
+
+        Parameters
+        ----------
+        rss_sp1 : RSS
+            RSS object for spectrograph 1
+        rss_sp2 : RSS
+            RSS object for spectrograph 2
+        rss_sp3 : RSS
+            RSS object for spectrograph 3
+
+        Returns
+        -------
+        RSS
+            RSS object with data from all three spectrographs
+        """
+        # load and stack each extension
+        hdrs = []
+        rsss = [rss_sp1, rss_sp2, rss_sp3]
+        for i in range(len(rsss)):
+            rss = rsss[i]
+            if i == 0:
+                data_out = rss._data
+                if rss._error is not None:
+                    error_out = rss._error
+                if rss._mask is not None:
+                    mask_out = rss._mask
+                if rss._wave is not None:
+                    wave_out = rss._wave
+                if rss._inst_fwhm is not None:
+                    fwhm_out = rss._inst_fwhm
+                if rss._sky is not None:
+                    sky_out = rss._sky
+                if rss._sky_error is not None:
+                    sky_error_out = rss._sky_error
+                if rss._header is not None:
+                    hdrs.append(Header(rss.getHeader()))
+                if rss._fluxcal is not None:
+                    fluxcal_out = rss._fluxcal
+            else:
+                data_out = numpy.concatenate((data_out, rss._data), axis=0)
+                if rss._wave is not None:
+                    if len(wave_out.shape) == 2 and len(rss._wave.shape) == 2:
+                        wave_out = numpy.concatenate((wave_out, rss._wave), axis=0)
+                    elif len(wave_out.shape) == 1 and len(rss._wave.shape) == 1 and numpy.isclose(wave_out, rss._wave).all():
+                        wave_out = wave_out
+                    else:
+                        raise ValueError(f"Cannot concatenate wavelength arrays of different shapes: {wave_out.shape} and {rss._wave.shape} or inhomogeneous wavelength arrays")
+                else:
+                    wave_out = None
+                if rss._inst_fwhm is not None:
+                    if len(fwhm_out.shape) == 2 and len(rss._inst_fwhm.shape) == 2:
+                        fwhm_out = numpy.concatenate((fwhm_out, rss._inst_fwhm), axis=0)
+                    elif len(fwhm_out.shape) == 1 and len(rss._inst_fwhm.shape) == 1 and numpy.isclose(fwhm_out, rss._inst_fwhm).all():
+                        fwhm_out = fwhm_out
+                    else:
+                        raise ValueError(f"Cannot concatenate FWHM arrays of different shapes: {fwhm_out.shape} and {rss._inst_fwhm.shape} or inhomogeneous FWHM arrays")
+                else:
+                    fwhm_out = None
+                if rss._error is not None:
+                    error_out = numpy.concatenate((error_out, rss._error), axis=0)
+                else:
+                    error_out = None
+                if rss._mask is not None:
+                    mask_out = numpy.concatenate((mask_out, rss._mask), axis=0)
+                else:
+                    mask_out = None
+                if rss._sky is not None:
+                    sky_out = numpy.concatenate((sky_out, rss._sky), axis=0)
+                else:
+                    sky_out = None
+                if rss._sky_error is not None:
+                    sky_error_out = numpy.concatenate((sky_error_out, rss._sky_error), axis=0)
+                else:
+                    sky_error_out = None
+                if rss._header is not None:
+                    hdrs.append(Header(rss.getHeader()))
+                if rss._fluxcal is not None:
+                    f = fluxcal_out.to_pandas()
+                    fluxcal_out = Table.from_pandas(f.combine_first(rss._fluxcal.to_pandas()))
+                else:
+                    fluxcal_out = None
+
+        # update header
+        if len(hdrs) > 0:
+            hdr_out = combineHdr(hdrs)
+        else:
+            hdr_out = None
+        
+        # update slitmap
+        slitmap_out = rss._slitmap
+
+        return cls(
+            data=data_out,
+            error=error_out,
+            mask=mask_out,
+            wave=wave_out,
+            inst_fwhm=fwhm_out,
+            sky=sky_out,
+            sky_error=sky_error_out,
+            header=hdr_out._header,
+            slitmap=slitmap_out,
+            fluxcal=fluxcal_out,
+        )
 
     @classmethod
     def from_channels(cls, rss_b, rss_r, rss_z, use_weights=True):
