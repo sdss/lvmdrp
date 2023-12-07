@@ -93,7 +93,7 @@ class RSS(FiberRows):
         rss_z : RSS
             RSS object for the z channel
         use_weights : bool, optional
-            whether to use weights for channel combination, by default True
+            use inverse variance weights for channel combination, by default True
 
         Returns
         -------

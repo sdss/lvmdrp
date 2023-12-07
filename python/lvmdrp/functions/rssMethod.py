@@ -3072,18 +3072,21 @@ def DAR_registerSDSS_drp(
 
 
 def join_spec_channels(in_rsss: List[str], out_rss: str, use_weights: bool = True):
-    """combine the given RSS list through the overlaping wavelength range
+    """Stitch together the three RSS channels (brz) into a single RSS.
 
-    Run once per exposure, for one spectrograph at a time.
-    in_rss is a list of 3 files, one for each channel, for a given
-    exposure and spectrograph id.
+    Given a list of three rss files (one per channel), this function
+    stitches them together into a single RSS file. The output RSS file
+    will have the same number of fibers as the input RSS files, but
+    the wavelength range will be the union of the wavelength ranges
+    of the input RSS files.
 
     Parameters
     ----------
     in_rsss : array_like
         list of RSS file paths for each spectrograph channel
     out_rss : str
-        output RSS file path
+    use_weights : bool, optional
+        use inverse variance weights for channel combination, by default True
 
     Returns
     -------
