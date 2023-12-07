@@ -30,7 +30,7 @@ from lvmdrp.core.image import loadImage
 from lvmdrp.core.passband import PassBand
 from lvmdrp.core.plot import plt, create_subplots, save_fig, plot_wavesol_residuals, plot_wavesol_coeffs
 from lvmdrp.core.rss import RSS, _read_pixwav_map, loadRSS
-from lvmdrp.core.spectrum1d import Spectrum1D, wave_little_interpol, _spec_from_lines, _cross_match
+from lvmdrp.core.spectrum1d import Spectrum1D, _spec_from_lines, _cross_match
 from lvmdrp.external import ancillary_func
 from lvmdrp.utils import flatten
 from lvmdrp import log
@@ -3097,80 +3097,9 @@ def join_spec_channels(in_rsss: List[str], out_rss: str, use_weights: bool = Tru
     # set masked pixels to NaN
     [rss.apply_pixelmask() for rss in rsss]
 
-    # get wavelengths
-    log.info("merging wavelength arrays")
-    waves = [rss._wave for rss in rsss]
-    new_wave = numpy.unique(numpy.concatenate(waves))
-    sampling = numpy.diff(new_wave)
+    # combine channels
+    new_rss = RSS.from_channels(*rsss, use_weights=use_weights)
     
-    # optionally interpolate if the merged wavelengths are not monotonic
-    if numpy.all(numpy.isclose(sampling, sampling[0])):
-        log.info(f"current wavelength sampling: min = {sampling.min():.2f}, max = {sampling.max():.2f}")
-        # extend rss._data to new_wave filling with NaNs
-        rsss = [rss.extendData(new_wave) for rss in rsss]
-        fluxes = numpy.asarray([rss._data for rss in rsss])
-        errors = numpy.asarray([rss._error for rss in rsss])
-        masks = numpy.asarray([rss._mask for rss in rsss])
-        lsfs = numpy.asarray([rss._inst_fwhm for rss in rsss])
-        skies = numpy.asarray([rss._sky for rss in rsss])
-        sky_errors = numpy.asarray([rss._sky_error for rss in rsss])
-    else:
-        log.warning("merged wavelengths are not monotonic, interpolation needed")
-        # compute the combined wavelengths
-        new_wave = wave_little_interpol(waves)
-        sampling = numpy.diff(new_wave)
-        log.info(f"new wavelength sampling: min = {sampling.min():.2f}, max = {sampling.max():.2f}")
-
-        # define interpolators
-        log.info("interpolating RSS data in new wavelength array")
-        fluxes_f = [interpolate.interp1d(rss._wave, rss._data, axis=1, bounds_error=False, fill_value=numpy.nan) for rss in rsss]
-        errors_f = [interpolate.interp1d(rss._wave, rss._error, axis=1, bounds_error=False, fill_value=numpy.nan) for rss in rsss]
-        masks_f = [interpolate.interp1d(rss._wave, rss._mask, axis=1, kind="nearest", bounds_error=False, fill_value=0) for rss in rsss]
-        lsfs_f = [interpolate.interp1d(rss._wave, rss._inst_fwhm, axis=1, bounds_error=False, fill_value=numpy.nan) for rss in rsss]
-        sky_f = [interpolate.interp1d(rss._wave, rss._sky, axis=1, bounds_error=False, fill_value=numpy.nan) for rss in rsss]
-        sky_error_f = [interpolate.interp1d(rss._wave, rss._sky_error, axis=1, bounds_error=False, fill_value=numpy.nan) for rss in rsss]
-        # evaluate interpolators
-        fluxes = numpy.asarray([f(new_wave).astype("float32") for f in fluxes_f])
-        errors = numpy.asarray([f(new_wave).astype("float32") for f in errors_f])
-        masks = numpy.asarray([f(new_wave).astype("uint8") for f in masks_f])
-        lsfs = numpy.asarray([f(new_wave).astype("float32") for f in lsfs_f])
-        skies = numpy.asarray([f(new_wave).astype("float32") for f in sky_f])
-        sky_errors = numpy.asarray([f(new_wave).astype("float32") for f in sky_error_f])
-
-    # define weights for channel combination
-    vars = errors ** 2
-    log.info("combining channel data")
-    if use_weights:
-        weights = 1.0 / vars
-        weights = weights / bn.nansum(weights, axis=0)[None]
-
-        new_data = bn.nansum(fluxes * weights, axis=0)
-        new_inst_fwhm = bn.nansum(lsfs * weights, axis=0)
-        new_error = numpy.sqrt(bn.nansum(vars, axis=0))
-        new_mask = numpy.sum(masks, axis=0).astype("bool")
-        new_sky = bn.nansum(skies * weights, axis=0)
-        new_sky_error = numpy.sqrt(bn.nansum(sky_errors ** 2 * weights ** 2, axis=0))
-    else:
-        # channel-combine RSS data
-        new_data = bn.nanmean(fluxes, axis=0)
-        new_inst_fwhm = bn.nanmean(lsfs, axis=0)
-        new_error = numpy.sqrt(bn.nanmean(vars, axis=0))
-        new_mask = numpy.sum(masks, axis=0).astype("bool")
-        new_sky = bn.nansum(skies, axis=0)
-        new_sky_error = numpy.sqrt(bn.nanmean(sky_errors ** 2, axis=0))
-
-    # create RSS
-    new_hdr = rsss[0]._header.copy()
-    for rss in rsss[1:]:
-        new_hdr.update(rss._header)
-    new_hdr["NAXIS1"] = new_data.shape[1]
-    new_hdr["NAXIS2"] = new_data.shape[0]
-    new_hdr["CCD"] = ",".join([rss._header["CCD"][0] for rss in rsss])
-    wcs = WCS(new_hdr)
-    wcs.spectral.wcs.cdelt[0] = new_wave[1] - new_wave[0]
-    wcs.spectral.wcs.crval[0] = new_wave[0]
-    new_hdr.update(wcs.to_header())
-    new_rss = RSS(data=new_data, error=new_error, mask=new_mask, wave=new_wave, inst_fwhm=new_inst_fwhm, sky=new_sky, sky_error=new_sky_error, header=new_hdr)
     # write output RSS
     if out_rss is not None:
         log.info(f"writing output RSS to {os.path.basename(out_rss)}")
