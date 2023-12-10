@@ -12,6 +12,7 @@ from lvmdrp.core.constants import CONFIG_PATH
 from lvmdrp.core.apertures import Aperture
 from lvmdrp.core.cube import Cube
 from lvmdrp.core.fiberrows import FiberRows
+from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.core.header import Header, combineHdr
 from lvmdrp.core.positionTable import PositionTable
 from lvmdrp.core.spectrum1d import Spectrum1D, wave_little_interpol
@@ -391,6 +392,8 @@ class RSS(FiberRows):
         sky_error=None,
         shape=None,
         size=None,
+        cent_trace=None,
+        width_trace=None,
         arc_position_x=None,
         arc_position_y=None,
         slitmap=None,
@@ -429,9 +432,31 @@ class RSS(FiberRows):
             self._sky = sky
         if sky_error is not None:
             self._sky_error = sky_error
-        
+
+        self.set_cent_trace(cent_trace)
+        self.set_width_trace(width_trace)
         self.setSlitmap(slitmap)
         self.set_fluxcal(fluxcal)
+
+    def _trace_to_coeff_table(self, trace):
+        """Converts a given trace into its polynomial coefficients representation as an Astropy Table"""
+        if isinstance(trace, TraceMask):
+            coeffs = trace._coeffs
+            columns = [
+                pyfits.Column(name="FUNC", format="A10", array=numpy.asarray([trace._poly_kind] * self._fibers)),
+                pyfits.Column(name="XMIN", format="I", unit="pix", array=numpy.asarray([0] * self._fibers)),
+                pyfits.Column(name="XMAX", format="I", unit="pix", array=numpy.asarray([self._data.shape[1]-1] * self._fibers)),
+                pyfits.Column(name="COEFF", format=f"{coeffs.shape[1]}E", dim=f"({coeffs.shape[0]},)", array=trace._coeffs)
+            ]
+            self._trace = Table(pyfits.BinTableHDU.from_columns(columns).data)
+            return self._trace
+        elif isinstance(trace, pyfits.BinTableHDU):
+            self._trace = Table(trace.data)
+            return self._trace
+        elif trace is None:
+            return None
+        else:
+            raise TypeError("trace must be lvmdrp.core.tracemask.TraceMask or None")
 
     def __mul__(self, other):
         """
@@ -704,6 +729,8 @@ class RSS(FiberRows):
         extension_error=None,
         extension_wave=None,
         extension_fwhm=None,
+        extension_cent=None,
+        extension_width=None,
         extension_sky=None,
         extension_skyerror=None,
         extension_hdr=None,
@@ -736,6 +763,8 @@ class RSS(FiberRows):
             and extension_error is None
             and extension_wave is None
             and extension_fwhm is None
+            and extension_cent is None
+            and extension_width is None
             and extension_sky is None
             and extension_skyerror is None
             and extension_slitmap is None
@@ -755,6 +784,10 @@ class RSS(FiberRows):
                         self.setWave(hdu[i].data.astype("float32"))
                     if hdu[i].header["EXTNAME"].split()[0] == "INSTFWHM":
                         self.setInstFWHM(hdu[i].data.astype("float32"))
+                    if hdu[i].header["EXTNAME"].split()[0] == "TRACE_CENT":
+                        self.set_cent_trace(hdu[i])
+                    if hdu[i].header["EXTNAME"].split()[0] == "TRACE_WIDTH":
+                        self.set_width_trace(hdu[i])
                     if hdu[i].header["EXTNAME"].split()[0] == "SLITMAP":
                         self.setSlitmap(Table(hdu[i].data))
                     if hdu[i].header["EXTNAME"].split()[0] == "SKY":
@@ -779,6 +812,10 @@ class RSS(FiberRows):
                 self.setWave(hdu[extension_wave].data.astype("float32"))
             if extension_fwhm is not None:
                 self.setInstFWHM(hdu[extension_fwhm].data.astype("float32"))
+            if extension_cent is not None:
+                self.set_cent_trace(hdu[extension_cent])
+            if extension_width is not None:
+                self.set_width_trace(hdu[extension_width])
             if extension_slitmap is not None:
                 self.setSlitmap(Table(hdu[extension_slitmap].data))
             if extension_sky is not None:
@@ -801,6 +838,8 @@ class RSS(FiberRows):
         extension_error=None,
         extension_wave=None,
         extension_fwhm=None,
+        extension_cent=None,
+        extension_width=None,
         extension_sky=None,
         extension_skyerror=None,
         extension_slitmap=None,
@@ -838,7 +877,7 @@ class RSS(FiberRows):
         if self._sky_error is not None:
             self._sky_error = self._sky_error.astype(numpy.float32)
 
-        hdus = [None, None, None, None, None, None, None, None, None]  # create empty list for hdu storage
+        hdus = [None, None, None, None, None, None, None, None, None, None, None]  # create empty list for hdu storage
 
         # create primary hdus and image hdus
         # data hdu
@@ -847,6 +886,9 @@ class RSS(FiberRows):
             and extension_error is None
             and extension_mask is None
             and extension_wave is None
+            and extension_fwhm is None
+            and extension_cent is None
+            and extension_width is None
             and extension_slitmap is None
             and extension_sky is None
             and extension_skyerror is None
@@ -861,14 +903,18 @@ class RSS(FiberRows):
                 hdus[3] = pyfits.ImageHDU(self._error, name="ERROR")
             if self._mask is not None:
                 hdus[4] = pyfits.ImageHDU(self._mask.astype("uint8"), name="BADPIX")
+            if self._cent_trace is not None:
+                hdus[5] = pyfits.BinTableHDU(self._cent_trace, name="TRACE_CENT")
+            if self._width_trace is not None:
+                hdus[6] = pyfits.BinTableHDU(self._width_trace, name="TRACE_WIDTH")
             if self._slitmap is not None:
-                hdus[5] = pyfits.BinTableHDU(self._slitmap, name="SLITMAP")
+                hdus[7] = pyfits.BinTableHDU(self._slitmap, name="SLITMAP")
             if self._sky is not None:
-                hdus[6] = pyfits.ImageHDU(self._sky, name="SKY")
+                hdus[8] = pyfits.ImageHDU(self._sky, name="SKY")
             if self._sky_error is not None:
-                hdus[7] = pyfits.ImageHDU(self._sky_error, name="SKY_ERROR")
+                hdus[9] = pyfits.ImageHDU(self._sky_error, name="SKY_ERROR")
             if self._fluxcal is not None:
-                hdus[8] = pyfits.BinTableHDU(self._fluxcal, name="FLUXCAL")
+                hdus[10] = pyfits.BinTableHDU(self._fluxcal, name="FLUXCAL")
         else:
             if extension_data == 0:
                 hdus[0] = pyfits.PrimaryHDU(self._data)
@@ -900,6 +946,18 @@ class RSS(FiberRows):
                 hdu = pyfits.PrimaryHDU(self._error)
             elif extension_error > 0 and extension_error is not None:
                 hdus[extension_error] = pyfits.ImageHDU(self._error, name="ERROR")
+
+            # trace_cent hdu
+            if extension_cent > 0 and extension_cent is not None:
+                hdus[extension_cent] = pyfits.BinTableHDU(self._cent_trace, name="TRACE_CENT")
+            else:
+                raise ValueError("extension_cent must be larger than 0")
+
+            # trace_width hdu
+            if extension_width > 0 and extension_width is not None:
+                hdus[extension_width] = pyfits.BinTableHDU(self._width_trace, name="TRACE_WIDTH")
+            else:
+                raise ValueError("extension_width must be larger than 0")
 
             # slitmap hdu
             if extension_slitmap == 0:
@@ -2493,6 +2551,19 @@ class RSS(FiberRows):
     def get_fluxcal(self):
         return self._fluxcal
 
+    def get_cent_trace(self):
+        return self._cent_trace
+    
+    def set_cent_trace(self, cent_trace):
+        self._cent_trace = self._trace_to_coeff_table(cent_trace)
+        return self._cent_trace
+
+    def get_width_trace(self):
+        return self._width_trace
+    
+    def set_width_trace(self, width_trace):
+        self._width_trace = self._trace_to_coeff_table(width_trace)
+        return self._width_trace
 
 def loadRSS(infile, extension_data=None, extension_mask=None, extension_error=None, extension_sky=None):
     rss = RSS()
@@ -2541,24 +2612,6 @@ class lvmFrame(RSS):
         if header is not None:
             self.setHeader(header, **kwargs)
     
-    def _convertTrace(self, trace):
-        """Converts a given trace into its polynomial coefficients representation"""
-        if isinstance(trace, FiberRows):
-            coeffs = trace._coeffs
-            columns = [
-                pyfits.Column(name="FUNC", format="A10", array=numpy.asarray([trace._poly_kind] * self._fibers)),
-                pyfits.Column(name="XMIN", format="I", unit="pix", array=numpy.asarray([0] * self._fibers)),
-                pyfits.Column(name="XMAX", format="I", unit="pix", array=numpy.asarray([self._data.shape[1]-1] * self._fibers)),
-                pyfits.Column(name="COEFF", format=f"{coeffs.shape[1]}E", dim=f"({coeffs.shape[0]},)", array=trace._coeffs)
-            ]
-            self._trace = Table(pyfits.BinTableHDU.from_columns(columns).data)
-            return self._trace
-        elif isinstance(trace, Table):
-            self._trace = trace
-            return self._trace
-        else:
-            raise TypeError("wave_trace must be lvmdrp.core.fiberrows.FiberRows or an Astropy Table")
-
     def setHeader(self, orig_header, **kwargs):
         """Set header"""
         blueprint = dp.load_blueprint(name="lvmFrame")
@@ -2587,8 +2640,8 @@ class lvmFrame(RSS):
 
     def setWaveTrace(self, wave_trace, lsf_trace):
         """Set wavelength/LSF trace representation"""
-        self._wave_trace = self._convertTrace(wave_trace)
-        self._lsf_trace = self._convertTrace(lsf_trace)
+        self._wave_trace = self._trace_to_coeff_table(wave_trace)
+        self._lsf_trace = self._trace_to_coeff_table(lsf_trace)
         return self._wave_trace, self._lsf_trace
 
     def getSuperflat(self):
@@ -2603,18 +2656,18 @@ class lvmFrame(RSS):
     def getFiberTrace(self):
         """Get fiber centroid/width trace representation as FiberRows"""
         if self._cent_trace is not None:
-            cent_trace = FiberRows.from_coeff_table(self._cent_trace)
+            cent_trace = TraceMask.from_coeff_table(self._cent_trace)
         else:
             cent_trace = None
         if self._width_trace is not None:
-            width_trace = FiberRows.from_coeff_table(self._wave_trace)
+            width_trace = TraceMask.from_coeff_table(self._wave_trace)
         else:
             width_trace = None
         return cent_trace, width_trace
 
     def setFiberTrace(self, cent_trace, width_trace):
-        self._cent_trace = self._convertTrace(cent_trace)
-        self._width_trace = self._convertTrace(width_trace)
+        self._cent_trace = self._trace_to_coeff_table(cent_trace)
+        self._width_trace = self._trace_to_coeff_table(width_trace)
         return self._cent_trace, self._width_trace
 
     def loadFitsData(self, in_file):
@@ -2681,24 +2734,6 @@ class lvmCFrame(RSS):
             self.setHeader(header, **kwargs)
         else:
             self._header = None
-
-    def _convertTrace(self, trace):
-        """Converts a given trace into its polynomial coefficients representation"""
-        if isinstance(trace, FiberRows):
-            coeffs = trace._coeffs
-            columns = [
-                pyfits.Column(name="FUNC", format="A10", array=numpy.asarray([trace._poly_kind] * self._fibers)),
-                pyfits.Column(name="XMIN", format="I", unit="pix", array=numpy.asarray([0] * self._fibers)),
-                pyfits.Column(name="XMAX", format="I", unit="pix", array=numpy.asarray([self._data.shape[1]-1] * self._fibers)),
-                pyfits.Column(name="COEFF", format=f"{coeffs.shape[1]}E", dim=f"({coeffs.shape[0]},)", array=trace._coeffs)
-            ]
-            self._trace = Table(pyfits.BinTableHDU.from_columns(columns).data)
-            return self._trace
-        elif isinstance(trace, Table):
-            self._trace = trace
-            return self._trace
-        else:
-            raise TypeError("wave_trace must be lvmdrp.core.fiberrows.FiberRows or an Astropy Table")
 
     def setHeader(self, orig_header, **kwargs):
         """Set header"""
