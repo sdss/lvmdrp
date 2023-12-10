@@ -18,6 +18,9 @@ class TraceMask(FiberRows):
         arc_position_y=None,
         good_fibers=None,
         fiber_type=None,
+        coeffs=None,
+        poly_kind=None,
+        poly_deg=None
     ):
         FiberRows.__init__(
             self,
@@ -31,6 +34,9 @@ class TraceMask(FiberRows):
             arc_position_y,
             good_fibers,
             fiber_type,
+            coeffs,
+            poly_kind,
+            poly_deg
         )
 
     def getRound(self):
