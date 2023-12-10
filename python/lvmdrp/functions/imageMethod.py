@@ -2455,14 +2455,14 @@ def extract_spectra(
 
     trace_mask = TraceMask()
     trace_mask.loadFitsData(in_trace)
-    trace_fwhm = TraceMask()
 
     if method == "optimal":
         # check if fwhm trace is given and exists
+        trace_fwhm = TraceMask()
         if in_fwhm is None or not os.path.isfile(in_fwhm):
             trace_fwhm.setData(data=numpy.ones(trace_mask._data.shape) * float(fwhm))
         else:
-            trace_fwhm.loadFitsData(in_fwhm, extension_data=0)
+            trace_fwhm.loadFitsData(in_fwhm)
         
         # set up parallel run
         if parallel == "auto":
@@ -2507,6 +2507,7 @@ def extract_spectra(
                 trace_mask, trace_fwhm, plot_fig=plot_fig
             )
     elif method == "aperture":
+        trace_fwhm = None
         (data, error, mask) = img.extractSpecAperture(trace_mask, aperture)
         
         # apply aperture correction given in in_acorr
@@ -2526,32 +2527,56 @@ def extract_spectra(
         mask=mask,
         error=error,
         good_fibers=trace_mask._good_fibers,
+        cent_trace=trace_mask,
+        width_trace=trace_fwhm,
         header=img.getHeader(),
     )
     rss.setHdrValue("NAXIS2", data.shape[0])
     rss.setHdrValue("NAXIS1", data.shape[1])
     rss.setHdrValue("DISPAXIS", 1)
+    rss.setHdrValue(
+        "HIERARCH FIBER CENT MIN",
+        numpy.nanmin(trace_mask._data[rss._good_fibers]),
+    )
+    rss.setHdrValue(
+        "HIERARCH FIBER CENT MAX",
+        numpy.nanmax(trace_mask._data[rss._good_fibers]),
+    )
+    rss.setHdrValue(
+        "HIERARCH FIBER CENT AVG",
+        numpy.nanmean(trace_mask._data[rss._good_fibers]) if data.size != 0 else 0,
+    )
+    rss.setHdrValue(
+        "HIERARCH FIBER CENT MED",
+        numpy.nanmedian(trace_mask._data[rss._good_fibers])
+        if data.size != 0
+        else 0,
+    )
+    rss.setHdrValue(
+        "HIERARCH FIBER CENT SIG",
+        numpy.std(trace_mask._data[rss._good_fibers]) if data.size != 0 else 0,
+    )
     if method == "optimal":
         rss.setHdrValue(
-            "HIERARCH PIPE CDISP FWHM MIN",
+            "HIERARCH FIBER WIDTH MIN",
             numpy.nanmin(trace_fwhm._data[rss._good_fibers]),
         )
         rss.setHdrValue(
-            "HIERARCH PIPE CDISP FWHM MAX",
+            "HIERARCH FIBER WIDTH MAX",
             numpy.nanmax(trace_fwhm._data[rss._good_fibers]),
         )
         rss.setHdrValue(
-            "HIERARCH PIPE CDISP FWHM AVG",
+            "HIERARCH FIBER WIDTH AVG",
             numpy.nanmean(trace_fwhm._data[rss._good_fibers]) if data.size != 0 else 0,
         )
         rss.setHdrValue(
-            "HIERARCH PIPE CDISP FWHM MED",
+            "HIERARCH FIBER WIDTH MED",
             numpy.nanmedian(trace_fwhm._data[rss._good_fibers])
             if data.size != 0
             else 0,
         )
         rss.setHdrValue(
-            "HIERARCH PIPE CDISP FWHM SIG",
+            "HIERARCH FIBER WIDTH SIG",
             numpy.std(trace_fwhm._data[rss._good_fibers]) if data.size != 0 else 0,
         )
     # propagate slitmap

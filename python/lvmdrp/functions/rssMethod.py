@@ -26,6 +26,7 @@ from lvmdrp.core.constants import CONFIG_PATH, ARC_LAMPS
 from lvmdrp.core.header import Header, combineHdr
 from lvmdrp.core.cube import Cube
 from lvmdrp.core.fiberrows import FiberRows
+from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.core.image import loadImage
 from lvmdrp.core.passband import PassBand
 from lvmdrp.core.plot import plt, create_subplots, save_fig, plot_wavesol_residuals, plot_wavesol_coeffs
@@ -771,7 +772,7 @@ def create_pixel_table(in_rss: str, out_rss: str, arc_wave: str, arc_fwhm: str =
     else:
         crop_start = 0
         crop_end = rss._data.shape[1] - 1
-    wave_trace = FiberRows()
+    wave_trace = TraceMask()
     wave_trace.loadFitsData(arc_wave)
     rss.setWave(wave_trace.getData()[0][:, crop_start:crop_end])
     rss._data = rss._data[:, crop_start:crop_end]
@@ -788,7 +789,7 @@ def create_pixel_table(in_rss: str, out_rss: str, arc_wave: str, arc_fwhm: str =
         pass
 
     if arc_fwhm != "":
-        fwhm_trace = FiberRows()
+        fwhm_trace = TraceMask()
         fwhm_trace.loadFitsData(arc_fwhm)
         rss.setInstFWHM(fwhm_trace.getData()[0][:, crop_start:crop_end])
     rss.writeFitsData(out_rss)
@@ -1707,19 +1708,20 @@ def apply_fiberflat(in_rss: str, out_rss: str, out_lvmframe: str,
 
     # load ancillary data
     log.info(f"writing lvmFrame to {os.path.basename(out_lvmframe)}")
-    cent_trace = FiberRows()
+    cent_trace = TraceMask()
     cent_trace.loadFitsData(in_cent)
-    width_trace = FiberRows()
+    width_trace = TraceMask()
     width_trace.loadFitsData(in_width)
-    wave_trace = FiberRows()
+    wave_trace = TraceMask()
     wave_trace.loadFitsData(in_wave)
-    lsf_trace = FiberRows()
+    lsf_trace = TraceMask()
     lsf_trace.loadFitsData(in_lsf)
 
     # create lvmFrame
     lvmframe = lvmFrame(data=rss._data, mask=rss._mask, error=rss._error, slitmap=rss._slitmap)
     lvmframe.setHeader(orig_header=rss._header, flatname=os.path.basename(in_flat), ifibvar=ifibvar, ffibvar=ffibvar)
-    lvmframe.setFiberTrace(cent_trace=cent_trace, width_trace=width_trace)
+    lvmframe.set_cent_trace(cent_trace=cent_trace)
+    lvmframe.set_width_trace(width_trace=width_trace)
     lvmframe.setWaveTrace(wave_trace=wave_trace, lsf_trace=lsf_trace)
     lvmframe.setSuperflat(superflat=flat._data)
     # write lvmFrame
