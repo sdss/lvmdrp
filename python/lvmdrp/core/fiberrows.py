@@ -1254,6 +1254,22 @@ class FiberRows(Header, PositionTable):
         out_trace = new_trace + ext_offset[numpy.newaxis, :]  # match the trace offsets
         self._data = out_trace
 
+    def eval_coeffs(self):
+        """Evaluates the polynomial coefficients to the corresponding data values"""
+        if self._poly_kind == "poly":
+            poly_cls = polynomial.Polynomial
+        elif self._poly_kind == "legendre":
+            poly_cls = polynomial.Legendre
+        elif self._poly_kind == "chebyshev":
+            poly_cls = polynomial.Chebyshev
+        
+        self._coeffs = numpy.zeros((self._fibers, self._poly_deg+1))
+        for i in range(self._fibers):
+            poly = poly_cls(self._coeffs[i, :])
+            self._data[i, :] = poly(self._pixels)
+        
+        return self._data
+
     def interpolate_coeffs(self):
         """Interpolate coefficients or data of bad fibers
 
