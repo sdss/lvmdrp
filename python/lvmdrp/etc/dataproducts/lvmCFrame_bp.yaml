@@ -10,7 +10,7 @@ location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[MJD]/
 created_by: module.py
 used_by: module.py
 naming_convention: |
-  lvmCFrame-[EXPNUM].fits.gz, where [EXPNUM] is the (zero-padded) 8-digit exposure number.
+  lvmCFrame-[CHANNEL]-[EXPNUM].fits.gz, where [EXPNUM] is the (zero-padded) 8-digit exposure number.
 hdu0:
   name: PRIMARY
   description: primary header metadata
@@ -21,7 +21,7 @@ hdu0:
     comment: conforms to FITS standard
 hdu1:
   name: FLUX
-  description: Flux in flat fielded electrons
+  description: Flux in flat fielded electrons / angstrom
   is_image: true
   header:
   - key: BUNIT
