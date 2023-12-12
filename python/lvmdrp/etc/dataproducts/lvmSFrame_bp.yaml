@@ -23,13 +23,23 @@ hdu0:
     value: 0
     comment: number of array dimensions
 hdu1:
+  name: FLUX
+  description: sky-subtracted flux in units of 10(-17) erg/s/cm2/Ang/fiber
+  is_image: true
+  shape: NWAVE x NFIBER
+hdu2:
+  name: IVAR
+  description: inverse variance (1/sigma^2) of sky-subtracted flux
+  is_image: true
+  shape: NWAVE x NFIBER
+hdu3:
   name: WAVE
-  description: wavelength solution in Angstroms (air)
+  description: air wavelength solution trace in angstroms
   is_image: true
   shape: NWAVE
-hdu2:
+hdu4:
   name: LSF_TRACE
-  description: LSF solution traceset Angstroms
+  description: LSF (FWHM) solution traceset in angstroms
   is_image: false
   shape: BINARY FITS TABLE
   columns:
@@ -53,17 +63,17 @@ hdu2:
       type: float32
       unit: null
       description: 'polynomial coefficients'
-hdu3:
+hdu5:
   name: SKY
-  description: sky flux in flux-calibrated units (10(-17) erg/s/cm2/Ang/fiber)
+  description: sky in flux-calibrated units (10(-17) erg/s/cm2/Ang/fiber)
   is_image: true
   shape: NWAVE x NFIBER
-hdu4:
+hdu6:
   name: SKY_IVAR
   description: sky inverse variance (1/sigma^2) in flux-calibrated units (10(-17) erg/s/cm2/Ang/fiber)
   is_image: true
   shape: NWAVE x NFIBER
-hdu5:
+hdu7:
   name: SUPERSKY
   description: super sky information
   is_image: false
@@ -79,7 +89,7 @@ hdu5:
       type: float32
       unit: '(10(-17) erg/s/cm2/Ang/fiber)'
       description: 'spline fitting in super sampled grid'
-hdu7:
+hdu8:
   name: SLITMAP
   description: slitmap table describing fiber positions for this exposure
   is_image: false

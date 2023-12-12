@@ -22,7 +22,7 @@ hdu0:
     comment: fiber-to-fiber variance after flatfielding
 hdu1:
   name: FLUX
-  description: Flux in flat fielded electrons
+  description: Flux in flat fielded in (electron/angstrom)
   header:
   - key: BUNIT
     comment: flux units
@@ -44,7 +44,7 @@ hdu3:
   shape: CCDROW x NFIBER
 hdu4:
   name: WAVE_TRACE
-  description: wavelength solution traceset Angstroms (air)
+  description: air wavelength solution trace in angstroms
   is_image: false
   shape: BINARY FITS TABLE
   columns:
@@ -52,25 +52,25 @@ hdu4:
       name: FUNC
       type: str
       unit: null
-      description: 'polynomial function type: poly, chebyshev, legendre'
+      description: "polynomial function kind: poly, chebyshev, legendre"
     XMIN:
       name: XMIN
       type: float32
       unit: pix
-      description: 'initial pixel in the wavelength trace'
+      description: initial pixel in the wavelength trace
     XMAX:
       name: XMAX
       type: float32
       unit: pix
-      description: 'final pixel in the wavelength trace'
+      description: final pixel in the wavelength trace
     COEFF:
       name: COEFF
       type: float32
       unit: null
-      description: 'polynomial coefficients'
+      description: polynomial coefficients
 hdu5:
   name: LSF_TRACE
-  description: LSF solution traceset Angstroms
+  description: LSF (FWHM) solution traceset in angstroms
   is_image: false
   shape: BINARY FITS TABLE
   columns:
@@ -78,22 +78,22 @@ hdu5:
       name: FUNC
       type: str
       unit: null
-      description: 'polynomial function type: poly, chebyshev, legendre'
+      description: "polynomial function kind: poly, chebyshev, legendre"
     XMIN:
       name: XMIN
       type: float32
       unit: pix
-      description: 'initial pixel in the LSF trace'
+      description: initial pixel in the LSF trace
     XMAX:
       name: XMAX
       type: float32
       unit: pix
-      description: 'final pixel in the LSF trace'
+      description: final pixel in the LSF trace
     COEFF:
       name: COEFF
       type: float32
       unit: null
-      description: 'polynomial coefficients'
+      description: polynomial coefficients
 hdu6:
   name: CENT_TRACE
   description: fiber centroid positions in the CCD
@@ -104,22 +104,22 @@ hdu6:
       name: FUNC
       type: str
       unit: null
-      description: 'polynomial function type: poly, chebyshev, legendre'
+      description: "polynomial function kind: poly, chebyshev, legendre"
     XMIN:
       name: XMIN
       type: float32
       unit: pix
-      description: 'initial pixel in the fiber centroid trace'
+      description: initial pixel in the fiber centroid trace
     XMAX:
       name: XMAX
       type: float32
       unit: pix
-      description: 'final pixel in the fiber centroid trace'
+      description: final pixel in the fiber centroid trace
     COEFF:
       name: COEFF
       type: float32
       unit: null
-      description: 'polynomial coefficients'
+      description: polynomial coefficients
 hdu7:
   name: WIDTH_TRACE
   description: fiber width (FWHM) in the CCD
@@ -130,22 +130,22 @@ hdu7:
       name: FUNC
       type: str
       unit: null
-      description: 'polynomial function type: poly, chebyshev, legendre'
+      description: "polynomial function kind: poly, chebyshev, legendre"
     XMIN:
       name: XMIN
       type: float32
       unit: pix
-      description: 'initial pixel in fiber width (FWHM) trace'
+      description: initial pixel in fiber width (FWHM) trace
     XMAX:
       name: XMAX
       type: float32
       unit: pix
-      description: 'final pixel in fiber width (FWHM) trace'
+      description: final pixel in fiber width (FWHM) trace
     COEFF:
       name: COEFF
       type: float32
       unit: null
-      description: 'polynomial coefficients'
+      description: polynomial coefficients
 hdu8:
   name: SUPERFLAT
   description: superflat vector from quartz lamps
