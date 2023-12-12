@@ -38,12 +38,17 @@ class FiberRows(Header, PositionTable):
         data = numpy.zeros((nfibers, npixels), dtype=numpy.float32)
         coeffs = numpy.zeros((nfibers, coeff_table["COEFF"].shape[1]), dtype=numpy.float32)
         for ifiber in range(nfibers):
-            if coeff_table[ifiber]["FUNC"] == "poly":
+            poly_kind = coeff_table[ifiber]["FUNC"]
+            if poly_kind == "poly" or poly_kind == "None":
                 poly_cls = numpy.polynomial.Polynomial
-            elif coeff_table[ifiber]["FUNC"] == "chebyshev":
+            elif poly_kind == "chebyshev":
                 poly_cls = numpy.polynomial.Chebyshev
-            elif coeff_table[ifiber]["FUNC"] == "legendre":
+            elif poly_kind == "legendre":
                 poly_cls = numpy.polynomial.Legendre
+            else:
+                raise ValueError(
+                        f"Invalid polynomial kind: '{poly_kind}', valid options are: 'poly', 'legendre', 'chebyshev'"
+                    )
             
             data[ifiber] = poly_cls(coeff_table[ifiber]["COEFF"])(x_pixels)
             coeffs[ifiber] = coeff_table[ifiber]["COEFF"]
@@ -76,29 +81,10 @@ class FiberRows(Header, PositionTable):
             good_fibers=good_fibers,
             fiber_type=fiber_type,
         )
-        if data is None:
-            self._data = None
-        else:
-            self._data = data.astype("float32")
-            self._fibers = data.shape[0]
-            self._pixels = numpy.arange(data.shape[1])
-
-        if error is None:
-            self._error = None
-        else:
-            self._error = numpy.array(error).astype("float32")
-
-        if mask is None:
-            self._mask = None
-        else:
-            self._mask = numpy.array(mask)
-
-        self._poly_kind = poly_kind
-        self._poly_deg = poly_deg
-        if coeffs is None:
-            self._coeffs = None
-        else:
-            self._coeffs = coeffs.astype("float32")
+        self.setData(data=data, error=error, mask=mask)
+        self.set_coeffs(coeffs=coeffs, poly_kind=poly_kind)
+        if self._data is None and self._coeffs is not None:
+            self.eval_coeffs()
         
 
     def __len__(self):
@@ -649,18 +635,33 @@ class FiberRows(Header, PositionTable):
             if error is not None:
                 self._error[select] = error
         else:
+            nfibers, npixels = None, None
             if data is not None:
                 self._data = data
                 nfibers, npixels = data.shape
+            elif not hasattr(self, "_data"):
+                self._data = None
             if mask is not None:
                 self._mask = mask
-                nfibers, npixels = mask.shape
+                nfibers, npixels = self._mask.shape
+                self._good_fibers = numpy.where(numpy.sum(self._mask, axis=1) != self._mask.shape[1])[0]
+            elif not hasattr(self, "_mask"):
+                self._mask = None
+                self._good_fibers = None
             if error is not None:
                 self._error = error
                 nfibers, npixels = error.shape
+            elif not hasattr(self, "_error"):
+                self._error = None
 
-            self._fibers = nfibers
-            self._pixels = numpy.arange(npixels)
+            if nfibers is not None:
+                self._fibers = nfibers
+            elif not hasattr(self, "_fibers"):
+                self._fibers = None
+            if npixels is not None:
+                self._pixels = numpy.arange(npixels) if npixels is not None else npixels
+            elif not hasattr(self, "_pixels"):
+                self._pixels = None
 
     def split(self, fragments, axis="x"):
         list = []
@@ -685,178 +686,11 @@ class FiberRows(Header, PositionTable):
 
         return list
 
-    def loadFitsData(
-        self,
-        file,
-        extension_data=None,
-        extension_mask=None,
-        extension_error=None,
-        extension_coeffs=None,
-        extension_hdr=None,
-    ):
-        """
-        Load data from a FITS image into an FiberRows object (Fibers in y-direction, dispersion in x-direction)
-
-        Parameters
-        --------------
-        filename : string
-            Name or Path of the FITS image from which the data shall be loaded
-
-        extension_data : int, optional with default: None
-            Number of the FITS extension containing the data
-
-        extension_mask : int, optional with default: None
-            Number of the FITS extension containing the masked pixels
-
-        extension_error : int, optional with default: None
-            Number of the FITS extension containing the errors for the values
-        """
-        hdu = pyfits.open(file, uint=True, do_not_scale_image_data=True, memmap=False)
-        if (
-            extension_data is None
-            and extension_mask is None
-            and extension_error is None
-            and extension_coeffs is None
-        ):
-            self._data = hdu[0].data.astype("float32")
-            self._fibers = self._data.shape[0]
-            self._pixels = numpy.arange(self._data.shape[1])
-            self.setHeader(hdu[0].header)
-            if len(hdu) > 1:
-                for i in range(1, len(hdu)):
-                    if hdu[i].header["EXTNAME"].split()[0] == "ERROR":
-                        self._error = hdu[i].data.astype("float32")
-                    elif hdu[i].header["EXTNAME"].split()[0] == "BADPIX":
-                        self._mask = hdu[i].data.astype("bool")
-                        self._good_fibers = numpy.where(numpy.sum(self._mask, axis=1) != self._data.shape[1])[0]
-                    elif hdu[i].header["EXTNAME"].split()[0] == "COEFFS":
-                        self._coeffs = hdu[i].data.astype("float32")
-                        self._poly_kind = self._header.get("POLYKIND", "poly")
-                        self._poly_deg = self._header.get("POLYDEG", self._coeffs.shape[1]-1)
-
-        else:
-            if extension_data is not None:
-                self._data = hdu[extension_data].data.astype("float32")
-                self._fibers = self._data.shape[0]
-                self._pixels = numpy.arange(self._data.shape[1])
-            if extension_mask is not None:
-                self._mask = hdu[extension_mask].data.astype("bool")
-                self._good_fibers = numpy.where(numpy.sum(self._mask, axis=1) != self._data.shape[1])[0]
-            if extension_error is not None:
-                self._error = hdu[extension_error].data.astype("float32")
-            if extension_coeffs is not None:
-                self._coeffs = hdu[extension_coeffs].data.astype("float32")
-                self._poly_kind = self._header.get("POLYKIND", "poly")
-                self._poly_deg = self._header.get("POLYDEG", self._coeffs.shape[1]-1)
-        
-        hdu.close()
-        
-        if extension_hdr is not None:
-            self.setHeader(hdu[extension_hdr].header)
-
     def applyFibers(self, function, args):
         result = []
         for i in range(len(self)):
             result.append(function(args))
         return result
-
-    def writeFitsData(
-        self,
-        filename,
-        extension_data=None,
-        extension_mask=None,
-        extension_error=None,
-        extension_coeffs=None,
-    ):
-        """
-        Save information from a FiberRows object into a FITS file.
-        A single or multiple extension file are possible to create.
-
-        Parameters
-        --------------
-        filename : string
-            Name or Path of the FITS image from which the data shall be loaded
-
-        extension_data : int (0, 1, or 2), optional with default: None
-            Number of the FITS extension containing the data
-
-        extension_mask : int (0, 1, or 2), optional with default: None
-            Number of the FITS extension containing the masked pixels
-
-        extension_error : int (0, 1, or 2), optional with default: None
-            Number of the FITS extension containing the errors for the values
-        """
-        # convert all to single precision
-        self._data = self._data.astype("float32")
-        if self._error is not None:
-            self._error = self._error.astype("float32")
-        if self._coeffs is not None:
-            self._coeffs = self._coeffs.astype("float32")
-
-        hdus = [None, None, None, None]
-
-        # create primary hdus and image hdus
-        # data hdu
-        if (
-            extension_data is None
-            and extension_error is None
-            and extension_mask is None
-            and extension_coeffs is None
-        ):
-            hdus[0] = pyfits.PrimaryHDU(self._data)
-            if self._error is not None:
-                hdus[1] = pyfits.ImageHDU(self._error, name="ERROR")
-            if self._mask is not None:
-                hdus[2] = pyfits.ImageHDU(self._mask.astype("uint8"), name="BADPIX")
-            if self._coeffs is not None:
-                hdus[3] = pyfits.ImageHDU(self._coeffs, name="COEFFS")
-        else:
-            if extension_data == 0:
-                hdus[0] = pyfits.PrimaryHDU(self._data)
-            elif extension_data > 0 and extension_data is not None:
-                hdus[extension_data] = pyfits.ImageHDU(self._data, name="DATA")
-
-            # mask hdu
-            if extension_mask == 0:
-                hdu = pyfits.PrimaryHDU(self._mask.astype("uint8"))
-            elif extension_mask > 0 and extension_mask is not None:
-                hdus[extension_mask] = pyfits.ImageHDU(
-                    self._mask.astype("uint8"), name="BADPIX"
-                )
-
-            # error hdu
-            if extension_error == 0:
-                hdu = pyfits.PrimaryHDU(self._error)
-            elif extension_error > 0 and extension_error is not None:
-                hdus[extension_error] = pyfits.ImageHDU(self._error, name="ERROR")
-
-            # polynomial trace hdu
-            if extension_coeffs == 0:
-                hdu = pyfits.PrimaryHDU(self._coeffs)
-            elif extension_coeffs > 0 and extension_coeffs is not None:
-                hdus[extension_coeffs] = pyfits.ImageHDU(self._coeffs, name="COEFFS")
-
-        # remove not used hdus
-        for i in range(len(hdus)):
-            try:
-                hdus.remove(None)
-            except Exception:
-                break
-
-        if len(hdus) > 0:
-            hdu = pyfits.HDUList(hdus)  # create an HDUList object
-            if self._header is not None:
-                hdu[0].header = self.getHeader()  # add the primary header to the HDU
-                hdu[0].update_header()
-        try:
-            del hdu[0]._header["COMMENT"]
-        except KeyError:
-            pass
-        try:
-            del hdu[0]._header["HISTORY"]
-        except KeyError:
-            pass
-        hdu.writeto(filename, output_verify="silentfix", overwrite=True)
 
     def measureArcLines(
         self,
@@ -1050,6 +884,10 @@ class FiberRows(Header, PositionTable):
                     poly_cls = polynomial.Legendre
                 elif poly_kind == "chebyshev":
                     poly_cls = polynomial.Chebyshev
+                else:
+                    raise ValueError(
+                        f"Invalid polynomial kind: '{poly_kind}', valid options are: 'poly', 'legendre', 'chebyshev'"
+                    )
 
                 # try to fit
                 try:
@@ -1254,16 +1092,35 @@ class FiberRows(Header, PositionTable):
         out_trace = new_trace + ext_offset[numpy.newaxis, :]  # match the trace offsets
         self._data = out_trace
 
+    def get_coeffs(self):
+        """Returns the polynomial coefficients"""
+        return self._coeffs
+
+    def set_coeffs(self, coeffs, poly_kind):
+        """Sets the polynomial coefficients"""
+        if coeffs is not None:
+            self._coeffs = coeffs
+            self._poly_kind = poly_kind
+            self._poly_deg = coeffs.shape[1] - 1
+        else:
+            self._coeffs = None
+            self._poly_kind = None
+            self._poly_deg = None
+
     def eval_coeffs(self):
         """Evaluates the polynomial coefficients to the corresponding data values"""
-        if self._poly_kind == "poly":
+        if self._poly_kind == "poly" or self._poly_kind is None:
             poly_cls = polynomial.Polynomial
         elif self._poly_kind == "legendre":
             poly_cls = polynomial.Legendre
         elif self._poly_kind == "chebyshev":
             poly_cls = polynomial.Chebyshev
+        else:
+            raise ValueError(
+                        f"Invalid polynomial kind: '{self._poly_kind}', valid options are: 'poly', 'legendre', 'chebyshev'"
+                    )
         
-        self._coeffs = numpy.zeros((self._fibers, self._poly_deg+1))
+        self._data = numpy.zeros((self._fibers, self._pixels.size))
         for i in range(self._fibers):
             poly = poly_cls(self._coeffs[i, :])
             self._data[i, :] = poly(self._pixels)
