@@ -424,8 +424,7 @@ def createMasterSky_drp(
     plot = int(plot)
     filter = filter.split(",")
 
-    rss = RSS()
-    rss.loadFitsData(in_rss)
+    rss = RSS.from_file(in_rss)
 
     log.info("calculating median value for each fiber")
     median = np.zeros(len(rss), dtype=np.float32)
@@ -608,8 +607,8 @@ def sepContinuumLine_drp(
             )
         if np.any(sky_spec._wave != sci_spec._wave):
             sky_spec = sky_spec.resampleSpec(ref_wave=sci_spec._wave, method="linear")
-        if np.any(sky_spec._inst_fwhm != sci_spec._inst_fwhm):
-            sky_spec = sky_spec.matchFWHM(target_FWHM=sci_spec._inst_fwhm)
+        if np.any(sky_spec._lsf != sci_spec._lsf):
+            sky_spec = sky_spec.matchFWHM(target_FWHM=sci_spec._lsf)
 
         output_path = os.path.abspath(os.path.dirname(out_cont_line))
         pars_out, skycorr_fit = run_skycorr(
@@ -628,7 +627,7 @@ def sepContinuumLine_drp(
             * 3600,
             TELALT=sky_spec._header["ALT"],
             WLG_TO_MICRON=1e-4,
-            FWHM=sky_spec._inst_fwhm.max() / np.diff(sky_spec._wave).min(),
+            FWHM=sky_spec._lsf.max() / np.diff(sky_spec._wave).min(),
         )
 
         wavelength = skycorr_fit["lambda"]
@@ -637,14 +636,14 @@ def sepContinuumLine_drp(
             data=skycorr_fit["mcflux"],
             error=None,
             mask=None,
-            inst_fwhm=sky_spec._inst_fwhm,
+            lsf=sky_spec._lsf,
         )
         sky_line = Spectrum1D(
             wave=wavelength,
             data=skycorr_fit["mlflux"],
             error=None,
             mask=None,
-            inst_fwhm=sky_spec._inst_fwhm,
+            lsf=sky_spec._lsf,
         )
         # TODO: implement skycorr method output
 
@@ -673,15 +672,15 @@ def sepContinuumLine_drp(
             wave=sky_model["lam"].value,
             data=sky_model["flux"].value - sky_model["flux_ael"].value,
             error=(sky_model["dflux2"] - sky_model["dflux1"]).value / 2,
-            inst_fwhm=sky_model["lam"].value / resolving_power,
+            lsf=sky_model["lam"].value / resolving_power,
         )
         sky_cont._mask = np.isnan(sky_cont._data)
         # resample and match in spectral resolution sky model as needed
         if np.any(sky_cont._wave != sky_spec._wave):
             sky_cont = sky_cont.resampleSpec(ref_wave=sky_spec._wave, method="linear")
-        if np.any(sky_cont._inst_fwhm != sky_spec._inst_fwhm):
+        if np.any(sky_cont._lsf != sky_spec._lsf):
             sky_cont = sky_cont.smoothGaussVariable(
-                diff_fwhm=np.sqrt(sky_spec._inst_fwhm**2 - sky_cont._inst_fwhm**2)
+                diff_fwhm=np.sqrt(sky_spec._lsf**2 - sky_cont._lsf**2)
             )
 
         # calculate the line component
@@ -800,8 +799,8 @@ def evalESOSky_drp(
     if eval_failed or resample_step == "optimal":
         # determine sampling based on wavelength resolution
         # if not present LSF in reference spectrum, use the reference sampling step
-        if sky_spec._inst_fwhm is not None:
-            resample_step = np.min(sky_spec._inst_fwhm) / 3
+        if sky_spec._lsf is not None:
+            resample_step = np.min(sky_spec._lsf) / 3
         else:
             resample_step = np.min(np.diff(sky_spec._wave))
 
@@ -843,7 +842,7 @@ def evalESOSky_drp(
     )
     # create initial RSS containing the sky model components
     spectra_list = [
-        Spectrum1D(wave=wav_comp, data=sed, error=err, mask=msk, inst_fwhm=lsf_comp)
+        Spectrum1D(wave=wav_comp, data=sed, error=err, mask=msk, lsf=lsf_comp)
         for sed, err, msk in zip(sed_comp, err_comp, msk_comp)
     ]
 
@@ -875,7 +874,7 @@ def evalESOSky_drp(
             )
 
     # convolve RSS to reference LSF
-    diff_fwhm = np.sqrt(sky_spec._inst_fwhm**2 - spectra_list[0]._inst_fwhm ** 2)
+    diff_fwhm = np.sqrt(sky_spec._lsf**2 - spectra_list[0]._lsf ** 2)
     if cpus > 1:
         pool = Pool(cpus)
         threads = []
@@ -998,17 +997,14 @@ def corrSkyLine_drp(
                 sky_models_in = 2 * sky_models_in
 
             # BUG: I cannot index xxx_model.loadFitsData(...) because that is an in-place operation
-            sky1_model = RSS()
-            sky1_model.loadFitsData(sky_models_in[0])[1]
-            sky2_model = RSS()
-            sky2_model.loadFitsData(sky_models_in[1])[1]
+            sky1_model = RSS.from_file(sky_models_in[0])[1]
+            sky2_model = RSS.from_file(sky_models_in[1])[1]
         else:
             # TODO: fall back to closest sky model if not given filenames
             pass
 
         if sci_model_in != "":
-            sci_model = RSS()
-            sci_model.loadFitsData(sci_model_in)[1]
+            sci_model = RSS.from_file(sci_model_in)[1]
         else:
             # TODO: fall back to closest sky model to science target
             pass
@@ -1041,7 +1037,7 @@ def corrSkyLine_drp(
     lsf_fit = line_fit["lambda"].value / pars_out["wres"].value
     sed_fit = np.asarray(line_fit.as_array().tolist())[:, 1].T
     hdr_fit = fits.Header(pars_out)
-    rss = RSS(data=sed_fit, wave=wav_fit, inst_fwhm=lsf_fit, header=hdr_fit)
+    rss = RSS(data=sed_fit, wave=wav_fit, lsf=lsf_fit, header=hdr_fit)
 
     # dump RSS file containing the model sky line spectrum
     rss.writeFitsData(filename=line_corr_out)
@@ -1113,17 +1109,14 @@ def corrSkyContinuum_drp(
             if len(sky_models_in) == 1:
                 sky_models_in = 2 * sky_models_in
 
-            sky1_model = RSS()
-            sky1_model.loadFitsData(sky_models_in[0])
-            sky2_model = RSS()
-            sky2_model.loadFitsData(sky_models_in[1])
+            sky1_model = RSS.from_file(sky_models_in[0])
+            sky2_model = RSS.from_file(sky_models_in[1])
         else:
             # TODO: fall back to closest sky model if not given filenames
             pass
 
         if sci_model_in != "":
-            sci_model = RSS()
-            sci_model.loadFitsData(sci_model_in)
+            sci_model = RSS.from_file(sci_model_in)
         else:
             # TODO: fall back to closest sky model to science target
             pass
@@ -1138,10 +1131,10 @@ def corrSkyContinuum_drp(
         if np.any(sky2_model._wave != sci_model._wave):
             sky2_model = sky2_model.resampleSpec(sci_model._wave)
 
-        if np.any(sky1_model._inst_fwhm != sci_model._inst_fwhm):
-            sky1_model.matchFWHM(sci_model._inst_fwhm)
-        if np.any(sky2_model._inst_fwhm != sci_model._inst_fwhm):
-            sky2_model.matchFWHM(sci_model._inst_fwhm)
+        if np.any(sky1_model._lsf != sci_model._lsf):
+            sky1_model.matchFWHM(sci_model._lsf)
+        if np.any(sky2_model._lsf != sci_model._lsf):
+            sky2_model.matchFWHM(sci_model._lsf)
 
         # TODO: weight the continuum components of each sky telescope depending on the sky quality (darker, airmass)
         # extrapolate sky pointings into science pointing
@@ -1205,8 +1198,7 @@ def coaddContinuumLine_drp(
     sky_cont_corr = Spectrum1D()
     sky_cont_corr.loadFitsData(sky_cont_corr_in)
     # read RSS continuum contribution
-    sky_line_corr = RSS()
-    sky_line_corr.loadFitsData(sky_line_corr_in)
+    sky_line_corr = RSS.from_file(sky_line_corr_in)
     sky_line_corr = sky_line_corr[line_fiber]
     # coadd to build joint sky model
 
@@ -1261,8 +1253,7 @@ def subtractSky_drp(
     if scale_region != "":
         region = scale_region.split(",")
         wave_region = [float(region[0]), float(region[1])]
-    rss = RSS()
-    rss.loadFitsData(in_rss)
+    rss = RSS.from_file(in_rss)
 
     sky_spec = Spectrum1D()
     sky_spec.loadFitsData(sky_ref)
@@ -1273,7 +1264,7 @@ def subtractSky_drp(
     sky_rss = RSS(
         data=np.zeros_like(rss._data),
         wave=np.zeros_like(rss._wave),
-        inst_fwhm=np.zeros_like(rss._inst_fwhm),
+        lsf=np.zeros_like(rss._lsf),
         error=np.zeros_like(rss._error),
         mask=np.zeros_like(rss._mask, dtype=bool),
         header=sky_head,
@@ -1388,8 +1379,7 @@ def interpolate_sky(in_rss: str, out_sky: str, out_rss: str = None, which: str =
     
     # load input RSS
     log.info(f"loading input RSS file '{os.path.basename(in_rss)}'")
-    rss = RSS()
-    rss.loadFitsData(in_rss)
+    rss = RSS.from_file(in_rss)
 
     # extract fibermap for current spectrograph
     fibermap = rss._slitmap[rss._slitmap["spectrographid"] == int(rss._header["CCD"][1])]
@@ -1618,16 +1608,13 @@ def quick_sky_subtraction(in_rss: str, out_rss, in_skye: str, in_skyw: str, sky_
     """
     # load input RSS
     log.info(f"loading input RSS file '{os.path.basename(in_rss)}'")
-    rss = RSS()
-    rss.loadFitsData(in_rss)
+    rss = RSS.from_file(in_rss)
 
     # load sky RSS
     log.info(f"loading input SkyE RSS file '{os.path.basename(in_skye)}'")
-    sky_e = RSS()
-    sky_e.loadFitsData(in_skye)
+    sky_e = RSS.from_file(in_skye)
     log.info(f"loading input SkyW RSS file '{os.path.basename(in_skyw)}'")
-    sky_w = RSS()
-    sky_w.loadFitsData(in_skyw)
+    sky_w = RSS.from_file(in_skyw)
 
     # linearly interpolate in sky coordinates
     log.info("interpolating sky fibers for both telescopes")
@@ -1686,22 +1673,24 @@ def quick_sky_subtraction(in_rss: str, out_rss, in_skye: str, in_skyw: str, sky_
     return rss
 
 
-def quick_sky_refinement(in_cframe, band=np.array((7238,7242,7074,7084,7194,7265))):
+def quick_sky_refinement(in_fframe, out_sframe, band=np.array((7238,7242,7074,7084,7194,7265))):
     """Quick sky refinement using the model in the final CFrame
     
     Parameters
     ----------
-    in_cframe : str
+    in_fframe : str
         input CFrame file
+    out_sframe : str
+        output SFrame file
     band : np.array, optional
         wavelength range to use for sky refinement, by default np.array((7238,7242,7074,7084,7194,7265))
     """
     
-    cframe = fits.open(in_cframe)
-    wave = cframe["WAVE"].data
-    flux = cframe["FLUX"].data
-    error = cframe["ERROR"].data
-    sky = cframe["SKY"].data
+    fframe = fits.open(in_fframe)
+    wave = fframe["WAVE"].data
+    flux = fframe["FLUX"].data
+    error = fframe["ERROR"].data
+    sky = fframe["SKY"].data
 
     crval = wave[0]
     cdelt = wave[1] - wave[0]
@@ -1722,7 +1711,7 @@ def quick_sky_refinement(in_cframe, band=np.array((7238,7242,7074,7084,7194,7265
     data_c = np.nan_to_num(flux - sky_c)
     error_c = np.nan_to_num(error - sky_c)
 
-    cframe["FLUX"].data = data_c
-    cframe["ERROR"].data = error_c
-    cframe["SKY"].data = sky_c
-    cframe.writeto(in_cframe, overwrite=True)
+    fframe["FLUX"].data = data_c
+    fframe["ERROR"].data = error_c
+    fframe["SKY"].data = sky_c
+    fframe.writeto(out_sframe, overwrite=True)

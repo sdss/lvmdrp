@@ -83,6 +83,77 @@ def _read_pixwav_map(lamp: str, camera: str, pixels=None, waves=None):
 class RSS(FiberRows):
 
     @classmethod
+    def from_file(cls, in_rss):
+        """Returns an RSS instance given a FITS file
+
+        Parameters
+        ----------
+        in_rss : str
+            Name or Path of the FITS image from which the data shall be loaded
+
+        Returns
+        -------
+        RSS
+            RSS instance
+        """
+        header = None
+        data, error, mask = None, None, None
+        wave_trace, lsf_trace = None, None
+        wave, lsf = None, None
+        cent_trace, width_trace = None, None
+        sky, sky_error = None, None
+        fluxcal = None
+        slitmap = None
+        with pyfits.open(in_rss, uint=True, do_not_scale_image_data=True, memmap=False) as hdus:
+            header = hdus["PRIMARY"].header
+            for hdu in hdus:
+                if hdu.name == "PRIMARY":
+                    data = hdu.data.astype("float32")
+                if hdu.name == "ERROR":
+                    error = hdu.data.astype("float32")
+                if hdu.name == "BADPIX":
+                    mask = hdu.data.astype("bool")
+                if hdu.name == "WAVE_TRACE":
+                    wave_trace = hdu
+                elif hdu.name == "WAVE":
+                    wave = hdu.data.astype("float32")
+                if hdu.name == "LSF_TRACE":
+                    lsf_trace = hdu
+                elif hdu.name == "LSF" or hdu.name == "INSTFWHM":
+                    lsf = hdu.data.astype("float32")
+                if hdu.name == "CENT_TRACE":
+                    cent_trace = hdu
+                if hdu.name == "WIDTH_TRACE":
+                    width_trace = hdu
+                if hdu.name == "SKY":
+                    sky = hdu.data.astype("float32")
+                if hdu.name == "SKY_ERROR":
+                    sky_error = hdu.data.astype("float32")
+                if hdu.name == "FLUXCAL":
+                    fluxcal = hdu.data
+                if hdu.name == "SLITMAP":
+                    slitmap = hdu.data
+            
+            rss = cls(
+                data=data,
+                error=error,
+                mask=mask,
+                wave_trace=wave_trace,
+                lsf_trace=lsf_trace,
+                wave=wave,
+                lsf=lsf,
+                cent_trace=cent_trace,
+                width_trace=width_trace,
+                sky=sky,
+                sky_error=sky_error,
+                header=header,
+                slitmap=slitmap,
+                fluxcal=fluxcal
+            )
+            
+        return rss
+
+    @classmethod
     def from_spectrographs(cls, rss_sp1, rss_sp2, rss_sp3):
         """Stacks together RSS objects from the three spectrographs
 
@@ -113,8 +184,8 @@ class RSS(FiberRows):
                     mask_out = rss._mask
                 if rss._wave is not None:
                     wave_out = rss._wave
-                if rss._inst_fwhm is not None:
-                    fwhm_out = rss._inst_fwhm
+                if rss._lsf is not None:
+                    fwhm_out = rss._lsf
                 if rss._sky is not None:
                     sky_out = rss._sky
                 if rss._sky_error is not None:
@@ -134,13 +205,13 @@ class RSS(FiberRows):
                         raise ValueError(f"Cannot concatenate wavelength arrays of different shapes: {wave_out.shape} and {rss._wave.shape} or inhomogeneous wavelength arrays")
                 else:
                     wave_out = None
-                if rss._inst_fwhm is not None:
-                    if len(fwhm_out.shape) == 2 and len(rss._inst_fwhm.shape) == 2:
-                        fwhm_out = numpy.concatenate((fwhm_out, rss._inst_fwhm), axis=0)
-                    elif len(fwhm_out.shape) == 1 and len(rss._inst_fwhm.shape) == 1 and numpy.isclose(fwhm_out, rss._inst_fwhm).all():
+                if rss._lsf is not None:
+                    if len(fwhm_out.shape) == 2 and len(rss._lsf.shape) == 2:
+                        fwhm_out = numpy.concatenate((fwhm_out, rss._lsf), axis=0)
+                    elif len(fwhm_out.shape) == 1 and len(rss._lsf.shape) == 1 and numpy.isclose(fwhm_out, rss._lsf).all():
                         fwhm_out = fwhm_out
                     else:
-                        raise ValueError(f"Cannot concatenate FWHM arrays of different shapes: {fwhm_out.shape} and {rss._inst_fwhm.shape} or inhomogeneous FWHM arrays")
+                        raise ValueError(f"Cannot concatenate FWHM arrays of different shapes: {fwhm_out.shape} and {rss._lsf.shape} or inhomogeneous FWHM arrays")
                 else:
                     fwhm_out = None
                 if rss._error is not None:
@@ -181,7 +252,7 @@ class RSS(FiberRows):
             error=error_out,
             mask=mask_out,
             wave=wave_out,
-            inst_fwhm=fwhm_out,
+            lsf=fwhm_out,
             sky=sky_out,
             sky_error=sky_error_out,
             header=hdr_out._header,
@@ -228,7 +299,7 @@ class RSS(FiberRows):
                 fluxes.append(rss._data)
                 errors.append(rss._error)
                 masks.append(rss._mask)
-                lsfs.append(rss._inst_fwhm)
+                lsfs.append(rss._lsf)
                 skies.append(rss._sky)
                 sky_errors.append(rss._sky_error)
             fluxes = numpy.asarray(fluxes)
@@ -254,7 +325,7 @@ class RSS(FiberRows):
                 errors.append(f(new_wave).astype("float32"))
                 f = interpolate.interp1d(rss._wave, rss._mask, axis=1, kind="nearest", bounds_error=False, fill_value=0)
                 masks.append(f(new_wave).astype("uint8"))
-                f = interpolate.interp1d(rss._wave, rss._inst_fwhm, axis=1, bounds_error=False, fill_value=numpy.nan)
+                f = interpolate.interp1d(rss._wave, rss._lsf, axis=1, bounds_error=False, fill_value=numpy.nan)
                 lsfs.append(f(new_wave).astype("float32"))
                 f = interpolate.interp1d(rss._wave, rss._sky, axis=1, bounds_error=False, fill_value=numpy.nan)
                 skies.append(f(new_wave).astype("float32"))
@@ -275,7 +346,7 @@ class RSS(FiberRows):
             weights = weights / bn.nansum(weights, axis=0)[None]
 
             new_data = bn.nansum(fluxes * weights, axis=0)
-            new_inst_fwhm = bn.nansum(lsfs * weights, axis=0)
+            new_lsf = bn.nansum(lsfs * weights, axis=0)
             new_error = numpy.sqrt(bn.nansum(vars, axis=0))
             new_mask = numpy.sum(masks, axis=0).astype("bool")
             new_sky = bn.nansum(skies * weights, axis=0)
@@ -283,7 +354,7 @@ class RSS(FiberRows):
         else:
             # channel-combine RSS data
             new_data = bn.nanmean(fluxes, axis=0)
-            new_inst_fwhm = bn.nanmean(lsfs, axis=0)
+            new_lsf = bn.nanmean(lsfs, axis=0)
             new_error = numpy.sqrt(bn.nanmean(vars, axis=0))
             new_mask = numpy.sum(masks, axis=0).astype("bool")
             new_sky = bn.nansum(skies, axis=0)
@@ -305,7 +376,7 @@ class RSS(FiberRows):
             error=new_error,
             mask=new_mask,
             wave=new_wave,
-            inst_fwhm=new_inst_fwhm,
+            lsf=new_lsf,
             sky=new_sky,
             sky_error=new_sky_error,
             header=new_hdr
@@ -337,8 +408,8 @@ class RSS(FiberRows):
             wave=numpy.zeros((n_spectra, ref_spec._wave.size))
             if ref_spec._wave is not None
             else None,
-            inst_fwhm=numpy.zeros((n_spectra, ref_spec._inst_fwhm.size))
-            if ref_spec._inst_fwhm is not None
+            lsf=numpy.zeros((n_spectra, ref_spec._lsf.size))
+            if ref_spec._lsf is not None
             else None,
             error=numpy.zeros((n_spectra, ref_spec._error.size))
             if ref_spec._error is not None
@@ -372,19 +443,17 @@ class RSS(FiberRows):
         else:
             rss.setWave(rss._wave)
         if numpy.allclose(
-            numpy.repeat(rss._inst_fwhm[0][None, :], rss._fibers, axis=0),
-            rss._inst_fwhm,
+            numpy.repeat(rss._lsf[0][None, :], rss._fibers, axis=0),
+            rss._lsf,
         ):
-            rss.setInstFWHM(rss._inst_fwhm[0])
+            rss.set_lsf(rss._lsf[0])
         else:
-            rss.setInstFWHM(rss._inst_fwhm)
+            rss.set_lsf(rss._lsf)
         return rss
 
     def __init__(
         self,
         data=None,
-        wave=None,
-        inst_fwhm=None,
         header=None,
         error=None,
         mask=None,
@@ -394,6 +463,10 @@ class RSS(FiberRows):
         size=None,
         cent_trace=None,
         width_trace=None,
+        wave=None,
+        lsf=None,
+        wave_trace=None,
+        lsf_trace=None,
         arc_position_x=None,
         arc_position_y=None,
         slitmap=None,
@@ -415,26 +488,24 @@ class RSS(FiberRows):
             good_fibers,
             fiber_type,
         )
-        self._wave = None
-        self._wave_disp = None
-        self._wave_start = None
-        self._res_elements = None
-        self._inst_fwhm = None
         self._sky = None
         self._sky_error = None
-        if wave is not None:
-            self.setWave(wave)
-        else:
-            self.createWavefromHdr(logwave=logwave)
-        if inst_fwhm is not None:
-            self.setInstFWHM(inst_fwhm)
         if sky is not None:
             self._sky = sky
         if sky_error is not None:
             self._sky_error = sky_error
 
+        # set fiber traces information if available
         self.set_cent_trace(cent_trace)
         self.set_width_trace(width_trace)
+        
+        # set wavelength and LSF traces information if available
+        self.set_wave_trace(wave_trace)
+        self.set_lsf_trace(lsf_trace)
+        # evaluate wavelength and LSF traces
+        self.set_wave_array(wave=wave)
+        self.set_lsf_array(lsf=lsf)
+        
         self.setSlitmap(slitmap)
         self.set_fluxcal(fluxcal)
 
@@ -456,7 +527,17 @@ class RSS(FiberRows):
         elif trace is None:
             return None
         else:
-            raise TypeError("trace must be lvmdrp.core.tracemask.TraceMask or None")
+            raise TypeError(f"trace must be lvmdrp.core.tracemask.TraceMask or None, instead got {type(trace)}")
+
+    def _coeff_table_to_trace(self, table):
+        """Converts a given Astropy Table with polynomial coefficients into a TraceMask"""
+        if isinstance(table, Table):
+            self._trace = TraceMask.from_coeff_table(table)
+            return self._trace
+        elif table is None:
+            return None
+        else:
+            raise TypeError("table must be astropy.table.Table or None")
 
     def __mul__(self, other):
         """
@@ -631,13 +712,13 @@ class RSS(FiberRows):
         else:
             wave = numpy.arange(data.size)
 
-        if self._inst_fwhm is not None:
-            if len(self._inst_fwhm.shape) == 1:
-                inst_fwhm = self._inst_fwhm
+        if self._lsf is not None:
+            if len(self._lsf.shape) == 1:
+                lsf = self._lsf
             else:
-                inst_fwhm = self._inst_fwhm[fiber, :]
+                lsf = self._lsf[fiber, :]
         else:
-            inst_fwhm = None
+            lsf = None
 
         if self._error is not None:
             error = self._error[fiber, :]
@@ -649,7 +730,7 @@ class RSS(FiberRows):
         else:
             mask = None
 
-        spec = Spectrum1D(wave, data, error=error, mask=mask, inst_fwhm=inst_fwhm)
+        spec = Spectrum1D(wave, data, error=error, mask=mask, lsf=lsf)
         return spec
 
     def __setitem__(self, fiber, spec):
@@ -658,8 +739,8 @@ class RSS(FiberRows):
         if self._wave is not None and len(self._wave.shape) == 2:
             self._wave[fiber, :] = spec._wave
 
-        if self._inst_fwhm is not None and len(self._inst_fwhm.shape) == 2:
-            self._inst_fwhm[fiber, :] = spec._inst_fwhm
+        if self._lsf is not None and len(self._lsf.shape) == 2:
+            self._lsf[fiber, :] = spec._lsf
 
         if self._error is not None and spec._error is not None:
             self._error[fiber, :] = spec._error
@@ -667,27 +748,54 @@ class RSS(FiberRows):
         if self._mask is not None and spec._mask is not None:
             self._mask[fiber, :] = spec._mask
 
-    def setWave(self, wave, unit="Angstrom"):
-        self._wave = numpy.array(wave)
+    def set_wave_array(self, wave=None):
+        """Sets the wavelength array for the RSS object
+        
+        if wave is None, the wavelength array will be created from the trace information if available
+        otherwise it will be set from the given array
 
-        if len(wave.shape) == 1:
-            self._wave_disp = self._wave[1] - self._wave[0]
-            self._wave_start = self._wave[0]
-            self._res_elements = self._wave.shape[0]
-            if self._header is not None:
-                wcs = WCS(header={
-                    "CDELT1": self._wave_disp, "CRVAL1": self._wave_start,
-                    "CUNIT1": unit, "CTYPE1": "WAVE", "CRPIX1": 1.0})
-                self._header.update(wcs.to_header())
-        if len(wave.shape) == 2:
-            self._res_elements = self._wave.shape[1]
+        Parameters
+        ----------
+        wave : numpy.ndarray, optional
+            Wavelength array to be set, by default None
+        """
+        self._wave = None
+        self._wave_disp = None
+        self._wave_start = None
+        self._res_elements = None
+        if wave is not None:
+            self._wave = numpy.asarray(wave)
+            if len(wave.shape) == 1:
+                self._wave_disp = self._wave[1] - self._wave[0]
+                self._wave_start = self._wave[0]
+                self._res_elements = self._wave.shape[0]
+                if self._header is not None:
+                    wcs = WCS(header={
+                        "CDELT1": self._wave_disp, "CRVAL1": self._wave_start,
+                        "CUNIT1": "angstrom", "CTYPE1": "WAVE", "CRPIX1": 1.0})
+                    self._header.update(wcs.to_header())
+            elif len(wave.shape) == 2:
+                self._res_elements = self._wave.shape[1]
+            else:
+                raise ValueError("Invalid wavelength array shape")
+        elif self._wave_trace is not None:
+            trace = TraceMask.from_coeff_table(self._wave_trace)
+            self._wave = trace.eval_coeffs()
+        else:
+            self._wave = None
+        
+        return self._wave
 
-    def setInstFWHM(self, inst_fwhm):
-        try:
-            if len(inst_fwhm) > 0:
-                self._inst_fwhm = numpy.array(inst_fwhm)
-        except Exception:
-            self._inst_fwhm = inst_fwhm
+    def set_lsf_array(self, lsf=None):
+        if lsf is not None:
+            self._lsf = lsf
+        elif self._lsf_trace is not None:
+            trace = TraceMask.from_coeff_table(self._lsf_trace)
+            self._lsf = trace.eval_coeffs()
+        else:
+            self._lsf = None
+
+        return self._lsf
 
     def maskFiber(self, fiber, replace_error=1e10):
         self._data[fiber, :] = 0
@@ -696,7 +804,7 @@ class RSS(FiberRows):
         if self._error is not None:
             self._error[fiber, :] = replace_error
 
-    def createWavefromHdr(self, logwave=False):
+    def createWavefromHdr(self):
         if self._header is not None:
             wcs = WCS(self._header)
             if wcs.spectral.array_shape:
@@ -705,8 +813,8 @@ class RSS(FiberRows):
                 self._wave = (wl * u.m).to(u.angstrom).value
                 self._wave_disp = self._wave[1] - self._wave[0]
                 self._wave_start = self._wave[0]
-                if logwave:
-                    self._wave = 10 ** (self._wave)
+            else:
+                self._wave = None
 
     def set_sky(self, rss_sky):
         assert rss_sky._data.shape == self._data.shape
@@ -719,294 +827,7 @@ class RSS(FiberRows):
         if header is not None:
             header["IMAGETYP"] = "sky"
             header["OBJECT"] = "sky"
-        return RSS(data=self._sky, error=self._sky_error, mask=self._mask, wave=self._wave, inst_fwhm=self._inst_fwhm, header=header)
-
-    def loadFitsData(
-        self,
-        file,
-        extension_data=None,
-        extension_mask=None,
-        extension_error=None,
-        extension_wave=None,
-        extension_fwhm=None,
-        extension_cent=None,
-        extension_width=None,
-        extension_sky=None,
-        extension_skyerror=None,
-        extension_hdr=None,
-        extension_PT=None,
-        extension_slitmap=None,
-        extension_fluxcal=None,
-        logwave=False,
-    ):
-        """
-        Load data from a FITS image into an RSS object (Fibers in y-direction, dispersion in x-direction)
-
-        Parameters
-        --------------
-        filename : string
-            Name or Path of the FITS image from which the data shall be loaded
-
-        extension_data : int, optional with default: None
-            Number of the FITS extension containing the data
-
-        extension_mask : int, optional with default: None
-            Number of the FITS extension containing the masked pixels
-
-        extension_error : int, optional with default: None
-            Number of the FITS extension containing the errors for the values
-        """
-        hdu = pyfits.open(file, uint=True, do_not_scale_image_data=True, memmap=False)
-        if (
-            extension_data is None
-            and extension_mask is None
-            and extension_error is None
-            and extension_wave is None
-            and extension_fwhm is None
-            and extension_cent is None
-            and extension_width is None
-            and extension_sky is None
-            and extension_skyerror is None
-            and extension_slitmap is None
-            and extension_fluxcal is None
-        ):
-            self._data = hdu[0].data.astype("float32")
-            self.setHeader(header=hdu[0].header, origin=file)
-            self.createWavefromHdr(logwave=logwave)
-            if len(hdu) > 1:
-                for i in range(1, len(hdu)):
-                    if hdu[i].header["EXTNAME"].split()[0] == "ERROR":
-                        self._error = hdu[i].data.astype("float32")
-                    if hdu[i].header["EXTNAME"].split()[0] == "BADPIX":
-                        self._mask = hdu[i].data.astype("bool")
-                        self._good_fibers = numpy.where(numpy.sum(self._mask, axis=1) != self._data.shape[1])[0]
-                    if hdu[i].header["EXTNAME"].split()[0] == "WAVE":
-                        self.setWave(hdu[i].data.astype("float32"))
-                    if hdu[i].header["EXTNAME"].split()[0] == "INSTFWHM":
-                        self.setInstFWHM(hdu[i].data.astype("float32"))
-                    if hdu[i].header["EXTNAME"].split()[0] == "TRACE_CENT":
-                        self.set_cent_trace(hdu[i])
-                    if hdu[i].header["EXTNAME"].split()[0] == "TRACE_WIDTH":
-                        self.set_width_trace(hdu[i])
-                    if hdu[i].header["EXTNAME"].split()[0] == "SLITMAP":
-                        self.setSlitmap(Table(hdu[i].data))
-                    if hdu[i].header["EXTNAME"].split()[0] == "SKY":
-                        self._sky = hdu[i].data.astype("float32")
-                    if hdu[i].header["EXTNAME"].split()[0] == "SKY_ERROR":
-                        self._sky_error = hdu[i].data.astype("float32")
-                    if hdu[i].header["EXTNAME"].split()[0] == "FLUXCAL":
-                        self.set_fluxcal(Table(hdu[i].data))
-                    if hdu[i].header["EXTNAME"].split()[0] == "POSTABLE":
-                        self.loadFitsPosTable(hdu[i])
-        else:
-            if extension_hdr is not None:
-                self.setHeader(hdu[extension_hdr].header, origin=file)
-            if extension_data is not None:
-                self._data = hdu[extension_data].data.astype("float32")
-            if extension_mask is not None:
-                self._mask = hdu[extension_mask].data
-                self._good_fibers = numpy.where(numpy.sum(self._mask, axis=1) != self._data.shape[1])[0]
-            if extension_error is not None:
-                self._error = hdu[extension_error].data.astype("float32")
-            if extension_wave is not None:
-                self.setWave(hdu[extension_wave].data.astype("float32"))
-            if extension_fwhm is not None:
-                self.setInstFWHM(hdu[extension_fwhm].data.astype("float32"))
-            if extension_cent is not None:
-                self.set_cent_trace(hdu[extension_cent])
-            if extension_width is not None:
-                self.set_width_trace(hdu[extension_width])
-            if extension_slitmap is not None:
-                self.setSlitmap(Table(hdu[extension_slitmap].data))
-            if extension_sky is not None:
-                self._sky = hdu[extension_sky].data.astype("float32")
-            if extension_skyerror is not None:
-                self._sky_error = hdu[extension_skyerror].data.astype("float32")
-            if extension_fluxcal is not None:
-                self.set_fluxcal(Table(hdu[extension_fluxcal].data))
-        
-        self._fibers = self._data.shape[0]
-        self._pixels = numpy.arange(self._data.shape[1])
-
-        hdu.close()
-
-    def writeFitsData(
-        self,
-        filename,
-        extension_data=None,
-        extension_mask=None,
-        extension_error=None,
-        extension_wave=None,
-        extension_fwhm=None,
-        extension_cent=None,
-        extension_width=None,
-        extension_sky=None,
-        extension_skyerror=None,
-        extension_slitmap=None,
-        extension_fluxcal=None,
-        include_PT=True,
-    ):
-        """
-        Save information from a RSS object into a FITS file.
-        A single or multiple extension file are possible to create.
-
-        Parameters
-        --------------
-        filename : string
-            Name or Path of the FITS image from which the data shall be loaded
-
-        extension_data : int (0, 1, or 2), optional with default: None
-            Number of the FITS extension containing the data
-
-        extension_mask : int (0, 1, or 2), optional with default: None
-            Number of the FITS extension containing the masked pixels
-
-        extension_error : int (0, 1, or 2), optional with default: None
-            Number of the FITS extension containing the errors for the values
-        """
-        # convert all to single precision
-        self._data = self._data.astype(numpy.float32)
-        if self._error is not None:
-            self._error = self._error.astype(numpy.float32)
-        if self._wave is not None:
-            self._wave = self._wave.astype(numpy.float32)
-        if self._inst_fwhm is not None:
-            self._inst_fwhm = self._inst_fwhm.astype(numpy.float32)
-        if self._sky is not None:
-            self._sky = self._sky.astype(numpy.float32)
-        if self._sky_error is not None:
-            self._sky_error = self._sky_error.astype(numpy.float32)
-
-        hdus = [None, None, None, None, None, None, None, None, None, None, None]  # create empty list for hdu storage
-
-        # create primary hdus and image hdus
-        # data hdu
-        if (
-            extension_data is None
-            and extension_error is None
-            and extension_mask is None
-            and extension_wave is None
-            and extension_fwhm is None
-            and extension_cent is None
-            and extension_width is None
-            and extension_slitmap is None
-            and extension_sky is None
-            and extension_skyerror is None
-            and extension_fluxcal is None
-        ):
-            hdus[0] = pyfits.PrimaryHDU(self._data)
-            if self._wave is not None:
-                hdus[1] = pyfits.ImageHDU(self._wave, name="WAVE")
-            if self._inst_fwhm is not None:
-                hdus[2] = pyfits.ImageHDU(self._inst_fwhm, name="INSTFWHM")
-            if self._error is not None:
-                hdus[3] = pyfits.ImageHDU(self._error, name="ERROR")
-            if self._mask is not None:
-                hdus[4] = pyfits.ImageHDU(self._mask.astype("uint8"), name="BADPIX")
-            if self._cent_trace is not None:
-                hdus[5] = pyfits.BinTableHDU(self._cent_trace, name="TRACE_CENT")
-            if self._width_trace is not None:
-                hdus[6] = pyfits.BinTableHDU(self._width_trace, name="TRACE_WIDTH")
-            if self._slitmap is not None:
-                hdus[7] = pyfits.BinTableHDU(self._slitmap, name="SLITMAP")
-            if self._sky is not None:
-                hdus[8] = pyfits.ImageHDU(self._sky, name="SKY")
-            if self._sky_error is not None:
-                hdus[9] = pyfits.ImageHDU(self._sky_error, name="SKY_ERROR")
-            if self._fluxcal is not None:
-                hdus[10] = pyfits.BinTableHDU(self._fluxcal, name="FLUXCAL")
-        else:
-            if extension_data == 0:
-                hdus[0] = pyfits.PrimaryHDU(self._data)
-            elif extension_data > 0 and extension_data is not None:
-                hdus[extension_data] = pyfits.ImageHDU(self._data, name="DATA")
-
-            # wavelength hdu
-            if extension_wave == 0:
-                hdu = pyfits.PrimaryHDU(self._wave)
-            elif extension_wave > 0 and extension_wave is not None:
-                hdus[extension_wave] = pyfits.ImageHDU(self._wave, name="WAVE")
-
-            # instrumental FWHM hdu
-            if extension_fwhm == 0:
-                hdu = pyfits.PrimaryHDU(self._inst_fwhm)
-            elif extension_fwhm > 0 and extension_fwhm is not None:
-                hdus[extension_fwhm] = pyfits.ImageHDU(self._inst_fwhm, name="INSTFWHM")
-
-            # mask hdu
-            if extension_mask == 0:
-                hdu = pyfits.PrimaryHDU(self._mask.astype("uint8"))
-            elif extension_mask > 0 and extension_mask is not None:
-                hdus[extension_mask] = pyfits.ImageHDU(
-                    self._mask.astype("uint8"), name="BADPIX"
-                )
-
-            # error hdu
-            if extension_error == 0:
-                hdu = pyfits.PrimaryHDU(self._error)
-            elif extension_error > 0 and extension_error is not None:
-                hdus[extension_error] = pyfits.ImageHDU(self._error, name="ERROR")
-
-            # trace_cent hdu
-            if extension_cent > 0 and extension_cent is not None:
-                hdus[extension_cent] = pyfits.BinTableHDU(self._cent_trace, name="TRACE_CENT")
-            else:
-                raise ValueError("extension_cent must be larger than 0")
-
-            # trace_width hdu
-            if extension_width > 0 and extension_width is not None:
-                hdus[extension_width] = pyfits.BinTableHDU(self._width_trace, name="TRACE_WIDTH")
-            else:
-                raise ValueError("extension_width must be larger than 0")
-
-            # slitmap hdu
-            if extension_slitmap == 0:
-                hdu = pyfits.PrimaryHDU(self._slitmap)
-            elif extension_slitmap > 0 and extension_slitmap is not None:
-                hdus[extension_slitmap] = pyfits.BinTableHDU(self._slitmap, name="SLITMAP")
-
-            # sky hdu
-            if extension_sky == 0:
-                hdu = pyfits.PrimaryHDU(self._sky)
-            elif extension_sky > 0 and extension_sky is not None:
-                hdus[extension_sky] = pyfits.ImageHDU(self._sky, name="SKY")
-            
-            # sky error hdu
-            if extension_skyerror == 0:
-                hdu = pyfits.PrimaryHDU(self._sky_error)
-            elif extension_skyerror > 0 and extension_skyerror is not None:
-                hdus[extension_skyerror] = pyfits.ImageHDU(self._sky_error, name="SKY_ERROR")
-            
-            # fluxcal hdu
-            if extension_fluxcal == 0:
-                hdu = pyfits.PrimaryHDU(self._fluxcal)
-            elif extension_fluxcal > 0 and extension_fluxcal is not None:
-                hdus[extension_fluxcal] = pyfits.BinTableHDU(self._fluxcal, name="FLUXCAL")
-
-        if include_PT:
-            try:
-                table = self.writeFitsPosTable()
-                hdus[-1] = pyfits.BinTableHDU(
-                    data=table.data, header=table.header, name="PosTable"
-                )
-            except (IndexError, ValueError, AttributeError):
-                pass
-
-        # remove not used hdus
-        for i in range(len(hdus)):
-            try:
-                hdus.remove(None)
-            except Exception:
-                break
-
-        if len(hdus) > 0:
-            hdu = pyfits.HDUList(hdus)  # create an HDUList object
-            if self._header is not None:
-                hdu[0].header = self.getHeader()  # add the primary header to the HDU
-                hdu[0].update_header()
-        hdu.writeto(
-            filename, overwrite=True, output_verify="silentfix"
-        )  # write FITS file to disc
+        return RSS(data=self._sky, error=self._sky_error, mask=self._mask, wave=self._wave, lsf=self._lsf, header=header)
 
     def getSpec(self, fiber):
         data = self._data[fiber, :]
@@ -1017,13 +838,13 @@ class RSS(FiberRows):
                 wave = self._wave[fiber, :]
         else:
             wave = numpy.arange(data.size)
-        if self._inst_fwhm is not None:
-            if len(self._inst_fwhm.shape) == 1:
-                inst_fwhm = self._inst_fwhm
+        if self._lsf is not None:
+            if len(self._lsf.shape) == 1:
+                lsf = self._lsf
             else:
-                inst_fwhm = self._inst_fwhm[fiber, :]
+                lsf = self._lsf[fiber, :]
         else:
-            inst_fwhm = None
+            lsf = None
         if self._error is not None:
             error = self._error[fiber, :]
         else:
@@ -1044,7 +865,7 @@ class RSS(FiberRows):
         else:
             sky_error = None
 
-        spec = Spectrum1D(wave, data, error=error, mask=mask, inst_fwhm=inst_fwhm, sky=sky, sky_error=sky_error)
+        spec = Spectrum1D(wave, data, error=error, mask=mask, lsf=lsf, sky=sky, sky_error=sky_error)
         
         return spec
 
@@ -1100,11 +921,11 @@ class RSS(FiberRows):
             new_sky_error[:, ipix:fpix+1] = self._sky_error
         else:
             new_sky_error = None
-        if self._inst_fwhm is not None:
-            new_inst_fwhm = numpy.full((self._inst_fwhm.shape[0], new_wave.size), numpy.nan, dtype=numpy.float32)
-            new_inst_fwhm[:, ipix:fpix+1] = self._inst_fwhm
+        if self._lsf is not None:
+            new_lsf = numpy.full((self._lsf.shape[0], new_wave.size), numpy.nan, dtype=numpy.float32)
+            new_lsf[:, ipix:fpix+1] = self._lsf
         else:
-            new_inst_fwhm = None
+            new_lsf = None
 
         # set new arrays
         self._data = new_data
@@ -1112,7 +933,7 @@ class RSS(FiberRows):
         self._mask = new_mask
         self._sky = new_sky
         self._sky_error = new_sky_error
-        self._inst_fwhm = new_inst_fwhm
+        self._lsf = new_lsf
         self._wave = new_wave
     
         return self
@@ -1278,7 +1099,7 @@ class RSS(FiberRows):
 
         self._data = combined_data
         self._wave = rss_in[0]._wave
-        self._inst_fwhm = rss_in[0]._inst_fwhm
+        self._lsf = rss_in[0]._lsf
         self._header = rss_in[0]._header
         self._mask = combined_mask
         self._error = combined_error
@@ -1338,10 +1159,10 @@ class RSS(FiberRows):
                 error = self._error[select].flatten()[idx]
             else:
                 error = None
-            if self._inst_fwhm is not None:
-                inst_fwhm = self._inst_fwhm[select].flatten()[idx]
+            if self._lsf is not None:
+                lsf = self._lsf[select].flatten()[idx]
             else:
-                inst_fwhm = None
+                lsf = None
             if self._mask is not None:
                 mask = self._mask[select].flatten()[idx]
             else:
@@ -1392,10 +1213,10 @@ class RSS(FiberRows):
                 mask = None
             
             wave = self._wave
-            if self._inst_fwhm is not None and len(self._inst_fwhm.shape) == 2:
-                inst_fwhm = numpy.mean(self._inst_fwhm, 0)
+            if self._lsf is not None and len(self._lsf.shape) == 2:
+                lsf = numpy.mean(self._lsf, 0)
             else:
-                inst_fwhm = self._inst_fwhm
+                lsf = self._lsf
         
         header = self._header
         
@@ -1403,7 +1224,7 @@ class RSS(FiberRows):
             wave=wave,
             data=data,
             error=error,
-            inst_fwhm=inst_fwhm,
+            lsf=lsf,
             mask=mask,
             sky=sky,
             header=header
@@ -2365,13 +2186,13 @@ class RSS(FiberRows):
         else:
             wave = None
 
-        if self._inst_fwhm is not None:
-            if len(self._inst_fwhm.shape) == 2:
-                inst_fwhm = self._inst_fwhm[select, :]
+        if self._lsf is not None:
+            if len(self._lsf.shape) == 2:
+                lsf = self._lsf[select, :]
             else:
-                inst_fwhm = self._inst_fwhm
+                lsf = self._lsf
         else:
-            inst_fwhm = None
+            lsf = None
         
         if self._sky is not None:
             sky = self._sky[select, :]
@@ -2381,7 +2202,7 @@ class RSS(FiberRows):
         rss = RSS(
             data=data,
             wave=wave,
-            inst_fwhm=inst_fwhm,
+            lsf=lsf,
             header=self.getHeader(),
             error=error,
             mask=mask,
@@ -2425,13 +2246,13 @@ class RSS(FiberRows):
                         wave = self._wave[parts[i]]
                 else:
                     wave = None
-                if self._inst_fwhm is not None:
-                    if len(self._inst_fwhm.shape) == 2:
-                        inst_fwhm = self._inst_fwhm[:, parts[i]]
+                if self._lsf is not None:
+                    if len(self._lsf.shape) == 2:
+                        lsf = self._lsf[:, parts[i]]
                     else:
-                        inst_fwhm = self._inst_fwhm[parts[i]]
+                        lsf = self._lsf[parts[i]]
                 else:
-                    inst_fwhm = None
+                    lsf = None
             elif axis == 1:
                 data = self._data[parts[i]]
                 if self._error is not None:
@@ -2453,20 +2274,20 @@ class RSS(FiberRows):
                         wave = self._wave[parts[i]]
                 else:
                     wave = None
-                if self._inst_fwhm is not None:
-                    if len(self._inst_fwhm.shape) == 2:
-                        inst_fwhm = self._inst_fwhm[parts[i]]
+                if self._lsf is not None:
+                    if len(self._lsf.shape) == 2:
+                        lsf = self._lsf[parts[i]]
                     else:
-                        inst_fwhm = self._inst_fwhm[parts[i]]
+                        lsf = self._lsf[parts[i]]
                 else:
-                    inst_fwhm = None
+                    lsf = None
 
             rss = RSS(
                 data=data,
                 error=error,
                 mask=mask,
                 wave=wave,
-                inst_fwhm=inst_fwhm,
+                lsf=lsf,
                 sky=sky,
                 header=Header(header=self._header)._header,
                 shape=self._shape,
@@ -2521,7 +2342,7 @@ class RSS(FiberRows):
         return self._slitmap
     
     def setSlitmap(self, slitmap):
-        self._slitmap = slitmap
+        self._slitmap = Table(slitmap)
 
         # define fiber positions in WCS
         if self._header is not None:
@@ -2534,16 +2355,16 @@ class RSS(FiberRows):
         if mask is None:
             mask = self._mask
         if mask is None:
-            return self._data, self._error, self._inst_fwhm
+            return self._data, self._error, self._lsf
 
         if self._mask is not None:
             self._data[self._mask] = numpy.nan
             if self._error is not None:
                 self._error[self._mask] = numpy.nan
-            if self._inst_fwhm is not None:
-                self._inst_fwhm[self._mask] = numpy.nan
+            if self._lsf is not None:
+                self._lsf[self._mask] = numpy.nan
 
-        return self._data, self._error, self._inst_fwhm
+        return self._data, self._error, self._lsf
 
     def set_fluxcal(self, fluxcal):
         self._fluxcal = fluxcal
@@ -2565,12 +2386,95 @@ class RSS(FiberRows):
         self._width_trace = self._trace_to_coeff_table(width_trace)
         return self._width_trace
 
-def loadRSS(infile, extension_data=None, extension_mask=None, extension_error=None, extension_sky=None):
-    rss = RSS()
-    rss.loadFitsData(
-        infile, extension_data=None, extension_mask=None, extension_error=None, extension_sky=None
-    )
+    def get_wave_trace(self):
+        return self._wave_trace
+    
+    def set_wave_trace(self, wave_trace):
+        self._wave_trace = self._trace_to_coeff_table(wave_trace)
+        return self._wave_trace
+    
+    def get_lsf_trace(self):
+        return self._lsf_trace
 
+    def set_lsf_trace(self, lsf_trace):
+        self._lsf_trace = self._trace_to_coeff_table(lsf_trace)
+        return self._lsf_trace
+
+    def writeFitsData(self, out_rss, include_PT=False):
+        """Writes information from a RSS object into a FITS file.
+        
+        Parameters
+        ----------
+        out_rss : str
+            Name or Path of the FITS file to which the data shall be written
+        include_PT : bool, optional
+            If True, the position table will be included in the FITS file, by default False
+
+        Raises
+        ------
+        ValueError
+            Invalid wavelength array shape
+        ValueError
+            Invalid LSF array shape
+        """
+        hdus = pyfits.HDUList()
+
+        hdus.append(pyfits.PrimaryHDU(self._data.astype("float32")))
+        if self._error is not None:
+            hdus.append(pyfits.ImageHDU(self._error.astype("float32"), name="ERROR"))
+        if self._mask is not None:
+            hdus.append(pyfits.ImageHDU(self._mask.astype("uint8"), name="BADPIX"))
+        
+        if self._wave_trace is not None:
+            hdus.append(pyfits.BinTableHDU(self._wave_trace, name="WAVE_TRACE"))
+        elif self._wave is not None:
+            if len(self._wave.shape) == 1:
+                wcs = WCS(
+                    header={"CDELT1": self._wave_disp, "CRVAL1": self._wave_start,
+                    "CUNIT1": "angstrom", "CTYPE1": "WAVE", "CRPIX1": 1.0})
+                self._header.update(wcs.to_header())
+            elif len(self._wave.shape) == 2:
+                raise ValueError("Missing wavelength trace information")
+            else:
+                raise ValueError("Invalid wavelength array shape")
+        
+        if self._lsf_trace is not None:
+            hdus.append(pyfits.BinTableHDU(self._lsf_trace, name="LSF_TRACE"))
+        elif self._lsf is not None:
+            if len(self._lsf.shape) == 1:
+                hdus.append(pyfits.ImageHDU(self._lsf.astype("float32"), name="LSF"))
+            elif len(self._lsf.shape) == 2:
+                raise ValueError("Missing LSF trace information")
+            else:
+                raise ValueError("Invalid LSF array shape")
+        
+        if self._cent_trace is not None:
+            hdus.append(pyfits.BinTableHDU(self._cent_trace, name="CENT_TRACE"))
+        if self._width_trace is not None:
+            hdus.append(pyfits.BinTableHDU(self._width_trace, name="WIDTH_TRACE"))
+        if self._sky is not None:
+            hdus.append(pyfits.ImageHDU(self._sky.astype("float32"), name="SKY"))
+        if self._sky_error is not None:
+            hdus.append(pyfits.ImageHDU(self._sky_error.astype("float32"), name="SKY_ERROR"))
+        if self._fluxcal is not None:
+            hdus.append(pyfits.BinTableHDU(self._fluxcal, name="FLUXCAL"))
+        if self._slitmap is not None:
+            hdus.append(pyfits.BinTableHDU(self._slitmap, name="SLITMAP"))
+
+        if include_PT:
+            try:
+                table = self.writeFitsPosTable()
+                hdus.append(pyfits.BinTableHDU(data=table.data, header=table.header, name="PosTable"))
+            except (IndexError, ValueError, AttributeError):
+                pass
+
+        if self._header is not None:
+            hdus[0].header = self.getHeader()
+            hdus[0].update_header()
+        hdus.writeto(out_rss, overwrite=True, output_verify="silentfix")
+
+def loadRSS(in_rss):
+    rss = RSS.from_file(in_rss)
     return rss
 
 

@@ -269,7 +269,7 @@ def wave_little_interpol(wavelist):
 
 class Spectrum1D(Header):
     def __init__(
-        self, wave=None, data=None, error=None, mask=None, inst_fwhm=None, sky=None, sky_error=None, header=None
+        self, wave=None, data=None, error=None, mask=None, lsf=None, sky=None, sky_error=None, header=None
     ):
         self._wave = wave
         self._data = data
@@ -278,7 +278,7 @@ class Spectrum1D(Header):
             self._pixels = numpy.arange(self._dim)
         self._error = error
         self._mask = mask
-        self._inst_fwhm = inst_fwhm
+        self._lsf = lsf
         self._sky = sky
         self._sky_error = sky_error
         self._header = header
@@ -1140,7 +1140,7 @@ class Spectrum1D(Header):
                     elif hdu[i].header["EXTNAME"].split()[0] == "WAVE":
                         self._wave = hdu[i].data
                     elif hdu[i].header["EXTNAME"].split()[0] == "INSTFWHM":
-                        self._inst_fwhm = hdu[i].data
+                        self._lsf = hdu[i].data
                     elif hdu[i].header["EXTNAME"].split()[0] == "SKY":
                         self._sky = hdu[i].data
                     elif hdu[i].header["EXTNAME"].split()[0] == "SKY_ERROR":
@@ -1158,7 +1158,7 @@ class Spectrum1D(Header):
             if extension_wave is not None:
                 self._wave = hdu[extension_wave].data
             if extension_fwhm is not None:
-                self._inst_fwhm = hdu[i].data
+                self._lsf = hdu[i].data
             if extension_sky is not None:
                 self._sky = hdu[i].data
             if extension_skyerror:
@@ -1205,8 +1205,8 @@ class Spectrum1D(Header):
             self._error = self._error.astype("float32")
         if self._wave is not None:
             self._wave = self._wave.astype("float32")
-        if self._inst_fwhm is not None:
-            self._inst_fwhm = self._inst_fwhm.astype("float32")
+        if self._lsf is not None:
+            self._lsf = self._lsf.astype("float32")
         if self._sky is not None:
             self._sky = self._sky.astype("float32")
         if self._sky_error is not None:
@@ -1229,8 +1229,8 @@ class Spectrum1D(Header):
             hdus[0] = pyfits.PrimaryHDU(self._data, header=self._header)
             if self._wave is not None:
                 hdus[1] = pyfits.ImageHDU(self._wave, name="WAVE")
-            if self._inst_fwhm is not None:
-                hdus[2] = pyfits.ImageHDU(self._inst_fwhm, name="INSTFWHM")
+            if self._lsf is not None:
+                hdus[2] = pyfits.ImageHDU(self._lsf, name="INSTFWHM")
             if self._error is not None:
                 hdus[3] = pyfits.ImageHDU(self._error, name="ERROR")
             if self._mask is not None:
@@ -1253,9 +1253,9 @@ class Spectrum1D(Header):
 
             # instrumental FWHM hdu
             if extension_fwhm == 0:
-                hdu = pyfits.PrimaryHDU(self._inst_fwhm)
+                hdu = pyfits.PrimaryHDU(self._lsf)
             elif extension_fwhm > 0 and extension_fwhm is not None:
-                hdus[extension_fwhm] = pyfits.ImageHDU(self._inst_fwhm, name="INSTFWHM")
+                hdus[extension_fwhm] = pyfits.ImageHDU(self._lsf, name="INSTFWHM")
 
             # mask hdu
             if extension_mask == 0:
@@ -1453,10 +1453,10 @@ class Spectrum1D(Header):
             # all data points to zero
             new_data = numpy.zeros(len(ref_wave), numpy.float32)
             # all LSF pixels zero (if present)
-            if self._inst_fwhm is not None:
-                new_inst_fwhm = numpy.zeros(len(ref_wave), numpy.float32)
+            if self._lsf is not None:
+                new_lsf = numpy.zeros(len(ref_wave), numpy.float32)
             else:
-                new_inst_fwhm = None
+                new_lsf = None
             # all error pixels replaced with replace_error
             if self._error is None or err_sim == 0:
                 new_error = None
@@ -1479,7 +1479,7 @@ class Spectrum1D(Header):
                 wave=ref_wave,
                 error=new_error,
                 mask=new_mask,
-                inst_fwhm=new_inst_fwhm,
+                lsf=new_lsf,
                 sky=new_sky,
                 sky_error=new_sky_error,
                 header=self._header,
@@ -1495,38 +1495,38 @@ class Spectrum1D(Header):
                 select_goodpix = numpy.ones(self._dim, dtype=bool)
 
             # interpolate LSF ---------------------------------------------------------------------------------------------------------------------------------
-            if self._inst_fwhm is not None:
+            if self._lsf is not None:
                 intp = interpolate.interp1d(
                     self._wave[select_goodpix],
-                    self._inst_fwhm[select_goodpix],
+                    self._lsf[select_goodpix],
                     bounds_error=False,
                     assume_sorted=True,
                     fill_value=(0.0, 0.0),
                 )
-                clean_inst_fwhm = intp(self._wave)
+                clean_lsf = intp(self._wave)
 
-                select_interp = clean_inst_fwhm != 0
+                select_interp = clean_lsf != 0
                 # wave_interp = self._wave[select_interp]
                 # perform the interpolation on the data
                 if method == "spline":
                     intp = interpolate.UnivariateSpline(
                         self._wave[select_interp],
-                        clean_inst_fwhm[select_interp],
+                        clean_lsf[select_interp],
                         s=0,
                         ext="zeros",
                     )
-                    new_inst_fwhm = intp(ref_wave)
+                    new_lsf = intp(ref_wave)
                 elif method == "linear":
                     intp = interpolate.interp1d(
                         self._wave[select_interp],
-                        clean_inst_fwhm[select_interp],
+                        clean_lsf[select_interp],
                         bounds_error=False,
                         assume_sorted=True,
                         fill_value=(0.0, 0.0),
                     )
-                    new_inst_fwhm = intp(ref_wave)
+                    new_lsf = intp(ref_wave)
             else:
-                new_inst_fwhm = None
+                new_lsf = None
 
             # interpolate data --------------------------------------------------------------------------------------------------------------------------------
             # replace bad pixels within the spectrum with linear interpolated values
@@ -1720,9 +1720,9 @@ class Spectrum1D(Header):
             new_mask = numpy.where(select_out, extrapolate._mask, new_mask)
             if new_error is not None:
                 new_error = numpy.where(select_out, extrapolate._error, new_error)
-            if new_inst_fwhm is not None:
-                new_inst_fwhm = numpy.where(
-                    select_out, extrapolate._inst_fwhm, new_inst_fwhm
+            if new_lsf is not None:
+                new_lsf = numpy.where(
+                    select_out, extrapolate._lsf, new_lsf
                 )
             if new_sky is not None:
                 new_sky = numpy.where(select_out, extrapolate._sky, new_sky)
@@ -1736,7 +1736,7 @@ class Spectrum1D(Header):
             mask=new_mask,
             sky=new_sky,
             sky_error=new_sky_error,
-            inst_fwhm=new_inst_fwhm,
+            lsf=new_lsf,
         )
         return spec_out
 
@@ -1766,12 +1766,12 @@ class Spectrum1D(Header):
         return new_spec
 
     def matchFWHM(self, target_fwhm, inplace=False):
-        if self._inst_fwhm is not None:
+        if self._lsf is not None:
             if self._mask is not None:
                 good_pix = numpy.logical_not(self._mask)
                 data = self._data[good_pix]
                 wave = self._wave[good_pix]
-                fwhm = self._inst_fwhm[good_pix]
+                fwhm = self._lsf[good_pix]
                 if self._error is not None:
                     error = self._error[good_pix]
                 else:
@@ -1787,7 +1787,7 @@ class Spectrum1D(Header):
             else:
                 data = self._data
                 wave = self._wave
-                fwhm = self._inst_fwhm
+                fwhm = self._lsf
                 error = self._error
                 sky = self._sky
                 sky_error = self._sky_error
@@ -1813,7 +1813,7 @@ class Spectrum1D(Header):
             new_data = numpy.sum(multiplied, axis=0) / numpy.sum(kernel, 0)
             if new_spec._mask is not None:
                 new_spec._data[good_pix] = new_data
-                new_spec._inst_fwhm[:] = target_fwhm
+                new_spec._lsf[:] = target_fwhm
             if error is not None:
                 new_error = numpy.sqrt(
                     numpy.sum((error[:, numpy.newaxis] * kernel) ** 2, axis=0)
@@ -1976,10 +1976,10 @@ class Spectrum1D(Header):
         else:
             error = None
 
-        if self._inst_fwhm is not None:
-            inst_fwhm = numpy.sqrt(self._inst_fwhm**2 + diff_fwhm**2)
+        if self._lsf is not None:
+            lsf = numpy.sqrt(self._lsf**2 + diff_fwhm**2)
         else:
-            inst_fwhm = diff_fwhm
+            lsf = diff_fwhm
         
         if self._sky is not None:
             sky = numpy.zeros_like(self._sky)
@@ -1999,7 +1999,7 @@ class Spectrum1D(Header):
             data=data,
             error=error,
             mask=self._mask,
-            inst_fwhm=inst_fwhm,
+            lsf=lsf,
             sky=sky,
             sky_error=sky_error
         )
@@ -2798,8 +2798,8 @@ class Spectrum1D(Header):
             else:
                 errors[i, :] = s_new._error
 
-            if s._inst_fwhm is not None:
-                fwhms[i, :] = s_new._inst_fwhm
+            if s._lsf is not None:
+                fwhms[i, :] = s_new._lsf
             if s._mask is not None:
                 masks[i, :] = s_new._mask
             if s._sky is not None:
@@ -2836,4 +2836,4 @@ class Spectrum1D(Header):
         masks = numpy.logical_or(masks, numpy.isnan(skies))
         masks = numpy.logical_or(masks, numpy.isnan(sky_errors))
 
-        return Spectrum1D(wave=wave, data=fluxes, error=errors, inst_fwhm=fwhms, mask=masks, sky=skies, sky_error=sky_errors)
+        return Spectrum1D(wave=wave, data=fluxes, error=errors, lsf=fwhms, mask=masks, sky=skies, sky_error=sky_errors)

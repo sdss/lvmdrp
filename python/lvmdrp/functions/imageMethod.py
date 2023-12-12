@@ -2453,16 +2453,15 @@ def extract_spectra(
     elif disp_axis == "Y" or disp_axis == "y":
         img.swapaxes()
 
-    trace_mask = TraceMask()
-    trace_mask.loadFitsData(in_trace)
+    trace_mask = TraceMask.from_file(in_trace)
 
     if method == "optimal":
         # check if fwhm trace is given and exists
-        trace_fwhm = TraceMask()
         if in_fwhm is None or not os.path.isfile(in_fwhm):
+            trace_fwhm = TraceMask()
             trace_fwhm.setData(data=numpy.ones(trace_mask._data.shape) * float(fwhm))
         else:
-            trace_fwhm.loadFitsData(in_fwhm)
+            trace_fwhm = TraceMask().from_file(in_fwhm)
         
         # set up parallel run
         if parallel == "auto":
@@ -4096,7 +4095,7 @@ def trace_fibers(
     centroids.setHeader(img._header.copy())
     centroids._header["IMAGETYP"] = "trace_centroid"
     # initialize flux and FWHM traces
-    trace_cent = copy(centroids)
+    cent_trace = copy(centroids)
     trace_amp = copy(centroids)
     trace_amp._header["IMAGETYP"] = "trace_amplitude"
     trace_fwhm = copy(centroids)
@@ -4222,10 +4221,10 @@ def trace_fibers(
 
         if amp_slice.size != trace_amp._data.shape[0]:
             dummy_amp = numpy.split(numpy.zeros(trace_amp._data.shape[0]), LVM_NBLOCKS)
-            dummy_cent = numpy.split(numpy.zeros(trace_cent._data.shape[0]), LVM_NBLOCKS)
+            dummy_cent = numpy.split(numpy.zeros(cent_trace._data.shape[0]), LVM_NBLOCKS)
             dummy_fwhm = numpy.split(numpy.zeros(trace_fwhm._data.shape[0]), LVM_NBLOCKS)
             dummy_amp_mask = numpy.split(numpy.ones(trace_amp._data.shape[0], dtype=bool), LVM_NBLOCKS)
-            dummy_cent_mask = numpy.split(numpy.ones(trace_cent._data.shape[0], dtype=bool), LVM_NBLOCKS)
+            dummy_cent_mask = numpy.split(numpy.ones(cent_trace._data.shape[0], dtype=bool), LVM_NBLOCKS)
             dummy_fwhm_mask = numpy.split(numpy.ones(trace_fwhm._data.shape[0], dtype=bool), LVM_NBLOCKS)
 
             amp_split = numpy.split(amp_slice, len(iblocks))
@@ -4244,15 +4243,15 @@ def trace_fibers(
             
             # update traces
             trace_amp.setSlice(icolumn, axis="y", data=numpy.concatenate(dummy_amp), mask=numpy.concatenate(dummy_amp_mask))
-            trace_cent.setSlice(icolumn, axis="y", data=numpy.concatenate(dummy_cent), mask=numpy.concatenate(dummy_cent_mask))
+            cent_trace.setSlice(icolumn, axis="y", data=numpy.concatenate(dummy_cent), mask=numpy.concatenate(dummy_cent_mask))
             trace_fwhm.setSlice(icolumn, axis="y", data=numpy.concatenate(dummy_fwhm), mask=numpy.concatenate(dummy_fwhm_mask))
             trace_amp._good_fibers = numpy.arange(trace_amp._fibers)[~numpy.all(trace_amp._mask, axis=1)]
-            trace_cent._good_fibers = numpy.arange(trace_cent._fibers)[~numpy.all(trace_cent._mask, axis=1)]
+            cent_trace._good_fibers = numpy.arange(cent_trace._fibers)[~numpy.all(cent_trace._mask, axis=1)]
             trace_fwhm._good_fibers = numpy.arange(trace_fwhm._fibers)[~numpy.all(trace_fwhm._mask, axis=1)]
         else:
             # update traces
             trace_amp.setSlice(icolumn, axis="y", data=amp_slice, mask=amp_mask)
-            trace_cent.setSlice(icolumn, axis="y", data=cent_slice, mask=cent_mask)
+            cent_trace.setSlice(icolumn, axis="y", data=cent_slice, mask=cent_mask)
             trace_fwhm.setSlice(icolumn, axis="y", data=fwhm_slice, mask=fwhm_mask)
         
         # compute residuals
@@ -4277,42 +4276,42 @@ def trace_fibers(
         log.info(f"fitting peak trace with {deg_amp}-deg polynomial")
         trace_amp.fit_polynomial(deg_amp, poly_kind="poly")
         log.info(f"fitting centroid trace with {deg_cent}-deg polynomial")
-        trace_cent.fit_polynomial(deg_cent, poly_kind="poly")
+        cent_trace.fit_polynomial(deg_cent, poly_kind="poly")
         log.info(f"fitting FWHM trace with {deg_fwhm}-deg polynomial")
         trace_fwhm.fit_polynomial(deg_fwhm, poly_kind="poly")
         # set bad fibers in trace mask
         trace_amp._mask[bad_fibers] = True
-        trace_cent._mask[bad_fibers] = True
+        cent_trace._mask[bad_fibers] = True
         trace_fwhm._mask[bad_fibers] = True
 
         # linearly interpolate coefficients at masked fibers
         if interpolate_missing:
             log.info(f"interpolating coefficients at {bad_fibers.sum()} masked fibers")
             trace_amp.interpolate_coeffs()
-            trace_cent.interpolate_coeffs()
+            cent_trace.interpolate_coeffs()
             trace_fwhm.interpolate_coeffs()
     else:
         # interpolate traces along X axis to fill in missing data
         log.info("interpolating traces along X axis to fill in missing data")
         trace_amp.interpolate_data(axis="X")
-        trace_cent.interpolate_data(axis="X")
+        cent_trace.interpolate_data(axis="X")
         trace_fwhm.interpolate_data(axis="X")
         # set bad fibers in trace mask
         trace_amp._mask[bad_fibers] = True
-        trace_cent._mask[bad_fibers] = True
+        cent_trace._mask[bad_fibers] = True
         trace_fwhm._mask[bad_fibers] = True
 
         if interpolate_missing:
             log.info("interpolating bad fibers")
             trace_amp.interpolate_data(axis="Y")
-            trace_cent.interpolate_data(axis="Y")
+            cent_trace.interpolate_data(axis="Y")
             trace_fwhm.interpolate_data(axis="Y")
     
     # write output traces
     log.info(f"writing amplitude trace to '{os.path.basename(out_trace_amp)}'")
     trace_amp.writeFitsData(out_trace_amp)
     log.info(f"writing centroid trace to '{os.path.basename(out_trace_cent)}'")
-    trace_cent.writeFitsData(out_trace_cent)
+    cent_trace.writeFitsData(out_trace_cent)
     log.info(f"writing FWHM trace to '{os.path.basename(out_trace_fwhm)}'")
     trace_fwhm.writeFitsData(out_trace_fwhm)
     if out_trace_cent_guess is not None:
@@ -4367,4 +4366,4 @@ def trace_fibers(
         label="residuals_columns"
     )
 
-    return centroids, trace_cent, trace_amp, trace_fwhm
+    return centroids, cent_trace, trace_amp, trace_fwhm

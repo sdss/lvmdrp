@@ -80,8 +80,7 @@ def illumination_correction(in_fiberflat: bool = None) -> dict:
     for spec in "123":
         for cam in ["b", "r", "z"]:
             cam = cam + spec
-            fflat = rss_tasks.RSS()
-            fflat.loadFitsData(f"/home/mejia/Research/lvm/lvmdata/calib/60177/lvm-mfiberflat-{cam}.fits")
+            fflat = rss_tasks.RSS.from_file(f"/home/mejia/Research/lvm/lvmdata/calib/60177/lvm-mfiberflat-{cam}.fits")
             fflat._data[(fflat._mask) | (fflat._data <= 0)] = np.nan
             sci_factor = np.nanmedian(fflat._data[sci1_fibers][:, 1000:3000])
             skw_factor = np.nanmedian(fflat._data[skw1_fibers][:, 1000:3000])
@@ -246,9 +245,8 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
                                   out_lvmframe=frame_path)
 
         # NOTE: this is a temporary fix for the illumination bias across telescopes whe using dome flats
-        rss = rss_tasks.RSS()
+        rss = rss_tasks.RSS.from_file(fsci_path)
         factors = illumination_correction(in_fiberflat=None)
-        rss.loadFitsData(fsci_path)
         fibermap = rss._slitmap
         fibermap = fibermap[fibermap["spectrographid"] == int(sci_camera[1])]
         for ifiber in range(rss._fibers):
