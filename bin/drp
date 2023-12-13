@@ -2,6 +2,10 @@
 # encoding: utf-8
 #
 
+import os
+import pathlib
+import shutil
+
 import click
 import cloup
 from cloup.constraints import mutually_exclusive, RequireExactly, IsSet, If
@@ -121,6 +125,17 @@ def quick_reduction(expnum: int, use_fiducial_master: bool, skip_sky_subtraction
 
 # register quick DRP command
 cli.add_command(quick_reduction)
+
+
+@cli.command('erase', short_help='Remove the DRP reductions')
+@click.option('-d', '--drpver', type=str, help='the DRP version', required=True)
+def erase(drpver: str):
+    """ Clean out the DRP reductions for a given version """
+    path = pathlib.Path(os.getenv('LVM_SPECTRO_REDUX')) / drpver
+    if not path.exists():
+        click.echo(f'Path {path} does not exist.')
+        return
+    shutil.rmtree(path)
 
 
 if __name__ == "__main__":

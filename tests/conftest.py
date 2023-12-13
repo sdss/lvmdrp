@@ -56,7 +56,7 @@ def datadir():
 @pytest.fixture(scope='module')
 def make_meta():
     """ fixture factory to make a fake metadata frame """
-    def _make_meta(expnum=6817, tileid=1111, mjd=61234):
+    def _make_meta(expnum=6817, tileid=11111, mjd=61234):
         defaults = {'hemi': 's', 'status': 0, 'stage': 1, 'qual': 0, 'quality': 'excellent',
                     'quartz': False, 'ldls': False, 'argon': False, 'xenon': False, 'krypton': False,
                     'hgne': False, 'neon': False, 'exptime': 900.0, 'imgtype': 'object'}
@@ -67,6 +67,7 @@ def make_meta():
 
         defaults['expnum'] = expnum
         defaults['tileid'] = tileid
+        defaults['tilegrp'] = '0011XX'
         defaults['mjd'] = mjd
         defaults['rmjd'] = mjd
         return pd.DataFrame(defaults)
@@ -96,7 +97,7 @@ def multimeta(make_multi):
     yield make_multi(expnum=[6818, 6819])
 
 
-def create_fake_fits(path, tileid=1111, mjd=61234, expnum=6817, cameras=None):
+def create_fake_fits(path, tileid=11111, mjd=61234, expnum=6817, cameras=None):
     """ create a fake raw frame FITS file """
     out = {}
     cameras = cameras or ['b1']

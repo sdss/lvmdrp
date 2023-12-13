@@ -25,7 +25,7 @@ from lvmdrp.utils.bitmask import (
 )
 from lvmdrp import log, __version__, path
 from lvmdrp.utils.hdrfix import apply_hdrfix
-from lvmdrp.utils.convert import dateobs_to_sjd, correct_sjd
+from lvmdrp.utils.convert import dateobs_to_sjd, correct_sjd, tileid_grp
 
 
 DRPVER = __version__
@@ -57,6 +57,7 @@ RAW_METADATA_COLUMNS = [
     ("status", ReductionStatus),
     ("drpqual", QualityFlag),
     ("name", str),
+    ("tilegrp", str)
 ]
 MASTER_METADATA_COLUMNS = [
     ("tileid", int),
@@ -80,6 +81,7 @@ MASTER_METADATA_COLUMNS = [
     ("drpqual", QualityFlag),
     ("nframes", int),
     ("name", str),
+    ("tilegrp", str)
 ]
 
 
@@ -138,8 +140,9 @@ def _get_metadata_paths(tileid=None, mjd=None, kind="raw", filter_exist=True):
             raise ValueError(
                 "`tileid` and `mjd` are needed to define a path for raw metadata"
             )
+        tilegrp = tileid_grp(tileid)
         path_pattern = os.path.join(
-            METADATA_PATH, str(tileid), str(mjd), "raw_metadata.hdf5"
+            METADATA_PATH, tilegrp, str(tileid), str(mjd), "raw_metadata.hdf5"
         )
     elif kind == "master":
         path_pattern = os.path.join(METADATA_PATH, "master_metadata.hdf5")
@@ -576,9 +579,12 @@ def extract_metadata(frames_paths: list, kind: str = "raw") -> pd.DataFrame:
         # set on-lamp conditions
         onlamp = ["ON", True, 'T', 1]
 
-        # get the tile id; set null tile ids -999 to 1111
-        tileid = header.get("TILE_ID") or header.get("TILEID", 1111)
-        tileid = 1111 if tileid in (-999, None) else tileid
+        # get the tile id; set null tile ids -999 to 11111
+        tileid = header.get("TILE_ID") or header.get("TILEID", 11111)
+        tileid = 11111 if tileid in (-999, 999, None) else tileid
+
+        # get the tile group
+        tilegrp = tileid_grp(tileid)
 
         if kind == "raw":
             new_metadata[i] = [
@@ -604,6 +610,7 @@ def extract_metadata(frames_paths: list, kind: str = "raw") -> pd.DataFrame:
                 header.get("DRPSTAT", ReductionStatus(0)),
                 header.get("DRPQUAL", QualityFlag(0)),
                 frame_path.stem,
+                tilegrp,
             ]
         elif kind == "master":
             new_metadata[i] = [
@@ -628,6 +635,7 @@ def extract_metadata(frames_paths: list, kind: str = "raw") -> pd.DataFrame:
                 header.get("DRPQUAL", QualityFlag(0)),
                 header.get("NFRAMES", 1),
                 frame_path.stem,
+                tilegrp,
             ]
 
     # define dataframe

@@ -137,7 +137,7 @@ def get_frames_metadata(mjd: Union[str, int] = None, path: str = None, suffix: s
         camera, expnum = parse_sdr_name(frame_path)
         spec = f"sp{camera[-1]}"
         exptime = header["EXPTIME"]
-        tileid = header.get("TILEID", 1111)
+        tileid = header.get("TILEID", 11111)
         qual = header.get("QUALITY", "excellent")
         frames_table.add_row([imagetyp, spec, mjd, camera, expnum, exptime,
                               tileid, qual, str(frame_path), frame_path.stem])
