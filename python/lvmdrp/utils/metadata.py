@@ -581,7 +581,7 @@ def extract_metadata(frames_paths: list, kind: str = "raw") -> pd.DataFrame:
 
         # get the tile id; set null tile ids -999 to 11111
         tileid = header.get("TILE_ID") or header.get("TILEID", 11111)
-        tileid = 11111 if tileid in (-999, None) else tileid
+        tileid = 11111 if tileid in (-999, 999, None) else tileid
 
         # get the tile group
         tilegrp = tileid_grp(tileid)
