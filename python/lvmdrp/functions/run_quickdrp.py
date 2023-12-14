@@ -141,13 +141,14 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
     extraction_method = "aperture" if aperture_extraction else "optimal"
 
     # get target frames metadata
-    sci_metadata = md.get_metadata(tileid="*", mjd="*", expnum=expnum, imagetyp="object")
+    sci_metadata = md.get_metadata(tileid="*", mjd="*", expnum=expnum)
     sci_metadata.sort_values("expnum", ascending=False, inplace=True)
 
     # define general metadata
     sci_tileid = sci_metadata["tileid"].unique()[0]
     sci_mjd = sci_metadata["mjd"].unique()[0]
     sci_expnum = sci_metadata["expnum"].unique()[0]
+    sci_imagetyp = sci_metadata["imagetyp"].unique()[0]
     log.info(f"running Quick DRP for tile {sci_tileid} at MJD {sci_mjd} with exposure number {sci_expnum}")
 
     master_mjd = get_master_mjd(sci_mjd)
@@ -267,19 +268,19 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
         # use sky subtracted resampled frames for flux calibration in each camera
         flux_tasks.fluxcal_Gaia(sci_camera, hsci_path, GAIA_CACHE_DIR=ORIG_MASTER_DIR+'/gaia_cache')
 
-    # # combine spectrographs
-    drp.combine_spectrographs(tileid=sci_tileid, mjd=sci_mjd, channel="b", expnum=sci_expnum)
-    drp.combine_spectrographs(tileid=sci_tileid, mjd=sci_mjd, channel="r", expnum=sci_expnum)
-    drp.combine_spectrographs(tileid=sci_tileid, mjd=sci_mjd, channel="z", expnum=sci_expnum)
+    # combine spectrographs
+    drp.combine_spectrographs(tileid=sci_tileid, mjd=sci_mjd, channel="b", expnum=sci_expnum, imagetype=sci_imagetyp)
+    drp.combine_spectrographs(tileid=sci_tileid, mjd=sci_mjd, channel="r", expnum=sci_expnum, imagetype=sci_imagetyp)
+    drp.combine_spectrographs(tileid=sci_tileid, mjd=sci_mjd, channel="z", expnum=sci_expnum, imagetype=sci_imagetyp)
 
     # flux-calibrate each channel
-    sci_paths = sorted(drp.path.expand("lvm_anc", drpver=drpver, tileid=sci_tileid, mjd=sci_mjd, kind="", imagetype="object", camera="*", expnum=sci_expnum))
-    sci_paths = [sci_path for sci_path in sci_paths if "lvm-object-sp" not in sci_path]
+    sci_paths = sorted(drp.path.expand("lvm_anc", drpver=drpver, tileid=sci_tileid, mjd=sci_mjd, kind="", imagetype=sci_imagetyp, camera="*", expnum=sci_expnum))
+    sci_paths = [sci_path for sci_path in sci_paths if f"lvm-{sci_imagetyp}-sp" not in sci_path]
     for sci_path in sci_paths:
         flux_tasks.apply_fluxcal(in_rss=sci_path, out_rss=sci_path)
 
     # combine channels
-    drp.combine_channels(tileid=sci_tileid, mjd=sci_mjd, expnum=sci_expnum)
+    drp.combine_channels(tileid=sci_tileid, mjd=sci_mjd, expnum=sci_expnum, imagetype=sci_imagetyp)
 
     # refine sky subtraction
     sky_tasks.quick_sky_refinement(in_cframe=path.full("lvm_frame", mjd=sci_mjd, drpver=drpver, tileid=sci_tileid, expnum=sci_expnum, kind='CFrame'))
