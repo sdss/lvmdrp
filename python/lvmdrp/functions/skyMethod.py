@@ -1686,7 +1686,7 @@ def quick_sky_subtraction(in_rss: str, out_rss, in_skye: str, in_skyw: str, sky_
     return rss
 
 
-def quick_sky_refinement(in_cframe, band=np.array((7238,7242,7074,7084,7194,7265))):
+def quick_sky_refinement(in_cframe, band=np.array((7238,7242,7074,7084,7194,7265)), skip_subtraction=False):
     """Quick sky refinement using the model in the final CFrame
     
     Parameters
@@ -1717,10 +1717,12 @@ def quick_sky_refinement(in_cframe, band=np.array((7238,7242,7074,7084,7194,7265
     smap_1 = bn.nanmean(sky[:, i_band[4]:i_band[5]], axis=1)
     smap_c = smap_b - 0.5 * (smap_0 + smap_1)
 
+        
     scale = map_c / smap_c
     sky_c = np.nan_to_num(sky * scale[:, None])
-    data_c = np.nan_to_num(flux - sky_c)
-    error_c = np.nan_to_num(error - sky_c)
+    if skip_subtraction:
+        data_c = np.nan_to_num(flux - sky_c)
+        error_c = np.nan_to_num(error - sky_c)
 
     cframe["FLUX"].data = data_c
     cframe["ERROR"].data = error_c

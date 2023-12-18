@@ -284,7 +284,9 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
 
     # refine sky subtraction
     # TODO: make sure the the master sky being subtracted in this step is stored in the correct extension
-    sky_tasks.quick_sky_refinement(in_cframe=path.full("lvm_frame", mjd=sci_mjd, drpver=drpver, tileid=sci_tileid, expnum=sci_expnum, kind='CFrame'))
+
+    sky_tasks.quick_sky_refinement(in_cframe=path.full("lvm_frame", mjd=sci_mjd, drpver=drpver, tileid=sci_tileid, expnum=sci_expnum, kind='CFrame'),
+                                   skip_subtraction=skip_sky_subtraction)
 
     # TODO: add quick report routine
 
