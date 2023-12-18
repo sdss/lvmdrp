@@ -272,29 +272,30 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
         # use sky subtracted resampled frames for flux calibration in each camera
         flux_tasks.fluxcal_Gaia(sci_camera, hsci_path, GAIA_CACHE_DIR=ORIG_MASTER_DIR+'/gaia_cache')
 
-    # # combine spectrographs
-    drp.combine_spectrographs(tileid=sci_tileid, mjd=sci_mjd, channel="b", expnum=sci_expnum)
-    drp.combine_spectrographs(tileid=sci_tileid, mjd=sci_mjd, channel="r", expnum=sci_expnum)
-    drp.combine_spectrographs(tileid=sci_tileid, mjd=sci_mjd, channel="z", expnum=sci_expnum)
+    # stack spectrographs and channel-wise calibration
+    for channel in "brz":
+        hsci_paths = sorted(path.expand('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver,
+                                        kind='h', camera=f'{channel}*', imagetype='object', expnum=expnum))
+        
+        # stack spectrographs
+        # TODO: write lvmCFrame-<channel>-<expnum>.fits
+        cframe_path = path.full("lvm_frame", mjd=sci_mjd, drpver=drpver, tileid=sci_tileid, expnum=sci_expnum, kind=f'CFrame-{channel}')
+        rss_tasks.stack_spectrographs(in_rsss=hsci_paths, out_rss=cframe_path)
 
-    # flux-calibrate each channel
-    sci_paths = sorted(drp.path.expand("lvm_anc", drpver=drpver, tileid=sci_tileid, mjd=sci_mjd, kind="", imagetype="object", camera="*", expnum=sci_expnum))
-    sci_paths = [sci_path for sci_path in sci_paths if "lvm-object-sp" not in sci_path]
-    # TODO: write lvmFFrame
-    for sci_path in sci_paths:
-        flux_tasks.apply_fluxcal(in_rss=sci_path, out_rss=sci_path)
+        # flux-calibrate each channel
+        # TODO: write lvmFFrame-<channel>-<expnum>.fits
+        fframe_path = path.full("lvm_frame", mjd=sci_mjd, drpver=drpver, tileid=sci_tileid, expnum=sci_expnum, kind=f'FFrame-{channel}')
+        flux_tasks.apply_fluxcal(in_rss=cframe_path, out_rss=fframe_path)
 
-    # combine channels
-    # TODO: write lvmCFrame
-    drp.combine_channels(tileid=sci_tileid, mjd=sci_mjd, expnum=sci_expnum)
+    # stitch channels
+    fframe_paths = sorted(path.expand('lvm_frame', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver, kind='FFrame-*', expnum=expnum))
+    fframe_path = path.full("lvm_frame", drpver=drpver, tileid=sci_tileid, mjd=sci_mjd, expnum=sci_expnum, kind='FFrame')
+    rss_tasks.join_spec_channels(in_rsss=fframe_paths, out_rss=fframe_path, use_weights=True)
 
-    # refine sky subtraction
-    # TODO: write lvmSFrame
-    sky_tasks.quick_sky_refinement(in_cframe=path.full("lvm_frame", mjd=sci_mjd, drpver=drpver, tileid=sci_tileid, expnum=sci_expnum, kind='CFrame'))
+    # TODO: write lvmSFrame-<expnum>.fits
+    sframe_path = path.full("lvm_frame", mjd=sci_mjd, drpver=drpver, tileid=sci_tileid, expnum=sci_expnum, kind='SFrame')
+    sky_tasks.quick_sky_refinement(in_fframe=fframe_path, out_sframe=sframe_path)
 
     # TODO: add quick report routine
 
-    # TODO: combine exposures
     # TODO: by default remove the extra files for the given expnum
-
-    # TODO: flux calibration
