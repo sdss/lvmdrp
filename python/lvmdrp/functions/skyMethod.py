@@ -1592,8 +1592,8 @@ def interpolate_sky(in_rss: str, out_sky: str, out_rss: str = None, which: str =
     return f_data, f_error, sky_rss, swave, ssky, svars, smask
 
 
-def quick_sky_subtraction(in_rss: str, out_rss, in_skye: str, in_skyw: str, sky_weights: Tuple[float, float] = None, skip_subtraction: bool = False) -> RSS:
-    """Quick sky subtraction using the sky fibers from both telescopes
+def combine_skies(in_rss: str, out_rss, in_skye: str, in_skyw: str, sky_weights: Tuple[float, float] = None) -> RSS:
+    """Combines the extrapolated sky fibers from both telescopes into a single master sky RSS
 
     Parameters
     ----------
@@ -1607,8 +1607,6 @@ def quick_sky_subtraction(in_rss: str, out_rss, in_skye: str, in_skyw: str, sky_
         input SkyW RSS file
     sky_weights : Tuple[float, float]
         weights for each telescope when master_sky = 'combine', by default None
-    skip_subtraction : bool, optional
-        whether to skip sky subtraction or not, by default False
 
     Returns
     -------
@@ -1661,32 +1659,18 @@ def quick_sky_subtraction(in_rss: str, out_rss, in_skye: str, in_skyw: str, sky_
 
     # define master sky
     sky = sky_e * w_e + sky_w * w_w
-    
-    # subtract master sky from data
-    if skip_subtraction:
-        log.info(f"skipping sky subtraction, saving master sky in '{os.path.basename(out_rss)}'")
-        new_data = rss._data
-        new_error = rss._error
-        new_mask = rss._mask
-    else:
-        log.info("subtracting interpolated sky from original data")
-        new_data = rss._data - sky._data
-        new_error = np.sqrt(rss._error ** 2 + sky._error ** 2)
-        new_mask = rss._mask
 
     # write output sky-subtracted RSS
     log.info(f"writing output RSS file '{os.path.basename(out_rss)}'")
-    rss.setHdrValue("SKYSUB", not skip_subtraction, "sky subtracted?")
     rss.setHdrValue("SKYEW", w_e, "SkyE weight")
     rss.setHdrValue("SKYWW", w_w, "SkyW weight")
-    rss.setData(data=new_data, error=new_error, mask=new_mask)
     rss.set_sky(rss_sky=sky)
     rss.writeFitsData(out_rss)
 
     return rss
 
 
-def quick_sky_refinement(in_cframe, band=np.array((7238,7242,7074,7084,7194,7265)), skip_subtraction=False):
+def quick_sky_subtraction(in_cframe, band=np.array((7238,7242,7074,7084,7194,7265)), skip_subtraction=False):
     """Quick sky refinement using the model in the final CFrame
     
     Parameters
@@ -1726,6 +1710,7 @@ def quick_sky_refinement(in_cframe, band=np.array((7238,7242,7074,7084,7194,7265
         data_c = flux
         error_c = error
 
+    cframe["PRIMARY"].header["SKYSUB"] = (not skip_subtraction, "sky subtracted?")
     cframe["FLUX"].data = data_c
     cframe["ERROR"].data = error_c
     cframe["SKY"].data = sky_c
