@@ -524,7 +524,7 @@ class RSS(FiberRows):
         
         return supersky_error
 
-    def eval_supersky(self, supersky=None, supersky_error=None, which="e"):
+    def eval_supersky(self, which, wave=None, supersky=None, supersky_error=None):
         which = which.lower()
         if which in {"east", "e", "skye"}:
             supersky = self._supersky_e if supersky is None else supersky
@@ -540,32 +540,30 @@ class RSS(FiberRows):
         if supersky_error is None:
             raise ValueError("Cannot evaluate super sky error, spline parameters are None")
 
-        if self._wave is None:
+        if wave is None:
+            wave = self._wave
+
+        if wave is None:
             raise ValueError("Cannot evaluate super sky, no wavelength information is available")
 
-        if len(self._wave.shape) == 1:
-            dlambda = numpy.diff(self._wave)
+        if len(wave.shape) == 1:
+            dlambda = numpy.diff(wave)
             dlambda = numpy.append(dlambda, dlambda[-1])
-            sky_spline = interpolate.splev(self._wave, supersky)
-            sky_error_spline = interpolate.splev(self._wave, supersky_error)
-        elif len(self._wave.shape) == 2:
-            dlambda = numpy.diff(self._wave, axis=1)
+            sky_spline = interpolate.splev(wave, supersky)
+            sky_error_spline = interpolate.splev(wave, supersky_error)
+        elif len(wave.shape) == 2:
+            dlambda = numpy.diff(wave, axis=1)
             dlambda = numpy.column_stack((dlambda, dlambda[:, -1]))
             sky_spline = numpy.zeros(self._data.shape)
             sky_error_spline = numpy.zeros(self._data.shape)
             for i in range(self._fibers):
-                sky_spline[i, :] = interpolate.splev(self._wave[i, :], supersky)
-                sky_error_spline[i, :] = interpolate.splev(self._wave[i, :], supersky_error)
+                sky_spline[i, :] = interpolate.splev(wave[i, :], supersky)
+                sky_error_spline[i, :] = interpolate.splev(wave[i, :], supersky_error)
 
-        sky_spline = interpolate.splev(self._wave, supersky).astype("float32") * dlambda
-        sky_error_spline = interpolate.splev(self._wave, supersky_error).astype("float32") * dlambda
+        sky_spline = interpolate.splev(wave, supersky).astype("float32") * dlambda
+        sky_error_spline = interpolate.splev(wave, supersky_error).astype("float32") * dlambda
 
-        return RSS(data=sky_spline,
-                   error=sky_error_spline,
-                   mask=self._mask,
-                   wave=self._wave,
-                   inst_fwhm=self._inst_fwhm,
-                   header=self._header)
+        return wave, sky_spline, sky_error_spline
 
     def supersky_to_table(self):
         tck_supersky = dict(knots=[], coeffs=[], degree=[], telescope=[])
