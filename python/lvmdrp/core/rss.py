@@ -595,19 +595,6 @@ class RSS(FiberRows):
             tck_dict["telescope"].append(telescope)
         
         return Table(tck_dict)
-    
-    def supersky_error_to_table(self):
-        tck_supersky_error = dict(knots=[], coeffs=[], degree=[], specid=[], telescope=[])
-        for which, tck in zip(("east", "west"), (self._supersky_error_e, self._supersky_error_w)):
-            if tck is None:
-                continue
-            tck_supersky_error["knots"].append(tck[0])
-            tck_supersky_error["coeffs"].append(tck[1])
-            tck_supersky_error["degree"].append(tck[2])
-            tck_supersky_error["specid"].append(int(self._header["SPEC"][-1]))
-            tck_supersky_error["telescope"].append(which)
-        
-        return Table(tck_supersky_error)
 
     def loadFitsData(
         self,
