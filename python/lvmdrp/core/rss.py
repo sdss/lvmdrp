@@ -504,7 +504,7 @@ class RSS(FiberRows):
     def get_supersky_error(self):
         return self._supersky_error
 
-    def eval_supersky(self, wave, supersky=None, supersky_error=None):
+    def eval_supersky(self, supersky=None, supersky_error=None):
 
         # get supersky spline parameters
         supersky = self._supersky if supersky is None else supersky
@@ -514,55 +514,55 @@ class RSS(FiberRows):
         if supersky_error is None:
             raise ValueError("Cannot evaluate super sky error, spline parameters are None")
 
-        # validate wave
-        if wave.shape != self._data.shape:
-            raise ValueError("wave and data shape do not match")
-        if wave.shape[0] // 648 != supersky["specid"].max():
-            raise ValueError("wave and supersky specid do not match")
-
-        waves = numpy.split(wave, 3, axis=0)
+        telescopes = sorted(set(supersky["telescope"]))
+        specids = sorted(set(supersky["specid"]))
 
         # separate east and west
-        supersky_spline = dict(east=numpy.zeros_like(waves), west=[])
+        waves = dict(east=[], west=[])
+        supersky_spline = dict(east=[], west=[])
         supersky_error_spline = dict(east=[], west=[])
-        for telescope in ("east", "west"):
+        for telescope in telescopes:
             # separate by telescope
             select_telescope = supersky["telescope"] == telescope
             tcks = list(zip(
+                supersky["wave"][select_telescope],
                 supersky["knots"][select_telescope],
                 supersky["coeffs"][select_telescope],
                 supersky["degree"][select_telescope]))
 
             tcks_error = list(zip(
+                supersky_error["wave"][select_telescope],
                 supersky_error["knots"][select_telescope],
                 supersky_error["coeffs"][select_telescope],
                 supersky_error["degree"][select_telescope]))
-            
+
             # separate by spectrograph
-            for specid in (1,2,3):
-                select_specid = supersky["specid"][select_telescope] == specid
-                tck = tcks[select_specid][0]
-                tck_error = tcks_error[select_specid][0]
-                wave = waves[specid-1]
-                
+            for specid in specids:
+                wave = tcks[specid-1][0]
+                wave = wave.reshape((-1, 4085))
+                tck = tcks[specid-1][1:]
+                tck_error = tcks_error[specid-1][1:]
+
                 # evaluate supersky
                 dlambda = numpy.diff(wave, axis=1)
                 dlambda = numpy.column_stack((dlambda, dlambda[:, -1]))
                 sky = numpy.zeros(wave.shape)
                 error = numpy.zeros(wave.shape)
-                for i in range(self._fibers):
+                for i in range(self._fibers // len(specids)):
                     sky[i, :] = interpolate.splev(wave[i, :], tck)
                     error[i, :] = interpolate.splev(wave[i, :], tck_error)
                 
                 # store supersky
+                waves[telescope].append(wave)
                 supersky_spline[telescope].append(sky)
                 supersky_error_spline[telescope].append(error)
             
             # concatenate spectrographs
+            waves[telescope] = numpy.concatenate(waves[telescope], axis=0)
             supersky_spline[telescope] = numpy.concatenate(supersky_spline[telescope], axis=0)
             supersky_error_spline[telescope] = numpy.concatenate(supersky_error_spline[telescope], axis=0)
 
-        return supersky_spline, supersky_error_spline
+        return waves, supersky_spline, supersky_error_spline
 
     def tck_to_table(self, wave, knots, coeffs, degree, specid, telescope):
         # pack arguments for validation
