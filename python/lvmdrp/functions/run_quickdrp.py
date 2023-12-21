@@ -252,8 +252,7 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
         rss.writeFitsData(fsci_path)
 
         # interpolate sky fibers
-        sky_tasks.interpolate_sky(in_rss=fsci_path, out_sky=fskye_path, which="e")
-        sky_tasks.interpolate_sky(in_rss=fsci_path, out_sky=fskyw_path, which="w")
+        sky_tasks.interpolate_sky(in_rss=fsci_path, out_skye=fskye_path, out_skyw=fskyw_path)
 
         # compute master sky and subtract if requested
         sky_tasks.combine_skies(in_rss=fsci_path, out_rss=ssci_path, in_skye=fskye_path, in_skyw=fskyw_path, sky_weights=sky_weights)

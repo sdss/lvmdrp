@@ -21,8 +21,6 @@ import yaml
 from astropy.io import fits
 from astropy.time import Time
 from scipy import optimize
-from scipy import interpolate
-from astropy.stats import biweight_location, biweight_scale
 
 from lvmdrp.core.constants import (
     LVM_UNAM_URL,
@@ -36,6 +34,8 @@ from lvmdrp.core.passband import PassBand
 from lvmdrp.core.rss import RSS
 from lvmdrp.core.sky import (
     ang_distance,
+    select_sky_fibers,
+    fit_supersky,
     optimize_sky,
     run_skycorr,
     run_skymodel,
@@ -1353,22 +1353,19 @@ def subtractPCAResiduals_drp():
     pass
 
 
-def interpolate_sky(in_rss: str, out_sky: str, out_rss: str = None, which: str = "both",
-                    subtract: bool = False, display_plots: bool = False) -> RSS:
+def interpolate_sky(in_rss: str, out_skye: str, out_skyw: str, out_rss: str = None, display_plots: bool = False) -> RSS:
     """Interpolate sky fibers in a given RSS file
 
     Parameters
     ----------
     in_rss : str
         input RSS file
-    out_sky : str
-        output sky RSS file
+    out_skye : str
+        output SkyE RSS file
+    out_skyw : str
+        output SkyW RSS file
     out_rss : str, optional
         output sky-subtracted RSS file, by default None
-    which : str, optional
-        for which sky telescope fibers are going to be interpolated, by default "both"
-    subtract : bool, optional
-        whether to subtract or not interpolated sky from original data, by default False
     display_plots : bool, optional
         whether to display plots or not, by default False
 
@@ -1383,213 +1380,126 @@ def interpolate_sky(in_rss: str, out_sky: str, out_rss: str = None, which: str =
         if subtract is True and out_rss is None or if which is not one of {"both", "east", "e", "skye", "west", "w", "skyw"}
     """
 
-    if subtract and out_rss is None:
-        raise ValueError(f"need to provide an output file to write sky-subtracted data")
-    
     # load input RSS
     log.info(f"loading input RSS file '{os.path.basename(in_rss)}'")
     rss = RSS()
     rss.loadFitsData(in_rss)
 
     # extract fibermap for current spectrograph
-    fibermap = rss._slitmap[rss._slitmap["spectrographid"] == int(rss._header["CCD"][1])]
+    specid = int(rss._header["CCD"][1])
+    fibermap = rss._slitmap[rss._slitmap["spectrographid"] == specid]
     
-    # select sky fibers
-    which = which.lower()
-    if which == "both":
-        sky_selection = fibermap["targettype"] == "SKY"
-    elif which in {"east", "e", "skye"}:
-        sky_selection = fibermap["telescope"] == "SkyE"
-    elif which in {"west", "w", "skyw"}:
-        sky_selection = fibermap["telescope"] == "SkyW"
-    else:
-        raise ValueError(f"invalid value for 'which' parameter: '{which}'")
+    supersky, supererror, supersky_rss, swave, ssky, svars, smask = {}, {}, {}, {}, {}, {}, {}
+    out_sky = dict(east=out_skye, west=out_skyw)
+    for telescope in ("east", "west"):
+        sky_wave, sky_data, sky_vars, sky_mask, sci_wave, sci_data = select_sky_fibers(rss, fibermap=fibermap, telescope=telescope)
 
-    # define wavelength, flux and variances
-    log.info(f"interpolating sky fibers for '{which}' sky telescope(s)")
-    sky_wave = rss._wave[sky_selection]
-    sky_data = rss._data[sky_selection]
-    sky_vars = rss._error[sky_selection] ** 2
-    sky_mask = rss._mask[sky_selection]
-    sci_wave = rss._wave[~sky_selection]
-    sci_data = rss._data[~sky_selection]
+        fig, axs = plt.subplots(2, 1, figsize=(20,5), sharex=True)
+        axs = axs.flatten()
+        axs[0].plot(sky_wave[0], sky_data[0], "k", lw=1, label="sky")
+        axs[0].plot(sci_wave[10], sci_data[10], "0.5", lw=1, label="sci")
+        axs[0].legend(loc=2)
 
-    # plt.plot(sky_wave[0].ravel(), sky_data[0].ravel(), ".k")
-    # plt.plot(sky_wave[2].ravel(), sky_data[2].ravel(), ".r")
-    # plt.show()
+        axs[0].plot(sky_wave[0], sky_data[0], "r", lw=1, label="flatfielded sky")
+        axs[0].plot(sci_wave[10], sci_data[10], "b", lw=1, label="flatfielded sci")
+        axs[0].legend(loc=2)
+        # divide by the wavelength sampling step at each pixel
+        dlambda = np.diff(sky_wave, axis=1)
+        dlambda = np.column_stack((dlambda, dlambda[:, -1]))
+        sky_data = sky_data / dlambda
+        sky_vars = sky_vars / dlambda
 
-    # remove outlying sky fibers
-    # TODO: this rejection needs to be done on all-channels data
-    mean_sky_data = np.nanmean(sky_data, axis=1)
-    mean_sky_fiber = biweight_location(mean_sky_data)
-    std_sky_fiber = biweight_scale(mean_sky_data)
-    mask = np.abs(mean_sky_data - mean_sky_fiber) < 3 * std_sky_fiber
-    sky_data = sky_data[mask]
-    sky_wave = sky_wave[mask]
-    sky_vars = sky_vars[mask]
-    sky_mask = sky_mask[mask]
+        axs[1].plot(sky_wave[0], sky_data[0], "b", lw=1, label="densities")
+        axs[1].legend(loc=2)
+        save_fig(
+            fig,
+            product_path=out_sky[telescope],
+            to_display=display_plots,
+            figure_path="qa",
+            label="diag",
+        )
 
-    # plt.plot(sky_wave.ravel(), sky_data.ravel(), ".r")
-    # plt.show()
+        # calculate supersky and fit splines
+        s_ssky, s_error, s_mask, sw, ss, sv, sm = fit_supersky(sky_wave, sky_data, sky_vars, sky_mask, sci_wave, sci_data)
 
-    fig, axs = plt.subplots(2, 1, figsize=(20,5), sharex=True)
-    axs = axs.flatten()
-    axs[0].plot(sky_wave[0], sky_data[0], "k", lw=1, label="sky")
-    axs[0].plot(sci_wave[10], sci_data[10], "0.5", lw=1, label="sci")
-    axs[0].legend(loc=2)
+        fig, axs = create_subplots(to_display=display_plots, figsize=(20,10), nrows=2, ncols=1, sharex=True)
+        axs[0].scatter(sw, ss, s=1, color="tab:blue", label="super sky")
+        axs[0].plot(sw[~sm], s_ssky(sw[~sm]).astype("float32"), lw=1, color="k", label="spline")
 
-    axs[0].plot(sky_wave[0], sky_data[0], "r", lw=1, label="flatfielded sky")
-    axs[0].plot(sci_wave[10], sci_data[10], "b", lw=1, label="flatfielded sci")
-    axs[0].legend(loc=2)
-    # divide by the wavelength sampling step at each pixel
-    dlambda = np.diff(sky_wave, axis=1)
-    dlambda = np.column_stack((dlambda, dlambda[:, -1]))
-    sky_data = sky_data / dlambda
-    sky_vars = sky_vars / dlambda
+        # plot residuals
+        residuals = (s_ssky(sky_wave).astype("float32") - sky_data)
+        axs[1].scatter(sky_wave.flatten(), residuals.flatten())
+        axs[1].axhline(ls="--", lw=1, color="k")
+        axs[1].set_label("lambda (Angstrom)")
+        fig.supylabel("counts (e/s)")
 
-    axs[1].plot(sky_wave[0], sky_data[0], "b", lw=1, label="densities")
-    axs[1].legend(loc=2)
-    save_fig(
-        fig,
-        product_path=out_sky,
-        to_display=display_plots,
-        figure_path="qa",
-        label="diag",
-    )
+        save_fig(
+            fig,
+            product_path=out_sky[telescope],
+            to_display=display_plots,
+            figure_path="qa",
+            label="super_sky",
+        )
 
-    # update mask
-    sky_mask = sky_mask | (~np.isfinite(sky_data))
-    sky_mask = sky_mask | (~np.isfinite(sky_vars))
+        # interpolated sky
+        dlambda = np.diff(rss._wave, axis=1)
+        dlambda = np.column_stack((dlambda, dlambda[:, -1]))
+        new_sky = s_ssky(rss._wave).astype("float32") * dlambda
+        new_error = np.sqrt(s_error(rss._wave).astype("float32")) * dlambda
+        new_mask = s_mask(rss._wave).astype(bool)
+        # update mask with new bad pixels
+        # new_mask |= rss._mask
+        new_mask = (new_sky<0) | np.isnan(new_sky)
+        new_mask |= (new_error<0) | np.isnan(new_error)
+        
+        fig, axs = plt.subplots(1, 1, figsize=(20,5), sharex=True)
+        axs.plot(rss._wave[0], new_sky[0], "k", lw=1, label="sky")
+        # axs.plot(sky_wave[10], sci_data[10], "0.5", lw=1, label="sci")
+        save_fig(
+            fig,
+            product_path=out_sky[telescope],
+            to_display=display_plots,
+            figure_path="qa",
+            label="sky_comp",
+        )
 
-    # build super-sky spectrum
-    swave = sky_wave.flatten()
-    ssky = sky_data.flatten()
-    svars = sky_vars.flatten()
-    smask = sky_mask.flatten()
-    # build super-science spectrum
-    ssci = sci_data.flatten()
-    idx = np.unique(swave, return_index=True)[1]
+        # define sky RSS
+        sky_rss = copy(rss)
+        sky_rss.setData(data=new_sky, error=new_error, mask=new_mask)
+        sky_rss.set_supersky(s_ssky.tck, telescope=telescope)
+        sky_rss.set_supersky_error(s_error.tck, telescope=telescope)
+        sky_rss._header["IMAGETYP"] = "sky"
 
-    # sort arrays by wavelength
-    swave = swave[idx]
-    ssky = ssky[idx]
-    svars = svars[idx]
-    smask = smask[idx]
-    ssci = ssci[idx]
-    
-    # model sky using skycorr
-    # pars_out, skycorr_fit = run_skycorr(
-    #     sci_spec=Spectrum1D(wave=swave, data=ssci, error=np.sqrt(svars), mask=smask),
-    #     sky_spec=Spectrum1D(wave=swave, data=ssky, error=np.sqrt(svars), mask=smask),
-    #     spec_label=os.path.basename(out_sky).replace(".fits", ""),
-    #     specs_dir=os.path.abspath("."),
-    #     out_dir=os.path.abspath("."),
-    #     MJD=rss._header["MJD"],
-    #     TIME=(
-    #         Time(rss._header["MJD"], format="mjd").to_datetime()
-    #         - datetime.fromisoformat("1970-01-01 00:00:00")
-    #     ).days
-    #     * 24
-    #     * 3600,
-    #     TELALT=(np.pi/2 - np.arccos(1/rss._header["SCIAIRM"])) * 180/np.pi,
-    #     WLG_TO_MICRON=1e-4,
-    #     FWHM=1.5,
-    # )
-    # ssky = skycorr_fit["mflux"]
-    
-    # calculate weights
-    weights = 1 / svars
+        # extract standard star metadata if exists
+        std_acq = np.asarray(list(rss._header["STD*ACQ"].values()))
+        if std_acq.size == 0:
+            log.warning("no standard star metadata found, skipping sky reescaling")
+        else:
+            # filter by acquired
+            std_ids = np.asarray(list(rss._header["STD*FIB"].values()))[std_acq]
+            std_exp = np.asarray(list(rss._header["STD*EXP"].values()))[std_acq]
+            # select only standard star in current exposure
+            std_idx = np.where(np.isin(fibermap["orig_ifulabel"], std_ids))
+            log.info(f"calculating correction factors for standard star: {fibermap[std_idx]['orig_ifulabel'].value}")
+            # calculate scaling factors for standard star
+            std_fac = ((stdid, stdexp / rss._header["EXPTIME"]) for stdid, stdexp in zip(std_ids, std_exp) if stdid in fibermap["orig_ifulabel"])
+            std_fac = {stdid: np.round(factor,4) for stdid, factor in sorted(std_fac, key=lambda item: int(item[0].split("-")[1]))}
+            log.info(f"correction factors for standard star: {std_fac}")
+            # apply factors to standard star sky
+            sky_rss._data[std_idx] *= np.asarray(list(std_fac.values()))[:, None]
+            sky_rss._error[std_idx] *= np.asarray(list(std_fac.values()))[:, None]
+        
+        # write output sky RSS
+        log.info(f"writing output sky RSS file '{os.path.basename(out_sky[telescope])}'")
+        sky_rss.writeFitsData(out_sky[telescope])
 
-    # define interpolation functions
-    # NOTE: store a super sampled version of the splines as an extension of the sky RSS
-    f_data = interpolate.make_smoothing_spline(swave[~smask], ssky[~smask], w=weights[~smask], lam=1e-6)
-    f_error = interpolate.make_smoothing_spline(swave[~smask], svars[~smask], w=weights[~smask], lam=1e-6)
-    f_mask = interpolate.interp1d(swave, smask, kind="nearest", bounds_error=False, fill_value=0)
+        # store outputs
+        supersky[telescope] = s_ssky
+        supererror[telescope] = s_error
+        supersky_rss[telescope] = sky_rss
+        swave[telescope], ssky[telescope], svars[telescope], smask[telescope] = sw, ss, sv, sm
 
-    fig, axs = create_subplots(to_display=display_plots, figsize=(20,10), nrows=2, ncols=1, sharex=True)
-    axs[0].scatter(swave, ssky, s=1, color="tab:blue", label="super sky")
-    axs[0].plot(swave[~smask], f_data(swave[~smask]).astype("float32"), lw=1, color="k", label="spline")
-
-    # plot residuals
-    residuals = (f_data(sky_wave).astype("float32") - sky_data)
-    residuals = residuals.flatten()
-    axs[1].scatter(sky_wave.flatten(), residuals)
-    axs[1].axhline(ls="--", lw=1, color="k")
-    axs[1].set_label("lambda (Angstrom)")
-    fig.supylabel("counts (e/s)")
-
-    save_fig(
-        fig,
-        product_path=out_sky,
-        to_display=display_plots,
-        figure_path="qa",
-        label="super_sky",
-    )
-
-    # interpolated sky
-    dlambda = np.diff(rss._wave, axis=1)
-    dlambda = np.column_stack((dlambda, dlambda[:, -1]))
-    new_sky = f_data(rss._wave).astype("float32") * dlambda
-    new_error = np.sqrt(f_error(rss._wave).astype("float32")) * dlambda
-    new_mask = f_mask(rss._wave).astype(bool)
-    # update mask with new bad pixels
-    # new_mask |= rss._mask
-    new_mask = (new_sky<0) | np.isnan(new_sky)
-    new_mask |= (new_error<0) | np.isnan(new_error)
-    
-    fig, axs = plt.subplots(1, 1, figsize=(20,5), sharex=True)
-    axs.plot(rss._wave[0], new_sky[0], "k", lw=1, label="sky")
-    # axs.plot(sky_wave[10], sci_data[10], "0.5", lw=1, label="sci")
-    save_fig(
-        fig,
-        product_path=out_sky,
-        to_display=display_plots,
-        figure_path="qa",
-        label="sky_comp",
-    )
-
-    # define sky RSS
-    sky_rss = copy(rss)
-    sky_rss.setData(data=new_sky, error=new_error, mask=new_mask)
-    sky_rss._header["IMAGETYP"] = "sky"
-
-    # extract standard star metadata if exists
-    std_acq = np.asarray(list(rss._header["STD*ACQ"].values()))
-    if std_acq.size == 0:
-        log.warning("no standard star metadata found, skipping sky reescaling")
-    else:
-        # filter by acquired
-        std_ids = np.asarray(list(rss._header["STD*FIB"].values()))[std_acq]
-        std_exp = np.asarray(list(rss._header["STD*EXP"].values()))[std_acq]
-        # select only standard star in current exposure
-        std_idx = np.where(np.isin(fibermap["orig_ifulabel"], std_ids))
-        log.info(f"calculating correction factors for standard star: {fibermap[std_idx]['orig_ifulabel'].value}")
-        # calculate scaling factors for standard star
-        std_fac = ((stdid, stdexp / rss._header["EXPTIME"]) for stdid, stdexp in zip(std_ids, std_exp) if stdid in fibermap["orig_ifulabel"])
-        std_fac = {stdid: np.round(factor,4) for stdid, factor in sorted(std_fac, key=lambda item: int(item[0].split("-")[1]))}
-        log.info(f"correction factors for standard star: {std_fac}")
-        # apply factors to standard star sky
-        sky_rss._data[std_idx] *= np.asarray(list(std_fac.values()))[:, None]
-        sky_rss._error[std_idx] *= np.asarray(list(std_fac.values()))[:, None]
-    
-    # write output sky RSS
-    log.info(f"writing output sky RSS file '{os.path.basename(out_sky)}'")
-    sky_rss.writeFitsData(out_sky)
-
-    if subtract:
-        # subtract interpolated sky from original data
-        log.info("subtracting interpolated sky from original data")
-        new_data = rss._data - new_sky
-        new_error = np.sqrt(rss._error ** 2 + new_error ** 2)
-        new_mask = rss._mask | new_mask
-        # write output sky-subtracted RSS
-        log.info(f"writing output sky-subtracted RSS file '{os.path.basename(out_rss)}'")
-
-        rss_sub = copy(rss)
-        rss_sub.setData(data=new_data, error=new_error, mask=new_mask)
-        rss_sub.writeFitsData(out_rss)
-    
-    return f_data, f_error, sky_rss, swave, ssky, svars, smask
+    return supersky, supererror, sky_rss, swave, ssky, svars, smask
 
 
 def combine_skies(in_rss: str, out_rss, in_skye: str, in_skyw: str, sky_weights: Tuple[float, float] = None) -> RSS:
@@ -1665,6 +1575,11 @@ def combine_skies(in_rss: str, out_rss, in_skye: str, in_skyw: str, sky_weights:
     rss.setHdrValue("SKYEW", w_e, "SkyE weight")
     rss.setHdrValue("SKYWW", w_w, "SkyW weight")
     rss.set_sky(rss_sky=sky)
+
+    new_supersky = rss.stack_supersky([sky_e._supersky, sky_w._supersky])
+    new_supersky_error = rss.stack_supersky([sky_e._supersky_error, sky_w._supersky_error])
+    rss.set_supersky(new_supersky)
+    rss.set_supersky_error(new_supersky_error)
     rss.writeFitsData(out_rss)
 
     return rss
