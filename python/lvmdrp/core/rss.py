@@ -165,10 +165,8 @@ class RSS(FiberRows):
         mask=None,
         sky=None,
         sky_error=None,
-        supersky_e=None,
-        supersky_w=None,
-        supersky_error_e=None,
-        supersky_error_w=None,
+        supersky=None,
+        supersky_error=None,
         shape=None,
         size=None,
         arc_position_x=None,
@@ -199,10 +197,8 @@ class RSS(FiberRows):
         self._inst_fwhm = None
         self._sky = None
         self._sky_error = None
-        self._supersky_e = None
-        self._supersky_w = None
-        self._supersky_error_e = None
-        self._supersky_error_w = None
+        self._supersky = None
+        self._supersky_error = None
         if wave is not None:
             self.setWave(wave)
         else:
@@ -213,10 +209,10 @@ class RSS(FiberRows):
             self._sky = sky
         if sky_error is not None:
             self._sky_error = sky_error
-        if supersky_e is not None and supersky_error_e is not None:
-            self.set_supersky(supersky_e, supersky_error_e, which="e")
-        if supersky_w is not None and supersky_error_w is not None:
-            self.set_supersky(supersky_w, supersky_error_w, which="w")
+        if supersky is not None:
+            self.set_supersky(supersky)
+        if supersky_error is not None:
+            self.set_supersky_error(supersky_error)
         
         self.setSlitmap(slitmap)
         self.set_fluxcal(fluxcal)
@@ -484,107 +480,131 @@ class RSS(FiberRows):
             header["OBJECT"] = "sky"
         return RSS(data=self._sky, error=self._sky_error, mask=self._mask, wave=self._wave, inst_fwhm=self._inst_fwhm, header=header)
 
-    def set_supersky(self, supersky, which):
-        which = which.lower()
-        if which in {"east", "e", "skye"}:
-            self._supersky_e = supersky
-        elif which in {"west", "w", "skyw"}:
-            self._supersky_w = supersky
+    def set_supersky(self, supersky, telescope=None):
+        if isinstance(supersky, Table):
+            self._supersky = supersky
+        elif isinstance(supersky, tuple):
+            self._supersky = self.tck_to_table(supersky, telescope=telescope)
         else:
-            raise ValueError(f"invalid value for 'which' parameter: '{which}'")
+            raise TypeError(f"Invalid {supersky} value. Valid types are 'astropy.table.Table' and 'tuple'")
     
-    def set_supersky_error(self, supersky_error, which):
-        which = which.lower()
-        if which in {"east", "e", "skye"}:
-            self._supersky_error_e = supersky_error
-        elif which in {"west", "w", "skyw"}:
-            self._supersky_error_w = supersky_error
+    def set_supersky_error(self, supersky_error, telescope=None):
+        if isinstance(supersky_error, Table):
+            self._supersky_error = supersky_error
+        elif isinstance(supersky_error, tuple):
+            self._supersky_error = self.tck_to_table(supersky_error, telescope=telescope)
         else:
-            raise ValueError(f"invalid value for 'which' parameter: '{which}'")
+            raise TypeError(f"Invalid {supersky_error} value. Valid types are 'astropy.table.Table' and 'tuple'")
 
-    def get_supersky(self, which):
-        which = which.lower()
-        if which in {"east", "e", "skye"}:
-            supersky = self._supersky_e
-        elif which in {"west", "w", "skyw"}:
-            supersky = self._supersky_w
-        else:
-            raise ValueError(f"invalid value for 'which' parameter: '{which}'")
+    def get_supersky(self):
+        return self._supersky
 
-        return supersky
+    def get_supersky_error(self):
+        return self._supersky_error
 
-    def get_subpersky_error(self, which):
-        which = which.lower()
-        if which in {"east", "e", "skye"}:
-            supersky_error = self._supersky_error_e
-        elif which in {"west", "w", "skyw"}:
-            supersky_error = self._supersky_error_w
-        else:
-            raise ValueError(f"invalid value for 'which' parameter: '{which}'")
-        
-        return supersky_error
+    def eval_supersky(self, wave, supersky=None, supersky_error=None):
 
-    def eval_supersky(self, which, wave=None, supersky=None, supersky_error=None):
-        which = which.lower()
-        if which in {"east", "e", "skye"}:
-            supersky = self._supersky_e if supersky is None else supersky
-            supersky_error = self._supersky_error_e if supersky_error is None else supersky_error
-        elif which in {"west", "w", "skyw"}:
-            supersky = self._supersky_w if supersky is None else supersky
-            supersky_error = self._supersky_error_w if supersky_error is None else supersky_error
-        else:
-            raise ValueError(f"invalid value for 'which' parameter: '{which}'")
-
+        # get supersky spline parameters
+        supersky = self._supersky if supersky is None else supersky
+        supersky_error = self._supersky_error if supersky_error is None else supersky_error
         if supersky is None:
             raise ValueError("Cannot evaluate super sky, spline parameters are None")
         if supersky_error is None:
             raise ValueError("Cannot evaluate super sky error, spline parameters are None")
 
-        if wave is None:
-            wave = self._wave
+        # validate wave
+        if wave.shape != self._data.shape:
+            raise ValueError("wave and data shape do not match")
+        if wave.shape[0] // 648 != supersky["specid"].max():
+            raise ValueError("wave and supersky specid do not match")
 
-        if wave is None:
-            raise ValueError("Cannot evaluate super sky, no wavelength information is available")
+        waves = numpy.split(wave, 3, axis=0)
 
-        if len(wave.shape) == 1:
-            dlambda = numpy.diff(wave)
-            dlambda = numpy.append(dlambda, dlambda[-1])
-            sky_spline = interpolate.splev(wave, supersky)
-            sky_error_spline = interpolate.splev(wave, supersky_error)
-        elif len(wave.shape) == 2:
-            dlambda = numpy.diff(wave, axis=1)
-            dlambda = numpy.column_stack((dlambda, dlambda[:, -1]))
-            sky_spline = numpy.zeros(self._data.shape)
-            sky_error_spline = numpy.zeros(self._data.shape)
-            for i in range(self._fibers):
-                sky_spline[i, :] = interpolate.splev(wave[i, :], supersky)
-                sky_error_spline[i, :] = interpolate.splev(wave[i, :], supersky_error)
+        # separate east and west
+        supersky_spline = dict(east=numpy.zeros_like(waves), west=[])
+        supersky_error_spline = dict(east=[], west=[])
+        for telescope in ("east", "west"):
+            # separate by telescope
+            select_telescope = supersky["telescope"] == telescope
+            tcks = list(zip(
+                supersky["knots"][select_telescope],
+                supersky["coeffs"][select_telescope],
+                supersky["degree"][select_telescope]))
 
-        sky_spline = interpolate.splev(wave, supersky).astype("float32") * dlambda
-        sky_error_spline = interpolate.splev(wave, supersky_error).astype("float32") * dlambda
+            tcks_error = list(zip(
+                supersky_error["knots"][select_telescope],
+                supersky_error["coeffs"][select_telescope],
+                supersky_error["degree"][select_telescope]))
+            
+            # separate by spectrograph
+            for specid in (1,2,3):
+                select_specid = supersky["specid"][select_telescope] == specid
+                tck = tcks[select_specid][0]
+                tck_error = tcks_error[select_specid][0]
+                wave = waves[specid-1]
+                
+                # evaluate supersky
+                dlambda = numpy.diff(wave, axis=1)
+                dlambda = numpy.column_stack((dlambda, dlambda[:, -1]))
+                sky = numpy.zeros(wave.shape)
+                error = numpy.zeros(wave.shape)
+                for i in range(self._fibers):
+                    sky[i, :] = interpolate.splev(wave[i, :], tck)
+                    error[i, :] = interpolate.splev(wave[i, :], tck_error)
+                
+                # store supersky
+                supersky_spline[telescope].append(sky)
+                supersky_error_spline[telescope].append(error)
+            
+            # concatenate spectrographs
+            supersky_spline[telescope] = numpy.concatenate(supersky_spline[telescope], axis=0)
+            supersky_error_spline[telescope] = numpy.concatenate(supersky_error_spline[telescope], axis=0)
 
-        return wave, sky_spline, sky_error_spline
+        return supersky_spline, supersky_error_spline
 
-    def supersky_to_table(self):
-        tck_supersky = dict(knots=[], coeffs=[], degree=[], telescope=[])
-        for which, tck in zip(("east", "west"), (self._supersky_e, self._supersky_w)):
-            if tck is None:
-                continue
-            tck_supersky["knots"].append(tck[0])
-            tck_supersky["coeffs"].append(tck[1])
-            tck_supersky["degree"].append(tck[2])
-            tck_supersky["telescope"].append(which)
+    def tck_to_table(self, tck, telescope):
+        tck_dict = dict(knots=[], coeffs=[], degree=[], specid=[], telescope=[])
+        if isinstance(tck, list) and isinstance(telescope, list) and len(tck) == len(telescope):
+            for (knots, coeffs, degree), telescope in zip(tck, telescope):
+                tck_dict["knots"].append(knots)
+                tck_dict["coeffs"].append(coeffs)
+                tck_dict["degree"].append(degree)
+                tck_dict["specid"].append(int(self._header["CCD"][1]))
+                tck_dict["telescope"].append(telescope)
+        elif isinstance(tck, tuple) and isinstance(telescope, str):        
+            tck_dict["knots"].append(tck[0])
+            tck_dict["coeffs"].append(tck[1])
+            tck_dict["degree"].append(tck[2])
+            tck_dict["specid"].append(int(self._header["CCD"][1]))
+            tck_dict["telescope"].append(telescope)
+        else:
+            raise TypeError("Invalid types for {tck} and/or {telescope}. Valid types are 'list' and 'list' or 'tuple' and 'str'")
         
-        return Table(tck_supersky)
+        return Table(tck_dict)
+    
+    def stack_supersky(self, superskies):
+        tck_dict = dict(knots=[], coeffs=[], degree=[], specid=[], telescope=[])
+        iterator = []
+        for supersky in superskies:
+            iterator.extend(list(supersky.iterrows()))
+        for knots, coeffs, degree, specid, telescope in iterator:
+            tck_dict["knots"].append(knots)
+            tck_dict["coeffs"].append(coeffs)
+            tck_dict["degree"].append(degree)
+            tck_dict["specid"].append(specid)
+            tck_dict["telescope"].append(telescope)
+        
+        return Table(tck_dict)
     
     def supersky_error_to_table(self):
-        tck_supersky_error = dict(knots=[], coeffs=[], degree=[], telescope=[])
+        tck_supersky_error = dict(knots=[], coeffs=[], degree=[], specid=[], telescope=[])
         for which, tck in zip(("east", "west"), (self._supersky_error_e, self._supersky_error_w)):
             if tck is None:
                 continue
             tck_supersky_error["knots"].append(tck[0])
             tck_supersky_error["coeffs"].append(tck[1])
             tck_supersky_error["degree"].append(tck[2])
+            tck_supersky_error["specid"].append(int(self._header["SPEC"][-1]))
             tck_supersky_error["telescope"].append(which)
         
         return Table(tck_supersky_error)
@@ -659,13 +679,9 @@ class RSS(FiberRows):
                     if hdu[i].header["EXTNAME"].split()[0] == "SKY_ERROR":
                         self._sky_error = hdu[i].data.astype("float32")
                     if hdu[i].header["EXTNAME"].split()[0] == "SUPERSKY":
-                        supersky_table = Table(hdu[i].data)
-                        for knots, coeffs, degree, telescope in supersky_table.iterrows():
-                            self.set_supersky(supersky=(knots, coeffs, degree), which=telescope)
+                        self.set_supersky(Table(hdu[i].data))
                     elif hdu[i].header["EXTNAME"].split()[0] == "SUPERSKY_ERROR":
-                        supersky_error_table = Table(hdu[i].data)
-                        for knots, coeffs, degree, telescope in supersky_error_table.iterrows():
-                            self.set_supersky_error(supersky_error=(knots, coeffs, degree), which=telescope)
+                        self.set_supersky_error(Table(hdu[i].data))
                     if hdu[i].header["EXTNAME"].split()[0] == "FLUXCAL":
                         self.set_fluxcal(Table(hdu[i].data))
                     if hdu[i].header["EXTNAME"].split()[0] == "POSTABLE":
@@ -691,13 +707,9 @@ class RSS(FiberRows):
             if extension_skyerror is not None:
                 self._sky_error = hdu[extension_skyerror].data.astype("float32")
             if extension_supersky is not None:
-                supersky_table = Table(hdu[extension_supersky].data)
-                for row in supersky_table.iterrows():
-                    self.set_supersky(supersky=(row["knots"], row["coeffs"], row["degree"]), which=row["telescope"])
+                self.set_supersky(Table(hdu[extension_supersky].data))
             if extension_supersky_error is not None:
-                supersky_error_table = Table(hdu[i].data)
-                for row in supersky_error_table.iterrows():
-                    self.set_supersky_error(supersky=(row["knots"], row["coeffs"], row["degree"]), which=row["telescope"])
+                self.set_supersky_error(Table(hdu[i].data))
             if extension_fluxcal is not None:
                 self.set_fluxcal(Table(hdu[extension_fluxcal].data))
         
@@ -784,12 +796,10 @@ class RSS(FiberRows):
                 hdus[6] = pyfits.ImageHDU(self._sky, name="SKY")
             if self._sky_error is not None:
                 hdus[7] = pyfits.ImageHDU(self._sky_error, name="SKY_ERROR")
-            if self._supersky_e is not None or self._supersky_w is not None:
-                supersky_table = self.supersky_to_table()
-                hdus[8] = pyfits.BinTableHDU(supersky_table, name="SUPERSKY")
-            if self._supersky_error_e is not None or self._supersky_error_w is not None:
-                supersky_error_table = self.supersky_error_to_table()
-                hdus[9] = pyfits.BinTableHDU(Table(supersky_error_table), name="SUPERSKY_ERROR")
+            if self._supersky is not None:
+                hdus[8] = pyfits.BinTableHDU(self._supersky, name="SUPERSKY")
+            if self._supersky_error:
+                hdus[9] = pyfits.BinTableHDU(self._supersky_error, name="SUPERSKY_ERROR")
             if self._fluxcal is not None:
                 hdus[10] = pyfits.BinTableHDU(self._fluxcal, name="FLUXCAL")
         else:
@@ -843,18 +853,16 @@ class RSS(FiberRows):
                 hdus[extension_skyerror] = pyfits.ImageHDU(self._sky_error, name="SKY_ERROR")
             
             # supersky hdu
-            supersky_table = self.supersky_to_table()
             if extension_supersky == 0:
-                hdu = pyfits.PrimaryHDU(supersky_table)
+                hdu = pyfits.PrimaryHDU(self._supersky)
             elif extension_supersky > 0 and extension_supersky is not None:
-                hdus[extension_supersky] = pyfits.BinTableHDU(supersky_table, name="SUPERSKY")
+                hdus[extension_supersky] = pyfits.BinTableHDU(self._supersky, name="SUPERSKY")
 
             # supersky error hdu
-            supersky_error_table = self.supersky_error_to_table()
             if extension_supersky_error == 0:
-                hdu = pyfits.PrimaryHDU(supersky_error_table)
+                hdu = pyfits.PrimaryHDU(self._supersky_error)
             elif extension_supersky_error > 0 and extension_supersky_error is not None:
-                hdus[extension_supersky_error] = pyfits.BinTableHDU(supersky_error_table, name="SUPERSKY_ERROR")
+                hdus[extension_supersky_error] = pyfits.BinTableHDU(self._supersky_error, name="SUPERSKY_ERROR")
 
             # fluxcal hdu
             if extension_fluxcal == 0:

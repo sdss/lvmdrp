@@ -9,6 +9,7 @@ from typing import List
 import matplotlib
 import matplotlib.gridspec as gridspec
 import numpy
+import pandas as pd
 from numpy.lib import recfunctions as rfn
 import yaml
 import bottleneck as bn
@@ -1200,7 +1201,9 @@ def resample_wavelength(in_rss: str, out_rss: str, method: str = "spline",
         mask=mask,
         slitmap=rss._slitmap,
         sky=sky,
-        sky_error=sky_error
+        sky_error=sky_error,
+        supersky=rss._supersky,
+        supersky_error=rss._supersky_error
     )
 
     resamp_rss.writeFitsData(out_rss)
@@ -1753,6 +1756,10 @@ def stack_rss(in_rsss: List[str], out_rss: str, axis: int = 0) -> RSS:
                 sky_out = rss._sky
             if rss._sky_error is not None:
                 sky_error_out = rss._sky_error
+            if rss._supersky is not None:
+                supersky_out = rss._supersky
+            if rss._supersky_error is not None:
+                supersky_error_out = rss._supersky_error
             if rss._header is not None:
                 hdrs.append(Header(rss.getHeader()))
             if rss._fluxcal is not None:
@@ -1793,6 +1800,12 @@ def stack_rss(in_rsss: List[str], out_rss: str, axis: int = 0) -> RSS:
                 sky_error_out = numpy.concatenate((sky_error_out, rss._sky_error), axis=axis)
             else:
                 sky_error_out = None
+            if rss._supersky is not None:
+                f = pd.concat([supersky_out.to_pandas(), rss._supersky.to_pandas()], axis=0)
+                supersky_out = Table.from_pandas(f)
+            if rss._supersky_error is not None:
+                f = pd.concat([supersky_error_out.to_pandas(), rss._supersky_error.to_pandas()], axis=0)
+                supersky_error_out = Table.from_pandas(f)
             if rss._header is not None:
                 hdrs.append(Header(rss.getHeader()))
             if rss._fluxcal is not None:
@@ -1821,6 +1834,8 @@ def stack_rss(in_rsss: List[str], out_rss: str, axis: int = 0) -> RSS:
         inst_fwhm=fwhm_out,
         sky=sky_out,
         sky_error=sky_error_out,
+        supersky=supersky_out,
+        supersky_error=supersky_error_out,
         header=hdr_out.getHeader(),
         slitmap=slitmap_out,
         fluxcal=fluxcal_out
