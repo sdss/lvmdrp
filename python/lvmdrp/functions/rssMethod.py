@@ -1801,11 +1801,9 @@ def stack_rss(in_rsss: List[str], out_rss: str, axis: int = 0) -> RSS:
             else:
                 sky_error_out = None
             if rss._supersky is not None:
-                f = pd.concat([supersky_out.to_pandas(), rss._supersky.to_pandas()], axis=0)
-                supersky_out = Table.from_pandas(f)
+                supersky_out = rss.stack_supersky([supersky_out, rss._supersky])
             if rss._supersky_error is not None:
-                f = pd.concat([supersky_error_out.to_pandas(), rss._supersky_error.to_pandas()], axis=0)
-                supersky_error_out = Table.from_pandas(f)
+                supersky_error_out = rss.stack_supersky([supersky_error_out, rss._supersky_error])
             if rss._header is not None:
                 hdrs.append(Header(rss.getHeader()))
             if rss._fluxcal is not None:

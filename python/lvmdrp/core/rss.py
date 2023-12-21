@@ -484,7 +484,8 @@ class RSS(FiberRows):
         if isinstance(supersky, Table):
             self._supersky = supersky
         elif isinstance(supersky, tuple):
-            self._supersky = self.tck_to_table(supersky, telescope=telescope)
+            wave, knots, coeffs, degree, specid, telescope = supersky
+            self._supersky = self.tck_to_table(wave, knots, coeffs, degree, specid, telescope)
         else:
             raise TypeError(f"Invalid {supersky} value. Valid types are 'astropy.table.Table' and 'tuple'")
     
@@ -492,7 +493,8 @@ class RSS(FiberRows):
         if isinstance(supersky_error, Table):
             self._supersky_error = supersky_error
         elif isinstance(supersky_error, tuple):
-            self._supersky_error = self.tck_to_table(supersky_error, telescope=telescope)
+            wave, knots, coeffs, degree, specid, telescope = supersky_error
+            self._supersky_error = self.tck_to_table(wave, knots, coeffs, degree, specid, telescope)
         else:
             raise TypeError(f"Invalid {supersky_error} value. Valid types are 'astropy.table.Table' and 'tuple'")
 
@@ -562,32 +564,45 @@ class RSS(FiberRows):
 
         return supersky_spline, supersky_error_spline
 
-    def tck_to_table(self, tck, telescope):
-        tck_dict = dict(knots=[], coeffs=[], degree=[], specid=[], telescope=[])
-        if isinstance(tck, list) and isinstance(telescope, list) and len(tck) == len(telescope):
-            for (knots, coeffs, degree), telescope in zip(tck, telescope):
+    def tck_to_table(self, wave, knots, coeffs, degree, specid, telescope):
+        # pack arguments for validation
+        args = (wave, knots, coeffs, degree, specid, telescope)
+        types = (numpy.ndarray, numpy.ndarray, numpy.ndarray, int, int, str)
+
+        tck_dict = dict(wave=[], knots=[], coeffs=[], degree=[], specid=[], telescope=[])
+        if isinstance(wave, list):
+            # validate arguments list
+            assert all(isinstance(arg, list) for arg in args), "All objects must be instances of list"
+            # validate lists length
+            length_set = {len(arg) for arg in args}
+            assert len(length_set) == 1, "All lists must have the same length"
+    
+            for knots, coeffs, degree, specid, telescope in zip(args):
+                tck_dict["wave"].append(wave.ravel())
                 tck_dict["knots"].append(knots)
                 tck_dict["coeffs"].append(coeffs)
                 tck_dict["degree"].append(degree)
-                tck_dict["specid"].append(int(self._header["CCD"][1]))
+                tck_dict["specid"].append(specid)
                 tck_dict["telescope"].append(telescope)
-        elif isinstance(tck, tuple) and isinstance(telescope, str):        
-            tck_dict["knots"].append(tck[0])
-            tck_dict["coeffs"].append(tck[1])
-            tck_dict["degree"].append(tck[2])
-            tck_dict["specid"].append(int(self._header["CCD"][1]))
-            tck_dict["telescope"].append(telescope)
         else:
-            raise TypeError("Invalid types for {tck} and/or {telescope}. Valid types are 'list' and 'list' or 'tuple' and 'str'")
+            # validate argument types
+            assert all(isinstance(arg, type_) for arg, type_ in zip(args, types)), "Invalid argument type"
+            tck_dict["wave"].append(wave.ravel())
+            tck_dict["knots"].append(knots)
+            tck_dict["coeffs"].append(coeffs)
+            tck_dict["degree"].append(degree)
+            tck_dict["specid"].append(specid)
+            tck_dict["telescope"].append(telescope)
         
         return Table(tck_dict)
-    
+
     def stack_supersky(self, superskies):
-        tck_dict = dict(knots=[], coeffs=[], degree=[], specid=[], telescope=[])
+        tck_dict = dict(wave=[], knots=[], coeffs=[], degree=[], specid=[], telescope=[])
         iterator = []
         for supersky in superskies:
             iterator.extend(list(supersky.iterrows()))
-        for knots, coeffs, degree, specid, telescope in iterator:
+        for wave, knots, coeffs, degree, specid, telescope in iterator:
+            tck_dict["wave"].append(wave)
             tck_dict["knots"].append(knots)
             tck_dict["coeffs"].append(coeffs)
             tck_dict["degree"].append(degree)

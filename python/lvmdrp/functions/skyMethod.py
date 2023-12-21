@@ -1466,8 +1466,11 @@ def interpolate_sky(in_rss: str, out_skye: str, out_skyw: str, out_rss: str = No
         # define sky RSS
         sky_rss = copy(rss)
         sky_rss.setData(data=new_sky, error=new_error, mask=new_mask)
-        sky_rss.set_supersky(s_ssky.tck, telescope=telescope)
-        sky_rss.set_supersky_error(s_error.tck, telescope=telescope)
+
+        s_pars = (sky_rss._wave,) + s_ssky.tck + (int(sky_rss._header["CCD"][1]), telescope)
+        sky_rss.set_supersky(s_pars)
+        s_error_pars = (sky_rss._wave,) + s_error.tck + (int(sky_rss._header["CCD"][1]), telescope)
+        sky_rss.set_supersky_error(s_error_pars)
         sky_rss._header["IMAGETYP"] = "sky"
 
         # extract standard star metadata if exists
