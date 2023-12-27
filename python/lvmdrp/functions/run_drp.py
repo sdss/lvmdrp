@@ -1524,9 +1524,10 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
 
         # reduce the science data
         if sci_cond:
+            kwargs = get_config_options('reduction_steps.quick_science_reduction')
             for expnum in sci['expnum'].unique():
                 try:
-                    quick_science_reduction(expnum, use_fiducial_master=True)
+                    quick_science_reduction(expnum, use_fiducial_master=True, **kwargs)
                 except Exception as e:
                     log.exception(f'Failed to reduce science frame mjd {mjd} exposure {expnum}: {e}')
                     create_status_file(tileid, mjd, status='error')
