@@ -184,8 +184,7 @@ def fluxcal_Gaia(camera, in_rss, plot=True, GAIA_CACHE_DIR=None):
     
     # load input RSS
     log.info(f"loading input RSS file '{os.path.basename(in_rss)}'")
-    rss = RSS()
-    rss.loadFitsData(in_rss)
+    rss = RSS.from_file(in_rss)
 
     # extract useful metadata
     sci_spec = rss._header["SPEC"]
