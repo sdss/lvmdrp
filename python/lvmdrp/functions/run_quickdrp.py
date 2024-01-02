@@ -180,11 +180,10 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
                                   out_lvmframe=frame_path)
 
         # interpolate sky fibers
-        sky_tasks.interpolate_sky(in_rss=fsci_path, out_sky=fskye_path, which="e")
-        sky_tasks.interpolate_sky(in_rss=fsci_path, out_sky=fskyw_path, which="w")
+        sky_tasks.interpolate_sky(in_rss=fsci_path, out_skye=fskye_path, out_skyw=fskyw_path)
 
         # compute master sky and subtract if requested
-        sky_tasks.quick_sky_subtraction(in_rss=fsci_path, out_rss=ssci_path, in_skye=fskye_path, in_skyw=fskyw_path, sky_weights=sky_weights, skip_subtraction=skip_sky_subtraction)
+        sky_tasks.combine_skies(in_rss=fsci_path, out_rss=ssci_path, in_skye=fskye_path, in_skyw=fskyw_path, sky_weights=sky_weights)
 
         # resample wavelength into uniform grid along fiber IDs for science and sky fibers
         iwave, fwave = SPEC_CHANNELS[sci_camera[0]]
@@ -217,7 +216,7 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
 
     # TODO: write lvmSFrame-<expnum>.fits
     sframe_path = path.full("lvm_frame", mjd=sci_mjd, drpver=drpver, tileid=sci_tileid, expnum=sci_expnum, kind='SFrame')
-    sky_tasks.quick_sky_refinement(in_fframe=fframe_path, out_sframe=sframe_path)
+    sky_tasks.quick_sky_subtraction(in_fframe=fframe_path, out_sframe=sframe_path, skip_subtraction=skip_sky_subtraction)
 
     # TODO: add quick report routine
 

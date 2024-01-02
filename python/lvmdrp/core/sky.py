@@ -15,9 +15,11 @@ from datetime import timedelta
 from io import BytesIO
 
 import numpy as np
+from scipy import interpolate
 import yaml
 from astropy import units as u
 from astropy.io import fits
+from astropy.stats import biweight_location, biweight_scale
 from astropy.table import Table, hstack
 from astropy.time import Time
 from skycalc_cli.skycalc import AlmanacQuery, SkyModel
@@ -577,3 +579,76 @@ def optimize_sky(factor, test_spec, sky_spec, start_wave, end_wave):
         raise RuntimeError
     rms = np.std(test_spec._data[select] - sky_spec._data[select] * factor)
     return rms
+
+
+def select_sky_fibers(rss, fibermap, telescope):
+    # select sky fibers
+    telescope = telescope.lower()
+    if telescope == "both":
+        sky_selection = fibermap["targettype"] == "SKY"
+    elif telescope in {"east", "e", "skye"}:
+        sky_selection = fibermap["telescope"] == "SkyE"
+    elif telescope in {"west", "w", "skyw"}:
+        sky_selection = fibermap["telescope"] == "SkyW"
+    else:
+        raise ValueError(f"invalid value for 'telescope' parameter: '{telescope}'")
+
+    # define wavelength, flux and variances
+    log.info(f"interpolating sky fibers for sky {telescope = } telescope(s)")
+    sky_wave = rss._wave[sky_selection]
+    sky_data = rss._data[sky_selection]
+    sky_vars = rss._error[sky_selection] ** 2
+    sky_mask = rss._mask[sky_selection]
+    sci_wave = rss._wave[~sky_selection]
+    sci_data = rss._data[~sky_selection]
+
+    return sky_wave, sky_data, sky_vars, sky_mask, sci_wave, sci_data
+
+
+def fit_supersky(sky_wave, sky_data, sky_vars, sky_mask, sci_wave, sci_data):
+
+    # plt.plot(sky_wave[0].ravel(), sky_data[0].ravel(), ".k")
+    # plt.plot(sky_wave[2].ravel(), sky_data[2].ravel(), ".r")
+    # plt.show()
+
+    # remove outlying sky fibers
+    # TODO: this rejection needs to be done on all-channels data
+    mean_sky_data = np.nanmean(sky_data, axis=1)
+    mean_sky_fiber = biweight_location(mean_sky_data)
+    std_sky_fiber = biweight_scale(mean_sky_data)
+    mask = np.abs(mean_sky_data - mean_sky_fiber) < 3 * std_sky_fiber
+    sky_data = sky_data[mask]
+    sky_wave = sky_wave[mask]
+    sky_vars = sky_vars[mask]
+    sky_mask = sky_mask[mask]
+
+    # update mask
+    sky_mask = sky_mask | (~np.isfinite(sky_data))
+    sky_mask = sky_mask | (~np.isfinite(sky_vars))
+
+    # build super-sky spectrum
+    swave = sky_wave.flatten()
+    ssky = sky_data.flatten()
+    svars = sky_vars.flatten()
+    smask = sky_mask.flatten()
+    # build super-science spectrum
+    ssci = sci_data.flatten()
+    idx = np.unique(swave, return_index=True)[1]
+
+    # sort arrays by wavelength
+    swave = swave[idx]
+    ssky = ssky[idx]
+    svars = svars[idx]
+    smask = smask[idx]
+    ssci = ssci[idx]
+
+    # calculate weights
+    weights = 1 / svars
+
+    # define interpolation functions
+    # NOTE: store a super sampled version of the splines as an extension of the sky RSS
+    f_data = interpolate.make_smoothing_spline(swave[~smask], ssky[~smask], w=weights[~smask], lam=1e-6)
+    f_error = interpolate.make_smoothing_spline(swave[~smask], svars[~smask], w=weights[~smask], lam=1e-6)
+    f_mask = interpolate.interp1d(swave, smask, kind="nearest", bounds_error=False, fill_value=0)
+
+    return f_data, f_error, f_mask, swave, ssky, svars, smask

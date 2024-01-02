@@ -102,6 +102,7 @@ class RSS(FiberRows):
         wave, lsf = None, None
         cent_trace, width_trace = None, None
         sky, sky_error = None, None
+        supersky, supersky_error = None, None
         fluxcal = None
         slitmap = None
         with pyfits.open(in_rss, uint=True, do_not_scale_image_data=True, memmap=False) as hdus:
@@ -129,6 +130,10 @@ class RSS(FiberRows):
                     sky = hdu.data.astype("float32")
                 if hdu.name == "SKY_ERROR":
                     sky_error = hdu.data.astype("float32")
+                if hdu.name == "SUPERSKY":
+                    supersky = hdu
+                if hdu.name == "SUPERSKY_ERROR":
+                    supersky_error = hdu
                 if hdu.name == "FLUXCAL":
                     fluxcal = hdu.data
                 if hdu.name == "SLITMAP":
@@ -146,6 +151,8 @@ class RSS(FiberRows):
                 width_trace=width_trace,
                 sky=sky,
                 sky_error=sky_error,
+                supersky=supersky,
+                supersky_error=supersky_error,
                 header=header,
                 slitmap=slitmap,
                 fluxcal=fluxcal
@@ -394,7 +401,6 @@ class RSS(FiberRows):
         slitmap=None,
         good_fibers=None,
         fiber_type=None,
-        logwave=False,
     ):
         """
         Returns an RSS instance given a list of Spectrum1D instances
@@ -432,7 +438,6 @@ class RSS(FiberRows):
             slitmap=slitmap,
             good_fibers=good_fibers,
             fiber_type=fiber_type,
-            logwave=logwave,
         )
         for i in range(n_spectra):
             rss[i] = spectra_list[i]
@@ -461,6 +466,8 @@ class RSS(FiberRows):
         mask=None,
         sky=None,
         sky_error=None,
+        supersky=None,
+        supersky_error=None,
         shape=None,
         size=None,
         cent_trace=None,
@@ -475,7 +482,6 @@ class RSS(FiberRows):
         fluxcal=None,
         good_fibers=None,
         fiber_type=None,
-        logwave=False,
     ):
         FiberRows.__init__(
             self,
@@ -492,6 +498,8 @@ class RSS(FiberRows):
         )
         self._sky = None
         self._sky_error = None
+        self._supersky = None
+        self._supersky_error = None
         if sky is not None:
             self._sky = sky
         if sky_error is not None:
@@ -507,6 +515,10 @@ class RSS(FiberRows):
         # evaluate wavelength and LSF traces
         self.set_wave_array(wave=wave)
         self.set_lsf_array(lsf=lsf)
+        if supersky is not None:
+            self.set_supersky(supersky)
+        if supersky_error is not None:
+            self.set_supersky_error(supersky_error)
         
         self.setSlitmap(slitmap)
         self.set_fluxcal(fluxcal)
@@ -830,6 +842,141 @@ class RSS(FiberRows):
             header["IMAGETYP"] = "sky"
             header["OBJECT"] = "sky"
         return RSS(data=self._sky, error=self._sky_error, mask=self._mask, wave=self._wave, lsf=self._lsf, header=header)
+
+    def set_supersky(self, supersky, telescope=None):
+        if isinstance(supersky, pyfits.BinTableHDU):
+            self._supersky = Table(supersky.data)
+        elif isinstance(supersky, Table):
+            self._supersky = supersky
+        elif isinstance(supersky, tuple):
+            wave, knots, coeffs, degree, specid, telescope = supersky
+            self._supersky = self.tck_to_table(wave, knots, coeffs, degree, specid, telescope)
+        else:
+            raise TypeError(f"Invalid {supersky} value. Valid types are 'astropy.io.fits.BinTableHDU', 'astropy.table.Table' and 'tuple'")
+    
+    def set_supersky_error(self, supersky_error, telescope=None):
+        if isinstance(supersky_error, pyfits.BinTableHDU):
+            self._supersky_error = Table(supersky_error.data)
+        elif isinstance(supersky_error, Table):
+            self._supersky_error = supersky_error
+        elif isinstance(supersky_error, tuple):
+            wave, knots, coeffs, degree, specid, telescope = supersky_error
+            self._supersky_error = self.tck_to_table(wave, knots, coeffs, degree, specid, telescope)
+        else:
+            raise TypeError(f"Invalid {supersky_error} value. Valid types are 'astropy.io.fits.BinTableHDU', 'astropy.table.Table' and 'tuple'")
+
+    def get_supersky(self):
+        return self._supersky
+
+    def get_supersky_error(self):
+        return self._supersky_error
+
+    def eval_supersky(self, supersky=None, supersky_error=None):
+
+        # get supersky spline parameters
+        supersky = self._supersky if supersky is None else supersky
+        supersky_error = self._supersky_error if supersky_error is None else supersky_error
+        if supersky is None:
+            raise ValueError("Cannot evaluate super sky, spline parameters are None")
+        if supersky_error is None:
+            raise ValueError("Cannot evaluate super sky error, spline parameters are None")
+
+        telescopes = sorted(set(supersky["telescope"]))
+        specids = sorted(set(supersky["specid"]))
+
+        # separate east and west
+        waves = dict(east=[], west=[])
+        supersky_spline = dict(east=[], west=[])
+        supersky_error_spline = dict(east=[], west=[])
+        for telescope in telescopes:
+            # separate by telescope
+            select_telescope = supersky["telescope"] == telescope
+            tcks = list(zip(
+                supersky["wave"][select_telescope],
+                supersky["knots"][select_telescope],
+                supersky["coeffs"][select_telescope],
+                supersky["degree"][select_telescope]))
+
+            tcks_error = list(zip(
+                supersky_error["wave"][select_telescope],
+                supersky_error["knots"][select_telescope],
+                supersky_error["coeffs"][select_telescope],
+                supersky_error["degree"][select_telescope]))
+
+            # separate by spectrograph
+            for specid in specids:
+                wave = tcks[specid-1][0]
+                wave = wave.reshape((-1, 4085))
+                tck = tcks[specid-1][1:]
+                tck_error = tcks_error[specid-1][1:]
+
+                # evaluate supersky
+                dlambda = numpy.diff(wave, axis=1)
+                dlambda = numpy.column_stack((dlambda, dlambda[:, -1]))
+                sky = numpy.zeros(wave.shape)
+                error = numpy.zeros(wave.shape)
+                for i in range(self._fibers // len(specids)):
+                    sky[i, :] = interpolate.splev(wave[i, :], tck)
+                    error[i, :] = interpolate.splev(wave[i, :], tck_error)
+                
+                # store supersky
+                waves[telescope].append(wave)
+                supersky_spline[telescope].append(sky)
+                supersky_error_spline[telescope].append(error)
+            
+            # concatenate spectrographs
+            waves[telescope] = numpy.concatenate(waves[telescope], axis=0)
+            supersky_spline[telescope] = numpy.concatenate(supersky_spline[telescope], axis=0)
+            supersky_error_spline[telescope] = numpy.concatenate(supersky_error_spline[telescope], axis=0)
+
+        return waves, supersky_spline, supersky_error_spline
+
+    def tck_to_table(self, wave, knots, coeffs, degree, specid, telescope):
+        # pack arguments for validation
+        args = (wave, knots, coeffs, degree, specid, telescope)
+        types = (numpy.ndarray, numpy.ndarray, numpy.ndarray, int, int, str)
+
+        tck_dict = dict(wave=[], knots=[], coeffs=[], degree=[], specid=[], telescope=[])
+        if isinstance(wave, list):
+            # validate arguments list
+            assert all(isinstance(arg, list) for arg in args), "All objects must be instances of list"
+            # validate lists length
+            length_set = {len(arg) for arg in args}
+            assert len(length_set) == 1, "All lists must have the same length"
+    
+            for knots, coeffs, degree, specid, telescope in zip(args):
+                tck_dict["wave"].append(wave.ravel())
+                tck_dict["knots"].append(knots)
+                tck_dict["coeffs"].append(coeffs)
+                tck_dict["degree"].append(degree)
+                tck_dict["specid"].append(specid)
+                tck_dict["telescope"].append(telescope)
+        else:
+            # validate argument types
+            assert all(isinstance(arg, type_) for arg, type_ in zip(args, types)), "Invalid argument type"
+            tck_dict["wave"].append(wave.ravel())
+            tck_dict["knots"].append(knots)
+            tck_dict["coeffs"].append(coeffs)
+            tck_dict["degree"].append(degree)
+            tck_dict["specid"].append(specid)
+            tck_dict["telescope"].append(telescope)
+        
+        return Table(tck_dict)
+
+    def stack_supersky(self, superskies):
+        tck_dict = dict(wave=[], knots=[], coeffs=[], degree=[], specid=[], telescope=[])
+        iterator = []
+        for supersky in superskies:
+            iterator.extend(list(supersky.iterrows()))
+        for wave, knots, coeffs, degree, specid, telescope in iterator:
+            tck_dict["wave"].append(wave)
+            tck_dict["knots"].append(knots)
+            tck_dict["coeffs"].append(coeffs)
+            tck_dict["degree"].append(degree)
+            tck_dict["specid"].append(specid)
+            tck_dict["telescope"].append(telescope)
+        
+        return Table(tck_dict)
 
     def getSpec(self, fiber):
         data = self._data[fiber, :]

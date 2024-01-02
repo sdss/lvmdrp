@@ -1178,7 +1178,9 @@ def resample_wavelength(in_rss: str, out_rss: str, method: str = "spline",
         mask=mask,
         slitmap=rss._slitmap,
         sky=sky,
-        sky_error=sky_error
+        sky_error=sky_error,
+        supersky=rss._supersky,
+        supersky_error=rss._supersky_error
     )
 
     resamp_rss.writeFitsData(out_rss)
