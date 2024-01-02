@@ -1156,7 +1156,7 @@ class FiberRows(Header, PositionTable):
         
         return self
 
-    def interpolate_data(self, axis="Y"):
+    def interpolate_data(self, axis="Y", reset_mask=True):
         """Interpolate data of bad fibers (axis='Y') or bad pixels along the dispersion axis (axis='X')
 
         Parameters
@@ -1164,6 +1164,8 @@ class FiberRows(Header, PositionTable):
         axis : string or int, optional with default: 'Y'
             Defines the axis of the slice to be inserted, 'X', 'x', or 1 for the x-axis or
             'Y','y', or 0 for the y-axis.
+        reset_mask : bool, optional with default: True
+            If True, reset the mask of interpolated fibers to False
 
         Returns
         -------
@@ -1186,7 +1188,7 @@ class FiberRows(Header, PositionTable):
             self._data = f_data(y_pixels)
             if self._error is not None:
                 f_error = interpolate.interp1d(y_pixels[~bad_fibers], self._error[~bad_fibers, :], axis=0, bounds_error=False)
-                self._error = f_error(y_pixels)        
+                self._error = f_error(y_pixels)
 
             # unmask interpolated fibers
             if self._mask is not None:
@@ -1206,7 +1208,7 @@ class FiberRows(Header, PositionTable):
                 if self._error is not None:
                     f_error = interpolate.interp1d(x_pixels[~bad_pixels], self._error[ifiber, ~bad_pixels], bounds_error=False)
                     self._error[ifiber, :] = f_error(x_pixels)
-                if self._mask is not None:
+                if self._mask is not None and reset_mask:
                     self._mask[ifiber, bad_pixels] = False
         else:
             raise ValueError(f"axis {axis} not supported")
