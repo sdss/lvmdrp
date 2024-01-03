@@ -1171,8 +1171,7 @@ def resample_wavelength(in_rss: str, out_rss: str, method: str = "spline",
 
     resamp_rss = RSS(
         data=data,
-        wave=ref_wave,
-        lsf=lsf,
+        lsf_trace=rss._lsf_trace,
         header=rss._header,
         error=error,
         mask=mask,
@@ -1182,6 +1181,7 @@ def resample_wavelength(in_rss: str, out_rss: str, method: str = "spline",
         supersky=rss._supersky,
         supersky_error=rss._supersky_error
     )
+    resamp_rss.set_wave_array(ref_wave)
 
     resamp_rss.writeFitsData(out_rss)
 
@@ -1667,7 +1667,8 @@ def apply_fiberflat(in_rss: str, out_rss: str, out_lvmframe: str,
         # apply clipping
         select_clip_below = (spec_flat < clip_below) | numpy.isnan(spec_flat._data)
         spec_flat._data[select_clip_below] = 1
-        spec_flat._mask[select_clip_below] = True
+        if spec_flat._mask is not None:
+            spec_flat._mask[select_clip_below] = True
 
         # correct
         spec_new = spec_data / spec_flat
