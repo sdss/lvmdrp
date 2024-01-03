@@ -135,9 +135,9 @@ class RSS(FiberRows):
                 if hdu.name == "SUPERSKY_ERROR":
                     supersky_error = hdu
                 if hdu.name == "FLUXCAL":
-                    fluxcal = hdu.data
+                    fluxcal = hdu
                 if hdu.name == "SLITMAP":
-                    slitmap = hdu.data
+                    slitmap = hdu
             
             rss = cls(
                 data=data,
@@ -2564,7 +2564,15 @@ class RSS(FiberRows):
         return self._slitmap
     
     def setSlitmap(self, slitmap):
-        self._slitmap = Table(slitmap)
+        if slitmap is None:
+            self._slitmap = None
+            return
+        if isinstance(slitmap, pyfits.BinTableHDU):
+            self._slitmap = Table(slitmap.data)
+        elif isinstance(slitmap, Table):
+            self._slitmap = slitmap
+        else:
+            raise TypeError(f"Invalid slitmap table type '{type(slitmap)}'")
 
         # define fiber positions in WCS
         if self._header is not None:
@@ -2589,7 +2597,15 @@ class RSS(FiberRows):
         return self._data, self._error, self._lsf
 
     def set_fluxcal(self, fluxcal):
-        self._fluxcal = fluxcal
+        if fluxcal is None:
+            self._fluxcal = None
+            return
+        if isinstance(fluxcal, pyfits.BinTableHDU):
+            self._fluxcal = Table(fluxcal.data)
+        elif isinstance(fluxcal, Table):
+            self._fluxcal = fluxcal
+        else:
+            raise TypeError(f"Invalid flux calibration table type '{type(fluxcal)}'")
     
     def get_fluxcal(self):
         return self._fluxcal
