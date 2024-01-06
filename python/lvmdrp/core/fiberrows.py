@@ -38,21 +38,10 @@ class FiberRows(Header, PositionTable):
         data = numpy.zeros((nfibers, npixels), dtype=numpy.float32)
         coeffs = numpy.zeros((nfibers, coeff_table["COEFF"].shape[1]), dtype=numpy.float32)
         for ifiber in range(nfibers):
-            poly_kind = coeff_table[ifiber]["FUNC"]
-            if poly_kind == "poly" or poly_kind == "None":
-                poly_cls = numpy.polynomial.Polynomial
-            elif poly_kind == "chebyshev":
-                poly_cls = numpy.polynomial.Chebyshev
-            elif poly_kind == "legendre":
-                poly_cls = numpy.polynomial.Legendre
-            else:
-                raise ValueError(
-                        f"Invalid polynomial kind: '{poly_kind}', valid options are: 'poly', 'legendre', 'chebyshev'"
-                    )
-            
+            poly_cls = Spectrum1D.select_poly_class(poly_kind=coeff_table[ifiber]["FUNC"])
             data[ifiber] = poly_cls(coeff_table[ifiber]["COEFF"])(x_pixels)
             coeffs[ifiber] = coeff_table[ifiber]["COEFF"]
-        
+
         return cls(data=data, coeffs=coeffs, **kwargs)
 
     def __init__(
@@ -85,7 +74,6 @@ class FiberRows(Header, PositionTable):
         self.set_coeffs(coeffs=coeffs, poly_kind=poly_kind)
         if self._data is None and self._coeffs is not None:
             self.eval_coeffs()
-        
 
     def __len__(self):
         return self._fibers
@@ -764,7 +752,7 @@ class FiberRows(Header, PositionTable):
         )
         for i in iterator:
             spec = self.getSpec(i)
-            
+
             fit = spec.fitSepGauss(cent_wave[i - 1], aperture, init_back, axs=None)
             flux[i, :] = numpy.fabs(fit[:nlines])
             cent_wave[i, :] = fit[nlines : 2 * nlines]
@@ -878,16 +866,7 @@ class FiberRows(Header, PositionTable):
             good_pix = numpy.logical_not(self._mask[i, :])
             if numpy.sum(good_pix) >= deg + 1:
                 # select the polynomial class
-                if poly_kind == "poly":
-                    poly_cls = polynomial.Polynomial
-                elif poly_kind == "legendre":
-                    poly_cls = polynomial.Legendre
-                elif poly_kind == "chebyshev":
-                    poly_cls = polynomial.Chebyshev
-                else:
-                    raise ValueError(
-                        f"Invalid polynomial kind: '{poly_kind}', valid options are: 'poly', 'legendre', 'chebyshev'"
-                    )
+                poly_cls = Spectrum1D.select_poly_class(poly_kind)
 
                 # try to fit
                 try:
@@ -1109,22 +1088,13 @@ class FiberRows(Header, PositionTable):
 
     def eval_coeffs(self):
         """Evaluates the polynomial coefficients to the corresponding data values"""
-        if self._poly_kind == "poly" or self._poly_kind is None:
-            poly_cls = polynomial.Polynomial
-        elif self._poly_kind == "legendre":
-            poly_cls = polynomial.Legendre
-        elif self._poly_kind == "chebyshev":
-            poly_cls = polynomial.Chebyshev
-        else:
-            raise ValueError(
-                        f"Invalid polynomial kind: '{self._poly_kind}', valid options are: 'poly', 'legendre', 'chebyshev'"
-                    )
-        
+        poly_cls = Spectrum1D.select_poly_class(self._poly_kind)
+
         self._data = numpy.zeros((self._fibers, self._pixels.size))
         for i in range(self._fibers):
             poly = poly_cls(self._coeffs[i, :])
             self._data[i, :] = poly(self._pixels)
-        
+
         return self._data
 
     def interpolate_coeffs(self):
@@ -1138,7 +1108,7 @@ class FiberRows(Header, PositionTable):
         # early return if no coefficients are available
         if self._coeffs is None:
             return self
-        
+
         # define coordinates
         x_pixels = numpy.arange(self._data.shape[1])
         y_pixels = numpy.arange(self._fibers)
@@ -1147,13 +1117,13 @@ class FiberRows(Header, PositionTable):
         bad_fibers = self._mask.all(axis=1)
         f_coeffs = interpolate.interp1d(y_pixels[~bad_fibers], self._coeffs[~bad_fibers, :], axis=0, bounds_error=False, fill_value="extrapolate")
         self._coeffs = f_coeffs(y_pixels)
-        
+
         # evaluate trace at interpolated fibers
         for ifiber in y_pixels[bad_fibers]:
             poly = numpy.polynomial.Polynomial(self._coeffs[ifiber, :])
             self._data[ifiber, :] = poly(x_pixels)
             self._mask[ifiber, :] = False
-        
+
         return self
 
     def interpolate_data(self, axis="Y", reset_mask=True):
@@ -1171,7 +1141,7 @@ class FiberRows(Header, PositionTable):
         -------
         FiberRows
             Interpolated FiberRows object
-        
+
         Raises
         ------
         ValueError

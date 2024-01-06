@@ -268,6 +268,29 @@ def wave_little_interpol(wavelist):
 
 
 class Spectrum1D(Header):
+
+    @classmethod
+    def select_poly_class(cls, poly_kind=None):
+        """Returns the polynomial class to use for the given kind of polynomial
+
+        Parameters
+        ----------
+        poly_kind : string, optional with default None
+
+        Returns
+        -------
+        poly_cls : numpy.polynomial.Polynomial
+        """
+        if poly_kind == "poly" or poly_kind is None or poly_kind == "None":
+            poly_cls = numpy.polynomial.Polynomial
+        elif poly_kind == "chebyshev":
+            poly_cls = numpy.polynomial.Chebyshev
+        elif poly_kind == "legendre":
+            poly_cls = numpy.polynomial.Legendre
+        else:
+            raise ValueError(f"Invalid polynomial kind: '{poly_kind}', valid options are: 'poly', 'legendre', 'chebyshev'")
+        return poly_cls
+
     def __init__(
         self, wave=None, data=None, error=None, mask=None, lsf=None, sky=None, sky_error=None, header=None
     ):
