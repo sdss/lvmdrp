@@ -260,7 +260,7 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
         ilamps.extend(lamps)
         # append arc
         iarcs.append(arc)
-    
+
     # combine RSS objects
     arc = RSS()
     arc.combineRSS(iarcs, method="sum")
@@ -326,7 +326,7 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
             stretch_factors=numpy.linspace(0.9,1.1,10000),
             shift_range=[-cc_max_shift, cc_max_shift],
         )
-        
+
         log.info(f"max CC = {cc:.2f} for strech = {mhat:.2f} and shift = {bhat:.2f}")
     else:
         mhat, bhat = 1.0, 0.0
@@ -473,7 +473,7 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
             wave_cls = polynomial.Legendre
         elif kind_disp == "chebyshev":
             wave_cls = polynomial.Chebyshev
-        
+
         wave_poly = wave_cls.fit(cent_wave[i, use_line], ref_lines[use_line], deg=poly_disp)
 
         wave_coeffs[i, :] = wave_poly.convert().coef
@@ -506,7 +506,7 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
             fwhm_cls = polynomial.Legendre
         elif kind_fwhm == "chebyshev":
             fwhm_cls = polynomial.Chebyshev
-        
+
         fwhm_poly = fwhm_cls.fit(cent_wave[i, use_line], fwhm_wave[use_line], deg=poly_fwhm)
 
         lsf_coeffs[i, :] = fwhm_poly.convert().coef
@@ -759,7 +759,7 @@ def create_pixel_table(in_rss: str, out_rss: str, arc_wave: str, arc_fwhm: str =
     rss._data = rss._data[:, :-1]
     rss._error = rss._error[:, :-1]
     rss._mask = rss._mask[:, :-1]
-    
+
     wave_trace = TraceMask.from_file(arc_wave)
     wave_trace._data = wave_trace._data[:, :-1]
     rss.set_wave_trace(wave_trace)
@@ -1121,7 +1121,7 @@ def resample_wavelength(in_rss: str, out_rss: str, method: str = "spline",
         sky_error = numpy.zeros((rss._fibers, len(ref_wave)), dtype=numpy.float32)
     else:
         sky_error = None
-    
+
     if compute_densities:
         width_pix = numpy.zeros_like(rss._data)
         width_pix[:, :-1] = numpy.fabs(rss._wave[:, 1:] - rss._wave[:, :-1])
@@ -1130,7 +1130,7 @@ def resample_wavelength(in_rss: str, out_rss: str, method: str = "spline",
         rss._header["BUNIT"] = rss._header["BUNIT"] + "/angstrom"
         if rss._error is not None:
             rss._error = rss._error / width_pix
-    
+
     if rss._wave is not None and len(rss._wave.shape) == 2:
         if parallel == "auto":
             cpus = cpu_count()
@@ -1171,7 +1171,6 @@ def resample_wavelength(in_rss: str, out_rss: str, method: str = "spline",
 
     resamp_rss = RSS(
         data=data,
-        lsf_trace=rss._lsf_trace,
         header=rss._header,
         error=error,
         mask=mask,
@@ -1182,6 +1181,7 @@ def resample_wavelength(in_rss: str, out_rss: str, method: str = "spline",
         supersky_error=rss._supersky_error
     )
     resamp_rss.set_wave_array(ref_wave)
+    resamp_rss.set_lsf_trace(rss._lsf_trace)
 
     resamp_rss.writeFitsData(out_rss)
 
@@ -1286,7 +1286,7 @@ def create_fiberflat(in_rsss: List[str], out_rsss: List[str], median_box: int = 
                      illumination_corr: bool = False,
                      display_plots: bool = False) -> RSS:
     """computes a fiberflat from a wavelength calibrated continuum exposure
-    
+
     This function computes a fiberflat from a extracted and wavelength calibrated
     continuum exposure. The fiberflat is computed by dividing the continuum
     exposure by the median spectrum of the continuum exposure. The fiberflat
@@ -1353,7 +1353,7 @@ def create_fiberflat(in_rsss: List[str], out_rsss: List[str], median_box: int = 
         return None
     else:
         wdelt = numpy.diff(rss._wave, axis=1).mean()
-    
+
     # copy original data into output fiberflat object
     fiberflat = copy(rss)
     fiberflat._error = None
@@ -1363,7 +1363,7 @@ def create_fiberflat(in_rsss: List[str], out_rsss: List[str], median_box: int = 
         median_box_pix = int(median_box / wdelt)
         log.info(f"applying median smoothing with box size {[1, median_box]} angstroms ({[1, median_box_pix]} pixels)")
         fiberflat._data = ndimage.filters.median_filter(fiberflat._data, (1, median_box_pix))
-    
+
     # calculate median spectrum
     log.info(f"caculating normalization in full wavelength range ({fiberflat._wave.min():.2f} - {fiberflat._wave.max():.2f} angstroms)")
     norm = bn.nanmedian(fiberflat._data, axis=0)
@@ -1374,7 +1374,7 @@ def create_fiberflat(in_rsss: List[str], out_rsss: List[str], median_box: int = 
         log.info(f"limiting wavelength range to {wave_range[0]:.2f} - {wave_range[1]:.2f} angstroms")
         wave_select = (wave_range[0] <= norm_wave) & (norm_wave <= wave_range[1])
         norm[~wave_select] = numpy.nan
-    
+
     # normalize fibers where norm has valid values
     log.info(f"computing fiberflat across {fiberflat._fibers} fibers and {(~numpy.isnan(norm)).sum()} wavelength bins")
     normalized = fiberflat._data / norm[None, :]
@@ -1402,7 +1402,7 @@ def create_fiberflat(in_rsss: List[str], out_rsss: List[str], median_box: int = 
             spec = fiberflat.getSpec(ifiber)
             spec.smoothPoly(deg=poly_deg, poly_kind=poly_kind)
             fiberflat._data[ifiber, :] = spec._data
-    
+
     # interpolate masked pixels in fiberflat
     for ifiber in range(fiberflat._fibers):
         wave, data, mask = fiberflat._wave[ifiber], fiberflat._data[ifiber], fiberflat._mask[ifiber]
@@ -1635,7 +1635,7 @@ def apply_fiberflat(in_rss: str, out_rss: str, out_lvmframe: str,
     # load target data
     log.info(f"reading target data from {os.path.basename(in_rss)}")
     rss = RSS.from_file(in_rss)
-    
+
     # compute initial variance
     ifibvar = bn.nanmean(bn.nanvar(rss._data, axis=0))
 
@@ -1647,7 +1647,7 @@ def apply_fiberflat(in_rss: str, out_rss: str, out_lvmframe: str,
     if rss._fibers != flat._fibers:
         log.error(f"number of fibers in target data ({rss._fibers}) and fiberflat ({flat._fibers}) do not match")
         return None
-    
+
     # check if fiberflat has the same wavelength grid as the target data
     if not numpy.isclose(rss._wave, flat._wave).all():
         log.warning("target data and fiberflat have different wavelength grids")
@@ -1663,7 +1663,7 @@ def apply_fiberflat(in_rss: str, out_rss: str, out_lvmframe: str,
         if not numpy.isclose(spec_flat._wave, spec_data._wave).all():
             log.warning("resampling fiberflat to target wavelength grid")
             spec_flat = spec_flat.resampleSpec(spec_data._wave, err_sim=5)
-        
+
         # apply clipping
         select_clip_below = (spec_flat < clip_below) | numpy.isnan(spec_flat._data)
         spec_flat._data[select_clip_below] = 1
@@ -1673,7 +1673,7 @@ def apply_fiberflat(in_rss: str, out_rss: str, out_lvmframe: str,
         # correct
         spec_new = spec_data / spec_flat
         rss.setSpec(i, spec_new)
-    
+
     # compute final variance
     ffibvar = bn.nanmean(bn.nanvar(rss._data, axis=0))
 
@@ -3029,7 +3029,7 @@ def join_spec_channels(in_rsss: List[str], out_rss: str, use_weights: bool = Tru
 
     # combine channels
     new_rss = RSS.from_channels(*rsss, use_weights=use_weights)
-    
+
     # write output RSS
     if out_rss is not None:
         log.info(f"writing output RSS to {os.path.basename(out_rss)}")
