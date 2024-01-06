@@ -1,9 +1,9 @@
 from copy import deepcopy
 
-import matplotlib.pyplot as plt
 import numpy
 import bottleneck as bn
 from astropy.io import fits as pyfits
+from astropy.table import Table
 from numpy import polynomial
 from scipy.linalg import norm
 from scipy import signal, interpolate, ndimage, sparse
@@ -306,11 +306,16 @@ class Spectrum1D(Header):
         self._sky_error = sky_error
         self._header = header
 
-        self.set_wave(wave, wave_trace)
-        self.set_lsf(lsf, lsf_trace)
+        self.set_wave_and_lsf_traces(wave=wave, wave_trace=wave_trace, lsf_trace=lsf_trace)
 
     def __sub__(self, other):
         if isinstance(other, Spectrum1D):
+            # verify wavelength and LSF arrays are the same
+            if not numpy.array_equal(self._wave, other._wave):
+                raise ValueError("wavelength arrays are not the same")
+            if not numpy.array_equal(self._wave_trace, other._wave_trace):
+                raise ValueError("wavelength trace arrays are not the same")
+
             data = numpy.zeros_like(self._data)
             select_zero = self._data == 0
             data = self._data - other._data
@@ -426,6 +431,12 @@ class Spectrum1D(Header):
 
     def __add__(self, other):
         if isinstance(other, Spectrum1D):
+            # verify wavelength and LSF arrays are the same
+            if not numpy.array_equal(self._wave, other._wave):
+                raise ValueError("wavelength arrays are not the same")
+            if not numpy.array_equal(self._wave_trace, other._wave_trace):
+                raise ValueError("wavelength trace arrays are not the same")
+
             other._data.astype(numpy.float32)
             data = numpy.zeros_like(self._data)
             select_zero = self._data == 0
@@ -574,6 +585,12 @@ class Spectrum1D(Header):
 
     def __truediv__(self, other):
         if isinstance(other, Spectrum1D):
+            # verify wavelength and LSF arrays are the same
+            if not numpy.array_equal(self._wave, other._wave):
+                raise ValueError("wavelength arrays are not the same")
+            if not numpy.array_equal(self._wave_trace, other._wave_trace):
+                raise ValueError("wavelength trace arrays are not the same")
+
             other._data = other._data.astype(numpy.float32)
             select = other._data != 0.0
             data = numpy.divide(self._data, other._data, out=numpy.zeros_like(self._data), where=select)
@@ -635,7 +652,7 @@ class Spectrum1D(Header):
                 if sky_error.dtype == numpy.float64 or sky_error.dtype == numpy.dtype(">f8"):
                     sky_error = sky_error.astype(numpy.float32)
 
-            spec = Spectrum1D(wave=self._wave, data=data, error=error, mask=mask, sky=sky, sky_error=sky_error)
+            spec = Spectrum1D(wave=self._wave, data=data, error=error, mask=mask, wave_trace=self._wave_trace, lsf_trace=self._lsf_trace, sky=sky, sky_error=sky_error)
 
             return spec
 
@@ -728,6 +745,12 @@ class Spectrum1D(Header):
 
     def __rtruediv__(self, other):
         if isinstance(other, Spectrum1D):
+            # verify wavelength and LSF arrays are the same
+            if not numpy.array_equal(self._wave, other._wave):
+                raise ValueError("wavelength arrays are not the same")
+            if not numpy.array_equal(self._wave_trace, other._wave_trace):
+                raise ValueError("wavelength trace arrays are not the same")
+
             other._data = other._data.astype(numpy.float32)
             select = self._data != 0.0
             data = numpy.divide(other._data, self._data, out=numpy.zeros_like(self._data), where=select)
@@ -876,6 +899,12 @@ class Spectrum1D(Header):
 
     def __mul__(self, other):
         if isinstance(other, Spectrum1D):
+            # verify wavelength and LSF arrays are the same
+            if not numpy.array_equal(self._wave, other._wave):
+                raise ValueError("wavelength arrays are not the same")
+            if not numpy.array_equal(self._wave_trace, other._wave_trace):
+                raise ValueError("wavelength trace arrays are not the same")
+
             data = self._data * other._data
 
             if self._mask is not None and other._mask is not None:
@@ -1109,43 +1138,112 @@ class Spectrum1D(Header):
     def __ge__(self, other):
         return self._data >= other
 
-    def _eval_wave_or_lsf(self, array=None, trace=None):
-        if trace is not None:
-            poly_kind = trace["FUNC"]
-            xmin, xmax = trace["XMIN"], trace["XMAX"] + 1
-            coeffs = trace["COEFF"]
+    def eval_wave_and_lsf_traces(self, wave, wave_trace, lsf_trace):
+        """Evaluates the wavelength and LSF traces at the given wavelength array.
 
-            pixels = numpy.arange(xmin, xmax)
+        Given a wavelength array, this method evaluates the wavelength and LSF
+        traces at the given wavelength array. The wavelength trace is evaluated
+        using the polynomial coefficients and the LSF trace is evaluated using
+        the LSF coefficients. The wavelength and LSF traces are evaluated using
+        the same polynomial class as the one used to fit the traces.
 
-            if poly_kind == "poly" or poly_kind is None or poly_kind == "None":
-                poly_cls = polynomial.Polynomial
-            elif poly_kind == "legendre":
-                poly_cls = polynomial.Legendre
-            elif poly_kind == "chebyshev":
-                poly_cls = polynomial.Chebyshev
-            else:
-                raise ValueError(
-                            f"Invalid polynomial kind: '{poly_kind}', valid options are: 'poly', 'legendre', 'chebyshev'"
-                        )
+        If the wavelength array is not the same as the one fitted by the
+        polynomial class, the wavelength and the LSF traces are interpolated to
+        the new wavelength array.
 
-            poly = poly_cls(coeffs)
-            _array = poly(pixels)
+        Parameters
+        ----------
+        wave : numpy.ndarray (float)
+            New wavelength scale
+        wave_trace : astropy.table.row.Row
+            Wavelength trace parameters
+        lsf_trace : astropy.table.row.Row
+            LSF trace parameters
 
-            if array is not None:
-                if not numpy.allclose(_array, array):
-                    raise ValueError("given array does not match the trace")
+        Returns
+        -------
+        wave : numpy.ndarray (float)
+            New wavelength scale
+        lsf : numpy.ndarray (float)
+            New LSF array
 
-        return array
+        Raises
+        ------
+        ValueError
+            If the new wavelength array is outside the old wavelength array
+        ValueError
+            If the new LSF array is outside the old LSF array
+        ValueError
+            If the new wavelength array does not match the input wavelength array
+        """
+        # eval wavelength and LSF polynomial traces
+        if wave_trace is not None:
+            wave_coeffs = wave_trace["COEFF"]
+            old_wave_pixels = numpy.arange(wave_trace["XMIN"], wave_trace["XMAX"] + 1)
+            wave_poly_cls = self.select_poly_class(poly_kind=wave_trace["FUNC"])
+            wave_poly = wave_poly_cls(wave_coeffs)
+            old_wave = wave_poly(old_wave_pixels)
+        else:
+            old_wave = wave
 
-    def set_wave(self, wave_array=None, wave_trace=None):
-        self._wave = wave_array
+        if lsf_trace is not None:
+            lsf_coeffs = lsf_trace["COEFF"]
+            old_lsf_pixels = numpy.arange(lsf_trace["XMIN"], lsf_trace["XMAX"] + 1)
+            lsf_poly_cls = self.select_poly_class(poly_kind=lsf_trace["FUNC"])
+            lsf_poly = lsf_poly_cls(lsf_coeffs)
+            old_lsf = lsf_poly(old_lsf_pixels)
+        else:
+            old_lsf = None
+
+        # check if interpolation is needed
+        if old_wave.size == wave.size and numpy.allclose(old_wave, wave):
+            return old_wave, old_lsf
+        else:
+            new_wave_pixels = numpy.interp(wave, old_wave, old_wave_pixels)
+            # verify that new pixels are within the old pixel range
+            if numpy.any(new_wave_pixels < old_wave_pixels[0]) or numpy.any(new_wave_pixels > old_wave_pixels[-1]):
+                raise ValueError("New wavelength pixels are outside the old wavelength pixel range")
+            new_wave = wave_poly(new_wave_pixels)
+            # verify that the new wavelength is equivalent to the input wavelength
+            if not numpy.allclose(new_wave, wave):
+                raise ValueError("New wavelength pixels do not match the input wavelength")
+
+            # if no LSF trace is provided, return the new wavelength array
+            if old_lsf is None:
+                new_lsf = None
+                return new_wave, new_lsf
+
+            new_lsf_pixels = numpy.interp(wave, old_wave, old_lsf_pixels)
+            # verify that new pixels are within the old pixel range
+            if numpy.any(new_lsf_pixels < old_lsf_pixels[0]) or numpy.any(new_lsf_pixels > old_lsf_pixels[-1]):
+                raise ValueError("New LSF pixels are outside the old LSF pixel range")
+            new_lsf = lsf_poly(new_lsf_pixels)
+
+            return new_wave, new_lsf
+
+    def set_wave_and_lsf_traces(self, wave, wave_trace, lsf_trace, lsf=None):
+        """Sets the wavelength and LSF traces.
+
+        Parameters
+        ----------
+        wave : numpy.ndarray (float)
+            Wavelength array
+        wave_trace : astropy.table.row.Row
+            Wavelength trace parameters
+        lsf_trace : astropy.table.row.Row
+            LSF trace parameters
+        lsf : numpy.ndarray (float), optional
+            LSF array
+        """
+
         self._wave_trace = wave_trace
-        self._wave = self._eval_wave_or_lsf(array=self._wave, trace=self._wave_trace)
-
-    def set_lsf(self, lsf=None, lsf_trace=None):
-        self._lsf = lsf
         self._lsf_trace = lsf_trace
-        self._lsf = self._eval_wave_or_lsf(array=self._lsf, trace=self._lsf_trace)
+        self._wave, self._lsf = self.eval_wave_and_lsf_traces(
+            wave=wave, wave_trace=self._wave_trace, lsf_trace=self._lsf_trace
+        )
+        # set LSF only if no trace information is provided
+        if self._lsf is None:
+            self._lsf = lsf
 
     def loadFitsData(
         self,
@@ -1559,7 +1657,7 @@ class Spectrum1D(Header):
                 select_goodpix = numpy.ones(self._dim, dtype=bool)
 
             # interpolate LSF ---------------------------------------------------------------------------------------------------------------------------------
-            if self._lsf is not None:
+            if self._lsf_trace is None and self._lsf is not None:
                 intp = interpolate.interp1d(
                     self._wave[select_goodpix],
                     self._lsf[select_goodpix],
@@ -1569,6 +1667,7 @@ class Spectrum1D(Header):
                 )
                 clean_lsf = intp(self._wave)
 
+                # select pixels that were interpolated (excluding extrapolated ones)
                 select_interp = clean_lsf != 0
                 # wave_interp = self._wave[select_interp]
                 # perform the interpolation on the data
@@ -1698,7 +1797,7 @@ class Spectrum1D(Header):
                 # replace error values in masked pixels
                 if new_error is not None:
                     new_error[new_mask] = replace_error
-            
+
             # interpolate sky ---------------------------------------------------------------------------------------------------------------------------------
             if self._sky is not None:
                 intp = interpolate.interp1d(
@@ -1794,13 +1893,15 @@ class Spectrum1D(Header):
                 new_sky_error = numpy.where(select_out, extrapolate._sky_error, new_error)
 
         spec_out = Spectrum1D(
-            wave=ref_wave,
             data=new_data,
             error=new_error,
             mask=new_mask,
-            sky=new_sky,
-            sky_error=new_sky_error,
+            wave=ref_wave,
+            wave_trace=self._wave_trace,
             lsf=new_lsf,
+            lsf_trace=self._lsf_trace,
+            sky=new_sky,
+            sky_error=new_sky_error
         )
         return spec_out
 

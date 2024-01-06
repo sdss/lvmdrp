@@ -372,20 +372,18 @@ class RSS(FiberRows):
         new_hdr["NAXIS1"] = new_data.shape[1]
         new_hdr["NAXIS2"] = new_data.shape[0]
         new_hdr["CCD"] = ",".join([rss._header["CCD"][0] for rss in rsss])
-        wcs = WCS(new_hdr)
-        wcs.spectral.wcs.cdelt[0] = new_wave[1] - new_wave[0]
-        wcs.spectral.wcs.crval[0] = new_wave[0]
-        new_hdr.update(wcs.to_header())
-        return RSS(
+
+        new_rss = RSS(
             data=new_data,
             error=new_error,
             mask=new_mask,
-            wave=new_wave,
-            lsf=new_lsf,
             sky=new_sky,
             sky_error=new_sky_error,
             header=new_hdr
         )
+        new_rss.set_wave_array(new_wave)
+        new_rss.set_lsf_array(new_lsf)
+        return new_rss
 
     @classmethod
     def from_spectra1d(
@@ -508,8 +506,9 @@ class RSS(FiberRows):
         # set wavelength and LSF traces information if available
         self.set_wave_trace(wave_trace)
         self.set_lsf_trace(lsf_trace)
-        # evaluate wavelength and LSF traces
+        # evaluate wavelength from header or from trace
         self.set_wave_array()
+        # evaluate LSF from trace
         self.set_lsf_array()
         if supersky is not None:
             self.set_supersky(supersky)
@@ -764,23 +763,38 @@ class RSS(FiberRows):
     def set_wave_array(self, wave=None):
         """Sets the wavelength array for the RSS object
 
-        if wave is None, the wavelength array will be created from the trace
-        information if available or from the header assuming an uniform
-        sampling. Otherwise it will be set from the given array only if it has
-        the correct shape.
+        This method tries to set the wavelength array from three different
+        sources, in the following order:
+
+            - from the input `wave` array, in which case it expects it to be a
+            one-dimensional array with the same number of elements as the
+            wavelength dimension of the data array.
+
+            - from the wavelength trace, in which case the resulting wavelength
+            array will be a two-dimensional array with the same shape as the
+            data array.
+
+            - from the header, in which case the wavelength the resulting
+            wavelength will be a one-dimensional array.
 
         Parameters
         ----------
         wave : numpy.ndarray, optional
             Wavelength array to be set, by default None
         """
+        # initialize wavelength attributes
         self._wave = None
         self._wave_disp = None
         self._wave_start = None
         self._res_elements = None
+
+        # set new wavelength array if given
         if wave is not None:
             self._wave = numpy.asarray(wave)
             if len(wave.shape) == 1:
+                if wave.size != self._data.shape[1]:
+                    raise ValueError(f"Input wavelength array shape {wave.size} does not match the data shape {self._data.shape}")
+
                 self._wave_disp = self._wave[1] - self._wave[0]
                 self._wave_start = self._wave[0]
                 self._res_elements = self._wave.shape[0]
@@ -789,9 +803,8 @@ class RSS(FiberRows):
                         "CDELT1": self._wave_disp, "CRVAL1": self._wave_start,
                         "CUNIT1": "Angstrom", "CTYPE1": "WAVE", "CRPIX1": 1.0})
                     self._header.update(wcs.to_header())
-                self._wave_trace = None
             elif len(wave.shape) == 2:
-                raise ValueError("You cannot set a 2D wavelength array directly, use wave=None instead")
+                raise ValueError("You cannot set a 2D wavelength array directly, use wave=None instead to avaluate the wavelength from the trace")
             else:
                 raise ValueError("Invalid wavelength array shape")
         elif self._wave_trace is not None:
@@ -804,11 +817,18 @@ class RSS(FiberRows):
 
     def set_lsf_array(self, lsf=None):
         self._lsf = None
+
+        if self._wave is None:
+            return self._lsf
+
         if lsf is not None:
             self._lsf = lsf
         elif self._lsf_trace is not None:
-            trace = TraceMask.from_coeff_table(self._lsf_trace)
-            self._lsf = trace.eval_coeffs()
+            lsf = numpy.zeros_like(self._data)
+            for ifiber in range(self._fibers):
+                spec = self[ifiber]
+                _, lsf[ifiber] = spec.eval_wave_and_lsf_traces(wave=spec._wave, wave_trace=spec._wave_trace, lsf_trace=spec._lsf_trace)
+            self._lsf = lsf
 
         return self._lsf
 

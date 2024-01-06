@@ -118,7 +118,7 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
         hskye_path = path.full("lvm_anc", drpver=drpver, kind="h", imagetype="sky_e", **sci)
         hskyw_path = path.full("lvm_anc", drpver=drpver, kind="h", imagetype="sky_w", **sci)
         os.makedirs(os.path.dirname(hsci_path), exist_ok=True)
-        
+
         # define science product paths
         frame_path = path.full("lvm_frame", drpver=drpver, tileid=sci_tileid, mjd=sci_mjd, expnum=sci_expnum, kind=f"Frame-{sci_camera}")
         # define current arc lamps to use for wavelength calibration
@@ -198,7 +198,7 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
     for channel in "brz":
         hsci_paths = sorted(path.expand('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver,
                                         kind='h', camera=f'{channel}*', imagetype='object', expnum=expnum))
-        
+
         # stack spectrographs
         # TODO: write lvmCFrame-<channel>-<expnum>.fits
         cframe_path = path.full("lvm_frame", mjd=sci_mjd, drpver=drpver, tileid=sci_tileid, expnum=sci_expnum, kind=f'CFrame-{channel}')
