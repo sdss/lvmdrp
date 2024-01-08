@@ -1086,14 +1086,17 @@ class FiberRows(Header, PositionTable):
             self._poly_kind = None
             self._poly_deg = None
 
-    def eval_coeffs(self):
+    def eval_coeffs(self, pixels=None):
         """Evaluates the polynomial coefficients to the corresponding data values"""
         poly_cls = Spectrum1D.select_poly_class(self._poly_kind)
 
-        self._data = numpy.zeros((self._fibers, self._pixels.size))
+        if pixels is None:
+            pixels = self._pixels
+
+        self._data = numpy.zeros((self._fibers, pixels.size))
         for i in range(self._fibers):
             poly = poly_cls(self._coeffs[i, :])
-            self._data[i, :] = poly(self._pixels)
+            self._data[i, :] = poly(pixels)
 
         return self._data
 
