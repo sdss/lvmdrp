@@ -714,13 +714,23 @@ class RSS(FiberRows):
                 % (self._fibers, fiber)
             )
 
-        data = self._data[fiber, :]
+        data = self._data[fiber]
+
+        if self._wave_trace is not None:
+            wave_trace = self._wave_trace[fiber]
+        else:
+            wave_trace = None
+
+        if self._lsf_trace is not None:
+            lsf_trace = self._lsf_trace[fiber]
+        else:
+            lsf_trace = None
 
         if self._wave is not None:
             if len(self._wave.shape) == 1:
                 wave = self._wave
             else:
-                wave = self._wave[fiber, :]
+                wave = self._wave[fiber]
         else:
             wave = numpy.arange(data.size)
 
@@ -728,25 +738,31 @@ class RSS(FiberRows):
             if len(self._lsf.shape) == 1:
                 lsf = self._lsf
             else:
-                lsf = self._lsf[fiber, :]
+                lsf = self._lsf[fiber]
         else:
             lsf = None
 
         if self._error is not None:
-            error = self._error[fiber, :]
+            error = self._error[fiber]
         else:
             error = None
 
         if self._mask is not None:
-            mask = self._mask[fiber, :]
+            mask = self._mask[fiber]
         else:
             mask = None
 
-        spec = Spectrum1D(wave, data, error=error, mask=mask, lsf=lsf)
+        spec = Spectrum1D(data=data, error=error, mask=mask, wave=wave, lsf=lsf, wave_trace=wave_trace, lsf_trace=lsf_trace)
         return spec
 
     def __setitem__(self, fiber, spec):
         self._data[fiber, :] = spec._data
+
+        if self._wave_trace is not None and spec._wave_trace is not None:
+            self._wave_trace[fiber] = spec._wave_trace
+
+        if self._lsf_trace is not None and spec._lsf_trace is not None:
+            self._lsf_trace[fiber] = spec._lsf_trace
 
         if self._wave is not None and len(self._wave.shape) == 2:
             self._wave[fiber, :] = spec._wave
@@ -759,6 +775,12 @@ class RSS(FiberRows):
 
         if self._mask is not None and spec._mask is not None:
             self._mask[fiber, :] = spec._mask
+
+        if self._sky is not None and spec._sky is not None:
+            self._sky[fiber] = spec._sky
+
+        if self._sky_error is not None and spec._sky_error is not None:
+            self._sky_error[fiber] = spec._sky_error
 
     def set_wave_array(self, wave=None):
         """Sets the wavelength array for the RSS object
