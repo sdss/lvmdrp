@@ -2708,15 +2708,15 @@ class RSS(FiberRows):
 
         return Table(trace_dict)
 
-    def writeFitsData(self, out_rss, include_PT=False):
+    def writeFitsData(self, out_rss, include_wave=False):
         """Writes information from a RSS object into a FITS file.
 
         Parameters
         ----------
         out_rss : str
             Name or Path of the FITS file to which the data shall be written
-        include_PT : bool, optional
-            If True, the position table will be included in the FITS file, by default False
+        include_wave : bool, optional
+            If True, the wavelength array is included in the FITS file, by default False
 
         Raises
         ------
@@ -2732,6 +2732,10 @@ class RSS(FiberRows):
             hdus.append(pyfits.ImageHDU(self._error.astype("float32"), name="ERROR"))
         if self._mask is not None:
             hdus.append(pyfits.ImageHDU(self._mask.astype("uint8"), name="BADPIX"))
+
+        # include wavelength extension for rectified RSSs
+        if include_wave and self._wave and len(self._wave.shape) == 1:
+            hdus.append(pyfits.ImageHDU(self._wave.astype("float32"), name="WAVE"))
 
         if self._wave_trace is not None:
             hdus.append(pyfits.BinTableHDU(self._wave_trace, name="WAVE_TRACE"))
@@ -2770,13 +2774,6 @@ class RSS(FiberRows):
             hdus.append(pyfits.BinTableHDU(self._fluxcal, name="FLUXCAL"))
         if self._slitmap is not None:
             hdus.append(pyfits.BinTableHDU(self._slitmap, name="SLITMAP"))
-
-        if include_PT:
-            try:
-                table = self.writeFitsPosTable()
-                hdus.append(pyfits.BinTableHDU(data=table.data, header=table.header, name="PosTable"))
-            except (IndexError, ValueError, AttributeError):
-                pass
 
         if self._header is not None:
             hdus[0].header = self.getHeader()
