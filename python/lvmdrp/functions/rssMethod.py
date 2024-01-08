@@ -1169,11 +1169,15 @@ def resample_wavelength(in_rss: str, out_rss: str, method: str = "spline",
                 sky_error[i, :] = spec._sky_error
             mask[i, :] = spec._mask
 
+    new_header = rss._header
+    new_header["WAVREC"] = (True, "Wavelength rectified")
     resamp_rss = RSS(
         data=data,
-        header=rss._header,
+        header=new_header,
         error=error,
         mask=mask,
+        wave_trace=rss._wave_trace,
+        lsf_trace=rss._lsf_trace,
         slitmap=rss._slitmap,
         sky=sky,
         sky_error=sky_error,
@@ -1181,7 +1185,6 @@ def resample_wavelength(in_rss: str, out_rss: str, method: str = "spline",
         supersky_error=rss._supersky_error
     )
     resamp_rss.set_wave_array(ref_wave)
-    resamp_rss.set_lsf_trace(rss._lsf_trace)
 
     resamp_rss.writeFitsData(out_rss)
 

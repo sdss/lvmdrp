@@ -792,12 +792,12 @@ class RSS(FiberRows):
             one-dimensional array with the same number of elements as the
             wavelength dimension of the data array.
 
+            - from the header, in which case the wavelength the resulting
+            wavelength will be a one-dimensional array.
+
             - from the wavelength trace, in which case the resulting wavelength
             array will be a two-dimensional array with the same shape as the
             data array.
-
-            - from the header, in which case the wavelength the resulting
-            wavelength will be a one-dimensional array.
 
         Parameters
         ----------
@@ -829,11 +829,11 @@ class RSS(FiberRows):
                 raise ValueError("You cannot set a 2D wavelength array directly, use wave=None instead to avaluate the wavelength from the trace")
             else:
                 raise ValueError("Invalid wavelength array shape")
+        elif self._header is not None and self._header.get("WAVREC", False):
+            self._wave, self._res_elements, self._wave_start, self._wave_disp = self.get_wave_from_header()
         elif self._wave_trace is not None:
             trace = TraceMask.from_coeff_table(self._wave_trace)
             self._wave = trace.eval_coeffs()
-        else:
-            self.createWavefromHdr()
 
         return self._wave
 
@@ -861,17 +861,20 @@ class RSS(FiberRows):
         if self._error is not None:
             self._error[fiber, :] = replace_error
 
-    def createWavefromHdr(self):
+    def get_wave_from_header(self):
+        wave, res_elements, wave_start, wave_disp = None, None, None, None
         if self._header is None:
-            return
+            return wave, res_elements, wave_start, wave_disp
 
         wcs = WCS(self._header)
         if wcs.spectral.array_shape:
-            self._res_elements = wcs.spectral.array_shape[0]
-            wl = wcs.spectral.all_pix2world(numpy.arange(self._res_elements), 0)[0]
-            self._wave = (wl * u.m).to(u.angstrom).value
-            self._wave_disp = self._wave[1] - self._wave[0]
-            self._wave_start = self._wave[0]
+            res_elements = wcs.spectral.array_shape[0]
+            wl = wcs.spectral.all_pix2world(numpy.arange(res_elements), 0)[0]
+            wave = (wl * u.m).to(u.angstrom).value
+            wave_disp = wave[1] - wave[0]
+            wave_start = wave[0]
+
+        return wave, res_elements, wave_start, wave_disp
 
     def set_sky(self, rss_sky):
         assert rss_sky._data.shape == self._data.shape
