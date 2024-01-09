@@ -796,6 +796,46 @@ class RSS(FiberRows):
         if self._sky_error is not None and spec._sky_error is not None:
             self._sky_error[fiber] = spec._sky_error
 
+    def set_cent_trace(self, cent_trace):
+        self._cent_trace = self._trace_to_coeff_table(cent_trace)
+        return self._cent_trace
+
+    def get_cent_trace(self, as_tracemask=False):
+        if not as_tracemask:
+            return self._cent_trace
+        else:
+            return TraceMask.from_coeff_table(self._cent_trace)
+
+    def get_width_trace(self, as_tracemask=False):
+        if not as_tracemask:
+            return self._width_trace
+        else:
+            return TraceMask.from_coeff_table(self._width_trace)
+
+    def set_width_trace(self, width_trace):
+        self._width_trace = self._trace_to_coeff_table(width_trace)
+        return self._width_trace
+
+    def get_wave_trace(self, as_tracemask=False):
+        if not as_tracemask:
+            return self.get_wave_trace()
+        else:
+            return TraceMask.from_coeff_table(self._wave_trace)
+
+    def set_wave_trace(self, wave_trace):
+        self._wave_trace = self._trace_to_coeff_table(wave_trace)
+        return self._wave_trace
+
+    def get_lsf_trace(self, as_tracemask=False):
+        if not as_tracemask:
+            return self.get_lsf_trace()
+        else:
+            return TraceMask.from_coeff_table(self._lsf_trace)
+
+    def set_lsf_trace(self, lsf_trace):
+        self._lsf_trace = self._trace_to_coeff_table(lsf_trace)
+        return self._lsf_trace
+
     def set_wave_array(self, wave=None):
         """Sets the wavelength array for the RSS object
 
@@ -2681,34 +2721,6 @@ class RSS(FiberRows):
     def get_fluxcal(self):
         return self._fluxcal
 
-    def get_cent_trace(self):
-        return self._cent_trace
-
-    def set_cent_trace(self, cent_trace):
-        self._cent_trace = self._trace_to_coeff_table(cent_trace)
-        return self._cent_trace
-
-    def get_width_trace(self):
-        return self._width_trace
-
-    def set_width_trace(self, width_trace):
-        self._width_trace = self._trace_to_coeff_table(width_trace)
-        return self._width_trace
-
-    def get_wave_trace(self):
-        return self._wave_trace
-
-    def set_wave_trace(self, wave_trace):
-        self._wave_trace = self._trace_to_coeff_table(wave_trace)
-        return self._wave_trace
-
-    def get_lsf_trace(self):
-        return self._lsf_trace
-
-    def set_lsf_trace(self, lsf_trace):
-        self._lsf_trace = self._trace_to_coeff_table(lsf_trace)
-        return self._lsf_trace
-
     def stack_trace(self, traces):
         trace_dict = dict(FUNC=[], XMIN=[], XMAX=[], COEFF=[])
         iterator = []
@@ -2809,10 +2821,10 @@ class lvmFrame(RSS):
         error = numpy.divide(1, hdulist["IVAR"].data, where=hdulist["IVAR"].data != 0, out=numpy.zeros_like(hdulist["IVAR"].data))
         error = numpy.sqrt(error)
         mask = hdulist["MASK"].data
-        wave_trace = Table(hdulist["WAVE_TRACE"].data)
-        lsf_trace = Table(hdulist["LSF_TRACE"].data)
         cent_trace = Table(hdulist["CENT_TRACE"].data)
         width_trace = Table(hdulist["WIDTH_TRACE"].data)
+        wave_trace = Table(hdulist["WAVE_TRACE"].data)
+        lsf_trace = Table(hdulist["LSF_TRACE"].data)
         superflat = hdulist["SUPERFLAT"].data
         slitmap = Table(hdulist["SLITMAP"].data)
         return cls(data=data, error=error, mask=mask, header=header,
@@ -2820,24 +2832,24 @@ class lvmFrame(RSS):
                    cent_trace=cent_trace, width_trace=width_trace,
                    superflat=superflat, slitmap=slitmap)
 
-    def __init__(self, data=None, error=None, mask=None, header=None, slitmap=None, wave_trace=None, superflat=None, **kwargs):
-        RSS.__init__(self, data=data, error=error, mask=mask, header=header, slitmap=slitmap)
+    def __init__(self, data=None, error=None, mask=None,
+                 cent_trace=None, width_trace=None, wave_trace=None, lsf_trace=None,
+                 header=None, slitmap=None, superflat=None, **kwargs):
+        RSS.__init__(self, data=data, error=error, mask=mask,
+                     cent_trace=cent_trace, width_trace=width_trace,
+                     wave_trace=wave_trace, lsf_trace=lsf_trace, header=header, slitmap=slitmap)
 
         self._blueprint = dp.load_blueprint(name="lvmFrame")
         self._template = dp.dump_template(dataproduct_bp=self._blueprint, save=False)
 
-        if wave_trace is not None:
-            self.setWaveTrace(wave_trace)
-        else:
-            self._wave_trace = None
         if superflat is not None:
-            self.setSuperflat(superflat)
+            self.set_superflat(superflat)
         else:
             self._superflat = None
         if header is not None:
-            self.setHeader(header, **kwargs)
+            self.set_header(header, **kwargs)
 
-    def setHeader(self, orig_header, **kwargs):
+    def set_header(self, orig_header, **kwargs):
         """Set header"""
         blueprint = dp.load_blueprint(name="lvmFrame")
         new_header = orig_header
@@ -2851,49 +2863,14 @@ class lvmFrame(RSS):
         self._header = new_header
         return self._header
 
-    def getWaveTrace(self):
-        """Wavelength trace representation as FiberRows"""
-        if self._wave_trace is not None:
-            return FiberRows.from_table(self._wave_trace)
-        else:
-            return None
-
-        if self._lsf_trace is not None:
-            return FiberRows.from_table(self._lsf_trace)
-        else:
-            return None
-
-    def setWaveTrace(self, wave_trace, lsf_trace):
-        """Set wavelength/LSF trace representation"""
-        self._wave_trace = self._trace_to_coeff_table(wave_trace)
-        self._lsf_trace = self._trace_to_coeff_table(lsf_trace)
-        return self._wave_trace, self._lsf_trace
-
-    def getSuperflat(self):
+    def get_superflat(self):
         """Get superflat representation as numpy array"""
         return self._superflat
 
-    def setSuperflat(self, superflat):
+    def set_superflat(self, superflat):
         """Set superflat representation"""
         self._superflat = superflat
         return self._superflat
-
-    def getFiberTrace(self):
-        """Get fiber centroid/width trace representation as FiberRows"""
-        if self._cent_trace is not None:
-            cent_trace = TraceMask.from_coeff_table(self._cent_trace)
-        else:
-            cent_trace = None
-        if self._width_trace is not None:
-            width_trace = TraceMask.from_coeff_table(self._wave_trace)
-        else:
-            width_trace = None
-        return cent_trace, width_trace
-
-    def setFiberTrace(self, cent_trace, width_trace):
-        self._cent_trace = self._trace_to_coeff_table(cent_trace)
-        self._width_trace = self._trace_to_coeff_table(width_trace)
-        return self._cent_trace, self._width_trace
 
     def loadFitsData(self, in_file):
         with pyfits.open(in_file) as hdulist:

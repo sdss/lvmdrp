@@ -1,5 +1,4 @@
 import numpy
-from numpy import polynomial
 from astropy.io import fits as pyfits
 from scipy import interpolate
 from tqdm import tqdm
@@ -30,6 +29,9 @@ class FiberRows(Header, PositionTable):
     @classmethod
     def from_coeff_table(cls, coeff_table, **kwargs):
         """Creates an FiberRows instance from a table of coefficients"""
+
+        if coeff_table is None:
+            return None
 
         nfibers = len(coeff_table)
         npixels = coeff_table["XMAX"].max() - coeff_table["XMIN"].min() + 1
