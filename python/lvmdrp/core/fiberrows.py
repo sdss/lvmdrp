@@ -44,6 +44,51 @@ class FiberRows(Header, PositionTable):
 
         return cls(data=data, coeffs=coeffs, **kwargs)
 
+    @classmethod
+    def from_spectrographs(cls, spec1, spec2, spec3):
+        hdrs = []
+        fiberrows = [spec1, spec2, spec3]
+        for i in range(len(fiberrows)):
+            fiberrow = fiberrows[i]
+            if i == 0:
+                data_out = fiberrow._data
+                if fiberrow._error is not None:
+                    error_out = fiberrow._error
+                if fiberrow._mask is not None:
+                    mask_out = fiberrow._mask
+                if fiberrow._coeffs is not None:
+                    coeffs_out = fiberrow._coeffs
+            else:
+                data_out = numpy.concatenate((data_out, fiberrow._data), axis=0)
+                if fiberrow._error is not None:
+                    error_out = numpy.concatenate((error_out, fiberrow._error), axis=0)
+                else:
+                    error_out = None
+                if fiberrow._mask is not None:
+                    mask_out = numpy.concatenate((mask_out, fiberrow._mask), axis=0)
+                else:
+                    mask_out = None
+                if fiberrow._coeffs is not None:
+                    coeffs_out = numpy.concatenate((coeffs_out, fiberrow._coeffs), axis=0)
+                else:
+                    coeffs_out = None
+
+        # update header
+        if len(hdrs) > 0:
+            hdr_out = combineHdr(hdrs)
+        else:
+            hdr_out = None
+
+        fiberrow_out = cls(
+            data=data_out,
+            error=error_out,
+            mask=mask_out,
+            coeffs=coeffs_out
+        )
+        fiberrow_out.setHeader(hdr_out)
+
+        return fiberrow_out
+
     def __init__(
         self,
         data=None,
