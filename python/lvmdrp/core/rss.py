@@ -182,6 +182,10 @@ class RSS(FiberRows):
                     error_out = rss._error
                 if rss._mask is not None:
                     mask_out = rss._mask
+                if rss._cent_trace is not None:
+                    cent_trace_out = rss._cent_trace
+                if rss._width_trace is not None:
+                    width_trace_out = rss._width_trace
                 if rss._wave_trace is not None:
                     wave_trace_out = rss._wave_trace
                 if rss._lsf_trace is not None:
@@ -201,6 +205,14 @@ class RSS(FiberRows):
             else:
                 data_out = numpy.concatenate((data_out, rss._data), axis=0)
 
+                if rss._cent_trace is not None:
+                    cent_trace_out = rss.stack_trace((cent_trace_out, rss._cent_trace))
+                else:
+                    cent_trace_out = None
+                if rss._width_trace is not None:
+                    width_trace_out = rss.stack_trace((width_trace_out, rss._width_trace))
+                else:
+                    width_trace_out = None
                 if rss._wave_trace is not None:
                     wave_trace_out = rss.stack_trace((wave_trace_out, rss._wave_trace))
                 else:
@@ -254,6 +266,8 @@ class RSS(FiberRows):
             data=data_out,
             error=error_out,
             mask=mask_out,
+            cent_trace=cent_trace_out,
+            width_trace=width_trace_out,
             wave_trace=wave_trace_out,
             lsf_trace=lsf_trace_out,
             sky=sky_out,
@@ -262,7 +276,7 @@ class RSS(FiberRows):
             supersky_error=supersky_error_out,
             header=hdr_out._header,
             slitmap=slitmap_out,
-            fluxcal=fluxcal_out,
+            fluxcal=fluxcal_out
         )
 
     @classmethod
