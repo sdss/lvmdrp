@@ -2,10 +2,47 @@
 # encoding: utf-8
 
 import numpy
+from astropy.io import fits as pyfits
 from lvmdrp.core.fiberrows import FiberRows
 
 
 class TraceMask(FiberRows):
+
+    @classmethod
+    def from_file(cls, in_tracemask):
+        """Returns an TraceMask instance given a FITS file
+
+        Parameters
+        ----------
+        in_rss : str
+            Name or Path of the FITS image from which the data shall be loaded
+
+        Returns
+        -------
+        TraceMask
+            TraceMask instance
+        """
+        header = None
+        data, error, mask = None, None, None
+        coeffs, poly_kind, poly_deg = None, None, None
+        with pyfits.open(in_tracemask, uint=True, do_not_scale_image_data=True, memmap=False) as hdus:
+            header = hdus["PRIMARY"].header
+            for hdu in hdus:
+                if hdu.name == "PRIMARY":
+                    data = hdu.data.astype("float32")
+                if hdu.name == "ERROR":
+                    error = hdu.data.astype("float32")
+                if hdu.name == "BADPIX":
+                    mask = hdu.data.astype("bool")
+                if hdu.name == "COEFFS":
+                    coeffs = hdu.data.astype("float32")
+                    poly_kind = header.get("POLYKIND")
+                    poly_deg = header.get("POLYDEG")
+
+            trace = cls(data=data, error=error, mask=mask, coeffs=coeffs, poly_kind=poly_kind, poly_deg=poly_deg, header=header)
+
+        return trace
+
     def __init__(
         self,
         data=None,
@@ -18,6 +55,9 @@ class TraceMask(FiberRows):
         arc_position_y=None,
         good_fibers=None,
         fiber_type=None,
+        coeffs=None,
+        poly_kind=None,
+        poly_deg=None
     ):
         FiberRows.__init__(
             self,
@@ -31,6 +71,9 @@ class TraceMask(FiberRows):
             arc_position_y,
             good_fibers,
             fiber_type,
+            coeffs,
+            poly_kind,
+            poly_deg
         )
 
     def getRound(self):
@@ -64,3 +107,33 @@ class TraceMask(FiberRows):
     def clipTrace(self, dim):
         self._data = numpy.clip(self._data, 0, dim)
         self._data = numpy.clip(self._data, 0, dim)
+    
+    def writeFitsData(self, out_trace):
+        """Writes information from a FiberRows object into a FITS file.
+        
+        A single or multiple extension file are possible to create.
+
+        Parameters
+        --------------
+        out_trace : string
+            Name or Path of the FITS image from which the data shall be loaded
+        """
+        hdus = pyfits.HDUList()
+
+        hdus.append(pyfits.PrimaryHDU(self._data.astype("float32")))
+        if self._error is not None:
+            hdus.append(pyfits.ImageHDU(self._error.astype("float32"), name="ERROR"))
+        if self._mask is not None:
+            hdus.append(pyfits.ImageHDU(self._mask.astype("uint8"), name="BADPIX"))
+        if self._coeffs is not None:
+            hdus.append(pyfits.ImageHDU(self._coeffs.astype("float32"), name="COEFFS"))
+            hdus[0].header["POLYKIND"] = (self._poly_kind, "polynomial kind")
+            hdus[0].header["POLYDEG"] = (self._poly_deg, "polynomial degree")
+
+        if len(hdus) > 0:
+            hdu = pyfits.HDUList(hdus)  # create an HDUList object
+            if self._header is not None:
+                hdu[0].header = self.getHeader()  # add the primary header to the HDU
+                hdu[0].update_header()
+
+        hdu.writeto(out_trace, output_verify="silentfix", overwrite=True)

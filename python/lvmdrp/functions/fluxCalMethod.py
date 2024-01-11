@@ -194,8 +194,7 @@ def fluxcal_Gaia(camera, in_rss, plot=True, GAIA_CACHE_DIR=None):
 
     # load input RSS
     log.info(f"loading input RSS file '{os.path.basename(in_rss)}'")
-    rss = RSS()
-    rss.loadFitsData(in_rss)
+    rss = RSS.from_file(in_rss)
 
     # extract useful metadata
     sci_spec = rss._header["SPEC"]
@@ -275,8 +274,8 @@ def fluxcal_Gaia(camera, in_rss, plot=True, GAIA_CACHE_DIR=None):
             log.warning(e)
             continue
 
-        # divide by our exptime for that standard
-        spec = rss._data[fibidx[0], :] / exptime
+        # subtract sky spectrum and divide by exptime
+        spec = (rss._data[fibidx[0],:] - rss._sky[fibidx[0],:])/exptime
 
         # interpolate over bright sky lines
         spec = ancillary_func.interpolate_mask(w, spec, m, fill_value="extrapolate")

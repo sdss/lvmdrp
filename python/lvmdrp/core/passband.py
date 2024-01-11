@@ -11,7 +11,7 @@ resources_dir = path.join(path.dirname(__file__), "../resources")
 
 class PassBand(Spectrum1D):
     def __init__(self, data=None, wave=None):
-        Spectrum1D.__init__(self, wave, data, error=None, mask=None, inst_fwhm=None)
+        Spectrum1D.__init__(self, wave, data, error=None, mask=None, lsf=None)
 
     def loadTxtFile(self, file, wave_col=2, trans_col=3, delimiter="", header_col=0):
         filter_dat = open(file, "r")

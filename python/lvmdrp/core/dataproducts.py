@@ -15,6 +15,24 @@ from lvmdrp.core.constants import CONFIG_PATH
 # path to blueprints, all should be defined in this same path
 DATAPRODUCT_BLUEPRINTS_PATH = os.path.join(CONFIG_PATH, "dataproducts")
 
+# numpy to astropy binary table format mapping
+FORMAT_MAPPING = {
+        "int8": 'B',
+        "uint8": 'B',
+        "int16": 'I',
+        "uint16": 'I',
+        "int32": 'J',
+        "uint32": 'J',
+        "int64": 'K',
+        "uint64": 'K',
+        "float32": 'E',
+        "float64": 'D',
+        "complex64": 'C',
+        "complex128": 'M',
+        'bool': 'L',
+        'str': 'A'
+    }
+
 
 def load_blueprint(name: str) -> dict:
     """ Reads a datamodel blueprint
@@ -34,7 +52,7 @@ def load_blueprint(name: str) -> dict:
         a dictionary containing a dataproduct definition
 
     """
-    _name = name if name.endswith(".yaml") else f"{name}.yaml"
+    _name = name if name.endswith(".yaml") else f"{name}_bp.yaml"
     with open(os.path.join(DATAPRODUCT_BLUEPRINTS_PATH, _name), 'r') as f:
         return yaml.safe_load(f)
 
@@ -72,18 +90,17 @@ def dump_template(dataproduct_bp, save=False):
             if ihdu == "hdu0":
                 hdu = fits.PrimaryHDU(header=header)
             else:
-                header.name = hdu_bp["name"]
                 hdu = fits.ImageHDU(header=header)
+                hdu.name = hdu_bp["name"]
         else:
             header = fits.Header()
             header["COMMENT"] = hdu_bp["description"]
-            header.name = hdu_bp["name"]
             cols = [
-                fits.Column(name=col["name"], format=col["type"], unit=col["unit"])
+                fits.Column(name=col["name"], format=FORMAT_MAPPING[col["type"]], unit=col["unit"])
                 for _, col in hdu_bp.get("columns", {}).items()
             ]
             hdu = fits.BinTableHDU.from_columns(cols, header=header)
-
+            hdu.name = hdu_bp["name"]
         hdu_list.append(hdu)
 
     fits_template = fits.HDUList(hdus=hdu_list)
