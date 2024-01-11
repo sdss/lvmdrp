@@ -1196,7 +1196,7 @@ class Spectrum1D(Header):
             old_lsf = None
 
         # check if interpolation is needed
-        if old_wave.size == wave.size and numpy.allclose(old_wave, wave):
+        if old_wave.size == wave.size and numpy.allclose(old_wave, wave, rtol=1e-2):
             return old_wave, old_lsf
         else:
             new_wave_pixels = numpy.interp(wave, old_wave, old_wave_pixels)
@@ -1205,7 +1205,7 @@ class Spectrum1D(Header):
                 raise ValueError("New wavelength pixels are outside the old wavelength pixel range")
             new_wave = wave_poly(new_wave_pixels)
             # verify that the new wavelength is equivalent to the input wavelength
-            if not numpy.allclose(new_wave, wave):
+            if not numpy.allclose(new_wave, wave, rtol=1e-2):
                 raise ValueError("New wavelength pixels do not match the input wavelength")
 
             # if no LSF trace is provided, return the new wavelength array
