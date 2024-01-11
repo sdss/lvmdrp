@@ -1597,10 +1597,7 @@ def correctTraceMask_drp(trace_in, trace_out, logfile, ref_file, poly_smooth="")
     trace.writeFitsData(trace_out)
 
 
-def apply_fiberflat(in_rss: str, out_rss: str, out_lvmframe: str,
-                    in_flat: str, in_cent: str, in_width: str,
-                    in_wave: str, in_lsf: str,
-                    clip_below: float = 0.2) -> RSS:
+def apply_fiberflat(in_rss: str, out_rss: str, out_lvmframe: str, in_flat: str, clip_below: float = 0.0) -> RSS:
     """applies fiberflat correction to target RSS file
 
     This function applies a fiberflat correction to a target RSS file. The
@@ -1619,16 +1616,8 @@ def apply_fiberflat(in_rss: str, out_rss: str, out_lvmframe: str,
         output lvmFrame file path with fiberflat correction applied
     in_flat : str
         input RSS file path to the fiberflat
-    in_cent : str
-        input RSS file path to the fiber centroid trace
-    in_width : str
-        input RSS file path to the fiber width (FWHM) trace
-    in_wave : str
-        input RSS file path to the wavelength solution
-    in_lsf : str
-        intput RSS file path to the LSF solution
     clip_below : float, optional
-        minimum relative transmission considered. Values below will be masked, by default 0.2
+        minimum relative transmission considered. Values below will be masked, by default 0.0
 
     Returns
     -------
@@ -1686,19 +1675,20 @@ def apply_fiberflat(in_rss: str, out_rss: str, out_lvmframe: str,
 
     # load ancillary data
     log.info(f"writing lvmFrame to {os.path.basename(out_lvmframe)}")
-    cent_trace = TraceMask.from_file(in_cent)
-    width_trace = TraceMask.from_file(in_width)
-    wave_trace = TraceMask.from_file(in_wave)
-    lsf_trace = TraceMask.from_file(in_lsf)
 
     # create lvmFrame
-    lvmframe = lvmFrame(data=rss._data, mask=rss._mask, error=rss._error, slitmap=rss._slitmap)
-    lvmframe.setHeader(orig_header=rss._header, flatname=os.path.basename(in_flat), ifibvar=ifibvar, ffibvar=ffibvar)
-    lvmframe.set_cent_trace(cent_trace=cent_trace)
-    lvmframe.set_width_trace(width_trace=width_trace)
-    lvmframe.setWaveTrace(wave_trace=wave_trace, lsf_trace=lsf_trace)
-    lvmframe.setSuperflat(superflat=flat._data)
-    # write lvmFrame
+    lvmframe = lvmFrame(
+        data=rss._data,
+        error=rss._error,
+        mask=rss._mask,
+        cent_trace=rss._cent_trace,
+        width_trace=rss._width_trace,
+        wave_trace=rss._wave_trace,
+        lsf_trace=rss._lsf_trace,
+        slitmap=rss._slitmap,
+        superflat=flat._data
+    )
+    lvmframe.set_header(orig_header=rss._header, flatname=os.path.basename(in_flat), ifibvar=ifibvar, ffibvar=ffibvar)
     lvmframe.writeFitsData(out_lvmframe)
 
     return rss, lvmframe

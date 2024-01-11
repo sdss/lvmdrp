@@ -588,7 +588,7 @@ class Spectrum1D(Header):
             # verify wavelength and LSF arrays are the same
             if not numpy.array_equal(self._wave, other._wave):
                 raise ValueError("wavelength arrays are not the same")
-            if not numpy.array_equal(self._wave_trace, other._wave_trace):
+            if (self._wave_trace is not None and other._wave_trace is not None) and not self._wave_trace == other._wave_trace:
                 raise ValueError("wavelength trace arrays are not the same")
 
             other._data = other._data.astype(numpy.float32)
