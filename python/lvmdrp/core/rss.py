@@ -2391,14 +2391,14 @@ class RSS(FiberRows):
                     if len(self._wave.shape) == 2:
                         wave = self._wave[parts[i]]
                     else:
-                        wave = self._wave[parts[i]]
+                        wave = self._wave
                 else:
                     wave = None
                 if self._inst_fwhm is not None:
                     if len(self._inst_fwhm.shape) == 2:
                         inst_fwhm = self._inst_fwhm[parts[i]]
                     else:
-                        inst_fwhm = self._inst_fwhm[parts[i]]
+                        inst_fwhm = self._inst_fwhm
                 else:
                     inst_fwhm = None
 
