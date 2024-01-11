@@ -65,7 +65,7 @@ __all__ = [
 
 def get_sky_mask_uves(wave, width=3, threshold=2):
     """
-    Generate a mask for the bright sky lines. 
+    Generate a mask for the bright sky lines.
     mask every line at +-width, where width in same units as wave (Angstroms)
     Only lines with a flux larger than threshold (in 10E-16 ergs/cm^2/s/A) are masked
     The line list is from https://www.eso.org/observing/dfo/quality/UVES/pipeline/sky_spectrum.html
@@ -604,7 +604,7 @@ def sepContinuumLine_drp(
             sci_spec.loadFitsData(sky_sci, extension_hdr=0)
         else:
             raise ValueError(
-                f"You need to provide a science spectrum to perform the continuum/line separation using skycorr."
+                "You need to provide a science spectrum to perform the continuum/line separation using skycorr."
             )
         if np.any(sky_spec._wave != sci_spec._wave):
             sky_spec = sky_spec.resampleSpec(ref_wave=sci_spec._wave, method="linear")
@@ -1388,7 +1388,7 @@ def interpolate_sky(in_rss: str, out_skye: str, out_skyw: str, out_rss: str = No
     # extract fibermap for current spectrograph
     specid = int(rss._header["CCD"][1])
     fibermap = rss._slitmap[rss._slitmap["spectrographid"] == specid]
-    
+
     supersky, supererror, supersky_rss, swave, ssky, svars, smask = {}, {}, {}, {}, {}, {}, {}
     out_sky = dict(east=out_skye, west=out_skyw)
     for telescope in ("east", "west"):
@@ -1451,7 +1451,7 @@ def interpolate_sky(in_rss: str, out_skye: str, out_skyw: str, out_rss: str = No
         # new_mask |= rss._mask
         new_mask = (new_sky<0) | np.isnan(new_sky)
         new_mask |= (new_error<0) | np.isnan(new_error)
-        
+
         fig, axs = plt.subplots(1, 1, figsize=(20,5), sharex=True)
         axs.plot(rss._wave[0], new_sky[0], "k", lw=1, label="sky")
         # axs.plot(sky_wave[10], sci_data[10], "0.5", lw=1, label="sci")
@@ -1491,7 +1491,7 @@ def interpolate_sky(in_rss: str, out_skye: str, out_skyw: str, out_rss: str = No
             # apply factors to standard star sky
             sky_rss._data[std_idx] *= np.asarray(list(std_fac.values()))[:, None]
             sky_rss._error[std_idx] *= np.asarray(list(std_fac.values()))[:, None]
-        
+
         # write output sky RSS
         log.info(f"writing output sky RSS file '{os.path.basename(out_sky[telescope])}'")
         sky_rss.writeFitsData(out_sky[telescope])
@@ -1590,7 +1590,7 @@ def combine_skies(in_rss: str, out_rss, in_skye: str, in_skyw: str, sky_weights:
 
 def quick_sky_subtraction(in_cframe, band=np.array((7238,7242,7074,7084,7194,7265)), skip_subtraction=False):
     """Quick sky refinement using the model in the final CFrame
-    
+
     Parameters
     ----------
     in_cframe : str
@@ -1598,7 +1598,7 @@ def quick_sky_subtraction(in_cframe, band=np.array((7238,7242,7074,7084,7194,726
     band : np.array, optional
         wavelength range to use for sky refinement, by default np.array((7238,7242,7074,7084,7194,7265))
     """
-    
+
     cframe = fits.open(in_cframe)
     wave = cframe["WAVE"].data
     flux = cframe["FLUX"].data

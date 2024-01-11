@@ -12,9 +12,9 @@ from lvmdrp.core.constants import CONFIG_PATH
 from lvmdrp.core.apertures import Aperture
 from lvmdrp.core.cube import Cube
 from lvmdrp.core.fiberrows import FiberRows
-from lvmdrp.core.header import Header
+from lvmdrp.core.header import Header, combineHdr
 from lvmdrp.core.positionTable import PositionTable
-from lvmdrp.core.spectrum1d import Spectrum1D
+from lvmdrp.core.spectrum1d import Spectrum1D, wave_little_interpol
 
 
 def _read_pixwav_map(lamp: str, camera: str, pixels=None, waves=None):
@@ -78,14 +78,237 @@ def _read_pixwav_map(lamp: str, camera: str, pixels=None, waves=None):
     return pixwav_map_path, ref_fiber, pixels, waves, use_line
 
 
-def _chain_join(b, r, z):
-    ii = [i for i in [b, r, z] if i]
-    x = ii[0]
-    for e in ii[1:]:
-        x = x.coaddSpec(e)
-    return x
-
 class RSS(FiberRows):
+
+    @classmethod
+    def from_spectrographs(cls, rss_sp1, rss_sp2, rss_sp3):
+        """Stacks together RSS objects from the three spectrographs
+
+        Parameters
+        ----------
+        rss_sp1 : RSS
+            RSS object for spectrograph 1
+        rss_sp2 : RSS
+            RSS object for spectrograph 2
+        rss_sp3 : RSS
+            RSS object for spectrograph 3
+
+        Returns
+        -------
+        RSS
+            RSS object with data from all three spectrographs
+        """
+        # load and stack each extension
+        hdrs = []
+        rsss = [rss_sp1, rss_sp2, rss_sp3]
+        for i in range(len(rsss)):
+            rss = rsss[i]
+            if i == 0:
+                data_out = rss._data
+                if rss._error is not None:
+                    error_out = rss._error
+                if rss._mask is not None:
+                    mask_out = rss._mask
+                if rss._wave is not None:
+                    wave_out = rss._wave
+                if rss._inst_fwhm is not None:
+                    fwhm_out = rss._inst_fwhm
+                if rss._sky is not None:
+                    sky_out = rss._sky
+                if rss._sky_error is not None:
+                    sky_error_out = rss._sky_error
+                if rss._header is not None:
+                    hdrs.append(Header(rss.getHeader()))
+                if rss._fluxcal is not None:
+                    fluxcal_out = rss._fluxcal
+            else:
+                data_out = numpy.concatenate((data_out, rss._data), axis=0)
+                if rss._wave is not None:
+                    if len(wave_out.shape) == 2 and len(rss._wave.shape) == 2:
+                        wave_out = numpy.concatenate((wave_out, rss._wave), axis=0)
+                    elif len(wave_out.shape) == 1 and len(rss._wave.shape) == 1 and numpy.isclose(wave_out, rss._wave).all():
+                        wave_out = wave_out
+                    else:
+                        raise ValueError(f"Cannot concatenate wavelength arrays of different shapes: {wave_out.shape} and {rss._wave.shape} or inhomogeneous wavelength arrays")
+                else:
+                    wave_out = None
+                if rss._inst_fwhm is not None:
+                    if len(fwhm_out.shape) == 2 and len(rss._inst_fwhm.shape) == 2:
+                        fwhm_out = numpy.concatenate((fwhm_out, rss._inst_fwhm), axis=0)
+                    elif len(fwhm_out.shape) == 1 and len(rss._inst_fwhm.shape) == 1 and numpy.isclose(fwhm_out, rss._inst_fwhm).all():
+                        fwhm_out = fwhm_out
+                    else:
+                        raise ValueError(f"Cannot concatenate FWHM arrays of different shapes: {fwhm_out.shape} and {rss._inst_fwhm.shape} or inhomogeneous FWHM arrays")
+                else:
+                    fwhm_out = None
+                if rss._error is not None:
+                    error_out = numpy.concatenate((error_out, rss._error), axis=0)
+                else:
+                    error_out = None
+                if rss._mask is not None:
+                    mask_out = numpy.concatenate((mask_out, rss._mask), axis=0)
+                else:
+                    mask_out = None
+                if rss._sky is not None:
+                    sky_out = numpy.concatenate((sky_out, rss._sky), axis=0)
+                else:
+                    sky_out = None
+                if rss._sky_error is not None:
+                    sky_error_out = numpy.concatenate((sky_error_out, rss._sky_error), axis=0)
+                else:
+                    sky_error_out = None
+                if rss._header is not None:
+                    hdrs.append(Header(rss.getHeader()))
+                if rss._fluxcal is not None:
+                    f = fluxcal_out.to_pandas()
+                    fluxcal_out = Table.from_pandas(f.combine_first(rss._fluxcal.to_pandas()))
+                else:
+                    fluxcal_out = None
+
+        # update header
+        if len(hdrs) > 0:
+            hdr_out = combineHdr(hdrs)
+        else:
+            hdr_out = None
+
+        # update slitmap
+        slitmap_out = rss._slitmap
+
+        return cls(
+            data=data_out,
+            error=error_out,
+            mask=mask_out,
+            wave=wave_out,
+            inst_fwhm=fwhm_out,
+            sky=sky_out,
+            sky_error=sky_error_out,
+            header=hdr_out._header,
+            slitmap=slitmap_out,
+            fluxcal=fluxcal_out,
+        )
+
+    @classmethod
+    def from_channels(cls, rss_b, rss_r, rss_z, use_weights=True):
+        """Stitch together RSS channels into a single RSS object
+
+        Parameters
+        ----------
+        rss_b : RSS
+            RSS object for the b channel
+        rss_r : RSS
+            RSS object for the r channel
+        rss_z : RSS
+            RSS object for the z channel
+        use_weights : bool, optional
+            use inverse variance weights for channel combination, by default True
+
+        Returns
+        -------
+        RSS
+            RSS object with data from all three channels
+        """
+
+        rsss = [rss_b, rss_r, rss_z]
+
+        # get wavelengths
+        log.info("merging wavelength arrays")
+        waves = [rss._wave for rss in rsss]
+        new_wave = numpy.unique(numpy.concatenate(waves))
+        sampling = numpy.diff(new_wave)
+
+        # optionally interpolate if the merged wavelengths are not monotonic
+        if numpy.all(numpy.isclose(sampling, sampling[0])):
+            log.info(f"current wavelength sampling: min = {sampling.min():.2f}, max = {sampling.max():.2f}")
+            # extend rss._data to new_wave filling with NaNs
+            fluxes, errors, masks, lsfs, skies, sky_errors = [], [], [], [], [], []
+            for rss in rsss:
+                rss = rss.extendData(new_wave)
+                fluxes.append(rss._data)
+                errors.append(rss._error)
+                masks.append(rss._mask)
+                lsfs.append(rss._inst_fwhm)
+                skies.append(rss._sky)
+                sky_errors.append(rss._sky_error)
+            fluxes = numpy.asarray(fluxes)
+            errors = numpy.asarray(errors)
+            masks = numpy.asarray(masks)
+            lsfs = numpy.asarray(lsfs)
+            skies = numpy.asarray(skies)
+            sky_errors = numpy.asarray(sky_errors)
+        else:
+            log.warning("merged wavelengths are not monotonic, interpolation needed")
+            # compute the combined wavelengths
+            new_wave = wave_little_interpol(waves)
+            sampling = numpy.diff(new_wave)
+            log.info(f"new wavelength sampling: min = {sampling.min():.2f}, max = {sampling.max():.2f}")
+
+            # define interpolators
+            log.info("interpolating RSS data in new wavelength array")
+            fluxes, errors, masks, lsfs, skies, sky_errors = [], [], [], [], [], []
+            for rss in rsss:
+                f = interpolate.interp1d(rss._wave, rss._data, axis=1, bounds_error=False, fill_value=numpy.nan)
+                fluxes.append(f(new_wave).astype("float32"))
+                f = interpolate.interp1d(rss._wave, rss._error, axis=1, bounds_error=False, fill_value=numpy.nan)
+                errors.append(f(new_wave).astype("float32"))
+                f = interpolate.interp1d(rss._wave, rss._mask, axis=1, kind="nearest", bounds_error=False, fill_value=0)
+                masks.append(f(new_wave).astype("uint8"))
+                f = interpolate.interp1d(rss._wave, rss._inst_fwhm, axis=1, bounds_error=False, fill_value=numpy.nan)
+                lsfs.append(f(new_wave).astype("float32"))
+                f = interpolate.interp1d(rss._wave, rss._sky, axis=1, bounds_error=False, fill_value=numpy.nan)
+                skies.append(f(new_wave).astype("float32"))
+                f = interpolate.interp1d(rss._wave, rss._sky_error, axis=1, bounds_error=False, fill_value=numpy.nan)
+                sky_errors.append(f(new_wave).astype("float32"))
+            fluxes = numpy.asarray(fluxes)
+            errors = numpy.asarray(errors)
+            masks = numpy.asarray(masks)
+            lsfs = numpy.asarray(lsfs)
+            skies = numpy.asarray(skies)
+            sky_errors = numpy.asarray(sky_errors)
+
+        # define weights for channel combination
+        vars = errors ** 2
+        log.info("combining channel data")
+        if use_weights:
+            weights = 1.0 / vars
+            weights = weights / bn.nansum(weights, axis=0)[None]
+
+            new_data = bn.nansum(fluxes * weights, axis=0)
+            new_inst_fwhm = bn.nansum(lsfs * weights, axis=0)
+            new_error = numpy.sqrt(bn.nansum(vars, axis=0))
+            new_mask = numpy.sum(masks, axis=0).astype("bool")
+            new_sky = bn.nansum(skies * weights, axis=0)
+            new_sky_error = numpy.sqrt(bn.nansum(sky_errors ** 2 * weights ** 2, axis=0))
+        else:
+            # channel-combine RSS data
+            new_data = bn.nanmean(fluxes, axis=0)
+            new_inst_fwhm = bn.nanmean(lsfs, axis=0)
+            new_error = numpy.sqrt(bn.nanmean(vars, axis=0))
+            new_mask = numpy.sum(masks, axis=0).astype("bool")
+            new_sky = bn.nansum(skies, axis=0)
+            new_sky_error = numpy.sqrt(bn.nanmean(sky_errors ** 2, axis=0))
+
+        # create RSS
+        new_hdr = rsss[0]._header.copy()
+        for rss in rsss[1:]:
+            new_hdr.update(rss._header)
+        new_hdr["NAXIS1"] = new_data.shape[1]
+        new_hdr["NAXIS2"] = new_data.shape[0]
+        new_hdr["CCD"] = ",".join([rss._header["CCD"][0] for rss in rsss])
+        wcs = WCS(new_hdr)
+        wcs.spectral.wcs.cdelt[0] = new_wave[1] - new_wave[0]
+        wcs.spectral.wcs.crval[0] = new_wave[0]
+        new_hdr.update(wcs.to_header())
+        return RSS(
+            data=new_data,
+            error=new_error,
+            mask=new_mask,
+            wave=new_wave,
+            inst_fwhm=new_inst_fwhm,
+            sky=new_sky,
+            sky_error=new_sky_error,
+            header=new_hdr
+        )
+
     @classmethod
     def from_spectra1d(
         cls,
@@ -213,7 +436,7 @@ class RSS(FiberRows):
             self.set_supersky(supersky)
         if supersky_error is not None:
             self.set_supersky_error(supersky_error)
-        
+
         self.setSlitmap(slitmap)
         self.set_fluxcal(fluxcal)
 
@@ -488,7 +711,7 @@ class RSS(FiberRows):
             self._supersky = self.tck_to_table(wave, knots, coeffs, degree, specid, telescope)
         else:
             raise TypeError(f"Invalid {supersky} value. Valid types are 'astropy.table.Table' and 'tuple'")
-    
+
     def set_supersky_error(self, supersky_error, telescope=None):
         if isinstance(supersky_error, Table):
             self._supersky_error = supersky_error
@@ -551,12 +774,12 @@ class RSS(FiberRows):
                 for i in range(self._fibers // len(specids)):
                     sky[i, :] = interpolate.splev(wave[i, :], tck)
                     error[i, :] = interpolate.splev(wave[i, :], tck_error)
-                
+
                 # store supersky
                 waves[telescope].append(wave)
                 supersky_spline[telescope].append(sky)
                 supersky_error_spline[telescope].append(error)
-            
+
             # concatenate spectrographs
             waves[telescope] = numpy.concatenate(waves[telescope], axis=0)
             supersky_spline[telescope] = numpy.concatenate(supersky_spline[telescope], axis=0)
@@ -576,7 +799,7 @@ class RSS(FiberRows):
             # validate lists length
             length_set = {len(arg) for arg in args}
             assert len(length_set) == 1, "All lists must have the same length"
-    
+
             for knots, coeffs, degree, specid, telescope in zip(args):
                 tck_dict["wave"].append(wave.ravel())
                 tck_dict["knots"].append(knots)
@@ -593,7 +816,7 @@ class RSS(FiberRows):
             tck_dict["degree"].append(degree)
             tck_dict["specid"].append(specid)
             tck_dict["telescope"].append(telescope)
-        
+
         return Table(tck_dict)
 
     def stack_supersky(self, superskies):
@@ -608,7 +831,7 @@ class RSS(FiberRows):
             tck_dict["degree"].append(degree)
             tck_dict["specid"].append(specid)
             tck_dict["telescope"].append(telescope)
-        
+
         return Table(tck_dict)
 
     def loadFitsData(
@@ -714,7 +937,7 @@ class RSS(FiberRows):
                 self.set_supersky_error(Table(hdu[i].data))
             if extension_fluxcal is not None:
                 self.set_fluxcal(Table(hdu[extension_fluxcal].data))
-        
+
         self._fibers = self._data.shape[0]
         self._pixels = numpy.arange(self._data.shape[1])
 
@@ -847,13 +1070,13 @@ class RSS(FiberRows):
                 hdu = pyfits.PrimaryHDU(self._sky)
             elif extension_sky > 0 and extension_sky is not None:
                 hdus[extension_sky] = pyfits.ImageHDU(self._sky, name="SKY")
-            
+
             # sky error hdu
             if extension_skyerror == 0:
                 hdu = pyfits.PrimaryHDU(self._sky_error)
             elif extension_skyerror > 0 and extension_skyerror is not None:
                 hdus[extension_skyerror] = pyfits.ImageHDU(self._sky_error, name="SKY_ERROR")
-            
+
             # supersky hdu
             if extension_supersky == 0:
                 hdu = pyfits.PrimaryHDU(self._supersky)
@@ -922,20 +1145,89 @@ class RSS(FiberRows):
             mask = self._mask[fiber, :]
         else:
             mask = None
-        
+
         if self._sky is not None:
             sky = self._sky[fiber, :]
         else:
             sky = None
-        
+
         if self._sky_error is not None:
             sky_error = self._sky_error[fiber, :]
         else:
             sky_error = None
 
         spec = Spectrum1D(wave, data, error=error, mask=mask, inst_fwhm=inst_fwhm, sky=sky, sky_error=sky_error)
-        
+
         return spec
+
+    def extendData(self, new_wave):
+        """Extends data, error, mask, and sky to new wavelength array
+
+        Given a new wavelength array `new_wave`, this function extends
+        the data, error, mask, and sky arrays to the new wavelength array,
+        filling in the new pixels with NaNs.
+
+        Parameters
+        ----------
+        new_wave : array-like
+            New wavelength array to extend to
+
+        Returns
+        -------
+        self : RSS
+            Returns self with extended arrays
+        """
+        if self._wave is None:
+            raise ValueError("No wavelength array found in RSS object")
+
+        if self._data is None:
+            raise ValueError("No data array found in RSS object")
+
+        if len(new_wave) == 0:
+            raise ValueError("New wavelength array is empty")
+
+        # find positions in new wavelength array that contain self._wave
+        ipix, fpix = numpy.searchsorted(new_wave, self._wave[[0, -1]], side="left")
+
+        # define new arrays filled with NaNs
+        new_data = numpy.full((self._data.shape[0], new_wave.size), numpy.nan, dtype=numpy.float32)
+        new_data[:, ipix:fpix+1] = self._data
+        if self._error is not None:
+            new_error = numpy.full((self._error.shape[0], new_wave.size), numpy.nan, dtype=numpy.float32)
+            new_error[:, ipix:fpix+1] = self._error
+        else:
+            new_error = None
+        if self._mask is not None:
+            new_mask = numpy.full((self._mask.shape[0], new_wave.size), False, dtype=bool)
+            new_mask[:, ipix:fpix+1] = self._mask
+        else:
+            new_mask = None
+        if self._sky is not None:
+            new_sky = numpy.full((self._sky.shape[0], new_wave.size), numpy.nan, dtype=numpy.float32)
+            new_sky[:, ipix:fpix+1] = self._sky
+        else:
+            new_sky = None
+        if self._sky_error is not None:
+            new_sky_error = numpy.full((self._sky_error.shape[0], new_wave.size), numpy.nan, dtype=numpy.float32)
+            new_sky_error[:, ipix:fpix+1] = self._sky_error
+        else:
+            new_sky_error = None
+        if self._inst_fwhm is not None:
+            new_inst_fwhm = numpy.full((self._inst_fwhm.shape[0], new_wave.size), numpy.nan, dtype=numpy.float32)
+            new_inst_fwhm[:, ipix:fpix+1] = self._inst_fwhm
+        else:
+            new_inst_fwhm = None
+
+        # set new arrays
+        self._data = new_data
+        self._error = new_error
+        self._mask = new_mask
+        self._sky = new_sky
+        self._sky_error = new_sky_error
+        self._inst_fwhm = new_inst_fwhm
+        self._wave = new_wave
+
+        return self
 
     def combineRSS(self, rss_in, method="mean", replace_error=1e10):
         dim = rss_in[0]._data.shape
@@ -944,17 +1236,17 @@ class RSS(FiberRows):
             mask = numpy.zeros((len(rss_in), dim[0], dim[1]), dtype="bool")
         else:
             mask = None
-       
+
         if rss_in[0]._error is not None:
             error = numpy.zeros((len(rss_in), dim[0], dim[1]), dtype=numpy.float32)
         else:
             error = None
-        
+
         if rss_in[0]._sky is not None:
             sky = numpy.zeros((len(rss_in), dim[0], dim[1]), dtype=numpy.float32)
         else:
             sky = None
-        
+
         for i in range(len(rss_in)):
             data[i, :, :] = rss_in[i]._data
             if mask is not None:
@@ -967,7 +1259,7 @@ class RSS(FiberRows):
         combined_data = numpy.zeros(dim, dtype=numpy.float32)
         combined_error = numpy.zeros(dim, dtype=numpy.float32)
         combined_sky = numpy.zeros(dim, dtype=numpy.float32)
-        
+
         if method == "sum":
             if mask is not None:
                 data[mask] = 0
@@ -1041,7 +1333,7 @@ class RSS(FiberRows):
             if mask is not None:
                 good_pix = bn.nansum(numpy.logical_not(mask), 0)
                 select_mean = good_pix > 0
-                
+
                 var = error**2
                 weights = numpy.divide(1, var, out=numpy.zeros_like(var), where=var != 0)
                 weights /= bn.nansum(weights, 0)
@@ -1090,7 +1382,7 @@ class RSS(FiberRows):
                     combined_sky = bn.nanmedian(sky, 0)
                 else:
                     combined_sky = None
-            
+
         else:
             if method == "weighted_mean":
                 raise ValueError(f"Method {method} is not supported when error is None")
@@ -1151,9 +1443,9 @@ class RSS(FiberRows):
             # idx = numpy.argsort(wave)
             _, idx = numpy.unique(wave, return_index=True)
             wave = wave[idx]
-            
+
             data = self._data[select].flatten()[idx]
-            
+
             if self._error is not None:
                 error = self._error[select].flatten()[idx]
             else:
@@ -1173,9 +1465,9 @@ class RSS(FiberRows):
                 select = numpy.logical_not(self._mask)
             else:
                 select = numpy.ones(self._data.shape, dtype="bool")
-            
+
             data = numpy.zeros(self._data.shape[1], dtype=numpy.float32)
-            
+
             if self._error is not None:
                 error = numpy.zeros(self._data.shape[1], dtype=numpy.float32)
             else:
@@ -1184,7 +1476,7 @@ class RSS(FiberRows):
                 sky = numpy.zeros(self._data.shape[1], dtype=numpy.float32)
             else:
                 sky = None
-            
+
             for i in range(self._data.shape[1]):
                 if numpy.sum(select[:, i]) > 0:
                     if method == "mean":
@@ -1204,21 +1496,21 @@ class RSS(FiberRows):
                             )
                         if sky is not None:
                             sky[i] = numpy.sum(self._sky[select[:, i], i])
-            
+
             if self._mask is not None:
                 bad = numpy.sum(self._mask, 0)
                 mask = bad == self._fibers
             else:
                 mask = None
-            
+
             wave = self._wave
             if self._inst_fwhm is not None and len(self._inst_fwhm.shape) == 2:
                 inst_fwhm = numpy.mean(self._inst_fwhm, 0)
             else:
                 inst_fwhm = self._inst_fwhm
-        
+
         header = self._header
-        
+
         spec = Spectrum1D(
             wave=wave,
             data=data,
@@ -1234,12 +1526,12 @@ class RSS(FiberRows):
         collapsed = numpy.zeros(self._fibers, dtype=numpy.float32)
         for i in range(self._fibers):
             spec = self[i]
-            
+
             if spec._mask is not None:
                 goodpix = numpy.logical_not(spec._mask)
             else:
                 goodpix = numpy.ones(spec._data.dim[0], dtype=numpy.float32)
-            
+
             if numpy.sum(goodpix) > 0:
                 if method == "median":
                     collapsed[i] = numpy.median(spec._data[goodpix])
@@ -2192,7 +2484,7 @@ class RSS(FiberRows):
                 inst_fwhm = self._inst_fwhm
         else:
             inst_fwhm = None
-        
+
         if self._sky is not None:
             sky = self._sky[select, :]
         else:
@@ -2339,7 +2631,7 @@ class RSS(FiberRows):
 
     def getSlitmap(self):
         return self._slitmap
-    
+
     def setSlitmap(self, slitmap):
         self._slitmap = slitmap
 
@@ -2367,7 +2659,7 @@ class RSS(FiberRows):
 
     def set_fluxcal(self, fluxcal):
         self._fluxcal = fluxcal
-    
+
     def get_fluxcal(self):
         return self._fluxcal
 

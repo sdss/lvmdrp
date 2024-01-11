@@ -47,10 +47,10 @@ jobs:
         pip install wheel
         pip install .[dev]
 
-    # - name: Lint with ruff
-    #   run: |
-    #     pip install ruff
-    #     ruff .
+    - name: Lint with ruff
+      run: |
+        pip install ruff
+        ruff .
 
     - name: Test with pytest
       run: |
