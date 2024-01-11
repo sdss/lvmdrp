@@ -1,11 +1,10 @@
 from lvmdrp.core.header import Header
 
-
 try:
-    import matplotlib
     from matplotlib import pyplot as plt
-except:
+except ImportError:
     pass
+import numpy
 
 description = "Provides Methods to make some plots"
 

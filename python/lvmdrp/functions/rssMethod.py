@@ -20,7 +20,7 @@ from astropy.stats import biweight_scale
 from numpy import polynomial
 from scipy import interpolate, ndimage
 
-from lvmdrp.utils.decorators import skip_on_missing_input_path, drop_missing_input_paths, skip_if_drpqual_flags
+from lvmdrp.utils.decorators import skip_on_missing_input_path, skip_if_drpqual_flags
 from lvmdrp.core.constants import CONFIG_PATH, ARC_LAMPS
 from lvmdrp.core.cube import Cube
 from lvmdrp.core.tracemask import TraceMask

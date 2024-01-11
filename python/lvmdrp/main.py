@@ -12,7 +12,6 @@ import sys
 from argparse import Namespace
 
 import numpy as np
-import yaml
 
 from lvmdrp.core import image
 from lvmdrp.core.constants import CALIBRATION_TYPES, FRAMES_PRIORITY

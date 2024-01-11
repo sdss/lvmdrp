@@ -260,6 +260,7 @@ class RSS(FiberRows):
         else:
             hdr_out = None
 
+
         # update slitmap
         slitmap_out = rss._slitmap
 
