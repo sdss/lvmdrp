@@ -1,6 +1,7 @@
 import os
 import numpy
 import bottleneck as bn
+from copy import deepcopy as copy
 from scipy import interpolate
 from astropy.io import fits as pyfits
 from astropy.wcs import WCS
@@ -1518,6 +1519,230 @@ class RSS(FiberRows):
         numbers = numpy.arange(self._fibers)
         select = numpy.logical_or(numbers < min, numbers > numbers[-1] - max)
         return arg[select]
+
+    def rectify_wave(self, wave=None, wave_range=None, wave_disp=None, method="linear", return_density=False, **interp_kwargs):
+        """Wavelength rectifies the RSS object
+
+        This method rectifies the RSS object to an uniform wavelength grid. The
+        wavelength grid can be specified in three different ways:
+
+            - by providing a `wave` array, in which case it expects it to be a
+            one-dimensional array with an uniform sampling.
+
+            - by providing a `wave_range` and `wave_disp` values, in which case
+            it expects `wave_range` to be a tuple with the lower and upper
+            limits of the wavelength range, and `wave_disp` to be the
+            wavelength dispersion.
+
+            - by providing a `wave` array, in which case it expects it to be a
+            one-dimensional array with the same number of elements as the
+            wavelength dimension of the data array.
+
+        NOTE: all operations are perfomed in a copy of the RSS object, so the
+        original object is not modified.
+
+        Parameters
+        ----------
+        wave : array-like
+            Wavelength array to rectify to, by default None
+        wave_range : tuple, optional
+            Wavelength range to rectify to, by default None
+        wave_disp : float, optional
+            Wavelength dispersion to rectify to, by default None
+        method : str, optional
+            Interpolation method, by default "linear"
+        return_density : bool, optional
+            If True, returns the density of the rectification, by default False
+
+        Returns
+        -------
+        RSS
+            Rectified RSS object
+        """
+        if self._wave is None and self._wave_trace is None:
+            raise ValueError("No wavelength information found in RSS object")
+        elif self._wave is None and self._wave_trace is not None:
+            trace = TraceMask.from_coeff_table(self._wave_trace)
+            self._wave = trace.eval_coeffs()
+
+        if self._header is not None and self._header.get("WAVREC", False) or len(self._wave.shape) == 1:
+            return self
+
+        if wave is not None:
+            # verify uniform sampling
+            if not numpy.allclose(numpy.diff(wave), numpy.diff(wave)[0]):
+                raise ValueError("Wavelength array must have uniform sampling")
+        elif wave_range is not None and wave_disp is not None:
+            wave = numpy.arange(wave_range[0], wave_range[1] + wave_disp, wave_disp)
+        elif wave is None and wave_range is None and wave_disp is None:
+            raise ValueError("No wavelength information provided to perform rectification")
+
+        # make sure the interpolation happens in density space
+        rss = copy(self)
+        if rss._header is None:
+            rss._header = pyfits.Header()
+        unit = rss._header["BUNIT"]
+        if not unit.endswith("/Angstrom"):
+            dlambda = numpy.gradient(rss._wave, axis=1)
+            rss._data /= dlambda
+            rss._error /= dlambda
+            if rss._sky is not None:
+                rss._sky /= dlambda
+            if rss._sky_error is not None:
+                rss._sky_error /= dlambda
+            unit = unit + "/Angstrom"
+
+        rss._header["BUNIT"] = unit
+        rss._header["WAVREC"] = True
+        rss._header["METREC"] = (method, "Wavelength rectification method")
+        # create output RSS
+        new_rss = RSS(
+            data=numpy.zeros((rss._fibers, wave.size), dtype="float32"),
+            error=numpy.zeros((rss._fibers, wave.size), dtype="float32"),
+            mask=numpy.zeros((rss._fibers, wave.size), dtype="bool"),
+            sky=numpy.zeros((rss._fibers, wave.size), dtype="float32") if rss._sky is not None else None,
+            sky_error=numpy.zeros((rss._fibers, wave.size), dtype="float32") if rss._sky_error is not None else None,
+            cent_trace=rss._cent_trace,
+            width_trace=rss._width_trace,
+            wave_trace=rss._wave_trace,
+            lsf_trace=rss._lsf_trace,
+            slitmap=rss._slitmap,
+            header=rss._header
+        )
+        new_rss.set_wave_array(wave)
+
+        # TODO: convert this into a interpolation class selector
+        if method == "spline":
+            method = "cubic"
+        elif method == "linear":
+            pass
+        else:
+            raise ValueError(f"Invalid interpolation {method = }")
+
+        for ifiber in range(rss._fibers):
+            f = interpolate.interp1d(rss._wave[ifiber], rss._data[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
+            new_rss._data[ifiber] = f(wave).astype("float32")
+            f = interpolate.interp1d(rss._wave[ifiber], rss._error[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
+            new_rss._error[ifiber] = f(wave).astype("float32")
+            f = interpolate.interp1d(rss._wave[ifiber], rss._mask[ifiber], kind="nearest", bounds_error=False, fill_value=1)
+            new_rss._mask[ifiber] = f(wave).astype("bool")
+            if rss._sky is not None:
+                f = interpolate.interp1d(rss._wave[ifiber], rss._sky[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
+                new_rss._sky[ifiber] = f(wave).astype("float32")
+            if rss._sky_error is not None:
+                f = interpolate.interp1d(rss._wave[ifiber], rss._sky_error[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
+                new_rss._sky_error[ifiber] = f(wave).astype("float32")
+
+        if not return_density:
+            dlambda = numpy.gradient(wave)
+            new_rss._data *= dlambda
+            new_rss._error *= dlambda
+            if new_rss._sky is not None:
+                new_rss._sky *= dlambda
+            if new_rss._sky_error is not None:
+                new_rss._sky_error *= dlambda
+            new_rss._header["BUNIT"] = unit.replace("/Angstrom", "")
+
+        return new_rss
+
+    def to_native_wave(self, method="linear", return_density=False):
+        """Converts the wavelength to the native wavelength grid
+
+        This method de-rectifies the RSS object to the native wavelength grid.
+        The native wavelength grid is defined by the wavelength trace
+        coefficients. If no wavelength trace is found, it returns the RSS
+        object unchanged.
+
+        NOTE: all operations are perfomed in a copy of the RSS object, so the
+        original object is not modified.
+
+        NOTE: this method should be used to de-rectify RSS objects that
+        represent functions of wavelength, instead of samples. For example, RSS
+        objects that represent a fiberflat, or a supersky.
+
+        Parameters
+        ----------
+        method : str, optional
+            Interpolation method, by default "linear"
+        return_density : bool, optional
+            If True, returns the density of the rectification, by default False
+
+        Returns
+        -------
+        RSS
+            De-rectified RSS object
+        """
+        if self._wave is None and self._header is None:
+            raise ValueError("No wavelength information found in RSS object")
+        elif self._wave is None and self._header is not None:
+            self._wave, _, _, _ = self.get_wave_from_header()
+
+        if self._header is not None and not self._header.get("WAVREC", False) or len(self._wave.shape) == 2:
+            return self
+
+        # get native wavelength grid
+        trace = TraceMask.from_coeff_table(self._wave_trace)
+        wave = trace.eval_coeffs()
+
+        rss = copy(self)
+        if rss._header is None:
+            rss._header = pyfits.Header()
+        unit = rss._header["BUNIT"]
+        if not unit.endswith("/Angstrom"):
+            dlambda = numpy.gradient(rss._wave)
+            rss._data /= dlambda
+            rss._error /= dlambda
+            if rss._sky is not None:
+                rss._sky /= dlambda
+            if rss._sky_error is not None:
+                rss._sky_error /= dlambda
+            unit = unit + "/Angstrom"
+
+        rss._header["BUNIT"] = unit
+        rss._header["WAVREC"] = False
+        rss._header["METREC"] = (method, "Wavelength rectification method")
+        del rss._header["CRPIX1"], rss._header["CRVAL1"], rss._header["CDELT1"], rss._header["CTYPE1"]
+        # create output RSS
+        new_rss = RSS(
+            data=numpy.zeros((rss._fibers, wave.shape[1]), dtype="float32"),
+            error=numpy.zeros((rss._fibers, wave.shape[1]), dtype="float32"),
+            mask=numpy.zeros((rss._fibers, wave.shape[1]), dtype="bool"),
+            sky=numpy.zeros((rss._fibers, wave.shape[1]), dtype="float32") if rss._sky is not None else None,
+            sky_error=numpy.zeros((rss._fibers, wave.shape[1]), dtype="float32") if rss._sky_error is not None else None,
+            cent_trace=rss._cent_trace,
+            width_trace=rss._width_trace,
+            wave_trace=rss._wave_trace,
+            lsf_trace=rss._lsf_trace,
+            slitmap=rss._slitmap,
+            header=rss._header
+        )
+
+        # interpolate data, error, mask and sky arrays from rectified grid to original grid
+        for ifiber in range(rss._fibers):
+            f = interpolate.interp1d(rss._wave, rss._data[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
+            new_rss._data[ifiber] = f(wave[ifiber]).astype("float32")
+            f = interpolate.interp1d(rss._wave, rss._error[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
+            new_rss._error[ifiber] = f(wave[ifiber]).astype("float32")
+            f = interpolate.interp1d(rss._wave, rss._mask[ifiber], kind="nearest", bounds_error=False, fill_value=1)
+            new_rss._mask[ifiber] = f(wave[ifiber]).astype("bool")
+            if rss._sky is not None:
+                f = interpolate.interp1d(rss._wave, rss._sky[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
+                new_rss._sky[ifiber] = f(wave[ifiber]).astype("float32")
+            if rss._sky_error is not None:
+                f = interpolate.interp1d(rss._wave, rss._sky_error[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
+                new_rss._sky_error[ifiber] = f(wave[ifiber]).astype("float32")
+
+        if not return_density:
+            dlambda = numpy.gradient(wave, axis=1)
+            new_rss._data *= dlambda
+            new_rss._error *= dlambda
+            if new_rss._sky is not None:
+                new_rss._sky *= dlambda
+            if new_rss._sky_error is not None:
+                new_rss._sky_error *= dlambda
+            new_rss._header["BUNIT"] = unit.replace("/Angstrom", "")
+
+        return new_rss
 
     def createCubeInterpolation(
         self,
