@@ -604,7 +604,7 @@ def sepContinuumLine_drp(
             sci_spec.loadFitsData(sky_sci, extension_hdr=0)
         else:
             raise ValueError(
-                f"You need to provide a science spectrum to perform the continuum/line separation using skycorr."
+                "You need to provide a science spectrum to perform the continuum/line separation using skycorr."
             )
         if np.any(sky_spec._wave != sci_spec._wave):
             sky_spec = sky_spec.resampleSpec(ref_wave=sci_spec._wave, method="linear")
@@ -1384,7 +1384,7 @@ def interpolate_sky(in_rss: str, out_sky: str, out_rss: str = None, which: str =
     """
 
     if subtract and out_rss is None:
-        raise ValueError(f"need to provide an output file to write sky-subtracted data")
+        raise ValueError("need to provide an output file to write sky-subtracted data")
     
     # load input RSS
     log.info(f"loading input RSS file '{os.path.basename(in_rss)}'")

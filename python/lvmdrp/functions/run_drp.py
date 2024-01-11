@@ -20,7 +20,7 @@ from astropy.wcs import WCS
 from lvmdrp.core.rss import RSS
 from lvmdrp.functions.imageMethod import (preproc_raw_frame, create_master_frame,
                                           create_pixelmask, detrend_frame,
-                                          find_peaks_auto, trace_peaks,
+                                          trace_peaks,
                                           extract_spectra)
 from lvmdrp.functions.rssMethod import (determine_wavelength_solution, create_pixel_table,
                                         resample_wavelength, join_spec_channels, stack_rss)
