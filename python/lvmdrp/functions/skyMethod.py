@@ -1672,7 +1672,7 @@ def quick_sky_subtraction(in_rss: str, out_rss, in_skye: str, in_skyw: str, sky_
         log.info("subtracting interpolated sky from original data")
         new_data = rss._data - sky._data
         new_error = np.sqrt(rss._error ** 2 + sky._error ** 2)
-        new_mask = rss._mask
+        new_mask = rss._mask | sky._mask
 
     # write output sky-subtracted RSS
     log.info(f"writing output RSS file '{os.path.basename(out_rss)}'")

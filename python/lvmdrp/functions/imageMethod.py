@@ -12,14 +12,16 @@ from multiprocessing import Pool, cpu_count
 
 import numpy
 import bottleneck as bn
+import numpy as np
 from astropy import units as u
 from astropy.table import Table
 from astropy.io import fits as pyfits
 from astropy.nddata import CCDData, StdDevUncertainty
-from astropy.stats.biweight import biweight_location
+from astropy.stats.biweight import biweight_location, biweight_scale
 from astropy.visualization import simple_norm
 from ccdproc import cosmicray_lacosmic
 from scipy import interpolate
+from scipy.ndimage import median_filter
 from tqdm import tqdm
 
 from typing import List, Tuple
@@ -3231,6 +3233,57 @@ def preproc_raw_frame(
     return org_img, os_profiles, os_models, proc_img
 
 
+def find_bad_columns(image, win_median=5, n_compare=10, percentile=5, nsigma=3):
+    """Identifies bad columns in the LVM image
+
+    Parameters
+    ----------
+    image : numpy.ndarray
+        image to analyse
+    win_median : int
+        size of the median filter window along x-axis for searching the bad columns locations
+    n_compare : int
+        how many pixels from the both sides of the bad column will be used
+        to calculate reference brightness distribution for estimating the height of the bad columns
+    percentile: float
+        percentile defining the brightness of the faintest/brightest pixels to be considered as outliers
+        from the smoothed distribution along the x-axis
+    nsigma: int
+        how many standard deviations from constructed reference distribution is allowed
+        to be considered as not affected by bad column
+    """
+
+    # Find approximate y-positions of the fibers (they are not used in further calculations)
+    data_med_v = median_filter(image, size=(11, 1))
+    diff = image - data_med_v
+    rec = (diff < numpy.nanpercentile(data_med_v, 1))
+    diff[rec] = numpy.nan
+    yy_fibers = numpy.flatnonzero(numpy.nansum(numpy.isfinite(diff), axis=1) > (image.shape[1] * 0.5))
+
+    # Identify positions of the bad columns
+    data_med = median_filter(image, size=(1, win_median))
+    diff = image - data_med
+    rec = (diff < numpy.nanpercentile(diff, percentile)) | (diff > numpy.nanpercentile(diff, 100-percentile))
+    diff[~rec] = numpy.nan
+    diff[yy_fibers, :] = numpy.nan
+    # assume that each bad column has size of at least 20% of ny
+    xx_bad = numpy.flatnonzero(numpy.nansum(numpy.isfinite(diff), axis=0) > ((image.shape[0] - len(yy_fibers)) * 0.2))
+
+    # find y-borders for mask for each bad column
+    mask = np.zeros_like(image).astype(bool)
+    for xx in xx_bad:
+        compar_reg_l = xx - win_median - numpy.arange(n_compare)
+        compar_reg_l = compar_reg_l[compar_reg_l >= 0]
+        compar_reg_r = xx + win_median + numpy.arange(n_compare)
+        compar_reg_r = compar_reg_r[compar_reg_r < image.shape[1]]
+        compar_reg = numpy.append(compar_reg_l, compar_reg_r)
+        cur_data = image[:, xx].ravel()
+        median_vector = biweight_location(image[:, compar_reg], axis=1)
+        std_vector = biweight_scale(image[:, compar_reg], axis=1)
+        rec = ~numpy.isfinite(cur_data) | (abs(cur_data - median_vector) > (nsigma * std_vector))
+        mask[rec, xx] = True
+    return mask
+
 @skip_on_missing_input_path(["in_image"])
 # @skip_if_drpqual_flags(["SATURATED"], "in_image")
 def detrend_frame(
@@ -3247,6 +3300,7 @@ def detrend_frame(
     reject_cr: bool = True,
     median_box: list = [0, 0],
     display_plots: bool = False,
+    search_bad_columns: bool = True,
 ):
     """detrends input image by subtracting bias, dark and flatfielding
 
@@ -3276,6 +3330,8 @@ def detrend_frame(
         size of the median box to refine pixel mask, by default [0,0]
     display_plots : str, optional
         whether to show plots on display or not, by default False
+    search_bad_columns : bool, optional
+        whether to perform search of the bad columns in the data
     """
 
     # TODO: Normalization of flats. This is for combining them right? Need to make sure median is not dominated by diferences in background.
@@ -3419,6 +3475,16 @@ def detrend_frame(
             data=numpy.ones(detrended_img._dim) * numpy.nan,
             mask=numpy.zeros(detrended_img._dim),
         )
+
+    # search additional bad columns and add them to mask
+    if search_bad_columns:
+        log.info(f"Searching and masking remaining bad columns")
+        if 'b' in detrended_img._header["CCD"]:
+            perc = 5
+        else:
+            perc = 2
+        additional_bad_columns = find_bad_columns(detrended_img._data, percentile=perc)
+        detrended_img.setData(mask=(detrended_img._mask | additional_bad_columns), inplace=True)
 
     # replace masked pixels with NaNs
     if replace_with_nan:
