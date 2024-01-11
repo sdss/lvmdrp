@@ -11,7 +11,7 @@ except ImportError:
 from copy import deepcopy
 from scipy import stats
 
-from lvdrp.core import fit_profile
+from lvmdrp.core import fit_profile
 from lvmdrp.core.cube import Cube, loadCube
 from lvmdrp.core.image import Image
 from lvmdrp.core.rss import RSS
