@@ -23,7 +23,7 @@ from lvmdrp.functions.imageMethod import (preproc_raw_frame, create_master_frame
                                           trace_peaks,
                                           extract_spectra)
 from lvmdrp.functions.rssMethod import (determine_wavelength_solution, create_pixel_table,
-                                        resample_wavelength, join_spec_channels, stack_rss)
+                                        resample_wavelength, join_spec_channels, stack_spectrographs)
 from lvmdrp.utils.metadata import (get_frames_metadata, get_master_metadata, extract_metadata,
                                    get_analog_groups, match_master_metadata, create_master_path)
 from lvmdrp.utils.convert import tileid_grp
@@ -1102,7 +1102,7 @@ def combine_spectrographs(tileid: int, mjd: int, channel: str, expnum: int) -> R
                            kind='', camera=channel, imagetype="object", expnum=expnum)
 
     # combine RSS files along fiber ID direction
-    return stack_rss(hsci_paths, frame_path, axis=0)
+    return stack_spectrographs(hsci_paths, frame_path)
 
 
 def stack_ext(files: list, ext: Union[int, str] = 0) -> np.array:
