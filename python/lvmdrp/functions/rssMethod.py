@@ -9,7 +9,6 @@ from typing import List
 import matplotlib
 import matplotlib.gridspec as gridspec
 import numpy
-from numpy.lib import recfunctions as rfn
 import yaml
 import bottleneck as bn
 from astropy import units as u
@@ -21,7 +20,7 @@ from astropy.stats import biweight_scale
 from numpy import polynomial
 from scipy import interpolate, ndimage
 
-from lvmdrp.utils.decorators import skip_on_missing_input_path, drop_missing_input_paths, skip_if_drpqual_flags
+from lvmdrp.utils.decorators import skip_on_missing_input_path, skip_if_drpqual_flags
 from lvmdrp.core.constants import CONFIG_PATH, ARC_LAMPS
 from lvmdrp.core.header import Header, combineHdr
 from lvmdrp.core.cube import Cube
@@ -263,7 +262,7 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
         ilamps.extend(lamps)
         # append arc
         iarcs.append(arc)
-    
+
     # combine RSS objects
     arc = RSS()
     arc.combineRSS(iarcs, method="sum")
@@ -329,7 +328,7 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
             stretch_factors=numpy.linspace(0.9,1.1,10000),
             shift_range=[-cc_max_shift, cc_max_shift],
         )
-        
+
         log.info(f"max CC = {cc:.2f} for strech = {mhat:.2f} and shift = {bhat:.2f}")
     else:
         mhat, bhat = 1.0, 0.0
@@ -476,7 +475,7 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
             wave_cls = polynomial.Legendre
         elif kind_disp == "chebyshev":
             wave_cls = polynomial.Chebyshev
-        
+
         wave_poly = wave_cls.fit(cent_wave[i, use_line], ref_lines[use_line], deg=poly_disp)
 
         wave_coeffs[i, :] = wave_poly.convert().coef
@@ -509,7 +508,7 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
             fwhm_cls = polynomial.Legendre
         elif kind_fwhm == "chebyshev":
             fwhm_cls = polynomial.Chebyshev
-        
+
         fwhm_poly = fwhm_cls.fit(cent_wave[i, use_line], fwhm_wave[use_line], deg=poly_fwhm)
 
         lsf_coeffs[i, :] = fwhm_poly.convert().coef
@@ -1143,7 +1142,7 @@ def resample_wavelength(in_rss: str, out_rss: str, method: str = "spline",
         sky_error = numpy.zeros((rss._fibers, len(ref_wave)), dtype=numpy.float32)
     else:
         sky_error = None
-    
+
     if compute_densities:
         width_pix = numpy.zeros_like(rss._data)
         width_pix[:, :-1] = numpy.fabs(rss._wave[:, 1:] - rss._wave[:, :-1])
@@ -1152,7 +1151,7 @@ def resample_wavelength(in_rss: str, out_rss: str, method: str = "spline",
         rss._header["BUNIT"] = rss._header["BUNIT"] + "/angstrom"
         if rss._error is not None:
             rss._error = rss._error / width_pix
-    
+
     if rss._wave is not None and len(rss._wave.shape) == 2:
         if parallel == "auto":
             cpus = cpu_count()
@@ -1308,7 +1307,7 @@ def create_fiberflat(in_rsss: List[str], out_rsss: List[str], median_box: int = 
                      illumination_corr: bool = False,
                      display_plots: bool = False) -> RSS:
     """computes a fiberflat from a wavelength calibrated continuum exposure
-    
+
     This function computes a fiberflat from a extracted and wavelength calibrated
     continuum exposure. The fiberflat is computed by dividing the continuum
     exposure by the median spectrum of the continuum exposure. The fiberflat
@@ -1375,7 +1374,7 @@ def create_fiberflat(in_rsss: List[str], out_rsss: List[str], median_box: int = 
         return None
     else:
         wdelt = numpy.diff(rss._wave, axis=1).mean()
-    
+
     # copy original data into output fiberflat object
     fiberflat = copy(rss)
     fiberflat._error = None
@@ -1385,7 +1384,7 @@ def create_fiberflat(in_rsss: List[str], out_rsss: List[str], median_box: int = 
         median_box_pix = int(median_box / wdelt)
         log.info(f"applying median smoothing with box size {[1, median_box]} angstroms ({[1, median_box_pix]} pixels)")
         fiberflat._data = ndimage.filters.median_filter(fiberflat._data, (1, median_box_pix))
-    
+
     # calculate median spectrum
     log.info(f"caculating normalization in full wavelength range ({fiberflat._wave.min():.2f} - {fiberflat._wave.max():.2f} angstroms)")
     norm = bn.nanmedian(fiberflat._data, axis=0)
@@ -1396,7 +1395,7 @@ def create_fiberflat(in_rsss: List[str], out_rsss: List[str], median_box: int = 
         log.info(f"limiting wavelength range to {wave_range[0]:.2f} - {wave_range[1]:.2f} angstroms")
         wave_select = (wave_range[0] <= norm_wave) & (norm_wave <= wave_range[1])
         norm[~wave_select] = numpy.nan
-    
+
     # normalize fibers where norm has valid values
     log.info(f"computing fiberflat across {fiberflat._fibers} fibers and {(~numpy.isnan(norm)).sum()} wavelength bins")
     normalized = fiberflat._data / norm[None, :]
@@ -1424,7 +1423,7 @@ def create_fiberflat(in_rsss: List[str], out_rsss: List[str], median_box: int = 
             spec = fiberflat.getSpec(ifiber)
             spec.smoothPoly(deg=poly_deg, poly_kind=poly_kind)
             fiberflat._data[ifiber, :] = spec._data
-    
+
     # interpolate masked pixels in fiberflat
     for ifiber in range(fiberflat._fibers):
         wave, data, mask = fiberflat._wave[ifiber], fiberflat._data[ifiber], fiberflat._mask[ifiber]
@@ -1646,7 +1645,7 @@ def apply_fiberflat(in_rss: str, out_rss: str, in_flat: str, clip_below: float =
     log.info(f"reading target data from {os.path.basename(in_rss)}")
     rss = RSS()
     rss.loadFitsData(in_rss)
-    
+
     # load fiberflat
     log.info(f"reading fiberflat from {os.path.basename(in_flat)}")
     flat = RSS()
@@ -1656,7 +1655,7 @@ def apply_fiberflat(in_rss: str, out_rss: str, in_flat: str, clip_below: float =
     if rss._fibers != flat._fibers:
         log.error(f"number of fibers in target data ({rss._fibers}) and fiberflat ({flat._fibers}) do not match")
         return None
-    
+
     # check if fiberflat has the same wavelength grid as the target data
     if not numpy.isclose(rss._wave, flat._wave).all():
         log.warning("target data and fiberflat have different wavelength grids")
@@ -1671,7 +1670,7 @@ def apply_fiberflat(in_rss: str, out_rss: str, in_flat: str, clip_below: float =
         # interpolate fiberflat to target wavelength grid to fill in missing values
         if not numpy.isclose(spec_flat._wave, spec_data._wave).all():
             spec_flat = spec_flat.resampleSpec(spec_data._wave, err_sim=0)
-        
+
         # apply clipping
         select_clip_below = (spec_flat < clip_below) | numpy.isnan(spec_flat._data)
         spec_flat._data[select_clip_below] = 1
@@ -1680,7 +1679,7 @@ def apply_fiberflat(in_rss: str, out_rss: str, in_flat: str, clip_below: float =
         # correct
         spec_new = spec_data / spec_flat
         rss.setSpec(i, spec_new)
-    
+
     # write out corrected RSS
     log.info(f"writing fiberflat corrected RSS to {os.path.basename(out_rss)}")
     rss.writeFitsData(out_rss)
@@ -1714,6 +1713,120 @@ def combineRSS_drp(in_rsss, out_rss, method="mean"):
     # combined_rss.setHeader(header=combined_header._header)
     # write out FITS file
     combined_rss.writeFitsData(out_rss)
+
+
+def stack_rss(in_rsss: List[str], out_rss: str, axis: int = 0) -> RSS:
+    """stacks a list of RSS objects along a given axis
+
+    Parameters
+    ----------
+    in_rsss : List[str]
+        list of RSS file paths
+    out_rss : str
+        output RSS file path
+    axis : int, optional
+        axis along which to stack the RSS objects, by default 0
+
+    Returns
+    -------
+    RSS
+        stacked RSS object
+    """
+
+    # load and stack each extension
+    log.info(f"stacking frames in {','.join([os.path.basename(in_rss) for in_rss in in_rsss])} along axis {axis}")
+    hdrs = []
+    for i in range(len(in_rsss)):
+        rss = loadRSS(in_rsss[i])
+        if i == 0:
+            data_out = rss._data
+            if rss._error is not None:
+                error_out = rss._error
+            if rss._mask is not None:
+                mask_out = rss._mask
+            if rss._wave is not None:
+                wave_out = rss._wave
+            if rss._inst_fwhm is not None:
+                fwhm_out = rss._inst_fwhm
+            if rss._sky is not None:
+                sky_out = rss._sky
+            if rss._sky_error is not None:
+                sky_error_out = rss._sky_error
+            if rss._header is not None:
+                hdrs.append(Header(rss.getHeader()))
+            if rss._fluxcal is not None:
+                fluxcal_out = rss._fluxcal
+        else:
+            data_out = numpy.concatenate((data_out, rss._data), axis=axis)
+            if rss._wave is not None:
+                if len(wave_out.shape) == 2 and len(rss._wave.shape) == 2:
+                    wave_out = numpy.concatenate((wave_out, rss._wave), axis=axis)
+                elif len(wave_out.shape) == 1 and len(rss._wave.shape) == 1 and numpy.isclose(wave_out, rss._wave).all():
+                    wave_out = wave_out
+                else:
+                    raise ValueError(f"Cannot concatenate wavelength arrays of different shapes: {wave_out.shape} and {rss._wave.shape} or inhomogeneous wavelength arrays")
+            else:
+                wave_out = None
+            if rss._inst_fwhm is not None:
+                if len(fwhm_out.shape) == 2 and len(rss._inst_fwhm.shape) == 2:
+                    fwhm_out = numpy.concatenate((fwhm_out, rss._inst_fwhm), axis=axis)
+                elif len(fwhm_out.shape) == 1 and len(rss._inst_fwhm.shape) == 1 and numpy.isclose(fwhm_out, rss._inst_fwhm).all():
+                    fwhm_out = fwhm_out
+                else:
+                    raise ValueError(f"Cannot concatenate FWHM arrays of different shapes: {fwhm_out.shape} and {rss._inst_fwhm.shape} or inhomogeneous FWHM arrays")
+            else:
+                fwhm_out = None
+            if rss._error is not None:
+                error_out = numpy.concatenate((error_out, rss._error), axis=axis)
+            else:
+                error_out = None
+            if rss._mask is not None:
+                mask_out = numpy.concatenate((mask_out, rss._mask), axis=axis)
+            else:
+                mask_out = None
+            if rss._sky is not None:
+                sky_out = numpy.concatenate((sky_out, rss._sky), axis=axis)
+            else:
+                sky_out = None
+            if rss._sky_error is not None:
+                sky_error_out = numpy.concatenate((sky_error_out, rss._sky_error), axis=axis)
+            else:
+                sky_error_out = None
+            if rss._header is not None:
+                hdrs.append(Header(rss.getHeader()))
+            if rss._fluxcal is not None:
+                f = fluxcal_out.to_pandas()
+                fluxcal_out = Table.from_pandas(f.combine_first(rss._fluxcal.to_pandas()))
+            else:
+                fluxcal_out = None
+
+    # update header
+    log.info("updating header")
+    if len(hdrs) > 0:
+        hdr_out = combineHdr(hdrs)
+    else:
+        hdr_out = None
+
+    # update slitmap
+    slitmap_out = rss._slitmap
+
+    # write output
+    log.info(f"writing stacked RSS to {os.path.basename(out_rss)}")
+    rss_out = RSS(
+        wave=wave_out,
+        data=data_out,
+        error=error_out,
+        mask=mask_out,
+        inst_fwhm=fwhm_out,
+        sky=sky_out,
+        sky_error=sky_error_out,
+        header=hdr_out.getHeader(),
+        slitmap=slitmap_out,
+        fluxcal=fluxcal_out
+    )
+    rss_out.writeFitsData(out_rss)
+
+    return rss_out
 
 
 def apertureFluxRSS_drp(
@@ -3020,7 +3133,7 @@ def join_spec_channels(in_rsss: List[str], out_rss: str, use_weights: bool = Tru
 
     # combine channels
     new_rss = RSS.from_channels(*rsss, use_weights=use_weights)
-    
+
     # write output RSS
     if out_rss is not None:
         log.info(f"writing output RSS to {os.path.basename(out_rss)}")

@@ -7,6 +7,5 @@ from . import (
     imageMethod,
     plotMethod,
     rssMethod,
-    specialMethod,
-    vimosMethod,
+    specialMethod
 )

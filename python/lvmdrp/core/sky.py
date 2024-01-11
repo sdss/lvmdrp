@@ -151,20 +151,20 @@ def skymodel_pars_from_header(header):
         observatory = header["OBSERVAT"]
     except KeyError:
         log.warning(
-            f"'OBSERVAT' is not in reference sky header. Assuming OBSERVAT='LCO'"
+            "'OBSERVAT' is not in reference sky header. Assuming OBSERVAT='LCO'"
         )
         observatory = "LCO"
     try:
         obstime = Time(header["OBSTIME"], scale="tai")
     except KeyError:
         log.warning(
-            f"'OBSTIME' is not in reference sky header. Falling back to 'MJD'"
+            "'OBSTIME' is not in reference sky header. Falling back to 'MJD'"
         )
     try:
         obstime = Time(header["MJD"], format="mjd")
     except KeyError:
-        log.error(f"'MJD' is not in reference sky header.")
-        raise ValueError(f"no datetime information found for reference sky.")
+        log.error("'MJD' is not in reference sky header.")
+        raise ValueError("no datetime information found for reference sky.")
     ra, dec = header["RA"], header["DEC"]
 
     # build quantities from information in sky_head
@@ -402,7 +402,7 @@ def run_skymodel(skymodel_path=SKYMODEL_INST_PATH, **kwargs):
 
         log.info("calculating effective atmospheric transmission")
         os.chdir(os.path.join(skymodel_path, "sm-01_mod2"))
-        out = subprocess.run(f"bin/preplinetrans".split(), capture_output=True)
+        out = subprocess.run("bin/preplinetrans".split(), capture_output=True)
         if out.returncode == 0:
             log.info(
                 "successfully finished effective atmospheric transmission calculations"
@@ -413,7 +413,7 @@ def run_skymodel(skymodel_path=SKYMODEL_INST_PATH, **kwargs):
             )
             log.error(out.stderr.decode("utf-8"))
 
-        out = subprocess.run(f"bin/calcskymodel".split(), capture_output=True)
+        out = subprocess.run("bin/calcskymodel".split(), capture_output=True)
         if out.returncode == 0:
             log.info("successfully finished 'calcskymodel'")
         else:

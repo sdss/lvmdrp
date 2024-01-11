@@ -180,7 +180,7 @@ class Cube(Header, PositionTable):
             if self._wave is None:
                 try:
                     crpix = self.getHdrValue("CRPIX3") - 1
-                except:
+                except KeyError:
                     crpix = 0
                 try:
                     self._wave = (
@@ -220,7 +220,7 @@ class Cube(Header, PositionTable):
                 self._dim_x = self._cover.shape[2]
             try:
                 crpix = self.getHdrValue("CRPIX3") - 1
-            except:
+            except KeyError:
                 crpix = 0
             try:
                 self._wave = (
@@ -393,8 +393,8 @@ class Cube(Header, PositionTable):
 
         if self._mask is not None:
             data = self._data * numpy.logical_not(self._mask)
-            if self._error is not None:
-                error = self._error * numpy.logical_not(self._mask)
+            # if self._error is not None:
+            #     error = self._error * numpy.logical_not(self._mask)
         else:
             data = self._data
 
@@ -532,8 +532,8 @@ class Cube(Header, PositionTable):
                 wave = numpy.arange(wave1[0], wave2[-1] + disp2, disp2)
                 select1 = wave1 < wave2[0]
                 select2 = wave2 > wave1[-1]
-                select_overlap1 = wave1 >= wave2[0]
-                select_overlap2 = wave2 <= wave1[-1]
+                # select_overlap1 = wave1 >= wave2[0]
+                # select_overlap2 = wave2 <= wave1[-1]
             else:
                 raise ValueError("The wavelength ranges do not match with each other")
         else:
@@ -676,7 +676,7 @@ class Cube(Header, PositionTable):
                         )
                     )
 
-        if mergeHdr == True:
+        if mergeHdr is True:
             hdrs = [cube1, cube2]
             combined_header = combineHdr(hdrs)
             self.setHeader(combined_header.getHeader())
