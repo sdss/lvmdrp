@@ -7,10 +7,13 @@ import astropy.io.fits as pyfits
 import numpy
 import bottleneck as bn
 from scipy import interpolate, optimize, special
+from astropy.modeling.models import Voigt1D
 
 
 
 fact = numpy.sqrt(2.0 * numpy.pi)
+
+amp_fwhm = 2*numpy.sqrt(2*numpy.log(2))
 
 
 class SpectralResolution(object):
@@ -739,6 +742,50 @@ class Gaussian_poly(fit_profile1D):
     def __init__(self, par):
         fit_profile1D.__init__(self, par, self._profile, self._guess_par)
 
+class Voigts(fit_profile1D):
+    def _profile(self, x): 
+        ncomp = len(self._par) // 4 
+        y = numpy.zeros((ncomp, len(x)), dtype=numpy.float32) 
+        for i in range(ncomp):
+            self._par[i+2*ncomp] *= amp_fwhm
+            self._par[i+3*ncomp] *= amp_fwhm
+            v = Voigt1D(amplitude_L=self._par[i],x_0=self._par[i+ncomp], fwhm_G=self._par[i+2*ncomp], fwhm_L=self._par[i+3*ncomp])
+            y[i] = v(x)
+        return bn.nansum(y, axis=0) 
+
+    def __init__(self, par):
+        fit_profile1D.__init__(self, par, self._profile)
+
+
+class Voigts_width(fit_profile1D):
+    def _profile(self, x):
+        y = numpy.zeros((ncomp, len(x)), dtype=numpy.float32) 
+        ncomp = len(self._args)
+        # y = numpy.zeros((ncomp, len(x)), dtype=numpy.float32)  #para que tenga apariencia igual a Gaussians
+        for i in range(ncomp): 
+            self._par[i+2*ncomp] *= amp_fwhm
+            self._par[i+3*ncomp] *= amp_fwhm
+            v = Voigt1D(amplitude_L=self._par[i], x_0=self._arg[i+ncomp], fwhm_G=self._par[i+2*ncomp], fwhm_L=self._par[i+3*ncomp])
+            y[i] = v(x)
+        return bn.nansum(y, axis=0) 
+
+    def __init__(self, par, args):
+        fit_profile1D.__init__(self, par, self._profile, args=args)
+
+class Voigts_flux(fit_profile1D):
+    def _profile(self, x):
+        y = numpy.zeros((ncomp, len(x)), dtype=numpy.float32) 
+        ncomp = len(self._par)
+        # y = numpy.zeros((ncomp, len(x)), dtype=numpy.float32) 
+        for i in range(ncomp): 
+            self._par[i+2*ncomp] *= amp_fwhm
+            self._par[i+3*ncomp] *= amp_fwhm
+            v = Voigt1D(amplitude_L=self._par[i], x_0=self._arg[i+ncomp], fwhm_G=self._arg[i+2*ncomp], fwhm_L=self._arg[i+3*ncomp])
+            y[i] = v(x)
+        return bn.nansum(y, axis=0) 
+
+    def __init__(self, par, args):
+        fit_profile1D.__init__(self, par, self._profile, args=args)
 
 class Gaussians(fit_profile1D):
     def _profile(self, x):
@@ -752,7 +799,7 @@ class Gaussians(fit_profile1D):
         fit_profile1D.__init__(self, par, self._profile)
 
 
-class Gaussians_width(fit_profile1D):
+class Gaussians_width(fit_profile1D): #el orden de los parametros esta malo y sigma esta mal definido
     def _profile(self, x):
         y = numpy.zeros(len(x))
         ncomp = len(self._args)
