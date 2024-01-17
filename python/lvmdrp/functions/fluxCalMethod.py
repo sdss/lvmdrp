@@ -43,17 +43,13 @@ import os
 import numpy as np
 from scipy import interpolate
 from scipy import stats
-from scipy import signal
 
-from astropy.time import Time
-from astropy.coordinates import SkyCoord, EarthLocation, AltAz
 from astropy.stats import biweight_location, biweight_scale
-from astropy import units as u
-from astropy.io import fits
 from astropy.table import Table
 
 from lvmdrp.core.rss import RSS, loadRSS
 from lvmdrp.core.spectrum1d import Spectrum1D
+from lvmdrp.core.fluxcal import retrieve_header_stars, filter_channel
 from lvmdrp.external import ancillary_func
 from lvmdrp.functions import skyMethod
 from lvmdrp import log
@@ -69,6 +65,7 @@ __all__ = [
     "quickFluxCalibration_drp",
     "correctTelluric_drp",
 ]
+
 
 def apply_fluxcal(in_rss: str, out_rss: str, display_plots: bool = False):
     """applies flux calibration to spectrograph-combined data
@@ -89,28 +86,48 @@ def apply_fluxcal(in_rss: str, out_rss: str, display_plots: bool = False):
     # read all three channels
     log.info(f"loading RSS file {os.path.basename(in_rss)}")
     rss = loadRSS(in_rss)
+
+    # check for flux calibration data
+    if np.isnan(rss._fluxcal.to_pandas().values).all():
+        log.warning("no standard star metadata found, skipping flux calibration")
+        return rss
+
     expnum = rss._header["EXPOSURE"]
-    channel = rss._header["CCD"][0]
+    camera = rss._header["CCD"]
+    channel = camera[0]
     # set masked pixels to NaN
     rss.apply_pixelmask()
+    # load fibermap and filter for current spectrograph
+    slitmap = rss._slitmap
+
+    # define exposure time factors
+    exptimes = np.zeros(len(slitmap))
+    exptimes[
+        (slitmap["targettype"] == "science") | (slitmap["targettype"] == "SKY")
+    ] = rss._header["EXPTIME"]
+    for std_hd in rss._fluxcal.colnames:
+        exptime = rss._header[f"{std_hd[:-3]}EXP"]
+        fiberid = rss._header[f"{std_hd[:-3]}FIB"]
+        exptimes[slitmap["orig_ifulabel"] == fiberid] = exptime
 
     # apply joint sensitivity curve
-    fig, ax = create_subplots(to_display=display_plots, figsize=(15, 5))
+    fig, ax = create_subplots(to_display=display_plots, figsize=(10, 5))
     fig.suptitle(f"Flux calibration for {expnum = }, {channel = }")
     log.info(f"computing joint sensitivity curve for channel {channel}")
     # calculate exposure time factors
-    std_exp = np.asarray([rss._header.get(f"{std_hd[:-3]}EXP", 1.0) for std_hd in rss._fluxcal.colnames])
-    weights = std_exp / std_exp.sum()
+    # std_exp = np.asarray([rss._header.get(f"{std_hd[:-3]}EXP", 1.0) for std_hd in rss._fluxcal.colnames])
+    # weights = std_exp / std_exp.sum()
     # TODO: reject sensitivity curves based on the overall shape by normalizing using a median curve
     # calculate the biweight mean sensitivity
-    # sens_ave = np.sum(sens_ave * weights[:,None], axis=1)
-    sens_arr = rss._fluxcal.to_pandas().values
+    sens_arr = rss._fluxcal.to_pandas().values  # * (std_exp / std_exp.sum())[None]
     sens_ave = biweight_location(sens_arr, axis=1, ignore_nan=True)
     sens_rms = biweight_scale(sens_arr, axis=1, ignore_nan=True)
 
     # fix all zeros
     if (sens_ave == 0).all() or np.isnan(sens_ave).all():
-        log.warning("all sensitivity values are zero or NaN, impossible to flux-calibrate")
+        log.warning(
+            "all sensitivity values are zero or NaN, impossible to flux-calibrate"
+        )
         sens_ave = np.ones_like(sens_ave)
         sens_rms = np.zeros_like(sens_rms)
         rss.setHdrValue("FLUXCAL", False, "flux-calibrated?")
@@ -127,43 +144,54 @@ def apply_fluxcal(in_rss: str, out_rss: str, display_plots: bool = False):
         std_hd = rss._fluxcal.colnames[j][:-3]
         std_id = rss._header.get(f"{std_hd}FIB", "unknown")
 
-        ax.plot(rss._wave, sens_arr[:,j], "-", lw=1, label=std_id)
+        ax.plot(rss._wave, sens_arr[:, j], "-", lw=1, label=std_id)
     ax.plot(rss._wave, sens_ave, "-r", lw=2, label="mean")
     ax.set_yscale("log")
     ax.set_xlabel("wavelength (Angstrom)")
     ax.set_ylabel("sensitivity [(ergs/s/cm^2/A) / (e-/s/A)]")
     ax.legend(loc="upper right")
-    save_fig(fig, product_path=out_rss, to_display=display_plots, figure_path="qa", label="fluxcal")
+    fig.tight_layout()
+    save_fig(
+        fig,
+        product_path=out_rss,
+        to_display=display_plots,
+        figure_path="qa",
+        label="fluxcal",
+    )
     # flux-calibrate and extinction correct data
     # Note that we assume a constant extinction curve here!
-    log.info(f"Extinction correcting science and sky spectra, curve {os.getenv('LVMCORE_DIR')+'/etc/lco_extinction.txt'}")
-    txt = np.genfromtxt(os.getenv('LVMCORE_DIR')+'/etc/lco_extinction.txt')
-    lext, ext = txt[:,0], txt[:,1]
+    log.info(
+        f"Extinction correcting science and sky spectra, curve {os.getenv('LVMCORE_DIR')+'/etc/lco_extinction.txt'}"
+    )
+    txt = np.genfromtxt(os.getenv("LVMCORE_DIR") + "/etc/lco_extinction.txt")
+    lext, ext = txt[:, 0], txt[:, 1]
     ext = np.interp(rss._wave, lext, ext)
-    sci_secz = rss._header['TESCIAM']
+    sci_secz = rss._header["TESCIAM"]
 
     log.info("flux-calibrating data science and sky spectra")
-    rss._data *= sens_ave * 10**(0.4*ext*(sci_secz)) / rss._header["EXPTIME"]
-    rss._error *= sens_ave * 10**(0.4*ext*(sci_secz)) / rss._header["EXPTIME"]
-    rss._sky *= sens_ave * 10**(0.4*ext*(sci_secz)) / rss._header["EXPTIME"]
-    rss._sky_error *= sens_ave * 10**(0.4*ext*(sci_secz)) / rss._header["EXPTIME"]
+
+    rss._data *= sens_ave * 10 ** (0.4 * ext * (sci_secz)) / exptimes[:, None]
+    rss._error *= sens_ave * 10 ** (0.4 * ext * (sci_secz)) / exptimes[:, None]
+    rss._sky *= sens_ave * 10 ** (0.4 * ext * (sci_secz)) / exptimes[:, None]
+    rss._sky_error *= sens_ave * 10 ** (0.4 * ext * (sci_secz)) / exptimes[:, None]
 
     log.info(f"writing output file in {os.path.basename(out_rss)}")
     rss.writeFitsData(out_rss)
 
     return rss
 
+
 def fluxcal_Gaia(camera, in_rss, plot=True, GAIA_CACHE_DIR=None):
-    '''
+    """
     Flux calibrate LVM data using the 12 spectra of stars observed through
     the Spec telescope.
 
-    Uses Gaia BP-RP spectra for calibration. To be replaced or extended by using fitted stellar 
+    Uses Gaia BP-RP spectra for calibration. To be replaced or extended by using fitted stellar
     atmmospheres.
-    '''
-    GAIA_CACHE_DIR = './' if GAIA_CACHE_DIR is None else GAIA_CACHE_DIR
+    """
+    GAIA_CACHE_DIR = "./" if GAIA_CACHE_DIR is None else GAIA_CACHE_DIR
     log.info(f"Using Gaia CACHE DIR '{GAIA_CACHE_DIR}'")
-    
+
     # load input RSS
     log.info(f"loading input RSS file '{os.path.basename(in_rss)}'")
     rss = RSS()
@@ -182,8 +210,10 @@ def fluxcal_Gaia(camera, in_rss, plot=True, GAIA_CACHE_DIR=None):
     colnames = [f"{std_fib[:-3]}SEN" for std_fib in rss._header["STD*FIB"]]
     if len(colnames) == 0:
         NSTD = 15
-        colnames = [f"STD{i}SEN" for i in range(1, NSTD+1)]
-    res = Table(np.full(w.size, np.nan, dtype=list(zip(colnames, ["f8"]*len(colnames)))))
+        colnames = [f"STD{i}SEN" for i in range(1, NSTD + 1)]
+    res = Table(
+        np.full(w.size, np.nan, dtype=list(zip(colnames, ["f8"] * len(colnames))))
+    )
     mean, rms = np.full(w.size, np.nan), np.full(w.size, np.nan)
 
     # set dummy sensitivity array in RSS object
@@ -196,159 +226,137 @@ def fluxcal_Gaia(camera, in_rss, plot=True, GAIA_CACHE_DIR=None):
         log.warning("no standard star metadata found, skipping sensitivity measurement")
         rss.writeFitsData(in_rss)
         return res, mean, rms, rss
-    
+
     # early stop if not standards exposed in current spectrograph
     if len(stds) == 0:
-        log.warning(f"no standard star acquired/exposed in spectrograph {sci_spec}, skipping sensitivity measurement")
+        log.warning(
+            f"no standard star acquired/exposed in spectrograph {sci_spec}, skipping sensitivity measurement"
+        )
         rss.writeFitsData(in_rss)
         return res, mean, rms, rss
 
     # load extinction curve
     # Note that we assume a constant extinction curve here!
-    txt = np.genfromtxt(os.getenv('LVMCORE_DIR')+'/etc/lco_extinction.txt')
-    lext, ext = txt[:,0], txt[:,1]
+    txt = np.genfromtxt(os.getenv("LVMCORE_DIR") + "/etc/lco_extinction.txt")
+    lext, ext = txt[:, 0], txt[:, 1]
     ext = np.interp(w, lext, ext)
 
     if plot:
         plt.subplot
         fig1 = plt.figure(1)
-        frame1 = fig1.add_axes((.1,.3,.8,.6))
+        frame1 = fig1.add_axes((0.1, 0.3, 0.8, 0.6))
         frame1.set_xticklabels([])
 
     # load the sky masks
     m = skyMethod.get_sky_mask_uves(w, width=3)
     m2 = None
-    if camera[0] == 'z':
+    if camera[0] == "z":
         m2 = skyMethod.get_z_continuum_mask(w)
 
     # iterate over standard stars, derive sensitivity curve for each
     for s in stds:
-        nn, fiber, gaia_id, exptime, secz = s   # unpack standard star tuple
-        
+        nn, fiber, gaia_id, exptime, secz = s  # unpack standard star tuple
+
         # find the fiber with our spectrum of that Gaia star, if it is not in the current spectrograph, continue
-        select = (slitmap["orig_ifulabel"] == fiber)
+        select = slitmap["orig_ifulabel"] == fiber
         fibidx = np.where(select)[0]
 
-        log.info(f"standard fiber '{fiber}', index '{fibidx}', star '{gaia_id}', exptime '{exptime:.2f}', secz '{secz:.2f}'")
+        log.info(
+            f"standard fiber '{fiber}', index '{fibidx}', star '{gaia_id}', exptime '{exptime:.2f}', secz '{secz:.2f}'"
+        )
 
         # load Gaia BP-RP spectrum from cache, or download from webapp
         try:
-            gw, gf = ancillary_func.retrive_gaia_star(gaia_id, GAIA_CACHE_DIR=GAIA_CACHE_DIR)
-            stdflux = np.interp(w, gw, gf)   # interpolate to our wavelength grid
+            gw, gf = ancillary_func.retrive_gaia_star(
+                gaia_id, GAIA_CACHE_DIR=GAIA_CACHE_DIR
+            )
+            stdflux = np.interp(w, gw, gf)  # interpolate to our wavelength grid
         except ancillary_func.GaiaStarNotFound as e:
             log.warning(e)
             continue
-    
-        # divide by our exptime for that standard
-        spec = rss._data[fibidx[0],:]/exptime
-        
-        # interpolate over bright sky lines
-        spec = ancillary_func.interpolate_mask(w, spec, m, fill_value='extrapolate')
-        if camera[0] == 'z':
-            spec = ancillary_func.interpolate_mask(w, spec, ~m2, fill_value='extrapolate')
-        
-        # correct for extinction
-        spec *= 10**(0.4*ext*secz)
 
-        # TODO: mask telluric spectral regions
+        # divide by our exptime for that standard
+        spec = rss._data[fibidx[0], :] / exptime
+
+        # interpolate over bright sky lines
+        spec = ancillary_func.interpolate_mask(w, spec, m, fill_value="extrapolate")
+        if camera[0] == "z":
+            spec = ancillary_func.interpolate_mask(
+                w, spec, ~m2, fill_value="extrapolate"
+            )
+
+        # correct for extinction
+        spec *= 10 ** (0.4 * ext * secz)
+
+        # TODO: fit continuum to instrumental std spectrum (stdflux) and normalize
+        # TODO: mask telluric absorption lines from stdflux
+        # TODO: match gaia spectrum and stdflux against a set of theoretical stellar templates
+        # TODO: downgrade best fit template to instrumental LSF and calculate sensitivity curve (after lifting telluric mask)
 
         # divide to find sensitivity and smooth
-        sens = stdflux/spec        
+        sens = stdflux / spec
         wgood, sgood = filter_channel(w, sens, 2)
-        s = interpolate.make_smoothing_spline(wgood, sgood, lam=1e4)        
+        s = interpolate.make_smoothing_spline(wgood, sgood, lam=1e4)
         res[f"STD{nn}SEN"] = s(w).astype(np.float32)
 
         # caluculate SDSS g band magnitudes for QC
         mAB_std = np.round(ancillary_func.spec_to_LVM_mAB(camera, w, stdflux), 2)
-        mAB_obs = np.round(ancillary_func.spec_to_LVM_mAB(camera, w[np.isfinite(spec)], spec[np.isfinite(spec)]), 2)
+        mAB_obs = np.round(
+            ancillary_func.spec_to_LVM_mAB(
+                camera, w[np.isfinite(spec)], spec[np.isfinite(spec)]
+            ),
+            2,
+        )
         # update input file header
         label = camera[0].upper()
         rss.setHdrValue(f"STD{nn}{label}AB", mAB_std, f"Gaia AB mag in {label}-band")
         rss.setHdrValue(f"STD{nn}{label}IN", mAB_obs, f"Obs AB mag in {label}-band")
-        log.info(f"AB mag in LVM_{camera[0]}: Gaia {mAB_std:.2f}, instrumental {mAB_obs:.2f}")
+        log.info(
+            f"AB mag in LVM_{camera[0]}: Gaia {mAB_std:.2f}, instrumental {mAB_obs:.2f}"
+        )
 
         if plot:
-            plt.plot(wgood, sgood, 'r.', markersize=4)
+            plt.plot(wgood, sgood, "r.", markersize=4)
             plt.plot(w, res[f"STD{nn}SEN"], linewidth=0.5)
-            #plt.ylim(0,0.1e-11)
+            # plt.ylim(0,0.1e-11)
 
     rms = biweight_scale(res.to_pandas().values, axis=1, ignore_nan=True)
     mean = biweight_location(res.to_pandas().values, axis=1, ignore_nan=True)
 
     if plot:
-        plt.ylabel('sensitivity [(ergs/s/cm^2/A) / (e-/s/A)]')
-        plt.xlabel('wavelength [A]')
+        plt.ylabel("sensitivity [(ergs/s/cm^2/A) / (e-/s/A)]")
+        plt.xlabel("wavelength [A]")
         plt.ylim(1e-14, 0.1e-11)
         plt.semilogy()
-        fig1.add_axes((.1,.1,.8,.2))
-        plt.plot([w[0],w[-1]], [0.05, 0.05], color='k', linewidth=1, linestyle='dotted')
-        plt.plot([w[0],w[-1]], [-0.05, -0.05], color='k', linewidth=1, linestyle='dotted')
-        plt.plot([w[0],w[-1]], [0.1, 0.1], color='k', linewidth=1, linestyle='dashed')
-        plt.plot([w[0],w[-1]], [-0.1, -0.1], color='k', linewidth=1, linestyle='dashed')
-        plt.plot(w, rms/mean)
-        plt.plot(w, -rms/mean)
+        fig1.add_axes((0.1, 0.1, 0.8, 0.2))
+        plt.plot(
+            [w[0], w[-1]], [0.05, 0.05], color="k", linewidth=1, linestyle="dotted"
+        )
+        plt.plot(
+            [w[0], w[-1]], [-0.05, -0.05], color="k", linewidth=1, linestyle="dotted"
+        )
+        plt.plot([w[0], w[-1]], [0.1, 0.1], color="k", linewidth=1, linestyle="dashed")
+        plt.plot(
+            [w[0], w[-1]], [-0.1, -0.1], color="k", linewidth=1, linestyle="dashed"
+        )
+        plt.plot(w, rms / mean)
+        plt.plot(w, -rms / mean)
         plt.ylim(-0.2, 0.2)
-        plt.ylabel('relative residuals')
-        plt.xlabel('wavelength [A]')
-        save_fig(plt.gcf(), product_path=in_rss, to_display=False, figure_path="qa", label="fluxcal")
+        plt.ylabel("relative residuals")
+        plt.xlabel("wavelength [A]")
+        save_fig(
+            plt.gcf(),
+            product_path=in_rss,
+            to_display=False,
+            figure_path="qa",
+            label="fluxcal",
+        )
 
     # update sensitivity extension
     rss.set_fluxcal(fluxcal=res)
     rss.writeFitsData(in_rss)
 
     return res, mean, rms, rss
-
-def retrieve_header_stars(rss):
-    '''
-    Retrieve fiber, Gaia ID, exposure time and airmass for the 12 standard stars in the header.
-    return a list of tuples of the above quatities.
-    '''
-    lco = EarthLocation(lat=-29.008999964*u.deg, lon=-70.688663912*u.deg, height=2800*u.m)   
-    h = rss._header
-    slitmap = rss._slitmap[rss._slitmap["spectrographid"] == int(h['SPEC'][-1])]
-    # retrieve the data for the 12 standards from the header
-    stddata = []
-    for i in range(12):
-        stdi = 'STD'+str(i+1)
-        if h[stdi+'ACQ'] and h[stdi+'FIB'] in slitmap['orig_ifulabel']:
-            gaia_id = h[stdi+'ID']
-            fiber = h[stdi+'FIB']
-            obstime = Time(h[stdi+'T0'])
-            exptime = h[stdi+'EXP']
-            c = SkyCoord(float(h[stdi+'RA']), float(h[stdi+'DE']), unit="deg")
-            stdT = c.transform_to(AltAz(obstime=obstime,location=lco))  
-            secz = stdT.secz.value
-            #print(gid, fib, et, secz)
-            stddata.append((i+1, fiber, gaia_id, exptime, secz))
-    return stddata
-
-def mean_absolute_deviation(vals):
-    '''
-    Robust estimate of RMS
-    - see https://en.wikipedia.org/wiki/Median_absolute_deviation
-    '''
-    mval = np.nanmedian(vals)
-    rms = 1.4826*np.nanmedian(np.abs(vals-mval))
-    return mval, rms
-    #ok=np.abs(vals-mval)<4*rms
-
-def butter_lowpass_filter(data, cutoff_freq, nyq_freq, order=4):
-    normal_cutoff = float(cutoff_freq) / nyq_freq
-    b, a = signal.butter(order, normal_cutoff, btype='lowpass') 
-    y = signal.filtfilt(b, a, data)
-    return y
-
-def filter_channel(w, f, k=3):
-    c = np.where(np.isfinite(f))
-    s = butter_lowpass_filter(f[c], 0.01, 2)
-    res = s - f[c]
-    #plt.plot(w[c], f[c], 'k.')
-    #plt.plot(w[c], s, 'b-')
-    mres, rms = mean_absolute_deviation(res)
-    good = np.where(np.abs(res-mres)<k*rms)
-    #plt.plot(w[c][good], f[c][good], 'r.', markersize=5)
-    return w[c][good], f[c][good]
-
 
 
 def createSensFunction_drp(
@@ -417,17 +425,17 @@ def createSensFunction_drp(
 
     try:
         extinct_v = rss.getHdrValue(extinct_v)
-    except:
+    except KeyError:
         extinct_v = float(extinct_v)
 
     try:
         airmass = rss.getHdrValue(airmass)
-    except:
+    except KeyError:
         airmass = float(airmass)
 
     try:
         exptime = rss.getHdrValue(exptime)
-    except:
+    except KeyError:
         exptime = float(exptime)
 
     if (
@@ -636,17 +644,17 @@ def createSensFunction2_drp(
 
     try:
         extinct_v = rss.getHdrValue(extinct_v)
-    except:  # KeyError or TypeError:
+    except (KeyError, TypeError):  # KeyError or TypeError:
         extinct_v = float(extinct_v)
 
     try:
         airmass = rss.getHdrValue(airmass)
-    except:  # KeyError or TypeError:
+    except (KeyError, TypeError):  # KeyError or TypeError:
         airmass = float(airmass)
 
     try:
         exptime = rss.getHdrValue(exptime)
-    except:  # KeyError or TypeError:
+    except (KeyError, TypeError):  # KeyError or TypeError:
         exptime = float(exptime)
 
     if (

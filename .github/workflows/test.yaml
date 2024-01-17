@@ -1,0 +1,58 @@
+# This workflow will install Python dependencies, run tests and lint with a single version of Python
+# For more information see: https://help.github.com/actions/language-and-framework-guides/using-python-with-github-actions
+
+name: Build and Test
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.allow_failure }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: [3.8, 3.9, "3.10"]
+        allow_failure: [false]
+        os: [ubuntu-latest]
+        include:
+          - python: "3.11"
+            os: ubuntu-latest
+            allow_failure: true
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Clone lvmcore repository
+      uses: actions/checkout@v4
+      with:
+        repository: sdss/lvmcore
+        path: lvmcore
+
+    - name: Set LVMCORE_DIR envvar
+      run:
+        echo "LVMCORE_DIR=$GITHUB_WORKSPACE/lvmcore" >> "$GITHUB_ENV"
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: 'pip'
+        cache-dependency-path: '**/setup.cfg'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install wheel
+        pip install .[dev]
+
+    - name: Lint with ruff
+      run: |
+        pip install ruff
+        ruff .
+
+    - name: Test with pytest
+      run: |
+        pytest
+

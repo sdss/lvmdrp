@@ -4,25 +4,31 @@
 import os
 import pathlib
 import yaml
+import shutil
+import traceback
 import pandas as pd
 from typing import Union
 from functools import lru_cache
 from itertools import groupby
-import numpy as np
 
+import numpy as np
 import astropy.units as u
 from astropy.io import fits
 from astropy.table import Table
+from astropy.time import Time
 from astropy.wcs import WCS
 from lvmdrp.core.rss import RSS
 from lvmdrp.functions.imageMethod import (preproc_raw_frame, create_master_frame,
                                           create_pixelmask, detrend_frame,
-                                          find_peaks_auto, trace_peaks,
+                                          trace_peaks,
                                           extract_spectra)
 from lvmdrp.functions.rssMethod import (determine_wavelength_solution, create_pixel_table,
-                                        resample_wavelength, join_spec_channels, stack_rss)
+                                        resample_wavelength, join_spec_channels, stack_spectrographs)
 from lvmdrp.utils.metadata import (get_frames_metadata, get_master_metadata, extract_metadata,
                                    get_analog_groups, match_master_metadata, create_master_path)
+from lvmdrp.utils.convert import tileid_grp
+from lvmdrp.functions.run_quickdrp import quick_science_reduction
+
 from lvmdrp import config, log, path, __version__ as drpver
 
 
@@ -377,8 +383,8 @@ def create_output_path(kind: str, flavor: str, mjd: int, tileid: int, camera: st
 
     Creates the output file path for the science frames or the master arc/flats.
     For example, the extracted fiber spectra is
-    "1111/60115/ancillary/lvm-xobject-b1-00060115.fits" for science frames
-    or "1111/60115/calib/lvm-xmarc-b1.fits" for the master arc frame.
+    "11111/60115/ancillary/lvm-xobject-b1-00060115.fits" for science frames
+    or "11111/60115/calib/lvm-xmarc-b1.fits" for the master arc frame.
 
     Parameters
     ----------
@@ -613,7 +619,7 @@ def reduce_masters(mjd: int):
         reduce_frame(path, master=True, **row)
 
 
-def run_drp(mjd: Union[int, str, list], bias: bool = False, dark: bool = False,
+def run_drp_deprecated(mjd: Union[int, str, list], bias: bool = False, dark: bool = False,
             pixelflat: bool = False, skip_bd: bool = False, arc: bool = False, flat: bool = False,
             only_bd: bool = False, only_cal: bool = False, only_sci: bool = False, pixmask: bool = False,
             spec: int = None, camera: str = None, expnum: Union[int, str, list] = None,
@@ -755,7 +761,7 @@ def run_drp(mjd: Union[int, str, list], bias: bool = False, dark: bool = False,
         combine_spectrographs(tileid, mjd, "b", expnum)
         combine_spectrographs(tileid, mjd, "r", expnum)
         combine_spectrographs(tileid, mjd, "z", expnum)
-    
+
     # perform camera combination
     # produces lvm-CFrame file
     for tileid, mjd, expnum in sub.groupby(['tileid', 'mjd', 'expnum']).groups.keys():
@@ -779,9 +785,10 @@ def start_logging(mjd: int, tileid: int):
     tileid : int
         The tile ID of the observations
     """
+    tilegrp = tileid_grp(tileid)
     lpath = (os.path.join(os.getenv('LVM_SPECTRO_REDUX'),
-             "{drpver}/{tileid}/{mjd}/lvm-drp-{tileid}-{mjd}.log"))
-    logpath = lpath.format(drpver=drpver, mjd=mjd, tileid=tileid)
+             "{drpver}/{tilegrp}/{tileid}/{mjd}/lvm-drp-{tileid}-{mjd}.log"))
+    logpath = lpath.format(drpver=drpver, mjd=mjd, tileid=tileid, tilegrp=tilegrp)
     logpath = pathlib.Path(logpath)
 
     # if logpath.exists():
@@ -790,7 +797,7 @@ def start_logging(mjd: int, tileid: int):
     if not logpath.parent.exists():
         logpath.parent.mkdir(parents=True, exist_ok=True)
 
-    log.start_file_logger(logpath)
+    log.start_file_logger(logpath, rotating=False, with_json=True)
 
 
 def write_config_file():
@@ -932,7 +939,7 @@ def build_supersky(tileid: int, mjd: int, expnum: int) -> fits.BinTableHDU:
     # select files for sky fibers
     fsci_paths = sorted(path.expand("lvm_anc", mjd=mjd, tileid=tileid, drpver=drpver,
                                 kind="f", camera="*", imagetype="object", expnum=expnum))
-    
+
     fsci_paths_cam = groupby(fsci_paths, lambda x: x.split("-")[-2])
     sky_wave = []
     sky = []
@@ -945,11 +952,11 @@ def build_supersky(tileid: int, mjd: int, expnum: int) -> fits.BinTableHDU:
         paths = sorted(list(paths))
 
         for sci_path in paths:
-            
+
             # load flafielded camera frame
             fsci = RSS()
             fsci.loadFitsData(sci_path)
-            
+
             # convert to density units if necessary
             if fsci._header["BUNIT"] == "electron":
                 dlambda = np.diff(fsci._wave, axis=1, append=2*(fsci._wave[:, -1] - fsci._wave[:, -2])[:, None])
@@ -1006,7 +1013,7 @@ def combine_channels(tileid: int, mjd: int, expnum: int):
     files = path.expand('lvm_anc', mjd=mjd, tileid=tileid, drpver=drpver,
                          imagetype='object', expnum=expnum, kind='', camera='*')
     # filter out old lvm-object-sp?-*.fits files
-    files = sorted([f for f in files if not f.startswith("lvm-object-sp")], key=_parse_expnum_cam)
+    files = sorted([f for f in files if not os.path.basename(f).startswith("lvm-object-sp")], key=_parse_expnum_cam)
 
     cframe_path = path.full("lvm_frame", mjd=mjd, drpver=drpver, tileid=tileid, expnum=expnum, kind='CFrame')
 
@@ -1092,13 +1099,10 @@ def combine_spectrographs(tileid: int, mjd: int, channel: str, expnum: int) -> R
 
     # construct output path
     frame_path = path.full('lvm_anc', mjd=mjd, tileid=tileid, drpver=drpver,
-                        kind='', camera=channel, imagetype="object", expnum=expnum)
-
+                           kind='', camera=channel, imagetype="object", expnum=expnum)
 
     # combine RSS files along fiber ID direction
-    spec_comb = stack_rss(hsci_paths, frame_path, axis=0)
-
-    return spec_comb
+    return stack_spectrographs(hsci_paths, frame_path)
 
 
 def stack_ext(files: list, ext: Union[int, str] = 0) -> np.array:
@@ -1234,3 +1238,340 @@ def add_extension(hdu: Union[fits.ImageHDU, fits.BinTableHDU], filename: str):
         if hdu.name not in hdulist:
             hdulist.append(hdu)
             hdulist.flush()
+
+
+def _yield_dir(root: pathlib.Path, mjd: int) -> pathlib.Path:
+    """ Iteratively yield a pathlib directory
+
+    Parameters
+    ----------
+    root : pathlib.Path
+        the top-level path
+    mjd : int
+        the MJD to look for
+
+    Yields
+    ------
+    Iterator[pathlib.Path]
+        the pathlib.Path
+    """
+    for item in root.iterdir():
+        if item.stem == str(mjd):
+            yield item
+        if item.is_dir():
+            yield from _yield_dir(item, mjd)
+
+
+def should_run(mjd: int) -> bool:
+    """ Check if the DRP should be run
+
+    Checks to see if the DRP should be run for the
+    given MJD.  Checks if the data transfer has completed
+    and that no pipeline run has started yet.
+
+    Parameters
+    ----------
+    mjd : int
+        the MJD
+
+    Returns
+    -------
+    bool
+        Flag if the pipeline should be run
+    """
+
+    # not transferred yet
+    done = pathlib.Path(os.getenv("LCO_STAGING_DATA")) / f'log/lvm/{mjd}/transfer-{mjd}.done'
+    if not done.exists() or not done.is_file():
+        # data not transferred yet, skip DRP running
+        log.warning(f'Data transfer not yet complete for MJD {mjd}.')
+        return False
+
+    # check for MJD directory and any files in it
+    # if no directory or no raw_metadata file in it, we run the DRP
+    root = pathlib.Path(os.getenv("LVM_SPECTRO_REDUX")) / f'{drpver}'
+    mjddir = list(_yield_dir(root, mjd))
+    no_files = not any(mjddir[0].glob('raw_meta*')) if mjddir else True
+    if not no_files:
+        log.info(f"DRP for mjd {mjd} already running.")
+    return no_files
+
+
+def check_daily_mjd(test: bool = False, with_cals: bool = False):
+    """ Check for daily MJD run
+
+    Get the MJD for the current datetime and check if
+    we should run the DRP or not.  If so, start the DRP
+    for the given MJD.
+
+    Parameters
+    ----------
+    test : bool, optional
+        Flag to test the check without running the DRP, by default False
+    with_cals: bool, optional
+        Flag to turn on reduction of the individual calibration files
+    """
+    # get current MJD
+    t = Time.now()
+    mjd = int(t.mjd)
+    log.info(f'It is {t.to_string()}.  The MJD is {int(t.mjd)}.')
+
+    # check if we should run the DRP
+    if should_run(mjd):
+        log.info(f"Running DRP for mjd {mjd}")
+        if not test:
+            run_drp(mjd, with_cals=with_cals)
+
+
+def create_status_file(tileid: int, mjd: int, status: str = 'started'):
+    """ Create a DRP status file
+
+    Create a DRP status file for the given tile_id, MJD.
+
+    Parameters
+    ----------
+    tileid : int
+        the tile iD
+    mjd : int
+        the MJD
+    status : str, optional
+        the DRP status, by default 'started'
+    """
+    tilegrp = tileid_grp(tileid)
+    root = pathlib.Path(os.getenv("LVM_SPECTRO_REDUX")) / f'{drpver}/{tilegrp}/{tileid}/logs'
+    root.mkdir(parents=True, exist_ok=True)
+    path = root / f'lvm-drp-{tileid}-{mjd}.{status}'
+    path.touch()
+
+
+def remove_status_file(tileid: int, mjd: int, remove_all: bool = False):
+    """ Remove a DRP status file
+
+    Remove a DRP status file for the given tile_id, MJD, or
+    optionally remove all status files.
+
+    Parameters
+    ----------
+    tileid : int
+        the tile iD
+    mjd : int
+        the MJD
+    remove_all : bool, optional
+        Flag to remove all status files, by default False
+    """
+    tilegrp = tileid_grp(tileid)
+    root = pathlib.Path(os.getenv("LVM_SPECTRO_REDUX")) / f'{drpver}/{tilegrp}/{tileid}/logs'
+
+    if remove_all:
+        shutil.rmtree(root)
+        return
+
+    files = root.rglob(f'lvm-drp-{tileid}-{mjd}.*')
+    for file in files:
+        file.unlink()
+
+
+def status_file_exists(tileid: int, mjd: int, status: str = 'started') -> bool:
+    """ Check if a status file exists
+
+    Parameters
+    ----------
+    tileid : int
+        the tile iD
+    mjd : int
+        the MJD
+    status : str, optional
+        the DRP status, by default 'started'
+
+    Returns
+    -------
+    bool
+        Flag if the file exists
+    """
+    tilegrp = tileid_grp(tileid)
+    root = pathlib.Path(os.getenv("LVM_SPECTRO_REDUX")) / f'{drpver}/{tilegrp}/{tileid}/logs'
+    path = root / f'lvm-drp-{tileid}-{mjd}.{status}'
+    return path.exists()
+
+
+def update_error_file(tileid: int, mjd: int, expnum: int, error: str,
+                      reset: bool = False):
+    """ Update the DRP error file
+
+    Appends to the "drp_errors.txt" file whenever
+    there is an error during a reduction.
+
+    Parameters
+    ----------
+    tileid : int
+        the tile id
+    mjd : int
+        the MJD
+    expnum : int
+        the exposure number
+    error : str
+        the traceback
+    reset : bool, optional
+        Flag to reset the text file, by default False
+    """
+
+    path = pathlib.Path(os.getenv("LVM_SPECTRO_REDUX")) / f'{drpver}' / 'drp_errors.txt'
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    if reset:
+        path.unlink()
+        return
+
+    with open(path, '+a') as f:
+        f.write(f'ERROR on tileid, mjd, exposure: {tileid}, {mjd}, {expnum}\n')
+        f.write(error)
+        f.write('\n')
+
+
+def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
+            with_cals: bool = False, no_sci: bool = False):
+    """ Run the quick DRP
+
+    Run the quick DRP for an MJD, or a range of MJDs. Reduces
+    science frames with the function ``run_quickdrp.quick_science_reduction``.
+    Optionally can set flags to attempt reduction of the individual calibration
+    frames in the MJD up through detrending, or to turn off science frame
+    reduction.
+
+    Parameters
+    ----------
+    mjd : Union[int, str, list]
+        the MJD to reduce
+    expnum : Union[int, str, list], optional
+        the exposure numbers to reduce, by default None
+    with_cals : bool, optional
+        Flag to reduce individual calibration files, by default False
+    no_sci : bool, optional
+        Flag to turn off science frame reduction, by default False
+    """
+    # # write the drp parameter configuration
+    # write_config_file()
+
+    # parse the input MJD and loop over all reductions
+    mjds = parse_mjds(mjd)
+    if isinstance(mjds, list):
+        for mjd in mjds:
+            run_drp(mjd=mjd, expnum=expnum, with_cals=with_cals, no_sci=no_sci)
+        return
+
+    log.info(f'Processing MJD {mjd}')
+
+    # check the MJD data directory path
+    mjd_path = pathlib.Path(os.getenv('LVM_DATA_S')) / str(mjd)
+    log.info(f'MJD processing path: {mjd_path}')
+    if not mjd_path.is_dir():
+        log.warning(f'{mjd = } is not valid raw data directory.')
+        return
+
+    # generate the MJD metadata
+    frames = get_frames_metadata(mjd=mjd)
+    sub = frames.copy()
+
+    # remove bad or test quality frames
+    sub = sub[~(sub['quality'] != 'excellent')]
+
+    # filter on exposure number
+    if expnum:
+        log.info(f'Filtering on exposure numbers {expnum}.')
+        sub = filter_expnum(sub, expnum)
+
+    # sort the frames
+    sub = sub.sort_values(['expnum', 'camera'])
+
+    # group by tileid, mjd
+    groups = sub.groupby(['tileid', 'mjd'])
+
+    # iterate over each group and reduce
+    for key, group in groups:
+        tileid, mjd = key
+
+        # split into cals, and science
+        cals = group[~(group['imagetyp'] == 'object')]
+        sci = group[group['imagetyp'] == 'object']
+
+        # avoid creating logs / status files for tileid+mjd groups with
+        # no science files, unless explicitly reducing cals
+        cal_cond = not cals.empty and with_cals
+        sci_cond = not sci.empty and not no_sci
+
+        # create start status
+        create_status_file(tileid, mjd, status='started')
+
+        if sci_cond or cal_cond:
+            # start logging for this tileid, mjd
+            start_logging(mjd, tileid)
+
+        # attempt to reduce individual calibration files
+        if cal_cond:
+            for row in cals.to_dict("records"):
+                try:
+                    reduce_calib_frame(row)
+                except Exception as e:
+                    log.exception(f'Failed to reduce calib frame mjd {mjd} exposure {row["expnum"]}: {e}')
+                    trace = traceback.format_exc()
+                    update_error_file(tileid, mjd, row['expnum'], trace)
+
+        # reduce the science data
+        if sci_cond:
+            kwargs = get_config_options('reduction_steps.quick_science_reduction')
+            for expnum in sci['expnum'].unique():
+                try:
+                    quick_science_reduction(expnum, use_fiducial_master=True, **kwargs)
+                except Exception as e:
+                    log.exception(f'Failed to reduce science frame mjd {mjd} exposure {expnum}: {e}')
+                    create_status_file(tileid, mjd, status='error')
+                    trace = traceback.format_exc()
+                    update_error_file(tileid, mjd, expnum, trace)
+                    continue
+
+        # create done status on successful run
+        if not status_file_exists(tileid, mjd, status='error'):
+            create_status_file(tileid, mjd, status='done')
+
+
+def reduce_calib_frame(row: dict):
+    """ Reduce an individual calibration frame
+
+    Tries to reduce an individual calibration exposure through
+    the preprocessing and detrending stages.  Considered files
+    are bias, darks, arcs, and flats.
+
+    Parameters
+    ----------
+    row : dict
+        info from the raw_metadata file
+    """
+    # get raw frame filepath
+    filename = path.full('lvm_raw', **row, camspec=row['camera'])
+
+    log.info(f'--- Starting calibration reduction of raw frame: {filename}')
+
+    # set flavor
+    flavor = row.get('imagetyp')
+    flavor = 'fiberflat' if flavor == 'flat' else flavor
+
+    # get master calibration paths
+    mpixmask = path.full('lvm_calib', mjd=row['mjd'], camera=row['camera'], kind='pixmask')
+    mbias = path.full('lvm_calib', mjd=row['mjd'], camera=row['camera'], kind='bias')
+    mdark = path.full('lvm_calib', mjd=row['mjd'], camera=row['camera'], kind='dark')
+    mpixflat = path.full('lvm_calib', mjd=row['mjd'], camera=row['camera'], kind='pixflat')
+
+    # preprocess the frames
+    log.info('--- Preprocessing raw frame ---')
+    out_pre = path.full('lvm_anc', kind='p', drpver=drpver, imagetype=flavor, **row)
+    preproc_raw_frame(in_image=filename, in_mask=mpixmask, out_image=out_pre)
+
+    # detrend the frames
+    log.info('--- Running detrend frame ---')
+
+    in_cal = path.full('lvm_anc', kind='p', drpver=drpver, imagetype=flavor, **row)
+    out_cal = path.full('lvm_anc', kind='d', drpver=drpver, imagetype=flavor, **row)
+
+    detrend_frame(in_image=in_cal, out_image=out_cal,
+                  in_bias=mbias, in_dark=mdark, in_pixelflat=mpixflat,
+                  in_slitmap=Table(fibermap.data), reject_cr=False)

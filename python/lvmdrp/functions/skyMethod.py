@@ -16,6 +16,7 @@ from copy import deepcopy as copy
 from typing import Tuple
 
 import numpy as np
+import bottleneck as bn
 import yaml
 from astropy.io import fits
 from astropy.time import Time
@@ -603,7 +604,7 @@ def sepContinuumLine_drp(
             sci_spec.loadFitsData(sky_sci, extension_hdr=0)
         else:
             raise ValueError(
-                f"You need to provide a science spectrum to perform the continuum/line separation using skycorr."
+                "You need to provide a science spectrum to perform the continuum/line separation using skycorr."
             )
         if np.any(sky_spec._wave != sci_spec._wave):
             sky_spec = sky_spec.resampleSpec(ref_wave=sci_spec._wave, method="linear")
@@ -1383,7 +1384,7 @@ def interpolate_sky(in_rss: str, out_sky: str, out_rss: str = None, which: str =
     """
 
     if subtract and out_rss is None:
-        raise ValueError(f"need to provide an output file to write sky-subtracted data")
+        raise ValueError("need to provide an output file to write sky-subtracted data")
     
     # load input RSS
     log.info(f"loading input RSS file '{os.path.basename(in_rss)}'")
@@ -1683,3 +1684,45 @@ def quick_sky_subtraction(in_rss: str, out_rss, in_skye: str, in_skyw: str, sky_
     rss.writeFitsData(out_rss)
 
     return rss
+
+
+def quick_sky_refinement(in_cframe, band=np.array((7238,7242,7074,7084,7194,7265))):
+    """Quick sky refinement using the model in the final CFrame
+    
+    Parameters
+    ----------
+    in_cframe : str
+        input CFrame file
+    band : np.array, optional
+        wavelength range to use for sky refinement, by default np.array((7238,7242,7074,7084,7194,7265))
+    """
+    
+    cframe = fits.open(in_cframe)
+    wave = cframe["WAVE"].data
+    flux = cframe["FLUX"].data
+    error = cframe["ERROR"].data
+    sky = cframe["SKY"].data
+
+    crval = wave[0]
+    cdelt = wave[1] - wave[0]
+    i_band = ((band - crval) / cdelt).astype(int)
+
+    map_b = bn.nanmean(flux[:, i_band[0]:i_band[1]], axis=1)
+    map_0 = bn.nanmean(flux[:, i_band[2]:i_band[3]], axis=1)
+    map_1 = bn.nanmean(flux[:, i_band[4]:i_band[5]], axis=1)
+    map_c = map_b - 0.5 * (map_0 + map_1)
+
+    smap_b = bn.nanmean(sky[:, i_band[0]:i_band[1]], axis=1)
+    smap_0 = bn.nanmean(sky[:, i_band[2]:i_band[3]], axis=1)
+    smap_1 = bn.nanmean(sky[:, i_band[4]:i_band[5]], axis=1)
+    smap_c = smap_b - 0.5 * (smap_0 + smap_1)
+
+    scale = map_c / smap_c
+    sky_c = np.nan_to_num(sky * scale[:, None])
+    data_c = np.nan_to_num(flux - sky_c)
+    error_c = np.nan_to_num(error - sky_c)
+
+    cframe["FLUX"].data = data_c
+    cframe["ERROR"].data = error_c
+    cframe["SKY"].data = sky_c
+    cframe.writeto(in_cframe, overwrite=True)
