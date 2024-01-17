@@ -2551,6 +2551,30 @@ class Spectrum1D(Header):
         gauss_multi = fit_profile.Gaussians(par)
         gauss_multi.fit(self._wave[select], self._data[select], sigma=error[select])
         return gauss_multi, gauss_multi.getPar()
+    
+    def fitMultiVoigt(self, centres, init_fwhm_G, init_fwhm_L):
+        select = numpy.zeros(self._dim, dtype = "bool")
+        flux_in = numpy.zeros(len(centres), dtype = numpy.float32)
+        sig_in_G = numpy.ones_like(flux_in) * init_fwhm_G / 2.354
+        sig_in_L = numpy.ones_like(flux_in) * init_fwhm_L / 2.354
+        cent = numpy.zeros(len(centres), dtype = numpy.float32)
+        if self._error is not None:
+            error = self._error 
+        else:
+            error = numpy.ones_like(self._dim, dtype = numpy.float32)
+        for i in range(len(centres)): 
+            init_fwhm = max(init_fwhm_G, init_fwhm_L)
+            select_line = numpy.logical_and(
+                self._wave > centres[i] - 2 * init_fwhm,
+                self._wave < centres[i] + 2 * init_fwhm,
+            )
+            flux_in[i] = numpy.sum(self._data[select_line])
+            select = numpy.logical_or(select, select_line)
+            cent[i] = centres[i]
+        par = numpy.concatenate([flux_in, cent, sig_in_G, sig_in_L])
+        voigt_multi = fit_profile.Voigts(par)
+        voigt_multi.fit(self._wave[select], self._data[select], sigma=error[select]) #No se si poner otro sigma
+        return voigt_multi, voigt_multi.getPar()
 
     def fitParFile(
         self, par, err_sim=0, ftol=1e-8, xtol=1e-8, method="leastsq", parallel="auto"
