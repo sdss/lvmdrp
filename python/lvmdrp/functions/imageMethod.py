@@ -1498,7 +1498,7 @@ def trace_peaks(
 
     # create empty trace mask for the image
     trace = TraceMask()
-    trace.createEmpty(data_dim=(fibers, dim[1]), mask_dim=(fibers, dim[1]))
+    trace.createEmpty(data_dim=(fibers, dim[1]))
     trace.setFibers(fibers)
     trace._good_fibers = good_fibers
     # add the positions of the previous identified peaks
@@ -4065,7 +4065,7 @@ def trace_fibers(
     fibers = ref_cent.size
     dim = img.getDim()
     centroids = TraceMask()
-    centroids.createEmpty(data_dim=(fibers, dim[1]), mask_dim=(fibers, dim[1]))
+    centroids.createEmpty(data_dim=(fibers, dim[1]))
     centroids.setFibers(fibers)
     centroids._good_fibers = good_fibers
     centroids.setHeader(img._header.copy())

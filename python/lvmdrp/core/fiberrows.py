@@ -447,7 +447,7 @@ class FiberRows(Header, PositionTable):
 
         return self.__class__(data=data, error=error, mask=mask)
 
-    def createEmpty(self, data_dim=None, error_dim=None, mask_dim=None):
+    def createEmpty(self, data_dim=None, poly_deg=None):
         """
         Fill the FiberRows object with empty data
 
@@ -455,26 +455,24 @@ class FiberRows(Header, PositionTable):
         --------------
         data_dim: tuple, optional with default: None
             Dimension of the empty data array to be created
-
-        error_dim : tuple, optional with default: None
-            Dimension of the empty error array to be created
-
-        mask_dim : tuple, optional with default: None
-            Dimension of the bad pixel mask to be created (all pixel masked bad)
-
+        poly_deg: int, optional with default: None
+            Degree of the polynomial trace to be created
         """
         if data_dim is not None:
             # create empty  data array and set number of fibers
             self._data = numpy.zeros(data_dim, dtype=numpy.float32)
             self._fibers = self._data.shape[0]
 
-        if error_dim is not None:
+        if data_dim is not None:
             # create empty  error array
-            self._error = numpy.zeros(error_dim, dtype=numpy.float32)
+            self._error = numpy.zeros(data_dim, dtype=numpy.float32)
 
-        if mask_dim is not None:
+        if data_dim is not None:
             # create empty mask all pixel assigned bad
-            self._mask = numpy.ones(mask_dim, dtype="bool")
+            self._mask = numpy.ones(data_dim, dtype="bool")
+
+        if data_dim is not None and poly_deg is not None:
+            self._coeffs = numpy.zeros((data_dim[0], poly_deg+1), dtype=numpy.float32)
 
     def setFibers(self, fibers):
         """
@@ -715,9 +713,9 @@ class FiberRows(Header, PositionTable):
                 self._error = hdu[extension_error].data.astype("float32")
             if extension_coeffs is not None:
                 self._coeffs = hdu[extension_coeffs].data.astype("float32")
-        
+
         hdu.close()
-        
+
         if extension_hdr is not None:
             self.setHeader(hdu[extension_hdr].header)
 
@@ -897,7 +895,7 @@ class FiberRows(Header, PositionTable):
         )
         for i in iterator:
             spec = self.getSpec(i)
-            
+
             fit = spec.fitSepGauss(cent_wave[i - 1], aperture, init_back, axs=None)
             flux[i, :] = numpy.fabs(fit[:nlines])
             cent_wave[i, :] = fit[nlines : 2 * nlines]
@@ -1232,7 +1230,7 @@ class FiberRows(Header, PositionTable):
         # early return if no coefficients are available
         if self._coeffs is None:
             return self
-        
+
         # define coordinates
         x_pixels = numpy.arange(self._data.shape[1])
         y_pixels = numpy.arange(self._fibers)
@@ -1241,13 +1239,13 @@ class FiberRows(Header, PositionTable):
         bad_fibers = self._mask.all(axis=1)
         f_coeffs = interpolate.interp1d(y_pixels[~bad_fibers], self._coeffs[~bad_fibers, :], axis=0, bounds_error=False, fill_value="extrapolate")
         self._coeffs = f_coeffs(y_pixels)
-        
+
         # evaluate trace at interpolated fibers
         for ifiber in y_pixels[bad_fibers]:
             poly = numpy.polynomial.Polynomial(self._coeffs[ifiber, :])
             self._data[ifiber, :] = poly(x_pixels)
             self._mask[ifiber, :] = False
-        
+
         return self
 
     def interpolate_data(self, axis="Y"):
@@ -1263,7 +1261,7 @@ class FiberRows(Header, PositionTable):
         -------
         FiberRows
             Interpolated FiberRows object
-        
+
         Raises
         ------
         ValueError
@@ -1280,7 +1278,7 @@ class FiberRows(Header, PositionTable):
             self._data = f_data(y_pixels)
             if self._error is not None:
                 f_error = interpolate.interp1d(y_pixels[~bad_fibers], self._error[~bad_fibers, :], axis=0, bounds_error=False)
-                self._error = f_error(y_pixels)        
+                self._error = f_error(y_pixels)
 
             # unmask interpolated fibers
             if self._mask is not None:
