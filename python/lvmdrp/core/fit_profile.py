@@ -7,7 +7,11 @@ import astropy.io.fits as pyfits
 import numpy
 import bottleneck as bn
 from scipy import interpolate, optimize, special
-from astropy.modeling.models import Voigt1D
+from astropy.modeling.models import Voigt1D, Lorentz1D
+from scipy.special import wofz
+
+def Voigt(x, x_0=0, amplitude_L=1, sigma_L=0.5, sigma_G=0.001):
+    return amplitude_L * numpy.real(wofz((x - x_0 + 1j*sigma_L)/sigma_G /numpy.sqrt(2))) / sigma_G /numpy.sqrt(2*numpy.pi)
 
 
 
@@ -743,22 +747,31 @@ class Gaussian_poly(fit_profile1D):
         fit_profile1D.__init__(self, par, self._profile, self._guess_par)
 
 class Voigts(fit_profile1D):
+    def _profile(self, x):
+        ncomp = len(self._par) // 4
+        y = numpy.zeros((ncomp, len(x)), dtype=numpy.float32)
+        for i in range(ncomp):
+            y[i] = Voigt(x, amplitude_L=self._par[i],x_0=self._par[i+ncomp], sigma_G=self._par[i+2*ncomp], sigma_L=self._par[i+3*ncomp])
+        return bn.nansum(y, axis=0)
+
+    def __init__(self, par):
+        fit_profile1D.__init__(self, par, self._profile)
+
+class Lorentzs(fit_profile1D):
     def _profile(self, x): 
-        ncomp = len(self._par) // 4 
+        ncomp = len(self._par) // 3
         y = numpy.zeros((ncomp, len(x)), dtype=numpy.float32) 
         for i in range(ncomp):
-            self._par[i+2*ncomp] *= amp_fwhm
-            self._par[i+3*ncomp] *= amp_fwhm
-            v = Voigt1D(amplitude_L=self._par[i],x_0=self._par[i+ncomp], fwhm_G=self._par[i+2*ncomp], fwhm_L=self._par[i+3*ncomp])
+            v = Lorentz1D(amplitude=self._par[i],x_0=self._par[i+ncomp], fwhm=self._par[i+2*ncomp]*amp_fwhm)
             y[i] = v(x)
         return bn.nansum(y, axis=0) 
 
     def __init__(self, par):
         fit_profile1D.__init__(self, par, self._profile)
 
-
 class Voigts_width(fit_profile1D):
     def _profile(self, x):
+        ncomp = len(self._par) // 4 
         y = numpy.zeros((ncomp, len(x)), dtype=numpy.float32) 
         ncomp = len(self._args)
         # y = numpy.zeros((ncomp, len(x)), dtype=numpy.float32)  #para que tenga apariencia igual a Gaussians
@@ -774,6 +787,7 @@ class Voigts_width(fit_profile1D):
 
 class Voigts_flux(fit_profile1D):
     def _profile(self, x):
+        ncomp = len(self._par) // 4 
         y = numpy.zeros((ncomp, len(x)), dtype=numpy.float32) 
         ncomp = len(self._par)
         # y = numpy.zeros((ncomp, len(x)), dtype=numpy.float32) 
