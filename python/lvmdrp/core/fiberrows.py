@@ -1036,7 +1036,7 @@ class FiberRows(Header, PositionTable):
             else:
                 self._mask[i, :] = True
 
-        return pix_table, poly_table, poly_all_table
+        return numpy.asarray(pix_table), numpy.asarray(poly_table), numpy.asarray(poly_all_table)
 
     def smoothTraceDist(
         self, start_slice, poly_cross=[4, 1, 4], poly_disp=8, bound=[350, 2000]

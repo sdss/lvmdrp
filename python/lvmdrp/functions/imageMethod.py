@@ -158,6 +158,44 @@ def _create_peaks_regions(fibermap: Table, column: int = 2000) -> None:
                 )
 
 
+def _create_trace_regions(out_trace, table_data, table_poly, table_poly_all, display_plots=False):
+    """Creates three DS9 region files with the trace data
+
+    Parameters
+    ----------
+    out_trace : str
+        output trace file
+    table_data : numpy.ndarray
+        trace data (measurements)
+    table_poly : numpy.ndarray
+        trace polynomial evaluated at the trace data
+    table_poly_all : numpy.ndarray
+        trace polynomial evaluated at all pixels
+    display_plots : bool, optional
+        display plots, by default False
+    """
+    coords_file = out_trace.replace("calib", "ancillary").replace(".fits", "_coords.txt")
+    os.makedirs(os.path.dirname(coords_file), exist_ok=True)
+    poly_file = coords_file.replace("_coords.txt", "_poly.txt")
+    poly_all_file = coords_file.replace("_coords.txt", "_poly_all.txt")
+    log.info(f"writing trace data to files: {os.path.basename(coords_file)}, {os.path.basename(poly_file)} and {os.path.basename(poly_all_file)}")
+    numpy.savetxt(coords_file, 1+table_data, fmt="%.5f")
+    numpy.savetxt(poly_file, 1+table_poly, fmt="%.5f")
+    numpy.savetxt(poly_all_file, 1+table_poly_all, fmt="%.5f")
+
+    # plot trace fitting residuals
+    fig, ax = create_subplots(1, 1, figsize=(10, 10))
+    ax.axhspan(-1, 1, color="k", alpha=0.1)
+    ax.axhspan(-10, 10, color="k", alpha=0.1)
+    residuals = (table_poly[:, 1] - table_data[:, 1]) / table_data[:, 1] * 100
+    ax.plot(table_data[:, 0], residuals, "o", ms=1, color="k")
+    ax.set_ylim(-25, 25)
+    ax.set_xlabel("y (pixel)")
+    ax.set_ylabel("residuals (%)")
+    ax.set_title("trace residuals")
+    save_fig(fig, out_trace, label="residuals", to_display=display_plots)
+
+
 def detCos_drp(
     image,
     out_image,
@@ -1568,14 +1606,7 @@ def trace_peaks(
     trace._mask[bad_fibers] = True
 
     if write_trace_data:
-        coords_file = out_trace.replace("calib", "ancillary").replace(".fits", "_coords.txt")
-        os.makedirs(os.path.dirname(coords_file), exist_ok=True)
-        poly_file = coords_file.replace("_coords.txt", "_poly.txt")
-        poly_all_file = coords_file.replace("_coords.txt", "_poly_all.txt")
-        log.info(f"writing trace data to files: {os.path.basename(coords_file)}, {os.path.basename(poly_file)} and {os.path.basename(poly_all_file)}")
-        numpy.savetxt(coords_file, 1+numpy.asarray(table), fmt="%.5f")
-        numpy.savetxt(poly_file, 1+numpy.asarray(table_poly), fmt="%.5f")
-        numpy.savetxt(poly_all_file, 1+numpy.asarray(table_poly_all), fmt="%.5f")
+        _create_trace_regions(out_trace, table, table_poly, table_poly_all, display_plots=display_plots)
 
     # linearly interpolate coefficients at masked fibers
     log.info(f"interpolating coefficients at {bad_fibers.sum()} masked fibers")
@@ -4250,11 +4281,17 @@ def trace_fibers(
     # smooth all trace by a polynomial
     if fit_poly:
         log.info(f"fitting peak trace with {deg_amp}-deg polynomial")
-        trace_amp.fit_polynomial(deg_amp, poly_kind="poly")
+        table_data, table_poly, table_poly_all = trace_amp.fit_polynomial(deg_amp, poly_kind="poly")
+        _create_trace_regions(out_trace_amp, table_data, table_poly, table_poly_all, display_plots=display_plots)
+
         log.info(f"fitting centroid trace with {deg_cent}-deg polynomial")
-        trace_cent.fit_polynomial(deg_cent, poly_kind="poly")
+        table_data, table_poly, table_poly_all = trace_cent.fit_polynomial(deg_cent, poly_kind="poly")
+        _create_trace_regions(out_trace_cent, table_data, table_poly, table_poly_all, display_plots=display_plots)
+
         log.info(f"fitting FWHM trace with {deg_fwhm}-deg polynomial")
-        trace_fwhm.fit_polynomial(deg_fwhm, poly_kind="poly")
+        table_data, table_poly, table_poly_all = trace_fwhm.fit_polynomial(deg_fwhm, poly_kind="poly")
+        _create_trace_regions(out_trace_fwhm, table_data, table_poly, table_poly_all, display_plots=display_plots)
+
         # set bad fibers in trace mask
         trace_amp._mask[bad_fibers] = True
         trace_cent._mask[bad_fibers] = True
