@@ -196,6 +196,23 @@ def _create_trace_regions(out_trace, table_data, table_poly, table_poly_all, dis
     save_fig(fig, out_trace, label="residuals", to_display=display_plots)
 
 
+def _eval_continuum_model(obs_img, trace_amp, trace_cent, trace_fwhm):
+    # define gaussian model
+    f = numpy.sqrt(2 * numpy.pi)
+    def gaussians(pars, x):
+        y = pars[0][:, None] * numpy.exp(-0.5 * ((x[None, :] - pars[1][:, None]) / pars[2][:, None]) ** 2) / (pars[2][:, None] * f)
+        return numpy.sum(y, axis=0)
+
+    # evaluate continuum exposure model
+    mod = copy(obs_img)
+    column = numpy.arange(obs_img._dim[0])
+    for icolumn in tqdm(range(obs_img._dim[1]), desc="evaluating Gaussians", unit="column", ascii=True):
+        pars = (trace_amp._data[:, icolumn], trace_cent._data[:, icolumn], trace_fwhm._data[:, icolumn] / 2.354)
+        mod._data[:, icolumn] = gaussians(pars=pars, x=column)
+
+    return mod, (mod / obs_img)
+
+
 def detCos_drp(
     image,
     out_image,
@@ -3921,6 +3938,8 @@ def trace_fibers(
     out_trace_cent: str,
     out_trace_fwhm: str,
     out_trace_cent_guess: str = None,
+    out_model: str = None,
+    out_ratio: str = None,
     correct_ref: bool = False,
     median_box: tuple = (1, 10),
     coadd: int = 5,
@@ -4320,6 +4339,14 @@ def trace_fibers(
             trace_cent.interpolate_data(axis="Y")
             trace_fwhm.interpolate_data(axis="Y")
 
+    # evaluate model image
+    log.info("evaluating model image")
+    model, mratio = _eval_continuum_model(img, trace_amp, trace_cent, trace_fwhm)
+    if out_model is not None:
+        model.writeFitsData(out_model)
+    if out_ratio is not None:
+        mratio.writeFitsData(out_ratio)
+
     # write output traces
     log.info(f"writing amplitude trace to '{os.path.basename(out_trace_amp)}'")
     trace_amp.writeFitsData(out_trace_amp)
@@ -4379,4 +4406,4 @@ def trace_fibers(
         label="residuals_columns"
     )
 
-    return centroids, trace_cent, trace_amp, trace_fwhm
+    return centroids, trace_cent, trace_amp, trace_fwhm, model, mratio
