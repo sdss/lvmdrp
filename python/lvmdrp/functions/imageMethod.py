@@ -201,7 +201,7 @@ def _eval_continuum_model(obs_img, trace_amp, trace_cent, trace_fwhm):
     f = numpy.sqrt(2 * numpy.pi)
     def gaussians(pars, x):
         y = pars[0][:, None] * numpy.exp(-0.5 * ((x[None, :] - pars[1][:, None]) / pars[2][:, None]) ** 2) / (pars[2][:, None] * f)
-        return numpy.sum(y, axis=0)
+        return bn.nansum(y, axis=0)
 
     # evaluate continuum exposure model
     mod = copy(obs_img)
@@ -4340,11 +4340,10 @@ def trace_fibers(
             trace_fwhm.interpolate_data(axis="Y")
 
     # evaluate model image
-    log.info("evaluating model image")
-    model, mratio = _eval_continuum_model(img, trace_amp, trace_cent, trace_fwhm)
-    if out_model is not None:
+    if out_model is not None and out_ratio is not None:
+        log.info("evaluating model image")
+        model, mratio = _eval_continuum_model(img, trace_amp, trace_cent, trace_fwhm)
         model.writeFitsData(out_model)
-    if out_ratio is not None:
         mratio.writeFitsData(out_ratio)
 
     # write output traces
