@@ -4345,6 +4345,8 @@ def trace_fibers(
         model, mratio = _eval_continuum_model(img, trace_amp, trace_cent, trace_fwhm)
         model.writeFitsData(out_model)
         mratio.writeFitsData(out_ratio)
+    else:
+        model, mratio = None, None
 
     # write output traces
     log.info(f"writing amplitude trace to '{os.path.basename(out_trace_amp)}'")
@@ -4405,4 +4407,4 @@ def trace_fibers(
         label="residuals_columns"
     )
 
-    return centroids, trace_cent, trace_amp, trace_fwhm, model, mratio
+    return centroids, trace_cent, trace_amp, trace_fwhm, img, model, mratio
