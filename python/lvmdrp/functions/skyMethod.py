@@ -40,6 +40,7 @@ from lvmdrp.core.sky import (
     run_skycorr,
     run_skymodel,
     skymodel_pars_from_header,
+    get_telescope_shadowheight
 )
 from lvmdrp.core.spectrum1d import Spectrum1D
 from lvmdrp import log
@@ -1471,7 +1472,17 @@ def interpolate_sky(in_rss: str, out_skye: str, out_skyw: str, out_rss: str = No
         sky_rss.set_supersky(s_pars)
         s_error_pars = (sky_rss._wave,) + s_error.tck + (int(sky_rss._header["CCD"][1]), telescope)
         sky_rss.set_supersky_error(s_error_pars)
+
+        # update header metadata
         sky_rss._header["IMAGETYP"] = "sky"
+        sky_rss._header.update(skymodel_pars_from_header(sky_rss._header, telescope="SKYW"))
+        sky_rss._header.update(skymodel_pars_from_header(sky_rss._header, telescope="SKYE"))
+        sky_rss._header.update(skymodel_pars_from_header(sky_rss._header, telescope="SCI"))
+        # TODO: add same parameters for std *fibers*
+        # sky_rss._header.update(skymodel_pars_from_header(sky_rss._header, telescope="SPEC"))
+        sky_rss._header["HIERARCH GEOCORONAL SKYW SHADOW_HEIGHT"] = get_telescope_shadowheight(sky_rss._header, telescope="SKYW")
+        sky_rss._header["HIERARCH GEOCORONAL SKYE SHADOW_HEIGHT"] = get_telescope_shadowheight(sky_rss._header, telescope="SKYE")
+        sky_rss._header["HIERARCH GEOCORONAL SCI SHADOW_HEIGHT"] = get_telescope_shadowheight(sky_rss._header, telescope="SCI")
 
         # extract standard star metadata if exists
         std_acq = np.asarray(list(rss._header["STD*ACQ"].values()))
