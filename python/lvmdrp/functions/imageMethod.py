@@ -158,7 +158,7 @@ def _create_peaks_regions(fibermap: Table, column: int = 2000) -> None:
                 )
 
 
-def _create_trace_regions(out_trace, table_data, table_poly, table_poly_all, display_plots=False):
+def _create_trace_regions(out_trace, table_data, table_poly, table_poly_all, label=None, display_plots=False):
     """Creates three DS9 region files with the trace data
 
     Parameters
@@ -171,6 +171,8 @@ def _create_trace_regions(out_trace, table_data, table_poly, table_poly_all, dis
         trace polynomial evaluated at the trace data
     table_poly_all : numpy.ndarray
         trace polynomial evaluated at all pixels
+    label : str, optional
+        label for the trace, by default None
     display_plots : bool, optional
         display plots, by default False
     """
@@ -184,6 +186,9 @@ def _create_trace_regions(out_trace, table_data, table_poly, table_poly_all, dis
     numpy.savetxt(poly_all_file, 1+table_poly_all, fmt="%.5f")
 
     # plot trace fitting residuals
+    if label is None:
+        label = os.path.basename(out_trace).replace(".fits", "")
+
     fig, ax = create_subplots(1, 1, figsize=(10, 10))
     ax.axhspan(-1, 1, color="k", alpha=0.1)
     ax.axhspan(-10, 10, color="k", alpha=0.1)
@@ -192,7 +197,7 @@ def _create_trace_regions(out_trace, table_data, table_poly, table_poly_all, dis
     ax.set_ylim(-25, 25)
     ax.set_xlabel("y (pixel)")
     ax.set_ylabel("residuals (%)")
-    ax.set_title("trace residuals")
+    ax.set_title(f"{label} residuals")
     save_fig(fig, out_trace, label="residuals", to_display=display_plots)
 
 
@@ -4280,13 +4285,18 @@ def trace_fibers(
             trace_cent.setSlice(icolumn, axis="y", data=cent_slice, mask=cent_mask)
             trace_fwhm.setSlice(icolumn, axis="y", data=fwhm_slice, mask=fwhm_mask)
 
+        # compute model column
+        mod_slice = mod_joint(img_slice._pixels)
+
         # compute residuals
-        integral_mod = numpy.trapz(mod_joint(img_slice._pixels), img_slice._pixels) or numpy.nan
-        integral_dat = numpy.trapz(img_slice._data, img_slice._pixels)
+        integral_mod = numpy.trapz(mod_slice, img_slice._pixels)
+        integral_mod = integral_mod if integral_mod != 0 else numpy.nan
+        # NOTE: this is a hack to avoid integrating the whole column when tracing a few blocks
+        integral_dat = numpy.trapz(img_slice._data * (mod_slice>0), img_slice._pixels)
         residuals.append((integral_dat - integral_mod) / integral_dat * 100)
 
         # compute fitted model stats
-        chisq_red = bn.nansum((mod_joint(img_slice._pixels) - img_slice._data)[~img_slice._mask]**2 / img_slice._error[~img_slice._mask]**2) / (img._dim[0] - 1 - 3)
+        chisq_red = bn.nansum((mod_slice - img_slice._data)[~img_slice._mask]**2 / img_slice._error[~img_slice._mask]**2) / (img._dim[0] - 1 - 3)
         log.info(f"joint model {chisq_red = :.2f}")
         if amp_mask.all() or cent_mask.all() or fwhm_mask.all():
             continue
@@ -4384,7 +4394,7 @@ def trace_fibers(
     fig.supylabel("residuals (%)")
     fig.supxlabel("Y (pixel)")
 
-    colors = plt.cm.coolwarm(numpy.linspace(0, 1, len(columns)))
+    colors = plt.cm.Spectral(numpy.linspace(0, 1, len(columns)))
     idx = numpy.argsort(columns)
     for i in idx:
         icolumn = columns[i]
@@ -4394,10 +4404,9 @@ def trace_fibers(
         img_slice = img.getSlice(icolumn, axis="y")
         img_slice._data[(img_slice._mask)|(joint_mod<=0)] = numpy.nan
 
-        # weights = img_slice._data / bn.nansum(img_slice._data)
+        weights = img_slice._data / bn.nansum(img_slice._data) * 500
         residuals = (joint_mod - img_slice._data) / img_slice._data * 100
-        # residuals *= weights
-        ax.plot(img_slice._pixels, residuals, ".", ms=2, mew=0, mfc=colors[i])
+        ax.scatter(img_slice._pixels, residuals, s=weights, lw=0, color=colors[i])
         ax.set_ylim(-50, 50)
     save_fig(
         fig,
