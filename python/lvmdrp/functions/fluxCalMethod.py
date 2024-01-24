@@ -66,8 +66,7 @@ __all__ = [
     "correctTelluric_drp",
 ]
 
-
-def apply_fluxcal(in_rss: str, out_rss: str, display_plots: bool = False):
+def apply_fluxcal(in_rss: str, out_rss: str, skip_fluxcal: bool = False, display_plots: bool = False):
     """applies flux calibration to spectrograph-combined data
 
     Parameters
@@ -76,6 +75,8 @@ def apply_fluxcal(in_rss: str, out_rss: str, display_plots: bool = False):
         input RSS file
     out_rss : str
         output RSS file
+    skip_fluxcal : bool, optional
+        whether to skip flux calibration, by default False
     display_plots : bool, optional
 
     Returns
@@ -123,7 +124,7 @@ def apply_fluxcal(in_rss: str, out_rss: str, display_plots: bool = False):
     sens_ave = biweight_location(sens_arr, axis=1, ignore_nan=True)
     sens_rms = biweight_scale(sens_arr, axis=1, ignore_nan=True)
 
-    # fix all zeros
+    # fix case of all invalid values
     if (sens_ave == 0).all() or np.isnan(sens_ave).all():
         log.warning(
             "all sensitivity values are zero or NaN, impossible to flux-calibrate"
@@ -168,12 +169,21 @@ def apply_fluxcal(in_rss: str, out_rss: str, display_plots: bool = False):
     ext = np.interp(rss._wave, lext, ext)
     sci_secz = rss._header["TESCIAM"]
 
-    log.info("flux-calibrating data science and sky spectra")
-
-    rss._data *= sens_ave * 10 ** (0.4 * ext * (sci_secz)) / exptimes[:, None]
-    rss._error *= sens_ave * 10 ** (0.4 * ext * (sci_secz)) / exptimes[:, None]
-    rss._sky *= sens_ave * 10 ** (0.4 * ext * (sci_secz)) / exptimes[:, None]
-    rss._sky_error *= sens_ave * 10 ** (0.4 * ext * (sci_secz)) / exptimes[:, None]
+    # optionally sky flux calibration
+    if skip_fluxcal:
+        log.info("skipping flux calibration")
+        rss._data /= exptimes[:, None]
+        rss._error /= exptimes[:, None]
+        rss._sky /= exptimes[:, None]
+        rss._sky_error /= exptimes[:, None]
+        rss.setHdrValue("FLUXCAL", False, "flux-calibrated?")
+        rss.setHdrValue("BUNIT", "electron/s/A", "flux units")
+    else:
+        log.info("flux-calibrating data science and sky spectra")
+        rss._data *= sens_ave * 10 ** (0.4 * ext * (sci_secz)) / exptimes[:, None]
+        rss._error *= sens_ave * 10 ** (0.4 * ext * (sci_secz)) / exptimes[:, None]
+        rss._sky *= sens_ave * 10 ** (0.4 * ext * (sci_secz)) / exptimes[:, None]
+        rss._sky_error *= sens_ave * 10 ** (0.4 * ext * (sci_secz)) / exptimes[:, None]
 
     log.info(f"writing output file in {os.path.basename(out_rss)}")
     rss.writeFitsData(out_rss)
