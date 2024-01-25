@@ -4170,9 +4170,13 @@ def trace_fibers(
 
         centroids.setSlice(icolumn, axis="y", data=cen_slice, mask=msk_slice)
 
-    # smooth all trace by a polynomial
-    log.info(f"fitting centroid guess trace with {deg_cent}-deg polynomial")
-    centroids.fit_polynomial(deg_cent, poly_kind="poly")
+    if fit_poly:
+        # smooth all trace by a polynomial
+        log.info(f"fitting centroid guess trace with {deg_cent}-deg polynomial")
+        centroids.fit_polynomial(deg_cent, poly_kind="poly")
+    else:
+        log.info("interpolating centroid guess trace")
+        centroids.interpolate_data(axis="X")
     # set bad fibers in trace mask
     centroids._mask[bad_fibers] = True
 
