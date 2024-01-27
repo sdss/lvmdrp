@@ -756,9 +756,8 @@ class Gaussians_width(fit_profile1D):
     def _profile(self, x):
         y = numpy.zeros(len(x))
         ncomp = len(self._args)
-        self._par[0] = numpy.fabs(self._par[0])
         for i in range(ncomp):
-            y += self._par[i + 1] * numpy.exp(-0.5 * ((x - self._args[i]) / self._par[0]) ** 2) / (fact * self._par[0])
+            y += self._par[i + ncomp] * numpy.exp(-0.5 * ((x - self._args[i]) / abs(self._par[i])) ** 2) / (fact * abs(self._par[i]))
         return y
 
     def __init__(self, par, args):
