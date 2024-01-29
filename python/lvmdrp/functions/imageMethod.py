@@ -1849,67 +1849,53 @@ def combineImages_drp(images, out_image, method="median", k="3.0"):
     combined_img.writeFitsData(out_image)
 
 
-def subtractStraylight_drp(
-    in_image,
-    in_trace,
-    out_stray,
-    out_image,
-    disp_axis="X",
-    aperture="7",
-    poly_cross="4",
-    smooth_disp="5",
-    smooth_gauss="10.0",
+def subtract_straylight(
+    in_image: str,
+    in_cent_trace: str,
+    out_image: str,
+    out_stray: str,
+    aperture: int = 7,
+    poly_cross: int = 4,
+    smooth_disp: int = 5,
+    smooth_gauss: int = 10,
     parallel="auto",
-):
+) -> None:
     """
-                Subtracts a diffuse background signal (stray light) from the raw data. It uses the regions between fiber to estimate the stray light signal and
-                smoothes the result by a polyon in cross-disperion direction and afterwards a wide 2D Gaussian filter to reduce the introduction of low frequency noise.
+    Subtracts a diffuse background signal (stray light) from the raw data. It
+    uses the regions between fiber to estimate the stray light signal and
+    smoothes the result by a polyon in cross-disperion direction and afterwards
+    a wide 2D Gaussian filter to reduce the introduction of low frequency
+    noise.
 
-                Parameters
-                --------------
-                image: string
-                                Name of the FITS image from which the stray light should be subtracted
-                trace: string
-                                Name of the  FITS file with the trace mask of the fibers
-                stray_image: string
-                                Name of the FITS file in which the pure straylight image is stored
-                clean_img: string
-                                Name of the FITS file in which the straylight subtracted image is stored
-                disp_axis: string of float, optional  with default: 'X'
-                                Define the dispersion axis, either 'X','x', or 0 for the  x axis or 'Y','y', or 1 for the y axis.
-                aperture: string of integer, optional  with default: '7'
-                                Size of the aperture around each fiber in cross-disperion direction assumed to contain signal from fibers
-                poly_cross: string of integer, optional with default: '4'
-                        Order of the polynomial used to interpolate the background signal in cross-dispersion direction (positiv: normal polynomial, negativ: Legandre polynomial)
-                smooth_gauss : string of float, optional with default :'10.0'
-                        Width of the 2D Gaussian filter to smooth the measured background signal
+    Parameters
+    --------------
+    in_image: string
+        Name of the FITS image from which the stray light should be subtracted
+    in_cent_trace: string
+        Name of the  FITS file with the trace mask of the fibers
+    out_image: string
+        Name of the FITS file in which the straylight subtracted image is stored
+    out_stray: string
+        Name of the FITS file in which the pure straylight image is stored
+    disp_axis: string of float, optional  with default: 'X'
+        Define the dispersion axis, either 'X','x', or 0 for the  x axis or 'Y','y', or 1 for the y axis.
+    aperture: string of integer, optional  with default: '7'
+        Size of the aperture around each fiber in cross-disperion direction assumed to contain signal from fibers
+    poly_cross: string of integer, optional with default: '4'
+        Order of the polynomial used to interpolate the background signal in cross-dispersion direction (positiv: normal polynomial, negativ: Legandre polynomial)
+    smooth_gauss : string of float, optional with default :'10.0'
+        Width of the 2D Gaussian filter to smooth the measured background signal
 
-                Examples
-                ----------------
+    Examples
+    ----------------
     user:> lvmdrp image subtractStrylight IMAGE.fits TRACE.fits CLEAN.fits x aperture=9 poly_cross=6 smooth_gauss=20.0
     """
-    # convert input parameters to proper type
-    aperture = int(aperture)
-    poly_cross = int(poly_cross)
-    smooth_gauss = float(smooth_gauss)
-    smooth_disp = int(smooth_disp)
-
     # load image data
     img = loadImage(in_image)
 
-    # orient image so that the cross-dispersion is along the first and the dispersion is along the second array axis
-    if disp_axis == "X" or disp_axis == "x":
-        pass
-    elif disp_axis == "Y" or disp_axis == "y":
-        img.swapaxes()
-
     # load trace mask
     trace_mask = TraceMask()
-    trace_mask.loadFitsData(in_trace, extension_data=0)
-    # trace_mask.clipTrace(img._dim[0])
-
-    # if img._mask is not None:
-    #    img._data[img._mask==1] = numpy.nan
+    trace_mask.loadFitsData(in_cent_trace, extension_data=0)
 
     # smooth image along dispersion axis with a median filter excluded NaN values bas
     if smooth_disp:
@@ -1926,29 +1912,24 @@ def subtractStraylight_drp(
 
     # smooth the results by 2D Gaussian filter of given with (cross- and dispersion axis have equal width)
     img_smooth = img_fit.convolveGaussImg(smooth_gauss, smooth_gauss)
+    img_smooth.setData(data=numpy.nan_to_num(img_smooth._data), error=numpy.nan_to_num(img_smooth._error))
 
     # subtract smoothed background signal from origianal image
-    img = loadImage(in_image)
-
-    if disp_axis == "X" or disp_axis == "x":
-        pass
-    elif disp_axis == "Y" or disp_axis == "y":
-        img.swapaxes()
-
     img_out = img - img_smooth
-    ##img_out = img-img_fit
-
-    # restore original orientation of image
-    if disp_axis == "X" or disp_axis == "x":
-        pass
-    elif disp_axis == "Y" or disp_axis == "y":
-        img_out.swapaxes()
-        img_smooth.swapaxes()
 
     # include header and write out file
     img_out.setHeader(header=img.getHeader())
     img_out.writeFitsData(out_image)
-    img_smooth.writeFitsData(out_stray)
+    # img_smooth.writeFitsData(out_stray)
+
+    img_median.apply_pixelmask()
+    from astropy.io import fits
+    hdus = fits.HDUList()
+    hdus.append(fits.PrimaryHDU(img._data, header=img._header))
+    hdus.append(fits.ImageHDU(img_median._data, name="MASKED"))
+    hdus.append(fits.ImageHDU(img_fit._data, name="POLYFIT"))
+    hdus.append(fits.ImageHDU(img_smooth._data, name="SMOOTH"))
+    hdus.writeto(out_stray, overwrite=True)
 
 
 def traceFWHM_drp(
