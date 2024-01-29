@@ -3939,9 +3939,9 @@ def create_pixelmask(in_short_dark, in_long_dark, out_pixmask, in_flat_a=None, i
 
 def trace_fibers(
     in_image: str,
-    out_trace_amp: str,
     out_trace_cent: str,
-    out_trace_fwhm: str,
+    out_trace_amp: str = None,
+    out_trace_fwhm: str = None,
     out_trace_cent_guess: str = None,
     out_model: str = None,
     out_ratio: str = None,
@@ -3959,6 +3959,7 @@ def trace_fibers(
     fit_poly: bool = False,
     poly_deg: int | Tuple[int] = 6,
     interpolate_missing: bool = True,
+    only_centroids: bool = False,
     display_plots: bool = True
 ) -> Tuple[TraceMask, TraceMask, TraceMask]:
     """Trace fibers in a given image
@@ -3997,12 +3998,12 @@ def trace_fibers(
     ----------
     in_image : str
         path to input image
-    out_trace_amp : str
-        path to output amplitude trace
     out_trace_cent : str
         path to output centroid trace
-    out_trace_fwhm : str
-        path to output FWHM trace
+    out_trace_amp : str, optional
+        path to output amplitude trace, by default None
+    out_trace_fwhm : str, optional
+        path to output FWHM trace, by default None
     out_trace_cent_guess : str, optional
         path to output centroid guess trace, by default None
     correct_ref : bool, optional
@@ -4033,6 +4034,8 @@ def trace_fibers(
         degree of polynomial(s) to use when fitting amplitude, centroid and FWHM, by default 6
     intrpolate_missing : bool, optional
         whether to interpolate bad/missing fibers, by default True
+    only_centroids : bool, optional
+        whether to only trace centroids, by default False
     display_plots : bool, optional
         whether to show plots on display or not, by default True
 
@@ -4125,12 +4128,6 @@ def trace_fibers(
     centroids._good_fibers = good_fibers
     centroids.setHeader(img._header.copy())
     centroids._header["IMAGETYP"] = "trace_centroid"
-    # initialize flux and FWHM traces
-    trace_cent = copy(centroids)
-    trace_amp = copy(centroids)
-    trace_amp._header["IMAGETYP"] = "trace_amplitude"
-    trace_fwhm = copy(centroids)
-    trace_fwhm._header["IMAGETYP"] = "trace_fwhm"
 
     # set positions of fibers along reference column
     centroids.setSlice(LVM_REFERENCE_COLUMN, axis="y", data=ref_cent, mask=numpy.zeros_like(ref_cent, dtype="bool"))
@@ -4174,15 +4171,41 @@ def trace_fibers(
         # smooth all trace by a polynomial
         log.info(f"fitting centroid guess trace with {deg_cent}-deg polynomial")
         centroids.fit_polynomial(deg_cent, poly_kind="poly")
+
+        # set bad fibers in trace mask
+        centroids._mask[bad_fibers] = True
+        # linearly interpolate coefficients at masked fibers
+        log.info(f"interpolating coefficients at {bad_fibers.sum()} masked fibers")
+        centroids.interpolate_coeffs()
     else:
         log.info("interpolating centroid guess trace")
         centroids.interpolate_data(axis="X")
-    # set bad fibers in trace mask
-    centroids._mask[bad_fibers] = True
 
-    # linearly interpolate coefficients at masked fibers
-    log.info(f"interpolating coefficients at {bad_fibers.sum()} masked fibers")
-    centroids.interpolate_coeffs()
+        # set bad fibers in trace mask
+        centroids._mask[bad_fibers] = True
+        log.info(f"interpolating data at {bad_fibers.sum()} masked fibers")
+        centroids.interpolate_data(axis="Y")
+
+    # write centroid if requested
+    if only_centroids:
+        log.info(f"writing centroid trace to '{os.path.basename(out_trace_cent)}'")
+        centroids.writeFitsData(out_trace_cent)
+        return centroids, img
+
+    if out_trace_fwhm is None or out_trace_amp is None:
+        raise ValueError("missing output trace for amplitude and/or FWHM")
+
+    # initialize flux and FWHM traces
+    trace_cent = TraceMask()
+    trace_cent.createEmpty(data_dim=(fibers, dim[1]))
+    trace_cent.setFibers(fibers)
+    trace_cent._good_fibers = good_fibers
+    trace_cent.setHeader(img._header.copy())
+    trace_amp = copy(trace_cent)
+    trace_fwhm = copy(trace_cent)
+    trace_cent._header["IMAGETYP"] = "trace_centroid"
+    trace_amp._header["IMAGETYP"] = "trace_amplitude"
+    trace_fwhm._header["IMAGETYP"] = "trace_fwhm"
 
     # select columns to fit for amplitudes, centroids and FWHMs per fiber block
     step = img._dim[1] // ncolumns_full
@@ -4348,7 +4371,7 @@ def trace_fibers(
         trace_fwhm._mask[bad_fibers] = True
 
         if interpolate_missing:
-            log.info("interpolating bad fibers")
+            log.info(f"interpolating data at {bad_fibers.sum()} masked fibers")
             trace_amp.interpolate_data(axis="Y")
             trace_cent.interpolate_data(axis="Y")
             trace_fwhm.interpolate_data(axis="Y")
