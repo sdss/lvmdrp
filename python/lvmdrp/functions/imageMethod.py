@@ -4229,7 +4229,7 @@ def trace_fibers(
             else:
                 # fit gaussian models to each fiber profile
                 log.info(f"fitting fiber block {j+1}/{nblocks} ({cen_block.size}/{msk_block.size} good fibers)")
-                _, par_block[~par_mask] = img_slice.fitMultiGauss(cen_block, init_fwhm=guess_fwhm)
+                _, par_block[~par_mask] = img_slice.fitMultiGauss_fixed_cent(cen_block, init_fwhm=guess_fwhm)
 
             par_blocks.append(par_block)
 
