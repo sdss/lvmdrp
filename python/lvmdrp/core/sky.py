@@ -221,7 +221,6 @@ def skymodel_pars_from_header(header, telescope):
     # observatory height ('sm_h' in km)
     sm_h = SH_CALCULATOR.observatory_elevation
 
-    # TODO: - ** lower height limit ('sm_hmin' in km)
     # altitude of object above the horizon (alt, 0 -- 90)
     alt, az, _ = t.altaz()
 
@@ -234,22 +233,18 @@ def skymodel_pars_from_header(header, telescope):
     # altitude of moon ('altmoon', -90 -- 90)
     altmoon, _, moondist = m.altaz()
 
-    # TODO: - ** distance to moon ('moondist', 0.91 -- 1.08; 1: mean distance)
+    # distance to moon ('moondist', 0.91 -- 1.08; 1: mean distance)
     moondist = moondist.to(u.m) / MEAN_MOON_DIST
 
     # TODO: - ** pressure at observatory altitude ('pres' in hPa)
-    # TODO: - ** single scattering albedo for aerosols ('ssa')
     # TODO: - ** calculation of double scattering of moonlight ('calcds', Y or N)
-    # TODO: - ** relative UV/optical ozone column density ('o3column'; 1: 258 DU)
-    # TODO: - ** scaling factor for scattered moonlight ('moonscal')
 
     # heliocentric ecliptic longitude of object ('lon_ecl', -180 -- 180)
     # heliocentric ecliptic latitude of object ('lat_ecl', -90 -- 90)
     lon_ecl, lat_ecl, _ = t.frame_latlon(ecliptic_frame)
 
-    # TODO: - ** grey-body emissivity ('emis_str', comma-separated list)
-    # TODO: - ** grey-body temperature ('temp_str' in K, comma-separated list)
     # TODO: - ** monthly-averaged solar radio flux ('msolflux' in sfu)
+    # TODO: pull this from header if it already exists
 
     # bimonthly period ('season'; 1: Dec/Jan, ..., 6: Oct/Nov; 0 entire year)
     month = obs_time.to_astropy().to_datetime().month
@@ -285,12 +280,13 @@ def skymodel_pars_from_header(header, telescope):
 
     # vacuum or air wavelengths ('vac_air', vac or air)
     # precipitable water vapour ('pwv' in mm; -1: bimonthly mean)
+    # NOTE: the following is for MOD1 when we run the RT code
     # TODO: - ** radiative transfer code for molecular spectra ('rtcode', L or R)
     # TODO: - ** resolving power of molecular spectra in library ('resol')
     # TODO: - ** sky model components
 
     skymodel_pars = {
-        f"HIERACH SKYMODEL {telescope} SM_H": max(2.4, max(3.06, sm_h.to(u.km).value)),
+        f"HIERACH SKYMODEL {telescope} SM_H": sm_h.to(u.km).value,
         f"HIERACH SKYMODEL {telescope} SM_HMIN": (2.0 * u.km).value,
         f"HIERACH SKYMODEL {telescope} ALT": alt.to(u.deg).value,
         f"HIERACH SKYMODEL {telescope} ALPHA": alpha.to(u.deg).value,

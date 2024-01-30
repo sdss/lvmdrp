@@ -1478,6 +1478,8 @@ def interpolate_sky(in_rss: str, out_skye: str, out_skyw: str, out_rss: str = No
         sky_rss._header.update(skymodel_pars_from_header(sky_rss._header, telescope="SKYW"))
         sky_rss._header.update(skymodel_pars_from_header(sky_rss._header, telescope="SKYE"))
         sky_rss._header.update(skymodel_pars_from_header(sky_rss._header, telescope="SCI"))
+        # TODO: add MSOLFLUX to headers. Pull data from here:
+        # https://spaceweather.gc.ca/forecast-prevision/solar-solaire/solarflux/sx-5-en.php
         # TODO: add same parameters for std *fibers*
         # sky_rss._header.update(skymodel_pars_from_header(sky_rss._header, telescope="SPEC"))
         sky_rss._header["HIERARCH GEOCORONAL SKYW SHADOW_HEIGHT"] = get_telescope_shadowheight(sky_rss._header, telescope="SKYW")
