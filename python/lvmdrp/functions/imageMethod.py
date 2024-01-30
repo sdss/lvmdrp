@@ -4404,12 +4404,12 @@ def trace_fibers(
 
     colors = plt.cm.Spectral(numpy.linspace(0, 1, len(columns)))
     idx = numpy.argsort(columns)
+    img_ = copy(img)
     for i in idx:
         icolumn = columns[i]
 
+        img_slice = img_.getSlice(icolumn, axis="y")
         joint_mod = mod_columns[i](img_slice._pixels)
-
-        img_slice = img.getSlice(icolumn, axis="y")
         img_slice._data[(img_slice._mask)|(joint_mod<=0)] = numpy.nan
 
         weights = img_slice._data / bn.nansum(img_slice._data) * 500
