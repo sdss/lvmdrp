@@ -1885,13 +1885,11 @@ def subtract_straylight(
         Order of the polynomial used to interpolate the background signal in cross-dispersion direction (positiv: normal polynomial, negativ: Legandre polynomial)
     smooth_gauss : string of float, optional with default :'10.0'
         Width of the 2D Gaussian filter to smooth the measured background signal
-
-    Examples
-    ----------------
-    user:> lvmdrp image subtractStrylight IMAGE.fits TRACE.fits CLEAN.fits x aperture=9 poly_cross=6 smooth_gauss=20.0
     """
     # load image data
     img = loadImage(in_image)
+    img._mask[-30:] = True
+    img._mask[:30] = True
 
     # load trace mask
     trace_mask = TraceMask()
@@ -4229,7 +4227,7 @@ def trace_fibers(
             else:
                 # fit gaussian models to each fiber profile
                 log.info(f"fitting fiber block {j+1}/{nblocks} ({cen_block.size}/{msk_block.size} good fibers)")
-                _, par_block[~par_mask] = img_slice.fitMultiGauss_fixed_cent(cen_block, init_fwhm=guess_fwhm)
+                _, par_block[~par_mask] = img_slice.fitMultiGauss(cen_block, init_fwhm=guess_fwhm)
 
             par_blocks.append(par_block)
 
