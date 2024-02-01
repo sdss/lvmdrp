@@ -336,8 +336,7 @@ class Image(Header):
             if self._error is not None and other._error is not None:
                 new_error = numpy.sqrt(
                     (self._error / other._data) ** 2
-                    + (self._data * other._error / other._data**2) ** 2
-                )
+                    + ((self._data / other._data) * (other._error / other._data**2)) ** 2)
                 img.setData(error=new_error)
             else:
                 img.setData(error=self._error)
