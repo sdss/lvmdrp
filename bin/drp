@@ -15,6 +15,7 @@ from lvmdrp.functions.skyMethod import configureSkyModel_drp
 from lvmdrp.utils.metadata import get_frames_metadata, get_master_metadata
 
 from lvmdrp.functions.run_quickdrp import quick_science_reduction
+from lvmdrp.functions.run_twilights import reduce_twilight_sequence
 
 
 @click.group('drp', short_help='CLI for the LVM data reduction')
@@ -126,6 +127,30 @@ def quick_reduction(expnum: int, use_fiducial_master: bool, skip_sky_subtraction
 
 # register quick DRP command
 cli.add_command(quick_reduction)
+
+
+@click.command('twilight', short_help='Run the twilight sequence reduction')
+@click.option('-e', '--expnums', type=int, multiple=True, help='a list of exposure numbers to reduce')
+@click.option('-b', '--median-box', type=int, default=5, help='the median box size')
+@click.option('-n', '--niter', type=int, default=1000, help='the number of iterations')
+@click.option('-t', '--threshold', type=float, default=0.5, help='the threshold for the sigma clipping')
+@click.option('-k', '--nknots', type=int, default=80, help='the number of knots for the spline')
+@click.option('-w', '--mask-bands', type=(float,float), multiple=True, help='the wavelength ranges to mask')
+def twilight_reduction(expnums: list, median_box: int = 5, niter: int = 1000, threshold: float = 0.5,
+                       knots: int = 80, mask_bands: tuple = None, display_plots: bool = False) -> None:
+    """ Run the twilight sequence reduction """
+    reduce_twilight_sequence(
+        expnums=expnums,
+        median_box=median_box,
+        niter=niter,
+        threshold=threshold,
+        nknots=knots,
+        mask_bands=mask_bands,
+        display_plots=display_plots)
+
+
+# register twilight sequence reduction
+cli.add_command(twilight_reduction)
 
 
 @cli.command('erase', short_help='Remove the DRP reductions')
