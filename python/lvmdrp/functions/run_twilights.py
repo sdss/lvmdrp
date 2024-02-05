@@ -36,18 +36,6 @@ MASTER_CON_LAMPS = {"b": "ldls", "r": "ldls", "z": "quartz"}
 MASTER_ARC_LAMPS = {"b": "neon_hgne_argon_xenon", "r": "neon_hgne_argon_xenon", "z": "neon_hgne_argon_xenon"}
 SLITMAP = Table(drp.fibermap.data)
 
-mask_bands = {
-    "b": [(3910, 4000), (4260, 4330)],
-    "r": [(6260, 6300), (6530, 6600), (6670, 6750), (6800, 7060), (7090, 7450)],
-    "z": [(7580, 7700), (8060, 8680), (8900, 9180), (9250, 9750)]
-}
-mask_bands = {
-    "b": [(3910, 4000), (4260, 4330)],
-    "r": [],
-    "z": [(7570, 7700)]
-}
-
-
 
 def fit_continuum(spec, median_box=30, thresh=1.2, niter=5, poly_deg=10, wave_range=None, wave_masks=None, reset_mask=True):
 
@@ -515,11 +503,6 @@ def fit_flat(mflat, camera, mwave_path=None, plot_fibers=[0, 300, 647], display_
 def reduce_twilight_sequence(expnums, median_box=5, niter=1000, threshold=0.5, nknots=50,
                              b_mask=[], r_mask=[], z_mask=[], display_plots=True):
     """Reduce the twilight sequence and produces master twilight flats"""
-    # get parameters of first exposure
-    flat_path = path.expand("lvm_raw", hemi="s", mjd="*", camspec="b1", expnum=expnums[0])[0]
-    params = path.extract("lvm_raw", flat_path)
-    params.pop("hemi")
-
     # get metadata
     flats = get_sequence_metadata(expnums)
     for flat in flats.to_dict("records"):
@@ -583,10 +566,13 @@ def reduce_twilight_sequence(expnums, median_box=5, niter=1000, threshold=0.5, n
     channels = "brz"
     mask_bands = dict(zip(channels, [b_mask, r_mask, z_mask]))
     new_flats = dict.fromkeys(channels)
-    for channel in channels:
-        for expnum in expnums:
-            hflat_paths = sorted(path.expand("lvm_anc", drpver=drpver, tileid="*", mjd=mjd, kind="h", imagetype="flat", camera=f"{channel}?", expnum=expnum))
-            sflat_paths = [path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="s", imagetype="flat", camera=f"{channel}{i+1}", expnum=expnum) for i in range(3)]
+    flat_channels = flats.groupby(flats.camera.str.__getitem__(0))
+    for channel in flat_channels.groups:
+        flat_expnums = flat_channels.get_group(channel).groupby("expnum")
+        for expnum in flat_expnums.groups:
+            flat_specs = flat_expnums.get_group(expnum)
+            hflat_paths = [path.full("lvm_anc", drpver=drpver, kind="h", imagetype=flat["imagetyp"], **flat) for flat in flat_specs.to_dict("records")]
+            sflat_paths = [path.full("lvm_anc", drpver=drpver, kind="s", imagetype=flat["imagetyp"], **flat) for flat in flat_specs.to_dict("records")]
 
             # fit fiber throughput
             hflats = [rssMethod.loadRSS(hflat_path) for hflat_path in hflat_paths]
@@ -597,15 +583,17 @@ def reduce_twilight_sequence(expnums, median_box=5, niter=1000, threshold=0.5, n
             for sflat, sflat_path in zip(sflats, sflat_paths):
                 sflat.writeFitsData(sflat_path)
 
-    cameras = ["b1", "b2", "b3", "r1", "r2", "r3", "z1", "z2", "z3"]
     # combine twilights and fit master fiberflat
-    new_flats = dict.fromkeys(cameras)
-    for camera in cameras:
+    new_flats = dict.fromkeys(flats.camera.unique())
+    flat_camera = flats.groupby("camera")
+    for camera in flat_camera.groups:
+        channel = camera[0]
+        flat_expnums = flat_camera.get_group(camera)
+        tileid = flat_expnums.tileid.min()
+        mrss = combine_twilight_sequence(expnums=flat_expnums.expnum.values, camera=camera, output_dir=masters_path)
+        mrss.writeFitsData(path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=masters_mjd, kind="mfiberflat", camera=camera))
 
-        mrss = combine_twilight_sequence(expnums=expnums, camera=camera, output_dir=masters_path)
-        mrss.writeFitsData(path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mfiberflat", camera=camera))
-
-        mwave_path = os.path.join(masters_path, f"lvm-mwave_{MASTER_ARC_LAMPS[camera[0]]}-{camera}.fits")
+        mwave_path = os.path.join(masters_path, f"lvm-mwave_{MASTER_ARC_LAMPS[channel]}-{camera}.fits")
         new_flat = fit_flat(mrss, camera=camera, mwave_path=mwave_path, display_plots=display_plots)
         mflat_path = os.path.join(masters_path, f"lvm-mfiberflat_twilight-{camera}.fits")
         new_flat.writeFitsData(mflat_path)
@@ -618,4 +606,8 @@ if __name__ == "__main__":
     expnums = list(range(7832, 7832+12))
     expnums = list(range(8027, 8038+1))
     expnums = list(range(7341, 7352+1))
-    flats = reduce_twilight_sequence(expnums=expnums, threshold=0.5, nknots=80, mask_bands=mask_bands, display_plots=True)
+
+    b_mask = [(3910, 4000), (4260, 4330)]
+    r_mask = []
+    z_mask = [(7570, 7700)]
+    flats = reduce_twilight_sequence(expnums=expnums, threshold=0.5, nknots=80, b_mask=b_mask, r_mask=r_mask, z_mask=z_mask, display_plots=True)
