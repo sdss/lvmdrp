@@ -302,7 +302,7 @@ def get_sequence_metadata(expnums):
     metadata.sort_values(["camera", "expnum"], inplace=True)
     return metadata
 
-def continuum_twilight(rsss, interpolate_bad=True, mask_bands=None,
+def continuum_twilight(rsss, interpolate_bad=True, mask_bands=[],
                        median_box=5, niter=100, threshold=1,
                        plot_fibers=np.arange(20), display_plots=True, **kwargs):
 
@@ -336,7 +336,7 @@ def continuum_twilight(rsss, interpolate_bad=True, mask_bands=None,
         flat.interpolate_data(axis="X", reset_mask=False)
 
     # mask wavelength bands
-    if mask_bands is not None:
+    if mask_bands:
         for iwave, fwave in mask_bands:
             flat._mask |= (iwave <= flat._wave) & (flat._wave <= fwave)
             flat._data[flat._mask] = np.nan
@@ -512,7 +512,8 @@ def fit_flat(mflat, camera, mwave_path=None, plot_fibers=[0, 300, 647], display_
 
     return new_flat
 
-def reduce_twilight_sequence(expnums, median_box=5, niter=1000, threshold=0.5, nknots=50, mask_bands=None, display_plots=True):
+def reduce_twilight_sequence(expnums, median_box=5, niter=1000, threshold=0.5, nknots=50,
+                             b_mask=[], r_mask=[], z_mask=[], display_plots=True):
     """Reduce the twilight sequence and produces master twilight flats"""
     # get parameters of first exposure
     flat_path = path.expand("lvm_raw", hemi="s", mjd="*", camspec="b1", expnum=expnums[0])[0]
@@ -580,19 +581,15 @@ def reduce_twilight_sequence(expnums, median_box=5, niter=1000, threshold=0.5, n
 
     # decompose twilight spectra into sun continuum and twilight components
     channels = "brz"
+    mask_bands = dict(zip(channels, [b_mask, r_mask, z_mask]))
     new_flats = dict.fromkeys(channels)
     for channel in channels:
         for expnum in expnums:
             hflat_paths = sorted(path.expand("lvm_anc", drpver=drpver, tileid="*", mjd=mjd, kind="h", imagetype="flat", camera=f"{channel}?", expnum=expnum))
             sflat_paths = [path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="s", imagetype="flat", camera=f"{channel}{i+1}", expnum=expnum) for i in range(3)]
 
-            # if all([os.path.isfile(sflat_path) for sflat_path in sflat_paths]):
-            #     log.info(f"skipping {','.join(sflat_paths)}, file already exist")
-            #     continue
-            # else:
-            hflats = [rssMethod.loadRSS(hflat_path) for hflat_path in hflat_paths]
-
             # fit fiber throughput
+            hflats = [rssMethod.loadRSS(hflat_path) for hflat_path in hflat_paths]
             sflats = continuum_twilight(rsss=hflats, median_box=median_box, niter=niter, threshold=threshold, mask_bands=mask_bands[channel],
                                         display_plots=display_plots, nknots=nknots)
 

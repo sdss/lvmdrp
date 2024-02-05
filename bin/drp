@@ -18,6 +18,47 @@ from lvmdrp.functions.run_quickdrp import quick_science_reduction
 from lvmdrp.functions.run_twilights import reduce_twilight_sequence
 
 
+class IntRangeType(click.ParamType):
+    name = 'int_list'
+
+    def convert(self, value, param, ctx):
+        try:
+            # Split the input value by commas
+            parts = value.split(',')
+
+            if len(parts) == 1:
+                # If only one part, treat it as a single integer
+                return [int(parts[0])]
+            elif len(parts) == 2:
+                # If two parts, treat them as initial and final values for a range
+                start, end = map(int, parts)
+                return list(range(start, end + 1))
+            else:
+                self.fail(f'{value} is not a valid input', param, ctx)
+
+        except ValueError:
+            self.fail(f'{value} is not a valid input', param, ctx)
+
+
+class WaveRange(click.ParamType):
+    name = 'wave_ranges'
+
+    def convert(self, value, param, ctx):
+        try:
+            # Split the input value by commas
+            waves = value.split(',')
+
+            if len(waves) == 2:
+                # Only if two parts, treat them as initial and final values for a range
+                iwave, fwave = map(float, waves)
+                return iwave, fwave
+            else:
+                self.fail(f'{value} is not a valid input', param, ctx)
+
+        except ValueError:
+            self.fail(f'{value} is not a valid input', param, ctx)
+
+
 @click.group('drp', short_help='CLI for the LVM data reduction')
 def cli():
     pass
@@ -130,22 +171,31 @@ cli.add_command(quick_reduction)
 
 
 @click.command('twilight', short_help='Run the twilight sequence reduction')
-@click.option('-e', '--expnums', type=int, multiple=True, help='a list of exposure numbers to reduce')
+@click.option('-e', '--expnums', type=IntRangeType(), help='a list of exposure numbers to reduce')
 @click.option('-b', '--median-box', type=int, default=5, help='the median box size')
 @click.option('-n', '--niter', type=int, default=1000, help='the number of iterations')
 @click.option('-t', '--threshold', type=float, default=0.5, help='the threshold for the sigma clipping')
 @click.option('-k', '--nknots', type=int, default=80, help='the number of knots for the spline')
-@click.option('-w', '--mask-bands', type=(float,float), multiple=True, help='the wavelength ranges to mask')
+@cloup.option_group(
+    'Channel masks',
+    'Options for masking wavelength ranges for each spectrograph channel',
+    cloup.option('--b-mask', type=WaveRange(), multiple=True, help='the wavelength ranges to mask for b channel'),
+    cloup.option('--r-mask', type=WaveRange(), multiple=True, help='the wavelength ranges to mask for r channel'),
+    cloup.option('--z-mask', type=WaveRange(), multiple=True, help='the wavelength ranges to mask for z channel')
+)
 def twilight_reduction(expnums: list, median_box: int = 5, niter: int = 1000, threshold: float = 0.5,
-                       knots: int = 80, mask_bands: tuple = None, display_plots: bool = False) -> None:
+                       nknots: int = 80, b_mask: list = [], r_mask: list = [], z_mask: list = [],
+                       display_plots: bool = False) -> None:
     """ Run the twilight sequence reduction """
     reduce_twilight_sequence(
         expnums=expnums,
         median_box=median_box,
         niter=niter,
         threshold=threshold,
-        nknots=knots,
-        mask_bands=mask_bands,
+        nknots=nknots,
+        b_mask=b_mask,
+        r_mask=r_mask,
+        z_mask=z_mask,
         display_plots=display_plots)
 
 
