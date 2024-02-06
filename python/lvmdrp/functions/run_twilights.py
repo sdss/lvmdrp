@@ -127,15 +127,16 @@ def fit_continuum(spectrum: Spectrum1D, mask_bands: List[Tuple[float,float]],
 
     # iterate to mask outliers and update spline
     continuum_models = []
+    masked_pixels = copy(spectrum._mask)
     for i in range(niter):
         residuals = spline - spectrum._data
         mask = spline - threshold*np.nanstd(residuals) > spectrum._data
 
         # add new outliers to mask
-        spectrum._mask |= mask
+        masked_pixels |= mask
 
         # update spline
-        good_pix = ~spectrum._mask
+        good_pix = ~masked_pixels
         f = interpolate.splrep(spectrum._wave[good_pix], spectrum._data[good_pix], **kwargs)
         new_spline = interpolate.splev(spectrum._wave, f)
         continuum_models.append(new_spline)
@@ -145,7 +146,6 @@ def fit_continuum(spectrum: Spectrum1D, mask_bands: List[Tuple[float,float]],
             spline = new_spline
 
     best_continuum = continuum_models.pop()
-    masked_pixels = spectrum._mask
     return best_continuum, continuum_models, masked_pixels, knots
 
 def fit_fiberflat(rsss: List[RSS], interpolate_bad: bool = True, mask_bands: List[Tuple[float,float]] = [],
