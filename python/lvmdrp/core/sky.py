@@ -31,7 +31,7 @@ from skyfield.api import Star, load, wgs84
 from skyfield.framelib import ecliptic_frame
 
 # from lvmscheduler import shadow as sh
-from lvmsurveysim.utils import shadow_height_lib as sh
+from lvmdrp.external import shadow_height_lib as sh
 
 from lvmdrp.core.constants import (
     ALMANAC_CONFIG_PATH,

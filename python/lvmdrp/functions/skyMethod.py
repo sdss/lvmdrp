@@ -1646,3 +1646,4 @@ def quick_sky_subtraction(in_cframe, band=np.array((7238,7242,7074,7084,7194,726
     cframe["ERROR"].data = error_c
     cframe["SKY"].data = sky_c
     cframe.writeto(in_cframe, overwrite=True)
+    # TODO: check on expnum=7632 for halpha emission in sky fibers
