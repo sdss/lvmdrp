@@ -30,7 +30,8 @@ from skyfield.positionlib import ICRS
 from skyfield.api import Star, load, wgs84
 from skyfield.framelib import ecliptic_frame
 
-from lvmscheduler import shadow as sh
+# from lvmscheduler import shadow as sh
+from lvmsurveysim.utils import shadow_height_lib as sh
 
 from lvmdrp.core.constants import (
     ALMANAC_CONFIG_PATH,
@@ -191,7 +192,7 @@ def skymodel_pars_from_header(header, telescope):
         raise ValueError(f"invalid value for 'telescope' parameter: '{telescope}', valid values are 'SKYE', 'SKYW', 'SCI', or 'SPEC'")
 
     # extract useful header information
-    ra, dec = header[f"TE{telescope}ERA"], header[f"TE{telescope}EDEC"]
+    ra, dec = header[f"TE{telescope}RA"], header[f"TE{telescope}DE"]
     obstime = Time(header["OBSTIME"], scale="tai")
 
     # define ephemeris object
@@ -199,9 +200,9 @@ def skymodel_pars_from_header(header, telescope):
     sun, earth, moon = astros["sun"], astros["earth"], astros["moon"]
     # define location
     obs_topos = wgs84.latlon(
-        latitude_degrees=SH_CALCULATOR.observatory_topo.latitude.degrees.to(u.deg),
-        longitude_degrees=SH_CALCULATOR.observatory_topo.longitude.degrees.to(u.deg),
-        elevation_m=SH_CALCULATOR.observatory_elevation,
+        latitude_degrees=SH_CALCULATOR.observatory_topo.latitude.degrees,#.to(u.deg),
+        longitude_degrees=SH_CALCULATOR.observatory_topo.longitude.degrees,#.to(u.deg),
+        elevation_m=SH_CALCULATOR.observatory_elevation.value,
     )
     obs = earth + obs_topos
     # define observation datetime
@@ -686,7 +687,7 @@ def get_telescope_shadowheight(header, telescope):
         raise ValueError(f"invalid value for 'telescope' parameter: '{telescope}', valid values are 'SKYE', 'SKYW', 'SCI', or 'SPEC'")
 
     header["JD"] = header["MJD"] + 2400000.5
-    ra, dec = header[f"TE{telescope}ERA"], header[f"TE{telescope}EDEC"]
+    ra, dec = header[f"TE{telescope}RA"], header[f"TE{telescope}DE"]
     jd = header["JD"]
 
     SH_CALCULATOR.update_time(jd=jd)
