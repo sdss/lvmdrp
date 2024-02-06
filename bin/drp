@@ -175,7 +175,7 @@ cli.add_command(quick_reduction)
 @click.option('-e', '--expnums', type=IntRangeType(), help='a list of exposure numbers to reduce')
 @click.option('-b', '--median-box', type=int, default=5, help='the median box size')
 @click.option('-n', '--niter', type=int, default=1000, help='the number of iterations')
-@click.option('-t', '--threshold', type=float, default=0.5, help='the threshold for the sigma clipping')
+@click.option('-t', '--threshold', type=tuple, default=(0.5,2.0), help='the thresholds (lower,upper) for the sigma clipping')
 @click.option('-k', '--nknots', type=int, default=80, help='the number of knots for the spline')
 @cloup.option_group(
     'Channel masks',
@@ -184,9 +184,10 @@ cli.add_command(quick_reduction)
     cloup.option('--r-mask', type=WaveRange(), multiple=True, help='the wavelength ranges to mask for r channel'),
     cloup.option('--z-mask', type=WaveRange(), multiple=True, help='the wavelength ranges to mask for z channel')
 )
-def twilight_reduction(expnums: list, median_box: int = 5, niter: int = 1000, threshold: Tuple[float,float]|float = (0.5,1e12),
-                       nknots: int = 80, b_mask: list = [], r_mask: list = [], z_mask: list = [],
-                       display_plots: bool = False) -> None:
+@click.option('-d', '--display-plots', is_flag=True, default=False, help='Flag to display the plots')
+def twilight_reduction(expnums: list, median_box: int, niter: int, threshold: Tuple[float,float],
+                       nknots: int, b_mask: list, r_mask: list, z_mask: list,
+                       display_plots: bool) -> None:
     """ Run the twilight sequence reduction """
     reduce_twilight_sequence(
         expnums=expnums,

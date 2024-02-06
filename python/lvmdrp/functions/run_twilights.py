@@ -569,13 +569,3 @@ def reduce_twilight_sequence(expnums: List[int], median_box: int = 10, niter: bo
 
     return new_flats
 
-
-if __name__ == "__main__":
-    expnums = list(range(7832, 7832+12))
-    expnums = list(range(8027, 8038+1))
-    expnums = list(range(7341, 7352+1))
-
-    b_mask = [(3910, 4000), (4260, 4330)]
-    r_mask = []
-    z_mask = [(7570, 7700)]
-    flats = reduce_twilight_sequence(expnums=expnums, threshold=0.5, nknots=80, b_mask=b_mask, r_mask=r_mask, z_mask=z_mask, display_plots=False)
