@@ -346,8 +346,10 @@ def combine_twilight_sequence(expnums: List[int], camera: str, output_dir: str) 
         mflat._error[select_nonstd] = np.sqrt(mflat._error[select_nonstd]**2 + hflat._error[select_nonstd]**2)
         mflat._mask[select_nonstd] = mflat._mask[select_nonstd] & hflat._mask[select_nonstd]
 
+        # get exposed standard fiber ID
+        default_fiber_id = f"P1-{i+1}"
+        fiber_id = mflat._header.get("CALIBFIB", default_fiber_id) or default_fiber_id
         # put std fibers in the right position
-        fiber_id = f"P1-{i+1}"
         idx = np.where(fibermap["orig_ifulabel"].value == fiber_id)
         mflat._data[idx] = hflat._data[idx]
         mflat._error[idx] = hflat._error[idx]
