@@ -30,7 +30,6 @@ from skyfield.positionlib import ICRS
 from skyfield.api import Star, load, wgs84
 from skyfield.framelib import ecliptic_frame
 
-# from lvmscheduler import shadow as sh
 from lvmdrp.external import shadow_height_lib as sh
 
 from lvmdrp.core.constants import (
@@ -287,25 +286,25 @@ def skymodel_pars_from_header(header, telescope):
     # TODO: - ** sky model components
 
     skymodel_pars = {
-        f"HIERACH SKYMODEL {telescope} SM_H": sm_h.to(u.km).value,
-        f"HIERACH SKYMODEL {telescope} SM_HMIN": (2.0 * u.km).value,
-        f"HIERACH SKYMODEL {telescope} ALT": alt.to(u.deg).value,
-        f"HIERACH SKYMODEL {telescope} ALPHA": alpha.to(u.deg).value,
-        f"HIERACH SKYMODEL {telescope} RHO": rho.to(u.deg).value,
-        f"HIERACH SKYMODEL {telescope} ALTMOON": altmoon.to(u.deg).value,
-        f"HIERACH SKYMODEL {telescope} MOONDIST": moondist.value,
-        f"HIERACH SKYMODEL {telescope} PRES": (744 * u.hPa).value,
-        f"HIERACH SKYMODEL {telescope} SSA": 0.97,
-        f"HIERACH SKYMODEL {telescope} CALCDS": "N",
-        f"HIERACH SKYMODEL {telescope} O2COLUMN": 1.0,
-        f"HIERACH SKYMODEL {telescope} MOONSCAL": 1.0,
-        f"HIERACH SKYMODEL {telescope} LON_ECL": lon_ecl.to(u.deg).value,
-        f"HIERACH SKYMODEL {telescope} LAT_ECL": lat_ecl.to(u.deg).value,
-        f"HIERACH SKYMODEL {telescope} EMIS_STR": ",".join(map(str, [0.2])),
-        f"HIERACH SKYMODEL {telescope} TEMP_STR": ",".join(map(str, [(290.0 * u.K).value])),
-        f"HIERACH SKYMODEL {telescope} MSOLFLUX": 130.0,  # 1 sfu = 1e-19 erg/s/cm**2/Hz,
-        f"HIERACH SKYMODEL {telescope} SEASON": season,
-        f"HIERACH SKYMODEL {telescope} TIME": time,
+        f"HIERARCH SKYMODEL {telescope} SM_H": sm_h.to(u.km).value,
+        f"HIERARCH SKYMODEL {telescope} SM_HMIN": (2.0 * u.km).value,
+        f"HIERARCH SKYMODEL {telescope} ALT": alt.to(u.deg).value,
+        f"HIERARCH SKYMODEL {telescope} ALPHA": alpha.to(u.deg).value,
+        f"HIERARCH SKYMODEL {telescope} RHO": rho.to(u.deg).value,
+        f"HIERARCH SKYMODEL {telescope} ALTMOON": altmoon.to(u.deg).value,
+        f"HIERARCH SKYMODEL {telescope} MOONDIST": moondist.value,
+        f"HIERARCH SKYMODEL {telescope} PRES": (744 * u.hPa).value,
+        f"HIERARCH SKYMODEL {telescope} SSA": 0.97,
+        f"HIERARCH SKYMODEL {telescope} CALCDS": "N",
+        f"HIERARCH SKYMODEL {telescope} O2COLUMN": 1.0,
+        f"HIERARCH SKYMODEL {telescope} MOONSCAL": 1.0,
+        f"HIERARCH SKYMODEL {telescope} LON_ECL": lon_ecl.to(u.deg).value,
+        f"HIERARCH SKYMODEL {telescope} LAT_ECL": lat_ecl.to(u.deg).value,
+        f"HIERARCH SKYMODEL {telescope} EMIS_STR": ",".join(map(str, [0.2])),
+        f"HIERARCH SKYMODEL {telescope} TEMP_STR": ",".join(map(str, [(290.0 * u.K).value])),
+        f"HIERARCH SKYMODEL {telescope} MSOLFLUX": 130.0,  # 1 sfu = 1e-19 erg/s/cm**2/Hz,
+        f"HIERARCH SKYMODEL {telescope} SEASON": season,
+        f"HIERARCH SKYMODEL {telescope} TIME": time,
     }
 
     return skymodel_pars
