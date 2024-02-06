@@ -1672,7 +1672,7 @@ def quick_sky_subtraction(in_rss: str, out_rss, in_skye: str, in_skyw: str, sky_
         log.info("subtracting interpolated sky from original data")
         new_data = rss._data - sky._data
         new_error = np.sqrt(rss._error ** 2 + sky._error ** 2)
-        new_mask = rss._mask
+        new_mask = rss._mask | sky._mask
 
     # write output sky-subtracted RSS
     log.info(f"writing output RSS file '{os.path.basename(out_rss)}'")
@@ -1701,7 +1701,13 @@ def quick_sky_refinement(in_cframe, band=np.array((7238,7242,7074,7084,7194,7265
     wave = cframe["WAVE"].data
     flux = cframe["FLUX"].data
     error = cframe["ERROR"].data
+    sky_error = cframe["SKY_ERROR"].data
     sky = cframe["SKY"].data
+
+    # If sky has been subtracted already
+    if cframe['FLUX'].header.get('SKYSUB'):
+        flux = flux + sky
+        error = np.sqrt(error**2 - sky_error**2)
 
     crval = wave[0]
     cdelt = wave[1] - wave[0]
@@ -1720,7 +1726,7 @@ def quick_sky_refinement(in_cframe, band=np.array((7238,7242,7074,7084,7194,7265
     scale = map_c / smap_c
     sky_c = np.nan_to_num(sky * scale[:, None])
     data_c = np.nan_to_num(flux - sky_c)
-    error_c = np.nan_to_num(error - sky_c)
+    error_c = np.nan_to_num(np.sqrt(error**2 + (sky_error * scale[:, None])**2))
 
     cframe["FLUX"].data = data_c
     cframe["ERROR"].data = error_c
