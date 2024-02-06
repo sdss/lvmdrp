@@ -69,7 +69,7 @@ def get_sequence_metadata(expnums: List[int]) -> pd.DataFrame:
     return metadata
 
 def fit_continuum(spectrum: Spectrum1D, mask_bands: List[Tuple[float,float]],
-                  median_box: int, niter: int, threshold: float, **kwargs):
+                  median_box: int, niter: int, threshold: Tuple[float,float]|float, **kwargs):
     """Fit a continuum to a spectrum using a spline interpolation
 
     Given a spectrum, this function fits a continuum using a spline
@@ -86,8 +86,9 @@ def fit_continuum(spectrum: Spectrum1D, mask_bands: List[Tuple[float,float]],
         Size of the median filter box
     niter : int
         Number of iterations to fit the continuum
-    threshold : float
-        Threshold to mask outliers
+    threshold : float or tuple of floats
+        Threshold to mask outliers, if tuple, the first element is the lower
+        threshold and the second element is the upper threshold
 
     Returns
     -------
@@ -128,16 +129,18 @@ def fit_continuum(spectrum: Spectrum1D, mask_bands: List[Tuple[float,float]],
     # iterate to mask outliers and update spline
     continuum_models = []
     masked_pixels = copy(spectrum._mask)
+    if threshold is not None and isinstance(threshold, (float, int)):
+        threshold = (threshold, np.inf)
     for i in range(niter):
         residuals = spline - spectrum._data
-        mask = spline - threshold*np.nanstd(residuals) > spectrum._data
+        mask = spline - threshold[0]*np.nanstd(residuals) > spectrum._data
+        mask |= spline + threshold[1]*np.nanstd(residuals) < spectrum._data
 
         # add new outliers to mask
         masked_pixels |= mask
 
         # update spline
-        good_pix = ~masked_pixels
-        f = interpolate.splrep(spectrum._wave[good_pix], spectrum._data[good_pix], **kwargs)
+        f = interpolate.splrep(spectrum._wave[~masked_pixels], spectrum._data[~masked_pixels], **kwargs)
         new_spline = interpolate.splev(spectrum._wave, f)
         continuum_models.append(new_spline)
         if np.mean(np.abs(new_spline - spline) / spline) <= 0.01:
@@ -149,8 +152,9 @@ def fit_continuum(spectrum: Spectrum1D, mask_bands: List[Tuple[float,float]],
     return best_continuum, continuum_models, masked_pixels, knots
 
 def fit_fiberflat(rsss: List[RSS], interpolate_bad: bool = True, mask_bands: List[Tuple[float,float]] = [],
-                       median_box:int = 5, niter: int = 100, threshold: float = 1.0,
-                       plot_fibers: List[int] = np.arange(20), display_plots: bool = False, **kwargs) -> List[RSS]:
+                  median_box:int = 5, niter: int = 1000, threshold: Tuple[float,float]|float = (0.5,2.0),
+                  plot_fibers: List[int] = [0,300,600,900,1200,1400,1700],
+                  display_plots: bool = False, **kwargs) -> List[RSS]:
     """Fit fiber throughput for a twilight sequence
 
     Given a list of three extracted and wavelength calibrated twilight
@@ -169,11 +173,11 @@ def fit_fiberflat(rsss: List[RSS], interpolate_bad: bool = True, mask_bands: Lis
     median_box : int, optional
         Size of the median filter box, by default 5
     niter : int, optional
-        Number of iterations to fit the continuum, by default 100
+        Number of iterations to fit the continuum, by default 1000
     threshold : float, optional
-        Threshold to mask outliers, by default 1.0
+        Threshold to mask outliers, by default (0.5,2.0)
     plot_fibers : list, optional
-        List of fibers to plot, by default np.arange(20)
+        List of fibers to plot, by default [0,300,600,900,1200,1400,1700]
     display_plots : bool, optional
         Display plots, by default False
 
@@ -429,8 +433,8 @@ def resample_fiberflat(mflat: RSS, camera: str, mwave_path: str,
 
     return new_flat
 
-def reduce_twilight_sequence(expnums: List[int], median_box: int = 5, niter: bool = 1000,
-                             threshold: float = 0.5, nknots: bool = 50,
+def reduce_twilight_sequence(expnums: List[int], median_box: int = 10, niter: bool = 1000,
+                             threshold: Tuple[float,float]|float = (0.5,1.5), nknots: bool = 50,
                              b_mask: List[Tuple[float,float]] = [],
                              r_mask: List[Tuple[float,float]] = [],
                              z_mask: List[Tuple[float,float]] = [],
@@ -539,8 +543,9 @@ def reduce_twilight_sequence(expnums: List[int], median_box: int = 5, niter: boo
 
             # fit fiber throughput
             hflats = [rssMethod.loadRSS(hflat_path) for hflat_path in hflat_paths]
-            sflats = fit_fiberflat(rsss=hflats, median_box=median_box, niter=niter, threshold=threshold, mask_bands=mask_bands[channel],
-                                        display_plots=display_plots, nknots=nknots)
+            sflats = fit_fiberflat(rsss=hflats, median_box=median_box, niter=niter,
+                                   threshold=threshold, mask_bands=mask_bands[channel],
+                                   display_plots=display_plots, nknots=nknots)
 
             # write output to disk
             for sflat, sflat_path in zip(sflats, sflat_paths):

@@ -5,6 +5,7 @@
 import os
 import pathlib
 import shutil
+from typing import Tuple
 
 import click
 import cloup
@@ -183,7 +184,7 @@ cli.add_command(quick_reduction)
     cloup.option('--r-mask', type=WaveRange(), multiple=True, help='the wavelength ranges to mask for r channel'),
     cloup.option('--z-mask', type=WaveRange(), multiple=True, help='the wavelength ranges to mask for z channel')
 )
-def twilight_reduction(expnums: list, median_box: int = 5, niter: int = 1000, threshold: float = 0.5,
+def twilight_reduction(expnums: list, median_box: int = 5, niter: int = 1000, threshold: Tuple[float,float]|float = (0.5,1e12),
                        nknots: int = 80, b_mask: list = [], r_mask: list = [], z_mask: list = [],
                        display_plots: bool = False) -> None:
     """ Run the twilight sequence reduction """
