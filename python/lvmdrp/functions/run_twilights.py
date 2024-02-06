@@ -387,7 +387,7 @@ def resample_fiberflat(mflat: RSS, camera: str, mwave_path: str,
         Master twilight flat with fitted fiber throughput
     """
     channel = camera[0]
-    tileid = mflat._header.get("TILEID", 11111) or 11111
+    tileid = mflat._header.get("TILE_ID", 11111) or 11111
     mjd = mflat._header["MJD"]
     # load master wavelength
     if mwave_path is not None:
