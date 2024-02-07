@@ -1948,7 +1948,7 @@ def subtract_straylight(
     img_out.writeFitsData(out_image)
 
     # write out stray light image
-    if out_stray is None:
+    if out_stray is not None:
         log.info(f"writing stray light image to {os.path.basename(out_stray)}")
         img_median.apply_pixelmask()
         hdus = pyfits.HDUList()
@@ -3972,7 +3972,7 @@ def trace_fibers(
     poly_deg: int | Tuple[int] = 6,
     interpolate_missing: bool = True,
     only_centroids: bool = False,
-    display_plots: bool = True
+    display_plots: bool = False
 ) -> Tuple[TraceMask, TraceMask, TraceMask]:
     """Trace fibers in a given image
 
