@@ -35,9 +35,11 @@ from astropy.io import fits
 
 from lvmdrp import log, path, __version__ as drpver
 from lvmdrp.utils import metadata as md
+from lvmdrp.core.constants import SPEC_CHANNELS
 from lvmdrp.core.tracemask import TraceMask
 
 from lvmdrp.functions import imageMethod as image_tasks
+from lvmdrp.functions import rssMethod as rss_tasks
 from lvmdrp.functions.run_drp import get_config_options, read_fibermap
 
 
@@ -84,6 +86,8 @@ def get_sequence_metadata(mjds, target_mjd=None, expnums=None):
     # filter by given expnums
     if expnums is not None:
         frames.query("expnum in @expnums", inplace=True)
+
+    frames.sort_values(["expnum", "camera"], inplace=True)
 
     return frames, masters_mjd
 
@@ -401,7 +405,6 @@ def create_traces(mjds, target_mjd=None, expnums_ldls=None, expnums_qrtz=None,
     """
     expnums = np.concatenate([expnums_ldls, expnums_qrtz])
     frames, masters_mjd = get_sequence_metadata(mjds, target_mjd=target_mjd, expnums=expnums)
-    frames.sort_values(["expnum", "camera"], inplace=True)
 
     reduce_2d(mjds, target_mjd=masters_mjd, expnums=expnums)
 
@@ -604,7 +607,7 @@ def create_illumination_corrections(mjds, target_mjd=None, expnums=None):
 
 
 def create_wavelengths(mjds, target_mjd=None, expnums=None):
-    """Create wavelength solutions from master arcs
+    """Reduces an arc sequence to create master wavelength solutions
 
     Given a set of MJDs and (optionally) exposure numbers, create wavelength
     solutions from the master arcs. This routine will store the master
@@ -623,8 +626,57 @@ def create_wavelengths(mjds, target_mjd=None, expnums=None):
     expnums : list
         List of exposure numbers to reduce
     """
-    pass
+    frames, masters_mjd = get_sequence_metadata(mjds, target_mjd=target_mjd, expnums=expnums)
+    masters_path = os.path.join(MASTERS_DIR, str(masters_mjd))
 
+    reduce_2d(mjds, target_mjd=masters_mjd, expnums=expnums)
+
+    arc_analogs = frames.query("imagetyp=='arc'").groupby(["camera",])
+    for camera in arc_analogs.groups:
+        arcs = arc_analogs.get_group((camera,))
+        arc = arcs.iloc[0]
+
+        # define master paths for target frames
+        mtrace_path = os.path.join(masters_path, f"lvm-mtrace-{camera}.fits")
+        mwidth_path = os.path.join(masters_path, f"lvm-mwidth-{camera}.fits")
+
+        # define product paths
+        marc_path = path.full("lvm_master", drpver=drpver, tileid=arc["tileid"], mjd=arc["mjd"], kind="marc", camera=arc["camera"])
+        xarc_path = path.full("lvm_master", drpver=drpver, tileid=arc["tileid"], mjd=arc["mjd"], kind="xarc", camera=arc["camera"])
+        os.makedirs(os.path.dirname(marc_path), exist_ok=True)
+
+        # combine individual arcs into master arc
+        if os.path.isfile(marc_path):
+            log.info(f"skipping master arc {marc_path}, file already exists")
+        else:
+            darc_paths = [path.full("lvm_anc", drpver=drpver, kind="d", imagetype=arc["imagetyp"], **arc) for arc in arcs.to_dict("records")]
+            image_tasks.create_master_frame(in_images=darc_paths, out_image=marc_path)
+
+        # extract arc
+        if os.path.isfile(xarc_path):
+            log.info(f"skipping extracted arc {xarc_path}, file already exists")
+        else:
+            image_tasks.extract_spectra(in_image=marc_path, out_rss=xarc_path, in_trace=mtrace_path, in_fwhm=mwidth_path, method="optimal")
+
+        # define products paths
+        xarc_path = path.full("lvm_master", drpver=drpver, tileid=arc["tileid"], mjd=arc["mjd"], kind="xarc", camera=arc["camera"])
+        harc_path = path.full("lvm_master", drpver=drpver, tileid=arc["tileid"], mjd=arc["mjd"], kind="harc", camera=arc["camera"])
+
+        # fit wavelength solution
+        out_wave, out_lsf = os.path.join("data_wave", f"lvm-mwave-{camera}.fits"), os.path.join("data_wave", f"lvm-mlsf-{camera}.fits")
+        rss_tasks.determine_wavelength_solution(in_arcs=xarc_path, out_wave=out_wave, out_lsf=out_lsf, aperture=12,
+                                                cc_correction=True, cc_max_shift=20, poly_disp=5, poly_fwhm=2, poly_cros=2,
+                                                flux_min=1e-12, fwhm_max=5, rel_flux_limits=[0.001, 1e12])
+
+        # apply wavelength solution to arcs
+        rss_tasks.create_pixel_table(in_rss=xarc_path, out_rss=harc_path, arc_wave=out_wave, arc_fwhm=out_lsf)
+
+        # rectify arcs
+        iwave, fwave = SPEC_CHANNELS[camera[0]]
+        rss_tasks.resample_wavelength(in_rss=harc_path, out_rss=harc_path,
+                                      method="linear", disp_pix=0.5,
+                                      start_wave=iwave, end_wave=fwave,
+                                      err_sim=10, parallel=0, extrapolate=False)
 
 @cloup.command(short_help='Run the calibration sequence reduction', show_constraints=True)
 @click.option('-m', '--mjds', type=int, multiple=True, help='list of MJDs with calibration sequence taken')
@@ -684,10 +736,9 @@ if __name__ == '__main__':
     # qrtz_expnums = np.arange(3938, 3939+1).tolist() + [None] * 10
 
     try:
-        # reduce_2d(mjds=60177, expnums=[3450])
         # create_detrending_frames(mjds=60255, target_mjd=60255, kind="bias")
-        reduce_2d(mjds=MJD, expnums=np.concatenate((ldls_expnums, qrtz_expnums)))
-        create_traces(mjds=MJD, expnums_ldls=ldls_expnums, expnums_qrtz=qrtz_expnums, subtract_straylight=True)
+        # create_traces(mjds=MJD, expnums_ldls=ldls_expnums, expnums_qrtz=qrtz_expnums, subtract_straylight=True)
+        create_wavelengths(mjds=60264, target_mjd=60255, expnums=[7750,7751])
     except Exception as e:
         # snapshot = tracemalloc.take_snapshot()
         # top_stats = snapshot.statistics('lineno')
