@@ -1899,6 +1899,7 @@ def subtract_straylight(
         The stray light subtracted image
     """
     # load image data
+    log.info(f"using image {os.path.basename(in_image)} for stray light subtraction")
     img = loadImage(in_image)
 
     # mask regions around the top and bottom of the CCD
@@ -1907,45 +1908,55 @@ def subtract_straylight(
         mask_bnrows = mask_nrows
     else:
         mask_tnrows, mask_bnrows = mask_nrows
+    log.info(f"masking top {mask_tnrows} and bottom {mask_bnrows} rows of the CCD")
     img._mask[-mask_tnrows:] = True
     img._mask[:mask_bnrows] = True
 
-    # load trace mask
-    trace_mask = TraceMask()
-    trace_mask.loadFitsData(in_cent_trace, extension_data=0)
-
     # smooth image along dispersion axis with a median filter excluded NaN values
-    if smooth_disp:
+    if smooth_disp is not None:
+        log.info(f"median filtering image along dispersion axis with a median filter of width {smooth_disp}")
         smooth_disp = max(1, smooth_disp)
         img_median = img.medianImg((1, smooth_disp), use_mask=True)
     else:
         img_median = copy(img)
 
+    # load trace mask
+    log.info(f"using centroids trace {os.path.basename(in_cent_trace)} to mask fibers")
+    trace_mask = TraceMask()
+    trace_mask.loadFitsData(in_cent_trace, extension_data=0)
+
     # mask regions around each fiber within a given cross-dispersion aperture
+    log.info(f"masking fibers with an aperture of {aperture} pixels")
     img_median.maskFiberTraces(trace_mask, aperture=aperture, parallel=parallel)
 
     # fit the signal in unmaksed areas along cross-dispersion axis by a polynomial
+    log.info(f"fitting polynomial of degree {poly_cross} to the background signal along cross-dispersion axis")
     img_fit = img_median.fitPoly(order=poly_cross, plot=-1)
 
     # smooth the results by 2D Gaussian filter of given with (cross- and dispersion axis have equal width)
+    log.info(f"smoothing the background signal by a 2D Gaussian filter of width {smooth_gauss}")
     img_stray = img_fit.convolveGaussImg(smooth_gauss, smooth_gauss)
     img_stray.setData(data=numpy.nan_to_num(img_stray._data), error=numpy.nan_to_num(img_stray._error))
 
     # subtract smoothed background signal from origianal image
+    log.info("subtracting the smoothed background signal from the original image")
     img_out = img - img_stray
 
     # include header and write out file
+    log.info(f"writing stray light subtracted image to {os.path.basename(out_image)}")
     img_out.setHeader(header=img.getHeader())
     img_out.writeFitsData(out_image)
 
     # write out stray light image
-    img_median.apply_pixelmask()
-    hdus = pyfits.HDUList()
-    hdus.append(pyfits.PrimaryHDU(img._data, header=img._header))
-    hdus.append(pyfits.ImageHDU(img_median._data, name="MASKED"))
-    hdus.append(pyfits.ImageHDU(img_fit._data, name="POLYFIT"))
-    hdus.append(pyfits.ImageHDU(img_stray._data, name="SMOOTH"))
-    hdus.writeto(out_stray, overwrite=True)
+    if out_stray is None:
+        log.info(f"writing stray light image to {os.path.basename(out_stray)}")
+        img_median.apply_pixelmask()
+        hdus = pyfits.HDUList()
+        hdus.append(pyfits.PrimaryHDU(img._data, header=img._header))
+        hdus.append(pyfits.ImageHDU(img_median._data, name="MASKED"))
+        hdus.append(pyfits.ImageHDU(img_fit._data, name="POLYFIT"))
+        hdus.append(pyfits.ImageHDU(img_stray._data, name="SMOOTH"))
+        hdus.writeto(out_stray, overwrite=True)
 
     return img, img_fit, img_stray, img_out
 
