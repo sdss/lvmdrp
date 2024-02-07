@@ -445,6 +445,7 @@ def create_traces(mjds, target_mjd=None, expnums_ldls=None, expnums_qrtz=None,
             model_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=masters_mjd, kind="d", imagetype="model", camera=camera, expnum=expnum)
             mratio_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=masters_mjd, kind="d", imagetype="mratio", camera=camera, expnum=expnum)
             mstray_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=masters_mjd, kind="d", imagetype="stray", camera=camera, expnum=expnum)
+            stray_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=masters_mjd, kind="d", imagetype="stray_model", camera=camera, expnum=expnum)
 
             if subtract_straylight:
                 # trace only centroids
@@ -477,7 +478,7 @@ def create_traces(mjds, target_mjd=None, expnums_ldls=None, expnums_qrtz=None,
                 correct_ref=True, median_box=(1,10), coadd=20,
                 counts_threshold=counts_threshold, max_diff=1.5, guess_fwhm=2.5, method="gauss",
                 ncolumns=(140, 40), iblocks=block_idxs, fwhm_limits=(1.5, 4.5),
-                fit_poly=fit_poly, interpolate_missing=False, poly_deg=(poly_deg_amp, poly_deg_cent, poly_deg_width), display_plots=True
+                fit_poly=fit_poly, interpolate_missing=False, poly_deg=(poly_deg_amp, poly_deg_cent, poly_deg_width)
             )
 
             # update master traces
@@ -542,7 +543,7 @@ def create_traces(mjds, target_mjd=None, expnums_ldls=None, expnums_qrtz=None,
             stray_model.append(fits.ImageHDU(data=model._data, name="CONT_MODEL"))
             stray_model.append(fits.ImageHDU(data=img_stray._data-model._data, name="STRAY_MODEL"))
             stray_model.append(fits.ImageHDU(data=img._data-model._data, name="NOSTRAY_MODEL"))
-            stray_model.writeto(path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=masters_mjd, kind="d", imagetype="stray_model", camera=camera, expnum=expnum), overwrite=True)
+            stray_model.writeto(stray_path, overwrite=True)
 
     return mamps, mcents, mwidths, img, img_stray, model, ratio
 

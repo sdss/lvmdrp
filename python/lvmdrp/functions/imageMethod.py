@@ -198,7 +198,7 @@ def _create_trace_regions(out_trace, table_data, table_poly, table_poly_all, lab
     ax.set_xlabel("y (pixel)")
     ax.set_ylabel("residuals (%)")
     ax.set_title(f"{label} residuals")
-    save_fig(fig, out_trace, label="residuals", to_display=display_plots)
+    save_fig(fig, out_trace, label="residuals", figure_path="qa", to_display=display_plots)
 
 
 def _eval_continuum_model(obs_img, trace_amp, trace_cent, trace_fwhm):
