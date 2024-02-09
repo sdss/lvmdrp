@@ -1699,6 +1699,85 @@ class Image(Header):
         new_img.setData(data=fit_result, mask=new_mask)
         return new_img
 
+    def fitSpline(self, axis="y", smoothing=0):
+        """Fits a spline to the image along a given axis
+
+        Parameters
+        ----------
+        axis : string or int
+            Define the axis along which the spline fit is performed either 'X', 'x', or 0 for the
+            x axis or 'Y',' y', or 1 for the y axis.
+        smoothing : float, optional
+            smoothing factor for the spline fit, by default 0
+
+        Returns
+        -------
+        lvmdrp.core.image.Image
+            An Image object containing the spline modelled data
+        """
+        # match orientation of the image
+        if axis == "y" or axis == "Y" or axis == 0:
+            pass
+        else:
+            self.swapaxes()
+
+        pixels = numpy.arange(self._dim[0])
+        models = []
+        for i in range(self._dim[1]):
+            good_pix = ~self._mask[:,i] or numpy.isnan(self._data[:,i])
+
+            # skip column if all pixels are masked
+            if good_pix.sum() == 0:
+                models.append(numpy.zeros(self._dim[0]))
+                continue
+
+            # define spline fitting parameters
+            masked_pixels = pixels[good_pix]
+            data = self._data[good_pix, i]
+
+            # group pixels into continuous segments
+            groups, indices = [], []
+            for j in range(len(masked_pixels)-1):
+                delta = masked_pixels[j+1] - masked_pixels[j]
+                if delta > 1:
+                    if len(indices) > 0:
+                        indices.append(j)
+                        groups.append(indices)
+                        indices = []
+                    continue
+                elif j == len(masked_pixels)-2:
+                    indices.append(j+1)
+                    groups.append(indices)
+                else:
+                    indices.append(j)
+
+            # collapse groups into single pixel
+            new_masked_pixels, new_data = [], []
+            for group in groups:
+                new_masked_pixels.append(numpy.mean(masked_pixels[group]))
+                new_data.append(numpy.median(data[group]))
+            masked_pixels = numpy.asarray(new_masked_pixels)
+            data = numpy.asarray(new_data)
+
+            # fit spline
+            spline_pars = interpolate.splrep(masked_pixels, data, s=smoothing)
+            model = interpolate.splev(pixels, spline_pars)
+            models.append(model)
+
+        # reconstruct the model image
+        models = numpy.asarray(models).T
+
+        # match orientation of the output array
+        if axis == "y" or axis == "Y" or axis == 0:
+            pass
+        else:
+            models = models.T
+            self.swapaxes()
+
+        new_img = copy(self)
+        new_img.setData(data=models)
+        return new_img
+
     def traceFWHM(
         self, axis_select, TraceMask, blocks, init_fwhm, threshold_flux, max_pix=None
     ):
