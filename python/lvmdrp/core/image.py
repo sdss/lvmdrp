@@ -1724,7 +1724,7 @@ class Image(Header):
         pixels = numpy.arange(self._dim[0])
         models = []
         for i in range(self._dim[1]):
-            good_pix = ~self._mask[:,i] or numpy.isnan(self._data[:,i])
+            good_pix = ~self._mask[:,i] if self._mask is not None else numpy.isnan(self._data[:,i])
 
             # skip column if all pixels are masked
             if good_pix.sum() == 0:
