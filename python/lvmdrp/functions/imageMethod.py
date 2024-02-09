@@ -1972,6 +1972,7 @@ def subtract_straylight(
     # include header and write out file
     log.info(f"writing stray light subtracted image to {os.path.basename(out_image)}")
     img_out.setHeader(header=img.getHeader())
+    img_out.setData(mask=img._mask)
     img_out.writeFitsData(out_image)
 
     # plot results: polyomial fitting & smoothing, both with masked regions on
