@@ -8,7 +8,6 @@
 # @Copyright: SDSS-V LVM
 
 import os
-import numpy as np
 from typing import Tuple
 
 from astropy.table import Table
@@ -24,73 +23,6 @@ from lvmdrp.core.constants import SPEC_CHANNELS
 
 
 ORIG_MASTER_DIR = os.getenv("LVM_MASTER_DIR")
-
-
-def illumination_correction(in_fiberflat: bool = None) -> dict:
-    if in_fiberflat is None:
-        # NOTE: this was done using exposure 3900
-        factors = {('SkyW', 'b1'): 0.8854398,
-                   ('SkyE', 'b1'): 1.0811657,
-                   ('Sci', 'b1'): 1.0333946,
-                   ('Spec', 'b1'): 1.3,
-                   ('SkyW', 'r1'): 0.9435192,
-                   ('SkyE', 'r1'): 1.0190876,
-                   ('Sci', 'r1'): 1.0373933,
-                   ('Spec', 'r1'): 1.3,
-                   ('SkyW', 'z1'): 0.9378496,
-                   ('SkyE', 'z1'): 1.0072966,
-                   ('Sci', 'z1'): 1.0548539,
-                   ('Spec', 'z1'): 1.3,
-                   ('SkyW', 'b2'): 0.9148656,
-                   ('SkyE', 'b2'): 1.0618604,
-                   ('Sci', 'b2'): 1.023274,
-                   ('Spec', 'b2'): 1.3,
-                   ('SkyW', 'r2'): 0.9465178,
-                   ('SkyE', 'r2'): 1.0136424,
-                   ('Sci', 'r2'): 1.0398397,
-                   ('Spec', 'r2'): 1.3,
-                   ('SkyW', 'z2'): 0.93933785,
-                   ('SkyE', 'z2'): 1.0083715,
-                   ('Sci', 'z2'): 1.0522904,
-                   ('Spec', 'z2'): 1.3,
-                   ('SkyW', 'b3'): 0.88334155,
-                   ('SkyE', 'b3'): 1.0627162,
-                   ('Sci', 'b3'): 1.0539422,
-                   ('Spec', 'b3'): 1.3,
-                   ('SkyW', 'r3'): 0.9305622,
-                   ('SkyE', 'r3'): 1.013976,
-                   ('Sci', 'r3'): 1.0554619,
-                   ('Spec', 'r3'): 1.3,
-                   ('SkyW', 'z3'): 0.9152639,
-                   ('SkyE', 'z3'): 1.0191175,
-                   ('Sci', 'z3'): 1.0656188,
-                   ('Spec', 'z3'): 1.3}
-
-        return factors
-
-    fibers = [2, 106, 37]
-    fibermap = Table(drp.fibermap.data)
-    select = np.isin(fibermap["fiberid"]-1, fibers)
-    skw1_fibers = fibermap[~select][fibermap[~select]["ifulabel"] == "SkyW1"]["fiberid"] - 1
-    ske1_fibers = fibermap[~select][fibermap[~select]["ifulabel"] == "SkyE1"]["fiberid"] - 1
-    sci1_fibers = fibermap[~select][fibermap[~select]["ifulabel"] == "Sci1"]["fiberid"] - 1
-
-    factors = {}
-    for spec in "123":
-        for cam in ["b", "r", "z"]:
-            cam = cam + spec
-            fflat = rss_tasks.RSS()
-            fflat.loadFitsData(f"/home/mejia/Research/lvm/lvmdata/calib/60177/lvm-mfiberflat-{cam}.fits")
-            fflat._data[(fflat._mask) | (fflat._data <= 0)] = np.nan
-            sci_factor = np.nanmedian(fflat._data[sci1_fibers][:, 1000:3000])
-            skw_factor = np.nanmedian(fflat._data[skw1_fibers][:, 1000:3000])
-            ske_factor = np.nanmedian(fflat._data[ske1_fibers][:, 1000:3000])
-            norm = np.mean([sci_factor, skw_factor, ske_factor])
-            factors[("SkyW", cam)] = skw_factor/norm
-            factors[("SkyE", cam)] = ske_factor/norm
-            factors[("Sci", cam)] = sci_factor/norm
-
-        return factors
 
 
 def get_master_mjd(sci_mjd: int) -> int:
@@ -141,13 +73,14 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
     extraction_method = "aperture" if aperture_extraction else "optimal"
 
     # get target frames metadata
-    sci_metadata = md.get_metadata(tileid="*", mjd="*", expnum=expnum, imagetyp="object")
+    sci_metadata = md.get_metadata(tileid="*", mjd="*", expnum=expnum)
     sci_metadata.sort_values("expnum", ascending=False, inplace=True)
 
     # define general metadata
     sci_tileid = sci_metadata["tileid"].unique()[0]
     sci_mjd = sci_metadata["mjd"].unique()[0]
     sci_expnum = sci_metadata["expnum"].unique()[0]
+    sci_imagetyp = sci_metadata["imagetyp"].unique()[0]
     log.info(f"running Quick DRP for tile {sci_tileid} at MJD {sci_mjd} with exposure number {sci_expnum}")
 
     master_mjd = get_master_mjd(sci_mjd)
@@ -202,7 +135,7 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
             # macorr_path = os.path.join(masters_path, f"lvm-apercorr-{sci_camera}.fits")
             mwave_path = os.path.join(masters_path, f"lvm-mwave_{lamps}-{sci_camera}.fits")
             mlsf_path = os.path.join(masters_path, f"lvm-mlsf_{lamps}-{sci_camera}.fits")
-            mflat_path = os.path.join(masters_path, f"lvm-mfiberflat-{sci_camera}.fits")
+            mflat_path = os.path.join(masters_path, f"lvm-mfiberflat_twilight-{sci_camera}.fits")
         else:
             log.info(f"using master calibration frames from DRP version {drpver}, mjd = {sci_mjd}, camera = {sci_camera}")
             masters = md.match_master_metadata(target_mjd=sci_mjd,
@@ -236,20 +169,7 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
         rss_tasks.create_pixel_table(in_rss=xsci_path, out_rss=wsci_path, arc_wave=mwave_path, arc_fwhm=mlsf_path)
 
         # apply fiberflat correction
-        rss_tasks.apply_fiberflat(in_rss=wsci_path, out_rss=fsci_path, in_flat=mflat_path)
-
-        # NOTE: this is a temporary fix for the illumination bias across telescopes whe using dome flats
-        rss = rss_tasks.RSS()
-        factors = illumination_correction(in_fiberflat=None)
-        rss.loadFitsData(fsci_path)
-        fibermap = rss._slitmap
-        fibermap = fibermap[fibermap["spectrographid"] == int(sci_camera[1])]
-        for ifiber in range(rss._fibers):
-            f = factors.get((fibermap[ifiber]["telescope"], sci_camera), 1)
-            # print(f"applying factor {(fibermap[ifiber]['telescope'], sci_camera)} : {f}")
-            rss._data[ifiber] *= f
-            rss._error[ifiber] *= f
-        rss.writeFitsData(fsci_path)
+        rss_tasks.apply_fiberflat(in_rss=wsci_path, out_rss=fsci_path, in_flat=mflat_path, clip_below=0)
 
         # interpolate sky fibers
         sky_tasks.interpolate_sky(in_rss=fsci_path, out_sky=fskye_path, which="e")
@@ -267,22 +187,26 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
         # use sky subtracted resampled frames for flux calibration in each camera
         flux_tasks.fluxcal_Gaia(sci_camera, hsci_path, GAIA_CACHE_DIR=ORIG_MASTER_DIR+'/gaia_cache')
 
-    # # combine spectrographs
-    drp.combine_spectrographs(tileid=sci_tileid, mjd=sci_mjd, channel="b", expnum=sci_expnum)
-    drp.combine_spectrographs(tileid=sci_tileid, mjd=sci_mjd, channel="r", expnum=sci_expnum)
-    drp.combine_spectrographs(tileid=sci_tileid, mjd=sci_mjd, channel="z", expnum=sci_expnum)
+    # combine spectrographs
+    drp.combine_spectrographs(tileid=sci_tileid, mjd=sci_mjd, channel="b", expnum=sci_expnum, imagetype=sci_imagetyp)
+    drp.combine_spectrographs(tileid=sci_tileid, mjd=sci_mjd, channel="r", expnum=sci_expnum, imagetype=sci_imagetyp)
+    drp.combine_spectrographs(tileid=sci_tileid, mjd=sci_mjd, channel="z", expnum=sci_expnum, imagetype=sci_imagetyp)
 
     # flux-calibrate each channel
-    sci_paths = sorted(drp.path.expand("lvm_anc", drpver=drpver, tileid=sci_tileid, mjd=sci_mjd, kind="", imagetype="object", camera="*", expnum=sci_expnum))
-    sci_paths = [sci_path for sci_path in sci_paths if "lvm-object-sp" not in sci_path]
+    sci_paths = sorted(drp.path.expand("lvm_anc", drpver=drpver, tileid=sci_tileid, mjd=sci_mjd, kind="", imagetype=sci_imagetyp, camera="*", expnum=sci_expnum))
+    sci_paths = [sci_path for sci_path in sci_paths if f"lvm-{sci_imagetyp}-sp" not in sci_path]
     for sci_path in sci_paths:
         flux_tasks.apply_fluxcal(in_rss=sci_path, out_rss=sci_path, skip_fluxcal=skip_flux_calibration)
 
     # combine channels
-    drp.combine_channels(tileid=sci_tileid, mjd=sci_mjd, expnum=sci_expnum)
+    drp.combine_channels(tileid=sci_tileid, mjd=sci_mjd, expnum=sci_expnum, imagetype=sci_imagetyp)
 
     # refine sky subtraction
     sky_tasks.quick_sky_refinement(in_cframe=path.full("lvm_frame", mjd=sci_mjd, drpver=drpver, tileid=sci_tileid, expnum=sci_expnum, kind='CFrame'))
+
+    # TODO: add Guillermo's code to create astrometry, don't create images/maps
+    # TODO: create astrometry for sky and std telescopes
+    
 
     # TODO: add quick report routine
 

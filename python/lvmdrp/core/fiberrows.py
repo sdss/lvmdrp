@@ -1248,7 +1248,7 @@ class FiberRows(Header, PositionTable):
 
         return self
 
-    def interpolate_data(self, axis="Y", extrapolate=False):
+    def interpolate_data(self, axis="Y", extrapolate=False, reset_mask=True):
         """Interpolate data of bad fibers (axis='Y') or bad pixels along the dispersion axis (axis='X')
 
         Parameters
@@ -1258,6 +1258,8 @@ class FiberRows(Header, PositionTable):
             'Y','y', or 0 for the y-axis.
         extrapolate : bool, optional with default: False
             If True, extrapolate data for bad fibers or bad pixels along the dispersion axis
+        reset_mask : bool, optional with default: True
+            If True, reset the mask of interpolated fibers to False
 
         Returns
         -------
@@ -1300,7 +1302,7 @@ class FiberRows(Header, PositionTable):
                 if self._error is not None:
                     f_error = interpolate.interp1d(x_pixels[~bad_pixels], self._error[ifiber, ~bad_pixels], bounds_error=False, fill_value="extrapolate")
                     self._error[ifiber, :] = f_error(x_pixels)
-                if self._mask is not None:
+                if self._mask is not None and reset_mask:
                     self._mask[ifiber, bad_pixels] = False
         else:
             raise ValueError(f"axis {axis} not supported")
