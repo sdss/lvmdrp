@@ -1861,6 +1861,7 @@ def subtract_straylight(
     median_box: int = 11,
     gaussian_sigma: int = 20.0,
     parallel: int|str = "auto",
+    plot_columns : List[int] = [500, 1500, 2000, 2500, 3500],
     display_plots: bool = False,
 ) -> Tuple[Image, Image, Image, Image]:
     """Subtracts a diffuse background signal (stray light) from the raw data
@@ -1894,6 +1895,7 @@ def subtract_straylight(
         Width of the 2D Gaussian filter to smooth the measured background signal
     parallel : either int (>0) or  'auto', optional with default: 'auto'
         Number of CPU cores used in parallel for the computation. If set to auto, the maximum number of CPUs
+    plot_columns : array of int, optional with default: [500, 1500, 2000, 2500, 3500]
     display_plots : bool, optional with default: False
         If True, the results are plotted and displayed
 
@@ -1990,7 +1992,7 @@ def subtract_straylight(
     axs[1].set_title("stray light model vs. data", loc="left")
 
     colors = plt.cm.coolwarm(numpy.linspace(0, 1, img_median._data.shape[1]))
-    for icol in [1500, 2000, 2500]:
+    for icol in plot_columns:
         axs[0].plot(y_pixels, img_fit._data[:, icol], "-", color=colors[icol], lw=1)
         axs[0].errorbar(y_pixels, img_median._data[:, icol], yerr=img_median._error[:, icol], color=colors[icol], elinewidth=1, mew=0, ms=5, zorder=9999)
         axs[1].plot(y_pixels, img_stray._data[:, icol], "-", color=colors[icol], lw=1)
