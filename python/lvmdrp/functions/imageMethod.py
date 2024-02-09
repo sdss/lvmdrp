@@ -1951,12 +1951,10 @@ def subtract_straylight(
 
     # mask additional rows before top fiber and after bottom fiber
     log.info(f"masking additional {mask_tnrows} rows before top fiber and {mask_bnrows} rows after bottom fiber")
-    ifib_pos = trace_mask._data[0].astype(int)
-    irows = ifib_pos + numpy.arange(mask_tnrows)[:,None]
-    img_median._mask[irows] = True
-    ffib_pos = trace_mask._data[-1].astype(int)
-    frows = ffib_pos - numpy.arange(mask_bnrows)[:,None]
-    img_median._mask[frows] = True
+    trows = trace_mask._data[0].astype(int) + numpy.arange(mask_tnrows)[:, None]
+    brows = trace_mask._data[-1].astype(int) - numpy.arange(mask_bnrows)[:, None]
+    img_median._mask[trows] = True
+    img_median._mask[brows] = True
 
     # fit the signal in unmaksed areas along cross-dispersion axis by a polynomial
     log.info(f"fitting spline with {smoothing = } to the background signal along cross-dispersion axis")
@@ -1967,7 +1965,7 @@ def subtract_straylight(
     img_stray = img_fit.convolveGaussImg(gaussian_sigma, gaussian_sigma)
     img_stray.setData(data=numpy.nan_to_num(img_stray._data), error=numpy.nan_to_num(img_stray._error))
 
-    # subtract smoothed background signal from origianal image
+    # subtract smoothed background signal from original image
     log.info("subtracting the smoothed background signal from the original image")
     img_out = img - img_stray
 
@@ -2004,6 +2002,7 @@ def subtract_straylight(
         log.info(f"writing stray light image to {os.path.basename(out_stray)}")
         hdus = pyfits.HDUList()
         hdus.append(pyfits.PrimaryHDU(img._data, header=img._header))
+        hdus.append(pyfits.ImageHDU(img_out._data, name="CLEANED"))
         hdus.append(pyfits.ImageHDU(img_median._data, name="MASKED"))
         hdus.append(pyfits.ImageHDU(img_fit._data, name="SPLINE"))
         hdus.append(pyfits.ImageHDU(img_stray._data, name="SMOOTH"))

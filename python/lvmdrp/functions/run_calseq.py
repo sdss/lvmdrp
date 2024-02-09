@@ -423,8 +423,8 @@ def create_traces(mjds, target_mjd=None, expnums_ldls=None, expnums_qrtz=None,
     # iterate through exposures with std fibers exposed
     expnum_params = _get_ring_expnums(expnums_ldls, expnums_qrtz, ring_size=12)
     for camera, expnums in expnum_params.items():
-        # if camera != "r1":
-        #     continue
+        if camera != "r1":
+            continue
         for expnum, block_idxs, fiber_str in expnums:
             con_lamp = MASTER_CON_LAMPS[camera[0]]
             if con_lamp == "ldls":
@@ -468,7 +468,8 @@ def create_traces(mjds, target_mjd=None, expnums_ldls=None, expnums_qrtz=None,
                     out_image=sflat_path,
                     in_cent_trace=cent_path,
                     out_stray=mstray_path,
-                    smooth_disp=11, aperture=5, poly_cross=9, smooth_gauss=10
+                    mask_nrows=(20,70),
+                    median_box=21, aperture=13, smoothing=200, gaussian_sigma=0.0
                 )
             else:
                 sflat_path = dflat_path
@@ -701,6 +702,8 @@ def run_calibration_sequence(mjds, target_mjd=None, expnums=None, illumination_c
         List of exposure numbers to reduce
     """
 
+    # TODO: split exposures into the exposure sequence of each type of master frame
+
     # reduce bias/dark/pixflat
     create_detrending_frames(mjds, target_mjd=target_mjd, expnums=expnums)
 
@@ -737,8 +740,8 @@ if __name__ == '__main__':
 
     try:
         # create_detrending_frames(mjds=60255, target_mjd=60255, kind="bias")
-        # create_traces(mjds=MJD, expnums_ldls=ldls_expnums, expnums_qrtz=qrtz_expnums, subtract_straylight=True)
-        create_wavelengths(mjds=60264, target_mjd=60255, expnums=[7750,7751])
+        create_traces(mjds=MJD, expnums_ldls=ldls_expnums, expnums_qrtz=qrtz_expnums, subtract_straylight=True)
+        # create_wavelengths(mjds=60264, target_mjd=60255, expnums=[7750,7751])
     except Exception as e:
         # snapshot = tracemalloc.take_snapshot()
         # top_stats = snapshot.statistics('lineno')
