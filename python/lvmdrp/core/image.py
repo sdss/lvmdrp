@@ -1699,7 +1699,7 @@ class Image(Header):
         new_img.setData(data=fit_result, mask=new_mask)
         return new_img
 
-    def fitSpline(self, axis="y", smoothing=0):
+    def fitSpline(self, axis="y", smoothing=0, use_weights=False):
         """Fits a spline to the image along a given axis
 
         Parameters
@@ -1709,6 +1709,8 @@ class Image(Header):
             x axis or 'Y',' y', or 1 for the y axis.
         smoothing : float, optional
             smoothing factor for the spline fit, by default 0
+        use_weights : bool, optional
+            whether to use the inverse variance as weights for the spline fit or not, by default False
 
         Returns
         -------
@@ -1734,6 +1736,7 @@ class Image(Header):
             # define spline fitting parameters
             masked_pixels = pixels[good_pix]
             data = self._data[good_pix, i]
+            vars = self._error[good_pix, i] ** 2
 
             # group pixels into continuous segments
             groups, indices = [], []
@@ -1752,15 +1755,21 @@ class Image(Header):
                     indices.append(j)
 
             # collapse groups into single pixel
-            new_masked_pixels, new_data = [], []
+            new_masked_pixels, new_data, new_vars = [], [], []
             for group in groups:
                 new_masked_pixels.append(numpy.mean(masked_pixels[group]))
                 new_data.append(numpy.median(data[group]))
+                new_vars.append(numpy.mean(vars[group]))
             masked_pixels = numpy.asarray(new_masked_pixels)
             data = numpy.asarray(new_data)
+            vars = numpy.asarray(new_vars)
 
             # fit spline
-            spline_pars = interpolate.splrep(masked_pixels, data, s=smoothing)
+            if use_weights:
+                weights = numpy.divide(1, vars, out=numpy.zeros_like(vars), where=vars!=0)
+                spline_pars = interpolate.splrep(masked_pixels, data, w=weights, s=smoothing)
+            else:
+                spline_pars = interpolate.splrep(masked_pixels, data, s=smoothing)
             model = interpolate.splev(pixels, spline_pars)
             models.append(model)
 

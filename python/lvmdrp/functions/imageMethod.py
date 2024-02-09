@@ -1857,6 +1857,7 @@ def subtract_straylight(
     mask_nrows: int|Tuple[int,int] = 30,
     aperture: int = 14,
     smoothing: int = 20,
+    use_weights : bool = False,
     median_box: int = 11,
     gaussian_sigma: int = 20.0,
     parallel: int|str = "auto",
@@ -1885,6 +1886,8 @@ def subtract_straylight(
         Size of the aperture around each fiber in cross-disperion direction assumed to contain signal from fibers
     smoothing: int, optional with default: 20
         Smoothing parameter for the spline fit to the background signal
+    use_weights : bool, optional with default: False
+        If True, the error of the image is used as weights in the spline fitting
     median_box: int, optional with default: 11
         Width of the median filter used to smooth the image along the dispersion axis
     gaussian_sigma : float, optional with default :20.0
@@ -1908,6 +1911,11 @@ def subtract_straylight(
     # load image data
     log.info(f"using image {os.path.basename(in_image)} for stray light subtraction")
     img = loadImage(in_image)
+
+    # update mask
+    if img._mask is None:
+        img._mask = numpy.zeros(img._data.shape, dtype=bool)
+    img._mask = img._mask | numpy.isnan(img._data) | numpy.isinf(img._data) | (img._data == 0)
 
     # metadata
     unit = img._header["BUNIT"]
@@ -1950,7 +1958,7 @@ def subtract_straylight(
 
     # fit the signal in unmaksed areas along cross-dispersion axis by a polynomial
     log.info(f"fitting spline with {smoothing = } to the background signal along cross-dispersion axis")
-    img_fit = img_median.fitSpline(smoothing=smoothing)
+    img_fit = img_median.fitSpline(smoothing=smoothing, use_weights=use_weights)
 
     # smooth the results by 2D Gaussian filter of given with (cross- and dispersion axis have equal width)
     log.info(f"smoothing the background signal by a 2D Gaussian filter of width {gaussian_sigma}")
