@@ -1982,14 +1982,14 @@ def subtract_straylight(
     fig.suptitle(f"Stray Light Subtraction for frame {os.path.basename(in_image)}")
     fig.supxlabel("Y (pixel)")
     fig.supylabel(f"Counts ({unit})")
-    plt.xlim(0, img_median._data.shape[1])
-    plt.ylim(0, 400)
 
     img_median._data[img_median._mask] = numpy.nan
     img_median._error[img_median._mask] = numpy.nan
     y_pixels = numpy.arange(img_median._data.shape[0])
     axs[0].set_title("polynomial fit vs. data", loc="left")
     axs[1].set_title("stray light model vs. data", loc="left")
+    plt.xlim(0, img_median._data.shape[1])
+    plt.ylim(0, numpy.nanmax(img_median._data) * 1.1)
 
     colors = plt.cm.coolwarm(numpy.linspace(0, 1, img_median._data.shape[1]))
     for icol in plot_columns:
