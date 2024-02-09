@@ -271,7 +271,7 @@ def fit_fiberflat(rsss: List[RSS], interpolate_bad: bool = True, mask_bands: Lis
 
     save_fig(
         fig,
-        product_path=path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=mjd, kind="s", imagetype="flat", camera=camera, expnum=expnum),
+        product_path=path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=mjd, kind="f", imagetype="flat", camera=camera, expnum=expnum),
         to_display=display_plots,
         label="twilight_continuum_fit",
         figure_path="qa"
@@ -299,7 +299,7 @@ def fit_fiberflat(rsss: List[RSS], interpolate_bad: bool = True, mask_bands: Lis
 
     save_fig(
         fig,
-        product_path=path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=mjd, kind="s", imagetype="flat", camera=camera, expnum=expnum),
+        product_path=path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=mjd, kind="f", imagetype="flat", camera=camera, expnum=expnum),
         to_display=display_plots,
         label="twilight_flatfielded",
         figure_path="qa"
@@ -331,7 +331,7 @@ def combine_twilight_sequence(expnums: List[int], camera: str, output_dir: str) 
     mflat : RSS
         Master twilight flat
     """
-    hflats = [rssMethod.loadRSS(path.expand("lvm_anc", drpver=drpver, tileid="*", mjd="*", kind="s", imagetype="flat", camera=camera, expnum=expnum)[0]) for expnum in expnums]
+    hflats = [rssMethod.loadRSS(path.expand("lvm_anc", drpver=drpver, tileid="*", mjd="*", kind="f", imagetype="flat", camera=camera, expnum=expnum)[0]) for expnum in expnums]
 
     # combine RSS exposures using an average
     mflat = RSS(data=np.zeros_like(hflats[0]._data), error=np.zeros_like(hflats[0]._error), mask=np.ones_like(hflats[0]._mask, dtype=bool),
@@ -427,7 +427,7 @@ def resample_fiberflat(mflat: RSS, camera: str, mwave_path: str,
     ax.legend(loc=1, frameon=False)
     save_fig(
         fig,
-        product_path=path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=mjd, kind="s", imagetype="flat", camera=camera),
+        product_path=path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=mjd, kind="f", imagetype="flat", camera=camera),
         to_display=display_plots,
         label="twilight_fiberflat_fit",
         figure_path="qa"
@@ -478,6 +478,8 @@ def reduce_twilight_sequence(expnums: List[int], median_box: int = 10, niter: bo
 
         # master calibration paths
         camera = flat["camera"]
+        if camera != "r1":
+            continue
         mjd = flat["mjd"]
         arc_lamp = MASTER_ARC_LAMPS[camera[0]]
         masters_mjd = qdrp.get_master_mjd(mjd)
@@ -497,7 +499,9 @@ def reduce_twilight_sequence(expnums: List[int], median_box: int = 10, niter: bo
         flat_path = path.full("lvm_raw", camspec=flat["camera"], **flat)
         pflat_path = path.full("lvm_anc", drpver=drpver, kind="p", imagetype=flat["imagetyp"], **flat)
         dflat_path = path.full("lvm_anc", drpver=drpver, kind="d", imagetype=flat["imagetyp"], **flat)
+        sflat_path = path.full("lvm_anc", drpver=drpver, kind="s", imagetype=flat["imagetyp"], **flat)
         os.makedirs(os.path.dirname(pflat_path), exist_ok=True)
+
         if os.path.isfile(dflat_path):
             log.info(f"skipping {dflat_path}, file already exist")
         else:
@@ -506,12 +510,19 @@ def reduce_twilight_sequence(expnums: List[int], median_box: int = 10, niter: bo
                                         in_bias=master_cals.get("bias"), in_dark=master_cals.get("dark"),
                                         in_pixelflat=master_cals.get("pixelflat"), in_slitmap=SLITMAP)
 
+        if os.path.isfile(sflat_path):
+            log.info(f"skipping {sflat_path}, file already exist")
+        else:
+            imageMethod.subtract_straylight(in_image=dflat_path, out_image=sflat_path,
+                                            in_cent_trace=master_cals.get("cent"), mask_nrows=(20,70),
+                                            aperture=13, smoothing=200, median_box=21, gaussian_sigma=0.0)
+
         # extract 1D spectra for each frame
         xflat_path = path.full("lvm_anc", drpver=drpver, kind="x", imagetype=flat["imagetyp"], **flat)
         if os.path.isfile(xflat_path):
             log.info(f"skipping {xflat_path}, file already exist")
         else:
-            imageMethod.extract_spectra(in_image=dflat_path, out_rss=xflat_path,
+            imageMethod.extract_spectra(in_image=sflat_path, out_rss=xflat_path,
                                         in_trace=master_cals.get("cent"), in_fwhm=master_cals.get("width"),
                                         method="optimal", parallel=10)
 
@@ -541,16 +552,16 @@ def reduce_twilight_sequence(expnums: List[int], median_box: int = 10, niter: bo
         for expnum in flat_expnums.groups:
             flat_specs = flat_expnums.get_group(expnum)
             hflat_paths = [path.full("lvm_anc", drpver=drpver, kind="h", imagetype=flat["imagetyp"], **flat) for flat in flat_specs.to_dict("records")]
-            sflat_paths = [path.full("lvm_anc", drpver=drpver, kind="s", imagetype=flat["imagetyp"], **flat) for flat in flat_specs.to_dict("records")]
+            fflat_paths = [path.full("lvm_anc", drpver=drpver, kind="f", imagetype=flat["imagetyp"], **flat) for flat in flat_specs.to_dict("records")]
 
             # fit fiber throughput
             hflats = [rssMethod.loadRSS(hflat_path) for hflat_path in hflat_paths]
-            sflats = fit_fiberflat(rsss=hflats, median_box=median_box, niter=niter,
+            fflats = fit_fiberflat(rsss=hflats, median_box=median_box, niter=niter,
                                    threshold=threshold, mask_bands=mask_bands[channel],
                                    display_plots=display_plots, nknots=nknots)
 
             # write output to disk
-            for sflat, sflat_path in zip(sflats, sflat_paths):
+            for sflat, sflat_path in zip(fflats, fflat_paths):
                 sflat.writeFitsData(sflat_path)
 
     # combine twilights and fit master fiberflat
