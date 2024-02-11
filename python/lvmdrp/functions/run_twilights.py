@@ -103,10 +103,11 @@ def fit_continuum(spectrum: Spectrum1D, mask_bands: List[Tuple[float,float]],
         Spline knots
     """
     # early return if no good pixels
-    mask = copy(spectrum._mask)
-    good_pix = ~mask
+    continuum_models = []
+    masked_pixels = copy(spectrum._mask)
+    good_pix = ~masked_pixels
     if good_pix.sum() == 0:
-        return np.ones_like(spectrum._wave) * np.nan
+        return np.ones_like(spectrum._wave) * np.nan, continuum_models, masked_pixels, np.array([])
 
     # define main arrays
     wave = spectrum._wave[good_pix]
@@ -128,8 +129,6 @@ def fit_continuum(spectrum: Spectrum1D, mask_bands: List[Tuple[float,float]],
     spline = interpolate.splev(spectrum._wave, f)
 
     # iterate to mask outliers and update spline
-    continuum_models = []
-    masked_pixels = copy(spectrum._mask)
     if threshold is not None and isinstance(threshold, (float, int)):
         threshold = (threshold, np.inf)
     for i in range(niter):
