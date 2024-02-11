@@ -36,6 +36,12 @@ MASTER_CON_LAMPS = {"b": "ldls", "r": "ldls", "z": "quartz"}
 MASTER_ARC_LAMPS = {"b": "neon_hgne_argon_xenon", "r": "neon_hgne_argon_xenon", "z": "neon_hgne_argon_xenon"}
 SLITMAP = Table(drp.fibermap.data)
 
+MASK_BANDS = {
+        "b": [(3910, 4000), (4260, 4330)],
+        "r": [],
+        "z": [(7570, 7700)]
+    }
+
 
 def get_sequence_metadata(expnums: List[int]) -> pd.DataFrame:
     """Returns metadata for a sequence of exposures
@@ -121,8 +127,7 @@ def fit_continuum(spectrum: Spectrum1D, mask_bands: List[Tuple[float,float]],
         for iwave, fwave in mask_bands:
             mask[(iwave<=knots)&(knots<=fwave)] = False
         knots = knots[mask]
-    kwargs.update([("t", knots)])
-    kwargs.update([("task", -1)])
+    kwargs.update({"t": knots, "task": -1})
 
     # fit first spline
     f = interpolate.splrep(wave, data, **kwargs)
@@ -148,7 +153,7 @@ def fit_continuum(spectrum: Spectrum1D, mask_bands: List[Tuple[float,float]],
         else:
             spline = new_spline
 
-    best_continuum = continuum_models.pop()
+    best_continuum = continuum_models.pop(-1)
     return best_continuum, continuum_models, masked_pixels, knots
 
 def fit_fiberflat(rsss: List[RSS], interpolate_bad: bool = True, mask_bands: List[Tuple[float,float]] = [],
@@ -437,9 +442,9 @@ def resample_fiberflat(mflat: RSS, camera: str, mwave_path: str,
 
 def reduce_twilight_sequence(expnums: List[int], median_box: int = 10, niter: bool = 1000,
                              threshold: Tuple[float,float]|float = (0.5,1.5), nknots: bool = 50,
-                             b_mask: List[Tuple[float,float]] = [],
-                             r_mask: List[Tuple[float,float]] = [],
-                             z_mask: List[Tuple[float,float]] = [],
+                             b_mask: List[Tuple[float,float]] = MASK_BANDS["b"],
+                             r_mask: List[Tuple[float,float]] = MASK_BANDS["r"],
+                             z_mask: List[Tuple[float,float]] = MASK_BANDS["z"],
                              display_plots: bool = False) -> Dict[str, RSS]:
     """Reduce the twilight sequence and produces master twilight flats
 
@@ -478,8 +483,6 @@ def reduce_twilight_sequence(expnums: List[int], median_box: int = 10, niter: bo
 
         # master calibration paths
         camera = flat["camera"]
-        if camera != "r1":
-            continue
         mjd = flat["mjd"]
         arc_lamp = MASTER_ARC_LAMPS[camera[0]]
         masters_mjd = qdrp.get_master_mjd(mjd)
@@ -547,7 +550,7 @@ def reduce_twilight_sequence(expnums: List[int], median_box: int = 10, niter: bo
     mask_bands = dict(zip(channels, [b_mask, r_mask, z_mask]))
     new_flats = dict.fromkeys(channels)
     flat_channels = flats.groupby(flats.camera.str.__getitem__(0))
-    for channel in flat_channels.groups:
+    for channel in channels:
         flat_expnums = flat_channels.get_group(channel).groupby("expnum")
         for expnum in flat_expnums.groups:
             flat_specs = flat_expnums.get_group(expnum)
@@ -557,7 +560,7 @@ def reduce_twilight_sequence(expnums: List[int], median_box: int = 10, niter: bo
             # fit fiber throughput
             hflats = [rssMethod.loadRSS(hflat_path) for hflat_path in hflat_paths]
             fflats = fit_fiberflat(rsss=hflats, median_box=median_box, niter=niter,
-                                   threshold=threshold, mask_bands=mask_bands[channel],
+                                   threshold=threshold, mask_bands=mask_bands.get(channel, []),
                                    display_plots=display_plots, nknots=nknots)
 
             # write output to disk
@@ -581,4 +584,3 @@ def reduce_twilight_sequence(expnums: List[int], median_box: int = 10, niter: bo
         new_flats[camera] = new_flat
 
     return new_flats
-
