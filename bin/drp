@@ -16,7 +16,7 @@ from lvmdrp.functions.skyMethod import configureSkyModel_drp
 from lvmdrp.utils.metadata import get_frames_metadata, get_master_metadata
 
 from lvmdrp.functions.run_quickdrp import quick_science_reduction
-from lvmdrp.functions.run_twilights import reduce_twilight_sequence
+from lvmdrp.functions.run_twilights import reduce_twilight_sequence, MASK_BANDS
 
 
 class IntRangeType(click.ParamType):
@@ -181,9 +181,9 @@ cli.add_command(quick_reduction)
 @cloup.option_group(
     'Channel masks',
     'Options for masking wavelength ranges for each spectrograph channel',
-    cloup.option('--b-mask', type=WaveRange(), multiple=True, help='the wavelength ranges to mask for b channel'),
-    cloup.option('--r-mask', type=WaveRange(), multiple=True, help='the wavelength ranges to mask for r channel'),
-    cloup.option('--z-mask', type=WaveRange(), multiple=True, help='the wavelength ranges to mask for z channel')
+    cloup.option('--b-mask', type=WaveRange(), default=MASK_BANDS["b"], multiple=True, help='the wavelength ranges to mask for b channel'),
+    cloup.option('--r-mask', type=WaveRange(), default=MASK_BANDS["r"], multiple=True, help='the wavelength ranges to mask for r channel'),
+    cloup.option('--z-mask', type=WaveRange(), default=MASK_BANDS["z"], multiple=True, help='the wavelength ranges to mask for z channel')
 )
 @click.option('-d', '--display-plots', is_flag=True, default=False, help='Flag to display the plots')
 def twilight_reduction(expnums: list, median_box: int, niter: int, threshold: Tuple[float,float],
