@@ -423,8 +423,6 @@ def create_traces(mjds, target_mjd=None, expnums_ldls=None, expnums_qrtz=None,
     # iterate through exposures with std fibers exposed
     expnum_params = _get_ring_expnums(expnums_ldls, expnums_qrtz, ring_size=12)
     for camera, expnums in expnum_params.items():
-        if camera != "r1":
-            continue
         for expnum, block_idxs, fiber_str in expnums:
             con_lamp = MASTER_CON_LAMPS[camera[0]]
             if con_lamp == "ldls":
@@ -524,6 +522,11 @@ def create_traces(mjds, target_mjd=None, expnums_ldls=None, expnums_qrtz=None,
             mamps[camera].interpolate_data(axis="Y", extrapolate=True)
             mcents[camera].interpolate_data(axis="Y", extrapolate=True)
             mwidths[camera].interpolate_data(axis="Y", extrapolate=True)
+
+        # reset mask to propagate broken fibers
+        mamps[camera]._mask[bad_fibers] = True
+        mcents[camera]._mask[bad_fibers] = True
+        mwidths[camera]._mask[bad_fibers] = True
 
         # save master traces
         mamp_path = path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=masters_mjd, camera=camera, kind="mamps")
