@@ -1,5 +1,6 @@
 from copy import deepcopy as copy
 from multiprocessing import Pool, cpu_count
+import warnings
 
 from typing import List
 
@@ -1699,7 +1700,7 @@ class Image(Header):
         new_img.setData(data=fit_result, mask=new_mask)
         return new_img
 
-    def fitSpline(self, axis="y", smoothing=0, use_weights=False):
+    def fitSpline(self, axis="y", degree=3, smoothing=0, use_weights=False):
         """Fits a spline to the image along a given axis
 
         Parameters
@@ -1707,6 +1708,8 @@ class Image(Header):
         axis : string or int
             Define the axis along which the spline fit is performed either 'X', 'x', or 0 for the
             x axis or 'Y',' y', or 1 for the y axis.
+        degree : int, optional
+            degree of the spline fit, by default 3
         smoothing : float, optional
             smoothing factor for the spline fit, by default 0
         use_weights : bool, optional
@@ -1730,6 +1733,7 @@ class Image(Header):
 
             # skip column if all pixels are masked
             if good_pix.sum() == 0:
+                warnings.warn(f"Skipping column {i} due to all pixels being masked", RuntimeWarning)
                 models.append(numpy.zeros(self._dim[0]))
                 continue
 
@@ -1753,6 +1757,11 @@ class Image(Header):
                     groups.append(indices)
                 else:
                     indices.append(j)
+
+            if len(groups) <= degree+1:
+                warnings.warn(f"Skipping column {i} due to insufficient data for spline fit", RuntimeWarning)
+                models.append(numpy.zeros(self._dim[0]))
+                continue
 
             # collapse groups into single pixel
             new_masked_pixels, new_data, new_vars = [], [], []
