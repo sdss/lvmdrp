@@ -11,6 +11,7 @@ import os
 from typing import Tuple, List, Dict
 from copy import deepcopy as copy
 import numpy as np
+import bottleneck as bn
 import pandas as pd
 from astropy.table import Table
 from scipy.ndimage import median_filter
@@ -278,7 +279,7 @@ def fit_fiberflat(rsss: List[RSS], interpolate_bad: bool = True, mask_bands: Lis
     )
 
     # normalize by median fiber
-    median_fiber = np.median(new_flat._data, axis=0)
+    median_fiber = bn.nanmedian(new_flat._data, axis=0)
     new_flat._data = new_flat._data / median_fiber
     new_flat._error = new_flat._error / median_fiber
     new_flat._data[~np.isfinite(new_flat._data)] = 1
