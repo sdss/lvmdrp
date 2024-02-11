@@ -25,7 +25,10 @@ class IntRangeType(click.ParamType):
     def convert(self, value, param, ctx):
         try:
             # Split the input value by commas
-            parts = value.split(',')
+            if isinstance(value, str):
+                parts = value.split(',')
+            else:
+                parts = value
 
             if len(parts) == 1:
                 # If only one part, treat it as a single integer
@@ -34,8 +37,8 @@ class IntRangeType(click.ParamType):
                 # If two parts, treat them as initial and final values for a range
                 start, end = map(int, parts)
                 return list(range(start, end + 1))
-            else:
-                self.fail(f'{value} is not a valid input', param, ctx)
+
+            self.fail(f'{value} is not a valid input', param, ctx)
 
         except ValueError:
             self.fail(f'{value} is not a valid input', param, ctx)
@@ -46,14 +49,15 @@ class WaveRange(click.ParamType):
 
     def convert(self, value, param, ctx):
         try:
+            # Split the input value by commas
             if isinstance(value, str):
-                # Split the input value by commas
                 waves = value.split(',')
-                if len(waves) == 2:
-                    # Only if two parts, treat them as initial and final values for a range
-                    return tuple(map(float, waves))
-            elif isinstance(value, tuple):
-                return tuple(map(float, value))
+            else:
+                waves = value
+
+            if len(waves) == 2:
+                # Only if two parts, treat them as initial and final values for a range
+                return tuple(map(float, waves))
 
             self.fail(f'{value} is not a valid input', param, ctx)
 
