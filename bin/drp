@@ -189,9 +189,10 @@ cli.add_command(quick_reduction)
     cloup.option('--r-mask', type=WaveRange(), default=MASK_BANDS["r"], multiple=True, help='the wavelength ranges to mask for r channel'),
     cloup.option('--z-mask', type=WaveRange(), default=MASK_BANDS["z"], multiple=True, help='the wavelength ranges to mask for z channel')
 )
+@click.option('-s', '--skip-done', is_flag=True, default=False, help='Flag to skip reduction steps that have already been done')
 @click.option('-d', '--display-plots', is_flag=True, default=False, help='Flag to display the plots')
 def twilight_reduction(expnums: list, median_box: int, niter: int, threshold: Tuple[float,float],
-                       nknots: int, b_mask: list, r_mask: list, z_mask: list,
+                       nknots: int, b_mask: list, r_mask: list, z_mask: list, skip_done: bool,
                        display_plots: bool) -> None:
     """ Run the twilight sequence reduction """
     # parse multiple exposure number lists into a single list
@@ -205,6 +206,7 @@ def twilight_reduction(expnums: list, median_box: int, niter: int, threshold: Tu
         b_mask=b_mask,
         r_mask=r_mask,
         z_mask=z_mask,
+        skip_done=skip_done,
         display_plots=display_plots)
 
 

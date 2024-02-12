@@ -445,6 +445,7 @@ def reduce_twilight_sequence(expnums: List[int], median_box: int = 10, niter: bo
                              b_mask: List[Tuple[float,float]] = MASK_BANDS["b"],
                              r_mask: List[Tuple[float,float]] = MASK_BANDS["r"],
                              z_mask: List[Tuple[float,float]] = MASK_BANDS["z"],
+                             skip_done: bool = False,
                              display_plots: bool = False) -> Dict[str, RSS]:
     """Reduce the twilight sequence and produces master twilight flats
 
@@ -469,6 +470,8 @@ def reduce_twilight_sequence(expnums: List[int], median_box: int = 10, niter: bo
         List of wavelength bands to mask in the red channel, by default []
     z_mask : list, optional
         List of wavelength bands to mask in the NIR channel, by default []
+    skip_done : bool, optional
+        Skip files that already exist, by default False
     display_plots : bool, optional
         Display plots, by default False
 
@@ -505,7 +508,7 @@ def reduce_twilight_sequence(expnums: List[int], median_box: int = 10, niter: bo
         sflat_path = path.full("lvm_anc", drpver=drpver, kind="s", imagetype=flat["imagetyp"], **flat)
         os.makedirs(os.path.dirname(pflat_path), exist_ok=True)
 
-        if os.path.isfile(dflat_path):
+        if skip_done and os.path.isfile(dflat_path):
             log.info(f"skipping {dflat_path}, file already exist")
         else:
             imageMethod.preproc_raw_frame(in_image=flat_path, out_image=pflat_path, in_mask=master_cals.get("pixelmask"))
@@ -513,16 +516,16 @@ def reduce_twilight_sequence(expnums: List[int], median_box: int = 10, niter: bo
                                         in_bias=master_cals.get("bias"), in_dark=master_cals.get("dark"),
                                         in_pixelflat=master_cals.get("pixelflat"), in_slitmap=SLITMAP)
 
-        if os.path.isfile(sflat_path):
+        if skip_done and os.path.isfile(sflat_path):
             log.info(f"skipping {sflat_path}, file already exist")
         else:
             imageMethod.subtract_straylight(in_image=dflat_path, out_image=sflat_path,
-                                            in_cent_trace=master_cals.get("cent"), select_nrows=3,
-                                            aperture=13, smoothing=200, median_box=21, gaussian_sigma=0.0)
+                                            in_cent_trace=master_cals.get("cent"), select_nrows=5,
+                                            aperture=13, smoothing=400, median_box=21, gaussian_sigma=0.0)
 
         # extract 1D spectra for each frame
         xflat_path = path.full("lvm_anc", drpver=drpver, kind="x", imagetype=flat["imagetyp"], **flat)
-        if os.path.isfile(xflat_path):
+        if skip_done and os.path.isfile(xflat_path):
             log.info(f"skipping {xflat_path}, file already exist")
         else:
             imageMethod.extract_spectra(in_image=sflat_path, out_rss=xflat_path,
@@ -530,14 +533,14 @@ def reduce_twilight_sequence(expnums: List[int], median_box: int = 10, niter: bo
                                         method="optimal", parallel=10)
 
         wflat_path = path.full("lvm_anc", drpver=drpver, kind="w", imagetype=flat["imagetyp"], **flat)
-        if os.path.isfile(wflat_path):
+        if skip_done and os.path.isfile(wflat_path):
             log.info(f"skipping {wflat_path}, file already exist")
         else:
             rssMethod.create_pixel_table(in_rss=xflat_path, out_rss=wflat_path,
                                             arc_wave=master_cals.get("wave"), arc_fwhm=master_cals.get("lsf"))
 
         hflat_path = path.full("lvm_anc", drpver=drpver, kind="h", imagetype=flat["imagetyp"], **flat)
-        if os.path.isfile(hflat_path):
+        if skip_done and os.path.isfile(hflat_path):
             log.info(f"skipping {hflat_path}, file already exist")
         else:
             iwave, fwave = SPEC_CHANNELS[camera[0]]
