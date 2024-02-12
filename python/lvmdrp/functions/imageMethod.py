@@ -1854,7 +1854,7 @@ def subtract_straylight(
     in_cent_trace: str,
     out_image: str,
     out_stray: str = None,
-    mask_nrows: int|Tuple[int,int] = 30,
+    select_nrows: int|Tuple[int,int] = 3,
     aperture: int = 14,
     smoothing: int = 20,
     use_weights : bool = False,
@@ -1881,8 +1881,8 @@ def subtract_straylight(
         Name of the FITS file in which the straylight subtracted image is stored
     out_stray: str
         Name of the FITS file in which the pure straylight image is stored
-    mask_nrows: int or Tuple[int,int], optional with default: 30
-        Number of rows at the top and bottom of the CCD to be masked
+    select_nrows: int or Tuple[int,int], optional with default: 30
+        Number of rows at the top and bottom of the CCD to be used for the stray light estimation
     aperture: int, optional  with default: 14
         Size of the aperture around each fiber in cross-disperion direction assumed to contain signal from fibers
     smoothing: int, optional with default: 20
@@ -1913,24 +1913,7 @@ def subtract_straylight(
     # load image data
     log.info(f"using image {os.path.basename(in_image)} for stray light subtraction")
     img = loadImage(in_image)
-
-    # update mask
-    if img._mask is None:
-        img._mask = numpy.zeros(img._data.shape, dtype=bool)
-    img._mask = img._mask | numpy.isnan(img._data) | numpy.isinf(img._data) | (img._data == 0)
-
-    # metadata
     unit = img._header["BUNIT"]
-
-    # mask regions around the top and bottom of the CCD
-    if isinstance(mask_nrows, int):
-        mask_tnrows = mask_nrows
-        mask_bnrows = mask_nrows
-    else:
-        mask_tnrows, mask_bnrows = mask_nrows
-    log.info(f"masking top {mask_tnrows} and bottom {mask_bnrows} rows of the CCD")
-    img._mask[-mask_tnrows:] = True
-    img._mask[:mask_bnrows] = True
 
     # smooth image along dispersion axis with a median filter excluded NaN values
     if median_box is not None:
@@ -1945,16 +1928,33 @@ def subtract_straylight(
     trace_mask = TraceMask()
     trace_mask.loadFitsData(in_cent_trace, extension_data=0)
 
+    # update mask
+    if img_median._mask is None:
+        img_median._mask = numpy.zeros(img_median._data.shape, dtype=bool)
+    img_median._mask = img_median._mask | numpy.isnan(img_median._data) | numpy.isinf(img_median._data) | (img_median._data == 0)
+
+    # mask regions around the top and bottom of the CCD
+    if isinstance(select_nrows, int):
+        select_tnrows = select_nrows
+        select_bnrows = select_nrows
+    else:
+        select_tnrows, select_bnrows = select_nrows
+    log.info(f"selecting top {select_tnrows} and bottom {select_bnrows} rows of the CCD")
+    # define indices for top/bottom fibers
+    tfiber = numpy.ceil(trace_mask._data[0]).astype(int)
+    bfiber = numpy.floor(trace_mask._data[-1]).astype(int)
+
+    for icol in range(img_median._dim[1]):
+        # mask top/bottom rows before/after first/last fiber
+        img_median._mask[tfiber[icol]:] = True
+        img_median._mask[:bfiber[icol]] = True
+        # unmask select_nrows around each region
+        img_median._mask[(tfiber[icol]+img_median._dim[0]-select_tnrows)//2:(tfiber[icol]+img_median._dim[0]+select_tnrows)//2] = False
+        img_median._mask[(bfiber[icol]-select_bnrows)//2:(bfiber[icol]+select_bnrows)//2] = False
+
     # mask regions around each fiber within a given cross-dispersion aperture
     log.info(f"masking fibers with an aperture of {aperture} pixels")
     img_median.maskFiberTraces(trace_mask, aperture=aperture, parallel=parallel)
-
-    # mask additional rows before top fiber and after bottom fiber
-    log.info(f"masking additional {mask_tnrows} rows before top fiber and {mask_bnrows} rows after bottom fiber")
-    trows = trace_mask._data[0].astype(int) + numpy.arange(mask_tnrows)[:, None]
-    brows = trace_mask._data[-1].astype(int) - numpy.arange(mask_bnrows)[:, None]
-    img_median._mask[trows] = True
-    img_median._mask[brows] = True
 
     # fit the signal in unmaksed areas along cross-dispersion axis by a polynomial
     log.info(f"fitting spline with {smoothing = } to the background signal along cross-dispersion axis")
@@ -1988,7 +1988,7 @@ def subtract_straylight(
     axs[0].set_title("polynomial fit vs. data", loc="left")
     axs[1].set_title("stray light model vs. data", loc="left")
     plt.xlim(0, img_median._data.shape[1])
-    plt.ylim(0, numpy.nanmax(img_median._data) * 1.1)
+    plt.ylim(0, numpy.nanmedian(img_median._data) + 3*numpy.nanstd(img_median._data))
 
     colors = plt.cm.coolwarm(numpy.linspace(0, 1, img_median._data.shape[1]))
     for icol in plot_columns:
