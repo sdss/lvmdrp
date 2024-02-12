@@ -1519,7 +1519,9 @@ class Image(Header):
             median filtered image
         """
         if self._mask is None and use_mask:
-            new_data = ndimage.median_filter(self._data, size, mode=mode)
+            new_data = copy(self._data)
+            new_data[self._mask] = numpy.nan
+            new_data = ndimage.median_filter(new_data, size, mode=mode)
             new_mask = None
             new_error = None
             if propagate_error and self._error is not None:
