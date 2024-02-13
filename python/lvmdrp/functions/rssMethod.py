@@ -1594,7 +1594,7 @@ def correctTraceMask_drp(trace_in, trace_out, logfile, ref_file, poly_smooth="")
     trace.writeFitsData(trace_out)
 
 
-def apply_fiberflat(in_rss: str, out_rss: str, out_lvmframe: str, in_flat: str, clip_below: float = 0.0) -> RSS:
+def apply_fiberflat(in_rss: str, out_lvmframe: str, in_flats: str, clip_below: float = 0.0) -> RSS:
     """applies fiberflat correction to target RSS file
 
     This function applies a fiberflat correction to a target RSS file. The
@@ -1607,11 +1607,9 @@ def apply_fiberflat(in_rss: str, out_rss: str, out_lvmframe: str, in_flat: str, 
     ----------
     in_rss : str
         input RSS file path to be corrected
-    out_rss : str
-        output RSS file path with fiberflat correction applied
     out_lvmframe : str
         output lvmFrame file path with fiberflat correction applied
-    in_flat : str
+    in_flats : str
         input RSS file path to the fiberflat
     clip_below : float, optional
         minimum relative transmission considered. Values below will be masked, by default 0.0
@@ -1629,8 +1627,13 @@ def apply_fiberflat(in_rss: str, out_rss: str, out_lvmframe: str, in_flat: str, 
     ifibvar = bn.nanmean(bn.nanvar(rss._data, axis=0))
 
     # load fiberflat
-    log.info(f"reading fiberflat from {os.path.basename(in_flat)}")
-    flat = RSS.from_file(in_flat)
+    flatname = ','.join([os.path.basename(in_flat) for in_flat in in_flats])
+    log.info(f"reading fiberflat from {flatname = }")
+    flats = [RSS.from_file(in_flat) for in_flat in in_flats]
+    flat = RSS.from_spectrographs(*flats)
+    if flat._wave is None:
+        flat.set_wave_trace(rss._wave_trace)
+        flat.set_wave_array()
 
     # check if fiberflat has the same number of fibers as the target data
     if rss._fibers != flat._fibers:
@@ -1666,10 +1669,6 @@ def apply_fiberflat(in_rss: str, out_rss: str, out_lvmframe: str, in_flat: str, 
     # compute final variance
     ffibvar = bn.nanmean(bn.nanvar(rss._data, axis=0))
 
-    # write out corrected RSS
-    log.info(f"writing fiberflat corrected RSS to {os.path.basename(out_rss)}")
-    rss.writeFitsData(out_rss)
-
     # load ancillary data
     log.info(f"writing lvmFrame to {os.path.basename(out_lvmframe)}")
 
@@ -1685,7 +1684,7 @@ def apply_fiberflat(in_rss: str, out_rss: str, out_lvmframe: str, in_flat: str, 
         slitmap=rss._slitmap,
         superflat=flat._data
     )
-    lvmframe.set_header(orig_header=rss._header, flatname=os.path.basename(in_flat), ifibvar=ifibvar, ffibvar=ffibvar)
+    lvmframe.set_header(orig_header=rss._header, flatname=flatname, ifibvar=ifibvar, ffibvar=ffibvar)
     lvmframe.writeFitsData(out_lvmframe)
 
     return rss, lvmframe
