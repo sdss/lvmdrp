@@ -466,8 +466,8 @@ def create_traces(mjds, target_mjd=None, expnums_ldls=None, expnums_qrtz=None,
                     out_image=sflat_path,
                     in_cent_trace=cent_path,
                     out_stray=mstray_path,
-                    select_nrows=3,
-                    median_box=21, aperture=13, smoothing=200, gaussian_sigma=0.0
+                    select_nrows=5,
+                    median_box=21, aperture=13, smoothing=400, gaussian_sigma=0.0
                 )
             else:
                 sflat_path = dflat_path
