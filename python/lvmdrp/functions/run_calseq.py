@@ -439,7 +439,7 @@ def create_traces(mjds, target_mjd=None, expnums_ldls=None, expnums_qrtz=None,
 
             # define paths
             dflat_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=masters_mjd, kind="d", imagetype="flat", camera=camera, expnum=expnum)
-            sflat_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=masters_mjd, kind="s", imagetype="flat", camera=camera, expnum=expnum)
+            lflat_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=masters_mjd, kind="l", imagetype="flat", camera=camera, expnum=expnum)
             flux_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=masters_mjd, kind="d", imagetype="flux", camera=camera, expnum=expnum)
             cent_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=masters_mjd, kind="d", imagetype="cent", camera=camera, expnum=expnum)
             fwhm_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=masters_mjd, kind="d", imagetype="fwhm", camera=camera, expnum=expnum)
@@ -463,18 +463,18 @@ def create_traces(mjds, target_mjd=None, expnums_ldls=None, expnums_qrtz=None,
                 # subtract stray light
                 image_tasks.subtract_straylight(
                     in_image=dflat_path,
-                    out_image=sflat_path,
+                    out_image=lflat_path,
                     in_cent_trace=cent_path,
                     out_stray=mstray_path,
                     select_nrows=5,
                     median_box=21, aperture=13, smoothing=400, gaussian_sigma=0.0
                 )
             else:
-                sflat_path = dflat_path
+                lflat_path = dflat_path
 
             log.info(f"going to trace std fiber {fiber_str} in {camera} within {block_idxs = }")
             centroids, trace_cent_fit, trace_flux_fit, trace_fwhm_fit, img_stray, model, mratio = image_tasks.trace_fibers(
-                in_image=sflat_path,
+                in_image=lflat_path,
                 out_trace_amp=flux_path, out_trace_cent=cent_path, out_trace_fwhm=fwhm_path,
                 out_trace_cent_guess=None,
                 correct_ref=True, median_box=(1,10), coadd=20,
