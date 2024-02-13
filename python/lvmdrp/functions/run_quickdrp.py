@@ -52,6 +52,7 @@ def get_master_mjd(sci_mjd: int) -> int:
 def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
                             skip_sky_subtraction: bool = False,
                             sky_weights: Tuple[float, float] = None,
+                            skip_flux_calibration: bool = False,
                             ncpus: int = None,
                             aperture_extraction: bool = False) -> None:
     """ Run the Quick DRP for a given exposure number.
@@ -95,8 +96,10 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
     sci_metadata.sort_values("camera", inplace=True)
 
     # define arc lamps configuration per spectrograph channel
-    # arc_lamps = {"b": "hgne", "r": "neon", "z": "neon"}
-    arc_lamps = {"b": "neon_hgne_argon_xenon", "r": "neon_hgne_argon_xenon", "z": "neon_hgne_argon_xenon"}
+    if master_mjd == 60142:
+        arc_lamps = {"b": "hgne", "r": "neon", "z": "neon"}
+    else:
+        arc_lamps = {"b": "neon_hgne_argon_xenon", "r": "neon_hgne_argon_xenon", "z": "neon_hgne_argon_xenon"}
 
     # run reduction loop for each science camera exposure
     for sci in sci_metadata.to_dict("records"):
@@ -206,7 +209,7 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
         # flux-calibrate each channel
         # TODO: write lvmFFrame-<channel>-<expnum>.fits
         fframe_path = path.full("lvm_frame", mjd=sci_mjd, drpver=drpver, tileid=sci_tileid, expnum=sci_expnum, kind=f'FFrame-{channel}')
-        flux_tasks.apply_fluxcal(in_rss=cframe_path, out_rss=fframe_path)
+        flux_tasks.apply_fluxcal(in_rss=cframe_path, out_rss=fframe_path, skip_fluxcal=skip_flux_calibration)
 
     # stitch channels
     fframe_paths = sorted(path.expand('lvm_frame', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver, kind='FFrame-*', expnum=expnum))
