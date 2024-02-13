@@ -2460,6 +2460,7 @@ def extract_spectra(
         if in_fwhm is None or not os.path.isfile(in_fwhm):
             trace_fwhm = TraceMask()
             trace_fwhm.setData(data=numpy.ones(trace_mask._data.shape) * float(fwhm))
+            trace_fwhm._coeffs = numpy.ones((trace_mask._data.shape[0], 1)) * float(fwhm)
         else:
             trace_fwhm = TraceMask().from_file(in_fwhm)
 
