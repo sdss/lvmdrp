@@ -138,6 +138,8 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
             mwave_path = os.path.join(masters_path, f"lvm-mwave_{lamps}-{sci_camera}.fits")
             mlsf_path = os.path.join(masters_path, f"lvm-mlsf_{lamps}-{sci_camera}.fits")
             mflat_path = os.path.join(masters_path, f"lvm-mfiberflat_twilight-{sci_camera}.fits")
+            if not os.path.isfile(mflat_path):
+                mflat_path = os.path.join(masters_path, f"lvm-mfiberflat-{sci_camera}.fits")
         else:
             log.info(f"using master calibration frames from DRP version {drpver}, mjd = {sci_mjd}, camera = {sci_camera}")
             masters = md.match_master_metadata(target_mjd=sci_mjd,
@@ -208,7 +210,6 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
 
     # TODO: add Guillermo's code to create astrometry, don't create images/maps
     # TODO: create astrometry for sky and std telescopes
-    
 
     # TODO: add quick report routine
 
