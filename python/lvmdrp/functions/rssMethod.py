@@ -732,12 +732,12 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
 
 
 # TODO:
-# * merge arc_wave and arc_fwhm into lvmArc product, change variable name to in_arc
-@skip_on_missing_input_path(["in_rss", "arc_wave", "arc_fwhm"])
-@skip_if_drpqual_flags(["EXTRACTBAD", "BADTRACE"], "in_rss")
-def create_pixel_table(in_rss: str, out_rss: str, arc_wave: str, arc_fwhm: str = None):
+# * merge arc_wave and arc_lsfs into lvmArc product, change variable name to in_arc
+# @skip_on_missing_input_path(["in_rss", "in_waves", "in_lsfs"])
+# @skip_if_drpqual_flags(["EXTRACTBAD", "BADTRACE"], "in_rss")
+def create_pixel_table(in_rss: str, out_rss: str, in_waves: str, in_lsfs: str):
     """
-    Applies the wavelength and possibly also the spectral resolution (FWHM) to an RSS
+    Applies the wavelength and the spectral resolution (LSF) to an RSS
 
     Parameters
     ----------
@@ -746,28 +746,25 @@ def create_pixel_table(in_rss: str, out_rss: str, arc_wave: str, arc_fwhm: str =
     out_rss : string
         Output RSS FITS file with the wavelength and spectral resolution pixel
         table added as extensions
-    arc_wave : string
-        RSS FITS file containing the wavelength pixel table in its primary
-        (0th) extension
-    arc_fwhm : string, optional with default: ''
-        RSS FITS file containing the spectral resolution (FWHM) pixel table in
-        its primary (0th) extension. No spectral resolution will not be added
-        if the string is empty.
-
+    in_waves : string
+        RSS FITS file containing the wavelength solutions
+    in_lsfs : string, optional with default: ''
+        RSS FITS file containing the spectral resolution (LSF in FWHM)
     """
     rss = RSS.from_file(in_rss)
     rss._data = rss._data[:, :-1]
     rss._error = rss._error[:, :-1]
     rss._mask = rss._mask[:, :-1]
 
-    wave_trace = TraceMask.from_file(arc_wave)
+    wave_traces = [TraceMask.from_file(in_wave) for in_wave in in_waves]
+    wave_trace = TraceMask.from_spectrographs(*wave_traces)
     wave_trace._data = wave_trace._data[:, :-1]
     rss.set_wave_trace(wave_trace)
 
-    if arc_fwhm is not None:
-        fwhm_trace = TraceMask.from_file(arc_fwhm)
-        fwhm_trace._data = fwhm_trace._data[:, :-1]
-        rss.set_lsf_trace(fwhm_trace)
+    lsf_traces = [TraceMask.from_file(in_lsfs) for in_lsfs in in_lsfs]
+    lsf_trace = TraceMask.from_spectrographs(*lsf_traces)
+    lsf_trace._data = lsf_trace._data[:, :-1]
+    rss.set_lsf_trace(lsf_trace)
     rss.writeFitsData(out_rss)
 
     return rss
