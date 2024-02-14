@@ -1464,10 +1464,10 @@ def interpolate_sky(in_frame: str, out_rss: str = None,
     new_rss = RSS(data=frame._data, error=frame._error, mask=frame._mask,
                   wave_trace=frame._wave_trace, lsf_trace=frame._lsf_trace,
                   slitmap=frame._slitmap, header=frame._header)
-    new_rss.set_supersky((frame._wave, *supersky["east"].tck, "east"))
-    new_rss.set_supersky((frame._wave, *supersky["west"].tck, "west"))
-    new_rss.set_supersky_error((frame._wave, *supererror["east"].tck, "east"))
-    new_rss.set_supersky_error((frame._wave, *supererror["west"].tck, "west"))
+    superskies = new_rss.stack_supersky([(frame._wave, *supersky["east"].tck, "east"), (frame._wave, *supersky["west"].tck, "west")])
+    supererrors = new_rss.stack_supersky([(frame._wave, *supererror["east"].tck, "east"), (frame._wave, *supererror["west"].tck, "west")])
+    new_rss.set_supersky(superskies)
+    new_rss.set_supersky_error(supererrors)
 
     # update header metadata
     new_rss._header.update(skymodel_pars_from_header(new_rss._header, telescope="SKYW"))

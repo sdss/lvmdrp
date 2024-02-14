@@ -1057,10 +1057,16 @@ class RSS(FiberRows):
         return Table(tck_dict)
 
     def stack_supersky(self, superskies):
+        if isinstance(superskies, list):
+            iterator = superskies
+        elif isinstance(superskies, Table):
+            iterator = []
+            for supersky in superskies:
+                iterator.extend(list(supersky.iterrows()))
+        else:
+            raise TypeError("superskies must be a list of tuples or an astropy.table.Table")
+
         tck_dict = dict(wave=[], knots=[], coeffs=[], degree=[], telescope=[])
-        iterator = []
-        for supersky in superskies:
-            iterator.extend(list(supersky.iterrows()))
         for wave, knots, coeffs, degree, telescope in iterator:
             tck_dict["wave"].append(wave)
             tck_dict["knots"].append(knots)
