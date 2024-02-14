@@ -119,6 +119,7 @@ def get_master_mjd(sci_mjd: int) -> int:
 def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
                             skip_sky_subtraction: bool = False,
                             sky_weights: Tuple[float, float] = None,
+                            skip_flux_calibration: bool = False,
                             ncpus: int = None,
                             aperture_extraction: bool = False) -> None:
     """ Run the Quick DRP for a given exposure number.
@@ -161,8 +162,10 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
     sci_metadata.sort_values("camera", inplace=True)
 
     # define arc lamps configuration per spectrograph channel
-    # arc_lamps = {"b": "hgne", "r": "neon", "z": "neon"}
-    arc_lamps = {"b": "neon_hgne_argon_xenon", "r": "neon_hgne_argon_xenon", "z": "neon_hgne_argon_xenon"}
+    if master_mjd == 60142:
+        arc_lamps = {"b": "hgne", "r": "neon", "z": "neon"}
+    else:
+        arc_lamps = {"b": "neon_hgne_argon_xenon", "r": "neon_hgne_argon_xenon", "z": "neon_hgne_argon_xenon"}
 
     # run reduction loop for each science camera exposure
     for sci in sci_metadata.to_dict("records"):
@@ -201,7 +204,9 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
             # macorr_path = os.path.join(masters_path, f"lvm-apercorr-{sci_camera}.fits")
             mwave_path = os.path.join(masters_path, f"lvm-mwave_{lamps}-{sci_camera}.fits")
             mlsf_path = os.path.join(masters_path, f"lvm-mlsf_{lamps}-{sci_camera}.fits")
-            mflat_path = os.path.join(masters_path, f"lvm-mfiberflat-{sci_camera}.fits")
+            mflat_path = os.path.join(masters_path, f"lvm-mfiberflat_twilight-{sci_camera}.fits")
+            if not os.path.isfile(mflat_path):
+                mflat_path = os.path.join(masters_path, f"lvm-mfiberflat-{sci_camera}.fits")
         else:
             log.info(f"using master calibration frames from DRP version {drpver}, mjd = {sci_mjd}, camera = {sci_camera}")
             masters = md.match_master_metadata(target_mjd=sci_mjd,
@@ -274,7 +279,7 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
     sci_paths = sorted(drp.path.expand("lvm_anc", drpver=drpver, tileid=sci_tileid, mjd=sci_mjd, kind="", imagetype="object", camera="*", expnum=sci_expnum))
     sci_paths = [sci_path for sci_path in sci_paths if "lvm-object-sp" not in sci_path]
     for sci_path in sci_paths:
-        flux_tasks.apply_fluxcal(in_rss=sci_path, out_rss=sci_path)
+        flux_tasks.apply_fluxcal(in_rss=sci_path, out_rss=sci_path, skip_fluxcal=skip_flux_calibration)
 
     # combine channels
     # TODO: write spline fitting in the super-sky table

@@ -3376,7 +3376,10 @@ def detrend_frame(
         log.info("subtracting master dark")
     elif in_dark and in_pixelflat:
         log.info("subtracting master dark and dividing by master pixelflat")
-    detrended_img = (bcorr_img - mdark_img.convertUnit(to=bcorr_img._header["BUNIT"])) / mflat_img
+
+    detrended_img = (bcorr_img - mdark_img.convertUnit(to=bcorr_img._header["BUNIT"]))
+    # NOTE: this is a hack to avoid the error propagation of the division in Image
+    detrended_img = detrended_img / mflat_img._data
 
     # propagate pixel mask
     log.info("propagating pixel mask")
