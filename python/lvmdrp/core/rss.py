@@ -3033,6 +3033,8 @@ def loadRSS(in_rss):
 class lvmFrame(RSS):
     """lvmFrame class"""
 
+    _BPARS = {"BUNIT": "electron", "BSCALE": 1, "BZERO": 0}
+
     @classmethod
     def from_hdulist(cls, hdulist):
         data = hdulist["FLUX"].data
@@ -3046,8 +3048,8 @@ class lvmFrame(RSS):
         superflat = hdulist["SUPERFLAT"].data
         slitmap = Table(hdulist["SLITMAP"].data)
         header = hdulist["PRIMARY"].header
-        for kw in ["BUNIT", "BSCALE", "BZERO"]:
-            header[kw] = hdulist["FLUX"].header.pop(kw, None)
+        for kw, vl in cls._BPARS.items():
+            header[kw] = hdulist["FLUX"].header.pop(kw, vl)
         return cls(data=data, error=error, mask=mask, header=header,
                    wave_trace=wave_trace, lsf_trace=lsf_trace,
                    cent_trace=cent_trace, width_trace=width_trace,
@@ -3104,9 +3106,9 @@ class lvmFrame(RSS):
 
     def writeFitsData(self, out_file):
         # update flux header
-        for kw in ["BUNIT", "BSCALE", "BZERO"]:
+        for kw, vl in self._BPARS.items():
             if kw in self._header:
-                self._template["FLUX"].header[kw] = self._header.pop(kw, None)
+                self._template["FLUX"].header[kw] = self._header.pop(kw, vl)
         # update primary header
         self._template["PRIMARY"].header.update(self._header)
         # fill in rest of the template
