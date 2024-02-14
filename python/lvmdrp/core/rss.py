@@ -2901,12 +2901,12 @@ class RSS(FiberRows):
         else:
             raise TypeError(f"Invalid slitmap table type '{type(slitmap)}'")
 
-        # define fiber positions in WCS
-        if self._header is not None:
-            wcs = WCS(header=self._header).to_header()
-            wcs.update({"NAXIS": 2, "NAXIS2": self._header["NAXIS2"], "CRPIX2": 1,
-                        "CRVAL2": 1, "CDELT2": 1, "CTYPE2": "LINEAR"})
-            self._header.update(wcs)
+        # # define fiber positions in WCS
+        # if self._header is not None:
+        #     wcs = WCS(header=self._header).to_header()
+        #     wcs.update({"NAXIS": 2, "NAXIS2": self._header["NAXIS2"], "CRPIX2": 1,
+        #                 "CRVAL2": 1, "CDELT2": 1, "CTYPE2": "LINEAR"})
+        #     self._header.update(wcs)
 
     def apply_pixelmask(self, mask=None):
         if mask is None:
