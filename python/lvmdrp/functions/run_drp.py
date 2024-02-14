@@ -20,10 +20,10 @@ from astropy.wcs import WCS
 from lvmdrp.core.rss import RSS
 from lvmdrp.functions.imageMethod import (preproc_raw_frame, create_master_frame,
                                           create_pixelmask, detrend_frame,
-                                          find_peaks_auto, trace_peaks,
+                                          trace_peaks,
                                           extract_spectra)
 from lvmdrp.functions.rssMethod import (determine_wavelength_solution, create_pixel_table,
-                                        resample_wavelength, join_spec_channels, stack_rss)
+                                        resample_wavelength, join_spec_channels, stack_spectrographs)
 from lvmdrp.utils.metadata import (get_frames_metadata, get_master_metadata, extract_metadata,
                                    get_analog_groups, match_master_metadata, create_master_path)
 from lvmdrp.utils.convert import tileid_grp
@@ -1094,7 +1094,7 @@ def combine_spectrographs(tileid: int, mjd: int, channel: str, expnum: int, imag
     """
 
     hsci_paths = sorted(path.expand('lvm_anc', mjd=mjd, tileid=tileid, drpver=drpver,
-                               kind='h', camera=f'{channel}*', imagetype=imagetype, expnum=expnum))
+                               kind='h', camera=f'{channel}[123]', imagetype=imagetype, expnum=expnum))
 
     if not hsci_paths:
         log.error(f'no rectified frames found for {expnum = }, {channel = }')
@@ -1108,7 +1108,7 @@ def combine_spectrographs(tileid: int, mjd: int, channel: str, expnum: int, imag
                            kind='', camera=channel, imagetype=imagetype, expnum=expnum)
 
     # combine RSS files along fiber ID direction
-    return stack_rss(hsci_paths, frame_path, axis=0)
+    return stack_spectrographs(hsci_paths, frame_path)
 
 
 def stack_ext(files: list, ext: Union[int, str] = 0) -> np.array:
@@ -1524,9 +1524,10 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
 
         # reduce the science data
         if sci_cond:
+            kwargs = get_config_options('reduction_steps.quick_science_reduction')
             for expnum in sci['expnum'].unique():
                 try:
-                    quick_science_reduction(expnum, use_fiducial_master=True)
+                    quick_science_reduction(expnum, use_fiducial_master=True, **kwargs)
                 except Exception as e:
                     log.exception(f'Failed to reduce science frame mjd {mjd} exposure {expnum}: {e}')
                     create_status_file(tileid, mjd, status='error')

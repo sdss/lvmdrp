@@ -25,7 +25,7 @@ from tqdm import tqdm
 from typing import List, Tuple
 
 from lvmdrp import log
-from lvmdrp.utils.decorators import skip_on_missing_input_path, drop_missing_input_paths, skip_if_drpqual_flags
+from lvmdrp.utils.decorators import skip_on_missing_input_path, drop_missing_input_paths
 from lvmdrp.utils.bitmask import QualityFlag
 from lvmdrp.core.fit_profile import Gaussians
 from lvmdrp.core.fiberrows import FiberRows, _read_fiber_ypix
@@ -1468,7 +1468,7 @@ def trace_peaks(
         # read slitmap extension
         slitmap = img.getSlitmap()
         slitmap = slitmap[slitmap["spectrographid"] == int(img._header["CCD"][1])]
-        
+
         channel = img._header["CCD"][0]
         positions = slitmap[f"ypix_{channel}"]
         fibers = positions.size
@@ -1576,7 +1576,7 @@ def trace_peaks(
         numpy.savetxt(coords_file, 1+numpy.asarray(table), fmt="%.5f")
         numpy.savetxt(poly_file, 1+numpy.asarray(table_poly), fmt="%.5f")
         numpy.savetxt(poly_all_file, 1+numpy.asarray(table_poly_all), fmt="%.5f")
-    
+
     # linearly interpolate coefficients at masked fibers
     log.info(f"interpolating coefficients at {bad_fibers.sum()} masked fibers")
     x_pixels = numpy.arange(trace._data.shape[1])
@@ -1982,9 +1982,9 @@ def traceFWHM_drp(
         median_box = max(median_box, 1)
         median_cross = max(median_cross, 1)
         img = img.medianImg((median_cross, median_box))
-    
+
     img._mask[...] = False
-    
+
     # plt.figure(figsize=(20,10))
     # plt.plot(img.getSlice(1300, axis="y")._error.tolist(), lw=0.6, color="0.7")
     # plt.plot(img.getSlice(1200, axis="y")._error.tolist(), lw=1)
@@ -2073,7 +2073,7 @@ def traceFWHM_drp(
 
 
     traceFWHM = TraceMask(data=fwhm, mask=mask | orig_trace._mask)
-   
+
     # smooth the FWHM trace with a polynomial fit along dispersion axis (uncertain pixels are not used)
     # traceFWHM.fit_polynomial(deg=poly_disp, poly_kind=poly_kind, clip=clip)
 
@@ -2463,7 +2463,7 @@ def extract_spectra(
             trace_fwhm.setData(data=numpy.ones(trace_mask._data.shape) * float(fwhm))
         else:
             trace_fwhm.loadFitsData(in_fwhm, extension_data=0)
-        
+
         # set up parallel run
         if parallel == "auto":
             fragments = multiprocessing.cpu_count()
@@ -2508,7 +2508,7 @@ def extract_spectra(
             )
     elif method == "aperture":
         (data, error, mask) = img.extractSpecAperture(trace_mask, aperture)
-        
+
         # apply aperture correction given in in_acorr
         if in_acorr is not None and os.path.isfile(in_acorr):
             log.info(f"applying aperture correction in {os.path.basename(in_acorr)}")
@@ -3288,7 +3288,7 @@ def detrend_frame(
     log.info(
         "target frame parameters: "
         f"MJD = {org_img._header['MJD']}, "
-        f"exptime = {org_img._header['EXPTIME']}, "
+        f"exptime = {exptime}, "
         f"camera = {org_img._header['CCD']}"
     )
 
@@ -3376,7 +3376,10 @@ def detrend_frame(
         log.info("subtracting master dark")
     elif in_dark and in_pixelflat:
         log.info("subtracting master dark and dividing by master pixelflat")
-    detrended_img = (bcorr_img - mdark_img.convertUnit(to=bcorr_img._header["BUNIT"])) / mflat_img
+
+    detrended_img = (bcorr_img - mdark_img.convertUnit(to=bcorr_img._header["BUNIT"]))
+    # NOTE: this is a hack to avoid the error propagation of the division in Image
+    detrended_img = detrended_img / mflat_img._data
 
     # propagate pixel mask
     log.info("propagating pixel mask")
@@ -3524,7 +3527,7 @@ def create_master_frame(in_images: List[str], out_image: str, batch_size: int = 
         log.info(f"selecting {batch_size} random images")
         in_images = numpy.random.choice(in_images, batch_size, replace=False)
     nexp = len(in_images)
-    
+
     # load images
     org_imgs, imagetyps = [], []
     for in_image in in_images:
@@ -3560,7 +3563,7 @@ def create_master_frame(in_images: List[str], out_image: str, batch_size: int = 
             org_imgs, method="median", normalize=True, normalize_percentile=75
         )
 
-    # write output master 
+    # write output master
     log.info(f"writing master frame to '{os.path.basename(out_image)}'")
     if master_mjd is not None:
         master_img._header["MJD"] = master_mjd
@@ -3767,7 +3770,7 @@ def create_pixelmask(in_short_dark, in_long_dark, out_pixmask, in_flat_a=None, i
 
     # define ratio of darks
     ratio_dark = short_dark / long_dark
-    
+
     # define quadrant sections
     sections = short_dark.getHdrValue("AMP? TRIMSEC")
 
@@ -3782,7 +3785,7 @@ def create_pixelmask(in_short_dark, in_long_dark, out_pixmask, in_flat_a=None, i
     fig_rat, axs_rat = create_subplots(to_display=display_plots, nrows=2, ncols=2, figsize=(15, 10), sharex=True, sharey=True)
     plt.subplots_adjust(hspace=0.1, wspace=0.1)
     fig_rat.suptitle(os.path.basename(out_pixmask))
-    
+
     log.info(f"creating pixel mask using dark current threshold = {dc_low} {unit}")
     for iquad, section in enumerate(sections.values()):
         log.info(f"processing quadrant = {section}")
@@ -3880,7 +3883,7 @@ def create_pixelmask(in_short_dark, in_long_dark, out_pixmask, in_flat_a=None, i
     # write output mask
     log.info(f"writing pixel mask to '{os.path.basename(out_pixmask)}'")
     pixmask.writeFitsData(out_pixmask)
-    
+
     return pixmask, ratio_dark, ratio_flat
 
 
@@ -3918,11 +3921,11 @@ def trace_fibers(
     header. The reference fiber positions are corrected using a
     cross-correlation between the reference fiber profile and the observed
     fiber profile.
-    
+
     The first measurement of the fiber centroids is performed using individual
     Gaussian fittings per column in a selection of ncolumns across the X-axis.
     This first guess of the centroids is fitted with a polynomial.
-    
+
     The centroids measured and fitted in the previous step are used to fit for
     the fiber profiles in the image along each ncolumns columns in the image. A
     number of nblocks of Gaussians are fitted simultaneously along each column.
@@ -4091,7 +4094,7 @@ def trace_fibers(
     for i, icolumn in iterator:
         # extract column profile
         img_slice = img.getSlice(icolumn, axis="y")
-        
+
         # get fiber positions along previous column
         if icolumn == LVM_REFERENCE_COLUMN:
             # trace reference column first or skip if already traced
@@ -4101,7 +4104,7 @@ def trace_fibers(
                 continue
         else:
             cent_guess, _, mask_guess = centroids.getSlice(columns[i-1], axis="y")
-        
+
         # update masked fibers
         mask_guess |= numpy.isnan(cent_guess)
 
@@ -4124,7 +4127,7 @@ def trace_fibers(
     # linearly interpolate coefficients at masked fibers
     log.info(f"interpolating coefficients at {bad_fibers.sum()} masked fibers")
     centroids.interpolate_coeffs()
-    
+
     # select columns to fit for amplitudes, centroids and FWHMs per fiber block
     step = img._dim[1] // ncolumns_full
     columns = numpy.concatenate((numpy.arange(LVM_REFERENCE_COLUMN, 0, -step), numpy.arange(LVM_REFERENCE_COLUMN+step, img._dim[1], step)))
@@ -4153,7 +4156,7 @@ def trace_fibers(
             # apply flux threshold
             cen_idx = cen_block.round().astype("int16")
             msk_block |= (img_slice._data[cen_idx] < counts_threshold)
-            
+
             # mask bad fibers
             cen_block = cen_block[~msk_block]
             # initialize parameters with the full block size
@@ -4178,7 +4181,7 @@ def trace_fibers(
 
         # store joint model
         mod_columns.append(mod_joint)
-    
+
         # get parameters of joint model
         amp_slice = par_joint[0]
         cent_slice = par_joint[1]
@@ -4216,7 +4219,7 @@ def trace_fibers(
                 dummy_amp_mask[iblock] = amp_mask_split[j]
                 dummy_cent_mask[iblock] = cent_mask_split[j]
                 dummy_fwhm_mask[iblock] = fwhm_mask_split[j]
-            
+
             # update traces
             trace_amp.setSlice(icolumn, axis="y", data=numpy.concatenate(dummy_amp), mask=numpy.concatenate(dummy_amp_mask))
             trace_cent.setSlice(icolumn, axis="y", data=numpy.concatenate(dummy_cent), mask=numpy.concatenate(dummy_cent_mask))
@@ -4229,12 +4232,12 @@ def trace_fibers(
             trace_amp.setSlice(icolumn, axis="y", data=amp_slice, mask=amp_mask)
             trace_cent.setSlice(icolumn, axis="y", data=cent_slice, mask=cent_mask)
             trace_fwhm.setSlice(icolumn, axis="y", data=fwhm_slice, mask=fwhm_mask)
-        
+
         # compute residuals
         integral_mod = numpy.trapz(mod_joint(img_slice._pixels), img_slice._pixels) or numpy.nan
         integral_dat = numpy.trapz(img_slice._data, img_slice._pixels)
         residuals.append((integral_dat - integral_mod) / integral_dat * 100)
-    
+
         # compute fitted model stats
         chisq_red = bn.nansum((mod_joint(img_slice._pixels) - img_slice._data)[~img_slice._mask]**2 / img_slice._error[~img_slice._mask]**2) / (img._dim[0] - 1 - 3)
         log.info(f"joint model {chisq_red = :.2f}")
@@ -4246,7 +4249,7 @@ def trace_fibers(
         log.info(f"joint model amplitudes: {min_amp = :.2f}, {max_amp = :.2f}, {median_amp = :.2f}")
         log.info(f"joint model centroids: {min_cent = :.2f}, {max_cent = :.2f}, {median_cent = :.2f}")
         log.info(f"joint model FWHMs: {min_fwhm = :.2f}, {max_fwhm = :.2f}, {median_fwhm = :.2f}")
-    
+
     # smooth all trace by a polynomial
     if fit_poly:
         log.info(f"fitting peak trace with {deg_amp}-deg polynomial")
@@ -4282,7 +4285,7 @@ def trace_fibers(
             trace_amp.interpolate_data(axis="Y")
             trace_cent.interpolate_data(axis="Y")
             trace_fwhm.interpolate_data(axis="Y")
-    
+
     # write output traces
     log.info(f"writing amplitude trace to '{os.path.basename(out_trace_amp)}'")
     trace_amp.writeFitsData(out_trace_amp)
@@ -4312,7 +4315,7 @@ def trace_fibers(
         figure_path="qa",
         label="residuals_int_columns"
     )
-    
+
     # profile models vs data
     fig, ax = create_subplots(to_display=display_plots, figsize=(15,7))
     fig.suptitle(f"Profile fitting residuals for {camera = }")

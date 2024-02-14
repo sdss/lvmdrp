@@ -76,7 +76,7 @@ def register_image(
         np.arange(-search_box / 2.0, search_box / 2.0 + step_search, step_search)
         + guess_y
     )
-    angles_off = np.arange(-10, 10, 2)
+    # angles_off = np.arange(-10, 10, 2)
     offsets_xIFU = np.zeros((len(offsets_x), len(offsets_y)))
     offsets_yIFU = np.zeros((len(offsets_x), len(offsets_y)))
     chisq = np.zeros((len(offsets_x), len(offsets_y)))

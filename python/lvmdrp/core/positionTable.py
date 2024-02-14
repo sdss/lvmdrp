@@ -39,7 +39,7 @@ class PositionTable(object):
 
         try:
             self._fiber_type = numpy.array(fiber_type)
-        except:
+        except Exception:
             self._fiber_type = None
 
     def loadTxtPosTab(self, file):
@@ -69,27 +69,19 @@ class PositionTable(object):
             self._fiber_type = fiber_type
 
     def writeTxtPosTab(self, file, fiber_type=False):
-        dat = open(file, "w")
-        print >> dat, "%s %.2f %.2f %i" % (self._shape, self._size[0], self._size[1], 0)
-        for i in range(len(self._arc_position_x)):
-            if fiber_type:
-                print >> dat, "%i %.2f %.2f %i %s" % (
-                    i + 1,
-                    self._arc_position_x[i],
-                    self._arc_position_y[i],
-                    self._good_fibers[i],
-                    self._fiber_type[i],
-                )
-            else:
-                print >> dat, "%i %.2f %.2f %i" % (
-                    i + 1,
-                    self._arc_position_x[i],
-                    self._arc_position_y[i],
-                    self._good_fibers[i],
-                )
-        #    print >> dat, "%i %.2f %.2f %i"%(i+1, self._arc_position_x[i], self._arc_position_y[i], self._good_fibers[i])
-        #    print >> dat, "%i %.2f %.2f"%(i+1, self._arc_position_x[i], self._arc_position_y[i])
-        dat.close()
+        with open(file, "w") as dat:
+            dat.write(f"{self._shape} {self._size[0]:.2f} {self._size[1]:.2f} {0}\n")
+            for i in range(len(self._arc_position_x)):
+                if fiber_type:
+                    dat.write(
+                        f"{i + 1} {self._arc_position_x[i]:.2f} {self._arc_position_y[i]:.2f} "
+                        f"{self._good_fibers[i]} {self._fiber_type[i]}\n"
+                    )
+                else:
+                    dat.write(
+                        f"{i + 1} {self._arc_position_x[i]:.2f} {self._arc_position_y[i]:.2f} "
+                        f"{self._good_fibers[i]}\n"
+                    )
 
     def writeFitsPosTable(self):
         columns = []
@@ -231,7 +223,7 @@ def loadPosTable(infile):
             if hdu[i].header["EXTNAME"].split()[0] == "POSTABLE":
                 posTab.loadFitsPosTable(hdu[i])
                 found = True
-        if found == False:
+        if found is False:
             raise RuntimeError(
                 "No position table information found in file %s." % (infile)
             )
