@@ -3032,21 +3032,28 @@ class lvmFrame(RSS):
 
     @classmethod
     def from_hdulist(cls, hdulist):
-        header = hdulist["PRIMARY"].header
         data = hdulist["FLUX"].data
         error = numpy.divide(1, hdulist["IVAR"].data, where=hdulist["IVAR"].data != 0, out=numpy.zeros_like(hdulist["IVAR"].data))
         error = numpy.sqrt(error)
-        mask = hdulist["MASK"].data
+        mask = hdulist["MASK"].data.astype("bool")
         cent_trace = Table(hdulist["CENT_TRACE"].data)
         width_trace = Table(hdulist["WIDTH_TRACE"].data)
         wave_trace = Table(hdulist["WAVE_TRACE"].data)
         lsf_trace = Table(hdulist["LSF_TRACE"].data)
         superflat = hdulist["SUPERFLAT"].data
         slitmap = Table(hdulist["SLITMAP"].data)
+        header = hdulist["PRIMARY"].header
+        for kw in ["BUNIT", "BSCALE", "BZERO"]:
+            header[kw] = hdulist["FLUX"].header.pop(kw, None)
         return cls(data=data, error=error, mask=mask, header=header,
                    wave_trace=wave_trace, lsf_trace=lsf_trace,
                    cent_trace=cent_trace, width_trace=width_trace,
                    superflat=superflat, slitmap=slitmap)
+
+    @classmethod
+    def from_file(cls, in_file):
+        with pyfits.open(in_file) as hdulist:
+            return cls.from_hdulist(hdulist)
 
     def __init__(self, data=None, error=None, mask=None,
                  cent_trace=None, width_trace=None, wave_trace=None, lsf_trace=None,
@@ -3089,18 +3096,8 @@ class lvmFrame(RSS):
         return self._superflat
 
     def loadFitsData(self, in_file):
-        with pyfits.open(in_file) as hdulist:
-            self._header = hdulist["PRIMARY"].header
-            self._data = hdulist["FLUX"].data
-            self._error = numpy.divide(1, hdulist["IVAR"].data, where=hdulist["IVAR"].data != 0, out=numpy.zeros_like(hdulist["IVAR"].data))
-            self._error = numpy.sqrt(self._error)
-            self._mask = hdulist["MASK"].data.astype("bool")
-            self._wave_trace = Table(hdulist["WAVE_TRACE"].data)
-            self._lsf_trace = Table(hdulist["LSF_TRACE"].data)
-            self._cent_trace = Table(hdulist["CENT_TRACE"].data)
-            self._width_trace = Table(hdulist["WIDTH_TRACE"].data)
-            self._superflat = hdulist["SUPERFLAT"].data
-            self._slitmap = Table(hdulist["SLITMAP"].data)
+        self = lvmFrame.from_file(in_file)
+        return self
 
     def writeFitsData(self, out_file):
         # update flux header
