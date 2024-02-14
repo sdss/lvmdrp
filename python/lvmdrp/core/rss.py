@@ -1524,16 +1524,13 @@ class RSS(FiberRows):
         wavelength grid can be specified in three different ways:
 
             - by providing a `wave` array, in which case it expects it to be a
-            one-dimensional array with an uniform sampling.
+            one-dimensional array with the same number of elements as the
+            wavelength dimension of the data array and with uniform sampling.
 
             - by providing a `wave_range` and `wave_disp` values, in which case
             it expects `wave_range` to be a tuple with the lower and upper
             limits of the wavelength range, and `wave_disp` to be the
             wavelength dispersion.
-
-            - by providing a `wave` array, in which case it expects it to be a
-            one-dimensional array with the same number of elements as the
-            wavelength dimension of the data array.
 
         NOTE: all operations are perfomed in a copy of the RSS object, so the
         original object is not modified.
@@ -1579,7 +1576,7 @@ class RSS(FiberRows):
         if rss._header is None:
             rss._header = pyfits.Header()
         unit = rss._header["BUNIT"]
-        if not unit.endswith("/Angstrom"):
+        if not unit.endswith("/angstrom"):
             dlambda = numpy.gradient(rss._wave, axis=1)
             rss._data /= dlambda
             rss._error /= dlambda
@@ -1587,7 +1584,7 @@ class RSS(FiberRows):
                 rss._sky /= dlambda
             if rss._sky_error is not None:
                 rss._sky_error /= dlambda
-            unit = unit + "/Angstrom"
+            unit = unit + "/angstrom"
 
         rss._header["BUNIT"] = unit
         rss._header["WAVREC"] = True
@@ -1638,7 +1635,7 @@ class RSS(FiberRows):
                 new_rss._sky *= dlambda
             if new_rss._sky_error is not None:
                 new_rss._sky_error *= dlambda
-            new_rss._header["BUNIT"] = unit.replace("/Angstrom", "")
+            new_rss._header["BUNIT"] = unit.replace("/angstrom", "")
 
         return new_rss
 
@@ -1685,7 +1682,7 @@ class RSS(FiberRows):
         if rss._header is None:
             rss._header = pyfits.Header()
         unit = rss._header["BUNIT"]
-        if not unit.endswith("/Angstrom"):
+        if not unit.endswith("/angstrom"):
             dlambda = numpy.gradient(rss._wave)
             rss._data /= dlambda
             rss._error /= dlambda
@@ -1693,7 +1690,7 @@ class RSS(FiberRows):
                 rss._sky /= dlambda
             if rss._sky_error is not None:
                 rss._sky_error /= dlambda
-            unit = unit + "/Angstrom"
+            unit = unit + "/angstrom"
 
         rss._header["BUNIT"] = unit
         rss._header["WAVREC"] = False
@@ -1737,7 +1734,7 @@ class RSS(FiberRows):
                 new_rss._sky *= dlambda
             if new_rss._sky_error is not None:
                 new_rss._sky_error *= dlambda
-            new_rss._header["BUNIT"] = unit.replace("/Angstrom", "")
+            new_rss._header["BUNIT"] = unit.replace("/angstrom", "")
 
         return new_rss
 
