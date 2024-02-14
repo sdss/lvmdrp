@@ -204,7 +204,9 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
             # macorr_path = os.path.join(masters_path, f"lvm-apercorr-{sci_camera}.fits")
             mwave_path = os.path.join(masters_path, f"lvm-mwave_{lamps}-{sci_camera}.fits")
             mlsf_path = os.path.join(masters_path, f"lvm-mlsf_{lamps}-{sci_camera}.fits")
-            mflat_path = os.path.join(masters_path, f"lvm-mfiberflat-{sci_camera}.fits")
+            mflat_path = os.path.join(masters_path, f"lvm-mfiberflat_twilight-{sci_camera}.fits")
+            if not os.path.isfile(mflat_path):
+                mflat_path = os.path.join(masters_path, f"lvm-mfiberflat-{sci_camera}.fits")
         else:
             log.info(f"using master calibration frames from DRP version {drpver}, mjd = {sci_mjd}, camera = {sci_camera}")
             masters = md.match_master_metadata(target_mjd=sci_mjd,
