@@ -1594,7 +1594,7 @@ def correctTraceMask_drp(trace_in, trace_out, logfile, ref_file, poly_smooth="")
     trace.writeFitsData(trace_out)
 
 
-def apply_fiberflat(in_rss: str, out_lvmframe: str, in_flats: str, clip_below: float = 0.0) -> RSS:
+def apply_fiberflat(in_rss: str, out_frame: str, in_flats: str, clip_below: float = 0.0) -> RSS:
     """applies fiberflat correction to target RSS file
 
     This function applies a fiberflat correction to a target RSS file. The
@@ -1607,7 +1607,7 @@ def apply_fiberflat(in_rss: str, out_lvmframe: str, in_flats: str, clip_below: f
     ----------
     in_rss : str
         input RSS file path to be corrected
-    out_lvmframe : str
+    out_frame : str
         output lvmFrame file path with fiberflat correction applied
     in_flats : str
         input RSS file path to the fiberflat
@@ -1670,7 +1670,7 @@ def apply_fiberflat(in_rss: str, out_lvmframe: str, in_flats: str, clip_below: f
     ffibvar = bn.nanmean(bn.nanvar(rss._data, axis=0))
 
     # load ancillary data
-    log.info(f"writing lvmFrame to {os.path.basename(out_lvmframe)}")
+    log.info(f"writing lvmFrame to {os.path.basename(out_frame)}")
 
     # create lvmFrame
     lvmframe = lvmFrame(
@@ -1685,7 +1685,7 @@ def apply_fiberflat(in_rss: str, out_lvmframe: str, in_flats: str, clip_below: f
         superflat=flat._data
     )
     lvmframe.set_header(orig_header=rss._header, flatname=flatname, ifibvar=ifibvar, ffibvar=ffibvar)
-    lvmframe.writeFitsData(out_lvmframe)
+    lvmframe.writeFitsData(out_frame)
 
     return rss, lvmframe
 
