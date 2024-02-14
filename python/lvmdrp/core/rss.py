@@ -992,13 +992,13 @@ class RSS(FiberRows):
         for telescope in telescopes:
             # separate by telescope
             select_telescope = supersky["telescope"] == telescope
-            tcks = list(zip(
+            tcks, = tuple(zip(
                 supersky["wave"][select_telescope],
                 supersky["knots"][select_telescope],
                 supersky["coeffs"][select_telescope],
                 supersky["degree"][select_telescope]))
 
-            tcks_error = list(zip(
+            tcks_error, = tuple(zip(
                 supersky_error["wave"][select_telescope],
                 supersky_error["knots"][select_telescope],
                 supersky_error["coeffs"][select_telescope],

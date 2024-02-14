@@ -1507,7 +1507,7 @@ def interpolate_sky(in_frame: str, out_rss: str = None,
     return new_rss, supersky, supererror, swave, ssky, svars, smask
 
 
-def combine_skies(in_rss: str, out_rss, in_skye: str, in_skyw: str, sky_weights: Tuple[float, float] = None) -> RSS:
+def combine_skies(in_rss: str, out_rss, sky_weights: Tuple[float, float] = None) -> Tuple[RSS, RSS]:
     """Combines the extrapolated sky fibers from both telescopes into a single master sky RSS
 
     Parameters
@@ -1525,19 +1525,14 @@ def combine_skies(in_rss: str, out_rss, in_skye: str, in_skyw: str, sky_weights:
 
     Returns
     -------
-    RSS
-        sky-subtracted RSS object
-
+    RSS : lvmdrp.core.rss.RSS
+        new RSS object with telescope-combined sky and sky error
+    RSS : lvmdrp.core.rss.RSS
+        combined sky RSS
     """
     # load input RSS
     log.info(f"loading input RSS file '{os.path.basename(in_rss)}'")
     rss = RSS.from_file(in_rss)
-
-    # load sky RSS
-    log.info(f"loading input SkyE RSS file '{os.path.basename(in_skye)}'")
-    sky_e = RSS.from_file(in_skye)
-    log.info(f"loading input SkyW RSS file '{os.path.basename(in_skyw)}'")
-    sky_w = RSS.from_file(in_skyw)
 
     # linearly interpolate in sky coordinates
     log.info("interpolating sky fibers for both telescopes")
@@ -1569,6 +1564,11 @@ def combine_skies(in_rss: str, out_rss, in_skye: str, in_skyw: str, sky_weights:
     else:
         raise ValueError(f"invalid value for 'sky_weights' parameter: '{sky_weights}'")
 
+    # evaluate sky spectra
+    _, supersky, supersky_error = rss.eval_supersky()
+    sky_e = RSS(wave_trace=rss._wave_trace, lsf_trace=rss._lsf_trace, data=supersky["east"], error=supersky_error["east"])
+    sky_w = RSS(wave_trace=rss._wave_trace, lsf_trace=rss._lsf_trace, data=supersky["west"], error=supersky_error["west"])
+
     # define master sky
     sky = sky_e * w_e + sky_w * w_w
 
@@ -1577,14 +1577,9 @@ def combine_skies(in_rss: str, out_rss, in_skye: str, in_skyw: str, sky_weights:
     rss.setHdrValue("SKYEW", w_e, "SkyE weight")
     rss.setHdrValue("SKYWW", w_w, "SkyW weight")
     rss.set_sky(rss_sky=sky)
-
-    new_supersky = rss.stack_supersky([sky_e._supersky, sky_w._supersky])
-    new_supersky_error = rss.stack_supersky([sky_e._supersky_error, sky_w._supersky_error])
-    rss.set_supersky(new_supersky)
-    rss.set_supersky_error(new_supersky_error)
     rss.writeFitsData(out_rss)
 
-    return rss
+    return rss, sky
 
 
 def quick_sky_subtraction(in_fframe, out_sframe, band=np.array((7238,7242,7074,7084,7194,7265)), skip_subtraction=False):
