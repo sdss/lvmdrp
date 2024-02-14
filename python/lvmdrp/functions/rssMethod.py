@@ -4,7 +4,7 @@
 import os
 from copy import deepcopy as copy
 from multiprocessing import Pool, cpu_count
-from typing import List
+from typing import List, Tuple
 
 import matplotlib
 import matplotlib.gridspec as gridspec
@@ -12,6 +12,7 @@ import numpy
 import yaml
 import bottleneck as bn
 from astropy import units as u
+from astropy.constants import c
 from astropy.io import fits
 from astropy.table import Table
 from astropy.time import Time
@@ -1017,17 +1018,18 @@ def correctPixTable_drp(
 # TODO: hacer esto antes de hacer el rasampling en wl
 @skip_on_missing_input_path(["in_rss"])
 @skip_if_drpqual_flags(["BADTRACE", "EXTRACTBAD"], "in_rss")
-def resample_wavelength(in_rss: str, out_rss: str, method: str = "spline",
-                        start_wave: float = None, end_wave: float = None,
-                        disp_pix: float = None, err_sim: int = 500,
-                        replace_error: float = 1.e10, correctHvel: float = None,
-                        compute_densities: bool = False, extrapolate: bool = True,
-                        parallel: str = "auto"):
-    """
-    Resamples the RSS wavelength solutions a common wavelength solution for each fiber
+def resample_wavelength(in_rss: str, out_rss: str, method: str = "linear",
+                        wave_range: Tuple[float,float] = None, wave_disp: float = None,
+                        helio_vel: float = 0.0, helio_vel_keyword: str = "HELIO_RV",
+                        convert_to_density: bool = False) -> RSS:
+    """Resamples the RSS wavelength solutions to a common wavelength solution
 
-    A Monte Carlo scheme can be used to propagte the error to the resample spectrum.
-    Note that correlated noise is not taken into account with the procedure.
+    A common wavelength solution is computed for the RSS by resampling the
+    wavelength solution of each fiber to a common wavelength grid. The
+    resampling is performed using a linear or spline interpolation scheme.
+    Additionally barycentric correction in velocity can be applied if
+    information is supplied as input parameter or in the header of the input
+    RSS.
 
     Parameters
     ----------
@@ -1035,155 +1037,65 @@ def resample_wavelength(in_rss: str, out_rss: str, method: str = "spline",
         Input RSS FITS file where the wavelength is stored as a pixel table
     out_rss : string
         Output RSS FITS file with a common wavelength solution
-    method : string, optional with default: 'spline'
+    method : string, optional with default: 'linear'
         Interpolation scheme used for the spectral resampling of the data.
         Available options are:
-            - spline
             - linear
-    start_wave : string of float, optional with default: ''
-        Start wavelength for the common resampled wavelength solution.
-        The "optimal" wavelength will be used if the paramter is empty.
-    endt_wave : string of float, optional with default: ''
-        End wavelength for the common resampled wavelength solution
-        The "optimal" wavelength will be used if the paramter is empty.
-    disp_pix : string of float, optional with default: ''
+            - spline
+    wave_range : string of float, optional with default: None
+        Wavelength range of the common resampled wavelength solution. If the
+        parameter is empty, the wavelength range of the input RSS is used.
+    wave_disp : string of float, optional with default: None
         Dispersion per pixel for the common resampled wavelength solution.
-        The "optimal" dispersion will be used if the paramter is empty.
-    err_sim : string of integer (>0), optional with default: '500'
-        Number of Monte Carlo simulation per fiber in the RSS to estimate the
-        error of the resampled spectrum. If err_sim is set to 0, no error will
-        be estimated for the resampled RSS.
-    replace_error: strong of float, optional with default: '1e10'
-        Error value for bad pixels resampled data, will be ignored if empty
-    parallel: either string of integer (>0) or  'auto', optional with default: 'auto'
-        Number of CPU cores used in parallel for the computation. If set to
-        auto, the maximum number of CPUs for the given system is used.
+        The "optimal" dispersion will be used if the parameter is empty.
+    helio_vel : string of float, optional with default: 0.0
+        Heliocentric velocity in km/s. If the parameter is empty, the value
+        stored in the header of the input RSS is used.
+    helio_vel_keyword : string, optional with default: 'HELIO_RV'
+        Keyword in the header of the input RSS where the heliocentric velocity
+        is stored.
+    convert_to_density : string of boolean, optional with default: False
+        If True, the resampled RSS will be converted to density units.
 
-    Examples
-    --------
-    user:> lvmdrp rss resampleWave RSS_in.fits RSS_out.fits
-    user:> lvmdrp rss resampleWave RSS_in.fits RSS_out.fits start_wave=3700.0 /
-    > end_wave=7000.0 disp_pix=2.0 err_sim=0
+    Returns
+    -------
+    RSS : lvmdrp.core.rss.RSS
+        Resampled RSS with a common wavelength solution
     """
 
+    # load input RSS
+    log.info(f"reading target data from '{os.path.basename(in_rss)}'")
     rss = loadRSS(in_rss)
 
-    if not start_wave:
+    # define wavelength grid
+    if wave_range is None or len(wave_range) < 2:
         start_wave = numpy.min(rss._wave)
-    else:
-        start_wave = float(start_wave)
-    if not disp_pix:
-        disp_pix = numpy.min(rss._wave[:, 1:] - rss._wave[:, :-1])
-    else:
-        disp_pix = float(disp_pix)
-
-    if not end_wave:
         end_wave = numpy.max(rss._wave)
+        wave_range = (start_wave, end_wave)
+    if wave_disp is None:
+        wave_disp = numpy.min(rss._wave[:, 1:] - rss._wave[:, :-1])
+    log.info(f"using wavelength range {wave_range = } angstrom and {wave_disp = } angstrom pixel size")
+
+    # apply heliocentric velocity correction
+    if helio_vel is None or helio_vel == 0.0:
+        helio_vel = rss._header.get(helio_vel_keyword)
+        if helio_vel is None:
+            helio_vel = 0.0
+            log.warning(f"no heliocentric velocity found in header by keywords {helio_vel_keyword = }, assuming {helio_vel = } km/s")
     else:
-        end_wave = float(end_wave)
+        log.info(f"applying heliocentric velocity correction of {helio_vel = } km/s")
 
-    if not correctHvel:
-        offset_vel = 0.0
-    else:
-        try:
-            offset_vel = float(correctHvel)
-        except ValueError:
-            offset_vel = rss.getHdrValue(correctHvel)
+    rss._wave = rss._wave * (1 + helio_vel / c.to("km/s").value)
 
-    ref_wave = numpy.arange(start_wave, end_wave + disp_pix - 0.001, disp_pix)
-    rss._wave = rss._wave * (1 + offset_vel / 300000.0)
+    # resample the wavelength solution
+    log.info(f"resampling the wavelength solution using {method = } interpolation")
+    new_rss = rss.rectify_wave(wave_range=wave_range, wave_disp=wave_disp, method=method, return_density=convert_to_density)
 
-    if extrapolate:
-        collapsed_spec = rss.create1DSpec().resampleSpec(
-            ref_wave, method="linear", err_sim=err_sim
-        )
-    else:
-        collapsed_spec = None
+    # write output RSS
+    log.info(f"writing resampled RSS to '{os.path.basename(out_rss)}'")
+    new_rss.writeFitsData(out_rss)
 
-    data = numpy.zeros((rss._fibers, len(ref_wave)), dtype=numpy.float32)
-    mask = numpy.zeros((rss._fibers, len(ref_wave)), dtype="bool")
-    if rss._error is not None and err_sim != 0:
-        error = numpy.zeros((rss._fibers, len(ref_wave)), dtype=numpy.float32)
-    else:
-        error = None
-    if rss._lsf is not None:
-        lsf = numpy.zeros((rss._fibers, len(ref_wave)), dtype=numpy.float32)
-    else:
-        lsf = None
-    if rss._sky is not None:
-        sky = numpy.zeros((rss._fibers, len(ref_wave)), dtype=numpy.float32)
-    else:
-        sky = None
-    if rss._sky_error is not None:
-        sky_error = numpy.zeros((rss._fibers, len(ref_wave)), dtype=numpy.float32)
-    else:
-        sky_error = None
-
-    if compute_densities:
-        width_pix = numpy.zeros_like(rss._data)
-        width_pix[:, :-1] = numpy.fabs(rss._wave[:, 1:] - rss._wave[:, :-1])
-        width_pix[:, -1] = width_pix[:, -2]
-        rss._data = rss._data / width_pix
-        rss._header["BUNIT"] = rss._header["BUNIT"] + "/angstrom"
-        if rss._error is not None:
-            rss._error = rss._error / width_pix
-
-    if rss._wave is not None and len(rss._wave.shape) == 2:
-        if parallel == "auto":
-            cpus = cpu_count()
-        else:
-            cpus = int(parallel)
-        if cpus > 1:
-            pool = Pool(cpus)
-            result_spec = []
-            for i in range(rss._fibers):
-                spec = rss.getSpec(i)
-                result_spec.append(
-                    pool.apply_async(
-                        spec.resampleSpec,
-                        args=(ref_wave, method, err_sim, replace_error, collapsed_spec),
-                    )
-                )
-            pool.close()
-            pool.join()
-
-        for i in range(rss._fibers):
-            if cpus > 1:
-                spec = result_spec[i].get()
-            else:
-                spec = rss.getSpec(i)
-                spec = spec.resampleSpec(
-                    ref_wave, method, err_sim, replace_error, collapsed_spec
-                )
-            data[i, :] = spec._data
-            if rss._error is not None and err_sim != 0:
-                error[i, :] = spec._error
-            if rss._lsf is not None:
-                lsf[i, :] = spec._lsf
-            if rss._sky is not None:
-                sky[i, :] = spec._sky
-            if rss._sky_error is not None:
-                sky_error[i, :] = spec._sky_error
-            mask[i, :] = spec._mask
-
-    new_header = rss._header
-    new_header["WAVREC"] = (True, "Wavelength rectified")
-    resamp_rss = RSS(
-        data=data,
-        header=new_header,
-        error=error,
-        mask=mask,
-        wave_trace=rss._wave_trace,
-        lsf_trace=rss._lsf_trace,
-        slitmap=rss._slitmap,
-        sky=sky,
-        sky_error=sky_error,
-        supersky=rss._supersky,
-        supersky_error=rss._supersky_error
-    )
-    resamp_rss.set_wave_array(ref_wave)
-
-    resamp_rss.writeFitsData(out_rss)
+    return new_rss
 
 
 def matchResolution_drp(in_rss, out_rss, targetFWHM, parallel="auto"):
