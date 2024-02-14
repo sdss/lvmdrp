@@ -945,25 +945,25 @@ class RSS(FiberRows):
             header["OBJECT"] = "sky"
         return RSS(data=self._sky, error=self._sky_error, mask=self._mask, wave=self._wave, lsf=self._lsf, header=header)
 
-    def set_supersky(self, supersky, telescope=None):
+    def set_supersky(self, supersky):
         if isinstance(supersky, pyfits.BinTableHDU):
             self._supersky = Table(supersky.data)
         elif isinstance(supersky, Table):
             self._supersky = supersky
         elif isinstance(supersky, tuple):
-            wave, knots, coeffs, degree, specid, telescope = supersky
-            self._supersky = self.tck_to_table(wave, knots, coeffs, degree, specid, telescope)
+            wave, knots, coeffs, degree, telescope = supersky
+            self._supersky = self.tck_to_table(wave, knots, coeffs, degree, telescope)
         else:
             raise TypeError(f"Invalid {supersky} value. Valid types are 'astropy.io.fits.BinTableHDU', 'astropy.table.Table' and 'tuple'")
 
-    def set_supersky_error(self, supersky_error, telescope=None):
+    def set_supersky_error(self, supersky_error):
         if isinstance(supersky_error, pyfits.BinTableHDU):
             self._supersky_error = Table(supersky_error.data)
         elif isinstance(supersky_error, Table):
             self._supersky_error = supersky_error
         elif isinstance(supersky_error, tuple):
-            wave, knots, coeffs, degree, specid, telescope = supersky_error
-            self._supersky_error = self.tck_to_table(wave, knots, coeffs, degree, specid, telescope)
+            wave, knots, coeffs, degree, telescope = supersky_error
+            self._supersky_error = self.tck_to_table(wave, knots, coeffs, degree, telescope)
         else:
             raise TypeError(f"Invalid {supersky_error} value. Valid types are 'astropy.io.fits.BinTableHDU', 'astropy.table.Table' and 'tuple'")
 
@@ -984,7 +984,6 @@ class RSS(FiberRows):
             raise ValueError("Cannot evaluate super sky error, spline parameters are None")
 
         telescopes = sorted(set(supersky["telescope"]))
-        specids = sorted(set(supersky["specid"]))
 
         # separate east and west
         waves = dict(east=[], west=[])
@@ -1005,40 +1004,34 @@ class RSS(FiberRows):
                 supersky_error["coeffs"][select_telescope],
                 supersky_error["degree"][select_telescope]))
 
-            # separate by spectrograph
-            for specid in specids:
-                wave = tcks[specid-1][0]
-                wave = wave.reshape((-1, 4085))
-                tck = tcks[specid-1][1:]
-                tck_error = tcks_error[specid-1][1:]
+            # separate wavelenths from spline parameters
+            wave = tcks[0]
+            wave = wave.reshape((-1, 4085))
+            tck = tcks[1:]
+            tck_error = tcks_error[1:]
 
-                # evaluate supersky
-                dlambda = numpy.diff(wave, axis=1)
-                dlambda = numpy.column_stack((dlambda, dlambda[:, -1]))
-                sky = numpy.zeros(wave.shape)
-                error = numpy.zeros(wave.shape)
-                for i in range(self._fibers // len(specids)):
-                    sky[i, :] = interpolate.splev(wave[i, :], tck)
-                    error[i, :] = interpolate.splev(wave[i, :], tck_error)
+            # evaluate supersky
+            dlambda = numpy.diff(wave, axis=1)
+            dlambda = numpy.column_stack((dlambda, dlambda[:, -1]))
+            sky = numpy.zeros(wave.shape)
+            error = numpy.zeros(wave.shape)
+            for i in range(self._fibers):
+                sky[i, :] = interpolate.splev(wave[i, :], tck)
+                error[i, :] = interpolate.splev(wave[i, :], tck_error)
 
-                # store supersky
-                waves[telescope].append(wave)
-                supersky_spline[telescope].append(sky)
-                supersky_error_spline[telescope].append(error)
-
-            # concatenate spectrographs
-            waves[telescope] = numpy.concatenate(waves[telescope], axis=0)
-            supersky_spline[telescope] = numpy.concatenate(supersky_spline[telescope], axis=0)
-            supersky_error_spline[telescope] = numpy.concatenate(supersky_error_spline[telescope], axis=0)
+            # store supersky in dictionary
+            waves[telescope] = wave
+            supersky_spline[telescope] = sky
+            supersky_error_spline[telescope] = error
 
         return waves, supersky_spline, supersky_error_spline
 
-    def tck_to_table(self, wave, knots, coeffs, degree, specid, telescope):
+    def tck_to_table(self, wave, knots, coeffs, degree, telescope):
         # pack arguments for validation
-        args = (wave, knots, coeffs, degree, specid, telescope)
-        types = (numpy.ndarray, numpy.ndarray, numpy.ndarray, int, int, str)
+        args = (wave, knots, coeffs, degree, telescope)
+        types = (numpy.ndarray, numpy.ndarray, numpy.ndarray, int, str)
 
-        tck_dict = dict(wave=[], knots=[], coeffs=[], degree=[], specid=[], telescope=[])
+        tck_dict = dict(wave=[], knots=[], coeffs=[], degree=[], telescope=[])
         if isinstance(wave, list):
             # validate arguments list
             assert all(isinstance(arg, list) for arg in args), "All objects must be instances of list"
@@ -1046,12 +1039,11 @@ class RSS(FiberRows):
             length_set = {len(arg) for arg in args}
             assert len(length_set) == 1, "All lists must have the same length"
 
-            for knots, coeffs, degree, specid, telescope in zip(args):
+            for knots, coeffs, degree, telescope in zip(args):
                 tck_dict["wave"].append(wave.ravel())
                 tck_dict["knots"].append(knots)
                 tck_dict["coeffs"].append(coeffs)
                 tck_dict["degree"].append(degree)
-                tck_dict["specid"].append(specid)
                 tck_dict["telescope"].append(telescope)
         else:
             # validate argument types
@@ -1060,22 +1052,20 @@ class RSS(FiberRows):
             tck_dict["knots"].append(knots)
             tck_dict["coeffs"].append(coeffs)
             tck_dict["degree"].append(degree)
-            tck_dict["specid"].append(specid)
             tck_dict["telescope"].append(telescope)
 
         return Table(tck_dict)
 
     def stack_supersky(self, superskies):
-        tck_dict = dict(wave=[], knots=[], coeffs=[], degree=[], specid=[], telescope=[])
+        tck_dict = dict(wave=[], knots=[], coeffs=[], degree=[], telescope=[])
         iterator = []
         for supersky in superskies:
             iterator.extend(list(supersky.iterrows()))
-        for wave, knots, coeffs, degree, specid, telescope in iterator:
+        for wave, knots, coeffs, degree, telescope in iterator:
             tck_dict["wave"].append(wave)
             tck_dict["knots"].append(knots)
             tck_dict["coeffs"].append(coeffs)
             tck_dict["degree"].append(degree)
-            tck_dict["specid"].append(specid)
             tck_dict["telescope"].append(telescope)
 
         return Table(tck_dict)
