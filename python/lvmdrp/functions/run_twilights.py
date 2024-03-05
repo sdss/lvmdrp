@@ -63,6 +63,9 @@ def get_sequence_metadata(expnums: List[int]) -> pd.DataFrame:
     for mjd in mjds:
         metadata.append(md.get_frames_metadata(mjd=mjd))
 
+    if len(metadata) == 0:
+        return pd.DataFrame()
+
     metadata = pd.concat(metadata, ignore_index=True)
     metadata.query("expnum in @expnums", inplace=True)
     metadata.sort_values(["camera", "expnum"], inplace=True)
