@@ -108,7 +108,7 @@ def fit_continuum(spectrum: Spectrum1D, mask_bands: List[Tuple[float,float]],
     mask = copy(spectrum._mask)
     good_pix = ~mask
     if good_pix.sum() == 0:
-        return np.ones_like(spectrum._wave) * np.nan
+        return np.ones_like(spectrum._wave) * np.nan, [], mask, []
 
     # define main arrays
     wave = spectrum._wave[good_pix]
