@@ -1617,6 +1617,7 @@ def quick_sky_subtraction(in_cframe, band=np.array((7238,7242,7074,7084,7194,726
     flux = cframe["FLUX"].data
     error = cframe["ERROR"].data
     sky = cframe["SKY"].data
+    sky_error = cframe["SKY_ERROR"].data
 
     crval = wave[0]
     cdelt = wave[1] - wave[0]
@@ -1636,7 +1637,7 @@ def quick_sky_subtraction(in_cframe, band=np.array((7238,7242,7074,7084,7194,726
     sky_c = np.nan_to_num(sky * scale[:, None])
     if not skip_subtraction:
         data_c = np.nan_to_num(flux - sky_c)
-        error_c = np.nan_to_num(error - sky_c)
+        error_c = np.nan_to_num(np.sqrt(error**2 - sky_error**2))
     else:
         data_c = flux
         error_c = error
