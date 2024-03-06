@@ -35,7 +35,7 @@ class shadow_calc(object):
         self.observatory_elevation = observatory_elevation
         try:
             self.observatory_elevation.to("m")
-        except:
+        except (AttributeError, u.UnitConversionError):
             sys.exit("Observatory elevation does not have unit of length")
 
         self.observatory_name = observatory_name
@@ -328,7 +328,7 @@ def test_shadow_calc():
         test = "Create Class"
         calculator = shadow_calc()
         test_results[test] = "Pass"
-    except:
+    except Exception:
         test_results[test] = "Fail"
 
     orbit_ani = orbit_animation(calculator)
@@ -351,22 +351,17 @@ def test_shadow_calc():
         new_h = calculator.get_heights(return_heights=True, unit="m")
         print("old: %f; new: %f"%(old_h, new_h))
 
-
-    from astropy.coordinates import SkyCoord
-    from astropy.coordinates import Angle, Latitude, Longitude
-    from astropy import units as u
-
     try:
         test = "Shadow RA/DEC"
         ra, dec = calculator.cone_ra_dec()
-    except:
+    except Exception:
         test_results[test] = "Fail"
 
     try:
         test = "Set Coordinates"
         calculator.set_coordinates(np.array([ra]), np.array([dec]) )
         test_results[test] = "Pass"
-    except:
+    except Exception:
         test_results[test] = "Fail"
 
     try:
@@ -374,24 +369,24 @@ def test_shadow_calc():
         jd = 2459458.5+20 + 4.75/24.
         calculator.update_time(jd)
         test_results[test] = "Pass"
-    except:
+    except Exception:
         test_results[test] = "Fail"
 
     try:
         test = "Run"
         calculator.get_heights()
         test_results[test] = "Pass"
-    except:
+    except Exception:
         test_results[test] = "Fail"
 
     try:
         test = "loop"
         for jd in np.linspace(jd, jd+1, 1/24.):
             calculator.update_time(jd)
-            heights = calculator.get_heights(return_heights=True, unit="km")
-            #print("height_v(jd=%f) = %f"%(jd, heights[0]))
+            # heights = calculator.get_heights(return_heights=True, unit="km")
+            # print("height_v(jd=%f) = %f"%(jd, heights[0]))
         test_results[test] = "Pass"
-    except:
+    except Exception:
         test_results[test] = "Fail"
 
     for test in test_results.keys():
