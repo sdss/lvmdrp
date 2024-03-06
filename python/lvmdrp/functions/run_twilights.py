@@ -6,6 +6,7 @@
 # @License: BSD 3-Clause
 # @Copyright: SDSS-V LVM
 
+from __future__ import annotations
 
 import os
 from typing import Tuple, List, Dict
@@ -69,6 +70,9 @@ def get_sequence_metadata(expnums: List[int]) -> pd.DataFrame:
     metadata = []
     for mjd in mjds:
         metadata.append(md.get_frames_metadata(mjd=mjd))
+
+    if len(metadata) == 0:
+        return pd.DataFrame()
 
     metadata = pd.concat(metadata, ignore_index=True)
     metadata.query("expnum in @expnums", inplace=True)
