@@ -1453,7 +1453,7 @@ def create_fiberflat(in_rsss: List[str], out_rsss: List[str], median_box: int = 
     axs[0].step(norm_wave, norm, color="0.1", lw=2, label="median spectrum")
     axs[2].step(norm_wave, norm, color="0.1", lw=2, label="median spectrum")
     # add labels and titles and set axis limits
-    ymax = norm.mean() + bn.nanstd(rss._data) * 3
+    ymax = bn.nanmean(norm) + bn.nanstd(rss._data) * 3
     axs[0].set_ylim(0, ymax)
     axs[0].set_ylabel(f"counts ({unit})")
     axs[0].set_title("median spectrum", loc="left")
