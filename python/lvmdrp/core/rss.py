@@ -318,6 +318,7 @@ class RSS(FiberRows):
         size=None,
         arc_position_x=None,
         arc_position_y=None,
+        slitmap=None,
         good_fibers=None,
         fiber_type=None,
         logwave=False,
@@ -355,6 +356,7 @@ class RSS(FiberRows):
             size=size,
             arc_position_x=arc_position_x,
             arc_position_y=arc_position_y,
+            slitmap=slitmap,
             good_fibers=good_fibers,
             fiber_type=fiber_type,
             logwave=logwave,
@@ -2504,6 +2506,79 @@ class RSS(FiberRows):
             arc_position_y=arc_position_y,
             good_fibers=good_fibers,
             fiber_type=fiber_type,
+        )
+        return rss
+
+    def stackRSS(self, rsss, axis=0):
+        if axis == 0:
+            axis = 1
+        elif axis == 1:
+            axis = 0
+
+        data = numpy.concatenate([rss._data for rss in rsss], axis=axis)
+        if self._error is not None:
+            error = numpy.concatenate([rss._error for rss in rsss], axis=axis)
+        else:
+            error = None
+        if self._mask is not None:
+            mask = numpy.concatenate([rss._mask for rss in rsss], axis=axis)
+        else:
+            mask = None
+        if self._sky is not None:
+            sky = numpy.concatenate([rss._sky for rss in rsss], axis=axis)
+        else:
+            sky = None
+        if self._wave is not None:
+            if len(self._wave.shape) == 2:
+                wave = numpy.concatenate([rss._wave for rss in rsss], axis=axis)
+            else:
+                wave = numpy.concatenate([numpy.repeat([rss._wave], self._fibers, axis=0) for rss in rsss], axis=axis)
+        else:
+            wave = None
+        if self._inst_fwhm is not None:
+            if len(self._inst_fwhm.shape) == 2:
+                inst_fwhm = numpy.concatenate(
+                    [rss._inst_fwhm for rss in rsss], axis=axis
+                )
+            else:
+                inst_fwhm = numpy.concatenate(
+                    [numpy.repeat([rss._inst_fwhm], self._fibers, axis=0) for rss in rsss], axis=axis
+                )
+        else:
+            inst_fwhm = None
+        if self._arc_position_x is not None:
+            arc_position_x = numpy.concatenate(
+                [rss._arc_position_x for rss in rsss], axis=0
+            )
+        else:
+            arc_position_x = None
+        if self._arc_position_y is not None:
+            arc_position_y = numpy.concatenate(
+                [rss._arc_position_y for rss in rsss], axis=0
+            )
+        else:
+            arc_position_y = None
+        if self._good_fibers is not None:
+            good_fibers = numpy.concatenate(
+                [rss._good_fibers+self._fibers for rss in rsss], axis=0
+            )
+        else:
+            good_fibers = None
+
+        rss = RSS(
+            data=data,
+            error=error,
+            mask=mask,
+            sky=sky,
+            wave=wave,
+            inst_fwhm=inst_fwhm,
+            header=self._header,
+            shape=self._shape,
+            size=self._size,
+            arc_position_x=arc_position_x,
+            arc_position_y=arc_position_y,
+            slitmap=self._slitmap,
+            good_fibers=good_fibers
         )
         return rss
 

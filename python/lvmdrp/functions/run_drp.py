@@ -919,7 +919,7 @@ def _parse_expnum_cam(name: str) -> tuple:
     return int(ss[-1]), ss[-2]
 
 
-def build_supersky(tileid: int, mjd: int, expnum: int) -> fits.BinTableHDU:
+def build_supersky(tileid: int, mjd: int, expnum: int, imagetype: str) -> fits.BinTableHDU:
     """return super sky FITS table for a given exposure
 
     Parameters
@@ -930,6 +930,8 @@ def build_supersky(tileid: int, mjd: int, expnum: int) -> fits.BinTableHDU:
         the MJD of observation
     expnum : int
         the exposure number
+    imagetype : str
+        the image type
 
     Returns
     -------
@@ -938,7 +940,7 @@ def build_supersky(tileid: int, mjd: int, expnum: int) -> fits.BinTableHDU:
     """
     # select files for sky fibers
     fsci_paths = sorted(path.expand("lvm_anc", mjd=mjd, tileid=tileid, drpver=drpver,
-                                kind="f", camera="*", imagetype="object", expnum=expnum))
+                                kind="f", camera="*", imagetype=imagetype, expnum=expnum))
 
     fsci_paths_cam = groupby(fsci_paths, lambda x: x.split("-")[-2])
     sky_wave = []
@@ -992,7 +994,7 @@ def build_supersky(tileid: int, mjd: int, expnum: int) -> fits.BinTableHDU:
     return supersky
 
 
-def combine_channels(tileid: int, mjd: int, expnum: int):
+def combine_channels(tileid: int, mjd: int, expnum: int, imagetype: str):
     """ Combine the spectrograph channels together
 
     For a given exposure, combines the three spectograph channels together
@@ -1007,13 +1009,15 @@ def combine_channels(tileid: int, mjd: int, expnum: int):
         the MJD of observation
     expnum : int
         the exposure number
+    imagetype : str
+        the image type
     """
 
     # find all the h object files
     files = path.expand('lvm_anc', mjd=mjd, tileid=tileid, drpver=drpver,
-                         imagetype='object', expnum=expnum, kind='', camera='*')
+                         imagetype=imagetype, expnum=expnum, kind='', camera='*')
     # filter out old lvm-object-sp?-*.fits files
-    files = sorted([f for f in files if not os.path.basename(f).startswith("lvm-object-sp")], key=_parse_expnum_cam)
+    files = sorted([f for f in files if not os.path.basename(f).startswith(f"lvm-{imagetype}-sp")], key=_parse_expnum_cam)
 
     cframe_path = path.full("lvm_frame", mjd=mjd, drpver=drpver, tileid=tileid, expnum=expnum, kind='CFrame')
 
@@ -1055,7 +1059,7 @@ def combine_channels(tileid: int, mjd: int, expnum: int):
     sky_error = fits.ImageHDU(rss_comb._sky_error, name="SKY_ERROR")
 
     # build super sky
-    supersky = build_supersky(tileid, mjd, expnum)
+    supersky = build_supersky(tileid, mjd, expnum, imagetype)
 
     # write out new file
     log.info(f'writing output file in {os.path.basename(cframe_path)}')
@@ -1063,7 +1067,7 @@ def combine_channels(tileid: int, mjd: int, expnum: int):
     hdulist.writeto(cframe_path, overwrite=True)
 
 
-def combine_spectrographs(tileid: int, mjd: int, channel: str, expnum: int) -> RSS:
+def combine_spectrographs(tileid: int, mjd: int, channel: str, expnum: int, imagetype: str) -> RSS:
     """ Combine the spectrographs together for a given exposure
 
     For a given exposure, combines the three spectographs together into a
@@ -1080,6 +1084,8 @@ def combine_spectrographs(tileid: int, mjd: int, channel: str, expnum: int) -> R
         The channel of the spectrograph, e.g. b, r, z
     expnum : int
         The exposure number of the frames to combines
+    imagetype : str
+        The imagetype of the frames to combine
 
     Returns
     -------
@@ -1088,7 +1094,7 @@ def combine_spectrographs(tileid: int, mjd: int, channel: str, expnum: int) -> R
     """
 
     hsci_paths = sorted(path.expand('lvm_anc', mjd=mjd, tileid=tileid, drpver=drpver,
-                               kind='h', camera=f'{channel}[123]', imagetype='object', expnum=expnum))
+                               kind='h', camera=f'{channel}[123]', imagetype=imagetype, expnum=expnum))
 
     if not hsci_paths:
         log.error(f'no rectified frames found for {expnum = }, {channel = }')
@@ -1099,7 +1105,7 @@ def combine_spectrographs(tileid: int, mjd: int, channel: str, expnum: int) -> R
 
     # construct output path
     frame_path = path.full('lvm_anc', mjd=mjd, tileid=tileid, drpver=drpver,
-                           kind='', camera=channel, imagetype="object", expnum=expnum)
+                           kind='', camera=channel, imagetype=imagetype, expnum=expnum)
 
     # combine RSS files along fiber ID direction
     return stack_spectrographs(hsci_paths, frame_path)

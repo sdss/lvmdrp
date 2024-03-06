@@ -1613,6 +1613,9 @@ def quick_sky_subtraction(in_cframe, band=np.array((7238,7242,7074,7084,7194,726
     """
 
     cframe = fits.open(in_cframe)
+    if cframe[0].header["IMAGETYP"] != "object":
+        return
+
     wave = cframe["WAVE"].data
     flux = cframe["FLUX"].data
     error = cframe["ERROR"].data

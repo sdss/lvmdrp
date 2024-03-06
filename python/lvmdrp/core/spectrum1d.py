@@ -2291,9 +2291,9 @@ class Spectrum1D(Header):
             self._data = ndimage.filters.median_filter(self._data, size, mode=mode)
         elif method == "BSpline":
             smooth = interpolate.splrep(
-                self._wave,
-                self._data,
-                w=1.0 / numpy.sqrt(numpy.fabs(self._data)),
+                self._wave[~self._mask],
+                self._data[~self._mask],
+                w=1.0 / numpy.sqrt(numpy.fabs(self._data[~self._mask])),
                 s=size,
             )
             self._data = interpolate.splev(self._wave, smooth, der=0)
@@ -2393,7 +2393,7 @@ class Spectrum1D(Header):
                 poly = polynomial.Legendre.fit(
                     self._wave[mask], self._data[mask], deg=deg
                 )
-            out_par = poly.coef
+            out_par = poly.convert().coef
 
             if ref_base is None:
                 self._data = poly(self._wave)
