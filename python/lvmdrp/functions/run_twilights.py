@@ -6,6 +6,7 @@
 # @License: BSD 3-Clause
 # @Copyright: SDSS-V LVM
 
+from __future__ import annotations
 
 import os
 from typing import Tuple, List, Dict
