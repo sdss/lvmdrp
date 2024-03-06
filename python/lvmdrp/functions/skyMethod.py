@@ -1588,6 +1588,8 @@ def combine_skies(in_rss: str, out_rss, in_skye: str, in_skyw: str, sky_weights:
 
     # write output sky-subtracted RSS
     log.info(f"writing output RSS file '{os.path.basename(out_rss)}'")
+    rss.appendHeader(sky_e._header["SKYMODEL*"])
+    rss.appendHeader(sky_e._header["GEOCORONAL*"])
     rss.setHdrValue("SKYEW", w_e, "SkyE weight")
     rss.setHdrValue("SKYWW", w_w, "SkyW weight")
     rss.set_sky(rss_sky=sky)
