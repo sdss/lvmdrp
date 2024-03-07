@@ -2573,7 +2573,7 @@ class Spectrum1D(Header):
             cent[i] = centres[i]
         par = numpy.concatenate([flux_in, cent, sig_in_G, sig_in_L])
         voigt_multi = fit_profile.Voigts(par)
-        voigt_multi.fit(self._wave[select], self._data[select], sigma=error[select]) #No se si poner otro sigma
+        voigt_multi.fit(self._wave[select], self._data[select], sigma=error[select], maxfev = 1000000)
         return voigt_multi, voigt_multi.getPar()
 
     def fitParFile(
