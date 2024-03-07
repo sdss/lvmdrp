@@ -11,8 +11,9 @@ from astropy.modeling.models import Voigt1D, Lorentz1D
 from scipy.special import wofz
 
 def Voigt(x, x_0=0, amplitude_L=1, sigma_L=0.5, sigma_G=0.001):
+    if sigma_L < 0: 
+        return x * numpy.nan
     return amplitude_L * numpy.real(wofz((x - x_0 + 1j*sigma_L)/sigma_G /numpy.sqrt(2))) / sigma_G /numpy.sqrt(2*numpy.pi)
-
 
 
 fact = numpy.sqrt(2.0 * numpy.pi)
