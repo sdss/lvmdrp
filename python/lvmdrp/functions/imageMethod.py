@@ -24,6 +24,8 @@ from tqdm import tqdm
 
 from typing import List, Tuple
 
+from lvmdrp.core import fit_profile as fp
+
 from lvmdrp import log
 from lvmdrp.utils.decorators import skip_on_missing_input_path, drop_missing_input_paths, skip_if_drpqual_flags
 from lvmdrp.utils.bitmask import QualityFlag
@@ -4321,6 +4323,7 @@ def trace_fibers(
     fig.supxlabel("Y (pixel)")
 
     colors = plt.cm.coolwarm(numpy.linspace(0, 1, len(columns)))
+    #colors = plt.cm.Spectral(numpy.linspace(0, 1, len(columns)))
     idx = numpy.argsort(columns)
     for i in idx:
         icolumn = columns[i]
@@ -4330,10 +4333,9 @@ def trace_fibers(
         img_slice = img.getSlice(icolumn, axis="y")
         img_slice._data[(img_slice._mask)|(joint_mod<=0)] = numpy.nan
 
-        # weights = img_slice._data / bn.nansum(img_slice._data)
+        weights = img_slice._data / bn.nansum(img_slice._data) * 500
         residuals = (joint_mod - img_slice._data) / img_slice._data * 100
-        # residuals *= weights
-        ax.plot(img_slice._pixels, residuals, ".", ms=2, mew=0, mfc=colors[i])
+        ax.scatter(img_slice._pixels, residuals, s=weights, lw=0, color=colors[i])
         ax.set_ylim(-50, 50)
     save_fig(
         fig,
@@ -4419,6 +4421,25 @@ def trace_Voigt_fibers(
         whether to interpolate bad/missing fibers, by default True
     display_plots : bool, optional
         whether to show plots on display or not, by default True
+
+    Returns
+    -------
+    centroids : TraceMask
+        fiber centroids
+    flux : TraceMask
+        fiber flux
+    fwhm_G : TraceMask
+        fiber FWHM gaussian
+    fwhm_L : TraceMask
+        fiber FWHM lorentzian
+    
+    Raises
+    ------
+    ValueError
+        invalid polynomial degree
+    ValueError
+        invalid number of columns
+    """
     '''
 
     # parse polynomial degrees
@@ -4781,10 +4802,9 @@ def trace_Voigt_fibers(
         img_slice = img.getSlice(icolumn, axis="y")
         img_slice._data[(img_slice._mask)|(joint_mod<=0)] = numpy.nan
 
-        # weights = img_slice._data / bn.nansum(img_slice._data)
+        weights = img_slice._data / bn.nansum(img_slice._data) * 500
         residuals = (joint_mod - img_slice._data) / img_slice._data * 100
-        # residuals *= weights
-        ax.plot(img_slice._pixels, residuals, ".", ms=2, mew=0, mfc=colors[i])
+        ax.scatter(img_slice._pixels, residuals, s=weights, lw=0, color=colors[i])
         ax.set_ylim(-50, 50)
     save_fig(
         fig,
@@ -4793,5 +4813,200 @@ def trace_Voigt_fibers(
         figure_path="qa",
         label="residuals_columns"
     )
-
     return centroids, trace_cent, trace_amp, trace_fwhm_G, trace_fwhm_L
+
+
+def image_gauss(image_path, amp_path, cent_path, fwhm_G_path, out_model, out_ratio):
+    '''
+    This function make a model and a ratio image from parameters already calculate
+
+    Parameters
+    ----------
+    image_path : str
+        path to input image
+    amp_path : str
+        path to amplitud trace
+    cent_path :  str
+        path to centroid trace
+    fwhm_G_path : str
+        path to fwhm gaussian trace
+    out_model : str
+        path for the model image
+    out_ratio : str
+        path for the ratio image
+
+    Returns
+    ----------
+    model_image : lvmdrp.core.image.Image
+        A recreation of the observational image
+    ratio_image : lvmdrp.core.image.Image
+        A reason between the observational and the model image
+    '''
+
+    if os.path.isfile(out_model) and os.path.isfile(out_ratio):
+        model_image = Image() # imagen vacio
+        model_image.loadFitsData(out_model)
+
+        model_ratio = Image() # imagen vacio
+        model_ratio.loadFitsData(out_ratio)
+
+        return model_ratio, model_image
+
+    median_box = (1, 10)
+    coadd = 20
+
+    img = Image() # imagen vacio
+    img.loadFitsData(image_path)
+
+    img.setData(data=numpy.nan_to_num(img._data), error=numpy.nan_to_num(img._error))
+
+    # perform median filtering along the dispersion axis to clean cosmic rays
+    median_box = tuple(map(lambda x: max(x, 1), median_box))
+
+    if median_box != (1, 1):
+        img = img.replaceMaskMedian(*median_box) # Replace bad pixels with the median value of pixel in a rectangular filter window
+        img = img.medianImg(median_box) #  return median filtered image with the given kernel size
+
+    # coadd images along the dispersion axis to increase the S/N of the peaks
+    if coadd != 0:
+        coadd_kernel = numpy.ones((1, coadd), dtype="uint8") #se especifica el axis
+        img = img.convolveImg(coadd_kernel) # Return a collapsed cut as a spectrum object along one axis
+
+
+    amp = TraceMask()
+    centroid = TraceMask()
+    fwhm_G = TraceMask()
+    # guarda en el objeto centroid el contenido del archivo
+    amp.loadFitsData(amp_path)
+    centroid.loadFitsData(cent_path)
+    fwhm_G.loadFitsData(fwhm_G_path)
+
+    ncolumns = centroid._data.shape[1]
+    y_pixels = numpy.arange(img._data.shape[0])
+    
+    gauss_list = [] 
+
+    for column in range(ncolumns):
+        c = centroid._data[:, column]
+        a = amp._data[:, column]
+        f_g = fwhm_G._data[:, column]
+        param = numpy.concatenate([a, c, f_g/2.354])
+        gauss = fp.Gaussians(param)
+
+        # evaluar Modelo 
+        ev = gauss(y_pixels)
+        gauss_list.append(ev)
+
+    gauss_array = numpy.array(gauss_list).T
+
+    model_image = copy(img)
+    model_image._data = gauss_array # instancia de image
+
+    model_ratio = model_image / img
+
+    model_image.writeFitsData(out_model)
+
+    model_ratio.writeFitsData(out_ratio)
+
+    return model_ratio, model_image
+
+
+def image_fitting_voigt(img_path, amp_path, cent_path, fwhm_G_path, fwhm_L_path, out_model, out_ratio):
+    '''
+    This function make a model and a ratio image from parameters already calculate
+
+    Parameters
+    ----------
+    image_path : str
+        path to input image
+    amp_path : str
+        path to amplitud trace
+    cent_path :  str
+        path to centroid trace
+    fwhm_G_path : str
+        path to fwhm gaussian trace
+    fwhm_L_path : str
+        path to fwhm lorentzian trace
+    out_model : str
+        path for the model image
+    out_ratio : str
+        path for the ratio image
+
+    Returns
+    ----------
+    model_image : lvmdrp.core.image.Image
+        A recreation of the observational image
+    ratio_image : lvmdrp.core.image.Image
+        A reason between the observational and the model image
+    '''
+
+    if os.path.isfile(out_model) and os.path.isfile(out_ratio):
+        model_image = Image() # imagen vacio
+        model_image.loadFitsData(out_model)
+
+        model_ratio = Image() # imagen vacio
+        model_ratio.loadFitsData(out_ratio)
+
+        return model_ratio, model_image
+        
+    median_box = (1, 10)
+    coadd = 20
+
+    img = Image() # imagen vacio
+    img.loadFitsData(img_path)
+
+    img.setData(data=numpy.nan_to_num(img._data), error=numpy.nan_to_num(img._error))
+
+    # perform median filtering along the dispersion axis to clean cosmic rays
+    median_box = tuple(map(lambda x: max(x, 1), median_box))
+
+    if median_box != (1, 1):
+        img = img.replaceMaskMedian(*median_box) # Replace bad pixels with the median value of pixel in a rectangular filter window
+        img = img.medianImg(median_box) #  return median filtered image with the given kernel size
+
+    # coadd images along the dispersion axis to increase the S/N of the peaks
+    if coadd != 0:
+        coadd_kernel = numpy.ones((1, coadd), dtype="uint8") #se especifica el axis
+        img = img.convolveImg(coadd_kernel) # Return a collapsed cut as a spectrum object along one axis.
+
+    amp = TraceMask()
+    centroid = TraceMask()
+    fwhm_G = TraceMask()
+    fwhm_L = TraceMask()
+
+    #guarda en el objeto centroid el contenido del archivo
+
+    amp.loadFitsData(amp_path)
+    centroid.loadFitsData(cent_path)
+    fwhm_G.loadFitsData(fwhm_G_path)
+    fwhm_L.loadFitsData(fwhm_L_path)
+
+    ncolumns = centroid._data.shape[1]
+    y_pixels = numpy.arange(img._data.shape[0])
+
+    voigt_list = []    
+
+    for column in range(ncolumns): 
+        c = centroid._data[:, column]
+        a = amp._data[:, column]
+        f_g = fwhm_G._data[:, column]
+        f_l = fwhm_L._data[:, column]
+        param = numpy.concatenate([a, c, f_g/2.354, f_l/2.354])
+        voigts = fp.Voigts(param)
+
+        # Evaluar Modelo
+        ev = voigts(y_pixels)
+        voigt_list.append(ev)
+    
+    voigt_array = numpy.array(voigt_list).T
+    
+    model_image = copy(img)
+    model_image._data = voigt_array # instancia de image
+
+    model_ratio = model_image / img
+
+    model_image.writeFitsData(out_model)
+
+    model_ratio.writeFitsData(out_ratio)
+
+    return model_ratio, model_image
