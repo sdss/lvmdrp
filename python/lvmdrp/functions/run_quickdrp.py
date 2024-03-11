@@ -176,11 +176,10 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
         rss_tasks.apply_fiberflat(in_rss=wsci_path, out_rss=fsci_path, in_flat=mflat_path, clip_below=0)
 
         # interpolate sky fibers
-        sky_tasks.interpolate_sky(in_rss=fsci_path, out_sky=fskye_path, which="e")
-        sky_tasks.interpolate_sky(in_rss=fsci_path, out_sky=fskyw_path, which="w")
+        sky_tasks.interpolate_sky(in_rss=fsci_path, out_skye=fskye_path, out_skyw=fskyw_path)
 
         # compute master sky and subtract if requested
-        sky_tasks.quick_sky_subtraction(in_rss=fsci_path, out_rss=ssci_path, in_skye=fskye_path, in_skyw=fskyw_path, sky_weights=sky_weights, skip_subtraction=skip_sky_subtraction)
+        sky_tasks.combine_skies(in_rss=fsci_path, out_rss=ssci_path, in_skye=fskye_path, in_skyw=fskyw_path, sky_weights=sky_weights)
 
         # resample wavelength into uniform grid along fiber IDs for science and sky fibers
         iwave, fwave = SPEC_CHANNELS[sci_camera[0]]
@@ -203,10 +202,12 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
         flux_tasks.apply_fluxcal(in_rss=sci_path, out_rss=sci_path, skip_fluxcal=skip_flux_calibration)
 
     # combine channels
+    # TODO: write spline fitting in the super-sky table
     drp.combine_channels(tileid=sci_tileid, mjd=sci_mjd, expnum=sci_expnum, imagetype=sci_imagetyp)
 
-    # refine sky subtraction
-    sky_tasks.quick_sky_refinement(in_cframe=path.full("lvm_frame", mjd=sci_mjd, drpver=drpver, tileid=sci_tileid, expnum=sci_expnum, kind='CFrame'))
+    # sky-subtract the lvmCFrame
+    sky_tasks.quick_sky_subtraction(in_cframe=path.full("lvm_frame", mjd=sci_mjd, drpver=drpver, tileid=sci_tileid, expnum=sci_expnum, kind='CFrame'),
+                                   skip_subtraction=skip_sky_subtraction)
 
     # TODO: add Guillermo's code to create astrometry, don't create images/maps
     # TODO: create astrometry for sky and std telescopes
