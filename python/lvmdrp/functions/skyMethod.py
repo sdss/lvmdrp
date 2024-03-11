@@ -1393,6 +1393,7 @@ def interpolate_sky(in_rss: str, out_skye: str, out_skyw: str, out_rss: str = No
     supersky, supererror, supersky_rss, swave, ssky, svars, smask = {}, {}, {}, {}, {}, {}, {}
     out_sky = dict(east=out_skye, west=out_skyw)
     for telescope in ("east", "west"):
+        log.info(f"interpolating sky fibers for sky {telescope = } telescope(s)")
         sky_wave, sky_data, sky_vars, sky_mask, sci_wave, sci_data = select_sky_fibers(rss, fibermap=fibermap, telescope=telescope)
 
         fig, axs = plt.subplots(2, 1, figsize=(20,5), sharex=True)
