@@ -7,10 +7,18 @@ import astropy.io.fits as pyfits
 import numpy
 import bottleneck as bn
 from scipy import interpolate, optimize, special
+from astropy.modeling.models import Voigt1D, Lorentz1D
+from scipy.special import wofz
 
+def Voigt(x, x_0=0, amplitude_L=1, sigma_L=0.5, sigma_G=0.001):
+    if sigma_L < 0: 
+        return x * numpy.nan
+    return amplitude_L * numpy.real(wofz((x - x_0 + 1j*sigma_L)/sigma_G /numpy.sqrt(2))) / sigma_G /numpy.sqrt(2*numpy.pi)
 
 
 fact = numpy.sqrt(2.0 * numpy.pi)
+
+amp_fwhm = 2*numpy.sqrt(2*numpy.log(2))
 
 
 class SpectralResolution(object):
@@ -739,6 +747,203 @@ class Gaussian_poly(fit_profile1D):
     def __init__(self, par):
         fit_profile1D.__init__(self, par, self._profile, self._guess_par)
 
+class Voigts(fit_profile1D):
+    """
+    A class to fit data with the Voigt function.
+
+    ...
+
+    Methods
+    -------
+    _profile(x):
+        Returns a list of all the parameters: centroids, amplitudes, fwhm gaussians and fwhm lorentzians
+    """
+    def _profile(self, x):
+        '''
+        Fit data with the Voigt profile
+
+        Parameters
+        ----------
+            x : float
+                the point where the fit is going to be evaluated
+
+        Returns
+        -------
+            bn.nansum(y, axis=0) : list
+                a list of the parameters for all the x points 
+        '''
+        ncomp = len(self._par) // 4
+        y = numpy.zeros((ncomp, len(x)), dtype=numpy.float32)
+        for i in range(ncomp):
+            y[i] = Voigt(x, amplitude_L=self._par[i],x_0=self._par[i+ncomp], 
+                         sigma_G=self._par[i+2*ncomp], sigma_L=self._par[i+3*ncomp])
+        return bn.nansum(y, axis=0)
+
+    def __init__(self, par):
+        '''
+        Constructs the necessary attributes for the Voigt object.
+
+        Parameters
+        ----------
+            par : list
+                list of inicial parameters for the Voigt profile
+
+        Returns
+        -------
+        None
+        '''
+        fit_profile1D.__init__(self, par, self._profile)
+
+class Lorentzs(fit_profile1D):
+    '''
+    A class to fit data with the Lorentz function.
+
+    ...
+
+    Methods
+    -------
+    _profile(x):
+        Returns a list of all the parameters: centroids, amplitudes and fwhm lorentzians
+    '''
+    def _profile(self, x): 
+        '''
+        Fit data with the Lorentz profile
+
+        Parameters
+        ----------
+            x : float
+                the point where the fit is going to be evaluated
+
+        Returns
+        -------
+            bn.nansum(y, axis=0) : list
+                a list of the parameters for all the x points 
+        '''
+        ncomp = len(self._par) // 3
+        y = numpy.zeros((ncomp, len(x)), dtype=numpy.float32) 
+        for i in range(ncomp):
+            v = Lorentz1D(amplitude=self._par[i],x_0=self._par[i+ncomp], fwhm=self._par[i+2*ncomp]*amp_fwhm)
+            y[i] = v(x)
+        return bn.nansum(y, axis=0) 
+
+    def __init__(self, par):
+        '''
+        Constructs the necessary attributes for the Lorentz object.
+
+        Parameters
+        ----------
+            par : list
+                list of inicial parameters for the Lorentz profile
+
+        Returns
+        -------
+        None
+        '''
+        fit_profile1D.__init__(self, par, self._profile)
+
+class Voigts_width(fit_profile1D):
+    '''
+    A class to fit the fwhms with the Voigt function. It keeps the centroids constant
+
+    ...
+
+    Methods
+    -------
+    _profile(x):
+        Returns a list of all the parameters: centroids, amplitudes, fwhm gaussians and fwhm lorentzians
+    '''
+    def _profile(self, x):
+        '''
+        Fit data with the Voigt profile
+
+        Parameters
+        ----------
+            x : float
+                the point where the fit is going to be evaluate
+
+        Returns
+        -------
+            bn.nansum(y, axis=0) : list
+                a list of the parameters for all the x points. The centroids still constant
+        '''
+        ncomp = len(self._par) // 4 
+        y = numpy.zeros((ncomp, len(x)), dtype=numpy.float32) 
+        ncomp = len(self._args)
+        for i in range(ncomp): 
+            self._par[i+2*ncomp] *= amp_fwhm
+            self._par[i+3*ncomp] *= amp_fwhm
+            v = Voigt1D(amplitude_L=self._par[i], x_0=self._arg[i+ncomp], fwhm_G=self._par[i+2*ncomp], fwhm_L=self._par[i+3*ncomp])
+            y[i] = v(x)
+        return bn.nansum(y, axis=0) 
+
+    def __init__(self, par, args):
+        '''
+        Constructs the necessary attributes for the Voigt object.
+
+        Parameters
+        ----------
+            par : list
+                list of inicial parameters for the Voigt profile that are going to be fitted
+            args : list
+                list of inicial parameters for the Voigt profile that keep constant
+
+        Returns
+        -------
+        None
+        '''
+        fit_profile1D.__init__(self, par, self._profile, args=args)
+
+class Voigts_flux(fit_profile1D):
+    '''
+    A class to fit the amplitudes with the Voigt function. It keeps the centroids and fwhms constant
+
+    ...
+
+    Methods
+    -------
+    _profile(x):
+        Returns a list of all the parameters: centroids, amplitudes, fwhm gaussians and fwhm lorentzians
+    '''
+    def _profile(self, x):
+        '''
+        Fit data with the Voigt profile
+
+        Parameters
+        ----------
+            x : float
+                the point where the fit is going to be evaluate
+
+        Returns
+        -------
+            bn.nansum(y, axis=0) : list
+                a list of the parameters for all the x points. The centroids and fwhms still constant
+        '''
+        ncomp = len(self._par) // 4 
+        y = numpy.zeros((ncomp, len(x)), dtype=numpy.float32) 
+        ncomp = len(self._par)
+        for i in range(ncomp): 
+            self._par[i+2*ncomp] *= amp_fwhm
+            self._par[i+3*ncomp] *= amp_fwhm
+            v = Voigt1D(amplitude_L=self._par[i], x_0=self._arg[i+ncomp], fwhm_G=self._arg[i+2*ncomp], fwhm_L=self._arg[i+3*ncomp])
+            y[i] = v(x)
+        return bn.nansum(y, axis=0) 
+
+    def __init__(self, par, args):
+        '''
+        Constructs the necessary attributes for the Voigt object.
+
+        Parameters
+        ----------
+            par : list
+                list of inicial parameters for the Voigt profile that are going to be fitted
+            args : list
+                list of inicial parameters for the Voigt profile that keep constant
+
+        Returns
+        -------
+        None
+        '''
+        fit_profile1D.__init__(self, par, self._profile, args=args)
 
 class Gaussians(fit_profile1D):
     def _profile(self, x):
@@ -752,7 +957,7 @@ class Gaussians(fit_profile1D):
         fit_profile1D.__init__(self, par, self._profile)
 
 
-class Gaussians_width(fit_profile1D):
+class Gaussians_width(fit_profile1D): #el orden de los parametros esta malo y sigma esta mal definido
     def _profile(self, x):
         y = numpy.zeros(len(x))
         ncomp = len(self._args)
