@@ -53,7 +53,15 @@ DEFAULT_TRIMSEC = [
     "[1:2043, 1:2040]",
     "[2078:4120, 1:2040]",
 ]
+# NOTE: this is the OS region shrinked down to avoid pixels with fiber signal
 DEFAULT_BIASSEC = [
+    "[2048:2058, 2041:4080]",
+    "[2065:2075, 2041:4080]",
+    "[2048:2058, 1:2040]",
+    "[2065:2075, 1:2040]",
+]
+# NOTE: original OS region
+ORI_BIASSEC = [
     "[2044:2060, 2041:4080]",
     "[2061:2077, 2041:4080]",
     "[2044:2060, 1:2040]",

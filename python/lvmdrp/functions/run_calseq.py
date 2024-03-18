@@ -264,7 +264,7 @@ def reduce_2d(mjds, target_mjd=None, expnums=None):
         if os.path.isfile(dframe_path):
             log.info(f"skipping {dframe_path}, file already exist")
         else:
-            image_tasks.preproc_raw_frame(in_image=frame_path, out_image=pframe_path, in_mask=mpixmask_path)
+            image_tasks.preproc_raw_frame(in_image=frame_path, out_image=pframe_path, in_mask=mpixmask_path, assume_biassec=image_tasks.DEFAULT_BIASSEC)
             image_tasks.detrend_frame(in_image=pframe_path, out_image=dframe_path,
                                         in_bias=mbias_path, in_dark=mdark_path,
                                         in_pixelflat=mpixflat_path,
