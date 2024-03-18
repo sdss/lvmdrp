@@ -290,6 +290,7 @@ def fit_fiberflat(rsss: List[RSS], interpolate_bad: bool = True, mask_bands: Lis
 
     # flattield original twilight
     ori_flat._data = ori_flat._data / new_flat._data
+    med_fiberflat = np.median(ori_flat._data, axis=0)
 
     # plot flatfielded twilight flat
     fig, axs = create_subplots(to_display=display_plots, figsize=(15,7), sharex=True, layout="constrained")
@@ -297,9 +298,19 @@ def fit_fiberflat(rsss: List[RSS], interpolate_bad: bool = True, mask_bands: Lis
     fig.supxlabel("Wavelength (Angstrom)")
     fig.supylabel("Normalized counts")
 
+    flat_error = ori_flat._data / med_fiberflat
+    med_flat_error = np.median(flat_error, axis=0)
+    std_flat_error = np.std(flat_error, axis=0)
+    med_error = np.median(ori_flat._error, axis=0) / med_fiberflat
     for ifiber in range(flat._fibers):
         if ifiber in plot_fibers:
-            axs.step(ori_flat._wave, ori_flat._data[ifiber], lw=1)
+            axs.step(ori_flat._wave, flat_error[ifiber], color="0.2", alpha=0.5, lw=1)
+    axs.step(ori_flat._wave, med_flat_error, color="tab:red", lw=2)
+    axs.step(ori_flat._wave, med_flat_error - std_flat_error, color="tab:blue", lw=2)
+    axs.step(ori_flat._wave, med_flat_error + std_flat_error, color="tab:blue", lw=2)
+    axs.step(ori_flat._wave, med_flat_error - med_error, color="tab:green", lw=2)
+    axs.step(ori_flat._wave, med_flat_error + med_error, color="tab:green", lw=2)
+    axs.set_ylim(0.8, 1.2)
 
     save_fig(
         fig,
@@ -412,7 +423,7 @@ def resample_fiberflat(mflat: RSS, camera: str, mwave_path: str,
     new_flat._slitmap = mflat._slitmap
     new_flat._good_fibers = mflat._good_fibers
 
-    fig, ax = create_subplots(to_display=display_plots, figsize=(20,7))
+    fig, ax = create_subplots(to_display=display_plots, figsize=(15,7))
     fig.suptitle(f"Flat for {channel = }, fibers = {','.join(map(str,plot_fibers))}")
     ax.set_xlabel("Wavelength (Angstrom)")
     ax.set_ylabel("Normalized counts")
