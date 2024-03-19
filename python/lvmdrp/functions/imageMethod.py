@@ -3105,17 +3105,6 @@ def preproc_raw_frame(
         )
         # subtract overscan bias from image if requested
         if subtract_overscan:
-            if overscan_stat == "biweight":
-                os_stat = biweight_location
-            elif overscan_stat == "median":
-                os_stat = numpy.nanmedian
-            else:
-                log.warning(
-                    f"overscan statistic '{overscan_stat}' not implemented, "
-                    "falling back to 'biweight'"
-                )
-                os_stat = biweight_location
-
             if overscan_model not in ["const", "poly", "spline"]:
                 log.warning(
                     f"overscan model '{overscan_model}' not implemented, "
@@ -3124,15 +3113,15 @@ def preproc_raw_frame(
                 overscan_model = "spline"
             if overscan_model == "const":
                 os_profile, os_model = _model_overscan(
-                    os_quad, axis=1, stat=os_stat, model="const"
+                    os_quad, axis=1, overscan_stat=overscan_stat, model="const"
                 )
             if overscan_model == "spline":
                 os_profile, os_model = _model_overscan(
-                    os_quad, axis=1, stat=os_stat, nknots=300
+                    os_quad, axis=1, overscan_stat=overscan_stat, nknots=300
                 )
             elif overscan_model == "poly":
                 os_profile, os_model = _model_overscan(
-                    os_quad, axis=1, stat=os_stat, model="poly", deg=9
+                    os_quad, axis=1, overscan_stat=overscan_stat, model="poly", deg=9
                 )
 
             sc_quad = sc_quad - os_model

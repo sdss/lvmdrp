@@ -31,7 +31,7 @@ def _parse_ccd_section(section):
     return slice_x, slice_y
 
 
-def _model_overscan(os_quad, axis=1, stat=biweight_location, model="spline", **kwargs):
+def _model_overscan(os_quad, axis=1, overscan_stat="biweight", model="spline", **kwargs):
     """fits a parametric model to the given overscan region
 
     Given an overscan section corresponding to a quadrant in a raw frame, this function
@@ -50,8 +50,8 @@ def _model_overscan(os_quad, axis=1, stat=biweight_location, model="spline", **k
         image section corresponding to a overscan quadrant
     axis : int, optional
         axis along which the overscan will be fitted, by default 1
-    stat : function, optional
-        function to use for coadding pixels along `axis`, by default biweight_location
+    overscan_stat : str, optional
+        function name to use for coadding pixels along `axis`, by default "biweight"
     model : str, optional
         parametric function to fit ("const", "profile", "poly", "spline"), by default "spline"
 
@@ -63,6 +63,17 @@ def _model_overscan(os_quad, axis=1, stat=biweight_location, model="spline", **k
         overscan model
     """
     assert axis == 0 or axis == 1
+
+    if overscan_stat == "biweight":
+        stat = biweight_location
+    elif overscan_stat == "median":
+        stat = numpy.nanmedian
+    else:
+        warnings.warn(
+            f"overscan statistic '{overscan_stat}' not implemented, "
+            "falling back to 'biweight'"
+        )
+        stat = biweight_location
 
     os_profile = stat(os_quad._data, axis=axis)
     pixels = numpy.arange(os_profile.size)
