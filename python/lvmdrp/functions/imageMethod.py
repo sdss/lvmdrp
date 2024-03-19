@@ -2974,6 +2974,7 @@ def preproc_raw_frame(
     rdnoise_prefix: str = "RDNOISE",
     subtract_overscan: bool = True,
     overscan_stat: str = "biweight",
+    overscan_threshold: float = 2.0,
     overscan_model: str = "spline",
     replace_with_nan: bool = True,
     display_plots: bool = False,
@@ -3017,6 +3018,8 @@ def preproc_raw_frame(
         whether to subtract the overscan for each quadrant or not, by default True
     overscan_stat : str, optional
         statistics to use when coadding pixels along the X axis, by default "biweight"
+    overscan_threshold : float, optional
+        number of standard deviations to reject pixels in overscan, by default 2.0
     overscan_model : str, optional
         model used to fit the overscan profile of each quadrant, by default "spline"
     replace_with_nan : bool, optional
@@ -3111,18 +3114,15 @@ def preproc_raw_frame(
                     "falling back to 'spline'"
                 )
                 overscan_model = "spline"
-            if overscan_model == "const":
-                os_profile, os_model = _model_overscan(
-                    os_quad, axis=1, overscan_stat=overscan_stat, model="const"
-                )
             if overscan_model == "spline":
-                os_profile, os_model = _model_overscan(
-                    os_quad, axis=1, overscan_stat=overscan_stat, nknots=300
-                )
+                os_kwargs = {"nknots": 300}
             elif overscan_model == "poly":
-                os_profile, os_model = _model_overscan(
-                    os_quad, axis=1, overscan_stat=overscan_stat, model="poly", deg=9
-                )
+                os_kwargs = {"deg": 9}
+
+            os_data, os_profile, os_model = _model_overscan(os_quad, axis=1, overscan_stat=overscan_stat, threshold=overscan_threshold, **os_kwargs)
+
+            if numpy.isnan(os_data).any():
+                log.info(f"rejected {numpy.isnan(os_data).sum()} pixel(s) in overscan above {overscan_threshold} standard deviations")
 
             sc_quad = sc_quad - os_model
 

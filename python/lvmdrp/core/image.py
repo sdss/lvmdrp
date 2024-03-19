@@ -2,6 +2,7 @@ from copy import deepcopy as copy
 from multiprocessing import Pool, cpu_count
 import warnings
 
+from functools import partial
 from typing import List
 
 import numpy
@@ -11,6 +12,7 @@ from astropy.io import fits as pyfits
 from astropy.modeling import fitting, models
 from astropy.stats.biweight import biweight_location
 from astropy.visualization import simple_norm
+from scipy.stats import zscore
 from scipy import ndimage, signal
 from scipy import interpolate
 
@@ -31,7 +33,7 @@ def _parse_ccd_section(section):
     return slice_x, slice_y
 
 
-def _model_overscan(os_quad, axis=1, overscan_stat="biweight", model="spline", **kwargs):
+def _model_overscan(os_quad, axis=1, overscan_stat="biweight", threshold=None, model="spline", **kwargs):
     """fits a parametric model to the given overscan region
 
     Given an overscan section corresponding to a quadrant in a raw frame, this function
@@ -41,6 +43,9 @@ def _model_overscan(os_quad, axis=1, overscan_stat="biweight", model="spline", *
         * profile: the raw profile (`os_model = os_profile`)
         * polynomial: a polynomial model fitted on `os_profile`
         * spline: a cubic-spline fitting on `os_profile`
+
+    if `threshold` is given, pixels in the overscan region will be masked if
+    above `threshold` standard deviations from the mean.
 
     Additional keyword parameters are passed to the fitted model.
 
@@ -52,6 +57,8 @@ def _model_overscan(os_quad, axis=1, overscan_stat="biweight", model="spline", *
         axis along which the overscan will be fitted, by default 1
     overscan_stat : str, optional
         function name to use for coadding pixels along `axis`, by default "biweight"
+    threshold : float, optional
+        threshold to mask columns in the overscan region, by default None
     model : str, optional
         parametric function to fit ("const", "profile", "poly", "spline"), by default "spline"
 
@@ -65,7 +72,7 @@ def _model_overscan(os_quad, axis=1, overscan_stat="biweight", model="spline", *
     assert axis == 0 or axis == 1
 
     if overscan_stat == "biweight":
-        stat = biweight_location
+        stat = partial(biweight_location, ignore_nan=True)
     elif overscan_stat == "median":
         stat = numpy.nanmedian
     else:
@@ -73,9 +80,21 @@ def _model_overscan(os_quad, axis=1, overscan_stat="biweight", model="spline", *
             f"overscan statistic '{overscan_stat}' not implemented, "
             "falling back to 'biweight'"
         )
-        stat = biweight_location
+        stat = partial(biweight_location, ignore_nan=True)
 
-    os_profile = stat(os_quad._data, axis=axis)
+    if threshold is not None:
+        os_data = os_quad._data
+        os_zscore = zscore(os_data, axis=1)
+        mask = numpy.abs(os_zscore) > threshold
+        # reject the whole column if more than 60% of the pixels are masked
+        mask_columns = mask.sum(axis=0) > 0.6 * os_data.shape[0]
+        if mask_columns.any():
+            mask[:, mask_columns] = True
+        os_data[mask] = numpy.nan
+    else:
+        os_data = os_quad._data
+
+    os_profile = stat(os_data, axis=axis)
     pixels = numpy.arange(os_profile.size)
     if model == "const":
         os_model = numpy.ones_like(pixels) * stat(os_profile)
@@ -103,7 +122,7 @@ def _model_overscan(os_quad, axis=1, overscan_stat="biweight", model="spline", *
     elif axis == 0:
         os_model = os_model[None, :]
 
-    return os_profile, os_model
+    return os_data, os_profile, os_model
 
 
 def _percentile_normalize(images, pct=75):
