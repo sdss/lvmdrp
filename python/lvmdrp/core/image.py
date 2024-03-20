@@ -10,9 +10,8 @@ import bottleneck as bn
 from astropy.table import Table
 from astropy.io import fits as pyfits
 from astropy.modeling import fitting, models
-from astropy.stats.biweight import biweight_location
+from astropy.stats.biweight import biweight_location, biweight_scale
 from astropy.visualization import simple_norm
-from scipy.stats import zscore
 from scipy import ndimage, signal
 from scipy import interpolate
 
@@ -31,6 +30,17 @@ def _parse_ccd_section(section):
     slice_x[0] -= 1
     slice_y[0] -= 1
     return slice_x, slice_y
+
+
+def _zscore(x, axis=1):
+    """computes the zscore of a given array along a given axis"""
+    if axis == 0:
+        zscore = (x - biweight_location(x, axis=axis, ignore_nan=True)[None, :]) / biweight_scale(x, axis=axis, ignore_nan=True)[None, :]
+    elif axis == 1:
+        zscore = (x - biweight_location(x, axis=axis, ignore_nan=True)[:, None]) / biweight_scale(x, axis=axis, ignore_nan=True)[:, None]
+    else:
+        raise ValueError("axis must be 0 or 1")
+    return zscore
 
 
 def _model_overscan(os_quad, axis=1, overscan_stat="biweight", threshold=None, model="spline", **kwargs):
@@ -84,10 +94,10 @@ def _model_overscan(os_quad, axis=1, overscan_stat="biweight", threshold=None, m
 
     if threshold is not None:
         os_data = os_quad._data
-        os_zscore = zscore(os_data, axis=1)
+        os_zscore = _zscore(os_data, axis=1)
         mask = numpy.abs(os_zscore) > threshold
-        # reject the whole column if more than 60% of the pixels are masked
-        mask_columns = mask.sum(axis=0) > 0.6 * os_data.shape[0]
+        # reject the whole column if more than 30% of the pixels are masked
+        mask_columns = mask.sum(axis=0) > 0.3 * os_data.shape[0]
         if mask_columns.any():
             mask[:, mask_columns] = True
         os_data[mask] = numpy.nan

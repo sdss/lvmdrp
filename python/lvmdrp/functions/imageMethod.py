@@ -2974,7 +2974,7 @@ def preproc_raw_frame(
     rdnoise_prefix: str = "RDNOISE",
     subtract_overscan: bool = True,
     overscan_stat: str = "biweight",
-    overscan_threshold: float = 2.0,
+    overscan_threshold: float = 3.0,
     overscan_model: str = "spline",
     replace_with_nan: bool = True,
     display_plots: bool = False,
@@ -3019,7 +3019,7 @@ def preproc_raw_frame(
     overscan_stat : str, optional
         statistics to use when coadding pixels along the X axis, by default "biweight"
     overscan_threshold : float, optional
-        number of standard deviations to reject pixels in overscan, by default 2.0
+        number of standard deviations to reject pixels in overscan, by default 3.0
     overscan_model : str, optional
         model used to fit the overscan profile of each quadrant, by default "spline"
     replace_with_nan : bool, optional
@@ -3116,7 +3116,8 @@ def preproc_raw_frame(
             os_quad._data = os_data
 
             if numpy.isnan(os_data).any():
-                log.info(f"masked {numpy.isnan(os_data).sum()} pixel(s) in overscan above {overscan_threshold} standard deviations")
+                os_nmask = numpy.isnan(os_data).sum()
+                log.info(f"masked {os_nmask} ({os_nmask/os_data.size*100:.2f}%) pixels in overscan above {overscan_threshold} standard deviations")
 
             sc_quad = sc_quad - os_model
 
