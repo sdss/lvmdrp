@@ -3099,13 +3099,6 @@ def preproc_raw_frame(
         # get overscan and science quadrant & convert to electron
         sc_quad = org_img.getSection(section=sc_xy)
         os_quad = org_img.getSection(section=os_xy)
-        # compute overscan stats
-        os_bias_med[i] = numpy.nanmedian(os_quad._data, axis=None)
-        os_bias_std[i] = numpy.nanmedian(numpy.std(os_quad._data, axis=1), axis=None)
-        log.info(
-            f"median and standard deviation in OS quadrant {i+1}: "
-            f"{os_bias_med[i]:.2f} +/- {os_bias_std[i]:.2f} (ADU)"
-        )
         # subtract overscan bias from image if requested
         if subtract_overscan:
             if overscan_model not in ["const", "poly", "spline"]:
@@ -3120,14 +3113,23 @@ def preproc_raw_frame(
                 os_kwargs = {"deg": 9}
 
             os_data, os_profile, os_model = _model_overscan(os_quad, axis=1, overscan_stat=overscan_stat, threshold=overscan_threshold, **os_kwargs)
+            os_quad._data = os_data
 
             if numpy.isnan(os_data).any():
-                log.info(f"rejected {numpy.isnan(os_data).sum()} pixel(s) in overscan above {overscan_threshold} standard deviations")
+                log.info(f"masked {numpy.isnan(os_data).sum()} pixel(s) in overscan above {overscan_threshold} standard deviations")
 
             sc_quad = sc_quad - os_model
 
             os_profiles.append(os_profile)
             os_models.append(os_model)
+
+        # compute overscan stats
+        os_bias_med[i] = numpy.nanmedian(os_quad._data, axis=None)
+        os_bias_std[i] = numpy.nanmedian(numpy.nanstd(os_quad._data, axis=1), axis=None)
+        log.info(
+            f"median and standard deviation in OS quadrant {i+1}: "
+            f"{os_bias_med[i]:.2f} +/- {os_bias_std[i]:.2f} (ADU)"
+        )
 
         sc_quads.append(sc_quad)
         os_quads.append(os_quad)
