@@ -532,7 +532,7 @@ def reduce_twilight_sequence(expnums: List[int], median_box: int = 10, niter: bo
         if skip_done and os.path.isfile(dflat_path):
             log.info(f"skipping {dflat_path}, file already exist")
         else:
-            imageMethod.preproc_raw_frame(in_image=flat_path, out_image=pflat_path, in_mask=master_cals.get("pixelmask"), assume_biassec=imageMethod.DEFAULT_BIASSEC)
+            imageMethod.preproc_raw_frame(in_image=flat_path, out_image=pflat_path, in_mask=master_cals.get("pixelmask"))
             imageMethod.detrend_frame(in_image=pflat_path, out_image=dflat_path,
                                         in_bias=master_cals.get("bias"), in_dark=master_cals.get("dark"),
                                         in_pixelflat=master_cals.get("pixelflat"), in_slitmap=SLITMAP)

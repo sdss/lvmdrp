@@ -160,7 +160,7 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
         log.info(f'--- Starting science reduction of raw frame: {rsci_path}')
 
         # preprocess frame
-        image_tasks.preproc_raw_frame(in_image=rsci_path, out_image=psci_path, in_mask=mpixmask_path, assume_biassec=image_tasks.DEFAULT_BIASSEC)
+        image_tasks.preproc_raw_frame(in_image=rsci_path, out_image=psci_path, in_mask=mpixmask_path)
 
         # detrend frame
         image_tasks.detrend_frame(in_image=psci_path, out_image=dsci_path,
