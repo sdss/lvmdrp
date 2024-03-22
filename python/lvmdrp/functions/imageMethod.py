@@ -16,7 +16,6 @@ from astropy import units as u
 from astropy.table import Table
 from astropy.io import fits as pyfits
 from astropy.nddata import CCDData, StdDevUncertainty
-from astropy.stats.biweight import biweight_location
 from astropy.visualization import simple_norm
 from ccdproc import cosmicray_lacosmic
 from scipy import interpolate
