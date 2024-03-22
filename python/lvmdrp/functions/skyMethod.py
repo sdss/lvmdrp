@@ -1643,7 +1643,7 @@ def quick_sky_subtraction(in_cframe, band=np.array((7238,7242,7074,7084,7194,726
     sky_c = np.nan_to_num(sky * scale[:, None])
     if not skip_subtraction:
         data_c = np.nan_to_num(flux - sky_c)
-        error_c = np.nan_to_num(np.sqrt(error**2 - sky_error**2))
+        error_c = np.nan_to_num(np.sqrt(error**2 + sky_error**2))
     else:
         data_c = flux
         error_c = error
