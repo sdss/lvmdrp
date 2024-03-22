@@ -3292,6 +3292,7 @@ def preproc_raw_frame(
             ax=axs[i],
             mu_stat=numpy.nanmedian,
             sg_stat=lambda x, axis: numpy.nanmedian(numpy.std(x, axis=axis)),
+            show_individuals=True,
             labels=True,
         )
         os_x, os_y = _parse_ccd_section(list(os_sec)[0])
