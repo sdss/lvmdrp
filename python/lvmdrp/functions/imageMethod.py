@@ -2956,12 +2956,41 @@ def testres_drp(image, trace, fwhm, flux):
 
 
 def fix_pixel_shifts(in_image, out_image, ref_image, threshold=1.15, fill_gaps=20, display_plots=False):
+    """Identify and corrects pixel shifts in dispersion direction
 
+    This task identifies pixel shifts in the dispersion direction by comparing
+    the overscan regions of the input image with a reference image. The pixel
+    shifts are corrected by rolling the image data by the amount of the shift.
+
+    Parameters
+    ----------
+    in_image : str
+        input image path
+    out_image : str
+        output image path
+    ref_image : str
+        reference image path
+    threshold : float, optional
+        threshold for pixel shifts, by default 1.15
+    fill_gaps : int, optional
+        width of the gaps to fill in the pixel shifts, by default 20
+    display_plots : bool, optional
+        whether to display plots, by default False
+
+    Returns
+    -------
+    numpy.ndarray
+        pixel shifts in dispersion direction
+    lvmdrp.core.image.Image
+        output image with corrected pixel shifts
+    """
     # load reference image
+    log.info(f"loading reference image from {os.path.basename(ref_image)}")
     image_ref = Image()
     image_ref.loadFitsData(ref_image)
 
     # load input image
+    log.info(f"loading input image from {os.path.basename(in_image)}")
     image = Image()
     image.loadFitsData(in_image)
     image_out = copy(image)
@@ -2977,6 +3006,7 @@ def fix_pixel_shifts(in_image, out_image, ref_image, threshold=1.15, fill_gaps=2
         os_quad = image.getSection(os_sec)
 
         # calculate pixels to shift and amount of shifting
+        log.info(f"calculating pixel shifts for {camera} quadrant {i+1} with OS counts ratio >{threshold}")
         shift_mask = numpy.abs(os_quad._data / os_quad_r._data) > threshold
         shift_pixels_raw = numpy.sum(shift_mask, axis=1)
 
@@ -2984,29 +3014,37 @@ def fix_pixel_shifts(in_image, out_image, ref_image, threshold=1.15, fill_gaps=2
         hairs = (shift_pixels_raw % 2).astype(bool)
         shift_pixels_raw[hairs] -= 1
         shift_pixels_raw[shift_pixels_raw < 0] = 0
+        log.info(f"removing {hairs.sum()} spikes from pixel shifts")
 
         # interpolate valleys
         shift_pixels = _fillin_valleys(shift_pixels_raw, width=fill_gaps)
+        log.info(f"filling {(shift_pixels - shift_pixels_raw).sum()} gaps {fill_gaps} pixels wide")
         shifts.append(shift_pixels)
 
     # decide on the shift direction
     shift_right = numpy.concatenate(shifts[1::2][::-1])
     shift_left = -1*numpy.concatenate(shifts[::2][::-1])
     if numpy.any(shift_right != 0):
+        log.info("shifting pixels to the right")
         shift_column = shift_right
     else:
+        log.info("shifting pixels to the left")
         shift_column = shift_left
 
     # correct stepdowns
+    log.info("removing stepdowns from pixel shifts")
     shift_column = _no_stepdowns(shift_column)
 
     # apply shifts and write output image
+    log.info(f"apply pixel shifts to {(shift_column>0).sum()} rows")
     if numpy.any(shift_column != 0):
         for irow in range(image._data.shape[0]):
             image_out._data[irow] = numpy.roll(image._data[irow], shift_column[irow])
+        log.info(f"writing corrected image to {os.path.basename(out_image)}")
         image_out.writeFitsData(out_image)
 
     # display plots if requested
+    log.info("plotting results")
     if display_plots and numpy.any(shift_column != 0):
         fig, ax = plt.subplots(figsize=(15,7), sharex=True, layout="constrained")
         ax.set_title(f"{mjd = } - {expnum = } - {camera = }", loc="left")
