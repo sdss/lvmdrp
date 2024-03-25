@@ -428,9 +428,9 @@ def create_traces(mjds, target_mjd=None, expnums_ldls=None, expnums_qrtz=None,
         for expnum, block_idxs, fiber_str in expnums:
             con_lamp = MASTER_CON_LAMPS[camera[0]]
             if con_lamp == "ldls":
-                counts_threshold = 5000
+                counts_threshold = 1000
             elif con_lamp == "quartz":
-                counts_threshold = 10000
+                counts_threshold = 1000
 
             # select fibers in current spectrograph
             fibermap = SLITMAP[SLITMAP["spectrographid"] == int(camera[1])]
@@ -509,7 +509,10 @@ def create_traces(mjds, target_mjd=None, expnums_ldls=None, expnums_qrtz=None,
         mcents[camera]._mask[bad_fibers] = True
         mwidths[camera]._mask[bad_fibers] = True
         # masking untraced standard fibers
-        fiber_strs = list(zip(*expnum_params[camera]))[2]
+        try:
+            fiber_strs = list(zip(*expnum_params[camera]))[2]
+        except IndexError:
+            fiber_strs = []
         untraced_fibers = np.isin(fibermap["orig_ifulabel"].value, list(set(fibermap[fibermap["telescope"] == "Spec"]["orig_ifulabel"])-set(fiber_strs)))
         mamps[camera]._mask[untraced_fibers] = True
         mcents[camera]._mask[untraced_fibers] = True
@@ -735,14 +738,21 @@ if __name__ == '__main__':
 
     tracemalloc.start()
 
-    MJD = 60255
-    ldls_expnums = np.arange(7264, 7269+1)
-    ldls_expnums = [None] * (12-ldls_expnums.size) + ldls_expnums.tolist()
-    qrtz_expnums = np.arange(7252, 7263+1)
+    # MJD = 60255
+    # ldls_expnums = np.arange(7264, 7269+1)
+    # ldls_expnums = [None] * (12-ldls_expnums.size) + ldls_expnums.tolist()
+    # qrtz_expnums = np.arange(7252, 7263+1)
 
     # MJD = 60185
     # ldls_expnums = np.arange(3936, 3937+1).tolist() + [None] * 10
     # qrtz_expnums = np.arange(3938, 3939+1).tolist() + [None] * 10
+
+    MJD = 60255
+    # ldls_expnums = np.arange(7230, 7240+1)
+    # qrtz_expnums = np.arange(7341, 7352+1)
+    ldls_expnums = qrtz_expnums = [7230] * 6
+    ldls_expnums += [None] * 6
+    qrtz_expnums += [None] * 6
 
     try:
         # create_detrending_frames(mjds=60255, target_mjd=60255, kind="bias")

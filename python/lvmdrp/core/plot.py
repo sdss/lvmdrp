@@ -103,7 +103,7 @@ def plot_image(
     else:
         ax.set_visible("off")
         return
-    
+
     # mask data if requested
     if use_mask and extension != "mask" and image._mask is not None:
         data[image._mask] = np.nan
@@ -142,7 +142,7 @@ def plot_image(
 
 
 def plot_strips(
-    image, axis, nstrip, ax, mu_stat=np.median, sg_stat=np.std, n_sg=1, labels=False
+    image, axis, nstrip, ax, mu_stat=np.median, sg_stat=np.std, n_sg=1, show_individuals=False, labels=False
 ):
     """plots a number of strips of the image along a given direction
 
@@ -166,6 +166,8 @@ def plot_strips(
         the function to compute the deviation statistic, by default np.std
     n_sg : int, optional
         the number of deviations from the median to plot, by default 1
+    show_individuals : bool, optional
+        whether to show or not the individual strips, by default False
     labels : bool, optional
         whether to show or not the plot legend, by default False
 
@@ -199,6 +201,17 @@ def plot_strips(
             lw=1,
             label=f"{sg_stat}" if labels else None,
         )
+        if show_individuals:
+            ylims = ax.get_ylim()
+            ax.plot(
+                pixels,
+                data[i * width : (i + 1) * width],
+                lw=0.5,
+                color="0.5",
+                alpha=0.1,
+                zorder=-999
+            )
+            ax.set_ylim(ylims)
 
     return ax
 
@@ -231,10 +244,10 @@ def plot_detrend(ori_image, det_image, axs, mbias=None, mdark=None, labels=False
     ValueError
         if the number of axes is not 4
     """
-    
+
     # define quadrant sections
     sections = ori_image.getHdrValue("AMP? TRIMSEC")
-    
+
     # convert all images to adu
     unit = "adu"
     ori_image_ = ori_image.convertUnit("adu", inplace=False)
@@ -244,10 +257,10 @@ def plot_detrend(ori_image, det_image, axs, mbias=None, mdark=None, labels=False
         mbias_ = mbias.convertUnit("adu", inplace=False)
     if mdark is not None:
         mdark_ = mdark.convertUnit("adu", inplace=False)
-    
+
     # define counts range
     counts_range = (np.nanpercentile(ori_image_._data, q=0.1), np.nanpercentile(ori_image_._data, q=95.0))
-    
+
     for i in range(4):
         # plot original image
         qori = ori_image_.getSection(sections[i])
@@ -266,7 +279,7 @@ def plot_detrend(ori_image, det_image, axs, mbias=None, mdark=None, labels=False
         # plot detrended image
         qdet = det_image.getSection(sections[i])
         _ = axs[i].hist(qdet._data.ravel(), bins=100, range=counts_range, fc="none", lw=1, ec="tab:blue", histtype="step", label="detrended")
-        
+
         axs[i].legend(loc=1, frameon=False)
         axs[i].ticklabel_format(axis='y', style='sci', scilimits=(4,4))
 
@@ -285,18 +298,18 @@ def plot_wavesol_residuals(lines_pixels, lines_waves, model_waves, ax=None, labe
     # lines_waves is an X array of the true wavelengths
 
     residuals = model_waves - lines_waves
-    
+
     ax.axhline(ls="--", lw=1, color="0.8")
     ax.scatter(lines_pixels, residuals, s=10)
     for i in range(residuals.size):
         x, y = lines_pixels[i], residuals[i]
         ax.annotate(f"{lines_waves[i]:.2f}", (x, y), xytext=(9, -9),
                 textcoords="offset pixels")
-    
+
     if labels:
         ax.set_xlabel("X (pixel)")
         ax.set_ylabel("Residuals (angstrom)")
-    
+
     return ax
 
 
@@ -308,13 +321,13 @@ def plot_wavesol_coeffs(ypix, coeffs, axs, title=None, labels=False):
         axs[icoeff].scatter(ypix, coeffs[:, icoeff], color="tab:blue")
         if labels:
             axs[icoeff].set_title(f"coeff # {icoeff+1}", loc="left")
-    
+
     fig = axs[0].get_figure()
     if labels:
         fig.supxlabel("Fiber ID")
     if title is not None:
         fig.suptitle(title)
-    
+
     return axs
 
 

@@ -109,6 +109,7 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
         rsci_path = path.full("lvm_raw", camspec=sci_camera, **sci)
         psci_path = path.full("lvm_anc", drpver=drpver, kind="p", imagetype=sci["imagetyp"], **sci)
         dsci_path = path.full("lvm_anc", drpver=drpver, kind="d", imagetype=sci["imagetyp"], **sci)
+        lsci_path = path.full("lvm_anc", drpver=drpver, kind="l", imagetype=sci["imagetyp"], **sci)
         xsci_path = path.full("lvm_anc", drpver=drpver, kind="x", imagetype=sci["imagetyp"], **sci)
         wsci_path = path.full("lvm_anc", drpver=drpver, kind="w", imagetype=sci["imagetyp"], **sci)
         fsci_path = path.full("lvm_anc", drpver=drpver, kind="f", imagetype=sci["imagetyp"], **sci)
@@ -137,7 +138,7 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
             # macorr_path = os.path.join(masters_path, f"lvm-apercorr-{sci_camera}.fits")
             mwave_path = os.path.join(masters_path, f"lvm-mwave_{lamps}-{sci_camera}.fits")
             mlsf_path = os.path.join(masters_path, f"lvm-mlsf_{lamps}-{sci_camera}.fits")
-            mflat_path = os.path.join(masters_path, f"lvm-mfiberflat_twilight-{sci_camera}.fits")
+            mflat_path = os.path.join(masters_path, f"lvm-mfiberflat_twilight_single-{sci_camera}.fits")
             if not os.path.isfile(mflat_path):
                 mflat_path = os.path.join(masters_path, f"lvm-mfiberflat-{sci_camera}.fits")
         else:
@@ -166,8 +167,13 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
                                   in_bias=mbias_path, in_dark=mdark_path, in_pixelflat=mpixflat_path,
                                   in_slitmap=Table(drp.fibermap.data), reject_cr=False)
 
+        # subtract straylight
+        image_tasks.subtract_straylight(in_image=dsci_path, out_image=lsci_path,
+                                            in_cent_trace=mtrace_path, select_nrows=5,
+                                            aperture=13, smoothing=400, median_box=21, gaussian_sigma=0.0)
+
         # # extract 1d spectra
-        image_tasks.extract_spectra(in_image=dsci_path, out_rss=xsci_path, in_trace=mtrace_path, in_fwhm=mwidth_path, method=extraction_method, parallel=extraction_parallel)
+        image_tasks.extract_spectra(in_image=lsci_path, out_rss=xsci_path, in_trace=mtrace_path, in_fwhm=mwidth_path, method=extraction_method, parallel=extraction_parallel)
 
         # wavelength calibrate
         rss_tasks.create_pixel_table(in_rss=xsci_path, out_rss=wsci_path, arc_wave=mwave_path, arc_fwhm=mlsf_path)

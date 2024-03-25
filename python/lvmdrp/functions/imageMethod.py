@@ -16,7 +16,6 @@ from astropy import units as u
 from astropy.table import Table
 from astropy.io import fits as pyfits
 from astropy.nddata import CCDData, StdDevUncertainty
-from astropy.stats.biweight import biweight_location
 from astropy.visualization import simple_norm
 from ccdproc import cosmicray_lacosmic
 from scipy import interpolate
@@ -53,7 +52,15 @@ DEFAULT_TRIMSEC = [
     "[1:2043, 1:2040]",
     "[2078:4120, 1:2040]",
 ]
+# NOTE: this is the OS region shrinked down to avoid pixels with fiber signal
 DEFAULT_BIASSEC = [
+    "[2048:2058, 2041:4080]",
+    "[2065:2075, 2041:4080]",
+    "[2048:2058, 1:2040]",
+    "[2065:2075, 1:2040]",
+]
+# NOTE: original OS region
+ORI_BIASSEC = [
     "[2044:2060, 2041:4080]",
     "[2061:2077, 2041:4080]",
     "[2044:2060, 1:2040]",
@@ -2966,6 +2973,7 @@ def preproc_raw_frame(
     rdnoise_prefix: str = "RDNOISE",
     subtract_overscan: bool = True,
     overscan_stat: str = "biweight",
+    overscan_threshold: float = 3.0,
     overscan_model: str = "spline",
     replace_with_nan: bool = True,
     display_plots: bool = False,
@@ -3009,6 +3017,8 @@ def preproc_raw_frame(
         whether to subtract the overscan for each quadrant or not, by default True
     overscan_stat : str, optional
         statistics to use when coadding pixels along the X axis, by default "biweight"
+    overscan_threshold : float, optional
+        number of standard deviations to reject pixels in overscan, by default 3.0
     overscan_model : str, optional
         model used to fit the overscan profile of each quadrant, by default "spline"
     replace_with_nan : bool, optional
@@ -3088,49 +3098,38 @@ def preproc_raw_frame(
         # get overscan and science quadrant & convert to electron
         sc_quad = org_img.getSection(section=sc_xy)
         os_quad = org_img.getSection(section=os_xy)
-        # compute overscan stats
-        os_bias_med[i] = numpy.nanmedian(os_quad._data, axis=None)
-        os_bias_std[i] = numpy.nanmedian(numpy.std(os_quad._data, axis=1), axis=None)
-        log.info(
-            f"median and standard deviation in OS quadrant {i+1}: "
-            f"{os_bias_med[i]:.2f} +/- {os_bias_std[i]:.2f} (ADU)"
-        )
         # subtract overscan bias from image if requested
         if subtract_overscan:
-            if overscan_stat == "biweight":
-                os_stat = biweight_location
-            elif overscan_stat == "median":
-                os_stat = numpy.nanmedian
-            else:
-                log.warning(
-                    f"overscan statistic '{overscan_stat}' not implemented, "
-                    "falling back to 'biweight'"
-                )
-                os_stat = biweight_location
-
             if overscan_model not in ["const", "poly", "spline"]:
                 log.warning(
                     f"overscan model '{overscan_model}' not implemented, "
                     "falling back to 'spline'"
                 )
                 overscan_model = "spline"
-            if overscan_model == "const":
-                os_profile, os_model = _model_overscan(
-                    os_quad, axis=1, stat=os_stat, model="const"
-                )
             if overscan_model == "spline":
-                os_profile, os_model = _model_overscan(
-                    os_quad, axis=1, stat=os_stat, nknots=300
-                )
+                os_kwargs = {"nknots": 300}
             elif overscan_model == "poly":
-                os_profile, os_model = _model_overscan(
-                    os_quad, axis=1, stat=os_stat, model="poly", deg=9
-                )
+                os_kwargs = {"deg": 9}
+
+            os_data, os_profile, os_model = _model_overscan(os_quad, axis=1, overscan_stat=overscan_stat, threshold=overscan_threshold, **os_kwargs)
+            os_quad._data = os_data
+
+            if numpy.isnan(os_data).any():
+                os_nmask = numpy.isnan(os_data).sum()
+                log.info(f"masked {os_nmask} ({os_nmask/os_data.size*100:.2f}%) pixels in overscan above {overscan_threshold} standard deviations")
 
             sc_quad = sc_quad - os_model
 
             os_profiles.append(os_profile)
             os_models.append(os_model)
+
+        # compute overscan stats
+        os_bias_med[i] = numpy.nanmedian(os_quad._data, axis=None)
+        os_bias_std[i] = numpy.nanmedian(numpy.nanstd(os_quad._data, axis=1), axis=None)
+        log.info(
+            f"median and standard deviation in OS quadrant {i+1}: "
+            f"{os_bias_med[i]:.2f} +/- {os_bias_std[i]:.2f} (ADU)"
+        )
 
         sc_quads.append(sc_quad)
         os_quads.append(os_quad)
@@ -3292,6 +3291,7 @@ def preproc_raw_frame(
             ax=axs[i],
             mu_stat=numpy.nanmedian,
             sg_stat=lambda x, axis: numpy.nanmedian(numpy.std(x, axis=axis)),
+            show_individuals=True,
             labels=True,
         )
         os_x, os_y = _parse_ccd_section(list(os_sec)[0])

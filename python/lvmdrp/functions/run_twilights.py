@@ -39,7 +39,7 @@ SLITMAP = Table(drp.fibermap.data)
 
 MASK_BANDS = {
         "b": [(3910, 4000), (4260, 4330)],
-        "r": [],
+        "r": [(6840,6960)],
         "z": [(7570, 7700)]
     }
 
@@ -162,7 +162,7 @@ def fit_continuum(spectrum: Spectrum1D, mask_bands: List[Tuple[float,float]],
 
 def fit_fiberflat(rsss: List[RSS], interpolate_bad: bool = True, mask_bands: List[Tuple[float,float]] = [],
                   median_box:int = 5, niter: int = 1000, threshold: Tuple[float,float]|float = (0.5,2.0),
-                  plot_fibers: List[int] = [0,300,600,900,1200,1400,1700],
+                  plot_fibers: List[int] = list(range(0,648,10)),#[0,300,600,900,1200,1400,1700],
                   display_plots: bool = False, **kwargs) -> List[RSS]:
     """Fit fiber throughput for a twilight sequence
 
@@ -255,10 +255,16 @@ def fit_fiberflat(rsss: List[RSS], interpolate_bad: bool = True, mask_bands: Lis
         twilight = flat[ifiber]
         ori_twilight = ori_flat[ifiber]
 
-        best_continuum, continuum_models, masked_pixels, knots = fit_continuum(
-            spectrum=twilight, mask_bands=mask_bands,
-            median_box=median_box, niter=niter, threshold=threshold, **kwargs
-        )
+        try:
+            best_continuum, continuum_models, masked_pixels, knots = fit_continuum(
+                spectrum=twilight, mask_bands=mask_bands,
+                median_box=median_box, niter=niter, threshold=threshold, **kwargs
+            )
+        except ValueError:
+            log.error(f"while fitting fiber throughput for fiber {ifiber+1}")
+            new_flat._data[ifiber] = 0.0
+            new_flat._mask[ifiber] = True
+            continue
 
         if ifiber in plot_fibers:
             good_pix = ~twilight._mask
@@ -386,7 +392,7 @@ def combine_twilight_sequence(expnums: List[int], camera: str, output_dir: str) 
     return mflat
 
 def resample_fiberflat(mflat: RSS, camera: str, mwave_path: str,
-             plot_fibers: List[int] = [0, 300, 647],
+             plot_fibers: List[int] = list(range(0,648,10)),
              display_plots: bool = False) -> RSS:
     """Fit master twilight flat
 
@@ -600,8 +606,13 @@ def reduce_twilight_sequence(expnums: List[int], median_box: int = 10, niter: bo
 
         mwave_path = os.path.join(masters_path, f"lvm-mwave_{MASTER_ARC_LAMPS[channel]}-{camera}.fits")
         new_flat = resample_fiberflat(mrss, camera=camera, mwave_path=mwave_path, display_plots=display_plots)
-        mflat_path = os.path.join(masters_path, f"lvm-mfiberflat_twilight-{camera}.fits")
+        mflat_path = os.path.join(masters_path, f"lvm-mfiberflat_twilight_single-{camera}.fits")
         new_flat.writeFitsData(mflat_path)
         new_flats[camera] = new_flat
 
     return new_flats
+
+
+if __name__ == "__main__":
+
+    reduce_twilight_sequence(expnums=[7230], median_box=10, niter=1000, threshold=(0.5,2.5), nknots=60, skip_done=True, display_plots=True)
