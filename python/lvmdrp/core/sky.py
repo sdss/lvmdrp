@@ -594,9 +594,16 @@ def optimize_sky(factor, test_spec, sky_spec, start_wave, end_wave):
     return rms
 
 
-def select_sky_fibers(rss, fibermap, telescope):
+def select_sky_fibers(rss, telescope, fibermap=None):
+    # define fibermap
+    if fibermap is None:
+        fibermap = rss._slitmap
+    elif fibermap is None and rss._slitmap is None:
+        raise ValueError("no fibermap information found")
+
     # select sky fibers
     telescope = telescope.lower()
+    rst_selection = fibermap["targettype"] != "SKY"
     if telescope == "both":
         sky_selection = fibermap["targettype"] == "SKY"
     elif telescope in {"east", "e", "skye"}:
@@ -607,15 +614,14 @@ def select_sky_fibers(rss, fibermap, telescope):
         raise ValueError(f"invalid value for 'telescope' parameter: '{telescope}'")
 
     # define wavelength, flux and variances
-    log.info(f"interpolating sky fibers for sky {telescope = } telescope(s)")
     sky_wave = rss._wave[sky_selection]
     sky_data = rss._data[sky_selection]
     sky_vars = rss._error[sky_selection] ** 2
     sky_mask = rss._mask[sky_selection]
-    sci_wave = rss._wave[~sky_selection]
-    sci_data = rss._data[~sky_selection]
+    rst_wave = rss._wave[rst_selection]
+    rst_data = rss._data[rst_selection]
 
-    return sky_wave, sky_data, sky_vars, sky_mask, sci_wave, sci_data
+    return sky_wave, sky_data, sky_vars, sky_mask, rst_wave, rst_data
 
 
 def fit_supersky(sky_wave, sky_data, sky_vars, sky_mask, sci_wave, sci_data):

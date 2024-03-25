@@ -1387,6 +1387,7 @@ def interpolate_sky(in_frame: str, out_rss: str = None,
 
     supersky, supererror, swave, ssky, svars, smask = {}, {}, {}, {}, {}, {}
     for telescope in ("east", "west"):
+        log.info(f"interpolating sky fibers for sky {telescope = } telescope(s)")
         sky_wave, sky_data, sky_vars, sky_mask, sci_wave, sci_data = select_sky_fibers(frame, fibermap=fibermap, telescope=telescope)
 
         fig, axs = create_subplots(to_display=display_plots, figsize=(20,10), nrows=2, ncols=1, sharex=True)
@@ -1574,6 +1575,8 @@ def combine_skies(in_rss: str, out_rss, sky_weights: Tuple[float, float] = None)
 
     # write output sky-subtracted RSS
     log.info(f"writing output RSS file '{os.path.basename(out_rss)}'")
+    rss.appendHeader(sky_e._header["SKYMODEL*"])
+    rss.appendHeader(sky_e._header["GEOCORONAL*"])
     rss.setHdrValue("SKYEW", w_e, "SkyE weight")
     rss.setHdrValue("SKYWW", w_w, "SkyW weight")
     rss.set_sky(rss_sky=sky)
@@ -1600,6 +1603,7 @@ def quick_sky_subtraction(in_fframe, out_sframe, band=np.array((7238,7242,7074,7
     flux = fframe["FLUX"].data
     error = fframe["ERROR"].data
     sky = fframe["SKY"].data
+    sky_error = fframe["SKY_ERROR"].data
 
     crval = wave[0]
     cdelt = wave[1] - wave[0]
@@ -1619,7 +1623,7 @@ def quick_sky_subtraction(in_fframe, out_sframe, band=np.array((7238,7242,7074,7
     sky_c = np.nan_to_num(sky * scale[:, None])
     if not skip_subtraction:
         data_c = np.nan_to_num(flux - sky_c)
-        error_c = np.nan_to_num(error - sky_c)
+        error_c = np.nan_to_num(np.sqrt(error**2 + sky_error**2))
     else:
         data_c = flux
         error_c = error
