@@ -1094,7 +1094,7 @@ def combine_spectrographs(tileid: int, mjd: int, channel: str, expnum: int, imag
     """
 
     hsci_paths = sorted(path.expand('lvm_anc', mjd=mjd, tileid=tileid, drpver=drpver,
-                               kind='h', camera=f'{channel}*', imagetype=imagetype, expnum=expnum))
+                               kind='h', camera=f'{channel}[123]', imagetype=imagetype, expnum=expnum))
 
     if not hsci_paths:
         log.error(f'no rectified frames found for {expnum = }, {channel = }')
