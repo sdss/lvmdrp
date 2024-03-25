@@ -212,6 +212,67 @@ def _bg_subtraction(images, quad_sections, bg_sections):
     return images_bgcorr, bg_images_med, bg_images_std, bg_sections
 
 
+def _fillin_valleys(data, width=18):
+    """fills in valleys in the data array
+
+    Parameters
+    ----------
+    data : array_like
+        1-dimensional array of data
+    width : int, optional
+        width of the valley to fill, by default 18
+
+    Returns
+    -------
+    array_like
+        1-dimensional array with filled valleys
+    """
+    data_out = copy(data)
+    top = data[0]
+    for i in range(data.size):
+        if data[i] > top:
+            top = data[i]
+        if data[i] == top:
+            continue
+        if data[i] < top:
+            j_ini = i
+        j_fin = j_ini
+        for j in range(j_ini, data.size):
+            if data[j] < top:
+                continue
+            if data[j] == top:
+                j_fin = j
+                break
+        if j_fin - j_ini < width:
+            data_out[j_ini:j_fin] = top
+    return data_out
+
+
+def _no_stepdowns(data):
+    """Removes stepdowns in the data array
+
+    Parameters
+    ----------
+    data : array_like
+        1-dimensional array of data
+
+    Returns
+    -------
+    array_like
+        1-dimensional array with stepdowns removed
+    """
+    data_out = copy(data)
+    top = data[0]
+    for i in range(data.size):
+        if data[i] > top:
+            top = data[i]
+        if data[i] == top:
+            continue
+        if data[i] < top:
+            data_out[i] = top
+    return data_out
+
+
 class Image(Header):
     def __init__(self, data=None, header=None, mask=None, error=None, origin=None, individual_frames=None, slitmap=None):
         Header.__init__(self, header=header, origin=origin)

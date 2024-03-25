@@ -56,6 +56,26 @@ def create_subplots(to_display, flatten_axes=True, **subplots_params):
     return fig, axs
 
 
+def plot_image_shift(ax, image, column_shift, pos=(0.0,1.0-0.32), box=(0.3,0.3), cmap="gray"):
+    """plots the pixel shifts of the given image along the given column shifts positions"""
+    xh = image.shape[1]//2
+    deltas = np.gradient(column_shift)
+    irows = np.where(deltas == 1)[0][::2][::-1]
+    axis = []
+    for i, irow in enumerate(irows):
+        iy, fy, ix, fx = xh-30, xh+30, irow-30, irow+30
+        axi = ax.inset_axes((pos[0],pos[1]-i/3.2, *box))
+        axi.imshow(image[ix:fx, iy:fy], extent=[iy,fy,ix,fx], origin="lower", cmap=cmap, vmin=0, vmax=np.mean(image)+3*np.std(image))
+        axi.tick_params(axis="both", labelsize=10)
+        if i == 0 and irows.size > 1:
+            axi.tick_params(axis="both", labelbottom=False)
+        else:
+            axi.set_xlabel("X (pixel)", fontsize=10)
+        axi.set_ylabel("Y (pixel)", fontsize=10)
+        axis.append(axi)
+    return axis
+
+
 def plot_image(
     image, ax, title=None, use_mask=True, labels=True, colorbar=True, extension="data"
 ):
