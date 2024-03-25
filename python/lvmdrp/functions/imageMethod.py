@@ -8,6 +8,7 @@ import os
 import sys
 from itertools import product
 from copy import deepcopy as copy
+from shutil import copy2
 from multiprocessing import Pool, cpu_count
 
 import numpy
@@ -2955,7 +2956,7 @@ def testres_drp(image, trace, fwhm, flux):
     hdu.writeto("res_rel.fits", overwrite=True)
 
 
-def fix_pixel_shifts(in_image, out_image, ref_image, threshold=1.15, fill_gaps=20, display_plots=False):
+def fix_pixel_shifts(in_image, ref_image, threshold=1.15, fill_gaps=20, display_plots=False):
     """Identify and corrects pixel shifts in dispersion direction
 
     This task identifies pixel shifts in the dispersion direction by comparing
@@ -2966,8 +2967,6 @@ def fix_pixel_shifts(in_image, out_image, ref_image, threshold=1.15, fill_gaps=2
     ----------
     in_image : str
         input image path
-    out_image : str
-        output image path
     ref_image : str
         reference image path
     threshold : float, optional
@@ -2984,6 +2983,10 @@ def fix_pixel_shifts(in_image, out_image, ref_image, threshold=1.15, fill_gaps=2
     lvmdrp.core.image.Image
         output image with corrected pixel shifts
     """
+    # create output image path if not provided
+    ori_image = in_image.replace(".fits.gz", "_ori.fits.gz")
+    out_image = copy(in_image)
+
     # load reference image
     log.info(f"loading reference image from {os.path.basename(ref_image)}")
     image_ref = Image()
@@ -3036,16 +3039,23 @@ def fix_pixel_shifts(in_image, out_image, ref_image, threshold=1.15, fill_gaps=2
     shift_column = _no_stepdowns(shift_column)
 
     # apply shifts and write output image
-    log.info(f"apply pixel shifts to {(shift_column>0).sum()} rows")
     if numpy.any(shift_column != 0):
+        log.info(f"apply pixel shifts to {(shift_column>0).sum()} rows")
         for irow in range(image._data.shape[0]):
             image_out._data[irow] = numpy.roll(image._data[irow], shift_column[irow])
+
+        # copy original image to 'ori' file
+        log.info(f"writing original image to {os.path.basename(ori_image)}")
+        copy2(in_image, ori_image)
+
         log.info(f"writing corrected image to {os.path.basename(out_image)}")
         image_out.writeFitsData(out_image)
+    else:
+        log.info("no pixel shifts detected, no correction applied")
 
     # display plots if requested
-    log.info("plotting results")
     if display_plots and numpy.any(shift_column != 0):
+        log.info("plotting results")
         fig, ax = plt.subplots(figsize=(15,7), sharex=True, layout="constrained")
         ax.set_title(f"{mjd = } - {expnum = } - {camera = }", loc="left")
         y_pixels = numpy.arange(shift_column.size)
