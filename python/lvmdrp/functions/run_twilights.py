@@ -434,7 +434,7 @@ def resample_fiberflat(mflat: RSS, camera: str, mwave_path: str,
     new_flat._slitmap = mflat._slitmap
     new_flat._good_fibers = mflat._good_fibers
 
-    fig, ax = create_subplots(to_display=display_plots, figsize=(20,7))
+    fig, ax = create_subplots(to_display=display_plots, figsize=(15,7))
     fig.suptitle(f"Flat for {channel = }, fibers = {','.join(map(str,plot_fibers))}")
     ax.set_xlabel("Wavelength (Angstrom)")
     ax.set_ylabel("Normalized counts")
