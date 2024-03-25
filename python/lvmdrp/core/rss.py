@@ -302,7 +302,7 @@ class RSS(FiberRows):
             RSS object with data from all three channels
         """
 
-        rsss = [rss_b, rss_r, rss_z]
+        rsss = [copy(rss_b), copy(rss_r), copy(rss_z)]
 
         # get wavelengths
         log.info("merging wavelength arrays")
@@ -359,12 +359,28 @@ class RSS(FiberRows):
             skies = numpy.asarray(skies)
             sky_errors = numpy.asarray(sky_errors)
 
+        # get overlapping ranges
+        mask_overlap_br = (new_wave >= rss_r._wave[0]) & (new_wave <= rss_b._wave[-1])
+        mask_overlap_rz = (new_wave >= rss_z._wave[0]) & (new_wave <= rss_r._wave[-1])
+        # get channel ranges (excluding overlapping regions)
+        mask_b = ((new_wave >= rss_b._wave[0]) & (new_wave <= rss_b._wave[-1])) & (~mask_overlap_br)
+        mask_r = ((new_wave >= rss_r._wave[0]) & (new_wave <= rss_r._wave[-1])) & (~mask_overlap_br) & (~mask_overlap_rz)
+        mask_z = ((new_wave >= rss_z._wave[0]) & (new_wave <= rss_z._wave[-1])) & (~mask_overlap_rz)
+
         # define weights for channel combination
         vars = errors ** 2
         log.info("combining channel data")
         if use_weights:
-            weights = 1.0 / vars
-            weights = weights / bn.nansum(weights, axis=0)[None]
+            weights = numpy.zeros_like(vars)
+            weights[:, :, mask_overlap_br|mask_overlap_rz] = 1.0 / vars[:, :, mask_overlap_br|mask_overlap_rz]
+            weights[numpy.isnan(weights)] = 0.0
+            # normalize weights
+            weights[:, :, mask_overlap_br] = weights[:, :, mask_overlap_br] / bn.nansum(weights[:, :, mask_overlap_br], axis=0)[None]
+            weights[:, :, mask_overlap_rz] = weights[:, :, mask_overlap_rz] / bn.nansum(weights[:, :, mask_overlap_rz], axis=0)[None]
+            # set weights for non-overlapping regions to 1 in their corresponding channels
+            weights[0, :, mask_b] = 1.0
+            weights[1, :, mask_r] = 1.0
+            weights[2, :, mask_z] = 1.0
 
             new_data = bn.nansum(fluxes * weights, axis=0)
             new_lsf = bn.nansum(lsfs * weights, axis=0)
