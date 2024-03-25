@@ -41,6 +41,7 @@ from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.functions import imageMethod as image_tasks
 from lvmdrp.functions import rssMethod as rss_tasks
 from lvmdrp.functions.run_drp import get_config_options, read_fibermap
+from lvmdrp.functions.run_twilights import reduce_twilight_sequence
 
 
 SLITMAP = read_fibermap(as_table=True)
@@ -189,6 +190,7 @@ def _get_ring_expnums(expnums_ldls, expnums_qrtz, ring_size=12, sort_expnums=Fal
                 if expnum is None:
                     continue
                 # define fiber ID
+                # TODO: change this to use CALIBFIB header keyword
                 fiber_str = f"P{ring+1}-{fiber+1}"
                 # get spectrograph where current fiber is plugged
                 fiber_par = SLITMAP[SLITMAP["orig_ifulabel"] == fiber_str]
@@ -575,14 +577,14 @@ def create_fiberflats(mjds, target_mjd=None, expnums=None):
     expnums : list
         List of exposure numbers to reduce
     """
-    # read master twilight flats
-    # read master traces
-    # extract twilight fibers
-    # fit continuum avoiding absorption/emission lines
-    # calculate median continuum
-    # normalize fibers by median continuum
-    # write master fiber flats
-    pass
+    frames, masters_mjd = get_sequence_metadata(mjds, target_mjd=target_mjd, expnums=expnums)
+
+    reduce_2d(mjds, target_mjd=masters_mjd, expnums=expnums)
+
+    if expnums is None:
+        expnums = frames.expnum.unique().values
+
+    reduce_twilight_sequence(expnums=expnums)
 
 
 def create_illumination_corrections(mjds, target_mjd=None, expnums=None):
@@ -681,6 +683,7 @@ def create_wavelengths(mjds, target_mjd=None, expnums=None):
                                       method="linear", disp_pix=0.5,
                                       start_wave=iwave, end_wave=fwave,
                                       err_sim=10, parallel=0, extrapolate=False)
+
 
 @cloup.command(short_help='Run the calibration sequence reduction', show_constraints=True)
 @click.option('-m', '--mjds', type=int, multiple=True, help='list of MJDs with calibration sequence taken')
