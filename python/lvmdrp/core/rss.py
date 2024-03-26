@@ -2738,16 +2738,14 @@ class RSS(FiberRows):
         if mask is None:
             mask = self._mask
         if mask is None:
-            return self._data, self._error, self._inst_fwhm
+            return self._data, self._error
 
         if self._mask is not None:
             self._data[self._mask] = numpy.nan
             if self._error is not None:
                 self._error[self._mask] = numpy.nan
-            if self._inst_fwhm is not None:
-                self._inst_fwhm[self._mask] = numpy.nan
 
-        return self._data, self._error, self._inst_fwhm
+        return self._data, self._error
 
     def set_fluxcal(self, fluxcal):
         self._fluxcal = fluxcal
