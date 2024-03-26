@@ -10,8 +10,13 @@ import pytest
 import lvmdrp
 import importlib
 
+import numpy as np
 import pandas as pd
 from astropy.io import fits
+
+from lvmdrp.core.image import _parse_ccd_section
+from lvmdrp.functions.imageMethod import DEFAULT_BIASSEC, DEFAULT_TRIMSEC
+
 
 """
 Here you can add fixtures that will be used for all the tests in this
@@ -97,7 +102,7 @@ def multimeta(make_multi):
     yield make_multi(expnum=[6818, 6819])
 
 
-def create_fake_fits(path, tileid=11111, mjd=61234, expnum=6817, cameras=None):
+def create_fake_fits(path, tileid=11111, mjd=61234, expnum=6817, cameras=None, bias_levels=[980, 960, 1000, 1020], sci_level=60000, leak=False, shift_rows=[]):
     """ create a fake raw frame FITS file """
     out = {}
     cameras = cameras or ['b1']
@@ -108,10 +113,30 @@ def create_fake_fits(path, tileid=11111, mjd=61234, expnum=6817, cameras=None):
                'EXPTIME': 900.0,
                'IMAGETYP': 'object', 'FILENAME': filename, 'SPEC': f'sp{cam[-1]}',
                'OBSTIME': '2023-10-18T07:56:23.289', 'OBSERVAT': 'LCO',
-               'TELESCOP': 'SDSS 0.16m', 'SURVEY': 'LVM'}
-        prim = fits.PrimaryHDU(header=fits.Header(hdr))
+               'TELESCOP': 'SDSS 0.16m', 'SURVEY': 'LVM',
+               "TRIMSEC1": DEFAULT_TRIMSEC[0], "TRIMSEC2": DEFAULT_TRIMSEC[1],
+               "TRIMSEC3": DEFAULT_TRIMSEC[2], "TRIMSEC4": DEFAULT_TRIMSEC[3],
+               "BIASSEC1": DEFAULT_BIASSEC[0], "BIASSEC2": DEFAULT_BIASSEC[1],
+               "BIASSEC3": DEFAULT_BIASSEC[2], "BIASSEC4": DEFAULT_BIASSEC[3]}
+
+        # mock data
+        data = np.zeros((4080, 4120), dtype=int)
+        for iquad in range(4):
+            (os_ix,os_fx), (os_iy,os_fy) = _parse_ccd_section(DEFAULT_BIASSEC[iquad])
+            (sc_ix,sc_fx), (sc_iy,sc_fy) = _parse_ccd_section(DEFAULT_TRIMSEC[iquad])
+            data[os_iy:os_fy, os_ix:os_fx] += bias_levels[iquad]
+            data[sc_iy:sc_fy, sc_ix:sc_fx] += bias_levels[iquad] + sci_level
+
+            # simulate leaks in overscan region
+            if leak:
+                data[:, (os_ix if iquad in {0,2} else os_fx-1)] += sci_level
+
+        # simulate pixel shifts
+        for irow in shift_rows:
+            data[irow:] = np.roll(data[irow:], -2, axis=1)
 
         # create fake file
+        prim = fits.PrimaryHDU(header=fits.Header(hdr), data=data)
         full = path / filename
         hdulist = fits.HDUList(prim)
         hdulist.writeto(full)
@@ -122,6 +147,7 @@ def create_fake_fits(path, tileid=11111, mjd=61234, expnum=6817, cameras=None):
 @pytest.fixture(scope='module')
 def make_fits(datadir):
     """ fixture to create fake fits files """
-    mjd = 61234
-    paths = datadir([mjd])
-    create_fake_fits(paths[0], mjd=mjd, cameras=['b1', 'b2', 'b3'])
+    def _make_fits(mjd=61234, cameras=["b1"], expnum=6817, bias_levels=[980, 960, 1000, 1020], sci_level=60000, leak=False, shift_rows=[]):
+        paths = datadir([mjd])
+        return create_fake_fits(paths[0], mjd=mjd, cameras=cameras, expnum=expnum, leak=leak, shift_rows=shift_rows)
+    yield _make_fits
