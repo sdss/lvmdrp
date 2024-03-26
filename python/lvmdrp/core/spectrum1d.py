@@ -2954,6 +2954,30 @@ class Spectrum1D(Header):
         gauss_multi.fit(self._wave[select], self._data[select], sigma=error[select])
         return gauss_multi, gauss_multi.getPar()
 
+    def fitMultiGauss_fixed_cent(self, centres, init_fwhm):
+        select = numpy.zeros(self._dim, dtype="bool")
+        flux_in = numpy.zeros(len(centres), dtype=numpy.float32)
+        sig_in = numpy.ones_like(flux_in) * init_fwhm / 2.354
+        cent = numpy.zeros(len(centres), dtype=numpy.float32)
+        if self._error is not None:
+            error = self._error
+        else:
+            error = numpy.ones_like(self._dim, dtype=numpy.float32)
+        for i in range(len(centres)):
+            select_line = numpy.logical_and(
+                self._wave > centres[i] - 2 * init_fwhm,
+                self._wave < centres[i] + 2 * init_fwhm,
+            )
+            flux_in[i] = numpy.sum(self._data[select_line])
+            select = numpy.logical_or(select, select_line)
+            cent[i] = centres[i]
+        par = numpy.concatenate([sig_in, flux_in])
+        gauss_multi = fit_profile.Gaussians_width(par, args=cent)
+        gauss_multi.fit(self._wave[select], self._data[select], sigma=error[select])
+        params = numpy.split(gauss_multi.getPar(), 2)
+        params = numpy.concatenate([params[1], cent, params[0]])
+        return gauss_multi, params
+
     def fitParFile(
         self, par, err_sim=0, ftol=1e-8, xtol=1e-8, method="leastsq", parallel="auto"
     ):

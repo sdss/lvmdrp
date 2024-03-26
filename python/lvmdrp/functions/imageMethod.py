@@ -8,6 +8,7 @@ import os
 import sys
 from itertools import product
 from copy import deepcopy as copy
+from shutil import copy2
 from multiprocessing import Pool, cpu_count
 
 import numpy
@@ -16,7 +17,6 @@ from astropy import units as u
 from astropy.table import Table
 from astropy.io import fits as pyfits
 from astropy.nddata import CCDData, StdDevUncertainty
-from astropy.stats.biweight import biweight_location
 from astropy.visualization import simple_norm
 from ccdproc import cosmicray_lacosmic
 from scipy import interpolate
@@ -33,11 +33,13 @@ from lvmdrp.core.image import (
     Image,
     _parse_ccd_section,
     _model_overscan,
+    _fillin_valleys,
+    _no_stepdowns,
     combineImages,
     glueImages,
     loadImage,
 )
-from lvmdrp.core.plot import plt, create_subplots, plot_detrend, plot_strips, save_fig
+from lvmdrp.core.plot import plt, create_subplots, plot_detrend, plot_strips, plot_image_shift, save_fig
 from lvmdrp.core.rss import RSS
 from lvmdrp.core.spectrum1d import Spectrum1D, _spec_from_lines, _cross_match
 from lvmdrp.core.tracemask import TraceMask
@@ -76,7 +78,7 @@ __all__ = [
     "LACosmic_drp",
     "find_peaks_auto",
     "trace_peaks",
-    "subtractStraylight_drp",
+    "subtract_straylight",
     "traceFWHM_drp",
     "extract_spectra",
     "preproc_raw_frame",
@@ -156,6 +158,66 @@ def _create_peaks_regions(fibermap: Table, column: int = 2000) -> None:
                     "# text(%.4f,%.4f) text={%i, %i}\n"
                     % (column+1, centers[i]+1, i + 1, centers[i])
                 )
+
+
+def _create_trace_regions(out_trace, table_data, table_poly, table_poly_all, label=None, display_plots=False):
+    """Creates three DS9 region files with the trace data
+
+    Parameters
+    ----------
+    out_trace : str
+        output trace file
+    table_data : numpy.ndarray
+        trace data (measurements)
+    table_poly : numpy.ndarray
+        trace polynomial evaluated at the trace data
+    table_poly_all : numpy.ndarray
+        trace polynomial evaluated at all pixels
+    label : str, optional
+        label for the trace, by default None
+    display_plots : bool, optional
+        display plots, by default False
+    """
+    coords_file = out_trace.replace("calib", "ancillary").replace(".fits", "_coords.txt")
+    os.makedirs(os.path.dirname(coords_file), exist_ok=True)
+    poly_file = coords_file.replace("_coords.txt", "_poly.txt")
+    poly_all_file = coords_file.replace("_coords.txt", "_poly_all.txt")
+    log.info(f"writing trace data to files: {os.path.basename(coords_file)}, {os.path.basename(poly_file)} and {os.path.basename(poly_all_file)}")
+    numpy.savetxt(coords_file, 1+table_data, fmt="%.5f")
+    numpy.savetxt(poly_file, 1+table_poly, fmt="%.5f")
+    numpy.savetxt(poly_all_file, 1+table_poly_all, fmt="%.5f")
+
+    # plot trace fitting residuals
+    if label is None:
+        label = os.path.basename(out_trace).replace(".fits", "")
+
+    fig, ax = create_subplots(1, 1, figsize=(10, 10))
+    ax.axhspan(-1, 1, color="k", alpha=0.1)
+    ax.axhspan(-10, 10, color="k", alpha=0.1)
+    residuals = (table_poly[:, 1] - table_data[:, 1]) / table_data[:, 1] * 100
+    ax.plot(table_data[:, 0], residuals, "o", ms=1, color="k")
+    ax.set_ylim(-25, 25)
+    ax.set_xlabel("y (pixel)")
+    ax.set_ylabel("residuals (%)")
+    ax.set_title(f"{label} residuals")
+    save_fig(fig, out_trace, label="residuals", figure_path="qa", to_display=display_plots)
+
+
+def _eval_continuum_model(obs_img, trace_amp, trace_cent, trace_fwhm):
+    # define gaussian model
+    f = numpy.sqrt(2 * numpy.pi)
+    def gaussians(pars, x):
+        y = pars[0][:, None] * numpy.exp(-0.5 * ((x[None, :] - pars[1][:, None]) / pars[2][:, None]) ** 2) / (pars[2][:, None] * f)
+        return bn.nansum(y, axis=0)
+
+    # evaluate continuum exposure model
+    mod = copy(obs_img)
+    column = numpy.arange(obs_img._dim[0])
+    for icolumn in tqdm(range(obs_img._dim[1]), desc="evaluating Gaussians", unit="column", ascii=True):
+        pars = (trace_amp._data[:, icolumn], trace_cent._data[:, icolumn], trace_fwhm._data[:, icolumn] / 2.354)
+        mod._data[:, icolumn] = gaussians(pars=pars, x=column)
+
+    return mod, (mod / obs_img)
 
 
 def detCos_drp(
@@ -1498,7 +1560,7 @@ def trace_peaks(
 
     # create empty trace mask for the image
     trace = TraceMask()
-    trace.createEmpty(data_dim=(fibers, dim[1]), mask_dim=(fibers, dim[1]))
+    trace.createEmpty(data_dim=(fibers, dim[1]))
     trace.setFibers(fibers)
     trace._good_fibers = good_fibers
     # add the positions of the previous identified peaks
@@ -1568,14 +1630,7 @@ def trace_peaks(
     trace._mask[bad_fibers] = True
 
     if write_trace_data:
-        coords_file = out_trace.replace("calib", "ancillary").replace(".fits", "_coords.txt")
-        os.makedirs(os.path.dirname(coords_file), exist_ok=True)
-        poly_file = coords_file.replace("_coords.txt", "_poly.txt")
-        poly_all_file = coords_file.replace("_coords.txt", "_poly_all.txt")
-        log.info(f"writing trace data to files: {os.path.basename(coords_file)}, {os.path.basename(poly_file)} and {os.path.basename(poly_all_file)}")
-        numpy.savetxt(coords_file, 1+numpy.asarray(table), fmt="%.5f")
-        numpy.savetxt(poly_file, 1+numpy.asarray(table_poly), fmt="%.5f")
-        numpy.savetxt(poly_all_file, 1+numpy.asarray(table_poly_all), fmt="%.5f")
+        _create_trace_regions(out_trace, table, table_poly, table_poly_all, display_plots=display_plots)
 
     # linearly interpolate coefficients at masked fibers
     log.info(f"interpolating coefficients at {bad_fibers.sum()} masked fibers")
@@ -1796,107 +1851,167 @@ def combineImages_drp(images, out_image, method="median", k="3.0"):
     combined_img.writeFitsData(out_image)
 
 
-def subtractStraylight_drp(
-    in_image,
-    in_trace,
-    out_stray,
-    out_image,
-    disp_axis="X",
-    aperture="7",
-    poly_cross="4",
-    smooth_disp="5",
-    smooth_gauss="10.0",
-    parallel="auto",
-):
+def subtract_straylight(
+    in_image: str,
+    in_cent_trace: str,
+    out_image: str,
+    out_stray: str = None,
+    select_nrows: int|Tuple[int,int] = 3,
+    aperture: int = 14,
+    smoothing: int = 20,
+    use_weights : bool = False,
+    median_box: int = 11,
+    gaussian_sigma: int = 20.0,
+    parallel: int|str = "auto",
+    plot_columns : List[int] = [500, 1500, 2000, 2500, 3500],
+    display_plots: bool = False,
+) -> Tuple[Image, Image, Image, Image]:
+    """Subtracts a diffuse background signal (stray light) from the raw data
+
+    It uses the regions between fiber to estimate the stray light signal and
+    smoothes the result by a polyon in cross-disperion direction and afterwards
+    a wide 2D Gaussian filter to reduce the introduction of low frequency
+    noise.
+
+    Parameters
+    ----------
+    in_image: str
+        Name of the FITS image from which the stray light should be subtracted
+    in_cent_trace: str
+        Name of the  FITS file with the trace mask of the fibers
+    out_image: str
+        Name of the FITS file in which the straylight subtracted image is stored
+    out_stray: str
+        Name of the FITS file in which the pure straylight image is stored
+    select_nrows: int or Tuple[int,int], optional with default: 30
+        Number of rows at the top and bottom of the CCD to be used for the stray light estimation
+    aperture: int, optional  with default: 14
+        Size of the aperture around each fiber in cross-disperion direction assumed to contain signal from fibers
+    smoothing: int, optional with default: 20
+        Smoothing parameter for the spline fit to the background signal
+    use_weights : bool, optional with default: False
+        If True, the error of the image is used as weights in the spline fitting
+    median_box: int, optional with default: 11
+        Width of the median filter used to smooth the image along the dispersion axis
+    gaussian_sigma : float, optional with default :20.0
+        Width of the 2D Gaussian filter to smooth the measured background signal
+    parallel : either int (>0) or  'auto', optional with default: 'auto'
+        Number of CPU cores used in parallel for the computation. If set to auto, the maximum number of CPUs
+    plot_columns : array of int, optional with default: [500, 1500, 2000, 2500, 3500]
+    display_plots : bool, optional with default: False
+        If True, the results are plotted and displayed
+
+    Returns
+    -------
+    img: Image
+        The original image
+    img_fit: Image
+        The polynomial fit to the background signal
+    img_smooth: Image
+        The smoothed background signal
+    img_out: Image
+        The stray light subtracted image
     """
-                Subtracts a diffuse background signal (stray light) from the raw data. It uses the regions between fiber to estimate the stray light signal and
-                smoothes the result by a polyon in cross-disperion direction and afterwards a wide 2D Gaussian filter to reduce the introduction of low frequency noise.
-
-                Parameters
-                --------------
-                image: string
-                                Name of the FITS image from which the stray light should be subtracted
-                trace: string
-                                Name of the  FITS file with the trace mask of the fibers
-                stray_image: string
-                                Name of the FITS file in which the pure straylight image is stored
-                clean_img: string
-                                Name of the FITS file in which the straylight subtracted image is stored
-                disp_axis: string of float, optional  with default: 'X'
-                                Define the dispersion axis, either 'X','x', or 0 for the  x axis or 'Y','y', or 1 for the y axis.
-                aperture: string of integer, optional  with default: '7'
-                                Size of the aperture around each fiber in cross-disperion direction assumed to contain signal from fibers
-                poly_cross: string of integer, optional with default: '4'
-                        Order of the polynomial used to interpolate the background signal in cross-dispersion direction (positiv: normal polynomial, negativ: Legandre polynomial)
-                smooth_gauss : string of float, optional with default :'10.0'
-                        Width of the 2D Gaussian filter to smooth the measured background signal
-
-                Examples
-                ----------------
-    user:> lvmdrp image subtractStrylight IMAGE.fits TRACE.fits CLEAN.fits x aperture=9 poly_cross=6 smooth_gauss=20.0
-    """
-    # convert input parameters to proper type
-    aperture = int(aperture)
-    poly_cross = int(poly_cross)
-    smooth_gauss = float(smooth_gauss)
-    smooth_disp = int(smooth_disp)
-
     # load image data
+    log.info(f"using image {os.path.basename(in_image)} for stray light subtraction")
     img = loadImage(in_image)
+    unit = img._header["BUNIT"]
 
-    # orient image so that the cross-dispersion is along the first and the dispersion is along the second array axis
-    if disp_axis == "X" or disp_axis == "x":
-        pass
-    elif disp_axis == "Y" or disp_axis == "y":
-        img.swapaxes()
+    # smooth image along dispersion axis with a median filter excluded NaN values
+    if median_box is not None:
+        log.info(f"median filtering image along dispersion axis with a median filter of width {median_box}")
+        median_box = max(1, median_box)
+        img_median = img.medianImg((1, median_box), use_mask=True)
+    else:
+        img_median = copy(img)
 
     # load trace mask
+    log.info(f"using centroids trace {os.path.basename(in_cent_trace)} to mask fibers")
     trace_mask = TraceMask()
-    trace_mask.loadFitsData(in_trace, extension_data=0)
-    # trace_mask.clipTrace(img._dim[0])
+    trace_mask.loadFitsData(in_cent_trace, extension_data=0)
 
-    # if img._mask is not None:
-    #    img._data[img._mask==1] = numpy.nan
+    # update mask
+    if img_median._mask is None:
+        img_median._mask = numpy.zeros(img_median._data.shape, dtype=bool)
+    img_median._mask = img_median._mask | numpy.isnan(img_median._data) | numpy.isinf(img_median._data) | (img_median._data == 0)
 
-    # smooth image along dispersion axis with a median filter excluded NaN values bas
-    if smooth_disp:
-        smooth_disp = max(1, smooth_disp)
-        img_median = img.medianImg((1, smooth_disp), use_mask=True)
+    # mask regions around the top and bottom of the CCD
+    if isinstance(select_nrows, int):
+        select_tnrows = select_nrows
+        select_bnrows = select_nrows
     else:
-        img_median = img
+        select_tnrows, select_bnrows = select_nrows
+    log.info(f"selecting top {select_tnrows} and bottom {select_bnrows} rows of the CCD")
+    # define indices for top/bottom fibers
+    tfiber = numpy.ceil(trace_mask._data[0]).astype(int)
+    bfiber = numpy.floor(trace_mask._data[-1]).astype(int)
+
+    for icol in range(img_median._dim[1]):
+        # mask top/bottom rows before/after first/last fiber
+        img_median._mask[tfiber[icol]:] = True
+        img_median._mask[:bfiber[icol]] = True
+        # unmask select_nrows around each region
+        img_median._mask[(tfiber[icol]+img_median._dim[0]-select_tnrows)//2:(tfiber[icol]+img_median._dim[0]+select_tnrows)//2] = False
+        img_median._mask[(bfiber[icol]-select_bnrows)//2:(bfiber[icol]+select_bnrows)//2] = False
 
     # mask regions around each fiber within a given cross-dispersion aperture
+    log.info(f"masking fibers with an aperture of {aperture} pixels")
     img_median.maskFiberTraces(trace_mask, aperture=aperture, parallel=parallel)
 
-    # fit the signal in unmaksed areas along cross-dispersion axis independently with a polynom of a given order
-    img_fit = img_median.fitPoly(order=poly_cross, plot=-1)
+    # fit the signal in unmaksed areas along cross-dispersion axis by a polynomial
+    log.info(f"fitting spline with {smoothing = } to the background signal along cross-dispersion axis")
+    img_fit = img_median.fitSpline(smoothing=smoothing, use_weights=use_weights)
 
     # smooth the results by 2D Gaussian filter of given with (cross- and dispersion axis have equal width)
-    img_smooth = img_fit.convolveGaussImg(smooth_gauss, smooth_gauss)
+    log.info(f"smoothing the background signal by a 2D Gaussian filter of width {gaussian_sigma}")
+    img_stray = img_fit.convolveGaussImg(gaussian_sigma, gaussian_sigma)
+    img_stray.setData(data=numpy.nan_to_num(img_stray._data), error=numpy.nan_to_num(img_stray._error))
 
-    # subtract smoothed background signal from origianal image
-    img = loadImage(in_image)
-
-    if disp_axis == "X" or disp_axis == "x":
-        pass
-    elif disp_axis == "Y" or disp_axis == "y":
-        img.swapaxes()
-
-    img_out = img - img_smooth
-    ##img_out = img-img_fit
-
-    # restore original orientation of image
-    if disp_axis == "X" or disp_axis == "x":
-        pass
-    elif disp_axis == "Y" or disp_axis == "y":
-        img_out.swapaxes()
-        img_smooth.swapaxes()
+    # subtract smoothed background signal from original image
+    log.info("subtracting the smoothed background signal from the original image")
+    img_out = img - img_stray
 
     # include header and write out file
+    log.info(f"writing stray light subtracted image to {os.path.basename(out_image)}")
     img_out.setHeader(header=img.getHeader())
+    img_out.setData(mask=img._mask)
     img_out.writeFitsData(out_image)
-    img_smooth.writeFitsData(out_stray)
 
+    # plot results: polyomial fitting & smoothing, both with masked regions on
+    log.info("plotting results")
+    fig, axs = create_subplots(to_display=display_plots, nrows=2, figsize=(10, 7), sharex=True, sharey=True, layout="constrained")
+    fig.suptitle(f"Stray Light Subtraction for frame {os.path.basename(in_image)}")
+    fig.supxlabel("Y (pixel)")
+    fig.supylabel(f"Counts ({unit})")
+
+    img_median._data[img_median._mask] = numpy.nan
+    img_median._error[img_median._mask] = numpy.nan
+    y_pixels = numpy.arange(img_median._data.shape[0])
+    axs[0].set_title("polynomial fit vs. data", loc="left")
+    axs[1].set_title("stray light model vs. data", loc="left")
+    plt.xlim(0, img_median._data.shape[1])
+    plt.ylim(0, numpy.nanmedian(img_median._data) + 3*numpy.nanstd(img_median._data))
+
+    colors = plt.cm.coolwarm(numpy.linspace(0, 1, img_median._data.shape[1]))
+    for icol in plot_columns:
+        axs[0].plot(y_pixels, img_fit._data[:, icol], "-", color=colors[icol], lw=1)
+        axs[0].errorbar(y_pixels, img_median._data[:, icol], yerr=img_median._error[:, icol], color=colors[icol], elinewidth=1, mew=0, ms=5, zorder=9999)
+        axs[1].plot(y_pixels, img_stray._data[:, icol], "-", color=colors[icol], lw=1)
+        axs[1].errorbar(y_pixels, img_median._data[:, icol], yerr=img_median._error[:, icol], color=colors[icol], elinewidth=1, ecolor=colors[icol], mew=0, ms=5, zorder=9999)
+    save_fig(fig, product_path=out_image, to_display=display_plots, figure_path="qa", label="straylight_model")
+
+    # write out stray light image
+    if out_stray is not None:
+        log.info(f"writing stray light image to {os.path.basename(out_stray)}")
+        hdus = pyfits.HDUList()
+        hdus.append(pyfits.PrimaryHDU(img._data, header=img._header))
+        hdus.append(pyfits.ImageHDU(img_out._data, name="CLEANED"))
+        hdus.append(pyfits.ImageHDU(img_median._data, name="MASKED"))
+        hdus.append(pyfits.ImageHDU(img_fit._data, name="SPLINE"))
+        hdus.append(pyfits.ImageHDU(img_stray._data, name="SMOOTH"))
+        hdus.writeto(out_stray, overwrite=True)
+
+    return img_median, img_fit, img_stray, img_out
 
 def traceFWHM_drp(
     in_image,
@@ -2856,6 +2971,120 @@ def testres_drp(image, trace, fwhm, flux):
     hdu = pyfits.PrimaryHDU((img._data - out) / img._data)
     hdu.writeto("res_rel.fits", overwrite=True)
 
+
+def fix_pixel_shifts(in_image, ref_image, threshold=1.15, fill_gaps=20, display_plots=False):
+    """Identify and corrects pixel shifts in dispersion direction
+
+    This task identifies pixel shifts in the dispersion direction by comparing
+    the overscan regions of the input image with a reference image. The pixel
+    shifts are corrected by rolling the image data by the amount of the shift.
+
+    Parameters
+    ----------
+    in_image : str
+        input image path
+    ref_image : str
+        reference image path
+    threshold : float, optional
+        threshold for pixel shifts, by default 1.15
+    fill_gaps : int, optional
+        width of the gaps to fill in the pixel shifts, by default 20
+    display_plots : bool, optional
+        whether to display plots, by default False
+
+    Returns
+    -------
+    numpy.ndarray
+        pixel shifts in dispersion direction
+    lvmdrp.core.image.Image
+        output image with corrected pixel shifts
+    """
+    # create output image path if not provided
+    ori_image = in_image.replace(".fits.gz", "_ori.fits.gz")
+    out_image = copy(in_image)
+
+    # load reference image
+    log.info(f"loading reference image from {os.path.basename(ref_image)}")
+    image_ref = Image()
+    image_ref.loadFitsData(ref_image)
+
+    # load input image
+    log.info(f"loading input image from {os.path.basename(in_image)}")
+    image = Image()
+    image.loadFitsData(in_image)
+    image_out = copy(image)
+
+    # get useful metadata
+    mjd, expnum, camera = image._header["MJD"], image._header["EXPOSURE"], image._header["CCD"]
+
+    sc_sections, os_sections = list(image._header["TRIMSEC?"].values()), list(image._header["BIASSEC?"].values())
+    shifts = []
+    for i, (sc_sec, os_sec) in enumerate(zip(sc_sections, os_sections)):
+        # get overscan quadrant
+        os_quad_r = image_ref.getSection(os_sec)
+        os_quad = image.getSection(os_sec)
+
+        # calculate pixels to shift and amount of shifting
+        log.info(f"calculating pixel shifts for {camera} quadrant {i+1} with OS counts ratio >{threshold}")
+        shift_mask = numpy.abs(os_quad._data / os_quad_r._data) > threshold
+        shift_pixels_raw = numpy.sum(shift_mask, axis=1)
+        log.info(f"found {(shift_pixels_raw>0).sum()} rows shifted")
+
+        # fix hair
+        hairs = (shift_pixels_raw % 2).astype(bool)
+        shift_pixels_raw[hairs] -= 1
+        shift_pixels_raw[shift_pixels_raw < 0] = 0
+        log.info(f"removing {hairs.sum()} spikes from pixel shifts")
+
+        # interpolate valleys
+        shift_pixels = _fillin_valleys(shift_pixels_raw, width=fill_gaps)
+        log.info(f"filling {(shift_pixels - shift_pixels_raw).sum()} gaps {fill_gaps} pixels wide")
+        shifts.append(shift_pixels)
+
+    # decide on the shift direction
+    shift_right = numpy.concatenate(shifts[1::2][::-1])
+    shift_left = -1*numpy.concatenate(shifts[::2][::-1])
+    if numpy.any(shift_right != 0):
+        log.info("shifting pixels to the right")
+        shift_column = shift_right
+    else:
+        log.info("shifting pixels to the left")
+        shift_column = shift_left
+
+    # correct stepdowns
+    log.info("removing stepdowns from pixel shifts")
+    shift_column = _no_stepdowns(shift_column)
+
+    # apply shifts and write output image
+    if numpy.any(shift_column != 0):
+        log.info(f"apply pixel shifts to {(shift_column>0).sum()} rows")
+        for irow in range(image._data.shape[0]):
+            image_out._data[irow] = numpy.roll(image._data[irow], shift_column[irow])
+
+        # copy original image to 'ori' file
+        log.info(f"writing original image to {os.path.basename(ori_image)}")
+        copy2(in_image, ori_image)
+
+        log.info(f"writing corrected image to {os.path.basename(out_image)}")
+        image_out.writeFitsData(out_image)
+    else:
+        log.info("no pixel shifts detected, no correction applied")
+
+    # display plots if requested
+    if display_plots and numpy.any(shift_column != 0):
+        log.info("plotting results")
+        fig, ax = plt.subplots(figsize=(15,7), sharex=True, layout="constrained")
+        ax.set_title(f"{mjd = } - {expnum = } - {camera = }", loc="left")
+        y_pixels = numpy.arange(shift_column.size)
+        ax.step(y_pixels, shift_column, where="mid", lw=1)
+        ax.set_xlabel("Y (pixel)")
+        ax.set_ylabel("Shift (pixel)")
+        plot_image_shift(ax, image._data, shift_column, cmap="Reds")
+        axis = plot_image_shift(ax, image_out._data, shift_column, cmap="Blues", pos=(0.14,1.0-0.32))
+        plt.setp(axis, yticklabels=[], ylabel="")
+
+    return shift_column, image_out
+
 # TODO: for arcs take short exposures for bright lines & long exposures for faint lines
 # TODO: Argon: 10s + 300s
 # TODO: Neon: 10s + 300s
@@ -2877,6 +3106,7 @@ def preproc_raw_frame(
     rdnoise_prefix: str = "RDNOISE",
     subtract_overscan: bool = True,
     overscan_stat: str = "biweight",
+    overscan_threshold: float = 3.0,
     overscan_model: str = "spline",
     replace_with_nan: bool = True,
     display_plots: bool = False,
@@ -2920,6 +3150,8 @@ def preproc_raw_frame(
         whether to subtract the overscan for each quadrant or not, by default True
     overscan_stat : str, optional
         statistics to use when coadding pixels along the X axis, by default "biweight"
+    overscan_threshold : float, optional
+        number of standard deviations to reject pixels in overscan, by default 3.0
     overscan_model : str, optional
         model used to fit the overscan profile of each quadrant, by default "spline"
     replace_with_nan : bool, optional
@@ -2960,24 +3192,24 @@ def preproc_raw_frame(
     # extract TRIMSEC or assume default value
     if assume_trimsec:
         log.info(f"using given TRIMSEC = {assume_trimsec}")
-        sc_sec = [sec for sec in assume_trimsec]
+        sc_sections = [sec for sec in assume_trimsec]
     elif not org_header["TRIMSEC?"]:
         log.warning(f"assuming TRIMSEC = {DEFAULT_TRIMSEC}")
-        sc_sec = DEFAULT_TRIMSEC
+        sc_sections = DEFAULT_TRIMSEC
     else:
-        sc_sec = list(org_header["TRIMSEC?"].values())
-        log.info(f"using header TRIMSEC = {sc_sec}")
+        sc_sections = list(org_header["TRIMSEC?"].values())
+        log.info(f"using header TRIMSEC = {sc_sections}")
 
     # extract BIASSEC or assume default value
     if assume_biassec:
         log.info(f"using given BIASSEC = {assume_biassec}")
-        os_sec = [sec for sec in assume_biassec]
+        os_sections = [sec for sec in assume_biassec]
     elif not org_header["BIASSEC?"]:
         log.warning(f"assuming BIASSEC = {DEFAULT_BIASSEC}")
-        os_sec = DEFAULT_BIASSEC
+        os_sections = DEFAULT_BIASSEC
     else:
-        os_sec = list(org_header["BIASSEC?"].values())
-        log.info(f"using header BIASSEC = {os_sec}")
+        os_sections = list(org_header["BIASSEC?"].values())
+        log.info(f"using header BIASSEC = {os_sections}")
 
     # extract gain
     gain = numpy.ones(NQUADS)
@@ -2995,53 +3227,42 @@ def preproc_raw_frame(
     sc_quads, os_quads = [], []
     os_profiles, os_models = [], []
     # process each quadrant
-    for i, (sc_xy, os_xy) in enumerate(zip(sc_sec, os_sec)):
+    for i, (sc_xy, os_xy) in enumerate(zip(sc_sections, os_sections)):
         # get overscan and science quadrant & convert to electron
         sc_quad = org_img.getSection(section=sc_xy)
         os_quad = org_img.getSection(section=os_xy)
-        # compute overscan stats
-        os_bias_med[i] = numpy.nanmedian(os_quad._data, axis=None)
-        os_bias_std[i] = numpy.nanmedian(numpy.std(os_quad._data, axis=1), axis=None)
-        log.info(
-            f"median and standard deviation in OS quadrant {i+1}: "
-            f"{os_bias_med[i]:.2f} +/- {os_bias_std[i]:.2f} (ADU)"
-        )
         # subtract overscan bias from image if requested
         if subtract_overscan:
-            if overscan_stat == "biweight":
-                os_stat = biweight_location
-            elif overscan_stat == "median":
-                os_stat = numpy.nanmedian
-            else:
-                log.warning(
-                    f"overscan statistic '{overscan_stat}' not implemented, "
-                    "falling back to 'biweight'"
-                )
-                os_stat = biweight_location
-
             if overscan_model not in ["const", "poly", "spline"]:
                 log.warning(
                     f"overscan model '{overscan_model}' not implemented, "
                     "falling back to 'spline'"
                 )
                 overscan_model = "spline"
-            if overscan_model == "const":
-                os_profile, os_model = _model_overscan(
-                    os_quad, axis=1, stat=os_stat, model="const"
-                )
             if overscan_model == "spline":
-                os_profile, os_model = _model_overscan(
-                    os_quad, axis=1, stat=os_stat, nknots=300
-                )
+                os_kwargs = {"nknots": 300}
             elif overscan_model == "poly":
-                os_profile, os_model = _model_overscan(
-                    os_quad, axis=1, stat=os_stat, model="poly", deg=9
-                )
+                os_kwargs = {"deg": 9}
+
+            os_data, os_profile, os_model = _model_overscan(os_quad, axis=1, overscan_stat=overscan_stat, threshold=overscan_threshold, **os_kwargs)
+            os_quad._data = os_data
+
+            if numpy.isnan(os_data).any():
+                os_nmask = numpy.isnan(os_data).sum()
+                log.info(f"masked {os_nmask} ({os_nmask/os_data.size*100:.2f}%) pixels in overscan above {overscan_threshold} standard deviations")
 
             sc_quad = sc_quad - os_model
 
             os_profiles.append(os_profile)
             os_models.append(os_model)
+
+        # compute overscan stats
+        os_bias_med[i] = numpy.nanmedian(os_quad._data, axis=None)
+        os_bias_std[i] = numpy.nanmedian(numpy.nanstd(os_quad._data, axis=1), axis=None)
+        log.info(
+            f"median and standard deviation in OS quadrant {i+1}: "
+            f"{os_bias_med[i]:.2f} +/- {os_bias_std[i]:.2f} (ADU)"
+        )
 
         sc_quads.append(sc_quad)
         os_quads.append(os_quad)
@@ -3170,7 +3391,7 @@ def preproc_raw_frame(
             sg_stat=lambda x, axis: numpy.nanmedian(numpy.std(x, axis=axis)),
             labels=True,
         )
-        os_x, os_y = _parse_ccd_section(list(os_sec)[0])
+        os_x, os_y = _parse_ccd_section(list(os_sections)[0])
         axs[i].axvline(os_x[1] - os_x[0], ls="--", color="0.5", lw=1)
         axs[i].set_title(f"overscan for quadrants {['12','34'][i]}", loc="left")
     save_fig(
@@ -3203,9 +3424,10 @@ def preproc_raw_frame(
             ax=axs[i],
             mu_stat=numpy.nanmedian,
             sg_stat=lambda x, axis: numpy.nanmedian(numpy.std(x, axis=axis)),
+            show_individuals=True,
             labels=True,
         )
-        os_x, os_y = _parse_ccd_section(list(os_sec)[0])
+        os_x, os_y = _parse_ccd_section(list(os_sections)[0])
         axs[i].axvline(os_y[1] - os_y[0], ls="--", color="0.5", lw=1)
         axs[i].set_title(f"overscan for quadrants {['13','24'][i]}", loc="left")
     save_fig(
@@ -3914,10 +4136,12 @@ def create_pixelmask(in_short_dark, in_long_dark, out_pixmask, in_flat_a=None, i
 
 def trace_fibers(
     in_image: str,
-    out_trace_amp: str,
     out_trace_cent: str,
-    out_trace_fwhm: str,
+    out_trace_amp: str = None,
+    out_trace_fwhm: str = None,
     out_trace_cent_guess: str = None,
+    out_model: str = None,
+    out_ratio: str = None,
     correct_ref: bool = False,
     median_box: tuple = (1, 10),
     coadd: int = 5,
@@ -3932,7 +4156,8 @@ def trace_fibers(
     fit_poly: bool = False,
     poly_deg: int | Tuple[int] = 6,
     interpolate_missing: bool = True,
-    display_plots: bool = True
+    only_centroids: bool = False,
+    display_plots: bool = False
 ) -> Tuple[TraceMask, TraceMask, TraceMask]:
     """Trace fibers in a given image
 
@@ -3970,12 +4195,12 @@ def trace_fibers(
     ----------
     in_image : str
         path to input image
-    out_trace_amp : str
-        path to output amplitude trace
     out_trace_cent : str
         path to output centroid trace
-    out_trace_fwhm : str
-        path to output FWHM trace
+    out_trace_amp : str, optional
+        path to output amplitude trace, by default None
+    out_trace_fwhm : str, optional
+        path to output FWHM trace, by default None
     out_trace_cent_guess : str, optional
         path to output centroid guess trace, by default None
     correct_ref : bool, optional
@@ -4006,6 +4231,8 @@ def trace_fibers(
         degree of polynomial(s) to use when fitting amplitude, centroid and FWHM, by default 6
     intrpolate_missing : bool, optional
         whether to interpolate bad/missing fibers, by default True
+    only_centroids : bool, optional
+        whether to only trace centroids, by default False
     display_plots : bool, optional
         whether to show plots on display or not, by default True
 
@@ -4093,7 +4320,7 @@ def trace_fibers(
     fibers = ref_cent.size
     dim = img.getDim()
     centroids = TraceMask()
-    centroids.createEmpty(data_dim=(fibers, dim[1]), mask_dim=(fibers, dim[1]))
+    centroids.createEmpty(data_dim=(fibers, dim[1]))
     centroids.setFibers(fibers)
     centroids._good_fibers = good_fibers
     centroids.setHeader(img._header.copy())
@@ -4143,15 +4370,45 @@ def trace_fibers(
 
         centroids.setSlice(icolumn, axis="y", data=cen_slice, mask=msk_slice)
 
-    # smooth all trace by a polynomial
-    log.info(f"fitting centroid guess trace with {deg_cent}-deg polynomial")
-    centroids.fit_polynomial(deg_cent, poly_kind="poly")
-    # set bad fibers in trace mask
-    centroids._mask[bad_fibers] = True
+    if fit_poly:
+        # smooth all trace by a polynomial
+        log.info(f"fitting centroid guess trace with {deg_cent}-deg polynomial")
+        centroids.fit_polynomial(deg_cent, poly_kind="poly")
 
-    # linearly interpolate coefficients at masked fibers
-    log.info(f"interpolating coefficients at {bad_fibers.sum()} masked fibers")
-    centroids.interpolate_coeffs()
+        # set bad fibers in trace mask
+        centroids._mask[bad_fibers] = True
+        # linearly interpolate coefficients at masked fibers
+        log.info(f"interpolating coefficients at {bad_fibers.sum()} masked fibers")
+        centroids.interpolate_coeffs()
+    else:
+        log.info("interpolating centroid guess trace")
+        centroids.interpolate_data(axis="X")
+
+        # set bad fibers in trace mask
+        centroids._mask[bad_fibers] = True
+        log.info(f"interpolating data at {bad_fibers.sum()} masked fibers")
+        centroids.interpolate_data(axis="Y")
+
+    # write centroid if requested
+    if only_centroids:
+        log.info(f"writing centroid trace to '{os.path.basename(out_trace_cent)}'")
+        centroids.writeFitsData(out_trace_cent)
+        return centroids, img
+
+    if out_trace_fwhm is None or out_trace_amp is None:
+        raise ValueError("missing output trace for amplitude and/or FWHM")
+
+    # initialize flux and FWHM traces
+    trace_cent = TraceMask()
+    trace_cent.createEmpty(data_dim=(fibers, dim[1]))
+    trace_cent.setFibers(fibers)
+    trace_cent._good_fibers = good_fibers
+    trace_cent.setHeader(img._header.copy())
+    trace_amp = copy(trace_cent)
+    trace_fwhm = copy(trace_cent)
+    trace_cent._header["IMAGETYP"] = "trace_centroid"
+    trace_amp._header["IMAGETYP"] = "trace_amplitude"
+    trace_fwhm._header["IMAGETYP"] = "trace_fwhm"
 
     # select columns to fit for amplitudes, centroids and FWHMs per fiber block
     step = img._dim[1] // ncolumns_full
@@ -4258,13 +4515,18 @@ def trace_fibers(
             cent_trace.setSlice(icolumn, axis="y", data=cent_slice, mask=cent_mask)
             trace_fwhm.setSlice(icolumn, axis="y", data=fwhm_slice, mask=fwhm_mask)
 
+        # compute model column
+        mod_slice = mod_joint(img_slice._pixels)
+
         # compute residuals
-        integral_mod = numpy.trapz(mod_joint(img_slice._pixels), img_slice._pixels) or numpy.nan
-        integral_dat = numpy.trapz(img_slice._data, img_slice._pixels)
+        integral_mod = numpy.trapz(mod_slice, img_slice._pixels)
+        integral_mod = integral_mod if integral_mod != 0 else numpy.nan
+        # NOTE: this is a hack to avoid integrating the whole column when tracing a few blocks
+        integral_dat = numpy.trapz(img_slice._data * (mod_slice>0), img_slice._pixels)
         residuals.append((integral_dat - integral_mod) / integral_dat * 100)
 
         # compute fitted model stats
-        chisq_red = bn.nansum((mod_joint(img_slice._pixels) - img_slice._data)[~img_slice._mask]**2 / img_slice._error[~img_slice._mask]**2) / (img._dim[0] - 1 - 3)
+        chisq_red = bn.nansum((mod_slice - img_slice._data)[~img_slice._mask]**2 / img_slice._error[~img_slice._mask]**2) / (img._dim[0] - 1 - 3)
         log.info(f"joint model {chisq_red = :.2f}")
         if amp_mask.all() or cent_mask.all() or fwhm_mask.all():
             continue
@@ -4278,11 +4540,17 @@ def trace_fibers(
     # smooth all trace by a polynomial
     if fit_poly:
         log.info(f"fitting peak trace with {deg_amp}-deg polynomial")
-        trace_amp.fit_polynomial(deg_amp, poly_kind="poly")
+        table_data, table_poly, table_poly_all = trace_amp.fit_polynomial(deg_amp, poly_kind="poly")
+        _create_trace_regions(out_trace_amp, table_data, table_poly, table_poly_all, display_plots=display_plots)
+
         log.info(f"fitting centroid trace with {deg_cent}-deg polynomial")
-        cent_trace.fit_polynomial(deg_cent, poly_kind="poly")
+        table_data, table_poly, table_poly_all = trace_cent.fit_polynomial(deg_cent, poly_kind="poly")
+        _create_trace_regions(out_trace_cent, table_data, table_poly, table_poly_all, display_plots=display_plots)
+
         log.info(f"fitting FWHM trace with {deg_fwhm}-deg polynomial")
-        trace_fwhm.fit_polynomial(deg_fwhm, poly_kind="poly")
+        table_data, table_poly, table_poly_all = trace_fwhm.fit_polynomial(deg_fwhm, poly_kind="poly")
+        _create_trace_regions(out_trace_fwhm, table_data, table_poly, table_poly_all, display_plots=display_plots)
+
         # set bad fibers in trace mask
         trace_amp._mask[bad_fibers] = True
         cent_trace._mask[bad_fibers] = True
@@ -4306,10 +4574,19 @@ def trace_fibers(
         trace_fwhm._mask[bad_fibers] = True
 
         if interpolate_missing:
-            log.info("interpolating bad fibers")
+            log.info(f"interpolating data at {bad_fibers.sum()} masked fibers")
             trace_amp.interpolate_data(axis="Y")
             cent_trace.interpolate_data(axis="Y")
             trace_fwhm.interpolate_data(axis="Y")
+
+    # evaluate model image
+    if out_model is not None and out_ratio is not None:
+        log.info("evaluating model image")
+        model, mratio = _eval_continuum_model(img, trace_amp, trace_cent, trace_fwhm)
+        model.writeFitsData(out_model)
+        mratio.writeFitsData(out_ratio)
+    else:
+        model, mratio = None, None
 
     # write output traces
     log.info(f"writing amplitude trace to '{os.path.basename(out_trace_amp)}'")
@@ -4347,20 +4624,19 @@ def trace_fibers(
     fig.supylabel("residuals (%)")
     fig.supxlabel("Y (pixel)")
 
-    colors = plt.cm.coolwarm(numpy.linspace(0, 1, len(columns)))
+    colors = plt.cm.Spectral(numpy.linspace(0, 1, len(columns)))
     idx = numpy.argsort(columns)
+    img_ = copy(img)
     for i in idx:
         icolumn = columns[i]
 
+        img_slice = img_.getSlice(icolumn, axis="y")
         joint_mod = mod_columns[i](img_slice._pixels)
-
-        img_slice = img.getSlice(icolumn, axis="y")
         img_slice._data[(img_slice._mask)|(joint_mod<=0)] = numpy.nan
 
-        # weights = img_slice._data / bn.nansum(img_slice._data)
+        weights = img_slice._data / bn.nansum(img_slice._data) * 500
         residuals = (joint_mod - img_slice._data) / img_slice._data * 100
-        # residuals *= weights
-        ax.plot(img_slice._pixels, residuals, ".", ms=2, mew=0, mfc=colors[i])
+        ax.scatter(img_slice._pixels, residuals, s=weights, lw=0, color=colors[i])
         ax.set_ylim(-50, 50)
     save_fig(
         fig,
@@ -4370,4 +4646,4 @@ def trace_fibers(
         label="residuals_columns"
     )
 
-    return centroids, cent_trace, trace_amp, trace_fwhm
+    return centroids, trace_cent, trace_amp, trace_fwhm, img, model, mratio

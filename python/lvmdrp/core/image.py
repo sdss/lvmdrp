@@ -1,6 +1,8 @@
 from copy import deepcopy as copy
 from multiprocessing import Pool, cpu_count
+import warnings
 
+from functools import partial
 from typing import List
 
 import numpy
@@ -8,7 +10,7 @@ import bottleneck as bn
 from astropy.table import Table
 from astropy.io import fits as pyfits
 from astropy.modeling import fitting, models
-from astropy.stats.biweight import biweight_location
+from astropy.stats.biweight import biweight_location, biweight_scale
 from astropy.visualization import simple_norm
 from scipy import ndimage, signal
 from scipy import interpolate
@@ -30,7 +32,18 @@ def _parse_ccd_section(section):
     return slice_x, slice_y
 
 
-def _model_overscan(os_quad, axis=1, stat=biweight_location, model="spline", **kwargs):
+def _zscore(x, axis=1):
+    """computes the zscore of a given array along a given axis"""
+    if axis == 0:
+        zscore = (x - biweight_location(x, axis=axis, ignore_nan=True)[None, :]) / biweight_scale(x, axis=axis, ignore_nan=True)[None, :]
+    elif axis == 1:
+        zscore = (x - biweight_location(x, axis=axis, ignore_nan=True)[:, None]) / biweight_scale(x, axis=axis, ignore_nan=True)[:, None]
+    else:
+        raise ValueError("axis must be 0 or 1")
+    return zscore
+
+
+def _model_overscan(os_quad, axis=1, overscan_stat="biweight", threshold=None, model="spline", **kwargs):
     """fits a parametric model to the given overscan region
 
     Given an overscan section corresponding to a quadrant in a raw frame, this function
@@ -41,6 +54,9 @@ def _model_overscan(os_quad, axis=1, stat=biweight_location, model="spline", **k
         * polynomial: a polynomial model fitted on `os_profile`
         * spline: a cubic-spline fitting on `os_profile`
 
+    if `threshold` is given, pixels in the overscan region will be masked if
+    above `threshold` standard deviations from the mean.
+
     Additional keyword parameters are passed to the fitted model.
 
     Parameters
@@ -49,8 +65,10 @@ def _model_overscan(os_quad, axis=1, stat=biweight_location, model="spline", **k
         image section corresponding to a overscan quadrant
     axis : int, optional
         axis along which the overscan will be fitted, by default 1
-    stat : function, optional
-        function to use for coadding pixels along `axis`, by default biweight_location
+    overscan_stat : str, optional
+        function name to use for coadding pixels along `axis`, by default "biweight"
+    threshold : float, optional
+        threshold to mask columns in the overscan region, by default None
     model : str, optional
         parametric function to fit ("const", "profile", "poly", "spline"), by default "spline"
 
@@ -63,7 +81,30 @@ def _model_overscan(os_quad, axis=1, stat=biweight_location, model="spline", **k
     """
     assert axis == 0 or axis == 1
 
-    os_profile = stat(os_quad._data, axis=axis)
+    if overscan_stat == "biweight":
+        stat = partial(biweight_location, ignore_nan=True)
+    elif overscan_stat == "median":
+        stat = numpy.nanmedian
+    else:
+        warnings.warn(
+            f"overscan statistic '{overscan_stat}' not implemented, "
+            "falling back to 'biweight'"
+        )
+        stat = partial(biweight_location, ignore_nan=True)
+
+    if threshold is not None:
+        os_data = os_quad._data
+        os_zscore = _zscore(os_data, axis=1)
+        mask = numpy.abs(os_zscore) > threshold
+        # reject the whole column if more than 30% of the pixels are masked
+        mask_columns = mask.sum(axis=0) > 0.3 * os_data.shape[0]
+        if mask_columns.any():
+            mask[:, mask_columns] = True
+        os_data[mask] = numpy.nan
+    else:
+        os_data = os_quad._data
+
+    os_profile = stat(os_data, axis=axis)
     pixels = numpy.arange(os_profile.size)
     if model == "const":
         os_model = numpy.ones_like(pixels) * stat(os_profile)
@@ -91,7 +132,7 @@ def _model_overscan(os_quad, axis=1, stat=biweight_location, model="spline", **k
     elif axis == 0:
         os_model = os_model[None, :]
 
-    return os_profile, os_model
+    return os_data, os_profile, os_model
 
 
 def _percentile_normalize(images, pct=75):
@@ -169,6 +210,67 @@ def _bg_subtraction(images, quad_sections, bg_sections):
     images_bgcorr.mask = images.mask | numpy.isnan(images_bgcorr)
 
     return images_bgcorr, bg_images_med, bg_images_std, bg_sections
+
+
+def _fillin_valleys(data, width=18):
+    """fills in valleys in the data array
+
+    Parameters
+    ----------
+    data : array_like
+        1-dimensional array of data
+    width : int, optional
+        width of the valley to fill, by default 18
+
+    Returns
+    -------
+    array_like
+        1-dimensional array with filled valleys
+    """
+    data_out = copy(data)
+    top = data[0]
+    for i in range(data.size):
+        if data[i] > top:
+            top = data[i]
+        if data[i] == top:
+            continue
+        if data[i] < top:
+            j_ini = i
+        j_fin = j_ini
+        for j in range(j_ini, data.size):
+            if data[j] < top:
+                continue
+            if data[j] == top:
+                j_fin = j
+                break
+        if j_fin - j_ini < width:
+            data_out[j_ini:j_fin] = top
+    return data_out
+
+
+def _no_stepdowns(data):
+    """Removes stepdowns in the data array
+
+    Parameters
+    ----------
+    data : array_like
+        1-dimensional array of data
+
+    Returns
+    -------
+    array_like
+        1-dimensional array with stepdowns removed
+    """
+    data_out = copy(data)
+    top = data[0]
+    for i in range(data.size):
+        if data[i] > top:
+            top = data[i]
+        if data[i] == top:
+            continue
+        if data[i] < top:
+            data_out[i] = top
+    return data_out
 
 
 class Image(Header):
@@ -336,8 +438,7 @@ class Image(Header):
             if self._error is not None and other._error is not None:
                 new_error = numpy.sqrt(
                     (self._error / other._data) ** 2
-                    + (self._data * other._error / other._data**2) ** 2
-                )
+                    + ((self._data / other._data) * (other._error / other._data**2)) ** 2)
                 img.setData(error=new_error)
             else:
                 img.setData(error=self._error)
@@ -1519,7 +1620,9 @@ class Image(Header):
             median filtered image
         """
         if self._mask is None and use_mask:
-            new_data = ndimage.median_filter(self._data, size, mode=mode)
+            new_data = copy(self._data)
+            new_data[self._mask] = numpy.nan
+            new_data = ndimage.median_filter(new_data, size, mode=mode)
             new_mask = None
             new_error = None
             if propagate_error and self._error is not None:
@@ -1698,6 +1801,102 @@ class Image(Header):
 
         new_img = copy(self)
         new_img.setData(data=fit_result, mask=new_mask)
+        return new_img
+
+    def fitSpline(self, axis="y", degree=3, smoothing=0, use_weights=False):
+        """Fits a spline to the image along a given axis
+
+        Parameters
+        ----------
+        axis : string or int
+            Define the axis along which the spline fit is performed either 'X', 'x', or 0 for the
+            x axis or 'Y',' y', or 1 for the y axis.
+        degree : int, optional
+            degree of the spline fit, by default 3
+        smoothing : float, optional
+            smoothing factor for the spline fit, by default 0
+        use_weights : bool, optional
+            whether to use the inverse variance as weights for the spline fit or not, by default False
+
+        Returns
+        -------
+        lvmdrp.core.image.Image
+            An Image object containing the spline modelled data
+        """
+        # match orientation of the image
+        if axis == "y" or axis == "Y" or axis == 0:
+            pass
+        else:
+            self.swapaxes()
+
+        pixels = numpy.arange(self._dim[0])
+        models = []
+        for i in range(self._dim[1]):
+            good_pix = ~self._mask[:,i] if self._mask is not None else numpy.isnan(self._data[:,i])
+
+            # skip column if all pixels are masked
+            if good_pix.sum() == 0:
+                warnings.warn(f"Skipping column {i} due to all pixels being masked", RuntimeWarning)
+                models.append(numpy.zeros(self._dim[0]))
+                continue
+
+            # define spline fitting parameters
+            masked_pixels = pixels[good_pix]
+            data = self._data[good_pix, i]
+            vars = self._error[good_pix, i] ** 2
+
+            # group pixels into continuous segments
+            groups, indices = [], []
+            for j in range(len(masked_pixels)-1):
+                delta = masked_pixels[j+1] - masked_pixels[j]
+                if delta > 1:
+                    if len(indices) > 0:
+                        indices.append(j)
+                        groups.append(indices)
+                        indices = []
+                    continue
+                elif j == len(masked_pixels)-2:
+                    indices.append(j+1)
+                    groups.append(indices)
+                else:
+                    indices.append(j)
+
+            if len(groups) <= degree+1:
+                warnings.warn(f"Skipping column {i} due to insufficient data for spline fit", RuntimeWarning)
+                models.append(numpy.zeros(self._dim[0]))
+                continue
+
+            # collapse groups into single pixel
+            new_masked_pixels, new_data, new_vars = [], [], []
+            for group in groups:
+                new_masked_pixels.append(numpy.mean(masked_pixels[group]))
+                new_data.append(numpy.median(data[group]))
+                new_vars.append(numpy.mean(vars[group]))
+            masked_pixels = numpy.asarray(new_masked_pixels)
+            data = numpy.asarray(new_data)
+            vars = numpy.asarray(new_vars)
+
+            # fit spline
+            if use_weights:
+                weights = numpy.divide(1, vars, out=numpy.zeros_like(vars), where=vars!=0)
+                spline_pars = interpolate.splrep(masked_pixels, data, w=weights, s=smoothing)
+            else:
+                spline_pars = interpolate.splrep(masked_pixels, data, s=smoothing)
+            model = interpolate.splev(pixels, spline_pars)
+            models.append(model)
+
+        # reconstruct the model image
+        models = numpy.asarray(models).T
+
+        # match orientation of the output array
+        if axis == "y" or axis == "Y" or axis == 0:
+            pass
+        else:
+            models = models.T
+            self.swapaxes()
+
+        new_img = copy(self)
+        new_img.setData(data=models)
         return new_img
 
     def traceFWHM(

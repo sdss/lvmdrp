@@ -543,8 +543,8 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
     )
 
     # create plot of polynomial fittings
-    fig = plt.figure(figsize=(16, 10), tight_layout=True)
-    gs = gridspec.GridSpec(10, max(poly_disp + 1, poly_fwhm + 1))
+    fig = plt.figure(figsize=(16, 10), layout="constrained")
+    gs = gridspec.GridSpec(10, max(poly_disp + 1, poly_fwhm + 1), figure=fig)
 
     ax_spec = fig.add_subplot(gs[:3, :])
     ax_spec.tick_params(labelbottom=False)
@@ -673,7 +673,6 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
         color="tab:red",
     )
 
-    fig.tight_layout()
     save_fig(fig, product_path=out_wave, to_display=display_plots, figure_path='qa', label="fit_wave")
 
 

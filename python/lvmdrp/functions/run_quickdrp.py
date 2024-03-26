@@ -109,6 +109,7 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
         rsci_path = path.full("lvm_raw", camspec=sci_camera, **sci)
         psci_path = path.full("lvm_anc", drpver=drpver, kind="p", imagetype=sci["imagetyp"], **sci)
         dsci_path = path.full("lvm_anc", drpver=drpver, kind="d", imagetype=sci["imagetyp"], **sci)
+        lsci_path = path.full("lvm_anc", drpver=drpver, kind="l", imagetype=sci["imagetyp"], **sci)
         xsci_path = path.full("lvm_anc", drpver=drpver, kind="x", imagetype=sci["imagetyp"], **sci)
         wsci_path = path.full("lvm_anc", drpver=drpver, kind="w", imagetype=sci["imagetyp"], **sci)
         fsci_path = path.full("lvm_anc", drpver=drpver, kind="f", imagetype=sci["imagetyp"], **sci)
@@ -140,7 +141,7 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
             # macorr_path = os.path.join(masters_path, f"lvm-apercorr-{sci_camera}.fits")
             mwave_path = os.path.join(masters_path, f"lvm-mwave_{lamps}-{sci_camera}.fits")
             mlsf_path = os.path.join(masters_path, f"lvm-mlsf_{lamps}-{sci_camera}.fits")
-            mflat_path = os.path.join(masters_path, f"lvm-mfiberflat_twilight-{sci_camera}.fits")
+            mflat_path = os.path.join(masters_path, f"lvm-mfiberflat_twilight_single-{sci_camera}.fits")
             if not os.path.isfile(mflat_path):
                 mflat_path = os.path.join(masters_path, f"lvm-mfiberflat-{sci_camera}.fits")
         else:

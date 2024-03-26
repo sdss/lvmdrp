@@ -16,7 +16,7 @@ from lvmdrp.functions.skyMethod import configureSkyModel_drp
 from lvmdrp.utils.metadata import get_frames_metadata, get_master_metadata
 
 from lvmdrp.functions.run_quickdrp import quick_science_reduction
-from lvmdrp.functions.run_twilights import reduce_twilight_sequence
+from lvmdrp.functions.run_twilights import reduce_twilight_sequence, MASK_BANDS
 
 
 class IntRangeType(click.ParamType):
@@ -25,7 +25,10 @@ class IntRangeType(click.ParamType):
     def convert(self, value, param, ctx):
         try:
             # Split the input value by commas
-            parts = value.split(',')
+            if isinstance(value, str):
+                parts = value.split(',')
+            else:
+                parts = value
 
             if len(parts) == 1:
                 # If only one part, treat it as a single integer
@@ -34,8 +37,8 @@ class IntRangeType(click.ParamType):
                 # If two parts, treat them as initial and final values for a range
                 start, end = map(int, parts)
                 return list(range(start, end + 1))
-            else:
-                self.fail(f'{value} is not a valid input', param, ctx)
+
+            self.fail(f'{value} is not a valid input', param, ctx)
 
         except ValueError:
             self.fail(f'{value} is not a valid input', param, ctx)
@@ -47,14 +50,16 @@ class WaveRange(click.ParamType):
     def convert(self, value, param, ctx):
         try:
             # Split the input value by commas
-            waves = value.split(',')
+            if isinstance(value, str):
+                waves = value.split(',')
+            else:
+                waves = value
 
             if len(waves) == 2:
                 # Only if two parts, treat them as initial and final values for a range
-                iwave, fwave = map(float, waves)
-                return iwave, fwave
-            else:
-                self.fail(f'{value} is not a valid input', param, ctx)
+                return tuple(map(float, waves))
+
+            self.fail(f'{value} is not a valid input', param, ctx)
 
         except ValueError:
             self.fail(f'{value} is not a valid input', param, ctx)
@@ -180,13 +185,14 @@ cli.add_command(quick_reduction)
 @cloup.option_group(
     'Channel masks',
     'Options for masking wavelength ranges for each spectrograph channel',
-    cloup.option('--b-mask', type=WaveRange(), multiple=True, help='the wavelength ranges to mask for b channel'),
-    cloup.option('--r-mask', type=WaveRange(), multiple=True, help='the wavelength ranges to mask for r channel'),
-    cloup.option('--z-mask', type=WaveRange(), multiple=True, help='the wavelength ranges to mask for z channel')
+    cloup.option('--b-mask', type=WaveRange(), default=MASK_BANDS["b"], multiple=True, help='the wavelength ranges to mask for b channel'),
+    cloup.option('--r-mask', type=WaveRange(), default=MASK_BANDS["r"], multiple=True, help='the wavelength ranges to mask for r channel'),
+    cloup.option('--z-mask', type=WaveRange(), default=MASK_BANDS["z"], multiple=True, help='the wavelength ranges to mask for z channel')
 )
+@click.option('-s', '--skip-done', is_flag=True, default=False, help='Flag to skip reduction steps that have already been done')
 @click.option('-d', '--display-plots', is_flag=True, default=False, help='Flag to display the plots')
 def twilight_reduction(expnums: list, median_box: int, niter: int, threshold: Tuple[float,float],
-                       nknots: int, b_mask: list, r_mask: list, z_mask: list,
+                       nknots: int, b_mask: list, r_mask: list, z_mask: list, skip_done: bool,
                        display_plots: bool) -> None:
     """ Run the twilight sequence reduction """
     # parse multiple exposure number lists into a single list
@@ -200,6 +206,7 @@ def twilight_reduction(expnums: list, median_box: int, niter: int, threshold: Tu
         b_mask=b_mask,
         r_mask=r_mask,
         z_mask=z_mask,
+        skip_done=skip_done,
         display_plots=display_plots)
 
 
