@@ -343,12 +343,11 @@ def _load_or_create_store(tileid=None, mjd=None, kind="raw", mode="a"):
     )
 
     stores = []
+    log.info(f"loading/creating metadata store with parameters {tileid = }, {mjd = } and {kind = }")
     for metadata_path in metadata_paths:
         # create the directory if needed
         metadata_path.parent.mkdir(parents=True, exist_ok=True)
 
-        msg = "loading" if metadata_path.exists() else "creating"
-        log.info(f"{msg} metadata store at {metadata_path}")
         stores.append(h5py.File(metadata_path, mode=mode))
 
     return stores
@@ -898,7 +897,6 @@ def get_metadata(
 
         # extract metadata as dataframe
         metadata = pd.DataFrame(dataset[()])
-        log.info(f"found {len(metadata)} frames in store '{store.file.filename}'")
 
         # close store
         store.close()
@@ -906,35 +904,32 @@ def get_metadata(
         # convert bytes to literal strings
         metadata = _decode_string(metadata)
 
-        # filter by exposure number, spectrograph and/or camera
-        # NOTE: we don't filter by tileid or mjd because we already done it when loading the stores
-        metadata = _filter_metadata(
-            metadata=metadata,
-            hemi=hemi,
-            imagetyp=imagetyp,
-            spec=spec,
-            camera=camera,
-            expnum=expnum,
-            exptime=exptime,
-            neon=neon,
-            hgne=hgne,
-            krypton=krypton,
-            xenon=xenon,
-            argon=argon,
-            ldls=ldls,
-            quartz=quartz,
-            quality=quality,
-            stage=stage,
-            status=status,
-            drpqual=drpqual,
-        )
-        log.info(f"number of frames after filtering {len(metadata)}")
-
         metadatas.append(metadata)
 
     metadata = pd.concat(metadatas, axis="index", ignore_index=True)
-
-    log.info(f"total number of frames found {len(metadata)}")
+    log.info(f"found {len(metadata)} frames in stores")
+    # filter by exposure number, spectrograph and/or camera
+    metadata = _filter_metadata(
+        metadata=metadata,
+        hemi=hemi,
+        imagetyp=imagetyp,
+        spec=spec,
+        camera=camera,
+        expnum=expnum,
+        exptime=exptime,
+        neon=neon,
+        hgne=hgne,
+        krypton=krypton,
+        xenon=xenon,
+        argon=argon,
+        ldls=ldls,
+        quartz=quartz,
+        quality=quality,
+        stage=stage,
+        status=status,
+        drpqual=drpqual,
+    )
+    log.info(f"number of frames after filtering {len(metadata)}")
 
     return metadata
 
