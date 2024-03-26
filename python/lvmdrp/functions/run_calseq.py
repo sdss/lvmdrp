@@ -796,8 +796,12 @@ def create_wavelengths(mjds, target_mjd=None, expnums=None):
 @click.option('-m', '--mjds', type=int, multiple=True, help='list of MJDs with calibration sequence taken')
 @click.option('--target-mjd', type=int, help='MJD to store the resulting master frames in')
 @click.option('-e', '--expnums', type=int, multiple=True, help='list of exposure numbers to target for reduction')
+@click.option('--pixelflats', is_flag=True, default=False, help='flag to create pixel flats')
+@click.option('--pixelmasks', is_flag=True, default=False, help='flag to create pixel masks')
 @click.option('-i', '--illumination-corrections', is_flag=True, default=False, help='flag to create illumination corrections')
-def run_calibration_sequence(mjds, target_mjd=None, expnums=None, illumination_corrections: bool = False):
+def run_calibration_sequence(mjds, target_mjd=None, expnums=None,
+                             pixelflats: bool = False, pixelmasks: bool = False,
+                             illumination_corrections: bool = False):
     """Run the calibration sequence reduction
 
     Given a set of MJDs and (optionally) exposure numbers, run the calibration
@@ -813,28 +817,53 @@ def run_calibration_sequence(mjds, target_mjd=None, expnums=None, illumination_c
         MJD to store the master frames in
     expnums : list
         List of exposure numbers to reduce
+    pixelflats : bool
+        Flag to create pixel flats
+    pixelmasks : bool
+        Flag to create pixel masks
+    illumination_corrections : bool
+        Flag to create illumination corrections
     """
 
-    # TODO: split exposures into the exposure sequence of each type of master frame
+    # split exposures into the exposure sequence of each type of master frame
+    frames, masters_mjd = get_sequence_metadata(mjds, target_mjd=target_mjd, expnums=expnums)
+    bias_frames = frames.query("imagetyp == 'bias'")
+    dark_frames = frames.query("imagetyp == 'dark'")
+    ldls_frames = frames.query("imagetyp == 'flat & ldls")
+    qrtz_frames = frames.query("imagetyp == 'flat & quartz'")
+    twilight_frames = frames.query("imagetyp == 'flat'")
+    arc_frames = frames.query("imagetyp == 'arc'")
 
-    # reduce bias/dark/pixflat
-    create_detrending_frames(mjds, target_mjd=target_mjd, expnums=expnums)
+    # TODO: verify sequences completeness
 
-    # create pixel mask
-    create_pixelmasks(mjds, target_mjd=target_mjd, expnums=expnums)
+    # reduce bias/dark
+    create_detrending_frames(mjds, target_mjd=target_mjd, expnums=set(bias_frames.expnum), kind="bias")
+    create_detrending_frames(mjds, target_mjd=target_mjd, expnums=set(dark_frames.expnum), kind="dark")
 
     # create traces
-    create_traces(mjds, target_mjd=target_mjd, expnums=expnums)
+    create_traces(mjds, target_mjd=target_mjd, expnums_ldls=set(ldls_frames.expnum), expnums_qrtz=set(qrtz_frames.expnum), subtract_straylight=True)
 
     # create fiber flats
-    create_fiberflats(mjds, target_mjd=target_mjd, expnums=expnums)
+    create_fiberflats(mjds, target_mjd=target_mjd, expnums=set(twilight_frames.expnum))
+
+    # create wavelength solutions
+    create_wavelengths(mjds, target_mjd=target_mjd, expnums=set(arc_frames.expnum))
+
+    # create pixel flats
+    if pixelflats:
+        pixflat_frames = frames.query("imagetyp == 'pixelflat'")
+        create_detrending_frames(mjds, target_mjd=target_mjd, expnums=set(pixflat_frames.expnum), kind="pixflat")
+
+    # create pixel mask
+    if pixelmasks:
+        create_pixelmasks(mjds, target_mjd=target_mjd,
+                          dark_expnums=set(dark_frames.expnum),
+                          pixflat_expnums=set(pixflat_frames.expnum),
+                          ignore_pixflats=False)
 
     # create illumination corrections
     if illumination_corrections:
         create_illumination_corrections(mjds, target_mjd=target_mjd, expnums=expnums)
-
-    # create wavelength solutions
-    create_wavelengths(mjds, target_mjd=target_mjd, expnums=expnums)
 
 
 if __name__ == '__main__':
