@@ -20,6 +20,7 @@ def mock_meta():
 
 def test_get_frames_metadata(make_fits):
     """ test we can extract metadata from a fits file """
+    make_fits(mjd=61234, cameras=['b1', 'b2', 'b3'], expnum=6817)
     meta = get_frames_metadata(61234)
     meta = meta.sort_values('camera')
     assert len(meta) == 3

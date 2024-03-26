@@ -8,6 +8,7 @@ import os
 import sys
 from itertools import product
 from copy import deepcopy as copy
+from shutil import copy2
 from multiprocessing import Pool, cpu_count
 
 import numpy
@@ -32,11 +33,13 @@ from lvmdrp.core.image import (
     Image,
     _parse_ccd_section,
     _model_overscan,
+    _fillin_valleys,
+    _no_stepdowns,
     combineImages,
     glueImages,
     loadImage,
 )
-from lvmdrp.core.plot import plt, create_subplots, plot_detrend, plot_strips, save_fig
+from lvmdrp.core.plot import plt, create_subplots, plot_detrend, plot_strips, plot_image_shift, save_fig
 from lvmdrp.core.rss import RSS
 from lvmdrp.core.spectrum1d import Spectrum1D, _spec_from_lines, _cross_match
 from lvmdrp.core.tracemask import TraceMask
@@ -52,15 +55,7 @@ DEFAULT_TRIMSEC = [
     "[1:2043, 1:2040]",
     "[2078:4120, 1:2040]",
 ]
-# NOTE: this is the OS region shrinked down to avoid pixels with fiber signal
 DEFAULT_BIASSEC = [
-    "[2048:2058, 2041:4080]",
-    "[2065:2075, 2041:4080]",
-    "[2048:2058, 1:2040]",
-    "[2065:2075, 1:2040]",
-]
-# NOTE: original OS region
-ORI_BIASSEC = [
     "[2044:2060, 2041:4080]",
     "[2061:2077, 2041:4080]",
     "[2044:2060, 1:2040]",
@@ -2952,6 +2947,120 @@ def testres_drp(image, trace, fwhm, flux):
     hdu = pyfits.PrimaryHDU((img._data - out) / img._data)
     hdu.writeto("res_rel.fits", overwrite=True)
 
+
+def fix_pixel_shifts(in_image, ref_image, threshold=1.15, fill_gaps=20, display_plots=False):
+    """Identify and corrects pixel shifts in dispersion direction
+
+    This task identifies pixel shifts in the dispersion direction by comparing
+    the overscan regions of the input image with a reference image. The pixel
+    shifts are corrected by rolling the image data by the amount of the shift.
+
+    Parameters
+    ----------
+    in_image : str
+        input image path
+    ref_image : str
+        reference image path
+    threshold : float, optional
+        threshold for pixel shifts, by default 1.15
+    fill_gaps : int, optional
+        width of the gaps to fill in the pixel shifts, by default 20
+    display_plots : bool, optional
+        whether to display plots, by default False
+
+    Returns
+    -------
+    numpy.ndarray
+        pixel shifts in dispersion direction
+    lvmdrp.core.image.Image
+        output image with corrected pixel shifts
+    """
+    # create output image path if not provided
+    ori_image = in_image.replace(".fits.gz", "_ori.fits.gz")
+    out_image = copy(in_image)
+
+    # load reference image
+    log.info(f"loading reference image from {os.path.basename(ref_image)}")
+    image_ref = Image()
+    image_ref.loadFitsData(ref_image)
+
+    # load input image
+    log.info(f"loading input image from {os.path.basename(in_image)}")
+    image = Image()
+    image.loadFitsData(in_image)
+    image_out = copy(image)
+
+    # get useful metadata
+    mjd, expnum, camera = image._header["MJD"], image._header["EXPOSURE"], image._header["CCD"]
+
+    sc_sections, os_sections = list(image._header["TRIMSEC?"].values()), list(image._header["BIASSEC?"].values())
+    shifts = []
+    for i, (sc_sec, os_sec) in enumerate(zip(sc_sections, os_sections)):
+        # get overscan quadrant
+        os_quad_r = image_ref.getSection(os_sec)
+        os_quad = image.getSection(os_sec)
+
+        # calculate pixels to shift and amount of shifting
+        log.info(f"calculating pixel shifts for {camera} quadrant {i+1} with OS counts ratio >{threshold}")
+        shift_mask = numpy.abs(os_quad._data / os_quad_r._data) > threshold
+        shift_pixels_raw = numpy.sum(shift_mask, axis=1)
+        log.info(f"found {(shift_pixels_raw>0).sum()} rows shifted")
+
+        # fix hair
+        hairs = (shift_pixels_raw % 2).astype(bool)
+        shift_pixels_raw[hairs] -= 1
+        shift_pixels_raw[shift_pixels_raw < 0] = 0
+        log.info(f"removing {hairs.sum()} spikes from pixel shifts")
+
+        # interpolate valleys
+        shift_pixels = _fillin_valleys(shift_pixels_raw, width=fill_gaps)
+        log.info(f"filling {(shift_pixels - shift_pixels_raw).sum()} gaps {fill_gaps} pixels wide")
+        shifts.append(shift_pixels)
+
+    # decide on the shift direction
+    shift_right = numpy.concatenate(shifts[1::2][::-1])
+    shift_left = -1*numpy.concatenate(shifts[::2][::-1])
+    if numpy.any(shift_right != 0):
+        log.info("shifting pixels to the right")
+        shift_column = shift_right
+    else:
+        log.info("shifting pixels to the left")
+        shift_column = shift_left
+
+    # correct stepdowns
+    log.info("removing stepdowns from pixel shifts")
+    shift_column = _no_stepdowns(shift_column)
+
+    # apply shifts and write output image
+    if numpy.any(shift_column != 0):
+        log.info(f"apply pixel shifts to {(shift_column>0).sum()} rows")
+        for irow in range(image._data.shape[0]):
+            image_out._data[irow] = numpy.roll(image._data[irow], shift_column[irow])
+
+        # copy original image to 'ori' file
+        log.info(f"writing original image to {os.path.basename(ori_image)}")
+        copy2(in_image, ori_image)
+
+        log.info(f"writing corrected image to {os.path.basename(out_image)}")
+        image_out.writeFitsData(out_image)
+    else:
+        log.info("no pixel shifts detected, no correction applied")
+
+    # display plots if requested
+    if display_plots and numpy.any(shift_column != 0):
+        log.info("plotting results")
+        fig, ax = plt.subplots(figsize=(15,7), sharex=True, layout="constrained")
+        ax.set_title(f"{mjd = } - {expnum = } - {camera = }", loc="left")
+        y_pixels = numpy.arange(shift_column.size)
+        ax.step(y_pixels, shift_column, where="mid", lw=1)
+        ax.set_xlabel("Y (pixel)")
+        ax.set_ylabel("Shift (pixel)")
+        plot_image_shift(ax, image._data, shift_column, cmap="Reds")
+        axis = plot_image_shift(ax, image_out._data, shift_column, cmap="Blues", pos=(0.14,1.0-0.32))
+        plt.setp(axis, yticklabels=[], ylabel="")
+
+    return shift_column, image_out
+
 # TODO: for arcs take short exposures for bright lines & long exposures for faint lines
 # TODO: Argon: 10s + 300s
 # TODO: Neon: 10s + 300s
@@ -3059,24 +3168,24 @@ def preproc_raw_frame(
     # extract TRIMSEC or assume default value
     if assume_trimsec:
         log.info(f"using given TRIMSEC = {assume_trimsec}")
-        sc_sec = [sec for sec in assume_trimsec]
+        sc_sections = [sec for sec in assume_trimsec]
     elif not org_header["TRIMSEC?"]:
         log.warning(f"assuming TRIMSEC = {DEFAULT_TRIMSEC}")
-        sc_sec = DEFAULT_TRIMSEC
+        sc_sections = DEFAULT_TRIMSEC
     else:
-        sc_sec = list(org_header["TRIMSEC?"].values())
-        log.info(f"using header TRIMSEC = {sc_sec}")
+        sc_sections = list(org_header["TRIMSEC?"].values())
+        log.info(f"using header TRIMSEC = {sc_sections}")
 
     # extract BIASSEC or assume default value
     if assume_biassec:
         log.info(f"using given BIASSEC = {assume_biassec}")
-        os_sec = [sec for sec in assume_biassec]
+        os_sections = [sec for sec in assume_biassec]
     elif not org_header["BIASSEC?"]:
         log.warning(f"assuming BIASSEC = {DEFAULT_BIASSEC}")
-        os_sec = DEFAULT_BIASSEC
+        os_sections = DEFAULT_BIASSEC
     else:
-        os_sec = list(org_header["BIASSEC?"].values())
-        log.info(f"using header BIASSEC = {os_sec}")
+        os_sections = list(org_header["BIASSEC?"].values())
+        log.info(f"using header BIASSEC = {os_sections}")
 
     # extract gain
     gain = numpy.ones(NQUADS)
@@ -3094,7 +3203,7 @@ def preproc_raw_frame(
     sc_quads, os_quads = [], []
     os_profiles, os_models = [], []
     # process each quadrant
-    for i, (sc_xy, os_xy) in enumerate(zip(sc_sec, os_sec)):
+    for i, (sc_xy, os_xy) in enumerate(zip(sc_sections, os_sections)):
         # get overscan and science quadrant & convert to electron
         sc_quad = org_img.getSection(section=sc_xy)
         os_quad = org_img.getSection(section=os_xy)
@@ -3258,7 +3367,7 @@ def preproc_raw_frame(
             sg_stat=lambda x, axis: numpy.nanmedian(numpy.std(x, axis=axis)),
             labels=True,
         )
-        os_x, os_y = _parse_ccd_section(list(os_sec)[0])
+        os_x, os_y = _parse_ccd_section(list(os_sections)[0])
         axs[i].axvline(os_x[1] - os_x[0], ls="--", color="0.5", lw=1)
         axs[i].set_title(f"overscan for quadrants {['12','34'][i]}", loc="left")
     save_fig(
@@ -3294,7 +3403,7 @@ def preproc_raw_frame(
             show_individuals=True,
             labels=True,
         )
-        os_x, os_y = _parse_ccd_section(list(os_sec)[0])
+        os_x, os_y = _parse_ccd_section(list(os_sections)[0])
         axs[i].axvline(os_y[1] - os_y[0], ls="--", color="0.5", lw=1)
         axs[i].set_title(f"overscan for quadrants {['13','24'][i]}", loc="left")
     save_fig(
