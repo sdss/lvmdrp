@@ -30,7 +30,7 @@ import click
 import cloup
 import numpy as np
 import pandas as pd
-from itertools import product
+from itertools import product, groupby
 from astropy.io import fits
 
 from lvmdrp import log, path, __version__ as drpver
@@ -359,7 +359,9 @@ def create_detrending_frames(mjds, target_mjd=None, expnums=None, kind="all", as
     _clean_ancillary(mjds=mjds, expnums=expnums, kind=kind)
 
 
-def create_pixelmasks(mjds, target_mjd=None, expnums=None, ignore_darks=True):
+def create_pixelmasks(mjds, target_mjd=None, dark_expnums=None, pixflat_expnums=None,
+                      short_exptime=900, long_exptime=3600, pixflat_exptime=5,
+                      ignore_pixflats=True):
     """Create pixel mask from master pixelflat and/or dark frames
 
     Given a set of MJDs and (optionally) exposure numbers, create a pixel mask
@@ -367,9 +369,9 @@ def create_pixelmasks(mjds, target_mjd=None, expnums=None, ignore_darks=True):
     master pixelmask in the corresponding calibration directory in the
     `target_mjd` or by default in the smallest MJD in `mjds`.
 
-    If the corresponding master pixelflat and/or dark frames do not exist, they
+    If the corresponding detrended pixelflat and/or dark frames do not exist, they
     will be created first. Otherwise they will be read from disk. If
-    `ignore_darks` is True, then the dark frames will not be used to create the
+    `ignore_pixflats` is True, then the pixelflat frames will not be used to create the
     pixel mask.
 
     Parameters:
@@ -378,13 +380,96 @@ def create_pixelmasks(mjds, target_mjd=None, expnums=None, ignore_darks=True):
         List of MJDs to reduce
     target_mjd : float
         MJD to store the master frames in
-    expnums : list
-        List of exposure numbers to reduce
-    ignore_darks : bool
-        Ignore dark frames when creating pixel mask
+    dark_expnums : list
+        List of dark exposure numbers
+    pixflat_expnums : list
+        List of pixelflat exposure numbers
+    short_exptime : int
+        Short exposure time for dark frames
+    long_exptime : int
+        Long exposure time for dark frames
+    pixflat_exptime : int
+        Exposure time for pixelflat frames
+    ignore_pixflats : bool
+        Ignore pixelflat frames when creating pixel mask
 
     """
-    pass
+    if dark_expnums is not None and pixflat_expnums is not None:
+        expnums = np.concatenate([dark_expnums, pixflat_expnums])
+    else:
+        expnums = None
+    frames, masters_mjd = get_sequence_metadata(mjds, target_mjd=target_mjd, expnums=expnums)
+    masters_path = os.path.join(MASTERS_DIR, f"{masters_mjd}")
+
+    darks = frames.query("imagetyp == 'dark' and exptime == @short_exptime or exptime == @long_exptime", inplace=True)
+    pixflats = frames.query("imagetyp == 'dark' or imagetyp == 'pixelflat' and exptime == @pixflat_exptime", inplace=True)
+
+    # reduce darks
+    reduce_2d(mjds=mjds, target_mjd=target_mjd, expnums=set(darks.expnum))
+
+    ddark_paths = [path.full("lvm_anc", drpver=drpver, kind="d", imagetype="dark", **dark) for dark in darks.to_dict("records")]
+    darks["ddark_path"] = ddark_paths
+    cam_groups = darks.groupby(["camera", "exptime"])
+    for cam, exptime in cam_groups.groups:
+        ddark_paths_cam = cam_groups.get_group((cam, exptime))["ddark_path"]
+
+        mdark_path = os.path.join(masters_path, f"lvm-mdark-{cam}-{int(exptime)}s.fits")
+        image_tasks.create_master_frame(in_images=ddark_paths_cam, out_image=mdark_path)
+
+    # reduce pixflats
+    if not ignore_pixflats:
+        reduce_2d(mjds=mjds, target_mjd=target_mjd, expnums=set(pixflats.expnum),
+                replace_with_nan=False, assume_imagetyp="pixelflat", reject_cr=False)
+        dflat_paths = [path.full("lvm_anc", drpver=drpver, kind="d", imagetype="pixflat", **pixflat) for pixflat in pixflats.to_dict("records")]
+        pixflats["dflat_path"] = dflat_paths
+
+        cam_groups = pixflats.groupby("camera")
+        for cam in cam_groups.groups:
+            dflat_paths_cam = cam_groups.get_group(cam)["dflat_path"]
+
+            # define output combined pixelflat path
+            mflat_path = os.path.join(masters_path, f"lvm-mpixflat-{cam}.fits")
+
+            image_tasks.create_master_frame(in_images=dflat_paths_cam, out_image=mflat_path)
+
+            # normalize pixelflat background
+            pixflat_img = image_tasks.loadImage(mflat_path)
+            pixflat_img = pixflat_img / pixflat_img.medianImg(size=20)
+            pixflat_img.writeFitsData(mflat_path)
+
+        dflat_groups = groupby(dflat_paths, key=lambda s: os.path.basename(s).split("-")[2])
+
+        # create pixel mask
+        for camera, group in dflat_groups:
+            medians = []
+            group = list(group)
+            # compute medians of all detrended pixel flats
+            for dflat_path in group:
+                medians.append(np.nanmedian(image_tasks.loadImage(dflat_path)._data))
+
+            # sort paths by median values
+            idx = np.argsort(medians)
+            dflat_group = np.asarray(group)[idx]
+
+            # pick two most different pixelflats
+            flat_a = dflat_group[0]
+            flat_b = dflat_group[-1]
+
+            mdark_short_path = os.path.join(masters_path, f"lvm-mdark-{camera}-{short_exptime}s.fits")
+            mdark_long_path = os.path.join(masters_path, f"lvm-mdark-{camera}-{long_exptime}s.fits")
+            mpixmask_path = os.path.join(masters_path, f"lvm-mpixmask-{camera}.fits")
+            image_tasks.create_pixelmask(in_short_dark=mdark_short_path, in_long_dark=mdark_long_path,
+                                        in_flat_a=flat_a, in_flat_b=flat_b,
+                                        out_pixmask=mpixmask_path)
+    else:
+        log.info("Ignoring pixelflats when creating pixel mask")
+        mdark_short_path = os.path.join(masters_path, f"lvm-mdark-{camera}-{short_exptime}s.fits")
+        mdark_long_path = os.path.join(masters_path, f"lvm-mdark-{camera}-{long_exptime}s.fits")
+        mpixmask_path = os.path.join(masters_path, f"lvm-mpixmask-{camera}.fits")
+        image_tasks.create_pixelmask(in_short_dark=mdark_short_path, in_long_dark=mdark_long_path, out_pixmask=mpixmask_path)
+
+    # ancillary paths clean up
+    _clean_ancillary(mjds=mjds, expnums=expnums)
 
 
 def create_traces(mjds, target_mjd=None, expnums_ldls=None, expnums_qrtz=None,
