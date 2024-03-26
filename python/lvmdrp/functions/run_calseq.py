@@ -506,7 +506,10 @@ def create_traces(mjds, target_mjd=None, expnums_ldls=None, expnums_qrtz=None,
     poly_deg_width : int, optional
         Degree of the polynomial to fit to the widths, by default 5
     """
-    expnums = np.concatenate([expnums_ldls, expnums_qrtz])
+    if expnums_ldls is not None and expnums_qrtz is not None:
+        expnums = np.concatenate([expnums_ldls, expnums_qrtz])
+    else:
+        expnums = None
     frames, masters_mjd = get_sequence_metadata(mjds, target_mjd=target_mjd, expnums=expnums)
 
     reduce_2d(mjds, target_mjd=masters_mjd, expnums=expnums)
@@ -686,7 +689,7 @@ def create_fiberflats(mjds, target_mjd=None, expnums=None):
     reduce_2d(mjds, target_mjd=masters_mjd, expnums=expnums)
 
     if expnums is None:
-        expnums = frames.expnum.unique().values
+        expnums = set(frames.query("imagetyp == 'flat' and not ldls and not quartz").expnum)
 
     reduce_twilight_sequence(expnums=expnums)
 
@@ -713,7 +716,7 @@ def create_illumination_corrections(mjds, target_mjd=None, expnums=None):
     """
     # read master fiber flats (dome and twilight)
     # calculate ratio twilight/dome
-    pass
+    raise NotImplementedError("create_illumination_corrections")
 
 
 def create_wavelengths(mjds, target_mjd=None, expnums=None):
