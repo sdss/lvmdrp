@@ -215,7 +215,8 @@ def _get_ring_expnums(expnums_ldls, expnums_qrtz, ring_size=12, sort_expnums=Fal
     return expnum_params
 
 
-def reduce_2d(mjds, target_mjd=None, expnums=None, ref_expnum=None):
+def reduce_2d(mjds, target_mjd=None, expnums=None, ref_expnum=None,
+              replace_with_nan=True, assume_imagetyp=None, reject_cr=True):
     """Preprocess and detrend a list of 2D frames
 
     Given a set of MJDs and (optionally) exposure numbers, preprocess and
@@ -233,6 +234,12 @@ def reduce_2d(mjds, target_mjd=None, expnums=None, ref_expnum=None):
         List of exposure numbers to reduce
     ref_expnum : int
         Reference exposure number for pixel shift correction
+    replace_with_nan : bool
+        Replace rejected pixels with NaN
+    assume_imagetyp : str
+        Assume the given imagetyp for all frames
+    reject_cr : bool
+        Reject cosmic rays
     """
 
     frames, masters_mjd = get_sequence_metadata(mjds, target_mjd=target_mjd, expnums=expnums)
@@ -272,10 +279,13 @@ def reduce_2d(mjds, target_mjd=None, expnums=None, ref_expnum=None):
         else:
             if frame["imagetyp"] == "flat" and ref_expnum is not None:
                 image_tasks.fix_pixel_shifts(in_image=frame_path, ref_image=ref_path)
-            image_tasks.preproc_raw_frame(in_image=frame_path, out_image=pframe_path, in_mask=mpixmask_path)
+            image_tasks.preproc_raw_frame(in_image=frame_path, out_image=pframe_path, in_mask=mpixmask_path,
+                                          replace_with_nan=replace_with_nan)
             image_tasks.detrend_frame(in_image=pframe_path, out_image=dframe_path,
                                         in_bias=mbias_path, in_dark=mdark_path,
                                         in_pixelflat=mpixflat_path,
+                                        replace_with_nan=replace_with_nan,
+                                        reject_cr=reject_cr,
                                         in_slitmap=SLITMAP)
 
 
