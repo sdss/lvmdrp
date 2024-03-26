@@ -55,15 +55,7 @@ DEFAULT_TRIMSEC = [
     "[1:2043, 1:2040]",
     "[2078:4120, 1:2040]",
 ]
-# NOTE: this is the OS region shrinked down to avoid pixels with fiber signal
 DEFAULT_BIASSEC = [
-    "[2048:2058, 2041:4080]",
-    "[2065:2075, 2041:4080]",
-    "[2048:2058, 1:2040]",
-    "[2065:2075, 1:2040]",
-]
-# NOTE: original OS region
-ORI_BIASSEC = [
     "[2044:2060, 2041:4080]",
     "[2061:2077, 2041:4080]",
     "[2044:2060, 1:2040]",
@@ -3012,6 +3004,7 @@ def fix_pixel_shifts(in_image, ref_image, threshold=1.15, fill_gaps=20, display_
         log.info(f"calculating pixel shifts for {camera} quadrant {i+1} with OS counts ratio >{threshold}")
         shift_mask = numpy.abs(os_quad._data / os_quad_r._data) > threshold
         shift_pixels_raw = numpy.sum(shift_mask, axis=1)
+        log.info(f"found {(shift_pixels_raw>0).sum()} rows shifted")
 
         # fix hair
         hairs = (shift_pixels_raw % 2).astype(bool)
