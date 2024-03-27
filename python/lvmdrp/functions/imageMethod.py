@@ -2948,7 +2948,7 @@ def testres_drp(image, trace, fwhm, flux):
     hdu.writeto("res_rel.fits", overwrite=True)
 
 
-def fix_pixel_shifts(in_image, ref_image, threshold=1.15, fill_gaps=20, display_plots=False):
+def fix_pixel_shifts(in_image, ref_image, threshold=1.15, fill_gaps=20, dry_run=False, display_plots=False):
     """Identify and corrects pixel shifts in dispersion direction
 
     This task identifies pixel shifts in the dispersion direction by comparing
@@ -2965,6 +2965,8 @@ def fix_pixel_shifts(in_image, ref_image, threshold=1.15, fill_gaps=20, display_
         threshold for pixel shifts, by default 1.15
     fill_gaps : int, optional
         width of the gaps to fill in the pixel shifts, by default 20
+    dry_run : bool, optional
+        whether to write the output files or not, by default False
     display_plots : bool, optional
         whether to display plots, by default False
 
@@ -3038,12 +3040,15 @@ def fix_pixel_shifts(in_image, ref_image, threshold=1.15, fill_gaps=20, display_
         for irow in range(image._data.shape[0]):
             image_out._data[irow] = numpy.roll(image._data[irow], shift_column[irow])
 
-        # copy original image to 'ori' file
-        log.info(f"writing original image to {os.path.basename(ori_image)}")
-        copy2(in_image, ori_image)
-
-        log.info(f"writing corrected image to {os.path.basename(out_image)}")
-        image_out.writeFitsData(out_image)
+        if not dry_run:
+            # copy original image to 'ori' file
+            log.info(f"writing original image to {os.path.basename(ori_image)}")
+            copy2(in_image, ori_image)
+            # write corrected image
+            log.info(f"writing corrected image to {os.path.basename(out_image)}")
+            image_out.writeFitsData(out_image)
+        else:
+            log.info("dry run, not writing output images")
 
         log.info("plotting results")
         fig, ax = create_subplots(to_display=display_plots, figsize=(15,7), sharex=True, layout="constrained")
