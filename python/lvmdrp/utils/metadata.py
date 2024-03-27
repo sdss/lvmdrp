@@ -563,7 +563,7 @@ def extract_metadata(frames_paths: list, kind: str = "raw") -> pd.DataFrame:
         try:
             header = fits.getheader(frame_path, ext=0)
         except OSError as e:
-            log.error(f"Cannot read FITS header: {e}")
+            log.error(f"Cannot read FITS header of {frame_path}: {e}")
             continue
 
         frame_path = pathlib.Path(frame_path)
