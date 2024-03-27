@@ -328,6 +328,9 @@ def create_detrending_frames(mjds, target_mjd=None, expnums=None, kind="all", as
     else:
         raise ValueError(f"Invalid kind: '{kind}'. Must be one of 'bias', 'dark', 'pixflat' or 'all'")
 
+    # preprocess and detrend frames
+    reduce_2d(mjds=mjds, target_mjd=masters_mjd, expnums=set(frames.expnum))
+
     # define image types to reduce
     imagetypes = set(frames.imagetyp)
 
@@ -342,9 +345,6 @@ def create_detrending_frames(mjds, target_mjd=None, expnums=None, kind="all", as
         for keys in frames_analog.groups:
             analogs = frames_analog.get_group(keys)
             frame = analogs.iloc[0].to_dict()
-
-            # preprocess and detrend frames
-            reduce_2d(mjds=set(analogs.mjd), target_mjd=masters_mjd, expnums=analogs.expnum.values)
 
             # combine into master frame
             kwargs = get_config_options('reduction_steps.create_master_frame', imagetyp)
