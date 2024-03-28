@@ -3060,7 +3060,7 @@ def fix_pixel_shifts(in_image, ref_image, threshold=1.15, fill_gaps=20, dry_run=
         ax.set_xlabel("Y (pixel)")
         ax.set_ylabel("Shift (pixel)")
         plot_image_shift(ax, image._data, shift_column, cmap="Reds")
-        axis = plot_image_shift(ax, image_out._data, shift_column, cmap="Blues", pos=(0.14,1.0-0.32))
+        axis = plot_image_shift(ax, image_out._data, shift_column, cmap="Blues", inset_pos=(0.14,1.0-0.32))
         plt.setp(axis, yticklabels=[], ylabel="")
         save_fig(
             fig,
