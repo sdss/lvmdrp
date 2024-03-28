@@ -2993,7 +2993,9 @@ def fix_pixel_shifts(in_image, ref_image, threshold=1.15, fill_gaps=20, dry_run=
     image_out = copy(image)
 
     # get useful metadata
-    mjd, expnum, camera = image._header["MJD"], image._header["EXPOSURE"], image._header["CCD"]
+    mjd = image._header.get("SMJD", image._header["MJD"])
+    expnum, camera = image._header["EXPOSURE"], image._header["CCD"]
+    imagetyp = image._header["IMAGETYP"]
 
     sc_sections, os_sections = list(image._header["TRIMSEC?"].values()), list(image._header["BIASSEC?"].values())
     shifts = []
@@ -3052,7 +3054,7 @@ def fix_pixel_shifts(in_image, ref_image, threshold=1.15, fill_gaps=20, dry_run=
 
         log.info("plotting results")
         fig, ax = create_subplots(to_display=display_plots, figsize=(15,7), sharex=True, layout="constrained")
-        ax.set_title(f"{mjd = } - {expnum = } - {camera = }", loc="left")
+        ax.set_title(f"{mjd = } - {expnum = } - {camera = } - {imagetyp = }", loc="left")
         y_pixels = numpy.arange(shift_column.size)
         ax.step(y_pixels, shift_column, where="mid", lw=1)
         ax.set_xlabel("Y (pixel)")
