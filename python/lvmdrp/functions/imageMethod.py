@@ -20,6 +20,8 @@ from astropy.nddata import CCDData, StdDevUncertainty
 from astropy.visualization import simple_norm
 from ccdproc import cosmicray_lacosmic
 from scipy import interpolate
+from scipy import signal
+from scipy.ndimage import median_filter
 from tqdm import tqdm
 
 from typing import List, Tuple
@@ -33,6 +35,7 @@ from lvmdrp.core.image import (
     Image,
     _parse_ccd_section,
     _model_overscan,
+    _remove_spikes,
     _fillin_valleys,
     _no_stepdowns,
     combineImages,
@@ -3073,6 +3076,132 @@ def fix_pixel_shifts(in_image, ref_image, threshold=1.15, fill_gaps=20, dry_run=
         log.info("no pixel shifts detected, no correction applied")
 
     return shift_column, image_out
+
+
+def fix_pixel_shifts_robust(in_image, ref_image, median_rows=11, max_shift=10,
+                            threshold_spikes=0.5, flat_spikes=11, fill_gaps=20,
+                            dry_run=False, display_plots=False):
+    """Identify and corrects pixel shifts in dispersion direction
+
+    This task identifies pixel shifts in the dispersion direction by cross-correlating
+    the input image with a reference image. The pixel shifts are corrected by rolling
+    the image data by the amount of the shift.
+
+    Parameters
+    ----------
+    in_image : str
+        input image path
+    ref_image : str
+        reference image path
+    median_rows : int, optional
+        number of rows to use for median filtering, by default 11
+    max_shift : int, optional
+        maximum shift to consider, by default 10
+    threshold_spikes : float, optional
+        threshold for pixel shifts, by default 0.5
+    flat_spikes : int, optional
+        width of the spikes to remove, by default 11
+    fill_gaps : int, optional
+        width of the gaps to fill in the pixel shifts, by default 20
+    dry_run : bool, optional
+        whether to write the output files or not, by default False
+    display_plots : bool, optional
+        whether to display plots, by default False
+
+    Returns
+    -------
+    numpy.ndarray
+        pixel shifts in dispersion direction
+    numpy.ndarray
+        correlation values
+    lvmdrp.core.image.Image
+        output image with corrected pixel shifts
+    """
+
+    # create output image path if not provided
+    ori_image = in_image.replace(".fits.gz", "_ori.fits.gz")
+    out_image = copy(in_image)
+
+    log.info(f"loading reference image from {os.path.basename(ref_image)}")
+    image_ref = Image()
+    image_ref.loadFitsData(ref_image)
+    cdata = image_ref._data / median_filter(image_ref._data, size=(1,median_rows))
+
+    log.info(f"loading input image from {os.path.basename(in_image)}")
+    image = Image()
+    image.loadFitsData(in_image)
+    rdata = image._data / median_filter(image._data, size=(1,median_rows))
+
+    mjd = image._header.get("SMJD", image._header["MJD"])
+    expnum, camera = image._header["EXPOSURE"], image._header["CCD"]
+    imagetyp = image._header["IMAGETYP"]
+
+    # cross-correlate image with pixel mask
+    image_out = copy(image)
+    corrs, shifts = [], []
+    for irow in range(image._data.shape[0]):
+        cimg_row = cdata[irow]
+        rimg_row = rdata[irow]
+
+        shift = signal.correlation_lags(cimg_row.size, rimg_row.size, mode="same")
+        corr = signal.correlate(cimg_row, rimg_row, mode="same")
+
+        mask = (numpy.abs(shift) <= max_shift)
+        shift = shift[mask]
+        corr = corr[mask]
+
+        max_corr = numpy.argmax(corr)
+        shifts.append(shift[max_corr])
+        corrs.append(corr[max_corr])
+
+    shifts = numpy.asarray(shifts)
+    corrs = numpy.asarray(corrs)
+
+    raw_shifts = copy(shifts)
+    shifts = _remove_spikes(shifts, width=flat_spikes, threshold=threshold_spikes)
+    shifts = _fillin_valleys(shifts, width=fill_gaps)
+    shifts = _no_stepdowns(shifts)
+
+    apply_shift = numpy.any(numpy.abs(shifts)>0)
+    if apply_shift:
+        log.info(f"found {numpy.sum(numpy.abs(shifts)>0)} rows with pixel shifts")
+        for irow in range(len(shifts)):
+            if shifts[irow] > 0:
+                image_out._data[irow, :] = numpy.roll(image._data[irow, :], int(shifts[irow]))
+
+        if not dry_run:
+            # copy original image to 'ori' file
+            log.info(f"writing original image to {os.path.basename(ori_image)}")
+            copy2(in_image, ori_image)
+            # write corrected image
+            log.info(f"writing corrected image to {os.path.basename(out_image)}")
+            image_out.writeFitsData(out_image)
+        else:
+            log.info("dry run, not writing output images")
+
+        log.info("plotting results")
+        fig, ax = create_subplots(to_display=display_plots, figsize=(15,7), sharex=True, layout="constrained")
+        ax.set_title(f"{mjd = } - {expnum = } - {camera = } - {imagetyp = }", loc="left")
+        y_pixels = numpy.arange(shifts.size)
+        ax.step(y_pixels, raw_shifts, where="mid", lw=1, color="red", linestyle="--")
+        ax.step(y_pixels, shifts, where="mid", lw=1)
+        ax.set_xlabel("Y (pixel)")
+        ax.set_ylabel("Shift (pixel)")
+        plot_image_shift(ax, image._data, shifts, cmap="Reds")
+        axis = plot_image_shift(ax, image_out._data, shifts, cmap="Blues", inset_pos=(0.14,1.0-0.32))
+        plt.setp(axis, yticklabels=[], ylabel="")
+        save_fig(
+            fig,
+            product_path=out_image,
+            to_display=display_plots,
+            figure_path="qa",
+            label="pixel_shifts"
+        )
+    else:
+        log.info("no pixel shifts detected, no correction applied")
+
+    return shifts, corrs, image_out
+
 
 # TODO: for arcs take short exposures for bright lines & long exposures for faint lines
 # TODO: Argon: 10s + 300s

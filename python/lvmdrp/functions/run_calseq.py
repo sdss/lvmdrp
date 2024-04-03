@@ -277,8 +277,11 @@ def reduce_2d(mjds, target_mjd=None, expnums=None, ref_expnum=None,
         if os.path.isfile(dframe_path):
             log.info(f"skipping {dframe_path}, file already exist")
         else:
-            if frame["imagetyp"] == "flat" and ref_expnum is not None:
-                image_tasks.fix_pixel_shifts(in_image=frame_path, ref_image=ref_path)
+            if ref_expnum is not None:
+                image_tasks.fix_pixel_shifts_robust(in_image=frame_path, ref_image=ref_path,
+                                                    median_rows=11, max_shift=10,
+                                                    threshold_spikes=0.6, flat_spikes=11,
+                                                    fill_gaps=20)
             image_tasks.preproc_raw_frame(in_image=frame_path, out_image=pframe_path, in_mask=mpixmask_path,
                                           replace_with_nan=replace_with_nan)
             image_tasks.detrend_frame(in_image=pframe_path, out_image=dframe_path,

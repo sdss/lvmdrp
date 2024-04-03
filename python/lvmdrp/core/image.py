@@ -212,6 +212,32 @@ def _bg_subtraction(images, quad_sections, bg_sections):
     return images_bgcorr, bg_images_med, bg_images_std, bg_sections
 
 
+def _remove_spikes(data, width=11, threshold=0.5):
+    """Returns a data array with spikes removed
+
+    Parameters
+    ----------
+    data : array_like
+        1-dimensional array of data
+    width : int, optional
+        width of the window where spikes are located, by default 11
+    threshold : float, optional
+        threshold to remove spikes, by default 0.5
+
+    Returns
+    -------
+    array_like
+        1-dimensional array with spikes removed
+    """
+    data_ = copy(data)
+    for irow in range(width, data.size - width):
+        chunk = data[irow-width:irow+width+1]
+        has_peaks = chunk[0] == 0 and chunk[-1] == 0
+        if has_peaks and numpy.sum(chunk != 0) / width < threshold:
+            data_[irow-width:irow+width+1] = 0
+    return data_
+
+
 def _fillin_valleys(data, width=18):
     """fills in valleys in the data array
 
