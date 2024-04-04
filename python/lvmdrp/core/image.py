@@ -1302,6 +1302,9 @@ class Image(Header):
         new_image :  Image object
             Subsampled image
         """
+        if self._mask is None:
+            return self
+
         idx = numpy.indices(self._dim)  # create an index array
         # get x and y coordinates of bad pixels
 
