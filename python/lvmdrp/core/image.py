@@ -232,8 +232,8 @@ def _remove_spikes(data, width=11, threshold=0.5):
     data_ = copy(data)
     for irow in range(width, data.size - width):
         chunk = data[irow-width:irow+width+1]
-        has_peaks = chunk[0] == 0 and chunk[-1] == 0
-        if has_peaks and numpy.sum(chunk != 0) / width < threshold:
+        has_peaks = (chunk[0] == 0 and chunk[-1] == 0) and (chunk != 0).any()
+        if has_peaks and (chunk != 0).sum() / width < threshold:
             data_[irow-width:irow+width+1] = 0
     return data_
 
