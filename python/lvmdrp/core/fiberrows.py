@@ -654,6 +654,28 @@ class FiberRows(Header, PositionTable):
 
         return list
 
+    def unsplit(self, image_list, axis="X"):
+        if axis == "X" or axis == "x" or axis == 1:
+            axis_split = 1
+        elif axis == "Y" or axis == "y" or axis == 0:
+            axis_split = 0
+
+        data = []
+        error = []
+        mask = []
+        for i in range(len(image_list)):
+            data.append(image_list[i]._data)
+            error.append(image_list[i]._error)
+            mask.append(image_list[i]._mask)
+        self._data = numpy.concatenate(data, axis_split)
+        self._dim = self._data.shape
+        if error[0] is not None:
+            self._error = numpy.concatenate(error, axis_split)
+        if mask[0] is not None:
+            self._mask = numpy.concatenate(mask, axis_split)
+        if image_list[0]._header is not None:
+            self._header = image_list[0]._header
+
     def loadFitsData(
         self,
         file,
