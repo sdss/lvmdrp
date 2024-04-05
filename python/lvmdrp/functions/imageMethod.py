@@ -27,6 +27,7 @@ from tqdm import tqdm
 from typing import List, Tuple
 
 from lvmdrp import log
+from lvmdrp.core.constants import SPEC_CHANNELS
 from lvmdrp.utils.decorators import skip_on_missing_input_path, drop_missing_input_paths
 from lvmdrp.utils.bitmask import QualityFlag
 from lvmdrp.core.fit_profile import Gaussians
@@ -48,6 +49,7 @@ from lvmdrp.core.spectrum1d import Spectrum1D, _spec_from_lines, _cross_match
 from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.utils.hdrfix import apply_hdrfix
 from lvmdrp.utils.convert import dateobs_to_sjd, correct_sjd
+from lvmdrp.functions.skyMethod import get_sky_mask_uves
 
 
 NQUADS = 4
@@ -221,6 +223,202 @@ def _eval_continuum_model(obs_img, trace_amp, trace_cent, trace_fwhm):
         mod._data[:, icolumn] = gaussians(pars=pars, x=column)
 
     return mod, (mod / obs_img)
+
+
+def _mask_fibers(in_images, in_cent_traces, in_waves, y_widths=3, channels="brz"):
+    # read master trace and wavelength
+    mtraces = [FiberRows() for _ in range(len(in_cent_traces))]
+    mwaves = [FiberRows() for _ in range(len(in_waves))]
+    channel_masks = []
+    for i, (mtrace_path, mwave_path) in enumerate(zip(in_cent_traces, in_waves)):
+        mtraces[i].loadFitsData(mtrace_path)
+        mwaves[i].loadFitsData(mwave_path)
+
+        # add columns for OS region
+        os_region = numpy.zeros((mtraces[i]._data.shape[0], 34), dtype=int)
+        trace_data = numpy.split(mtraces[i]._data, 2, axis=1)
+        trace_mask = numpy.split(mtraces[i]._mask, 2, axis=1)
+        mtraces[i]._data = numpy.concatenate([trace_data[0], os_region, trace_data[1]], axis=1)
+        mtraces[i]._mask = numpy.concatenate([trace_mask[0], ~os_region.astype(bool), trace_mask[1]], axis=1)
+        wave_data = numpy.split(mwaves[i]._data, 2, axis=1)
+        wave_mask = numpy.split(mwaves[i]._mask, 2, axis=1)
+        mwaves[i]._data = numpy.concatenate([wave_data[0], os_region, wave_data[1]], axis=1)
+        mwaves[i]._mask = numpy.concatenate([wave_mask[0], ~os_region.astype(bool), wave_mask[1]], axis=1)
+
+        # get pixels where spectropgraph is not blocked
+        channel_mask = (SPEC_CHANNELS[channels[i]][0]<=mwaves[i]._data)&(mwaves[i]._data<=SPEC_CHANNELS[channels[i]][1])
+        channel_masks.append(channel_mask)
+
+        mtraces[i]._mask |= ~channel_mask
+        mwaves[i]._mask |= ~channel_mask
+    mtrace = FiberRows()
+    mtrace.unsplit(mtraces)
+    mwave = FiberRows()
+    mwave.unsplit(mwaves)
+
+    rframes = [Image() for _ in range(len(in_images))]
+    for i, rframe_path in enumerate(in_images):
+        rframes[i].loadFitsData(rframe_path)
+        mask_badpix = copy(rframes[i]._mask) if rframes[i]._mask is not None else numpy.zeros(rframes[i]._data.shape, dtype=bool)
+        rframes[i].maskFiberTraces(mtraces[i], aperture=y_widths)
+        rframes[i]._mask |= mask_badpix
+    rframe = Image()
+    rframe.unsplit(rframes)
+    rframe._data[numpy.isnan(rframe._data)] = 0
+
+    return rframe, mtrace, mwave
+
+
+def get_2dmask(in_images, out_mask, in_cent_traces, in_waves, y_widths=3, wave_widths=0.6*5, image_shape=(4080, 3*4120), channels="brz", display_plots=False):
+
+    frame_2d, mtrace, mwave = _mask_fibers(in_images, in_cent_traces, in_waves, y_widths=y_widths, channels=channels)
+
+    # get sky mask
+    sky_masks = []
+    for ifiber in range(mwave._data.shape[0]):
+        sky_mask = get_sky_mask_uves(mwave._data[ifiber], width=wave_widths/2)
+        sky_masks.append(sky_mask&~mwave._mask[ifiber])
+    sky_masks = numpy.array(sky_masks)
+
+    # make sky mask 2d
+    sky_mask_2d = numpy.zeros(image_shape, dtype=bool)
+    for icol in range(image_shape[1]):
+        for ifiber in range(mwave._data.shape[0]):
+            sky_mask_2d[mtrace._data[ifiber, icol].astype(int), icol] = sky_masks[ifiber, icol]
+
+    for icol in range(sky_mask_2d.shape[1]):
+        col = sky_mask_2d[:, icol]
+        y = numpy.arange(sky_mask_2d.shape[0])
+        if numpy.sum(col) == 0:
+            continue
+        f = interpolate.interp1d(y[col], col[col], kind="nearest", bounds_error=False, fill_value=0)
+        sky_mask_2d[:, icol] = f(y).astype(bool)
+
+    sky_mask_2d &= frame_2d._mask
+
+    mask_image = Image(data=sky_mask_2d.astype(int))
+    mask_image.writeFitsData(out_mask)
+
+    fig, ax = create_subplots(1, 1, figsize=(15, 5))
+    ax.imshow(sky_mask_2d, origin="lower", aspect="auto", cmap="binary_r")
+    save_fig(
+        fig,
+        product_path=out_mask,
+        to_display=display_plots,
+        figure_path="qa",
+        label="sky_mask_2d"
+    )
+
+    return sky_mask_2d, mtrace, mwave
+
+
+def fix_pixel_shifts_science(in_images, ref_images, in_mask, max_shift=10, threshold_spikes=0.6, flat_spikes=11, fill_gaps=20, dry_run=False, display_plots=False):
+
+    # create output image path if not provided
+    ori_images = [in_image.replace(".fits.gz", "_ori.fits.gz") if ".gz" in in_image else in_image.replace(".fits", "_ori.fits") for in_image in in_images]
+    out_images = copy(in_images)
+
+    mask = loadImage(in_mask)
+
+    log.info(f"loading reference image from {','.join(ref_images)}")
+    image_ref = Image()
+    image_ref.unsplit([loadImage(ref_image) for ref_image in ref_images])
+    # image_ref._data[numpy.isnan(image_ref._data)] = 0
+    # image_ref._mask[numpy.isnan(image_ref._data)] = True
+    # image_ref.replaceMaskMedian(1,11)
+    cdata = copy(image_ref._data)# / median_filter(image_ref._data, size=(1, 11))
+    cdata = numpy.nan_to_num(cdata, nan=0) * mask._data
+
+    log.info(f"loading input image from {','.join(in_images)}")
+    # read all three detrended images and channel combine them
+    image = Image()
+    image.unsplit([loadImage(in_image) for in_image in in_images])
+    # image._data[numpy.isnan(image._data)] = 0
+    # image._mask[numpy.isnan(image._data)] = True
+    # image.replaceMaskMedian(1,11)
+    rdata = copy(image._data)# / median_filter(image._data, size=(1, 11))
+    rdata = numpy.nan_to_num(rdata, nan=0) * mask._data
+
+    # plt.figure()
+    # vmin = numpy.abs(numpy.nanmean(rdata)-1*numpy.nanstd(rdata))
+    # vmax = numpy.abs(numpy.nanmean(rdata)+1*numpy.nanstd(rdata))
+    # plt.imshow(rdata, origin="lower", aspect="auto", cmap="viridis", vmin=vmin, vmax=vmax)
+
+    images_out = [Image() for _ in range(len(in_images))]
+    [image_out.loadFitsData(out_image) for image_out, out_image in zip(images_out, out_images)]
+
+    shifts, corrs = [], []
+    for irow in range(rdata.shape[0]):
+        cimg_row = cdata[irow]
+        rimg_row = rdata[irow]
+        if numpy.all(cimg_row == 0) or numpy.all(rimg_row == 0):
+            shifts.append(0)
+            corrs.append(0)
+            continue
+
+        shift = signal.correlation_lags(cimg_row.size, rimg_row.size, mode="same")
+        corr = signal.correlate(cimg_row, rimg_row, mode="same")
+
+        mask = (numpy.abs(shift) <= max_shift)
+        shift = shift[mask]
+        corr = corr[mask]
+
+        max_corr = numpy.argmax(corr)
+        shifts.append(shift[max_corr])
+        corrs.append(corr[max_corr])
+    shifts = numpy.asarray(shifts)
+    corrs = numpy.asarray(corrs)
+
+    raw_shifts = copy(shifts)
+    shifts = _remove_spikes(shifts, width=flat_spikes, threshold=threshold_spikes)
+    shifts = _fillin_valleys(shifts, width=fill_gaps)
+    shifts = _no_stepdowns(shifts)
+
+    apply_shift = numpy.any(numpy.abs(shifts)>0)
+    if apply_shift:
+        log.info(f"found {numpy.sum(numpy.abs(shifts)>0)} rows with pixel shifts")
+        for image_out, in_image, out_image, ori_image in zip(images_out, in_images, out_images, ori_images):
+            image = copy(image_out)
+            mjd = image._header.get("SMJD", image._header["MJD"])
+            expnum, camera = image._header["EXPOSURE"], image._header["CCD"]
+            imagetyp = image._header["IMAGETYP"]
+
+            for irow in range(len(shifts)):
+                if shifts[irow] > 0:
+                    image_out._data[irow, :] = numpy.roll(image._data[irow, :], int(shifts[irow]))
+
+            if not dry_run:
+                # copy original image to 'ori' file
+                log.info(f"writing original image to {os.path.basename(ori_image)}")
+                copy2(in_image, ori_image)
+                # write corrected image
+                log.info(f"writing corrected image to {os.path.basename(out_image)}")
+                image_out.writeFitsData(out_image)
+            else:
+                log.info("dry run, not writing output images")
+
+            log.info("plotting results")
+            fig, ax = create_subplots(to_display=display_plots, figsize=(15,7), sharex=True, layout="constrained")
+            ax.set_title(f"{mjd = } - {expnum = } - {camera = } - {imagetyp = }", loc="left")
+            y_pixels = numpy.arange(shifts.size)
+            ax.step(y_pixels, raw_shifts, where="mid", lw=1, color="red", linestyle="--")
+            ax.step(y_pixels, shifts, where="mid", lw=1)
+            ax.set_xlabel("Y (pixel)")
+            ax.set_ylabel("Shift (pixel)")
+            plot_image_shift(ax, image._data, shifts, cmap="Reds")
+            axis = plot_image_shift(ax, image_out._data, shifts, cmap="Blues", inset_pos=(0.14,1.0-0.32))
+            plt.setp(axis, yticklabels=[], ylabel="")
+            save_fig(
+                fig,
+                product_path=out_image,
+                to_display=display_plots,
+                figure_path="qa",
+                label="pixel_shifts"
+            )
+    else:
+        log.info("no pixel shifts detected, no correction applied")
+
+    return shifts, corrs, images_out
 
 
 def detCos_drp(
