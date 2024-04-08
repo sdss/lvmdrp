@@ -47,9 +47,9 @@ from lvmdrp.core.plot import plt, create_subplots, plot_detrend, plot_strips, pl
 from lvmdrp.core.rss import RSS
 from lvmdrp.core.spectrum1d import Spectrum1D, _spec_from_lines, _cross_match
 from lvmdrp.core.tracemask import TraceMask
+from lvmdrp.core.sky import get_sky_mask_uves
 from lvmdrp.utils.hdrfix import apply_hdrfix
 from lvmdrp.utils.convert import dateobs_to_sjd, correct_sjd
-from lvmdrp.functions.skyMethod import get_sky_mask_uves
 
 
 NQUADS = 4
