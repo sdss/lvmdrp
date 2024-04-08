@@ -168,9 +168,12 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
                                   in_slitmap=Table(drp.fibermap.data), reject_cr=False)
 
         # subtract straylight
-        image_tasks.subtract_straylight(in_image=dsci_path, out_image=lsci_path,
-                                            in_cent_trace=mtrace_path, select_nrows=5,
-                                            aperture=13, smoothing=400, median_box=21, gaussian_sigma=0.0)
+        if sci_imagetyp == "flat":
+            image_tasks.subtract_straylight(in_image=dsci_path, out_image=lsci_path,
+                                                in_cent_trace=mtrace_path, select_nrows=5,
+                                                aperture=13, smoothing=400, median_box=21, gaussian_sigma=0.0)
+        else:
+            lsci_path = dsci_path
 
         # # extract 1d spectra
         image_tasks.extract_spectra(in_image=lsci_path, out_rss=xsci_path, in_trace=mtrace_path, in_fwhm=mwidth_path, method=extraction_method, parallel=extraction_parallel)
