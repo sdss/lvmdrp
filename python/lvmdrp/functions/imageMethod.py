@@ -225,7 +225,7 @@ def _eval_continuum_model(obs_img, trace_amp, trace_cent, trace_fwhm):
     return mod, (mod / obs_img)
 
 
-def _mask_fibers(in_images, in_cent_traces, in_waves, y_widths=3, channels="brz"):
+def _channel_combine_fiber_params(in_cent_traces, in_waves, add_overscan_columns=True, channels="brz"):
     # read master trace and wavelength
     mtraces = [FiberRows() for _ in range(len(in_cent_traces))]
     mwaves = [FiberRows() for _ in range(len(in_waves))]
@@ -235,81 +235,97 @@ def _mask_fibers(in_images, in_cent_traces, in_waves, y_widths=3, channels="brz"
         mwaves[i].loadFitsData(mwave_path)
 
         # add columns for OS region
-        os_region = numpy.zeros((mtraces[i]._data.shape[0], 34), dtype=int)
-        trace_data = numpy.split(mtraces[i]._data, 2, axis=1)
-        trace_mask = numpy.split(mtraces[i]._mask, 2, axis=1)
-        mtraces[i]._data = numpy.concatenate([trace_data[0], os_region, trace_data[1]], axis=1)
-        mtraces[i]._mask = numpy.concatenate([trace_mask[0], ~os_region.astype(bool), trace_mask[1]], axis=1)
-        wave_data = numpy.split(mwaves[i]._data, 2, axis=1)
-        wave_mask = numpy.split(mwaves[i]._mask, 2, axis=1)
-        mwaves[i]._data = numpy.concatenate([wave_data[0], os_region, wave_data[1]], axis=1)
-        mwaves[i]._mask = numpy.concatenate([wave_mask[0], ~os_region.astype(bool), wave_mask[1]], axis=1)
+        if add_overscan_columns:
+            os_region = numpy.zeros((mtraces[i]._data.shape[0], 34), dtype=int)
+            trace_data = numpy.split(mtraces[i]._data, 2, axis=1)
+            trace_mask = numpy.split(mtraces[i]._mask, 2, axis=1)
+            mtraces[i]._data = numpy.concatenate([trace_data[0], os_region, trace_data[1]], axis=1)
+            mtraces[i]._mask = numpy.concatenate([trace_mask[0], ~os_region.astype(bool), trace_mask[1]], axis=1)
+            wave_data = numpy.split(mwaves[i]._data, 2, axis=1)
+            wave_mask = numpy.split(mwaves[i]._mask, 2, axis=1)
+            mwaves[i]._data = numpy.concatenate([wave_data[0], os_region, wave_data[1]], axis=1)
+            mwaves[i]._mask = numpy.concatenate([wave_mask[0], ~os_region.astype(bool), wave_mask[1]], axis=1)
 
         # get pixels where spectropgraph is not blocked
-        channel_mask = (SPEC_CHANNELS[channels[i]][0]<=mwaves[i]._data)&(mwaves[i]._data<=SPEC_CHANNELS[channels[i]][1])
+        channel_mask = (SPEC_CHANNELS[channels[i]][0]>=mwaves[i]._data)|(mwaves[i]._data>=SPEC_CHANNELS[channels[i]][1])
         channel_masks.append(channel_mask)
 
-        mtraces[i]._mask |= ~channel_mask
-        mwaves[i]._mask |= ~channel_mask
+        mtraces[i]._mask |= channel_mask
+        mwaves[i]._mask |= channel_mask
     mtrace = FiberRows()
     mtrace.unsplit(mtraces)
     mwave = FiberRows()
     mwave.unsplit(mwaves)
 
-    rframes = [Image() for _ in range(len(in_images))]
-    for i, rframe_path in enumerate(in_images):
-        rframes[i].loadFitsData(rframe_path)
-        mask_badpix = copy(rframes[i]._mask) if rframes[i]._mask is not None else numpy.zeros(rframes[i]._data.shape, dtype=bool)
-        rframes[i].maskFiberTraces(mtraces[i], aperture=y_widths)
-        rframes[i]._mask |= mask_badpix
-    rframe = Image()
-    rframe.unsplit(rframes)
-    rframe._data[numpy.isnan(rframe._data)] = 0
-
-    return rframe, mtrace, mwave
+    return mtraces, mwaves, mtrace, mwave
 
 
-def get_2dmask(in_images, out_mask, in_cent_traces, in_waves, y_widths=3, wave_widths=0.6*5, image_shape=(4080, 3*4120), channels="brz", display_plots=False):
+def _get_fiber_selection(traces, image_shape=(4080, 4120), y_widths=3):
 
-    frame_2d, mtrace, mwave = _mask_fibers(in_images, in_cent_traces, in_waves, y_widths=y_widths, channels=channels)
+    images = [Image(data=numpy.zeros(image_shape), mask=numpy.zeros(image_shape, dtype=bool)) for _ in range(len(traces))]
+    for i in range(len(traces)):
+        images[i].maskFiberTraces(traces[i], aperture=y_widths)
+    image = Image()
+    image.unsplit(images)
 
-    # get sky mask
-    sky_masks = []
-    for ifiber in range(mwave._data.shape[0]):
-        sky_mask = get_sky_mask_uves(mwave._data[ifiber], width=wave_widths/2)
-        sky_masks.append(sky_mask&~mwave._mask[ifiber])
-    sky_masks = numpy.array(sky_masks)
+    return image._mask
+
+
+def _get_wave_selection(waves, lines_list, window):
+    hw = window / 2
+    wave_selection = numpy.zeros_like(waves, dtype=bool)
+    if len(wave_selection.shape) == 2:
+        for ifiber in range(wave_selection.shape[0]):
+            for wline in lines_list:
+                if wline-hw < waves[ifiber].min() or wline+hw > waves[ifiber].max():
+                    continue
+                wave_selection[ifiber] |= (waves[ifiber] > wline-hw) & (waves[ifiber] < wline+hw)
+    else:
+        wave_selection = (waves > wline-hw) & (waves < wline+hw)
+    return wave_selection
+
+
+def get_2dmask(in_images, out_mask, in_cent_traces, in_waves, lines_list, y_widths=3, wave_widths=0.6*5, image_shape=(4080, 4120), channels="brz", display_plots=False):
+
+    # stack along x-axis traces and wavelengths, adding OS columns
+    mtraces, mwaves, mtrace, mwave = _channel_combine_fiber_params(in_cent_traces, in_waves, channels=channels)
+
+    # get fiber selection mask
+    fiber_selection = _get_fiber_selection(mtraces, y_widths=y_widths, image_shape=image_shape)
+
+    # get lines selection mask
+    lines_mask = _get_wave_selection(mwave._data, lines_list=lines_list, window=wave_widths)
+    lines_mask &= ~mwave._mask
 
     # make sky mask 2d
-    sky_mask_2d = numpy.zeros(image_shape, dtype=bool)
-    for icol in range(image_shape[1]):
+    lines_mask_2d = numpy.zeros((image_shape[0], len(in_images)*image_shape[1]), dtype=bool)
+    for icol in range(lines_mask_2d.shape[1]):
         for ifiber in range(mwave._data.shape[0]):
-            sky_mask_2d[mtrace._data[ifiber, icol].astype(int), icol] = sky_masks[ifiber, icol]
+            lines_mask_2d[mtrace._data[ifiber, icol].astype(int), icol] = lines_mask[ifiber, icol]
 
-    for icol in range(sky_mask_2d.shape[1]):
-        col = sky_mask_2d[:, icol]
-        y = numpy.arange(sky_mask_2d.shape[0])
+        col = lines_mask_2d[:, icol]
+        y = numpy.arange(lines_mask_2d.shape[0])
         if numpy.sum(col) == 0:
             continue
         f = interpolate.interp1d(y[col], col[col], kind="nearest", bounds_error=False, fill_value=0)
-        sky_mask_2d[:, icol] = f(y).astype(bool)
+        lines_mask_2d[:, icol] = f(y).astype(bool)
 
-    sky_mask_2d &= frame_2d._mask
+    lines_mask_2d &= fiber_selection
 
-    mask_image = Image(data=sky_mask_2d.astype(int))
+    mask_image = Image(data=lines_mask_2d.astype(int))
     mask_image.writeFitsData(out_mask)
 
     fig, ax = create_subplots(1, 1, figsize=(15, 5))
-    ax.imshow(sky_mask_2d, origin="lower", aspect="auto", cmap="binary_r")
+    ax.imshow(lines_mask_2d, origin="lower", aspect="auto", cmap="binary_r")
     save_fig(
         fig,
         product_path=out_mask,
         to_display=display_plots,
         figure_path="qa",
-        label="sky_mask_2d"
+        label="lines_mask_2d"
     )
 
-    return sky_mask_2d, mtrace, mwave
+    return lines_mask_2d, mtrace, mwave
 
 
 def fix_pixel_shifts_science(in_images, ref_images, in_mask, max_shift=10, threshold_spikes=0.6, flat_spikes=11, fill_gaps=20, dry_run=False, display_plots=False):
