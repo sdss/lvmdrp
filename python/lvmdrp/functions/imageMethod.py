@@ -27,7 +27,7 @@ from tqdm import tqdm
 from typing import List, Tuple
 
 from lvmdrp import log
-from lvmdrp.core.constants import SPEC_CHANNELS
+from lvmdrp.core.constants import CONFIG_PATH, SPEC_CHANNELS, ARC_LAMPS, CON_LAMPS
 from lvmdrp.utils.decorators import skip_on_missing_input_path, drop_missing_input_paths
 from lvmdrp.utils.bitmask import QualityFlag
 from lvmdrp.core.fit_profile import Gaussians
@@ -47,7 +47,6 @@ from lvmdrp.core.plot import plt, create_subplots, plot_detrend, plot_strips, pl
 from lvmdrp.core.rss import RSS
 from lvmdrp.core.spectrum1d import Spectrum1D, _spec_from_lines, _cross_match
 from lvmdrp.core.tracemask import TraceMask
-from lvmdrp.core.sky import get_sky_mask_uves
 from lvmdrp.utils.hdrfix import apply_hdrfix
 from lvmdrp.utils.convert import dateobs_to_sjd, correct_sjd
 
@@ -285,13 +284,50 @@ def _get_wave_selection(waves, lines_list, window):
     return wave_selection
 
 
-def get_2dmask(in_images, out_mask, in_cent_traces, in_waves, lines_list, y_widths=3, wave_widths=0.6*5, image_shape=(4080, 4120), channels="brz", display_plots=False):
+def get_2dmask(in_images, out_mask, in_cent_traces, in_waves, lines_list=None, y_widths=3, wave_widths=0.6*5, image_shape=(4080, 4120), channels="brz", display_plots=False):
 
     # stack along x-axis traces and wavelengths, adding OS columns
     mtraces, mwaves, mtrace, mwave = _channel_combine_fiber_params(in_cent_traces, in_waves, channels=channels)
 
     # get fiber selection mask
     fiber_selection = _get_fiber_selection(mtraces, y_widths=y_widths, image_shape=image_shape)
+
+    # parse lines list based on the image type
+    if lines_list is None:
+        image = loadImage(in_images[0])
+        imagetyp = image._header["IMAGETYP"]
+        if imagetyp == "arc":
+            lines_list = ",".join([lamp.lower() for lamp in ARC_LAMPS if image._header.get(lamp, False)])
+        else:
+            lines_list = "sky"
+        log.info(f"selecting sources for {imagetyp = } frame: {lines_list}")
+
+    # parse lines list base on the given list
+    if isinstance(lines_list, (list, tuple, numpy.ndarray)):
+        log.info(f"selecting lines in given list {','.join(lines_list)}")
+    elif isinstance(lines_list, str):
+        sources = lines_list.split(",")
+        lines_list = []
+        lamps = list(map(str.lower, ARC_LAMPS))
+        for source in sources:
+            if source in lamps:
+                # define reference lines path
+                ref_table = os.path.join(CONFIG_PATH, "wavelength", f"lvm-reflines-{source}.txt")
+                log.info(f"loading reference lines from '{ref_table}")
+                # skip if missing
+                if not os.path.isfile(ref_table):
+                    log.warning(f"missing reference lines for {source = }")
+                    continue
+                table = numpy.genfromtxt(ref_table, usecols=(0, 1), skip_header=1)
+                lines_list.append(table[table[:, 0]>=200, 1])
+            elif source == "sky":
+                lines_list.append(numpy.genfromtxt(os.path.join(os.getenv('LVMCORE_DIR'), 'etc', 'UVES_sky_lines.txt'), usecols=(1,)))
+
+        lines_list = numpy.concatenate(lines_list)
+        lines_list.sort()
+        waves = mwave._data[mwave._data>0].flatten()
+        lines_list = lines_list[(lines_list > waves.min()) & (lines_list < waves.max())]
+        log.info(f"selecting lines in given sources {lines_list.tolist()}")
 
     # get lines selection mask
     lines_mask = _get_wave_selection(mwave._data, lines_list=lines_list, window=wave_widths)
