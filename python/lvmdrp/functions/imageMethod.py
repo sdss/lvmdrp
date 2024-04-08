@@ -298,6 +298,9 @@ def get_2dmask(in_images, out_mask, in_cent_traces, in_waves, lines_list=None, y
         imagetyp = image._header["IMAGETYP"]
         if imagetyp == "arc":
             lines_list = ",".join([lamp.lower() for lamp in ARC_LAMPS if image._header.get(lamp, False)])
+        elif imagetyp == "flat":
+            lines_list = "sky"
+            wave_widths = 5000
         else:
             lines_list = "sky"
         log.info(f"selecting sources for {imagetyp = } frame: {lines_list}")
