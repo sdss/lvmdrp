@@ -216,9 +216,10 @@ def _get_ring_expnums(expnums_ldls, expnums_qrtz, ring_size=12, sort_expnums=Fal
 
     return expnum_params
 
+
 def fix_raw_pixel_shifts(mjd, expnums=None, ref_expnums=None, specs="123",
-            y_widths=5, wave_list=None, wave_widths=0.6*5, max_shift=10, flat_spikes=11,
-            threshold_spikes=np.inf, create_mask_always=False, dry_run=False, display_plots=False):
+                         y_widths=5, wave_list=None, wave_widths=0.6*5, max_shift=10, flat_spikes=11,
+                         threshold_spikes=np.inf, create_mask_always=False, dry_run=False, display_plots=False):
     """Attempts to fix pixel shifts in a list of raw frames
 
     Given an MJD and (optionally) exposure numbers, fix the pixel shifts in a
@@ -274,10 +275,16 @@ def fix_raw_pixel_shifts(mjd, expnums=None, ref_expnums=None, specs="123",
             rframe_paths = [rframe_path for rframe_path in rframe_paths if ".gz" in rframe_path]
             cframe_paths = [cframe_path for cframe_path in cframe_paths if ".gz" in cframe_path]
 
+            if len(rframe_paths) < 3:
+                log.warning(f"skipping {rframe_paths}, less than 3 files found")
+                continue
+
             mwave_paths = sorted(glob(os.path.join(masters_path, f"lvm-mwave_neon_hgne_argon_xenon-?{spec}.fits")))
             mtrace_paths = sorted(glob(os.path.join(masters_path, f"lvm-mtrace-?{spec}.fits")))
             mask_2d_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, imagetype="mask2d",
                                      expnum=0, camera=f"sp{spec}", kind="")
+            pixshift_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, imagetype="pixshift",
+                                     expnum=expnum, camera=f"sp{spec}", kind="")
 
             if create_mask_always or expnum == list(expnums_grp.groups)[0]:
                 os.makedirs(os.path.dirname(mask_2d_path), exist_ok=True)
@@ -286,8 +293,8 @@ def fix_raw_pixel_shifts(mjd, expnums=None, ref_expnums=None, specs="123",
                                             y_widths=y_widths, wave_widths=wave_widths,
                                             display_plots=display_plots)
 
-            image_tasks.fix_pixel_shifts(in_images=rframe_paths, ref_images=cframe_paths,
-                                         in_mask=mask_2d_path, flat_spikes=flat_spikes,
+            image_tasks.fix_pixel_shifts(in_images=rframe_paths, out_pixshift=pixshift_path,
+                                         ref_images=cframe_paths, in_mask=mask_2d_path, flat_spikes=flat_spikes,
                                          threshold_spikes=threshold_spikes, max_shift=max_shift,
                                          dry_run=dry_run, display_plots=display_plots)
 

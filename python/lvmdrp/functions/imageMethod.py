@@ -475,7 +475,7 @@ def select_lines_2d(in_images, out_mask, in_cent_traces, in_waves, lines_list=No
     return lines_mask_2d, mtrace, mwave
 
 
-def fix_pixel_shifts(in_images, ref_images, in_mask, max_shift=10, threshold_spikes=0.6, flat_spikes=11, fill_gaps=20, dry_run=False, display_plots=False):
+def fix_pixel_shifts(in_images, out_pixshift, ref_images, in_mask, max_shift=10, threshold_spikes=0.6, flat_spikes=11, fill_gaps=20, dry_run=False, display_plots=False):
     """Corrects pixel shifts in raw frames based on reference frames and a selection of spectral regions
 
     Given a set of raw frames, reference frames and a mask, this function corrects pixel shifts
@@ -485,6 +485,8 @@ def fix_pixel_shifts(in_images, ref_images, in_mask, max_shift=10, threshold_spi
     ----------
     in_images : list
         list of input raw images for the same spectrograph (brz)
+    out_pixshift : str
+        output pixel shifts file
     ref_images : list
         list of input reference images for the same spectrograph
     in_mask : str
@@ -609,7 +611,7 @@ def fix_pixel_shifts(in_images, ref_images, in_mask, max_shift=10, threshold_spi
             plt.setp(axis, yticklabels=[], ylabel="")
             save_fig(
                 fig,
-                product_path=in_mask,
+                product_path=out_pixshift,
                 to_display=display_plots,
                 figure_path="qa",
                 label="pixel_shifts"
