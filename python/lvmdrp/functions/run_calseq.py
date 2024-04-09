@@ -42,6 +42,7 @@ from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.functions import imageMethod as image_tasks
 from lvmdrp.functions import rssMethod as rss_tasks
 from lvmdrp.functions.run_drp import get_config_options, read_fibermap
+from lvmdrp.functions.run_quickdrp import get_master_mjd
 from lvmdrp.functions.run_twilights import reduce_twilight_sequence
 
 
@@ -215,8 +216,7 @@ def _get_ring_expnums(expnums_ldls, expnums_qrtz, ring_size=12, sort_expnums=Fal
 
     return expnum_params
 
-
-def fix_raw_pixel_shifts(mjd, target_mjd=None, expnums=None, ref_expnums=None, specs="123",
+def fix_raw_pixel_shifts(mjd, expnums=None, ref_expnums=None, specs="123",
             y_widths=5, wave_list=None, wave_widths=0.6*5, max_shift=10, flat_spikes=11,
             threshold_spikes=np.inf, create_mask_always=False, dry_run=False, display_plots=False):
     """Attempts to fix pixel shifts in a list of raw frames
@@ -229,8 +229,6 @@ def fix_raw_pixel_shifts(mjd, target_mjd=None, expnums=None, ref_expnums=None, s
     ----------
     mjd : float
         MJD to reduce
-    target_mjd : float
-        MJD where master frames are to be found
     expnums : list
         List of exposure numbers to look for pixel shifts
     ref_expnums : list
@@ -238,7 +236,7 @@ def fix_raw_pixel_shifts(mjd, target_mjd=None, expnums=None, ref_expnums=None, s
     specs : str
         Spectrograph channels
     y_widths : int
-        Width of the y-axis for the lines, by default 5
+        Width of the fibers along y-axis, by default 5
     wave_list : list
         List of lines to use for the wavelength calibration, by default None
     wave_widths : float
@@ -264,7 +262,8 @@ def fix_raw_pixel_shifts(mjd, target_mjd=None, expnums=None, ref_expnums=None, s
     else:
         raise ValueError("no valid reference exposure number given")
 
-    frames, masters_mjd = get_sequence_metadata(mjd, target_mjd=target_mjd, expnums=expnums)
+    frames, _ = get_sequence_metadata(mjd, target_mjd=None, expnums=expnums)
+    masters_mjd = get_master_mjd(sci_mjd=mjd)
     masters_path = os.path.join(MASTERS_DIR, str(masters_mjd))
 
     expnums_grp = frames.groupby("expnum")
