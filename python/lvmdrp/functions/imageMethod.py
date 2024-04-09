@@ -516,35 +516,27 @@ def fix_pixel_shifts(in_images, out_pixshift, ref_images, in_mask, max_shift=10,
     # create output image path if not provided
     ori_images = [in_image.replace(".fits.gz", "_ori.fits.gz") if ".gz" in in_image else in_image.replace(".fits", "_ori.fits") for in_image in in_images]
     out_images = copy(in_images)
+    if all([os.path.isfile(ori_image) for ori_image in ori_images]):
+        log.info(f"found a previous run of pixel shifts, loading original images from {','.join(ori_images)}")
+        in_images = ori_images
 
     mask = loadImage(in_mask)
 
     log.info(f"loading reference image from {','.join(ref_images)}")
     image_ref = Image()
     image_ref.unsplit([loadImage(ref_image) for ref_image in ref_images])
-    # image_ref._data[numpy.isnan(image_ref._data)] = 0
-    # image_ref._mask[numpy.isnan(image_ref._data)] = True
-    # image_ref.replaceMaskMedian(1,11)
-    cdata = copy(image_ref._data)# / median_filter(image_ref._data, size=(1, 11))
+    cdata = copy(image_ref._data)
     cdata = numpy.nan_to_num(cdata, nan=0) * mask._data
 
-    log.info(f"loading input image from {','.join(in_images)}")
     # read all three detrended images and channel combine them
+    log.info(f"loading input image from {','.join(in_images)}")
     image = Image()
     image.unsplit([loadImage(in_image) for in_image in in_images])
-    # image._data[numpy.isnan(image._data)] = 0
-    # image._mask[numpy.isnan(image._data)] = True
-    # image.replaceMaskMedian(1,11)
-    rdata = copy(image._data)# / median_filter(image._data, size=(1, 11))
+    rdata = copy(image._data)
     rdata = numpy.nan_to_num(rdata, nan=0) * mask._data
 
-    # plt.figure()
-    # vmin = numpy.abs(numpy.nanmean(rdata)-1*numpy.nanstd(rdata))
-    # vmax = numpy.abs(numpy.nanmean(rdata)+1*numpy.nanstd(rdata))
-    # plt.imshow(rdata, origin="lower", aspect="auto", cmap="viridis", vmin=vmin, vmax=vmax)
-
-    images_out = [Image() for _ in range(len(in_images))]
-    [image_out.loadFitsData(out_image) for image_out, out_image in zip(images_out, out_images)]
+    # load input images into output array to apply corrections if needed
+    images_out = [loadImage(in_image) for in_image in in_images]
 
     # calculate pixel shifts
     log.info("running row-by-row cross-correlation")
@@ -591,7 +583,8 @@ def fix_pixel_shifts(in_images, out_pixshift, ref_images, in_mask, max_shift=10,
             if not dry_run:
                 # copy original image to 'ori' file
                 log.info(f"writing original image to {os.path.basename(ori_image)}")
-                copy2(in_image, ori_image)
+                if in_image != ori_image:
+                    copy2(in_image, ori_image)
                 # write corrected image
                 log.info(f"writing corrected image to {os.path.basename(out_image)}")
                 image_out.writeFitsData(out_image)
