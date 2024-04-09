@@ -475,7 +475,9 @@ def select_lines_2d(in_images, out_mask, in_cent_traces, in_waves, lines_list=No
     return lines_mask_2d, mtrace, mwave
 
 
-def fix_pixel_shifts(in_images, out_pixshift, ref_images, in_mask, max_shift=10, threshold_spikes=0.6, flat_spikes=11, fill_gaps=20, dry_run=False, display_plots=False):
+def fix_pixel_shifts(in_images, out_pixshift, ref_images, in_mask,
+                     max_shift=10, threshold_spikes=0.6, flat_spikes=11,
+                     fill_gaps=20, dry_run=False, undo_correction=False, display_plots=False):
     """Corrects pixel shifts in raw frames based on reference frames and a selection of spectral regions
 
     Given a set of raw frames, reference frames and a mask, this function corrects pixel shifts
@@ -501,6 +503,8 @@ def fix_pixel_shifts(in_images, out_pixshift, ref_images, in_mask, max_shift=10,
         width of the gap filling, by default 20
     dry_run : bool, optional
         dry run, by default False
+    undo_correction : bool, optional
+        undo correction if existing run is found, by default False
     display_plots : bool, optional
         display plots, by default False
 
@@ -519,6 +523,14 @@ def fix_pixel_shifts(in_images, out_pixshift, ref_images, in_mask, max_shift=10,
     if all([os.path.isfile(ori_image) for ori_image in ori_images]):
         log.info(f"found a previous run of pixel shifts, loading original images from {','.join(ori_images)}")
         in_images = ori_images
+        if undo_correction:
+            log.info(f"undoing previous pixel shifts for {','.join(out_images)}")
+            out_images = [copy2(ori_image, out_image) for ori_image, out_image in zip(ori_images, out_images)]
+            [os.remove(ori_image) for ori_image in ori_images]
+            return
+    elif undo_correction:
+        log.info(f"no previous run of pixel shifts found for {','.join(in_images)}")
+        return
 
     mask = loadImage(in_mask)
 

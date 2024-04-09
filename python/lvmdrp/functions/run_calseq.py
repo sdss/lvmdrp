@@ -219,7 +219,8 @@ def _get_ring_expnums(expnums_ldls, expnums_qrtz, ring_size=12, sort_expnums=Fal
 
 def fix_raw_pixel_shifts(mjd, expnums=None, ref_expnums=None, specs="123",
                          y_widths=5, wave_list=None, wave_widths=0.6*5, max_shift=10, flat_spikes=11,
-                         threshold_spikes=np.inf, create_mask_always=False, dry_run=False, display_plots=False):
+                         threshold_spikes=np.inf, create_mask_always=False, dry_run=False,
+                         undo_corrections=False, display_plots=False):
     """Attempts to fix pixel shifts in a list of raw frames
 
     Given an MJD and (optionally) exposure numbers, fix the pixel shifts in a
@@ -252,6 +253,8 @@ def fix_raw_pixel_shifts(mjd, expnums=None, ref_expnums=None, specs="123",
         Create mask always, by default False
     dry_run : bool
         Dry run, by default False
+    undo_corrections : bool
+        Only undo corrections for previous runs, by default False
     display_plots : bool
         Display plots, by default False
     """
@@ -286,7 +289,7 @@ def fix_raw_pixel_shifts(mjd, expnums=None, ref_expnums=None, specs="123",
             pixshift_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, imagetype="pixshift",
                                      expnum=expnum, camera=f"sp{spec}", kind="")
 
-            if create_mask_always or expnum == list(expnums_grp.groups)[0]:
+            if not undo_corrections and (create_mask_always or expnum == list(expnums_grp.groups)[0]):
                 os.makedirs(os.path.dirname(mask_2d_path), exist_ok=True)
                 image_tasks.select_lines_2d(in_images=cframe_paths, out_mask=mask_2d_path, lines_list=wave_list,
                                             in_cent_traces=mtrace_paths, in_waves=mwave_paths,
@@ -296,7 +299,7 @@ def fix_raw_pixel_shifts(mjd, expnums=None, ref_expnums=None, specs="123",
             image_tasks.fix_pixel_shifts(in_images=rframe_paths, out_pixshift=pixshift_path,
                                          ref_images=cframe_paths, in_mask=mask_2d_path, flat_spikes=flat_spikes,
                                          threshold_spikes=threshold_spikes, max_shift=max_shift,
-                                         dry_run=dry_run, display_plots=display_plots)
+                                         dry_run=dry_run, undo_correction=undo_corrections, display_plots=display_plots)
 
 
 def reduce_2d(mjds, target_mjd=None, expnums=None,
