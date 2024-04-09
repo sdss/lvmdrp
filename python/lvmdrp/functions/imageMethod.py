@@ -225,6 +225,34 @@ def _eval_continuum_model(obs_img, trace_amp, trace_cent, trace_fwhm):
 
 
 def _channel_combine_fiber_params(in_cent_traces, in_waves, add_overscan_columns=True, channels="brz"):
+    """Combines fiber centroid traces and wavelength model for a given spectrograph along the x-axis
+
+    Given a set of centroid traces and wavelength models for a given spectrograph, this function
+    combines them along the x-axis, adding overscan columns if requested. Additionally the regions
+    past the dichroic are masked.
+
+    Parameters
+    ----------
+    in_cent_traces : list
+        list of input centroid trace files for the same spectrograph
+    in_waves : list
+        list of input wavelength files for the same spectrograph
+    add_overscan_columns : bool, optional
+        add overscan columns, by default True
+    channels : str, optional
+        spectrograph channels, by default "brz"
+
+    Returns
+    -------
+    list
+        list of fiber centroid traces
+    list
+        list of wavelength models
+    FiberRows
+        channel stacked fiber centroid trace data
+    FiberRows
+        channel stacked wavelength data
+    """
     # read master trace and wavelength
     mtraces = [FiberRows() for _ in range(len(in_cent_traces))]
     mwaves = [FiberRows() for _ in range(len(in_waves))]
@@ -260,7 +288,25 @@ def _channel_combine_fiber_params(in_cent_traces, in_waves, add_overscan_columns
 
 
 def _get_fiber_selection(traces, image_shape=(4080, 4120), y_widths=3):
+    """Returns a mask with selected fibers within a given width
 
+    Given a set of centroid traces, this function returns a mask with selected fibers
+    within a given width.
+
+    Parameters
+    ----------
+    traces : list
+        list of fiber centroid traces
+    image_shape : tuple, optional
+        shape of the image, by default (4080, 4120)
+    y_widths : int, optional
+        width of the fiber trace, by default 3
+
+    Returns
+    -------
+    numpy.ndarray
+        fiber selection mask
+    """
     images = [Image(data=numpy.zeros(image_shape), mask=numpy.zeros(image_shape, dtype=bool)) for _ in range(len(traces))]
     for i in range(len(traces)):
         images[i].maskFiberTraces(traces[i], aperture=y_widths)
@@ -271,6 +317,25 @@ def _get_fiber_selection(traces, image_shape=(4080, 4120), y_widths=3):
 
 
 def _get_wave_selection(waves, lines_list, window):
+    """Returns selection windows from a list of wavelengths
+
+    Given a list of wavelengths, this function returns selection windows
+    based on a given window size.
+
+    Parameters
+    ----------
+    waves : numpy.ndarray
+        wavelength data
+    lines_list : list
+        list of lines to select
+    window : float
+        window size
+
+    Returns
+    -------
+    numpy.ndarray
+        selection mask
+    """
     hw = window / 2
     wave_selection = numpy.zeros_like(waves, dtype=bool)
     if len(wave_selection.shape) == 2:
@@ -284,12 +349,51 @@ def _get_wave_selection(waves, lines_list, window):
     return wave_selection
 
 
-def get_2dmask(in_images, out_mask, in_cent_traces, in_waves, lines_list=None, y_widths=3, wave_widths=0.6*5, image_shape=(4080, 4120), channels="brz", display_plots=False):
+def select_lines_2d(in_images, out_mask, in_cent_traces, in_waves, lines_list=None, y_widths=3, wave_widths=0.6*5, image_shape=(4080, 4120), channels="brz", display_plots=False):
+    """Selects spectral features based on a list of wavelengths from a 2D raw frame
 
+    Given a list of raw frames, centroid traces and wavelength models for a given spectrograph,
+    this function selects spectral features based on a list of wavelengths, creating a 2D mask
+    with selected lines.
+
+    Parameters
+    ----------
+    in_images : list
+        list of input raw frames for the same spectrograph (brz)
+    out_mask : str
+        output mask file for the channel stacked frame
+    in_cent_traces : list
+        list of input centroid trace files for the same spectrograph
+    in_waves : list
+        list of input wavelength files for the same spectrograph
+    lines_list : list, optional
+        list of lines to select, by default None
+    y_widths : int, optional
+        width of the fiber trace, by default 3
+    wave_widths : float, optional
+        width of the wavelength window, by default 0.6*5
+    image_shape : tuple, optional
+        shape of the image, by default (4080, 4120)
+    channels : str, optional
+        spectrograph channels, by default "brz"
+    display_plots : bool, optional
+        display plots, by default False
+
+    Returns
+    -------
+    numpy.ndarray
+        2D mask with selected lines
+    FiberRows
+        channel stacked fiber centroid trace data
+    FiberRows
+        channel stacked wavelength data
+    """
     # stack along x-axis traces and wavelengths, adding OS columns
+    log.info(f"stacking traces and wavelengths for {channels = }")
     mtraces, mwaves, mtrace, mwave = _channel_combine_fiber_params(in_cent_traces, in_waves, channels=channels)
 
     # get fiber selection mask
+    log.info(f"selecting fibers with {y_widths = } pixel")
     fiber_selection = _get_fiber_selection(mtraces, y_widths=y_widths, image_shape=image_shape)
 
     # parse lines list based on the image type
@@ -333,10 +437,12 @@ def get_2dmask(in_images, out_mask, in_cent_traces, in_waves, lines_list=None, y
         log.info(f"selecting lines in given sources {lines_list.tolist()}")
 
     # get lines selection mask
+    log.info(f"selecting lines with {wave_widths = } pixel")
     lines_mask = _get_wave_selection(mwave._data, lines_list=lines_list, window=wave_widths)
     lines_mask &= ~mwave._mask
 
     # make sky mask 2d
+    log.info("interpolating mask into 2D frame")
     lines_mask_2d = numpy.zeros((image_shape[0], len(in_images)*image_shape[1]), dtype=bool)
     for icol in range(lines_mask_2d.shape[1]):
         for ifiber in range(mwave._data.shape[0]):
@@ -351,9 +457,13 @@ def get_2dmask(in_images, out_mask, in_cent_traces, in_waves, lines_list=None, y
 
     lines_mask_2d &= fiber_selection
 
+    # write mask to file
+    log.info(f"writing output mask to {os.path.basename(out_mask)}")
     mask_image = Image(data=lines_mask_2d.astype(int))
     mask_image.writeFitsData(out_mask)
 
+    # plot results
+    log.info("plotting results")
     fig, ax = create_subplots(1, 1, figsize=(15, 5))
     ax.imshow(lines_mask_2d, origin="lower", aspect="auto", cmap="binary_r")
     save_fig(
@@ -368,7 +478,41 @@ def get_2dmask(in_images, out_mask, in_cent_traces, in_waves, lines_list=None, y
 
 
 def fix_pixel_shifts_science(in_images, ref_images, in_mask, max_shift=10, threshold_spikes=0.6, flat_spikes=11, fill_gaps=20, dry_run=False, display_plots=False):
+    """Corrects pixel shifts in raw frames based on reference frames and a selection of spectral regions
 
+    Given a set of raw frames, reference frames and a mask, this function corrects pixel shifts
+    based on the reference frames and a selection of spectral regions.
+
+    Parameters
+    ----------
+    in_images : list
+        list of input raw images for the same spectrograph (brz)
+    ref_images : list
+        list of input reference images for the same spectrograph
+    in_mask : str
+        input mask file for the channel stacked frame
+    max_shift : int, optional
+        maximum shift in pixels, by default 10
+    threshold_spikes : float, optional
+        threshold for spike removal, by default 0.6
+    flat_spikes : int, optional
+        width of the spike removal, by default 11
+    fill_gaps : int, optional
+        width of the gap filling, by default 20
+    dry_run : bool, optional
+        dry run, by default False
+    display_plots : bool, optional
+        display plots, by default False
+
+    Returns
+    -------
+    numpy.ndarray
+        pixel shifts
+    numpy.ndarray
+        pixel correlations
+    list
+        list of corrected images
+    """
     # create output image path if not provided
     ori_images = [in_image.replace(".fits.gz", "_ori.fits.gz") if ".gz" in in_image else in_image.replace(".fits", "_ori.fits") for in_image in in_images]
     out_images = copy(in_images)
@@ -402,6 +546,8 @@ def fix_pixel_shifts_science(in_images, ref_images, in_mask, max_shift=10, thres
     images_out = [Image() for _ in range(len(in_images))]
     [image_out.loadFitsData(out_image) for image_out, out_image in zip(images_out, out_images)]
 
+    # calculate pixel shifts
+    log.info("running row-by-row cross-correlation")
     shifts, corrs = [], []
     for irow in range(rdata.shape[0]):
         cimg_row = cdata[irow]
