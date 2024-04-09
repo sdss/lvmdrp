@@ -30,6 +30,7 @@ import click
 import cloup
 import numpy as np
 import pandas as pd
+from glob import glob
 from itertools import product, groupby
 from astropy.io import fits
 
@@ -215,7 +216,8 @@ def _get_ring_expnums(expnums_ldls, expnums_qrtz, ring_size=12, sort_expnums=Fal
     return expnum_params
 
 
-def reduce_2d(mjds, target_mjd=None, expnums=None, ref_expnum=None,
+
+def reduce_2d(mjds, target_mjd=None, expnums=None,
               replace_with_nan=True, assume_imagetyp=None, reject_cr=True):
     """Preprocess and detrend a list of 2D frames
 
@@ -232,8 +234,6 @@ def reduce_2d(mjds, target_mjd=None, expnums=None, ref_expnum=None,
         MJD to store the master frames in
     expnums : list
         List of exposure numbers to reduce
-    ref_expnum : int
-        Reference exposure number for pixel shift correction
     replace_with_nan : bool
         Replace rejected pixels with NaN
     assume_imagetyp : str
@@ -263,8 +263,6 @@ def reduce_2d(mjds, target_mjd=None, expnums=None, ref_expnum=None,
         log.info(f'Using master pixel flat: {mpixflat_path}')
 
         frame_path = path.full("lvm_raw", camspec=frame["camera"], **frame)
-        if ref_expnum is not None:
-            ref_path = path.full("lvm_raw", hemi=frame["hemi"], mjd=frame["mjd"], camspec=frame["camera"], expnum=ref_expnum)
         pframe_path = path.full("lvm_anc", drpver=drpver, kind="p", imagetype=imagetyp, **frame)
 
         # bypass creation of detrended frame in case of imagetyp=bias
@@ -277,19 +275,14 @@ def reduce_2d(mjds, target_mjd=None, expnums=None, ref_expnum=None,
         if os.path.isfile(dframe_path):
             log.info(f"skipping {dframe_path}, file already exist")
         else:
-            if ref_expnum is not None:
-                image_tasks.fix_pixel_shifts_robust(in_image=frame_path, ref_image=ref_path,
-                                                    median_rows=11, max_shift=10,
-                                                    threshold_spikes=0.6, flat_spikes=11,
-                                                    fill_gaps=20)
-            image_tasks.preproc_raw_frame(in_image=frame_path, out_image=pframe_path, in_mask=mpixmask_path,
-                                          replace_with_nan=replace_with_nan)
+            image_tasks.preproc_raw_frame(in_image=frame_path, out_image=pframe_path,
+                                          in_mask=mpixmask_path, replace_with_nan=replace_with_nan)
             image_tasks.detrend_frame(in_image=pframe_path, out_image=dframe_path,
-                                        in_bias=mbias_path, in_dark=mdark_path,
-                                        in_pixelflat=mpixflat_path,
-                                        replace_with_nan=replace_with_nan,
-                                        reject_cr=reject_cr,
-                                        in_slitmap=SLITMAP)
+                                      in_bias=mbias_path, in_dark=mdark_path,
+                                      in_pixelflat=mpixflat_path,
+                                      replace_with_nan=replace_with_nan,
+                                      reject_cr=reject_cr,
+                                      in_slitmap=SLITMAP)
 
 
 def create_detrending_frames(mjds, target_mjd=None, expnums=None, kind="all", assume_imagetyp=None):
