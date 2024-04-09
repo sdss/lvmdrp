@@ -21,13 +21,12 @@ from astropy.visualization import simple_norm
 from ccdproc import cosmicray_lacosmic
 from scipy import interpolate
 from scipy import signal
-from scipy.ndimage import median_filter
 from tqdm import tqdm
 
 from typing import List, Tuple
 
 from lvmdrp import log
-from lvmdrp.core.constants import CONFIG_PATH, SPEC_CHANNELS, ARC_LAMPS, CON_LAMPS
+from lvmdrp.core.constants import CONFIG_PATH, SPEC_CHANNELS, ARC_LAMPS
 from lvmdrp.utils.decorators import skip_on_missing_input_path, drop_missing_input_paths
 from lvmdrp.utils.bitmask import QualityFlag
 from lvmdrp.core.fit_profile import Gaussians
