@@ -609,7 +609,7 @@ def fix_pixel_shifts(in_images, ref_images, in_mask, max_shift=10, threshold_spi
             plt.setp(axis, yticklabels=[], ylabel="")
             save_fig(
                 fig,
-                product_path=out_image,
+                product_path=in_mask,
                 to_display=display_plots,
                 figure_path="qa",
                 label="pixel_shifts"
