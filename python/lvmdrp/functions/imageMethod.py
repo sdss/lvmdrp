@@ -224,7 +224,7 @@ def _eval_continuum_model(obs_img, trace_amp, trace_cent, trace_fwhm):
     return mod, (mod / obs_img)
 
 
-def _channel_combine_fiber_params(in_cent_traces, in_waves, add_overscan_columns=True, channels="brz"):
+def _channel_combine_fiber_params(in_cent_traces, in_waves, add_overscan_columns=True):
     """Combines fiber centroid traces and wavelength model for a given spectrograph along the x-axis
 
     Given a set of centroid traces and wavelength models for a given spectrograph, this function
@@ -239,8 +239,6 @@ def _channel_combine_fiber_params(in_cent_traces, in_waves, add_overscan_columns
         list of input wavelength files for the same spectrograph
     add_overscan_columns : bool, optional
         add overscan columns, by default True
-    channels : str, optional
-        spectrograph channels, by default "brz"
 
     Returns
     -------
@@ -253,6 +251,7 @@ def _channel_combine_fiber_params(in_cent_traces, in_waves, add_overscan_columns
     FiberRows
         channel stacked wavelength data
     """
+    channels = "brz"
     # read master trace and wavelength
     mtraces = [FiberRows() for _ in range(len(in_cent_traces))]
     mwaves = [FiberRows() for _ in range(len(in_waves))]
@@ -389,8 +388,8 @@ def select_lines_2d(in_images, out_mask, in_cent_traces, in_waves, lines_list=No
         channel stacked wavelength data
     """
     # stack along x-axis traces and wavelengths, adding OS columns
-    log.info(f"stacking traces and wavelengths for {channels = }")
-    mtraces, mwaves, mtrace, mwave = _channel_combine_fiber_params(in_cent_traces, in_waves, channels=channels)
+    log.info(f"stacking centroid traces and wavelengths for {','.join(in_cent_traces)} and {','.join(in_waves)}")
+    mtraces, mwaves, mtrace, mwave = _channel_combine_fiber_params(in_cent_traces, in_waves)
 
     # get fiber selection mask
     log.info(f"selecting fibers with {y_widths = } pixel")
