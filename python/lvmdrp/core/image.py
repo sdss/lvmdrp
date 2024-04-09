@@ -230,11 +230,12 @@ def _remove_spikes(data, width=11, threshold=0.5):
         1-dimensional array with spikes removed
     """
     data_ = copy(data)
-    for irow in range(width, data.size - width):
-        chunk = data[irow-width:irow+width+1]
-        has_peaks = (chunk[0] == 0 and chunk[-1] == 0) and (chunk != 0).any()
+    hw = width // 2
+    for irow in range(hw, data.size - hw):
+        chunk = data[irow-hw:irow+hw+1]
+        has_peaks = (chunk[0] == chunk[-1]) and (numpy.abs(chunk) > chunk[0]).any()
         if has_peaks and (chunk != 0).sum() / width < threshold:
-            data_[irow-width:irow+width+1] = 0
+            data_[irow-hw:irow+hw+1] = chunk[0]
     return data_
 
 
