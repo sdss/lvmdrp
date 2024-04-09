@@ -218,7 +218,7 @@ def _get_ring_expnums(expnums_ldls, expnums_qrtz, ring_size=12, sort_expnums=Fal
 
 def fix_raw_pixel_shifts(mjd, target_mjd=None, expnums=None, ref_expnums=None, specs="123",
             y_widths=5, wave_list=None, wave_widths=0.6*5, max_shift=10, flat_spikes=11,
-            threshold_spikes=np.inf, dry_run=False, display_plots=False):
+            threshold_spikes=np.inf, create_mask_always=False, dry_run=False, display_plots=False):
     """Attempts to fix pixel shifts in a list of raw frames
 
     Given an MJD and (optionally) exposure numbers, fix the pixel shifts in a
@@ -249,8 +249,12 @@ def fix_raw_pixel_shifts(mjd, target_mjd=None, expnums=None, ref_expnums=None, s
         Number of flat spikes, by default 11
     threshold_spikes : float
         Threshold for spikes, by default np.inf
+    create_mask_always : bool
+        Create mask always, by default False
     dry_run : bool
         Dry run, by default False
+    display_plots : bool
+        Display plots, by default False
     """
 
     if isinstance(ref_expnums, (list, tuple, np.ndarray)):
@@ -276,12 +280,14 @@ def fix_raw_pixel_shifts(mjd, target_mjd=None, expnums=None, ref_expnums=None, s
             mwave_paths = sorted(glob(os.path.join(masters_path, f"lvm-mwave_neon_hgne_argon_xenon-?{spec}.fits")))
             mtrace_paths = sorted(glob(os.path.join(masters_path, f"lvm-mtrace-?{spec}.fits")))
             mask_2d_path = path.full("lvm_anc", drpver=drpver, tileid=frame["tileid"], mjd=mjd, imagetype="mask2d",
-                                     expnum=expnum, camera=f"?{spec}", kind="")
+                                     expnum=expnum, camera=f"sp{spec}", kind="")
+            os.makedirs(os.path.dirname(mask_2d_path), exist_ok=True)
 
-            image_tasks.select_lines_2d(in_images=cframe_paths, out_mask=mask_2d_path, lines_list=wave_list,
-                                        in_cent_traces=mtrace_paths, in_waves=mwave_paths,
-                                        y_widths=y_widths, wave_widths=wave_widths,
-                                        display_plots=display_plots)
+            if create_mask_always or (spec == "1" and not os.path.isfile(mask_2d_path)):
+                image_tasks.select_lines_2d(in_images=cframe_paths, out_mask=mask_2d_path, lines_list=wave_list,
+                                            in_cent_traces=mtrace_paths, in_waves=mwave_paths,
+                                            y_widths=y_widths, wave_widths=wave_widths,
+                                            display_plots=display_plots)
 
             image_tasks.fix_pixel_shifts(in_images=rframe_paths, ref_images=cframe_paths,
                                          in_mask=mask_2d_path, flat_spikes=flat_spikes,
