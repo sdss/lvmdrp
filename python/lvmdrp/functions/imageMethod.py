@@ -307,7 +307,7 @@ def _get_fiber_selection(traces, image_shape=(4080, 4120), y_widths=3):
     """
     images = [Image(data=numpy.zeros(image_shape), mask=numpy.zeros(image_shape, dtype=bool)) for _ in range(len(traces))]
     for i in range(len(traces)):
-        images[i].maskFiberTraces(traces[i], aperture=y_widths)
+        images[i].maskFiberTraces(traces[i], aperture=y_widths, parallel=1)
     image = Image()
     image.unsplit(images)
 
