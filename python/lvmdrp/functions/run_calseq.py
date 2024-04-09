@@ -270,8 +270,6 @@ def fix_raw_pixel_shifts(mjd, target_mjd=None, expnums=None, ref_expnums=None, s
     expnums_grp = frames.groupby("expnum")
     for spec in specs:
         for expnum in expnums_grp.groups:
-            frame = expnums_grp.get_group(expnum).iloc[0].to_dict()
-
             rframe_paths = sorted(path.expand("lvm_raw", hemi="s", camspec=f"?{spec}", mjd=mjd, expnum=expnum))
             cframe_paths = sorted(path.expand("lvm_raw", hemi="s", camspec=f"?{spec}", mjd=mjd, expnum=ref_expnum))
             rframe_paths = [rframe_path for rframe_path in rframe_paths if ".gz" in rframe_path]
@@ -279,11 +277,11 @@ def fix_raw_pixel_shifts(mjd, target_mjd=None, expnums=None, ref_expnums=None, s
 
             mwave_paths = sorted(glob(os.path.join(masters_path, f"lvm-mwave_neon_hgne_argon_xenon-?{spec}.fits")))
             mtrace_paths = sorted(glob(os.path.join(masters_path, f"lvm-mtrace-?{spec}.fits")))
-            mask_2d_path = path.full("lvm_anc", drpver=drpver, tileid=frame["tileid"], mjd=mjd, imagetype="mask2d",
-                                     expnum=expnum, camera=f"sp{spec}", kind="")
-            os.makedirs(os.path.dirname(mask_2d_path), exist_ok=True)
+            mask_2d_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, imagetype="mask2d",
+                                     expnum=0, camera=f"sp{spec}", kind="")
 
-            if create_mask_always or (spec == "1" and not os.path.isfile(mask_2d_path)):
+            if create_mask_always or expnum == list(expnums_grp.groups)[0]:
+                os.makedirs(os.path.dirname(mask_2d_path), exist_ok=True)
                 image_tasks.select_lines_2d(in_images=cframe_paths, out_mask=mask_2d_path, lines_list=wave_list,
                                             in_cent_traces=mtrace_paths, in_waves=mwave_paths,
                                             y_widths=y_widths, wave_widths=wave_widths,
