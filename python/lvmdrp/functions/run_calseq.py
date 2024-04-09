@@ -216,6 +216,78 @@ def _get_ring_expnums(expnums_ldls, expnums_qrtz, ring_size=12, sort_expnums=Fal
     return expnum_params
 
 
+def fix_raw_pixel_shifts(mjd, target_mjd=None, expnums=None, ref_expnums=None, specs="123",
+            y_widths=5, wave_list=None, wave_widths=0.6*5, max_shift=10, flat_spikes=11,
+            threshold_spikes=np.inf, dry_run=False, display_plots=False):
+    """Attempts to fix pixel shifts in a list of raw frames
+
+    Given an MJD and (optionally) exposure numbers, fix the pixel shifts in a
+    list of 2D frames. This routine will store the fixed frames in the
+    corresponding calibration directory in the `target_mjd` or by default `mjd`.
+
+    Parameters:
+    ----------
+    mjd : float
+        MJD to reduce
+    target_mjd : float
+        MJD where master frames are to be found
+    expnums : list
+        List of exposure numbers to look for pixel shifts
+    ref_expnums : list
+        List of reference exposure numbers to use as reference for good frames
+    specs : str
+        Spectrograph channels
+    y_widths : int
+        Width of the y-axis for the lines, by default 5
+    wave_list : list
+        List of lines to use for the wavelength calibration, by default None
+    wave_widths : float
+        Width of the wavelength axis for the lines, by default 0.6*5
+    max_shift : int
+        Maximum shift in pixels, by default 10
+    flat_spikes : int
+        Number of flat spikes, by default 11
+    threshold_spikes : float
+        Threshold for spikes, by default np.inf
+    dry_run : bool
+        Dry run, by default False
+    """
+
+    if isinstance(ref_expnums, (list, tuple, np.ndarray)):
+        ref_expnum = ref_expnums[0]
+    elif isinstance(ref_expnums, int):
+        ref_expnum = ref_expnums
+    else:
+        pass
+
+    frames, masters_mjd = get_sequence_metadata(mjd, target_mjd=target_mjd, expnums=expnums)
+    masters_path = os.path.join(MASTERS_DIR, str(masters_mjd))
+
+    expnums_grp = frames.groupby("expnum")
+    for spec in specs:
+        for expnum in expnums_grp.groups:
+            frame = expnums_grp.get_group(expnum).iloc[0].to_dict()
+
+            rframe_paths = sorted(path.expand("lvm_raw", hemi="s", camspec=f"?{spec}", mjd=mjd, expnum=expnum))
+            cframe_paths = sorted(path.expand("lvm_raw", hemi="s", camspec=f"?{spec}", mjd=mjd, expnum=ref_expnum))
+            rframe_paths = [rframe_path for rframe_path in rframe_paths if ".gz" in rframe_path]
+            cframe_paths = [cframe_path for cframe_path in cframe_paths if ".gz" in cframe_path]
+
+            mwave_paths = sorted(glob(os.path.join(masters_path, f"lvm-mwave_neon_hgne_argon_xenon-?{spec}.fits")))
+            mtrace_paths = sorted(glob(os.path.join(masters_path, f"lvm-mtrace-?{spec}.fits")))
+            mask_2d_path = path.full("lvm_anc", drpver=drpver, tileid=frame["tileid"], mjd=mjd, imagetype="mask2d",
+                                     expnum=expnum, camera=f"?{spec}", kind="")
+
+            image_tasks.select_lines_2d(in_images=cframe_paths, out_mask=mask_2d_path, lines_list=wave_list,
+                                        in_cent_traces=mtrace_paths, in_waves=mwave_paths,
+                                        y_widths=y_widths, wave_widths=wave_widths,
+                                        display_plots=display_plots)
+
+            image_tasks.fix_pixel_shifts(in_images=rframe_paths, ref_images=cframe_paths,
+                                         in_mask=mask_2d_path, flat_spikes=flat_spikes,
+                                         threshold_spikes=threshold_spikes, max_shift=max_shift,
+                                         dry_run=dry_run, display_plots=display_plots)
+
 
 def reduce_2d(mjds, target_mjd=None, expnums=None,
               replace_with_nan=True, assume_imagetyp=None, reject_cr=True):
