@@ -259,10 +259,10 @@ def fix_raw_pixel_shifts(mjd, target_mjd=None, expnums=None, ref_expnums=None, s
 
     if isinstance(ref_expnums, (list, tuple, np.ndarray)):
         ref_expnum = ref_expnums[0]
-    elif isinstance(ref_expnums, int):
+    elif isinstance(ref_expnums, (int, np.int64)):
         ref_expnum = ref_expnums
     else:
-        pass
+        raise ValueError("no valid reference exposure number given")
 
     frames, masters_mjd = get_sequence_metadata(mjd, target_mjd=target_mjd, expnums=expnums)
     masters_path = os.path.join(MASTERS_DIR, str(masters_mjd))
