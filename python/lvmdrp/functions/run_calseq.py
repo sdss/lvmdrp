@@ -260,7 +260,8 @@ def messup_frame(mjd, expnum, spec="1", shifts=[1500, 2000, 3500], shift_size=-2
         return
 
     log.info(f"messing up frames {','.join(rframe_paths)} with {shifts = } and {shift_size = } pixels")
-    [copy2(rframe_path, rframe_ori_path) for rframe_path, rframe_ori_path in zip(rframe_paths, rframe_ori_paths)]
+    if not original_exists:
+        [copy2(rframe_path, rframe_ori_path) for rframe_path, rframe_ori_path in zip(rframe_paths, rframe_ori_paths)]
 
     messed_up_frames = []
     for rframe_path, rframe_ori_path in zip(rframe_paths, rframe_ori_paths):
