@@ -31,6 +31,8 @@ import cloup
 import numpy as np
 import pandas as pd
 from glob import glob
+from copy import deepcopy as copy
+from shutil import copy2
 from itertools import product, groupby
 from astropy.io import fits
 
@@ -38,6 +40,7 @@ from lvmdrp import log, path, __version__ as drpver
 from lvmdrp.utils import metadata as md
 from lvmdrp.core.constants import SPEC_CHANNELS
 from lvmdrp.core.tracemask import TraceMask
+from lvmdrp.core.image import loadImage
 
 from lvmdrp.functions import imageMethod as image_tasks
 from lvmdrp.functions import rssMethod as rss_tasks
@@ -215,6 +218,64 @@ def _get_ring_expnums(expnums_ldls, expnums_qrtz, ring_size=12, sort_expnums=Fal
         expnum_params[camera][0] = (expnums[0], sorted(filled_block_ids), fiber_strs[0])
 
     return expnum_params
+
+
+def messup_frame(mjd, expnum, spec="1", shifts=[1500, 2000, 3500], shift_size=-2, undo_messup=False):
+    """ Mess up a frame by shifting the data by a given amount along given rows
+
+    Parameters
+    ----------
+    mjd : int
+        the MJD of the frame
+    expnum : int
+        the exposure number of the frame
+    spec : str
+        the spectrograph number
+    shifts : list
+        the rows to shift
+    shift_size : int
+        the amount to shift the data by
+    undo_messup : bool
+        whether to undo the mess up of the frame
+
+    Returns
+    -------
+    list
+        the messed up frames
+    """
+    specid = f"sp{spec}"
+    frames = md.get_frames_metadata(mjd)
+    frames.query("expnum == @expnum and spec == @specid", inplace=True)
+
+    rframe_paths = sorted(path.expand("lvm_raw", hemi="s", camspec=f"?{spec}", mjd=mjd, expnum=expnum))
+    rframe_ori_paths = [rframe_path.replace(".fits.gz", "_good.fits.gz") for rframe_path in rframe_paths]
+    original_exists = all([os.path.exists(rframe_ori_path) for rframe_ori_path in rframe_ori_paths])
+    if undo_messup and original_exists:
+        log.info(f"undoing mess up of frames {','.join(rframe_paths)}")
+        [copy2(rframe_ori_path, rframe_path) for rframe_ori_path, rframe_path in zip(rframe_ori_paths, rframe_paths)]
+        [os.remove(rframe_ori_path) for rframe_ori_path in rframe_ori_paths]
+        return
+    elif undo_messup:
+        log.info(f"cannot undo mess up of frames {','.join(rframe_paths)} because original frames do not exist")
+        return
+
+    log.info(f"messing up frames {','.join(rframe_paths)} with {shifts = } and {shift_size = } pixels")
+    [copy2(rframe_path, rframe_ori_path) for rframe_path, rframe_ori_path in zip(rframe_paths, rframe_ori_paths)]
+
+    messed_up_frames = []
+    for rframe_path, rframe_ori_path in zip(rframe_paths, rframe_ori_paths):
+        rframe = loadImage(rframe_ori_path)
+
+        messup_frame = copy(rframe)
+        for shift in shifts:
+            messup_frame._data[shift:] = np.roll(messup_frame._data[shift:], shift_size, axis=1)
+
+        log.info(f"saving messed up frame to {rframe_path}")
+        messup_frame.writeFitsData(rframe_path)
+
+        messed_up_frames.append(messup_frame)
+
+    return messed_up_frames
 
 
 def fix_raw_pixel_shifts(mjd, expnums=None, ref_expnums=None, specs="123",
