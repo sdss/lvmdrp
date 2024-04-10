@@ -426,7 +426,8 @@ def select_lines_2d(in_images, out_mask, in_cent_traces, in_waves, lines_list=No
                 table = numpy.genfromtxt(ref_table, usecols=(0, 1), skip_header=1)
                 lines_list.append(table[table[:, 0]>=200, 1])
             elif source == "sky":
-                lines_list.append(numpy.genfromtxt(os.path.join(os.getenv('LVMCORE_DIR'), 'etc', 'UVES_sky_lines.txt'), usecols=(1,)))
+                ref_table = numpy.genfromtxt(os.path.join(os.getenv('LVMCORE_DIR'), 'etc', 'UVES_sky_lines.txt'), usecols=(1,4))
+                lines_list.append(ref_table[ref_table[:, 1] > 2, 0])
 
         lines_list = numpy.concatenate(lines_list)
         lines_list.sort()
