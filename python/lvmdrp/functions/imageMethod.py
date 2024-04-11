@@ -429,7 +429,7 @@ def select_lines_2d(in_images, out_mask, in_cent_traces, in_waves, lines_list=No
                 ref_table = numpy.genfromtxt(os.path.join(os.getenv('LVMCORE_DIR'), 'etc', 'UVES_sky_lines.txt'), usecols=(1,4))
                 lines_list.append(ref_table[ref_table[:, 1] > 2, 0])
 
-        lines_list = numpy.concatenate(lines_list)
+        lines_list = numpy.unique(numpy.concatenate(lines_list))
         lines_list.sort()
         waves = mwave._data[mwave._data>0].flatten()
         lines_list = lines_list[(lines_list > waves.min()) & (lines_list < waves.max())]
