@@ -281,7 +281,7 @@ def messup_frame(mjd, expnum, spec="1", shifts=[1500, 2000, 3500], shift_size=-2
 
 def fix_raw_pixel_shifts(mjd, expnums=None, ref_expnums=None, specs="123",
                          y_widths=5, wave_list=None, wave_widths=0.6*5, max_shift=10, flat_spikes=11,
-                         threshold_spikes=np.inf, create_mask_always=False, dry_run=False,
+                         threshold_spikes=np.inf, shift_rows=None, create_mask_always=False, dry_run=False,
                          undo_corrections=False, display_plots=False):
     """Attempts to fix pixel shifts in a list of raw frames
 
@@ -311,6 +311,8 @@ def fix_raw_pixel_shifts(mjd, expnums=None, ref_expnums=None, specs="123",
         Number of flat spikes, by default 11
     threshold_spikes : float
         Threshold for spikes, by default np.inf
+    shift_rows : dict
+        Rows to shift, by default None
     create_mask_always : bool
         Create mask always, by default False
     dry_run : bool
@@ -327,6 +329,11 @@ def fix_raw_pixel_shifts(mjd, expnums=None, ref_expnums=None, specs="123",
         ref_expnum = ref_expnums
     else:
         raise ValueError("no valid reference exposure number given")
+
+    if shift_rows is None:
+        shift_rows = {}
+    elif not isinstance(shift_rows, dict):
+        raise ValueError("shift_rows must be a dictionary with keys (spec, expnum) and values a list of rows to shift")
 
     frames, _ = get_sequence_metadata(mjd, target_mjd=None, expnums=expnums)
     masters_mjd = get_master_mjd(sci_mjd=mjd)
@@ -360,7 +367,7 @@ def fix_raw_pixel_shifts(mjd, expnums=None, ref_expnums=None, specs="123",
 
             image_tasks.fix_pixel_shifts(in_images=rframe_paths, out_pixshift=pixshift_path,
                                          ref_images=cframe_paths, in_mask=mask_2d_path, flat_spikes=flat_spikes,
-                                         threshold_spikes=threshold_spikes, max_shift=max_shift,
+                                         threshold_spikes=threshold_spikes, max_shift=max_shift, shift_rows=shift_rows.get((spec, expnum), None),
                                          dry_run=dry_run, undo_correction=undo_corrections, display_plots=display_plots)
 
 

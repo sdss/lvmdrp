@@ -478,7 +478,7 @@ def select_lines_2d(in_images, out_mask, in_cent_traces, in_waves, lines_list=No
 
 def fix_pixel_shifts(in_images, out_pixshift, ref_images, in_mask,
                      max_shift=10, threshold_spikes=0.6, flat_spikes=11,
-                     fill_gaps=20, dry_run=False, undo_correction=False, display_plots=False):
+                     fill_gaps=20, shift_rows=None, dry_run=False, undo_correction=False, display_plots=False):
     """Corrects pixel shifts in raw frames based on reference frames and a selection of spectral regions
 
     Given a set of raw frames, reference frames and a mask, this function corrects pixel shifts
@@ -551,38 +551,47 @@ def fix_pixel_shifts(in_images, out_pixshift, ref_images, in_mask,
     # load input images into output array to apply corrections if needed
     images_out = [loadImage(in_image) for in_image in in_images]
 
-    # calculate pixel shifts
-    log.info("running row-by-row cross-correlation")
-    shifts, corrs = [], []
-    for irow in range(rdata.shape[0]):
-        cimg_row = cdata[irow]
-        rimg_row = rdata[irow]
-        if numpy.all(cimg_row == 0) or numpy.all(rimg_row == 0):
-            shifts.append(0)
-            corrs.append(0)
-            continue
+    # calculate pixel shifts or use provided ones
+    if shift_rows is None:
+        log.info("running row-by-row cross-correlation")
+        shifts, corrs = [], []
+        for irow in range(rdata.shape[0]):
+            cimg_row = cdata[irow]
+            rimg_row = rdata[irow]
+            if numpy.all(cimg_row == 0) or numpy.all(rimg_row == 0):
+                shifts.append(0)
+                corrs.append(0)
+                continue
 
-        shift = signal.correlation_lags(cimg_row.size, rimg_row.size, mode="same")
-        corr = signal.correlate(cimg_row, rimg_row, mode="same")
+            shift = signal.correlation_lags(cimg_row.size, rimg_row.size, mode="same")
+            corr = signal.correlate(cimg_row, rimg_row, mode="same")
 
-        mask = (numpy.abs(shift) <= max_shift)
-        shift = shift[mask]
-        corr = corr[mask]
+            mask = (numpy.abs(shift) <= max_shift)
+            shift = shift[mask]
+            corr = corr[mask]
 
-        max_corr = numpy.argmax(corr)
-        shifts.append(shift[max_corr])
-        corrs.append(corr[max_corr])
-    shifts = numpy.asarray(shifts)
-    corrs = numpy.asarray(corrs)
+            max_corr = numpy.argmax(corr)
+            shifts.append(shift[max_corr])
+            corrs.append(corr[max_corr])
+        shifts = numpy.asarray(shifts)
+        corrs = numpy.asarray(corrs)
 
-    raw_shifts = copy(shifts)
-    shifts = _remove_spikes(shifts, width=flat_spikes, threshold=threshold_spikes)
-    shifts = _fillin_valleys(shifts, width=fill_gaps)
-    shifts = _no_stepdowns(shifts)
+        raw_shifts = copy(shifts)
+        shifts = _remove_spikes(shifts, width=flat_spikes, threshold=threshold_spikes)
+        shifts = _fillin_valleys(shifts, width=fill_gaps)
+        shifts = _no_stepdowns(shifts)
+    else:
+        log.info("using user provided pixel shifts")
+        shifts = numpy.zeros(cdata.shape[0])
+        for irow in shift_rows:
+            shifts[irow:] += 2
+        raw_shifts = copy(shifts)
+        corrs = numpy.zeros_like(shifts)
 
     apply_shift = numpy.any(numpy.abs(shifts)>0)
     if apply_shift:
-        log.info(f"found {numpy.sum(numpy.abs(shifts)>0)} rows with pixel shifts")
+        shifted_rows = numpy.where(numpy.gradient(shifts) > 0)[0][1::2].tolist()
+        log.info(f"applying shifts to {shifted_rows = } ({numpy.sum(numpy.abs(shifts)>0)}) rows")
         for image_out, in_image, out_image, ori_image in zip(images_out, in_images, out_images, ori_images):
             image = copy(image_out)
             mjd = image._header.get("SMJD", image._header["MJD"])
