@@ -508,7 +508,8 @@ def get_frames_metadata(
     raw_frame = f"{mjd}/sdR*{suffix}*" if mjd else f"*/sdR*{suffix}*"
     frames = list(pathlib.Path(raw_data_path).rglob(raw_frame))
 
-    if _load_or_create_store(tileid="*", mjd=mjd, kind="raw") and not overwrite:
+    metadata_paths = _get_metadata_paths(tileid="*", mjd=mjd, kind="raw", filter_exist=True)
+    if any(metadata_paths) and not overwrite:
         log.info("Loading existing metadata store.")
         meta = get_metadata(mjd=mjd, tileid="*")
     else:
