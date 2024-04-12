@@ -1435,25 +1435,6 @@ def interpolate_sky(in_frame: str, out_rss: str = None,
     new_rss._header["HIERARCH GEOCORONAL SKYE SHADOW_HEIGHT"] = get_telescope_shadowheight(new_rss._header, telescope="SKYE")
     new_rss._header["HIERARCH GEOCORONAL SCI SHADOW_HEIGHT"] = get_telescope_shadowheight(new_rss._header, telescope="SCI")
 
-    # extract standard star metadata if exists
-    std_acq = np.asarray(list(frame._header["STD*ACQ"].values()))
-    if std_acq.size == 0:
-        log.warning("no standard star metadata found, skipping sky reescaling")
-    else:
-        # filter by acquired
-        std_ids = np.asarray(list(frame._header["STD*FIB"].values()))[std_acq]
-        std_exp = np.asarray(list(frame._header["STD*EXP"].values()))[std_acq]
-        # select only standard star in current exposure
-        std_idx = np.where(np.isin(fibermap["orig_ifulabel"], std_ids))
-        log.info(f"calculating correction factors for standard star: {fibermap[std_idx]['orig_ifulabel'].value}")
-        # calculate scaling factors for standard star
-        std_fac = ((stdid, stdexp / frame._header["EXPTIME"]) for stdid, stdexp in zip(std_ids, std_exp) if stdid in fibermap["orig_ifulabel"])
-        std_fac = {stdid: np.round(factor,4) for stdid, factor in sorted(std_fac, key=lambda item: int(item[0].split("-")[1]))}
-        log.info(f"correction factors for standard star: {std_fac}")
-        # apply factors to standard star sky
-        new_rss._data[std_idx] *= np.asarray(list(std_fac.values()))[:, None]
-        new_rss._error[std_idx] *= np.asarray(list(std_fac.values()))[:, None]
-
     # write output RSS
     log.info(f"writing output RSS file '{os.path.basename(out_rss)}'")
     new_rss.writeFitsData(out_rss)
@@ -1533,6 +1514,26 @@ def combine_skies(in_rss: str, out_rss, sky_weights: Tuple[float, float] = None)
     rss.setHdrValue("SKYEW", w_e, "SkyE weight")
     rss.setHdrValue("SKYWW", w_w, "SkyW weight")
     rss.set_sky(rss_sky=sky)
+
+    # extract standard star metadata if exists
+    std_acq = np.asarray(list(rss._header["STD*ACQ"].values()))
+    if std_acq.size == 0:
+        log.warning("no standard star metadata found, skipping sky reescaling")
+    else:
+        # filter by acquired
+        std_ids = np.asarray(list(rss._header["STD*FIB"].values()))[std_acq]
+        std_exp = np.asarray(list(rss._header["STD*EXP"].values()))[std_acq]
+        # select only standard star in current exposure
+        std_idx = np.where(np.isin(rss._slitmap["orig_ifulabel"], std_ids))
+        log.info(f"calculating correction factors for standard star: {rss._slitmap[std_idx]['orig_ifulabel'].value}")
+        # calculate scaling factors for standard star
+        std_fac = ((stdid, stdexp / rss._header["EXPTIME"]) for stdid, stdexp in zip(std_ids, std_exp) if stdid in rss._slitmap["orig_ifulabel"])
+        std_fac = {stdid: np.round(factor,4) for stdid, factor in sorted(std_fac, key=lambda item: int(item[0].split("-")[1]))}
+        log.info(f"correction factors for standard star: {std_fac}")
+        # apply factors to standard star sky
+        rss._sky[std_idx] *= np.asarray(list(std_fac.values()))[:, None]
+        rss._sky_error[std_idx] *= np.asarray(list(std_fac.values()))[:, None]
+
     rss.writeFitsData(out_rss)
 
     return rss, sky
