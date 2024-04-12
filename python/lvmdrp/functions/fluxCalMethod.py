@@ -191,7 +191,7 @@ def apply_fluxcal(in_rss: str, out_rss: str, skip_fluxcal: bool = False, display
     return rss
 
 
-def fluxcal_Gaia(camera, in_rss, plot=True, GAIA_CACHE_DIR=None):
+def fluxcal_Gaia(channel, in_rss, plot=True, GAIA_CACHE_DIR=None):
     """
     Flux calibrate LVM data using the 12 spectra of stars observed through
     the Spec telescope.
@@ -211,9 +211,6 @@ def fluxcal_Gaia(camera, in_rss, plot=True, GAIA_CACHE_DIR=None):
 
     # wavelength array
     w = rss._wave
-
-    # load fibermap and filter for current spectrograph
-    slitmap = rss._slitmap[rss._slitmap["spectrographid"] == int(camera[1])]
 
     # define dummy sensitivity array in (ergs/s/cm^2/A) / (e-/s/A)
     colnames = [f"{std_fib[:-3]}SEN" for std_fib in rss._header["STD*FIB"]]
@@ -259,7 +256,7 @@ def fluxcal_Gaia(camera, in_rss, plot=True, GAIA_CACHE_DIR=None):
     # load the sky masks
     m = get_sky_mask_uves(w, width=3)
     m2 = None
-    if camera[0] == "z":
+    if channel == "z":
         m2 = get_z_continuum_mask(w)
 
     # iterate over standard stars, derive sensitivity curve for each
@@ -267,12 +264,10 @@ def fluxcal_Gaia(camera, in_rss, plot=True, GAIA_CACHE_DIR=None):
         nn, fiber, gaia_id, exptime, secz = s  # unpack standard star tuple
 
         # find the fiber with our spectrum of that Gaia star, if it is not in the current spectrograph, continue
-        select = slitmap["orig_ifulabel"] == fiber
+        select = rss._slitmap["orig_ifulabel"] == fiber
         fibidx = np.where(select)[0]
 
-        log.info(
-            f"standard fiber '{fiber}', index '{fibidx}', star '{gaia_id}', exptime '{exptime:.2f}', secz '{secz:.2f}'"
-        )
+        log.info(f"standard fiber '{fiber}', index '{fibidx}', star '{gaia_id}', exptime '{exptime:.2f}', secz '{secz:.2f}'")
 
         # load Gaia BP-RP spectrum from cache, or download from webapp
         try:
@@ -289,10 +284,8 @@ def fluxcal_Gaia(camera, in_rss, plot=True, GAIA_CACHE_DIR=None):
 
         # interpolate over bright sky lines
         spec = ancillary_func.interpolate_mask(w, spec, m, fill_value="extrapolate")
-        if camera[0] == "z":
-            spec = ancillary_func.interpolate_mask(
-                w, spec, ~m2, fill_value="extrapolate"
-            )
+        if channel == "z":
+            spec = ancillary_func.interpolate_mask(w, spec, ~m2, fill_value="extrapolate")
 
         # correct for extinction
         spec *= 10 ** (0.4 * ext * secz)
@@ -309,19 +302,14 @@ def fluxcal_Gaia(camera, in_rss, plot=True, GAIA_CACHE_DIR=None):
         res[f"STD{nn}SEN"] = s(w).astype(np.float32)
 
         # caluculate SDSS g band magnitudes for QC
-        mAB_std = np.round(ancillary_func.spec_to_LVM_mAB(camera, w, stdflux), 2)
-        mAB_obs = np.round(
-            ancillary_func.spec_to_LVM_mAB(
-                camera, w[np.isfinite(spec)], spec[np.isfinite(spec)]
-            ),
-            2,
-        )
+        mAB_std = np.round(ancillary_func.spec_to_LVM_mAB(channel, w, stdflux), 2)
+        mAB_obs = np.round(ancillary_func.spec_to_LVM_mAB(channel, w[np.isfinite(spec)], spec[np.isfinite(spec)]), 2)
         # update input file header
-        label = camera[0].upper()
+        label = channel.upper()
         rss.setHdrValue(f"STD{nn}{label}AB", mAB_std, f"Gaia AB mag in {label}-band")
         rss.setHdrValue(f"STD{nn}{label}IN", mAB_obs, f"Obs AB mag in {label}-band")
         log.info(
-            f"AB mag in LVM_{camera[0]}: Gaia {mAB_std:.2f}, instrumental {mAB_obs:.2f}"
+            f"AB mag in LVM_{channel}: Gaia {mAB_std:.2f}, instrumental {mAB_obs:.2f}"
         )
 
         if plot:
