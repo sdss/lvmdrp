@@ -2,6 +2,7 @@ import os
 import numpy
 import bottleneck as bn
 from copy import deepcopy as copy
+from copy import deepcopy as copy
 from scipy import interpolate
 from astropy.io import fits as pyfits
 from astropy.wcs import WCS
@@ -2931,16 +2932,14 @@ class RSS(FiberRows):
         if mask is None:
             mask = self._mask
         if mask is None:
-            return self._data, self._error, self._lsf
+            return self._data, self._error
 
         if self._mask is not None:
             self._data[self._mask] = numpy.nan
             if self._error is not None:
                 self._error[self._mask] = numpy.nan
-            if self._lsf is not None:
-                self._lsf[self._mask] = numpy.nan
 
-        return self._data, self._error, self._lsf
+        return self._data, self._error
 
     def set_fluxcal(self, fluxcal):
         if fluxcal is None:

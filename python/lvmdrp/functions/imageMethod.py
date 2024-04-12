@@ -20,11 +20,13 @@ from astropy.nddata import CCDData, StdDevUncertainty
 from astropy.visualization import simple_norm
 from ccdproc import cosmicray_lacosmic
 from scipy import interpolate
+from scipy import signal
 from tqdm import tqdm
 
 from typing import List, Tuple
 
 from lvmdrp import log
+from lvmdrp.core.constants import CONFIG_PATH, SPEC_CHANNELS, ARC_LAMPS
 from lvmdrp.utils.decorators import skip_on_missing_input_path, drop_missing_input_paths
 from lvmdrp.utils.bitmask import QualityFlag
 from lvmdrp.core.fit_profile import Gaussians
@@ -33,6 +35,7 @@ from lvmdrp.core.image import (
     Image,
     _parse_ccd_section,
     _model_overscan,
+    _remove_spikes,
     _fillin_valleys,
     _no_stepdowns,
     combineImages,
@@ -218,6 +221,420 @@ def _eval_continuum_model(obs_img, trace_amp, trace_cent, trace_fwhm):
         mod._data[:, icolumn] = gaussians(pars=pars, x=column)
 
     return mod, (mod / obs_img)
+
+
+def _channel_combine_fiber_params(in_cent_traces, in_waves, add_overscan_columns=True):
+    """Combines fiber centroid traces and wavelength model for a given spectrograph along the x-axis
+
+    Given a set of centroid traces and wavelength models for a given spectrograph, this function
+    combines them along the x-axis, adding overscan columns if requested. Additionally the regions
+    past the dichroic are masked.
+
+    Parameters
+    ----------
+    in_cent_traces : list
+        list of input centroid trace files for the same spectrograph
+    in_waves : list
+        list of input wavelength files for the same spectrograph
+    add_overscan_columns : bool, optional
+        add overscan columns, by default True
+
+    Returns
+    -------
+    list
+        list of fiber centroid traces
+    list
+        list of wavelength models
+    FiberRows
+        channel stacked fiber centroid trace data
+    FiberRows
+        channel stacked wavelength data
+    """
+    channels = "brz"
+    # read master trace and wavelength
+    mtraces = [FiberRows() for _ in range(len(in_cent_traces))]
+    mwaves = [FiberRows() for _ in range(len(in_waves))]
+    channel_masks = []
+    for i, (mtrace_path, mwave_path) in enumerate(zip(in_cent_traces, in_waves)):
+        mtraces[i].loadFitsData(mtrace_path)
+        mwaves[i].loadFitsData(mwave_path)
+
+        # add columns for OS region
+        if add_overscan_columns:
+            os_region = numpy.zeros((mtraces[i]._data.shape[0], 34), dtype=int)
+            trace_data = numpy.split(mtraces[i]._data, 2, axis=1)
+            trace_mask = numpy.split(mtraces[i]._mask, 2, axis=1)
+            mtraces[i]._data = numpy.concatenate([trace_data[0], os_region, trace_data[1]], axis=1)
+            mtraces[i]._mask = numpy.concatenate([trace_mask[0], ~os_region.astype(bool), trace_mask[1]], axis=1)
+            wave_data = numpy.split(mwaves[i]._data, 2, axis=1)
+            wave_mask = numpy.split(mwaves[i]._mask, 2, axis=1)
+            mwaves[i]._data = numpy.concatenate([wave_data[0], os_region, wave_data[1]], axis=1)
+            mwaves[i]._mask = numpy.concatenate([wave_mask[0], ~os_region.astype(bool), wave_mask[1]], axis=1)
+
+        # get pixels where spectropgraph is not blocked
+        channel_mask = (SPEC_CHANNELS[channels[i]][0]>=mwaves[i]._data)|(mwaves[i]._data>=SPEC_CHANNELS[channels[i]][1])
+        channel_masks.append(channel_mask)
+
+        mtraces[i]._mask |= channel_mask
+        mwaves[i]._mask |= channel_mask
+    mtrace = FiberRows()
+    mtrace.unsplit(mtraces)
+    mwave = FiberRows()
+    mwave.unsplit(mwaves)
+
+    return mtraces, mwaves, mtrace, mwave
+
+
+def _get_fiber_selection(traces, image_shape=(4080, 4120), y_widths=3):
+    """Returns a mask with selected fibers within a given width
+
+    Given a set of centroid traces, this function returns a mask with selected fibers
+    within a given width.
+
+    Parameters
+    ----------
+    traces : list
+        list of fiber centroid traces
+    image_shape : tuple, optional
+        shape of the image, by default (4080, 4120)
+    y_widths : int, optional
+        width of the fiber trace, by default 3
+
+    Returns
+    -------
+    numpy.ndarray
+        fiber selection mask
+    """
+    images = [Image(data=numpy.zeros(image_shape), mask=numpy.zeros(image_shape, dtype=bool)) for _ in range(len(traces))]
+    for i in range(len(traces)):
+        images[i].maskFiberTraces(traces[i], aperture=y_widths, parallel=1)
+    image = Image()
+    image.unsplit(images)
+
+    return image._mask
+
+
+def _get_wave_selection(waves, lines_list, window):
+    """Returns selection windows from a list of wavelengths
+
+    Given a list of wavelengths, this function returns selection windows
+    based on a given window size.
+
+    Parameters
+    ----------
+    waves : numpy.ndarray
+        wavelength data
+    lines_list : list
+        list of lines to select
+    window : float
+        window size
+
+    Returns
+    -------
+    numpy.ndarray
+        selection mask
+    """
+    hw = window / 2
+    wave_selection = numpy.zeros_like(waves, dtype=bool)
+    if len(wave_selection.shape) == 2:
+        for ifiber in range(wave_selection.shape[0]):
+            for wline in lines_list:
+                if wline-hw < waves[ifiber].min() or wline+hw > waves[ifiber].max():
+                    continue
+                wave_selection[ifiber] |= (waves[ifiber] > wline-hw) & (waves[ifiber] < wline+hw)
+    else:
+        wave_selection = (waves > wline-hw) & (waves < wline+hw)
+    return wave_selection
+
+
+def select_lines_2d(in_images, out_mask, in_cent_traces, in_waves, lines_list=None, y_widths=3, wave_widths=0.6*5, image_shape=(4080, 4120), channels="brz", display_plots=False):
+    """Selects spectral features based on a list of wavelengths from a 2D raw frame
+
+    Given a list of raw frames, centroid traces and wavelength models for a given spectrograph,
+    this function selects spectral features based on a list of wavelengths, creating a 2D mask
+    with selected lines.
+
+    Parameters
+    ----------
+    in_images : list
+        list of input raw frames for the same spectrograph (brz)
+    out_mask : str
+        output mask file for the channel stacked frame
+    in_cent_traces : list
+        list of input centroid trace files for the same spectrograph
+    in_waves : list
+        list of input wavelength files for the same spectrograph
+    lines_list : list, optional
+        list of lines to select, by default None
+    y_widths : int, optional
+        width of the fiber trace, by default 3
+    wave_widths : float, optional
+        width of the wavelength window, by default 0.6*5
+    image_shape : tuple, optional
+        shape of the image, by default (4080, 4120)
+    channels : str, optional
+        spectrograph channels, by default "brz"
+    display_plots : bool, optional
+        display plots, by default False
+
+    Returns
+    -------
+    numpy.ndarray
+        2D mask with selected lines
+    FiberRows
+        channel stacked fiber centroid trace data
+    FiberRows
+        channel stacked wavelength data
+    """
+    # stack along x-axis traces and wavelengths, adding OS columns
+    log.info(f"stacking centroid traces and wavelengths for {','.join(in_cent_traces)} and {','.join(in_waves)}")
+    mtraces, mwaves, mtrace, mwave = _channel_combine_fiber_params(in_cent_traces, in_waves)
+
+    # get fiber selection mask
+    log.info(f"selecting fibers with {y_widths = } pixel")
+    fiber_selection = _get_fiber_selection(mtraces, y_widths=y_widths, image_shape=image_shape)
+
+    # parse lines list based on the image type
+    if lines_list is None:
+        image = loadImage(in_images[0])
+        imagetyp = image._header["IMAGETYP"]
+        if imagetyp == "arc":
+            lines_list = ",".join([lamp.lower() for lamp in ARC_LAMPS if image._header.get(lamp, False)])
+        elif imagetyp == "flat":
+            lines_list = "sky"
+            wave_widths = 5000
+        else:
+            lines_list = "sky"
+        log.info(f"selecting sources for {imagetyp = } frame: {lines_list}")
+
+    # parse lines list base on the given list
+    if isinstance(lines_list, (list, tuple, numpy.ndarray)):
+        log.info(f"selecting lines in given list {','.join(lines_list)}")
+    elif isinstance(lines_list, str):
+        sources = lines_list.split(",")
+        lines_list = []
+        lamps = list(map(str.lower, ARC_LAMPS))
+        for source in sources:
+            if source in lamps:
+                # define reference lines path
+                ref_table = os.path.join(CONFIG_PATH, "wavelength", f"lvm-reflines-{source}.txt")
+                log.info(f"loading reference lines from '{ref_table}")
+                # skip if missing
+                if not os.path.isfile(ref_table):
+                    log.warning(f"missing reference lines for {source = }")
+                    continue
+                table = numpy.genfromtxt(ref_table, usecols=(0, 1), skip_header=1)
+                lines_list.append(table[table[:, 0]>=200, 1])
+            elif source == "sky":
+                ref_table = numpy.genfromtxt(os.path.join(os.getenv('LVMCORE_DIR'), 'etc', 'UVES_sky_lines.txt'), usecols=(1,4))
+                lines_list.append(ref_table[ref_table[:, 1] > 2, 0])
+
+        lines_list = numpy.unique(numpy.concatenate(lines_list))
+        lines_list.sort()
+        waves = mwave._data[mwave._data>0].flatten()
+        lines_list = lines_list[(lines_list > waves.min()) & (lines_list < waves.max())]
+        log.info(f"selecting lines in given sources {lines_list.tolist()}")
+
+    # get lines selection mask
+    log.info(f"selecting lines with {wave_widths = } pixel")
+    lines_mask = _get_wave_selection(mwave._data, lines_list=lines_list, window=wave_widths)
+    lines_mask &= ~mwave._mask
+
+    # make sky mask 2d
+    log.info("interpolating mask into 2D frame")
+    lines_mask_2d = numpy.zeros((image_shape[0], len(in_images)*image_shape[1]), dtype=bool)
+    for icol in range(lines_mask_2d.shape[1]):
+        for ifiber in range(mwave._data.shape[0]):
+            lines_mask_2d[mtrace._data[ifiber, icol].astype(int), icol] = lines_mask[ifiber, icol]
+
+        col = lines_mask_2d[:, icol]
+        y = numpy.arange(lines_mask_2d.shape[0])
+        if numpy.sum(col) == 0:
+            continue
+        f = interpolate.interp1d(y[col], col[col], kind="nearest", bounds_error=False, fill_value=0)
+        lines_mask_2d[:, icol] = f(y).astype(bool)
+
+    lines_mask_2d &= fiber_selection
+
+    # write mask to file
+    log.info(f"writing output mask to {os.path.basename(out_mask)}")
+    mask_image = Image(data=lines_mask_2d.astype(int))
+    mask_image.writeFitsData(out_mask)
+
+    # plot results
+    log.info("plotting results")
+    fig, ax = create_subplots(1, 1, figsize=(15, 5))
+    ax.imshow(lines_mask_2d, origin="lower", aspect="auto", cmap="binary_r")
+    save_fig(
+        fig,
+        product_path=out_mask,
+        to_display=display_plots,
+        figure_path="qa",
+        label="lines_mask_2d"
+    )
+
+    return lines_mask_2d, mtrace, mwave
+
+
+def fix_pixel_shifts(in_images, out_pixshift, ref_images, in_mask,
+                     max_shift=10, threshold_spikes=0.6, flat_spikes=11,
+                     fill_gaps=20, shift_rows=None, dry_run=False, undo_correction=False, display_plots=False):
+    """Corrects pixel shifts in raw frames based on reference frames and a selection of spectral regions
+
+    Given a set of raw frames, reference frames and a mask, this function corrects pixel shifts
+    based on the reference frames and a selection of spectral regions.
+
+    Parameters
+    ----------
+    in_images : list
+        list of input raw images for the same spectrograph (brz)
+    out_pixshift : str
+        output pixel shifts file
+    ref_images : list
+        list of input reference images for the same spectrograph
+    in_mask : str
+        input mask file for the channel stacked frame
+    max_shift : int, optional
+        maximum shift in pixels, by default 10
+    threshold_spikes : float, optional
+        threshold for spike removal, by default 0.6
+    flat_spikes : int, optional
+        width of the spike removal, by default 11
+    fill_gaps : int, optional
+        width of the gap filling, by default 20
+    dry_run : bool, optional
+        dry run, by default False
+    undo_correction : bool, optional
+        undo correction if existing run is found, by default False
+    display_plots : bool, optional
+        display plots, by default False
+
+    Returns
+    -------
+    numpy.ndarray
+        pixel shifts
+    numpy.ndarray
+        pixel correlations
+    list
+        list of corrected images
+    """
+    # create output image path if not provided
+    ori_images = [in_image.replace(".fits.gz", "_ori.fits.gz") if ".gz" in in_image else in_image.replace(".fits", "_ori.fits") for in_image in in_images]
+    out_images = copy(in_images)
+    if all([os.path.isfile(ori_image) for ori_image in ori_images]):
+        log.info(f"found a previous run of pixel shifts, loading original images from {','.join(ori_images)}")
+        in_images = ori_images
+        if undo_correction:
+            log.info(f"undoing previous pixel shifts for {','.join(out_images)}")
+            out_images = [copy2(ori_image, out_image) for ori_image, out_image in zip(ori_images, out_images)]
+            [os.remove(ori_image) for ori_image in ori_images]
+            return
+    elif undo_correction:
+        log.info(f"no previous run of pixel shifts found for {','.join(in_images)}")
+        return
+
+    mask = loadImage(in_mask)
+
+    log.info(f"loading reference image from {','.join(ref_images)}")
+    image_ref = Image()
+    image_ref.unsplit([loadImage(ref_image) for ref_image in ref_images])
+    cdata = copy(image_ref._data)
+    cdata = numpy.nan_to_num(cdata, nan=0) * mask._data
+
+    # read all three detrended images and channel combine them
+    log.info(f"loading input image from {','.join(in_images)}")
+    image = Image()
+    image.unsplit([loadImage(in_image) for in_image in in_images])
+    rdata = copy(image._data)
+    rdata = numpy.nan_to_num(rdata, nan=0) * mask._data
+
+    # load input images into output array to apply corrections if needed
+    images_out = [loadImage(in_image) for in_image in in_images]
+
+    # calculate pixel shifts or use provided ones
+    if shift_rows is None:
+        log.info("running row-by-row cross-correlation")
+        shifts, corrs = [], []
+        for irow in range(rdata.shape[0]):
+            cimg_row = cdata[irow]
+            rimg_row = rdata[irow]
+            if numpy.all(cimg_row == 0) or numpy.all(rimg_row == 0):
+                shifts.append(0)
+                corrs.append(0)
+                continue
+
+            shift = signal.correlation_lags(cimg_row.size, rimg_row.size, mode="same")
+            corr = signal.correlate(cimg_row, rimg_row, mode="same")
+
+            mask = (numpy.abs(shift) <= max_shift)
+            shift = shift[mask]
+            corr = corr[mask]
+
+            max_corr = numpy.argmax(corr)
+            shifts.append(shift[max_corr])
+            corrs.append(corr[max_corr])
+        shifts = numpy.asarray(shifts)
+        corrs = numpy.asarray(corrs)
+
+        raw_shifts = copy(shifts)
+        shifts = _remove_spikes(shifts, width=flat_spikes, threshold=threshold_spikes)
+        shifts = _fillin_valleys(shifts, width=fill_gaps)
+        shifts = _no_stepdowns(shifts)
+    else:
+        log.info("using user provided pixel shifts")
+        shifts = numpy.zeros(cdata.shape[0])
+        for irow in shift_rows:
+            shifts[irow:] += 2
+        raw_shifts = copy(shifts)
+        corrs = numpy.zeros_like(shifts)
+
+    apply_shift = numpy.any(numpy.abs(shifts)>0)
+    if apply_shift:
+        shifted_rows = numpy.where(numpy.gradient(shifts) > 0)[0][1::2].tolist()
+        log.info(f"applying shifts to {shifted_rows = } ({numpy.sum(numpy.abs(shifts)>0)}) rows")
+        for image_out, in_image, out_image, ori_image in zip(images_out, in_images, out_images, ori_images):
+            image = copy(image_out)
+            mjd = image._header.get("SMJD", image._header["MJD"])
+            expnum, camera = image._header["EXPOSURE"], image._header["CCD"]
+            imagetyp = image._header["IMAGETYP"]
+
+            for irow in range(len(shifts)):
+                if shifts[irow] > 0:
+                    image_out._data[irow, :] = numpy.roll(image._data[irow, :], int(shifts[irow]))
+
+            if not dry_run:
+                # copy original image to 'ori' file
+                log.info(f"writing original image to {os.path.basename(ori_image)}")
+                if in_image != ori_image:
+                    copy2(in_image, ori_image)
+                # write corrected image
+                log.info(f"writing corrected image to {os.path.basename(out_image)}")
+                image_out.writeFitsData(out_image)
+            else:
+                log.info("dry run, not writing output images")
+
+            log.info("plotting results")
+            fig, ax = create_subplots(to_display=display_plots, figsize=(15,7), sharex=True, layout="constrained")
+            ax.set_title(f"{mjd = } - {expnum = } - {camera = } - {imagetyp = }", loc="left")
+            y_pixels = numpy.arange(shifts.size)
+            ax.step(y_pixels, raw_shifts, where="mid", lw=1, color="red", linestyle="--")
+            ax.step(y_pixels, shifts, where="mid", lw=1)
+            ax.set_xlabel("Y (pixel)")
+            ax.set_ylabel("Shift (pixel)")
+            plot_image_shift(ax, image._data, shifts, cmap="Reds")
+            axis = plot_image_shift(ax, image_out._data, shifts, cmap="Blues", inset_pos=(0.14,1.0-0.32))
+            plt.setp(axis, yticklabels=[], ylabel="")
+            save_fig(
+                fig,
+                product_path=out_pixshift,
+                to_display=display_plots,
+                figure_path="qa",
+                label="pixel_shifts"
+            )
+    else:
+        log.info("no pixel shifts detected, no correction applied")
+
+    return shifts, corrs, images_out
 
 
 def detCos_drp(
@@ -2972,119 +3389,6 @@ def testres_drp(image, trace, fwhm, flux):
     hdu.writeto("res_rel.fits", overwrite=True)
 
 
-def fix_pixel_shifts(in_image, ref_image, threshold=1.15, fill_gaps=20, display_plots=False):
-    """Identify and corrects pixel shifts in dispersion direction
-
-    This task identifies pixel shifts in the dispersion direction by comparing
-    the overscan regions of the input image with a reference image. The pixel
-    shifts are corrected by rolling the image data by the amount of the shift.
-
-    Parameters
-    ----------
-    in_image : str
-        input image path
-    ref_image : str
-        reference image path
-    threshold : float, optional
-        threshold for pixel shifts, by default 1.15
-    fill_gaps : int, optional
-        width of the gaps to fill in the pixel shifts, by default 20
-    display_plots : bool, optional
-        whether to display plots, by default False
-
-    Returns
-    -------
-    numpy.ndarray
-        pixel shifts in dispersion direction
-    lvmdrp.core.image.Image
-        output image with corrected pixel shifts
-    """
-    # create output image path if not provided
-    ori_image = in_image.replace(".fits.gz", "_ori.fits.gz")
-    out_image = copy(in_image)
-
-    # load reference image
-    log.info(f"loading reference image from {os.path.basename(ref_image)}")
-    image_ref = Image()
-    image_ref.loadFitsData(ref_image)
-
-    # load input image
-    log.info(f"loading input image from {os.path.basename(in_image)}")
-    image = Image()
-    image.loadFitsData(in_image)
-    image_out = copy(image)
-
-    # get useful metadata
-    mjd, expnum, camera = image._header["MJD"], image._header["EXPOSURE"], image._header["CCD"]
-
-    sc_sections, os_sections = list(image._header["TRIMSEC?"].values()), list(image._header["BIASSEC?"].values())
-    shifts = []
-    for i, (sc_sec, os_sec) in enumerate(zip(sc_sections, os_sections)):
-        # get overscan quadrant
-        os_quad_r = image_ref.getSection(os_sec)
-        os_quad = image.getSection(os_sec)
-
-        # calculate pixels to shift and amount of shifting
-        log.info(f"calculating pixel shifts for {camera} quadrant {i+1} with OS counts ratio >{threshold}")
-        shift_mask = numpy.abs(os_quad._data / os_quad_r._data) > threshold
-        shift_pixels_raw = numpy.sum(shift_mask, axis=1)
-        log.info(f"found {(shift_pixels_raw>0).sum()} rows shifted")
-
-        # fix hair
-        hairs = (shift_pixels_raw % 2).astype(bool)
-        shift_pixels_raw[hairs] -= 1
-        shift_pixels_raw[shift_pixels_raw < 0] = 0
-        log.info(f"removing {hairs.sum()} spikes from pixel shifts")
-
-        # interpolate valleys
-        shift_pixels = _fillin_valleys(shift_pixels_raw, width=fill_gaps)
-        log.info(f"filling {(shift_pixels - shift_pixels_raw).sum()} gaps {fill_gaps} pixels wide")
-        shifts.append(shift_pixels)
-
-    # decide on the shift direction
-    shift_right = numpy.concatenate(shifts[1::2][::-1])
-    shift_left = -1*numpy.concatenate(shifts[::2][::-1])
-    if numpy.any(shift_right != 0):
-        log.info("shifting pixels to the right")
-        shift_column = shift_right
-    else:
-        log.info("shifting pixels to the left")
-        shift_column = shift_left
-
-    # correct stepdowns
-    log.info("removing stepdowns from pixel shifts")
-    shift_column = _no_stepdowns(shift_column)
-
-    # apply shifts and write output image
-    if numpy.any(shift_column != 0):
-        log.info(f"apply pixel shifts to {(shift_column>0).sum()} rows")
-        for irow in range(image._data.shape[0]):
-            image_out._data[irow] = numpy.roll(image._data[irow], shift_column[irow])
-
-        # copy original image to 'ori' file
-        log.info(f"writing original image to {os.path.basename(ori_image)}")
-        copy2(in_image, ori_image)
-
-        log.info(f"writing corrected image to {os.path.basename(out_image)}")
-        image_out.writeFitsData(out_image)
-    else:
-        log.info("no pixel shifts detected, no correction applied")
-
-    # display plots if requested
-    if display_plots and numpy.any(shift_column != 0):
-        log.info("plotting results")
-        fig, ax = plt.subplots(figsize=(15,7), sharex=True, layout="constrained")
-        ax.set_title(f"{mjd = } - {expnum = } - {camera = }", loc="left")
-        y_pixels = numpy.arange(shift_column.size)
-        ax.step(y_pixels, shift_column, where="mid", lw=1)
-        ax.set_xlabel("Y (pixel)")
-        ax.set_ylabel("Shift (pixel)")
-        plot_image_shift(ax, image._data, shift_column, cmap="Reds")
-        axis = plot_image_shift(ax, image_out._data, shift_column, cmap="Blues", pos=(0.14,1.0-0.32))
-        plt.setp(axis, yticklabels=[], ylabel="")
-
-    return shift_column, image_out
-
 # TODO: for arcs take short exposures for bright lines & long exposures for faint lines
 # TODO: Argon: 10s + 300s
 # TODO: Neon: 10s + 300s
@@ -3626,7 +3930,7 @@ def detrend_frame(
 
     detrended_img = (bcorr_img - mdark_img.convertUnit(to=bcorr_img._header["BUNIT"]))
     # NOTE: this is a hack to avoid the error propagation of the division in Image
-    detrended_img = detrended_img / mflat_img._data
+    detrended_img = detrended_img / numpy.nan_to_num(mflat_img._data, nan=1.0)
 
     # propagate pixel mask
     log.info("propagating pixel mask")

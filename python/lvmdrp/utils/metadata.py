@@ -343,12 +343,11 @@ def _load_or_create_store(tileid=None, mjd=None, kind="raw", mode="a"):
     )
 
     stores = []
+    log.info(f"loading/creating metadata store with parameters {tileid = }, {mjd = } and {kind = }")
     for metadata_path in metadata_paths:
         # create the directory if needed
         metadata_path.parent.mkdir(parents=True, exist_ok=True)
 
-        msg = "loading" if metadata_path.exists() else "creating"
-        log.info(f"{msg} metadata store at {metadata_path}")
         stores.append(h5py.File(metadata_path, mode=mode))
 
     return stores
@@ -509,7 +508,8 @@ def get_frames_metadata(
     raw_frame = f"{mjd}/sdR*{suffix}*" if mjd else f"*/sdR*{suffix}*"
     frames = list(pathlib.Path(raw_data_path).rglob(raw_frame))
 
-    if _load_or_create_store(tileid="*", mjd=mjd, kind="raw") and not overwrite:
+    metadata_paths = _get_metadata_paths(tileid="*", mjd=mjd, kind="raw", filter_exist=True)
+    if any(metadata_paths) and not overwrite:
         log.info("Loading existing metadata store.")
         meta = get_metadata(mjd=mjd, tileid="*")
     else:
@@ -518,7 +518,6 @@ def get_frames_metadata(
 
         log.info("Creating new metadata store.")
         meta = extract_metadata(frames, kind="raw")
-        add_raws(meta)
 
     return meta
 
@@ -564,7 +563,7 @@ def extract_metadata(frames_paths: list, kind: str = "raw") -> pd.DataFrame:
         try:
             header = fits.getheader(frame_path, ext=0)
         except OSError as e:
-            log.error(f"Cannot read FITS header: {e}")
+            log.error(f"Cannot read FITS header of {frame_path}: {e}")
             continue
 
         frame_path = pathlib.Path(frame_path)
@@ -898,7 +897,6 @@ def get_metadata(
 
         # extract metadata as dataframe
         metadata = pd.DataFrame(dataset[()])
-        log.info(f"found {len(metadata)} frames in store '{store.file.filename}'")
 
         # close store
         store.close()
@@ -906,35 +904,32 @@ def get_metadata(
         # convert bytes to literal strings
         metadata = _decode_string(metadata)
 
-        # filter by exposure number, spectrograph and/or camera
-        # NOTE: we don't filter by tileid or mjd because we already done it when loading the stores
-        metadata = _filter_metadata(
-            metadata=metadata,
-            hemi=hemi,
-            imagetyp=imagetyp,
-            spec=spec,
-            camera=camera,
-            expnum=expnum,
-            exptime=exptime,
-            neon=neon,
-            hgne=hgne,
-            krypton=krypton,
-            xenon=xenon,
-            argon=argon,
-            ldls=ldls,
-            quartz=quartz,
-            quality=quality,
-            stage=stage,
-            status=status,
-            drpqual=drpqual,
-        )
-        log.info(f"number of frames after filtering {len(metadata)}")
-
         metadatas.append(metadata)
 
     metadata = pd.concat(metadatas, axis="index", ignore_index=True)
-
-    log.info(f"total number of frames found {len(metadata)}")
+    log.info(f"found {len(metadata)} frames in stores")
+    # filter by exposure number, spectrograph and/or camera
+    metadata = _filter_metadata(
+        metadata=metadata,
+        hemi=hemi,
+        imagetyp=imagetyp,
+        spec=spec,
+        camera=camera,
+        expnum=expnum,
+        exptime=exptime,
+        neon=neon,
+        hgne=hgne,
+        krypton=krypton,
+        xenon=xenon,
+        argon=argon,
+        ldls=ldls,
+        quartz=quartz,
+        quality=quality,
+        stage=stage,
+        status=status,
+        drpqual=drpqual,
+    )
+    log.info(f"number of frames after filtering {len(metadata)}")
 
     return metadata
 

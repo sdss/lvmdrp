@@ -461,7 +461,7 @@ def resample_fiberflat(mflat: RSS, camera: str, mwave_path: str,
 
     return new_flat
 
-def reduce_twilight_sequence(expnums: List[int], ref_expnum: int, median_box: int = 10, niter: bool = 1000,
+def reduce_twilight_sequence(expnums: List[int], median_box: int = 10, niter: bool = 1000,
                              threshold: Tuple[float,float]|float = (0.5,1.5), nknots: bool = 50,
                              b_mask: List[Tuple[float,float]] = MASK_BANDS["b"],
                              r_mask: List[Tuple[float,float]] = MASK_BANDS["r"],
@@ -477,8 +477,6 @@ def reduce_twilight_sequence(expnums: List[int], ref_expnum: int, median_box: in
     ----------
     expnums : list
         List of twilight exposure numbers
-    ref_expnum : int
-        Reference exposure number to fix pixel shifts
     median_box : int, optional
         Size of the median filter box, by default 5
     niter : int, optional
@@ -525,7 +523,6 @@ def reduce_twilight_sequence(expnums: List[int], ref_expnum: int, median_box: in
         }
 
         flat_path = path.full("lvm_raw", camspec=flat["camera"], **flat)
-        ref_flat_path = path.full("lvm_raw", hemi=flat["hemi"], mjd=flat["mjd"], camspec=flat["camera"], expnum=ref_expnum)
         pflat_path = path.full("lvm_anc", drpver=drpver, kind="p", imagetype=flat["imagetyp"], **flat)
         dflat_path = path.full("lvm_anc", drpver=drpver, kind="d", imagetype=flat["imagetyp"], **flat)
         lflat_path = path.full("lvm_anc", drpver=drpver, kind="l", imagetype=flat["imagetyp"], **flat)
@@ -535,8 +532,6 @@ def reduce_twilight_sequence(expnums: List[int], ref_expnum: int, median_box: in
         if skip_done and os.path.isfile(dflat_path):
             log.info(f"skipping {dflat_path}, file already exist")
         else:
-            if ref_expnum is not None:
-                imageMethod.fix_pixel_shifts(in_image=flat_path, ref_image=ref_flat_path)
             imageMethod.preproc_raw_frame(in_image=flat_path, out_image=pflat_path, in_mask=master_cals.get("pixelmask"))
             imageMethod.detrend_frame(in_image=pflat_path, out_image=dflat_path,
                                         in_bias=master_cals.get("bias"), in_dark=master_cals.get("dark"),

@@ -56,16 +56,21 @@ def create_subplots(to_display, flatten_axes=True, **subplots_params):
     return fig, axs
 
 
-def plot_image_shift(ax, image, column_shift, pos=(0.0,1.0-0.32), box=(0.3,0.3), cmap="gray"):
+def plot_image_shift(ax, image, column_shift, xpos=None, inset_pos=(0.0,1.0-0.32), inset_box=(0.3,0.3), cmap="gray"):
     """plots the pixel shifts of the given image along the given column shifts positions"""
-    xh = image.shape[1]//2
+    if xpos is None:
+        xpos = image.shape[1]//2
     deltas = np.gradient(column_shift)
-    irows = np.where(deltas == 1)[0][::2][::-1]
+    irows = np.where(deltas > 0)[0][::2][::-1]
     axis = []
     for i, irow in enumerate(irows):
-        iy, fy, ix, fx = xh-30, xh+30, irow-30, irow+30
-        axi = ax.inset_axes((pos[0],pos[1]-i/3.2, *box))
-        axi.imshow(image[ix:fx, iy:fy], extent=[iy,fy,ix,fx], origin="lower", cmap=cmap, vmin=0, vmax=np.mean(image)+3*np.std(image))
+        iy, fy, ix, fx = xpos-30, xpos+30, irow-30, irow+30
+        image_region = image[ix:fx, iy:fy]
+        vmin = np.abs(np.nanmean(image_region)-3*np.nanstd(image_region))
+        vmax = np.abs(np.nanmean(image_region)+3*np.nanstd(image_region))
+
+        axi = ax.inset_axes((inset_pos[0],inset_pos[1]-i/3.2, *inset_box))
+        axi.imshow(image_region, extent=[iy,fy,ix,fx], origin="lower", cmap=cmap, vmin=vmin, vmax=vmax)
         axi.tick_params(axis="both", labelsize=10)
         if i == 0 and irows.size > 1:
             axi.tick_params(axis="both", labelbottom=False)

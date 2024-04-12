@@ -30,17 +30,22 @@ import click
 import cloup
 import numpy as np
 import pandas as pd
-from itertools import product
+from glob import glob
+from copy import deepcopy as copy
+from shutil import copy2
+from itertools import product, groupby
 from astropy.io import fits
 
 from lvmdrp import log, path, __version__ as drpver
 from lvmdrp.utils import metadata as md
 from lvmdrp.core.constants import SPEC_CHANNELS
 from lvmdrp.core.tracemask import TraceMask
+from lvmdrp.core.image import loadImage
 
 from lvmdrp.functions import imageMethod as image_tasks
 from lvmdrp.functions import rssMethod as rss_tasks
 from lvmdrp.functions.run_drp import get_config_options, read_fibermap
+from lvmdrp.functions.run_quickdrp import get_master_mjd
 from lvmdrp.functions.run_twilights import reduce_twilight_sequence
 
 
@@ -215,7 +220,159 @@ def _get_ring_expnums(expnums_ldls, expnums_qrtz, ring_size=12, sort_expnums=Fal
     return expnum_params
 
 
-def reduce_2d(mjds, target_mjd=None, expnums=None, ref_expnum=None):
+def messup_frame(mjd, expnum, spec="1", shifts=[1500, 2000, 3500], shift_size=-2, undo_messup=False):
+    """ Mess up a frame by shifting the data by a given amount along given rows
+
+    Parameters
+    ----------
+    mjd : int
+        the MJD of the frame
+    expnum : int
+        the exposure number of the frame
+    spec : str
+        the spectrograph number
+    shifts : list
+        the rows to shift
+    shift_size : int
+        the amount to shift the data by
+    undo_messup : bool
+        whether to undo the mess up of the frame
+
+    Returns
+    -------
+    list
+        the messed up frames
+    """
+    specid = f"sp{spec}"
+    frames = md.get_frames_metadata(mjd)
+    frames.query("expnum == @expnum and spec == @specid", inplace=True)
+
+    rframe_paths = sorted(path.expand("lvm_raw", hemi="s", camspec=f"?{spec}", mjd=mjd, expnum=expnum))
+    rframe_ori_paths = [rframe_path.replace(".fits.gz", "_good.fits.gz") for rframe_path in rframe_paths]
+    original_exists = all([os.path.exists(rframe_ori_path) for rframe_ori_path in rframe_ori_paths])
+    if undo_messup and original_exists:
+        log.info(f"undoing mess up of frames {','.join(rframe_paths)}")
+        [copy2(rframe_ori_path, rframe_path) for rframe_ori_path, rframe_path in zip(rframe_ori_paths, rframe_paths)]
+        [os.remove(rframe_ori_path) for rframe_ori_path in rframe_ori_paths]
+        return
+    elif undo_messup:
+        log.info(f"cannot undo mess up of frames {','.join(rframe_paths)} because original frames do not exist")
+        return
+
+    log.info(f"messing up frames {','.join(rframe_paths)} with {shifts = } and {shift_size = } pixels")
+    if not original_exists:
+        [copy2(rframe_path, rframe_ori_path) for rframe_path, rframe_ori_path in zip(rframe_paths, rframe_ori_paths)]
+
+    messed_up_frames = []
+    for rframe_path, rframe_ori_path in zip(rframe_paths, rframe_ori_paths):
+        rframe = loadImage(rframe_ori_path)
+
+        messup_frame = copy(rframe)
+        for shift in shifts:
+            messup_frame._data[shift:] = np.roll(messup_frame._data[shift:], shift_size, axis=1)
+
+        log.info(f"saving messed up frame to {rframe_path}")
+        messup_frame.writeFitsData(rframe_path)
+
+        messed_up_frames.append(messup_frame)
+
+    return messed_up_frames
+
+
+def fix_raw_pixel_shifts(mjd, expnums=None, ref_expnums=None, specs="123",
+                         y_widths=5, wave_list=None, wave_widths=0.6*5, max_shift=10, flat_spikes=11,
+                         threshold_spikes=np.inf, shift_rows=None, create_mask_always=False, dry_run=False,
+                         undo_corrections=False, display_plots=False):
+    """Attempts to fix pixel shifts in a list of raw frames
+
+    Given an MJD and (optionally) exposure numbers, fix the pixel shifts in a
+    list of 2D frames. This routine will store the fixed frames in the
+    corresponding calibration directory in the `target_mjd` or by default `mjd`.
+
+    Parameters:
+    ----------
+    mjd : float
+        MJD to reduce
+    expnums : list
+        List of exposure numbers to look for pixel shifts
+    ref_expnums : list
+        List of reference exposure numbers to use as reference for good frames
+    specs : str
+        Spectrograph channels
+    y_widths : int
+        Width of the fibers along y-axis, by default 5
+    wave_list : list
+        List of lines to use for the wavelength calibration, by default None
+    wave_widths : float
+        Width of the wavelength axis for the lines, by default 0.6*5
+    max_shift : int
+        Maximum shift in pixels, by default 10
+    flat_spikes : int
+        Number of flat spikes, by default 11
+    threshold_spikes : float
+        Threshold for spikes, by default np.inf
+    shift_rows : dict
+        Rows to shift, by default None
+    create_mask_always : bool
+        Create mask always, by default False
+    dry_run : bool
+        Dry run, by default False
+    undo_corrections : bool
+        Only undo corrections for previous runs, by default False
+    display_plots : bool
+        Display plots, by default False
+    """
+
+    if isinstance(ref_expnums, (list, tuple, np.ndarray)):
+        ref_expnum = ref_expnums[0]
+    elif isinstance(ref_expnums, (int, np.int64)):
+        ref_expnum = ref_expnums
+    else:
+        raise ValueError("no valid reference exposure number given")
+
+    if shift_rows is None:
+        shift_rows = {}
+    elif not isinstance(shift_rows, dict):
+        raise ValueError("shift_rows must be a dictionary with keys (spec, expnum) and values a list of rows to shift")
+
+    frames, _ = get_sequence_metadata(mjd, target_mjd=None, expnums=expnums)
+    masters_mjd = get_master_mjd(sci_mjd=mjd)
+    masters_path = os.path.join(MASTERS_DIR, str(masters_mjd))
+
+    expnums_grp = frames.groupby("expnum")
+    for spec in specs:
+        for expnum in expnums_grp.groups:
+            rframe_paths = sorted(path.expand("lvm_raw", hemi="s", camspec=f"?{spec}", mjd=mjd, expnum=expnum))
+            cframe_paths = sorted(path.expand("lvm_raw", hemi="s", camspec=f"?{spec}", mjd=mjd, expnum=ref_expnum))
+            rframe_paths = [rframe_path for rframe_path in rframe_paths if ".gz" in rframe_path]
+            cframe_paths = [cframe_path for cframe_path in cframe_paths if ".gz" in cframe_path]
+
+            if len(rframe_paths) < 3:
+                log.warning(f"skipping {rframe_paths}, less than 3 files found")
+                continue
+
+            mwave_paths = sorted(glob(os.path.join(masters_path, f"lvm-mwave_neon_hgne_argon_xenon-?{spec}.fits")))
+            mtrace_paths = sorted(glob(os.path.join(masters_path, f"lvm-mtrace-?{spec}.fits")))
+            mask_2d_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, imagetype="mask2d",
+                                     expnum=0, camera=f"sp{spec}", kind="")
+            pixshift_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, imagetype="pixshift",
+                                     expnum=expnum, camera=f"sp{spec}", kind="")
+
+            if not undo_corrections and (create_mask_always or expnum == list(expnums_grp.groups)[0]):
+                os.makedirs(os.path.dirname(mask_2d_path), exist_ok=True)
+                image_tasks.select_lines_2d(in_images=cframe_paths, out_mask=mask_2d_path, lines_list=wave_list,
+                                            in_cent_traces=mtrace_paths, in_waves=mwave_paths,
+                                            y_widths=y_widths, wave_widths=wave_widths,
+                                            display_plots=display_plots)
+
+            image_tasks.fix_pixel_shifts(in_images=rframe_paths, out_pixshift=pixshift_path,
+                                         ref_images=cframe_paths, in_mask=mask_2d_path, flat_spikes=flat_spikes,
+                                         threshold_spikes=threshold_spikes, max_shift=max_shift, shift_rows=shift_rows.get((spec, expnum), None),
+                                         dry_run=dry_run, undo_correction=undo_corrections, display_plots=display_plots)
+
+
+def reduce_2d(mjds, target_mjd=None, expnums=None,
+              replace_with_nan=True, assume_imagetyp=None, reject_cr=True):
     """Preprocess and detrend a list of 2D frames
 
     Given a set of MJDs and (optionally) exposure numbers, preprocess and
@@ -231,8 +388,12 @@ def reduce_2d(mjds, target_mjd=None, expnums=None, ref_expnum=None):
         MJD to store the master frames in
     expnums : list
         List of exposure numbers to reduce
-    ref_expnum : int
-        Reference exposure number for pixel shift correction
+    replace_with_nan : bool
+        Replace rejected pixels with NaN
+    assume_imagetyp : str
+        Assume the given imagetyp for all frames
+    reject_cr : bool
+        Reject cosmic rays
     """
 
     frames, masters_mjd = get_sequence_metadata(mjds, target_mjd=target_mjd, expnums=expnums)
@@ -256,8 +417,6 @@ def reduce_2d(mjds, target_mjd=None, expnums=None, ref_expnum=None):
         log.info(f'Using master pixel flat: {mpixflat_path}')
 
         frame_path = path.full("lvm_raw", camspec=frame["camera"], **frame)
-        if ref_expnum is not None:
-            ref_path = path.full("lvm_raw", hemi=frame["hemi"], mjd=frame["mjd"], camspec=frame["camera"], expnum=ref_expnum)
         pframe_path = path.full("lvm_anc", drpver=drpver, kind="p", imagetype=imagetyp, **frame)
 
         # bypass creation of detrended frame in case of imagetyp=bias
@@ -270,13 +429,14 @@ def reduce_2d(mjds, target_mjd=None, expnums=None, ref_expnum=None):
         if os.path.isfile(dframe_path):
             log.info(f"skipping {dframe_path}, file already exist")
         else:
-            if frame["imagetyp"] == "flat" and ref_expnum is not None:
-                image_tasks.fix_pixel_shifts(in_image=frame_path, ref_image=ref_path)
-            image_tasks.preproc_raw_frame(in_image=frame_path, out_image=pframe_path, in_mask=mpixmask_path)
+            image_tasks.preproc_raw_frame(in_image=frame_path, out_image=pframe_path,
+                                          in_mask=mpixmask_path, replace_with_nan=replace_with_nan)
             image_tasks.detrend_frame(in_image=pframe_path, out_image=dframe_path,
-                                        in_bias=mbias_path, in_dark=mdark_path,
-                                        in_pixelflat=mpixflat_path,
-                                        in_slitmap=SLITMAP)
+                                      in_bias=mbias_path, in_dark=mdark_path,
+                                      in_pixelflat=mpixflat_path,
+                                      replace_with_nan=replace_with_nan,
+                                      reject_cr=reject_cr,
+                                      in_slitmap=SLITMAP)
 
 
 def create_detrending_frames(mjds, target_mjd=None, expnums=None, kind="all", assume_imagetyp=None):
@@ -318,6 +478,9 @@ def create_detrending_frames(mjds, target_mjd=None, expnums=None, kind="all", as
     else:
         raise ValueError(f"Invalid kind: '{kind}'. Must be one of 'bias', 'dark', 'pixflat' or 'all'")
 
+    # preprocess and detrend frames
+    reduce_2d(mjds=mjds, target_mjd=masters_mjd, expnums=set(frames.expnum))
+
     # define image types to reduce
     imagetypes = set(frames.imagetyp)
 
@@ -333,9 +496,6 @@ def create_detrending_frames(mjds, target_mjd=None, expnums=None, kind="all", as
             analogs = frames_analog.get_group(keys)
             frame = analogs.iloc[0].to_dict()
 
-            # preprocess and detrend frames
-            reduce_2d(mjds=set(analogs.mjd), target_mjd=masters_mjd, expnums=analogs.expnum.values)
-
             # combine into master frame
             kwargs = get_config_options('reduction_steps.create_master_frame', imagetyp)
             log.info(f'custom configuration parameters for create_master_frame: {repr(kwargs)}')
@@ -349,7 +509,9 @@ def create_detrending_frames(mjds, target_mjd=None, expnums=None, kind="all", as
     _clean_ancillary(mjds=mjds, expnums=expnums, kind=kind)
 
 
-def create_pixelmasks(mjds, target_mjd=None, expnums=None, ignore_darks=True):
+def create_pixelmasks(mjds, target_mjd=None, dark_expnums=None, pixflat_expnums=None,
+                      short_exptime=900, long_exptime=3600, pixflat_exptime=5,
+                      ignore_pixflats=True):
     """Create pixel mask from master pixelflat and/or dark frames
 
     Given a set of MJDs and (optionally) exposure numbers, create a pixel mask
@@ -357,9 +519,9 @@ def create_pixelmasks(mjds, target_mjd=None, expnums=None, ignore_darks=True):
     master pixelmask in the corresponding calibration directory in the
     `target_mjd` or by default in the smallest MJD in `mjds`.
 
-    If the corresponding master pixelflat and/or dark frames do not exist, they
+    If the corresponding detrended pixelflat and/or dark frames do not exist, they
     will be created first. Otherwise they will be read from disk. If
-    `ignore_darks` is True, then the dark frames will not be used to create the
+    `ignore_pixflats` is True, then the pixelflat frames will not be used to create the
     pixel mask.
 
     Parameters:
@@ -368,13 +530,96 @@ def create_pixelmasks(mjds, target_mjd=None, expnums=None, ignore_darks=True):
         List of MJDs to reduce
     target_mjd : float
         MJD to store the master frames in
-    expnums : list
-        List of exposure numbers to reduce
-    ignore_darks : bool
-        Ignore dark frames when creating pixel mask
+    dark_expnums : list
+        List of dark exposure numbers
+    pixflat_expnums : list
+        List of pixelflat exposure numbers
+    short_exptime : int
+        Short exposure time for dark frames
+    long_exptime : int
+        Long exposure time for dark frames
+    pixflat_exptime : int
+        Exposure time for pixelflat frames
+    ignore_pixflats : bool
+        Ignore pixelflat frames when creating pixel mask
 
     """
-    pass
+    if dark_expnums is not None and pixflat_expnums is not None:
+        expnums = np.concatenate([dark_expnums, pixflat_expnums])
+    else:
+        expnums = None
+    frames, masters_mjd = get_sequence_metadata(mjds, target_mjd=target_mjd, expnums=expnums)
+    masters_path = os.path.join(MASTERS_DIR, f"{masters_mjd}")
+
+    darks = frames.query("imagetyp == 'dark' and exptime == @short_exptime or exptime == @long_exptime", inplace=True)
+    pixflats = frames.query("imagetyp == 'dark' or imagetyp == 'pixelflat' and exptime == @pixflat_exptime", inplace=True)
+
+    # reduce darks
+    reduce_2d(mjds=mjds, target_mjd=target_mjd, expnums=set(darks.expnum))
+
+    ddark_paths = [path.full("lvm_anc", drpver=drpver, kind="d", imagetype="dark", **dark) for dark in darks.to_dict("records")]
+    darks["ddark_path"] = ddark_paths
+    cam_groups = darks.groupby(["camera", "exptime"])
+    for cam, exptime in cam_groups.groups:
+        ddark_paths_cam = cam_groups.get_group((cam, exptime))["ddark_path"]
+
+        mdark_path = os.path.join(masters_path, f"lvm-mdark-{cam}-{int(exptime)}s.fits")
+        image_tasks.create_master_frame(in_images=ddark_paths_cam, out_image=mdark_path)
+
+    # reduce pixflats
+    if not ignore_pixflats:
+        reduce_2d(mjds=mjds, target_mjd=target_mjd, expnums=set(pixflats.expnum),
+                replace_with_nan=False, assume_imagetyp="pixelflat", reject_cr=False)
+        dflat_paths = [path.full("lvm_anc", drpver=drpver, kind="d", imagetype="pixflat", **pixflat) for pixflat in pixflats.to_dict("records")]
+        pixflats["dflat_path"] = dflat_paths
+
+        cam_groups = pixflats.groupby("camera")
+        for cam in cam_groups.groups:
+            dflat_paths_cam = cam_groups.get_group(cam)["dflat_path"]
+
+            # define output combined pixelflat path
+            mflat_path = os.path.join(masters_path, f"lvm-mpixflat-{cam}.fits")
+
+            image_tasks.create_master_frame(in_images=dflat_paths_cam, out_image=mflat_path)
+
+            # normalize pixelflat background
+            pixflat_img = image_tasks.loadImage(mflat_path)
+            pixflat_img = pixflat_img / pixflat_img.medianImg(size=20)
+            pixflat_img.writeFitsData(mflat_path)
+
+        dflat_groups = groupby(dflat_paths, key=lambda s: os.path.basename(s).split("-")[2])
+
+        # create pixel mask
+        for camera, group in dflat_groups:
+            medians = []
+            group = list(group)
+            # compute medians of all detrended pixel flats
+            for dflat_path in group:
+                medians.append(np.nanmedian(image_tasks.loadImage(dflat_path)._data))
+
+            # sort paths by median values
+            idx = np.argsort(medians)
+            dflat_group = np.asarray(group)[idx]
+
+            # pick two most different pixelflats
+            flat_a = dflat_group[0]
+            flat_b = dflat_group[-1]
+
+            mdark_short_path = os.path.join(masters_path, f"lvm-mdark-{camera}-{short_exptime}s.fits")
+            mdark_long_path = os.path.join(masters_path, f"lvm-mdark-{camera}-{long_exptime}s.fits")
+            mpixmask_path = os.path.join(masters_path, f"lvm-mpixmask-{camera}.fits")
+            image_tasks.create_pixelmask(in_short_dark=mdark_short_path, in_long_dark=mdark_long_path,
+                                        in_flat_a=flat_a, in_flat_b=flat_b,
+                                        out_pixmask=mpixmask_path)
+    else:
+        log.info("Ignoring pixelflats when creating pixel mask")
+        mdark_short_path = os.path.join(masters_path, f"lvm-mdark-{camera}-{short_exptime}s.fits")
+        mdark_long_path = os.path.join(masters_path, f"lvm-mdark-{camera}-{long_exptime}s.fits")
+        mpixmask_path = os.path.join(masters_path, f"lvm-mpixmask-{camera}.fits")
+        image_tasks.create_pixelmask(in_short_dark=mdark_short_path, in_long_dark=mdark_long_path, out_pixmask=mpixmask_path)
+
+    # ancillary paths clean up
+    _clean_ancillary(mjds=mjds, expnums=expnums)
 
 
 def create_traces(mjds, target_mjd=None, expnums_ldls=None, expnums_qrtz=None,
@@ -411,7 +656,10 @@ def create_traces(mjds, target_mjd=None, expnums_ldls=None, expnums_qrtz=None,
     poly_deg_width : int, optional
         Degree of the polynomial to fit to the widths, by default 5
     """
-    expnums = np.concatenate([expnums_ldls, expnums_qrtz])
+    if expnums_ldls is not None and expnums_qrtz is not None:
+        expnums = np.concatenate([expnums_ldls, expnums_qrtz])
+    else:
+        expnums = None
     frames, masters_mjd = get_sequence_metadata(mjds, target_mjd=target_mjd, expnums=expnums)
 
     reduce_2d(mjds, target_mjd=masters_mjd, expnums=expnums)
@@ -591,7 +839,7 @@ def create_fiberflats(mjds, target_mjd=None, expnums=None):
     reduce_2d(mjds, target_mjd=masters_mjd, expnums=expnums)
 
     if expnums is None:
-        expnums = frames.expnum.unique().values
+        expnums = set(frames.query("imagetyp == 'flat' and not ldls and not quartz").expnum)
 
     reduce_twilight_sequence(expnums=expnums)
 
@@ -618,7 +866,7 @@ def create_illumination_corrections(mjds, target_mjd=None, expnums=None):
     """
     # read master fiber flats (dome and twilight)
     # calculate ratio twilight/dome
-    pass
+    raise NotImplementedError("create_illumination_corrections")
 
 
 def create_wavelengths(mjds, target_mjd=None, expnums=None):
@@ -698,8 +946,12 @@ def create_wavelengths(mjds, target_mjd=None, expnums=None):
 @click.option('-m', '--mjds', type=int, multiple=True, help='list of MJDs with calibration sequence taken')
 @click.option('--target-mjd', type=int, help='MJD to store the resulting master frames in')
 @click.option('-e', '--expnums', type=int, multiple=True, help='list of exposure numbers to target for reduction')
+@click.option('--pixelflats', is_flag=True, default=False, help='flag to create pixel flats')
+@click.option('--pixelmasks', is_flag=True, default=False, help='flag to create pixel masks')
 @click.option('-i', '--illumination-corrections', is_flag=True, default=False, help='flag to create illumination corrections')
-def run_calibration_sequence(mjds, target_mjd=None, expnums=None, illumination_corrections: bool = False):
+def run_calibration_sequence(mjds, target_mjd=None, expnums=None,
+                             pixelflats: bool = False, pixelmasks: bool = False,
+                             illumination_corrections: bool = False):
     """Run the calibration sequence reduction
 
     Given a set of MJDs and (optionally) exposure numbers, run the calibration
@@ -715,28 +967,53 @@ def run_calibration_sequence(mjds, target_mjd=None, expnums=None, illumination_c
         MJD to store the master frames in
     expnums : list
         List of exposure numbers to reduce
+    pixelflats : bool
+        Flag to create pixel flats
+    pixelmasks : bool
+        Flag to create pixel masks
+    illumination_corrections : bool
+        Flag to create illumination corrections
     """
 
-    # TODO: split exposures into the exposure sequence of each type of master frame
+    # split exposures into the exposure sequence of each type of master frame
+    frames, masters_mjd = get_sequence_metadata(mjds, target_mjd=target_mjd, expnums=expnums)
+    bias_frames = frames.query("imagetyp == 'bias'")
+    dark_frames = frames.query("imagetyp == 'dark'")
+    ldls_frames = frames.query("imagetyp == 'flat & ldls")
+    qrtz_frames = frames.query("imagetyp == 'flat & quartz'")
+    twilight_frames = frames.query("imagetyp == 'flat'")
+    arc_frames = frames.query("imagetyp == 'arc'")
 
-    # reduce bias/dark/pixflat
-    create_detrending_frames(mjds, target_mjd=target_mjd, expnums=expnums)
+    # TODO: verify sequences completeness
 
-    # create pixel mask
-    create_pixelmasks(mjds, target_mjd=target_mjd, expnums=expnums)
+    # reduce bias/dark
+    create_detrending_frames(mjds, target_mjd=target_mjd, expnums=set(bias_frames.expnum), kind="bias")
+    create_detrending_frames(mjds, target_mjd=target_mjd, expnums=set(dark_frames.expnum), kind="dark")
 
     # create traces
-    create_traces(mjds, target_mjd=target_mjd, expnums=expnums)
+    create_traces(mjds, target_mjd=target_mjd, expnums_ldls=set(ldls_frames.expnum), expnums_qrtz=set(qrtz_frames.expnum), subtract_straylight=True)
 
     # create fiber flats
-    create_fiberflats(mjds, target_mjd=target_mjd, expnums=expnums)
+    create_fiberflats(mjds, target_mjd=target_mjd, expnums=set(twilight_frames.expnum))
+
+    # create wavelength solutions
+    create_wavelengths(mjds, target_mjd=target_mjd, expnums=set(arc_frames.expnum))
+
+    # create pixel flats
+    if pixelflats:
+        pixflat_frames = frames.query("imagetyp == 'pixelflat'")
+        create_detrending_frames(mjds, target_mjd=target_mjd, expnums=set(pixflat_frames.expnum), kind="pixflat")
+
+    # create pixel mask
+    if pixelmasks:
+        create_pixelmasks(mjds, target_mjd=target_mjd,
+                          dark_expnums=set(dark_frames.expnum),
+                          pixflat_expnums=set(pixflat_frames.expnum),
+                          ignore_pixflats=False)
 
     # create illumination corrections
     if illumination_corrections:
         create_illumination_corrections(mjds, target_mjd=target_mjd, expnums=expnums)
-
-    # create wavelength solutions
-    create_wavelengths(mjds, target_mjd=target_mjd, expnums=expnums)
 
 
 if __name__ == '__main__':

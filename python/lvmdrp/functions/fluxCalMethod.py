@@ -50,8 +50,8 @@ from astropy.table import Table
 from lvmdrp.core.rss import RSS, loadRSS
 from lvmdrp.core.spectrum1d import Spectrum1D
 from lvmdrp.core.fluxcal import retrieve_header_stars, filter_channel
+from lvmdrp.core.sky import get_sky_mask_uves, get_z_continuum_mask
 from lvmdrp.external import ancillary_func
-from lvmdrp.functions import skyMethod
 from lvmdrp import log
 
 from lvmdrp.core.plot import plt, create_subplots, save_fig
@@ -257,10 +257,10 @@ def fluxcal_Gaia(camera, in_rss, plot=True, GAIA_CACHE_DIR=None):
         frame1.set_xticklabels([])
 
     # load the sky masks
-    m = skyMethod.get_sky_mask_uves(w, width=3)
+    m = get_sky_mask_uves(w, width=3)
     m2 = None
     if camera[0] == "z":
-        m2 = skyMethod.get_z_continuum_mask(w)
+        m2 = get_z_continuum_mask(w)
 
     # iterate over standard stars, derive sensitivity curve for each
     for s in stds:

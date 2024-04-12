@@ -719,6 +719,93 @@ class FiberRows(Header, PositionTable):
 
         return list
 
+    def unsplit(self, image_list, axis="X"):
+        if axis == "X" or axis == "x" or axis == 1:
+            axis_split = 1
+        elif axis == "Y" or axis == "y" or axis == 0:
+            axis_split = 0
+
+        data = []
+        error = []
+        mask = []
+        for i in range(len(image_list)):
+            data.append(image_list[i]._data)
+            error.append(image_list[i]._error)
+            mask.append(image_list[i]._mask)
+        self._data = numpy.concatenate(data, axis_split)
+        self._dim = self._data.shape
+        if error[0] is not None:
+            self._error = numpy.concatenate(error, axis_split)
+        if mask[0] is not None:
+            self._mask = numpy.concatenate(mask, axis_split)
+        if image_list[0]._header is not None:
+            self._header = image_list[0]._header
+
+    def loadFitsData(
+        self,
+        file,
+        extension_data=None,
+        extension_mask=None,
+        extension_error=None,
+        extension_coeffs=None,
+        extension_hdr=None,
+    ):
+        """
+        Load data from a FITS image into an FiberRows object (Fibers in y-direction, dispersion in x-direction)
+
+        Parameters
+        --------------
+        filename : string
+            Name or Path of the FITS image from which the data shall be loaded
+
+        extension_data : int, optional with default: None
+            Number of the FITS extension containing the data
+
+        extension_mask : int, optional with default: None
+            Number of the FITS extension containing the masked pixels
+
+        extension_error : int, optional with default: None
+            Number of the FITS extension containing the errors for the values
+        """
+        hdu = pyfits.open(file, uint=True, do_not_scale_image_data=True, memmap=False)
+        if (
+            extension_data is None
+            and extension_mask is None
+            and extension_error is None
+            and extension_coeffs is None
+        ):
+            self._data = hdu[0].data.astype("float32")
+            self._fibers = self._data.shape[0]
+            self._pixels = numpy.arange(self._data.shape[1])
+            self.setHeader(hdu[0].header)
+            if len(hdu) > 1:
+                for i in range(1, len(hdu)):
+                    if hdu[i].header["EXTNAME"].split()[0] == "ERROR":
+                        self._error = hdu[i].data.astype("float32")
+                    elif hdu[i].header["EXTNAME"].split()[0] == "BADPIX":
+                        self._mask = hdu[i].data.astype("bool")
+                        self._good_fibers = numpy.where(numpy.sum(self._mask, axis=1) != self._data.shape[1])[0]
+                    elif hdu[i].header["EXTNAME"].split()[0] == "COEFFS":
+                        self._coeffs = hdu[i].data.astype("float32")
+
+        else:
+            if extension_data is not None:
+                self._data = hdu[extension_data].data.astype("float32")
+                self._fibers = self._data.shape[0]
+                self._pixels = numpy.arange(self._data.shape[1])
+            if extension_mask is not None:
+                self._mask = hdu[extension_mask].data.astype("bool")
+                self._good_fibers = numpy.where(numpy.sum(self._mask, axis=1) != self._data.shape[1])[0]
+            if extension_error is not None:
+                self._error = hdu[extension_error].data.astype("float32")
+            if extension_coeffs is not None:
+                self._coeffs = hdu[extension_coeffs].data.astype("float32")
+
+        hdu.close()
+
+        if extension_hdr is not None:
+            self.setHeader(hdu[extension_hdr].header)
+
     def applyFibers(self, function, args):
         result = []
         for i in range(len(self)):

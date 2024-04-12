@@ -63,53 +63,6 @@ __all__ = [
 ]
 
 
-def get_sky_mask_uves(wave, width=3, threshold=2):
-    """
-    Generate a mask for the bright sky lines.
-    mask every line at +-width, where width in same units as wave (Angstroms)
-    Only lines with a flux larger than threshold (in 10E-16 ergs/cm^2/s/A) are masked
-    The line list is from https://www.eso.org/observing/dfo/quality/UVES/pipeline/sky_spectrum.html
-
-    Returns a bool np.array the same size as wave with sky line wavelengths marked as True
-    """
-    p = os.path.join(os.getenv('LVMCORE_DIR'), 'etc', 'UVES_sky_lines.txt')
-    txt = np.genfromtxt(p)
-    skyw, skyf = txt[:,1], txt[:,4]
-    #plt.plot(skyw, skyw*0, 'k.')
-    #plt.plot(skyw, skyf, 'k.')
-    select = (skyf>threshold)
-    lines = skyw[select]
-    # do NOT mask Ha if it is present in the sky table
-    ha = (lines>6562) & (lines<6564)
-    lines = lines[~ha]
-    mask = np.zeros_like(wave, dtype=bool)
-    if width > 0.0:
-        for line in lines :
-            if (line<=wave[0]) or (line>=wave[-1]):
-                continue
-            ii=np.where((wave>=line-width)&(wave<=line+width))[0]
-            mask[ii]=True
-
-    return mask
-
-
-def get_z_continuum_mask(w):
-    '''
-    Some clean regions at the red edge of the NIR channel (hand picked)
-    '''
-    good = [[9230,9280], [9408,9415], [9464,9472], [9608,9512], [9575,9590], [9593,9603], [9640,9650], [9760,9775]]
-    mask = np.zeros_like(w, dtype=bool)
-    for r in good :
-        if (r[0]<=w[0]) or (r[1]>=w[-1]):
-            continue
-        ii=np.where((w>=r[0])&(w<=r[1]))[0]
-        mask[ii]=True
-
-    # do not mask before first region
-    mask[np.where(w<=good[0][0])] = True
-    return mask
-
-
 def configureSkyModel_drp(
     skymodel_config_path=SKYMODEL_CONFIG_PATH,
     skymodel_path=SKYMODEL_INST_PATH,
