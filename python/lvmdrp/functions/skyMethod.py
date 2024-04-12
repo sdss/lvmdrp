@@ -1520,8 +1520,8 @@ def combine_skies(in_rss: str, out_rss, sky_weights: Tuple[float, float] = None)
 
     # evaluate sky spectra
     _, supersky, supersky_error = rss.eval_supersky()
-    sky_e = RSS(wave_trace=rss._wave_trace, lsf_trace=rss._lsf_trace, data=supersky["east"], error=supersky_error["east"])
-    sky_w = RSS(wave_trace=rss._wave_trace, lsf_trace=rss._lsf_trace, data=supersky["west"], error=supersky_error["west"])
+    sky_e = RSS(wave_trace=rss._wave_trace, lsf_trace=rss._lsf_trace, data=supersky["east"], error=supersky_error["east"], header=rss._header)
+    sky_w = RSS(wave_trace=rss._wave_trace, lsf_trace=rss._lsf_trace, data=supersky["west"], error=supersky_error["west"], header=rss._header)
 
     # define master sky
     sky = sky_e * w_e + sky_w * w_w
