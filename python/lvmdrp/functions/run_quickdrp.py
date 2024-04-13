@@ -8,6 +8,7 @@
 # @Copyright: SDSS-V LVM
 
 import os
+from glob import glob
 from typing import Tuple
 
 from astropy.table import Table
@@ -138,12 +139,6 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
             mpixflat_path = os.path.join(masters_path, f"lvm-mpixflat-{sci_camera}.fits")
             mtrace_path = os.path.join(masters_path, f"lvm-mtrace-{sci_camera}.fits")
             mwidth_path = os.path.join(masters_path, f"lvm-mwidth-{sci_camera}.fits")
-            # macorr_path = os.path.join(masters_path, f"lvm-apercorr-{sci_camera}.fits")
-            mwave_path = os.path.join(masters_path, f"lvm-mwave_{lamps}-{sci_camera}.fits")
-            mlsf_path = os.path.join(masters_path, f"lvm-mlsf_{lamps}-{sci_camera}.fits")
-            mflat_path = os.path.join(masters_path, f"lvm-mfiberflat_twilight_single-{sci_camera}.fits")
-            if not os.path.isfile(mflat_path):
-                mflat_path = os.path.join(masters_path, f"lvm-mfiberflat-{sci_camera}.fits")
         else:
             log.info(f"using master calibration frames from DRP version {drpver}, mjd = {sci_mjd}, camera = {sci_camera}")
             masters = md.match_master_metadata(target_mjd=sci_mjd,
@@ -155,10 +150,6 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
             mpixflat_path = None
             mtrace_path = path.full("lvm_master", drpver=drpver, kind="mtrace", **masters["trace"].to_dict())
             mwidth_path = None
-            # macorr_path = None
-            mwave_path = path.full("lvm_master", drpver=drpver, kind=f"mwave_{lamps}", **masters["wave"].to_dict())
-            mlsf_path = path.full("lvm_master", drpver=drpver, kind=f"mlsf_{lamps}", **masters["lsf"].to_dict())
-            mflat_path = path.full("lvm_master", drpver=drpver, kind="mfiberflat", **masters["fiberflat"].to_dict())
 
         log.info(f'--- Starting science reduction of raw frame: {rsci_path}')
 
@@ -179,56 +170,61 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
             lsci_path = dsci_path
 
         # extract 1d spectra
-        image_tasks.extract_spectra(in_image=lsci_path, out_rss=xsci_path, in_trace=mtrace_path, in_fwhm=mwidth_path, method=extraction_method, parallel=extraction_parallel)
+        image_tasks.extract_spectra(in_image=dsci_path, out_rss=xsci_path, in_trace=mtrace_path, in_fwhm=mwidth_path,
+                                    method=extraction_method, parallel=extraction_parallel)
 
-        # wavelength calibrate
-        rss_tasks.create_pixel_table(in_rss=xsci_path, out_rss=wsci_path, arc_wave=mwave_path, arc_fwhm=mlsf_path)
-
-        # apply fiberflat correction
-        rss_tasks.apply_fiberflat(in_rss=wsci_path, out_rss=fsci_path,
-                                  in_flat=mflat_path, in_cent=mtrace_path,
-                                  in_width=mwidth_path,
-                                  in_wave=mwave_path, in_lsf=mlsf_path,
-                                  out_lvmframe=frame_path)
-
-        # interpolate sky fibers
-        sky_tasks.interpolate_sky(in_rss=fsci_path, out_skye=fskye_path, out_skyw=fskyw_path)
-
-        # compute master sky and subtract if requested
-        sky_tasks.combine_skies(in_rss=fsci_path, out_rss=ssci_path, in_skye=fskye_path, in_skyw=fskyw_path, sky_weights=sky_weights)
-
-        # resample wavelength into uniform grid along fiber IDs for science and sky fibers
-        iwave, fwave = SPEC_CHANNELS[sci_camera[0]]
-        rss_tasks.resample_wavelength(in_rss=ssci_path,  out_rss=hsci_path, method="linear", compute_densities=True, disp_pix=0.5, start_wave=iwave, end_wave=fwave, err_sim=10, parallel=0, extrapolate=False)
-        rss_tasks.resample_wavelength(in_rss=fskye_path, out_rss=hskye_path, method="linear", compute_densities=True, disp_pix=0.5, start_wave=iwave, end_wave=fwave, err_sim=10, parallel=0, extrapolate=False)
-        rss_tasks.resample_wavelength(in_rss=fskyw_path, out_rss=hskyw_path, method="linear", compute_densities=True, disp_pix=0.5, start_wave=iwave, end_wave=fwave, err_sim=10, parallel=0, extrapolate=False)
-
-        # use sky subtracted resampled frames for flux calibration in each camera
-        flux_tasks.fluxcal_Gaia(sci_camera, hsci_path, GAIA_CACHE_DIR=ORIG_MASTER_DIR+'/gaia_cache')
-
-    # stack spectrographs and channel-wise calibration
+    # per channel reduction
     for channel in "brz":
-        hsci_paths = sorted(path.expand('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver,
-                                        kind='h', camera=f'{channel}*', imagetype='object', expnum=expnum))
+        xsci_paths = sorted(path.expand('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver,
+                                        kind='x', camera=f'{channel}[123]', imagetype=sci_imagetyp, expnum=expnum))
+        xsci_path = path.full('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver,
+                              kind='x', camera=channel, imagetype=sci_imagetyp, expnum=expnum)
+        wsci_path = path.full('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver,
+                              kind='w', camera=channel, imagetype=sci_imagetyp, expnum=expnum)
+        mwave_paths = sorted(glob(os.path.join(masters_path, f"lvm-mwave_{lamps}-{channel}?.fits")))
+        mlsf_paths = sorted(glob(os.path.join(masters_path, f"lvm-mlsf_{lamps}-{channel}?.fits")))
+        frame_path = path.full('lvm_frame', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver, expnum=sci_expnum, kind=f'Frame-{channel}')
+        mflat_paths = sorted(glob(os.path.join(masters_path, f"lvm-mfiberflat_twilight-{channel}?.fits")))
+        if not mflat_paths:
+            mflat_paths = sorted(glob(os.path.join(masters_path, f"lvm-mfiberflat-{channel}?.fits")))
+        ssci_path = path.full('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver,
+                              kind='s', camera=channel, imagetype=sci_imagetyp, expnum=expnum)
+        hsci_path = path.full('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver,
+                              kind='h', camera=channel, imagetype=sci_imagetyp, expnum=expnum)
 
         # stack spectrographs
-        # TODO: write lvmCFrame-<channel>-<expnum>.fits
-        cframe_path = path.full("lvm_frame", mjd=sci_mjd, drpver=drpver, tileid=sci_tileid, expnum=sci_expnum, kind=f'CFrame-{channel}')
-        rss_tasks.stack_spectrographs(in_rsss=hsci_paths, out_rss=cframe_path)
+        rss_tasks.stack_spectrographs(in_rsss=xsci_paths, out_rss=xsci_path)
+
+        # wavelength calibrate
+        rss_tasks.create_pixel_table(in_rss=xsci_path, out_rss=wsci_path, in_waves=mwave_paths, in_lsfs=mlsf_paths)
+
+        # apply fiberflat correction
+        rss_tasks.apply_fiberflat(in_rss=wsci_path, out_frame=frame_path, in_flats=mflat_paths)
+
+        # interpolate sky fibers
+        sky_tasks.interpolate_sky(in_frame=frame_path, out_rss=ssci_path)
+
+        # combine sky telescopes
+        sky_tasks.combine_skies(in_rss=ssci_path, out_rss=ssci_path, sky_weights=sky_weights)
+
+        # resample wavelength into uniform grid along fiber IDs for science and sky fibers
+        rss_tasks.resample_wavelength(in_rss=ssci_path,  out_rss=hsci_path, wave_range=SPEC_CHANNELS[channel], wave_disp=0.5, convert_to_density=True)
+
+        # use sky subtracted resampled frames for flux calibration in each camera
+        flux_tasks.fluxcal_Gaia(channel, hsci_path, GAIA_CACHE_DIR=ORIG_MASTER_DIR+'/gaia_cache')
 
         # flux-calibrate each channel
-        # TODO: write lvmFFrame-<channel>-<expnum>.fits
         fframe_path = path.full("lvm_frame", mjd=sci_mjd, drpver=drpver, tileid=sci_tileid, expnum=sci_expnum, kind=f'FFrame-{channel}')
-        flux_tasks.apply_fluxcal(in_rss=cframe_path, out_rss=fframe_path, skip_fluxcal=skip_flux_calibration)
+        flux_tasks.apply_fluxcal(in_rss=hsci_path, out_rss=fframe_path, skip_fluxcal=skip_flux_calibration)
 
     # stitch channels
-    fframe_paths = sorted(path.expand('lvm_frame', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver, kind='FFrame-*', expnum=expnum))
-    fframe_path = path.full("lvm_frame", drpver=drpver, tileid=sci_tileid, mjd=sci_mjd, expnum=sci_expnum, kind='FFrame')
-    rss_tasks.join_spec_channels(in_rsss=fframe_paths, out_rss=fframe_path, use_weights=True)
+    fframe_paths = sorted(path.expand('lvm_frame', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver, kind='FFrame-?', expnum=expnum))
+    cframe_path = path.full("lvm_frame", drpver=drpver, tileid=sci_tileid, mjd=sci_mjd, expnum=sci_expnum, kind='CFrame')
+    rss_tasks.join_spec_channels(in_rsss=fframe_paths, out_rss=cframe_path, use_weights=True)
 
-    # TODO: write lvmSFrame-<expnum>.fits
+    # sky subtraction
     sframe_path = path.full("lvm_frame", mjd=sci_mjd, drpver=drpver, tileid=sci_tileid, expnum=sci_expnum, kind='SFrame')
-    sky_tasks.quick_sky_subtraction(in_fframe=fframe_path, out_sframe=sframe_path, skip_subtraction=skip_sky_subtraction)
+    sky_tasks.quick_sky_subtraction(in_cframe=cframe_path, out_sframe=sframe_path, skip_subtraction=skip_sky_subtraction)
 
     # TODO: add quick report routine
 
