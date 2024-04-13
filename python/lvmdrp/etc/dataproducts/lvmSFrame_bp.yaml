@@ -16,16 +16,17 @@ hdu0:
   - key: SIMPLE
     value: true
     comment: conforms to FITS standard
-  - key: BITPIX
-    value: 8
-    comment: array data type
-  - key: NAXIS
-    value: 0
-    comment: number of array dimensions
 hdu1:
   name: FLUX
   description: sky-subtracted flux in units of 10(-17) erg/s/cm2/Ang/fiber
   is_image: true
+  header:
+  - key: BUNIT
+    comment: flux units
+  - key: BSCALE
+    comment: linear scaling factor
+  - key: BZERO
+    comment: zero point
   shape: NWAVE x NFIBER
 hdu2:
   name: IVAR
@@ -33,62 +34,30 @@ hdu2:
   is_image: true
   shape: NWAVE x NFIBER
 hdu3:
+  name: MASK
+  description: the quality bitmask for each fiber pixel
+  is_image: true
+  shape: NWAVE x NFIBER
+hdu4:
   name: WAVE
-  description: air wavelength solution trace in angstroms
+  description: air wavelength solution in angstroms
   is_image: true
   shape: NWAVE
-hdu4:
-  name: LSF_TRACE
-  description: LSF (FWHM) solution traceset in angstroms
-  is_image: false
-  shape: BINARY FITS TABLE
-  columns:
-    FUNC:
-      name: FUNC
-      type: str
-      unit: null
-      description: 'polynomial function type: poly, chebyshev, legendre'
-    XMIN:
-      name: XMIN
-      type: float32
-      unit: pix
-      description: 'initial pixel in the LSF trace'
-    XMAX:
-      name: XMAX
-      type: float32
-      unit: pix
-      description: 'final pixel in the LSF trace'
-    COEFF:
-      name: COEFF
-      type: float32
-      unit: null
-      description: 'polynomial coefficients'
 hdu5:
+  name: LSF
+  description: LSF (FWHM) solution in angstroms
+  is_image: true
+  shape: NWAVE x NFIBER
+hdu6:
   name: SKY
   description: sky in flux-calibrated units (10(-17) erg/s/cm2/Ang/fiber)
   is_image: true
   shape: NWAVE x NFIBER
-hdu6:
+hdu7:
   name: SKY_IVAR
   description: sky inverse variance (1/sigma^2) in flux-calibrated units (10(-17) erg/s/cm2/Ang/fiber)
   is_image: true
   shape: NWAVE x NFIBER
-hdu7:
-  name: SUPERSKY
-  description: super sky information
-  is_image: false
-  shape: BINARY FITS TABLE
-  columns:
-    AIRWAVE:
-      name: AIRWAVE
-      type: float32
-      unit: '(10(-17) erg/s/cm2/Ang/fiber)'
-      description: 'super sampled wavelength grid'
-    FLUX:
-      name: FLUX
-      type: float32
-      unit: '(10(-17) erg/s/cm2/Ang/fiber)'
-      description: 'spline fitting in super sampled grid'
 hdu8:
   name: SLITMAP
   description: slitmap table describing fiber positions for this exposure
