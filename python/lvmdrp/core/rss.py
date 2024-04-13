@@ -412,7 +412,8 @@ class RSS(FiberRows):
             mask=new_mask,
             sky=new_sky,
             sky_error=new_sky_error,
-            header=new_hdr
+            header=new_hdr,
+            slitmap=rsss[0]._slitmap
         )
         new_rss.set_wave_array(new_wave)
         new_rss.set_lsf_array(new_lsf)
@@ -3150,27 +3151,36 @@ class lvmCFrame(RSS):
         error = numpy.sqrt(error)
         mask = hdulist["MASK"].data
         wave = hdulist["WAVE"].data
-        superflat = hdulist["SUPERFLAT"].data
+        lsf = hdulist["LSF"].data
+        sky = hdulist["SKY"].data
+        sky_error = numpy.divide(1, hdulist["SKY_IVAR"].data, where=hdulist["SKY_IVAR"].data != 0, out=numpy.zeros_like(hdulist["SKY_IVAR"].data))
+        sky_error = numpy.sqrt(sky_error)
         slitmap = Table(hdulist["SLITMAP"].data)
         return cls(data=data, error=error, mask=mask, header=header,
-                   wave=wave, superflat=superflat, slitmap=slitmap)
+                   wave=wave, lsf=lsf,
+                   sky=sky, sky_error=sky_error, slitmap=slitmap)
 
-    def __init__(self, data=None, error=None, mask=None, header=None, slitmap=None, wave=None, superflat=None, **kwargs):
-        RSS.__init__(self, data=data, error=error, mask=mask, header=header, slitmap=slitmap, wave=wave)
+    @classmethod
+    def from_file(cls, in_file):
+        with pyfits.open(in_file) as hdulist:
+            return cls.from_hdulist(hdulist)
+
+    def __init__(self, data=None, error=None, mask=None, header=None, slitmap=None, wave=None, lsf=None, sky=None, sky_error=None, **kwargs):
+        RSS.__init__(self, data=data, error=error, mask=mask, header=header,
+                     sky=sky, sky_error=sky_error, slitmap=slitmap)
+
+        self.set_wave_array(wave)
+        self.set_lsf_array(lsf)
 
         self._blueprint = dp.load_blueprint(name="lvmCFrame")
         self._template = dp.dump_template(dataproduct_bp=self._blueprint, save=False)
 
-        if superflat is not None:
-            self.setSuperflat(superflat)
-        else:
-            self._superflat = None
         if header is not None:
-            self.setHeader(header, **kwargs)
+            self.set_header(header, **kwargs)
         else:
             self._header = None
 
-    def setHeader(self, orig_header, **kwargs):
+    def set_header(self, orig_header, **kwargs):
         """Set header"""
         blueprint = dp.load_blueprint(name="lvmCFrame")
         new_header = orig_header
@@ -3185,7 +3195,6 @@ class lvmCFrame(RSS):
         new_header.update(new_cards)
 
         new_header["CCD"] = ",".join([channel for channel in kwargs.get("channels", [])])
-        new_header["NAXIS1"], new_header["NAXIS2"] = self._data.shape[1], self._data.shape[0]
         # update header with WCS
         if self._wave is not None:
             wcs = WCS(new_header)
@@ -3195,28 +3204,9 @@ class lvmCFrame(RSS):
         self._header = new_header
         return self._header
 
-    def getSuperflat(self):
-        """Get superflat representation as numpy array"""
-        return self._superflat
-
-    def setSuperflat(self, superflat):
-        """Set superflat representation"""
-        self._superflat = superflat
-        return self._superflat
-
     def loadFitsData(self, in_file):
-        with pyfits.open(in_file) as f:
-            self._data = f["FLUX"].data
-            self._error = numpy.divide(1, f["IVAR"].data, where=f["IVAR"].data != 0, out=numpy.zeros_like(f["IVAR"].data))
-            self._error = numpy.sqrt(self._error)
-            self._mask = f["MASK"].data.astype("bool")
-            self._wave = f["WAVE"].data.astype("float32")
-            self._superflat = f["SUPERFLAT"].data
-            self._slitmap = Table(f["SLITMAP"].data)
-            self._header = f["PRIMARY"].header
-            for kw in ["BUNIT", "BSCALE", "BZERO"]:
-                if kw in f["FLUX"].header:
-                    self._header[kw] = f["FLUX"].header.get(kw)
+        self = lvmCFrame.from_file(in_file)
+        return self
 
     def writeFitsData(self, out_file):
         # update flux header
@@ -3229,8 +3219,10 @@ class lvmCFrame(RSS):
         self._template["FLUX"].data = self._data
         self._template["IVAR"].data = numpy.divide(1, self._error**2, where=self._error != 0, out=numpy.zeros_like(self._error))
         self._template["MASK"].data = self._mask.astype("uint8")
-        self._template["WAVE"].data = self._wave.astype("float32")
-        self._template["SUPERFLAT"].data = self._superflat
+        self._template["WAVE"].data = self._wave
+        self._template["LSF"].data = self._lsf
+        self._template["SKY"].data = self._sky
+        self._template["SKY_IVAR"].data = numpy.divide(1, self._sky_error**2, where=self._sky_error != 0, out=numpy.zeros_like(self._sky_error))
         self._template["SLITMAP"] = pyfits.BinTableHDU(data=self._slitmap, name="SLITMAP")
         # write template
         self._template.writeto(out_file, overwrite=True)
@@ -3247,22 +3239,31 @@ class lvmFFrame(RSS):
         error = numpy.sqrt(error)
         mask = hdulist["MASK"].data
         wave = hdulist["WAVE"].data
+        lsf_trace = Table(hdulist["LSF_TRACE"].data)
+        sky = hdulist["SKY"].data
+        sky_error = numpy.divide(1, hdulist["SKY_IVAR"].data, where=hdulist["SKY_IVAR"].data != 0, out=numpy.zeros_like(hdulist["SKY_IVAR"].data))
+        sky_error = numpy.sqrt(sky_error)
+        fluxcal = Table(hdulist["FLUXCAL"].data)
         slitmap = Table(hdulist["SLITMAP"].data)
         return cls(data=data, error=error, mask=mask, header=header,
-                   wave=wave, slitmap=slitmap)
+                   wave=wave, lsf_trace=lsf_trace,
+                   sky=sky, sky_error=sky_error, fluxcal=fluxcal, slitmap=slitmap)
 
-    def __init__(self, data=None, error=None, mask=None, header=None, slitmap=None, wave=None, **kwargs):
-        RSS.__init__(self, data=data, error=error, mask=mask, header=header, slitmap=slitmap, wave=wave)
+    def __init__(self, data=None, error=None, mask=None, header=None, wave=None, lsf_trace=None, fluxcal=None, slitmap=None, **kwargs):
+        RSS.__init__(self, data=data, error=error, mask=mask, header=header,
+                     lsf_trace=lsf_trace, fluxcal=fluxcal, slitmap=slitmap)
+
+        self.set_wave_array(wave)
 
         self._blueprint = dp.load_blueprint(name="lvmFFrame")
         self._template = dp.dump_template(dataproduct_bp=self._blueprint, save=False)
 
         if header is not None:
-            self.setHeader(header, **kwargs)
+            self.set_header(header, **kwargs)
         else:
             self._header = None
 
-    def setHeader(self, orig_header, **kwargs):
+    def set_header(self, orig_header, **kwargs):
         """Set header"""
         blueprint = dp.load_blueprint(name="lvmFFrame")
         new_header = orig_header
@@ -3277,7 +3278,6 @@ class lvmFFrame(RSS):
         new_header.update(new_cards)
 
         new_header["CCD"] = ",".join([channel for channel in kwargs.get("channels", [])])
-        new_header["NAXIS1"], new_header["NAXIS2"] = self._data.shape[1], self._data.shape[0]
         # update header with WCS
         if self._wave is not None:
             wcs = WCS(new_header)
@@ -3311,14 +3311,18 @@ class lvmFFrame(RSS):
         self._template["FLUX"].data = self._data
         self._template["IVAR"].data = numpy.divide(1, self._error**2, where=self._error != 0, out=numpy.zeros_like(self._error))
         self._template["MASK"].data = self._mask.astype("uint8")
-        self._template["WAVE"].data = self._wave.astype("float32")
+        self._template["WAVE"].data = self._wave
+        self._template["LSF_TRACE"] = pyfits.BinTableHDU(self._lsf_trace, name="LSF_TRACE")
+        self._template["SKY"].data = self._sky.astype("float32")
+        self._template["SKY_IVAR"].data = numpy.divide(1, self._sky_error**2, where=self._sky_error != 0, out=numpy.zeros_like(self._sky_error))
+        self._template["FLUXCAL"] = pyfits.BinTableHDU(data=self._fluxcal, name="FLUXCAL")
         self._template["SLITMAP"] = pyfits.BinTableHDU(data=self._slitmap, name="SLITMAP")
         # write template
         self._template.writeto(out_file, overwrite=True)
 
 
 class lvmSFrame(RSS):
-    """lvmSFrame class"""
+    """LVM SFrame product class for extracted sky data"""
 
     @classmethod
     def from_hdulist(cls, hdulist):
@@ -3328,22 +3332,35 @@ class lvmSFrame(RSS):
         error = numpy.sqrt(error)
         mask = hdulist["MASK"].data
         wave = hdulist["WAVE"].data
+        lsf = hdulist["LSF"].data
+        sky = hdulist["SKY"].data
+        sky_error = numpy.divide(1, hdulist["SKY_IVAR"].data, where=hdulist["SKY_IVAR"].data != 0, out=numpy.zeros_like(hdulist["SKY_IVAR"].data))
+        sky_error = numpy.sqrt(sky_error)
         slitmap = Table(hdulist["SLITMAP"].data)
         return cls(data=data, error=error, mask=mask, header=header,
-                   wave=wave, slitmap=slitmap)
+                   wave=wave, lsf=lsf, sky=sky, sky_error=sky_error, slitmap=slitmap)
 
-    def __init__(self, data=None, error=None, mask=None, header=None, slitmap=None, wave=None, superflat=None, **kwargs):
-        RSS.__init__(self, data=data, error=error, mask=mask, header=header, slitmap=slitmap, wave=wave)
+    @classmethod
+    def from_file(cls, in_file):
+        with pyfits.open(in_file) as hdulist:
+            return cls.from_hdulist(hdulist)
+
+    def __init__(self, data=None, error=None, mask=None, header=None, slitmap=None, wave=None, lsf=None, sky=None, sky_error=None, **kwargs):
+        RSS.__init__(self, data=data, error=error, mask=mask, header=header,
+                     sky=sky, sky_error=sky_error, slitmap=slitmap)
+
+        self.set_wave_array(wave)
+        self.set_lsf_array(lsf)
 
         self._blueprint = dp.load_blueprint(name="lvmSFrame")
         self._template = dp.dump_template(dataproduct_bp=self._blueprint, save=False)
 
         if header is not None:
-            self.setHeader(header, **kwargs)
+            self.set_header(header, **kwargs)
         else:
             self._header = None
 
-    def setHeader(self, orig_header, **kwargs):
+    def set_header(self, orig_header, **kwargs):
         """Set header"""
         blueprint = dp.load_blueprint(name="lvmSFrame")
         new_header = orig_header
@@ -3358,7 +3375,6 @@ class lvmSFrame(RSS):
         new_header.update(new_cards)
 
         new_header["CCD"] = ",".join([channel for channel in kwargs.get("channels", [])])
-        new_header["NAXIS1"], new_header["NAXIS2"] = self._data.shape[1], self._data.shape[0]
         # update header with WCS
         if self._wave is not None:
             wcs = WCS(new_header)
@@ -3368,38 +3384,9 @@ class lvmSFrame(RSS):
         self._header = new_header
         return self._header
 
-    def getSky(self):
-        """Get sky representation as numpy array"""
-        return self._sky
-
-    def setSky(self, sky):
-        """Set sky representation"""
-        self._sky = sky
-        return self._sky
-
-    def getSupersky(self):
-        """Get supersky representation as numpy array"""
-        return self._supersky
-
-    def setSupersky(self, supersky):
-        """Set supersky representation"""
-        self._supersky = supersky
-        return self._supersky
-
     def loadFitsData(self, in_file):
-        with pyfits.open(in_file) as f:
-            self._data = f["FLUX"].data
-            self._error = numpy.divide(1, f["IVAR"].data, where=f["IVAR"].data != 0, out=numpy.zeros_like(f["IVAR"].data))
-            self._error = numpy.sqrt(self._error)
-            self._mask = f["MASK"].data.astype("bool")
-            self._wave = f["WAVE"].data.astype("float32")
-            self._sky = f["SKY"].data.astype("float32")
-            self._supersky = Table(f["SUPERSKY"].data)
-            self._slitmap = Table(f["SLITMAP"].data)
-            self._header = f["PRIMARY"].header
-            for kw in ["BUNIT", "BSCALE", "BZERO"]:
-                if kw in f["FLUX"].header:
-                    self._header[kw] = f["FLUX"].header.get(kw)
+        self = lvmSFrame.from_file(in_file)
+        return self
 
     def writeFitsData(self, out_file):
         # update flux header
@@ -3412,9 +3399,10 @@ class lvmSFrame(RSS):
         self._template["FLUX"].data = self._data
         self._template["IVAR"].data = numpy.divide(1, self._error**2, where=self._error != 0, out=numpy.zeros_like(self._error))
         self._template["MASK"].data = self._mask.astype("uint8")
-        self._template["WAVE"].data = self._wave.astype("float32")
+        self._template["WAVE"].data = self._wave
+        self._template["LSF"].data = self._lsf
         self._template["SKY"].data = self._sky.astype("float32")
-        self._template["SUPERSKY"] = pyfits.BinTableHDU(data=self._supersky, name="SUPERSKY")
+        self._template["SKY_IVAR"].data = numpy.divide(1, self._sky_error**2, where=self._sky_error != 0, out=numpy.zeros_like(self._sky_error))
         self._template["SLITMAP"] = pyfits.BinTableHDU(data=self._slitmap, name="SLITMAP")
         # write template
         self._template.writeto(out_file, overwrite=True)
