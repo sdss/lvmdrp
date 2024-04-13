@@ -28,7 +28,7 @@ from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.core.image import loadImage
 from lvmdrp.core.passband import PassBand
 from lvmdrp.core.plot import plt, create_subplots, save_fig, plot_wavesol_residuals, plot_wavesol_coeffs
-from lvmdrp.core.rss import RSS, _read_pixwav_map, loadRSS, lvmFrame
+from lvmdrp.core.rss import RSS, _read_pixwav_map, loadRSS, lvmFrame, lvmCFrame
 from lvmdrp.core.spectrum1d import Spectrum1D, _spec_from_lines, _cross_match
 from lvmdrp.external import ancillary_func
 from lvmdrp.utils import flatten
@@ -2930,12 +2930,17 @@ def join_spec_channels(in_rsss: List[str], out_rss: str, use_weights: bool = Tru
     # combine channels
     new_rss = RSS.from_channels(*rsss, use_weights=use_weights)
 
+    cframe = lvmCFrame(data=new_rss._data, error=new_rss._error, mask=new_rss._mask, header=new_rss._header,
+                       wave=new_rss._wave, lsf=new_rss._lsf,
+                       sky=new_rss._sky, sky_error=new_rss._sky_error,
+                       slitmap=new_rss._slitmap)
+
     # write output RSS
     if out_rss is not None:
         log.info(f"writing output RSS to {os.path.basename(out_rss)}")
-        new_rss.writeFitsData(out_rss)
+        cframe.writeFitsData(out_rss)
 
-    return new_rss
+    return cframe
 
 # TODO: from Law+2016
 # 	* normalize each fiber to unity

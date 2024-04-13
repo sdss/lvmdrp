@@ -30,7 +30,7 @@ from lvmdrp.core.constants import (
 from lvmdrp.core.plot import plt, create_subplots, save_fig
 from lvmdrp.core.header import Header
 from lvmdrp.core.passband import PassBand
-from lvmdrp.core.rss import RSS, lvmFrame
+from lvmdrp.core.rss import RSS, lvmFrame, lvmCFrame, lvmSFrame
 from lvmdrp.core.sky import (
     ang_distance,
     select_sky_fibers,
@@ -1539,12 +1539,12 @@ def combine_skies(in_rss: str, out_rss, sky_weights: Tuple[float, float] = None)
     return rss, sky
 
 
-def quick_sky_subtraction(in_fframe, out_sframe, band=np.array((7238,7242,7074,7084,7194,7265)), skip_subtraction=False):
+def quick_sky_subtraction(in_cframe, out_sframe, band=np.array((7238,7242,7074,7084,7194,7265)), skip_subtraction=False):
     """Quick sky refinement using the model in the final CFrame
 
     Parameters
     ----------
-    in_fframe : str
+    in_cframe : str
         input CFrame file
     out_sframe : str
         output SFrame file
@@ -1552,12 +1552,12 @@ def quick_sky_subtraction(in_fframe, out_sframe, band=np.array((7238,7242,7074,7
         wavelength range to use for sky refinement, by default np.array((7238,7242,7074,7084,7194,7265))
     """
 
-    fframe = fits.open(in_fframe)
-    wave = fframe["WAVE"].data
-    flux = fframe["FLUX"].data
-    error = fframe["ERROR"].data
-    sky = fframe["SKY"].data
-    sky_error = fframe["SKY_ERROR"].data
+    cframe = lvmCFrame.from_file(in_cframe)
+    wave = cframe._wave
+    flux = cframe._data
+    error = cframe._error
+    sky = cframe._sky
+    sky_error = cframe._sky_error
 
     crval = wave[0]
     cdelt = wave[1] - wave[0]
@@ -1582,9 +1582,9 @@ def quick_sky_subtraction(in_fframe, out_sframe, band=np.array((7238,7242,7074,7
         data_c = flux
         error_c = error
 
-    fframe["PRIMARY"].header["SKYSUB"] = (not skip_subtraction, "sky subtracted?")
-    fframe["FLUX"].data = data_c
-    fframe["ERROR"].data = error_c
-    fframe["SKY"].data = sky_c
-    fframe.writeto(out_sframe, overwrite=True)
+    sframe = lvmSFrame(data=data_c, error=error_c, mask=cframe._mask,
+                       sky=sky_c, sky_error=sky_error,
+                       wave=cframe._wave, lsf=cframe._lsf,
+                       header=cframe._header, slitmap=cframe._slitmap)
+    sframe.writeFitsData(out_sframe)
     # TODO: check on expnum=7632 for halpha emission in sky fibers
