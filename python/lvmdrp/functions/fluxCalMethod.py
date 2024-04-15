@@ -91,6 +91,8 @@ def apply_fluxcal(in_rss: str, out_rss: str, skip_fluxcal: bool = False, display
     # check for flux calibration data
     if np.isnan(rss._fluxcal.to_pandas().values).all():
         log.warning("no standard star metadata found, skipping flux calibration")
+        rss.setHdrValue("FLUXCAL", False, "flux-calibrated?")
+        rss.writeFitsData(out_rss)
         return rss
 
     expnum = rss._header["EXPOSURE"]

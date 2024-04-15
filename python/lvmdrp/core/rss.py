@@ -2,7 +2,6 @@ import os
 import numpy
 import bottleneck as bn
 from copy import deepcopy as copy
-from copy import deepcopy as copy
 from scipy import interpolate
 from astropy.io import fits as pyfits
 from astropy.wcs import WCS
@@ -2832,6 +2831,14 @@ class RSS(FiberRows):
                         lsf = self._lsf[parts[i]]
                 else:
                     lsf = None
+                if self._wave_trace is not None:
+                    wave_trace = self._wave_trace[parts[i]]
+                else:
+                    wave_trace = None
+                if self._lsf_trace is not None:
+                    lsf_trace = self._lsf_trace[parts[i]]
+                else:
+                    lsf_trace = None
             elif axis == 1:
                 data = self._data[parts[i]]
                 if self._error is not None:
@@ -2846,6 +2853,20 @@ class RSS(FiberRows):
                     sky = self._sky[parts[i]]
                 else:
                     sky = None
+                if self._wave is not None:
+                    if len(self._wave.shape) == 2:
+                        wave = self._wave[parts[i]]
+                    else:
+                        wave = self._wave[parts[i]]
+                else:
+                    wave = None
+                if self._lsf is not None:
+                    if len(self._lsf.shape) == 2:
+                        lsf = self._lsf[parts[i]]
+                    else:
+                        lsf = self._lsf[parts[i]]
+                else:
+                    lsf = None
                 if self._wave_trace is not None:
                     wave_trace = self._wave_trace[parts[i]]
                 else:
@@ -2859,6 +2880,8 @@ class RSS(FiberRows):
                 data=data,
                 error=error,
                 mask=mask,
+                wave=wave,
+                lsf=lsf,
                 wave_trace=wave_trace,
                 lsf_trace=lsf_trace,
                 sky=sky,

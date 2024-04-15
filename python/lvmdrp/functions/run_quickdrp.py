@@ -113,13 +113,8 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
         lsci_path = path.full("lvm_anc", drpver=drpver, kind="l", imagetype=sci["imagetyp"], **sci)
         xsci_path = path.full("lvm_anc", drpver=drpver, kind="x", imagetype=sci["imagetyp"], **sci)
         wsci_path = path.full("lvm_anc", drpver=drpver, kind="w", imagetype=sci["imagetyp"], **sci)
-        fsci_path = path.full("lvm_anc", drpver=drpver, kind="f", imagetype=sci["imagetyp"], **sci)
         ssci_path = path.full("lvm_anc", drpver=drpver, kind="s", imagetype=sci["imagetyp"], **sci)
         hsci_path = path.full("lvm_anc", drpver=drpver, kind="h", imagetype=sci["imagetyp"], **sci)
-        fskye_path = path.full("lvm_anc", drpver=drpver, kind="f", imagetype="sky_e", **sci)
-        fskyw_path = path.full("lvm_anc", drpver=drpver, kind="f", imagetype="sky_w", **sci)
-        hskye_path = path.full("lvm_anc", drpver=drpver, kind="h", imagetype="sky_e", **sci)
-        hskyw_path = path.full("lvm_anc", drpver=drpver, kind="h", imagetype="sky_w", **sci)
         os.makedirs(os.path.dirname(hsci_path), exist_ok=True)
 
         # define science product paths

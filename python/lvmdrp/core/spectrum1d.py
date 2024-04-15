@@ -3,7 +3,6 @@ from copy import deepcopy
 import numpy
 import bottleneck as bn
 from astropy.io import fits as pyfits
-from astropy.table import Table
 from numpy import polynomial
 from scipy.linalg import norm
 from scipy import signal, interpolate, ndimage, sparse

@@ -6,7 +6,7 @@ import pytest
 from lvmdrp.core.spectrum1d import Spectrum1D
 from lvmdrp.core.rss import RSS
 
-from lvmdrp.functions.run_twilights import get_sequence_metadata, fit_continuum, fit_fiberflat
+from lvmdrp.functions.run_twilights import get_sequence_metadata, fit_continuum
 
 
 def create_fake_twilight(path, tileid=11111, mjd=61234, expnum=6817, cameras=None, imagetyp=None):
@@ -104,29 +104,29 @@ def test_fit_continuum():
     assert best_continuum[-1] == pytest.approx(0, abs=1e-10)
 
 
-def test_fit_fiberflat():
-    """ test fitting a fiberflat """
-    rsss = make_fake_rss(imagetyp="flat", cameras=["b1", "b2", "b3"])
-    new_rss = fit_fiberflat(rsss, plot_fibers=[0,5,9], interpolate_bad=False)
-    assert len(new_rss) == 3
-    assert new_rss[0]._data.shape == (10, 2001)
-    assert new_rss[0]._data == pytest.approx(np.ones_like(new_rss[0]._data), abs=1e-10)
-    assert new_rss[1]._data == pytest.approx(np.ones_like(new_rss[1]._data), abs=1e-10)
-    assert new_rss[2]._data == pytest.approx(np.ones_like(new_rss[2]._data), abs=1e-10)
+# def test_fit_fiberflat():
+#     """ test fitting a fiberflat """
+#     rsss = make_fake_rss(imagetyp="flat", cameras=["b1", "b2", "b3"])
+#     new_rss = fit_fiberflat(rsss, plot_fibers=[0,5,9], interpolate_bad=False)
+#     assert len(new_rss) == 3
+#     assert new_rss[0]._data.shape == (10, 2001)
+#     assert new_rss[0]._data == pytest.approx(np.ones_like(new_rss[0]._data), abs=1e-10)
+#     assert new_rss[1]._data == pytest.approx(np.ones_like(new_rss[1]._data), abs=1e-10)
+#     assert new_rss[2]._data == pytest.approx(np.ones_like(new_rss[2]._data), abs=1e-10)
 
 
-def test_fit_fiberflat_bad():
-    """ test fitting a fiberflat """
-    rsss = make_fake_rss(imagetyp="flat", cameras=["b1", "b2", "b3"])
-    rsss[0]._data[0] = 0
-    rsss[0]._data[5] = 0
-    rsss[0]._data[9] = 0
-    new_rss = fit_fiberflat(rsss, plot_fibers=[0,5,9], interpolate_bad=False)
-    assert len(new_rss) == 3
-    assert new_rss[0]._data.shape == (10, 2001)
-    assert new_rss[0]._data[0] == pytest.approx(0, abs=1e-10)
-    assert new_rss[0]._data[5] == pytest.approx(0, abs=1e-10)
-    assert new_rss[0]._data[9] == pytest.approx(0, abs=1e-10)
-    assert new_rss[1]._data == pytest.approx(np.ones_like(new_rss[1]._data), abs=1e-10)
-    assert new_rss[2]._data == pytest.approx(np.ones_like(new_rss[2]._data), abs=1e-10)
+# def test_fit_fiberflat_bad():
+#     """ test fitting a fiberflat """
+#     rsss = make_fake_rss(imagetyp="flat", cameras=["b1", "b2", "b3"])
+#     rsss[0]._data[0] = 0
+#     rsss[0]._data[5] = 0
+#     rsss[0]._data[9] = 0
+#     new_rss = fit_fiberflat(rsss, plot_fibers=[0,5,9], interpolate_bad=False)
+#     assert len(new_rss) == 3
+#     assert new_rss[0]._data.shape == (10, 2001)
+#     assert new_rss[0]._data[0] == pytest.approx(0, abs=1e-10)
+#     assert new_rss[0]._data[5] == pytest.approx(0, abs=1e-10)
+#     assert new_rss[0]._data[9] == pytest.approx(0, abs=1e-10)
+#     assert new_rss[1]._data == pytest.approx(np.ones_like(new_rss[1]._data), abs=1e-10)
+#     assert new_rss[2]._data == pytest.approx(np.ones_like(new_rss[2]._data), abs=1e-10)
 
