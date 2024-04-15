@@ -246,6 +246,7 @@ def messup_frame(mjd, expnum, spec="1", shifts=[1500, 2000, 3500], shift_size=-2
     specid = f"sp{spec}"
     frames = md.get_frames_metadata(mjd)
     frames.query("expnum == @expnum and spec == @specid", inplace=True)
+    log.info(f"messing up frames for spectrograph = {specid}")
 
     rframe_paths = sorted(path.expand("lvm_raw", hemi="s", camspec=f"?{spec}", mjd=mjd, expnum=expnum))
     rframe_ori_paths = [rframe_path.replace(".fits.gz", "_good.fits.gz") for rframe_path in rframe_paths]
