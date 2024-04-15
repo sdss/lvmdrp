@@ -2018,14 +2018,14 @@ class Image(Header):
         mask |= bad_pix
         return data, error, mask
 
-    def extractSpecOptimal(self, trace_cent, trace_fwhm, plot_fig=False):
+    def extractSpecOptimal(self, cent_trace, trace_fwhm, plot_fig=False):
         # initialize RSS arrays
-        data = numpy.zeros((trace_cent._fibers, self._dim[1]), dtype=numpy.float32)
+        data = numpy.zeros((cent_trace._fibers, self._dim[1]), dtype=numpy.float32)
         if self._error is not None:
-            error = numpy.zeros((trace_cent._fibers, self._dim[1]), dtype=numpy.float32)
+            error = numpy.zeros((cent_trace._fibers, self._dim[1]), dtype=numpy.float32)
         else:
             error = None
-        mask = numpy.zeros((trace_cent._fibers, self._dim[1]), dtype="bool")
+        mask = numpy.zeros((cent_trace._fibers, self._dim[1]), dtype="bool")
 
         self._data = numpy.nan_to_num(self._data)
         self._error = numpy.nan_to_num(self._error, nan=1e10)
@@ -2036,7 +2036,7 @@ class Image(Header):
         for i in range(self._dim[1]):
             # get i-column from image and trace
             slice_img = self.getSlice(i, axis="y")
-            slice_cent = trace_cent.getSlice(i, axis="y")
+            slice_cent = cent_trace.getSlice(i, axis="y")
             cent = slice_cent[0]
 
             # define fiber mask

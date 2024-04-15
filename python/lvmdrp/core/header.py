@@ -29,6 +29,11 @@ class Header(object):
             self._origin = None
 
     def setHeader(self, header, origin=None):
+        if header is None:
+            self._header = None
+            self._origin = None
+            return
+
         if isinstance(header, Header):
             header = header._header
         elif isinstance(header, pyfits.Header):

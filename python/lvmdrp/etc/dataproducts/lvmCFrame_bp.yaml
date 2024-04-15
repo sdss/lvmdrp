@@ -5,12 +5,12 @@ description: |
     together across the dichroic break, adding rows for fibers from spectrograph 2 and 3 atop
     those from spectrograph 1 (i.e., in order of fiberid). All spectra in this file have been
     resampled to a common wavelength grid for ALL LVM observations.  Note that 'C' in the
-    name means Camera Combined on a Common wavelength grid.
+    name means Spectrograph Combined.
 location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[MJD]/
 created_by: module.py
 used_by: module.py
 naming_convention: |
-  lvmCFrame-[EXPNUM].fits.gz, where [EXPNUM] is the (zero-padded) 8-digit exposure number.
+  lvmCFrame-[CHANNEL]-[EXPNUM].fits.gz, where [CHANNEL] is the channel (brz) and [EXPNUM] is the (zero-padded) 8-digit exposure number.
 hdu0:
   name: PRIMARY
   description: primary header metadata
@@ -21,8 +21,15 @@ hdu0:
     comment: conforms to FITS standard
 hdu1:
   name: FLUX
-  description: Flux in flat fielded electrons
+  description: Flux in flat fielded electrons / angstrom
   is_image: true
+  header:
+  - key: BUNIT
+    comment: flux units
+  - key: BSCALE
+    comment: linear scaling factor
+  - key: BZERO
+    comment: zero point
   shape: NWAVE x NFIBER
 hdu2:
   name: IVAR
@@ -36,18 +43,132 @@ hdu3:
   shape: NWAVE x NFIBER
 hdu4:
   name: WAVE
-  description: wavelength solution in log-10 Angstroms (vacuum)
+  description: air wavelength solution in angstroms
   is_image: true
   shape: NWAVE
 hdu5:
+  name: LSF
+  description: LSF (FWHM) solution in angstroms
+  is_image: true
+  shape: NWAVE x NFIBER
+hdu6:
+  name: SKY
+  description: sky in flux-calibrated units (10(-17) erg/s/cm2/Ang/fiber)
+  is_image: true
+  shape: NWAVE x NFIBER
+hdu7:
+  name: SKY_IVAR
+  description: sky inverse variance (1/sigma^2) in flux-calibrated units (10(-17) erg/s/cm2/Ang/fiber)
+  is_image: true
+  shape: NWAVE x NFIBER
+hdu8:
   name: SLITMAP
   description: slitmap table describing fiber positions for this exposure
   is_image: false
   shape: BINARY FITS TABLE
   columns:
-    pass
-hdu7:
-  name: SUPERFLAT
-  description: superflat vector from quartz lamps
-  is_image: true
-  shape: NWAVE x NFIBER
+    FIBEID:
+      name: fiberid
+      type: uint16
+      description: number of the fiber along the slithead
+      unit: null
+    SPECTROGRAPHID:
+      name: spectrographid
+      type: uint16
+      description: the spectrograph id number, either 1, 2 or 3
+      unit: null
+    BLOCKID:
+      name: blockid
+      type: str
+      description: the ID label of the block along the slit
+      unit: null
+    FINBLOCK:
+      name: finblock
+      type: uint16
+      description: the fiber number within the v-groove block
+      unit: null
+    TARGETTYPE:
+      name: targettype
+      type: str
+      description: the type of fiber, either science, standard or sky
+      unit: null
+    IFULABEL:
+      name: ifulabel
+      type: str
+      description: an ID label for the telescope + sector
+      unit: null
+    FINIFU:
+      name: finifu
+      type: uint16
+      description: a running fiber number within the IFU from 1 to N
+      unit: null
+    TELESCOPE:
+      name: telescope
+      type: str
+      description: the name of the telescope; Sci, Spec, SkyE/W for science, standards, or skies
+      unit: null
+    XPMM:
+      name: xpmm
+      type: float32
+      description: the x coordinate in mm of the fiber relative to the centroid
+      unit: mm
+    YPMM:
+      name: ypmm
+      type: float32
+      description: the x coordinate in mm of the fiber relative to the centroid
+      unit: mm
+    RINGNUM:
+      name: ringnum
+      type: uint16
+      description: the number of the IFU ring the fiber belongs to
+      unit: null
+    ORIG_IFULABEL:
+      name: orig_ifulabel
+      type: str
+      description: the original IFU label from the Excel document. WRONG! DO NOT USE!
+      unit: null
+    ORIG_SLITLABEL:
+      name: orig_slitlabel
+      type: str
+      description: the original slitblock label from the Excel document. WRONG! DO NOT USE!
+      unit: null
+    FINSECTOR:
+      name: finsector
+      type: uint16
+      description: the original fiber number within the IFU sector
+      unit: null
+    FMAP:
+      name: fmap
+      type: str
+      description: the current fiber flow FROM:TO from the IFU position to the SLIT position.
+      unit: null
+    YPIX_B:
+      name: ypix_b
+      type: uint32
+      description: the y coordinate in pixels of the fiber at column 2000 for channel b
+      unit: pixels
+    YPIX_R:
+      name: ypix_r
+      type: uint32
+      description: the y coordinate in pixels of the fiber at column 2000 for channel r
+      unit: pixels
+    YPIX_Z:
+      name: ypix_z
+      type: uint32
+      description: the y coordinate in pixels of the fiber at column 2000 for channel z
+      unit: pixels
+    FIBSTATUS:
+      name: fibstatus
+      type: uint16
+      description: the status of the fiber, 0=good, 1=dead, 2=low, 3=repair, 4=short
+      unit: null
+    RA:
+      name: ra
+      type: float64
+      description: the right ascension of the fiber in J2000
+      unit: deg
+    DEC:
+      name: dec
+      type: float64
+      description: the declination of the fiber in J2000
+      unit: deg

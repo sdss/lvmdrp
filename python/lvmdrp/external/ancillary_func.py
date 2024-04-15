@@ -89,14 +89,14 @@ def spec_to_mAB(lam, spec, lamf, filt):
     return mab
 
 
-def spec_to_LVM_mAB(camera, w, f):
+def spec_to_LVM_mAB(channel, w, f):
     """
     LVM photometric system: Gaussian filter with sigma 250A centered in channels
     at 4500, 6500, and 8500A
     """
-    if camera[0] == "b":
+    if channel == "b":
         return spec_to_mAB(w, f, w, numpy.exp(-0.5 * ((w - 4500) / 250) ** 2))
-    elif camera[0] == "r":
+    elif channel == "r":
         return spec_to_mAB(w, f, w, numpy.exp(-0.5 * ((w - 6500) / 250) ** 2))
     else:
         return spec_to_mAB(w, f, w, numpy.exp(-0.5 * ((w - 8500) / 250) ** 2))

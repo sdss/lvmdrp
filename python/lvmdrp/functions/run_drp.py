@@ -1054,7 +1054,7 @@ def combine_channels(tileid: int, mjd: int, expnum: int, imagetype: str):
     flux = fits.ImageHDU(rss_comb._data, name='FLUX', header=fits.Header(newhdr))
     err = fits.ImageHDU(rss_comb._error, name='ERROR')
     mask = fits.ImageHDU(rss_comb._mask.astype("uint8"), name='MASK')
-    fwhm = fits.ImageHDU(rss_comb._inst_fwhm, name='FWHM')
+    fwhm = fits.ImageHDU(rss_comb._lsf, name='FWHM')
     sky = fits.ImageHDU(rss_comb._sky, name="SKY")
     sky_error = fits.ImageHDU(rss_comb._sky_error, name="SKY_ERROR")
 

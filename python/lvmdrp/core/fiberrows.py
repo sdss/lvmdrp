@@ -1,5 +1,4 @@
 import numpy
-from numpy import polynomial
 from astropy.io import fits as pyfits
 from scipy import interpolate
 from tqdm import tqdm
@@ -26,6 +25,72 @@ def _read_fiber_ypix(peaks_file):
 
 
 class FiberRows(Header, PositionTable):
+
+    @classmethod
+    def from_coeff_table(cls, coeff_table, **kwargs):
+        """Creates an FiberRows instance from a table of coefficients"""
+
+        if coeff_table is None:
+            return None
+
+        nfibers = len(coeff_table)
+        npixels = coeff_table["XMAX"].max() - coeff_table["XMIN"].min() + 1
+        x_pixels = numpy.arange(npixels)
+
+        data = numpy.zeros((nfibers, npixels), dtype=numpy.float32)
+        coeffs = numpy.zeros((nfibers, coeff_table["COEFF"].shape[1]), dtype=numpy.float32)
+        for ifiber in range(nfibers):
+            poly_cls = Spectrum1D.select_poly_class(poly_kind=coeff_table[ifiber]["FUNC"])
+            data[ifiber] = poly_cls(coeff_table[ifiber]["COEFF"])(x_pixels)
+            coeffs[ifiber] = coeff_table[ifiber]["COEFF"]
+
+        return cls(data=data, coeffs=coeffs, **kwargs)
+
+    @classmethod
+    def from_spectrographs(cls, spec1, spec2, spec3):
+        hdrs = []
+        fiberrows = [spec1, spec2, spec3]
+        for i in range(len(fiberrows)):
+            fiberrow = fiberrows[i]
+            if i == 0:
+                data_out = fiberrow._data
+                if fiberrow._error is not None:
+                    error_out = fiberrow._error
+                if fiberrow._mask is not None:
+                    mask_out = fiberrow._mask
+                if fiberrow._coeffs is not None:
+                    coeffs_out = fiberrow._coeffs
+            else:
+                data_out = numpy.concatenate((data_out, fiberrow._data), axis=0)
+                if fiberrow._error is not None:
+                    error_out = numpy.concatenate((error_out, fiberrow._error), axis=0)
+                else:
+                    error_out = None
+                if fiberrow._mask is not None:
+                    mask_out = numpy.concatenate((mask_out, fiberrow._mask), axis=0)
+                else:
+                    mask_out = None
+                if fiberrow._coeffs is not None:
+                    coeffs_out = numpy.concatenate((coeffs_out, fiberrow._coeffs), axis=0)
+                else:
+                    coeffs_out = None
+
+        # update header
+        if len(hdrs) > 0:
+            hdr_out = combineHdr(hdrs)
+        else:
+            hdr_out = None
+
+        fiberrow_out = cls(
+            data=data_out,
+            error=error_out,
+            mask=mask_out,
+            coeffs=coeffs_out
+        )
+        fiberrow_out.setHeader(hdr_out)
+
+        return fiberrow_out
+
     def __init__(
         self,
         data=None,
@@ -39,6 +104,8 @@ class FiberRows(Header, PositionTable):
         good_fibers=None,
         fiber_type=None,
         coeffs=None,
+        poly_kind=None,
+        poly_deg=None
     ):
         Header.__init__(self, header=header)
         PositionTable.__init__(
@@ -50,27 +117,10 @@ class FiberRows(Header, PositionTable):
             good_fibers=good_fibers,
             fiber_type=fiber_type,
         )
-        if data is None:
-            self._data = None
-        else:
-            self._data = data.astype("float32")
-            self._fibers = data.shape[0]
-            self._pixels = numpy.arange(data.shape[1])
-
-        if error is None:
-            self._error = None
-        else:
-            self._error = numpy.array(error).astype("float32")
-
-        if mask is None:
-            self._mask = None
-        else:
-            self._mask = numpy.array(mask)
-
-        if coeffs is None:
-            self._coeffs = None
-        else:
-            self._coeffs = coeffs.astype("float32")
+        self.setData(data=data, error=error, mask=mask)
+        self.set_coeffs(coeffs=coeffs, poly_kind=poly_kind)
+        if self._data is None and self._coeffs is not None:
+            self.eval_coeffs()
 
     def __len__(self):
         return self._fibers
@@ -618,18 +668,33 @@ class FiberRows(Header, PositionTable):
             if error is not None:
                 self._error[select] = error
         else:
+            nfibers, npixels = None, None
             if data is not None:
                 self._data = data
                 nfibers, npixels = data.shape
+            elif not hasattr(self, "_data"):
+                self._data = None
             if mask is not None:
                 self._mask = mask
-                nfibers, npixels = mask.shape
+                nfibers, npixels = self._mask.shape
+                self._good_fibers = numpy.where(numpy.sum(self._mask, axis=1) != self._mask.shape[1])[0]
+            elif not hasattr(self, "_mask"):
+                self._mask = None
+                self._good_fibers = None
             if error is not None:
                 self._error = error
                 nfibers, npixels = error.shape
+            elif not hasattr(self, "_error"):
+                self._error = None
 
-            self._fibers = nfibers
-            self._pixels = numpy.arange(npixels)
+            if nfibers is not None:
+                self._fibers = nfibers
+            elif not hasattr(self, "_fibers"):
+                self._fibers = None
+            if npixels is not None:
+                self._pixels = numpy.arange(npixels) if npixels is not None else npixels
+            elif not hasattr(self, "_pixels"):
+                self._pixels = None
 
     def split(self, fragments, axis="x"):
         list = []
@@ -746,104 +811,6 @@ class FiberRows(Header, PositionTable):
         for i in range(len(self)):
             result.append(function(args))
         return result
-
-    def writeFitsData(
-        self,
-        filename,
-        extension_data=None,
-        extension_mask=None,
-        extension_error=None,
-        extension_coeffs=None,
-    ):
-        """
-        Save information from a FiberRows object into a FITS file.
-        A single or multiple extension file are possible to create.
-
-        Parameters
-        --------------
-        filename : string
-            Name or Path of the FITS image from which the data shall be loaded
-
-        extension_data : int (0, 1, or 2), optional with default: None
-            Number of the FITS extension containing the data
-
-        extension_mask : int (0, 1, or 2), optional with default: None
-            Number of the FITS extension containing the masked pixels
-
-        extension_error : int (0, 1, or 2), optional with default: None
-            Number of the FITS extension containing the errors for the values
-        """
-        # convert all to single precision
-        self._data = self._data.astype("float32")
-        if self._error is not None:
-            self._error = self._error.astype("float32")
-        if self._coeffs is not None:
-            self._coeffs = self._coeffs.astype("float32")
-
-        hdus = [None, None, None, None]
-
-        # create primary hdus and image hdus
-        # data hdu
-        if (
-            extension_data is None
-            and extension_error is None
-            and extension_mask is None
-            and extension_coeffs is None
-        ):
-            hdus[0] = pyfits.PrimaryHDU(self._data)
-            if self._error is not None:
-                hdus[1] = pyfits.ImageHDU(self._error, name="ERROR")
-            if self._mask is not None:
-                hdus[2] = pyfits.ImageHDU(self._mask.astype("uint8"), name="BADPIX")
-            if self._coeffs is not None:
-                hdus[3] = pyfits.ImageHDU(self._coeffs, name="COEFFS")
-        else:
-            if extension_data == 0:
-                hdus[0] = pyfits.PrimaryHDU(self._data)
-            elif extension_data > 0 and extension_data is not None:
-                hdus[extension_data] = pyfits.ImageHDU(self._data, name="DATA")
-
-            # mask hdu
-            if extension_mask == 0:
-                hdu = pyfits.PrimaryHDU(self._mask.astype("uint8"))
-            elif extension_mask > 0 and extension_mask is not None:
-                hdus[extension_mask] = pyfits.ImageHDU(
-                    self._mask.astype("uint8"), name="BADPIX"
-                )
-
-            # error hdu
-            if extension_error == 0:
-                hdu = pyfits.PrimaryHDU(self._error)
-            elif extension_error > 0 and extension_error is not None:
-                hdus[extension_error] = pyfits.ImageHDU(self._error, name="ERROR")
-
-            # polynomial trace hdu
-            if extension_coeffs == 0:
-                hdu = pyfits.PrimaryHDU(self._coeffs)
-            elif extension_coeffs > 0 and extension_coeffs is not None:
-                hdus[extension_coeffs] = pyfits.ImageHDU(self._coeffs, name="COEFFS")
-
-        # remove not used hdus
-        for i in range(len(hdus)):
-            try:
-                hdus.remove(None)
-            except Exception:
-                break
-
-        if len(hdus) > 0:
-            hdu = pyfits.HDUList(hdus)  # create an HDUList object
-            if self._header is not None:
-                hdu[0].header = self.getHeader()  # add the primary header to the HDU
-                hdu[0].update_header()
-        try:
-            del hdu[0]._header["COMMENT"]
-        except KeyError:
-            pass
-        try:
-            del hdu[0]._header["HISTORY"]
-        except KeyError:
-            pass
-        hdu.writeto(filename, output_verify="silentfix", overwrite=True)
 
     def measureArcLines(
         self,
@@ -1031,12 +998,7 @@ class FiberRows(Header, PositionTable):
             good_pix = numpy.logical_not(self._mask[i, :])
             if numpy.sum(good_pix) >= deg + 1:
                 # select the polynomial class
-                if poly_kind == "poly":
-                    poly_cls = polynomial.Polynomial
-                elif poly_kind == "legendre":
-                    poly_cls = polynomial.Legendre
-                elif poly_kind == "chebyshev":
-                    poly_cls = polynomial.Chebyshev
+                poly_cls = Spectrum1D.select_poly_class(poly_kind)
 
                 # try to fit
                 try:
@@ -1240,6 +1202,35 @@ class FiberRows(Header, PositionTable):
         #  plt.show()
         out_trace = new_trace + ext_offset[numpy.newaxis, :]  # match the trace offsets
         self._data = out_trace
+
+    def get_coeffs(self):
+        """Returns the polynomial coefficients"""
+        return self._coeffs
+
+    def set_coeffs(self, coeffs, poly_kind):
+        """Sets the polynomial coefficients"""
+        if coeffs is not None:
+            self._coeffs = coeffs
+            self._poly_kind = poly_kind
+            self._poly_deg = coeffs.shape[1] - 1
+        else:
+            self._coeffs = None
+            self._poly_kind = None
+            self._poly_deg = None
+
+    def eval_coeffs(self, pixels=None):
+        """Evaluates the polynomial coefficients to the corresponding data values"""
+        poly_cls = Spectrum1D.select_poly_class(self._poly_kind)
+
+        if pixels is None:
+            pixels = self._pixels
+
+        self._data = numpy.zeros((self._fibers, pixels.size))
+        for i in range(self._fibers):
+            poly = poly_cls(self._coeffs[i, :])
+            self._data[i, :] = poly(pixels)
+
+        return self._data
 
     def interpolate_coeffs(self):
         """Interpolate coefficients or data of bad fibers

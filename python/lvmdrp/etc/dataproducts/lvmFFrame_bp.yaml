@@ -1,13 +1,13 @@
 name: lvmFFrame
 short: the flux-calibrated science frames
 description: |
-  The per-exposure science frame after extraction, sky subtraction, and flux calibration.
-  Made from input lvmSFrame files. Note that the 'F' in the name means Flux-calibrated.
+  The per-exposure science frame after extraction, flatfielding, and flux calibration.
+  Made from input lvmCFrame files. Note that the 'F' in the name means Flux-calibrated.
 location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[MJD]/
 created_by: module.py
 used_by: module.py
 naming_convention: |
-  lvmFFrame-[EXPNUM].fits.gz, where [EXPNUM] is the (zero-padded) 8-digit exposure number.
+  lvmFFrame-[CHANNEL]-[EXPNUM].fits.gz, where [CHANNEL] is the channel (brz) and [EXPNUM] is the (zero-padded) 8-digit exposure number.
 hdu0:
   name: PRIMARY
   description: primary header metadata
@@ -71,8 +71,15 @@ hdu0:
     comment: Poisson ratio statistic in Z3 camera
 hdu1:
   name: FLUX
-  description: Sky-subtracted flux in units of 10(-17) erg/s/cm2/Ang/fiber
+  description: flux in units of 10(-17) erg/s/cm2/Ang/fiber
   is_image: true
+  header:
+  - key: BUNIT
+    comment: flux units
+  - key: BSCALE
+    comment: linear scaling factor
+  - key: BZERO
+    comment: zero point
   shape: NWAVE x NFIBER
 hdu2:
   name: IVAR
@@ -86,34 +93,219 @@ hdu3:
   shape: NWAVE x NFIBER
 hdu4:
   name: WAVE
-  description: wavelength solution in log-10 Angstroms (vacuum)
+  description: air wavelength solution trace in angstroms
   is_image: true
   shape: NWAVE
 hdu5:
+  name: LSF_TRACE
+  description: LSF (FWHM) solution traceset in angstroms
+  is_image: false
+  shape: BINARY FITS TABLE
+  columns:
+    FUNC:
+      name: FUNC
+      type: str
+      unit: null
+      description: "polynomial function kind: poly, chebyshev, legendre"
+    XMIN:
+      name: XMIN
+      type: float32
+      unit: pix
+      description: initial pixel in the LSF trace
+    XMAX:
+      name: XMAX
+      type: float32
+      unit: pix
+      description: final pixel in the LSF trace
+    COEFF:
+      name: COEFF
+      type: float32
+      unit: null
+      description: polynomial coefficients
+hdu6:
+  name: FLUXCAL
+  description: sensitivity in units of (electron/s) / (erg/s/cm2/Ang/fiber)
+  is_image: false
+  shape: BINARY FITS TABLE
+  columns:
+    STD1SEN:
+      name: STD1SEN
+      type: float32
+      unit: (electron) / (erg/s/cm2/angstrom)
+      description: standard star 1
+    STD2SEN:
+      name: STD2SEN
+      type: float32
+      unit: (electron) / (erg/s/cm2/angstrom)
+      description: standard star 2
+    STD3SEN:
+      name: STD3SEN
+      type: float32
+      unit: (electron) / (erg/s/cm2/angstrom)
+      description: standard star 3
+    STD4SEN:
+      name: STD4SEN
+      type: float32
+      unit: (electron) / (erg/s/cm2/angstrom)
+      description: standard star 4
+    STD5SEN:
+      name: STD5SEN
+      type: float32
+      unit: (electron) / (erg/s/cm2/angstrom)
+      description: standard star 5
+    STD6SEN:
+      name: STD6SEN
+      type: float32
+      unit: (electron) / (erg/s/cm2/angstrom)
+      description: standard star 6
+    STD7SEN:
+      name: STD7SEN
+      type: float32
+      unit: (electron) / (erg/s/cm2/angstrom)
+      description: standard star 7
+    STD8SEN:
+      name: STD8SEN
+      type: float32
+      unit: (electron) / (erg/s/cm2/angstrom)
+      description: standard star 8
+    STD9SEN:
+      name: STD9SEN
+      type: float32
+      unit: (electron) / (erg/s/cm2/angstrom)
+      description: standard star 9
+    STD10SEN:
+      name: STD10SEN
+      type: float32
+      unit: (electron) / (erg/s/cm2/angstrom)
+      description: standard star 10
+    STD11SEN:
+      name: STD11SEN
+      type: float32
+      unit: (electron) / (erg/s/cm2/angstrom)
+      description: standard star 11
+    STD12SEN:
+      name: STD12SEN
+      type: float32
+      unit: (electron) / (erg/s/cm2/angstrom)
+      description: standard star 12
+    MEAN_SENS:
+      name: MEAN_SENS
+      type: float32
+      unit: (electron) / (erg/s/cm2/angstrom)
+      description: mean sensitivity
+    STDDEV_SENS:
+      name: STDDEV_SENS
+      type: float32
+      unit: (electron) / (erg/s/cm2/angstrom)
+      description: standard deviation of sensitivity
+hdu7:
   name: SLITMAP
   description: slitmap table describing fiber positions for this exposure
   is_image: false
   shape: BINARY FITS TABLE
   columns:
-    pass
-hdu6:
-  name: SKY
-  description: Sky flux in units of 10(-17) erg/s/cm2/Ang/fiber
-  is_image: true
-  shape: NWAVE x NFIBER
-hdu7:
-  name: SUPERSKY
-  description: super sky information
-  is_image: false
-  shape: BINARY FITS TABLE
-  columns:
-    AIRWAVE:
-      name: AIRWAVE
+    FIBEID:
+      name: fiberid
+      type: uint16
+      description: number of the fiber along the slithead
+      unit: null
+    SPECTROGRAPHID:
+      name: spectrographid
+      type: uint16
+      description: the spectrograph id number, either 1, 2 or 3
+      unit: null
+    BLOCKID:
+      name: blockid
+      type: str
+      description: the ID label of the block along the slit
+      unit: null
+    FINBLOCK:
+      name: finblock
+      type: uint16
+      description: the fiber number within the v-groove block
+      unit: null
+    TARGETTYPE:
+      name: targettype
+      type: str
+      description: the type of fiber, either science, standard or sky
+      unit: null
+    IFULABEL:
+      name: ifulabel
+      type: str
+      description: an ID label for the telescope + sector
+      unit: null
+    FINIFU:
+      name: finifu
+      type: uint16
+      description: a running fiber number within the IFU from 1 to N
+      unit: null
+    TELESCOPE:
+      name: telescope
+      type: str
+      description: the name of the telescope; Sci, Spec, SkyE/W for science, standards, or skies
+      unit: null
+    XPMM:
+      name: xpmm
       type: float32
-      unit: ''
-      description: ''
-    FLUX:
-      name: FLUX
+      description: the x coordinate in mm of the fiber relative to the centroid
+      unit: mm
+    YPMM:
+      name: ypmm
       type: float32
-      unit: ''
-      description: ''
+      description: the x coordinate in mm of the fiber relative to the centroid
+      unit: mm
+    RINGNUM:
+      name: ringnum
+      type: uint16
+      description: the number of the IFU ring the fiber belongs to
+      unit: null
+    ORIG_IFULABEL:
+      name: orig_ifulabel
+      type: str
+      description: the original IFU label from the Excel document. WRONG! DO NOT USE!
+      unit: null
+    ORIG_SLITLABEL:
+      name: orig_slitlabel
+      type: str
+      description: the original slitblock label from the Excel document. WRONG! DO NOT USE!
+      unit: null
+    FINSECTOR:
+      name: finsector
+      type: uint16
+      description: the original fiber number within the IFU sector
+      unit: null
+    FMAP:
+      name: fmap
+      type: str
+      description: the current fiber flow FROM:TO from the IFU position to the SLIT position.
+      unit: null
+    YPIX_B:
+      name: ypix_b
+      type: uint32
+      description: the y coordinate in pixels of the fiber at column 2000 for channel b
+      unit: pixels
+    YPIX_R:
+      name: ypix_r
+      type: uint32
+      description: the y coordinate in pixels of the fiber at column 2000 for channel r
+      unit: pixels
+    YPIX_Z:
+      name: ypix_z
+      type: uint32
+      description: the y coordinate in pixels of the fiber at column 2000 for channel z
+      unit: pixels
+    FIBSTATUS:
+      name: fibstatus
+      type: uint16
+      description: the status of the fiber, 0=good, 1=dead, 2=low, 3=repair, 4=short
+      unit: null
+    RA:
+      name: ra
+      type: float64
+      description: the right ascension of the fiber in J2000
+      unit: deg
+    DEC:
+      name: dec
+      type: float64
+      description: the declination of the fiber in J2000
+      unit: deg

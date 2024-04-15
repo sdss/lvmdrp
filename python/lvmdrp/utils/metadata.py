@@ -518,7 +518,6 @@ def get_frames_metadata(
 
         log.info("Creating new metadata store.")
         meta = extract_metadata(frames, kind="raw")
-        add_raws(meta)
 
     return meta
 
