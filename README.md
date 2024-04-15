@@ -175,13 +175,13 @@ For those willing to contribute by coding, there are some steps to streamline th
 1. Make sure you install the pipeline on your environment in edit (developer) mode, like this:
 
     ```bash
-    pip install -e .[dev]
+    pip install -e .'[dev]'
     ```
 
 2. Before you start coding on a new feature/bug-fix, make sure your **local** `master` branch is up to date:
 
     ```bash
-    git pull master
+    git pull origin master
     ```
 
 3. Create a branch to work on and make sure the name can be easily mappable to the work you intend to do:
@@ -189,14 +189,21 @@ For those willing to contribute by coding, there are some steps to streamline th
     ```bash
     git checkout -b <feature_name>
     ```
+4. Start coding. Once you're done implementing changes:
 
-4. Afterwards, you can push your updates to the remote branch on Github:
+   ```bash
+   git status #check what has changed and identify the files you want to commit
+   git add <changed_files>
+   git commit -m "commit message"
+   ```
+
+6. Afterwards, you can push your updates to the remote branch on Github:
 
     ```bash
     git push
     ```
 
-5. Finally, if you consider your feature is ready to be merged to the `master` branch, you can create a new [pull request at Github](https://github.com/sdss/lvmdrp/pulls).
+7. Finally, if you consider your feature is ready to be merged to the `master` branch, you can create a new [pull request at Github](https://github.com/sdss/lvmdrp/pulls).
 
 Regarding commits, I'm trying to go for an *atomic* approach, where each commit has a single purpose. So please try to avoid as much as possible pushing lots of unrelated changes in one commit.
 
