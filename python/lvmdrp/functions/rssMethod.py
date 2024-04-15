@@ -2889,7 +2889,11 @@ def stack_spectrographs(in_rsss: List[str], out_rss: str) -> RSS:
     rsss = [loadRSS(in_rss) for in_rss in in_rsss]
 
     log.info(f"stacking frames in {','.join([os.path.basename(in_rss) for in_rss in in_rsss])} along fiber ID axis")
-    rss_out = RSS.from_spectrographs(*rsss)
+    try:
+        rss_out = RSS.from_spectrographs(*rsss)
+    except TypeError as e:
+        log.error(f'Cannot stack spectrographs: {e}')
+        return
 
     # write output
     log.info(f"writing stacked RSS to {os.path.basename(out_rss)}")
