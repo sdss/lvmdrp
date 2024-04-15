@@ -502,6 +502,8 @@ class RSS(FiberRows):
         size=None,
         cent_trace=None,
         width_trace=None,
+        wave=None,
+        lsf=None,
         wave_trace=None,
         lsf_trace=None,
         arc_position_x=None,
@@ -537,13 +539,14 @@ class RSS(FiberRows):
         self.set_cent_trace(cent_trace)
         self.set_width_trace(width_trace)
 
-        # set wavelength and LSF traces information if available
+        # set wavelength and LSF information if available
         self.set_wave_trace(wave_trace)
+        self.set_wave_array(wave)
+
         self.set_lsf_trace(lsf_trace)
-        # evaluate wavelength from header or from trace
-        self.set_wave_array()
-        # evaluate LSF from trace
-        self.set_lsf_array()
+        self.set_lsf_array(lsf)
+
+        # set supersky information if available
         if supersky is not None:
             self.set_supersky(supersky)
         if supersky_error is not None:
@@ -900,7 +903,7 @@ class RSS(FiberRows):
                         "CUNIT1": "Angstrom", "CTYPE1": "WAVE", "CRPIX1": 1.0})
                     self._header.update(wcs.to_header())
             elif len(wave.shape) == 2:
-                raise ValueError("You cannot set a 2D wavelength array directly, use wave=None instead to avaluate the wavelength from the trace")
+                self._wave = numpy.array(wave)
             else:
                 raise ValueError("Invalid wavelength array shape")
         elif self._header is not None and self._header.get("WAVREC", False):
