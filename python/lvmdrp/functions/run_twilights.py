@@ -436,8 +436,8 @@ def resample_fiberflat(mflat: RSS, camera: str, mwave_path: str,
                    lsf=mflat._lsf,
                    slitmap=mflat._slitmap,
                    header=copy(mflat._header))
-    new_flat._header = mflat._header
-    new_flat._slitmap = mflat._slitmap
+    for kw in ["WCSAXES", "CRPIX1", "CDELT1", "CUNIT1", "CTYPE1", "CRVAL1", "LATPOLE", "MJDREF", "METREC", "WAVREC"]:
+        del new_flat._header[kw]
     new_flat._good_fibers = mflat._good_fibers
 
     fig, ax = create_subplots(to_display=display_plots, figsize=(15,7))
@@ -570,7 +570,7 @@ def reduce_twilight_sequence(expnums: List[int], median_box: int = 10, niter: bo
         for expnum in flat_expnums.groups:
             xflat_paths = sorted(path.expand("lvm_anc", drpver=drpver, kind="x", imagetype=flat["imagetyp"], tileid=flat["tileid"], mjd=flat["mjd"], camera=f"{channel}?", expnum=expnum))
             fflat_paths = sorted(path.expand("lvm_anc", drpver=drpver, kind="f", imagetype=flat["imagetyp"], tileid=flat["tileid"], mjd=flat["mjd"], camera=f"{channel}?", expnum=expnum))
-            fflat_path = path.full("lvm_anc", drpver=drpver, kind="f",
+            fflat_path = path.full("lvm_anc", drpver=drpver, kind="flatfielded_",
                                    imagetype=flat["imagetyp"], tileid=flat["tileid"], mjd=flat["mjd"],
                                    camera=channel, expnum=expnum)
 
@@ -625,4 +625,4 @@ def reduce_twilight_sequence(expnums: List[int], median_box: int = 10, niter: bo
 
 if __name__ == "__main__":
 
-    reduce_twilight_sequence(expnums=[7230], median_box=10, niter=1000, threshold=(0.5,2.5), nknots=60, skip_done=False, display_plots=True)
+    reduce_twilight_sequence(expnums=[7231], median_box=10, niter=1000, threshold=(0.5,2.5), nknots=60, skip_done=True, display_plots=False)
