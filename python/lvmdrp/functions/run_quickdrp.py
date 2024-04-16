@@ -25,8 +25,6 @@ from lvmdrp.core.constants import SPEC_CHANNELS
 
 ORIG_MASTER_DIR = os.getenv("LVM_MASTER_DIR")
 
-print(ORIG_MASTER_DIR)
-
 def get_master_mjd(sci_mjd: int) -> int:
     """ Get the correct master calibration MJD for a science frame
 
