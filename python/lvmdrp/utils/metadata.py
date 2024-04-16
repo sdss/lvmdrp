@@ -14,6 +14,7 @@ import h5py
 import numpy as np
 import pandas as pd
 from astropy.io import fits
+from astropy.table import Table
 from tqdm import tqdm
 
 from lvmdrp.core.constants import FRAMES_CALIB_NEEDS
@@ -1330,3 +1331,49 @@ def put_reduction_stage(
         # update store
         dataset[...] = metadata.to_records()
         store.close()
+
+
+def create_summary_file() -> pd.DataFrame:
+    """ Create a DRPall summary file
+
+    Creates a FITS drpall summary file, using the raw
+    HDF5 metadata files.  It aggregates all the stores
+    together into a single dataframe.
+
+    Re-running this will update any existing drpall
+    file with any new data stores.
+
+    Returns
+    -------
+    pd.DataFrame
+        the aggregated data from all the stores
+    """
+    # get raw metadata stores
+    stores = _load_or_create_store(tileid="*", mjd="*", mode="r")
+
+    # get raw array from hdf5 files
+    a = []
+    for h in stores:
+        a.append(h['raw'][()])
+
+    # stack arrays and convert to a dataframe
+    tmp = np.concatenate(a, axis=0)
+    df = pd.DataFrame(tmp)
+
+    # decode byte columns
+    tmp = df.select_dtypes([object]).stack().str.decode('utf-8').unstack()
+    df[tmp.columns] = tmp
+
+    # remove columns
+    df = df.drop(['rmjd', 'name'], axis=1)
+
+    # sort frames
+    df = df.sort_values(['mjd', 'expnum', 'camera'])
+
+    # write FITS file
+    drpall = path.full('lvm_drpall', drpver=DRPVER)
+    b = fits.BinTableHDU(Table.from_pandas(df), name='SUMMARY')
+    x = fits.HDUList([fits.PrimaryHDU(), b])
+    x.writeto(drpall, overwrite=True)
+
+    return df
