@@ -100,6 +100,7 @@ class RSS(FiberRows):
         header = None
         data, error, mask = None, None, None
         wave_trace, lsf_trace = None, None
+        wave, lsf = None, None
         cent_trace, width_trace = None, None
         sky, sky_error = None, None
         supersky, supersky_error = None, None
@@ -118,6 +119,10 @@ class RSS(FiberRows):
                     wave_trace = hdu
                 if hdu.name == "LSF_TRACE":
                     lsf_trace = hdu
+                if hdu.name == "WAVE":
+                    wave = hdu.data.astype("float32")
+                if hdu.name == "LSF":
+                    lsf = hdu.data.astype("float32")
                 if hdu.name == "CENT_TRACE":
                     cent_trace = hdu
                 if hdu.name == "WIDTH_TRACE":
@@ -141,6 +146,8 @@ class RSS(FiberRows):
                 mask=mask,
                 wave_trace=wave_trace,
                 lsf_trace=lsf_trace,
+                wave=wave,
+                lsf=lsf,
                 cent_trace=cent_trace,
                 width_trace=width_trace,
                 sky=sky,
@@ -554,15 +561,15 @@ class RSS(FiberRows):
         self.setSlitmap(slitmap)
         self.set_fluxcal(fluxcal)
 
-    def _trace_to_coeff_table(self, trace):
+    def _trace_to_coeff_table(self, trace, default_poly_deg=4):
         """Converts a given trace into its polynomial coefficients representation as an Astropy Table"""
         if isinstance(trace, TraceMask):
-            coeffs = trace._coeffs
+            coeffs = trace._coeffs if trace._coeffs is not None else numpy.zeros((self._fibers, default_poly_deg+1))
             columns = [
                 pyfits.Column(name="FUNC", format="A10", array=numpy.asarray([trace._poly_kind] * self._fibers)),
                 pyfits.Column(name="XMIN", format="I", unit="pix", array=numpy.asarray([0] * self._fibers)),
                 pyfits.Column(name="XMAX", format="I", unit="pix", array=numpy.asarray([self._data.shape[1]-1] * self._fibers)),
-                pyfits.Column(name="COEFF", format=f"{coeffs.shape[1]}E", dim=f"({coeffs.shape[0]},)", array=trace._coeffs)
+                pyfits.Column(name="COEFF", format=f"{coeffs.shape[1]}E", dim=f"({self._fibers},)", array=trace._coeffs)
             ]
             self._trace = Table(pyfits.BinTableHDU.from_columns(columns).data)
             return self._trace
@@ -2857,14 +2864,14 @@ class RSS(FiberRows):
                     if len(self._wave.shape) == 2:
                         wave = self._wave[parts[i]]
                     else:
-                        wave = self._wave[parts[i]]
+                        wave = self._wave
                 else:
                     wave = None
                 if self._lsf is not None:
                     if len(self._lsf.shape) == 2:
                         lsf = self._lsf[parts[i]]
                     else:
-                        lsf = self._lsf[parts[i]]
+                        lsf = self._lsf
                 else:
                     lsf = None
                 if self._wave_trace is not None:
@@ -2892,6 +2899,7 @@ class RSS(FiberRows):
                 arc_position_y=self._arc_position_y,
                 good_fibers=self._good_fibers,
                 fiber_type=self._fiber_type,
+                slitmap=self._slitmap
             )
             rss_parts.append(rss)
         return rss_parts
