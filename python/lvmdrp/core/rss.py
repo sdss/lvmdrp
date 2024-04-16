@@ -2857,14 +2857,14 @@ class RSS(FiberRows):
                     if len(self._wave.shape) == 2:
                         wave = self._wave[parts[i]]
                     else:
-                        wave = self._wave[parts[i]]
+                        wave = self._wave
                 else:
                     wave = None
                 if self._lsf is not None:
                     if len(self._lsf.shape) == 2:
                         lsf = self._lsf[parts[i]]
                     else:
-                        lsf = self._lsf[parts[i]]
+                        lsf = self._lsf
                 else:
                     lsf = None
                 if self._wave_trace is not None:
@@ -2892,6 +2892,7 @@ class RSS(FiberRows):
                 arc_position_y=self._arc_position_y,
                 good_fibers=self._good_fibers,
                 fiber_type=self._fiber_type,
+                slitmap=self._slitmap
             )
             rss_parts.append(rss)
         return rss_parts
