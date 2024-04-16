@@ -18,6 +18,8 @@ from astropy.table import Table
 from astropy.io import fits as pyfits
 from astropy.nddata import CCDData, StdDevUncertainty
 from astropy.visualization import simple_norm
+from astropy.wcs import wcs
+import astropy.io.fits as fits
 from ccdproc import cosmicray_lacosmic
 from scipy import interpolate
 from scipy import signal
@@ -3780,6 +3782,127 @@ def preproc_raw_frame(
     )
 
     return org_img, os_profiles, os_models, proc_img
+
+
+def add_astrometry(
+    in_image: str, 
+    out_image: str,
+    in_agcsci_image: str,
+    in_agcskye_image: str,
+    in_agcskyw_image: str,
+    in_agcspec_image: str,
+):
+    """uses WCS in AG camera coadd image to calculate RA,DEC of 
+    each fiber in each telescope and adds these to SLITMAP extension
+    
+    Parameters
+
+    in_image : str
+        path to input image
+    out_image : str
+        path to output image
+    in_agcsci_image : str
+        path to Sci telescope AGC coadd master frame
+    in_agcskye_image : str
+        path to SkyE telescope AGC coadd master frame      
+    in_agcskyw_image : str
+        path to SkyW telescope AGC coadd master frame
+   in_agcspec_image : str
+        path to Spec telescope AGC coadd master frame
+    """
+ 
+    print("**************************************")
+    print("**** ADDING ASTROMETRY TO SLITMAP ****")
+    print("**************************************")
+    #print(in_image)
+    #print(out_image)
+    #print(in_agcsci_image)
+    #print(in_agcskye_image)
+    #print(in_agcskyw_image)
+    #print(in_agcspec_image)
+
+    # reading slitmap
+    org_img = loadImage(in_image)
+    slitmap = org_img.getSlitmap()
+    fibid=numpy.array(slitmap['fiberid'].data)
+    telescope=numpy.array(slitmap['telescope'].data)
+    x=numpy.array(slitmap['xpmm'].data)
+    y=numpy.array(slitmap['ypmm'].data)
+    
+    # selection mask for fibers from different telescopes
+    selsci=(telescope=='Sci')
+    selskye=(telescope=='SkyE')
+    selskyw=(telescope=='SkyW')
+    selspec=(telescope=='Spec')
+
+    # read AGC coadd images and get RAobs, DECobs, and PAobs for each telescope
+    agcfiledir={'sci':in_agcsci_image, 'skye':in_agcskye_image, 'skyw':in_agcskyw_image, 'spec':in_agcspec_image}
+    def getobsparam(tel):
+        #print(agcfiledir[tel])
+        mfagc=fits.open(agcfiledir[tel])
+        mfheader=mfagc[1].header
+        outw = wcs.WCS(mfheader)
+        #print(outw)
+        CDmatrix=outw.pixel_scale_matrix
+        posangrad=-1*numpy.arctan(CDmatrix[1,0]/CDmatrix[0,0])
+        PAobs=posangrad*180/numpy.pi
+        IFUcencoords=outw.pixel_to_world(2500,1000)
+        if tel!='spec':
+            RAobs=IFUcencoords.ra.value
+            DECobs=IFUcencoords.dec.value
+        else:
+            RAobs=180
+            DECobs=0
+            PAobs=0
+        return RAobs, DECobs, PAobs
+
+    RAobs_sci, DECobs_sci, PAobs_sci = getobsparam('sci')
+    RAobs_skye, DECobs_skye, PAobs_skye = getobsparam('skye')
+    RAobs_skyw, DECobs_skyw, PAobs_skyw = getobsparam('skyw')
+    RAobs_spec, DECobs_spec, PAobs_spec = getobsparam('spec')
+
+    # Create fake IFU image WCS object for each telescope focal plane and use it to calculate RA,DEC of each fiber
+    telcoordsdir={'sci':(RAobs_sci, DECobs_sci, PAobs_sci), 'skye':(RAobs_skye, DECobs_skye, PAobs_skye), 'skyw':(RAobs_skyw, DECobs_skyw, PAobs_skyw), 'spec':(RAobs_spec, DECobs_spec, PAobs_spec)}
+    seldir={'sci':selsci, 'skye':selskye, 'skyw':selskyw, 'spec':selspec}
+
+    RAfib=numpy.zeros(len(slitmap))
+    DECfib=numpy.zeros(len(slitmap))
+
+    def getfibradec(tel):
+        RAobs, DECobs, PAobs = telcoordsdir[tel]
+        platescale=112.36748321030637 # Focal plane platescale in "/mm
+        print("Using Fiducial Platescale = ", platescale)   
+        pscale=0.01 # IFU image pixel scale in mm/pix
+        skypscale=pscale*platescale/3600 # IFU image pixel scale in deg/pix
+        npix=1800 # size of fake IFU image   
+        w = wcs.WCS(naxis=2) # IFU image wcs object
+        w.wcs.crpix = [int(npix/2)+1, int(npix/2)+1]
+        posangrad=PAobs*numpy.pi/180
+        w.wcs.cd=numpy.array([[skypscale*numpy.cos(posangrad), -1*skypscale*numpy.sin(posangrad)],[-1*skypscale*numpy.sin(posangrad), -1*skypscale*numpy.cos(posangrad)]])
+        w.wcs.crval = [RAobs,DECobs]
+        w.wcs.ctype = ["RA---TAN", "DEC--TAN"]
+        # Calculate RA,DEC of each individual fiber
+        sel=seldir[tel]
+        xfib=x[sel]/pscale+int(npix/2) # pixel x coordinates of fibers
+        yfib=y[sel]/pscale+int(npix/2) # pixel y coordinates of fibers
+        fibcoords=w.pixel_to_world(xfib,yfib).to_table()
+        RAfib[sel]=fibcoords['ra'].degree
+        DECfib[sel]=fibcoords['dec'].degree
+
+    getfibradec('sci')
+    getfibradec('skye')
+    getfibradec('skyw')
+    getfibradec('spec')
+
+    # add coordinates to slitmap 
+    slitmap['ra']=RAfib
+    slitmap['dec']=DECfib
+    org_img._slitmap=slitmap
+
+    log.info(f"writing RA,DEC to slitmap in image '{os.path.basename(out_image)}'")
+    org_img.writeFitsData(out_image)
+
+
 
 
 @skip_on_missing_input_path(["in_image"])
