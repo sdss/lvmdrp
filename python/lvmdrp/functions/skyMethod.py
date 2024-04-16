@@ -17,7 +17,10 @@ from typing import Tuple, Dict
 import numpy as np
 import bottleneck as bn
 import yaml
+from astropy.coordinates import SkyCoord
 from astropy.io import fits
+from astropy.stats import biweight_location, mad_std
+from astropy.table import Table
 from astropy.time import Time
 from scipy import optimize
 
@@ -1553,38 +1556,390 @@ def quick_sky_subtraction(in_cframe, out_sframe, band=np.array((7238,7242,7074,7
     """
 
     cframe = lvmCFrame.from_file(in_cframe)
-    wave = cframe._wave
-    flux = cframe._data
-    error = cframe._error
-    sky = cframe._sky
+    # wave = cframe._wave
+    # flux = cframe._data
+    # error = cframe._error
+    # sky = cframe._sky
+    # sky_error = cframe._sky_error
+
+    # crval = wave[0]
+    # cdelt = wave[1] - wave[0]
+    # i_band = ((band - crval) / cdelt).astype(int)
+
+    # map_b = bn.nanmean(flux[:, i_band[0]:i_band[1]], axis=1)
+    # map_0 = bn.nanmean(flux[:, i_band[2]:i_band[3]], axis=1)
+    # map_1 = bn.nanmean(flux[:, i_band[4]:i_band[5]], axis=1)
+    # map_c = map_b - 0.5 * (map_0 + map_1)
+
+    # smap_b = bn.nanmean(sky[:, i_band[0]:i_band[1]], axis=1)
+    # smap_0 = bn.nanmean(sky[:, i_band[2]:i_band[3]], axis=1)
+    # smap_1 = bn.nanmean(sky[:, i_band[4]:i_band[5]], axis=1)
+    # smap_c = smap_b - 0.5 * (smap_0 + smap_1)
+
+    # scale = map_c / smap_c
+    # sky_c = np.nan_to_num(sky * scale[:, None])
+    # if not skip_subtraction:
+    #     data_c = np.nan_to_num(flux - sky_c)
+    #     error_c = np.nan_to_num(np.sqrt(error**2 + sky_error**2))
+    # else:
+    #     data_c = flux
+    #     error_c = error
+
+    # read sky table hdu
+    sky_hdu = prep_input_simplesky_mean(in_cframe)
+
+    # choose which sky data to use
+    sci = SkyCoord(sky_hdu['SCI'].header['RA'], sky_hdu['SCI'].header['DEC'], unit='deg')
+    skyw = SkyCoord(sky_hdu['SKYW'].header['RA'], sky_hdu['SKYW'].header['DEC'], unit='deg')
+    skye = SkyCoord(sky_hdu['SKYE'].header['RA'], sky_hdu['SKYE'].header['DEC'], unit='deg')
+    wsep = sci.separation(skyw)
+    esep = sci.separation(skye)
+
+    if wsep < esep:
+        sky_input = 'SKYW'
+    else:
+        sky_input = 'SKYE'
+
+    scisub = create_skysub_spectrum(sky_hdu, sci_input='SCI', sky_input=sky_input)
+    skyesub = create_skysub_spectrum(sky_hdu, sci_input='SKYE', sky_input='SKYE')
+    skywsub = create_skysub_spectrum(sky_hdu, sci_input='SKYW', sky_input='SKYW')
+
+    # select fibers
+    data = cframe._data
+    slitmap = Table(cframe._slitmap)
+    scifibers = slitmap[slitmap['telescope']=='Sci']['fiberid'] - 1
+    skyefibers = slitmap[slitmap['telescope']=='SkyE']['fiberid'] - 1
+    skywfibers = slitmap[slitmap['telescope']=='SkyW']['fiberid'] - 1
+
+    # sky subtract each spectrum
+    skydata = data.copy()
+    skydata[scifibers] = data[scifibers] - np.array(scisub)
+    skydata[skyefibers] = data[skyefibers] - np.array(skyesub)
+    skydata[skywfibers] = data[skywfibers] - np.array(skywsub)
+
+    # TODO - deal with error in sky-subtracted data ; replaced "error_c"
+    error_c = cframe._error
+
+    # propagate cframe extensions
+    sky_c = cframe._sky
     sky_error = cframe._sky_error
 
-    crval = wave[0]
-    cdelt = wave[1] - wave[0]
-    i_band = ((band - crval) / cdelt).astype(int)
-
-    map_b = bn.nanmean(flux[:, i_band[0]:i_band[1]], axis=1)
-    map_0 = bn.nanmean(flux[:, i_band[2]:i_band[3]], axis=1)
-    map_1 = bn.nanmean(flux[:, i_band[4]:i_band[5]], axis=1)
-    map_c = map_b - 0.5 * (map_0 + map_1)
-
-    smap_b = bn.nanmean(sky[:, i_band[0]:i_band[1]], axis=1)
-    smap_0 = bn.nanmean(sky[:, i_band[2]:i_band[3]], axis=1)
-    smap_1 = bn.nanmean(sky[:, i_band[4]:i_band[5]], axis=1)
-    smap_c = smap_b - 0.5 * (smap_0 + smap_1)
-
-    scale = map_c / smap_c
-    sky_c = np.nan_to_num(sky * scale[:, None])
-    if not skip_subtraction:
-        data_c = np.nan_to_num(flux - sky_c)
-        error_c = np.nan_to_num(np.sqrt(error**2 + sky_error**2))
-    else:
-        data_c = flux
-        error_c = error
-
-    sframe = lvmSFrame(data=data_c, error=error_c, mask=cframe._mask,
+    sframe = lvmSFrame(data=skydata, error=error_c, mask=cframe._mask,
                        sky=sky_c, sky_error=sky_error,
                        wave=cframe._wave, lsf=cframe._lsf,
                        header=cframe._header, slitmap=cframe._slitmap)
     sframe.writeFitsData(out_sframe)
     # TODO: check on expnum=7632 for halpha emission in sky fibers
+
+
+def prep_input_simplesky_mean(filename: str = None):
+    '''
+    Create mean spectra for the science, skyE and skyW fibers
+    in a calibrated data frame and write results to
+    fits files that can be used by SkyCorr
+    '''
+
+    x = fits.open(filename)
+
+    # extract info from lvmCFrame file
+    xroot = x['PRIMARY'].header['EXPOSURE']
+
+    # determine which telescope we are discussing
+    slitmap = Table(x['SLITMAP'].data)
+
+    good_fibers = slitmap[slitmap['fibstatus']==0]
+
+    # TODO - maybe make this an input for choice or all in one table
+    # this gets all 4 sci/sky/skyw/skye
+    sci = good_fibers[good_fibers['telescope']=='Sci']
+    sky_e = good_fibers[good_fibers['telescope']=='SkyE']
+    sky_w = good_fibers[good_fibers['telescope']=='SkyW']
+
+    xsci=x['FLUX'].data[sci['fiberid']-1]
+    esci=x['IVAR'].data[sci['fiberid']-1]
+
+    xsky=x['SKY'].data[sci['fiberid']-1]
+    esky=x['SKY_IVAR'].data[sci['fiberid']-1]
+
+    xsky_e=x['FLUX'].data[sky_e['fiberid']-1]
+    esky_e=x['IVAR'].data[sky_e['fiberid']-1]
+
+    xsky_w=x['FLUX'].data[sky_w['fiberid']-1]
+    esky_w=x['IVAR'].data[sky_w['fiberid']-1]
+
+    sci_flux = biweight_location(xsci,axis=0,ignore_nan=True)
+    sci_err = mad_std(xsci,axis=0,ignore_nan=True)
+
+    sky = biweight_location(xsky,axis=0,ignore_nan=True)
+    sky_e = biweight_location(xsky,axis=0,ignore_nan=True)
+
+    sky_e_flux = biweight_location(xsky_e,axis=0,ignore_nan=True)
+    sky_e_err = mad_std(xsky_e,axis=0,ignore_nan=True)
+
+    sky_w_flux = biweight_location(xsky_w,axis=0,ignore_nan=True)
+    sky_w_err = mad_std(xsky_w,axis=0,ignore_nan=True)
+
+    wave=x['WAVE'].data
+
+    # Now create the 3 sets of data
+    xtime=x['PRIMARY'].header['OBSTIME']
+    print(xtime)
+    word=xtime.split('T')
+    word=word[-1].split(':')
+    utc=int(word[0])+int(word[1])/60.+eval(word[2])/3600
+
+    # First do the science data
+
+    ra=x['PRIMARY'].header['TESCIRA']
+    dec=x['PRIMARY'].header['TESCIDE']
+    airmass=x['PRIMARY'].header['TESCIAM']
+    xtel='Sci'
+    alt=90-np.arccos(1./airmass)*57.29578
+
+    # create science table
+
+    # xtab=Table([wave,sci_med,esci_med], names=['WAVE','FLUX','ERROR'])
+    xtab=Table([wave,sci_flux,sci_err], names=['WAVE','FLUX','ERROR'])
+
+    sci_table_hdu = fits.BinTableHDU(xtab, name='SCI')
+    new_primary_hdu = fits.PrimaryHDU(header=x[0].header)
+
+    sci_table_hdu.header['UTC']=utc
+    sci_table_hdu.header['RA']=ra
+    sci_table_hdu.header['DEC']=dec
+    sci_table_hdu.header['ALT']=alt
+    sci_table_hdu.header['TELE']=xtel
+
+    #Sci_file=outfile='Sci_%04d.fits' % xroot
+    #print('Writing: %s' % outfile)
+    #new.writeto(outfile,overwrite=True)
+
+    #now write a median super sky; header to this file is the same
+    # so the rest should be easy
+
+    # create full sky table
+
+    xtab['FLUX'] = sky
+    xtab['ERROR'] = sky_e
+
+    sky_table_hdu = fits.BinTableHDU(xtab, name='SKY')
+    #new_primary_hdu = fits.PrimaryHDU(header=x[0].header)
+    #new = fits.HDUList([new_primary_hdu, table_hdu])
+
+    sky_table_hdu.header['UTC']=utc
+    sky_table_hdu.header['RA']=ra
+    sky_table_hdu.header['DEC']=dec
+    sky_table_hdu.header['ALT']=alt
+    sky_table_hdu.header['TELE']=xtel
+
+
+    #Sky_file=outfile='SkyM_%04d.fits' % xroot
+    #print('Writing: %s' % outfile)
+    #new.writeto(outfile,overwrite=True)
+
+    # creating table for sky e
+
+    # Now do Sky E
+
+    ra=x['PRIMARY'].header['TESKYERA']
+    dec=x['PRIMARY'].header['TESKYEDE']
+    airmass=x['PRIMARY'].header['TESKYEAM']
+    xtel='SkyE'
+    alt=90-np.arccos(1./airmass)*57.29578
+
+    # xtab=Table([wave,sky_e_med,esky_e_med], names=['WAVE','FLUX','ERROR'])
+    xtab_sky_e=Table([wave,sky_e_flux,sky_e_err], names=['WAVE','FLUX','ERROR'])
+
+    skye_table_hdu = fits.BinTableHDU(xtab_sky_e, name='SKYE')
+    #new_primary_hdu = fits.PrimaryHDU(header=x[0].header)
+    #new = fits.HDUList([new_primary_hdu, table_hdu])
+
+    skye_table_hdu.header['UTC']=utc
+    skye_table_hdu.header['RA']=ra
+    skye_table_hdu.header['DEC']=dec
+    skye_table_hdu.header['ALT']=alt
+    skye_table_hdu.header['TELE']=xtel
+
+    #SkyE_file=outfile='SkyE_%04d.fits' % xroot
+    #print('Writing: %s' % outfile)
+    #new.writeto(outfile,overwrite=True)
+
+    # creating table for sky W
+
+    # Finally do Sky W
+
+    ra=x['PRIMARY'].header['TESKYWRA']
+    dec=x['PRIMARY'].header['TESKYWDE']
+    airmass=x['PRIMARY'].header['TESKYWAM']
+    xtel='SkyE'
+    alt=90-np.arccos(1./airmass)*57.29578
+
+    # xtab=Table([wave,sky_w_med,esky_w_med], names=['WAVE','FLUX','ERROR'])
+    xtab_sky_w=Table([wave,sky_w_flux,sky_w_err], names=['WAVE','FLUX','ERROR'])
+
+    #print('b',np.sum(xtab_sky_e['FLUX']-xtab_sky_w['FLUX']))
+
+    skyw_table_hdu = fits.BinTableHDU(xtab_sky_w, name='SKYW')
+    #new_primary_hdu = fits.PrimaryHDU(header=x[0].header)
+    #new = fits.HDUList([new_primary_hdu, table_hdu])
+
+    skyw_table_hdu.header['UTC']=utc
+    skyw_table_hdu.header['RA']=ra
+    skyw_table_hdu.header['DEC']=dec
+    skyw_table_hdu.header['ALT']=alt
+    skyw_table_hdu.header['TELE']=xtel
+
+    #SkyW_file=outfile='SkyW_%04d.fits' % xroot
+    #print('Writing: %s' % outfile)
+    #new.writeto(outfile,overwrite=True)
+
+    new = fits.HDUList([new_primary_hdu, sci_table_hdu, sky_table_hdu,
+                        skye_table_hdu, skyw_table_hdu])
+
+    #Sci_file=Sci_file.replace('.fits','')
+    #SkyE_file=SkyE_file.replace('.fits','')
+    #SkyW_file=SkyW_file.replace('.fits','')
+    #return Sci_file, SkyE_file, SkyW_file
+    return new
+
+
+def create_skysub_spectrum(hdu = None,
+                #sci_file='Sci_4852.fits',sky_file='SkyE_4852.fits',
+                sci_input: str = 'SCI',
+                sky_input: str = 'SKY',
+                wmin=6200, wmax=6450):
+    """_summary_
+
+    _extended_summary_
+
+    Parameters
+    ----------
+    hdu : _type_, optional
+        the sky hdu input from prep_sky, by default None
+    wmin=6200
+    wmax : int, optional
+        _description_, by default 6450
+    """
+    #sci=fits.open(sci_file)
+    sci = hdu[sci_input]
+    #sky=fits.open(sky_file)
+    sky = hdu[sky_input]
+    sci_tab=Table(sci.data)
+    sky_tab=Table(sky.data)
+    #plt.figure(1,(6,6))
+
+    xsci=sci_tab[sci_tab['WAVE']>wmin]
+    xsci=xsci[xsci['WAVE']<wmax]
+
+    xsky=sky_tab[sky_tab['WAVE']>wmin]
+    xsky=xsky[xsky['WAVE']<wmax]
+
+    #xnorm=np.dot(xsky['FLUX'],xsky['FLUX'])
+
+    rmin=0.5
+    rmax=1.5
+
+    minimum = ksl_bisection(fit_func, rmin, rmax, tol=0.001, maxiter=8,args=(xsci['FLUX'],xsky['FLUX']))
+
+    #skysub = xsci['FLUX'] - minimum * xsky['FLUX']
+    skysub = sci_tab['FLUX'] - minimum * sky_tab['FLUX']
+
+    print('Results %f' % (minimum))
+
+    # plt.figure(1,(8,6))
+    # plt.subplot(4,1,1)
+    # plt.plot(xsci['WAVE'],xsci['FLUX'],label='Science')
+    # plt.legend()
+    # plt.xlim(wmin,wmax)
+    # plt.tight_layout()
+
+    # plt.subplot(4,1,2)
+    # plt.plot(xsky['WAVE'],xsky['FLUX'],label='Sky')
+    # plt.legend()
+    # plt.xlim(wmin,wmax)
+    # plt.tight_layout()
+
+    # plt.subplot(4,1,3)
+    # plt.plot(xsci['WAVE'],skysub,label='Sky-subtracted')
+    # plt.legend()
+    # plt.xlim(wmin,wmax)
+    # ymin,ymax=plt.ylim()
+    # if ymin<-2e-14:
+    #     ymin=-2e-14
+    # if ymax>1e-13:
+    #     ymax=1e-13
+    # plt.ylim(ymin,ymax)
+    # plt.tight_layout()
+
+    # #outname = '%s_%s_all.png' % (sci_file.replace('.fits',''),sky_file.replace('.fits',''))
+    # outname = 'skysub_all_plot.png'
+    # plt.savefig(outname)
+
+    return skysub
+
+
+def fit_func(r, sci, sky):
+    '''
+    The function that is minimized, basically
+    the absolute value of the difference in science and
+    sky squared, which basically weights regions with
+    the brightest sky lines the most.
+    '''
+
+    delta=sci-r*sky
+
+    xx=sci*delta
+    xx=np.abs(xx)
+
+    xresult=np.sum(xx)
+    xnorm=np.dot(sky,sky)
+
+
+    return xresult/xnorm
+
+
+def ksl_bisection(func, a, b, tol=1e-2, args=(), maxiter=30):
+    """
+    Custom implementation of bisection method to find the minimum of a function within an interval.
+
+    Parameters:
+        func (callable): The objective function.
+        a (float): The lower bound of the interval.
+        b (float): The upper bound of the interval.
+        tol (float, optional): The tolerance for the minimum value. Default is 1e-6.
+        maxiter (int, optional): The maximum number of iterations. Default is 100.
+
+    Returns:
+        float: The x-coordinate of the estimated minimum.
+    """
+
+
+    j=0
+    while j<maxiter:
+        interval = [a, (3./4.*a+1/4.*b), (a + b) / 2, 1/4* a + 3/4*b, b]
+        print(interval)
+        values = [func(x,*args) for x in interval]
+        print(values)
+        min_index = values.index(min(values))
+        print(min_index)
+
+
+        if min_index == 0:
+            a, b = interval[0], interval[2]
+        elif min_index == 1:
+            a, b = interval[0], interval[2]
+        elif min_index == 2:
+            a, b = interval[1], interval[3]
+        elif min_index == 3:
+            a, b = interval[2], interval[4]
+        elif min_index == 4:
+            a, b = interval[2], interval[4]
+        print(a,b)
+        if abs(a-b)<tol:
+            print('Accuracy achieved on interation %d' % j)
+            break
+        j+=1
+
+
+    # Return the midpoint after the maximum number of iterations
+    return (a + b) / 2
