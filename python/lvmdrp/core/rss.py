@@ -100,6 +100,7 @@ class RSS(FiberRows):
         header = None
         data, error, mask = None, None, None
         wave_trace, lsf_trace = None, None
+        wave, lsf = None, None
         cent_trace, width_trace = None, None
         sky, sky_error = None, None
         supersky, supersky_error = None, None
@@ -118,6 +119,10 @@ class RSS(FiberRows):
                     wave_trace = hdu
                 if hdu.name == "LSF_TRACE":
                     lsf_trace = hdu
+                if hdu.name == "WAVE":
+                    wave = hdu.data.astype("float32")
+                if hdu.name == "LSF":
+                    lsf = hdu.data.astype("float32")
                 if hdu.name == "CENT_TRACE":
                     cent_trace = hdu
                 if hdu.name == "WIDTH_TRACE":
@@ -141,6 +146,8 @@ class RSS(FiberRows):
                 mask=mask,
                 wave_trace=wave_trace,
                 lsf_trace=lsf_trace,
+                wave=wave,
+                lsf=lsf,
                 cent_trace=cent_trace,
                 width_trace=width_trace,
                 sky=sky,
