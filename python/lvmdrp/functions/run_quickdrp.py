@@ -191,6 +191,7 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
         rss_tasks.stack_spectrographs(in_rsss=xsci_paths, out_rss=xsci_path)
 
         # wavelength calibrate
+        # GB will add shifts based on sky lines for science frames
         rss_tasks.create_pixel_table(in_rss=xsci_path, out_rss=wsci_path, in_waves=mwave_paths, in_lsfs=mlsf_paths)
 
         # apply fiberflat correction
