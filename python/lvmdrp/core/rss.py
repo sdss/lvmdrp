@@ -561,15 +561,15 @@ class RSS(FiberRows):
         self.setSlitmap(slitmap)
         self.set_fluxcal(fluxcal)
 
-    def _trace_to_coeff_table(self, trace):
+    def _trace_to_coeff_table(self, trace, default_poly_deg=4):
         """Converts a given trace into its polynomial coefficients representation as an Astropy Table"""
         if isinstance(trace, TraceMask):
-            coeffs = trace._coeffs
+            coeffs = trace._coeffs if trace._coeffs is not None else numpy.zeros((self._fibers, default_poly_deg+1))
             columns = [
                 pyfits.Column(name="FUNC", format="A10", array=numpy.asarray([trace._poly_kind] * self._fibers)),
                 pyfits.Column(name="XMIN", format="I", unit="pix", array=numpy.asarray([0] * self._fibers)),
                 pyfits.Column(name="XMAX", format="I", unit="pix", array=numpy.asarray([self._data.shape[1]-1] * self._fibers)),
-                pyfits.Column(name="COEFF", format=f"{coeffs.shape[1]}E", dim=f"({coeffs.shape[0]},)", array=trace._coeffs)
+                pyfits.Column(name="COEFF", format=f"{coeffs.shape[1]}E", dim=f"({self._fibers},)", array=trace._coeffs)
             ]
             self._trace = Table(pyfits.BinTableHDU.from_columns(columns).data)
             return self._trace
