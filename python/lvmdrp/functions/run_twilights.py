@@ -160,7 +160,7 @@ def fit_continuum(spectrum: Spectrum1D, mask_bands: List[Tuple[float,float]],
     best_continuum = continuum_models.pop(-1)
     return best_continuum, continuum_models, masked_pixels, knots
 
-def fit_fiberflat(rsss: List[RSS], interpolate_bad: bool = True, mask_bands: List[Tuple[float,float]] = [],
+def fit_fiberflat(rsss: List[RSS], out_rss: str, interpolate_bad: bool = True, mask_bands: List[Tuple[float,float]] = [],
                   median_box:int = 5, niter: int = 1000, threshold: Tuple[float,float]|float = (0.5,2.0),
                   plot_fibers: List[int] = list(range(0,648,10)),#[0,300,600,900,1200,1400,1700],
                   display_plots: bool = False, **kwargs) -> List[RSS]:
@@ -175,6 +175,8 @@ def fit_fiberflat(rsss: List[RSS], interpolate_bad: bool = True, mask_bands: Lis
     ----------
     rsss : list
         List of RSS objects for each twilight exposure
+    out_rss : str
+        Output path for the master twilight flat
     interpolate_bad : bool, optional
         Interpolate bad pixels, by default True
     mask_bands : list, optional
@@ -197,8 +199,6 @@ def fit_fiberflat(rsss: List[RSS], interpolate_bad: bool = True, mask_bands: Lis
     """
     camera = rsss[0]._header["CCD"]
     expnum = rsss[0]._header["EXPOSURE"]
-    tileid = rsss[0]._header.get("TILE_ID", 11111) or 11111
-    mjd = rsss[0]._header["MJD"]
     unit = rsss[0]._header["BUNIT"]
 
     # stack rsss
@@ -286,7 +286,7 @@ def fit_fiberflat(rsss: List[RSS], interpolate_bad: bool = True, mask_bands: Lis
 
     save_fig(
         fig,
-        product_path=path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=mjd, kind="f", imagetype="flat", camera=camera, expnum=expnum),
+        product_path=out_rss,
         to_display=display_plots,
         label="twilight_continuum_fit",
         figure_path="qa"
@@ -325,7 +325,7 @@ def fit_fiberflat(rsss: List[RSS], interpolate_bad: bool = True, mask_bands: Lis
 
     save_fig(
         fig,
-        product_path=path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=mjd, kind="f", imagetype="flat", camera=camera, expnum=expnum),
+        product_path=out_rss,
         to_display=display_plots,
         label="twilight_flatfielded",
         figure_path="qa"
@@ -333,6 +333,10 @@ def fit_fiberflat(rsss: List[RSS], interpolate_bad: bool = True, mask_bands: Lis
 
     new_flats = new_flat.splitRSS(parts=len(rsss), axis=1)
     [new_flat.setSlitmap(rsss[0]._slitmap) for new_flat in new_flats]
+
+    # write output faltfielded explosure
+    log.info(f"writing twilight flat to {out_rss}")
+    ori_flat.writeFitsData(out_rss)
 
     return new_flats
 
