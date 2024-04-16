@@ -1837,7 +1837,7 @@ def prep_input_simplesky_mean(filename: str = None) -> fits.HDUList:
 
 
 def create_skysub_spectrum(hdu: fits.HDUList = None, sci_input: str = "SCI", sky_input: str = "SKY",
-                           wmin: int = 6200, wmax: int = 6450) -> np.array:
+                           wmin: int = 3600, wmax: int = 9000) -> np.array:
     """ Create spectrum for sky subtraction
 
     _extended_summary_
@@ -1882,9 +1882,9 @@ def create_skysub_spectrum(hdu: fits.HDUList = None, sci_input: str = "SCI", sky
     )
 
     # create spectrum for sky subtraction using entire wavelength range
-    skysub = sci_tab["FLUX"] - minimum * sky_tab["FLUX"]
+    skysub = minimum * sky_tab["FLUX"]
 
-    log.info(f"Results {minimum}")
+    log.info(f"Results {minimum} with wmin {wmin} and wmax {wmax}.")
 
     # plt.figure(1,(6,6))
     # plt.figure(1,(8,6))
