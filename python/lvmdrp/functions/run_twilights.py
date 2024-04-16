@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import os
+from glob import glob
 from typing import Tuple, List, Dict
 from copy import deepcopy as copy
 import numpy as np
@@ -21,7 +22,7 @@ from scipy import interpolate
 from lvmdrp import path, log, __version__ as drpver
 from lvmdrp.utils import metadata as md
 from lvmdrp.core.constants import SPEC_CHANNELS
-from lvmdrp.core.fiberrows import FiberRows
+from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.core.spectrum1d import Spectrum1D
 from lvmdrp.core.rss import RSS
 from lvmdrp.core.plot import create_subplots, save_fig
@@ -365,7 +366,7 @@ def combine_twilight_sequence(expnums: List[int], camera: str, output_dir: str) 
 
     # combine RSS exposures using an average
     mflat = RSS(data=np.zeros_like(hflats[0]._data), error=np.zeros_like(hflats[0]._error), mask=np.ones_like(hflats[0]._mask, dtype=bool),
-                header=copy(hflats[0]._header), slitmap=copy(hflats[0]._slitmap))
+                header=copy(hflats[0]._header), wave=copy(hflats[0]._wave), lsf=copy(hflats[0]._lsf), slitmap=copy(hflats[0]._slitmap))
     # select non-std fibers
     fibermap =  mflat._slitmap[mflat._slitmap["spectrographid"] == int(camera[1])]
     select_allstd = fibermap["telescope"] == "Spec"
@@ -423,8 +424,7 @@ def resample_fiberflat(mflat: RSS, camera: str, mwave_path: str,
     mjd = mflat._header["MJD"]
     # load master wavelength
     if mwave_path is not None:
-        mwave = FiberRows()
-        mwave.loadFitsData(mwave_path)
+        mwave = TraceMask.from_file(mwave_path)
         mwave = mwave._data[:, :-1]
     else:
         mwave = np.repeat([mflat._wave], mflat._fibers, axis=0)
@@ -433,7 +433,9 @@ def resample_fiberflat(mflat: RSS, camera: str, mwave_path: str,
     new_flat = RSS(data=np.zeros_like(mwave),
                    wave=mwave,
                    mask=np.zeros_like(mwave, dtype="bool"),
-                   inst_fwhm=mflat._inst_fwhm)
+                   lsf=mflat._lsf,
+                   slitmap=mflat._slitmap,
+                   header=copy(mflat._header))
     new_flat._header = mflat._header
     new_flat._slitmap = mflat._slitmap
     new_flat._good_fibers = mflat._good_fibers
@@ -558,24 +560,6 @@ def reduce_twilight_sequence(expnums: List[int], median_box: int = 10, niter: bo
                                         in_trace=master_cals.get("cent"), in_fwhm=master_cals.get("width"),
                                         method="optimal", parallel=10)
 
-        # calibrate in wavelength
-        wflat_path = path.full("lvm_anc", drpver=drpver, kind="w", imagetype=flat["imagetyp"], **flat)
-        if skip_done and os.path.isfile(wflat_path):
-            log.info(f"skipping {wflat_path}, file already exist")
-        else:
-            rssMethod.create_pixel_table(in_rss=xflat_path, out_rss=wflat_path,
-                                            arc_wave=master_cals.get("wave"), arc_fwhm=master_cals.get("lsf"))
-
-        # rectify in wavelength
-        hflat_path = path.full("lvm_anc", drpver=drpver, kind="h", imagetype=flat["imagetyp"], **flat)
-        if skip_done and os.path.isfile(hflat_path):
-            log.info(f"skipping {hflat_path}, file already exist")
-        else:
-            iwave, fwave = SPEC_CHANNELS[camera[0]]
-            rssMethod.resample_wavelength(in_rss=wflat_path, out_rss=hflat_path,
-                                            disp_pix=0.5, start_wave=iwave, end_wave=fwave,
-                                            err_sim=5, parallel=0, extrapolate=False)
-
     # decompose twilight spectra into sun continuum and twilight components
     channels = "brz"
     mask_bands = dict(zip(channels, [b_mask, r_mask, z_mask]))
@@ -584,13 +568,35 @@ def reduce_twilight_sequence(expnums: List[int], median_box: int = 10, niter: bo
     for channel in channels:
         flat_expnums = flat_channels.get_group(channel).groupby("expnum")
         for expnum in flat_expnums.groups:
-            flat_specs = flat_expnums.get_group(expnum)
-            hflat_paths = [path.full("lvm_anc", drpver=drpver, kind="h", imagetype=flat["imagetyp"], **flat) for flat in flat_specs.to_dict("records")]
-            fflat_paths = [path.full("lvm_anc", drpver=drpver, kind="f", imagetype=flat["imagetyp"], **flat) for flat in flat_specs.to_dict("records")]
+            xflat_paths = sorted(path.expand("lvm_anc", drpver=drpver, kind="x", imagetype=flat["imagetyp"], tileid=flat["tileid"], mjd=flat["mjd"], camera=f"{channel}?", expnum=expnum))
+            fflat_paths = sorted(path.expand("lvm_anc", drpver=drpver, kind="f", imagetype=flat["imagetyp"], tileid=flat["tileid"], mjd=flat["mjd"], camera=f"{channel}?", expnum=expnum))
+            fflat_path = path.full("lvm_anc", drpver=drpver, kind="f",
+                                   imagetype=flat["imagetyp"], tileid=flat["tileid"], mjd=flat["mjd"],
+                                   camera=channel, expnum=expnum)
+
+            mwave_paths = sorted(glob(os.path.join(masters_path, f"lvm-mwave_{arc_lamp}-{channel}?.fits")))
+            mlsf_paths = sorted(glob(os.path.join(masters_path, f"lvm-mlsf_{arc_lamp}-{channel}?.fits")))
+
+            # spectrograph stack xflats
+            xflat = RSS.from_spectrographs(*[rssMethod.loadRSS(xflat_path) for xflat_path in xflat_paths])
+            xflat_path = path.full("lvm_anc", drpver=drpver, kind="x",
+                                   imagetype=flat["imagetyp"], tileid=flat["tileid"], mjd=flat["mjd"],
+                                   camera=channel, expnum=expnum)
+            xflat.writeFitsData(xflat_path)
+
+            # calibrate in wavelength
+            wflat_path = path.full("lvm_anc", drpver=drpver, kind="w", imagetype=flat["imagetyp"], tileid=flat["tileid"], mjd=flat["mjd"], camera=channel, expnum=expnum)
+            rssMethod.create_pixel_table(in_rss=xflat_path, out_rss=wflat_path,
+                                         in_waves=mwave_paths, in_lsfs=mlsf_paths)
+
+            # rectify in wavelength
+            hflat_path = path.full("lvm_anc", drpver=drpver, kind="h", imagetype=flat["imagetyp"], tileid=flat["tileid"], mjd=flat["mjd"], camera=channel, expnum=expnum)
+            rssMethod.resample_wavelength(in_rss=wflat_path, out_rss=hflat_path, wave_disp=0.5, wave_range=SPEC_CHANNELS[channel])
 
             # fit fiber throughput
-            hflats = [rssMethod.loadRSS(hflat_path) for hflat_path in hflat_paths]
-            fflats = fit_fiberflat(rsss=hflats, median_box=median_box, niter=niter,
+            hflat = rssMethod.loadRSS(hflat_path)
+            hflats = hflat.splitRSS(parts=len(mwave_paths), axis=1)
+            fflats = fit_fiberflat(rsss=hflats, out_rss=fflat_path, median_box=median_box, niter=niter,
                                    threshold=threshold, mask_bands=mask_bands.get(channel, []),
                                    display_plots=display_plots, nknots=nknots)
 
@@ -619,4 +625,4 @@ def reduce_twilight_sequence(expnums: List[int], median_box: int = 10, niter: bo
 
 if __name__ == "__main__":
 
-    reduce_twilight_sequence(expnums=[7230], median_box=10, niter=1000, threshold=(0.5,2.5), nknots=60, skip_done=True, display_plots=True)
+    reduce_twilight_sequence(expnums=[7230], median_box=10, niter=1000, threshold=(0.5,2.5), nknots=60, skip_done=False, display_plots=True)
