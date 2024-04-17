@@ -343,6 +343,8 @@ def test_shadow_calc():
 
     compare_old = True
     if compare_old:
+        redux = os.getenv("LVM_SPECTRO_REDUX")
+        load = Loader(redux)
         eph = load('de421.bsp')
         import lvmsurveysim.utils.iterative_shadow_height_lib as iterative_shadow_height_lib
         iter_calc = iterative_shadow_height_lib.shadow_calc(observatory_name='LCO',
