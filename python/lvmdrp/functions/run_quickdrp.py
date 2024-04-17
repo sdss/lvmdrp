@@ -26,6 +26,24 @@ from lvmdrp.core.constants import SPEC_CHANNELS
 ORIG_MASTER_DIR = os.getenv("LVM_MASTER_DIR")
 
 
+def mjd_from_expnum(expnum):
+    """Returns the MJD for the given exposure number
+
+    Parameters
+    ----------
+    expnum : int
+        the exposure number
+
+    Returns
+    -------
+    int
+        the MJD of the exposure
+    """
+    rpath = path.expand("lvm_raw", camspec="*", mjd="*", hemi="s", expnum=expnum)[0]
+    mjd = path.extract("lvm_raw", rpath)["mjd"]
+    return int(mjd)
+
+
 def get_master_mjd(sci_mjd: int) -> int:
     """ Get the correct master calibration MJD for a science frame
 
@@ -73,8 +91,12 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
     extraction_parallel = "auto" if ncpus is None else ncpus
     extraction_method = "aperture" if aperture_extraction else "optimal"
 
-    # get target frames metadata
+    # get target frames metadata or extract if it doesn't exist
     sci_metadata = md.get_metadata(tileid="*", mjd="*", expnum=expnum)
+    if len(sci_metadata) == 0:
+        sci_mjd = mjd_from_expnum(expnum)
+        sci_metadata = md.get_frames_metadata(mjd=sci_mjd)
+        sci_metadata.query("expnum == @expnum", inplace=True)
     sci_metadata.sort_values("expnum", ascending=False, inplace=True)
 
     # define general metadata
