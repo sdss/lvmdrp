@@ -160,6 +160,12 @@ def apply_hdrfix(mjd: int, camera: str = None, expnum: int = None,
     elif not (mjd and camera and expnum):
         raise ValueError('Either filename, hdr, or mjd, camera, expnum must be specified.')
 
+    # always check the hdr tile id and correct it
+    # get the tile id; set null tile ids -999 to 11111
+    tileid = hdr.get("TILE_ID") or hdr.get("TILEID", 11111)
+    tileid = 11111 if tileid in (-999, 999, None) else tileid
+    hdr['TILE_ID'] = tileid
+
     # read the hdr fix file
     fix = read_hdrfix_file(mjd)
 
@@ -182,4 +188,3 @@ def apply_hdrfix(mjd: int, camera: str = None, expnum: int = None,
             hdr[key] = val
 
     return hdr
-

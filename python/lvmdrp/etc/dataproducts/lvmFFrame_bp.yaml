@@ -97,32 +97,31 @@ hdu4:
   is_image: true
   shape: NWAVE
 hdu5:
-  name: LSF_TRACE
-  description: LSF (FWHM) solution traceset in angstroms
-  is_image: false
-  shape: BINARY FITS TABLE
-  columns:
-    FUNC:
-      name: FUNC
-      type: str
-      unit: null
-      description: "polynomial function kind: poly, chebyshev, legendre"
-    XMIN:
-      name: XMIN
-      type: float32
-      unit: pix
-      description: initial pixel in the LSF trace
-    XMAX:
-      name: XMAX
-      type: float32
-      unit: pix
-      description: final pixel in the LSF trace
-    COEFF:
-      name: COEFF
-      type: float32
-      unit: null
-      description: polynomial coefficients
+  name: LSF
+  description: LSF (FWHM) solution array in angstroms
+  is_image: true
+  shape: NWAVE x NFIBER
 hdu6:
+  name: SKY_EAST
+  description: sky east in flux-calibrated units (10(-17) erg/s/cm2/Ang/fiber)
+  is_image: true
+  shape: NWAVE x NFIBER
+hdu7:
+  name: SKY_EAST_IVAR
+  description: sky east inverse variance (1/sigma^2) in flux-calibrated units (10(-17) erg/s/cm2/Ang/fiber)
+  is_image: true
+  shape: NWAVE x NFIBER
+hdu8:
+  name: SKY_WEST
+  description: sky west in flux-calibrated units (10(-17) erg/s/cm2/Ang/fiber)
+  is_image: true
+  shape: NWAVE x NFIBER
+hdu9:
+  name: SKY_WEST_IVAR
+  description: sky west inverse variance (1/sigma^2) in flux-calibrated units (10(-17) erg/s/cm2/Ang/fiber)
+  is_image: true
+  shape: NWAVE x NFIBER
+hdu10:
   name: FLUXCAL
   description: sensitivity in units of (electron/s) / (erg/s/cm2/Ang/fiber)
   is_image: false
@@ -198,7 +197,7 @@ hdu6:
       type: float32
       unit: (electron) / (erg/s/cm2/angstrom)
       description: standard deviation of sensitivity
-hdu7:
+hdu11:
   name: SLITMAP
   description: slitmap table describing fiber positions for this exposure
   is_image: false
