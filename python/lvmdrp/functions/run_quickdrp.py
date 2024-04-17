@@ -39,8 +39,10 @@ def mjd_from_expnum(expnum):
     int
         the MJD of the exposure
     """
-    rpath = path.expand("lvm_raw", camspec="*", mjd="*", hemi="s", expnum=expnum)[0]
-    mjd = path.extract("lvm_raw", rpath)["mjd"]
+    rpath = path.expand("lvm_raw", camspec="*", mjd="*", hemi="s", expnum=expnum)
+    if len(rpath) == 0:
+        raise ValueError(f"no raw frame found for exposure number {expnum}")
+    mjd = path.extract("lvm_raw", rpath[0])["mjd"]
     return int(mjd)
 
 
