@@ -264,6 +264,7 @@ class RSS(FiberRows):
         # update header
         if len(hdrs) > 0:
             hdr_out = combineHdr(hdrs)
+            hdr_out._header["CCD"] = hdr_out._header["CCD"][0]
         else:
             hdr_out = None
 
