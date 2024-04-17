@@ -45,7 +45,7 @@ from lvmdrp.core.sky import (
     get_telescope_shadowheight,
 )
 from lvmdrp.core.spectrum1d import Spectrum1D
-from lvmdrp import log
+from lvmdrp import log, path, __version__ as drpver
 from lvmdrp.utils.examples import fetch_example_data
 
 
@@ -1627,6 +1627,9 @@ def quick_sky_subtraction(in_cframe, out_sframe, band=np.array((7238, 7242, 7074
         output SFrame file
     band : np.array, optional
         wavelength range to use for sky refinement, by default np.array((7238,7242,7074,7084,7194,7265))
+    skymethod : str, optional
+        method of computing sky continuum, by default "cont"
+
     """
 
     cframe = lvmCFrame.from_file(in_cframe)
@@ -1687,6 +1690,14 @@ def quick_sky_subtraction(in_cframe, out_sframe, band=np.array((7238, 7242, 7074
     skydata[scifibers] = data[scifibers] - scisub
     skydata[skyefibers] = data[skyefibers] - skyesub
     skydata[skywfibers] = data[skywfibers] - skywsub
+
+    # write out sky table to ancillary file
+    mjd = cframe._header['MJD']
+    expnum = cframe._header['EXPOSURE']
+    tileid = cframe._header['TILE_ID']
+    skytable = path.full('lvm_anc', mjd=mjd, tileid=tileid, drpver=drpver,
+                         kind='sky', camera='brz', imagetype='table', expnum=expnum)
+    sky_hdu.writeto(skytable, overwrite=True)
 
     # TODO - deal with error in sky-subtracted data ; replaced "error_c"
     error_c = cframe._error
@@ -1886,8 +1897,6 @@ def create_skysub_spectrum(hdu: fits.HDUList = None, sci_input: str = "SCI", sky
                            wmin: int = 3600, wmax: int = 9000, method: str = 'cont') -> np.array:
     """ Create spectrum for sky subtraction
 
-    _extended_summary_
-
     Parameters
     ----------
     hdu : fits.HDUList, optional
@@ -1914,25 +1923,25 @@ def create_skysub_spectrum(hdu: fits.HDUList = None, sci_input: str = "SCI", sky
     sci_tab = Table(sci.data)
     sky_tab = Table(sky.data)
 
-    # select wavelength range subset for bisection
-    xsci = sci_tab[sci_tab["WAVE"] > wmin]
-    xsci = xsci[xsci["WAVE"] < wmax]
-
-    xsky = sky_tab[sky_tab["WAVE"] > wmin]
-    xsky = xsky[xsky["WAVE"] < wmax]
-
     if method == 'cont':
-        xsci = polynomial_fit_with_outliers(xsci, degree=4, sigma_lower=3, sigma_upper=1, grow=5)
-        xsky = polynomial_fit_with_outliers(xsky, degree=4, sigma_lower=3, sigma_upper=1, grow=5)
+        xsci = polynomial_fit_with_outliers(sci_tab, degree=4, sigma_lower=3, sigma_upper=1, grow=5)
+        xsky = polynomial_fit_with_outliers(sky_tab, degree=4, sigma_lower=3, sigma_upper=1, grow=5)
         xsci['LINES'] = xsci['FLUX'] - xsci['CONT']
         xsky['LINES'] = xsky['FLUX'] - xsky['CONT']
+
+    # select wavelength range subset for bisection
+    sci_subset = sci_tab[sci_tab["WAVE"] > wmin]
+    sci_subset = xsci[xsci["WAVE"] < wmax]
+
+    sky_subset = sky_tab[sky_tab["WAVE"] > wmin]
+    sky_subset = xsky[xsky["WAVE"] < wmax]
 
     # set bounds
     rmin = 0.5
     rmax = 1.5
 
     minimum = ksl_bisection(
-        fit_func, rmin, rmax, tol=0.001, maxiter=8, args=(xsci["FLUX"], xsky["FLUX"])
+        fit_func, rmin, rmax, tol=0.001, maxiter=8, args=(sci_subset["FLUX"], sky_subset["FLUX"])
     )
 
     # create spectrum for sky subtraction using entire wavelength range
@@ -1942,6 +1951,9 @@ def create_skysub_spectrum(hdu: fits.HDUList = None, sci_input: str = "SCI", sky
         skysub = minimum * sky_tab["FLUX"]
 
     log.info(f"Results {minimum} with wmin {wmin} and wmax {wmax}.")
+
+    # update the main sci_input hdu extension with new columns
+    hdu[sci_input] = fits.BinTableHDU(xsci, name=sci_input)
 
     # plt.figure(1,(6,6))
     # plt.figure(1,(8,6))
