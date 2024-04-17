@@ -210,12 +210,12 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
 
         # flux-calibrate each channel
         fframe_path = path.full("lvm_frame", mjd=sci_mjd, drpver=drpver, tileid=sci_tileid, expnum=sci_expnum, kind=f'FFrame-{channel}')
-        flux_tasks.apply_fluxcal(in_rss=hsci_path, out_rss=fframe_path, skip_fluxcal=skip_flux_calibration)
+        flux_tasks.apply_fluxcal(in_rss=hsci_path, out_fframe=fframe_path, skip_fluxcal=skip_flux_calibration)
 
     # stitch channels
     fframe_paths = sorted(path.expand('lvm_frame', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver, kind='FFrame-?', expnum=expnum))
     cframe_path = path.full("lvm_frame", drpver=drpver, tileid=sci_tileid, mjd=sci_mjd, expnum=sci_expnum, kind='CFrame')
-    rss_tasks.join_spec_channels(in_rsss=fframe_paths, out_rss=cframe_path, use_weights=True)
+    rss_tasks.join_spec_channels(in_fframes=fframe_paths, out_cframe=cframe_path, use_weights=True)
 
     # sky subtraction
     sframe_path = path.full("lvm_frame", mjd=sci_mjd, drpver=drpver, tileid=sci_tileid, expnum=sci_expnum, kind='SFrame')
