@@ -148,25 +148,25 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
 
         log.info(f'--- Starting science reduction of raw frame: {rsci_path}')
 
-        # preprocess frame
-        image_tasks.preproc_raw_frame(in_image=rsci_path, out_image=psci_path, in_mask=mpixmask_path)
-
-        # detrend frame
-        image_tasks.detrend_frame(in_image=psci_path, out_image=dsci_path,
-                                  in_bias=mbias_path, in_dark=mdark_path, in_pixelflat=mpixflat_path,
-                                  in_slitmap=Table(drp.fibermap.data), reject_cr=False)
-
-        # subtract straylight
-        if sci_imagetyp == "flat":
-            image_tasks.subtract_straylight(in_image=dsci_path, out_image=lsci_path,
-                                                in_cent_trace=mtrace_path, select_nrows=5,
-                                                aperture=13, smoothing=400, median_box=21, gaussian_sigma=0.0)
-        else:
-            lsci_path = dsci_path
-
-        # extract 1d spectra
-        image_tasks.extract_spectra(in_image=dsci_path, out_rss=xsci_path, in_trace=mtrace_path, in_fwhm=mwidth_path,
-                                    method=extraction_method, parallel=extraction_parallel)
+#        # preprocess frame
+#        image_tasks.preproc_raw_frame(in_image=rsci_path, out_image=psci_path, in_mask=mpixmask_path)
+#
+#        # detrend frame
+#        image_tasks.detrend_frame(in_image=psci_path, out_image=dsci_path,
+#                                  in_bias=mbias_path, in_dark=mdark_path, in_pixelflat=mpixflat_path,
+#                                  in_slitmap=Table(drp.fibermap.data), reject_cr=False)
+#
+#        # subtract straylight
+#        if sci_imagetyp == "flat":
+#            image_tasks.subtract_straylight(in_image=dsci_path, out_image=lsci_path,
+#                                                in_cent_trace=mtrace_path, select_nrows=5,
+#                                                aperture=13, smoothing=400, median_box=21, gaussian_sigma=0.0)
+#        else:
+#            lsci_path = dsci_path
+#
+#        # extract 1d spectra
+#        image_tasks.extract_spectra(in_image=dsci_path, out_rss=xsci_path, in_trace=mtrace_path, in_fwhm=mwidth_path,
+#                                    method=extraction_method, parallel=extraction_parallel)
 
     # per channel reduction
     for channel in "brz":
@@ -187,41 +187,43 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
         hsci_path = path.full('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver,
                               kind='h', camera=channel, imagetype=sci_imagetyp, expnum=expnum)
 
-        # stack spectrographs
-        rss_tasks.stack_spectrographs(in_rsss=xsci_paths, out_rss=xsci_path)
-
+#        # stack spectrographs
+#        rss_tasks.stack_spectrographs(in_rsss=xsci_paths, out_rss=xsci_path)
+#
         # wavelength calibrate
-        # GB will add shifts based on sky lines for science frames
         rss_tasks.create_pixel_table(in_rss=xsci_path, out_rss=wsci_path, in_waves=mwave_paths, in_lsfs=mlsf_paths)
 
-        # apply fiberflat correction
-        rss_tasks.apply_fiberflat(in_rss=wsci_path, out_frame=frame_path, in_flats=mflat_paths)
-
-        # interpolate sky fibers
-        sky_tasks.interpolate_sky(in_frame=frame_path, out_rss=ssci_path)
-
-        # combine sky telescopes
-        sky_tasks.combine_skies(in_rss=ssci_path, out_rss=ssci_path, sky_weights=sky_weights)
-
-        # resample wavelength into uniform grid along fiber IDs for science and sky fibers
-        rss_tasks.resample_wavelength(in_rss=ssci_path,  out_rss=hsci_path, wave_range=SPEC_CHANNELS[channel], wave_disp=0.5, convert_to_density=True)
-
-        # use sky subtracted resampled frames for flux calibration in each camera
-        flux_tasks.fluxcal_Gaia(channel, hsci_path, GAIA_CACHE_DIR=ORIG_MASTER_DIR+'/gaia_cache')
-
-        # flux-calibrate each channel
-        fframe_path = path.full("lvm_frame", mjd=sci_mjd, drpver=drpver, tileid=sci_tileid, expnum=sci_expnum, kind=f'FFrame-{channel}')
-        flux_tasks.apply_fluxcal(in_rss=hsci_path, out_rss=fframe_path, skip_fluxcal=skip_flux_calibration)
-
-    # stitch channels
-    fframe_paths = sorted(path.expand('lvm_frame', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver, kind='FFrame-?', expnum=expnum))
-    cframe_path = path.full("lvm_frame", drpver=drpver, tileid=sci_tileid, mjd=sci_mjd, expnum=sci_expnum, kind='CFrame')
-    rss_tasks.join_spec_channels(in_rsss=fframe_paths, out_rss=cframe_path, use_weights=True)
-
-    # sky subtraction
-    sframe_path = path.full("lvm_frame", mjd=sci_mjd, drpver=drpver, tileid=sci_tileid, expnum=sci_expnum, kind='SFrame')
-    sky_tasks.quick_sky_subtraction(in_cframe=cframe_path, out_sframe=sframe_path, skip_subtraction=skip_sky_subtraction)
-
-    # TODO: add quick report routine
-
-    # TODO: by default remove the extra files for the given expnum
+        # correct thermal shift in wavelength direction
+        rss_tasks.shift_wave_skylines(in_rss=wsci_path, out_rss=wsci_path, channel=channel)
+#
+#        # apply fiberflat correction
+#        rss_tasks.apply_fiberflat(in_rss=wsci_path, out_frame=frame_path, in_flats=mflat_paths)
+#
+#        # interpolate sky fibers
+#        sky_tasks.interpolate_sky(in_frame=frame_path, out_rss=ssci_path)
+#
+#        # combine sky telescopes
+#        sky_tasks.combine_skies(in_rss=ssci_path, out_rss=ssci_path, sky_weights=sky_weights)
+#
+#        # resample wavelength into uniform grid along fiber IDs for science and sky fibers
+#        rss_tasks.resample_wavelength(in_rss=ssci_path,  out_rss=hsci_path, wave_range=SPEC_CHANNELS[channel], wave_disp=0.5, convert_to_density=True)
+#
+#        # use sky subtracted resampled frames for flux calibration in each camera
+#        flux_tasks.fluxcal_Gaia(channel, hsci_path, GAIA_CACHE_DIR=ORIG_MASTER_DIR+'/gaia_cache')
+#
+#        # flux-calibrate each channel
+#        fframe_path = path.full("lvm_frame", mjd=sci_mjd, drpver=drpver, tileid=sci_tileid, expnum=sci_expnum, kind=f'FFrame-{channel}')
+#        flux_tasks.apply_fluxcal(in_rss=hsci_path, out_rss=fframe_path, skip_fluxcal=skip_flux_calibration)
+#
+#    # stitch channels
+#    fframe_paths = sorted(path.expand('lvm_frame', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver, kind='FFrame-?', expnum=expnum))
+#    cframe_path = path.full("lvm_frame", drpver=drpver, tileid=sci_tileid, mjd=sci_mjd, expnum=sci_expnum, kind='CFrame')
+#    rss_tasks.join_spec_channels(in_rsss=fframe_paths, out_rss=cframe_path, use_weights=True)
+#
+#    # sky subtraction
+#    sframe_path = path.full("lvm_frame", mjd=sci_mjd, drpver=drpver, tileid=sci_tileid, expnum=sci_expnum, kind='SFrame')
+#    sky_tasks.quick_sky_subtraction(in_cframe=cframe_path, out_sframe=sframe_path, skip_subtraction=skip_sky_subtraction)
+#
+#    # TODO: add quick report routine
+#
+#    # TODO: by default remove the extra files for the given expnum
