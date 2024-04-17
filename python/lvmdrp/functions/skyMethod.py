@@ -1534,8 +1534,11 @@ def combine_skies(in_rss: str, out_rss, sky_weights: Tuple[float, float] = None)
         std_fac = {stdid: np.round(factor,4) for stdid, factor in sorted(std_fac, key=lambda item: int(item[0].split("-")[1]))}
         log.info(f"correction factors for standard star: {std_fac}")
         # apply factors to standard star sky
-        rss._sky[std_idx] *= np.asarray(list(std_fac.values()))[:, None]
-        rss._sky_error[std_idx] *= np.asarray(list(std_fac.values()))[:, None]
+        exptime_factors = np.asarray(list(std_fac.values()))[:, None]
+        rss._sky_east[std_idx] *= exptime_factors
+        rss._sky_east_error[std_idx] *= exptime_factors
+        rss._sky_west[std_idx] *= exptime_factors
+        rss._sky_west_error[std_idx] *= exptime_factors
 
     rss.writeFitsData(out_rss)
 
