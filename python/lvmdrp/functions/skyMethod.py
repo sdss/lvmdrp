@@ -19,7 +19,7 @@ import bottleneck as bn
 import yaml
 from astropy.coordinates import SkyCoord
 from astropy.io import fits
-from astropy.stats import biweight_location, mad_std
+from astropy.stats import biweight_location, mad_std, sigma_clip
 from astropy.table import Table, Column
 from astropy.time import Time
 from scipy import optimize
@@ -1615,7 +1615,8 @@ def combine_skies(in_rss: str, out_rss, sky_weights: Tuple[float, float] = None)
     return rss, sky
 
 
-def quick_sky_subtraction(in_cframe, out_sframe, band=np.array((7238, 7242, 7074, 7084, 7194, 7265)), skip_subtraction=False):
+def quick_sky_subtraction(in_cframe, out_sframe, band=np.array((7238, 7242, 7074, 7084, 7194, 7265)),
+                          skip_subtraction=False, skymethod: str = 'cont'):
     """ Quick sky refinement using the model in the final CFrame
 
     Parameters
@@ -1670,13 +1671,9 @@ def quick_sky_subtraction(in_cframe, out_sframe, band=np.array((7238, 7242, 7074
     sky_input = "SKYW" if wsep < esep else 'SKYE'
 
     # create spectrum for sky subtraction
-    # scisub = create_skysub_spectrum(sky_hdu, sci_input="SCI", sky_input=sky_input)
-    # skyesub = create_skysub_spectrum(sky_hdu, sci_input="SKYE", sky_input="SKYE")
-    # skywsub = create_skysub_spectrum(sky_hdu, sci_input="SKYW", sky_input="SKYW")
-
-    scisub = create_skysub_spectrum2(sky_hdu, sci_input="SCI", sky_input=sky_input)
-    skyesub = create_skysub_spectrum2(sky_hdu, sci_input="SKYE", sky_input="SKYE")
-    skywsub = create_skysub_spectrum2(sky_hdu, sci_input="SKYW", sky_input="SKYW")
+    scisub = create_skysub_spectrum(sky_hdu, sci_input="SCI", sky_input=sky_input, method=skymethod)
+    skyesub = create_skysub_spectrum(sky_hdu, sci_input="SKYE", sky_input="SKYE", method=skymethod)
+    skywsub = create_skysub_spectrum(sky_hdu, sci_input="SKYW", sky_input="SKYW", method=skymethod)
 
     # select correct fibers
     data = cframe._data
@@ -1840,71 +1837,8 @@ def prep_input_simplesky_mean(filename: str = None) -> fits.HDUList:
         return new
 
 
-
-
-def create_skysub_spectrum2(hdu: fits.HDUList = None, sci_input: str = "SCI", sky_input: str = "SKY",
-                           wmin: int = 3600, wmax: int = 9000) -> np.array:
-    """ Create spectrum for sky subtraction.  This version attemps a separation 
-    between the coniuum and the lines and fits the lines separately
-
-    _extended_summary_
-
-    Parameters
-    ----------
-    hdu : fits.HDUList, optional
-        the sky data from the lvmCFrame file, by default None
-    sci_input : str, optional
-        which extension to use as science, by default "SCI"
-    sky_input : str, optional
-        which extension to use as sky, by default "SKY"
-    wmin : int, optional
-        the wavelength minimum bound, by default 6200
-    wmax : int, optional
-        the wavelength maximum bound, by default 6450
-
-    Returns
-    -------
-    np.array
-        the output spectrum for sky subtraction
-    """
-    # get the science and sky data, convert to tables
-    sci = hdu[sci_input]
-    sky = hdu[sky_input]
-    sci_tab = Table(sci.data)
-    sky_tab = Table(sky.data)
-
-    # select wavelength range subset for bisection
-    xsci = sci_tab[sci_tab["WAVE"] > wmin]
-    xsci = xsci[xsci["WAVE"] < wmax]
-
-    xsky = sky_tab[sky_tab["WAVE"] > wmin]
-    xsky = xsky[xsky["WAVE"] < wmax]
-
-    xsci= polynomial_fit_with_outliers(xsci, degree=4, sigma_lower=3, sigma_upper=1, grow=5)
-    xsky= polynomial_fit_with_outliers(xsky, degree=4, sigma_lower=3, sigma_upper=1, grow=5)
-
-    xsci['LINES']=xsci['FLUX']-xsci['CONT']
-    xsky['LINES']=xsky['FLUX']-xsky['CONT']
-
-    rmin=0.5
-    rmax=1.5
-
-    minimum = ksl_bisection(
-        fit_func, rmin, rmax, tol=0.001, maxiter=8, args=(xsci["FLUX"], xsky["FLUX"])
-    )
-
-    # create spectrum for sky subtraction using entire wavelength range
-    skysub = xsky['CONT']+minimum * sky_tab["FLUX"]
-
-    log.info(f"Results {minimum} with wmin {wmin} and wmax {wmax}.")
-
-    return np.array(skysub)
-
-
-
 def polynomial_fit_with_outliers(spectrum_table, degree=3, sigma_lower=3, sigma_upper=3, grow=0, max_iter=10):
-    """
-    Perform a polynomial fit to the total spectrum while iteratively removing outliers.
+    """ Perform a polynomial fit to the total spectrum while iteratively removing outliers.
 
     Parameters:
         spectrum_table (astropy.table.Table): Table containing columns for wavelength, total flux, line flux, and continuum flux.
@@ -1946,10 +1880,10 @@ def polynomial_fit_with_outliers(spectrum_table, degree=3, sigma_lower=3, sigma_
     output_table['MASK'] = mask
 
     return output_table
-    
+
 
 def create_skysub_spectrum(hdu: fits.HDUList = None, sci_input: str = "SCI", sky_input: str = "SKY",
-                           wmin: int = 3600, wmax: int = 9000) -> np.array:
+                           wmin: int = 3600, wmax: int = 9000, method: str = 'cont') -> np.array:
     """ Create spectrum for sky subtraction
 
     _extended_summary_
@@ -1966,6 +1900,8 @@ def create_skysub_spectrum(hdu: fits.HDUList = None, sci_input: str = "SCI", sky
         the wavelength minimum bound, by default 6200
     wmax : int, optional
         the wavelength maximum bound, by default 6450
+    method : str, optional
+        the method of constructing the sky continuum, by default "cont"
 
     Returns
     -------
@@ -1985,6 +1921,12 @@ def create_skysub_spectrum(hdu: fits.HDUList = None, sci_input: str = "SCI", sky
     xsky = sky_tab[sky_tab["WAVE"] > wmin]
     xsky = xsky[xsky["WAVE"] < wmax]
 
+    if method == 'cont':
+        xsci = polynomial_fit_with_outliers(xsci, degree=4, sigma_lower=3, sigma_upper=1, grow=5)
+        xsky = polynomial_fit_with_outliers(xsky, degree=4, sigma_lower=3, sigma_upper=1, grow=5)
+        xsci['LINES'] = xsci['FLUX'] - xsci['CONT']
+        xsky['LINES'] = xsky['FLUX'] - xsky['CONT']
+
     # set bounds
     rmin = 0.5
     rmax = 1.5
@@ -1994,7 +1936,10 @@ def create_skysub_spectrum(hdu: fits.HDUList = None, sci_input: str = "SCI", sky
     )
 
     # create spectrum for sky subtraction using entire wavelength range
-    skysub = minimum * sky_tab["FLUX"]
+    if method == 'cont':
+        skysub = xsky['CONT'] + minimum * sky_tab["FLUX"]
+    else:
+        skysub = minimum * sky_tab["FLUX"]
 
     log.info(f"Results {minimum} with wmin {wmin} and wmax {wmax}.")
 
