@@ -817,15 +817,7 @@ def shift_wave_skylines(in_rss: str, out_rss: str, channel: str):
         figure_path="qa",
         label=f"skylineshift_{skylines[i]}")
     
-   
 
-    #mask[sel]=0
-    #hdu1=fits.PrimaryHDU(rss._data)
-    #hdu2=fits.ImageHDU(rss._wave)
-    #hdu3=fits.ImageHDU(mask)
-    #hdul=fits.HDUList([hdu1, hdu2, hdu3])
-    #hdul.writeto(f'junk_{channel}.fits', overwrite=True)
-    
 
 # TODO:
 # * merge arc_wave and arc_lsfs into lvmArc product, change variable name to in_arc
