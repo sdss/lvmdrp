@@ -1931,10 +1931,10 @@ def create_skysub_spectrum(hdu: fits.HDUList = None, sci_input: str = "SCI", sky
 
     # select wavelength range subset for bisection
     sci_subset = sci_tab[sci_tab["WAVE"] > wmin]
-    sci_subset = xsci[xsci["WAVE"] < wmax]
+    sci_subset = sci_subset[sci_subset["WAVE"] < wmax]
 
     sky_subset = sky_tab[sky_tab["WAVE"] > wmin]
-    sky_subset = xsky[xsky["WAVE"] < wmax]
+    sky_subset = sky_subset[sky_subset["WAVE"] < wmax]
 
     # set bounds
     rmin = 0.5
@@ -1953,7 +1953,9 @@ def create_skysub_spectrum(hdu: fits.HDUList = None, sci_input: str = "SCI", sky
     log.info(f"Results {minimum} with wmin {wmin} and wmax {wmax}.")
 
     # update the main sci_input hdu extension with new columns
-    hdu[sci_input] = fits.BinTableHDU(xsci, name=sci_input)
+    # if we updated the table with cont and lines info
+    if method == 'cont':
+        hdu[sci_input] = fits.BinTableHDU(xsci, name=sci_input)
 
     # plt.figure(1,(6,6))
     # plt.figure(1,(8,6))
