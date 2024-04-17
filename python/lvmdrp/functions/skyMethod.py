@@ -1670,9 +1670,13 @@ def quick_sky_subtraction(in_cframe, out_sframe, band=np.array((7238, 7242, 7074
     sky_input = "SKYW" if wsep < esep else 'SKYE'
 
     # create spectrum for sky subtraction
-    scisub = create_skysub_spectrum(sky_hdu, sci_input="SCI", sky_input=sky_input)
-    skyesub = create_skysub_spectrum(sky_hdu, sci_input="SKYE", sky_input="SKYE")
-    skywsub = create_skysub_spectrum(sky_hdu, sci_input="SKYW", sky_input="SKYW")
+    # scisub = create_skysub_spectrum(sky_hdu, sci_input="SCI", sky_input=sky_input)
+    # skyesub = create_skysub_spectrum(sky_hdu, sci_input="SKYE", sky_input="SKYE")
+    # skywsub = create_skysub_spectrum(sky_hdu, sci_input="SKYW", sky_input="SKYW")
+
+    scisub = create_skysub_spectrum2(sky_hdu, sci_input="SCI", sky_input=sky_input)
+    skyesub = create_skysub_spectrum2(sky_hdu, sci_input="SKYE", sky_input="SKYE")
+    skywsub = create_skysub_spectrum2(sky_hdu, sci_input="SKYW", sky_input="SKYW")
 
     # select correct fibers
     data = cframe._data
@@ -1835,6 +1839,114 @@ def prep_input_simplesky_mean(filename: str = None) -> fits.HDUList:
 
         return new
 
+
+
+
+def create_skysub_spectrum2(hdu: fits.HDUList = None, sci_input: str = "SCI", sky_input: str = "SKY",
+                           wmin: int = 3600, wmax: int = 9000) -> np.array:
+    """ Create spectrum for sky subtraction.  This version attemps a separation 
+    between the coniuum and the lines and fits the lines separately
+
+    _extended_summary_
+
+    Parameters
+    ----------
+    hdu : fits.HDUList, optional
+        the sky data from the lvmCFrame file, by default None
+    sci_input : str, optional
+        which extension to use as science, by default "SCI"
+    sky_input : str, optional
+        which extension to use as sky, by default "SKY"
+    wmin : int, optional
+        the wavelength minimum bound, by default 6200
+    wmax : int, optional
+        the wavelength maximum bound, by default 6450
+
+    Returns
+    -------
+    np.array
+        the output spectrum for sky subtraction
+    """
+    # get the science and sky data, convert to tables
+    sci = hdu[sci_input]
+    sky = hdu[sky_input]
+    sci_tab = Table(sci.data)
+    sky_tab = Table(sky.data)
+
+    # select wavelength range subset for bisection
+    xsci = sci_tab[sci_tab["WAVE"] > wmin]
+    xsci = xsci[xsci["WAVE"] < wmax]
+
+    xsky = sky_tab[sky_tab["WAVE"] > wmin]
+    xsky = xsky[xsky["WAVE"] < wmax]
+
+    xsci= polynomial_fit_with_outliers(xsci, degree=4, sigma_lower=3, sigma_upper=1, grow=5)
+    xsky= polynomial_fit_with_outliers(xsky, degree=4, sigma_lower=3, sigma_upper=1, grow=5)
+
+    xsci['LINES']=xsci['FLUX']-xsci['CONT']
+    xsky['LINES']=xsky['FLUX']-xsky['CONT']
+
+    rmin=0.5
+    rmax=1.5
+
+    minimum = ksl_bisection(
+        fit_func, rmin, rmax, tol=0.001, maxiter=8, args=(xsci["FLUX"], xsky["FLUX"])
+    )
+
+    # create spectrum for sky subtraction using entire wavelength range
+    skysub = xsky['CONT']+minimum * sky_tab["FLUX"]
+
+    log.info(f"Results {minimum} with wmin {wmin} and wmax {wmax}.")
+
+    return np.array(skysub)
+
+
+
+def polynomial_fit_with_outliers(spectrum_table, degree=3, sigma_lower=3, sigma_upper=3, grow=0, max_iter=10):
+    """
+    Perform a polynomial fit to the total spectrum while iteratively removing outliers.
+
+    Parameters:
+        spectrum_table (astropy.table.Table): Table containing columns for wavelength, total flux, line flux, and continuum flux.
+        degree (int): Degree of the polynomial fit.
+        sigma_lower (float): Lower sigma value for sigma-clipping to identify outliers.
+        sigma_upper (float): Upper sigma value for sigma-clipping to identify outliers.
+        grow (int): Number of pixels to grow the mask of clipped values.
+        max_iter (int): Maximum number of iterations for outlier removal.
+
+    Returns:
+        astropy.table.Table: Table containing columns for wavelength, total flux, line flux, continuum flux, fitted spectrum, and mask.
+    """
+    # Copy input spectrum table
+    output_table = spectrum_table.copy()
+
+    # Initial fit
+    coefficients = np.polyfit(spectrum_table['WAVE'], spectrum_table['FLUX'], degree)
+    fitted_flux = np.polyval(coefficients, spectrum_table['WAVE'])
+
+    # Iterate until convergence or max_iter
+    for _ in range(max_iter):
+        # Compute residuals
+        residuals = spectrum_table['FLUX'] - fitted_flux
+
+        # Perform sigma clipping
+        mask = sigma_clip(residuals, sigma_lower=sigma_lower, sigma_upper=sigma_upper, grow=grow).mask
+
+        # Update masked spectrum table
+        masked_spectrum = spectrum_table[~mask]
+
+        # Perform polynomial fit
+        coefficients = np.polyfit(masked_spectrum['WAVE'], masked_spectrum['FLUX'], degree)
+
+        # Evaluate polynomial fit on the wavelength grid
+        fitted_flux = np.polyval(coefficients, spectrum_table['WAVE'])
+
+    # Add fitted spectrum and mask columns to output table
+    output_table['CONT'] = fitted_flux
+    output_table['MASK'] = mask
+
+    return output_table
+    
 
 def create_skysub_spectrum(hdu: fits.HDUList = None, sci_input: str = "SCI", sky_input: str = "SKY",
                            wmin: int = 3600, wmax: int = 9000) -> np.array:
