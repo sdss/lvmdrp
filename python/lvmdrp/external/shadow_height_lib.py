@@ -1,5 +1,6 @@
 #!/usr/bin/python3
 import numpy as np
+import os
 import sys
 from astropy import units as u
 from skyfield.api import load
@@ -21,7 +22,8 @@ class shadow_calc(object):
 
         # Load the ephemeral datat for the earth and sun.
         if eph is None:
-            self.eph = load('de421.bsp')
+            sandbox = os.getenv("LVM_SANDBOX")
+            self.eph = load(sandbox + '/de421.bsp')
 
         # Get functions for the earth, sun and observatory
         self.earth = earth
