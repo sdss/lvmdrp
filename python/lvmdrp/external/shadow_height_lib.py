@@ -3,7 +3,7 @@ import numpy as np
 import os
 import sys
 from astropy import units as u
-from skyfield.api import load
+from skyfield.api import Loader
 from skyfield.api import Topos
 
 class shadow_calc(object):
@@ -22,8 +22,9 @@ class shadow_calc(object):
 
         # Load the ephemeral datat for the earth and sun.
         if eph is None:
-            sandbox = os.getenv("LVM_SANDBOX")
-            self.eph = load(sandbox + '/de421.bsp')
+            redux = os.getenv("LVM_SPECTRO_REDUX")
+            load = Loader(redux)
+            self.eph = load('de421.bsp')
 
         # Get functions for the earth, sun and observatory
         self.earth = earth
