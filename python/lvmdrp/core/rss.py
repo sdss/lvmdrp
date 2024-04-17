@@ -3292,15 +3292,12 @@ class lvmCFrame(RSS):
         mask = hdulist["MASK"].data
         wave = hdulist["WAVE"].data
         lsf = hdulist["LSF"].data
-        sky = hdulist["SKY"].data
-        sky_error = numpy.divide(1, hdulist["SKY_IVAR"].data, where=hdulist["SKY_IVAR"].data != 0, out=numpy.zeros_like(hdulist["SKY_IVAR"].data))
-        sky_error = numpy.sqrt(sky_error)
         sky_east = hdulist["SKY_EAST"].data
         sky_east_error = numpy.divide(1, hdulist["SKY_EAST_IVAR"].data, where=hdulist["SKY_EAST_IVAR"].data != 0, out=numpy.zeros_like(hdulist["SKY_EAST_IVAR"].data))
-        sky_east_error = numpy.sqrt(sky_error)
+        sky_east_error = numpy.sqrt(sky_east_error)
         sky_west = hdulist["SKY_WEST"].data
         sky_west_error = numpy.divide(1, hdulist["SKY_WEST_IVAR"].data, where=hdulist["SKY_WEST_IVAR"].data != 0, out=numpy.zeros_like(hdulist["SKY_WEST_IVAR"].data))
-        sky_west_error = numpy.sqrt(sky_error)
+        sky_west_error = numpy.sqrt(sky_west_error)
         slitmap = Table(hdulist["SLITMAP"].data)
         return cls(data=data, error=error, mask=mask, header=header,
                    wave=wave, lsf=lsf,
