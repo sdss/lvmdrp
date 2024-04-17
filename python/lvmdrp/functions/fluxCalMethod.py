@@ -176,16 +176,36 @@ def apply_fluxcal(in_rss: str, out_rss: str, skip_fluxcal: bool = False, display
         log.info("skipping flux calibration")
         rss._data /= exptimes[:, None]
         rss._error /= exptimes[:, None]
-        rss._sky /= exptimes[:, None]
-        rss._sky_error /= exptimes[:, None]
+        if rss._sky is not None:
+            rss._sky /= exptimes[:, None]
+        if rss._sky_error is not None:
+            rss._sky_error /= exptimes[:, None]
+        if rss._sky_east is not None:
+            rss._sky_east /= exptimes[:, None]
+        if rss._sky_east_error is not None:
+            rss._sky_east_error /= exptimes[:, None]
+        if rss._sky_west is not None:
+            rss._sky_west /= exptimes[:, None]
+        if rss._sky_west_error is not None:
+            rss._sky_west_error /= exptimes[:, None]
         rss.setHdrValue("FLUXCAL", False, "flux-calibrated?")
         rss.setHdrValue("BUNIT", "electron/s/A", "flux units")
     else:
         log.info("flux-calibrating data science and sky spectra")
         rss._data *= sens_ave * 10 ** (0.4 * ext * (sci_secz)) / exptimes[:, None]
         rss._error *= sens_ave * 10 ** (0.4 * ext * (sci_secz)) / exptimes[:, None]
-        rss._sky *= sens_ave * 10 ** (0.4 * ext * (sci_secz)) / exptimes[:, None]
-        rss._sky_error *= sens_ave * 10 ** (0.4 * ext * (sci_secz)) / exptimes[:, None]
+        if rss._sky is not None:
+            rss._sky *= sens_ave * 10 ** (0.4 * ext * (sci_secz)) / exptimes[:, None]
+        if rss._sky_error is not None:
+            rss._sky_error *= sens_ave * 10 ** (0.4 * ext * (sci_secz)) / exptimes[:, None]
+        if rss._sky_east is not None:
+            rss._sky_east *= sens_ave * 10 ** (0.4 * ext * (sci_secz)) / exptimes[:, None]
+        if rss._sky_east_error is not None:
+            rss._sky_east_error *= sens_ave * 10 ** (0.4 * ext * (sci_secz)) / exptimes[:, None]
+        if rss._sky_west is not None:
+            rss._sky_west *= sens_ave * 10 ** (0.4 * ext * (sci_secz)) / exptimes[:, None]
+        if rss._sky_west_error is not None:
+            rss._sky_west_error *= sens_ave * 10 ** (0.4 * ext * (sci_secz)) / exptimes[:, None]
 
     log.info(f"writing output file in {os.path.basename(out_rss)}")
     rss.writeFitsData(out_rss)

@@ -2933,6 +2933,8 @@ def join_spec_channels(in_rsss: List[str], out_rss: str, use_weights: bool = Tru
     cframe = lvmCFrame(data=new_rss._data, error=new_rss._error, mask=new_rss._mask, header=new_rss._header,
                        wave=new_rss._wave, lsf=new_rss._lsf,
                        sky=new_rss._sky, sky_error=new_rss._sky_error,
+                       sky_east=new_rss._sky_east, sky_east_error=new_rss._sky_east_error,
+                       sky_west=new_rss._sky_west, sky_west_error=new_rss._sky_west_error,
                        slitmap=new_rss._slitmap)
 
     # write output RSS

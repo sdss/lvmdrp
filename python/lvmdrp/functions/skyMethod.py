@@ -1511,9 +1511,13 @@ def combine_skies(in_rss: str, out_rss, sky_weights: Tuple[float, float] = None)
     log.info(f"writing output RSS file '{os.path.basename(out_rss)}'")
     rss.appendHeader(sky_e._header["SKYMODEL*"])
     rss.appendHeader(sky_e._header["GEOCORONAL*"])
-    rss.setHdrValue("SKYEW", w_e, "SkyE weight")
-    rss.setHdrValue("SKYWW", w_w, "SkyW weight")
-    rss.set_sky(rss_sky=sky)
+    rss.setHdrValue("SKYEW", w_e, "SkyE weight for STD star sky subtraction")
+    rss.setHdrValue("SKYWW", w_w, "SkyW weight for STD star sky subtraction")
+    rss.set_sky(sky_master=sky._data, sky_master_error=sky._error,
+                sky_east=sky_e._data, sky_east_error=sky_e._error,
+                sky_west=sky_w._data, sky_west_error=sky_w._error)
+    rss._supersky = None
+    rss._supersky_error = None
 
     # extract standard star metadata if exists
     std_acq = np.asarray(list(rss._header["STD*ACQ"].values()))

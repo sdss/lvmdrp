@@ -103,6 +103,8 @@ class RSS(FiberRows):
         wave, lsf = None, None
         cent_trace, width_trace = None, None
         sky, sky_error = None, None
+        sky_east, sky_east_error = None, None
+        sky_west, sky_west_error = None, None
         supersky, supersky_error = None, None
         fluxcal = None
         slitmap = None
@@ -131,6 +133,14 @@ class RSS(FiberRows):
                     sky = hdu.data.astype("float32")
                 if hdu.name == "SKY_ERROR":
                     sky_error = hdu.data.astype("float32")
+                if hdu.name == "SKY_EAST":
+                    sky_east = hdu.data.astype("float32")
+                if hdu.name == "SKY_EAST_ERROR":
+                    sky_east_error = hdu.data.astype("float32")
+                if hdu.name == "SKY_WEST":
+                    sky_west = hdu.data.astype("float32")
+                if hdu.name == "SKY_WEST_ERROR":
+                    sky_west_error = hdu.data.astype("float32")
                 if hdu.name == "SUPERSKY":
                     supersky = hdu
                 if hdu.name == "SUPERSKY_ERROR":
@@ -152,6 +162,10 @@ class RSS(FiberRows):
                 width_trace=width_trace,
                 sky=sky,
                 sky_error=sky_error,
+                sky_east=sky_east,
+                sky_east_error=sky_east_error,
+                sky_west=sky_west,
+                sky_west_error=sky_west_error,
                 supersky=supersky,
                 supersky_error=supersky_error,
                 header=header,
@@ -318,10 +332,11 @@ class RSS(FiberRows):
         sampling = numpy.diff(new_wave)
 
         # optionally interpolate if the merged wavelengths are not monotonic
+        fluxes, errors, masks, lsfs, skies, sky_errors = [], [], [], [], [], []
+        skies_e, skies_w, sky_e_errors, sky_w_errors = [], [], [], []
         if numpy.all(numpy.isclose(sampling, sampling[0])):
             log.info(f"current wavelength sampling: min = {sampling.min():.2f}, max = {sampling.max():.2f}")
             # extend rss._data to new_wave filling with NaNs
-            fluxes, errors, masks, lsfs, skies, sky_errors = [], [], [], [], [], []
             for rss in rsss:
                 rss = rss.extendData(new_wave)
                 fluxes.append(rss._data)
@@ -330,12 +345,20 @@ class RSS(FiberRows):
                 lsfs.append(rss._lsf)
                 skies.append(rss._sky)
                 sky_errors.append(rss._sky_error)
+                skies_e.append(rss._sky_east)
+                sky_e_errors.append(rss._sky_east_error)
+                skies_w.append(rss._sky_west)
+                sky_w_errors.append(rss._sky_west_error)
             fluxes = numpy.asarray(fluxes)
             errors = numpy.asarray(errors)
             masks = numpy.asarray(masks)
             lsfs = numpy.asarray(lsfs)
             skies = numpy.asarray(skies)
             sky_errors = numpy.asarray(sky_errors)
+            skies_e = numpy.asarray(skies_e)
+            sky_e_errors = numpy.asarray(sky_e_errors)
+            skies_w = numpy.asarray(skies_w)
+            sky_w_errors = numpy.asarray(sky_w_errors)
         else:
             log.warning("merged wavelengths are not monotonic, interpolation needed")
             # compute the combined wavelengths
@@ -345,7 +368,6 @@ class RSS(FiberRows):
 
             # define interpolators
             log.info("interpolating RSS data in new wavelength array")
-            fluxes, errors, masks, lsfs, skies, sky_errors = [], [], [], [], [], []
             for rss in rsss:
                 f = interpolate.interp1d(rss._wave, rss._data, axis=1, bounds_error=False, fill_value=numpy.nan)
                 fluxes.append(f(new_wave).astype("float32"))
@@ -359,12 +381,24 @@ class RSS(FiberRows):
                 skies.append(f(new_wave).astype("float32"))
                 f = interpolate.interp1d(rss._wave, rss._sky_error, axis=1, bounds_error=False, fill_value=numpy.nan)
                 sky_errors.append(f(new_wave).astype("float32"))
+                f = interpolate.interp1d(rss._wave, rss._sky_east, axis=1, bounds_error=False, fill_value=numpy.nan)
+                skies_e.append(f(new_wave).astype("float32"))
+                f = interpolate.interp1d(rss._wave, rss._sky_east_error, axis=1, bounds_error=False, fill_value=numpy.nan)
+                sky_e_errors.append(f(new_wave).astype("float32"))
+                f = interpolate.interp1d(rss._wave, rss._sky_west, axis=1, bounds_error=False, fill_value=numpy.nan)
+                skies_w.append(f(new_wave).astype("float32"))
+                f = interpolate.interp1d(rss._wave, rss._sky_west_error, axis=1, bounds_error=False, fill_value=numpy.nan)
+                sky_w_errors.append(f(new_wave).astype("float32"))
             fluxes = numpy.asarray(fluxes)
             errors = numpy.asarray(errors)
             masks = numpy.asarray(masks)
             lsfs = numpy.asarray(lsfs)
             skies = numpy.asarray(skies)
             sky_errors = numpy.asarray(sky_errors)
+            skies_e = numpy.asarray(skies_e)
+            sky_e_errors = numpy.asarray(sky_e_errors)
+            skies_w = numpy.asarray(skies_w)
+            sky_w_errors = numpy.asarray(sky_w_errors)
 
         # get overlapping ranges
         mask_overlap_br = (new_wave >= rss_r._wave[0]) & (new_wave <= rss_b._wave[-1])
@@ -395,6 +429,10 @@ class RSS(FiberRows):
             new_mask = numpy.sum(masks, axis=0).astype("bool")
             new_sky = bn.nansum(skies * weights, axis=0)
             new_sky_error = numpy.sqrt(bn.nansum(sky_errors ** 2 * weights ** 2, axis=0))
+            new_skye = bn.nansum(skies_e * weights, axis=0)
+            new_skye_error = numpy.sqrt(bn.nansum(sky_e_errors ** 2 * weights ** 2, axis=0))
+            new_skyw = bn.nansum(skies_w * weights, axis=0)
+            new_skyw_error = numpy.sqrt(bn.nansum(sky_w_errors ** 2 * weights ** 2, axis=0))
         else:
             # channel-combine RSS data
             new_data = bn.nanmean(fluxes, axis=0)
@@ -403,6 +441,10 @@ class RSS(FiberRows):
             new_mask = numpy.sum(masks, axis=0).astype("bool")
             new_sky = bn.nansum(skies, axis=0)
             new_sky_error = numpy.sqrt(bn.nanmean(sky_errors ** 2, axis=0))
+            new_skye = bn.nanmean(skies_e, axis=0)
+            new_skye_error = numpy.sqrt(bn.nanmean(sky_e_errors ** 2, axis=0))
+            new_skyw = bn.nanmean(skies_w, axis=0)
+            new_skyw_error = numpy.sqrt(bn.nanmean(sky_w_errors ** 2, axis=0))
 
         # create RSS
         new_hdr = rsss[0]._header.copy()
@@ -418,6 +460,10 @@ class RSS(FiberRows):
             mask=new_mask,
             sky=new_sky,
             sky_error=new_sky_error,
+            sky_east=new_skye,
+            sky_east_error=new_skye_error,
+            sky_west=new_skyw,
+            sky_west_error=new_skyw_error,
             header=new_hdr,
             slitmap=rsss[0]._slitmap
         )
@@ -504,6 +550,10 @@ class RSS(FiberRows):
         sky_error=None,
         supersky=None,
         supersky_error=None,
+        sky_east=None,
+        sky_east_error=None,
+        sky_west=None,
+        sky_west_error=None,
         shape=None,
         size=None,
         cent_trace=None,
@@ -532,14 +582,11 @@ class RSS(FiberRows):
             good_fibers,
             fiber_type,
         )
-        self._sky = None
-        self._sky_error = None
         self._supersky = None
         self._supersky_error = None
-        if sky is not None:
-            self._sky = sky
-        if sky_error is not None:
-            self._sky_error = sky_error
+        self.set_sky(sky_master=sky, sky_master_error=sky_error,
+                     sky_east=sky_east, sky_east_error=sky_east_error,
+                     sky_west=sky_west, sky_west_error=sky_west_error)
 
         # set fiber traces information if available
         self.set_cent_trace(cent_trace)
@@ -959,11 +1006,13 @@ class RSS(FiberRows):
 
         return wave, res_elements, wave_start, wave_disp
 
-    def set_sky(self, rss_sky):
-        assert rss_sky._data.shape == self._data.shape
-        self._sky = rss_sky._data
-        if rss_sky._error is not None:
-            self._sky_error = rss_sky._error
+    def set_sky(self, sky_master=None, sky_master_error=None, sky_east=None, sky_east_error=None, sky_west=None, sky_west_error=None):
+        self._sky_east = sky_east
+        self._sky_east_error = sky_east_error
+        self._sky_west = sky_west
+        self._sky_west_error = sky_west_error
+        self._sky = sky_master
+        self._sky_error = sky_master_error
 
     def get_sky(self):
         header = self._header
@@ -1623,6 +1672,10 @@ class RSS(FiberRows):
             mask=numpy.zeros((rss._fibers, wave.size), dtype="bool"),
             sky=numpy.zeros((rss._fibers, wave.size), dtype="float32") if rss._sky is not None else None,
             sky_error=numpy.zeros((rss._fibers, wave.size), dtype="float32") if rss._sky_error is not None else None,
+            sky_east=numpy.zeros((rss._fibers, wave.size), dtype="float32") if rss._sky_east is not None else None,
+            sky_east_error=numpy.zeros((rss._fibers, wave.size), dtype="float32") if rss._sky_east_error is not None else None,
+            sky_west=numpy.zeros((rss._fibers, wave.size), dtype="float32") if rss._sky_west is not None else None,
+            sky_west_error=numpy.zeros((rss._fibers, wave.size), dtype="float32") if rss._sky_west_error is not None else None,
             cent_trace=rss._cent_trace,
             width_trace=rss._width_trace,
             wave_trace=rss._wave_trace,
@@ -1640,6 +1693,7 @@ class RSS(FiberRows):
         else:
             raise ValueError(f"Invalid interpolation {method = }")
 
+        # fit and evaluate interpolators
         for ifiber in range(rss._fibers):
             f = interpolate.interp1d(rss._wave[ifiber], rss._data[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
             new_rss._data[ifiber] = f(wave).astype("float32")
@@ -1653,6 +1707,22 @@ class RSS(FiberRows):
             if rss._sky_error is not None:
                 f = interpolate.interp1d(rss._wave[ifiber], rss._sky_error[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
                 new_rss._sky_error[ifiber] = f(wave).astype("float32")
+            if rss._sky_east is not None:
+                f = interpolate.interp1d(rss._wave[ifiber], rss._sky_east[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
+                new_rss._sky_east[ifiber] = f(wave).astype("float32")
+            if rss._sky_east_error is not None:
+                f = interpolate.interp1d(rss._wave[ifiber], rss._sky_east_error[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
+                new_rss._sky_east_error[ifiber] = f(wave).astype("float32")
+            if rss._sky_west is not None:
+                f = interpolate.interp1d(rss._wave[ifiber], rss._sky_west[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
+                new_rss._sky_west[ifiber] = f(wave).astype("float32")
+            if rss._sky_west_error is not None:
+                f = interpolate.interp1d(rss._wave[ifiber], rss._sky_west_error[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
+                new_rss._sky_west_error[ifiber] = f(wave).astype("float32")
+        # add supersky information if available
+        if rss._supersky is not None:
+            new_rss.set_supersky(rss._supersky)
+            new_rss.set_supersky_error(rss._supersky_error)
 
         if not return_density:
             dlambda = numpy.gradient(wave)
@@ -1662,6 +1732,14 @@ class RSS(FiberRows):
                 new_rss._sky *= dlambda
             if new_rss._sky_error is not None:
                 new_rss._sky_error *= dlambda
+            if new_rss._sky_east is not None:
+                new_rss._sky_east *= dlambda
+            if new_rss._sky_east_error is not None:
+                new_rss._sky_east_error *= dlambda
+            if new_rss._sky_west is not None:
+                new_rss._sky_west *= dlambda
+            if new_rss._sky_west_error is not None:
+                new_rss._sky_west_error *= dlambda
             new_rss._header["BUNIT"] = unit.replace("/angstrom", "")
 
         return new_rss
@@ -1752,6 +1830,18 @@ class RSS(FiberRows):
             if rss._sky_error is not None:
                 f = interpolate.interp1d(rss._wave, rss._sky_error[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
                 new_rss._sky_error[ifiber] = f(wave[ifiber]).astype("float32")
+            if rss._sky_east is not None:
+                f = interpolate.interp1d(rss._wave, rss._sky_east[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
+                new_rss._sky_east[ifiber] = f(wave[ifiber]).astype("float32")
+            if rss._sky_east_error is not None:
+                f = interpolate.interp1d(rss._wave, rss._sky_east_error[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
+                new_rss._sky_east_error[ifiber] = f(wave[ifiber]).astype("float32")
+            if rss._sky_west is not None:
+                f = interpolate.interp1d(rss._wave, rss._sky_west[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
+                new_rss._sky_west[ifiber] = f(wave[ifiber]).astype("float32")
+            if rss._sky_west_error is not None:
+                f = interpolate.interp1d(rss._wave, rss._sky_west_error[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
+                new_rss._sky_west_error[ifiber] = f(wave[ifiber]).astype("float32")
 
         if not return_density:
             dlambda = numpy.gradient(wave, axis=1)
@@ -1761,6 +1851,14 @@ class RSS(FiberRows):
                 new_rss._sky *= dlambda
             if new_rss._sky_error is not None:
                 new_rss._sky_error *= dlambda
+            if new_rss._sky_east is not None:
+                new_rss._sky_east *= dlambda
+            if new_rss._sky_east_error is not None:
+                new_rss._sky_east_error *= dlambda
+            if new_rss._sky_west is not None:
+                new_rss._sky_west *= dlambda
+            if new_rss._sky_west_error is not None:
+                new_rss._sky_west_error *= dlambda
             new_rss._header["BUNIT"] = unit.replace("/angstrom", "")
 
         return new_rss
@@ -3061,6 +3159,14 @@ class RSS(FiberRows):
             hdus.append(pyfits.ImageHDU(self._sky.astype("float32"), name="SKY"))
         if self._sky_error is not None:
             hdus.append(pyfits.ImageHDU(self._sky_error.astype("float32"), name="SKY_ERROR"))
+        if self._sky_east is not None:
+            hdus.append(pyfits.ImageHDU(self._sky_east.astype("float32"), name="SKY_EAST"))
+        if self._sky_east_error is not None:
+            hdus.append(pyfits.ImageHDU(self._sky_east_error.astype("float32"), name="SKY_EAST_ERROR"))
+        if self._sky_west is not None:
+            hdus.append(pyfits.ImageHDU(self._sky_west.astype("float32"), name="SKY_WEST"))
+        if self._sky_west_error is not None:
+            hdus.append(pyfits.ImageHDU(self._sky_west_error.astype("float32"), name="SKY_WEST_ERROR"))
         if self._supersky is not None:
             hdus.append(pyfits.BinTableHDU(self._supersky, name="SUPERSKY"))
         if self._supersky_error is not None:
@@ -3189,19 +3295,32 @@ class lvmCFrame(RSS):
         sky = hdulist["SKY"].data
         sky_error = numpy.divide(1, hdulist["SKY_IVAR"].data, where=hdulist["SKY_IVAR"].data != 0, out=numpy.zeros_like(hdulist["SKY_IVAR"].data))
         sky_error = numpy.sqrt(sky_error)
+        sky_east = hdulist["SKY_EAST"].data
+        sky_east_error = numpy.divide(1, hdulist["SKY_EAST_IVAR"].data, where=hdulist["SKY_EAST_IVAR"].data != 0, out=numpy.zeros_like(hdulist["SKY_EAST_IVAR"].data))
+        sky_east_error = numpy.sqrt(sky_error)
+        sky_west = hdulist["SKY_WEST"].data
+        sky_west_error = numpy.divide(1, hdulist["SKY_WEST_IVAR"].data, where=hdulist["SKY_WEST_IVAR"].data != 0, out=numpy.zeros_like(hdulist["SKY_WEST_IVAR"].data))
+        sky_west_error = numpy.sqrt(sky_error)
         slitmap = Table(hdulist["SLITMAP"].data)
         return cls(data=data, error=error, mask=mask, header=header,
                    wave=wave, lsf=lsf,
-                   sky=sky, sky_error=sky_error, slitmap=slitmap)
+                   sky=sky, sky_error=sky_error,
+                   sky_east=sky_east, sky_east_error=sky_east_error,
+                   sky_west=sky_west, sky_west_error=sky_west_error,
+                   slitmap=slitmap)
 
     @classmethod
     def from_file(cls, in_file):
         with pyfits.open(in_file) as hdulist:
             return cls.from_hdulist(hdulist)
 
-    def __init__(self, data=None, error=None, mask=None, header=None, slitmap=None, wave=None, lsf=None, sky=None, sky_error=None, **kwargs):
+    def __init__(self, data=None, error=None, mask=None, header=None, slitmap=None, wave=None, lsf=None,
+                 sky=None, sky_error=None, sky_east=None, sky_east_error=None, sky_west=None, sky_west_error=None, **kwargs):
         RSS.__init__(self, data=data, error=error, mask=mask, header=header,
-                     sky=sky, sky_error=sky_error, slitmap=slitmap)
+                     sky=sky, sky_error=sky_error,
+                     sky_east=sky_east, sky_east_error=sky_east_error,
+                     sky_west=sky_west, sky_west_error=sky_west_error,
+                     slitmap=slitmap)
 
         self.set_wave_array(wave)
         self.set_lsf_array(lsf)
@@ -3257,6 +3376,10 @@ class lvmCFrame(RSS):
         self._template["LSF"].data = self._lsf
         self._template["SKY"].data = self._sky
         self._template["SKY_IVAR"].data = numpy.divide(1, self._sky_error**2, where=self._sky_error != 0, out=numpy.zeros_like(self._sky_error))
+        self._template["SKY_EAST"].data = self._sky_east
+        self._template["SKY_EAST_IVAR"].data = numpy.divide(1, self._sky_east_error**2, where=self._sky_east_error != 0, out=numpy.zeros_like(self._sky_east_error))
+        self._template["SKY_WEST"].data = self._sky_west
+        self._template["SKY_WEST_IVAR"].data = numpy.divide(1, self._sky_west_error**2, where=self._sky_west_error != 0, out=numpy.zeros_like(self._sky_west_error))
         self._template["SLITMAP"] = pyfits.BinTableHDU(data=self._slitmap, name="SLITMAP")
         # write template
         self._template.writeto(out_file, overwrite=True)
@@ -3276,12 +3399,21 @@ class lvmFFrame(RSS):
         lsf_trace = Table(hdulist["LSF_TRACE"].data)
         sky = hdulist["SKY"].data
         sky_error = numpy.divide(1, hdulist["SKY_IVAR"].data, where=hdulist["SKY_IVAR"].data != 0, out=numpy.zeros_like(hdulist["SKY_IVAR"].data))
+        sky_east = hdulist["SKY_EAST"].data
+        sky_east_error = numpy.divide(1, hdulist["SKY_EAST_IVAR"].data, where=hdulist["SKY_EAST_IVAR"].data != 0, out=numpy.zeros_like(hdulist["SKY_EAST_IVAR"].data))
+        sky_east_error = numpy.sqrt(sky_error)
+        sky_west = hdulist["SKY_WEST"].data
+        sky_west_error = numpy.divide(1, hdulist["SKY_WEST_IVAR"].data, where=hdulist["SKY_WEST_IVAR"].data != 0, out=numpy.zeros_like(hdulist["SKY_WEST_IVAR"].data))
+        sky_west_error = numpy.sqrt(sky_error)
         sky_error = numpy.sqrt(sky_error)
         fluxcal = Table(hdulist["FLUXCAL"].data)
         slitmap = Table(hdulist["SLITMAP"].data)
         return cls(data=data, error=error, mask=mask, header=header,
                    wave=wave, lsf_trace=lsf_trace,
-                   sky=sky, sky_error=sky_error, fluxcal=fluxcal, slitmap=slitmap)
+                   sky=sky, sky_error=sky_error,
+                   sky_east=sky_east, sky_east_error=sky_east_error,
+                   sky_west=sky_west, sky_west_error=sky_west_error,
+                   fluxcal=fluxcal, slitmap=slitmap)
 
     def __init__(self, data=None, error=None, mask=None, header=None, wave=None, lsf_trace=None, fluxcal=None, slitmap=None, **kwargs):
         RSS.__init__(self, data=data, error=error, mask=mask, header=header,
