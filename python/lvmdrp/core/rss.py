@@ -826,6 +826,30 @@ class RSS(FiberRows):
         if self._sky_error is not None and spec._sky_error is not None:
             self._sky_error[fiber] = spec._sky_error
 
+    def eval_wcs(self, wave=None, data=None):
+        """Returns the WCS object from the current wavelength and fibers arrays"""
+        wave = wave or self._wave
+        data = data or self._data
+
+        if wave is not None and len(wave.shape) == 1:
+            wcs = WCS(header={"NAXIS": 2, "NAXIS1": data.shape[1], "NAXIS2": data.shape[0],
+                              "CDELT1": wave[1]-wave[0],
+                              "CRVAL1": wave[0],
+                              "CUNIT1": "Angstrom", "CTYPE1": "WAVE", "CRPIX1": 1,
+                              "CDELT2": 1,
+                              "CRVAL2": 1,
+                              "CUNIT2": "", "CTYPE2": "FIBERID", "CRPIX2": 1})
+        elif len(wave.shape) == 2:
+            wcs = WCS(header={"NAXIS": 2, "NAXIS1": data.shape[1], "NAXIS2": data.shape[0],
+                              "CDELT1": 1,
+                              "CRVAL1": 1,
+                              "CUNIT1": "", "CTYPE1": "XAXIS", "CRPIX1": 1,
+                              "CDELT2": 1,
+                              "CRVAL2": 1,
+                              "CUNIT2": "", "CTYPE2": "FIBERID", "CRPIX2": 1})
+
+        return wcs
+
     def set_cent_trace(self, cent_trace):
         self._cent_trace = self._trace_to_coeff_table(cent_trace)
         return self._cent_trace
@@ -3172,6 +3196,8 @@ class lvmFrame(RSS):
         self._template["WIDTH_TRACE"] = pyfits.BinTableHDU(data=self._width_trace, name="WIDTH_TRACE")
         self._template["SUPERFLAT"].data = self._superflat
         self._template["SLITMAP"] = pyfits.BinTableHDU(data=self._slitmap, name="SLITMAP")
+        # update header information with the WCS
+        [hdu.header.update(self.eval_wcs().to_header()) for hdu in self._template if hdu.is_image and hdu.name != "PRIMARY"]
         self._template.writeto(out_file, overwrite=True)
 
 
@@ -3259,7 +3285,8 @@ class lvmCFrame(RSS):
         self._template["SKY"].data = self._sky
         self._template["SKY_IVAR"].data = numpy.divide(1, self._sky_error**2, where=self._sky_error != 0, out=numpy.zeros_like(self._sky_error))
         self._template["SLITMAP"] = pyfits.BinTableHDU(data=self._slitmap, name="SLITMAP")
-        # write template
+        # update header information with the WCS
+        [hdu.header.update(self.eval_wcs().to_header()) for hdu in self._template if hdu.is_image and hdu.name != "PRIMARY"]
         self._template.writeto(out_file, overwrite=True)
 
 
@@ -3352,7 +3379,8 @@ class lvmFFrame(RSS):
         self._template["SKY_IVAR"].data = numpy.divide(1, self._sky_error**2, where=self._sky_error != 0, out=numpy.zeros_like(self._sky_error))
         self._template["FLUXCAL"] = pyfits.BinTableHDU(data=self._fluxcal, name="FLUXCAL")
         self._template["SLITMAP"] = pyfits.BinTableHDU(data=self._slitmap, name="SLITMAP")
-        # write template
+        # update header information with the WCS
+        [hdu.header.update(self.eval_wcs().to_header()) for hdu in self._template if hdu.is_image and hdu.name != "PRIMARY"]
         self._template.writeto(out_file, overwrite=True)
 
 
@@ -3439,7 +3467,8 @@ class lvmSFrame(RSS):
         self._template["SKY"].data = self._sky.astype("float32")
         self._template["SKY_IVAR"].data = numpy.divide(1, self._sky_error**2, where=self._sky_error != 0, out=numpy.zeros_like(self._sky_error))
         self._template["SLITMAP"] = pyfits.BinTableHDU(data=self._slitmap, name="SLITMAP")
-        # write template
+        # update header information with the WCS
+        [hdu.header.update(self.eval_wcs().to_header()) for hdu in self._template if hdu.is_image and hdu.name != "PRIMARY"]
         self._template.writeto(out_file, overwrite=True)
 
 
