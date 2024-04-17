@@ -52,36 +52,26 @@ hdu5:
   is_image: true
   shape: NWAVE x NFIBER
 hdu6:
-  name: SKY
-  description: sky in flux-calibrated units (10(-17) erg/s/cm2/Ang/fiber)
-  is_image: true
-  shape: NWAVE x NFIBER
-hdu7:
-  name: SKY_IVAR
-  description: sky inverse variance (1/sigma^2) in flux-calibrated units (10(-17) erg/s/cm2/Ang/fiber)
-  is_image: true
-  shape: NWAVE x NFIBER
-hdu8:
   name: SKY_EAST
   description: sky east in flux-calibrated units (10(-17) erg/s/cm2/Ang/fiber)
   is_image: true
   shape: NWAVE x NFIBER
-hdu9:
+hdu7:
   name: SKY_EAST_IVAR
   description: sky east inverse variance (1/sigma^2) in flux-calibrated units (10(-17) erg/s/cm2/Ang/fiber)
   is_image: true
   shape: NWAVE x NFIBER
-hdu10:
+hdu8:
   name: SKY_WEST
   description: sky west in flux-calibrated units (10(-17) erg/s/cm2/Ang/fiber)
   is_image: true
   shape: NWAVE x NFIBER
-hdu11:
+hdu9:
   name: SKY_WEST_IVAR
   description: sky west inverse variance (1/sigma^2) in flux-calibrated units (10(-17) erg/s/cm2/Ang/fiber)
   is_image: true
   shape: NWAVE x NFIBER
-hdu12:
+hdu10:
   name: SLITMAP
   description: slitmap table describing fiber positions for this exposure
   is_image: false

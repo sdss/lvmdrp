@@ -302,7 +302,8 @@ def fluxcal_Gaia(channel, in_rss, plot=True, GAIA_CACHE_DIR=None):
             continue
 
         # subtract sky spectrum and divide by exptime
-        spec = (rss._data[fibidx[0],:] - rss._sky[fibidx[0],:])/exptime
+        master_sky = rss.eval_master_sky()
+        spec = (rss._data[fibidx[0],:] - master_sky._data[fibidx[0],:])/exptime
 
         # interpolate over bright sky lines
         spec = ancillary_func.interpolate_mask(w, spec, m, fill_value="extrapolate")

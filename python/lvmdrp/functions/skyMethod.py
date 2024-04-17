@@ -1513,8 +1513,7 @@ def combine_skies(in_rss: str, out_rss, sky_weights: Tuple[float, float] = None)
     rss.appendHeader(sky_e._header["GEOCORONAL*"])
     rss.setHdrValue("SKYEW", w_e, "SkyE weight for STD star sky subtraction")
     rss.setHdrValue("SKYWW", w_w, "SkyW weight for STD star sky subtraction")
-    rss.set_sky(sky_master=sky._data, sky_master_error=sky._error,
-                sky_east=sky_e._data, sky_east_error=sky_e._error,
+    rss.set_sky(sky_east=sky_e._data, sky_east_error=sky_e._error,
                 sky_west=sky_w._data, sky_west_error=sky_w._error)
     rss._supersky = None
     rss._supersky_error = None
@@ -1560,8 +1559,10 @@ def quick_sky_subtraction(in_cframe, out_sframe, band=np.array((7238,7242,7074,7
     wave = cframe._wave
     flux = cframe._data
     error = cframe._error
-    sky = cframe._sky
-    sky_error = cframe._sky_error
+
+    master_sky = cframe.eval_master_sky()
+    sky = master_sky._data
+    sky_error = master_sky._error
 
     crval = wave[0]
     cdelt = wave[1] - wave[0]
