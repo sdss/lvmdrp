@@ -3370,9 +3370,8 @@ class lvmCFrame(RSS):
             return cls.from_hdulist(hdulist)
 
     def __init__(self, data=None, error=None, mask=None, header=None, slitmap=None, wave=None, lsf=None,
-                 sky=None, sky_error=None, sky_east=None, sky_east_error=None, sky_west=None, sky_west_error=None, **kwargs):
+                 sky_east=None, sky_east_error=None, sky_west=None, sky_west_error=None, **kwargs):
         RSS.__init__(self, data=data, error=error, mask=mask, header=header,
-                     sky=sky, sky_error=sky_error,
                      sky_east=sky_east, sky_east_error=sky_east_error,
                      sky_west=sky_west, sky_west_error=sky_west_error,
                      slitmap=slitmap)
