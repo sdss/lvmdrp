@@ -3445,30 +3445,35 @@ class lvmFFrame(RSS):
         error = numpy.sqrt(error)
         mask = hdulist["MASK"].data
         wave = hdulist["WAVE"].data
-        lsf_trace = Table(hdulist["LSF_TRACE"].data)
-        sky = hdulist["SKY"].data
-        sky_error = numpy.divide(1, hdulist["SKY_IVAR"].data, where=hdulist["SKY_IVAR"].data != 0, out=numpy.zeros_like(hdulist["SKY_IVAR"].data))
+        lsf = hdulist["LSF"].data
         sky_east = hdulist["SKY_EAST"].data
         sky_east_error = numpy.divide(1, hdulist["SKY_EAST_IVAR"].data, where=hdulist["SKY_EAST_IVAR"].data != 0, out=numpy.zeros_like(hdulist["SKY_EAST_IVAR"].data))
-        sky_east_error = numpy.sqrt(sky_error)
+        sky_east_error = numpy.sqrt(sky_east_error)
         sky_west = hdulist["SKY_WEST"].data
         sky_west_error = numpy.divide(1, hdulist["SKY_WEST_IVAR"].data, where=hdulist["SKY_WEST_IVAR"].data != 0, out=numpy.zeros_like(hdulist["SKY_WEST_IVAR"].data))
-        sky_west_error = numpy.sqrt(sky_error)
-        sky_error = numpy.sqrt(sky_error)
+        sky_west_error = numpy.sqrt(sky_west_error)
         fluxcal = Table(hdulist["FLUXCAL"].data)
         slitmap = Table(hdulist["SLITMAP"].data)
         return cls(data=data, error=error, mask=mask, header=header,
-                   wave=wave, lsf_trace=lsf_trace,
-                   sky=sky, sky_error=sky_error,
+                   wave=wave, lsf=lsf,
                    sky_east=sky_east, sky_east_error=sky_east_error,
                    sky_west=sky_west, sky_west_error=sky_west_error,
                    fluxcal=fluxcal, slitmap=slitmap)
 
-    def __init__(self, data=None, error=None, mask=None, header=None, wave=None, lsf_trace=None, fluxcal=None, slitmap=None, **kwargs):
-        RSS.__init__(self, data=data, error=error, mask=mask, header=header,
-                     lsf_trace=lsf_trace, fluxcal=fluxcal, slitmap=slitmap)
+    @classmethod
+    def from_file(cls, in_file):
+        with pyfits.open(in_file) as hdulist:
+            return cls.from_hdulist(hdulist)
 
-        self.set_wave_array(wave)
+    def __init__(self, data=None, error=None, mask=None, header=None, wave=None, lsf=None,
+                 sky_east=None, sky_east_error=None,
+                 sky_west=None, sky_west_error=None,
+                 fluxcal=None, slitmap=None, **kwargs):
+        RSS.__init__(self, data=data, error=error, mask=mask, header=header,
+                     wave=wave, lsf=lsf,
+                     sky_east=sky_east, sky_east_error=sky_east_error,
+                     sky_west=sky_west, sky_west_error=sky_west_error,
+                     fluxcal=fluxcal, slitmap=slitmap)
 
         self._blueprint = dp.load_blueprint(name="lvmFFrame")
         self._template = dp.dump_template(dataproduct_bp=self._blueprint, save=False)
@@ -3503,17 +3508,8 @@ class lvmFFrame(RSS):
         return self._header
 
     def loadFitsData(self, in_file):
-        with pyfits.open(in_file) as f:
-            self._data = f["FLUX"].data
-            self._error = numpy.divide(1, f["IVAR"].data, where=f["IVAR"].data != 0, out=numpy.zeros_like(f["IVAR"].data))
-            self._error = numpy.sqrt(self._error)
-            self._mask = f["MASK"].data.astype("bool")
-            self._wave = f["WAVE"].data.astype("float32")
-            self._slitmap = Table(f["SLITMAP"].data)
-            self._header = f["PRIMARY"].header
-            for kw in ["BUNIT", "BSCALE", "BZERO"]:
-                if kw in f["FLUX"].header:
-                    self._header[kw] = f["FLUX"].header.get(kw)
+        self = lvmFFrame.from_file(in_file)
+        return self
 
     def writeFitsData(self, out_file):
         # update flux header
@@ -3527,9 +3523,11 @@ class lvmFFrame(RSS):
         self._template["IVAR"].data = numpy.divide(1, self._error**2, where=self._error != 0, out=numpy.zeros_like(self._error))
         self._template["MASK"].data = self._mask.astype("uint8")
         self._template["WAVE"].data = self._wave
-        self._template["LSF_TRACE"] = pyfits.BinTableHDU(self._lsf_trace, name="LSF_TRACE")
-        self._template["SKY"].data = self._sky.astype("float32")
-        self._template["SKY_IVAR"].data = numpy.divide(1, self._sky_error**2, where=self._sky_error != 0, out=numpy.zeros_like(self._sky_error))
+        self._template["LSF"].data = self._lsf
+        self._template["SKY_EAST"].data = self._sky_east
+        self._template["SKY_EAST_IVAR"].data = numpy.divide(1, self._sky_east_error**2, where=self._sky_east_error != 0, out=numpy.zeros_like(self._sky_east_error))
+        self._template["SKY_WEST"].data = self._sky_west
+        self._template["SKY_WEST_IVAR"].data = numpy.divide(1, self._sky_west_error**2, where=self._sky_west_error != 0, out=numpy.zeros_like(self._sky_west_error))
         self._template["FLUXCAL"] = pyfits.BinTableHDU(data=self._fluxcal, name="FLUXCAL")
         self._template["SLITMAP"] = pyfits.BinTableHDU(data=self._slitmap, name="SLITMAP")
         # write template
