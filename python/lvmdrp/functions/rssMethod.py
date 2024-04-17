@@ -28,7 +28,7 @@ from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.core.image import loadImage
 from lvmdrp.core.passband import PassBand
 from lvmdrp.core.plot import plt, create_subplots, save_fig, plot_wavesol_residuals, plot_wavesol_coeffs
-from lvmdrp.core.rss import RSS, _read_pixwav_map, loadRSS, lvmFrame, lvmCFrame
+from lvmdrp.core.rss import RSS, _read_pixwav_map, loadRSS, lvmFrame, lvmFFrame, lvmCFrame
 from lvmdrp.core.spectrum1d import Spectrum1D, _spec_from_lines, _cross_match
 from lvmdrp.external import ancillary_func
 from lvmdrp.utils import flatten
@@ -2898,7 +2898,7 @@ def stack_spectrographs(in_rsss: List[str], out_rss: str) -> RSS:
     return rss_out
 
 
-def join_spec_channels(in_rsss: List[str], out_rss: str, use_weights: bool = True):
+def join_spec_channels(in_fframes: List[str], out_cframe: str, use_weights: bool = True):
     """Stitch together the three RSS channels (brz) into a single RSS.
 
     Given a list of three rss files (one per channel), this function
@@ -2922,23 +2922,24 @@ def join_spec_channels(in_rsss: List[str], out_rss: str, use_weights: bool = Tru
     """
 
     # read all three channels
-    log.info(f"loading RSS files: {', '.join([os.path.basename(in_rss) for in_rss in in_rsss])}")
-    rsss = [loadRSS(in_rss) for in_rss in in_rsss]
+    log.info(f"loading RSS files: {', '.join([os.path.basename(in_rss) for in_rss in in_fframes])}")
+    fframes = [lvmFFrame.from_file(in_rss) for in_rss in in_fframes]
     # set masked pixels to NaN
-    [rss.apply_pixelmask() for rss in rsss]
+    [fframe.apply_pixelmask() for fframe in fframes]
 
     # combine channels
-    new_rss = RSS.from_channels(*rsss, use_weights=use_weights)
+    new_rss = RSS.from_channels(*fframes, use_weights=use_weights)
 
     cframe = lvmCFrame(data=new_rss._data, error=new_rss._error, mask=new_rss._mask, header=new_rss._header,
                        wave=new_rss._wave, lsf=new_rss._lsf,
-                       sky=new_rss._sky, sky_error=new_rss._sky_error,
+                       sky_east=new_rss._sky_east, sky_east_error=new_rss._sky_east_error,
+                       sky_west=new_rss._sky_west, sky_west_error=new_rss._sky_west_error,
                        slitmap=new_rss._slitmap)
 
     # write output RSS
-    if out_rss is not None:
-        log.info(f"writing output RSS to {os.path.basename(out_rss)}")
-        cframe.writeFitsData(out_rss)
+    if out_cframe is not None:
+        log.info(f"writing output RSS to {os.path.basename(out_cframe)}")
+        cframe.writeFitsData(out_cframe)
 
     return cframe
 

@@ -1,8 +1,9 @@
 #!/usr/bin/python3
 import numpy as np
+import os
 import sys
 from astropy import units as u
-from skyfield.api import load
+from skyfield.api import Loader
 from skyfield.api import Topos
 
 class shadow_calc(object):
@@ -21,6 +22,8 @@ class shadow_calc(object):
 
         # Load the ephemeral datat for the earth and sun.
         if eph is None:
+            redux = os.getenv("LVM_SPECTRO_REDUX")
+            load = Loader(redux)
             self.eph = load('de421.bsp')
 
         # Get functions for the earth, sun and observatory
@@ -340,6 +343,8 @@ def test_shadow_calc():
 
     compare_old = True
     if compare_old:
+        redux = os.getenv("LVM_SPECTRO_REDUX")
+        load = Loader(redux)
         eph = load('de421.bsp')
         import lvmsurveysim.utils.iterative_shadow_height_lib as iterative_shadow_height_lib
         iter_calc = iterative_shadow_height_lib.shadow_calc(observatory_name='LCO',

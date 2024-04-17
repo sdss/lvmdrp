@@ -1576,9 +1576,12 @@ def combine_skies(in_rss: str, out_rss, sky_weights: Tuple[float, float] = None)
     log.info(f"writing output RSS file '{os.path.basename(out_rss)}'")
     rss.appendHeader(sky_e._header["SKYMODEL*"])
     rss.appendHeader(sky_e._header["GEOCORONAL*"])
-    rss.setHdrValue("SKYEW", w_e, "SkyE weight")
-    rss.setHdrValue("SKYWW", w_w, "SkyW weight")
-    rss.set_sky(rss_sky=sky)
+    rss.setHdrValue("SKYEW", w_e, "SkyE weight for STD star sky subtraction")
+    rss.setHdrValue("SKYWW", w_w, "SkyW weight for STD star sky subtraction")
+    rss.set_sky(sky_east=sky_e._data, sky_east_error=sky_e._error,
+                sky_west=sky_w._data, sky_west_error=sky_w._error)
+    rss._supersky = None
+    rss._supersky_error = None
 
     # extract standard star metadata if exists
     std_acq = np.asarray(list(rss._header["STD*ACQ"].values()))
@@ -1607,8 +1610,11 @@ def combine_skies(in_rss: str, out_rss, sky_weights: Tuple[float, float] = None)
         }
         log.info(f"correction factors for standard star: {std_fac}")
         # apply factors to standard star sky
-        rss._sky[std_idx] *= np.asarray(list(std_fac.values()))[:, None]
-        rss._sky_error[std_idx] *= np.asarray(list(std_fac.values()))[:, None]
+        exptime_factors = np.asarray(list(std_fac.values()))[:, None]
+        rss._sky_east[std_idx] *= exptime_factors
+        rss._sky_east_error[std_idx] *= exptime_factors
+        rss._sky_west[std_idx] *= exptime_factors
+        rss._sky_west_error[std_idx] *= exptime_factors
 
     rss.writeFitsData(out_rss)
 

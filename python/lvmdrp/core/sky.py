@@ -748,4 +748,8 @@ def get_telescope_shadowheight(header, telescope):
 
     shadow_height = SH_CALCULATOR.get_heights()[0]
 
-    return shadow_height
+    # check if the shadow height is a nan value
+    isnan = np.isnan(shadow_height)
+
+    # return None or the valid value
+    return None if isnan else shadow_height
