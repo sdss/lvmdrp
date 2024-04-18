@@ -11,7 +11,6 @@ from astropy.table import Table
 from astropy.io import fits as pyfits
 from astropy.modeling import fitting, models
 from astropy.stats.biweight import biweight_location, biweight_scale
-from astropy.visualization import simple_norm
 from scipy import ndimage, signal
 from scipy import interpolate
 
@@ -1309,17 +1308,17 @@ class Image(Header):
 
     def replaceMaskMedian(self, box_x, box_y, replace_error=1e20):
         """
-            Replace bad pixels with the median value of pixel in a rectangular filter window 
-            
+            Replace bad pixels with the median value of pixel in a rectangular filter window
+
             Parameters
             --------------
             box_x : int
                 Pixel size of filter window in x direction
-            box_y : int 
+            box_y : int
                 Pixel size of filter window in y direction
             replace_error : float, optional with default: None
                 Error that should be set for bad pixel
-                
+
             Returns
             -----------
             new_image :  Image object
@@ -1331,20 +1330,20 @@ class Image(Header):
 
         idx = numpy.indices(self._dim)  # create an index array
         # get x and y coordinates of bad pixels
-        
+
         y_cors = idx[0][self._mask]
         x_cors = idx[1][self._mask]
-        
+
         out_data = self._data
         out_error = self._error
-        
+
         # esimate the pixel distance form the bad pixel to the filter window boundary
         delta_x = numpy.ceil(box_x/2.0)
         delta_y = numpy.ceil(box_y/2.0)
-        
+
         # iterate over bad pixels
         for m in range(len(y_cors)):
-            # computes the min and max pixels of the filter window in x and y 
+            # computes the min and max pixels of the filter window in x and y
             range_y = numpy.clip([y_cors[m]-delta_y, y_cors[m]+delta_y+1], 0, self._dim[0]-1).astype(numpy.uint16)
             range_x = (numpy.clip([x_cors[m]-delta_x, x_cors[m]+delta_x+1], 0, self._dim[1]-1)).astype(numpy.uint16)
             # compute the masked median within the filter window and replace data
@@ -1354,7 +1353,7 @@ class Image(Header):
             if self._error is not None and replace_error is not None:
                 # replace the error of bad pixel if defined
                 out_error[y_cors[m], x_cors[m]] = replace_error
-                
+
         # create new Image object
         new_image = Image(data=out_data, error=out_error,  mask=self._mask)
         return new_image
@@ -1627,7 +1626,7 @@ class Image(Header):
                 self._data, (sigma_y, sigma_x), mode=mode
             )
             scale = ndimage.filters.gaussian_filter(
-                (self._mask == False).astype('float32'), (sigma_y, sigma_x), mode=mode
+                (~self._mask).astype('float32'), (sigma_y, sigma_x), mode=mode
             )
             new = gauss / scale
             self._data[self._mask] = mask_data
@@ -2439,7 +2438,7 @@ class Image(Header):
                 verbose: boolean, default: False
                         Flag for providing information during the processing on the command line
                 inplace: boolean, default: True
-                        Flag to indicate whether the code should modify the existing data or return 
+                        Flag to indicate whether the code should modify the existing data or return
                         a new Image instance with the modified data. In the latter case the mask and error
                         extensions ONLY contain the cosmic-related pixels.
 
@@ -2537,7 +2536,7 @@ class Image(Header):
                 out.replace_subselect(select, mask=True)  # set the new mask
                 out = out.replaceMaskMedian(box_x, box_y, replace_error=None)  # replace possible corrput pixel with zeros
 
-        if inplace==True:
+        if inplace:
             self._data = out._data
             if self._error is None:
                 self._error = out._error
