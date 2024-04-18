@@ -3789,11 +3789,12 @@ def add_astrometry(
     out_image: str,
     in_agcsci_image: str,
     in_agcskye_image: str,
-    in_agcskyw_image: str,
-    in_agcspec_image: str,
+    in_agcskyw_image: str
 ):
-    """uses WCS in AG camera coadd image to calculate RA,DEC of 
+    """
+    uses WCS in AG camera coadd image to calculate RA,DEC of 
     each fiber in each telescope and adds these to SLITMAP extension
+    if AGC frames are not available it uses the POtelRA,POtelDEC,POtelPA 
     
     Parameters
 
@@ -3807,8 +3808,6 @@ def add_astrometry(
         path to SkyE telescope AGC coadd master frame      
     in_agcskyw_image : str
         path to SkyW telescope AGC coadd master frame
-   in_agcspec_image : str
-        path to Spec telescope AGC coadd master frame
     """
  
     print("**************************************")
@@ -3836,22 +3835,25 @@ def add_astrometry(
     selspec=(telescope=='Spec')
 
     # read AGC coadd images and get RAobs, DECobs, and PAobs for each telescope
-    agcfiledir={'sci':in_agcsci_image, 'skye':in_agcskye_image, 'skyw':in_agcskyw_image, 'spec':in_agcspec_image}
+    agcfiledir={'sci':in_agcsci_image, 'skye':in_agcskye_image, 'skyw':in_agcskyw_image}
     def getobsparam(tel):
-        #print(agcfiledir[tel])
-        mfagc=fits.open(agcfiledir[tel])
-        mfheader=mfagc[1].header
-        outw = wcs.WCS(mfheader)
-        #print(outw)
-        CDmatrix=outw.pixel_scale_matrix
-        posangrad=-1*numpy.arctan(CDmatrix[1,0]/CDmatrix[0,0])
-        PAobs=posangrad*180/numpy.pi
-        IFUcencoords=outw.pixel_to_world(2500,1000)
         if tel!='spec':
-            RAobs=IFUcencoords.ra.value
-            DECobs=IFUcencoords.dec.value
+            if os.path.isfile(agcfiledir[tel]):
+                mfagc=fits.open(agcfiledir[tel])
+                mfheader=mfagc[1].header
+                outw = wcs.WCS(mfheader)
+                CDmatrix=outw.pixel_scale_matrix
+                posangrad=-1*numpy.arctan(CDmatrix[1,0]/CDmatrix[0,0])
+                PAobs=posangrad*180/numpy.pi
+                IFUcencoords=outw.pixel_to_world(2500,1000)
+                RAobs=IFUcencoords.ra.value
+                DECobs=IFUcencoords.dec.value
+            else:
+                RAobs=org_img.header[f'PO{tel}RA'.capitalize{}]
+                DECobs=org_img.header[f'PO{tel}DE'.capitalize{}]
+                PAobs=org_img.header[f'PO{tel}PA'.capitalize{}]
         else:
-            RAobs=180
+            RAobs=0
             DECobs=0
             PAobs=0
         return RAobs, DECobs, PAobs

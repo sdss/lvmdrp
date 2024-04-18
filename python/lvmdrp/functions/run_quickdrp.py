@@ -125,7 +125,7 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
         agcsci_path=path.full('lvm_agcam_coadd', mjd=sci_mjd, specframe=sci_expnum, tel='sci')
         agcskye_path=path.full('lvm_agcam_coadd', mjd=sci_mjd, specframe=sci_expnum, tel='skye')
         agcskyw_path=path.full('lvm_agcam_coadd', mjd=sci_mjd, specframe=sci_expnum, tel='skyw')
-        agcspec_path=path.full('lvm_agcam_coadd', mjd=sci_mjd, specframe=sci_expnum, tel='spec')
+        #agcspec_path=path.full('lvm_agcam_coadd', mjd=sci_mjd, specframe=sci_expnum, tel='spec')
 
         # define calibration frames paths
         if use_fiducial_master:
@@ -162,7 +162,7 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
                                   in_slitmap=Table(drp.fibermap.data), reject_cr=False)
 
         # add astrometry to frame
-        image_tasks.add_astrometry(in_image=dsci_path, out_image=dsci_path, in_agcsci_image=agcsci_path, in_agcskye_image=agcskye_path, in_agcskyw_image=agcskyw_path, in_agcspec_image=agcspec_path)
+        image_tasks.add_astrometry(in_image=dsci_path, out_image=dsci_path, in_agcsci_image=agcsci_path, in_agcskye_image=agcskye_path, in_agcskyw_image=agcskyw_path)
 
         # subtract straylight
         if sci_imagetyp == "flat":
