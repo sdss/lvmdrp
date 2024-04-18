@@ -1642,42 +1642,11 @@ def quick_sky_subtraction(in_cframe, out_sframe, band=np.array((7238, 7242, 7074
     print('************************************')
 
     cframe = lvmCFrame.from_file(in_cframe)
-    # wave = cframe._wave
-    # flux = cframe._data
-    # error = cframe._error
-    # sky = cframe._sky
-    # sky_error = cframe._sky_error
-
-    # crval = wave[0]
-    # cdelt = wave[1] - wave[0]
-    # i_band = ((band - crval) / cdelt).astype(int)
-
-    # map_b = bn.nanmean(flux[:, i_band[0]:i_band[1]], axis=1)
-    # map_0 = bn.nanmean(flux[:, i_band[2]:i_band[3]], axis=1)
-    # map_1 = bn.nanmean(flux[:, i_band[4]:i_band[5]], axis=1)
-    # map_c = map_b - 0.5 * (map_0 + map_1)
-
-    # smap_b = bn.nanmean(sky[:, i_band[0]:i_band[1]], axis=1)
-    # smap_0 = bn.nanmean(sky[:, i_band[2]:i_band[3]], axis=1)
-    # smap_1 = bn.nanmean(sky[:, i_band[4]:i_band[5]], axis=1)
-    # smap_c = smap_b - 0.5 * (smap_0 + smap_1)
-
-    # scale = map_c / smap_c
-    # sky_c = np.nan_to_num(sky * scale[:, None])
-    # if not skip_subtraction:
-    #     data_c = np.nan_to_num(flux - sky_c)
-    #     error_c = np.nan_to_num(np.sqrt(error**2 + sky_error**2))
-    # else:
-    #     data_c = flux
-    #     error_c = error
-
+    
     # read sky table hdu
     sky_hdu = prep_input_simplesky_mean(in_cframe)
 
     # create spectrum for sky subtraction
-    #scisub = create_skysub_spectrum(sky_hdu, sci_input="SCI", sky_input=sky_input, method=skymethod)
-    #skyesub = create_skysub_spectrum(sky_hdu, sci_input="SKYE", sky_input="SKYE", method=skymethod)
-    #skywsub = create_skysub_spectrum(sky_hdu, sci_input="SKYW", sky_input="SKYW", method=skymethod)
     scisky = create_skysub_spectrum(sky_hdu, tel='sci', method=skymethod)
     skyesky = create_skysub_spectrum(sky_hdu, tel="skye", method=skymethod)
     skywsky = create_skysub_spectrum(sky_hdu, tel="skyw", method=skymethod)
@@ -1710,6 +1679,7 @@ def quick_sky_subtraction(in_cframe, out_sframe, band=np.array((7238, 7242, 7074
     sky_c = cframe._sky_east
     sky_error = cframe._sky_east_error
 
+    print("writing lvmSFrame")
     sframe = lvmSFrame(data=skydata, error=error_c, mask=cframe._mask, sky=sky_c, sky_error=sky_error,
                        wave=cframe._wave, lsf=cframe._lsf, header=cframe._header, slitmap=cframe._slitmap)
     sframe.writeFitsData(out_sframe)
