@@ -240,8 +240,8 @@ def get_calibs(kind, mjd, camera):
 
     The syntax for the calibration files are $LVM_SANDBOX/calib/[mjd]/lvm-m[kind]-[camera].fits.
     "mjd" is the MJD directory to download. "kind" is the kind of calib file to download, e.g. pixmask,
-    bias, fiberflat, without the leading "m".  "camera" is the camera can be a specific, e.g "b1" or
-    all channels with "b*".
+    bias, fiberflat, without the leading "m".  "camera" is the camera, can be a specific channel, e.g "b1"
+    or all channels with "b*".
 
     """
     a = Access()
