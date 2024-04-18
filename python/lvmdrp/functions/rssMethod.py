@@ -806,7 +806,7 @@ def shift_wave_skylines(in_rss: str, out_rss: str, channel: str):
         ax.hlines(-0.05, 0, 1944, linestyle=':', color='black', alpha=0.3)   
         ax.legend()
         ax.set_ylim(-0.4,0.4)
-        ax.set_title(f'{rss._header['EXPOSURE']} - {channel} - {skylines[i]}')
+        ax.set_title(f'{rss._header["EXPOSURE"]} - {channel} - {skylines[i]}')
         ax.set_xlabel('Fiber ID')
         ax.set_ylabel(r'$\Delta \lambda [\AA]$')
     
