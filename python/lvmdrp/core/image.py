@@ -2476,13 +2476,13 @@ class Image(Header):
 
         # apply gain factor to data if applicable
         if (gain != 1.0) and verbose:
-            print('Convert image from ADUs to electrons using a gain factor of %f' % (gain))
+            print('  Convert image from ADUs to electrons using a gain factor of %f' % (gain))
         img = img * gain
         img_original = img_original * gain
 
         # compute noise using read-noise value
         if (rdnoise > 0.0) and verbose:
-            print('A value of %f is used for the electron read-out noise.' % rdnoise)
+            print('  A value of %f is used for the electron read-out noise.' % rdnoise)
         img_original._error = numpy.sqrt((numpy.clip(img_original._data, a_min=0.0, a_max=None) + rdnoise**2))
 
         select = numpy.zeros(img._dim, dtype=bool)
@@ -2490,14 +2490,10 @@ class Image(Header):
         img._mask = numpy.zeros(img._dim, dtype=bool)
 
         # start iteration
-        if verbose:
-            print('Start the detection process using.')
-
         out = img
-
         for i in range(iterations):
             if verbose:
-                print('Start iteration %i' % (i+1))
+                print('  Start iteration %i' % (i+1))
 
             # create smoothed noise fromimage
             noise = out.medianImg((box_y, box_x))
@@ -2527,7 +2523,7 @@ class Image(Header):
             if verbose:
                 dim = img_original._dim
                 det_pix = numpy.sum(select)
-                print('Total number of detected cosmics: %i out of %i pixels' % (int(det_pix), dim[0] * dim[1]))
+                print('  Total number of detected cosmics: %i out of %i pixels' % (int(det_pix), dim[0] * dim[1]))
 
             if i == iterations-1:
                 img_original.replace_subselect(select, mask=True)  # set the new mask
@@ -2550,7 +2546,7 @@ class Image(Header):
             if self._mask is None:
                 self._mask = out._mask
             else:
-                self._mask += out._mask
+                self._mask |= out._mask
         else:
             return out
 
