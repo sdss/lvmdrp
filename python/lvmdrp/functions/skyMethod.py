@@ -1639,7 +1639,6 @@ def quick_sky_subtraction(in_cframe, out_sframe, band=np.array((7238, 7242, 7074
     """
 
     cframe = lvmCFrame.from_file(in_cframe)
-<<<<<<< HEAD
     # wave = cframe._wave
     # flux = cframe._data
     # error = cframe._error
@@ -1712,15 +1711,6 @@ def quick_sky_subtraction(in_cframe, out_sframe, band=np.array((7238, 7242, 7074
     # propagate cframe extensions
     sky_c = cframe._sky
     sky_error = cframe._sky_error
-=======
-    wave = cframe._wave
-    flux = cframe._data
-    error = cframe._error
-
-    master_sky = cframe.eval_master_sky()
-    sky = master_sky._data
-    sky_error = master_sky._error
->>>>>>> master
 
     sframe = lvmSFrame(data=skydata, error=error_c, mask=cframe._mask, sky=sky_c, sky_error=sky_error,
                        wave=cframe._wave, lsf=cframe._lsf, header=cframe._header, slitmap=cframe._slitmap)
