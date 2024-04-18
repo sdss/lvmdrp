@@ -1743,37 +1743,41 @@ def prep_input_simplesky_mean(filename: str = None) -> fits.HDUList:
         sky_e_fib = good_fibers[good_fibers["telescope"] == "SkyE"]
         sky_w_fib = good_fibers[good_fibers["telescope"] == "SkyW"]
 
+        # select the correct fibers from correct extensions
+        # and convert IVAR back to error
+
         # select the science fibers from science extension
         # variable syntax: extension_fibers
         xsci_scifib = x["FLUX"].data[sci_fib["fiberid"] - 1]
-        esci_scifib = x["IVAR"].data[sci_fib["fiberid"] - 1]
-
-        # select science fibers from skye and skyw extensions
-        xsky_e_scifib = x["SKY_EAST"].data[sci_fib["fiberid"] - 1]
-        esky_e_scifib = x["SKY_EAST_IVAR"].data[sci_fib["fiberid"] - 1]
-
-        xsky_w_scifib = x["SKY_WEST"].data[sci_fib["fiberid"] - 1]
-        esky_w_scifib = x["SKY_WEST_IVAR"].data[sci_fib["fiberid"] - 1]
+        esci_scifib = np.sqrt(1 / x["IVAR"].data[sci_fib["fiberid"] - 1])
 
         # select the skye/w fibers from the science extension
         xsci_skyefib = x["FLUX"].data[sky_e_fib["fiberid"] - 1]
-        esci_skyefib = x["IVAR"].data[sky_e_fib["fiberid"] - 1]
+        esci_skyefib = np.sqrt(1 / x["IVAR"].data[sky_e_fib["fiberid"] - 1])
 
         xsci_skywfib = x["FLUX"].data[sky_w_fib["fiberid"] - 1]
-        esci_skywfib = x["IVAR"].data[sky_w_fib["fiberid"] - 1]
+        esci_skywfib = np.sqrt(1 / x["IVAR"].data[sky_w_fib["fiberid"] - 1])
+
+        # superskies
+        # select science fibers from skye and skyw extensions
+        xsky_e_scifib = x["SKY_EAST"].data[sci_fib["fiberid"] - 1]
+        esky_e_scifib = np.sqrt(1 / x["SKY_EAST_IVAR"].data[sci_fib["fiberid"] - 1])
+
+        xsky_w_scifib = x["SKY_WEST"].data[sci_fib["fiberid"] - 1]
+        esky_w_scifib = np.sqrt(1 / x["SKY_WEST_IVAR"].data[sci_fib["fiberid"] - 1])
 
         # perform the biweight selection for science
         # science fibers in science extension
         sci_flux = biweight_location(xsci_scifib, axis=0, ignore_nan=True)
-        sci_err = mad_std(xsci_scifib, axis=0, ignore_nan=True)
+        sci_err = np.sqrt(biweight_location(np.square(esci_scifib), axis=0, ignore_nan=True)) / np.sqrt(len(sci_fib))
 
         # These are the skies from the fluxed sky fibers
         # skye/w fibers in science extension
         sky_e_flux = biweight_location(xsci_skyefib, axis=0, ignore_nan=True)
-        sky_e_err = mad_std(xsci_skyefib, axis=0, ignore_nan=True)
+        sky_e_err = np.sqrt(biweight_location(np.square(esci_skyefib), axis=0, ignore_nan=True)) / np.sqrt(len(sky_e_fib))
 
         sky_w_flux = biweight_location(xsci_skywfib, axis=0, ignore_nan=True)
-        sky_w_err = mad_std(xsci_skywfib, axis=0, ignore_nan=True)
+        sky_w_err = np.sqrt(biweight_location(np.square(esci_skywfib), axis=0, ignore_nan=True)) / np.sqrt(len(sky_w_fib))
 
         # The next two are the supersampled ones
         # science fibers in skye/w extensions
