@@ -13,12 +13,9 @@ from multiprocessing import Pool, cpu_count
 
 import numpy
 import bottleneck as bn
-from astropy import units as u
 from astropy.table import Table
 from astropy.io import fits as pyfits
-from astropy.nddata import CCDData, StdDevUncertainty
 from astropy.visualization import simple_norm
-from ccdproc import cosmicray_lacosmic
 from scipy import interpolate
 from scipy import signal
 from tqdm import tqdm
@@ -4125,39 +4122,11 @@ def detrend_frame(
     detrended_img._mask = numpy.logical_or(detrended_img._mask, infpixels)
 
     # reject cosmic rays
-    if convert_to_e and reject_cr:
+    if reject_cr:
         log.info("rejecting cosmic rays")
-        ccd = CCDData(
-            detrended_img._data,
-            uncertainty=StdDevUncertainty(detrended_img._error),
-            unit=u.electron,
-            mask=detrended_img._mask,
-        )
-        array = copy(detrended_img._data)
-        array[detrended_img._mask] = numpy.nan
-        clean_ccd = cosmicray_lacosmic(
-            ccd, sigclip=30.0, objlim=numpy.nanpercentile(array, q=99.9)
-        )
-        cr_mask = clean_ccd.mask
-        cr_mask[detrended_img._mask] = False
-
-        ncosmic = cr_mask.sum()
-        if ncosmic > 100000:
-            log.error(f"found cosmic ray {ncosmic} pixels, ignoring CR")
-            cr_mask[:, :] = False
-        elif ncosmic > 1000:
-            log.warning(f"found cosmic ray {ncosmic} pixels")
-        else:
-            log.info(f"found cosmic ray {ncosmic} pixels")
-        clean_img = Image(data=clean_ccd.data, mask=cr_mask)
-        # update image with cosmic ray mask
-        detrended_img.setData(mask=(detrended_img._mask | clean_img._mask))
-    else:
-        cr_mask = numpy.zeros(detrended_img._dim, dtype=bool)
-        clean_img = Image(
-            data=numpy.ones(detrended_img._dim) * numpy.nan,
-            mask=numpy.zeros(detrended_img._dim),
-        )
+        rdnoise = detrended_img.getHdrValue("AMP1 RDNOISE")
+        detrended_img.reject_cosmics(gain=1.0, rdnoise=rdnoise, rlim=1.3, iterations=5, fwhm_gauss=[2.75, 2.75],
+                                     replace_box=[10,2], replace_error=1e6, verbose=True, inplace=True)
 
     # replace masked pixels with NaNs
     if replace_with_nan:
@@ -4215,7 +4184,6 @@ def detrend_frame(
         mbias_img,
         mdark_img,
         mflat_img,
-        cr_mask,
         detrended_img,
     )
 

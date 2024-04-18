@@ -731,6 +731,95 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
     fwhm_trace.writeFitsData(out_lsf)
 
 
+
+# method to apply shift in wavelength table based on comparison to skylines
+def shift_wave_skylines(in_rss: str, out_rss: str, channel: str):
+    """
+    Applies shift to wavelength map extension based on sky line centroid measurements
+
+    Parameters
+    ----------
+    in_rss : string
+        Input RSS FITS file
+    out_rss : string
+        Output RSS FITS file with the shifted wavelength maps
+    """
+
+    # print('************************************************')
+    # print('***** CORRECTING WAVELENGTH USING SKYLINES *****')
+    # print('************************************************')
+    log.info("correcting wavelength using skylines")
+
+
+    # GB hand picked isolated bright lines across each channel which are not doublest in UVES atlas
+    # true wavelengths taken from UVES sky line atlas
+    skylinedict={'b':[5577.346680], 'r':[6363.782715, 7358.680176, 7392.209961], 'z':[8399.175781, 8988.383789, 9552.546875, 9719.838867]}
+    skylines=skylinedict[channel]
+    dwave=5 # width of wavelength window to measure centroid of skylines
+
+    rss = RSS.from_file(in_rss)
+    fiberid=rss._slitmap['fiberid'].data
+    # selection of which fibers belong to which spectrograph
+    sel1=rss._slitmap['spectrographid'].data==1
+    sel2=rss._slitmap['spectrographid'].data==2
+    sel3=rss._slitmap['spectrographid'].data==3
+
+    # measure offsets
+    offsets=numpy.zeros((len(skylines), numpy.shape(rss._data)[0]))
+    specoffset=numpy.zeros((len(skylines), 3))
+    for i in range(len(skylines)):
+        mask=numpy.abs(rss._wave-skylines[i])>=dwave/2
+        weights=rss._data.copy()
+        weights[mask]=0
+        offsets[i,:]=numpy.nansum(rss._wave*weights, axis=1)/numpy.nansum(weights, axis=1)-skylines[i]
+        specoffset[i,0]=numpy.nanmedian(offsets[i,sel1])
+        specoffset[i,1]=numpy.nanmedian(offsets[i,sel2])
+        specoffset[i,2]=numpy.nanmedian(offsets[i,sel3])
+
+    #Average offsets for different skylines in each channel, apply to trace, and write them in header
+    meanoffset=numpy.nanmean(specoffset, axis=0)
+    log.info(f'Applying the following offsets [Angstroms] in [b,r,z] channels: {meanoffset}')
+    rss._wave_trace['COEFF'].data[sel1,0] -= meanoffset[0]
+    rss._wave_trace['COEFF'].data[sel2,0] -= meanoffset[1]
+    rss._wave_trace['COEFF'].data[sel3,0] -= meanoffset[2]
+    rss._header[f'HIERARCH WAVE SKYOFF_{channel}1']=(f'{meanoffset[0]}', f'Mean sky line offset in {channel}1 [Angs]')
+    rss._header[f'HIERARCH WAVE SKYOFF_{channel}2']=(f'{meanoffset[1]}', f'Mean sky line offset in {channel}2 [Angs]')
+    rss._header[f'HIERARCH WAVE SKYOFF_{channel}3']=(f'{meanoffset[2]}', f'Mean sky line offset in {channel}3 [Angs]')
+
+    #write updated wobject
+    log.info(f"writing updated wobject file '{os.path.basename(out_rss)}'")
+    rss.writeFitsData(out_rss)
+
+    # Make QA plots showing offsets for each sky line in each channel
+    for i in range(len(skylines)):
+        fig, ax = plt.subplots()
+        ax.plot(fiberid[sel1], offsets[i,sel1], label='Spec1', color='red', alpha=0.5)
+        ax.plot(fiberid[sel2], offsets[i,sel2], label='Spec2', color='green', alpha=0.5)
+        ax.plot(fiberid[sel3], offsets[i,sel3], label='Spec3', color='blue', alpha=0.5)
+        ax.plot(fiberid[sel1], numpy.repeat(specoffset[i,0], len(fiberid[sel1])), linestyle='--', color='red')
+        ax.plot(fiberid[sel2], numpy.repeat(specoffset[i,1], len(fiberid[sel2])), linestyle='--', color='green')
+        ax.plot(fiberid[sel3], numpy.repeat(specoffset[i,2], len(fiberid[sel3])), linestyle='--', color='blue')
+        ax.plot(fiberid[sel1], numpy.repeat(meanoffset[0], len(fiberid[sel1])), linestyle='-', color='red')
+        ax.plot(fiberid[sel2], numpy.repeat(meanoffset[1], len(fiberid[sel2])), linestyle='-', color='green')
+        ax.plot(fiberid[sel3], numpy.repeat(meanoffset[2], len(fiberid[sel3])), linestyle='-', color='blue')
+        ax.hlines(0, 0, 1944, linestyle='--', color='black', alpha=0.3)
+        ax.hlines(+0.05, 0, 1944, linestyle=':', color='black', alpha=0.3)
+        ax.hlines(-0.05, 0, 1944, linestyle=':', color='black', alpha=0.3)
+        ax.legend()
+        ax.set_ylim(-0.4,0.4)
+        ax.set_title(f'{rss._header["EXPOSURE"]} - {channel} - {skylines[i]}')
+        ax.set_xlabel('Fiber ID')
+        ax.set_ylabel(r'$\Delta \lambda [\AA]$')
+
+        save_fig(
+        fig,
+        product_path=out_rss,
+        to_display=False,
+        figure_path="qa",
+        label=f"skylineshift_{skylines[i]}")
+
+
+
 # TODO:
 # * merge arc_wave and arc_lsfs into lvmArc product, change variable name to in_arc
 # @skip_on_missing_input_path(["in_rss", "in_waves", "in_lsfs"])
@@ -2889,7 +2978,11 @@ def stack_spectrographs(in_rsss: List[str], out_rss: str) -> RSS:
     rsss = [loadRSS(in_rss) for in_rss in in_rsss]
 
     log.info(f"stacking frames in {','.join([os.path.basename(in_rss) for in_rss in in_rsss])} along fiber ID axis")
-    rss_out = RSS.from_spectrographs(*rsss)
+    try:
+        rss_out = RSS.from_spectrographs(*rsss)
+    except TypeError as e:
+        log.error(f'Cannot stack spectrographs: {e}')
+        return
 
     # write output
     log.info(f"writing stacked RSS to {os.path.basename(out_rss)}")
