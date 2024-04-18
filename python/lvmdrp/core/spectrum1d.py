@@ -61,12 +61,12 @@ def _cross_match(
     shift_range: List[int],
     peak_num: int = None,
 ) -> Tuple[float, int, float]:
-    """Find the best cross correlation between two spectra.
+    """Find the best integer-offset cross correlation between two spectra.
 
     This function finds the best cross correlation between two spectra by
     stretching and shifting the first spectrum and computing the cross
     correlation with the second spectrum. The best cross correlation is
-    defined as the one with the highest correlation value and the correct
+    defined as the integer offset with the highest correlation value and the correct
     number of peaks.
 
     Parameters
@@ -149,6 +149,111 @@ def _cross_match(
             best_stretch_factor = factor
 
     return max_correlation, best_shift, best_stretch_factor
+
+
+def _cross_match_float(
+    ref_spec: numpy.ndarray,
+    obs_spec: numpy.ndarray,
+    stretch_factors: numpy.ndarray,
+    shift_range: List[int],
+) -> Tuple[float, float, float]:
+    """Find the best fractional-pixel cross correlation between two spectra.
+
+    This function finds the best cross correlation between two spectra by
+    stretching and shifting the first spectrum and computing the cross
+    correlation with the second spectrum. The best cross correlation is
+    defined as the fractional-pixel offset with the highest correlation value.
+    The spectra are "peak-normalized" before correlating, making all peaks 
+    about 1 unit in height.
+
+    This is used for measuring fiber shifts during the night
+
+    Parameters
+    ----------
+    ref_spec : ndarray
+        The reference spectrum.
+    obs_spec : ndarray
+        The observed spectrum.
+    stretch_factors : ndarray
+        The stretch factors to use.
+    shift_range : tuple
+        The range of shifts to use.
+
+    Returns
+    -------
+    max_correlation : float
+        The maximum correlation value.
+    best_shift : float
+        The fractional pixel shift that maximizes the correlation
+    best_stretch_factor : float
+        The best stretch factor.
+    """
+    min_shift, max_shift = shift_range
+    max_correlation = -numpy.inf
+    best_shift = 0
+    best_stretch_factor = 1
+
+    # normalize the peaks to roughly magnitude 1, so that individual very bright
+    # fibers do not dominate the signal
+    peaks1, _ = signal.find_peaks(ref_spec)
+    peaks2, _ = signal.find_peaks(obs_spec)
+    # primitive "fiber flat"
+    spl1_eval = numpy.interp(numpy.arange(ref_spec.shape[0]), peaks1, ref_spec[peaks1])
+    spl2_eval = numpy.interp(numpy.arange(obs_spec.shape[0]), peaks2, obs_spec[peaks2])
+    ref_spec /= spl1_eval
+    obs_spec /= spl2_eval
+    #return ref_spec, obs_spec
+
+    for factor in stretch_factors:
+        # Stretch the first signal
+        stretched_signal1 = zoom(ref_spec, factor, mode="constant", prefilter=True)
+
+        # Make the lengths equal
+        len_diff = len(obs_spec) - len(stretched_signal1)
+        if len_diff > 0:
+            # Zero pad the stretched signal at the end if it's shorter
+            stretched_signal1 = numpy.pad(stretched_signal1, (0, len_diff))
+        elif len_diff < 0:
+            # Or crop the stretched signal at the end if it's longer
+            stretched_signal1 = stretched_signal1[:len_diff]
+
+        # Compute the cross correlation
+        cross_corr = signal.correlate(obs_spec, stretched_signal1, mode="same")
+
+        # Normalize the cross correlation
+        cross_corr = cross_corr.astype(numpy.float32)
+        cross_corr /= norm(stretched_signal1) * norm(obs_spec)
+
+        # Get the correlation shifts
+        shifts = signal.correlation_lags(
+            len(obs_spec), len(stretched_signal1), mode="same"
+        )
+
+        # Constrain the cross_corr and shifts to the shift_range
+        mask = (shifts >= min_shift) & (shifts <= max_shift)
+        cross_corr = cross_corr[mask]
+        shifts = shifts[mask]
+
+        #return cross_cor
+
+        # Find the max correlation and the corresponding shift for this stretch factor
+        idx_max_corr = numpy.argmax(cross_corr)
+        max_corr = cross_corr[idx_max_corr]
+        shift = shifts[idx_max_corr]
+
+        # poor man's parabola fit ...
+        d = (numpy.take(cross_corr, shift + 1) - 2 * numpy.take(cross_corr, shift) + numpy.take(cross_corr, shift - 1))
+        position = (shift + 1 - ((numpy.take(cross_corr, shift + 1) - numpy.take(cross_corr, shift)) / d ))
+
+        condition = max_corr > max_correlation
+
+        if condition:
+            max_correlation = max_corr
+            best_shift = position
+            best_stretch_factor = factor
+
+    return max_correlation, best_shift, best_stretch_factor
+
 
 
 def _apply_shift_and_stretch(

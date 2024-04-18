@@ -42,6 +42,7 @@ from lvmdrp.core.image import (
     glueImages,
     loadImage,
 )
+from lvmdrp.core import spectrum1d
 from lvmdrp.core.plot import plt, create_subplots, plot_detrend, plot_strips, plot_image_shift, save_fig
 from lvmdrp.core.rss import RSS
 from lvmdrp.core.spectrum1d import Spectrum1D, _spec_from_lines, _cross_match
@@ -635,6 +636,44 @@ def fix_pixel_shifts(in_images, out_pixshift, ref_images, in_mask,
         log.info("no pixel shifts detected, no correction applied")
 
     return shifts, corrs, images_out
+
+
+
+def measure_y_fiber_image_shift(image1, image2, cols = [500, 1000, 1500, 2000, 2500, 3000], w = 25, shift_range=[-5,5]):
+    '''
+    Measure the (thermal, flexure, ...) shift between the fiber (traces) in 2 detrended images in 
+    the y (cross dispersion) direction.
+
+    Uses cross-correlations between (medians of a number of) columns to determine
+    the shift between the fibers in image2 relative to image1. The measurement is performed 
+    independently at each column in cols= using a median of +-w columns.
+
+    Parameters
+    ----------
+    image1: numpy.ndarray
+        2D reference image
+    image2: numpy.ndarray
+        2D image
+    cols:  List[int]
+        List of columns to cross correlate.
+    w: int
+        window width around each value in cols to use
+    shift_range: List[int]
+        minimal and maximal value for shift
+
+    Returns
+    -------
+    numpy.ndarray[float]:
+       pixel shifts in cols
+    '''
+    shifts = numpy.zeros(len(cols))
+    for j,c in enumerate(cols):
+        s1 = numpy.nanmedian(image1[50:-50,c-w:c+w], axis=1)#[200:300]
+        s2 = numpy.nanmedian(image2[50:-50,c-w:c+w], axis=1)#[200:300]
+        m = spectrum1d._cross_match_float(s1, s2, numpy.array([1.0]), [-5, 5])
+        shifts[j] = m[1]
+
+    return shifts
 
 
 def detCos_drp(
