@@ -47,7 +47,7 @@ from lvmdrp.core.sky import (
 from lvmdrp.core.spectrum1d import Spectrum1D
 from lvmdrp import log, path, __version__ as drpver
 from lvmdrp.utils.examples import fetch_example_data
-
+from lvmdrp.functions.run_twilights import fit_continuum
 
 description = "Provides methods for sky subtraction"
 
@@ -1928,20 +1928,21 @@ def create_skysub_spectrum(hdu: fits.HDUList, tel: str,
     """
 
     # get the science and sky data, convert to tables
-    sci = hdu['SCI']
-    skye = hdu['SKYE']
-    skyw = hdu['SKYW']
-    sskye = hdu['SKYE_SUPER']
-    sskye = hdu['SKYW_SUPER']
+    hdusci = hdu['SCI']
+    hduskye = hdu['SKYE']
+    hduskyw = hdu['SKYW']
+    hdusskye = hdu['SKYE_SUPER']
+    hdusskye = hdu['SKYW_SUPER']
 
+    print(f'Creating sky for telescope: {tel}')
+    print(f'Using method: {method}')
+
+    # Knox's original method using nearest sky and polynomial fit to model continuum
     if method == 'kls_nearest_poly':
-
-        print(f'Using method: {method}')
-
         # choose which sky data to use (nearest)
-        cordsci = SkyCoord(sci.header["RA"], sci.header["DEC"], unit="deg")
-        cordskye = SkyCoord(skye.header["RA"], skye.header["DEC"], unit="deg")
-        cordskyw = SkyCoord(skyw.header["RA"], skyw.header["DEC"], unit="deg")
+        cordsci = SkyCoord(hdusci.header["RA"], hdusci.header["DEC"], unit="deg")
+        cordskye = SkyCoord(hduskye.header["RA"], hduskye.header["DEC"], unit="deg")
+        cordskyw = SkyCoord(hduskyw.header["RA"], hduskyw.header["DEC"], unit="deg")
         wsep = cordsci.separation(cordskyw)
         esep = cordsci.separation(cordskye)
         sky_input = "SKYW" if wsep < esep else 'SKYE'
@@ -1972,50 +1973,44 @@ def create_skysub_spectrum(hdu: fits.HDUList, tel: str,
             fit_func, rmin, rmax, tol=0.001, maxiter=8, args=(sci_subset["FLUX"], sky_subset["FLUX"])
         )
 
-
-
-    # create spectrum for sky subtraction using entire wavelength range
-    #if method == 'cont':
+        # create spectrum for sky subtraction using entire wavelength range
         skysub = xsky['CONT'] + minimum * sky_tab["FLUX"]
-    #else:
-    #    skysub = minimum * sky_tab["FLUX"]
-
         log.info(f"Results {minimum} with wmin {wmin} and wmax {wmax}.")
 
-    # update the main sci_input hdu extension with new columns
-    # if we updated the table with cont and lines info
-    #if method == 'cont':
-        #hdu[sciextensiondir[tel]] = fits.BinTableHDU(xsci, name=sciextensiondir[tel])
 
-    # plt.figure(1,(6,6))
-    # plt.figure(1,(8,6))
-    # plt.subplot(4,1,1)
-    # plt.plot(xsci['WAVE'],xsci['FLUX'],label='Science')
-    # plt.legend()
-    # plt.xlim(wmin,wmax)
-    # plt.tight_layout()
+    # Guille's method using continuum from nearest sky and lines from further sky
+    # uses Alfredo's spline continuum modeling routine
+    elif method == 'gb_test':
 
-    # plt.subplot(4,1,2)
-    # plt.plot(xsky['WAVE'],xsky['FLUX'],label='Sky')
-    # plt.legend()
-    # plt.xlim(wmin,wmax)
-    # plt.tight_layout()
+        wsci=Table(hdusci.data)['WAVE'].data
+        fsci=Table(hdusci.data)['FLUX'].data
 
-    # plt.subplot(4,1,3)
-    # plt.plot(xsci['WAVE'],skysub,label='Sky-subtracted')
-    # plt.legend()
-    # plt.xlim(wmin,wmax)
-    # ymin,ymax=plt.ylim()
-    # if ymin<-2e-14:
-    #     ymin=-2e-14
-    # if ymax>1e-13:
-    #     ymax=1e-13
-    # plt.ylim(ymin,ymax)
-    # plt.tight_layout()
+        wskye=Table(hduskye.data)['WAVE'].data
+        fskye=Table(hduskye.data)['FLUX'].data
 
-    # #outname = '%s_%s_all.png' % (sci_file.replace('.fits',''),sky_file.replace('.fits',''))
-    # outname = 'skysub_all_plot.png'
-    # plt.savefig(outname)
+        wskyw=Table(hduskye.data)['WAVE'].data
+        fskyw=Table(hduskye.data)['FLUX'].data
+
+        # do continuum vs line separation
+
+        maskbands=[()]
+        cskye=fit_continuum(fskye, mask_bands: List[Tuple[float,float]],
+                  median_box: int, niter: int, threshold: Tuple[float,float]|float, **kwargs):
+
+
+        cskye, cskye_models, masked_pixels, knots = fit_continuum(spectrum=fskye, mask_bands=None, median_box=5, niter=10, threshold=(2.0, 0.5))
+
+
+        # MAKING PLOTS FOR TESTING
+        fig, ax = plt.subplots(figsize=(20, 5))
+        ax.plot(wsci, fskye)
+        ax.plot(wsci, cskye)
+        ax.set_ylim(-1e-14, 2e-14)
+        plt.show()
+
+        skysub=np.zeros(len(wsci))
+
+
 
     return np.array(skysub)
 
