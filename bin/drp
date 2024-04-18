@@ -235,8 +235,8 @@ def get_calibs(kind, mjd, camera):
     """ Download the master calibration frames
 
     Downloads the master calibration frames from the Utah SAS in LVM_SANDBOX/calib.  This command
-    only downloads files when they do not yet exist on your local system.  To re-download existing
-    files, first delete your local files.
+    only downloads files when they do not yet exist on your local system or when the remote files
+    are newer.
 
     The syntax for the calibration files are $LVM_SANDBOX/calib/[mjd]/lvm-m[kind]-[camera].fits.
     "mjd" is the MJD directory to download. "kind" is the kind of calib file to download, e.g. pixmask,
