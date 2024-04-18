@@ -219,6 +219,9 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
         # wavelength calibrate
         rss_tasks.create_pixel_table(in_rss=xsci_path, out_rss=wsci_path, in_waves=mwave_paths, in_lsfs=mlsf_paths)
 
+        # correct thermal shift in wavelength direction
+        rss_tasks.shift_wave_skylines(in_rss=wsci_path, out_rss=wsci_path, channel=channel)
+
         # apply fiberflat correction
         rss_tasks.apply_fiberflat(in_rss=wsci_path, out_frame=frame_path, in_flats=mflat_paths)
 
