@@ -3849,9 +3849,9 @@ def add_astrometry(
                 RAobs=IFUcencoords.ra.value
                 DECobs=IFUcencoords.dec.value
             else:
-                RAobs=org_img.header[f'PO{tel}RA'.capitalize{}]
-                DECobs=org_img.header[f'PO{tel}DE'.capitalize{}]
-                PAobs=org_img.header[f'PO{tel}PA'.capitalize{}]
+                RAobs=org_img._header[f'PO{tel}RA'.capitalize()]
+                DECobs=org_img._header[f'PO{tel}DE'.capitalize()]
+                PAobs=org_img._header[f'PO{tel}PA'.capitalize()]
         else:
             RAobs=0
             DECobs=0
