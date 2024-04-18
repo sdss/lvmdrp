@@ -1370,6 +1370,9 @@ def create_summary_file() -> pd.DataFrame:
     # sort frames
     df = df.sort_values(['mjd', 'expnum', 'camera'])
 
+    # add columns
+    df['drpver'] = DRPVER
+
     # write FITS file
     drpall = path.full('lvm_drpall', drpver=DRPVER)
     b = fits.BinTableHDU(Table.from_pandas(df), name='SUMMARY')
