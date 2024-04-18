@@ -3979,7 +3979,6 @@ def detrend_frame(
     if reject_cr:
         log.info("rejecting cosmic rays")
         rdnoise = detrended_img.getHdrValue("AMP1 RDNOISE")
-        log.info(f"using read noise {rdnoise}")
         detrended_img.reject_cosmics(gain=1.0, rdnoise=rdnoise, rlim=1.3, iterations=5, fwhm_gauss=[2.75, 2.75],
                                      replace_box=[10,2], replace_error=1e6, verbose=True, inplace=True)
 

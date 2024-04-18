@@ -14,6 +14,7 @@ from astropy.stats.biweight import biweight_location, biweight_scale
 from scipy import ndimage, signal
 from scipy import interpolate
 
+from lvmdrp import log
 from lvmdrp.core.constants import CON_LAMPS, ARC_LAMPS
 from lvmdrp.core.plot import plt
 from lvmdrp.core.apertures import Apertures
@@ -2469,19 +2470,19 @@ class Image(Header):
 
         # subtract bias if applicable
         if (bias > 0.0) and verbose:
-            print('Subtract bias level %f from image' % (bias))
+            log.info(f'Subtract bias level {bias:.2f} from image')
         img = img - bias
         img_original = img_original - bias
 
         # apply gain factor to data if applicable
         if (gain != 1.0) and verbose:
-            print('  Convert image from ADUs to electrons using a gain factor of %f' % (gain))
+            log.info(f'  Convert image from ADUs to electrons using a gain factor of {gain:.2f}')
         img = img * gain
         img_original = img_original * gain
 
         # compute noise using read-noise value
         if (rdnoise > 0.0) and verbose:
-            print('  A value of %f is used for the electron read-out noise.' % rdnoise)
+            log.info(f'  A value of {rdnoise:.2f} is used for the electron read-out noise')
         img_original._error = numpy.sqrt((numpy.clip(img_original._data, a_min=0.0, a_max=None) + rdnoise**2))
 
         select = numpy.zeros(img._dim, dtype=bool)
@@ -2492,7 +2493,7 @@ class Image(Header):
         out = img
         for i in range(iterations):
             if verbose:
-                print('  Start iteration %i' % (i+1))
+                log.info(f'  Start iteration {i+1}')
 
             # create smoothed noise fromimage
             noise = out.medianImg((box_y, box_x))
@@ -2522,7 +2523,7 @@ class Image(Header):
             if verbose:
                 dim = img_original._dim
                 det_pix = numpy.sum(select)
-                print('  Total number of detected cosmics: %i out of %i pixels' % (int(det_pix), dim[0] * dim[1]))
+                log.info(f'  Total number of detected cosmics: {det_pix} out of {dim[0] * dim[1]} pixels')
 
             if i == iterations-1:
                 img_original.replace_subselect(select, mask=True)  # set the new mask
