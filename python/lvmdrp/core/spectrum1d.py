@@ -163,7 +163,7 @@ def _cross_match_float(
     stretching and shifting the first spectrum and computing the cross
     correlation with the second spectrum. The best cross correlation is
     defined as the fractional-pixel offset with the highest correlation value.
-    The spectra are "peak-normalized" before correlating, making all peaks 
+    The spectra are "peak-normalized" before correlating, making all peaks
     about 1 unit in height.
 
     This is used for measuring fiber shifts during the night
