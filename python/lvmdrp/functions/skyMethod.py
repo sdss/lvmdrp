@@ -1637,6 +1637,9 @@ def quick_sky_subtraction(in_cframe, out_sframe, band=np.array((7238, 7242, 7074
         method of computing sky continuum, by default "cont"
 
     """
+    print('************************************')
+    print('********* SUBTRACTING SKY **********')
+    print('************************************')
 
     cframe = lvmCFrame.from_file(in_cframe)
     # wave = cframe._wave
@@ -1931,7 +1934,7 @@ def polynomial_fit_with_outliers(spectrum_table, degree=3, sigma_lower=3, sigma_
     return output_table
 
 
-def create_skysub_spectrum(hdu: fits.HDUList = None, tel: str,
+def create_skysub_spectrum(hdu: fits.HDUList, tel: str,
                            wmin: int = 3600, wmax: int = 9800, method: str = 'nearest') -> np.array:
     """ Create spectrum for sky subtraction
 
@@ -1963,6 +1966,8 @@ def create_skysub_spectrum(hdu: fits.HDUList = None, tel: str,
 
     if method == 'kls_nearest_poly':
 
+        print(f'Using method: {method}')
+
         # choose which sky data to use (nearest)
         cordsci = SkyCoord(sci.header["RA"], sci.header["DEC"], unit="deg")
         cordskye = SkyCoord(skye.header["RA"], skye.header["DEC"], unit="deg")
@@ -1973,8 +1978,8 @@ def create_skysub_spectrum(hdu: fits.HDUList = None, tel: str,
 
         sciextensiondir={'sci':'SCI', 'skye':'SKYE', 'skyw':'SKYW'}
         skyextensiondir={'sci':sky_input, 'skye':'SKYE', 'skyw':'SKYW'}
-        sci_tab = Table(hadu[sciextensiondir[tel]].data)
-        sky_tab = Table(hadu[skyextensiondir[tel]].data)
+        sci_tab = Table(hdu[sciextensiondir[tel]].data)
+        sky_tab = Table(hdu[skyextensiondir[tel]].data)
 
         # fit continuum in sci and sky using polynomial
         xsci = polynomial_fit_with_outliers(sci_tab, degree=4, sigma_lower=3, sigma_upper=1, grow=5)
