@@ -25,7 +25,6 @@ from lvmdrp.core.constants import SPEC_CHANNELS
 
 ORIG_MASTER_DIR = os.getenv("LVM_MASTER_DIR")
 
-
 def mjd_from_expnum(expnum):
     """Returns the MJD for the given exposure number
 
@@ -178,7 +177,7 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
         # detrend frame
         image_tasks.detrend_frame(in_image=psci_path, out_image=dsci_path,
                                   in_bias=mbias_path, in_dark=mdark_path, in_pixelflat=mpixflat_path,
-                                  in_slitmap=Table(drp.fibermap.data), reject_cr=False)
+                                  in_slitmap=Table(drp.fibermap.data), reject_cr=True)
 
         # subtract straylight
         if sci_imagetyp == "flat":
