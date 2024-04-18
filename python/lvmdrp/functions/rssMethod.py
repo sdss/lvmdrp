@@ -745,9 +745,10 @@ def shift_wave_skylines(in_rss: str, out_rss: str, channel: str):
         Output RSS FITS file with the shifted wavelength maps
     """
 
-    print('************************************************')
-    print('***** CORRECTING WAVELENGTH USING SKYLINES *****')
-    print('************************************************')
+    # print('************************************************')
+    # print('***** CORRECTING WAVELENGTH USING SKYLINES *****')
+    # print('************************************************')
+    log.info("correcting wavelength using skylines")
 
 
     # GB hand picked isolated bright lines across each channel which are not doublest in UVES atlas
@@ -777,13 +778,13 @@ def shift_wave_skylines(in_rss: str, out_rss: str, channel: str):
 
     #Average offsets for different skylines in each channel, apply to trace, and write them in header
     meanoffset=numpy.nanmean(specoffset, axis=0)
-    print('Applying the following offsets [Angstroms] in [b,r,z] channels:', meanoffset)
+    log.info(f'Applying the following offsets [Angstroms] in [b,r,z] channels: {meanoffset}')
     rss._wave_trace['COEFF'].data[sel1,0] -= meanoffset[0]
     rss._wave_trace['COEFF'].data[sel2,0] -= meanoffset[1]
     rss._wave_trace['COEFF'].data[sel3,0] -= meanoffset[2]
-    rss._header[f'SKYOFF_{channel}1']=(f'{meanoffset[0]}', f'Mean sky line offset in {channel}1 [Angs]')
-    rss._header[f'SKYOFF_{channel}2']=(f'{meanoffset[1]}', f'Mean sky line offset in {channel}2 [Angs]')
-    rss._header[f'SKYOFF_{channel}3']=(f'{meanoffset[2]}', f'Mean sky line offset in {channel}3 [Angs]')
+    rss._header[f'HIERARCH WAVE SKYOFF_{channel}1']=(f'{meanoffset[0]}', f'Mean sky line offset in {channel}1 [Angs]')
+    rss._header[f'HIERARCH WAVE SKYOFF_{channel}2']=(f'{meanoffset[1]}', f'Mean sky line offset in {channel}2 [Angs]')
+    rss._header[f'HIERARCH WAVE SKYOFF_{channel}3']=(f'{meanoffset[2]}', f'Mean sky line offset in {channel}3 [Angs]')
 
     #write updated wobject
     log.info(f"writing updated wobject file '{os.path.basename(out_rss)}'")
@@ -791,32 +792,32 @@ def shift_wave_skylines(in_rss: str, out_rss: str, channel: str):
 
     # Make QA plots showing offsets for each sky line in each channel
     for i in range(len(skylines)):
-        fig, ax = plt.subplots() 
+        fig, ax = plt.subplots()
         ax.plot(fiberid[sel1], offsets[i,sel1], label='Spec1', color='red', alpha=0.5)
-        ax.plot(fiberid[sel2], offsets[i,sel2], label='Spec2', color='green', alpha=0.5)   
+        ax.plot(fiberid[sel2], offsets[i,sel2], label='Spec2', color='green', alpha=0.5)
         ax.plot(fiberid[sel3], offsets[i,sel3], label='Spec3', color='blue', alpha=0.5)
-        ax.plot(fiberid[sel1], numpy.repeat(specoffset[i,0], len(fiberid[sel1])), linestyle='--', color='red')   
-        ax.plot(fiberid[sel2], numpy.repeat(specoffset[i,1], len(fiberid[sel2])), linestyle='--', color='green')   
-        ax.plot(fiberid[sel3], numpy.repeat(specoffset[i,2], len(fiberid[sel3])), linestyle='--', color='blue')   
-        ax.plot(fiberid[sel1], numpy.repeat(meanoffset[0], len(fiberid[sel1])), linestyle='-', color='red')   
-        ax.plot(fiberid[sel2], numpy.repeat(meanoffset[1], len(fiberid[sel2])), linestyle='-', color='green')   
-        ax.plot(fiberid[sel3], numpy.repeat(meanoffset[2], len(fiberid[sel3])), linestyle='-', color='blue')   
-        ax.hlines(0, 0, 1944, linestyle='--', color='black', alpha=0.3)   
-        ax.hlines(+0.05, 0, 1944, linestyle=':', color='black', alpha=0.3)   
-        ax.hlines(-0.05, 0, 1944, linestyle=':', color='black', alpha=0.3)   
+        ax.plot(fiberid[sel1], numpy.repeat(specoffset[i,0], len(fiberid[sel1])), linestyle='--', color='red')
+        ax.plot(fiberid[sel2], numpy.repeat(specoffset[i,1], len(fiberid[sel2])), linestyle='--', color='green')
+        ax.plot(fiberid[sel3], numpy.repeat(specoffset[i,2], len(fiberid[sel3])), linestyle='--', color='blue')
+        ax.plot(fiberid[sel1], numpy.repeat(meanoffset[0], len(fiberid[sel1])), linestyle='-', color='red')
+        ax.plot(fiberid[sel2], numpy.repeat(meanoffset[1], len(fiberid[sel2])), linestyle='-', color='green')
+        ax.plot(fiberid[sel3], numpy.repeat(meanoffset[2], len(fiberid[sel3])), linestyle='-', color='blue')
+        ax.hlines(0, 0, 1944, linestyle='--', color='black', alpha=0.3)
+        ax.hlines(+0.05, 0, 1944, linestyle=':', color='black', alpha=0.3)
+        ax.hlines(-0.05, 0, 1944, linestyle=':', color='black', alpha=0.3)
         ax.legend()
         ax.set_ylim(-0.4,0.4)
         ax.set_title(f'{rss._header["EXPOSURE"]} - {channel} - {skylines[i]}')
         ax.set_xlabel('Fiber ID')
         ax.set_ylabel(r'$\Delta \lambda [\AA]$')
-    
+
         save_fig(
         fig,
         product_path=out_rss,
         to_display=False,
         figure_path="qa",
         label=f"skylineshift_{skylines[i]}")
-    
+
 
 
 # TODO:
