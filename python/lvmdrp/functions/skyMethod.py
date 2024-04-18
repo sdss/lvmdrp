@@ -1706,11 +1706,11 @@ def quick_sky_subtraction(in_cframe, out_sframe, band=np.array((7238, 7242, 7074
     sky_hdu.writeto(skytable, overwrite=True)
 
     # TODO - deal with error in sky-subtracted data ; replaced "error_c"
+    # TODO - deal properly with the error, sky, and sky_error
+    # this is incorrect
     error_c = cframe._error
-
-    # propagate cframe extensions
-    sky_c = cframe._sky
-    sky_error = cframe._sky_error
+    sky_c = cframe._sky_east
+    sky_error = cframe._sky_east_error
 
     sframe = lvmSFrame(data=skydata, error=error_c, mask=cframe._mask, sky=sky_c, sky_error=sky_error,
                        wave=cframe._wave, lsf=cframe._lsf, header=cframe._header, slitmap=cframe._slitmap)
