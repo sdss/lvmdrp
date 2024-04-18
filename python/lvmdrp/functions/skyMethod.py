@@ -1671,18 +1671,13 @@ def quick_sky_subtraction(in_cframe, out_sframe, band=np.array((7238, 7242, 7074
     # read sky table hdu
     sky_hdu = prep_input_simplesky_mean(in_cframe)
 
-    # choose which sky data to use
-    sci = SkyCoord(sky_hdu["SCI"].header["RA"], sky_hdu["SCI"].header["DEC"], unit="deg")
-    skyw = SkyCoord(sky_hdu["SKYW"].header["RA"], sky_hdu["SKYW"].header["DEC"], unit="deg")
-    skye = SkyCoord(sky_hdu["SKYE"].header["RA"], sky_hdu["SKYE"].header["DEC"], unit="deg")
-    wsep = sci.separation(skyw)
-    esep = sci.separation(skye)
-    sky_input = "SKYW" if wsep < esep else 'SKYE'
-
     # create spectrum for sky subtraction
-    scisub = create_skysub_spectrum(sky_hdu, sci_input="SCI", sky_input=sky_input, method=skymethod)
-    skyesub = create_skysub_spectrum(sky_hdu, sci_input="SKYE", sky_input="SKYE", method=skymethod)
-    skywsub = create_skysub_spectrum(sky_hdu, sci_input="SKYW", sky_input="SKYW", method=skymethod)
+    #scisub = create_skysub_spectrum(sky_hdu, sci_input="SCI", sky_input=sky_input, method=skymethod)
+    #skyesub = create_skysub_spectrum(sky_hdu, sci_input="SKYE", sky_input="SKYE", method=skymethod)
+    #skywsub = create_skysub_spectrum(sky_hdu, sci_input="SKYW", sky_input="SKYW", method=skymethod)
+    scisky = create_skysub_spectrum(sky_hdu, tel='sci', method=skymethod)
+    skyesky = create_skysub_spectrum(sky_hdu, tel="skye", method=skymethod)
+    skywsky = create_skysub_spectrum(sky_hdu, tel="skyw", method=skymethod)
 
     # select correct fibers
     data = cframe._data
@@ -1693,9 +1688,9 @@ def quick_sky_subtraction(in_cframe, out_sframe, band=np.array((7238, 7242, 7074
 
     # sky subtract each spectrum
     skydata = data.copy()
-    skydata[scifibers] = data[scifibers] - scisub
-    skydata[skyefibers] = data[skyefibers] - skyesub
-    skydata[skywfibers] = data[skywfibers] - skywsub
+    skydata[scifibers] = data[scifibers] - scisky
+    skydata[skyefibers] = data[skyefibers] - skyesky
+    skydata[skywfibers] = data[skywfibers] - skywsky
 
     # write out sky table to ancillary file
     mjd = cframe._header['MJD']
@@ -1936,69 +1931,86 @@ def polynomial_fit_with_outliers(spectrum_table, degree=3, sigma_lower=3, sigma_
     return output_table
 
 
-def create_skysub_spectrum(hdu: fits.HDUList = None, sci_input: str = "SCI", sky_input: str = "SKY",
-                           wmin: int = 3600, wmax: int = 9000, method: str = 'cont') -> np.array:
+def create_skysub_spectrum(hdu: fits.HDUList = None, tel: str,
+                           wmin: int = 3600, wmax: int = 9800, method: str = 'nearest') -> np.array:
     """ Create spectrum for sky subtraction
 
     Parameters
     ----------
     hdu : fits.HDUList, optional
-        the sky data from the lvmCFrame file, by default None
-    sci_input : str, optional
-        which extension to use as science, by default "SCI"
-    sky_input : str, optional
-        which extension to use as sky, by default "SKY"
+        the skytable data from the lvmCFrame file, by default None
+    tel : str
+        for which telescope is the sky being constructed
     wmin : int, optional
         the wavelength minimum bound, by default 6200
     wmax : int, optional
         the wavelength maximum bound, by default 6450
     method : str, optional
-        the method of constructing the sky continuum, by default "cont"
+        the method of constructing the sky continuum, by default "nearest"
 
     Returns
     -------
     np.array
         the output spectrum for sky subtraction
     """
-    # get the science and sky data, convert to tables
-    sci = hdu[sci_input]
-    sky = hdu[sky_input]
-    sci_tab = Table(sci.data)
-    sky_tab = Table(sky.data)
 
-    if method == 'cont':
+    # get the science and sky data, convert to tables
+    sci = hdu['SCI']
+    skye = hdu['SKYE']
+    skyw = hdu['SKYW']
+    sskye = hdu['SKYE_SUPER']
+    sskye = hdu['SKYW_SUPER']
+
+    if method == 'kls_nearest_poly':
+
+        # choose which sky data to use (nearest)
+        cordsci = SkyCoord(sci.header["RA"], sci.header["DEC"], unit="deg")
+        cordskye = SkyCoord(skye.header["RA"], skye.header["DEC"], unit="deg")
+        cordskyw = SkyCoord(skyw.header["RA"], skyw.header["DEC"], unit="deg")
+        wsep = cordsci.separation(cordskyw)
+        esep = cordsci.separation(cordskye)
+        sky_input = "SKYW" if wsep < esep else 'SKYE'
+
+        sciextensiondir={'sci':'SCI', 'skye':'SKYE', 'skyw':'SKYW'}
+        skyextensiondir={'sci':sky_input, 'skye':'SKYE', 'skyw':'SKYW'}
+        sci_tab = Table(hadu[sciextensiondir[tel]].data)
+        sky_tab = Table(hadu[skyextensiondir[tel]].data)
+
+        # fit continuum in sci and sky using polynomial
         xsci = polynomial_fit_with_outliers(sci_tab, degree=4, sigma_lower=3, sigma_upper=1, grow=5)
         xsky = polynomial_fit_with_outliers(sky_tab, degree=4, sigma_lower=3, sigma_upper=1, grow=5)
         xsci['LINES'] = xsci['FLUX'] - xsci['CONT']
         xsky['LINES'] = xsky['FLUX'] - xsky['CONT']
 
-    # select wavelength range subset for bisection
-    sci_subset = sci_tab[sci_tab["WAVE"] > wmin]
-    sci_subset = sci_subset[sci_subset["WAVE"] < wmax]
+        # select wavelength range subset for bisection
+        sci_subset = sci_tab[sci_tab["WAVE"] > wmin]
+        sci_subset = sci_subset[sci_subset["WAVE"] < wmax]
 
-    sky_subset = sky_tab[sky_tab["WAVE"] > wmin]
-    sky_subset = sky_subset[sky_subset["WAVE"] < wmax]
+        sky_subset = sky_tab[sky_tab["WAVE"] > wmin]
+        sky_subset = sky_subset[sky_subset["WAVE"] < wmax]
 
-    # set bounds
-    rmin = 0.5
-    rmax = 1.5
+        # set bounds
+        rmin = 0.5
+        rmax = 1.5
 
-    minimum = ksl_bisection(
-        fit_func, rmin, rmax, tol=0.001, maxiter=8, args=(sci_subset["FLUX"], sky_subset["FLUX"])
-    )
+        minimum = ksl_bisection(
+            fit_func, rmin, rmax, tol=0.001, maxiter=8, args=(sci_subset["FLUX"], sky_subset["FLUX"])
+        )
+
+
 
     # create spectrum for sky subtraction using entire wavelength range
-    if method == 'cont':
+    #if method == 'cont':
         skysub = xsky['CONT'] + minimum * sky_tab["FLUX"]
-    else:
-        skysub = minimum * sky_tab["FLUX"]
+    #else:
+    #    skysub = minimum * sky_tab["FLUX"]
 
-    log.info(f"Results {minimum} with wmin {wmin} and wmax {wmax}.")
+        log.info(f"Results {minimum} with wmin {wmin} and wmax {wmax}.")
 
     # update the main sci_input hdu extension with new columns
     # if we updated the table with cont and lines info
-    if method == 'cont':
-        hdu[sci_input] = fits.BinTableHDU(xsci, name=sci_input)
+    #if method == 'cont':
+        #hdu[sciextensiondir[tel]] = fits.BinTableHDU(xsci, name=sciextensiondir[tel])
 
     # plt.figure(1,(6,6))
     # plt.figure(1,(8,6))
