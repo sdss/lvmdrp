@@ -19,6 +19,8 @@ from lvmdrp.utils.cluster import run_cluster
 from lvmdrp.functions.run_quickdrp import quick_science_reduction
 from lvmdrp.functions.run_twilights import reduce_twilight_sequence, MASK_BANDS
 
+from sdss_access import Access
+
 
 class IntRangeType(click.ParamType):
     name = 'int_list'
@@ -224,6 +226,30 @@ def erase(drpver: str):
         click.echo(f'Path {path} does not exist.')
         return
     shutil.rmtree(path)
+
+
+@cli.command(short_help='Download the master calibrations')
+@click.option('-k', '--kind', type=str, default='*', help='the kind of files to download, e.g "pixmask".', show_default=True)
+@click.option('-m', '--mjd', type=str, default='*', help='the MJD folder to download', show_default=True)
+@click.option('-c', '--camera', type=str, default='*', help='the camera to download, e.g. "b*" or "b1".', show_default=True)
+def get_calibs(kind, mjd, camera):
+    """ Download the master calibration frames
+
+    Downloads the master calibration frames from the Utah SAS in LVM_SANDBOX/calib.  This command
+    only downloads files when they do not yet exist on your local system or when the remote files
+    are newer.
+
+    The syntax for the calibration files are $LVM_SANDBOX/calib/[mjd]/lvm-m[kind]-[camera].fits.
+    "mjd" is the MJD directory to download. "kind" is the kind of calib file to download, e.g. pixmask,
+    bias, fiberflat, without the leading "m".  "camera" is the camera, can be a specific channel, e.g "b1"
+    or all channels with "b*".
+
+    """
+    a = Access()
+    a.remote()
+    a.add('lvm_calib', kind=kind, mjd=mjd, camera=camera)
+    a.set_stream()
+    a.commit()
 
 
 @cli.command('cluster', short_help='Submit a Utah cluster run')
