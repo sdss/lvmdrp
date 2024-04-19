@@ -22,7 +22,7 @@ from tqdm import tqdm
 
 from typing import List, Tuple
 
-from lvmdrp import log
+from lvmdrp import log, __version__ as DRPVER
 from lvmdrp.core.constants import CONFIG_PATH, SPEC_CHANNELS, ARC_LAMPS
 from lvmdrp.utils.decorators import skip_on_missing_input_path, drop_missing_input_paths
 from lvmdrp.utils.bitmask import QualityFlag
@@ -3842,6 +3842,9 @@ def preproc_raw_frame(
     if saturated_mask.sum() / proc_img._mask.size > 0.01:
         drpqual += "SATURATED"
     proc_img.setHdrValue("DRPQUAL", value=drpqual.value, comment="data reduction quality flag")
+
+    # set drp tag version
+    proc_img.setHdrValue("DRPVER", DRPVER, comment='data reduction pipeline software tag')
 
     # write out FITS file
     log.info(f"writing preprocessed image to {os.path.basename(out_image)}")
