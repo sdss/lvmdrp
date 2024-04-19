@@ -1924,6 +1924,10 @@ def create_skysub_spectrum(hdu: fits.HDUList, tel: str,
         the output spectrum for sky subtraction
     """
 
+    if method not in ['farlines_nearcont', 'nearest']:
+        raise ValueError(f"sky_method {method} does not exist")
+
+
     # get the science and sky data, convert to tables
     hdusci = hdu['SCI']
     hduskye = hdu['SKYE']
@@ -2002,6 +2006,24 @@ def create_skysub_spectrum(hdu: fits.HDUList, tel: str,
 
         # create spectrum for sky subtraction using entire wavelength range
         skysub = usecsky + minimum * uselsky
+
+
+    # method using continuum from nearest sky and lines from further sky
+    # scaling lines on a per family basis using Sebastian's code
+    elif method == 'families':
+
+        if wsep < esep :
+            uselsky=lskyw
+            usecsky=cskyw
+        else:
+            uselsky=lskye
+            usecsky=cskye
+
+        # correcting sky line spectrum 
+        uselskycorr=uselsky
+        # uselskycorr=sebastian_function(lsci, uselsky)
+
+        skysub = usecsky + uselskycorr
 
 
     ## MAKING PLOTS FOR TESTING
