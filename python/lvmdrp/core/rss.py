@@ -3270,10 +3270,19 @@ def loadRSS(in_rss):
 class lvmFrame(RSS):
     """lvmFrame class"""
 
-    _BPARS = {"BUNIT": "electron", "BSCALE": 1, "BZERO": 0}
+    _BPARS = {"BUNIT": None, "BSCALE": 1.0, "BZERO": 0.0}
+
+    @classmethod
+    def header_from_hdulist(cls, hdulist):
+        header = hdulist["PRIMARY"].header
+        for kw, vl in cls._BPARS.items():
+            header[kw] = hdulist["FLUX"].header.pop(kw, vl)
+        return header
 
     @classmethod
     def from_hdulist(cls, hdulist):
+        header = cls.header_from_hdulist(hdulist)
+
         data = hdulist["FLUX"].data
         error = numpy.divide(1, hdulist["IVAR"].data, where=hdulist["IVAR"].data != 0, out=numpy.zeros_like(hdulist["IVAR"].data))
         error = numpy.sqrt(error)
@@ -3284,9 +3293,6 @@ class lvmFrame(RSS):
         lsf_trace = Table(hdulist["LSF_TRACE"].data)
         superflat = hdulist["SUPERFLAT"].data
         slitmap = Table(hdulist["SLITMAP"].data)
-        header = hdulist["PRIMARY"].header
-        for kw, vl in cls._BPARS.items():
-            header[kw] = hdulist["FLUX"].header.pop(kw, vl)
         return cls(data=data, error=error, mask=mask, header=header,
                    wave_trace=wave_trace, lsf_trace=lsf_trace,
                    cent_trace=cent_trace, width_trace=width_trace,
@@ -3337,17 +3343,33 @@ class lvmFrame(RSS):
         self._superflat = superflat
         return self._superflat
 
+    def update_header(self):
+        # update flux header
+        for kw in ["BUNIT", "BSCALE", "BZERO"]:
+            if kw in self._header:
+                self._template["FLUX"].header[kw] = self._header.get(kw)
+
+        # update primary header
+        self._template["PRIMARY"].header.update(self._header)
+        del self._template["PRIMARY"].header["WCS*"]
+        del self._template["PRIMARY"].header["CDELT*"]
+        del self._template["PRIMARY"].header["CRVAL*"]
+        del self._template["PRIMARY"].header["CRPIX*"]
+        del self._template["PRIMARY"].header["CTYPE*"]
+        del self._template["PRIMARY"].header["CUNIT*"]
+
+        # update WCS
+        wcs = self.eval_wcs()
+        [hdu.header.update(wcs.to_header()) for hdu in self._template if hdu.is_image and hdu.name != "PRIMARY"]
+
     def loadFitsData(self, in_file):
         self = lvmFrame.from_file(in_file)
         return self
 
     def writeFitsData(self, out_file):
-        # update flux header
-        for kw, vl in self._BPARS.items():
-            if kw in self._header:
-                self._template["FLUX"].header[kw] = self._header.pop(kw, vl)
-        # update primary header
-        self._template["PRIMARY"].header.update(self._header)
+
+        # update headers
+        self.update_header()
         # fill in rest of the template
         self._template["FLUX"].data = self._data
         self._template["IVAR"].data = numpy.divide(1, self._error**2, where=self._error != 0, out=numpy.zeros_like(self._error))
@@ -3358,116 +3380,26 @@ class lvmFrame(RSS):
         self._template["WIDTH_TRACE"] = pyfits.BinTableHDU(data=self._width_trace, name="WIDTH_TRACE")
         self._template["SUPERFLAT"].data = self._superflat
         self._template["SLITMAP"] = pyfits.BinTableHDU(data=self._slitmap, name="SLITMAP")
-        # update header information with the WCS
-        [hdu.header.update(self.eval_wcs().to_header()) for hdu in self._template if hdu.is_image and hdu.name != "PRIMARY"]
-        self._template.writeto(out_file, overwrite=True)
-
-
-class lvmCFrame(RSS):
-    """lvmCFrame class"""
-
-    @classmethod
-    def from_hdulist(cls, hdulist):
-        header = hdulist["PRIMARY"].header
-        data = hdulist["FLUX"].data
-        error = numpy.divide(1, hdulist["IVAR"].data, where=hdulist["IVAR"].data != 0, out=numpy.zeros_like(hdulist["IVAR"].data))
-        error = numpy.sqrt(error)
-        mask = hdulist["MASK"].data
-        wave = hdulist["WAVE"].data
-        lsf = hdulist["LSF"].data
-        sky_east = hdulist["SKY_EAST"].data
-        sky_east_error = numpy.divide(1, hdulist["SKY_EAST_IVAR"].data, where=hdulist["SKY_EAST_IVAR"].data != 0, out=numpy.zeros_like(hdulist["SKY_EAST_IVAR"].data))
-        sky_east_error = numpy.sqrt(sky_east_error)
-        sky_west = hdulist["SKY_WEST"].data
-        sky_west_error = numpy.divide(1, hdulist["SKY_WEST_IVAR"].data, where=hdulist["SKY_WEST_IVAR"].data != 0, out=numpy.zeros_like(hdulist["SKY_WEST_IVAR"].data))
-        sky_west_error = numpy.sqrt(sky_west_error)
-        slitmap = Table(hdulist["SLITMAP"].data)
-        return cls(data=data, error=error, mask=mask, header=header,
-                   wave=wave, lsf=lsf,
-                   sky_east=sky_east, sky_east_error=sky_east_error,
-                   sky_west=sky_west, sky_west_error=sky_west_error,
-                   slitmap=slitmap)
-
-    @classmethod
-    def from_file(cls, in_file):
-        with pyfits.open(in_file) as hdulist:
-            return cls.from_hdulist(hdulist)
-
-    def __init__(self, data=None, error=None, mask=None, header=None, slitmap=None, wave=None, lsf=None,
-                 sky_east=None, sky_east_error=None, sky_west=None, sky_west_error=None, **kwargs):
-        RSS.__init__(self, data=data, error=error, mask=mask, header=header,
-                     sky_east=sky_east, sky_east_error=sky_east_error,
-                     sky_west=sky_west, sky_west_error=sky_west_error,
-                     slitmap=slitmap)
-
-        self.set_wave_array(wave)
-        self.set_lsf_array(lsf)
-
-        self._blueprint = dp.load_blueprint(name="lvmCFrame")
-        self._template = dp.dump_template(dataproduct_bp=self._blueprint, save=False)
-
-        if header is not None:
-            self.set_header(header, **kwargs)
-        else:
-            self._header = None
-
-    def set_header(self, orig_header, **kwargs):
-        """Set header"""
-        blueprint = dp.load_blueprint(name="lvmCFrame")
-        new_header = orig_header
-        new_cards = []
-        # iterate over PRIMARY and FLUX headers
-        for i in range(2):
-            for card in blueprint[f"hdu{i}"]["header"]:
-                kw = card["key"]
-                cm = card["comment"]
-                if kw.lower() in kwargs:
-                    new_cards.append((kw, kwargs[kw.lower()], cm))
-        new_header.update(new_cards)
-
-        new_header["CCD"] = ",".join([channel for channel in kwargs.get("channels", [])])
-        # update header with WCS
-        if self._wave is not None:
-            wcs = WCS(new_header)
-            wcs.spectral.wcs.cdelt[0] = self._wave[1] - self._wave[0]
-            wcs.spectral.wcs.crval[0] = self._wave[0]
-            new_header.update(wcs.to_header())
-        self._header = new_header
-        return self._header
-
-    def loadFitsData(self, in_file):
-        self = lvmCFrame.from_file(in_file)
-        return self
-
-    def writeFitsData(self, out_file):
-        # update flux header
-        for kw in ["BUNIT", "BSCALE", "BZERO"]:
-            if kw in self._header:
-                self._template["FLUX"].header[kw] = self._header.get(kw)
-        # update primary header
-        self._template["PRIMARY"].header.update(self._header)
-        # fill in rest of the template
-        self._template["FLUX"].data = self._data
-        self._template["IVAR"].data = numpy.divide(1, self._error**2, where=self._error != 0, out=numpy.zeros_like(self._error))
-        self._template["MASK"].data = self._mask.astype("uint8")
-        self._template["WAVE"].data = self._wave
-        self._template["LSF"].data = self._lsf
-        self._template["SKY_EAST"].data = self._sky_east
-        self._template["SKY_EAST_IVAR"].data = numpy.divide(1, self._sky_east_error**2, where=self._sky_east_error != 0, out=numpy.zeros_like(self._sky_east_error))
-        self._template["SKY_WEST"].data = self._sky_west
-        self._template["SKY_WEST_IVAR"].data = numpy.divide(1, self._sky_west_error**2, where=self._sky_west_error != 0, out=numpy.zeros_like(self._sky_west_error))
-        self._template["SLITMAP"] = pyfits.BinTableHDU(data=self._slitmap, name="SLITMAP")
-        # update header information with the WCS
-        [hdu.header.update(self.eval_wcs().to_header()) for hdu in self._template if hdu.is_image and hdu.name != "PRIMARY"]
         self._template.writeto(out_file, overwrite=True)
 
 
 class lvmFFrame(RSS):
     """lvmFFrame class"""
 
+    _BPARS = {"BUNIT": None, "BSCALE": 1.0, "BZERO": 0.0}
+
+    @classmethod
+    def header_from_hdulist(cls, hdulist):
+        header = hdulist["PRIMARY"].header
+        for kw, vl in cls._BPARS.items():
+            header[kw] = hdulist["FLUX"].header.pop(kw, vl)
+        return header
+
+
     @classmethod
     def from_hdulist(cls, hdulist):
-        header = hdulist["PRIMARY"].header
+        header = cls.header_from_hdulist(hdulist)
+
         data = hdulist["FLUX"].data
         error = numpy.divide(1, hdulist["IVAR"].data, where=hdulist["IVAR"].data != 0, out=numpy.zeros_like(hdulist["IVAR"].data))
         error = numpy.sqrt(error)
@@ -3535,17 +3467,32 @@ class lvmFFrame(RSS):
         self._header = new_header
         return self._header
 
+    def update_header(self):
+        # update flux header
+        for kw in ["BUNIT", "BSCALE", "BZERO"]:
+            if kw in self._header:
+                self._template["FLUX"].header[kw] = self._header.get(kw)
+
+        # update primary header
+        self._template["PRIMARY"].header.update(self._header)
+        del self._template["PRIMARY"].header["WCS*"]
+        del self._template["PRIMARY"].header["CDELT*"]
+        del self._template["PRIMARY"].header["CRVAL*"]
+        del self._template["PRIMARY"].header["CRPIX*"]
+        del self._template["PRIMARY"].header["CTYPE*"]
+        del self._template["PRIMARY"].header["CUNIT*"]
+
+        # update WCS
+        wcs = self.eval_wcs()
+        [hdu.header.update(wcs.to_header()) for hdu in self._template if hdu.is_image and hdu.name != "PRIMARY"]
+
     def loadFitsData(self, in_file):
         self = lvmFFrame.from_file(in_file)
         return self
 
     def writeFitsData(self, out_file):
-        # update flux header
-        for kw in ["BUNIT", "BSCALE", "BZERO"]:
-            if kw in self._header:
-                self._template["FLUX"].header[kw] = self._header.get(kw)
-        # update primary header
-        self._template["PRIMARY"].header.update(self._header)
+        # update headers
+        self.update_header()
         # fill in rest of the template
         self._template["FLUX"].data = self._data
         self._template["IVAR"].data = numpy.divide(1, self._error**2, where=self._error != 0, out=numpy.zeros_like(self._error))
@@ -3558,17 +3505,149 @@ class lvmFFrame(RSS):
         self._template["SKY_WEST_IVAR"].data = numpy.divide(1, self._sky_west_error**2, where=self._sky_west_error != 0, out=numpy.zeros_like(self._sky_west_error))
         self._template["FLUXCAL"] = pyfits.BinTableHDU(data=self._fluxcal, name="FLUXCAL")
         self._template["SLITMAP"] = pyfits.BinTableHDU(data=self._slitmap, name="SLITMAP")
-        # update header information with the WCS
-        [hdu.header.update(self.eval_wcs().to_header()) for hdu in self._template if hdu.is_image and hdu.name != "PRIMARY"]
+        self._template.writeto(out_file, overwrite=True)
+
+
+class lvmCFrame(RSS):
+    """lvmCFrame class"""
+
+    _BPARS = {"BUNIT": None, "BSCALE": 1.0, "BZERO": 0.0}
+
+    @classmethod
+    def header_from_hdulist(cls, hdulist):
+        header = hdulist["PRIMARY"].header
+        for kw, vl in cls._BPARS.items():
+            header[kw] = hdulist["FLUX"].header.pop(kw, vl)
+        return header
+
+
+    @classmethod
+    def from_hdulist(cls, hdulist):
+        header = cls.header_from_hdulist(hdulist)
+
+        data = hdulist["FLUX"].data
+        error = numpy.divide(1, hdulist["IVAR"].data, where=hdulist["IVAR"].data != 0, out=numpy.zeros_like(hdulist["IVAR"].data))
+        error = numpy.sqrt(error)
+        mask = hdulist["MASK"].data
+        wave = hdulist["WAVE"].data
+        lsf = hdulist["LSF"].data
+        sky_east = hdulist["SKY_EAST"].data
+        sky_east_error = numpy.divide(1, hdulist["SKY_EAST_IVAR"].data, where=hdulist["SKY_EAST_IVAR"].data != 0, out=numpy.zeros_like(hdulist["SKY_EAST_IVAR"].data))
+        sky_east_error = numpy.sqrt(sky_east_error)
+        sky_west = hdulist["SKY_WEST"].data
+        sky_west_error = numpy.divide(1, hdulist["SKY_WEST_IVAR"].data, where=hdulist["SKY_WEST_IVAR"].data != 0, out=numpy.zeros_like(hdulist["SKY_WEST_IVAR"].data))
+        sky_west_error = numpy.sqrt(sky_west_error)
+        slitmap = Table(hdulist["SLITMAP"].data)
+        return cls(data=data, error=error, mask=mask, header=header,
+                   wave=wave, lsf=lsf,
+                   sky_east=sky_east, sky_east_error=sky_east_error,
+                   sky_west=sky_west, sky_west_error=sky_west_error,
+                   slitmap=slitmap)
+
+    @classmethod
+    def from_file(cls, in_file):
+        with pyfits.open(in_file) as hdulist:
+            return cls.from_hdulist(hdulist)
+
+    def __init__(self, data=None, error=None, mask=None, header=None, slitmap=None, wave=None, lsf=None,
+                 sky_east=None, sky_east_error=None, sky_west=None, sky_west_error=None, **kwargs):
+        RSS.__init__(self, data=data, error=error, mask=mask, header=header,
+                     sky_east=sky_east, sky_east_error=sky_east_error,
+                     sky_west=sky_west, sky_west_error=sky_west_error,
+                     slitmap=slitmap)
+
+        self.set_wave_array(wave)
+        self.set_lsf_array(lsf)
+
+        self._blueprint = dp.load_blueprint(name="lvmCFrame")
+        self._template = dp.dump_template(dataproduct_bp=self._blueprint, save=False)
+
+        if header is not None:
+            self.set_header(header, **kwargs)
+        else:
+            self._header = None
+
+    def set_header(self, orig_header, **kwargs):
+        """Set header"""
+        blueprint = dp.load_blueprint(name="lvmCFrame")
+        new_header = orig_header
+        new_cards = []
+        # iterate over PRIMARY and FLUX headers
+        for i in range(2):
+            for card in blueprint[f"hdu{i}"]["header"]:
+                kw = card["key"]
+                cm = card["comment"]
+                if kw.lower() in kwargs:
+                    new_cards.append((kw, kwargs[kw.lower()], cm))
+        new_header.update(new_cards)
+
+        new_header["CCD"] = ",".join([channel for channel in kwargs.get("channels", [])])
+        # update header with WCS
+        if self._wave is not None:
+            wcs = WCS(new_header)
+            wcs.spectral.wcs.cdelt[0] = self._wave[1] - self._wave[0]
+            wcs.spectral.wcs.crval[0] = self._wave[0]
+            new_header.update(wcs.to_header())
+        self._header = new_header
+        return self._header
+
+    def update_header(self):
+        # update flux header
+        for kw in ["BUNIT", "BSCALE", "BZERO"]:
+            if kw in self._header:
+                self._template["FLUX"].header[kw] = self._header.get(kw)
+
+        # update primary header
+        self._template["PRIMARY"].header.update(self._header)
+        del self._template["PRIMARY"].header["WCS*"]
+        del self._template["PRIMARY"].header["CDELT*"]
+        del self._template["PRIMARY"].header["CRVAL*"]
+        del self._template["PRIMARY"].header["CRPIX*"]
+        del self._template["PRIMARY"].header["CTYPE*"]
+        del self._template["PRIMARY"].header["CUNIT*"]
+
+        # update WCS
+        wcs = self.eval_wcs()
+        [hdu.header.update(wcs.to_header()) for hdu in self._template if hdu.is_image and hdu.name != "PRIMARY"]
+
+    def loadFitsData(self, in_file):
+        self = lvmCFrame.from_file(in_file)
+        return self
+
+    def writeFitsData(self, out_file):
+        # update headers
+        self.update_header()
+        # fill in rest of the template
+        self._template["FLUX"].data = self._data
+        self._template["IVAR"].data = numpy.divide(1, self._error**2, where=self._error != 0, out=numpy.zeros_like(self._error))
+        self._template["MASK"].data = self._mask.astype("uint8")
+        self._template["WAVE"].data = self._wave
+        self._template["LSF"].data = self._lsf
+        self._template["SKY_EAST"].data = self._sky_east
+        self._template["SKY_EAST_IVAR"].data = numpy.divide(1, self._sky_east_error**2, where=self._sky_east_error != 0, out=numpy.zeros_like(self._sky_east_error))
+        self._template["SKY_WEST"].data = self._sky_west
+        self._template["SKY_WEST_IVAR"].data = numpy.divide(1, self._sky_west_error**2, where=self._sky_west_error != 0, out=numpy.zeros_like(self._sky_west_error))
+        self._template["SLITMAP"] = pyfits.BinTableHDU(data=self._slitmap, name="SLITMAP")
         self._template.writeto(out_file, overwrite=True)
 
 
 class lvmSFrame(RSS):
     """LVM SFrame product class for extracted sky data"""
 
+    _BPARS = {"BUNIT": None, "BSCALE": 1.0, "BZERO": 0.0}
+
+    @classmethod
+    def header_from_hdulist(cls, hdulist):
+        header = hdulist["PRIMARY"].header
+        for kw, vl in cls._BPARS.items():
+            header[kw] = hdulist["FLUX"].header.pop(kw, vl)
+        return header
+
+
     @classmethod
     def from_hdulist(cls, hdulist):
-        header = hdulist["PRIMARY"].header
+        header = cls.header_from_hdulist(hdulist)
+
         data = hdulist["FLUX"].data
         error = numpy.divide(1, hdulist["IVAR"].data, where=hdulist["IVAR"].data != 0, out=numpy.zeros_like(hdulist["IVAR"].data))
         error = numpy.sqrt(error)
@@ -3626,17 +3705,32 @@ class lvmSFrame(RSS):
         self._header = new_header
         return self._header
 
+    def update_header(self):
+        # update flux header
+        for kw in ["BUNIT", "BSCALE", "BZERO"]:
+            if kw in self._header:
+                self._template["FLUX"].header[kw] = self._header.get(kw)
+
+        # update primary header
+        self._template["PRIMARY"].header.update(self._header)
+        del self._template["PRIMARY"].header["WCS*"]
+        del self._template["PRIMARY"].header["CDELT*"]
+        del self._template["PRIMARY"].header["CRVAL*"]
+        del self._template["PRIMARY"].header["CRPIX*"]
+        del self._template["PRIMARY"].header["CTYPE*"]
+        del self._template["PRIMARY"].header["CUNIT*"]
+
+        # update WCS
+        wcs = self.eval_wcs()
+        [hdu.header.update(wcs.to_header()) for hdu in self._template if hdu.is_image and hdu.name != "PRIMARY"]
+
     def loadFitsData(self, in_file):
         self = lvmSFrame.from_file(in_file)
         return self
 
     def writeFitsData(self, out_file):
-        # update flux header
-        for kw in ["BUNIT", "BSCALE", "BZERO"]:
-            if kw in self._header:
-                self._template["FLUX"].header[kw] = self._header.get(kw)
-        # update primary header
-        self._template["PRIMARY"].header.update(self._header)
+        # update headers
+        self.update_header()
         # fill in rest of the template
         self._template["FLUX"].data = self._data
         self._template["IVAR"].data = numpy.divide(1, self._error**2, where=self._error != 0, out=numpy.zeros_like(self._error))
@@ -3646,8 +3740,6 @@ class lvmSFrame(RSS):
         self._template["SKY"].data = self._sky.astype("float32")
         self._template["SKY_IVAR"].data = numpy.divide(1, self._sky_error**2, where=self._sky_error != 0, out=numpy.zeros_like(self._sky_error))
         self._template["SLITMAP"] = pyfits.BinTableHDU(data=self._slitmap, name="SLITMAP")
-        # update header information with the WCS
-        [hdu.header.update(self.eval_wcs().to_header()) for hdu in self._template if hdu.is_image and hdu.name != "PRIMARY"]
         self._template.writeto(out_file, overwrite=True)
 
 
