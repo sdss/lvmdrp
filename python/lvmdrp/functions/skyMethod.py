@@ -1982,33 +1982,102 @@ def create_skysub_spectrum(hdu: fits.HDUList, tel: str,
     # uses Alfredo's spline continuum modeling routine
     elif method == 'gb_test':
 
-        wsci=Table(hdusci.data)['WAVE'].data
-        fsci=Table(hdusci.data)['FLUX'].data
-
-        wskye=Table(hduskye.data)['WAVE'].data
-        fskye=Table(hduskye.data)['FLUX'].data
-
-        wskyw=Table(hduskye.data)['WAVE'].data
-        fskyw=Table(hduskye.data)['FLUX'].data
-
         # do continuum vs line separation
+        specsci=Spectrum1D(wave=Table(hdusci.data)['WAVE'].data, data=Table(hdusci.data)['FLUX'].data, mask=np.zeros(len(Table(hdusci.data)), dtype=bool))
+        specskye=Spectrum1D(wave=Table(hduskye.data)['WAVE'].data, data=Table(hduskye.data)['FLUX'].data, mask=np.zeros(len(Table(hduskye.data)), dtype=bool))
+        specskyw=Spectrum1D(wave=Table(hduskyw.data)['WAVE'].data, data=Table(hduskyw.data)['FLUX'].data, mask=np.zeros(len(Table(hduskyw.data)), dtype=bool))
 
-        maskbands=[()]
-        cskye=fit_continuum(fskye, mask_bands: List[Tuple[float,float]],
-                  median_box: int, niter: int, threshold: Tuple[float,float]|float, **kwargs):
+        csci, csci_models, masked_pixels, knots = fit_continuum(spectrum=specsci, mask_bands=[], median_box=10, niter=1000, threshold=(2.0, 0.01), nknots=100)
+        cskye, cskye_models, masked_pixels, knots = fit_continuum(spectrum=specskye, mask_bands=[], median_box=10, niter=1000, threshold=(2.0, 0.01), nknots=100)
+        cskyw, cskyw_models, masked_pixels, knots = fit_continuum(spectrum=specskyw, mask_bands=[], median_box=10, niter=1000, threshold=(2.0, 0.01), nknots=100)
 
+        lsci=specsci._data-csci
+        lskye=specskye._data-cskye
+        lskyw=specskyw._data-cskyw
 
-        cskye, cskye_models, masked_pixels, knots = fit_continuum(spectrum=fskye, mask_bands=None, median_box=5, niter=10, threshold=(2.0, 0.5))
+        # choose which sky data to use (nearest)
+        cordsci = SkyCoord(hdusci.header["RA"], hdusci.header["DEC"], unit="deg")
+        cordskye = SkyCoord(hduskye.header["RA"], hduskye.header["DEC"], unit="deg")
+        cordskyw = SkyCoord(hduskyw.header["RA"], hduskyw.header["DEC"], unit="deg")
+        wsep = cordsci.separation(cordskyw)
+        esep = cordsci.separation(cordskye)
+
+        if wsep < esep :
+            uselsky=lskye
+            usecsky=cskyw
+        else:
+            uselsky=lskyw
+            usecsky=cskye
+
+        # set bounds
+        rmin = 0.5
+        rmax = 1.5
+
+        minimum = ksl_bisection(
+            fit_func, rmin, rmax, tol=0.001, maxiter=8, args=(lsci, uselsky)
+        )
+
+        # create spectrum for sky subtraction using entire wavelength range
+        skysub = usecsky + minimum * uselsky
+        log.info(f"Results {minimum} with wmin {wmin} and wmax {wmax}.")
 
 
         # MAKING PLOTS FOR TESTING
-        fig, ax = plt.subplots(figsize=(20, 5))
-        ax.plot(wsci, fskye)
-        ax.plot(wsci, cskye)
-        ax.set_ylim(-1e-14, 2e-14)
+        fig1, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(20, 15))
+        ax1.plot(specsci._wave, specsci._data)
+        ax1.plot(specsci._wave, csci)
+        ax1.set_ylim(-1e-15, 3e-14)
+        ax2.plot(specskye._wave, specskye._data)
+        ax2.plot(specskye._wave, cskye)
+        ax2.set_ylim(-1e-15, 2e-14)
+        ax3.plot(specskyw._wave, specskyw._data)
+        ax3.plot(specskyw._wave, cskyw)
+        ax3.set_ylim(-1e-15, 2e-14)
         plt.show()
 
-        skysub=np.zeros(len(wsci))
+        fig2, ax1 = plt.subplots(figsize=(20, 15))
+        ax1.plot(specsci._wave, lsci, label='Sci')
+        ax1.plot(specskye._wave, lskye, label='SkyE')
+        ax1.plot(specskyw._wave, lskyw, label='SkyW')
+        ax1.set_ylim(-1e-15, 2e-13)
+        ax1.set_xlim(6400, 6800)
+        ax1.legend()
+        plt.show()
+
+        fig3, ax1 = plt.subplots(figsize=(20, 15))
+        ax1.plot(specsci._wave, lsci, label='Sci')
+        ax1.plot(specskye._wave, lskye, label='SkyE')
+        ax1.plot(specskyw._wave, lskyw, label='SkyW')
+        ax1.set_ylim(-1e-15, 2e-13)
+        ax1.set_xlim(7700, 8100)
+        ax1.legend()
+        plt.show()
+        
+        fig4, ax1 = plt.subplots(figsize=(20, 15))
+        ax1.plot(specsci._wave, specsci._data, alpha=0.6, label='Sci')
+        ax1.plot(specsci._wave, specsci._data-skysub, alpha=0.6, label='Sci-Sky')  
+        ax1.set_ylim(-1e-15, 2e-13)
+        ax1.set_xlim(6400, 6800)
+        ax1.legend()
+        plt.show() 
+
+        fig5, ax1 = plt.subplots(figsize=(20, 15))
+        ax1.plot(specsci._wave, specsci._data, alpha=0.6, label='Sci')
+        ax1.plot(specsci._wave, specsci._data-skysub, alpha=0.6, label='Sci-Sky')  
+        ax1.set_ylim(-1e-15, 2e-13)
+        ax1.set_xlim(7700, 8100)
+        ax1.legend()
+        plt.show() 
+
+        fig6, ax1 = plt.subplots(figsize=(20, 15))
+        ax1.plot(specsci._wave, specsci._data, alpha=0.6, label='Sci')
+        ax1.plot(specsci._wave, specsci._data-skysub, alpha=0.6, label='Sci-Sky')  
+        ax1.set_ylim(-1e-15, 2e-13)
+        #ax1.set_xlim(00, 8100)
+        ax1.legend()
+        plt.show() 
+
+
 
 
 
