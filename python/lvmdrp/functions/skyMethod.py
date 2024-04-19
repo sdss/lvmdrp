@@ -1619,8 +1619,8 @@ def combine_skies(in_rss: str, out_rss, sky_weights: Tuple[float, float] = None)
     return rss, sky
 
 
-def quick_sky_subtraction(in_cframe, out_sframe, band=np.array((7238, 7242, 7074, 7084, 7194, 7265)),
-                          skip_subtraction=False, skymethod: str = 'cont'):
+def quick_sky_subtraction(in_cframe, out_sframe,
+                          skip_subtraction=False, skymethod: str = 'farlines_nearcont'):
     """ Quick sky refinement using the model in the final CFrame
 
     Parameters
