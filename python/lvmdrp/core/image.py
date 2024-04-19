@@ -19,7 +19,7 @@ from lvmdrp.core.constants import CON_LAMPS, ARC_LAMPS
 from lvmdrp.core.plot import plt
 from lvmdrp.core.apertures import Apertures
 from lvmdrp.core.header import Header
-from lvmdrp.core.spectrum1d import Spectrum1D
+from lvmdrp.core.spectrum1d import Spectrum1D, _cross_match_float
 
 
 def _parse_ccd_section(section):
@@ -606,6 +606,42 @@ class Image(Header):
 
     def __ge__(self, other):
         return self._data >= other
+
+    def measure_fiber_shifts(self, ref_image, columns=[500, 1000, 1500, 2000, 2500, 3000], column_width=25, shift_range=[-5,5]):
+        '''Measure the (thermal, flexure, ...) shift between the fiber (traces) in 2 detrended images in the y (cross dispersion) direction.
+
+        Uses cross-correlations between (medians of a number of) columns to determine
+        the shift between the fibers in image2 relative to ref_image. The measurement is performed
+        independently at each column in columns= using a median of +-column_width columns.
+
+        Parameters
+        ----------
+        ref_image: Image or numpy.ndarray
+            2D reference image
+        columns:  List[int]
+            List of columns to cross correlate.
+        column_width: int
+            window width around each value in columns to use
+        shift_range: List[int]
+            minimal and maximal value for shift
+
+        Returns
+        -------
+        numpy.ndarray[float]:
+            pixel shifts in columns
+        '''
+        if isinstance(ref_image, Image):
+            ref_data = ref_image._data
+        elif isinstance(ref_image, numpy.ndarray):
+            ref_data = ref_image
+
+        shifts = numpy.zeros(len(columns))
+        for j,c in enumerate(columns):
+            s1 = numpy.nanmedian(ref_data[50:-50,c-column_width:c+column_width], axis=1)
+            s2 = numpy.nanmedian(self._data[50:-50,c-column_width:c+column_width], axis=1)
+            _, shifts[j], _ = _cross_match_float(s1, s2, numpy.array([1.0]), [-5, 5])
+
+        return shifts
 
     def apply_pixelmask(self, mask=None):
         """Applies the mask to the data and error arrays, setting to nan when True and leaving the same value otherwise"""
