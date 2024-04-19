@@ -1906,7 +1906,7 @@ def polynomial_fit_with_outliers(spectrum_table, degree=3, sigma_lower=3, sigma_
 
 
 def create_skysub_spectrum(hdu: fits.HDUList, tel: str,
-                           wmin: int = 7000, wmax: int = 9000, method: str = 'nearest') -> np.array:
+                           wmin: int = 7000, wmax: int = 9000, method: str = 'ensenada') -> np.array:
     """ Create spectrum for sky subtraction
 
     Parameters
@@ -1960,8 +1960,7 @@ def create_skysub_spectrum(hdu: fits.HDUList, tel: str,
     print(f'Creating sky for telescope: {tel}')
     print(f'Using method: {method}')
 
-# Guille's method using continuum from nearest sky and lines from further sky
-    # uses Alfredo's spline continuum modeling routine
+    # Guille's method using continuum from nearest sky and lines from further sky
     if method == 'ensenada':
 
         if wsep < esep :
