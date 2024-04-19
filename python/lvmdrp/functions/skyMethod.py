@@ -1906,7 +1906,7 @@ def polynomial_fit_with_outliers(spectrum_table, degree=3, sigma_lower=3, sigma_
 
 
 def create_skysub_spectrum(hdu: fits.HDUList, tel: str,
-                           wmin: int = 3600, wmax: int = 9800, method: str = 'nearest') -> np.array:
+                           wmin: int = 7000, wmax: int = 9000, method: str = 'nearest') -> np.array:
     """ Create spectrum for sky subtraction
 
     Parameters
