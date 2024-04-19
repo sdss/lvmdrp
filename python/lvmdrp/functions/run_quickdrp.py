@@ -25,7 +25,6 @@ from lvmdrp.core.constants import SPEC_CHANNELS
 
 ORIG_MASTER_DIR = os.getenv("LVM_MASTER_DIR")
 
-
 def mjd_from_expnum(expnum):
     """Returns the MJD for the given exposure number
 
@@ -39,8 +38,10 @@ def mjd_from_expnum(expnum):
     int
         the MJD of the exposure
     """
-    rpath = path.expand("lvm_raw", camspec="*", mjd="*", hemi="s", expnum=expnum)[0]
-    mjd = path.extract("lvm_raw", rpath)["mjd"]
+    rpath = path.expand("lvm_raw", camspec="*", mjd="*", hemi="s", expnum=expnum)
+    if len(rpath) == 0:
+        raise ValueError(f"no raw frame found for exposure number {expnum}")
+    mjd = path.extract("lvm_raw", rpath[0])["mjd"]
     return int(mjd)
 
 
@@ -176,7 +177,7 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
         # detrend frame
         image_tasks.detrend_frame(in_image=psci_path, out_image=dsci_path,
                                   in_bias=mbias_path, in_dark=mdark_path, in_pixelflat=mpixflat_path,
-                                  in_slitmap=Table(drp.fibermap.data), reject_cr=False)
+                                  in_slitmap=Table(drp.fibermap.data), reject_cr=True)
 
         # subtract straylight
         if sci_imagetyp == "flat":
@@ -211,9 +212,15 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
 
         # stack spectrographs
         rss_tasks.stack_spectrographs(in_rsss=xsci_paths, out_rss=xsci_path)
+        if not os.path.exists(xsci_path):
+            log.error(f'No stacked file found: {xsci_path}. Skipping remaining pipeline.')
+            continue
 
         # wavelength calibrate
         rss_tasks.create_pixel_table(in_rss=xsci_path, out_rss=wsci_path, in_waves=mwave_paths, in_lsfs=mlsf_paths)
+
+        # correct thermal shift in wavelength direction
+        rss_tasks.shift_wave_skylines(in_rss=wsci_path, out_rss=wsci_path, channel=channel)
 
         # apply fiberflat correction
         rss_tasks.apply_fiberflat(in_rss=wsci_path, out_frame=frame_path, in_flats=mflat_paths)
@@ -236,6 +243,10 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
 
     # stitch channels
     fframe_paths = sorted(path.expand('lvm_frame', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver, kind='FFrame-?', expnum=expnum))
+    if len(fframe_paths) == 0:
+        log.error('No fframe files found.  Cannot join spectrograph channels. Exiting pipeline.')
+        return
+
     cframe_path = path.full("lvm_frame", drpver=drpver, tileid=sci_tileid, mjd=sci_mjd, expnum=sci_expnum, kind='CFrame')
     rss_tasks.join_spec_channels(in_fframes=fframe_paths, out_cframe=cframe_path, use_weights=True)
 

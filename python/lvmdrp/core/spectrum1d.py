@@ -6,12 +6,83 @@ from astropy.io import fits as pyfits
 from numpy import polynomial
 from scipy.linalg import norm
 from scipy import signal, interpolate, ndimage, sparse
-from scipy.ndimage import zoom
+from scipy.ndimage import zoom, median_filter
 from typing import List, Tuple
 
 from lvmdrp.utils import gaussian
 from lvmdrp.core import fit_profile
 from lvmdrp.core.header import Header
+
+
+def adaptive_smooth(data, start_width, end_width):
+    """
+    Smooth an array with a filter that adapts in size from start_width to end_width.
+    Parameters:
+    - data (numpy.array): The input array to be smoothed.
+    - start_width (int): The width of the smoothing kernel at the beginning of the array.
+    - end_width (int): The width of the smoothing kernel at the end of the array.
+    Returns:
+    - numpy.array: The smoothed array.
+    """
+    # Create an array of kernel sizes changing linearly from start_width to end_width
+    n_points = len(data)
+    kernel_sizes = numpy.linspace(start_width, end_width, n_points).astype(int)
+    # Output array initialization
+    smoothed_data = numpy.zeros_like(data)
+    # Apply varying filter
+    for i in range(n_points):
+        # Handle boundary effects by determining effective kernel size
+        half_width = kernel_sizes[i] // 2
+        start_index = max(0, i - half_width)
+        end_index = min(n_points, i + half_width + 1)
+        # Apply uniform filter to the local segment of the data
+        smoothed_data[i] = numpy.median(data[start_index:end_index])
+    return smoothed_data
+
+def find_continuum(spec_s,niter=15,thresh=0.8,median_box_max=100,median_box_min=1):
+    """
+    find the continuum from a spectrum by smoothing and masking the values above
+    the smoothed version in an iterative way.
+    Parameters:
+    - data (numpy.array): The input array from which we would like to find the continuum.
+    - niter  (int): Maximum number of iterations
+    - thresh (float): Threshold to compare the smoothed an unsmoother version
+    - median_box_max (float): Maximum size of the smoothing box
+    - median_box_min (float): Minumum size of the smoothing box
+    Returns:
+    - numpy.array: continuum spectrum.
+    """
+    median_box=median_box_max
+    spec_s_org = spec_s.copy()
+    mask = (spec_s>(-1)*numpy.abs(numpy.min(spec_s)))
+    #m_spec_s = adaptive_smooth(spec_s, median_box, int(median_box_max*0.5))
+    m_spec_s = median_filter(median_box, spec_s)
+    pixels = numpy.arange(0,spec_s.shape[0])
+    i_len_in = len(spec_s_org[mask])
+    for i in range(niter):
+        mask = mask & (numpy.divide(m_spec_s, spec_s, where=spec_s != 0, out=numpy.zeros_like(spec_s)) > thresh)
+        i_len = len(spec_s_org[mask])
+        if (i_len==i_len_in):
+            break
+        else:
+            i_len_in=i_len
+        spec_s = numpy.interp(pixels, pixels[mask], spec_s[mask])
+        m_spec_s = adaptive_smooth(spec_s, median_box, median_box_max)
+#        m_spec_s = median_filter(median_box, spec_s)
+        median_box = int(median_box*0.5)
+        if (median_box<median_box_min):
+            median_box=median_box_min
+    spec_s = numpy.interp(pixels, pixels[mask], spec_s_org[mask])
+    spec_s_out = spec_s
+#    s_spec_s = adaptive_smooth(spec_s, median_box_min, int(median_box_max*0.5))
+#    w1 = 1/(1+pixels)
+#    w2 = pixels
+#    wN = w1+w2
+#    w1 = w1/wN
+#    w2 = w2/wN
+#    print(w1,w2)
+#    spec_s_out = w1*spec_s + w2*s_spec_s
+    return spec_s_out
 
 
 def _spec_from_lines(
@@ -163,7 +234,7 @@ def _cross_match_float(
     stretching and shifting the first spectrum and computing the cross
     correlation with the second spectrum. The best cross correlation is
     defined as the fractional-pixel offset with the highest correlation value.
-    The spectra are "peak-normalized" before correlating, making all peaks 
+    The spectra are "peak-normalized" before correlating, making all peaks
     about 1 unit in height.
 
     This is used for measuring fiber shifts during the night
