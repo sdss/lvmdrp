@@ -356,6 +356,29 @@ def plot_wavesol_coeffs(ypix, coeffs, axs, title=None, labels=False):
     return axs
 
 
+def plot_fiber_thermal_shift(columns, column_shifts, ax=None, labels=False):
+    """"Plots the thermal shifts measured in the fiber centroids"""
+    if ax is None:
+        fig, ax = create_subplots(figsize=(15,5))
+
+    mean_shifts = np.nanmean(column_shifts)
+    std_shifts = np.nanstd(column_shifts)
+
+    ax.plot(columns, column_shifts, "o-", color="tab:blue")
+    ax.axhline(0, color="0.1", ls=":")
+    ax.axhspan(mean_shifts-std_shifts, mean_shifts+std_shifts, color="tab:red", alpha=0.1)
+    ax.axhline(mean_shifts, color="tab:red", lw=1, zorder=0)
+    ax.set_title("Y shifts for each column")
+    ax.set_xlabel("X (pixel)")
+    ax.set_ylabel("Y shift (pixel)")
+
+    if labels:
+        ax.annotate(f"mean: {mean_shifts:.2f}", (0.9, 0.9), xycoords="axes fraction", ha="right", va="top", color="tab:red")
+        ax.annotate(f"std: {std_shifts:.2f}", (0.9, 0.85), xycoords="axes fraction", ha="right", va="top", color="tab:red")
+
+    return ax
+
+
 def save_fig(fig, product_path, to_display, figure_path=None, label=None, fmt="png"):
     """Saves the given matplotlib figure to the given output/figure path"""
     # define figure path

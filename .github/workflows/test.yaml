@@ -50,7 +50,7 @@ jobs:
     - name: Lint with ruff
       run: |
         pip install ruff
-        ruff .
+        ruff check .
 
     - name: Test with pytest
       run: |
