@@ -1629,8 +1629,6 @@ def quick_sky_subtraction(in_cframe, out_sframe,
         input CFrame file
     out_sframe : str
         output SFrame file
-    band : np.array, optional
-        wavelength range to use for sky refinement, by default np.array((7238,7242,7074,7084,7194,7265))
     skymethod : str, optional
         method of computing sky continuum, by default "cont"
 
