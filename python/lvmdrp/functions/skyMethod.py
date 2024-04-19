@@ -1670,7 +1670,8 @@ def quick_sky_subtraction(in_cframe, out_sframe, band=np.array((7238, 7242, 7074
     tileid = cframe._header['TILE_ID']
     skytable = path.full('lvm_anc', mjd=mjd, tileid=tileid, drpver=drpver,
                          kind='sky', camera='brz', imagetype='table', expnum=expnum)
-    sky_hdu.writeto(skytable, overwrite=True)
+    # GB TEST, REMEMBER TO UNCOMMENT
+    #sky_hdu.writeto(skytable, overwrite=True)
 
     # TODO - deal with error in sky-subtracted data ; replaced "error_c"
     # TODO - deal properly with the error, sky, and sky_error
@@ -2026,21 +2027,22 @@ def create_skysub_spectrum(hdu: fits.HDUList, tel: str,
         fig1, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(20, 15))
         ax1.plot(specsci._wave, specsci._data)
         ax1.plot(specsci._wave, csci)
-        ax1.set_ylim(-1e-15, 3e-14)
+        ax1.set_ylim(-1e-15, 8e-14)
         ax2.plot(specskye._wave, specskye._data)
         ax2.plot(specskye._wave, cskye)
-        ax2.set_ylim(-1e-15, 2e-14)
+        ax2.set_ylim(-1e-15, 8e-14)
         ax3.plot(specskyw._wave, specskyw._data)
         ax3.plot(specskyw._wave, cskyw)
-        ax3.set_ylim(-1e-15, 2e-14)
+        ax3.set_ylim(-1e-15, 8e-14)
         plt.show()
 
         fig2, ax1 = plt.subplots(figsize=(20, 15))
         ax1.plot(specsci._wave, lsci, label='Sci')
         ax1.plot(specskye._wave, lskye, label='SkyE')
         ax1.plot(specskyw._wave, lskyw, label='SkyW')
+        ax1.plot(specskyw._wave, minimum*uselsky, label='Scaled Line Sky')
         ax1.set_ylim(-1e-15, 2e-13)
-        ax1.set_xlim(6400, 6800)
+        ax1.set_xlim(6450, 6650)
         ax1.legend()
         plt.show()
 
@@ -2048,8 +2050,9 @@ def create_skysub_spectrum(hdu: fits.HDUList, tel: str,
         ax1.plot(specsci._wave, lsci, label='Sci')
         ax1.plot(specskye._wave, lskye, label='SkyE')
         ax1.plot(specskyw._wave, lskyw, label='SkyW')
+        ax1.plot(specskyw._wave, minimum*uselsky, label='Scaled Line Sky')
         ax1.set_ylim(-1e-15, 2e-13)
-        ax1.set_xlim(7700, 8100)
+        ax1.set_xlim(7800, 8000)
         ax1.legend()
         plt.show()
         
@@ -2057,7 +2060,7 @@ def create_skysub_spectrum(hdu: fits.HDUList, tel: str,
         ax1.plot(specsci._wave, specsci._data, alpha=0.6, label='Sci')
         ax1.plot(specsci._wave, specsci._data-skysub, alpha=0.6, label='Sci-Sky')  
         ax1.set_ylim(-1e-15, 2e-13)
-        ax1.set_xlim(6400, 6800)
+        ax1.set_xlim(6450, 6650)
         ax1.legend()
         plt.show() 
 
@@ -2065,19 +2068,24 @@ def create_skysub_spectrum(hdu: fits.HDUList, tel: str,
         ax1.plot(specsci._wave, specsci._data, alpha=0.6, label='Sci')
         ax1.plot(specsci._wave, specsci._data-skysub, alpha=0.6, label='Sci-Sky')  
         ax1.set_ylim(-1e-15, 2e-13)
-        ax1.set_xlim(7700, 8100)
+        ax1.set_xlim(7800, 8000)
         ax1.legend()
         plt.show() 
 
         fig6, ax1 = plt.subplots(figsize=(20, 15))
         ax1.plot(specsci._wave, specsci._data, alpha=0.6, label='Sci')
         ax1.plot(specsci._wave, specsci._data-skysub, alpha=0.6, label='Sci-Sky')  
-        ax1.set_ylim(-1e-15, 2e-13)
+        ax1.set_ylim(-5e-14, 2e-13)
         #ax1.set_xlim(00, 8100)
         ax1.legend()
         plt.show() 
 
-
+        fig7, ax1 = plt.subplots(figsize=(20, 15))
+        ax1.plot(specsci._wave, np.abs((specsci._data-skysub)/uselsky), alpha=0.6, label='Sci-Sky')  
+        ax1.set_ylim(0, 1)
+        #ax1.set_xlim(00, 8100)
+        ax1.legend()
+        plt.show() 
 
 
 
