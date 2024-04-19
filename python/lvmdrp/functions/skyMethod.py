@@ -1906,7 +1906,7 @@ def polynomial_fit_with_outliers(spectrum_table, degree=3, sigma_lower=3, sigma_
 
 
 def create_skysub_spectrum(hdu: fits.HDUList, tel: str,
-                           wmin: int = 7000, wmax: int = 9000, method: str = 'ensenada') -> np.array:
+                           wmin: int = 7000, wmax: int = 9000, method: str = 'farlines_nearcont') -> np.array:
     """ Create spectrum for sky subtraction
 
     Parameters
@@ -1961,7 +1961,8 @@ def create_skysub_spectrum(hdu: fits.HDUList, tel: str,
     print(f'Using method: {method}')
 
     # Guille's method using continuum from nearest sky and lines from further sky
-    if method == 'ensenada':
+    # scaling lines spectrum with Knox's global scaling method
+    if method == 'farlines_nearcont':
 
         if wsep < esep :
             uselsky=lskye
@@ -1983,6 +1984,7 @@ def create_skysub_spectrum(hdu: fits.HDUList, tel: str,
         skysub = usecsky + minimum * uselsky
 
     # Knox's original method using nearest sky and polynomial fit to model continuum
+    # scaling lines spectrum with Knox's global scaling method
     elif method == 'nearest':
 
         if wsep < esep :
