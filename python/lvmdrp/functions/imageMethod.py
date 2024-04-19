@@ -3836,6 +3836,11 @@ def add_astrometry(
 
     # read AGC coadd images and get RAobs, DECobs, and PAobs for each telescope
     agcfiledir={'sci':in_agcsci_image, 'skye':in_agcskye_image, 'skyw':in_agcskyw_image}
+
+    def copy_guider_keyword(gdrhdr, keyword, imghdr):
+        '''Copy a keyword from a guider coadd header to an Image header'''
+        imghdr.setHdrValue(f'HIERARCH GDRCOADD {keyword}', gdrhdr[keyword], gdrhdr.comments[keyword])
+
     def getobsparam(tel):
         if tel!='spec':
             if os.path.isfile(agcfiledir[tel]):
@@ -3848,10 +3853,39 @@ def add_astrometry(
                 IFUcencoords=outw.pixel_to_world(2500,1000)
                 RAobs=IFUcencoords.ra.value
                 DECobs=IFUcencoords.dec.value
+                org_img._header.setHdrValue('ASTRMSRC', 'GDR coadd', comment='Source of astrometric solution: guider')
+                copy_guider_keyword(mfheader, 'FRAME0  ', org_img._header)
+                copy_guider_keyword(mfheader, 'FRAMEN  ', org_img._header)
+                copy_guider_keyword(mfheader, 'NFRAMES ', org_img._header)
+                copy_guider_keyword(mfheader, 'STACK0  ', org_img._header)
+                copy_guider_keyword(mfheader, 'STACKN  ', org_img._header)
+                copy_guider_keyword(mfheader, 'NSTACKED', org_img._header)
+                copy_guider_keyword(mfheader, 'COESTIM ', org_img._header)
+                copy_guider_keyword(mfheader, 'SIGCLIP ', org_img._header)
+                copy_guider_keyword(mfheader, 'SIGMA   ', org_img._header)
+                copy_guider_keyword(mfheader, 'OBSTIME0', org_img._header)
+                copy_guider_keyword(mfheader, 'OBSTIMEN', org_img._header)
+                copy_guider_keyword(mfheader, 'FWHM0   ', org_img._header)
+                copy_guider_keyword(mfheader, 'FWHMN   ', org_img._header)
+                copy_guider_keyword(mfheader, 'FWHMMED ', org_img._header)
+                copy_guider_keyword(mfheader, 'COFWHM  ', org_img._header)
+                copy_guider_keyword(mfheader, 'COFWHMST', org_img._header)
+                copy_guider_keyword(mfheader, 'PACOEFFA', org_img._header)
+                copy_guider_keyword(mfheader, 'PACOEFFB', org_img._header)
+                copy_guider_keyword(mfheader, 'PAMIN   ', org_img._header)
+                copy_guider_keyword(mfheader, 'PAMAX   ', org_img._header)
+                copy_guider_keyword(mfheader, 'PADRIFT ', org_img._header)
+                copy_guider_keyword(mfheader, 'ZEROPT  ', org_img._header)
+                copy_guider_keyword(mfheader, 'SOLVED  ', org_img._header)
+                copy_guider_keyword(mfheader, 'WARNPADR', org_img._header)
+                copy_guider_keyword(mfheader, 'WARNTRAN', org_img._header)
+                copy_guider_keyword(mfheader, 'WARNMATC', org_img._header)
+                copy_guider_keyword(mfheader, 'WARNFWHM', org_img._header)
             else:
                 RAobs=org_img._header[f'PO{tel}RA'.capitalize()]
                 DECobs=org_img._header[f'PO{tel}DE'.capitalize()]
                 PAobs=org_img._header[f'PO{tel}PA'.capitalize()]
+                org_img._header.setHdrValue('ASTRMSRC', 'CMD position', comment='Source of astrometric solution: commanded position')
         else:
             RAobs=0
             DECobs=0
