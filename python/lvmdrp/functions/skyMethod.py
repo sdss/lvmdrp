@@ -15,11 +15,10 @@ from multiprocessing import Pool, cpu_count
 from typing import Tuple, Dict, Callable
 
 import numpy as np
-import bottleneck as bn
 import yaml
 from astropy.coordinates import SkyCoord
 from astropy.io import fits
-from astropy.stats import biweight_location, mad_std, sigma_clip
+from astropy.stats import biweight_location, sigma_clip
 from astropy.table import Table, Column
 from astropy.time import Time
 from scipy import optimize
@@ -47,7 +46,6 @@ from lvmdrp.core.sky import (
 from lvmdrp.core.spectrum1d import Spectrum1D, find_continuum
 from lvmdrp import log, path, __version__ as drpver
 from lvmdrp.utils.examples import fetch_example_data
-from lvmdrp.functions.run_twilights import fit_continuum
 
 description = "Provides methods for sky subtraction"
 
@@ -1670,8 +1668,8 @@ def quick_sky_subtraction(in_cframe, out_sframe, band=np.array((7238, 7242, 7074
     tileid = cframe._header['TILE_ID']
     skytable = path.full('lvm_anc', mjd=mjd, tileid=tileid, drpver=drpver,
                          kind='sky', camera='brz', imagetype='table', expnum=expnum)
-    # GB TEST, REMEMBER TO UNCOMMENT
-    #sky_hdu.writeto(skytable, overwrite=True)
+    
+    sky_hdu.writeto(skytable, overwrite=True)
 
     # TODO - deal with error in sky-subtracted data ; replaced "error_c"
     # TODO - deal properly with the error, sky, and sky_error
@@ -1932,8 +1930,9 @@ def create_skysub_spectrum(hdu: fits.HDUList, tel: str,
     hdusci = hdu['SCI']
     hduskye = hdu['SKYE']
     hduskyw = hdu['SKYW']
-    hdusskye = hdu['SKYE_SUPER']
-    hdusskye = hdu['SKYW_SUPER']
+    # below are the supersampled sky tables, not using them now but might be used in the future
+    #hdusskye = hdu['SKYE_SUPER']
+    #hdusskyw = hdu['SKYW_SUPER']
 
     # do continuum vs line separation
     print("separating line and continuum in Sci, SkyE ,and SkyW spectra")
