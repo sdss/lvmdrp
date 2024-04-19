@@ -499,13 +499,13 @@ def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=Non
     # deltas._mask[:, columns] = False
     # deltas.fit_polynomial(deg=4)
 
-    # fig, ax = create_subplots(to_display=True, figsize=(15,5))
-    # ax.plot(deltas._data[:, columns]-column_shifts, ".k")
+    # # fig, ax = create_subplots(to_display=True, figsize=(15,5))
+    # # ax.plot(deltas._data[:, columns]-column_shifts, ".k")
 
     # trace_cent_fixed = copy(trace_cent)
     # for ifiber in range(trace_cent._data.shape[0]):
-    #     poly_trace = Polynomial(trace_cent._coeffs[ifiber])
-    #     poly_deltas = Polynomial(deltas._coeffs[ifiber])
+    #     poly_trace = numpy.polynomial.Polynomial(trace_cent._coeffs[ifiber])
+    #     poly_deltas = numpy.polynomial.Polynomial(deltas._coeffs[ifiber])
     #     trace_cent_fixed._coeffs[ifiber] = (poly_trace + poly_deltas).coef
     # trace_cent_fixed.eval_coeffs()
 
@@ -3216,7 +3216,7 @@ def extract_spectra(
         trace_fwhm = None
 
         # fix centroids for thermal shifts
-        trace_mask, _, _, _ = _fix_fiber_thermal_shifts(img, trace_mask, trace_fwhm,
+        trace_mask, _, _, _ = _fix_fiber_thermal_shifts(img, trace_mask, trace_fwhm or 2.5,
                                                         trace_amp=10000,
                                                         columns=columns,
                                                         column_width=column_width,
