@@ -3823,7 +3823,6 @@ def add_astrometry(
     # reading slitmap
     org_img = loadImage(in_image)
     slitmap = org_img.getSlitmap()
-    fibid=numpy.array(slitmap['fiberid'].data)
     telescope=numpy.array(slitmap['telescope'].data)
     x=numpy.array(slitmap['xpmm'].data)
     y=numpy.array(slitmap['ypmm'].data)
