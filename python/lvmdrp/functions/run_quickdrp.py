@@ -145,6 +145,12 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
         # define current arc lamps to use for wavelength calibration
         lamps = arc_lamps[sci_camera[0]]
 
+        # define agc coadd path
+        agcsci_path=path.full('lvm_agcam_coadd', mjd=sci_mjd, specframe=sci_expnum, tel='sci')
+        agcskye_path=path.full('lvm_agcam_coadd', mjd=sci_mjd, specframe=sci_expnum, tel='skye')
+        agcskyw_path=path.full('lvm_agcam_coadd', mjd=sci_mjd, specframe=sci_expnum, tel='skyw')
+        #agcspec_path=path.full('lvm_agcam_coadd', mjd=sci_mjd, specframe=sci_expnum, tel='spec')
+
         # define calibration frames paths
         if use_fiducial_master:
             masters_path = os.getenv("LVM_MASTER_DIR")
@@ -178,6 +184,9 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
         image_tasks.detrend_frame(in_image=psci_path, out_image=dsci_path,
                                   in_bias=mbias_path, in_dark=mdark_path, in_pixelflat=mpixflat_path,
                                   in_slitmap=Table(drp.fibermap.data), reject_cr=True)
+
+        # add astrometry to frame
+        image_tasks.add_astrometry(in_image=dsci_path, out_image=dsci_path, in_agcsci_image=agcsci_path, in_agcskye_image=agcskye_path, in_agcskyw_image=agcskyw_path)
 
         # subtract straylight
         if sci_imagetyp == "flat":
