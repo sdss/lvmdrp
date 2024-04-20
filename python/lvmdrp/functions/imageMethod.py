@@ -18,7 +18,6 @@ from astropy.io import fits as pyfits
 from astropy.visualization import simple_norm
 from astropy.wcs import wcs
 import astropy.io.fits as fits
-from ccdproc import cosmicray_lacosmic
 from scipy import interpolate
 from scipy import signal
 from tqdm import tqdm
