@@ -47,7 +47,7 @@ from scipy import stats
 from astropy.stats import biweight_location, biweight_scale
 from astropy.table import Table
 
-from lvmdrp.core.rss import RSS, loadRSS
+from lvmdrp.core.rss import RSS, loadRSS, lvmFFrame
 from lvmdrp.core.spectrum1d import Spectrum1D
 from lvmdrp.core.fluxcal import retrieve_header_stars, filter_channel
 from lvmdrp.core.sky import get_sky_mask_uves, get_z_continuum_mask
@@ -66,7 +66,7 @@ __all__ = [
     "correctTelluric_drp",
 ]
 
-def apply_fluxcal(in_rss: str, out_rss: str, skip_fluxcal: bool = False, display_plots: bool = False):
+def apply_fluxcal(in_rss: str, out_fframe: str, skip_fluxcal: bool = False, display_plots: bool = False):
     """applies flux calibration to spectrograph-combined data
 
     Parameters
@@ -88,29 +88,36 @@ def apply_fluxcal(in_rss: str, out_rss: str, skip_fluxcal: bool = False, display
     log.info(f"loading RSS file {os.path.basename(in_rss)}")
     rss = loadRSS(in_rss)
 
+    # initialize the lvmFFrame object
+    fframe = lvmFFrame(data=rss._data, error=rss._error, mask=rss._mask, header=rss._header,
+                       wave=rss._wave, lsf=rss._lsf,
+                       sky_east=rss._sky_east, sky_east_error=rss._sky_east_error,
+                       sky_west=rss._sky_west, sky_west_error=rss._sky_west_error,
+                       fluxcal=rss._fluxcal, slitmap=rss._slitmap)
+
     # check for flux calibration data
-    if np.isnan(rss._fluxcal.to_pandas().values).all():
+    if np.isnan(fframe._fluxcal.to_pandas().values).all():
         log.warning("no standard star metadata found, skipping flux calibration")
-        rss.setHdrValue("FLUXCAL", False, "flux-calibrated?")
-        rss.writeFitsData(out_rss)
+        fframe.setHdrValue("FLUXCAL", False, "flux-calibrated?")
+        fframe.writeFitsData(out_fframe)
         return rss
 
-    expnum = rss._header["EXPOSURE"]
-    camera = rss._header["CCD"]
-    channel = camera[0]
+    expnum = fframe._header["EXPOSURE"]
+    channel = fframe._header["CCD"]
+
     # set masked pixels to NaN
-    rss.apply_pixelmask()
+    fframe.apply_pixelmask()
     # load fibermap and filter for current spectrograph
-    slitmap = rss._slitmap
+    slitmap = fframe._slitmap
 
     # define exposure time factors
     exptimes = np.zeros(len(slitmap))
     exptimes[
         (slitmap["targettype"] == "science") | (slitmap["targettype"] == "SKY")
-    ] = rss._header["EXPTIME"]
-    for std_hd in rss._fluxcal.colnames:
-        exptime = rss._header[f"{std_hd[:-3]}EXP"]
-        fiberid = rss._header[f"{std_hd[:-3]}FIB"]
+    ] = fframe._header["EXPTIME"]
+    for std_hd in fframe._fluxcal.colnames:
+        exptime = fframe._header[f"{std_hd[:-3]}EXP"]
+        fiberid = fframe._header[f"{std_hd[:-3]}FIB"]
         exptimes[slitmap["orig_ifulabel"] == fiberid] = exptime
 
     # apply joint sensitivity curve
@@ -118,11 +125,11 @@ def apply_fluxcal(in_rss: str, out_rss: str, skip_fluxcal: bool = False, display
     fig.suptitle(f"Flux calibration for {expnum = }, {channel = }")
     log.info(f"computing joint sensitivity curve for channel {channel}")
     # calculate exposure time factors
-    # std_exp = np.asarray([rss._header.get(f"{std_hd[:-3]}EXP", 1.0) for std_hd in rss._fluxcal.colnames])
+    # std_exp = np.asarray([fframe._header.get(f"{std_hd[:-3]}EXP", 1.0) for std_hd in fframe._fluxcal.colnames])
     # weights = std_exp / std_exp.sum()
     # TODO: reject sensitivity curves based on the overall shape by normalizing using a median curve
     # calculate the biweight mean sensitivity
-    sens_arr = rss._fluxcal.to_pandas().values  # * (std_exp / std_exp.sum())[None]
+    sens_arr = fframe._fluxcal.to_pandas().values  # * (std_exp / std_exp.sum())[None]
     sens_ave = biweight_location(sens_arr, axis=1, ignore_nan=True)
     sens_rms = biweight_scale(sens_arr, axis=1, ignore_nan=True)
 
@@ -133,22 +140,19 @@ def apply_fluxcal(in_rss: str, out_rss: str, skip_fluxcal: bool = False, display
         )
         sens_ave = np.ones_like(sens_ave)
         sens_rms = np.zeros_like(sens_rms)
-        rss.setHdrValue("FLUXCAL", False, "flux-calibrated?")
-    else:
-        rss.setHdrValue("FLUXCAL", True, "flux-calibrated?")
-        rss.setHdrValue("BUNIT", "ergs/s/cm^2/A", "flux units")
+        fframe.setHdrValue("FLUXCAL", False, "flux-calibrated?")
 
     # update the fluxcal extension
-    rss._fluxcal["mean"] = sens_ave
-    rss._fluxcal["rms"] = sens_rms
+    fframe._fluxcal["mean"] = sens_ave
+    fframe._fluxcal["rms"] = sens_rms
 
     ax.set_title(f"{channel = }", loc="left")
     for j in range(sens_arr.shape[1]):
-        std_hd = rss._fluxcal.colnames[j][:-3]
-        std_id = rss._header.get(f"{std_hd}FIB", "unknown")
+        std_hd = fframe._fluxcal.colnames[j][:-3]
+        std_id = fframe._header.get(f"{std_hd}FIB", "unknown")
 
-        ax.plot(rss._wave, sens_arr[:, j], "-", lw=1, label=std_id)
-    ax.plot(rss._wave, sens_ave, "-r", lw=2, label="mean")
+        ax.plot(fframe._wave, sens_arr[:, j], "-", lw=1, label=std_id)
+    ax.plot(fframe._wave, sens_ave, "-r", lw=2, label="mean")
     ax.set_yscale("log")
     ax.set_xlabel("wavelength (Angstrom)")
     ax.set_ylabel("sensitivity [(ergs/s/cm^2/A) / (e-/s/A)]")
@@ -156,7 +160,7 @@ def apply_fluxcal(in_rss: str, out_rss: str, skip_fluxcal: bool = False, display
     fig.tight_layout()
     save_fig(
         fig,
-        product_path=out_rss,
+        product_path=out_fframe,
         to_display=display_plots,
         figure_path="qa",
         label="fluxcal",
@@ -168,29 +172,51 @@ def apply_fluxcal(in_rss: str, out_rss: str, skip_fluxcal: bool = False, display
     )
     txt = np.genfromtxt(os.getenv("LVMCORE_DIR") + "/etc/lco_extinction.txt")
     lext, ext = txt[:, 0], txt[:, 1]
-    ext = np.interp(rss._wave, lext, ext)
-    sci_secz = rss._header["TESCIAM"]
+    ext = np.interp(fframe._wave, lext, ext)
+    sci_secz = fframe._header["TESCIAM"]
 
     # optionally sky flux calibration
     if skip_fluxcal:
         log.info("skipping flux calibration")
-        rss._data /= exptimes[:, None]
-        rss._error /= exptimes[:, None]
-        rss._sky /= exptimes[:, None]
-        rss._sky_error /= exptimes[:, None]
-        rss.setHdrValue("FLUXCAL", False, "flux-calibrated?")
-        rss.setHdrValue("BUNIT", "electron/s/A", "flux units")
+        fframe._data /= exptimes[:, None]
+        fframe._error /= exptimes[:, None]
+        if fframe._sky is not None:
+            fframe._sky /= exptimes[:, None]
+        if fframe._sky_error is not None:
+            fframe._sky_error /= exptimes[:, None]
+        if fframe._sky_east is not None:
+            fframe._sky_east /= exptimes[:, None]
+        if fframe._sky_east_error is not None:
+            fframe._sky_east_error /= exptimes[:, None]
+        if fframe._sky_west is not None:
+            fframe._sky_west /= exptimes[:, None]
+        if fframe._sky_west_error is not None:
+            fframe._sky_west_error /= exptimes[:, None]
+        fframe.setHdrValue("FLUXCAL", False, "flux-calibrated?")
+        fframe.setHdrValue("BUNIT", "electron/s/A", "flux units")
     else:
         log.info("flux-calibrating data science and sky spectra")
-        rss._data *= sens_ave * 10 ** (0.4 * ext * (sci_secz)) / exptimes[:, None]
-        rss._error *= sens_ave * 10 ** (0.4 * ext * (sci_secz)) / exptimes[:, None]
-        rss._sky *= sens_ave * 10 ** (0.4 * ext * (sci_secz)) / exptimes[:, None]
-        rss._sky_error *= sens_ave * 10 ** (0.4 * ext * (sci_secz)) / exptimes[:, None]
+        fframe._data *= sens_ave * 10 ** (0.4 * ext * (sci_secz)) / exptimes[:, None]
+        fframe._error *= sens_ave * 10 ** (0.4 * ext * (sci_secz)) / exptimes[:, None]
+        if fframe._sky is not None:
+            fframe._sky *= sens_ave * 10 ** (0.4 * ext * (sci_secz)) / exptimes[:, None]
+        if fframe._sky_error is not None:
+            fframe._sky_error *= sens_ave * 10 ** (0.4 * ext * (sci_secz)) / exptimes[:, None]
+        if fframe._sky_east is not None:
+            fframe._sky_east *= sens_ave * 10 ** (0.4 * ext * (sci_secz)) / exptimes[:, None]
+        if fframe._sky_east_error is not None:
+            fframe._sky_east_error *= sens_ave * 10 ** (0.4 * ext * (sci_secz)) / exptimes[:, None]
+        if fframe._sky_west is not None:
+            fframe._sky_west *= sens_ave * 10 ** (0.4 * ext * (sci_secz)) / exptimes[:, None]
+        if fframe._sky_west_error is not None:
+            fframe._sky_west_error *= sens_ave * 10 ** (0.4 * ext * (sci_secz)) / exptimes[:, None]
+        fframe.setHdrValue("FLUXCAL", True, "flux-calibrated?")
+        fframe.setHdrValue("BUNIT", "ergs/s/cm^2/A", "flux units")
 
-    log.info(f"writing output file in {os.path.basename(out_rss)}")
-    rss.writeFitsData(out_rss)
+    log.info(f"writing output file in {os.path.basename(out_fframe)}")
+    fframe.writeFitsData(out_fframe)
 
-    return rss
+    return fframe
 
 
 def fluxcal_Gaia(channel, in_rss, plot=True, GAIA_CACHE_DIR=None):
@@ -282,7 +308,8 @@ def fluxcal_Gaia(channel, in_rss, plot=True, GAIA_CACHE_DIR=None):
             continue
 
         # subtract sky spectrum and divide by exptime
-        spec = (rss._data[fibidx[0],:] - rss._sky[fibidx[0],:])/exptime
+        master_sky = rss.eval_master_sky()
+        spec = (rss._data[fibidx[0],:] - master_sky._data[fibidx[0],:])/exptime
 
         # interpolate over bright sky lines
         spec = ancillary_func.interpolate_mask(w, spec, m, fill_value="extrapolate")
