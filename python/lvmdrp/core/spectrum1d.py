@@ -56,7 +56,7 @@ def find_continuum(spec_s,niter=15,thresh=0.8,median_box_max=100,median_box_min=
     spec_s_org = spec_s.copy()
     mask = (spec_s>(-1)*numpy.abs(numpy.min(spec_s)))
     #m_spec_s = adaptive_smooth(spec_s, median_box, int(median_box_max*0.5))
-    m_spec_s = median_filter(median_box, spec_s)
+    m_spec_s = median_filter(spec_s, median_box)
     pixels = numpy.arange(0,spec_s.shape[0])
     i_len_in = len(spec_s_org[mask])
     for i in range(niter):

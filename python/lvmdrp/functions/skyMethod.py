@@ -12,12 +12,14 @@ import re
 import subprocess
 from datetime import datetime
 from multiprocessing import Pool, cpu_count
-from typing import Tuple, Dict
+from typing import Tuple, Dict, Callable
 
 import numpy as np
-import bottleneck as bn
 import yaml
+from astropy.coordinates import SkyCoord
 from astropy.io import fits
+from astropy.stats import biweight_location, sigma_clip
+from astropy.table import Table, Column
 from astropy.time import Time
 from scipy import optimize
 
@@ -39,12 +41,11 @@ from lvmdrp.core.sky import (
     run_skycorr,
     run_skymodel,
     skymodel_pars_from_header,
-    get_telescope_shadowheight
+    get_telescope_shadowheight,
 )
-from lvmdrp.core.spectrum1d import Spectrum1D
-from lvmdrp import log
+from lvmdrp.core.spectrum1d import Spectrum1D, find_continuum
+from lvmdrp import log, path, __version__ as drpver
 from lvmdrp.utils.examples import fetch_example_data
-
 
 description = "Provides methods for sky subtraction"
 
@@ -129,9 +130,7 @@ def configureSkyModel_drp(
 
     ori_path = os.path.abspath(os.curdir)
 
-    log.info(
-        f"writing configuration files using '{skymodel_config_path}' as source"
-    )
+    log.info(f"writing configuration files using '{skymodel_config_path}' as source")
     # read master configuration file
     skymodel_master_config = yaml.load(
         open(skymodel_config_path, "r"), Loader=yaml.Loader
@@ -606,8 +605,9 @@ def sepContinuumLine_drp(
         # TODO: use the master sky parameters (datetime, observing conditions: lunation, moon distance, etc.) evaluate a sky model
         # TODO: use the resulting model continuum as physical representation of the target sky continuum
         # TODO: remove continuum contribution from original sky spectrum
-        resample_step, resolving_power = np.diff(sky_spec._wave).min(), int(
-            np.ceil((sky_spec._wave / np.diff(sky_spec._wave).min()).max())
+        resample_step, resolving_power = (
+            np.diff(sky_spec._wave).min(),
+            int(np.ceil((sky_spec._wave / np.diff(sky_spec._wave).min()).max())),
         )
         # BUG: implement missing parameters in this call of run_skymodel
         skymodel_pars = skymodel_pars_from_header(sky_spec._header)
@@ -1297,10 +1297,16 @@ def subtractPCAResiduals_drp():
     pass
 
 
-def interpolate_sky(in_frame: str, out_rss: str = None,
-                    display_plots: bool = False) -> Tuple[RSS, Dict[str,np.ndarray], Dict[str,np.ndarray],
-                                                          Dict[str,np.ndarray], Dict[str,np.ndarray],
-                                                          Dict[str,np.ndarray], Dict[str,np.ndarray]]:
+def interpolate_sky( in_frame: str, out_rss: str = None, display_plots: bool = False
+) -> Tuple[
+    RSS,
+    Dict[str, np.ndarray],
+    Dict[str, np.ndarray],
+    Dict[str, np.ndarray],
+    Dict[str, np.ndarray],
+    Dict[str, np.ndarray],
+    Dict[str, np.ndarray],
+]:
     """Interpolate sky fibers in a given RSS file
 
     Parameters
@@ -1341,11 +1347,19 @@ def interpolate_sky(in_frame: str, out_rss: str = None,
     supersky, supererror, swave, ssky, svars, smask = {}, {}, {}, {}, {}, {}
     for telescope in ("east", "west"):
         log.info(f"interpolating sky fibers for sky {telescope = } telescope(s)")
-        sky_wave, sky_data, sky_vars, sky_mask, sci_wave, sci_data = select_sky_fibers(frame, fibermap=fibermap, telescope=telescope)
+        sky_wave, sky_data, sky_vars, sky_mask, sci_wave, sci_data = select_sky_fibers(
+            frame, fibermap=fibermap, telescope=telescope
+        )
 
-        fig, axs = create_subplots(to_display=display_plots, figsize=(20,10), nrows=2, ncols=1, sharex=True)
-        axs[0].scatter(sky_wave.ravel(), sky_data.ravel(), s=5, color="tab:blue", lw=0, label="sky")
-        axs[0].scatter(sci_wave.ravel(), sci_data.ravel(), s=3, color="0.7", lw=0, label="sci")
+        fig, axs = create_subplots(
+            to_display=display_plots, figsize=(20, 10), nrows=2, ncols=1, sharex=True
+        )
+        axs[0].scatter(
+            sky_wave.ravel(), sky_data.ravel(), s=5, color="tab:blue", lw=0, label="sky"
+        )
+        axs[0].scatter(
+            sci_wave.ravel(), sci_data.ravel(), s=3, color="0.7", lw=0, label="sci"
+        )
         axs[0].set_ylabel(f"Counts ({unit})")
         axs[0].legend(loc=2)
 
@@ -1355,7 +1369,9 @@ def interpolate_sky(in_frame: str, out_rss: str = None,
         sky_data = sky_data / dlambda
         sky_vars = sky_vars / dlambda
 
-        axs[1].scatter(sky_wave.ravel(), sky_data.ravel(), s=5, color="tab:red", lw=0, label="sky")
+        axs[1].scatter(
+            sky_wave.ravel(), sky_data.ravel(), s=5, color="tab:red", lw=0, label="sky"
+        )
         axs[1].set_xlabel("Lambda (Angstrom)")
         axs[1].set_ylabel(f"Counts ({unit}/Angstrom)")
         axs[1].legend(loc=2)
@@ -1368,14 +1384,20 @@ def interpolate_sky(in_frame: str, out_rss: str = None,
         )
 
         # calculate supersky and fit splines
-        s_ssky, s_error, s_mask, sw, ss, sv, sm = fit_supersky(sky_wave, sky_data, sky_vars, sky_mask, sci_wave, sci_data)
+        s_ssky, s_error, s_mask, sw, ss, sv, sm = fit_supersky(
+            sky_wave, sky_data, sky_vars, sky_mask, sci_wave, sci_data
+        )
 
-        fig, axs = create_subplots(to_display=display_plots, figsize=(20,5), nrows=2, ncols=1, sharex=True)
+        fig, axs = create_subplots(
+            to_display=display_plots, figsize=(20, 5), nrows=2, ncols=1, sharex=True
+        )
         axs[0].scatter(sw, ss, s=1, color="tab:blue", label="super sky")
-        axs[0].plot(sw[~sm], s_ssky(sw[~sm]).astype("float32"), lw=1, color="k", label="spline")
+        axs[0].plot(
+            sw[~sm], s_ssky(sw[~sm]).astype("float32"), lw=1, color="k", label="spline"
+        )
 
         # plot residuals
-        residuals = (s_ssky(sky_wave).astype("float32") - sky_data)
+        residuals = s_ssky(sky_wave).astype("float32") - sky_data
         axs[1].scatter(sky_wave.ravel(), residuals.ravel())
         axs[1].axhline(ls="--", lw=1, color="0.2")
         axs[1].set_label("Lambda (Angstrom)")
@@ -1396,30 +1418,51 @@ def interpolate_sky(in_frame: str, out_rss: str = None,
         new_error = np.sqrt(s_error(frame._wave).astype("float32")) * dlambda
         new_mask = s_mask(frame._wave).astype(bool)
         # update mask with new bad pixels
-        new_mask = (new_sky<0) | np.isnan(new_sky)
-        new_mask |= (new_error<0) | np.isnan(new_error)
+        new_mask = (new_sky < 0) | np.isnan(new_sky)
+        new_mask |= (new_error < 0) | np.isnan(new_error)
 
-        fig, axs = plt.subplots(1, 1, figsize=(20,5), sharex=True)
+        fig, axs = plt.subplots(1, 1, figsize=(20, 5), sharex=True)
         axs.plot(frame._wave[0], new_sky[0], "k", lw=1, label="sky")
         save_fig(
             fig,
             product_path=out_rss,
             to_display=display_plots,
             figure_path="qa",
-            label=f"sky_comp_{telescope}"
+            label=f"sky_comp_{telescope}",
         )
 
         # store outputs
         supersky[telescope] = s_ssky
         supererror[telescope] = s_error
-        swave[telescope], ssky[telescope], svars[telescope], smask[telescope] = sw, ss, sv, sm
+        swave[telescope], ssky[telescope], svars[telescope], smask[telescope] = (
+            sw,
+            ss,
+            sv,
+            sm,
+        )
 
     # set supersky and supersky error splines
-    new_rss = RSS(data=frame._data, error=frame._error, mask=frame._mask,
-                  wave_trace=frame._wave_trace, lsf_trace=frame._lsf_trace,
-                  slitmap=frame._slitmap, header=frame._header)
-    superskies = new_rss.stack_supersky([(frame._wave, *supersky["east"].tck, "east"), (frame._wave, *supersky["west"].tck, "west")])
-    supererrors = new_rss.stack_supersky([(frame._wave, *supererror["east"].tck, "east"), (frame._wave, *supererror["west"].tck, "west")])
+    new_rss = RSS(
+        data=frame._data,
+        error=frame._error,
+        mask=frame._mask,
+        wave_trace=frame._wave_trace,
+        lsf_trace=frame._lsf_trace,
+        slitmap=frame._slitmap,
+        header=frame._header,
+    )
+    superskies = new_rss.stack_supersky(
+        [
+            (frame._wave, *supersky["east"].tck, "east"),
+            (frame._wave, *supersky["west"].tck, "west"),
+        ]
+    )
+    supererrors = new_rss.stack_supersky(
+        [
+            (frame._wave, *supererror["east"].tck, "east"),
+            (frame._wave, *supererror["west"].tck, "west"),
+        ]
+    )
     new_rss.set_supersky(superskies)
     new_rss.set_supersky_error(supererrors)
 
@@ -1431,9 +1474,15 @@ def interpolate_sky(in_frame: str, out_rss: str = None,
     # https://spaceweather.gc.ca/forecast-prevision/solar-solaire/solarflux/sx-5-en.php
     # TODO: add same parameters for std *fibers*
     # new_rss._header.update(skymodel_pars_from_header(new_rss._header, telescope="SPEC"))
-    new_rss._header["HIERARCH GEOCORONAL SKYW SHADOW_HEIGHT"] = get_telescope_shadowheight(new_rss._header, telescope="SKYW")
-    new_rss._header["HIERARCH GEOCORONAL SKYE SHADOW_HEIGHT"] = get_telescope_shadowheight(new_rss._header, telescope="SKYE")
-    new_rss._header["HIERARCH GEOCORONAL SCI SHADOW_HEIGHT"] = get_telescope_shadowheight(new_rss._header, telescope="SCI")
+    new_rss._header["HIERARCH GEOCORONAL SKYW SHADOW_HEIGHT"] = (
+        get_telescope_shadowheight(new_rss._header, telescope="SKYW")
+    )
+    new_rss._header["HIERARCH GEOCORONAL SKYE SHADOW_HEIGHT"] = (
+        get_telescope_shadowheight(new_rss._header, telescope="SKYE")
+    )
+    new_rss._header["HIERARCH GEOCORONAL SCI SHADOW_HEIGHT"] = (
+        get_telescope_shadowheight(new_rss._header, telescope="SCI")
+    )
 
     # write output RSS
     log.info(f"writing output RSS file '{os.path.basename(out_rss)}'")
@@ -1478,15 +1527,17 @@ def combine_skies(in_rss: str, out_rss, sky_weights: Tuple[float, float] = None)
     ra_s = rss._header.get("TESCIRA", rss._header.get("SCIRA"))
     dec_s = rss._header.get("TESCIDE", rss._header.get("SCIDEC"))
 
-    log.info("interpolating sky telescopes pointings "
+    log.info(
+        "interpolating sky telescopes pointings "
         f"(SKYERA, SKYEDEC: {ra_e:.2f}, {dec_e:.2f}; SKYWRA, SKYWDEC: {ra_w:.2f}, {dec_w:.2f}) "
-        f"in science telescope pointing (SCIRA, SCIDEC: {ra_s:.2f}, {dec_s:.2f})")
+        f"in science telescope pointing (SCIRA, SCIDEC: {ra_s:.2f}, {dec_s:.2f})"
+    )
 
     if sky_weights is None:
         ad = ang_distance(ra_e, dec_e, ra_s, dec_s)
-        w_e = 1 / (ad if ad>0 else 1)
+        w_e = 1 / (ad if ad > 0 else 1)
         ad = ang_distance(ra_w, dec_w, ra_s, dec_s)
-        w_w = 1 / (ad if ad>0 else 1)
+        w_w = 1 / (ad if ad > 0 else 1)
         w_norm = w_e + w_w
         w_e, w_w = w_e / w_norm, w_w / w_norm
         log.info(f"calculated weights SkyE: {w_e:.3f}, SkyW: {w_w:.3f}")
@@ -1501,8 +1552,20 @@ def combine_skies(in_rss: str, out_rss, sky_weights: Tuple[float, float] = None)
 
     # evaluate sky spectra
     _, supersky, supersky_error = rss.eval_supersky()
-    sky_e = RSS(wave_trace=rss._wave_trace, lsf_trace=rss._lsf_trace, data=supersky["east"], error=supersky_error["east"], header=rss._header)
-    sky_w = RSS(wave_trace=rss._wave_trace, lsf_trace=rss._lsf_trace, data=supersky["west"], error=supersky_error["west"], header=rss._header)
+    sky_e = RSS(
+        wave_trace=rss._wave_trace,
+        lsf_trace=rss._lsf_trace,
+        data=supersky["east"],
+        error=supersky_error["east"],
+        header=rss._header,
+    )
+    sky_w = RSS(
+        wave_trace=rss._wave_trace,
+        lsf_trace=rss._lsf_trace,
+        data=supersky["west"],
+        error=supersky_error["west"],
+        header=rss._header,
+    )
 
     # define master sky
     sky = sky_e * w_e + sky_w * w_w
@@ -1528,10 +1591,21 @@ def combine_skies(in_rss: str, out_rss, sky_weights: Tuple[float, float] = None)
         std_exp = np.asarray(list(rss._header["STD*EXP"].values()))[std_acq]
         # select only standard star in current exposure
         std_idx = np.where(np.isin(rss._slitmap["orig_ifulabel"], std_ids))
-        log.info(f"calculating correction factors for standard star: {rss._slitmap[std_idx]['orig_ifulabel'].value}")
+        log.info(
+            f"calculating correction factors for standard star: {rss._slitmap[std_idx]['orig_ifulabel'].value}"
+        )
         # calculate scaling factors for standard star
-        std_fac = ((stdid, stdexp / rss._header["EXPTIME"]) for stdid, stdexp in zip(std_ids, std_exp) if stdid in rss._slitmap["orig_ifulabel"])
-        std_fac = {stdid: np.round(factor,4) for stdid, factor in sorted(std_fac, key=lambda item: int(item[0].split("-")[1]))}
+        std_fac = (
+            (stdid, stdexp / rss._header["EXPTIME"])
+            for stdid, stdexp in zip(std_ids, std_exp)
+            if stdid in rss._slitmap["orig_ifulabel"]
+        )
+        std_fac = {
+            stdid: np.round(factor, 4)
+            for stdid, factor in sorted(
+                std_fac, key=lambda item: int(item[0].split("-")[1])
+            )
+        }
         log.info(f"correction factors for standard star: {std_fac}")
         # apply factors to standard star sky
         exptime_factors = np.asarray(list(std_fac.values()))[:, None]
@@ -1545,8 +1619,9 @@ def combine_skies(in_rss: str, out_rss, sky_weights: Tuple[float, float] = None)
     return rss, sky
 
 
-def quick_sky_subtraction(in_cframe, out_sframe, band=np.array((7238,7242,7074,7084,7194,7265)), skip_subtraction=False):
-    """Quick sky refinement using the model in the final CFrame
+def quick_sky_subtraction(in_cframe, out_sframe,
+                          skip_subtraction=False, skymethod: str = 'farlines_nearcont'):
+    """ Quick sky refinement using the model in the final CFrame
 
     Parameters
     ----------
@@ -1554,45 +1629,554 @@ def quick_sky_subtraction(in_cframe, out_sframe, band=np.array((7238,7242,7074,7
         input CFrame file
     out_sframe : str
         output SFrame file
-    band : np.array, optional
-        wavelength range to use for sky refinement, by default np.array((7238,7242,7074,7084,7194,7265))
+    skymethod : str, optional
+        method of computing sky continuum, by default "cont"
+
     """
+    print('************************************')
+    print('********* SUBTRACTING SKY **********')
+    print('************************************')
 
     cframe = lvmCFrame.from_file(in_cframe)
-    wave = cframe._wave
-    flux = cframe._data
-    error = cframe._error
+    
+    # read sky table hdu
+    sky_hdu = prep_input_simplesky_mean(in_cframe)
 
-    master_sky = cframe.eval_master_sky()
-    sky = master_sky._data
-    sky_error = master_sky._error
+    # create spectrum for sky subtraction
+    scisky = create_skysub_spectrum(sky_hdu, tel='sci', method=skymethod)
+    skyesky = create_skysub_spectrum(sky_hdu, tel="skye", method=skymethod)
+    skywsky = create_skysub_spectrum(sky_hdu, tel="skyw", method=skymethod)
 
-    crval = wave[0]
-    cdelt = wave[1] - wave[0]
-    i_band = ((band - crval) / cdelt).astype(int)
+    # select correct fibers
+    data = cframe._data
+    slitmap = Table(cframe._slitmap)
+    scifibers = slitmap[slitmap["telescope"] == "Sci"]["fiberid"] - 1
+    skyefibers = slitmap[slitmap["telescope"] == "SkyE"]["fiberid"] - 1
+    skywfibers = slitmap[slitmap["telescope"] == "SkyW"]["fiberid"] - 1
 
-    map_b = bn.nanmean(flux[:, i_band[0]:i_band[1]], axis=1)
-    map_0 = bn.nanmean(flux[:, i_band[2]:i_band[3]], axis=1)
-    map_1 = bn.nanmean(flux[:, i_band[4]:i_band[5]], axis=1)
-    map_c = map_b - 0.5 * (map_0 + map_1)
+    # sky subtract each spectrum
+    skydata = data.copy()
+    skydata[scifibers] = data[scifibers] - scisky
+    skydata[skyefibers] = data[skyefibers] - skyesky
+    skydata[skywfibers] = data[skywfibers] - skywsky
 
-    smap_b = bn.nanmean(sky[:, i_band[0]:i_band[1]], axis=1)
-    smap_0 = bn.nanmean(sky[:, i_band[2]:i_band[3]], axis=1)
-    smap_1 = bn.nanmean(sky[:, i_band[4]:i_band[5]], axis=1)
-    smap_c = smap_b - 0.5 * (smap_0 + smap_1)
+    # write out sky table to ancillary file
+    mjd = cframe._header['MJD']
+    expnum = cframe._header['EXPOSURE']
+    tileid = cframe._header['TILE_ID']
+    skytable = path.full('lvm_anc', mjd=mjd, tileid=tileid, drpver=drpver,
+                         kind='sky', camera='brz', imagetype='table', expnum=expnum)
+    
+    sky_hdu.writeto(skytable, overwrite=True)
 
-    scale = map_c / smap_c
-    sky_c = np.nan_to_num(sky * scale[:, None])
-    if not skip_subtraction:
-        data_c = np.nan_to_num(flux - sky_c)
-        error_c = np.nan_to_num(np.sqrt(error**2 + sky_error**2))
-    else:
-        data_c = flux
-        error_c = error
+    # TODO - deal with error in sky-subtracted data ; replaced "error_c"
+    # TODO - deal properly with the error, sky, and sky_error
+    # this is incorrect
+    error_c = cframe._error
+    sky_c = cframe._sky_east
+    sky_error = cframe._sky_east_error
 
-    sframe = lvmSFrame(data=data_c, error=error_c, mask=cframe._mask,
-                       sky=sky_c, sky_error=sky_error,
-                       wave=cframe._wave, lsf=cframe._lsf,
-                       header=cframe._header, slitmap=cframe._slitmap)
+    print("writing lvmSFrame")
+    sframe = lvmSFrame(data=skydata, error=error_c, mask=cframe._mask, sky=sky_c, sky_error=sky_error,
+                       wave=cframe._wave, lsf=cframe._lsf, header=cframe._header, slitmap=cframe._slitmap)
     sframe.writeFitsData(out_sframe)
     # TODO: check on expnum=7632 for halpha emission in sky fibers
+
+
+def prep_input_simplesky_mean(filename: str = None) -> fits.HDUList:
+    """ Prepare the input to the simplesky routine
+
+    Prepare the input fits.HDUList from the lvmCFrame file. Create
+    mean spectra for the science, skyE and skyW fibers
+    in a calibrated data frame and write results to a
+    fits file that can be used by sky subtraction.
+
+    Parameters
+    ----------
+    filename : str, optional
+        the input lvmCFrame file, by default None
+
+    Returns
+    -------
+    fits.HDUList
+        the output fits
+    """
+
+    # extract info from lvmCFrame file
+    with fits.open(filename) as x:
+
+        # determine which telescope we are discussing
+        slitmap = Table(x["SLITMAP"].data)
+        good_fibers = slitmap[slitmap["fibstatus"] == 0]
+
+        # get the good fibers for science, skye, skyw from slitmap
+        sci_fib = good_fibers[good_fibers["telescope"] == "Sci"]
+        sky_e_fib = good_fibers[good_fibers["telescope"] == "SkyE"]
+        sky_w_fib = good_fibers[good_fibers["telescope"] == "SkyW"]
+
+        # select the correct fibers from correct extensions
+        # and convert IVAR back to error
+
+        # select the science fibers from science extension
+        # variable syntax: extension_fibers
+        xsci_scifib = x["FLUX"].data[sci_fib["fiberid"] - 1]
+        esci_scifib = np.sqrt(1 / x["IVAR"].data[sci_fib["fiberid"] - 1])
+
+        # select the skye/w fibers from the science extension
+        xsci_skyefib = x["FLUX"].data[sky_e_fib["fiberid"] - 1]
+        esci_skyefib = np.sqrt(1 / x["IVAR"].data[sky_e_fib["fiberid"] - 1])
+
+        xsci_skywfib = x["FLUX"].data[sky_w_fib["fiberid"] - 1]
+        esci_skywfib = np.sqrt(1 / x["IVAR"].data[sky_w_fib["fiberid"] - 1])
+
+        # superskies
+        # select science fibers from skye and skyw extensions
+        xsky_e_scifib = x["SKY_EAST"].data[sci_fib["fiberid"] - 1]
+        esky_e_scifib = np.sqrt(1 / x["SKY_EAST_IVAR"].data[sci_fib["fiberid"] - 1])
+
+        xsky_w_scifib = x["SKY_WEST"].data[sci_fib["fiberid"] - 1]
+        esky_w_scifib = np.sqrt(1 / x["SKY_WEST_IVAR"].data[sci_fib["fiberid"] - 1])
+
+        # perform the biweight selection for science
+        # science fibers in science extension
+        sci_flux = biweight_location(xsci_scifib, axis=0, ignore_nan=True)
+        sci_err = np.sqrt(biweight_location(np.square(esci_scifib), axis=0, ignore_nan=True)) / np.sqrt(len(sci_fib))
+
+        # These are the skies from the fluxed sky fibers
+        # skye/w fibers in science extension
+        sky_e_flux = biweight_location(xsci_skyefib, axis=0, ignore_nan=True)
+        sky_e_err = np.sqrt(biweight_location(np.square(esci_skyefib), axis=0, ignore_nan=True)) / np.sqrt(len(sky_e_fib))
+
+        sky_w_flux = biweight_location(xsci_skywfib, axis=0, ignore_nan=True)
+        sky_w_err = np.sqrt(biweight_location(np.square(esci_skywfib), axis=0, ignore_nan=True)) / np.sqrt(len(sky_w_fib))
+
+        # The next two are the supersampled ones
+        # science fibers in skye/w extensions
+        sky_east_super = biweight_location(xsky_e_scifib, axis=0, ignore_nan=True)
+        sky_east_super_e = biweight_location(esky_e_scifib, axis=0, ignore_nan=True)
+
+        sky_west_super = biweight_location(xsky_w_scifib, axis=0, ignore_nan=True)
+        sky_west_super_e = biweight_location(esky_w_scifib, axis=0, ignore_nan=True)
+
+
+        # Now create tables of data
+
+        # get wavelength
+        wave = x["WAVE"].data
+
+        xtime = x["PRIMARY"].header["OBSTIME"]
+        word = xtime.split("T")
+        word = word[-1].split(":")
+        utc = int(word[0]) + int(word[1]) / 60.0 + eval(word[2]) / 3600
+
+        # First do the science data
+
+        ra = x["PRIMARY"].header["TESCIRA"]
+        dec = x["PRIMARY"].header["TESCIDE"]
+        airmass = x["PRIMARY"].header["TESCIAM"]
+        xtel = "Sci"
+        alt = 90 - np.arccos(1.0 / airmass) * 57.29578
+
+        # create science table
+
+        xtab = Table([wave, sci_flux, sci_err], names=["WAVE", "FLUX", "ERROR"])
+        sci_table_hdu = fits.BinTableHDU(xtab, name="SCI")
+        new_primary_hdu = fits.PrimaryHDU(header=x[0].header)
+        sci_table_hdu.header["UTC"] = utc
+        sci_table_hdu.header["RA"] = ra
+        sci_table_hdu.header["DEC"] = dec
+        sci_table_hdu.header["ALT"] = alt
+        sci_table_hdu.header["TELE"] = xtel
+
+        # creating table for Sky E
+        ra = x["PRIMARY"].header["TESKYERA"]
+        dec = x["PRIMARY"].header["TESKYEDE"]
+        airmass = x["PRIMARY"].header["TESKYEAM"]
+        xtel = "SkyE"
+        alt = 90 - np.arccos(1.0 / airmass) * 57.29578
+
+        xtab_sky_e = Table([wave, sky_e_flux, sky_e_err], names=["WAVE", "FLUX", "ERROR"])
+        skye_table_hdu = fits.BinTableHDU(xtab_sky_e, name="SKYE")
+        skye_table_hdu.header["UTC"] = utc
+        skye_table_hdu.header["RA"] = ra
+        skye_table_hdu.header["DEC"] = dec
+        skye_table_hdu.header["ALT"] = alt
+        skye_table_hdu.header["TELE"] = xtel
+
+        # creating table for Sky W
+        ra = x["PRIMARY"].header["TESKYWRA"]
+        dec = x["PRIMARY"].header["TESKYWDE"]
+        airmass = x["PRIMARY"].header["TESKYWAM"]
+        xtel = "SkyE"
+        alt = 90 - np.arccos(1.0 / airmass) * 57.29578
+
+        xtab_sky_w = Table([wave, sky_w_flux, sky_w_err], names=["WAVE", "FLUX", "ERROR"])
+        skyw_table_hdu = fits.BinTableHDU(xtab_sky_w, name="SKYW")
+        skyw_table_hdu.header["UTC"] = utc
+        skyw_table_hdu.header["RA"] = ra
+        skyw_table_hdu.header["DEC"] = dec
+        skyw_table_hdu.header["ALT"] = alt
+        skyw_table_hdu.header["TELE"] = xtel
+
+        # create table for the supersky sky east
+        ra = x["PRIMARY"].header["TESKYERA"]
+        dec = x["PRIMARY"].header["TESKYEDE"]
+        airmass = x["PRIMARY"].header["TESKYEAM"]
+        xtel = "SkyE"
+        alt = 90 - np.arccos(1.0 / airmass) * 57.29578
+
+        xtab_sky_e = Table([wave, sky_east_super, sky_east_super_e], names=["WAVE", "FLUX", "ERROR"])
+        super_skye_table_hdu = fits.BinTableHDU(xtab_sky_e, name="SKYE_SUPER")
+        super_skye_table_hdu.header["UTC"] = utc
+        super_skye_table_hdu.header["RA"] = ra
+        super_skye_table_hdu.header["DEC"] = dec
+        super_skye_table_hdu.header["ALT"] = alt
+        super_skye_table_hdu.header["TELE"] = xtel
+
+        # create table for the supersky sky west
+        ra = x["PRIMARY"].header["TESKYWRA"]
+        dec = x["PRIMARY"].header["TESKYWDE"]
+        airmass = x["PRIMARY"].header["TESKYWAM"]
+        xtel = "SkyE"
+        alt = 90 - np.arccos(1.0 / airmass) * 57.29578
+
+        xtab_sky_w = Table([wave, sky_west_super, sky_west_super_e], names=["WAVE", "FLUX", "ERROR"])
+        super_skyw_table_hdu = fits.BinTableHDU(xtab_sky_w, name="SKYW_SUPER")
+        super_skyw_table_hdu.header["UTC"] = utc
+        super_skyw_table_hdu.header["RA"] = ra
+        super_skyw_table_hdu.header["DEC"] = dec
+        super_skyw_table_hdu.header["ALT"] = alt
+        super_skyw_table_hdu.header["TELE"] = xtel
+
+        new = fits.HDUList(
+            [new_primary_hdu, sci_table_hdu, skye_table_hdu, skyw_table_hdu,
+             super_skye_table_hdu, super_skyw_table_hdu]
+        )
+
+        return new
+
+
+def polynomial_fit_with_outliers(spectrum_table, degree=3, sigma_lower=3, sigma_upper=3, grow=0, max_iter=10):
+    """ Perform a polynomial fit to the total spectrum while iteratively removing outliers.
+
+    Parameters:
+        spectrum_table (astropy.table.Table): Table containing columns for wavelength, total flux, line flux, and continuum flux.
+        degree (int): Degree of the polynomial fit.
+        sigma_lower (float): Lower sigma value for sigma-clipping to identify outliers.
+        sigma_upper (float): Upper sigma value for sigma-clipping to identify outliers.
+        grow (int): Number of pixels to grow the mask of clipped values.
+        max_iter (int): Maximum number of iterations for outlier removal.
+
+    Returns:
+        astropy.table.Table: Table containing columns for wavelength, total flux, line flux, continuum flux, fitted spectrum, and mask.
+    """
+    # Copy input spectrum table
+    output_table = spectrum_table.copy()
+
+    # Initial fit
+    coefficients = np.polyfit(spectrum_table['WAVE'], spectrum_table['FLUX'], degree)
+    fitted_flux = np.polyval(coefficients, spectrum_table['WAVE'])
+
+    # Iterate until convergence or max_iter
+    for _ in range(max_iter):
+        # Compute residuals
+        residuals = spectrum_table['FLUX'] - fitted_flux
+
+        # Perform sigma clipping
+        mask = sigma_clip(residuals, sigma_lower=sigma_lower, sigma_upper=sigma_upper, grow=grow).mask
+
+        # Update masked spectrum table
+        masked_spectrum = spectrum_table[~mask]
+
+        # Perform polynomial fit
+        coefficients = np.polyfit(masked_spectrum['WAVE'], masked_spectrum['FLUX'], degree)
+
+        # Evaluate polynomial fit on the wavelength grid
+        fitted_flux = np.polyval(coefficients, spectrum_table['WAVE'])
+
+    # Add fitted spectrum and mask columns to output table
+    output_table['CONT'] = fitted_flux
+    output_table['MASK'] = mask
+
+    return output_table
+
+
+def create_skysub_spectrum(hdu: fits.HDUList, tel: str,
+                           wmin: int = 7000, wmax: int = 9000, method: str = 'farlines_nearcont') -> np.array:
+    """ Create spectrum for sky subtraction
+
+    Parameters
+    ----------
+    hdu : fits.HDUList, optional
+        the skytable data from the lvmCFrame file, by default None
+    tel : str
+        for which telescope is the sky being constructed
+    wmin : int, optional
+        the wavelength minimum bound, by default 6200
+    wmax : int, optional
+        the wavelength maximum bound, by default 6450
+    method : str, optional
+        the method of constructing the sky continuum, by default "nearest"
+
+    Returns
+    -------
+    np.array
+        the output spectrum for sky subtraction
+    """
+
+    if method not in ['farlines_nearcont', 'nearest']:
+        raise ValueError(f"sky_method {method} does not exist")
+
+
+    # get the science and sky data, convert to tables
+    hdusci = hdu['SCI']
+    hduskye = hdu['SKYE']
+    hduskyw = hdu['SKYW']
+    # below are the supersampled sky tables, not using them now but might be used in the future
+    #hdusskye = hdu['SKYE_SUPER']
+    #hdusskyw = hdu['SKYW_SUPER']
+
+    # do continuum vs line separation
+    print("separating line and continuum in Sci, SkyE ,and SkyW spectra")
+
+    specsci=Spectrum1D(wave=Table(hdusci.data)['WAVE'].data, data=Table(hdusci.data)['FLUX'].data, mask=np.zeros(len(Table(hdusci.data)), dtype=bool))
+    specskye=Spectrum1D(wave=Table(hduskye.data)['WAVE'].data, data=Table(hduskye.data)['FLUX'].data, mask=np.zeros(len(Table(hduskye.data)), dtype=bool))
+    specskyw=Spectrum1D(wave=Table(hduskyw.data)['WAVE'].data, data=Table(hduskyw.data)['FLUX'].data, mask=np.zeros(len(Table(hduskyw.data)), dtype=bool))
+
+    csci=find_continuum(specsci._data)
+    cskye=find_continuum(specskye._data)
+    cskyw=find_continuum(specskyw._data)
+
+    lsci=specsci._data-csci
+    lskye=specskye._data-cskye
+    lskyw=specskyw._data-cskyw
+
+    # calculate separation of sky and science fields
+    cordsci = SkyCoord(hdusci.header["RA"], hdusci.header["DEC"], unit="deg")
+    cordskye = SkyCoord(hduskye.header["RA"], hduskye.header["DEC"], unit="deg")
+    cordskyw = SkyCoord(hduskyw.header["RA"], hduskyw.header["DEC"], unit="deg")
+    wsep = cordsci.separation(cordskyw)
+    esep = cordsci.separation(cordskye)
+
+    print(f'Creating sky for telescope: {tel}')
+    print(f'Using method: {method}')
+
+    # Guille's method using continuum from nearest sky and lines from further sky
+    # scaling lines spectrum with Knox's global scaling method
+    if method == 'farlines_nearcont':
+
+        if wsep < esep :
+            uselsky=lskye
+            usecsky=cskyw
+        else:
+            uselsky=lskyw
+            usecsky=cskye
+
+        # set bounds
+        rmin = 0.5
+        rmax = 1.5
+
+        minimum = ksl_bisection(
+            fit_func, rmin, rmax, tol=0.001, maxiter=8, args=(lsci, uselsky)
+        )
+        log.info(f"Results {minimum} with wmin {wmin} and wmax {wmax}.")
+
+        # create spectrum for sky subtraction using entire wavelength range
+        skysub = usecsky + minimum * uselsky
+
+    # Knox's original method using nearest sky and polynomial fit to model continuum
+    # scaling lines spectrum with Knox's global scaling method
+    elif method == 'nearest':
+
+        if wsep < esep :
+            uselsky=lskyw
+            usecsky=cskyw
+        else:
+            uselsky=lskye
+            usecsky=cskye
+
+        # set bounds
+        rmin = 0.5
+        rmax = 1.5
+
+        minimum = ksl_bisection(
+            fit_func, rmin, rmax, tol=0.001, maxiter=8, args=(lsci, uselsky)
+        )
+        log.info(f"Results {minimum} with wmin {wmin} and wmax {wmax}.")
+
+        # create spectrum for sky subtraction using entire wavelength range
+        skysub = usecsky + minimum * uselsky
+
+
+    # method using continuum from nearest sky and lines from further sky
+    # scaling lines on a per family basis using Sebastian's code
+    elif method == 'families':
+
+        if wsep < esep :
+            uselsky=lskyw
+            usecsky=cskyw
+        else:
+            uselsky=lskye
+            usecsky=cskye
+
+        # correcting sky line spectrum 
+        uselskycorr=uselsky
+        # uselskycorr=sebastian_function(lsci, uselsky)
+
+        skysub = usecsky + uselskycorr
+
+
+    ## MAKING PLOTS FOR TESTING
+    #fig1, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(20, 15))
+    #ax1.plot(specsci._wave, specsci._data)
+    #ax1.plot(specsci._wave, csci)
+    #ax1.set_ylim(-1e-15, 8e-14)
+    #ax2.plot(specskye._wave, specskye._data)
+    #ax2.plot(specskye._wave, cskye)
+    #ax2.set_ylim(-1e-15, 8e-14)
+    #ax3.plot(specskyw._wave, specskyw._data)
+    #ax3.plot(specskyw._wave, cskyw)
+    #ax3.set_ylim(-1e-15, 8e-14)
+    #plt.show()
+    #fig2, ax1 = plt.subplots(figsize=(20, 15))
+    #ax1.plot(specsci._wave, lsci, label='Sci')
+    #ax1.plot(specskye._wave, lskye, label='SkyE')
+    #ax1.plot(specskyw._wave, lskyw, label='SkyW')
+    #ax1.plot(specskyw._wave, minimum*uselsky, label='Scaled Line Sky')
+    #ax1.set_ylim(-1e-15, 2e-13)
+    #ax1.set_xlim(6450, 6650)
+    #ax1.legend()
+    #plt.show()
+    #fig3, ax1 = plt.subplots(figsize=(20, 15))
+    #ax1.plot(specsci._wave, lsci, label='Sci')
+    #ax1.plot(specskye._wave, lskye, label='SkyE')
+    #ax1.plot(specskyw._wave, lskyw, label='SkyW')
+    #ax1.plot(specskyw._wave, minimum*uselsky, label='Scaled Line Sky')
+    #ax1.set_ylim(-1e-15, 2e-13)
+    #ax1.set_xlim(7800, 8000)
+    #ax1.legend()
+    #plt.show()
+    #fig4, ax1 = plt.subplots(figsize=(20, 15))
+    #ax1.plot(specsci._wave, specsci._data, alpha=0.6, label='Sci')
+    #ax1.plot(specsci._wave, specsci._data-skysub, alpha=0.6, label='Sci-Sky')  
+    #ax1.set_ylim(-1e-15, 2e-13)
+    #ax1.set_xlim(6450, 6650)
+    #ax1.legend()
+    #plt.show() 
+    #fig5, ax1 = plt.subplots(figsize=(20, 15))
+    #ax1.plot(specsci._wave, specsci._data, alpha=0.6, label='Sci')
+    #ax1.plot(specsci._wave, specsci._data-skysub, alpha=0.6, label='Sci-Sky')  
+    #ax1.set_ylim(-1e-15, 2e-13)
+    #ax1.set_xlim(7800, 8000)
+    #ax1.legend()
+    #plt.show() 
+    #fig6, ax1 = plt.subplots(figsize=(20, 15))
+    #ax1.plot(specsci._wave, specsci._data, alpha=0.6, label='Sci')
+    #ax1.plot(specsci._wave, specsci._data-skysub, alpha=0.6, label='Sci-Sky')  
+    #ax1.set_ylim(-5e-14, 2e-13)
+    ##ax1.set_xlim(00, 8100)
+    #ax1.legend()
+    #plt.show() 
+    #fig7, ax1 = plt.subplots(figsize=(20, 15))
+    #ax1.plot(specsci._wave, np.abs((specsci._data-skysub)/uselsky), alpha=0.6, label='Sci-Sky')  
+    #ax1.set_ylim(0, 1)
+    ##ax1.set_xlim(00, 8100)
+    #ax1.legend()
+    #plt.show() 
+
+
+
+    return np.array(skysub)
+
+
+def fit_func(r: float, sci: Column, sky: Column) -> float:
+    """ Minimized function
+
+    The function that is minimized, basically
+    the absolute value of the difference in science and
+    sky squared, which basically weights regions with
+    the brightest sky lines the most.
+
+    Parameters
+    ----------
+    r : float
+        scale factor
+    sci : Column
+        the science array data
+    sky : Column
+        the sky array data
+
+    Returns
+    -------
+    float
+        the minimized value
+    """
+
+    delta = sci - r * sky
+
+    xx = sci * delta
+    xx = np.abs(xx)
+
+    xresult = np.sum(xx)
+    xnorm = np.dot(sky, sky)
+
+    return xresult / xnorm
+
+
+def ksl_bisection(func: Callable, a: float, b: float, tol: float = 1e-2, args: tuple = (), maxiter: int = 30) -> float:
+    """ Custom implementation of bisection method to find the minimum of a function within an interval.
+
+    Parameters
+    ----------
+    func : Callable
+        The objective function.
+    a : float
+        The lower bound of the interval.
+    b : float
+        The upper bound of the interval.
+    tol : float, optional
+        The tolerance for the minimum value, by default 1e-2
+    args : tuple, optional
+        additional arguments, by default ()
+    maxiter : int, optional
+        The maximum number of iterations, by default 30
+
+    Returns
+    -------
+    float
+        The x-coordinate of the estimated minimum.
+    """
+
+    j = 0
+    while j < maxiter:
+        interval = [
+            a,
+            (3.0 / 4.0 * a + 1 / 4.0 * b),
+            (a + b) / 2,
+            1 / 4 * a + 3 / 4 * b,
+            b,
+        ]
+        log.info(f'{interval}')
+        values = [func(x, *args) for x in interval]
+        log.info(f'{values}')
+        min_index = values.index(min(values))
+        log.info(f'{min_index}')
+
+        if min_index == 0:
+            a, b = interval[0], interval[2]
+        elif min_index == 1:
+            a, b = interval[0], interval[2]
+        elif min_index == 2:
+            a, b = interval[1], interval[3]
+        elif min_index == 3:
+            a, b = interval[2], interval[4]
+        elif min_index == 4:
+            a, b = interval[2], interval[4]
+        log.info(f'{a}, {b}')
+        if abs(a - b) < tol:
+            log.info(f"Accuracy achieved on interation {j}")
+            break
+        j += 1
+
+    # Return the midpoint after the maximum number of iterations
+    return (a + b) / 2
