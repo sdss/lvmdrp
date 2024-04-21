@@ -99,9 +99,7 @@ def _decode_string(metadata):
     pandas.DataFrame
         dataframe with all bytes columns turned into literal strings
     """
-    df_str = metadata.select_dtypes(object).apply(
-        lambda s: s.str.decode("utf-8"), axis="columns"
-    )
+    df_str = metadata.select_dtypes([object]).stack().str.decode('utf-8').unstack()
     metadata[df_str.columns] = df_str
     return metadata
 
@@ -907,6 +905,9 @@ def get_metadata(
 
         metadatas.append(metadata)
 
+    if not metadatas:
+        return
+
     metadata = pd.concat(metadatas, axis="index", ignore_index=True)
     log.info(f"found {len(metadata)} frames in stores")
     # filter by exposure number, spectrograph and/or camera
@@ -1333,50 +1334,123 @@ def put_reduction_stage(
         store.close()
 
 
-def create_summary_file() -> pd.DataFrame:
-    """ Create a DRPall summary file
+def _collect_header_data(filename: str) -> dict:
+    """ Collect the relevant header information from a file
 
-    Creates a FITS drpall summary file, using the raw
-    HDF5 metadata files.  It aggregates all the stores
-    together into a single dataframe.
+    Get the relevant header keys from the lvmSFrame file.  Remaps
+    some of the keys into new, cleaner column names for the summary
+    file.
 
-    Re-running this will update any existing drpall
-    file with any new data stores.
+    Parameters
+    ----------
+    filename : str
+        the lvmSFrame filename
 
     Returns
     -------
-    pd.DataFrame
-        the aggregated data from all the stores
+    dict
+        the extracted header key/values
     """
-    # get raw metadata stores
-    stores = _load_or_create_store(tileid="*", mjd="*", mode="r")
+    hdr_dict_mapping = {'drpver': 'DRPVER', 'drpqual': 'DRPQUAL', 'dpos': 'DPOS',
+                        'sci_ra': 'TESCIRA', 'sci_dec': 'TESCIDE', 'sci_amass': 'TESCIAM',
+                        'sci_kmpos': 'TESCIKM', 'sci_focpos': 'TESCIFO',
+                        'sci_geoshadow_hgt':'GEOCORONAL SCI SHADOW_HEIGHT',
+                        'skye_ra': 'TESKYERA', 'skye_dec': 'TESKYEDE', 'skye_amass': 'TESKYEAM',
+                        'skye_kmpos': 'TESKYEKM', 'skye_focpos': 'TESKYEFO', 'skye_name': 'SKYENAME',
+                        'skye_geoshadow_hgt':'GEOCORONAL SKYE SHADOW_HEIGHT',
+                        'skyw_ra': 'TESKYWRA', 'skyw_dec': 'TESKYWDE', 'skyw_amass': 'TESKYWAM',
+                        'skyw_kmpos': 'TESKYWKM', 'skyw_focpos': 'TESKYWFO', 'skyw_name': 'SKYWNAME',
+                        'skyw_geoshadow_hgt':'GEOCORONAL SKYW SHADOW_HEIGHT'
+                        }
 
-    # get raw array from hdf5 files
-    a = []
-    for h in stores:
-        a.append(h['raw'][()])
+    with fits.open(filename) as hdulist:
+        hdr = hdulist['PRIMARY'].header
 
-    # stack arrays and convert to a dataframe
-    tmp = np.concatenate(a, axis=0)
-    df = pd.DataFrame(tmp)
+        hdrrow = {k: hdr.get(v) for k, v in hdr_dict_mapping.items()}
 
-    # decode byte columns
-    tmp = df.select_dtypes([object]).stack().str.decode('utf-8').unstack()
-    df[tmp.columns] = tmp
+        return hdrrow
 
-    # remove columns
-    df = df.drop(['rmjd', 'name'], axis=1)
 
-    # sort frames
-    df = df.sort_values(['mjd', 'expnum', 'camera'])
+def update_summary_file(filename: str, tileid: int = None, mjd: int = None, expnum: int = None,
+                        master_mjd: int = None):
+    """ Update the DRPall summary file
 
-    # add columns
-    df['drpver'] = DRPVER
+    Update the LVM DRPall summary file with a new row of data for a given lvmSFrame file.
+    This writes out the summary file as an HDF5 file using pandas built-in "to_hdf", which
+    uses pytables.  This allows for efficient read/writes, updates, and handles file creation.
+
+    Parameters
+    ----------
+    filename : str
+        the lvmSFrame filepath
+    tileid : int, optional
+        the tileid of the exposure, by default None
+    mjd : int, optional
+        the mjd of the exposure, by default None
+    expnum : int, optional
+        the exposure number, by default None
+    master_mjd : int, optional
+        the master calibration MJD, by default None
+    """
+
+    # get the row(s) from the raw frames metadata
+    df = get_metadata(tileid=int(tileid), mjd=int(mjd), expnum=int(expnum), imagetyp='object')
+    if df is None or df.empty:
+        return
+
+    # select unique expnum row, i.e. remove duplicates from camera/spec rows
+    # select a subset of columns from frames metadata
+    row = df.drop_duplicates(['tileid', 'mjd', 'expnum']).reset_index(drop=True).sort_values(['mjd', 'expnum'])
+    row = row[['tilegrp', 'tileid', 'mjd', 'expnum', 'exptime', 'stage', 'status', 'drpqual']]
+
+    # collect header info
+    hdr_data = _collect_header_data(filename)
+
+    # add additional metadata
+    # get SAS location and name
+    location = path.location("lvm_frame", mjd=mjd, drpver=DRPVER, tileid=tileid, expnum=expnum, kind='SFrame')
+    name = path.name("lvm_frame", mjd=mjd, drpver=DRPVER, tileid=tileid, expnum=expnum, kind='SFrame')
+    gdr_location = path.location('lvm_agcam_coadd', mjd=mjd, specframe=expnum, tel='sci')
+    hdr_data['filename'] = name
+    hdr_data['location'] = location
+    hdr_data['agcam_location'] = gdr_location
+    hdr_data['calib_mjd'] = master_mjd
+    hdr_data['drpver'] = DRPVER
+
+    # add new columns
+    df = row.assign(**hdr_data)
+
+    # create drpall h5 filepath
+    drpall = path.full('lvm_drpall', drpver=DRPVER)
+    drpall = drpall.replace('.fits', '.h5')
+
+    # write to pytables hdf5
+    try:
+        df.to_hdf(drpall, key='summary', append=True, data_columns=True, min_itemsize={'skyename': 20, 'skywname': 20})
+    except ImportError:
+        log.error('Missing pytables dependency. Install with `pip install "pandas[hdf5]"`. '
+                      'On macs, you may first need to first run "brew install hdf5".')
+
+
+def convert_h5_to_fits(h5file: str):
+    """ Convert a pandas HDF5 file to a FITS file
+
+    Convert the drpall hdf5 file to more astro-friendly
+    FITS format.  This function is useful to run once
+    the summary HDF5 file for the entire tagged DRP run
+    has completed.
+
+    Parameters
+    ----------
+    h5file : str
+        the path to the h5 file
+    """
+    # read in the dataframe
+    df = pd.read_hdf(h5file, key='summary')
+    df.reset_index(drop=True, inplace=True)
+    df.to_hdf(h5file, key='summary', data_columns=True)
 
     # write FITS file
-    drpall = path.full('lvm_drpall', drpver=DRPVER)
-    b = fits.BinTableHDU(Table.from_pandas(df), name='SUMMARY')
-    x = fits.HDUList([fits.PrimaryHDU(), b])
-    x.writeto(drpall, overwrite=True)
-
-    return df
+    fitsfile = h5file.replace('.h5', '.fits')
+    table = Table.from_pandas(df)
+    table.write(fitsfile, overwrite=True)

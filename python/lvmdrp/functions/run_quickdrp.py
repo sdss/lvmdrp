@@ -224,3 +224,7 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
     # TODO: add quick report routine
 
     # TODO: by default remove the extra files for the given expnum
+
+    # update the drpall summary file
+    log.info('Updating the drpall summary file')
+    md.update_summary_file(sframe_path, tileid=sci_tileid, mjd=sci_mjd, expnum=sci_expnum, master_mjd=master_mjd)

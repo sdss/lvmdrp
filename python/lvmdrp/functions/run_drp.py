@@ -25,7 +25,7 @@ from lvmdrp.functions.imageMethod import (preproc_raw_frame, create_master_frame
 from lvmdrp.functions.rssMethod import (determine_wavelength_solution, create_pixel_table,
                                         resample_wavelength, join_spec_channels, stack_spectrographs)
 from lvmdrp.utils.metadata import (get_frames_metadata, get_master_metadata, extract_metadata,
-                                   get_analog_groups, match_master_metadata, create_master_path, create_summary_file)
+                                   get_analog_groups, match_master_metadata, create_master_path)
 from lvmdrp.utils.convert import tileid_grp
 from lvmdrp.functions.run_quickdrp import quick_science_reduction
 
@@ -1538,10 +1538,6 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
         # create done status on successful run
         if not status_file_exists(tileid, mjd, status='error'):
             create_status_file(tileid, mjd, status='done')
-
-    # write / update the drpall summary file
-    log.info('Updating the drpall summary file')
-    create_summary_file()
 
 
 def reduce_calib_frame(row: dict):
