@@ -4029,7 +4029,7 @@ def add_astrometry(
                 IFUcencoords=outw.pixel_to_world(2500,1000)
                 RAobs=IFUcencoords.ra.value
                 DECobs=IFUcencoords.dec.value
-                org_img._header.setHdrValue('ASTRMSRC', 'GDR coadd', comment='Source of astrometric solution: guider')
+                org_img.setHdrValue('ASTRMSRC', 'GDR coadd', comment='Source of astrometric solution: guider')
                 copy_guider_keyword(mfheader, 'FRAME0  ', org_img._header)
                 copy_guider_keyword(mfheader, 'FRAMEN  ', org_img._header)
                 copy_guider_keyword(mfheader, 'NFRAMES ', org_img._header)
