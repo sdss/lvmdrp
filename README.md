@@ -4,7 +4,7 @@ The LVM DRP is based in a collection of routines from [Py3D](https://github.com/
 
 ## Prerequisites
 
-This code is being developed/tested in an Ubuntu-based OS, using **Python 3.8**. We recommend you use a Python environment manager such as Anaconda or similar, in order to work on the same python version and to avoid cluttering the OS's python installation. We assume you are a member of the [Github sdss organization](https://github.com/sdss). We also assume that you have an SSH key set up on your local machine and registered in your Github account. If not, please follow [these instructions](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/adding-a-new-ssh-key-to-your-github-account) to set up one.
+This code is being developed/tested in an Ubuntu-based OS, using **Python 3.10**. We recommend you use a Python environment manager such as Anaconda or similar, in order to work on the same python version and to avoid cluttering the OS's python installation. We assume you are a member of the [Github sdss organization](https://github.com/sdss). We also assume that you have an SSH key set up on your local machine and registered in your Github account. If not, please follow [these instructions](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/adding-a-new-ssh-key-to-your-github-account) to set up one.
 
 To properly install and run the DRP you'll need to follow these steps first:
 
@@ -32,7 +32,7 @@ To properly install and run the DRP you'll need to follow these steps first:
     wget -X css --reject html -nH -nc -t0 -r –level=2 -E –ignore-length -x -k -p -erobots=off -np -N https://data.sdss5.org/sas/sdsswork/data/lvm/lco/<mjd>/ --user <user> --password <password>
     ```
     **NOTE: we strongly recommend that you use the [SDSS access](https://github.com/sdss/sdss_access) product to achieve the same results.**
-    
+
 3. Download the current set of calibrations from the [SAS sandbox](https://data.sdss5.org/sas/sdsswork/lvm/sandbox/calib/) and add to your `.bashrc` (or equivalent) the following definition:
 
     ```bash
@@ -42,13 +42,13 @@ To properly install and run the DRP you'll need to follow these steps first:
     where `master-calibrations` contains only MJD folders.
 
 4. Create a new python environment. This is optional, but strongly recommended. With conda this is done like this:
-   
+
     ```bash
-    conda create -n lvmdrp python=3.8
+    conda create -n lvmdrp python=3.10
     ```
 
 5. Make sure you are in the intended python environment and directory:
-    
+
     ```bash
     conda activate lvmdrp
     ```
@@ -60,20 +60,20 @@ If you are planning on installing the DRP on a system other than Ubuntu (e.g., M
 To install the DRP along with its dependencies, you need to run the following steps:
 
 1. Clone the Github repository:
-    
+
     ```bash
     git clone git@github.com:sdss/lvmdrp.git
     ```
 
 2. Go into the `lvmdrp` directory:
-    
+
     ```bash
     cd lvmdrp
     ```
 
 
 3. Install the DRP package in the current python environment (see [contributing](#contributing-to-lvm-drp-development) section below for a replacement of this step):
-    
+
     ```bash
     pip install .
     ```
