@@ -12,6 +12,11 @@ from scipy import interpolate, optimize, special
 
 fact = numpy.sqrt(2.0 * numpy.pi)
 
+def gaussians(pars, x):
+    """Gaussian models for multiple components"""
+    y = pars[0][:, None] * numpy.exp(-0.5 * ((x[None, :] - pars[1][:, None]) / pars[2][:, None]) ** 2) / (pars[2][:, None] * fact)
+    return bn.nansum(y, axis=0)
+
 
 class SpectralResolution(object):
     def __init__(self, res=None):

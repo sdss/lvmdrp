@@ -89,27 +89,6 @@ __all__ = [
 ]
 
 
-def _fill_column_list(columns, width):
-    """Adds # width columns around the given columns list
-
-    Parameters
-    ----------
-    columns : list
-        list of columns to add width
-    width : int
-        number of columns to add around the given columns
-
-    Returns
-    -------
-    list
-        list of columns with width
-    """
-    new_columns = []
-    for icol in columns:
-        new_columns.extend(range(icol - width, icol + width))
-    return new_columns
-
-
 def _nonlinearity_correction(ptc_params: None | numpy.ndarray, nominal_gain: float, quadrant: Image, iquad: int) -> Image:
     """calculates non-linearity correction for input quadrant
 
@@ -224,87 +203,6 @@ def _create_trace_regions(out_trace, table_data, table_poly, table_poly_all, lab
     ax.set_ylabel("residuals (%)")
     ax.set_title(f"{label} residuals")
     save_fig(fig, out_trace, label="residuals", figure_path="qa", to_display=display_plots)
-
-
-def _eval_continuum_model_columns(trace_cent, trace_width=None, trace_amp=None, nrows=4080,
-                         columns=[500, 1000, 1500, 2000, 2500, 3000, 3500], column_width=25):
-    """Returns the evaluated continuum model from the given fiber trace information
-
-    Parameters
-    ----------
-    trace_cent : TraceMask
-        the fiber trace centroids
-    trace_width : TraceMask
-        the fiber trace widths, defaults to None
-    trace_amp : TraceMask
-        the fiber trace amplitudes, defaults to None
-    nrows : int
-        number of rows in the image, defaults to 4080
-    columns : list
-        list of columns to evaluate the continuum model, defaults to [500, 1000, 1500, 2000, 2500, 3000, 3500]
-    column_width : int
-        number of columns to add around the given columns, defaults to 25
-
-    Returns
-    -------
-    Image
-        the evaluated continuum model
-    """
-    # define gaussian model
-    f = numpy.sqrt(2 * numpy.pi)
-    def gaussians(pars, x):
-        y = pars[0][:, None] * numpy.exp(-0.5 * ((x[None, :] - pars[1][:, None]) / pars[2][:, None]) ** 2) / (pars[2][:, None] * f)
-        return bn.nansum(y, axis=0)
-
-    if trace_width is None or trace_amp is None or trace_cent is None:
-        raise ValueError(f"nothing to do, with provided fiber trace information {trace_cent = } {trace_width = }, {trace_amp = }")
-
-    if isinstance(trace_width, (int, float, numpy.float32)):
-        trace_width = TraceMask(data=numpy.ones_like(trace_cent._data) * trace_width, mask=numpy.zeros_like(trace_cent._data, dtype=bool))
-    elif isinstance(trace_width, TraceMask):
-            pass
-    else:
-        raise ValueError("trace_width must be a TraceMask instance or an int/float")
-
-    if isinstance(trace_amp, (int, float, numpy.float32)):
-        trace_amp = TraceMask(data=numpy.ones_like(trace_cent._data) * trace_amp, mask=numpy.zeros_like(trace_cent._data, dtype=bool))
-    elif isinstance(trace_amp, TraceMask):
-            pass
-    else:
-        raise ValueError("trace_amp must be a TraceMask instance or an int/float")
-
-    # initialize the continuum model
-    ncols = trace_cent._data.shape[1]
-    model = Image(data=numpy.zeros((nrows, ncols)), mask=numpy.ones((nrows, ncols), dtype=bool))
-    model._mask[:, columns] = False
-
-    # fill the columns with the width
-    columns = _fill_column_list(columns, column_width)
-
-    # evaluate continuum model
-    y_axis = numpy.arange(nrows)
-    for icolumn in tqdm(columns, desc="evaluating Gaussians", unit="column", ascii=True):
-        pars = (trace_amp._data[:, icolumn], trace_cent._data[:, icolumn], trace_width._data[:, icolumn] / 2.354)
-        model._data[:, icolumn] = gaussians(pars=pars, x=y_axis)
-
-    return model
-
-
-def _eval_continuum_model(obs_img, trace_amp, trace_cent, trace_fwhm):
-    # define gaussian model
-    f = numpy.sqrt(2 * numpy.pi)
-    def gaussians(pars, x):
-        y = pars[0][:, None] * numpy.exp(-0.5 * ((x[None, :] - pars[1][:, None]) / pars[2][:, None]) ** 2) / (pars[2][:, None] * f)
-        return bn.nansum(y, axis=0)
-
-    # evaluate continuum exposure model
-    mod = copy(obs_img)
-    column = numpy.arange(obs_img._dim[0])
-    for icolumn in tqdm(range(obs_img._dim[1]), desc="evaluating Gaussians", unit="column", ascii=True):
-        pars = (trace_amp._data[:, icolumn], trace_cent._data[:, icolumn], trace_fwhm._data[:, icolumn] / 2.354)
-        mod._data[:, icolumn] = gaussians(pars=pars, x=column)
-
-    return mod, (mod / obs_img)
 
 
 def _channel_combine_fiber_params(in_cent_traces, in_waves, add_overscan_columns=True):
@@ -467,7 +365,7 @@ def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=Non
         the evaluated continuum model at the given columns
     """
     # generate the continuum model using the master traces only along the specific columns
-    model = _eval_continuum_model_columns(trace_cent, trace_width, trace_amp=trace_amp, columns=columns, column_width=column_width)
+    model, _ = image.eval_fiber_model(trace_cent, trace_width, trace_amp=trace_amp, columns=columns, column_width=column_width)
 
     # calculate thermal shifts
     column_shifts = image.measure_fiber_shifts(model, columns=columns, column_width=column_width, shift_range=shift_range)
@@ -2579,6 +2477,15 @@ def subtract_straylight(
         hdus.append(pyfits.ImageHDU(img_fit._data, name="SPLINE"))
         hdus.append(pyfits.ImageHDU(img_stray._data, name="SMOOTH"))
         hdus.writeto(out_stray, overwrite=True)
+
+        # stray_model = fits.HDUList()
+        # stray_model.append(fits.PrimaryHDU(data=img._data, header=img._header))
+        # stray_model.append(fits.ImageHDU(data=img_stray._data, name="STRAY_CORR"))
+        # stray_model.append(fits.ImageHDU(data=img._data-img_stray._data, name="STRAYLIGHT"))
+        # stray_model.append(fits.ImageHDU(data=model._data, name="CONT_MODEL"))
+        # stray_model.append(fits.ImageHDU(data=img_stray._data-model._data, name="STRAY_MODEL"))
+        # stray_model.append(fits.ImageHDU(data=img._data-model._data, name="NOSTRAY_MODEL"))
+        # stray_model.writeto(stray_path, overwrite=True)
 
     return img_median, img_fit, img_stray, img_out
 
@@ -5192,7 +5099,7 @@ def trace_fibers(
     # evaluate model image
     if out_model is not None and out_ratio is not None:
         log.info("evaluating model image")
-        model, mratio = _eval_continuum_model(img, trace_amp, trace_cent, trace_fwhm)
+        model, mratio = img.eval_fiber_model(trace_amp, trace_cent, trace_fwhm)
         model.writeFitsData(out_model)
         mratio.writeFitsData(out_ratio)
     else:

@@ -802,7 +802,7 @@ def create_traces(mjds, target_mjd=None, expnums_ldls=None, expnums_qrtz=None,
         mwidths[camera].writeFitsData(mwidth_path)
 
         # eval model continuum and ratio
-        model, ratio = image_tasks._eval_continuum_model(img_stray, mamps[camera], mcents[camera], mwidths[camera])
+        model, ratio = img_stray.eval_fiber_model(mamps[camera], mcents[camera], mwidths[camera])
         model.writeFitsData(model_path)
         ratio.writeFitsData(mratio_path)
 

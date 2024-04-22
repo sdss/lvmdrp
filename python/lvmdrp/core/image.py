@@ -4,6 +4,7 @@ import warnings
 
 from functools import partial
 from typing import List
+from tqdm import tqdm
 
 import numpy
 import bottleneck as bn
@@ -17,9 +18,32 @@ from scipy import interpolate
 from lvmdrp import log
 from lvmdrp.core.constants import CON_LAMPS, ARC_LAMPS
 from lvmdrp.core.plot import plt
+from lvmdrp.core.fit_profile import gaussians
 from lvmdrp.core.apertures import Apertures
 from lvmdrp.core.header import Header
+from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.core.spectrum1d import Spectrum1D, _cross_match_float
+
+
+def _fill_column_list(columns, width):
+    """Adds # width columns around the given columns list
+
+    Parameters
+    ----------
+    columns : list
+        list of columns to add width
+    width : int
+        number of columns to add around the given columns
+
+    Returns
+    -------
+    list
+        list of columns with width
+    """
+    new_columns = []
+    for icol in columns:
+        new_columns.extend(range(icol - width, icol + width))
+    return new_columns
 
 
 def _parse_ccd_section(section):
@@ -1634,7 +1658,6 @@ class Image(Header):
         new_image.setData(data=new, error=new_error, inplace=True)
         return new_image
 
-
     def convolveGaussImg(self, sigma_x, sigma_y, mode="nearest", mask=False):
         """
         Convolves the data of the Image with a given kernel. The mask and error information will be unchanged.
@@ -2024,7 +2047,6 @@ class Image(Header):
             ]  #    traceFWHM.setSlice(i, axis='y', data = fwhm_fit[0], mask = fwhm_fit[1]) # insert the result into the trace mask
             # return traceFWHM
         return (fwhm, mask)
-
 
     def extractSpecAperture(self, TraceMask, aperture):
         pos = TraceMask._data
@@ -2606,6 +2628,67 @@ class Image(Header):
 
     def setSlitmap(self, slitmap):
         self._slitmap = slitmap
+
+    def eval_fiber_model(self, trace_cent, trace_width=None, trace_amp=None, columns=None, column_width=None):
+        """Returns the evaluated fiber model from the given fiber centroids, widths and amplitudes
+
+        Parameters
+        ----------
+        trace_cent : TraceMask
+            the fiber trace centroids
+        trace_width : TraceMask
+            the fiber trace widths, defaults to None
+        trace_amp : TraceMask
+            the fiber trace amplitudes, defaults to None
+        nrows : int
+            number of rows in the image, defaults to 4080
+        columns : list
+            list of columns to evaluate the continuum model, defaults to None
+        column_width : int
+            number of columns to add around the given columns, defaults to None
+
+        Returns
+        -------
+        Image
+            the evaluated continuum model
+        Image
+            the ratio of the model to the original image
+        """
+        if trace_width is None or trace_amp is None or trace_cent is None:
+            raise ValueError(f"nothing to do, with provided fiber trace information {trace_cent = } {trace_width = }, {trace_amp = }")
+
+        if isinstance(trace_width, (int, float, numpy.float32)):
+            trace_width = TraceMask(data=numpy.ones_like(trace_cent._data) * trace_width, mask=numpy.zeros_like(trace_cent._data, dtype=bool))
+        elif isinstance(trace_width, TraceMask):
+                pass
+        else:
+            raise ValueError("trace_width must be a TraceMask instance or an int/float")
+
+        if isinstance(trace_amp, (int, float, numpy.float32)):
+            trace_amp = TraceMask(data=numpy.ones_like(trace_cent._data) * trace_amp, mask=numpy.zeros_like(trace_cent._data, dtype=bool))
+        elif isinstance(trace_amp, TraceMask):
+                pass
+        else:
+            raise ValueError("trace_amp must be a TraceMask instance or an int/float")
+
+        if columns is None:
+            columns = numpy.arange(trace_cent._data.shape[1])
+        else:
+            columns = _fill_column_list(columns, column_width)
+
+        # initialize the continuum model
+        nrows = self._dim[0]
+        ncols = self._dim[1]
+        model = Image(data=numpy.zeros((nrows, ncols)), mask=numpy.ones((nrows, ncols), dtype=bool))
+        model._mask[:, columns] = False
+
+        # evaluate continuum model
+        y_axis = numpy.arange(nrows)
+        for icolumn in tqdm(columns, desc="modelling fiber profile", unit="column", ascii=True):
+            pars = (trace_amp._data[:, icolumn], trace_cent._data[:, icolumn], trace_width._data[:, icolumn] / 2.354)
+            model._data[:, icolumn] = gaussians(pars=pars, x=y_axis)
+
+        return model, model / self
 
 
 def loadImage(
