@@ -1426,7 +1426,7 @@ def update_summary_file(filename: str, tileid: int = None, mjd: int = None, expn
 
     # write to pytables hdf5
     try:
-        df.to_hdf(drpall, key='summary', append=True, data_columns=True, min_itemsize={'skyename': 20, 'skywname': 20})
+        df.to_hdf(drpall, key='summary', append=True, data_columns=True, min_itemsize={'skye_name': 20, 'skyw_name': 20})
     except ImportError:
         log.error('Missing pytables dependency. Install with `pip install "pandas[hdf5]"`. '
                       'On macs, you may first need to first run "brew install hdf5".')
