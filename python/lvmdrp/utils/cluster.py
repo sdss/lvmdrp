@@ -6,6 +6,10 @@ import os
 
 from lvmdrp import log
 
+# set temporary slurm envvars for non-utah runs
+os.environ["SLURM_SCRATCH_DIR"] = os.getenv("SLURM_SCRATCH_DIR", "~")
+os.environ["SLURM_LOGS_DIR"] = os.getenv("SLURM_LOGS_DIR", "~")
+
 try:
     from slurm import queue
 except ImportError:
