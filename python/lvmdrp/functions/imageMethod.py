@@ -4061,7 +4061,7 @@ def add_astrometry(
                 RAobs=org_img._header[f'PO{tel}RA'.capitalize()]
                 DECobs=org_img._header[f'PO{tel}DE'.capitalize()]
                 PAobs=org_img._header[f'PO{tel}PA'.capitalize()]
-                org_img._header.setHdrValue('ASTRMSRC', 'CMD position', comment='Source of astrometric solution: commanded position')
+                org_img.setHdrValue('ASTRMSRC', 'CMD position', comment='Source of astrometric solution: commanded position')
         else:
             RAobs=0
             DECobs=0
