@@ -1066,7 +1066,7 @@ class RSS(FiberRows):
         if wcs.spectral.array_shape:
             res_elements = wcs.spectral.array_shape[0]
             wl = wcs.spectral.all_pix2world(numpy.arange(res_elements), 0)[0]
-            wave = (wl * u.AA).value
+            wave = (wl * u.m).to(u.AA).value
             wave_disp = wave[1] - wave[0]
             wave_start = wave[0]
 
@@ -1759,14 +1759,13 @@ class RSS(FiberRows):
             sky_east_error=numpy.zeros((rss._fibers, wave.size), dtype="float32") if rss._sky_east_error is not None else None,
             sky_west=numpy.zeros((rss._fibers, wave.size), dtype="float32") if rss._sky_west is not None else None,
             sky_west_error=numpy.zeros((rss._fibers, wave.size), dtype="float32") if rss._sky_west_error is not None else None,
+            wave=wave,
+            lsf=numpy.zeros((rss._fibers, wave.size), dtype="float32") if rss._lsf is not None else None,
             cent_trace=rss._cent_trace,
             width_trace=rss._width_trace,
-            wave_trace=rss._wave_trace,
-            lsf_trace=rss._lsf_trace,
             slitmap=rss._slitmap,
             header=rss._header
         )
-        new_rss.set_wave_array(wave)
 
         # TODO: convert this into a interpolation class selector
         if method == "spline":
@@ -1784,6 +1783,9 @@ class RSS(FiberRows):
             new_rss._error[ifiber] = f(wave).astype("float32")
             f = interpolate.interp1d(rss._wave[ifiber], rss._mask[ifiber], kind="nearest", bounds_error=False, fill_value=1)
             new_rss._mask[ifiber] = f(wave).astype("bool")
+            if rss._lsf is not None:
+                f = interpolate.interp1d(rss._wave[ifiber], rss._lsf[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
+                new_rss._lsf[ifiber] = f(wave).astype("float32")
             if rss._sky is not None:
                 f = interpolate.interp1d(rss._wave[ifiber], rss._sky[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
                 new_rss._sky[ifiber] = f(wave).astype("float32")
