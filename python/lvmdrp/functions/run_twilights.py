@@ -543,14 +543,6 @@ def reduce_twilight_sequence(expnums: List[int], median_box: int = 10, niter: bo
                                         in_bias=master_cals.get("bias"), in_dark=master_cals.get("dark"),
                                         in_pixelflat=master_cals.get("pixelflat"), in_slitmap=SLITMAP)
 
-        # subtract straylight
-        if skip_done and os.path.isfile(lflat_path):
-            log.info(f"skipping {lflat_path}, file already exist")
-        else:
-            imageMethod.subtract_straylight(in_image=dflat_path, out_image=lflat_path,
-                                            in_cent_trace=master_cals.get("cent"), select_nrows=5,
-                                            aperture=13, smoothing=400, median_box=21, gaussian_sigma=0.0)
-
         # extract 1D spectra for each frame
         xflat_path = path.full("lvm_anc", drpver=drpver, kind="x", imagetype=flat["imagetyp"], **flat)
         if skip_done and os.path.isfile(xflat_path):

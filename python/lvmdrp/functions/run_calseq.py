@@ -34,7 +34,6 @@ from glob import glob
 from copy import deepcopy as copy
 from shutil import copy2
 from itertools import product, groupby
-from astropy.io import fits
 
 from lvmdrp import log, path, __version__ as drpver
 from lvmdrp.utils import metadata as md
@@ -694,7 +693,8 @@ def create_traces(mjds, target_mjd=None, expnums_ldls=None, expnums_qrtz=None,
         expnums = None
     frames, masters_mjd = get_sequence_metadata(mjds, target_mjd=target_mjd, expnums=expnums)
 
-    reduce_2d(mjds, target_mjd=masters_mjd, expnums=expnums)
+    # run 2D reduction on flats: preprocessing, detrending and stray light subtraction
+    reduce_2d(mjds, target_mjd=masters_mjd, expnums=expnums, reject_cr=False)
 
     # load current traces
     mamps, mcents, mwidths = {}, {}, {}
@@ -714,9 +714,9 @@ def create_traces(mjds, target_mjd=None, expnums_ldls=None, expnums_qrtz=None,
         for expnum, block_idxs, fiber_str in expnums:
             con_lamp = MASTER_CON_LAMPS[camera[0]]
             if con_lamp == "ldls":
-                counts_threshold = 1000
+                counts_threshold = 5000
             elif con_lamp == "quartz":
-                counts_threshold = 1000
+                counts_threshold = 10000
 
             # select fibers in current spectrograph
             fibermap = SLITMAP[SLITMAP["spectrographid"] == int(camera[1])]
@@ -726,39 +726,12 @@ def create_traces(mjds, target_mjd=None, expnums_ldls=None, expnums_qrtz=None,
             fiber_idx = np.where(select)[0][0]
 
             # define paths
-            dflat_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=masters_mjd, kind="d", imagetype="flat", camera=camera, expnum=expnum)
             lflat_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=masters_mjd, kind="l", imagetype="flat", camera=camera, expnum=expnum)
             flux_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=masters_mjd, kind="d", imagetype="flux", camera=camera, expnum=expnum)
             cent_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=masters_mjd, kind="d", imagetype="cent", camera=camera, expnum=expnum)
             fwhm_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=masters_mjd, kind="d", imagetype="fwhm", camera=camera, expnum=expnum)
             model_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=masters_mjd, kind="d", imagetype="model", camera=camera, expnum=expnum)
             mratio_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=masters_mjd, kind="d", imagetype="mratio", camera=camera, expnum=expnum)
-            mstray_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=masters_mjd, kind="d", imagetype="stray", camera=camera, expnum=expnum)
-            stray_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=masters_mjd, kind="d", imagetype="stray_model", camera=camera, expnum=expnum)
-
-            if subtract_straylight:
-                # trace only centroids
-                centroids, img = image_tasks.trace_fibers(
-                    in_image=dflat_path,
-                    out_trace_cent=cent_path,
-                    correct_ref=True, median_box=(1,10), coadd=20,
-                    counts_threshold=counts_threshold, max_diff=1.5,
-                    guess_fwhm=2.5, method="gauss", ncolumns=140,
-                    fit_poly=True, poly_deg=poly_deg_cent,
-                    interpolate_missing=True, only_centroids=True
-                )
-
-                # subtract stray light
-                image_tasks.subtract_straylight(
-                    in_image=dflat_path,
-                    out_image=lflat_path,
-                    in_cent_trace=cent_path,
-                    out_stray=mstray_path,
-                    select_nrows=5,
-                    median_box=21, aperture=13, smoothing=400, gaussian_sigma=0.0
-                )
-            else:
-                lflat_path = dflat_path
 
             log.info(f"going to trace std fiber {fiber_str} in {camera} within {block_idxs = }")
             centroids, trace_cent_fit, trace_flux_fit, trace_fwhm_fit, img_stray, model, mratio = image_tasks.trace_fibers(
@@ -832,18 +805,6 @@ def create_traces(mjds, target_mjd=None, expnums_ldls=None, expnums_qrtz=None,
         model, ratio = image_tasks._eval_continuum_model(img_stray, mamps[camera], mcents[camera], mwidths[camera])
         model.writeFitsData(model_path)
         ratio.writeFitsData(mratio_path)
-
-        if subtract_straylight:
-            stray_model = fits.HDUList()
-            stray_model.append(fits.PrimaryHDU(data=img._data, header=img._header))
-            stray_model.append(fits.ImageHDU(data=img_stray._data, name="STRAY_CORR"))
-            stray_model.append(fits.ImageHDU(data=img._data-img_stray._data, name="STRAYLIGHT"))
-            stray_model.append(fits.ImageHDU(data=model._data, name="CONT_MODEL"))
-            stray_model.append(fits.ImageHDU(data=img_stray._data-model._data, name="STRAY_MODEL"))
-            stray_model.append(fits.ImageHDU(data=img._data-model._data, name="NOSTRAY_MODEL"))
-            stray_model.writeto(stray_path, overwrite=True)
-
-    return mamps, mcents, mwidths, img, img_stray, model, ratio
 
 
 def create_fiberflats(mjds, target_mjd=None, expnums=None):
@@ -1053,21 +1014,21 @@ if __name__ == '__main__':
 
     tracemalloc.start()
 
-    # MJD = 60255
-    # ldls_expnums = np.arange(7264, 7269+1)
-    # ldls_expnums = [None] * (12-ldls_expnums.size) + ldls_expnums.tolist()
-    # qrtz_expnums = np.arange(7252, 7263+1)
+    MJD = 60255
+    ldls_expnums = np.arange(7264, 7269+1)
+    ldls_expnums = [None] * (12-ldls_expnums.size) + ldls_expnums.tolist()
+    qrtz_expnums = np.arange(7252, 7263+1)
 
     # MJD = 60185
     # ldls_expnums = np.arange(3936, 3937+1).tolist() + [None] * 10
     # qrtz_expnums = np.arange(3938, 3939+1).tolist() + [None] * 10
 
-    MJD = 60255
-    # ldls_expnums = np.arange(7230, 7240+1)
-    # qrtz_expnums = np.arange(7341, 7352+1)
-    ldls_expnums = qrtz_expnums = [7230] * 6
-    ldls_expnums += [None] * 6
-    qrtz_expnums += [None] * 6
+    # MJD = 60255
+    # # ldls_expnums = np.arange(7230, 7240+1)
+    # # qrtz_expnums = np.arange(7341, 7352+1)
+    # ldls_expnums = qrtz_expnums = [7230] * 6
+    # ldls_expnums += [None] * 6
+    # qrtz_expnums += [None] * 6
 
     try:
         # create_detrending_frames(mjds=60255, target_mjd=60255, kind="bias")
