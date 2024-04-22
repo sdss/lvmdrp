@@ -4811,23 +4811,12 @@ def trace_fibers(
         img = img.convolveImg(coadd_kernel)
         counts_threshold = counts_threshold * coadd
 
-    # extract guess positions from fibermap
-    ref_cent = slitmap[f"ypix_{channel}"].data
-    # correct reference fiber positions
-    profile = img.getSlice(LVM_REFERENCE_COLUMN, axis="y")
-    pixels = profile._pixels
+    # calculate centroids for reference column
     if correct_ref:
-        pixels = numpy.arange(pixels.size)
-        guess_heights = numpy.ones_like(ref_cent) * numpy.nanmax(profile._data)
-        ref_profile = _spec_from_lines(ref_cent, sigma=1.2, wavelength=pixels, heights=guess_heights)
-        log.info(f"correcting guess positions for column {LVM_REFERENCE_COLUMN}")
-        cc, bhat, mhat = _cross_match(
-            ref_spec=ref_profile,
-            obs_spec=profile._data,
-            stretch_factors=numpy.linspace(0.7,1.3,5000),
-            shift_range=[-100, 100])
-        log.info(f"stretch factor: {mhat:.3f}, shift: {bhat:.3f}")
-        ref_cent = ref_cent * mhat + bhat
+        ref_cent = img.match_reference_column(ref_column=LVM_REFERENCE_COLUMN)
+    else:
+        ref_cent = img._slitmap[f"ypix_{channel}"].data
+
     # set mask
     fibers_status = slitmap["fibstatus"]
     bad_fibers = (fibers_status == 1) | (profile._data[ref_cent.round().astype(int)] < counts_threshold)

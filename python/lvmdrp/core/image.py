@@ -22,7 +22,7 @@ from lvmdrp.core.fit_profile import gaussians
 from lvmdrp.core.apertures import Apertures
 from lvmdrp.core.header import Header
 from lvmdrp.core.tracemask import TraceMask
-from lvmdrp.core.spectrum1d import Spectrum1D, _cross_match_float
+from lvmdrp.core.spectrum1d import Spectrum1D, _cross_match_float, _cross_match, _spec_from_lines
 
 
 def _fill_column_list(columns, width):
@@ -2002,6 +2002,60 @@ class Image(Header):
         new_img = copy(self)
         new_img.setData(data=models)
         return new_img
+
+    def match_reference_column(self, ref_column=2000, ref_centroids=None, stretch_range=[0.7, 1.3], shift_range=[-100, 100]):
+        """Returns the reference centroids matched against the current image
+
+        Parameters
+        ----------
+        ref_column : int, optional
+            column to use as reference, by default 2000
+        ref_centroids : numpy.ndarray, optional
+            reference centroids to use for matching, by default None
+
+        Returns
+        -------
+        numpy.ndarray
+            matched reference centroids
+        """
+        if self._header is None:
+            raise ValueError("No header available")
+        # define current image channel
+        channel = self._header.get("CCD")[0]
+        if channel is None:
+            raise ValueError("No CCD information available in header")
+        # extract guess positions from fibermap
+        if ref_centroids is None and self._slitmap is not None:
+            ref_centroids = self._slitmap[f"ypix_{channel}"].data
+        else:
+            raise ValueError("No reference profile provided and no slitmap available")
+
+        # define stretch factors
+        s_min, s_max = stretch_range
+        s_del = 0.1/self._dim[0]
+        stretch_factors = numpy.arange(s_min, s_max+s_del, s_del)
+
+        # correct reference fiber positions
+        profile = self.getSlice(ref_column, axis="y")
+        pixels = profile._pixels
+        pixels = numpy.arange(pixels.size)
+        guess_heights = numpy.ones_like(ref_centroids) * numpy.nanmax(profile._data)
+        ref_centroids = _spec_from_lines(ref_centroids, sigma=1.2, wavelength=pixels, heights=guess_heights)
+        log.info(f"correcting guess positions for column {ref_column}")
+        cc, bhat, mhat = _cross_match(
+            ref_spec=ref_centroids,
+            obs_spec=profile._data,
+            stretch_factors=stretch_factors,
+            shift_range=shift_range)
+        log.info(f"stretch factor: {mhat:.3f}, shift: {bhat:.3f}")
+        ref_centroids = ref_centroids * mhat + bhat
+        return ref_centroids
+
+    def trace_fiber_centroids(self, fit_polynomial=True, poly_deg=4):
+        pass
+
+    def fit_fiber_profiles(self, fiber_centroids, fit_polynomial=True, poly_deg=4):
+        pass
 
     def traceFWHM(
         self, axis_select, TraceMask, blocks, init_fwhm, threshold_flux, max_pix=None
