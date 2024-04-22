@@ -4817,83 +4817,19 @@ def trace_fibers(
     else:
         ref_cent = img._slitmap[f"ypix_{channel}"].data
 
-    # set mask
-    fibers_status = slitmap["fibstatus"]
-    bad_fibers = (fibers_status == 1) | (profile._data[ref_cent.round().astype(int)] < counts_threshold)
-    good_fibers = numpy.where(numpy.logical_not(bad_fibers))[0]
+    # first centroids trace
+    log.info(f"tracing centroids in {len(ncolumns_cent)-1} columns: {','.join(map(str, numpy.unique(ncolumns_cent)))}")
+    centroids = img.trace_centroids(ref_column=LVM_REFERENCE_COLUMN, ref_centroids=ref_cent, mask_fibstatus=1,
+                                    ncolumns=ncolumns_cent, method=method, guess_fwhm=guess_fwhm,
+                                    counts_threshold=counts_threshold, max_diff=max_diff,
+                                    fit_polynomial=fit_poly, poly_deg=deg_cent)
 
-    # create empty traces mask for the image
-    fibers = ref_cent.size
-    dim = img.getDim()
-    centroids = TraceMask()
-    centroids.createEmpty(data_dim=(fibers, dim[1]))
-    centroids.setFibers(fibers)
-    centroids._good_fibers = good_fibers
-    centroids.setHeader(img._header.copy())
-    centroids._header["IMAGETYP"] = "trace_centroid"
     # initialize flux and FWHM traces
     trace_cent = copy(centroids)
     trace_amp = copy(centroids)
     trace_amp._header["IMAGETYP"] = "trace_amplitude"
     trace_fwhm = copy(centroids)
     trace_fwhm._header["IMAGETYP"] = "trace_fwhm"
-
-    # set positions of fibers along reference column
-    centroids.setSlice(LVM_REFERENCE_COLUMN, axis="y", data=ref_cent, mask=numpy.zeros_like(ref_cent, dtype="bool"))
-
-    # select columns to measure centroids
-    step = img._dim[1] // ncolumns_cent
-    columns = numpy.concatenate((numpy.arange(LVM_REFERENCE_COLUMN, 0, -step), numpy.arange(LVM_REFERENCE_COLUMN, img._dim[1], step)))
-    log.info(f"tracing centroids in {len(columns)-1} columns: {','.join(map(str, numpy.unique(columns)))}")
-
-    # trace centroids in each column
-    mod_columns, residuals = [], []
-    iterator = tqdm(enumerate(columns), total=len(columns), desc="tracing centroids", unit="column", ascii=True)
-    for i, icolumn in iterator:
-        # extract column profile
-        img_slice = img.getSlice(icolumn, axis="y")
-
-        # get fiber positions along previous column
-        if icolumn == LVM_REFERENCE_COLUMN:
-            # trace reference column first or skip if already traced
-            if i == 0:
-                cent_guess, _, mask_guess = centroids.getSlice(LVM_REFERENCE_COLUMN, axis="y")
-            else:
-                continue
-        else:
-            cent_guess, _, mask_guess = centroids.getSlice(columns[i-1], axis="y")
-
-        # update masked fibers
-        mask_guess |= numpy.isnan(cent_guess)
-
-        # fix masked fibers from last iteration
-        cent_guess[mask_guess] = copy(ref_cent)[mask_guess]
-        # cast fiber positions to integers
-        cent_guess = cent_guess.round().astype("int16")
-
-        # measure fiber positions
-        cen_slice, msk_slice = img_slice.measurePeaks(cent_guess, method, init_sigma=guess_fwhm / 2.354, threshold=counts_threshold, max_diff=max_diff)
-
-        centroids.setSlice(icolumn, axis="y", data=cen_slice, mask=msk_slice)
-
-    if fit_poly:
-        # smooth all trace by a polynomial
-        log.info(f"fitting centroid guess trace with {deg_cent}-deg polynomial")
-        centroids.fit_polynomial(deg_cent, poly_kind="poly")
-
-        # set bad fibers in trace mask
-        centroids._mask[bad_fibers] = True
-        # linearly interpolate coefficients at masked fibers
-        log.info(f"interpolating coefficients at {bad_fibers.sum()} masked fibers")
-        centroids.interpolate_coeffs()
-    else:
-        log.info("interpolating centroid guess trace")
-        centroids.interpolate_data(axis="X")
-
-        # set bad fibers in trace mask
-        centroids._mask[bad_fibers] = True
-        log.info(f"interpolating data at {bad_fibers.sum()} masked fibers")
-        centroids.interpolate_data(axis="Y")
 
     # write centroid if requested
     if only_centroids:
@@ -4906,9 +4842,9 @@ def trace_fibers(
 
     # initialize flux and FWHM traces
     trace_cent = TraceMask()
-    trace_cent.createEmpty(data_dim=(fibers, dim[1]))
-    trace_cent.setFibers(fibers)
-    trace_cent._good_fibers = good_fibers
+    trace_cent.createEmpty(data_dim=(centroids._fibers, img._dim[1]))
+    trace_cent.setFibers(centroids._fibers)
+    trace_cent._good_fibers = centroids._good_fibers
     trace_cent.setHeader(img._header.copy())
     trace_amp = copy(trace_cent)
     trace_fwhm = copy(trace_cent)
@@ -4922,6 +4858,7 @@ def trace_fibers(
     log.info(f"tracing fibers in {len(columns)} columns: {','.join(map(str, columns))}")
 
     # fit peaks, centroids and FWHM in each column
+    mod_columns, residuals = [], []
     for i, icolumn in enumerate(columns):
         log.info(f"tracing column {icolumn} ({i+1}/{len(columns)})")
         # get slice of data and trace
@@ -5058,6 +4995,7 @@ def trace_fibers(
         _create_trace_regions(out_trace_fwhm, table_data, table_poly, table_poly_all, display_plots=display_plots)
 
         # set bad fibers in trace mask
+        bad_fibers = slitmap["fibstatus"] == 1
         trace_amp._mask[bad_fibers] = True
         trace_cent._mask[bad_fibers] = True
         trace_fwhm._mask[bad_fibers] = True

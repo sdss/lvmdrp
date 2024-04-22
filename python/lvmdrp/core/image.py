@@ -2020,13 +2020,17 @@ class Image(Header):
         """
         if self._header is None:
             raise ValueError("No header available")
-        # define current image channel
-        channel = self._header.get("CCD")[0]
+        if self._slitmap is None:
+            raise ValueError("No slitmap available")
+        channel, spec = list(self._header.get("CCD", [None, None]))
+        spec = int(spec)
         if channel is None:
             raise ValueError("No CCD information available in header")
+
         # extract guess positions from fibermap
+        slitmap = self._slitmap[self._slitmap["spectrographid"] == spec]
         if ref_centroids is None and self._slitmap is not None:
-            ref_centroids = self._slitmap[f"ypix_{channel}"].data
+            ref_centroids = slitmap[f"ypix_{channel}"].data
         else:
             raise ValueError("No reference profile provided and no slitmap available")
 
@@ -2051,10 +2055,104 @@ class Image(Header):
         ref_centroids = ref_centroids * mhat + bhat
         return ref_centroids
 
-    def trace_fiber_centroids(self, fit_polynomial=True, poly_deg=4):
-        pass
+    def trace_fiber_centroids(self, ref_column=2000, ref_centroids=None, mask_fibstatus=1,
+                              ncolumns=40, method="gauss", guess_fwhm=2.5,
+                              counts_threshold=5000, max_diff=1.5, fit_polynomial=True, poly_deg=4):
+        if self._header is None:
+            raise ValueError("No header available")
+        if self._slitmap is None:
+            raise ValueError("No slitmap available")
+        channel, spec = list(self._header.get("CCD", [None, None]))
+        spec = int(spec)
+        if channel is None:
+            raise ValueError("No CCD information available in header")
 
-    def fit_fiber_profiles(self, fiber_centroids, fit_polynomial=True, poly_deg=4):
+        # extract guess positions from fibermap
+        slitmap = self._slitmap[self._slitmap["spectrographid"] == spec]
+        if ref_centroids is None and self._slitmap is not None:
+            ref_centroids = slitmap[f"ypix_{channel}"].data
+        else:
+            raise ValueError("No reference profile provided and no slitmap available")
+
+        if isinstance(mask_fibstatus, int):
+            mask_fibstatus = [mask_fibstatus]
+        elif isinstance(mask_fibstatus, list, tuple, numpy.ndarray):
+            mask_fibstatus = mask_fibstatus.astype(int)
+
+        # set mask
+        bad_fibers = numpy.isin(slitmap["fibstatus"].data, mask_fibstatus)
+        good_fibers = numpy.where(numpy.logical_not(bad_fibers))[0]
+
+        # create empty traces mask for the image
+        fibers = ref_centroids.size
+        dim = self.getDim()
+        centroids = TraceMask()
+        centroids.createEmpty(data_dim=(fibers, dim[1]))
+        centroids.setFibers(fibers)
+        centroids._good_fibers = good_fibers
+        centroids.setHeader(self._header.copy())
+        centroids._header["IMAGETYP"] = "trace_centroid"
+
+        # set positions of fibers along reference column
+        centroids.setSlice(ref_column, axis="y", data=ref_centroids, mask=numpy.zeros_like(ref_centroids, dtype="bool"))
+
+        # select columns to measure centroids
+        step = self._dim[1] // ncolumns
+        columns = numpy.concatenate((numpy.arange(ref_column, 0, -step), numpy.arange(ref_column, self._dim[1], step)))
+
+        # trace centroids in each column
+        iterator = tqdm(enumerate(columns), total=len(columns), desc="tracing centroids", unit="column", ascii=True)
+        for i, icolumn in iterator:
+            # extract column profile
+            img_slice = self.getSlice(icolumn, axis="y")
+
+            # get fiber positions along previous column
+            if icolumn == ref_column:
+                # trace reference column first or skip if already traced
+                if i == 0:
+                    cent_guess, _, mask_guess = centroids.getSlice(ref_column, axis="y")
+                else:
+                    continue
+            else:
+                cent_guess, _, mask_guess = centroids.getSlice(columns[i-1], axis="y")
+
+            # update masked fibers
+            mask_guess |= numpy.isnan(cent_guess)
+
+            # fix masked fibers from last iteration
+            # NOTE: this may cause issues if the masked fibers in the current
+            # column are too apart from the reference column
+            cent_guess[mask_guess] = copy(ref_centroids)[mask_guess]
+            # cast fiber positions to integers
+            cent_guess = cent_guess.round().astype("int16")
+
+            # measure fiber positions
+            cen_slice, msk_slice = img_slice.measurePeaks(cent_guess, method, init_sigma=guess_fwhm / 2.354, threshold=counts_threshold, max_diff=max_diff)
+
+            centroids.setSlice(icolumn, axis="y", data=cen_slice, mask=msk_slice)
+
+        if fit_polynomial:
+            # smooth all trace by a polynomial
+            log.info(f"fitting centroid guess trace with {poly_deg}-deg polynomial")
+            centroids.fit_polynomial(poly_deg, poly_kind="poly")
+
+            # set bad fibers in trace mask
+            centroids._mask[bad_fibers] = True
+            # linearly interpolate coefficients at masked fibers
+            log.info(f"interpolating coefficients at {bad_fibers.sum()} masked fibers")
+            centroids.interpolate_coeffs()
+        else:
+            log.info("interpolating centroid guess trace")
+            centroids.interpolate_data(axis="X")
+
+            # set bad fibers in trace mask
+            centroids._mask[bad_fibers] = True
+            log.info(f"interpolating data at {bad_fibers.sum()} masked fibers")
+            centroids.interpolate_data(axis="Y")
+
+        return centroids
+
+    def trace_widths(self, fiber_centroids, fit_polynomial=True, poly_deg=4):
         pass
 
     def traceFWHM(
