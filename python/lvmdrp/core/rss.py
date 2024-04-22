@@ -912,29 +912,32 @@ class RSS(FiberRows):
         if self._sky_error is not None and spec._sky_error is not None:
             self._sky_error[fiber] = spec._sky_error
 
-    def eval_wcs(self, wave=None, data=None):
+    def eval_wcs(self, wave=None, data=None, as_dict=True):
         """Returns the WCS object from the current wavelength and fibers arrays"""
         wave = wave or self._wave
         data = data or self._data
 
         if wave is not None and len(wave.shape) == 1:
-            wcs = WCS(header={"NAXIS": 2, "NAXIS1": data.shape[1], "NAXIS2": data.shape[0],
-                              "CDELT1": wave[1]-wave[0],
-                              "CRVAL1": wave[0],
-                              "CUNIT1": "Angstrom", "CTYPE1": "WAVE", "CRPIX1": 1,
-                              "CDELT2": 1,
-                              "CRVAL2": 1,
-                              "CUNIT2": "", "CTYPE2": "FIBERID", "CRPIX2": 1})
-        elif len(wave.shape) == 2:
-            wcs = WCS(header={"NAXIS": 2, "NAXIS1": data.shape[1], "NAXIS2": data.shape[0],
-                              "CDELT1": 1,
-                              "CRVAL1": 1,
-                              "CUNIT1": "", "CTYPE1": "XAXIS", "CRPIX1": 1,
-                              "CDELT2": 1,
-                              "CRVAL2": 1,
-                              "CUNIT2": "", "CTYPE2": "FIBERID", "CRPIX2": 1})
+            wcs_dict = {"NAXIS": 2, "NAXIS1": data.shape[1], "NAXIS2": data.shape[0],
+                        "CDELT1": wave[1]-wave[0],
+                        "CRVAL1": wave[0],
+                        "CUNIT1": "Angstrom", "CTYPE1": "WAVE", "CRPIX1": 1,
+                        "CDELT2": 1,
+                        "CRVAL2": 1,
+                        "CUNIT2": "", "CTYPE2": "FIBERID", "CRPIX2": 1}
 
-        return wcs
+        elif len(wave.shape) == 2:
+            wcs_dict = {"NAXIS": 2, "NAXIS1": data.shape[1], "NAXIS2": data.shape[0],
+                        "CDELT1": 1,
+                        "CRVAL1": 1,
+                        "CUNIT1": "", "CTYPE1": "XAXIS", "CRPIX1": 1,
+                        "CDELT2": 1,
+                        "CRVAL2": 1,
+                        "CUNIT2": "", "CTYPE2": "FIBERID", "CRPIX2": 1}
+        if as_dict:
+            return wcs_dict
+
+        return WCS(header=wcs_dict)
 
     def set_cent_trace(self, cent_trace):
         self._cent_trace = self._trace_to_coeff_table(cent_trace)
@@ -1015,10 +1018,10 @@ class RSS(FiberRows):
                 self._wave_start = self._wave[0]
                 self._res_elements = self._wave.shape[0]
                 if self._header is not None:
-                    wcs = WCS(header={
+                    # wcs = WCS(header=)
+                    self._header.update({
                         "CDELT1": self._wave_disp, "CRVAL1": self._wave_start,
                         "CUNIT1": "Angstrom", "CTYPE1": "WAVE", "CRPIX1": 1.0})
-                    self._header.update(wcs.to_header())
             elif len(wave.shape) == 2:
                 self._wave = numpy.array(wave)
             else:
@@ -3215,10 +3218,11 @@ class RSS(FiberRows):
             hdus.append(pyfits.BinTableHDU(self._wave_trace, name="WAVE_TRACE"))
         elif self._wave is not None:
             if len(self._wave.shape) == 1:
-                wcs = WCS(
-                    header={"CDELT1": self._wave_disp, "CRVAL1": self._wave_start,
+                # wcs = WCS(
+                #     header={"CDELT1": self._wave_disp, "CRVAL1": self._wave_start,
+                #     "CUNIT1": "Angstrom", "CTYPE1": "WAVE", "CRPIX1": 1.0})
+                self._header.update({"CDELT1": self._wave_disp, "CRVAL1": self._wave_start,
                     "CUNIT1": "Angstrom", "CTYPE1": "WAVE", "CRPIX1": 1.0})
-                self._header.update(wcs.to_header())
             elif len(self._wave.shape) == 2:
                 hdus.append(pyfits.ImageHDU(self._wave.astype("float32"), name="WAVE"))
             else:
@@ -3360,7 +3364,7 @@ class lvmFrame(RSS):
 
         # update WCS
         wcs = self.eval_wcs()
-        [hdu.header.update(wcs.to_header()) for hdu in self._template if hdu.is_image and hdu.name != "PRIMARY"]
+        [hdu.header.update(wcs) for hdu in self._template if hdu.is_image and hdu.name != "PRIMARY"]
 
     def loadFitsData(self, in_file):
         self = lvmFrame.from_file(in_file)
@@ -3380,6 +3384,7 @@ class lvmFrame(RSS):
         self._template["WIDTH_TRACE"] = pyfits.BinTableHDU(data=self._width_trace, name="WIDTH_TRACE")
         self._template["SUPERFLAT"].data = self._superflat
         self._template["SLITMAP"] = pyfits.BinTableHDU(data=self._slitmap, name="SLITMAP")
+        self._template.verify("silentfix")
         self._template.writeto(out_file, overwrite=True)
 
 
@@ -3459,11 +3464,11 @@ class lvmFFrame(RSS):
 
         new_header["CCD"] = ",".join([channel for channel in kwargs.get("channels", [])])
         # update header with WCS
-        if self._wave is not None:
-            wcs = WCS(new_header)
-            wcs.spectral.wcs.cdelt[0] = self._wave[1] - self._wave[0]
-            wcs.spectral.wcs.crval[0] = self._wave[0]
-            new_header.update(wcs.to_header())
+        # if self._wave is not None:
+        #     wcs = WCS(new_header)
+        #     wcs.spectral.wcs.cdelt[0] = self._wave[1] - self._wave[0]
+        #     wcs.spectral.wcs.crval[0] = self._wave[0]
+        #     new_header.update(wcs.to_header())
         self._header = new_header
         return self._header
 
@@ -3484,7 +3489,7 @@ class lvmFFrame(RSS):
 
         # update WCS
         wcs = self.eval_wcs()
-        [hdu.header.update(wcs.to_header()) for hdu in self._template if hdu.is_image and hdu.name != "PRIMARY"]
+        [hdu.header.update(wcs) for hdu in self._template if hdu.is_image and hdu.name != "PRIMARY"]
 
     def loadFitsData(self, in_file):
         self = lvmFFrame.from_file(in_file)
@@ -3505,6 +3510,7 @@ class lvmFFrame(RSS):
         self._template["SKY_WEST_IVAR"].data = numpy.divide(1, self._sky_west_error**2, where=self._sky_west_error != 0, out=numpy.zeros_like(self._sky_west_error))
         self._template["FLUXCAL"] = pyfits.BinTableHDU(data=self._fluxcal, name="FLUXCAL")
         self._template["SLITMAP"] = pyfits.BinTableHDU(data=self._slitmap, name="SLITMAP")
+        self._template.verify("silentfix")
         self._template.writeto(out_file, overwrite=True)
 
 
@@ -3583,11 +3589,11 @@ class lvmCFrame(RSS):
 
         new_header["CCD"] = ",".join([channel for channel in kwargs.get("channels", [])])
         # update header with WCS
-        if self._wave is not None:
-            wcs = WCS(new_header)
-            wcs.spectral.wcs.cdelt[0] = self._wave[1] - self._wave[0]
-            wcs.spectral.wcs.crval[0] = self._wave[0]
-            new_header.update(wcs.to_header())
+        # if self._wave is not None:
+        #     wcs = WCS(new_header)
+        #     wcs.spectral.wcs.cdelt[0] = self._wave[1] - self._wave[0]
+        #     wcs.spectral.wcs.crval[0] = self._wave[0]
+        #     new_header.update(wcs.to_header())
         self._header = new_header
         return self._header
 
@@ -3608,7 +3614,7 @@ class lvmCFrame(RSS):
 
         # update WCS
         wcs = self.eval_wcs()
-        [hdu.header.update(wcs.to_header()) for hdu in self._template if hdu.is_image and hdu.name != "PRIMARY"]
+        [hdu.header.update(wcs) for hdu in self._template if hdu.is_image and hdu.name != "PRIMARY"]
 
     def loadFitsData(self, in_file):
         self = lvmCFrame.from_file(in_file)
@@ -3628,6 +3634,7 @@ class lvmCFrame(RSS):
         self._template["SKY_WEST"].data = self._sky_west
         self._template["SKY_WEST_IVAR"].data = numpy.divide(1, self._sky_west_error**2, where=self._sky_west_error != 0, out=numpy.zeros_like(self._sky_west_error))
         self._template["SLITMAP"] = pyfits.BinTableHDU(data=self._slitmap, name="SLITMAP")
+        self._template.verify("silentfix")
         self._template.writeto(out_file, overwrite=True)
 
 
@@ -3697,11 +3704,11 @@ class lvmSFrame(RSS):
 
         new_header["CCD"] = ",".join([channel for channel in kwargs.get("channels", [])])
         # update header with WCS
-        if self._wave is not None:
-            wcs = WCS(new_header)
-            wcs.spectral.wcs.cdelt[0] = self._wave[1] - self._wave[0]
-            wcs.spectral.wcs.crval[0] = self._wave[0]
-            new_header.update(wcs.to_header())
+        # if self._wave is not None:
+        #     wcs = WCS(new_header)
+        #     wcs.spectral.wcs.cdelt[0] = self._wave[1] - self._wave[0]
+        #     wcs.spectral.wcs.crval[0] = self._wave[0]
+        #     new_header.update(wcs.to_header())
         self._header = new_header
         return self._header
 
@@ -3722,7 +3729,7 @@ class lvmSFrame(RSS):
 
         # update WCS
         wcs = self.eval_wcs()
-        [hdu.header.update(wcs.to_header()) for hdu in self._template if hdu.is_image and hdu.name != "PRIMARY"]
+        [hdu.header.update(wcs) for hdu in self._template if hdu.is_image and hdu.name != "PRIMARY"]
 
     def loadFitsData(self, in_file):
         self = lvmSFrame.from_file(in_file)
@@ -3740,6 +3747,7 @@ class lvmSFrame(RSS):
         self._template["SKY"].data = self._sky.astype("float32")
         self._template["SKY_IVAR"].data = numpy.divide(1, self._sky_error**2, where=self._sky_error != 0, out=numpy.zeros_like(self._sky_error))
         self._template["SLITMAP"] = pyfits.BinTableHDU(data=self._slitmap, name="SLITMAP")
+        self._template.verify("silentfix")
         self._template.writeto(out_file, overwrite=True)
 
 
