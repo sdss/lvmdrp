@@ -373,13 +373,16 @@ def fix_raw_pixel_shifts(mjd, expnums=None, ref_expnums=None, specs="123",
 
 
 def reduce_2d(mjds, target_mjd=None, expnums=None,
-              replace_with_nan=True, assume_imagetyp=None, reject_cr=True):
+              replace_with_nan=True, assume_imagetyp=None, reject_cr=True,
+              counts_threshold=5000, poly_deg_cent=4,
+              skip_done=True):
     """Preprocess and detrend a list of 2D frames
 
-    Given a set of MJDs and (optionally) exposure numbers, preprocess and
-    detrend the 2D frames. This routine will store the preprocessed and
-    detrended frames in the corresponding calibration directory in the
-    `target_mjd` or by default in the smallest MJD in `mjds`.
+    Given a set of MJDs and (optionally) exposure numbers, preprocess detrends
+    and optionally fits and subtracts the stray light field from the 2D frames.
+    This routine will store the preprocessed, detrended and
+    straylight-subtracted frames in the corresponding calibration directory in
+    the `target_mjd` or by default in the smallest MJD in `mjds`.
 
     Parameters:
     ----------
@@ -395,6 +398,12 @@ def reduce_2d(mjds, target_mjd=None, expnums=None,
         Assume the given imagetyp for all frames
     reject_cr : bool
         Reject cosmic rays
+    counts_threshold : int
+        Minimum count level to consider when tracing centroids, defaults to 5000
+    poly_deg_cent : int
+        Degree of the polynomial to fit to the centroids, by default 4
+    skip_done : bool
+        Skip pipeline steps that have already been done
     """
 
     frames, masters_mjd = get_sequence_metadata(mjds, target_mjd=target_mjd, expnums=expnums)
@@ -403,7 +412,9 @@ def reduce_2d(mjds, target_mjd=None, expnums=None,
     # preprocess and detrend frames
     for frame in frames.to_dict("records"):
         camera = frame["camera"]
-        imagetyp = frame["imagetyp"]
+
+        # assume given image type
+        imagetyp = assume_imagetyp or frame["imagetyp"]
         # get master frames paths
         # masters = find_masters(masters_mjd, imagetyp, camera)
         mpixmask_path = os.path.join(masters_path, f"lvm-mpixmask-{camera}.fits")
@@ -419,6 +430,9 @@ def reduce_2d(mjds, target_mjd=None, expnums=None,
 
         frame_path = path.full("lvm_raw", camspec=frame["camera"], **frame)
         pframe_path = path.full("lvm_anc", drpver=drpver, kind="p", imagetype=imagetyp, **frame)
+        dcent_path = path.full("lvm_anc", drpver=drpver, kind="d", imagetype="cent", **frame)
+        lframe_path = path.full("lvn_anc", drpver=drpver, kind="l", imagetype=imagetyp, **frame)
+        dstray_path = path.full("lvm_anc", drpver=drpver, kind="d", imagetype="stray", **frame)
 
         # bypass creation of detrended frame in case of imagetyp=bias
         if imagetyp != "bias":
@@ -427,7 +441,7 @@ def reduce_2d(mjds, target_mjd=None, expnums=None,
             dframe_path = pframe_path
 
         os.makedirs(os.path.dirname(dframe_path), exist_ok=True)
-        if os.path.isfile(dframe_path):
+        if skip_done and os.path.isfile(dframe_path):
             log.info(f"skipping {dframe_path}, file already exist")
         else:
             image_tasks.preproc_raw_frame(in_image=frame_path, out_image=pframe_path,
@@ -437,7 +451,24 @@ def reduce_2d(mjds, target_mjd=None, expnums=None,
                                       in_pixelflat=mpixflat_path,
                                       replace_with_nan=replace_with_nan,
                                       reject_cr=reject_cr,
-                                      in_slitmap=SLITMAP)
+                                      in_slitmap=SLITMAP if imagetyp in {"flat", "arc", "object"} else None)
+
+        # subtract stray light only if imagetyp is flat
+        if imagetyp == "flat" and skip_done and os.path.isfile(lframe_path):
+            log.info(f"skipping {lframe_path}, file already exist")
+        else:
+            # quick and dirty trace of centroids to subtract stray light
+            image_tasks.trace_fibers(in_image=dframe_path,
+                                     out_trace_cent=dcent_path,
+                                     correct_ref=True, median_box=(1,10), coadd=20,
+                                     counts_threshold=counts_threshold, max_diff=1.5,
+                                     guess_fwhm=2.5, method="gauss", ncolumns=140,
+                                     fit_poly=True, poly_deg=poly_deg_cent,
+                                     interpolate_missing=True, only_centroids=True)
+            image_tasks.subtract_straylight(in_image=dframe_path, out_image=lframe_path, out_stray=dstray_path,
+                                            in_cent_trace=dcent_path, select_nrows=5,
+                                            aperture=13, smoothing=400, median_box=21,
+                                            gaussian_sigma=0.0)
 
 
 def create_detrending_frames(mjds, target_mjd=None, expnums=None, kind="all", assume_imagetyp=None):
