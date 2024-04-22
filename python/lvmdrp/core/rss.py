@@ -498,6 +498,8 @@ class RSS(FiberRows):
             data=new_data,
             error=new_error,
             mask=new_mask,
+            wave=new_wave,
+            lsf=new_lsf,
             sky=new_sky,
             sky_error=new_sky_error,
             sky_east=new_skye,
@@ -507,8 +509,6 @@ class RSS(FiberRows):
             header=new_hdr,
             slitmap=rsss[0]._slitmap
         )
-        new_rss.set_wave_array(new_wave)
-        new_rss.set_lsf_array(new_lsf)
         return new_rss
 
     @classmethod
@@ -1017,11 +1017,6 @@ class RSS(FiberRows):
                 self._wave_disp = self._wave[1] - self._wave[0]
                 self._wave_start = self._wave[0]
                 self._res_elements = self._wave.shape[0]
-                if self._header is not None:
-                    # wcs = WCS(header=)
-                    self._header.update({
-                        "CDELT1": self._wave_disp, "CRVAL1": self._wave_start,
-                        "CUNIT1": "Angstrom", "CTYPE1": "WAVE", "CRPIX1": 1.0})
             elif len(wave.shape) == 2:
                 self._wave = numpy.array(wave)
             else:
@@ -1063,11 +1058,15 @@ class RSS(FiberRows):
         if self._header is None:
             return wave, res_elements, wave_start, wave_disp
 
-        wcs = WCS(self._header)
+        header = self._header.copy()
+        header["NAXIS"] = len(self._data.shape)
+        header["NAXIS1"] = self._data.shape[1]
+        header["NAXIS2"] = self._data.shape[0]
+        wcs = WCS(header)
         if wcs.spectral.array_shape:
             res_elements = wcs.spectral.array_shape[0]
             wl = wcs.spectral.all_pix2world(numpy.arange(res_elements), 0)[0]
-            wave = (wl * u.m).to(u.angstrom).value
+            wave = (wl * u.AA).value
             wave_disp = wave[1] - wave[0]
             wave_start = wave[0]
 
@@ -3361,6 +3360,7 @@ class lvmFrame(RSS):
         del self._template["PRIMARY"].header["CRPIX*"]
         del self._template["PRIMARY"].header["CTYPE*"]
         del self._template["PRIMARY"].header["CUNIT*"]
+        del self._template["PRIMARY"].header["DISPAXIS"]
 
         # update WCS
         wcs = self.eval_wcs()
@@ -3558,12 +3558,10 @@ class lvmCFrame(RSS):
     def __init__(self, data=None, error=None, mask=None, header=None, slitmap=None, wave=None, lsf=None,
                  sky_east=None, sky_east_error=None, sky_west=None, sky_west_error=None, **kwargs):
         RSS.__init__(self, data=data, error=error, mask=mask, header=header,
+                     wave=wave, lsf=lsf,
                      sky_east=sky_east, sky_east_error=sky_east_error,
                      sky_west=sky_west, sky_west_error=sky_west_error,
                      slitmap=slitmap)
-
-        self.set_wave_array(wave)
-        self.set_lsf_array(lsf)
 
         self._blueprint = dp.load_blueprint(name="lvmCFrame")
         self._template = dp.dump_template(dataproduct_bp=self._blueprint, save=False)
@@ -3675,10 +3673,8 @@ class lvmSFrame(RSS):
 
     def __init__(self, data=None, error=None, mask=None, header=None, slitmap=None, wave=None, lsf=None, sky=None, sky_error=None, **kwargs):
         RSS.__init__(self, data=data, error=error, mask=mask, header=header,
+                     wave=wave, lsf=lsf,
                      sky=sky, sky_error=sky_error, slitmap=slitmap)
-
-        self.set_wave_array(wave)
-        self.set_lsf_array(lsf)
 
         self._blueprint = dp.load_blueprint(name="lvmSFrame")
         self._template = dp.dump_template(dataproduct_bp=self._blueprint, save=False)
