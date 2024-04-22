@@ -11,15 +11,15 @@ from astropy.table import Table
 from astropy.io import fits as pyfits
 from astropy.modeling import fitting, models
 from astropy.stats.biweight import biweight_location, biweight_scale
-from astropy.visualization import simple_norm
 from scipy import ndimage, signal
 from scipy import interpolate
 
+from lvmdrp import log
 from lvmdrp.core.constants import CON_LAMPS, ARC_LAMPS
 from lvmdrp.core.plot import plt
 from lvmdrp.core.apertures import Apertures
 from lvmdrp.core.header import Header
-from lvmdrp.core.spectrum1d import Spectrum1D
+from lvmdrp.core.spectrum1d import Spectrum1D, _cross_match_float
 
 
 def _parse_ccd_section(section):
@@ -186,7 +186,7 @@ def _bg_subtraction(images, quad_sections, bg_sections):
     list_like
         4-element list containing the sections used to calculate the background
     """
-    bg_images_med = numpy.ma.masked_array(
+    bg_images_med = numpy.ma._masked_array(
         numpy.zeros_like(images), mask=images.mask, fill_value=numpy.nan, hard_mask=True
     )
     bg_images_std = numpy.ma.masked_array(
@@ -606,6 +606,42 @@ class Image(Header):
 
     def __ge__(self, other):
         return self._data >= other
+
+    def measure_fiber_shifts(self, ref_image, columns=[500, 1000, 1500, 2000, 2500, 3000], column_width=25, shift_range=[-5,5]):
+        '''Measure the (thermal, flexure, ...) shift between the fiber (traces) in 2 detrended images in the y (cross dispersion) direction.
+
+        Uses cross-correlations between (medians of a number of) columns to determine
+        the shift between the fibers in image2 relative to ref_image. The measurement is performed
+        independently at each column in columns= using a median of +-column_width columns.
+
+        Parameters
+        ----------
+        ref_image: Image or numpy.ndarray
+            2D reference image
+        columns:  List[int]
+            List of columns to cross correlate.
+        column_width: int
+            window width around each value in columns to use
+        shift_range: List[int]
+            minimal and maximal value for shift
+
+        Returns
+        -------
+        numpy.ndarray[float]:
+            pixel shifts in columns
+        '''
+        if isinstance(ref_image, Image):
+            ref_data = ref_image._data
+        elif isinstance(ref_image, numpy.ndarray):
+            ref_data = ref_image
+
+        shifts = numpy.zeros(len(columns))
+        for j,c in enumerate(columns):
+            s1 = numpy.nanmedian(ref_data[50:-50,c-column_width:c+column_width], axis=1)
+            s2 = numpy.nanmedian(self._data[50:-50,c-column_width:c+column_width], axis=1)
+            _, shifts[j], _ = _cross_match_float(s1, s2, numpy.array([1.0]), [-5, 5])
+
+        return shifts
 
     def apply_pixelmask(self, mask=None):
         """Applies the mask to the data and error arrays, setting to nan when True and leaving the same value otherwise"""
@@ -1285,64 +1321,78 @@ class Image(Header):
         self._error[select] = numpy.sqrt(self._data[select] + rdnoise**2)
         self._error[numpy.logical_not(select)] = rdnoise
 
+    def replace_subselect(self, select, data=None, error=None, mask=None):
+        """
+            Set data for an Image. Specific data values can replaced according to a specific selection.
+
+            Parameters
+            --------------
+            select : numpy.ndarray(bool)
+                array defining the selection of pixel to be set
+            data : numpy.ndarray(float), optional with default = None
+                array corresponding to the data to be set
+            error : numpy.ndarray(float), optional with default = None
+                array corresponding to the data to be set
+            mask : numpy.ndarray(bool), optional with default = None
+                array corresponding to the bad pixel to be set
+        """
+        if data is not None:
+            self._data[select] = data
+        if mask is not None:
+            self._mask[select] = mask
+        if error is not None:
+            self._error[select] = error
+
     def replaceMaskMedian(self, box_x, box_y, replace_error=1e20):
         """
-        Replace bad pixels with the median value of pixel in a rectangular filter window
+            Replace bad pixels with the median value of pixel in a rectangular filter window
 
-        Parameters
-        --------------
-        box_x : int
-            Pixel size of filter window in x direction
-        box_y : int
-            Pixel size of filter window in y direction
-        replace_error : float, optional with default: None
-            Error that should be set for bad pixel
+            Parameters
+            --------------
+            box_x : int
+                Pixel size of filter window in x direction
+            box_y : int
+                Pixel size of filter window in y direction
+            replace_error : float, optional with default: None
+                Error that should be set for bad pixel
 
-        Returns
-        -----------
-        new_image :  Image object
-            Subsampled image
+            Returns
+            -----------
+            new_image :  Image object
+                Subsampled image
         """
-        if self._mask is None:
-            return self
+
+        if self._data is None:
+            raise RuntimeError("Image object is empty. Nothing to process.")
 
         idx = numpy.indices(self._dim)  # create an index array
         # get x and y coordinates of bad pixels
 
-        y_cors = idx[0, self._mask]
-        x_cors = idx[1, self._mask]
+        y_cors = idx[0][self._mask]
+        x_cors = idx[1][self._mask]
 
         out_data = self._data
         out_error = self._error
 
         # esimate the pixel distance form the bad pixel to the filter window boundary
-        delta_x = int(numpy.ceil(box_x / 2.0))
-        delta_y = int(numpy.ceil(box_y / 2.0))
+        delta_x = numpy.ceil(box_x/2.0)
+        delta_y = numpy.ceil(box_y/2.0)
 
         # iterate over bad pixels
         for m in range(len(y_cors)):
             # computes the min and max pixels of the filter window in x and y
-            range_y = numpy.clip(
-                [y_cors[m] - delta_y, y_cors[m] + delta_y + 1], 0, self._dim[0] - 1
-            )
-            range_x = numpy.clip(
-                [x_cors[m] - delta_x, x_cors[m] + delta_x + 1], 0, self._dim[1] - 1
-            )
+            range_y = numpy.clip([y_cors[m]-delta_y, y_cors[m]+delta_y+1], 0, self._dim[0]-1).astype(numpy.uint16)
+            range_x = (numpy.clip([x_cors[m]-delta_x, x_cors[m]+delta_x+1], 0, self._dim[1]-1)).astype(numpy.uint16)
             # compute the masked median within the filter window and replace data
-            select = self._mask[range_y[0] : range_y[1], range_x[0] : range_x[1]] == 0
-            out_data[y_cors[m], x_cors[m]] = bn.nanmedian(
-                self._data[range_y[0] : range_y[1], range_x[0] : range_x[1]][select]
-            )
+            select = self._mask[range_y[0]:range_y[1], range_x[0]:range_x[1]] == 0
+            out_data[y_cors[m], x_cors[m]] = numpy.median(self._data[range_y[0]:range_y[1],
+                                                          range_x[0]:range_x[1]][select])
             if self._error is not None and replace_error is not None:
                 # replace the error of bad pixel if defined
                 out_error[y_cors[m], x_cors[m]] = replace_error
 
-        # fill nan values and update mask
-        out_mask = numpy.logical_or(self._mask, numpy.isnan(out_data))
-        out_data = numpy.nan_to_num(out_data)
         # create new Image object
-        new_image = copy(self)
-        new_image.setData(data=out_data, error=out_error, mask=out_mask, inplace=True)
+        new_image = Image(data=out_data, error=out_error,  mask=self._mask)
         return new_image
 
     def calibrateSDSS(self, fieldPhot, subtractSky=True):
@@ -1584,6 +1634,7 @@ class Image(Header):
         new_image.setData(data=new, error=new_error, inplace=True)
         return new_image
 
+
     def convolveGaussImg(self, sigma_x, sigma_y, mode="nearest", mask=False):
         """
         Convolves the data of the Image with a given kernel. The mask and error information will be unchanged.
@@ -1612,7 +1663,7 @@ class Image(Header):
                 self._data, (sigma_y, sigma_x), mode=mode
             )
             scale = ndimage.filters.gaussian_filter(
-                (self._mask is False).astype("float32"), (sigma_y, sigma_x), mode=mode
+                (~self._mask).astype('float32'), (sigma_y, sigma_x), mode=mode
             )
             new = gauss / scale
             self._data[self._mask] = mask_data
@@ -2385,216 +2436,155 @@ class Image(Header):
         flux = apertures.integratedFlux(self)
         return flux
 
-    def createCosmicMask(
-        self,
-        sigma_det=5,
-        flim=1.1,
-        iter=3,
-        sig_gauss=(0.8, 0.8),
-        error_box=(20, 2),
-        replace_box=(20, 2),
-        parallel="auto",
-    ):
-        """create a pixel mask for cosmic rays using the LA algorithm
-
-        Parameters
-        ----------
-        sigma_det : int, optional
-            sigma level above the noise to be detected as comics, by default 5
-        flim : float, optional
-            threshold between Laplacian edged and Gaussian smoothed image (>1), by default 1.1
-        iter : int, optional
-            number of iterations, recommended >1 to fully detect extended cosmics, by default 3
-        sig_gauss : tuple, optional
-            sigma of the Gaussian smoothing kernel in x and y direction, by default (0.8, 0.8)
-        error_box : tuple, optional
-            box size used to estimate the electron counts for a given pixel by taken a median to estimate the noise level.
-        replace_box : tuple, optional
-            box size in used to estimate replacement values from valid pixels, by default (20, 2)
-        parallel : str or int, optional
-            whether to run in parallel ("auto" or >1) or not (<=1), by default "auto"
-
-        Returns
-        -------
-        np.ndarray
-            pixel mask with cosmic rays (1) and clean pixels (0)
+    def reject_cosmics(self, sigma_det=5, rlim=1.2, iterations=5, fwhm_gauss=[2.0,2.0], replace_box=[5, 5],
+            replace_error=1e6, increase_radius=0, gain=1.0, rdnoise=1.0, bias=0.0, verbose=False, inplace=True):
         """
-        # TODO: Cosmic ray rejection should happen after detrending, not before.
-        # TODO: Not clear to me how noise image is used. You should already have an error image at this point. Why create a new one?
-        # TODO: Is this noise image an rms in a median box or Poisson per pixel?
-        # TODO: It looks like things picked up as CRs are really bad columns/pixels. If you detrend first and apply bad pixel mask this might solve this.
-        # TODO: Looks like CR mask leaves out fainter parts of the CRs. Need to fine tune parameters (thresholds and number of iterations)
-        # TODO: try this: https://lacosmic.readthedocs.io/en/stable/_modules/lacosmic/core.html#lacosmic with the long kernel convolution
-        # https://github.com/larrybradley/lacosmic
-        err_box_x = error_box[0]
-        err_box_y = error_box[1]
-        sigma_x = sig_gauss[0]
-        sigma_y = sig_gauss[1]
-        # box_x = replace_box[0]
-        # box_y = replace_box[1]
+            Detects and removes cosmics from astronomical images based on Laplacian edge
+            detection scheme combined with a PSF convolution approach.
 
-        # create a new Image instance to store the initial data array
-        out = Image(
-            data=self.getData(),
-            header=self.getHeader(),
-            error=self.getError(),
-            mask=numpy.zeros(self.getDim(), dtype=bool),
-            individual_frames=self.getIndividualFrames(),
-            slitmap=self.getSlitMap(),
-        )
+            IMPORTANT:
+            The image and the readout noise are assumed to be in units of electrons.
+            The image also needs to be BIAS subtracted! The gain can be entered to convert the image from ADUs to
+            electros, when this is down already set gain=1.0 as the default. If ncessary a homegnous bias level can
+            be subtracted if necessary but default is 0.0.
 
-        # initial CR selection
-        select = numpy.zeros_like(out._mask, dtype=bool)
+                Parameters
+                --------------
+                data: ndarray
+                        Two-dimensional array representing the input image in which cosmic rays are detected.
+                sigma_det: float, default: 5.0
+                        Detection limit of edge pixel above the noise in (sigma units) to be detected as comiscs
+                rlim: float, default: 1.2
+                        Detection threshold between Laplacian edged and Gaussian smoothed image
+                iterations: integer, default: 5
+                        Number of iterations. Should be >1 to fully detect extended cosmics
+                fwhm_gauss: list of floats, default: [2.0, 2.0]
+                        FWHM of the Gaussian smoothing kernel in x and y direction on the CCD
+                replace_box: list integers, default: [5,5]
+                        median box size in x and y to estimate replacement values from valid pixels
+                replace_error: float, default: 1e6
+                        Error value for bad pixels in the comupted error image
+                increase_radius: integer, default: 0
+                        Increase the boundary of each detected cosmic ray pixel by the given number of pixels.
+                gain: float, default=1.0
+                        Value of the gain in units of electrons/ADUs
+                rdnoise: float, default=1.0
+                        Value of the readout noise in electrons
+                bias: float, default=0.0
+                        Optional subtraction of a bias level.
+                verbose: boolean, default: False
+                        Flag for providing information during the processing on the command line
+                inplace: boolean, default: True
+                        Flag to indicate whether the code should modify the existing data or return
+                        a new Image instance with the modified data. In the latter case the mask and error
+                        extensions ONLY contain the cosmic-related pixels.
 
-        # define Laplacian convolution kernel
-        LA_kernel = (
-            numpy.array(
-                [
-                    [0, -1, 0],
-                    [-1, 4, -1],
-                    [0, -1, 0],
-                ]
-            )
-            / 4.0
-        )
+                Ouput
+                -------------
+                out: Image class instance
+                    Result of the detection process is an Image which contains .data, .error, .mask as attributes for the
+                    cleaned image, the internally computed error image and a mask image with flags for cosmic ray pixels.
 
-        if parallel == "auto":
-            cpus = cpu_count()
-        else:
-            cpus = int(parallel)
+                Reference
+                --------------
+                Husemann et al. 2012, A&A, Volume 545, A137 (https://ui.adsabs.harvard.edu/abs/2012A%26A...545A.137)
 
-        # get rdnoise from header or assume given value
-        # quads = list(self._header["AMP? TRIMSEC"].values())
-        # rdnoises = list(self._header["AMP? RDNOISE"].values())
+        """
+
+        # convert all parameters to proper type
+        sigma_x = fwhm_gauss[0] / 2.354
+        sigma_y = fwhm_gauss[1] / 2.354
+        box_x = int(replace_box[0])
+        box_y = int(replace_box[1])
+
+        # define Laplacian convolution kernal
+        LA_kernel = numpy.array([[0, -1, 0], [-1, 4, -1], [0, -1, 0]])/4.0
+
+        # Initiate image instances
+        img_original = Image(data=self._data)
+        img = Image(data=self._data)
+
+        # subtract bias if applicable
+        if (bias > 0.0) and verbose:
+            log.info(f'Subtract bias level {bias:.2f} from image')
+        img = img - bias
+        img_original = img_original - bias
+
+        # apply gain factor to data if applicable
+        if (gain != 1.0) and verbose:
+            log.info(f'  Convert image from ADUs to electrons using a gain factor of {gain:.2f}')
+        img = img * gain
+        img_original = img_original * gain
+
+        # compute noise using read-noise value
+        if (rdnoise > 0.0) and verbose:
+            log.info(f'  A value of {rdnoise:.2f} is used for the electron read-out noise')
+        img_original._error = numpy.sqrt((numpy.clip(img_original._data, a_min=0.0, a_max=None) + rdnoise**2))
+
+        select = numpy.zeros(img._dim, dtype=bool)
+        img_original._mask = numpy.zeros(img._dim, dtype=bool)
+        img._mask = numpy.zeros(img._dim, dtype=bool)
 
         # start iteration
-        for i in range(iter):
-            # quick and dirty pixel noise calculation
-            # noise = out.medianImg((err_box_y, err_box_x))
-            # for iquad in range(len(quads)):
-            #     quad = noise.getSection(quads[iquad])
-            #     select_noise = quad.getData() <= 0
-            #     quad.setData(data=0, select=select_noise)
-            #     quad = (quad + rdnoises[iquad] ** 2).sqrt()
-            #     noise = noise.setSection(
-            #         quads[iquad], subimg=quad, update_header=False, inplace=False
-            #     )
-            # noise.setData(
-            #     data=noise._data[noise._data > 0].min(), select=noise._data <= 0
-            # )
-            if cpus > 1:
-                result = []
-                fine = out.convolveGaussImg(sigma_x, sigma_y)
-                fine_norm = out / fine
-                select_neg = fine_norm < 0
-                fine_norm.setData(data=0, select=select_neg)
+        out = img
+        for i in range(iterations):
+            if verbose:
+                log.info(f'  Start iteration {i+1}')
 
-                pool = Pool(cpus)
-                result.append(pool.apply_async(out.subsampleImg))
-                result.append(pool.apply_async(fine_norm.subsampleImg))
-                pool.close()
-                pool.join()
-                sub = result[0].get()
-                sub_norm = result[1].get()
-                pool.terminate()
+            # create smoothed noise fromimage
+            noise = out.medianImg((box_y, box_x))
+            select_neg2 = noise._data <= 0
+            noise.replace_subselect(select_neg2, data=0)
+            noise = (noise + rdnoise ** 2).sqrt()
 
-                pool = Pool(cpus)
-                result[0] = pool.apply_async(sub.convolveImg, args=([LA_kernel]))
-                result[1] = pool.apply_async(sub_norm.convolveImg, args=([LA_kernel]))
-                pool.close()
-                pool.join()
-                conv = result[0].get()
-                select_neg = conv < 0
-                conv.setData(
-                    data=0, select=select_neg
-                )  # replace all negative values with 0
-                Lap2 = result[1].get()
-                pool.terminate()
+            sub = img.subsampleImg()  # subsample image
+            conv = sub.convolveImg(LA_kernel)  # convolve subsampled image with kernel
+            select_neg = conv < 0
+            conv.replace_subselect(select_neg, data=0)  # replace all negative values with 0
+            Lap = conv.rebin(2, 2)  # rebin the data to original resolution
+            S = Lap/(noise*2)  # normalize Laplacian image by the noise
+            S_prime = S-S.medianImg((5, 5))  # cleaning of the normalized Laplacian image
 
-                pool = Pool(cpus)
-                result[0] = pool.apply_async(conv.rebin, args=(2, 2))
-                result[1] = pool.apply_async(Lap2.rebin, args=(2, 2))
-                pool.close()
-                pool.join()
-                Lap = result[0].get()
-                Lap2 = result[1].get()
-                pool.terminate()
+            # Perform additional clean using a 2D Gaussian smoothing kernel
+            fine = out.convolveGaussImg(sigma_x, sigma_y, mask=True)  # convolve image with a 2D Gaussian
+            fine_norm = out/fine
+            select_neg = fine_norm < 0
+            fine_norm.replace_subselect(select_neg, data=0)
+            sub_norm = fine_norm.subsampleImg()  # subsample image
+            Lap2 = sub_norm.convolveImg(LA_kernel)
+            Lap2 = Lap2.rebin(2, 2)  # rebin the data to original resolution
 
-                S = Lap / (out._error)  # normalize Laplacian image by the noise
-                S_prime = S - S.medianImg(
-                    (err_box_y, err_box_x)
-                )  # cleaning of the normalized Laplacian image
+            select = numpy.logical_or(numpy.logical_and(Lap2 > rlim, S_prime > sigma_det), select)
+
+            if verbose:
+                dim = img_original._dim
+                det_pix = numpy.sum(select)
+                log.info(f'  Total number of detected cosmics: {det_pix} out of {dim[0] * dim[1]} pixels')
+
+            if i == iterations-1:
+                img_original.replace_subselect(select, mask=True)  # set the new mask
+                if increase_radius > 0:
+                    mask_img = Image(data=img_original._mask)
+                    mask_new = mask_img.convolveImg(kernel=numpy.ones((2*increase_radius+1, 2*increase_radius+1)))
+                    img_original._mask = mask_new
+                # replace possible corrput pixel with zeros for final output
+                out = img_original.replaceMaskMedian(box_x, box_y, replace_error=replace_error)
             else:
-                fig, axs = plt.subplots(
-                    2, 2, figsize=(20, 20), sharex=True, sharey=True
-                )
-                axs = axs.flatten()
+                out.replace_subselect(select, mask=True)  # set the new mask
+                out = out.replaceMaskMedian(box_x, box_y, replace_error=None)  # replace possible corrput pixel with zeros
 
-                # norm = simple_norm(out._data, stretch="log", clip=True)
-                # axs[0].imshow(out._data, origin="lower", norm=norm)
-
-                # NOTE: subsample and convolve with Laplacian kernel
-                # to highlight cosmic ray edges
-                sub = out.subsampleImg()  # subsample image
-                conv = sub.convolveImg(
-                    LA_kernel
-                )  # convolve subsampled image with kernel
-
-                select_neg = conv < 0
-                conv.setData(
-                    data=0, select=select_neg
-                )  # replace all negative values with 0
-
-                # NOTE: return data to the original sampling
-                Lap = conv.rebin(2, 2)  # rebin the data to original resolution
-
-                norm = simple_norm(Lap._data, stretch="log", clip=True)
-                axs[0].set_title("laplacian of input image")
-                axs[0].imshow(Lap._data, origin="lower", norm=norm)
-
-                S = Lap / (out._error)  # normalize Laplacian image by the noise
-                S_prime = S - S.medianImg(
-                    (err_box_y, err_box_x)
-                )  # cleaning of the normalized Laplacian image
-
-                norm = simple_norm(S_prime._data, stretch="log", clip=True)
-                axs[1].set_title(
-                    "noise normalized and background subtracted laplacian (S_prime)"
-                )
-                axs[1].imshow(S_prime._data, origin="lower", norm=norm)
-
-                # NOTE: convolve with a Gaussian kernel
-                fine = out.convolveGaussImg(
-                    sigma_x, sigma_y
-                )  # convolve image with a 2D Gaussian
-                fine_norm = out / fine
-                select_neg = fine_norm < 0
-                fine_norm.setData(data=0, select=select_neg)
-
-                norm = simple_norm(fine_norm._data, stretch="log", clip=True)
-                axs[2].set_title("normalized input")
-                axs[2].imshow(fine_norm._data, origin="lower", norm=norm)
-
-                sub_norm = fine_norm.subsampleImg()  # subsample image
-                Lap2 = (sub_norm).convolveImg(LA_kernel)
-                Lap2 = Lap2.rebin(2, 2)  # rebin the data to original resolution
-
-                norm = simple_norm(Lap2._data, stretch="log", max_percent=90)
-                axs[3].set_title("laplacian of normalized input (Lap2)")
-                axs[3].imshow(Lap2._data, origin="lower", norm=norm)
-
-                plt.show()
-
-            # define cosmic ray selection
-            # select = numpy.logical_or(
-            #     numpy.logical_and((Lap2) > flim, S_prime > sigma_det), select
-            # )
-            select |= (Lap2._data > flim) & (S_prime._data > sigma_det)
-            # update mask in clean image for next iteration
-            out.setData(mask=True, select=select)
-            # out = out.replaceMaskMedian(box_x, box_y, replace_error=None)
-
-        return select
+        if inplace:
+            self._data = out._data
+            if self._error is None:
+                self._error = out._error
+            else:
+                self._error += out._error
+            if self._mask is None:
+                self._mask = out._mask
+            else:
+                self._mask |= out._mask
+        else:
+            return out
 
     def getIndividualFrames(self):
         return self._individual_frames

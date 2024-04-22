@@ -33,21 +33,13 @@ To properly install and run the DRP you'll need to follow these steps first:
     ```
     **NOTE: we strongly recommend that you use the [SDSS access](https://github.com/sdss/sdss_access) product to achieve the same results.**
 
-3. Download the current set of calibrations from the [SAS sandbox](https://data.sdss5.org/sas/sdsswork/lvm/sandbox/calib/) and add to your `.bashrc` (or equivalent) the following definition:
-
-    ```bash
-    export LVM_MASTER_DIR="path/to/master-calibrations"
-    ```
-
-    where `master-calibrations` contains only MJD folders.
-
-4. Create a new python environment. This is optional, but strongly recommended. With conda this is done like this:
+3. Create a new python environment. This is optional, but strongly recommended. With conda this is done like this:
 
     ```bash
     conda create -n lvmdrp python=3.10
     ```
 
-5. Make sure you are in the intended python environment and directory:
+4. Make sure you are in the intended python environment and directory:
 
     ```bash
     conda activate lvmdrp
@@ -87,6 +79,20 @@ envcheck
 ```
 
 if the variables are correctly set, you should see the values of each and a successful message.
+
+## Setup Calibration Files
+
+Download the current set of calibrations from the [SAS sandbox](https://data.sdss5.org/sas/sdsswork/lvm/sandbox/calib/).  After installation of the pipeline, you can use the command `drp get-calibs`.  For usage, run `drp get-calibs --help`. For
+example, to download all the calibration files for 60255, run
+
+```bash
+drp get-calibs -m 60255
+```
+
+This command will download the files using `sdss-access` and place them in `$LVM_MASTER_DIR`, which is defined by the
+pipeline as `$LVM_SANDBOX/calib`, mirroring the SAS.  These are defined automatically relative to your root `$SAS_BASE_DIR`.
+You would find the files at `$SAS_BASE_DIR/sdsswork/lvm/sandbox/calib/`
+
 
 ## Running the DRP
 

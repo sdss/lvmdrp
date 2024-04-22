@@ -25,6 +25,25 @@ from lvmdrp.core.constants import SPEC_CHANNELS
 
 ORIG_MASTER_DIR = os.getenv("LVM_MASTER_DIR")
 
+def mjd_from_expnum(expnum):
+    """Returns the MJD for the given exposure number
+
+    Parameters
+    ----------
+    expnum : int
+        the exposure number
+
+    Returns
+    -------
+    int
+        the MJD of the exposure
+    """
+    rpath = path.expand("lvm_raw", camspec="*", mjd="*", hemi="s", expnum=expnum)
+    if len(rpath) == 0:
+        raise ValueError(f"no raw frame found for exposure number {expnum}")
+    mjd = path.extract("lvm_raw", rpath[0])["mjd"]
+    return int(mjd)
+
 
 def get_master_mjd(sci_mjd: int) -> int:
     """ Get the correct master calibration MJD for a science frame
@@ -73,8 +92,12 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
     extraction_parallel = "auto" if ncpus is None else ncpus
     extraction_method = "aperture" if aperture_extraction else "optimal"
 
-    # get target frames metadata
+    # get target frames metadata or extract if it doesn't exist
     sci_metadata = md.get_metadata(tileid="*", mjd="*", expnum=expnum)
+    if len(sci_metadata) == 0:
+        sci_mjd = mjd_from_expnum(expnum)
+        sci_metadata = md.get_frames_metadata(mjd=sci_mjd)
+        sci_metadata.query("expnum == @expnum", inplace=True)
     sci_metadata.sort_values("expnum", ascending=False, inplace=True)
 
     # define general metadata
@@ -122,6 +145,12 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
         # define current arc lamps to use for wavelength calibration
         lamps = arc_lamps[sci_camera[0]]
 
+        # define agc coadd path
+        agcsci_path=path.full('lvm_agcam_coadd', mjd=sci_mjd, specframe=sci_expnum, tel='sci')
+        agcskye_path=path.full('lvm_agcam_coadd', mjd=sci_mjd, specframe=sci_expnum, tel='skye')
+        agcskyw_path=path.full('lvm_agcam_coadd', mjd=sci_mjd, specframe=sci_expnum, tel='skyw')
+        #agcspec_path=path.full('lvm_agcam_coadd', mjd=sci_mjd, specframe=sci_expnum, tel='spec')
+
         # define calibration frames paths
         if use_fiducial_master:
             masters_path = os.getenv("LVM_MASTER_DIR")
@@ -154,7 +183,10 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
         # detrend frame
         image_tasks.detrend_frame(in_image=psci_path, out_image=dsci_path,
                                   in_bias=mbias_path, in_dark=mdark_path, in_pixelflat=mpixflat_path,
-                                  in_slitmap=Table(drp.fibermap.data), reject_cr=False)
+                                  in_slitmap=Table(drp.fibermap.data), reject_cr=True)
+
+        # add astrometry to frame
+        image_tasks.add_astrometry(in_image=dsci_path, out_image=dsci_path, in_agcsci_image=agcsci_path, in_agcskye_image=agcskye_path, in_agcskyw_image=agcskyw_path)
 
         # subtract straylight
         if sci_imagetyp == "flat":
@@ -189,9 +221,15 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
 
         # stack spectrographs
         rss_tasks.stack_spectrographs(in_rsss=xsci_paths, out_rss=xsci_path)
+        if not os.path.exists(xsci_path):
+            log.error(f'No stacked file found: {xsci_path}. Skipping remaining pipeline.')
+            continue
 
         # wavelength calibrate
         rss_tasks.create_pixel_table(in_rss=xsci_path, out_rss=wsci_path, in_waves=mwave_paths, in_lsfs=mlsf_paths)
+
+        # correct thermal shift in wavelength direction
+        rss_tasks.shift_wave_skylines(in_rss=wsci_path, out_rss=wsci_path, channel=channel)
 
         # apply fiberflat correction
         rss_tasks.apply_fiberflat(in_rss=wsci_path, out_frame=frame_path, in_flats=mflat_paths)
@@ -210,12 +248,16 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
 
         # flux-calibrate each channel
         fframe_path = path.full("lvm_frame", mjd=sci_mjd, drpver=drpver, tileid=sci_tileid, expnum=sci_expnum, kind=f'FFrame-{channel}')
-        flux_tasks.apply_fluxcal(in_rss=hsci_path, out_rss=fframe_path, skip_fluxcal=skip_flux_calibration)
+        flux_tasks.apply_fluxcal(in_rss=hsci_path, out_fframe=fframe_path, skip_fluxcal=skip_flux_calibration)
 
     # stitch channels
     fframe_paths = sorted(path.expand('lvm_frame', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver, kind='FFrame-?', expnum=expnum))
+    if len(fframe_paths) == 0:
+        log.error('No fframe files found.  Cannot join spectrograph channels. Exiting pipeline.')
+        return
+
     cframe_path = path.full("lvm_frame", drpver=drpver, tileid=sci_tileid, mjd=sci_mjd, expnum=sci_expnum, kind='CFrame')
-    rss_tasks.join_spec_channels(in_rsss=fframe_paths, out_rss=cframe_path, use_weights=True)
+    rss_tasks.join_spec_channels(in_fframes=fframe_paths, out_cframe=cframe_path, use_weights=True)
 
     # sky subtraction
     sframe_path = path.full("lvm_frame", mjd=sci_mjd, drpver=drpver, tileid=sci_tileid, expnum=sci_expnum, kind='SFrame')

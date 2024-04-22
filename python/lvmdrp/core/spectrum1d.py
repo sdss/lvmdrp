@@ -6,12 +6,83 @@ from astropy.io import fits as pyfits
 from numpy import polynomial
 from scipy.linalg import norm
 from scipy import signal, interpolate, ndimage, sparse
-from scipy.ndimage import zoom
+from scipy.ndimage import zoom, median_filter
 from typing import List, Tuple
 
 from lvmdrp.utils import gaussian
 from lvmdrp.core import fit_profile
 from lvmdrp.core.header import Header
+
+
+def adaptive_smooth(data, start_width, end_width):
+    """
+    Smooth an array with a filter that adapts in size from start_width to end_width.
+    Parameters:
+    - data (numpy.array): The input array to be smoothed.
+    - start_width (int): The width of the smoothing kernel at the beginning of the array.
+    - end_width (int): The width of the smoothing kernel at the end of the array.
+    Returns:
+    - numpy.array: The smoothed array.
+    """
+    # Create an array of kernel sizes changing linearly from start_width to end_width
+    n_points = len(data)
+    kernel_sizes = numpy.linspace(start_width, end_width, n_points).astype(int)
+    # Output array initialization
+    smoothed_data = numpy.zeros_like(data)
+    # Apply varying filter
+    for i in range(n_points):
+        # Handle boundary effects by determining effective kernel size
+        half_width = kernel_sizes[i] // 2
+        start_index = max(0, i - half_width)
+        end_index = min(n_points, i + half_width + 1)
+        # Apply uniform filter to the local segment of the data
+        smoothed_data[i] = numpy.median(data[start_index:end_index])
+    return smoothed_data
+
+def find_continuum(spec_s,niter=15,thresh=0.8,median_box_max=100,median_box_min=1):
+    """
+    find the continuum from a spectrum by smoothing and masking the values above
+    the smoothed version in an iterative way.
+    Parameters:
+    - data (numpy.array): The input array from which we would like to find the continuum.
+    - niter  (int): Maximum number of iterations
+    - thresh (float): Threshold to compare the smoothed an unsmoother version
+    - median_box_max (float): Maximum size of the smoothing box
+    - median_box_min (float): Minumum size of the smoothing box
+    Returns:
+    - numpy.array: continuum spectrum.
+    """
+    median_box=median_box_max
+    spec_s_org = spec_s.copy()
+    mask = (spec_s>(-1)*numpy.abs(numpy.min(spec_s)))
+    #m_spec_s = adaptive_smooth(spec_s, median_box, int(median_box_max*0.5))
+    m_spec_s = median_filter(spec_s, median_box)
+    pixels = numpy.arange(0,spec_s.shape[0])
+    i_len_in = len(spec_s_org[mask])
+    for i in range(niter):
+        mask = mask & (numpy.divide(m_spec_s, spec_s, where=spec_s != 0, out=numpy.zeros_like(spec_s)) > thresh)
+        i_len = len(spec_s_org[mask])
+        if (i_len==i_len_in):
+            break
+        else:
+            i_len_in=i_len
+        spec_s = numpy.interp(pixels, pixels[mask], spec_s[mask])
+        m_spec_s = adaptive_smooth(spec_s, median_box, median_box_max)
+#        m_spec_s = median_filter(median_box, spec_s)
+        median_box = int(median_box*0.5)
+        if (median_box<median_box_min):
+            median_box=median_box_min
+    spec_s = numpy.interp(pixels, pixels[mask], spec_s_org[mask])
+    spec_s_out = spec_s
+#    s_spec_s = adaptive_smooth(spec_s, median_box_min, int(median_box_max*0.5))
+#    w1 = 1/(1+pixels)
+#    w2 = pixels
+#    wN = w1+w2
+#    w1 = w1/wN
+#    w2 = w2/wN
+#    print(w1,w2)
+#    spec_s_out = w1*spec_s + w2*s_spec_s
+    return spec_s_out
 
 
 def _spec_from_lines(
@@ -61,12 +132,12 @@ def _cross_match(
     shift_range: List[int],
     peak_num: int = None,
 ) -> Tuple[float, int, float]:
-    """Find the best cross correlation between two spectra.
+    """Find the best integer-offset cross correlation between two spectra.
 
     This function finds the best cross correlation between two spectra by
     stretching and shifting the first spectrum and computing the cross
     correlation with the second spectrum. The best cross correlation is
-    defined as the one with the highest correlation value and the correct
+    defined as the integer offset with the highest correlation value and the correct
     number of peaks.
 
     Parameters
@@ -149,6 +220,111 @@ def _cross_match(
             best_stretch_factor = factor
 
     return max_correlation, best_shift, best_stretch_factor
+
+
+def _cross_match_float(
+    ref_spec: numpy.ndarray,
+    obs_spec: numpy.ndarray,
+    stretch_factors: numpy.ndarray,
+    shift_range: List[int],
+) -> Tuple[float, float, float]:
+    """Find the best fractional-pixel cross correlation between two spectra.
+
+    This function finds the best cross correlation between two spectra by
+    stretching and shifting the first spectrum and computing the cross
+    correlation with the second spectrum. The best cross correlation is
+    defined as the fractional-pixel offset with the highest correlation value.
+    The spectra are "peak-normalized" before correlating, making all peaks
+    about 1 unit in height.
+
+    This is used for measuring fiber shifts during the night
+
+    Parameters
+    ----------
+    ref_spec : ndarray
+        The reference spectrum.
+    obs_spec : ndarray
+        The observed spectrum.
+    stretch_factors : ndarray
+        The stretch factors to use.
+    shift_range : tuple
+        The range of shifts to use.
+
+    Returns
+    -------
+    max_correlation : float
+        The maximum correlation value.
+    best_shift : float
+        The fractional pixel shift that maximizes the correlation
+    best_stretch_factor : float
+        The best stretch factor.
+    """
+    min_shift, max_shift = shift_range
+    max_correlation = -numpy.inf
+    best_shift = 0
+    best_stretch_factor = 1
+
+    # normalize the peaks to roughly magnitude 1, so that individual very bright
+    # fibers do not dominate the signal
+    peaks1, _ = signal.find_peaks(ref_spec)
+    peaks2, _ = signal.find_peaks(obs_spec)
+    # primitive "fiber flat"
+    spl1_eval = numpy.interp(numpy.arange(ref_spec.shape[0]), peaks1, ref_spec[peaks1])
+    spl2_eval = numpy.interp(numpy.arange(obs_spec.shape[0]), peaks2, obs_spec[peaks2])
+    ref_spec /= spl1_eval
+    obs_spec /= spl2_eval
+    #return ref_spec, obs_spec
+
+    for factor in stretch_factors:
+        # Stretch the first signal
+        stretched_signal1 = zoom(ref_spec, factor, mode="constant", prefilter=True)
+
+        # Make the lengths equal
+        len_diff = len(obs_spec) - len(stretched_signal1)
+        if len_diff > 0:
+            # Zero pad the stretched signal at the end if it's shorter
+            stretched_signal1 = numpy.pad(stretched_signal1, (0, len_diff))
+        elif len_diff < 0:
+            # Or crop the stretched signal at the end if it's longer
+            stretched_signal1 = stretched_signal1[:len_diff]
+
+        # Compute the cross correlation
+        cross_corr = signal.correlate(obs_spec, stretched_signal1, mode="same")
+
+        # Normalize the cross correlation
+        cross_corr = cross_corr.astype(numpy.float32)
+        cross_corr /= norm(stretched_signal1) * norm(obs_spec)
+
+        # Get the correlation shifts
+        shifts = signal.correlation_lags(
+            len(obs_spec), len(stretched_signal1), mode="same"
+        )
+
+        # Constrain the cross_corr and shifts to the shift_range
+        mask = (shifts >= min_shift) & (shifts <= max_shift)
+        cross_corr = cross_corr[mask]
+        shifts = shifts[mask]
+
+        #return cross_cor
+
+        # Find the max correlation and the corresponding shift for this stretch factor
+        idx_max_corr = numpy.argmax(cross_corr)
+        max_corr = cross_corr[idx_max_corr]
+        shift = shifts[idx_max_corr]
+
+        # poor man's parabola fit ...
+        d = (numpy.take(cross_corr, shift + 1) - 2 * numpy.take(cross_corr, shift) + numpy.take(cross_corr, shift - 1))
+        position = (shift + 1 - ((numpy.take(cross_corr, shift + 1) - numpy.take(cross_corr, shift)) / d ))
+
+        condition = max_corr > max_correlation
+
+        if condition:
+            max_correlation = max_corr
+            best_shift = position
+            best_stretch_factor = factor
+
+    return max_correlation, best_shift, best_stretch_factor
+
 
 
 def _apply_shift_and_stretch(
