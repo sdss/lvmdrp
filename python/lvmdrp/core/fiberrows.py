@@ -973,6 +973,65 @@ class FiberRows(Header, PositionTable):
             combined_hdr = combineHdr([self, rows])
             self.setHeader(combined_hdr._header)
 
+    def fit_spline(self, nknots=300, knots=None, clip=None):
+        """
+        smooths the traces along the dispersion direction with a spline function for each individual fiber
+
+        Parameters
+        ----------
+        nknots: int, optional with default None
+            number of knots to use in the spline function
+        knots: numpy.ndarray, optional with default None
+            array of knots to use in the spline function
+        clip : 2-tuple of int, optional with default None
+            clip data around this values, defaults to no clipping
+
+        Returns
+        -------
+        pix_table : numpy.ndarray
+            table of measured values
+        poly_table : numpy.ndarray
+            table of spline values at measured values
+        poly_all_table : numpy.ndarray
+            table of spline values for all pixels in the fibers
+        """
+        pixels = numpy.arange(self._data.shape[1])
+        if nknots is not None and knots is None:
+            knots = numpy.linspace(pixels[len(pixels) // nknots], pixels[-1 * len(pixels) // nknots], nknots)
+        elif knots is not None:
+            nknots = len(knots)
+        else:
+            raise ValueError("Either nknots or knots must be provided")
+
+        self._coeffs = numpy.zeros(self._data.shape[0], dtype=object)
+
+        pix_table = []
+        poly_table = []
+        poly_all_table = []
+        for i in range(self._fibers):
+            good_pix = numpy.logical_not(self._mask[i, :])
+            if numpy.sum(good_pix) >= nknots + 1:
+                try:
+                    tck = interpolate.splrep(pixels[good_pix], self._data[i, good_pix], s=0, task=0)
+                    pix_table.extend(numpy.column_stack([pixels[good_pix], self._data[i, good_pix]]).tolist())
+                    poly_table.extend(numpy.column_stack([pixels[good_pix], interpolate.splev(pixels[good_pix], tck)]).tolist())
+                    poly_all_table.extend(numpy.column_stack([pixels, interpolate.splev(pixels, tck)]).tolist())
+                except ValueError as e:
+                    log.error(f'Fiber trace failure at fiber {i}: {e}')
+                    self._mask[i, :] = True
+                    continue
+
+                self._coeffs[i] = tck
+                self._data[i, :] = interpolate.splev(pixels, tck)
+
+                if clip is not None:
+                    self._data = numpy.clip(self._data, clip[0], clip[1])
+                self._mask[i, :] = False
+            else:
+                self._mask[i, :] = True
+
+        return numpy.asarray(pix_table), numpy.asarray(poly_table), numpy.asarray(poly_all_table)
+
     def fit_polynomial(self, deg, poly_kind="poly", clip=None):
         """
         smooths the traces along the dispersion direction with a polynomical function for each individual fiber
