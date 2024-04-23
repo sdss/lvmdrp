@@ -455,7 +455,7 @@ def reduce_2d(mjds, target_mjd=None, expnums=None,
         # subtract stray light only if imagetyp is flat
         if imagetyp == "flat" and skip_done and os.path.isfile(lframe_path):
             log.info(f"skipping {lframe_path}, file already exist")
-        else:
+        elif imagetyp == "flat":
             # quick and dirty trace of centroids to subtract stray light
             image_tasks.trace_fibers(in_image=dframe_path,
                                      out_trace_cent=dcent_path,
