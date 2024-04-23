@@ -66,6 +66,7 @@ class fit_profile1D(object):
         y,
         sigma=1.0,
         p0=None,
+        bounds=(-numpy.inf, numpy.inf),
         ftol=1e-8,
         xtol=1e-8,
         maxfev=9999,
@@ -79,16 +80,11 @@ class fit_profile1D(object):
         perr_init = deepcopy(self)
         p0 = self._par
         if method == "leastsq":
-            try:
-                model = optimize.leastsq(
-                    self.res, p0, (x, y, sigma), maxfev=maxfev, ftol=ftol, xtol=xtol
-                )
-                # model = optimize.leastsq(self.res, p0, (x, y, sigma), None, 0, 0, ftol, xtol, 0.0, maxfev, 0.0, 100.0, None, warning)
-            except TypeError:
-                model = optimize.leastsq(
-                    self.res, p0, (x, y, sigma), maxfev=maxfev, ftol=ftol, xtol=xtol
-                )
-            self._par = model[0]
+            model = optimize.least_squares(
+                self.res, x0=p0, bounds=bounds, args=(x, y, sigma), max_nfev=maxfev, ftol=ftol, xtol=xtol,
+            )
+            self._par = model.x
+            # model = optimize.leastsq(self.res, p0, (x, y, sigma), None, 0, 0, ftol, xtol, 0.0, maxfev, 0.0, 100.0, None, warning)
 
         if method == "simplex":
             try:
