@@ -3935,7 +3935,7 @@ def add_astrometry(
                 IFUcencoords=outw.pixel_to_world(2500,1000)
                 RAobs=IFUcencoords.ra.value
                 DECobs=IFUcencoords.dec.value
-                org_img._header.setHdrValue('ASTRMSRC', 'GDR coadd', comment='Source of astrometric solution: guider')
+                org_img.setHdrValue('ASTRMSRC', 'GDR coadd', comment='Source of astrometric solution: guider')
                 copy_guider_keyword(mfheader, 'FRAME0  ', org_img._header)
                 copy_guider_keyword(mfheader, 'FRAMEN  ', org_img._header)
                 copy_guider_keyword(mfheader, 'NFRAMES ', org_img._header)
@@ -3967,7 +3967,7 @@ def add_astrometry(
                 RAobs=org_img._header[f'PO{tel}RA'.capitalize()]
                 DECobs=org_img._header[f'PO{tel}DE'.capitalize()]
                 PAobs=org_img._header[f'PO{tel}PA'.capitalize()]
-                org_img._header.setHdrValue('ASTRMSRC', 'CMD position', comment='Source of astrometric solution: commanded position')
+                org_img.setHdrValue('ASTRMSRC', 'CMD position', comment='Source of astrometric solution: commanded position')
         else:
             RAobs=0
             DECobs=0

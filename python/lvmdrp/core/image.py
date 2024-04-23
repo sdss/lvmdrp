@@ -1395,8 +1395,10 @@ class Image(Header):
         y_cors = idx[0][self._mask]
         x_cors = idx[1][self._mask]
 
-        out_data = self._data
-        out_error = self._error
+        out_data = copy(self._data)
+        msk_data = copy(self._data)
+        msk_data[self._mask] = numpy.nan
+        out_error = copy(self._error)
 
         # esimate the pixel distance form the bad pixel to the filter window boundary
         delta_x = numpy.ceil(box_x/2.0)
@@ -1408,15 +1410,14 @@ class Image(Header):
             range_y = numpy.clip([y_cors[m]-delta_y, y_cors[m]+delta_y+1], 0, self._dim[0]-1).astype(numpy.uint16)
             range_x = (numpy.clip([x_cors[m]-delta_x, x_cors[m]+delta_x+1], 0, self._dim[1]-1)).astype(numpy.uint16)
             # compute the masked median within the filter window and replace data
-            select = self._mask[range_y[0]:range_y[1], range_x[0]:range_x[1]] == 0
-            out_data[y_cors[m], x_cors[m]] = numpy.median(self._data[range_y[0]:range_y[1],
-                                                          range_x[0]:range_x[1]][select])
+            out_data[y_cors[m], x_cors[m]] = bn.nanmedian(msk_data[range_y[0]:range_y[1],
+                                                          range_x[0]:range_x[1]])
             if self._error is not None and replace_error is not None:
                 # replace the error of bad pixel if defined
                 out_error[y_cors[m], x_cors[m]] = replace_error
 
         # create new Image object
-        new_image = Image(data=out_data, error=out_error,  mask=self._mask)
+        new_image = Image(data=out_data, error=out_error,  mask=self._mask, header=self._header)
         return new_image
 
     def calibrateSDSS(self, fieldPhot, subtractSky=True):
