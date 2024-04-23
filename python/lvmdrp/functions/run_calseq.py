@@ -883,11 +883,13 @@ def create_wavelengths(mjds, target_mjd=None, expnums=None):
         List of exposure numbers to reduce
     """
     frames, masters_mjd = get_sequence_metadata(mjds, target_mjd=target_mjd, expnums=expnums)
+    frames = frames.query("imagetyp=='arc' or (not ldls|quartz and neon|hgne|argon|xenon)")
+    frames["imagetyp"] = "arc"
     masters_path = os.path.join(MASTERS_DIR, str(masters_mjd))
 
-    reduce_2d(mjds, target_mjd=masters_mjd, expnums=expnums)
+    reduce_2d(mjds, target_mjd=masters_mjd, expnums=expnums, assume_imagetyp="arc", reject_cr=False)
 
-    arc_analogs = frames.query("imagetyp=='arc'").groupby(["camera",])
+    arc_analogs = frames.groupby(["camera",])
     for camera in arc_analogs.groups:
         arcs = arc_analogs.get_group((camera,))
         arc = arcs.iloc[0]
