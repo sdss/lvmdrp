@@ -430,7 +430,7 @@ def reduce_2d(mjds, target_mjd=None, expnums=None,
         frame_path = path.full("lvm_raw", camspec=frame["camera"], **frame)
         pframe_path = path.full("lvm_anc", drpver=drpver, kind="p", imagetype=imagetyp, **frame)
         dcent_path = path.full("lvm_anc", drpver=drpver, kind="d", imagetype="cent", **frame)
-        lframe_path = path.full("lvn_anc", drpver=drpver, kind="l", imagetype=imagetyp, **frame)
+        lframe_path = path.full("lvm_anc", drpver=drpver, kind="l", imagetype=imagetyp, **frame)
         dstray_path = path.full("lvm_anc", drpver=drpver, kind="d", imagetype="stray", **frame)
 
         # bypass creation of detrended frame in case of imagetyp=bias
