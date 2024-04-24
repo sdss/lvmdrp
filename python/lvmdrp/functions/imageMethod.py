@@ -4767,6 +4767,7 @@ def trace_fibers(
     poly_deg: int | Tuple[int] = 6,
     interpolate_missing: bool = True,
     only_centroids: bool = False,
+    use_given_centroids: bool = False,
     display_plots: bool = False
 ) -> Tuple[TraceMask, TraceMask, TraceMask]:
     """Trace fibers in a given image
@@ -4843,6 +4844,8 @@ def trace_fibers(
         whether to interpolate bad/missing fibers, by default True
     only_centroids : bool, optional
         whether to only trace centroids, by default False
+    use_given_centroids : bool, optional
+        whether to use given centroids, by default False
     display_plots : bool, optional
         whether to show plots on display or not, by default True
 
@@ -4953,58 +4956,64 @@ def trace_fibers(
 
     # trace centroids in each column
     mod_columns, residuals = [], []
-    iterator = tqdm(enumerate(columns), total=len(columns), desc="tracing centroids", unit="column", ascii=True)
-    for i, icolumn in iterator:
-        # extract column profile
-        img_slice = img.getSlice(icolumn, axis="y")
+    if not os.path.isfile(out_trace_cent_guess) and not use_given_centroids:
+        iterator = tqdm(enumerate(columns), total=len(columns), desc="tracing centroids", unit="column", ascii=True)
+        for i, icolumn in iterator:
+            # extract column profile
+            img_slice = img.getSlice(icolumn, axis="y")
 
-        # get fiber positions along previous column
-        if icolumn == LVM_REFERENCE_COLUMN:
-            # trace reference column first or skip if already traced
-            if i == 0:
-                cent_guess, _, mask_guess = centroids.getSlice(LVM_REFERENCE_COLUMN, axis="y")
+            # get fiber positions along previous column
+            if icolumn == LVM_REFERENCE_COLUMN:
+                # trace reference column first or skip if already traced
+                if i == 0:
+                    cent_guess, _, mask_guess = centroids.getSlice(LVM_REFERENCE_COLUMN, axis="y")
+                else:
+                    continue
             else:
-                continue
+                cent_guess, _, mask_guess = centroids.getSlice(columns[i-1], axis="y")
+
+            # # update masked fibers
+            # mask_guess |= numpy.isnan(cent_guess)
+
+            # # fix masked fibers from last iteration
+            # cent_guess[mask_guess] = copy(ref_cent)[mask_guess]
+            # cast fiber positions to integers
+            cent_guess = cent_guess.round().astype("int16")
+
+            # measure fiber positions
+            cen_slice, msk_slice = img_slice.measurePeaks(cent_guess, method, init_sigma=guess_fwhm / 2.354, threshold=counts_threshold, max_diff=max_diff, ftol=1e-3, xtol=1e-3)
+
+            # replace failed centroid measurements (NaN) by last valid measurement
+            cen_slice[numpy.isnan(cen_slice)] = cent_guess[numpy.isnan(cen_slice)]
+            centroids.setSlice(icolumn, axis="y", data=cen_slice, mask=msk_slice)
+
+        if fit_poly:
+            # smooth all trace by a polynomial
+            log.info(f"fitting centroid guess trace with {deg_cent}-deg polynomial")
+            table_data, table_poly, table_poly_all = centroids.fit_polynomial(deg_cent, poly_kind="poly")
+            _create_trace_regions(out_trace_cent.replace(".fits", "_guess.fits"), table_data, table_poly, table_poly_all, display_plots=display_plots)
+
+            # set bad fibers in trace mask
+            centroids._mask[bad_fibers] = True
+            # linearly interpolate coefficients at masked fibers
+            log.info(f"interpolating coefficients at {bad_fibers.sum()} masked fibers")
+            centroids.interpolate_coeffs()
         else:
-            cent_guess, _, mask_guess = centroids.getSlice(columns[i-1], axis="y")
+            log.info("interpolating centroid guess trace")
+            centroids.interpolate_data(axis="X")
 
-        # update masked fibers
-        mask_guess |= numpy.isnan(cent_guess)
+            # set bad fibers in trace mask
+            centroids._mask[bad_fibers] = True
+            log.info(f"interpolating data at {bad_fibers.sum()} masked fibers")
+            centroids.interpolate_data(axis="Y")
 
-        # fix masked fibers from last iteration
-        cent_guess[mask_guess] = copy(ref_cent)[mask_guess]
-        # cast fiber positions to integers
-        cent_guess = cent_guess.round().astype("int16")
-
-        # measure fiber positions
-        cen_slice, msk_slice = img_slice.measurePeaks(cent_guess, method, init_sigma=guess_fwhm / 2.354, threshold=counts_threshold, max_diff=max_diff)
-
-        centroids.setSlice(icolumn, axis="y", data=cen_slice, mask=msk_slice)
-
-    if fit_poly:
-        # smooth all trace by a polynomial
-        log.info(f"fitting centroid guess trace with {deg_cent}-deg polynomial")
-        centroids.fit_polynomial(deg_cent, poly_kind="poly")
-
-        # set bad fibers in trace mask
-        centroids._mask[bad_fibers] = True
-        # linearly interpolate coefficients at masked fibers
-        log.info(f"interpolating coefficients at {bad_fibers.sum()} masked fibers")
-        centroids.interpolate_coeffs()
+        # write centroid if requested
+        if only_centroids:
+            log.info(f"writing centroid trace to '{os.path.basename(out_trace_cent_guess)}'")
+            centroids.writeFitsData(out_trace_cent_guess)
+            return centroids, img
     else:
-        log.info("interpolating centroid guess trace")
-        centroids.interpolate_data(axis="X")
-
-        # set bad fibers in trace mask
-        centroids._mask[bad_fibers] = True
-        log.info(f"interpolating data at {bad_fibers.sum()} masked fibers")
-        centroids.interpolate_data(axis="Y")
-
-    # write centroid if requested
-    if only_centroids:
-        log.info(f"writing centroid trace to '{os.path.basename(out_trace_cent)}'")
-        centroids.writeFitsData(out_trace_cent)
-        return centroids, img
+        centroids = TraceMask.from_file(out_trace_cent_guess)
 
     if out_trace_fwhm is None or out_trace_amp is None:
         raise ValueError("missing output trace for amplitude and/or FWHM")
