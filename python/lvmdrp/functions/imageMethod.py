@@ -4894,8 +4894,9 @@ def trace_fibers(
     median_box = tuple(map(lambda x: max(x, 1), median_box))
     if median_box != (1, 1):
         log.info(f"performing median filtering with box {median_box} pixels")
-        img = img.replaceMaskMedian(*median_box)
-        img = img.medianImg(median_box)
+        img = img.replaceMaskMedian(*median_box, replace_error=None)
+        img._data = numpy.nan_to_num(img._data)
+        img = img.medianImg(median_box, propagate_error=True)
 
     # coadd images along the dispersion axis to increase the S/N of the peaks
     if coadd != 0:
