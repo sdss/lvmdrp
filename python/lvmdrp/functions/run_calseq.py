@@ -710,7 +710,8 @@ def create_traces(mjds, target_mjd=None, expnums_ldls=None, expnums_qrtz=None,
                 # trace only centroids
                 centroids, img = image_tasks.trace_fibers(
                     in_image=dflat_path,
-                    out_trace_cent=cent_guess_path,
+                    out_trace_cent=None,
+                    out_trace_cent_guess=cent_guess_path,
                     correct_ref=True, median_box=(1,10), coadd=20,
                     counts_threshold=counts_threshold, max_diff=1.5,
                     guess_fwhm=2.5, method="gauss", ncolumns=140,

@@ -4956,7 +4956,10 @@ def trace_fibers(
 
     # trace centroids in each column
     mod_columns, residuals = [], []
-    if not os.path.isfile(out_trace_cent_guess) and not use_given_centroids:
+    if use_given_centroids and (out_trace_cent_guess is not None and os.path.isfile(out_trace_cent_guess)):
+        log.info(f"loading guess fiber centroids from '{os.path.basename(out_trace_cent_guess)}'")
+        centroids = TraceMask.from_file(out_trace_cent_guess)
+    else:
         iterator = tqdm(enumerate(columns), total=len(columns), desc="tracing centroids", unit="column", ascii=True)
         for i, icolumn in iterator:
             # extract column profile
@@ -4991,7 +4994,7 @@ def trace_fibers(
             # smooth all trace by a polynomial
             log.info(f"fitting centroid guess trace with {deg_cent}-deg polynomial")
             table_data, table_poly, table_poly_all = centroids.fit_polynomial(deg_cent, poly_kind="poly")
-            _create_trace_regions(out_trace_cent.replace(".fits", "_guess.fits"), table_data, table_poly, table_poly_all, display_plots=display_plots)
+            _create_trace_regions(out_trace_cent_guess, table_data, table_poly, table_poly_all, display_plots=display_plots)
 
             # set bad fibers in trace mask
             centroids._mask[bad_fibers] = True
@@ -5009,11 +5012,10 @@ def trace_fibers(
 
         # write centroid if requested
         if only_centroids:
-            log.info(f"writing centroid trace to '{os.path.basename(out_trace_cent_guess)}'")
-            centroids.writeFitsData(out_trace_cent_guess)
+            if out_trace_cent_guess is not None:
+                log.info(f"writing centroid trace to '{os.path.basename(out_trace_cent_guess)}'")
+                centroids.writeFitsData(out_trace_cent_guess)
             return centroids, img
-    else:
-        centroids = TraceMask.from_file(out_trace_cent_guess)
 
     if out_trace_fwhm is None or out_trace_amp is None:
         raise ValueError("missing output trace for amplitude and/or FWHM")
