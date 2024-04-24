@@ -4,6 +4,7 @@ from scipy import interpolate
 from tqdm import tqdm
 
 from lvmdrp import log
+from scipy import optimize
 from lvmdrp.core.header import Header, combineHdr
 from lvmdrp.core.positionTable import PositionTable
 from lvmdrp.core.spectrum1d import Spectrum1D
@@ -22,6 +23,20 @@ def _read_fiber_ypix(peaks_file):
     subpix = peaks[1].data["SUBPIX"]
     qual = peaks[1].data["QUALITY"].astype(bool)
     return xpos, fiber, pixel, subpix, qual
+
+
+def _guess_spline(x, y, k, s, w=None):
+    """Do an ordinary spline fit to provide knots"""
+    return interpolate.splrep(x, y, w, k=k, s=s)
+
+def _residual_spline(c, x, y, t, k, w=None):
+    """The error function to minimize"""
+    diff = y - interpolate.splev(x, (t, c, k))
+    if w is None:
+        diff = numpy.einsum('...i,...i', diff, diff)
+    else:
+        diff = numpy.dot(diff*diff, w)
+    return numpy.abs(diff)
 
 
 class FiberRows(Header, PositionTable):
@@ -973,7 +988,7 @@ class FiberRows(Header, PositionTable):
             combined_hdr = combineHdr([self, rows])
             self.setHeader(combined_hdr._header)
 
-    def fit_spline(self, nknots=300, knots=None, clip=None):
+    def fit_spline(self, degree=3, nknots=5, knots=None, smoothing=None, weights=None, constraints=None, clip=None):
         """
         smooths the traces along the dispersion direction with a spline function for each individual fiber
 
@@ -1001,7 +1016,7 @@ class FiberRows(Header, PositionTable):
         elif knots is not None:
             nknots = len(knots)
         else:
-            raise ValueError("Either nknots or knots must be provided")
+            knots = None
 
         self._coeffs = numpy.zeros(self._data.shape[0], dtype=object)
 
@@ -1011,10 +1026,14 @@ class FiberRows(Header, PositionTable):
         for i in range(self._fibers):
             good_pix = numpy.logical_not(self._mask[i, :])
             if numpy.sum(good_pix) >= nknots + 1:
+                pixels_, data_ = pixels[good_pix], self._data[i, good_pix]
+                (t0, c0, k) = _guess_spline(pixels_, data_, k=degree, s=smoothing, w=weights)
                 try:
-                    tck = interpolate.splrep(pixels[good_pix], self._data[i, good_pix], s=0, task=0)
-                    pix_table.extend(numpy.column_stack([pixels[good_pix], self._data[i, good_pix]]).tolist())
-                    poly_table.extend(numpy.column_stack([pixels[good_pix], interpolate.splev(pixels[good_pix], tck)]).tolist())
+                    opt = optimize.minimize(_residual_spline, (t0, c0), (pixels_, data_, k, weights), constraints=constraints)
+                    t, c = opt.x
+                    tck = (t, c, k)
+                    pix_table.extend(numpy.column_stack([pixels_, data_]).tolist())
+                    poly_table.extend(numpy.column_stack([pixels_, interpolate.splev(pixels_, tck)]).tolist())
                     poly_all_table.extend(numpy.column_stack([pixels, interpolate.splev(pixels, tck)]).tolist())
                 except ValueError as e:
                     log.error(f'Fiber trace failure at fiber {i}: {e}')
