@@ -279,7 +279,6 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
     mask = numpy.isnan(arc._data) | numpy.isnan(arc._error)
     mask |= (arc._data < 0.0) | (arc._error < 0.0)
     arc._data[mask] = 0.0
-    arc._error[mask] = 0.0
 
     # read reference lines
     ilamps = [lamp.lower() for lamp in ARC_LAMPS]
