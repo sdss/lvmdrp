@@ -4066,7 +4066,7 @@ def add_astrometry(
                     log.warn(f'Guider image {agcfiledir[tel]} does not have EAST COADD header')
 
                 try:
-                    mfeweader=mfagc[3].header    # West guider co-add
+                    mfwheader=mfagc[3].header    # West guider co-add
                     copy_guider_keyword(mfwheader, 'WEST', 'FRAME0  ', org_img)
                     copy_guider_keyword(mfwheader, 'WEST', 'FRAMEN  ', org_img)
                     copy_guider_keyword(mfwheader, 'WEST', 'NFRAMES ', org_img)
