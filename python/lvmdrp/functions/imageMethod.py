@@ -4032,68 +4032,22 @@ def add_astrometry(
                 IFUcencoords=outw.pixel_to_world(2500,1000)
                 RAobs=IFUcencoords.ra.value
                 DECobs=IFUcencoords.dec.value
+                gdrkeys = ['FRAME0  ', 'FRAMEN  ', 'NFRAMES ', 'STACK0  ', 'STACKN  ', 'NSTACKED', 'COESTIM ', 'SIGCLIP ', 
+                           'SIGMA   ', 'OBSTIME0', 'OBSTIMEN', 'FWHM0   ', 'FWHMN   ', 'FWHMMED ', 'COFWHM  ', 'COFWHMST', 
+                           'PACOEFFA', 'PACOEFFB', 'PAMIN   ', 'PAMAX   ', 'PADRIFT ', 'ZEROPT  ', 'SOLVED  ', 'WARNPADR', 
+                           'WARNTRAN', 'WARNMATC', 'WARNFWHM']
                 try:
                     mfeheader=mfagc[2].header    # East guider co-add
                     org_img.setHdrValue('ASTRMSRC', 'GDR coadd', comment='Source of astrometric solution: guider')
-                    copy_guider_keyword(mfeheader, 'EAST', 'FRAME0  ', org_img)
-                    copy_guider_keyword(mfeheader, 'EAST', 'FRAMEN  ', org_img)
-                    copy_guider_keyword(mfeheader, 'EAST', 'NFRAMES ', org_img)
-                    copy_guider_keyword(mfeheader, 'EAST', 'STACK0  ', org_img)
-                    copy_guider_keyword(mfeheader, 'EAST', 'STACKN  ', org_img)
-                    copy_guider_keyword(mfeheader, 'EAST', 'NSTACKED', org_img)
-                    copy_guider_keyword(mfeheader, 'EAST', 'COESTIM ', org_img)
-                    copy_guider_keyword(mfeheader, 'EAST', 'SIGCLIP ', org_img)
-                    copy_guider_keyword(mfeheader, 'EAST', 'SIGMA   ', org_img)
-                    copy_guider_keyword(mfeheader, 'EAST', 'OBSTIME0', org_img)
-                    copy_guider_keyword(mfeheader, 'EAST', 'OBSTIMEN', org_img)
-                    copy_guider_keyword(mfeheader, 'EAST', 'FWHM0   ', org_img)
-                    copy_guider_keyword(mfeheader, 'EAST', 'FWHMN   ', org_img)
-                    copy_guider_keyword(mfeheader, 'EAST', 'FWHMMED ', org_img)
-                    copy_guider_keyword(mfeheader, 'EAST', 'COFWHM  ', org_img)
-                    copy_guider_keyword(mfeheader, 'EAST', 'COFWHMST', org_img)
-                    copy_guider_keyword(mfeheader, 'EAST', 'PACOEFFA', org_img)
-                    copy_guider_keyword(mfeheader, 'EAST', 'PACOEFFB', org_img)
-                    copy_guider_keyword(mfeheader, 'EAST', 'PAMIN   ', org_img)
-                    copy_guider_keyword(mfeheader, 'EAST', 'PAMAX   ', org_img)
-                    copy_guider_keyword(mfeheader, 'EAST', 'PADRIFT ', org_img)
-                    copy_guider_keyword(mfeheader, 'EAST', 'ZEROPT  ', org_img)
-                    copy_guider_keyword(mfeheader, 'EAST', 'SOLVED  ', org_img)
-                    copy_guider_keyword(mfeheader, 'EAST', 'WARNPADR', org_img)
-                    copy_guider_keyword(mfeheader, 'EAST', 'WARNTRAN', org_img)
-                    copy_guider_keyword(mfeheader, 'EAST', 'WARNMATC', org_img)
-                    copy_guider_keyword(mfeheader, 'EAST', 'WARNFWHM', org_img)
+                    for key in gdrkeys:
+                        copy_guider_keyword(mfeheader, 'EAST', key, org_img)
                 except:
                     log.warn(f'Guider image {agcfiledir[tel]} does not have EAST COADD header')
 
                 try:
                     mfwheader=mfagc[3].header    # West guider co-add
-                    copy_guider_keyword(mfwheader, 'WEST', 'FRAME0  ', org_img)
-                    copy_guider_keyword(mfwheader, 'WEST', 'FRAMEN  ', org_img)
-                    copy_guider_keyword(mfwheader, 'WEST', 'NFRAMES ', org_img)
-                    copy_guider_keyword(mfwheader, 'WEST', 'STACK0  ', org_img)
-                    copy_guider_keyword(mfwheader, 'WEST', 'STACKN  ', org_img)
-                    copy_guider_keyword(mfwheader, 'WEST', 'NSTACKED', org_img)
-                    copy_guider_keyword(mfwheader, 'WEST', 'COESTIM ', org_img)
-                    copy_guider_keyword(mfwheader, 'WEST', 'SIGCLIP ', org_img)
-                    copy_guider_keyword(mfwheader, 'WEST', 'SIGMA   ', org_img)
-                    copy_guider_keyword(mfwheader, 'WEST', 'OBSTIME0', org_img)
-                    copy_guider_keyword(mfwheader, 'WEST', 'OBSTIMEN', org_img)
-                    copy_guider_keyword(mfwheader, 'WEST', 'FWHM0   ', org_img)
-                    copy_guider_keyword(mfwheader, 'WEST', 'FWHMN   ', org_img)
-                    copy_guider_keyword(mfwheader, 'WEST', 'FWHMMED ', org_img)
-                    copy_guider_keyword(mfwheader, 'WEST', 'COFWHM  ', org_img)
-                    copy_guider_keyword(mfwheader, 'WEST', 'COFWHMST', org_img)
-                    copy_guider_keyword(mfwheader, 'WEST', 'PACOEFFA', org_img)
-                    copy_guider_keyword(mfwheader, 'WEST', 'PACOEFFB', org_img)
-                    copy_guider_keyword(mfwheader, 'WEST', 'PAMIN   ', org_img)
-                    copy_guider_keyword(mfwheader, 'WEST', 'PAMAX   ', org_img)
-                    copy_guider_keyword(mfwheader, 'WEST', 'PADRIFT ', org_img)
-                    copy_guider_keyword(mfwheader, 'WEST', 'ZEROPT  ', org_img)
-                    copy_guider_keyword(mfwheader, 'WEST', 'SOLVED  ', org_img)
-                    copy_guider_keyword(mfwheader, 'WEST', 'WARNPADR', org_img)
-                    copy_guider_keyword(mfwheader, 'WEST', 'WARNTRAN', org_img)
-                    copy_guider_keyword(mfwheader, 'WEST', 'WARNMATC', org_img)
-                    copy_guider_keyword(mfwheader, 'WEST', 'WARNFWHM', org_img)
+                    for key in gdrkeys:
+                        copy_guider_keyword(mfwheader, 'WEST', key, org_img)
                 except:
                     log.warn(f'Guider image {agcfiledir[tel]} does not have WEST COADD header')
 
