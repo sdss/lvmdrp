@@ -348,61 +348,57 @@ def fit_fiberflat(rsss: List[RSS], out_flat: str, out_rss: str, interpolate_bad:
 
     return new_flat
 
-def combine_twilight_sequence(expnums: List[int], channel: str, output_dir: str) -> RSS:
+def combine_twilight_sequence(fflats: List[RSS]) -> RSS:
     """Combine twilight exposures into a single RSS object
 
-    Given a list of twilight exposures, this function combines them into a
-    single RSS object using an average of the non-standard fibers and the
-    standard fibers in the right position.
+    Given a list of RSS objects of fiberflats from twilight exposures, this
+    function combines them into a single RSS object by averaging the fiber
+    throughput of all non-standard fibers and putting the standard fibers in
+    their respective positions.
 
     Parameters
     ----------
-    expnums : list
-        List of twilight exposure numbers
-    channel : str
-        Spectrograph channel
-    output_dir : str
-        Output directory
+    fflats : list
+        List of fiberflat individual exposures
 
     Returns
     -------
     mflat : RSS
         Master twilight flat
     """
-    hflats = [rssMethod.loadRSS(path.expand("lvm_anc", drpver=drpver, tileid="*", mjd="*", kind="f", imagetype="flat", camera=channel, expnum=expnum)[0]) for expnum in expnums]
 
-    # data = [hflat._data for hflat in hflats]
+    # data = [fflat._data for fflat in fflats]
     # median_fiber = bn.nanmedian(data, axis=0)
-    # for hflat in hflats:
-    #     hflat._data = hflat._data / median_fiber
-    #     hflat._error = hflat._error / median_fiber
+    # for fflat in fflats:
+    #     fflat._data = fflat._data / median_fiber
+    #     fflat._error = fflat._error / median_fiber
 
     # combine RSS exposures using an average
-    mflat = RSS(data=np.zeros_like(hflats[0]._data), error=np.zeros_like(hflats[0]._error), mask=np.ones_like(hflats[0]._mask, dtype=bool),
-                header=copy(hflats[0]._header), wave=copy(hflats[0]._wave), lsf=copy(hflats[0]._lsf), slitmap=copy(hflats[0]._slitmap))
+    mflat = RSS(data=np.zeros_like(fflats[0]._data), error=np.zeros_like(fflats[0]._error), mask=np.ones_like(fflats[0]._mask, dtype=bool),
+                header=copy(fflats[0]._header), wave=copy(fflats[0]._wave), lsf=copy(fflats[0]._lsf), slitmap=copy(fflats[0]._slitmap))
     # select non-std fibers
     fibermap =  mflat._slitmap
     select_allstd = fibermap["telescope"] == "Spec"
     select_nonstd = ~select_allstd
-    for i, hflat in enumerate(hflats):
+    for i, fflat in enumerate(fflats):
         # coadding all non-std fibers
-        mflat._data[select_nonstd] = mflat._data[select_nonstd] + hflat._data[select_nonstd]
-        mflat._error[select_nonstd] = np.sqrt(mflat._error[select_nonstd]**2 + hflat._error[select_nonstd]**2)
-        mflat._mask[select_nonstd] = mflat._mask[select_nonstd] & hflat._mask[select_nonstd]
+        mflat._data[select_nonstd] = mflat._data[select_nonstd] + fflat._data[select_nonstd]
+        mflat._error[select_nonstd] = np.sqrt(mflat._error[select_nonstd]**2 + fflat._error[select_nonstd]**2)
+        mflat._mask[select_nonstd] = mflat._mask[select_nonstd] & fflat._mask[select_nonstd]
 
         # get exposed standard fiber ID
         default_fiber_id = f"P1-{i+1}"
         fiber_id = mflat._header.get("CALIBFIB", default_fiber_id) or default_fiber_id
         # put std fibers in the right position
         idx = np.where(fibermap["orig_ifulabel"].value == fiber_id)
-        mflat._data[idx] = hflat._data[idx]
-        mflat._error[idx] = hflat._error[idx]
-        mflat._mask[idx] = mflat._mask[idx] & hflat._mask[idx]
-        mflat._header.update(hflat._header["STD*"])
+        mflat._data[idx] = fflat._data[idx]
+        mflat._error[idx] = fflat._error[idx]
+        mflat._mask[idx] = mflat._mask[idx] & fflat._mask[idx]
+        mflat._header.update(fflat._header["STD*"])
 
     # compute average of non-std fibers
-    mflat._data[select_nonstd] = mflat._data[select_nonstd] / len(hflats)
-    mflat._error[select_nonstd] = mflat._error[select_nonstd] / np.sqrt(len(hflats))
+    mflat._data[select_nonstd] = mflat._data[select_nonstd] / len(fflats)
+    mflat._error[select_nonstd] = mflat._error[select_nonstd] / np.sqrt(len(fflats))
 
     # mask invalid pixels
     mflat._mask |= np.isnan(mflat._data) | (mflat._data <= 0) | np.isinf(mflat._data)
@@ -573,7 +569,10 @@ def reduce_twilight_sequence(expnums: List[int], median_box: int = 10, niter: bo
     tileid = flats.tileid.min()
     for channel in channels:
         flat_expnums = flat_channels.get_group(channel).groupby("expnum")
+        fflats = []
         for expnum in flat_expnums.groups:
+            flat = flat_expnums.get_group(expnum).iloc[0]
+
             xflat_paths = sorted(path.expand("lvm_anc", drpver=drpver, kind="x", imagetype=flat["imagetyp"], tileid=flat["tileid"], mjd=flat["mjd"], camera=f"{channel}?", expnum=expnum))
             fflat_flatfielded_path = path.full("lvm_anc", drpver=drpver, kind="flatfielded_",
                                    imagetype=flat["imagetyp"], tileid=flat["tileid"], mjd=flat["mjd"],
@@ -603,18 +602,17 @@ def reduce_twilight_sequence(expnums: List[int], median_box: int = 10, niter: bo
             # fit fiber throughput
             hflat = rssMethod.loadRSS(hflat_path)
             hflats = hflat.splitRSS(parts=len(mwave_paths), axis=1)
-            fit_fiberflat(rsss=hflats, out_flat=fflat_path, out_rss=fflat_flatfielded_path, median_box=median_box, niter=niter,
+            fflat = fit_fiberflat(rsss=hflats, out_flat=fflat_path, out_rss=fflat_flatfielded_path, median_box=median_box, niter=niter,
                                    threshold=threshold, mask_bands=mask_bands.get(channel, []),
                                    display_plots=display_plots, nknots=nknots)
+            fflats.append(fflat)
 
-
-        expnums = list(flat_expnums.groups.keys())
-        mrss = combine_twilight_sequence(expnums=expnums, channel=channel, output_dir=masters_path)
-        mrss.writeFitsData(path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=masters_mjd, kind="mfiberflat_single", camera=channel))
+        mrss = combine_twilight_sequence(fflats=fflats)
+        mrss.writeFitsData(path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=masters_mjd, kind="mfiberflat", camera=channel))
 
         mwave_paths = sorted(glob(os.path.join(masters_path, f"lvm-mwave-{channel}?.fits")))
         new_flat = resample_fiberflat(mrss, channel=channel, mwave_paths=mwave_paths, display_plots=display_plots)
-        mflat_path = os.path.join(masters_path, f"lvm-mfiberflat_twilight_single-{channel}.fits")
+        mflat_path = os.path.join(masters_path, f"lvm-mfiberflat_twilight-{channel}.fits")
         new_flat.writeFitsData(mflat_path)
         new_flats[channel] = new_flat
 
@@ -623,6 +621,6 @@ def reduce_twilight_sequence(expnums: List[int], median_box: int = 10, niter: bo
 
 if __name__ == "__main__":
 
-    expnums = [7231]
+    expnums = [7341]
     expnums = np.arange(7341, 7352+1)
     reduce_twilight_sequence(expnums=expnums, median_box=10, niter=1000, threshold=(0.5,2.5), nknots=60, skip_done=True, display_plots=False)
