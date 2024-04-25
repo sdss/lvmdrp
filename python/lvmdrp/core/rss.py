@@ -1738,7 +1738,8 @@ class RSS(FiberRows):
         if not unit.endswith("/angstrom"):
             dlambda = numpy.gradient(rss._wave, axis=1)
             rss._data /= dlambda
-            rss._error /= dlambda
+            if rss._error is not None:
+                rss._error /= dlambda
             if rss._sky is not None:
                 rss._sky /= dlambda
             if rss._sky_error is not None:
@@ -1751,7 +1752,7 @@ class RSS(FiberRows):
         # create output RSS
         new_rss = RSS(
             data=numpy.zeros((rss._fibers, wave.size), dtype="float32"),
-            error=numpy.zeros((rss._fibers, wave.size), dtype="float32"),
+            error=numpy.zeros((rss._fibers, wave.size), dtype="float32") if rss._error is not None else None,
             mask=numpy.zeros((rss._fibers, wave.size), dtype="bool"),
             sky=numpy.zeros((rss._fibers, wave.size), dtype="float32") if rss._sky is not None else None,
             sky_error=numpy.zeros((rss._fibers, wave.size), dtype="float32") if rss._sky_error is not None else None,
@@ -1779,8 +1780,9 @@ class RSS(FiberRows):
         for ifiber in range(rss._fibers):
             f = interpolate.interp1d(rss._wave[ifiber], rss._data[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
             new_rss._data[ifiber] = f(wave).astype("float32")
-            f = interpolate.interp1d(rss._wave[ifiber], rss._error[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
-            new_rss._error[ifiber] = f(wave).astype("float32")
+            if rss._error is not None:
+                f = interpolate.interp1d(rss._wave[ifiber], rss._error[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
+                new_rss._error[ifiber] = f(wave).astype("float32")
             f = interpolate.interp1d(rss._wave[ifiber], rss._mask[ifiber], kind="nearest", bounds_error=False, fill_value=1)
             new_rss._mask[ifiber] = f(wave).astype("bool")
             if rss._lsf is not None:
@@ -1812,7 +1814,8 @@ class RSS(FiberRows):
         if not return_density:
             dlambda = numpy.gradient(wave)
             new_rss._data *= dlambda
-            new_rss._error *= dlambda
+            if new_rss._error is not None:
+                new_rss._error *= dlambda
             if new_rss._sky is not None:
                 new_rss._sky *= dlambda
             if new_rss._sky_error is not None:
