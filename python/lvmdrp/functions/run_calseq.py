@@ -864,7 +864,7 @@ def create_illumination_corrections(mjds, target_mjd=None, expnums=None):
     raise NotImplementedError("create_illumination_corrections")
 
 
-def create_wavelengths(mjds, target_mjd=None, expnums=None):
+def create_wavelengths(mjds, target_mjd=None, expnums=None, skip_done=True):
     """Reduces an arc sequence to create master wavelength solutions
 
     Given a set of MJDs and (optionally) exposure numbers, create wavelength
@@ -883,14 +883,17 @@ def create_wavelengths(mjds, target_mjd=None, expnums=None):
         MJD to store the master frames in
     expnums : list
         List of exposure numbers to reduce
+    skip_done : bool
+        Skip pipeline steps that have already been done
     """
     frames, masters_mjd = get_sequence_metadata(mjds, target_mjd=target_mjd, expnums=expnums)
     frames = frames.query("imagetyp=='arc' or (not ldls|quartz and neon|hgne|argon|xenon)")
     frames["imagetyp"] = "arc"
     masters_path = os.path.join(MASTERS_DIR, str(masters_mjd))
 
-    reduce_2d(mjds, target_mjd=masters_mjd, expnums=expnums, assume_imagetyp="arc", reject_cr=False)
+    reduce_2d(mjds, target_mjd=masters_mjd, expnums=expnums, assume_imagetyp="arc", reject_cr=False, skip_done=skip_done)
 
+    expnum_str = f"{frames.expnum.min():>08}-{frames.expnum.max():>08}"
     arc_analogs = frames.groupby(["camera",])
     for camera in arc_analogs.groups:
         arcs = arc_analogs.get_group((camera,))
@@ -901,42 +904,45 @@ def create_wavelengths(mjds, target_mjd=None, expnums=None):
         mwidth_path = os.path.join(masters_path, f"lvm-mwidth-{camera}.fits")
 
         # define product paths
-        marc_path = path.full("lvm_master", drpver=drpver, tileid=arc["tileid"], mjd=arc["mjd"], kind="marc", camera=arc["camera"])
-        xarc_path = path.full("lvm_master", drpver=drpver, tileid=arc["tileid"], mjd=arc["mjd"], kind="xarc", camera=arc["camera"])
-        os.makedirs(os.path.dirname(marc_path), exist_ok=True)
+        carc_path = path.full("lvm_anc", drpver=drpver, tileid=arc["tileid"], mjd=arc["mjd"], kind="c", imagetype=arc["imagetyp"], camera=arc["camera"], expnum=expnum_str)
+        xarc_path = path.full("lvm_anc", drpver=drpver, tileid=arc["tileid"], mjd=arc["mjd"], kind="x", imagetype=arc["imagetyp"], camera=arc["camera"], expnum=expnum_str)
+        mwave_path = path.full("lvm_master", drpver=drpver, tileid=arc["tileid"], mjd=arc["mjd"], camera=arc["camera"], kind="mwave")
+        mlsf_path = path.full("lvm_master", drpver=drpver, tileid=arc["tileid"], mjd=arc["mjd"], camera=arc["camera"], kind="mlsf")
+        os.makedirs(os.path.dirname(carc_path), exist_ok=True)
 
         # combine individual arcs into master arc
-        if os.path.isfile(marc_path):
-            log.info(f"skipping master arc {marc_path}, file already exists")
+        if skip_done and os.path.isfile(carc_path):
+            log.info(f"skipping combined arc {carc_path}, file already exists")
         else:
             darc_paths = [path.full("lvm_anc", drpver=drpver, kind="d", imagetype=arc["imagetyp"], **arc) for arc in arcs.to_dict("records")]
-            image_tasks.create_master_frame(in_images=darc_paths, out_image=marc_path)
+            image_tasks.create_master_frame(in_images=darc_paths, out_image=carc_path, batch_size=48)
 
         # extract arc
-        if os.path.isfile(xarc_path):
+        if skip_done and os.path.isfile(xarc_path):
             log.info(f"skipping extracted arc {xarc_path}, file already exists")
         else:
-            image_tasks.extract_spectra(in_image=marc_path, out_rss=xarc_path, in_trace=mtrace_path, in_fwhm=mwidth_path, method="optimal")
-
-        # define products paths
-        xarc_path = path.full("lvm_master", drpver=drpver, tileid=arc["tileid"], mjd=arc["mjd"], kind="xarc", camera=arc["camera"])
-        harc_path = path.full("lvm_master", drpver=drpver, tileid=arc["tileid"], mjd=arc["mjd"], kind="harc", camera=arc["camera"])
+            image_tasks.extract_spectra(in_image=carc_path, out_rss=xarc_path, in_trace=mtrace_path, in_fwhm=mwidth_path, method="optimal")
 
         # fit wavelength solution
-        out_wave, out_lsf = os.path.join("data_wave", f"lvm-mwave-{camera}.fits"), os.path.join("data_wave", f"lvm-mlsf-{camera}.fits")
-        rss_tasks.determine_wavelength_solution(in_arcs=xarc_path, out_wave=out_wave, out_lsf=out_lsf, aperture=12,
+        rss_tasks.determine_wavelength_solution(in_arcs=xarc_path, out_wave=mwave_path, out_lsf=mlsf_path, aperture=12,
                                                 cc_correction=True, cc_max_shift=20, poly_disp=5, poly_fwhm=2, poly_cros=2,
                                                 flux_min=1e-12, fwhm_max=5, rel_flux_limits=[0.001, 1e12])
 
-        # apply wavelength solution to arcs
-        rss_tasks.create_pixel_table(in_rss=xarc_path, out_rss=harc_path, arc_wave=out_wave, arc_fwhm=out_lsf)
+    arc = frames.iloc[0]
+    for channel in "brz":
+        mwave_paths = sorted(path.expand("lvm_master", drpver=drpver, tileid=arc["tileid"], mjd=arc["mjd"], camera=f"{channel}?", kind="mwave"))
+        mlsf_paths = sorted(path.expand("lvm_master", drpver=drpver, tileid=arc["tileid"], mjd=arc["mjd"], camera=f"{channel}?", kind="mlsf"))
 
+        xarc_paths = sorted(path.expand("lvm_anc", drpver=drpver, tileid=arc["tileid"], mjd=arc["mjd"], kind="x", imagetype=arc["imagetyp"], camera=f"{channel}?", expnum=expnum_str))
+        xarc_path = path.full("lvm_anc", drpver=drpver, tileid=arc["tileid"], mjd=arc["mjd"], kind="x", imagetype=arc["imagetyp"], camera=channel, expnum=expnum_str)
+        harc_path = path.full("lvm_anc", drpver=drpver, tileid=arc["tileid"], mjd=arc["mjd"], kind="h", imagetype=arc["imagetyp"], camera=channel, expnum=expnum_str)
+
+        # stack spectragraphs
+        rss_tasks.stack_spectrographs(in_rsss=xarc_paths, out_rss=xarc_path)
+        # apply wavelength solution to arcs
+        rss_tasks.create_pixel_table(in_rss=xarc_path, out_rss=harc_path, in_waves=mwave_paths, in_lsfs=mlsf_paths)
         # rectify arcs
-        iwave, fwave = SPEC_CHANNELS[camera[0]]
-        rss_tasks.resample_wavelength(in_rss=harc_path, out_rss=harc_path,
-                                      method="linear", disp_pix=0.5,
-                                      start_wave=iwave, end_wave=fwave,
-                                      err_sim=10, parallel=0, extrapolate=False)
+        rss_tasks.resample_wavelength(in_rss=harc_path, out_rss=harc_path, method="linear", wave_range=SPEC_CHANNELS[channel], wave_disp=0.5)
 
 
 @cloup.command(short_help='Run the calibration sequence reduction', show_constraints=True)
