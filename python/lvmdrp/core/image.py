@@ -1937,7 +1937,7 @@ class Image(Header):
         pixels = numpy.arange(self._dim[0])
         models = []
         for i in range(self._dim[1]):
-            good_pix = ~self._mask[:,i] if self._mask is not None else numpy.isnan(self._data[:,i])
+            good_pix = ~self._mask[:,i] if self._mask is not None else ~numpy.isnan(self._data[:,i])
 
             # skip column if all pixels are masked
             if good_pix.sum() == 0:
@@ -2117,25 +2117,20 @@ class Image(Header):
             else:
                 cent_guess, _, mask_guess = centroids.getSlice(columns[i-1], axis="y")
 
-            # update masked fibers
-            mask_guess |= numpy.isnan(cent_guess)
-
-            # fix masked fibers from last iteration
-            # NOTE: this may cause issues if the masked fibers in the current
-            # column are too apart from the reference column
-            cent_guess[mask_guess] = copy(ref_centroids)[mask_guess]
             # cast fiber positions to integers
             cent_guess = cent_guess.round().astype("int16")
 
             # measure fiber positions
             cen_slice, msk_slice = img_slice.measurePeaks(cent_guess, method, init_sigma=fwhm_guess / 2.354, threshold=counts_threshold, max_diff=max_diff)
 
+            # replace failed centroid measurements (NaN) by last valid measurement
+            cen_slice[numpy.isnan(cen_slice)] = cent_guess[numpy.isnan(cen_slice)]
             centroids.setSlice(icolumn, axis="y", data=cen_slice, mask=msk_slice)
 
         return centroids
 
     def trace_fiber_widths(self, fiber_centroids, ref_column=2000, ncolumns=40, nblocks=18, iblocks=[],
-                           fwhm_guess=2.5, fwhm_range=[1.0,3.5], counts_threshold=5000):
+                           fwhm_guess=2.5, fwhm_range=[1.0,3.5], max_diff=1.5, counts_threshold=5000):
 
         if self._header is None:
             raise ValueError("No header available")
@@ -2195,7 +2190,9 @@ class Image(Header):
                 else:
                     # fit gaussian models to each fiber profile
                     log.info(f"fitting fiber block {j+1}/{nblocks} ({cen_block.size}/{msk_block.size} good fibers)")
-                    _, par_block[~par_mask] = img_slice.fitMultiGauss(cen_block, init_fwhm=fwhm_guess)
+                    bound_lower = numpy.array([0]*cen_block.size + (cen_block-max_diff).tolist() + [fwhm_range[0]/2.354]*cen_block.size)
+                    bound_upper = numpy.array([numpy.inf]*cen_block.size + (cen_block+max_diff).tolist() + [fwhm_range[1]/2.354]*cen_block.size)
+                    _, par_block[~par_mask] = img_slice.fitMultiGauss(cen_block, init_fwhm=fwhm_guess, bounds=(bound_lower, bound_upper), ftol=1e-3, xtol=1e-3)
 
                 par_blocks.append(par_block)
 

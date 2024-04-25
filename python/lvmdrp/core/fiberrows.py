@@ -4,6 +4,7 @@ from scipy import interpolate
 from tqdm import tqdm
 
 from lvmdrp import log
+from scipy import optimize
 from lvmdrp.core.header import Header, combineHdr
 from lvmdrp.core.positionTable import PositionTable
 from lvmdrp.core.spectrum1d import Spectrum1D
@@ -22,6 +23,20 @@ def _read_fiber_ypix(peaks_file):
     subpix = peaks[1].data["SUBPIX"]
     qual = peaks[1].data["QUALITY"].astype(bool)
     return xpos, fiber, pixel, subpix, qual
+
+
+def _guess_spline(x, y, k, s, w=None):
+    """Do an ordinary spline fit to provide knots"""
+    return interpolate.splrep(x, y, w, k=k, s=s)
+
+def _residual_spline(c, x, y, t, k, w=None):
+    """The error function to minimize"""
+    diff = y - interpolate.splev(x, (t, c, k))
+    if w is None:
+        diff = numpy.einsum('...i,...i', diff, diff)
+    else:
+        diff = numpy.dot(diff*diff, w)
+    return numpy.abs(diff)
 
 
 class FiberRows(Header, PositionTable):
@@ -972,6 +987,69 @@ class FiberRows(Header, PositionTable):
         if append_hdr:
             combined_hdr = combineHdr([self, rows])
             self.setHeader(combined_hdr._header)
+
+    def fit_spline(self, degree=3, nknots=5, knots=None, smoothing=None, weights=None, constraints=None, clip=None):
+        """
+        smooths the traces along the dispersion direction with a spline function for each individual fiber
+
+        Parameters
+        ----------
+        nknots: int, optional with default None
+            number of knots to use in the spline function
+        knots: numpy.ndarray, optional with default None
+            array of knots to use in the spline function
+        clip : 2-tuple of int, optional with default None
+            clip data around this values, defaults to no clipping
+
+        Returns
+        -------
+        pix_table : numpy.ndarray
+            table of measured values
+        poly_table : numpy.ndarray
+            table of spline values at measured values
+        poly_all_table : numpy.ndarray
+            table of spline values for all pixels in the fibers
+        """
+        pixels = numpy.arange(self._data.shape[1])
+        if nknots is not None and knots is None:
+            knots = numpy.linspace(pixels[len(pixels) // nknots], pixels[-1 * len(pixels) // nknots], nknots)
+        elif knots is not None:
+            nknots = len(knots)
+        else:
+            knots = None
+
+        self._coeffs = numpy.zeros(self._data.shape[0], dtype=object)
+
+        pix_table = []
+        poly_table = []
+        poly_all_table = []
+        for i in range(self._fibers):
+            good_pix = numpy.logical_not(self._mask[i, :])
+            if numpy.sum(good_pix) >= nknots + 1:
+                pixels_, data_ = pixels[good_pix], self._data[i, good_pix]
+                (t0, c0, k) = _guess_spline(pixels_, data_, k=degree, s=smoothing, w=weights)
+                try:
+                    opt = optimize.minimize(_residual_spline, (t0, c0), (pixels_, data_, k, weights), constraints=constraints)
+                    t, c = opt.x
+                    tck = (t, c, k)
+                    pix_table.extend(numpy.column_stack([pixels_, data_]).tolist())
+                    poly_table.extend(numpy.column_stack([pixels_, interpolate.splev(pixels_, tck)]).tolist())
+                    poly_all_table.extend(numpy.column_stack([pixels, interpolate.splev(pixels, tck)]).tolist())
+                except ValueError as e:
+                    log.error(f'Fiber trace failure at fiber {i}: {e}')
+                    self._mask[i, :] = True
+                    continue
+
+                self._coeffs[i] = tck
+                self._data[i, :] = interpolate.splev(pixels, tck)
+
+                if clip is not None:
+                    self._data = numpy.clip(self._data, clip[0], clip[1])
+                self._mask[i, :] = False
+            else:
+                self._mask[i, :] = True
+
+        return numpy.asarray(pix_table), numpy.asarray(poly_table), numpy.asarray(poly_all_table)
 
     def fit_polynomial(self, deg, poly_kind="poly", clip=None):
         """

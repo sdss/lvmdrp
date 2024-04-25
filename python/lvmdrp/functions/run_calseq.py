@@ -458,7 +458,8 @@ def reduce_2d(mjds, target_mjd=None, expnums=None,
         elif imagetyp == "flat":
             # quick and dirty trace of centroids to subtract stray light
             image_tasks.trace_fibers(in_image=dframe_path,
-                                     out_trace_cent=dcent_path,
+                                     out_trace_cent=None,
+                                     out_trace_cent_guess=dcent_path,
                                      correct_ref=True, median_box=(1,10), coadd=20,
                                      counts_threshold=counts_threshold, max_diff=1.5,
                                      guess_fwhm=2.5, method="gauss", ncolumns=140,
@@ -729,6 +730,7 @@ def create_traces(mjds, target_mjd=None, expnums_ldls=None, expnums_qrtz=None,
             lflat_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=masters_mjd, kind="l", imagetype="flat", camera=camera, expnum=expnum)
             flux_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=masters_mjd, kind="d", imagetype="flux", camera=camera, expnum=expnum)
             cent_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=masters_mjd, kind="d", imagetype="cent", camera=camera, expnum=expnum)
+            cent_guess_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=masters_mjd, kind="d", imagetype="cent_guess", camera=camera, expnum=expnum)
             fwhm_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=masters_mjd, kind="d", imagetype="fwhm", camera=camera, expnum=expnum)
             model_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=masters_mjd, kind="d", imagetype="model", camera=camera, expnum=expnum)
             mratio_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=masters_mjd, kind="d", imagetype="mratio", camera=camera, expnum=expnum)
@@ -737,11 +739,11 @@ def create_traces(mjds, target_mjd=None, expnums_ldls=None, expnums_qrtz=None,
             centroids, trace_cent_fit, trace_flux_fit, trace_fwhm_fit, img_stray, model, mratio = image_tasks.trace_fibers(
                 in_image=lflat_path,
                 out_trace_amp=flux_path, out_trace_cent=cent_path, out_trace_fwhm=fwhm_path,
-                out_trace_cent_guess=None,
+                out_trace_cent_guess=cent_guess_path,
                 correct_ref=True, median_box=(1,10), coadd=20,
                 counts_threshold=counts_threshold, max_diff=1.5, guess_fwhm=2.5, method="gauss",
                 ncolumns=(140, 40), iblocks=block_idxs, fwhm_limits=(1.5, 4.5),
-                fit_poly=fit_poly, interpolate_missing=False, poly_deg=(poly_deg_amp, poly_deg_cent, poly_deg_width)
+                fit_poly=fit_poly, interpolate_missing=False, poly_deg=(poly_deg_amp, poly_deg_cent, poly_deg_width), use_given_centroids=True
             )
 
             # update master traces
