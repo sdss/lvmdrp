@@ -4827,8 +4827,8 @@ def trace_fibers(
         centroids = TraceMask.from_file(out_trace_cent_guess)
     else:
         log.info(f"tracing centroids in {len(ncolumns_cent)-1} columns: {','.join(map(str, numpy.unique(ncolumns_cent)))}")
-        centroids = img.trace_centroids(ref_column=LVM_REFERENCE_COLUMN, ref_centroids=ref_cent, mask_fibstatus=1,
-                                        ncolumns=ncolumns_cent, method=method, guess_fwhm=guess_fwhm,
+        centroids = img.trace_fiber_centroids(ref_column=LVM_REFERENCE_COLUMN, ref_centroids=ref_cent, mask_fibstatus=1,
+                                        ncolumns=ncolumns_cent, method=method, fwhm_guess=guess_fwhm,
                                         counts_threshold=counts_threshold, max_diff=max_diff)
 
         if fit_poly:
@@ -4870,8 +4870,7 @@ def trace_fibers(
 
     trace_amp, trace_cent, trace_fwhm, columns, mod_columns, residuals = img.trace_fiber_widths(centroids, ref_column=LVM_REFERENCE_COLUMN,
                                                                                                 ncolumns=ncolumns_full, nblocks=LVM_NBLOCKS, iblocks=[],
-                                                                                                fwhm_guess=2.5, fwhm_range=[1.0,3.5], counts_threshold=5000,
-                                                                                                fit_polynomial=True, poly_deg=4)
+                                                                                                fwhm_guess=2.5, fwhm_range=[1.0,3.5], counts_threshold=5000)
 
     # smooth all trace by a polynomial
     if fit_poly:

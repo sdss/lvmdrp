@@ -1417,7 +1417,7 @@ class Image(Header):
                 out_error[y_cors[m], x_cors[m]] = replace_error
 
         # create new Image object
-        new_image = Image(data=out_data, error=out_error,  mask=self._mask, header=self._header)
+        new_image = Image(data=out_data, error=out_error,  mask=self._mask, header=self._header, slitmap=self._slitmap)
         return new_image
 
     def calibrateSDSS(self, fieldPhot, subtractSky=True):
@@ -2045,10 +2045,10 @@ class Image(Header):
         pixels = profile._pixels
         pixels = numpy.arange(pixels.size)
         guess_heights = numpy.ones_like(ref_centroids) * numpy.nanmax(profile._data)
-        ref_centroids = _spec_from_lines(ref_centroids, sigma=1.2, wavelength=pixels, heights=guess_heights)
+        ref_profile = _spec_from_lines(ref_centroids, sigma=1.2, wavelength=pixels, heights=guess_heights)
         log.info(f"correcting guess positions for column {ref_column}")
         cc, bhat, mhat = _cross_match(
-            ref_spec=ref_centroids,
+            ref_spec=ref_profile,
             obs_spec=profile._data,
             stretch_factors=stretch_factors,
             shift_range=shift_range)
@@ -2072,7 +2072,7 @@ class Image(Header):
         slitmap = self._slitmap[self._slitmap["spectrographid"] == spec]
         if ref_centroids is None and self._slitmap is not None:
             ref_centroids = slitmap[f"ypix_{channel}"].data
-        else:
+        elif ref_centroids is None:
             raise ValueError("No reference profile provided and no slitmap available")
 
         if isinstance(mask_fibstatus, int):
@@ -2100,6 +2100,7 @@ class Image(Header):
         # select columns to measure centroids
         step = self._dim[1] // ncolumns
         columns = numpy.concatenate((numpy.arange(ref_column, 0, -step), numpy.arange(ref_column, self._dim[1], step)))
+        log.info(f"selecting {len(columns)-1} columns: {','.join(map(str, numpy.unique(columns)))}")
 
         # trace centroids in each column
         iterator = tqdm(enumerate(columns), total=len(columns), desc="tracing centroids", unit="column", ascii=True)
