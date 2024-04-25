@@ -161,7 +161,7 @@ def fit_continuum(spectrum: Spectrum1D, mask_bands: List[Tuple[float,float]],
     best_continuum = continuum_models.pop(-1)
     return best_continuum, continuum_models, masked_pixels, knots
 
-def fit_fiberflat(rsss: List[RSS], out_rss: str, interpolate_bad: bool = True, mask_bands: List[Tuple[float,float]] = [],
+def fit_fiberflat(rsss: List[RSS], out_flat: str, out_rss: str, interpolate_bad: bool = True, mask_bands: List[Tuple[float,float]] = [],
                   median_box:int = 5, niter: int = 1000, threshold: Tuple[float,float]|float = (0.5,2.0),
                   plot_fibers: List[int] = list(range(0,648,10)),#[0,300,600,900,1200,1400,1700],
                   display_plots: bool = False, **kwargs) -> List[RSS]:
@@ -176,6 +176,8 @@ def fit_fiberflat(rsss: List[RSS], out_rss: str, interpolate_bad: bool = True, m
     ----------
     rsss : list
         List of RSS objects for each twilight exposure
+    out_flat : str
+        Output path for the master twilight flat
     out_rss : str
         Output path for the master twilight flat
     interpolate_bad : bool, optional
@@ -295,6 +297,7 @@ def fit_fiberflat(rsss: List[RSS], out_rss: str, interpolate_bad: bool = True, m
 
     # normalize by median fiber
     median_fiber = bn.nanmedian(new_flat._data, axis=0)
+    # median_fiber = bn.nanmean(new_flat._data, axis=0)
     new_flat._data = new_flat._data / median_fiber
     new_flat._error = new_flat._error / median_fiber
     new_flat._data[~np.isfinite(new_flat._data)] = 1
@@ -332,16 +335,20 @@ def fit_fiberflat(rsss: List[RSS], out_rss: str, interpolate_bad: bool = True, m
         figure_path="qa"
     )
 
-    new_flats = new_flat.splitRSS(parts=len(rsss), axis=1)
-    [new_flat.setSlitmap(rsss[0]._slitmap) for new_flat in new_flats]
+    # new_flats = new_flat.splitRSS(parts=len(rsss), axis=1)
+    # [new_flat.setSlitmap(rsss[0]._slitmap) for new_flat in new_flats]
+
+    # write output fiberflat
+    log.info(f"writing twilight flat to {out_flat}")
+    new_flat.writeFitsData(out_flat)
 
     # write output faltfielded explosure
     log.info(f"writing twilight flat to {out_rss}")
     ori_flat.writeFitsData(out_rss)
 
-    return new_flats
+    return new_flat
 
-def combine_twilight_sequence(expnums: List[int], camera: str, output_dir: str) -> RSS:
+def combine_twilight_sequence(expnums: List[int], channel: str, output_dir: str) -> RSS:
     """Combine twilight exposures into a single RSS object
 
     Given a list of twilight exposures, this function combines them into a
@@ -352,7 +359,7 @@ def combine_twilight_sequence(expnums: List[int], camera: str, output_dir: str) 
     ----------
     expnums : list
         List of twilight exposure numbers
-    camera : str
+    channel : str
         Spectrograph channel
     output_dir : str
         Output directory
@@ -362,13 +369,19 @@ def combine_twilight_sequence(expnums: List[int], camera: str, output_dir: str) 
     mflat : RSS
         Master twilight flat
     """
-    hflats = [rssMethod.loadRSS(path.expand("lvm_anc", drpver=drpver, tileid="*", mjd="*", kind="f", imagetype="flat", camera=camera, expnum=expnum)[0]) for expnum in expnums]
+    hflats = [rssMethod.loadRSS(path.expand("lvm_anc", drpver=drpver, tileid="*", mjd="*", kind="f", imagetype="flat", camera=channel, expnum=expnum)[0]) for expnum in expnums]
+
+    # data = [hflat._data for hflat in hflats]
+    # median_fiber = bn.nanmedian(data, axis=0)
+    # for hflat in hflats:
+    #     hflat._data = hflat._data / median_fiber
+    #     hflat._error = hflat._error / median_fiber
 
     # combine RSS exposures using an average
     mflat = RSS(data=np.zeros_like(hflats[0]._data), error=np.zeros_like(hflats[0]._error), mask=np.ones_like(hflats[0]._mask, dtype=bool),
                 header=copy(hflats[0]._header), wave=copy(hflats[0]._wave), lsf=copy(hflats[0]._lsf), slitmap=copy(hflats[0]._slitmap))
     # select non-std fibers
-    fibermap =  mflat._slitmap[mflat._slitmap["spectrographid"] == int(camera[1])]
+    fibermap =  mflat._slitmap
     select_allstd = fibermap["telescope"] == "Spec"
     select_nonstd = ~select_allstd
     for i, hflat in enumerate(hflats):
@@ -396,7 +409,7 @@ def combine_twilight_sequence(expnums: List[int], camera: str, output_dir: str) 
 
     return mflat
 
-def resample_fiberflat(mflat: RSS, camera: str, mwave_path: str,
+def resample_fiberflat(mflat: RSS, channel: str, mwave_paths: str,
              plot_fibers: List[int] = list(range(0,648,10)),
              display_plots: bool = False) -> RSS:
     """Fit master twilight flat
@@ -405,8 +418,8 @@ def resample_fiberflat(mflat: RSS, camera: str, mwave_path: str,
     ----------
     mflat : RSS
         Master twilight flat
-    camera : str
-        LVM camera (b1, b2, r1, r2, z1, z2, etc.)
+    channel : str
+        LVM channel (b1, b2, r1, r2, z1, z2, etc.)
     mwave_path : str
         Path to master wavelength
     plot_fibers : list, optional
@@ -419,12 +432,12 @@ def resample_fiberflat(mflat: RSS, camera: str, mwave_path: str,
     new_flat : RSS
         Master twilight flat with fitted fiber throughput
     """
-    channel = camera[0]
     tileid = mflat._header.get("TILE_ID", 11111) or 11111
     mjd = mflat._header["MJD"]
     # load master wavelength
-    if mwave_path is not None:
-        mwave = TraceMask.from_file(mwave_path)
+    if mwave_paths is not None:
+        mwaves = [TraceMask.from_file(mwave_path) for mwave_path in mwave_paths]
+        mwave = TraceMask.from_spectrographs(*mwaves)
         mwave = mwave._data[:, :-1]
     else:
         mwave = np.repeat([mflat._wave], mflat._fibers, axis=0)
@@ -460,7 +473,7 @@ def resample_fiberflat(mflat: RSS, camera: str, mwave_path: str,
     ax.legend(loc=1, frameon=False)
     save_fig(
         fig,
-        product_path=path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=mjd, kind="f", imagetype="flat", camera=camera),
+        product_path=path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=mjd, kind="f", imagetype="flat", camera=channel),
         to_display=display_plots,
         label="twilight_fiberflat_fit",
         figure_path="qa"
@@ -515,7 +528,6 @@ def reduce_twilight_sequence(expnums: List[int], median_box: int = 10, niter: bo
         # master calibration paths
         camera = flat["camera"]
         mjd = flat["mjd"]
-        arc_lamp = MASTER_ARC_LAMPS[camera[0]]
         masters_mjd = qdrp.get_master_mjd(mjd)
         masters_path = os.path.join(ORIG_MASTER_DIR, f"{masters_mjd}")
         master_cals = {
@@ -558,14 +570,16 @@ def reduce_twilight_sequence(expnums: List[int], median_box: int = 10, niter: bo
     mask_bands = dict(zip(channels, [b_mask, r_mask, z_mask]))
     new_flats = dict.fromkeys(channels)
     flat_channels = flats.groupby(flats.camera.str.__getitem__(0))
+    tileid = flats.tileid.min()
     for channel in channels:
         flat_expnums = flat_channels.get_group(channel).groupby("expnum")
         for expnum in flat_expnums.groups:
             xflat_paths = sorted(path.expand("lvm_anc", drpver=drpver, kind="x", imagetype=flat["imagetyp"], tileid=flat["tileid"], mjd=flat["mjd"], camera=f"{channel}?", expnum=expnum))
-            fflat_paths = sorted(path.expand("lvm_anc", drpver=drpver, kind="f", imagetype=flat["imagetyp"], tileid=flat["tileid"], mjd=flat["mjd"], camera=f"{channel}?", expnum=expnum))
-            fflat_path = path.full("lvm_anc", drpver=drpver, kind="flatfielded_",
+            fflat_flatfielded_path = path.full("lvm_anc", drpver=drpver, kind="flatfielded_",
                                    imagetype=flat["imagetyp"], tileid=flat["tileid"], mjd=flat["mjd"],
                                    camera=channel, expnum=expnum)
+            fflat_path = path.full("lvm_anc", drpver=drpver, kind="f",
+                                   imagetype=flat["imagetyp"], tileid=flat["tileid"], mjd=flat["mjd"], camera=channel, expnum=expnum)
 
             mwave_paths = sorted(glob(os.path.join(masters_path, f"lvm-mwave-{channel}?.fits")))
             mlsf_paths = sorted(glob(os.path.join(masters_path, f"lvm-mlsf-{channel}?.fits")))
@@ -589,29 +603,20 @@ def reduce_twilight_sequence(expnums: List[int], median_box: int = 10, niter: bo
             # fit fiber throughput
             hflat = rssMethod.loadRSS(hflat_path)
             hflats = hflat.splitRSS(parts=len(mwave_paths), axis=1)
-            fflats = fit_fiberflat(rsss=hflats, out_rss=fflat_path, median_box=median_box, niter=niter,
+            fit_fiberflat(rsss=hflats, out_flat=fflat_path, out_rss=fflat_flatfielded_path, median_box=median_box, niter=niter,
                                    threshold=threshold, mask_bands=mask_bands.get(channel, []),
                                    display_plots=display_plots, nknots=nknots)
 
-            # write output to disk
-            for fflat, fflat_path in zip(fflats, fflat_paths):
-                fflat.writeFitsData(fflat_path)
 
-    # combine twilights and fit master fiberflat
-    new_flats = dict.fromkeys(flats.camera.unique())
-    flat_camera = flats.groupby("camera")
-    for camera in flat_camera.groups:
-        channel = camera[0]
-        flat_expnums = flat_camera.get_group(camera)
-        tileid = flat_expnums.tileid.min()
-        mrss = combine_twilight_sequence(expnums=flat_expnums.expnum.values, camera=camera, output_dir=masters_path)
-        mrss.writeFitsData(path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=masters_mjd, kind="mfiberflat", camera=camera))
+        expnums = list(flat_expnums.groups.keys())
+        mrss = combine_twilight_sequence(expnums=expnums, channel=channel, output_dir=masters_path)
+        mrss.writeFitsData(path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=masters_mjd, kind="mfiberflat_single", camera=channel))
 
-        mwave_path = os.path.join(masters_path, f"lvm-mwave_{MASTER_ARC_LAMPS[channel]}-{camera}.fits")
-        new_flat = resample_fiberflat(mrss, camera=camera, mwave_path=mwave_path, display_plots=display_plots)
-        mflat_path = os.path.join(masters_path, f"lvm-mfiberflat_twilight-{camera}.fits")
+        mwave_paths = sorted(glob(os.path.join(masters_path, f"lvm-mwave-{channel}?.fits")))
+        new_flat = resample_fiberflat(mrss, channel=channel, mwave_paths=mwave_paths, display_plots=display_plots)
+        mflat_path = os.path.join(masters_path, f"lvm-mfiberflat_twilight_single-{channel}.fits")
         new_flat.writeFitsData(mflat_path)
-        new_flats[camera] = new_flat
+        new_flats[channel] = new_flat
 
     return new_flats
 
