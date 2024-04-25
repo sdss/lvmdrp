@@ -437,7 +437,8 @@ def resample_fiberflat(mflat: RSS, camera: str, mwave_path: str,
                    slitmap=mflat._slitmap,
                    header=copy(mflat._header))
     for kw in ["WCSAXES", "CRPIX1", "CDELT1", "CUNIT1", "CTYPE1", "CRVAL1", "LATPOLE", "MJDREF", "METREC", "WAVREC"]:
-        del new_flat._header[kw]
+        if kw in new_flat._header:
+            del new_flat._header[kw]
     new_flat._good_fibers = mflat._good_fibers
 
     fig, ax = create_subplots(to_display=display_plots, figsize=(15,7))
@@ -524,8 +525,8 @@ def reduce_twilight_sequence(expnums: List[int], median_box: int = 10, niter: bo
             "pixelflat" : os.path.join(masters_path, f"lvm-mpixflat-{camera}.fits"),
             "cent" : os.path.join(masters_path, f"lvm-mtrace-{camera}.fits"),
             "width" : os.path.join(masters_path, f"lvm-mwidth-{camera}.fits"),
-            "wave" : os.path.join(masters_path, f"lvm-mwave_{arc_lamp}-{camera}.fits"),
-            "lsf" : os.path.join(masters_path, f"lvm-mlsf_{arc_lamp}-{camera}.fits")
+            "wave" : os.path.join(masters_path, f"lvm-mwave-{camera}.fits"),
+            "lsf" : os.path.join(masters_path, f"lvm-mlsf-{camera}.fits")
         }
 
         flat_path = path.full("lvm_raw", camspec=flat["camera"], **flat)
@@ -541,7 +542,7 @@ def reduce_twilight_sequence(expnums: List[int], median_box: int = 10, niter: bo
             imageMethod.preproc_raw_frame(in_image=flat_path, out_image=pflat_path, in_mask=master_cals.get("pixelmask"))
             imageMethod.detrend_frame(in_image=pflat_path, out_image=dflat_path,
                                         in_bias=master_cals.get("bias"), in_dark=master_cals.get("dark"),
-                                        in_pixelflat=master_cals.get("pixelflat"), in_slitmap=SLITMAP)
+                                        in_pixelflat=master_cals.get("pixelflat"), in_slitmap=SLITMAP, reject_cr=True)
 
         # extract 1D spectra for each frame
         xflat_path = path.full("lvm_anc", drpver=drpver, kind="x", imagetype=flat["imagetyp"], **flat)
@@ -566,8 +567,8 @@ def reduce_twilight_sequence(expnums: List[int], median_box: int = 10, niter: bo
                                    imagetype=flat["imagetyp"], tileid=flat["tileid"], mjd=flat["mjd"],
                                    camera=channel, expnum=expnum)
 
-            mwave_paths = sorted(glob(os.path.join(masters_path, f"lvm-mwave_{arc_lamp}-{channel}?.fits")))
-            mlsf_paths = sorted(glob(os.path.join(masters_path, f"lvm-mlsf_{arc_lamp}-{channel}?.fits")))
+            mwave_paths = sorted(glob(os.path.join(masters_path, f"lvm-mwave-{channel}?.fits")))
+            mlsf_paths = sorted(glob(os.path.join(masters_path, f"lvm-mlsf-{channel}?.fits")))
 
             # spectrograph stack xflats
             xflat = RSS.from_spectrographs(*[rssMethod.loadRSS(xflat_path) for xflat_path in xflat_paths])
@@ -608,7 +609,7 @@ def reduce_twilight_sequence(expnums: List[int], median_box: int = 10, niter: bo
 
         mwave_path = os.path.join(masters_path, f"lvm-mwave_{MASTER_ARC_LAMPS[channel]}-{camera}.fits")
         new_flat = resample_fiberflat(mrss, camera=camera, mwave_path=mwave_path, display_plots=display_plots)
-        mflat_path = os.path.join(masters_path, f"lvm-mfiberflat_twilight_single-{camera}.fits")
+        mflat_path = os.path.join(masters_path, f"lvm-mfiberflat_twilight-{camera}.fits")
         new_flat.writeFitsData(mflat_path)
         new_flats[camera] = new_flat
 
@@ -617,4 +618,6 @@ def reduce_twilight_sequence(expnums: List[int], median_box: int = 10, niter: bo
 
 if __name__ == "__main__":
 
-    reduce_twilight_sequence(expnums=[7231], median_box=10, niter=1000, threshold=(0.5,2.5), nknots=60, skip_done=True, display_plots=False)
+    expnums = [7231]
+    expnums = np.arange(7341, 7352+1)
+    reduce_twilight_sequence(expnums=expnums, median_box=10, niter=1000, threshold=(0.5,2.5), nknots=60, skip_done=True, display_plots=False)
