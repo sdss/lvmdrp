@@ -373,7 +373,7 @@ def fix_raw_pixel_shifts(mjd, expnums=None, ref_expnums=None, specs="123",
 
 def reduce_2d(mjds, target_mjd=None, expnums=None,
               replace_with_nan=True, assume_imagetyp=None, reject_cr=True,
-              counts_threshold=5000, poly_deg_cent=4,
+              counts_threshold=5000, poly_deg_cent=4, use_master_centroids=False,
               skip_done=True):
     """Preprocess and detrend a list of 2D frames
 
@@ -457,14 +457,17 @@ def reduce_2d(mjds, target_mjd=None, expnums=None,
             log.info(f"skipping {lframe_path}, file already exist")
         elif imagetyp == "flat":
             # quick and dirty trace of centroids to subtract stray light
-            image_tasks.trace_fibers(in_image=dframe_path,
-                                     out_trace_cent=None,
-                                     out_trace_cent_guess=dcent_path,
-                                     correct_ref=True, median_box=(1,10), coadd=20,
-                                     counts_threshold=counts_threshold, max_diff=1.5,
-                                     guess_fwhm=2.5, method="gauss", ncolumns=140,
-                                     fit_poly=True, poly_deg=poly_deg_cent,
-                                     interpolate_missing=True, only_centroids=True)
+            if not use_master_centroids:
+                image_tasks.trace_fibers(in_image=dframe_path,
+                                        out_trace_cent=None,
+                                        out_trace_cent_guess=dcent_path,
+                                        correct_ref=True, median_box=(1,10), coadd=20,
+                                        counts_threshold=counts_threshold, max_diff=1.5,
+                                        guess_fwhm=2.5, method="gauss", ncolumns=140,
+                                        fit_poly=True, poly_deg=poly_deg_cent,
+                                        interpolate_missing=True, only_centroids=True)
+            else:
+                dcent_path = os.path.join(masters_path, f"lvm-mtrace-{camera}.fits")
             image_tasks.subtract_straylight(in_image=dframe_path, out_image=lframe_path, out_stray=dstray_path,
                                             in_cent_trace=dcent_path, select_nrows=5,
                                             aperture=13, smoothing=400, median_box=21,
