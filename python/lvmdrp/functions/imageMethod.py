@@ -4015,7 +4015,9 @@ def add_astrometry(
 
     def copy_guider_keyword(gdrhdr, keyword, img):
         '''Copy a keyword from a guider coadd header to an Image object Header'''
-        img.setHdrValue(f'HIERARCH GDRCOADD {keyword}', gdrhdr[keyword], gdrhdr.comments[keyword])
+        inhdr = keyword in gdrhdr
+        comment = gdrhdr.comments[keyword] if inhdr else ''
+        img.setHdrValue(f'HIERARCH GDRCOADD {keyword}', gdrhdr.get(keyword), comment)
 
     def getobsparam(tel):
         if tel!='spec':
