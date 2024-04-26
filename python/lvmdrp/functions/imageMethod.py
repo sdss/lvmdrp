@@ -4826,7 +4826,7 @@ def trace_fibers(
         log.info(f"loading guess fiber centroids from '{os.path.basename(out_trace_cent_guess)}'")
         centroids = TraceMask.from_file(out_trace_cent_guess)
     else:
-        log.info(f"tracing centroids in {len(ncolumns_cent)-1} columns: {','.join(map(str, numpy.unique(ncolumns_cent)))}")
+        log.info(f"going to trace fiber centroids using {ncolumns_cent} columns")
         centroids = img.trace_fiber_centroids(ref_column=LVM_REFERENCE_COLUMN, ref_centroids=ref_cent, mask_fibstatus=1,
                                         ncolumns=ncolumns_cent, method=method, fwhm_guess=guess_fwhm,
                                         counts_threshold=counts_threshold, max_diff=max_diff)
