@@ -28,6 +28,7 @@ from lvmdrp.core.rss import RSS
 from lvmdrp.core.plot import create_subplots, save_fig
 from lvmdrp.functions import run_drp as drp
 from lvmdrp.functions import run_quickdrp as qdrp
+from lvmdrp.functions import run_calseq as calseq
 
 from lvmdrp.functions import imageMethod, rssMethod
 
@@ -519,6 +520,10 @@ def reduce_twilight_sequence(expnums: List[int], median_box: int = 10, niter: bo
     """
     # get metadata
     flats = get_sequence_metadata(expnums)
+
+    # 2D reduction of twilight sequence
+    calseq.reduce_2d(mjds=flats.rmjd.iloc[0], target_mjd=flats.rmjd.iloc[0], expnums=flats.expnum.unique(), reject_cr=False, skip_done=True)
+
     for flat in flats.to_dict("records"):
 
         # master calibration paths
@@ -537,22 +542,8 @@ def reduce_twilight_sequence(expnums: List[int], median_box: int = 10, niter: bo
             "lsf" : os.path.join(masters_path, f"lvm-mlsf-{camera}.fits")
         }
 
-        flat_path = path.full("lvm_raw", camspec=flat["camera"], **flat)
-        pflat_path = path.full("lvm_anc", drpver=drpver, kind="p", imagetype=flat["imagetyp"], **flat)
-        dflat_path = path.full("lvm_anc", drpver=drpver, kind="d", imagetype=flat["imagetyp"], **flat)
-        lflat_path = path.full("lvm_anc", drpver=drpver, kind="l", imagetype=flat["imagetyp"], **flat)
-        os.makedirs(os.path.dirname(pflat_path), exist_ok=True)
-
-        # preprocess and detrend each frame
-        if skip_done and os.path.isfile(dflat_path):
-            log.info(f"skipping {dflat_path}, file already exist")
-        else:
-            imageMethod.preproc_raw_frame(in_image=flat_path, out_image=pflat_path, in_mask=master_cals.get("pixelmask"))
-            imageMethod.detrend_frame(in_image=pflat_path, out_image=dflat_path,
-                                        in_bias=master_cals.get("bias"), in_dark=master_cals.get("dark"),
-                                        in_pixelflat=master_cals.get("pixelflat"), in_slitmap=SLITMAP, reject_cr=True)
-
         # extract 1D spectra for each frame
+        lflat_path = path.full("lvm_anc", drpver=drpver, kind="l", imagetype=flat["imagetyp"], **flat)
         xflat_path = path.full("lvm_anc", drpver=drpver, kind="x", imagetype=flat["imagetyp"], **flat)
         if skip_done and os.path.isfile(xflat_path):
             log.info(f"skipping {xflat_path}, file already exist")
@@ -563,6 +554,7 @@ def reduce_twilight_sequence(expnums: List[int], median_box: int = 10, niter: bo
 
     # decompose twilight spectra into sun continuum and twilight components
     channels = "brz"
+    channels = "r"
     mask_bands = dict(zip(channels, [b_mask, r_mask, z_mask]))
     new_flats = dict.fromkeys(channels)
     flat_channels = flats.groupby(flats.camera.str.__getitem__(0))
@@ -578,7 +570,7 @@ def reduce_twilight_sequence(expnums: List[int], median_box: int = 10, niter: bo
                                    imagetype=flat["imagetyp"], tileid=flat["tileid"], mjd=flat["mjd"],
                                    camera=channel, expnum=expnum)
             fflat_path = path.full("lvm_anc", drpver=drpver, kind="f",
-                                   imagetype=flat["imagetyp"], tileid=flat["tileid"], mjd=flat["mjd"], camera=channel, expnum=expnum)
+                                   imagetype="flat", tileid=flat["tileid"], mjd=flat["mjd"], camera=channel, expnum=expnum)
 
             mwave_paths = sorted(glob(os.path.join(masters_path, f"lvm-mwave-{channel}?.fits")))
             mlsf_paths = sorted(glob(os.path.join(masters_path, f"lvm-mlsf-{channel}?.fits")))
@@ -621,6 +613,6 @@ def reduce_twilight_sequence(expnums: List[int], median_box: int = 10, niter: bo
 
 if __name__ == "__main__":
 
-    expnums = [7341]
+    expnums = [7231]
     expnums = np.arange(7341, 7352+1)
     reduce_twilight_sequence(expnums=expnums, median_box=10, niter=1000, threshold=(0.5,2.5), nknots=60, skip_done=True, display_plots=False)
