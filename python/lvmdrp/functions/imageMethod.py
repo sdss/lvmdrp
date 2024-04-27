@@ -4321,6 +4321,7 @@ def create_master_frame(in_images: List[str], out_image: str, batch_size: int = 
             normalize=True,
             normalize_percentile=75,
         )
+        master_img = master_img / master_img.medianImg(size=20, propagate_error=True, use_mask=True)
     elif master_type == "arc":
         master_img = combineImages(
             org_imgs, method="median", normalize=True, normalize_percentile=99
