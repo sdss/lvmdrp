@@ -1447,6 +1447,7 @@ def convert_h5_to_fits(h5file: str):
     """
     # read in the dataframe
     df = pd.read_hdf(h5file, key='summary')
+    df = df.sort_values(['mjd', 'expnum'])
     df.reset_index(drop=True, inplace=True)
     df.to_hdf(h5file, key='summary', data_columns=True)
 
