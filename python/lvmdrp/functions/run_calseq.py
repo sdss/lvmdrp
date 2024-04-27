@@ -54,7 +54,7 @@ MASTER_ARC_LAMPS = {"b": "hgne", "r": "neon", "z": "neon"}
 MASTERS_DIR = os.getenv("LVM_MASTER_DIR")
 
 
-def get_sequence_metadata(mjds, target_mjd=None, expnums=None):
+def get_sequence_metadata(mjds, target_mjd=None, expnums=None, exptime=None):
     """Get frames metadata for a given sequence
 
     Given a set of MJDs and (optionally) exposure numbers, get the frames
@@ -69,6 +69,8 @@ def get_sequence_metadata(mjds, target_mjd=None, expnums=None):
         MJD to store the master frames in
     expnums : list
         List of exposure numbers to reduce
+    exptime : int
+        Filter frames metadata by exposure
 
     Returns:
     -------
@@ -85,12 +87,16 @@ def get_sequence_metadata(mjds, target_mjd=None, expnums=None):
     masters_mjd = target_mjd or min(mjds)
 
     # get frames metadata
-    frames = [md.get_metadata(tileid="*", mjd=mjd) for mjd in mjds]
+    frames = [md.get_frames_metadata(mjd=mjd) for mjd in mjds]
     frames = pd.concat(frames, ignore_index=True)
 
     # filter by given expnums
     if expnums is not None:
         frames.query("expnum in @expnums", inplace=True)
+
+    # filter by given exptime
+    if exptime is not None:
+        frames.query("exptime == @exptime", inplace=True)
 
     frames.sort_values(["expnum", "camera"], inplace=True)
 
@@ -371,7 +377,7 @@ def fix_raw_pixel_shifts(mjd, expnums=None, ref_expnums=None, specs="123",
                                          dry_run=dry_run, undo_correction=undo_corrections, display_plots=display_plots)
 
 
-def reduce_2d(mjds, target_mjd=None, expnums=None,
+def reduce_2d(mjds, target_mjd=None, expnums=None, exptime=None,
               replace_with_nan=True, assume_imagetyp=None, reject_cr=True,
               counts_threshold=5000, poly_deg_cent=4, use_master_centroids=False,
               skip_done=True):
@@ -391,6 +397,8 @@ def reduce_2d(mjds, target_mjd=None, expnums=None,
         MJD to store the master frames in
     expnums : list
         List of exposure numbers to reduce
+    exptime : int
+        Exposure time to filter by
     replace_with_nan : bool
         Replace rejected pixels with NaN
     assume_imagetyp : str
@@ -405,7 +413,7 @@ def reduce_2d(mjds, target_mjd=None, expnums=None,
         Skip pipeline steps that have already been done
     """
 
-    frames, masters_mjd = get_sequence_metadata(mjds, target_mjd=target_mjd, expnums=expnums)
+    frames, masters_mjd = get_sequence_metadata(mjds, target_mjd=target_mjd, expnums=expnums, exptime=exptime)
     masters_path = os.path.join(MASTERS_DIR, str(masters_mjd))
 
     # preprocess and detrend frames
@@ -419,7 +427,7 @@ def reduce_2d(mjds, target_mjd=None, expnums=None,
         mpixmask_path = os.path.join(masters_path, f"lvm-mpixmask-{camera}.fits")
         mbias_path = os.path.join(masters_path, f"lvm-mbias-{camera}.fits")
         mdark_path = os.path.join(masters_path, f"lvm-mdark-{camera}.fits")
-        mpixflat_path = os.path.join(masters_path, f"lvm-mpixflat-{camera}.fits")
+        mpixflat_path = os.path.join(masters_path, f"lvm-mpixelflat-{camera}.fits")
 
         # log the master frames
         log.info(f'Using master pixel mask: {mpixmask_path}')
@@ -444,7 +452,7 @@ def reduce_2d(mjds, target_mjd=None, expnums=None,
             log.info(f"skipping {dframe_path}, file already exist")
         else:
             image_tasks.preproc_raw_frame(in_image=frame_path, out_image=pframe_path,
-                                          in_mask=mpixmask_path, replace_with_nan=replace_with_nan)
+                                          in_mask=mpixmask_path, replace_with_nan=replace_with_nan, assume_imagetyp=assume_imagetyp)
             image_tasks.detrend_frame(in_image=pframe_path, out_image=dframe_path,
                                       in_bias=mbias_path, in_dark=mdark_path,
                                       in_pixelflat=mpixflat_path,
@@ -474,7 +482,7 @@ def reduce_2d(mjds, target_mjd=None, expnums=None,
                                             gaussian_sigma=0.0)
 
 
-def create_detrending_frames(mjds, target_mjd=None, expnums=None, kind="all", assume_imagetyp=None):
+def create_detrending_frames(mjds, target_mjd=None, expnums=None, exptime=None, kind="all", assume_imagetyp=None, reject_cr=True, skip_done=True):
     """Reduce a sequence of bias/dark/pixelflat frames to produce master frames
 
     Given a set of MJDs and (optionally) exposure numbers, reduce the
@@ -498,23 +506,29 @@ def create_detrending_frames(mjds, target_mjd=None, expnums=None, kind="all", as
         MJD to store the master frames in
     expnums : list
         List of exposure numbers to reduce
+    exptime : int
+        Exposure time to filter by
     kind : str
         Kind of frame to reduce
     assume_imagetyp : str
         Assume the given imagetyp for all frames
+    reject_cr : bool
+        Reject cosmic rays
+    skip_done : bool
+        Skip pipeline steps that have already been done
     """
-    frames, masters_mjd = get_sequence_metadata(mjds, target_mjd=target_mjd, expnums=expnums)
+    frames, masters_mjd = get_sequence_metadata(mjds, target_mjd=target_mjd, expnums=expnums, exptime=exptime)
 
     # filter by target image types
     if kind == "all":
-        frames.query("imagetyp in ['bias', 'dark', 'pixflat']", inplace=True)
-    elif kind in ["bias", "dark", "pixflat"]:
+        frames.query("imagetyp in ['bias', 'dark', 'pixelflat']", inplace=True)
+    elif kind in ["bias", "dark", "pixelflat"]:
         frames.query("imagetyp == @kind", inplace=True)
     else:
-        raise ValueError(f"Invalid kind: '{kind}'. Must be one of 'bias', 'dark', 'pixflat' or 'all'")
+        raise ValueError(f"Invalid kind: '{kind}'. Must be one of 'bias', 'dark', 'pixelflat' or 'all'")
 
     # preprocess and detrend frames
-    reduce_2d(mjds=mjds, target_mjd=masters_mjd, expnums=set(frames.expnum))
+    reduce_2d(mjds=mjds, target_mjd=masters_mjd, expnums=set(frames.expnum), exptime=exptime, assume_imagetyp=assume_imagetyp, reject_cr=reject_cr, skip_done=skip_done)
 
     # define image types to reduce
     imagetypes = set(frames.imagetyp)
@@ -605,7 +619,7 @@ def create_pixelmasks(mjds, target_mjd=None, dark_expnums=None, pixflat_expnums=
     if not ignore_pixflats:
         reduce_2d(mjds=mjds, target_mjd=target_mjd, expnums=set(pixflats.expnum),
                 replace_with_nan=False, assume_imagetyp="pixelflat", reject_cr=False)
-        dflat_paths = [path.full("lvm_anc", drpver=drpver, kind="d", imagetype="pixflat", **pixflat) for pixflat in pixflats.to_dict("records")]
+        dflat_paths = [path.full("lvm_anc", drpver=drpver, kind="d", imagetype="pixelflat", **pixflat) for pixflat in pixflats.to_dict("records")]
         pixflats["dflat_path"] = dflat_paths
 
         cam_groups = pixflats.groupby("camera")
@@ -613,7 +627,7 @@ def create_pixelmasks(mjds, target_mjd=None, dark_expnums=None, pixflat_expnums=
             dflat_paths_cam = cam_groups.get_group(cam)["dflat_path"]
 
             # define output combined pixelflat path
-            mflat_path = os.path.join(masters_path, f"lvm-mpixflat-{cam}.fits")
+            mflat_path = os.path.join(masters_path, f"lvm-mpixelflat-{cam}.fits")
 
             image_tasks.create_master_frame(in_images=dflat_paths_cam, out_image=mflat_path)
 
@@ -659,7 +673,7 @@ def create_pixelmasks(mjds, target_mjd=None, dark_expnums=None, pixflat_expnums=
 
 def create_traces(mjds, target_mjd=None, expnums_ldls=None, expnums_qrtz=None,
                   subtract_straylight=False, fit_poly=True, poly_deg_amp=5,
-                  poly_deg_cent=4, poly_deg_width=5):
+                  poly_deg_cent=4, poly_deg_width=5, skip_done=True):
     """Create traces from master dome flats
 
     Given a set of MJDs and (optionally) exposure numbers, create traces from
@@ -690,6 +704,8 @@ def create_traces(mjds, target_mjd=None, expnums_ldls=None, expnums_qrtz=None,
         Degree of the polynomial to fit to the centroids, by default 4
     poly_deg_width : int, optional
         Degree of the polynomial to fit to the widths, by default 5
+    skip_done : bool, optional
+        Skip pipeline steps that have already been done, by default True
     """
     if expnums_ldls is not None and expnums_qrtz is not None:
         expnums = np.concatenate([expnums_ldls, expnums_qrtz])
@@ -698,7 +714,7 @@ def create_traces(mjds, target_mjd=None, expnums_ldls=None, expnums_qrtz=None,
     frames, masters_mjd = get_sequence_metadata(mjds, target_mjd=target_mjd, expnums=expnums)
 
     # run 2D reduction on flats: preprocessing, detrending and stray light subtraction
-    reduce_2d(mjds, target_mjd=masters_mjd, expnums=expnums, reject_cr=False)
+    reduce_2d(mjds, target_mjd=masters_mjd, expnums=expnums, reject_cr=False, skip_done=skip_done)
 
     # load current traces
     mamps, mcents, mwidths = {}, {}, {}
