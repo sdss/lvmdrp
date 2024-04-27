@@ -3691,8 +3691,6 @@ def preproc_raw_frame(
     for i in range(NQUADS):
         ysize, xsize = sc_quads[i]._dim
         x, y = int(QUAD_POSITIONS[i][0]), int(QUAD_POSITIONS[i][1])
-        # flip y-axis
-        y = 1 if y == 0 else 0
         proc_img.setHdrValue(
             f"HIERARCH AMP{i+1} TRIMSEC",
             f"[{x*xsize+1}:{xsize*(x+1)}, {y*ysize+1}:{ysize*(y+1)}]",
