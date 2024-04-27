@@ -3656,10 +3656,10 @@ def preproc_raw_frame(
     # extract rdnoise
     rdnoise = os_bias_std * gain
     if assume_rdnoise:
-        log.info(f"using given RDNOISE = {assume_rdnoise} (ADU)")
+        log.info(f"using given RDNOISE = {assume_rdnoise} (e-)")
         rdnoise = numpy.asarray(assume_rdnoise)
     elif not org_header[f"{rdnoise_prefix}?"]:
-        log.warning(f"assuming RDNOISE = {rdnoise.tolist()} (ADU)")
+        log.warning(f"assuming RDNOISE = {rdnoise.tolist()} (e-)")
     else:
         rdnoise = numpy.asarray(list(org_header[f"{rdnoise_prefix}?"].values()))
         log.info(f"using header RDNOISE = {rdnoise.tolist()} (e-)")
@@ -3679,6 +3679,11 @@ def preproc_raw_frame(
     if ccd.startswith("z") or ccd.startswith("b"):
         log.info("flipping along X-axis")
         proc_img.orientImage("X")
+        # NOTE: need to flip per quadrant quantities 1 <--> 2, 3 <--> 4
+        gain2, gain1, gain4, gain3 = gain
+        gain = [gain1, gain2, gain3, gain4]
+        rdnoise2, rdnoise1, rdnoise4, rdnoise3 = rdnoise
+        rdnoise = [rdnoise1, rdnoise2, rdnoise3, rdnoise4]
 
     # update header
     log.info("updating header with per quadrant stats")
