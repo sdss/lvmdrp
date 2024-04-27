@@ -29,6 +29,9 @@ from lvmdrp.core.plot import create_subplots, save_fig
 from lvmdrp.functions import run_drp as drp
 from lvmdrp.functions import run_quickdrp as qdrp
 from lvmdrp.functions import run_calseq as calseq
+from astropy import wcs
+from astropy.io import fits
+import itertools
 
 from lvmdrp.functions import imageMethod, rssMethod
 
@@ -45,6 +48,136 @@ MASK_BANDS = {
         "z": [(7570, 7700)]
     }
 
+
+def polyfit2d(x, y, z, order=3):
+    """
+    Fit 2D polynomial
+    """
+    ncols = (order + 1) ** 2
+    G = np.zeros((x.size, ncols))
+    ij = itertools.product(range(order + 1), range(order + 1))
+    for k, (i, j) in enumerate(ij):
+        G[:, k] = x ** i * y ** j
+    m, null, null, null = np.linalg.lstsq(G, z, rcond=None)
+    return m
+
+def polyval2d(x, y, m):
+    """
+    Generate 2D polynomial
+    """
+    order = int(np.sqrt(len(m))) - 1
+    ij = itertools.product(range(order + 1), range(order + 1))
+    z = np.zeros_like(x)
+    for a, (i, j) in zip(m, ij):
+        z += a * x ** i * y ** j
+    return z
+
+def mkifuimage(
+    x, y, flux, fibid, posang=0, RAobs=0, DECobs=0,
+    platescale=112.36748321030637, # Focal plane platescale in "/mm
+    pscale=0.01 # IFU image pixel scale in mm/pix
+):
+
+    # Create fiber image
+    rspaxel=35.3/platescale/2 # spaxel radius in mm assuming 35.3" diameter chromium mask
+    npix=flux.size # size of IFU image
+    ima=np.zeros((npix,npix))+np.nan
+    xima=x*pscale # x coordinate in mm of each pixel in image
+    yima=y*pscale # y coordinate in mm of each pixel in image
+    for i in range(len(flux)):
+        sel=(xima-x[i])**2+(yima-y[i])**2<=rspaxel**2
+        ima[sel]=flux[i]
+    # flag CRPIX for visual reference
+    ima[int(npix/2), int(npix/2)]=0
+
+    # Create WCS for IFU image
+    w = wcs.WCS(naxis=2)
+    w.wcs.crpix = [int(npix/2)+1, int(npix/2)+1]
+    skypscale=pscale*platescale/3600 # IFU image pixel scale in deg/pix
+    posangrad=posang*np.pi/180
+    w.wcs.cd=np.array([[skypscale*np.cos(posangrad), -1*skypscale*np.sin(posangrad)],[-1*skypscale*np.sin(posangrad), -1*skypscale*np.cos(posangrad)]])
+    w.wcs.crval = [RAobs,DECobs]
+    w.wcs.ctype = ["RA---TAN", "DEC--TAN"]
+    header = w.to_header()
+
+    # create image
+    hdu = fits.PrimaryHDU(ima, header=header)
+
+    return ima, hdu
+
+def sumflux(rsshdu, wrange):
+    naxis1 = rsshdu[0].data.shape[1]
+    naxis2=rsshdu[0].data.shape[0]
+    w = wcs.WCS(rsshdu[0].header)
+    wave = w.spectral.pixel_to_world(np.arange(naxis1)).value*1e10
+    selwave=(wave>=wrange[0])*(wave<=wrange[1])
+    selwavemask=np.tile(selwave, (naxis2,1))
+
+    flux = rsshdu[0].data
+    mask = rsshdu["BADPIX"].data.astype(bool)
+    flux[mask] = np.nan
+    rssmasked=flux*selwavemask
+
+    coadded_flux = np.nanmean(rssmasked,axis=1)
+    return coadded_flux
+
+def remove_field_gradient(in_hflat, out_gflat, wrange, deg=1, display_plots=False):
+
+    fflat = fits.open(in_hflat)
+    channel = fflat[0].header["CCD"]
+    fibermap = Table(fflat["SLITMAP"].data)
+    telescope=fibermap["telescope"]
+
+    flux = sumflux(fflat, wrange=wrange)
+
+    rss = fflat[0].data[telescope=="Sci"]
+    rss_e = fflat[0].data[telescope=="SkyE"]
+    rss_w = fflat[0].data[telescope=="SkyW"]
+    rss_s = fflat[0].data[telescope=="Spec"]
+    x_e=fibermap["xpmm"].astype(float)[telescope=="SkyE"]
+    y_e=fibermap["ypmm"].astype(float)[telescope=="SkyE"]
+    x_w=fibermap["xpmm"].astype(float)[telescope=="SkyW"]
+    y_w=fibermap["ypmm"].astype(float)[telescope=="SkyW"]
+    x_s=fibermap["xpmm"].astype(float)[telescope=="Spec"]
+    y_s=fibermap["ypmm"].astype(float)[telescope=="Spec"]
+
+    flux = flux[telescope=="Sci"]
+    x=fibermap["xpmm"].astype(float)[telescope=="Sci"]
+    y=fibermap["ypmm"].astype(float)[telescope=="Sci"]
+
+    flux_med = np.nanmedian(flux)
+    flux_fact = flux / flux_med
+    select = np.isfinite(flux_fact)
+    coeffs = polyfit2d(x[select], y[select], flux_fact[select], deg)
+
+    grad_model = polyval2d(x, y, coeffs)
+    grad_model_e = polyval2d(x_e, y_e, coeffs)
+    grad_model_w = polyval2d(x_w, y_w, coeffs)
+    grad_model_s = polyval2d(x_s, y_s, coeffs)
+
+    fig, axs = create_subplots(to_display=display_plots, nrows=1, ncols=3, figsize=(15,5))
+    flux_c = flux / grad_model
+    flux_std = np.nanstd(flux)
+    axs[0].scatter(x, y, s=10, vmin=flux_med-2*flux_std, vmax=flux_med+2*flux_std, lw=0, c=flux, cmap="rainbow")
+    axs[1].scatter(x, y, s=10, vmin=0.95, vmax=1.05, lw=0, c=grad_model, cmap="coolwarm")
+    axs[2].scatter(x, y, s=10, vmin=flux_med-2*flux_std, vmax=flux_med+2*flux_std, lw=0, c=flux_c, cmap="rainbow")
+    axs[0].set_title("Original", loc="left")
+    axs[1].set_title("Gradient", loc="left")
+    axs[2].set_title("Original / Gradient", loc="left")
+    fig.suptitle(f"Gradient field fitting for {channel = }")
+    save_fig(fig, out_gflat, to_display=display_plots, figure_path="qa", label="field_gradient")
+
+    rss = rss / grad_model[:, None]
+    rss_e = rss_e / grad_model_e[:, None]
+    rss_w = rss_w / grad_model_w[:, None]
+    rss_s = rss_s / grad_model_s[:, None]
+
+    new_fflat = copy(fflat)
+    new_fflat[0].data[telescope == "Sci"] = rss
+    new_fflat[0].data[telescope == "SkyE"] = rss_e
+    new_fflat[0].data[telescope == "SkyW"] = rss_w
+    new_fflat[0].data[telescope == "Spec"] = rss_s
+    new_fflat.writeto(out_gflat, overwrite=True)
 
 def get_sequence_metadata(expnums: List[int]) -> pd.DataFrame:
     """Returns metadata for a sequence of exposures
@@ -522,7 +655,7 @@ def reduce_twilight_sequence(expnums: List[int], median_box: int = 10, niter: bo
     flats = get_sequence_metadata(expnums)
 
     # 2D reduction of twilight sequence
-    calseq.reduce_2d(mjds=flats.rmjd.iloc[0], target_mjd=flats.rmjd.iloc[0], expnums=flats.expnum.unique(), reject_cr=False, skip_done=True)
+    calseq.reduce_2d(mjds=flats.rmjd.iloc[0], target_mjd=flats.rmjd.iloc[0], expnums=flats.expnum.unique(), reject_cr=True, use_master_centroids=True, skip_done=skip_done)
 
     for flat in flats.to_dict("records"):
 
@@ -554,7 +687,6 @@ def reduce_twilight_sequence(expnums: List[int], median_box: int = 10, niter: bo
 
     # decompose twilight spectra into sun continuum and twilight components
     channels = "brz"
-    channels = "r"
     mask_bands = dict(zip(channels, [b_mask, r_mask, z_mask]))
     new_flats = dict.fromkeys(channels)
     flat_channels = flats.groupby(flats.camera.str.__getitem__(0))
@@ -591,10 +723,14 @@ def reduce_twilight_sequence(expnums: List[int], median_box: int = 10, niter: bo
             hflat_path = path.full("lvm_anc", drpver=drpver, kind="h", imagetype=flat["imagetyp"], tileid=flat["tileid"], mjd=flat["mjd"], camera=channel, expnum=expnum)
             rssMethod.resample_wavelength(in_rss=wflat_path, out_rss=hflat_path, wave_disp=0.5, wave_range=SPEC_CHANNELS[channel])
 
+            # fit gradient and remove it
+            gflat_path = path.full("lvm_anc", drpver=drpver, kind="g", imagetype=flat["imagetyp"], tileid=flat["tileid"], mjd=flat["mjd"], camera=channel, expnum=expnum)
+            remove_field_gradient(in_hflat=hflat_path, out_gflat=gflat_path, wrange=SPEC_CHANNELS[channel])
+
             # fit fiber throughput
-            hflat = rssMethod.loadRSS(hflat_path)
-            hflats = hflat.splitRSS(parts=len(mwave_paths), axis=1)
-            fflat = fit_fiberflat(rsss=hflats, out_flat=fflat_path, out_rss=fflat_flatfielded_path, median_box=median_box, niter=niter,
+            gflat = rssMethod.loadRSS(gflat_path)
+            gflats = gflat.splitRSS(parts=len(mwave_paths), axis=1)
+            fflat = fit_fiberflat(rsss=gflats, out_flat=fflat_path, out_rss=fflat_flatfielded_path, median_box=median_box, niter=niter,
                                    threshold=threshold, mask_bands=mask_bands.get(channel, []),
                                    display_plots=display_plots, nknots=nknots)
             fflats.append(fflat)
@@ -615,4 +751,4 @@ if __name__ == "__main__":
 
     expnums = [7231]
     expnums = np.arange(7341, 7352+1)
-    reduce_twilight_sequence(expnums=expnums, median_box=10, niter=1000, threshold=(0.5,2.5), nknots=60, skip_done=True, display_plots=False)
+    reduce_twilight_sequence(expnums=expnums, median_box=10, niter=1000, threshold=(0.5,2.5), nknots=60, skip_done=False, display_plots=False)
