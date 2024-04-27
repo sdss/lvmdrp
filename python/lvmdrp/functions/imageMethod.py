@@ -4109,6 +4109,7 @@ def detrend_frame(
     else:
         log.info(f"using dark calibration frame '{os.path.basename(in_dark)}'")
         mdark_img = loadImage(in_dark)
+        mdark_img = mdark_img / mdark_img._header["EXPTIME"] * exptime
 
     # read master flat
     if img_type in ["bias", "dark", "pixelflat"] or (
