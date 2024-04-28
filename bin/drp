@@ -17,7 +17,7 @@ from lvmdrp.utils.metadata import get_frames_metadata, get_master_metadata
 from lvmdrp.utils.cluster import run_cluster
 
 from lvmdrp.functions.run_quickdrp import quick_science_reduction
-from lvmdrp.functions.run_twilights import reduce_twilight_sequence, MASK_BANDS
+from lvmdrp.functions.run_calseq import create_fiberflats, MASK_BANDS
 
 from sdss_access import Access
 
@@ -200,7 +200,7 @@ def twilight_reduction(expnums: list, median_box: int, niter: int, threshold: Tu
     """ Run the twilight sequence reduction """
     # parse multiple exposure number lists into a single list
     expnums = [expnum for expnum_list in expnums for expnum in expnum_list]
-    reduce_twilight_sequence(
+    create_fiberflats(
         expnums=expnums,
         median_box=median_box,
         niter=niter,
