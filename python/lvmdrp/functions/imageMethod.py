@@ -4017,9 +4017,10 @@ def add_astrometry(
         '''Copy a keyword from a guider coadd header to an Image object Header'''
         try:
             img.setHdrValue(f'HIERARCH GDRCOADD {EW} {keyword}', gdrhdr[keyword], gdrhdr.comments[keyword])
-        except:
+        except Exception:
+            log.warn(f'Guider image {agcfiledir[EW]} does not have {keyword} keyword')
             img.setHdrValue(f'HIERARCH GDRCOADD {EW} {keyword}', '', 'Not found')
-            
+
     def getobsparam(tel):
         if tel!='spec':
             if os.path.isfile(agcfiledir[tel]):
@@ -4032,23 +4033,23 @@ def add_astrometry(
                 IFUcencoords=outw.pixel_to_world(2500,1000)
                 RAobs=IFUcencoords.ra.value
                 DECobs=IFUcencoords.dec.value
-                gdrkeys = ['FRAME0  ', 'FRAMEN  ', 'NFRAMES ', 'STACK0  ', 'STACKN  ', 'NSTACKED', 'COESTIM ', 'SIGCLIP ', 
-                           'SIGMA   ', 'OBSTIME0', 'OBSTIMEN', 'FWHM0   ', 'FWHMN   ', 'FWHMMED ', 'COFWHM  ', 'COFWHMST', 
-                           'PACOEFFA', 'PACOEFFB', 'PAMIN   ', 'PAMAX   ', 'PADRIFT ', 'ZEROPT  ', 'SOLVED  ', 'WARNPADR', 
+                gdrkeys = ['FRAME0  ', 'FRAMEN  ', 'NFRAMES ', 'STACK0  ', 'STACKN  ', 'NSTACKED', 'COESTIM ', 'SIGCLIP ',
+                           'SIGMA   ', 'OBSTIME0', 'OBSTIMEN', 'FWHM0   ', 'FWHMN   ', 'FWHMMED ', 'COFWHM  ', 'COFWHMST',
+                           'PACOEFFA', 'PACOEFFB', 'PAMIN   ', 'PAMAX   ', 'PADRIFT ', 'ZEROPT  ', 'SOLVED  ', 'WARNPADR',
                            'WARNTRAN', 'WARNMATC', 'WARNFWHM']
                 try:
                     mfeheader=mfagc[2].header    # East guider co-add
                     org_img.setHdrValue('ASTRMSRC', 'GDR coadd', comment='Source of astrometric solution: guider')
                     for key in gdrkeys:
                         copy_guider_keyword(mfeheader, 'EAST', key, org_img)
-                except:
+                except Exception:
                     log.warn(f'Guider image {agcfiledir[tel]} does not have EAST COADD header')
 
                 try:
                     mfwheader=mfagc[3].header    # West guider co-add
                     for key in gdrkeys:
                         copy_guider_keyword(mfwheader, 'WEST', key, org_img)
-                except:
+                except Exception:
                     log.warn(f'Guider image {agcfiledir[tel]} does not have WEST COADD header')
 
                 mfagc.close()
