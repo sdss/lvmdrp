@@ -68,6 +68,18 @@ DEFAULT_BGSEC = [
     "[1:2043, 1991:2000]",
     "[1:2043, 1991:2000]",
 ]
+# PAVAN'S FIT OF GAIN
+DEFAULT_GAIN = {
+    "b1": [2.71, 2.71, 2.69, 2.68],
+    "b2": [2.62, 2.69, 2.69, 2.68],
+    "b3": [2.71, 2.77, 2.73, 2.69],
+    "r1": [2.75, 2.79, 2.74, 2.68],
+    "r2": [2.64, 2.79, 2.67, 2.68],
+    "r3": [2.74, 2.76, 2.81, 2.73],
+    "z1": [2.76, 2.65, 2.78, 2.89],
+    "z2": [2.70, 2.76, 2.81, 2.71],
+    "z3": [2.75, 2.85, 2.79, 2.74]
+}
 DEFAULT_PTC_PATH = os.path.join(os.environ["LVMCORE_DIR"], "metrology", "PTC_fit.txt")
 
 LVM_NBLOCKS = 18
@@ -3606,6 +3618,10 @@ def preproc_raw_frame(
         log.warning(f"assuming GAIN = {gain.tolist()} (e-/ADU)")
     else:
         gain = numpy.asarray(list(org_header[f"{gain_prefix}?"].values()))
+        gain1, gain2, gain4, gain3 = gain
+        org_header[f"{gain_prefix}3"] = gain3
+        org_header[f"{gain_prefix}4"] = gain4
+        # gain = numpy.asarray(DEFAULT_GAIN[org_header["CCD"]])
         log.info(f"using header GAIN = {gain.tolist()} (e-/ADU)")
 
     # initialize overscan stats, quadrants lists and, gains and rnoise
@@ -3662,6 +3678,10 @@ def preproc_raw_frame(
         log.warning(f"assuming RDNOISE = {rdnoise.tolist()} (e-)")
     else:
         rdnoise = numpy.asarray(list(org_header[f"{rdnoise_prefix}?"].values()))
+        rdnoise1, rdnoise2, rdnoise4, rdnoise3 = rdnoise
+        org_header[f"{rdnoise_prefix}3"] = rdnoise3
+        org_header[f"{rdnoise_prefix}4"] = rdnoise4
+
         log.info(f"using header RDNOISE = {rdnoise.tolist()} (e-)")
 
     # join images
