@@ -4769,6 +4769,7 @@ def trace_fibers(
     poly_deg: int | Tuple[int] = 6,
     interpolate_missing: bool = True,
     only_centroids: bool = False,
+    use_given_centroids: bool = False,
     display_plots: bool = False
 ) -> Tuple[TraceMask, TraceMask, TraceMask]:
     """Trace fibers in a given image
@@ -4845,6 +4846,8 @@ def trace_fibers(
         whether to interpolate bad/missing fibers, by default True
     only_centroids : bool, optional
         whether to only trace centroids, by default False
+    use_given_centroids : bool, optional
+        whether to use given centroids, by default False
     display_plots : bool, optional
         whether to show plots on display or not, by default True
 
@@ -4896,8 +4899,9 @@ def trace_fibers(
     median_box = tuple(map(lambda x: max(x, 1), median_box))
     if median_box != (1, 1):
         log.info(f"performing median filtering with box {median_box} pixels")
-        img = img.replaceMaskMedian(*median_box)
-        img = img.medianImg(median_box)
+        img = img.replaceMaskMedian(*median_box, replace_error=None)
+        img._data = numpy.nan_to_num(img._data)
+        img = img.medianImg(median_box, propagate_error=True)
 
     # coadd images along the dispersion axis to increase the S/N of the peaks
     if coadd != 0:
@@ -4954,58 +4958,66 @@ def trace_fibers(
 
     # trace centroids in each column
     mod_columns, residuals = [], []
-    iterator = tqdm(enumerate(columns), total=len(columns), desc="tracing centroids", unit="column", ascii=True)
-    for i, icolumn in iterator:
-        # extract column profile
-        img_slice = img.getSlice(icolumn, axis="y")
-
-        # get fiber positions along previous column
-        if icolumn == LVM_REFERENCE_COLUMN:
-            # trace reference column first or skip if already traced
-            if i == 0:
-                cent_guess, _, mask_guess = centroids.getSlice(LVM_REFERENCE_COLUMN, axis="y")
-            else:
-                continue
-        else:
-            cent_guess, _, mask_guess = centroids.getSlice(columns[i-1], axis="y")
-
-        # update masked fibers
-        mask_guess |= numpy.isnan(cent_guess)
-
-        # fix masked fibers from last iteration
-        cent_guess[mask_guess] = copy(ref_cent)[mask_guess]
-        # cast fiber positions to integers
-        cent_guess = cent_guess.round().astype("int16")
-
-        # measure fiber positions
-        cen_slice, msk_slice = img_slice.measurePeaks(cent_guess, method, init_sigma=guess_fwhm / 2.354, threshold=counts_threshold, max_diff=max_diff)
-
-        centroids.setSlice(icolumn, axis="y", data=cen_slice, mask=msk_slice)
-
-    if fit_poly:
-        # smooth all trace by a polynomial
-        log.info(f"fitting centroid guess trace with {deg_cent}-deg polynomial")
-        centroids.fit_polynomial(deg_cent, poly_kind="poly")
-
-        # set bad fibers in trace mask
-        centroids._mask[bad_fibers] = True
-        # linearly interpolate coefficients at masked fibers
-        log.info(f"interpolating coefficients at {bad_fibers.sum()} masked fibers")
-        centroids.interpolate_coeffs()
+    if use_given_centroids and (out_trace_cent_guess is not None and os.path.isfile(out_trace_cent_guess)):
+        log.info(f"loading guess fiber centroids from '{os.path.basename(out_trace_cent_guess)}'")
+        centroids = TraceMask.from_file(out_trace_cent_guess)
     else:
-        log.info("interpolating centroid guess trace")
-        centroids.interpolate_data(axis="X")
+        iterator = tqdm(enumerate(columns), total=len(columns), desc="tracing centroids", unit="column", ascii=True)
+        for i, icolumn in iterator:
+            # extract column profile
+            img_slice = img.getSlice(icolumn, axis="y")
 
-        # set bad fibers in trace mask
-        centroids._mask[bad_fibers] = True
-        log.info(f"interpolating data at {bad_fibers.sum()} masked fibers")
-        centroids.interpolate_data(axis="Y")
+            # get fiber positions along previous column
+            if icolumn == LVM_REFERENCE_COLUMN:
+                # trace reference column first or skip if already traced
+                if i == 0:
+                    cent_guess, _, mask_guess = centroids.getSlice(LVM_REFERENCE_COLUMN, axis="y")
+                else:
+                    continue
+            else:
+                cent_guess, _, mask_guess = centroids.getSlice(columns[i-1], axis="y")
 
-    # write centroid if requested
-    if only_centroids:
-        log.info(f"writing centroid trace to '{os.path.basename(out_trace_cent)}'")
-        centroids.writeFitsData(out_trace_cent)
-        return centroids, img
+            # # update masked fibers
+            # mask_guess |= numpy.isnan(cent_guess)
+
+            # # fix masked fibers from last iteration
+            # cent_guess[mask_guess] = copy(ref_cent)[mask_guess]
+            # cast fiber positions to integers
+            cent_guess = cent_guess.round().astype("int16")
+
+            # measure fiber positions
+            cen_slice, msk_slice = img_slice.measurePeaks(cent_guess, method, init_sigma=guess_fwhm / 2.354, threshold=counts_threshold, max_diff=max_diff, ftol=1e-3, xtol=1e-3)
+
+            # replace failed centroid measurements (NaN) by last valid measurement
+            cen_slice[numpy.isnan(cen_slice)] = cent_guess[numpy.isnan(cen_slice)]
+            centroids.setSlice(icolumn, axis="y", data=cen_slice, mask=msk_slice)
+
+        if fit_poly:
+            # smooth all trace by a polynomial
+            log.info(f"fitting centroid guess trace with {deg_cent}-deg polynomial")
+            table_data, table_poly, table_poly_all = centroids.fit_polynomial(deg_cent, poly_kind="poly")
+            _create_trace_regions(out_trace_cent_guess, table_data, table_poly, table_poly_all, display_plots=display_plots)
+
+            # set bad fibers in trace mask
+            centroids._mask[bad_fibers] = True
+            # linearly interpolate coefficients at masked fibers
+            log.info(f"interpolating coefficients at {bad_fibers.sum()} masked fibers")
+            centroids.interpolate_coeffs()
+        else:
+            log.info("interpolating centroid guess trace")
+            centroids.interpolate_data(axis="X")
+
+            # set bad fibers in trace mask
+            centroids._mask[bad_fibers] = True
+            log.info(f"interpolating data at {bad_fibers.sum()} masked fibers")
+            centroids.interpolate_data(axis="Y")
+
+        # write centroid if requested
+        if only_centroids:
+            if out_trace_cent_guess is not None:
+                log.info(f"writing centroid trace to '{os.path.basename(out_trace_cent_guess)}'")
+                centroids.writeFitsData(out_trace_cent_guess)
+            return centroids, img
 
     if out_trace_fwhm is None or out_trace_amp is None:
         raise ValueError("missing output trace for amplitude and/or FWHM")
@@ -5063,7 +5075,19 @@ def trace_fibers(
             else:
                 # fit gaussian models to each fiber profile
                 log.info(f"fitting fiber block {j+1}/{nblocks} ({cen_block.size}/{msk_block.size} good fibers)")
-                _, par_block[~par_mask] = img_slice.fitMultiGauss(cen_block, init_fwhm=guess_fwhm)
+                _, par_block[~par_mask] = img_slice.fitMultiGauss(cen_block, init_fwhm=guess_fwhm,
+                                                                  bounds=(numpy.array([0]*cen_block.size + (cen_block-max_diff).tolist() + [fwhm_limits[0]/2.354]*cen_block.size),
+                                                                          numpy.array([numpy.inf]*cen_block.size + (cen_block+max_diff).tolist() + [fwhm_limits[1]/2.354]*cen_block.size)),
+                                                                  ftol=1e-3, xtol=1e-3)
+
+            # print(img_slice._error)
+            # mod_block = Gaussians(par=par_block)
+            # plt.figure()
+            # plt.plot(img_slice._pixels, img_slice._data, label="data")
+            # plt.plot(img_slice._pixels, mod_block(img_slice._pixels), label="model")
+            # plt.plot(img_slice._pixels, img_slice._error, label="error")
+            # plt.legend(loc=2)
+            # plt.show()
 
             par_blocks.append(par_block)
 
@@ -5151,9 +5175,20 @@ def trace_fibers(
 
     # smooth all trace by a polynomial
     if fit_poly:
+
+        # plt.figure()
+        # data = copy(numpy.split(trace_amp._data, LVM_NBLOCKS, axis=0)[16][0])
+        # # data[data==0] = numpy.nan
+        # plt.plot(data, label="measured amp")
+
         log.info(f"fitting peak trace with {deg_amp}-deg polynomial")
+        # constraints = [{'type': 'ineq', 'fun': lambda t, c: interpolate.splev(0, (t, c, deg_amp), der=1)},
+        #                {'type': 'ineq', 'fun': lambda t, c: -interpolate.splev(trace_amp._data.shape[1], (t, c, deg_amp), der=1)}]
         table_data, table_poly, table_poly_all = trace_amp.fit_polynomial(deg_amp, poly_kind="poly")
+        # table_data, table_poly, table_poly_all = trace_amp.fit_spline(degree=deg_amp, smoothing=0, constraints=constraints)
         _create_trace_regions(out_trace_amp, table_data, table_poly, table_poly_all, display_plots=display_plots)
+        # plt.plot(numpy.split(trace_amp._data, LVM_NBLOCKS, axis=0)[16][0], label="fitted amp")
+        # plt.show()
 
         log.info(f"fitting centroid trace with {deg_cent}-deg polynomial")
         table_data, table_poly, table_poly_all = trace_cent.fit_polynomial(deg_cent, poly_kind="poly")
