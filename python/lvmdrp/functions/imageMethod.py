@@ -3562,6 +3562,8 @@ def preproc_raw_frame(
     org_img = loadImage(in_image)
     org_header = org_img.getHeader()
 
+    camera = org_header["CCD"]
+
     # fix the header with header fix file
     # convert real MJD to SJD
     try:
@@ -3617,11 +3619,35 @@ def preproc_raw_frame(
     elif not org_header[f"{gain_prefix}?"]:
         log.warning(f"assuming GAIN = {gain.tolist()} (e-/ADU)")
     else:
-        gain = numpy.asarray(list(org_header[f"{gain_prefix}?"].values()))
-        gain1, gain2, gain4, gain3 = gain
-        org_header[f"{gain_prefix}3"] = gain3
-        org_header[f"{gain_prefix}4"] = gain4
         # gain = numpy.asarray(DEFAULT_GAIN[org_header["CCD"]])
+        gain = numpy.asarray([org_header[f"{gain_prefix}{iquad+1}"] for iquad in range(NQUADS)])
+
+        if camera == "b1":
+            gain[1] *= 1.036
+        if camera == "b2":
+            gain[1] *= 1.013
+            gain[2] *= 1.011
+        if camera == "b3":
+            gain[1] *= 1.029
+            gain[2] *= 1.012
+        if camera == "r1":
+            gain[1] *= 1.011
+            gain[2] *= 1.027
+        if camera == "r2":
+            gain[1] *= 1.025
+            gain[2] *= 1.017
+        if camera == "r3":
+            gain[1] *= 1.010
+            gain[2] *= 1.020
+        if camera == "z1":
+            gain[1] *= 1.093
+            gain[3] *= 1.063
+        if camera == "z2":
+            gain[0] *= 1.043
+            gain[2] *= 1.089
+        if camera == "z3":
+            gain[3] /= 1.056
+
         log.info(f"using header GAIN = {gain.tolist()} (e-/ADU)")
 
     # initialize overscan stats, quadrants lists and, gains and rnoise
@@ -3645,6 +3671,8 @@ def preproc_raw_frame(
                 os_kwargs = {"nknots": 300}
             elif overscan_model == "poly":
                 os_kwargs = {"deg": 9}
+            else:
+                os_kwargs = {}
 
             os_data, os_profile, os_model = _model_overscan(os_quad, axis=1, overscan_stat=overscan_stat, threshold=overscan_threshold, **os_kwargs)
             os_quad._data = os_data
@@ -3677,10 +3705,7 @@ def preproc_raw_frame(
     elif not org_header[f"{rdnoise_prefix}?"]:
         log.warning(f"assuming RDNOISE = {rdnoise.tolist()} (e-)")
     else:
-        rdnoise = numpy.asarray(list(org_header[f"{rdnoise_prefix}?"].values()))
-        rdnoise1, rdnoise2, rdnoise4, rdnoise3 = rdnoise
-        org_header[f"{rdnoise_prefix}3"] = rdnoise3
-        org_header[f"{rdnoise_prefix}4"] = rdnoise4
+        rdnoise = numpy.asarray([org_header[f"{rdnoise_prefix}{iquad+1}"] for iquad in range(NQUADS)])
 
         log.info(f"using header RDNOISE = {rdnoise.tolist()} (e-)")
 
@@ -4165,7 +4190,7 @@ def detrend_frame(
         # calculate Poisson errors
         log.info("applying gain correction per quadrant")
         for i, quad_sec in enumerate(bcorr_img.getHdrValue("AMP? TRIMSEC").values()):
-            log.info(f"processing quadrant {i+1}")
+            log.info(f"processing quadrant {i+1}: {quad_sec}")
             # extract quadrant image
             quad = bcorr_img.getSection(quad_sec)
             # extract quadrant gain and rdnoise values
