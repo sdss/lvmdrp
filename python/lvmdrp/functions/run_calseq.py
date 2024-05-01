@@ -938,11 +938,8 @@ def create_fiberflats(mjds: List[int]|int, target_mjd: int = None, expnums: List
             mlsf_paths = sorted(glob(os.path.join(masters_path, f"lvm-mlsf-{channel}?.fits")))
 
             # spectrograph stack xflats
-            xflat = RSS.from_spectrographs(*[rss_tasks.loadRSS(xflat_path) for xflat_path in xflat_paths])
-            xflat_path = path.full("lvm_anc", drpver=drpver, kind="x",
-                                   imagetype=flat["imagetyp"], tileid=flat["tileid"], mjd=flat["mjd"],
-                                   camera=channel, expnum=expnum)
-            xflat.writeFitsData(xflat_path)
+            xflat_path = path.full("lvm_anc", drpver=drpver, kind="x", imagetype=flat["imagetyp"], tileid=flat["tileid"], mjd=flat["mjd"], camera=channel, expnum=expnum)
+            rss_tasks.stack_spectrographs(in_rsss=xflat_paths, out_rss=xflat_path)
 
             # calibrate in wavelength
             wflat_path = path.full("lvm_anc", drpver=drpver, kind="w", imagetype=flat["imagetyp"], tileid=flat["tileid"], mjd=flat["mjd"], camera=channel, expnum=expnum)
@@ -958,9 +955,7 @@ def create_fiberflats(mjds: List[int]|int, target_mjd: int = None, expnums: List
             remove_field_gradient(in_hflat=hflat_path, out_gflat=gflat_path, wrange=SPEC_CHANNELS[channel])
 
             # fit fiber throughput
-            gflat = rss_tasks.loadRSS(gflat_path)
-            gflats = gflat.splitRSS(parts=len(mwave_paths), axis=1)
-            fflat = fit_fiberflat(rsss=gflats, out_flat=fflat_path, out_rss=fflat_flatfielded_path, median_box=median_box, niter=niter,
+            fflat = fit_fiberflat(in_twilight=gflat_path, out_flat=fflat_path, out_rss=fflat_flatfielded_path, median_box=median_box, niter=niter,
                                    threshold=threshold, mask_bands=mask_bands.get(channel, []),
                                    display_plots=display_plots, nknots=nknots)
             fflats.append(fflat)
@@ -970,7 +965,7 @@ def create_fiberflats(mjds: List[int]|int, target_mjd: int = None, expnums: List
 
         mwave_paths = sorted(glob(os.path.join(masters_path, f"lvm-mwave-{channel}?.fits")))
         new_flat = resample_fiberflat(mrss, channel=channel, mwave_paths=mwave_paths, display_plots=display_plots)
-        mflat_path = os.path.join(masters_path, f"lvm-mfiberflat_twilight-{channel}.fits")
+        mflat_path = path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=masters_mjd, kind="mfiberflat_twilight", camera=channel)
         new_flat.writeFitsData(mflat_path)
         new_flats[channel] = new_flat
 
