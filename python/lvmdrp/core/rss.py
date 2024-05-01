@@ -655,7 +655,7 @@ class RSS(FiberRows):
             columns = [
                 pyfits.Column(name="FUNC", format="A10", array=numpy.asarray([trace._poly_kind] * self._fibers)),
                 pyfits.Column(name="XMIN", format="I", unit="pix", array=numpy.asarray([0] * self._fibers)),
-                pyfits.Column(name="XMAX", format="I", unit="pix", array=numpy.asarray([self._data.shape[1]-1] * self._fibers)),
+                pyfits.Column(name="XMAX", format="I", unit="pix", array=numpy.asarray([trace._data.shape[1]-1] * self._fibers)),
                 pyfits.Column(name="COEFF", format=f"{coeffs.shape[1]}E", dim=f"({self._fibers},)", array=trace._coeffs)
             ]
             self._trace = Table(pyfits.BinTableHDU.from_columns(columns).data)
@@ -1832,7 +1832,7 @@ class RSS(FiberRows):
 
         return new_rss
 
-    def to_native_wave(self, method="linear", return_density=False):
+    def to_native_wave(self, method="linear", interp_density=True, return_density=False):
         """Converts the wavelength to the native wavelength grid
 
         This method de-rectifies the RSS object to the native wavelength grid.
@@ -1875,7 +1875,7 @@ class RSS(FiberRows):
         if rss._header is None:
             rss._header = pyfits.Header()
         unit = rss._header["BUNIT"]
-        if not unit.endswith("/angstrom"):
+        if not unit.endswith("/angstrom") and interp_density:
             dlambda = numpy.gradient(rss._wave)
             rss._data /= dlambda
             rss._error /= dlambda
@@ -1931,7 +1931,7 @@ class RSS(FiberRows):
                 f = interpolate.interp1d(rss._wave, rss._sky_west_error[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
                 new_rss._sky_west_error[ifiber] = f(wave[ifiber]).astype("float32")
 
-        if not return_density:
+        if not return_density and unit.endswith("/angstrom"):
             dlambda = numpy.gradient(wave, axis=1)
             new_rss._data *= dlambda
             new_rss._error *= dlambda
@@ -1948,6 +1948,23 @@ class RSS(FiberRows):
             if new_rss._sky_west_error is not None:
                 new_rss._sky_west_error *= dlambda
             new_rss._header["BUNIT"] = unit.replace("/angstrom", "")
+        elif return_density and not unit.endswith("/angstrom"):
+            dlambda = numpy.gradient(wave, axis=1)
+            new_rss._data /= dlambda
+            new_rss._error /= dlambda
+            if new_rss._sky is not None:
+                new_rss._sky /= dlambda
+            if new_rss._sky_error is not None:
+                new_rss._sky_error /= dlambda
+            if new_rss._sky_east is not None:
+                new_rss._sky_east /= dlambda
+            if new_rss._sky_east_error is not None:
+                new_rss._sky_east_error /= dlambda
+            if new_rss._sky_west is not None:
+                new_rss._sky_west /= dlambda
+            if new_rss._sky_west_error is not None:
+                new_rss._sky_west_error /= dlambda
+            new_rss._header["BUNIT"] = unit + "/angstrom"
 
         return new_rss
 
