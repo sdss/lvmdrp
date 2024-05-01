@@ -1148,7 +1148,7 @@ class RSS(FiberRows):
 
             # separate wavelenths from spline parameters
             wave = tcks[0]
-            wave = wave.reshape((-1, 4085))
+            wave = wave.reshape((-1, 4086))
             tck = tcks[1:]
             tck_error = tcks_error[1:]
 

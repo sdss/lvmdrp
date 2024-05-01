@@ -785,7 +785,7 @@ class Spectrum1D(Header):
     def __truediv__(self, other):
         if isinstance(other, Spectrum1D):
             # verify wavelength and LSF arrays are the same
-            if not numpy.array_equal(self._wave, other._wave):
+            if not numpy.isclose(self._wave, other._wave).all():
                 raise ValueError("wavelength arrays are not the same")
             if (self._wave_trace is not None and other._wave_trace is not None) and not self._wave_trace == other._wave_trace:
                 raise ValueError("wavelength trace arrays are not the same")
