@@ -283,9 +283,9 @@ def fit_continuum(spectrum: Spectrum1D, mask_bands: List[Tuple[float,float]],
     best_continuum = continuum_models.pop(-1)
     return best_continuum, continuum_models, masked_pixels, knots
 
-def fit_fiberflat(rsss: List[RSS], out_flat: str, out_rss: str, interpolate_bad: bool = True, mask_bands: List[Tuple[float,float]] = [],
-                  median_box:int = 5, niter: int = 1000, threshold: Tuple[float,float]|float = (0.5,2.0),
-                  plot_fibers: List[int] = list(range(0,648,10)),#[0,300,600,900,1200,1400,1700],
+def fit_fiberflat(in_twilight: str, out_flat: str, out_rss: str, interpolate_bad: bool = True, mask_bands: List[Tuple[float,float]] = [],
+                  median_box: int = 5, niter: int = 1000, threshold: Tuple[float,float]|float = (0.5,2.0),
+                  plot_fibers: List[int] = [0,300,600,900,1200,1400,1700],
                   display_plots: bool = False, **kwargs) -> List[RSS]:
     """Fit fiber throughput for a twilight sequence
 
@@ -296,12 +296,12 @@ def fit_fiberflat(rsss: List[RSS], out_flat: str, out_rss: str, interpolate_bad:
 
     Parameters
     ----------
-    rsss : list
-        List of RSS objects for each twilight exposure
+    in_twilight : str
+        Input path for the twilight exposure
     out_flat : str
-        Output path for the master twilight flat
+        Output path for the fitted fiberflat
     out_rss : str
-        Output path for the master twilight flat
+        Output path for the flatfielded twilight
     interpolate_bad : bool, optional
         Interpolate bad pixels, by default True
     mask_bands : list, optional
@@ -322,52 +322,38 @@ def fit_fiberflat(rsss: List[RSS], out_flat: str, out_rss: str, interpolate_bad:
     new_flats : list
         List of RSS objects for each twilight exposure with the fitted fiber throughput
     """
-    camera = rsss[0]._header["CCD"]
-    expnum = rsss[0]._header["EXPOSURE"]
-    unit = rsss[0]._header["BUNIT"]
+    twilight = RSS.from_file(in_twilight)
 
-    # stack rsss
-    data, error, mask = [], [], []
-    for rss in rsss:
-        data.append(rss._data)
-        error.append(rss._error)
-        mask.append(rss._mask)
+    channel = twilight._header["CCD"]
+    expnum = twilight._header["EXPOSURE"]
+    unit = twilight._header["BUNIT"]
 
-    flat = RSS(
-        wave=rsss[0]._wave,
-        data=np.row_stack(data),
-        error=np.row_stack(error),
-        mask=np.row_stack(mask),
-        header=rsss[0]._header,
-        slitmap=rsss[0]._slitmap
-    )
-
-    ori_flat = copy(flat)
-    new_flat = copy(flat)
+    ori_flat = copy(twilight)
+    new_flat = copy(twilight)
 
     # mask bad pixels
-    flat._mask |= np.isnan(flat._data) | (flat._data < 0) | np.isinf(flat._data)
-    flat._data[flat._mask] = np.nan
+    twilight._mask |= np.isnan(twilight._data) | (twilight._data < 0) | np.isinf(twilight._data)
+    twilight._data[twilight._mask] = np.nan
 
     # interpolate bad pixels
     if interpolate_bad:
-        flat.interpolate_data(axis="X", reset_mask=False)
+        twilight.interpolate_data(axis="X", reset_mask=False)
 
     # mask wavelength bands
     if mask_bands:
         for iwave, fwave in mask_bands:
-            flat._mask |= (iwave <= flat._wave) & (flat._wave <= fwave)
-            flat._data[flat._mask] = np.nan
+            twilight._mask |= (iwave <= twilight._wave) & (twilight._wave <= fwave)
+            twilight._data[twilight._mask] = np.nan
 
     # remove high-frequency features and update mask
-    flat._data = median_filter(flat._data, (1,median_box))
-    flat._mask |= np.isnan(flat._data)
+    twilight._data = median_filter(twilight._data, (1,median_box))
+    twilight._mask |= np.isnan(twilight._data)
 
     # diplay plots
     fig, axs = create_subplots(to_display=display_plots,
                                nrows=len(plot_fibers), ncols=1, sharex=True,
                                figsize=(15,3*len(plot_fibers)), layout="constrained")
-    fig.suptitle(f"Twilight flat for {camera = } and {expnum = }")
+    fig.suptitle(f"Twilight flat for {channel = } and {expnum = }")
     fig.supxlabel("Wavelength (Angstrom)")
     fig.supylabel(f"Counts ({unit})")
 
@@ -376,13 +362,13 @@ def fit_fiberflat(rsss: List[RSS], out_flat: str, out_rss: str, interpolate_bad:
             for ax in axs:
                 ax.axvspan(*mask, color="0.9")
 
-    for ifiber in range(flat._fibers):
-        twilight = flat[ifiber]
-        ori_twilight = ori_flat[ifiber]
+    for ifiber in range(twilight._fibers):
+        fiber = twilight[ifiber]
+        ori_fiber = ori_flat[ifiber]
 
         try:
             best_continuum, continuum_models, masked_pixels, knots = fit_continuum(
-                spectrum=twilight, mask_bands=mask_bands,
+                spectrum=fiber, mask_bands=mask_bands,
                 median_box=median_box, niter=niter, threshold=threshold, **kwargs
             )
         except ValueError:
@@ -392,20 +378,20 @@ def fit_fiberflat(rsss: List[RSS], out_flat: str, out_rss: str, interpolate_bad:
             continue
 
         if ifiber in plot_fibers:
-            good_pix = ~twilight._mask
+            good_pix = ~fiber._mask
             iax = list(plot_fibers).index(ifiber)
 
-            # plot original twilight and processed twilight
+            # plot original fiber and processed fiber
             axs[iax].set_title(f"Fiber {ifiber+1}", loc="left")
-            axs[iax].step(twilight._wave[good_pix], ori_twilight._data[good_pix], color="0.7", lw=1)
-            axs[iax].step(twilight._wave[good_pix], twilight._data[good_pix], color="0.2", lw=1)
+            axs[iax].step(fiber._wave[good_pix], ori_fiber._data[good_pix], color="0.7", lw=1)
+            axs[iax].step(fiber._wave[good_pix], fiber._data[good_pix], color="0.2", lw=1)
 
             # plot masked pixels and fitted splines
             for continuum_model in continuum_models:
-                axs[iax].plot(twilight._wave[masked_pixels], twilight._data[masked_pixels], ".", color="tab:blue", ms=5, mew=0)
-                axs[iax].plot(twilight._wave, continuum_model, color="tab:red", lw=1, alpha=0.5, zorder=niter)
+                axs[iax].plot(fiber._wave[masked_pixels], fiber._data[masked_pixels], ".", color="tab:blue", ms=5, mew=0)
+                axs[iax].plot(fiber._wave, continuum_model, color="tab:red", lw=1, alpha=0.5, zorder=niter)
             axs[iax].plot(knots, np.zeros_like(knots), ".k")
-            axs[iax].step(twilight._wave, best_continuum, color="tab:red", lw=2)
+            axs[iax].step(fiber._wave, best_continuum, color="tab:red", lw=2)
 
         new_flat._data[ifiber] = best_continuum
 
@@ -431,7 +417,7 @@ def fit_fiberflat(rsss: List[RSS], out_flat: str, out_rss: str, interpolate_bad:
 
     # plot flatfielded twilight flat
     fig, axs = create_subplots(to_display=display_plots, figsize=(15,7), sharex=True, layout="constrained")
-    axs.set_title(f"Flatfielded twilight for camera = {camera}", loc="left")
+    axs.set_title(f"Flatfielded twilight for camera = {channel}", loc="left")
     fig.supxlabel("Wavelength (Angstrom)")
     fig.supylabel("Normalized counts")
 
@@ -439,7 +425,7 @@ def fit_fiberflat(rsss: List[RSS], out_flat: str, out_rss: str, interpolate_bad:
     med_flat_error = np.median(flat_error, axis=0)
     std_flat_error = np.std(flat_error, axis=0)
     med_error = np.median(ori_flat._error, axis=0) / med_fiberflat
-    for ifiber in range(flat._fibers):
+    for ifiber in range(twilight._fibers):
         if ifiber in plot_fibers:
             axs.step(ori_flat._wave, flat_error[ifiber], color="0.2", alpha=0.5, lw=1)
     axs.step(ori_flat._wave, med_flat_error, color="tab:red", lw=2)
@@ -465,7 +451,7 @@ def fit_fiberflat(rsss: List[RSS], out_flat: str, out_rss: str, interpolate_bad:
     new_flat.writeFitsData(out_flat)
 
     # write output faltfielded explosure
-    log.info(f"writing twilight flat to {out_rss}")
+    log.info(f"writing flatfielded twilight to {out_rss}")
     ori_flat.writeFitsData(out_rss)
 
     return new_flat
@@ -528,7 +514,7 @@ def combine_twilight_sequence(fflats: List[RSS]) -> RSS:
     return mflat
 
 def resample_fiberflat(mflat: RSS, channel: str, mwave_paths: str,
-             plot_fibers: List[int] = list(range(0,648,10)),
+             plot_fibers: List[int] = [0,300,600,900,1200,1400,1700],
              display_plots: bool = False) -> RSS:
     """Fit master twilight flat
 
@@ -541,7 +527,7 @@ def resample_fiberflat(mflat: RSS, channel: str, mwave_paths: str,
     mwave_path : str
         Path to master wavelength
     plot_fibers : list, optional
-        List of fibers to plot, by default [0, 300, 647]
+        List of fibers to plot, by default [0,300,600,900,1200,1400,1700]
     display_plots : bool, optional
         Display plots, by default False
 
