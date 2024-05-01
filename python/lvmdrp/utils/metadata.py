@@ -6,6 +6,7 @@
 # @License: BSD 3-Clause
 # @Copyright: SDSS-V LVM
 
+import itertools
 import os
 import pathlib
 from glob import glob, has_magic
@@ -1352,15 +1353,21 @@ def _collect_header_data(filename: str) -> dict:
         the extracted header key/values
     """
     hdr_dict_mapping = {'drpver': 'DRPVER', 'drpqual': 'DRPQUAL', 'dpos': 'DPOS',
+                        # sci
                         'sci_ra': 'TESCIRA', 'sci_dec': 'TESCIDE', 'sci_amass': 'TESCIAM',
                         'sci_kmpos': 'TESCIKM', 'sci_focpos': 'TESCIFO',
                         'sci_geoshadow_hgt':'GEOCORONAL SCI SHADOW_HEIGHT',
+                        'sci_moon_alt': 'SKYMODEL SCI ALT', 'sci_moon_rho': 'SKYMODEL SCI RHO',
+                        # skye
                         'skye_ra': 'TESKYERA', 'skye_dec': 'TESKYEDE', 'skye_amass': 'TESKYEAM',
                         'skye_kmpos': 'TESKYEKM', 'skye_focpos': 'TESKYEFO', 'skye_name': 'SKYENAME',
                         'skye_geoshadow_hgt':'GEOCORONAL SKYE SHADOW_HEIGHT',
+                        'skye_moon_alt': 'SKYMODEL SKYE ALT', 'skye_moon_rho': 'SKYMODEL SKYE RHO',
+                        # skyw
                         'skyw_ra': 'TESKYWRA', 'skyw_dec': 'TESKYWDE', 'skyw_amass': 'TESKYWAM',
                         'skyw_kmpos': 'TESKYWKM', 'skyw_focpos': 'TESKYWFO', 'skyw_name': 'SKYWNAME',
-                        'skyw_geoshadow_hgt':'GEOCORONAL SKYW SHADOW_HEIGHT'
+                        'skyw_geoshadow_hgt':'GEOCORONAL SKYW SHADOW_HEIGHT',
+                        'skyw_moon_alt': 'SKYMODEL SKYW ALT', 'skyw_moon_rho': 'SKYMODEL SKYW RHO'
                         }
 
     with fits.open(filename) as hdulist:
@@ -1419,6 +1426,14 @@ def update_summary_file(filename: str, tileid: int = None, mjd: int = None, expn
 
     # add new columns
     df = row.assign(**hdr_data)
+
+    # explicitly set some column dtypes to try and handle cases with null data
+    # sci, skye, skye keys
+    tels = {'sci', 'skye', 'skyw'}
+    keys = {'ra', 'dec', 'amass', 'kmpos', 'focpos', 'geoshadow_hgt', 'moon_alt', 'moon_rho'}
+    dtypes = {f'{i}_{j}': 'float64' for i, j in itertools.product(tels, keys)}
+    dtypes['calib_mjd'] = 'int64'
+    df = df.astype(dtypes)
 
     # create drpall h5 filepath
     drpall = path.full('lvm_drpall', drpver=DRPVER)
