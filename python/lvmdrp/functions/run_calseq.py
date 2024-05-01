@@ -38,16 +38,17 @@ from typing import List, Tuple, Dict
 
 from lvmdrp import log, path, __version__ as drpver
 from lvmdrp.utils import metadata as md
+from lvmdrp.core import dataproducts as dp
 from lvmdrp.core.constants import SPEC_CHANNELS
 from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.core.image import loadImage
-from lvmdrp.core.rss import RSS
+from lvmdrp.core.rss import RSS, lvmFrame
 
 from lvmdrp.functions import imageMethod as image_tasks
 from lvmdrp.functions import rssMethod as rss_tasks
 from lvmdrp.functions.run_drp import get_config_options, read_fibermap
 from lvmdrp.functions.run_quickdrp import get_master_mjd
-from lvmdrp.functions.run_twilights import fit_fiberflat, remove_field_gradient, combine_twilight_sequence, resample_fiberflat
+from lvmdrp.functions.run_twilights import fit_fiberflat, remove_field_gradient, combine_twilight_sequence
 
 
 SLITMAP = read_fibermap(as_table=True)
@@ -876,7 +877,7 @@ def create_fiberflats(mjds: List[int]|int, target_mjd: int = None, expnums: List
 
     Returns
     -------
-    new_flats : dict
+    mfflats : dict
         Dictionary with the master twilight flats for each channel
     """
     # get metadata
@@ -918,10 +919,26 @@ def create_fiberflats(mjds: List[int]|int, target_mjd: int = None, expnums: List
     # decompose twilight spectra into sun continuum and twilight components
     channels = "brz"
     mask_bands = dict(zip(channels, [b_mask, r_mask, z_mask]))
-    new_flats = dict.fromkeys(channels)
+    mfflats = dict.fromkeys(channels)
     flat_channels = flats.groupby(flats.camera.str.__getitem__(0))
     tileid = flats.tileid.min()
     for channel in channels:
+        mwave_paths = sorted(glob(os.path.join(masters_path, f"lvm-mwave-{channel}?.fits")))
+        mwaves = [TraceMask.from_file(master_wave) for master_wave in mwave_paths]
+        mwave = TraceMask.from_spectrographs(*mwaves)
+
+        mlsf_paths = sorted(glob(os.path.join(masters_path, f"lvm-mlsf-{channel}?.fits")))
+        mlsfs = [TraceMask.from_file(master_lsf) for master_lsf in mlsf_paths]
+        mlsf = TraceMask.from_spectrographs(*mlsfs)
+
+        mcent_paths = sorted(glob(os.path.join(masters_path, f"lvm-mtrace-{channel}?.fits")))
+        mcents = [TraceMask.from_file(master_cent) for master_cent in mcent_paths]
+        mcent = TraceMask.from_spectrographs(*mcents)
+
+        mwidth_paths = sorted(glob(os.path.join(masters_path, f"lvm-mwidth-{channel}?.fits")))
+        mwidths = [TraceMask.from_file(master_width) for master_width in mwidth_paths]
+        mwidth = TraceMask.from_spectrographs(*mwidths)
+
         flat_expnums = flat_channels.get_group(channel).groupby("expnum")
         fflats = []
         for expnum in flat_expnums.groups:
@@ -958,18 +975,28 @@ def create_fiberflats(mjds: List[int]|int, target_mjd: int = None, expnums: List
             fflat = fit_fiberflat(in_twilight=gflat_path, out_flat=fflat_path, out_rss=fflat_flatfielded_path, median_box=median_box, niter=niter,
                                    threshold=threshold, mask_bands=mask_bands.get(channel, []),
                                    display_plots=display_plots, nknots=nknots)
+            fflat.set_wave_trace(mwave)
+            fflat.set_lsf_trace(mlsf)
+            fflat = fflat.to_native_wave(method="linear", interp_density=False, return_density=False)
             fflats.append(fflat)
 
-        mrss = combine_twilight_sequence(fflats=fflats)
-        mrss.writeFitsData(path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=masters_mjd, kind="mfiberflat", camera=channel))
+            # build lvmFlat
+            twilight = RSS.from_file(fflat_flatfielded_path)
+            twilight.set_wave_trace(mwave)
+            twilight.set_lsf_trace(mlsf)
+            twilight = twilight.to_native_wave(method="linear", interp_density=True, return_density=False)
+            lvmflat = lvmFlat(data=twilight._data, error=twilight._error, mask=twilight._mask, header=twilight._header,
+                              cent_trace=mcent, width_trace=mwidth,
+                              wave_trace=mwave, lsf_trace=mlsf,
+                              superflat=fflat._data, slitmap=twilight._slitmap)
+            lvmflat.writeFitsData(path.full("lvm_frame", mjd=masters_mjd, tileid=tileid, drpver=drpver, expnum=expnum, kind=f'Flat-{channel}'))
 
-        mwave_paths = sorted(glob(os.path.join(masters_path, f"lvm-mwave-{channel}?.fits")))
-        new_flat = resample_fiberflat(mrss, channel=channel, mwave_paths=mwave_paths, display_plots=display_plots)
+        mfflat = combine_twilight_sequence(fflats=fflats)
         mflat_path = path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=masters_mjd, kind="mfiberflat_twilight", camera=channel)
-        new_flat.writeFitsData(mflat_path)
-        new_flats[channel] = new_flat
+        mfflat.writeFitsData(mflat_path)
+        mfflats[channel] = mfflat
 
-    return new_flats
+    return mfflats
 
 
 def create_illumination_corrections(mjds, target_mjd=None, expnums=None):
@@ -1151,6 +1178,20 @@ def run_calibration_sequence(mjds, target_mjd=None, expnums=None,
     if illumination_corrections:
         create_illumination_corrections(mjds, target_mjd=target_mjd, expnums=expnums)
 
+
+class lvmFlat(lvmFrame):
+    """lvmFlat class"""
+
+    def __init__(self, data=None, error=None, mask=None,
+                 cent_trace=None, width_trace=None, wave_trace=None, lsf_trace=None,
+                 header=None, slitmap=None, superflat=None, **kwargs):
+        lvmFrame.__init__(self, data=data, error=error, mask=mask,
+                     cent_trace=cent_trace, width_trace=width_trace,
+                     wave_trace=wave_trace, lsf_trace=lsf_trace,
+                     header=header, slitmap=slitmap, superflat=superflat)
+
+        self._blueprint = dp.load_blueprint(name="lvmFlat")
+        self._template = dp.dump_template(dataproduct_bp=self._blueprint, save=False)
 
 if __name__ == '__main__':
     import tracemalloc
