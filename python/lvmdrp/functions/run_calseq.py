@@ -27,7 +27,6 @@
 
 import os
 import numpy as np
-import pandas as pd
 from glob import glob
 from copy import deepcopy as copy
 from shutil import copy2
@@ -60,7 +59,7 @@ MASK_BANDS = {
 }
 
 
-def get_sequence_metadata(mjds, expnums=None, exptime=None):
+def get_sequence_metadata(mjd, expnums=None, exptime=None):
     """Get frames metadata for a given sequence
 
     Given a set of MJDs and (optionally) exposure numbers, get the frames
@@ -69,8 +68,8 @@ def get_sequence_metadata(mjds, expnums=None, exptime=None):
 
     Parameters:
     ----------
-    mjds : list
-        List of MJDs to reduce
+    mjd : int
+        MJD to reduce
     expnums : list
         List of exposure numbers to reduce
     exptime : int
@@ -83,13 +82,8 @@ def get_sequence_metadata(mjds, expnums=None, exptime=None):
     masters_mjd : float
         MJD for master frames
     """
-    # change to list if single MJD is given
-    if not isinstance(mjds, (list, tuple)):
-        mjds = [mjds]
-
     # get frames metadata
-    frames = [md.get_frames_metadata(mjd=mjd) for mjd in mjds]
-    frames = pd.concat(frames, ignore_index=True)
+    frames = md.get_frames_metadata(mjd=mjd)
 
     # filter by given expnums
     if expnums is not None:
@@ -104,7 +98,7 @@ def get_sequence_metadata(mjds, expnums=None, exptime=None):
     return frames
 
 
-def _clean_ancillary(mjds, expnums=None, kind=None):
+def _clean_ancillary(mjd, expnums=None, kind=None):
     """Clean ancillary files
 
     Given a set of MJDs and (optionally) exposure numbers, clean the ancillary
@@ -114,25 +108,16 @@ def _clean_ancillary(mjds, expnums=None, kind=None):
 
     Parameters:
     ----------
-    mjds : list
-        List of MJDs to reduce
+    mjd : int
+        MJD to reduce
     expnums : list
         List of exposure numbers to reduce
     kind : str
         Kind of frame to reduce
     """
 
-    # change to list if single MJD is given
-    if not isinstance(mjds, (list, tuple)):
-        mjds = [mjds]
-
     # get frames metadata
-    frames = [md.get_metadata(tileid="*", mjd=mjd) for mjd in mjds]
-    frames = pd.concat(frames, ignore_index=True)
-
-    # filter by given expnums
-    if expnums is not None:
-        frames.query("expnum in @expnums", inplace=True)
+    frames = get_sequence_metadata(mjd, expnums=expnums)
 
     # filter by target image types
     if kind == "all":
@@ -348,8 +333,6 @@ def fix_raw_pixel_shifts(mjd, use_fiducial_cals=True, expnums=None, ref_expnums=
     if use_fiducial_cals:
         masters_mjd = get_master_mjd(mjd)
         masters_path = os.path.join(MASTERS_DIR, str(masters_mjd))
-    else:
-        masters_path = None
 
     expnums_grp = frames.groupby("expnum")
     for spec in specs:
@@ -363,12 +346,12 @@ def fix_raw_pixel_shifts(mjd, use_fiducial_cals=True, expnums=None, ref_expnums=
                 log.warning(f"skipping {rframe_paths}, less than 3 files found")
                 continue
 
-            if masters_path is not None:
+            if use_fiducial_cals:
                 mwave_paths = sorted(glob(os.path.join(masters_path, f"lvm-mwave_neon_hgne_argon_xenon-?{spec}.fits")))
                 mtrace_paths = sorted(glob(os.path.join(masters_path, f"lvm-mtrace-?{spec}.fits")))
             else:
-                mwave_paths = sorted(path.expand("lvm_calib", drpver=drpver, tileid=11111, mjd=mjd, kind="mwave", camera=f"?{spec}"))
-                mtrace_paths = sorted(path.expand("lvm_calib", drpver=drpver, tileid=11111, mjd=mjd, kind="mtrace", camera=f"?{spec}"))
+                mwave_paths = sorted(path.expand("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mwave", camera=f"?{spec}"))
+                mtrace_paths = sorted(path.expand("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mtrace", camera=f"?{spec}"))
 
             mask_2d_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, imagetype="mask2d",
                                      expnum=0, camera=f"sp{spec}", kind="")
@@ -391,7 +374,7 @@ def fix_raw_pixel_shifts(mjd, use_fiducial_cals=True, expnums=None, ref_expnums=
 def reduce_2d(mjd, use_fiducial_cals=True, expnums=None, exptime=None,
               replace_with_nan=True, assume_imagetyp=None, reject_cr=True,
               counts_threshold=5000, poly_deg_cent=4, use_master_centroids=False,
-              skip_done=True):
+              skip_done=True, keep_ancillary=False):
     """Preprocess and detrend a list of 2D frames
 
     Given a set of MJDs and (optionally) exposure numbers, preprocess detrends
@@ -422,6 +405,8 @@ def reduce_2d(mjd, use_fiducial_cals=True, expnums=None, exptime=None,
         Degree of the polynomial to fit to the centroids, by default 4
     skip_done : bool
         Skip pipeline steps that have already been done
+    keep_ancillary : bool
+        Keep ancillary files, by default False
     """
 
     frames = get_sequence_metadata(mjd, expnums=expnums, exptime=exptime)
@@ -438,17 +423,14 @@ def reduce_2d(mjd, use_fiducial_cals=True, expnums=None, exptime=None,
         # get master frames paths
         mpixmask_path = os.path.join(masters_path, f"lvm-mpixmask-{camera}.fits")
         mpixflat_path = os.path.join(masters_path, f"lvm-mpixelflat-{camera}.fits")
-        if masters_path is not None:
+        if use_fiducial_cals:
             mbias_path = os.path.join(masters_path, f"lvm-mbias-{camera}.fits")
-            mdark_path = os.path.join(masters_path, f"lvm-mdark-{camera}.fits")
         else:
-            mbias_path = path.full("lvm_calib", drpver=drpver, tileid=11111, mjd=mjd, kind="mbias", camera=camera)
-            mdark_path = path.full("lvm_calib", drpver=drpver, tileid=11111, mjd=mjd, kind="mdark", camera=camera)
+            mbias_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mbias", camera=camera)
 
         # log the master frames
         log.info(f'Using master pixel mask: {mpixmask_path}')
         log.info(f'Using master bias: {mbias_path}')
-        log.info(f'Using master dark: {mdark_path}')
         log.info(f'Using master pixel flat: {mpixflat_path}')
 
         frame_path = path.full("lvm_raw", camspec=frame["camera"], **frame)
@@ -470,7 +452,7 @@ def reduce_2d(mjd, use_fiducial_cals=True, expnums=None, exptime=None,
             image_tasks.preproc_raw_frame(in_image=frame_path, out_image=pframe_path,
                                           in_mask=mpixmask_path, replace_with_nan=replace_with_nan, assume_imagetyp=assume_imagetyp)
             image_tasks.detrend_frame(in_image=pframe_path, out_image=dframe_path,
-                                      in_bias=mbias_path, in_dark=mdark_path,
+                                      in_bias=mbias_path,
                                       in_pixelflat=mpixflat_path,
                                       replace_with_nan=replace_with_nan,
                                       reject_cr=reject_cr,
@@ -498,7 +480,7 @@ def reduce_2d(mjd, use_fiducial_cals=True, expnums=None, exptime=None,
                                             gaussian_sigma=0.0)
 
 
-def create_detrending_frames(mjd, use_fiducial_cals=True, expnums=None, exptime=None, kind="all", assume_imagetyp=None, reject_cr=True, skip_done=True):
+def create_detrending_frames(mjd, use_fiducial_cals=True, expnums=None, exptime=None, kind="all", assume_imagetyp=None, reject_cr=True, skip_done=True, keep_ancillary=False):
     """Reduce a sequence of bias/dark/pixelflat frames to produce master frames
 
     Given a set of MJDs and (optionally) exposure numbers, reduce the
@@ -532,6 +514,8 @@ def create_detrending_frames(mjd, use_fiducial_cals=True, expnums=None, exptime=
         Reject cosmic rays
     skip_done : bool
         Skip pipeline steps that have already been done
+    keep_ancillary : bool
+        Keep ancillary files, by default False
     """
     frames = get_sequence_metadata(mjd, expnums=expnums, exptime=exptime)
 
@@ -565,18 +549,22 @@ def create_detrending_frames(mjd, use_fiducial_cals=True, expnums=None, exptime=
             kwargs = get_config_options('reduction_steps.create_master_frame', imagetyp)
             log.info(f'custom configuration parameters for create_master_frame: {repr(kwargs)}')
             mframe_path = path.full("lvm_master", drpver=drpver, tileid=frame["tileid"], mjd=mjd, kind=f'm{imagetyp}', camera=frame["camera"])
-            os.makedirs(os.path.dirname(mframe_path), exist_ok=True)
+            if skip_done and os.path.isfile(mframe_path):
+                log.info(f"skipping {mframe_path}, file already exist")
+            else:
+                os.makedirs(os.path.dirname(mframe_path), exist_ok=True)
+                dframe_paths = [path.full("lvm_anc", drpver=drpver, kind="d" if imagetyp != "bias" else "p", imagetype=imagetyp, **frame) for frame in analogs.to_dict("records")]
+                image_tasks.create_master_frame(in_images=dframe_paths, out_image=mframe_path, **kwargs)
 
-            dframe_paths = [path.full("lvm_anc", drpver=drpver, kind="d" if imagetyp != "bias" else "p", imagetype=imagetyp, **frame) for frame in analogs.to_dict("records")]
-            image_tasks.create_master_frame(in_images=dframe_paths, out_image=mframe_path, **kwargs)
 
     # ancillary paths clean up
-    _clean_ancillary(mjd=mjd, expnums=expnums, kind=kind)
+    if not keep_ancillary:
+        _clean_ancillary(mjd=mjd, expnums=expnums, kind=kind)
 
 
 def create_pixelmasks(mjd, use_fiducial_cals=True, dark_expnums=None, pixflat_expnums=None,
                       short_exptime=900, long_exptime=3600, pixflat_exptime=5,
-                      ignore_pixflats=True):
+                      ignore_pixflats=True, keep_ancillary=False):
     """Create pixel mask from master pixelflat and/or dark frames
 
     Given a set of MJDs and (optionally) exposure numbers, create a pixel mask
@@ -607,6 +595,8 @@ def create_pixelmasks(mjd, use_fiducial_cals=True, dark_expnums=None, pixflat_ex
         Exposure time for pixelflat frames
     ignore_pixflats : bool
         Ignore pixelflat frames when creating pixel mask
+    keep_ancillary : bool
+        Keep ancillary files, by default False
 
     """
     if dark_expnums is not None and pixflat_expnums is not None:
@@ -683,7 +673,8 @@ def create_pixelmasks(mjd, use_fiducial_cals=True, dark_expnums=None, pixflat_ex
         image_tasks.create_pixelmask(in_short_dark=mdark_short_path, in_long_dark=mdark_long_path, out_pixmask=mpixmask_path)
 
     # ancillary paths clean up
-    _clean_ancillary(mjd=mjd, expnums=expnums)
+    if not keep_ancillary:
+        _clean_ancillary(mjd=mjd, expnums=expnums)
 
 
 def create_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnums_qrtz=None,
@@ -904,25 +895,13 @@ def create_fiberflats(mjd: int, use_fiducial_cals: bool = True, expnums: List[in
         masters_path = os.path.join(MASTERS_DIR, f"{masters_mjd}")
         if use_fiducial_cals:
             master_cals = {
-                "pixelmask" : os.path.join(masters_path, f"lvm-mpixmask-{camera}.fits"),
-                "bias" : os.path.join(masters_path, f"lvm-mbias-{camera}.fits"),
-                "dark" : os.path.join(masters_path, f"lvm-mdark-{camera}.fits"),
-                "pixelflat" : os.path.join(masters_path, f"lvm-mpixelflat-{camera}.fits"),
                 "cent" : os.path.join(masters_path, f"lvm-mtrace-{camera}.fits"),
-                "width" : os.path.join(masters_path, f"lvm-mwidth-{camera}.fits"),
-                "wave" : os.path.join(masters_path, f"lvm-mwave-{camera}.fits"),
-                "lsf" : os.path.join(masters_path, f"lvm-mlsf-{camera}.fits")
+                "width" : os.path.join(masters_path, f"lvm-mwidth-{camera}.fits")
             }
         else:
             master_cals = {
-                "pixelmask" : os.path.join(masters_path, f"lvm-mpixmask-{camera}.fits"),
-                "bias" : path.full("lvm_calib", drpver=drpver, tileid=11111, mjd=mjd, kind="mbias", camera=camera),
-                "dark" : os.path.join(masters_path, f"lvm-mdark-{camera}.fits"),
-                "pixelflat" : os.path.join(masters_path, f"lvm-mpixelflat-{camera}.fits"),
                 "cent" : path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mtrace", camera=camera),
-                "width" : path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mwidth", camera=camera),
-                "wave" : path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mwave", camera=camera),
-                "lsf" : path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mlsf", camera=camera)
+                "width" : path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mwidth", camera=camera)
             }
 
         # extract 1D spectra for each frame
@@ -1072,8 +1051,6 @@ def create_wavelengths(mjd, use_fiducial_cals=True, expnums=None, skip_done=True
     if use_fiducial_cals:
         masters_mjd = get_master_mjd(mjd)
         masters_path = os.path.join(MASTERS_DIR, str(masters_mjd))
-    else:
-        masters_path = None
 
     reduce_2d(mjd, use_fiducial_cals=use_fiducial_cals, expnums=expnums, assume_imagetyp="arc", reject_cr=False, skip_done=skip_done)
 
@@ -1083,7 +1060,7 @@ def create_wavelengths(mjd, use_fiducial_cals=True, expnums=None, skip_done=True
         arcs = arc_analogs.get_group((camera,))
 
         # define master paths for target frames
-        if masters_path is not None:
+        if use_fiducial_cals:
             mtrace_path = os.path.join(masters_path, f"lvm-mtrace-{camera}.fits")
             mwidth_path = os.path.join(masters_path, f"lvm-mwidth-{camera}.fits")
         else:
