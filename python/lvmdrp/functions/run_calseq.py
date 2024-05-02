@@ -652,8 +652,8 @@ def create_pixelmasks(mjd, use_fiducial_cals=True, dark_expnums=None, pixflat_ex
 
 
 def create_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnums_qrtz=None,
-                  subtract_straylight=False, fit_poly=True, poly_deg_amp=5,
-                  poly_deg_cent=4, poly_deg_width=5, skip_done=True):
+                  fit_poly=True, poly_deg_amp=5, poly_deg_cent=4, poly_deg_width=5,
+                  skip_done=True):
     """Create traces from master dome flats
 
     Given a set of MJDs and (optionally) exposure numbers, create traces from
@@ -674,8 +674,6 @@ def create_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnums_qrtz=N
         List of exposure numbers for LDLS dome flats
     expnums_qrtz : list
         List of exposure numbers for quartz dome flats
-    subtract_straylight : bool, optional
-        Subtract stray light from dome flats, by default False
     fit_poly : bool, optional
         Fit polynomials to traces, by default True
     poly_deg_amp : int, optional
@@ -693,7 +691,7 @@ def create_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnums_qrtz=N
         expnums = None
     frames = get_sequence_metadata(mjd, expnums=expnums)
 
-    # run 2D reduction on flats: preprocessing, detrending and stray light subtraction
+    # run 2D reduction on flats: preprocessing, detrending
     reduce_2d(mjd, use_fiducial_cals=use_fiducial_cals, expnums=expnums, reject_cr=False, skip_done=skip_done)
 
     # load current traces
@@ -726,27 +724,61 @@ def create_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnums_qrtz=N
             fiber_idx = np.where(select)[0][0]
 
             # define paths
+            dflat_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=mjd, kind="d", imagetype="flat", camera=camera, expnum=expnum)
             lflat_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=mjd, kind="l", imagetype="flat", camera=camera, expnum=expnum)
             flux_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=mjd, kind="d", imagetype="flux", camera=camera, expnum=expnum)
             cent_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=mjd, kind="d", imagetype="cent", camera=camera, expnum=expnum)
             cent_guess_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=mjd, kind="d", imagetype="cent_guess", camera=camera, expnum=expnum)
+            dstray_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=mjd, kind="d", imagetype="stray", camera=camera, expnum=expnum)
             fwhm_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=mjd, kind="d", imagetype="fwhm", camera=camera, expnum=expnum)
             model_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=mjd, kind="d", imagetype="model", camera=camera, expnum=expnum)
             mratio_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=mjd, kind="d", imagetype="mratio", camera=camera, expnum=expnum)
 
-            log.info(f"going to trace std fiber {fiber_str} in {camera} within {block_idxs = }")
-            centroids, trace_cent_fit, trace_flux_fit, trace_fwhm_fit, img_stray, model, mratio = image_tasks.trace_fibers(
-                in_image=lflat_path,
-                out_trace_amp=flux_path, out_trace_cent=cent_path, out_trace_fwhm=fwhm_path,
-                out_trace_cent_guess=cent_guess_path,
-                correct_ref=True, median_box=(1,10), coadd=20,
-                counts_threshold=counts_threshold, max_diff=1.5, guess_fwhm=2.5, method="gauss",
-                ncolumns=(140, 40), iblocks=block_idxs, fwhm_limits=(1.5, 4.5),
-                fit_poly=fit_poly, interpolate_missing=False, poly_deg=(poly_deg_amp, poly_deg_cent, poly_deg_width), use_given_centroids=True
-            )
+            # first centroids trace
+            if skip_done and os.path.isfile(cent_guess_path):
+                log.info(f"skipping {cent_guess_path}, file already exist")
+            else:
+                log.info(f"going to trace all fibers in {camera}")
+                centroids, img = image_tasks.trace_centroids(in_image=dflat_path, out_trace_cent=cent_guess_path,
+                                                            correct_ref=True, median_box=(1,10), coadd=20, counts_threshold=counts_threshold,
+                                                            max_diff=1.5, guess_fwhm=2.5, method="gauss", ncolumns=140,
+                                                            fit_poly=fit_poly, poly_deg=poly_deg_cent,
+                                                            interpolate_missing=True)
+
+            # subtract stray light only if imagetyp is flat
+            if skip_done and os.path.isfile(lflat_path):
+                log.info(f"skipping {lflat_path}, file already exist")
+            else:
+                image_tasks.subtract_straylight(in_image=dflat_path, out_image=lflat_path, out_stray=dstray_path,
+                                                in_cent_trace=cent_guess_path, select_nrows=5,
+                                                aperture=13, smoothing=400, median_box=21,
+                                                gaussian_sigma=0.0)
+
+            if skip_done and os.path.isfile(flux_path):
+                log.info(f"skipping {flux_path}, file already exist")
+                trace_cent_fit = TraceMask.from_file(cent_path)
+                trace_flux_fit = TraceMask.from_file(flux_path)
+                trace_fwhm_fit = TraceMask.from_file(fwhm_path)
+                img_stray = loadImage(lflat_path)
+                img_stray.setData(data=np.nan_to_num(img_stray._data), error=np.nan_to_num(img_stray._error))
+                img_stray = img_stray.replaceMaskMedian(1, 10, replace_error=None)
+                img_stray._data = np.nan_to_num(img_stray._data)
+                img_stray = img_stray.medianImg((1,10), propagate_error=True)
+                img_stray = img_stray.convolveImg(np.ones((1, 20), dtype="uint8"))
+            else:
+                log.info(f"going to trace std fiber {fiber_str} in {camera} within {block_idxs = }")
+                centroids, trace_cent_fit, trace_flux_fit, trace_fwhm_fit, img_stray, model, mratio = image_tasks.trace_fibers(
+                    in_image=lflat_path,
+                    out_trace_amp=flux_path, out_trace_cent=cent_path, out_trace_fwhm=fwhm_path,
+                    in_trace_cent_guess=cent_guess_path,
+                    median_box=(1,10), coadd=20,
+                    counts_threshold=counts_threshold, max_diff=1.5, guess_fwhm=2.5,
+                    ncolumns=40, iblocks=block_idxs, fwhm_limits=(1.5, 4.5),
+                    fit_poly=fit_poly, interpolate_missing=False, poly_deg=(poly_deg_amp, poly_deg_cent, poly_deg_width)
+                )
 
             # update master traces
-            log.info(f"{camera = }, {expnum = }, {fiber_str = :>6s}, fiber_idx = {fiber_idx:>3d}, FWHM = {trace_fwhm_fit._data[fiber_idx].mean():.2f}")
+            log.info(f"{camera = }, {expnum = }, {fiber_str = :>6s}, fiber_idx = {fiber_idx:>3d}, FWHM = {np.nanmean(trace_fwhm_fit._data[fiber_idx]):.2f}")
             select_block = np.isin(fibermap["blockid"], [f"B{id+1}" for id in block_idxs])
             if fit_poly:
                 mamps[camera]._coeffs[select_block] = trace_flux_fit._coeffs[select_block]
