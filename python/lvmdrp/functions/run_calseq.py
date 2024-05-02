@@ -930,12 +930,12 @@ def create_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnums_qrtz=N
 
 
 def create_fiberflats(mjd: int, use_fiducial_cals: bool = True, expnums: List[int] = None, median_box: int = 10, niter: bool = 1000,
-                             threshold: Tuple[float,float]|float = (0.5,1.5), nknots: bool = 50,
-                             b_mask: List[Tuple[float,float]] = MASK_BANDS["b"],
-                             r_mask: List[Tuple[float,float]] = MASK_BANDS["r"],
-                             z_mask: List[Tuple[float,float]] = MASK_BANDS["z"],
-                             skip_done: bool = False,
-                             display_plots: bool = False) -> Dict[str, RSS]:
+                      threshold: Tuple[float,float]|float = (0.5,1.5), nknots: bool = 50,
+                      b_mask: List[Tuple[float,float]] = MASK_BANDS["b"],
+                      r_mask: List[Tuple[float,float]] = MASK_BANDS["r"],
+                      z_mask: List[Tuple[float,float]] = MASK_BANDS["z"],
+                      skip_done: bool = False,
+                      display_plots: bool = False) -> Dict[str, RSS]:
     """Reduce the twilight sequence and produces master twilight flats
 
     Given a sequence of twilight exposures, this function reduces them and
@@ -963,6 +963,8 @@ def create_fiberflats(mjd: int, use_fiducial_cals: bool = True, expnums: List[in
         List of wavelength bands to mask in the red channel, by default []
     z_mask : list, optional
         List of wavelength bands to mask in the NIR channel, by default []
+    use_master_centroids : bool, optional
+        Use master centroids to trace the fibers, by default False
     skip_done : bool, optional
         Skip files that already exist, by default False
     display_plots : bool, optional
@@ -979,7 +981,7 @@ def create_fiberflats(mjd: int, use_fiducial_cals: bool = True, expnums: List[in
         flats.query("imagetyp == 'flat' and not ldls|quartz", inplace=True)
 
     # 2D reduction of twilight sequence
-    reduce_2d(mjd=mjd, use_fiducial_cals=use_fiducial_cals, expnums=flats.expnum.unique(), reject_cr=False, use_master_centroids=True, skip_done=skip_done)
+    reduce_2d(mjd=mjd, use_fiducial_cals=use_fiducial_cals, expnums=flats.expnum.unique(), reject_cr=False, skip_done=skip_done)
 
     for flat in flats.to_dict("records"):
 
@@ -1000,8 +1002,20 @@ def create_fiberflats(mjd: int, use_fiducial_cals: bool = True, expnums: List[in
             }
 
         # extract 1D spectra for each frame
-        lflat_path = path.full("lvm_anc", drpver=drpver, kind="l", imagetype=flat["imagetyp"], **flat)
-        xflat_path = path.full("lvm_anc", drpver=drpver, kind="x", imagetype=flat["imagetyp"], **flat)
+        dflat_path = path.full("lvm_anc", drpver=drpver, kind="d", imagetype="flat", **flat)
+        lflat_path = path.full("lvm_anc", drpver=drpver, kind="l", imagetype="flat", **flat)
+        xflat_path = path.full("lvm_anc", drpver=drpver, kind="x", imagetype="flat", **flat)
+        stray_path = path.full("lvm_anc", drpver=drpver, kind="d", imagetype="stray", **flat)
+
+        # subtract stray light only if imagetyp is flat
+        if skip_done and os.path.isfile(lflat_path):
+            log.info(f"skipping {lflat_path}, file already exist")
+        else:
+            image_tasks.subtract_straylight(in_image=dflat_path, out_image=lflat_path, out_stray=stray_path,
+                                            in_cent_trace=master_cals.get("cent"), select_nrows=5,
+                                            aperture=13, smoothing=400, median_box=21,
+                                            gaussian_sigma=0.0)
+
         if skip_done and os.path.isfile(xflat_path):
             log.info(f"skipping {xflat_path}, file already exist")
         else:
@@ -1183,9 +1197,12 @@ def create_wavelengths(mjd, use_fiducial_cals=True, expnums=None, skip_done=True
             image_tasks.extract_spectra(in_image=carc_path, out_rss=xarc_path, in_trace=mtrace_path, in_fwhm=mwidth_path, method="optimal")
 
         # fit wavelength solution
-        rss_tasks.determine_wavelength_solution(in_arcs=xarc_path, out_wave=mwave_path, out_lsf=mlsf_path, aperture=12,
-                                                cc_correction=True, cc_max_shift=20, poly_disp=5, poly_fwhm=2, poly_cros=2,
-                                                flux_min=1e-12, fwhm_max=5, rel_flux_limits=[0.001, 1e12])
+        if skip_done and os.path.isfile(mwave_path) and os.path.isfile(mlsf_path):
+            log.info(f"skipping wavelength solution {mwave_path} and {mlsf_path}, files already exists")
+        else:
+            rss_tasks.determine_wavelength_solution(in_arcs=xarc_path, out_wave=mwave_path, out_lsf=mlsf_path, aperture=12,
+                                                    cc_correction=True, cc_max_shift=20, poly_disp=5, poly_fwhm=2, poly_cros=2,
+                                                    flux_min=1e-12, fwhm_max=5, rel_flux_limits=[0.001, 1e12])
 
     for channel in "brz":
         mwave_paths = sorted(path.expand("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=f"{channel}?", kind="mwave"))
@@ -1196,11 +1213,16 @@ def create_wavelengths(mjd, use_fiducial_cals=True, expnums=None, skip_done=True
         harc_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="h", imagetype="arc", camera=channel, expnum=expnum_str)
 
         # stack spectragraphs
-        rss_tasks.stack_spectrographs(in_rsss=xarc_paths, out_rss=xarc_path)
-        # apply wavelength solution to arcs
-        rss_tasks.create_pixel_table(in_rss=xarc_path, out_rss=harc_path, in_waves=mwave_paths, in_lsfs=mlsf_paths)
-        # rectify arcs
-        rss_tasks.resample_wavelength(in_rss=harc_path, out_rss=harc_path, method="linear", wave_range=SPEC_CHANNELS[channel], wave_disp=0.5)
+        if skip_done and os.path.isfile(xarc_path):
+            log.info(f"skipping stacked arc {xarc_path}, file already exists")
+        else:
+            rss_tasks.stack_spectrographs(in_rsss=xarc_paths, out_rss=xarc_path)
+        # apply wavelength solution to arcs and rectify
+        if skip_done and os.path.isfile(harc_path):
+            log.info(f"skipping rectified arc {harc_path}, file already exists")
+        else:
+            rss_tasks.create_pixel_table(in_rss=xarc_path, out_rss=harc_path, in_waves=mwave_paths, in_lsfs=mlsf_paths)
+            rss_tasks.resample_wavelength(in_rss=harc_path, out_rss=harc_path, method="linear", wave_range=SPEC_CHANNELS[channel], wave_disp=0.5)
 
 
 @cloup.command(short_help='Run the calibration sequence reduction', show_constraints=True)
