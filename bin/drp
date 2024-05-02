@@ -17,7 +17,7 @@ from lvmdrp.utils.metadata import get_frames_metadata, get_master_metadata
 from lvmdrp.utils.cluster import run_cluster
 
 from lvmdrp.functions.run_quickdrp import quick_science_reduction
-from lvmdrp.functions.run_calseq import create_fiberflats, MASK_BANDS
+from lvmdrp.functions.run_calseq import MASK_BANDS, create_fiberflats, reduce_nightly_sequence
 
 from sdss_access import Access
 
@@ -215,6 +215,21 @@ def twilight_reduction(expnums: list, median_box: int, niter: int, threshold: Tu
 
 # register twilight sequence reduction
 cli.add_command(twilight_reduction)
+
+@cli.command('nightly-cals', short_help='Run the nightly calibration sequence')
+@click.option('-m', '--mjd', type=int, help='the MJD to reduce')
+@click.option('-r', '--reject-cr', is_flag=True, default=False, help='flag to reject cosmic rays')
+@click.option('-f', '--use-fiducial-cals', is_flag=True, default=False, help='flag to use fiducial calibration frames')
+@click.option('-s', '--skip-done', is_flag=True, default=False, help='flag to skip reduction steps that have already been done')
+@click.option('-a', '--keep-ancillary', is_flag=True, default=False, help='flag to keep ancillary files')
+def nightly_calibrations(mjd, reject_cr, use_fiducial_cals, skip_done, keep_ancillary):
+    """ Run the nightly calibration sequence """
+    reduce_nightly_sequence(mjd=mjd, reject_cr=reject_cr,
+                            use_fiducial_cals=use_fiducial_cals,
+                            skip_done=skip_done, keep_ancillary=keep_ancillary)
+
+# register nightly calibration sequence
+cli.add_command(nightly_calibrations)
 
 
 @cli.command('erase', short_help='Remove the DRP reductions')

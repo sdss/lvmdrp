@@ -1225,28 +1225,87 @@ def create_wavelengths(mjd, use_fiducial_cals=True, expnums=None, skip_done=True
             rss_tasks.resample_wavelength(in_rss=harc_path, out_rss=harc_path, method="linear", wave_range=SPEC_CHANNELS[channel], wave_disp=0.5)
 
 
-@cloup.command(short_help='Run the calibration sequence reduction', show_constraints=True)
-@click.option('-m', '--mjds', type=int, multiple=True, help='list of MJDs with calibration sequence taken')
-@click.option('--target-mjd', type=int, help='MJD to store the resulting master frames in')
-@click.option('-e', '--expnums', type=int, multiple=True, help='list of exposure numbers to target for reduction')
-@click.option('--pixelflats', is_flag=True, default=False, help='flag to create pixel flats')
-@click.option('--pixelmasks', is_flag=True, default=False, help='flag to create pixel masks')
-@click.option('-i', '--illumination-corrections', is_flag=True, default=False, help='flag to create illumination corrections')
-def run_calibration_sequence(mjds, target_mjd=None, expnums=None,
+def reduce_nightly_sequence(mjd, use_fiducial_cals=True, reject_cr=True, skip_done=True, keep_ancillary=False):
+    """Reduces the nightly calibration sequence:
+
+    The nightly calibration sequence consists of the following exposures:
+        * 7 - 9 bias
+        * 2 dome flat (LDLS and quartz)
+        * 2 arc (10s and 50s exposures)
+        * ~12 - 24 twilight (~half exposures at dawn and twilight)
+
+    This routine will create *nightly* (not long-term) master calibrations
+    at $LVM_SPECTRO_REDUX/{drpver}/0011XX/11111/{mjd}/calib
+
+    Parameters:
+    ----------
+    mjd : int
+        MJD to reduce
+    use_fiducial_cals : bool
+        Whether to use fiducial calibration frames or not, defaults to True
+    reject_cr : bool
+        Reject cosmic rays in 2D reduction, by default True
+    skip_done : bool
+        Skip pipeline steps that have already been done
+    keep_ancillary : bool
+        Keep ancillary files, by default False
+    """
+
+    cal_imagetyps = {"bias", "flat", "arc"}
+    log.info(f"going to reduce nightly calibration frames: {cal_imagetyps}")
+
+    frames = md.get_frames_metadata(mjd)
+    frames.query("imagetyp in @cal_imagetyps", inplace=True)
+    if len(frames) == 0:
+        raise ValueError(f"no frames found for MJD = {mjd}")
+
+    biases = frames.query("imagetyp == 'bias'")
+    if len(biases) != 0:
+        log.info(f"found {len(biases)} bias exposures: {set(biases.expnum)}")
+        create_detrending_frames(mjd=mjd, expnums=set(biases.expnum), kind="bias", use_fiducial_cals=use_fiducial_cals, skip_done=skip_done, keep_ancillary=keep_ancillary)
+    else:
+        log.warning("no bias exposures found")
+
+    dome_flats = frames.query("imagetyp == 'flat' and ldls|quartz")
+    if len(dome_flats) != 0:
+        expnums_ldls = dome_flats.query("ldls").expnum.unique()
+        expnums_qrtz = dome_flats.query("quartz").expnum.unique()
+        log.info(f"found {len(dome_flats)} dome flat exposures: {set(dome_flats.expnum)}")
+        create_nighly_traces(mjd=mjd, expnums_ldls=expnums_ldls, expnums_qrtz=expnums_qrtz, skip_done=skip_done)
+        # create_nightly_fiberflats(mjd=mjd, expnums_ldls=expnums_ldls, expnums_qrtz=expnums_qrtz, skip_done=skip_done)
+    else:
+        log.warning("no dome flat exposures found")
+
+    arcs = frames.query("imagetyp == 'arc' and not ldls|quartz and neon|hgne|argon|xenon")
+    if len(arcs) != 0:
+        log.info(f"found {len(arcs)} arc exposures: {set(arcs.expnum)}")
+        create_wavelengths(mjd=mjd, expnums=arcs.expnum.unique(), skip_done=skip_done)
+    else:
+        log.warning("no arc exposures found")
+
+    twilight_flats = frames.query("imagetyp == 'flat' and not ldls|quartz")
+    if len(twilight_flats) != 0:
+        log.info(f"found {len(twilight_flats)} twilight exposures: {set(twilight_flats.expnum)}")
+        create_fiberflats(mjd=mjd, expnums=sorted(twilight_flats.expnum.unique()), skip_done=skip_done)
+    else:
+        log.warning("no twilight exposures found")
+
+
+def run_calibration_sequence(mjds, masters_mjd=None, expnums=None,
                              pixelflats: bool = False, pixelmasks: bool = False,
                              illumination_corrections: bool = False):
     """Run the calibration sequence reduction
 
     Given a set of MJDs and (optionally) exposure numbers, run the calibration
     sequence reduction. This routine will store the master calibration frames
-    in the corresponding calibration directory in the `target_mjd` or by
+    in the corresponding calibration directory in the `masters_mjd` or by
     default in the smallest MJD in `mjds`.
 
     Parameters:
     ----------
     mjds : list
         List of MJDs to reduce
-    target_mjd : float
+    masters_mjd : float
         MJD to store the master frames in
     expnums : list
         List of exposure numbers to reduce
@@ -1259,7 +1318,7 @@ def run_calibration_sequence(mjds, target_mjd=None, expnums=None,
     """
 
     # split exposures into the exposure sequence of each type of master frame
-    frames, masters_mjd = get_sequence_metadata(mjds, target_mjd=target_mjd, expnums=expnums)
+    frames, masters_mjd = get_sequence_metadata(mjds, masters_mjd=masters_mjd, expnums=expnums)
     bias_frames = frames.query("imagetyp == 'bias'")
     dark_frames = frames.query("imagetyp == 'dark'")
     ldls_frames = frames.query("imagetyp == 'flat & ldls")
@@ -1270,33 +1329,33 @@ def run_calibration_sequence(mjds, target_mjd=None, expnums=None,
     # TODO: verify sequences completeness
 
     # reduce bias/dark
-    create_detrending_frames(mjds, target_mjd=target_mjd, expnums=set(bias_frames.expnum), kind="bias")
-    create_detrending_frames(mjds, target_mjd=target_mjd, expnums=set(dark_frames.expnum), kind="dark")
+    create_detrending_frames(mjds, masters_mjd=masters_mjd, expnums=set(bias_frames.expnum), kind="bias")
+    create_detrending_frames(mjds, masters_mjd=masters_mjd, expnums=set(dark_frames.expnum), kind="dark")
 
     # create traces
-    create_traces(mjds, target_mjd=target_mjd, expnums_ldls=set(ldls_frames.expnum), expnums_qrtz=set(qrtz_frames.expnum), subtract_straylight=True)
+    create_traces(mjds, use_fiducial_cals=masters_mjd, expnums_ldls=set(ldls_frames.expnum), expnums_qrtz=set(qrtz_frames.expnum), subtract_straylight=True)
 
     # create fiber flats
-    create_fiberflats(mjds, target_mjd=target_mjd, expnums=set(twilight_frames.expnum))
+    create_fiberflats(mjds, use_fiducial_cals=masters_mjd, expnums=set(twilight_frames.expnum))
 
     # create wavelength solutions
-    create_wavelengths(mjds, target_mjd=target_mjd, expnums=set(arc_frames.expnum))
+    create_wavelengths(mjds, use_fiducial_cals=masters_mjd, expnums=set(arc_frames.expnum))
 
     # create pixel flats
     if pixelflats:
         pixflat_frames = frames.query("imagetyp == 'pixelflat'")
-        create_detrending_frames(mjds, target_mjd=target_mjd, expnums=set(pixflat_frames.expnum), kind="pixflat")
+        create_detrending_frames(mjds, masters_mjd=masters_mjd, expnums=set(pixflat_frames.expnum), kind="pixflat")
 
     # create pixel mask
     if pixelmasks:
-        create_pixelmasks(mjds, target_mjd=target_mjd,
+        create_pixelmasks(mjds, use_fiducial_cals=masters_mjd,
                           dark_expnums=set(dark_frames.expnum),
                           pixflat_expnums=set(pixflat_frames.expnum),
                           ignore_pixflats=False)
 
     # create illumination corrections
     if illumination_corrections:
-        create_illumination_corrections(mjds, target_mjd=target_mjd, expnums=expnums)
+        create_illumination_corrections(mjds, masters_mjd=masters_mjd, expnums=expnums)
 
 
 class lvmFlat(lvmFrame):
@@ -1318,10 +1377,10 @@ if __name__ == '__main__':
 
     tracemalloc.start()
 
-    MJD = 60255
-    ldls_expnums = np.arange(7264, 7269+1)
-    ldls_expnums = [None] * (12-ldls_expnums.size) + ldls_expnums.tolist()
-    qrtz_expnums = np.arange(7252, 7263+1)
+    # MJD = 60255
+    # ldls_expnums = np.arange(7264, 7269+1)
+    # ldls_expnums = [None] * (12-ldls_expnums.size) + ldls_expnums.tolist()
+    # qrtz_expnums = np.arange(7252, 7263+1)
 
     # MJD = 60185
     # ldls_expnums = np.arange(3936, 3937+1).tolist() + [None] * 10
@@ -1335,9 +1394,20 @@ if __name__ == '__main__':
     # qrtz_expnums += [None] * 6
 
     try:
-        # create_detrending_frames(mjds=60255, target_mjd=60255, kind="bias")
-        create_traces(mjds=MJD, expnums_ldls=ldls_expnums, expnums_qrtz=qrtz_expnums, subtract_straylight=True)
-        # create_wavelengths(mjds=60264, target_mjd=60255, expnums=[7750,7751])
+        # create_detrending_frames(mjd=60171, masters_mjd=60142, kind="bias", skip_done=False)
+        # create_detrending_frames(mjd=60146, masters_mjd=60142, kind="dark", exptime=900, reject_cr=False, skip_done=False)
+        # create_detrending_frames(mjd=60171, masters_mjd=60142, expnums=np.arange(3098, 3117+1), kind="dark", assume_imagetyp="pixelflat", reject_cr=False, skip_done=False)
+
+        # create_detrending_frames(mjd=60255, kind="bias", skip_done=False)
+        # create_traces(mjd=MJD, expnums_ldls=ldls_expnums, expnums_qrtz=qrtz_expnums, subtract_straylight=True)
+        # create_wavelengths(mjd=60255, masters_mjd=60255, expnums=np.arange(7276,7323+1), skip_done=True)
+
+        # expnums = [7231]
+        # expnums = np.arange(7341, 7352+1)
+        # expnums = [7352]
+        # create_fiberflats(mjd=60255, expnums=expnums, median_box=10, niter=1000, threshold=(0.5,2.5), nknots=60, skip_done=True, display_plots=False)
+
+        reduce_nightly_sequence(mjd=60265, reject_cr=False, use_fiducial_cals=False, skip_done=True, keep_ancillary=True)
     except Exception as e:
         # snapshot = tracemalloc.take_snapshot()
         # top_stats = snapshot.statistics('lineno')
