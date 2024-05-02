@@ -80,8 +80,8 @@ class fit_profile1D(object):
         method="leastsq",
         parallel="auto",
     ):
-        if not numpy.isfinite(sigma).all():
-            raise ValueError(f"Errors have non-finite values: {sigma}")
+        if numpy.isnan(sigma).any():
+            raise ValueError(f"Errors have non-valid values: {sigma}")
         if p0 is None and p0 is not False and self._guess_par is not None:
             self._guess_par(x, y)
         perr_init = deepcopy(self)
