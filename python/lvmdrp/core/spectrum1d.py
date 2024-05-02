@@ -2734,7 +2734,7 @@ class Spectrum1D(Header):
 
         return pixels, wave, data
 
-    def measurePeaks(self, init_pos, method="gauss", init_sigma=1.0, threshold=0, bounds=(-numpy.inf, numpy.inf), ftol=1e-5, xtol=1e-5):
+    def measurePeaks(self, init_pos, method="gauss", init_sigma=1.0, threshold=0, max_diff=1.5, bounds=(-numpy.inf, numpy.inf), ftol=1e-5, xtol=1e-5):
         """
         Find the subpixel centre for the local maxima in a Spectrum.
 
@@ -2837,6 +2837,7 @@ class Spectrum1D(Header):
                     gauss.fit(
                         self._pixels[init_pos[j] - 1 : init_pos[j] + 2],
                         self._data[init_pos[j] - 1 : init_pos[j] + 2],
+                        sigma=self._data[init_pos[j]-1:init_pos[j]+2],
                         bounds=([amp_lower[j], pos_lower[j], sig_lower[j]], [amp_upper[j], pos_upper[j], sig_upper[j]]),
                         warning=False, ftol=ftol, xtol=xtol
                     )  # perform fitting
@@ -2846,9 +2847,6 @@ class Spectrum1D(Header):
             mask, numpy.isnan(positions)
         )  # masked all corrupt subpixel peak positions
 
-        if numpy.sum(mask) > 0:
-            # replace the estimated position of all masekd peak position by the corresponding initial guess peak positions
-            positions[mask] = init_pos[mask].astype("float32")
         return positions, mask
 
     def measureFWHMPeaks(

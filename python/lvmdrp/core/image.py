@@ -2126,8 +2126,6 @@ class Image(Header):
             bound_upper = numpy.array([numpy.inf]*cent_guess.size + (cent_guess+max_diff).tolist() + [fwhm_range[1]/2.354]*cent_guess.size)
             cen_slice, msk_slice = img_slice.measurePeaks(cent_guess, method, init_sigma=fwhm_guess / 2.354, threshold=counts_threshold, bounds=(bound_lower, bound_upper))
 
-            # replace failed centroid measurements (NaN) by last valid measurement
-            cen_slice[numpy.isnan(cen_slice)] = cent_guess[numpy.isnan(cen_slice)]
             centroids.setSlice(icolumn, axis="y", data=cen_slice, mask=msk_slice)
 
         return centroids
