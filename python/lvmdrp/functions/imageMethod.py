@@ -4702,20 +4702,103 @@ def create_pixelmask(in_short_dark, in_long_dark, out_pixmask, in_flat_a=None, i
     return pixmask, ratio_dark, ratio_flat
 
 
+def trace_centroids(in_image: str,
+        out_trace_cent: str,
+        correct_ref: bool = False,
+        median_box: tuple = (1, 10),
+        coadd: int = 5,
+        method: str = "gauss",
+        guess_fwhm: float = 2.5,
+        counts_threshold: float = 500,
+        max_diff: int = 1.5,
+        ncolumns: int | Tuple[int] = 18,
+        fit_poly: bool = False,
+        poly_deg: int | Tuple[int] = 6,
+        interpolate_missing: bool = True,
+        display_plots: bool = False
+    ) -> Tuple[TraceMask, TraceMask, TraceMask]:
+
+    # load continuum image  from file
+    log.info(f"using flat image {os.path.basename(in_image)} for tracing")
+    img = loadImage(in_image)
+    img.setData(data=numpy.nan_to_num(img._data), error=numpy.nan_to_num(img._error))
+
+    # extract usefull metadata from the image
+    channel = img._header["CCD"][0]
+
+    # read slitmap extension
+    slitmap = img.getSlitmap()
+    slitmap = slitmap[slitmap["spectrographid"] == int(img._header["CCD"][1])]
+    bad_fibers = slitmap["fibstatus"] == 1
+
+    # perform median filtering along the dispersion axis to clean cosmic rays
+    median_box = tuple(map(lambda x: max(x, 1), median_box))
+    if median_box != (1, 1):
+        log.info(f"performing median filtering with box {median_box} pixels")
+        img = img.replaceMaskMedian(*median_box, replace_error=None)
+        img._data = numpy.nan_to_num(img._data)
+        img = img.medianImg(median_box, propagate_error=True)
+
+    # coadd images along the dispersion axis to increase the S/N of the peaks
+    if coadd != 0:
+        log.info(f"coadding {coadd} pixels along the dispersion axis")
+        coadd_kernel = numpy.ones((1, coadd), dtype="uint8")
+        img = img.convolveImg(coadd_kernel)
+        counts_threshold = counts_threshold * coadd
+
+    # calculate centroids for reference column
+    if correct_ref:
+        ref_cent = img.match_reference_column(ref_column=LVM_REFERENCE_COLUMN)
+    else:
+        ref_cent = img._slitmap[f"ypix_{channel}"].data
+
+    # trace centroids in each column
+    log.info(f"going to trace fiber centroids using {ncolumns} columns")
+    centroids = img.trace_fiber_centroids(ref_column=LVM_REFERENCE_COLUMN, ref_centroids=ref_cent, mask_fibstatus=1,
+                                          ncolumns=ncolumns, method=method, fwhm_guess=guess_fwhm,
+                                          counts_threshold=counts_threshold, max_diff=max_diff)
+
+    if fit_poly:
+        # smooth all trace by a polynomial
+        log.info(f"fitting centroid guess trace with {poly_deg}-deg polynomial")
+        table_data, table_poly, table_poly_all = centroids.fit_polynomial(poly_deg, poly_kind="poly")
+        _create_trace_regions(out_trace_cent, table_data, table_poly, table_poly_all, display_plots=display_plots)
+
+        # set bad fibers in trace mask
+        centroids._mask[bad_fibers] = True
+        # linearly interpolate coefficients at masked fibers
+        log.info(f"interpolating coefficients at {bad_fibers.sum()} masked fibers")
+        centroids.interpolate_coeffs()
+    else:
+        log.info("interpolating centroid guess trace")
+        centroids.interpolate_data(axis="X")
+
+        # set bad fibers in trace mask
+        centroids._mask[bad_fibers] = True
+        log.info(f"interpolating data at {bad_fibers.sum()} masked fibers")
+        centroids.interpolate_data(axis="Y")
+
+    # write centroid if requested
+    if out_trace_cent is not None:
+        log.info(f"writing centroid trace to '{os.path.basename(out_trace_cent)}'")
+        centroids.writeFitsData(out_trace_cent)
+    return centroids, img
+
+
 def trace_fibers(
     in_image: str,
     out_trace_cent: str,
-    out_trace_amp: str = None,
-    out_trace_fwhm: str = None,
-    out_trace_cent_guess: str = None,
+    out_trace_amp: str,
+    out_trace_fwhm: str,
+    in_trace_cent_guess: str,
     out_model: str = None,
     out_ratio: str = None,
     correct_ref: bool = False,
     median_box: tuple = (1, 10),
     coadd: int = 5,
     method: str = "gauss",
-    guess_fwhm: float = 3.0,
-    counts_threshold: float = 0.5,
+    guess_fwhm: float = 2.5,
+    counts_threshold: float = 500,
     max_diff: int = 1.5,
     ncolumns: int | Tuple[int] = 18,
     nblocks: int = 18,
@@ -4766,12 +4849,12 @@ def trace_fibers(
         path to input image
     out_trace_cent : str
         path to output centroid trace
-    out_trace_amp : str, optional
-        path to output amplitude trace, by default None
-    out_trace_fwhm : str, optional
-        path to output FWHM trace, by default None
-    out_trace_cent_guess : str, optional
-        path to output centroid guess trace, by default None
+    out_trace_amp : str
+        path to output amplitude trace
+    out_trace_fwhm : str
+        path to output FWHM trace
+    in_trace_cent_guess : str
+        path to input centroid guess trace
     correct_ref : bool, optional
         whether to correct reference fiber positions, by default False
     median_box : tuple, optional
@@ -4831,20 +4914,10 @@ def trace_fibers(
     else:
         raise ValueError(f"invalid polynomial degree: {poly_deg}")
 
-    if isinstance(ncolumns, (list, tuple)) and len(ncolumns) == 2:
-        ncolumns_cent, ncolumns_full = ncolumns
-    elif isinstance(ncolumns, int):
-        ncolumns_cent = ncolumns_full = ncolumns
-    else:
-        raise ValueError(f"invalid number of columns: {ncolumns}")
-
     # load continuum image  from file
     log.info(f"using flat image {os.path.basename(in_image)} for tracing")
     img = loadImage(in_image)
     img.setData(data=numpy.nan_to_num(img._data), error=numpy.nan_to_num(img._error))
-
-    # extract usefull metadata from the image
-    channel = img._header["CCD"][0]
 
     # read slitmap extension
     slitmap = img.getSlitmap()
@@ -4866,52 +4939,9 @@ def trace_fibers(
         img = img.convolveImg(coadd_kernel)
         counts_threshold = counts_threshold * coadd
 
-    # calculate centroids for reference column
-    if correct_ref:
-        ref_cent = img.match_reference_column(ref_column=LVM_REFERENCE_COLUMN)
-    else:
-        ref_cent = img._slitmap[f"ypix_{channel}"].data
-
     # trace centroids in each column
-    mod_columns, residuals = [], []
-    if use_given_centroids and (out_trace_cent_guess is not None and os.path.isfile(out_trace_cent_guess)):
-        log.info(f"loading guess fiber centroids from '{os.path.basename(out_trace_cent_guess)}'")
-        centroids = TraceMask.from_file(out_trace_cent_guess)
-    else:
-        log.info(f"going to trace fiber centroids using {ncolumns_cent} columns")
-        centroids = img.trace_fiber_centroids(ref_column=LVM_REFERENCE_COLUMN, ref_centroids=ref_cent, mask_fibstatus=1,
-                                        ncolumns=ncolumns_cent, method=method, fwhm_guess=guess_fwhm,
-                                        counts_threshold=counts_threshold, max_diff=max_diff)
-
-        if fit_poly:
-            # smooth all trace by a polynomial
-            log.info(f"fitting centroid guess trace with {deg_cent}-deg polynomial")
-            table_data, table_poly, table_poly_all = centroids.fit_polynomial(deg_cent, poly_kind="poly")
-            _create_trace_regions(out_trace_cent_guess, table_data, table_poly, table_poly_all, display_plots=display_plots)
-
-            # set bad fibers in trace mask
-            centroids._mask[bad_fibers] = True
-            # linearly interpolate coefficients at masked fibers
-            log.info(f"interpolating coefficients at {bad_fibers.sum()} masked fibers")
-            centroids.interpolate_coeffs()
-        else:
-            log.info("interpolating centroid guess trace")
-            centroids.interpolate_data(axis="X")
-
-            # set bad fibers in trace mask
-            centroids._mask[bad_fibers] = True
-            log.info(f"interpolating data at {bad_fibers.sum()} masked fibers")
-            centroids.interpolate_data(axis="Y")
-
-        # write centroid if requested
-        if only_centroids:
-            if out_trace_cent_guess is not None:
-                log.info(f"writing centroid trace to '{os.path.basename(out_trace_cent_guess)}'")
-                centroids.writeFitsData(out_trace_cent_guess)
-            return centroids, img
-
-    if out_trace_fwhm is None or out_trace_amp is None:
-        raise ValueError("missing output trace for amplitude and/or FWHM")
+    log.info(f"loading guess fiber centroids from '{os.path.basename(in_trace_cent_guess)}'")
+    centroids = TraceMask.from_file(in_trace_cent_guess)
 
     # initialize flux and FWHM traces
     trace_cent = copy(centroids)
@@ -4921,8 +4951,8 @@ def trace_fibers(
     trace_fwhm._header["IMAGETYP"] = "trace_fwhm"
 
     trace_amp, trace_cent, trace_fwhm, columns, mod_columns, residuals = img.trace_fiber_widths(centroids, ref_column=LVM_REFERENCE_COLUMN,
-                                                                                                ncolumns=ncolumns_full, nblocks=LVM_NBLOCKS, iblocks=[],
-                                                                                                fwhm_guess=2.5, fwhm_range=[1.0,3.5], counts_threshold=5000)
+                                                                                                ncolumns=ncolumns, nblocks=LVM_NBLOCKS, iblocks=[],
+                                                                                                fwhm_guess=guess_fwhm, fwhm_range=[1.0,3.5], counts_threshold=counts_threshold)
 
     # smooth all trace by a polynomial
     if fit_poly:
@@ -4993,9 +5023,6 @@ def trace_fibers(
     trace_cent.writeFitsData(out_trace_cent)
     log.info(f"writing FWHM trace to '{os.path.basename(out_trace_fwhm)}'")
     trace_fwhm.writeFitsData(out_trace_fwhm)
-    if out_trace_cent_guess is not None:
-        log.info(f"writing guess centroids trace to '{os.path.basename(out_trace_cent_guess)}'")
-        centroids.writeFitsData(out_trace_cent_guess)
 
     # plot results
     log.info("plotting results")
