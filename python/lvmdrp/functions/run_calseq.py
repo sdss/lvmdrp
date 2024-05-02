@@ -706,16 +706,7 @@ def create_nighly_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnums
                                                 gaussian_sigma=0.0)
 
             if skip_done and os.path.isfile(flux_path) and os.path.isfile(cent_path) and os.path.isfile(fwhm_path):
-                log.info(f"skipping {flux_path}, file already exist")
-                trace_cent_fit = TraceMask.from_file(cent_path)
-                trace_flux_fit = TraceMask.from_file(flux_path)
-                trace_fwhm_fit = TraceMask.from_file(fwhm_path)
-                img_stray = loadImage(lflat_path)
-                img_stray.setData(data=np.nan_to_num(img_stray._data), error=np.nan_to_num(img_stray._error))
-                img_stray = img_stray.replaceMaskMedian(1, 10, replace_error=None)
-                img_stray._data = np.nan_to_num(img_stray._data)
-                img_stray = img_stray.medianImg((1,10), propagate_error=True)
-                img_stray = img_stray.convolveImg(np.ones((1, 20), dtype="uint8"))
+                log.info(f"skipping {flux_path}, {cent_path} and {fwhm_path}, files already exist")
             else:
                 log.info(f"going to trace fibers in {camera}")
                 centroids, trace_cent_fit, trace_flux_fit, trace_fwhm_fit, img_stray, model, mratio = image_tasks.trace_fibers(
@@ -730,9 +721,23 @@ def create_nighly_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnums
                 )
 
             # eval model continuum and ratio
-            model, ratio = img_stray.eval_fiber_model(trace_flux_fit, trace_cent_fit, trace_fwhm_fit)
-            model.writeFitsData(dmodel_path)
-            ratio.writeFitsData(dratio_path)
+            if skip_done and os.path.isfile(dmodel_path) and os.path.isfile(dratio_path):
+                log.info(f"skipping {dmodel_path}, file already exist")
+            else:
+                log.info(f"going to create model image and mode/exposure ratio in {camera}")
+                if "trace_cent_fit" not in locals():
+                    trace_cent_fit = TraceMask.from_file(cent_path)
+                    trace_flux_fit = TraceMask.from_file(flux_path)
+                    trace_fwhm_fit = TraceMask.from_file(fwhm_path)
+                    img_stray = loadImage(lflat_path)
+                    img_stray.setData(data=np.nan_to_num(img_stray._data), error=np.nan_to_num(img_stray._error))
+                    img_stray = img_stray.replaceMaskMedian(1, 10, replace_error=None)
+                    img_stray._data = np.nan_to_num(img_stray._data)
+                    img_stray = img_stray.medianImg((1,10), propagate_error=True)
+                    img_stray = img_stray.convolveImg(np.ones((1, 20), dtype="uint8"))
+                model, ratio = img_stray.eval_fiber_model(trace_flux_fit, trace_cent_fit, trace_fwhm_fit)
+                model.writeFitsData(dmodel_path)
+                ratio.writeFitsData(dratio_path)
 
 
 def create_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnums_qrtz=None,
