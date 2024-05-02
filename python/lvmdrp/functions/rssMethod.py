@@ -269,16 +269,17 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
     lamps = set(ilamps)
 
     # mask std fibers since they are not regularly illuminated during arc exposures
-    fibermap = arc._slitmap[arc._slitmap["spectrographid"] == 2]
+    fibermap = arc._slitmap[arc._slitmap["spectrographid"] == int(camera[1])]
     select = fibermap["telescope"] == "Spec"
     arc._mask[select] = True
     arc._data[select] = 0.0
-    arc._error[select] = 0.0
+    arc._error[select] = numpy.inf
 
     # replace NaNs
-    mask = numpy.isnan(arc._data) | numpy.isnan(arc._error)
-    mask |= (arc._data < 0.0) | (arc._error < 0.0)
+    mask = arc._mask | numpy.isnan(arc._data) | numpy.isnan(arc._error)
+    mask |= (arc._data < 0.0) | (arc._error <= 0.0)
     arc._data[mask] = 0.0
+    arc._error[mask] = numpy.inf
 
     # read reference lines
     ilamps = [lamp.lower() for lamp in ARC_LAMPS]

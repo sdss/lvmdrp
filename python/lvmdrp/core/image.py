@@ -2130,7 +2130,7 @@ class Image(Header):
         return ref_centroids
 
     def trace_fiber_centroids(self, ref_column=2000, ref_centroids=None, mask_fibstatus=1,
-                              ncolumns=140, method="gauss", fwhm_guess=2.5,
+                              ncolumns=140, method="gauss", fwhm_guess=2.5, fwhm_range=[1.0, 3.5],
                               counts_threshold=5000, max_diff=1.5, fit_polynomial=True, poly_deg=4):
         if self._header is None:
             raise ValueError("No header available")
@@ -2195,10 +2195,10 @@ class Image(Header):
             cent_guess = cent_guess.round().astype("int16")
 
             # measure fiber positions
-            cen_slice, msk_slice = img_slice.measurePeaks(cent_guess, method, init_sigma=fwhm_guess / 2.354, threshold=counts_threshold, max_diff=max_diff)
+            bound_lower = numpy.array([0]*cent_guess.size + (cent_guess-max_diff).tolist() + [fwhm_range[0]/2.354]*cent_guess.size)
+            bound_upper = numpy.array([numpy.inf]*cent_guess.size + (cent_guess+max_diff).tolist() + [fwhm_range[1]/2.354]*cent_guess.size)
+            cen_slice, msk_slice = img_slice.measurePeaks(cent_guess, method, init_sigma=fwhm_guess / 2.354, threshold=counts_threshold, bounds=(bound_lower, bound_upper))
 
-            # replace failed centroid measurements (NaN) by last valid measurement
-            cen_slice[numpy.isnan(cen_slice)] = cent_guess[numpy.isnan(cen_slice)]
             centroids.setSlice(icolumn, axis="y", data=cen_slice, mask=msk_slice)
 
         return centroids
@@ -2266,7 +2266,7 @@ class Image(Header):
                     log.info(f"fitting fiber block {j+1}/{nblocks} ({cen_block.size}/{msk_block.size} good fibers)")
                     bound_lower = numpy.array([0]*cen_block.size + (cen_block-max_diff).tolist() + [fwhm_range[0]/2.354]*cen_block.size)
                     bound_upper = numpy.array([numpy.inf]*cen_block.size + (cen_block+max_diff).tolist() + [fwhm_range[1]/2.354]*cen_block.size)
-                    _, par_block[~par_mask] = img_slice.fitMultiGauss(cen_block, init_fwhm=fwhm_guess, bounds=(bound_lower, bound_upper), ftol=1e-3, xtol=1e-3)
+                    _, par_block[~par_mask] = img_slice.fitMultiGauss(cen_block, init_fwhm=fwhm_guess, bounds=(bound_lower, bound_upper))
 
                 par_blocks.append(par_block)
 
