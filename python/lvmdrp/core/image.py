@@ -324,6 +324,79 @@ def _no_stepdowns(data):
     return data_out
 
 
+class LinearSelectionElement:
+    """Define a selection element for morphological binary image processing.
+       Used, e.g. for binary closure of cosmic ray tracks.
+    """
+
+    def __init__(self, n, m, angle):
+        """This will produce an n x m selection element with a line going
+        through the center according to some angle.
+
+        Parameters
+        ----------
+        n : int
+            Number of rows in selection element.
+        m : int
+            Number of columns in selection element.
+        angle : float
+            Angle of line through center, in deg [0,180].
+        """
+        self.se = None
+        self.angle = angle
+
+        se = numpy.zeros((m,n), dtype=int)
+        xc, yc = n//2, m//2 # row, col
+
+        if angle >= 0 and angle < 45:
+            b = numpy.tan(numpy.deg2rad(angle))
+        elif angle >= 45 and angle < 90:
+            b = numpy.tan(numpy.deg2rad(90 - angle))
+        elif angle >= 90 and angle < 135:
+            b = numpy.tan(numpy.deg2rad(angle-90))
+        elif angle >= 135 and angle < 180:
+            b = numpy.tan(numpy.deg2rad(180-angle))
+        else:
+            raise ValueError('Angle ({}) must be in [0,180]'.format(angle))
+
+        for x in range(0, n):
+            y = int(yc + b*(x-xc))
+            if y >= 0 and y < m:
+                se[y,x] = 1
+
+        if angle < 45:
+            self.se = se
+        elif angle >= 45 and angle < 90:
+            self.se = se.T
+        elif angle >= 90 and angle < 135:
+            self.se = se.T[:,::-1]
+        else:
+            self.se = se[:,::-1]
+
+    def plot(self):
+        """Return a plot of the selection element (a bitmap).
+
+        Returns
+        -------
+        fig : matplotlib.Figure
+            Figure object for plotting/saving.
+        """
+        #- Isolated mpl imports to work in batch with no $DISPLAY
+        import matplotlib as mpl
+        import matplotlib.pyplot as plt
+
+        n, m = self.se.shape
+        fig, ax = plt.subplots(1,1, figsize=(0.2*n, 0.2*m), tight_layout=True)
+        ax.imshow(self.se, cmap='gray', origin='lower',
+                  interpolation='nearest', vmin=0, vmax=1)
+        ax.xaxis.set_major_locator(mpl.ticker.LinearLocator(n+1))
+        ax.yaxis.set_major_locator(mpl.ticker.LinearLocator(m+1))
+        ax.set(xticklabels=[], yticklabels=[])
+        ax.grid(color='gray')
+        ax.tick_params(axis='both', length=0)
+        return fig
+
+
 class Image(Header):
     def __init__(self, data=None, header=None, mask=None, error=None, origin=None, individual_frames=None, slitmap=None):
         Header.__init__(self, header=header, origin=origin)
@@ -2737,7 +2810,8 @@ class Image(Header):
         return flux
 
     def reject_cosmics(self, sigma_det=5, rlim=1.2, iterations=5, fwhm_gauss=[2.0,2.0], replace_box=[5, 5],
-            replace_error=1e6, increase_radius=0, gain=1.0, rdnoise=1.0, bias=0.0, verbose=False, inplace=True):
+            replace_error=1e6, increase_radius=0, binary_closure=True,
+            gain=1.0, rdnoise=1.0, bias=0.0, verbose=False, inplace=True):
         """
             Detects and removes cosmics from astronomical images based on Laplacian edge
             detection scheme combined with a PSF convolution approach.
@@ -2766,6 +2840,9 @@ class Image(Header):
                         Error value for bad pixels in the comupted error image
                 increase_radius: integer, default: 0
                         Increase the boundary of each detected cosmic ray pixel by the given number of pixels.
+                binary_closure: booean, default: True
+                        Apply binary closure to final mask to merge long cosmic ray traces that were separated
+                        along the propagation direction
                 gain: float, default=1.0
                         Value of the gain in units of electrons/ADUs
                 rdnoise: float, default=1.0
@@ -2867,11 +2944,22 @@ class Image(Header):
                     mask_img = Image(data=img_original._mask)
                     mask_new = mask_img.convolveImg(kernel=numpy.ones((2*increase_radius+1, 2*increase_radius+1)))
                     img_original._mask = mask_new
-                # replace possible corrput pixel with zeros for final output
+                if binary_closure:
+                    bmask = img_original._mask > 0
+                    bc_mask = numpy.zeros(bmask.shape, dtype=img_original._mask.dtype)
+                    for ang in [20, 45, 70, 90, 110, 135, 160]:
+                        # leave out the dispersion direction (0 degrees), see DESI, Guy et al., ApJ, 2023, 165, 144
+                        lse = LinearSelectionElement(11, 11, ang)
+                        bc_mask = bc_mask | ndimage.binary_closing(bmask, structure=lse.se)
+                    img_original._mask = bc_mask
+                    if verbose:
+                        log.info(f'  Total number after binary closing: {numpy.sum(bc_mask)} pixels')
+
+                # replace possible corrput pixel with median for final output
                 out = img_original.replaceMaskMedian(box_x, box_y, replace_error=replace_error)
             else:
                 out.replace_subselect(select, mask=True)  # set the new mask
-                out = out.replaceMaskMedian(box_x, box_y, replace_error=None)  # replace possible corrput pixel with zeros
+                out = out.replaceMaskMedian(box_x, box_y, replace_error=None)  # replace possible corrput pixel with median
 
         if inplace:
             self._data = out._data
