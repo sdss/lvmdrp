@@ -497,7 +497,7 @@ def select_lines_2d(in_images, out_mask, in_cent_traces, in_waves, lines_list=No
         log.info(f"selecting lines in given sources {lines_list.tolist()}")
 
     # get lines selection mask
-    log.info(f"selecting lines with {wave_widths = } pixel")
+    log.info(f"selecting lines with {wave_widths = } angstrom")
     lines_mask = _get_wave_selection(mwave._data, lines_list=lines_list, window=wave_widths)
     lines_mask &= ~mwave._mask
 
@@ -537,9 +537,9 @@ def select_lines_2d(in_images, out_mask, in_cent_traces, in_waves, lines_list=No
     return lines_mask_2d, mtrace, mwave
 
 
-def fix_pixel_shifts(in_images, out_pixshift, ref_images, in_mask,
+def fix_pixel_shifts(in_images, out_images, ref_images, in_mask,
                      max_shift=10, threshold_spikes=0.6, flat_spikes=11,
-                     fill_gaps=20, shift_rows=None, dry_run=False, undo_correction=False, display_plots=False):
+                     fill_gaps=20, shift_rows=None, display_plots=False):
     """Corrects pixel shifts in raw frames based on reference frames and a selection of spectral regions
 
     Given a set of raw frames, reference frames and a mask, this function corrects pixel shifts
@@ -549,7 +549,7 @@ def fix_pixel_shifts(in_images, out_pixshift, ref_images, in_mask,
     ----------
     in_images : list
         list of input raw images for the same spectrograph (brz)
-    out_pixshift : str
+    out_images : str
         output pixel shifts file
     ref_images : list
         list of input reference images for the same spectrograph
@@ -563,10 +563,6 @@ def fix_pixel_shifts(in_images, out_pixshift, ref_images, in_mask,
         width of the spike removal, by default 11
     fill_gaps : int, optional
         width of the gap filling, by default 20
-    dry_run : bool, optional
-        dry run, by default False
-    undo_correction : bool, optional
-        undo correction if existing run is found, by default False
     display_plots : bool, optional
         display plots, by default False
 
@@ -579,21 +575,6 @@ def fix_pixel_shifts(in_images, out_pixshift, ref_images, in_mask,
     list
         list of corrected images
     """
-    # create output image path if not provided
-    ori_images = [in_image.replace(".fits.gz", "_ori.fits.gz") if ".gz" in in_image else in_image.replace(".fits", "_ori.fits") for in_image in in_images]
-    out_images = copy(in_images)
-    if all([os.path.isfile(ori_image) for ori_image in ori_images]):
-        log.info(f"found a previous run of pixel shifts, loading original images from {','.join(ori_images)}")
-        in_images = ori_images
-        if undo_correction:
-            log.info(f"undoing previous pixel shifts for {','.join(out_images)}")
-            out_images = [copy2(ori_image, out_image) for ori_image, out_image in zip(ori_images, out_images)]
-            [os.remove(ori_image) for ori_image in ori_images]
-            return
-    elif undo_correction:
-        log.info(f"no previous run of pixel shifts found for {','.join(in_images)}")
-        return
-
     mask = loadImage(in_mask)
 
     log.info(f"loading reference image from {','.join(ref_images)}")
@@ -653,7 +634,7 @@ def fix_pixel_shifts(in_images, out_pixshift, ref_images, in_mask,
     if apply_shift:
         shifted_rows = numpy.where(numpy.gradient(shifts) > 0)[0][1::2].tolist()
         log.info(f"applying shifts to {shifted_rows = } ({numpy.sum(numpy.abs(shifts)>0)}) rows")
-        for image_out, in_image, out_image, ori_image in zip(images_out, in_images, out_images, ori_images):
+        for image_out, out_image in zip(images_out, out_images):
             image = copy(image_out)
             mjd = image._header.get("SMJD", image._header["MJD"])
             expnum, camera = image._header["EXPOSURE"], image._header["CCD"]
@@ -663,16 +644,9 @@ def fix_pixel_shifts(in_images, out_pixshift, ref_images, in_mask,
                 if shifts[irow] > 0:
                     image_out._data[irow, :] = numpy.roll(image._data[irow, :], int(shifts[irow]))
 
-            if not dry_run:
-                # copy original image to 'ori' file
-                log.info(f"writing original image to {os.path.basename(ori_image)}")
-                if in_image != ori_image:
-                    copy2(in_image, ori_image)
-                # write corrected image
-                log.info(f"writing corrected image to {os.path.basename(out_image)}")
-                image_out.writeFitsData(out_image)
-            else:
-                log.info("dry run, not writing output images")
+            # write corrected image
+            log.info(f"writing corrected image to {os.path.basename(out_image)}")
+            image_out.writeFitsData(out_image)
 
             log.info("plotting results")
             fig, ax = create_subplots(to_display=display_plots, figsize=(15,7), sharex=True, layout="constrained")
@@ -687,7 +661,7 @@ def fix_pixel_shifts(in_images, out_pixshift, ref_images, in_mask,
             plt.setp(axis, yticklabels=[], ylabel="")
             save_fig(
                 fig,
-                product_path=out_pixshift,
+                product_path=out_image,
                 to_display=display_plots,
                 figure_path="qa",
                 label="pixel_shifts"

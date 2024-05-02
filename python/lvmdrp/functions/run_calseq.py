@@ -269,10 +269,10 @@ def messup_frame(mjd, expnum, spec="1", shifts=[1500, 2000, 3500], shift_size=-2
     return messed_up_frames
 
 
-def fix_raw_pixel_shifts(mjd, use_fiducial_cals=True, expnums=None, ref_expnums=None, specs="123",
+def fix_raw_pixel_shifts(mjd, ref_expnums, use_fiducial_cals=True, expnums=None, specs="123",
                          y_widths=5, wave_list=None, wave_widths=0.6*5, max_shift=10, flat_spikes=11,
-                         threshold_spikes=np.inf, shift_rows=None, create_mask_always=False, dry_run=False,
-                         undo_corrections=False, display_plots=False):
+                         threshold_spikes=np.inf, shift_rows=None, skip_done=False,
+                         display_plots=False):
     """Attempts to fix pixel shifts in a list of raw frames
 
     Given an MJD and (optionally) exposure numbers, fix the pixel shifts in a
@@ -283,12 +283,12 @@ def fix_raw_pixel_shifts(mjd, use_fiducial_cals=True, expnums=None, ref_expnums=
     ----------
     mjd : float
         MJD to reduce
+    ref_expnums : list
+        List of reference exposure numbers to use as reference for good frames
     use_fiducial_cals : bool
         Whether to use fiducial calibration frames or not, defaults to True
     expnums : list
         List of exposure numbers to look for pixel shifts
-    ref_expnums : list
-        List of reference exposure numbers to use as reference for good frames
     specs : str
         Spectrograph channels
     y_widths : int
@@ -305,40 +305,41 @@ def fix_raw_pixel_shifts(mjd, use_fiducial_cals=True, expnums=None, ref_expnums=
         Threshold for spikes, by default np.inf
     shift_rows : dict
         Rows to shift, by default None
-    create_mask_always : bool
-        Create mask always, by default False
-    dry_run : bool
-        Dry run, by default False
-    undo_corrections : bool
-        Only undo corrections for previous runs, by default False
+    skip_done : bool
+        Skip pipeline steps that have already been done
     display_plots : bool
         Display plots, by default False
     """
-
-    if isinstance(ref_expnums, (list, tuple, np.ndarray)):
-        ref_expnum = ref_expnums[0]
-    elif isinstance(ref_expnums, (int, np.int64)):
-        ref_expnum = ref_expnums
-    else:
-        raise ValueError("no valid reference exposure number given")
 
     if shift_rows is None:
         shift_rows = {}
     elif not isinstance(shift_rows, dict):
         raise ValueError("shift_rows must be a dictionary with keys (spec, expnum) and values a list of rows to shift")
 
+    ref_frames = get_sequence_metadata(mjd, expnums=ref_expnums)
     frames = get_sequence_metadata(mjd, expnums=expnums)
     if use_fiducial_cals:
         masters_mjd = get_master_mjd(mjd)
         masters_path = os.path.join(MASTERS_DIR, str(masters_mjd))
 
+    ref_imagetyps = set(ref_frames.imagetyp)
+    imagetyps = set(frames.imagetyp)
+    if not imagetyps.issubset(ref_imagetyps):
+        raise ValueError(f"the following image types are not present in the reference frames: {imagetyps - ref_imagetyps}")
+
     expnums_grp = frames.groupby("expnum")
     for spec in specs:
         for expnum in expnums_grp.groups:
+            frame = expnums_grp.get_group(expnum).iloc[0]
+            ref_expnum = ref_frames.query("imagetyp == @frame.imagetyp").expnum.iloc[0]
+
             rframe_paths = sorted(path.expand("lvm_raw", hemi="s", camspec=f"?{spec}", mjd=mjd, expnum=expnum))
             cframe_paths = sorted(path.expand("lvm_raw", hemi="s", camspec=f"?{spec}", mjd=mjd, expnum=ref_expnum))
             rframe_paths = [rframe_path for rframe_path in rframe_paths if ".gz" in rframe_path]
             cframe_paths = [cframe_path for cframe_path in cframe_paths if ".gz" in cframe_path]
+            eframe_paths = [path.full("lvm_anc", drpver=drpver, tileid=frame.tileid, mjd=mjd, kind="e", imagetype=frame.imagetyp, expnum=expnum, camera=f"{channel}{spec}") for channel in "brz"]
+            mask_2d_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, imagetype="mask2d",
+                                     expnum=0, camera=f"sp{spec}", kind="")
 
             if len(rframe_paths) < 3:
                 log.warning(f"skipping {rframe_paths}, less than 3 files found")
@@ -351,22 +352,18 @@ def fix_raw_pixel_shifts(mjd, use_fiducial_cals=True, expnums=None, ref_expnums=
                 mwave_paths = sorted(path.expand("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mwave", camera=f"?{spec}"))
                 mtrace_paths = sorted(path.expand("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mtrace", camera=f"?{spec}"))
 
-            mask_2d_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, imagetype="mask2d",
-                                     expnum=0, camera=f"sp{spec}", kind="")
-            pixshift_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, imagetype="pixshift",
-                                     expnum=expnum, camera=f"sp{spec}", kind="")
-
-            if not undo_corrections and (create_mask_always or expnum == list(expnums_grp.groups)[0]):
-                os.makedirs(os.path.dirname(mask_2d_path), exist_ok=True)
+            if skip_done and os.path.exists(mask_2d_path):
+                log.info(f"skipping {mask_2d_path}, file already exists")
+            else:
                 image_tasks.select_lines_2d(in_images=cframe_paths, out_mask=mask_2d_path, lines_list=wave_list,
                                             in_cent_traces=mtrace_paths, in_waves=mwave_paths,
                                             y_widths=y_widths, wave_widths=wave_widths,
                                             display_plots=display_plots)
 
-            image_tasks.fix_pixel_shifts(in_images=rframe_paths, out_pixshift=pixshift_path,
+            image_tasks.fix_pixel_shifts(in_images=rframe_paths, out_images=eframe_paths,
                                          ref_images=cframe_paths, in_mask=mask_2d_path, flat_spikes=flat_spikes,
                                          threshold_spikes=threshold_spikes, max_shift=max_shift, shift_rows=shift_rows.get((spec, expnum), None),
-                                         dry_run=dry_run, undo_correction=undo_corrections, display_plots=display_plots)
+                                         display_plots=display_plots)
 
 
 def reduce_2d(mjd, use_fiducial_cals=True, expnums=None, exptime=None,
@@ -451,7 +448,6 @@ def reduce_2d(mjd, use_fiducial_cals=True, expnums=None, exptime=None,
                                       replace_with_nan=replace_with_nan,
                                       reject_cr=reject_cr,
                                       in_slitmap=SLITMAP if imagetyp in {"flat", "arc", "object"} else None)
-
 
 
 def create_detrending_frames(mjd, use_fiducial_cals=True, expnums=None, exptime=None, kind="all", assume_imagetyp=None, reject_cr=True, skip_done=True, keep_ancillary=False):
