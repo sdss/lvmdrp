@@ -130,7 +130,9 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
         sci_camera = sci["camera"]
 
         # define ancillary product paths
-        rsci_path = path.full("lvm_raw", camspec=sci_camera, **sci)
+        esci_path = path.full("lvm_anc", drpver=drpver, kind="e", imagetype=sci["imagetyp"], **sci)
+        rsci_path = esci_path if os.path.isfile(esci_path) else path.full("lvm_raw", camspec=sci_camera, **sci)
+
         psci_path = path.full("lvm_anc", drpver=drpver, kind="p", imagetype=sci["imagetyp"], **sci)
         dsci_path = path.full("lvm_anc", drpver=drpver, kind="d", imagetype=sci["imagetyp"], **sci)
         lsci_path = path.full("lvm_anc", drpver=drpver, kind="l", imagetype=sci["imagetyp"], **sci)

@@ -427,7 +427,9 @@ def reduce_2d(mjd, use_fiducial_cals=True, expnums=None, exptime=None,
         log.info(f'Using master bias: {mbias_path}')
         log.info(f'Using master pixel flat: {mpixflat_path}')
 
-        frame_path = path.full("lvm_raw", camspec=frame["camera"], **frame)
+        rframe_path = path.full("lvm_raw", camspec=frame["camera"], **frame)
+        eframe_path = path.full("lvm_anc", drpver=drpver, kind="e", imagetype=imagetyp, **frame)
+        frame_path = eframe_path if os.path.exists(eframe_path) else rframe_path
         pframe_path = path.full("lvm_anc", drpver=drpver, kind="p", imagetype=imagetyp, **frame)
 
         # bypass creation of detrended frame in case of imagetyp=bias
