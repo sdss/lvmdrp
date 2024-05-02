@@ -2949,9 +2949,11 @@ class Image(Header):
                     bc_mask = numpy.zeros(bmask.shape, dtype=img_original._mask.dtype)
                     for ang in [20, 45, 70, 90, 110, 135, 160]:
                         # leave out the dispersion direction (0 degrees), see DESI, Guy et al., ApJ, 2023, 165, 144
-                        lse = LinearSelectionElement(9, 9, ang)
+                        lse = LinearSelectionElement(11, 11, ang)
                         bc_mask = bc_mask | ndimage.binary_closing(bmask, structure=lse.se)
                     img_original._mask = bc_mask
+                    if verbose:
+                        log.info(f'  Total number after binary closing: {numpy.sum(bc_mask)} pixels')
 
                 # replace possible corrput pixel with median for final output
                 out = img_original.replaceMaskMedian(box_x, box_y, replace_error=replace_error)
