@@ -93,11 +93,10 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
     extraction_method = "aperture" if aperture_extraction else "optimal"
 
     # get target frames metadata or extract if it doesn't exist
-    sci_metadata = md.get_metadata(tileid="*", mjd="*", expnum=expnum)
-    if len(sci_metadata) == 0:
-        sci_mjd = mjd_from_expnum(expnum)
-        sci_metadata = md.get_frames_metadata(mjd=sci_mjd)
-        sci_metadata.query("expnum == @expnum", inplace=True)
+    sci_mjd = mjd_from_expnum(expnum)
+    sci_metadata = md.get_frames_metadata(mjd=sci_mjd)
+    sci_metadata = md.get_frames_metadata(mjd=sci_mjd)
+    sci_metadata.query("expnum == @expnum", inplace=True)
     sci_metadata.sort_values("expnum", ascending=False, inplace=True)
 
     # define general metadata
