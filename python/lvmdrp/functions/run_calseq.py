@@ -1289,6 +1289,10 @@ def reduce_nightly_sequence(mjd, use_fiducial_cals=True, reject_cr=True, skip_do
         log.warning("no twilight exposures found")
 
 
+def reduce_longterm_sequence(mjd, use_fiducial_cals=True, reject_cr=True, skip_done=True, keep_ancillary=False):
+    pass
+
+
 def run_calibration_sequence(mjds, masters_mjd=None, expnums=None,
                              pixelflats: bool = False, pixelmasks: bool = False,
                              illumination_corrections: bool = False):
