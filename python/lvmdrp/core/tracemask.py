@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # encoding: utf-8
 
+import os
 import numpy
 from astropy.io import fits as pyfits
 from lvmdrp.core.fiberrows import FiberRows
@@ -107,10 +108,10 @@ class TraceMask(FiberRows):
     def clipTrace(self, dim):
         self._data = numpy.clip(self._data, 0, dim)
         self._data = numpy.clip(self._data, 0, dim)
-    
+
     def writeFitsData(self, out_trace):
         """Writes information from a FiberRows object into a FITS file.
-        
+
         A single or multiple extension file are possible to create.
 
         Parameters
@@ -136,4 +137,5 @@ class TraceMask(FiberRows):
                 hdu[0].header = self.getHeader()  # add the primary header to the HDU
                 hdu[0].update_header()
 
+        os.path.makedirs(os.path.dirname(out_trace), exist_ok=True)
         hdu.writeto(out_trace, output_verify="silentfix", overwrite=True)

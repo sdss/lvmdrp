@@ -3285,6 +3285,8 @@ class RSS(FiberRows):
         if self._header is not None:
             hdus[0].header = self.getHeader()
             hdus[0].update_header()
+
+        os.makedirs(os.path.dirname(out_rss), exist_ok=True)
         hdus.writeto(out_rss, overwrite=True, output_verify="silentfix")
 
 def loadRSS(in_rss):
@@ -3409,6 +3411,8 @@ class lvmFrame(lvmBaseProduct):
         self._template["SUPERFLAT"].data = self._superflat
         self._template["SLITMAP"] = pyfits.BinTableHDU(data=self._slitmap, name="SLITMAP")
         self._template.verify("silentfix")
+
+        os.makedirs(os.path.dirname(out_file), exist_ok=True)
         self._template.writeto(out_file, overwrite=True)
 
 
@@ -3477,6 +3481,8 @@ class lvmFFrame(lvmBaseProduct):
         self._template["FLUXCAL"] = pyfits.BinTableHDU(data=self._fluxcal, name="FLUXCAL")
         self._template["SLITMAP"] = pyfits.BinTableHDU(data=self._slitmap, name="SLITMAP")
         self._template.verify("silentfix")
+
+        os.makedirs(os.path.dirname(out_file), exist_ok=True)
         self._template.writeto(out_file, overwrite=True)
 
 
@@ -3541,6 +3547,8 @@ class lvmCFrame(lvmBaseProduct):
         self._template["SKY_WEST_IVAR"].data = numpy.divide(1, self._sky_west_error**2, where=self._sky_west_error != 0, out=numpy.zeros_like(self._sky_west_error))
         self._template["SLITMAP"] = pyfits.BinTableHDU(data=self._slitmap, name="SLITMAP")
         self._template.verify("silentfix")
+
+        os.makedirs(os.path.dirname(out_file), exist_ok=True)
         self._template.writeto(out_file, overwrite=True)
 
 
@@ -3594,6 +3602,8 @@ class lvmSFrame(lvmBaseProduct):
         self._template["SKY_IVAR"].data = numpy.divide(1, self._sky_error**2, where=self._sky_error != 0, out=numpy.zeros_like(self._sky_error))
         self._template["SLITMAP"] = pyfits.BinTableHDU(data=self._slitmap, name="SLITMAP")
         self._template.verify("silentfix")
+
+        os.makedirs(os.path.dirname(out_file), exist_ok=True)
         self._template.writeto(out_file, overwrite=True)
 
 

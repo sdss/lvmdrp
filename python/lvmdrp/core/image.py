@@ -6,6 +6,7 @@ from functools import partial
 from typing import List
 from tqdm import tqdm
 
+import os
 import numpy
 import bottleneck as bn
 from astropy.table import Table
@@ -1410,6 +1411,7 @@ class Image(Header):
                     pass
                 hdu[0].update_header()
 
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
         hdu.writeto(filename, output_verify="silentfix", overwrite=True)
 
     def computePoissonError(self, rdnoise):
