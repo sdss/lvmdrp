@@ -8,7 +8,6 @@ import os
 import sys
 from itertools import product
 from copy import deepcopy as copy
-from shutil import copy2
 from multiprocessing import Pool, cpu_count
 
 import numpy
