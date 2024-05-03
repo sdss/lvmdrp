@@ -17,13 +17,30 @@ from lvmdrp.utils.metadata import get_frames_metadata, get_master_metadata
 from lvmdrp.utils.cluster import run_cluster
 
 from lvmdrp.functions.run_quickdrp import quick_science_reduction
-from lvmdrp.functions.run_twilights import reduce_twilight_sequence, MASK_BANDS
+from lvmdrp.functions.run_calseq import MASK_BANDS, create_fiberflats, reduce_nightly_sequence, fix_raw_pixel_shifts
 
 from sdss_access import Access
 
 
-class IntRangeType(click.ParamType):
+class IntListType(click.ParamType):
     name = 'int_list'
+
+    def convert(self, value, param, ctx):
+        try:
+            # Split the input value by commas
+            if isinstance(value, str):
+                parts = value.split(',')
+            else:
+                parts = value
+
+            return [int(part) for part in parts]
+
+        except ValueError:
+            self.fail(f'{value} is not a valid input', param, ctx)
+
+
+class IntRangeType(click.ParamType):
+    name = 'int_ranges'
 
     def convert(self, value, param, ctx):
         try:
@@ -200,7 +217,7 @@ def twilight_reduction(expnums: list, median_box: int, niter: int, threshold: Tu
     """ Run the twilight sequence reduction """
     # parse multiple exposure number lists into a single list
     expnums = [expnum for expnum_list in expnums for expnum in expnum_list]
-    reduce_twilight_sequence(
+    create_fiberflats(
         expnums=expnums,
         median_box=median_box,
         niter=niter,
@@ -215,6 +232,46 @@ def twilight_reduction(expnums: list, median_box: int, niter: int, threshold: Tu
 
 # register twilight sequence reduction
 cli.add_command(twilight_reduction)
+
+@cli.command('nightly-cals', short_help='Run the nightly calibration sequence')
+@click.option('-m', '--mjd', type=int, required=True, help='the MJD to reduce')
+@click.option('-r', '--skip-cr', is_flag=True, default=False, help='flag to skip cosmic rays rejection')
+@click.option('-f', '--use-fiducial-cals', is_flag=True, default=False, help='flag to use fiducial calibration frames')
+@click.option('-s', '--skip-done', is_flag=True, default=False, help='flag to skip reduction steps that have already been done')
+@click.option('-a', '--keep-ancillary', is_flag=True, default=False, help='flag to keep ancillary files')
+def nightly_calibrations(mjd, skip_cr, use_fiducial_cals, skip_done, keep_ancillary):
+    """ Run the nightly calibration sequence """
+    reduce_nightly_sequence(mjd=mjd, reject_cr=not skip_cr,
+                            use_fiducial_cals=use_fiducial_cals,
+                            skip_done=skip_done, keep_ancillary=keep_ancillary)
+
+# register nightly calibration sequence
+cli.add_command(nightly_calibrations)
+
+
+@cli.command('fix-pixel-shifts', short_help='Fix the electronic pixel shifts in the raw data')
+@click.option('-m', '--mjd', type=int, help='the MJD to reduce')
+@click.option('-e', '--expnums', type=IntListType(), help='a list of exposure numbers to reduce')
+@click.option('-r', '--ref-expnums', type=IntListType(), help='a list of reference exposure numbers')
+@click.option('-w', '--wave-widths', type=int, default=5000, help='the width of the wavelength range in angstroms')
+@click.option('-y', '--y-widths', type=int, default=20, help='the width of the cross-dispersion aperture in pixels')
+@click.option('-f', '--flat-spikes', type=int, default=21, help='the window within which to filter spikes')
+@click.option('-t', '--threshold-spikes', type=float, default=0.6, help='the threshold for the spikes filtering')
+def fix_pixel_shifts(mjd, expnums, ref_expnums, wave_widths, y_widths, flat_spikes, threshold_spikes):
+    """ Fix the electronic pixel shifts in the raw data """
+    # TODO: read Dmitry's reports on shifts
+    # TODO: calculate shifts and compare to Dmitry's
+    # TODO: if different, visually inspect the suspect frames
+    # TODO: manually correct shifts and pass as `shift_rows` parameter
+    # TODO: add shift corrections as header metadata
+
+    fix_raw_pixel_shifts(mjd=mjd, expnums=expnums, ref_expnums=ref_expnums,
+                         wave_widths=wave_widths, y_widths=y_widths,
+                         flat_spikes=flat_spikes, threshold_spikes=threshold_spikes,
+                         skip_done=True)
+
+# register fix pixel shifts command
+cli.add_command(fix_pixel_shifts)
 
 
 @cli.command('erase', short_help='Remove the DRP reductions')

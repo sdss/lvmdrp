@@ -785,7 +785,7 @@ class Spectrum1D(Header):
     def __truediv__(self, other):
         if isinstance(other, Spectrum1D):
             # verify wavelength and LSF arrays are the same
-            if not numpy.array_equal(self._wave, other._wave):
+            if not numpy.isclose(self._wave, other._wave).all():
                 raise ValueError("wavelength arrays are not the same")
             if (self._wave_trace is not None and other._wave_trace is not None) and not self._wave_trace == other._wave_trace:
                 raise ValueError("wavelength trace arrays are not the same")
@@ -2734,7 +2734,7 @@ class Spectrum1D(Header):
 
         return pixels, wave, data
 
-    def measurePeaks(self, init_pos, method="gauss", init_sigma=1.0, threshold=0, max_diff=0, ftol=1e-3, xtol=1e-3):
+    def measurePeaks(self, init_pos, method="gauss", init_sigma=1.0, threshold=0, max_diff=1.5, bounds=(-numpy.inf, numpy.inf), ftol=1e-5, xtol=1e-5):
         """
         Find the subpixel centre for the local maxima in a Spectrum.
 
@@ -2819,9 +2819,10 @@ class Spectrum1D(Header):
 
         elif method == "gauss":
             # compute the subpixel peak position by fitting a gaussian to all peaks (3 pixel to get a unique solution
-            positions = numpy.zeros(
-                len(init_pos), dtype="float32"
-            )  # create empty array
+            positions = numpy.zeros(len(init_pos), dtype="float32")
+            lower, upper = bounds
+            amp_lower, pos_lower, sig_lower = numpy.split(lower, 3)
+            amp_upper, pos_upper, sig_upper = numpy.split(upper, 3)
             for j in range(len(init_pos)):
                 # only pixels with enough contrast are fitted
                 if not mask[j]:
@@ -2836,6 +2837,8 @@ class Spectrum1D(Header):
                     gauss.fit(
                         self._pixels[init_pos[j] - 1 : init_pos[j] + 2],
                         self._data[init_pos[j] - 1 : init_pos[j] + 2],
+                        sigma=self._data[init_pos[j]-1:init_pos[j]+2],
+                        bounds=([amp_lower[j], pos_lower[j], sig_lower[j]], [amp_upper[j], pos_upper[j], sig_upper[j]]),
                         warning=False, ftol=ftol, xtol=xtol
                     )  # perform fitting
                     positions[j] = gauss.getPar()[1]
@@ -2844,18 +2847,6 @@ class Spectrum1D(Header):
             mask, numpy.isnan(positions)
         )  # masked all corrupt subpixel peak positions
 
-        if max_diff != 0:
-            # mask all pixels that are away from the initial guess of peak positions by a certain difference
-            mask = numpy.logical_or(
-                numpy.logical_or(
-                    positions > init_pos + max_diff, positions < init_pos - max_diff
-                ),
-                mask,
-            )
-
-        if numpy.sum(mask) > 0:
-            # replace the estimated position of all masekd peak position by the corresponding initial guess peak positions
-            positions[mask] = init_pos[mask].astype("float32")
         return positions, mask
 
     def measureFWHMPeaks(
@@ -3105,7 +3096,7 @@ class Spectrum1D(Header):
                 med_pos[i] = 0.0
         return offsets, med_pos
 
-    def fitMultiGauss(self, centres, init_fwhm, bounds=(-numpy.inf, numpy.inf), ftol=1e-3, xtol=1e-3):
+    def fitMultiGauss(self, centres, init_fwhm, bounds=(-numpy.inf, numpy.inf), ftol=1e-5, xtol=1e-5):
         select = numpy.zeros(self._dim, dtype="bool")
         flux_in = numpy.zeros(len(centres), dtype=numpy.float32)
         sig_in = numpy.ones_like(flux_in) * init_fwhm / 2.354

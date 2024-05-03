@@ -12,6 +12,11 @@ from scipy import interpolate, optimize, special
 
 fact = numpy.sqrt(2.0 * numpy.pi)
 
+def gaussians(pars, x):
+    """Gaussian models for multiple components"""
+    y = pars[0][:, None] * numpy.exp(-0.5 * ((x[None, :] - pars[1][:, None]) / pars[2][:, None]) ** 2) / (pars[2][:, None] * fact)
+    return bn.nansum(y, axis=0)
+
 
 class SpectralResolution(object):
     def __init__(self, res=None):
@@ -75,8 +80,8 @@ class fit_profile1D(object):
         method="leastsq",
         parallel="auto",
     ):
-        if not numpy.isfinite(sigma).all():
-            raise ValueError(f"Errors have non-finite values: {sigma}")
+        if numpy.isnan(sigma).any():
+            raise ValueError(f"Errors have non-valid values: {sigma}")
         if p0 is None and p0 is not False and self._guess_par is not None:
             self._guess_par(x, y)
         perr_init = deepcopy(self)

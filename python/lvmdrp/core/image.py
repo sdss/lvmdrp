@@ -4,6 +4,7 @@ import warnings
 
 from functools import partial
 from typing import List
+from tqdm import tqdm
 
 import numpy
 import bottleneck as bn
@@ -17,9 +18,32 @@ from scipy import interpolate
 from lvmdrp import log
 from lvmdrp.core.constants import CON_LAMPS, ARC_LAMPS
 from lvmdrp.core.plot import plt
+from lvmdrp.core.fit_profile import gaussians, Gaussians
 from lvmdrp.core.apertures import Apertures
 from lvmdrp.core.header import Header
-from lvmdrp.core.spectrum1d import Spectrum1D, _cross_match_float
+from lvmdrp.core.tracemask import TraceMask
+from lvmdrp.core.spectrum1d import Spectrum1D, _cross_match_float, _cross_match, _spec_from_lines
+
+
+def _fill_column_list(columns, width):
+    """Adds # width columns around the given columns list
+
+    Parameters
+    ----------
+    columns : list
+        list of columns to add width
+    width : int
+        number of columns to add around the given columns
+
+    Returns
+    -------
+    list
+        list of columns with width
+    """
+    new_columns = []
+    for icol in columns:
+        new_columns.extend(range(icol - width, icol + width))
+    return new_columns
 
 
 def _parse_ccd_section(section):
@@ -298,6 +322,79 @@ def _no_stepdowns(data):
         if data[i] < top:
             data_out[i] = top
     return data_out
+
+
+class LinearSelectionElement:
+    """Define a selection element for morphological binary image processing.
+       Used, e.g. for binary closure of cosmic ray tracks.
+    """
+
+    def __init__(self, n, m, angle):
+        """This will produce an n x m selection element with a line going
+        through the center according to some angle.
+
+        Parameters
+        ----------
+        n : int
+            Number of rows in selection element.
+        m : int
+            Number of columns in selection element.
+        angle : float
+            Angle of line through center, in deg [0,180].
+        """
+        self.se = None
+        self.angle = angle
+
+        se = numpy.zeros((m,n), dtype=int)
+        xc, yc = n//2, m//2 # row, col
+
+        if angle >= 0 and angle < 45:
+            b = numpy.tan(numpy.deg2rad(angle))
+        elif angle >= 45 and angle < 90:
+            b = numpy.tan(numpy.deg2rad(90 - angle))
+        elif angle >= 90 and angle < 135:
+            b = numpy.tan(numpy.deg2rad(angle-90))
+        elif angle >= 135 and angle < 180:
+            b = numpy.tan(numpy.deg2rad(180-angle))
+        else:
+            raise ValueError('Angle ({}) must be in [0,180]'.format(angle))
+
+        for x in range(0, n):
+            y = int(yc + b*(x-xc))
+            if y >= 0 and y < m:
+                se[y,x] = 1
+
+        if angle < 45:
+            self.se = se
+        elif angle >= 45 and angle < 90:
+            self.se = se.T
+        elif angle >= 90 and angle < 135:
+            self.se = se.T[:,::-1]
+        else:
+            self.se = se[:,::-1]
+
+    def plot(self):
+        """Return a plot of the selection element (a bitmap).
+
+        Returns
+        -------
+        fig : matplotlib.Figure
+            Figure object for plotting/saving.
+        """
+        #- Isolated mpl imports to work in batch with no $DISPLAY
+        import matplotlib as mpl
+        import matplotlib.pyplot as plt
+
+        n, m = self.se.shape
+        fig, ax = plt.subplots(1,1, figsize=(0.2*n, 0.2*m), tight_layout=True)
+        ax.imshow(self.se, cmap='gray', origin='lower',
+                  interpolation='nearest', vmin=0, vmax=1)
+        ax.xaxis.set_major_locator(mpl.ticker.LinearLocator(n+1))
+        ax.yaxis.set_major_locator(mpl.ticker.LinearLocator(m+1))
+        ax.set(xticklabels=[], yticklabels=[])
+        ax.grid(color='gray')
+        ax.tick_params(axis='both', length=0)
+        return fig
 
 
 class Image(Header):
@@ -1393,7 +1490,7 @@ class Image(Header):
                 out_error[y_cors[m], x_cors[m]] = replace_error
 
         # create new Image object
-        new_image = Image(data=out_data, error=out_error,  mask=self._mask, header=self._header)
+        new_image = Image(data=out_data, error=out_error,  mask=self._mask, header=self._header, slitmap=self._slitmap)
         return new_image
 
     def calibrateSDSS(self, fieldPhot, subtractSky=True):
@@ -1634,7 +1731,6 @@ class Image(Header):
         new_image = copy(self)
         new_image.setData(data=new, error=new_error, inplace=True)
         return new_image
-
 
     def convolveGaussImg(self, sigma_x, sigma_y, mode="nearest", mask=False):
         """
@@ -1981,6 +2077,283 @@ class Image(Header):
         new_img.setData(data=models)
         return new_img
 
+    def match_reference_column(self, ref_column=2000, ref_centroids=None, stretch_range=[0.7, 1.3], shift_range=[-100, 100]):
+        """Returns the reference centroids matched against the current image
+
+        Parameters
+        ----------
+        ref_column : int, optional
+            column to use as reference, by default 2000
+        ref_centroids : numpy.ndarray, optional
+            reference centroids to use for matching, by default None
+
+        Returns
+        -------
+        numpy.ndarray
+            matched reference centroids
+        """
+        if self._header is None:
+            raise ValueError("No header available")
+        if self._slitmap is None:
+            raise ValueError("No slitmap available")
+        channel, spec = list(self._header.get("CCD", [None, None]))
+        spec = int(spec)
+        if channel is None:
+            raise ValueError("No CCD information available in header")
+
+        # extract guess positions from fibermap
+        slitmap = self._slitmap[self._slitmap["spectrographid"] == spec]
+        if ref_centroids is None and self._slitmap is not None:
+            ref_centroids = slitmap[f"ypix_{channel}"].data
+        else:
+            raise ValueError("No reference profile provided and no slitmap available")
+
+        # define stretch factors
+        s_min, s_max = stretch_range
+        s_del = 0.1/self._dim[0]
+        stretch_factors = numpy.arange(s_min, s_max+s_del, s_del)
+
+        # correct reference fiber positions
+        profile = self.getSlice(ref_column, axis="y")
+        pixels = profile._pixels
+        pixels = numpy.arange(pixels.size)
+        guess_heights = numpy.ones_like(ref_centroids) * numpy.nanmax(profile._data)
+        ref_profile = _spec_from_lines(ref_centroids, sigma=1.2, wavelength=pixels, heights=guess_heights)
+        log.info(f"correcting guess positions for column {ref_column}")
+        cc, bhat, mhat = _cross_match(
+            ref_spec=ref_profile,
+            obs_spec=profile._data,
+            stretch_factors=stretch_factors,
+            shift_range=shift_range)
+        log.info(f"stretch factor: {mhat:.3f}, shift: {bhat:.3f}")
+        ref_centroids = ref_centroids * mhat + bhat
+        return ref_centroids
+
+    def trace_fiber_centroids(self, ref_column=2000, ref_centroids=None, mask_fibstatus=1,
+                              ncolumns=140, method="gauss", fwhm_guess=2.5, fwhm_range=[1.0, 3.5],
+                              counts_threshold=5000, max_diff=1.5, fit_polynomial=True, poly_deg=4):
+        if self._header is None:
+            raise ValueError("No header available")
+        if self._slitmap is None:
+            raise ValueError("No slitmap available")
+        channel, spec = list(self._header.get("CCD", [None, None]))
+        spec = int(spec)
+        if channel is None:
+            raise ValueError("No CCD information available in header")
+
+        # extract guess positions from fibermap
+        slitmap = self._slitmap[self._slitmap["spectrographid"] == spec]
+        if ref_centroids is None and self._slitmap is not None:
+            ref_centroids = slitmap[f"ypix_{channel}"].data
+        elif ref_centroids is None:
+            raise ValueError("No reference profile provided and no slitmap available")
+
+        if isinstance(mask_fibstatus, int):
+            mask_fibstatus = [mask_fibstatus]
+        elif isinstance(mask_fibstatus, list, tuple, numpy.ndarray):
+            mask_fibstatus = mask_fibstatus.astype(int)
+
+        # set mask
+        bad_fibers = numpy.isin(slitmap["fibstatus"].data, mask_fibstatus)
+        good_fibers = numpy.where(numpy.logical_not(bad_fibers))[0]
+
+        # create empty traces mask for the image
+        fibers = ref_centroids.size
+        dim = self.getDim()
+        centroids = TraceMask()
+        centroids.createEmpty(data_dim=(fibers, dim[1]))
+        centroids.setFibers(fibers)
+        centroids._good_fibers = good_fibers
+        centroids.setHeader(self._header.copy())
+        centroids._header["IMAGETYP"] = "trace_centroid"
+
+        # set positions of fibers along reference column
+        centroids.setSlice(ref_column, axis="y", data=ref_centroids, mask=numpy.zeros_like(ref_centroids, dtype="bool"))
+
+        # select columns to measure centroids
+        step = self._dim[1] // ncolumns
+        columns = numpy.concatenate((numpy.arange(ref_column, 0, -step), numpy.arange(ref_column, self._dim[1], step)))
+        log.info(f"selecting {len(columns)-1} columns: {','.join(map(str, numpy.unique(columns)))}")
+
+        # trace centroids in each column
+        iterator = tqdm(enumerate(columns), total=len(columns), desc="tracing centroids", unit="column", ascii=True)
+        for i, icolumn in iterator:
+            # extract column profile
+            img_slice = self.getSlice(icolumn, axis="y")
+
+            # get fiber positions along previous column
+            if icolumn == ref_column:
+                # trace reference column first or skip if already traced
+                if i == 0:
+                    cent_guess, _, mask_guess = centroids.getSlice(ref_column, axis="y")
+                else:
+                    continue
+            else:
+                cent_guess, _, mask_guess = centroids.getSlice(columns[i-1], axis="y")
+
+            # cast fiber positions to integers
+            cent_guess = cent_guess.round().astype("int16")
+
+            # measure fiber positions
+            bound_lower = numpy.array([0]*cent_guess.size + (cent_guess-max_diff).tolist() + [fwhm_range[0]/2.354]*cent_guess.size)
+            bound_upper = numpy.array([numpy.inf]*cent_guess.size + (cent_guess+max_diff).tolist() + [fwhm_range[1]/2.354]*cent_guess.size)
+            cen_slice, msk_slice = img_slice.measurePeaks(cent_guess, method, init_sigma=fwhm_guess / 2.354, threshold=counts_threshold, bounds=(bound_lower, bound_upper))
+
+            centroids.setSlice(icolumn, axis="y", data=cen_slice, mask=msk_slice)
+
+        return centroids
+
+    def trace_fiber_widths(self, fiber_centroids, ref_column=2000, ncolumns=40, nblocks=18, iblocks=[],
+                           fwhm_guess=2.5, fwhm_range=[1.0,3.5], max_diff=1.5, counts_threshold=5000):
+
+        if self._header is None:
+            raise ValueError("No header available")
+        unit = self._header["BUNIT"]
+
+        # initialize flux and FWHM traces
+        trace_cent = TraceMask()
+        trace_cent.createEmpty(data_dim=(fiber_centroids._fibers, self._dim[1]))
+        trace_cent.setFibers(fiber_centroids._fibers)
+        trace_cent._good_fibers = fiber_centroids._good_fibers
+        trace_cent.setHeader(self._header.copy())
+        trace_amp = copy(trace_cent)
+        trace_fwhm = copy(trace_cent)
+        trace_cent._header["IMAGETYP"] = "trace_centroid"
+        trace_amp._header["IMAGETYP"] = "trace_amplitude"
+        trace_fwhm._header["IMAGETYP"] = "trace_fwhm"
+
+        # select columns to fit for amplitudes, fiber_centroids and FWHMs per fiber block
+        step = self._dim[1] // ncolumns
+        columns = numpy.concatenate((numpy.arange(ref_column, 0, -step), numpy.arange(ref_column+step, self._dim[1], step)))
+        log.info(f"tracing fibers in {len(columns)} columns: {','.join(map(str, columns))}")
+
+        # fit peaks, fiber_centroids and FWHM in each column
+        mod_columns, residuals = [], []
+        for i, icolumn in enumerate(columns):
+            log.info(f"tracing column {icolumn} ({i+1}/{len(columns)})")
+            # get slice of data and trace
+            cen_slice, _, msk_slice = fiber_centroids.getSlice(icolumn, axis="y")
+            img_slice = self.getSlice(icolumn, axis="y")
+
+            # define fiber blocks
+            if iblocks and isinstance(iblocks, (list, tuple, numpy.ndarray)):
+                cen_blocks = numpy.split(cen_slice, nblocks)
+                cen_blocks = numpy.asarray(cen_blocks)[iblocks]
+                msk_blocks = numpy.split(msk_slice, nblocks)
+                msk_blocks = numpy.asarray(msk_blocks)[iblocks]
+            else:
+                cen_blocks = numpy.split(cen_slice, nblocks)
+                msk_blocks = numpy.split(msk_slice, nblocks)
+
+            # fit each block
+            par_blocks = []
+            for j, (cen_block, msk_block) in enumerate(zip(cen_blocks, msk_blocks)):
+                # apply flux threshold
+                cen_idx = cen_block.round().astype("int16")
+                msk_block |= (img_slice._data[cen_idx] < counts_threshold)
+
+                # mask bad fibers
+                cen_block = cen_block[~msk_block]
+                # initialize parameters with the full block size
+                par_block = numpy.ones(3 * msk_block.size) * numpy.nan
+                par_mask = numpy.tile(msk_block, 3)
+
+                # skip block if all fibers are masked
+                if msk_block.sum() > 0.5 * msk_block.size:
+                    log.info(f"skipping fiber block {j+1}/{nblocks} (most fibers masked)")
+                else:
+                    # fit gaussian models to each fiber profile
+                    log.info(f"fitting fiber block {j+1}/{nblocks} ({cen_block.size}/{msk_block.size} good fibers)")
+                    bound_lower = numpy.array([0]*cen_block.size + (cen_block-max_diff).tolist() + [fwhm_range[0]/2.354]*cen_block.size)
+                    bound_upper = numpy.array([numpy.inf]*cen_block.size + (cen_block+max_diff).tolist() + [fwhm_range[1]/2.354]*cen_block.size)
+                    _, par_block[~par_mask] = img_slice.fitMultiGauss(cen_block, init_fwhm=fwhm_guess, bounds=(bound_lower, bound_upper))
+
+                par_blocks.append(par_block)
+
+            # combine all parameters in a single array
+            par_joint = numpy.asarray([numpy.split(par_block, 3) for par_block in par_blocks])
+            par_joint = par_joint.transpose(1, 0, 2).reshape(3, -1)
+            # define joint gaussian model
+            mod_joint = Gaussians(par=par_joint.ravel())
+
+            # store joint model
+            mod_columns.append(mod_joint)
+
+            # get parameters of joint model
+            amp_slice = par_joint[0]
+            cent_slice = par_joint[1]
+            fwhm_slice = par_joint[2] * 2.354
+
+            # mask fibers with invalid values
+            amp_off = (amp_slice <= counts_threshold)
+            log.info(f"masking {amp_off.sum()} samples with amplitude < {counts_threshold} {unit}")
+            cent_off = numpy.abs(1 - cent_slice / numpy.concatenate(cen_blocks)) > 0.01
+            log.info(f"masking {cent_off.sum()} samples with centroids refined by > 1 %")
+            fwhm_off = (fwhm_slice < fwhm_range[0]) | (fwhm_slice > fwhm_range[1])
+            log.info(f"masking {fwhm_off.sum()} samples with FWHM outside {fwhm_range} pixels")
+            amp_mask = numpy.isnan(amp_slice) | amp_off | cent_off | fwhm_off
+            cent_mask = numpy.isnan(cent_slice) | amp_off | cent_off | fwhm_off
+            fwhm_mask = numpy.isnan(fwhm_slice) | amp_off | cent_off | fwhm_off
+
+            if amp_slice.size != trace_amp._data.shape[0]:
+                dummy_amp = numpy.split(numpy.zeros(trace_amp._data.shape[0]), nblocks)
+                dummy_cent = numpy.split(numpy.zeros(trace_cent._data.shape[0]), nblocks)
+                dummy_fwhm = numpy.split(numpy.zeros(trace_fwhm._data.shape[0]), nblocks)
+                dummy_amp_mask = numpy.split(numpy.ones(trace_amp._data.shape[0], dtype=bool), nblocks)
+                dummy_cent_mask = numpy.split(numpy.ones(trace_cent._data.shape[0], dtype=bool), nblocks)
+                dummy_fwhm_mask = numpy.split(numpy.ones(trace_fwhm._data.shape[0], dtype=bool), nblocks)
+
+                amp_split = numpy.split(amp_slice, len(iblocks))
+                cent_split = numpy.split(cent_slice, len(iblocks))
+                fwhm_split = numpy.split(fwhm_slice, len(iblocks))
+                amp_mask_split = numpy.split(amp_mask, len(iblocks))
+                cent_mask_split = numpy.split(cent_mask, len(iblocks))
+                fwhm_mask_split = numpy.split(fwhm_mask, len(iblocks))
+                for j, iblock in enumerate(iblocks):
+                    dummy_amp[iblock] = amp_split[j]
+                    dummy_cent[iblock] = cent_split[j]
+                    dummy_fwhm[iblock] = fwhm_split[j]
+                    dummy_amp_mask[iblock] = amp_mask_split[j]
+                    dummy_cent_mask[iblock] = cent_mask_split[j]
+                    dummy_fwhm_mask[iblock] = fwhm_mask_split[j]
+
+                # update traces
+                trace_amp.setSlice(icolumn, axis="y", data=numpy.concatenate(dummy_amp), mask=numpy.concatenate(dummy_amp_mask))
+                trace_cent.setSlice(icolumn, axis="y", data=numpy.concatenate(dummy_cent), mask=numpy.concatenate(dummy_cent_mask))
+                trace_fwhm.setSlice(icolumn, axis="y", data=numpy.concatenate(dummy_fwhm), mask=numpy.concatenate(dummy_fwhm_mask))
+                trace_amp._good_fibers = numpy.arange(trace_amp._fibers)[~numpy.all(trace_amp._mask, axis=1)]
+                trace_cent._good_fibers = numpy.arange(trace_cent._fibers)[~numpy.all(trace_cent._mask, axis=1)]
+                trace_fwhm._good_fibers = numpy.arange(trace_fwhm._fibers)[~numpy.all(trace_fwhm._mask, axis=1)]
+            else:
+                # update traces
+                trace_amp.setSlice(icolumn, axis="y", data=amp_slice, mask=amp_mask)
+                trace_cent.setSlice(icolumn, axis="y", data=cent_slice, mask=cent_mask)
+                trace_fwhm.setSlice(icolumn, axis="y", data=fwhm_slice, mask=fwhm_mask)
+
+            # compute model column
+            mod_slice = mod_joint(img_slice._pixels)
+
+            # compute residuals
+            integral_mod = numpy.trapz(mod_slice, img_slice._pixels)
+            integral_mod = integral_mod if integral_mod != 0 else numpy.nan
+            # NOTE: this is a hack to avoid integrating the whole column when tracing a few blocks
+            integral_dat = numpy.trapz(img_slice._data * (mod_slice>0), img_slice._pixels)
+            residuals.append((integral_dat - integral_mod) / integral_dat * 100)
+
+            # compute fitted model stats
+            chisq_red = bn.nansum((mod_slice - img_slice._data)[~img_slice._mask]**2 / img_slice._error[~img_slice._mask]**2) / (self._dim[0] - 1 - 3)
+            log.info(f"joint model {chisq_red = :.2f}")
+            if amp_mask.all() or cent_mask.all() or fwhm_mask.all():
+                continue
+            min_amp, max_amp, median_amp = bn.nanmin(amp_slice[~amp_mask]), bn.nanmax(amp_slice[~amp_mask]), bn.nanmedian(amp_slice[~amp_mask])
+            min_cent, max_cent, median_cent = bn.nanmin(cent_slice[~cent_mask]), bn.nanmax(cent_slice[~cent_mask]), bn.nanmedian(cent_slice[~cent_mask])
+            min_fwhm, max_fwhm, median_fwhm = bn.nanmin(fwhm_slice[~fwhm_mask]), bn.nanmax(fwhm_slice[~fwhm_mask]), bn.nanmedian(fwhm_slice[~fwhm_mask])
+            log.info(f"joint model amplitudes: {min_amp = :.2f}, {max_amp = :.2f}, {median_amp = :.2f}")
+            log.info(f"joint model centroids: {min_cent = :.2f}, {max_cent = :.2f}, {median_cent = :.2f}")
+            log.info(f"joint model FWHMs: {min_fwhm = :.2f}, {max_fwhm = :.2f}, {median_fwhm = :.2f}")
+
+        return trace_amp, trace_cent, trace_fwhm, columns, mod_columns, residuals
+
     def traceFWHM(
         self, axis_select, TraceMask, blocks, init_fwhm, threshold_flux, max_pix=None
     ):
@@ -2025,7 +2398,6 @@ class Image(Header):
             ]  #    traceFWHM.setSlice(i, axis='y', data = fwhm_fit[0], mask = fwhm_fit[1]) # insert the result into the trace mask
             # return traceFWHM
         return (fwhm, mask)
-
 
     def extractSpecAperture(self, TraceMask, aperture):
         pos = TraceMask._data
@@ -2438,7 +2810,8 @@ class Image(Header):
         return flux
 
     def reject_cosmics(self, sigma_det=5, rlim=1.2, iterations=5, fwhm_gauss=[2.0,2.0], replace_box=[5, 5],
-            replace_error=1e6, increase_radius=0, gain=1.0, rdnoise=1.0, bias=0.0, verbose=False, inplace=True):
+            replace_error=1e6, increase_radius=0, binary_closure=True,
+            gain=1.0, rdnoise=1.0, bias=0.0, verbose=False, inplace=True):
         """
             Detects and removes cosmics from astronomical images based on Laplacian edge
             detection scheme combined with a PSF convolution approach.
@@ -2467,6 +2840,9 @@ class Image(Header):
                         Error value for bad pixels in the comupted error image
                 increase_radius: integer, default: 0
                         Increase the boundary of each detected cosmic ray pixel by the given number of pixels.
+                binary_closure: booean, default: True
+                        Apply binary closure to final mask to merge long cosmic ray traces that were separated
+                        along the propagation direction
                 gain: float, default=1.0
                         Value of the gain in units of electrons/ADUs
                 rdnoise: float, default=1.0
@@ -2568,11 +2944,22 @@ class Image(Header):
                     mask_img = Image(data=img_original._mask)
                     mask_new = mask_img.convolveImg(kernel=numpy.ones((2*increase_radius+1, 2*increase_radius+1)))
                     img_original._mask = mask_new
-                # replace possible corrput pixel with zeros for final output
+                if binary_closure:
+                    bmask = img_original._mask > 0
+                    bc_mask = numpy.zeros(bmask.shape, dtype=img_original._mask.dtype)
+                    for ang in [20, 45, 70, 90, 110, 135, 160]:
+                        # leave out the dispersion direction (0 degrees), see DESI, Guy et al., ApJ, 2023, 165, 144
+                        lse = LinearSelectionElement(11, 11, ang)
+                        bc_mask = bc_mask | ndimage.binary_closing(bmask, structure=lse.se)
+                    img_original._mask = bc_mask
+                    if verbose:
+                        log.info(f'  Total number after binary closing: {numpy.sum(bc_mask)} pixels')
+
+                # replace possible corrput pixel with median for final output
                 out = img_original.replaceMaskMedian(box_x, box_y, replace_error=replace_error)
             else:
                 out.replace_subselect(select, mask=True)  # set the new mask
-                out = out.replaceMaskMedian(box_x, box_y, replace_error=None)  # replace possible corrput pixel with zeros
+                out = out.replaceMaskMedian(box_x, box_y, replace_error=None)  # replace possible corrput pixel with median
 
         if inplace:
             self._data = out._data
@@ -2607,6 +2994,67 @@ class Image(Header):
 
     def setSlitmap(self, slitmap):
         self._slitmap = slitmap
+
+    def eval_fiber_model(self, trace_cent, trace_width=None, trace_amp=None, columns=None, column_width=None):
+        """Returns the evaluated fiber model from the given fiber centroids, widths and amplitudes
+
+        Parameters
+        ----------
+        trace_cent : TraceMask
+            the fiber trace centroids
+        trace_width : TraceMask
+            the fiber trace widths, defaults to None
+        trace_amp : TraceMask
+            the fiber trace amplitudes, defaults to None
+        nrows : int
+            number of rows in the image, defaults to 4080
+        columns : list
+            list of columns to evaluate the continuum model, defaults to None
+        column_width : int
+            number of columns to add around the given columns, defaults to None
+
+        Returns
+        -------
+        Image
+            the evaluated continuum model
+        Image
+            the ratio of the model to the original image
+        """
+        if trace_width is None or trace_amp is None or trace_cent is None:
+            raise ValueError(f"nothing to do, with provided fiber trace information {trace_cent = } {trace_width = }, {trace_amp = }")
+
+        if isinstance(trace_width, (int, float, numpy.float32)):
+            trace_width = TraceMask(data=numpy.ones_like(trace_cent._data) * trace_width, mask=numpy.zeros_like(trace_cent._data, dtype=bool))
+        elif isinstance(trace_width, TraceMask):
+                pass
+        else:
+            raise ValueError("trace_width must be a TraceMask instance or an int/float")
+
+        if isinstance(trace_amp, (int, float, numpy.float32)):
+            trace_amp = TraceMask(data=numpy.ones_like(trace_cent._data) * trace_amp, mask=numpy.zeros_like(trace_cent._data, dtype=bool))
+        elif isinstance(trace_amp, TraceMask):
+                pass
+        else:
+            raise ValueError("trace_amp must be a TraceMask instance or an int/float")
+
+        if columns is None:
+            columns = numpy.arange(trace_cent._data.shape[1])
+        else:
+            columns = _fill_column_list(columns, column_width)
+
+        # initialize the continuum model
+        nrows = self._dim[0]
+        ncols = self._dim[1]
+        model = Image(data=numpy.zeros((nrows, ncols)), mask=numpy.ones((nrows, ncols), dtype=bool))
+        model._mask[:, columns] = False
+
+        # evaluate continuum model
+        y_axis = numpy.arange(nrows)
+        for icolumn in tqdm(columns, desc="modelling fiber profile", unit="column", ascii=True):
+            pars = (trace_amp._data[:, icolumn], trace_cent._data[:, icolumn], trace_width._data[:, icolumn] / 2.354)
+            model._data[:, icolumn] = gaussians(pars=pars, x=y_axis)
+
+        return model, model / self
 
 
 def loadImage(
