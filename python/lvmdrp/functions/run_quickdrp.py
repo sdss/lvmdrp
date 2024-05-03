@@ -130,7 +130,9 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
         sci_camera = sci["camera"]
 
         # define ancillary product paths
-        rsci_path = path.full("lvm_raw", camspec=sci_camera, **sci)
+        esci_path = path.full("lvm_anc", drpver=drpver, kind="e", imagetype=sci["imagetyp"], **sci)
+        rsci_path = esci_path if os.path.isfile(esci_path) else path.full("lvm_raw", camspec=sci_camera, **sci)
+
         psci_path = path.full("lvm_anc", drpver=drpver, kind="p", imagetype=sci["imagetyp"], **sci)
         dsci_path = path.full("lvm_anc", drpver=drpver, kind="d", imagetype=sci["imagetyp"], **sci)
         lsci_path = path.full("lvm_anc", drpver=drpver, kind="l", imagetype=sci["imagetyp"], **sci)
@@ -211,9 +213,9 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
         mwave_paths = sorted(glob(os.path.join(masters_path, f"lvm-mwave_{lamps}-{channel}?.fits")))
         mlsf_paths = sorted(glob(os.path.join(masters_path, f"lvm-mlsf_{lamps}-{channel}?.fits")))
         frame_path = path.full('lvm_frame', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver, expnum=sci_expnum, kind=f'Frame-{channel}')
-        mflat_paths = sorted(glob(os.path.join(masters_path, f"lvm-mfiberflat_twilight-{channel}?.fits")))
-        if not mflat_paths:
-            mflat_paths = sorted(glob(os.path.join(masters_path, f"lvm-mfiberflat-{channel}?.fits")))
+        mflat_path = os.path.join(masters_path, f"lvm-mfiberflat_twilight-{channel}.fits")
+        if not mflat_path:
+            mflat_path = os.path.join(masters_path, f"lvm-mfiberflat-{channel}?.fits")
         ssci_path = path.full('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver,
                               kind='s', camera=channel, imagetype=sci_imagetyp, expnum=expnum)
         hsci_path = path.full('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver,
@@ -228,11 +230,11 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
         # wavelength calibrate
         rss_tasks.create_pixel_table(in_rss=xsci_path, out_rss=wsci_path, in_waves=mwave_paths, in_lsfs=mlsf_paths)
 
-        # correct thermal shift in wavelength direction
-        rss_tasks.shift_wave_skylines(in_rss=wsci_path, out_rss=wsci_path, channel=channel)
-
         # apply fiberflat correction
-        rss_tasks.apply_fiberflat(in_rss=wsci_path, out_frame=frame_path, in_flats=mflat_paths)
+        rss_tasks.apply_fiberflat(in_rss=wsci_path, out_frame=frame_path, in_flat=mflat_path)
+
+        # correct thermal shift in wavelength direction
+        rss_tasks.shift_wave_skylines(in_frame=frame_path, out_frame=frame_path, channel=channel)
 
         # interpolate sky fibers
         sky_tasks.interpolate_sky(in_frame=frame_path, out_rss=ssci_path)

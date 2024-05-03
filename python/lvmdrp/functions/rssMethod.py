@@ -269,17 +269,17 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
     lamps = set(ilamps)
 
     # mask std fibers since they are not regularly illuminated during arc exposures
-    fibermap = arc._slitmap[arc._slitmap["spectrographid"] == 2]
+    fibermap = arc._slitmap[arc._slitmap["spectrographid"] == int(camera[1])]
     select = fibermap["telescope"] == "Spec"
     arc._mask[select] = True
     arc._data[select] = 0.0
-    arc._error[select] = 0.0
+    arc._error[select] = numpy.inf
 
     # replace NaNs
-    mask = numpy.isnan(arc._data) | numpy.isnan(arc._error)
-    mask |= (arc._data < 0.0) | (arc._error < 0.0)
+    mask = arc._mask | numpy.isnan(arc._data) | numpy.isnan(arc._error)
+    mask |= (arc._data < 0.0) | (arc._error <= 0.0)
     arc._data[mask] = 0.0
-    arc._error[mask] = 0.0
+    arc._error[mask] = numpy.inf
 
     # read reference lines
     ilamps = [lamp.lower() for lamp in ARC_LAMPS]
@@ -733,15 +733,15 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
 
 
 # method to apply shift in wavelength table based on comparison to skylines
-def shift_wave_skylines(in_rss: str, out_rss: str, channel: str):
+def shift_wave_skylines(in_frame: str, out_frame: str, channel: str):
     """
     Applies shift to wavelength map extension based on sky line centroid measurements
 
     Parameters
     ----------
-    in_rss : string
+    in_frame : string
         Input RSS FITS file
-    out_rss : string
+    out_frame : string
         Output RSS FITS file with the shifted wavelength maps
     """
 
@@ -757,21 +757,21 @@ def shift_wave_skylines(in_rss: str, out_rss: str, channel: str):
     skylines=skylinedict[channel]
     dwave=5 # width of wavelength window to measure centroid of skylines
 
-    rss = RSS.from_file(in_rss)
-    fiberid=rss._slitmap['fiberid'].data
+    lvmframe = lvmFrame.from_file(in_frame)
+    fiberid=lvmframe._slitmap['fiberid'].data
     # selection of which fibers belong to which spectrograph
-    sel1=rss._slitmap['spectrographid'].data==1
-    sel2=rss._slitmap['spectrographid'].data==2
-    sel3=rss._slitmap['spectrographid'].data==3
+    sel1=lvmframe._slitmap['spectrographid'].data==1
+    sel2=lvmframe._slitmap['spectrographid'].data==2
+    sel3=lvmframe._slitmap['spectrographid'].data==3
 
     # measure offsets
-    offsets=numpy.zeros((len(skylines), numpy.shape(rss._data)[0]))
+    offsets=numpy.zeros((len(skylines), numpy.shape(lvmframe._data)[0]))
     specoffset=numpy.zeros((len(skylines), 3))
     for i in range(len(skylines)):
-        mask=numpy.abs(rss._wave-skylines[i])>=dwave/2
-        weights=rss._data.copy()
+        mask=numpy.abs(lvmframe._wave-skylines[i])>=dwave/2
+        weights=lvmframe._data.copy()
         weights[mask]=0
-        offsets[i,:]=numpy.nansum(rss._wave*weights, axis=1)/numpy.nansum(weights, axis=1)-skylines[i]
+        offsets[i,:]=numpy.nansum(lvmframe._wave*weights, axis=1)/numpy.nansum(weights, axis=1)-skylines[i]
         specoffset[i,0]=numpy.nanmedian(offsets[i,sel1])
         specoffset[i,1]=numpy.nanmedian(offsets[i,sel2])
         specoffset[i,2]=numpy.nanmedian(offsets[i,sel3])
@@ -779,16 +779,16 @@ def shift_wave_skylines(in_rss: str, out_rss: str, channel: str):
     #Average offsets for different skylines in each channel, apply to trace, and write them in header
     meanoffset=numpy.nanmean(specoffset, axis=0)
     log.info(f'Applying the following offsets [Angstroms] in [b,r,z] channels: {meanoffset}')
-    rss._wave_trace['COEFF'].data[sel1,0] -= meanoffset[0]
-    rss._wave_trace['COEFF'].data[sel2,0] -= meanoffset[1]
-    rss._wave_trace['COEFF'].data[sel3,0] -= meanoffset[2]
-    rss._header[f'HIERARCH WAVE SKYOFF_{channel}1']=(f'{meanoffset[0]}', f'Mean sky line offset in {channel}1 [Angs]')
-    rss._header[f'HIERARCH WAVE SKYOFF_{channel}2']=(f'{meanoffset[1]}', f'Mean sky line offset in {channel}2 [Angs]')
-    rss._header[f'HIERARCH WAVE SKYOFF_{channel}3']=(f'{meanoffset[2]}', f'Mean sky line offset in {channel}3 [Angs]')
+    lvmframe._wave_trace['COEFF'].data[sel1,0] -= meanoffset[0]
+    lvmframe._wave_trace['COEFF'].data[sel2,0] -= meanoffset[1]
+    lvmframe._wave_trace['COEFF'].data[sel3,0] -= meanoffset[2]
+    lvmframe._header[f'HIERARCH WAVE SKYOFF_{channel}1']=(f'{meanoffset[0]}', f'Mean sky line offset in {channel}1 [Angs]')
+    lvmframe._header[f'HIERARCH WAVE SKYOFF_{channel}2']=(f'{meanoffset[1]}', f'Mean sky line offset in {channel}2 [Angs]')
+    lvmframe._header[f'HIERARCH WAVE SKYOFF_{channel}3']=(f'{meanoffset[2]}', f'Mean sky line offset in {channel}3 [Angs]')
 
     #write updated wobject
-    log.info(f"writing updated wobject file '{os.path.basename(out_rss)}'")
-    rss.writeFitsData(out_rss)
+    log.info(f"writing updated wobject file '{os.path.basename(out_frame)}'")
+    lvmframe.writeFitsData(out_frame)
 
     # Make QA plots showing offsets for each sky line in each channel
     for i in range(len(skylines)):
@@ -807,13 +807,13 @@ def shift_wave_skylines(in_rss: str, out_rss: str, channel: str):
         ax.hlines(-0.05, 0, 1944, linestyle=':', color='black', alpha=0.3)
         ax.legend()
         ax.set_ylim(-0.4,0.4)
-        ax.set_title(f'{rss._header["EXPOSURE"]} - {channel} - {skylines[i]}')
+        ax.set_title(f'{lvmframe._header["EXPOSURE"]} - {channel} - {skylines[i]}')
         ax.set_xlabel('Fiber ID')
         ax.set_ylabel(r'$\Delta \lambda [\AA]$')
 
         save_fig(
         fig,
-        product_path=out_rss,
+        product_path=out_frame,
         to_display=False,
         figure_path="qa",
         label=f"skylineshift_{skylines[i]}")
@@ -841,18 +841,13 @@ def create_pixel_table(in_rss: str, out_rss: str, in_waves: str, in_lsfs: str):
         RSS FITS file containing the spectral resolution (LSF in FWHM)
     """
     rss = RSS.from_file(in_rss)
-    rss._data = rss._data[:, :-1]
-    rss._error = rss._error[:, :-1]
-    rss._mask = rss._mask[:, :-1]
 
     wave_traces = [TraceMask.from_file(in_wave) for in_wave in in_waves]
     wave_trace = TraceMask.from_spectrographs(*wave_traces)
-    wave_trace._data = wave_trace._data[:, :-1]
     rss.set_wave_trace(wave_trace)
 
     lsf_traces = [TraceMask.from_file(in_lsfs) for in_lsfs in in_lsfs]
     lsf_trace = TraceMask.from_spectrographs(*lsf_traces)
-    lsf_trace._data = lsf_trace._data[:, :-1]
     rss.set_lsf_trace(lsf_trace)
     rss.writeFitsData(out_rss)
 
@@ -1594,7 +1589,7 @@ def correctTraceMask_drp(trace_in, trace_out, logfile, ref_file, poly_smooth="")
     trace.writeFitsData(trace_out)
 
 
-def apply_fiberflat(in_rss: str, out_frame: str, in_flats: str, clip_below: float = 0.0) -> RSS:
+def apply_fiberflat(in_rss: str, out_frame: str, in_flat: str, clip_below: float = 0.0) -> RSS:
     """applies fiberflat correction to target RSS file
 
     This function applies a fiberflat correction to a target RSS file. The
@@ -1609,7 +1604,7 @@ def apply_fiberflat(in_rss: str, out_frame: str, in_flats: str, clip_below: floa
         input RSS file path to be corrected
     out_frame : str
         output lvmFrame file path with fiberflat correction applied
-    in_flats : str
+    in_flat : str
         input RSS file path to the fiberflat
     clip_below : float, optional
         minimum relative transmission considered. Values below will be masked, by default 0.0
@@ -1627,10 +1622,8 @@ def apply_fiberflat(in_rss: str, out_frame: str, in_flats: str, clip_below: floa
     ifibvar = bn.nanmean(bn.nanvar(rss._data, axis=0))
 
     # load fiberflat
-    flatname = ','.join([os.path.basename(in_flat) for in_flat in in_flats])
-    log.info(f"reading fiberflat from {flatname = }")
-    flats = [RSS.from_file(in_flat) for in_flat in in_flats]
-    flat = RSS.from_spectrographs(*flats)
+    log.info(f"reading fiberflat from {os.path.basename(in_flat)}")
+    flat = RSS.from_file(in_flat)
     if flat._wave is None:
         flat.set_wave_trace(rss._wave_trace)
         flat.set_wave_array()
@@ -1653,7 +1646,8 @@ def apply_fiberflat(in_rss: str, out_frame: str, in_flats: str, clip_below: floa
 
         # interpolate fiberflat to target wavelength grid to fill in missing values
         if not numpy.isclose(spec_flat._wave, spec_data._wave).all():
-            log.warning("resampling fiberflat to target wavelength grid")
+            deltas = spec_flat._wave - spec_data._wave
+            log.warning(f"at fiber {i+1} resampling fiberflat: {numpy.min(deltas)} - {numpy.max(deltas)}")
             spec_flat = spec_flat.resampleSpec(spec_data._wave, err_sim=5)
 
         # apply clipping
@@ -1684,7 +1678,7 @@ def apply_fiberflat(in_rss: str, out_frame: str, in_flats: str, clip_below: floa
         slitmap=rss._slitmap,
         superflat=flat._data
     )
-    lvmframe.set_header(orig_header=rss._header, flatname=flatname, ifibvar=ifibvar, ffibvar=ffibvar)
+    lvmframe.set_header(orig_header=rss._header, flatname=os.path.basename(in_flat), ifibvar=ifibvar, ffibvar=ffibvar)
     lvmframe.writeFitsData(out_frame)
 
     return rss, lvmframe

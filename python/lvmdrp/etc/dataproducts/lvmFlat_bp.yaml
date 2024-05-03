@@ -3,89 +3,252 @@ short: the extracted flatfield frame
 description: |
   This FITS file contains the reduce flat frames. The headers record the status of the telescope
   when the exposure is taken, and the software version that used to reduce this frame.
-created_by: module.py
-used_by: module.py
-location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[MJD]/
+created_by:
+used_by: null
+location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEGRP]/[TILEID]/[MJD]/
 naming_convention: |
-  lvmFlat-[CAMERA]-[EXPNUM].fits.gz, where [CAMERA] is one of the nine cameras on the instrument, b1, r1, z1,
-  or b2, r2, z2, or b3, r3, or z3 for the blue, red, nir cameras on each LVM spectrograph, and
+  lvmFlat-[CHANNEL]-[EXPNUM].fits.gz, where [CHANNEL] is one of the three channels: brz on each LVM spectrograph, and
   [EXPNUM] is the (zero-padded) 8-digit exposure number.
 hdu0:
   name: PRIMARY
-  description: the primary header metadata
+  description: primary header metadata
   is_image: true
   header:
-  - key: DRP2QUAL
-    comment: the DRP quality bitmask
+  - key: FLATNAME
+    comment: fiberflat used to flatfield the data
+  - key: IFIBVAR
+    comment: fiber-to-fiber variance before flatfielding
+  - key: FFIBVAR
+    comment: fiber-to-fiber variance after flatfielding
 hdu1:
   name: FLUX
-  description: Flat field vectors to remove relative flat-field variations as function of wavelength
+  description: Flux in flat fielded in (electron/angstrom)
+  header:
+  - key: BUNIT
+    comment: flux units
+  - key: BSCALE
+    comment: linear scaling factor
+  - key: BZERO
+    comment: zero point
   is_image: true
   shape: CCDROW x NFIBER
 hdu2:
-  name: MASK
-  description: the bitmask describing the quality of the fiber
+  name: IVAR
+  description: Inverse variance (1/sigma2) for the above
   is_image: true
-  shape: NFIBER
+  shape: CCDROW x NFIBER
 hdu3:
-  name: TSET
-  description: Legendre polynomial traceset containing the x,y centers of the fiber traces
+  name: MASK
+  description: the quality bitmask for each fiber pixel
+  is_image: true
+  shape: CCDROW x NFIBER
+hdu4:
+  name: WAVE_TRACE
+  description: air wavelength solution trace in angstroms
   is_image: false
   shape: BINARY FITS TABLE
   columns:
     FUNC:
       name: FUNC
       type: str
-      unit: ''
-      description: ''
+      unit: null
+      description: "polynomial function kind: poly, chebyshev, legendre"
     XMIN:
       name: XMIN
-      type: float64
-      unit: ''
-      description: ''
+      type: float32
+      unit: pix
+      description: initial pixel in the wavelength trace
     XMAX:
       name: XMAX
-      type: float64
-      unit: ''
-      description: ''
+      type: float32
+      unit: pix
+      description: final pixel in the wavelength trace
     COEFF:
       name: COEFF
-      type: float64
-      unit: ''
-      description: ''
-hdu4:
-  name: WIDTH
-  description: Profile width of each fiber
-  is_image: true
-  shape: CCDROW x NFIBER
+      type: float32
+      unit: null
+      description: polynomial coefficients
 hdu5:
-  name: SUPERFLATSET
-  description: Traceset describing superflat
+  name: LSF_TRACE
+  description: LSF (FWHM) solution traceset in angstroms
   is_image: false
   shape: BINARY FITS TABLE
   columns:
-    FULLBKPT:
-      name: FULLBKPT
+    FUNC:
+      name: FUNC
+      type: str
+      unit: null
+      description: "polynomial function kind: poly, chebyshev, legendre"
+    XMIN:
+      name: XMIN
       type: float32
-      unit: ''
-      description: ''
-    BKMASK:
-      name: BKMASK
-      type: int16
-      unit: ''
-      description: ''
-    NORD:
-      name: NORD
-      type: int32
-      unit: ''
-      description: ''
+      unit: pix
+      description: initial pixel in the LSF trace
+    XMAX:
+      name: XMAX
+      type: float32
+      unit: pix
+      description: final pixel in the LSF trace
     COEFF:
       name: COEFF
       type: float32
-      unit: ''
-      description: ''
-    ICOEFF:
-      name: ICOEFF
+      unit: null
+      description: polynomial coefficients
+hdu6:
+  name: CENT_TRACE
+  description: fiber centroid positions in the CCD
+  is_image: false
+  shape: BINARY FITS TABLE
+  columns:
+    FUNC:
+      name: FUNC
+      type: str
+      unit: null
+      description: "polynomial function kind: poly, chebyshev, legendre"
+    XMIN:
+      name: XMIN
       type: float32
-      unit: ''
-      description: ''
+      unit: pix
+      description: initial pixel in the fiber centroid trace
+    XMAX:
+      name: XMAX
+      type: float32
+      unit: pix
+      description: final pixel in the fiber centroid trace
+    COEFF:
+      name: COEFF
+      type: float32
+      unit: null
+      description: polynomial coefficients
+hdu7:
+  name: WIDTH_TRACE
+  description: fiber width (FWHM) in the CCD
+  is_image: false
+  shape: BINARY FITS TABLE
+  columns:
+    FUNC:
+      name: FUNC
+      type: str
+      unit: null
+      description: "polynomial function kind: poly, chebyshev, legendre"
+    XMIN:
+      name: XMIN
+      type: float32
+      unit: pix
+      description: initial pixel in fiber width (FWHM) trace
+    XMAX:
+      name: XMAX
+      type: float32
+      unit: pix
+      description: final pixel in fiber width (FWHM) trace
+    COEFF:
+      name: COEFF
+      type: float32
+      unit: null
+      description: polynomial coefficients
+hdu8:
+  name: SUPERFLAT
+  description: superflat vector from quartz lamps
+  is_image: true
+  shape: CCDROW x NFIBER
+hdu9:
+  name: SLITMAP
+  description: slitmap table describing fiber positions for this exposure
+  is_image: false
+  shape: BINARY FITS TABLE
+  columns:
+    FIBEID:
+      name: fiberid
+      type: uint16
+      description: number of the fiber along the slithead
+      unit: null
+    SPECTROGRAPHID:
+      name: spectrographid
+      type: uint16
+      description: the spectrograph id number, either 1, 2 or 3
+      unit: null
+    BLOCKID:
+      name: blockid
+      type: str
+      description: the ID label of the block along the slit
+      unit: null
+    FINBLOCK:
+      name: finblock
+      type: uint16
+      description: the fiber number within the v-groove block
+      unit: null
+    TARGETTYPE:
+      name: targettype
+      type: str
+      description: the type of fiber, either science, standard or sky
+      unit: null
+    IFULABEL:
+      name: ifulabel
+      type: str
+      description: an ID label for the telescope + sector
+      unit: null
+    FINIFU:
+      name: finifu
+      type: uint16
+      description: a running fiber number within the IFU from 1 to N
+      unit: null
+    TELESCOPE:
+      name: telescope
+      type: str
+      description: the name of the telescope; Sci, Spec, SkyE/W for science, standards, or skies
+      unit: null
+    XPMM:
+      name: xpmm
+      type: float32
+      description: the x coordinate in mm of the fiber relative to the centroid
+      unit: mm
+    YPMM:
+      name: ypmm
+      type: float32
+      description: the x coordinate in mm of the fiber relative to the centroid
+      unit: mm
+    RINGNUM:
+      name: ringnum
+      type: uint16
+      description: the number of the IFU ring the fiber belongs to
+      unit: null
+    ORIG_IFULABEL:
+      name: orig_ifulabel
+      type: str
+      description: the original IFU label from the Excel document. WRONG! DO NOT USE!
+      unit: null
+    ORIG_SLITLABEL:
+      name: orig_slitlabel
+      type: str
+      description: the original slitblock label from the Excel document. WRONG! DO NOT USE!
+      unit: null
+    FINSECTOR:
+      name: finsector
+      type: uint16
+      description: the original fiber number within the IFU sector
+      unit: null
+    FMAP:
+      name: fmap
+      type: str
+      description: the current fiber flow FROM:TO from the IFU position to the SLIT position.
+      unit: null
+    YPIX_B:
+      name: ypix_b
+      type: uint32
+      description: the y coordinate in pixels of the fiber at column 2000 for channel b
+      unit: pix
+    YPIX_R:
+      name: ypix_r
+      type: uint32
+      description: the y coordinate in pixels of the fiber at column 2000 for channel r
+      unit: pix
+    YPIX_Z:
+      name: ypix_z
+      type: uint32
+      description: the y coordinate in pixels of the fiber at column 2000 for channel z
+      unit: pix
+    FIBSTATUS:
+      name: fibstatus
+      type: uint16
+      description: the status of the fiber, 0=good, 1=dead, 2=low, 3=repair, 4=short
+      unit: null
