@@ -93,6 +93,14 @@ def get_sequence_metadata(mjd, expnums=None, exptime=None):
     if exptime is not None:
         frames.query("exptime == @exptime", inplace=True)
 
+    # simple fix of imagetyp, some images have the wrong type in the header
+    twilight_selection = (frames.imagetyp == "flat") & ~(frames.ldls|frames.quartz)
+    domeflat_selection = (frames.ldls|frames.quartz) & ~(frames.neon|frames.hgne|frames.argon|frames.xenon)
+    arc_selection = (frames.neon|frames.hgne|frames.argon|frames.xenon) & ~(frames.ldls|frames.quartz)
+    frames.loc[twilight_selection, "imagetyp"] = "flat"
+    frames.loc[domeflat_selection, "imagetyp"] = "flat"
+    frames.loc[arc_selection, "imagetyp"] = "arc"
+
     frames.sort_values(["expnum", "camera"], inplace=True)
 
     return frames
@@ -1469,7 +1477,7 @@ if __name__ == '__main__':
         # create_fiberflats(mjd=60255, expnums=expnums, median_box=10, niter=1000, threshold=(0.5,2.5), nknots=60, skip_done=True, display_plots=False)
 
         # reduce_nightly_sequence(mjd=60265, reject_cr=False, use_fiducial_cals=False, skip_done=True, keep_ancillary=True)
-        reduce_longterm_sequence(mjd=60265, reject_cr=False, use_fiducial_cals=False, skip_done=True, keep_ancillary=True)
+        reduce_longterm_sequence(mjd=60177, reject_cr=False, use_fiducial_cals=False, skip_done=True, keep_ancillary=True)
 
         # frames = md.get_frames_metadata(60264)
         # frames.sort_values(by="expnum", inplace=True)
