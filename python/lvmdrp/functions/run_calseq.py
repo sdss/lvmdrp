@@ -98,6 +98,70 @@ def get_sequence_metadata(mjd, expnums=None, exptime=None):
     return frames
 
 
+def choose_sequence(frames, flavor, kind):
+    """Returns exposure numbers splitted in different sequences
+
+    Parameters:
+    ----------
+    frames : pd.DataFrame
+        Pandas dataframe containing frames metadata
+    flavor : str
+        Flavor of calibration frame: 'twilight', 'bias', 'flat', 'arc'
+    kind : str
+        Kind of calibration frame: 'nightly', 'longterm'
+
+    Return:
+    ------
+    list
+        list containing arrays of exposure numbers for each sequence
+    """
+    if not isinstance(flavor, str) or flavor not in {"twilight", "bias", "flat", "arc"}:
+        raise ValueError(f"invalid flavor '{flavor}', available values are 'twilight', 'bias', 'flat', 'arc'")
+    if not isinstance(kind, str) or kind not in {"nightly", "longterm"}:
+        raise ValueError(f"invalid kind '{kind}', available values are 'nightly' and 'longterm'")
+
+    if flavor == "twilight":
+        query = "imagetyp == 'flat' and not ldls|quartz"
+    elif flavor == "bias":
+        query = "imagetyp == 'bias'"
+    elif flavor == "flat":
+        query = "imagetyp == 'flat' and ldls|quartz"
+    elif flavor == "arc":
+        query = "imagetyp == 'arc' and not ldls|quartz and neon|hgne|argon|xenon"
+    expnums = frames.query(query).expnum.unique()
+    diff = np.diff(expnums)
+    div, = np.where(diff > 1)
+
+    sequences = np.split(expnums, div+1)
+    log.info(f"found sequences: {sequences}")
+
+    if len(sequences) == 0:
+        raise ValueError(f"no calibration frames of flavor '{flavor}' found using the query: {query}")
+
+    lengths = [len(seq) for seq in sequences]
+    idx = lengths.index(min(lengths) if kind == "nightly" else max(lengths))
+    if len(sequences) > 1:
+        chosen_expnums = sequences[idx]
+    else:
+        chosen_expnums = sequences[idx]
+
+    if flavor == "twilight":
+        expected_length = 24
+    elif flavor == "bias":
+        expected_length = 7
+    elif flavor == "flat":
+        expected_length = 2 if kind == "nightly" else 24
+    elif flavor == "arc":
+        expected_length = 2 if kind == "nightly" else 24
+
+    if len(chosen_expnums) != expected_length:
+        log.warning(f"wrong sequence length: {len(chosen_expnums)}")
+
+    chosen_frames = frames.query("expnum in @chosen_expnums")
+    chosen_frames.sort_values(["expnum", "camera"], inplace=True)
+    return chosen_frames, chosen_expnums
+
+
 def _clean_ancillary(mjd, expnums=None, kind="all"):
     """Clean ancillary files
 
@@ -1290,74 +1354,68 @@ def reduce_nightly_sequence(mjd, use_fiducial_cals=True, reject_cr=True, skip_do
 
 
 def reduce_longterm_sequence(mjd, use_fiducial_cals=True, reject_cr=True, skip_done=True, keep_ancillary=False):
-    pass
+    """Reduces the long-term calibration sequence:
 
+    The long-term calibration sequence consists of the following exposures:
+        * 7 - 9 bias
+        * 24 dome flat (12: LDLS and 12: quartz)
+        * 24 arc (12: 10s and 12: 50s exposures)
+        * ~12 - 24 twilight (~half exposures at dawn and twilight)
 
-def run_calibration_sequence(mjds, masters_mjd=None, expnums=None,
-                             pixelflats: bool = False, pixelmasks: bool = False,
-                             illumination_corrections: bool = False):
-    """Run the calibration sequence reduction
-
-    Given a set of MJDs and (optionally) exposure numbers, run the calibration
-    sequence reduction. This routine will store the master calibration frames
-    in the corresponding calibration directory in the `masters_mjd` or by
-    default in the smallest MJD in `mjds`.
+    This routine will create *long-term* master calibrations
+    at $LVM_SANDBOX/calib/{mjd}
 
     Parameters:
     ----------
-    mjds : list
-        List of MJDs to reduce
-    masters_mjd : float
-        MJD to store the master frames in
-    expnums : list
-        List of exposure numbers to reduce
-    pixelflats : bool
-        Flag to create pixel flats
-    pixelmasks : bool
-        Flag to create pixel masks
-    illumination_corrections : bool
-        Flag to create illumination corrections
+    mjd : int
+        MJD to reduce
+    use_fiducial_cals : bool
+        Whether to use fiducial calibration frames or not, defaults to True
+    reject_cr : bool
+        Reject cosmic rays in 2D reduction, by default True
+    skip_done : bool
+        Skip pipeline steps that have already been done
+    keep_ancillary : bool
+        Keep ancillary files, by default False
     """
+    cal_imagetyps = {"bias", "flat", "arc"}
+    log.info(f"going to reduce nightly calibration frames: {cal_imagetyps}")
 
-    # split exposures into the exposure sequence of each type of master frame
-    frames, masters_mjd = get_sequence_metadata(mjds, masters_mjd=masters_mjd, expnums=expnums)
-    bias_frames = frames.query("imagetyp == 'bias'")
-    dark_frames = frames.query("imagetyp == 'dark'")
-    ldls_frames = frames.query("imagetyp == 'flat & ldls")
-    qrtz_frames = frames.query("imagetyp == 'flat & quartz'")
-    twilight_frames = frames.query("imagetyp == 'flat'")
-    arc_frames = frames.query("imagetyp == 'arc'")
+    frames = md.get_frames_metadata(mjd)
+    frames.query("imagetyp in @cal_imagetyps", inplace=True)
+    if len(frames) == 0:
+        raise ValueError(f"no frames found for MJD = {mjd}")
 
-    # TODO: verify sequences completeness
+    biases, bias_expnums = choose_sequence(frames, flavor="bias", kind="longterm")
+    if len(biases) != 0:
+        log.info(f"found {len(biases)} bias exposures: {bias_expnums}")
+        create_detrending_frames(mjd=mjd, expnums=bias_expnums, kind="bias", use_fiducial_cals=use_fiducial_cals, skip_done=skip_done, keep_ancillary=keep_ancillary)
+    else:
+        log.warning("no bias exposures found")
 
-    # reduce bias/dark
-    create_detrending_frames(mjds, masters_mjd=masters_mjd, expnums=set(bias_frames.expnum), kind="bias")
-    create_detrending_frames(mjds, masters_mjd=masters_mjd, expnums=set(dark_frames.expnum), kind="dark")
+    dome_flats, dome_flat_expnums = choose_sequence(frames, flavor="flat", kind="longterm")
+    if len(dome_flats) != 0:
+        expnums_ldls = dome_flats.query("ldls").expnum.unique()
+        expnums_qrtz = dome_flats.query("quartz").expnum.unique()
+        log.info(f"found {len(dome_flats)} dome flat exposures: {dome_flat_expnums}")
+        create_traces(mjd=mjd, expnums_ldls=expnums_ldls, expnums_qrtz=expnums_qrtz, skip_done=skip_done)
+        # create_nightly_fiberflats(mjd=mjd, expnums_ldls=expnums_ldls, expnums_qrtz=expnums_qrtz, skip_done=skip_done)
+    else:
+        log.warning("no dome flat exposures found")
 
-    # create traces
-    create_traces(mjds, use_fiducial_cals=masters_mjd, expnums_ldls=set(ldls_frames.expnum), expnums_qrtz=set(qrtz_frames.expnum), subtract_straylight=True)
+    arcs, arc_expnums = choose_sequence(frames, flavor="arc", kind="longterm")
+    if len(arcs) != 0:
+        log.info(f"found {len(arcs)} arc exposures: {arc_expnums}")
+        create_wavelengths(mjd=mjd, expnums=arcs.expnum.unique(), skip_done=skip_done)
+    else:
+        log.warning("no arc exposures found")
 
-    # create fiber flats
-    create_fiberflats(mjds, use_fiducial_cals=masters_mjd, expnums=set(twilight_frames.expnum))
-
-    # create wavelength solutions
-    create_wavelengths(mjds, use_fiducial_cals=masters_mjd, expnums=set(arc_frames.expnum))
-
-    # create pixel flats
-    if pixelflats:
-        pixflat_frames = frames.query("imagetyp == 'pixelflat'")
-        create_detrending_frames(mjds, masters_mjd=masters_mjd, expnums=set(pixflat_frames.expnum), kind="pixflat")
-
-    # create pixel mask
-    if pixelmasks:
-        create_pixelmasks(mjds, use_fiducial_cals=masters_mjd,
-                          dark_expnums=set(dark_frames.expnum),
-                          pixflat_expnums=set(pixflat_frames.expnum),
-                          ignore_pixflats=False)
-
-    # create illumination corrections
-    if illumination_corrections:
-        create_illumination_corrections(mjds, masters_mjd=masters_mjd, expnums=expnums)
+    twilight_flats, twilight_expnums = choose_sequence(frames, flavor="twilight", kind="longterm")
+    if len(twilight_flats) != 0:
+        log.info(f"found {len(twilight_flats)} twilight exposures: {twilight_expnums}")
+        create_fiberflats(mjd=mjd, expnums=twilight_expnums, skip_done=skip_done)
+    else:
+        log.warning("no twilight exposures found")
 
 
 class lvmFlat(lvmFrame):
@@ -1373,6 +1431,7 @@ class lvmFlat(lvmFrame):
 
         self._blueprint = dp.load_blueprint(name="lvmFlat")
         self._template = dp.dump_template(dataproduct_bp=self._blueprint, save=False)
+
 
 if __name__ == '__main__':
     import tracemalloc
@@ -1409,7 +1468,15 @@ if __name__ == '__main__':
         # expnums = [7352]
         # create_fiberflats(mjd=60255, expnums=expnums, median_box=10, niter=1000, threshold=(0.5,2.5), nknots=60, skip_done=True, display_plots=False)
 
-        reduce_nightly_sequence(mjd=60265, reject_cr=False, use_fiducial_cals=False, skip_done=True, keep_ancillary=True)
+        # reduce_nightly_sequence(mjd=60265, reject_cr=False, use_fiducial_cals=False, skip_done=True, keep_ancillary=True)
+        reduce_longterm_sequence(mjd=60265, reject_cr=False, use_fiducial_cals=False, skip_done=True, keep_ancillary=True)
+
+        # frames = md.get_frames_metadata(60264)
+        # frames.sort_values(by="expnum", inplace=True)
+        # frames, sequence = split_sequences(frames, flavor="arc", kind="nightly")
+        # print(sequence)
+        # print(frames.to_string())
+
     except Exception as e:
         # snapshot = tracemalloc.take_snapshot()
         # top_stats = snapshot.statistics('lineno')
