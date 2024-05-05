@@ -188,6 +188,36 @@ def _load_shift_report(mjd):
     return shifts_report
 
 
+def _get_reference_expnum(frame, ref_frames):
+    """Get reference frame for a given frame
+
+    Given a frame and a set of reference frames, get the reference frame for the
+    given frame. This routine will return the reference frame with the closest
+    exposure number to the given frame.
+
+    Parameters:
+    ----------
+    frame : pd.Series
+        Frame metadata
+    ref_frames : pd.DataFrame
+        Reference frames metadata
+
+    Returns:
+    -------
+    pd.Series
+        Reference frame metadata
+    """
+    refs = ref_frames.loc[(ref_frames.imagetyp == frame.imagetyp) & (ref_frames.ldls == frame.ldls) & (ref_frames.quartz == frame.quartz)]
+    if len(refs) == 0:
+                raise ValueError(f"no reference frame found for {frame.imagetyp}")
+    idx = np.argmin(refs.expnum.sub(frame.expnum).abs())
+    if idx > 0:
+        idx -= 1
+    if idx == 0:
+        idx += 1
+    return refs.iloc[idx]
+
+
 def _clean_ancillary(mjd, expnums=None, kind="all"):
     """Clean ancillary files
 
@@ -408,8 +438,10 @@ def fix_raw_pixel_shifts(mjd, ref_expnums, use_fiducial_cals=True, expnums=None,
     elif not isinstance(shift_rows, dict):
         raise ValueError("shift_rows must be a dictionary with keys (spec, expnum) and values a list of rows to shift")
 
-    ref_frames = get_sequence_metadata(mjd, expnums=ref_expnums)
+    # get target frames & reference frames metadata
     frames = get_sequence_metadata(mjd, expnums=expnums)
+    ref_frames = get_sequence_metadata(mjd, expnums=ref_expnums)
+
     if use_fiducial_cals:
         masters_mjd = get_master_mjd(mjd)
         masters_path = os.path.join(MASTERS_DIR, str(masters_mjd))
@@ -427,12 +459,20 @@ def fix_raw_pixel_shifts(mjd, ref_expnums, use_fiducial_cals=True, expnums=None,
     for spec in specs:
         for expnum in expnums_grp.groups:
             frame = expnums_grp.get_group(expnum).iloc[0]
-            ref_expnum = ref_frames.query("imagetyp == @frame.imagetyp").expnum.iloc[0]
+
+            # find suitable reference frame for current frame
+            ref_frame = _get_reference_expnum(frame, ref_frames)
+            ref_expnum = ref_frame.expnum
 
             rframe_paths = sorted(path.expand("lvm_raw", hemi="s", camspec=f"?{spec}", mjd=mjd, expnum=expnum))
-            cframe_paths = sorted(path.expand("lvm_raw", hemi="s", camspec=f"?{spec}", mjd=mjd, expnum=ref_expnum))
             rframe_paths = [rframe_path for rframe_path in rframe_paths if ".gz" in rframe_path]
-            cframe_paths = [cframe_path for cframe_path in cframe_paths if ".gz" in cframe_path]
+
+            # use fixed reference if exist, else use original raw frame
+            cframe_paths = sorted([path.full("lvm_anc", drpver=drpver, tileid=frame.tileid, mjd=mjd, kind="e", imagetype=frame.imagetyp, expnum=ref_expnum, camera=f"{channel}{spec}") for channel in "brz"])
+            if not all([os.path.exists(cframe_path) for cframe_path in cframe_paths]):
+                cframe_paths = sorted(path.expand("lvm_raw", hemi="s", camspec=f"?{spec}", mjd=mjd, expnum=ref_expnum))
+                cframe_paths = [cframe_path for cframe_path in cframe_paths if ".gz" in cframe_path]
+
             eframe_paths = [path.full("lvm_anc", drpver=drpver, tileid=frame.tileid, mjd=mjd, kind="e", imagetype=frame.imagetyp, expnum=expnum, camera=f"{channel}{spec}") for channel in "brz"]
             mask_2d_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, imagetype="mask2d",
                                      expnum=0, camera=f"sp{spec}", kind="")
@@ -1502,13 +1542,15 @@ if __name__ == '__main__':
         # create_fiberflats(mjd=60255, expnums=expnums, median_box=10, niter=1000, threshold=(0.5,2.5), nknots=60, skip_done=True, display_plots=False)
 
         # reduce_nightly_sequence(mjd=60265, reject_cr=False, use_fiducial_cals=False, skip_done=True, keep_ancillary=True)
-        reduce_longterm_sequence(mjd=60177, reject_cr=False, use_fiducial_cals=False, skip_done=True, keep_ancillary=True)
+        # reduce_longterm_sequence(mjd=60177, reject_cr=False, use_fiducial_cals=False, skip_done=True, keep_ancillary=True)
 
         # frames = md.get_frames_metadata(60264)
         # frames.sort_values(by="expnum", inplace=True)
         # frames, sequence = split_sequences(frames, flavor="arc", kind="nightly")
         # print(sequence)
         # print(frames.to_string())
+
+        fix_raw_pixel_shifts(mjd=60412, expnums=[16148], ref_expnums=None, wave_widths=5000, y_widths=20, flat_spikes=21, threshold_spikes=0.6, skip_done=True, interactive=True, display_plots=True)
 
     except Exception as e:
         # snapshot = tracemalloc.take_snapshot()

@@ -686,7 +686,7 @@ def fix_pixel_shifts(in_images, out_images, ref_images, in_mask, report=None,
             image_out.writeFitsData(out_image)
 
         if numpy.any(shifts):
-            log.info("plotting results")
+            log.info(f"plotting results for {out_image}")
             fig, ax = create_subplots(to_display=display_plots, figsize=(15,7), sharex=True, layout="constrained")
             ax.set_title(f"{mjd = } - {expnum = } - {camera = } - {imagetyp = }", loc="left")
             y_pixels = numpy.arange(shifts.size)
