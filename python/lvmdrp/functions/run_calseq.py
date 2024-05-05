@@ -209,17 +209,16 @@ def _get_reference_expnum(frame, ref_frames):
     pd.Series
         Reference frame metadata
     """
-    refs = ref_frames.loc[
-        (ref_frames.imagetyp == frame.imagetyp) &
-        (ref_frames.ldls == frame.ldls) &
-        (ref_frames.quartz == frame.quartz) &
-        (ref_frames.neon == frame.neon) &
-        (ref_frames.hgne == frame.hgne) &
-        (ref_frames.xenon == frame.xenon) &
-        (ref_frames.argon == frame.argon)]
+    if frame.imagetyp == "flat" and frame.ldls|frame.quartz:
+        refs = ref_frames.query("imagetyp == 'flat' and ldls|quartz")
+    elif frame.imagetyp == "flat":
+        refs = ref_frames.query("imagetyp == 'flat' and not ldls|quartz")
+    else:
+        refs = ref_frames.query("imagetyp == @frame.imagetyp")
+
     ref_expnums = refs.expnum.unique()
-    if len(ref_expnums) == 0:
-                raise ValueError(f"no reference frame found for {frame.imagetyp}")
+    if len(ref_expnums) < 2:
+        raise ValueError(f"no reference frame found for {frame.imagetyp}")
     idx = np.argmin(np.abs(ref_expnums-frame.expnum))
     if idx > 0:
         idx -= 1
