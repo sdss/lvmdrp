@@ -209,15 +209,23 @@ def _get_reference_expnum(frame, ref_frames):
     pd.Series
         Reference frame metadata
     """
-    refs = ref_frames.loc[(ref_frames.imagetyp == frame.imagetyp) & (ref_frames.ldls == frame.ldls) & (ref_frames.quartz == frame.quartz)]
-    if len(refs) == 0:
+    refs = ref_frames.loc[
+        (ref_frames.imagetyp == frame.imagetyp) &
+        (ref_frames.ldls == frame.ldls) &
+        (ref_frames.quartz == frame.quartz) &
+        (ref_frames.neon == frame.neon) &
+        (ref_frames.hgne == frame.hgne) &
+        (ref_frames.xenon == frame.xenon) &
+        (ref_frames.argon == frame.argon)]
+    ref_expnums = refs.expnum.unique()
+    if len(ref_expnums) == 0:
                 raise ValueError(f"no reference frame found for {frame.imagetyp}")
-    idx = np.argmin(refs.expnum.sub(frame.expnum).abs())
+    idx = np.argmin(np.abs(ref_expnums-frame.expnum))
     if idx > 0:
         idx -= 1
     if idx == 0:
         idx += 1
-    return refs.iloc[idx]
+    return ref_expnums[idx]
 
 
 def _clean_ancillary(mjd, expnums=None, kind="all"):
@@ -391,7 +399,7 @@ def messup_frame(mjd, expnum, spec="1", shifts=[1500, 2000, 3500], shift_size=-2
     return messed_up_frames
 
 
-def fix_raw_pixel_shifts(mjd, ref_expnums, use_fiducial_cals=True, expnums=None, specs="123",
+def fix_raw_pixel_shifts(mjd, expnums=None, ref_expnums=None, use_fiducial_cals=True, specs="123",
                          y_widths=5, wave_list=None, wave_widths=0.6*5, max_shift=10, flat_spikes=11,
                          threshold_spikes=np.inf, shift_rows=None, interactive=False, skip_done=False,
                          display_plots=False):
@@ -405,12 +413,12 @@ def fix_raw_pixel_shifts(mjd, ref_expnums, use_fiducial_cals=True, expnums=None,
     ----------
     mjd : float
         MJD to reduce
-    ref_expnums : list
-        List of reference exposure numbers to use as reference for good frames
-    use_fiducial_cals : bool
-        Whether to use fiducial calibration frames or not, defaults to True
     expnums : list
         List of exposure numbers to look for pixel shifts
+    ref_expnums : list
+        List of reference exposure numbers to use as reference for good frames, by default None
+    use_fiducial_cals : bool
+        Whether to use fiducial calibration frames or not, defaults to True
     specs : str
         Spectrograph channels
     y_widths : int
@@ -454,6 +462,7 @@ def fix_raw_pixel_shifts(mjd, ref_expnums, use_fiducial_cals=True, expnums=None,
         raise ValueError(f"the following image types are not present in the reference frames: {imagetyps - ref_imagetyps}")
 
     shifts_path = os.path.join(os.getenv('LVM_SANDBOX'), 'shift_monitor', f'shift_{mjd}.txt')
+    shifts_report = {}
     if os.path.isfile(shifts_path):
         shifts_report = _load_shift_report(mjd)
 
@@ -463,8 +472,7 @@ def fix_raw_pixel_shifts(mjd, ref_expnums, use_fiducial_cals=True, expnums=None,
             frame = expnums_grp.get_group(expnum).iloc[0]
 
             # find suitable reference frame for current frame
-            ref_frame = _get_reference_expnum(frame, ref_frames)
-            ref_expnum = ref_frame.expnum
+            ref_expnum = _get_reference_expnum(frame, ref_frames)
 
             rframe_paths = sorted(path.expand("lvm_raw", hemi="s", camspec=f"?{spec}", mjd=mjd, expnum=expnum))
             rframe_paths = [rframe_path for rframe_path in rframe_paths if ".gz" in rframe_path]

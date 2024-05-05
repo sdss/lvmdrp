@@ -461,7 +461,7 @@ def _apply_electronic_shifts(images, out_images, drp_shifts, qc_shifts=None, cus
         else:
             this_shifts = drp_shifts
 
-        if apply_shifts:
+        if apply_shifts and numpy.any(this_shifts != 0):
             shifted_rows = numpy.where(numpy.gradient(this_shifts) > 0)[0][1::2].tolist()
             log.info(f"applying shifts from rows {shifted_rows} ({numpy.sum(numpy.abs(this_shifts)>0)} affected rows)")
             for irow in range(len(this_shifts)):
@@ -498,6 +498,8 @@ def _apply_electronic_shifts(images, out_images, drp_shifts, qc_shifts=None, cus
                 figure_path="qa",
                 label="pixel_shifts"
             )
+        else:
+            log.info(f"no shifts to apply, not need to write to {os.path.basename(out_image)}")
     return images_out, this_shifts, which_shifts
 
 
@@ -721,7 +723,7 @@ def fix_pixel_shifts(in_images, out_images, ref_images, in_mask, report=None,
         dshifts = numpy.asarray(dshifts)
         corrs = numpy.asarray(corrs)
 
-        raw_shifts = copy(dshifts)
+        raw_shifts = None
         dshifts = _remove_spikes(dshifts, width=flat_spikes, threshold=threshold_spikes)
         dshifts = _fillin_valleys(dshifts, width=fill_gaps)
         dshifts = _no_stepdowns(dshifts)
@@ -730,7 +732,7 @@ def fix_pixel_shifts(in_images, out_images, ref_images, in_mask, report=None,
         cshifts = numpy.zeros(cdata.shape[0])
         for irow in shift_rows:
             cshifts[irow:] += 2
-        raw_shifts = copy(cshifts)
+        raw_shifts = None
         corrs = numpy.zeros_like(cshifts)
 
     # parse QC reports with the electronic pixel shifts
@@ -780,14 +782,11 @@ def fix_pixel_shifts(in_images, out_images, ref_images, in_mask, report=None,
                 log.warning(f"no shift will be applied to the images: {in_images}")
                 apply_shifts = False
 
-            # apply pixel shifts to the images
-            images_out, _, _, = _apply_electronic_shifts(images=images, out_images=out_images,
-                                                         drp_shifts=dshifts, qc_shifts=qshifts, custom_shifts=cshifts,
-                                                         which_shifts=which_shifts, apply_shifts=apply_shifts,
-                                                         dry_run=False, display_plots=display_plots)
-    else:
-        log.info(f"no pixel shifts detected on frames: {in_images}")
-        shifts = dshifts
+    # apply pixel shifts to the images
+    images_out, shifts, _, = _apply_electronic_shifts(images=images, out_images=out_images, raw_shifts=raw_shifts,
+                                                      drp_shifts=dshifts, qc_shifts=qshifts, custom_shifts=cshifts,
+                                                      which_shifts=which_shifts, apply_shifts=apply_shifts,
+                                                      dry_run=False, display_plots=display_plots)
 
     return shifts, corrs, images_out
 
