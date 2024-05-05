@@ -536,9 +536,9 @@ def select_lines_2d(in_images, out_mask, in_cent_traces, in_waves, lines_list=No
     return lines_mask_2d, mtrace, mwave
 
 
-def fix_pixel_shifts(in_images, out_images, ref_images, in_mask,
+def fix_pixel_shifts(in_images, out_images, ref_images, in_mask, report=None,
                      max_shift=10, threshold_spikes=0.6, flat_spikes=11,
-                     fill_gaps=20, shift_rows=None, display_plots=False):
+                     fill_gaps=20, shift_rows=None, interactive=False, display_plots=False):
     """Corrects pixel shifts in raw frames based on reference frames and a selection of spectral regions
 
     Given a set of raw frames, reference frames and a mask, this function corrects pixel shifts
@@ -554,6 +554,8 @@ def fix_pixel_shifts(in_images, out_images, ref_images, in_mask,
         list of input reference images for the same spectrograph
     in_mask : str
         input mask file for the channel stacked frame
+    report : dict, optional
+        input report with keys (spec, expnum) and values (shift_rows, amount), by default None
     max_shift : int, optional
         maximum shift in pixels, by default 10
     threshold_spikes : float, optional
@@ -562,6 +564,8 @@ def fix_pixel_shifts(in_images, out_images, ref_images, in_mask,
         width of the spike removal, by default 11
     fill_gaps : int, optional
         width of the gap filling, by default 20
+    interactive : bool, optional
+        interactive mode, by default False
     display_plots : bool, optional
         display plots, by default False
 
@@ -629,16 +633,50 @@ def fix_pixel_shifts(in_images, out_images, ref_images, in_mask,
         raw_shifts = copy(shifts)
         corrs = numpy.zeros_like(shifts)
 
-    apply_shift = numpy.any(numpy.abs(shifts)>0)
-    if apply_shift:
-        shifted_rows = numpy.where(numpy.gradient(shifts) > 0)[0][1::2].tolist()
-        log.info(f"applying shifts to {shifted_rows = } ({numpy.sum(numpy.abs(shifts)>0)}) rows")
-        for image_out, out_image in zip(images_out, out_images):
-            image = copy(image_out)
-            mjd = image._header.get("SMJD", image._header["MJD"])
-            expnum, camera = image._header["EXPOSURE"], image._header["CCD"]
-            imagetyp = image._header["IMAGETYP"]
+    # read QC reports with the electronic pixel shifts
+    if report is not None:
+        shift_rows, amount = report
+        qshifts = numpy.zeros(cdata.shape[0])
+        for irow in shift_rows:
+            qshifts[irow:] = amount
+    else:
+        qshifts = None
 
+    # compare QC reports with the electronic pixel shifts
+    apply_shifts = numpy.any(shifts)
+    if qshifts is not None:
+        qshifted_rows = numpy.where(numpy.gradient(qshifts) > 0)[0][1::2].tolist()
+        shifted_rows = numpy.where(numpy.gradient(shifts) > 0)[0][1::2].tolist()
+        log.info(f"QC reports shifted rows: {qshifted_rows}")
+        log.info(f"DRP shifted rows: {shifted_rows}")
+        if not numpy.all(qshifts == shifts):
+            log.warning("QC reports and DRP do not agree on the shifted rows")
+            if interactive:
+                log.info("interactive mode enabled")
+                answer = input("apply [q]c, [d]rp or [c]ustom shifts: ")
+                if answer.lower() == "q":
+                    shifts = qshifts
+                    log.info("choosing QC shifts")
+                elif answer.lower() == "d":
+                    log.info("choosing DRP shifts")
+                elif answer.lower() == "c":
+                    log.info("choosing custom shifts")
+                    answer = input("provide custom shifts and press enter: ")
+                    shifts = numpy.array([int(_) for _ in answer.split()])
+                apply_shifts = numpy.any(numpy.abs(shifts)>0)
+            else:
+                log.warning(f"no shift will be applied to the images: {in_images}")
+                apply_shifts = False
+
+    for image_out, out_image in zip(images_out, out_images):
+        image = copy(image_out)
+        mjd = image._header.get("SMJD", image._header["MJD"])
+        expnum, camera = image._header["EXPOSURE"], image._header["CCD"]
+        imagetyp = image._header["IMAGETYP"]
+
+        if apply_shifts:
+            shifted_rows = numpy.where(numpy.gradient(shifts) > 0)[0][1::2].tolist()
+            log.info(f"applying shifts from rows {shifted_rows} ({numpy.sum(numpy.abs(shifts)>0)} affected rows)")
             for irow in range(len(shifts)):
                 if shifts[irow] > 0:
                     image_out._data[irow, :] = numpy.roll(image._data[irow, :], int(shifts[irow]))
@@ -647,6 +685,7 @@ def fix_pixel_shifts(in_images, out_images, ref_images, in_mask,
             log.info(f"writing corrected image to {os.path.basename(out_image)}")
             image_out.writeFitsData(out_image)
 
+        if numpy.any(shifts):
             log.info("plotting results")
             fig, ax = create_subplots(to_display=display_plots, figsize=(15,7), sharex=True, layout="constrained")
             ax.set_title(f"{mjd = } - {expnum = } - {camera = } - {imagetyp = }", loc="left")
@@ -665,8 +704,8 @@ def fix_pixel_shifts(in_images, out_images, ref_images, in_mask,
                 figure_path="qa",
                 label="pixel_shifts"
             )
-    else:
-        log.info("no pixel shifts detected, no correction applied")
+        else:
+            log.info(f"no pixel shifts detected on frames: {in_images}")
 
     return shifts, corrs, images_out
 

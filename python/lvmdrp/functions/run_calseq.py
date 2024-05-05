@@ -170,6 +170,24 @@ def choose_sequence(frames, flavor, kind):
     return chosen_frames, chosen_expnums
 
 
+def _load_shift_report(mjd):
+    """Reads QC reports with the electronic pixel shifts"""
+
+    with open(os.path.join(os.environ["LVM_SANDBOX"], "shift_monitor", f"shift_{mjd}.txt"), "r") as f:
+        lines = f.readlines()[2:]
+
+    shifts_report = {}
+    for line in lines:
+        cols = line.split()
+        _, exp, _, spec = cols[:4]
+        exp = int(exp)
+        spec = spec[-1]
+        shifts = np.array([int(_) for _ in cols[4:]])
+        shifts_report[(spec, exp)] = (shifts[::2]+1, shifts[1::2])
+
+    return shifts_report
+
+
 def _clean_ancillary(mjd, expnums=None, kind="all"):
     """Clean ancillary files
 
@@ -343,7 +361,7 @@ def messup_frame(mjd, expnum, spec="1", shifts=[1500, 2000, 3500], shift_size=-2
 
 def fix_raw_pixel_shifts(mjd, ref_expnums, use_fiducial_cals=True, expnums=None, specs="123",
                          y_widths=5, wave_list=None, wave_widths=0.6*5, max_shift=10, flat_spikes=11,
-                         threshold_spikes=np.inf, shift_rows=None, skip_done=False,
+                         threshold_spikes=np.inf, shift_rows=None, interactive=False, skip_done=False,
                          display_plots=False):
     """Attempts to fix pixel shifts in a list of raw frames
 
@@ -377,6 +395,8 @@ def fix_raw_pixel_shifts(mjd, ref_expnums, use_fiducial_cals=True, expnums=None,
         Threshold for spikes, by default np.inf
     shift_rows : dict
         Rows to shift, by default None
+    interactive : bool
+        Interactive mode when report and measured shifts are different, by default False
     skip_done : bool
         Skip pipeline steps that have already been done
     display_plots : bool
@@ -398,6 +418,10 @@ def fix_raw_pixel_shifts(mjd, ref_expnums, use_fiducial_cals=True, expnums=None,
     imagetyps = set(frames.imagetyp)
     if not imagetyps.issubset(ref_imagetyps):
         raise ValueError(f"the following image types are not present in the reference frames: {imagetyps - ref_imagetyps}")
+
+    shifts_path = os.path.join(os.getenv('LVM_SANDBOX'), 'shift_monitor', f'shift_{mjd}.txt')
+    if os.path.isfile(shifts_path):
+        shifts_report = _load_shift_report(mjd)
 
     expnums_grp = frames.groupby("expnum")
     for spec in specs:
@@ -433,9 +457,10 @@ def fix_raw_pixel_shifts(mjd, ref_expnums, use_fiducial_cals=True, expnums=None,
                                             display_plots=display_plots)
 
             image_tasks.fix_pixel_shifts(in_images=rframe_paths, out_images=eframe_paths,
-                                         ref_images=cframe_paths, in_mask=mask_2d_path, flat_spikes=flat_spikes,
-                                         threshold_spikes=threshold_spikes, max_shift=max_shift, shift_rows=shift_rows.get((spec, expnum), None),
-                                         display_plots=display_plots)
+                                         ref_images=cframe_paths, in_mask=mask_2d_path, report=shifts_report.get((spec, expnum), None),
+                                         flat_spikes=flat_spikes, threshold_spikes=threshold_spikes,
+                                         max_shift=max_shift, shift_rows=shift_rows.get((spec, expnum), None),
+                                         interactive=interactive, display_plots=display_plots)
 
 
 def reduce_2d(mjd, use_fiducial_cals=True, expnums=None, exptime=None,
