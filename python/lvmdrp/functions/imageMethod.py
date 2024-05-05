@@ -407,6 +407,100 @@ def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=Non
     return trace_cent_fixed, column_shifts, model
 
 
+def _apply_electronic_shifts(images, out_images, drp_shifts, qc_shifts=None, custom_shifts=None, raw_shifts=None,
+                             which_shifts="drp", apply_shifts=True, dry_run=False, display_plots=False):
+    """Applies the chosen electronic pixel shifts to the images and plots the results
+
+    Parameters
+    ----------
+    images : list
+        list of input images
+    out_images : list
+        list of output images
+    drp_shifts : numpy.ndarray
+        DRP electronic pixel shifts
+    qc_shifts : numpy.ndarray
+        QC electronic pixel shifts, by default None
+    custom_shifts : numpy.ndarray
+        custom electronic pixel shifts, by default None
+    raw_shifts : numpy.ndarray
+        raw DRP electronic pixel shifts, by default None
+    which_shifts : str
+        chosen electronic pixel shifts, by default "drp"
+    apply_shifts : bool
+        apply the shifts, by default True
+    dry_run : bool
+        dry run mode (does not save corrected images), by default False
+    display_plots : bool
+        display plots, by default False
+
+    Returns
+    -------
+    list
+        list of corrected images
+    numpy.ndarray
+        the chosen electronic pixel shifts
+    str
+        name of the chosen electronic pixel shifts ('drp', 'qc' or 'custom')
+    """
+    images_out = [copy(image) for image in images]
+    for image, image_out, out_image in zip(images, images_out, out_images):
+        mjd = image._header.get("SMJD", image._header["MJD"])
+        expnum, camera = image._header["EXPOSURE"], image._header["CCD"]
+        imagetyp = image._header["IMAGETYP"]
+
+        if which_shifts == "drp":
+            this_shifts = drp_shifts
+            image_color = "Blues"
+        elif which_shifts == "qc":
+            this_shifts = qc_shifts
+            image_color = "Greens"
+        elif which_shifts == "custom":
+            this_shifts = custom_shifts
+            image_color = "Purples"
+        else:
+            this_shifts = drp_shifts
+
+        if apply_shifts:
+            shifted_rows = numpy.where(numpy.gradient(this_shifts) > 0)[0][1::2].tolist()
+            log.info(f"applying shifts from rows {shifted_rows} ({numpy.sum(numpy.abs(this_shifts)>0)} affected rows)")
+            for irow in range(len(this_shifts)):
+                if this_shifts[irow] > 0:
+                    image_out._data[irow, :] = numpy.roll(image._data[irow, :], int(this_shifts[irow]))
+
+            if not dry_run:
+                log.info(f"writing corrected image to {os.path.basename(out_image)}")
+                image_out.writeFitsData(out_image)
+                images_out.append(image_out)
+
+            log.info(f"plotting results for {out_image}")
+            fig, ax = create_subplots(to_display=display_plots, figsize=(15,7), sharex=True, layout="constrained")
+            ax.set_title(f"{mjd = } - {expnum = } - {camera = } - {imagetyp = }", loc="left")
+            y_pixels = numpy.arange(this_shifts.size)
+            if raw_shifts is not None:
+                ax.step(y_pixels, raw_shifts, where="mid", lw=0.5, color="0.9", label="raw DRP")
+            ax.step(y_pixels, this_shifts, where="mid", color="k", lw=3)
+            ax.step(y_pixels, drp_shifts, where="mid", lw=1, color="tab:blue", label="DRP")
+            if qc_shifts is not None:
+                ax.step(y_pixels, qc_shifts, where="mid", lw=2, color="tab:green", label="QC")
+            if custom_shifts is not None:
+                ax.step(y_pixels, custom_shifts, where="mid", lw=2, color="tab:purple", label="custom shifts")
+            ax.legend(loc="lower right", frameon=False)
+            ax.set_xlabel("Y (pixel)")
+            ax.set_ylabel("Shift (pixel)")
+            plot_image_shift(ax, image._data, this_shifts, cmap="Reds")
+            axis = plot_image_shift(ax, image_out._data, this_shifts, cmap=image_color, inset_pos=(0.14,1.0-0.32))
+            plt.setp(axis, yticklabels=[], ylabel="")
+            save_fig(
+                fig,
+                product_path=out_image,
+                to_display=display_plots,
+                figure_path="qa",
+                label="pixel_shifts"
+            )
+    return images_out, this_shifts, which_shifts
+
+
 def select_lines_2d(in_images, out_mask, in_cent_traces, in_waves, lines_list=None, y_widths=3, wave_widths=0.6*5, image_shape=(4080, 4120), channels="brz", display_plots=False):
     """Selects spectral features based on a list of wavelengths from a 2D raw frame
 
@@ -593,18 +687,24 @@ def fix_pixel_shifts(in_images, out_images, ref_images, in_mask, report=None,
     rdata = copy(image._data)
     rdata = numpy.nan_to_num(rdata, nan=0) * mask._data
 
-    # load input images into output array to apply corrections if needed
-    images_out = [loadImage(in_image) for in_image in in_images]
+    # load input images and initialize output images
+    images = [loadImage(in_image) for in_image in in_images]
+    images_out = images
+
+    # initialize custom shifts
+    cshifts = None
+    apply_shifts = True
+    which_shifts = "drp"
 
     # calculate pixel shifts or use provided ones
     if shift_rows is None:
         log.info("running row-by-row cross-correlation")
-        shifts, corrs = [], []
+        dshifts, corrs = [], []
         for irow in range(rdata.shape[0]):
             cimg_row = cdata[irow]
             rimg_row = rdata[irow]
             if numpy.all(cimg_row == 0) or numpy.all(rimg_row == 0):
-                shifts.append(0)
+                dshifts.append(0)
                 corrs.append(0)
                 continue
 
@@ -616,24 +716,24 @@ def fix_pixel_shifts(in_images, out_images, ref_images, in_mask, report=None,
             corr = corr[mask]
 
             max_corr = numpy.argmax(corr)
-            shifts.append(shift[max_corr])
+            dshifts.append(shift[max_corr])
             corrs.append(corr[max_corr])
-        shifts = numpy.asarray(shifts)
+        dshifts = numpy.asarray(dshifts)
         corrs = numpy.asarray(corrs)
 
-        raw_shifts = copy(shifts)
-        shifts = _remove_spikes(shifts, width=flat_spikes, threshold=threshold_spikes)
-        shifts = _fillin_valleys(shifts, width=fill_gaps)
-        shifts = _no_stepdowns(shifts)
+        raw_shifts = copy(dshifts)
+        dshifts = _remove_spikes(dshifts, width=flat_spikes, threshold=threshold_spikes)
+        dshifts = _fillin_valleys(dshifts, width=fill_gaps)
+        dshifts = _no_stepdowns(dshifts)
     else:
         log.info("using user provided pixel shifts")
-        shifts = numpy.zeros(cdata.shape[0])
+        cshifts = numpy.zeros(cdata.shape[0])
         for irow in shift_rows:
-            shifts[irow:] += 2
-        raw_shifts = copy(shifts)
-        corrs = numpy.zeros_like(shifts)
+            cshifts[irow:] += 2
+        raw_shifts = copy(cshifts)
+        corrs = numpy.zeros_like(cshifts)
 
-    # read QC reports with the electronic pixel shifts
+    # parse QC reports with the electronic pixel shifts
     if report is not None:
         shift_rows, amount = report
         qshifts = numpy.zeros(cdata.shape[0])
@@ -643,69 +743,51 @@ def fix_pixel_shifts(in_images, out_images, ref_images, in_mask, report=None,
         qshifts = None
 
     # compare QC reports with the electronic pixel shifts
-    apply_shifts = numpy.any(shifts)
     if qshifts is not None:
         qshifted_rows = numpy.where(numpy.gradient(qshifts) > 0)[0][1::2].tolist()
-        shifted_rows = numpy.where(numpy.gradient(shifts) > 0)[0][1::2].tolist()
+        shifted_rows = numpy.where(numpy.gradient(dshifts) > 0)[0][1::2].tolist()
         log.info(f"QC reports shifted rows: {qshifted_rows}")
         log.info(f"DRP shifted rows: {shifted_rows}")
-        if not numpy.all(qshifts == shifts):
+        if not numpy.all(qshifts == dshifts):
+            _apply_electronic_shifts(images=images, out_images=out_images,
+                                     drp_shifts=dshifts, qc_shifts=qshifts, raw_shifts=raw_shifts,
+                                     which_shifts="drp", apply_shifts=True,
+                                     dry_run=True, display_plots=display_plots)
             log.warning("QC reports and DRP do not agree on the shifted rows")
             if interactive:
                 log.info("interactive mode enabled")
                 answer = input("apply [q]c, [d]rp or [c]ustom shifts: ")
                 if answer.lower() == "q":
-                    shifts = qshifts
                     log.info("choosing QC shifts")
+                    shifts = qshifts
+                    which_shifts = "qc"
                 elif answer.lower() == "d":
                     log.info("choosing DRP shifts")
+                    shifts = dshifts
+                    which_shifts = "drp"
                 elif answer.lower() == "c":
                     log.info("choosing custom shifts")
-                    answer = input("provide custom shifts and press enter: ")
-                    shifts = numpy.array([int(_) for _ in answer.split()])
+                    answer = input("provide comma-separated custom shifts and press enter: ")
+                    shift_rows = numpy.array([int(_) for _ in answer.split(",")])
+                    cshifts = numpy.zeros(cdata.shape[0])
+                    for irow in shift_rows:
+                        cshifts[irow:] += 2
+                    shifts = cshifts
+                    corrs = numpy.zeros_like(cshifts)
+                    which_shifts = "custom"
                 apply_shifts = numpy.any(numpy.abs(shifts)>0)
             else:
                 log.warning(f"no shift will be applied to the images: {in_images}")
                 apply_shifts = False
 
-    for image_out, out_image in zip(images_out, out_images):
-        image = copy(image_out)
-        mjd = image._header.get("SMJD", image._header["MJD"])
-        expnum, camera = image._header["EXPOSURE"], image._header["CCD"]
-        imagetyp = image._header["IMAGETYP"]
-
-        if apply_shifts:
-            shifted_rows = numpy.where(numpy.gradient(shifts) > 0)[0][1::2].tolist()
-            log.info(f"applying shifts from rows {shifted_rows} ({numpy.sum(numpy.abs(shifts)>0)} affected rows)")
-            for irow in range(len(shifts)):
-                if shifts[irow] > 0:
-                    image_out._data[irow, :] = numpy.roll(image._data[irow, :], int(shifts[irow]))
-
-            # write corrected image
-            log.info(f"writing corrected image to {os.path.basename(out_image)}")
-            image_out.writeFitsData(out_image)
-
-        if numpy.any(shifts):
-            log.info(f"plotting results for {out_image}")
-            fig, ax = create_subplots(to_display=display_plots, figsize=(15,7), sharex=True, layout="constrained")
-            ax.set_title(f"{mjd = } - {expnum = } - {camera = } - {imagetyp = }", loc="left")
-            y_pixels = numpy.arange(shifts.size)
-            ax.step(y_pixels, raw_shifts, where="mid", lw=1, color="red", linestyle="--")
-            ax.step(y_pixels, shifts, where="mid", lw=1)
-            ax.set_xlabel("Y (pixel)")
-            ax.set_ylabel("Shift (pixel)")
-            plot_image_shift(ax, image._data, shifts, cmap="Reds")
-            axis = plot_image_shift(ax, image_out._data, shifts, cmap="Blues", inset_pos=(0.14,1.0-0.32))
-            plt.setp(axis, yticklabels=[], ylabel="")
-            save_fig(
-                fig,
-                product_path=out_image,
-                to_display=display_plots,
-                figure_path="qa",
-                label="pixel_shifts"
-            )
-        else:
-            log.info(f"no pixel shifts detected on frames: {in_images}")
+            # apply pixel shifts to the images
+            images_out, _, _, = _apply_electronic_shifts(images=images, out_images=out_images,
+                                                         drp_shifts=dshifts, qc_shifts=qshifts, custom_shifts=cshifts,
+                                                         which_shifts=which_shifts, apply_shifts=apply_shifts,
+                                                         dry_run=False, display_plots=display_plots)
+    else:
+        log.info(f"no pixel shifts detected on frames: {in_images}")
+        shifts = dshifts
 
     return shifts, corrs, images_out
 
