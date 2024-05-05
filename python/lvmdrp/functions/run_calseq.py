@@ -181,7 +181,6 @@ def _load_shift_report(mjd):
         cols = line[:-1].split()
         if not cols:
             continue
-        print(cols)
         cols = [col for col in cols if col]
         _, exp, _, spec = cols[:4]
         exp = int(exp)
