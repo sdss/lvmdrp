@@ -5044,8 +5044,9 @@ def trace_fibers(
     trace_fwhm._header["IMAGETYP"] = "trace_fwhm"
 
     trace_amp, trace_cent, trace_fwhm, columns, mod_columns, residuals = img.trace_fiber_widths(centroids, ref_column=LVM_REFERENCE_COLUMN,
-                                                                                                ncolumns=ncolumns, nblocks=LVM_NBLOCKS, iblocks=[],
-                                                                                                fwhm_guess=guess_fwhm, fwhm_range=[1.0,3.5], counts_threshold=counts_threshold)
+                                                                                                ncolumns=ncolumns, nblocks=LVM_NBLOCKS, iblocks=iblocks,
+                                                                                                fwhm_guess=guess_fwhm, fwhm_range=fwhm_limits,
+                                                                                                counts_threshold=counts_threshold)
 
     # smooth all trace by a polynomial
     if fit_poly:
