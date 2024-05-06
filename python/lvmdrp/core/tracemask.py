@@ -137,5 +137,5 @@ class TraceMask(FiberRows):
                 hdu[0].header = self.getHeader()  # add the primary header to the HDU
                 hdu[0].update_header()
 
-        os.path.makedirs(os.path.dirname(out_trace), exist_ok=True)
+        os.makedirs(os.path.dirname(out_trace), exist_ok=True)
         hdu.writeto(out_trace, output_verify="silentfix", overwrite=True)
