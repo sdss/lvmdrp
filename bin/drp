@@ -17,7 +17,12 @@ from lvmdrp.utils.metadata import get_frames_metadata, get_master_metadata
 from lvmdrp.utils.cluster import run_cluster
 
 from lvmdrp.functions.run_quickdrp import quick_science_reduction
-from lvmdrp.functions.run_calseq import MASK_BANDS, create_fiberflats, reduce_nightly_sequence, fix_raw_pixel_shifts
+from lvmdrp.functions.run_calseq import (
+    MASK_BANDS,
+    create_fiberflats,
+    reduce_nightly_sequence,
+    reduce_longterm_sequence,
+    fix_raw_pixel_shifts)
 
 from sdss_access import Access
 
@@ -247,6 +252,22 @@ def nightly_calibrations(mjd, skip_cr, use_fiducial_cals, skip_done, keep_ancill
 
 # register nightly calibration sequence
 cli.add_command(nightly_calibrations)
+
+
+@cli.command('long-term-cals', short_help='Run the long-term calibration sequence')
+@click.option('-m', '--mjd', type=int, required=True, help='the MJD to reduce')
+@click.option('-r', '--skip-cr', is_flag=True, default=False, help='flag to skip cosmic rays rejection')
+@click.option('-f', '--use-fiducial-cals', is_flag=True, default=False, help='flag to use fiducial calibration frames')
+@click.option('-s', '--skip-done', is_flag=True, default=False, help='flag to skip reduction steps that have already been done')
+@click.option('-a', '--keep-ancillary', is_flag=True, default=False, help='flag to keep ancillary files')
+def long_term_calibrations(mjd, skip_cr, use_fiducial_cals, skip_done, keep_ancillary):
+    """ Run the long-term calibration sequence """
+    reduce_longterm_sequence(mjd=mjd, reject_cr=not skip_cr,
+                             use_fiducial_cals=use_fiducial_cals,
+                             skip_done=skip_done, keep_ancillary=keep_ancillary)
+
+# register long-term calibration sequence
+cli.add_command(long_term_calibrations)
 
 
 @cli.command('fix-pixel-shifts', short_help='Fix the electronic pixel shifts in the raw data')

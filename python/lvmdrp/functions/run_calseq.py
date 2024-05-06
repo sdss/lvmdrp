@@ -29,7 +29,7 @@ import os
 import numpy as np
 from glob import glob
 from copy import deepcopy as copy
-from shutil import copy2
+from shutil import copy2, move
 from itertools import product, groupby
 from typing import List, Tuple, Dict
 
@@ -163,7 +163,7 @@ def choose_sequence(frames, flavor, kind):
         expected_length = 2 if kind == "nightly" else 24
 
     if len(chosen_expnums) != expected_length:
-        log.warning(f"wrong sequence length: {len(chosen_expnums)}")
+        log.warning(f"wrong sequence length for {flavor = }: {len(chosen_expnums)}, expected {expected_length}")
 
     chosen_frames = frames.query("expnum in @chosen_expnums")
     chosen_frames.sort_values(["expnum", "camera"], inplace=True)
@@ -227,32 +227,38 @@ def _get_reference_expnum(frame, ref_frames):
     return ref_expnums[idx]
 
 
-def _clean_ancillary(mjd, expnums=None, kind="all"):
+def _clean_ancillary(mjd, expnums=None, imagetyp="all"):
     """Clean ancillary files
 
     Given a set of MJDs and (optionally) exposure numbers, clean the ancillary
-    files for the given kind of frames. This routine will remove the ancillary
-    files for the given kind of frames in the corresponding calibration
+    files for the given imagetyp of frames. This routine will remove the ancillary
+    files for the given imagetyp of frames in the corresponding calibration
     directory in the `masters_mjd` or by default in the smallest MJD in `mjds`.
 
     Parameters:
     ----------
     mjd : int
-        MJD to reduce
+        MJD to clean
     expnums : list
-        List of exposure numbers to reduce
-    kind : str
-        Kind of frame to reduce, defaults to "all"
+        List of exposure numbers to clean
+    imagetyp : str
+        type of frame to remove, defaults to "all"
     """
 
     # get frames metadata
     frames = get_sequence_metadata(mjd, expnums=expnums)
 
     # filter by target image types
-    if kind in ["bias", "dark", "flat", "arc", "object"]:
-        frames.query("imagetyp == @kind", inplace=True)
-    elif kind != "all":
-        raise ValueError(f"Invalid kind: '{kind}'. Must be one of 'bias', 'dark', 'flat', 'arc', 'object' or 'all'")
+    ALL = {"bias", "dark", "flat", "arc", "object", "cent", "amp", "width", "stray"}
+    if imagetyp in ALL:
+        frames.query("imagetyp == @imagetyp", inplace=True)
+    elif imagetyp != "all":
+        raise ValueError(f"Invalid imagetyp: '{imagetyp}'. Must be one of {ALL} or 'all'")
+
+    if imagetyp == "all":
+        ancillary_dir = os.path.join(os.getenv["LVM_SPECTRO_REDUX"], drpver, str(mjd), "ancillary")
+        os.rmdir(ancillary_dir)
+        return
 
     ancillary_dirs = []
     for frame in frames.to_dict("records"):
@@ -1434,6 +1440,9 @@ def reduce_nightly_sequence(mjd, use_fiducial_cals=True, reject_cr=True, skip_do
     else:
         log.warning("no twilight exposures found")
 
+    if not keep_ancillary:
+        _clean_ancillary(mjd)
+
 
 def reduce_longterm_sequence(mjd, use_fiducial_cals=True, reject_cr=True, skip_done=True, keep_ancillary=False):
     """Reduces the long-term calibration sequence:
@@ -1481,7 +1490,6 @@ def reduce_longterm_sequence(mjd, use_fiducial_cals=True, reject_cr=True, skip_d
         expnums_qrtz = dome_flats.query("quartz").expnum.unique()
         log.info(f"found {len(dome_flats)} dome flat exposures: {dome_flat_expnums}")
         create_traces(mjd=mjd, expnums_ldls=expnums_ldls, expnums_qrtz=expnums_qrtz, skip_done=skip_done)
-        # create_nightly_fiberflats(mjd=mjd, expnums_ldls=expnums_ldls, expnums_qrtz=expnums_qrtz, skip_done=skip_done)
     else:
         log.warning("no dome flat exposures found")
 
@@ -1499,6 +1507,17 @@ def reduce_longterm_sequence(mjd, use_fiducial_cals=True, reject_cr=True, skip_d
     else:
         log.warning("no twilight exposures found")
 
+    # move master calibrations to sandbox
+    kinds = {"bias", "trace", "width", "fiberflat", "wave", "lsf"}
+    for kind in kinds:
+        src_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind=f"m{kind}")
+        dst_path = path.full("lvm_calib", drpver=drpver, mjd=mjd, kind=f"m{kind}")
+        os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+        move(src_path, dst_path)
+
+    if not keep_ancillary:
+        _clean_ancillary(mjd)
+
 
 class lvmFlat(lvmFrame):
     """lvmFlat class"""
@@ -1513,6 +1532,10 @@ class lvmFlat(lvmFrame):
 
         self._blueprint = dp.load_blueprint(name="lvmFlat")
         self._template = dp.dump_template(dataproduct_bp=self._blueprint, save=False)
+
+
+class lvmArc(lvmFrame):
+    pass
 
 
 if __name__ == '__main__':
@@ -1551,7 +1574,7 @@ if __name__ == '__main__':
         # create_fiberflats(mjd=60255, expnums=expnums, median_box=10, niter=1000, threshold=(0.5,2.5), nknots=60, skip_done=True, display_plots=False)
 
         # reduce_nightly_sequence(mjd=60265, reject_cr=False, use_fiducial_cals=False, skip_done=True, keep_ancillary=True)
-        # reduce_longterm_sequence(mjd=60177, reject_cr=False, use_fiducial_cals=False, skip_done=True, keep_ancillary=True)
+        reduce_longterm_sequence(mjd=60264, reject_cr=False, use_fiducial_cals=True, skip_done=True, keep_ancillary=True)
 
         # frames = md.get_frames_metadata(60264)
         # frames.sort_values(by="expnum", inplace=True)
@@ -1559,7 +1582,7 @@ if __name__ == '__main__':
         # print(sequence)
         # print(frames.to_string())
 
-        fix_raw_pixel_shifts(mjd=60412, expnums=[16148], ref_expnums=None, wave_widths=5000, y_widths=20, flat_spikes=21, threshold_spikes=0.6, skip_done=True, interactive=True, display_plots=True)
+        # fix_raw_pixel_shifts(mjd=60412, expnums=[16148], ref_expnums=None, wave_widths=5000, y_widths=20, flat_spikes=21, threshold_spikes=0.6, skip_done=True, interactive=True, display_plots=True)
 
     except Exception as e:
         # snapshot = tracemalloc.take_snapshot()
