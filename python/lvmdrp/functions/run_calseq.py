@@ -493,7 +493,10 @@ def fix_raw_pixel_shifts(mjd, expnums=None, ref_expnums=None, use_fiducial_cals=
                                      expnum=0, camera=f"sp{spec}", kind="")
 
             if len(rframe_paths) < 3:
-                log.warning(f"skipping {rframe_paths}, less than 3 files found")
+                log.warning(f"skipping {rframe_paths = }, less than 3 files found")
+                continue
+            if len(cframe_paths) < 3:
+                log.warning(f"skipping {cframe_paths = }, less than 3 files found")
                 continue
 
             if use_fiducial_cals:
