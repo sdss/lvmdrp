@@ -4839,6 +4839,9 @@ def trace_centroids(in_image: str,
         img = img.convolveImg(coadd_kernel)
         counts_threshold = counts_threshold * coadd
 
+    # handle invalid error values
+    img._error[img._mask|(img._error<=0)] = numpy.inf
+
     # calculate centroids for reference column
     if correct_ref:
         ref_cent = img.match_reference_column(ref_column=LVM_REFERENCE_COLUMN)
@@ -5031,6 +5034,9 @@ def trace_fibers(
         coadd_kernel = numpy.ones((1, coadd), dtype="uint8")
         img = img.convolveImg(coadd_kernel)
         counts_threshold = counts_threshold * coadd
+
+    # handle invalid error values
+    img._error[img._mask|(img._error<=0)] = numpy.inf
 
     # trace centroids in each column
     log.info(f"loading guess fiber centroids from '{os.path.basename(in_trace_cent_guess)}'")

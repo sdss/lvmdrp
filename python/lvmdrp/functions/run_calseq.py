@@ -1007,6 +1007,7 @@ def create_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnums_qrtz=N
                 img_stray._data = np.nan_to_num(img_stray._data)
                 img_stray = img_stray.medianImg((1,10), propagate_error=True)
                 img_stray = img_stray.convolveImg(np.ones((1, 20), dtype="uint8"))
+                img_stray._error[img_stray._mask|(img_stray._error<=0)] = np.inf
             else:
                 log.info(f"going to trace std fiber {fiber_str} in {camera} within {block_idxs = }")
                 centroids, trace_cent_fit, trace_flux_fit, trace_fwhm_fit, img_stray, model, mratio = image_tasks.trace_fibers(
@@ -1062,24 +1063,24 @@ def create_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnums_qrtz=N
             mcents[camera].interpolate_data(axis="Y", extrapolate=True)
             mwidths[camera].interpolate_data(axis="Y", extrapolate=True)
 
-        # reset mask to propagate broken fibers
-        mamps[camera]._mask[bad_fibers] = True
-        mcents[camera]._mask[bad_fibers] = True
-        mwidths[camera]._mask[bad_fibers] = True
+    # reset mask to propagate broken fibers
+    mamps[camera]._mask[bad_fibers] = True
+    mcents[camera]._mask[bad_fibers] = True
+    mwidths[camera]._mask[bad_fibers] = True
 
-        # save master traces
-        mamp_path = path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=mjd, camera=camera, kind="mamps")
-        mcent_path = path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=mjd, camera=camera, kind="mtrace")
-        mwidth_path = path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=mjd, camera=camera, kind="mwidth")
-        os.makedirs(os.path.dirname(mamp_path), exist_ok=True)
-        mamps[camera].writeFitsData(mamp_path)
-        mcents[camera].writeFitsData(mcent_path)
-        mwidths[camera].writeFitsData(mwidth_path)
+    # save master traces
+    mamp_path = path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=mjd, camera=camera, kind="mamps")
+    mcent_path = path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=mjd, camera=camera, kind="mtrace")
+    mwidth_path = path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=mjd, camera=camera, kind="mwidth")
+    os.makedirs(os.path.dirname(mamp_path), exist_ok=True)
+    mamps[camera].writeFitsData(mamp_path)
+    mcents[camera].writeFitsData(mcent_path)
+    mwidths[camera].writeFitsData(mwidth_path)
 
-        # eval model continuum and ratio
-        model, ratio = img_stray.eval_fiber_model(mamps[camera], mcents[camera], mwidths[camera])
-        model.writeFitsData(dmodel_path)
-        ratio.writeFitsData(dratio_path)
+    # eval model continuum and ratio
+    model, ratio = img_stray.eval_fiber_model(mamps[camera], mcents[camera], mwidths[camera])
+    model.writeFitsData(dmodel_path)
+    ratio.writeFitsData(dratio_path)
 
 
 def create_fiberflats(mjd: int, use_fiducial_cals: bool = True, expnums: List[int] = None, median_box: int = 10, niter: bool = 1000,
@@ -1568,7 +1569,7 @@ if __name__ == '__main__':
         # create_detrending_frames(mjd=60171, masters_mjd=60142, expnums=np.arange(3098, 3117+1), kind="dark", assume_imagetyp="pixelflat", reject_cr=False, skip_done=False)
 
         # create_detrending_frames(mjd=60255, kind="bias", skip_done=False)
-        # create_traces(mjd=MJD, expnums_ldls=ldls_expnums, expnums_qrtz=qrtz_expnums, subtract_straylight=True)
+        # create_traces(mjd=MJD, expnums_ldls=ldls_expnums, expnums_qrtz=qrtz_expnums)
         # create_wavelengths(mjd=60255, masters_mjd=60255, expnums=np.arange(7276,7323+1), skip_done=True)
 
         # expnums = [7231]
@@ -1577,7 +1578,7 @@ if __name__ == '__main__':
         # create_fiberflats(mjd=60255, expnums=expnums, median_box=10, niter=1000, threshold=(0.5,2.5), nknots=60, skip_done=True, display_plots=False)
 
         # reduce_nightly_sequence(mjd=60265, reject_cr=False, use_fiducial_cals=False, skip_done=True, keep_ancillary=True)
-        reduce_longterm_sequence(mjd=60264, reject_cr=False, use_fiducial_cals=True, skip_done=True, keep_ancillary=True)
+        reduce_longterm_sequence(mjd=60264, reject_cr=False, use_fiducial_cals=True, skip_done=False, keep_ancillary=True)
 
         # frames = md.get_frames_metadata(60264)
         # frames.sort_values(by="expnum", inplace=True)
