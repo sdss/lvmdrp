@@ -1515,10 +1515,11 @@ def reduce_longterm_sequence(mjd, use_fiducial_cals=True, reject_cr=True, skip_d
     # move master calibrations to sandbox
     kinds = {"bias", "trace", "width", "fiberflat", "wave", "lsf"}
     for kind in kinds:
-        src_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind=f"m{kind}")
-        dst_path = path.full("lvm_calib", drpver=drpver, mjd=mjd, kind=f"m{kind}")
-        os.makedirs(os.path.dirname(dst_path), exist_ok=True)
-        move(src_path, dst_path)
+        for camera in {"b1", "b2", "b3", "r1", "r2", "r3", "z1", "z2", "z3"}:
+            src_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind=f"m{kind}", camera=camera)
+            dst_path = path.full("lvm_calib", mjd=mjd, kind=kind, camera=camera)
+            os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+            move(src_path, dst_path)
 
     if not keep_ancillary:
         _clean_ancillary(mjd)
