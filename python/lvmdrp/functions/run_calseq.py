@@ -136,11 +136,12 @@ def choose_sequence(frames, flavor, kind):
         query = "imagetyp == 'flat' and ldls|quartz"
     elif flavor == "arc":
         query = "imagetyp == 'arc' and not ldls|quartz and neon|hgne|argon|xenon"
-    expnums = frames.query(query).expnum.unique()
+    expnums = np.sort(frames.query(query).expnum.unique())
     diff = np.diff(expnums)
-    div, = np.where(diff > 1)
+    div, = np.where(np.abs(diff) > 1)
 
     sequences = np.split(expnums, div+1)
+    [seq.sort() for seq in sequences]
     log.info(f"found sequences: {sequences}")
 
     if len(sequences) == 0:
