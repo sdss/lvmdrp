@@ -232,8 +232,8 @@ def fit_continuum(spectrum: Spectrum1D, mask_bands: List[Tuple[float,float]],
         List of continuum models for each iteration
     masked_pixels : np.ndarray
         Masked pixels in all iterations
-    knots : np.ndarray
-        Spline knots
+    tck : tuple
+        Spline parameters
     """
     # early return if no good pixels
     continuum_models = []
@@ -257,8 +257,8 @@ def fit_continuum(spectrum: Spectrum1D, mask_bands: List[Tuple[float,float]],
     kwargs.update({"t": knots, "task": -1})
 
     # fit first spline
-    f = interpolate.splrep(wave, data, **kwargs)
-    spline = interpolate.splev(spectrum._wave, f)
+    tck = interpolate.splrep(wave, data, **kwargs)
+    spline = interpolate.splev(spectrum._wave, tck)
 
     # iterate to mask outliers and update spline
     if threshold is not None and isinstance(threshold, (float, int)):
@@ -272,8 +272,8 @@ def fit_continuum(spectrum: Spectrum1D, mask_bands: List[Tuple[float,float]],
         masked_pixels |= mask
 
         # update spline
-        f = interpolate.splrep(spectrum._wave[~masked_pixels], spectrum._data[~masked_pixels], **kwargs)
-        new_spline = interpolate.splev(spectrum._wave, f)
+        tck = interpolate.splrep(spectrum._wave[~masked_pixels], spectrum._data[~masked_pixels], **kwargs)
+        new_spline = interpolate.splev(spectrum._wave, tck)
         continuum_models.append(new_spline)
         if np.mean(np.abs(new_spline - spline) / spline) <= 0.01:
             break
@@ -281,7 +281,7 @@ def fit_continuum(spectrum: Spectrum1D, mask_bands: List[Tuple[float,float]],
             spline = new_spline
 
     best_continuum = continuum_models.pop(-1)
-    return best_continuum, continuum_models, masked_pixels, knots
+    return best_continuum, continuum_models, masked_pixels, tck
 
 def fit_fiberflat(in_twilight: str, out_flat: str, out_rss: str, interpolate_bad: bool = True, mask_bands: List[Tuple[float,float]] = [],
                   median_box: int = 5, niter: int = 1000, threshold: Tuple[float,float]|float = (0.5,2.0),
