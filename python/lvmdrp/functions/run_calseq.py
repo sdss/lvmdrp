@@ -1423,8 +1423,8 @@ def reduce_nightly_sequence(mjd, use_fiducial_cals=True, reject_cr=True, skip_do
 
     dome_flats = frames.query("imagetyp == 'flat' and ldls|quartz")
     if len(dome_flats) != 0:
-        expnums_ldls = dome_flats.query("ldls").expnum.unique()
-        expnums_qrtz = dome_flats.query("quartz").expnum.unique()
+        expnums_ldls = np.sort(dome_flats.query("ldls").expnum.unique())
+        expnums_qrtz = np.sort(dome_flats.query("quartz").expnum.unique())
         log.info(f"found {len(dome_flats)} dome flat exposures: {set(dome_flats.expnum)}")
         create_nighly_traces(mjd=mjd, expnums_ldls=expnums_ldls, expnums_qrtz=expnums_qrtz, skip_done=skip_done)
         # create_nightly_fiberflats(mjd=mjd, expnums_ldls=expnums_ldls, expnums_qrtz=expnums_qrtz, skip_done=skip_done)
@@ -1434,14 +1434,14 @@ def reduce_nightly_sequence(mjd, use_fiducial_cals=True, reject_cr=True, skip_do
     arcs = frames.query("imagetyp == 'arc' and not ldls|quartz and neon|hgne|argon|xenon")
     if len(arcs) != 0:
         log.info(f"found {len(arcs)} arc exposures: {set(arcs.expnum)}")
-        create_wavelengths(mjd=mjd, expnums=arcs.expnum.unique(), skip_done=skip_done)
+        create_wavelengths(mjd=mjd, expnums=np.sort(arcs.expnum.unique()), skip_done=skip_done)
     else:
         log.warning("no arc exposures found")
 
     twilight_flats = frames.query("imagetyp == 'flat' and not ldls|quartz")
     if len(twilight_flats) != 0:
         log.info(f"found {len(twilight_flats)} twilight exposures: {set(twilight_flats.expnum)}")
-        create_fiberflats(mjd=mjd, expnums=sorted(twilight_flats.expnum.unique()), skip_done=skip_done)
+        create_fiberflats(mjd=mjd, expnums=sorted(np.sort(twilight_flats.expnum.unique())), skip_done=skip_done)
     else:
         log.warning("no twilight exposures found")
 
@@ -1491,8 +1491,8 @@ def reduce_longterm_sequence(mjd, use_fiducial_cals=True, reject_cr=True, skip_d
 
     dome_flats, dome_flat_expnums = choose_sequence(frames, flavor="flat", kind="longterm")
     if len(dome_flats) != 0:
-        expnums_ldls = dome_flats.query("ldls").expnum.unique()
-        expnums_qrtz = dome_flats.query("quartz").expnum.unique()
+        expnums_ldls = np.sort(dome_flats.query("ldls").expnum.unique())
+        expnums_qrtz = np.sort(dome_flats.query("quartz").expnum.unique())
         log.info(f"found {len(dome_flats)} dome flat exposures: {dome_flat_expnums}")
         create_traces(mjd=mjd, expnums_ldls=expnums_ldls, expnums_qrtz=expnums_qrtz, skip_done=skip_done)
     else:
@@ -1501,7 +1501,7 @@ def reduce_longterm_sequence(mjd, use_fiducial_cals=True, reject_cr=True, skip_d
     arcs, arc_expnums = choose_sequence(frames, flavor="arc", kind="longterm")
     if len(arcs) != 0:
         log.info(f"found {len(arcs)} arc exposures: {arc_expnums}")
-        create_wavelengths(mjd=mjd, expnums=arcs.expnum.unique(), skip_done=skip_done)
+        create_wavelengths(mjd=mjd, expnums=np.sort(arcs.expnum.unique()), skip_done=skip_done)
     else:
         log.warning("no arc exposures found")
 
