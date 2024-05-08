@@ -2490,13 +2490,18 @@ def subtract_straylight(
     # load image data
     log.info(f"using image {os.path.basename(in_image)} for stray light subtraction")
     img = loadImage(in_image)
+    img.setData(data=numpy.nan_to_num(img._data), error=numpy.nan_to_num(img._error))
     unit = img._header["BUNIT"]
 
     # smooth image along dispersion axis with a median filter excluded NaN values
     if median_box is not None:
         log.info(f"median filtering image along dispersion axis with a median filter of width {median_box}")
-        median_box = max(1, median_box)
-        img_median = img.medianImg((1, median_box), use_mask=True)
+        median_box = (1, max(1, median_box))
+        img_median = img.replaceMaskMedian(*median_box, replace_error=None)
+        img_median._data = numpy.nan_to_num(img_median._data)
+        img_median = img_median.medianImg(median_box, use_mask=True)
+        img_median._mask = img._mask
+
     else:
         img_median = copy(img)
 
@@ -2509,6 +2514,10 @@ def subtract_straylight(
     if img_median._mask is None:
         img_median._mask = numpy.zeros(img_median._data.shape, dtype=bool)
     img_median._mask = img_median._mask | numpy.isnan(img_median._data) | numpy.isinf(img_median._data) | (img_median._data == 0)
+
+    # mask regions around each fiber within a given cross-dispersion aperture
+    log.info(f"masking fibers with an aperture of {aperture} pixels")
+    img_median.maskFiberTraces(trace_mask, aperture=aperture, parallel=parallel)
 
     # mask regions around the top and bottom of the CCD
     if isinstance(select_nrows, int):
@@ -2523,23 +2532,22 @@ def subtract_straylight(
 
     for icol in range(img_median._dim[1]):
         # mask top/bottom rows before/after first/last fiber
-        img_median._mask[tfiber[icol]:] = True
-        img_median._mask[:bfiber[icol]] = True
+        img_median._mask[tfiber[icol]:, icol] = True
+        img_median._mask[:bfiber[icol], icol] = True
         # unmask select_nrows around each region
-        img_median._mask[(tfiber[icol]+img_median._dim[0]-select_tnrows)//2:(tfiber[icol]+img_median._dim[0]+select_tnrows)//2] = False
-        img_median._mask[(bfiber[icol]-select_bnrows)//2:(bfiber[icol]+select_bnrows)//2] = False
-
-    # mask regions around each fiber within a given cross-dispersion aperture
-    log.info(f"masking fibers with an aperture of {aperture} pixels")
-    img_median.maskFiberTraces(trace_mask, aperture=aperture, parallel=parallel)
+        img_median._mask[(tfiber[icol]+aperture//2):(tfiber[icol]+aperture//2+select_tnrows), icol] = False
+        img_median._mask[(bfiber[icol]-aperture//2-select_bnrows):(bfiber[icol]-aperture//2), icol] = False
 
     # fit the signal in unmaksed areas along cross-dispersion axis by a polynomial
     log.info(f"fitting spline with {smoothing = } to the background signal along cross-dispersion axis")
-    img_fit = img_median.fitSpline(smoothing=smoothing, use_weights=use_weights)
+    img_fit = img_median.fitSpline(smoothing=smoothing, use_weights=use_weights, clip=(0.0, None))
+
+    # median filter to reject outlying columns
+    img_fit = img_fit.medianImg((1, 7))
 
     # smooth the results by 2D Gaussian filter of given with (cross- and dispersion axis have equal width)
     log.info(f"smoothing the background signal by a 2D Gaussian filter of width {gaussian_sigma}")
-    img_stray = img_fit.convolveGaussImg(gaussian_sigma, gaussian_sigma)
+    img_stray = img_fit.convolveGaussImg(1, gaussian_sigma)
     img_stray.setData(data=numpy.nan_to_num(img_stray._data), error=numpy.nan_to_num(img_stray._error))
 
     # subtract smoothed background signal from original image

@@ -1983,7 +1983,7 @@ class Image(Header):
         new_img.setData(data=fit_result, mask=new_mask)
         return new_img
 
-    def fitSpline(self, axis="y", degree=3, smoothing=0, use_weights=False):
+    def fitSpline(self, axis="y", degree=3, smoothing=0, use_weights=False, clip=None):
         """Fits a spline to the image along a given axis
 
         Parameters
@@ -1997,6 +1997,8 @@ class Image(Header):
             smoothing factor for the spline fit, by default 0
         use_weights : bool, optional
             whether to use the inverse variance as weights for the spline fit or not, by default False
+        clip : tuple, optional
+            minimum and maximum values to clip the spline model, by default None
 
         Returns
         -------
@@ -2013,6 +2015,7 @@ class Image(Header):
         models = []
         for i in range(self._dim[1]):
             good_pix = ~self._mask[:,i] if self._mask is not None else ~numpy.isnan(self._data[:,i])
+            # good_pix = ~self._mask[:, i] if self._mask is not None else numpy.ones(self._dim[0], dtype=bool)
 
             # skip column if all pixels are masked
             if good_pix.sum() == 0:
@@ -2063,6 +2066,8 @@ class Image(Header):
             else:
                 spline_pars = interpolate.splrep(masked_pixels, data, s=smoothing)
             model = interpolate.splev(pixels, spline_pars)
+            if clip is not None:
+                model = numpy.clip(model, clip[0], clip[1])
             models.append(model)
 
         # reconstruct the model image
