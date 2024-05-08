@@ -380,13 +380,17 @@ def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=Non
     # calculate thermal shifts
     column_shifts = image.measure_fiber_shifts(model, columns=columns, column_width=column_width, shift_range=shift_range)
     # shifts stats
-    mean_shifts = numpy.nanmean(column_shifts, axis=0)
-    std_shifts = numpy.nanstd(column_shifts, axis=0)
-    log.info(f"shift in fibers: {mean_shifts:.4f}+/-{std_shifts:.4f} pixels")
+    median_shift = numpy.nanmedian(column_shifts, axis=0)
+    std_shift = numpy.nanstd(column_shifts, axis=0)
+    if median_shift > 1:
+        log.warning(f"large thermal shift measured: {column_shifts} pixels")
+        log.warning(f"{median_shift = :.4f}+/-{std_shift = :.4f} pixels")
+    else:
+        log.info(f"median shift in fibers: {median_shift = :.4f}+/-{std_shift = :.4f} pixels")
 
     # apply average shift to the zeroth order trace coefficients
     trace_cent_fixed = copy(trace_cent)
-    trace_cent_fixed._coeffs[:, 0] += mean_shifts
+    trace_cent_fixed._coeffs[:, 0] += median_shift
     trace_cent_fixed.eval_coeffs()
 
     # deltas = TraceMask(data=numpy.zeros_like(trace_cent._data), mask=numpy.ones_like(trace_cent._data, dtype=bool))
@@ -3091,7 +3095,7 @@ def extract_spectra(
     in_trace: str,
     in_fwhm: str = None,
     in_acorr: str = None,
-    columns: List[int] = [500, 1500, 2000, 2500, 3500],
+    columns: List[int] = [500, 1000, 1500, 2000, 2500, 3000],
     column_width: int = 20,
     method: str = "optimal",
     aperture: int = 3,
@@ -3165,8 +3169,7 @@ def extract_spectra(
         trace_mask, shifts, _ = _fix_fiber_thermal_shifts(img, trace_mask, trace_fwhm,
                                                           trace_amp=10000,
                                                           columns=columns,
-                                                          column_width=column_width,
-                                                          shift_range=[-5,5])
+                                                          column_width=column_width)
 
         # set up parallel run
         if parallel == "auto":
@@ -3218,8 +3221,7 @@ def extract_spectra(
         trace_mask, shifts, _ = _fix_fiber_thermal_shifts(img, trace_mask, trace_fwhm or 2.5,
                                                           trace_amp=10000,
                                                           columns=columns,
-                                                          column_width=column_width,
-                                                          shift_range=[-5,5])
+                                                          column_width=column_width)
 
         (data, error, mask) = img.extractSpecAperture(trace_mask, aperture)
 

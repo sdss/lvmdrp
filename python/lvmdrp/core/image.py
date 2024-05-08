@@ -737,7 +737,7 @@ class Image(Header):
         for j,c in enumerate(columns):
             s1 = numpy.nanmedian(ref_data[50:-50,c-column_width:c+column_width], axis=1)
             s2 = numpy.nanmedian(self._data[50:-50,c-column_width:c+column_width], axis=1)
-            _, shifts[j], _ = _cross_match_float(s1, s2, numpy.array([1.0]), [-5, 5])
+            _, shifts[j], _ = _cross_match_float(s1, s2, numpy.array([1.0]), shift_range)
 
         return shifts
 
