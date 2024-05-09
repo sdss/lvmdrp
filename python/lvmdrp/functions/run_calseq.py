@@ -231,8 +231,7 @@ def _get_reference_expnum(frame, ref_frames):
 def _move_master_calibrations(mjd, kind=None):
 
     kinds = {"bias", "trace", "width", "fiberflat", "wave", "lsf"}
-
-    if isinstance(kind, list, tuple, np.ndarray):
+    if isinstance(kind, (list, tuple, np.ndarray)):
         kinds = kind
     elif isinstance(kind, str) and kind in kinds:
         kinds = {kind}
