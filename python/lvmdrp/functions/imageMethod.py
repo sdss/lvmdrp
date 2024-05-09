@@ -2490,7 +2490,6 @@ def subtract_straylight(
     # load image data
     log.info(f"using image {os.path.basename(in_image)} for stray light subtraction")
     img = loadImage(in_image)
-    img.setData(data=numpy.nan_to_num(img._data), error=numpy.nan_to_num(img._error))
     unit = img._header["BUNIT"]
 
     # smooth image along dispersion axis with a median filter excluded NaN values
@@ -2500,8 +2499,6 @@ def subtract_straylight(
         img_median = img.replaceMaskMedian(*median_box, replace_error=None)
         img_median._data = numpy.nan_to_num(img_median._data)
         img_median = img_median.medianImg(median_box, use_mask=True)
-        img_median._mask = img._mask
-
     else:
         img_median = copy(img)
 
@@ -2543,21 +2540,22 @@ def subtract_straylight(
     img_fit = img_median.fitSpline(smoothing=smoothing, use_weights=use_weights, clip=(0.0, None))
 
     # median filter to reject outlying columns
-    img_fit = img_fit.medianImg((1, 7))
+    img_fit = img_fit.medianImg((1, 7), use_mask=True)
 
-    # smooth the results by 2D Gaussian filter of given with (cross- and dispersion axis have equal width)
+    # smooth the results by 2D Gaussian filter of given width
     log.info(f"smoothing the background signal by a 2D Gaussian filter of width {gaussian_sigma}")
     img_stray = img_fit.convolveGaussImg(1, gaussian_sigma)
-    img_stray.setData(data=numpy.nan_to_num(img_stray._data), error=numpy.nan_to_num(img_stray._error))
 
     # subtract smoothed background signal from original image
     log.info("subtracting the smoothed background signal from the original image")
-    img_out = img - img_stray
+    img_out = loadImage(in_image)
+    img_out._data = img_out._data - img_stray._data
+    img_out.setData(data=0.0, error=numpy.inf, select=(img_out._data==0)|(img_out._error==0), inplace=True)
+    img_out.setData(mask=True, select=(img_out._data==0)|~numpy.isfinite(img_out._error), inplace=True)
 
     # include header and write out file
     log.info(f"writing stray light subtracted image to {os.path.basename(out_image)}")
     img_out.setHeader(header=img.getHeader())
-    img_out.setData(mask=img._mask)
     img_out.writeFitsData(out_image)
 
     # plot results: polyomial fitting & smoothing, both with masked regions on
