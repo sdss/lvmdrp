@@ -228,6 +228,29 @@ def _get_reference_expnum(frame, ref_frames):
     return ref_expnums[idx]
 
 
+def _move_master_calibrations(mjd, kind=None):
+
+    kinds = {"bias", "trace", "width", "fiberflat", "wave", "lsf"}
+
+    if isinstance(kind, list, tuple, np.ndarray):
+        kinds = kind
+    elif isinstance(kind, str) and kind in kinds:
+        kinds = {kind}
+    elif kind is None:
+        pass
+    else:
+        raise ValueError(f"kind must be one of {kinds}")
+
+    for kind in kinds:
+        src_paths = path.expand("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind=f"m{kind}", camera="*")
+        for src_path in src_paths:
+            camera = path.extract("lvm_master", src_path)["camera"]
+            dst_path = path.full("lvm_calib", mjd=mjd, kind=kind, camera=camera)
+            if os.path.isfile(src_path):
+                os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+                copy2(src_path, dst_path)
+
+
 def _clean_ancillary(mjd, expnums=None, imagetyp="all"):
     """Clean ancillary files
 
@@ -1486,6 +1509,7 @@ def reduce_longterm_sequence(mjd, use_fiducial_cals=True, reject_cr=True, skip_d
     if len(biases) != 0:
         log.info(f"found {len(biases)} bias exposures: {bias_expnums}")
         create_detrending_frames(mjd=mjd, expnums=bias_expnums, kind="bias", use_fiducial_cals=use_fiducial_cals, skip_done=skip_done, keep_ancillary=keep_ancillary)
+        _move_master_calibrations(mjd=mjd, kind="bias")
     else:
         log.warning("no bias exposures found")
 
@@ -1495,6 +1519,7 @@ def reduce_longterm_sequence(mjd, use_fiducial_cals=True, reject_cr=True, skip_d
         expnums_qrtz = np.sort(dome_flats.query("quartz").expnum.unique())
         log.info(f"found {len(dome_flats)} dome flat exposures: {dome_flat_expnums}")
         create_traces(mjd=mjd, expnums_ldls=expnums_ldls, expnums_qrtz=expnums_qrtz, skip_done=skip_done)
+        _move_master_calibrations(mjd=mjd, kind={"trace", "width"})
     else:
         log.warning("no dome flat exposures found")
 
@@ -1502,6 +1527,7 @@ def reduce_longterm_sequence(mjd, use_fiducial_cals=True, reject_cr=True, skip_d
     if len(arcs) != 0:
         log.info(f"found {len(arcs)} arc exposures: {arc_expnums}")
         create_wavelengths(mjd=mjd, expnums=np.sort(arcs.expnum.unique()), skip_done=skip_done)
+        _move_master_calibrations(mjd=mjd, kind={"wave", "lsf"})
     else:
         log.warning("no arc exposures found")
 
@@ -1509,17 +1535,9 @@ def reduce_longterm_sequence(mjd, use_fiducial_cals=True, reject_cr=True, skip_d
     if len(twilight_flats) != 0:
         log.info(f"found {len(twilight_flats)} twilight exposures: {twilight_expnums}")
         create_fiberflats(mjd=mjd, expnums=twilight_expnums, skip_done=skip_done)
+        _move_master_calibrations(mjd=mjd, kind="fiberflat_twilight")
     else:
         log.warning("no twilight exposures found")
-
-    # move master calibrations to sandbox
-    kinds = {"bias", "trace", "width", "fiberflat", "wave", "lsf"}
-    for kind in kinds:
-        for camera in {"b1", "b2", "b3", "r1", "r2", "r3", "z1", "z2", "z3"}:
-            src_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind=f"m{kind}", camera=camera)
-            dst_path = path.full("lvm_calib", mjd=mjd, kind=kind, camera=camera)
-            os.makedirs(os.path.dirname(dst_path), exist_ok=True)
-            move(src_path, dst_path)
 
     if not keep_ancillary:
         _clean_ancillary(mjd)
