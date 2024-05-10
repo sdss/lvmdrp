@@ -367,7 +367,7 @@ def fit_fiberflat(in_twilight: str, out_flat: str, out_rss: str, interpolate_bad
         ori_fiber = ori_flat[ifiber]
 
         try:
-            best_continuum, continuum_models, masked_pixels, knots = fit_continuum(
+            best_continuum, continuum_models, masked_pixels, tck = fit_continuum(
                 spectrum=fiber, mask_bands=mask_bands,
                 median_box=median_box, niter=niter, threshold=threshold, **kwargs
             )
@@ -390,7 +390,7 @@ def fit_fiberflat(in_twilight: str, out_flat: str, out_rss: str, interpolate_bad
             for continuum_model in continuum_models:
                 axs[iax].plot(fiber._wave[masked_pixels], fiber._data[masked_pixels], ".", color="tab:blue", ms=5, mew=0)
                 axs[iax].plot(fiber._wave, continuum_model, color="tab:red", lw=1, alpha=0.5, zorder=niter)
-            axs[iax].plot(knots, np.zeros_like(knots), ".k")
+            axs[iax].plot(tck[0], np.zeros_like(tck[0]), ".k")
             axs[iax].step(fiber._wave, best_continuum, color="tab:red", lw=2)
 
         new_flat._data[ifiber] = best_continuum
