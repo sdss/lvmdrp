@@ -2550,8 +2550,6 @@ def subtract_straylight(
     log.info("subtracting the smoothed background signal from the original image")
     img_out = loadImage(in_image)
     img_out._data = img_out._data - img_stray._data
-    img_out.setData(data=0.0, error=numpy.inf, select=(img_out._data==0)|(img_out._error==0), inplace=True)
-    img_out.setData(mask=True, select=(img_out._data==0)|~numpy.isfinite(img_out._error), inplace=True)
 
     # include header and write out file
     log.info(f"writing stray light subtracted image to {os.path.basename(out_image)}")
