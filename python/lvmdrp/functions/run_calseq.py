@@ -877,9 +877,8 @@ def create_nighly_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnums
                 log.info(f"skipping {lflat_path}, file already exist")
             else:
                 image_tasks.subtract_straylight(in_image=dflat_path, out_image=lflat_path, out_stray=dstray_path,
-                                                in_cent_trace=cent_guess_path, select_nrows=5,
-                                                aperture=13, smoothing=400, median_box=21,
-                                                gaussian_sigma=0.0)
+                                                in_cent_trace=cent_guess_path, select_nrows=(5,5), use_weights=True,
+                                                aperture=15, smoothing=400, median_box=101, gaussian_sigma=20.0)
 
             if skip_done and os.path.isfile(flux_path) and os.path.isfile(cent_path) and os.path.isfile(fwhm_path):
                 log.info(f"skipping {flux_path}, {cent_path} and {fwhm_path}, files already exist")
@@ -1015,9 +1014,8 @@ def create_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnums_qrtz=N
                 log.info(f"skipping {lflat_path}, file already exist")
             else:
                 image_tasks.subtract_straylight(in_image=dflat_path, out_image=lflat_path, out_stray=dstray_path,
-                                                in_cent_trace=cent_guess_path, select_nrows=5,
-                                                aperture=13, smoothing=400, median_box=21,
-                                                gaussian_sigma=0.0)
+                                                in_cent_trace=cent_guess_path, select_nrows=(5,5), use_weights=True,
+                                                aperture=15, smoothing=400, median_box=101, gaussian_sigma=20.0)
 
             if skip_done and os.path.isfile(flux_path):
                 log.info(f"skipping {flux_path}, file already exist")
@@ -1189,9 +1187,8 @@ def create_fiberflats(mjd: int, use_fiducial_cals: bool = True, expnums: List[in
             log.info(f"skipping {lflat_path}, file already exist")
         else:
             image_tasks.subtract_straylight(in_image=dflat_path, out_image=lflat_path, out_stray=stray_path,
-                                            in_cent_trace=master_cals.get("cent"), select_nrows=5,
-                                            aperture=13, smoothing=400, median_box=21,
-                                            gaussian_sigma=0.0)
+                                            in_cent_trace=master_cals.get("cent"), select_nrows=(5,5), use_weights=True,
+                                            aperture=15, smoothing=400, median_box=101, gaussian_sigma=20.0)
 
         if skip_done and os.path.isfile(xflat_path):
             log.info(f"skipping {xflat_path}, file already exist")
