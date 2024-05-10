@@ -4321,7 +4321,7 @@ def detrend_frame(
 
     detrended_img = (bcorr_img - mdark_img.convertUnit(to=bcorr_img._header["BUNIT"]))
     # NOTE: this is a hack to avoid the error propagation of the division in Image
-    detrended_img = detrended_img / numpy.nan_to_num(mflat_img._data, nan=1.0)
+    detrended_img._data = detrended_img._data / numpy.nan_to_num(mflat_img._data, nan=1.0)
 
     # propagate pixel mask
     log.info("propagating pixel mask")

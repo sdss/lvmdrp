@@ -3282,10 +3282,13 @@ class Spectrum1D(Header):
         ).astype("int")
         # defining bad pixels for each fiber if needed
         if self._mask is not None:
+            # select: fibers in the boundary of the chip
             bad_pix = numpy.zeros(fibers, dtype="bool")
             select = bn.nansum(pixels >= self._mask.shape[0], 1)
             nselect = numpy.logical_not(select)
             bad_pix[select] = True
+
+            # masking fibers if all pixels are bad within aperture
             bad_pix[nselect] = bn.nansum(self._mask[pixels[nselect, :]], 1) == aperture
         else:
             bad_pix = None

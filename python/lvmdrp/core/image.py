@@ -2459,7 +2459,7 @@ class Image(Header):
         mask = numpy.zeros((cent_trace._fibers, self._dim[1]), dtype="bool")
 
         self._data = numpy.nan_to_num(self._data)
-        self._error = numpy.nan_to_num(self._error, nan=1e10)
+        self._error = numpy.nan_to_num(self._error, nan=numpy.inf)
 
         # convert FWHM trace to sigma
         trace_sigma = trace_fwhm / 2.354
