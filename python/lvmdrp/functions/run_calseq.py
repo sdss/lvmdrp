@@ -1084,24 +1084,24 @@ def create_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnums_qrtz=N
             mcents[camera].interpolate_data(axis="Y", extrapolate=True)
             mwidths[camera].interpolate_data(axis="Y", extrapolate=True)
 
-    # reset mask to propagate broken fibers
-    mamps[camera]._mask[bad_fibers] = True
-    mcents[camera]._mask[bad_fibers] = True
-    mwidths[camera]._mask[bad_fibers] = True
+        # reset mask to propagate broken fibers
+        mamps[camera]._mask[bad_fibers] = True
+        mcents[camera]._mask[bad_fibers] = True
+        mwidths[camera]._mask[bad_fibers] = True
 
-    # save master traces
-    mamp_path = path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=mjd, camera=camera, kind="mamps")
-    mcent_path = path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=mjd, camera=camera, kind="mtrace")
-    mwidth_path = path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=mjd, camera=camera, kind="mwidth")
-    os.makedirs(os.path.dirname(mamp_path), exist_ok=True)
-    mamps[camera].writeFitsData(mamp_path)
-    mcents[camera].writeFitsData(mcent_path)
-    mwidths[camera].writeFitsData(mwidth_path)
+        # save master traces
+        mamp_path = path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=mjd, camera=camera, kind="mamps")
+        mcent_path = path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=mjd, camera=camera, kind="mtrace")
+        mwidth_path = path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=mjd, camera=camera, kind="mwidth")
+        os.makedirs(os.path.dirname(mamp_path), exist_ok=True)
+        mamps[camera].writeFitsData(mamp_path)
+        mcents[camera].writeFitsData(mcent_path)
+        mwidths[camera].writeFitsData(mwidth_path)
 
-    # eval model continuum and ratio
-    model, ratio = img_stray.eval_fiber_model(mamps[camera], mcents[camera], mwidths[camera])
-    model.writeFitsData(dmodel_path)
-    ratio.writeFitsData(dratio_path)
+        # eval model continuum and ratio
+        model, ratio = img_stray.eval_fiber_model(mamps[camera], mcents[camera], mwidths[camera])
+        model.writeFitsData(dmodel_path)
+        ratio.writeFitsData(dratio_path)
 
 
 def create_fiberflats(mjd: int, use_fiducial_cals: bool = True, expnums: List[int] = None, median_box: int = 10, niter: bool = 1000,
