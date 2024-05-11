@@ -2498,7 +2498,7 @@ def subtract_straylight(
         median_box = (1, max(1, median_box))
         img_median = img.replaceMaskMedian(*median_box, replace_error=None)
         img_median._data = numpy.nan_to_num(img_median._data)
-        img_median = img_median.medianImg(median_box, use_mask=True)
+        img_median = img_median.medianImg(median_box, use_mask=False)
     else:
         img_median = copy(img)
 
@@ -2540,7 +2540,7 @@ def subtract_straylight(
     img_fit = img_median.fitSpline(smoothing=smoothing, use_weights=use_weights, clip=(0.0, None))
 
     # median filter to reject outlying columns
-    img_fit = img_fit.medianImg((1, 7), use_mask=True)
+    img_fit = img_fit.medianImg((1, 7), use_mask=False)
 
     # smooth the results by 2D Gaussian filter of given width
     log.info(f"smoothing the background signal by a 2D Gaussian filter of width {gaussian_sigma}")
