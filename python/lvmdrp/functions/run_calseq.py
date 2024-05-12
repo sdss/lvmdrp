@@ -29,14 +29,16 @@ import os
 import numpy as np
 from glob import glob
 from copy import deepcopy as copy
-from shutil import copy2, move
+from shutil import copy2
 from itertools import product, groupby
+from astropy.stats import biweight_location, biweight_scale
 from typing import List, Tuple, Dict
 
 from lvmdrp import log, path, __version__ as drpver
 from lvmdrp.utils import metadata as md
+from lvmdrp.core.plot import create_subplots
 from lvmdrp.core import dataproducts as dp
-from lvmdrp.core.constants import SPEC_CHANNELS
+from lvmdrp.core.constants import SPEC_CHANNELS, LVM_REFERENCE_COLUMN, LVM_NBLOCKS
 from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.core.image import loadImage
 from lvmdrp.core.rss import RSS, lvmFrame
@@ -59,7 +61,7 @@ MASK_BANDS = {
 }
 
 
-def get_sequence_metadata(mjd, expnums=None, exptime=None):
+def get_sequence_metadata(mjd, expnums=None, exptime=None, extract_metadata=False):
     """Get frames metadata for a given sequence
 
     Given a set of MJDs and (optionally) exposure numbers, get the frames
@@ -74,6 +76,8 @@ def get_sequence_metadata(mjd, expnums=None, exptime=None):
         List of exposure numbers to reduce
     exptime : int
         Filter frames metadata by exposure
+    extract_metadata : bool
+        Whether to extract metadata or not, by default False
 
     Returns:
     -------
@@ -83,7 +87,7 @@ def get_sequence_metadata(mjd, expnums=None, exptime=None):
         MJD for master frames
     """
     # get frames metadata
-    frames = md.get_frames_metadata(mjd=mjd)
+    frames = md.get_frames_metadata(mjd=mjd, overwrite=extract_metadata)
 
     # filter by given expnums
     if expnums is not None:
@@ -169,6 +173,114 @@ def choose_sequence(frames, flavor, kind):
     chosen_frames = frames.query("expnum in @chosen_expnums")
     chosen_frames.sort_values(["expnum", "camera"], inplace=True)
     return chosen_frames, chosen_expnums
+
+
+def get_exposed_std_fiber(mjd, expnums, camera, ref_column=LVM_REFERENCE_COLUMN, snr_threshold=5, display_plots=False):
+    """Returns the exposed standard fiber IDs for a given exposure sequence and camera
+
+    Parameters
+    ----------
+    mjd : int
+        MJD of the exposure sequence
+    expnums : list
+        List of exposure numbers in the sequence
+    camera : str
+        Camera name (e.g. "b1")
+    ref_column : int
+        Reference column for the fiber trace
+    display_plots : bool
+        If True, display plots
+
+    Returns
+    -------
+    dict
+        Dictionary with the exposed standard fiber IDs for each exposure in the sequence
+    """
+    log.info(f"loading detrended frames for {camera = }, exposures = {expnums}")
+    rframe_paths = sorted([path.expand("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, camera=camera, expnum=expnum, kind="d", imagetype="*")[0] for expnum in expnums])
+    images = [image_tasks.loadImage(rframe_path) for rframe_path in rframe_paths]
+
+    # get exposed standard fibers from header if present
+    exposed_stds = {image._header["EXPOSURE"]: image._header.get("CALIBFIB", None) for image in images}
+    if all([exposed_std is not None for exposed_std in exposed_stds.values()]):
+        log.info(f"standard fibers in {camera = }: {','.join(exposed_stds.values())}")
+        return exposed_stds
+    else:
+        log.warning(f"exposed standard fibers not found in header for {camera = }, going to infer exposed fibers from SNR")
+
+    # combine frames for given camera
+    log.info(f"combining {len(images)} exposures")
+    cimage = image_tasks.combineImages(images, normalize=False, background_subtract=False)
+    cimage.setData(data=np.nan_to_num(cimage._data), error=np.nan_to_num(cimage._error, nan=np.inf))
+    # calculate correction in reference Y positions along reference column
+    fiber_pos = cimage.match_reference_column(ref_column)
+
+    # define fibermap for camera & std fibers parameters
+    fibermap = cimage._slitmap[cimage._slitmap["spectrographid"]==int(camera[1])]
+    spec_select = fibermap["telescope"] == "Spec"
+    ids_std = fibermap[spec_select]["orig_ifulabel"]
+    pos_std = fiber_pos[spec_select].round().astype("int")
+    idx_std = np.arange(pos_std.size)
+    log.info(f"standard fibers in {camera = }: {','.join(ids_std)}")
+
+    # calculate SNR along colummn
+    fig, axs = create_subplots(to_display=display_plots,
+                               nrows=len(images)//3, ncols=3,
+                               figsize=(15,5*len(images)//3),
+                               sharex=True, sharey=True,
+                               layout="constrained")
+    fig.supxlabel("standard fiber ID")
+    fig.supylabel("SNR at fiber centroid")
+    fig.suptitle(f"exposed standard fibers in sequence {expnums[0]} - {expnums[-1]} in camera '{camera}'")
+    exposed_stds, block_idxs = {}, np.arange(LVM_NBLOCKS).tolist()
+    for image, ax in zip(images, axs):
+        expnum = image._header["EXPOSURE"]
+        column = image.getSlice(ref_column, axis="Y")
+        snr = (column._data/column._error)
+        snr_med = biweight_location(snr[fiber_pos.round().astype("int")])
+        snr_std = biweight_scale(snr[fiber_pos.round().astype("int")])
+        snr_std_med = biweight_location(snr[pos_std])
+        snr_std_std = biweight_scale(snr[pos_std])
+        log.info(f"{expnum = } median SNR = {snr_med:.2f} +/- {snr_std:.2f} (standard fibers: {snr_std_med:.2f} +/- {snr_std_std:.2f})")
+
+        ax.set_title(f"{expnum = }", loc="left")
+        ax.axhspan(snr_med-snr_std, snr_med+snr_std, lw=0, fc="0.7", alpha=0.5)
+        ax.axhline(snr_med, lw=1, color="0.7")
+        ax.axhspan(max(0, snr_std_med-snr_threshold*snr_std_std), snr_std_med+snr_threshold*snr_std_std, lw=0, fc="0.7", alpha=0.5)
+        ax.axhline(snr_std_med, lw=1, color="0.7")
+        ax.bar(idx_std, snr[pos_std], hatch="///////", lw=0, ec="tab:blue", fc="none", zorder=999)
+        ax.set_xticks(idx_std)
+        ax.set_xticklabels(ids_std)
+
+        # select standard fiber exposed if any
+        select_std = (snr[pos_std] > snr_std_med+snr_threshold*snr_std_std) | (snr[pos_std] >= snr_med-snr_std)
+        exposed_std = ids_std[select_std]
+        if len(exposed_std) > 1:
+            exposed_std = [exposed_std[np.argmax(snr[pos_std[select_std]])]]
+            log.warning(f"more than one standard fiber selected in {expnum = }: {','.join(exposed_std)}, selecting higest SNR: {exposed_std[0]}")
+        exposed_std = exposed_std[0] if len(exposed_std) > 0 else None
+        if exposed_std is None:
+            continue
+
+        # get block ID for exposed standard fiber
+        fiber_par = image._slitmap[image._slitmap["orig_ifulabel"] == exposed_std]
+        block_idx = int(fiber_par["blockid"][0][1:])-1
+        block_idxs.remove(block_idx)
+
+        exposed_stds[expnum] = (exposed_std, [block_idx])
+
+    # TODO: save figure
+
+    # add missing blocks for first exposure
+    if len(block_idxs) > 0:
+        log.info(f"remaining blocks without exposed standard fibers: {block_idxs}, adding to first exposure")
+        expnum = list(exposed_stds.keys())[0]
+        exposed_stds[expnum] = (exposed_stds[expnum][0], sorted(exposed_stds[expnum][1]+block_idxs))
+
+    # list unexposed standard fibers
+    unexposed_stds = [fiber for fiber in ids_std if fiber not in exposed_stds.values()]
+
+    return exposed_stds, unexposed_stds
 
 
 def _load_shift_report(mjd):
@@ -971,22 +1083,16 @@ def create_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnums_qrtz=N
 
     tileid = frames.tileid.iloc[0]
     # iterate through exposures with std fibers exposed
-    expnum_params = _get_ring_expnums(expnums_ldls, expnums_qrtz, ring_size=12)
-    for camera, expnums in expnum_params.items():
-        for expnum, block_idxs, fiber_str in expnums:
-            con_lamp = MASTER_CON_LAMPS[camera[0]]
-            if con_lamp == "ldls":
-                counts_threshold = 5000
-            elif con_lamp == "quartz":
-                counts_threshold = 10000
+    cameras = ["b1", "b2", "b3", "r1", "r2", "r3", "z1", "z2", "z3"]
+    for camera in cameras:
+        expnums = expnums_qrtz if camera[0] == "z" else expnums_ldls
+        counts_threshold = 10000 if camera[0] == "z" else 5000
 
-            # select fibers in current spectrograph
-            fibermap = SLITMAP[SLITMAP["spectrographid"] == int(camera[1])]
-            # select illuminated std fiber
-            select = fibermap["orig_ifulabel"] == fiber_str
-            # select fiber index
-            fiber_idx = np.where(select)[0][0]
+        # select fibers in current spectrograph
+        fibermap = SLITMAP[SLITMAP["spectrographid"] == int(camera[1])]
 
+        exposed_stds, unexposed_stds = get_exposed_std_fiber(mjd=mjd, expnums=expnums, camera=camera)
+        for expnum, (std_fiberid, block_idxs) in exposed_stds.items():
             # define paths
             dflat_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=mjd, kind="d", imagetype="flat", camera=camera, expnum=expnum)
             lflat_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=mjd, kind="l", imagetype="flat", camera=camera, expnum=expnum)
@@ -1030,7 +1136,7 @@ def create_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnums_qrtz=N
                 img_stray = img_stray.convolveImg(np.ones((1, 20), dtype="uint8"))
                 img_stray._error[img_stray._mask|(img_stray._error<=0)] = np.inf
             else:
-                log.info(f"going to trace std fiber {fiber_str} in {camera} within {block_idxs = }")
+                log.info(f"going to trace std fiber {std_fiberid} in {camera} within {block_idxs = }")
                 centroids, trace_cent_fit, trace_flux_fit, trace_fwhm_fit, img_stray, model, mratio = image_tasks.trace_fibers(
                     in_image=lflat_path,
                     out_trace_amp=flux_path, out_trace_cent=cent_path, out_trace_fwhm=fwhm_path,
@@ -1042,7 +1148,7 @@ def create_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnums_qrtz=N
                 )
 
             # update master traces
-            log.info(f"{camera = }, {expnum = }, {fiber_str = :>6s}, fiber_idx = {fiber_idx:>3d}, FWHM = {np.nanmean(trace_fwhm_fit._data[fiber_idx]):.2f}")
+            log.info(f"{camera = }, {expnum = }, {std_fiberid = :>6s}")
             select_block = np.isin(fibermap["blockid"], [f"B{id+1}" for id in block_idxs])
             if fit_poly:
                 mamps[camera]._coeffs[select_block] = trace_flux_fit._coeffs[select_block]
@@ -1065,11 +1171,7 @@ def create_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnums_qrtz=N
         mcents[camera]._mask[bad_fibers] = True
         mwidths[camera]._mask[bad_fibers] = True
         # masking untraced standard fibers
-        try:
-            fiber_strs = list(zip(*expnum_params[camera]))[2]
-        except IndexError:
-            fiber_strs = []
-        untraced_fibers = np.isin(fibermap["orig_ifulabel"].value, list(set(fibermap[fibermap["telescope"] == "Spec"]["orig_ifulabel"])-set(fiber_strs)))
+        untraced_fibers = np.isin(fibermap["orig_ifulabel"].value, unexposed_stds)
         mamps[camera]._mask[untraced_fibers] = True
         mcents[camera]._mask[untraced_fibers] = True
         mwidths[camera]._mask[untraced_fibers] = True

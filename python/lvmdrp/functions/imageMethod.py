@@ -24,7 +24,7 @@ from tqdm import tqdm
 from typing import List, Tuple
 
 from lvmdrp import log, __version__ as DRPVER
-from lvmdrp.core.constants import CONFIG_PATH, SPEC_CHANNELS, ARC_LAMPS
+from lvmdrp.core.constants import CONFIG_PATH, SPEC_CHANNELS, ARC_LAMPS, LVM_REFERENCE_COLUMN, LVM_NBLOCKS
 from lvmdrp.utils.decorators import skip_on_missing_input_path, drop_missing_input_paths
 from lvmdrp.utils.bitmask import QualityFlag
 from lvmdrp.core.fiberrows import FiberRows, _read_fiber_ypix
@@ -80,9 +80,6 @@ DEFAULT_GAIN = {
     "z3": [2.75, 2.85, 2.79, 2.74]
 }
 DEFAULT_PTC_PATH = os.path.join(os.environ["LVMCORE_DIR"], "metrology", "PTC_fit.txt")
-
-LVM_NBLOCKS = 18
-LVM_REFERENCE_COLUMN = 2000
 
 description = "Provides Methods to process 2D images"
 
