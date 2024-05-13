@@ -1533,7 +1533,7 @@ def reduce_nightly_sequence(mjd, use_fiducial_cals=True, reject_cr=True, skip_do
     cal_imagetyps = {"bias", "flat", "arc"}
     log.info(f"going to reduce nightly calibration frames: {cal_imagetyps}")
 
-    frames = md.get_frames_metadata(mjd)
+    frames = md.get_sequence_metadata(mjd)
     frames.query("imagetyp in @cal_imagetyps", inplace=True)
     if len(frames) == 0:
         raise ValueError(f"no frames found for MJD = {mjd}")
@@ -1601,7 +1601,7 @@ def reduce_longterm_sequence(mjd, use_fiducial_cals=True, reject_cr=True, skip_d
     cal_imagetyps = {"bias", "flat", "arc"}
     log.info(f"going to reduce nightly calibration frames: {cal_imagetyps}")
 
-    frames = md.get_frames_metadata(mjd)
+    frames = get_sequence_metadata(mjd)
     frames.query("imagetyp in @cal_imagetyps", inplace=True)
     if len(frames) == 0:
         raise ValueError(f"no frames found for MJD = {mjd}")
