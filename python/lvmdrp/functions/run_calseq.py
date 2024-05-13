@@ -301,7 +301,7 @@ def _load_shift_report(mjd):
         exp = int(exp)
         spec = spec[-1]
         shifts = np.array([int(_) for _ in cols[4:]])
-        shifts_report[(spec, exp)] = (shifts[::2]+1, shifts[1::2])
+        shifts_report[(spec, exp)] = (shifts[::2], shifts[1::2])
 
     return shifts_report
 
