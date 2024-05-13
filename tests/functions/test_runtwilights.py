@@ -99,7 +99,7 @@ def test_fit_continuum():
     assert best_continuum.size == spectrum._data.size
     assert len(models) == 0
     assert masked_pixels.sum() == 12
-    assert len(tck[0]) == 95
+    assert len(tck[0]) == 100+3
     assert best_continuum[0] == pytest.approx(0, abs=1e-10)
     assert best_continuum[-1] == pytest.approx(0, abs=1e-10)
 
