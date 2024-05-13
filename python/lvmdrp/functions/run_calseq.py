@@ -133,13 +133,13 @@ def choose_sequence(frames, flavor, kind):
         raise ValueError(f"invalid kind '{kind}', available values are 'nightly' and 'longterm'")
 
     if flavor == "twilight":
-        query = "imagetyp == 'flat' and not ldls|quartz"
+        query = "imagetyp == 'flat' and not (ldls|quartz)"
     elif flavor == "bias":
         query = "imagetyp == 'bias'"
     elif flavor == "flat":
-        query = "imagetyp == 'flat' and ldls|quartz"
+        query = "imagetyp == 'flat' and (ldls|quartz)"
     elif flavor == "arc":
-        query = "imagetyp == 'arc' and not ldls|quartz and neon|hgne|argon|xenon"
+        query = "imagetyp == 'arc' and not (ldls|quartz) and (neon|hgne|argon|xenon)"
     expnums = np.sort(frames.query(query).expnum.unique())
     diff = np.diff(expnums)
     div, = np.where(np.abs(diff) > 1)
@@ -149,14 +149,17 @@ def choose_sequence(frames, flavor, kind):
     log.info(f"found sequences: {sequences}")
 
     if len(sequences) == 0:
-        raise ValueError(f"no calibration frames of flavor '{flavor}' found using the query: {query}")
+        raise ValueError(f"no calibration frames of flavor '{flavor}' found using the query: '{query}'")
 
     lengths = [len(seq) for seq in sequences]
-    idx = lengths.index(min(lengths) if kind == "nightly" else max(lengths))
-    if len(sequences) > 1:
-        chosen_expnums = sequences[idx]
+    if flavor == "twilight":
+        chosen_expnums = np.concatenate(sequences)
     else:
-        chosen_expnums = sequences[idx]
+        idx = lengths.index(min(lengths) if kind == "nightly" else max(lengths))
+        if len(sequences) > 1:
+            chosen_expnums = sequences[idx]
+        else:
+            chosen_expnums = sequences[0]
 
     if flavor == "twilight":
         expected_length = 24
@@ -323,9 +326,9 @@ def _get_reference_expnum(frame, ref_frames):
         Reference frame metadata
     """
     if frame.imagetyp == "flat" and frame.ldls|frame.quartz:
-        refs = ref_frames.query("imagetyp == 'flat' and ldls|quartz")
+        refs = ref_frames.query("imagetyp == 'flat' and (ldls|quartz)")
     elif frame.imagetyp == "flat":
-        refs = ref_frames.query("imagetyp == 'flat' and not ldls|quartz")
+        refs = ref_frames.query("imagetyp == 'flat' and not (ldls|quartz)")
     else:
         refs = ref_frames.query("imagetyp == @frame.imagetyp")
 
@@ -343,7 +346,7 @@ def _get_reference_expnum(frame, ref_frames):
 def _move_master_calibrations(mjd, kind=None):
 
     kinds = {"bias", "trace", "width", "fiberflat", "wave", "lsf"}
-    if isinstance(kind, (list, tuple, np.ndarray)):
+    if isinstance(kind, (list, tuple, set, np.ndarray)):
         kinds = kind
     elif isinstance(kind, str) and kind in kinds:
         kinds = {kind}
@@ -355,7 +358,7 @@ def _move_master_calibrations(mjd, kind=None):
     for kind in kinds:
         src_paths = path.expand("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind=f"m{kind}", camera="*")
         for src_path in src_paths:
-            camera = path.extract("lvm_master", src_path)["camera"]
+            camera = os.path.basename(src_path).split(".")[0].split("-")[-1]
             dst_path = path.full("lvm_calib", mjd=mjd, kind=kind, camera=camera)
             if os.path.isfile(src_path):
                 os.makedirs(os.path.dirname(dst_path), exist_ok=True)
@@ -1255,7 +1258,7 @@ def create_fiberflats(mjd: int, use_fiducial_cals: bool = True, expnums: List[in
     # get metadata
     flats = get_sequence_metadata(mjd, expnums=expnums)
     if expnums is None:
-        flats.query("imagetyp == 'flat' and not ldls|quartz", inplace=True)
+        flats.query("imagetyp == 'flat' and not (ldls|quartz)", inplace=True)
 
     # 2D reduction of twilight sequence
     reduce_2d(mjd=mjd, use_fiducial_cals=use_fiducial_cals, expnums=flats.expnum.unique(), reject_cr=False, skip_done=skip_done)
@@ -1430,7 +1433,7 @@ def create_wavelengths(mjd, use_fiducial_cals=True, expnums=None, skip_done=True
         Skip pipeline steps that have already been done
     """
     frames = get_sequence_metadata(mjd, expnums=expnums)
-    frames = frames.query("imagetyp=='arc' or (not ldls|quartz and neon|hgne|argon|xenon)")
+    frames = frames.query("imagetyp=='arc' or (not (ldls|quartz) and (neon|hgne|argon|xenon))")
     frames["imagetyp"] = "arc"
 
     if use_fiducial_cals:
@@ -1542,7 +1545,7 @@ def reduce_nightly_sequence(mjd, use_fiducial_cals=True, reject_cr=True, skip_do
     else:
         log.warning("no bias exposures found")
 
-    dome_flats = frames.query("imagetyp == 'flat' and ldls|quartz")
+    dome_flats = frames.query("imagetyp == 'flat' and (ldls|quartz)")
     if len(dome_flats) != 0:
         expnums_ldls = np.sort(dome_flats.query("ldls").expnum.unique())
         expnums_qrtz = np.sort(dome_flats.query("quartz").expnum.unique())
@@ -1552,14 +1555,14 @@ def reduce_nightly_sequence(mjd, use_fiducial_cals=True, reject_cr=True, skip_do
     else:
         log.warning("no dome flat exposures found")
 
-    arcs = frames.query("imagetyp == 'arc' and not ldls|quartz and neon|hgne|argon|xenon")
+    arcs = frames.query("imagetyp == 'arc' and not (ldls|quartz) and (neon|hgne|argon|xenon)")
     if len(arcs) != 0:
         log.info(f"found {len(arcs)} arc exposures: {set(arcs.expnum)}")
         create_wavelengths(mjd=mjd, expnums=np.sort(arcs.expnum.unique()), skip_done=skip_done)
     else:
         log.warning("no arc exposures found")
 
-    twilight_flats = frames.query("imagetyp == 'flat' and not ldls|quartz")
+    twilight_flats = frames.query("imagetyp == 'flat' and not (ldls|quartz)")
     if len(twilight_flats) != 0:
         log.info(f"found {len(twilight_flats)} twilight exposures: {set(twilight_flats.expnum)}")
         create_fiberflats(mjd=mjd, expnums=sorted(np.sort(twilight_flats.expnum.unique())), skip_done=skip_done)
