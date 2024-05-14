@@ -345,7 +345,7 @@ def _get_reference_expnum(frame, ref_frames):
 
 def _move_master_calibrations(mjd, kind=None):
 
-    kinds = {"bias", "trace", "width", "fiberflat", "wave", "lsf"}
+    kinds = {"bias", "trace", "width", "fiberflat", "fiberflat_twilight", "wave", "lsf"}
     if isinstance(kind, (list, tuple, set, np.ndarray)):
         kinds = kind
     elif isinstance(kind, str) and kind in kinds:
@@ -1126,18 +1126,8 @@ def create_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnums_qrtz=N
                                                 in_cent_trace=cent_guess_path, select_nrows=(5,5), use_weights=True,
                                                 aperture=15, smoothing=400, median_box=101, gaussian_sigma=20.0)
 
-            if skip_done and os.path.isfile(flux_path):
-                log.info(f"skipping {flux_path}, file already exist")
-                trace_cent_fit = TraceMask.from_file(cent_path)
-                trace_flux_fit = TraceMask.from_file(flux_path)
-                trace_fwhm_fit = TraceMask.from_file(fwhm_path)
-                img_stray = loadImage(lflat_path)
-                img_stray.setData(data=np.nan_to_num(img_stray._data), error=np.nan_to_num(img_stray._error))
-                img_stray = img_stray.replaceMaskMedian(1, 10, replace_error=None)
-                img_stray._data = np.nan_to_num(img_stray._data)
-                img_stray = img_stray.medianImg((1,10), propagate_error=True)
-                img_stray = img_stray.convolveImg(np.ones((1, 20), dtype="uint8"))
-                img_stray._error[img_stray._mask|(img_stray._error<=0)] = np.inf
+            if skip_done and os.path.isfile(cent_path) and os.path.isfile(flux_path) and os.path.isfile(fwhm_path):
+                log.info(f"skipping {cent_path}, {flux_path} and {fwhm_path}, file already exist")
             else:
                 log.info(f"going to trace std fiber {std_fiberid} in {camera} within {block_idxs = }")
                 centroids, trace_cent_fit, trace_flux_fit, trace_fwhm_fit, img_stray, model, mratio = image_tasks.trace_fibers(
@@ -1150,63 +1140,66 @@ def create_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnums_qrtz=N
                     fit_poly=fit_poly, interpolate_missing=False, poly_deg=(poly_deg_amp, poly_deg_cent, poly_deg_width)
                 )
 
-            # update master traces
-            log.info(f"{camera = }, {expnum = }, {std_fiberid = :>6s}")
-            select_block = np.isin(fibermap["blockid"], [f"B{id+1}" for id in block_idxs])
-            if fit_poly:
-                mamps[camera]._coeffs[select_block] = trace_flux_fit._coeffs[select_block]
-                mcents[camera]._coeffs[select_block] = trace_cent_fit._coeffs[select_block]
-                mwidths[camera]._coeffs[select_block] = trace_fwhm_fit._coeffs[select_block]
-            else:
-                mamps[camera]._coeffs = None
-                mcents[camera]._coeffs = None
-                mwidths[camera]._coeffs = None
-            mamps[camera]._data[select_block] = trace_flux_fit._data[select_block]
-            mcents[camera]._data[select_block] = trace_cent_fit._data[select_block]
-            mwidths[camera]._data[select_block] = trace_fwhm_fit._data[select_block]
-            mamps[camera]._mask[select_block] = False
-            mcents[camera]._mask[select_block] = False
-            mwidths[camera]._mask[select_block] = False
+                # update master traces
+                log.info(f"{camera = }, {expnum = }, {std_fiberid = :>6s}")
+                select_block = np.isin(fibermap["blockid"], [f"B{id+1}" for id in block_idxs])
+                if fit_poly:
+                    mamps[camera]._coeffs[select_block] = trace_flux_fit._coeffs[select_block]
+                    mcents[camera]._coeffs[select_block] = trace_cent_fit._coeffs[select_block]
+                    mwidths[camera]._coeffs[select_block] = trace_fwhm_fit._coeffs[select_block]
+                else:
+                    mamps[camera]._coeffs = None
+                    mcents[camera]._coeffs = None
+                    mwidths[camera]._coeffs = None
+                mamps[camera]._data[select_block] = trace_flux_fit._data[select_block]
+                mcents[camera]._data[select_block] = trace_cent_fit._data[select_block]
+                mwidths[camera]._data[select_block] = trace_fwhm_fit._data[select_block]
+                mamps[camera]._mask[select_block] = False
+                mcents[camera]._mask[select_block] = False
+                mwidths[camera]._mask[select_block] = False
 
-        # masking bad fibers
-        bad_fibers = fibermap["fibstatus"] == 1
-        mamps[camera]._mask[bad_fibers] = True
-        mcents[camera]._mask[bad_fibers] = True
-        mwidths[camera]._mask[bad_fibers] = True
-        # masking untraced standard fibers
-        untraced_fibers = np.isin(fibermap["orig_ifulabel"].value, unexposed_stds)
-        mamps[camera]._mask[untraced_fibers] = True
-        mcents[camera]._mask[untraced_fibers] = True
-        mwidths[camera]._mask[untraced_fibers] = True
-
-        # interpolate master traces in missing fibers
-        if fit_poly:
-            mamps[camera].interpolate_coeffs()
-            mcents[camera].interpolate_coeffs()
-            mwidths[camera].interpolate_coeffs()
-        else:
-            mamps[camera].interpolate_data(axis="Y", extrapolate=True)
-            mcents[camera].interpolate_data(axis="Y", extrapolate=True)
-            mwidths[camera].interpolate_data(axis="Y", extrapolate=True)
-
-        # reset mask to propagate broken fibers
-        mamps[camera]._mask[bad_fibers] = True
-        mcents[camera]._mask[bad_fibers] = True
-        mwidths[camera]._mask[bad_fibers] = True
-
-        # save master traces
         mamp_path = path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=mjd, camera=camera, kind="mamps")
         mcent_path = path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=mjd, camera=camera, kind="mtrace")
         mwidth_path = path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=mjd, camera=camera, kind="mwidth")
         os.makedirs(os.path.dirname(mamp_path), exist_ok=True)
-        mamps[camera].writeFitsData(mamp_path)
-        mcents[camera].writeFitsData(mcent_path)
-        mwidths[camera].writeFitsData(mwidth_path)
+        if skip_done and os.path.isfile(mcent_path) and os.path.isfile(mamp_path) and os.path.isfile(mwidth_path):
+            log.info(f"skipping {mcent_path}, {mamp_path} and {mwidth_path}, files already exist")
+        else:
+            # masking bad fibers
+            bad_fibers = fibermap["fibstatus"] == 1
+            mamps[camera]._mask[bad_fibers] = True
+            mcents[camera]._mask[bad_fibers] = True
+            mwidths[camera]._mask[bad_fibers] = True
+            # masking untraced standard fibers
+            untraced_fibers = np.isin(fibermap["orig_ifulabel"].value, unexposed_stds)
+            mamps[camera]._mask[untraced_fibers] = True
+            mcents[camera]._mask[untraced_fibers] = True
+            mwidths[camera]._mask[untraced_fibers] = True
 
-        # eval model continuum and ratio
-        model, ratio = img_stray.eval_fiber_model(mamps[camera], mcents[camera], mwidths[camera])
-        model.writeFitsData(dmodel_path)
-        ratio.writeFitsData(dratio_path)
+            # interpolate master traces in missing fibers
+            if fit_poly:
+                mamps[camera].interpolate_coeffs()
+                mcents[camera].interpolate_coeffs()
+                mwidths[camera].interpolate_coeffs()
+            else:
+                mamps[camera].interpolate_data(axis="Y", extrapolate=True)
+                mcents[camera].interpolate_data(axis="Y", extrapolate=True)
+                mwidths[camera].interpolate_data(axis="Y", extrapolate=True)
+
+            # reset mask to propagate broken fibers
+            mamps[camera]._mask[bad_fibers] = True
+            mcents[camera]._mask[bad_fibers] = True
+            mwidths[camera]._mask[bad_fibers] = True
+
+            # save master traces
+            mamps[camera].writeFitsData(mamp_path)
+            mcents[camera].writeFitsData(mcent_path)
+            mwidths[camera].writeFitsData(mwidth_path)
+
+            # eval model continuum and ratio
+            model, ratio = img_stray.eval_fiber_model(mamps[camera], mcents[camera], mwidths[camera])
+            model.writeFitsData(dmodel_path)
+            ratio.writeFitsData(dratio_path)
 
 
 def create_fiberflats(mjd: int, use_fiducial_cals: bool = True, expnums: List[int] = None, median_box: int = 10, niter: bool = 1000,
