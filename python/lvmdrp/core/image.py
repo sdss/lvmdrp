@@ -2354,7 +2354,7 @@ class Image(Header):
             integral_mod = integral_mod if integral_mod != 0 else numpy.nan
             # NOTE: this is a hack to avoid integrating the whole column when tracing a few blocks
             integral_dat = numpy.trapz(img_slice._data * (mod_slice>0), img_slice._pixels)
-            residuals.append((integral_dat - integral_mod) / integral_dat * 100)
+            residuals.append((integral_mod - integral_dat) / integral_dat * 100)
 
             # compute fitted model stats
             chisq_red = bn.nansum((mod_slice - img_slice._data)[~img_slice._mask]**2 / img_slice._error[~img_slice._mask]**2) / (self._dim[0] - 1 - 3)

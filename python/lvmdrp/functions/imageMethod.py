@@ -408,7 +408,7 @@ def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=Non
     return trace_cent_fixed, column_shifts, model
 
 
-def _apply_electronic_shifts(images, out_images, drp_shifts, qc_shifts=None, custom_shifts=None, raw_shifts=None,
+def _apply_electronic_shifts(images, out_images, drp_shifts=None, qc_shifts=None, custom_shifts=None, raw_shifts=None,
                              which_shifts="drp", apply_shifts=True, dry_run=False, display_plots=False):
     """Applies the chosen electronic pixel shifts to the images and plots the results
 
@@ -419,7 +419,7 @@ def _apply_electronic_shifts(images, out_images, drp_shifts, qc_shifts=None, cus
     out_images : list
         list of output images
     drp_shifts : numpy.ndarray
-        DRP electronic pixel shifts
+        DRP electronic pixel shifts, by default None
     qc_shifts : numpy.ndarray
         QC electronic pixel shifts, by default None
     custom_shifts : numpy.ndarray
@@ -481,7 +481,8 @@ def _apply_electronic_shifts(images, out_images, drp_shifts, qc_shifts=None, cus
             if raw_shifts is not None:
                 ax.step(y_pixels, raw_shifts, where="mid", lw=0.5, color="0.9", label="raw DRP")
             ax.step(y_pixels, this_shifts, where="mid", color="k", lw=3)
-            ax.step(y_pixels, drp_shifts, where="mid", lw=1, color="tab:blue", label="DRP")
+            if drp_shifts is not None:
+                ax.step(y_pixels, drp_shifts, where="mid", lw=1, color="tab:blue", label="DRP")
             if qc_shifts is not None:
                 ax.step(y_pixels, qc_shifts, where="mid", lw=2, color="tab:green", label="QC")
             if custom_shifts is not None:
@@ -695,12 +696,22 @@ def fix_pixel_shifts(in_images, out_images, ref_images, in_mask, report=None,
     images_out = images
 
     # initialize custom shifts
+    raw_shifts = None
+    dshifts = None
+    qshifts = None
     cshifts = None
     apply_shifts = True
     which_shifts = "drp"
 
     # calculate pixel shifts or use provided ones
-    if shift_rows is None:
+    if shift_rows is not None:
+        log.info("using user provided pixel shifts")
+        cshifts = numpy.zeros(cdata.shape[0])
+        for irow in shift_rows:
+            cshifts[irow:] += 2
+        corrs = numpy.zeros_like(cshifts)
+        which_shifts = "custom"
+    else:
         log.info("running row-by-row cross-correlation")
         dshifts, corrs = [], []
         for irow in range(rdata.shape[0]):
@@ -724,64 +735,54 @@ def fix_pixel_shifts(in_images, out_images, ref_images, in_mask, report=None,
         dshifts = numpy.asarray(dshifts)
         corrs = numpy.asarray(corrs)
 
-        raw_shifts = None
         dshifts = _remove_spikes(dshifts, width=flat_spikes, threshold=threshold_spikes)
         dshifts = _fillin_valleys(dshifts, width=fill_gaps)
         dshifts = _no_stepdowns(dshifts)
-    else:
-        log.info("using user provided pixel shifts")
-        cshifts = numpy.zeros(cdata.shape[0])
-        for irow in shift_rows:
-            cshifts[irow:] += 2
-        raw_shifts = None
-        corrs = numpy.zeros_like(cshifts)
 
-    # parse QC reports with the electronic pixel shifts
-    if report is not None:
-        shift_rows, amount = report
-        qshifts = numpy.zeros(cdata.shape[0])
-        for irow in shift_rows:
-            qshifts[irow:] = amount
-    else:
-        qshifts = None
+        # parse QC reports with the electronic pixel shifts
+        if report is not None:
+            shift_rows, amounts = report
+            qshifts = numpy.zeros(cdata.shape[0])
+            for irow, amount in zip(shift_rows, amounts[::-1]):
+                qshifts[irow:] = amount
 
-    # compare QC reports with the electronic pixel shifts
-    if qshifts is not None:
-        qshifted_rows = numpy.where(numpy.gradient(qshifts) > 0)[0][1::2].tolist()
-        shifted_rows = numpy.where(numpy.gradient(dshifts) > 0)[0][1::2].tolist()
-        log.info(f"QC reports shifted rows: {qshifted_rows}")
-        log.info(f"DRP shifted rows: {shifted_rows}")
-        if not numpy.all(qshifts == dshifts):
-            _apply_electronic_shifts(images=images, out_images=out_images,
-                                     drp_shifts=dshifts, qc_shifts=qshifts, raw_shifts=raw_shifts,
-                                     which_shifts="drp", apply_shifts=True,
-                                     dry_run=True, display_plots=display_plots)
-            log.warning("QC reports and DRP do not agree on the shifted rows")
-            if interactive:
-                log.info("interactive mode enabled")
-                answer = input("apply [q]c, [d]rp or [c]ustom shifts: ")
-                if answer.lower() == "q":
-                    log.info("choosing QC shifts")
-                    shifts = qshifts
-                    which_shifts = "qc"
-                elif answer.lower() == "d":
-                    log.info("choosing DRP shifts")
-                    shifts = dshifts
-                    which_shifts = "drp"
-                elif answer.lower() == "c":
-                    log.info("choosing custom shifts")
-                    answer = input("provide comma-separated custom shifts and press enter: ")
-                    shift_rows = numpy.array([int(_) for _ in answer.split(",")])
-                    cshifts = numpy.zeros(cdata.shape[0])
-                    for irow in shift_rows:
-                        cshifts[irow:] += 2
-                    shifts = cshifts
-                    corrs = numpy.zeros_like(cshifts)
-                    which_shifts = "custom"
-                apply_shifts = numpy.any(numpy.abs(shifts)>0)
-            else:
-                log.warning(f"no shift will be applied to the images: {in_images}")
-                apply_shifts = False
+        # compare QC reports with the electronic pixel shifts
+        if qshifts is not None:
+            qshifted_rows = numpy.where(numpy.gradient(qshifts) > 0)[0][1::2].tolist()
+            shifted_rows = numpy.where(numpy.gradient(dshifts) > 0)[0][1::2].tolist()
+            log.info(f"QC reports shifted rows: {qshifted_rows}")
+            log.info(f"DRP shifted rows: {shifted_rows}")
+            if not numpy.all(qshifts == dshifts):
+                _apply_electronic_shifts(images=images, out_images=out_images,
+                                         drp_shifts=dshifts, qc_shifts=qshifts, raw_shifts=raw_shifts,
+                                         which_shifts="drp", apply_shifts=True,
+                                         dry_run=True, display_plots=display_plots)
+                log.warning("QC reports and DRP do not agree on the shifted rows")
+                if interactive:
+                    log.info("interactive mode enabled")
+                    answer = input("apply [q]c, [d]rp or [c]ustom shifts: ")
+                    if answer.lower() == "q":
+                        log.info("choosing QC shifts")
+                        shifts = qshifts
+                        which_shifts = "qc"
+                    elif answer.lower() == "d":
+                        log.info("choosing DRP shifts")
+                        shifts = dshifts
+                        which_shifts = "drp"
+                    elif answer.lower() == "c":
+                        log.info("choosing custom shifts")
+                        answer = input("provide comma-separated custom shifts and press enter: ")
+                        shift_rows = numpy.array([int(_) for _ in answer.split(",")])
+                        cshifts = numpy.zeros(cdata.shape[0])
+                        for irow in shift_rows:
+                            cshifts[irow:] += 2
+                        shifts = cshifts
+                        corrs = numpy.zeros_like(cshifts)
+                        which_shifts = "custom"
+                    apply_shifts = numpy.any(numpy.abs(shifts)>0)
+                else:
+                    log.warning(f"no shift will be applied to the images: {in_images}")
+                    apply_shifts = False
 
     # apply pixel shifts to the images
     images_out, shifts, _, = _apply_electronic_shifts(images=images, out_images=out_images, raw_shifts=raw_shifts,
