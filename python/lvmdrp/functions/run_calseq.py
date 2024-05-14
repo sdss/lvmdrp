@@ -1426,8 +1426,6 @@ def create_wavelengths(mjd, use_fiducial_cals=True, expnums=None, skip_done=True
         Skip pipeline steps that have already been done
     """
     frames = get_sequence_metadata(mjd, expnums=expnums)
-    frames = frames.query("imagetyp=='arc' or (not (ldls|quartz) and (neon|hgne|argon|xenon))")
-    frames["imagetyp"] = "arc"
 
     if use_fiducial_cals:
         masters_mjd = get_master_mjd(mjd)
