@@ -900,6 +900,17 @@ class FiberRows(Header, PositionTable):
         for i in iterator:
             spec = self.getSpec(i)
 
+            # if i in [562, 563, 564, 565]:
+            #     ncols = 3
+            #     nlines = len(cent_wave[0])
+            #     nrows = int(numpy.ceil(nlines / ncols))
+            #     fig, axs = plt.subplots(nrows=nrows, ncols=ncols, figsize=(6*ncols, 6*nrows))
+            #     axs = axs.flatten()
+            #     fig.suptitle("Gaussian fitting")
+            #     fig.supylabel("counts (e-/pixel)")
+            #     fit = spec.fitSepGauss(cent_wave[i - 1], aperture, init_back, axs=axs)
+            #     fig.savefig(f"lines_fit_{i}.png", bbox_inches="tight")
+            # else:
             fit = spec.fitSepGauss(cent_wave[i - 1], aperture, init_back, axs=None)
             flux[i, :] = numpy.fabs(fit[:nlines])
             cent_wave[i, :] = fit[nlines : 2 * nlines]

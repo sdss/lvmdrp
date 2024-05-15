@@ -3231,8 +3231,8 @@ class Spectrum1D(Header):
             par = [0.0, 0.0, 0.0]
             gauss = fit_profile.Gaussian(par)
         else:
-            par = [0.0, 0.0, 0.0, 0.0, 0.0]
-            gauss = fit_profile.Gaussian_poly(par)
+            par = [0.0, 0.0, 0.0, 0.0]
+            gauss = fit_profile.Gaussian_const(par)
 
         gauss.fit(
             self._wave[select],
