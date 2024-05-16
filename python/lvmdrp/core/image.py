@@ -737,7 +737,7 @@ class Image(Header):
         for j,c in enumerate(columns):
             s1 = numpy.nanmedian(ref_data[50:-50,c-column_width:c+column_width], axis=1)
             s2 = numpy.nanmedian(self._data[50:-50,c-column_width:c+column_width], axis=1)
-            _, shifts[j], _ = _cross_match_float(s1, s2, numpy.array([1.0]), [-5, 5])
+            _, shifts[j], _ = _cross_match_float(s1, s2, numpy.array([1.0]), shift_range)
 
         return shifts
 
@@ -1983,7 +1983,7 @@ class Image(Header):
         new_img.setData(data=fit_result, mask=new_mask)
         return new_img
 
-    def fitSpline(self, axis="y", degree=3, smoothing=0, use_weights=False):
+    def fitSpline(self, axis="y", degree=3, smoothing=0, use_weights=False, clip=None, interpolate_missing=True):
         """Fits a spline to the image along a given axis
 
         Parameters
@@ -1997,6 +1997,10 @@ class Image(Header):
             smoothing factor for the spline fit, by default 0
         use_weights : bool, optional
             whether to use the inverse variance as weights for the spline fit or not, by default False
+        clip : tuple, optional
+            minimum and maximum values to clip the spline model, by default None
+        interpolate_missing : bool, optional
+            interpolate coefficients if spline fitting failed
 
         Returns
         -------
@@ -2010,14 +2014,13 @@ class Image(Header):
             self.swapaxes()
 
         pixels = numpy.arange(self._dim[0])
-        models = []
+        models = numpy.zeros(self._dim)
         for i in range(self._dim[1]):
             good_pix = ~self._mask[:,i] if self._mask is not None else ~numpy.isnan(self._data[:,i])
 
             # skip column if all pixels are masked
             if good_pix.sum() == 0:
                 warnings.warn(f"Skipping column {i} due to all pixels being masked", RuntimeWarning)
-                models.append(numpy.zeros(self._dim[0]))
                 continue
 
             # define spline fitting parameters
@@ -2043,15 +2046,14 @@ class Image(Header):
 
             if len(groups) <= degree+1:
                 warnings.warn(f"Skipping column {i} due to insufficient data for spline fit", RuntimeWarning)
-                models.append(numpy.zeros(self._dim[0]))
                 continue
 
             # collapse groups into single pixel
             new_masked_pixels, new_data, new_vars = [], [], []
             for group in groups:
-                new_masked_pixels.append(numpy.mean(masked_pixels[group]))
-                new_data.append(numpy.median(data[group]))
-                new_vars.append(numpy.mean(vars[group]))
+                new_masked_pixels.append(numpy.nanmean(masked_pixels[group]))
+                new_data.append(numpy.nanmedian(data[group]))
+                new_vars.append(numpy.nanmean(vars[group]))
             masked_pixels = numpy.asarray(new_masked_pixels)
             data = numpy.asarray(new_data)
             vars = numpy.asarray(new_vars)
@@ -2062,11 +2064,23 @@ class Image(Header):
                 spline_pars = interpolate.splrep(masked_pixels, data, w=weights, s=smoothing)
             else:
                 spline_pars = interpolate.splrep(masked_pixels, data, s=smoothing)
-            model = interpolate.splev(pixels, spline_pars)
-            models.append(model)
+            models[:, i] = interpolate.splev(pixels, spline_pars)
 
-        # reconstruct the model image
-        models = numpy.asarray(models).T
+        # clip spline fit if required
+        if clip is not None:
+            models = numpy.clip(models, clip[0], clip[1])
+
+        # interpolate failed columns if requested
+        masked_columns = numpy.count_nonzero((models == 0)|numpy.isnan(models), axis=0) >= 0.1*self._dim[0]
+        if interpolate_missing and masked_columns.any():
+            log.info(f"interpolating spline fit in {masked_columns.sum()} columns")
+            x_pixels = numpy.arange(self._dim[1])
+            f = interpolate.interp1d(x_pixels[~masked_columns], models[:, ~masked_columns], axis=1, bounds_error=False, fill_value="extrapolate")
+            models[:, masked_columns] = f(x_pixels[masked_columns])
+
+            # clip spline fit if required
+            if clip is not None:
+                models = numpy.clip(models, clip[0], clip[1])
 
         # match orientation of the output array
         if axis == "y" or axis == "Y" or axis == 0:
@@ -2340,7 +2354,7 @@ class Image(Header):
             integral_mod = integral_mod if integral_mod != 0 else numpy.nan
             # NOTE: this is a hack to avoid integrating the whole column when tracing a few blocks
             integral_dat = numpy.trapz(img_slice._data * (mod_slice>0), img_slice._pixels)
-            residuals.append((integral_dat - integral_mod) / integral_dat * 100)
+            residuals.append((integral_mod - integral_dat) / integral_dat * 100)
 
             # compute fitted model stats
             chisq_red = bn.nansum((mod_slice - img_slice._data)[~img_slice._mask]**2 / img_slice._error[~img_slice._mask]**2) / (self._dim[0] - 1 - 3)
@@ -2454,7 +2468,7 @@ class Image(Header):
         mask = numpy.zeros((cent_trace._fibers, self._dim[1]), dtype="bool")
 
         self._data = numpy.nan_to_num(self._data)
-        self._error = numpy.nan_to_num(self._error, nan=1e10)
+        self._error = numpy.nan_to_num(self._error, nan=numpy.inf)
 
         # convert FWHM trace to sigma
         trace_sigma = trace_fwhm / 2.354

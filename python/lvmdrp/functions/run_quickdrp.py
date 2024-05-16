@@ -139,6 +139,7 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
         wsci_path = path.full("lvm_anc", drpver=drpver, kind="w", imagetype=sci["imagetyp"], **sci)
         ssci_path = path.full("lvm_anc", drpver=drpver, kind="s", imagetype=sci["imagetyp"], **sci)
         hsci_path = path.full("lvm_anc", drpver=drpver, kind="h", imagetype=sci["imagetyp"], **sci)
+        lstr_path = path.full("lvm_anc", drpver=drpver, kind="d", imagetype="stray", **sci)
         os.makedirs(os.path.dirname(hsci_path), exist_ok=True)
 
         # define science product paths
@@ -190,15 +191,12 @@ def quick_science_reduction(expnum: int, use_fiducial_master: bool = False,
         image_tasks.add_astrometry(in_image=dsci_path, out_image=dsci_path, in_agcsci_image=agcsci_path, in_agcskye_image=agcskye_path, in_agcskyw_image=agcskyw_path)
 
         # subtract straylight
-        if sci_imagetyp == "flat":
-            image_tasks.subtract_straylight(in_image=dsci_path, out_image=lsci_path,
-                                                in_cent_trace=mtrace_path, select_nrows=5,
-                                                aperture=13, smoothing=400, median_box=21, gaussian_sigma=0.0)
-        else:
-            lsci_path = dsci_path
+        image_tasks.subtract_straylight(in_image=dsci_path, out_image=lsci_path, out_stray=lstr_path,
+                                        in_cent_trace=mtrace_path, select_nrows=(5,5), use_weights=True,
+                                        aperture=15, smoothing=400, median_box=101, gaussian_sigma=20.0)
 
         # extract 1d spectra
-        image_tasks.extract_spectra(in_image=dsci_path, out_rss=xsci_path, in_trace=mtrace_path, in_fwhm=mwidth_path,
+        image_tasks.extract_spectra(in_image=lsci_path, out_rss=xsci_path, in_trace=mtrace_path, in_fwhm=mwidth_path,
                                     method=extraction_method, parallel=extraction_parallel)
 
     # per channel reduction

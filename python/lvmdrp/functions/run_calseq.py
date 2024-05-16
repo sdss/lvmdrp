@@ -31,12 +31,14 @@ from glob import glob
 from copy import deepcopy as copy
 from shutil import copy2
 from itertools import product, groupby
+from astropy.stats import biweight_location, biweight_scale
 from typing import List, Tuple, Dict
 
 from lvmdrp import log, path, __version__ as drpver
 from lvmdrp.utils import metadata as md
+from lvmdrp.core.plot import create_subplots
 from lvmdrp.core import dataproducts as dp
-from lvmdrp.core.constants import SPEC_CHANNELS
+from lvmdrp.core.constants import SPEC_CHANNELS, LVM_REFERENCE_COLUMN, LVM_NBLOCKS
 from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.core.image import loadImage
 from lvmdrp.core.rss import RSS, lvmFrame
@@ -59,7 +61,7 @@ MASK_BANDS = {
 }
 
 
-def get_sequence_metadata(mjd, expnums=None, exptime=None):
+def get_sequence_metadata(mjd, expnums=None, exptime=None, extract_metadata=False):
     """Get frames metadata for a given sequence
 
     Given a set of MJDs and (optionally) exposure numbers, get the frames
@@ -74,6 +76,8 @@ def get_sequence_metadata(mjd, expnums=None, exptime=None):
         List of exposure numbers to reduce
     exptime : int
         Filter frames metadata by exposure
+    extract_metadata : bool
+        Whether to extract metadata or not, by default False
 
     Returns:
     -------
@@ -83,7 +87,7 @@ def get_sequence_metadata(mjd, expnums=None, exptime=None):
         MJD for master frames
     """
     # get frames metadata
-    frames = md.get_frames_metadata(mjd=mjd)
+    frames = md.get_frames_metadata(mjd=mjd, overwrite=extract_metadata)
 
     # filter by given expnums
     if expnums is not None:
@@ -93,37 +97,306 @@ def get_sequence_metadata(mjd, expnums=None, exptime=None):
     if exptime is not None:
         frames.query("exptime == @exptime", inplace=True)
 
+    # simple fix of imagetyp, some images have the wrong type in the header
+    twilight_selection = (frames.imagetyp == "flat") & ~(frames.ldls|frames.quartz)
+    domeflat_selection = (frames.ldls|frames.quartz) & ~(frames.neon|frames.hgne|frames.argon|frames.xenon)
+    arc_selection = (frames.neon|frames.hgne|frames.argon|frames.xenon) & ~(frames.ldls|frames.quartz)
+    frames.loc[twilight_selection, "imagetyp"] = "flat"
+    frames.loc[domeflat_selection, "imagetyp"] = "flat"
+    frames.loc[arc_selection, "imagetyp"] = "arc"
+
     frames.sort_values(["expnum", "camera"], inplace=True)
 
     return frames
 
 
-def _clean_ancillary(mjd, expnums=None, kind="all"):
+def choose_sequence(frames, flavor, kind):
+    """Returns exposure numbers splitted in different sequences
+
+    Parameters:
+    ----------
+    frames : pd.DataFrame
+        Pandas dataframe containing frames metadata
+    flavor : str
+        Flavor of calibration frame: 'twilight', 'bias', 'flat', 'arc'
+    kind : str
+        Kind of calibration frame: 'nightly', 'longterm'
+
+    Return:
+    ------
+    list
+        list containing arrays of exposure numbers for each sequence
+    """
+    if not isinstance(flavor, str) or flavor not in {"twilight", "bias", "flat", "arc"}:
+        raise ValueError(f"invalid flavor '{flavor}', available values are 'twilight', 'bias', 'flat', 'arc'")
+    if not isinstance(kind, str) or kind not in {"nightly", "longterm"}:
+        raise ValueError(f"invalid kind '{kind}', available values are 'nightly' and 'longterm'")
+
+    if flavor == "twilight":
+        query = "imagetyp == 'flat' and not (ldls|quartz)"
+    elif flavor == "bias":
+        query = "imagetyp == 'bias'"
+    elif flavor == "flat":
+        query = "imagetyp == 'flat' and (ldls|quartz)"
+    elif flavor == "arc":
+        query = "imagetyp == 'arc' and not (ldls|quartz) and (neon|hgne|argon|xenon)"
+    expnums = np.sort(frames.query(query).expnum.unique())
+    diff = np.diff(expnums)
+    div, = np.where(np.abs(diff) > 1)
+
+    sequences = np.split(expnums, div+1)
+    [seq.sort() for seq in sequences]
+    log.info(f"found sequences: {sequences}")
+
+    if len(sequences) == 0:
+        raise ValueError(f"no calibration frames of flavor '{flavor}' found using the query: '{query}'")
+
+    lengths = [len(seq) for seq in sequences]
+    if flavor == "twilight":
+        chosen_expnums = np.concatenate(sequences)
+    else:
+        idx = lengths.index(min(lengths) if kind == "nightly" else max(lengths))
+        if len(sequences) > 1:
+            chosen_expnums = sequences[idx]
+        else:
+            chosen_expnums = sequences[0]
+
+    if flavor == "twilight":
+        expected_length = 24
+    elif flavor == "bias":
+        expected_length = 7
+    elif flavor == "flat":
+        expected_length = 2 if kind == "nightly" else 24
+    elif flavor == "arc":
+        expected_length = 2 if kind == "nightly" else 24
+
+    if len(chosen_expnums) != expected_length:
+        log.warning(f"wrong sequence length for {flavor = }: {len(chosen_expnums)}, expected {expected_length}")
+
+    chosen_frames = frames.query("expnum in @chosen_expnums")
+    chosen_frames.sort_values(["expnum", "camera"], inplace=True)
+    return chosen_frames, chosen_expnums
+
+
+def get_exposed_std_fiber(mjd, expnums, camera, ref_column=LVM_REFERENCE_COLUMN, snr_threshold=5, display_plots=False):
+    """Returns the exposed standard fiber IDs for a given exposure sequence and camera
+
+    Parameters
+    ----------
+    mjd : int
+        MJD of the exposure sequence
+    expnums : list
+        List of exposure numbers in the sequence
+    camera : str
+        Camera name (e.g. "b1")
+    ref_column : int
+        Reference column for the fiber trace
+    display_plots : bool
+        If True, display plots
+
+    Returns
+    -------
+    dict
+        Dictionary with the exposed standard fiber IDs for each exposure in the sequence
+    """
+    log.info(f"loading detrended frames for {camera = }, exposures = {expnums}")
+    rframe_paths = sorted([path.expand("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, camera=camera, expnum=expnum, kind="d", imagetype="*")[0] for expnum in expnums])
+    images = [image_tasks.loadImage(rframe_path) for rframe_path in rframe_paths]
+
+    # get exposed standard fibers from header if present
+    exposed_stds = {image._header["EXPOSURE"]: image._header.get("CALIBFIB", None) for image in images}
+    if all([exposed_std is not None for exposed_std in exposed_stds.values()]):
+        log.info(f"standard fibers in {camera = }: {','.join(exposed_stds.values())}")
+        return exposed_stds
+    else:
+        log.warning(f"exposed standard fibers not found in header for {camera = }, going to infer exposed fibers from SNR")
+
+    # combine frames for given camera
+    log.info(f"combining {len(images)} exposures")
+    cimage = image_tasks.combineImages(images, normalize=False, background_subtract=False)
+    cimage.setData(data=np.nan_to_num(cimage._data), error=np.nan_to_num(cimage._error, nan=np.inf))
+    # calculate correction in reference Y positions along reference column
+    fiber_pos = cimage.match_reference_column(ref_column)
+
+    # define fibermap for camera & std fibers parameters
+    fibermap = cimage._slitmap[cimage._slitmap["spectrographid"]==int(camera[1])]
+    spec_select = fibermap["telescope"] == "Spec"
+    ids_std = fibermap[spec_select]["orig_ifulabel"]
+    pos_std = fiber_pos[spec_select].round().astype("int")
+    idx_std = np.arange(pos_std.size)
+    log.info(f"standard fibers in {camera = }: {','.join(ids_std)}")
+
+    # calculate SNR along colummn
+    fig, axs = create_subplots(to_display=display_plots,
+                               nrows=len(images)//3, ncols=3,
+                               figsize=(15,5*len(images)//3),
+                               sharex=True, sharey=True,
+                               layout="constrained")
+    fig.supxlabel("standard fiber ID")
+    fig.supylabel("SNR at fiber centroid")
+    fig.suptitle(f"exposed standard fibers in sequence {expnums[0]} - {expnums[-1]} in camera '{camera}'")
+    exposed_stds, block_idxs = {}, np.arange(LVM_NBLOCKS).tolist()
+    for image, ax in zip(images, axs):
+        expnum = image._header["EXPOSURE"]
+        column = image.getSlice(ref_column, axis="Y")
+        snr = (column._data/column._error)
+        snr_med = biweight_location(snr[fiber_pos.round().astype("int")])
+        snr_std = biweight_scale(snr[fiber_pos.round().astype("int")])
+        snr_std_med = biweight_location(snr[pos_std])
+        snr_std_std = biweight_scale(snr[pos_std])
+        log.info(f"{expnum = } median SNR = {snr_med:.2f} +/- {snr_std:.2f} (standard fibers: {snr_std_med:.2f} +/- {snr_std_std:.2f})")
+
+        ax.set_title(f"{expnum = }", loc="left")
+        ax.axhspan(snr_med-snr_std, snr_med+snr_std, lw=0, fc="0.7", alpha=0.5)
+        ax.axhline(snr_med, lw=1, color="0.7")
+        ax.axhspan(max(0, snr_std_med-snr_threshold*snr_std_std), snr_std_med+snr_threshold*snr_std_std, lw=0, fc="0.7", alpha=0.5)
+        ax.axhline(snr_std_med, lw=1, color="0.7")
+        ax.bar(idx_std, snr[pos_std], hatch="///////", lw=0, ec="tab:blue", fc="none", zorder=999)
+        ax.set_xticks(idx_std)
+        ax.set_xticklabels(ids_std)
+
+        # select standard fiber exposed if any
+        select_std = (snr[pos_std] > snr_std_med+snr_threshold*snr_std_std) | (snr[pos_std] >= snr_med-snr_std)
+        exposed_std = ids_std[select_std]
+        if len(exposed_std) > 1:
+            exposed_std = [exposed_std[np.argmax(snr[pos_std[select_std]])]]
+            log.warning(f"more than one standard fiber selected in {expnum = }: {','.join(exposed_std)}, selecting higest SNR: {exposed_std[0]}")
+        exposed_std = exposed_std[0] if len(exposed_std) > 0 else None
+        if exposed_std is None:
+            continue
+
+        # get block ID for exposed standard fiber
+        fiber_par = image._slitmap[image._slitmap["orig_ifulabel"] == exposed_std]
+        block_idx = int(fiber_par["blockid"][0][1:])-1
+        block_idxs.remove(block_idx)
+
+        exposed_stds[expnum] = (exposed_std, [block_idx])
+
+    # TODO: save figure
+
+    # add missing blocks for first exposure
+    if len(block_idxs) > 0:
+        log.info(f"remaining blocks without exposed standard fibers: {block_idxs}, adding to first exposure")
+        expnum = list(exposed_stds.keys())[0]
+        exposed_stds[expnum] = (exposed_stds[expnum][0], sorted(exposed_stds[expnum][1]+block_idxs))
+
+    # list unexposed standard fibers
+    unexposed_stds = [fiber for fiber in ids_std if fiber not in exposed_stds.values()]
+
+    return exposed_stds, unexposed_stds
+
+
+def _load_shift_report(mjd):
+    """Reads QC reports with the electronic pixel shifts"""
+
+    with open(os.path.join(os.environ["LVM_SANDBOX"], "shift_monitor", f"shift_{mjd}.txt"), "r") as f:
+        lines = f.readlines()[2:]
+
+    shifts_report = {}
+    for line in lines:
+        cols = line[:-1].split()
+        if not cols:
+            continue
+        _, exp, _, spec = cols[:4]
+        exp = int(exp)
+        spec = spec[-1]
+        shifts = np.array([int(_) for _ in cols[4:]])
+        shifts_report[(spec, exp)] = (shifts[::2], shifts[1::2])
+
+    return shifts_report
+
+
+def _get_reference_expnum(frame, ref_frames):
+    """Get reference frame for a given frame
+
+    Given a frame and a set of reference frames, get the reference frame for the
+    given frame. This routine will return the reference frame with the closest
+    exposure number to the given frame.
+
+    Parameters:
+    ----------
+    frame : pd.Series
+        Frame metadata
+    ref_frames : pd.DataFrame
+        Reference frames metadata
+
+    Returns:
+    -------
+    pd.Series
+        Reference frame metadata
+    """
+    if frame.imagetyp == "flat" and frame.ldls|frame.quartz:
+        refs = ref_frames.query("imagetyp == 'flat' and (ldls|quartz)")
+    elif frame.imagetyp == "flat":
+        refs = ref_frames.query("imagetyp == 'flat' and not (ldls|quartz)")
+    else:
+        refs = ref_frames.query("imagetyp == @frame.imagetyp")
+
+    ref_expnums = refs.expnum.unique()
+    if len(ref_expnums) < 2:
+        raise ValueError(f"no reference frame found for {frame.imagetyp}")
+    idx = np.argmin(np.abs(ref_expnums-frame.expnum))
+    if idx > 0:
+        idx -= 1
+    if idx == 0:
+        idx += 1
+    return ref_expnums[idx]
+
+
+def _move_master_calibrations(mjd, kind=None):
+
+    kinds = {"bias", "trace", "width", "fiberflat", "fiberflat_twilight", "wave", "lsf"}
+    if isinstance(kind, (list, tuple, set, np.ndarray)):
+        kinds = kind
+    elif isinstance(kind, str) and kind in kinds:
+        kinds = {kind}
+    elif kind is None:
+        pass
+    else:
+        raise ValueError(f"kind must be one of {kinds}")
+
+    for kind in kinds:
+        src_paths = path.expand("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind=f"m{kind}", camera="*")
+        for src_path in src_paths:
+            camera = os.path.basename(src_path).split(".")[0].split("-")[-1]
+            dst_path = path.full("lvm_calib", mjd=mjd, kind=kind, camera=camera)
+            if os.path.isfile(src_path):
+                os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+                copy2(src_path, dst_path)
+
+
+def _clean_ancillary(mjd, expnums=None, imagetyp="all"):
     """Clean ancillary files
 
     Given a set of MJDs and (optionally) exposure numbers, clean the ancillary
-    files for the given kind of frames. This routine will remove the ancillary
-    files for the given kind of frames in the corresponding calibration
+    files for the given imagetyp of frames. This routine will remove the ancillary
+    files for the given imagetyp of frames in the corresponding calibration
     directory in the `masters_mjd` or by default in the smallest MJD in `mjds`.
 
     Parameters:
     ----------
     mjd : int
-        MJD to reduce
+        MJD to clean
     expnums : list
-        List of exposure numbers to reduce
-    kind : str
-        Kind of frame to reduce, defaults to "all"
+        List of exposure numbers to clean
+    imagetyp : str
+        type of frame to remove, defaults to "all"
     """
 
     # get frames metadata
     frames = get_sequence_metadata(mjd, expnums=expnums)
 
     # filter by target image types
-    if kind in ["bias", "dark", "flat", "arc", "object"]:
-        frames.query("imagetyp == @kind", inplace=True)
-    elif kind != "all":
-        raise ValueError(f"Invalid kind: '{kind}'. Must be one of 'bias', 'dark', 'flat', 'arc', 'object' or 'all'")
+    ALL = {"bias", "dark", "flat", "arc", "object", "cent", "amp", "width", "stray"}
+    if imagetyp in ALL:
+        frames.query("imagetyp == @imagetyp", inplace=True)
+    elif imagetyp != "all":
+        raise ValueError(f"Invalid imagetyp: '{imagetyp}'. Must be one of {ALL} or 'all'")
+
+    if imagetyp == "all":
+        ancillary_dir = os.path.join(os.getenv["LVM_SPECTRO_REDUX"], drpver, str(mjd), "ancillary")
+        os.rmdir(ancillary_dir)
+        return
 
     ancillary_dirs = []
     for frame in frames.to_dict("records"):
@@ -269,9 +542,9 @@ def messup_frame(mjd, expnum, spec="1", shifts=[1500, 2000, 3500], shift_size=-2
     return messed_up_frames
 
 
-def fix_raw_pixel_shifts(mjd, ref_expnums, use_fiducial_cals=True, expnums=None, specs="123",
+def fix_raw_pixel_shifts(mjd, expnums=None, ref_expnums=None, use_fiducial_cals=True, specs="123",
                          y_widths=5, wave_list=None, wave_widths=0.6*5, max_shift=10, flat_spikes=11,
-                         threshold_spikes=np.inf, shift_rows=None, skip_done=False,
+                         threshold_spikes=np.inf, shift_rows=None, interactive=False, skip_done=False,
                          display_plots=False):
     """Attempts to fix pixel shifts in a list of raw frames
 
@@ -283,12 +556,12 @@ def fix_raw_pixel_shifts(mjd, ref_expnums, use_fiducial_cals=True, expnums=None,
     ----------
     mjd : float
         MJD to reduce
-    ref_expnums : list
-        List of reference exposure numbers to use as reference for good frames
-    use_fiducial_cals : bool
-        Whether to use fiducial calibration frames or not, defaults to True
     expnums : list
         List of exposure numbers to look for pixel shifts
+    ref_expnums : list
+        List of reference exposure numbers to use as reference for good frames, by default None
+    use_fiducial_cals : bool
+        Whether to use fiducial calibration frames or not, defaults to True
     specs : str
         Spectrograph channels
     y_widths : int
@@ -305,6 +578,8 @@ def fix_raw_pixel_shifts(mjd, ref_expnums, use_fiducial_cals=True, expnums=None,
         Threshold for spikes, by default np.inf
     shift_rows : dict
         Rows to shift, by default None
+    interactive : bool
+        Interactive mode when report and measured shifts are different, by default False
     skip_done : bool
         Skip pipeline steps that have already been done
     display_plots : bool
@@ -316,8 +591,10 @@ def fix_raw_pixel_shifts(mjd, ref_expnums, use_fiducial_cals=True, expnums=None,
     elif not isinstance(shift_rows, dict):
         raise ValueError("shift_rows must be a dictionary with keys (spec, expnum) and values a list of rows to shift")
 
-    ref_frames = get_sequence_metadata(mjd, expnums=ref_expnums)
+    # get target frames & reference frames metadata
     frames = get_sequence_metadata(mjd, expnums=expnums)
+    ref_frames = get_sequence_metadata(mjd, expnums=ref_expnums)
+
     if use_fiducial_cals:
         masters_mjd = get_master_mjd(mjd)
         masters_path = os.path.join(MASTERS_DIR, str(masters_mjd))
@@ -327,22 +604,37 @@ def fix_raw_pixel_shifts(mjd, ref_expnums, use_fiducial_cals=True, expnums=None,
     if not imagetyps.issubset(ref_imagetyps):
         raise ValueError(f"the following image types are not present in the reference frames: {imagetyps - ref_imagetyps}")
 
+    shifts_path = os.path.join(os.getenv('LVM_SANDBOX'), 'shift_monitor', f'shift_{mjd}.txt')
+    shifts_report = {}
+    if os.path.isfile(shifts_path):
+        shifts_report = _load_shift_report(mjd)
+
     expnums_grp = frames.groupby("expnum")
     for spec in specs:
         for expnum in expnums_grp.groups:
             frame = expnums_grp.get_group(expnum).iloc[0]
-            ref_expnum = ref_frames.query("imagetyp == @frame.imagetyp").expnum.iloc[0]
+
+            # find suitable reference frame for current frame
+            ref_expnum = _get_reference_expnum(frame, ref_frames)
 
             rframe_paths = sorted(path.expand("lvm_raw", hemi="s", camspec=f"?{spec}", mjd=mjd, expnum=expnum))
-            cframe_paths = sorted(path.expand("lvm_raw", hemi="s", camspec=f"?{spec}", mjd=mjd, expnum=ref_expnum))
             rframe_paths = [rframe_path for rframe_path in rframe_paths if ".gz" in rframe_path]
-            cframe_paths = [cframe_path for cframe_path in cframe_paths if ".gz" in cframe_path]
+
+            # use fixed reference if exist, else use original raw frame
+            cframe_paths = sorted([path.full("lvm_anc", drpver=drpver, tileid=frame.tileid, mjd=mjd, kind="e", imagetype=frame.imagetyp, expnum=ref_expnum, camera=f"{channel}{spec}") for channel in "brz"])
+            if not all([os.path.exists(cframe_path) for cframe_path in cframe_paths]):
+                cframe_paths = sorted(path.expand("lvm_raw", hemi="s", camspec=f"?{spec}", mjd=mjd, expnum=ref_expnum))
+                cframe_paths = [cframe_path for cframe_path in cframe_paths if ".gz" in cframe_path]
+
             eframe_paths = [path.full("lvm_anc", drpver=drpver, tileid=frame.tileid, mjd=mjd, kind="e", imagetype=frame.imagetyp, expnum=expnum, camera=f"{channel}{spec}") for channel in "brz"]
             mask_2d_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, imagetype="mask2d",
                                      expnum=0, camera=f"sp{spec}", kind="")
 
             if len(rframe_paths) < 3:
-                log.warning(f"skipping {rframe_paths}, less than 3 files found")
+                log.warning(f"skipping {rframe_paths = }, less than 3 files found")
+                continue
+            if len(cframe_paths) < 3:
+                log.warning(f"skipping {cframe_paths = }, less than 3 files found")
                 continue
 
             if use_fiducial_cals:
@@ -361,9 +653,10 @@ def fix_raw_pixel_shifts(mjd, ref_expnums, use_fiducial_cals=True, expnums=None,
                                             display_plots=display_plots)
 
             image_tasks.fix_pixel_shifts(in_images=rframe_paths, out_images=eframe_paths,
-                                         ref_images=cframe_paths, in_mask=mask_2d_path, flat_spikes=flat_spikes,
-                                         threshold_spikes=threshold_spikes, max_shift=max_shift, shift_rows=shift_rows.get((spec, expnum), None),
-                                         display_plots=display_plots)
+                                         ref_images=cframe_paths, in_mask=mask_2d_path, report=shifts_report.get((spec, expnum), None),
+                                         flat_spikes=flat_spikes, threshold_spikes=threshold_spikes,
+                                         max_shift=max_shift, shift_rows=shift_rows.get((spec, expnum), None),
+                                         interactive=interactive, display_plots=display_plots)
 
 
 def reduce_2d(mjd, use_fiducial_cals=True, expnums=None, exptime=None,
@@ -699,9 +992,8 @@ def create_nighly_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnums
                 log.info(f"skipping {lflat_path}, file already exist")
             else:
                 image_tasks.subtract_straylight(in_image=dflat_path, out_image=lflat_path, out_stray=dstray_path,
-                                                in_cent_trace=cent_guess_path, select_nrows=5,
-                                                aperture=13, smoothing=400, median_box=21,
-                                                gaussian_sigma=0.0)
+                                                in_cent_trace=cent_guess_path, select_nrows=(5,5), use_weights=True,
+                                                aperture=15, smoothing=400, median_box=101, gaussian_sigma=20.0)
 
             if skip_done and os.path.isfile(flux_path) and os.path.isfile(cent_path) and os.path.isfile(fwhm_path):
                 log.info(f"skipping {flux_path}, {cent_path} and {fwhm_path}, files already exist")
@@ -794,22 +1086,16 @@ def create_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnums_qrtz=N
 
     tileid = frames.tileid.iloc[0]
     # iterate through exposures with std fibers exposed
-    expnum_params = _get_ring_expnums(expnums_ldls, expnums_qrtz, ring_size=12)
-    for camera, expnums in expnum_params.items():
-        for expnum, block_idxs, fiber_str in expnums:
-            con_lamp = MASTER_CON_LAMPS[camera[0]]
-            if con_lamp == "ldls":
-                counts_threshold = 5000
-            elif con_lamp == "quartz":
-                counts_threshold = 10000
+    cameras = ["b1", "b2", "b3", "r1", "r2", "r3", "z1", "z2", "z3"]
+    for camera in cameras:
+        expnums = expnums_qrtz if camera[0] == "z" else expnums_ldls
+        counts_threshold = 10000 if camera[0] == "z" else 5000
 
-            # select fibers in current spectrograph
-            fibermap = SLITMAP[SLITMAP["spectrographid"] == int(camera[1])]
-            # select illuminated std fiber
-            select = fibermap["orig_ifulabel"] == fiber_str
-            # select fiber index
-            fiber_idx = np.where(select)[0][0]
+        # select fibers in current spectrograph
+        fibermap = SLITMAP[SLITMAP["spectrographid"] == int(camera[1])]
 
+        exposed_stds, unexposed_stds = get_exposed_std_fiber(mjd=mjd, expnums=expnums, camera=camera)
+        for expnum, (std_fiberid, block_idxs) in exposed_stds.items():
             # define paths
             dflat_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=mjd, kind="d", imagetype="flat", camera=camera, expnum=expnum)
             lflat_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=mjd, kind="l", imagetype="flat", camera=camera, expnum=expnum)
@@ -837,23 +1123,13 @@ def create_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnums_qrtz=N
                 log.info(f"skipping {lflat_path}, file already exist")
             else:
                 image_tasks.subtract_straylight(in_image=dflat_path, out_image=lflat_path, out_stray=dstray_path,
-                                                in_cent_trace=cent_guess_path, select_nrows=5,
-                                                aperture=13, smoothing=400, median_box=21,
-                                                gaussian_sigma=0.0)
+                                                in_cent_trace=cent_guess_path, select_nrows=(5,5), use_weights=True,
+                                                aperture=15, smoothing=400, median_box=101, gaussian_sigma=20.0)
 
-            if skip_done and os.path.isfile(flux_path):
-                log.info(f"skipping {flux_path}, file already exist")
-                trace_cent_fit = TraceMask.from_file(cent_path)
-                trace_flux_fit = TraceMask.from_file(flux_path)
-                trace_fwhm_fit = TraceMask.from_file(fwhm_path)
-                img_stray = loadImage(lflat_path)
-                img_stray.setData(data=np.nan_to_num(img_stray._data), error=np.nan_to_num(img_stray._error))
-                img_stray = img_stray.replaceMaskMedian(1, 10, replace_error=None)
-                img_stray._data = np.nan_to_num(img_stray._data)
-                img_stray = img_stray.medianImg((1,10), propagate_error=True)
-                img_stray = img_stray.convolveImg(np.ones((1, 20), dtype="uint8"))
+            if skip_done and os.path.isfile(cent_path) and os.path.isfile(flux_path) and os.path.isfile(fwhm_path):
+                log.info(f"skipping {cent_path}, {flux_path} and {fwhm_path}, file already exist")
             else:
-                log.info(f"going to trace std fiber {fiber_str} in {camera} within {block_idxs = }")
+                log.info(f"going to trace std fiber {std_fiberid} in {camera} within {block_idxs = }")
                 centroids, trace_cent_fit, trace_flux_fit, trace_fwhm_fit, img_stray, model, mratio = image_tasks.trace_fibers(
                     in_image=lflat_path,
                     out_trace_amp=flux_path, out_trace_cent=cent_path, out_trace_fwhm=fwhm_path,
@@ -864,67 +1140,66 @@ def create_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnums_qrtz=N
                     fit_poly=fit_poly, interpolate_missing=False, poly_deg=(poly_deg_amp, poly_deg_cent, poly_deg_width)
                 )
 
-            # update master traces
-            log.info(f"{camera = }, {expnum = }, {fiber_str = :>6s}, fiber_idx = {fiber_idx:>3d}, FWHM = {np.nanmean(trace_fwhm_fit._data[fiber_idx]):.2f}")
-            select_block = np.isin(fibermap["blockid"], [f"B{id+1}" for id in block_idxs])
-            if fit_poly:
-                mamps[camera]._coeffs[select_block] = trace_flux_fit._coeffs[select_block]
-                mcents[camera]._coeffs[select_block] = trace_cent_fit._coeffs[select_block]
-                mwidths[camera]._coeffs[select_block] = trace_fwhm_fit._coeffs[select_block]
-            else:
-                mamps[camera]._coeffs = None
-                mcents[camera]._coeffs = None
-                mwidths[camera]._coeffs = None
-            mamps[camera]._data[select_block] = trace_flux_fit._data[select_block]
-            mcents[camera]._data[select_block] = trace_cent_fit._data[select_block]
-            mwidths[camera]._data[select_block] = trace_fwhm_fit._data[select_block]
-            mamps[camera]._mask[select_block] = False
-            mcents[camera]._mask[select_block] = False
-            mwidths[camera]._mask[select_block] = False
+                # update master traces
+                log.info(f"{camera = }, {expnum = }, {std_fiberid = :>6s}")
+                select_block = np.isin(fibermap["blockid"], [f"B{id+1}" for id in block_idxs])
+                if fit_poly:
+                    mamps[camera]._coeffs[select_block] = trace_flux_fit._coeffs[select_block]
+                    mcents[camera]._coeffs[select_block] = trace_cent_fit._coeffs[select_block]
+                    mwidths[camera]._coeffs[select_block] = trace_fwhm_fit._coeffs[select_block]
+                else:
+                    mamps[camera]._coeffs = None
+                    mcents[camera]._coeffs = None
+                    mwidths[camera]._coeffs = None
+                mamps[camera]._data[select_block] = trace_flux_fit._data[select_block]
+                mcents[camera]._data[select_block] = trace_cent_fit._data[select_block]
+                mwidths[camera]._data[select_block] = trace_fwhm_fit._data[select_block]
+                mamps[camera]._mask[select_block] = False
+                mcents[camera]._mask[select_block] = False
+                mwidths[camera]._mask[select_block] = False
 
-        # masking bad fibers
-        bad_fibers = fibermap["fibstatus"] == 1
-        mamps[camera]._mask[bad_fibers] = True
-        mcents[camera]._mask[bad_fibers] = True
-        mwidths[camera]._mask[bad_fibers] = True
-        # masking untraced standard fibers
-        try:
-            fiber_strs = list(zip(*expnum_params[camera]))[2]
-        except IndexError:
-            fiber_strs = []
-        untraced_fibers = np.isin(fibermap["orig_ifulabel"].value, list(set(fibermap[fibermap["telescope"] == "Spec"]["orig_ifulabel"])-set(fiber_strs)))
-        mamps[camera]._mask[untraced_fibers] = True
-        mcents[camera]._mask[untraced_fibers] = True
-        mwidths[camera]._mask[untraced_fibers] = True
-
-        # interpolate master traces in missing fibers
-        if fit_poly:
-            mamps[camera].interpolate_coeffs()
-            mcents[camera].interpolate_coeffs()
-            mwidths[camera].interpolate_coeffs()
-        else:
-            mamps[camera].interpolate_data(axis="Y", extrapolate=True)
-            mcents[camera].interpolate_data(axis="Y", extrapolate=True)
-            mwidths[camera].interpolate_data(axis="Y", extrapolate=True)
-
-        # reset mask to propagate broken fibers
-        mamps[camera]._mask[bad_fibers] = True
-        mcents[camera]._mask[bad_fibers] = True
-        mwidths[camera]._mask[bad_fibers] = True
-
-        # save master traces
         mamp_path = path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=mjd, camera=camera, kind="mamps")
         mcent_path = path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=mjd, camera=camera, kind="mtrace")
         mwidth_path = path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=mjd, camera=camera, kind="mwidth")
         os.makedirs(os.path.dirname(mamp_path), exist_ok=True)
-        mamps[camera].writeFitsData(mamp_path)
-        mcents[camera].writeFitsData(mcent_path)
-        mwidths[camera].writeFitsData(mwidth_path)
+        if skip_done and os.path.isfile(mcent_path) and os.path.isfile(mamp_path) and os.path.isfile(mwidth_path):
+            log.info(f"skipping {mcent_path}, {mamp_path} and {mwidth_path}, files already exist")
+        else:
+            # masking bad fibers
+            bad_fibers = fibermap["fibstatus"] == 1
+            mamps[camera]._mask[bad_fibers] = True
+            mcents[camera]._mask[bad_fibers] = True
+            mwidths[camera]._mask[bad_fibers] = True
+            # masking untraced standard fibers
+            untraced_fibers = np.isin(fibermap["orig_ifulabel"].value, unexposed_stds)
+            mamps[camera]._mask[untraced_fibers] = True
+            mcents[camera]._mask[untraced_fibers] = True
+            mwidths[camera]._mask[untraced_fibers] = True
 
-        # eval model continuum and ratio
-        model, ratio = img_stray.eval_fiber_model(mamps[camera], mcents[camera], mwidths[camera])
-        model.writeFitsData(dmodel_path)
-        ratio.writeFitsData(dratio_path)
+            # interpolate master traces in missing fibers
+            if fit_poly:
+                mamps[camera].interpolate_coeffs()
+                mcents[camera].interpolate_coeffs()
+                mwidths[camera].interpolate_coeffs()
+            else:
+                mamps[camera].interpolate_data(axis="Y", extrapolate=True)
+                mcents[camera].interpolate_data(axis="Y", extrapolate=True)
+                mwidths[camera].interpolate_data(axis="Y", extrapolate=True)
+
+            # reset mask to propagate broken fibers
+            mamps[camera]._mask[bad_fibers] = True
+            mcents[camera]._mask[bad_fibers] = True
+            mwidths[camera]._mask[bad_fibers] = True
+
+            # save master traces
+            mamps[camera].writeFitsData(mamp_path)
+            mcents[camera].writeFitsData(mcent_path)
+            mwidths[camera].writeFitsData(mwidth_path)
+
+            # eval model continuum and ratio
+            model, ratio = img_stray.eval_fiber_model(mamps[camera], mcents[camera], mwidths[camera])
+            model.writeFitsData(dmodel_path)
+            ratio.writeFitsData(dratio_path)
 
 
 def create_fiberflats(mjd: int, use_fiducial_cals: bool = True, expnums: List[int] = None, median_box: int = 10, niter: bool = 1000,
@@ -976,18 +1251,17 @@ def create_fiberflats(mjd: int, use_fiducial_cals: bool = True, expnums: List[in
     # get metadata
     flats = get_sequence_metadata(mjd, expnums=expnums)
     if expnums is None:
-        flats.query("imagetyp == 'flat' and not ldls|quartz", inplace=True)
+        flats.query("imagetyp == 'flat' and not (ldls|quartz)", inplace=True)
 
     # 2D reduction of twilight sequence
     reduce_2d(mjd=mjd, use_fiducial_cals=use_fiducial_cals, expnums=flats.expnum.unique(), reject_cr=False, skip_done=skip_done)
 
+    masters_mjd = get_master_mjd(mjd)
+    masters_path = os.path.join(MASTERS_DIR, f"{masters_mjd}")
     for flat in flats.to_dict("records"):
 
         # master calibration paths
         camera = flat["camera"]
-        mjd = flat["mjd"]
-        masters_mjd = get_master_mjd(mjd)
-        masters_path = os.path.join(MASTERS_DIR, f"{masters_mjd}")
         if use_fiducial_cals:
             master_cals = {
                 "cent" : os.path.join(masters_path, f"lvm-mtrace-{camera}.fits"),
@@ -1010,9 +1284,8 @@ def create_fiberflats(mjd: int, use_fiducial_cals: bool = True, expnums: List[in
             log.info(f"skipping {lflat_path}, file already exist")
         else:
             image_tasks.subtract_straylight(in_image=dflat_path, out_image=lflat_path, out_stray=stray_path,
-                                            in_cent_trace=master_cals.get("cent"), select_nrows=5,
-                                            aperture=13, smoothing=400, median_box=21,
-                                            gaussian_sigma=0.0)
+                                            in_cent_trace=master_cals.get("cent"), select_nrows=(5,5), use_weights=True,
+                                            aperture=15, smoothing=400, median_box=101, gaussian_sigma=20.0)
 
         if skip_done and os.path.isfile(xflat_path):
             log.info(f"skipping {xflat_path}, file already exist")
@@ -1072,14 +1345,24 @@ def create_fiberflats(mjd: int, use_fiducial_cals: bool = True, expnums: List[in
             hflat_path = path.full("lvm_anc", drpver=drpver, kind="h", imagetype=flat["imagetyp"], tileid=flat["tileid"], mjd=flat["mjd"], camera=channel, expnum=expnum)
             rss_tasks.resample_wavelength(in_rss=wflat_path, out_rss=hflat_path, wave_disp=0.5, wave_range=SPEC_CHANNELS[channel])
 
-            # fit gradient and remove it
-            gflat_path = path.full("lvm_anc", drpver=drpver, kind="g", imagetype=flat["imagetyp"], tileid=flat["tileid"], mjd=flat["mjd"], camera=channel, expnum=expnum)
-            remove_field_gradient(in_hflat=hflat_path, out_gflat=gflat_path, wrange=SPEC_CHANNELS[channel])
-
             # fit fiber throughput
-            fflat = fit_fiberflat(in_twilight=gflat_path, out_flat=fflat_path, out_rss=fflat_flatfielded_path, median_box=median_box, niter=niter,
+            fflat = fit_fiberflat(in_twilight=hflat_path, out_flat=fflat_path, out_rss=fflat_flatfielded_path, median_box=median_box, niter=niter,
                                    threshold=threshold, mask_bands=mask_bands.get(channel, []),
                                    display_plots=display_plots, nknots=nknots)
+
+            # fit gradient and remove it
+            gflat_path = path.full("lvm_anc", drpver=drpver, kind="g", imagetype=flat["imagetyp"], tileid=flat["tileid"], mjd=flat["mjd"], camera=channel, expnum=expnum)
+            remove_field_gradient(in_hflat=fflat_flatfielded_path, out_gflat=gflat_path, wrange=SPEC_CHANNELS[channel])
+
+            fflat_flatfielded = RSS.from_file(fflat_flatfielded_path)
+            gflat = RSS.from_file(gflat_path)
+            gradient = copy(gflat)
+            gradient._data = fflat_flatfielded._data / gflat._data
+            fflat._data /= gradient._data
+            fflat._mask |= np.isnan(fflat._data)
+            fflat = fflat.interpolate_data(axis="X")
+            fflat = fflat.interpolate_data(axis="Y")
+            fflat.writeFitsData(fflat_path)
             fflat.set_wave_trace(mwave)
             fflat.set_lsf_trace(mlsf)
             fflat = fflat.to_native_wave(method="linear", interp_density=False, return_density=False)
@@ -1152,8 +1435,6 @@ def create_wavelengths(mjd, use_fiducial_cals=True, expnums=None, skip_done=True
         Skip pipeline steps that have already been done
     """
     frames = get_sequence_metadata(mjd, expnums=expnums)
-    frames = frames.query("imagetyp=='arc' or (not ldls|quartz and neon|hgne|argon|xenon)")
-    frames["imagetyp"] = "arc"
 
     if use_fiducial_cals:
         masters_mjd = get_master_mjd(mjd)
@@ -1252,7 +1533,7 @@ def reduce_nightly_sequence(mjd, use_fiducial_cals=True, reject_cr=True, skip_do
     cal_imagetyps = {"bias", "flat", "arc"}
     log.info(f"going to reduce nightly calibration frames: {cal_imagetyps}")
 
-    frames = md.get_frames_metadata(mjd)
+    frames = md.get_sequence_metadata(mjd)
     frames.query("imagetyp in @cal_imagetyps", inplace=True)
     if len(frames) == 0:
         raise ValueError(f"no frames found for MJD = {mjd}")
@@ -1264,100 +1545,103 @@ def reduce_nightly_sequence(mjd, use_fiducial_cals=True, reject_cr=True, skip_do
     else:
         log.warning("no bias exposures found")
 
-    dome_flats = frames.query("imagetyp == 'flat' and ldls|quartz")
+    dome_flats = frames.query("imagetyp == 'flat' and (ldls|quartz)")
     if len(dome_flats) != 0:
-        expnums_ldls = dome_flats.query("ldls").expnum.unique()
-        expnums_qrtz = dome_flats.query("quartz").expnum.unique()
+        expnums_ldls = np.sort(dome_flats.query("ldls").expnum.unique())
+        expnums_qrtz = np.sort(dome_flats.query("quartz").expnum.unique())
         log.info(f"found {len(dome_flats)} dome flat exposures: {set(dome_flats.expnum)}")
         create_nighly_traces(mjd=mjd, expnums_ldls=expnums_ldls, expnums_qrtz=expnums_qrtz, skip_done=skip_done)
         # create_nightly_fiberflats(mjd=mjd, expnums_ldls=expnums_ldls, expnums_qrtz=expnums_qrtz, skip_done=skip_done)
     else:
         log.warning("no dome flat exposures found")
 
-    arcs = frames.query("imagetyp == 'arc' and not ldls|quartz and neon|hgne|argon|xenon")
+    arcs = frames.query("imagetyp == 'arc' and not (ldls|quartz) and (neon|hgne|argon|xenon)")
     if len(arcs) != 0:
         log.info(f"found {len(arcs)} arc exposures: {set(arcs.expnum)}")
-        create_wavelengths(mjd=mjd, expnums=arcs.expnum.unique(), skip_done=skip_done)
+        create_wavelengths(mjd=mjd, expnums=np.sort(arcs.expnum.unique()), skip_done=skip_done)
     else:
         log.warning("no arc exposures found")
 
-    twilight_flats = frames.query("imagetyp == 'flat' and not ldls|quartz")
+    twilight_flats = frames.query("imagetyp == 'flat' and not (ldls|quartz)")
     if len(twilight_flats) != 0:
         log.info(f"found {len(twilight_flats)} twilight exposures: {set(twilight_flats.expnum)}")
-        create_fiberflats(mjd=mjd, expnums=sorted(twilight_flats.expnum.unique()), skip_done=skip_done)
+        create_fiberflats(mjd=mjd, expnums=sorted(np.sort(twilight_flats.expnum.unique())), skip_done=skip_done)
     else:
         log.warning("no twilight exposures found")
 
+    if not keep_ancillary:
+        _clean_ancillary(mjd)
+
 
 def reduce_longterm_sequence(mjd, use_fiducial_cals=True, reject_cr=True, skip_done=True, keep_ancillary=False):
-    pass
+    """Reduces the long-term calibration sequence:
 
+    The long-term calibration sequence consists of the following exposures:
+        * 7 - 9 bias
+        * 24 dome flat (12: LDLS and 12: quartz)
+        * 24 arc (12: 10s and 12: 50s exposures)
+        * ~12 - 24 twilight (~half exposures at dawn and twilight)
 
-def run_calibration_sequence(mjds, masters_mjd=None, expnums=None,
-                             pixelflats: bool = False, pixelmasks: bool = False,
-                             illumination_corrections: bool = False):
-    """Run the calibration sequence reduction
-
-    Given a set of MJDs and (optionally) exposure numbers, run the calibration
-    sequence reduction. This routine will store the master calibration frames
-    in the corresponding calibration directory in the `masters_mjd` or by
-    default in the smallest MJD in `mjds`.
+    This routine will create *long-term* master calibrations
+    at $LVM_SANDBOX/calib/{mjd}
 
     Parameters:
     ----------
-    mjds : list
-        List of MJDs to reduce
-    masters_mjd : float
-        MJD to store the master frames in
-    expnums : list
-        List of exposure numbers to reduce
-    pixelflats : bool
-        Flag to create pixel flats
-    pixelmasks : bool
-        Flag to create pixel masks
-    illumination_corrections : bool
-        Flag to create illumination corrections
+    mjd : int
+        MJD to reduce
+    use_fiducial_cals : bool
+        Whether to use fiducial calibration frames or not, defaults to True
+    reject_cr : bool
+        Reject cosmic rays in 2D reduction, by default True
+    skip_done : bool
+        Skip pipeline steps that have already been done
+    keep_ancillary : bool
+        Keep ancillary files, by default False
     """
+    cal_imagetyps = {"bias", "flat", "arc"}
+    log.info(f"going to reduce nightly calibration frames: {cal_imagetyps}")
 
-    # split exposures into the exposure sequence of each type of master frame
-    frames, masters_mjd = get_sequence_metadata(mjds, masters_mjd=masters_mjd, expnums=expnums)
-    bias_frames = frames.query("imagetyp == 'bias'")
-    dark_frames = frames.query("imagetyp == 'dark'")
-    ldls_frames = frames.query("imagetyp == 'flat & ldls")
-    qrtz_frames = frames.query("imagetyp == 'flat & quartz'")
-    twilight_frames = frames.query("imagetyp == 'flat'")
-    arc_frames = frames.query("imagetyp == 'arc'")
+    frames = get_sequence_metadata(mjd)
+    frames.query("imagetyp in @cal_imagetyps", inplace=True)
+    if len(frames) == 0:
+        raise ValueError(f"no frames found for MJD = {mjd}")
 
-    # TODO: verify sequences completeness
+    biases, bias_expnums = choose_sequence(frames, flavor="bias", kind="longterm")
+    if len(biases) != 0:
+        log.info(f"found {len(biases)} bias exposures: {bias_expnums}")
+        create_detrending_frames(mjd=mjd, expnums=bias_expnums, kind="bias", use_fiducial_cals=use_fiducial_cals, skip_done=skip_done, keep_ancillary=keep_ancillary)
+        _move_master_calibrations(mjd=mjd, kind="bias")
+    else:
+        log.warning("no bias exposures found")
 
-    # reduce bias/dark
-    create_detrending_frames(mjds, masters_mjd=masters_mjd, expnums=set(bias_frames.expnum), kind="bias")
-    create_detrending_frames(mjds, masters_mjd=masters_mjd, expnums=set(dark_frames.expnum), kind="dark")
+    dome_flats, dome_flat_expnums = choose_sequence(frames, flavor="flat", kind="longterm")
+    if len(dome_flats) != 0:
+        expnums_ldls = np.sort(dome_flats.query("ldls").expnum.unique())
+        expnums_qrtz = np.sort(dome_flats.query("quartz").expnum.unique())
+        log.info(f"found {len(dome_flats)} dome flat exposures: {dome_flat_expnums}")
+        create_traces(mjd=mjd, expnums_ldls=expnums_ldls, expnums_qrtz=expnums_qrtz, skip_done=skip_done)
+        _move_master_calibrations(mjd=mjd, kind={"trace", "width"})
+    else:
+        log.warning("no dome flat exposures found")
 
-    # create traces
-    create_traces(mjds, use_fiducial_cals=masters_mjd, expnums_ldls=set(ldls_frames.expnum), expnums_qrtz=set(qrtz_frames.expnum), subtract_straylight=True)
+    arcs, arc_expnums = choose_sequence(frames, flavor="arc", kind="longterm")
+    if len(arcs) != 0:
+        log.info(f"found {len(arcs)} arc exposures: {arc_expnums}")
+        create_wavelengths(mjd=mjd, expnums=np.sort(arcs.expnum.unique()), skip_done=skip_done)
+        _move_master_calibrations(mjd=mjd, kind={"wave", "lsf"})
+    else:
+        log.warning("no arc exposures found")
 
-    # create fiber flats
-    create_fiberflats(mjds, use_fiducial_cals=masters_mjd, expnums=set(twilight_frames.expnum))
+    twilight_flats, twilight_expnums = choose_sequence(frames, flavor="twilight", kind="longterm")
+    if len(twilight_flats) != 0:
+        log.info(f"found {len(twilight_flats)} twilight exposures: {twilight_expnums}")
+        create_fiberflats(mjd=mjd, expnums=twilight_expnums, skip_done=skip_done)
+        _move_master_calibrations(mjd=mjd, kind="fiberflat_twilight")
+    else:
+        log.warning("no twilight exposures found")
 
-    # create wavelength solutions
-    create_wavelengths(mjds, use_fiducial_cals=masters_mjd, expnums=set(arc_frames.expnum))
-
-    # create pixel flats
-    if pixelflats:
-        pixflat_frames = frames.query("imagetyp == 'pixelflat'")
-        create_detrending_frames(mjds, masters_mjd=masters_mjd, expnums=set(pixflat_frames.expnum), kind="pixflat")
-
-    # create pixel mask
-    if pixelmasks:
-        create_pixelmasks(mjds, use_fiducial_cals=masters_mjd,
-                          dark_expnums=set(dark_frames.expnum),
-                          pixflat_expnums=set(pixflat_frames.expnum),
-                          ignore_pixflats=False)
-
-    # create illumination corrections
-    if illumination_corrections:
-        create_illumination_corrections(mjds, masters_mjd=masters_mjd, expnums=expnums)
+    if not keep_ancillary:
+        _clean_ancillary(mjd)
 
 
 class lvmFlat(lvmFrame):
@@ -1373,6 +1657,11 @@ class lvmFlat(lvmFrame):
 
         self._blueprint = dp.load_blueprint(name="lvmFlat")
         self._template = dp.dump_template(dataproduct_bp=self._blueprint, save=False)
+
+
+class lvmArc(lvmFrame):
+    pass
+
 
 if __name__ == '__main__':
     import tracemalloc
@@ -1401,7 +1690,7 @@ if __name__ == '__main__':
         # create_detrending_frames(mjd=60171, masters_mjd=60142, expnums=np.arange(3098, 3117+1), kind="dark", assume_imagetyp="pixelflat", reject_cr=False, skip_done=False)
 
         # create_detrending_frames(mjd=60255, kind="bias", skip_done=False)
-        # create_traces(mjd=MJD, expnums_ldls=ldls_expnums, expnums_qrtz=qrtz_expnums, subtract_straylight=True)
+        # create_traces(mjd=MJD, expnums_ldls=ldls_expnums, expnums_qrtz=qrtz_expnums)
         # create_wavelengths(mjd=60255, masters_mjd=60255, expnums=np.arange(7276,7323+1), skip_done=True)
 
         # expnums = [7231]
@@ -1409,7 +1698,17 @@ if __name__ == '__main__':
         # expnums = [7352]
         # create_fiberflats(mjd=60255, expnums=expnums, median_box=10, niter=1000, threshold=(0.5,2.5), nknots=60, skip_done=True, display_plots=False)
 
-        reduce_nightly_sequence(mjd=60265, reject_cr=False, use_fiducial_cals=False, skip_done=True, keep_ancillary=True)
+        # reduce_nightly_sequence(mjd=60265, reject_cr=False, use_fiducial_cals=False, skip_done=True, keep_ancillary=True)
+        reduce_longterm_sequence(mjd=60264, reject_cr=False, use_fiducial_cals=True, skip_done=False, keep_ancillary=True)
+
+        # frames = md.get_frames_metadata(60264)
+        # frames.sort_values(by="expnum", inplace=True)
+        # frames, sequence = split_sequences(frames, flavor="arc", kind="nightly")
+        # print(sequence)
+        # print(frames.to_string())
+
+        # fix_raw_pixel_shifts(mjd=60412, expnums=[16148], ref_expnums=None, wave_widths=5000, y_widths=20, flat_spikes=21, threshold_spikes=0.6, skip_done=True, interactive=True, display_plots=True)
+
     except Exception as e:
         # snapshot = tracemalloc.take_snapshot()
         # top_stats = snapshot.statistics('lineno')

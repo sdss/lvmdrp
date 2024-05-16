@@ -232,8 +232,8 @@ def fit_continuum(spectrum: Spectrum1D, mask_bands: List[Tuple[float,float]],
         List of continuum models for each iteration
     masked_pixels : np.ndarray
         Masked pixels in all iterations
-    knots : np.ndarray
-        Spline knots
+    tck : tuple
+        Spline parameters
     """
     # early return if no good pixels
     continuum_models = []
@@ -257,8 +257,8 @@ def fit_continuum(spectrum: Spectrum1D, mask_bands: List[Tuple[float,float]],
     kwargs.update({"t": knots, "task": -1})
 
     # fit first spline
-    f = interpolate.splrep(wave, data, **kwargs)
-    spline = interpolate.splev(spectrum._wave, f)
+    tck = interpolate.splrep(wave, data, **kwargs)
+    spline = interpolate.splev(spectrum._wave, tck)
 
     # iterate to mask outliers and update spline
     if threshold is not None and isinstance(threshold, (float, int)):
@@ -272,8 +272,8 @@ def fit_continuum(spectrum: Spectrum1D, mask_bands: List[Tuple[float,float]],
         masked_pixels |= mask
 
         # update spline
-        f = interpolate.splrep(spectrum._wave[~masked_pixels], spectrum._data[~masked_pixels], **kwargs)
-        new_spline = interpolate.splev(spectrum._wave, f)
+        tck = interpolate.splrep(spectrum._wave[~masked_pixels], spectrum._data[~masked_pixels], **kwargs)
+        new_spline = interpolate.splev(spectrum._wave, tck)
         continuum_models.append(new_spline)
         if np.mean(np.abs(new_spline - spline) / spline) <= 0.01:
             break
@@ -281,7 +281,7 @@ def fit_continuum(spectrum: Spectrum1D, mask_bands: List[Tuple[float,float]],
             spline = new_spline
 
     best_continuum = continuum_models.pop(-1)
-    return best_continuum, continuum_models, masked_pixels, knots
+    return best_continuum, continuum_models, masked_pixels, tck
 
 def fit_fiberflat(in_twilight: str, out_flat: str, out_rss: str, interpolate_bad: bool = True, mask_bands: List[Tuple[float,float]] = [],
                   median_box: int = 5, niter: int = 1000, threshold: Tuple[float,float]|float = (0.5,2.0),
@@ -367,7 +367,7 @@ def fit_fiberflat(in_twilight: str, out_flat: str, out_rss: str, interpolate_bad
         ori_fiber = ori_flat[ifiber]
 
         try:
-            best_continuum, continuum_models, masked_pixels, knots = fit_continuum(
+            best_continuum, continuum_models, masked_pixels, tck = fit_continuum(
                 spectrum=fiber, mask_bands=mask_bands,
                 median_box=median_box, niter=niter, threshold=threshold, **kwargs
             )
@@ -390,7 +390,7 @@ def fit_fiberflat(in_twilight: str, out_flat: str, out_rss: str, interpolate_bad
             for continuum_model in continuum_models:
                 axs[iax].plot(fiber._wave[masked_pixels], fiber._data[masked_pixels], ".", color="tab:blue", ms=5, mew=0)
                 axs[iax].plot(fiber._wave, continuum_model, color="tab:red", lw=1, alpha=0.5, zorder=niter)
-            axs[iax].plot(knots, np.zeros_like(knots), ".k")
+            axs[iax].plot(tck[0], np.zeros_like(tck[0]), ".k")
             axs[iax].step(fiber._wave, best_continuum, color="tab:red", lw=2)
 
         new_flat._data[ifiber] = best_continuum

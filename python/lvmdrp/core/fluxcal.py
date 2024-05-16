@@ -25,7 +25,7 @@ def retrieve_header_stars(rss):
         lat=-29.008999964 * u.deg, lon=-70.688663912 * u.deg, height=2800 * u.m
     )
     h = rss._header
-    slitmap = rss._slitmap[rss._slitmap["spectrographid"] == int(h["SPEC"][-1])]
+    slitmap = rss._slitmap
     # retrieve the data for the 12 standards from the header
     stddata = []
     for i in range(12):

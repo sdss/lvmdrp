@@ -95,11 +95,11 @@ def test_get_sequence_metadata_no_files():
 def test_fit_continuum():
     """ test continuum fitting """
     spectrum = make_fake_spectrum()
-    best_continuum, models, masked_pixels, knots = fit_continuum(spectrum, mask_bands=[(3100,3200)], median_box=1, niter=10, threshold=0.5)
+    best_continuum, models, masked_pixels, tck = fit_continuum(spectrum, mask_bands=[(3100,3200)], median_box=1, niter=10, threshold=0.5)
     assert best_continuum.size == spectrum._data.size
     assert len(models) == 0
     assert masked_pixels.sum() == 12
-    assert len(knots) == 95
+    assert len(tck[0]) == 100+3
     assert best_continuum[0] == pytest.approx(0, abs=1e-10)
     assert best_continuum[-1] == pytest.approx(0, abs=1e-10)
 

@@ -342,8 +342,8 @@ def fluxcal_Gaia(channel, in_rss, plot=True, GAIA_CACHE_DIR=None):
         )
 
         if plot:
-            plt.plot(wgood, sgood, "r.", markersize=4)
-            plt.plot(w, res[f"STD{nn}SEN"], linewidth=0.5)
+            plt.plot(wgood, sgood, ".k", markersize=2, zorder=-999)
+            plt.plot(w, res[f"STD{nn}SEN"], linewidth=1)
             # plt.ylim(0,0.1e-11)
 
     rms = biweight_scale(res.to_pandas().values, axis=1, ignore_nan=True)

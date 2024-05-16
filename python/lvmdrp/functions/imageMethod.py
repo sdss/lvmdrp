@@ -24,7 +24,7 @@ from tqdm import tqdm
 from typing import List, Tuple
 
 from lvmdrp import log, __version__ as DRPVER
-from lvmdrp.core.constants import CONFIG_PATH, SPEC_CHANNELS, ARC_LAMPS
+from lvmdrp.core.constants import CONFIG_PATH, SPEC_CHANNELS, ARC_LAMPS, LVM_REFERENCE_COLUMN, LVM_NBLOCKS
 from lvmdrp.utils.decorators import skip_on_missing_input_path, drop_missing_input_paths
 from lvmdrp.utils.bitmask import QualityFlag
 from lvmdrp.core.fiberrows import FiberRows, _read_fiber_ypix
@@ -80,9 +80,6 @@ DEFAULT_GAIN = {
     "z3": [2.75, 2.85, 2.79, 2.74]
 }
 DEFAULT_PTC_PATH = os.path.join(os.environ["LVMCORE_DIR"], "metrology", "PTC_fit.txt")
-
-LVM_NBLOCKS = 18
-LVM_REFERENCE_COLUMN = 2000
 
 description = "Provides Methods to process 2D images"
 
@@ -380,13 +377,17 @@ def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=Non
     # calculate thermal shifts
     column_shifts = image.measure_fiber_shifts(model, columns=columns, column_width=column_width, shift_range=shift_range)
     # shifts stats
-    mean_shifts = numpy.nanmean(column_shifts, axis=0)
-    std_shifts = numpy.nanstd(column_shifts, axis=0)
-    log.info(f"shift in fibers: {mean_shifts:.4f}+/-{std_shifts:.4f} pixels")
+    median_shift = numpy.nanmedian(column_shifts, axis=0)
+    std_shift = numpy.nanstd(column_shifts, axis=0)
+    if median_shift > 1:
+        log.warning(f"large thermal shift measured: {column_shifts} pixels")
+        log.warning(f"{median_shift = :.4f}+/-{std_shift = :.4f} pixels")
+    else:
+        log.info(f"median shift in fibers: {median_shift = :.4f}+/-{std_shift = :.4f} pixels")
 
     # apply average shift to the zeroth order trace coefficients
     trace_cent_fixed = copy(trace_cent)
-    trace_cent_fixed._coeffs[:, 0] += mean_shifts
+    trace_cent_fixed._coeffs[:, 0] += median_shift
     trace_cent_fixed.eval_coeffs()
 
     # deltas = TraceMask(data=numpy.zeros_like(trace_cent._data), mask=numpy.ones_like(trace_cent._data, dtype=bool))
@@ -405,6 +406,103 @@ def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=Non
     # trace_cent_fixed.eval_coeffs()
 
     return trace_cent_fixed, column_shifts, model
+
+
+def _apply_electronic_shifts(images, out_images, drp_shifts=None, qc_shifts=None, custom_shifts=None, raw_shifts=None,
+                             which_shifts="drp", apply_shifts=True, dry_run=False, display_plots=False):
+    """Applies the chosen electronic pixel shifts to the images and plots the results
+
+    Parameters
+    ----------
+    images : list
+        list of input images
+    out_images : list
+        list of output images
+    drp_shifts : numpy.ndarray
+        DRP electronic pixel shifts, by default None
+    qc_shifts : numpy.ndarray
+        QC electronic pixel shifts, by default None
+    custom_shifts : numpy.ndarray
+        custom electronic pixel shifts, by default None
+    raw_shifts : numpy.ndarray
+        raw DRP electronic pixel shifts, by default None
+    which_shifts : str
+        chosen electronic pixel shifts, by default "drp"
+    apply_shifts : bool
+        apply the shifts, by default True
+    dry_run : bool
+        dry run mode (does not save corrected images), by default False
+    display_plots : bool
+        display plots, by default False
+
+    Returns
+    -------
+    list
+        list of corrected images
+    numpy.ndarray
+        the chosen electronic pixel shifts
+    str
+        name of the chosen electronic pixel shifts ('drp', 'qc' or 'custom')
+    """
+    images_out = [copy(image) for image in images]
+    for image, image_out, out_image in zip(images, images_out, out_images):
+        mjd = image._header.get("SMJD", image._header["MJD"])
+        expnum, camera = image._header["EXPOSURE"], image._header["CCD"]
+        imagetyp = image._header["IMAGETYP"]
+
+        if which_shifts == "drp":
+            this_shifts = drp_shifts
+            image_color = "Blues"
+        elif which_shifts == "qc":
+            this_shifts = qc_shifts
+            image_color = "Greens"
+        elif which_shifts == "custom":
+            this_shifts = custom_shifts
+            image_color = "Purples"
+        else:
+            this_shifts = drp_shifts
+
+        if apply_shifts and numpy.any(this_shifts != 0):
+            shifted_rows = numpy.where(numpy.gradient(this_shifts) > 0)[0][1::2].tolist()
+            log.info(f"applying shifts from rows {shifted_rows} ({numpy.sum(numpy.abs(this_shifts)>0)} affected rows)")
+            for irow in range(len(this_shifts)):
+                if this_shifts[irow] > 0:
+                    image_out._data[irow, :] = numpy.roll(image._data[irow, :], int(this_shifts[irow]))
+
+            if not dry_run:
+                log.info(f"writing corrected image to {os.path.basename(out_image)}")
+                image_out.writeFitsData(out_image)
+                images_out.append(image_out)
+
+            log.info(f"plotting results for {out_image}")
+            fig, ax = create_subplots(to_display=display_plots, figsize=(15,7), sharex=True, layout="constrained")
+            ax.set_title(f"{mjd = } - {expnum = } - {camera = } - {imagetyp = }", loc="left")
+            y_pixels = numpy.arange(this_shifts.size)
+            if raw_shifts is not None:
+                ax.step(y_pixels, raw_shifts, where="mid", lw=0.5, color="0.9", label="raw DRP")
+            ax.step(y_pixels, this_shifts, where="mid", color="k", lw=3)
+            if drp_shifts is not None:
+                ax.step(y_pixels, drp_shifts, where="mid", lw=1, color="tab:blue", label="DRP")
+            if qc_shifts is not None:
+                ax.step(y_pixels, qc_shifts, where="mid", lw=2, color="tab:green", label="QC")
+            if custom_shifts is not None:
+                ax.step(y_pixels, custom_shifts, where="mid", lw=2, color="tab:purple", label="custom shifts")
+            ax.legend(loc="lower right", frameon=False)
+            ax.set_xlabel("Y (pixel)")
+            ax.set_ylabel("Shift (pixel)")
+            plot_image_shift(ax, image._data, this_shifts, cmap="Reds")
+            axis = plot_image_shift(ax, image_out._data, this_shifts, cmap=image_color, inset_pos=(0.14,1.0-0.32))
+            plt.setp(axis, yticklabels=[], ylabel="")
+            save_fig(
+                fig,
+                product_path=out_image,
+                to_display=display_plots,
+                figure_path="qa",
+                label="pixel_shifts"
+            )
+        else:
+            log.info(f"no shifts to apply, not need to write to {os.path.basename(out_image)}")
+    return images_out, this_shifts, which_shifts
 
 
 def select_lines_2d(in_images, out_mask, in_cent_traces, in_waves, lines_list=None, y_widths=3, wave_widths=0.6*5, image_shape=(4080, 4120), channels="brz", display_plots=False):
@@ -536,9 +634,9 @@ def select_lines_2d(in_images, out_mask, in_cent_traces, in_waves, lines_list=No
     return lines_mask_2d, mtrace, mwave
 
 
-def fix_pixel_shifts(in_images, out_images, ref_images, in_mask,
+def fix_pixel_shifts(in_images, out_images, ref_images, in_mask, report=None,
                      max_shift=10, threshold_spikes=0.6, flat_spikes=11,
-                     fill_gaps=20, shift_rows=None, display_plots=False):
+                     fill_gaps=20, shift_rows=None, interactive=False, display_plots=False):
     """Corrects pixel shifts in raw frames based on reference frames and a selection of spectral regions
 
     Given a set of raw frames, reference frames and a mask, this function corrects pixel shifts
@@ -554,6 +652,8 @@ def fix_pixel_shifts(in_images, out_images, ref_images, in_mask,
         list of input reference images for the same spectrograph
     in_mask : str
         input mask file for the channel stacked frame
+    report : dict, optional
+        input report with keys (spec, expnum) and values (shift_rows, amount), by default None
     max_shift : int, optional
         maximum shift in pixels, by default 10
     threshold_spikes : float, optional
@@ -562,6 +662,8 @@ def fix_pixel_shifts(in_images, out_images, ref_images, in_mask,
         width of the spike removal, by default 11
     fill_gaps : int, optional
         width of the gap filling, by default 20
+    interactive : bool, optional
+        interactive mode, by default False
     display_plots : bool, optional
         display plots, by default False
 
@@ -589,18 +691,34 @@ def fix_pixel_shifts(in_images, out_images, ref_images, in_mask,
     rdata = copy(image._data)
     rdata = numpy.nan_to_num(rdata, nan=0) * mask._data
 
-    # load input images into output array to apply corrections if needed
-    images_out = [loadImage(in_image) for in_image in in_images]
+    # load input images and initialize output images
+    images = [loadImage(in_image) for in_image in in_images]
+    images_out = images
+
+    # initialize custom shifts
+    raw_shifts = None
+    dshifts = None
+    qshifts = None
+    cshifts = None
+    apply_shifts = True
+    which_shifts = "drp"
 
     # calculate pixel shifts or use provided ones
-    if shift_rows is None:
+    if shift_rows is not None:
+        log.info("using user provided pixel shifts")
+        cshifts = numpy.zeros(cdata.shape[0])
+        for irow in shift_rows:
+            cshifts[irow:] += 2
+        corrs = numpy.zeros_like(cshifts)
+        which_shifts = "custom"
+    else:
         log.info("running row-by-row cross-correlation")
-        shifts, corrs = [], []
+        dshifts, corrs = [], []
         for irow in range(rdata.shape[0]):
             cimg_row = cdata[irow]
             rimg_row = rdata[irow]
             if numpy.all(cimg_row == 0) or numpy.all(rimg_row == 0):
-                shifts.append(0)
+                dshifts.append(0)
                 corrs.append(0)
                 continue
 
@@ -612,61 +730,65 @@ def fix_pixel_shifts(in_images, out_images, ref_images, in_mask,
             corr = corr[mask]
 
             max_corr = numpy.argmax(corr)
-            shifts.append(shift[max_corr])
+            dshifts.append(shift[max_corr])
             corrs.append(corr[max_corr])
-        shifts = numpy.asarray(shifts)
+        dshifts = numpy.asarray(dshifts)
         corrs = numpy.asarray(corrs)
 
-        raw_shifts = copy(shifts)
-        shifts = _remove_spikes(shifts, width=flat_spikes, threshold=threshold_spikes)
-        shifts = _fillin_valleys(shifts, width=fill_gaps)
-        shifts = _no_stepdowns(shifts)
-    else:
-        log.info("using user provided pixel shifts")
-        shifts = numpy.zeros(cdata.shape[0])
-        for irow in shift_rows:
-            shifts[irow:] += 2
-        raw_shifts = copy(shifts)
-        corrs = numpy.zeros_like(shifts)
+        dshifts = _remove_spikes(dshifts, width=flat_spikes, threshold=threshold_spikes)
+        dshifts = _fillin_valleys(dshifts, width=fill_gaps)
+        dshifts = _no_stepdowns(dshifts)
 
-    apply_shift = numpy.any(numpy.abs(shifts)>0)
-    if apply_shift:
-        shifted_rows = numpy.where(numpy.gradient(shifts) > 0)[0][1::2].tolist()
-        log.info(f"applying shifts to {shifted_rows = } ({numpy.sum(numpy.abs(shifts)>0)}) rows")
-        for image_out, out_image in zip(images_out, out_images):
-            image = copy(image_out)
-            mjd = image._header.get("SMJD", image._header["MJD"])
-            expnum, camera = image._header["EXPOSURE"], image._header["CCD"]
-            imagetyp = image._header["IMAGETYP"]
+        # parse QC reports with the electronic pixel shifts
+        if report is not None:
+            shift_rows, amounts = report
+            qshifts = numpy.zeros(cdata.shape[0])
+            for irow, amount in zip(shift_rows, amounts[::-1]):
+                qshifts[irow:] = amount
 
-            for irow in range(len(shifts)):
-                if shifts[irow] > 0:
-                    image_out._data[irow, :] = numpy.roll(image._data[irow, :], int(shifts[irow]))
+        # compare QC reports with the electronic pixel shifts
+        if qshifts is not None:
+            qshifted_rows = numpy.where(numpy.gradient(qshifts) > 0)[0][1::2].tolist()
+            shifted_rows = numpy.where(numpy.gradient(dshifts) > 0)[0][1::2].tolist()
+            log.info(f"QC reports shifted rows: {qshifted_rows}")
+            log.info(f"DRP shifted rows: {shifted_rows}")
+            if not numpy.all(qshifts == dshifts):
+                _apply_electronic_shifts(images=images, out_images=out_images,
+                                         drp_shifts=dshifts, qc_shifts=qshifts, raw_shifts=raw_shifts,
+                                         which_shifts="drp", apply_shifts=True,
+                                         dry_run=True, display_plots=display_plots)
+                log.warning("QC reports and DRP do not agree on the shifted rows")
+                if interactive:
+                    log.info("interactive mode enabled")
+                    answer = input("apply [q]c, [d]rp or [c]ustom shifts: ")
+                    if answer.lower() == "q":
+                        log.info("choosing QC shifts")
+                        shifts = qshifts
+                        which_shifts = "qc"
+                    elif answer.lower() == "d":
+                        log.info("choosing DRP shifts")
+                        shifts = dshifts
+                        which_shifts = "drp"
+                    elif answer.lower() == "c":
+                        log.info("choosing custom shifts")
+                        answer = input("provide comma-separated custom shifts and press enter: ")
+                        shift_rows = numpy.array([int(_) for _ in answer.split(",")])
+                        cshifts = numpy.zeros(cdata.shape[0])
+                        for irow in shift_rows:
+                            cshifts[irow:] += 2
+                        shifts = cshifts
+                        corrs = numpy.zeros_like(cshifts)
+                        which_shifts = "custom"
+                    apply_shifts = numpy.any(numpy.abs(shifts)>0)
+                else:
+                    log.warning(f"no shift will be applied to the images: {in_images}")
+                    apply_shifts = False
 
-            # write corrected image
-            log.info(f"writing corrected image to {os.path.basename(out_image)}")
-            image_out.writeFitsData(out_image)
-
-            log.info("plotting results")
-            fig, ax = create_subplots(to_display=display_plots, figsize=(15,7), sharex=True, layout="constrained")
-            ax.set_title(f"{mjd = } - {expnum = } - {camera = } - {imagetyp = }", loc="left")
-            y_pixels = numpy.arange(shifts.size)
-            ax.step(y_pixels, raw_shifts, where="mid", lw=1, color="red", linestyle="--")
-            ax.step(y_pixels, shifts, where="mid", lw=1)
-            ax.set_xlabel("Y (pixel)")
-            ax.set_ylabel("Shift (pixel)")
-            plot_image_shift(ax, image._data, shifts, cmap="Reds")
-            axis = plot_image_shift(ax, image_out._data, shifts, cmap="Blues", inset_pos=(0.14,1.0-0.32))
-            plt.setp(axis, yticklabels=[], ylabel="")
-            save_fig(
-                fig,
-                product_path=out_image,
-                to_display=display_plots,
-                figure_path="qa",
-                label="pixel_shifts"
-            )
-    else:
-        log.info("no pixel shifts detected, no correction applied")
+    # apply pixel shifts to the images
+    images_out, shifts, _, = _apply_electronic_shifts(images=images, out_images=out_images, raw_shifts=raw_shifts,
+                                                      drp_shifts=dshifts, qc_shifts=qshifts, custom_shifts=cshifts,
+                                                      which_shifts=which_shifts, apply_shifts=apply_shifts,
+                                                      dry_run=False, display_plots=display_plots)
 
     return shifts, corrs, images_out
 
@@ -2371,8 +2493,10 @@ def subtract_straylight(
     # smooth image along dispersion axis with a median filter excluded NaN values
     if median_box is not None:
         log.info(f"median filtering image along dispersion axis with a median filter of width {median_box}")
-        median_box = max(1, median_box)
-        img_median = img.medianImg((1, median_box), use_mask=True)
+        median_box = (1, max(1, median_box))
+        img_median = img.replaceMaskMedian(*median_box, replace_error=None)
+        img_median._data = numpy.nan_to_num(img_median._data)
+        img_median = img_median.medianImg(median_box, use_mask=False)
     else:
         img_median = copy(img)
 
@@ -2385,6 +2509,10 @@ def subtract_straylight(
     if img_median._mask is None:
         img_median._mask = numpy.zeros(img_median._data.shape, dtype=bool)
     img_median._mask = img_median._mask | numpy.isnan(img_median._data) | numpy.isinf(img_median._data) | (img_median._data == 0)
+
+    # mask regions around each fiber within a given cross-dispersion aperture
+    log.info(f"masking fibers with an aperture of {aperture} pixels")
+    img_median.maskFiberTraces(trace_mask, aperture=aperture, parallel=parallel)
 
     # mask regions around the top and bottom of the CCD
     if isinstance(select_nrows, int):
@@ -2399,33 +2527,31 @@ def subtract_straylight(
 
     for icol in range(img_median._dim[1]):
         # mask top/bottom rows before/after first/last fiber
-        img_median._mask[tfiber[icol]:] = True
-        img_median._mask[:bfiber[icol]] = True
+        img_median._mask[tfiber[icol]:, icol] = True
+        img_median._mask[:bfiber[icol], icol] = True
         # unmask select_nrows around each region
-        img_median._mask[(tfiber[icol]+img_median._dim[0]-select_tnrows)//2:(tfiber[icol]+img_median._dim[0]+select_tnrows)//2] = False
-        img_median._mask[(bfiber[icol]-select_bnrows)//2:(bfiber[icol]+select_bnrows)//2] = False
-
-    # mask regions around each fiber within a given cross-dispersion aperture
-    log.info(f"masking fibers with an aperture of {aperture} pixels")
-    img_median.maskFiberTraces(trace_mask, aperture=aperture, parallel=parallel)
+        img_median._mask[(tfiber[icol]+aperture//2):(tfiber[icol]+aperture//2+select_tnrows), icol] = False
+        img_median._mask[(bfiber[icol]-aperture//2-select_bnrows):(bfiber[icol]-aperture//2), icol] = False
 
     # fit the signal in unmaksed areas along cross-dispersion axis by a polynomial
     log.info(f"fitting spline with {smoothing = } to the background signal along cross-dispersion axis")
-    img_fit = img_median.fitSpline(smoothing=smoothing, use_weights=use_weights)
+    img_fit = img_median.fitSpline(smoothing=smoothing, use_weights=use_weights, clip=(0.0, None))
 
-    # smooth the results by 2D Gaussian filter of given with (cross- and dispersion axis have equal width)
+    # median filter to reject outlying columns
+    img_fit = img_fit.medianImg((1, 7), use_mask=False)
+
+    # smooth the results by 2D Gaussian filter of given width
     log.info(f"smoothing the background signal by a 2D Gaussian filter of width {gaussian_sigma}")
-    img_stray = img_fit.convolveGaussImg(gaussian_sigma, gaussian_sigma)
-    img_stray.setData(data=numpy.nan_to_num(img_stray._data), error=numpy.nan_to_num(img_stray._error))
+    img_stray = img_fit.convolveGaussImg(1, gaussian_sigma)
 
     # subtract smoothed background signal from original image
     log.info("subtracting the smoothed background signal from the original image")
-    img_out = img - img_stray
+    img_out = loadImage(in_image)
+    img_out._data = img_out._data - img_stray._data
 
     # include header and write out file
     log.info(f"writing stray light subtracted image to {os.path.basename(out_image)}")
     img_out.setHeader(header=img.getHeader())
-    img_out.setData(mask=img._mask)
     img_out.writeFitsData(out_image)
 
     # plot results: polyomial fitting & smoothing, both with masked regions on
@@ -2971,7 +3097,7 @@ def extract_spectra(
     in_trace: str,
     in_fwhm: str = None,
     in_acorr: str = None,
-    columns: List[int] = [500, 1500, 2000, 2500, 3500],
+    columns: List[int] = [500, 1000, 1500, 2000, 2500, 3000],
     column_width: int = 20,
     method: str = "optimal",
     aperture: int = 3,
@@ -3045,8 +3171,7 @@ def extract_spectra(
         trace_mask, shifts, _ = _fix_fiber_thermal_shifts(img, trace_mask, trace_fwhm,
                                                           trace_amp=10000,
                                                           columns=columns,
-                                                          column_width=column_width,
-                                                          shift_range=[-5,5])
+                                                          column_width=column_width)
 
         # set up parallel run
         if parallel == "auto":
@@ -3098,8 +3223,7 @@ def extract_spectra(
         trace_mask, shifts, _ = _fix_fiber_thermal_shifts(img, trace_mask, trace_fwhm or 2.5,
                                                           trace_amp=10000,
                                                           columns=columns,
-                                                          column_width=column_width,
-                                                          shift_range=[-5,5])
+                                                          column_width=column_width)
 
         (data, error, mask) = img.extractSpecAperture(trace_mask, aperture)
 
@@ -4195,7 +4319,7 @@ def detrend_frame(
 
     detrended_img = (bcorr_img - mdark_img.convertUnit(to=bcorr_img._header["BUNIT"]))
     # NOTE: this is a hack to avoid the error propagation of the division in Image
-    detrended_img = detrended_img / numpy.nan_to_num(mflat_img._data, nan=1.0)
+    detrended_img._data = detrended_img._data / numpy.nan_to_num(mflat_img._data, nan=1.0)
 
     # propagate pixel mask
     log.info("propagating pixel mask")
@@ -4719,6 +4843,9 @@ def trace_centroids(in_image: str,
         img = img.convolveImg(coadd_kernel)
         counts_threshold = counts_threshold * coadd
 
+    # handle invalid error values
+    img._error[img._mask|(img._error<=0)] = numpy.inf
+
     # calculate centroids for reference column
     if correct_ref:
         ref_cent = img.match_reference_column(ref_column=LVM_REFERENCE_COLUMN)
@@ -4912,6 +5039,9 @@ def trace_fibers(
         img = img.convolveImg(coadd_kernel)
         counts_threshold = counts_threshold * coadd
 
+    # handle invalid error values
+    img._error[img._mask|(img._error<=0)] = numpy.inf
+
     # trace centroids in each column
     log.info(f"loading guess fiber centroids from '{os.path.basename(in_trace_cent_guess)}'")
     centroids = TraceMask.from_file(in_trace_cent_guess)
@@ -4924,8 +5054,9 @@ def trace_fibers(
     trace_fwhm._header["IMAGETYP"] = "trace_fwhm"
 
     trace_amp, trace_cent, trace_fwhm, columns, mod_columns, residuals = img.trace_fiber_widths(centroids, ref_column=LVM_REFERENCE_COLUMN,
-                                                                                                ncolumns=ncolumns, nblocks=LVM_NBLOCKS, iblocks=[],
-                                                                                                fwhm_guess=guess_fwhm, fwhm_range=[1.0,3.5], counts_threshold=counts_threshold)
+                                                                                                ncolumns=ncolumns, nblocks=LVM_NBLOCKS, iblocks=iblocks,
+                                                                                                fwhm_guess=guess_fwhm, fwhm_range=fwhm_limits,
+                                                                                                counts_threshold=counts_threshold)
 
     # smooth all trace by a polynomial
     if fit_poly:

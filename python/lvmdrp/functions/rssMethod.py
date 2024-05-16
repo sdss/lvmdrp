@@ -393,6 +393,10 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
         label="lines_fitting",
     )
 
+    # numpy.savetxt("./pixels.txt", cent_wave)
+    # numpy.savetxt("./flux.txt", flux)
+    # numpy.savetxt("./fwhm.txt", fwhm)
+
     if fiberflat != "":
         log.info("computing fiberflat from measured lines")
         norm_flux = numpy.zeros_like(ref_lines)
@@ -480,6 +484,15 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
         wave_coeffs[i, :] = wave_poly.convert().coef
         wave_sol[i, :] = wave_poly(arc._pixels)
         wave_rms[i] = numpy.std(wave_poly(cent_wave[i, use_line]) - ref_lines[use_line])
+        # if i in [565, 566, 567, 568]:
+        #     fig, ax = plt.subplots(figsize=(15, 7))
+        #     # ax.plot(cent_wave[i], ref_lines+i - wave_poly.convert().coef[0] - wave_poly.convert().coef[1]*cent_wave[i], "ok")
+        #     # ax.plot(arc._pixels, wave_poly(arc._pixels)+i - wave_poly.convert().coef[0] - wave_poly.convert().coef[1]*arc._pixels, "-r")
+        #     residuals = wave_poly(cent_wave[i]) - ref_lines
+        #     ax.plot(cent_wave[i], residuals, "o", color=("b" if i != 319 else "r"))
+        #     fig.savefig("wave_poly.png")
+        #     print(f"{i}: {cent_wave[i]}")
+        #     print(wave_poly.convert().coef)
 
     log.info(
         "finished wavelength fitting with median "
