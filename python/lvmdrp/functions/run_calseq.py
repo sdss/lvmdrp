@@ -1256,13 +1256,12 @@ def create_fiberflats(mjd: int, use_fiducial_cals: bool = True, expnums: List[in
     # 2D reduction of twilight sequence
     reduce_2d(mjd=mjd, use_fiducial_cals=use_fiducial_cals, expnums=flats.expnum.unique(), reject_cr=False, skip_done=skip_done)
 
+    masters_mjd = get_master_mjd(mjd)
+    masters_path = os.path.join(MASTERS_DIR, f"{masters_mjd}")
     for flat in flats.to_dict("records"):
 
         # master calibration paths
         camera = flat["camera"]
-        mjd = flat["mjd"]
-        masters_mjd = get_master_mjd(mjd)
-        masters_path = os.path.join(MASTERS_DIR, f"{masters_mjd}")
         if use_fiducial_cals:
             master_cals = {
                 "cent" : os.path.join(masters_path, f"lvm-mtrace-{camera}.fits"),
@@ -1346,14 +1345,21 @@ def create_fiberflats(mjd: int, use_fiducial_cals: bool = True, expnums: List[in
             hflat_path = path.full("lvm_anc", drpver=drpver, kind="h", imagetype=flat["imagetyp"], tileid=flat["tileid"], mjd=flat["mjd"], camera=channel, expnum=expnum)
             rss_tasks.resample_wavelength(in_rss=wflat_path, out_rss=hflat_path, wave_disp=0.5, wave_range=SPEC_CHANNELS[channel])
 
-            # fit gradient and remove it
-            gflat_path = path.full("lvm_anc", drpver=drpver, kind="g", imagetype=flat["imagetyp"], tileid=flat["tileid"], mjd=flat["mjd"], camera=channel, expnum=expnum)
-            remove_field_gradient(in_hflat=hflat_path, out_gflat=gflat_path, wrange=SPEC_CHANNELS[channel])
-
             # fit fiber throughput
-            fflat = fit_fiberflat(in_twilight=gflat_path, out_flat=fflat_path, out_rss=fflat_flatfielded_path, median_box=median_box, niter=niter,
+            fflat = fit_fiberflat(in_twilight=hflat_path, out_flat=fflat_path, out_rss=fflat_flatfielded_path, median_box=median_box, niter=niter,
                                    threshold=threshold, mask_bands=mask_bands.get(channel, []),
                                    display_plots=display_plots, nknots=nknots)
+
+            # fit gradient and remove it
+            gflat_path = path.full("lvm_anc", drpver=drpver, kind="g", imagetype=flat["imagetyp"], tileid=flat["tileid"], mjd=flat["mjd"], camera=channel, expnum=expnum)
+            remove_field_gradient(in_hflat=fflat_flatfielded_path, out_gflat=gflat_path, wrange=SPEC_CHANNELS[channel])
+
+            fflat_flatfielded = RSS.from_file(fflat_flatfielded_path)
+            gflat = RSS.from_file(gflat_path)
+            gradient = copy(gflat)
+            gradient._data = fflat_flatfielded._data / gflat._data
+            fflat._data /= gradient._data
+            fflat.writeFitsData(fflat_path)
             fflat.set_wave_trace(mwave)
             fflat.set_lsf_trace(mlsf)
             fflat = fflat.to_native_wave(method="linear", interp_density=False, return_density=False)
