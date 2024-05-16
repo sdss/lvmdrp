@@ -82,7 +82,7 @@ def find_continuum(spec_s,niter=15,thresh=0.8,median_box_max=100,median_box_min=
 #    w2 = w2/wN
 #    print(w1,w2)
 #    spec_s_out = w1*spec_s + w2*s_spec_s
-    return spec_s_out
+    return spec_s_out, mask
 
 
 def _spec_from_lines(

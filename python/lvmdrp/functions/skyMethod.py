@@ -1633,32 +1633,47 @@ def quick_sky_subtraction(in_cframe, out_sframe,
         method of computing sky continuum, by default "cont"
 
     """
-    print('************************************')
-    print('********* SUBTRACTING SKY **********')
-    print('************************************')
+    # print('************************************')
+    # print('********* SUBTRACTING SKY **********')
+    # print('************************************')
+    log.info(f"loading {in_cframe} for sky subtraction")
 
     cframe = lvmCFrame.from_file(in_cframe)
-    
+
     # read sky table hdu
     sky_hdu = prep_input_simplesky_mean(in_cframe)
 
     # create spectrum for sky subtraction
-    scisky = create_skysub_spectrum(sky_hdu, tel='sci', method=skymethod)
-    skyesky = create_skysub_spectrum(sky_hdu, tel="skye", method=skymethod)
-    skywsky = create_skysub_spectrum(sky_hdu, tel="skyw", method=skymethod)
+    scisky, scisky_error = create_skysub_spectrum(sky_hdu, tel='sci', method=skymethod)
+    skyesky, skyesky_error = create_skysub_spectrum(sky_hdu, tel="skye", method=skymethod)
+    skywsky, skywsky_error = create_skysub_spectrum(sky_hdu, tel="skyw", method=skymethod)
 
     # select correct fibers
     data = cframe._data
+    error = cframe._error
     slitmap = Table(cframe._slitmap)
     scifibers = slitmap[slitmap["telescope"] == "Sci"]["fiberid"] - 1
     skyefibers = slitmap[slitmap["telescope"] == "SkyE"]["fiberid"] - 1
     skywfibers = slitmap[slitmap["telescope"] == "SkyW"]["fiberid"] - 1
 
     # sky subtract each spectrum
-    skydata = data.copy()
-    skydata[scifibers] = data[scifibers] - scisky
-    skydata[skyefibers] = data[skyefibers] - skyesky
-    skydata[skywfibers] = data[skywfibers] - skywsky
+    skysub_data = data.copy()
+    skysub_data[scifibers] = data[scifibers] - scisky
+    skysub_data[skyefibers] = data[skyefibers] - skyesky
+    skysub_data[skywfibers] = data[skywfibers] - skywsky
+    skysub_error = error.copy()
+    skysub_error[scifibers] = np.sqrt(error[scifibers]**2 + scisky_error**2)
+    skysub_error[skyefibers] = np.sqrt(error[skyefibers]**2 + skyesky_error**2)
+    skysub_error[skywfibers] = np.sqrt(error[skywfibers]**2 + skywsky_error**2)
+
+    skydata = np.zeros_like(skysub_data)
+    skydata[scifibers] = scisky
+    skydata[skyefibers] = skyesky
+    skydata[skywfibers] = skywsky
+    sky_error = np.zeros_like(skysub_data)
+    sky_error[scifibers] = scisky_error
+    sky_error[skyefibers] = skyesky_error
+    sky_error[skywfibers] = skywsky_error
 
     # write out sky table to ancillary file
     mjd = cframe._header['MJD']
@@ -1666,19 +1681,14 @@ def quick_sky_subtraction(in_cframe, out_sframe,
     tileid = cframe._header['TILE_ID']
     skytable = path.full('lvm_anc', mjd=mjd, tileid=tileid, drpver=drpver,
                          kind='sky', camera='brz', imagetype='table', expnum=expnum)
-    
+
     sky_hdu.writeto(skytable, overwrite=True)
 
-    # TODO - deal with error in sky-subtracted data ; replaced "error_c"
-    # TODO - deal properly with the error, sky, and sky_error
-    # this is incorrect
-    error_c = cframe._error
-    sky_c = cframe._sky_east
-    sky_error = cframe._sky_east_error
-
-    print("writing lvmSFrame")
-    sframe = lvmSFrame(data=skydata, error=error_c, mask=cframe._mask, sky=sky_c, sky_error=sky_error,
+    # print("writing lvmSFrame")
+    log.info(f"writing lvmSframe to {out_sframe}")
+    sframe = lvmSFrame(data=skysub_data, error=skysub_error, mask=cframe._mask.astype(bool), sky=skydata, sky_error=sky_error,
                        wave=cframe._wave, lsf=cframe._lsf, header=cframe._header, slitmap=cframe._slitmap)
+    sframe._mask |= ~np.isfinite(sframe._error)
     sframe.writeFitsData(out_sframe)
     # TODO: check on expnum=7632 for halpha emission in sky fibers
 
@@ -1740,15 +1750,15 @@ def prep_input_simplesky_mean(filename: str = None) -> fits.HDUList:
         # perform the biweight selection for science
         # science fibers in science extension
         sci_flux = biweight_location(xsci_scifib, axis=0, ignore_nan=True)
-        sci_err = np.sqrt(biweight_location(np.square(esci_scifib), axis=0, ignore_nan=True)) / np.sqrt(len(sci_fib))
+        sci_err = np.sqrt(biweight_location(np.square(esci_scifib), axis=0, ignore_nan=True)) / len(sci_fib)
 
         # These are the skies from the fluxed sky fibers
         # skye/w fibers in science extension
         sky_e_flux = biweight_location(xsci_skyefib, axis=0, ignore_nan=True)
-        sky_e_err = np.sqrt(biweight_location(np.square(esci_skyefib), axis=0, ignore_nan=True)) / np.sqrt(len(sky_e_fib))
+        sky_e_err = np.sqrt(biweight_location(np.square(esci_skyefib), axis=0, ignore_nan=True)) / len(sky_e_fib)
 
         sky_w_flux = biweight_location(xsci_skywfib, axis=0, ignore_nan=True)
-        sky_w_err = np.sqrt(biweight_location(np.square(esci_skywfib), axis=0, ignore_nan=True)) / np.sqrt(len(sky_w_fib))
+        sky_w_err = np.sqrt(biweight_location(np.square(esci_skywfib), axis=0, ignore_nan=True)) / len(sky_w_fib)
 
         # The next two are the supersampled ones
         # science fibers in skye/w extensions
@@ -1937,19 +1947,41 @@ def create_skysub_spectrum(hdu: fits.HDUList, tel: str,
     #hdusskyw = hdu['SKYW_SUPER']
 
     # do continuum vs line separation
-    print("separating line and continuum in Sci, SkyE ,and SkyW spectra")
+    log.info("separating line and continuum in Sci, SkyE ,and SkyW spectra")
 
     specsci=Spectrum1D(wave=Table(hdusci.data)['WAVE'].data, data=Table(hdusci.data)['FLUX'].data, mask=np.zeros(len(Table(hdusci.data)), dtype=bool))
     specskye=Spectrum1D(wave=Table(hduskye.data)['WAVE'].data, data=Table(hduskye.data)['FLUX'].data, mask=np.zeros(len(Table(hduskye.data)), dtype=bool))
     specskyw=Spectrum1D(wave=Table(hduskyw.data)['WAVE'].data, data=Table(hduskyw.data)['FLUX'].data, mask=np.zeros(len(Table(hduskyw.data)), dtype=bool))
 
-    csci=find_continuum(specsci._data)
-    cskye=find_continuum(specskye._data)
-    cskyw=find_continuum(specskyw._data)
+    # specsci_error = Spectrum1D(
+    #     wave=Table(hdusci.data)["WAVE"].data,
+    #     data=Table(hdusci.data)['ERROR'].data,
+    #     mask=np.zeros(len(Table(hdusci.data)), dtype=bool))
+    specskye_error = Spectrum1D(
+        wave=Table(hduskye.data)["WAVE"].data,
+        data=Table(hduskye.data)['ERROR'].data,
+        mask=np.zeros(len(Table(hduskye.data)), dtype=bool))
+    specskyw_error = Spectrum1D(
+        wave=Table(hduskyw.data)["WAVE"].data,
+        data=Table(hduskyw.data)['ERROR'].data,
+        mask=np.zeros(len(Table(hduskyw.data)), dtype=bool))
+
+    csci, cscimask = find_continuum(specsci._data)
+    cskye, cskyemask = find_continuum(specskye._data)
+    cskyw, cskywmask = find_continuum(specskyw._data)
+
+    pixels = np.arange(csci.size)
+    # csci_error = np.interp(pixels, pixels[cscimask], specsci_error._data[cscimask])
+    cskye_error = np.interp(pixels, pixels[cskyemask], specskye_error._data[cskyemask])
+    cskyw_error = np.interp(pixels, pixels[cskywmask], specskyw_error._data[cskywmask])
 
     lsci=specsci._data-csci
     lskye=specskye._data-cskye
     lskyw=specskyw._data-cskyw
+
+    # lsci_error = np.sqrt(specsci_error._data**2+csci_error**2)
+    lskye_error = np.sqrt(specskye_error._data**2+cskye_error**2)
+    lskyw_error = np.sqrt(specskyw_error._data**2+cskyw_error**2)
 
     # calculate separation of sky and science fields
     cordsci = SkyCoord(hdusci.header["RA"], hdusci.header["DEC"], unit="deg")
@@ -1958,8 +1990,7 @@ def create_skysub_spectrum(hdu: fits.HDUList, tel: str,
     wsep = cordsci.separation(cordskyw)
     esep = cordsci.separation(cordskye)
 
-    print(f'Creating sky for telescope: {tel}')
-    print(f'Using method: {method}')
+    log.info(f'Creating sky for telescope: {tel}, using method: {method}')
 
     # Guille's method using continuum from nearest sky and lines from further sky
     # scaling lines spectrum with Knox's global scaling method
@@ -1968,9 +1999,13 @@ def create_skysub_spectrum(hdu: fits.HDUList, tel: str,
         if wsep < esep :
             uselsky=lskye
             usecsky=cskyw
+            uselsky_error = lskye_error
+            usecsky_error = cskyw_error
         else:
             uselsky=lskyw
             usecsky=cskye
+            uselsky_error = lskyw_error
+            usecsky_error = cskye_error
 
         # set bounds
         rmin = 0.5
@@ -1983,6 +2018,7 @@ def create_skysub_spectrum(hdu: fits.HDUList, tel: str,
 
         # create spectrum for sky subtraction using entire wavelength range
         skysub = usecsky + minimum * uselsky
+        skysub_error = np.sqrt(usecsky_error**2 + (minimum*uselsky_error)**2)
 
     # Knox's original method using nearest sky and polynomial fit to model continuum
     # scaling lines spectrum with Knox's global scaling method
@@ -1991,9 +2027,13 @@ def create_skysub_spectrum(hdu: fits.HDUList, tel: str,
         if wsep < esep :
             uselsky=lskyw
             usecsky=cskyw
+            uselsky_error = lskyw_error
+            usecsky_error = cskyw_error
         else:
             uselsky=lskye
             usecsky=cskye
+            uselsky_error = lskye_error
+            usecsky_error = cskye_error
 
         # set bounds
         rmin = 0.5
@@ -2006,6 +2046,7 @@ def create_skysub_spectrum(hdu: fits.HDUList, tel: str,
 
         # create spectrum for sky subtraction using entire wavelength range
         skysub = usecsky + minimum * uselsky
+        skysub_error = np.sqrt(usecsky_error**2 + (minimum*uselsky_error)**2)
 
 
     # method using continuum from nearest sky and lines from further sky
@@ -2015,15 +2056,21 @@ def create_skysub_spectrum(hdu: fits.HDUList, tel: str,
         if wsep < esep :
             uselsky=lskyw
             usecsky=cskyw
+            uselsky_error = lskyw_error
+            usecsky_error = cskyw_error
         else:
             uselsky=lskye
             usecsky=cskye
+            uselsky_error = lskye_error
+            usecsky_error = cskye_error
 
-        # correcting sky line spectrum 
+        # correcting sky line spectrum
         uselskycorr=uselsky
+        uselskycorr_error = uselsky_error
         # uselskycorr=sebastian_function(lsci, uselsky)
 
         skysub = usecsky + uselskycorr
+        skysub_error = np.sqrt(usecsky_error**2 + uselskycorr_error**2)
 
 
     ## MAKING PLOTS FOR TESTING
@@ -2058,35 +2105,35 @@ def create_skysub_spectrum(hdu: fits.HDUList, tel: str,
     #plt.show()
     #fig4, ax1 = plt.subplots(figsize=(20, 15))
     #ax1.plot(specsci._wave, specsci._data, alpha=0.6, label='Sci')
-    #ax1.plot(specsci._wave, specsci._data-skysub, alpha=0.6, label='Sci-Sky')  
+    #ax1.plot(specsci._wave, specsci._data-skysub, alpha=0.6, label='Sci-Sky')
     #ax1.set_ylim(-1e-15, 2e-13)
     #ax1.set_xlim(6450, 6650)
     #ax1.legend()
-    #plt.show() 
+    #plt.show()
     #fig5, ax1 = plt.subplots(figsize=(20, 15))
     #ax1.plot(specsci._wave, specsci._data, alpha=0.6, label='Sci')
-    #ax1.plot(specsci._wave, specsci._data-skysub, alpha=0.6, label='Sci-Sky')  
+    #ax1.plot(specsci._wave, specsci._data-skysub, alpha=0.6, label='Sci-Sky')
     #ax1.set_ylim(-1e-15, 2e-13)
     #ax1.set_xlim(7800, 8000)
     #ax1.legend()
-    #plt.show() 
+    #plt.show()
     #fig6, ax1 = plt.subplots(figsize=(20, 15))
     #ax1.plot(specsci._wave, specsci._data, alpha=0.6, label='Sci')
-    #ax1.plot(specsci._wave, specsci._data-skysub, alpha=0.6, label='Sci-Sky')  
+    #ax1.plot(specsci._wave, specsci._data-skysub, alpha=0.6, label='Sci-Sky')
     #ax1.set_ylim(-5e-14, 2e-13)
     ##ax1.set_xlim(00, 8100)
     #ax1.legend()
-    #plt.show() 
+    #plt.show()
     #fig7, ax1 = plt.subplots(figsize=(20, 15))
-    #ax1.plot(specsci._wave, np.abs((specsci._data-skysub)/uselsky), alpha=0.6, label='Sci-Sky')  
+    #ax1.plot(specsci._wave, np.abs((specsci._data-skysub)/uselsky), alpha=0.6, label='Sci-Sky')
     #ax1.set_ylim(0, 1)
     ##ax1.set_xlim(00, 8100)
     #ax1.legend()
-    #plt.show() 
+    #plt.show()
 
 
 
-    return np.array(skysub)
+    return np.array(skysub), np.array(skysub_error)
 
 
 def fit_func(r: float, sci: Column, sky: Column) -> float:
@@ -2156,11 +2203,11 @@ def ksl_bisection(func: Callable, a: float, b: float, tol: float = 1e-2, args: t
             1 / 4 * a + 3 / 4 * b,
             b,
         ]
-        log.info(f'{interval}')
+        # log.debug(f'{interval}')
         values = [func(x, *args) for x in interval]
-        log.info(f'{values}')
+        # log.debug(f'{values}')
         min_index = values.index(min(values))
-        log.info(f'{min_index}')
+        # log.debug(f'{min_index}')
 
         if min_index == 0:
             a, b = interval[0], interval[2]
@@ -2172,9 +2219,9 @@ def ksl_bisection(func: Callable, a: float, b: float, tol: float = 1e-2, args: t
             a, b = interval[2], interval[4]
         elif min_index == 4:
             a, b = interval[2], interval[4]
-        log.info(f'{a}, {b}')
+        # log.debug(f'{a}, {b}')
         if abs(a - b) < tol:
-            log.info(f"Accuracy achieved on interation {j}")
+            log.debug(f"Accuracy achieved on interation {j}")
             break
         j += 1
 
