@@ -3287,6 +3287,7 @@ class RSS(FiberRows):
             hdus[0].update_header()
 
         os.makedirs(os.path.dirname(out_rss), exist_ok=True)
+        hdus[0].header["FILENAME"] = os.path.basename(out_rss)
         hdus.writeto(out_rss, overwrite=True, output_verify="silentfix")
 
 def loadRSS(in_rss):
@@ -3413,6 +3414,7 @@ class lvmFrame(lvmBaseProduct):
         self._template.verify("silentfix")
 
         os.makedirs(os.path.dirname(out_file), exist_ok=True)
+        self._template[0].header["FILENAME"] = os.path.basename(out_file)
         self._template.writeto(out_file, overwrite=True)
 
 
@@ -3483,6 +3485,7 @@ class lvmFFrame(lvmBaseProduct):
         self._template.verify("silentfix")
 
         os.makedirs(os.path.dirname(out_file), exist_ok=True)
+        self._template[0].header["FILENAME"] = os.path.basename(out_file)
         self._template.writeto(out_file, overwrite=True)
 
 
@@ -3549,6 +3552,7 @@ class lvmCFrame(lvmBaseProduct):
         self._template.verify("silentfix")
 
         os.makedirs(os.path.dirname(out_file), exist_ok=True)
+        self._template[0].header["FILENAME"] = os.path.basename(out_file)
         self._template.writeto(out_file, overwrite=True)
 
 
@@ -3604,6 +3608,7 @@ class lvmSFrame(lvmBaseProduct):
         self._template.verify("silentfix")
 
         os.makedirs(os.path.dirname(out_file), exist_ok=True)
+        self._template[0].header["FILENAME"] = os.path.basename(out_file)
         self._template.writeto(out_file, overwrite=True)
 
 
