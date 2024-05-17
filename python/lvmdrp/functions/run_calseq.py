@@ -586,7 +586,7 @@ def fix_raw_pixel_shifts(mjd, expnums=None, ref_expnums=None, use_fiducial_cals=
                 continue
 
             if use_fiducial_cals:
-                mwave_paths = sorted(glob(os.path.join(masters_path, f"lvm-mwave_neon_hgne_argon_xenon-?{spec}.fits")))
+                mwave_paths = sorted(glob(os.path.join(masters_path, f"lvm-mwave-?{spec}.fits")))
                 mtrace_paths = sorted(glob(os.path.join(masters_path, f"lvm-mtrace-?{spec}.fits")))
             else:
                 mwave_paths = sorted(path.expand("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mwave", camera=f"?{spec}"))
