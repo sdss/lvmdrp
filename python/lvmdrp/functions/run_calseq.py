@@ -51,7 +51,6 @@ from lvmdrp.functions.run_twilights import fit_fiberflat, remove_field_gradient,
 
 SLITMAP = read_fibermap(as_table=True)
 MASTER_CON_LAMPS = {"b": "ldls", "r": "ldls", "z": "quartz"}
-MASTER_ARC_LAMPS = {"b": "hgne", "r": "neon", "z": "neon"}
 MASK_BANDS = {
     "b": [(3910, 4000), (4260, 4330)],
     "r": [(6840,6960)],

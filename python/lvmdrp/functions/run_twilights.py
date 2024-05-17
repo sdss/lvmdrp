@@ -31,8 +31,6 @@ import itertools
 
 
 MASTER_CON_LAMPS = {"b": "ldls", "r": "ldls", "z": "quartz"}
-# MASTER_ARC_LAMPS = {"b": "hgne", "r": "neon", "z": "neon"}
-MASTER_ARC_LAMPS = {"b": "neon_hgne_argon_xenon", "r": "neon_hgne_argon_xenon", "z": "neon_hgne_argon_xenon"}
 SLITMAP = Table(drp.fibermap.data)
 
 
