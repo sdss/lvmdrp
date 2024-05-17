@@ -1660,7 +1660,7 @@ def apply_fiberflat(in_rss: str, out_frame: str, in_flat: str, clip_below: float
         # interpolate fiberflat to target wavelength grid to fill in missing values
         if not numpy.isclose(spec_flat._wave, spec_data._wave).all():
             deltas = spec_flat._wave - spec_data._wave
-            log.warning(f"at fiber {i+1} resampling fiberflat: {numpy.min(deltas)} - {numpy.max(deltas)}")
+            log.warning(f"at fiber {i} resampling fiberflat: {numpy.min(deltas):.4f} - {numpy.max(deltas):.4f}")
             spec_flat = spec_flat.resampleSpec(spec_data._wave, err_sim=5)
 
         # apply clipping

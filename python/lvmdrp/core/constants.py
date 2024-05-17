@@ -64,6 +64,8 @@ SKYCORR_CONFIG_PATH = os.path.join(CONFIG_PATH, "third_configs", "skycorr_config
 DATA_PATH = os.path.join(ROOT_PATH, "data")
 EPHEMERIS_PATH = os.path.join(DATA_PATH, "de421.bsp")
 
+# fiducial calibrations directory
+MASTERS_DIR = os.getenv("LVM_MASTER_DIR")
 
 SKYCORR_PAR_MAP = {
     "INPUT_OBJECT_SPECTRUM": "objfile",
@@ -100,17 +102,17 @@ SKYCORR_PAR_MAP = {
     "PLOT_TYPE": "plotType",
 }
 
-BASIC_CALIBRATION_TYPES = ["pixmask", "bias", "dark", "pixelflat"]
+BASIC_CALIBRATION_TYPES = ["pixmask", "bias", "dark", "pixflat"]
 CALIBRATION_TYPES = BASIC_CALIBRATION_TYPES + ["flat", "arc"]
 FRAMES_PRIORITY = CALIBRATION_TYPES + ["object"]
 FRAMES_CALIB_NEEDS = {
     "bias": [],
     "dark": ["bias"],
-    "pixelflat": ["bias", "dark"],
-    "pixmask": ["bias", "dark", "pixelflat"],
-    "flat": ["pixmask", "bias", "dark", "pixelflat", "trace", "fwhm", "wave", "lsf"],
-    "arc": ["pixmask", "bias", "dark", "pixelflat", "trace", "fwhm", "wave", "lsf"],
-    "object": ["pixmask", "bias", "dark", "pixelflat", "fiberflat", "trace", "fwhm", "wave", "lsf"],
+    "pixflat": ["bias", "dark"],
+    "pixmask": ["bias", "dark", "pixflat"],
+    "flat": ["pixmask", "bias", "dark", "pixflat", "trace", "fwhm", "wave", "lsf"],
+    "arc": ["pixmask", "bias", "dark", "pixflat", "trace", "fwhm", "wave", "lsf"],
+    "object": ["pixmask", "bias", "dark", "pixflat", "fiberflat", "trace", "fwhm", "wave", "lsf"],
 }
 
 # spectrograph channels as spec
@@ -123,3 +125,5 @@ CON_LAMPS = ["LDLS", "QUARTZ"]
 
 LVM_NBLOCKS = 18
 LVM_REFERENCE_COLUMN = 2000
+FIDUCIAL_PLATESCALE = 112.36748321030637 # Focal plane platescale in "/mm
+

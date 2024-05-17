@@ -24,7 +24,7 @@ from tqdm import tqdm
 from typing import List, Tuple
 
 from lvmdrp import log, __version__ as DRPVER
-from lvmdrp.core.constants import CONFIG_PATH, SPEC_CHANNELS, ARC_LAMPS, LVM_REFERENCE_COLUMN, LVM_NBLOCKS
+from lvmdrp.core.constants import CONFIG_PATH, SPEC_CHANNELS, ARC_LAMPS, LVM_REFERENCE_COLUMN, LVM_NBLOCKS, FIDUCIAL_PLATESCALE
 from lvmdrp.utils.decorators import skip_on_missing_input_path, drop_missing_input_paths
 from lvmdrp.utils.bitmask import QualityFlag
 from lvmdrp.core.fiberrows import FiberRows, _read_fiber_ypix
@@ -3097,8 +3097,8 @@ def extract_spectra(
     in_trace: str,
     in_fwhm: str = None,
     in_acorr: str = None,
-    columns: List[int] = [500, 1000, 1500, 2000, 2500, 3000],
-    column_width: int = 20,
+    columns: List[int] = [500, 750, 1000, 1250, 1500, 1750, 2000, 2250, 2500, 2750, 3000],
+    column_width: int = 50,
     method: str = "optimal",
     aperture: int = 3,
     fwhm: float = 2.5,
@@ -3171,7 +3171,8 @@ def extract_spectra(
         trace_mask, shifts, _ = _fix_fiber_thermal_shifts(img, trace_mask, trace_fwhm,
                                                           trace_amp=10000,
                                                           columns=columns,
-                                                          column_width=column_width)
+                                                          column_width=column_width,
+                                                          shift_range=[-2,2])
 
         # set up parallel run
         if parallel == "auto":
@@ -3868,7 +3869,7 @@ def preproc_raw_frame(
         )
 
     # load master pixel mask
-    if in_mask and proc_img._header["IMAGETYP"] not in {"bias", "dark", "pixelflat"}:
+    if in_mask and proc_img._header["IMAGETYP"] not in {"bias", "dark", "pixflat"}:
         log.info(f"loading master pixel mask from {os.path.basename(in_mask)}")
         master_mask = loadImage(in_mask)._mask.astype(bool)
     else:
@@ -4038,9 +4039,10 @@ def add_astrometry(
         path to SkyW telescope AGC coadd master frame
     """
 
-    print("**************************************")
-    print("**** ADDING ASTROMETRY TO SLITMAP ****")
-    print("**************************************")
+    # print("**************************************")
+    # print("**** ADDING ASTROMETRY TO SLITMAP ****")
+    # print("**************************************")
+    log.info(f"loading frame from {in_image}")
     #print(in_image)
     #print(out_image)
     #print(in_agcsci_image)
@@ -4133,10 +4135,8 @@ def add_astrometry(
     RAfib=numpy.zeros(len(slitmap))
     DECfib=numpy.zeros(len(slitmap))
 
-    def getfibradec(tel):
+    def getfibradec(tel, platescale):
         RAobs, DECobs, PAobs = telcoordsdir[tel]
-        platescale=112.36748321030637 # Focal plane platescale in "/mm
-        print("Using Fiducial Platescale = ", platescale)
         pscale=0.01 # IFU image pixel scale in mm/pix
         skypscale=pscale*platescale/3600 # IFU image pixel scale in deg/pix
         npix=1800 # size of fake IFU image
@@ -4154,10 +4154,11 @@ def add_astrometry(
         RAfib[sel]=fibcoords['ra'].degree
         DECfib[sel]=fibcoords['dec'].degree
 
-    getfibradec('sci')
-    getfibradec('skye')
-    getfibradec('skyw')
-    getfibradec('spec')
+    log.info(f'Using Fiducial Platescale = {FIDUCIAL_PLATESCALE:.2f} "/mm')
+    getfibradec('sci', platescale=FIDUCIAL_PLATESCALE)
+    getfibradec('skye', platescale=FIDUCIAL_PLATESCALE)
+    getfibradec('skyw', platescale=FIDUCIAL_PLATESCALE)
+    getfibradec('spec', platescale=FIDUCIAL_PLATESCALE)
 
     # add coordinates to slitmap
     slitmap['ra']=RAfib
@@ -4256,7 +4257,7 @@ def detrend_frame(
         mdark_img = mdark_img / mdark_img._header["EXPTIME"] * exptime
 
     # read master flat
-    if img_type in ["bias", "dark", "pixelflat"] or (
+    if img_type in ["bias", "dark", "pixflat"] or (
         in_pixelflat is None or not os.path.isfile(in_pixelflat)
     ):
         if in_pixelflat and not os.path.isfile(in_pixelflat):
@@ -4347,8 +4348,8 @@ def detrend_frame(
         detrended_img.setData(mask=(detrended_img._mask | med_img._mask), inplace=True)
 
     # normalize in case of pixel flat calibration
-    # 'pixelflat' is the imagetyp that a pixel flat can have
-    if img_type == "pixelflat":
+    # 'pixflat' is the imagetyp that a pixel flat can have
+    if img_type == "pixflat":
         flat_array = numpy.ma.masked_array(
             detrended_img._data, mask=detrended_img._mask
         )
@@ -4458,7 +4459,7 @@ def create_master_frame(in_images: List[str], out_image: str, batch_size: int = 
         master_img = combineImages(org_imgs, method="median", normalize=False)
     elif master_type == "dark":
         master_img = combineImages(org_imgs, method="median", normalize=False)
-    elif master_type == "pixelflat":
+    elif master_type == "pixflat":
         master_img = combineImages(
             [img / numpy.nanmedian(img._data) for img in org_imgs],
             method="median",

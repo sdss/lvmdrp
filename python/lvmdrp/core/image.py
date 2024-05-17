@@ -3009,7 +3009,10 @@ class Image(Header):
         return self._slitmap
 
     def setSlitmap(self, slitmap):
-        self._slitmap = slitmap
+        if isinstance(slitmap, pyfits.BinTableHDU):
+            self._slitmap = Table(slitmap.data)
+        else:
+            self._slitmap = slitmap
 
     def eval_fiber_model(self, trace_cent, trace_width=None, trace_amp=None, columns=None, column_width=None):
         """Returns the evaluated fiber model from the given fiber centroids, widths and amplitudes

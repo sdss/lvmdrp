@@ -7,10 +7,10 @@ import pytest
 
 from astropy.time import Time
 from lvmdrp import __version__ as drpver
-from lvmdrp.functions.run_drp import (create_status_file, remove_status_file,
-                                      status_file_exists, update_error_file,
-                                      should_run, check_daily_mjd, parse_mjds,
-                                      filter_expnum)
+from lvmdrp.main import (create_status_file, remove_status_file,
+                         status_file_exists, update_error_file,
+                         should_run, check_daily_mjd, parse_mjds,
+                         filter_expnum)
 
 
 @pytest.fixture()
@@ -63,9 +63,9 @@ def test_update_error_file():
     path = pathlib.Path(os.getenv("LVM_SPECTRO_REDUX")) / f'{drpver}/drp_errors.txt'
 
     errors = """ Traceback (most recent call last):
-  File "/Users/Brian/Work/github_projects/sdss/lvm/lvmdrp/python/lvmdrp/functions/run_drp.py", line 1517, in run_drp
-    quick_science_reduction(expnum, use_fiducial_master=True)
-  File "/Users/Brian/Work/github_projects/sdss/lvm/lvmdrp/python/lvmdrp/functions/run_quickdrp.py", line 225, in quick_science_reduction
+  File "/Users/Brian/Work/github_projects/sdss/lvm/lvmdrp/python/lvmdrp/main.py", line 1517, in run_drp
+    science_reduction(expnum, use_fiducial_master=True)
+  File "/Users/Brian/Work/github_projects/sdss/lvm/lvmdrp/python/lvmdrp/main.py", line 225, in science_reduction
     raise ValueError('This is a bad error on b2')
 ValueError: This is a bad error on b2
     """
@@ -92,7 +92,7 @@ def test_should_run_yes(transfer):
 @pytest.fixture()
 def check(mocker, caplog):
     """ fixture to capture output from the check daily """
-    mocker.patch('lvmdrp.functions.run_drp.Time.now', return_value=Time(61234, format='mjd'))
+    mocker.patch('lvmdrp.main.Time.now', return_value=Time(61234, format='mjd'))
     check_daily_mjd(test=True)
     out = '\n'.join(caplog.messages)
     assert 'The MJD is 61234.' in out

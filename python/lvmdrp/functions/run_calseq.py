@@ -38,76 +38,25 @@ from lvmdrp import log, path, __version__ as drpver
 from lvmdrp.utils import metadata as md
 from lvmdrp.core.plot import create_subplots
 from lvmdrp.core import dataproducts as dp
-from lvmdrp.core.constants import SPEC_CHANNELS, LVM_REFERENCE_COLUMN, LVM_NBLOCKS
+from lvmdrp.core.constants import SPEC_CHANNELS, LVM_REFERENCE_COLUMN, LVM_NBLOCKS, MASTERS_DIR
 from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.core.image import loadImage
 from lvmdrp.core.rss import RSS, lvmFrame
 
 from lvmdrp.functions import imageMethod as image_tasks
 from lvmdrp.functions import rssMethod as rss_tasks
-from lvmdrp.functions.run_drp import get_config_options, read_fibermap
-from lvmdrp.functions.run_quickdrp import get_master_mjd
+from lvmdrp.main import get_config_options, read_fibermap, get_master_mjd, reduce_2d
 from lvmdrp.functions.run_twilights import fit_fiberflat, remove_field_gradient, combine_twilight_sequence
 
 
 SLITMAP = read_fibermap(as_table=True)
 MASTER_CON_LAMPS = {"b": "ldls", "r": "ldls", "z": "quartz"}
 MASTER_ARC_LAMPS = {"b": "hgne", "r": "neon", "z": "neon"}
-MASTERS_DIR = os.getenv("LVM_MASTER_DIR")
 MASK_BANDS = {
     "b": [(3910, 4000), (4260, 4330)],
     "r": [(6840,6960)],
     "z": [(7570, 7700)]
 }
-
-
-def get_sequence_metadata(mjd, expnums=None, exptime=None, extract_metadata=False):
-    """Get frames metadata for a given sequence
-
-    Given a set of MJDs and (optionally) exposure numbers, get the frames
-    metadata for the given sequence. This routine will return the frames
-    metadata for the given MJDs and the MJD for the master frames.
-
-    Parameters:
-    ----------
-    mjd : int
-        MJD to reduce
-    expnums : list
-        List of exposure numbers to reduce
-    exptime : int
-        Filter frames metadata by exposure
-    extract_metadata : bool
-        Whether to extract metadata or not, by default False
-
-    Returns:
-    -------
-    frames : pd.DataFrame
-        Frames metadata
-    masters_mjd : float
-        MJD for master frames
-    """
-    # get frames metadata
-    frames = md.get_frames_metadata(mjd=mjd, overwrite=extract_metadata)
-
-    # filter by given expnums
-    if expnums is not None:
-        frames.query("expnum in @expnums", inplace=True)
-
-    # filter by given exptime
-    if exptime is not None:
-        frames.query("exptime == @exptime", inplace=True)
-
-    # simple fix of imagetyp, some images have the wrong type in the header
-    twilight_selection = (frames.imagetyp == "flat") & ~(frames.ldls|frames.quartz)
-    domeflat_selection = (frames.ldls|frames.quartz) & ~(frames.neon|frames.hgne|frames.argon|frames.xenon)
-    arc_selection = (frames.neon|frames.hgne|frames.argon|frames.xenon) & ~(frames.ldls|frames.quartz)
-    frames.loc[twilight_selection, "imagetyp"] = "flat"
-    frames.loc[domeflat_selection, "imagetyp"] = "flat"
-    frames.loc[arc_selection, "imagetyp"] = "arc"
-
-    frames.sort_values(["expnum", "camera"], inplace=True)
-
-    return frames
 
 
 def choose_sequence(frames, flavor, kind):
@@ -384,7 +333,7 @@ def _clean_ancillary(mjd, expnums=None, imagetyp="all"):
     """
 
     # get frames metadata
-    frames = get_sequence_metadata(mjd, expnums=expnums)
+    frames = md.get_sequence_metadata(mjd, expnums=expnums)
 
     # filter by target image types
     ALL = {"bias", "dark", "flat", "arc", "object", "cent", "amp", "width", "stray"}
@@ -592,8 +541,8 @@ def fix_raw_pixel_shifts(mjd, expnums=None, ref_expnums=None, use_fiducial_cals=
         raise ValueError("shift_rows must be a dictionary with keys (spec, expnum) and values a list of rows to shift")
 
     # get target frames & reference frames metadata
-    frames = get_sequence_metadata(mjd, expnums=expnums)
-    ref_frames = get_sequence_metadata(mjd, expnums=ref_expnums)
+    frames = md.get_sequence_metadata(mjd, expnums=expnums)
+    ref_frames = md.get_sequence_metadata(mjd, expnums=ref_expnums)
 
     if use_fiducial_cals:
         masters_mjd = get_master_mjd(mjd)
@@ -659,92 +608,6 @@ def fix_raw_pixel_shifts(mjd, expnums=None, ref_expnums=None, use_fiducial_cals=
                                          interactive=interactive, display_plots=display_plots)
 
 
-def reduce_2d(mjd, use_fiducial_cals=True, expnums=None, exptime=None,
-              replace_with_nan=True, assume_imagetyp=None, reject_cr=True,
-              skip_done=True, keep_ancillary=False):
-    """Preprocess and detrend a list of 2D frames
-
-    Given a set of MJDs and (optionally) exposure numbers, preprocess detrends
-    and optionally fits and subtracts the stray light field from the 2D frames.
-    This routine will store the preprocessed, detrended and
-    straylight-subtracted frames in the corresponding calibration directory in
-    the `masters_mjd` or by default in the smallest MJD in `mjds`.
-
-    Parameters:
-    ----------
-    mjd : int
-        MJD to reduce
-    use_fiducial_cals : bool
-        Whether to use fiducial calibration frames or not, defaults to True
-    expnums : list
-        List of exposure numbers to reduce
-    exptime : int
-        Exposure time to filter by
-    replace_with_nan : bool
-        Replace rejected pixels with NaN
-    assume_imagetyp : str
-        Assume the given imagetyp for all frames
-    reject_cr : bool
-        Reject cosmic rays
-    counts_threshold : int
-        Minimum count level to consider when tracing centroids, defaults to 500
-    poly_deg_cent : int
-        Degree of the polynomial to fit to the centroids, by default 4
-    skip_done : bool
-        Skip pipeline steps that have already been done
-    keep_ancillary : bool
-        Keep ancillary files, by default False
-    """
-
-    frames = get_sequence_metadata(mjd, expnums=expnums, exptime=exptime)
-    masters_mjd = get_master_mjd(mjd)
-    masters_path = os.path.join(MASTERS_DIR, str(masters_mjd))
-
-    # preprocess and detrend frames
-    for frame in frames.to_dict("records"):
-        camera = frame["camera"]
-
-        # assume given image type
-        imagetyp = assume_imagetyp or frame["imagetyp"]
-
-        # get master frames paths
-        mpixmask_path = os.path.join(masters_path, f"lvm-mpixmask-{camera}.fits")
-        mpixflat_path = os.path.join(masters_path, f"lvm-mpixelflat-{camera}.fits")
-        if use_fiducial_cals:
-            mbias_path = os.path.join(masters_path, f"lvm-mbias-{camera}.fits")
-        else:
-            mbias_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mbias", camera=camera)
-
-        # log the master frames
-        log.info(f'Using master pixel mask: {mpixmask_path}')
-        log.info(f'Using master bias: {mbias_path}')
-        log.info(f'Using master pixel flat: {mpixflat_path}')
-
-        rframe_path = path.full("lvm_raw", camspec=frame["camera"], **frame)
-        eframe_path = path.full("lvm_anc", drpver=drpver, kind="e", imagetype=imagetyp, **frame)
-        frame_path = eframe_path if os.path.exists(eframe_path) else rframe_path
-        pframe_path = path.full("lvm_anc", drpver=drpver, kind="p", imagetype=imagetyp, **frame)
-
-        # bypass creation of detrended frame in case of imagetyp=bias
-        if imagetyp != "bias":
-            dframe_path = path.full("lvm_anc", drpver=drpver, kind="d", imagetype=imagetyp, **frame)
-        else:
-            dframe_path = pframe_path
-
-        os.makedirs(os.path.dirname(dframe_path), exist_ok=True)
-        if skip_done and os.path.isfile(dframe_path):
-            log.info(f"skipping {dframe_path}, file already exist")
-        else:
-            image_tasks.preproc_raw_frame(in_image=frame_path, out_image=pframe_path,
-                                          in_mask=mpixmask_path, replace_with_nan=replace_with_nan, assume_imagetyp=assume_imagetyp)
-            image_tasks.detrend_frame(in_image=pframe_path, out_image=dframe_path,
-                                      in_bias=mbias_path,
-                                      in_pixelflat=mpixflat_path,
-                                      replace_with_nan=replace_with_nan,
-                                      reject_cr=reject_cr,
-                                      in_slitmap=SLITMAP if imagetyp in {"flat", "arc", "object"} else None)
-
-
 def create_detrending_frames(mjd, use_fiducial_cals=True, expnums=None, exptime=None, kind="all", assume_imagetyp=None, reject_cr=True, skip_done=True, keep_ancillary=False):
     """Reduce a sequence of bias/dark/pixelflat frames to produce master frames
 
@@ -782,15 +645,15 @@ def create_detrending_frames(mjd, use_fiducial_cals=True, expnums=None, exptime=
     keep_ancillary : bool
         Keep ancillary files, by default False
     """
-    frames = get_sequence_metadata(mjd, expnums=expnums, exptime=exptime)
+    frames = md.get_sequence_metadata(mjd, expnums=expnums, exptime=exptime)
 
     # filter by target image types
     if kind == "all":
-        frames.query("imagetyp in ['bias', 'dark', 'pixelflat']", inplace=True)
-    elif kind in ["bias", "dark", "pixelflat"]:
+        frames.query("imagetyp in ['bias', 'dark', 'pixflat']", inplace=True)
+    elif kind in ["bias", "dark", "pixflat"]:
         frames.query("imagetyp == @kind", inplace=True)
     else:
-        raise ValueError(f"Invalid kind: '{kind}'. Must be one of 'bias', 'dark', 'pixelflat' or 'all'")
+        raise ValueError(f"Invalid kind: '{kind}'. Must be one of 'bias', 'dark', 'pixflat' or 'all'")
 
     # preprocess and detrend frames
     reduce_2d(mjd=mjd, use_fiducial_cals=use_fiducial_cals, expnums=set(frames.expnum), exptime=exptime, assume_imagetyp=assume_imagetyp, reject_cr=reject_cr, skip_done=skip_done)
@@ -868,7 +731,7 @@ def create_pixelmasks(mjd, use_fiducial_cals=True, dark_expnums=None, pixflat_ex
         expnums = np.concatenate([dark_expnums, pixflat_expnums])
     else:
         expnums = None
-    frames = get_sequence_metadata(mjd, expnums=expnums)
+    frames = md.get_sequence_metadata(mjd, expnums=expnums)
 
     darks = frames.query("imagetyp == 'dark' and exptime == @short_exptime or exptime == @long_exptime", inplace=True)
     pixflats = frames.query("imagetyp == 'dark' or imagetyp == 'pixelflat' and exptime == @pixflat_exptime", inplace=True)
@@ -897,7 +760,7 @@ def create_pixelmasks(mjd, use_fiducial_cals=True, dark_expnums=None, pixflat_ex
             dflat_paths_cam = cam_groups.get_group(cam)["dflat_path"]
 
             # define output combined pixelflat path
-            mflat_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mpixelflat", camera=cam)
+            mflat_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mpixflat", camera=cam)
 
             image_tasks.create_master_frame(in_images=dflat_paths_cam, out_image=mflat_path)
 
@@ -949,7 +812,7 @@ def create_nighly_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnums
         expnums = np.concatenate([expnums_ldls, expnums_qrtz])
     else:
         expnums = None
-    frames = get_sequence_metadata(mjd, expnums=expnums)
+    frames = md.get_sequence_metadata(mjd, expnums=expnums)
 
     # run 2D reduction on flats: preprocessing, detrending
     reduce_2d(mjd, use_fiducial_cals=use_fiducial_cals, expnums=expnums, reject_cr=False, skip_done=skip_done)
@@ -1068,7 +931,7 @@ def create_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnums_qrtz=N
         expnums = np.concatenate([expnums_ldls, expnums_qrtz])
     else:
         expnums = None
-    frames = get_sequence_metadata(mjd, expnums=expnums)
+    frames = md.get_sequence_metadata(mjd, expnums=expnums)
 
     # run 2D reduction on flats: preprocessing, detrending
     reduce_2d(mjd, use_fiducial_cals=use_fiducial_cals, expnums=expnums, reject_cr=False, skip_done=skip_done)
@@ -1249,7 +1112,7 @@ def create_fiberflats(mjd: int, use_fiducial_cals: bool = True, expnums: List[in
         Dictionary with the master twilight flats for each channel
     """
     # get metadata
-    flats = get_sequence_metadata(mjd, expnums=expnums)
+    flats = md.get_sequence_metadata(mjd, expnums=expnums)
     if expnums is None:
         flats.query("imagetyp == 'flat' and not (ldls|quartz)", inplace=True)
 
@@ -1434,7 +1297,7 @@ def create_wavelengths(mjd, use_fiducial_cals=True, expnums=None, skip_done=True
     skip_done : bool
         Skip pipeline steps that have already been done
     """
-    frames = get_sequence_metadata(mjd, expnums=expnums)
+    frames = md.get_sequence_metadata(mjd, expnums=expnums)
 
     if use_fiducial_cals:
         masters_mjd = get_master_mjd(mjd)
@@ -1533,7 +1396,7 @@ def reduce_nightly_sequence(mjd, use_fiducial_cals=True, reject_cr=True, skip_do
     cal_imagetyps = {"bias", "flat", "arc"}
     log.info(f"going to reduce nightly calibration frames: {cal_imagetyps}")
 
-    frames = md.get_sequence_metadata(mjd)
+    frames = md.md.get_sequence_metadata(mjd)
     frames.query("imagetyp in @cal_imagetyps", inplace=True)
     if len(frames) == 0:
         raise ValueError(f"no frames found for MJD = {mjd}")
@@ -1599,9 +1462,9 @@ def reduce_longterm_sequence(mjd, use_fiducial_cals=True, reject_cr=True, skip_d
         Keep ancillary files, by default False
     """
     cal_imagetyps = {"bias", "flat", "arc"}
-    log.info(f"going to reduce nightly calibration frames: {cal_imagetyps}")
+    log.info(f"going to reduce long-term calibration frames: {cal_imagetyps}")
 
-    frames = get_sequence_metadata(mjd)
+    frames = md.get_sequence_metadata(mjd)
     frames.query("imagetyp in @cal_imagetyps", inplace=True)
     if len(frames) == 0:
         raise ValueError(f"no frames found for MJD = {mjd}")

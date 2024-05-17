@@ -8,7 +8,6 @@
 
 from __future__ import annotations
 
-import os
 from typing import Tuple, List
 from copy import deepcopy as copy
 import numpy as np
@@ -24,14 +23,13 @@ from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.core.spectrum1d import Spectrum1D
 from lvmdrp.core.rss import RSS
 from lvmdrp.core.plot import create_subplots, save_fig
-from lvmdrp.functions import run_drp as drp
+from lvmdrp import main as drp
 from astropy import wcs
 from astropy.io import fits
 from astropy.stats import biweight_location
 import itertools
 
 
-ORIG_MASTER_DIR = os.getenv("LVM_MASTER_DIR")
 MASTER_CON_LAMPS = {"b": "ldls", "r": "ldls", "z": "quartz"}
 # MASTER_ARC_LAMPS = {"b": "hgne", "r": "neon", "z": "neon"}
 MASTER_ARC_LAMPS = {"b": "neon_hgne_argon_xenon", "r": "neon_hgne_argon_xenon", "z": "neon_hgne_argon_xenon"}
