@@ -27,6 +27,7 @@ from lvmdrp.core.plot import create_subplots, save_fig
 from lvmdrp.functions import run_drp as drp
 from astropy import wcs
 from astropy.io import fits
+from astropy.stats import biweight_location
 import itertools
 
 
@@ -371,9 +372,9 @@ def fit_fiberflat(in_twilight: str, out_flat: str, out_rss: str, interpolate_bad
                 spectrum=fiber, mask_bands=mask_bands,
                 median_box=median_box, niter=niter, threshold=threshold, **kwargs
             )
-        except ValueError:
-            log.error(f"while fitting fiber throughput for fiber {ifiber+1}")
-            new_flat._data[ifiber] = 0.0
+        except (ValueError, TypeError) as e:
+            log.error(f"while fitting fiber throughput for fiber {ifiber}: {e}")
+            new_flat._data[ifiber] = np.nan
             new_flat._mask[ifiber] = True
             continue
 
@@ -408,8 +409,8 @@ def fit_fiberflat(in_twilight: str, out_flat: str, out_rss: str, interpolate_bad
     # median_fiber = bn.nanmean(new_flat._data, axis=0)
     new_flat._data = new_flat._data / median_fiber
     new_flat._error = new_flat._error / median_fiber
-    new_flat._data[~np.isfinite(new_flat._data)] = 1
-    new_flat._mask[...] = False
+    # new_flat._data[~np.isfinite(new_flat._data)] = 1
+    # new_flat._mask[...] = False
 
     # flattield original twilight
     ori_flat._data = ori_flat._data / new_flat._data
@@ -487,29 +488,38 @@ def combine_twilight_sequence(fflats: List[RSS]) -> RSS:
     # select non-std fibers
     fibermap =  mflat._slitmap
     select_allstd = fibermap["telescope"] == "Spec"
-    select_nonstd = ~select_allstd
+    # select_nonstd = ~select_allstd
     for i, fflat in enumerate(fflats):
-        # coadding all non-std fibers
-        mflat._data[select_nonstd] = mflat._data[select_nonstd] + fflat._data[select_nonstd]
-        mflat._error[select_nonstd] = np.sqrt(mflat._error[select_nonstd]**2 + fflat._error[select_nonstd]**2)
-        mflat._mask[select_nonstd] = mflat._mask[select_nonstd] & fflat._mask[select_nonstd]
-
         # get exposed standard fiber ID
-        default_fiber_id = f"P1-{i+1}"
-        fiber_id = mflat._header.get("CALIBFIB", default_fiber_id) or default_fiber_id
-        # put std fibers in the right position
-        idx = np.where(fibermap["orig_ifulabel"].value == fiber_id)
-        mflat._data[idx] = fflat._data[idx]
-        mflat._error[idx] = fflat._error[idx]
-        mflat._mask[idx] = mflat._mask[idx] & fflat._mask[idx]
-        mflat._header.update(fflat._header["STD*"])
+        fiber_id = fflat._header.get("CALIBFIB")
+        if fiber_id is None:
+            snrs = np.nanmedian(fflat._data / fflat._error, axis=1)
+            select_nonexposed = snrs < 50
+            #plt.figure(figsize=(15,5))
+            #plt.plot(snrs[select_allstd])
+            #ids_std = fibermap[select_allstd]["orig_ifulabel"]
+            #idx_std = np.arange(ids_std.size)
+            #plt.gca().set_xticks(idx_std)
+            #plt.gca().set_xticklabels(ids_std)
+        else:
+            select_nonexposed = fibermap["orig_ifulabel"] != fiber_id
 
-    # compute average of non-std fibers
-    mflat._data[select_nonstd] = mflat._data[select_nonstd] / len(fflats)
-    mflat._error[select_nonstd] = mflat._error[select_nonstd] / np.sqrt(len(fflats))
+        # put std fibers in the right position
+        fflat._data[select_allstd&select_nonexposed] = np.nan
+        fflat._error[select_allstd&select_nonexposed] = np.nan
+        fflat._mask[select_allstd&select_nonexposed] = True
+
+    mflat = copy(fflats[0])
+    mflat._data = biweight_location([fflat._data for fflat in fflats], axis=0, ignore_nan=True)
+    mflat._error = np.sqrt(biweight_location([fflat._error**2 for fflat in fflats], axis=0, ignore_nan=True)) / len(fflats)
 
     # mask invalid pixels
     mflat._mask |= np.isnan(mflat._data) | (mflat._data <= 0) | np.isinf(mflat._data)
+    mflat._mask |= np.isnan(mflat._error) | (mflat._error <= 0) | np.isinf(mflat._error)
+
+    # interpolate masked fibers if any remaining
+    mflat = mflat.interpolate_data(axis="X")
+    mflat = mflat.interpolate_data(axis="Y")
 
     return mflat
 

@@ -1361,7 +1361,7 @@ def create_fiberflats(mjd: int, use_fiducial_cals: bool = True, expnums: List[in
             fflat._data /= gradient._data
             fflat._mask |= np.isnan(fflat._data)
             fflat = fflat.interpolate_data(axis="X")
-            fflat = fflat.interpolate_data(axis="Y")
+            # fflat = fflat.interpolate_data(axis="Y")
             fflat.writeFitsData(fflat_path)
             fflat.set_wave_trace(mwave)
             fflat.set_lsf_trace(mlsf)
