@@ -217,6 +217,7 @@ def get_exposed_std_fiber(mjd, expnums, camera, imagetyp="flat", ref_column=LVM_
         fiber_par = image._slitmap[image._slitmap["orig_ifulabel"] == exposed_std]
         block_idx = int(fiber_par["blockid"][0][1:])-1
         block_idxs.remove(block_idx)
+        log.info(f"exposed standard fiber in exposure {expnum}: '{exposed_std}' (blockidx = {block_idx})")
 
         exposed_stds[expnum] = (exposed_std, [block_idx])
 
