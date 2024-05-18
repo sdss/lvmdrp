@@ -207,7 +207,9 @@ def get_exposed_std_fiber(mjd, expnums, camera, imagetyp="flat", ref_column=LVM_
             ax.set_xticklabels(ids_std)
 
             # select standard fiber exposed if any
-            select_std = (snr[pos_std] > snr_std_med+snr_threshold*snr_std_std) | (snr[pos_std] >= snr_med-snr_std)
+            snr_std_dif = np.abs(np.asarray([np.nanmean(snr_fib-snr[pos_std]) for snr_fib in snr[pos_std]]))
+            snr_all_dif = np.abs(np.asarray([np.nanmean(snr_fib-snr) for snr_fib in snr[pos_std]]))
+            select_std = (snr_std_dif > snr_std_med+snr_threshold*snr_std_std) | (snr_all_dif >= snr_med-snr_std)
             exposed_std = ids_std[select_std]
             if len(exposed_std) > 1:
                 exposed_std = [exposed_std[np.argmax(snr[pos_std[select_std]])]]
