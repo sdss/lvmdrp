@@ -126,7 +126,7 @@ def choose_sequence(frames, flavor, kind):
     return chosen_frames, chosen_expnums
 
 
-def get_exposed_std_fiber(mjd, expnums, camera, ref_column=LVM_REFERENCE_COLUMN, snr_threshold=5, display_plots=False):
+def get_exposed_std_fiber(mjd, expnums, camera, imagetyp="flat", ref_column=LVM_REFERENCE_COLUMN, snr_threshold=5, display_plots=False):
     """Returns the exposed standard fiber IDs for a given exposure sequence and camera
 
     Parameters
@@ -148,7 +148,7 @@ def get_exposed_std_fiber(mjd, expnums, camera, ref_column=LVM_REFERENCE_COLUMN,
         Dictionary with the exposed standard fiber IDs for each exposure in the sequence
     """
     log.info(f"loading detrended frames for {camera = }, exposures = {expnums}")
-    rframe_paths = sorted([path.expand("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, camera=camera, expnum=expnum, kind="d", imagetype="*")[0] for expnum in expnums])
+    rframe_paths = sorted([path.expand("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, camera=camera, expnum=expnum, kind="d", imagetype=imagetyp)[0] for expnum in expnums])
     images = [image_tasks.loadImage(rframe_path) for rframe_path in rframe_paths]
 
     # get exposed standard fibers from header if present
