@@ -195,7 +195,7 @@ def get_exposed_std_fiber(mjd, expnums, camera, imagetyp="flat", ref_column=LVM_
             snr_std = biweight_scale(snr[fiber_pos.round().astype("int")], ignore_nan=True)
             snr_std_med = biweight_location(snr[pos_std], ignore_nan=True)
             snr_std_std = biweight_scale(snr[pos_std], ignore_nan=True)
-            log.info(f"{expnum = } mean SNR = {snr_med:.2f} +/- {snr_std:.2f} (standard fibers: {snr_std_med:.2f} +/- {snr_std_std:.2f})")
+            log.debug(f"{expnum = } mean SNR = {snr_med:.2f} +/- {snr_std:.2f} (standard fibers: {snr_std_med:.2f} +/- {snr_std_std:.2f})")
 
             ax.set_title(f"{expnum = }", loc="left")
             ax.axhspan(snr_med-snr_std, snr_med+snr_std, lw=0, fc="0.7", alpha=0.5)
@@ -225,7 +225,7 @@ def get_exposed_std_fiber(mjd, expnums, camera, imagetyp="flat", ref_column=LVM_
             block_idx = int(fiber_par["blockid"][0][1:])-1
             if block_idx in block_idxs:
                 block_idxs.remove(block_idx)
-            log.info(f"exposed standard fiber in exposure {expnum}: '{exposed_std}' (blockidx = {block_idx})")
+            log.info(f"exposed standard fiber in exposure {expnum}: '{exposed_std}' ({block_idx = })")
 
             exposed_stds[expnum] = (exposed_std, [block_idx])
 
@@ -245,7 +245,7 @@ def get_exposed_std_fiber(mjd, expnums, camera, imagetyp="flat", ref_column=LVM_
         exposed_stds[expnum] = (exposed_stds[expnum][0], sorted(exposed_stds[expnum][1]+block_idxs))
 
     # list unexposed standard fibers
-    unexposed_stds = [fiber for fiber in ids_std if fiber not in exposed_stds.values()]
+    unexposed_stds = [fiber for fiber in ids_std if fiber not in list(zip(*exposed_stds.values()))[0]]
 
     return exposed_stds, unexposed_stds
 
