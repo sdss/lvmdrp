@@ -36,7 +36,7 @@ from typing import List, Tuple, Dict
 
 from lvmdrp import log, path, __version__ as drpver
 from lvmdrp.utils import metadata as md
-from lvmdrp.core.plot import create_subplots
+from lvmdrp.core.plot import create_subplots, save_fig
 from lvmdrp.core import dataproducts as dp
 from lvmdrp.core.constants import SPEC_CHANNELS, LVM_REFERENCE_COLUMN, LVM_NBLOCKS, MASTERS_DIR
 from lvmdrp.core.tracemask import TraceMask
@@ -220,7 +220,14 @@ def get_exposed_std_fiber(mjd, expnums, camera, imagetyp="flat", ref_column=LVM_
 
         exposed_stds[expnum] = (exposed_std, [block_idx])
 
-    # TODO: save figure
+    # save figure
+    save_fig(fig,
+             product_path=path.full("lvm_anc", drpver=drpver, tileid=11111,
+                                    mjd=mjd, camera=camera, expnum=f"{expnums[0]}_{expnums[-1]}",
+                                    kind="d", imagetype=imagetyp),
+             to_display=display_plots,
+             figure_path="qa",
+             label="exposed_std_fiber")
 
     # add missing blocks for first exposure
     if len(block_idxs) > 0:
