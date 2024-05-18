@@ -211,10 +211,11 @@ def get_exposed_std_fiber(mjd, expnums, camera, imagetyp="flat", ref_column=LVM_
             snr_all_dif = np.abs(np.asarray([np.nanmean(snr_fib-snr) for snr_fib in snr[pos_std]]))
             select_std = (snr_std_dif > snr_std_med+snr_threshold*snr_std_std) | (snr_all_dif >= snr_med-snr_std)
             exposed_std = ids_std[select_std]
-            if len(exposed_std) > 1:
-                exposed_std = [exposed_std[np.argmax(snr[pos_std[select_std]])]]
-                log.warning(f"more than one standard fiber selected in {expnum = }: {','.join(exposed_std)}, selecting highest SNR: '{exposed_std}'")
-            elif len(exposed_std) > 0:
+            if select_std.sum() > 1:
+                exposed_std_ = exposed_std[np.argmax(snr[pos_std[select_std]])]
+                log.warning(f"more than one standard fiber selected in {expnum = }: {','.join(exposed_std)}, selecting highest SNR: '{exposed_std_}'")
+                exposed_std = exposed_std_
+            elif select_std.sum() > 0:
                 exposed_std = exposed_std[0]
             else:
                 exposed_std = None
