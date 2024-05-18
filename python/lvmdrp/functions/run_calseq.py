@@ -188,11 +188,11 @@ def get_exposed_std_fiber(mjd, expnums, camera, ref_column=LVM_REFERENCE_COLUMN,
         expnum = image._header["EXPOSURE"]
         column = image.getSlice(ref_column, axis="Y")
         snr = (column._data/column._error)
-        snr_med = biweight_location(snr[fiber_pos.round().astype("int")])
-        snr_std = biweight_scale(snr[fiber_pos.round().astype("int")])
-        snr_std_med = biweight_location(snr[pos_std])
-        snr_std_std = biweight_scale(snr[pos_std])
-        log.info(f"{expnum = } median SNR = {snr_med:.2f} +/- {snr_std:.2f} (standard fibers: {snr_std_med:.2f} +/- {snr_std_std:.2f})")
+        snr_med = biweight_location(snr[fiber_pos.round().astype("int")], ignore_nan=True)
+        snr_std = biweight_scale(snr[fiber_pos.round().astype("int")], ignore_nan=True)
+        snr_std_med = biweight_location(snr[pos_std], ignore_nan=True)
+        snr_std_std = biweight_scale(snr[pos_std], ignore_nan=True)
+        log.info(f"{expnum = } mean SNR = {snr_med:.2f} +/- {snr_std:.2f} (standard fibers: {snr_std_med:.2f} +/- {snr_std_std:.2f})")
 
         ax.set_title(f"{expnum = }", loc="left")
         ax.axhspan(snr_med-snr_std, snr_med+snr_std, lw=0, fc="0.7", alpha=0.5)
