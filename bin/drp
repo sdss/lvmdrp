@@ -5,6 +5,7 @@
 import os
 import pathlib
 import shutil
+from itertools import groupby
 from typing import Tuple
 
 import click
@@ -273,16 +274,22 @@ cli.add_command(long_term_calibrations)
 @click.option('-m', '--mjd', type=int, help='the MJD to reduce')
 @click.option('-e', '--expnums', type=IntListType(), help='a list of exposure numbers to reduce')
 @click.option('-r', '--ref-expnums', type=IntListType(), help='a list of reference exposure numbers')
+@click.option('-c', '--custom-shift', type=(str, int, int), multiple=True, help='3-tuple of spectrograph, exposure and pixel row to shift from')
 @click.option('-w', '--wave-widths', type=int, default=5000, help='the width of the wavelength range in angstroms')
 @click.option('-y', '--y-widths', type=int, default=20, help='the width of the cross-dispersion aperture in pixels')
 @click.option('-f', '--flat-spikes', type=int, default=21, help='the window within which to filter spikes')
 @click.option('-t', '--threshold-spikes', type=float, default=0.6, help='the threshold for the spikes filtering')
 @click.option('-i', '--interactive', is_flag=True, default=False, help='flag to run in interactive mode when QC and DRP discrepancies are found')
-def fix_pixel_shifts(mjd, expnums, ref_expnums, wave_widths, y_widths, flat_spikes, threshold_spikes, interactive):
+def fix_pixel_shifts(mjd, expnums, ref_expnums, custom_shift, wave_widths, y_widths, flat_spikes, threshold_spikes, interactive):
     """ Fix the electronic pixel shifts in the raw data """
+    custom_shifts = {}
+    for key, vals in groupby(custom_shift, key=lambda t: t[:2]):
+        custom_shifts[key] = list(v[-1] for v in vals)
+
     fix_raw_pixel_shifts(mjd=mjd, expnums=expnums, ref_expnums=ref_expnums,
                          wave_widths=wave_widths, y_widths=y_widths,
-                         flat_spikes=flat_spikes, threshold_spikes=threshold_spikes,
+                         shift_rows=custom_shifts, flat_spikes=flat_spikes,
+                         threshold_spikes=threshold_spikes,
                          interactive=interactive, skip_done=True)
 
 # register fix pixel shifts command
