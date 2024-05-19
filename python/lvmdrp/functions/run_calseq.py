@@ -326,8 +326,12 @@ def _move_master_calibrations(mjd, kind=None):
             camera = os.path.basename(src_path).split(".")[0].split("-")[-1]
             dst_path = path.full("lvm_calib", mjd=mjd, kind=kind, camera=camera)
             if os.path.isfile(src_path):
-                os.makedirs(os.path.dirname(dst_path), exist_ok=True)
-                copy2(src_path, dst_path)
+                try:
+                    os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+                    copy2(src_path, dst_path)
+                    log.info(f"copied {src_path} into {dst_path}")
+                except PermissionError as e:
+                    log.error(f"error while copying {src_path}: {e}")
 
 
 def _clean_ancillary(mjd, expnums=None, imagetyp="all"):
