@@ -178,9 +178,10 @@ def get_exposed_std_fiber(mjd, expnums, camera, imagetyp="flat", ref_column=LVM_
         idx_std = np.arange(pos_std.size)
 
         # calculate SNR along colummn
+        nrows = max(len(images)//3, 1)
         fig, axs = create_subplots(to_display=display_plots,
-                                nrows=len(images)//3, ncols=3,
-                                figsize=(15,5*len(images)//3),
+                                nrows=nrows, ncols=3,
+                                figsize=(15,5*nrows),
                                 sharex=True, sharey=True,
                                 layout="constrained")
         fig.supxlabel("standard fiber ID")
@@ -1416,7 +1417,7 @@ def reduce_nightly_sequence(mjd, use_fiducial_cals=True, reject_cr=True, skip_do
     cal_imagetyps = {"bias", "flat", "arc"}
     log.info(f"going to reduce nightly calibration frames: {cal_imagetyps}")
 
-    frames = md.md.get_sequence_metadata(mjd)
+    frames = md.get_sequence_metadata(mjd)
     frames.query("imagetyp in @cal_imagetyps", inplace=True)
     if len(frames) == 0:
         raise ValueError(f"no frames found for MJD = {mjd}")
