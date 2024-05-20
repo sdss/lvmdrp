@@ -241,13 +241,23 @@ cli.add_command(twilight_reduction)
 @cli.command('nightly-cals', short_help='Run the nightly calibration sequence')
 @click.option('-m', '--mjd', type=int, required=True, help='the MJD to reduce')
 @click.option('-r', '--skip-cr', is_flag=True, default=False, help='flag to skip cosmic rays rejection')
-@click.option('-f', '--use-fiducial-cals', is_flag=True, default=False, help='flag to use fiducial calibration frames')
+@click.option('-n', '--use-nightly-cals', is_flag=True, default=False, help='flag to use nightly calibrations instead of fiducial ones')
+@click.option('-b', '--skip-bias', is_flag=True, default=False, help='skip bias calibrations')
+@click.option('-t', '--skip-trace', is_flag=True, default=False, help='skip fiber traces')
+@click.option('-w', '--skip-wavelength', is_flag=True, default=False, help='skip wavelength calibrations')
+@click.option('-f', '--skip-fiberflat', is_flag=True, default=False, help='skip fiberflats')
 @click.option('-s', '--skip-done', is_flag=True, default=False, help='flag to skip reduction steps that have already been done')
 @click.option('-a', '--keep-ancillary', is_flag=True, default=False, help='flag to keep ancillary files')
-def nightly_calibrations(mjd, skip_cr, use_fiducial_cals, skip_done, keep_ancillary):
+def nightly_calibrations(mjd, skip_cr, use_nightly_cals,
+                         skip_bias, skip_trace, skip_wavelength,
+                         skip_fiberflat, skip_done, keep_ancillary):
     """ Run the nightly calibration sequence """
+
+    only_cals = {flavor for flavor, skip in zip(["bias", "trace", "wave", "fiberflat"],
+                                                [skip_bias, skip_trace, skip_wavelength, skip_fiberflat]) if not skip}
     reduce_nightly_sequence(mjd=mjd, reject_cr=not skip_cr,
-                            use_fiducial_cals=use_fiducial_cals,
+                            use_fiducial_cals=not use_nightly_cals,
+                            only_cals=only_cals,
                             skip_done=skip_done, keep_ancillary=keep_ancillary)
 
 # register nightly calibration sequence
@@ -257,13 +267,23 @@ cli.add_command(nightly_calibrations)
 @cli.command('long-term-cals', short_help='Run the long-term calibration sequence')
 @click.option('-m', '--mjd', type=int, required=True, help='the MJD to reduce')
 @click.option('-r', '--skip-cr', is_flag=True, default=False, help='flag to skip cosmic rays rejection')
-@click.option('-f', '--use-fiducial-cals', is_flag=True, default=False, help='flag to use fiducial calibration frames')
+@click.option('-n', '--use-nightly-cals', is_flag=True, default=False, help='flag to use nightly calibrations instead of fiducial ones')
+@click.option('-b', '--skip-bias', is_flag=True, default=False, help='skip bias calibrations')
+@click.option('-t', '--skip-trace', is_flag=True, default=False, help='skip fiber traces')
+@click.option('-w', '--skip-wavelength', is_flag=True, default=False, help='skip wavelength calibrations')
+@click.option('-f', '--skip-fiberflat', is_flag=True, default=False, help='skip fiberflats')
 @click.option('-s', '--skip-done', is_flag=True, default=False, help='flag to skip reduction steps that have already been done')
 @click.option('-a', '--keep-ancillary', is_flag=True, default=False, help='flag to keep ancillary files')
-def long_term_calibrations(mjd, skip_cr, use_fiducial_cals, skip_done, keep_ancillary):
+def long_term_calibrations(mjd, skip_cr, use_nightly_cals,
+                           skip_bias, skip_trace, skip_wavelength,
+                           skip_fiberflat, skip_done, keep_ancillary):
     """ Run the long-term calibration sequence """
+
+    only_cals = {flavor for flavor, skip in zip(["bias", "trace", "wave", "fiberflat"],
+                                                [skip_bias, skip_trace, skip_wavelength, skip_fiberflat]) if not skip}
     reduce_longterm_sequence(mjd=mjd, reject_cr=not skip_cr,
-                             use_fiducial_cals=use_fiducial_cals,
+                             use_fiducial_cals=not use_nightly_cals,
+                             only_cals=only_cals,
                              skip_done=skip_done, keep_ancillary=keep_ancillary)
 
 # register long-term calibration sequence
