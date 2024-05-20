@@ -549,8 +549,12 @@ def fix_raw_pixel_shifts(mjd, expnums=None, ref_expnums=None, use_fiducial_cals=
         raise ValueError("shift_rows must be a dictionary with keys (spec, expnum) and values a list of rows to shift")
 
     # get target frames & reference frames metadata
-    frames, _ = md.get_sequence_metadata(mjd, expnums=expnums)
-    ref_frames, _ = md.get_sequence_metadata(mjd, expnums=ref_expnums)
+    frames = md.get_frames_metadata(mjd, expnums=expnums)
+    if expnums is not None:
+        frames.query("expnum in @expnums", inplace=True)
+    ref_frames = md.get_frames_metadata(mjd, expnums=ref_expnums)
+    if ref_expnums is not None:
+        frames.query("expnum in @ref_expnums", inplace=True)
 
     if use_fiducial_cals:
         masters_mjd = get_master_mjd(mjd)
@@ -653,7 +657,7 @@ def create_detrending_frames(mjd, use_fiducial_cals=True, expnums=None, exptime=
     keep_ancillary : bool
         Keep ancillary files, by default False
     """
-    frames, _ = md.get_sequence_metadata(mjd, expnums=expnums, exptime=exptime)
+    frames, _ = md.get_sequence_metadata(mjd, expnums=expnums, exptime=exptime, only_cals={"bias", "dark", "pixflat"})
 
     # filter by target image types
     if kind == "all":
@@ -739,7 +743,7 @@ def create_pixelmasks(mjd, use_fiducial_cals=True, dark_expnums=None, pixflat_ex
         expnums = np.concatenate([dark_expnums, pixflat_expnums])
     else:
         expnums = None
-    frames, _ = md.get_sequence_metadata(mjd, expnums=expnums)
+    frames, _ = md.get_sequence_metadata(mjd, expnums=expnums, for_cals={"dark", "pixflat"})
 
     darks = frames.query("imagetyp == 'dark' and exptime == @short_exptime or exptime == @long_exptime", inplace=True)
     pixflats = frames.query("imagetyp == 'dark' or imagetyp == 'pixelflat' and exptime == @pixflat_exptime", inplace=True)
@@ -820,7 +824,7 @@ def create_nighly_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnums
         expnums = np.concatenate([expnums_ldls, expnums_qrtz])
     else:
         expnums = None
-    frames, _ = md.get_sequence_metadata(mjd, expnums=expnums)
+    frames, _ = md.get_sequence_metadata(mjd, expnums=expnums, for_cals={"flat"})
 
     # run 2D reduction on flats: preprocessing, detrending
     reduce_2d(mjd, use_fiducial_cals=use_fiducial_cals, expnums=expnums, reject_cr=False, skip_done=skip_done)
@@ -943,7 +947,7 @@ def create_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnums_qrtz=N
         expnums = np.concatenate([expnums_ldls, expnums_qrtz])
     else:
         expnums = None
-    frames, _ = md.get_sequence_metadata(mjd, expnums=expnums)
+    frames, _ = md.get_sequence_metadata(mjd, expnums=expnums, for_cals={"trace"})
 
     # run 2D reduction on flats: preprocessing, detrending
     reduce_2d(mjd, use_fiducial_cals=use_fiducial_cals, expnums=expnums, reject_cr=False, skip_done=skip_done)
@@ -1124,9 +1128,7 @@ def create_fiberflats(mjd: int, use_fiducial_cals: bool = True, expnums: List[in
         Dictionary with the master twilight flats for each channel
     """
     # get metadata
-    flats, _ = md.get_sequence_metadata(mjd, expnums=expnums)
-    if expnums is None:
-        flats.query("imagetyp == 'flat' and not (ldls|quartz)", inplace=True)
+    flats, _ = md.get_sequence_metadata(mjd, expnums=expnums, for_cals={"fiberflat"})
 
     # 2D reduction of twilight sequence
     reduce_2d(mjd=mjd, use_fiducial_cals=use_fiducial_cals, expnums=flats.expnum.unique(), reject_cr=False, skip_done=skip_done)
@@ -1309,7 +1311,7 @@ def create_wavelengths(mjd, use_fiducial_cals=True, expnums=None, skip_done=True
     skip_done : bool
         Skip pipeline steps that have already been done
     """
-    frames, _ = md.get_sequence_metadata(mjd, expnums=expnums)
+    frames, _ = md.get_sequence_metadata(mjd, expnums=expnums, for_cals={"wave"})
 
     if use_fiducial_cals:
         masters_mjd = get_master_mjd(mjd)
@@ -1409,7 +1411,7 @@ def reduce_nightly_sequence(mjd, use_fiducial_cals=True, reject_cr=True, only_ca
     cal_types = {"bias", "trace", "wave", "fiberflat"}
     if not set(only_cals).issubset(cal_types):
         raise ValueError(f"some chosen image types in 'only_cals' are not valid: {only_cals.difference(cal_types)}")
-    log.info(f"going to produce long-term calibrations: {only_cals}")
+    log.info(f"going to produce nightly calibrations: {only_cals}")
 
     frames, found_cals = md.get_sequence_metadata(mjd, for_cals=only_cals)
 
