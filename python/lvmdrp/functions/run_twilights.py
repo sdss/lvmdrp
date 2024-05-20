@@ -164,41 +164,6 @@ def remove_field_gradient(in_hflat, out_gflat, wrange, deg=1, display_plots=Fals
     new_fflat[0].data[telescope == "Spec"] = rss_s
     new_fflat.writeto(out_gflat, overwrite=True)
 
-def get_sequence_metadata(expnums: List[int]) -> pd.DataFrame:
-    """Returns metadata for a sequence of exposures
-
-    Parameters
-    ----------
-    expnums : list
-        List of exposure numbers
-
-    Returns
-    -------
-    metadata : pd.DataFrame
-        DataFrame with metadata for the sequence of exposures
-    """
-    paths = []
-    for expnum in expnums:
-        paths.extend(path.expand("lvm_raw", mjd="*", hemi="s", camspec="*", expnum=expnum))
-    paths = sorted(paths)
-
-    mjds = []
-    for p in paths:
-        mjds.append(int(path.extract("lvm_raw", p)["mjd"]))
-    mjds = np.unique(mjds)
-
-    metadata = []
-    for mjd in mjds:
-        metadata.append(md.get_frames_metadata(mjd=mjd))
-
-    if len(metadata) == 0:
-        return pd.DataFrame()
-
-    metadata = pd.concat(metadata, ignore_index=True)
-    metadata.query("expnum in @expnums", inplace=True)
-    metadata.sort_values(["camera", "expnum"], inplace=True)
-    return metadata
-
 def fit_continuum(spectrum: Spectrum1D, mask_bands: List[Tuple[float,float]],
                   median_box: int, niter: int, threshold: Tuple[float,float]|float, **kwargs):
     """Fit a continuum to a spectrum using a spline interpolation

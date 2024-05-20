@@ -6,7 +6,7 @@ import pytest
 from lvmdrp.core.spectrum1d import Spectrum1D
 from lvmdrp.core.rss import RSS
 
-from lvmdrp.functions.run_twilights import get_sequence_metadata, fit_continuum
+from lvmdrp.functions.run_twilights import fit_continuum
 
 
 def create_fake_twilight(path, tileid=11111, mjd=61234, expnum=6817, cameras=None, imagetyp=None):
@@ -70,26 +70,6 @@ def make_fake_rss(tileid=11111, mjd=61234, expnum=6817, cameras=None, imagetyp=N
         rss = RSS(wave=w, data=f, error=np.sqrt(f), mask=m, header=x.header)
         out.append(rss)
     return out
-
-
-def test_get_sequence_metadata(make_twilight_sequence):
-    """ test we can get the sequence metadata """
-    meta = get_sequence_metadata(expnums=range(7700, 7712))
-    assert len(meta) == 12*9
-    assert np.isin(np.arange(7700, 7712), meta['expnum'].unique()).all()
-    assert "s" in meta["hemi"].unique()
-    assert 61235 in meta['mjd'].unique()
-    assert "0011XX" in meta["tilegrp"].unique()
-    assert 11111 in meta['tileid'].unique()
-    assert set(meta['camera']) == {'b1', 'b2', 'b3', 'r1', 'r2', 'r3', 'z1', 'z2', 'z3'}
-    assert set(meta['imagetyp']) == {'flat'}
-    assert set(meta['exptime']) == {900.0}
-
-
-def test_get_sequence_metadata_no_files():
-    """ test we can get the sequence metadata """
-    meta = get_sequence_metadata(expnums=range(7712, 7712+12))
-    assert len(meta) == 0
 
 
 def test_fit_continuum():
