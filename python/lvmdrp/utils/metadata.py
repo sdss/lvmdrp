@@ -988,22 +988,23 @@ def get_sequence_metadata(mjd, expnums=None, exptime=None, for_cals={"bias", "tr
     frames.loc[domeflat_selection, "imagetyp"] = "flat"
     frames.loc[arc_selection, "imagetyp"] = "arc"
 
+    found_cals = {'bias', 'trace', 'wave', 'fiberflat'}
     if bias_selection.sum() == 0 and "bias" in for_cals:
         log.error("no bias exposures found")
-        for_cals.remove("bias")
+        found_cals.remove("bias")
     elif domeflat_selection.sum() == 0 and "trace" in for_cals:
         log.error("no dome flat exposures found")
-        for_cals.remove("trace")
+        found_cals.remove("trace")
     elif arc_selection.sum() == 0 and "wave" in for_cals:
         log.error("no arc exposures found")
-        for_cals.remove("wave")
+        found_cals.remove("wave")
     elif twilight_selection.sum() == 0 and "fiberflat" in for_cals:
         log.error("no twilight exposures found")
-        for_cals.remove("fiberflat")
+        found_cals.remove("fiberflat")
 
     frames.sort_values(["expnum", "camera"], inplace=True)
 
-    return frames, for_cals
+    return frames, found_cals
 
 
 # TODO: implement matching of analogs and calibration masters
