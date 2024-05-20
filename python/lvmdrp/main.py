@@ -33,7 +33,7 @@ from lvmdrp.functions.rssMethod import (determine_wavelength_solution, create_pi
                                         resample_wavelength, shift_wave_skylines, join_spec_channels, stack_spectrographs)
 from lvmdrp.functions.skyMethod import interpolate_sky, combine_skies, quick_sky_subtraction
 from lvmdrp.functions.fluxCalMethod import fluxcal_Gaia, apply_fluxcal
-from lvmdrp.utils.metadata import (get_frames_metadata, get_master_metadata, get_sequence_metadata, extract_metadata,
+from lvmdrp.utils.metadata import (get_frames_metadata, get_master_metadata, extract_metadata,
                                    get_analog_groups, match_master_metadata, create_master_path,
                                    update_summary_file)
 from lvmdrp.utils.convert import tileid_grp

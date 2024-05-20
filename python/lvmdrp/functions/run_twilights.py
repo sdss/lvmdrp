@@ -12,13 +12,11 @@ from typing import Tuple, List
 from copy import deepcopy as copy
 import numpy as np
 import bottleneck as bn
-import pandas as pd
 from astropy.table import Table
 from scipy.ndimage import median_filter
 from scipy import interpolate
 
 from lvmdrp import path, log, __version__ as drpver
-from lvmdrp.utils import metadata as md
 from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.core.spectrum1d import Spectrum1D
 from lvmdrp.core.rss import RSS
