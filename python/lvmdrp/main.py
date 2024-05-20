@@ -1523,7 +1523,12 @@ def reduce_2d(mjd, use_fiducial_cals=True, expnums=None, exptime=None,
         Keep ancillary files, by default False
     """
 
-    frames, _ = get_sequence_metadata(mjd, expnums=expnums, exptime=exptime)
+    frames = get_frames_metadata(mjd)
+    if expnums is not None:
+        frames.query("expnum in @expnums", inplace=True)
+    if exptime is not None:
+        frames.query("exptime == @exptime", inplace=True)
+
     masters_mjd = get_master_mjd(mjd)
     masters_path = os.path.join(MASTERS_DIR, str(masters_mjd))
     pixelmasks_path = os.path.join(MASTERS_DIR, "pixelmasks")
