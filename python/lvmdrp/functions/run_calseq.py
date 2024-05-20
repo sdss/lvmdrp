@@ -826,21 +826,25 @@ def create_nighly_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnums
     reduce_2d(mjd, use_fiducial_cals=use_fiducial_cals, expnums=expnums, reject_cr=False, skip_done=skip_done)
 
     for channel, lamp in MASTER_CON_LAMPS.items():
-        if lamp == "ldls":
-            counts_threshold = 5000
-        elif lamp == "quartz":
-            counts_threshold = 10000
+        counts_threshold = 5000 if lamp == "ldls" else 10000
 
-        cameras = [f"{channel}{spec}" for spec in range(1, 4)]
-        flats = frames.loc[(frames.ldls)&(frames.camera.isin(cameras))]
-        for _, flat in flats.iterrows():
-            camera = flat.camera
+        # select dome flats accoding to current channel-lamp combination
+        flats_analogs = frames.loc[frames[lamp]].groupby("camera")
+        for camera in flats_analogs.groups:
+            flats = flats_analogs.get_group(camera)
+
+            # combine dome flats
+            expnum_str = f"{flats.expnum.min():>08}-{flats.expnum.max():>08}"
+            dflat_paths = [path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", **flat) for flat in flats]
+            cflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="c", imagetype="flat", camera=camera, expnum=expnum_str)
+            os.makedirs(os.path.dirname(cflat_path), exist_ok=True)
+            image_tasks.create_master_frame(in_images=dflat_paths, out_image=cflat_path)
+
             # define paths
-            dflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", imagetype="flat", camera=camera, expnum=flat["expnum"])
-            lflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="l", imagetype="flat", camera=camera, expnum=flat["expnum"])
-            dstray_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", imagetype="stray", camera=camera, expnum=flat["expnum"])
-            dmodel_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", imagetype="model", camera=camera, expnum=flat["expnum"])
-            dratio_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", imagetype="ratio", camera=camera, expnum=flat["expnum"])
+            lflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="l", imagetype="flat", camera=camera, expnum=expnum_str)
+            dstray_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", imagetype="stray", camera=camera, expnum=expnum_str)
+            dmodel_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", imagetype="model", camera=camera, expnum=expnum_str)
+            dratio_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", imagetype="ratio", camera=camera, expnum=expnum_str)
 
             cent_guess_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mcent_guess", camera=camera)
             flux_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mamps", camera=camera)
@@ -852,7 +856,7 @@ def create_nighly_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnums
                 log.info(f"skipping {cent_guess_path}, file already exist")
             else:
                 log.info(f"going to trace centroids fibers in {camera}")
-                centroids, img = image_tasks.trace_centroids(in_image=dflat_path, out_trace_cent=cent_guess_path,
+                centroids, img = image_tasks.trace_centroids(in_image=cflat_path, out_trace_cent=cent_guess_path,
                                                              correct_ref=True, median_box=(1,10), coadd=20, counts_threshold=counts_threshold,
                                                              max_diff=1.5, guess_fwhm=2.5, method="gauss", ncolumns=140,
                                                              fit_poly=fit_poly, poly_deg=poly_deg_cent,
@@ -862,7 +866,7 @@ def create_nighly_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnums
             if skip_done and os.path.isfile(lflat_path):
                 log.info(f"skipping {lflat_path}, file already exist")
             else:
-                image_tasks.subtract_straylight(in_image=dflat_path, out_image=lflat_path, out_stray=dstray_path,
+                image_tasks.subtract_straylight(in_image=cflat_path, out_image=lflat_path, out_stray=dstray_path,
                                                 in_cent_trace=cent_guess_path, select_nrows=(5,5), use_weights=True,
                                                 aperture=15, smoothing=400, median_box=101, gaussian_sigma=20.0)
 
