@@ -29,7 +29,7 @@ import os
 import numpy as np
 from glob import glob
 from copy import deepcopy as copy
-from shutil import copy2
+from shutil import copy2, rmtree
 from itertools import product, groupby
 from astropy.stats import biweight_location, biweight_scale
 from typing import List, Tuple, Dict
@@ -335,12 +335,12 @@ def _move_master_calibrations(mjd, kind=None):
                     log.error(f"error while copying {src_path}: {e}")
 
 
-def _clean_ancillary(mjd, expnums=None, imagetyp="all"):
+def _clean_ancillary(mjd, expnums=None, flavors="all"):
     """Clean ancillary files
 
     Given a set of MJDs and (optionally) exposure numbers, clean the ancillary
-    files for the given imagetyp of frames. This routine will remove the ancillary
-    files for the given imagetyp of frames in the corresponding calibration
+    files for the given flavor of frames. This routine will remove the ancillary
+    files for the given flavor of frames in the corresponding calibration
     directory in the `masters_mjd` or by default in the smallest MJD in `mjds`.
 
     Parameters:
@@ -349,39 +349,26 @@ def _clean_ancillary(mjd, expnums=None, imagetyp="all"):
         MJD to clean
     expnums : list
         List of exposure numbers to clean
-    imagetyp : str
-        type of frame to remove, defaults to "all"
+    flavors : list, tuple, set or str
+        type of, defaults to "all"
     """
-
-    # get frames metadata
-    frames = md.get_sequence_metadata(mjd, expnums=expnums)
-
     # filter by target image types
-    ALL = {"bias", "dark", "flat", "arc", "object", "cent", "amp", "width", "stray"}
-    if imagetyp in ALL:
-        frames.query("imagetyp == @imagetyp", inplace=True)
-    elif imagetyp != "all":
-        raise ValueError(f"Invalid imagetyp: '{imagetyp}'. Must be one of {ALL} or 'all'")
+    all_flavors = {"bias", "dark", "flat", "arc", "cent", "amp", "width", "stray"}
+    if not set(flavors).issubset(flavors):
+        raise ValueError(f"Invalid flavor: '{flavors}'. Must be one of {all_flavors} or 'all'")
 
-    if imagetyp == "all":
-        ancillary_dir = os.path.join(os.getenv["LVM_SPECTRO_REDUX"], drpver, str(mjd), "ancillary")
-        os.rmdir(ancillary_dir)
+    ancillary_dir = os.path.join(os.getenv["LVM_SPECTRO_REDUX"], drpver, str(mjd), "ancillary")
+    if flavors == "all":
+        rmtree(ancillary_dir)
         return
 
-    ancillary_dirs = []
-    for frame in frames.to_dict("records"):
+    for flavor in flavors:
         # remove ancillary files
-        ancillary_paths = path.expand("lvm_anc", drpver=drpver, kind='*', imagetype=frame["imagetyp"], **frame)
+        ancillary_paths = path.expand("lvm_anc", drpver=drpver, mjd=mjd, tileid=11111, kind='*', imagetype=flavor, camera="*", expnum="*")
         [os.remove(ancillary_path) for ancillary_path in ancillary_paths]
-        # get ancillary directories
-        ancillary_dirs.extend([os.path.dirname(ancillary_path) for ancillary_path in ancillary_paths])
 
-    ancillary_dirs = set(ancillary_dirs)
-    for ancillary_dir in ancillary_dirs:
-        # check if there are any files left in the ancillary directory
-        # if not, remove the directory
-        if not os.listdir(ancillary_dir):
-            os.rmdir(ancillary_dir)
+    if not os.listdir(ancillary_dir):
+        os.rmdir(ancillary_dir)
 
 
 def _get_ring_expnums(expnums_ldls, expnums_qrtz, ring_size=12, sort_expnums=False):
