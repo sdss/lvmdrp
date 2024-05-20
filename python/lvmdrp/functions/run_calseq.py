@@ -833,13 +833,13 @@ def create_nighly_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnums
         counts_threshold = 5000 if lamp == "ldls" else 10000
 
         # select dome flats accoding to current channel-lamp combination
-        flats_analogs = frames.loc[frames[lamp]].groupby("camera")
+        flats_analogs = frames.loc[frames[lamp]].groupby(["camera",])
         for camera in flats_analogs.groups:
-            flats = flats_analogs.get_group(camera)
+            flats = flats_analogs.get_group((camera,))
 
             # combine dome flats
             expnum_str = f"{flats.expnum.min():>08}-{flats.expnum.max():>08}"
-            dflat_paths = [path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", **flat) for flat in flats]
+            dflat_paths = [path.full("lvm_anc", drpver=drpver, kind="d", imagetype="flat", **flat) for flat in flats.to_dict("records")]
             cflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="c", imagetype="flat", camera=camera, expnum=expnum_str)
             os.makedirs(os.path.dirname(cflat_path), exist_ok=True)
             image_tasks.create_master_frame(in_images=dflat_paths, out_image=cflat_path)
