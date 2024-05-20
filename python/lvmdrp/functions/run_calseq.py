@@ -833,7 +833,7 @@ def create_nighly_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnums
         counts_threshold = 5000 if lamp == "ldls" else 10000
 
         # select dome flats accoding to current channel-lamp combination
-        flats_analogs = frames.loc[frames[lamp]].groupby(["camera",])
+        flats_analogs = frames.loc[(frames[lamp])&(frames["camera"].str.startswith(channel))].groupby(["camera",])
         for camera in flats_analogs.groups:
             flats = flats_analogs.get_group((camera,))
 
