@@ -937,7 +937,7 @@ def get_metadata(
     return metadata
 
 
-def get_sequence_metadata(mjd, expnums=None, exptime=None, extract_metadata=False):
+def get_sequence_metadata(mjd, expnums=None, exptime=None, for_cals={"bias", "trace", "wave", "fiberflat"}, extract_metadata=False):
     """Get frames metadata for a given sequence
 
     Given a set of MJDs and (optionally) exposure numbers, get the frames
@@ -952,6 +952,8 @@ def get_sequence_metadata(mjd, expnums=None, exptime=None, extract_metadata=Fals
         List of exposure numbers to reduce
     exptime : int
         Filter frames metadata by exposure
+    for_cals : list, tuple or set, optional
+        Only return frames meant to produce given calibrations, {'bias', 'trace', 'wave', 'fiberflat'}
     extract_metadata : bool
         Whether to extract metadata or not, by default False
 
@@ -964,6 +966,10 @@ def get_sequence_metadata(mjd, expnums=None, exptime=None, extract_metadata=Fals
     """
     # get frames metadata
     frames = get_frames_metadata(mjd=mjd, overwrite=extract_metadata)
+    frames.query("imagetyp in ['bias', 'flat', 'arc']", inplace=True)
+    if len(frames) == 0:
+        log.error(f"no calibration frames found for MJD = {mjd}")
+        return frames, {}
 
     # filter by given expnums
     if expnums is not None:
@@ -974,6 +980,7 @@ def get_sequence_metadata(mjd, expnums=None, exptime=None, extract_metadata=Fals
         frames.query("exptime == @exptime", inplace=True)
 
     # simple fix of imagetyp, some images have the wrong type in the header
+    bias_selection = (frames.imagetyp == "bias")
     twilight_selection = (frames.imagetyp == "flat") & ~(frames.ldls|frames.quartz)
     domeflat_selection = (frames.ldls|frames.quartz) & ~(frames.neon|frames.hgne|frames.argon|frames.xenon)
     arc_selection = (frames.neon|frames.hgne|frames.argon|frames.xenon) & ~(frames.ldls|frames.quartz)
@@ -981,9 +988,22 @@ def get_sequence_metadata(mjd, expnums=None, exptime=None, extract_metadata=Fals
     frames.loc[domeflat_selection, "imagetyp"] = "flat"
     frames.loc[arc_selection, "imagetyp"] = "arc"
 
+    if bias_selection.sum() == 0 and "bias" in for_cals:
+        log.error("no bias exposures found")
+        for_cals.remove("bias")
+    elif domeflat_selection.sum() == 0 and "trace" in for_cals:
+        log.error("no dome flat exposures found")
+        for_cals.remove("trace")
+    elif arc_selection.sum() == 0 and "wave" in for_cals:
+        log.error("no arc exposures found")
+        for_cals.remove("wave")
+    elif twilight_selection.sum() == 0 and "fiberflat" in for_cals:
+        log.error("no twilight exposures found")
+        for_cals.remove("fiberflat")
+
     frames.sort_values(["expnum", "camera"], inplace=True)
 
-    return frames
+    return frames, for_cals
 
 
 # TODO: implement matching of analogs and calibration masters
