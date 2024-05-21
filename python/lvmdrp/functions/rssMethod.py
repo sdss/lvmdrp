@@ -40,7 +40,7 @@ description = "Provides Methods to process Row Stacked Spectra (RSS) files"
 __all__ = [
     "determine_wavelength_solution",
     "create_pixel_table",
-    "combineRSS_drp",
+    "combine_rsss",
     "checkPixTable_drp",
     "correctPixTable_drp",
     "resample_wavelength",

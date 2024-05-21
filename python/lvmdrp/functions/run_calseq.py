@@ -1089,7 +1089,7 @@ def create_pixelmasks(mjd, use_fiducial_cals=True, dark_expnums=None, pixflat_ex
         _clean_ancillary(mjd=mjd, expnums=expnums)
 
 
-def create_nighly_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnums_qrtz=None,
+def create_nightly_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnums_qrtz=None,
                         fit_poly=True, poly_deg_amp=5, poly_deg_cent=4, poly_deg_width=5,
                         skip_done=True):
     if expnums_ldls is not None and expnums_qrtz is not None:
@@ -1699,7 +1699,7 @@ def reduce_nightly_sequence(mjd, use_fiducial_cals=True, reject_cr=True, only_ca
         log.info(f"choosing {len(dome_flats)} dome flat exposures: {dome_flat_expnums}")
         expnums_ldls = np.sort(dome_flats.query("ldls").expnum.unique())
         expnums_qrtz = np.sort(dome_flats.query("quartz").expnum.unique())
-        create_nighly_traces(mjd=mjd, expnums_ldls=expnums_ldls, expnums_qrtz=expnums_qrtz, skip_done=skip_done)
+        create_nightly_traces(mjd=mjd, expnums_ldls=expnums_ldls, expnums_qrtz=expnums_qrtz, skip_done=skip_done)
         # create_nightly_fiberflats(mjd=mjd, expnums_ldls=expnums_ldls, expnums_qrtz=expnums_qrtz, skip_done=skip_done)
     else:
         log.log(20 if "trace" in found_cals else 40, "skipping production of fiber traces")
