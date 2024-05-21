@@ -358,7 +358,7 @@ def _clean_ancillary(mjd, expnums=None, flavors="all"):
     if not set(flavors).issubset(flavors):
         raise ValueError(f"Invalid flavor: '{flavors}'. Must be one of {all_flavors} or 'all'")
 
-    ancillary_dir = os.path.join(os.getenv["LVM_SPECTRO_REDUX"], drpver, str(mjd), "ancillary")
+    ancillary_dir = os.path.join(os.getenv("LVM_SPECTRO_REDUX"), drpver, str(mjd), "ancillary")
     if flavors == "all":
         rmtree(ancillary_dir)
         return
@@ -442,6 +442,127 @@ def _get_ring_expnums(expnums_ldls, expnums_qrtz, ring_size=12, sort_expnums=Fal
 
 def _create_wavelengths_60177(use_fiducial_cals=True, skip_done=True):
     """Reduce arc sequence for MJD = 60177"""
+    pixwav = {"z1": np.asarray([
+    [88.57, 7488.8712, 1],
+    [111.79, 7503.8690, 1],
+    [128.59, 7514.6520, 1],
+    [161.43, 7535.7741, 0],
+    [237.58, 7584.6800, 1],
+    [454.78, 7724.6233, 0],
+    [840.33, 7967.3400, 1],
+    [902.66, 8006.1570, 0],
+    [916.05, 8014.7860, 0],
+    [1109.70, 8136.4054, 1],
+    [1222.22, 8206.3400, 0],
+    [1262.80, 8231.6350, 0],
+    [1372.72, 8300.3258, 0],
+    [1478.12, 8365.7466, 1],
+    [1497.42, 8377.6080, 0],
+    [1573.44, 8424.6400, 1],
+    [1688.33, 8495.3598, 0],
+    [1768.50, 8544.6958, 1],
+    [1844.78, 8591.2584, 0],
+    [1915.81, 8634.6470, 0],
+    [2029.76, 8704.1116, 0],
+    [2087.89, 8739.3900, 0],
+    [2220.99, 8819.4110, 0],
+    [2369.50, 8908.7300, 1],
+    [2387.51, 8919.5006, 1],
+    [2406.58, 8930.8300, 1],
+    [2600.14, 9045.4500, 0],
+    [2775.63, 9148.6716, 1],
+    [2866.74, 9201.7591, 0],
+    [2994.24, 9275.5196, 1],
+    [3164.63, 9373.3078, 0],
+    [3256.41, 9425.3788, 1],
+    [3364.76, 9486.6818, 0],
+    [3473.13, 9547.4049, 1],
+    [3671.55, 9657.7860, 1],
+    [3721.46, 9685.3200, 1],
+    [3781.02, 9718.1600, 1],
+    [3902.11, 9784.5030, 1],
+    [3930.05, 9799.7000, 0]]),
+    "z2": np.asarray([
+    [91.50, 7488.8712, 1],
+    [114.69, 7503.8690, 1],
+    [131.48, 7514.6520, 1],
+    [164.29, 7535.7741, 0],
+    [240.36, 7584.6800, 1],
+    [457.35, 7724.6233, 0],
+    [842.51, 7967.3400, 1],
+    [904.78, 8006.1570, 0],
+    [918.15, 8014.7860, 0],
+    [1111.61, 8136.4054, 1],
+    [1224.01, 8206.3400, 0],
+    [1264.56, 8231.6350, 0],
+    [1374.37, 8300.3258, 0],
+    [1479.65, 8365.7466, 1],
+    [1498.94, 8377.6080, 0],
+    [1574.89, 8424.6400, 1],
+    [1689.66, 8495.3598, 0],
+    [1769.74, 8544.6958, 1],
+    [1845.95, 8591.2584, 0],
+    [1916.91, 8634.6470, 0],
+    [2030.75, 8704.1116, 0],
+    [2088.82, 8739.3900, 0],
+    [2221.79, 8819.4110, 0],
+    [2370.14, 8908.7300, 1],
+    [2388.14, 8919.5006, 1],
+    [2407.19, 8930.8300, 1],
+    [2600.55, 9045.4500, 0],
+    [2775.87, 9148.6716, 1],
+    [2866.89, 9201.7591, 0],
+    [2994.25, 9275.5196, 1],
+    [3164.48, 9373.3078, 0],
+    [3256.16, 9425.3788, 1],
+    [3364.41, 9486.6818, 0],
+    [3472.66, 9547.4049, 1],
+    [3670.89, 9657.7860, 1],
+    [3720.75, 9685.3200, 1],
+    [3780.25, 9718.1600, 1],
+    [3901.22, 9784.5030, 1],
+    [3929.13, 9799.7000, 0]]),
+    "z3": np.asarray([
+    [68.74, 7488.8712, 1],
+    [92.02, 7503.8690, 1],
+    [108.87, 7514.6520, 1],
+    [141.79, 7535.7741, 0],
+    [218.13, 7584.6800, 1],
+    [435.89, 7724.6233, 0],
+    [822.42, 7967.3400, 1],
+    [884.91, 8006.1570, 0],
+    [898.33, 8014.7860, 0],
+    [1092.48, 8136.4054, 1],
+    [1205.28, 8206.3400, 0],
+    [1245.97, 8231.6350, 0],
+    [1356.17, 8300.3258, 0],
+    [1461.83, 8365.7466, 1],
+    [1481.18, 8377.6080, 0],
+    [1557.40, 8424.6400, 1],
+    [1672.58, 8495.3598, 0],
+    [1752.95, 8544.6958, 1],
+    [1829.43, 8591.2584, 0],
+    [1900.64, 8634.6470, 0],
+    [2014.88, 8704.1116, 0],
+    [2073.16, 8739.3900, 0],
+    [2206.60, 8819.4110, 0],
+    [2355.48, 8908.7300, 1],
+    [2373.54, 8919.5006, 1],
+    [2392.66, 8930.8300, 1],
+    [2586.71, 9045.4500, 0],
+    [2762.65, 9148.6716, 1],
+    [2853.99, 9201.7591, 0],
+    [2981.81, 9275.5196, 1],
+    [3152.64, 9373.3078, 0],
+    [3244.65, 9425.3788, 1],
+    [3353.28, 9486.6818, 0],
+    [3461.92, 9547.4049, 1],
+    [3660.85, 9657.7860, 1],
+    [3710.89, 9685.3200, 1],
+    [3770.60, 9718.1600, 1],
+    [3892.00, 9784.5030, 1],
+    [3920.01, 9799.7000, 0]])}
+
     mjd = 60177
     expnums = range(3453, 3466+1)
 
@@ -449,7 +570,7 @@ def _create_wavelengths_60177(use_fiducial_cals=True, skip_done=True):
         masters_mjd = get_master_mjd(mjd)
         masters_path = os.path.join(MASTERS_DIR, str(masters_mjd))
 
-    reduce_2d(mjd, use_fiducial_cals=use_fiducial_cals, expnums=expnums, assume_imagetyp="arc", reject_cr=False, skip_done=skip_done)
+    # reduce_2d(mjd, use_fiducial_cals=use_fiducial_cals, expnums=expnums, assume_imagetyp="arc", reject_cr=False, skip_done=skip_done)
 
     frames, _ = md.get_sequence_metadata(mjd=mjd, expnums=expnums, for_cals={"wave"})
 
@@ -488,13 +609,15 @@ def _create_wavelengths_60177(use_fiducial_cals=True, skip_done=True):
             else:
                 image_tasks.extract_spectra(in_image=carc_path, out_rss=xarc_path, in_trace=mtrace_path, in_fwhm=mwidth_path, method="optimal")
 
-    expnum_str = f"{frames.expnum.min()}_{frames.expnum.max()}"
+    expnum_str = f"{frames.expnum.min():>08}_{frames.expnum.max():>08}"
     for camera in np.sort(frames.camera.unique()):
         xarc_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="x", imagetype="arc", camera=camera, expnum=expnum_str)
 
         # coadd arcs
         if skip_done and os.path.isfile(xarc_path):
-            rss_tasks.combineRSS_drp(in_rsss=xarc_paths[camera], out_rss=xarc_path, method="sum")
+            log.info(f"skipping {xarc_path}, file already exists")
+        else:
+            rss_tasks.combine_rsss(in_rsss=xarc_paths[camera], out_rss=xarc_path, method="sum")
 
         # fit wavelength solution
         mwave_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=camera, kind="mwave")
@@ -502,7 +625,11 @@ def _create_wavelengths_60177(use_fiducial_cals=True, skip_done=True):
         if skip_done and os.path.isfile(mwave_path) and os.path.isfile(mlsf_path):
             log.info(f"skipping wavelength solution {mwave_path} and {mlsf_path}, files already exists")
         else:
-            rss_tasks.determine_wavelength_solution(in_arcs=xarc_path, out_wave=mwave_path, out_lsf=mlsf_path, aperture=12,
+            pixels = pixwav[camera][:, 0] if camera in pixwav else []
+            waves = pixwav[camera][:, 1] if camera in pixwav else []
+            use_lines = pixwav[camera][:, 2].astype(bool) if camera in pixwav else []
+            rss_tasks.determine_wavelength_solution(in_arcs=xarc_paths[camera], out_wave=mwave_path, out_lsf=mlsf_path,
+                                                    pixel=pixels, ref_lines=waves, use_line=use_lines, aperture=12,
                                                     cc_correction=True, cc_max_shift=20, poly_disp=5, poly_fwhm=2, poly_cros=2,
                                                     flux_min=1e-12, fwhm_max=5, rel_flux_limits=[0.001, 1e12])
 
@@ -547,9 +674,9 @@ def _create_fiberflats_60177(mjd, use_fiducial_cals=False):
 
         log.info(f"preparing wavelength for new fiberflats: {mwave_paths}, {mlsf_paths}")
         mwaves = [TraceMask.from_file(mwave_path) for mwave_path in mwave_paths]
-        mwave = TraceMask.from_spectrographs(mwaves)
+        mwave = TraceMask.from_spectrographs(*mwaves)
         mlsfs = [TraceMask.from_file(mlsf_path) for mlsf_path in mlsf_paths]
-        mlsf = TraceMask.from_spectrographs(mlsfs)
+        mlsf = TraceMask.from_spectrographs(*mlsfs)
 
         fiberflat_path = os.path.join(masters_path, f"lvm-mfiberflat_twilight-{channel}.fits")
         log.info(f"loading reference fiberflat from {fiberflat_path}")
@@ -560,18 +687,17 @@ def _create_fiberflats_60177(mjd, use_fiducial_cals=False):
         new_fiberflat = copy(fiberflat)
         new_fiberflat._header["MJD"] = mjd
         new_fiberflat._header["SMJD"] = mjd
-        for ifiber in fiberflat._fibers:
+        for ifiber in range(fiberflat._fibers):
             old_wave = fiberflat._wave[ifiber]
             new_wave = mwave._data[ifiber]
-            new_flat = new_fiberflat._data[ifiber]
             old_flat = fiberflat._data[ifiber]
 
-            new_flat._data[ifiber] = interpolate.interp1d(old_wave, old_flat, bounds_error=False)(new_wave)
-            if new_flat._error is not None:
-                new_flat._error[ifiber] = interpolate.interp1d(old_wave, fiberflat._error[ifiber], bounds_error=False)(new_wave)
-            if new_flat._mask is not None:
-                new_flat._mask[ifiber] = interpolate.interp1d(old_wave, fiberflat._mask[ifiber].astype(int), bounds_error=False, kind="nearest")(new_wave)
-                new_flat._mask[ifiber] = new_flat._mask[ifiber].astype(bool)
+            new_fiberflat._data[ifiber] = interpolate.interp1d(old_wave, old_flat, bounds_error=False, fill_value="extrapolate")(new_wave)
+            if new_fiberflat._error is not None:
+                new_fiberflat._error[ifiber] = interpolate.interp1d(old_wave, fiberflat._error[ifiber], bounds_error=False, fill_value="extrapolate")(new_wave)
+            if new_fiberflat._mask is not None:
+                new_fiberflat._mask[ifiber] = interpolate.interp1d(old_wave, fiberflat._mask[ifiber].astype(int), bounds_error=False, kind="nearest", fill_value="extrapolate")(new_wave)
+                new_fiberflat._mask[ifiber] = new_fiberflat._mask[ifiber].astype(bool)
 
         # update wavelength traces
         new_fiberflat.set_wave_trace(mwave)
@@ -998,7 +1124,7 @@ def create_nighly_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnums
 
             cent_guess_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mcent_guess", camera=camera)
             flux_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mamps", camera=camera)
-            cent_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mcent", camera=camera)
+            cent_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mtrace", camera=camera)
             fwhm_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mwidth", camera=camera)
 
             # first centroids trace
@@ -1578,7 +1704,7 @@ def reduce_nightly_sequence(mjd, use_fiducial_cals=True, reject_cr=True, only_ca
     else:
         log.log(20 if "trace" in found_cals else 40, "skipping production of fiber traces")
 
-    if mjd == 60177:
+    if "wave" in only_cals and mjd == 60177:
         log.info(f"running dedicated script to create wavelength calibrations for MJD = {mjd}")
         _create_wavelengths_60177(use_fiducial_cals=use_fiducial_cals, skip_done=skip_done)
     else:
@@ -1589,7 +1715,7 @@ def reduce_nightly_sequence(mjd, use_fiducial_cals=True, reject_cr=True, only_ca
         else:
             log.log(20 if "wave" in found_cals else 40, "skipping production of wavelength calibrations")
 
-    if mjd == 60177:
+    if "fiberflat" in only_cals and mjd == 60177:
         log.info(f"running dedicated script to create fiberflats for MJD = {mjd}")
         _create_fiberflats_60177(mjd=60255, use_fiducial_cals=use_fiducial_cals)
     else:
