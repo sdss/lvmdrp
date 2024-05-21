@@ -1706,7 +1706,7 @@ def reduce_nightly_sequence(mjd, use_fiducial_cals=True, reject_cr=True, only_ca
 
     if "wave" in only_cals and mjd == 60177:
         log.info(f"running dedicated script to create wavelength calibrations for MJD = {mjd}")
-        _create_wavelengths_60177(use_fiducial_cals=use_fiducial_cals, skip_done=skip_done)
+        _create_wavelengths_60177(use_fiducial_cals=False, skip_done=skip_done)
     else:
         if "wave" in only_cals and "wave" in found_cals:
             arcs, arc_expnums = choose_sequence(frames, flavor="arc", kind="nightly")
