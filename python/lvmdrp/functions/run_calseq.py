@@ -1717,7 +1717,7 @@ def reduce_nightly_sequence(mjd, use_fiducial_cals=True, reject_cr=True, only_ca
 
     if "fiberflat" in only_cals and mjd == 60177:
         log.info(f"running dedicated script to create fiberflats for MJD = {mjd}")
-        _create_fiberflats_60177(mjd=60255, use_fiducial_cals=use_fiducial_cals)
+        _create_fiberflats_60177(mjd=60255, use_fiducial_cals=False)
     else:
         if "fiberflat" in only_cals and "fiberflat" in found_cals:
             twilight_flats, twilight_expnums = choose_sequence(frames, flavor="twilight", kind="nightly")
