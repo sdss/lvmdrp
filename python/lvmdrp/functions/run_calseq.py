@@ -443,7 +443,7 @@ def _get_ring_expnums(expnums_ldls, expnums_qrtz, ring_size=12, sort_expnums=Fal
 def _create_wavelengths_60177(use_fiducial_cals=True, skip_done=True):
     """Reduce arc sequence for MJD = 60177"""
     mjd = 60177
-    expnums = range(4353, 3466+1)
+    expnums = range(3453, 3466+1)
 
     if use_fiducial_cals:
         masters_mjd = get_master_mjd(mjd)
@@ -456,9 +456,9 @@ def _create_wavelengths_60177(use_fiducial_cals=True, skip_done=True):
     lamps = [lamp.lower() for lamp in ARC_LAMPS]
     xarc_paths = {"b1": [], "b2": [], "b3": [], "r1": [], "r2": [], "r3": [], "z1": [], "z2": [], "z3": []}
     for lamp in lamps:
-        arc_analogs = frames.loc[frames.lamp].groupby(["camera",])
+        arc_analogs = frames.loc[frames[lamp]].groupby(["camera",])
         for camera in arc_analogs.groups:
-            arcs = arc_analogs.get_group(camera)
+            arcs = arc_analogs.get_group((camera,))
             expnum_str = f"{arcs.expnum.min():>08}_{arcs.expnum.max():>08}"
 
             # define master paths for target frames
@@ -470,8 +470,8 @@ def _create_wavelengths_60177(use_fiducial_cals=True, skip_done=True):
                 mwidth_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=camera, kind="mwidth")
 
             # define master frame path
-            carc_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="c", imagetyp=f"arc_{lamp}", camera=camera, expnum=expnum_str)
-            xarc_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="x", imagetyp=f"arc_{lamp}", camera=camera, expnum=expnum_str)
+            carc_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="c", imagetype=f"arc_{lamp}", camera=camera, expnum=expnum_str)
+            xarc_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="x", imagetype=f"arc_{lamp}", camera=camera, expnum=expnum_str)
             os.makedirs(os.path.dirname(carc_path), exist_ok=True)
             darc_paths = [path.full("lvm_anc", drpver=drpver, kind="d", imagetype="arc", **arc) for arc in arcs.to_dict("records")]
             xarc_paths[camera].append(xarc_path)
@@ -488,9 +488,9 @@ def _create_wavelengths_60177(use_fiducial_cals=True, skip_done=True):
             else:
                 image_tasks.extract_spectra(in_image=carc_path, out_rss=xarc_path, in_trace=mtrace_path, in_fwhm=mwidth_path, method="optimal")
 
-    expnum_str = f"{frames.expnum.min()}_{frames.exnum.max()}"
-    for camera in frames.camera.unique().sort_values():
-        xarc_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="x", imagetyp="arc", camera=camera, expnum=expnum_str)
+    expnum_str = f"{frames.expnum.min()}_{frames.expnum.max()}"
+    for camera in np.sort(frames.camera.unique()):
+        xarc_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="x", imagetype="arc", camera=camera, expnum=expnum_str)
 
         # coadd arcs
         if skip_done and os.path.isfile(xarc_path):
@@ -517,6 +517,7 @@ def _create_wavelengths_60177(use_fiducial_cals=True, skip_done=True):
         if skip_done and os.path.isfile(xarc_path):
             log.info(f"skipping stacked arc {xarc_path}, file already exists")
         else:
+            xarc_paths = sorted(path.expand("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="x", imagetype="arc", camera=f"{channel}?", expnum=expnum_str))
             rss_tasks.stack_spectrographs(in_rsss=xarc_paths, out_rss=xarc_path)
         # apply wavelength solution to arcs and rectify
         if skip_done and os.path.isfile(harc_path):
