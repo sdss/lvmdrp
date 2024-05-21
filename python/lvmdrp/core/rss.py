@@ -3428,7 +3428,7 @@ class lvmFFrame(lvmBaseProduct):
         data = hdulist["FLUX"].data
         error = numpy.divide(1, hdulist["IVAR"].data, where=hdulist["IVAR"].data != 0, out=numpy.zeros_like(hdulist["IVAR"].data))
         error = numpy.sqrt(error)
-        mask = hdulist["MASK"].data
+        mask = hdulist["MASK"].data.astype("bool")
         wave = hdulist["WAVE"].data
         lsf = hdulist["LSF"].data
         sky_east = hdulist["SKY_EAST"].data
@@ -3499,7 +3499,7 @@ class lvmCFrame(lvmBaseProduct):
         data = hdulist["FLUX"].data
         error = numpy.divide(1, hdulist["IVAR"].data, where=hdulist["IVAR"].data != 0, out=numpy.zeros_like(hdulist["IVAR"].data))
         error = numpy.sqrt(error)
-        mask = hdulist["MASK"].data
+        mask = hdulist["MASK"].data.astype("bool")
         wave = hdulist["WAVE"].data
         lsf = hdulist["LSF"].data
         sky_east = hdulist["SKY_EAST"].data
@@ -3566,7 +3566,7 @@ class lvmSFrame(lvmBaseProduct):
         data = hdulist["FLUX"].data
         error = numpy.divide(1, hdulist["IVAR"].data, where=hdulist["IVAR"].data != 0, out=numpy.zeros_like(hdulist["IVAR"].data))
         error = numpy.sqrt(error)
-        mask = hdulist["MASK"].data
+        mask = hdulist["MASK"].data.astype("bool")
         wave = hdulist["WAVE"].data
         lsf = hdulist["LSF"].data
         sky = hdulist["SKY"].data
