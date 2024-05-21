@@ -155,6 +155,7 @@ def mergeRSS_drp(files_in, file_out, mergeHdr="1"):
 # @skip_if_drpqual_flags(["SATURATED"], "in_arc")
 def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: str,
                                   ref_fiber: int = 319, pixel: List[float] = [], ref_lines: List[float] = [],
+                                  use_line: List[bool] = [],
                                   poly_disp: int = 3, poly_fwhm: int = 5,
                                   poly_cros: int = 3, poly_kinds: list = ['poly', 'poly', 'poly'],
                                   init_back: float = 10.0, aperture: int = 10,
@@ -282,29 +283,32 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
     arc._error[mask] = numpy.inf
 
     # read reference lines
-    ilamps = [lamp.lower() for lamp in ARC_LAMPS]
-    lamps_label = "_".join(sorted(lamps, key=lambda x: ilamps.index(x)))
-    _, ref_fiber_, pixel, ref_lines, use_line = _read_pixwav_map(lamps_label, camera)
-    # if no reference file for combined lamps exist, read individual files
-    if ref_fiber is None:
-        pixel_list, ref_lines_list, use_line_list = [], [], []
-        for lamp in lamps:
-            log.info(f"loading reference lines for {lamp = } in {camera = }")
-            _, ref_fiber_, pixel, ref_lines, use_line = _read_pixwav_map(lamp, camera)
+    if len(pixel) == 0 or len(ref_lines) == 0 or len(use_line) == 0:
+        ilamps = [lamp.lower() for lamp in ARC_LAMPS]
+        lamps_label = "_".join(sorted(lamps, key=lambda x: ilamps.index(x)))
+        _, ref_fiber_, pixel, ref_lines, use_line = _read_pixwav_map(lamps_label, camera)
+        # if no reference file for combined lamps exist, read individual files
+        if ref_fiber is None:
+            pixel_list, ref_lines_list, use_line_list = [], [], []
+            for lamp in lamps:
+                log.info(f"loading reference lines for {lamp = } in {camera = }")
+                _, ref_fiber_, pixel, ref_lines, use_line = _read_pixwav_map(lamp, camera)
 
-            # remove masked lines
-            pixel = pixel[use_line]
-            ref_lines = ref_lines[use_line]
-            use_line = use_line[use_line]
+                # remove masked lines
+                pixel = pixel[use_line]
+                ref_lines = ref_lines[use_line]
+                use_line = use_line[use_line]
 
-            pixel_list.append(pixel)
-            ref_lines_list.append(ref_lines)
-            use_line_list.append(use_line)
+                pixel_list.append(pixel)
+                ref_lines_list.append(ref_lines)
+                use_line_list.append(use_line)
 
-        # combine all reference lines into a long array
-        pixel = numpy.concatenate(pixel_list)
-        ref_lines = numpy.concatenate(ref_lines_list)
-        use_line = numpy.concatenate(use_line_list)
+            # combine all reference lines into a long array
+            pixel = numpy.concatenate(pixel_list)
+            ref_lines = numpy.concatenate(ref_lines_list)
+            use_line = numpy.concatenate(use_line_list)
+    else:
+        log.info(f"using given reference lines: {ref_lines}")
 
     # sort lines by pixel position
     sort = numpy.argsort(pixel)
@@ -503,10 +507,20 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
     # Estimate the spectral resolution pattern
     dwave = wave_sol[:, 1:] - wave_sol[:, :-1]
     cent_round = numpy.round(cent_wave).astype(int)
+    # cent_round = numpy.clip(cent_round, 0, 4085-1)
 
     # Iterate over the fibers
     log.info(f"fitting LSF solutions using {poly_fwhm}-deg polynomials")
     for i in fibers:
+        # masked_lines = masked[i, use_line]
+        # nmasked[i] = numpy.sum(masked_lines)
+
+        # if nmasked[i] == 0:
+        #     good_fibers[i] = True
+        # elif nmasked[i] == len(masked_lines):
+        #     log.warning(f"fiber {i} has all lines masked")
+        #     good_fibers[i] = False
+
         fwhm_wave = numpy.fabs(dwave[i, cent_round[i, :]]) * fwhm[i, :]
 
         if kind_fwhm not in ["poly", "legendre", "chebyshev"]:
@@ -1697,7 +1711,7 @@ def apply_fiberflat(in_rss: str, out_frame: str, in_flat: str, clip_below: float
     return rss, lvmframe
 
 
-def combineRSS_drp(in_rsss, out_rss, method="mean"):
+def combine_rsss(in_rsss, out_rss, method="mean"):
     """combines the given RSS list to a single RSS using a statistic
 
     Parameters
@@ -1709,11 +1723,8 @@ def combineRSS_drp(in_rsss, out_rss, method="mean"):
     method : str, optional
         statistic to use for combining the RSS objects, by default "mean"
     """
-    # convert input parameters to proper type
-    list_rss = in_rsss.split(",")
-
     rss_list = []
-    for i in list_rss:
+    for i in in_rsss:
         # load subimages from disc and append them to a list
         rss = loadRSS(i)
         rss_list.append(rss)
