@@ -929,7 +929,7 @@ def create_detrending_frames(mjd, use_fiducial_cals=True, expnums=None, exptime=
     keep_ancillary : bool
         Keep ancillary files, by default False
     """
-    frames, _ = md.get_sequence_metadata(mjd, expnums=expnums, exptime=exptime, only_cals={"bias", "dark", "pixflat"})
+    frames, _ = md.get_sequence_metadata(mjd, expnums=expnums, exptime=exptime, for_cals={"bias", "dark", "pixflat"})
 
     # filter by target image types
     if kind == "all":
