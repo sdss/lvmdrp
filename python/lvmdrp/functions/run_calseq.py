@@ -451,7 +451,7 @@ def _create_wavelengths_60177(use_fiducial_cals=True, skip_done=True):
 
     reduce_2d(mjd, use_fiducial_cals=use_fiducial_cals, expnums=expnums, assume_imagetyp="arc", reject_cr=False, skip_done=skip_done)
 
-    frames = md.get_sequence_metadata(mjd=mjd, expnums=expnums, for_cals={"wave"})
+    frames, _ = md.get_sequence_metadata(mjd=mjd, expnums=expnums, for_cals={"wave"})
 
     lamps = [lamp.lower() for lamp in ARC_LAMPS]
     xarc_paths = {"b1": [], "b2": [], "b3": [], "r1": [], "r2": [], "r3": [], "z1": [], "z2": [], "z3": []}
