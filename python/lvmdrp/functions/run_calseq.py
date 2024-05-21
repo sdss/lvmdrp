@@ -32,13 +32,14 @@ from copy import deepcopy as copy
 from shutil import copy2, rmtree
 from itertools import product, groupby
 from astropy.stats import biweight_location, biweight_scale
+from scipy import interpolate
 from typing import List, Tuple, Dict
 
 from lvmdrp import log, path, __version__ as drpver
 from lvmdrp.utils import metadata as md
 from lvmdrp.core.plot import create_subplots, save_fig
 from lvmdrp.core import dataproducts as dp
-from lvmdrp.core.constants import SPEC_CHANNELS, LVM_REFERENCE_COLUMN, LVM_NBLOCKS, MASTERS_DIR
+from lvmdrp.core.constants import SPEC_CHANNELS, LVM_REFERENCE_COLUMN, LVM_NBLOCKS, MASTERS_DIR, ARC_LAMPS
 from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.core.image import loadImage
 from lvmdrp.core.rss import RSS, lvmFrame
@@ -437,6 +438,150 @@ def _get_ring_expnums(expnums_ldls, expnums_qrtz, ring_size=12, sort_expnums=Fal
         expnum_params[camera][0] = (expnums[0], sorted(filled_block_ids), fiber_strs[0])
 
     return expnum_params
+
+
+def _create_wavelengths_60177(use_fiducial_cals=True, skip_done=True):
+    """Reduce arc sequence for MJD = 60177"""
+    mjd = 60177
+    expnums = range(4353, 3466+1)
+
+    if use_fiducial_cals:
+        masters_mjd = get_master_mjd(mjd)
+        masters_path = os.path.join(MASTERS_DIR, str(masters_mjd))
+
+    reduce_2d(mjd, use_fiducial_cals=use_fiducial_cals, expnums=expnums, assume_imagetyp="arc", reject_cr=False, skip_done=skip_done)
+
+    frames = md.get_sequence_metadata(mjd=mjd, expnums=expnums, for_cals={"wave"})
+
+    lamps = [lamp.lower() for lamp in ARC_LAMPS]
+    xarc_paths = {"b1": [], "b2": [], "b3": [], "r1": [], "r2": [], "r3": [], "z1": [], "z2": [], "z3": []}
+    for lamp in lamps:
+        arc_analogs = frames.loc[frames.lamp].groupby(["camera",])
+        for camera in arc_analogs.groups:
+            arcs = arc_analogs.get_group(camera)
+            expnum_str = f"{arcs.expnum.min():>08}_{arcs.expnum.max():>08}"
+
+            # define master paths for target frames
+            if use_fiducial_cals:
+                mtrace_path = os.path.join(masters_path, f"lvm-mtrace-{camera}.fits")
+                mwidth_path = os.path.join(masters_path, f"lvm-mwidth-{camera}.fits")
+            else:
+                mtrace_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=camera, kind="mtrace")
+                mwidth_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=camera, kind="mwidth")
+
+            # define master frame path
+            carc_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="c", imagetyp=f"arc_{lamp}", camera=camera, expnum=expnum_str)
+            xarc_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="x", imagetyp=f"arc_{lamp}", camera=camera, expnum=expnum_str)
+            os.makedirs(os.path.dirname(carc_path), exist_ok=True)
+            darc_paths = [path.full("lvm_anc", drpver=drpver, kind="d", imagetype="arc", **arc) for arc in arcs.to_dict("records")]
+            xarc_paths[camera].append(xarc_path)
+
+            # create master arc (2D image)
+            if skip_done and os.path.exists(carc_path):
+                log.info(f"skipping {carc_path}, file already exists")
+            else:
+                image_tasks.create_master_frame(in_images=darc_paths, out_image=carc_path)
+
+            # extract combined (master) arc
+            if skip_done and os.path.exists(xarc_path):
+                log.info(f"skipping {xarc_path}, file already exists")
+            else:
+                image_tasks.extract_spectra(in_image=carc_path, out_rss=xarc_path, in_trace=mtrace_path, in_fwhm=mwidth_path, method="optimal")
+
+    expnum_str = f"{frames.expnum.min()}_{frames.exnum.max()}"
+    for camera in frames.camera.unique().sort_values():
+        xarc_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="x", imagetyp="arc", camera=camera, expnum=expnum_str)
+
+        # coadd arcs
+        if skip_done and os.path.isfile(xarc_path):
+            rss_tasks.combineRSS_drp(in_rsss=xarc_paths[camera], out_rss=xarc_path, method="sum")
+
+        # fit wavelength solution
+        mwave_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=camera, kind="mwave")
+        mlsf_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=camera, kind="mlsf")
+        if skip_done and os.path.isfile(mwave_path) and os.path.isfile(mlsf_path):
+            log.info(f"skipping wavelength solution {mwave_path} and {mlsf_path}, files already exists")
+        else:
+            rss_tasks.determine_wavelength_solution(in_arcs=xarc_path, out_wave=mwave_path, out_lsf=mlsf_path, aperture=12,
+                                                    cc_correction=True, cc_max_shift=20, poly_disp=5, poly_fwhm=2, poly_cros=2,
+                                                    flux_min=1e-12, fwhm_max=5, rel_flux_limits=[0.001, 1e12])
+
+    for channel in "brz":
+        mwave_paths = sorted(path.expand("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=f"{channel}?", kind="mwave"))
+        mlsf_paths = sorted(path.expand("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=f"{channel}?", kind="mlsf"))
+
+        xarc_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="x", imagetype="arc", camera=channel, expnum=expnum_str)
+        harc_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="h", imagetype="arc", camera=channel, expnum=expnum_str)
+
+        # stack spectragraphs
+        if skip_done and os.path.isfile(xarc_path):
+            log.info(f"skipping stacked arc {xarc_path}, file already exists")
+        else:
+            rss_tasks.stack_spectrographs(in_rsss=xarc_paths, out_rss=xarc_path)
+        # apply wavelength solution to arcs and rectify
+        if skip_done and os.path.isfile(harc_path):
+            log.info(f"skipping rectified arc {harc_path}, file already exists")
+        else:
+            rss_tasks.create_pixel_table(in_rss=xarc_path, out_rss=harc_path, in_waves=mwave_paths, in_lsfs=mlsf_paths)
+            rss_tasks.resample_wavelength(in_rss=harc_path, out_rss=harc_path, method="linear", wave_range=SPEC_CHANNELS[channel], wave_disp=0.5)
+
+
+def _create_fiberflats_60177(mjd, use_fiducial_cals=False):
+    """Creates twilight fiberflats from given MJD to MJD = 60177"""
+    mjd_ = 60177
+
+    masters_mjd = get_master_mjd(mjd)
+    masters_path = os.path.join(MASTERS_DIR, str(masters_mjd))
+    masters_path_ = os.path.join(MASTERS_DIR, str(mjd_))
+
+    log.info(f"going to copy fiberflats from {mjd = } to {mjd_}")
+    for channel in "brz":
+        # define master paths for target frames
+        if use_fiducial_cals:
+            mwave_paths = sorted(glob(os.path.join(masters_path_, f"lvm-mwave-{channel}?.fits")))
+            mlsf_paths = sorted(glob(os.path.join(masters_path_, f"lvm-mlsf-{channel}?.fits")))
+        else:
+            mwave_paths = sorted(path.expand("lvm_master", drpver=drpver, tileid=11111, mjd=mjd_, camera=f"{channel}?", kind="mwave"))
+            mlsf_paths = sorted(path.expand("lvm_master", drpver=drpver, tileid=11111, mjd=mjd_, camera=f"{channel}?", kind="mlsf"))
+
+        log.info(f"preparing wavelength for new fiberflats: {mwave_paths}, {mlsf_paths}")
+        mwaves = [TraceMask.from_file(mwave_path) for mwave_path in mwave_paths]
+        mwave = TraceMask.from_spectrographs(mwaves)
+        mlsfs = [TraceMask.from_file(mlsf_path) for mlsf_path in mlsf_paths]
+        mlsf = TraceMask.from_spectrographs(mlsfs)
+
+        fiberflat_path = os.path.join(masters_path, f"lvm-mfiberflat_twilight-{channel}.fits")
+        log.info(f"loading reference fiberflat from {fiberflat_path}")
+        fiberflat = RSS.from_file(fiberflat_path)
+
+        # interpolate fiberflats to mjd_ wavelengths
+        log.info("resampling fiberflat to new wavelengths")
+        new_fiberflat = copy(fiberflat)
+        new_fiberflat._header["MJD"] = mjd
+        new_fiberflat._header["SMJD"] = mjd
+        for ifiber in fiberflat._fibers:
+            old_wave = fiberflat._wave[ifiber]
+            new_wave = mwave._data[ifiber]
+            new_flat = new_fiberflat._data[ifiber]
+            old_flat = fiberflat._data[ifiber]
+
+            new_flat._data[ifiber] = interpolate.interp1d(old_wave, old_flat, bounds_error=False)(new_wave)
+            if new_flat._error is not None:
+                new_flat._error[ifiber] = interpolate.interp1d(old_wave, fiberflat._error[ifiber], bounds_error=False)(new_wave)
+            if new_flat._mask is not None:
+                new_flat._mask[ifiber] = interpolate.interp1d(old_wave, fiberflat._mask[ifiber].astype(int), bounds_error=False, kind="nearest")(new_wave)
+                new_flat._mask[ifiber] = new_flat._mask[ifiber].astype(bool)
+
+        # update wavelength traces
+        new_fiberflat.set_wave_trace(mwave)
+        new_fiberflat.set_lsf_trace(mlsf)
+        new_fiberflat.set_wave_array(mwave._data)
+        new_fiberflat.set_lsf_array(mlsf._data)
+
+        # store new fiberflat
+        new_fiberflat_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd_, camera=channel, kind="mfiberflat_twilight")
+        log.info(f"writing new fiberflat to {new_fiberflat_path}")
+        new_fiberflat.writeFitsData(new_fiberflat_path)
 
 
 def messup_frame(mjd, expnum, spec="1", shifts=[1500, 2000, 3500], shift_size=-2, undo_messup=False):
@@ -1432,19 +1577,27 @@ def reduce_nightly_sequence(mjd, use_fiducial_cals=True, reject_cr=True, only_ca
     else:
         log.log(20 if "trace" in found_cals else 40, "skipping production of fiber traces")
 
-    if "wave" in only_cals and "wave" in found_cals:
-        arcs, arc_expnums = choose_sequence(frames, flavor="arc", kind="nightly")
-        log.info(f"choosing {len(arcs)} arc exposures: {arc_expnums}")
-        create_wavelengths(mjd=mjd, expnums=arc_expnums, skip_done=skip_done)
+    if mjd == 60177:
+        log.info(f"running dedicated script to create wavelength calibrations for MJD = {mjd}")
+        _create_wavelengths_60177(use_fiducial_cals=use_fiducial_cals, skip_done=skip_done)
     else:
-        log.log(20 if "wave" in found_cals else 40, "skipping production of wavelength calibrations")
+        if "wave" in only_cals and "wave" in found_cals:
+            arcs, arc_expnums = choose_sequence(frames, flavor="arc", kind="nightly")
+            log.info(f"choosing {len(arcs)} arc exposures: {arc_expnums}")
+            create_wavelengths(mjd=mjd, expnums=arc_expnums, skip_done=skip_done)
+        else:
+            log.log(20 if "wave" in found_cals else 40, "skipping production of wavelength calibrations")
 
-    if "fiberflat" in only_cals and "fiberflat" in found_cals:
-        twilight_flats, twilight_expnums = choose_sequence(frames, flavor="twilight", kind="nightly")
-        log.info(f"choosing {len(twilight_flats)} twilight exposures: {twilight_expnums}")
-        create_fiberflats(mjd=mjd, expnums=sorted(np.sort(twilight_flats.expnum.unique())), skip_done=skip_done)
+    if mjd == 60177:
+        log.info(f"running dedicated script to create fiberflats for MJD = {mjd}")
+        _create_fiberflats_60177(mjd=60255, use_fiducial_cals=use_fiducial_cals)
     else:
-        log.log(20 if "fiberflat" in found_cals else 40, "skipping production of fiberflats")
+        if "fiberflat" in only_cals and "fiberflat" in found_cals:
+            twilight_flats, twilight_expnums = choose_sequence(frames, flavor="twilight", kind="nightly")
+            log.info(f"choosing {len(twilight_flats)} twilight exposures: {twilight_expnums}")
+            create_fiberflats(mjd=mjd, expnums=sorted(np.sort(twilight_flats.expnum.unique())), skip_done=skip_done)
+        else:
+            log.log(20 if "fiberflat" in found_cals else 40, "skipping production of fiberflats")
 
     if not keep_ancillary:
         _clean_ancillary(mjd)
