@@ -7,6 +7,7 @@ Change Log
 This document records the main changes to the drp code.
 
 1.0.1 (unreleased)
+------------------
 
 
 1.0.0 (22-05-2024)
@@ -27,10 +28,6 @@ This document records the main changes to the drp code.
 * Have smaller calibration frames
 * Provide new products: lvmFrame, lvmFFrame, lvmCFrame, lvmSFrame, lvmRSS
 * A lot of bug fixes and small improvements
-
-0.1.2 (unreleased)
-------------------
-
 
 0.1.1 (11-08-2023)
 ------------------
