@@ -339,13 +339,15 @@ def get_calibs(kind, mjd, camera):
     are newer.
 
     The syntax for the calibration files are $LVM_SANDBOX/calib/[mjd]/lvm-m[kind]-[camera].fits.
-    "mjd" is the MJD directory to download. "kind" is the kind of calib file to download, e.g. pixmask,
-    bias, fiberflat, without the leading "m".  "camera" is the camera, can be a specific channel, e.g "b1"
-    or all channels with "b*".
+    "mjd" is the MJD directory to download. "kind" is the kind of calib file to download, e.g. bias,
+    fiberflat, without the leading "m".  "camera" is the camera, can be a specific channel, e.g "b1"
+    or all channels with "b*". The pixel masks and flats are stored at $LVM_SANDBOX/calib/pixelmasks
+    and are automatically included in the download.
 
     """
     a = Access()
     a.remote()
+    a.add('lvm_calib', kind="pix*", mjd="pixelmasks", camera=camera)
     a.add('lvm_calib', kind=kind, mjd=mjd, camera=camera)
     a.set_stream()
     a.commit()
