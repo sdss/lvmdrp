@@ -99,15 +99,12 @@ You would find the files at `$SAS_BASE_DIR/sdsswork/lvm/sandbox/calib/`
 Say you want to reduce the `<expnum>` under `<mjd>`. You can do it by running in the shell the following:
 
 ```bash
-drp metadata regenerate -m <mjd>
-drp quick-reduction -fe <expnum>
+drp run -m <mjd> -e <expnum>
 ```
 
 This requires that you have correctly setup your environment by following the instructions in the [Prerequisites](#prerequisites) and [Installation](#installation) sections.
 
-The `drp metadata regenerate` command will make sure that you have you target frames metadata in place, the DRP relies on this data to be able to correctly match calibration frames with your target science frames. **NOTE: you only have to do this once per MJD**.
-
-The `drp quick-reduction` will reduce your target exposure. Here is a list of reduction steps carried out by the quick DRP:
+The `drp run` will reduce your target exposure. Here is a list of reduction steps carried out by the DRP:
 
 - **Preprocessing**: overscan trimming and subtraction and pixel masking
 - **Detrending**: bias and dark subtraction, Poisson error calculation, flatfielding (pixel level, when available), units conversion (e-/s)
@@ -123,7 +120,7 @@ The `drp quick-reduction` will reduce your target exposure. Here is a list of re
 The main outputs will be stored in the SAS directory:
 
 ```bash
-$SAS_BASE_DIR/sdsswork/lvm/spectro/redux/<drpver>/<tileid>/<mjd>/
+$SAS_BASE_DIR/sdsswork/lvm/spectro/redux/<drpver>/<tilegrp>/<tileid>/<mjd>/
 ```
 
 where you should find your `lvmCFrame-<expnum:08d>.fits` file, the `raw_metadata.hdf5` file and the `ancillary` folder. Within `ancillary` you'll find files following the naming conventions:
@@ -137,7 +134,7 @@ where each letter in **`pdxwh`** stands for preprocessed, detrended, extracted, 
 
 ## ESO sky routines installation and configuration
 
-**NOTE: you don't need to install the ESO sky routines to be able to run the quick reductions as shown in the previous section**
+**NOTE: you don't need to install the ESO sky routines to be able to run the science reductions as shown in the previous section**
 
 If you are planning on using the sky module, you will need to install the ESO routines first. To install [skycorr](https://www.eso.org/sci/software/pipelines/skytools/skycorr) and the [ESO Sky Model](https://www.eso.org/sci/software/pipelines/skytools/skymodel), follow the instructions in the following links:
 
