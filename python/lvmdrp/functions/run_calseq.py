@@ -1110,7 +1110,7 @@ def create_nightly_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnum
             flats = flats_analogs.get_group((camera,))
 
             # combine dome flats
-            expnum_str = f"{flats.expnum.min():>08}-{flats.expnum.max():>08}"
+            expnum_str = f"{flats.expnum.min():>08}_{flats.expnum.max():>08}"
             dflat_paths = [path.full("lvm_anc", drpver=drpver, kind="d", imagetype="flat", **flat) for flat in flats.to_dict("records")]
             cflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="c", imagetype="flat", camera=camera, expnum=expnum_str)
             os.makedirs(os.path.dirname(cflat_path), exist_ok=True)
@@ -1122,7 +1122,7 @@ def create_nightly_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnum
             dmodel_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", imagetype="model", camera=camera, expnum=expnum_str)
             dratio_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", imagetype="ratio", camera=camera, expnum=expnum_str)
 
-            cent_guess_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mcent_guess", camera=camera)
+            cent_guess_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mtrace_guess", camera=camera)
             flux_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mamps", camera=camera)
             cent_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mtrace", camera=camera)
             fwhm_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mwidth", camera=camera)
