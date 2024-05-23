@@ -104,10 +104,11 @@ def cli():
 @click.option('-e', '--expnum', type=int, help='an exposure number to reduce')
 @click.option('-el', '--exp-list', type=int, multiple=True, help='a list of specific exposures to reduce')
 @click.option('-er', '--exp-range', type=str, help='a range of exposure numbers to reduce')
+@click.option('-c', '--clean-ancillary', is_flag=True, default=False, help='Remove ancillary paths after run')
 @cloup.constraint(mutually_exclusive, ['mjd', 'mjd_list', 'mjd_range'])
 @cloup.constraint(RequireExactly(1), ['mjd', 'mjd_list', 'mjd_range'])
 @cloup.constraint(mutually_exclusive, ['expnum', 'exp_list', 'exp_range'])
-def run(mjd, mjd_list, mjd_range, with_cals, no_sci, expnum, exp_list, exp_range):
+def run(mjd, mjd_list, mjd_range, with_cals, no_sci, expnum, exp_list, exp_range, clean_ancillary):
     """ Run the DRP reduction for a given MJD or range of MJDs
 
     Run the DRP for an MJD or range of MJDs.  Various flags and options are available
@@ -116,7 +117,7 @@ def run(mjd, mjd_list, mjd_range, with_cals, no_sci, expnum, exp_list, exp_range
     """
     mjd = mjd or mjd_list or mjd_range
     expnum = expnum or exp_list or exp_range
-    run_drp(mjd=mjd, expnum=expnum, no_sci=no_sci, with_cals=with_cals)
+    run_drp(mjd=mjd, expnum=expnum, no_sci=no_sci, with_cals=with_cals, clean_ancillary=clean_ancillary)
 
 
 # register full DRP command
@@ -182,61 +183,6 @@ metacli.add_command(regen)
 
 cli.add_command(metacli)
 
-
-# @click.command(short_help='Run the Quick DRP')
-# @click.option('-e', '--expnum', type=int, help='an exposure number to reduce')
-# @click.option('-f', '--use-fiducial-master', is_flag=True, default=False, help='use fiducial master calibration frames')
-# @click.option('-s', '--skip-sky-subtraction', is_flag=True, help='skip sky subtraction')
-# @click.option('--sky-weights', type=(float, float), default=None, help='weights (east, west) for the master sky combination')
-# @click.option('-c', '--skip-flux-calibration', is_flag=True, default=False, help='skip flux calibration')
-# @click.option('-n', '--ncpus', type=int, default=None, help='number of CPUs to use during extraction')
-# @click.option("-a", "--aperture-extraction", is_flag=True, default=False, help="run quick reduction with aperture extraction")
-# def quick_reduction(expnum: int, use_fiducial_master: bool, skip_sky_subtraction: bool,
-#                     sky_weights: tuple, skip_flux_calibration: bool, ncpus: int, aperture_extraction: bool) -> None:
-#     science_reduction(expnum, use_fiducial_master, skip_sky_subtraction,
-#                             sky_weights, skip_flux_calibration, ncpus, aperture_extraction)
-
-
-# # register quick DRP command
-# cli.add_command(quick_reduction)
-
-
-@click.command('twilight', short_help='Run the twilight sequence reduction')
-@click.option('-e', '--expnums', type=IntRangeType(), multiple=True, help='a list of exposure numbers to reduce')
-@click.option('-b', '--median-box', type=int, default=5, help='the median box size')
-@click.option('-n', '--niter', type=int, default=1000, help='the number of iterations')
-@click.option('-t', '--threshold', type=tuple, default=(0.5,2.0), help='the thresholds (lower,upper) for the sigma clipping')
-@click.option('-k', '--nknots', type=int, default=80, help='the number of knots for the spline')
-@cloup.option_group(
-    'Channel masks',
-    'Options for masking wavelength ranges for each spectrograph channel',
-    cloup.option('--b-mask', type=WaveRange(), default=MASK_BANDS["b"], multiple=True, help='the wavelength ranges to mask for b channel'),
-    cloup.option('--r-mask', type=WaveRange(), default=MASK_BANDS["r"], multiple=True, help='the wavelength ranges to mask for r channel'),
-    cloup.option('--z-mask', type=WaveRange(), default=MASK_BANDS["z"], multiple=True, help='the wavelength ranges to mask for z channel')
-)
-@click.option('-s', '--skip-done', is_flag=True, default=False, help='Flag to skip reduction steps that have already been done')
-@click.option('-d', '--display-plots', is_flag=True, default=False, help='Flag to display the plots')
-def twilight_reduction(expnums: list, median_box: int, niter: int, threshold: Tuple[float,float],
-                       nknots: int, b_mask: list, r_mask: list, z_mask: list, skip_done: bool,
-                       display_plots: bool) -> None:
-    """ Run the twilight sequence reduction """
-    # parse multiple exposure number lists into a single list
-    expnums = [expnum for expnum_list in expnums for expnum in expnum_list]
-    create_fiberflats(
-        expnums=expnums,
-        median_box=median_box,
-        niter=niter,
-        threshold=threshold,
-        nknots=nknots,
-        b_mask=b_mask,
-        r_mask=r_mask,
-        z_mask=z_mask,
-        skip_done=skip_done,
-        display_plots=display_plots)
-
-
-# register twilight sequence reduction
-cli.add_command(twilight_reduction)
 
 @cli.command('nightly-cals', short_help='Run the nightly calibration sequence')
 @click.option('-m', '--mjd', type=int, required=True, help='the MJD to reduce')

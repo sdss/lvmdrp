@@ -1583,7 +1583,8 @@ def science_reduction(expnum: int, use_fiducial_master: bool = False,
                       sky_weights: Tuple[float, float] = None,
                       skip_flux_calibration: bool = False,
                       ncpus: int = None,
-                      aperture_extraction: bool = False) -> None:
+                      aperture_extraction: bool = False,
+                      clean_ancillary: bool = False) -> None:
     """ Run the Quick DRP for a given exposure number.
     """
     # validate parameters
@@ -1753,13 +1754,42 @@ def science_reduction(expnum: int, use_fiducial_master: bool = False,
     sframe_path = path.full("lvm_frame", mjd=sci_mjd, drpver=drpver, tileid=sci_tileid, expnum=sci_expnum, kind='SFrame')
     quick_sky_subtraction(in_cframe=cframe_path, out_sframe=sframe_path, skip_subtraction=skip_sky_subtraction)
 
+    # clean ancillary folder
+    if clean_ancillary:
+        log.info("removing ancillary paths")
+        ancillary_dir = os.path.dirname(dsci_path)
+        qa_dir = os.path.join(ancillary_dir, "qa")
+        if os.path.isdir(ancillary_dir):
+            ancillary_paths = [os.path.join(ancillary_dir,p) for p in os.listdir(ancillary_dir) if str(sci_expnum) in p]
+            qa_paths = [os.path.join(qa_dir,p) for p in os.listdir(qa_dir) if str(sci_expnum) in p]
+            for ancillary_path in ancillary_paths:
+                try:
+                    os.remove(ancillary_path)
+                except Exception as e:
+                    log.warning(f"error while removing {ancillary_path}: {e}")
+            for qa_path in qa_paths:
+                try:
+                    os.remove(qa_path)
+                except Exception as e:
+                    log.warning(f"error while removing {qa_path}: {e}")
+            if len(os.listdir(qa_dir)) == 0:
+                try:
+                    shutil.rmtree(qa_dir)
+                except Exception as e:
+                    log.warning(f"error while removing {qa_dir}: {e}")
+            if len(os.listdir(ancillary_dir)) == 0:
+                try:
+                    shutil.rmtree(ancillary_dir)
+                except Exception as e:
+                    log.warning(f"error while removing {ancillary_dir}: {e}")
+
     # update the drpall summary file
     log.info('Updating the drpall summary file')
     update_summary_file(sframe_path, tileid=sci_tileid, mjd=sci_mjd, expnum=sci_expnum, master_mjd=master_mjd)
 
 
 def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
-            with_cals: bool = False, no_sci: bool = False):
+            with_cals: bool = False, no_sci: bool = False, clean_ancillary: bool = False):
     """ Run the quick DRP
 
     Run the quick DRP for an MJD, or a range of MJDs. Reduces
@@ -1778,6 +1808,8 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
         Flag to reduce individual calibration files, by default False
     no_sci : bool, optional
         Flag to turn off science frame reduction, by default False
+    clean_ancillary : bool, optional
+        Flag to remove the ancillary paths, by default False
     """
     # # write the drp parameter configuration
     # write_config_file()
@@ -1851,7 +1883,7 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
             kwargs = get_config_options('reduction_steps.science_reduction')
             for expnum in sci['expnum'].unique():
                 try:
-                    science_reduction(expnum, use_fiducial_master=True, **kwargs)
+                    science_reduction(expnum, use_fiducial_master=True, clean_ancillary=clean_ancillary, **kwargs)
                 except Exception as e:
                     log.exception(f'Failed to reduce science frame mjd {mjd} exposure {expnum}: {e}')
                     create_status_file(tileid, mjd, status='error')
@@ -1905,8 +1937,3 @@ def reduce_calib_frame(row: dict):
     detrend_frame(in_image=in_cal, out_image=out_cal,
                   in_bias=mbias, in_dark=mdark, in_pixelflat=mpixflat,
                   in_slitmap=Table(fibermap.data), reject_cr=False)
-
-
-if __name__ == "__main__":
-
-    science_reduction(expnum=7325, use_fiducial_master=True)
