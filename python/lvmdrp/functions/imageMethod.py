@@ -383,7 +383,7 @@ def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=Non
     # shifts stats
     median_shift = numpy.nanmedian(column_shifts, axis=0)
     std_shift = numpy.nanstd(column_shifts, axis=0)
-    if median_shift > 0.5:
+    if numpy.abs(median_shift) > 0.5:
         log.warning(f"large thermal shift measured: {column_shifts} pixels for {mjd = }, {expnum = }, {camera = }")
         log.warning(f"{median_shift = :.4f}+/-{std_shift = :.4f} pixels")
     else:
