@@ -374,16 +374,20 @@ def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=Non
     # generate the continuum model using the master traces only along the specific columns
     model, _ = image.eval_fiber_model(trace_cent, trace_width, trace_amp=trace_amp, columns=columns, column_width=column_width)
 
+    mjd = image._header["SMJD"]
+    expnum = image._header["EXPOSURE"]
+    camera = image._header["CCD"]
+
     # calculate thermal shifts
     column_shifts = image.measure_fiber_shifts(model, columns=columns, column_width=column_width, shift_range=shift_range)
     # shifts stats
     median_shift = numpy.nanmedian(column_shifts, axis=0)
     std_shift = numpy.nanstd(column_shifts, axis=0)
-    if median_shift > 1:
-        log.warning(f"large thermal shift measured: {column_shifts} pixels")
+    if median_shift > 0.5:
+        log.warning(f"large thermal shift measured: {column_shifts} pixels for {mjd = }, {expnum = }, {camera = }")
         log.warning(f"{median_shift = :.4f}+/-{std_shift = :.4f} pixels")
     else:
-        log.info(f"median shift in fibers: {median_shift = :.4f}+/-{std_shift = :.4f} pixels")
+        log.info(f"median shift in fibers: {median_shift = :.4f}+/-{std_shift = :.4f} pixels for {mjd = }, {expnum = }, {camera = }")
 
     # apply average shift to the zeroth order trace coefficients
     trace_cent_fixed = copy(trace_cent)
