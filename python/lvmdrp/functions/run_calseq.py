@@ -30,8 +30,9 @@ import numpy as np
 from glob import glob
 from copy import deepcopy as copy
 from shutil import copy2, rmtree
-from itertools import product, groupby
+from itertools import groupby
 from astropy.stats import biweight_location, biweight_scale
+from multiprocessing import Pool, cpu_count
 from scipy import interpolate
 from typing import List, Tuple, Dict
 
@@ -39,7 +40,13 @@ from lvmdrp import log, path, __version__ as drpver
 from lvmdrp.utils import metadata as md
 from lvmdrp.core.plot import create_subplots, save_fig
 from lvmdrp.core import dataproducts as dp
-from lvmdrp.core.constants import SPEC_CHANNELS, LVM_REFERENCE_COLUMN, LVM_NBLOCKS, MASTERS_DIR, ARC_LAMPS
+from lvmdrp.core.constants import (
+    CAMERAS,
+    SPEC_CHANNELS,
+    LVM_REFERENCE_COLUMN,
+    LVM_NBLOCKS,
+    MASTERS_DIR,
+    ARC_LAMPS)
 from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.core.image import loadImage
 from lvmdrp.core.rss import RSS, lvmFrame
@@ -1181,7 +1188,7 @@ def create_nightly_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnum
                 ratio.writeFitsData(dratio_path)
 
 
-def create_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnums_qrtz=None,
+def create_traces(mjd, cameras=CAMERAS, use_fiducial_cals=True, expnums_ldls=None, expnums_qrtz=None,
                   fit_poly=True, poly_deg_amp=5, poly_deg_cent=4, poly_deg_width=5,
                   skip_done=True):
     """Create traces from master dome flats
@@ -1198,6 +1205,8 @@ def create_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnums_qrtz=N
     ----------
     mjd : int
         MJD to reduce
+    cameras : list or tuple, optional
+        List of cameras (e.g., b2, z3) to create traces for
     use_fiducial_cals : bool
         Whether to use fiducial calibration frames or not, defaults to True
     expnums_ldls : list
@@ -1219,15 +1228,16 @@ def create_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnums_qrtz=N
         expnums = np.concatenate([expnums_ldls, expnums_qrtz])
     else:
         expnums = None
-    frames, _ = md.get_sequence_metadata(mjd, expnums=expnums, for_cals={"trace"})
+    frames, _ = md.get_sequence_metadata(mjd, expnums=expnums, cameras=cameras, for_cals={"trace"})
+    tileid = frames.tileid.iloc[0]
 
     # run 2D reduction on flats: preprocessing, detrending
-    reduce_2d(mjd, use_fiducial_cals=use_fiducial_cals, expnums=expnums, reject_cr=False, skip_done=skip_done)
+    reduce_2d(mjd, use_fiducial_cals=use_fiducial_cals, expnums=expnums, cameras=cameras, reject_cr=False, skip_done=skip_done)
 
-    # load current traces
-    mamps, mcents, mwidths = {}, {}, {}
-    for _ in product("brz", "123"):
-        camera = "".join(_)
+    # iterate through exposures with std fibers exposed
+    for camera in cameras:
+        # initialize fiber traces
+        mamps, mcents, mwidths = {}, {}, {}
         mamps[camera] = TraceMask()
         mamps[camera].createEmpty(data_dim=(648, 4086), poly_deg=poly_deg_amp)
         mcents[camera] = TraceMask()
@@ -1235,10 +1245,6 @@ def create_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnums_qrtz=N
         mwidths[camera] = TraceMask()
         mwidths[camera].createEmpty(data_dim=(648, 4086), poly_deg=poly_deg_width)
 
-    tileid = frames.tileid.iloc[0]
-    # iterate through exposures with std fibers exposed
-    cameras = ["b1", "b2", "b3", "r1", "r2", "r3", "z1", "z2", "z3"]
-    for camera in cameras:
         expnums = expnums_qrtz if camera[0] == "z" else expnums_ldls
         counts_threshold = 10000 if camera[0] == "z" else 5000
 
@@ -1248,15 +1254,15 @@ def create_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnums_qrtz=N
         exposed_stds, unexposed_stds = get_exposed_std_fiber(mjd=mjd, expnums=expnums, camera=camera)
         for expnum, (std_fiberid, block_idxs) in exposed_stds.items():
             # define paths
-            dflat_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=mjd, kind="d", imagetype="flat", camera=camera, expnum=expnum)
-            lflat_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=mjd, kind="l", imagetype="flat", camera=camera, expnum=expnum)
-            flux_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=mjd, kind="d", imagetype="flux", camera=camera, expnum=expnum)
-            cent_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=mjd, kind="d", imagetype="cent", camera=camera, expnum=expnum)
-            cent_guess_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=mjd, kind="d", imagetype="cent_guess", camera=camera, expnum=expnum)
-            dstray_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=mjd, kind="d", imagetype="stray", camera=camera, expnum=expnum)
-            fwhm_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=mjd, kind="d", imagetype="fwhm", camera=camera, expnum=expnum)
-            dmodel_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=mjd, kind="d", imagetype="model", camera=camera, expnum=expnum)
-            dratio_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=mjd, kind="d", imagetype="ratio", camera=camera, expnum=expnum)
+            dflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", imagetype="flat", camera=camera, expnum=expnum)
+            lflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="l", imagetype="flat", camera=camera, expnum=expnum)
+            flux_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", imagetype="flux", camera=camera, expnum=expnum)
+            cent_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", imagetype="cent", camera=camera, expnum=expnum)
+            cent_guess_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", imagetype="cent_guess", camera=camera, expnum=expnum)
+            dstray_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", imagetype="stray", camera=camera, expnum=expnum)
+            fwhm_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", imagetype="fwhm", camera=camera, expnum=expnum)
+            dmodel_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", imagetype="model", camera=camera, expnum=expnum)
+            dratio_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", imagetype="ratio", camera=camera, expnum=expnum)
 
             # first centroids trace
             if skip_done and os.path.isfile(cent_guess_path):
@@ -1777,7 +1783,19 @@ def reduce_longterm_sequence(mjd, use_fiducial_cals=True, reject_cr=True, only_c
         log.info(f"choosing {len(dome_flats)} dome flat exposures: {dome_flat_expnums}")
         expnums_ldls = np.sort(dome_flats.query("ldls").expnum.unique())
         expnums_qrtz = np.sort(dome_flats.query("quartz").expnum.unique())
-        create_traces(mjd=mjd, expnums_ldls=expnums_ldls, expnums_qrtz=expnums_qrtz, skip_done=skip_done)
+
+        pool = Pool()
+        threads = []
+        for camera in CAMERAS:
+            threads.append(pool.apply_async(create_traces,
+                           kwds=dict(mjd=mjd, cameras=[camera],
+                           use_fiducial_cals=use_fiducial_cals,
+                           expnums_ldls=expnums_ldls, expnums_qrtz=expnums_qrtz,
+                           skip_done=skip_done)))
+        for ithr in range(len(threads)):
+            threads[ithr].get()
+        pool.close()
+        pool.join()
         _move_master_calibrations(mjd=mjd, kind={"trace", "width"})
     else:
         log.log(20 if "trace" in found_cals else 40, "skipping production of fiber traces")
