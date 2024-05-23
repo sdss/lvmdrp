@@ -6,7 +6,6 @@ import os
 import pathlib
 import shutil
 from itertools import groupby
-from typing import Tuple
 
 import click
 import cloup
@@ -18,8 +17,6 @@ from lvmdrp.utils.metadata import get_frames_metadata, get_master_metadata
 from lvmdrp.utils.cluster import run_cluster
 
 from lvmdrp.functions.run_calseq import (
-    MASK_BANDS,
-    create_fiberflats,
     reduce_nightly_sequence,
     reduce_longterm_sequence,
     fix_raw_pixel_shifts)
