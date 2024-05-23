@@ -1584,9 +1584,18 @@ def science_reduction(expnum: int, use_fiducial_master: bool = False,
                       skip_flux_calibration: bool = False,
                       ncpus: int = None,
                       aperture_extraction: bool = False,
-                      clean_ancillary: bool = False) -> None:
-    """ Run the Quick DRP for a given exposure number.
+                      clean_ancillary: bool = False,
+                      debug_mode: bool = False) -> None:
+    """ Run the science reduction for a given exposure number.
     """
+
+    if debug_mode:
+        aperture_extraction = True
+        clean_ancillary = False
+        reject_cr = False
+    else:
+        reject_cr = True
+
     # validate parameters
     if sky_weights is not None:
         if len(sky_weights) != 2:
@@ -1600,7 +1609,7 @@ def science_reduction(expnum: int, use_fiducial_master: bool = False,
             return
 
     # define extraction method
-    extraction_parallel = "auto" if ncpus is None else ncpus
+    parallel_run = 1 if ncpus is None else ncpus
     extraction_method = "aperture" if aperture_extraction else "optimal"
 
     # get target frames metadata or extract if it doesn't exist
@@ -1628,7 +1637,7 @@ def science_reduction(expnum: int, use_fiducial_master: bool = False,
     sci_metadata.sort_values("camera", inplace=True)
 
     # detrend science exposure
-    reduce_2d(mjd=sci_mjd, use_fiducial_cals=use_fiducial_master, expnums=[sci_expnum], reject_cr=True, skip_done=False)
+    reduce_2d(mjd=sci_mjd, use_fiducial_cals=use_fiducial_master, expnums=[sci_expnum], reject_cr=reject_cr, skip_done=False)
 
     # run reduction loop for each science camera exposure
     for sci in sci_metadata.to_dict("records"):
@@ -1680,11 +1689,12 @@ def science_reduction(expnum: int, use_fiducial_master: bool = False,
         # subtract straylight
         subtract_straylight(in_image=dsci_path, out_image=lsci_path, out_stray=lstr_path,
                                         in_cent_trace=mtrace_path, select_nrows=(5,5), use_weights=True,
-                                        aperture=15, smoothing=400, median_box=101, gaussian_sigma=20.0)
+                                        aperture=15, smoothing=400, median_box=101, gaussian_sigma=20.0,
+                                        parallel=parallel_run)
 
         # extract 1d spectra
         extract_spectra(in_image=lsci_path, out_rss=xsci_path, in_trace=mtrace_path, in_fwhm=mwidth_path,
-                                    method=extraction_method, parallel=extraction_parallel)
+                                    method=extraction_method, parallel=parallel_run)
 
     # per channel reduction
     for channel in "brz":
@@ -1789,7 +1799,8 @@ def science_reduction(expnum: int, use_fiducial_master: bool = False,
 
 
 def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
-            with_cals: bool = False, no_sci: bool = False, clean_ancillary: bool = False):
+            with_cals: bool = False, no_sci: bool = False,
+            clean_ancillary: bool = False, debug_mode: bool = False):
     """ Run the quick DRP
 
     Run the quick DRP for an MJD, or a range of MJDs. Reduces
@@ -1810,6 +1821,8 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
         Flag to turn off science frame reduction, by default False
     clean_ancillary : bool, optional
         Flag to remove the ancillary paths, by default False
+    debug_mode : bool, optional
+        Flag to run in debug mode, by default False
     """
     # # write the drp parameter configuration
     # write_config_file()
@@ -1883,7 +1896,8 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
             kwargs = get_config_options('reduction_steps.science_reduction')
             for expnum in sci['expnum'].unique():
                 try:
-                    science_reduction(expnum, use_fiducial_master=True, clean_ancillary=clean_ancillary, **kwargs)
+                    science_reduction(expnum, use_fiducial_master=True, clean_ancillary=clean_ancillary,
+                                      debug_mode=debug_mode, **kwargs)
                 except Exception as e:
                     log.exception(f'Failed to reduce science frame mjd {mjd} exposure {expnum}: {e}')
                     create_status_file(tileid, mjd, status='error')

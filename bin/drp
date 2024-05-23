@@ -105,10 +105,11 @@ def cli():
 @click.option('-el', '--exp-list', type=int, multiple=True, help='a list of specific exposures to reduce')
 @click.option('-er', '--exp-range', type=str, help='a range of exposure numbers to reduce')
 @click.option('-c', '--clean-ancillary', is_flag=True, default=False, help='Remove ancillary paths after run')
+@click.option('-d', '--debug-mode', is_flag=True, default=False, help='Set debug mode on to run using aperture extraction and skip CR rejection')
 @cloup.constraint(mutually_exclusive, ['mjd', 'mjd_list', 'mjd_range'])
 @cloup.constraint(RequireExactly(1), ['mjd', 'mjd_list', 'mjd_range'])
 @cloup.constraint(mutually_exclusive, ['expnum', 'exp_list', 'exp_range'])
-def run(mjd, mjd_list, mjd_range, with_cals, no_sci, expnum, exp_list, exp_range, clean_ancillary):
+def run(mjd, mjd_list, mjd_range, with_cals, no_sci, expnum, exp_list, exp_range, clean_ancillary, debug_mode):
     """ Run the DRP reduction for a given MJD or range of MJDs
 
     Run the DRP for an MJD or range of MJDs.  Various flags and options are available
@@ -117,7 +118,8 @@ def run(mjd, mjd_list, mjd_range, with_cals, no_sci, expnum, exp_list, exp_range
     """
     mjd = mjd or mjd_list or mjd_range
     expnum = expnum or exp_list or exp_range
-    run_drp(mjd=mjd, expnum=expnum, no_sci=no_sci, with_cals=with_cals, clean_ancillary=clean_ancillary)
+    run_drp(mjd=mjd, expnum=expnum, no_sci=no_sci, with_cals=with_cals,
+            clean_ancillary=clean_ancillary, debug_mode=debug_mode)
 
 
 # register full DRP command
