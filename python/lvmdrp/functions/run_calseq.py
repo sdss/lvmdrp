@@ -821,10 +821,10 @@ def fix_raw_pixel_shifts(mjd, expnums=None, ref_expnums=None, use_fiducial_cals=
         raise ValueError("shift_rows must be a dictionary with keys (spec, expnum) and values a list of rows to shift")
 
     # get target frames & reference frames metadata
-    frames = md.get_frames_metadata(mjd, expnums=expnums)
+    frames = md.get_frames_metadata(mjd)
     if expnums is not None:
         frames.query("expnum in @expnums", inplace=True)
-    ref_frames = md.get_frames_metadata(mjd, expnums=ref_expnums)
+    ref_frames = md.get_frames_metadata(mjd)
     if ref_expnums is not None:
         frames.query("expnum in @ref_expnums", inplace=True)
 
