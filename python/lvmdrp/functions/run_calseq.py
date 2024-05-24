@@ -821,10 +821,10 @@ def fix_raw_pixel_shifts(mjd, expnums=None, ref_expnums=None, use_fiducial_cals=
         raise ValueError("shift_rows must be a dictionary with keys (spec, expnum) and values a list of rows to shift")
 
     # get target frames & reference frames metadata
-    frames = md.get_frames_metadata(mjd, expnums=expnums)
+    frames = md.get_frames_metadata(mjd)
     if expnums is not None:
         frames.query("expnum in @expnums", inplace=True)
-    ref_frames = md.get_frames_metadata(mjd, expnums=ref_expnums)
+    ref_frames = md.get_frames_metadata(mjd)
     if ref_expnums is not None:
         frames.query("expnum in @ref_expnums", inplace=True)
 
@@ -929,7 +929,7 @@ def create_detrending_frames(mjd, use_fiducial_cals=True, expnums=None, exptime=
     keep_ancillary : bool
         Keep ancillary files, by default False
     """
-    frames, _ = md.get_sequence_metadata(mjd, expnums=expnums, exptime=exptime, only_cals={"bias", "dark", "pixflat"})
+    frames, _ = md.get_sequence_metadata(mjd, expnums=expnums, exptime=exptime, for_cals={"bias", "dark", "pixflat"})
 
     # filter by target image types
     if kind == "all":
@@ -1110,7 +1110,7 @@ def create_nightly_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnum
             flats = flats_analogs.get_group((camera,))
 
             # combine dome flats
-            expnum_str = f"{flats.expnum.min():>08}-{flats.expnum.max():>08}"
+            expnum_str = f"{flats.expnum.min():>08}_{flats.expnum.max():>08}"
             dflat_paths = [path.full("lvm_anc", drpver=drpver, kind="d", imagetype="flat", **flat) for flat in flats.to_dict("records")]
             cflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="c", imagetype="flat", camera=camera, expnum=expnum_str)
             os.makedirs(os.path.dirname(cflat_path), exist_ok=True)
@@ -1122,7 +1122,7 @@ def create_nightly_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnum
             dmodel_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", imagetype="model", camera=camera, expnum=expnum_str)
             dratio_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", imagetype="ratio", camera=camera, expnum=expnum_str)
 
-            cent_guess_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mcent_guess", camera=camera)
+            cent_guess_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mtrace_guess", camera=camera)
             flux_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mamps", camera=camera)
             cent_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mtrace", camera=camera)
             fwhm_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mwidth", camera=camera)

@@ -60,7 +60,7 @@ def run_cluster(mjds: list = None, nodes: int = 2, ppn: int = 64, walltime: str 
     q.create(label='lvm_cluster_run', nodes=nodes, ppn=ppn, walltime=walltime, alloc=alloc, shared=True)
 
     for mjd in mjds:
-        script = f"drp run -m {mjd}"
+        script = f"drp run -m {mjd} -c"
         q.append(script)
 
     # submit the queue

@@ -1351,37 +1351,11 @@ def interpolate_sky( in_frame: str, out_rss: str = None, display_plots: bool = F
             frame, fibermap=fibermap, telescope=telescope
         )
 
-        fig, axs = create_subplots(
-            to_display=display_plots, figsize=(20, 10), nrows=2, ncols=1, sharex=True
-        )
-        axs[0].scatter(
-            sky_wave.ravel(), sky_data.ravel(), s=5, color="tab:blue", lw=0, label="sky"
-        )
-        axs[0].scatter(
-            sci_wave.ravel(), sci_data.ravel(), s=3, color="0.7", lw=0, label="sci"
-        )
-        axs[0].set_ylabel(f"Counts ({unit})")
-        axs[0].legend(loc=2)
-
         # divide by the wavelength sampling step at each pixel
         dlambda = np.diff(sky_wave, axis=1)
         dlambda = np.column_stack((dlambda, dlambda[:, -1]))
         sky_data = sky_data / dlambda
         sky_vars = sky_vars / dlambda
-
-        axs[1].scatter(
-            sky_wave.ravel(), sky_data.ravel(), s=5, color="tab:red", lw=0, label="sky"
-        )
-        axs[1].set_xlabel("Lambda (Angstrom)")
-        axs[1].set_ylabel(f"Counts ({unit}/Angstrom)")
-        axs[1].legend(loc=2)
-        save_fig(
-            fig,
-            product_path=out_rss,
-            to_display=display_plots,
-            figure_path="qa",
-            label=f"sky_sci_fibers_{telescope}",
-        )
 
         # calculate supersky and fit splines
         s_ssky, s_error, s_mask, sw, ss, sv, sm = fit_supersky(
@@ -1391,17 +1365,22 @@ def interpolate_sky( in_frame: str, out_rss: str = None, display_plots: bool = F
         fig, axs = create_subplots(
             to_display=display_plots, figsize=(20, 5), nrows=2, ncols=1, sharex=True
         )
-        axs[0].scatter(sw, ss, s=1, color="tab:blue", label="super sky")
-        axs[0].plot(
-            sw[~sm], s_ssky(sw[~sm]).astype("float32"), lw=1, color="k", label="spline"
-        )
+        mean, std = np.nanmedian(ss[~sm]), np.nanstd(ss[~sm])
+        axs[0].scatter(sw[~sm], ss[~sm], s=1, color="tab:blue", label="super sky")
+        axs[0].plot(sw[~sm], s_ssky(sw[~sm]).astype("float32"), lw=1, color="k", label="spline")
+        axs[0].set_ylabel(f"Counts ({unit}/Angstrom)")
+        axs[0].set_ylim(mean-0.5*std, mean+1.8*std)
 
         # plot residuals
-        residuals = s_ssky(sky_wave).astype("float32") - sky_data
-        axs[1].scatter(sky_wave.ravel(), residuals.ravel())
+        residuals = (s_ssky(sky_wave).astype("float32") - sky_data) / sky_data
+        mean, std = np.nanmedian(residuals), np.nanstd(residuals)
+        axs[1].scatter(sky_wave.ravel(), residuals.ravel(), color="0.4", s=1, lw=0, alpha=0.5)
         axs[1].axhline(ls="--", lw=1, color="0.2")
+        axs[1].axhline(mean, ls="-", lw=2, color="tab:blue")
+        axs[1].axhspan(mean-std, mean+std, lw=0, color="tab:blue", alpha=0.5)
         axs[1].set_label("Lambda (Angstrom)")
-        fig.supylabel(f"Counts ({unit}/Angstrom)")
+        axs[1].set_ylim(-1.5, 1.5)
+        axs[1].set_ylabel("Relative residuals")
 
         save_fig(
             fig,
@@ -1420,16 +1399,6 @@ def interpolate_sky( in_frame: str, out_rss: str = None, display_plots: bool = F
         # update mask with new bad pixels
         new_mask = (new_sky < 0) | np.isnan(new_sky)
         new_mask |= (new_error < 0) | np.isnan(new_error)
-
-        fig, axs = plt.subplots(1, 1, figsize=(20, 5), sharex=True)
-        axs.plot(frame._wave[0], new_sky[0], "k", lw=1, label="sky")
-        save_fig(
-            fig,
-            product_path=out_rss,
-            to_display=display_plots,
-            figure_path="qa",
-            label=f"sky_comp_{telescope}",
-        )
 
         # store outputs
         supersky[telescope] = s_ssky
