@@ -3167,6 +3167,7 @@ class RSS(FiberRows):
         #     self._header.update(wcs)
 
     def apply_pixelmask(self, mask=None):
+        """Replaces masked pixels in RSS by NaN values"""
         if mask is None:
             mask = self._mask
         if mask is None:
@@ -3206,13 +3207,15 @@ class RSS(FiberRows):
 
         return Table(trace_dict)
 
-    def writeFitsData(self, out_rss, include_wave=False):
+    def writeFitsData(self, out_rss, replace_masked=True, include_wave=False):
         """Writes information from a RSS object into a FITS file.
 
         Parameters
         ----------
         out_rss : str
             Name or Path of the FITS file to which the data shall be written
+        replace_masked : bool
+            If True, replaces masked values with NaN before writing RSS file
         include_wave : bool, optional
             If True, the wavelength array is included in the FITS file, by default False
 
@@ -3223,6 +3226,9 @@ class RSS(FiberRows):
         ValueError
             Invalid LSF array shape
         """
+        if replace_masked:
+            self.apply_pixelmask()
+
         hdus = pyfits.HDUList()
 
         hdus.append(pyfits.PrimaryHDU(self._data.astype("float32")))
@@ -3397,7 +3403,10 @@ class lvmFrame(lvmBaseProduct):
         self = lvmFrame.from_file(in_file)
         return self
 
-    def writeFitsData(self, out_file):
+    def writeFitsData(self, out_file, replace_masked=True):
+        # replace masked pixels
+        if replace_masked:
+            self.apply_pixelmask()
 
         # update headers
         self.update_header()
@@ -3467,7 +3476,11 @@ class lvmFFrame(lvmBaseProduct):
         self = lvmFFrame.from_file(in_file)
         return self
 
-    def writeFitsData(self, out_file):
+    def writeFitsData(self, out_file, replace_masked=True):
+        # replace masked pixels
+        if replace_masked:
+            self.apply_pixelmask()
+
         # update headers
         self.update_header()
         # fill in rest of the template
@@ -3535,7 +3548,11 @@ class lvmCFrame(lvmBaseProduct):
         self = lvmCFrame.from_file(in_file)
         return self
 
-    def writeFitsData(self, out_file):
+    def writeFitsData(self, out_file, replace_masked=True):
+        # replace masked pixels
+        if replace_masked:
+            self.apply_pixelmask()
+
         # update headers
         self.update_header()
         # fill in rest of the template
@@ -3593,7 +3610,11 @@ class lvmSFrame(lvmBaseProduct):
         self = lvmSFrame.from_file(in_file)
         return self
 
-    def writeFitsData(self, out_file):
+    def writeFitsData(self, out_file, replace_masked=True):
+        # replace masked pixels
+        if replace_masked:
+            self.apply_pixelmask()
+
         # update headers
         self.update_header()
         # fill in rest of the template
