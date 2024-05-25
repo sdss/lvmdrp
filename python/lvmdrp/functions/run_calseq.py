@@ -140,6 +140,8 @@ def get_exposed_std_fiber(mjd, expnums, camera, imagetyp="flat", ref_column=LVM_
         Camera name (e.g. "b1")
     ref_column : int
         Reference column for the fiber trace
+    snr_threshold : float
+        SNR threshold above which a fiber is considered to be exposed
     display_plots : bool
         If True, display plots
 
@@ -209,9 +211,7 @@ def get_exposed_std_fiber(mjd, expnums, camera, imagetyp="flat", ref_column=LVM_
             ax.set_xticklabels(ids_std)
 
             # select standard fiber exposed if any
-            snr_std_dif = np.abs(np.asarray([np.nanmean(snr_fib-snr[pos_std]) for snr_fib in snr[pos_std]]))
-            snr_all_dif = np.abs(np.asarray([np.nanmean(snr_fib-snr) for snr_fib in snr[pos_std]]))
-            select_std = (snr_std_dif > snr_std_med+snr_threshold*snr_std_std) | (snr_all_dif >= snr_med-snr_std)
+            select_std = snr[pos_std] > snr_std_med + snr_threshold * snr_std_std
             exposed_std = ids_std[select_std]
             if select_std.sum() > 1:
                 exposed_std_ = exposed_std[np.argmax(snr[pos_std[select_std]])]
@@ -223,6 +223,10 @@ def get_exposed_std_fiber(mjd, expnums, camera, imagetyp="flat", ref_column=LVM_
                 exposed_std = None
                 continue
 
+            # highlight exposed fiber in plot
+            select_exposed = ids_std == exposed_std
+            ax.bar(idx_std[select_exposed], snr[pos_std][select_exposed], hatch="///////", lw=0, ec="tab:red", fc="none", zorder=999)
+
             # get block ID for exposed standard fiber
             fiber_par = image._slitmap[image._slitmap["orig_ifulabel"] == exposed_std]
             block_idx = int(fiber_par["blockid"][0][1:])-1
@@ -231,6 +235,11 @@ def get_exposed_std_fiber(mjd, expnums, camera, imagetyp="flat", ref_column=LVM_
             log.info(f"exposed standard fiber in exposure {expnum}: '{exposed_std}' ({block_idx = })")
 
             exposed_stds[expnum] = (exposed_std, [block_idx])
+
+        # handle case of no standard fiber exposed
+        if len(exposed_stds) == 0:
+            exposed_stds[expnums[0]] = (None, block_idxs)
+            block_idxs = []
 
         # save figure
         save_fig(fig,
