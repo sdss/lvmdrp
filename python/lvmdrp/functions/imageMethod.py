@@ -4117,9 +4117,11 @@ def add_astrometry(
                 copy_guider_keyword(mfheader, 'WARNMATC', org_img)
                 copy_guider_keyword(mfheader, 'WARNFWHM', org_img)
             else:
-                RAobs=org_img._header[f'PO{tel}RA'.capitalize()]
-                DECobs=org_img._header[f'PO{tel}DE'.capitalize()]
-                PAobs=org_img._header[f'PO{tel}PA'.capitalize()]
+                RAobs=org_img._header.get(f'PO{tel}RA'.capitalize(), 0) or 0
+                DECobs=org_img._header.get(f'PO{tel}DE'.capitalize(), 0) or 0
+                PAobs=org_img._header.get(f'PO{tel}PA'.capitalize(), 0) or 0
+                if numpy.any([RAobs, DECobs, PAobs]) == 0:
+                    log.warning(f"some astrometry keywords for telescope '{tel}' are missing: {RAobs = }, {DECobs = }, {PAobs = }")
                 org_img.setHdrValue('ASTRMSRC', 'CMD position', comment='Source of astrometric solution: commanded position')
         else:
             RAobs=0
