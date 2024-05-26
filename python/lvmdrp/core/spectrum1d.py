@@ -9,7 +9,7 @@ from scipy import signal, interpolate, ndimage, sparse
 from scipy.ndimage import zoom, median_filter
 from typing import List, Tuple
 
-from lvmdrp import log
+# from lvmdrp import log
 from lvmdrp.utils import gaussian
 from lvmdrp.core import fit_profile
 from lvmdrp.core.header import Header
