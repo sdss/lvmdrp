@@ -3317,28 +3317,28 @@ class Spectrum1D(Header):
             shape=(self._dim, fibers),
         )
         # print(B)
-        # out = sparse.linalg.lsmr(B, self._data / self._error, atol=1e-4, btol=1e-4)
+        flux = sparse.linalg.lsmr(B, self._data / self._error, atol=1e-4, btol=1e-4)[0]
         # out = sparse.linalg.spsolve(B, self._data / self._error)
         # out = linalg.lstsq(A, self._data / self._error, lapack_driver='gelsy', check_finite=False)
         # print(out)
-        try:
-            # simple matrix inversion: slow, crashes with singular matrix error for some columns
-            # flux = sparse.linalg.inv(B.T.dot(B)).dot((B.T).dot(self._data/self._error))
+        # try:
+        #     # simple matrix inversion: slow, crashes with singular matrix error for some columns
+        #     # flux = sparse.linalg.inv(B.T.dot(B)).dot((B.T).dot(self._data/self._error))
 
-            # SVD: slow, also crashes
-            # U, s, V = linalg.svd(A, check_finite=False, full_matrices=False)
-            # S = numpy.diag(s)
-            # flux = V.dot(linalg.inv(S)).dot(U.T).dot(self._data/self._error)
+        #     # SVD: slow, also crashes
+        #     # U, s, V = linalg.svd(A, check_finite=False, full_matrices=False)
+        #     # S = numpy.diag(s)
+        #     # flux = V.dot(linalg.inv(S)).dot(U.T).dot(self._data/self._error)
 
-            # QR: slow
-            # Q, R = linalg.qr(A, mode="economic")
-            # flux = linalg.inv(R).dot(Q.T).dot(self._data/self._error)
+        #     # QR: slow
+        #     # Q, R = linalg.qr(A, mode="economic")
+        #     # flux = linalg.inv(R).dot(Q.T).dot(self._data/self._error)
 
-            # normal equations
-            flux = sparse.linalg.inv(B.T.dot(B)).dot(B.T).dot(self._data/self._error)
-        except RuntimeError as e:
-            log.debug(f"failed matrix inversion: {e}, falling back to LSMR")
-            flux = sparse.linalg.lsmr(B, self._data / self._error, atol=1e-4, btol=1e-4)[0]
+        #     # normal equations
+        #     flux = sparse.linalg.inv(B.T.dot(B)).dot(B.T).dot(self._data/self._error)
+        # except RuntimeError as e:
+        #     log.debug(f"failed matrix inversion: {e}, falling back to LSMR")
+        #     flux = sparse.linalg.lsmr(B, self._data / self._error, atol=1e-4, btol=1e-4)[0]
 
         error = numpy.sqrt(1 / bn.nansum((A**2), 0))
         if bad_pix is not None and bn.nansum(bad_pix) > 0:
