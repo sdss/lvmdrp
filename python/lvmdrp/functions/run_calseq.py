@@ -41,7 +41,7 @@ from lvmdrp.core.plot import create_subplots, save_fig
 from lvmdrp.core import dataproducts as dp
 from lvmdrp.core.constants import SPEC_CHANNELS, LVM_REFERENCE_COLUMN, LVM_NBLOCKS, MASTERS_DIR, ARC_LAMPS
 from lvmdrp.core.tracemask import TraceMask
-from lvmdrp.core.image import loadImage
+from lvmdrp.core.image import Image, loadImage
 from lvmdrp.core.rss import RSS, lvmFrame
 
 from lvmdrp.functions import imageMethod as image_tasks
@@ -1811,6 +1811,32 @@ def reduce_longterm_sequence(mjd, use_fiducial_cals=True, reject_cr=True, only_c
         _clean_ancillary(mjd)
 
 
+def create_fiber_model(mjd, flux=10000):
+    """Ancillary script to evaluate fiber models for a given calibration epoch"""
+    masters_mjd = get_master_mjd(mjd)
+    masters_path = os.path.join(MASTERS_DIR, f"{masters_mjd}")
+
+    cameras = [c+s for c, s in product("brz", "123")]
+    log.info(f"going to evaluate fiber model for cameras: {','.join(cameras)}")
+    for camera in cameras:
+        mcent_path = os.path.join(masters_path, f"lvm-mtrace-{camera}.fits")
+        mwidth_path = os.path.join(masters_path, f"lvm-mwidth-{camera}.fits")
+
+        if not (os.path.isfile(mcent_path) or os.path.isfile(mwidth_path)):
+            log.error(f"skipping creation of fiber model for {mjd = }, {camera = }, incomplete fiber traces")
+            continue
+
+        trace_cent = TraceMask.from_file(mcent_path)
+        trace_width = TraceMask.from_file(mwidth_path)
+
+        model = Image(data=np.zeros((4080, 4086)))
+        model, _ = model.eval_fiber_model(trace_cent, trace_width, trace_amp=flux)
+
+        model.setHeader(trace_cent._header)
+        model.setHdrValue("IMAGETYP", "fiber model")
+        model.writeFitsData(os.path.join(masters_path, f"lvm-mmodel-{camera}.fits"))
+
+
 class lvmFlat(lvmFrame):
     """lvmFlat class"""
 
@@ -1828,3 +1854,7 @@ class lvmFlat(lvmFrame):
 
 class lvmArc(lvmFrame):
     pass
+
+
+if __name__ == "__main__":
+    create_fiber_model(mjd=60255)

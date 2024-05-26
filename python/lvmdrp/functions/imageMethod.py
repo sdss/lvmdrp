@@ -336,7 +336,7 @@ def _get_wave_selection(waves, lines_list, window):
     return wave_selection
 
 
-def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=None,
+def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=None, fiber_model=None,
                               columns=[500, 1000, 1500, 2000, 2500, 3000],
                               column_width=25, shift_range=[-5,5]):
     """Returns the updated fiber trace centroids after fixing the thermal shifts
@@ -351,6 +351,8 @@ def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=Non
         the fiber trace widths, defaults to None
     trace_amp : TraceMask
         the fiber trace amplitudes, defaults to None
+    fiber_model : Image
+        2D fiber model image, defaults to None
     columns : list
         list of columns to evaluate the continuum model, defaults to [500, 1000, 1500, 2000, 2500, 3000, 3500]
     column_width : int
@@ -372,14 +374,16 @@ def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=Non
         the evaluated continuum model at the given columns
     """
     # generate the continuum model using the master traces only along the specific columns
-    model, _ = image.eval_fiber_model(trace_cent, trace_width, trace_amp=trace_amp, columns=columns, column_width=column_width)
+    if fiber_model is None:
+        fiber_model, _ = image.eval_fiber_model(trace_cent, trace_width, trace_amp=trace_amp, columns=columns, column_width=column_width)
+        fiber_model.writeFitsData("./test_model.fits")
 
     mjd = image._header["SMJD"]
     expnum = image._header["EXPOSURE"]
     camera = image._header["CCD"]
 
     # calculate thermal shifts
-    column_shifts = image.measure_fiber_shifts(model, columns=columns, column_width=column_width, shift_range=shift_range)
+    column_shifts = image.measure_fiber_shifts(fiber_model, columns=columns, column_width=column_width, shift_range=shift_range)
     # shifts stats
     median_shift = numpy.nanmedian(column_shifts, axis=0)
     std_shift = numpy.nanstd(column_shifts, axis=0)
@@ -409,7 +413,7 @@ def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=Non
     #     trace_cent_fixed._coeffs[ifiber] = (poly_trace + poly_deltas).coef
     # trace_cent_fixed.eval_coeffs()
 
-    return trace_cent_fixed, column_shifts, model
+    return trace_cent_fixed, column_shifts, fiber_model
 
 
 def _apply_electronic_shifts(images, out_images, drp_shifts=None, qc_shifts=None, custom_shifts=None, raw_shifts=None,
@@ -3100,6 +3104,7 @@ def extract_spectra(
     out_rss: str,
     in_trace: str,
     in_fwhm: str = None,
+    in_model: str = None,
     in_acorr: str = None,
     columns: List[int] = [500, 750, 1000, 1250, 1500, 1750, 2000, 2250, 2500, 2750, 3000],
     column_width: int = 50,
@@ -3162,6 +3167,12 @@ def extract_spectra(
 
     trace_mask = TraceMask.from_file(in_trace)
 
+    # load fiber model if given
+    if in_model is not None and os.path.isfile(in_model):
+        fiber_model = loadImage(in_model)
+    else:
+        fiber_model = None
+
     if method == "optimal":
         # check if fwhm trace is given and exists
         if in_fwhm is None or not os.path.isfile(in_fwhm):
@@ -3173,6 +3184,7 @@ def extract_spectra(
 
         # fix centroids for thermal shifts
         trace_mask, shifts, _ = _fix_fiber_thermal_shifts(img, trace_mask, trace_fwhm,
+                                                          fiber_model=fiber_model,
                                                           trace_amp=10000,
                                                           columns=columns,
                                                           column_width=column_width,
@@ -3226,9 +3238,11 @@ def extract_spectra(
         # fix centroids for thermal shifts
         log.info("measuring fiber thermal shifts")
         trace_mask, shifts, _ = _fix_fiber_thermal_shifts(img, trace_mask, trace_fwhm or 2.5,
+                                                          fiber_model=fiber_model,
                                                           trace_amp=10000,
                                                           columns=columns,
-                                                          column_width=column_width)
+                                                          column_width=column_width,
+                                                          shift_range=[-2,2])
 
         (data, error, mask) = img.extractSpecAperture(trace_mask, aperture)
 

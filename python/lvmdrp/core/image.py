@@ -3069,7 +3069,7 @@ class Image(Header):
 
         # evaluate continuum model
         y_axis = numpy.arange(nrows)
-        for icolumn in tqdm(columns, desc="modelling fiber profile", unit="column", ascii=True):
+        for icolumn in tqdm(columns, desc="evaluating fiber model", unit="column", ascii=True):
             pars = (trace_amp._data[:, icolumn], trace_cent._data[:, icolumn], trace_width._data[:, icolumn] / 2.354)
             model._data[:, icolumn] = gaussians(pars=pars, x=y_axis)
 
