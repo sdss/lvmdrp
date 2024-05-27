@@ -6,9 +6,16 @@ Change Log
 
 This document records the main changes to the drp code.
 
-1.0.1 (unreleased)
+1.0.2dev (unrealeased)
+-------------------
+
+
+1.0.1 (23-05-2024)
 ------------------
 
+ * Fixed minor bugs in thermal shifts reports, sky QA plots, fetching of metadata, drpall product and more
+ * Implemented cleaning of ancillary paths
+ * Serial runs are default now
 
 1.0.0 (22-05-2024)
 ------------------

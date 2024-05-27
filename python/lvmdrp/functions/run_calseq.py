@@ -48,7 +48,7 @@ from lvmdrp.core.constants import (
     MASTERS_DIR,
     ARC_LAMPS)
 from lvmdrp.core.tracemask import TraceMask
-from lvmdrp.core.image import loadImage
+from lvmdrp.core.image import Image, loadImage
 from lvmdrp.core.rss import RSS, lvmFrame
 
 from lvmdrp.functions import imageMethod as image_tasks
@@ -147,6 +147,8 @@ def get_exposed_std_fiber(mjd, expnums, camera, imagetyp="flat", ref_column=LVM_
         Camera name (e.g. "b1")
     ref_column : int
         Reference column for the fiber trace
+    snr_threshold : float
+        SNR threshold above which a fiber is considered to be exposed
     display_plots : bool
         If True, display plots
 
@@ -216,9 +218,7 @@ def get_exposed_std_fiber(mjd, expnums, camera, imagetyp="flat", ref_column=LVM_
             ax.set_xticklabels(ids_std)
 
             # select standard fiber exposed if any
-            snr_std_dif = np.abs(np.asarray([np.nanmean(snr_fib-snr[pos_std]) for snr_fib in snr[pos_std]]))
-            snr_all_dif = np.abs(np.asarray([np.nanmean(snr_fib-snr) for snr_fib in snr[pos_std]]))
-            select_std = (snr_std_dif > snr_std_med+snr_threshold*snr_std_std) | (snr_all_dif >= snr_med-snr_std)
+            select_std = snr[pos_std] > snr_std_med + snr_threshold * snr_std_std
             exposed_std = ids_std[select_std]
             if select_std.sum() > 1:
                 exposed_std_ = exposed_std[np.argmax(snr[pos_std[select_std]])]
@@ -230,6 +230,10 @@ def get_exposed_std_fiber(mjd, expnums, camera, imagetyp="flat", ref_column=LVM_
                 exposed_std = None
                 continue
 
+            # highlight exposed fiber in plot
+            select_exposed = ids_std == exposed_std
+            ax.bar(idx_std[select_exposed], snr[pos_std][select_exposed], hatch="///////", lw=0, ec="tab:red", fc="none", zorder=999)
+
             # get block ID for exposed standard fiber
             fiber_par = image._slitmap[image._slitmap["orig_ifulabel"] == exposed_std]
             block_idx = int(fiber_par["blockid"][0][1:])-1
@@ -238,6 +242,11 @@ def get_exposed_std_fiber(mjd, expnums, camera, imagetyp="flat", ref_column=LVM_
             log.info(f"exposed standard fiber in exposure {expnum}: '{exposed_std}' ({block_idx = })")
 
             exposed_stds[expnum] = (exposed_std, [block_idx])
+
+        # handle case of no standard fiber exposed
+        if len(exposed_stds) == 0:
+            exposed_stds[expnums[0]] = (None, block_idxs)
+            block_idxs = []
 
         # save figure
         save_fig(fig,
@@ -1820,6 +1829,32 @@ def reduce_longterm_sequence(mjd, use_fiducial_cals=True, reject_cr=True, only_c
         _clean_ancillary(mjd)
 
 
+def create_fiber_model(mjd, flux=10000):
+    """Ancillary script to evaluate fiber models for a given calibration epoch"""
+    masters_mjd = get_master_mjd(mjd)
+    masters_path = os.path.join(MASTERS_DIR, f"{masters_mjd}")
+
+    cameras = [c+s for c, s in product("brz", "123")]
+    log.info(f"going to evaluate fiber model for cameras: {','.join(cameras)}")
+    for camera in cameras:
+        mcent_path = os.path.join(masters_path, f"lvm-mtrace-{camera}.fits")
+        mwidth_path = os.path.join(masters_path, f"lvm-mwidth-{camera}.fits")
+
+        if not (os.path.isfile(mcent_path) or os.path.isfile(mwidth_path)):
+            log.error(f"skipping creation of fiber model for {mjd = }, {camera = }, incomplete fiber traces")
+            continue
+
+        trace_cent = TraceMask.from_file(mcent_path)
+        trace_width = TraceMask.from_file(mwidth_path)
+
+        model = Image(data=np.zeros((4080, 4086)))
+        model, _ = model.eval_fiber_model(trace_cent, trace_width, trace_amp=flux)
+
+        model.setHeader(trace_cent._header)
+        model.setHdrValue("IMAGETYP", "fiber model")
+        model.writeFitsData(os.path.join(masters_path, f"lvm-mmodel-{camera}.fits"))
+
+
 class lvmFlat(lvmFrame):
     """lvmFlat class"""
 
@@ -1837,3 +1872,7 @@ class lvmFlat(lvmFrame):
 
 class lvmArc(lvmFrame):
     pass
+
+
+if __name__ == "__main__":
+    create_fiber_model(mjd=60255)

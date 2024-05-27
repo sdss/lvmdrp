@@ -1627,7 +1627,6 @@ def science_reduction(expnum: int, use_fiducial_master: bool = False,
     sci_mjd = sci_metadata["mjd"].unique()[0]
     sci_expnum = sci_metadata["expnum"].unique()[0]
     sci_imagetyp = sci_metadata["imagetyp"].unique()[0]
-    log.info(f"running Quick DRP for tile {sci_tileid} at MJD {sci_mjd} with exposure number {sci_expnum}")
 
     master_mjd = get_master_mjd(sci_mjd)
     log.info(f"target master MJD: {master_mjd}")
@@ -1641,16 +1640,13 @@ def science_reduction(expnum: int, use_fiducial_master: bool = False,
     sci_metadata.sort_values("camera", inplace=True)
 
     # detrend science exposure
+    log.info(f"--- Starting science reduction for tile {sci_tileid} at MJD {sci_mjd} with exposure number {sci_expnum}")
     reduce_2d(mjd=sci_mjd, use_fiducial_cals=use_fiducial_master, expnums=[sci_expnum], reject_cr=reject_cr, skip_done=False)
 
     # run reduction loop for each science camera exposure
     for sci in sci_metadata.to_dict("records"):
         # define science camera
         sci_camera = sci["camera"]
-
-        # define ancillary product paths
-        esci_path = path.full("lvm_anc", drpver=drpver, kind="e", imagetype=sci["imagetyp"], **sci)
-        rsci_path = esci_path if os.path.isfile(esci_path) else path.full("lvm_raw", camspec=sci_camera, **sci)
 
         dsci_path = path.full("lvm_anc", drpver=drpver, kind="d", imagetype=sci["imagetyp"], **sci)
         lsci_path = path.full("lvm_anc", drpver=drpver, kind="l", imagetype=sci["imagetyp"], **sci)
@@ -1677,6 +1673,7 @@ def science_reduction(expnum: int, use_fiducial_master: bool = False,
                 raise ValueError(f"LVM_MASTER_DIR environment variable is not properly set, {masters_path} does not exists")
             mtrace_path = os.path.join(masters_path, f"lvm-mtrace-{sci_camera}.fits")
             mwidth_path = os.path.join(masters_path, f"lvm-mwidth-{sci_camera}.fits")
+            mmodel_path = os.path.join(masters_path, f"lvm-mmodel-{sci_camera}.fits")
         else:
             log.info(f"using master calibration frames from DRP version {drpver}, mjd = {sci_mjd}, camera = {sci_camera}")
             masters = match_master_metadata(target_mjd=sci_mjd,
@@ -1684,8 +1681,7 @@ def science_reduction(expnum: int, use_fiducial_master: bool = False,
                                             target_imagetyp=sci["imagetyp"])
             mtrace_path = path.full("lvm_master", drpver=drpver, kind="mtrace", **masters["trace"].to_dict())
             mwidth_path = None
-
-        log.info(f'--- Starting science reduction of raw frame: {rsci_path}')
+            mmodel_path = None
 
         # add astrometry to frame
         add_astrometry(in_image=dsci_path, out_image=dsci_path, in_agcsci_image=agcsci_path, in_agcskye_image=agcskye_path, in_agcskyw_image=agcskyw_path)
@@ -1698,7 +1694,7 @@ def science_reduction(expnum: int, use_fiducial_master: bool = False,
 
         # extract 1d spectra
         extract_spectra(in_image=lsci_path, out_rss=xsci_path, in_trace=mtrace_path, in_fwhm=mwidth_path,
-                                    method=extraction_method, parallel=parallel_run)
+                        in_model=mmodel_path, method=extraction_method, parallel=parallel_run)
 
     # per channel reduction
     for channel in "brz":
