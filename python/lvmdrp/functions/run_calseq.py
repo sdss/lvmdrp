@@ -32,7 +32,7 @@ from copy import deepcopy as copy
 from shutil import copy2, rmtree
 from itertools import groupby
 from astropy.stats import biweight_location, biweight_scale
-from multiprocessing import Pool, cpu_count
+from multiprocessing import Pool
 from scipy import interpolate
 from typing import List, Tuple, Dict
 
@@ -1160,7 +1160,7 @@ def create_nightly_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnum
             else:
                 image_tasks.subtract_straylight(in_image=cflat_path, out_image=lflat_path, out_stray=dstray_path,
                                                 in_cent_trace=cent_guess_path, select_nrows=(5,5), use_weights=True,
-                                                aperture=15, smoothing=400, median_box=101, gaussian_sigma=20.0)
+                                                aperture=15, smoothing=400, median_box=101, gaussian_sigma=20.0, parallel=0)
 
             if skip_done and os.path.isfile(flux_path) and os.path.isfile(cent_path) and os.path.isfile(fwhm_path):
                 log.info(f"skipping {flux_path}, {cent_path} and {fwhm_path}, files already exist")
@@ -1290,7 +1290,7 @@ def create_traces(mjd, cameras=CAMERAS, use_fiducial_cals=True, expnums_ldls=Non
             else:
                 image_tasks.subtract_straylight(in_image=dflat_path, out_image=lflat_path, out_stray=dstray_path,
                                                 in_cent_trace=cent_guess_path, select_nrows=(5,5), use_weights=True,
-                                                aperture=15, smoothing=400, median_box=101, gaussian_sigma=20.0)
+                                                aperture=15, smoothing=400, median_box=101, gaussian_sigma=20.0, parallel=0)
 
             if skip_done and os.path.isfile(cent_path) and os.path.isfile(flux_path) and os.path.isfile(fwhm_path):
                 log.info(f"skipping {cent_path}, {flux_path} and {fwhm_path}, file already exist")
@@ -1453,7 +1453,7 @@ def create_fiberflats(mjd: int, use_fiducial_cals: bool = True, expnums: List[in
         else:
             image_tasks.subtract_straylight(in_image=dflat_path, out_image=lflat_path, out_stray=stray_path,
                                             in_cent_trace=master_cals.get("cent"), select_nrows=(5,5), use_weights=True,
-                                            aperture=15, smoothing=400, median_box=101, gaussian_sigma=20.0)
+                                            aperture=15, smoothing=400, median_box=101, gaussian_sigma=20.0, parallel=0)
 
         if skip_done and os.path.isfile(xflat_path):
             log.info(f"skipping {xflat_path}, file already exist")
