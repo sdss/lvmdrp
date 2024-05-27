@@ -1531,7 +1531,7 @@ def reduce_2d(mjd, use_fiducial_cals=True, expnums=None, exptime=None, cameras=C
     if exptime is not None:
         frames.query("exptime == @exptime", inplace=True)
     if cameras:
-        frames.query("camera in @camera", inplace=True)
+        frames.query("camera in @cameras", inplace=True)
 
     masters_mjd = get_master_mjd(mjd)
     masters_path = os.path.join(MASTERS_DIR, str(masters_mjd))
