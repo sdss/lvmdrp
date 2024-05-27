@@ -901,7 +901,7 @@ def fix_raw_pixel_shifts(mjd, expnums=None, ref_expnums=None, use_fiducial_cals=
                                          interactive=interactive, display_plots=display_plots)
 
 
-def create_detrending_frames(mjd, use_fiducial_cals=True, expnums=None, exptime=None, kind="all", assume_imagetyp=None, reject_cr=True, skip_done=True, keep_ancillary=False):
+def create_detrending_frames(mjd, use_fiducial_cals=True, expnums=None, exptime=None, kind="all", label="", assume_imagetyp=None, reject_cr=True, skip_done=True, keep_ancillary=False):
     """Reduce a sequence of bias/dark/pixelflat frames to produce master frames
 
     Given a set of MJDs and (optionally) exposure numbers, reduce the
@@ -969,7 +969,7 @@ def create_detrending_frames(mjd, use_fiducial_cals=True, expnums=None, exptime=
             # combine into master frame
             kwargs = get_config_options('reduction_steps.create_master_frame', imagetyp)
             log.info(f'custom configuration parameters for create_master_frame: {repr(kwargs)}')
-            mframe_path = path.full("lvm_master", drpver=drpver, tileid=frame["tileid"], mjd=mjd, kind=f'm{imagetyp}', camera=frame["camera"])
+            mframe_path = path.full("lvm_master", drpver=drpver, tileid=frame["tileid"], mjd=mjd, kind=f'm{imagetyp}{label}', camera=frame["camera"])
             if skip_done and os.path.isfile(mframe_path):
                 log.info(f"skipping {mframe_path}, file already exist")
             else:
