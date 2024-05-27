@@ -4206,6 +4206,7 @@ def detrend_frame(
     replace_with_nan: bool = True,
     reject_cr: bool = True,
     median_box: list = [0, 0],
+    normalize_pixelflat: bool = True,
     display_plots: bool = False,
 ):
     """detrends input image by subtracting bias, dark and flatfielding
@@ -4234,6 +4235,8 @@ def detrend_frame(
         whether to reject or not cosmic rays from detrended image, by default True
     median_box : tuple, optional
         size of the median box to refine pixel mask, by default [0,0]
+    normalize_pixelflat : bool, optional
+        normalize by median value pixel flat frames, defaults to True
     display_plots : str, optional
         whether to show plots on display or not, by default False
     """
@@ -4369,7 +4372,7 @@ def detrend_frame(
 
     # normalize in case of pixel flat calibration
     # 'pixflat' is the imagetyp that a pixel flat can have
-    if img_type == "pixflat":
+    if img_type == "pixflat" and normalize_pixelflat:
         flat_array = numpy.ma.masked_array(
             detrended_img._data, mask=detrended_img._mask
         )
