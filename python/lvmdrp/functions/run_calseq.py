@@ -1834,9 +1834,8 @@ def create_fiber_model(mjd, flux=10000):
     masters_mjd = get_master_mjd(mjd)
     masters_path = os.path.join(MASTERS_DIR, f"{masters_mjd}")
 
-    cameras = [c+s for c, s in product("brz", "123")]
-    log.info(f"going to evaluate fiber model for cameras: {','.join(cameras)}")
-    for camera in cameras:
+    log.info(f"going to evaluate fiber model for cameras: {','.join(CAMERAS)}")
+    for camera in CAMERAS:
         mcent_path = os.path.join(masters_path, f"lvm-mtrace-{camera}.fits")
         mwidth_path = os.path.join(masters_path, f"lvm-mwidth-{camera}.fits")
 
