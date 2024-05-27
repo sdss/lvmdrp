@@ -1336,11 +1336,15 @@ def create_traces(mjd, cameras=CAMERAS, use_fiducial_cals=True, expnums_ldls=Non
             mamps[camera]._mask[bad_fibers] = True
             mcents[camera]._mask[bad_fibers] = True
             mwidths[camera]._mask[bad_fibers] = True
-            # masking untraced standard fibers
+            # masking untraced standard fibers (two cases: 1. not set for tracing and 2. flagged during tracing)
             untraced_fibers = np.isin(fibermap["orig_ifulabel"].value, unexposed_stds)
             mamps[camera]._mask[untraced_fibers] = True
             mcents[camera]._mask[untraced_fibers] = True
             mwidths[camera]._mask[untraced_fibers] = True
+            failed_fibers = np.nansum(mcents._data, axis=1) == 0
+            mamps[camera]._mask[failed_fibers] = True
+            mcents[camera]._mask[failed_fibers] = True
+            mwidths[camera]._mask[failed_fibers] = True
 
             # interpolate master traces in missing fibers
             if fit_poly:
@@ -1871,7 +1875,3 @@ class lvmFlat(lvmFrame):
 
 class lvmArc(lvmFrame):
     pass
-
-
-if __name__ == "__main__":
-    create_fiber_model(mjd=60255)
