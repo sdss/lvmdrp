@@ -1805,10 +1805,10 @@ def reduce_longterm_sequence(mjd, use_fiducial_cals=True, reject_cr=True, only_c
                            use_fiducial_cals=use_fiducial_cals,
                            expnums_ldls=expnums_ldls, expnums_qrtz=expnums_qrtz,
                            skip_done=skip_done)))
-        for ithr in range(len(threads)):
-            threads[ithr].get()
         pool.close()
         pool.join()
+        for ithr in range(len(threads)):
+            threads[ithr].get()
         _move_master_calibrations(mjd=mjd, kind={"trace", "width"})
     else:
         log.log(20 if "trace" in found_cals else 40, "skipping production of fiber traces")
