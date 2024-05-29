@@ -328,14 +328,14 @@ class RSS(FiberRows):
 
         # get wavelengths
         log.info("merging wavelength arrays")
-        waves = [rss._wave for rss in rsss]
+        waves = [numpy.round(rss._wave, 6) for rss in rsss]
         new_wave = numpy.unique(numpy.concatenate(waves))
         sampling = numpy.diff(new_wave)
 
         # optionally interpolate if the merged wavelengths are not monotonic
         fluxes, errors, masks, lsfs, skies, sky_errors = [], [], [], [], [], []
         skies_e, skies_w, sky_e_errors, sky_w_errors = [], [], [], []
-        if numpy.all(numpy.isclose(sampling, sampling[0])):
+        if numpy.all(numpy.isclose(sampling, sampling[0], atol=1e-6)):
             log.info(f"current wavelength sampling: min = {sampling.min():.2f}, max = {sampling.max():.2f}")
             # extend rss._data to new_wave filling with NaNs
             for rss in rsss:
@@ -433,28 +433,28 @@ class RSS(FiberRows):
             new_data = bn.nansum(fluxes * weights, axis=0)
             new_lsf = bn.nansum(lsfs * weights, axis=0)
             new_error = numpy.sqrt(bn.nansum(vars, axis=0))
-            new_mask = numpy.sum(masks, axis=0).astype("bool")
-            if skies.size != 0:
+            new_mask = (numpy.nansum(masks, axis=0)>0)
+            if rss._sky is not None:
                 new_sky = bn.nansum(skies * weights, axis=0)
             else:
                 new_sky = None
-            if sky_errors.size != 0:
+            if rss._sky_error is not None:
                 new_sky_error = numpy.sqrt(bn.nansum(sky_errors ** 2 * weights ** 2, axis=0))
             else:
                 new_sky_error = None
-            if skies_e.size != 0:
+            if rss._sky_east is not None:
                 new_skye = bn.nansum(skies_e * weights, axis=0)
             else:
                 new_skye = None
-            if sky_e_errors.size != 0:
+            if rss._sky_east_error is not None:
                 new_skye_error = numpy.sqrt(bn.nansum(sky_e_errors ** 2 * weights ** 2, axis=0))
             else:
                 new_skye_error = None
-            if skies_w.size != 0:
+            if rss._sky_west is not None:
                 new_skyw = bn.nansum(skies_w * weights, axis=0)
             else:
                 new_skyw = None
-            if sky_e_errors.size != 0:
+            if rss._sky_west_error is not None:
                 new_skyw_error = numpy.sqrt(bn.nansum(sky_w_errors ** 2 * weights ** 2, axis=0))
             else:
                 new_skyw_error = None
@@ -463,7 +463,7 @@ class RSS(FiberRows):
             new_data = bn.nanmean(fluxes, axis=0)
             new_lsf = bn.nanmean(lsfs, axis=0)
             new_error = numpy.sqrt(bn.nanmean(vars, axis=0))
-            new_mask = numpy.sum(masks, axis=0).astype("bool")
+            new_mask = numpy.nansum(masks, axis=0).astype("bool")
             if skies.size != 0:
                 new_sky = bn.nansum(skies, axis=0)
             else:
@@ -1334,6 +1334,26 @@ class RSS(FiberRows):
             new_mask[:, ipix:fpix+1] = self._mask
         else:
             new_mask = None
+        if self._sky_east is not None:
+            new_sky_east = numpy.full((self._sky_east.shape[0], new_wave.size), numpy.nan, dtype=numpy.float32)
+            new_sky_east[:, ipix:fpix+1] = self._sky_east
+        else:
+            new_sky_east = None
+        if self._sky_east_error is not None:
+            new_sky_east_error = numpy.full((self._sky_east_error.shape[0], new_wave.size), numpy.nan, dtype=numpy.float32)
+            new_sky_east_error[:, ipix:fpix+1] = self._sky_east_error
+        else:
+            new_sky_east_error = None
+        if self._sky_west is not None:
+            new_sky_west = numpy.full((self._sky_west.shape[0], new_wave.size), numpy.nan, dtype=numpy.float32)
+            new_sky_west[:, ipix:fpix+1] = self._sky_west
+        else:
+            new_sky_west = None
+        if self._sky_west_error is not None:
+            new_sky_west_error = numpy.full((self._sky_west_error.shape[0], new_wave.size), numpy.nan, dtype=numpy.float32)
+            new_sky_west_error[:, ipix:fpix+1] = self._sky_west_error
+        else:
+            new_sky_west_error = None
         if self._sky is not None:
             new_sky = numpy.full((self._sky.shape[0], new_wave.size), numpy.nan, dtype=numpy.float32)
             new_sky[:, ipix:fpix+1] = self._sky
@@ -1354,6 +1374,10 @@ class RSS(FiberRows):
         self._data = new_data
         self._error = new_error
         self._mask = new_mask
+        self._sky_east = new_sky_east
+        self._sky_east_error = new_sky_east_error
+        self._sky_west = new_sky_west
+        self._sky_west_error = new_sky_west_error
         self._sky = new_sky
         self._sky_error = new_sky_error
         self._lsf = new_lsf
@@ -1785,6 +1809,8 @@ class RSS(FiberRows):
                 new_rss._error[ifiber] = f(wave).astype("float32")
             f = interpolate.interp1d(rss._wave[ifiber], rss._mask[ifiber], kind="nearest", bounds_error=False, fill_value=1)
             new_rss._mask[ifiber] = f(wave).astype("bool")
+            new_rss._mask[ifiber] |= numpy.isnan(new_rss._data[ifiber])|(new_rss._data[ifiber]==0)
+            new_rss._mask[ifiber] |= ~numpy.isfinite(new_rss._error[ifiber])
             if rss._lsf is not None:
                 f = interpolate.interp1d(rss._wave[ifiber], rss._lsf[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
                 new_rss._lsf[ifiber] = f(wave).astype("float32")
@@ -3177,6 +3203,18 @@ class RSS(FiberRows):
             self._data[self._mask] = numpy.nan
             if self._error is not None:
                 self._error[self._mask] = numpy.nan
+            if self._sky is not None:
+                self._sky[self._mask] = numpy.nan
+            if self._sky_error is not None:
+                self._sky_error[self._mask] = numpy.nan
+            if self._sky_east is not None:
+                self._sky_east[self._mask] = numpy.nan
+            if self._sky_east_error is not None:
+                self._sky_east_error[self._mask] = numpy.nan
+            if self._sky_west is not None:
+                self._sky_west[self._mask] = numpy.nan
+            if self._sky_west_error is not None:
+                self._sky_west_error[self._mask] = numpy.nan
 
         return self._data, self._error
 
