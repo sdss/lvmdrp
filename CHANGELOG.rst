@@ -6,16 +6,19 @@ Change Log
 
 This document records the main changes to the drp code.
 
-1.0.3 (unreleased)
+1.0.3 (29-05-2024)
 ------------------
 
+- Fixed mask propagation and RSS set to NaN by default in masked pixels
+- Speeded up extraction
+- Fixed Straylight bug manifesting in low SNR frames
+- Fixed sky attributes propagation during channel combination
 
 1.0.2 (28-05-2024)
 ------------------
 - Speed up tracing by skipping model evaluation
 - Fixes bug with missing astrometry headers
 - Some other minor bug fixes
-
 
 1.0.1 (23-05-2024)
 ------------------
