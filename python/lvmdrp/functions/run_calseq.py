@@ -1341,7 +1341,7 @@ def create_traces(mjd, cameras=CAMERAS, use_fiducial_cals=True, expnums_ldls=Non
             mamps[camera]._mask[untraced_fibers] = True
             mcents[camera]._mask[untraced_fibers] = True
             mwidths[camera]._mask[untraced_fibers] = True
-            failed_fibers = np.nansum(mcents._data, axis=1) == 0
+            failed_fibers = (np.nansum(mcents[camera]._data, axis=1) == 0)|(np.nansum(mwidths[camera]._data, axis=1) == 0)
             mamps[camera]._mask[failed_fibers] = True
             mcents[camera]._mask[failed_fibers] = True
             mwidths[camera]._mask[failed_fibers] = True
@@ -1797,7 +1797,7 @@ def reduce_longterm_sequence(mjd, use_fiducial_cals=True, reject_cr=True, only_c
         expnums_ldls = np.sort(dome_flats.query("ldls").expnum.unique())
         expnums_qrtz = np.sort(dome_flats.query("quartz").expnum.unique())
 
-        pool = Pool()
+        pool = Pool(9)
         threads = []
         for camera in CAMERAS:
             threads.append(pool.apply_async(create_traces,
