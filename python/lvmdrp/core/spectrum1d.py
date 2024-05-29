@@ -3316,9 +3316,11 @@ class Spectrum1D(Header):
             shape=(self._dim, fibers),
         )
         # print(B)
-        out = sparse.linalg.lsmr(B, self._data / self._error, atol=1e-4, btol=1e-4)
-        # out = linalg.lstsq(A, self._data / self._error, lapack_driver='gelsy', check_finite=False)
-        # print(out)
+
+        ypixels = numpy.arange(self._data.size)
+        guess_flux = numpy.interp(pos, ypixels, self._data) * fact * sigma
+        out = sparse.linalg.lsmr(B, self._data / self._error, atol=1e-3, btol=1e-3, x0=guess_flux)
+        flux = out[0]
 
         error = numpy.sqrt(1 / bn.nansum((A**2), 0))
         if bad_pix is not None and bn.nansum(bad_pix) > 0:
@@ -3329,7 +3331,7 @@ class Spectrum1D(Header):
         #     plt.plot(numpy.dot(A * self._error[:, None], out[0]), "-r")
         #     # plt.plot(numpy.dot(A, out[0]), '-r')
         #     plt.show()
-        return out[0], error, bad_pix, B, A
+        return flux, error, bad_pix, B, A
 
     def collapseSpec(self, method="mean", start=None, end=None, transmission_func=None):
         if start is not None:
