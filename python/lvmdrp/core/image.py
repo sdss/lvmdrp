@@ -2071,7 +2071,7 @@ class Image(Header):
             models = numpy.clip(models, clip[0], clip[1])
 
         # interpolate failed columns if requested
-        masked_columns = numpy.count_nonzero((models == 0)|numpy.isnan(models), axis=0) >= 0.1*self._dim[0]
+        masked_columns = numpy.count_nonzero((models < 0)|numpy.isnan(models), axis=0) >= 0.1*self._dim[0]
         if interpolate_missing and masked_columns.any():
             log.info(f"interpolating spline fit in {masked_columns.sum()} columns")
             x_pixels = numpy.arange(self._dim[1])

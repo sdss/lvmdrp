@@ -1684,7 +1684,7 @@ def apply_fiberflat(in_rss: str, out_frame: str, in_flat: str, clip_below: float
             spec_flat._mask[select_clip_below] = True
 
         # correct
-        spec_new = spec_data / spec_flat
+        spec_new = spec_data / spec_flat._data
         rss.setSpec(i, spec_new)
 
     # compute final variance
