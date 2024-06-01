@@ -1307,7 +1307,7 @@ def create_traces(mjd, cameras=CAMERAS, use_fiducial_cals=True, expnums_ldls=Non
                 )
 
                 # update master traces
-                log.info(f"{camera = }, {expnum = }, {std_fiberid = :>6s}")
+                log.info(f"{camera = }, {expnum = }, {std_fiberid = }")
                 select_block = np.isin(fibermap["blockid"], [f"B{id+1}" for id in block_idxs])
                 if fit_poly:
                     mamps[camera]._coeffs[select_block] = trace_flux_fit._coeffs[select_block]
