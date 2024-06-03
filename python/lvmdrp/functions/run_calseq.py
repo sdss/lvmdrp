@@ -134,7 +134,7 @@ def choose_sequence(frames, flavor, kind):
     return chosen_frames, chosen_expnums
 
 
-def get_exposed_std_fiber(mjd, expnums, camera, imagetyp="flat", ref_column=LVM_REFERENCE_COLUMN, snr_threshold=5, display_plots=False):
+def get_exposed_std_fiber(mjd, expnums, camera, imagetyp="flat", ref_column=LVM_REFERENCE_COLUMN, snr_threshold=5, use_header=True, display_plots=False):
     """Returns the exposed standard fiber IDs for a given exposure sequence and camera
 
     Parameters
@@ -149,6 +149,8 @@ def get_exposed_std_fiber(mjd, expnums, camera, imagetyp="flat", ref_column=LVM_
         Reference column for the fiber trace
     snr_threshold : float
         SNR threshold above which a fiber is considered to be exposed
+    use_header : bool
+        Use CALIBFIB header keyword if available, defaults to True
     display_plots : bool
         If True, display plots
 
@@ -169,14 +171,18 @@ def get_exposed_std_fiber(mjd, expnums, camera, imagetyp="flat", ref_column=LVM_
 
     # get exposed standard fibers from header if present
     exposed_stds = {image._header["EXPOSURE"]: image._header.get("CALIBFIB", None) for image in images}
-    if all([exposed_std is not None for exposed_std in exposed_stds.values()]):
+    block_idxs = np.arange(LVM_NBLOCKS).tolist()
+    if use_header and all([exposed_std is not None for exposed_std in exposed_stds.values()]):
         log.info(f"standard fibers in {camera = }: {','.join(exposed_stds.values())}")
         for expnum, exposed_std in exposed_stds.items():
             fiber_par = fibermap[fibermap["orig_ifulabel"] == exposed_std]
             block_idx = int(fiber_par["blockid"][0][1:])-1
             exposed_stds[expnum] = (exposed_std, [block_idx])
     else:
-        log.warning(f"exposed standard fibers not found in header for {camera = }, going to infer exposed fibers from SNR")
+        if use_header:
+            log.warning(f"exposed standard fibers not found in header for {camera = }, going to infer exposed fibers from SNR")
+        else:
+            log.info(f"inferring exposed standard fiber for {camera = } from SNR")
 
         # combine frames for given camera
         log.info(f"combining {len(images)} exposures")
