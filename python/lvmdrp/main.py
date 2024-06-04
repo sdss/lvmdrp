@@ -1795,7 +1795,7 @@ def science_reduction(expnum: int, use_fiducial_master: bool = False,
 
 
 def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
-            with_cals: bool = False, no_sci: bool = False,
+            with_cals: bool = False, no_sci: bool = False, skip_fluxcal: bool = False,
             clean_ancillary: bool = False, debug_mode: bool = False):
     """ Run the quick DRP
 
@@ -1815,6 +1815,8 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
         Flag to reduce individual calibration files, by default False
     no_sci : bool, optional
         Flag to turn off science frame reduction, by default False
+    skip_fluxcal : bool, optional
+        Fits sensitivity curves but no flux calibration is performed, by default False
     clean_ancillary : bool, optional
         Flag to remove the ancillary paths, by default False
     debug_mode : bool, optional
@@ -1892,7 +1894,9 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
             kwargs = get_config_options('reduction_steps.science_reduction')
             for expnum in sci['expnum'].unique():
                 try:
-                    science_reduction(expnum, use_fiducial_master=True, clean_ancillary=clean_ancillary,
+                    science_reduction(expnum, use_fiducial_master=True,
+                                      skip_flux_calibration=skip_fluxcal,
+                                      clean_ancillary=clean_ancillary,
                                       debug_mode=debug_mode, **kwargs)
                 except Exception as e:
                     log.exception(f'Failed to reduce science frame mjd {mjd} exposure {expnum}: {e}')
