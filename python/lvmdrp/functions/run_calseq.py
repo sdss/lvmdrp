@@ -30,8 +30,9 @@ import numpy as np
 from glob import glob
 from copy import deepcopy as copy
 from shutil import copy2, rmtree
-from itertools import product, groupby
+from itertools import groupby
 from astropy.stats import biweight_location, biweight_scale
+from multiprocessing import Pool
 from scipy import interpolate
 from typing import List, Tuple, Dict
 
@@ -39,7 +40,13 @@ from lvmdrp import log, path, __version__ as drpver
 from lvmdrp.utils import metadata as md
 from lvmdrp.core.plot import create_subplots, save_fig
 from lvmdrp.core import dataproducts as dp
-from lvmdrp.core.constants import SPEC_CHANNELS, LVM_REFERENCE_COLUMN, LVM_NBLOCKS, MASTERS_DIR, ARC_LAMPS
+from lvmdrp.core.constants import (
+    CAMERAS,
+    SPEC_CHANNELS,
+    LVM_REFERENCE_COLUMN,
+    LVM_NBLOCKS,
+    MASTERS_DIR,
+    ARC_LAMPS)
 from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.core.image import Image, loadImage
 from lvmdrp.core.rss import RSS, lvmFrame
@@ -135,7 +142,7 @@ def choose_sequence(frames, flavor, kind, truncate=True):
     return chosen_frames, chosen_expnums
 
 
-def get_exposed_std_fiber(mjd, expnums, camera, imagetyp="flat", ref_column=LVM_REFERENCE_COLUMN, snr_threshold=5, display_plots=False):
+def get_exposed_std_fiber(mjd, expnums, camera, imagetyp="flat", ref_column=LVM_REFERENCE_COLUMN, snr_threshold=5, use_header=True, display_plots=False):
     """Returns the exposed standard fiber IDs for a given exposure sequence and camera
 
     Parameters
@@ -150,6 +157,8 @@ def get_exposed_std_fiber(mjd, expnums, camera, imagetyp="flat", ref_column=LVM_
         Reference column for the fiber trace
     snr_threshold : float
         SNR threshold above which a fiber is considered to be exposed
+    use_header : bool
+        Use CALIBFIB header keyword if available, defaults to True
     display_plots : bool
         If True, display plots
 
@@ -170,14 +179,18 @@ def get_exposed_std_fiber(mjd, expnums, camera, imagetyp="flat", ref_column=LVM_
 
     # get exposed standard fibers from header if present
     exposed_stds = {image._header["EXPOSURE"]: image._header.get("CALIBFIB", None) for image in images}
-    if all([exposed_std is not None for exposed_std in exposed_stds.values()]):
+    block_idxs = np.arange(LVM_NBLOCKS).tolist()
+    if use_header and all([exposed_std is not None for exposed_std in exposed_stds.values()]):
         log.info(f"standard fibers in {camera = }: {','.join(exposed_stds.values())}")
         for expnum, exposed_std in exposed_stds.items():
             fiber_par = fibermap[fibermap["orig_ifulabel"] == exposed_std]
             block_idx = int(fiber_par["blockid"][0][1:])-1
             exposed_stds[expnum] = (exposed_std, [block_idx])
     else:
-        log.warning(f"exposed standard fibers not found in header for {camera = }, going to infer exposed fibers from SNR")
+        if use_header:
+            log.warning(f"exposed standard fibers not found in header for {camera = }, going to infer exposed fibers from SNR")
+        else:
+            log.info(f"inferring exposed standard fiber for {camera = } from SNR")
 
         # combine frames for given camera
         log.info(f"combining {len(images)} exposures")
@@ -1161,7 +1174,7 @@ def create_nightly_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnum
             else:
                 image_tasks.subtract_straylight(in_image=cflat_path, out_image=lflat_path, out_stray=dstray_path,
                                                 in_cent_trace=cent_guess_path, select_nrows=(5,5), use_weights=True,
-                                                aperture=15, smoothing=400, median_box=101, gaussian_sigma=20.0)
+                                                aperture=15, smoothing=400, median_box=101, gaussian_sigma=20.0, parallel=0)
 
             if skip_done and os.path.isfile(flux_path) and os.path.isfile(cent_path) and os.path.isfile(fwhm_path):
                 log.info(f"skipping {flux_path}, {cent_path} and {fwhm_path}, files already exist")
@@ -1198,7 +1211,7 @@ def create_nightly_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnum
                 ratio.writeFitsData(dratio_path)
 
 
-def create_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnums_qrtz=None,
+def create_traces(mjd, cameras=CAMERAS, use_fiducial_cals=True, expnums_ldls=None, expnums_qrtz=None,
                   fit_poly=True, poly_deg_amp=5, poly_deg_cent=4, poly_deg_width=5,
                   skip_done=True):
     """Create traces from master dome flats
@@ -1215,6 +1228,8 @@ def create_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnums_qrtz=N
     ----------
     mjd : int
         MJD to reduce
+    cameras : list or tuple, optional
+        List of cameras (e.g., b2, z3) to create traces for
     use_fiducial_cals : bool
         Whether to use fiducial calibration frames or not, defaults to True
     expnums_ldls : list
@@ -1236,15 +1251,16 @@ def create_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnums_qrtz=N
         expnums = np.concatenate([expnums_ldls, expnums_qrtz])
     else:
         expnums = None
-    frames, _ = md.get_sequence_metadata(mjd, expnums=expnums, for_cals={"trace"})
+    frames, _ = md.get_sequence_metadata(mjd, expnums=expnums, cameras=cameras, for_cals={"trace"})
+    tileid = frames.tileid.iloc[0]
 
     # run 2D reduction on flats: preprocessing, detrending
-    reduce_2d(mjd, use_fiducial_cals=use_fiducial_cals, expnums=expnums, reject_cr=False, skip_done=skip_done)
+    reduce_2d(mjd, use_fiducial_cals=use_fiducial_cals, expnums=expnums, cameras=cameras, reject_cr=False, skip_done=skip_done)
 
-    # load current traces
-    mamps, mcents, mwidths = {}, {}, {}
-    for _ in product("brz", "123"):
-        camera = "".join(_)
+    # iterate through exposures with std fibers exposed
+    for camera in cameras:
+        # initialize fiber traces
+        mamps, mcents, mwidths = {}, {}, {}
         mamps[camera] = TraceMask()
         mamps[camera].createEmpty(data_dim=(648, 4086), poly_deg=poly_deg_amp)
         mcents[camera] = TraceMask()
@@ -1252,10 +1268,6 @@ def create_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnums_qrtz=N
         mwidths[camera] = TraceMask()
         mwidths[camera].createEmpty(data_dim=(648, 4086), poly_deg=poly_deg_width)
 
-    tileid = frames.tileid.iloc[0]
-    # iterate through exposures with std fibers exposed
-    cameras = ["b1", "b2", "b3", "r1", "r2", "r3", "z1", "z2", "z3"]
-    for camera in cameras:
         expnums = expnums_qrtz if camera[0] == "z" else expnums_ldls
         counts_threshold = 10000 if camera[0] == "z" else 5000
 
@@ -1265,15 +1277,15 @@ def create_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnums_qrtz=N
         exposed_stds, unexposed_stds = get_exposed_std_fiber(mjd=mjd, expnums=expnums, camera=camera)
         for expnum, (std_fiberid, block_idxs) in exposed_stds.items():
             # define paths
-            dflat_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=mjd, kind="d", imagetype="flat", camera=camera, expnum=expnum)
-            lflat_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=mjd, kind="l", imagetype="flat", camera=camera, expnum=expnum)
-            flux_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=mjd, kind="d", imagetype="flux", camera=camera, expnum=expnum)
-            cent_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=mjd, kind="d", imagetype="cent", camera=camera, expnum=expnum)
-            cent_guess_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=mjd, kind="d", imagetype="cent_guess", camera=camera, expnum=expnum)
-            dstray_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=mjd, kind="d", imagetype="stray", camera=camera, expnum=expnum)
-            fwhm_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=mjd, kind="d", imagetype="fwhm", camera=camera, expnum=expnum)
-            dmodel_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=mjd, kind="d", imagetype="model", camera=camera, expnum=expnum)
-            dratio_path = path.full("lvm_anc", drpver=drpver, tileid=tileid, mjd=mjd, kind="d", imagetype="ratio", camera=camera, expnum=expnum)
+            dflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", imagetype="flat", camera=camera, expnum=expnum)
+            lflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="l", imagetype="flat", camera=camera, expnum=expnum)
+            flux_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", imagetype="flux", camera=camera, expnum=expnum)
+            cent_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", imagetype="cent", camera=camera, expnum=expnum)
+            cent_guess_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", imagetype="cent_guess", camera=camera, expnum=expnum)
+            dstray_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", imagetype="stray", camera=camera, expnum=expnum)
+            fwhm_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", imagetype="fwhm", camera=camera, expnum=expnum)
+            dmodel_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", imagetype="model", camera=camera, expnum=expnum)
+            dratio_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", imagetype="ratio", camera=camera, expnum=expnum)
 
             # first centroids trace
             if skip_done and os.path.isfile(cent_guess_path):
@@ -1292,7 +1304,7 @@ def create_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnums_qrtz=N
             else:
                 image_tasks.subtract_straylight(in_image=dflat_path, out_image=lflat_path, out_stray=dstray_path,
                                                 in_cent_trace=cent_guess_path, select_nrows=(5,5), use_weights=True,
-                                                aperture=15, smoothing=400, median_box=101, gaussian_sigma=20.0)
+                                                aperture=15, smoothing=400, median_box=101, gaussian_sigma=20.0, parallel=0)
 
             if skip_done and os.path.isfile(cent_path) and os.path.isfile(flux_path) and os.path.isfile(fwhm_path):
                 log.info(f"skipping {cent_path}, {flux_path} and {fwhm_path}, file already exist")
@@ -1309,7 +1321,7 @@ def create_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnums_qrtz=N
                 )
 
                 # update master traces
-                log.info(f"{camera = }, {expnum = }, {std_fiberid = :>6s}")
+                log.info(f"{camera = }, {expnum = }, {std_fiberid = }")
                 select_block = np.isin(fibermap["blockid"], [f"B{id+1}" for id in block_idxs])
                 if fit_poly:
                     mamps[camera]._coeffs[select_block] = trace_flux_fit._coeffs[select_block]
@@ -1338,11 +1350,15 @@ def create_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnums_qrtz=N
             mamps[camera]._mask[bad_fibers] = True
             mcents[camera]._mask[bad_fibers] = True
             mwidths[camera]._mask[bad_fibers] = True
-            # masking untraced standard fibers
+            # masking untraced standard fibers (two cases: 1. not set for tracing and 2. flagged during tracing)
             untraced_fibers = np.isin(fibermap["orig_ifulabel"].value, unexposed_stds)
             mamps[camera]._mask[untraced_fibers] = True
             mcents[camera]._mask[untraced_fibers] = True
             mwidths[camera]._mask[untraced_fibers] = True
+            failed_fibers = (np.nansum(mcents[camera]._data, axis=1) == 0)|(np.nansum(mwidths[camera]._data, axis=1) == 0)
+            mamps[camera]._mask[failed_fibers] = True
+            mcents[camera]._mask[failed_fibers] = True
+            mwidths[camera]._mask[failed_fibers] = True
 
             # interpolate master traces in missing fibers
             if fit_poly:
@@ -1451,7 +1467,7 @@ def create_fiberflats(mjd: int, use_fiducial_cals: bool = True, expnums: List[in
         else:
             image_tasks.subtract_straylight(in_image=dflat_path, out_image=lflat_path, out_stray=stray_path,
                                             in_cent_trace=master_cals.get("cent"), select_nrows=(5,5), use_weights=True,
-                                            aperture=15, smoothing=400, median_box=101, gaussian_sigma=20.0)
+                                            aperture=15, smoothing=400, median_box=101, gaussian_sigma=20.0, parallel=0)
 
         if skip_done and os.path.isfile(xflat_path):
             log.info(f"skipping {xflat_path}, file already exist")
@@ -1794,7 +1810,19 @@ def reduce_longterm_sequence(mjd, use_fiducial_cals=True, reject_cr=True, only_c
         log.info(f"choosing {len(dome_flats)} dome flat exposures: {dome_flat_expnums}")
         expnums_ldls = np.sort(dome_flats.query("ldls").expnum.unique())
         expnums_qrtz = np.sort(dome_flats.query("quartz").expnum.unique())
-        create_traces(mjd=mjd, expnums_ldls=expnums_ldls, expnums_qrtz=expnums_qrtz, skip_done=skip_done)
+
+        pool = Pool(9)
+        threads = []
+        for camera in CAMERAS:
+            threads.append(pool.apply_async(create_traces,
+                           kwds=dict(mjd=mjd, cameras=[camera],
+                           use_fiducial_cals=use_fiducial_cals,
+                           expnums_ldls=expnums_ldls, expnums_qrtz=expnums_qrtz,
+                           skip_done=skip_done)))
+        pool.close()
+        pool.join()
+        for ithr in range(len(threads)):
+            threads[ithr].get()
         _move_master_calibrations(mjd=mjd, kind={"trace", "width"})
     else:
         log.log(20 if "trace" in found_cals else 40, "skipping production of fiber traces")
@@ -1824,9 +1852,8 @@ def create_fiber_model(mjd, flux=10000):
     masters_mjd = get_master_mjd(mjd)
     masters_path = os.path.join(MASTERS_DIR, f"{masters_mjd}")
 
-    cameras = [c+s for c, s in product("brz", "123")]
-    log.info(f"going to evaluate fiber model for cameras: {','.join(cameras)}")
-    for camera in cameras:
+    log.info(f"going to evaluate fiber model for cameras: {','.join(CAMERAS)}")
+    for camera in CAMERAS:
         mcent_path = os.path.join(masters_path, f"lvm-mtrace-{camera}.fits")
         mwidth_path = os.path.join(masters_path, f"lvm-mwidth-{camera}.fits")
 
@@ -1862,7 +1889,3 @@ class lvmFlat(lvmFrame):
 
 class lvmArc(lvmFrame):
     pass
-
-
-if __name__ == "__main__":
-    create_fiber_model(mjd=60255)

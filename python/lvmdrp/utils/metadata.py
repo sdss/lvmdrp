@@ -18,7 +18,7 @@ from astropy.io import fits
 from astropy.table import Table
 from tqdm import tqdm
 
-from lvmdrp.core.constants import FRAMES_CALIB_NEEDS
+from lvmdrp.core.constants import FRAMES_CALIB_NEEDS, CAMERAS
 from lvmdrp.utils.bitmask import (
     QualityFlag,
     RawFrameQuality,
@@ -937,7 +937,7 @@ def get_metadata(
     return metadata
 
 
-def get_sequence_metadata(mjd, expnums=None, exptime=None, for_cals={"bias", "trace", "wave", "fiberflat"}, extract_metadata=False):
+def get_sequence_metadata(mjd, expnums=None, exptime=None, cameras=CAMERAS, for_cals={"bias", "trace", "wave", "fiberflat"}, extract_metadata=False):
     """Get frames metadata for a given sequence
 
     Given a set of MJDs and (optionally) exposure numbers, get the frames
@@ -952,6 +952,8 @@ def get_sequence_metadata(mjd, expnums=None, exptime=None, for_cals={"bias", "tr
         List of exposure numbers to reduce
     exptime : int
         Filter frames metadata by exposure
+    cameras : list
+        List of cameras (e.g., "b1", "r3") to filter by
     for_cals : list, tuple or set, optional
         Only return frames meant to produce given calibrations, {'bias', 'trace', 'wave', 'fiberflat'}
     extract_metadata : bool
@@ -978,6 +980,9 @@ def get_sequence_metadata(mjd, expnums=None, exptime=None, for_cals={"bias", "tr
     # filter by given exptime
     if exptime is not None:
         frames.query("exptime == @exptime", inplace=True)
+
+    if cameras:
+        frames.query("camera in @cameras", inplace=True)
 
     # simple fix of imagetyp, some images have the wrong type in the header
     bias_selection = (frames.imagetyp == "bias")

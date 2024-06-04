@@ -187,6 +187,8 @@ def _create_trace_regions(out_trace, table_data, table_poly, table_poly_all, lab
     display_plots : bool, optional
         display plots, by default False
     """
+    if len(table_data) == 0 or len(table_poly) == 0:
+        return
     coords_file = out_trace.replace("calib", "ancillary").replace(".fits", "_coords.txt")
     os.makedirs(os.path.dirname(coords_file), exist_ok=True)
     poly_file = coords_file.replace("_coords.txt", "_poly.txt")

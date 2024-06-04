@@ -2093,7 +2093,7 @@ class Image(Header):
         new_img.setData(data=models)
         return new_img
 
-    def match_reference_column(self, ref_column=2000, ref_centroids=None, stretch_range=[0.7, 1.3], shift_range=[-100, 100]):
+    def match_reference_column(self, ref_column=2000, ref_centroids=None, stretch_range=[0.7, 1.3], shift_range=[-100, 100], return_pars=False):
         """Returns the reference centroids matched against the current image
 
         Parameters
@@ -2102,6 +2102,12 @@ class Image(Header):
             column to use as reference, by default 2000
         ref_centroids : numpy.ndarray, optional
             reference centroids to use for matching, by default None
+        stretch_range : list, tuple, optional
+            range of stretch factors to try, by default [0.7, 1.3]
+        shift_range : list, tuple, optional
+            range of shifts to try in pixels, by default [-100, 100]
+        return_pars : bool, optional
+            also returns a tuple with the strech and shift parameters, by default False
 
         Returns
         -------
@@ -2131,6 +2137,7 @@ class Image(Header):
 
         # correct reference fiber positions
         profile = self.getSlice(ref_column, axis="y")
+        profile._data = numpy.nan_to_num(profile._data, nan=0, neginf=0, posinf=0)
         pixels = profile._pixels
         pixels = numpy.arange(pixels.size)
         guess_heights = numpy.ones_like(ref_centroids) * numpy.nanmax(profile._data)
@@ -2143,6 +2150,8 @@ class Image(Header):
             shift_range=shift_range)
         log.info(f"stretch factor: {mhat:.3f}, shift: {bhat:.3f}")
         ref_centroids = ref_centroids * mhat + bhat
+        if return_pars:
+            return ref_centroids, mhat, bhat
         return ref_centroids
 
     def trace_fiber_centroids(self, ref_column=2000, ref_centroids=None, mask_fibstatus=1,
