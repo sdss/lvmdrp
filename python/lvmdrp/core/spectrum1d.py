@@ -2734,7 +2734,7 @@ class Spectrum1D(Header):
 
         return pixels, wave, data
 
-    def measurePeaks(self, init_pos, method="gauss", init_sigma=1.0, threshold=0, max_diff=1.5, bounds=(-numpy.inf, numpy.inf), ftol=1e-5, xtol=1e-5):
+    def measurePeaks(self, init_pos, method="gauss", init_sigma=1.0, threshold=0, max_diff=1.5, bounds=(-numpy.inf, numpy.inf), ftol=1e-3, xtol=1e-3):
         """
         Find the subpixel centre for the local maxima in a Spectrum.
 
@@ -3096,7 +3096,7 @@ class Spectrum1D(Header):
                 med_pos[i] = 0.0
         return offsets, med_pos
 
-    def fitMultiGauss(self, centres, init_fwhm, bounds=(-numpy.inf, numpy.inf), ftol=1e-5, xtol=1e-5):
+    def fitMultiGauss(self, centres, init_fwhm, bounds=(-numpy.inf, numpy.inf), ftol=1e-3, xtol=1e-3):
         select = numpy.zeros(self._dim, dtype="bool")
         flux_in = numpy.zeros(len(centres), dtype=numpy.float32)
         sig_in = numpy.ones_like(flux_in) * init_fwhm / 2.354
