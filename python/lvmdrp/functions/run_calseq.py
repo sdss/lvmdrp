@@ -1386,6 +1386,45 @@ def create_traces(mjd, cameras=CAMERAS, use_fiducial_cals=True, expnums_ldls=Non
             ratio.writeFitsData(dratio_path)
 
 
+def create_nightly_fiberflats(mjd, use_fiducial_cals=True, skip_done=True):
+
+    masters_mjd = get_master_mjd(mjd)
+    masters_path = os.path.join(MASTERS_DIR, f"{masters_mjd}")
+    for channel in "brz":
+
+        # define master paths for target frames
+        if use_fiducial_cals:
+            mtrace_paths = sorted(glob(os.path.join(masters_path, f"lvm-mtrace-{channel}?.fits")))
+            mwidth_paths = sorted(glob(os.path.join(masters_path, f"lvm-mwidth-{channel}?.fits")))
+            mwave_paths = sorted(glob(os.path.join(masters_path, f"lvm-mwave-{channel}?.fits")))
+            mlsf_paths = sorted(glob(os.path.join(masters_path, f"lvm-mlsf-{channel}?.fits")))
+        else:
+            mtrace_paths = sorted(path.expand("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=f"{channel}?", kind="mtrace"))
+            mwidth_paths = sorted(path.expand("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=f"{channel}?", kind="mwidth"))
+            mwave_paths = sorted(path.expand("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=f"{channel}?", kind="mwave"))
+            mlsf_paths = sorted(path.expand("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=f"{channel}?", kind="mlsf"))
+
+        # read calibrations
+        mcent = TraceMask.from_spectrographs(*[TraceMask.from_file(mtrace_path) for mtrace_path in mtrace_paths])
+        mwidth = TraceMask.from_spectrographs(*[TraceMask.from_file(mwidth_path) for mwidth_path in mwidth_paths])
+        mwave = TraceMask.from_spectrographs(*[TraceMask.from_file(mwave_path) for mwave_path in mwave_paths])
+        mlsf = TraceMask.from_spectrographs(*[TraceMask.from_file(mlsf_path) for mlsf_path in mlsf_paths])
+
+        # read mamp files
+        mamp_paths = sorted(path.expand("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mamp", camera=f"{channel}?"))
+        mamp = TraceMask.from_spectrographs(*[TraceMask.from_file(mamp_path) for mamp_path in mamp_paths])
+        # normalize by median fiber
+        median_fiber = np.nanmedian(mamp._data)
+        dome = copy(mamp)
+        dome._data = dome._data / median_fiber
+        # create lvmFlat object
+        lvmflat = lvmFlat(data=mamp._data, error=dome._error, mask=dome._mask, header=dome._header,
+                              cent_trace=mcent, width_trace=mwidth,
+                              wave_trace=mwave, lsf_trace=mlsf,
+                              superflat=dome._data, slitmap=SLITMAP)
+        lvmflat.writeFitsData(path.full("lvm_frame", mjd=mjd, tileid=11111, drpver=drpver, expnum="nightly", kind=f'Flat-{channel}'))
+
+
 def create_fiberflats(mjd: int, use_fiducial_cals: bool = True, expnums: List[int] = None, median_box: int = 10, niter: bool = 1000,
                       threshold: Tuple[float,float]|float = (0.5,1.5), nknots: bool = 50,
                       b_mask: List[Tuple[float,float]] = MASK_BANDS["b"],
