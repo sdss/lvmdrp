@@ -58,8 +58,7 @@ MASK_BANDS = {
     "z": [(7570, 7700)]
 }
 
-
-def choose_sequence(frames, flavor, kind):
+def choose_sequence(frames, flavor, kind, truncate=True):
     """Returns exposure numbers splitted in different sequences
 
     Parameters:
@@ -70,16 +69,25 @@ def choose_sequence(frames, flavor, kind):
         Flavor of calibration frame: 'twilight', 'bias', 'flat', 'arc'
     kind : str
         Kind of calibration frame: 'nightly', 'longterm'
+    truncate : bool, optional
+        Truncate sequences to match the expected number of exposures, by default True
 
     Return:
     ------
     list
         list containing arrays of exposure numbers for each sequence
     """
+    EXPECTED_LENGTHS = {
+    "bias": 7,
+    "flat": 2 if kind=="nightly" else 24,
+    "arc": 2 if kind=="nightly" else 24, "twilight": 24}
+
     if not isinstance(flavor, str) or flavor not in {"twilight", "bias", "flat", "arc"}:
         raise ValueError(f"invalid flavor '{flavor}', available values are 'twilight', 'bias', 'flat', 'arc'")
     if not isinstance(kind, str) or kind not in {"nightly", "longterm"}:
         raise ValueError(f"invalid kind '{kind}', available values are 'nightly' and 'longterm'")
+
+    # TODO: filter out exposures with hartmann door wrong status
 
     if flavor == "twilight":
         query = "imagetyp == 'flat' and not (ldls|quartz)"
@@ -103,24 +111,24 @@ def choose_sequence(frames, flavor, kind):
     lengths = [len(seq) for seq in sequences]
     if flavor == "twilight":
         chosen_expnums = np.concatenate(sequences)
+    elif flavor == "flat":
+        # TODO: choose the LDLS/Quartz sequence
+        pass
     else:
-        idx = lengths.index(min(lengths) if kind == "nightly" else max(lengths))
         if len(sequences) > 1:
+            idx = lengths.index(min(lengths) if kind == "nightly" else max(lengths))
             chosen_expnums = sequences[idx]
         else:
             chosen_expnums = sequences[0]
 
-    if flavor == "twilight":
-        expected_length = 24
-    elif flavor == "bias":
-        expected_length = 7
-    elif flavor == "flat":
-        expected_length = 2 if kind == "nightly" else 24
-    elif flavor == "arc":
-        expected_length = 2 if kind == "nightly" else 24
+    expected_length = EXPECTED_LENGTHS[flavor]
 
-    if len(chosen_expnums) != expected_length:
-        log.warning(f"wrong sequence length for {flavor = }: {len(chosen_expnums)}, expected {expected_length}")
+    sequence_length = len(chosen_expnums)
+    if sequence_length != expected_length:
+        log.warning(f"wrong sequence length for {flavor = }: {sequence_length}, expected {expected_length}")
+        if truncate and sequence_length > expected_length:
+            chosen_expnums = chosen_expnums[:expected_length]
+            log.info(f"selecting first {expected_length} exposures")
 
     chosen_frames = frames.query("expnum in @chosen_expnums")
     chosen_frames.sort_values(["expnum", "camera"], inplace=True)
