@@ -128,11 +128,11 @@ def choose_sequence(frames, flavor, kind):
 
 
 def get_fibers_signal(mjd, camera, expnum, imagetyp="flat"):
-    img_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, expnum=expnum, camera=camera, kind="d")
+    img_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, expnum=expnum, camera=camera, imagetype=imagetyp, kind="d")
     img = loadImage(img_path)
 
     img._data = np.nan_to_num(img._data, posinf=0, neginf=0)
-    img._data = np.nan_to_num(img._error, nan=np.inf, neginf=np.inf)
+    img._error = np.nan_to_num(img._error, nan=np.inf, neginf=np.inf)
 
     fiberpos = img.match_reference_column()
     fiberpos = fiberpos.round().astype(int)
