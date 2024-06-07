@@ -127,6 +127,27 @@ def choose_sequence(frames, flavor, kind):
     return chosen_frames, chosen_expnums
 
 
+def get_fibers_signal(mjd, camera, expnum, imagetyp="flat"):
+    img_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, expnum=expnum, camera=camera, kind="d")
+    img = loadImage(img_path)
+
+    img._data = np.nan_to_num(img._data, posinf=0, neginf=0)
+    img._data = np.nan_to_num(img._error, nan=np.inf, neginf=np.inf)
+
+    fiberpos = img.match_reference_column()
+    fiberpos = fiberpos.round().astype(int)
+    data = img._data[fiberpos]
+    error = img._error[fiberpos]
+
+    snr = data / error
+
+    log.info(f"average signal = {np.nanmean(data)}")
+    log.info(f"average SNR = {np.nanmean(snr)}")
+    log.info(f"standard deviation SNR = {np.nanstd(snr)}")
+
+    return fiberpos, img
+
+
 def get_exposed_std_fiber(mjd, expnums, camera, imagetyp="flat", ref_column=LVM_REFERENCE_COLUMN, snr_threshold=5, display_plots=False):
     """Returns the exposed standard fiber IDs for a given exposure sequence and camera
 
