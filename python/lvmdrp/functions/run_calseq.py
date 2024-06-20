@@ -138,7 +138,7 @@ def choose_sequence(frames, flavor, kind, truncate=True):
     if truncate and sequence_length > expected_length:
         log.info(f"selecting first {expected_length} exposures")
         if flavor == "flat":
-            qrtz_expnums = chosen_expnums[chosen_frames.qrtz][:expected_length//2]
+            qrtz_expnums = chosen_expnums[chosen_frames.quartz][:expected_length//2]
             ldls_expnums = chosen_expnums[chosen_frames.ldls][:expected_length//2]
             chosen_expnums = np.concatenate([qrtz_expnums, ldls_expnums])
         elif flavor == "arc":
@@ -1164,7 +1164,7 @@ def create_nightly_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnum
             dratio_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", imagetype="ratio", camera=camera, expnum=expnum_str)
 
             cent_guess_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mtrace_guess", camera=camera)
-            flux_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mamps", camera=camera)
+            flux_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mamp", camera=camera)
             cent_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mtrace", camera=camera)
             fwhm_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mwidth", camera=camera)
 
@@ -1349,7 +1349,7 @@ def create_traces(mjd, cameras=CAMERAS, use_fiducial_cals=True, expnums_ldls=Non
                 mcents[camera]._mask[select_block] = False
                 mwidths[camera]._mask[select_block] = False
 
-        mamp_path = path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=mjd, camera=camera, kind="mamps")
+        mamp_path = path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=mjd, camera=camera, kind="mamp")
         mcent_path = path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=mjd, camera=camera, kind="mtrace")
         mwidth_path = path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=mjd, camera=camera, kind="mwidth")
         os.makedirs(os.path.dirname(mamp_path), exist_ok=True)
