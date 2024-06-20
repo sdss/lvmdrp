@@ -85,9 +85,11 @@ def choose_sequence(frames, flavor, kind, truncate=True):
         list containing arrays of exposure numbers for each sequence
     """
     EXPECTED_LENGTHS = {
-    "bias": 7,
-    "flat": 2 if kind=="nightly" else 24,
-    "arc": 2 if kind=="nightly" else 24, "twilight": 24}
+        "bias": 7,
+        "flat": 2 if kind=="nightly" else 24,
+        "arc": 2 if kind=="nightly" else 24,
+        "twilight": 24
+    }
 
     if not isinstance(flavor, str) or flavor not in {"twilight", "bias", "flat", "arc"}:
         raise ValueError(f"invalid flavor '{flavor}', available values are 'twilight', 'bias', 'flat', 'arc'")
@@ -1395,7 +1397,7 @@ def create_traces(mjd, cameras=CAMERAS, use_fiducial_cals=True, expnums_ldls=Non
             ratio.writeFitsData(dratio_path)
 
 
-def create_nightly_fiberflats(mjd, use_fiducial_cals=True, skip_done=True):
+def create_dome_fiberflats(mjd, use_fiducial_cals=True, skip_done=True):
 
     masters_mjd = get_master_mjd(mjd)
     masters_path = os.path.join(MASTERS_DIR, f"{masters_mjd}")
@@ -1434,7 +1436,7 @@ def create_nightly_fiberflats(mjd, use_fiducial_cals=True, skip_done=True):
         lvmflat.writeFitsData(path.full("lvm_frame", mjd=mjd, tileid=11111, drpver=drpver, expnum="nightly", kind=f'Flat-{channel}'))
 
 
-def create_fiberflats(mjd: int, use_fiducial_cals: bool = True, expnums: List[int] = None, median_box: int = 10, niter: bool = 1000,
+def create_twilight_fiberflats(mjd: int, use_fiducial_cals: bool = True, expnums: List[int] = None, median_box: int = 10, niter: bool = 1000,
                       threshold: Tuple[float,float]|float = (0.5,1.5), nknots: bool = 50,
                       b_mask: List[Tuple[float,float]] = MASK_BANDS["b"],
                       r_mask: List[Tuple[float,float]] = MASK_BANDS["r"],
@@ -1734,7 +1736,7 @@ def create_wavelengths(mjd, use_fiducial_cals=True, expnums=None, skip_done=True
             rss_tasks.resample_wavelength(in_rss=harc_path, out_rss=harc_path, method="linear", wave_range=SPEC_CHANNELS[channel], wave_disp=0.5)
 
 
-def reduce_nightly_sequence(mjd, use_fiducial_cals=True, reject_cr=True, only_cals={"bias", "trace", "wave", "fiberflat"}, skip_done=True, keep_ancillary=False):
+def reduce_nightly_sequence(mjd, use_fiducial_cals=True, reject_cr=True, only_cals={"bias", "trace", "wave", "dome", "twilight"}, skip_done=True, keep_ancillary=False):
     """Reduces the nightly calibration sequence:
 
     The nightly calibration sequence consists of the following exposures:
@@ -1755,13 +1757,13 @@ def reduce_nightly_sequence(mjd, use_fiducial_cals=True, reject_cr=True, only_ca
     reject_cr : bool
         Reject cosmic rays in 2D reduction, by default True
     only_cals : list, tuple or set
-        Only produce this calibrations, by default {'bias', 'trace', 'wave', 'fiberflat'}
+        Only produce this calibrations, by default {'bias', 'trace', 'wave', 'dome', 'twilight'}
     skip_done : bool
         Skip pipeline steps that have already been done
     keep_ancillary : bool
         Keep ancillary files, by default False
     """
-    cal_types = {"bias", "trace", "wave", "fiberflat"}
+    cal_types = {"bias", "trace", "wave", "dome", "twilight"}
     if not set(only_cals).issubset(cal_types):
         raise ValueError(f"some chosen image types in 'only_cals' are not valid: {only_cals.difference(cal_types)}")
     log.info(f"going to produce nightly calibrations: {only_cals}")
@@ -1781,13 +1783,21 @@ def reduce_nightly_sequence(mjd, use_fiducial_cals=True, reject_cr=True, only_ca
         expnums_ldls = np.sort(dome_flats.query("ldls").expnum.unique())
         expnums_qrtz = np.sort(dome_flats.query("quartz").expnum.unique())
         create_nightly_traces(mjd=mjd, expnums_ldls=expnums_ldls, expnums_qrtz=expnums_qrtz, skip_done=skip_done)
-        # create_nightly_fiberflats(mjd=mjd, expnums_ldls=expnums_ldls, expnums_qrtz=expnums_qrtz, skip_done=skip_done)
     else:
         log.log(20 if "trace" in found_cals else 40, "skipping production of fiber traces")
 
-    if "wave" in only_cals and mjd == 60177:
-        log.info(f"running dedicated script to create wavelength calibrations for MJD = {mjd}")
-        _create_wavelengths_60177(use_fiducial_cals=False, skip_done=skip_done)
+    if mjd == 60177:
+        if "wave" in only_cals and "wave" in found_cals:
+            log.info(f"running dedicated script to create wavelength calibrations for MJD = {mjd}")
+            _create_wavelengths_60177(use_fiducial_cals=False, skip_done=skip_done)
+        else:
+            log.log(20 if "wave" in found_cals else 40, "skipping production of wavelength calibrations")
+
+        if "dome" in only_cals or "twilight" in only_cals and "dome" in found_cals:
+            log.info(f"running dedicated script to create fiberflats for MJD = {mjd}")
+            _create_fiberflats_60177(mjd=60255, use_fiducial_cals=False)
+        else:
+            log.log(20 if "dome" in found_cals or "twilight" in found_cals else 40, "skipping production of dome fiberflats")
     else:
         if "wave" in only_cals and "wave" in found_cals:
             arcs, arc_expnums = choose_sequence(frames, flavor="arc", kind="nightly")
@@ -1796,22 +1806,23 @@ def reduce_nightly_sequence(mjd, use_fiducial_cals=True, reject_cr=True, only_ca
         else:
             log.log(20 if "wave" in found_cals else 40, "skipping production of wavelength calibrations")
 
-    if "fiberflat" in only_cals and mjd == 60177:
-        log.info(f"running dedicated script to create fiberflats for MJD = {mjd}")
-        _create_fiberflats_60177(mjd=60255, use_fiducial_cals=False)
-    else:
-        if "fiberflat" in only_cals and "fiberflat" in found_cals:
+        if "dome" in only_cals and "dome" in found_cals:
+            create_dome_fiberflats(mjd=mjd, use_fiducial_cals=False)
+        else:
+            log.log(20 if "dome" in found_cals else 40, "skipping production of dome fiberflats")
+
+        if "twilight" in only_cals and "twilight" in found_cals:
             twilight_flats, twilight_expnums = choose_sequence(frames, flavor="twilight", kind="nightly")
             log.info(f"choosing {len(twilight_flats)} twilight exposures: {twilight_expnums}")
-            create_fiberflats(mjd=mjd, expnums=sorted(np.sort(twilight_flats.expnum.unique())), skip_done=skip_done)
+            create_twilight_fiberflats(mjd=mjd, expnums=sorted(np.sort(twilight_flats.expnum.unique())), skip_done=skip_done)
         else:
-            log.log(20 if "fiberflat" in found_cals else 40, "skipping production of fiberflats")
+            log.log(20 if "twilight" in found_cals else 40, "skipping production of twilight fiberflats")
 
     if not keep_ancillary:
         _clean_ancillary(mjd)
 
 
-def reduce_longterm_sequence(mjd, use_fiducial_cals=True, reject_cr=True, only_cals={"bias", "trace", "wave", "fiberflat"}, skip_done=True, keep_ancillary=False):
+def reduce_longterm_sequence(mjd, use_fiducial_cals=True, reject_cr=True, only_cals={"bias", "trace", "wave", "dome", "twilight"}, skip_done=True, keep_ancillary=False):
     """Reduces the long-term calibration sequence:
 
     The long-term calibration sequence consists of the following exposures:
@@ -1832,13 +1843,13 @@ def reduce_longterm_sequence(mjd, use_fiducial_cals=True, reject_cr=True, only_c
     reject_cr : bool
         Reject cosmic rays in 2D reduction, by default True
     only_cals : list, tuple or set
-        Only produce this calibrations, by default {'bias', 'trace', 'wave', 'fiberflat'}
+        Only produce this calibrations, by default {'bias', 'trace', 'wave', 'dome', 'twilight'}
     skip_done : bool
         Skip pipeline steps that have already been done
     keep_ancillary : bool
         Keep ancillary files, by default False
     """
-    cal_types = {"bias", "trace", "wave", "fiberflat"}
+    cal_types = {"bias", "trace", "wave", "dome", "twilight"}
     if not set(only_cals).issubset(cal_types):
         raise ValueError(f"some chosen image types in 'only_cals' are not valid: {only_cals.difference(cal_types)}")
     log.info(f"going to produce long-term calibrations: {only_cals}")
@@ -1883,13 +1894,18 @@ def reduce_longterm_sequence(mjd, use_fiducial_cals=True, reject_cr=True, only_c
     else:
         log.log(20 if "wave" in found_cals else 40, "skipping production of wavelength calibrations")
 
-    if "fiberflat" in only_cals and "fiberflat" in found_cals:
+    if "dome" in only_cals and "dome" in found_cals:
+        create_dome_fiberflats(mjd=mjd, use_fiducial_cals=False)
+    else:
+        log.log(20 if "dome" in found_cals else 40, "skipping production of dome fiberflats")
+
+    if "twilight" in only_cals and "twilight" in found_cals:
         twilight_flats, twilight_expnums = choose_sequence(frames, flavor="twilight", kind="longterm")
         log.info(f"choosing {len(twilight_flats)} twilight exposures: {twilight_expnums}")
-        create_fiberflats(mjd=mjd, expnums=twilight_expnums, skip_done=skip_done)
+        create_twilight_fiberflats(mjd=mjd, expnums=twilight_expnums, skip_done=skip_done)
         _move_master_calibrations(mjd=mjd, kind="fiberflat_twilight")
     else:
-        log.log(20 if "fiberflat" in found_cals else 40, "skipping production of fiberflats")
+        log.log(20 if "twilight" in found_cals else 40, "skipping production of twilight fiberflats")
 
     if not keep_ancillary:
         _clean_ancillary(mjd)
