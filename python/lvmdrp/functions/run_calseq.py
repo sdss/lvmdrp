@@ -118,9 +118,6 @@ def choose_sequence(frames, flavor, kind, truncate=True):
     lengths = [len(seq) for seq in sequences]
     if flavor == "twilight":
         chosen_expnums = np.concatenate(sequences)
-    elif flavor == "flat":
-        # TODO: choose the LDLS/Quartz sequence
-        pass
     else:
         if len(sequences) > 1:
             idx = lengths.index(min(lengths) if kind == "nightly" else max(lengths))
@@ -128,17 +125,29 @@ def choose_sequence(frames, flavor, kind, truncate=True):
         else:
             chosen_expnums = sequences[0]
 
-    expected_length = EXPECTED_LENGTHS[flavor]
-
-    sequence_length = len(chosen_expnums)
-    if sequence_length != expected_length:
-        log.warning(f"wrong sequence length for {flavor = }: {sequence_length}, expected {expected_length}")
-        if truncate and sequence_length > expected_length:
-            chosen_expnums = chosen_expnums[:expected_length]
-            log.info(f"selecting first {expected_length} exposures")
-
     chosen_frames = frames.query("expnum in @chosen_expnums")
-    chosen_frames.sort_values(["expnum", "camera"], inplace=True)
+    expected_length = EXPECTED_LENGTHS[flavor]
+    sequence_length = len(chosen_expnums)
+    if sequence_length == expected_length:
+        chosen_frames.sort_values(["expnum", "camera"], inplace=True)
+        return chosen_frames, chosen_expnums
+
+    log.warning(f"wrong sequence length for {flavor = }: {sequence_length}, expected {expected_length}")
+    if truncate and sequence_length > expected_length:
+        log.info(f"selecting first {expected_length} exposures")
+        if flavor == "flat":
+            qrtz_expnums = chosen_expnums[chosen_frames.qrtz][:expected_length//2]
+            ldls_expnums = chosen_expnums[chosen_frames.ldls][:expected_length//2]
+            chosen_expnums = np.concatenate([qrtz_expnums, ldls_expnums])
+        elif flavor == "arc":
+            short_expnums = chosen_expnums[chosen_frames.exptime == 10][:expected_length//2]
+            long_expnums = chosen_expnums[chosen_frames.exptime == 50][:expected_length//2]
+            chosen_expnums = np.concatenate([short_expnums, long_expnums])
+        else:
+            chosen_expnums = chosen_expnums[:expected_length]
+        chosen_frames = frames.query("expnum in @chosen_expnums")
+        chosen_frames.sort_values(["expnum", "camera"], inplace=True)
+
     return chosen_frames, chosen_expnums
 
 
