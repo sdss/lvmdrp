@@ -97,7 +97,7 @@ def choose_sequence(frames, flavor, kind, truncate=True):
     # TODO: filter out exposures with hartmann door wrong status
 
     if flavor == "twilight":
-        query = "imagetyp == 'flat' and not (ldls|quartz)"
+        query = "imagetyp == 'flat' and not (ldls|quartz) and not (neon|hgne|argon|xenon)"
     elif flavor == "bias":
         query = "imagetyp == 'bias'"
     elif flavor == "flat":
