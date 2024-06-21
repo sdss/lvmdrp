@@ -1397,21 +1397,26 @@ def create_traces(mjd, cameras=CAMERAS, use_fiducial_cals=True, expnums_ldls=Non
             ratio.writeFitsData(dratio_path)
 
 
-def create_dome_fiberflats(mjd, use_fiducial_cals=True, skip_done=True):
+def create_dome_fiberflats(mjd, expnums_ldls, expnums_qrtz, use_fiducial_cals=True, skip_done=True):
+
+    expnums = np.concatenate([expnums_ldls, expnums_qrtz])
+    frames, _ = md.get_sequence_metadata(mjd, expnums=expnums, for_cals={"flat"})
 
     masters_mjd = get_master_mjd(mjd)
     masters_path = os.path.join(MASTERS_DIR, f"{masters_mjd}")
-    for channel in "brz":
+    for channel, lamp in MASTER_CON_LAMPS.items():
 
         # define master paths for target frames
         if use_fiducial_cals:
             mtrace_paths = sorted(glob(os.path.join(masters_path, f"lvm-mtrace-{channel}?.fits")))
             mwidth_paths = sorted(glob(os.path.join(masters_path, f"lvm-mwidth-{channel}?.fits")))
+            # mmodel_paths = sorted(glob(os.path.join(masters_path, f"lvm-mmodel-{channel}?.fits")))
             mwave_paths = sorted(glob(os.path.join(masters_path, f"lvm-mwave-{channel}?.fits")))
             mlsf_paths = sorted(glob(os.path.join(masters_path, f"lvm-mlsf-{channel}?.fits")))
         else:
             mtrace_paths = sorted(path.expand("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=f"{channel}?", kind="mtrace"))
             mwidth_paths = sorted(path.expand("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=f"{channel}?", kind="mwidth"))
+            # mmodel_paths = sorted(path.expand("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=f"{channel}?", kind="mmodel"))
             mwave_paths = sorted(path.expand("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=f"{channel}?", kind="mwave"))
             mlsf_paths = sorted(path.expand("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=f"{channel}?", kind="mlsf"))
 
@@ -1421,19 +1426,39 @@ def create_dome_fiberflats(mjd, use_fiducial_cals=True, skip_done=True):
         mwave = TraceMask.from_spectrographs(*[TraceMask.from_file(mwave_path) for mwave_path in mwave_paths])
         mlsf = TraceMask.from_spectrographs(*[TraceMask.from_file(mlsf_path) for mlsf_path in mlsf_paths])
 
+        # read original combined dome flats and run extraction
+        flats = frames.loc[(frames[lamp])&(frames["camera"].str.startswith(channel))]
+        expnum_str = f"{flats.expnum.min():>08}_{flats.expnum.max():>08}"
+        xflat_paths = []
+        for i, specid in enumerate("123"):
+            camera = f"{channel}{specid}"
+            cflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="c", imagetype="flat", camera=camera, expnum=expnum_str)
+            xflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="x", imagetype="flat", camera=camera, expnum=expnum_str)
+            if skip_done and os.path.isfile(xflat_path):
+                log.info(f"skipping {xflat_path}, file already exists")
+            else:
+                image_tasks.extract_spectra(in_image=cflat_path, out_rss=xflat_path, in_trace=mtrace_paths[i], in_fwhm=mwidth_paths[i])
+            xflat_paths.append(xflat_path)
+        xflat = RSS.from_spectrographs(*[RSS.from_file(xflat_path) for xflat_path in xflat_paths])
+
         # read mamp files
         mamp_paths = sorted(path.expand("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mamp", camera=f"{channel}?"))
         mamp = TraceMask.from_spectrographs(*[TraceMask.from_file(mamp_path) for mamp_path in mamp_paths])
+
         # normalize by median fiber
-        median_fiber = np.nanmedian(mamp._data)
-        dome = copy(mamp)
-        dome._data = dome._data / median_fiber
+        fflat = RSS(data=mamp._data, error=np.sqrt(mamp._data), mask=xflat._mask, wave_trace=mwave, lsf_trace=mlsf, header=xflat._header)
+        fflat = fflat.rectify_wave(method="linear", wave_range=SPEC_CHANNELS[channel], wave_disp=0.5)
+        median_fiber = np.nanmedian(fflat._data, axis=0)
+        fflat._data = fflat._data / median_fiber
+        fflat.set_wave_trace(mwave)
+        fflat.set_lsf_trace(mlsf)
+        fflat = fflat.to_native_wave(method="linear", interp_density=False, return_density=False)
         # create lvmFlat object
-        lvmflat = lvmFlat(data=mamp._data, error=dome._error, mask=dome._mask, header=dome._header,
+        lvmflat = lvmFlat(data=xflat._data / fflat._data, error=xflat._error, mask=xflat._mask, header=xflat._header,
                               cent_trace=mcent, width_trace=mwidth,
                               wave_trace=mwave, lsf_trace=mlsf,
-                              superflat=dome._data, slitmap=SLITMAP)
-        lvmflat.writeFitsData(path.full("lvm_frame", mjd=mjd, tileid=11111, drpver=drpver, expnum="nightly", kind=f'Flat-{channel}'))
+                              superflat=fflat._data, slitmap=SLITMAP)
+        lvmflat.writeFitsData(path.full("lvm_frame", mjd=mjd, tileid=11111, drpver=drpver, expnum=expnum_str, kind=f'Flat-{channel}'))
 
 
 def create_twilight_fiberflats(mjd: int, use_fiducial_cals: bool = True, expnums: List[int] = None, median_box: int = 10, niter: bool = 1000,
@@ -1807,7 +1832,11 @@ def reduce_nightly_sequence(mjd, use_fiducial_cals=True, reject_cr=True, only_ca
             log.log(20 if "wave" in found_cals else 40, "skipping production of wavelength calibrations")
 
         if "dome" in only_cals and "dome" in found_cals:
-            create_dome_fiberflats(mjd=mjd, use_fiducial_cals=False)
+            dome_flats, dome_flat_expnums = choose_sequence(frames, flavor="flat", kind="nightly")
+            log.info(f"choosing {len(dome_flats)} dome flat exposures: {dome_flat_expnums}")
+            expnums_ldls = np.sort(dome_flats.query("ldls").expnum.unique())
+            expnums_qrtz = np.sort(dome_flats.query("quartz").expnum.unique())
+            create_dome_fiberflats(mjd=mjd, expnums_ldls=expnums_ldls, expnums_qrtz=expnums_qrtz, use_fiducial_cals=False, skip_done=skip_done)
         else:
             log.log(20 if "dome" in found_cals else 40, "skipping production of dome fiberflats")
 
