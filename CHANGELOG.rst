@@ -9,6 +9,7 @@ This document records the main changes to the drp code.
 1.0.4 (unreleased)
 ------------------
 
+- Adds a lockfile to drpall write, with 5 sec timeout, to prevent collisions during parallel writes.
 
 1.0.3 (29-05-2024)
 ------------------

@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 from astropy.io import fits
 from astropy.table import Table
+from filelock import FileLock, Timeout
 from tqdm import tqdm
 
 from lvmdrp.core.constants import FRAMES_CALIB_NEEDS, CAMERAS
@@ -1480,6 +1481,7 @@ def update_summary_file(filename: str, tileid: int = None, mjd: int = None, expn
     # get the row(s) from the raw frames metadata
     df = get_metadata(tileid=int(tileid), mjd=int(mjd), expnum=int(expnum), imagetyp='object')
     if df is None or df.empty:
+        log.info(f'No metadata found for {tileid=}, {mjd=}, {expnum=}. Exiting.')
         return
 
     # select unique expnum row, i.e. remove duplicates from camera/spec rows
@@ -1515,13 +1517,19 @@ def update_summary_file(filename: str, tileid: int = None, mjd: int = None, expn
     # create drpall h5 filepath
     drpall = path.full('lvm_drpall', drpver=DRPVER)
     drpall = drpall.replace('.fits', '.h5')
+    lock = FileLock(drpall.replace('.h5', '.h5.lock'), timeout=5)
 
     # write to pytables hdf5
     try:
-        df.to_hdf(drpall, key='summary', append=True, data_columns=True, min_itemsize={'skye_name': 20, 'skyw_name': 20, 'location': 120, 'agcam_location': 120})
+        with lock:
+            df.to_hdf(drpall, key='summary', mode='a', append=True, data_columns=True, min_itemsize={'skye_name': 20, 'skyw_name': 20, 'location': 120, 'agcam_location': 120})
     except ImportError:
         log.error('Missing pytables dependency. Install with `pip install "pandas[hdf5]"`. '
                       'On macs, you may first need to first run "brew install hdf5".')
+    except Timeout:
+        log.error("Another instance of the drp currently holds the drpall lock.")
+    else:
+        log.info(f'Updating drpall file {drpall}.')
 
 
 def convert_h5_to_fits(h5file: str):
