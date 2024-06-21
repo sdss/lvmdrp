@@ -1423,7 +1423,8 @@ def _collect_header_data(filename: str) -> dict:
     dict
         the extracted header key/values
     """
-    hdr_dict_mapping = {'drpver': 'DRPVER', 'drpqual': 'DRPQUAL', 'dpos': 'DPOS',
+    hdr_dict_mapping = {'drpver': 'DRPVER', 'drpqual': 'DRPQUAL', 'dpos': 'DPOS', 'object': 'OBJECT',
+                        'obstime': 'OBSTIME',
                         # sci
                         'sci_ra': 'TESCIRA', 'sci_dec': 'TESCIDE', 'sci_amass': 'TESCIAM',
                         'sci_kmpos': 'TESCIKM', 'sci_focpos': 'TESCIFO',
@@ -1507,15 +1508,22 @@ def update_summary_file(filename: str, tileid: int = None, mjd: int = None, expn
     dtypes['calib_mjd'] = 'int64'
     df = df.astype(dtypes)
 
+    # replace empty strings in object column with None
+    df['object'].replace('', None, inplace=True)
+
     # create drpall h5 filepath
     drpall = path.full('lvm_drpall', drpver=DRPVER)
     drpall = drpall.replace('.fits', '.h5')
     lock = FileLock(drpall.replace('.h5', '.h5.lock'), timeout=5)
 
+    # set min column sizes for some columns
+    min_itemsize = {'skye_name': 20, 'skyw_name': 20, 'location': 120, 'agcam_location': 120,
+                    'object': 16, 'obstime': 23}
+
     # write to pytables hdf5
     try:
         with lock:
-            df.to_hdf(drpall, key='summary', mode='a', append=True, data_columns=True, min_itemsize={'skye_name': 20, 'skyw_name': 20, 'location': 120, 'agcam_location': 120})
+            df.to_hdf(drpall, key='summary', mode='a', append=True, data_columns=True, min_itemsize=min_itemsize)
     except ImportError:
         log.error('Missing pytables dependency. Install with `pip install "pandas[hdf5]"`. '
                       'On macs, you may first need to first run "brew install hdf5".')
@@ -1548,3 +1556,26 @@ def convert_h5_to_fits(h5file: str):
     fitsfile = h5file.replace('.h5', '.fits')
     table = Table.from_pandas(df)
     table.write(fitsfile, overwrite=True)
+
+
+def extract_from_filename(filename: str | pathlib.Path) -> tuple:
+    """ Extract metadata from a reduced frame filename
+
+    Extract metadata from a reduced lvmXFrame filename.  This is a helper
+    function to extract the tileid, mjd, and expnum from a filename.
+
+    Parameters
+    ----------
+    filename : str
+        the filename
+
+    Returns
+    -------
+    tuple
+        a tuple with the extracted metadata
+    """
+    path = pathlib.Path(filename)
+    expnum = path.parts[-1].split('.')[0].split('-')[-1].lstrip('0')
+    mjd = path.parts[-2]
+    tileid = path.parts[-3]
+    return tileid, mjd, expnum
