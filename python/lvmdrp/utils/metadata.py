@@ -1509,7 +1509,7 @@ def update_summary_file(filename: str, tileid: int = None, mjd: int = None, expn
     df = df.astype(dtypes)
 
     # replace empty strings in object column with None
-    df['object'].replace('', None, inplace=True)
+    df['object'] = df['object'].replace('', None)
 
     # create drpall h5 filepath
     drpall = path.full('lvm_drpall', drpver=DRPVER)
