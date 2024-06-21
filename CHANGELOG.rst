@@ -10,6 +10,7 @@ This document records the main changes to the drp code.
 ------------------
 
 - Adds a lockfile to drpall write, with 5 sec timeout, to prevent collisions during parallel writes.
+- Adds `OBJECT` and `OBSTIME` header keys to the drpall summary file
 
 1.0.3 (29-05-2024)
 ------------------

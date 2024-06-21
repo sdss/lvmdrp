@@ -117,9 +117,9 @@ def test_check_daily_yes(transfer, check):
                           ('-61234', [61231, 61234]),
                           ('61234-', [61234, 61238])],
                          ids=['int', 'str', 'list', 'range', 'upper', 'lower'])
-def test_parse_mjds(datadir, mjd, exp):
+def test_parse_mjds(datadirs, mjd, exp):
     """ test we can parse different mjd inputs """
-    datadir([61231, 61234, 61238])
+    datadirs([61231, 61234, 61238])
     out = parse_mjds(mjd)
     assert out == exp
 
@@ -138,5 +138,3 @@ def test_filter_expnum(multimeta, expnum, exp):
     out = filter_expnum(multimeta, expnum)
     uni = out['expnum'].unique()
     assert all(uni == exp)
-
-
