@@ -21,7 +21,7 @@ from astropy.io import fits
 from astropy.table import Table
 from astropy.time import Time
 from astropy.wcs import WCS
-from lvmdrp.core.constants import SPEC_CHANNELS, MASTERS_DIR
+from lvmdrp.core.constants import CAMERAS, SPEC_CHANNELS, MASTERS_DIR
 from lvmdrp.core.rss import RSS
 from lvmdrp.functions.imageMethod import (preproc_raw_frame, create_master_frame,
                                           create_pixelmask, detrend_frame,
@@ -1486,7 +1486,7 @@ def update_error_file(tileid: int, mjd: int, expnum: int, error: str,
         f.write('\n')
 
 
-def reduce_2d(mjd, use_fiducial_cals=True, expnums=None, exptime=None,
+def reduce_2d(mjd, use_fiducial_cals=True, expnums=None, exptime=None, cameras=CAMERAS,
               replace_with_nan=True, assume_imagetyp=None, reject_cr=True,
               skip_done=True, keep_ancillary=False):
     """Preprocess and detrend a list of 2D frames
@@ -1507,6 +1507,8 @@ def reduce_2d(mjd, use_fiducial_cals=True, expnums=None, exptime=None,
         List of exposure numbers to reduce
     exptime : int
         Exposure time to filter by
+    cameras : list
+        List of cameras to filter by
     replace_with_nan : bool
         Replace rejected pixels with NaN
     assume_imagetyp : str
@@ -1528,6 +1530,8 @@ def reduce_2d(mjd, use_fiducial_cals=True, expnums=None, exptime=None,
         frames.query("expnum in @expnums", inplace=True)
     if exptime is not None:
         frames.query("exptime == @exptime", inplace=True)
+    if cameras:
+        frames.query("camera in @cameras", inplace=True)
 
     masters_mjd = get_master_mjd(mjd)
     masters_path = os.path.join(MASTERS_DIR, str(masters_mjd))

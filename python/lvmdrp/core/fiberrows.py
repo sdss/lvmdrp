@@ -1332,13 +1332,16 @@ class FiberRows(Header, PositionTable):
         # early return if no coefficients are available
         if self._coeffs is None:
             return self
+        # early return if all fibers are masked
+        bad_fibers = self._mask.all(axis=1)
+        if bad_fibers.sum() == self._fibers:
+            return self
 
         # define coordinates
         x_pixels = numpy.arange(self._data.shape[1])
         y_pixels = numpy.arange(self._fibers)
 
         # interpolate coefficients
-        bad_fibers = self._mask.all(axis=1)
         f_coeffs = interpolate.interp1d(y_pixels[~bad_fibers], self._coeffs[~bad_fibers, :], axis=0, bounds_error=False, fill_value="extrapolate")
         self._coeffs = f_coeffs(y_pixels)
 
@@ -1380,6 +1383,8 @@ class FiberRows(Header, PositionTable):
         # interpolate data
         if axis == "Y" or axis == "y" or axis == 0:
             bad_fibers = self._mask.all(axis=1)
+            if bad_fibers.sum() == self._fibers:
+                return self
             f_data = interpolate.interp1d(y_pixels[~bad_fibers], self._data[~bad_fibers, :], axis=0, bounds_error=False, fill_value="extrapolate")
             self._data = f_data(y_pixels)
             if self._error is not None:
