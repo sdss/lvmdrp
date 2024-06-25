@@ -65,6 +65,58 @@ MASK_BANDS = {
     "z": [(7570, 7700)]
 }
 
+def get_calib_paths(mjd, flavors={"pixmask", "pixflat", "bias", "trace_guess", "trace", "width", "amp", "model", "wave", "lsf", "fiberflat_dome", "fiberflat_twilight"}, use_fiducial_cals=True):
+    """Returns a dictionary containing paths for calibration frames
+
+    Parameters
+    ----------
+    mjd : int
+        MJD to reduce
+    only_cals : list, tuple or set
+        Only produce this calibrations, by default {"pixmask", "pixflat", "bias", "trace_gues", "trace", "width", "amp", "model", "wave", "lsf", "fiberflat_dome", "fiberflat_twilight"}
+    use_fiducial_cals : bool
+        Whether to use fiducial calibration frames or not, defaults to True
+
+    Returns
+    -------
+    calibs : dict[str, dict[str, str]]
+        a dictionary containing calibrations for the given
+    """
+
+    master_mjd = get_master_mjd(mjd)
+
+    path_species = "lvm_calib" if use_fiducial_cals else "lvm_master"
+    calibs = {}
+    for flavor in flavors:
+        # define camera for camera frames or spectrograph combined frames
+        cams = "brz" if flavor.startswith("fiberflat_") else CAMERAS
+        # define calibration prefix
+        prefix = "" if flavor == "bias" or use_fiducial_cals else "n"
+
+        calibs[flavor] = {c: path.full(path_species, drpver=drpver, tileid=11111, mjd=master_mjd, kind=f"{prefix}{flavor}", camera=c) for c in cams}
+
+    return calibs
+
+
+def group_calib_paths(calib_paths):
+    """Returns a dictionary of calibration paths grouped by channel given a set of camera frame paths
+
+    Parameters
+    ----------
+    calib_paths : dict[str, str]
+        Dictionary containing camera frame calibrations
+
+    Returns
+    -------
+    paths : dict[str, str]
+        Calibration paths grouped by channel
+    """
+    paths = {}
+    for channel, cameras in groupby(calib_paths, key=lambda p: os.path.basename(p).split(".")[0].split("-")[-1][0]):
+        paths[channel] = sorted([calib_paths[camera] for camera in cameras])
+    return paths
+
+
 def choose_sequence(frames, flavor, kind, truncate=True):
     """Returns exposure numbers splitted in different sequences
 
