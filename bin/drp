@@ -201,7 +201,7 @@ cli.add_command(metacli)
 @cloup.constraint(mutually_exclusive, ['mjd', 'mjd_list', 'mjd_range'])
 @cloup.constraint(RequireExactly(1), ['mjd', 'mjd_list', 'mjd_range'])
 @cloup.constraint(mutually_exclusive, ['expnum', 'exp_list', 'exp_range'])
-def nightly_calibrations(mjd, skip_cr, use_nightly_cals,
+def nightly_calibrations(mjd, mjd_list, mjd_range, skip_cr, use_nightly_cals,
                          skip_bias, skip_trace, skip_wavelength,
                          skip_dome, skip_twilight, skip_done, keep_ancillary):
     """ Run the nightly calibration sequence """
@@ -213,6 +213,8 @@ def nightly_calibrations(mjd, skip_cr, use_nightly_cals,
                                                 [skip_bias, skip_trace, skip_wavelength, skip_dome, skip_twilight]) if not skip}
 
     mjds = parse_mjds(mjd=mjd)
+    if not isinstance(mjds, list):
+        mjds = [mjds]
     for mjd in mjds:
         reduce_nightly_sequence(mjd=mjd, reject_cr=not skip_cr,
                                 use_fiducial_cals=not use_nightly_cals,
