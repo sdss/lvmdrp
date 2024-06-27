@@ -5137,7 +5137,7 @@ def trace_fibers(
     # evaluate model image
     if out_model is not None and out_ratio is not None:
         log.info("evaluating model image")
-        model, mratio = img.eval_fiber_model(trace_amp, trace_cent, trace_fwhm)
+        model, mratio = img.eval_fiber_model(trace_cent, trace_fwhm, trace_amp)
         model.writeFitsData(out_model)
         mratio.writeFitsData(out_ratio)
     else:

@@ -1279,7 +1279,7 @@ def create_nightly_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnum
                     img_stray._data = np.nan_to_num(img_stray._data)
                     img_stray = img_stray.medianImg((1,10), propagate_error=True)
                     img_stray = img_stray.convolveImg(np.ones((1, 20), dtype="uint8"))
-                model, ratio = img_stray.eval_fiber_model(trace_flux_fit, trace_cent_fit, trace_fwhm_fit)
+                model, ratio = img_stray.eval_fiber_model(trace_cent_fit, trace_fwhm_fit, trace_flux_fit)
                 model.writeFitsData(model_path)
                 ratio.writeFitsData(dratio_path)
 
@@ -1454,7 +1454,7 @@ def create_traces(mjd, cameras=CAMERAS, use_fiducial_cals=True, expnums_ldls=Non
             mwidths[camera].writeFitsData(mwidth_path)
 
             # eval model continuum and ratio
-            model, ratio = img_stray.eval_fiber_model(mamps[camera], mcents[camera], mwidths[camera])
+            model, ratio = img_stray.eval_fiber_model(mcents[camera], mwidths[camera], mamps[camera])
             model.writeFitsData(dmodel_path)
             ratio.writeFitsData(dratio_path)
 
