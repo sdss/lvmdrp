@@ -1914,7 +1914,14 @@ class RSS(FiberRows):
         rss._header["BUNIT"] = unit
         rss._header["WAVREC"] = False
         rss._header["METREC"] = (method, "Wavelength rectification method")
-        del rss._header["CRPIX1"], rss._header["CRVAL1"], rss._header["CDELT1"], rss._header["CTYPE1"]
+        if "CRPIX1" in rss._header:
+            del rss._header["CRPIX1"]
+        if "CRVAL1" in rss._header:
+            del rss._header["CRVAL1"]
+        if "CDELT1" in rss._header:
+            del rss._header["CDELT1"]
+        if "CTYPE1" in rss._header:
+            del rss._header["CTYPE1"]
         # create output RSS
         new_rss = RSS(
             data=numpy.zeros((rss._fibers, wave.shape[1]), dtype="float32"),
