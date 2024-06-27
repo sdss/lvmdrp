@@ -1822,7 +1822,7 @@ def create_wavelengths(mjd, use_fiducial_cals=True, expnums=None, kind="longterm
             rss_tasks.resample_wavelength(in_rss=harc_path, out_rss=harc_path, method="linear", wave_range=SPEC_CHANNELS[channel], wave_disp=0.5)
 
 
-def reduce_nightly_sequence(mjd, use_fiducial_cals=True, reject_cr=True, only_cals={"bias", "trace", "wave", "dome", "twilight"}, skip_done=True, keep_ancillary=False):
+def reduce_nightly_sequence(mjd, use_fiducial_cals=False, reject_cr=True, only_cals={"bias", "trace", "wave", "dome", "twilight"}, skip_done=True, keep_ancillary=False):
     """Reduces the nightly calibration sequence:
 
     The nightly calibration sequence consists of the following exposures:
@@ -1839,7 +1839,7 @@ def reduce_nightly_sequence(mjd, use_fiducial_cals=True, reject_cr=True, only_ca
     mjd : int
         MJD to reduce
     use_fiducial_cals : bool
-        Whether to use fiducial calibration frames or not, defaults to True
+        Whether to use fiducial calibration frames or not, defaults to False
     reject_cr : bool
         Reject cosmic rays in 2D reduction, by default True
     only_cals : list, tuple or set
