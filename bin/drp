@@ -200,7 +200,6 @@ cli.add_command(metacli)
 @click.option('-a', '--keep-ancillary', is_flag=True, default=False, help='flag to keep ancillary files')
 @cloup.constraint(mutually_exclusive, ['mjd', 'mjd_list', 'mjd_range'])
 @cloup.constraint(RequireExactly(1), ['mjd', 'mjd_list', 'mjd_range'])
-@cloup.constraint(mutually_exclusive, ['expnum', 'exp_list', 'exp_range'])
 def nightly_calibrations(mjd, mjd_list, mjd_range, skip_cr, use_nightly_cals,
                          skip_bias, skip_trace, skip_wavelength,
                          skip_dome, skip_twilight, skip_done, keep_ancillary):
@@ -212,7 +211,8 @@ def nightly_calibrations(mjd, mjd_list, mjd_range, skip_cr, use_nightly_cals,
     only_cals = {flavor for flavor, skip in zip(["bias", "trace", "wave", "dome", "twilight"],
                                                 [skip_bias, skip_trace, skip_wavelength, skip_dome, skip_twilight]) if not skip}
 
-    mjds = parse_mjds(mjd=mjd)
+    # parse MJDs or
+    mjds = parse_mjds(mjd=mjd or mjd_list or mjd_range) or "*"
     if not isinstance(mjds, list):
         mjds = [mjds]
     for mjd in mjds:
