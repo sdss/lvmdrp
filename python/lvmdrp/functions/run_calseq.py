@@ -994,7 +994,7 @@ def fix_raw_pixel_shifts(mjd, expnums=None, ref_expnums=None, use_fiducial_cals=
                                          interactive=interactive, display_plots=display_plots)
 
 
-def create_detrending_frames(mjd, use_fiducial_cals=True, expnums=None, exptime=None, kind="all", assume_imagetyp=None, reject_cr=True, skip_done=True, keep_ancillary=False):
+def create_detrending_frames(mjd, use_fiducial_cals=True, expnums=None, exptime=None, kind="all", assume_imagetyp=None, reject_cr=True, skip_done=True):
     """Reduce a sequence of bias/dark/pixelflat frames to produce master frames
 
     Given a set of MJDs and (optionally) exposure numbers, reduce the
@@ -1028,8 +1028,6 @@ def create_detrending_frames(mjd, use_fiducial_cals=True, expnums=None, exptime=
         Reject cosmic rays
     skip_done : bool
         Skip pipeline steps that have already been done
-    keep_ancillary : bool
-        Keep ancillary files, by default False
     """
     frames, _ = md.get_sequence_metadata(mjd, expnums=expnums, exptime=exptime, for_cals={"bias", "dark", "pixflat"})
 
@@ -1069,11 +1067,6 @@ def create_detrending_frames(mjd, use_fiducial_cals=True, expnums=None, exptime=
                 os.makedirs(os.path.dirname(mframe_path), exist_ok=True)
                 dframe_paths = [path.full("lvm_anc", drpver=drpver, kind="d" if imagetyp != "bias" else "p", imagetype=imagetyp, **frame) for frame in analogs.to_dict("records")]
                 image_tasks.create_master_frame(in_images=dframe_paths, out_image=mframe_path, **kwargs)
-
-
-    # ancillary paths clean up
-    if not keep_ancillary:
-        _clean_ancillary(mjd=mjd, expnums=expnums, kind=kind)
 
 
 def create_pixelmasks(mjd, use_fiducial_cals=True, dark_expnums=None, pixflat_expnums=None,
@@ -1858,7 +1851,7 @@ def reduce_nightly_sequence(mjd, use_fiducial_cals=False, reject_cr=True, only_c
     if "bias" in only_cals and "bias" in found_cals:
         biases, bias_expnums = choose_sequence(frames, flavor="bias", kind="nightly")
         log.info(f"choosing {len(biases)} bias exposures: {bias_expnums}")
-        create_detrending_frames(mjd=mjd, expnums=bias_expnums, kind="bias", use_fiducial_cals=use_fiducial_cals, skip_done=skip_done, keep_ancillary=keep_ancillary)
+        create_detrending_frames(mjd=mjd, expnums=bias_expnums, kind="bias", use_fiducial_cals=use_fiducial_cals, skip_done=skip_done)
     else:
         log.log(20 if "bias" in found_cals else 40, "skipping production of bias frames")
 
@@ -1948,7 +1941,7 @@ def reduce_longterm_sequence(mjd, use_fiducial_cals=True, reject_cr=True, only_c
     if "bias" in only_cals and "bias" in found_cals:
         biases, bias_expnums = choose_sequence(frames, flavor="bias", kind="longterm")
         log.info(f"choosing {len(biases)} bias exposures: {bias_expnums}")
-        create_detrending_frames(mjd=mjd, expnums=bias_expnums, kind="bias", use_fiducial_cals=use_fiducial_cals, skip_done=skip_done, keep_ancillary=keep_ancillary)
+        create_detrending_frames(mjd=mjd, expnums=bias_expnums, kind="bias", use_fiducial_cals=use_fiducial_cals, skip_done=skip_done)
         _move_master_calibrations(mjd=mjd, kind="bias")
     else:
         log.log(20 if "bias" in found_cals else 40, "skipping production of bias frames")
