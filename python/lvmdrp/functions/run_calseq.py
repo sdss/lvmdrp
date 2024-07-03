@@ -83,8 +83,7 @@ def get_calib_paths(mjd, flavors={"pixmask", "pixflat", "bias", "trace_guess", "
         a dictionary containing calibrations for the given
     """
 
-    master_mjd = get_master_mjd(mjd)
-
+    master_mjd = get_master_mjd(mjd) if use_fiducial_cals else mjd
     path_species = "lvm_calib" if use_fiducial_cals else "lvm_master"
     calibs = {}
     for flavor in flavors:
