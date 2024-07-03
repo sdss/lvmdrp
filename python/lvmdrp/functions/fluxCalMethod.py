@@ -93,10 +93,10 @@ def apply_fluxcal(in_rss: str, out_fframe: str, skip_fluxcal: bool = False, disp
                        wave=rss._wave, lsf=rss._lsf,
                        sky_east=rss._sky_east, sky_east_error=rss._sky_east_error,
                        sky_west=rss._sky_west, sky_west_error=rss._sky_west_error,
-                       fluxcal=rss._fluxcal, slitmap=rss._slitmap)
+                       fluxcal_std=rss._fluxcal_std, fluxcal_sci=rss._fluxcal_sci, slitmap=rss._slitmap)
 
     # check for flux calibration data
-    if np.isnan(fframe._fluxcal.to_pandas().values).all():
+    if np.isnan(fframe._fluxcal_std.to_pandas().values).all():
         log.warning("no standard star metadata found, skipping flux calibration")
         fframe.setHdrValue("FLUXCAL", False, "flux-calibrated?")
         fframe.writeFitsData(out_fframe)
@@ -115,7 +115,7 @@ def apply_fluxcal(in_rss: str, out_fframe: str, skip_fluxcal: bool = False, disp
     exptimes[
         (slitmap["targettype"] == "science") | (slitmap["targettype"] == "SKY")
     ] = fframe._header["EXPTIME"]
-    for std_hd in fframe._fluxcal.colnames:
+    for std_hd in fframe._fluxcal_std.colnames:
         exptime = fframe._header[f"{std_hd[:-3]}EXP"]
         fiberid = fframe._header[f"{std_hd[:-3]}FIB"]
         exptimes[slitmap["orig_ifulabel"] == fiberid] = exptime
@@ -129,7 +129,7 @@ def apply_fluxcal(in_rss: str, out_fframe: str, skip_fluxcal: bool = False, disp
     # weights = std_exp / std_exp.sum()
     # TODO: reject sensitivity curves based on the overall shape by normalizing using a median curve
     # calculate the biweight mean sensitivity
-    sens_arr = fframe._fluxcal.to_pandas().values  # * (std_exp / std_exp.sum())[None]
+    sens_arr = fframe._fluxcal_std.to_pandas().values  # * (std_exp / std_exp.sum())[None]
     sens_ave = biweight_location(sens_arr, axis=1, ignore_nan=True)
     sens_rms = biweight_scale(sens_arr, axis=1, ignore_nan=True)
 
@@ -143,12 +143,12 @@ def apply_fluxcal(in_rss: str, out_fframe: str, skip_fluxcal: bool = False, disp
         fframe.setHdrValue("FLUXCAL", False, "flux-calibrated?")
 
     # update the fluxcal extension
-    fframe._fluxcal["mean"] = sens_ave
-    fframe._fluxcal["rms"] = sens_rms
+    fframe._fluxcal_std["mean"] = sens_ave
+    fframe._fluxcal_std["rms"] = sens_rms
 
     ax.set_title(f"{channel = }", loc="left")
     for j in range(sens_arr.shape[1]):
-        std_hd = fframe._fluxcal.colnames[j][:-3]
+        std_hd = fframe._fluxcal_std.colnames[j][:-3]
         std_id = fframe._header.get(f"{std_hd}FIB", "unknown")
 
         ax.plot(fframe._wave, sens_arr[:, j], "-", lw=1, label=std_id)
@@ -219,70 +219,9 @@ def apply_fluxcal(in_rss: str, out_fframe: str, skip_fluxcal: bool = False, disp
     return fframe
 
 
-def fluxcal_Gaia(channel, in_rss, plot=True, GAIA_CACHE_DIR=None):
-    """
-    Flux calibrate LVM data using the 12 spectra of stars observed through
-    the Spec telescope.
-
-    Uses Gaia BP-RP spectra for calibration. To be replaced or extended by using fitted stellar
-    atmmospheres.
-    """
-    GAIA_CACHE_DIR = "./" if GAIA_CACHE_DIR is None else GAIA_CACHE_DIR
-    log.info(f"Using Gaia CACHE DIR '{GAIA_CACHE_DIR}'")
-
-    # load input RSS
-    log.info(f"loading input RSS file '{os.path.basename(in_rss)}'")
-    rss = RSS.from_file(in_rss)
-
-    # extract useful metadata
-    sci_spec = rss._header["SPEC"]
-
-    # wavelength array
-    w = rss._wave
-
-    # define dummy sensitivity array in (ergs/s/cm^2/A) / (e-/s/A)
-    colnames = [f"{std_fib[:-3]}SEN" for std_fib in rss._header["STD*FIB"]]
-    if len(colnames) == 0:
-        NSTD = 15
-        colnames = [f"STD{i}SEN" for i in range(1, NSTD + 1)]
-    res = Table(
-        np.full(w.size, np.nan, dtype=list(zip(colnames, ["f8"] * len(colnames))))
-    )
-    mean, rms = np.full(w.size, np.nan), np.full(w.size, np.nan)
-
-    # set dummy sensitivity array in RSS object
-    rss.set_fluxcal(fluxcal=res)
-
-    # get the list of standards from the header
-    try:
-        stds = retrieve_header_stars(rss=rss)
-    except KeyError:
-        log.warning("no standard star metadata found, skipping sensitivity measurement")
-        rss.writeFitsData(in_rss)
-        return res, mean, rms, rss
-
-    # early stop if not standards exposed in current spectrograph
-    if len(stds) == 0:
-        log.warning(
-            f"no standard star acquired/exposed in spectrograph {sci_spec}, skipping sensitivity measurement"
-        )
-        rss.writeFitsData(in_rss)
-        return res, mean, rms, rss
-
-    # load extinction curve
-    # Note that we assume a constant extinction curve here!
-    txt = np.genfromtxt(os.getenv("LVMCORE_DIR") + "/etc/lco_extinction.txt")
-    lext, ext = txt[:, 0], txt[:, 1]
-    ext = np.interp(w, lext, ext)
-
-    if plot:
-        plt.subplot
-        fig1 = plt.figure(1)
-        frame1 = fig1.add_axes((0.1, 0.3, 0.8, 0.6))
-        frame1.set_xticklabels([])
-
+def standard_sensitivity(w, channel, stds, rss, GAIA_CACHE_DIR, ext, res, plot, width=3):
     # load the sky masks
-    m = get_sky_mask_uves(w, width=3)
+    m = get_sky_mask_uves(w, width=width)
     m2 = None
     if channel == "z":
         m2 = get_z_continuum_mask(w)
@@ -345,9 +284,81 @@ def fluxcal_Gaia(channel, in_rss, plot=True, GAIA_CACHE_DIR=None):
             plt.plot(wgood, sgood, ".k", markersize=2, zorder=-999)
             plt.plot(w, res[f"STD{nn}SEN"], linewidth=1)
             # plt.ylim(0,0.1e-11)
+    return rss, res
 
+
+def science_sensititvity(rss, res):
+    return rss, res
+
+
+def fluxcal_Gaia(channel, in_rss, plot=True, GAIA_CACHE_DIR=None):
+    """
+    Flux calibrate LVM data using the 12 spectra of stars observed through
+    the Spec telescope.
+
+    Uses Gaia BP-RP spectra for calibration. To be replaced or extended by using fitted stellar
+    atmmospheres.
+    """
+    GAIA_CACHE_DIR = "./" if GAIA_CACHE_DIR is None else GAIA_CACHE_DIR
+    log.info(f"Using Gaia CACHE DIR '{GAIA_CACHE_DIR}'")
+
+    # load input RSS
+    log.info(f"loading input RSS file '{os.path.basename(in_rss)}'")
+    rss = RSS.from_file(in_rss)
+
+    # extract useful metadata
+    sci_spec = rss._header["SPEC"]
+
+    # wavelength array
+    w = rss._wave
+
+    # define dummy sensitivity array in (ergs/s/cm^2/A) / (e-/s/A)
+    colnames = [f"{std_fib[:-3]}SEN" for std_fib in rss._header["STD*FIB"]]
+    if len(colnames) == 0:
+        NSTD = 15
+        colnames = [f"STD{i}SEN" for i in range(1, NSTD + 1)]
+    res = Table(
+        np.full(w.size, np.nan, dtype=list(zip(colnames, ["f8"] * len(colnames))))
+    )
+    mean, rms = np.full(w.size, np.nan), np.full(w.size, np.nan)
+    mean_sci, rms_sci = np.full(w.size, np.nan), np.full(w.size, np.nan)
+
+    # get the list of standards from the header
+    try:
+        stds = retrieve_header_stars(rss=rss)
+    except KeyError:
+        log.warning("no standard star metadata found, skipping sensitivity measurement")
+        rss.writeFitsData(in_rss)
+        return res, mean, rms, rss
+
+    # early stop if not standards exposed in current spectrograph
+    if len(stds) == 0:
+        log.warning(
+            f"no standard star acquired/exposed in spectrograph {sci_spec}, skipping sensitivity measurement"
+        )
+        rss.writeFitsData(in_rss)
+        return res, mean, rms, rss
+
+    # load extinction curve
+    # Note that we assume a constant extinction curve here!
+    txt = np.genfromtxt(os.getenv("LVMCORE_DIR") + "/etc/lco_extinction.txt")
+    lext, ext = txt[:, 0], txt[:, 1]
+    ext = np.interp(w, lext, ext)
+
+    if plot:
+        plt.subplot
+        fig1 = plt.figure(1)
+        frame1 = fig1.add_axes((0.1, 0.3, 0.8, 0.6))
+        frame1.set_xticklabels([])
+
+    # standard fibers sensitivity curves
+    rss, res = standard_sensitivity(w, channel, stds, rss, GAIA_CACHE_DIR, ext, res, plot=plot)
     rms = biweight_scale(res.to_pandas().values, axis=1, ignore_nan=True)
     mean = biweight_location(res.to_pandas().values, axis=1, ignore_nan=True)
+
+    # TODO: science fibers with Gaia stars sensitivity curves
+    rss, res_sci = science_sensititvity(rss, res)
+    # rms_sci, mean_sci = None, None
 
     if plot:
         plt.ylabel("sensitivity [(ergs/s/cm^2/A) / (e-/s/A)]")
@@ -382,7 +393,7 @@ def fluxcal_Gaia(channel, in_rss, plot=True, GAIA_CACHE_DIR=None):
     rss.set_fluxcal(fluxcal=res)
     rss.writeFitsData(in_rss)
 
-    return res, mean, rms, rss
+    return res, mean, rms, res_sci, mean_sci, rms_sci, rss
 
 
 def createSensFunction_drp(

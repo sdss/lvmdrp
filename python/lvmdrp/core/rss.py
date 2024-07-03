@@ -106,7 +106,7 @@ class RSS(FiberRows):
         sky_east, sky_east_error = None, None
         sky_west, sky_west_error = None, None
         supersky, supersky_error = None, None
-        fluxcal = None
+        fluxcal_std, fluxcal_sci = None, None
         slitmap = None
         with pyfits.open(in_rss, uint=True, do_not_scale_image_data=True, memmap=False) as hdus:
             header = hdus["PRIMARY"].header
@@ -145,8 +145,10 @@ class RSS(FiberRows):
                     supersky = hdu
                 if hdu.name == "SUPERSKY_ERROR":
                     supersky_error = hdu
-                if hdu.name == "FLUXCAL":
-                    fluxcal = hdu
+                if hdu.name == "FLUXCAL_STD":
+                    fluxcal_std = hdu
+                if hdu.name == "FLUXCAL_SCI":
+                    fluxcal_sci = hdu
                 if hdu.name == "SLITMAP":
                     slitmap = hdu
 
@@ -170,7 +172,8 @@ class RSS(FiberRows):
                 supersky_error=supersky_error,
                 header=header,
                 slitmap=slitmap,
-                fluxcal=fluxcal
+                fluxcal_std=fluxcal_std,
+                fluxcal_sci=fluxcal_sci
             )
 
         return rss
@@ -222,8 +225,10 @@ class RSS(FiberRows):
                     supersky_error_out = rss._supersky_error
                 if rss._header is not None:
                     hdrs.append(Header(rss.getHeader()))
-                if rss._fluxcal is not None:
-                    fluxcal_out = rss._fluxcal
+                if rss._fluxcal_std is not None:
+                    fluxcal_std_out = rss._fluxcal_std
+                if rss._fluxcal_sci is not None:
+                    fluxcal_sci_out = rss._fluxcal_sci
             else:
                 data_out = numpy.concatenate((data_out, rss._data), axis=0)
 
@@ -269,11 +274,16 @@ class RSS(FiberRows):
                     supersky_error_out = None
                 if rss._header is not None:
                     hdrs.append(Header(rss.getHeader()))
-                if rss._fluxcal is not None:
-                    f = fluxcal_out.to_pandas()
-                    fluxcal_out = Table.from_pandas(f.combine_first(rss._fluxcal.to_pandas()))
+                if rss._fluxcal_std is not None:
+                    f = fluxcal_std_out.to_pandas()
+                    fluxcal_std_out = Table.from_pandas(f.combine_first(rss._fluxcal_std.to_pandas()))
                 else:
-                    fluxcal_out = None
+                    fluxcal_std_out = None
+                if rss._fluxcal_sci is not None:
+                    f = fluxcal_sci_out.to_pandas()
+                    fluxcal_sci_out = Table.from_pandas(f.combine_first(rss._fluxcal_sci.to_pandas()))
+                else:
+                    fluxcal_sci_out = None
 
         # update header
         if len(hdrs) > 0:
@@ -300,7 +310,9 @@ class RSS(FiberRows):
             supersky_error=supersky_error_out,
             header=hdr_out._header,
             slitmap=slitmap_out,
-            fluxcal=fluxcal_out
+            fluxcal_std=fluxcal_std_out,
+            fluxcal_sci=fluxcal_sci_out
+
         )
 
     @classmethod
@@ -605,7 +617,8 @@ class RSS(FiberRows):
         arc_position_x=None,
         arc_position_y=None,
         slitmap=None,
-        fluxcal=None,
+        fluxcal_std=None,
+        fluxcal_sci=None,
         good_fibers=None,
         fiber_type=None,
     ):
@@ -646,7 +659,8 @@ class RSS(FiberRows):
             self.set_supersky_error(supersky_error)
 
         self.setSlitmap(slitmap)
-        self.set_fluxcal(fluxcal)
+        self.set_fluxcal(fluxcal_std, source="std")
+        self.set_fluxcal(fluxcal_sci, source="sci")
 
     def _trace_to_coeff_table(self, trace, default_poly_deg=4):
         """Converts a given trace into its polynomial coefficients representation as an Astropy Table"""
@@ -3218,19 +3232,19 @@ class RSS(FiberRows):
 
         return self._data, self._error
 
-    def set_fluxcal(self, fluxcal):
+    def set_fluxcal(self, fluxcal, source="std"):
         if fluxcal is None:
-            self._fluxcal = None
+            setattr(self, f"_fluxcal_{source}", None)
             return
         if isinstance(fluxcal, pyfits.BinTableHDU):
-            self._fluxcal = Table(fluxcal.data)
+            setattr(self, f"_fluxcal_{source}", Table(fluxcal.data))
         elif isinstance(fluxcal, Table):
-            self._fluxcal = fluxcal
+            setattr(self, f"_fluxcal_{source}", fluxcal)
         else:
             raise TypeError(f"Invalid flux calibration table type '{type(fluxcal)}'")
 
-    def get_fluxcal(self):
-        return self._fluxcal
+    def get_fluxcal(self, source="std"):
+        return getattr(self, f"_fluxcal_{source}")
 
     def stack_trace(self, traces):
         trace_dict = dict(FUNC=[], XMIN=[], XMAX=[], COEFF=[])
@@ -3321,8 +3335,10 @@ class RSS(FiberRows):
             hdus.append(pyfits.BinTableHDU(self._supersky, name="SUPERSKY"))
         if self._supersky_error is not None:
             hdus.append(pyfits.BinTableHDU(self._supersky_error, name="SUPERSKY_ERROR"))
-        if self._fluxcal is not None:
-            hdus.append(pyfits.BinTableHDU(self._fluxcal, name="FLUXCAL"))
+        if self._fluxcal_std is not None:
+            hdus.append(pyfits.BinTableHDU(self._fluxcal_std, name="FLUXCAL_STD"))
+        if self._fluxcal_sci is not None:
+            hdus.append(pyfits.BinTableHDU(self._fluxcal_sci, name="FLUXCAL_SCI"))
         if self._slitmap is not None:
             hdus.append(pyfits.BinTableHDU(self._slitmap, name="SLITMAP"))
 
@@ -3484,23 +3500,24 @@ class lvmFFrame(lvmBaseProduct):
         sky_west = hdulist["SKY_WEST"].data
         sky_west_error = numpy.divide(1, hdulist["SKY_WEST_IVAR"].data, where=hdulist["SKY_WEST_IVAR"].data != 0, out=numpy.zeros_like(hdulist["SKY_WEST_IVAR"].data))
         sky_west_error = numpy.sqrt(sky_west_error)
-        fluxcal = Table(hdulist["FLUXCAL"].data)
+        fluxcal_std = Table(hdulist["FLUXCAL_STD"].data)
+        fluxcal_sci = Table(hdulist["FLUXCAL_SCI"].data)
         slitmap = Table(hdulist["SLITMAP"].data)
         return cls(data=data, error=error, mask=mask, header=header,
                    wave=wave, lsf=lsf,
                    sky_east=sky_east, sky_east_error=sky_east_error,
                    sky_west=sky_west, sky_west_error=sky_west_error,
-                   fluxcal=fluxcal, slitmap=slitmap)
+                   fluxcal_std=fluxcal_std, fluxcal_sci=fluxcal_sci, slitmap=slitmap)
 
     def __init__(self, data=None, error=None, mask=None, header=None, wave=None, lsf=None,
                  sky_east=None, sky_east_error=None,
                  sky_west=None, sky_west_error=None,
-                 fluxcal=None, slitmap=None, **kwargs):
+                 fluxcal_std=None, fluxcal_sci=None, slitmap=None, **kwargs):
         lvmBaseProduct.__init__(self, data=data, error=error, mask=mask, header=header,
                      wave=wave, lsf=lsf,
                      sky_east=sky_east, sky_east_error=sky_east_error,
                      sky_west=sky_west, sky_west_error=sky_west_error,
-                     fluxcal=fluxcal, slitmap=slitmap)
+                     fluxcal_std=fluxcal_std, fluxcal_sci=fluxcal_sci, slitmap=slitmap)
 
         self._blueprint = dp.load_blueprint(name="lvmFFrame")
         self._template = dp.dump_template(dataproduct_bp=self._blueprint, save=False)
@@ -3531,7 +3548,8 @@ class lvmFFrame(lvmBaseProduct):
         self._template["SKY_EAST_IVAR"].data = numpy.divide(1, self._sky_east_error**2, where=self._sky_east_error != 0, out=numpy.zeros_like(self._sky_east_error))
         self._template["SKY_WEST"].data = self._sky_west
         self._template["SKY_WEST_IVAR"].data = numpy.divide(1, self._sky_west_error**2, where=self._sky_west_error != 0, out=numpy.zeros_like(self._sky_west_error))
-        self._template["FLUXCAL"] = pyfits.BinTableHDU(data=self._fluxcal, name="FLUXCAL")
+        self._template["FLUXCAL_STD"] = pyfits.BinTableHDU(data=self._fluxcal_std, name="FLUXCAL_STD")
+        self._template["FLUXCAL_SCI"] = pyfits.BinTableHDU(data=self._fluxcal_sci, name="FLUXCAL_SCI")
         self._template["SLITMAP"] = pyfits.BinTableHDU(data=self._slitmap, name="SLITMAP")
         self._template.verify("silentfix")
 
