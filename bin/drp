@@ -11,7 +11,7 @@ import click
 import cloup
 from cloup.constraints import mutually_exclusive, RequireExactly, IsSet, If
 
-from lvmdrp.main import run_drp, reduce_file, check_daily_mjd, parse_mjds
+from lvmdrp.main import run_drp, reduce_file, check_daily_mjd, parse_mjds, read_expfile
 from lvmdrp.functions.skyMethod import configureSkyModel_drp
 from lvmdrp.utils.metadata import get_frames_metadata, get_master_metadata
 from lvmdrp.utils.cluster import run_cluster
@@ -101,21 +101,26 @@ def cli():
 @click.option('-e', '--expnum', type=int, help='an exposure number to reduce')
 @click.option('-el', '--exp-list', type=int, multiple=True, help='a list of specific exposures to reduce')
 @click.option('-er', '--exp-range', type=str, help='a range of exposure numbers to reduce')
+@click.option('-F', '--exp-file', type=str, help='a file containing a list of exposure numbers')
 @click.option('-f', '--skip-fluxcal', is_flag=True, default=False, help='skip flux calibration')
 @click.option('-c', '--clean-ancillary', is_flag=True, default=False, help='Remove ancillary paths after run')
 @click.option('-d', '--debug-mode', is_flag=True, default=False, help='Set debug mode on to run using aperture extraction and skip CR rejection')
 @cloup.constraint(mutually_exclusive, ['mjd', 'mjd_list', 'mjd_range'])
-@cloup.constraint(RequireExactly(1), ['mjd', 'mjd_list', 'mjd_range'])
+# @cloup.constraint(RequireExactly(1), ['mjd', 'mjd_list', 'mjd_range'])
 @cloup.constraint(mutually_exclusive, ['expnum', 'exp_list', 'exp_range'])
-def run(mjd, mjd_list, mjd_range, with_cals, no_sci, expnum, exp_list, exp_range, skip_fluxcal, clean_ancillary, debug_mode):
+def run(mjd, mjd_list, mjd_range, with_cals, no_sci, expnum, exp_list, exp_range, exp_file, skip_fluxcal, clean_ancillary, debug_mode):
     """ Run the DRP reduction for a given MJD or range of MJDs
 
     Run the DRP for an MJD or range of MJDs.  Various flags and options are available
     for filtering on calibration or science frames, or specific exposures.
 
     """
-    mjd = mjd or mjd_list or mjd_range
-    expnum = expnum or exp_list or exp_range
+    if exp_file is not None:
+        expnum = read_expfile(exp_file)
+    else:
+        mjd = mjd or mjd_list or mjd_range
+        expnum = expnum or exp_list or exp_range
+
     run_drp(mjd=mjd, expnum=expnum, no_sci=no_sci, with_cals=with_cals,
             skip_fluxcal=skip_fluxcal, clean_ancillary=clean_ancillary,
             debug_mode=debug_mode)
@@ -303,21 +308,26 @@ def get_calibs(kind, mjd, camera):
 @cli.command('cluster', short_help='Submit a Utah cluster run')
 @click.option('-l', '--mjd-list', type=int, default=None, multiple=True, help='a list of specific MJDs to reduce')
 @click.option('-r', '--mjd-range', type=str, default=None, help='a range of MJDs to reduce')
+@click.option('-e', '--expnum', type=int, help='an exposure number to reduce')
+@click.option('-el', '--exp-list', type=int, multiple=True, help='a list of specific exposures to reduce')
+@click.option('-er', '--exp-range', type=str, help='a range of exposure numbers to reduce')
+@click.option('-F', '--exp-file', type=str, help='a file containing a list of exposure numbers')
 @click.option('-n', '--nodes', type=int, default=2, help='the number of nodes to use')
 @click.option('-p', '--ppn', type=int, default=64, help='the number of CPU cores to use per node')
 @click.option('-w', '--walltime', type=str, default="24:00:00", help='the time for which the job is allowed to run')
 @click.option('-a', '--alloc', type=click.Choice(['sdss-np', 'sdss-kp']), default='sdss-np', help='which partition to use')
 @click.option('-s', '--submit', type=bool, default=True, help='flag to submit the job or not')
-def cluster(mjd_list, mjd_range, nodes, ppn, walltime, alloc, submit):
+def cluster(mjd_list, mjd_range, expnum, exp_list, exp_range, exp_file, nodes, ppn, walltime, alloc, submit):
     """ Submit a Utah cluster job to batch run the DRP by MJD """
 
     # filter the mjds
+    expnums = expnum or exp_list or exp_range or exp_file or None
     mjds = mjd_list or mjd_range or None
     if mjds:
         mjds = parse_mjds(mjds)
 
     # submit the cluster job
-    run_cluster(mjds=mjds, nodes=nodes, ppn=ppn, walltime=walltime, alloc=alloc, submit=submit)
+    run_cluster(mjds=mjds, expnums=expnums, nodes=nodes, ppn=ppn, walltime=walltime, alloc=alloc, submit=submit)
 
 
 if __name__ == "__main__":
