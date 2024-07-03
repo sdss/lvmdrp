@@ -4,7 +4,7 @@ import pathlib
 import numpy
 import requests
 from astropy.table import Table
-from gaiaxpy import calibrate
+import gaiaxpy
 from scipy import interpolate
 from scipy.integrate import simps
 
@@ -136,26 +136,20 @@ class GaiaStarNotFound(Exception):
 
 def retrive_gaia_star(gaiaID, GAIA_CACHE_DIR):
     """
-    Load or download and load from cache the spectrum of a gaia star, converted to erg/s/cm^2/A
+    Load or download and load from cache the XP spectrum of a gaia star, converted to erg/s/cm^2/A
     """
     # create cache dir if it does not exist
     pathlib.Path(GAIA_CACHE_DIR).mkdir(parents=True, exist_ok=True)
 
     if path.exists(GAIA_CACHE_DIR + "/gaia_spec_" + str(gaiaID) + ".csv") is True:
         # read the tables from our cache
-        gaiaflux = Table.read(
-            GAIA_CACHE_DIR + "/gaia_spec_" + str(gaiaID) + ".csv", format="csv"
-        )
-        gaiawave = Table.read(
-            GAIA_CACHE_DIR + "/gaia_spec_" + str(gaiaID) + "_sampling.csv", format="csv"
-        )
+        gaiaflux = Table.read(GAIA_CACHE_DIR + "/gaia_spec_" + str(gaiaID) + ".csv", format="csv")
+        gaiawave = Table.read(GAIA_CACHE_DIR + "/gaia_spec_" + str(gaiaID) + "_sampling.csv", format="csv")
     else:
         # need to download from Gaia archive
-        CSV_URL = (
-            "https://gea.esac.esa.int/data-server/data?RETRIEVAL_TYPE=XP_CONTINUOUS&ID=Gaia+DR3+"
+        CSV_URL = ("https://gea.esac.esa.int/data-server/data?RETRIEVAL_TYPE=XP_CONTINUOUS&ID=Gaia+DR3+"
             + str(gaiaID)
-            + "&format=CSV&DATA_STRUCTURE=RAW"
-        )
+            + "&format=CSV&DATA_STRUCTURE=RAW")
         FILE = GAIA_CACHE_DIR + "/XP_" + str(gaiaID) + "_RAW.csv"
 
         with requests.get(CSV_URL, stream=True) as r:
@@ -166,26 +160,19 @@ def retrive_gaia_star(gaiaID, GAIA_CACHE_DIR):
                 f.write(r.content.decode("utf-8"))
 
         # convert coefficients to sampled spectrum
-        _, _ = calibrate(
-            FILE,
-            output_path=GAIA_CACHE_DIR,
-            output_file="gaia_spec_" + str(gaiaID),
-            output_format="csv",
-        )
+        _, _ = gaiaxpy.calibrate(FILE, output_path=GAIA_CACHE_DIR,\
+                                 output_file="gaia_spec_" + str(gaiaID), output_format="csv")
         # read the flux and wavelength tables
-        gaiaflux = Table.read(
-            GAIA_CACHE_DIR + "/gaia_spec_" + str(gaiaID) + ".csv", format="csv"
-        )
-        gaiawave = Table.read(
-            GAIA_CACHE_DIR + "/gaia_spec_" + str(gaiaID) + "_sampling.csv", format="csv"
-        )
+        gaiaflux = Table.read(GAIA_CACHE_DIR + "/gaia_spec_" + str(gaiaID) + ".csv", format="csv")
+        gaiawave = Table.read(GAIA_CACHE_DIR + "/gaia_spec_" + str(gaiaID) + "_sampling.csv", format="csv")
 
     # make numpy arrays from whatever weird objects the Gaia stuff creates
     wave = numpy.fromstring(gaiawave["pos"][0][1:-1], sep=",") * 10  # in Angstrom
-    flux = (
-        1e7 * 1e-1 * 1e-4 * numpy.fromstring(gaiaflux["flux"][0][1:-1], sep=",")
-    )  # W/s/micron -> in erg/s/cm^2/A
+    # W/s/micron -> in erg/s/cm^2/A
+    flux = (1e7 * 1e-1 * 1e-4 * numpy.fromstring(gaiaflux["flux"][0][1:-1], sep=","))
     return wave, flux
+
+
 
 
 def extinctLaSilla(wave):
