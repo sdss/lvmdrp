@@ -1841,6 +1841,10 @@ def reduce_nightly_sequence(mjd, use_fiducial_cals=False, reject_cr=True, only_c
     keep_ancillary : bool
         Keep ancillary files, by default False
     """
+    if mjd is None:
+        log.error(f"nothing to reduce, MJD = {mjd}")
+        return
+
     cal_types = {"bias", "trace", "wave", "dome", "twilight"}
     if not set(only_cals).issubset(cal_types):
         raise ValueError(f"some chosen image types in 'only_cals' are not valid: {only_cals.difference(cal_types)}")
@@ -1931,6 +1935,10 @@ def reduce_longterm_sequence(mjd, use_fiducial_cals=True, reject_cr=True, only_c
     keep_ancillary : bool
         Keep ancillary files, by default False
     """
+    if mjd is None:
+        log.error(f"nothing to reduce, MJD = {mjd}")
+        return
+
     cal_types = {"bias", "trace", "wave", "dome", "twilight"}
     if not set(only_cals).issubset(cal_types):
         raise ValueError(f"some chosen image types in 'only_cals' are not valid: {only_cals.difference(cal_types)}")

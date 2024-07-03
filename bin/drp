@@ -212,8 +212,8 @@ def nightly_calibrations(mjd, mjd_list, mjd_range, reject_cr, use_fiducial_cals,
                                                 [skip_bias, skip_trace, skip_wavelength, skip_dome, skip_twilight]) if not skip}
 
     # parse MJDs or
-    mjds = parse_mjds(mjd=mjd or mjd_list or mjd_range) or "*"
-    if not isinstance(mjds, list):
+    mjds = parse_mjds(mjd=mjd or mjd_list or mjd_range or None)
+    if not isinstance(mjds, (list, tuple)):
         mjds = [mjds]
     for mjd in mjds:
         reduce_nightly_sequence(mjd=mjd, reject_cr=reject_cr,
