@@ -96,26 +96,49 @@ You would find the files at `$SAS_BASE_DIR/sdsswork/lvm/sandbox/calib/`
 
 ## Running the DRP
 
-Say you want to reduce the `<expnum>` under `<mjd>`. You can do it by running in the shell the following:
+Say you want to reduce all expsure within `<mjd>`. You can do it by running in the shell the following:
 
 ```bash
-drp run -m <mjd> -e <expnum>
+drp run -m <mjd>
 ```
 
-This requires that you have correctly setup your environment by following the instructions in the [Prerequisites](#prerequisites) and [Installation](#installation) sections.
+or you can reduce a single exposure number by running:
+
+```bash
+drp run -e <expnum>
+```
+
+or a list of exposure numbers in a file `<expnum_file>`, by running:
+
+```bash
+drp run -F <expnum_file>
+```
+
+More options are available, you can see them by running:
+
+```bash
+drp run --help
+```
+
+Running the DRP requires that you have correctly setup your environment by following the instructions in the [Prerequisites](#prerequisites) and [Installation](#installation) sections.
 
 The `drp run` will reduce your target exposure. Here is a list of reduction steps carried out by the DRP:
 
 - **Preprocessing**: overscan trimming and subtraction and pixel masking
 - **Detrending**: bias and dark subtraction, Poisson error calculation, flatfielding (pixel level, when available), units conversion (e-/s)
-- **Extraction**: aperture-based 1D spectra extraction
-- **Wavelength calibration**: pixel-to-wavelength mapping and LSF function per fiber
-- **Fiberflat**: flatfielding (fiber level)
-- **Sky interpolation**: sky fibers interpolation along fiber ID, per sky telescope
-- **Sky subtraction**: sky subtraction of inverse-distance weighted master sky
-- **Wavelength resampling**: wavelength resampling to a common grid (~0.5 Angstrom)
-- **Channel combination**: stitching together spectrographs' channels
+- **Astrometry**: adds astrometry to the primary header and RA and DEC for each fiber to the slitmap extension
+- **Stray light**: modelling and subtraction of the straylight field
+- **Extraction**: fiber fitting spectra extraction, takes into account thermal fiber shifts in the Y direction
 - **Spectrograph combination**: row-stacking of spectrograph fibers
+- **Wavelength calibration**: pixel-to-wavelength mapping and LSF function per fiber
+- **Fiberflat**: flatfielding (fiber level) using twilight fiberflats
+- **Wavelength refinement**: refines the wavelength solution by matching the sky line positions, takes into account fiber thermal shifts in the wavelength direction, only used to subtract sky from standard fibers
+- **Sky fibers interpolation**: sky fibers interpolation along fiber ID by fitting the supersampled sky spectrum, per sky telescope
+- **Wavelength resampling**: wavelength resampling to a common grid (~0.5 Angstrom)
+- **Flux calibration**: calculates sensitivity curves for each standard star exposed and flux-calibrate the science fibers using the average sensitivity
+- **Channel combination**: stitching together spectrographs' channels
+- **Sky subtraction**: final sky subtraction separating sky lines and continuum and combining into master sky in a predefined way
+- **Generate/update summary**: adds a new record to the summary file (see description below)
 
 The main outputs will be stored in the SAS directory:
 
@@ -125,12 +148,19 @@ $SAS_BASE_DIR/sdsswork/lvm/spectro/redux/<drpver>/<tilegrp>/<tileid>/<mjd>/
 
 where you should find your `lvmCFrame-<expnum:08d>.fits` file, the `raw_metadata.hdf5` file and the `ancillary` folder. Within `ancillary` you'll find files following the naming conventions:
 
-- `lvm-[pdxwh]object-<camera>-<expnum:08d>.fits`
-- `lvm-[wh]sky_[ew]-<camera>-<expnum:08d>.fits`
+- `lvm-[pdxlwhs]object-<camera>-<expnum:08d>.fits`
+- `lvm-dstray-<camera>-<expnum:08d>.fits`: contains the stray light modelling information
+- `lvm-[wh]sky_[ew]-<camera>-<expnum:08d>.fits`: contains the supersampled sky fitting
 
-where each letter in **`pdxwh`** stands for preprocessed, detrended, extracted, wavelength-calibrated, wavelength-resampled, respectively. **`ew`** refers to east and west sky telescopes, respectively.
+where each letter in **`pdxlwh`** stands for preprocessed, detrended, extracted, wavelength-calibrated, wavelength-resampled, respectively. **`ew`** refers to east and west sky telescopes, respectively.
 
-**NOTE: the `ancillary` folder contains files that will eventually be merged into final products of the pipeline and/or deleted from disk on regular (not debugging) pipeline runs.**
+The main products of the pipeline:
+
+- `lvmFrame-<channel>-<expnum:08d>.fits`: extracted, spectrograph stacked, wavelength calibrated and flatfielded frame in electrons
+- `lvmFFrame-<channel>-<expnum:08d>.fits`: flux calibrated frame in physical units
+- `lvmCFrame-<expnum:08d>.fits`: channel combined flux calibrated frame
+- `lvmSFrame-<expnum:08>.fits`: sky subtracted frame
+- `drpall-<drpver>.h5`: summary file of the reductions using `<drpver>` version of the DRP
 
 ## ESO sky routines installation and configuration
 
