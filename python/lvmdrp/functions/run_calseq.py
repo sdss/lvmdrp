@@ -471,7 +471,7 @@ def _clean_ancillary(mjd, expnums=None, flavors="all"):
     if not set(flavors).issubset(flavors):
         raise ValueError(f"Invalid flavor: '{flavors}'. Must be one of {all_flavors} or 'all'")
 
-    ancillary_dir = os.path.join(os.getenv("LVM_SPECTRO_REDUX"), drpver, str(mjd), "ancillary")
+    ancillary_dir = os.path.join(os.getenv("LVM_SPECTRO_REDUX"), drpver, "0011XX", "11111", str(mjd), "ancillary")
     if flavors == "all":
         rmtree(ancillary_dir)
         return
