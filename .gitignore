@@ -44,6 +44,8 @@ test_redux-*
 *.pdf
 tests/htmlcov
 tests/*coverage*
+*.fits
+*.csv
 
 # Mac OSX
 .DS_Store
