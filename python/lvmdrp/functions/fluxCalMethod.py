@@ -49,9 +49,8 @@ from astropy.table import Table
 
 from lvmdrp.core.rss import RSS, loadRSS, lvmFFrame
 from lvmdrp.core.spectrum1d import Spectrum1D
-from lvmdrp.core.fluxcal import retrieve_header_stars, filter_channel
+import lvmdrp.core.fluxcal as fluxcal 
 from lvmdrp.core.sky import get_sky_mask_uves, get_z_continuum_mask
-from lvmdrp.external import ancillary_func
 from lvmdrp import log
 
 from lvmdrp.core.plot import plt, create_subplots, save_fig
@@ -238,11 +237,9 @@ def standard_sensitivity(w, channel, stds, rss, GAIA_CACHE_DIR, ext, res, plot=F
 
         # load Gaia BP-RP spectrum from cache, or download from webapp
         try:
-            gw, gf = ancillary_func.retrive_gaia_star(
-                gaia_id, GAIA_CACHE_DIR=GAIA_CACHE_DIR
-            )
+            gw, gf = fluxcal.retrive_gaia_star(gaia_id, GAIA_CACHE_DIR=GAIA_CACHE_DIR)
             stdflux = np.interp(w, gw, gf)  # interpolate to our wavelength grid
-        except ancillary_func.GaiaStarNotFound as e:
+        except fluxcal.GaiaStarNotFound as e:
             log.warning(e)
             continue
 
@@ -251,9 +248,9 @@ def standard_sensitivity(w, channel, stds, rss, GAIA_CACHE_DIR, ext, res, plot=F
         spec = (rss._data[fibidx[0],:] - master_sky._data[fibidx[0],:])/exptime
 
         # interpolate over bright sky lines
-        spec = ancillary_func.interpolate_mask(w, spec, m, fill_value="extrapolate")
+        spec = fluxcal.interpolate_mask(w, spec, m, fill_value="extrapolate")
         if channel == "z":
-            spec = ancillary_func.interpolate_mask(w, spec, ~m2, fill_value="extrapolate")
+            spec = fluxcal.interpolate_mask(w, spec, ~m2, fill_value="extrapolate")
 
         # correct for extinction
         spec *= 10 ** (0.4 * ext * secz)
@@ -265,13 +262,13 @@ def standard_sensitivity(w, channel, stds, rss, GAIA_CACHE_DIR, ext, res, plot=F
 
         # divide to find sensitivity and smooth
         sens = stdflux / spec
-        wgood, sgood = filter_channel(w, sens, 2)
+        wgood, sgood = fluxcal.filter_channel(w, sens, 2)
         s = interpolate.make_smoothing_spline(wgood, sgood, lam=1e4)
         res[f"STD{nn}SEN"] = s(w).astype(np.float32)
 
         # caluculate SDSS g band magnitudes for QC
-        mAB_std = np.round(ancillary_func.spec_to_LVM_mAB(channel, w, stdflux), 2)
-        mAB_obs = np.round(ancillary_func.spec_to_LVM_mAB(channel, w[np.isfinite(spec)], spec[np.isfinite(spec)]), 2)
+        mAB_std = np.round(fluxcal.spec_to_LVM_mAB(channel, w, stdflux), 2)
+        mAB_obs = np.round(fluxcal.spec_to_LVM_mAB(channel, w[np.isfinite(spec)], spec[np.isfinite(spec)]), 2)
         # update input file header
         label = channel.upper()
         rss.setHdrValue(f"STD{nn}{label}AB", mAB_std, f"Gaia AB mag in {label}-band")
@@ -339,7 +336,7 @@ def fluxcal_Gaia(channel, in_rss, plot=True, GAIA_CACHE_DIR=None, NSCI_MAX=15):
     # get the list of standards from the header
     # TODO: rework so that it still tries to calibrate from the science IFU
     try:
-        stds = retrieve_header_stars(rss=rss)
+        stds = fluxcal.retrieve_header_stars(rss=rss)
     except KeyError:
         log.warning("no standard star metadata found, skipping sensitivity measurement")
         rss.writeFitsData(in_rss)
@@ -388,7 +385,7 @@ def fluxcal_Gaia(channel, in_rss, plot=True, GAIA_CACHE_DIR=None, NSCI_MAX=15):
     rss.set_fluxcal(fluxcal=res_std)
     rss.writeFitsData(in_rss)
 
-    return res_std, mean_std, rms_std, rss
+    return res_std, mean_std, rms_std, res_sci, mean_sci, rms_sci, rss
 
 
 def createSensFunction_drp(
@@ -476,13 +473,13 @@ def createSensFunction_drp(
         or extinct_curve == "winter"
     ):
         extinct = 10 ** (
-            ancillary_func.extinctCAHA(star_spec._wave, extinct_v, type=extinct_curve)
+            fluxcal.extinctCAHA(star_spec._wave, extinct_v, type=extinct_curve)
             * airmass
             * -0.4
         )
     elif extinct_curve == "Paranal":
         extinct = 10 ** (
-            ancillary_func.extinctParanal(star_spec._wave) * airmass * -0.4
+            fluxcal.extinctParanal(star_spec._wave) * airmass * -0.4
         )
     else:
         extinct = Spectrum1D()
@@ -695,13 +692,13 @@ def createSensFunction2_drp(
         or extinct_curve == "winter"
     ):
         extinct = 10 ** (
-            ancillary_func.extinctCAHA(star_spec._wave, extinct_v, type=extinct_curve)
+            fluxcal.extinctCAHA(star_spec._wave, extinct_v, type=extinct_curve)
             * airmass
             * -0.4
         )
     elif extinct_curve == "Paranal":
         extinct = 10 ** (
-            ancillary_func.extinctParanal(star_spec._wave) * airmass * -0.4
+            fluxcal.extinctParanal(star_spec._wave) * airmass * -0.4
         )
     else:
         extinct = Spectrum1D()
@@ -859,12 +856,12 @@ def quickFluxCalibration_drp(
             or extinct_curve == "winter"
         ):
             extinct = 10 ** (
-                ancillary_func.extinctCAHA(rss._wave, extinct_v, type=extinct_curve)
+                fluxcal.extinctCAHA(rss._wave, extinct_v, type=extinct_curve)
                 * airmass
                 * -0.4
             )
         elif extinct_curve == "Paranal":
-            extinct = 10 ** (ancillary_func.extinctParanal(rss._wave) * airmass * -0.4)
+            extinct = 10 ** (fluxcal.extinctParanal(rss._wave) * airmass * -0.4)
         else:
             extinct = Spectrum1D()
             extinct.loadTxtData(extinct_curve)

@@ -1697,60 +1697,61 @@ def science_reduction(expnum: int, use_fiducial_master: bool = False,
 
     # detrend science exposure
     log.info(f"--- Starting science reduction for tile {sci_tileid} at MJD {sci_mjd} with exposure number {sci_expnum}")
-    reduce_2d(mjd=sci_mjd, use_fiducial_cals=use_fiducial_master, expnums=[sci_expnum], reject_cr=reject_cr, skip_done=False)
+    if False:
+        reduce_2d(mjd=sci_mjd, use_fiducial_cals=use_fiducial_master, expnums=[sci_expnum], reject_cr=reject_cr, skip_done=False)
 
     # run reduction loop for each science camera exposure
-    for sci in sci_metadata.to_dict("records"):
-        # define science camera
-        sci_camera = sci["camera"]
+        for sci in sci_metadata.to_dict("records"):
+            # define science camera
+            sci_camera = sci["camera"]
 
-        dsci_path = path.full("lvm_anc", drpver=drpver, kind="d", imagetype=sci["imagetyp"], **sci)
-        lsci_path = path.full("lvm_anc", drpver=drpver, kind="l", imagetype=sci["imagetyp"], **sci)
-        xsci_path = path.full("lvm_anc", drpver=drpver, kind="x", imagetype=sci["imagetyp"], **sci)
-        wsci_path = path.full("lvm_anc", drpver=drpver, kind="w", imagetype=sci["imagetyp"], **sci)
-        ssci_path = path.full("lvm_anc", drpver=drpver, kind="s", imagetype=sci["imagetyp"], **sci)
-        hsci_path = path.full("lvm_anc", drpver=drpver, kind="h", imagetype=sci["imagetyp"], **sci)
-        lstr_path = path.full("lvm_anc", drpver=drpver, kind="d", imagetype="stray", **sci)
-        os.makedirs(os.path.dirname(hsci_path), exist_ok=True)
+            dsci_path = path.full("lvm_anc", drpver=drpver, kind="d", imagetype=sci["imagetyp"], **sci)
+            lsci_path = path.full("lvm_anc", drpver=drpver, kind="l", imagetype=sci["imagetyp"], **sci)
+            xsci_path = path.full("lvm_anc", drpver=drpver, kind="x", imagetype=sci["imagetyp"], **sci)
+            wsci_path = path.full("lvm_anc", drpver=drpver, kind="w", imagetype=sci["imagetyp"], **sci)
+            ssci_path = path.full("lvm_anc", drpver=drpver, kind="s", imagetype=sci["imagetyp"], **sci)
+            hsci_path = path.full("lvm_anc", drpver=drpver, kind="h", imagetype=sci["imagetyp"], **sci)
+            lstr_path = path.full("lvm_anc", drpver=drpver, kind="d", imagetype="stray", **sci)
+            os.makedirs(os.path.dirname(hsci_path), exist_ok=True)
 
-        # define science product paths
-        frame_path = path.full("lvm_frame", drpver=drpver, tileid=sci_tileid, mjd=sci_mjd, expnum=sci_expnum, kind=f"Frame-{sci_camera}")
+            # define science product paths
+            frame_path = path.full("lvm_frame", drpver=drpver, tileid=sci_tileid, mjd=sci_mjd, expnum=sci_expnum, kind=f"Frame-{sci_camera}")
 
-        # define agc coadd path
-        agcsci_path=path.full('lvm_agcam_coadd', mjd=sci_mjd, specframe=sci_expnum, tel='sci')
-        agcskye_path=path.full('lvm_agcam_coadd', mjd=sci_mjd, specframe=sci_expnum, tel='skye')
-        agcskyw_path=path.full('lvm_agcam_coadd', mjd=sci_mjd, specframe=sci_expnum, tel='skyw')
-        #agcspec_path=path.full('lvm_agcam_coadd', mjd=sci_mjd, specframe=sci_expnum, tel='spec')
+            # define agc coadd path
+            agcsci_path=path.full('lvm_agcam_coadd', mjd=sci_mjd, specframe=sci_expnum, tel='sci')
+            agcskye_path=path.full('lvm_agcam_coadd', mjd=sci_mjd, specframe=sci_expnum, tel='skye')
+            agcskyw_path=path.full('lvm_agcam_coadd', mjd=sci_mjd, specframe=sci_expnum, tel='skyw')
+            #agcspec_path=path.full('lvm_agcam_coadd', mjd=sci_mjd, specframe=sci_expnum, tel='spec')
 
-        # define calibration frames paths
-        if use_fiducial_master:
-            log.info(f"using fiducial master calibration frames for {sci_camera} at {masters_path = }")
-            if not os.path.isdir(masters_path):
-                raise ValueError(f"LVM_MASTER_DIR environment variable is not properly set, {masters_path} does not exists")
-            mtrace_path = os.path.join(masters_path, f"lvm-mtrace-{sci_camera}.fits")
-            mwidth_path = os.path.join(masters_path, f"lvm-mwidth-{sci_camera}.fits")
-            mmodel_path = os.path.join(masters_path, f"lvm-mmodel-{sci_camera}.fits")
-        else:
-            log.info(f"using master calibration frames from DRP version {drpver}, mjd = {sci_mjd}, camera = {sci_camera}")
-            masters = match_master_metadata(target_mjd=sci_mjd,
-                                            target_camera=sci_camera,
-                                            target_imagetyp=sci["imagetyp"])
-            mtrace_path = path.full("lvm_master", drpver=drpver, kind="mtrace", **masters["trace"].to_dict())
-            mwidth_path = None
-            mmodel_path = None
+            # define calibration frames paths
+            if use_fiducial_master:
+                log.info(f"using fiducial master calibration frames for {sci_camera} at {masters_path = }")
+                if not os.path.isdir(masters_path):
+                    raise ValueError(f"LVM_MASTER_DIR environment variable is not properly set, {masters_path} does not exists")
+                mtrace_path = os.path.join(masters_path, f"lvm-mtrace-{sci_camera}.fits")
+                mwidth_path = os.path.join(masters_path, f"lvm-mwidth-{sci_camera}.fits")
+                mmodel_path = os.path.join(masters_path, f"lvm-mmodel-{sci_camera}.fits")
+            else:
+                log.info(f"using master calibration frames from DRP version {drpver}, mjd = {sci_mjd}, camera = {sci_camera}")
+                masters = match_master_metadata(target_mjd=sci_mjd,
+                                                target_camera=sci_camera,
+                                                target_imagetyp=sci["imagetyp"])
+                mtrace_path = path.full("lvm_master", drpver=drpver, kind="mtrace", **masters["trace"].to_dict())
+                mwidth_path = None
+                mmodel_path = None
 
-        # add astrometry to frame
-        add_astrometry(in_image=dsci_path, out_image=dsci_path, in_agcsci_image=agcsci_path, in_agcskye_image=agcskye_path, in_agcskyw_image=agcskyw_path)
+            # add astrometry to frame
+            add_astrometry(in_image=dsci_path, out_image=dsci_path, in_agcsci_image=agcsci_path, in_agcskye_image=agcskye_path, in_agcskyw_image=agcskyw_path)
 
-        # subtract straylight
-        subtract_straylight(in_image=dsci_path, out_image=lsci_path, out_stray=lstr_path,
-                                        in_cent_trace=mtrace_path, select_nrows=(5,5), use_weights=True,
-                                        aperture=15, smoothing=400, median_box=101, gaussian_sigma=20.0,
-                                        parallel=parallel_run)
+            # subtract straylight
+            subtract_straylight(in_image=dsci_path, out_image=lsci_path, out_stray=lstr_path,
+                                            in_cent_trace=mtrace_path, select_nrows=(5,5), use_weights=True,
+                                            aperture=15, smoothing=400, median_box=101, gaussian_sigma=20.0,
+                                            parallel=parallel_run)
 
-        # extract 1d spectra
-        extract_spectra(in_image=lsci_path, out_rss=xsci_path, in_trace=mtrace_path, in_fwhm=mwidth_path,
-                        in_model=mmodel_path, method=extraction_method, parallel=parallel_run)
+            # extract 1d spectra
+            extract_spectra(in_image=lsci_path, out_rss=xsci_path, in_trace=mtrace_path, in_fwhm=mwidth_path,
+                            in_model=mmodel_path, method=extraction_method, parallel=parallel_run)
 
     # per channel reduction
     for channel in "brz":

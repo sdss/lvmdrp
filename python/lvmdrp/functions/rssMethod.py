@@ -30,7 +30,7 @@ from lvmdrp.core.passband import PassBand
 from lvmdrp.core.plot import plt, create_subplots, save_fig, plot_wavesol_residuals, plot_wavesol_coeffs
 from lvmdrp.core.rss import RSS, _read_pixwav_map, loadRSS, lvmFrame, lvmFFrame, lvmCFrame
 from lvmdrp.core.spectrum1d import Spectrum1D, _spec_from_lines, _cross_match
-from lvmdrp.external import ancillary_func
+from lvmdrp.core.fluxcal import galExtinct
 from lvmdrp.utils import flatten
 from lvmdrp import log
 
@@ -2442,7 +2442,7 @@ def correctGalExtinct_drp(in_rss, out_rss, Av, Rv="3.1", verbose="0"):
     rss = loadRSS(in_rss)
 
     if len(rss._wave.shape) == 1:
-        galExtCurve = ancillary_func.galExtinct(rss._wave, Rv)
+        galExtCurve = galExtinct(rss._wave, Rv)
         Alambda = galExtCurve * Av
         if verbose == 1:
             plt.plot(1.0 / 10 ** (Alambda._data / -2.5))
