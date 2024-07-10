@@ -2272,7 +2272,8 @@ class Image(Header):
 
             # fit each block
             par_blocks = []
-            for j, (cen_block, msk_block) in enumerate(zip(cen_blocks, msk_blocks)):
+            iterator = tqdm(enumerate(zip(cen_blocks, msk_blocks)), total=len(cen_blocks), desc="fitting fibers (00/00 good fibers)", ascii=True, unit="block")
+            for j, (cen_block, msk_block) in iterator:
                 # apply flux threshold
                 cen_idx = cen_block.round().astype("int16")
                 msk_block |= (img_slice._data[cen_idx] < counts_threshold)
@@ -2288,7 +2289,9 @@ class Image(Header):
                     log.info(f"skipping fiber block {j+1}/{nblocks} (most fibers masked)")
                 else:
                     # fit gaussian models to each fiber profile
-                    log.info(f"fitting fiber block {j+1}/{nblocks} ({cen_block.size}/{msk_block.size} good fibers)")
+                    iterator.set_description(f"fitting fibers ({cen_block.size:02d}/{msk_block.size:02d} good fibers)")
+                    iterator.refresh()
+                    # log.info(f"fitting fiber block {j+1}/{nblocks} ({cen_block.size}/{msk_block.size} good fibers)")
                     bound_lower = numpy.array([0]*cen_block.size + (cen_block-max_diff).tolist() + [fwhm_range[0]/2.354]*cen_block.size)
                     bound_upper = numpy.array([numpy.inf]*cen_block.size + (cen_block+max_diff).tolist() + [fwhm_range[1]/2.354]*cen_block.size)
                     _, par_block[~par_mask] = img_slice.fitMultiGauss(cen_block, init_fwhm=fwhm_guess, bounds=(bound_lower, bound_upper))
