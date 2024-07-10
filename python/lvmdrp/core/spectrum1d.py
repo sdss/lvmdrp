@@ -2819,25 +2819,26 @@ class Spectrum1D(Header):
 
         elif method == "gauss":
             # compute the subpixel peak position by fitting a gaussian to all peaks (3 pixel to get a unique solution
+            fact = numpy.sqrt(2 * numpy.pi)
+            ypixels = numpy.arange(self._data.size)
             positions = numpy.zeros(len(init_pos), dtype="float32")
             lower, upper = bounds
             amp_lower, pos_lower, sig_lower = numpy.split(lower, 3)
             amp_upper, pos_upper, sig_upper = numpy.split(upper, 3)
             for j in range(len(init_pos)):
+                guess_par = [
+                                numpy.interp(init_pos[j], ypixels, self._data) * fact * init_sigma,
+                                init_pos[j],
+                                init_sigma,
+                            ]
                 # only pixels with enough contrast are fitted
                 if not mask[j]:
-                    gauss = fit_profile.Gaussian(
-                        [
-                            self._data[init_pos[j]] * numpy.sqrt(2 * numpy.pi),
-                            init_pos[j],
-                            init_sigma,
-                        ]
-                    )  # set initial parameters for Gaussian profile
-
+                    gauss = fit_profile.Gaussian(guess_par)
                     gauss.fit(
                         self._pixels[init_pos[j] - 1 : init_pos[j] + 2],
                         self._data[init_pos[j] - 1 : init_pos[j] + 2],
-                        sigma=self._data[init_pos[j]-1:init_pos[j]+2],
+                        sigma=self._error[init_pos[j]-1:init_pos[j]+2],
+                        p0=guess_par,
                         bounds=([amp_lower[j], pos_lower[j], sig_lower[j]], [amp_upper[j], pos_upper[j], sig_upper[j]]),
                         warning=False, ftol=ftol, xtol=xtol
                     )  # perform fitting
