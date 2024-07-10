@@ -5092,7 +5092,7 @@ def trace_fibers(
         log.info(f"fitting peak trace with {deg_amp}-deg polynomial")
         # constraints = [{'type': 'ineq', 'fun': lambda t, c: interpolate.splev(0, (t, c, deg_amp), der=1)},
         #                {'type': 'ineq', 'fun': lambda t, c: -interpolate.splev(trace_amp._data.shape[1], (t, c, deg_amp), der=1)}]
-        table_data, table_poly, table_poly_all = trace_amp.fit_polynomial(deg_amp, poly_kind="poly")
+        table_data, table_poly, table_poly_all = trace_amp.fit_polynomial(deg_amp, poly_kind="poly", clip=(0.0,None))
         # table_data, table_poly, table_poly_all = trace_amp.fit_spline(degree=deg_amp, smoothing=0, constraints=constraints)
         _create_trace_regions(out_trace_amp, table_data, table_poly, table_poly_all, display_plots=display_plots)
         # plt.plot(numpy.split(trace_amp._data, LVM_NBLOCKS, axis=0)[16][0], label="fitted amp")
@@ -5103,7 +5103,7 @@ def trace_fibers(
         _create_trace_regions(out_trace_cent, table_data, table_poly, table_poly_all, display_plots=display_plots)
 
         log.info(f"fitting FWHM trace with {deg_fwhm}-deg polynomial")
-        table_data, table_poly, table_poly_all = trace_fwhm.fit_polynomial(deg_fwhm, poly_kind="poly")
+        table_data, table_poly, table_poly_all = trace_fwhm.fit_polynomial(deg_fwhm, poly_kind="poly", clip=fwhm_limits)
         _create_trace_regions(out_trace_fwhm, table_data, table_poly, table_poly_all, display_plots=display_plots)
 
         # set bad fibers in trace mask

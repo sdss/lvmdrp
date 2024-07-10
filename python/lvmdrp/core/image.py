@@ -2198,7 +2198,7 @@ class Image(Header):
         # select columns to measure centroids
         step = self._dim[1] // ncolumns
         columns = numpy.concatenate((numpy.arange(ref_column, 0, -step), numpy.arange(ref_column, self._dim[1], step)))
-        log.info(f"selecting {len(columns)-1} columns: {','.join(map(str, numpy.unique(columns)))}")
+        log.info(f"selecting {len(columns)-1} columns within range [{min(columns)}, {max(columns)}]")
 
         # trace centroids in each column
         iterator = tqdm(enumerate(columns), total=len(columns), desc="tracing centroids", unit="column", ascii=True)
@@ -2250,7 +2250,7 @@ class Image(Header):
         # select columns to fit for amplitudes, fiber_centroids and FWHMs per fiber block
         step = self._dim[1] // ncolumns
         columns = numpy.concatenate((numpy.arange(ref_column, 0, -step), numpy.arange(ref_column+step, self._dim[1], step)))
-        log.info(f"tracing fibers in {len(columns)} columns: {','.join(map(str, columns))}")
+        log.info(f"tracing fibers in {len(columns)} columns within range [{min(columns)}, {max(columns)}]")
 
         # fit peaks, fiber_centroids and FWHM in each column
         mod_columns, residuals = [], []
