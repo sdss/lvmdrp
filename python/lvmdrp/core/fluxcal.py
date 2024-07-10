@@ -11,11 +11,13 @@ from scipy import signal
 from scipy.integrate import simpson
 from scipy import interpolate
 import requests
+import pandas as pd
 
 import os.path as path
 import pathlib
 
 import gaiaxpy
+from astroquery.gaia import Gaia
 
 from astropy.time import Time
 from astropy.table import Table
@@ -26,14 +28,17 @@ from lvmdrp import log
 from lvmdrp.core.spectrum1d import Spectrum1D
 
 
+def get_mean_sens_curves(sens_dir):
+    return {'b':pd.read_csv(f'{sens_dir}/mean-sens-b.csv', names=['wavelength', 'sens']), 
+            'r':pd.read_csv(f'{sens_dir}/mean-sens-r.csv', names=['wavelength', 'sens']), 
+            'z':pd.read_csv(f'{sens_dir}/mean-sens-z.csv', names=['wavelength', 'sens'])}
+
 def retrieve_header_stars(rss):
     """
     Retrieve fiber, Gaia ID, exposure time and airmass for the 12 standard stars in the header.
-    return a list of tuples of the above quatities.
+    return a list of tuples of the above quantities.
     """
-    lco = EarthLocation(
-        lat=-29.008999964 * u.deg, lon=-70.688663912 * u.deg, height=2800 * u.m
-    )
+    lco = EarthLocation(lat=-29.008999964 * u.deg, lon=-70.688663912 * u.deg, height=2800 * u.m)
     h = rss._header
     slitmap = rss._slitmap
     # retrieve the data for the 12 standards from the header
@@ -54,6 +59,93 @@ def retrieve_header_stars(rss):
             # print(gid, fib, et, secz)
             stddata.append((i + 1, fiber, gaia_id, exptime, secz))
     return stddata
+
+
+class GaiaStarNotFound(Exception):
+    """
+    Signal that the star has no BP-RP spectrum
+    """
+
+    pass
+
+
+def retrive_gaia_star(gaiaID, GAIA_CACHE_DIR):
+    """
+    Load or download and load from cache the XP spectrum of a gaia star, converted to erg/s/cm^2/A
+    """
+    # create cache dir if it does not exist
+    pathlib.Path(GAIA_CACHE_DIR).mkdir(parents=True, exist_ok=True)
+
+    if path.exists(GAIA_CACHE_DIR + "/gaia_spec_" + str(gaiaID) + ".csv") is True:
+        # read the tables from our cache
+        gaiaflux = Table.read(GAIA_CACHE_DIR + "/gaia_spec_" + str(gaiaID) + ".csv", format="csv")
+        gaiawave = Table.read(GAIA_CACHE_DIR + "/gaia_spec_" + str(gaiaID) + "_sampling.csv", format="csv")
+    else:
+        # need to download from Gaia archive
+        CSV_URL = ("https://gea.esac.esa.int/data-server/data?RETRIEVAL_TYPE=XP_CONTINUOUS&ID=Gaia+DR3+"
+            + str(gaiaID)
+            + "&format=CSV&DATA_STRUCTURE=RAW")
+        FILE = GAIA_CACHE_DIR + "/XP_" + str(gaiaID) + "_RAW.csv"
+
+        with requests.get(CSV_URL, stream=True) as r:
+            r.raise_for_status()
+            if len(r.content) < 2:
+                raise GaiaStarNotFound(f"Gaia DR3 {gaiaID} has no BP-RP spectrum!")
+            with open(FILE, "w") as f:
+                f.write(r.content.decode("utf-8"))
+
+        # convert coefficients to sampled spectrum
+        _, _ = gaiaxpy.calibrate(FILE, output_path=GAIA_CACHE_DIR,\
+                                 output_file="gaia_spec_" + str(gaiaID), output_format="csv")
+        # read the flux and wavelength tables
+        gaiaflux = Table.read(GAIA_CACHE_DIR + "/gaia_spec_" + str(gaiaID) + ".csv", format="csv")
+        gaiawave = Table.read(GAIA_CACHE_DIR + "/gaia_spec_" + str(gaiaID) + "_sampling.csv", format="csv")
+
+    # make numpy arrays from whatever weird objects the Gaia stuff creates
+    wave = np.fromstring(gaiawave["pos"][0][1:-1], sep=",") * 10  # in Angstrom
+    # W/s/micron -> in erg/s/cm^2/A
+    flux = (1e7 * 1e-1 * 1e-4 * np.fromstring(gaiaflux["flux"][0][1:-1], sep=","))
+    return wave, flux
+
+
+def get_XP_spectra(expnum, ra_tile, dec_tile, lim_mag=13.0, n_spec=15, GAIA_CACHE_DIR='./gaia_cache', plot=False):
+    '''
+    mjd, tileid, central ra and dec, query for brightest GAIA stars in the science IFU,
+    cache their IDs, cache their XP spectra, and return a table with all the data
+    '''
+    if GAIA_CACHE_DIR is None or path.exists(GAIA_CACHE_DIR + f'/{expnum}_ids.ecsv') is False:
+        print('querying for ids ...')
+        r_ifu = np.sqrt(3.0)/2 * (30.2/2) / 60.0 # inner radius of hexagon in degrees for margin
+        select_tile = f'DISTANCE({ra_tile}, {dec_tile}, ra, dec) < {r_ifu} '
+        job = Gaia.launch_job(f"SELECT TOP {n_spec} * FROM gaiadr3.gaia_source_lite WHERE "
+                              + select_tile + f"AND phot_g_mean_mag < {lim_mag} AND has_xp_continuous = 'True' ORDER BY phot_g_mean_mag ASC ")
+        r = job.get_results()
+        if GAIA_CACHE_DIR is not None:
+            #print('writing '+GAIA_CACHE_DIR + f'/{expnum}_ids.ecsv')
+            r.write(GAIA_CACHE_DIR + f'/{expnum}_ids.ecsv', overwrite=True)
+    else:
+        #print('reading '+GAIA_CACHE_DIR + f'/{expnum}_ids.ecsv')
+        r = Table.read(GAIA_CACHE_DIR + f'/{expnum}_ids.ecsv')
+    #
+    # get XP spectra and cache the calibrated spectra
+    #
+    sampling=np.arange(336., 1021., 2.)
+    ids = [l['SOURCE_ID'] for l in r]
+    if GAIA_CACHE_DIR is None or path.exists(GAIA_CACHE_DIR + f'/{expnum}_XP_spec.pickle') is False:
+        calibrated_spectra, _ = gaiaxpy.calibrate(ids, truncation=False, save_file=False)
+        if GAIA_CACHE_DIR is not None:
+            #print('writing '+GAIA_CACHE_DIR + f'/{expnum}_XP_spec.pickle')
+            calibrated_spectra.to_pickle(GAIA_CACHE_DIR + f'/{expnum}_XP_spec.pickle')
+    else:
+        #print('reading '+GAIA_CACHE_DIR + f'/{expnum}_XP_spec.csv')
+        calibrated_spectra = pd.read_pickle(GAIA_CACHE_DIR + f'/{expnum}_XP_spec.pickle')
+        
+    # calibrated_spectra
+    if(plot):
+        gaiaxpy.plot_spectra(calibrated_spectra, sampling=sampling, multi=True, show_plot=True, output_path=None, legend=False)
+    # calibrated_spectra *= 100  # W/m^2 -> erg/s/cm^
+    # astropy.Table ['SOURCE_ID, 'ra', 'dec', ...], ]pandas.DataFrame ['source_id', 'flux', 'flux_error'], np.ndarray
+    return r, calibrated_spectra, sampling
 
 
 def mean_absolute_deviation(vals):
@@ -147,6 +239,20 @@ sdss_g_f = np.array(
     ]
 )
 
+def LVM_phot_filter(channel, w):
+    """
+    LVM photometric system: Gaussian filter with sigma 250A centered in channels
+    at 4500, 6500, and 8500A
+    """
+    if channel == "b":
+        return np.exp(-0.5 * ((w - 4500) / 250) ** 2)
+    elif channel == "r":
+        return np.exp(-0.5 * ((w - 6500) / 250) ** 2)
+    elif channel == "z":
+        return np.exp(-0.5 * ((w - 8500) / 250) ** 2)
+    else:
+        raise Exception(f"Unknown filter '{channel}'")
+    
 
 def spec_to_mAB(lam, spec, lamf, filt):
     """
@@ -155,8 +261,8 @@ def spec_to_mAB(lam, spec, lamf, filt):
     """
     c_AAs = 2.99792458e18  # Speed of light in Angstrom/s
     filt_int = np.interp(lam, lamf, filt)  # Interpolate to common wavelength axis
-    I1 = simpson(x=spec * filt_int * lam, y=lam)
-    I2 = simpson(x=filt_int / lam, y=lam)
+    I1 = simpson(y=spec * filt_int * lam, x=lam)
+    I2 = simpson(y=filt_int / lam, x=lam)
     fnu = I1 / I2 / c_AAs  # Average flux density
     mab = -2.5 * np.log10(fnu) - 48.6  # AB magnitude
     if np.isnan(mab):
@@ -164,17 +270,48 @@ def spec_to_mAB(lam, spec, lamf, filt):
     return mab
 
 
+def integrate_flux_in_filter(lam, spec, lamf, filt):
+    """
+    Calculate average flux in filter (lamf, filt) given a spectrum
+    (lam, spec)
+    """
+    filt_int = np.interp(lam, lamf, filt)  # Interpolate to common wavelength axis
+    return simpson(y=spec * filt_int, x=lam) / simpson(y=filt_int, x=lam)
+
+
+def spec_to_LVM_flux(channel, w, f):
+    """
+    Return average flux in the LVM photometric system
+    """
+    return integrate_flux_in_filter(w, f, w, LVM_phot_filter(channel, w))
+
 def spec_to_LVM_mAB(channel, w, f):
     """
     LVM photometric system: Gaussian filter with sigma 250A centered in channels
     at 4500, 6500, and 8500A
     """
-    if channel == "b":
-        return spec_to_mAB(w, f, w, np.exp(-0.5 * ((w - 4500) / 250) ** 2))
-    elif channel == "r":
-        return spec_to_mAB(w, f, w, np.exp(-0.5 * ((w - 6500) / 250) ** 2))
-    else:
-        return spec_to_mAB(w, f, w, np.exp(-0.5 * ((w - 8500) / 250) ** 2))
+    return spec_to_mAB(w, f, w, LVM_phot_filter(channel, w))
+
+
+def sky_flux_in_filter(cam, skyfibs, obswave, percentile=75):
+    '''
+    Given an lvmFrame, calculate the median flux in the LVM photometric system of the 
+    lowest 'percentile' of sky fibers. 
+    
+    Used for sky subtraction of the photometry of stars for sci IFU self calibration.
+    '''
+    nfiber = skyfibs.shape[0]
+    flux = np.full(nfiber, np.nan)
+    for i in range(nfiber):
+        obsflux = skyfibs[i,:]
+        f = np.isfinite(obsflux)
+        if np.any(f):
+            obsflux = interpolate_mask(obswave, obsflux, ~f)
+            flux[i] = spec_to_LVM_flux(cam, obswave, obsflux)
+
+    limidx = int(nfiber*percentile/100.0)
+    skies = np.argsort(flux)[1:limidx]
+    return np.nanmedian(flux[skies])
 
 
 def interpolate_mask(x, y, mask, kind="linear", fill_value=0):
@@ -194,60 +331,11 @@ def interpolate_mask(x, y, mask, kind="linear", fill_value=0):
     missing_x = x[mask]
     missing_idx = np.where(mask)
 
-    f = interpolate.interp1d(known_x, known_v, kind=kind, fill_value=fill_value)
+    f = interpolate.interp1d(known_x, known_v, kind=kind, fill_value=fill_value, bounds_error=False)
     yy = y.copy()
     yy[missing_idx] = f(missing_x)
 
     return yy
-
-
-class GaiaStarNotFound(Exception):
-    """
-    Signal that the star has no BP-RP spectrum
-    """
-
-    pass
-
-
-def retrive_gaia_star(gaiaID, GAIA_CACHE_DIR):
-    """
-    Load or download and load from cache the XP spectrum of a gaia star, converted to erg/s/cm^2/A
-    """
-    # create cache dir if it does not exist
-    pathlib.Path(GAIA_CACHE_DIR).mkdir(parents=True, exist_ok=True)
-
-    if path.exists(GAIA_CACHE_DIR + "/gaia_spec_" + str(gaiaID) + ".csv") is True:
-        # read the tables from our cache
-        gaiaflux = Table.read(GAIA_CACHE_DIR + "/gaia_spec_" + str(gaiaID) + ".csv", format="csv")
-        gaiawave = Table.read(GAIA_CACHE_DIR + "/gaia_spec_" + str(gaiaID) + "_sampling.csv", format="csv")
-    else:
-        # need to download from Gaia archive
-        CSV_URL = ("https://gea.esac.esa.int/data-server/data?RETRIEVAL_TYPE=XP_CONTINUOUS&ID=Gaia+DR3+"
-            + str(gaiaID)
-            + "&format=CSV&DATA_STRUCTURE=RAW")
-        FILE = GAIA_CACHE_DIR + "/XP_" + str(gaiaID) + "_RAW.csv"
-
-        with requests.get(CSV_URL, stream=True) as r:
-            r.raise_for_status()
-            if len(r.content) < 2:
-                raise GaiaStarNotFound(f"Gaia DR3 {gaiaID} has no BP-RP spectrum!")
-            with open(FILE, "w") as f:
-                f.write(r.content.decode("utf-8"))
-
-        # convert coefficients to sampled spectrum
-        _, _ = gaiaxpy.calibrate(FILE, output_path=GAIA_CACHE_DIR,\
-                                 output_file="gaia_spec_" + str(gaiaID), output_format="csv")
-        # read the flux and wavelength tables
-        gaiaflux = Table.read(GAIA_CACHE_DIR + "/gaia_spec_" + str(gaiaID) + ".csv", format="csv")
-        gaiawave = Table.read(GAIA_CACHE_DIR + "/gaia_spec_" + str(gaiaID) + "_sampling.csv", format="csv")
-
-    # make numpy arrays from whatever weird objects the Gaia stuff creates
-    wave = np.fromstring(gaiawave["pos"][0][1:-1], sep=",") * 10  # in Angstrom
-    # W/s/micron -> in erg/s/cm^2/A
-    flux = (1e7 * 1e-1 * 1e-4 * np.fromstring(gaiaflux["flux"][0][1:-1], sep=","))
-    return wave, flux
-
-
 
 
 def extinctLaSilla(wave):
