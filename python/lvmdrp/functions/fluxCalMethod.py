@@ -310,6 +310,7 @@ def science_sensitivity(in_rss, res_sci, ext, GAIA_CACHE_DIR, r_spaxel=(32.0/2)/
     # ra = header['POSCIRA']
     # dec = header['POSCIDE']
     expnum = header['EXPOSURE']
+    exptime = header['EXPTIME']
     channel = header['CCD']
     secz = header['TESCIAM']
 
@@ -362,7 +363,7 @@ def science_sensitivity(in_rss, res_sci, ext, GAIA_CACHE_DIR, r_spaxel=(32.0/2)/
             # correct for extinction
             obsflux *= 10 ** (0.4 * ext * secz)
             # TODO: understand exptime, is the data already per s?
-            obsflux /= 900
+            obsflux /= exptime
 
             # calculate the normalization of the average (known) sensitivity curve in a broad band
             lvmflux = fluxcal.spec_to_LVM_flux(channel, obswave, obsflux)
