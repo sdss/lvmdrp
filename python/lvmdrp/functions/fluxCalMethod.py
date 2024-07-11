@@ -286,7 +286,7 @@ def standard_sensitivity(stds, rss, GAIA_CACHE_DIR, ext, res, plot=False, width=
     return rss, res
 
 
-def science_sensitivity(in_rss, res_sci, ext, GAIA_CACHE_DIR, r_spaxel=(32.0/2)/3600.0, width=3, plot=False):
+def science_sensitivity(rss, res_sci, ext, GAIA_CACHE_DIR, r_spaxel=(32.0/2)/3600.0, width=3, plot=False):
     '''
     Scale the (assumed known) average sensitivity function of LVMi using GAIA XP spectra of 
     bright stars found in the science IFU. Scaling is based on a "broad band" Gaussian filter 
@@ -300,10 +300,10 @@ def science_sensitivity(in_rss, res_sci, ext, GAIA_CACHE_DIR, r_spaxel=(32.0/2)/
     colors = prop_cycle.by_key()['color']
 
     # get data from lvmFrame
-    fluxes = in_rss._data
-    obswave = in_rss._wave
-    header = in_rss._header
-    slitmap = in_rss._slitmap
+    fluxes = rss._data
+    obswave = rss._wave
+    header = rss._header
+    slitmap = rss._slitmap
     cfib = slitmap[slitmap['fiberid']==975]  # central fiber (in spectrograph 2, xpmm=ypmm=0)
     ra = cfib['ra'].value[0]
     dec = cfib['dec'].value[0]
@@ -333,7 +333,7 @@ def science_sensitivity(in_rss, res_sci, ext, GAIA_CACHE_DIR, r_spaxel=(32.0/2)/
     scifibs = slitmap[slitmap['targettype'] == 'science']
     #skyfibs = slitmap[slitmap['targettype'] == 'SKY']
 
-    master_sky = in_rss.eval_master_sky()
+    master_sky = rss.eval_master_sky()
 
     # locate the science ifu fibers the stars are in
     for i in range(len(calibrated_spectra)):
@@ -377,7 +377,7 @@ def science_sensitivity(in_rss, res_sci, ext, GAIA_CACHE_DIR, r_spaxel=(32.0/2)/
                          color=colors[i%len(colors)] , markersize=2, zorder=-999)
                 plt.plot(obswave, res_sci[f"STD{i+1}SEN"], color=colors[i%len(colors)], linewidth=2)
 
-    return in_rss, res_sci
+    return rss, res_sci
 
 
 def fluxcal_standard_stars(in_rss, plot=True, GAIA_CACHE_DIR=None):
@@ -503,9 +503,10 @@ def fluxcal_sci_ifu_stars(in_rss, plot=True, GAIA_CACHE_DIR=None, NSCI_MAX=15):
     mean_sci = biweight_location(res_sci.to_pandas().values, axis=1, ignore_nan=True)
 
     if plot:
+        # TODO: Fix this!
         plt.ylabel("sensitivity [(ergs/s/cm^2/A) / (e-/s/A)]")
         plt.xlabel("wavelength [A]")
-        #plt.ylim(1e-14, 0.1e-11)
+        plt.ylim(1e-14, 0.1e-11)
         plt.semilogy()
         fig1.add_axes((0.1, 0.1, 0.8, 0.2))
         plt.plot([w[0], w[-1]], [0.05, 0.05], color="k", linewidth=1, linestyle="dotted")
@@ -514,7 +515,7 @@ def fluxcal_sci_ifu_stars(in_rss, plot=True, GAIA_CACHE_DIR=None, NSCI_MAX=15):
         plt.plot([w[0], w[-1]], [-0.1, -0.1], color="k", linewidth=1, linestyle="dashed")
         plt.plot(w, rms_sci / mean_sci)
         plt.plot(w, -rms_sci / mean_sci)
-        #plt.ylim(-0.2, 0.2)
+        plt.ylim(-0.2, 0.2)
         plt.ylabel("relative residuals")
         plt.xlabel("wavelength [A]")
         save_fig(plt.gcf(), product_path=in_rss, to_display=False, figure_path="qa", label="fluxcal_sciifu")
