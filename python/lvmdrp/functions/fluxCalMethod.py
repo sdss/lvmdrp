@@ -371,7 +371,19 @@ def science_sensitivity(rss, res_sci, ext, GAIA_CACHE_DIR, NSCI_MAX=15, r_spaxel
             sens = fluxcal.spec_to_LVM_flux(channel, gwave, gflux) / lvmflux
             res_sci[f"STD{i+1}SEN"] = (sens*np.interp(obswave, mean_sens[channel]['wavelength'], 
                                                                mean_sens[channel]['sens'])).astype(np.float32)
-            # TODO: update header of RSS object
+
+            mAB_std = np.round(fluxcal.spec_to_LVM_mAB(channel, gwave, gflux), 2)
+            mAB_obs = np.round(fluxcal.spec_to_LVM_mAB(channel, obswave, obsflux), 2)
+            # update input file header
+            cam = channel.upper()
+            rss.setHdrValue(f"SCI{i+1}{cam}AB", mAB_std, f"Gaia AB mag in {cam}-band")
+            rss.setHdrValue(f"SCI{i+1}{cam}IN", mAB_obs, f"Obs AB mag in {cam}-band")
+            rss.setHdrValue(f"SCI{i+1}ID", data['SOURCE_ID'], f"Field star {i+1} Gaia source ID")
+            rss.setHdrValue(f"SCI{i+1}FIB", scifibs['fiberid'][fib][0], f"Field star {i+1} fiber id")
+            rss.setHdrValue(f"SCI{i+1}RA", data['ra'], f"Field star {i+1} RA")
+            rss.setHdrValue(f"SCI{i+1}DE", data['dec'], f"Field star {i+1} DEC")
+            log.info(f"AB mag in LVM_{cam}: Gaia {mAB_std:.2f}, instrumental {mAB_obs:.2f}")
+
             # calibrate and plot against the stars for debugging:
             if plot:
                 plt.plot(obswave, np.interp(obswave, gwave, gflux)/obsflux, '.', 
@@ -438,6 +450,11 @@ def fluxcal_standard_stars(in_rss, plot=True, GAIA_CACHE_DIR=None):
     rms_std = biweight_scale(res_std.to_pandas().values, axis=1, ignore_nan=True)
     mean_std = biweight_location(res_std.to_pandas().values, axis=1, ignore_nan=True)
 
+    cam = rss._header['CCD'].upper()
+    rss.setHdrValue(f"STDSENM{cam}", np.nanmean(mean_std[1000:3000]), f"Mean stdstar sensitivity in {cam}")
+    rss.setHdrValue(f"STDSENR{cam}", np.nanmean(rms_std[1000:3000]), f"Mean stdstar sensitivity rms in {cam}")
+    log.info(f"Mean stdstar sensitivity in {cam} : {np.nanmean(mean_std[1000:3000])}")
+
     if plot:
         plt.ylabel("sensitivity [(ergs/s/cm^2/A) / (e-/s/A)]")
         plt.xlabel("wavelength [A]")
@@ -502,6 +519,11 @@ def fluxcal_sci_ifu_stars(in_rss, plot=True, GAIA_CACHE_DIR=None, NSCI_MAX=15):
     rss, res_sci = science_sensitivity(rss, res_sci, ext, GAIA_CACHE_DIR, NSCI_MAX=NSCI_MAX, plot=plot)
     rms_sci = biweight_scale(res_sci.to_pandas().values, axis=1, ignore_nan=True)
     mean_sci = biweight_location(res_sci.to_pandas().values, axis=1, ignore_nan=True)
+
+    cam = rss._header['CCD'].upper()
+    rss.setHdrValue(f"SCISENM{cam}", np.nanmean(mean_sci[1000:3000]), f"Mean scistar sensitivity in {cam}")
+    rss.setHdrValue(f"SCISENR{cam}", np.nanmean(rms_sci[1000:3000]), f"Mean scistar sensitivity rms in {cam}")
+    log.info(f"Mean scistar sensitivity in {cam} : {np.nanmean(mean_sci[1000:3000])}")
 
     if plot:
         # TODO: Fix this!
