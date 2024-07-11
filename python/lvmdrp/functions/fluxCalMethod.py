@@ -65,7 +65,7 @@ __all__ = [
     "correctTelluric_drp",
 ]
 
-def apply_fluxcal(in_rss: str, out_fframe: str, skip_fluxcal: bool = False, display_plots: bool = False):
+def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'STD', display_plots: bool = False):
     """applies flux calibration to spectrograph-combined data
 
     Parameters
@@ -74,8 +74,10 @@ def apply_fluxcal(in_rss: str, out_fframe: str, skip_fluxcal: bool = False, disp
         input RSS file
     out_rss : str
         output RSS file
-    skip_fluxcal : bool, optional
-        whether to skip flux calibration, by default False
+    method : str
+        'STD' - apply calibration inferred from standard stars  (default)
+        'SCI' - apply calibration inferred from field stars in science ifu (fallback if STD not available)
+        'NONE' - do not apply flux calibration
     display_plots : bool, optional
 
     Returns
@@ -83,6 +85,9 @@ def apply_fluxcal(in_rss: str, out_fframe: str, skip_fluxcal: bool = False, disp
     rss : RSS
         flux-calibrated RSS object
     """
+
+    assert (method in ['STD', 'SCI', 'NONE']), 'Fluxcal method must be either STD or SCI or NONE'
+
     # read all three channels
     log.info(f"loading RSS file {os.path.basename(in_rss)}")
     rss = loadRSS(in_rss)
@@ -128,54 +133,68 @@ def apply_fluxcal(in_rss: str, out_fframe: str, skip_fluxcal: bool = False, disp
     # weights = std_exp / std_exp.sum()
     # TODO: reject sensitivity curves based on the overall shape by normalizing using a median curve
     # calculate the biweight mean sensitivity
-    sens_arr = fframe._fluxcal_std.to_pandas().values  # * (std_exp / std_exp.sum())[None]
-    sens_ave = biweight_location(sens_arr, axis=1, ignore_nan=True)
-    sens_rms = biweight_scale(sens_arr, axis=1, ignore_nan=True)
 
-    # fix case of all invalid values
-    if (sens_ave == 0).all() or np.isnan(sens_ave).all():
-        log.warning(
-            "all sensitivity values are zero or NaN, impossible to flux-calibrate"
-        )
-        sens_ave = np.ones_like(sens_ave)
-        sens_rms = np.zeros_like(sens_rms)
-        fframe.setHdrValue("FLUXCAL", False, "flux-calibrated?")
+    fframe.setHdrValue("FLUXCAL", 'NONE', "flux-calibration method")
 
-    # update the fluxcal extension
-    fframe._fluxcal_std["mean"] = sens_ave
-    fframe._fluxcal_std["rms"] = sens_rms
+    # if instructed, use standard stars
+    if method == 'STD':
+        log.info("flux-calibratimg using STD standard stars")
+        sens_arr = fframe._fluxcal_std.to_pandas().values  # * (std_exp / std_exp.sum())[None]
+        sens_ave = biweight_location(sens_arr, axis=1, ignore_nan=True)
+        sens_rms = biweight_scale(sens_arr, axis=1, ignore_nan=True)
 
-    ax.set_title(f"{channel = }", loc="left")
-    for j in range(sens_arr.shape[1]):
-        std_hd = fframe._fluxcal_std.colnames[j][:-3]
-        std_id = fframe._header.get(f"{std_hd}FIB", "unknown")
+        # fix case of all invalid values
+        if (sens_ave == 0).all() or np.isnan(sens_ave).all():
+            log.warning("all standard star sensitivities are zero or NaN, falling back to SCI stars")
+            method = 'SCI'  # fallback to sci field stars
+        else:
+            fframe.setHdrValue("FLUXCAL", 'STD', "flux-calibration method")
 
-        ax.plot(fframe._wave, sens_arr[:, j], "-", lw=1, label=std_id)
-    ax.plot(fframe._wave, sens_ave, "-r", lw=2, label="mean")
-    ax.set_yscale("log")
-    ax.set_xlabel("wavelength (Angstrom)")
-    ax.set_ylabel("sensitivity [(ergs/s/cm^2/A) / (e-/s/A)]")
-    ax.legend(loc="upper right")
-    fig.tight_layout()
-    save_fig(
-        fig,
-        product_path=out_fframe,
-        to_display=display_plots,
-        figure_path="qa",
-        label="fluxcal",
-    )
+    # fall back to science ifu field stars if above failed or if instructed to use this method
+    if method == 'SCI':
+        log.info("flux-calibratimg using SCI field stars")
+        sens_arr = fframe._fluxcal_sci.to_pandas().values  # * (std_exp / std_exp.sum())[None]
+        sens_ave = biweight_location(sens_arr, axis=1, ignore_nan=True)
+        sens_rms = biweight_scale(sens_arr, axis=1, ignore_nan=True)
+
+        # fix case of all invalid values
+        if (sens_ave == 0).all() or np.isnan(sens_ave).all():
+            log.warning("all field star sensitivities are zero or NaN, can't calibrate")
+            sens_ave = np.ones_like(sens_ave)
+            sens_rms = np.zeros_like(sens_rms)
+        else:
+            fframe.setHdrValue("FLUXCAL", 'SCI', "flux-calibration method")
+
+    if method != 'NONE':
+        # update the fluxcal extension
+        fframe._fluxcal_std["mean"] = sens_ave
+        fframe._fluxcal_std["rms"] = sens_rms
+
+        # TODO: fix plotting for 'SCI'
+        ax.set_title(f"{channel = }", loc="left")
+        for j in range(sens_arr.shape[1]):
+            std_hd = fframe._fluxcal_std.colnames[j][:-3]
+            std_id = fframe._header.get(f"{std_hd}FIB", "unknown")
+
+            ax.plot(fframe._wave, sens_arr[:, j], "-", lw=1, label=std_id)
+        ax.plot(fframe._wave, sens_ave, "-r", lw=2, label="mean")
+        ax.set_yscale("log")
+        ax.set_xlabel("wavelength (Angstrom)")
+        ax.set_ylabel("sensitivity [(ergs/s/cm^2/A) / (e-/s/A)]")
+        ax.legend(loc="upper right")
+        fig.tight_layout()
+        save_fig(fig, product_path=out_fframe, to_display=display_plots, figure_path="qa", label="fluxcal")
+
     # flux-calibrate and extinction correct data
     # Note that we assume a constant extinction curve here!
-    log.info(
-        f"Extinction correcting science and sky spectra, curve {os.getenv('LVMCORE_DIR')+'/etc/lco_extinction.txt'}"
-    )
+    log.info(f"Extinction correcting science and sky spectra, curve {os.getenv('LVMCORE_DIR')+'/etc/lco_extinction.txt'}")
     txt = np.genfromtxt(os.getenv("LVMCORE_DIR") + "/etc/lco_extinction.txt")
     lext, ext = txt[:, 0], txt[:, 1]
     ext = np.interp(fframe._wave, lext, ext)
     sci_secz = fframe._header["TESCIAM"]
 
     # optionally sky flux calibration
-    if skip_fluxcal:
+    if method == 'NONE':
         log.info("skipping flux calibration")
         fframe._data /= exptimes[:, None]
         fframe._error /= exptimes[:, None]
@@ -191,7 +210,7 @@ def apply_fluxcal(in_rss: str, out_fframe: str, skip_fluxcal: bool = False, disp
             fframe._sky_west /= exptimes[:, None]
         if fframe._sky_west_error is not None:
             fframe._sky_west_error /= exptimes[:, None]
-        fframe.setHdrValue("FLUXCAL", False, "flux-calibrated?")
+        fframe.setHdrValue("FLUXCAL", 'NONE', "flux-calibration method")
         fframe.setHdrValue("BUNIT", "electron/s/A", "flux units")
     else:
         log.info("flux-calibrating data science and sky spectra")
@@ -209,7 +228,6 @@ def apply_fluxcal(in_rss: str, out_fframe: str, skip_fluxcal: bool = False, disp
             fframe._sky_west *= sens_ave * 10 ** (0.4 * ext * (sci_secz)) / exptimes[:, None]
         if fframe._sky_west_error is not None:
             fframe._sky_west_error *= sens_ave * 10 ** (0.4 * ext * (sci_secz)) / exptimes[:, None]
-        fframe.setHdrValue("FLUXCAL", True, "flux-calibrated?")
         fframe.setHdrValue("BUNIT", "ergs/s/cm^2/A", "flux units")
 
     log.info(f"writing output file in {os.path.basename(out_fframe)}")
@@ -474,7 +492,8 @@ def fluxcal_standard_stars(in_rss, plot=True, GAIA_CACHE_DIR=None):
         save_fig(plt.gcf(), product_path=in_rss, to_display=False, figure_path="qa", label="fluxcal_std")
 
     # update sensitivity extension
-    rss.set_fluxcal(fluxcal=res_std)
+    log.info('appending FLUXCAL_STD table')
+    rss.set_fluxcal(fluxcal=res_std, source='std')
     rss.writeFitsData(in_rss)
 
     return res_std, mean_std, rms_std, rss
@@ -545,7 +564,8 @@ def fluxcal_sci_ifu_stars(in_rss, plot=True, GAIA_CACHE_DIR=None, NSCI_MAX=15):
         save_fig(plt.gcf(), product_path=in_rss, to_display=False, figure_path="qa", label="fluxcal_sciifu")
 
     # update sensitivity extension
-    rss.set_fluxcal(fluxcal=res_sci)
+    log.info('appending FLUXCAL_SCI table')
+    rss.set_fluxcal(fluxcal=res_sci, source='sci')
     rss.writeFitsData(in_rss)
 
     return res_sci, mean_sci, rms_sci, rss
