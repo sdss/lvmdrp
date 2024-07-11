@@ -1444,13 +1444,13 @@ def interpolate_sky( in_frame: str, out_rss: str = None, display_plots: bool = F
     # TODO: add same parameters for std *fibers*
     # new_rss._header.update(skymodel_pars_from_header(new_rss._header, telescope="SPEC"))
     new_rss._header["HIERARCH GEOCORONAL SKYW SHADOW_HEIGHT"] = (
-        get_telescope_shadowheight(new_rss._header, telescope="SKYW")
+        get_telescope_shadowheight(new_rss._header, telescope="SKYW"), "height of Earth's shadow (in km)" 
     )
     new_rss._header["HIERARCH GEOCORONAL SKYE SHADOW_HEIGHT"] = (
-        get_telescope_shadowheight(new_rss._header, telescope="SKYE")
+        get_telescope_shadowheight(new_rss._header, telescope="SKYE"), "height of Earth's shadow (in km)" 
     )
     new_rss._header["HIERARCH GEOCORONAL SCI SHADOW_HEIGHT"] = (
-        get_telescope_shadowheight(new_rss._header, telescope="SCI")
+        get_telescope_shadowheight(new_rss._header, telescope="SCI"), "height of Earth's shadow (in km)" 
     )
 
     # write output RSS
@@ -1590,7 +1590,7 @@ def combine_skies(in_rss: str, out_rss, sky_weights: Tuple[float, float] = None)
 
 def quick_sky_subtraction(in_cframe, out_sframe,
                           skip_subtraction=False, skymethod: str = 'farlines_nearcont'):
-    """ Quick sky refinement using the model in the final CFrame
+    """ main sky subtraction routine using Simple Sky method
 
     Parameters
     ----------
@@ -1599,7 +1599,7 @@ def quick_sky_subtraction(in_cframe, out_sframe,
     out_sframe : str
         output SFrame file
     skymethod : str, optional
-        method of computing sky continuum, by default "cont"
+        method of computing sky continuum, by default "farlines_nearcont"
 
     """
     # print('************************************')

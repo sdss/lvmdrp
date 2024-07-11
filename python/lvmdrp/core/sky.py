@@ -332,26 +332,27 @@ def skymodel_pars_from_header(header, telescope):
     # TODO: - ** resolving power of molecular spectra in library ('resol')
     # TODO: - ** sky model components
 
+
     skymodel_pars = {
-        f"HIERARCH SKYMODEL {telescope} SM_H": sm_h.to(u.km).value,
-        f"HIERARCH SKYMODEL {telescope} SM_HMIN": (2.0 * u.km).value,
-        f"HIERARCH SKYMODEL {telescope} ALT": alt.to(u.deg).value,
-        f"HIERARCH SKYMODEL {telescope} ALPHA": alpha.to(u.deg).value,
-        f"HIERARCH SKYMODEL {telescope} RHO": rho.to(u.deg).value,
-        f"HIERARCH SKYMODEL {telescope} ALTMOON": altmoon.to(u.deg).value,
-        f"HIERARCH SKYMODEL {telescope} MOONDIST": moondist.value,
-        f"HIERARCH SKYMODEL {telescope} PRES": (744 * u.hPa).value,
-        f"HIERARCH SKYMODEL {telescope} SSA": 0.97,
-        f"HIERARCH SKYMODEL {telescope} CALCDS": "N",
-        f"HIERARCH SKYMODEL {telescope} O2COLUMN": 1.0,
-        f"HIERARCH SKYMODEL {telescope} MOONSCAL": 1.0,
-        f"HIERARCH SKYMODEL {telescope} LON_ECL": lon_ecl.to(u.deg).value,
-        f"HIERARCH SKYMODEL {telescope} LAT_ECL": lat_ecl.to(u.deg).value,
-        f"HIERARCH SKYMODEL {telescope} EMIS_STR": ",".join(map(str, [0.2])),
-        f"HIERARCH SKYMODEL {telescope} TEMP_STR": ",".join(map(str, [(290.0 * u.K).value])),
-        f"HIERARCH SKYMODEL {telescope} MSOLFLUX": 130.0,  # 1 sfu = 1e-19 erg/s/cm**2/Hz,
-        f"HIERARCH SKYMODEL {telescope} SEASON": season,
-        f"HIERARCH SKYMODEL {telescope} TIME": time,
+        f"HIERARCH SKYMODEL {telescope} SM_H": (sm_h.to(u.km).value, "observatory height in km"),
+        f"HIERARCH SKYMODEL {telescope} SM_HMIN": ((2.0 * u.km).value, "lower height limit in km"),
+        f"HIERARCH SKYMODEL {telescope} ALT": (alt.to(u.deg).value, "altitude of object above horizon [0,90] in deg"),
+        f"HIERARCH SKYMODEL {telescope} ALPHA": (alpha.to(u.deg).value, "separation of Sun and Moon as seen from Earth [0,360] (> 180 for waning Moon) in deg"),
+        f"HIERARCH SKYMODEL {telescope} RHO": (rho.to(u.deg).value, "separation of Moon and object [0,180] in deg"),
+        f"HIERARCH SKYMODEL {telescope} ALTMOON": (altmoon.to(u.deg).value, "altitude of Moon above horizon [-90,90] in deg"),
+        f"HIERARCH SKYMODEL {telescope} MOONDIST": (moondist.value, "distance to Moon (mean distance = 1; [0.91,1.08])"),
+        f"HIERARCH SKYMODEL {telescope} PRES": ((744 * u.hPa).value, "pressure at observer altitude in hPa"),
+        f"HIERARCH SKYMODEL {telescope} SSA": (0.97, "single scattering albedo for aerosols [0,1]"),
+        f"HIERARCH SKYMODEL {telescope} CALCDS": ( "N", "calculation of double scattering of moonlight ('Y' or 'N')"),
+        f"HIERARCH SKYMODEL {telescope} O2COLUMN": (1.0, "relative UV/optical ozone column density (1 -> 258 DU)"),
+        f"HIERARCH SKYMODEL {telescope} MOONSCAL": (1.0, "scaling factor for scattered moonlight"),
+        f"HIERARCH SKYMODEL {telescope} LON_ECL": (lon_ecl.to(u.deg).value, "heliocentric ecliptic longitude of object [-180,180] in deg"),
+        f"HIERARCH SKYMODEL {telescope} LAT_ECL": (lat_ecl.to(u.deg).value, "ecliptic latitude of object [-90,90] in deg"),
+        f"HIERARCH SKYMODEL {telescope} EMIS_STR": (",".join(map(str, [0.2])), "grey-body emissivity (comma-separated list starting with the first component in the light path)"),
+        f"HIERARCH SKYMODEL {telescope} TEMP_STR": (",".join(map(str, [(290.0 * u.K).value])), "grey-body temperature in K (comma-separated list starting with the first component in the light path)"),
+        f"HIERARCH SKYMODEL {telescope} MSOLFLUX": (130.0, "monthly-averaged solar radio flux [sfu] with 1 sfu = 1e-19 erg/s/cm**2/Hz, set to 130"),
+        f"HIERARCH SKYMODEL {telescope} SEASON": (season, "bimonthly period (1: Dec/Jan, ..., 6: Oct/Nov.; 0: entire year)"),
+        f"HIERARCH SKYMODEL {telescope} TIME": (time, "period of the night (x/3 of night, x = 1,2,3; 0: entire night)"),
     }
 
     return skymodel_pars
@@ -740,9 +741,11 @@ def get_telescope_shadowheight(header, telescope):
     if telescope not in {"SKYE", "SKYW", "SCI", "SPEC"}:
         raise ValueError(f"invalid value for 'telescope' parameter: '{telescope}', valid values are 'SKYE', 'SKYW', 'SCI', or 'SPEC'")
 
-    header["JD"] = header["MJD"] + 2400000.5
+    #header["JD"] = header["MJD"] + 2400000.5
     ra, dec = header[f"TE{telescope}RA"], header[f"TE{telescope}DE"]
-    jd = header["JD"]
+    #jd = header["JD"]
+    time = Time(header["OBSTIME"],format='isot', scale='utc')
+    jd = time.jd
 
     SH_CALCULATOR.update_time(jd=jd)
     sk = SkyCoord(ra=ra, dec=dec, unit="deg")
