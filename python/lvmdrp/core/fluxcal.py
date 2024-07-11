@@ -108,7 +108,7 @@ def retrive_gaia_star(gaiaID, GAIA_CACHE_DIR):
     return wave, flux
 
 
-def get_XP_spectra(expnum, ra_tile, dec_tile, lim_mag=13.0, n_spec=15, GAIA_CACHE_DIR='./gaia_cache', plot=False):
+def get_XP_spectra(expnum, ra_tile, dec_tile, lim_mag=14.0, n_spec=15, GAIA_CACHE_DIR='./gaia_cache', plot=False):
     '''
     mjd, tileid, central ra and dec, query for brightest GAIA stars in the science IFU,
     cache their IDs, cache their XP spectra, and return a table with all the data

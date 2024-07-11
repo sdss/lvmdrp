@@ -286,7 +286,7 @@ def standard_sensitivity(stds, rss, GAIA_CACHE_DIR, ext, res, plot=False, width=
     return rss, res
 
 
-def science_sensitivity(rss, res_sci, ext, GAIA_CACHE_DIR, r_spaxel=(32.0/2)/3600.0, width=3, plot=False):
+def science_sensitivity(rss, res_sci, ext, GAIA_CACHE_DIR, NSCI_MAX=15, r_spaxel=(32.0/2)/3600.0, width=3, plot=False):
     '''
     Scale the (assumed known) average sensitivity function of LVMi using GAIA XP spectra of 
     bright stars found in the science IFU. Scaling is based on a "broad band" Gaussian filter 
@@ -320,7 +320,8 @@ def science_sensitivity(rss, res_sci, ext, GAIA_CACHE_DIR, r_spaxel=(32.0/2)/360
         m2 = get_z_continuum_mask(obswave)
 
     # get GAIA data, potentially cached
-    r, calibrated_spectra, sampling = fluxcal.get_XP_spectra(expnum, ra, dec, plot=False, lim_mag=13, n_spec=10, GAIA_CACHE_DIR='./gaia_cache')
+    r, calibrated_spectra, sampling = fluxcal.get_XP_spectra(expnum, ra, dec, plot=False, lim_mag=13.5, 
+                                                             n_spec=NSCI_MAX, GAIA_CACHE_DIR='./gaia_cache')
     gwave = sampling*10 # to A
     for i in range(len(calibrated_spectra)):
         # W/micron/m^2 -> in erg/s/cm^2/A
@@ -498,7 +499,7 @@ def fluxcal_sci_ifu_stars(in_rss, plot=True, GAIA_CACHE_DIR=None, NSCI_MAX=15):
         frame1.set_xticklabels([])
 
     # science fibers with Gaia stars sensitivity curves
-    rss, res_sci = science_sensitivity(rss, res_sci, ext, GAIA_CACHE_DIR, plot=plot)
+    rss, res_sci = science_sensitivity(rss, res_sci, ext, GAIA_CACHE_DIR, NSCI_MAX=NSCI_MAX, plot=plot)
     rms_sci = biweight_scale(res_sci.to_pandas().values, axis=1, ignore_nan=True)
     mean_sci = biweight_location(res_sci.to_pandas().values, axis=1, ignore_nan=True)
 
