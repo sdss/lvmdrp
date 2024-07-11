@@ -540,10 +540,11 @@ def fluxcal_sci_ifu_stars(in_rss, plot=True, GAIA_CACHE_DIR=None, NSCI_MAX=15):
     rms_sci = biweight_scale(res_sci.to_pandas().values, axis=1, ignore_nan=True)
     mean_sci = biweight_location(res_sci.to_pandas().values, axis=1, ignore_nan=True)
 
-    cam = rss._header['CCD'].upper()
-    rss.setHdrValue(f"SCISENM{cam}", np.nanmean(mean_sci[1000:3000]), f"Mean scistar sensitivity in {cam.lower()}")
-    rss.setHdrValue(f"SCISENR{cam}", np.nanmean(rms_sci[1000:3000]), f"Mean scistar sensitivity rms in {cam.lower()}")
-    log.info(f"Mean scistar sensitivity in {cam} : {np.nanmean(mean_sci[1000:3000])}")
+    label = rss._header['CCD']
+    channel = label.lower()
+    rss.setHdrValue(f"SCISENM{label}", np.nanmean(mean_sci[1000:3000]), f"Mean scistar sensitivity in {channel}")
+    rss.setHdrValue(f"SCISENR{label}", np.nanmean(rms_sci[1000:3000]), f"Mean scistar sensitivity rms in {channel}")
+    log.info(f"Mean scistar sensitivity in {channel} : {np.nanmean(mean_sci[1000:3000])}")
 
     if plot:
         # TODO: Fix this!
