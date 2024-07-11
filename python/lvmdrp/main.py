@@ -1697,7 +1697,7 @@ def science_reduction(expnum: int, use_fiducial_master: bool = False,
 
     # detrend science exposure
     log.info(f"--- Starting science reduction for tile {sci_tileid} at MJD {sci_mjd} with exposure number {sci_expnum}")
-    if False:
+    if True:
         reduce_2d(mjd=sci_mjd, use_fiducial_cals=use_fiducial_master, expnums=[sci_expnum], reject_cr=reject_cr, skip_done=False)
 
     # run reduction loop for each science camera exposure
