@@ -547,7 +547,6 @@ def fluxcal_sci_ifu_stars(in_rss, plot=True, GAIA_CACHE_DIR=None, NSCI_MAX=15):
     log.info(f"Mean scistar sensitivity in {channel} : {np.nanmean(mean_sci[1000:3000])}")
 
     if plot:
-        # TODO: Fix this!
         plt.ylabel("sensitivity [(ergs/s/cm^2/A) / (e-/s/A)]")
         plt.xlabel("wavelength [A]")
         plt.ylim(1e-14, 0.1e-11)
