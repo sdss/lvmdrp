@@ -32,6 +32,8 @@ from copy import deepcopy as copy
 from shutil import copy2, rmtree
 from itertools import groupby
 from astropy.stats import biweight_location, biweight_scale
+from astropy.io import fits
+from astropy.table import Table
 from multiprocessing import Pool
 from scipy import interpolate
 from typing import List, Tuple, Dict
@@ -1749,12 +1751,12 @@ def create_wavelengths(mjd, use_fiducial_cals=True, expnums=None, kind="longterm
     """
     frames, _ = md.get_sequence_metadata(mjd, expnums=expnums, for_cals={"wave"})
 
-    reduce_2d(mjd, use_fiducial_cals=use_fiducial_cals, expnums=expnums, assume_imagetyp="arc", reject_cr=False, skip_done=skip_done)
+    # reduce_2d(mjd, use_fiducial_cals=use_fiducial_cals, expnums=expnums, assume_imagetyp="arc", reject_cr=False, skip_done=skip_done)
 
     # define master paths for target frames
     calibs = get_calib_paths(mjd, use_fiducial_cals=use_fiducial_cals)
 
-    expnum_str = f"{frames.expnum.min():>08}-{frames.expnum.max():>08}"
+    expnum_str = f"{frames.expnum.min():>08}_{frames.expnum.max():>08}"
     arc_analogs = frames.groupby(["camera",])
     for camera in arc_analogs.groups:
         arcs = arc_analogs.get_group((camera,))
@@ -1789,9 +1791,15 @@ def create_wavelengths(mjd, use_fiducial_cals=True, expnums=None, kind="longterm
         if skip_done and os.path.isfile(mwave_path) and os.path.isfile(mlsf_path):
             log.info(f"skipping wavelength solution {mwave_path} and {mlsf_path}, files already exists")
         else:
-            rss_tasks.determine_wavelength_solution(in_arcs=xarc_path, out_wave=mwave_path, out_lsf=mlsf_path, aperture=12,
+            ref_lines, use_line, cent_wave, _, rss, wave_trace, fwhm_trace = rss_tasks.determine_wavelength_solution(in_arcs=xarc_path,
+                                                    out_wave=mwave_path, out_lsf=mlsf_path, aperture=12,
                                                     cc_correction=True, cc_max_shift=20, poly_disp=5, poly_fwhm=2, poly_cros=2,
                                                     flux_min=1e-12, fwhm_max=5, rel_flux_limits=[0.001, 1e12])
+
+            lvmarc = lvmArc(data=rss._data, error=rss._error, mask=rss._mask, header=rss._header,
+                            ref_wave=ref_lines[use_line], cent_line=cent_wave[:, use_line],
+                            wave_trace=wave_trace, lsf_trace=fwhm_trace)
+            lvmarc.writeFitsData(path.full("lvm_frame", mjd=mjd, tileid=11111, drpver=drpver, expnum=expnum_str, kind=f'Arc-{camera}'))
 
     for channel in "brz":
         if kind == "longterm":
@@ -2050,4 +2058,63 @@ class lvmFlat(lvmFrame):
 
 
 class lvmArc(lvmFrame):
-    pass
+    """LvmArc class"""
+
+    @classmethod
+    def from_hdulist(cls, hdulist):
+        header = cls.header_from_hdulist(hdulist)
+
+        data = hdulist["FLUX"].data
+        error = np.divide(1, hdulist["IVAR"].data, where=hdulist["IVAR"].data != 0, out=np.zeros_like(hdulist["IVAR"].data))
+        error = np.sqrt(error)
+        mask = hdulist["MASK"].data.astype("bool")
+        lxpeak = Table(hdulist["LXPEAK"].data)
+        wave_trace = Table(hdulist["WAVE_TRACE"].data)
+        lsf_trace = Table(hdulist["LSF_TRACE"].data)
+        return cls(data=data, error=error, mask=mask, header=header, lxpeak=lxpeak,
+                   wave_trace=wave_trace, lsf_trace=lsf_trace)
+
+    def __init__(self, data=None, error=None, mask=None, ref_wave=None, cent_line=None, lxpeak=None, wave_trace=None, lsf_trace=None, header=None):
+        lvmFrame.__init__(self, data=data, error=error, mask=mask, wave_trace=wave_trace, lsf_trace=lsf_trace, header=header)
+
+        self.set_lxpeak(ref_wave, cent_line, lxpeak=lxpeak)
+
+        self._blueprint = dp.load_blueprint(name="lvmArc")
+        self._template = dp.dump_template(dataproduct_bp=self._blueprint, save=False)
+
+    def set_lxpeak(self, ref_wave=None, lin_pixel=None, lxpeak=None):
+        """Sets a table with the wavelength of identified lamp lines & the corresponding X position in each fiber"""
+        # early return in case incomplete data is given
+        if lxpeak is None and (ref_wave is None or lin_pixel is None):
+            self._lxpeak = None
+            return self._lxpeak
+
+        # set the given lxpeak and return
+        if lxpeak is not None:
+            self._lxpeak = lxpeak
+            return self._lxpeak
+
+        self._lxpeak = Table(dtype=[(f"{wave:.4f}", "f4") for wave in ref_wave])
+        for ifiber in range(self._fibers):
+            self._lxpeak.add_row(lin_pixel[ifiber])
+
+    def writeFitsData(self, out_file, replace_masked=True):
+        # replace masked pixels
+        if replace_masked:
+            self.apply_pixelmask()
+
+        # update headers
+        self.update_header()
+        # fill in rest of the template
+        self._template["FLUX"].data = self._data
+        self._template["IVAR"].data = np.divide(1, self._error**2, where=self._error != 0, out=np.zeros_like(self._error))
+        self._template["MASK"].data = self._mask.astype("uint8")
+        self._template["LXPEAK"] = fits.BinTableHDU(data=self._lxpeak, name="LXPEAK")
+        self._template["WAVE_TRACE"] = fits.BinTableHDU(data=self._wave_trace, name="WAVE_TRACE")
+        self._template["LSF_TRACE"] = fits.BinTableHDU(data=self._lsf_trace, name="LSF_TRACE")
+        self._template.verify("silentfix")
+
+        os.makedirs(os.path.dirname(out_file), exist_ok=True)
+        self._template[0].header["FILENAME"] = os.path.basename(out_file)
+        self._template.writeto(out_file, overwrite=True)
+
