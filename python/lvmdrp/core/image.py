@@ -2382,6 +2382,141 @@ class Image(Header):
 
         return trace_amp, trace_cent, trace_fwhm, columns, mod_columns, residuals
 
+    def trace_fiber_widths_opt(self, fiber_centroids, ref_column=2000, ncolumns=40, nblocks=18, iblocks=[],
+                           fwhm_guess=2.5, fwhm_range=[1.0,3.5], max_diff=1.5, counts_threshold=5000):
+
+        if self._header is None:
+            raise ValueError("No header available")
+        unit = self._header["BUNIT"]
+
+        # initialize flux and FWHM traces
+        trace_cent = TraceMask()
+        trace_cent.createEmpty(data_dim=(fiber_centroids._fibers, self._dim[1]))
+        trace_cent.setFibers(fiber_centroids._fibers)
+        trace_cent._good_fibers = fiber_centroids._good_fibers
+        trace_cent.setHeader(self._header.copy())
+        trace_amp = copy(trace_cent)
+        trace_fwhm = copy(trace_cent)
+        trace_cent._header["IMAGETYP"] = "trace_centroid"
+        trace_amp._header["IMAGETYP"] = "trace_amplitude"
+        trace_fwhm._header["IMAGETYP"] = "trace_fwhm"
+
+        # select columns to fit for amplitudes, fiber_centroids and FWHMs per fiber block
+        step = self._dim[1] // ncolumns
+        columns = numpy.concatenate((numpy.arange(ref_column, 0, -step), numpy.arange(ref_column+step, self._dim[1], step)))
+        log.info(f"tracing fibers in {len(columns)} columns: {','.join(map(str, columns))}")
+
+        # fit peaks, fiber_centroids and FWHM in each column
+        mod_columns, residuals = [], []
+        for i, icolumn in enumerate(columns):
+            log.info(f"tracing column {icolumn} ({i+1}/{len(columns)})")
+            # get slice of data and trace
+            cen_slice, _, msk_slice = fiber_centroids.getSlice(icolumn, axis="y")
+            img_slice = self.getSlice(icolumn, axis="y")
+
+            # mask blocks we don't want to trace
+            if iblocks and isinstance(iblocks, (list, tuple, numpy.ndarray)):
+                cen_blocks = numpy.asarray(numpy.split(cen_slice, nblocks))
+                msk_blocks = numpy.asarray(numpy.split(msk_slice, nblocks))
+                cen_blocks = cen_blocks[iblocks]
+                msk_blocks = msk_blocks[iblocks]
+                msk_slice = numpy.concatenate(msk_blocks)
+                cen_slice = numpy.concatenate(cen_blocks)
+
+            cen_idx = cen_slice.round().astype("int16")
+            msk_slice |= (img_slice._data[cen_idx] < counts_threshold)
+
+            # initialize parameters with the full block size
+            par_slice = numpy.ones(3 * msk_slice.size) * numpy.nan
+            par_mask = numpy.tile(msk_slice, 3)
+
+            # fit gaussian models to each fiber profile
+            log.info(f"fitting fibers in column {i+1}/{ncolumns} ({cen_slice.size}/{msk_slice.size} selected fibers)")
+            bound_lower = numpy.array([0]*cen_slice.size + (cen_slice-max_diff).tolist() + [fwhm_range[0]/2.354]*cen_slice.size)
+            bound_upper = numpy.array([numpy.inf]*cen_slice.size + (cen_slice+max_diff).tolist() + [fwhm_range[1]/2.354]*cen_slice.size)
+            _, par_slice[~par_mask] = img_slice.fitMultiGauss(cen_slice, init_fwhm=fwhm_guess, bounds=(bound_lower, bound_upper))
+
+            # define joint gaussian model
+            mod_joint = Gaussians(par=par_slice)
+
+            # store joint model
+            mod_columns.append(mod_joint)
+
+            # get parameters of joint model
+            amp_slice = par_slice[0]
+            cent_slice = par_slice[1]
+            fwhm_slice = par_slice[2] * 2.354
+
+            # mask fibers with invalid values
+            amp_off = (amp_slice <= counts_threshold)
+            log.info(f"masking {amp_off.sum()} samples with amplitude < {counts_threshold} {unit}")
+            cent_off = numpy.abs(1 - cent_slice / numpy.concatenate(cen_blocks)) > 0.01
+            log.info(f"masking {cent_off.sum()} samples with centroids refined by > 1 %")
+            fwhm_off = (fwhm_slice < fwhm_range[0]) | (fwhm_slice > fwhm_range[1])
+            log.info(f"masking {fwhm_off.sum()} samples with FWHM outside {fwhm_range} pixels")
+            amp_mask = numpy.isnan(amp_slice) | amp_off | cent_off | fwhm_off
+            cent_mask = numpy.isnan(cent_slice) | amp_off | cent_off | fwhm_off
+            fwhm_mask = numpy.isnan(fwhm_slice) | amp_off | cent_off | fwhm_off
+
+            if amp_slice.size != trace_amp._data.shape[0]:
+                dummy_amp = numpy.split(numpy.zeros(trace_amp._data.shape[0]), nblocks)
+                dummy_cent = numpy.split(numpy.zeros(trace_cent._data.shape[0]), nblocks)
+                dummy_fwhm = numpy.split(numpy.zeros(trace_fwhm._data.shape[0]), nblocks)
+                dummy_amp_mask = numpy.split(numpy.ones(trace_amp._data.shape[0], dtype=bool), nblocks)
+                dummy_cent_mask = numpy.split(numpy.ones(trace_cent._data.shape[0], dtype=bool), nblocks)
+                dummy_fwhm_mask = numpy.split(numpy.ones(trace_fwhm._data.shape[0], dtype=bool), nblocks)
+
+                amp_split = numpy.split(amp_slice, len(iblocks))
+                cent_split = numpy.split(cent_slice, len(iblocks))
+                fwhm_split = numpy.split(fwhm_slice, len(iblocks))
+                amp_mask_split = numpy.split(amp_mask, len(iblocks))
+                cent_mask_split = numpy.split(cent_mask, len(iblocks))
+                fwhm_mask_split = numpy.split(fwhm_mask, len(iblocks))
+                for j, iblock in enumerate(iblocks):
+                    dummy_amp[iblock] = amp_split[j]
+                    dummy_cent[iblock] = cent_split[j]
+                    dummy_fwhm[iblock] = fwhm_split[j]
+                    dummy_amp_mask[iblock] = amp_mask_split[j]
+                    dummy_cent_mask[iblock] = cent_mask_split[j]
+                    dummy_fwhm_mask[iblock] = fwhm_mask_split[j]
+
+                # update traces
+                trace_amp.setSlice(icolumn, axis="y", data=numpy.concatenate(dummy_amp), mask=numpy.concatenate(dummy_amp_mask))
+                trace_cent.setSlice(icolumn, axis="y", data=numpy.concatenate(dummy_cent), mask=numpy.concatenate(dummy_cent_mask))
+                trace_fwhm.setSlice(icolumn, axis="y", data=numpy.concatenate(dummy_fwhm), mask=numpy.concatenate(dummy_fwhm_mask))
+                trace_amp._good_fibers = numpy.arange(trace_amp._fibers)[~numpy.all(trace_amp._mask, axis=1)]
+                trace_cent._good_fibers = numpy.arange(trace_cent._fibers)[~numpy.all(trace_cent._mask, axis=1)]
+                trace_fwhm._good_fibers = numpy.arange(trace_fwhm._fibers)[~numpy.all(trace_fwhm._mask, axis=1)]
+            else:
+                # update traces
+                trace_amp.setSlice(icolumn, axis="y", data=amp_slice, mask=amp_mask)
+                trace_cent.setSlice(icolumn, axis="y", data=cent_slice, mask=cent_mask)
+                trace_fwhm.setSlice(icolumn, axis="y", data=fwhm_slice, mask=fwhm_mask)
+
+            # compute model column
+            mod_slice = mod_joint(img_slice._pixels)
+
+            # compute residuals
+            integral_mod = numpy.trapz(mod_slice, img_slice._pixels)
+            integral_mod = integral_mod if integral_mod != 0 else numpy.nan
+            # NOTE: this is a hack to avoid integrating the whole column when tracing a few blocks
+            integral_dat = numpy.trapz(img_slice._data * (mod_slice>0), img_slice._pixels)
+            residuals.append((integral_mod - integral_dat) / integral_dat * 100)
+
+            # compute fitted model stats
+            chisq_red = bn.nansum((mod_slice - img_slice._data)[~img_slice._mask]**2 / img_slice._error[~img_slice._mask]**2) / (self._dim[0] - 1 - 3)
+            log.info(f"joint model {chisq_red = :.2f}")
+            if amp_mask.all() or cent_mask.all() or fwhm_mask.all():
+                continue
+            min_amp, max_amp, median_amp = bn.nanmin(amp_slice[~amp_mask]), bn.nanmax(amp_slice[~amp_mask]), bn.nanmedian(amp_slice[~amp_mask])
+            min_cent, max_cent, median_cent = bn.nanmin(cent_slice[~cent_mask]), bn.nanmax(cent_slice[~cent_mask]), bn.nanmedian(cent_slice[~cent_mask])
+            min_fwhm, max_fwhm, median_fwhm = bn.nanmin(fwhm_slice[~fwhm_mask]), bn.nanmax(fwhm_slice[~fwhm_mask]), bn.nanmedian(fwhm_slice[~fwhm_mask])
+            log.info(f"joint model amplitudes: {min_amp = :.2f}, {max_amp = :.2f}, {median_amp = :.2f}")
+            log.info(f"joint model centroids: {min_cent = :.2f}, {max_cent = :.2f}, {median_cent = :.2f}")
+            log.info(f"joint model FWHMs: {min_fwhm = :.2f}, {max_fwhm = :.2f}, {median_fwhm = :.2f}")
+
+        return trace_amp, trace_cent, trace_fwhm, columns, mod_columns, residuals
+
     def traceFWHM(
         self, axis_select, TraceMask, blocks, init_fwhm, threshold_flux, max_pix=None
     ):
