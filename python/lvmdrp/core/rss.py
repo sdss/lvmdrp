@@ -926,7 +926,7 @@ class RSS(FiberRows):
                         "CRVAL2": 1,
                         "CUNIT2": "", "CTYPE2": "FIBERID", "CRPIX2": 1}
 
-        elif len(wave.shape) == 2:
+        elif wave is None or len(wave.shape) == 2:
             wcs_dict = {"NAXIS": 2, "NAXIS1": data.shape[1], "NAXIS2": data.shape[0],
                         "CDELT1": 1,
                         "CRVAL1": 1,
