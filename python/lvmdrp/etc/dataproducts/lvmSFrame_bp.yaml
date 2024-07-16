@@ -18,7 +18,7 @@ hdu0:
     comment: conforms to FITS standard
 hdu1:
   name: FLUX
-  description: sky-subtracted flux in units of 10(-17) erg/s/cm2/Ang/fiber
+  description: sky-subtracted flux in units of erg/s/cm2/Ang
   is_image: true
   header:
   - key: BUNIT
@@ -50,12 +50,12 @@ hdu5:
   shape: NWAVE x NFIBER
 hdu6:
   name: SKY
-  description: sky in flux-calibrated units (10(-17) erg/s/cm2/Ang/fiber)
+  description: sky in flux-calibrated units erg/s/cm2/Ang
   is_image: true
   shape: NWAVE x NFIBER
 hdu7:
   name: SKY_IVAR
-  description: sky inverse variance (1/sigma^2) in flux-calibrated units (10(-17) erg/s/cm2/Ang/fiber)
+  description: sky inverse variance (1/sigma^2) in flux-calibrated units (erg/s/cm2/Ang)
   is_image: true
   shape: NWAVE x NFIBER
 hdu8:
@@ -112,7 +112,7 @@ hdu8:
     YPMM:
       name: ypmm
       type: float32
-      description: the x coordinate in mm of the fiber relative to the centroid
+      description: the y coordinate in mm of the fiber relative to the centroid
       unit: mm
     RINGNUM:
       name: ringnum
