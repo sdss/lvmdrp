@@ -3116,7 +3116,7 @@ class Spectrum1D(Header):
             cent[i] = centres[i]
         par = numpy.concatenate([flux_in, cent, sig_in])
         gauss_multi = fit_profile.Gaussians(par)
-        gauss_multi.fit(self._wave[select], self._data[select], sigma=error[select], bounds=bounds, ftol=ftol, xtol=xtol)
+        gauss_multi.fit(self._wave[select], self._data[select], p0=par, sigma=error[select], bounds=bounds, ftol=ftol, xtol=xtol)
         return gauss_multi, gauss_multi.getPar()
 
     def fitMultiGauss_fixed_cent(self, centres, init_fwhm):

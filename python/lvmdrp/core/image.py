@@ -2156,7 +2156,7 @@ class Image(Header):
 
     def trace_fiber_centroids(self, ref_column=2000, ref_centroids=None, mask_fibstatus=1,
                               ncolumns=140, method="gauss", fwhm_guess=2.5, fwhm_range=[1.0, 3.5],
-                              counts_threshold=5000, max_diff=1.5, fit_polynomial=True, poly_deg=4):
+                              counts_threshold=5000, max_diff=1.5):
         if self._header is None:
             raise ValueError("No header available")
         if self._slitmap is None:

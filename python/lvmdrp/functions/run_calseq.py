@@ -64,6 +64,8 @@ MASK_BANDS = {
     "r": [(6840,6960)],
     "z": [(7570, 7700)]
 }
+COUNTS_THRESHOLDS = {"ldls": 5000, "quartz": 10000}
+CAL_FLAVORS = {"bias", "trace", "wave", "dome", "twilight"}
 
 def get_calib_paths(mjd, flavors={"pixmask", "pixflat", "bias", "trace_guess", "trace", "width", "amp", "model", "wave", "lsf", "fiberflat_dome", "fiberflat_twilight"}, use_fiducial_cals=True):
     """Returns a dictionary containing paths for calibration frames
@@ -1185,8 +1187,10 @@ def create_pixelmasks(mjd, use_fiducial_cals=True, dark_expnums=None, pixflat_ex
 
 
 def create_nightly_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnums_qrtz=None,
-                        fit_poly=True, poly_deg_amp=5, poly_deg_cent=4, poly_deg_width=5,
-                        skip_done=True):
+                          counts_thresholds=COUNTS_THRESHOLDS, cent_guess_ncolumns=140,
+                          trace_full_ncolumns=40,
+                          fit_poly=True, poly_deg_amp=5, poly_deg_cent=4, poly_deg_width=5,
+                          skip_done=True):
     if expnums_ldls is not None and expnums_qrtz is not None:
         expnums = np.concatenate([expnums_ldls, expnums_qrtz])
     else:
@@ -1197,7 +1201,7 @@ def create_nightly_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnum
     reduce_2d(mjd, use_fiducial_cals=use_fiducial_cals, expnums=expnums, reject_cr=False, skip_done=skip_done)
 
     for channel, lamp in MASTER_CON_LAMPS.items():
-        counts_threshold = 5000 if lamp == "ldls" else 10000
+        counts_threshold = counts_thresholds[lamp]
 
         # select dome flats accoding to current channel-lamp combination
         flats_analogs = frames.loc[(frames[lamp])&(frames["camera"].str.startswith(channel))].groupby(["camera",])
@@ -1229,7 +1233,7 @@ def create_nightly_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnum
                 log.info(f"going to trace centroids fibers in {camera}")
                 centroids, img = image_tasks.trace_centroids(in_image=cflat_path, out_trace_cent=cent_guess_path,
                                                              correct_ref=True, median_box=(1,10), coadd=20, counts_threshold=counts_threshold,
-                                                             max_diff=1.5, guess_fwhm=2.5, method="gauss", ncolumns=140,
+                                                             max_diff=1.5, guess_fwhm=2.5, method="gauss", ncolumns=cent_guess_ncolumns,
                                                              fit_poly=fit_poly, poly_deg=poly_deg_cent,
                                                              interpolate_missing=True)
 
@@ -1251,7 +1255,7 @@ def create_nightly_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnum
                     in_trace_cent_guess=cent_guess_path,
                     median_box=(1,10), coadd=20,
                     counts_threshold=counts_threshold, max_diff=1.5, guess_fwhm=2.5,
-                    ncolumns=40, fwhm_limits=(1.5, 4.5),
+                    ncolumns=trace_full_ncolumns, fwhm_limits=(1.5, 4.5),
                     fit_poly=fit_poly, interpolate_missing=True,
                     poly_deg=(poly_deg_amp, poly_deg_cent, poly_deg_width)
                 )
@@ -1814,7 +1818,9 @@ def create_wavelengths(mjd, use_fiducial_cals=True, expnums=None, kind="longterm
             rss_tasks.resample_wavelength(in_rss=harc_path, out_rss=harc_path, method="linear", wave_range=SPEC_CHANNELS[channel], wave_disp=0.5)
 
 
-def reduce_nightly_sequence(mjd, use_fiducial_cals=False, reject_cr=True, only_cals={"bias", "trace", "wave", "dome", "twilight"}, skip_done=True, keep_ancillary=False):
+def reduce_nightly_sequence(mjd, use_fiducial_cals=False, reject_cr=True, only_cals=CAL_FLAVORS,
+                            counts_thresholds=COUNTS_THRESHOLDS, cent_guess_ncolumns=140, trace_full_ncolumns=40,
+                            skip_done=True, keep_ancillary=False):
     """Reduces the nightly calibration sequence:
 
     The nightly calibration sequence consists of the following exposures:
@@ -1845,9 +1851,8 @@ def reduce_nightly_sequence(mjd, use_fiducial_cals=False, reject_cr=True, only_c
         log.error(f"nothing to reduce, MJD = {mjd}")
         return
 
-    cal_types = {"bias", "trace", "wave", "dome", "twilight"}
-    if not set(only_cals).issubset(cal_types):
-        raise ValueError(f"some chosen image types in 'only_cals' are not valid: {only_cals.difference(cal_types)}")
+    if not set(only_cals).issubset(CAL_FLAVORS):
+        raise ValueError(f"some chosen image types in 'only_cals' are not valid: {only_cals.difference(CAL_FLAVORS)}")
     log.info(f"going to produce nightly calibrations: {only_cals}")
 
     frames, found_cals = md.get_sequence_metadata(mjd, for_cals=only_cals)
@@ -1864,7 +1869,11 @@ def reduce_nightly_sequence(mjd, use_fiducial_cals=False, reject_cr=True, only_c
         log.info(f"choosing {len(dome_flats)} dome flat exposures: {dome_flat_expnums}")
         expnums_ldls = np.sort(dome_flats.query("ldls").expnum.unique())
         expnums_qrtz = np.sort(dome_flats.query("quartz").expnum.unique())
-        create_nightly_traces(mjd=mjd, expnums_ldls=expnums_ldls, expnums_qrtz=expnums_qrtz, skip_done=skip_done)
+        create_nightly_traces(mjd=mjd, expnums_ldls=expnums_ldls, expnums_qrtz=expnums_qrtz,
+                              counts_thresholds=counts_thresholds,
+                              cent_guess_ncolumns=cent_guess_ncolumns,
+                              trace_full_ncolumns=trace_full_ncolumns,
+                              skip_done=skip_done)
     else:
         log.log(20 if "trace" in found_cals else 40, "skipping production of fiber traces")
 
@@ -1908,7 +1917,7 @@ def reduce_nightly_sequence(mjd, use_fiducial_cals=False, reject_cr=True, only_c
         _clean_ancillary(mjd)
 
 
-def reduce_longterm_sequence(mjd, use_fiducial_cals=True, reject_cr=True, only_cals={"bias", "trace", "wave", "dome", "twilight"}, skip_done=True, keep_ancillary=False):
+def reduce_longterm_sequence(mjd, use_fiducial_cals=True, reject_cr=True, only_cals=CAL_FLAVORS, skip_done=True, keep_ancillary=False):
     """Reduces the long-term calibration sequence:
 
     The long-term calibration sequence consists of the following exposures:
@@ -1939,9 +1948,8 @@ def reduce_longterm_sequence(mjd, use_fiducial_cals=True, reject_cr=True, only_c
         log.error(f"nothing to reduce, MJD = {mjd}")
         return
 
-    cal_types = {"bias", "trace", "wave", "dome", "twilight"}
-    if not set(only_cals).issubset(cal_types):
-        raise ValueError(f"some chosen image types in 'only_cals' are not valid: {only_cals.difference(cal_types)}")
+    if not set(only_cals).issubset(CAL_FLAVORS):
+        raise ValueError(f"some chosen image types in 'only_cals' are not valid: {only_cals.difference(CAL_FLAVORS)}")
     log.info(f"going to produce long-term calibrations: {only_cals}")
 
     frames, found_cals = md.get_sequence_metadata(mjd, for_cals=only_cals)
