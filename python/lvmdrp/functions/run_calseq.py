@@ -1211,7 +1211,10 @@ def create_nightly_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnum
             flats = flats_analogs.get_group((camera,))
 
             # combine dome flats
-            expnum_str = f"{flats.expnum.min():>08}_{flats.expnum.max():>08}"
+            if flats.expnum.min() != flats.expnum.max():
+                expnum_str = f"{flats.expnum.min():>08}_{flats.expnum.max():>08}"
+            else:
+                expnum_str = flats.expnum.min()
             dflat_paths = [path.full("lvm_anc", drpver=drpver, kind="d", imagetype="flat", **flat) for flat in flats.to_dict("records")]
             cflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="c", imagetype="flat", camera=camera, expnum=expnum_str)
             os.makedirs(os.path.dirname(cflat_path), exist_ok=True)
@@ -1487,7 +1490,10 @@ def create_dome_fiberflats(mjd, expnums_ldls, expnums_qrtz, use_fiducial_cals=Tr
     for channel, lamp in MASTER_CON_LAMPS.items():
         # read original combined dome flats and run extraction
         flats = frames.loc[(frames[lamp])&(frames["camera"].str.startswith(channel))]
-        expnum_str = f"{flats.expnum.min():>08}_{flats.expnum.max():>08}"
+        if flats.expnum.min() != flats.expnum.max():
+            expnum_str = f"{flats.expnum.min():>08}_{flats.expnum.max():>08}"
+        else:
+            expnum_str = flats.expnum.min()
         xflat_paths = []
         for i, specid in enumerate("123"):
             camera = f"{channel}{specid}"
@@ -1756,7 +1762,10 @@ def create_wavelengths(mjd, use_fiducial_cals=True, expnums=None, kind="longterm
     # define master paths for target frames
     calibs = get_calib_paths(mjd, use_fiducial_cals=use_fiducial_cals)
 
-    expnum_str = f"{frames.expnum.min():>08}_{frames.expnum.max():>08}"
+    if frames.expnum.min() != frames.exnum.max():
+        expnum_str = f"{frames.expnum.min():>08}_{frames.expnum.max():>08}"
+    else:
+        expnum_str = frames.expnum.min()
     arc_analogs = frames.groupby(["camera",])
     for camera in arc_analogs.groups:
         arcs = arc_analogs.get_group((camera,))
