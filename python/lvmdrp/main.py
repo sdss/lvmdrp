@@ -1491,6 +1491,9 @@ def science_reduction(expnum: int, use_fiducial_master: bool = False,
                       ncpus: int = None,
                       aperture_extraction: bool = False,
                       clean_ancillary: bool = False,
+                      skip_2d: bool = False,
+                      skip_1d: bool = False,
+                      skip_post_1d: bool = False,
                       debug_mode: bool = False) -> None:
     """ Run the science reduction for a given exposure number.
     """
@@ -1543,130 +1546,143 @@ def science_reduction(expnum: int, use_fiducial_master: bool = False,
 
     # detrend science exposure
     log.info(f"--- Starting science reduction for tile {sci_tileid} at MJD {sci_mjd} with exposure number {sci_expnum}")
-    reduce_2d(mjd=sci_mjd, use_fiducial_cals=use_fiducial_master, expnums=[sci_expnum], reject_cr=reject_cr, skip_done=False)
+    if skip_2d:
+        log.info("skipping 2D reduction")
+    else:
+        reduce_2d(mjd=sci_mjd, use_fiducial_cals=use_fiducial_master, expnums=[sci_expnum], reject_cr=reject_cr, skip_done=False)
 
     # run reduction loop for each science camera exposure
-    for sci in sci_metadata.to_dict("records"):
-        # define science camera
-        sci_camera = sci["camera"]
+    if skip_1d:
+        log.info("skipping 1D reduction")
+    else:
+        for sci in sci_metadata.to_dict("records"):
+            # define science camera
+            sci_camera = sci["camera"]
 
-        dsci_path = path.full("lvm_anc", drpver=drpver, kind="d", imagetype=sci["imagetyp"], **sci)
-        lsci_path = path.full("lvm_anc", drpver=drpver, kind="l", imagetype=sci["imagetyp"], **sci)
-        xsci_path = path.full("lvm_anc", drpver=drpver, kind="x", imagetype=sci["imagetyp"], **sci)
-        wsci_path = path.full("lvm_anc", drpver=drpver, kind="w", imagetype=sci["imagetyp"], **sci)
-        ssci_path = path.full("lvm_anc", drpver=drpver, kind="s", imagetype=sci["imagetyp"], **sci)
-        hsci_path = path.full("lvm_anc", drpver=drpver, kind="h", imagetype=sci["imagetyp"], **sci)
-        lstr_path = path.full("lvm_anc", drpver=drpver, kind="d", imagetype="stray", **sci)
-        os.makedirs(os.path.dirname(hsci_path), exist_ok=True)
+            dsci_path = path.full("lvm_anc", drpver=drpver, kind="d", imagetype=sci["imagetyp"], **sci)
+            lsci_path = path.full("lvm_anc", drpver=drpver, kind="l", imagetype=sci["imagetyp"], **sci)
+            xsci_path = path.full("lvm_anc", drpver=drpver, kind="x", imagetype=sci["imagetyp"], **sci)
+            wsci_path = path.full("lvm_anc", drpver=drpver, kind="w", imagetype=sci["imagetyp"], **sci)
+            ssci_path = path.full("lvm_anc", drpver=drpver, kind="s", imagetype=sci["imagetyp"], **sci)
+            hsci_path = path.full("lvm_anc", drpver=drpver, kind="h", imagetype=sci["imagetyp"], **sci)
+            lstr_path = path.full("lvm_anc", drpver=drpver, kind="d", imagetype="stray", **sci)
+            os.makedirs(os.path.dirname(hsci_path), exist_ok=True)
 
-        # define science product paths
-        frame_path = path.full("lvm_frame", drpver=drpver, tileid=sci_tileid, mjd=sci_mjd, expnum=sci_expnum, kind=f"Frame-{sci_camera}")
+            # define science product paths
+            frame_path = path.full("lvm_frame", drpver=drpver, tileid=sci_tileid, mjd=sci_mjd, expnum=sci_expnum, kind=f"Frame-{sci_camera}")
 
-        # define agc coadd path
-        agcsci_path=path.full('lvm_agcam_coadd', mjd=sci_mjd, specframe=sci_expnum, tel='sci')
-        agcskye_path=path.full('lvm_agcam_coadd', mjd=sci_mjd, specframe=sci_expnum, tel='skye')
-        agcskyw_path=path.full('lvm_agcam_coadd', mjd=sci_mjd, specframe=sci_expnum, tel='skyw')
-        #agcspec_path=path.full('lvm_agcam_coadd', mjd=sci_mjd, specframe=sci_expnum, tel='spec')
+            # define agc coadd path
+            agcsci_path=path.full('lvm_agcam_coadd', mjd=sci_mjd, specframe=sci_expnum, tel='sci')
+            agcskye_path=path.full('lvm_agcam_coadd', mjd=sci_mjd, specframe=sci_expnum, tel='skye')
+            agcskyw_path=path.full('lvm_agcam_coadd', mjd=sci_mjd, specframe=sci_expnum, tel='skyw')
+            #agcspec_path=path.full('lvm_agcam_coadd', mjd=sci_mjd, specframe=sci_expnum, tel='spec')
 
-        # define calibration frames paths
-        if use_fiducial_master:
-            log.info(f"using fiducial master calibration frames for {sci_camera} at {masters_path = }")
-            if not os.path.isdir(masters_path):
-                raise ValueError(f"LVM_MASTER_DIR environment variable is not properly set, {masters_path} does not exists")
-            mtrace_path = os.path.join(masters_path, f"lvm-mtrace-{sci_camera}.fits")
-            mwidth_path = os.path.join(masters_path, f"lvm-mwidth-{sci_camera}.fits")
-            mmodel_path = os.path.join(masters_path, f"lvm-mmodel-{sci_camera}.fits")
-        else:
-            log.info(f"using master calibration frames from DRP version {drpver}, mjd = {sci_mjd}, camera = {sci_camera}")
-            masters = match_master_metadata(target_mjd=sci_mjd,
-                                            target_camera=sci_camera,
-                                            target_imagetyp=sci["imagetyp"])
-            mtrace_path = path.full("lvm_master", drpver=drpver, kind="mtrace", **masters["trace"].to_dict())
-            mwidth_path = None
-            mmodel_path = None
+            # define calibration frames paths
+            if use_fiducial_master:
+                log.info(f"using fiducial master calibration frames for {sci_camera} at {masters_path = }")
+                if not os.path.isdir(masters_path):
+                    raise ValueError(f"LVM_MASTER_DIR environment variable is not properly set, {masters_path} does not exists")
+                mtrace_path = os.path.join(masters_path, f"lvm-mtrace-{sci_camera}.fits")
+                mwidth_path = os.path.join(masters_path, f"lvm-mwidth-{sci_camera}.fits")
+                mmodel_path = os.path.join(masters_path, f"lvm-mmodel-{sci_camera}.fits")
+            else:
+                log.info(f"using master calibration frames from DRP version {drpver}, mjd = {sci_mjd}, camera = {sci_camera}")
+                masters = match_master_metadata(target_mjd=sci_mjd,
+                                                target_camera=sci_camera,
+                                                target_imagetyp=sci["imagetyp"])
+                mtrace_path = path.full("lvm_master", drpver=drpver, kind="mtrace", **masters["trace"].to_dict())
+                mwidth_path = None
+                mmodel_path = None
 
-        # add astrometry to frame
-        add_astrometry(in_image=dsci_path, out_image=dsci_path, in_agcsci_image=agcsci_path, in_agcskye_image=agcskye_path, in_agcskyw_image=agcskyw_path)
+            # add astrometry to frame
+            add_astrometry(in_image=dsci_path, out_image=dsci_path, in_agcsci_image=agcsci_path, in_agcskye_image=agcskye_path, in_agcskyw_image=agcskyw_path)
 
-        # subtract straylight
-        subtract_straylight(in_image=dsci_path, out_image=lsci_path, out_stray=lstr_path,
-                                        in_cent_trace=mtrace_path, select_nrows=(5,5), use_weights=True,
-                                        aperture=15, smoothing=400, median_box=101, gaussian_sigma=20.0,
-                                        parallel=parallel_run)
+            # subtract straylight
+            subtract_straylight(in_image=dsci_path, out_image=lsci_path, out_stray=lstr_path,
+                                            in_cent_trace=mtrace_path, select_nrows=(5,5), use_weights=True,
+                                            aperture=15, smoothing=400, median_box=101, gaussian_sigma=20.0,
+                                            parallel=parallel_run)
 
-        # extract 1d spectra
-        extract_spectra(in_image=lsci_path, out_rss=xsci_path, in_trace=mtrace_path, in_fwhm=mwidth_path,
-                        in_model=mmodel_path, method=extraction_method, parallel=parallel_run)
+            # extract 1d spectra
+            extract_spectra(in_image=lsci_path, out_rss=xsci_path, in_trace=mtrace_path, in_fwhm=mwidth_path,
+                            in_model=mmodel_path, method=extraction_method, parallel=parallel_run)
 
     # per channel reduction
-    for channel in "brz":
-        xsci_paths = sorted(path.expand('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver,
-                                        kind='x', camera=f'{channel}[123]', imagetype=sci_imagetyp, expnum=expnum))
-        xsci_path = path.full('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver,
-                              kind='x', camera=channel, imagetype=sci_imagetyp, expnum=expnum)
-        wsci_path = path.full('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver,
-                              kind='w', camera=channel, imagetype=sci_imagetyp, expnum=expnum)
-        mwave_paths = sorted(glob(os.path.join(masters_path, f"lvm-mwave-{channel}?.fits")))
-        mlsf_paths = sorted(glob(os.path.join(masters_path, f"lvm-mlsf-{channel}?.fits")))
-        frame_path = path.full('lvm_frame', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver, expnum=sci_expnum, kind=f'Frame-{channel}')
-        mflat_path = os.path.join(masters_path, f"lvm-mfiberflat_twilight-{channel}.fits")
-        if not os.path.isfile(mflat_path):
-            mflat_path = os.path.join(masters_path, f"lvm-mfiberflat-{channel}.fits")
-            if not os.path.isfile(mflat_path):
-                mflat_paths = sorted(glob(os.path.join(masters_path, f"lvm-mfiberflat-{channel}?.fits")))
-                mflat = RSS.from_spectrographs(*[RSS.from_file(mflat_path) for mflat_path in mflat_paths])
-                mflat.writeFitsData(mflat_path)
-
-        ssci_path = path.full('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver,
-                              kind='s', camera=channel, imagetype=sci_imagetyp, expnum=expnum)
-        hsci_path = path.full('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver,
-                              kind='h', camera=channel, imagetype=sci_imagetyp, expnum=expnum)
-
-        # stack spectrographs
-        stack_spectrographs(in_rsss=xsci_paths, out_rss=xsci_path)
-        if not os.path.exists(xsci_path):
-            log.error(f'No stacked file found: {xsci_path}. Skipping remaining pipeline.')
-            continue
-
-        # wavelength calibrate
-        create_pixel_table(in_rss=xsci_path, out_rss=wsci_path, in_waves=mwave_paths, in_lsfs=mlsf_paths)
-
-        # apply fiberflat correction
-        apply_fiberflat(in_rss=wsci_path, out_frame=frame_path, in_flat=mflat_path)
-
-        # correct thermal shift in wavelength direction
-        shift_wave_skylines(in_frame=frame_path, out_frame=frame_path, channel=channel)
-
-        # interpolate sky fibers
-        interpolate_sky(in_frame=frame_path, out_rss=ssci_path)
-
-        # combine sky telescopes
-        combine_skies(in_rss=ssci_path, out_rss=ssci_path, sky_weights=sky_weights)
-
-        # resample wavelength into uniform grid along fiber IDs for science and sky fibers
-        resample_wavelength(in_rss=ssci_path,  out_rss=hsci_path, wave_range=SPEC_CHANNELS[channel], wave_disp=0.5, convert_to_density=True)
-
-        # use resampled frames for flux calibration in each camera, using standard stars observed in the spec telescope
-        #  and field stars found in the sci ifu
-        fluxcal_standard_stars(hsci_path, GAIA_CACHE_DIR=MASTERS_DIR+'/gaia_cache')
-        fluxcal_sci_ifu_stars(hsci_path, GAIA_CACHE_DIR=MASTERS_DIR+'/gaia_cache')
-
-        # flux-calibrate each channel
-        fframe_path = path.full("lvm_frame", mjd=sci_mjd, drpver=drpver, tileid=sci_tileid, expnum=sci_expnum, kind=f'FFrame-{channel}')
-        apply_fluxcal(in_rss=hsci_path, out_fframe=fframe_path, method=fluxcal_method)
-
-    # stitch channels
-    fframe_paths = sorted(path.expand('lvm_frame', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver, kind='FFrame-?', expnum=expnum))
-    if len(fframe_paths) == 0:
-        log.error('No fframe files found.  Cannot join spectrograph channels. Exiting pipeline.')
-        return
-
     cframe_path = path.full("lvm_frame", drpver=drpver, tileid=sci_tileid, mjd=sci_mjd, expnum=sci_expnum, kind='CFrame')
-    join_spec_channels(in_fframes=fframe_paths, out_cframe=cframe_path, use_weights=True)
-
-    # sky subtraction
     sframe_path = path.full("lvm_frame", mjd=sci_mjd, drpver=drpver, tileid=sci_tileid, expnum=sci_expnum, kind='SFrame')
-    quick_sky_subtraction(in_cframe=cframe_path, out_sframe=sframe_path, skip_subtraction=skip_sky_subtraction)
+    if skip_post_1d:
+        log.info("skipping post 1D reduction")
+    else:
+        for channel in "brz":
+            xsci_paths = sorted(path.expand('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver,
+                                            kind='x', camera=f'{channel}[123]', imagetype=sci_imagetyp, expnum=expnum))
+            xsci_path = path.full('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver,
+                                kind='x', camera=channel, imagetype=sci_imagetyp, expnum=expnum)
+            wsci_path = path.full('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver,
+                                kind='w', camera=channel, imagetype=sci_imagetyp, expnum=expnum)
+            mwave_paths = sorted(glob(os.path.join(masters_path, f"lvm-mwave-{channel}?.fits")))
+            mlsf_paths = sorted(glob(os.path.join(masters_path, f"lvm-mlsf-{channel}?.fits")))
+            frame_path = path.full('lvm_frame', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver, expnum=sci_expnum, kind=f'Frame-{channel}')
+            mflat_path = os.path.join(masters_path, f"lvm-mfiberflat_twilight-{channel}.fits")
+            if not os.path.isfile(mflat_path):
+                mflat_path = os.path.join(masters_path, f"lvm-mfiberflat-{channel}.fits")
+                if not os.path.isfile(mflat_path):
+                    mflat_paths = sorted(glob(os.path.join(masters_path, f"lvm-mfiberflat-{channel}?.fits")))
+                    mflat = RSS.from_spectrographs(*[RSS.from_file(mflat_path) for mflat_path in mflat_paths])
+                    mflat.writeFitsData(mflat_path)
+
+            ssci_path = path.full('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver,
+                                kind='s', camera=channel, imagetype=sci_imagetyp, expnum=expnum)
+            hsci_path = path.full('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver,
+                                kind='h', camera=channel, imagetype=sci_imagetyp, expnum=expnum)
+
+            # stack spectrographs
+            stack_spectrographs(in_rsss=xsci_paths, out_rss=xsci_path)
+            if not os.path.exists(xsci_path):
+                log.error(f'No stacked file found: {xsci_path}. Skipping remaining pipeline.')
+                continue
+
+            # wavelength calibrate
+            create_pixel_table(in_rss=xsci_path, out_rss=wsci_path, in_waves=mwave_paths, in_lsfs=mlsf_paths)
+
+            # apply fiberflat correction
+            apply_fiberflat(in_rss=wsci_path, out_frame=frame_path, in_flat=mflat_path)
+
+            # correct thermal shift in wavelength direction
+            shift_wave_skylines(in_frame=frame_path, out_frame=frame_path, channel=channel)
+
+            # interpolate sky fibers
+            interpolate_sky(in_frame=frame_path, out_rss=ssci_path)
+
+            # combine sky telescopes
+            combine_skies(in_rss=ssci_path, out_rss=ssci_path, sky_weights=sky_weights)
+
+            # resample wavelength into uniform grid along fiber IDs for science and sky fibers
+            resample_wavelength(in_rss=ssci_path,  out_rss=hsci_path, wave_range=SPEC_CHANNELS[channel], wave_disp=0.5, convert_to_density=True)
+
+            # use resampled frames for flux calibration in each camera, using standard stars observed in the spec telescope
+            #  and field stars found in the sci ifu
+            fluxcal_standard_stars(hsci_path, GAIA_CACHE_DIR=MASTERS_DIR+'/gaia_cache')
+            fluxcal_sci_ifu_stars(hsci_path, GAIA_CACHE_DIR=MASTERS_DIR+'/gaia_cache')
+
+            # flux-calibrate each channel
+            fframe_path = path.full("lvm_frame", mjd=sci_mjd, drpver=drpver, tileid=sci_tileid, expnum=sci_expnum, kind=f'FFrame-{channel}')
+            apply_fluxcal(in_rss=hsci_path, out_fframe=fframe_path, method=fluxcal_method)
+
+        # stitch channels
+        fframe_paths = sorted(path.expand('lvm_frame', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver, kind='FFrame-?', expnum=sci_expnum))
+        if len(fframe_paths) == 0:
+            log.error('No fframe files found.  Cannot join spectrograph channels. Exiting pipeline.')
+            return
+
+        join_spec_channels(in_fframes=fframe_paths, out_cframe=cframe_path, use_weights=True)
+
+        # sky subtraction
+        quick_sky_subtraction(in_cframe=cframe_path, out_sframe=sframe_path, skip_subtraction=skip_sky_subtraction)
+
+        # update the drpall summary file
+        log.info('Updating the drpall summary file')
+        update_summary_file(sframe_path, tileid=sci_tileid, mjd=sci_mjd, expnum=sci_expnum, master_mjd=master_mjd)
 
     # clean ancillary folder
     if clean_ancillary:
@@ -1697,14 +1713,11 @@ def science_reduction(expnum: int, use_fiducial_master: bool = False,
                 except Exception as e:
                     log.warning(f"error while removing {ancillary_dir}: {e}")
 
-    # update the drpall summary file
-    log.info('Updating the drpall summary file')
-    update_summary_file(sframe_path, tileid=sci_tileid, mjd=sci_mjd, expnum=sci_expnum, master_mjd=master_mjd)
-
 
 def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
             with_cals: bool = False, no_sci: bool = False,
-            fluxcal_method: str = 'STD', clean_ancillary: bool = False, debug_mode: bool = False):
+            fluxcal_method: str = 'STD', skip_2d: bool = False, skip_1d: bool = False, skip_post_1d: bool = False,
+            clean_ancillary: bool = False, debug_mode: bool = False):
     """ Run the quick DRP
 
     Run the quick DRP for an MJD, or a range of MJDs. Reduces
@@ -1725,6 +1738,12 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
         Flag to turn off science frame reduction, by default False
     fluxcal_method : str, optional
         'NONE' or 'STD' for standard stars, 'SCI' for field stars in science IFU
+    skip_2d : bool, optional
+        Skip preprocessing and detrending, by default False
+    skip_1d : bool, optional
+        Skip astrometry, straylight subtraction and extraction, by default False
+    skip_post_1d : bool, optional
+        Skip wavelength calibration, flatfielding, sky processing and flux calibration
     clean_ancillary : bool, optional
         Flag to remove the ancillary paths, by default False
     debug_mode : bool, optional
@@ -1744,6 +1763,9 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
         for mjd in mjds:
             run_drp(mjd=mjd, expnum=expnum, with_cals=with_cals, no_sci=no_sci,
                     fluxcal_method=fluxcal_method,
+                    skip_2d=skip_2d,
+                    skip_1d=skip_1d,
+                    skip_post_1d=skip_post_1d,
                     clean_ancillary=clean_ancillary,
                     debug_mode=debug_mode)
         return
@@ -1812,6 +1834,9 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
                 try:
                     science_reduction(expnum, use_fiducial_master=True,
                                       fluxcal_method=fluxcal_method,
+                                      skip_2d=skip_2d,
+                                      skip_1d=skip_1d,
+                                      skip_post_1d=skip_post_1d,
                                       clean_ancillary=clean_ancillary,
                                       debug_mode=debug_mode, **kwargs)
                 except Exception as e:
