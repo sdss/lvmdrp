@@ -757,7 +757,7 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
     wave_trace.writeFitsData(out_wave)
     fwhm_trace.writeFitsData(out_lsf)
 
-
+    return ref_lines, use_line, cent_wave, fwhm_wave, arc, wave_trace, fwhm_trace
 
 # method to apply shift in wavelength table based on comparison to skylines
 def shift_wave_skylines(in_frame: str, out_frame: str, channel: str):
