@@ -1703,7 +1703,7 @@ def science_reduction(expnum: int, use_fiducial_master: bool = False,
 
 
 def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
-            with_cals: bool = False, no_sci: bool = False, 
+            with_cals: bool = False, no_sci: bool = False,
             fluxcal_method: str = 'STD', clean_ancillary: bool = False, debug_mode: bool = False):
     """ Run the quick DRP
 

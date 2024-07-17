@@ -49,7 +49,7 @@ from astropy.table import Table
 
 from lvmdrp.core.rss import RSS, loadRSS, lvmFFrame
 from lvmdrp.core.spectrum1d import Spectrum1D
-import lvmdrp.core.fluxcal as fluxcal 
+import lvmdrp.core.fluxcal as fluxcal
 from lvmdrp.core.sky import get_sky_mask_uves, get_z_continuum_mask
 from lvmdrp import log
 
@@ -306,14 +306,14 @@ def standard_sensitivity(stds, rss, GAIA_CACHE_DIR, ext, res, plot=False, width=
 
 def science_sensitivity(rss, res_sci, ext, GAIA_CACHE_DIR, NSCI_MAX=15, r_spaxel=(32.0/2)/3600.0, width=3, plot=False):
     '''
-    Scale the (assumed known) average sensitivity function of LVMi using GAIA XP spectra of 
-    bright stars found in the science IFU. Scaling is based on a "broad band" Gaussian filter 
+    Scale the (assumed known) average sensitivity function of LVMi using GAIA XP spectra of
+    bright stars found in the science IFU. Scaling is based on a "broad band" Gaussian filter
     in b,r,i channels.
-    
+
     First query for any gaia stars in the science IFU, then use the nearest fiber
-    spectrum to measure an average flux offset between the data and the XP spectra. 
+    spectrum to measure an average flux offset between the data and the XP spectra.
     '''
-    
+
     prop_cycle = plt.rcParams['axes.prop_cycle']
     colors = prop_cycle.by_key()['color']
 
@@ -338,12 +338,12 @@ def science_sensitivity(rss, res_sci, ext, GAIA_CACHE_DIR, NSCI_MAX=15, r_spaxel
         m2 = get_z_continuum_mask(obswave)
 
     # get GAIA data, potentially cached
-    r, calibrated_spectra, sampling = fluxcal.get_XP_spectra(expnum, ra, dec, plot=False, lim_mag=13.5, 
-                                                             n_spec=NSCI_MAX, GAIA_CACHE_DIR='./gaia_cache')
+    r, calibrated_spectra, sampling = fluxcal.get_XP_spectra(expnum, ra, dec, plot=False, lim_mag=13.5,
+                                                             n_spec=NSCI_MAX, GAIA_CACHE_DIR=GAIA_CACHE_DIR)
     gwave = sampling*10 # to A
     for i in range(len(calibrated_spectra)):
         # W/micron/m^2 -> in erg/s/cm^2/A
-        calibrated_spectra.iloc[i].flux *= 100 
+        calibrated_spectra.iloc[i].flux *= 100
 
     # read the mean sensitivity curve
     mean_sens = fluxcal.get_mean_sens_curves(os.getenv("LVMCORE_DIR") + "/sensitivity")
@@ -387,7 +387,7 @@ def science_sensitivity(rss, res_sci, ext, GAIA_CACHE_DIR, NSCI_MAX=15, r_spaxel
             # calculate the normalization of the average (known) sensitivity curve in a broad band
             lvmflux = fluxcal.spec_to_LVM_flux(channel, obswave, obsflux)
             sens = fluxcal.spec_to_LVM_flux(channel, gwave, gflux) / lvmflux
-            res_sci[f"STD{i+1}SEN"] = (sens*np.interp(obswave, mean_sens[channel]['wavelength'], 
+            res_sci[f"STD{i+1}SEN"] = (sens*np.interp(obswave, mean_sens[channel]['wavelength'],
                                                                mean_sens[channel]['sens'])).astype(np.float32)
 
             mAB_std = np.round(fluxcal.spec_to_LVM_mAB(channel, gwave, gflux), 2)
@@ -404,7 +404,7 @@ def science_sensitivity(rss, res_sci, ext, GAIA_CACHE_DIR, NSCI_MAX=15, r_spaxel
 
             # calibrate and plot against the stars for debugging:
             if plot:
-                plt.plot(obswave, np.interp(obswave, gwave, gflux)/obsflux, '.', 
+                plt.plot(obswave, np.interp(obswave, gwave, gflux)/obsflux, '.',
                          color=colors[i%len(colors)] , markersize=2, zorder=-999)
                 plt.plot(obswave, res_sci[f"STD{i+1}SEN"], color=colors[i%len(colors)], linewidth=2)
 
@@ -501,7 +501,7 @@ def fluxcal_standard_stars(in_rss, plot=True, GAIA_CACHE_DIR=None):
 
 def fluxcal_sci_ifu_stars(in_rss, plot=True, GAIA_CACHE_DIR=None, NSCI_MAX=15):
     """
-    Scale the (assumed known) average sensitivity function using XP spectra of stars 
+    Scale the (assumed known) average sensitivity function using XP spectra of stars
     found in the science IFU. Create a calibration table analogue to the one returned
     by `fluxcal_standards`.
 
