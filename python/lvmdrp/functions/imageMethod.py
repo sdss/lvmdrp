@@ -3264,6 +3264,13 @@ def extract_spectra(
     plot_fiber_thermal_shift(columns, shifts, ax=ax)
     save_fig(fig, product_path=out_rss, to_display=display_plots, figure_path="qa", label="fiber_thermal_shifts")
 
+    # mask non-exposed standard fibers
+    slitmap = img.getSlitmap()
+    slitmap_spec = slitmap[slitmap["spectrographid"] == int(img._header["CCD"][1])]
+    exposed_selection = numpy.array(list(img._header["STD*ACQ"].values()))
+    exposed_std = numpy.array(list(img._header["STD*FIB"].values()))[exposed_selection]
+    mask |= (~(numpy.isin(slitmap_spec["orig_ifulabel"], exposed_std))&((slitmap_spec["telescope"] == "Spec")))[:, None]
+
     if error is not None:
         error[mask] = replace_error
     rss = RSS(
@@ -3274,6 +3281,7 @@ def extract_spectra(
         cent_trace=trace_mask,
         width_trace=trace_fwhm,
         header=img.getHeader(),
+        slitmap=slitmap
     )
     rss.setHdrValue("NAXIS2", data.shape[0])
     rss.setHdrValue("NAXIS1", data.shape[1])
@@ -3323,8 +3331,6 @@ def extract_spectra(
             "HIERARCH FIBER WIDTH SIG",
             numpy.std(trace_fwhm._data[rss._good_fibers]) if data.size != 0 else 0,
         )
-    # propagate slitmap
-    rss.setSlitmap(img.getSlitmap())
     # save extracted RSS
     log.info(f"writing extracted spectra to {os.path.basename(out_rss)}")
     rss.writeFitsData(out_rss)
