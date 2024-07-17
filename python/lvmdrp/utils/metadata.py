@@ -742,7 +742,7 @@ def add_masters(metadata):
     array = array.astype(
         [
             (n, dtypes[n])
-            if dtypes[n] != object
+            if dtypes[n] is not object
             else (n, h5py.string_dtype("utf-8", length=None))
             for n in dtypes.names
         ]
