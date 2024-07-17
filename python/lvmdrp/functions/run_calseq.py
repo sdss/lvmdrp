@@ -1757,7 +1757,7 @@ def create_wavelengths(mjd, use_fiducial_cals=True, expnums=None, kind="longterm
     """
     frames, _ = md.get_sequence_metadata(mjd, expnums=expnums, for_cals={"wave"})
 
-    # reduce_2d(mjd, use_fiducial_cals=use_fiducial_cals, expnums=expnums, assume_imagetyp="arc", reject_cr=False, skip_done=skip_done)
+    reduce_2d(mjd, use_fiducial_cals=use_fiducial_cals, expnums=expnums, assume_imagetyp="arc", reject_cr=False, skip_done=skip_done)
 
     # define master paths for target frames
     calibs = get_calib_paths(mjd, use_fiducial_cals=use_fiducial_cals)
