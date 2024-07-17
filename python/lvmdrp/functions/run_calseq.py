@@ -1762,7 +1762,7 @@ def create_wavelengths(mjd, use_fiducial_cals=True, expnums=None, kind="longterm
     # define master paths for target frames
     calibs = get_calib_paths(mjd, use_fiducial_cals=use_fiducial_cals)
 
-    if frames.expnum.min() != frames.exnum.max():
+    if frames.expnum.min() != frames.expnum.max():
         expnum_str = f"{frames.expnum.min():>08}_{frames.expnum.max():>08}"
     else:
         expnum_str = frames.expnum.min()
