@@ -170,8 +170,7 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'STD', display_plo
         fframe._fluxcal_std["mean"] = sens_ave
         fframe._fluxcal_std["rms"] = sens_rms
 
-        # TODO: fix plotting for 'SCI'
-        ax.set_title(f"{channel = }", loc="left")
+        ax.set_title(f"flux calibration for {channel = } with {method = }", loc="left")
         for j in range(sens_arr.shape[1]):
             std_hd = fframe._fluxcal_std.colnames[j][:-3]
             std_id = fframe._header.get(f"{std_hd}FIB", "unknown")
