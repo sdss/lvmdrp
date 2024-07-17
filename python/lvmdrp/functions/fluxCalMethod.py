@@ -381,7 +381,6 @@ def science_sensitivity(rss, res_sci, ext, GAIA_CACHE_DIR, NSCI_MAX=15, r_spaxel
 
             # correct for extinction
             obsflux *= 10 ** (0.4 * ext * secz)
-            # TODO: understand exptime, is the data already per s?
             obsflux /= exptime
 
             # calculate the normalization of the average (known) sensitivity curve in a broad band
