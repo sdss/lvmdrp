@@ -7,7 +7,7 @@ import yaml
 import shutil
 import traceback
 import pandas as pd
-from typing import Union
+from typing import Union, List
 from functools import lru_cache
 from itertools import groupby
 
@@ -41,24 +41,64 @@ from lvmdrp.utils.convert import tileid_grp
 from lvmdrp import config, log, path, __version__ as drpver
 
 
-def mjd_from_expnum(expnum):
+def mjd_from_expnum(expnum: Union[int, str, list, tuple]) -> List[int]:
     """Returns the MJD for the given exposure number
 
     Parameters
     ----------
-    expnum : int
-        the exposure number
+    expnum : int|list[int]
+        the exposure number(s)
 
     Returns
     -------
-    int
+    list[int]
         the MJD of the exposure
     """
+    if isinstance(expnum, int):
+        pass
+    elif isinstance(expnum, str) and "-" in expnum:
+        expnum = [int(exp) for exp in expnum.split("-")]
+        expnum = list(range(expnum[0], expnum[1]+1))
+
+    if isinstance(expnum, (tuple, list)):
+        mjds = [mjd_from_expnum(exp)[0] for exp in expnum]
+        return mjds
+
     rpath = path.expand("lvm_raw", camspec="*", mjd="*", hemi="s", expnum=expnum)
     if len(rpath) == 0:
         raise ValueError(f"no raw frame found for exposure number {expnum}")
     mjd = path.extract("lvm_raw", rpath[0])["mjd"]
-    return int(mjd)
+    return [int(mjd)]
+
+
+def parse_expnums(expnum: Union[int, str, list, tuple]) -> Union[List, Tuple]:
+    """Returns and exposure number list
+
+    Parameters
+    ----------
+    expnum : int|str|list[int]|tuple[int]
+        exposure numbers expression from which to parse an exposure number list
+
+    Returns
+    -------
+    exps : list[int]
+        a list of exposure numbers
+    """
+    if isinstance(expnum, str):
+        start_exp, end_exp = expnum.split('-')
+        start_exp = int(start_exp) if start_exp else None
+        end_exp = int(end_exp) if end_exp else None
+
+        if start_exp and end_exp:
+            exps = list(range(start_exp, end_exp+1))
+        else:
+            exps = (start_exp, end_exp)
+    elif isinstance(expnum, int):
+        exps = [expnum]
+    else:
+        exps = list(expnum)
+
+    return exps
 
 
 def get_master_mjd(sci_mjd: int) -> int:
@@ -468,6 +508,22 @@ def create_output_path(kind: str, flavor: str, mjd: int, tileid: int, camera: st
         return path.full("lvm_anc", kind=kind, imagetype=flavor, mjd=mjd, drpver=drpver,
                          camera=camera, tileid=tileid, expnum=expnum)
 
+
+def read_expfile(in_file: str) -> List[str]:
+    """Reads a comma-separated or column of exposure numbers"""
+    if not os.path.isfile(in_file):
+        return []
+
+    with open(in_file, "r") as expfile:
+        expnums = expfile.readlines()
+
+    if len(expnums) == 1 and "," in expnums[0]:
+        expnums = expnums[0]
+        expnums = [int(expnum) for expnum in expnums.split(",")]
+    else:
+        expnums = [int(expnum[:-1]) if "\n" in expnum else int(expnum) for expnum in expnums]
+
+    return expnums
 
 def parse_mjds(mjd: Union[int, str, list, tuple]) -> Union[int, list]:
     """ Parse the input MJD
@@ -1617,7 +1673,7 @@ def science_reduction(expnum: int, use_fiducial_master: bool = False,
     extraction_method = "aperture" if aperture_extraction else "optimal"
 
     # get target frames metadata or extract if it doesn't exist
-    sci_mjd = mjd_from_expnum(expnum)
+    sci_mjd = mjd_from_expnum(expnum)[0]
     sci_metadata = get_frames_metadata(mjd=sci_mjd)
     sci_metadata.query("expnum == @expnum", inplace=True)
     sci_metadata.sort_values("expnum", ascending=False, inplace=True)
@@ -1829,11 +1885,18 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
     # # write the drp parameter configuration
     # write_config_file()
 
-    # parse the input MJD and loop over all reductions
-    mjds = parse_mjds(mjd)
+    if mjd is None:
+        # parse expnums and get MJDs
+        mjds = mjd_from_expnum(expnum)
+    else:
+        # parse the input MJD and loop over all reductions
+        mjds = parse_mjds(mjd)
+
     if isinstance(mjds, list):
         for mjd in mjds:
-            run_drp(mjd=mjd, expnum=expnum, with_cals=with_cals, no_sci=no_sci)
+            run_drp(mjd=mjd, expnum=expnum, with_cals=with_cals, no_sci=no_sci,
+                    skip_fluxcal=skip_fluxcal, clean_ancillary=clean_ancillary,
+                    debug_mode=debug_mode)
         return
 
     log.info(f'Processing MJD {mjd}')
