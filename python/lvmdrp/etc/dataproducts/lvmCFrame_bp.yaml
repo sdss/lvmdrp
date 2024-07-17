@@ -53,22 +53,22 @@ hdu5:
   shape: NWAVE x NFIBER
 hdu6:
   name: SKY_EAST
-  description: sky east in flux-calibrated units (10(-17) erg/s/cm2/Ang/fiber)
+  description: sky east in flux-calibrated units (erg/s/cm2/Ang)
   is_image: true
   shape: NWAVE x NFIBER
 hdu7:
   name: SKY_EAST_IVAR
-  description: sky east inverse variance (1/sigma^2) in flux-calibrated units (10(-17) erg/s/cm2/Ang/fiber)
+  description: sky east inverse variance (1/sigma^2) in flux-calibrated units (erg/s/cm2/Ang)
   is_image: true
   shape: NWAVE x NFIBER
 hdu8:
   name: SKY_WEST
-  description: sky west in flux-calibrated units (10(-17) erg/s/cm2/Ang/fiber)
+  description: sky west in flux-calibrated units (erg/s/cm2/Ang)
   is_image: true
   shape: NWAVE x NFIBER
 hdu9:
   name: SKY_WEST_IVAR
-  description: sky west inverse variance (1/sigma^2) in flux-calibrated units (10(-17) erg/s/cm2/Ang/fiber)
+  description: sky west inverse variance (1/sigma^2) in flux-calibrated units (erg/s/cm2/Ang)
   is_image: true
   shape: NWAVE x NFIBER
 hdu10:
