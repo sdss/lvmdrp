@@ -9,6 +9,7 @@ import sys
 from itertools import product
 from copy import deepcopy as copy
 from multiprocessing import Pool, cpu_count
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
 import numpy
 import bottleneck as bn
@@ -2566,25 +2567,36 @@ def subtract_straylight(
 
     # plot results: polyomial fitting & smoothing, both with masked regions on
     log.info("plotting results")
-    fig, axs = create_subplots(to_display=display_plots, nrows=2, figsize=(10, 7), sharex=True, sharey=True, layout="constrained")
+    fig = plt.figure(figsize=(10, 10), layout="constrained")
     fig.suptitle(f"Stray Light Subtraction for frame {os.path.basename(in_image)}")
-    fig.supxlabel("Y (pixel)")
-    fig.supylabel(f"Counts ({unit})")
+    fig.supxlabel("X (pixel)")
+    fig.supylabel("Y (pixel)")
+    gs = fig.add_gridspec(2, 2,  width_ratios=(4, 1), height_ratios=(1, 4),
+                        left=0.1, right=0.9, bottom=0.1, top=0.9,
+                        wspace=0.05, hspace=0.05)
 
-    img_median._data[img_median._mask] = numpy.nan
-    img_median._error[img_median._mask] = numpy.nan
+    ax = fig.add_subplot(gs[1, 0])
+    ax_strayx = fig.add_subplot(gs[0, 0], sharex=ax)
+    ax_strayy = fig.add_subplot(gs[1, 1], sharey=ax)
+    ax_strayx.tick_params(axis="x", labelbottom=False)
+    ax_strayy.tick_params(axis="y", labelleft=False)
+    ax_strayx.set_ylabel(f"Counts ({unit})")
+    ax_strayy.set_xlabel(f"Counts ({unit})")
+    axins1 = inset_axes(ax, width="30%", height="5%", loc="upper right")
+    axins1.tick_params(labelsize="small", labelcolor="tab:red")
+
     y_pixels = numpy.arange(img_median._data.shape[0])
-    axs[0].set_title("polynomial fit vs. data", loc="left")
-    axs[1].set_title("stray light model vs. data", loc="left")
-    plt.xlim(0, img_median._data.shape[1])
-    plt.ylim(0, numpy.nanmedian(img_median._data) + 3*numpy.nanstd(img_median._data))
-
-    colors = plt.cm.coolwarm(numpy.linspace(0, 1, img_median._data.shape[1]))
-    for icol in plot_columns:
-        axs[0].plot(y_pixels, img_fit._data[:, icol], "-", color=colors[icol], lw=1)
-        axs[0].errorbar(y_pixels, img_median._data[:, icol], yerr=img_median._error[:, icol], color=colors[icol], elinewidth=1, mew=0, ms=5, zorder=9999)
-        axs[1].plot(y_pixels, img_stray._data[:, icol], "-", color=colors[icol], lw=1)
-        axs[1].errorbar(y_pixels, img_median._data[:, icol], yerr=img_median._error[:, icol], color=colors[icol], elinewidth=1, ecolor=colors[icol], mew=0, ms=5, zorder=9999)
+    x_pixels = numpy.arange(img_median._data.shape[1])
+    norm = simple_norm(data=img_stray._data)
+    im = ax.imshow(img_stray._data, origin="lower", cmap="Greys_r", norm=norm)
+    cbar = fig.colorbar(im, cax=axins1, orientation="horizontal")
+    cbar.set_label(f"Counts ({unit})")
+    colors_x = plt.cm.coolwarm(numpy.linspace(0, 1, img_median._data.shape[0]))
+    colors_y = plt.cm.coolwarm(numpy.linspace(0, 1, img_median._data.shape[1]))
+    for iy in y_pixels:
+        ax_strayx.scatter(x_pixels, img_stray._data[iy], lw=0, s=1, color=colors_x[iy], alpha=0.2)
+    for ix in x_pixels:
+        ax_strayy.scatter(img_stray._data[:, ix], y_pixels, lw=0, s=1, color=colors_y[ix], alpha=0.2)
     save_fig(fig, product_path=out_image, to_display=display_plots, figure_path="qa", label="straylight_model")
 
     # write out stray light image
