@@ -599,7 +599,7 @@ class Cube(Header, PositionTable):
         for i in range(self._data.shape[2]):
             for j in range(self._data.shape[1]):
                 if (
-                    rescale_region is not []
+                    rescale_region != []
                     and slice1._data[j + crpix2_1 - crpix2, i + crpix1_1 - crpix1] != 0
                 ):
                     ratio = (

@@ -18,7 +18,7 @@ hdu0:
     comment: conforms to FITS standard
 hdu1:
   name: FLUX
-  description: flux in units of 10(-17) erg/s/cm2/Ang/fiber
+  description: flux in units of erg/s/cm2/Ang
   is_image: true
   header:
   - key: BUNIT
@@ -55,94 +55,94 @@ hdu6:
   shape: NWAVE x NFIBER
 hdu7:
   name: SKY_EAST_IVAR
-  description: sky east inverse variance (1/sigma^2) in flux-calibrated units (10(-17) erg/s/cm2/Ang/fiber)
+  description: sky east inverse variance (1/sigma^2) in flux-calibrated units (erg/s/cm2/Ang)
   is_image: true
   shape: NWAVE x NFIBER
 hdu8:
   name: SKY_WEST
-  description: sky west in flux-calibrated units (10(-17) erg/s/cm2/Ang/fiber)
+  description: sky west in flux-calibrated units (erg/s/cm2/Ang)
   is_image: true
   shape: NWAVE x NFIBER
 hdu9:
   name: SKY_WEST_IVAR
-  description: sky west inverse variance (1/sigma^2) in flux-calibrated units (10(-17) erg/s/cm2/Ang/fiber)
+  description: sky west inverse variance (1/sigma^2) in flux-calibrated units (erg/s/cm2/Ang)
   is_image: true
   shape: NWAVE x NFIBER
 hdu10:
   name: FLUXCAL
-  description: sensitivity in units of (electron/s) / (erg/s/cm2/Ang/fiber)
+  description: sensitivity in units of (electron/s/Ang) / (erg/s/cm2/Ang)
   is_image: false
   shape: BINARY FITS TABLE
   columns:
     STD1SEN:
       name: STD1SEN
       type: float32
-      unit: (electron) / (erg/s/cm2/angstrom)
+      unit: (electron/s/Ang) / (erg/s/cm2/Ang)
       description: standard star 1
     STD2SEN:
       name: STD2SEN
       type: float32
-      unit: (electron) / (erg/s/cm2/angstrom)
+      unit: (electron/s/Ang) / (erg/s/cm2/Ang)
       description: standard star 2
     STD3SEN:
       name: STD3SEN
       type: float32
-      unit: (electron) / (erg/s/cm2/angstrom)
+      unit: (electron/s/Ang) / (erg/s/cm2/Ang)
       description: standard star 3
     STD4SEN:
       name: STD4SEN
       type: float32
-      unit: (electron) / (erg/s/cm2/angstrom)
+      unit: (electron/s/Ang) / (erg/s/cm2/Ang)
       description: standard star 4
     STD5SEN:
       name: STD5SEN
       type: float32
-      unit: (electron) / (erg/s/cm2/angstrom)
+      unit: (electron/s/Ang) / (erg/s/cm2/Ang)
       description: standard star 5
     STD6SEN:
       name: STD6SEN
       type: float32
-      unit: (electron) / (erg/s/cm2/angstrom)
+      unit: (electron/s/Ang) / (erg/s/cm2/Ang)
       description: standard star 6
     STD7SEN:
       name: STD7SEN
       type: float32
-      unit: (electron) / (erg/s/cm2/angstrom)
+      unit: (electron/s/Ang) / (erg/s/cm2/Ang)
       description: standard star 7
     STD8SEN:
       name: STD8SEN
       type: float32
-      unit: (electron) / (erg/s/cm2/angstrom)
+      unit: (electron/s/Ang) / (erg/s/cm2/Ang)
       description: standard star 8
     STD9SEN:
       name: STD9SEN
       type: float32
-      unit: (electron) / (erg/s/cm2/angstrom)
+      unit: (electron/s/Ang) / (erg/s/cm2/Ang)
       description: standard star 9
     STD10SEN:
       name: STD10SEN
       type: float32
-      unit: (electron) / (erg/s/cm2/angstrom)
+      unit: (electron/s/Ang) / (erg/s/cm2/Ang)
       description: standard star 10
     STD11SEN:
       name: STD11SEN
       type: float32
-      unit: (electron) / (erg/s/cm2/angstrom)
+      unit: (electron/s/Ang) / (erg/s/cm2/Ang)
       description: standard star 11
     STD12SEN:
       name: STD12SEN
       type: float32
-      unit: (electron) / (erg/s/cm2/angstrom)
+      unit: (electron/s/Ang) / (erg/s/cm2/Ang)
       description: standard star 12
     MEAN_SENS:
       name: MEAN_SENS
       type: float32
-      unit: (electron) / (erg/s/cm2/angstrom)
+      unit: (electron/s/Ang) / (erg/s/cm2/Ang)
       description: mean sensitivity
     STDDEV_SENS:
       name: STDDEV_SENS
       type: float32
-      unit: (electron) / (erg/s/cm2/angstrom)
+      unit: (electron/s/Ang) / (erg/s/cm2/Ang)
       description: standard deviation of sensitivity
 hdu11:
   name: SLITMAP
@@ -198,7 +198,7 @@ hdu11:
     YPMM:
       name: ypmm
       type: float32
-      description: the x coordinate in mm of the fiber relative to the centroid
+      description: the y coordinate in mm of the fiber relative to the centroid
       unit: mm
     RINGNUM:
       name: ringnum
