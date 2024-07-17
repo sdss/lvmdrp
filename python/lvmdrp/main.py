@@ -32,7 +32,7 @@ from lvmdrp.functions.imageMethod import (preproc_raw_frame, create_master_frame
 from lvmdrp.functions.rssMethod import (determine_wavelength_solution, create_pixel_table, apply_fiberflat,
                                         resample_wavelength, shift_wave_skylines, join_spec_channels, stack_spectrographs)
 from lvmdrp.functions.skyMethod import interpolate_sky, combine_skies, quick_sky_subtraction
-from lvmdrp.functions.fluxCalMethod import fluxcal_Gaia, apply_fluxcal
+from lvmdrp.functions.fluxCalMethod import fluxcal_standard_stars, fluxcal_sci_ifu_stars, apply_fluxcal
 from lvmdrp.utils.metadata import (get_frames_metadata, get_master_metadata, extract_metadata,
                                    get_analog_groups, match_master_metadata, create_master_path,
                                    update_summary_file)
@@ -725,160 +725,6 @@ def reduce_masters(mjd: int):
 
         # reduce the frame, pass in entire parameter set
         reduce_frame(path, master=True, **row)
-
-
-def run_drp_deprecated(mjd: Union[int, str, list], bias: bool = False, dark: bool = False,
-            pixelflat: bool = False, skip_bd: bool = False, arc: bool = False, flat: bool = False,
-            only_bd: bool = False, only_cal: bool = False, only_sci: bool = False, pixmask: bool = False,
-            spec: int = None, camera: str = None, expnum: Union[int, str, list] = None,
-            quick: bool = False):
-    """ Run the LVM DRP
-
-    Run the LVM data reduction pipeline on.  Optionally set flags
-    to reduce only a subset of data.
-
-    Parameters
-    ----------
-    mjd : Union[int, str, list], optional
-        The MJD of the raw data to reduce, by default None
-    arc : bool, optional
-        Flag to only reduce arc frames, by default False
-    flat : bool, optional
-        Flag to only reduce flat frames, by default False
-    skip_bd : bool, optional
-        Flag to skip reduction of bias/darks
-    """
-    # update the quick redux flag if necessary
-    if not config.get('quick') and quick:
-        config['quick'] = quick
-
-    # write the drp parameter configuration
-    write_config_file()
-
-    # parse the input MJD and loop over all reductions
-    mjds = parse_mjds(mjd)
-    if isinstance(mjds, list):
-        for mjd in mjds:
-            run_drp(mjd=mjd, bias=bias, dark=dark, pixelflat=pixelflat, skip_bd=skip_bd, arc=arc,
-                    flat=flat, only_bd=only_bd, only_cal=only_cal, only_sci=only_sci, pixmask=pixmask,
-                    spec=spec, camera=camera, expnum=expnum, quick=quick)
-        return
-
-    log.info(f'Processing MJD {mjd}')
-
-    # check the MJD data directory path
-    mjd_path = pathlib.Path(os.getenv('LVM_DATA_S')) / str(mjd)
-    log.info(f'MJD processing path: {mjd_path}')
-    if not mjd_path.is_dir():
-        log.warning(f'{mjd = } is not valid raw data directory.')
-        return
-
-    # find files
-    frames = get_frames_metadata(mjd=mjd)
-    sub = frames.copy()
-
-    # remove bad or test quality frames
-    sub = sub[~(sub['quality'] != 'excellent')]
-
-    # filter on files
-    if bias:
-        sub = sub[sub['imagetyp'] == 'bias']
-    if dark:
-        sub = sub[sub['imagetyp'] == 'dark']
-    if pixelflat:
-        sub = sub[sub['imagetyp'] == 'pixelflat']
-
-    # filter on camera or spectrograph
-    if spec:
-        sub = sub[sub['spec'] == f'sp{spec}']
-    if camera:
-        sub = sub[sub['camera'].str.contains(camera)]
-
-    # filter on exposure number
-    if expnum:
-        log.info(f'Filtering on exposure numbers {expnum}.')
-        sub = filter_expnum(sub, expnum)
-
-    # get biases and darks
-    cond = sub['imagetyp'].isin(['bias', 'dark', 'pixelflat'])
-    precals = sub[cond]
-    if len(precals) == 0 and not skip_bd:
-        log.error(f'No biases or darks found for mjd {mjd}. Discontinuing reduction.')
-        return
-    precals = precals.sort_values(['expnum', 'camera'])
-
-    if not skip_bd:
-        # reduce biases / darks / pixelflats
-        reduce_set(precals, settype='precals', flavor='bias')
-        if not pixmask:
-            reduce_set(precals, settype='precals', flavor='dark')
-            reduce_set(precals, settype='precals', flavor='pixelflat')
-        else:
-            on_pixflats = 'pixelflat' in set(precals['imagetyp'])
-            reduce_set(precals, settype='precals', flavor='dark', create_pixmask=not on_pixflats)
-            reduce_set(precals, settype='precals', flavor='pixelflat', create_pixmask=on_pixflats)
-
-    # returning if only reducing bias/darks
-    if only_bd:
-        return
-
-    # get all other image types
-    sub = sub[~cond]
-    if flat or arc:
-        sub = sub[sub['imagetyp'] == ('arc' if arc else 'flat')]
-    elif only_cal:
-        sub = sub[~(sub['imagetyp'] == 'object')]
-    elif only_sci:
-        sub = sub[sub['imagetyp'] == 'object']
-
-    # exit if not arcs, flats, or science frames in mjd
-    if len(sub) == 0:
-        log.error(f'No cals or science frames found for mjd {mjd}. Discontinuing reduction.')
-        return
-
-    # group the frames
-    sub = sub.sort_values(['expnum', 'camera'])
-
-    # split into cals, and science
-    cals = sub[~(sub['imagetyp'] == 'object')]
-    sci = sub[sub['imagetyp'] == 'object']
-
-    # reduce the individual flats/arcs
-    if not only_sci:
-        reduce_set(cals, settype='cals')
-
-    # reduce the master flat/arcs
-    if not only_sci:
-        reduce_masters(mjd=mjd)
-
-    # return if only calibration set
-    if only_cal or flat or arc or bias or dark or pixelflat:
-        return
-
-    # reduce science files
-    reduce_set(sci, settype='science')
-
-    # TODO - check for single elements
-    mjd = list(set(sub['mjd']))[0]
-    tileid = list(set(sub['tileid']))[0]
-
-    # perform spectrograph combination
-    # produces ancillary/lvm-object-[channel]-[expnum] files
-    exposures = set(sci['expnum'].sort_values())
-    for expnum in exposures:
-        combine_spectrographs(tileid, mjd, "b", expnum)
-        combine_spectrographs(tileid, mjd, "r", expnum)
-        combine_spectrographs(tileid, mjd, "z", expnum)
-
-    # perform camera combination
-    # produces lvm-CFrame file
-    for tileid, mjd, expnum in sub.groupby(['tileid', 'mjd', 'expnum']).groups.keys():
-        combine_channels(tileid, mjd, expnum)
-
-
-    # perform sky subtraction
-
-    # perform flux calibration
 
 
 def start_logging(mjd: int, tileid: int):
@@ -1641,7 +1487,7 @@ def reduce_2d(mjd, use_fiducial_cals=True, expnums=None, exptime=None, cameras=C
 def science_reduction(expnum: int, use_fiducial_master: bool = False,
                       skip_sky_subtraction: bool = False,
                       sky_weights: Tuple[float, float] = None,
-                      skip_flux_calibration: bool = False,
+                      fluxcal_method: str = 'STD',
                       ncpus: int = None,
                       aperture_extraction: bool = False,
                       clean_ancillary: bool = False,
@@ -1800,12 +1646,14 @@ def science_reduction(expnum: int, use_fiducial_master: bool = False,
         # resample wavelength into uniform grid along fiber IDs for science and sky fibers
         resample_wavelength(in_rss=ssci_path,  out_rss=hsci_path, wave_range=SPEC_CHANNELS[channel], wave_disp=0.5, convert_to_density=True)
 
-        # use sky subtracted resampled frames for flux calibration in each camera
-        fluxcal_Gaia(channel, hsci_path, GAIA_CACHE_DIR=MASTERS_DIR+'/gaia_cache')
+        # use resampled frames for flux calibration in each camera, using standard stars observed in the spec telescope
+        #  and field stars found in the sci ifu
+        fluxcal_standard_stars(hsci_path, GAIA_CACHE_DIR=MASTERS_DIR+'/gaia_cache')
+        fluxcal_sci_ifu_stars(hsci_path, GAIA_CACHE_DIR=MASTERS_DIR+'/gaia_cache')
 
         # flux-calibrate each channel
         fframe_path = path.full("lvm_frame", mjd=sci_mjd, drpver=drpver, tileid=sci_tileid, expnum=sci_expnum, kind=f'FFrame-{channel}')
-        apply_fluxcal(in_rss=hsci_path, out_fframe=fframe_path, skip_fluxcal=skip_flux_calibration)
+        apply_fluxcal(in_rss=hsci_path, out_fframe=fframe_path, method=fluxcal_method)
 
     # stitch channels
     fframe_paths = sorted(path.expand('lvm_frame', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver, kind='FFrame-?', expnum=expnum))
@@ -1855,8 +1703,8 @@ def science_reduction(expnum: int, use_fiducial_master: bool = False,
 
 
 def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
-            with_cals: bool = False, no_sci: bool = False, skip_fluxcal: bool = False,
-            clean_ancillary: bool = False, debug_mode: bool = False):
+            with_cals: bool = False, no_sci: bool = False,
+            fluxcal_method: str = 'STD', clean_ancillary: bool = False, debug_mode: bool = False):
     """ Run the quick DRP
 
     Run the quick DRP for an MJD, or a range of MJDs. Reduces
@@ -1875,8 +1723,8 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
         Flag to reduce individual calibration files, by default False
     no_sci : bool, optional
         Flag to turn off science frame reduction, by default False
-    skip_fluxcal : bool, optional
-        Fits sensitivity curves but no flux calibration is performed, by default False
+    fluxcal_method : str, optional
+        'NONE' or 'STD' for standard stars, 'SCI' for field stars in science IFU
     clean_ancillary : bool, optional
         Flag to remove the ancillary paths, by default False
     debug_mode : bool, optional
@@ -1895,7 +1743,8 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
     if isinstance(mjds, list):
         for mjd in mjds:
             run_drp(mjd=mjd, expnum=expnum, with_cals=with_cals, no_sci=no_sci,
-                    skip_fluxcal=skip_fluxcal, clean_ancillary=clean_ancillary,
+                    fluxcal_method=fluxcal_method,
+                    clean_ancillary=clean_ancillary,
                     debug_mode=debug_mode)
         return
 
@@ -1962,7 +1811,7 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
             for expnum in sci['expnum'].unique():
                 try:
                     science_reduction(expnum, use_fiducial_master=True,
-                                      skip_flux_calibration=skip_fluxcal,
+                                      fluxcal_method=fluxcal_method,
                                       clean_ancillary=clean_ancillary,
                                       debug_mode=debug_mode, **kwargs)
                 except Exception as e:

@@ -17,7 +17,7 @@ from lvmdrp.core.image import Image
 from lvmdrp.core.rss import RSS
 from lvmdrp.core.passband import PassBand
 from lvmdrp.core.spectrum1d import Spectrum1D
-from lvmdrp.external import ancillary_func
+from lvmdrp.core.fluxcal import extinctCAHA
 
 
 description = "Provides Methods to process Cube files"
@@ -814,7 +814,7 @@ def createSensFunction_drp(
     )
 
     extinct = 10 ** (
-        ancillary_func.extinctCAHA(star_spec._wave, extinct_v) * airmass * -0.4
+        extinctCAHA(star_spec._wave, extinct_v) * airmass * -0.4
     )
     ref_star_spec.loadSTDref(
         ref_spec,
