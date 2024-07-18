@@ -2582,21 +2582,21 @@ def subtract_straylight(
     ax_strayy.tick_params(axis="y", labelleft=False)
     ax_strayx.set_ylabel(f"Counts ({unit})")
     ax_strayy.set_xlabel(f"Counts ({unit})")
-    axins1 = inset_axes(ax, width="30%", height="5%", loc="upper right")
+    axins1 = inset_axes(ax, width="30%", height="2%", loc="upper right")
     axins1.tick_params(labelsize="small", labelcolor="tab:red")
 
     y_pixels = numpy.arange(img_median._data.shape[0])
     x_pixels = numpy.arange(img_median._data.shape[1])
-    norm = simple_norm(data=img_stray._data)
-    im = ax.imshow(img_stray._data, origin="lower", cmap="Greys_r", norm=norm)
+    norm = simple_norm(data=img_stray._data, stretch="asinh")
+    im = ax.imshow(img_stray._data, origin="lower", cmap="Greys_r", norm=norm, interpolation="none")
     cbar = fig.colorbar(im, cax=axins1, orientation="horizontal")
-    cbar.set_label(f"Counts ({unit})")
+    cbar.set_label(f"Counts ({unit})", fontsize="small", color="tab:red")
     colors_x = plt.cm.coolwarm(numpy.linspace(0, 1, img_median._data.shape[0]))
     colors_y = plt.cm.coolwarm(numpy.linspace(0, 1, img_median._data.shape[1]))
     for iy in y_pixels:
-        ax_strayx.scatter(x_pixels, img_stray._data[iy], lw=0, s=1, color=colors_x[iy], alpha=0.2)
+        ax_strayx.plot(x_pixels, img_stray._data[iy], ",", color=colors_x[iy], alpha=0.2)
     for ix in x_pixels:
-        ax_strayy.scatter(img_stray._data[:, ix], y_pixels, lw=0, s=1, color=colors_y[ix], alpha=0.2)
+        ax_strayy.plot(img_stray._data[:, ix], y_pixels, ",", color=colors_y[ix], alpha=0.2)
     save_fig(fig, product_path=out_image, to_display=display_plots, figure_path="qa", label="straylight_model")
 
     # write out stray light image
