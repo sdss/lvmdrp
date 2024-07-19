@@ -447,7 +447,7 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
     good_fibers = numpy.ones(len(fibers), dtype="bool")
     for i in fibers:
         if nlines - masked[i].sum() <= poly_disp + 1:
-            log.warning(f"fiber {i} has {nlines - masked[i].sum()} (<= {poly_disp + 1 = }) good lines)")
+            log.warning(f"fiber {i} has {nlines - masked[i].sum()} (<= {poly_disp + 1 = }) good lines")
             good_fibers[i] = False
             # continue
 
@@ -482,7 +482,7 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
     log.info(f"fitting LSF solutions using {poly_fwhm}-deg polynomials")
     for i in fibers:
         if nlines - masked[i].sum() <= poly_fwhm + 1:
-            log.warning(f"fiber {i} has {nlines - masked[i].sum()} (<= {poly_fwhm + 1 = }) good lines)")
+            log.warning(f"fiber {i} has {nlines - masked[i].sum()} (<= {poly_fwhm + 1 = }) good lines")
             good_fibers[i] = False
             # continue
 

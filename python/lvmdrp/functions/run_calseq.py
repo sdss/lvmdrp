@@ -1798,11 +1798,14 @@ def create_wavelengths(mjd, use_fiducial_cals=True, expnums=None, kind="longterm
         if skip_done and os.path.isfile(mwave_path) and os.path.isfile(mlsf_path):
             log.info(f"skipping wavelength solution {mwave_path} and {mlsf_path}, files already exists")
         else:
-            ref_lines, use_line, cent_wave, _, rss, wave_trace, fwhm_trace = rss_tasks.determine_wavelength_solution(in_arcs=xarc_path,
-                                                    out_wave=mwave_path, out_lsf=mlsf_path)
+            ref_lines, _, cent_wave, _, rss, wave_trace, fwhm_trace = rss_tasks.determine_wavelength_solution(
+                in_arcs=xarc_path,
+                out_wave=mwave_path,
+                out_lsf=mlsf_path
+            )
 
             lvmarc = lvmArc(data=rss._data, error=rss._error, mask=rss._mask, header=rss._header,
-                            ref_wave=ref_lines[use_line], cent_line=cent_wave[:, use_line],
+                            ref_wave=ref_lines, cent_line=cent_wave,
                             wave_trace=wave_trace, lsf_trace=fwhm_trace)
             lvmarc.writeFitsData(path.full("lvm_frame", mjd=mjd, tileid=11111, drpver=drpver, expnum=expnum_str, kind=f'Arc-{camera}'))
 
