@@ -737,9 +737,7 @@ def _create_wavelengths_60177(use_fiducial_cals=True, skip_done=True):
             waves = pixwav[camera][:, 1] if camera in pixwav else []
             use_lines = pixwav[camera][:, 2].astype(bool) if camera in pixwav else []
             rss_tasks.determine_wavelength_solution(in_arcs=xarc_paths[camera], out_wave=calibs["wave"][camera], out_lsf=calibs["lsf"][camera],
-                                                    pixel=pixels, ref_lines=waves, use_line=use_lines, aperture=12,
-                                                    cc_correction=True, cc_max_shift=20, poly_disp=5, poly_fwhm=2, poly_cros=2,
-                                                    flux_min=1e-12, fwhm_max=5, rel_flux_limits=[0.001, 1e12])
+                                                    pixel=pixels, ref_lines=waves, use_line=use_lines)
 
     mwave_paths = group_calib_paths(calibs["wave"])
     mlsf_paths = group_calib_paths(calibs["lsf"])
@@ -1801,9 +1799,7 @@ def create_wavelengths(mjd, use_fiducial_cals=True, expnums=None, kind="longterm
             log.info(f"skipping wavelength solution {mwave_path} and {mlsf_path}, files already exists")
         else:
             ref_lines, use_line, cent_wave, _, rss, wave_trace, fwhm_trace = rss_tasks.determine_wavelength_solution(in_arcs=xarc_path,
-                                                    out_wave=mwave_path, out_lsf=mlsf_path, aperture=12,
-                                                    cc_correction=True, cc_max_shift=20, poly_disp=5, poly_fwhm=2, poly_cros=2,
-                                                    flux_min=1e-12, fwhm_max=5, rel_flux_limits=[0.001, 1e12])
+                                                    out_wave=mwave_path, out_lsf=mlsf_path)
 
             lvmarc = lvmArc(data=rss._data, error=rss._error, mask=rss._mask, header=rss._header,
                             ref_wave=ref_lines[use_line], cent_line=cent_wave[:, use_line],

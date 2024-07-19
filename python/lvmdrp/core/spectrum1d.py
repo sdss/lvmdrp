@@ -3172,79 +3172,64 @@ class Spectrum1D(Header):
 
     def fitSepGauss(
         self,
-        centres,
+        cent_guess,
         aperture,
-        init_back=0.0,
-        ftol=1e-8,
-        xtol=1e-8,
+        fwhm_guess=3,
+        bg_guess=0.0,
+        flux_range=[0.0, numpy.inf],
+        fwhm_range=[0, 7],
+        bg_range=[0, numpy.inf],
+        ftol=1e-3,
+        xtol=1e-3,
         axs=None,
+        fit_bg=True,
         warning=False,
     ):
-        ncomp = len(centres)
+        error = self._error if self._error is not None else numpy.ones(self._dim, dtype=numpy.float32)
+        mask = self._mask if self._mask is not None else numpy.zeros(self._dim, dtype=bool)
+        error[mask] = numpy.inf
 
-        out = numpy.zeros(3 * ncomp, dtype=numpy.float32)
-        back = [deepcopy(init_back) for _ in centres]
+        flux = numpy.ones(len(cent_guess)) * numpy.nan
+        cent = numpy.ones(len(cent_guess)) * numpy.nan
+        fwhm = numpy.ones(len(cent_guess)) * numpy.nan
 
-        error = (
-            self._error
-            if self._error is not None
-            else numpy.ones(self._dim, dtype=numpy.float32)
-        )
-        mask = (
-            self._mask if self._mask is not None else numpy.zeros(self._dim, dtype=bool)
-        )
+        fact = numpy.sqrt(2 * numpy.pi)
+        hw = aperture // 2
+        for i, centre in enumerate(cent_guess):
+            select = (self._wave >= centre - hw) & (self._wave <= centre + hw) & (~(mask))
 
-        for i, centre in enumerate(centres):
-            select = self._get_select(centre, aperture, mask)
-            if numpy.sum(select) > 0:
-                max = numpy.max(self._data[select])
-                cent = numpy.median(self._wave[select][self._data[select] == max])
-                select = self._get_select(cent, aperture, mask)
+            if aperture - numpy.sum(select) > 2:
+                continue
 
-                gauss = self._fit_gaussian(select, back[i], error, ftol, xtol, warning)
-
-                out_fit = gauss.getPar()
-                out[i] = out_fit[0]
-                out[ncomp + i] = out_fit[1]
-                out[2 * ncomp + i] = out_fit[2]
-
-                if axs is not None:
-                    axs[i] = gauss.plot(
-                        self._wave[select], self._data[select], ax=axs[i]
-                    )
-                    axs[i].axvline(centres[i], ls="--", lw=1, color="tab:red")
+            flux_guess = numpy.interp(centre, self._wave[select], self._data[select]) * fact * fwhm_guess / 2.354
+            guess = [flux_guess, centre, fwhm_guess / 2.354, bg_guess]
+            if fit_bg:
+                gauss = fit_profile.Gaussian_const(guess)
             else:
-                out[i : ncomp + i + 1] = 0.0
+                gauss = fit_profile.Gaussian(guess)
 
-        return out
+            bound_lower = [flux_range[0], centre-hw, fwhm_range[0]/2.354, bg_range[0]]
+            bound_upper = [flux_range[1], centre+hw, fwhm_range[1]/2.354, bg_range[1]]
+            gauss.fit(
+                self._wave[select],
+                self._data[select],
+                sigma=error[select],
+                p0=guess,
+                bounds=(bound_lower, bound_upper),
+                ftol=ftol,
+                xtol=xtol,
+                warning=warning,
+            )
 
-    def _get_select(self, centre, aperture, mask):
-        return numpy.logical_and(
-            numpy.logical_and(
-                self._wave >= centre - aperture / 2.0,
-                self._wave <= centre + aperture / 2.0,
-            ),
-            numpy.logical_not(mask),
-        )
+            flux[i], cent[i], fwhm[i], _ = gauss.getPar()
+            fwhm[i] *= 2.354
 
-    def _fit_gaussian(self, select, back, error, ftol, xtol, warning):
-        if back == 0.0:
-            par = [0.0, 0.0, 0.0]
-            gauss = fit_profile.Gaussian(par)
-        else:
-            par = [0.0, 0.0, 0.0, 0.0]
-            gauss = fit_profile.Gaussian_const(par)
+            if axs is not None:
+                axs[i] = gauss.plot(self._wave[select], self._data[select], ax=axs[i])
+                axs[i].axvline(cent_guess[i], ls="--", lw=1, color="tab:red")
 
-        gauss.fit(
-            self._wave[select],
-            self._data[select],
-            sigma=error[select],
-            ftol=ftol,
-            xtol=xtol,
-            warning=warning,
-        )
+        return flux, cent, fwhm
 
-        return gauss
 
     def obtainGaussFluxPeaks(self, pos, sigma, indices, replace_error=1e10, plot=False):
         """returns Gaussian peaks parameters, flux error and mask
