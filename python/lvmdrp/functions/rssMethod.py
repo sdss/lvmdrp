@@ -110,6 +110,22 @@ def _illumination_correction(fiberflat, apply_correction=True):
     return fiberflat, dict(zip(("Sci", "SkyW", "SkyE", "Std"), (sci_factor, skw_factor, ske_factor, std_factor)))
 
 
+def _make_arcline_axes(display_plots, pixel, ref_lines, ifiber, unit="e-", ncols=3, fig_shape=(5, 4)):
+    nlines = len(pixel)
+    nrows = int(numpy.ceil(nlines / ncols))
+    fig, axs = create_subplots(to_display=display_plots,
+                               nrows=nrows, ncols=ncols,
+                               figsize=(fig_shape[0]*ncols, fig_shape[1]*nrows),
+                               layout="constrained")
+    fig.suptitle(f"Gaussian fitting for fiber {ifiber}")
+    fig.supylabel(f"Counts ({unit}/pixel)")
+    for i, ax in zip(range(nlines), axs):
+        ax.set_title(f"line {ref_lines[i]:.2f} (Ang)")
+        ax.set_xlabel("X (pixel)")
+
+    return fig, axs
+
+
 def mergeRSS_drp(files_in, file_out, mergeHdr="1"):
     """
     Different RSS are merged into a common file by extending the number of fibers.
@@ -167,6 +183,7 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
                                   poly_disp: int = 5, poly_fwhm: int = 2,
                                   poly_cros: int = 2, poly_kinds: list = ['poly', 'poly', 'poly'],
                                   negative: bool = False,
+                                  plot_fibers: List[int] = [],
                                   display_plots: bool = False):
     """
     Solves for the wavelength and the LSF using polynomial fitting
@@ -218,6 +235,8 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
         Polynomial degree for cross-dispersion smoothing of FWHM(pixel) ( = 0 no smoothing), by default 2
     negative : bool, optional
         Assume absorption spectra, by default False
+    plot_fibers : list[int], optional
+        When debug_mode == True, this will show additional plots on the fitting of the listed fibers
     display_plots : bool, optional
         If True, the results are plotted and displayed
 
@@ -369,22 +388,12 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
     log.info(f"   {fwhm_range = }")
     log.info(f"   {bg_range   = } {unit}")
 
-    # TODO: run peak finder without gaussian fitting in a small running window
-    # centers = cut_iter.measurePeaks(
-    #     pix, method, init_sigma, threshold=threshold, max_diff=float(max_diff)
-    # )
-
     # initialize plots for arc lines fitting
-    ncols = 3
-    nrows = int(numpy.ceil(nlines / ncols))
-    fig, axs = create_subplots(to_display=display_plots, nrows=nrows, ncols=ncols, figsize=(6*ncols, 6*nrows))
-    fig.suptitle("Gaussian fitting")
-    fig.supylabel("counts (e-/pixel)")
-    for i, ax in zip(range(nlines), axs):
-        # ax.axvline(pixel[i], ls="--", lw=1, color="tab:red")
-        ax.set_title(f"line @ {pixel[i]:.1f} (pixel) - {ref_lines[i]:.2f} (angstrom)")
-        ax.set_xlabel("X (pixel)")
-    # axs = None
+    axs_fibers = {}
+    axs_fibers[ref_fiber] = _make_arcline_axes(display_plots, pixel=pixel, ref_lines=ref_lines, ifiber=ref_fiber)
+    if plot_fibers:
+        for ifiber in plot_fibers:
+            axs_fibers[ifiber] = _make_arcline_axes(display_plots, pixel=pixel, ref_lines=ref_lines, ifiber=ifiber)
     fibers, flux, cent_wave, fwhm, masked = arc.measureArcLines(
         ref_fiber,
         pixel,
@@ -394,15 +403,16 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
         flux_range=flux_range,
         fwhm_range=fwhm_range,
         bg_range=bg_range,
-        axs=axs,
+        axs=axs_fibers,
     )
-    save_fig(
-        fig,
-        product_path=out_wave,
-        to_display=display_plots,
-        figure_path="qa",
-        label="lines_fitting",
-    )
+    for ifiber, (fig, axs) in axs_fibers.items():
+        save_fig(
+            fig,
+            product_path=out_wave,
+            to_display=display_plots,
+            figure_path="qa",
+            label=f"lines_fitting_{ifiber:04d}",
+        )
 
     # numpy.savetxt("./pixels.txt", cent_wave)
     # numpy.savetxt("./flux.txt", flux)

@@ -3227,6 +3227,7 @@ class Spectrum1D(Header):
             if axs is not None:
                 axs[i] = gauss.plot(self._wave[select], self._data[select], ax=axs[i])
                 axs[i].axvline(cent_guess[i], ls="--", lw=1, color="tab:red")
+                axs[i].set_title(f"{axs[i].get_title()} @ {cent[i]:.1f} (pixel)")
 
         return flux, cent, fwhm
 

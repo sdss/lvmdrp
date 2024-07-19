@@ -846,8 +846,7 @@ class FiberRows(Header, PositionTable):
         masked = numpy.zeros((self._fibers, nlines), dtype="bool")
 
         spec = self.getSpec(ref_fiber)
-        flux[ref_fiber], cent_wave[ref_fiber], fwhm[ref_fiber] = spec.fitSepGauss(ref_cent, aperture, fwhm_guess, bg_guess, flux_range, fwhm_range, bg_range, axs=axs)
-        # masked[ref_fiber, :] = False
+        flux[ref_fiber], cent_wave[ref_fiber], fwhm[ref_fiber] = spec.fitSepGauss(ref_cent, aperture, fwhm_guess, bg_guess, flux_range, fwhm_range, bg_range, axs=axs[ref_fiber][1])
         first = numpy.arange(ref_fiber - 1, -1, -1)
         second = numpy.arange(ref_fiber + 1, self._fibers, 1)
 
@@ -861,7 +860,11 @@ class FiberRows(Header, PositionTable):
         for i in iterator:
             spec = self.getSpec(i)
 
-            flux[i], cent_wave[i], fwhm[i] = spec.fitSepGauss(cent_wave[i + 1], aperture, fwhm_guess, bg_guess, flux_range, fwhm_range, bg_range, axs=None)
+            if axs is not None and i in axs:
+                _, axs_fiber = axs[i]
+            else:
+                axs_fiber = None
+            flux[i], cent_wave[i], fwhm[i] = spec.fitSepGauss(cent_wave[i + 1], aperture, fwhm_guess, bg_guess, flux_range, fwhm_range, bg_range, axs=axs_fiber)
             masked[i] = numpy.isnan(flux[i])|numpy.isnan(cent_wave[i])|numpy.isnan(fwhm[i])
 
             if numpy.any(masked[i]):
@@ -878,7 +881,11 @@ class FiberRows(Header, PositionTable):
         for i in iterator:
             spec = self.getSpec(i)
 
-            flux[i], cent_wave[i], fwhm[i] = spec.fitSepGauss(cent_wave[i - 1], aperture, fwhm_guess, bg_guess, flux_range, fwhm_range, bg_range, axs=None)
+            if axs is not None and i in axs:
+                _, axs_fiber = axs[i]
+            else:
+                axs_fiber = None
+            flux[i], cent_wave[i], fwhm[i] = spec.fitSepGauss(cent_wave[i - 1], aperture, fwhm_guess, bg_guess, flux_range, fwhm_range, bg_range, axs=axs_fiber)
             masked[i] = numpy.isnan(flux[i])|numpy.isnan(cent_wave[i])|numpy.isnan(fwhm[i])
 
             if numpy.any(masked[i]):
