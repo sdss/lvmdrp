@@ -91,8 +91,7 @@ class fit_profile1D(object):
                 self.res, x0=p0, bounds=bounds, args=(x, y, sigma), max_nfev=maxfev, ftol=ftol, xtol=xtol,
             )
             self._par = model.x
-            # model = optimize.leastsq(self.res, p0, (x, y, sigma), None, 0, 0, ftol, xtol, 0.0, maxfev, 0.0, 100.0, None, warning)
-
+            self._par[model.active_mask!=0] = numpy.nan
         if method == "simplex":
             try:
                 model = optimize.fmin(
