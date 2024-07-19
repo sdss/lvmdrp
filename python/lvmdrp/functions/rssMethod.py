@@ -177,7 +177,7 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
                                   aperture: int = 12,
                                   fwhm_guess: float = 3.0,
                                   bg_guess: float = 0.0,
-                                  flux_range: List[float] = [0.0, numpy.inf],
+                                  flux_range: List[float] = [2000.0, numpy.inf],
                                   fwhm_range: List[float] = [0.0, 7.0],
                                   bg_range: List[float] = [0.0, numpy.inf],
                                   poly_disp: int = 5, poly_fwhm: int = 2,
