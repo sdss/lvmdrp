@@ -51,6 +51,13 @@ class fit_profile1D(object):
     def __call__(self, x):
         return self._func(x)
 
+    def fix_guess(self, bounds):
+        guess = numpy.asarray(self._par)
+        bounds = numpy.asarray(bounds)
+
+        guess = numpy.clip(guess, *bounds)
+        return guess
+
     def getPar(self):
         return self._par
 
@@ -85,7 +92,7 @@ class fit_profile1D(object):
         if p0 is None and p0 is not False and self._guess_par is not None:
             self._guess_par(x, y)
         perr_init = deepcopy(self)
-        p0 = self._par
+        p0 = self.fix_guess(bounds)
         if method == "leastsq":
             model = optimize.least_squares(
                 self.res, x0=p0, bounds=bounds, args=(x, y, sigma), max_nfev=maxfev, ftol=ftol, xtol=xtol,

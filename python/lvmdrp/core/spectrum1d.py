@@ -3202,7 +3202,6 @@ class Spectrum1D(Header):
                 continue
 
             flux_guess = numpy.interp(centre, self._wave[select], self._data[select]) * fact * fwhm_guess / 2.354
-            flux_guess = numpy.clip(flux_guess, *flux_range)
             guess = [flux_guess, centre, fwhm_guess / 2.354, bg_guess]
             if fit_bg:
                 gauss = fit_profile.Gaussian_const(guess)
