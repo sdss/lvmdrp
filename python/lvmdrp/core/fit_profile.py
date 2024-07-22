@@ -95,7 +95,7 @@ class fit_profile1D(object):
         p0 = self.fix_guess(bounds)
         if method == "leastsq":
             model = optimize.least_squares(
-                self.res, x0=p0, bounds=bounds, args=(x, y, sigma), max_nfev=maxfev, ftol=ftol, xtol=xtol,
+                self.res, x0=p0, bounds=bounds, args=(x, y, sigma), max_nfev=maxfev, ftol=ftol, xtol=xtol, method="dogbox"
             )
             self._par = model.x
             self._par[model.active_mask!=0] = numpy.nan
