@@ -3176,6 +3176,7 @@ class Spectrum1D(Header):
         cent_range=[-2.0, 2.0],
         fwhm_range=[0, 7],
         bg_range=[0, numpy.inf],
+        pix_frac=0.95,
         ftol=1e-8,
         xtol=1e-8,
         axs=None,
@@ -3195,7 +3196,7 @@ class Spectrum1D(Header):
         for i, centre in enumerate(cent_guess):
             select = (self._wave >= centre - hw) & (self._wave <= centre + hw) & (~(mask))
 
-            if aperture - numpy.sum(select) > 2:
+            if select.sum() / aperture < pix_frac:
                 continue
 
             flux_guess = numpy.interp(centre, self._wave[select], self._data[select]) * fact * fwhm_guess / 2.354

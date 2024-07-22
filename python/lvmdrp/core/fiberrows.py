@@ -848,6 +848,7 @@ class FiberRows(Header, PositionTable):
 
         spec = self.getSpec(ref_fiber)
         flux[ref_fiber], cent_wave[ref_fiber], fwhm[ref_fiber] = spec.fitSepGauss(ref_cent, aperture, fwhm_guess, bg_guess, flux_range, cent_range, fwhm_range, bg_range, axs=axs[ref_fiber][1])
+        masked[ref_fiber] = numpy.isnan(flux[ref_fiber])|numpy.isnan(cent_wave[ref_fiber])|numpy.isnan(fwhm[ref_fiber])
         first = numpy.arange(ref_fiber - 1, -1, -1)
         second = numpy.arange(ref_fiber + 1, self._fibers, 1)
 
@@ -894,28 +895,6 @@ class FiberRows(Header, PositionTable):
                 fwhm[i, masked[i]] = fwhm[i - 1, masked[i]]
 
         fibers = numpy.arange(self._fibers)
-        for i in range(nlines):
-            select_line = masked[:, i]
-            bad_fibers = fibers[select_line]
-            good_fibers = fibers[numpy.logical_not(select_line)]
-            for j in bad_fibers:
-                nearest = numpy.abs(good_fibers - j)
-                sorted = numpy.argsort(nearest)
-                greater = good_fibers[sorted][good_fibers[sorted] > j]
-                smaller = good_fibers[sorted][good_fibers[sorted] < j]
-
-                if len(smaller) == 0:
-                    cent_wave[j, i] = cent_wave[greater[0], i]
-                    fwhm[j, i] = fwhm[greater[0], i]
-                elif len(greater) == 0:
-                    cent_wave[j, i] = cent_wave[smaller[0], i]
-                    fwhm[j, i] = fwhm[smaller[0], i]
-                else:
-                    cent_wave[j, i] = (
-                        cent_wave[smaller[0], i] + cent_wave[greater[0], i]
-                    ) / 2.0
-                    fwhm[j, i] = (fwhm[smaller[0], i] + fwhm[greater[0], i]) / 2.0
-
         return fibers, flux, cent_wave, fwhm, masked
 
     def append(self, rows, append_hdr=False):

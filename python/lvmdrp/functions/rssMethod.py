@@ -177,12 +177,12 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
                                   aperture: int = 12,
                                   fwhm_guess: float = 3.0,
                                   bg_guess: float = 0.0,
-                                  cent_range: List[float] = [-2.0, 2.0],
-                                  flux_range: List[float] = [500.0, numpy.inf],
-                                  fwhm_range: List[float] = [0.0, 7.0],
+                                  flux_range: List[float] = [800.0, numpy.inf],
+                                  cent_range: List[float] = [-3.0, 3.0],
+                                  fwhm_range: List[float] = [2.0, 4.5],
                                   bg_range: List[float] = [0.0, numpy.inf],
                                   poly_disp: int = 5, poly_fwhm: int = 2,
-                                  poly_cros: int = 2, poly_kinds: list = ['poly', 'poly', 'poly'],
+                                  poly_cros: int = 0, poly_kinds: list = ['poly', 'poly', 'poly'],
                                   negative: bool = False,
                                   plot_fibers: List[int] = [],
                                   display_plots: bool = False):
@@ -223,11 +223,11 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
     bg_guess : float, optional
         Guess for the local background around each arc line during Gaussian fitting, by default 0.0
     flux_range : list[float], optional
-        Range within which the integrated flux of arc lines is allowed to be during Gaussian fitting, by default [0.0, inf]
+        Range within which the integrated flux of arc lines is allowed to be during Gaussian fitting, by default [800.0, inf]
     cent_range : list[float], optional
-        Range of arc line centroids (in pixel) within which a line centroid is expected to be during Gaussian fitting, by default [-2.0, 2.0]
+        Range of arc line centroids (in pixel) within which a line centroid is expected to be during Gaussian fitting, by default [-3.0, 3.0]
     fwhm_range : list[float], optional
-        Range of FWHM (in pixel) allowed for arc lines during Gaussian fitting, by default [0.0, 7.0]
+        Range of FWHM (in pixel) allowed for arc lines during Gaussian fitting, by default [2.0, 3.5]
     bg_range : list[float], optional
         Range local background level allowed for arc lines during Gaussian fitting, by default [0.0, inf]
     poly_disp : int, optional
