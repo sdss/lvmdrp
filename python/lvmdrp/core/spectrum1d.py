@@ -3225,6 +3225,9 @@ class Spectrum1D(Header):
                 axs[i] = gauss.plot(self._wave[select], self._data[select], ax=axs[i])
                 axs[i].axvline(cent_guess[i], ls="--", lw=1, color="tab:red")
                 axs[i].set_title(f"{axs[i].get_title()} @ {cent[i]:.1f} (pixel)")
+                axs[i].text(0.05, 0.9, f"flux = {flux[i]:.2f}", va="bottom", ha="left", transform=axs[i].transAxes, fontsize=11)
+                axs[i].text(0.05, 0.8, f"cent = {cent[i]:.2f}", va="bottom", ha="left", transform=axs[i].transAxes, fontsize=11)
+                axs[i].text(0.05, 0.7, f"fwhm = {fwhm[i]:.2f}", va="bottom", ha="left", transform=axs[i].transAxes, fontsize=11)
 
         return flux, cent, fwhm
 
