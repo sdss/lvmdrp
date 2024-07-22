@@ -34,7 +34,6 @@ from itertools import groupby
 from astropy.stats import biweight_location, biweight_scale
 from astropy.io import fits
 from astropy.table import Table
-from multiprocessing import Pool
 from scipy import interpolate
 from typing import List, Tuple, Dict
 
@@ -1366,7 +1365,7 @@ def create_traces(mjd, cameras=CAMERAS, use_fiducial_cals=True, expnums_ldls=Non
                 log.info(f"going to trace all fibers in {camera}")
                 centroids, img = image_tasks.trace_centroids(in_image=dflat_path, out_trace_cent=cent_guess_path,
                                                             correct_ref=True, median_box=(1,10), coadd=20, counts_threshold=counts_threshold,
-                                                            max_diff=1.5, guess_fwhm=2.5, method="gauss", ncolumns=140,
+                                                            max_diff=5.0, guess_fwhm=2.5, method="gauss", ncolumns=140,
                                                             fit_poly=fit_poly, poly_deg=poly_deg_cent,
                                                             interpolate_missing=True)
 
@@ -1387,8 +1386,8 @@ def create_traces(mjd, cameras=CAMERAS, use_fiducial_cals=True, expnums_ldls=Non
                     out_trace_amp=flux_path, out_trace_cent=cent_path, out_trace_fwhm=fwhm_path,
                     in_trace_cent_guess=cent_guess_path,
                     median_box=(1,10), coadd=20,
-                    counts_threshold=counts_threshold, max_diff=1.5, guess_fwhm=2.5,
-                    ncolumns=40, iblocks=block_idxs, fwhm_limits=(1.5, 4.5),
+                    counts_threshold=counts_threshold, max_diff=5.0, guess_fwhm=2.5,
+                    ncolumns=40, iblocks=block_idxs, fwhm_limits=(1.0, 3.5),
                     fit_poly=fit_poly, interpolate_missing=False, poly_deg=(poly_deg_amp, poly_deg_cent, poly_deg_width)
                 )
 
@@ -1610,7 +1609,7 @@ def create_twilight_fiberflats(mjd: int, use_fiducial_cals: bool = True, expnums
             log.info(f"skipping {lflat_path}, file already exist")
         else:
             image_tasks.subtract_straylight(in_image=dflat_path, out_image=lflat_path, out_stray=stray_path,
-                                            in_cent_trace=calibs["trace_guess"][camera], select_nrows=(5,5), use_weights=True,
+                                            in_cent_trace=calibs["trace"][camera], select_nrows=(5,5), use_weights=True,
                                             aperture=15, smoothing=400, median_box=101, gaussian_sigma=20.0, parallel=0)
 
         if skip_done and os.path.isfile(xflat_path):
@@ -1984,18 +1983,13 @@ def reduce_longterm_sequence(mjd, use_fiducial_cals=True, reject_cr=True, only_c
         expnums_ldls = np.sort(dome_flats.query("ldls").expnum.unique())
         expnums_qrtz = np.sort(dome_flats.query("quartz").expnum.unique())
 
-        pool = Pool(9)
-        threads = []
         for camera in CAMERAS:
-            threads.append(pool.apply_async(create_traces,
-                           kwds=dict(mjd=mjd, cameras=[camera],
-                           use_fiducial_cals=use_fiducial_cals,
-                           expnums_ldls=expnums_ldls, expnums_qrtz=expnums_qrtz,
-                           skip_done=skip_done)))
-        pool.close()
-        pool.join()
-        for ithr in range(len(threads)):
-            threads[ithr].get()
+            create_traces(
+                mjd=mjd, cameras=[camera],
+                use_fiducial_cals=use_fiducial_cals,
+                expnums_ldls=expnums_ldls, expnums_qrtz=expnums_qrtz,
+                skip_done=skip_done
+            )
         _move_master_calibrations(mjd=mjd, kind={"trace", "width"})
     else:
         log.log(20 if "trace" in found_cals else 40, "skipping production of fiber traces")
