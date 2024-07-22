@@ -1612,7 +1612,7 @@ def create_twilight_fiberflats(mjd: int, use_fiducial_cals: bool = True, expnums
             log.info(f"skipping {lflat_path}, file already exist")
         else:
             image_tasks.subtract_straylight(in_image=dflat_path, out_image=lflat_path, out_stray=stray_path,
-                                            in_cent_trace=calibs["trace_guess"][camera], select_nrows=(5,5), use_weights=True,
+                                            in_cent_trace=calibs["trace"][camera], select_nrows=(5,5), use_weights=True,
                                             aperture=15, smoothing=400, median_box=101, gaussian_sigma=20.0, parallel=0)
 
         if skip_done and os.path.isfile(xflat_path):
