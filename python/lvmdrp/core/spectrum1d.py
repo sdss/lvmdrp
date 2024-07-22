@@ -3098,23 +3098,19 @@ class Spectrum1D(Header):
         return offsets, med_pos
 
     def fitMultiGauss(self, centres, init_fwhm, bounds=(-numpy.inf, numpy.inf), ftol=1e-3, xtol=1e-3):
+        fact = numpy.sqrt(2 * numpy.pi)
         select = numpy.zeros(self._dim, dtype="bool")
         flux_in = numpy.zeros(len(centres), dtype=numpy.float32)
-        sig_in = numpy.ones_like(flux_in) * init_fwhm / 2.354
-        cent = numpy.zeros(len(centres), dtype=numpy.float32)
-        if self._error is not None:
-            error = self._error
-        else:
-            error = numpy.ones_like(self._dim, dtype=numpy.float32)
+        sig_in = numpy.ones(len(centres), dtype=numpy.float32) * init_fwhm / 2.354
+        error = numpy.ones(self._dim, dtype=numpy.float32) if self._error is None else self._error
         for i in range(len(centres)):
             select_line = numpy.logical_and(
                 self._wave > centres[i] - 2 * init_fwhm,
                 self._wave < centres[i] + 2 * init_fwhm,
             )
-            flux_in[i] = numpy.sum(self._data[select_line])
+            flux_in[i] = numpy.interp(centres[i], self._pixels, self._data) * fact * sig_in[i]
             select = numpy.logical_or(select, select_line)
-            cent[i] = centres[i]
-        par = numpy.concatenate([flux_in, cent, sig_in])
+        par = numpy.concatenate([flux_in, centres, sig_in])
         gauss_multi = fit_profile.Gaussians(par)
         gauss_multi.fit(self._wave[select], self._data[select], p0=par, sigma=error[select], bounds=bounds, ftol=ftol, xtol=xtol)
         return gauss_multi, gauss_multi.getPar()

@@ -1368,7 +1368,7 @@ def create_traces(mjd, cameras=CAMERAS, use_fiducial_cals=True, expnums_ldls=Non
                 log.info(f"going to trace all fibers in {camera}")
                 centroids, img = image_tasks.trace_centroids(in_image=dflat_path, out_trace_cent=cent_guess_path,
                                                             correct_ref=True, median_box=(1,10), coadd=20, counts_threshold=counts_threshold,
-                                                            max_diff=1.5, guess_fwhm=2.5, method="gauss", ncolumns=140,
+                                                            max_diff=5.0, guess_fwhm=2.5, method="gauss", ncolumns=140,
                                                             fit_poly=fit_poly, poly_deg=poly_deg_cent,
                                                             interpolate_missing=True)
 
@@ -1389,8 +1389,8 @@ def create_traces(mjd, cameras=CAMERAS, use_fiducial_cals=True, expnums_ldls=Non
                     out_trace_amp=flux_path, out_trace_cent=cent_path, out_trace_fwhm=fwhm_path,
                     in_trace_cent_guess=cent_guess_path,
                     median_box=(1,10), coadd=20,
-                    counts_threshold=counts_threshold, max_diff=1.5, guess_fwhm=2.5,
-                    ncolumns=40, iblocks=block_idxs, fwhm_limits=(1.5, 4.5),
+                    counts_threshold=counts_threshold, max_diff=5.0, guess_fwhm=2.5,
+                    ncolumns=40, iblocks=block_idxs, fwhm_limits=(1.0, 3.5),
                     fit_poly=fit_poly, interpolate_missing=False, poly_deg=(poly_deg_amp, poly_deg_cent, poly_deg_width)
                 )
 
