@@ -835,6 +835,7 @@ class FiberRows(Header, PositionTable):
         fwhm_guess=3,
         bg_guess=0.0,
         flux_range=[0.0, numpy.inf],
+        cent_range=[-2.0, 2.0],
         fwhm_range=[0, 7],
         bg_range=[0, numpy.inf],
         axs=None,
@@ -846,7 +847,7 @@ class FiberRows(Header, PositionTable):
         masked = numpy.zeros((self._fibers, nlines), dtype="bool")
 
         spec = self.getSpec(ref_fiber)
-        flux[ref_fiber], cent_wave[ref_fiber], fwhm[ref_fiber] = spec.fitSepGauss(ref_cent, aperture, fwhm_guess, bg_guess, flux_range, fwhm_range, bg_range, axs=axs[ref_fiber][1])
+        flux[ref_fiber], cent_wave[ref_fiber], fwhm[ref_fiber] = spec.fitSepGauss(ref_cent, aperture, fwhm_guess, bg_guess, flux_range, cent_range, fwhm_range, bg_range, axs=axs[ref_fiber][1])
         first = numpy.arange(ref_fiber - 1, -1, -1)
         second = numpy.arange(ref_fiber + 1, self._fibers, 1)
 
@@ -864,7 +865,7 @@ class FiberRows(Header, PositionTable):
                 _, axs_fiber = axs[i]
             else:
                 axs_fiber = None
-            flux[i], cent_wave[i], fwhm[i] = spec.fitSepGauss(cent_wave[i + 1], aperture, fwhm_guess, bg_guess, flux_range, fwhm_range, bg_range, axs=axs_fiber)
+            flux[i], cent_wave[i], fwhm[i] = spec.fitSepGauss(cent_wave[i + 1], aperture, fwhm_guess, bg_guess, flux_range, cent_range, fwhm_range, bg_range, axs=axs_fiber)
             masked[i] = numpy.isnan(flux[i])|numpy.isnan(cent_wave[i])|numpy.isnan(fwhm[i])
 
             if numpy.any(masked[i]):
@@ -885,7 +886,7 @@ class FiberRows(Header, PositionTable):
                 _, axs_fiber = axs[i]
             else:
                 axs_fiber = None
-            flux[i], cent_wave[i], fwhm[i] = spec.fitSepGauss(cent_wave[i - 1], aperture, fwhm_guess, bg_guess, flux_range, fwhm_range, bg_range, axs=axs_fiber)
+            flux[i], cent_wave[i], fwhm[i] = spec.fitSepGauss(cent_wave[i - 1], aperture, fwhm_guess, bg_guess, flux_range, cent_range, fwhm_range, bg_range, axs=axs_fiber)
             masked[i] = numpy.isnan(flux[i])|numpy.isnan(cent_wave[i])|numpy.isnan(fwhm[i])
 
             if numpy.any(masked[i]):

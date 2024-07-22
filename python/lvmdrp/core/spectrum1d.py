@@ -3173,6 +3173,7 @@ class Spectrum1D(Header):
         fwhm_guess=3,
         bg_guess=0.0,
         flux_range=[0.0, numpy.inf],
+        cent_range=[-2.0, 2.0],
         fwhm_range=[0, 7],
         bg_range=[0, numpy.inf],
         ftol=1e-8,
@@ -3204,8 +3205,8 @@ class Spectrum1D(Header):
             else:
                 gauss = fit_profile.Gaussian(guess)
 
-            bound_lower = [flux_range[0], centre-hw, fwhm_range[0]/2.354, bg_range[0]]
-            bound_upper = [flux_range[1], centre+hw, fwhm_range[1]/2.354, bg_range[1]]
+            bound_lower = [flux_range[0], centre+cent_range[0], fwhm_range[0]/2.354, bg_range[0]]
+            bound_upper = [flux_range[1], centre+cent_range[1], fwhm_range[1]/2.354, bg_range[1]]
             gauss.fit(
                 self._wave[select],
                 self._data[select],

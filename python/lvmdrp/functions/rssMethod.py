@@ -177,6 +177,7 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
                                   aperture: int = 12,
                                   fwhm_guess: float = 3.0,
                                   bg_guess: float = 0.0,
+                                  cent_range: List[float] = [-2.0, 2.0],
                                   flux_range: List[float] = [500.0, numpy.inf],
                                   fwhm_range: List[float] = [0.0, 7.0],
                                   bg_range: List[float] = [0.0, numpy.inf],
@@ -216,13 +217,15 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
     cc_max_shift : int, optional
         Maximum shift in pixels to reference lines, by default 20
     aperture : int, optional
-        Range of pixels within which an arc line is allowed to be in consecutive fibers, by default 12
+        Range of pixels around arc lines guess centroid within which the Gaussian fitting will be performed, by default 12
     fwhm_guess : float, optional
         Guess for the FWHM (in pixel) of the arc lines during the Gaussian fitting, by default 3.0
     bg_guess : float, optional
         Guess for the local background around each arc line during Gaussian fitting, by default 0.0
     flux_range : list[float], optional
         Range within which the integrated flux of arc lines is allowed to be during Gaussian fitting, by default [0.0, inf]
+    cent_range : list[float], optional
+        Range of arc line centroids (in pixel) within which a line centroid is expected to be during Gaussian fitting, by default [-2.0, 2.0]
     fwhm_range : list[float], optional
         Range of FWHM (in pixel) allowed for arc lines during Gaussian fitting, by default [0.0, 7.0]
     bg_range : list[float], optional
@@ -385,7 +388,8 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
     # measure the ARC lines with individual Gaussian across the CCD
     log.info(f"fitting arc lines for each fiber for {ref_fiber = } with parameter ranges:")
     log.info(f"   {flux_range = } {unit}")
-    log.info(f"   {fwhm_range = }")
+    log.info(f"   {cent_range = } pixel")
+    log.info(f"   {fwhm_range = } pixel")
     log.info(f"   {bg_range   = } {unit}")
 
     # initialize plots for arc lines fitting
@@ -401,6 +405,7 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
         fwhm_guess=fwhm_guess,
         bg_guess=bg_guess,
         flux_range=flux_range,
+        cent_range=cent_range,
         fwhm_range=fwhm_range,
         bg_range=bg_range,
         axs=axs_fibers,
