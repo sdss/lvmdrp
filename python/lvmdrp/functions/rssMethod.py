@@ -461,10 +461,11 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
     # Iterate over the fibers
     good_fibers = numpy.ones(len(fibers), dtype="bool")
     for i in fibers:
-        if nlines - masked[i].sum() <= poly_disp + 1:
-            log.warning(f"fiber {i} has {nlines - masked[i].sum()} (<= {poly_disp + 1 = }) good lines")
+        good_lines = ~masked[i]
+        if good_lines.sum() <= poly_disp + 1:
+            log.warning(f"fiber {i} has {good_lines.sum()} (< {poly_disp + 1 = }) good lines")
             good_fibers[i] = False
-            # continue
+            continue
 
         if kind_disp not in ["poly", "legendre", "chebyshev"]:
             log.warning(
@@ -477,31 +478,32 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
         elif kind_disp == "chebyshev":
             wave_cls = polynomial.Chebyshev
 
-        wave_poly = wave_cls.fit(cent_wave[i], ref_lines, deg=poly_disp)
+        wave_poly = wave_cls.fit(cent_wave[i, good_lines], ref_lines[good_lines], deg=poly_disp)
 
         wave_coeffs[i, :] = wave_poly.convert().coef
         wave_sol[i, :] = wave_poly(arc._pixels)
-        wave_rms[i] = numpy.std(wave_poly(cent_wave[i]) - ref_lines)
+        wave_rms[i] = numpy.nanstd(wave_poly(cent_wave[i, good_lines]) - ref_lines[good_lines])
 
     log.info(
         "finished wavelength fitting with median "
-        f"RMS = {numpy.median(wave_rms):g} AA "
-        f"({numpy.median(wave_rms[:,None]/numpy.diff(wave_sol, axis=1)):g} pix)"
+        f"RMS = {numpy.nanmedian(wave_rms):g} AA "
+        f"({numpy.nanmedian(wave_rms[:,None]/numpy.diff(wave_sol, axis=1)):g} pix)"
     )
 
     # Estimate the spectral resolution pattern
-    dwave = numpy.gradient(wave_sol, axis=1)
-    cent_round = numpy.round(cent_wave).astype(int)
+    dwave = numpy.fabs(numpy.gradient(wave_sol, axis=1))
 
     # Iterate over the fibers
     log.info(f"fitting LSF solutions using {poly_fwhm}-deg polynomials")
     for i in fibers:
-        if nlines - masked[i].sum() <= poly_fwhm + 1:
-            log.warning(f"fiber {i} has {nlines - masked[i].sum()} (<= {poly_fwhm + 1 = }) good lines")
+        good_lines = ~masked[i]
+        if good_lines.sum() <= poly_fwhm + 1:
+            log.warning(f"fiber {i} has {good_lines.sum()} (< {poly_fwhm + 1 = }) good lines")
             good_fibers[i] = False
-            # continue
+            continue
 
-        fwhm_wave = numpy.fabs(dwave[i, cent_round[i, :]]) * fwhm[i, :]
+        dw = numpy.interp(cent_wave[i, good_lines], arc._pixels, dwave[i])
+        fwhm_wave = dw * fwhm[i, good_lines]
 
         if kind_fwhm not in ["poly", "legendre", "chebyshev"]:
             log.warning(
@@ -515,11 +517,11 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
         elif kind_fwhm == "chebyshev":
             fwhm_cls = polynomial.Chebyshev
 
-        fwhm_poly = fwhm_cls.fit(cent_wave[i], fwhm_wave, deg=poly_fwhm)
+        fwhm_poly = fwhm_cls.fit(cent_wave[i, good_lines], fwhm_wave, deg=poly_fwhm)
 
         lsf_coeffs[i, :] = fwhm_poly.convert().coef
         fwhm_sol[i, :] = fwhm_poly(arc._pixels)
-        fwhm_rms[i] = numpy.std(fwhm_wave - fwhm_poly(cent_wave[i]))
+        fwhm_rms[i] = numpy.nanstd(fwhm_wave - fwhm_poly(cent_wave[i, good_lines]))
 
     log.info(
         "finished LSF fitting with median "
@@ -641,9 +643,15 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
     )
     ax_sol_wave.plot(arc._pixels, wave_sol.mean(0), lw=1, color="tab:blue")
     for i in fibers:
+        good_lines = ~masked[i]
+        if good_lines.sum() <= poly_disp + 1:
+            log.warning(f"fiber {i} has {good_lines.sum()} (< {poly_disp + 1 = }) good lines")
+            good_fibers[i] = False
+            continue
+
         ax_sol_wave.plot(
-            cent_wave[i],
-            ref_lines,
+            cent_wave[i, good_lines],
+            ref_lines[good_lines],
             ",",
             color="tab:blue",
         )
@@ -665,10 +673,17 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
     )
     ax_sol_fwhm.plot(arc._pixels, fwhm_sol.mean(0), lw=1, color="tab:red")
     for i in fibers:
-        fwhm_wave = numpy.fabs(dwave[i, cent_round[i, :]]) * fwhm[i, :]
+        good_lines = ~masked[i]
+        if good_lines.sum() <= poly_fwhm + 1:
+            log.warning(f"fiber {i} has {good_lines.sum()} (< {poly_fwhm + 1 = }) good lines")
+            good_fibers[i] = False
+            continue
+
+        dw = numpy.interp(cent_wave[i, good_lines], arc._pixels, dwave[i])
+        fwhm_wave = dw * fwhm[i, good_lines]
 
         ax_sol_fwhm.plot(
-            cent_wave[i],
+            cent_wave[i, good_lines],
             fwhm_wave,
             ",",
             color="tab:red",
