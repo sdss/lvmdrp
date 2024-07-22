@@ -525,8 +525,8 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
 
     log.info(
         "finished LSF fitting with median "
-        f"RMS = {numpy.median(fwhm_rms):g} AA "
-        f"({numpy.median(fwhm_rms[:,None]/numpy.diff(wave_sol, axis=1)):g} pix)"
+        f"RMS = {numpy.nanmedian(fwhm_rms):g} AA "
+        f"({numpy.nanmedian(fwhm_rms[:,None]/numpy.gradient(wave_sol, axis=1)):g} pix)"
     )
 
     # create plot of polynomial coefficients
@@ -645,8 +645,6 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
     for i in fibers:
         good_lines = ~masked[i]
         if good_lines.sum() <= poly_disp + 1:
-            log.warning(f"fiber {i} has {good_lines.sum()} (< {poly_disp + 1 = }) good lines")
-            good_fibers[i] = False
             continue
 
         ax_sol_wave.plot(
@@ -675,8 +673,6 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
     for i in fibers:
         good_lines = ~masked[i]
         if good_lines.sum() <= poly_fwhm + 1:
-            log.warning(f"fiber {i} has {good_lines.sum()} (< {poly_fwhm + 1 = }) good lines")
-            good_fibers[i] = False
             continue
 
         dw = numpy.interp(cent_wave[i, good_lines], arc._pixels, dwave[i])
