@@ -34,7 +34,6 @@ from itertools import groupby
 from astropy.stats import biweight_location, biweight_scale
 from astropy.io import fits
 from astropy.table import Table
-from multiprocessing import Pool
 from scipy import interpolate
 from typing import List, Tuple, Dict
 
@@ -1985,18 +1984,13 @@ def reduce_longterm_sequence(mjd, use_fiducial_cals=True, reject_cr=True, only_c
         expnums_ldls = np.sort(dome_flats.query("ldls").expnum.unique())
         expnums_qrtz = np.sort(dome_flats.query("quartz").expnum.unique())
 
-        pool = Pool(9)
-        threads = []
         for camera in CAMERAS:
-            threads.append(pool.apply_async(create_traces,
-                           kwds=dict(mjd=mjd, cameras=[camera],
-                           use_fiducial_cals=use_fiducial_cals,
-                           expnums_ldls=expnums_ldls, expnums_qrtz=expnums_qrtz,
-                           skip_done=skip_done)))
-        pool.close()
-        pool.join()
-        for ithr in range(len(threads)):
-            threads[ithr].get()
+            create_traces(
+                mjd=mjd, cameras=[camera],
+                use_fiducial_cals=use_fiducial_cals,
+                expnums_ldls=expnums_ldls, expnums_qrtz=expnums_qrtz,
+                skip_done=skip_done
+            )
         _move_master_calibrations(mjd=mjd, kind={"trace", "width"})
     else:
         log.log(20 if "trace" in found_cals else 40, "skipping production of fiber traces")
