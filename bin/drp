@@ -259,9 +259,9 @@ cli.add_command(nightly_calibrations)
 @click.option('-w', '--skip-wavelength', is_flag=True, default=False, help='skip wavelength calibrations')
 @click.option('-f', '--skip-fiberflat', is_flag=True, default=False, help='skip fiberflats')
 @click.option('-s', '--skip-done', is_flag=True, default=False, help='flag to skip reduction steps that have already been done')
-@click.option('-a', '--keep-ancillary', is_flag=True, default=False, help='flag to keep ancillary files')
+@click.option('-a', '--clean-ancillary', is_flag=True, default=False, help='flag to keep ancillary files')
 def long_term_calibrations(mjd, reject_cr, skip_bias, skip_trace, skip_wavelength,
-                           skip_fiberflat, skip_done, keep_ancillary):
+                           skip_fiberflat, skip_done, clean_ancillary):
     """ Run the long-term calibration sequence """
 
     only_cals = {flavor for flavor, skip in zip(["bias", "trace", "wave", "twilight"],
@@ -269,7 +269,7 @@ def long_term_calibrations(mjd, reject_cr, skip_bias, skip_trace, skip_wavelengt
     reduce_longterm_sequence(mjd=mjd, reject_cr=reject_cr,
                              use_fiducial_cals=True,
                              only_cals=only_cals,
-                             skip_done=skip_done, keep_ancillary=keep_ancillary)
+                             skip_done=skip_done, keep_ancillary=not clean_ancillary)
 
 # register long-term calibration sequence
 cli.add_command(long_term_calibrations)
