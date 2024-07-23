@@ -67,6 +67,11 @@ MASK_BANDS = {
 }
 COUNTS_THRESHOLDS = {"ldls": 5000, "quartz": 10000}
 CAL_FLAVORS = {"bias", "trace", "wave", "dome", "twilight"}
+ARC_CONTINUUM_PARAMS = {
+    "b": {"cont_box_range": (150, 500), "cont_thresh": 0.9},
+    "r": {"cont_box_range": (50, 300), "cont_thresh": 0.999},
+    "z": {"cont_box_range": (50, 300), "cont_thresh": 0.999}
+}
 
 def get_calib_paths(mjd, flavors={"pixmask", "pixflat", "bias", "trace_guess", "trace", "width", "amp", "model", "wave", "lsf", "fiberflat_dome", "fiberflat_twilight"}, use_fiducial_cals=True):
     """Returns a dictionary containing paths for calibration frames
@@ -1765,6 +1770,7 @@ def create_wavelengths(mjd, use_fiducial_cals=True, expnums=None, kind="longterm
         expnum_str = frames.expnum.min()
     arc_analogs = frames.groupby(["camera",])
     for camera in arc_analogs.groups:
+        channel = camera[0]
         arcs = arc_analogs.get_group((camera,))
 
         # define product paths
@@ -1800,7 +1806,8 @@ def create_wavelengths(mjd, use_fiducial_cals=True, expnums=None, kind="longterm
             ref_lines, _, cent_wave, _, rss, wave_trace, fwhm_trace = rss_tasks.determine_wavelength_solution(
                 in_arcs=xarc_path,
                 out_wave=mwave_path,
-                out_lsf=mlsf_path
+                out_lsf=mlsf_path,
+                **ARC_CONTINUUM_PARAMS[channel]
             )
 
             lvmarc = lvmArc(data=rss._data, error=rss._error, mask=rss._mask, header=rss._header,

@@ -170,6 +170,7 @@ def mergeRSS_drp(files_in, file_out, mergeHdr="1"):
 @skip_on_missing_input_path(["in_arc"])
 # @skip_if_drpqual_flags(["SATURATED"], "in_arc")
 def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf: str,
+                                  cont_niter: int = 3, cont_thresh: float = 0.999, cont_box_range: Tuple[int] = (50, 300),
                                   ref_fiber: int = 319, pixel: List[float] = [], ref_lines: List[float] = [],
                                   use_line: List[bool] = [],
                                   cc_correction: bool = True,
@@ -204,6 +205,12 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
         Path to output wavelength trace file
     out_lsf : str
         Path to output LSF trace file
+    cont_niter : int, optional
+        Number of iterations for the continuum fitting, by default 3
+    cont_thresh : float, optional
+        Threshold above which pixels get rejected in the continuum fitting, by default 0.999
+    cont_box_range : tuple[int], optional
+        range of box sizes in adaptive median filtering for the continuum fitting, by default (50, 300)
     ref_fiber : int, optional
         Reference fiber used in line identification, by default 319
     pixel : list[float], optional
@@ -303,6 +310,10 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
     arc._mask[select] = True
     arc._data[select] = 0.0
     arc._error[select] = numpy.inf
+
+    # subtract continuum
+    log.info(f"fitting and subtracting continuum with parameters: {cont_niter = }, {cont_thresh = }, {cont_box_range = }")
+    arc, _, _ = arc.subtract_continuum(niter=cont_niter, thresh=cont_thresh, median_box_range=cont_box_range)
 
     # replace NaNs
     mask = arc._mask | numpy.isnan(arc._data) | numpy.isnan(arc._error)
