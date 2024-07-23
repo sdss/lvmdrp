@@ -3207,14 +3207,17 @@ class Spectrum1D(Header):
                 continue
 
             flux_guess = numpy.interp(centre, self._wave[select], self._data[select]) * fact * fwhm_guess / 2.354
-            guess = [flux_guess, centre, fwhm_guess / 2.354, bg_guess]
             if fit_bg:
+                guess = [flux_guess, centre, fwhm_guess / 2.354, bg_guess]
+                bound_lower = [flux_range[0], centre+cent_range[0], fwhm_range[0]/2.354, bg_range[0]]
+                bound_upper = [flux_range[1], centre+cent_range[1], fwhm_range[1]/2.354, bg_range[1]]
                 gauss = fit_profile.Gaussian_const(guess)
             else:
+                guess = [flux_guess, centre, fwhm_guess / 2.354]
                 gauss = fit_profile.Gaussian(guess)
+                bound_lower = [flux_range[0], centre+cent_range[0], fwhm_range[0]/2.354]
+                bound_upper = [flux_range[1], centre+cent_range[1], fwhm_range[1]/2.354]
 
-            bound_lower = [flux_range[0], centre+cent_range[0], fwhm_range[0]/2.354, bg_range[0]]
-            bound_upper = [flux_range[1], centre+cent_range[1], fwhm_range[1]/2.354, bg_range[1]]
             gauss.fit(
                 self._wave[select],
                 self._data[select],
@@ -3226,7 +3229,10 @@ class Spectrum1D(Header):
                 warning=warning,
             )
 
-            flux[i], cent[i], fwhm[i], _ = gauss.getPar()
+            if fit_bg:
+                flux[i], cent[i], fwhm[i], _ = gauss.getPar()
+            else:
+                flux[i], cent[i], fwhm[i] = gauss.getPar()
             fwhm[i] *= 2.354
 
             if axs is not None:
