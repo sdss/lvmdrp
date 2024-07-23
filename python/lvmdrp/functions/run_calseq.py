@@ -1183,8 +1183,8 @@ def create_pixelmasks(mjd, use_fiducial_cals=True, dark_expnums=None, pixflat_ex
         image_tasks.create_pixelmask(in_short_dark=mdark_short_path, in_long_dark=mdark_long_path, out_pixmask=mpixmask_path)
 
     # ancillary paths clean up
-    if not keep_ancillary:
-        _clean_ancillary(mjd=mjd, expnums=expnums)
+    # if not keep_ancillary:
+    #     _clean_ancillary(mjd=mjd, expnums=expnums)
 
 
 def create_nightly_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnums_qrtz=None,
@@ -1929,8 +1929,8 @@ def reduce_nightly_sequence(mjd, use_fiducial_cals=False, reject_cr=True, only_c
         else:
             log.log(20 if "twilight" in found_cals else 40, "skipping production of twilight fiberflats")
 
-    if not keep_ancillary:
-        _clean_ancillary(mjd)
+    # if not keep_ancillary:
+    #     _clean_ancillary(mjd)
 
 
 def reduce_longterm_sequence(mjd, use_fiducial_cals=True, reject_cr=True, only_cals=CAL_FLAVORS, skip_done=True, keep_ancillary=False):
@@ -2016,8 +2016,8 @@ def reduce_longterm_sequence(mjd, use_fiducial_cals=True, reject_cr=True, only_c
     else:
         log.log(20 if "twilight" in found_cals else 40, "skipping production of twilight fiberflats")
 
-    if not keep_ancillary:
-        _clean_ancillary(mjd)
+    # if not keep_ancillary:
+    #     _clean_ancillary(mjd)
 
 
 def create_fiber_model(mjd, flux=10000):
