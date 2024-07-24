@@ -2,12 +2,13 @@ import numpy
 from astropy.io import fits as pyfits
 from scipy import interpolate
 from tqdm import tqdm
+from copy import deepcopy as copy
 
 from lvmdrp import log
 from scipy import optimize
 from lvmdrp.core.header import Header, combineHdr
 from lvmdrp.core.positionTable import PositionTable
-from lvmdrp.core.spectrum1d import Spectrum1D
+from lvmdrp.core.spectrum1d import Spectrum1D, _cross_match
 from lvmdrp.core.plot import plt
 
 
@@ -852,6 +853,8 @@ class FiberRows(Header, PositionTable):
         first = numpy.arange(ref_fiber - 1, -1, -1)
         second = numpy.arange(ref_fiber + 1, self._fibers, 1)
 
+        last_spec = copy(self.getSpec(ref_fiber))
+        last_cent = copy(cent_wave[ref_fiber])
         iterator = tqdm(
             first,
             total=first.size,
@@ -861,18 +864,31 @@ class FiberRows(Header, PositionTable):
         )
         for i in iterator:
             spec = self.getSpec(i)
+            if spec._mask.all():
+                masked[i] = True
+                continue
 
             if axs is not None and i in axs:
                 _, axs_fiber = axs[i]
             else:
                 axs_fiber = None
-            flux[i], cent_wave[i], fwhm[i] = spec.fitSepGauss(cent_wave[i + 1], aperture, fwhm_guess, bg_guess, flux_range, cent_range, fwhm_range, bg_range, axs=axs_fiber)
+
+            cc, bhat, mhat = _cross_match(
+                ref_spec=last_spec._data,
+                obs_spec=spec._data,
+                stretch_factors=numpy.linspace(0.9,1.1,100),
+                shift_range=[-5, 5],
+            )
+            cent_guess = mhat * last_cent + bhat
+            flux[i], cent_wave[i], fwhm[i] = spec.fitSepGauss(cent_guess, aperture, fwhm_guess, bg_guess, flux_range, cent_range, fwhm_range, bg_range, axs=axs_fiber)
             masked[i] = numpy.isnan(flux[i])|numpy.isnan(cent_wave[i])|numpy.isnan(fwhm[i])
 
-            if numpy.any(masked[i]):
-                cent_wave[i, masked[i]] = cent_wave[i + 1, masked[i]]
-                fwhm[i, masked[i]] = fwhm[i + 1, masked[i]]
+            if numpy.isnan(cent_wave[i]).sum() == 0:
+                last_spec = copy(spec)
+                last_cent = copy(cent_wave[i])
 
+        last_spec = copy(self.getSpec(ref_fiber))
+        last_cent = copy(cent_wave[ref_fiber])
         iterator = tqdm(
             second,
             total=second.size,
@@ -882,17 +898,28 @@ class FiberRows(Header, PositionTable):
         )
         for i in iterator:
             spec = self.getSpec(i)
+            if spec._mask.all():
+                masked[i] = True
+                continue
 
             if axs is not None and i in axs:
                 _, axs_fiber = axs[i]
             else:
                 axs_fiber = None
-            flux[i], cent_wave[i], fwhm[i] = spec.fitSepGauss(cent_wave[i - 1], aperture, fwhm_guess, bg_guess, flux_range, cent_range, fwhm_range, bg_range, axs=axs_fiber)
+
+            cc, bhat, mhat = _cross_match(
+                ref_spec=last_spec._data,
+                obs_spec=spec._data,
+                stretch_factors=numpy.linspace(0.9,1.1,100),
+                shift_range=[-5, 5],
+            )
+            cent_guess = mhat * last_cent + bhat
+            flux[i], cent_wave[i], fwhm[i] = spec.fitSepGauss(cent_guess, aperture, fwhm_guess, bg_guess, flux_range, cent_range, fwhm_range, bg_range, axs=axs_fiber)
             masked[i] = numpy.isnan(flux[i])|numpy.isnan(cent_wave[i])|numpy.isnan(fwhm[i])
 
-            if numpy.any(masked[i]):
-                cent_wave[i, masked[i]] = cent_wave[i - 1, masked[i]]
-                fwhm[i, masked[i]] = fwhm[i - 1, masked[i]]
+            if numpy.isnan(cent_wave[i]).sum() == 0:
+                last_spec = copy(spec)
+                last_cent = copy(cent_wave[i])
 
         fibers = numpy.arange(self._fibers)
         return fibers, flux, cent_wave, fwhm, masked
