@@ -264,23 +264,26 @@ def _cross_match_float(
     best_shift = 0
     best_stretch_factor = 1
 
+    ref_spec_ = numpy.copy(ref_spec)
+    obs_spec_ = numpy.copy(obs_spec)
+
     # normalize the peaks to roughly magnitude 1, so that individual very bright
     # fibers do not dominate the signal
-    peaks1, _ = signal.find_peaks(ref_spec)
-    peaks2, _ = signal.find_peaks(obs_spec)
+    peaks1, _ = signal.find_peaks(ref_spec_)
+    peaks2, _ = signal.find_peaks(obs_spec_)
     # primitive "fiber flat"
-    spl1_eval = numpy.interp(numpy.arange(ref_spec.shape[0]), peaks1, ref_spec[peaks1])
-    spl2_eval = numpy.interp(numpy.arange(obs_spec.shape[0]), peaks2, obs_spec[peaks2])
-    ref_spec /= spl1_eval
-    obs_spec /= spl2_eval
-    #return ref_spec, obs_spec
+    spl1_eval = numpy.interp(numpy.arange(ref_spec_.shape[0]), peaks1, ref_spec_[peaks1])
+    spl2_eval = numpy.interp(numpy.arange(obs_spec_.shape[0]), peaks2, obs_spec_[peaks2])
+    ref_spec_ /= spl1_eval
+    obs_spec_ /= spl2_eval
+    #return ref_spec_, obs_spec_
 
     for factor in stretch_factors:
         # Stretch the first signal
-        stretched_signal1 = zoom(ref_spec, factor, mode="constant", prefilter=True)
+        stretched_signal1 = zoom(ref_spec_, factor, mode="constant", prefilter=True)
 
         # Make the lengths equal
-        len_diff = len(obs_spec) - len(stretched_signal1)
+        len_diff = len(obs_spec_) - len(stretched_signal1)
         if len_diff > 0:
             # Zero pad the stretched signal at the end if it's shorter
             stretched_signal1 = numpy.pad(stretched_signal1, (0, len_diff))
@@ -289,15 +292,15 @@ def _cross_match_float(
             stretched_signal1 = stretched_signal1[:len_diff]
 
         # Compute the cross correlation
-        cross_corr = signal.correlate(obs_spec, stretched_signal1, mode="same")
+        cross_corr = signal.correlate(obs_spec_, stretched_signal1, mode="same")
 
         # Normalize the cross correlation
         cross_corr = cross_corr.astype(numpy.float32)
-        cross_corr /= norm(stretched_signal1) * norm(obs_spec)
+        cross_corr /= norm(stretched_signal1) * norm(obs_spec_)
 
         # Get the correlation shifts
         shifts = signal.correlation_lags(
-            len(obs_spec), len(stretched_signal1), mode="same"
+            len(obs_spec_), len(stretched_signal1), mode="same"
         )
 
         # Constrain the cross_corr and shifts to the shift_range
