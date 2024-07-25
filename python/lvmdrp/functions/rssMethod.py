@@ -181,7 +181,7 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
                                   flux_range: List[float] = [800.0, numpy.inf],
                                   cent_range: List[float] = [-3.0, 3.0],
                                   fwhm_range: List[float] = [2.0, 4.5],
-                                  bg_range: List[float] = [1000.0, numpy.inf],
+                                  bg_range: List[float] = [-1000.0, numpy.inf],
                                   poly_disp: int = 5, poly_fwhm: int = 2,
                                   poly_cros: int = 0, poly_kinds: list = ['poly', 'poly', 'poly'],
                                   negative: bool = False,
