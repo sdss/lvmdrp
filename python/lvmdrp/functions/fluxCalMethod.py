@@ -144,8 +144,8 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'STD', display_plo
         sens_rms = biweight_scale(sens_arr, axis=1, ignore_nan=True)
 
         # fix case of all invalid values
-        if (sens_ave == 0).all() or np.isnan(sens_ave).all():
-            log.warning("all standard star sensitivities are zero or NaN, falling back to SCI stars")
+        if (sens_ave == 0).all() or np.isnan(sens_ave).all() or (sens_ave<0).any():
+            log.warning("all standard star sensitivities are <=0 or NaN, falling back to SCI stars")
             method = 'SCI'  # fallback to sci field stars
         else:
             fframe.setHdrValue("FLUXCAL", 'STD', "flux-calibration method")
