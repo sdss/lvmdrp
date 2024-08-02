@@ -1645,7 +1645,7 @@ def quick_sky_subtraction(in_cframe, out_sframe,
     sky_error[skywfibers] = skywsky_error
 
     # write out sky table to ancillary file
-    mjd = cframe._header['MJD']
+    mjd = cframe._header['SMJD']  # use SMJD to account for exposures taken before the nightly MJD switch
     expnum = cframe._header['EXPOSURE']
     tileid = cframe._header['TILE_ID']
     skytable = path.full('lvm_anc', mjd=mjd, tileid=tileid, drpver=drpver,
