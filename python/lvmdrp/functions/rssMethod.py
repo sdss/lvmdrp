@@ -11,6 +11,7 @@ import matplotlib.gridspec as gridspec
 import numpy
 import yaml
 import bottleneck as bn
+from tqdm import tqdm
 from astropy import units as u
 from astropy.constants import c
 from astropy.io import fits
@@ -52,6 +53,10 @@ __all__ = [
 DONE_PASS = "gi"
 DONE_MAGS = numpy.asarray([22, 21])
 DONE_LIMS = numpy.asarray([1.7, 5.0])
+
+# GB hand picked isolated bright lines across each channel which are not doublest in UVES atlas
+# true wavelengths taken from UVES sky line atlas
+REF_SKYLINES = {'b':[5577.346680], 'r':[6363.782715, 7358.680176, 7392.209961], 'z':[8399.175781, 8988.383789, 9552.546875, 9719.838867]}
 
 
 def _linear_model(pars, xdata):
@@ -770,7 +775,7 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
     return ref_lines, masked, cent_wave, fwhm_wave, arc, wave_trace, fwhm_trace
 
 # method to apply shift in wavelength table based on comparison to skylines
-def shift_wave_skylines(in_frame: str, out_frame: str, channel: str):
+def shift_wave_skylines(in_frame: str, out_frame: str, dwave: float = 8.0, skylinedict = REF_SKYLINES, display_plots: bool = False):
     """
     Applies shift to wavelength map extension based on sky line centroid measurements
 
@@ -780,6 +785,12 @@ def shift_wave_skylines(in_frame: str, out_frame: str, channel: str):
         Input RSS FITS file
     out_frame : string
         Output RSS FITS file with the shifted wavelength maps
+    dwave : float, optional
+        Wavelength window used to locate the sky line, by default 8.0
+    skylinedict : dict[str, list[float]], optional
+        Dictionary containing the list of reference sky lines per channel, by default REF_SKYLINES
+    display_plots: bool, optional
+        Display plots on screen, by default False
     """
 
     # print('************************************************')
@@ -788,72 +799,96 @@ def shift_wave_skylines(in_frame: str, out_frame: str, channel: str):
     log.info("correcting wavelength using skylines")
 
 
-    # GB hand picked isolated bright lines across each channel which are not doublest in UVES atlas
-    # true wavelengths taken from UVES sky line atlas
-    skylinedict={'b':[5577.346680], 'r':[6363.782715, 7358.680176, 7392.209961], 'z':[8399.175781, 8988.383789, 9552.546875, 9719.838867]}
-    skylines=skylinedict[channel]
-    dwave=5 # width of wavelength window to measure centroid of skylines
 
     lvmframe = lvmFrame.from_file(in_frame)
-    fiberid=lvmframe._slitmap['fiberid'].data
+    channel = lvmframe._header["CCD"][0]
+    fiberid = lvmframe._slitmap['fiberid'].data
     # selection of which fibers belong to which spectrograph
-    sel1=lvmframe._slitmap['spectrographid'].data==1
-    sel2=lvmframe._slitmap['spectrographid'].data==2
-    sel3=lvmframe._slitmap['spectrographid'].data==3
+    sel1 = lvmframe._slitmap['spectrographid'].data==1
+    sel2 = lvmframe._slitmap['spectrographid'].data==2
+    sel3 = lvmframe._slitmap['spectrographid'].data==3
+    skylines = skylinedict[channel]
 
     # measure offsets
-    offsets=numpy.zeros((len(skylines), numpy.shape(lvmframe._data)[0]))
-    specoffset=numpy.zeros((len(skylines), 3))
-    for i in range(len(skylines)):
-        mask=numpy.abs(lvmframe._wave-skylines[i])>=dwave/2
-        weights=lvmframe._data.copy()
-        weights[mask]=0
-        offsets[i,:]=numpy.nansum(lvmframe._wave*weights, axis=1)/numpy.nansum(weights, axis=1)-skylines[i]
-        specoffset[i,0]=numpy.nanmedian(offsets[i,sel1])
-        specoffset[i,1]=numpy.nanmedian(offsets[i,sel2])
-        specoffset[i,2]=numpy.nanmedian(offsets[i,sel3])
+    offsets = numpy.ones((len(skylines), numpy.shape(lvmframe._data)[0])) * numpy.nan
+    fiber_offset = numpy.ones(lvmframe._data.shape[0]) * numpy.nan
+    iterator = tqdm(range(lvmframe._fibers), total=lvmframe._fibers, desc=f"measuring offsets using {len(skylines)} sky line(s)", ascii=True, unit="fiber")
+    for ifiber in iterator:
+        spec = lvmframe.getSpec(ifiber)
+        if spec._mask.all() or lvmframe._slitmap[ifiber]["telescope"] == "Spec" or lvmframe._slitmap[ifiber]["fibstatus"] in [1, 2]:
+            continue
 
-    #Average offsets for different skylines in each channel, apply to trace, and write them in header
-    meanoffset=numpy.nanmean(specoffset, axis=0)
-    log.info(f'Applying the following offsets [Angstroms] in [b,r,z] channels: {meanoffset}')
-    lvmframe._wave_trace['COEFF'].data[sel1,0] -= meanoffset[0]
-    lvmframe._wave_trace['COEFF'].data[sel2,0] -= meanoffset[1]
-    lvmframe._wave_trace['COEFF'].data[sel3,0] -= meanoffset[2]
-    lvmframe._header[f'HIERARCH WAVE SKYOFF_{channel}1']=(f'{meanoffset[0]}', f'Mean sky line offset in {channel}1 [Angs]')
-    lvmframe._header[f'HIERARCH WAVE SKYOFF_{channel}2']=(f'{meanoffset[1]}', f'Mean sky line offset in {channel}2 [Angs]')
-    lvmframe._header[f'HIERARCH WAVE SKYOFF_{channel}3']=(f'{meanoffset[2]}', f'Mean sky line offset in {channel}3 [Angs]')
+        fwhm_guess = numpy.nanmean(numpy.interp(skylines, lvmframe._wave[ifiber], lvmframe._lsf[ifiber]))
 
-    #write updated wobject
+        flux, sky_wave, fwhm, bg = spec.fitSepGauss(skylines, dwave, fwhm_guess, 0.0, [0, numpy.inf], [-2.5, 2.5], [fwhm_guess - 1.5, fwhm_guess + 1.5], [0.0, numpy.inf])
+        if numpy.any(flux / bg < 1.5) or numpy.isnan([flux, sky_wave, fwhm]).any():
+            continue
+
+        offsets[:, ifiber] = sky_wave - skylines
+        fiber_offset[ifiber] = numpy.nanmedian(offsets[:,ifiber], axis=0)
+
+    # split per spectrographs
+    specoffset = numpy.asarray(numpy.split(offsets, 3, axis=1))
+    # fit smooth function to each spectrograph trend
+    fiber_offset_mod = fiber_offset.copy()
+    for spec_offset, spec in zip(numpy.split(fiber_offset, 3), [sel1, sel2, sel3]):
+        mask = numpy.isfinite(spec_offset)
+        t = numpy.linspace(
+            fiberid[spec][mask][len(fiberid[spec][mask]) // 20],
+            fiberid[spec][mask][-1 * len(fiberid[spec][mask]) // 20],
+            20
+        )
+        median_offset = ndimage.median_filter(spec_offset[mask], 8)
+        tck = interpolate.splrep(fiberid[spec][mask], median_offset, task=-1, t=t)
+        fiber_offset_mod[spec] = interpolate.splev(fiberid[spec], tck)
+
+    # Average offsets for different skylines in each channel, apply to trace, and write them in header
+    meanoffset = numpy.nanmean(specoffset, axis=(1, 2)).round(4)
+    log.info(f'Applying the offsets [Angstroms] in [1,2,3] spectrographs with means: {meanoffset}')
+    lvmframe._wave_trace['COEFF'].data[:,0] -= fiber_offset_mod
+    lvmframe._header[f'HIERARCH WAVE SKYOFF_{channel.upper()}1'] = (meanoffset[0], f'Mean sky line offset in {channel}1 [Angs]')
+    lvmframe._header[f'HIERARCH WAVE SKYOFF_{channel.upper()}2'] = (meanoffset[1], f'Mean sky line offset in {channel}2 [Angs]')
+    lvmframe._header[f'HIERARCH WAVE SKYOFF_{channel.upper()}3'] = (meanoffset[2], f'Mean sky line offset in {channel}3 [Angs]')
+
+    wave_trace = TraceMask.from_coeff_table(lvmframe._wave_trace)
+    lvmframe._wave = wave_trace.eval_coeffs()
+
+    # write updated wobject
     log.info(f"writing updated wobject file '{os.path.basename(out_frame)}'")
     lvmframe.writeFitsData(out_frame)
 
-    # Make QA plots showing offsets for each sky line in each channel
-    for i in range(len(skylines)):
-        fig, ax = plt.subplots()
-        ax.plot(fiberid[sel1], offsets[i,sel1], label='Spec1', color='red', alpha=0.5)
-        ax.plot(fiberid[sel2], offsets[i,sel2], label='Spec2', color='green', alpha=0.5)
-        ax.plot(fiberid[sel3], offsets[i,sel3], label='Spec3', color='blue', alpha=0.5)
-        ax.plot(fiberid[sel1], numpy.repeat(specoffset[i,0], len(fiberid[sel1])), linestyle='--', color='red')
-        ax.plot(fiberid[sel2], numpy.repeat(specoffset[i,1], len(fiberid[sel2])), linestyle='--', color='green')
-        ax.plot(fiberid[sel3], numpy.repeat(specoffset[i,2], len(fiberid[sel3])), linestyle='--', color='blue')
-        ax.plot(fiberid[sel1], numpy.repeat(meanoffset[0], len(fiberid[sel1])), linestyle='-', color='red')
-        ax.plot(fiberid[sel2], numpy.repeat(meanoffset[1], len(fiberid[sel2])), linestyle='-', color='green')
-        ax.plot(fiberid[sel3], numpy.repeat(meanoffset[2], len(fiberid[sel3])), linestyle='-', color='blue')
-        ax.hlines(0, 0, 1944, linestyle='--', color='black', alpha=0.3)
-        ax.hlines(+0.05, 0, 1944, linestyle=':', color='black', alpha=0.3)
-        ax.hlines(-0.05, 0, 1944, linestyle=':', color='black', alpha=0.3)
-        ax.legend()
-        ax.set_ylim(-0.4,0.4)
-        ax.set_title(f'{lvmframe._header["EXPOSURE"]} - {channel} - {skylines[i]}')
-        ax.set_xlabel('Fiber ID')
-        ax.set_ylabel(r'$\Delta \lambda [\AA]$')
+    # Make QA plots showing offsets for each sky line in each spectrograph
+    fig, ax = plt.subplots()
+    ax.plot(fiberid[sel1], fiber_offset_mod[sel1], color='red', label='Spec1')
+    ax.plot(fiberid[sel2], fiber_offset_mod[sel2], color='green', label='Spec2')
+    ax.plot(fiberid[sel3], fiber_offset_mod[sel3], color='blue', label='Spec3')
+    ax.hlines(meanoffset[0], 1, 648, linestyle='-', color='red')
+    ax.hlines(meanoffset[1], 1+648, 2*648, linestyle='-', color='green')
+    ax.hlines(meanoffset[2], 1+2*648, 1944, linestyle='-', color='blue')
+    ax.hlines(0, 1, 1944, linestyle='--', color='black', alpha=0.3)
+    ax.hlines(+0.05, 1, 1944, linestyle=':', color='black', alpha=0.3)
+    ax.hlines(-0.05, 1, 1944, linestyle=':', color='black', alpha=0.3)
 
-        save_fig(
+    for i in range(len(skylines)):
+        ax.plot(fiberid[sel1], ndimage.median_filter(offsets[i,sel1], 1), alpha=0.5)
+        ax.plot(fiberid[sel2], ndimage.median_filter(offsets[i,sel2], 1), alpha=0.5)
+        ax.plot(fiberid[sel3], ndimage.median_filter(offsets[i,sel3], 1), alpha=0.5)
+        # ax.hlines(numpy.nanmean(specoffset[0, i]), 1, 648, linestyle='--', color='red')
+        # ax.hlines(numpy.nanmean(specoffset[1, i]), 1+648, 2*648, linestyle='--', color='green')
+        # ax.hlines(numpy.nanmean(specoffset[2, i]), 1+2*648, 1944, linestyle='--', color='blue')
+    ax.legend()
+    ax.set_ylim(-0.4,0.4)
+    ax.set_title(f'{lvmframe._header["EXPOSURE"]} - {channel} - {numpy.round(skylines, 2)}')
+    ax.set_xlabel('Fiber ID')
+    ax.set_ylabel(r'$\Delta \lambda [\AA]$')
+    plt.show()
+
+    save_fig(
         fig,
         product_path=out_frame,
-        to_display=False,
+        to_display=display_plots,
         figure_path="qa",
-        label=f"skylineshift_{skylines[i]}")
+        label=f"skylineshift_{channel}")
 
 
 
