@@ -3193,6 +3193,8 @@ class Spectrum1D(Header):
         flux = numpy.ones(len(cent_guess)) * numpy.nan
         cent = numpy.ones(len(cent_guess)) * numpy.nan
         fwhm = numpy.ones(len(cent_guess)) * numpy.nan
+        if fit_bg:
+            bg = numpy.ones(len(cent_guess)) * numpy.nan
 
         fact = numpy.sqrt(2 * numpy.pi)
         hw = aperture // 2
@@ -3202,7 +3204,7 @@ class Spectrum1D(Header):
                 continue
             # refine centroid within selected window
             idx, = numpy.where(select)
-            centre = idx[numpy.argmax(self._data[select])]
+            centre = self._wave[idx[numpy.argmax(self._data[select])]]
             # update fitting window
             select = (self._wave >= centre - hw) & (self._wave <= centre + hw) & (~(mask))
 
@@ -3233,7 +3235,7 @@ class Spectrum1D(Header):
             )
 
             if fit_bg:
-                flux[i], cent[i], fwhm[i], _ = gauss.getPar()
+                flux[i], cent[i], fwhm[i], bg[i] = gauss.getPar()
             else:
                 flux[i], cent[i], fwhm[i] = gauss.getPar()
             fwhm[i] *= 2.354
@@ -3248,7 +3250,7 @@ class Spectrum1D(Header):
                 axs[i].text(0.05, 0.7, f"fwhm = {fwhm[i]:.2f}", va="bottom", ha="left", transform=axs[i].transAxes, fontsize=11)
                 axs[i].legend(loc="upper right", frameon=False, fontsize=11)
 
-        return flux, cent, fwhm
+        return flux, cent, fwhm, bg
 
 
     def obtainGaussFluxPeaks(self, pos, sigma, indices, replace_error=1e10, plot=False):

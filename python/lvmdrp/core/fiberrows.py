@@ -845,10 +845,11 @@ class FiberRows(Header, PositionTable):
         flux = numpy.zeros((self._fibers, nlines), dtype=numpy.float32)
         cent_wave = numpy.zeros((self._fibers, nlines), dtype=numpy.float32)
         fwhm = numpy.zeros((self._fibers, nlines), dtype=numpy.float32)
+        bg = numpy.zeros((self._fibers, nlines), dtype=numpy.float32)
         masked = numpy.zeros((self._fibers, nlines), dtype="bool")
 
         spec = self.getSpec(ref_fiber)
-        flux[ref_fiber], cent_wave[ref_fiber], fwhm[ref_fiber] = spec.fitSepGauss(ref_cent, aperture, fwhm_guess, bg_guess, flux_range, cent_range, fwhm_range, bg_range, axs=axs[ref_fiber][1])
+        flux[ref_fiber], cent_wave[ref_fiber], fwhm[ref_fiber], bg[ref_fiber] = spec.fitSepGauss(ref_cent, aperture, fwhm_guess, bg_guess, flux_range, cent_range, fwhm_range, bg_range, axs=axs[ref_fiber][1])
         masked[ref_fiber] = numpy.isnan(flux[ref_fiber])|numpy.isnan(cent_wave[ref_fiber])|numpy.isnan(fwhm[ref_fiber])
         first = numpy.arange(ref_fiber - 1, -1, -1)
         second = numpy.arange(ref_fiber + 1, self._fibers, 1)
@@ -880,7 +881,7 @@ class FiberRows(Header, PositionTable):
                 shift_range=[-5, 5],
             )
             cent_guess = mhat * last_cent + bhat
-            flux[i], cent_wave[i], fwhm[i] = spec.fitSepGauss(cent_guess, aperture, fwhm_guess, bg_guess, flux_range, cent_range, fwhm_range, bg_range, axs=axs_fiber)
+            flux[i], cent_wave[i], fwhm[i], bg[i] = spec.fitSepGauss(cent_guess, aperture, fwhm_guess, bg_guess, flux_range, cent_range, fwhm_range, bg_range, axs=axs_fiber)
             masked[i] = numpy.isnan(flux[i])|numpy.isnan(cent_wave[i])|numpy.isnan(fwhm[i])
 
             if numpy.isnan(cent_wave[i]).sum() == 0:
@@ -914,7 +915,7 @@ class FiberRows(Header, PositionTable):
                 shift_range=[-5, 5],
             )
             cent_guess = mhat * last_cent + bhat
-            flux[i], cent_wave[i], fwhm[i] = spec.fitSepGauss(cent_guess, aperture, fwhm_guess, bg_guess, flux_range, cent_range, fwhm_range, bg_range, axs=axs_fiber)
+            flux[i], cent_wave[i], fwhm[i], bg[i] = spec.fitSepGauss(cent_guess, aperture, fwhm_guess, bg_guess, flux_range, cent_range, fwhm_range, bg_range, axs=axs_fiber)
             masked[i] = numpy.isnan(flux[i])|numpy.isnan(cent_wave[i])|numpy.isnan(fwhm[i])
 
             if numpy.isnan(cent_wave[i]).sum() == 0:
