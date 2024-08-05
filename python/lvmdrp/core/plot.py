@@ -338,18 +338,18 @@ def plot_wavesol_residuals(lines_pixels, lines_waves, model_waves, ax=None, labe
     return ax
 
 
-def plot_wavesol_coeffs(ypix, coeffs, axs, title=None, labels=False):
+def plot_wavesol_coeffs(ypix, coeffs, axs, color="tab:blue", title=None, labels=False):
     # ypix is the Y coordinate of each fiber in the middle of the chip
     # coeffs is a 2D array of coefficients for each fiber [nfiber, ncoeff]
 
     for icoeff in range(coeffs.shape[1]):
-        axs[icoeff].scatter(ypix, coeffs[:, icoeff], color="tab:blue")
+        axs[icoeff].scatter(coeffs[:, icoeff], ypix, s=7, lw=0, color=color)
         if labels:
             axs[icoeff].set_title(f"coeff # {icoeff+1}", loc="left")
 
     fig = axs[0].get_figure()
     if labels:
-        fig.supxlabel("Fiber ID")
+        fig.supylabel("Fiber ID")
     if title is not None:
         fig.suptitle(title)
 

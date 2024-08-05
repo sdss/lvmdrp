@@ -398,8 +398,8 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
     lsf_coeffs = numpy.zeros((arc._fibers, numpy.abs(poly_fwhm) + 1))
     wave_sol = numpy.zeros((arc._fibers, arc._data.shape[1]), dtype=numpy.float32)
     wave_rms = numpy.zeros(arc._fibers, dtype=numpy.float32)
-    fwhm_sol = numpy.zeros((arc._fibers, arc._data.shape[1]), dtype=numpy.float32)
-    fwhm_rms = numpy.zeros(arc._fibers, dtype=numpy.float32)
+    lsf_sol = numpy.zeros((arc._fibers, arc._data.shape[1]), dtype=numpy.float32)
+    lsf_rms = numpy.zeros(arc._fibers, dtype=numpy.float32)
 
     # measure the ARC lines with individual Gaussian across the CCD
     log.info(f"fitting arc lines for each fiber for {ref_fiber = } with parameter ranges:")
@@ -502,7 +502,7 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
 
     log.info(
         "finished wavelength fitting with median "
-        f"RMS = {numpy.nanmedian(wave_rms):g} AA "
+        f"RMS = {numpy.nanmedian(wave_rms):g} Angstrom "
         f"({numpy.nanmedian(wave_rms[:,None]/numpy.diff(wave_sol, axis=1)):g} pix)"
     )
 
@@ -536,53 +536,31 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
         fwhm_poly = fwhm_cls.fit(cent_wave[i, good_lines], fwhm_wave, deg=poly_fwhm)
 
         lsf_coeffs[i, :] = fwhm_poly.convert().coef
-        fwhm_sol[i, :] = fwhm_poly(arc._pixels)
-        fwhm_rms[i] = numpy.nanstd(fwhm_wave - fwhm_poly(cent_wave[i, good_lines]))
+        lsf_sol[i, :] = fwhm_poly(arc._pixels)
+        lsf_rms[i] = numpy.nanstd(fwhm_wave - fwhm_poly(cent_wave[i, good_lines]))
 
     log.info(
         "finished LSF fitting with median "
-        f"RMS = {numpy.nanmedian(fwhm_rms):g} AA "
-        f"({numpy.nanmedian(fwhm_rms[:,None]/numpy.gradient(wave_sol, axis=1)):g} pix)"
+        f"RMS = {numpy.nanmedian(lsf_rms):g} Angstrom "
+        f"({numpy.nanmedian(lsf_rms[:,None]/numpy.gradient(wave_sol, axis=1)):g} pix)"
     )
 
-    # create plot of polynomial coefficients
-    fig, axs = create_subplots(to_display=display_plots, nrows=wave_coeffs.shape[1], figsize=(10, 15), sharex=True)
-    # TODO: use ypix for the fibers instead of fiber ids
-    axs = plot_wavesol_coeffs(numpy.arange(arc._fibers)[good_fibers], coeffs=wave_coeffs[good_fibers], axs=axs, labels=True)
-    save_fig(
-        fig,
-        product_path=out_wave,
-        to_display=display_plots,
-        figure_path="qa",
-        label="coeffs_wave",
-    )
-    # create plot of wavelength fitting residuals
-    fig, ax = create_subplots(to_display=display_plots, figsize=(15, 7))
-    axs = plot_wavesol_residuals(lines_pixels=cent_wave[ref_fiber], lines_waves=ref_lines, model_waves=wave_cls(wave_coeffs[ref_fiber])(cent_wave[ref_fiber]), ax=ax, labels=True)
-    save_fig(
-        fig,
-        product_path=out_wave,
-        to_display=display_plots,
-        figure_path="qa",
-        label="residuals_wave",
-    )
+    # create plot of reference spectrum and wavelength fitting residuals
+    fig, (ax_spec, ax) = create_subplots(to_display=display_plots, nrows=2, ncols=1, sharex=True, figsize=(15, 7), layout="constrained")
 
-    # create plot of polynomial fittings
-    fig = plt.figure(figsize=(16, 10), layout="constrained")
-    gs = gridspec.GridSpec(10, max(poly_disp + 1, poly_fwhm + 1), figure=fig)
-
-    ax_spec = fig.add_subplot(gs[:3, :])
-    ax_spec.tick_params(labelbottom=False)
-    # ax_spec.set_yscale("log")
-    ax_sol_wave = fig.add_subplot(gs[3:6, :], sharex=ax_spec)
-    ax_sol_fwhm = ax_sol_wave.twinx()
-    ax_sol_wave.tick_params("y", labelcolor="tab:blue")
-    ax_sol_fwhm.tick_params("y", labelcolor="tab:red")
-    ax_coe_wave, ax_coe_fwhm = [], []
-    for i in range(poly_disp + 1):
-        ax_coe_wave.append(fig.add_subplot(gs[6:8, i]))
-    for i in range(poly_fwhm + 1):
-        ax_coe_fwhm.append(fig.add_subplot(gs[8:, i]))
+    colors = plt.cm.coolwarm(numpy.linspace(0, 1, arc._fibers))
+    residuals = numpy.zeros((arc._fibers, len(ref_lines)))
+    for ifiber in range(arc._fibers):
+        residuals[ifiber] = wave_cls(wave_coeffs[ifiber])(cent_wave[ifiber]) - ref_lines
+        if ifiber == ref_fiber or not good_fibers[ifiber]:
+            continue
+        ax.plot(cent_wave[ifiber], residuals[ifiber], ".", color=colors[ifiber], alpha=0.2)
+    ax.plot(cent_wave[ref_fiber], residuals[ref_fiber], "o", mec="k", mfc="none", ms=7, mew=1)
+    for i in range(ref_lines.size):
+        x, y = cent_wave[ref_fiber, i], residuals[ref_fiber, i]
+        ax.annotate(f"{ref_lines[i]:.2f}", (x, y), xytext=(9, -9), textcoords="offset pixels")
+    ax.set_xlabel("X (pixel)")
+    ax.set_ylabel("Residuals (Angstrom)")
 
     # add reference spectrum plot with reference lines & corrected lines
     good_pix = ~arc._mask
@@ -613,102 +591,88 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
     )
     ax_spec.step(arc._pixels, (arc._data * good_pix)[ref_fiber], color="0.2", lw=1)
     ax_spec.set_title(f"reference arc spectrum {ref_fiber}", loc="left")
-    ax_spec.set_ylabel("count (e-/pix)")
+    ax_spec.set_ylabel(f"count ({unit})")
+    ax_spec.set_yscale("log")
     ax_spec.legend(loc=1)
-
-    # add coefficients plots
-    for icoef in range(poly_disp + 1):
-        data = wave_coeffs[:, icoef]
-        mean, std = data.mean(), data.std()
-        ax_coe_wave[icoef].hist(data, bins=100, fc="tab:blue")
-        ax_coe_wave[icoef].text(
-            0.05,
-            0.95,
-            f"{mean = :g}\n{std = :g}",
-            va="top",
-            ha="left",
-            transform=ax_coe_wave[icoef].transAxes,
-        )
-        ax_coe_wave[icoef].tick_params(labelsize="x-small")
-        if icoef == 0:
-            ax_coe_wave[icoef].set_title("wavelength coefficients", loc="left")
-    for icoef in range(poly_fwhm + 1):
-        data = lsf_coeffs[:, icoef]
-        mean, std = data.mean(), data.std()
-        ax_coe_fwhm[icoef].hist(data, bins=100, fc="tab:red")
-        ax_coe_fwhm[icoef].text(
-            0.05,
-            0.95,
-            f"{mean = :g}\n{std = :g}",
-            va="top",
-            ha="left",
-            transform=ax_coe_fwhm[icoef].transAxes,
-        )
-        ax_coe_fwhm[icoef].tick_params(labelsize="x-small")
-        if icoef == 0:
-            ax_coe_fwhm[icoef].set_title("LSF coefficients", loc="left")
-
-    # add wavelength and LSF solutions plot
-    ax_sol_wave.fill_between(
-        arc._pixels,
-        wave_sol.mean(0) - wave_sol.std(0),
-        wave_sol.mean(0) + wave_sol.std(0),
-        lw=0,
-        fc="tab:blue",
-        alpha=0.5,
+    save_fig(
+        fig,
+        product_path=out_wave,
+        to_display=display_plots,
+        figure_path="qa",
+        label="residuals_wave",
     )
-    ax_sol_wave.plot(arc._pixels, wave_sol.mean(0), lw=1, color="tab:blue")
+
+    # plot wavelength fitting minus linear term
+    fig_wave = plt.figure(figsize=(16, 10), layout="constrained")
+    gs = gridspec.GridSpec(10, poly_disp + 1, figure=fig_wave)
+
+    ax_sol_wave = fig_wave.add_subplot(gs[:5, :])
+    wave_lin = wave_coeffs[:, 0][:, None] + wave_coeffs[:, 1][:, None] * arc._pixels[None, :]
+    wave_lin_ref = wave_coeffs[:, 0][:, None] + wave_coeffs[:, 1][:, None] * cent_wave
     for i in fibers:
         good_lines = ~masked[i]
         if good_lines.sum() <= poly_disp + 1:
             continue
 
+        ax_sol_wave.plot(arc._pixels, (wave_lin - wave_sol)[i], color="tab:blue", alpha=0.3, lw=1)
         ax_sol_wave.plot(
             cent_wave[i, good_lines],
-            ref_lines[good_lines],
+            wave_lin_ref[i, good_lines] - ref_lines[good_lines],
             ",",
-            color="tab:blue",
+            color="k",
         )
-    ax_sol_wave.set_xlabel("dispersion axis (pix)")
-    ax_sol_wave.set_ylabel("wavelength (AA)")
+    ax_sol_wave.plot(arc._pixels, wave_lin.mean(0) - wave_sol.mean(0), lw=1, color="tab:blue")
+    ax_sol_wave.set_xlabel("X (pixel)")
+    ax_sol_wave.set_ylabel("wavelength (Angstrom)")
     ax_sol_wave.set_title(
         f"wavelength solutions with a {poly_disp}-deg polynomial",
         loc="left",
         color="tab:blue",
     )
 
-    ax_sol_fwhm.fill_between(
-        arc._pixels,
-        fwhm_sol.mean(0) - fwhm_sol.std(0),
-        fwhm_sol.mean(0) + fwhm_sol.std(0),
-        lw=0,
-        fc="tab:red",
-        alpha=0.5,
-    )
-    ax_sol_fwhm.plot(arc._pixels, fwhm_sol.mean(0), lw=1, color="tab:red")
+    ax_coe_wave, ax_coe_lsf = [], []
+    for i in range(poly_disp + 1):
+        ax_coe_wave.append(fig_wave.add_subplot(gs[5:, i], sharey=None if i == 0 else ax_coe_wave[-1]))
+        ax_coe_wave[-1].tick_params(labelleft=i == 0)
+    ax_coe_wave = plot_wavesol_coeffs(numpy.arange(arc._fibers)[good_fibers], coeffs=wave_coeffs[good_fibers], axs=ax_coe_wave, labels=True)
+    save_fig(fig_wave, product_path=out_wave, to_display=display_plots, figure_path='qa', label="fit_wave")
+
+    # plot LSF fitting minus linear term
+    fig_lsf = plt.figure(figsize=(16, 10), layout="constrained")
+    gs = gridspec.GridSpec(10, poly_fwhm + 1, figure=fig_lsf)
+
+    ax_sol_lsf = fig_lsf.add_subplot(gs[:5, :])
+    lsf_lin = lsf_coeffs[:, 0][:, None] + lsf_coeffs[:, 1][:, None] * arc._pixels[None, :]
+    lsf_lin_ref = lsf_coeffs[:, 0][:, None] + lsf_coeffs[:, 1][:, None] * cent_wave
     for i in fibers:
         good_lines = ~masked[i]
         if good_lines.sum() <= poly_fwhm + 1:
             continue
 
-        dw = numpy.interp(cent_wave[i, good_lines], arc._pixels, dwave[i])
-        fwhm_wave = dw * fwhm[i, good_lines]
+        ax_sol_lsf.plot(arc._pixels, (lsf_lin - lsf_sol)[i], color="tab:red", alpha=0.3, lw=1)
 
-        ax_sol_fwhm.plot(
+        dw = numpy.interp(cent_wave[i, good_lines], arc._pixels, dwave[i])
+        lsf_wave = dw * fwhm[i, good_lines]
+
+        ax_sol_lsf.plot(
             cent_wave[i, good_lines],
-            fwhm_wave,
+            lsf_lin_ref[i, good_lines] - lsf_wave,
             ",",
-            color="tab:red",
+            color="k",
         )
-    ax_sol_fwhm.set_ylabel("FWHM LSF (AA)")
-    ax_sol_fwhm.set_title(
+    ax_sol_lsf.plot(arc._pixels, lsf_lin.mean(0) - lsf_sol.mean(0), lw=1, color="tab:red")
+    ax_sol_lsf.set_ylabel("FWHM LSF (Angstrom)")
+    ax_sol_lsf.set_title(
         f"LSF solutions with a {poly_fwhm}-deg polynomial",
-        loc="right",
+        loc="left",
         color="tab:red",
     )
 
-    save_fig(fig, product_path=out_wave, to_display=display_plots, figure_path='qa', label="fit_wave")
-
+    for i in range(poly_fwhm + 1):
+        ax_coe_lsf.append(fig_lsf.add_subplot(gs[5:, i], sharey=None if i == 0 else ax_coe_lsf[-1]))
+        ax_coe_lsf[-1].tick_params(labelleft=i == 0)
+    ax_coe_lsf = plot_wavesol_coeffs(numpy.arange(arc._fibers)[good_fibers], coeffs=lsf_coeffs[good_fibers], axs=ax_coe_lsf, color="tab:red", labels=True)
+    save_fig(fig_lsf, product_path=out_wave, to_display=display_plots, figure_path='qa', label="fit_lsf")
 
     # update header
     log.info(
@@ -741,17 +705,17 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
     )
     arc.setHdrValue(
         "HIERARCH PIPE DISP RMS MEDIAN",
-        "%.4f" % (numpy.median(fwhm_rms[good_fibers])),
+        "%.4f" % (numpy.median(lsf_rms[good_fibers])),
         "Median RMS of disp sol",
     )
     arc.setHdrValue(
         "HIERARCH PIPE DISP RMS MIN",
-        "%.4f" % (numpy.min(fwhm_rms[good_fibers])),
+        "%.4f" % (numpy.min(lsf_rms[good_fibers])),
         "Min RMS of disp sol",
     )
     arc.setHdrValue(
         "HIERARCH PIPE DISP RMS MAX",
-        "%.4f" % (numpy.max(fwhm_rms[good_fibers])),
+        "%.4f" % (numpy.max(lsf_rms[good_fibers])),
         "Max RMS of disp sol",
     )
 
@@ -761,7 +725,7 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
     wave_trace._header["IMAGETYP"] = "wave"
     mask = numpy.zeros(arc._data.shape, dtype=bool)
     mask[(~good_fibers)|(lsf_coeffs==0).all(axis=1)] = True
-    fwhm_trace = TraceMask(data=fwhm_sol, mask=mask, coeffs=lsf_coeffs, header=arc._header.copy())
+    fwhm_trace = TraceMask(data=lsf_sol, mask=mask, coeffs=lsf_coeffs, header=arc._header.copy())
     fwhm_trace._header["IMAGETYP"] = "lsf"
 
     wave_trace.interpolate_coeffs()
