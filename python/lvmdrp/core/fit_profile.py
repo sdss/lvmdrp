@@ -233,12 +233,15 @@ class fit_profile1D(object):
         else:
             self._par_err = None
 
-    def plot(self, x, y=None, ax=None):
+    def plot(self, x, y=None, mask=None, ax=None):
         if ax is None:
             fig, ax = plt.subplots(figsize=(15,5))
+
+        mask_ = numpy.ones_like(mask)
+        mask_[mask] = numpy.nan
         if y is not None:
-            ax.step(x, y, color="0.2", lw=1, where="mid")
-        ax.step(x, self(x), color="tab:blue", lw=1, where="mid")
+            ax.step(x, y*mask_, color="0.2", lw=1, where="mid")
+        ax.step(x, self(x)*mask_, color="tab:blue", lw=1, where="mid")
         return ax
 
 

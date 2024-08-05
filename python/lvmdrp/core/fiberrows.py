@@ -883,6 +883,12 @@ class FiberRows(Header, PositionTable):
             cent_guess = mhat * last_cent + bhat
             flux[i], cent_wave[i], fwhm[i], bg[i] = spec.fitSepGauss(cent_guess, aperture, fwhm_guess, bg_guess, flux_range, cent_range, fwhm_range, bg_range, axs=axs_fiber)
             masked[i] = numpy.isnan(flux[i])|numpy.isnan(cent_wave[i])|numpy.isnan(fwhm[i])
+            if masked[i].any():
+                log.warning(f"some lines were not fitted properly in fiber {i}: ")
+                log.warning(f"   {flux[i] = }")
+                log.warning(f"   {cent_wave[i] = }")
+                log.warning(f"   {fwhm[i] = }")
+                log.warning(f"   {bg[i] = }")
 
             if numpy.isnan(cent_wave[i]).sum() == 0:
                 last_spec = copy(spec)

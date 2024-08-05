@@ -338,7 +338,7 @@ def plot_wavesol_residuals(lines_pixels, lines_waves, model_waves, ax=None, labe
     return ax
 
 
-def plot_wavesol_coeffs(ypix, coeffs, axs, color="tab:blue", title=None, labels=False):
+def plot_wavesol_coeffs(ypix, coeffs, axs, color="tab:blue", labels=False):
     # ypix is the Y coordinate of each fiber in the middle of the chip
     # coeffs is a 2D array of coefficients for each fiber [nfiber, ncoeff]
 
@@ -347,11 +347,8 @@ def plot_wavesol_coeffs(ypix, coeffs, axs, color="tab:blue", title=None, labels=
         if labels:
             axs[icoeff].set_title(f"coeff # {icoeff+1}", loc="left")
 
-    fig = axs[0].get_figure()
     if labels:
-        fig.supylabel("Fiber ID")
-    if title is not None:
-        fig.suptitle(title)
+        axs[0].set_ylabel("Fiber ID")
 
     return axs
 

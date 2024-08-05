@@ -9,6 +9,7 @@ from scipy import signal, interpolate, ndimage, sparse
 from scipy.ndimage import zoom, median_filter
 from typing import List, Tuple
 
+from lvmdrp import log
 from lvmdrp.utils import gaussian
 from lvmdrp.core import fit_profile
 from lvmdrp.core.header import Header
@@ -3179,7 +3180,7 @@ class Spectrum1D(Header):
         cent_range=[-2.0, 2.0],
         fwhm_range=[0, 7],
         bg_range=[0, numpy.inf],
-        pix_frac=0.95,
+        badpix_threshold=4,
         ftol=1e-8,
         xtol=1e-8,
         axs=None,
@@ -3199,16 +3200,17 @@ class Spectrum1D(Header):
         fact = numpy.sqrt(2 * numpy.pi)
         hw = aperture // 2
         for i, centre in enumerate(cent_guess):
-            select = (self._wave >= centre - hw) & (self._wave <= centre + hw) & (~(mask))
-            if select.sum() == 0:
+            select = (self._wave >= centre - hw) & (self._wave <= centre + hw)
+            if mask[select].sum() == select.size:
                 continue
             # refine centroid within selected window
             idx, = numpy.where(select)
             centre = self._wave[idx[numpy.argmax(self._data[select])]]
             # update fitting window
-            select = (self._wave >= centre - hw) & (self._wave <= centre + hw) & (~(mask))
+            select = (self._wave >= centre - hw) & (self._wave <= centre + hw)
 
-            if select.sum() / aperture < pix_frac:
+            if mask[select].sum() >= badpix_threshold:
+                log.warning(f"skipping line at pixel {centre} with {mask[select].sum()} >= {badpix_threshold = } bad pixels")
                 continue
 
             flux_guess = numpy.interp(centre, self._wave[select], self._data[select]) * fact * fwhm_guess / 2.354
@@ -3241,7 +3243,7 @@ class Spectrum1D(Header):
             fwhm[i] *= 2.354
 
             if axs is not None:
-                axs[i] = gauss.plot(self._wave[select], self._data[select], ax=axs[i])
+                axs[i] = gauss.plot(self._wave[select], self._data[select], mask=self._mask[select], ax=axs[i])
                 axs[i].axvline(cent_guess[i], ls="--", lw=1, color="0.7", label="orig. guess")
                 axs[i].axvline(centre, ls="--", lw=1, color="tab:red", label="ref. guess")
                 axs[i].set_title(f"{axs[i].get_title()} @ {cent[i]:.1f} (pixel)")
