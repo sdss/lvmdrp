@@ -317,19 +317,43 @@ def plot_detrend(ori_image, det_image, axs, mbias=None, mdark=None, labels=False
     return axs
 
 
-def plot_wavesol_residuals(lines_pixels, lines_waves, model_waves, ax=None, labels=False):
-    # lines_pixels [X, Y] of emission lines in a given lamp
-    # wavelength model poly_model(lines_centroids)
-    # lines_waves is an X array of the true wavelengths
+def plot_wavesol_residuals(fiber, ref_waves, lines_pixels, poly_cls, coeffs, ax=None, labels=False):
+    """Plot residuals in wavelength polynomial fitting
 
-    residuals = model_waves - lines_waves
+    Parameters
+    ----------
+    fiber : int
+        Reference fiber used in the fitting
+    ref_waves : np.ndarray[float]
+        Measured line centroids for all fibers
+    lines_pixels : np.ndarray[float]
+        Reference lines positions
+    poly_cls : polynomial class in np.polynomial
+        A polynomial class to evaluate wavelength solutions
+    coeffs : np.ndarray[float]
+        Coefficients to evaluate
+    ax : plt.Axes, optional
+        Axes where to plot, by default None
+    labels : bool, optional
+        Whether to draw labels or not, by default False
 
-    ax.axhline(ls="--", lw=1, color="0.8")
-    ax.scatter(lines_pixels, residuals, s=10)
-    for i in range(residuals.size):
-        x, y = lines_pixels[i], residuals[i]
-        ax.annotate(f"{lines_waves[i]:.2f}", (x, y), xytext=(9, -9),
-                textcoords="offset pixels")
+    Returns
+    -------
+    ax : plt.Axes
+        Axes with plot in it
+    """
+
+    colors = plt.cm.coolwarm(np.linspace(0, 1, lines_pixels.shape[0]))
+    residuals = np.zeros((lines_pixels.shape[0], ref_waves.size))
+    for ifiber in range(lines_pixels.shape[0]):
+        residuals[ifiber] = poly_cls(coeffs[ifiber])(lines_pixels[ifiber]) - ref_waves
+        if ifiber == fiber or (coeffs[ifiber] == 0).all():
+            continue
+        ax.plot(lines_pixels[ifiber], residuals[ifiber], ".", color=colors[ifiber], alpha=0.2)
+    ax.plot(lines_pixels[fiber], residuals[fiber], "o", mec="k", mfc="none", ms=5, mew=1)
+    for i in range(ref_waves.size):
+        x, y = lines_pixels[fiber, i], residuals[fiber, i]
+        ax.annotate(f"{ref_waves[i]:.2f}", (x, y), xytext=(9, -9), textcoords="offset pixels")
 
     if labels:
         ax.set_xlabel("X (pixel)")
@@ -338,9 +362,98 @@ def plot_wavesol_residuals(lines_pixels, lines_waves, model_waves, ax=None, labe
     return ax
 
 
+def plot_wavesol_spec(fiber, ref_pixels, aperture, mhat, bhat, arc, ax=None, log_scale=True, labels=False):
+    """Display arc spectrum of given fiber along with the measured reference lines
+
+    Parameters
+    ----------
+    fiber : int
+        Fiber for which the arc spectrum will be displayed
+    ref_pixels : np.ndarray[float]
+        Pixel positions of reference arc lines
+    aperture : float
+        Size of the window around which the arc lines were fitted
+    {mhat, bhat} : float
+        Parameters of the linear (mhat*x + bhat) correction applied to the reference arc lines positions
+    arc : lvmdrp.core.rss.RSS
+        RSS of the arc frame
+    ax : plt.Axes, optional
+        Axes where to put the plot, by default None
+    log_scale : bool, optional
+        Whether to display Y axis in log-scale or not, by default True
+    labels : bool, optional
+        Whether to draw labels for the axes
+
+    Returns
+    -------
+    ax : plt.Axes
+        Axes containing the plot
+    """
+
+    if ax is None:
+        _, ax = plt.subplots(figsize=(15,5), layout="constrained")
+
+    unit = arc._header["BUNIT"]
+    good_pix = ~arc._mask
+    for pix in ref_pixels:
+        ax.axvspan(
+            pix - (aperture - 1) // 2,
+            pix + (aperture - 1) // 2,
+            np.nanmin((arc._data * good_pix)[fiber]),
+            np.nanmax((arc._data * good_pix)[fiber]),
+            fc="0.7",
+            alpha=0.5,
+        )
+    ax.vlines(
+        (ref_pixels - bhat) / mhat,
+        np.nanmin((arc._data * good_pix)[fiber]),
+        np.nanmax((arc._data * good_pix)[fiber]),
+        color="tab:red",
+        lw=0.5,
+        label="orig. ref. lines",
+    )
+    ax.vlines(
+        ref_pixels,
+        np.nanmin((arc._data * good_pix)[fiber]),
+        np.nanmax((arc._data * good_pix)[fiber]),
+        color="tab:blue",
+        lw=0.5,
+        label=f"corr. lines ({mhat = :.2f}, {bhat = :.2f})",
+    )
+    ax.step(arc._pixels, (arc._data * good_pix)[fiber], color="0.2", lw=1)
+    if labels:
+        ax.set_title(f"reference arc spectrum {fiber}", loc="left")
+        ax.set_ylabel(f"count ({unit})")
+    if log_scale:
+        ax.set_yscale("log")
+    ax.legend(loc=1)
+
+    return ax
+
+
 def plot_wavesol_coeffs(ypix, coeffs, axs, color="tab:blue", labels=False):
-    # ypix is the Y coordinate of each fiber in the middle of the chip
-    # coeffs is a 2D array of coefficients for each fiber [nfiber, ncoeff]
+    """Display plot of polynomial fitting coefficients against fiber positions/indices
+
+    Parameters
+    ----------
+    ypix : np.ndarray[float|int]
+        Fiber positions or indices
+    coeffs : np.ndarray[float]
+        Coefficients of the fitted polynomials for each fiber
+    axs : np.ndarray[plt.Axes]
+        Array of axes to plot each of the coefficients
+    color : str, optional
+        color of the points, by default 'tab:blue'
+    labels : bool, optional
+        Whether to draw labels for the axes or not, by default False
+
+    Returns
+    -------
+    axs : np.ndarray[plt.Axes]
+        Axes with the plots in them
+    """
+    if len(axs) != coeffs.shape[1]:
+        raise ValueError(f"wrong number of axes {axs.size}, it does not match number of coefficients {coeffs.shape[1]}")
 
     for icoeff in range(coeffs.shape[1]):
         axs[icoeff].scatter(coeffs[:, icoeff], ypix, s=7, lw=0, color=color)
@@ -353,10 +466,142 @@ def plot_wavesol_coeffs(ypix, coeffs, axs, color="tab:blue", labels=False):
     return axs
 
 
+def plot_wavesol_wave(xpix, ref_waves, lines_pixels, wave_poly, wave_coeffs, ax=None, labels=False):
+    """Display polynomial fitting without linear terms for the wavelength solutions
+
+    Parameters
+    ----------
+    xpix : np.ndarray[float]
+        X axis of the frame
+    ref_waves : np.ndarray[float]
+        Wavelengths of the reference arc lines
+    lines_pixels : np.ndarray[float]
+        Pixel positions of the measured arc lines
+    wave_poly : np.polynomial class
+        Polynomial class used to fit wavelengths
+    wave_coeffs : np.ndarray[float]
+        Coefficients of the polynomials for each fiber
+    ax : plt.Axes, optional
+        Axes where to draw the plot, by default None
+    labels : bool, optional
+        Whether to draw axes labels or not, by default False
+
+    Returns
+    -------
+    ax : plt.Axes
+        Axes containing the plot
+    """
+
+    if ax is None:
+        _, ax = plt.subplots(figsize=(15,5), layout="constrained")
+
+    wave_sol = np.zeros((wave_coeffs.shape[0], xpix.size))
+    wave_lin = np.zeros((wave_coeffs.shape[0], xpix.size))
+    for i in np.arange(lines_pixels.shape[0]):
+        if (wave_coeffs[i] == 0).all():
+            continue
+
+        wave_sol[i] = wave_poly(wave_coeffs[i])(xpix)
+        wave_lin[i] = wave_poly(wave_coeffs[i]).truncate(2)(xpix)
+        wave_lin_ref = wave_poly(wave_coeffs[i]).truncate(2)(lines_pixels)
+        ax.plot(xpix, (wave_lin - wave_sol)[i], color="tab:blue", alpha=0.3, lw=1)
+
+        ax.plot(
+            lines_pixels[i],
+            wave_lin_ref[i] - ref_waves,
+            ".",
+            ms=4,
+            color="k",
+            zorder=999
+        )
+    ax.plot(xpix, wave_lin.mean(0) - wave_sol.mean(0), lw=1, color="tab:blue")
+    if labels:
+        ax.set_xlabel("X (pixel)")
+        ax.set_ylabel("Wavelength (Angstrom)")
+        ax.set_title(
+            f"wavelength solutions with a {wave_coeffs.shape[1]-1}-deg polynomial",
+            loc="left",
+            color="tab:blue",
+        )
+
+    return ax
+
+
+def plot_wavesol_lsf(xpix, lsf, lines_pixels, wave_poly, wave_coeffs, lsf_poly, lsf_coeffs, ax=None, labels=False):
+    """Display polynomial fitting without linear terms for the LSF solutions
+
+    Parameters
+    ----------
+    xpix : np.ndarray[float]
+        X axis of the frame
+    lsf : np.ndarray[float]
+        FWHM of the measured arc lines for each fiber
+    lines_pixels : np.ndarray[float]
+        Pixel positions of the measured arc lines
+    wave_poly : np.polynomial class
+        Polynomial class used to fit wavelengths
+    wave_coeffs : np.ndarray[float]
+        Coefficients of the wavelength polynomials for each fiber
+    lsf_poly : np.polynomial class
+        Polynomial class used to fit LSF
+    lsf_coeffs : np.ndarray[float]
+        Coefficients of the LSF polynomials for each fiber
+    ax : plt.Axes, optional
+        Axes where to draw the plot, by default None
+    labels : bool, optional
+        Whether to draw axes labels or not, by default False
+
+    Returns
+    -------
+    ax : plt.Axes
+        Axes containing the plot
+    """
+
+    if ax is None:
+        _, ax = plt.subplots(figsize=(15,5), layout="constrained")
+
+    dwave = np.zeros((wave_coeffs.shape[0], xpix.size))
+    wave_sol = np.zeros((wave_coeffs.shape[0], xpix.size))
+    lsf_sol = np.zeros((lsf_coeffs.shape[0], xpix.size))
+    lsf_lin = np.zeros((lsf_coeffs.shape[0], xpix.size))
+    for i in np.arange(lines_pixels.shape[0]):
+        if (wave_coeffs[i] == 0).all():
+            continue
+
+        wave_sol[i] = wave_poly(wave_coeffs[i])(xpix)
+        lsf_sol[i] = lsf_poly(lsf_coeffs[i])(xpix)
+        lsf_lin[i] = lsf_poly(lsf_coeffs[i]).truncate(2)(xpix)
+        lsf_lin_ref = lsf_poly(lsf_coeffs[i]).truncate(2)(lines_pixels)
+        ax.plot(xpix, (lsf_lin - lsf_sol)[i], color="tab:red", alpha=0.3, lw=1)
+
+        dwave[i] = np.abs(np.gradient(wave_sol[i]))
+        dw = np.interp(lines_pixels[i], xpix, dwave[i])
+
+        ax.plot(
+            lines_pixels[i],
+            lsf_lin_ref[i] - dw * lsf[i],
+            ".",
+            ms=4,
+            color="k",
+            zorder=999
+        )
+    ax.plot(xpix, lsf_lin.mean(0) - lsf_sol.mean(0), lw=1, color="tab:red")
+    if labels:
+        ax.set_xlabel("X (pixel)")
+        ax.set_ylabel("Wavelength (Angstrom)")
+        ax.set_title(
+            f"wavelength solutions with a {lsf_coeffs.shape[1]-1}-deg polynomial",
+            loc="left",
+            color="tab:red",
+        )
+
+    return ax
+
+
 def plot_fiber_thermal_shift(columns, column_shifts, ax=None, labels=False):
     """"Plots the thermal shifts measured in the fiber centroids"""
     if ax is None:
-        fig, ax = create_subplots(figsize=(15,5))
+        _, ax = create_subplots(figsize=(15,5), layout="constrained")
 
     mean_shifts = np.nanmean(column_shifts)
     std_shifts = np.nanstd(column_shifts)
