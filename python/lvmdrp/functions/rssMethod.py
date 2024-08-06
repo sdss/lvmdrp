@@ -754,10 +754,11 @@ def shift_wave_skylines(in_frame: str, out_frame: str, dwave: float = 8.0, skyli
     ax.hlines(+0.05, 1, 1944, linestyle=':', color='black', alpha=0.3)
     ax.hlines(-0.05, 1, 1944, linestyle=':', color='black', alpha=0.3)
 
+    colors = plt.cm.rainbow(numpy.linspace(0, 1, len(skylines)))
     for i in range(len(skylines)):
-        ax.plot(fiberid[sel1], ndimage.median_filter(offsets[i,sel1], 1), alpha=0.5)
-        ax.plot(fiberid[sel2], ndimage.median_filter(offsets[i,sel2], 1), alpha=0.5)
-        ax.plot(fiberid[sel3], ndimage.median_filter(offsets[i,sel3], 1), alpha=0.5)
+        ax.plot(fiberid[sel1], ndimage.median_filter(offsets[i,sel1], 1), color=colors[i], alpha=0.5)
+        ax.plot(fiberid[sel2], ndimage.median_filter(offsets[i,sel2], 1), color=colors[i], alpha=0.5)
+        ax.plot(fiberid[sel3], ndimage.median_filter(offsets[i,sel3], 1), color=colors[i], alpha=0.5)
         # ax.hlines(numpy.nanmean(specoffset[0, i]), 1, 648, linestyle='--', color='red')
         # ax.hlines(numpy.nanmean(specoffset[1, i]), 1+648, 2*648, linestyle='--', color='green')
         # ax.hlines(numpy.nanmean(specoffset[2, i]), 1+2*648, 1944, linestyle='--', color='blue')

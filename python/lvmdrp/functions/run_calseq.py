@@ -1786,6 +1786,8 @@ def create_wavelengths(mjd, use_fiducial_cals=True, expnums=None, kind="longterm
             darc_paths = [path.full("lvm_anc", drpver=drpver, kind="d", imagetype="arc", **arc) for arc in arcs.to_dict("records")]
             image_tasks.create_master_frame(in_images=darc_paths, out_image=carc_path, batch_size=48)
 
+        # TODO: maybe subtract stray light?
+
         # extract arc
         if skip_done and os.path.isfile(xarc_path):
             log.info(f"skipping extracted arc {xarc_path}, file already exists")

@@ -517,7 +517,7 @@ def plot_wavesol_wave(xpix, ref_waves, lines_pixels, wave_poly, wave_coeffs, ax=
     ax.plot(xpix, wave_lin.mean(0) - wave_sol.mean(0), lw=1, color="tab:blue")
     if labels:
         ax.set_xlabel("X (pixel)")
-        ax.set_ylabel("Wavelength (Angstrom)")
+        ax.set_ylabel("Wavelength model - linear terms (Angstrom)")
         ax.set_title(
             f"wavelength solutions with a {wave_coeffs.shape[1]-1}-deg polynomial",
             loc="left",
@@ -588,9 +588,9 @@ def plot_wavesol_lsf(xpix, lsf, lines_pixels, wave_poly, wave_coeffs, lsf_poly, 
     ax.plot(xpix, lsf_lin.mean(0) - lsf_sol.mean(0), lw=1, color="tab:red")
     if labels:
         ax.set_xlabel("X (pixel)")
-        ax.set_ylabel("Wavelength (Angstrom)")
+        ax.set_ylabel("LSF model - linear term (Angstrom)")
         ax.set_title(
-            f"wavelength solutions with a {lsf_coeffs.shape[1]-1}-deg polynomial",
+            f"LSF solutions with a {lsf_coeffs.shape[1]-1}-deg polynomial",
             loc="left",
             color="tab:red",
         )
