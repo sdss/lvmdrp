@@ -3190,6 +3190,8 @@ class Spectrum1D(Header):
         error = self._error if self._error is not None else numpy.ones(self._dim, dtype=numpy.float32)
         mask = self._mask if self._mask is not None else numpy.zeros(self._dim, dtype=bool)
         error[mask] = numpy.inf
+        data = self._data.copy()
+        data[mask] = 0.0
 
         flux = numpy.ones(len(cent_guess)) * numpy.nan
         cent = numpy.ones(len(cent_guess)) * numpy.nan
@@ -3205,7 +3207,7 @@ class Spectrum1D(Header):
                 continue
             # refine centroid within selected window
             idx, = numpy.where(select)
-            centre = self._wave[idx[numpy.argmax(self._data[select])]]
+            centre = self._wave[idx[numpy.argmax(data[select])]]
             # update fitting window
             select = (self._wave >= centre - hw) & (self._wave <= centre + hw)
 
@@ -3213,7 +3215,7 @@ class Spectrum1D(Header):
                 log.warning(f"skipping line at pixel {centre} with {mask[select].sum()} >= {badpix_threshold = } bad pixels")
                 continue
 
-            flux_guess = numpy.interp(centre, self._wave[select], self._data[select]) * fact * fwhm_guess / 2.354
+            flux_guess = numpy.interp(centre, self._wave[select], data[select]) * fact * fwhm_guess / 2.354
             if fit_bg:
                 guess = [flux_guess, centre, fwhm_guess / 2.354, bg_guess]
                 bound_lower = [flux_range[0], centre+cent_range[0], fwhm_range[0]/2.354, bg_range[0]]
@@ -3227,7 +3229,7 @@ class Spectrum1D(Header):
 
             gauss.fit(
                 self._wave[select],
-                self._data[select],
+                data[select],
                 sigma=error[select],
                 p0=guess,
                 bounds=(bound_lower, bound_upper),
