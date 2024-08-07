@@ -342,6 +342,8 @@ def plot_wavesol_residuals(fiber, ref_waves, lines_pixels, poly_cls, coeffs, ax=
     ax : plt.Axes
         Axes with plot in it
     """
+    if ax is None:
+        _, ax = plt.subplots(figsize=(15,5), layout="constrained")
 
     colors = plt.cm.coolwarm(np.linspace(0, 1, lines_pixels.shape[0]))
     residuals = np.zeros((lines_pixels.shape[0], ref_waves.size))
@@ -351,9 +353,13 @@ def plot_wavesol_residuals(fiber, ref_waves, lines_pixels, poly_cls, coeffs, ax=
             continue
         ax.plot(lines_pixels[ifiber], residuals[ifiber], ".", color=colors[ifiber], alpha=0.2)
     ax.plot(lines_pixels[fiber], residuals[fiber], "o", mec="k", mfc="none", ms=5, mew=1)
+    ax.axhline(ls="--", lw=1, color="0.7")
+    ax.axhline(-0.05, ls=":", lw=1, color="0.5")
+    ax.axhline(+0.05, ls=":", lw=1, color="0.5")
     for i in range(ref_waves.size):
         x, y = lines_pixels[fiber, i], residuals[fiber, i]
         ax.annotate(f"{ref_waves[i]:.2f}", (x, y), xytext=(9, -9), textcoords="offset pixels")
+    ax.set_ylim(-0.1, +0.1)
 
     if labels:
         ax.set_xlabel("X (pixel)")

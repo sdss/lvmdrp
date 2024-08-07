@@ -190,7 +190,7 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
                                   cent_range: List[float] = [-3.0, 3.0],
                                   fwhm_range: List[float] = [2.0, 4.5],
                                   bg_range: List[float] = [-1000.0, numpy.inf],
-                                  poly_disp: int = 5, poly_fwhm: int = 4,
+                                  poly_disp: int = 6, poly_fwhm: int = 4,
                                   poly_cros: int = 0, poly_kinds: list = ['poly', 'poly', 'poly'],
                                   negative: bool = False,
                                   plot_fibers: List[int] = [],
@@ -744,24 +744,21 @@ def shift_wave_skylines(in_frame: str, out_frame: str, dwave: float = 8.0, skyli
 
     # Make QA plots showing offsets for each sky line in each spectrograph
     fig, ax = plt.subplots()
-    ax.plot(fiberid[sel1], fiber_offset_mod[sel1], color='red', label='Spec1')
-    ax.plot(fiberid[sel2], fiber_offset_mod[sel2], color='green', label='Spec2')
-    ax.plot(fiberid[sel3], fiber_offset_mod[sel3], color='blue', label='Spec3')
-    ax.hlines(meanoffset[0], 1, 648, linestyle='-', color='red')
-    ax.hlines(meanoffset[1], 1+648, 2*648, linestyle='-', color='green')
-    ax.hlines(meanoffset[2], 1+2*648, 1944, linestyle='-', color='blue')
-    ax.hlines(0, 1, 1944, linestyle='--', color='black', alpha=0.3)
     ax.hlines(+0.05, 1, 1944, linestyle=':', color='black', alpha=0.3)
     ax.hlines(-0.05, 1, 1944, linestyle=':', color='black', alpha=0.3)
 
-    colors = plt.cm.rainbow(numpy.linspace(0, 1, len(skylines)))
+    colors = plt.cm.coolwarm(numpy.linspace(0, 1, len(skylines)))
     for i in range(len(skylines)):
-        ax.plot(fiberid[sel1], ndimage.median_filter(offsets[i,sel1], 1), color=colors[i], alpha=0.5)
-        ax.plot(fiberid[sel2], ndimage.median_filter(offsets[i,sel2], 1), color=colors[i], alpha=0.5)
-        ax.plot(fiberid[sel3], ndimage.median_filter(offsets[i,sel3], 1), color=colors[i], alpha=0.5)
-        # ax.hlines(numpy.nanmean(specoffset[0, i]), 1, 648, linestyle='--', color='red')
-        # ax.hlines(numpy.nanmean(specoffset[1, i]), 1+648, 2*648, linestyle='--', color='green')
-        # ax.hlines(numpy.nanmean(specoffset[2, i]), 1+2*648, 1944, linestyle='--', color='blue')
+        ax.plot(fiberid[sel1], ndimage.median_filter(offsets[i,sel1], 5), color=colors[i], lw=1, alpha=0.7)
+        ax.plot(fiberid[sel2], ndimage.median_filter(offsets[i,sel2], 5), color=colors[i], lw=1, alpha=0.7)
+        ax.plot(fiberid[sel3], ndimage.median_filter(offsets[i,sel3], 5), color=colors[i], lw=1, alpha=0.7)
+    ax.hlines(meanoffset[0], 1, 648, linestyle='-', color='tab:red', label='Spec1')
+    ax.hlines(meanoffset[1], 1+648, 2*648, linestyle='-', color='tab:green', label='Spec2')
+    ax.hlines(meanoffset[2], 1+2*648, 1944, linestyle='-', color='tab:blue', label='Spec3')
+    ax.plot(fiberid[sel1], fiber_offset_mod[sel1], color='0.2')
+    ax.plot(fiberid[sel2], fiber_offset_mod[sel2], color='0.2')
+    ax.plot(fiberid[sel3], fiber_offset_mod[sel3], color='0.2')
+    ax.hlines(0, 1, 1944, linestyle='--', color='black', alpha=0.3)
     ax.legend()
     ax.set_ylim(-0.4,0.4)
     ax.set_title(f'{lvmframe._header["EXPOSURE"]} - {channel} - {numpy.round(skylines, 2)}')
