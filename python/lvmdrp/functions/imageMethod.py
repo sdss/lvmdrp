@@ -42,7 +42,7 @@ from lvmdrp.core.image import (
 )
 from lvmdrp.core.plot import plt, create_subplots, plot_detrend, plot_strips, plot_image_shift, plot_fiber_thermal_shift, save_fig
 from lvmdrp.core.rss import RSS
-from lvmdrp.core.spectrum1d import Spectrum1D, _spec_from_lines, _cross_match
+from lvmdrp.core.spectrum1d import Spectrum1D, _spec_from_lines, _normalize_peaks, _cross_match
 from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.utils.hdrfix import apply_hdrfix
 from lvmdrp.utils.convert import dateobs_to_sjd, correct_sjd
@@ -341,7 +341,7 @@ def _get_wave_selection(waves, lines_list, window):
 
 def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=None, fiber_model=None,
                               columns=[500, 1000, 1500, 2000, 2500, 3000],
-                              column_width=25, shift_range=[-5,5]):
+                              column_width=25, shift_range=[-5,5], axs=None):
     """Returns the updated fiber trace centroids after fixing the thermal shifts
 
     Parameters
@@ -400,6 +400,26 @@ def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=Non
     trace_cent_fixed = copy(trace_cent)
     trace_cent_fixed._coeffs[:, 0] += median_shift
     trace_cent_fixed.eval_coeffs()
+
+    select_blocks = [9]
+    for j, c in enumerate(columns):
+        blocks_pos = numpy.asarray(numpy.split(trace_cent._data[:, c], 18))[select_blocks]
+        blocks_bounds = [(int(bpos.min())-5, int(bpos.max())+5) for bpos in blocks_pos]
+
+        for i, (bmin, bmax) in enumerate(blocks_bounds):
+            x = numpy.arange(bmax-bmin) + i*(bmax-bmin) + 10
+            # y_models = fiber_model._data[bmin:bmax,c-column_width:c+column_width]
+            y_model = numpy.nanmedian(fiber_model._data[bmin:bmax,c-column_width:c+column_width], axis=1)
+            y_data = numpy.nanmedian(image._data[bmin:bmax, c-column_width:c+column_width], axis=1)
+            y_model = _normalize_peaks(y_model)
+            y_data = _normalize_peaks(y_data)
+            # axs[j].step(x, y_models * norm, color="0.7", lw=1, alpha=0.3)
+            axs[j].step(x, y_data, color="tab:red", lw=1, label="data" if i == 0 else None)
+            axs[j].step(x, y_model, color="0.2", lw=1, label="model" if i == 0 else None)
+            axs[j].step(x+column_shifts[j], numpy.interp(x+column_shifts[j], x, y_model), color="tab:blue", lw=1, label="corrected mod." if i == 0 else None)
+        axs[j].set_title(f"measured shift {column_shifts[j]:.4f} pixel @ column {c}")
+
+    axs[0].legend()
 
     # deltas = TraceMask(data=numpy.zeros_like(trace_cent._data), mask=numpy.ones_like(trace_cent._data, dtype=bool))
     # deltas._data[:, columns] = column_shifts
@@ -3191,6 +3211,7 @@ def extract_spectra(
     else:
         fiber_model = None
 
+    fig, axs = plt.subplots(len(columns), 1, figsize=(15,2*len(columns)), sharex=True, layout="constrained")
     if method == "optimal":
         # check if fwhm trace is given and exists
         if in_fwhm is None or not os.path.isfile(in_fwhm):
@@ -3206,7 +3227,7 @@ def extract_spectra(
                                                           trace_amp=10000,
                                                           columns=columns,
                                                           column_width=column_width,
-                                                          shift_range=[-2,2])
+                                                          shift_range=[-2,2], axs=axs)
 
         # set up parallel run
         if parallel == "auto":
@@ -3260,7 +3281,7 @@ def extract_spectra(
                                                           trace_amp=10000,
                                                           columns=columns,
                                                           column_width=column_width,
-                                                          shift_range=[-2,2])
+                                                          shift_range=[-2,2], axs=axs)
 
         (data, error, mask) = img.extractSpecAperture(trace_mask, aperture)
 
@@ -3274,8 +3295,10 @@ def extract_spectra(
         else:
             log.warning("no aperture correction applied")
 
-    # plot thermal shifts
+    # save columns measured for thermal shifts
     log.info("plotting fiber thermal shifts")
+    save_fig(fig, product_path=out_rss, to_display=display_plots, figure_path="qa", label="columns_thermal_shifts")
+    # plot thermal shifts
     fig, ax = create_subplots(to_display=display_plots, figsize=(10, 5))
     plot_fiber_thermal_shift(columns, shifts, ax=ax)
     save_fig(fig, product_path=out_rss, to_display=display_plots, figure_path="qa", label="fiber_thermal_shifts")

@@ -223,6 +223,14 @@ def _cross_match(
     return max_correlation, best_shift, best_stretch_factor
 
 
+def _normalize_peaks(data):
+    data_ = numpy.asarray(data).copy()
+    peaks, _ = signal.find_peaks(data_)
+    norm = numpy.interp(numpy.arange(data_.shape[0]), peaks, data_[peaks])
+    data_ /= norm
+    return data_
+
+
 def _cross_match_float(
     ref_spec: numpy.ndarray,
     obs_spec: numpy.ndarray,
@@ -265,18 +273,10 @@ def _cross_match_float(
     best_shift = 0
     best_stretch_factor = 1
 
-    ref_spec_ = numpy.copy(ref_spec)
-    obs_spec_ = numpy.copy(obs_spec)
-
     # normalize the peaks to roughly magnitude 1, so that individual very bright
     # fibers do not dominate the signal
-    peaks1, _ = signal.find_peaks(ref_spec_)
-    peaks2, _ = signal.find_peaks(obs_spec_)
-    # primitive "fiber flat"
-    spl1_eval = numpy.interp(numpy.arange(ref_spec_.shape[0]), peaks1, ref_spec_[peaks1])
-    spl2_eval = numpy.interp(numpy.arange(obs_spec_.shape[0]), peaks2, obs_spec_[peaks2])
-    ref_spec_ /= spl1_eval
-    obs_spec_ /= spl2_eval
+    ref_spec_ = _normalize_peaks(ref_spec)
+    obs_spec_ = _normalize_peaks(obs_spec)
     #return ref_spec_, obs_spec_
 
     for factor in stretch_factors:
@@ -317,8 +317,8 @@ def _cross_match_float(
         shift = shifts[idx_max_corr]
 
         # poor man's parabola fit ...
-        d = (numpy.take(cross_corr, shift + 1) - 2 * numpy.take(cross_corr, shift) + numpy.take(cross_corr, shift - 1))
-        position = (shift + 1 - ((numpy.take(cross_corr, shift + 1) - numpy.take(cross_corr, shift)) / d ))
+        d = (cross_corr[idx_max_corr + 1] - 2 * cross_corr[idx_max_corr] + cross_corr[idx_max_corr - 1])
+        position = (shift + 1 - ((cross_corr[idx_max_corr + 1] - cross_corr[idx_max_corr])) / d )
 
         condition = max_corr > max_correlation
 
