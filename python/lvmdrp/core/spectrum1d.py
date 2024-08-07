@@ -9,6 +9,7 @@ from scipy import signal, interpolate, ndimage, sparse
 from scipy.ndimage import zoom, median_filter
 from typing import List, Tuple
 
+from lvmdrp import log
 from lvmdrp.utils import gaussian
 from lvmdrp.core import fit_profile
 from lvmdrp.core.header import Header
@@ -264,23 +265,26 @@ def _cross_match_float(
     best_shift = 0
     best_stretch_factor = 1
 
+    ref_spec_ = numpy.copy(ref_spec)
+    obs_spec_ = numpy.copy(obs_spec)
+
     # normalize the peaks to roughly magnitude 1, so that individual very bright
     # fibers do not dominate the signal
-    peaks1, _ = signal.find_peaks(ref_spec)
-    peaks2, _ = signal.find_peaks(obs_spec)
+    peaks1, _ = signal.find_peaks(ref_spec_)
+    peaks2, _ = signal.find_peaks(obs_spec_)
     # primitive "fiber flat"
-    spl1_eval = numpy.interp(numpy.arange(ref_spec.shape[0]), peaks1, ref_spec[peaks1])
-    spl2_eval = numpy.interp(numpy.arange(obs_spec.shape[0]), peaks2, obs_spec[peaks2])
-    ref_spec /= spl1_eval
-    obs_spec /= spl2_eval
-    #return ref_spec, obs_spec
+    spl1_eval = numpy.interp(numpy.arange(ref_spec_.shape[0]), peaks1, ref_spec_[peaks1])
+    spl2_eval = numpy.interp(numpy.arange(obs_spec_.shape[0]), peaks2, obs_spec_[peaks2])
+    ref_spec_ /= spl1_eval
+    obs_spec_ /= spl2_eval
+    #return ref_spec_, obs_spec_
 
     for factor in stretch_factors:
         # Stretch the first signal
-        stretched_signal1 = zoom(ref_spec, factor, mode="constant", prefilter=True)
+        stretched_signal1 = zoom(ref_spec_, factor, mode="constant", prefilter=True)
 
         # Make the lengths equal
-        len_diff = len(obs_spec) - len(stretched_signal1)
+        len_diff = len(obs_spec_) - len(stretched_signal1)
         if len_diff > 0:
             # Zero pad the stretched signal at the end if it's shorter
             stretched_signal1 = numpy.pad(stretched_signal1, (0, len_diff))
@@ -289,15 +293,15 @@ def _cross_match_float(
             stretched_signal1 = stretched_signal1[:len_diff]
 
         # Compute the cross correlation
-        cross_corr = signal.correlate(obs_spec, stretched_signal1, mode="same")
+        cross_corr = signal.correlate(obs_spec_, stretched_signal1, mode="same")
 
         # Normalize the cross correlation
         cross_corr = cross_corr.astype(numpy.float32)
-        cross_corr /= norm(stretched_signal1) * norm(obs_spec)
+        cross_corr /= norm(stretched_signal1) * norm(obs_spec_)
 
         # Get the correlation shifts
         shifts = signal.correlation_lags(
-            len(obs_spec), len(stretched_signal1), mode="same"
+            len(obs_spec_), len(stretched_signal1), mode="same"
         )
 
         # Constrain the cross_corr and shifts to the shift_range
@@ -3168,79 +3172,90 @@ class Spectrum1D(Header):
 
     def fitSepGauss(
         self,
-        centres,
+        cent_guess,
         aperture,
-        init_back=0.0,
+        fwhm_guess=3,
+        bg_guess=0.0,
+        flux_range=[0.0, numpy.inf],
+        cent_range=[-2.0, 2.0],
+        fwhm_range=[0, 7],
+        bg_range=[0, numpy.inf],
+        badpix_threshold=4,
         ftol=1e-8,
         xtol=1e-8,
         axs=None,
+        fit_bg=True,
         warning=False,
     ):
-        ncomp = len(centres)
+        error = self._error if self._error is not None else numpy.ones(self._dim, dtype=numpy.float32)
+        mask = self._mask if self._mask is not None else numpy.zeros(self._dim, dtype=bool)
+        error[mask] = numpy.inf
+        data = self._data.copy()
+        data[mask] = 0.0
 
-        out = numpy.zeros(3 * ncomp, dtype=numpy.float32)
-        back = [deepcopy(init_back) for _ in centres]
+        flux = numpy.ones(len(cent_guess)) * numpy.nan
+        cent = numpy.ones(len(cent_guess)) * numpy.nan
+        fwhm = numpy.ones(len(cent_guess)) * numpy.nan
+        if fit_bg:
+            bg = numpy.ones(len(cent_guess)) * numpy.nan
 
-        error = (
-            self._error
-            if self._error is not None
-            else numpy.ones(self._dim, dtype=numpy.float32)
-        )
-        mask = (
-            self._mask if self._mask is not None else numpy.zeros(self._dim, dtype=bool)
-        )
+        fact = numpy.sqrt(2 * numpy.pi)
+        hw = aperture // 2
+        for i, centre in enumerate(cent_guess):
+            select = (self._wave >= centre - hw) & (self._wave <= centre + hw)
+            if mask[select].sum() == select.size:
+                continue
+            # refine centroid within selected window
+            idx, = numpy.where(select)
+            centre = self._wave[idx[numpy.argmax(data[select])]]
+            # update fitting window
+            select = (self._wave >= centre - hw) & (self._wave <= centre + hw)
 
-        for i, centre in enumerate(centres):
-            select = self._get_select(centre, aperture, mask)
-            if numpy.sum(select) > 0:
-                max = numpy.max(self._data[select])
-                cent = numpy.median(self._wave[select][self._data[select] == max])
-                select = self._get_select(cent, aperture, mask)
+            if mask[select].sum() >= badpix_threshold:
+                log.warning(f"skipping line at pixel {centre} with {mask[select].sum()} >= {badpix_threshold = } bad pixels")
+                continue
 
-                gauss = self._fit_gaussian(select, back[i], error, ftol, xtol, warning)
-
-                out_fit = gauss.getPar()
-                out[i] = out_fit[0]
-                out[ncomp + i] = out_fit[1]
-                out[2 * ncomp + i] = out_fit[2]
-
-                if axs is not None:
-                    axs[i] = gauss.plot(
-                        self._wave[select], self._data[select], ax=axs[i]
-                    )
-                    axs[i].axvline(centres[i], ls="--", lw=1, color="tab:red")
+            flux_guess = numpy.interp(centre, self._wave[select], data[select]) * fact * fwhm_guess / 2.354
+            if fit_bg:
+                guess = [flux_guess, centre, fwhm_guess / 2.354, bg_guess]
+                bound_lower = [flux_range[0], centre+cent_range[0], fwhm_range[0]/2.354, bg_range[0]]
+                bound_upper = [flux_range[1], centre+cent_range[1], fwhm_range[1]/2.354, bg_range[1]]
+                gauss = fit_profile.Gaussian_const(guess)
             else:
-                out[i : ncomp + i + 1] = 0.0
+                guess = [flux_guess, centre, fwhm_guess / 2.354]
+                gauss = fit_profile.Gaussian(guess)
+                bound_lower = [flux_range[0], centre+cent_range[0], fwhm_range[0]/2.354]
+                bound_upper = [flux_range[1], centre+cent_range[1], fwhm_range[1]/2.354]
 
-        return out
+            gauss.fit(
+                self._wave[select],
+                data[select],
+                sigma=error[select],
+                p0=guess,
+                bounds=(bound_lower, bound_upper),
+                ftol=ftol,
+                xtol=xtol,
+                warning=warning,
+            )
 
-    def _get_select(self, centre, aperture, mask):
-        return numpy.logical_and(
-            numpy.logical_and(
-                self._wave >= centre - aperture / 2.0,
-                self._wave <= centre + aperture / 2.0,
-            ),
-            numpy.logical_not(mask),
-        )
+            if fit_bg:
+                flux[i], cent[i], fwhm[i], bg[i] = gauss.getPar()
+            else:
+                flux[i], cent[i], fwhm[i] = gauss.getPar()
+            fwhm[i] *= 2.354
 
-    def _fit_gaussian(self, select, back, error, ftol, xtol, warning):
-        if back == 0.0:
-            par = [0.0, 0.0, 0.0]
-            gauss = fit_profile.Gaussian(par)
-        else:
-            par = [0.0, 0.0, 0.0, 0.0]
-            gauss = fit_profile.Gaussian_const(par)
+            if axs is not None:
+                axs[i] = gauss.plot(self._wave[select], self._data[select], mask=self._mask[select], ax=axs[i])
+                axs[i].axvline(cent_guess[i], ls="--", lw=1, color="0.7", label="orig. guess")
+                axs[i].axvline(centre, ls="--", lw=1, color="tab:red", label="ref. guess")
+                axs[i].set_title(f"{axs[i].get_title()} @ {cent[i]:.1f} (pixel)")
+                axs[i].text(0.05, 0.9, f"flux = {flux[i]:.2f}", va="bottom", ha="left", transform=axs[i].transAxes, fontsize=11)
+                axs[i].text(0.05, 0.8, f"cent = {cent[i]:.2f}", va="bottom", ha="left", transform=axs[i].transAxes, fontsize=11)
+                axs[i].text(0.05, 0.7, f"fwhm = {fwhm[i]:.2f}", va="bottom", ha="left", transform=axs[i].transAxes, fontsize=11)
+                axs[i].legend(loc="upper right", frameon=False, fontsize=11)
 
-        gauss.fit(
-            self._wave[select],
-            self._data[select],
-            sigma=error[select],
-            ftol=ftol,
-            xtol=xtol,
-            warning=warning,
-        )
+        return flux, cent, fwhm, bg
 
-        return gauss
 
     def obtainGaussFluxPeaks(self, pos, sigma, indices, replace_error=1e10, plot=False):
         """returns Gaussian peaks parameters, flux error and mask

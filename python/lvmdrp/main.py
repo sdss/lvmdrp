@@ -1649,7 +1649,7 @@ def science_reduction(expnum: int, use_fiducial_master: bool = False,
             apply_fiberflat(in_rss=wsci_path, out_frame=frame_path, in_flat=mflat_path)
 
             # correct thermal shift in wavelength direction
-            shift_wave_skylines(in_frame=frame_path, out_frame=frame_path, channel=channel)
+            shift_wave_skylines(in_frame=frame_path, out_frame=frame_path)
 
             # interpolate sky fibers
             interpolate_sky(in_frame=frame_path, out_rss=ssci_path)

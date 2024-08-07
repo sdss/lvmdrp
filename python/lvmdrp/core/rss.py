@@ -16,7 +16,7 @@ from lvmdrp.core.fiberrows import FiberRows
 from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.core.header import Header, combineHdr
 from lvmdrp.core.positionTable import PositionTable
-from lvmdrp.core.spectrum1d import Spectrum1D, wave_little_interpol
+from lvmdrp.core.spectrum1d import Spectrum1D, find_continuum, wave_little_interpol
 from lvmdrp.core import dataproducts as dp
 
 
@@ -2014,6 +2014,49 @@ class RSS(FiberRows):
             new_rss._header["BUNIT"] = unit + "/angstrom"
 
         return new_rss
+
+    def subtract_continuum(self, niter=5, thresh=0.999, median_box_range=(50, 300)):
+        """Fits and subtracts the continuum contribution in each fiber
+
+        Iteratively rejects pixels that are above `thresh` in the array
+
+            median_filter(spec) / spec
+
+        where spec is the spectrum in one fiber and the median_filter is an adaptive
+        version of median filtering whereby the median box increases in size as a
+        function of wavelength.
+
+        Parameters
+        ----------
+        niter : int, optional
+            Number of iterations, by default 5
+        thresh : float, optional
+            Threshold in median_filter(spec) / spec above which pixels get rejected, by default 0.999
+        median_box_range : tuple[int], optional
+            range of box sizes in adaptive median filtering, by default (50, 300)
+
+        Returns
+        -------
+        new_rss : lvmdrp.core.rss.RSS
+            Copy of self without continuum contribution
+        cont_data : numpy.ndarray
+            Continuum fitted for each fiber
+        cont_select : numpy.ndarray
+            Selection of continuum pixels
+        """
+        cont_select = numpy.zeros_like(self._data, dtype=bool)
+        cont_data = numpy.zeros_like(self._data, dtype="float32")
+        for ifiber in range(self._fibers):
+            if self._mask[ifiber].sum() == self._data.shape[1]:
+                continue
+            cont_data[ifiber], cont_select[ifiber] = find_continuum(self._data[ifiber],
+                                                                    niter=niter, thresh=thresh,
+                                                                    median_box_max=median_box_range[1],
+                                                                    median_box_min=median_box_range[0])
+
+        new_rss = copy(self)
+        new_rss._data = new_rss._data - cont_data
+        return new_rss, cont_data, cont_select
 
     def createCubeInterpolation(
         self,

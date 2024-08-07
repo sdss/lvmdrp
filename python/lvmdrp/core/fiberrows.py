@@ -2,12 +2,13 @@ import numpy
 from astropy.io import fits as pyfits
 from scipy import interpolate
 from tqdm import tqdm
+from copy import deepcopy as copy
 
 from lvmdrp import log
 from scipy import optimize
 from lvmdrp.core.header import Header, combineHdr
 from lvmdrp.core.positionTable import PositionTable
-from lvmdrp.core.spectrum1d import Spectrum1D
+from lvmdrp.core.spectrum1d import Spectrum1D, _cross_match
 from lvmdrp.core.plot import plt
 
 
@@ -832,64 +833,69 @@ class FiberRows(Header, PositionTable):
         ref_fiber,
         ref_cent,
         aperture=12,
-        init_back=30.0,
-        flux_min=100,
-        fwhm_max=10,
-        rel_flux_limits=[0.2, 5],
+        fwhm_guess=3,
+        bg_guess=0.0,
+        flux_range=[0.0, numpy.inf],
+        cent_range=[-2.0, 2.0],
+        fwhm_range=[0, 7],
+        bg_range=[0, numpy.inf],
         axs=None,
     ):
         nlines = len(ref_cent)
+        flux = numpy.zeros((self._fibers, nlines), dtype=numpy.float32)
         cent_wave = numpy.zeros((self._fibers, nlines), dtype=numpy.float32)
         fwhm = numpy.zeros((self._fibers, nlines), dtype=numpy.float32)
-        flux = numpy.zeros((self._fibers, nlines), dtype=numpy.float32)
+        bg = numpy.zeros((self._fibers, nlines), dtype=numpy.float32)
         masked = numpy.zeros((self._fibers, nlines), dtype="bool")
 
         spec = self.getSpec(ref_fiber)
-        fit = spec.fitSepGauss(ref_cent, aperture, init_back, axs=axs)
-        masked[ref_fiber, :] = False
-        flux[ref_fiber, :] = fit[:nlines]
-        ref_flux = flux[ref_fiber, :]
-        cent_wave[ref_fiber, :] = fit[nlines : 2 * nlines]
-        fwhm[ref_fiber, :] = fit[2 * nlines : 3 * nlines] * 2.354
+        flux[ref_fiber], cent_wave[ref_fiber], fwhm[ref_fiber], bg[ref_fiber] = spec.fitSepGauss(ref_cent, aperture, fwhm_guess, bg_guess, flux_range, cent_range, fwhm_range, bg_range, axs=axs[ref_fiber][1])
+        masked[ref_fiber] = numpy.isnan(flux[ref_fiber])|numpy.isnan(cent_wave[ref_fiber])|numpy.isnan(fwhm[ref_fiber])
         first = numpy.arange(ref_fiber - 1, -1, -1)
         second = numpy.arange(ref_fiber + 1, self._fibers, 1)
 
+        last_spec = copy(self.getSpec(ref_fiber))
+        last_cent = copy(cent_wave[ref_fiber])
         iterator = tqdm(
             first,
             total=first.size,
-            desc=f"measuring arc lines upwards from {ref_fiber = }",
+            desc=f"measuring arc lines   upwards from {ref_fiber = }",
             ascii=True,
             unit="fiber",
         )
         for i in iterator:
             spec = self.getSpec(i)
+            if spec._mask.all():
+                masked[i] = True
+                continue
 
-            fit = spec.fitSepGauss(cent_wave[i + 1], aperture, init_back, axs=None)
-            flux[i, :] = numpy.fabs(fit[:nlines])
-            cent_wave[i, :] = fit[nlines : 2 * nlines]
-            fwhm[i, :] = fit[2 * nlines : 3 * nlines] * 2.354
-
-            rel_flux_med = numpy.nanmedian(flux[i, :] / ref_flux)
-            if (
-                rel_flux_med < rel_flux_limits[0]
-                or rel_flux_med > rel_flux_limits[1]
-                or numpy.nanmedian(fwhm[i, :]) > fwhm_max
-            ):
-                select = numpy.ones(len(flux[i, :]), dtype="bool")
+            if axs is not None and i in axs:
+                _, axs_fiber = axs[i]
             else:
-                select = numpy.logical_or(
-                    numpy.logical_or(
-                        flux[i, :] < flux_min,
-                        flux[i, :] / ref_flux > rel_flux_limits[1],
-                    ),
-                    fwhm[i, :] > fwhm_max,
-                )
+                axs_fiber = None
 
-            if numpy.nansum(select) > 0:
-                cent_wave[i, select] = cent_wave[i + 1, select]
-                fwhm[i, select] = fwhm[i + 1, select]
-                masked[i, select] = True
+            cc, bhat, mhat = _cross_match(
+                ref_spec=last_spec._data,
+                obs_spec=spec._data,
+                stretch_factors=numpy.linspace(0.9,1.1,100),
+                shift_range=[-5, 5],
+            )
+            cent_guess = mhat * last_cent + bhat
+            flux[i], cent_wave[i], fwhm[i], bg[i] = spec.fitSepGauss(cent_guess, aperture, fwhm_guess, bg_guess, flux_range, cent_range, fwhm_range, bg_range, axs=axs_fiber)
+            masked[i] = numpy.isnan(flux[i])|numpy.isnan(cent_wave[i])|numpy.isnan(fwhm[i])
+            if masked[i].any():
+                log.warning(f"some lines were not fitted properly in fiber {i}: ")
+                log.warning(f"   {flux[i] = }")
+                log.warning(f"   {cent_wave[i] = }")
+                log.warning(f"   {fwhm[i] = }")
+                log.warning(f"   {bg[i] = }")
 
+            if numpy.isnan(cent_wave[i]).sum() == 0:
+                last_spec = copy(spec)
+                last_cent = copy(cent_wave[i])
+
+        last_spec = copy(self.getSpec(ref_fiber))
+        last_cent = copy(cent_wave[ref_fiber])
         iterator = tqdm(
             second,
             total=second.size,
@@ -899,67 +905,30 @@ class FiberRows(Header, PositionTable):
         )
         for i in iterator:
             spec = self.getSpec(i)
+            if spec._mask.all():
+                masked[i] = True
+                continue
 
-            # if i in [562, 563, 564, 565]:
-            #     ncols = 3
-            #     nlines = len(cent_wave[0])
-            #     nrows = int(numpy.ceil(nlines / ncols))
-            #     fig, axs = plt.subplots(nrows=nrows, ncols=ncols, figsize=(6*ncols, 6*nrows))
-            #     axs = axs.flatten()
-            #     fig.suptitle("Gaussian fitting")
-            #     fig.supylabel("counts (e-/pixel)")
-            #     fit = spec.fitSepGauss(cent_wave[i - 1], aperture, init_back, axs=axs)
-            #     fig.savefig(f"lines_fit_{i}.png", bbox_inches="tight")
-            # else:
-            fit = spec.fitSepGauss(cent_wave[i - 1], aperture, init_back, axs=None)
-            flux[i, :] = numpy.fabs(fit[:nlines])
-            cent_wave[i, :] = fit[nlines : 2 * nlines]
-            fwhm[i, :] = fit[2 * nlines : 3 * nlines] * 2.354
-
-            rel_flux_med = numpy.nanmedian(flux[i, :] / ref_flux)
-            if (
-                rel_flux_med < rel_flux_limits[0]
-                or rel_flux_med > rel_flux_limits[1]
-                or numpy.nanmedian(fwhm[i, :]) > fwhm_max
-            ):
-                select = numpy.ones(len(flux[i, :]), dtype="bool")
+            if axs is not None and i in axs:
+                _, axs_fiber = axs[i]
             else:
-                select = numpy.logical_or(
-                    numpy.logical_or(
-                        flux[i, :] < flux_min,
-                        flux[i, :] / ref_flux > rel_flux_limits[1],
-                    ),
-                    fwhm[i, :] > fwhm_max,
-                )
+                axs_fiber = None
 
-            if numpy.nansum(select) > 0:
-                cent_wave[i, select] = cent_wave[i - 1, select]
-                fwhm[i, select] = fwhm[i - 1, select]
-                masked[i, select] = True
+            cc, bhat, mhat = _cross_match(
+                ref_spec=last_spec._data,
+                obs_spec=spec._data,
+                stretch_factors=numpy.linspace(0.9,1.1,100),
+                shift_range=[-5, 5],
+            )
+            cent_guess = mhat * last_cent + bhat
+            flux[i], cent_wave[i], fwhm[i], bg[i] = spec.fitSepGauss(cent_guess, aperture, fwhm_guess, bg_guess, flux_range, cent_range, fwhm_range, bg_range, axs=axs_fiber)
+            masked[i] = numpy.isnan(flux[i])|numpy.isnan(cent_wave[i])|numpy.isnan(fwhm[i])
+
+            if numpy.isnan(cent_wave[i]).sum() == 0:
+                last_spec = copy(spec)
+                last_cent = copy(cent_wave[i])
 
         fibers = numpy.arange(self._fibers)
-        for i in range(nlines):
-            select_line = masked[:, i]
-            bad_fibers = fibers[select_line]
-            good_fibers = fibers[numpy.logical_not(select_line)]
-            for j in bad_fibers:
-                nearest = numpy.abs(good_fibers - j)
-                sorted = numpy.argsort(nearest)
-                greater = good_fibers[sorted][good_fibers[sorted] > j]
-                smaller = good_fibers[sorted][good_fibers[sorted] < j]
-
-                if len(smaller) == 0:
-                    cent_wave[j, i] = cent_wave[greater[0], i]
-                    fwhm[j, i] = fwhm[greater[0], i]
-                elif len(greater) == 0:
-                    cent_wave[j, i] = cent_wave[smaller[0], i]
-                    fwhm[j, i] = fwhm[smaller[0], i]
-                else:
-                    cent_wave[j, i] = (
-                        cent_wave[smaller[0], i] + cent_wave[greater[0], i]
-                    ) / 2.0
-                    fwhm[j, i] = (fwhm[smaller[0], i] + fwhm[greater[0], i]) / 2.0
-
         return fibers, flux, cent_wave, fwhm, masked
 
     def append(self, rows, append_hdr=False):
