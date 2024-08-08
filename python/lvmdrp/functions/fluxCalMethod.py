@@ -363,6 +363,11 @@ def science_sensitivity(rss, res_sci, ext, GAIA_CACHE_DIR, NSCI_MAX=15, r_spaxel
             gflux = calibrated_spectra.iloc[i].flux
 
             fibidx = scifibs['fiberid'][fib] - 1
+
+            # skip star if the fiber is dead
+            if rss._mask[fibidx[0]].all():
+                continue
+
             dmin = d[fib] * 3600 # convert to arcsec
 
             log.info(f"science fiberid '{scifibs['fiberid'][fib][0]}', star '{data['SOURCE_ID']}', secz '{secz:.2f}'")
