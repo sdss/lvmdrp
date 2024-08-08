@@ -417,7 +417,7 @@ def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=Non
             axs[j].step(x, y_data, color="tab:red", lw=1, label="data" if i == 0 else None)
             axs[j].step(x, y_model, color="0.2", lw=1, label="model" if i == 0 else None)
             axs[j].step(x+column_shifts[j], numpy.interp(x+column_shifts[j], x, y_model), color="tab:blue", lw=1, label="corrected mod." if i == 0 else None)
-        axs[j].set_title(f"measured shift {column_shifts[j]:.4f} pixel @ column {c}")
+        axs[j].set_title(f"measured shift {column_shifts[j]:.4f} pixel @ column {c} with SNR = {numpy.sqrt(y_data.mean()):.2f}")
 
     axs[0].legend()
 

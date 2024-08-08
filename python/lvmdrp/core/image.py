@@ -737,7 +737,13 @@ class Image(Header):
         for j,c in enumerate(columns):
             s1 = numpy.nanmedian(ref_data[50:-50,c-column_width:c+column_width], axis=1)
             s2 = numpy.nanmedian(self._data[50:-50,c-column_width:c+column_width], axis=1)
-            _, shifts[j], _ = _cross_match_float(s1, s2, numpy.array([1.0]), shift_range)
+            snr = numpy.sqrt(numpy.nanmedian(self._data[50:-50,c-column_width:c+column_width], axis=1))
+
+            if numpy.nanmedian(snr) > 5:
+                _, shifts[j], _ = _cross_match_float(s1, s2, numpy.array([1.0]), shift_range)
+            else:
+                log.warning(f"too low SNR to reliably measure thermal shift at column {c}: {numpy.nanmedian(snr):.4f}, assuming shift = 0.0")
+                shifts[j] = 0.0
 
         return shifts
 
