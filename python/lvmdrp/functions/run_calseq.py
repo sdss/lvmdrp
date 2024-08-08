@@ -770,7 +770,7 @@ def _copy_fiberflats_from(mjd, mjd_dest=60177):
         MJD where copied twilight fiberflats will be stored
     """
      # define master paths for target frames
-    calibs = get_calib_paths(mjd_dest, use_fiducial_cals=False)
+    calibs = get_calib_paths(mjd_dest, use_fiducial_cals=True)
     mwave_paths = group_calib_paths(calibs["wave"])
     mlsf_paths = group_calib_paths(calibs["lsf"])
 
