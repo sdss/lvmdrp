@@ -759,22 +759,22 @@ def _create_wavelengths_60177(use_fiducial_cals=True, skip_done=True):
             rss_tasks.resample_wavelength(in_rss=harc_path, out_rss=harc_path, method="linear", wave_range=SPEC_CHANNELS[channel], wave_disp=0.5)
 
 
-def _create_fiberflats_60177(mjd):
-    """Creates twilight fiberflats from given MJD to MJD = 60177
+def _copy_fiberflats_from(mjd, mjd_dest=60177):
+    """Copies twilight fiberflats from given MJD to MJD destination
 
     Parameters
     ----------
     mjd : int
         MJD of calibration epoch from which the twilight fiberflats will be copied
+    mjd_dest : int
+        MJD where copied twilight fiberflats will be stored
     """
-    mjd_ = 60177
-
      # define master paths for target frames
-    calibs = get_calib_paths(mjd_, use_fiducial_cals=False)
+    calibs = get_calib_paths(mjd_dest, use_fiducial_cals=False)
     mwave_paths = group_calib_paths(calibs["wave"])
     mlsf_paths = group_calib_paths(calibs["lsf"])
 
-    log.info(f"going to copy twilight fiberflats from {mjd = } to {mjd_}")
+    log.info(f"going to copy twilight fiberflats from {mjd = } to {mjd_dest}")
     for channel in "brz":
         log.info(f"preparing wavelength for new fiberflats: {mwave_paths[channel]}, {mlsf_paths[channel]}")
         mwaves = [TraceMask.from_file(mwave_path) for mwave_path in mwave_paths[channel]]
@@ -810,7 +810,7 @@ def _create_fiberflats_60177(mjd):
         new_fiberflat.set_lsf_array(mlsf._data)
 
         # store new fiberflat
-        new_fiberflat_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd_, camera=channel, kind="mfiberflat_twilight")
+        new_fiberflat_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd_dest, camera=channel, kind="mfiberflat_twilight")
         log.info(f"writing new fiberflat to {new_fiberflat_path}")
         new_fiberflat.writeFitsData(new_fiberflat_path)
 
@@ -1904,7 +1904,7 @@ def reduce_nightly_sequence(mjd, use_fiducial_cals=False, reject_cr=True, only_c
 
         if "dome" in only_cals or "twilight" in only_cals and "dome" in found_cals:
             log.info(f"running dedicated script to create fiberflats for MJD = {mjd}")
-            _create_fiberflats_60177(mjd=60255, use_fiducial_cals=False)
+            _copy_fiberflats_from(mjd=60255, use_fiducial_cals=False)
         else:
             log.log(20 if "dome" in found_cals or "twilight" in found_cals else 40, "skipping production of dome fiberflats")
     else:
