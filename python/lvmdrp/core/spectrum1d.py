@@ -502,7 +502,7 @@ class Spectrum1D(Header):
         self._sky_error = sky_error
         self._header = header
 
-        self.set_wave_and_lsf_traces(wave=wave, wave_trace=wave_trace, lsf_trace=lsf_trace)
+        self.set_wave_and_lsf_traces(wave=wave, wave_trace=wave_trace, lsf_trace=lsf_trace, lsf=lsf)
 
     def __sub__(self, other):
         if isinstance(other, Spectrum1D):
