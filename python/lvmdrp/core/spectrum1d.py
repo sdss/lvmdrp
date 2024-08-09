@@ -305,7 +305,7 @@ def _cross_match_float(
         )
 
         # Constrain the cross_corr and shifts to the shift_range
-        mask = (shifts >= min_shift) & (shifts <= max_shift)
+        mask = (shifts >= -10) & (shifts <= +10)
         cross_corr = cross_corr[mask]
         shifts = shifts[mask]
 
@@ -316,16 +316,16 @@ def _cross_match_float(
         max_corr = cross_corr[idx_max_corr]
         shift = shifts[idx_max_corr]
 
-        # import matplotlib.pyplot as plt
-        # plt.figure()
-        # plt.plot(shifts, cross_corr)
-        # plt.axvline(shift)
-        # plt.show()
+        import matplotlib.pyplot as plt
+        plt.figure()
+        plt.step(shifts, cross_corr, where="mid")
+        plt.axvline(shift)
+        plt.show()
 
-        # plt.figure()
-        # plt.plot(obs_spec_)
-        # plt.plot(ref_spec_)
-        # plt.show()
+        plt.figure()
+        plt.plot(obs_spec_)
+        plt.plot(ref_spec_)
+        plt.show()
 
         # poor man's parabola fit ...
         d = (cross_corr[idx_max_corr + 1] - 2 * cross_corr[idx_max_corr] + cross_corr[idx_max_corr - 1])
