@@ -463,6 +463,46 @@ def wave_little_interpol(wavelist):
     return numpy.hstack(waveout)
 
 
+def convolution_matrix(kernel):
+    """Helper function to construct a kernel matrix for a convolution
+
+    Parameters
+    ----------
+    kernel : np.ndarray[float]
+        Matrix containing kernels for each pixel, row-wise
+
+    Returns
+    -------
+    new_kernel : scipy.sparse.csr_array
+        Compresed sparse kernel
+    """
+    if len(kernel.shape) == 2:
+        nrows = kernel.shape[0]
+    elif len(kernel.shape) == 1:
+        nrows = kernel.size
+        kernel = numpy.repeat([kernel], nrows, axis=0)
+
+    kernelLength = kernel.shape[1]
+
+    rowIdxFirst = numpy.floor(kernelLength / 2)
+    rowIdxLast  = rowIdxFirst + nrows
+
+    vI = []
+    vJ = []
+    vV = []
+    for jj in range(nrows):
+        kernel_row = kernel[jj]
+        for ii in range(kernelLength):
+            if (ii + jj >= rowIdxFirst) and (ii + jj < rowIdxLast):
+                # Valid otuput matrix row index
+                vI.append(int(ii + jj - rowIdxFirst))
+                vJ.append(int(jj))
+                vV.append(kernel_row[ii])
+
+    new_kernel = sparse.csr_array((vV, (vJ, vI)))
+    return new_kernel
+
+
 class Spectrum1D(Header):
 
     @classmethod
@@ -2356,81 +2396,56 @@ class Spectrum1D(Header):
 
         return new_spec
 
-    def matchFWHM(self, target_fwhm, inplace=False):
-        if self._lsf is not None:
-            if self._mask is not None:
-                good_pix = numpy.logical_not(self._mask)
-                data = self._data[good_pix]
-                wave = self._wave[good_pix]
-                fwhm = self._lsf[good_pix]
-                if self._error is not None:
-                    error = self._error[good_pix]
-                else:
-                    error = None
-                if self._sky is not None:
-                    sky = self._sky
-                else:
-                    sky = None
-                if self._sky_error is not None:
-                    sky_error = self._sky_error
-                else:
-                    sky_error = None
-            else:
-                data = self._data
-                wave = self._wave
-                fwhm = self._lsf
-                error = self._error
-                sky = self._sky
-                sky_error = self._sky_error
+    def flatten_lsf(self, target_fwhm, min_fwhm=0.1, inplace=False):
+        if self._lsf is None:
+            return self
 
-            if inplace:
-                new_spec = self
-            else:
-                new_spec = deepcopy(self)
+        if self._mask is None:
+            good_pix = numpy.ones_like(self._mask)
+        else:
+            good_pix = ~self._mask
 
-            gauss_sig = numpy.zeros_like(fwhm)
-            select = target_fwhm > fwhm
-            gauss_sig[select] = numpy.sqrt(target_fwhm**2 - fwhm[select] ** 2) / 2.354
-            fact = numpy.sqrt(2.0 * numpy.pi)
-            kernel = numpy.exp(
-                -0.5
-                * (
-                    (wave[:, numpy.newaxis] - wave[numpy.newaxis, :])
-                    / gauss_sig[numpy.newaxis, :]
-                )
-                ** 2
-            ) / (fact * gauss_sig[numpy.newaxis, :])
-            multiplied = data[:, numpy.newaxis] * kernel
-            new_data = numpy.sum(multiplied, axis=0) / numpy.sum(kernel, 0)
-            if new_spec._mask is not None:
-                new_spec._data[good_pix] = new_data
-                new_spec._lsf[:] = target_fwhm
-            if error is not None:
-                new_error = numpy.sqrt(
-                    numpy.sum((error[:, numpy.newaxis] * kernel) ** 2, axis=0)
-                ) / numpy.sum(kernel, 0)
-                if new_spec._mask is not None:
-                    new_spec._error[good_pix] = new_error
-                else:
-                    new_spec._error = new_error
-            if sky is not None:
-                new_sky = numpy.sum(sky[:, numpy.newaxis] * kernel, axis=0) / numpy.sum(
-                    kernel, 0
-                )
-                if new_spec._mask is not None:
-                    new_spec._sky[good_pix] = new_sky
-                else:
-                    new_spec._sky = new_sky
-            if sky_error is not None:
-                new_sky_error = numpy.sqrt(
-                    numpy.sum((sky_error[:, numpy.newaxis] * kernel) ** 2, axis=0)
-                ) / numpy.sum(kernel, 0)
-                if new_spec._mask is not None:
-                    new_spec._sky_error[good_pix] = new_sky_error
-                else:
-                    new_spec._sky_error = new_sky_error
+        good_pix = numpy.logical_not(self._mask)
+        data = self._data[good_pix]
+        wave = self._wave[good_pix]
+        fwhm = self._lsf[good_pix]
+        if self._error is not None:
+            error = self._error[good_pix]
+        else:
+            error = None
+        if self._sky is not None:
+            sky = self._sky[good_pix]
+        else:
+            sky = None
+        if self._sky_error is not None:
+            sky_error = self._sky_error[good_pix]
+        else:
+            sky_error = None
 
-            return new_spec
+        # setup kernel
+        fact = numpy.sqrt(2.0 * numpy.pi)
+        dwave = numpy.gradient(wave)
+        gauss_sig = numpy.where(target_fwhm > fwhm, numpy.sqrt(target_fwhm**2 - fwhm ** 2) / 2.354, min_fwhm / 2.354) / dwave
+        pixels = numpy.arange(-5, 5)
+        kernel = numpy.asarray([numpy.exp(-0.5 * (pixels / gauss_sig[iw]) ** 2) / (fact * gauss_sig[iw]) for iw, w in enumerate(wave)])
+        kernel = convolution_matrix(kernel)
+        new_data = kernel @ data
+
+        if inplace:
+            new_spec = self
+        else:
+            new_spec = deepcopy(self)
+
+        new_spec._data[good_pix] = new_data
+        new_spec._lsf[:] = target_fwhm
+        if error is not None:
+            new_spec._error[good_pix] = numpy.sqrt((kernel @ error) ** 2)
+        if sky is not None:
+            new_spec._sky[good_pix] = kernel @ sky
+        if sky_error is not None:
+            new_spec._sky_error[good_pix] = numpy.sqrt((kernel @ sky_error) ** 2)
+
+        return new_spec
 
     def binSpec(self, new_wave):
         new_disp = new_wave[1:] - new_wave[:-1]

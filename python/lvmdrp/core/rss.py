@@ -580,16 +580,16 @@ class RSS(FiberRows):
         if numpy.allclose(
             numpy.repeat(rss._wave[0][None, :], rss._fibers, axis=0), rss._wave
         ):
-            rss.setWave(rss._wave[0])
+            rss.set_wave_array(rss._wave[0])
         else:
-            rss.setWave(rss._wave)
+            rss.set_wave_array(rss._wave)
         if numpy.allclose(
             numpy.repeat(rss._lsf[0][None, :], rss._fibers, axis=0),
             rss._lsf,
         ):
-            rss.set_lsf(rss._lsf[0])
+            rss.set_lsf_array(rss._lsf[0])
         else:
-            rss.set_lsf(rss._lsf)
+            rss.set_lsf_array(rss._lsf)
         return rss
 
     def __init__(
