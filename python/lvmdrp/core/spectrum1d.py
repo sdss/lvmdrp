@@ -2396,29 +2396,73 @@ class Spectrum1D(Header):
 
         return new_spec
 
-    def flatten_lsf(self, target_fwhm, min_fwhm=0.1, inplace=False):
+    def apply_pixelmask(self, mask=None, inplace=False):
+        if mask is None:
+            mask = self._mask
+        if mask is None:
+            return self
+
+        if inplace:
+            new_spec = self
+        else:
+            new_spec = deepcopy(self)
+
+        new_spec._data[mask] = numpy.nan
+        if new_spec._error is not None:
+            new_spec._error[mask] = numpy.nan
+        if new_spec._sky is not None:
+            new_spec._sky[mask] = numpy.nan
+        if new_spec._sky_error is not None:
+            new_spec._sky_error[mask] = numpy.nan
+
+        return new_spec
+
+    def interpolate_masked(self, inplace=False):
+        if self._mask is None or self._mask.all():
+            return self
+
+        if inplace:
+            new_spec = self
+        else:
+            new_spec = deepcopy(self)
+
+        good_pix = ~self._mask
+        new_spec._data = numpy.interp(new_spec._wave, new_spec._wave[good_pix], new_spec._data[good_pix])
+        if new_spec._error is not None:
+            new_spec._error = numpy.interp(new_spec._wave, new_spec._wave[good_pix], new_spec._error[good_pix])
+        if new_spec._sky is not None:
+            new_spec._sky = numpy.interp(new_spec._wave, new_spec._wave[good_pix], new_spec._sky[good_pix])
+        if new_spec._sky_error is not None:
+            new_spec._sky_error = numpy.interp(new_spec._wave, new_spec._wave[good_pix], new_spec._sky_error[good_pix])
+
+        return new_spec
+
+    def flatten_lsf(self, target_fwhm, min_fwhm=0.1, interpolate_bad=True, inplace=False):
         if self._lsf is None:
             return self
 
-        if self._mask is None:
-            good_pix = numpy.ones_like(self._mask)
+        # make a copy of spectrum if not inplace
+        if inplace:
+            new_spec = self
         else:
-            good_pix = ~self._mask
+            new_spec = deepcopy(self)
 
-        good_pix = numpy.logical_not(self._mask)
-        data = self._data[good_pix]
-        wave = self._wave[good_pix]
-        fwhm = self._lsf[good_pix]
+        if interpolate_bad:
+            new_spec = new_spec.interpolate_masked(inplace=inplace)
+
+        data = self._data
+        wave = self._wave
+        fwhm = self._lsf
         if self._error is not None:
-            error = self._error[good_pix]
+            error = self._error
         else:
             error = None
         if self._sky is not None:
-            sky = self._sky[good_pix]
+            sky = self._sky
         else:
             sky = None
         if self._sky_error is not None:
-            sky_error = self._sky_error[good_pix]
+            sky_error = self._sky_error
         else:
             sky_error = None
 
@@ -2431,19 +2475,16 @@ class Spectrum1D(Header):
         kernel = convolution_matrix(kernel)
         new_data = kernel @ data
 
-        if inplace:
-            new_spec = self
-        else:
-            new_spec = deepcopy(self)
-
-        new_spec._data[good_pix] = new_data
+        new_spec._data = new_data
         new_spec._lsf[:] = target_fwhm
         if error is not None:
-            new_spec._error[good_pix] = numpy.sqrt((kernel @ error) ** 2)
+            new_spec._error = numpy.sqrt((kernel @ error) ** 2)
         if sky is not None:
-            new_spec._sky[good_pix] = kernel @ sky
+            new_spec._sky = kernel @ sky
         if sky_error is not None:
-            new_spec._sky_error[good_pix] = numpy.sqrt((kernel @ sky_error) ** 2)
+            new_spec._sky_error = numpy.sqrt((kernel @ sky_error) ** 2)
+
+        new_spec = new_spec.apply_pixelmask(inplace=inplace)
 
         return new_spec
 
