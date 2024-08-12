@@ -1091,7 +1091,7 @@ class RSS(FiberRows):
                 continue
             new_specs.append(spec.flatten_lsf(target_fwhm, min_fwhm=min_fwhm))
 
-        return RSS.from_spectra1d(new_specs)
+        return RSS.from_spectra1d(new_specs, header=self._header)
 
     def maskFiber(self, fiber, replace_error=1e10):
         self._data[fiber, :] = 0

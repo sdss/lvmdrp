@@ -1166,7 +1166,7 @@ def match_resolution(in_rss, out_rss, target_fwhm=None, min_fwhm=0.1):
 
     new_rss = rss.match_lsf(target_fwhm, min_fwhm=min_fwhm)
     new_rss._lsf = None
-    new_rss.setHdrValue("HIERARCH WAVE RES", target_fwhm, "FWHM of spectral resolution [Agnstrom]")
+    new_rss.setHdrValue("HIERARCH WAVE RES", target_fwhm, "FWHM of spectral resolution [Angstrom]")
     new_rss.writeFitsData(out_rss)
 
     return new_rss

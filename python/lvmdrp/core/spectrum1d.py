@@ -2427,13 +2427,13 @@ class Spectrum1D(Header):
             new_spec = deepcopy(self)
 
         good_pix = ~self._mask
-        new_spec._data = numpy.interp(new_spec._wave, new_spec._wave[good_pix], new_spec._data[good_pix])
+        new_spec._data = numpy.interp(new_spec._wave, new_spec._wave[good_pix], new_spec._data[good_pix], left=new_spec._data[good_pix][0], right=new_spec._data[good_pix][-1])
         if new_spec._error is not None:
-            new_spec._error = numpy.interp(new_spec._wave, new_spec._wave[good_pix], new_spec._error[good_pix])
+            new_spec._error = numpy.interp(new_spec._wave, new_spec._wave[good_pix], new_spec._error[good_pix], left=new_spec._error[good_pix][0], right=new_spec._error[good_pix][-1])
         if new_spec._sky is not None:
-            new_spec._sky = numpy.interp(new_spec._wave, new_spec._wave[good_pix], new_spec._sky[good_pix])
+            new_spec._sky = numpy.interp(new_spec._wave, new_spec._wave[good_pix], new_spec._sky[good_pix], left=new_spec._sky[good_pix][0], right=new_spec._sky[good_pix][-1])
         if new_spec._sky_error is not None:
-            new_spec._sky_error = numpy.interp(new_spec._wave, new_spec._wave[good_pix], new_spec._sky_error[good_pix])
+            new_spec._sky_error = numpy.interp(new_spec._wave, new_spec._wave[good_pix], new_spec._sky_error[good_pix], left=new_spec._sky_error[good_pix][0], right=new_spec._sky_error[good_pix][-1])
 
         return new_spec
 
