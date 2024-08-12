@@ -2,6 +2,7 @@ import os
 import numpy
 import bottleneck as bn
 from copy import deepcopy as copy
+from tqdm import tqdm
 from scipy import interpolate
 from astropy.io import fits as pyfits
 from astropy.wcs import WCS
@@ -1059,6 +1060,38 @@ class RSS(FiberRows):
             self._lsf = lsf
 
         return self._lsf
+
+    def match_lsf(self, target_fwhm=None, min_fwhm=0.1):
+        """Downgrade spectral resolution to match LSF in all fibers
+
+        This function will degrade the resolution of the RSS to match all
+        fibers given a scalar value for `target_fwhm` in FWHM or a callable to
+        generate one. If None is given, the resolution will be matched to the
+        worst value in the LSF.
+
+        Parameters
+        ----------
+        target_fwhm : float|callable[lsf], optional
+            Target resolution or function to apply to current LSF to get target resoltion, by default None
+        min_fwhm : float, optional
+            Minimum FWHM allowed, by default 0.1
+
+        Returns
+        -------
+        new_rss : lvmdrp.core.rss.RSS
+            A copy of the RSS with the LSF matched to the given value
+        """
+        target_fwhm = target_fwhm or numpy.max(self._lsf)
+
+        new_specs = []
+        for ifiber in tqdm(range(self._fibers), desc="matching LSF", ascii=True, unit="fiber"):
+            spec = self.getSpec(ifiber)
+            if spec._mask.all():
+                new_specs.append(spec)
+                continue
+            new_specs.append(spec.flatten_lsf(target_fwhm, min_fwhm=min_fwhm))
+
+        return RSS.from_spectra1d(new_specs)
 
     def maskFiber(self, fiber, replace_error=1e10):
         self._data[fiber, :] = 0

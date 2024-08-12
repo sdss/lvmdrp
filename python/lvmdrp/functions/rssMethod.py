@@ -1136,14 +1136,15 @@ def resample_wavelength(in_rss: str, out_rss: str, method: str = "linear",
     return new_rss
 
 
-def matchResolution_drp(in_rss, out_rss, targetFWHM, parallel="auto"):
+def match_resolution(in_rss, out_rss, target_fwhm=None, min_fwhm=0.1):
     """
     Homogenise the LSF of the RSS to a common spectral resolution (FWHM)
 
-    This task smooths the RSS with a Gaussian kernel of the corresponding
-    width. A pixel table with the spectral resolution needs to be present in
-    the RSS. If the spectral resolution is higher than than the target spectral
-    resolution for certain pixel, no smoothing is applied for those pixels.
+    This routine downgrades the RSS LSF with a Gaussian kernel of the
+    corresponding width. A pixel table with the spectral resolution needs to be
+    present in the RSS. If the spectral resolution is higher than than the
+    target spectral resolution for certain pixel, the spectra is degraded to
+    `min_fwhm` value.
 
     Parameters
     ----------
@@ -1151,48 +1152,24 @@ def matchResolution_drp(in_rss, out_rss, targetFWHM, parallel="auto"):
         Input RSS FITS file with a pixel table for the spectral resolution
     out_rss : string
         Output RSS FITS file with a homogenised spectral resolution
-    targetFWHM : string of float
-        Spectral resolution in FWHM to which the RSS shall be homogenised
-    parallel: either string of integer (>0) or  'auto', optional with default: 'auto'
-        Number of CPU cores used in parallel for the computation. If set to
-        auto, the maximum number of CPUs for the given system is used.
+    target_fwhm : float, optional
+        Spectral resolution in FWHM Agnstroms to which the RSS will be homogenised, by default None
+    min_fwhm : float, optional
+        Minimum spectral resolution in FWHM allowed, by default 0.1 Angstrom
 
-    Examples
-    --------
-    user:> lvmdrp rss matchResolution RSS_in.fits RSS_out.fits 6.0
+    Returns
+    -------
+    new_rss : lvmdrp.core.rss.RSS
+        New RSS with homogenised LSF
     """
-    targetFWHM = float(targetFWHM)
     rss = RSS.from_file(in_rss)
 
-    smoothFWHM = numpy.zeros_like(rss._lsf)
-    select = rss._lsf < targetFWHM
-    smoothFWHM[select] = numpy.sqrt(targetFWHM**2 - rss._lsf[select] ** 2)
+    new_rss = rss.match_lsf(target_fwhm, min_fwhm=min_fwhm)
+    new_rss._lsf = None
+    new_rss.setHdrValue("HIERARCH WAVE RES", target_fwhm, "FWHM of spectral resolution [Agnstrom]")
+    new_rss.writeFitsData(out_rss)
 
-    if parallel == "auto":
-        cpus = cpu_count()
-    else:
-        cpus = int(parallel)
-
-    if cpus > 1:
-        pool = Pool(cpus)
-        threads = []
-        for i in range(len(rss)):
-            threads.append(
-                pool.apply_async(rss[i].smoothGaussVariable, ([smoothFWHM[i, :]]))
-            )
-
-        for i in range(len(rss)):
-            rss[i] = threads[i].get()
-        pool.close()
-        pool.join()
-    else:
-        for i in range(len(rss)):
-            rss[i] = rss[i].smoothGaussVariable(smoothFWHM[i, :])
-    rss._lsf = None
-    rss.setHdrValue(
-        "HIERARCH PIPE SPEC RES", targetFWHM, "FWHM in A of spectral resolution"
-    )
-    rss.writeFitsData(out_rss)
+    return new_rss
 
 
 def splitFibers_drp(in_rss, splitted_out, contains):
