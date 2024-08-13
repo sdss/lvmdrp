@@ -55,7 +55,7 @@ from lvmdrp.core.rss import RSS, lvmFrame
 from lvmdrp.functions import imageMethod as image_tasks
 from lvmdrp.functions import rssMethod as rss_tasks
 from lvmdrp.main import get_config_options, read_fibermap, get_master_mjd, reduce_2d
-from lvmdrp.functions.run_twilights import fit_fiberflat, remove_field_gradient, combine_twilight_sequence
+from lvmdrp.functions.run_twilights import fit_fiberflat, combine_twilight_sequence
 
 
 SLITMAP = read_fibermap(as_table=True)
@@ -1626,7 +1626,6 @@ def create_twilight_fiberflats(mjd: int, use_fiducial_cals: bool = True, expnums
 
     # decompose twilight spectra into sun continuum and twilight components
     channels = "brz"
-    mask_bands = dict(zip(channels, [b_mask, r_mask, z_mask]))
     mfflats = dict.fromkeys(channels)
     flat_channels = flats.groupby(flats.camera.str.__getitem__(0))
     tileid = flats.tileid.min()
@@ -1636,34 +1635,32 @@ def create_twilight_fiberflats(mjd: int, use_fiducial_cals: bool = True, expnums
         for expnum in flat_expnums.groups:
             flat = flat_expnums.get_group(expnum).iloc[0]
 
-            xflat_paths = sorted(path.expand("lvm_anc", drpver=drpver, kind="x", imagetype=flat["imagetyp"], tileid=flat["tileid"], mjd=flat["mjd"], camera=f"{channel}?", expnum=expnum))
+            xflat_paths = sorted(path.expand("lvm_anc", drpver=drpver, kind="x", imagetype=flat.imagetyp, tileid=flat.tileid, mjd=flat.mjd, camera=f"{channel}?", expnum=expnum))
             fflat_flatfielded_path = path.full("lvm_anc", drpver=drpver, kind="flatfielded_",
-                                   imagetype=flat["imagetyp"], tileid=flat["tileid"], mjd=flat["mjd"],
+                                   imagetype=flat.imagetyp, tileid=flat.tileid, mjd=flat.mjd,
                                    camera=channel, expnum=expnum)
             fflat_path = path.full("lvm_anc", drpver=drpver, kind="f",
-                                   imagetype="flat", tileid=flat["tileid"], mjd=flat["mjd"], camera=channel, expnum=expnum)
+                                   imagetype="flat", tileid=flat.tileid, mjd=flat.mjd, camera=channel, expnum=expnum)
+            xflat_path = path.full("lvm_anc", drpver=drpver, kind="x", imagetype=flat.imagetyp, tileid=flat.tileid, mjd=flat.mjd, camera=channel, expnum=expnum)
+            wflat_path = path.full("lvm_anc", drpver=drpver, kind="w", imagetype=flat.imagetyp, tileid=flat.tileid, mjd=flat.mjd, camera=channel, expnum=expnum)
+            hflat_path = path.full("lvm_anc", drpver=drpver, kind="h", imagetype=flat.imagetyp, tileid=flat.tileid, mjd=flat.mjd, camera=channel, expnum=expnum)
+            gflat_path = path.full("lvm_anc", drpver=drpver, kind="g", imagetype=flat.imagetyp, tileid=flat.tileid, mjd=flat.mjd, camera=channel, expnum=expnum)
 
             # spectrograph stack xflats
-            xflat_path = path.full("lvm_anc", drpver=drpver, kind="x", imagetype=flat["imagetyp"], tileid=flat["tileid"], mjd=flat["mjd"], camera=channel, expnum=expnum)
             rss_tasks.stack_spectrographs(in_rsss=xflat_paths, out_rss=xflat_path)
 
             # calibrate in wavelength
-            wflat_path = path.full("lvm_anc", drpver=drpver, kind="w", imagetype=flat["imagetyp"], tileid=flat["tileid"], mjd=flat["mjd"], camera=channel, expnum=expnum)
             rss_tasks.create_pixel_table(in_rss=xflat_path, out_rss=wflat_path,
                                          in_waves=calibs["wave"][channel], in_lsfs=calibs["lsf"][channel])
 
             # rectify in wavelength
-            hflat_path = path.full("lvm_anc", drpver=drpver, kind="h", imagetype=flat["imagetyp"], tileid=flat["tileid"], mjd=flat["mjd"], camera=channel, expnum=expnum)
             rss_tasks.resample_wavelength(in_rss=wflat_path, out_rss=hflat_path, wave_disp=0.5, wave_range=SPEC_CHANNELS[channel])
 
-            # fit fiber throughput
-            fflat = fit_fiberflat(in_twilight=hflat_path, out_flat=fflat_path, out_rss=fflat_flatfielded_path, median_box=median_box, niter=niter,
-                                   threshold=threshold, mask_bands=mask_bands.get(channel, []),
-                                   display_plots=display_plots, nknots=nknots)
+            # match LSF in all fibers
+            rss_tasks.match_lsf(in_rss=hflat_path, out_rss=hflat_path, min_fwhm=1.0)
 
-            # fit gradient and remove it
-            gflat_path = path.full("lvm_anc", drpver=drpver, kind="g", imagetype=flat["imagetyp"], tileid=flat["tileid"], mjd=flat["mjd"], camera=channel, expnum=expnum)
-            remove_field_gradient(in_hflat=fflat_flatfielded_path, out_gflat=gflat_path, wrange=SPEC_CHANNELS[channel])
+            # fit fiber throughput
+            fflat = fit_fiberflat(in_twilight=hflat_path, out_flat=fflat_path, out_rss=fflat_flatfielded_path, remove_gradient=True, niter=4, display_plots=display_plots)
 
             # load fiber and wavelength traces
             mcent = TraceMask.from_spectrographs(*[TraceMask.from_file(master_cent) for master_cent in calibs["trace"][channel]])
