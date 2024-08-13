@@ -463,13 +463,15 @@ def wave_little_interpol(wavelist):
     return numpy.hstack(waveout)
 
 
-def convolution_matrix(kernel):
+def convolution_matrix(kernel, normalize=True):
     """Helper function to construct a kernel matrix for a convolution
 
     Parameters
     ----------
     kernel : np.ndarray[float]
         Matrix containing kernels for each pixel, row-wise
+    normalize : bool, optional
+        Normalizes over rows if the matrix, by default True
 
     Returns
     -------
@@ -491,7 +493,7 @@ def convolution_matrix(kernel):
     vJ = []
     vV = []
     for jj in range(nrows):
-        kernel_row = kernel[jj]
+        kernel_row = kernel[jj] / numpy.sum(kernel[jj])
         for ii in range(kernelLength):
             if (ii + jj >= rowIdxFirst) and (ii + jj < rowIdxLast):
                 # Valid otuput matrix row index
@@ -499,7 +501,11 @@ def convolution_matrix(kernel):
                 vJ.append(int(jj))
                 vV.append(kernel_row[ii])
 
+    # vI, vJ = numpy.where(kernel>1e-5)
+    # vV = kernel[vI, vJ]
     new_kernel = sparse.csr_array((vV, (vJ, vI)))
+    if normalize:
+        new_kernel = new_kernel.multiply(1 / numpy.sum(new_kernel, axis=1))
     return new_kernel
 
 
@@ -2467,13 +2473,35 @@ class Spectrum1D(Header):
             sky_error = None
 
         # setup kernel
-        fact = numpy.sqrt(2.0 * numpy.pi)
         dwave = numpy.gradient(wave)
-        gauss_sig = numpy.where(target_fwhm > fwhm, numpy.sqrt(target_fwhm**2 - fwhm ** 2) / 2.354, min_fwhm / 2.354) / dwave
-        pixels = numpy.arange(-5, 5)
-        kernel = numpy.asarray([numpy.exp(-0.5 * (pixels / gauss_sig[iw]) ** 2) / (fact * gauss_sig[iw]) for iw, w in enumerate(wave)])
+        sigma = numpy.sqrt(max(min_fwhm, target_fwhm) ** 2 - fwhm ** 2) / 2.354 / dwave
+        # sigma = numpy.where(target_fwhm > fwhm, numpy.sqrt(target_fwhm**2 - fwhm ** 2) / 2.354, min_fwhm / 2.354) / dwave
+        pixels = numpy.ceil(3 * max(sigma))
+        pixels = numpy.arange(-pixels, pixels)
+        kernel = numpy.asarray([numpy.exp(-0.5 * (pixels / sigma[iw]) ** 2) for iw in range(wave.size)])
         kernel = convolution_matrix(kernel)
         new_data = kernel @ data
+
+        # import matplotlib.pyplot as plt
+        # from astropy.visualization import simple_norm
+        # plt.figure(figsize=(10,10), layout="constrained")
+        # plt.imshow(kernel.toarray(), cmap="coolwarm", norm=simple_norm(kernel.toarray(), stretch="log"))
+        # plt.show()
+
+        # gauss_sig = numpy.zeros_like(fwhm)
+        # select = target_fwhm > fwhm
+        # gauss_sig[select] = numpy.sqrt(target_fwhm**2 - fwhm[select] ** 2) / 2.354
+        # fact = numpy.sqrt(2.0 * numpy.pi)
+        # kernel = numpy.exp(
+        #     -0.5
+        #     * (
+        #         (wave[:, numpy.newaxis] - wave[numpy.newaxis, :])
+        #         / gauss_sig[numpy.newaxis, :]
+        #     )
+        #     ** 2
+        # ) / (fact * gauss_sig[numpy.newaxis, :])
+        # multiplied = data[:, numpy.newaxis] * kernel
+        # new_data = bn.nansum(multiplied, axis=0) / bn.nansum(kernel, 0)
 
         new_spec._data = new_data
         new_spec._lsf[:] = target_fwhm
