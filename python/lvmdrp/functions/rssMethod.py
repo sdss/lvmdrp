@@ -1136,7 +1136,7 @@ def resample_wavelength(in_rss: str, out_rss: str, method: str = "linear",
     return new_rss
 
 
-def match_resolution(in_rss, out_rss, target_fwhm=None, min_fwhm=0.1):
+def match_resolution(in_rss, out_rss, target_fwhm=None, min_fwhm=0.1, plot_fibers=[0, 900, 1943], display_plots=False):
     """
     Homogenise the LSF of the RSS to a common spectral resolution (FWHM)
 
@@ -1156,6 +1156,10 @@ def match_resolution(in_rss, out_rss, target_fwhm=None, min_fwhm=0.1):
         Spectral resolution in FWHM Agnstroms to which the RSS will be homogenised, by default None
     min_fwhm : float, optional
         Minimum spectral resolution in FWHM allowed, by default 0.1 Angstrom
+    plot_fibers : list[int], optional
+        List of fiber indices to plot, by default [0, 900, 1943]
+    display_plots : bool, optional
+        Show plot on screen or not, by default False
 
     Returns
     -------
@@ -1168,6 +1172,14 @@ def match_resolution(in_rss, out_rss, target_fwhm=None, min_fwhm=0.1):
     new_rss._lsf = None
     new_rss.setHdrValue("HIERARCH WAVE RES", target_fwhm, "FWHM of spectral resolution [Angstrom]")
     new_rss.writeFitsData(out_rss)
+
+    if plot_fibers:
+        fig, ax = create_subplots(to_display=display_plots, figsize=(15,7), layout="constrained")
+        for ifiber in plot_fibers:
+            ln, = ax.step(rss._wave, rss._data[ifiber], lw=1, where="mid", alpha=0.5)
+            ax.step(new_rss._wave, new_rss._data[ifiber], lw=1, where="mid", color=ln.get_color(), label=ifiber)
+        ax.legend(loc=1, frameon=False, title="Fiber Idx")
+        save_fig(fig, to_display=display_plots, product_path=out_rss, figure_path="qa", label="match_res")
 
     return new_rss
 
