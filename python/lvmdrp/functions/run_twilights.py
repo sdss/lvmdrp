@@ -16,6 +16,7 @@ from scipy import interpolate
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
 from lvmdrp import path, log, __version__ as drpver
+from lvmdrp.core.constants import SPEC_CHANNELS
 from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.core.spectrum1d import Spectrum1D
 from lvmdrp.core.rss import RSS
@@ -26,35 +27,11 @@ from astropy import wcs
 from astropy.io import fits
 from astropy.stats import biweight_location
 from astropy.visualization import simple_norm
-import itertools
 
 
 MASTER_CON_LAMPS = {"b": "ldls", "r": "ldls", "z": "quartz"}
 SLITMAP = Table(drp.fibermap.data)
 
-
-def polyfit2d(x, y, z, order=3):
-    """
-    Fit 2D polynomial
-    """
-    ncols = (order + 1) ** 2
-    G = np.zeros((x.size, ncols))
-    ij = itertools.product(range(order + 1), range(order + 1))
-    for k, (i, j) in enumerate(ij):
-        G[:, k] = x ** i * y ** j
-    m, null, null, null = np.linalg.lstsq(G, z, rcond=None)
-    return m
-
-def polyval2d(x, y, m):
-    """
-    Generate 2D polynomial
-    """
-    order = int(np.sqrt(len(m))) - 1
-    ij = itertools.product(range(order + 1), range(order + 1))
-    z = np.zeros_like(x)
-    for a, (i, j) in zip(m, ij):
-        z += a * x ** i * y ** j
-    return z
 
 def mkifuimage(
     x, y, flux, fibid, posang=0, RAobs=0, DECobs=0,
@@ -89,59 +66,18 @@ def mkifuimage(
 
     return ima, hdu
 
-def sumflux(rsshdu, wrange):
-    naxis1 = rsshdu[0].data.shape[1]
-    naxis2=rsshdu[0].data.shape[0]
-    w = wcs.WCS(rsshdu[0].header)
-    wave = w.spectral.pixel_to_world(np.arange(naxis1)).value*1e10
-    selwave=(wave>=wrange[0])*(wave<=wrange[1])
-    selwavemask=np.tile(selwave, (naxis2,1))
-
-    flux = rsshdu[0].data
-    mask = rsshdu["BADPIX"].data.astype(bool)
-    flux[mask] = np.nan
-    rssmasked=flux*selwavemask
-
-    coadded_flux = np.nanmean(rssmasked,axis=1)
-    return coadded_flux
-
 def remove_field_gradient(in_hflat, out_gflat, wrange, deg=1, display_plots=False):
 
-    fflat = fits.open(in_hflat)
-    channel = fflat[0].header["CCD"]
-    fibermap = Table(fflat["SLITMAP"].data)
-    telescope=fibermap["telescope"]
+    fflat = RSS.from_file(in_hflat)
+    channel = fflat._header["CCD"]
 
-    flux = sumflux(fflat, wrange=wrange)
+    x, y, flux, grad_model, grad_model_e, grad_model_w, grad_model_s = fflat.fit_field_gradient(wrange, poly_deg=deg)
 
-    rss = fflat[0].data[telescope=="Sci"]
-    rss_e = fflat[0].data[telescope=="SkyE"]
-    rss_w = fflat[0].data[telescope=="SkyW"]
-    rss_s = fflat[0].data[telescope=="Spec"]
-    x_e=fibermap["xpmm"].astype(float)[telescope=="SkyE"]
-    y_e=fibermap["ypmm"].astype(float)[telescope=="SkyE"]
-    x_w=fibermap["xpmm"].astype(float)[telescope=="SkyW"]
-    y_w=fibermap["ypmm"].astype(float)[telescope=="SkyW"]
-    x_s=fibermap["xpmm"].astype(float)[telescope=="Spec"]
-    y_s=fibermap["ypmm"].astype(float)[telescope=="Spec"]
-
-    flux = flux[telescope=="Sci"]
-    x=fibermap["xpmm"].astype(float)[telescope=="Sci"]
-    y=fibermap["ypmm"].astype(float)[telescope=="Sci"]
-
+    flux_c = flux / grad_model
     flux_med = np.nanmedian(flux)
-    flux_fact = flux / flux_med
-    select = np.isfinite(flux_fact)
-    coeffs = polyfit2d(x[select], y[select], flux_fact[select], deg)
-
-    grad_model = polyval2d(x, y, coeffs)
-    grad_model_e = polyval2d(x_e, y_e, coeffs)
-    grad_model_w = polyval2d(x_w, y_w, coeffs)
-    grad_model_s = polyval2d(x_s, y_s, coeffs)
+    flux_std = np.nanstd(flux)
 
     fig, axs = create_subplots(to_display=display_plots, nrows=1, ncols=3, figsize=(15,6), sharex=True, sharey=True, layout="constrained")
-    flux_c = flux / grad_model
-    flux_std = np.nanstd(flux)
     sc_or = axs[0].scatter(x, y, s=40, marker="H", vmin=flux_med-4*flux_std, vmax=flux_med+4*flux_std, lw=0, c=flux, cmap="rainbow")
     sc_gr = axs[1].scatter(x, y, s=40, marker="H", lw=0, c=grad_model, cmap="coolwarm", norm=simple_norm(grad_model, stretch="log"))
 
@@ -170,17 +106,23 @@ def remove_field_gradient(in_hflat, out_gflat, wrange, deg=1, display_plots=Fals
     fig.suptitle(f"Gradient field fitting for {channel = }")
     save_fig(fig, out_gflat, to_display=display_plots, figure_path="qa", label="field_gradient")
 
+    telescope = fflat._slitmap["telescope"]
+    rss = fflat._data[telescope=="Sci"]
+    rss_e = fflat._data[telescope=="SkyE"]
+    rss_w = fflat._data[telescope=="SkyW"]
+    rss_s = fflat._data[telescope=="Spec"]
+
     rss = rss / grad_model[:, None]
     rss_e = rss_e / grad_model_e[:, None]
     rss_w = rss_w / grad_model_w[:, None]
     rss_s = rss_s / grad_model_s[:, None]
 
     new_fflat = copy(fflat)
-    new_fflat[0].data[telescope == "Sci"] = rss
-    new_fflat[0].data[telescope == "SkyE"] = rss_e
-    new_fflat[0].data[telescope == "SkyW"] = rss_w
-    new_fflat[0].data[telescope == "Spec"] = rss_s
-    new_fflat.writeto(out_gflat, overwrite=True)
+    new_fflat._data[telescope == "Sci"] = rss
+    new_fflat._data[telescope == "SkyE"] = rss_e
+    new_fflat._data[telescope == "SkyW"] = rss_w
+    new_fflat._data[telescope == "Spec"] = rss_s
+    new_fflat.writeFitsData(out_gflat)
 
 def fit_continuum(spectrum: Spectrum1D, mask_bands: List[Tuple[float,float]],
                   median_box: int, niter: int, threshold: Tuple[float,float]|float, knots: int|np.ndarray):
@@ -582,40 +524,61 @@ def resample_fiberflat(mflat: RSS, channel: str, mwave_paths: str,
     return new_flat
 
 def fit_fiberflat(in_twilight: str, out_flat: str, out_rss: str,
-                  lsf_offset: float = 1.0,
+                  remove_gradient: bool = True, niter: int = 4,
                   plot_fibers: List[int] = [0,300,600,900,1200,1400,1700],
                   display_plots: bool = False):
 
     twilight = RSS.from_file(in_twilight)
+    channel = twilight._header["CCD"][0]
 
-    median_fiber = np.nanmedian(twilight._data, axis=0)
-    new_flat = copy(twilight)
-    new_flat._data = twilight._data / median_fiber[None]
+    niter = max(1, niter)
+    for i in range(niter):
+        median_fiber = np.nanmedian(twilight._data, axis=0)
+        new_flat = copy(twilight)
+        new_flat._data = twilight._data / median_fiber[None]
+        for ifiber in range(new_flat._fibers):
+            f = new_flat.getSpec(ifiber)
+            if f._mask.all():
+                continue
 
-    for ifiber in range(new_flat._fibers):
-        f = new_flat.getSpec(ifiber)
-        if f._mask.all():
-            continue
+            # interpolating over masked pixels
+            mask = np.isfinite(f._data)
+            # f._data = np.interp(f._wave, f._wave[mask], f._data[mask])
 
-        # interpolating over masked pixels
-        mask = np.isfinite(f._data)
-        # f._data = np.interp(f._wave, f._wave[mask], f._data[mask])
+            # first filtering of high-frequency features
+            f._data[mask] = butter_lowpass_filter(f._data[mask], 0.1, 2)
+            new_flat._data[ifiber] = f._data
 
-        # first filtering of high-frequency features
-        f._data[mask] = butter_lowpass_filter(f._data[mask], 0.1, 2)
-        new_flat._data[ifiber] = f._data
+            # further smoothing of remaining unwanted features
+            tck = interpolate.splrep(f._wave[mask], f._data[mask], s=0.1)
+            new_flat._data[ifiber] = interpolate.splev(f._wave, tck)
 
-        # further smoothing of remaining unwanted features
-        tck = interpolate.splrep(f._wave[mask], f._data[mask], s=0.1)
-        new_flat._data[ifiber] = interpolate.splev(f._wave, tck)
+        flat_twilight = copy(twilight)
+        flat_twilight._data = flat_twilight._data / new_flat._data
 
-    flat_twilight = copy(twilight)
-    flat_twilight._data = twilight._data / new_flat._data
+        x, y, flux, grad_model, grad_model_e, grad_model_w, grad_model_s = flat_twilight.fit_field_gradient(wrange=SPEC_CHANNELS[channel], poly_deg=1)
+        telescope = twilight._slitmap["telescope"]
+        rss = twilight._data[telescope=="Sci"]
+        rss_e = twilight._data[telescope=="SkyE"]
+        rss_w = twilight._data[telescope=="SkyW"]
+        rss_s = twilight._data[telescope=="Spec"]
 
-    fig, ax = create_subplots(to_display=display_plots, figsize=(15,5), sharex=True, sharey=True, layout="constrained")
+        rss = rss / grad_model[:, None]
+        rss_e = rss_e / grad_model_e[:, None]
+        rss_w = rss_w / grad_model_w[:, None]
+        rss_s = rss_s / grad_model_s[:, None]
+
+        twilight._data[telescope == "Sci"] = rss
+        twilight._data[telescope == "SkyE"] = rss_e
+        twilight._data[telescope == "SkyW"] = rss_w
+        twilight._data[telescope == "Spec"] = rss_s
+
+    fig, axs = create_subplots(to_display=display_plots, nrows=2, figsize=(15,7), sharex=True, layout="constrained")
     for ifiber in plot_fibers:
-        ln, = ax.step(twilight._wave, twilight._data[ifiber] / np.nanmedian(twilight._data, axis=0), lw=1, where="mid")
-        ax.plot(new_flat._wave, new_flat._data[ifiber], lw=1, color=ln.get_color())
+        ln, = axs[0].step(twilight._wave, twilight._data[ifiber], lw=1, where="mid")
+        axs[1].step(twilight._wave, twilight._data[ifiber] / np.nanmedian(twilight._data, axis=0), lw=1, color=ln.get_color(), where="mid")
+        axs[1].plot(new_flat._wave, new_flat._data[ifiber], lw=1, color=ln.get_color(), label=ifiber)
+    fig.legend(loc=1, frameon=False, title="Fiber Idx")
     fig.supxlabel("Wavelength (Angstrom)")
     fig.supylabel("Normalized counts")
     save_fig(fig, product_path=out_flat, to_display=display_plots, figure_path="qa", label="fiberflat")
@@ -629,11 +592,3 @@ def fit_fiberflat(in_twilight: str, out_flat: str, out_rss: str,
     flat_twilight.writeFitsData(out_rss)
 
     return new_flat
-
-
-# TODO:
-    # - match resolution
-    # - iterate:
-    #   * calculate first flatfield
-    #   * fit field gradient
-    #   * remove gradient from twilight

@@ -1,5 +1,6 @@
 import os
 import numpy
+import itertools
 import bottleneck as bn
 from copy import deepcopy as copy
 from tqdm import tqdm
@@ -20,6 +21,29 @@ from lvmdrp.core.positionTable import PositionTable
 from lvmdrp.core.spectrum1d import Spectrum1D, find_continuum, wave_little_interpol
 from lvmdrp.core import dataproducts as dp
 
+
+def polyfit2d(x, y, z, order=3):
+    """
+    Fit 2D polynomial
+    """
+    ncols = (order + 1) ** 2
+    G = numpy.zeros((x.size, ncols))
+    ij = itertools.product(range(order + 1), range(order + 1))
+    for k, (i, j) in enumerate(ij):
+        G[:, k] = x ** i * y ** j
+    m, null, null, null = numpy.linalg.lstsq(G, z, rcond=None)
+    return m
+
+def polyval2d(x, y, m):
+    """
+    Generate 2D polynomial
+    """
+    order = int(numpy.sqrt(len(m))) - 1
+    ij = itertools.product(range(order + 1), range(order + 1))
+    z = numpy.zeros_like(x)
+    for a, (i, j) in zip(m, ij):
+        z += a * x ** i * y ** j
+    return z
 
 def _read_pixwav_map(lamp: str, camera: str, pixels=None, waves=None):
     """read pixel-wavelength map from a lamp and camera
@@ -3341,6 +3365,62 @@ class RSS(FiberRows):
             trace_dict["COEFF"].append(coeff)
 
         return Table(trace_dict)
+
+    def coadd_flux(self, wrange):
+        """Return the coadded flux along a given wavelength window for all fibers"""
+
+        if self._wave is None:
+            log.warning("missing wavelength information, not able to consistently coadd flux")
+            return self
+
+        naxis1 = self._data.shape[1]
+        naxis2=self._data.shape[0]
+        w = WCS(self._header)
+        wave = w.spectral.pixel_to_world(numpy.arange(naxis1)).value*1e10
+        selwave=(wave>=wrange[0])*(wave<=wrange[1])
+        selwavemask=numpy.tile(selwave, (naxis2,1))
+
+        flux = self._data
+        mask = self._mask
+        flux[mask] = numpy.nan
+        masked = flux*selwavemask
+
+        coadded_flux = numpy.nanmean(masked, axis=1)
+        return coadded_flux
+
+    def fit_field_gradient(self, wrange, poly_deg):
+        """Fits a polynomial function to the IFU field"""
+        if self._slitmap is None:
+            log.warning("not able to fit gradient without fibermap information")
+            return self
+
+        fibermap = self._slitmap
+        telescope = fibermap["telescope"]
+
+        flux = self.coadd_flux(wrange=wrange)
+
+        x_e=fibermap["xpmm"].astype(float)[telescope=="SkyE"]
+        y_e=fibermap["ypmm"].astype(float)[telescope=="SkyE"]
+        x_w=fibermap["xpmm"].astype(float)[telescope=="SkyW"]
+        y_w=fibermap["ypmm"].astype(float)[telescope=="SkyW"]
+        x_s=fibermap["xpmm"].astype(float)[telescope=="Spec"]
+        y_s=fibermap["ypmm"].astype(float)[telescope=="Spec"]
+
+        flux = flux[telescope=="Sci"]
+        x=fibermap["xpmm"].astype(float)[telescope=="Sci"]
+        y=fibermap["ypmm"].astype(float)[telescope=="Sci"]
+
+        flux_med = numpy.nanmedian(flux)
+        flux_fact = flux / flux_med
+        select = numpy.isfinite(flux_fact)
+        coeffs = polyfit2d(x[select], y[select], flux_fact[select], poly_deg)
+
+        grad_model = polyval2d(x, y, coeffs)
+        grad_model_e = polyval2d(x_e, y_e, coeffs)
+        grad_model_w = polyval2d(x_w, y_w, coeffs)
+        grad_model_s = polyval2d(x_s, y_s, coeffs)
+
+        return x, y, flux, grad_model, grad_model_e, grad_model_w, grad_model_s
 
     def writeFitsData(self, out_rss, replace_masked=True, include_wave=False):
         """Writes information from a RSS object into a FITS file.

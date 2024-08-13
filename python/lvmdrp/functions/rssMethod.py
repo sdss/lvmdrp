@@ -1136,7 +1136,7 @@ def resample_wavelength(in_rss: str, out_rss: str, method: str = "linear",
     return new_rss
 
 
-def match_resolution(in_rss, out_rss, target_fwhm=None, min_fwhm=0.1, plot_fibers=[0, 900, 1943], display_plots=False):
+def match_resolution(in_rss, out_rss, target_fwhm=None, min_fwhm=0.1, plot_fibers=[0,300,600,900,1200,1400,1700], display_plots=False):
     """
     Homogenise the LSF of the RSS to a common spectral resolution (FWHM)
 
@@ -1157,7 +1157,7 @@ def match_resolution(in_rss, out_rss, target_fwhm=None, min_fwhm=0.1, plot_fiber
     min_fwhm : float, optional
         Minimum spectral resolution in FWHM allowed, by default 0.1 Angstrom
     plot_fibers : list[int], optional
-        List of fiber indices to plot, by default [0, 900, 1943]
+        List of fiber indices to plot, by default [0,300,600,900,1200,1400,1700]
     display_plots : bool, optional
         Show plot on screen or not, by default False
 
