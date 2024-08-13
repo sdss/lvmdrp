@@ -11,10 +11,9 @@ from __future__ import annotations
 from typing import Tuple, List
 from copy import deepcopy as copy
 import numpy as np
-import bottleneck as bn
 from astropy.table import Table
-from scipy.ndimage import median_filter
 from scipy import interpolate
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
 from lvmdrp import path, log, __version__ as drpver
 from lvmdrp.core.tracemask import TraceMask
@@ -26,6 +25,7 @@ from lvmdrp import main as drp
 from astropy import wcs
 from astropy.io import fits
 from astropy.stats import biweight_location
+from astropy.visualization import simple_norm
 import itertools
 
 
@@ -139,12 +139,31 @@ def remove_field_gradient(in_hflat, out_gflat, wrange, deg=1, display_plots=Fals
     grad_model_w = polyval2d(x_w, y_w, coeffs)
     grad_model_s = polyval2d(x_s, y_s, coeffs)
 
-    fig, axs = create_subplots(to_display=display_plots, nrows=1, ncols=3, figsize=(15,5))
+    fig, axs = create_subplots(to_display=display_plots, nrows=1, ncols=3, figsize=(15,6), sharex=True, sharey=True, layout="constrained")
     flux_c = flux / grad_model
     flux_std = np.nanstd(flux)
-    axs[0].scatter(x, y, s=10, vmin=flux_med-2*flux_std, vmax=flux_med+2*flux_std, lw=0, c=flux, cmap="rainbow")
-    axs[1].scatter(x, y, s=10, vmin=0.95, vmax=1.05, lw=0, c=grad_model, cmap="coolwarm")
-    axs[2].scatter(x, y, s=10, vmin=flux_med-2*flux_std, vmax=flux_med+2*flux_std, lw=0, c=flux_c, cmap="rainbow")
+    sc_or = axs[0].scatter(x, y, s=40, marker="H", vmin=flux_med-4*flux_std, vmax=flux_med+4*flux_std, lw=0, c=flux, cmap="rainbow")
+    sc_gr = axs[1].scatter(x, y, s=40, marker="H", lw=0, c=grad_model, cmap="coolwarm", norm=simple_norm(grad_model, stretch="log"))
+
+    axi_or = inset_axes(
+        axs[0],
+        width="80%",  # width: 50% of parent_bbox width
+        height="2%",  # height: 5%
+        loc="upper right",
+    )
+    axi_or.tick_params(labelleft=False, labelsize="x-small")
+    fig.colorbar(sc_or, cax=axi_or, orientation="horizontal")
+
+    ax_gr = inset_axes(
+        axs[1],
+        width="80%",  # width: 50% of parent_bbox width
+        height="2%",  # height: 5%
+        loc="upper right",
+    )
+    ax_gr.tick_params(labelleft=False, labelsize="x-small")
+    fig.colorbar(sc_gr, cax=ax_gr, orientation="horizontal")
+
+    axs[2].scatter(x, y, s=40, marker="H", vmin=flux_med-2*flux_std, vmax=flux_med+2*flux_std, lw=0, c=flux_c, cmap="rainbow")
     axs[0].set_title("Original", loc="left")
     axs[1].set_title("Gradient", loc="left")
     axs[2].set_title("Original / Gradient", loc="left")
@@ -164,7 +183,7 @@ def remove_field_gradient(in_hflat, out_gflat, wrange, deg=1, display_plots=Fals
     new_fflat.writeto(out_gflat, overwrite=True)
 
 def fit_continuum(spectrum: Spectrum1D, mask_bands: List[Tuple[float,float]],
-                  median_box: int, niter: int, threshold: Tuple[float,float]|float, **kwargs):
+                  median_box: int, niter: int, threshold: Tuple[float,float]|float, knots: int|np.ndarray):
     """Fit a continuum to a spectrum using a spline interpolation
 
     Given a spectrum, this function fits a continuum using a spline
@@ -184,6 +203,8 @@ def fit_continuum(spectrum: Spectrum1D, mask_bands: List[Tuple[float,float]],
     threshold : float or tuple of floats
         Threshold to mask outliers, if tuple, the first element is the lower
         threshold and the second element is the upper threshold
+    knots : int or np.ndarray[float]
+        Number of knots or actual knots to use in the spline fitting
 
     Returns
     -------
@@ -208,17 +229,21 @@ def fit_continuum(spectrum: Spectrum1D, mask_bands: List[Tuple[float,float]],
     data = spectrum._data[good_pix]
 
     # define spline fitting parameters
-    nknots = kwargs.pop("nknots", 100)
-    knots = np.linspace(wave[wave.size // nknots], wave[-1 * wave.size // nknots], nknots)
+    if isinstance(knots, int):
+        nknots = knots
+        knots = np.linspace(wave[wave.size // nknots], wave[-1 * wave.size // nknots], nknots)
+    elif isinstance(knots, (list, tuple, np.ndarray)):
+        knots = np.asarray(knots)
+    else:
+        raise TypeError(f"invalid type for {knots = }, {type(knots)}")
     if mask_bands:
         mask = np.ones_like(knots, dtype="bool")
         for iwave, fwave in mask_bands:
             mask[(iwave<=knots)&(knots<=fwave)] = False
         knots = knots[mask]
-    kwargs.update({"t": knots, "task": -1})
 
     # fit first spline
-    tck = interpolate.splrep(wave, data, **kwargs)
+    tck = interpolate.splrep(wave, data, t=knots, task=-1)
     spline = interpolate.splev(spectrum._wave, tck)
 
     # iterate to mask outliers and update spline
@@ -233,7 +258,7 @@ def fit_continuum(spectrum: Spectrum1D, mask_bands: List[Tuple[float,float]],
         masked_pixels |= mask
 
         # update spline
-        tck = interpolate.splrep(spectrum._wave[~masked_pixels], spectrum._data[~masked_pixels], **kwargs)
+        tck = interpolate.splrep(spectrum._wave[~masked_pixels], spectrum._data[~masked_pixels], t=knots, task=-1)
         new_spline = interpolate.splev(spectrum._wave, tck)
         continuum_models.append(new_spline)
         if np.mean(np.abs(new_spline - spline) / spline) <= 0.01:
