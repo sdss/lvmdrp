@@ -20,6 +20,7 @@ from lvmdrp import path, log, __version__ as drpver
 from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.core.spectrum1d import Spectrum1D
 from lvmdrp.core.rss import RSS
+from lvmdrp.core.fluxcal import butter_lowpass_filter
 from lvmdrp.core.plot import create_subplots, save_fig
 from lvmdrp import main as drp
 from astropy import wcs
@@ -243,178 +244,179 @@ def fit_continuum(spectrum: Spectrum1D, mask_bands: List[Tuple[float,float]],
     best_continuum = continuum_models.pop(-1)
     return best_continuum, continuum_models, masked_pixels, tck
 
-def fit_fiberflat(in_twilight: str, out_flat: str, out_rss: str, interpolate_bad: bool = True, mask_bands: List[Tuple[float,float]] = [],
-                  median_box: int = 5, niter: int = 1000, threshold: Tuple[float,float]|float = (0.5,2.0),
-                  plot_fibers: List[int] = [0,300,600,900,1200,1400,1700],
-                  display_plots: bool = False, **kwargs) -> List[RSS]:
-    """Fit fiber throughput for a twilight sequence
+# def fit_fiberflat(in_twilight: str, out_flat: str, out_rss: str, interpolate_bad: bool = True, mask_bands: List[Tuple[float,float]] = [],
+#                   median_box: int = 5, niter: int = 1000, threshold: Tuple[float,float]|float = (0.5,2.0),
+#                   plot_fibers: List[int] = [0,300,600,900,1200,1400,1700],
+#                   display_plots: bool = False, **kwargs) -> List[RSS]:
+#     """Fit fiber throughput for a twilight sequence
 
-    Given a list of three extracted and wavelength calibrated twilight
-    exposures (spec 1, 2, and 3), this function fits the fiber throughput
-    across the entire spectrograph channel using an iterative spline fitting
-    method.
+#     Given a list of three extracted and wavelength calibrated twilight
+#     exposures (spec 1, 2, and 3), this function fits the fiber throughput
+#     across the entire spectrograph channel using an iterative spline fitting
+#     method.
 
-    Parameters
-    ----------
-    in_twilight : str
-        Input path for the twilight exposure
-    out_flat : str
-        Output path for the fitted fiberflat
-    out_rss : str
-        Output path for the flatfielded twilight
-    interpolate_bad : bool, optional
-        Interpolate bad pixels, by default True
-    mask_bands : list, optional
-        List of wavelength bands to mask, by default []
-    median_box : int, optional
-        Size of the median filter box, by default 5
-    niter : int, optional
-        Number of iterations to fit the continuum, by default 1000
-    threshold : float, optional
-        Threshold to mask outliers, by default (0.5,2.0)
-    plot_fibers : list, optional
-        List of fibers to plot, by default [0,300,600,900,1200,1400,1700]
-    display_plots : bool, optional
-        Display plots, by default False
+#     Parameters
+#     ----------
+#     in_twilight : str
+#         Input path for the twilight exposure
+#     out_flat : str
+#         Output path for the fitted fiberflat
+#     out_rss : str
+#         Output path for the flatfielded twilight
+#     interpolate_bad : bool, optional
+#         Interpolate bad pixels, by default True
+#     mask_bands : list, optional
+#         List of wavelength bands to mask, by default []
+#     median_box : int, optional
+#         Size of the median filter box, by default 5
+#     niter : int, optional
+#         Number of iterations to fit the continuum, by default 1000
+#     threshold : float, optional
+#         Threshold to mask outliers, by default (0.5,2.0)
+#     plot_fibers : list, optional
+#         List of fibers to plot, by default [0,300,600,900,1200,1400,1700]
+#     display_plots : bool, optional
+#         Display plots, by default False
 
-    Returns
-    -------
-    new_flats : list
-        List of RSS objects for each twilight exposure with the fitted fiber throughput
-    """
-    twilight = RSS.from_file(in_twilight)
+#     Returns
+#     -------
+#     new_flats : list
+#         List of RSS objects for each twilight exposure with the fitted fiber throughput
+#     """
+#     twilight = RSS.from_file(in_twilight)
 
-    channel = twilight._header["CCD"]
-    expnum = twilight._header["EXPOSURE"]
-    unit = twilight._header["BUNIT"]
+#     channel = twilight._header["CCD"]
+#     expnum = twilight._header["EXPOSURE"]
+#     unit = twilight._header["BUNIT"]
 
-    ori_flat = copy(twilight)
-    new_flat = copy(twilight)
+#     ori_flat = copy(twilight)
+#     new_flat = copy(twilight)
 
-    # mask bad pixels
-    twilight._mask |= np.isnan(twilight._data) | (twilight._data < 0) | np.isinf(twilight._data)
-    twilight._data[twilight._mask] = np.nan
+#     # mask bad pixels
+#     twilight._mask |= np.isnan(twilight._data) | (twilight._data < 0) | np.isinf(twilight._data)
+#     twilight._data[twilight._mask] = np.nan
 
-    # interpolate bad pixels
-    if interpolate_bad:
-        twilight.interpolate_data(axis="X", reset_mask=False)
+#     # interpolate bad pixels
+#     if interpolate_bad:
+#         twilight.interpolate_data(axis="X", reset_mask=False)
 
-    # mask wavelength bands
-    if mask_bands:
-        for iwave, fwave in mask_bands:
-            twilight._mask |= (iwave <= twilight._wave) & (twilight._wave <= fwave)
-            twilight._data[twilight._mask] = np.nan
+#     # mask wavelength bands
+#     if mask_bands:
+#         for iwave, fwave in mask_bands:
+#             twilight._mask |= (iwave <= twilight._wave) & (twilight._wave <= fwave)
+#             twilight._data[twilight._mask] = np.nan
 
-    # remove high-frequency features and update mask
-    twilight._data = median_filter(twilight._data, (1,median_box))
-    twilight._mask |= np.isnan(twilight._data)
+#     # remove high-frequency features and update mask
+#     twilight._data = median_filter(twilight._data, (1,median_box))
+#     twilight._mask |= np.isnan(twilight._data)
 
-    # diplay plots
-    fig, axs = create_subplots(to_display=display_plots,
-                               nrows=len(plot_fibers), ncols=1, sharex=True,
-                               figsize=(15,3*len(plot_fibers)), layout="constrained")
-    fig.suptitle(f"Twilight flat for {channel = } and {expnum = }")
-    fig.supxlabel("Wavelength (Angstrom)")
-    fig.supylabel(f"Counts ({unit})")
+#     # diplay plots
+#     fig, axs = create_subplots(to_display=display_plots,
+#                                nrows=len(plot_fibers), ncols=1, sharex=True,
+#                                figsize=(15,3*len(plot_fibers)), layout="constrained")
+#     fig.suptitle(f"Twilight flat for {channel = } and {expnum = }")
+#     fig.supxlabel("Wavelength (Angstrom)")
+#     fig.supylabel(f"Counts ({unit})")
 
-    if mask_bands is not None:
-        for mask in mask_bands:
-            for ax in axs:
-                ax.axvspan(*mask, color="0.9")
+#     if mask_bands is not None:
+#         for mask in mask_bands:
+#             for ax in axs:
+#                 ax.axvspan(*mask, color="0.9")
 
-    for ifiber in range(twilight._fibers):
-        fiber = twilight[ifiber]
-        ori_fiber = ori_flat[ifiber]
+#     for ifiber in range(twilight._fibers):
+#         fiber = twilight[ifiber]
+#         ori_fiber = ori_flat[ifiber]
 
-        try:
-            best_continuum, continuum_models, masked_pixels, tck = fit_continuum(
-                spectrum=fiber, mask_bands=mask_bands,
-                median_box=median_box, niter=niter, threshold=threshold, **kwargs
-            )
-        except (ValueError, TypeError) as e:
-            log.error(f"while fitting fiber throughput for fiber {ifiber}: {e}")
-            new_flat._data[ifiber] = np.nan
-            new_flat._mask[ifiber] = True
-            continue
+#         try:
+#             best_continuum, continuum_models, masked_pixels, tck = fit_continuum(
+#                 spectrum=fiber, mask_bands=mask_bands,
+#                 median_box=median_box, niter=niter, threshold=threshold, **kwargs
+#             )
+#         except (ValueError, TypeError) as e:
+#             log.error(f"while fitting fiber throughput for fiber {ifiber}: {e}")
+#             new_flat._data[ifiber] = np.nan
+#             new_flat._mask[ifiber] = True
+#             continue
 
-        if ifiber in plot_fibers:
-            good_pix = ~fiber._mask
-            iax = list(plot_fibers).index(ifiber)
+#         if ifiber in plot_fibers:
+#             good_pix = ~fiber._mask
+#             iax = list(plot_fibers).index(ifiber)
 
-            # plot original fiber and processed fiber
-            axs[iax].set_title(f"Fiber {ifiber+1}", loc="left")
-            axs[iax].step(fiber._wave[good_pix], ori_fiber._data[good_pix], color="0.7", lw=1)
-            axs[iax].step(fiber._wave[good_pix], fiber._data[good_pix], color="0.2", lw=1)
+#             # plot original fiber and processed fiber
+#             axs[iax].set_title(f"Fiber {ifiber+1}", loc="left")
+#             axs[iax].step(fiber._wave[good_pix], ori_fiber._data[good_pix], color="0.7", lw=1)
+#             axs[iax].step(fiber._wave[good_pix], fiber._data[good_pix], color="0.2", lw=1)
 
-            # plot masked pixels and fitted splines
-            for continuum_model in continuum_models:
-                axs[iax].plot(fiber._wave[masked_pixels], fiber._data[masked_pixels], ".", color="tab:blue", ms=5, mew=0)
-                axs[iax].plot(fiber._wave, continuum_model, color="tab:red", lw=1, alpha=0.5, zorder=niter)
-            axs[iax].plot(tck[0], np.zeros_like(tck[0]), ".k")
-            axs[iax].step(fiber._wave, best_continuum, color="tab:red", lw=2)
+#             # plot masked pixels and fitted splines
+#             for continuum_model in continuum_models:
+#                 axs[iax].plot(fiber._wave[~masked_pixels], fiber._data[~masked_pixels], ".", color="tab:red", ms=7, mew=0, alpha=0.5)
+#                 axs[iax].plot(fiber._wave[masked_pixels], fiber._data[masked_pixels], ".", color="tab:blue", ms=5, mew=0)
+#                 axs[iax].plot(fiber._wave, continuum_model, color="tab:red", lw=1, alpha=0.5, zorder=niter)
+#             axs[iax].plot(tck[0], np.zeros_like(tck[0]), ".k")
+#             axs[iax].step(fiber._wave, best_continuum, color="tab:red", lw=2)
 
-        new_flat._data[ifiber] = best_continuum
+#         new_flat._data[ifiber] = best_continuum
 
-    save_fig(
-        fig,
-        product_path=out_rss,
-        to_display=display_plots,
-        label="twilight_continuum_fit",
-        figure_path="qa"
-    )
+#     save_fig(
+#         fig,
+#         product_path=out_rss,
+#         to_display=display_plots,
+#         label="twilight_continuum_fit",
+#         figure_path="qa"
+#     )
 
-    # normalize by median fiber
-    median_fiber = bn.nanmedian(new_flat._data, axis=0)
-    # median_fiber = bn.nanmean(new_flat._data, axis=0)
-    new_flat._data = new_flat._data / median_fiber
-    new_flat._error = new_flat._error / median_fiber
-    # new_flat._data[~np.isfinite(new_flat._data)] = 1
-    # new_flat._mask[...] = False
+#     # normalize by median fiber
+#     median_fiber = bn.nanmedian(new_flat._data, axis=0)
+#     # median_fiber = bn.nanmean(new_flat._data, axis=0)
+#     new_flat._data = new_flat._data / median_fiber
+#     new_flat._error = new_flat._error / median_fiber
+#     # new_flat._data[~np.isfinite(new_flat._data)] = 1
+#     # new_flat._mask[...] = False
 
-    # flattield original twilight
-    ori_flat._data = ori_flat._data / new_flat._data
-    med_fiberflat = np.median(ori_flat._data, axis=0)
+#     # flattield original twilight
+#     ori_flat._data = ori_flat._data / new_flat._data
+#     med_fiberflat = np.nanmedian(ori_flat._data, axis=0)
 
-    # plot flatfielded twilight flat
-    fig, axs = create_subplots(to_display=display_plots, figsize=(15,7), sharex=True, layout="constrained")
-    axs.set_title(f"Flatfielded twilight for camera = {channel}", loc="left")
-    fig.supxlabel("Wavelength (Angstrom)")
-    fig.supylabel("Normalized counts")
+#     # plot flatfielded twilight flat
+#     fig, axs = create_subplots(to_display=display_plots, figsize=(15,7), sharex=True, layout="constrained")
+#     axs.set_title(f"Flatfielded twilight for camera = {channel}", loc="left")
+#     fig.supxlabel("Wavelength (Angstrom)")
+#     fig.supylabel("Normalized counts")
 
-    flat_error = ori_flat._data / med_fiberflat
-    med_flat_error = np.median(flat_error, axis=0)
-    std_flat_error = np.std(flat_error, axis=0)
-    med_error = np.median(ori_flat._error, axis=0) / med_fiberflat
-    for ifiber in range(twilight._fibers):
-        if ifiber in plot_fibers:
-            axs.step(ori_flat._wave, flat_error[ifiber], color="0.2", alpha=0.5, lw=1)
-    axs.step(ori_flat._wave, med_flat_error, color="tab:red", lw=2)
-    axs.step(ori_flat._wave, med_flat_error - std_flat_error, color="tab:blue", lw=2)
-    axs.step(ori_flat._wave, med_flat_error + std_flat_error, color="tab:blue", lw=2)
-    axs.step(ori_flat._wave, med_flat_error - med_error, color="tab:green", lw=2)
-    axs.step(ori_flat._wave, med_flat_error + med_error, color="tab:green", lw=2)
-    axs.set_ylim(0.8, 1.2)
+#     flat_error = ori_flat._data / med_fiberflat
+#     med_flat_error = np.nanmedian(flat_error, axis=0)
+#     std_flat_error = np.nanstd(flat_error, axis=0)
+#     med_error = np.median(ori_flat._error, axis=0) / med_fiberflat
+#     for ifiber in range(twilight._fibers):
+#         if ifiber in plot_fibers:
+#             axs.step(ori_flat._wave, flat_error[ifiber], color="0.2", alpha=0.5, lw=1)
+#     axs.step(ori_flat._wave, med_flat_error, color="tab:red", lw=2)
+#     axs.step(ori_flat._wave, med_flat_error - std_flat_error, color="tab:blue", lw=2)
+#     axs.step(ori_flat._wave, med_flat_error + std_flat_error, color="tab:blue", lw=2)
+#     axs.step(ori_flat._wave, med_flat_error - med_error, color="tab:green", lw=2)
+#     axs.step(ori_flat._wave, med_flat_error + med_error, color="tab:green", lw=2)
+#     axs.set_ylim(0.8, 1.2)
 
-    save_fig(
-        fig,
-        product_path=out_rss,
-        to_display=display_plots,
-        label="twilight_flatfielded",
-        figure_path="qa"
-    )
+#     save_fig(
+#         fig,
+#         product_path=out_rss,
+#         to_display=display_plots,
+#         label="twilight_flatfielded",
+#         figure_path="qa"
+#     )
 
-    # new_flats = new_flat.splitRSS(parts=len(rsss), axis=1)
-    # [new_flat.setSlitmap(rsss[0]._slitmap) for new_flat in new_flats]
+#     # new_flats = new_flat.splitRSS(parts=len(rsss), axis=1)
+#     # [new_flat.setSlitmap(rsss[0]._slitmap) for new_flat in new_flats]
 
-    # write output fiberflat
-    log.info(f"writing twilight flat to {out_flat}")
-    new_flat.writeFitsData(out_flat)
+#     # write output fiberflat
+#     log.info(f"writing twilight flat to {out_flat}")
+#     new_flat.writeFitsData(out_flat)
 
-    # write output faltfielded explosure
-    log.info(f"writing flatfielded twilight to {out_rss}")
-    ori_flat.writeFitsData(out_rss)
+#     # write output faltfielded explosure
+#     log.info(f"writing flatfielded twilight to {out_rss}")
+#     ori_flat.writeFitsData(out_rss)
 
-    return new_flat
+#     return new_flat
 
 def combine_twilight_sequence(fflats: List[RSS]) -> RSS:
     """Combine twilight exposures into a single RSS object
@@ -553,3 +555,60 @@ def resample_fiberflat(mflat: RSS, channel: str, mwave_paths: str,
     )
 
     return new_flat
+
+def fit_fiberflat(in_twilight: str, out_flat: str, out_rss: str,
+                  lsf_offset: float = 1.0,
+                  plot_fibers: List[int] = [0,300,600,900,1200,1400,1700],
+                  display_plots: bool = False):
+
+    twilight = RSS.from_file(in_twilight)
+
+    median_fiber = np.nanmedian(twilight._data, axis=0)
+    new_flat = copy(twilight)
+    new_flat._data = twilight._data / median_fiber[None]
+
+    for ifiber in range(new_flat._fibers):
+        f = new_flat.getSpec(ifiber)
+        if f._mask.all():
+            continue
+
+        # interpolating over masked pixels
+        mask = np.isfinite(f._data)
+        # f._data = np.interp(f._wave, f._wave[mask], f._data[mask])
+
+        # first filtering of high-frequency features
+        f._data[mask] = butter_lowpass_filter(f._data[mask], 0.1, 2)
+        new_flat._data[ifiber] = f._data
+
+        # further smoothing of remaining unwanted features
+        tck = interpolate.splrep(f._wave[mask], f._data[mask], s=0.1)
+        new_flat._data[ifiber] = interpolate.splev(f._wave, tck)
+
+    flat_twilight = copy(twilight)
+    flat_twilight._data = twilight._data / new_flat._data
+
+    fig, ax = create_subplots(to_display=display_plots, figsize=(15,5), sharex=True, sharey=True, layout="constrained")
+    for ifiber in plot_fibers:
+        ln, = ax.step(twilight._wave, twilight._data[ifiber] / np.nanmedian(twilight._data, axis=0), lw=1, where="mid")
+        ax.plot(new_flat._wave, new_flat._data[ifiber], lw=1, color=ln.get_color())
+    fig.supxlabel("Wavelength (Angstrom)")
+    fig.supylabel("Normalized counts")
+    save_fig(fig, product_path=out_flat, to_display=display_plots, figure_path="qa", label="fiberflat")
+
+    # write output fiberflat
+    log.info(f"writing flat field to {out_flat}")
+    new_flat.writeFitsData(out_flat, replace_masked=False)
+
+    # write output faltfielded explosure
+    log.info(f"writing flatfielded twilight to {out_rss}")
+    flat_twilight.writeFitsData(out_rss)
+
+    return new_flat
+
+
+# TODO:
+    # - match resolution
+    # - iterate:
+    #   * calculate first flatfield
+    #   * fit field gradient
+    #   * remove gradient from twilight
