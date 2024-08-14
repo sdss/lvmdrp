@@ -10,6 +10,7 @@ from itertools import product
 from copy import deepcopy as copy
 from multiprocessing import Pool, cpu_count
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+from matplotlib.gridspec import GridSpec
 
 import numpy
 import bottleneck as bn
@@ -385,16 +386,18 @@ def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=Non
     expnum = image._header["EXPOSURE"]
     camera = image._header["CCD"]
 
+    # unpack axes
+    axs_cc, axs_fb = axs
     # calculate thermal shifts
-    column_shifts = image.measure_fiber_shifts(fiber_model, columns=columns, column_width=column_width, shift_range=shift_range)
+    column_shifts = image.measure_fiber_shifts(fiber_model, columns=columns, column_width=column_width, shift_range=shift_range, axs=axs_cc)
     # shifts stats
     median_shift = numpy.nanmedian(column_shifts, axis=0)
     std_shift = numpy.nanstd(column_shifts, axis=0)
     if numpy.abs(median_shift) > 0.5:
-        log.warning(f"large thermal shift measured: {column_shifts} pixels for {mjd = }, {expnum = }, {camera = }")
-        log.warning(f"{median_shift = :.4f}+/-{std_shift = :.4f} pixels")
+        log.warning(f"large thermal shift measured: {','.join(map(str, column_shifts))} pixels for {mjd = }, {expnum = }, {camera = }")
+        log.warning(f"measured shifts median+/-stddev = {median_shift:.4f}+/-{std_shift:.4f} pixels")
     else:
-        log.info(f"median shift in fibers: {median_shift = :.4f}+/-{std_shift = :.4f} pixels for {mjd = }, {expnum = }, {camera = }")
+        log.info(f"measured shifts median+/-stddev = {median_shift:.4f}+/-{std_shift:.4f} pixels for {mjd = }, {expnum = }, {camera = }")
 
     # apply average shift to the zeroth order trace coefficients
     trace_cent_fixed = copy(trace_cent)
@@ -413,13 +416,13 @@ def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=Non
             y_data = numpy.nanmedian(image._data[bmin:bmax, c-column_width:c+column_width], axis=1)
             y_model = _normalize_peaks(y_model)
             y_data = _normalize_peaks(y_data)
-            # axs[j].step(x, y_models * norm, color="0.7", lw=1, alpha=0.3)
-            axs[j].step(x, y_data, color="tab:red", lw=1, label="data" if i == 0 else None)
-            axs[j].step(x, y_model, color="0.2", lw=1, label="model" if i == 0 else None)
-            axs[j].step(x+column_shifts[j], numpy.interp(x+column_shifts[j], x, y_model), color="tab:blue", lw=1, label="corrected mod." if i == 0 else None)
-        axs[j].set_title(f"measured shift {column_shifts[j]:.4f} pixel @ column {c} with SNR = {numpy.sqrt(y_data.mean()):.2f}")
-
-    axs[0].legend()
+            # axs_fib[j].step(x, y_models * norm, color="0.7", lw=0.7, alpha=0.3)
+            axs_fb[j].step(x, y_data, color="0.2", lw=1.5, label="data" if i == 0 else None)
+            axs_fb[j].step(x, y_model, color="tab:blue", lw=1, label="model" if i == 0 else None)
+            axs_fb[j].step(x+column_shifts[j], numpy.interp(x+column_shifts[j], x, y_model), color="tab:red", lw=1, label="corr. model" if i == 0 else None)
+        axs_fb[j].set_title(f"measured shift {column_shifts[j]:.4f} pixel @ column {c} with SNR = {numpy.sqrt(y_data.mean()):.2f}")
+        axs_fb[j].set_ylim(-0.05, 1.3)
+    axs_fb[0].legend(loc=1, frameon=False, ncols=3)
 
     # deltas = TraceMask(data=numpy.zeros_like(trace_cent._data), mask=numpy.ones_like(trace_cent._data, dtype=bool))
     # deltas._data[:, columns] = column_shifts
@@ -3196,6 +3199,10 @@ def extract_spectra(
         log.info(f"extraction using aperture of {aperture} pixels")
 
     img = loadImage(in_image)
+    mjd = img._header["SMJD"]
+    camera = img._header["CCD"]
+    expnum = img._header["EXPOSURE"]
+
 
     # orient image so that the cross-dispersion is along the first and the dispersion is along the second array axis
     if disp_axis == "X" or disp_axis == "x":
@@ -3211,7 +3218,36 @@ def extract_spectra(
     else:
         fiber_model = None
 
-    fig, axs = plt.subplots(len(columns), 1, figsize=(15,2*len(columns)), sharex=True, layout="constrained")
+    shift_range = [-4,4]
+    fig = plt.figure(figsize=(15, 3*len(columns)), layout="constrained")
+    fig.suptitle(f"Thermal fiber shifts for {mjd = }, {camera = }, {expnum = }")
+    gs = GridSpec(len(columns)+1, 15, figure=fig)
+    axs_cc, axs_fb = [], []
+    for icol in range(len(columns)):
+        axs_cc.append(fig.add_subplot(gs[icol, :3], sharex=axs_cc[-1] if icol > 0 else None))
+        axs_fb.append(fig.add_subplot(gs[icol, 3:], sharex=axs_fb[-1] if icol > 0 else None, sharey=axs_fb[-1] if icol > 0 else None))
+
+        if icol != len(columns)-1:
+            axs_cc[-1].tick_params(labelbottom=False)
+            axs_fb[-1].tick_params(labelbottom=False)
+    ax_shift = fig.add_subplot(gs[-1:, :])
+    axs_cc[0].set_title("Cross-correlation")
+    axs_cc[-1].set_xlabel("Shift (pixel)")
+    axs_fb[-1].set_xlabel("Y (pixel)")
+    axs_cc[-1].set_xlim(shift_range)
+
+    # fix centroids for thermal shifts
+    log.info(f"measuring fiber thermal shifts @ columns: {','.join(map(str, columns))}")
+    trace_mask, shifts, _ = _fix_fiber_thermal_shifts(img, trace_mask, 2.5,
+                                                      fiber_model=fiber_model,
+                                                      trace_amp=10000,
+                                                      columns=columns,
+                                                      column_width=column_width,
+                                                      shift_range=shift_range, axs=[axs_cc, axs_fb])
+    # save columns measured for thermal shifts
+    plot_fiber_thermal_shift(columns, shifts, ax=ax_shift)
+    save_fig(fig, product_path=out_rss, to_display=display_plots, figure_path="qa", label="fiber_thermal_shifts")
+
     if method == "optimal":
         # check if fwhm trace is given and exists
         if in_fwhm is None or not os.path.isfile(in_fwhm):
@@ -3220,14 +3256,6 @@ def extract_spectra(
             trace_fwhm._coeffs = numpy.ones((trace_mask._data.shape[0], 1)) * float(fwhm)
         else:
             trace_fwhm = TraceMask.from_file(in_fwhm)
-
-        # fix centroids for thermal shifts
-        trace_mask, shifts, _ = _fix_fiber_thermal_shifts(img, trace_mask, trace_fwhm,
-                                                          fiber_model=fiber_model,
-                                                          trace_amp=10000,
-                                                          columns=columns,
-                                                          column_width=column_width,
-                                                          shift_range=[-2,2], axs=axs)
 
         # set up parallel run
         if parallel == "auto":
@@ -3274,15 +3302,6 @@ def extract_spectra(
     elif method == "aperture":
         trace_fwhm = None
 
-        # fix centroids for thermal shifts
-        log.info("measuring fiber thermal shifts")
-        trace_mask, shifts, _ = _fix_fiber_thermal_shifts(img, trace_mask, trace_fwhm or 2.5,
-                                                          fiber_model=fiber_model,
-                                                          trace_amp=10000,
-                                                          columns=columns,
-                                                          column_width=column_width,
-                                                          shift_range=[-2,2], axs=axs)
-
         (data, error, mask) = img.extractSpecAperture(trace_mask, aperture)
 
         # apply aperture correction given in in_acorr
@@ -3294,14 +3313,6 @@ def extract_spectra(
                 error = error * acorr._data
         else:
             log.warning("no aperture correction applied")
-
-    # save columns measured for thermal shifts
-    log.info("plotting fiber thermal shifts")
-    save_fig(fig, product_path=out_rss, to_display=display_plots, figure_path="qa", label="columns_thermal_shifts")
-    # plot thermal shifts
-    fig, ax = create_subplots(to_display=display_plots, figsize=(10, 5))
-    plot_fiber_thermal_shift(columns, shifts, ax=ax)
-    save_fig(fig, product_path=out_rss, to_display=display_plots, figure_path="qa", label="fiber_thermal_shifts")
 
     # mask non-exposed standard fibers
     slitmap = img.getSlitmap()

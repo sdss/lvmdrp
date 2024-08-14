@@ -705,7 +705,7 @@ class Image(Header):
     def __ge__(self, other):
         return self._data >= other
 
-    def measure_fiber_shifts(self, ref_image, columns=[500, 1000, 1500, 2000, 2500, 3000], column_width=25, shift_range=[-5,5]):
+    def measure_fiber_shifts(self, ref_image, columns=[500, 1000, 1500, 2000, 2500, 3000], column_width=25, shift_range=[-5,5], axs=None):
         '''Measure the (thermal, flexure, ...) shift between the fiber (traces) in 2 detrended images in the y (cross dispersion) direction.
 
         Uses cross-correlations between (medians of a number of) columns to determine
@@ -740,7 +740,7 @@ class Image(Header):
             snr = numpy.sqrt(numpy.nanmedian(self._data[50:-50,c-column_width:c+column_width], axis=1))
 
             if numpy.nanmedian(snr) > 5:
-                _, shifts[j], _ = _cross_match_float(s1, s2, numpy.array([1.0]), shift_range)
+                _, shifts[j], _ = _cross_match_float(s1, s2, numpy.array([1.0]), shift_range, ax=axs[j])
             else:
                 log.warning(f"too low SNR to reliably measure thermal shift at column {c}: {numpy.nanmedian(snr):.4f}, assuming shift = 0.0")
                 shifts[j] = 0.0
