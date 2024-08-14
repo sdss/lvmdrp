@@ -555,6 +555,9 @@ def fit_fiberflat(in_twilight: str, out_flat: str, out_rss: str,
             tck = interpolate.splrep(f._wave[mask], f._data[mask], s=0.1)
             new_flat._data[ifiber] = interpolate.splev(f._wave, tck)
 
+        # reset pixel mask
+        new_flat._mask[:] = new_flat._mask.all(axis=1)[:, None]
+
         flat_twilight = copy(twilight)
         flat_twilight._data = flat_twilight._data / new_flat._data
 
@@ -612,7 +615,7 @@ def fit_fiberflat(in_twilight: str, out_flat: str, out_rss: str,
 
     # write output fiberflat
     log.info(f"writing flat field to {out_flat}")
-    new_flat.writeFitsData(out_flat, replace_masked=False)
+    new_flat.writeFitsData(out_flat)
 
     # write output faltfielded explosure
     log.info(f"writing flatfielded twilight to {out_rss}")

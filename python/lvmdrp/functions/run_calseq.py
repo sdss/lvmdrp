@@ -1644,7 +1644,7 @@ def create_twilight_fiberflats(mjd: int, use_fiducial_cals: bool = True, expnums
             xflat_path = path.full("lvm_anc", drpver=drpver, kind="x", imagetype=flat.imagetyp, tileid=flat.tileid, mjd=flat.mjd, camera=channel, expnum=expnum)
             wflat_path = path.full("lvm_anc", drpver=drpver, kind="w", imagetype=flat.imagetyp, tileid=flat.tileid, mjd=flat.mjd, camera=channel, expnum=expnum)
             hflat_path = path.full("lvm_anc", drpver=drpver, kind="h", imagetype=flat.imagetyp, tileid=flat.tileid, mjd=flat.mjd, camera=channel, expnum=expnum)
-            gflat_path = path.full("lvm_anc", drpver=drpver, kind="g", imagetype=flat.imagetyp, tileid=flat.tileid, mjd=flat.mjd, camera=channel, expnum=expnum)
+            # gflat_path = path.full("lvm_anc", drpver=drpver, kind="g", imagetype=flat.imagetyp, tileid=flat.tileid, mjd=flat.mjd, camera=channel, expnum=expnum)
 
             # spectrograph stack xflats
             rss_tasks.stack_spectrographs(in_rsss=xflat_paths, out_rss=xflat_path)
@@ -1657,7 +1657,7 @@ def create_twilight_fiberflats(mjd: int, use_fiducial_cals: bool = True, expnums
             rss_tasks.resample_wavelength(in_rss=wflat_path, out_rss=hflat_path, wave_disp=0.5, wave_range=SPEC_CHANNELS[channel])
 
             # match LSF in all fibers
-            rss_tasks.match_lsf(in_rss=hflat_path, out_rss=hflat_path, min_fwhm=1.0)
+            rss_tasks.match_resolution(in_rss=hflat_path, out_rss=hflat_path, target_fwhm=3.0)
 
             # fit fiber throughput
             fflat = fit_fiberflat(in_twilight=hflat_path, out_flat=fflat_path, out_rss=fflat_flatfielded_path, remove_gradient=True, niter=4, display_plots=display_plots)
@@ -1668,15 +1668,6 @@ def create_twilight_fiberflats(mjd: int, use_fiducial_cals: bool = True, expnums
             mwave = TraceMask.from_spectrographs(*[TraceMask.from_file(master_wave) for master_wave in calibs["wave"][channel]])
             mlsf = TraceMask.from_spectrographs(*[TraceMask.from_file(master_lsf) for master_lsf in calibs["lsf"][channel]])
 
-            fflat_flatfielded = RSS.from_file(fflat_flatfielded_path)
-            gflat = RSS.from_file(gflat_path)
-            gradient = copy(gflat)
-            gradient._data = fflat_flatfielded._data / gflat._data
-            fflat._data /= gradient._data
-            fflat._mask |= np.isnan(fflat._data)
-            fflat = fflat.interpolate_data(axis="X")
-            # fflat = fflat.interpolate_data(axis="Y")
-            fflat.writeFitsData(fflat_path)
             fflat.set_wave_trace(mwave)
             fflat.set_lsf_trace(mlsf)
             fflat = fflat.to_native_wave(method="linear", interp_density=False, return_density=False)
@@ -1695,7 +1686,7 @@ def create_twilight_fiberflats(mjd: int, use_fiducial_cals: bool = True, expnums
 
         mfflat = combine_twilight_sequence(fflats=fflats)
         mflat_path = path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=mjd, kind="mfiberflat_twilight", camera=channel)
-        mfflat.writeFitsData(mflat_path)
+        mfflat.writeFitsData(mflat_path, replace_masked=False)
         mfflats[channel] = mfflat
 
     return mfflats
