@@ -225,7 +225,7 @@ def _cross_match(
 
 def _normalize_peaks(data):
     data_ = numpy.asarray(data).copy()
-    peaks, _ = signal.find_peaks(data_)
+    peaks, _ = signal.find_peaks(data_, distance=5)
     norm = numpy.interp(numpy.arange(data_.shape[0]), peaks, data_[peaks])
     data_ /= norm
     return data_
