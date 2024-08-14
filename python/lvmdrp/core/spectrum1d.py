@@ -12,6 +12,7 @@ from typing import List, Tuple
 from lvmdrp import log
 from lvmdrp.utils import gaussian
 from lvmdrp.core import fit_profile
+from lvmdrp.core import plot
 from lvmdrp.core.header import Header
 
 
@@ -225,7 +226,7 @@ def _cross_match(
 
 def _normalize_peaks(data):
     data_ = numpy.asarray(data).copy()
-    peaks, _ = signal.find_peaks(data_)
+    peaks, _ = signal.find_peaks(data_, distance=5)
     norm = numpy.interp(numpy.arange(data_.shape[0]), peaks, data_[peaks])
     data_ /= norm
     return data_
@@ -236,6 +237,7 @@ def _cross_match_float(
     obs_spec: numpy.ndarray,
     stretch_factors: numpy.ndarray,
     shift_range: List[int],
+    ax: None|plot.plt.Axes = None
 ) -> Tuple[float, float, float]:
     """Find the best fractional-pixel cross correlation between two spectra.
 
@@ -304,32 +306,33 @@ def _cross_match_float(
             len(obs_spec_), len(stretched_signal1), mode="same"
         )
 
-        # Constrain the cross_corr and shifts to the shift_range
-        mask = (shifts >= min_shift) & (shifts <= max_shift)
-        cross_corr = cross_corr[mask]
-        shifts = shifts[mask]
-
-        #return cross_cor
-
         # Find the max correlation and the corresponding shift for this stretch factor
-        idx_max_corr = numpy.argmax(cross_corr)
-        max_corr = cross_corr[idx_max_corr]
-        shift = shifts[idx_max_corr]
+        mask = (shifts >= min_shift) & (shifts <= max_shift)
+        idx_max_corr = numpy.argmax(cross_corr[mask])
+        max_corr = cross_corr[mask][idx_max_corr]
+        shift = shifts[mask][idx_max_corr]
 
-        # import matplotlib.pyplot as plt
-        # plt.figure()
-        # plt.plot(shifts, cross_corr)
-        # plt.axvline(shift)
-        # plt.show()
+        # Fit Gaussian around maximum cross-correlation peak
+        guess = [1.0, shift, 1.0, 0.0]
+        bound_lower = [0.0, shift+min_shift, 0.0, 0.0]
+        bound_upper = [numpy.inf, shift+max_shift, 5.0, numpy.inf]
+        gauss = fit_profile.Gaussian_const(guess)
+        mask = (shifts >= -3) & (shifts <= 3)
+        gauss.fit(
+            shifts[mask],
+            cross_corr[mask],
+            sigma=1.0,
+            p0=guess,
+            bounds=(bound_lower, bound_upper)
+        )
+        area, position, sigma, bg = gauss.getPar()
 
-        # plt.figure()
-        # plt.plot(obs_spec_)
-        # plt.plot(ref_spec_)
-        # plt.show()
-
-        # poor man's parabola fit ...
-        d = (cross_corr[idx_max_corr + 1] - 2 * cross_corr[idx_max_corr] + cross_corr[idx_max_corr - 1])
-        position = (shift + 1 - ((cross_corr[idx_max_corr + 1] - cross_corr[idx_max_corr])) / d )
+        ax.step(shifts, cross_corr, color="0.2", lw=2, where="mid")
+        ax.step(shifts, gauss(shifts), color="tab:red", lw=1, where="mid")
+        ax.axvline(shift, color="tab:blue", lw=1, ls="--")
+        ax.axvline(position, color="tab:red", lw=1)
+        ax.text(shift, cross_corr[mask].min(), f"{shift}", va="bottom", ha="left", color="tab:blue")
+        ax.text(position, cross_corr[mask].min(), f"shift = {position:.3f}", va="bottom", ha="right", color="tab:red")
 
         condition = max_corr > max_correlation
 
