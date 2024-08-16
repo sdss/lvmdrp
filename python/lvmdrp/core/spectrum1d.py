@@ -237,6 +237,8 @@ def _cross_match_float(
     obs_spec: numpy.ndarray,
     stretch_factors: numpy.ndarray,
     shift_range: List[int],
+    gauss_window: List[int] = [-5, 5],
+    gauss_sigmas: List[float] = [0.0, 5.0],
     ax: None|plot.plt.Axes = None
 ) -> Tuple[float, float, float]:
     """Find the best fractional-pixel cross correlation between two spectra.
@@ -260,6 +262,12 @@ def _cross_match_float(
         The stretch factors to use.
     shift_range : tuple
         The range of shifts to use.
+    gauss_window : list[int], optional
+        Range of pixels to consider in Gaussian fitting relative to peak, by default [-5, 5]
+    gauss_sigmas : list[float], optional
+        Gaussian sigma boundaries, by default [0.0, 5.0]
+    ax : None|plt.Axes, optional
+        The matplotlib axes where to draw the CC and the
 
     Returns
     -------
@@ -314,10 +322,10 @@ def _cross_match_float(
 
         # Fit Gaussian around maximum cross-correlation peak
         guess = [1.0, shift, 1.0, 0.0]
-        bound_lower = [0.0, shift+min_shift, 0.0, 0.0]
-        bound_upper = [numpy.inf, shift+max_shift, 5.0, numpy.inf]
+        bound_lower = [0.0, shift+min_shift, gauss_sigmas[0], 0.0]
+        bound_upper = [numpy.inf, shift+max_shift, gauss_sigmas[1], numpy.inf]
         gauss = fit_profile.Gaussian_const(guess)
-        mask = (shifts >= -3) & (shifts <= 3)
+        mask = (shifts >= shift+gauss_window[0]) & (shifts <= shift+gauss_window[1])
         gauss.fit(
             shifts[mask],
             cross_corr[mask],
@@ -325,21 +333,32 @@ def _cross_match_float(
             p0=guess,
             bounds=(bound_lower, bound_upper)
         )
-        area, position, sigma, bg = gauss.getPar()
+        area, shift_sp, sigma, bg = gauss.getPar()
 
-        ax.step(shifts, cross_corr, color="0.2", lw=2, where="mid")
-        ax.step(shifts, gauss(shifts), color="tab:red", lw=1, where="mid")
-        ax.axvline(shift, color="tab:blue", lw=1, ls="--")
-        ax.axvline(position, color="tab:red", lw=1)
-        ax.text(shift, cross_corr[mask].min(), f"{shift}", va="bottom", ha="left", color="tab:blue")
-        ax.text(position, cross_corr[mask].min(), f"shift = {position:.3f}", va="bottom", ha="right", color="tab:red")
+        if ax is not None:
+            mask_cc = (shifts >= shift+2*gauss_window[0]) & (shifts <= shift+2*gauss_window[1])
+            ax.step(shifts[mask_cc], cross_corr[mask_cc], color="0.7", lw=1, where="mid", alpha=0.3)
 
         condition = max_corr > max_correlation
 
         if condition:
+            best_shifts, best_cross_corr = shifts, cross_corr
+            best_gauss = gauss
             max_correlation = max_corr
-            best_shift = position
+            best_shift = shift
+            best_shift_sp = shift_sp
             best_stretch_factor = factor
+
+    # display best match
+    if ax is not None:
+        mask = (best_shifts >= best_shift+gauss_window[0]) & (best_shifts <= best_shift+gauss_window[1])
+        mask_cc = (best_shifts >= best_shift+2*gauss_window[0]) & (best_shifts <= best_shift+2*gauss_window[1])
+        ax.step(best_shifts[mask_cc], best_cross_corr[mask_cc], color="0.2", lw=2, where="mid")
+        ax.step(best_shifts[mask], best_gauss(best_shifts[mask]), color="tab:red", lw=2, where="mid")
+        ax.axvline(shift, color="tab:blue", lw=1, ls="--")
+        ax.axvline(best_shift_sp, color="tab:red", lw=1)
+        ax.text(shift, (best_cross_corr[mask_cc]).min(), f"shift = {shift}", va="bottom", ha="left", color="tab:blue")
+        ax.text(best_shift_sp, (best_cross_corr[mask_cc]).min(), f"subpix. shift = {best_shift_sp:.3f}", va="top", ha="right", color="tab:red")
 
     return max_correlation, best_shift, best_stretch_factor
 
