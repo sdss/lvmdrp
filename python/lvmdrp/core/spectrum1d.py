@@ -2426,8 +2426,9 @@ class Spectrum1D(Header):
 
         return new_spec
 
-    def interpolate_masked(self, inplace=False):
-        if self._mask is None or self._mask.all():
+    def interpolate_masked(self, mask=None, inplace=False):
+        mask = mask if mask is not None else self._mask
+        if mask is None or mask.all():
             return self
 
         if inplace:
@@ -2435,7 +2436,7 @@ class Spectrum1D(Header):
         else:
             new_spec = deepcopy(self)
 
-        good_pix = ~self._mask
+        good_pix = ~mask
         new_spec._data = numpy.interp(new_spec._wave, new_spec._wave[good_pix], new_spec._data[good_pix], left=new_spec._data[good_pix][0], right=new_spec._data[good_pix][-1])
         if new_spec._error is not None:
             new_spec._error = numpy.interp(new_spec._wave, new_spec._wave[good_pix], new_spec._error[good_pix], left=new_spec._error[good_pix][0], right=new_spec._error[good_pix][-1])
