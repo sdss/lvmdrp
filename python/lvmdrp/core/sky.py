@@ -233,12 +233,14 @@ def write_skymodel_par(parfile_path, config, verify=True):
                 f.write(f"{key} = {val}\n")
 
 
-def skymodel_pars_from_header(header, telescope):
-    if telescope not in {"SKYE", "SKYW", "SCI", "SPEC"}:
-        raise ValueError(f"invalid value for 'telescope' parameter: '{telescope}', valid values are 'SKYE', 'SKYW', 'SCI', or 'SPEC'")
+def skymodel_pars_header(header):
+    #if telescope not in {"SKYE", "SKYW", "SCI", "SPEC"}:
+    #    raise ValueError(f"invalid value for 'telescope' parameter: '{telescope}', valid values are 'SKYE', 'SKYW', 'SCI', or 'SPEC'")
 
     # extract useful header information
-    ra, dec = header[f"TE{telescope}RA"], header[f"TE{telescope}DE"]
+    sci_ra, sci_dec = header[f"TESCIRA"], header[f"TESCIDE"]
+    skye_ra, skye_dec = header[f"TESKYERA"], header[f"TESKYEDE"]
+    skyw_ra, skyw_dec = header[f"TESKYWRA"], header[f"TESKYWDE"]
     obstime = Time(header["OBSTIME"], scale="tai")
 
     # define ephemeris object
@@ -260,22 +262,32 @@ def skymodel_pars_from_header(header, telescope):
     # define astros
     s, m = obs.observe(sun).apparent(), obs.observe(moon).apparent()
 
-    # define target
-    target_ra, target_dec = ra * u.deg, dec * u.deg
-    target = Star(ra_hours=target_ra.to(u.hourangle), dec_degrees=target_dec.to(u.deg))
-    t = obs.observe(target).apparent()
+    # define targets for sci, skye, skyw
+    sci_target_ra, sci_target_dec = sci_ra * u.deg, sci_dec * u.deg
+    sci_target = Star(ra_hours=sci_target_ra.to(u.hourangle), dec_degrees=sci_target_dec.to(u.deg))
+    sci_t = obs.observe(sci_target).apparent()
+    skye_target_ra, skye_target_dec = skye_ra * u.deg, skye_dec * u.deg
+    skye_target = Star(ra_hours=skye_target_ra.to(u.hourangle), dec_degrees=skye_target_dec.to(u.deg))
+    skye_t = obs.observe(skye_target).apparent()
+    skyw_target_ra, skyw_target_dec = skyw_ra * u.deg, skyw_dec * u.deg
+    skyw_target = Star(ra_hours=skyw_target_ra.to(u.hourangle), dec_degrees=skyw_target_dec.to(u.deg))
+    skyw_t = obs.observe(skyw_target).apparent()
 
     # observatory height ('sm_h' in km)
     sm_h = SH_CALCULATOR.observatory_elevation
 
     # altitude of object above the horizon (alt, 0 -- 90)
-    alt, az, _ = t.altaz()
+    sci_alt, sci_az, _ = sci_t.altaz()
+    skye_alt, skye_az, _ = skye_t.altaz()
+    skyw_alt, skyw_az, _ = skyw_t.altaz()
 
     # separation between moon and sun from earth ('alpha', 0 -- 360, >180 for waning moon)
     alpha = s.separation_from(m)
 
     # separation between moon and object ('rho', 0 -- 180)
-    rho = t.separation_from(m)
+    sci_rho = sci_t.separation_from(m)
+    skye_rho = skye_t.separation_from(m)
+    skyw_rho = skyw_t.separation_from(m)
 
     # altitude of moon ('altmoon', -90 -- 90)
     altmoon, _, moondist = m.altaz()
@@ -288,7 +300,9 @@ def skymodel_pars_from_header(header, telescope):
 
     # heliocentric ecliptic longitude of object ('lon_ecl', -180 -- 180)
     # heliocentric ecliptic latitude of object ('lat_ecl', -90 -- 90)
-    lon_ecl, lat_ecl, _ = t.frame_latlon(ecliptic_frame)
+    sci_lon_ecl, sci_lat_ecl, _ = sci_t.frame_latlon(ecliptic_frame)
+    skye_lon_ecl, skye_lat_ecl, _ = skye_t.frame_latlon(ecliptic_frame)
+    skyw_lon_ecl, skyw_lat_ecl, _ = skyw_t.frame_latlon(ecliptic_frame)
 
     # TODO: - ** monthly-averaged solar radio flux ('msolflux' in sfu)
     # TODO: pull this from header if it already exists
@@ -334,25 +348,37 @@ def skymodel_pars_from_header(header, telescope):
 
 
     skymodel_pars = {
-        f"HIERARCH SKYMODEL {telescope} SM_H": (sm_h.to(u.km).value, "observatory height in km"),
-        f"HIERARCH SKYMODEL {telescope} SM_HMIN": ((2.0 * u.km).value, "lower height limit in km"),
-        f"HIERARCH SKYMODEL {telescope} ALT": (alt.to(u.deg).value, "altitude of object above horizon [0,90] in deg"),
-        f"HIERARCH SKYMODEL {telescope} ALPHA": (alpha.to(u.deg).value, "separation of Sun and Moon as seen from Earth [0,360] (> 180 for waning Moon) in deg"),
-        f"HIERARCH SKYMODEL {telescope} RHO": (rho.to(u.deg).value, "separation of Moon and object [0,180] in deg"),
-        f"HIERARCH SKYMODEL {telescope} ALTMOON": (altmoon.to(u.deg).value, "altitude of Moon above horizon [-90,90] in deg"),
-        f"HIERARCH SKYMODEL {telescope} MOONDIST": (moondist.value, "distance to Moon (mean distance = 1; [0.91,1.08])"),
-        f"HIERARCH SKYMODEL {telescope} PRES": ((744 * u.hPa).value, "pressure at observer altitude in hPa"),
-        f"HIERARCH SKYMODEL {telescope} SSA": (0.97, "single scattering albedo for aerosols [0,1]"),
-        f"HIERARCH SKYMODEL {telescope} CALCDS": ( "N", "calculation of double scattering of moonlight ('Y' or 'N')"),
-        f"HIERARCH SKYMODEL {telescope} O2COLUMN": (1.0, "relative UV/optical ozone column density (1 -> 258 DU)"),
-        f"HIERARCH SKYMODEL {telescope} MOONSCAL": (1.0, "scaling factor for scattered moonlight"),
-        f"HIERARCH SKYMODEL {telescope} LON_ECL": (lon_ecl.to(u.deg).value, "heliocentric ecliptic longitude of object [-180,180] in deg"),
-        f"HIERARCH SKYMODEL {telescope} LAT_ECL": (lat_ecl.to(u.deg).value, "ecliptic latitude of object [-90,90] in deg"),
-        f"HIERARCH SKYMODEL {telescope} EMIS_STR": (",".join(map(str, [0.2])), "grey-body emissivity (comma-separated list starting with the first component in the light path)"),
-        f"HIERARCH SKYMODEL {telescope} TEMP_STR": (",".join(map(str, [(290.0 * u.K).value])), "grey-body temperature in K (comma-separated list starting with the first component in the light path)"),
-        f"HIERARCH SKYMODEL {telescope} MSOLFLUX": (130.0, "monthly-averaged solar radio flux [sfu] with 1 sfu = 1e-19 erg/s/cm**2/Hz, set to 130"),
-        f"HIERARCH SKYMODEL {telescope} SEASON": (season, "bimonthly period (1: Dec/Jan, ..., 6: Oct/Nov.; 0: entire year)"),
-        f"HIERARCH SKYMODEL {telescope} TIME": (time, "period of the night (x/3 of night, x = 1,2,3; 0: entire night)"),
+        f"HIERARCH SKYMODEL SM_H": (sm_h.to(u.km).value, "observatory height in km"),
+        f"HIERARCH SKYMODEL SM_HMIN": ((2.0 * u.km).value, "lower height limit in km"),
+        f"HIERARCH SKYMODEL SCI ALT": ("{:.4f}".format(sci_alt.to(u.deg).value), "altitude of object above horizon (deg)"),
+        f"HIERARCH SKYMODEL SKYE ALT": ("{:.4f}".format(skye_alt.to(u.deg).value), "altitude of object above horizon (deg)"),
+        f"HIERARCH SKYMODEL SKYW ALT": ("{:.4f}".format(skyw_alt.to(u.deg).value), "altitude of object above horizon (deg)"),
+        f"HIERARCH SKYMODEL ALPHA": ("{:.4f}".format(alpha.to(u.deg).value), "separation of Sun and Moon from Earth (deg)"),
+        f"HIERARCH SKYMODEL SCI RHO": ("{:.4f}".format(sci_rho.to(u.deg).value), "separation of Moon and object (deg)"),
+        f"HIERARCH SKYMODEL SKYE RHO": ("{:.4f}".format(skye_rho.to(u.deg).value), "separation of Moon and object (deg)"),
+        f"HIERARCH SKYMODEL SKYW RHO": ("{:.4f}".format(skyw_rho.to(u.deg).value), "separation of Moon and object (deg)"),
+        f"HIERARCH SKYMODEL ALTMOON": ("{:.4f}".format(altmoon.to(u.deg).value), "altitude of Moon above horizon (deg)"),
+        f"HIERARCH SKYMODEL MOONDIST": ("{:.4f}".format(moondist.value), "distance to Moon (mean distance=1)"),
+        f"HIERARCH SKYMODEL PRES": ((744 * u.hPa).value, "pressure at observer altitude (hPa), set: 744"),
+        f"HIERARCH SKYMODEL SSA": (0.97, "aerosols' single scattering albedo, set: 0.97"),
+        f"HIERARCH SKYMODEL CALCDS": ( "N", "cal double scattering of moon (Y or N)"),
+        f"HIERARCH SKYMODEL O2COLUMN": (1.0, "relative ozone column density (1->258 DU)"),
+        f"HIERARCH SKYMODEL MOONSCAL": (1.0, "scaling factor for scattered moonlight"),
+        f"HIERARCH SKYMODEL SCI LON_ECL": ("{:.4f}".format(sci_lon_ecl.to(u.deg).value), "heliocen ecliptic longitude (deg)"),
+        f"HIERARCH SKYMODEL SCI LAT_ECL": ("{:.4f}".format(sci_lat_ecl.to(u.deg).value), "ecliptic latitude (deg)"),
+        f"HIERARCH SKYMODEL SKYE LON_ECL": ("{:.4f}".format(skye_lon_ecl.to(u.deg).value), "heliocen ecliptic longitude (deg)"),
+        f"HIERARCH SKYMODEL SKYE LAT_ECL": ("{:.4f}".format(skye_lat_ecl.to(u.deg).value), "ecliptic latitude (deg)"),
+        f"HIERARCH SKYMODEL SKYW LON_ECL": ("{:.4f}".format(skyw_lon_ecl.to(u.deg).value), "heliocen ecliptic longitude (deg)"),
+        f"HIERARCH SKYMODEL SKYW LAT_ECL": ("{:.4f}".format(skyw_lat_ecl.to(u.deg).value), "ecliptic latitude (deg)"),
+        f"HIERARCH SKYMODEL EMIS_STR": (",".join(map(str, [0.2])), "grey-body emissivity"),
+        f"HIERARCH SKYMODEL TEMP_STR": (",".join(map(str, [(290.0 * u.K).value])), "grey-body temperature (K)"),
+        f"HIERARCH SKYMODEL MSOLFLUX": (130.0, "monthly-averaged solar radio flux, set: 130"),
+        f"HIERARCH SKYMODEL SEASON": (season, "bimonthly period (1:Dec/Jan, 6:Oct/Nov.; 0:year)"),
+        f"HIERARCH SKYMODEL TIME": (time, "period of night (x/3 night, x=1,2,3; 0:night)"),
+        #add Moon RA
+        #add Moon dec
+        #add Moon phase
+        #add Moon illumination
     }
 
     return skymodel_pars

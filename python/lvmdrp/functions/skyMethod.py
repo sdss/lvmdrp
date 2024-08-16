@@ -40,7 +40,7 @@ from lvmdrp.core.sky import (
     optimize_sky,
     run_skycorr,
     run_skymodel,
-    skymodel_pars_from_header,
+    skymodel_pars_header,
     get_telescope_shadowheight,
 )
 from lvmdrp.core.spectrum1d import Spectrum1D, find_continuum
@@ -1436,21 +1436,21 @@ def interpolate_sky( in_frame: str, out_rss: str = None, display_plots: bool = F
     new_rss.set_supersky_error(supererrors)
 
     # update header metadata
-    new_rss._header.update(skymodel_pars_from_header(new_rss._header, telescope="SKYW"))
-    new_rss._header.update(skymodel_pars_from_header(new_rss._header, telescope="SKYE"))
-    new_rss._header.update(skymodel_pars_from_header(new_rss._header, telescope="SCI"))
+    new_rss._header.update(skymodel_pars_header(new_rss._header))
+    #new_rss._header.update(skymodel_pars_from_header(new_rss._header, telescope="SKYE"))
+    #new_rss._header.update(skymodel_pars_from_header(new_rss._header, telescope="SCI"))
     # TODO: add MSOLFLUX to headers. Pull data from here:
     # https://spaceweather.gc.ca/forecast-prevision/solar-solaire/solarflux/sx-5-en.php
     # TODO: add same parameters for std *fibers*
     # new_rss._header.update(skymodel_pars_from_header(new_rss._header, telescope="SPEC"))
-    new_rss._header["HIERARCH GEOCORONAL SKYW SHADOW_HEIGHT"] = (
-        get_telescope_shadowheight(new_rss._header, telescope="SKYW"), "height of Earth's shadow (in km)" 
+    new_rss._header["HIERARCH GEOCORONAL SKYW SH_HGHT"] = (
+        "{:.4f}".format(get_telescope_shadowheight(new_rss._header, telescope="SKYW")), "height of Earth's shadow (km)" 
     )
-    new_rss._header["HIERARCH GEOCORONAL SKYE SHADOW_HEIGHT"] = (
-        get_telescope_shadowheight(new_rss._header, telescope="SKYE"), "height of Earth's shadow (in km)" 
+    new_rss._header["HIERARCH GEOCORONAL SKYE SH_HGHT"] = (
+        "{:.4f}".format(get_telescope_shadowheight(new_rss._header, telescope="SKYE")), "height of Earth's shadow (km)" 
     )
-    new_rss._header["HIERARCH GEOCORONAL SCI SHADOW_HEIGHT"] = (
-        get_telescope_shadowheight(new_rss._header, telescope="SCI"), "height of Earth's shadow (in km)" 
+    new_rss._header["HIERARCH GEOCORONAL SCI SH_HGHT"] = (
+        "{:.4f}".format(get_telescope_shadowheight(new_rss._header, telescope="SCI")), "height of Earth's shadow (km)" 
     )
 
     # write output RSS
