@@ -360,7 +360,7 @@ def _cross_match_float(
         ax.text(shift, (best_cross_corr[mask_cc]).min(), f"shift = {shift}", va="bottom", ha="left", color="tab:blue")
         ax.text(best_shift_sp, (best_cross_corr[mask_cc]).min(), f"subpix. shift = {best_shift_sp:.3f}", va="top", ha="right", color="tab:red")
 
-    return max_correlation, best_shift, best_stretch_factor
+    return max_correlation, best_shift_sp, best_stretch_factor
 
 
 
