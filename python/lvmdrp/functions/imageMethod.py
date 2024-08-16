@@ -818,6 +818,40 @@ def fix_pixel_shifts(in_images, out_images, ref_images, in_mask, report=None,
                     log.warning(f"no shift will be applied to the images: {in_images}")
                     apply_shifts = False
 
+        elif (dshifts!=0).any() and interactive:
+            shifted_rows = numpy.where(numpy.gradient(dshifts) > 0)[0][1::2].tolist()
+            log.info(f"DRP shifted rows: {shifted_rows}")
+            _apply_electronic_shifts(images=images, out_images=out_images,
+                                     drp_shifts=dshifts, qc_shifts=qshifts, raw_shifts=raw_shifts,
+                                     which_shifts="drp", apply_shifts=True,
+                                     dry_run=True, display_plots=display_plots)
+            if interactive:
+                log.info("interactive mode enabled")
+                answer = input("apply [d]rp, [c]ustom shifts or [n]one: ")
+                if answer.lower() == "d":
+                    log.info("choosing DRP shifts")
+                    shifts = dshifts
+                    which_shifts = "drp"
+                elif answer.lower() == "c":
+                    log.info("choosing custom shifts")
+                    answer = input("provide comma-separated custom shifts and press enter: ")
+                    shift_rows = numpy.array([int(_) for _ in answer.split(",")])
+                    cshifts = numpy.zeros(cdata.shape[0])
+                    for irow in shift_rows:
+                        cshifts[irow:] += 2
+                    shifts = cshifts
+                    corrs = numpy.zeros_like(cshifts)
+                    which_shifts = "custom"
+                elif answer.lower() == "n":
+                    log.info("choosing to apply no shift")
+                    cshifts = numpy.zeros_like(cdata.shape[0])
+                    shifts = cshifts
+                    corrs = numpy.zeros_like(cshifts)
+                    which_shifts = "custom"
+                    apply_shifts = False
+
+                apply_shifts = numpy.any(numpy.abs(shifts)>0)
+
     # apply pixel shifts to the images
     images_out, shifts, _, = _apply_electronic_shifts(images=images, out_images=out_images, raw_shifts=raw_shifts,
                                                       drp_shifts=dshifts, qc_shifts=qshifts, custom_shifts=cshifts,

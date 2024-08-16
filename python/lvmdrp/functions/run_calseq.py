@@ -875,7 +875,7 @@ def messup_frame(mjd, expnum, spec="1", shifts=[1500, 2000, 3500], shift_size=-2
     return messed_up_frames
 
 
-def fix_raw_pixel_shifts(mjd, expnums=None, ref_expnums=None, use_fiducial_cals=True, specs="123",
+def fix_raw_pixel_shifts(mjd, expnums=None, ref_expnums=None, use_fiducial_cals=True, specs="123", imagetyps=None,
                          y_widths=5, wave_list=None, wave_widths=0.6*5, max_shift=10, flat_spikes=11,
                          threshold_spikes=np.inf, shift_rows=None, interactive=False, skip_done=False,
                          display_plots=False):
@@ -897,6 +897,8 @@ def fix_raw_pixel_shifts(mjd, expnums=None, ref_expnums=None, use_fiducial_cals=
         Whether to use fiducial calibration frames or not, defaults to True
     specs : str
         Spectrograph channels
+    imagetyps : list
+        List of image types to analyse, by default None (any image type)
     y_widths : int
         Width of the fibers along y-axis, by default 5
     wave_list : list
@@ -926,9 +928,13 @@ def fix_raw_pixel_shifts(mjd, expnums=None, ref_expnums=None, use_fiducial_cals=
 
     # get target frames & reference frames metadata
     frames = md.get_frames_metadata(mjd)
+    if imagetyps is not None:
+        frames.query("imagetyp in @imagetyps", inplace=True)
     if expnums is not None:
         frames.query("expnum in @expnums", inplace=True)
     ref_frames = md.get_frames_metadata(mjd)
+    if imagetyps is not None:
+        ref_frames.query("imagetyp in @imagetyps", inplace=True)
     if ref_expnums is not None:
         ref_frames.query("expnum in @ref_expnums", inplace=True)
 
