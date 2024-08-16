@@ -739,10 +739,11 @@ class Image(Header):
             s2 = numpy.nanmedian(self._data[50:-50,c-column_width:c+column_width], axis=1)
             snr = numpy.sqrt(numpy.nanmedian(self._data[50:-50,c-column_width:c+column_width], axis=1))
 
-            if numpy.nanmedian(snr) > 5:
-                _, shifts[j], _ = _cross_match_float(s1, s2, numpy.array([1.0]), shift_range, ax=axs[j])
+            min_snr = 5.0
+            if numpy.nanmedian(snr) > min_snr:
+                _, shifts[j], _ = _cross_match_float(s1, s2, numpy.array([1.0]), shift_range, gauss_window=[-3,3], min_peak_dist=5.0, ax=axs[j])
             else:
-                log.warning(f"too low SNR to reliably measure thermal shift at column {c}: {numpy.nanmedian(snr):.4f}, assuming shift = 0.0")
+                log.warning(f"too low SNR (<={min_snr}) to reliably measure thermal shift at column {c}: {numpy.nanmedian(snr):.4f}, assuming shift = 0.0")
                 shifts[j] = 0.0
 
         return shifts
