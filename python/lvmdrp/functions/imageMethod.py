@@ -414,13 +414,14 @@ def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=Non
             # y_models = fiber_model._data[bmin:bmax,c-column_width:c+column_width]
             y_model = numpy.nanmedian(fiber_model._data[bmin:bmax,c-column_width:c+column_width], axis=1)
             y_data = numpy.nanmedian(image._data[bmin:bmax, c-column_width:c+column_width], axis=1)
-            y_model = _normalize_peaks(y_model)
-            y_data = _normalize_peaks(y_data)
+            snr = numpy.sqrt(y_data.mean())
+            y_model = _normalize_peaks(y_model, min_peak_dist=5.0)
+            y_data = _normalize_peaks(y_data, min_peak_dist=5.0)
             # axs_fib[j].step(x, y_models * norm, color="0.7", lw=0.7, alpha=0.3)
             axs_fb[j].step(x, y_data, color="0.2", lw=1.5, label="data" if i == 0 else None)
             axs_fb[j].step(x, y_model, color="tab:blue", lw=1, label="model" if i == 0 else None)
             axs_fb[j].step(x+column_shifts[j], numpy.interp(x+column_shifts[j], x, y_model), color="tab:red", lw=1, label="corr. model" if i == 0 else None)
-        axs_fb[j].set_title(f"measured shift {column_shifts[j]:.4f} pixel @ column {c} with SNR = {numpy.sqrt(y_data.mean()):.2f}")
+        axs_fb[j].set_title(f"measured shift {column_shifts[j]:.4f} pixel @ column {c} with SNR = {snr:.2f}")
         axs_fb[j].set_ylim(-0.05, 1.3)
     axs_fb[0].legend(loc=1, frameon=False, ncols=3)
 

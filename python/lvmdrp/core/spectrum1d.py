@@ -224,9 +224,9 @@ def _cross_match(
     return max_correlation, best_shift, best_stretch_factor
 
 
-def _normalize_peaks(data):
+def _normalize_peaks(data, min_peak_dist):
     data_ = numpy.asarray(data).copy()
-    peaks, _ = signal.find_peaks(data_, distance=5)
+    peaks, _ = signal.find_peaks(data_, distance=min_peak_dist)
     norm = numpy.interp(numpy.arange(data_.shape[0]), peaks, data_[peaks])
     data_ /= norm
     return data_
@@ -237,6 +237,7 @@ def _cross_match_float(
     obs_spec: numpy.ndarray,
     stretch_factors: numpy.ndarray,
     shift_range: List[int],
+    min_peak_dist: float = 5.0,
     gauss_window: List[int] = [-5, 5],
     gauss_sigmas: List[float] = [0.0, 5.0],
     ax: None|plot.plt.Axes = None
@@ -262,6 +263,8 @@ def _cross_match_float(
         The stretch factors to use.
     shift_range : tuple
         The range of shifts to use.
+    min_peak_dist : float, optional
+        Minimum distance between two consecutive peaks to be considered signal, by default 5.0
     gauss_window : list[int], optional
         Range of pixels to consider in Gaussian fitting relative to peak, by default [-5, 5]
     gauss_sigmas : list[float], optional
@@ -285,8 +288,8 @@ def _cross_match_float(
 
     # normalize the peaks to roughly magnitude 1, so that individual very bright
     # fibers do not dominate the signal
-    ref_spec_ = _normalize_peaks(ref_spec)
-    obs_spec_ = _normalize_peaks(obs_spec)
+    ref_spec_ = _normalize_peaks(ref_spec, min_peak_dist=min_peak_dist)
+    obs_spec_ = _normalize_peaks(obs_spec, min_peak_dist=min_peak_dist)
     #return ref_spec_, obs_spec_
 
     for factor in stretch_factors:
