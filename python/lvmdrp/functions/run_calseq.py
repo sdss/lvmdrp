@@ -930,7 +930,7 @@ def fix_raw_pixel_shifts(mjd, expnums=None, ref_expnums=None, use_fiducial_cals=
         frames.query("expnum in @expnums", inplace=True)
     ref_frames = md.get_frames_metadata(mjd)
     if ref_expnums is not None:
-        frames.query("expnum in @ref_expnums", inplace=True)
+        ref_frames.query("expnum in @ref_expnums", inplace=True)
 
     if use_fiducial_cals:
         masters_mjd = get_master_mjd(mjd)
