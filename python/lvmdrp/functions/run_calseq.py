@@ -1658,11 +1658,11 @@ def create_twilight_fiberflats(mjd: int, use_fiducial_cals: bool = True, expnums
             # calibrate in wavelength
             rss_tasks.create_pixel_table(in_rss=xflat_path, out_rss=wflat_path, in_waves=calibs["wave"][channel], in_lsfs=calibs["lsf"][channel])
 
+            # match LSF in all fibers
+            rss_tasks.match_resolution(in_rss=wflat_path, out_rss=wflat_path, target_fwhm=4.5)
+
             # rectify in wavelength
             rss_tasks.resample_wavelength(in_rss=wflat_path, out_rss=hflat_path, wave_disp=0.5, wave_range=SPEC_CHANNELS[channel])
-
-            # match LSF in all fibers
-            rss_tasks.match_resolution(in_rss=hflat_path, out_rss=hflat_path, target_fwhm=3.0)
 
             # fit fiber throughput
             fit_fiberflat(in_twilight=hflat_path, out_flat=fflat_path, out_twilight=fflat_flatfielded_path, remove_gradient=True, niter=4, display_plots=display_plots)
