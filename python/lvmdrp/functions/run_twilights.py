@@ -18,7 +18,7 @@ from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from lvmdrp import log
 from lvmdrp.core.constants import SPEC_CHANNELS
 from lvmdrp.core.tracemask import TraceMask
-from lvmdrp.core.spectrum1d import _cross_match_float, Spectrum1D
+from lvmdrp.core.spectrum1d import Spectrum1D
 from lvmdrp.core.rss import RSS, lvmFrame
 from lvmdrp.core.fluxcal import butter_lowpass_filter
 from lvmdrp.core import dataproducts as dp
@@ -270,25 +270,25 @@ def fit_fiberflat(in_twilight: str, out_flat: str, out_twilight: str,
         mask = np.isfinite(median_fiber)
         median_fiber = np.interp(twilight._wave, twilight._wave[mask], median_fiber[mask])
         new_flat = copy(twilight)
-        # new_flat._data = twilight._data / median_fiber[None]
+        new_flat._data = twilight._data / median_fiber[None]
         for ifiber in range(new_flat._fibers):
             f = new_flat.getSpec(ifiber)
             if f._mask.all():
                 continue
 
             # get selection of good pixels
-            f = f.interpolate_masked(mask=f._mask|~np.isfinite(f._data))
+            mask = np.isfinite(f._data)
 
             # correct median fiber to current fiber wavelength and normalize
-            _, shift, _ = _cross_match_float(ref_spec=median_fiber, obs_spec=f._data, stretch_factors=[1.0], shift_range=[-5,+5])
-            f._data /= np.interp(f._wave, f._wave+shift, median_fiber)
+            # _, shift, _ = _cross_match_float(ref_spec=median_fiber, obs_spec=f._data, stretch_factors=[1.0], shift_range=[-5,+5])
+            # f._data /= np.interp(f._wave, f._wave+shift, median_fiber)
 
             # first filtering of high-frequency features
-            f._data = butter_lowpass_filter(f._data, 0.1, 2)
+            f._data[mask] = butter_lowpass_filter(f._data[mask], 0.1, 2)
             new_flat._data[ifiber] = f._data
 
             # further smoothing of remaining unwanted features
-            tck = interpolate.splrep(f._wave, f._data, s=0.1)
+            tck = interpolate.splrep(f._wave[mask], f._data[mask], s=0.1)
             new_flat._data[ifiber] = interpolate.splev(f._wave, tck)
 
         # reset pixel mask
@@ -320,9 +320,9 @@ def fit_fiberflat(in_twilight: str, out_flat: str, out_twilight: str,
     axs[1].set_title(f"Flat field for fibers {','.join(map(str, plot_fibers))}", loc="left")
     median_fiber = biweight_location(twilight._data, axis=0, ignore_nan=True)
     for ifiber in plot_fibers:
-        _, shift, _ = _cross_match_float(ref_spec=median_fiber, obs_spec=np.nan_to_num(twilight._data[ifiber]), stretch_factors=[1.0], shift_range=[-5,+5])
+        # _, shift, _ = _cross_match_float(ref_spec=median_fiber, obs_spec=np.nan_to_num(twilight._data[ifiber]), stretch_factors=[1.0], shift_range=[-5,+5])
         ln, = axs[0].step(twilight._wave, twilight._data[ifiber], lw=1, where="mid")
-        axs[1].step(twilight._wave, twilight._data[ifiber] / np.interp(f._wave, f._wave+shift, median_fiber), lw=1, color=ln.get_color(), where="mid")
+        axs[1].step(twilight._wave, twilight._data[ifiber] / median_fiber, lw=1, color=ln.get_color(), where="mid", alpha=0.5)
         axs[1].plot(new_flat._wave, new_flat._data[ifiber], lw=1, color=ln.get_color(), label=ifiber)
     axs[0].step(twilight._wave, median_fiber, lw=2, color="0.2", where="mid", label="median fiber")
     axs[0].legend(loc=1, frameon=False)
