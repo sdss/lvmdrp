@@ -2479,22 +2479,23 @@ class Spectrum1D(Header):
         else:
             new_spec = deepcopy(self)
 
+        # interpolate masked pixels
         if interpolate_bad:
             new_spec = new_spec.interpolate_masked(inplace=inplace)
 
-        data = self._data
-        wave = self._wave
-        fwhm = self._lsf
-        if self._error is not None:
-            error = self._error
+        data = new_spec._data
+        wave = new_spec._wave
+        fwhm = new_spec._lsf
+        if new_spec._error is not None:
+            error = new_spec._error
         else:
             error = None
-        if self._sky is not None:
-            sky = self._sky
+        if new_spec._sky is not None:
+            sky = new_spec._sky
         else:
             sky = None
-        if self._sky_error is not None:
-            sky_error = self._sky_error
+        if new_spec._sky_error is not None:
+            sky_error = new_spec._sky_error
         else:
             sky_error = None
 
