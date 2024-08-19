@@ -1179,8 +1179,9 @@ def match_resolution(in_rss, out_rss, target_fwhm=None, min_fwhm=0.1, plot_fiber
         fig, ax = create_subplots(to_display=display_plots, figsize=(15,5), layout="constrained")
         fig.suptitle(f"Matched LSF for {camera = }, {expnum = }")
         for ifiber in plot_fibers:
-            ln, = ax.step(rss._wave, rss._data[ifiber], lw=1, where="mid", alpha=0.5)
-            ax.step(new_rss._wave, new_rss._data[ifiber], lw=1, where="mid", color=ln.get_color(), label=ifiber)
+            wave = rss._wave if len(rss._wave.shape) == 1 else rss._wave[ifiber]
+            ln, = ax.step(wave, rss._data[ifiber], lw=1, where="mid", alpha=0.5)
+            ax.step(wave, new_rss._data[ifiber], lw=1, where="mid", color=ln.get_color(), label=ifiber)
         ax.legend(loc=1, frameon=False, title="Fiber Idx", ncols=7)
         save_fig(fig, to_display=display_plots, product_path=out_rss, figure_path="qa", label="match_res")
 
