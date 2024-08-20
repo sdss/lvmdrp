@@ -14,6 +14,7 @@ import numpy as np
 from astropy.table import Table
 from scipy import interpolate
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+from matplotlib.gridspec import GridSpec
 
 from lvmdrp import log
 from lvmdrp.core.constants import SPEC_CHANNELS
@@ -22,7 +23,7 @@ from lvmdrp.core.spectrum1d import Spectrum1D
 from lvmdrp.core.rss import RSS, lvmFrame
 from lvmdrp.core.fluxcal import butter_lowpass_filter
 from lvmdrp.core import dataproducts as dp
-from lvmdrp.core.plot import create_subplots, save_fig
+from lvmdrp.core.plot import plt, create_subplots, save_fig
 from lvmdrp import main as drp
 from astropy import wcs
 from astropy.io import fits
@@ -279,6 +280,7 @@ def fit_fiberflat(in_twilight: str, out_flat: str, out_twilight: str,
             # get selection of good pixels
             mask = np.isfinite(f._data)
 
+            # TODO: implement this as a separated function, skipping boundaries of fibers
             # correct median fiber to current fiber wavelength and normalize
             # _, shift, _ = _cross_match_float(ref_spec=median_fiber, obs_spec=f._data, stretch_factors=[1.0], shift_range=[-5,+5])
             # f._data /= np.interp(f._wave, f._wave+shift, median_fiber)
@@ -314,7 +316,17 @@ def fit_fiberflat(in_twilight: str, out_flat: str, out_twilight: str,
         twilight._data[telescope == "SkyW"] = rss_w
         twilight._data[telescope == "Spec"] = rss_s
 
-    fig, axs = create_subplots(to_display=display_plots, nrows=2, figsize=(15,7), sharex=True, layout="constrained")
+    fig = plt.figure(figsize=(15, 10), layout="constrained")
+    gs = GridSpec(3, 15, figure=fig)
+
+    ax1 = fig.add_subplot(gs[0, :])
+    ax1.tick_params(labelbottom=False)
+    ax2 = fig.add_subplot(gs[1, :], sharex=ax1)
+    ax_1 = fig.add_subplot(gs[2, :-3])
+    ax_2 = fig.add_subplot(gs[2, -3:])
+    axs = [ax1, ax2, ax_1, ax_2]
+
+    # fig, axs = create_subplots(to_display=display_plots, nrows=3, figsize=(15,7), layout="constrained")
     fig.suptitle(f"Flat fielding for {channel = }, {expnum = }")
     axs[0].set_title("Twilight", loc="left")
     axs[1].set_title(f"Flat field for fibers {','.join(map(str, plot_fibers))}", loc="left")
@@ -327,29 +339,32 @@ def fit_fiberflat(in_twilight: str, out_flat: str, out_twilight: str,
     axs[0].step(twilight._wave, median_fiber, lw=2, color="0.2", where="mid", label="median fiber")
     axs[0].legend(loc=1, frameon=False)
     axs[1].legend(loc=1, frameon=False, title="Fiber Idx", ncols=7)
-    fig.supxlabel("Wavelength (Angstrom)")
+    axs[1].set_xlabel("Wavelength (Angstrom)")
     axs[0].set_ylabel(f"Counts ({unit})")
     axs[1].set_ylabel("Normalized counts")
-    save_fig(fig, product_path=out_flat, to_display=display_plots, figure_path="qa", label="fiberflat")
+    axs[1].set_xlim(*axs[0].get_xlim())
 
     ypixels = np.split(np.arange(flat_twilight._fibers) + 1, 3)
     median =  np.split(np.nanmedian(flat_twilight._data, axis=1), 3)
     mu = np.nanmedian(flat_twilight._data)
-    fig, ax = create_subplots(to_display=display_plots, figsize=(15,5), layout="constrained")
-    fig.suptitle(f"Flat fielding for {channel = }, {expnum = }")
-    ax.set_title("Flat-fielded fiber profile", loc="left")
-    ax.axhspan(0.995*mu, 1.005*mu, lw=0, alpha=0.3, color="0.7")
-    ax.axhline(mu, ls="--", lw=1, color="0.7")
-    ax.text(20, 1.005*mu, "0.5% offset", color="0.7", ha="left", va="bottom")
-    ax.text(20, mu, "median", color="0.7", ha="left", va="bottom")
+    median = (median / mu - 1) * 100
+    axs[2].axhspan(-0.5, 0.5, lw=0, alpha=0.3, color="0.7")
+    axs[2].axhline(0, ls="--", lw=1, color="0.7")
     colors = ["tab:blue", "tab:red", "tab:green"]
     for ispec in range(3):
-        ax.step(ypixels[ispec], median[ispec], lw=1, where="mid", label=f"Spec. {ispec+1}", color=colors[ispec])
-    ax.legend(loc=1, frameon=False, ncols=3)
-    ax.set_xlabel("Fiber ID")
-    ax.set_ylabel(f"Median counts ({unit})")
-    ax.set_xlim(1, twilight._fibers)
-    save_fig(fig, to_display=display_plots, product_path=out_flat, figure_path="qa", label="twilight_profile")
+        axs[2].step(ypixels[ispec], median[ispec], lw=1, where="mid", label=f"Spec. {ispec+1}", color=colors[ispec])
+    axs[2].legend(loc=1, frameon=False, ncols=3)
+    axs[2].set_xlabel("Fiber ID")
+    axs[2].set_ylabel("Flat-fielded flat (%)")
+    axs[2].set_xlim(1, twilight._fibers)
+
+    x = (flat_twilight._data/flat_twilight._data[0]).flatten()
+    axs[3].axvspan(np.nanmean(x) - np.nanstd(x), np.nanmean(x) + np.nanstd(x), lw=0, alpha=0.1, color="0.2")
+    axs[3].hist(x, bins=1000, range=(0.95, 1.05), color="tab:orange")
+    axs[3].tick_params(labelleft=False)
+    axs[3].set_xlabel("Twilight / Twilight[0]")
+
+    save_fig(fig, to_display=display_plots, product_path=out_flat, figure_path="qa", label="twilight_fiberflat")
 
     # write output fiberflat
     log.info(f"writing flat field to {out_flat}")
