@@ -100,11 +100,11 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'STD', display_plo
                        fluxcal_std=rss._fluxcal_std, fluxcal_sci=rss._fluxcal_sci, slitmap=rss._slitmap)
 
     # check for flux calibration data
-    if np.isnan(fframe._fluxcal_std.to_pandas().values).all():
-        log.warning("no standard star metadata found, skipping flux calibration")
-        fframe.setHdrValue("FLUXCAL", False, "flux-calibrated?")
+    fframe.setHdrValue("FLUXCAL", 'NONE', "flux-calibration method")
+    if method == "NONE":
+        log.info("skipping flux calibration")
         fframe.writeFitsData(out_fframe)
-        return rss
+        return fframe
 
     expnum = fframe._header["EXPOSURE"]
     channel = fframe._header["CCD"]
@@ -133,8 +133,6 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'STD', display_plo
     # weights = std_exp / std_exp.sum()
     # TODO: reject sensitivity curves based on the overall shape by normalizing using a median curve
     # calculate the biweight mean sensitivity
-
-    fframe.setHdrValue("FLUXCAL", 'NONE', "flux-calibration method")
 
     # if instructed, use standard stars
     if method == 'STD':
@@ -266,6 +264,11 @@ def standard_sensitivity(stds, rss, GAIA_CACHE_DIR, ext, res, plot=False, width=
             continue
 
         # subtract sky spectrum and divide by exptime
+        spec = rss._data[fibidx[0], :]
+        if np.nanmean(spec) < 100:
+            log.warning(f"fiber {fiber} @ {fibidx[0]} has counts < 100 electron, skipping")
+            continue
+
         spec = (rss._data[fibidx[0],:] - master_sky._data[fibidx[0],:])/exptime  #TODO: check exptime?
 
         # interpolate over bright sky lines
@@ -451,12 +454,14 @@ def fluxcal_standard_stars(in_rss, plot=True, GAIA_CACHE_DIR=None):
         stds = fluxcal.retrieve_header_stars(rss=rss)
     except KeyError:
         log.warning(f"no standard star metadata found in '{in_rss}', skipping sensitivity measurement")
+        rss.set_fluxcal(fluxcal=res_std, source='std')
         rss.writeFitsData(in_rss)
         return res_std, mean_std, rms_std, rss
 
     # early stop if not standards exposed in current spectrograph
     if len(stds) == 0:
         log.warning(f"no standard stars found in '{in_rss}', skipping sensitivity measurement")
+        rss.set_fluxcal(fluxcal=res_std, source='std')
         rss.writeFitsData(in_rss)
         return res_std, mean_std, rms_std, rss
 
@@ -468,8 +473,17 @@ def fluxcal_standard_stars(in_rss, plot=True, GAIA_CACHE_DIR=None):
 
     # standard fibers sensitivity curves
     rss, res_std = standard_sensitivity(stds, rss, GAIA_CACHE_DIR, ext, res_std, plot=plot)
-    rms_std = biweight_scale(res_std.to_pandas().values, axis=1, ignore_nan=True)
-    mean_std = biweight_location(res_std.to_pandas().values, axis=1, ignore_nan=True)
+    res_std_pd = res_std.to_pandas().values
+    ngood_std = res_std_pd.shape[1]-2-np.isnan(res_std_pd.sum(axis=0)).sum()
+    if ngood_std < 8:
+        log.warning("less than 8 good standard fibers, skipping standard calibration")
+        res_std[:] = np.nan
+        rss.set_fluxcal(fluxcal=res_std, source='std')
+        rss.writeFitsData(in_rss)
+        return res_std, mean_std, rms_std, rss
+
+    rms_std = biweight_scale(res_std_pd, axis=1, ignore_nan=True)
+    mean_std = biweight_location(res_std_pd, axis=1, ignore_nan=True)
 
     label = rss._header['CCD']
     channel = label.lower()
