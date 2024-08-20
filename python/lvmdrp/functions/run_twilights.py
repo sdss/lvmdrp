@@ -505,6 +505,8 @@ def combine_twilight_sequence(in_fiberflats: List[str], out_fiberflat: str,
     mflat.set_wave_trace(TraceMask.from_spectrographs(*[TraceMask.from_file(in_wave) for in_wave in in_waves]))
     mflat.set_lsf_trace(TraceMask.from_spectrographs(*[TraceMask.from_file(in_lsf) for in_lsf in in_lsfs]))
     mflat = mflat.to_native_wave(method="linear", interp_density=False, return_density=False)
+    mflat._error = None
+    mflat._mask = None
     mflat.writeFitsData(out_fiberflat, replace_masked=False)
 
     return mflat

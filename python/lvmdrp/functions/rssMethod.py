@@ -1601,8 +1601,8 @@ def apply_fiberflat(in_rss: str, out_frame: str, in_flat: str, clip_below: float
         # apply clipping
         select_clip_below = (spec_flat < clip_below) | numpy.isnan(spec_flat._data)
         spec_flat._data[select_clip_below] = 1
-        if spec_flat._mask is not None:
-            spec_flat._mask[select_clip_below] = True
+        # if spec_flat._mask is not None:
+        #     spec_flat._mask[select_clip_below] = True
 
         # correct
         spec_new = spec_data / spec_flat._data
