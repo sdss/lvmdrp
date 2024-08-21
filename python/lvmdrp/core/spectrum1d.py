@@ -3249,6 +3249,7 @@ class Spectrum1D(Header):
 
             if mask[select].sum() >= badpix_threshold:
                 log.warning(f"skipping line at pixel {centre} with {mask[select].sum()} >= {badpix_threshold = } bad pixels")
+                self.add_header_comment(f"skipping line at pixel {centre} with {mask[select].sum()} >= {badpix_threshold = } bad pixels")
                 continue
 
             flux_guess = numpy.interp(centre, self._wave[select], data[select]) * fact * fwhm_guess / 2.354

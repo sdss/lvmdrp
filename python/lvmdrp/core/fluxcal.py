@@ -49,6 +49,7 @@ def retrieve_header_stars(rss):
             gaia_id = h[stdi + "ID"]
             if gaia_id is None:
                 log.warning(f"{stdi} acquired but Gaia ID is {gaia_id}")
+                rss.add_header_comment(f"{stdi} acquired but Gaia ID is {gaia_id}")
                 continue
             fiber = h[stdi + "FIB"]
             obstime = Time(h[stdi + "T0"])

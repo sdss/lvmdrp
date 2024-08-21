@@ -705,6 +705,12 @@ class Image(Header):
     def __ge__(self, other):
         return self._data >= other
 
+    def add_header_comment(self, comstr):
+        '''
+        Append a COMMENT card at the end of the FITS header.
+        '''
+        self.header_.append(('COMMENT', comstr), bottom=True)
+
     def measure_fiber_shifts(self, ref_image, columns=[500, 1000, 1500, 2000, 2500, 3000], column_width=25, shift_range=[-5,5], axs=None):
         '''Measure the (thermal, flexure, ...) shift between the fiber (traces) in 2 detrended images in the y (cross dispersion) direction.
 
@@ -743,7 +749,9 @@ class Image(Header):
             if numpy.nanmedian(snr) > min_snr:
                 _, shifts[j], _ = _cross_match_float(s1, s2, numpy.array([1.0]), shift_range, gauss_window=[-3,3], min_peak_dist=5.0, ax=axs[j])
             else:
-                log.warning(f"too low SNR (<={min_snr}) to reliably measure thermal shift at column {c}: {numpy.nanmedian(snr):.4f}, assuming shift = 0.0")
+                comstr = f"low SNR (<={min_snr}) for thermal shift at column {c}: {numpy.nanmedian(snr):.4f}, assuming = 0.0"
+                log.warning(comstr)
+                self.add_header_comment(comstr)
                 shifts[j] = 0.0
 
         return shifts

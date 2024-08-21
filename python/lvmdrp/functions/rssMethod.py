@@ -454,6 +454,7 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
             msg = f'Failed to fit {kind_cros} for arc line {i}'
             if kind_cros not in ["poly", "legendre", "chebyshev"]:
                 log.warning(f"invalid polynomial kind '{kind_cros}'. Falling back to 'poly'")
+                arc.add_header_comment(f"invalid polynomial kind '{kind_cros}'. Falling back to 'poly'")
                 kind_cros = "poly"
 
             if kind_cros == "poly":
@@ -483,13 +484,13 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
         good_lines = ~masked[i]
         if good_lines.sum() <= poly_disp + 1:
             log.warning(f"fiber {i} has {good_lines.sum()} (< {poly_disp + 1 = }) good lines")
+            arc.add_header_comment(f"fiber {i} has {good_lines.sum()} (< {poly_disp + 1 = }) good lines")
             good_fibers[i] = False
             continue
 
         if kind_disp not in ["poly", "legendre", "chebyshev"]:
-            log.warning(
-                ("invalid polynomial kind " f"'{kind_disp = }'. Falling back to 'poly'")
-            )
+            log.warning(("invalid polynomial kind " f"'{kind_disp = }'. Falling back to 'poly'"))
+            arc.add_header_comment("invalid polynomial kind " f"'{kind_disp = }'. Falling back to 'poly'")
         if kind_disp == "poly":
             wave_cls = polynomial.Polynomial
         elif kind_disp == "legendre":
@@ -518,6 +519,7 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
         good_lines = ~masked[i]
         if good_lines.sum() <= poly_fwhm + 1:
             log.warning(f"fiber {i} has {good_lines.sum()} (< {poly_fwhm + 1 = }) good lines")
+            arc.add_header_comment(f"fiber {i} has {good_lines.sum()} (< {poly_fwhm + 1 = }) good lines")
             good_fibers[i] = False
             continue
 
@@ -525,9 +527,8 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
         fwhm_wave = dw * fwhm[i, good_lines]
 
         if kind_fwhm not in ["poly", "legendre", "chebyshev"]:
-            log.warning(
-                f"invalid polynomial kind '{kind_fwhm = }'. Falling back to 'poly'"
-            )
+            log.warning(f"invalid polynomial kind '{kind_fwhm = }'. Falling back to 'poly'")
+            arc.add_header_comment(f"invalid polynomial kind '{kind_fwhm = }'. Falling back to 'poly'")
             kind_fwhm = "poly"
         if kind_fwhm == "poly":
             fwhm_cls = polynomial.Polynomial
@@ -1119,6 +1120,7 @@ def resample_wavelength(in_rss: str, out_rss: str, method: str = "linear",
         if helio_vel is None:
             helio_vel = 0.0
             log.warning(f"no heliocentric velocity found in header by keywords {helio_vel_keyword = }, assuming {helio_vel = } km/s")
+            rss.add_header_comment(f"no heliocentric velocity {helio_vel_keyword = }, assuming {helio_vel = } km/s")
     else:
         log.info(f"applying heliocentric velocity correction of {helio_vel = } km/s")
 
@@ -1590,6 +1592,7 @@ def apply_fiberflat(in_rss: str, out_frame: str, in_flat: str, clip_below: float
     # check if fiberflat has the same wavelength grid as the target data
     if not numpy.isclose(rss._wave, flat._wave).all():
         log.warning("target data and fiberflat have different wavelength grids")
+        rss.add_header_comment("target data and fiberflat have different wavelength grids")
 
     # apply fiberflat
     log.info(f"applying fiberflat correction to {rss._fibers} fibers with minimum relative transmission of {clip_below}")
@@ -1602,6 +1605,7 @@ def apply_fiberflat(in_rss: str, out_frame: str, in_flat: str, clip_below: float
         if not numpy.isclose(spec_flat._wave, spec_data._wave).all():
             deltas = spec_flat._wave - spec_data._wave
             log.warning(f"at fiber {i} resampling fiberflat: {numpy.min(deltas):.4f} - {numpy.max(deltas):.4f}")
+            rss.add_header_comment(f"at fiber {i} resampling fiberflat: {numpy.min(deltas):.4f} - {numpy.max(deltas):.4f}")
             spec_flat = spec_flat.resampleSpec(spec_data._wave, err_sim=5)
 
         # apply clipping

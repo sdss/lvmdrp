@@ -144,6 +144,7 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'STD', display_plo
         # fix case of all invalid values
         if (sens_ave == 0).all() or np.isnan(sens_ave).all() or (sens_ave<0).any():
             log.warning("all standard star sensitivities are <=0 or NaN, falling back to SCI stars")
+            rss.add_header_comment("all standard star sensitivities are <=0 or NaN, falling back to SCI stars")
             method = 'SCI'  # fallback to sci field stars
         else:
             fframe.setHdrValue("FLUXCAL", 'STD', "flux-calibration method")
@@ -158,6 +159,7 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'STD', display_plo
         # fix case of all invalid values
         if (sens_ave == 0).all() or np.isnan(sens_ave).all():
             log.warning("all field star sensitivities are zero or NaN, can't calibrate")
+            rss.add_header_comment("all field star sensitivities are zero or NaN, can't calibrate")
             sens_ave = np.ones_like(sens_ave)
             sens_rms = np.zeros_like(sens_rms)
         else:
@@ -261,12 +263,14 @@ def standard_sensitivity(stds, rss, GAIA_CACHE_DIR, ext, res, plot=False, width=
             stdflux = np.interp(w, gw, gf)  # interpolate to our wavelength grid
         except fluxcal.GaiaStarNotFound as e:
             log.warning(e)
+            rss.add_header_comment(f"Gaia star {gaia_id} not found")
             continue
 
         # subtract sky spectrum and divide by exptime
         spec = rss._data[fibidx[0], :]
         if np.nanmean(spec) < 100:
-            log.warning(f"fiber {fiber} @ {fibidx[0]} has counts < 100 electron, skipping")
+            log.warning(f"fiber {fiber} @ {fibidx[0]} has counts < 100 e-, skipping")
+            rss.add_header_comment(f"fiber {fiber} @ {fibidx[0]} has counts < 100 e-, skipping")
             continue
 
         spec = (rss._data[fibidx[0],:] - master_sky._data[fibidx[0],:])/exptime  #TODO: check exptime?
@@ -454,6 +458,7 @@ def fluxcal_standard_stars(in_rss, plot=True, GAIA_CACHE_DIR=None):
         stds = fluxcal.retrieve_header_stars(rss=rss)
     except KeyError:
         log.warning(f"no standard star metadata found in '{in_rss}', skipping sensitivity measurement")
+        rss.add_header_comment(f"no standard star metadata found in '{in_rss}', skipping sensitivity measurement")
         rss.set_fluxcal(fluxcal=res_std, source='std')
         rss.writeFitsData(in_rss)
         return res_std, mean_std, rms_std, rss
@@ -461,6 +466,7 @@ def fluxcal_standard_stars(in_rss, plot=True, GAIA_CACHE_DIR=None):
     # early stop if not standards exposed in current spectrograph
     if len(stds) == 0:
         log.warning(f"no standard stars found in '{in_rss}', skipping sensitivity measurement")
+        rss.add_header_comment(f"no standard stars found in '{in_rss}', skipping sensitivity measurement")
         rss.set_fluxcal(fluxcal=res_std, source='std')
         rss.writeFitsData(in_rss)
         return res_std, mean_std, rms_std, rss
@@ -477,6 +483,7 @@ def fluxcal_standard_stars(in_rss, plot=True, GAIA_CACHE_DIR=None):
     ngood_std = res_std_pd.shape[1]-2-np.isnan(res_std_pd.sum(axis=0)).sum()
     if ngood_std < 8:
         log.warning("less than 8 good standard fibers, skipping standard calibration")
+        rss.add_header_comment("less than 8 good standard fibers, skipping standard calibration")
         res_std[:] = np.nan
         rss.set_fluxcal(fluxcal=res_std, source='std')
         rss.writeFitsData(in_rss)
