@@ -11,7 +11,6 @@ from typing import Union, List
 from functools import lru_cache
 from itertools import groupby
 
-from glob import glob
 from typing import Tuple
 
 
