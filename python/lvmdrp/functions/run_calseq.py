@@ -30,7 +30,6 @@ import numpy as np
 from glob import glob
 from copy import deepcopy as copy
 from shutil import copy2, rmtree
-from itertools import groupby
 from astropy.stats import biweight_location, biweight_scale
 from astropy.io import fits
 from astropy.table import Table
@@ -454,6 +453,7 @@ def _link_pixelmasks():
                 dst=pixelmasks_version_path,
                 target_is_directory=True)
 
+
 def _get_ring_expnums(expnums_ldls, expnums_qrtz, ring_size=12, sort_expnums=False):
     """Split expnums into primary and secondary ring expnums
 
@@ -648,12 +648,12 @@ def _create_wavelengths_60177(use_fiducial_cals=True, skip_done=True):
     mjd = 60177
     expnums = range(3453, 3466+1)
 
-    reduce_2d(mjd, use_fiducial_cals=use_fiducial_cals, expnums=expnums, assume_imagetyp="arc", reject_cr=False, skip_done=skip_done)
+    # define master paths for target frames
+    calibs = get_calib_paths(mjd, version=drpver, use_fiducial_cals=use_fiducial_cals)
+
+    reduce_2d(mjd, calibrations=calibs, expnums=expnums, assume_imagetyp="arc", reject_cr=False, skip_done=skip_done)
 
     frames, _ = md.get_sequence_metadata(mjd=mjd, expnums=expnums, for_cals={"wave"})
-
-    # define master paths for target frames
-    calibs = get_calib_paths(mjd, use_fiducial_cals=use_fiducial_cals)
 
     lamps = [lamp.lower() for lamp in ARC_LAMPS]
     xarc_paths = {"b1": [], "b2": [], "b3": [], "r1": [], "r2": [], "r3": [], "z1": [], "z2": [], "z3": []}
@@ -735,7 +735,7 @@ def _copy_fiberflats_from(mjd, mjd_dest=60177):
         MJD where copied twilight fiberflats will be stored
     """
      # define master paths for target frames
-    calibs = get_calib_paths(mjd_dest, use_fiducial_cals=True)
+    calibs = get_calib_paths(mjd_dest, version=drpver, use_fiducial_cals=True)
     mwave_paths = group_calib_paths(calibs["wave"])
     mlsf_paths = group_calib_paths(calibs["lsf"])
 
@@ -1012,8 +1012,11 @@ def create_detrending_frames(mjd, use_fiducial_cals=True, expnums=None, exptime=
     else:
         raise ValueError(f"Invalid kind: '{kind}'. Must be one of 'bias', 'dark', 'pixflat' or 'all'")
 
+    # define master paths for target frames
+    calibs = get_calib_paths(mjd, version=drpver, use_fiducial_cals=use_fiducial_cals)
+
     # preprocess and detrend frames
-    reduce_2d(mjd=mjd, use_fiducial_cals=use_fiducial_cals, expnums=set(frames.expnum), exptime=exptime, assume_imagetyp=assume_imagetyp, reject_cr=reject_cr, skip_done=skip_done)
+    reduce_2d(mjd=mjd, calibrations=calibs, expnums=set(frames.expnum), exptime=exptime, assume_imagetyp=assume_imagetyp, reject_cr=reject_cr, skip_done=skip_done)
 
     # define image types to reduce
     imagetypes = set(frames.imagetyp)
@@ -1168,8 +1171,11 @@ def create_nightly_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnum
         expnums = None
     frames, _ = md.get_sequence_metadata(mjd, expnums=expnums, for_cals={"flat"})
 
+    # define master paths for target frames
+    calibs = get_calib_paths(mjd, version=drpver, use_fiducial_cals=use_fiducial_cals)
+
     # run 2D reduction on flats: preprocessing, detrending
-    reduce_2d(mjd, use_fiducial_cals=use_fiducial_cals, expnums=expnums, reject_cr=False, skip_done=skip_done)
+    reduce_2d(mjd, calibrations=calibs, expnums=expnums, reject_cr=False, skip_done=skip_done)
 
     for channel, lamp in MASTER_CON_LAMPS.items():
         counts_threshold = counts_thresholds[lamp]
@@ -1297,8 +1303,11 @@ def create_traces(mjd, cameras=CAMERAS, use_fiducial_cals=True, expnums_ldls=Non
     frames, _ = md.get_sequence_metadata(mjd, expnums=expnums, cameras=cameras, for_cals={"trace"})
     tileid = frames.tileid.iloc[0]
 
+    # define master paths for target frames
+    calibs = get_calib_paths(mjd, version=drpver, use_fiducial_cals=use_fiducial_cals)
+
     # run 2D reduction on flats: preprocessing, detrending
-    reduce_2d(mjd, use_fiducial_cals=use_fiducial_cals, expnums=expnums, cameras=cameras, reject_cr=False, skip_done=skip_done)
+    reduce_2d(mjd, calibrations=calibs, expnums=expnums, cameras=cameras, reject_cr=False, skip_done=skip_done)
 
     # iterate through exposures with std fibers exposed
     for camera in cameras:
@@ -1452,7 +1461,7 @@ def create_dome_fiberflats(mjd, expnums_ldls, expnums_qrtz, use_fiducial_cals=Tr
     frames, _ = md.get_sequence_metadata(mjd, expnums=expnums, for_cals={"flat"})
 
     # define master paths for target frames
-    calibs = get_calib_paths(mjd, use_fiducial_cals=use_fiducial_cals)
+    calibs = get_calib_paths(mjd, version=drpver, use_fiducial_cals=use_fiducial_cals)
     for flavor in {"trace", "width", "wave", "lsf"}:
         calibs[flavor] = group_calib_paths(calibs[flavor])
 
@@ -1561,11 +1570,11 @@ def create_twilight_fiberflats(mjd: int, use_fiducial_cals: bool = True, expnums
     # get metadata
     flats, _ = md.get_sequence_metadata(mjd, expnums=expnums, for_cals={"fiberflat"})
 
-    # 2D reduction of twilight sequence
-    reduce_2d(mjd=mjd, use_fiducial_cals=use_fiducial_cals, expnums=flats.expnum.unique(), reject_cr=False, skip_done=skip_done)
-
     # define master paths for target frames
-    calibs = get_calib_paths(mjd, use_fiducial_cals=use_fiducial_cals)
+    calibs = get_calib_paths(mjd, version=drpver, use_fiducial_cals=use_fiducial_cals)
+
+    # 2D reduction of twilight sequence
+    reduce_2d(mjd=mjd, calibrations=calibs, expnums=flats.expnum.unique(), reject_cr=False, skip_done=skip_done)
 
     for flat in flats.to_dict("records"):
         camera = flat["camera"]
@@ -1726,10 +1735,10 @@ def create_wavelengths(mjd, use_fiducial_cals=True, expnums=None, kind="longterm
     """
     frames, _ = md.get_sequence_metadata(mjd, expnums=expnums, for_cals={"wave"})
 
-    reduce_2d(mjd, use_fiducial_cals=use_fiducial_cals, expnums=expnums, assume_imagetyp="arc", reject_cr=False, skip_done=skip_done)
-
     # define master paths for target frames
-    calibs = get_calib_paths(mjd, use_fiducial_cals=use_fiducial_cals)
+    calibs = get_calib_paths(mjd, version=drpver, use_fiducial_cals=use_fiducial_cals)
+
+    reduce_2d(mjd, calibrations=calibs, expnums=expnums, assume_imagetyp="arc", reject_cr=False, skip_done=skip_done)
 
     if frames.expnum.min() != frames.expnum.max():
         expnum_str = f"{frames.expnum.min():>08}_{frames.expnum.max():>08}"
