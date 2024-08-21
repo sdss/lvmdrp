@@ -44,44 +44,65 @@ from lvmdrp import config, log, path, __version__ as drpver
 CALIBRATION_NAMES = {"pixmask", "pixflat", "bias", "trace_guess", "trace", "width", "amp", "model", "wave", "lsf", "fiberflat_dome", "fiberflat_twilight"}
 
 
-def get_calib_paths(mjd, version, flavors=CALIBRATION_NAMES, use_fiducial_cals=True):
+def get_calib_paths(mjd, version=None, flavors=CALIBRATION_NAMES, use_fiducial_cals=True, from_sanbox=False):
     """Returns a dictionary containing paths for calibration frames
 
     Parameters
     ----------
     mjd : int
         MJD to reduce
-    version : str
-        Version of the pipeline to pull calibrations from
+    version : str, optional
+        Version of the pipeline to pull calibrations from, by default None
     only_cals : list, tuple or set
         Only produce this calibrations, by default {"pixmask", "pixflat", "bias", "trace_gues", "trace", "width", "amp", "model", "wave", "lsf", "fiberflat_dome", "fiberflat_twilight"}
     use_fiducial_cals : bool
         Whether to use fiducial calibration frames or not, defaults to True
+    from_sanbox : bool, optional
+        Fall back option to pull calibrations from sandbox, by default False
 
     Returns
     -------
     calibs : dict[str, dict[str, str]]
-        a dictionary containing calibrations for the given
+        a dictionary containing calibrations for the given cameras
     """
+    if version is None and not from_sanbox:
+        raise ValueError(f"You must provide a version string to get calibration paths, {version = } given")
 
     tileid = 11111
     tilegrp = tileid_grp(tileid)
-    pixelmasks_path = os.path.join(os.getenv('LVM_SPECTRO_REDUX'), f"{drpver}/{tilegrp}/{tileid}/pixelmasks")
 
-    master_mjd = get_master_mjd(mjd) if use_fiducial_cals else mjd
-    path_species = "lvm_master"
+    cals_mjd = get_master_mjd(mjd) if use_fiducial_cals or from_sanbox else mjd
+
+    # define root path to pixel flats and masks
+    # TODO: remove this once sdss-tree are updated with the corresponding species
+    if from_sanbox:
+        pixelmasks_path = os.path.join(MASTERS_DIR, "pixelmasks")
+        path_species = "lvm_calib"
+    else:
+        pixelmasks_path = os.path.join(os.getenv('LVM_SPECTRO_REDUX'), f"{version}/{tilegrp}/{tileid}/pixelmasks")
+        path_species = "lvm_master"
+
+    pixel_flavors = {"pixmask", "pixflat"}
+    flavors_ = flavors - pixel_flavors
+
+    # define paths to pixel flats and masks
     calibs = {}
-    for flavor in flavors:
+    for flavor in pixel_flavors:
+        calibs[flavor] = {c: os.path.join(pixelmasks_path, f"lvm-m{flavor}-{c}.fits") for c in CAMERAS}
+
+    # define paths to the rest of the calibrations
+    for flavor in flavors_:
         # define camera for camera frames or spectrograph combined frames
         cams = "brz" if flavor.startswith("fiberflat_") else CAMERAS
-        # define calibration prefix
-        prefix = "m" if flavor in ["pixmask", "pixflat", "bias", "fiberflat_twilight"] or use_fiducial_cals else "n"
 
-        if flavor in ["pixmask", "pixflat"]:
-            pixelpaths = sorted(glob(os.path.join(pixelmasks_path, f"*{flavor}*.fits")))
-            calibs[flavor] = {c: p for c, p in zip(cams, pixelpaths)}
+        # define calibration prefix
+        # TODO: clean this after update in sdss-tree that will consistently handle prefixes for nightly and long-term cals
+        if path_species == "lvm_calib":
+            prefix = ""
         else:
-            calibs[flavor] = {c: path.full(path_species, drpver=version, tileid=tileid, mjd=master_mjd, kind=f"{prefix}{flavor}", camera=c) for c in cams}
+            prefix = "m" if flavor in ["bias", "fiberflat_twilight"] or use_fiducial_cals else "n"
+
+        calibs[flavor] = {c: path.full(path_species, drpver=version, tileid=tileid, mjd=cals_mjd, kind=f"{prefix}{flavor}", camera=c) for c in cams}
 
     return calibs
 
