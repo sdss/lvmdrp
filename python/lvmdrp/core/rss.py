@@ -21,6 +21,7 @@ from lvmdrp.core.positionTable import PositionTable
 from lvmdrp.core.spectrum1d import Spectrum1D, find_continuum, wave_little_interpol
 from lvmdrp.core import dataproducts as dp
 
+from lvmdrp import __version__ as drpver
 
 def polyfit2d(x, y, z, order=3):
     """
@@ -3511,6 +3512,7 @@ class RSS(FiberRows):
 
         os.makedirs(os.path.dirname(out_rss), exist_ok=True)
         hdus[0].header["FILENAME"] = os.path.basename(out_rss)
+        hdus[0].header['DRPVER'] = drpver
         hdus.writeto(out_rss, overwrite=True, output_verify="silentfix")
 
 def loadRSS(in_rss):
@@ -3641,6 +3643,7 @@ class lvmFrame(lvmBaseProduct):
 
         os.makedirs(os.path.dirname(out_file), exist_ok=True)
         self._template[0].header["FILENAME"] = os.path.basename(out_file)
+        self._template[0].header['DRPVER'] = drpver
         self._template.writeto(out_file, overwrite=True)
 
 
@@ -3718,6 +3721,7 @@ class lvmFFrame(lvmBaseProduct):
 
         os.makedirs(os.path.dirname(out_file), exist_ok=True)
         self._template[0].header["FILENAME"] = os.path.basename(out_file)
+        self._template[0].header['DRPVER'] = drpver
         self._template.writeto(out_file, overwrite=True)
 
 
@@ -3789,6 +3793,7 @@ class lvmCFrame(lvmBaseProduct):
 
         os.makedirs(os.path.dirname(out_file), exist_ok=True)
         self._template[0].header["FILENAME"] = os.path.basename(out_file)
+        self._template[0].header['DRPVER'] = drpver
         self._template.writeto(out_file, overwrite=True)
 
 
@@ -3849,6 +3854,7 @@ class lvmSFrame(lvmBaseProduct):
 
         os.makedirs(os.path.dirname(out_file), exist_ok=True)
         self._template[0].header["FILENAME"] = os.path.basename(out_file)
+        self._template[0].header['DRPVER'] = drpver
         self._template.writeto(out_file, overwrite=True)
 
 
