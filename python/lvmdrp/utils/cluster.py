@@ -71,13 +71,13 @@ def run_cluster(mjds: list = None, expnums: Union[list, str] = None, nodes: int 
             return
         else:
             for expnum in expnums:
-                q.append(f"drp run -e {expnum} -c")
+                q.append(f"umask 002 && drp run -e {expnum} -c")
     else:
         # get a list of mjds
         mjds = mjds or sorted(os.listdir(os.getenv('LVM_DATA_S')))
 
         for mjd in mjds:
-            script = f"drp run -m {mjd} -c"
+            script = f"umask 002 && drp run -m {mjd} -c"
             q.append(script)
 
     # submit the queue

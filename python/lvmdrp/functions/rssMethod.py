@@ -706,7 +706,7 @@ def shift_wave_skylines(in_frame: str, out_frame: str, dwave: float = 8.0, skyli
         fwhm_guess = numpy.nanmean(numpy.interp(skylines, lvmframe._wave[ifiber], lvmframe._lsf[ifiber]))
 
         flux, sky_wave, fwhm, bg = spec.fitSepGauss(skylines, dwave, fwhm_guess, 0.0, [0, numpy.inf], [-2.5, 2.5], [fwhm_guess - 1.5, fwhm_guess + 1.5], [0.0, numpy.inf])
-        if numpy.any(flux / bg < 1.5) or numpy.isnan([flux, sky_wave, fwhm]).any():
+        if numpy.any(flux / bg < 0.7) or numpy.isnan([flux, sky_wave, fwhm]).any():
             continue
 
         offsets[:, ifiber] = sky_wave - skylines
@@ -764,7 +764,6 @@ def shift_wave_skylines(in_frame: str, out_frame: str, dwave: float = 8.0, skyli
     ax.set_title(f'{lvmframe._header["EXPOSURE"]} - {channel} - {numpy.round(skylines, 2)}')
     ax.set_xlabel('Fiber ID')
     ax.set_ylabel(r'$\Delta \lambda [\AA]$')
-    plt.show()
 
     save_fig(
         fig,

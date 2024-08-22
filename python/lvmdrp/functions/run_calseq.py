@@ -429,7 +429,7 @@ def _get_reference_expnum(frame, ref_frames):
 
 def _move_master_calibrations(mjd, kind=None):
 
-    kinds = {"bias", "trace", "width", "fiberflat", "fiberflat_twilight", "wave", "lsf"}
+    kinds = {"bias", "trace", "width", "model", "fiberflat", "fiberflat_twilight", "wave", "lsf"}
     if isinstance(kind, (list, tuple, set, np.ndarray)):
         kinds = kind
     elif isinstance(kind, str) and kind in kinds:
@@ -1362,8 +1362,6 @@ def create_traces(mjd, cameras=CAMERAS, use_fiducial_cals=True, expnums_ldls=Non
             cent_guess_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", imagetype="cent_guess", camera=camera, expnum=expnum)
             dstray_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", imagetype="stray", camera=camera, expnum=expnum)
             fwhm_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", imagetype="fwhm", camera=camera, expnum=expnum)
-            dmodel_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", imagetype="model", camera=camera, expnum=expnum)
-            dratio_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", imagetype="ratio", camera=camera, expnum=expnum)
 
             # first centroids trace
             if skip_done and os.path.isfile(cent_guess_path):
@@ -1419,6 +1417,8 @@ def create_traces(mjd, cameras=CAMERAS, use_fiducial_cals=True, expnums_ldls=Non
         mamp_path = path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=mjd, camera=camera, kind="mamp")
         mcent_path = path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=mjd, camera=camera, kind="mtrace")
         mwidth_path = path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=mjd, camera=camera, kind="mwidth")
+        mmodel_path = path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=mjd, camera=camera, kind="mmodel")
+        mratio_path = path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=mjd, camera=camera, kind="mratio")
         os.makedirs(os.path.dirname(mamp_path), exist_ok=True)
         if skip_done and os.path.isfile(mcent_path) and os.path.isfile(mamp_path) and os.path.isfile(mwidth_path):
             log.info(f"skipping {mcent_path}, {mamp_path} and {mwidth_path}, files already exist")
@@ -1460,8 +1460,8 @@ def create_traces(mjd, cameras=CAMERAS, use_fiducial_cals=True, expnums_ldls=Non
 
             # eval model continuum and ratio
             model, ratio = img_stray.eval_fiber_model(mcents[camera], mwidths[camera], mamps[camera])
-            model.writeFitsData(dmodel_path)
-            ratio.writeFitsData(dratio_path)
+            model.writeFitsData(mmodel_path)
+            ratio.writeFitsData(mratio_path)
 
 
 def create_dome_fiberflats(mjd, expnums_ldls, expnums_qrtz, use_fiducial_cals=True, kind="longterm", skip_done=True):
@@ -1966,7 +1966,7 @@ def reduce_longterm_sequence(mjd, use_fiducial_cals=True, reject_cr=True, only_c
                 expnums_ldls=expnums_ldls, expnums_qrtz=expnums_qrtz,
                 skip_done=skip_done
             )
-        _move_master_calibrations(mjd=mjd, kind={"trace", "width"})
+        _move_master_calibrations(mjd=mjd, kind={"trace", "width", "model"})
     else:
         log.log(20 if "trace" in found_cals else 40, "skipping production of fiber traces")
 
