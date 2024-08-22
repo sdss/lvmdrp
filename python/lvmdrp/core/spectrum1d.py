@@ -3327,11 +3327,6 @@ class Spectrum1D(Header):
             select = (self._wave >= centre - hw) & (self._wave <= centre + hw)
             if mask[select].sum() == select.size:
                 continue
-            # refine centroid within selected window
-            idx, = numpy.where(select)
-            centre = self._wave[idx[numpy.argmax(data[select])]]
-            # update fitting window
-            select = (self._wave >= centre - hw) & (self._wave <= centre + hw)
 
             if mask[select].sum() >= badpix_threshold:
                 log.warning(f"skipping line at pixel {centre} with {mask[select].sum()} >= {badpix_threshold = } bad pixels")

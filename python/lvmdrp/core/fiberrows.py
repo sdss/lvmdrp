@@ -8,7 +8,7 @@ from lvmdrp import log
 from scipy import optimize
 from lvmdrp.core.header import Header, combineHdr
 from lvmdrp.core.positionTable import PositionTable
-from lvmdrp.core.spectrum1d import Spectrum1D, _cross_match
+from lvmdrp.core.spectrum1d import Spectrum1D, _cross_match_float
 from lvmdrp.core.plot import plt
 
 
@@ -874,10 +874,10 @@ class FiberRows(Header, PositionTable):
             else:
                 axs_fiber = None
 
-            cc, bhat, mhat = _cross_match(
+            cc, bhat, mhat = _cross_match_float(
                 ref_spec=last_spec._data,
                 obs_spec=spec._data,
-                stretch_factors=numpy.linspace(0.9,1.1,100),
+                stretch_factors=[1.0],
                 shift_range=[-5, 5],
             )
             cent_guess = mhat * last_cent + bhat
@@ -914,10 +914,10 @@ class FiberRows(Header, PositionTable):
             else:
                 axs_fiber = None
 
-            cc, bhat, mhat = _cross_match(
+            cc, bhat, mhat = _cross_match_float(
                 ref_spec=last_spec._data,
                 obs_spec=spec._data,
-                stretch_factors=numpy.linspace(0.9,1.1,100),
+                stretch_factors=[1.0],
                 shift_range=[-5, 5],
             )
             cent_guess = mhat * last_cent + bhat

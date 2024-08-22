@@ -33,7 +33,7 @@ from lvmdrp.core.plot import (plt, create_subplots, save_fig,
                               plot_wavesol_spec, plot_wavesol_wave,
                               plot_wavesol_lsf)
 from lvmdrp.core.rss import RSS, _read_pixwav_map, loadRSS, lvmFrame, lvmFFrame, lvmCFrame
-from lvmdrp.core.spectrum1d import Spectrum1D, _spec_from_lines, _cross_match
+from lvmdrp.core.spectrum1d import Spectrum1D, _spec_from_lines, _cross_match_float
 from lvmdrp.core.fluxcal import galExtinct
 from lvmdrp.utils import flatten
 from lvmdrp import log
@@ -372,10 +372,10 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
         # fix cc_max_shift
         cc_max_shift = min(cc_max_shift, 50)
         # cross-match spectrum and pixwav map
-        cc, bhat, mhat = _cross_match(
+        cc, bhat, mhat = _cross_match_float(
             ref_spec=pix_spec,
             obs_spec=arc._data[ref_fiber],
-            stretch_factors=numpy.linspace(0.9,1.1,10000),
+            stretch_factors=[1.0],
             shift_range=[-cc_max_shift, cc_max_shift],
         )
 
