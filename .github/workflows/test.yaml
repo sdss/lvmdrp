@@ -50,7 +50,7 @@ jobs:
     - name: Lint with ruff
       run: |
         pip install ruff
-        ruff check .
+        ruff check . --extend-exclude "examples/**" --extend-exclude "docs/nb/**"
 
     - name: Test with pytest
       run: |
