@@ -30,7 +30,6 @@ import numpy as np
 from glob import glob
 from copy import deepcopy as copy
 from shutil import copy2, rmtree
-from itertools import groupby
 from astropy.stats import biweight_location, biweight_scale
 from astropy.io import fits
 from astropy.table import Table
@@ -39,6 +38,7 @@ from typing import List, Tuple, Dict
 
 from lvmdrp import log, path, __version__ as drpver
 from lvmdrp.utils import metadata as md
+from lvmdrp.utils.convert import tileid_grp
 from lvmdrp.core.plot import create_subplots, save_fig
 from lvmdrp.core import dataproducts as dp
 from lvmdrp.core.constants import (
@@ -54,7 +54,7 @@ from lvmdrp.core.rss import RSS, lvmFrame
 
 from lvmdrp.functions import imageMethod as image_tasks
 from lvmdrp.functions import rssMethod as rss_tasks
-from lvmdrp.main import get_config_options, read_fibermap, get_master_mjd, reduce_2d
+from lvmdrp.main import get_config_options, read_fibermap, get_master_mjd, get_calib_paths, group_calib_paths, reduce_2d
 from lvmdrp.functions.run_twilights import lvmFlat, fit_fiberflat, create_lvmflat, combine_twilight_sequence
 
 
@@ -67,57 +67,6 @@ MASK_BANDS = {
 }
 COUNTS_THRESHOLDS = {"ldls": 5000, "quartz": 10000}
 CAL_FLAVORS = {"bias", "trace", "wave", "dome", "twilight"}
-
-
-def get_calib_paths(mjd, flavors={"pixmask", "pixflat", "bias", "trace_guess", "trace", "width", "amp", "model", "wave", "lsf", "fiberflat_dome", "fiberflat_twilight"}, use_fiducial_cals=True):
-    """Returns a dictionary containing paths for calibration frames
-
-    Parameters
-    ----------
-    mjd : int
-        MJD to reduce
-    only_cals : list, tuple or set
-        Only produce this calibrations, by default {"pixmask", "pixflat", "bias", "trace_gues", "trace", "width", "amp", "model", "wave", "lsf", "fiberflat_dome", "fiberflat_twilight"}
-    use_fiducial_cals : bool
-        Whether to use fiducial calibration frames or not, defaults to True
-
-    Returns
-    -------
-    calibs : dict[str, dict[str, str]]
-        a dictionary containing calibrations for the given
-    """
-
-    master_mjd = get_master_mjd(mjd) if use_fiducial_cals else mjd
-    path_species = "lvm_calib" if use_fiducial_cals else "lvm_master"
-    calibs = {}
-    for flavor in flavors:
-        # define camera for camera frames or spectrograph combined frames
-        cams = "brz" if flavor.startswith("fiberflat_") else CAMERAS
-        # define calibration prefix
-        prefix = "" if flavor == "bias" or use_fiducial_cals else "n"
-
-        calibs[flavor] = {c: path.full(path_species, drpver=drpver, tileid=11111, mjd=master_mjd, kind=f"{prefix}{flavor}", camera=c) for c in cams}
-
-    return calibs
-
-
-def group_calib_paths(calib_paths):
-    """Returns a dictionary of calibration paths grouped by channel given a set of camera frame paths
-
-    Parameters
-    ----------
-    calib_paths : dict[str, str]
-        Dictionary containing camera frame calibrations
-
-    Returns
-    -------
-    paths : dict[str, str]
-        Calibration paths grouped by channel
-    """
-    paths = {}
-    for channel, cameras in groupby(calib_paths, key=lambda p: os.path.basename(p).split(".")[0].split("-")[-1][0]):
-        paths[channel] = sorted([calib_paths[camera] for camera in cameras])
-    return paths
 
 
 def choose_sequence(frames, flavor, kind, truncate=True):
@@ -489,6 +438,22 @@ def _clean_ancillary(mjd, expnums=None, flavors="all"):
         os.rmdir(ancillary_dir)
 
 
+def _link_pixelmasks():
+    """Creates a symbolic link of fiducial pixel flats and masks to current version directory"""
+    tileid = 11111
+    tilegrp = tileid_grp(tileid)
+    pixelmasks_version_path = os.path.join(os.getenv('LVM_SPECTRO_REDUX'), f"{drpver}/{tilegrp}/{tileid}/pixelmasks")
+    if os.path.isdir(pixelmasks_version_path):
+        log.info(f"link to pixel flats and masks already exists, {pixelmasks_version_path}")
+        return
+
+    pixelmasks_path = os.path.join(MASTERS_DIR, "pixelmasks")
+    log.info(f"linking pixel flats and masks to {pixelmasks_version_path}")
+    os.symlink(src=pixelmasks_path,
+                dst=pixelmasks_version_path,
+                target_is_directory=True)
+
+
 def _get_ring_expnums(expnums_ldls, expnums_qrtz, ring_size=12, sort_expnums=False):
     """Split expnums into primary and secondary ring expnums
 
@@ -683,12 +648,12 @@ def _create_wavelengths_60177(use_fiducial_cals=True, skip_done=True):
     mjd = 60177
     expnums = range(3453, 3466+1)
 
-    reduce_2d(mjd, use_fiducial_cals=use_fiducial_cals, expnums=expnums, assume_imagetyp="arc", reject_cr=False, skip_done=skip_done)
+    # define master paths for target frames
+    calibs = get_calib_paths(mjd, version=drpver, use_fiducial_cals=use_fiducial_cals)
+
+    reduce_2d(mjd, calibrations=calibs, expnums=expnums, assume_imagetyp="arc", reject_cr=False, skip_done=skip_done)
 
     frames, _ = md.get_sequence_metadata(mjd=mjd, expnums=expnums, for_cals={"wave"})
-
-    # define master paths for target frames
-    calibs = get_calib_paths(mjd, use_fiducial_cals=use_fiducial_cals)
 
     lamps = [lamp.lower() for lamp in ARC_LAMPS]
     xarc_paths = {"b1": [], "b2": [], "b3": [], "r1": [], "r2": [], "r3": [], "z1": [], "z2": [], "z3": []}
@@ -770,7 +735,7 @@ def _copy_fiberflats_from(mjd, mjd_dest=60177):
         MJD where copied twilight fiberflats will be stored
     """
      # define master paths for target frames
-    calibs = get_calib_paths(mjd_dest, use_fiducial_cals=True)
+    calibs = get_calib_paths(mjd_dest, version=drpver, use_fiducial_cals=True)
     mwave_paths = group_calib_paths(calibs["wave"])
     mlsf_paths = group_calib_paths(calibs["lsf"])
 
@@ -1047,8 +1012,11 @@ def create_detrending_frames(mjd, use_fiducial_cals=True, expnums=None, exptime=
     else:
         raise ValueError(f"Invalid kind: '{kind}'. Must be one of 'bias', 'dark', 'pixflat' or 'all'")
 
+    # define master paths for target frames
+    calibs = get_calib_paths(mjd, version=drpver, use_fiducial_cals=use_fiducial_cals)
+
     # preprocess and detrend frames
-    reduce_2d(mjd=mjd, use_fiducial_cals=use_fiducial_cals, expnums=set(frames.expnum), exptime=exptime, assume_imagetyp=assume_imagetyp, reject_cr=reject_cr, skip_done=skip_done)
+    reduce_2d(mjd=mjd, calibrations=calibs, expnums=set(frames.expnum), exptime=exptime, assume_imagetyp=assume_imagetyp, reject_cr=reject_cr, skip_done=skip_done)
 
     # define image types to reduce
     imagetypes = set(frames.imagetyp)
@@ -1077,122 +1045,7 @@ def create_detrending_frames(mjd, use_fiducial_cals=True, expnums=None, exptime=
                 image_tasks.create_master_frame(in_images=dframe_paths, out_image=mframe_path, **kwargs)
 
 
-def create_pixelmasks(mjd, use_fiducial_cals=True, dark_expnums=None, pixflat_expnums=None,
-                      short_exptime=900, long_exptime=3600, pixflat_exptime=5,
-                      ignore_pixflats=True, keep_ancillary=False):
-    """Create pixel mask from master pixelflat and/or dark frames
-
-    Given a set of MJDs and (optionally) exposure numbers, create a pixel mask
-    from the master pixelflat and/or dark frames. This routine will store the
-    master pixelmask in the corresponding calibration directory in the
-    `masters_mjd` or by default in the smallest MJD in `mjds`.
-
-    If the corresponding detrended pixelflat and/or dark frames do not exist, they
-    will be created first. Otherwise they will be read from disk. If
-    `ignore_pixflats` is True, then the pixelflat frames will not be used to create the
-    pixel mask.
-
-    Parameters:
-    ----------
-    mjd : int
-        MJD to reduce
-    use_fiducial_cals : bool
-        Whether to use fiducial calibration frames or not, defaults to True
-    dark_expnums : list
-        List of dark exposure numbers
-    pixflat_expnums : list
-        List of pixelflat exposure numbers
-    short_exptime : int
-        Short exposure time for dark frames
-    long_exptime : int
-        Long exposure time for dark frames
-    pixflat_exptime : int
-        Exposure time for pixelflat frames
-    ignore_pixflats : bool
-        Ignore pixelflat frames when creating pixel mask
-    keep_ancillary : bool
-        Keep ancillary files, by default False
-
-    """
-    if dark_expnums is not None and pixflat_expnums is not None:
-        expnums = np.concatenate([dark_expnums, pixflat_expnums])
-    else:
-        expnums = None
-    frames, _ = md.get_sequence_metadata(mjd, expnums=expnums, for_cals={"dark", "pixflat"})
-
-    darks = frames.query("imagetyp == 'dark' and exptime == @short_exptime or exptime == @long_exptime", inplace=True)
-    pixflats = frames.query("imagetyp == 'dark' or imagetyp == 'pixelflat' and exptime == @pixflat_exptime", inplace=True)
-
-    # reduce darks
-    reduce_2d(mjd=mjd, use_fiducial_cals=use_fiducial_cals, expnums=set(darks.expnum))
-
-    ddark_paths = [path.full("lvm_anc", drpver=drpver, kind="d", imagetype="dark", **dark) for dark in darks.to_dict("records")]
-    darks["ddark_path"] = ddark_paths
-    cam_groups = darks.groupby(["camera", "exptime"])
-    for cam, exptime in cam_groups.groups:
-        ddark_paths_cam = cam_groups.get_group((cam, exptime))["ddark_path"]
-
-        mdark_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind=f"mdark-{int(exptime)}s", camera=cam)
-        image_tasks.create_master_frame(in_images=ddark_paths_cam, out_image=mdark_path)
-
-    # reduce pixflats
-    if not ignore_pixflats:
-        reduce_2d(mjd=mjd, use_fiducial_cals=use_fiducial_cals, expnums=set(pixflats.expnum),
-                replace_with_nan=False, assume_imagetyp="pixelflat", reject_cr=False)
-        dflat_paths = [path.full("lvm_anc", drpver=drpver, kind="d", imagetype="pixelflat", **pixflat) for pixflat in pixflats.to_dict("records")]
-        pixflats["dflat_path"] = dflat_paths
-
-        cam_groups = pixflats.groupby("camera")
-        for cam in cam_groups.groups:
-            dflat_paths_cam = cam_groups.get_group(cam)["dflat_path"]
-
-            # define output combined pixelflat path
-            mflat_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mpixflat", camera=cam)
-
-            image_tasks.create_master_frame(in_images=dflat_paths_cam, out_image=mflat_path)
-
-            # normalize pixelflat background
-            pixflat_img = image_tasks.loadImage(mflat_path)
-            pixflat_img = pixflat_img / pixflat_img.medianImg(size=20)
-            pixflat_img.writeFitsData(mflat_path)
-
-        dflat_groups = groupby(dflat_paths, key=lambda s: os.path.basename(s).split("-")[2])
-
-        # create pixel mask
-        for camera, group in dflat_groups:
-            medians = []
-            group = list(group)
-            # compute medians of all detrended pixel flats
-            for dflat_path in group:
-                medians.append(np.nanmedian(image_tasks.loadImage(dflat_path)._data))
-
-            # sort paths by median values
-            idx = np.argsort(medians)
-            dflat_group = np.asarray(group)[idx]
-
-            # pick two most different pixelflats
-            flat_a = dflat_group[0]
-            flat_b = dflat_group[-1]
-
-            mdark_short_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind=f"mdark-{short_exptime}s", camera=camera)
-            mdark_long_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind=f"mdark-{long_exptime}s", camera=camera)
-            mpixmask_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mpixmask", camera=camera)
-            image_tasks.create_pixelmask(in_short_dark=mdark_short_path, in_long_dark=mdark_long_path,
-                                        in_flat_a=flat_a, in_flat_b=flat_b,
-                                        out_pixmask=mpixmask_path)
-    else:
-        log.info("Ignoring pixelflats when creating pixel mask")
-        mdark_short_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind=f"mdark-{short_exptime}s", camera=camera)
-        mdark_long_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind=f"mdark-{long_exptime}s", camera=camera)
-        mpixmask_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mpixmask", camera=camera)
-        image_tasks.create_pixelmask(in_short_dark=mdark_short_path, in_long_dark=mdark_long_path, out_pixmask=mpixmask_path)
-
-    # ancillary paths clean up
-    # if not keep_ancillary:
-    #     _clean_ancillary(mjd=mjd, expnums=expnums)
-
-
-def create_nightly_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnums_qrtz=None,
+def create_nightly_traces(mjd, use_fiducial_cals=False, expnums_ldls=None, expnums_qrtz=None,
                           counts_thresholds=COUNTS_THRESHOLDS, cent_guess_ncolumns=140,
                           trace_full_ncolumns=40,
                           fit_poly=True, poly_deg_amp=5, poly_deg_cent=4, poly_deg_width=5,
@@ -1203,8 +1056,11 @@ def create_nightly_traces(mjd, use_fiducial_cals=True, expnums_ldls=None, expnum
         expnums = None
     frames, _ = md.get_sequence_metadata(mjd, expnums=expnums, for_cals={"flat"})
 
+    # define master paths for target frames
+    calibs = get_calib_paths(mjd, version=drpver, use_fiducial_cals=use_fiducial_cals)
+
     # run 2D reduction on flats: preprocessing, detrending
-    reduce_2d(mjd, use_fiducial_cals=use_fiducial_cals, expnums=expnums, reject_cr=False, skip_done=skip_done)
+    reduce_2d(mjd, calibrations=calibs, expnums=expnums, reject_cr=False, skip_done=skip_done)
 
     for channel, lamp in MASTER_CON_LAMPS.items():
         counts_threshold = counts_thresholds[lamp]
@@ -1332,8 +1188,11 @@ def create_traces(mjd, cameras=CAMERAS, use_fiducial_cals=True, expnums_ldls=Non
     frames, _ = md.get_sequence_metadata(mjd, expnums=expnums, cameras=cameras, for_cals={"trace"})
     tileid = frames.tileid.iloc[0]
 
+    # define master paths for target frames
+    calibs = get_calib_paths(mjd, version=drpver, use_fiducial_cals=use_fiducial_cals)
+
     # run 2D reduction on flats: preprocessing, detrending
-    reduce_2d(mjd, use_fiducial_cals=use_fiducial_cals, expnums=expnums, cameras=cameras, reject_cr=False, skip_done=skip_done)
+    reduce_2d(mjd, calibrations=calibs, expnums=expnums, cameras=cameras, reject_cr=False, skip_done=skip_done)
 
     # iterate through exposures with std fibers exposed
     for camera in cameras:
@@ -1487,7 +1346,7 @@ def create_dome_fiberflats(mjd, expnums_ldls, expnums_qrtz, use_fiducial_cals=Tr
     frames, _ = md.get_sequence_metadata(mjd, expnums=expnums, for_cals={"flat"})
 
     # define master paths for target frames
-    calibs = get_calib_paths(mjd, use_fiducial_cals=use_fiducial_cals)
+    calibs = get_calib_paths(mjd, version=drpver, use_fiducial_cals=use_fiducial_cals)
     for flavor in {"trace", "width", "wave", "lsf"}:
         calibs[flavor] = group_calib_paths(calibs[flavor])
 
@@ -1596,11 +1455,11 @@ def create_twilight_fiberflats(mjd: int, use_fiducial_cals: bool = True, expnums
     # get metadata
     flats, _ = md.get_sequence_metadata(mjd, expnums=expnums, for_cals={"fiberflat"})
 
-    # 2D reduction of twilight sequence
-    reduce_2d(mjd=mjd, use_fiducial_cals=use_fiducial_cals, expnums=flats.expnum.unique(), reject_cr=False, skip_done=skip_done)
-
     # define master paths for target frames
-    calibs = get_calib_paths(mjd, use_fiducial_cals=use_fiducial_cals)
+    calibs = get_calib_paths(mjd, version=drpver, use_fiducial_cals=use_fiducial_cals)
+
+    # 2D reduction of twilight sequence
+    reduce_2d(mjd=mjd, calibrations=calibs, expnums=flats.expnum.unique(), reject_cr=False, skip_done=skip_done)
 
     for flat in flats.to_dict("records"):
         camera = flat["camera"]
@@ -1728,10 +1587,10 @@ def create_wavelengths(mjd, use_fiducial_cals=True, expnums=None, kind="longterm
     """
     frames, _ = md.get_sequence_metadata(mjd, expnums=expnums, for_cals={"wave"})
 
-    reduce_2d(mjd, use_fiducial_cals=use_fiducial_cals, expnums=expnums, assume_imagetyp="arc", reject_cr=False, skip_done=skip_done)
-
     # define master paths for target frames
-    calibs = get_calib_paths(mjd, use_fiducial_cals=use_fiducial_cals)
+    calibs = get_calib_paths(mjd, version=drpver, use_fiducial_cals=use_fiducial_cals)
+
+    reduce_2d(mjd, calibrations=calibs, expnums=expnums, assume_imagetyp="arc", reject_cr=False, skip_done=skip_done)
 
     if frames.expnum.min() != frames.expnum.max():
         expnum_str = f"{frames.expnum.min():>08}_{frames.expnum.max():>08}"
@@ -1811,7 +1670,7 @@ def create_wavelengths(mjd, use_fiducial_cals=True, expnums=None, kind="longterm
 
 def reduce_nightly_sequence(mjd, use_fiducial_cals=False, reject_cr=True, only_cals=CAL_FLAVORS,
                             counts_thresholds=COUNTS_THRESHOLDS, cent_guess_ncolumns=140, trace_full_ncolumns=40,
-                            skip_done=True, keep_ancillary=False):
+                            skip_done=True, keep_ancillary=False, link_pixelmasks=True):
     """Reduces the nightly calibration sequence:
 
     The nightly calibration sequence consists of the following exposures:
@@ -1837,6 +1696,8 @@ def reduce_nightly_sequence(mjd, use_fiducial_cals=False, reject_cr=True, only_c
         Skip pipeline steps that have already been done
     keep_ancillary : bool
         Keep ancillary files, by default False
+    link_pixelmasks : bool, optional
+        Create a symbolic link of current version of pixel mask and pixel flats to current version, by default True
     """
     if mjd is None:
         log.error(f"nothing to reduce, MJD = {mjd}")
@@ -1904,11 +1765,17 @@ def reduce_nightly_sequence(mjd, use_fiducial_cals=False, reject_cr=True, only_c
         else:
             log.log(20 if "twilight" in found_cals else 40, "skipping production of twilight fiberflats")
 
+    if link_pixelmasks:
+        _link_pixelmasks()
+
     # if not keep_ancillary:
     #     _clean_ancillary(mjd)
 
 
-def reduce_longterm_sequence(mjd, use_fiducial_cals=True, reject_cr=True, only_cals=CAL_FLAVORS, skip_done=True, keep_ancillary=False):
+def reduce_longterm_sequence(mjd, use_fiducial_cals=True,
+                             reject_cr=True, only_cals=CAL_FLAVORS,
+                             skip_done=True, keep_ancillary=False,
+                             link_pixelmasks=True):
     """Reduces the long-term calibration sequence:
 
     The long-term calibration sequence consists of the following exposures:
@@ -1934,6 +1801,8 @@ def reduce_longterm_sequence(mjd, use_fiducial_cals=True, reject_cr=True, only_c
         Skip pipeline steps that have already been done
     keep_ancillary : bool
         Keep ancillary files, by default False
+    link_pixelmasks : bool, optional
+        Create a symbolic link of current version of pixel mask and pixel flats to current version, by default True
     """
     if mjd is None:
         log.error(f"nothing to reduce, MJD = {mjd}")
@@ -1949,7 +1818,7 @@ def reduce_longterm_sequence(mjd, use_fiducial_cals=True, reject_cr=True, only_c
         biases, bias_expnums = choose_sequence(frames, flavor="bias", kind="longterm")
         log.info(f"choosing {len(biases)} bias exposures: {bias_expnums}")
         create_detrending_frames(mjd=mjd, expnums=bias_expnums, kind="bias", use_fiducial_cals=use_fiducial_cals, skip_done=skip_done)
-        _move_master_calibrations(mjd=mjd, kind="bias")
+        # _move_master_calibrations(mjd=mjd, kind="bias")
     else:
         log.log(20 if "bias" in found_cals else 40, "skipping production of bias frames")
 
@@ -1966,7 +1835,7 @@ def reduce_longterm_sequence(mjd, use_fiducial_cals=True, reject_cr=True, only_c
                 expnums_ldls=expnums_ldls, expnums_qrtz=expnums_qrtz,
                 skip_done=skip_done
             )
-        _move_master_calibrations(mjd=mjd, kind={"trace", "width", "model"})
+        # _move_master_calibrations(mjd=mjd, kind={"trace", "width", "model"})
     else:
         log.log(20 if "trace" in found_cals else 40, "skipping production of fiber traces")
 
@@ -1974,7 +1843,7 @@ def reduce_longterm_sequence(mjd, use_fiducial_cals=True, reject_cr=True, only_c
         arcs, arc_expnums = choose_sequence(frames, flavor="arc", kind="longterm")
         log.info(f"choosing {len(arcs)} arc exposures: {arc_expnums}")
         create_wavelengths(mjd=mjd, expnums=np.sort(arcs.expnum.unique()), skip_done=skip_done)
-        _move_master_calibrations(mjd=mjd, kind={"wave", "lsf"})
+        # _move_master_calibrations(mjd=mjd, kind={"wave", "lsf"})
     else:
         log.log(20 if "wave" in found_cals else 40, "skipping production of wavelength calibrations")
 
@@ -1987,9 +1856,12 @@ def reduce_longterm_sequence(mjd, use_fiducial_cals=True, reject_cr=True, only_c
         twilight_flats, twilight_expnums = choose_sequence(frames, flavor="twilight", kind="longterm")
         log.info(f"choosing {len(twilight_flats)} twilight exposures: {twilight_expnums}")
         create_twilight_fiberflats(mjd=mjd, expnums=twilight_expnums, skip_done=skip_done)
-        _move_master_calibrations(mjd=mjd, kind="fiberflat_twilight")
+        # _move_master_calibrations(mjd=mjd, kind="fiberflat_twilight")
     else:
         log.log(20 if "twilight" in found_cals else 40, "skipping production of twilight fiberflats")
+
+    if link_pixelmasks:
+        _link_pixelmasks()
 
     # if not keep_ancillary:
     #     _clean_ancillary(mjd)

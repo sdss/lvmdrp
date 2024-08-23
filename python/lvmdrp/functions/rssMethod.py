@@ -33,7 +33,7 @@ from lvmdrp.core.plot import (plt, create_subplots, save_fig,
                               plot_wavesol_spec, plot_wavesol_wave,
                               plot_wavesol_lsf)
 from lvmdrp.core.rss import RSS, _read_pixwav_map, loadRSS, lvmFrame, lvmFFrame, lvmCFrame
-from lvmdrp.core.spectrum1d import Spectrum1D, _spec_from_lines, _cross_match
+from lvmdrp.core.spectrum1d import Spectrum1D, _spec_from_lines, _cross_match_float
 from lvmdrp.core.fluxcal import galExtinct
 from lvmdrp.utils import flatten
 from lvmdrp import log
@@ -182,7 +182,7 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
                                   ref_fiber: int = 319, pixel: List[float] = [], ref_lines: List[float] = [],
                                   use_line: List[bool] = [],
                                   cc_correction: bool = True,
-                                  cc_max_shift: int = 20,
+                                  cc_max_shift: int = 30,
                                   aperture: int = 12,
                                   fwhm_guess: float = 3.0,
                                   bg_guess: float = 0.0,
@@ -230,7 +230,7 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
     cc_correction : bool, optional
         Perform cross-correlation correction to reference arc lines to account for instrumental shifts, by default True
     cc_max_shift : int, optional
-        Maximum shift in pixels to reference lines, by default 20
+        Maximum shift in pixels to reference lines, by default 30
     aperture : int, optional
         Range of pixels around arc lines guess centroid within which the Gaussian fitting will be performed, by default 12
     fwhm_guess : float, optional
@@ -367,19 +367,19 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
     if cc_correction or ref_fiber != ref_fiber_:
         log.info(f"running cross matching on all {pixel.size} identified lines")
         # determine maximum correlation shift
-        pix_spec = _spec_from_lines(pixel, sigma=2, wavelength=arc._pixels)
+        pix_spec = _spec_from_lines(pixel, sigma=2.5/2.354, wavelength=arc._pixels)
 
         # fix cc_max_shift
-        cc_max_shift = min(cc_max_shift, 50)
         # cross-match spectrum and pixwav map
-        cc, bhat, mhat = _cross_match(
+        cc, bhat, mhat = _cross_match_float(
             ref_spec=pix_spec,
             obs_spec=arc._data[ref_fiber],
-            stretch_factors=numpy.linspace(0.9,1.1,10000),
+            stretch_factors=numpy.linspace(0.8,1.2,10000),
             shift_range=[-cc_max_shift, cc_max_shift],
+            normalize_spectra=False,
         )
 
-        log.info(f"max CC = {cc:.2f} for strech = {mhat:.2f} and shift = {bhat:.2f}")
+        log.info(f"max CC = {cc:.2f} for strech = {mhat:.8f} and shift = {bhat:.8f}")
     else:
         mhat, bhat = 1.0, 0.0
 

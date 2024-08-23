@@ -11,7 +11,6 @@ from typing import Union, List
 from functools import lru_cache
 from itertools import groupby
 
-from glob import glob
 from typing import Tuple
 
 
@@ -39,6 +38,91 @@ from lvmdrp.utils.metadata import (get_frames_metadata, get_master_metadata, ext
 from lvmdrp.utils.convert import tileid_grp
 
 from lvmdrp import config, log, path, __version__ as drpver
+
+
+CALIBRATION_NAMES = {"pixmask", "pixflat", "bias", "trace_guess", "trace", "width", "amp", "model", "wave", "lsf", "fiberflat_dome", "fiberflat_twilight"}
+
+
+def get_calib_paths(mjd, version=None, flavors=CALIBRATION_NAMES, use_fiducial_cals=True, from_sanbox=False):
+    """Returns a dictionary containing paths for calibration frames
+
+    Parameters
+    ----------
+    mjd : int
+        MJD to reduce
+    version : str, optional
+        Version of the pipeline to pull calibrations from, by default None
+    only_cals : list, tuple or set
+        Only produce this calibrations, by default {"pixmask", "pixflat", "bias", "trace_gues", "trace", "width", "amp", "model", "wave", "lsf", "fiberflat_dome", "fiberflat_twilight"}
+    use_fiducial_cals : bool
+        Whether to use fiducial calibration frames or not, defaults to True
+    from_sanbox : bool, optional
+        Fall back option to pull calibrations from sandbox, by default False
+
+    Returns
+    -------
+    calibs : dict[str, dict[str, str]]
+        a dictionary containing calibrations for the given cameras
+    """
+    if version is None and not from_sanbox:
+        raise ValueError(f"You must provide a version string to get calibration paths, {version = } given")
+
+    tileid = 11111
+    tilegrp = tileid_grp(tileid)
+
+    cals_mjd = get_master_mjd(mjd) if use_fiducial_cals or from_sanbox else mjd
+
+    # define root path to pixel flats and masks
+    # TODO: remove this once sdss-tree are updated with the corresponding species
+    if from_sanbox:
+        pixelmasks_path = os.path.join(MASTERS_DIR, "pixelmasks")
+        path_species = "lvm_calib"
+    else:
+        pixelmasks_path = os.path.join(os.getenv('LVM_SPECTRO_REDUX'), f"{version}/{tilegrp}/{tileid}/pixelmasks")
+        path_species = "lvm_master"
+
+    pixel_flavors = {"pixmask", "pixflat"}
+    flavors_ = flavors - pixel_flavors
+
+    # define paths to pixel flats and masks
+    calibs = {}
+    for flavor in pixel_flavors:
+        calibs[flavor] = {c: os.path.join(pixelmasks_path, f"lvm-m{flavor}-{c}.fits") for c in CAMERAS}
+
+    # define paths to the rest of the calibrations
+    for flavor in flavors_:
+        # define camera for camera frames or spectrograph combined frames
+        cams = "brz" if flavor.startswith("fiberflat_") else CAMERAS
+
+        # define calibration prefix
+        # TODO: clean this after update in sdss-tree that will consistently handle prefixes for nightly and long-term cals
+        if path_species == "lvm_calib":
+            prefix = ""
+        else:
+            prefix = "m" if flavor in ["bias", "fiberflat_twilight"] or use_fiducial_cals else "n"
+
+        calibs[flavor] = {c: path.full(path_species, drpver=version, tileid=tileid, mjd=cals_mjd, kind=f"{prefix}{flavor}", camera=c) for c in cams}
+
+    return calibs
+
+
+def group_calib_paths(calib_paths):
+    """Returns a dictionary of calibration paths grouped by channel given a set of camera frame paths
+
+    Parameters
+    ----------
+    calib_paths : dict[str, str]
+        Dictionary containing camera frame calibrations
+
+    Returns
+    -------
+    paths : dict[str, str]
+        Calibration paths grouped by channel
+    """
+    paths = {}
+    for channel, cameras in groupby(calib_paths, key=lambda p: os.path.basename(p).split(".")[0].split("-")[-1][0]):
+        paths[channel] = sorted([calib_paths[camera] for camera in cameras])
+    return paths
 
 
 def mjd_from_expnum(expnum: Union[int, str, list, tuple]) -> List[int]:
@@ -1388,7 +1472,7 @@ def update_error_file(tileid: int, mjd: int, expnum: int, error: str,
         f.write('\n')
 
 
-def reduce_2d(mjd, use_fiducial_cals=True, expnums=None, exptime=None, cameras=CAMERAS,
+def reduce_2d(mjd, calibrations, expnums=None, exptime=None, cameras=CAMERAS,
               replace_with_nan=True, assume_imagetyp=None, reject_cr=True,
               skip_done=True, keep_ancillary=False):
     """Preprocess and detrend a list of 2D frames
@@ -1403,8 +1487,8 @@ def reduce_2d(mjd, use_fiducial_cals=True, expnums=None, exptime=None, cameras=C
     ----------
     mjd : int
         MJD to reduce
-    use_fiducial_cals : bool
-        Whether to use fiducial calibration frames or not, defaults to True
+    calibrations : dict[str, dict[str, str]]
+        Paths to calibrations to use, including bias and pixel masks and flats
     expnums : list
         List of exposure numbers to reduce
     exptime : int
@@ -1435,10 +1519,6 @@ def reduce_2d(mjd, use_fiducial_cals=True, expnums=None, exptime=None, cameras=C
     if cameras:
         frames.query("camera in @cameras", inplace=True)
 
-    masters_mjd = get_master_mjd(mjd)
-    masters_path = os.path.join(MASTERS_DIR, str(masters_mjd))
-    pixelmasks_path = os.path.join(MASTERS_DIR, "pixelmasks")
-
     # preprocess and detrend frames
     for frame in frames.to_dict("records"):
         camera = frame["camera"]
@@ -1447,17 +1527,14 @@ def reduce_2d(mjd, use_fiducial_cals=True, expnums=None, exptime=None, cameras=C
         imagetyp = assume_imagetyp or frame["imagetyp"]
 
         # get master frames paths
-        mpixmask_path = os.path.join(pixelmasks_path, f"lvm-mpixmask-{camera}.fits")
-        mpixflat_path = os.path.join(pixelmasks_path, f"lvm-mpixflat-{camera}.fits")
-        if use_fiducial_cals:
-            mbias_path = os.path.join(masters_path, f"lvm-mbias-{camera}.fits")
-        else:
-            mbias_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mbias", camera=camera)
+        mpixmask_path = calibrations["pixmask"][camera]
+        mpixflat_path = calibrations["pixflat"][camera]
+        mbias_path = calibrations["bias"][camera]
 
         # log the master frames
-        log.info(f'Using master pixel mask: {mpixmask_path}')
-        log.info(f'Using master bias: {mbias_path}')
-        log.info(f'Using master pixel flat: {mpixflat_path}')
+        log.info(f'Using pixel mask: {mpixmask_path}')
+        log.info(f'Using bias: {mbias_path}')
+        log.info(f'Using pixel flat: {mpixflat_path}')
 
         rframe_path = path.full("lvm_raw", camspec=frame["camera"], **frame)
         eframe_path = path.full("lvm_anc", drpver=drpver, kind="e", imagetype=imagetyp, **frame)
@@ -1533,12 +1610,13 @@ def science_reduction(expnum: int, use_fiducial_master: bool = False,
     sci_expnum = sci_metadata["expnum"].unique()[0]
     sci_imagetyp = sci_metadata["imagetyp"].unique()[0]
 
-    master_mjd = get_master_mjd(sci_mjd)
-    log.info(f"target master MJD: {master_mjd}")
+    cals_mjd = get_master_mjd(sci_mjd) if use_fiducial_master else sci_mjd
+    log.info(f"target master MJD: {cals_mjd}")
 
     # overwrite fiducial masters dir
-    masters_path = os.path.join(MASTERS_DIR, f"{master_mjd}")
+    # masters_path = os.path.join(MASTERS_DIR, f"{cals_mjd}")
     log.info(f"target master path: {os.getenv('LVM_MASTER_DIR')}")
+    calibs = get_calib_paths(mjd=cals_mjd, version=drpver, use_fiducial_cals=use_fiducial_master, from_sanbox=True)
 
     # make sure only one exposure number is being reduced
     sci_metadata.query("expnum == @sci_expnum", inplace=True)
@@ -1549,7 +1627,7 @@ def science_reduction(expnum: int, use_fiducial_master: bool = False,
     if skip_2d:
         log.info("skipping 2D reduction")
     else:
-        reduce_2d(mjd=sci_mjd, use_fiducial_cals=use_fiducial_master, expnums=[sci_expnum], reject_cr=reject_cr, skip_done=False)
+        reduce_2d(mjd=sci_mjd, calibrations=calibs, expnums=[sci_expnum], reject_cr=reject_cr, skip_done=False)
 
     # run reduction loop for each science camera exposure
     if skip_1d:
@@ -1578,21 +1656,10 @@ def science_reduction(expnum: int, use_fiducial_master: bool = False,
             #agcspec_path=path.full('lvm_agcam_coadd', mjd=sci_mjd, specframe=sci_expnum, tel='spec')
 
             # define calibration frames paths
-            if use_fiducial_master:
-                log.info(f"using fiducial master calibration frames for {sci_camera} at {masters_path = }")
-                if not os.path.isdir(masters_path):
-                    raise ValueError(f"LVM_MASTER_DIR environment variable is not properly set, {masters_path} does not exists")
-                mtrace_path = os.path.join(masters_path, f"lvm-mtrace-{sci_camera}.fits")
-                mwidth_path = os.path.join(masters_path, f"lvm-mwidth-{sci_camera}.fits")
-                mmodel_path = os.path.join(masters_path, f"lvm-mmodel-{sci_camera}.fits")
-            else:
-                log.info(f"using master calibration frames from DRP version {drpver}, mjd = {sci_mjd}, camera = {sci_camera}")
-                masters = match_master_metadata(target_mjd=sci_mjd,
-                                                target_camera=sci_camera,
-                                                target_imagetyp=sci["imagetyp"])
-                mtrace_path = path.full("lvm_master", drpver=drpver, kind="mtrace", **masters["trace"].to_dict())
-                mwidth_path = None
-                mmodel_path = None
+            # log.info(f"using calibration frames for {sci_camera}:")
+            mtrace_path = calibs["trace"][sci_camera]
+            mwidth_path = calibs["width"][sci_camera]
+            mmodel_path = calibs["model"][sci_camera]
 
             # add astrometry to frame
             add_astrometry(in_image=dsci_path, out_image=dsci_path, in_agcsci_image=agcsci_path, in_agcskye_image=agcskye_path, in_agcskyw_image=agcskyw_path)
@@ -1613,6 +1680,8 @@ def science_reduction(expnum: int, use_fiducial_master: bool = False,
     if skip_post_1d:
         log.info("skipping post 1D reduction")
     else:
+        mwave_groups = group_calib_paths(calibs["wave"])
+        mlsf_groups = group_calib_paths(calibs["lsf"])
         for channel in "brz":
             xsci_paths = sorted(path.expand('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver,
                                             kind='x', camera=f'{channel}[123]', imagetype=sci_imagetyp, expnum=expnum))
@@ -1620,17 +1689,11 @@ def science_reduction(expnum: int, use_fiducial_master: bool = False,
                                 kind='x', camera=channel, imagetype=sci_imagetyp, expnum=expnum)
             wsci_path = path.full('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver,
                                 kind='w', camera=channel, imagetype=sci_imagetyp, expnum=expnum)
-            mwave_paths = sorted(glob(os.path.join(masters_path, f"lvm-mwave-{channel}?.fits")))
-            mlsf_paths = sorted(glob(os.path.join(masters_path, f"lvm-mlsf-{channel}?.fits")))
-            frame_path = path.full('lvm_frame', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver, expnum=sci_expnum, kind=f'Frame-{channel}')
-            mflat_path = os.path.join(masters_path, f"lvm-mfiberflat_twilight-{channel}.fits")
-            if not os.path.isfile(mflat_path):
-                mflat_path = os.path.join(masters_path, f"lvm-mfiberflat-{channel}.fits")
-                if not os.path.isfile(mflat_path):
-                    mflat_paths = sorted(glob(os.path.join(masters_path, f"lvm-mfiberflat-{channel}?.fits")))
-                    mflat = RSS.from_spectrographs(*[RSS.from_file(mflat_path) for mflat_path in mflat_paths])
-                    mflat.writeFitsData(mflat_path)
+            mwave_paths = mwave_groups[channel]
+            mlsf_paths = mlsf_groups[channel]
+            mflat_path = calibs["fiberflat_twilight"][channel]
 
+            frame_path = path.full('lvm_frame', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver, expnum=sci_expnum, kind=f'Frame-{channel}')
             ssci_path = path.full('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver,
                                 kind='s', camera=channel, imagetype=sci_imagetyp, expnum=expnum)
             hsci_path = path.full('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver,
@@ -1682,7 +1745,7 @@ def science_reduction(expnum: int, use_fiducial_master: bool = False,
 
         # update the drpall summary file
         log.info('Updating the drpall summary file')
-        update_summary_file(sframe_path, tileid=sci_tileid, mjd=sci_mjd, expnum=sci_expnum, master_mjd=master_mjd)
+        update_summary_file(sframe_path, tileid=sci_tileid, mjd=sci_mjd, expnum=sci_expnum, master_mjd=cals_mjd)
 
     # clean ancillary folder
     if clean_ancillary:

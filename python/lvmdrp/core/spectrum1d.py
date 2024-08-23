@@ -240,6 +240,7 @@ def _cross_match_float(
     min_peak_dist: float = 5.0,
     gauss_window: List[int] = [-5, 5],
     gauss_sigmas: List[float] = [0.0, 5.0],
+    normalize_spectra : bool = True,
     ax: None|plot.plt.Axes = None
 ) -> Tuple[float, float, float]:
     """Find the best fractional-pixel cross correlation between two spectra.
@@ -269,6 +270,8 @@ def _cross_match_float(
         Range of pixels to consider in Gaussian fitting relative to peak, by default [-5, 5]
     gauss_sigmas : list[float], optional
         Gaussian sigma boundaries, by default [0.0, 5.0]
+    normalize_spectra : bool, optional
+        Normalize both spectrum to have peaks ~1, by default True
     ax : None|plt.Axes, optional
         The matplotlib axes where to draw the CC and the
 
@@ -288,8 +291,12 @@ def _cross_match_float(
 
     # normalize the peaks to roughly magnitude 1, so that individual very bright
     # fibers do not dominate the signal
-    ref_spec_ = _normalize_peaks(ref_spec, min_peak_dist=min_peak_dist)
-    obs_spec_ = _normalize_peaks(obs_spec, min_peak_dist=min_peak_dist)
+    if normalize_spectra:
+        ref_spec_ = _normalize_peaks(ref_spec, min_peak_dist=min_peak_dist)
+        obs_spec_ = _normalize_peaks(obs_spec, min_peak_dist=min_peak_dist)
+    else:
+        ref_spec_ = ref_spec.copy()
+        obs_spec_ = obs_spec.copy()
     #return ref_spec_, obs_spec_
 
     for factor in stretch_factors:
@@ -323,21 +330,6 @@ def _cross_match_float(
         max_corr = cross_corr[mask][idx_max_corr]
         shift = shifts[mask][idx_max_corr]
 
-        # Fit Gaussian around maximum cross-correlation peak
-        guess = [1.0, shift, 1.0, 0.0]
-        bound_lower = [0.0, shift+min_shift, gauss_sigmas[0], 0.0]
-        bound_upper = [numpy.inf, shift+max_shift, gauss_sigmas[1], numpy.inf]
-        gauss = fit_profile.Gaussian_const(guess)
-        mask = (shifts >= shift+gauss_window[0]) & (shifts <= shift+gauss_window[1])
-        gauss.fit(
-            shifts[mask],
-            cross_corr[mask],
-            sigma=1.0,
-            p0=guess,
-            bounds=(bound_lower, bound_upper)
-        )
-        area, shift_sp, sigma, bg = gauss.getPar()
-
         if ax is not None:
             mask_cc = (shifts >= shift+2*gauss_window[0]) & (shifts <= shift+2*gauss_window[1])
             ax.step(shifts[mask_cc], cross_corr[mask_cc], color="0.7", lw=1, where="mid", alpha=0.3)
@@ -346,11 +338,24 @@ def _cross_match_float(
 
         if condition:
             best_shifts, best_cross_corr = shifts, cross_corr
-            best_gauss = gauss
             max_correlation = max_corr
             best_shift = shift
-            best_shift_sp = shift_sp
             best_stretch_factor = factor
+
+    # Fit Gaussian around maximum cross-correlation peak
+    mask = (best_shifts >= best_shift+gauss_window[0]) & (best_shifts <= best_shift+gauss_window[1])
+    guess = [numpy.trapz(best_cross_corr[mask], best_shifts[mask]), best_shift, 1.0, 0.0]
+    bound_lower = [0.0, best_shift+min_shift, gauss_sigmas[0], 0.0]
+    bound_upper = [numpy.inf, best_shift+max_shift, gauss_sigmas[1], numpy.inf]
+    best_gauss = fit_profile.Gaussian_const(guess)
+    best_gauss.fit(
+        best_shifts[mask],
+        best_cross_corr[mask],
+        sigma=1.0,
+        p0=guess,
+        bounds=(bound_lower, bound_upper)
+    )
+    area, best_shift_sp, sigma, bg = best_gauss.getPar()
 
     # display best match
     if ax is not None:
@@ -358,9 +363,9 @@ def _cross_match_float(
         mask_cc = (best_shifts >= best_shift+2*gauss_window[0]) & (best_shifts <= best_shift+2*gauss_window[1])
         ax.step(best_shifts[mask_cc], best_cross_corr[mask_cc], color="0.2", lw=2, where="mid")
         ax.step(best_shifts[mask], best_gauss(best_shifts[mask]), color="tab:red", lw=2, where="mid")
-        ax.axvline(shift, color="tab:blue", lw=1, ls="--")
+        ax.axvline(best_shift, color="tab:blue", lw=1, ls="--")
         ax.axvline(best_shift_sp, color="tab:red", lw=1)
-        ax.text(shift, (best_cross_corr[mask_cc]).min(), f"shift = {shift}", va="bottom", ha="left", color="tab:blue")
+        ax.text(best_shift, (best_cross_corr[mask_cc]).min(), f"shift = {best_shift}", va="bottom", ha="left", color="tab:blue")
         ax.text(best_shift_sp, (best_cross_corr[mask_cc]).min(), f"subpix. shift = {best_shift_sp:.3f}", va="top", ha="right", color="tab:red")
 
     return max_correlation, best_shift_sp, best_stretch_factor
@@ -2469,7 +2474,25 @@ class Spectrum1D(Header):
 
         return new_spec
 
-    def flatten_lsf(self, target_fwhm, min_fwhm=0.1, interpolate_bad=True, inplace=False):
+    def flatten_lsf(self, target_fwhm, min_fwhm=0.5*2.354, interpolate_bad=True, inplace=False):
+        """Degrades spectral resolution to match a constant resolution in FWHM
+
+        Parameters
+        ----------
+        target_fwhm : float
+            Spectral resolution in FWHM to degrade to
+        min_fwhm : float, optional
+            Minimum resolution to allow in case any target_fwhm <= fwhm, by default 0.5
+        interpolate_bad : bool, optional
+            Interpolate bad pixels before convolution, by default True
+        inplace : bool, optional
+            Degrade resolution in place
+
+        Returns
+        -------
+        new_spec : lvmdrp.core.spectrum1d.Spectrum1D
+            New spectrum with constant LSF
+        """
         if self._lsf is None:
             return self
 
@@ -2499,13 +2522,17 @@ class Spectrum1D(Header):
         else:
             sky_error = None
 
+        # define Gaussian sigmas
+        dfwhm = target_fwhm - fwhm
+        if numpy.any(dfwhm <= 0):
+            # correcting given resolution to match minimum value allowed
+            target_fwhm += min_fwhm - min(dfwhm)
+        sigmas = numpy.sqrt(target_fwhm**2 - fwhm**2) / 2.354 / numpy.gradient(wave)
+
         # setup kernel
-        dwave = numpy.gradient(wave)
-        sigma = numpy.sqrt(max(min_fwhm, target_fwhm) ** 2 - fwhm ** 2) / 2.354 / dwave
-        # sigma = numpy.where(target_fwhm > fwhm, numpy.sqrt(target_fwhm**2 - fwhm ** 2) / 2.354, min_fwhm / 2.354) / dwave
-        pixels = numpy.ceil(3 * max(sigma))
+        pixels = numpy.ceil(3 * max(sigmas))
         pixels = numpy.arange(-pixels, pixels)
-        kernel = numpy.asarray([numpy.exp(-0.5 * (pixels / sigma[iw]) ** 2) for iw in range(wave.size)])
+        kernel = numpy.asarray([numpy.exp(-0.5 * (pixels / sigmas[iw]) ** 2) for iw in range(wave.size)])
         kernel = convolution_matrix(kernel)
         new_data = kernel @ data
 
@@ -3327,11 +3354,6 @@ class Spectrum1D(Header):
             select = (self._wave >= centre - hw) & (self._wave <= centre + hw)
             if mask[select].sum() == select.size:
                 continue
-            # refine centroid within selected window
-            idx, = numpy.where(select)
-            centre = self._wave[idx[numpy.argmax(data[select])]]
-            # update fitting window
-            select = (self._wave >= centre - hw) & (self._wave <= centre + hw)
 
             if mask[select].sum() >= badpix_threshold:
                 log.warning(f"skipping line at pixel {centre} with {mask[select].sum()} >= {badpix_threshold = } bad pixels")
