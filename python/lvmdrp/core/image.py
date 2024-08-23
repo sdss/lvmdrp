@@ -25,6 +25,7 @@ from lvmdrp.core.header import Header
 from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.core.spectrum1d import Spectrum1D, _cross_match_float, _cross_match, _spec_from_lines
 
+from lvmdrp import __version__ as drpver
 
 def _fill_column_list(columns, width):
     """Adds # width columns around the given columns list
@@ -1417,6 +1418,7 @@ class Image(Header):
         #    hdus[0].update_ext_name('T')
 
         if len(hdus) > 0:
+            hdus[0].header['DRPVER'] = drpver 
             hdu = pyfits.HDUList(hdus)  # create an HDUList object
             if self._header is not None:
                 hdu[0].header = self.getHeader()  # add the primary header to the HDU
