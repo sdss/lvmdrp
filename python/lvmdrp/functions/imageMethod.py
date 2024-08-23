@@ -3356,6 +3356,7 @@ def extract_spectra(
     exposed_selection = numpy.array(list(img._header["STD*ACQ"].values()))
     exposed_std = numpy.array(list(img._header["STD*FIB"].values()))[exposed_selection]
     mask |= (~(numpy.isin(slitmap_spec["orig_ifulabel"], exposed_std))&((slitmap_spec["telescope"] == "Spec")))[:, None]
+    mask |= (slitmap_spec["fibstatus"] == 1)[:, None]
 
     # propagate thermal shift to slitmap
     channel = img._header['CCD'][0]
