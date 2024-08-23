@@ -363,8 +363,8 @@ def get_calibs(kind, mjd, camera):
 @click.option('-p', '--ppn', type=int, default=64, help='the number of CPU cores to use per node')
 @click.option('-w', '--walltime', type=str, default="24:00:00", help='the time for which the job is allowed to run')
 @click.option('-a', '--alloc', type=click.Choice(['sdss-np', 'sdss-kp']), default='sdss-np', help='which partition to use')
-@click.option('-s', '--submit', type=bool, default=True, help='flag to submit the job or not')
-@click.option('--run-calibs', type=bool, default=False, help="run long-term calibrations only")
+@click.option('-s', '--submit', is_flag=True, type=bool, default=True, help='flag to submit the job or not')
+@click.option('--run-calibs', is_flag=True, type=bool, default=False, help="run long-term calibrations only")
 def cluster(mjd_list, mjd_range, expnum, exp_list, exp_range, exp_file, nodes, ppn, walltime, alloc, submit, run_calibs):
     """ Submit a Utah cluster job to batch run the DRP by MJD """
 
