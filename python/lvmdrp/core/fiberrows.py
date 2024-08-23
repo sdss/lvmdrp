@@ -877,8 +877,9 @@ class FiberRows(Header, PositionTable):
             cc, bhat, mhat = _cross_match_float(
                 ref_spec=last_spec._data,
                 obs_spec=spec._data,
-                stretch_factors=[1.0],
+                stretch_factors=numpy.linspace(0.99,1.01,20),
                 shift_range=[-5, 5],
+                normalize_spectra=False,
             )
             cent_guess = mhat * last_cent + bhat
             flux[i], cent_wave[i], fwhm[i], bg[i] = spec.fitSepGauss(cent_guess, aperture, fwhm_guess, bg_guess, flux_range, cent_range, fwhm_range, bg_range, axs=axs_fiber)
@@ -917,8 +918,9 @@ class FiberRows(Header, PositionTable):
             cc, bhat, mhat = _cross_match_float(
                 ref_spec=last_spec._data,
                 obs_spec=spec._data,
-                stretch_factors=[1.0],
+                stretch_factors=numpy.linspace(0.99,1.01,20),
                 shift_range=[-5, 5],
+                normalize_spectra=False
             )
             cent_guess = mhat * last_cent + bhat
             flux[i], cent_wave[i], fwhm[i], bg[i] = spec.fitSepGauss(cent_guess, aperture, fwhm_guess, bg_guess, flux_range, cent_range, fwhm_range, bg_range, axs=axs_fiber)
