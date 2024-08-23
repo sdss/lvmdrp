@@ -20,7 +20,7 @@ except ImportError:
 
 
 def run_cluster(mjds: list = None, expnums: Union[list, str] = None, nodes: int = 2, ppn: int = 64, walltime: str = '24:00:00',
-                alloc: str = 'sdss-np', submit: bool = True):
+                alloc: str = 'sdss-np', submit: bool = True, run_calibs: bool = False):
     """ Submit a slurm cluster Utah job
 
     Creates the cluster job at $SLURM_SCRATCH_DIR, e.g /scratch/general/nfs1/[unid]/pbs
@@ -49,6 +49,8 @@ def run_cluster(mjds: list = None, expnums: Union[list, str] = None, nodes: int 
         which partition to use, by default 'sdss-np'
     submit : bool, optional
         Flag to submit the job or not, by default True
+    run_calibs : bool, optional
+        Flag to submit a job for long-term calibration reductions only, by default False (science reduction only)
     """
 
     if not queue:
@@ -59,6 +61,11 @@ def run_cluster(mjds: list = None, expnums: Union[list, str] = None, nodes: int 
     q = queue()
     q.verbose = True
     q.create(label='lvm_cluster_run', nodes=nodes, ppn=ppn, walltime=walltime, alloc=alloc, shared=True)
+
+    cmd = "run"
+    if run_calibs:
+        expnums = None
+        cmd = "long-term-cals"
 
     if expnums is not None:
         if isinstance(expnums, str) and os.path.isfile(expnums):
@@ -77,7 +84,7 @@ def run_cluster(mjds: list = None, expnums: Union[list, str] = None, nodes: int 
         mjds = mjds or sorted(os.listdir(os.getenv('LVM_DATA_S')))
 
         for mjd in mjds:
-            script = f"umask 002 && drp run -m {mjd} -c"
+            script = f"umask 002 && drp {cmd} -m {mjd} -c"
             q.append(script)
 
     # submit the queue
