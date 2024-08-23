@@ -710,7 +710,7 @@ class Image(Header):
         '''
         Append a COMMENT card at the end of the FITS header.
         '''
-        self.header_.append(('COMMENT', comstr), bottom=True)
+        self._header.append(('COMMENT', comstr), bottom=True)
 
     def measure_fiber_shifts(self, ref_image, columns=[500, 1000, 1500, 2000, 2500, 3000], column_width=25, shift_range=[-5,5], axs=None):
         '''Measure the (thermal, flexure, ...) shift between the fiber (traces) in 2 detrended images in the y (cross dispersion) direction.
@@ -1418,7 +1418,7 @@ class Image(Header):
         #    hdus[0].update_ext_name('T')
 
         if len(hdus) > 0:
-            hdus[0].header['DRPVER'] = drpver 
+            hdus[0].header['DRPVER'] = drpver
             hdu = pyfits.HDUList(hdus)  # create an HDUList object
             if self._header is not None:
                 hdu[0].header = self.getHeader()  # add the primary header to the HDU

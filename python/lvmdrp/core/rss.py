@@ -957,7 +957,7 @@ class RSS(FiberRows):
         '''
         Append a COMMENT card at the end of the FITS header.
         '''
-        self.header_.append(('COMMENT', comstr), bottom=True)
+        self._header.append(('COMMENT', comstr), bottom=True)
 
 
     def eval_wcs(self, wave=None, data=None, as_dict=True):
