@@ -400,6 +400,7 @@ class RSS(FiberRows):
             sky_w_errors = numpy.asarray(sky_w_errors)
         else:
             log.warning("merged wavelengths are not monotonic, interpolation needed")
+            rsss[0].add_header_comment("merged wavelengths are not monotonic, interpolation needed")
             # compute the combined wavelengths
             new_wave = wave_little_interpol(waves)
             sampling = numpy.diff(new_wave)
@@ -951,6 +952,13 @@ class RSS(FiberRows):
 
         if self._sky_error is not None and spec._sky_error is not None:
             self._sky_error[fiber] = spec._sky_error
+
+    def add_header_comment(self, comstr):
+        '''
+        Append a COMMENT card at the end of the FITS header.
+        '''
+        self.header_.append(('COMMENT', comstr), bottom=True)
+
 
     def eval_wcs(self, wave=None, data=None, as_dict=True):
         """Returns the WCS object from the current wavelength and fibers arrays"""

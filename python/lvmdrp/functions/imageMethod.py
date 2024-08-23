@@ -395,6 +395,7 @@ def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=Non
     std_shift = numpy.nanstd(column_shifts, axis=0)
     if numpy.abs(median_shift) > 0.5:
         log.warning(f"large thermal shift measured: {','.join(map(str, column_shifts))} pixels for {mjd = }, {expnum = }, {camera = }")
+        image.add_header_comment(f"large thermal shift: {','.join(map(str, column_shifts))} pixels {camera = }")
         log.warning(f"measured shifts median+/-stddev = {median_shift:.4f}+/-{std_shift:.4f} pixels")
     else:
         log.info(f"measured shifts median+/-stddev = {median_shift:.4f}+/-{std_shift:.4f} pixels for {mjd = }, {expnum = }, {camera = }")
@@ -793,6 +794,7 @@ def fix_pixel_shifts(in_images, out_images, ref_images, in_mask, report=None,
                                          which_shifts="drp", apply_shifts=True,
                                          dry_run=True, display_plots=display_plots)
                 log.warning("QC reports and DRP do not agree on the shifted rows")
+                [img.add_header_comment("QC reports and DRP do not agree on the shifted rows") for img in images]
                 if interactive:
                     log.info("interactive mode enabled")
                     answer = input("apply [q]c, [d]rp or [c]ustom shifts: ")
@@ -817,6 +819,7 @@ def fix_pixel_shifts(in_images, out_images, ref_images, in_mask, report=None,
                     apply_shifts = numpy.any(numpy.abs(shifts)>0)
                 else:
                     log.warning(f"no shift will be applied to the images: {in_images}")
+                    [img.add_header_comment("no shift will be applied to the images") for img in images]
                     apply_shifts = False
 
         elif (dshifts!=0).any() and interactive:
@@ -3348,6 +3351,7 @@ def extract_spectra(
                 error = error * acorr._data
         else:
             log.warning("no aperture correction applied")
+            img.add_header_comment("no aperture correction applied")
 
     # mask non-exposed standard fibers
     slitmap = img.getSlitmap()
@@ -3791,6 +3795,7 @@ def preproc_raw_frame(
     # assume imagetyp or not
     if assume_imagetyp:
         log.warning(f"assuming IMAGETYP = '{assume_imagetyp}'")
+        org_img.add_header_comment(f"assuming IMAGETYP = '{assume_imagetyp}'")
         org_header["IMAGETYP"] = assume_imagetyp
     elif "IMAGETYP" not in org_header:
         log.error(
@@ -3810,6 +3815,7 @@ def preproc_raw_frame(
         sc_sections = [sec for sec in assume_trimsec]
     elif not org_header["TRIMSEC?"]:
         log.warning(f"assuming TRIMSEC = {DEFAULT_TRIMSEC}")
+        org_img.add_header_comment(f"assuming default TRIMSEC = {DEFAULT_TRIMSEC}")
         sc_sections = DEFAULT_TRIMSEC
     else:
         sc_sections = list(org_header["TRIMSEC?"].values())
@@ -3821,6 +3827,7 @@ def preproc_raw_frame(
         os_sections = [sec for sec in assume_biassec]
     elif not org_header["BIASSEC?"]:
         log.warning(f"assuming BIASSEC = {DEFAULT_BIASSEC}")
+        org_img.add_header_comment(f"assuming default BIASSEC = {DEFAULT_BIASSEC}")
         os_sections = DEFAULT_BIASSEC
     else:
         os_sections = list(org_header["BIASSEC?"].values())
@@ -3833,6 +3840,7 @@ def preproc_raw_frame(
         gain = numpy.asarray(assume_gain)
     elif not org_header[f"{gain_prefix}?"]:
         log.warning(f"assuming GAIN = {gain.tolist()} (e-/ADU)")
+        org_img.add_header_comment(f"assuming default GAINs = {gain.tolist()}")
     else:
         # gain = numpy.asarray(DEFAULT_GAIN[org_header["CCD"]])
         gain = numpy.asarray([org_header[f"{gain_prefix}{iquad+1}"] for iquad in range(NQUADS)])
@@ -3877,10 +3885,8 @@ def preproc_raw_frame(
         # subtract overscan bias from image if requested
         if subtract_overscan:
             if overscan_model not in ["const", "poly", "spline"]:
-                log.warning(
-                    f"overscan model '{overscan_model}' not implemented, "
-                    "falling back to 'spline'"
-                )
+                log.warning(f"overscan model '{overscan_model}' not implemented, using 'spline'")
+                org_img.add_header_comment(f"overscan model '{overscan_model}' not implemented, using 'spline'")
                 overscan_model = "spline"
             if overscan_model == "spline":
                 os_kwargs = {"nknots": 300}
@@ -3919,6 +3925,7 @@ def preproc_raw_frame(
         rdnoise = numpy.asarray(assume_rdnoise)
     elif not org_header[f"{rdnoise_prefix}?"]:
         log.warning(f"assuming RDNOISE = {rdnoise.tolist()} (e-)")
+        org_img.add_header_comment(f"assuming RDNOISE = {rdnoise.tolist()} (e-)")
     else:
         rdnoise = numpy.asarray([org_header[f"{rdnoise_prefix}{iquad+1}"] for iquad in range(NQUADS)])
 
@@ -4235,6 +4242,7 @@ def add_astrometry(
                 PAobs=org_img._header.get(f'PO{tel}PA'.capitalize(), 0) or 0
                 if numpy.any([RAobs, DECobs, PAobs]) == 0:
                     log.warning(f"some astrometry keywords for telescope '{tel}' are missing: {RAobs = }, {DECobs = }, {PAobs = }")
+                    org_img.add_header_comment(f"no astromentry keywords '{tel}': {RAobs = }, {DECobs = }, {PAobs = }, using commanded")
                 org_img.setHdrValue('ASTRMSRC', 'CMD position', comment='Source of astrometric solution: commanded position')
         else:
             RAobs=0
@@ -4360,6 +4368,7 @@ def detrend_frame(
     if img_type in ["bias"] or (in_bias is None or not os.path.isfile(in_bias)):
         if in_bias and not os.path.isfile(in_bias):
             log.warning(f"master bias '{in_bias}' not found. Using dummy bias")
+            org_img.add_header_comment(f"master bias '{in_bias}' not found. Using dummy bias")
         mbias_img = Image(data=numpy.zeros_like(org_img._data))
     else:
         log.info(f"using bias calibration frame '{os.path.basename(in_bias)}'")
@@ -4369,6 +4378,7 @@ def detrend_frame(
     if img_type in ["bias", "dark"] or (in_dark is None or not os.path.isfile(in_dark)):
         if in_dark and not os.path.isfile(in_dark):
             log.warning(f"master dark '{in_dark}' not found. Using dummy dark")
+            org_img.add_header_comment(f"master dark '{in_dark}' not found. Using dummy dark")
         mdark_img = Image(data=numpy.zeros_like(org_img._data))
     else:
         log.info(f"using dark calibration frame '{os.path.basename(in_dark)}'")
@@ -4381,6 +4391,7 @@ def detrend_frame(
     ):
         if in_pixelflat and not os.path.isfile(in_pixelflat):
             log.warning(f"master flat '{in_pixelflat}' not found. Using dummy flat")
+            org_img.add_header_comment(f"master flat '{in_pixelflat}' not found. Using dummy flat")
         mflat_img = Image(data=numpy.ones_like(org_img._data))
     else:
         log.info(
@@ -4480,6 +4491,7 @@ def detrend_frame(
         detrended_img.setSlitmap(in_slitmap)
     else:
         log.warning("no slitmap information to be added")
+        detrended_img.add_header_comment("no slitmap information to be added")
 
     # save detrended image
     log.info(f"writing detrended image to '{os.path.basename(out_image)}'")
