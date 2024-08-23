@@ -2469,7 +2469,25 @@ class Spectrum1D(Header):
 
         return new_spec
 
-    def flatten_lsf(self, target_fwhm, min_fwhm=0.1, interpolate_bad=True, inplace=False):
+    def flatten_lsf(self, target_fwhm, min_fwhm=0.5*2.354, interpolate_bad=True, inplace=False):
+        """Degrades spectral resolution to match a constant resolution in FWHM
+
+        Parameters
+        ----------
+        target_fwhm : float
+            Spectral resolution in FWHM to degrade to
+        min_fwhm : float, optional
+            Minimum resolution to allow in case any target_fwhm <= fwhm, by default 0.5
+        interpolate_bad : bool, optional
+            Interpolate bad pixels before convolution, by default True
+        inplace : bool, optional
+            Degrade resolution in place
+
+        Returns
+        -------
+        new_spec : lvmdrp.core.spectrum1d.Spectrum1D
+            New spectrum with constant LSF
+        """
         if self._lsf is None:
             return self
 
@@ -2499,13 +2517,17 @@ class Spectrum1D(Header):
         else:
             sky_error = None
 
+        # define Gaussian sigmas
+        dfwhm = target_fwhm - fwhm
+        if numpy.any(dfwhm <= 0):
+            # correcting given resolution to match minimum value allowed
+            target_fwhm += min_fwhm - min(dfwhm)
+        sigmas = numpy.sqrt(target_fwhm**2 - fwhm**2) / 2.354 / numpy.gradient(wave)
+
         # setup kernel
-        dwave = numpy.gradient(wave)
-        sigma = numpy.sqrt(max(min_fwhm, target_fwhm) ** 2 - fwhm ** 2) / 2.354 / dwave
-        # sigma = numpy.where(target_fwhm > fwhm, numpy.sqrt(target_fwhm**2 - fwhm ** 2) / 2.354, min_fwhm / 2.354) / dwave
-        pixels = numpy.ceil(3 * max(sigma))
+        pixels = numpy.ceil(3 * max(sigmas))
         pixels = numpy.arange(-pixels, pixels)
-        kernel = numpy.asarray([numpy.exp(-0.5 * (pixels / sigma[iw]) ** 2) for iw in range(wave.size)])
+        kernel = numpy.asarray([numpy.exp(-0.5 * (pixels / sigmas[iw]) ** 2) for iw in range(wave.size)])
         kernel = convolution_matrix(kernel)
         new_data = kernel @ data
 
