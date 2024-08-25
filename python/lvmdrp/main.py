@@ -1725,7 +1725,9 @@ def science_reduction(expnum: int, use_fiducial_master: bool = False,
 
             # use resampled frames for flux calibration in each camera, using standard stars observed in the spec telescope
             #  and field stars found in the sci ifu
-            fluxcal_standard_stars(hsci_path, GAIA_CACHE_DIR=MASTERS_DIR+'/gaia_cache')
+            # mode='GAIA' -> old behavior; 'model' -> new version with the spectra from the Pollux library
+            fluxcal_standard_stars(hsci_path, GAIA_CACHE_DIR=MASTERS_DIR+'/gaia_cache', mode='model')
+
             fluxcal_sci_ifu_stars(hsci_path, GAIA_CACHE_DIR=MASTERS_DIR+'/gaia_cache')
 
             # flux-calibrate each channel

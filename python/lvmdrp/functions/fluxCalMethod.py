@@ -235,7 +235,19 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'STD', display_plo
     return fframe
 
 
-def standard_sensitivity(stds, rss, GAIA_CACHE_DIR, ext, res, plot=False, width=3):
+def calc_sensitivity_from_model(wl, gaia_spec, obs_spec):
+    """
+    Calculate the sensitivity curves from a combination of GAIA+model spectra
+    :param wl: wavelength array for the observed spectrum
+    :param gaia_spec: GAIA spectra interpolated to obs wavelength grid and with heliocentic correction added
+    :param obs_spec: observed standard spectum (sky-subtracted and corrected for extinction)
+    :return: sensitivity curve
+    """
+    sens = gaia_spec/obs_spec
+    return sens
+
+
+def standard_sensitivity(stds, rss, GAIA_CACHE_DIR, ext, res, plot=False, width=3, mode='GAIA'):
     # load the sky masks
     channel = rss._header['CCD']
     w = rss._wave
@@ -260,6 +272,7 @@ def standard_sensitivity(stds, rss, GAIA_CACHE_DIR, ext, res, plot=False, width=
         # load Gaia BP-RP spectrum from cache, or download from webapp
         try:
             gw, gf = fluxcal.retrive_gaia_star(gaia_id, GAIA_CACHE_DIR=GAIA_CACHE_DIR)
+            #=== TODO: ADD heliocentric correction GAIA->obs
             stdflux = np.interp(w, gw, gf)  # interpolate to our wavelength grid
         except fluxcal.GaiaStarNotFound as e:
             log.warning(e)
@@ -289,7 +302,10 @@ def standard_sensitivity(stds, rss, GAIA_CACHE_DIR, ext, res, plot=False, width=
         # TODO: downgrade best fit template to instrumental LSF and calculate sensitivity curve (after lifting telluric mask)
 
         # divide to find sensitivity and smooth
-        sens = stdflux / spec
+        if mode == "GAIA":
+            sens = stdflux / spec
+        else:
+            sens = calc_sensitivity_from_model(w, stdflux, spec)
         wgood, sgood = fluxcal.filter_channel(w, sens, 2)
         s = interpolate.make_smoothing_spline(wgood, sgood, lam=1e4)
         res[f"STD{nn}SEN"] = s(w).astype(np.float32)
@@ -421,13 +437,15 @@ def science_sensitivity(rss, res_sci, ext, GAIA_CACHE_DIR, NSCI_MAX=15, r_spaxel
     return rss, res_sci
 
 
-def fluxcal_standard_stars(in_rss, plot=True, GAIA_CACHE_DIR=None):
+def fluxcal_standard_stars(in_rss, plot=True, GAIA_CACHE_DIR=None, mode='GAIA'):
     """
     Create sensitivity functions for LVM data using the 12 spectra of stars observed through
     the Spec telescope.
 
     Uses Gaia BP-RP spectra for calibration. To be replaced or extended by using fitted stellar
     atmmospheres.
+
+    mode = 'GAIA' (old behavior) or 'model' (uses stellar atmosphere models)
     """
     GAIA_CACHE_DIR = "./" if GAIA_CACHE_DIR is None else GAIA_CACHE_DIR
     log.info(f"Using Gaia CACHE DIR '{GAIA_CACHE_DIR}'")
@@ -478,7 +496,7 @@ def fluxcal_standard_stars(in_rss, plot=True, GAIA_CACHE_DIR=None):
         frame1.set_xticklabels([])
 
     # standard fibers sensitivity curves
-    rss, res_std = standard_sensitivity(stds, rss, GAIA_CACHE_DIR, ext, res_std, plot=plot)
+    rss, res_std = standard_sensitivity(stds, rss, GAIA_CACHE_DIR, ext, res_std, plot=plot, mode=mode)
     res_std_pd = res_std.to_pandas().values
     ngood_std = res_std_pd.shape[1]-2-np.isnan(res_std_pd.sum(axis=0)).sum()
     if ngood_std < 8:
