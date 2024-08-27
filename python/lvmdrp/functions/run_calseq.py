@@ -1818,7 +1818,6 @@ def reduce_longterm_sequence(mjd, use_fiducial_cals=True,
         biases, bias_expnums = choose_sequence(frames, flavor="bias", kind="longterm")
         log.info(f"choosing {len(biases)} bias exposures: {bias_expnums}")
         create_detrending_frames(mjd=mjd, expnums=bias_expnums, kind="bias", use_fiducial_cals=use_fiducial_cals, skip_done=skip_done)
-        # _move_master_calibrations(mjd=mjd, kind="bias")
     else:
         log.log(20 if "bias" in found_cals else 40, "skipping production of bias frames")
 
@@ -1835,7 +1834,6 @@ def reduce_longterm_sequence(mjd, use_fiducial_cals=True,
                 expnums_ldls=expnums_ldls, expnums_qrtz=expnums_qrtz,
                 skip_done=skip_done
             )
-        # _move_master_calibrations(mjd=mjd, kind={"trace", "width", "model"})
     else:
         log.log(20 if "trace" in found_cals else 40, "skipping production of fiber traces")
 
@@ -1843,7 +1841,6 @@ def reduce_longterm_sequence(mjd, use_fiducial_cals=True,
         arcs, arc_expnums = choose_sequence(frames, flavor="arc", kind="longterm")
         log.info(f"choosing {len(arcs)} arc exposures: {arc_expnums}")
         create_wavelengths(mjd=mjd, expnums=np.sort(arcs.expnum.unique()), skip_done=skip_done)
-        # _move_master_calibrations(mjd=mjd, kind={"wave", "lsf"})
     else:
         log.log(20 if "wave" in found_cals else 40, "skipping production of wavelength calibrations")
 
@@ -1856,7 +1853,6 @@ def reduce_longterm_sequence(mjd, use_fiducial_cals=True,
         twilight_flats, twilight_expnums = choose_sequence(frames, flavor="twilight", kind="longterm")
         log.info(f"choosing {len(twilight_flats)} twilight exposures: {twilight_expnums}")
         create_twilight_fiberflats(mjd=mjd, expnums=twilight_expnums, skip_done=skip_done)
-        # _move_master_calibrations(mjd=mjd, kind="fiberflat_twilight")
     else:
         log.log(20 if "twilight" in found_cals else 40, "skipping production of twilight fiberflats")
 
