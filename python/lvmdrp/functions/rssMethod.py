@@ -644,10 +644,12 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
     mask = numpy.zeros(arc._data.shape, dtype=bool)
     mask[(~good_fibers)|(wave_coeffs==0).all(axis=1)] = True
     wave_trace = TraceMask(data=wave_sol, mask=mask, coeffs=wave_coeffs, header=arc._header.copy())
+    wave_trace._samples = Table(data=cent_wave, names=ref_lines)
     wave_trace._header["IMAGETYP"] = "wave"
     mask = numpy.zeros(arc._data.shape, dtype=bool)
     mask[(~good_fibers)|(lsf_coeffs==0).all(axis=1)] = True
     fwhm_trace = TraceMask(data=lsf_sol, mask=mask, coeffs=lsf_coeffs, header=arc._header.copy())
+    fwhm_trace._samples = Table(data=fwhm, names=ref_lines)
     fwhm_trace._header["IMAGETYP"] = "lsf"
 
     wave_trace.interpolate_coeffs()
