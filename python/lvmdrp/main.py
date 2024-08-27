@@ -5,6 +5,7 @@ import os
 import pathlib
 import yaml
 import shutil
+import fnmatch
 import traceback
 import pandas as pd
 from typing import Union, List
@@ -43,7 +44,7 @@ from lvmdrp import config, log, path, __version__ as drpver
 CALIBRATION_NAMES = {"pixmask", "pixflat", "bias", "trace_guess", "trace", "width", "amp", "model", "wave", "lsf", "fiberflat_dome", "fiberflat_twilight"}
 
 
-def get_calib_paths(mjd, version=None, flavors=CALIBRATION_NAMES, use_fiducial_cals=True, from_sanbox=False):
+def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_NAMES, use_fiducial_cals=True, from_sanbox=False):
     """Returns a dictionary containing paths for calibration frames
 
     Parameters
@@ -52,8 +53,10 @@ def get_calib_paths(mjd, version=None, flavors=CALIBRATION_NAMES, use_fiducial_c
         MJD to reduce
     version : str, optional
         Version of the pipeline to pull calibrations from, by default None
-    only_cals : list, tuple or set
-        Only produce this calibrations, by default {"pixmask", "pixflat", "bias", "trace_gues", "trace", "width", "amp", "model", "wave", "lsf", "fiberflat_dome", "fiberflat_twilight"}
+    cameras : list[str]|str, optional
+        List of cameras or wildcard to match, by default '*'
+    flavors : list, tuple or set
+        Only get paths for this calibrations, by default all available flavors
     use_fiducial_cals : bool
         Whether to use fiducial calibration frames or not, defaults to True
     from_sanbox : bool, optional
@@ -66,6 +69,9 @@ def get_calib_paths(mjd, version=None, flavors=CALIBRATION_NAMES, use_fiducial_c
     """
     if version is None and not from_sanbox:
         raise ValueError(f"You must provide a version string to get calibration paths, {version = } given")
+
+    cams = fnmatch.filter(CAMERAS, cameras)
+    channels = "".join(sorted(set(map(lambda c: c.strip("123"), cams))))
 
     tileid = 11111
     tilegrp = tileid_grp(tileid)
@@ -82,17 +88,19 @@ def get_calib_paths(mjd, version=None, flavors=CALIBRATION_NAMES, use_fiducial_c
         path_species = "lvm_master"
 
     pixel_flavors = {"pixmask", "pixflat"}
-    flavors_ = flavors - pixel_flavors
+    if not pixel_flavors.issubset(flavors):
+        pixel_flavors = set()
+    flavors_ = set(flavors) - pixel_flavors
 
     # define paths to pixel flats and masks
     calibs = {}
     for flavor in pixel_flavors:
-        calibs[flavor] = {c: os.path.join(pixelmasks_path, f"lvm-m{flavor}-{c}.fits") for c in CAMERAS}
+        calibs[flavor] = {c: os.path.join(pixelmasks_path, f"lvm-m{flavor}-{c}.fits") for c in cams}
 
     # define paths to the rest of the calibrations
     for flavor in flavors_:
         # define camera for camera frames or spectrograph combined frames
-        cams = "brz" if flavor.startswith("fiberflat_") else CAMERAS
+        cam_or_chan = channels if flavor.startswith("fiberflat_") else cams
 
         # define calibration prefix
         # TODO: clean this after update in sdss-tree that will consistently handle prefixes for nightly and long-term cals
@@ -101,7 +109,7 @@ def get_calib_paths(mjd, version=None, flavors=CALIBRATION_NAMES, use_fiducial_c
         else:
             prefix = "m" if flavor in ["bias", "fiberflat_twilight"] or use_fiducial_cals else "n"
 
-        calibs[flavor] = {c: path.full(path_species, drpver=version, tileid=tileid, mjd=cals_mjd, kind=f"{prefix}{flavor}", camera=c) for c in cams}
+        calibs[flavor] = {c: path.full(path_species, drpver=version, tileid=tileid, mjd=cals_mjd, kind=f"{prefix}{flavor}", camera=c) for c in cam_or_chan}
 
     return calibs
 
