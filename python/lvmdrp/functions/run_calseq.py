@@ -65,7 +65,7 @@ MASK_BANDS = {
     "r": [(6840,6960)],
     "z": [(7570, 7700)]
 }
-COUNTS_THRESHOLDS = {"ldls": 5000, "quartz": 10000}
+COUNTS_THRESHOLDS = {"ldls": 1000, "quartz": 1000}
 CAL_FLAVORS = {"bias", "trace", "wave", "dome", "twilight"}
 
 
@@ -1206,7 +1206,7 @@ def create_traces(mjd, cameras=CAMERAS, use_fiducial_cals=True, expnums_ldls=Non
         mwidths[camera].createEmpty(data_dim=(648, 4086), poly_deg=poly_deg_width)
 
         expnums = expnums_qrtz if camera[0] == "z" else expnums_ldls
-        counts_threshold = 10000 if camera[0] == "z" else 5000
+        counts_threshold = COUNTS_THRESHOLDS[camera[0]]
 
         # select fibers in current spectrograph
         fibermap = SLITMAP[SLITMAP["spectrographid"] == int(camera[1])]
