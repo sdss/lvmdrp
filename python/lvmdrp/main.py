@@ -71,7 +71,7 @@ def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_NAMES, u
         raise ValueError(f"You must provide a version string to get calibration paths, {version = } given")
 
     cams = fnmatch.filter(CAMERAS, cameras)
-    channels = "".join(set(map(lambda c, s: c.replace(s,""), cams, "123")))
+    channels = "".join(sorted(set(map(lambda c: c.strip("123"), cams))))
 
     tileid = 11111
     tilegrp = tileid_grp(tileid)
@@ -90,7 +90,7 @@ def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_NAMES, u
     pixel_flavors = {"pixmask", "pixflat"}
     if not pixel_flavors.issubset(flavors):
         pixel_flavors = set()
-    flavors_ = flavors - pixel_flavors
+    flavors_ = set(flavors) - pixel_flavors
 
     # define paths to pixel flats and masks
     calibs = {}
