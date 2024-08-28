@@ -27,6 +27,7 @@ class TraceMask(FiberRows):
         header = None
         data, error, mask = None, None, None
         coeffs, poly_kind, poly_deg = None, None, None
+        samples = None
         with pyfits.open(in_tracemask, uint=True, do_not_scale_image_data=True, memmap=False) as hdus:
             header = hdus["PRIMARY"].header
             for hdu in hdus:
