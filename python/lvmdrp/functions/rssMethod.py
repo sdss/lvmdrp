@@ -320,8 +320,9 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
     arc._error[select] = numpy.inf
 
     # subtract continuum
-    log.info(f"fitting and subtracting continuum with parameters: {cont_niter = }, {cont_thresh = }, {cont_box_range = }")
-    arc, _, _ = arc.subtract_continuum(niter=cont_niter, thresh=cont_thresh, median_box_range=cont_box_range)
+    if cont_niter > 0:
+        log.info(f"fitting and subtracting continuum with parameters: {cont_niter = }, {cont_thresh = }, {cont_box_range = }")
+        arc, _, _ = arc.subtract_continuum(niter=cont_niter, thresh=cont_thresh, median_box_range=cont_box_range)
 
     # replace NaNs
     mask = arc._mask | numpy.isnan(arc._data) | numpy.isnan(arc._error)
