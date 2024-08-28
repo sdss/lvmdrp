@@ -1206,7 +1206,8 @@ def create_traces(mjd, cameras=CAMERAS, use_fiducial_cals=True, expnums_ldls=Non
         mwidths[camera].createEmpty(data_dim=(648, 4086), poly_deg=poly_deg_width)
 
         expnums = expnums_qrtz if camera[0] == "z" else expnums_ldls
-        counts_threshold = COUNTS_THRESHOLDS[camera[0]]
+        select_lamp = MASTER_CON_LAMPS[camera[0]]
+        counts_threshold = COUNTS_THRESHOLDS[select_lamp]
 
         # select fibers in current spectrograph
         fibermap = SLITMAP[SLITMAP["spectrographid"] == int(camera[1])]
