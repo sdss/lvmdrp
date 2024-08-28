@@ -656,7 +656,7 @@ class FiberRows(Header, PositionTable):
         else:
             mask = None
         spec = Spectrum1D(
-            numpy.arange(self._data.shape[1]), data, error=error, mask=mask
+            numpy.arange(self._data.shape[1]), data, error=error, mask=mask, header=self._header
         )
 
         return spec

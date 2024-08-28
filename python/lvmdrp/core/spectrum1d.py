@@ -1615,6 +1615,14 @@ class Spectrum1D(Header):
     def __ge__(self, other):
         return self._data >= other
 
+    def add_header_comment(self, comstr):
+        '''
+        Append a COMMENT card at the end of the FITS header.
+        '''
+        if self._header is None:
+            return
+        self._header.append(('COMMENT', comstr), bottom=True)
+
     def eval_wave_and_lsf_traces(self, wave, wave_trace, lsf_trace):
         """Evaluates the wavelength and LSF traces at the given wavelength array.
 
