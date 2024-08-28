@@ -29,6 +29,7 @@ from lvmdrp.core.constants import (
     SKYMODEL_CONFIG_PATH,
     SKYMODEL_INST_PATH,
 )
+from lvmdrp.utils.bitmask import ReductionStage
 from lvmdrp.core.plot import plt, create_subplots, save_fig
 from lvmdrp.core.header import Header
 from lvmdrp.core.passband import PassBand
@@ -1455,6 +1456,7 @@ def interpolate_sky( in_frame: str, out_rss: str = None, display_plots: bool = F
 
     # write output RSS
     log.info(f"writing output RSS file '{os.path.basename(out_rss)}'")
+    new_rss._header["DRPSTAGE"] = (ReductionStage(new_rss._header["DRPSTAGE"]) + "SKY_SUPERSAMPLED").value
     new_rss.writeFitsData(out_rss)
 
     return new_rss, supersky, supererror, swave, ssky, svars, smask
@@ -1583,6 +1585,7 @@ def combine_skies(in_rss: str, out_rss, sky_weights: Tuple[float, float] = None)
         rss._sky_west[std_idx] *= exptime_factors
         rss._sky_west_error[std_idx] *= exptime_factors
 
+    rss._header["DRPSTAGE"] = (ReductionStage(rss._header["DRPSTAGE"]) + "SKY_TELESCOPES_COMBINED").value
     rss.writeFitsData(out_rss)
 
     return rss, sky
@@ -1658,6 +1661,7 @@ def quick_sky_subtraction(in_cframe, out_sframe,
     sframe = lvmSFrame(data=skysub_data, error=skysub_error, mask=cframe._mask.astype(bool), sky=skydata, sky_error=sky_error,
                        wave=cframe._wave, lsf=cframe._lsf, header=cframe._header, slitmap=cframe._slitmap)
     sframe._mask |= ~np.isfinite(sframe._error)
+    sframe._header["DRPSTAGE"] = (ReductionStage(sframe._header["DRPSTAGE"]) + "SKY_SUBTRACTED").value
     sframe.writeFitsData(out_sframe)
     # TODO: check on expnum=7632 for halpha emission in sky fibers
 

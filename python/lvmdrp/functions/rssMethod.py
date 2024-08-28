@@ -23,6 +23,7 @@ from numpy import polynomial
 from scipy import interpolate, ndimage
 
 from lvmdrp.utils.decorators import skip_on_missing_input_path, skip_if_drpqual_flags
+from lvmdrp.utils.bitmask import ReductionStage
 from lvmdrp.core.constants import CONFIG_PATH, ARC_LAMPS
 from lvmdrp.core.cube import Cube
 from lvmdrp.core.tracemask import TraceMask
@@ -741,6 +742,7 @@ def shift_wave_skylines(in_frame: str, out_frame: str, dwave: float = 8.0, skyli
 
     # write updated wobject
     log.info(f"writing updated wobject file '{os.path.basename(out_frame)}'")
+    lvmframe._header["DRPSTAGE"] = (ReductionStage(lvmframe._header["DRPSTAGE"]) + "WAVELENGTH_SHIFTED").value
     lvmframe.writeFitsData(out_frame)
 
     # Make QA plots showing offsets for each sky line in each spectrograph
@@ -804,6 +806,7 @@ def create_pixel_table(in_rss: str, out_rss: str, in_waves: str, in_lsfs: str):
     lsf_traces = [TraceMask.from_file(in_lsfs) for in_lsfs in in_lsfs]
     lsf_trace = TraceMask.from_spectrographs(*lsf_traces)
     rss.set_lsf_trace(lsf_trace)
+    rss._header["DRPSTAGE"] = (ReductionStage(rss._header["DRPSTAGE"]) + "WAVELENGTH_CALIBRATED").value
     rss.writeFitsData(out_rss)
 
     return rss
@@ -1630,6 +1633,7 @@ def apply_fiberflat(in_rss: str, out_frame: str, in_flat: str, clip_below: float
         superflat=flat._data
     )
     lvmframe.set_header(orig_header=rss._header, flatname=os.path.basename(in_flat), ifibvar=ifibvar, ffibvar=ffibvar)
+    lvmframe._header["DRPSTAGE"] = (ReductionStage(lvmframe._header["DRPSTAGE"]) + "FLATFIELDED").value
     lvmframe.writeFitsData(out_frame)
 
     return rss, lvmframe
@@ -2928,6 +2932,7 @@ def stack_spectrographs(in_rsss: List[str], out_rss: str) -> RSS:
 
     # write output
     log.info(f"writing stacked RSS to {os.path.basename(out_rss)}")
+    rss_out._header["DRPSTAGE"] = (ReductionStage(rss_out._header["DRPSTAGE"]) + "SPECTROGRAPH_STACKED").value
     rss_out.writeFitsData(out_rss)
 
     return rss_out
@@ -2970,6 +2975,8 @@ def join_spec_channels(in_fframes: List[str], out_cframe: str, use_weights: bool
                        sky_east=new_rss._sky_east, sky_east_error=new_rss._sky_east_error,
                        sky_west=new_rss._sky_west, sky_west_error=new_rss._sky_west_error,
                        slitmap=new_rss._slitmap)
+
+    cframe._header["DRPSTAGE"] = (ReductionStage(cframe._header["DRPSTAGE"]) + "CHANNEL_COMBINED").value
 
     # write output RSS
     if out_cframe is not None:

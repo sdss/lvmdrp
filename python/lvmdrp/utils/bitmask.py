@@ -141,21 +141,53 @@ class ReductionStatus(BaseBitmask):
 
 class ReductionStage(BaseBitmask):
     # completed reduction steps
-    UNREDUCED = auto()  # exposure not reduced
-    PREPROCESSED = auto()  # trimmed overscan region
-    CALIBRATED = auto()  # bias, dark and pixelflat calibrated
-    COSMIC_CLEAN = auto()  # cosmic ray cleaned
-    STRAY_CLEAN = auto()  # stray light subtracted
-    FIBERS_FOUND = auto()  # fiberflat fibers located along the column
-    FIBERS_TRACED = auto()  # fiberflat fibers traces along the dispersion axis
-    SPECTRA_EXTRACTED = (
-        auto()
-    )  # extracted the fiber spectra of any arc, flat, or science frames
-    WAVELENGTH_SOLVED = auto()  # arc fiber wavelength solution found
-    WAVELENGTH_RESAMPLED = (
-        auto()
-    )  # fiber wavelength resampled to common wavelength/LSF vector
+    UNREDUCED = auto()                # exposure in raw stage
+    HDRFIX_APPLIED = auto()           # header fix applied
+    OVERSCAN_SUBTRACTED = auto()      # trimmed overscan region, overscan-subtracted
+    PIXELMASK_ADDED = auto()          # fiducial pixel mask was added
+    GAIN_CORRECTED = auto()           # gain correction applied
+    POISSON_ERROR_CALCULATED = auto() # calculated poisson error
+    LINEARITY_CORRECTED = auto()      # linearity correction applied
+    DETRENDED = auto()                # bias subtracted and pixel flat-fielded
+    COSMIC_CLEANED = auto()           # cosmic ray cleaned
+    SCI_ASTROMETRY_ADDED = auto()     # added astrometric solution for science telescope
+    SPEC_ASTROMETRY_ADDED = auto()    # added astrometric solution for spectrophotometric telescope
+    SKYE_ASTROMETRY_ADDED = auto()    # added astrometric solution for sky east telescope
+    SKYW_ASTROMETRY_ADDED = auto()    # added astrometric solution for sky west telescope
+    FIBERS_ASTROMETRY_ADDED = auto()  # added astrometric solution for all fibers in the system
+    STRAYLIGHT_SUBTRACTED = auto()    # stray light subtracted
+    FIBERS_SHIFTED = auto()           # fibers positions corrected for thermal shifts
+    SPECTRA_EXTRACTED =  auto()       # extracted spectra
+    SPECTROGRAPH_STACKED = auto()     # stacked spectrograph wise
+    WAVELENGTH_CALIBRATED = auto()    # arc fiber wavelength solution found
+    FLATFIELDED = auto()              # fiber flat-fielded
+    WAVELENGTH_SHIFTED = auto()       # wavelength corrected for thermal shifts
+    SKY_SUPERSAMPLED = auto()         # extrapolated sky fibers along slit
+    SKY_TELESCOPES_COMBINED = auto()  # telescope-combined extrapolated sky fibers
+    WAVELENGTH_RECTIFIED = auto()     # wavelength resampled to common grid along slit
+    MEASURED_SENS_STD = auto()        # measured sensitivity curve using standard stars
+    MEASURED_SENS_SCI = auto()        # scaled fiducial sensitivity using science field stars
+    FLUX_CALIBRATED = auto()          # flux calibrated all fibers in the system
+    CHANNEL_COMBINED = auto()         # channel stitched together
+    SKY_SUBTRACTED = auto()           # sky-subtracted all fibers in the system
 
+
+    def __add__(self, flag):
+        if isinstance(flag, self.__class__):
+            pass
+        elif isinstance(flag, str):
+            flag = self.__class__[flag.upper()]
+        elif isinstance(flag, int):
+            flag = self.__class__(flag)
+        else:
+            try:
+                return super().__add__(flag)
+            except:
+                raise
+
+        new = copy(self)
+        new = self ^ self.__class__["UNREDUCED"]
+        return new | flag
 
 class QualityFlag(BaseBitmask):
     # TODO: add flag for overscan quality
