@@ -3353,16 +3353,16 @@ class Spectrum1D(Header):
         flux = numpy.ones(len(cent_guess)) * numpy.nan
         cent = numpy.ones(len(cent_guess)) * numpy.nan
         fwhm = numpy.ones(len(cent_guess)) * numpy.nan
-        if fit_bg:
-            bg = numpy.ones(len(cent_guess)) * numpy.nan
+        bg = numpy.ones(len(cent_guess)) * numpy.nan
 
         fact = numpy.sqrt(2 * numpy.pi)
         hw = aperture // 2
         for i, centre in enumerate(cent_guess):
-            select = (self._wave >= centre - hw) & (self._wave <= centre + hw)
-            if mask[select].sum() == select.size:
+            if centre + hw < self._wave[0] or centre - hw > self._wave[-1]:
                 continue
 
+            select = (self._wave >= centre - hw) & (self._wave <= centre + hw)
+            # print(i, centre, self._wave.min(), self._wave.max(), select.sum())
             if mask[select].sum() >= badpix_threshold:
                 log.warning(f"skipping line at pixel {centre} with {mask[select].sum()} >= {badpix_threshold = } bad pixels")
                 self.add_header_comment(f"skipping line at pixel {centre} with {mask[select].sum()} >= {badpix_threshold = } bad pixels")
