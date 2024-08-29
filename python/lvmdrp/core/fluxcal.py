@@ -5,7 +5,7 @@
 # @Filename: fluxcal.py
 # @License: BSD 3-Clause
 # @Copyright: SDSS-V LVM
-
+import matplotlib.pyplot as plt
 import numpy as np
 from scipy import signal
 from scipy.integrate import simpson
@@ -167,9 +167,44 @@ def butter_lowpass_filter(data, cutoff_freq, nyq_freq, order=4):
     return y
 
 
-def filter_channel(w, f, k=3):
+def cos_apod(nsample, perc=10.):
+    y=np.ones(nsample)
+    nperc=int(np.round(nsample*perc/100))
+    x=np.sin(np.pi/2/nperc*np.arange(nperc))
+    y[:nperc]=x
+    y[-nperc:]=np.flip(x)
+    return y
+
+
+def derive_vecshift(vec, vec_ref, max_ampl=None, oversample_bin=20):
+    """
+    Derive shift of 1D-array vec from vec_ref using cross-correlation;
+    both arrays assumed to be normalized
+    if max_ampl is set than maximum shift is max_ampl
+    """
+    nsamples = min([len(vec), len(vec_ref)])
+    vec[~np.isfinite(vec)] = np.nanmedian(vec)
+    vec_ref[~np.isfinite(vec_ref)] = np.nanmedian(vec_ref)
+    vec = signal.resample_poly(cos_apod(nsamples) * (vec[:nsamples]), oversample_bin, 1)
+    vec_ref = signal.resample_poly(cos_apod(nsamples) * (vec_ref[:nsamples]), oversample_bin, 1)
+    xcorr = signal.correlate(vec, vec_ref)
+    if max_ampl:
+        max_ampl = min([(nsamples * oversample_bin - 1), int(np.floor(max_ampl * oversample_bin))])
+        xcorr = xcorr[nsamples * oversample_bin - (max_ampl + 1): nsamples * oversample_bin + max_ampl]
+    else:
+        max_ampl = nsamples * oversample_bin - 1
+    dt = np.arange(- max_ampl, max_ampl + 1)
+    shift = dt[xcorr.argmax()] / oversample_bin
+    return shift
+
+
+
+def filter_channel(w, f, k=3, method='lowpass'):
     c = np.where(np.isfinite(f))
-    s = butter_lowpass_filter(f[c], 0.01, 2)
+    if method == 'lowpass':
+        s = butter_lowpass_filter(f[c], 0.01, 2)
+    elif method == 'savgol':
+        s = signal.savgol_filter(f[c], 5, 3)
     res = s - f[c]
     # plt.plot(w[c], f[c], 'k.')
     # plt.plot(w[c], s, 'b-')

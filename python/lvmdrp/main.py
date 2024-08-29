@@ -1682,6 +1682,11 @@ def science_reduction(expnum: int, use_fiducial_master: bool = False,
     else:
         mwave_groups = group_calib_paths(calibs["wave"])
         mlsf_groups = group_calib_paths(calibs["lsf"])
+
+        hsci_all_bands = [path.full('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver, kind='h',
+                                    camera=channel, imagetype=sci_imagetyp, expnum=expnum) for channel in "brz"]
+
+
         for channel in "brz":
             xsci_paths = sorted(path.expand('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver,
                                             kind='x', camera=f'{channel}[123]', imagetype=sci_imagetyp, expnum=expnum))
@@ -1726,7 +1731,8 @@ def science_reduction(expnum: int, use_fiducial_master: bool = False,
             # use resampled frames for flux calibration in each camera, using standard stars observed in the spec telescope
             #  and field stars found in the sci ifu
             # mode='GAIA' -> old behavior; 'model' -> new version with the spectra from the Pollux library
-            fluxcal_standard_stars(hsci_path, GAIA_CACHE_DIR=MASTERS_DIR+'/gaia_cache', mode='model')
+            fluxcal_standard_stars(hsci_path, GAIA_CACHE_DIR=MASTERS_DIR+'/gaia_cache', mode='model',
+                                   model_list=best_fit_models, model_coef=model_to_gaia_median)
 
             fluxcal_sci_ifu_stars(hsci_path, GAIA_CACHE_DIR=MASTERS_DIR+'/gaia_cache')
 

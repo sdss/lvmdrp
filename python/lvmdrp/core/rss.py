@@ -1399,7 +1399,7 @@ class RSS(FiberRows):
             raise ValueError("New wavelength array is empty")
 
         # find positions in new wavelength array that contain self._wave
-        ipix, fpix = numpy.searchsorted(new_wave, self._wave[[0, -1]], side="left")
+        ipix, fpix = numpy.searchsorted(new_wave, numpy.round(self._wave[[0, -1]], 6), side="left")
 
         # define new arrays filled with NaNs
         new_data = numpy.full((self._data.shape[0], new_wave.size), numpy.nan, dtype=numpy.float32)
