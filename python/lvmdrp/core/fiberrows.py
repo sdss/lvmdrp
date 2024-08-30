@@ -6,6 +6,7 @@ from copy import deepcopy as copy
 
 from lvmdrp import log
 from scipy import optimize
+from astropy.table import Table
 from lvmdrp.core.header import Header, combineHdr
 from lvmdrp.core.positionTable import PositionTable
 from lvmdrp.core.spectrum1d import Spectrum1D, _cross_match_float
@@ -113,6 +114,7 @@ class FiberRows(Header, PositionTable):
         header=None,
         error=None,
         mask=None,
+        samples=None,
         shape=None,
         size=None,
         arc_position_x=None,
@@ -134,6 +136,7 @@ class FiberRows(Header, PositionTable):
             fiber_type=fiber_type,
         )
         self.setData(data=data, error=error, mask=mask)
+        self.set_samples(samples)
         self.set_coeffs(coeffs=coeffs, poly_kind=poly_kind)
         if self._data is None and self._coeffs is not None:
             self.eval_coeffs()
@@ -513,7 +516,7 @@ class FiberRows(Header, PositionTable):
 
         return self.__class__(data=data, error=error, mask=mask)
 
-    def createEmpty(self, data_dim=None, poly_deg=None):
+    def createEmpty(self, data_dim=None, poly_deg=None, samples_columns=None):
         """
         Fill the FiberRows object with empty data
 
@@ -537,6 +540,9 @@ class FiberRows(Header, PositionTable):
             # create empty mask all pixel assigned bad
             self._mask = numpy.ones(data_dim, dtype="bool")
 
+        if data_dim is not None and samples_columns is not None:
+            self._samples = Table(data=numpy.zeros((data_dim[0], len(samples_columns))) + numpy.nan, names=samples_columns)
+
         if data_dim is not None and poly_deg is not None:
             self._coeffs = numpy.zeros((data_dim[0], poly_deg+1), dtype=numpy.float32)
 
@@ -551,7 +557,7 @@ class FiberRows(Header, PositionTable):
         """
         self._fibers = fibers
 
-    def setSlice(self, slice, axis="x", data=None, error=None, mask=None, select=None):
+    def setSlice(self, slice, axis="x", data=None, error=None, mask=None, samples=None, select=None):
         """
         Insert data to a slice of the trace mask
 
@@ -650,7 +656,7 @@ class FiberRows(Header, PositionTable):
         else:
             mask = None
         spec = Spectrum1D(
-            numpy.arange(self._data.shape[1]), data, error=error, mask=mask
+            numpy.arange(self._data.shape[1]), data, error=error, mask=mask, header=self._header
         )
 
         return spec
@@ -711,6 +717,21 @@ class FiberRows(Header, PositionTable):
                 self._pixels = numpy.arange(npixels) if npixels is not None else npixels
             elif not hasattr(self, "_pixels"):
                 self._pixels = None
+
+    def set_samples(self, samples=None, columns=None):
+        if isinstance(samples, Table):
+            self._samples = samples
+        elif isinstance(samples, numpy.ndarray) and columns is not None:
+            self._samples = Table(data=samples, names=columns)
+        elif columns is not None:
+            self._samples = Table(data=numpy.zeros((self._fibers, len(columns))) + numpy.nan, names=columns)
+        else:
+            self._samples = None
+
+        return self._samples
+
+    def get_samples(self):
+        return self._samples
 
     def split(self, fragments, axis="x"):
         list = []
@@ -842,10 +863,10 @@ class FiberRows(Header, PositionTable):
         axs=None,
     ):
         nlines = len(ref_cent)
-        flux = numpy.zeros((self._fibers, nlines), dtype=numpy.float32)
-        cent_wave = numpy.zeros((self._fibers, nlines), dtype=numpy.float32)
-        fwhm = numpy.zeros((self._fibers, nlines), dtype=numpy.float32)
-        bg = numpy.zeros((self._fibers, nlines), dtype=numpy.float32)
+        flux = numpy.ones((self._fibers, nlines), dtype=numpy.float32) * numpy.nan
+        cent_wave = numpy.ones((self._fibers, nlines), dtype=numpy.float32) * numpy.nan
+        fwhm = numpy.ones((self._fibers, nlines), dtype=numpy.float32) * numpy.nan
+        bg = numpy.ones((self._fibers, nlines), dtype=numpy.float32) * numpy.nan
         masked = numpy.zeros((self._fibers, nlines), dtype="bool")
 
         spec = self.getSpec(ref_fiber)
@@ -886,14 +907,13 @@ class FiberRows(Header, PositionTable):
             masked[i] = numpy.isnan(flux[i])|numpy.isnan(cent_wave[i])|numpy.isnan(fwhm[i])
             if masked[i].any():
                 log.warning(f"some lines were not fitted properly in fiber {i}: ")
-                log.warning(f"   {flux[i] = }")
-                log.warning(f"   {cent_wave[i] = }")
-                log.warning(f"   {fwhm[i] = }")
-                log.warning(f"   {bg[i] = }")
+                log.warning(f"   flux = {numpy.round(flux[i],3)}")
+                log.warning(f"   cent = {numpy.round(cent_wave[i],3)}")
+                log.warning(f"   fwhm = {numpy.round(fwhm[i],3)}")
+                log.warning(f"   bg   = {numpy.round(bg[i],3)}")
 
-            if numpy.isnan(cent_wave[i]).sum() == 0:
-                last_spec = copy(spec)
-                last_cent = copy(cent_wave[i])
+            last_spec = copy(spec)
+            last_cent = copy(cent_wave[i])
 
         last_spec = copy(self.getSpec(ref_fiber))
         last_cent = copy(cent_wave[ref_fiber])
@@ -926,9 +946,8 @@ class FiberRows(Header, PositionTable):
             flux[i], cent_wave[i], fwhm[i], bg[i] = spec.fitSepGauss(cent_guess, aperture, fwhm_guess, bg_guess, flux_range, cent_range, fwhm_range, bg_range, axs=axs_fiber)
             masked[i] = numpy.isnan(flux[i])|numpy.isnan(cent_wave[i])|numpy.isnan(fwhm[i])
 
-            if numpy.isnan(cent_wave[i]).sum() == 0:
-                last_spec = copy(spec)
-                last_cent = copy(cent_wave[i])
+            last_spec = copy(spec)
+            last_cent = copy(cent_wave[i])
 
         fibers = numpy.arange(self._fibers)
         return fibers, flux, cent_wave, fwhm, masked

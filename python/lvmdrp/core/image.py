@@ -2199,11 +2199,16 @@ class Image(Header):
         bad_fibers = numpy.isin(slitmap["fibstatus"].data, mask_fibstatus)
         good_fibers = numpy.where(numpy.logical_not(bad_fibers))[0]
 
+        # select columns to measure centroids
+        step = self._dim[1] // ncolumns
+        columns = numpy.concatenate((numpy.arange(ref_column, 0, -step), numpy.arange(ref_column, self._dim[1], step)))
+        log.info(f"selecting {len(columns)-1} columns within range [{min(columns)}, {max(columns)}]")
+
         # create empty traces mask for the image
         fibers = ref_centroids.size
         dim = self.getDim()
         centroids = TraceMask()
-        centroids.createEmpty(data_dim=(fibers, dim[1]))
+        centroids.createEmpty(data_dim=(fibers, dim[1]), samples_columns=sorted(set(columns)))
         centroids.setFibers(fibers)
         centroids._good_fibers = good_fibers
         centroids.setHeader(self._header.copy())
@@ -2211,11 +2216,6 @@ class Image(Header):
 
         # set positions of fibers along reference column
         centroids.setSlice(ref_column, axis="y", data=ref_centroids, mask=numpy.zeros_like(ref_centroids, dtype="bool"))
-
-        # select columns to measure centroids
-        step = self._dim[1] // ncolumns
-        columns = numpy.concatenate((numpy.arange(ref_column, 0, -step), numpy.arange(ref_column, self._dim[1], step)))
-        log.info(f"selecting {len(columns)-1} columns within range [{min(columns)}, {max(columns)}]")
 
         # trace centroids in each column
         iterator = tqdm(enumerate(columns), total=len(columns), desc="tracing centroids", unit="column", ascii=True)
@@ -2241,7 +2241,8 @@ class Image(Header):
             bound_upper = numpy.array([numpy.inf]*cent_guess.size + (cent_guess+max_diff).tolist() + [fwhm_range[1]/2.354]*cent_guess.size)
             cen_slice, msk_slice = img_slice.measurePeaks(cent_guess, method, init_sigma=fwhm_guess / 2.354, threshold=counts_threshold, bounds=(bound_lower, bound_upper))
 
-            centroids.setSlice(icolumn, axis="y", data=cen_slice, mask=msk_slice)
+            centroids._samples[f"{icolumn}"][~msk_slice] = cen_slice[~msk_slice]
+            centroids.setSlice(icolumn, axis="y", data=cen_slice, mask=msk_slice, samples=cen_slice)
 
         return centroids
 
@@ -2252,9 +2253,14 @@ class Image(Header):
             raise ValueError("No header available")
         unit = self._header["BUNIT"]
 
+        # select columns to fit for amplitudes, fiber_centroids and FWHMs per fiber block
+        step = self._dim[1] // ncolumns
+        columns = numpy.concatenate((numpy.arange(ref_column, 0, -step), numpy.arange(ref_column+step, self._dim[1], step)))
+        log.info(f"tracing fibers in {len(columns)} columns within range [{min(columns)}, {max(columns)}]")
+
         # initialize flux and FWHM traces
         trace_cent = TraceMask()
-        trace_cent.createEmpty(data_dim=(fiber_centroids._fibers, self._dim[1]))
+        trace_cent.createEmpty(data_dim=(fiber_centroids._fibers, self._dim[1]), samples_columns=sorted(set(columns)))
         trace_cent.setFibers(fiber_centroids._fibers)
         trace_cent._good_fibers = fiber_centroids._good_fibers
         trace_cent.setHeader(self._header.copy())
@@ -2263,11 +2269,6 @@ class Image(Header):
         trace_cent._header["IMAGETYP"] = "trace_centroid"
         trace_amp._header["IMAGETYP"] = "trace_amplitude"
         trace_fwhm._header["IMAGETYP"] = "trace_fwhm"
-
-        # select columns to fit for amplitudes, fiber_centroids and FWHMs per fiber block
-        step = self._dim[1] // ncolumns
-        columns = numpy.concatenate((numpy.arange(ref_column, 0, -step), numpy.arange(ref_column+step, self._dim[1], step)))
-        log.info(f"tracing fibers in {len(columns)} columns within range [{min(columns)}, {max(columns)}]")
 
         # fit peaks, fiber_centroids and FWHM in each column
         mod_columns, residuals = [], []
@@ -2363,6 +2364,9 @@ class Image(Header):
                     dummy_fwhm_mask[iblock] = fwhm_mask_split[j]
 
                 # update traces
+                trace_amp._samples[f"{icolumn}"] = numpy.concatenate(dummy_amp)
+                trace_cent._samples[f"{icolumn}"] = numpy.concatenate(dummy_cent)
+                trace_fwhm._samples[f"{icolumn}"] = numpy.concatenate(dummy_fwhm)
                 trace_amp.setSlice(icolumn, axis="y", data=numpy.concatenate(dummy_amp), mask=numpy.concatenate(dummy_amp_mask))
                 trace_cent.setSlice(icolumn, axis="y", data=numpy.concatenate(dummy_cent), mask=numpy.concatenate(dummy_cent_mask))
                 trace_fwhm.setSlice(icolumn, axis="y", data=numpy.concatenate(dummy_fwhm), mask=numpy.concatenate(dummy_fwhm_mask))
@@ -2371,6 +2375,9 @@ class Image(Header):
                 trace_fwhm._good_fibers = numpy.arange(trace_fwhm._fibers)[~numpy.all(trace_fwhm._mask, axis=1)]
             else:
                 # update traces
+                trace_amp._samples[f"{icolumn}"] = amp_slice
+                trace_cent._samples[f"{icolumn}"] = cent_slice
+                trace_fwhm._samples[f"{icolumn}"] = fwhm_slice
                 trace_amp.setSlice(icolumn, axis="y", data=amp_slice, mask=amp_mask)
                 trace_cent.setSlice(icolumn, axis="y", data=cent_slice, mask=cent_mask)
                 trace_fwhm.setSlice(icolumn, axis="y", data=fwhm_slice, mask=fwhm_mask)

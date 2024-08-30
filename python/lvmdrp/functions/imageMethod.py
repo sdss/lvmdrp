@@ -3364,9 +3364,12 @@ def extract_spectra(
     select_spec = slitmap["spectrographid"] == int(img._header["CCD"][1])
     slitmap_spec = slitmap[select_spec]
     exposed_selection = numpy.array(list(img._header["STD*ACQ"].values()))
-    exposed_std = numpy.array(list(img._header["STD*FIB"].values()))[exposed_selection]
-    mask |= (~(numpy.isin(slitmap_spec["orig_ifulabel"], exposed_std))&((slitmap_spec["telescope"] == "Spec")))[:, None]
-    mask |= (slitmap_spec["fibstatus"] == 1)[:, None]
+    # mask fibers that are not exposed
+    # TODO: use the more reliable routine get_exposed_std_fibers once is merged from addqa branch
+    if len(exposed_selection) != 0:
+        exposed_std = numpy.array(list(img._header["STD*FIB"].values()))[exposed_selection]
+        mask |= (~(numpy.isin(slitmap_spec["orig_ifulabel"], exposed_std))&((slitmap_spec["telescope"] == "Spec")))[:, None]
+        mask |= (slitmap_spec["fibstatus"] == 1)[:, None]
 
     drpstage += "SPECTRA_EXTRACTED"
 
