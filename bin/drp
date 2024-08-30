@@ -365,8 +365,8 @@ def get_calibs(kind, mjd, camera):
 @click.option('-a', '--alloc', type=click.Choice(['sdss-np', 'sdss-kp']), default='sdss-np', help='which partition to use')
 @click.option('-s', '--submit', is_flag=True, type=bool, default=True, help='flag to submit the job or not')
 @click.option('--run-calibs', is_flag=True, type=bool, default=False, help="run long-term calibrations only")
-@click.option('--drp-options', type=str, default=None, help="pass options to drp run command")
-def cluster(mjd_list, mjd_range, expnum, exp_list, exp_range, exp_file, nodes, ppn, walltime, 
+@click.option('--drp-options', type=str, default="", help="pass options to drp run command")
+def cluster(mjd_list, mjd_range, expnum, exp_list, exp_range, exp_file, nodes, ppn, walltime,
             alloc, submit, run_calibs, drp_options):
     """ Submit a Utah cluster job to batch run the DRP by MJD """
 
@@ -377,7 +377,7 @@ def cluster(mjd_list, mjd_range, expnum, exp_list, exp_range, exp_file, nodes, p
         mjds = parse_mjds(mjds)
 
     # submit the cluster job
-    run_cluster(mjds=mjds, expnums=expnums, nodes=nodes, ppn=ppn, walltime=walltime, alloc=alloc, submit=submit, 
+    run_cluster(mjds=mjds, expnums=expnums, nodes=nodes, ppn=ppn, walltime=walltime, alloc=alloc, submit=submit,
                 run_calibs=run_calibs, drp_options=drp_options)
 
 
