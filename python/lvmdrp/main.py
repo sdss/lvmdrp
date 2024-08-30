@@ -31,7 +31,7 @@ from lvmdrp.functions.imageMethod import (preproc_raw_frame, create_master_frame
 from lvmdrp.functions.rssMethod import (determine_wavelength_solution, create_pixel_table, apply_fiberflat,
                                         resample_wavelength, shift_wave_skylines, join_spec_channels, stack_spectrographs)
 from lvmdrp.functions.skyMethod import interpolate_sky, combine_skies, quick_sky_subtraction
-from lvmdrp.functions.fluxCalMethod import fluxcal_standard_stars, fluxcal_sci_ifu_stars, apply_fluxcal
+from lvmdrp.functions.fluxCalMethod import fluxcal_standard_stars, fluxcal_sci_ifu_stars, apply_fluxcal, model_selection
 from lvmdrp.utils.metadata import (get_frames_metadata, get_master_metadata, extract_metadata,
                                    get_analog_groups, match_master_metadata, create_master_path,
                                    update_summary_file)
@@ -1686,6 +1686,10 @@ def science_reduction(expnum: int, use_fiducial_master: bool = False,
         hsci_all_bands = [path.full('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver, kind='h',
                                     camera=channel, imagetype=sci_imagetyp, expnum=expnum) for channel in "brz"]
 
+        # #The model stellar atmosphere spectra selection
+        best_fit_models, model_to_gaia_median = model_selection(hsci_all_bands,
+                                                                GAIA_CACHE_DIR=MASTERS_DIR + '/gaia_cache')
+        #
 
         for channel in "brz":
             xsci_paths = sorted(path.expand('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver,

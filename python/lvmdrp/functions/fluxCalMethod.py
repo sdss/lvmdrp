@@ -277,12 +277,17 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3):
     model_names = [f for f in listdir(join(model_dir, 'convolved')) if
                    isfile(join(model_dir, 'convolved', f)) and (f.lower().endswith('.fits'))]
     model_specs_convolved_norm = []
-    for i in range(len(model_names)):
-        with fits.open(join(model_dir, 'convolved', model_names[i])) as hdul:
-            convolved_tmp = hdul[0].data
-            model_specs_convolved_norm.append(convolved_tmp)
+
+
+    # !!! HERE DRP CRASHES WHEN IT TRIES TO OPEN ALL THE MODEL. Solution -> save everything to the single fits file
+    n_models = len(model_names)
+    log.info(f'Number of models: {n_models}')
+    for i in range(n_models):
+        convolved_tmp = fits.getdata(join(model_dir, 'convolved', model_names[i]))
+        # with fits.open(join(model_dir, 'convolved', model_names[i])) as hdul:
+        #     convolved_tmp = hdul[0].data
+        model_specs_convolved_norm.append(convolved_tmp)
     model_specs_convolved_norm = np.array(model_specs_convolved_norm)
-    print('Number of models', len(model_specs_convolved_norm))
 
     GAIA_CACHE_DIR = "./" if GAIA_CACHE_DIR is None else GAIA_CACHE_DIR
     log.info(f"Using Gaia CACHE DIR '{GAIA_CACHE_DIR}'")
@@ -316,7 +321,6 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3):
         normalized_spectra = []
         std_errors = []
         #log.info(f"loading input RSS file '{os.path.basename(in_rss[b])}'")
-        print(b)
         rss_tmp = RSS.from_file(in_rss[b])
 
         # get the list of standards from the header
@@ -438,7 +442,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3):
 
         chi2 = [np.nansum(((normalized_std_on_gaia_cont_single[mask_good] -
                             model_specs_convolved_norm[model_ind][mask_good]) / gaia_std_err[mask_good]) ** 2) /
-                np.sum(mask_good) for model_ind in range(len(model_names))]
+                np.sum(mask_good) for model_ind in range(n_models)]
         best_id = np.argmin(chi2)
 
         # Check the possible velocity offsets
@@ -465,7 +469,8 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3):
 
 
         log.info(f"GAIA id:{gaia_ids[i]}. Best model is: {best_id}, {model_names[best_id]}")
-        print(f"Velocity offset from model in b,r,z channels: {vel_offset_b}, {vel_offset_r},{vel_offset_z}")
+        log.info(f"Velocity offset from model in b,r,z channels: {np.round(vel_offset_b,1)}, "
+                 f"{np.round(vel_offset_r,1)},{np.round(vel_offset_z,1)}")
 
         best_fit_models.append(model_names[best_id])
 
