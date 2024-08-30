@@ -3358,7 +3358,7 @@ class Spectrum1D(Header):
         fact = numpy.sqrt(2 * numpy.pi)
         hw = aperture // 2
         for i, centre in enumerate(cent_guess):
-            if centre + hw < self._wave[0] or centre - hw > self._wave[-1]:
+            if numpy.isnan(centre) or (centre + hw < self._wave[0] or centre - hw > self._wave[-1]):
                 continue
 
             select = (self._wave >= centre - hw) & (self._wave <= centre + hw)
