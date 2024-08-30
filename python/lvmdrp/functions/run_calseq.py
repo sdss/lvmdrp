@@ -54,7 +54,7 @@ from lvmdrp.core.rss import RSS, lvmFrame
 
 from lvmdrp.functions import imageMethod as image_tasks
 from lvmdrp.functions import rssMethod as rss_tasks
-from lvmdrp.main import get_config_options, read_fibermap, get_master_mjd, get_calib_paths, group_calib_paths, reduce_2d
+from lvmdrp.main import start_logging, get_config_options, read_fibermap, get_master_mjd, get_calib_paths, group_calib_paths, reduce_2d
 from lvmdrp.functions.run_twilights import lvmFlat, fit_fiberflat, create_lvmflat, combine_twilight_sequence
 
 
@@ -65,7 +65,7 @@ MASK_BANDS = {
     "r": [(6840,6960)],
     "z": [(7570, 7700)]
 }
-COUNTS_THRESHOLDS = {"ldls": 5000, "quartz": 10000}
+COUNTS_THRESHOLDS = {"ldls": 1000, "quartz": 1000}
 CAL_FLAVORS = {"bias", "trace", "wave", "dome", "twilight"}
 
 
@@ -1206,7 +1206,8 @@ def create_traces(mjd, cameras=CAMERAS, use_fiducial_cals=True, expnums_ldls=Non
         mwidths[camera].createEmpty(data_dim=(648, 4086), poly_deg=poly_deg_width)
 
         expnums = expnums_qrtz if camera[0] == "z" else expnums_ldls
-        counts_threshold = 10000 if camera[0] == "z" else 5000
+        select_lamp = MASTER_CON_LAMPS[camera[0]]
+        counts_threshold = COUNTS_THRESHOLDS[select_lamp]
 
         # select fibers in current spectrograph
         fibermap = SLITMAP[SLITMAP["spectrographid"] == int(camera[1])]
@@ -1703,6 +1704,9 @@ def reduce_nightly_sequence(mjd, use_fiducial_cals=False, reject_cr=True, only_c
         log.error(f"nothing to reduce, MJD = {mjd}")
         return
 
+    # start logging to file
+    start_logging(mjd, tileid=11111)
+
     if not set(only_cals).issubset(CAL_FLAVORS):
         raise ValueError(f"some chosen image types in 'only_cals' are not valid: {only_cals.difference(CAL_FLAVORS)}")
     log.info(f"going to produce nightly calibrations: {only_cals}")
@@ -1807,6 +1811,9 @@ def reduce_longterm_sequence(mjd, use_fiducial_cals=True,
     if mjd is None:
         log.error(f"nothing to reduce, MJD = {mjd}")
         return
+
+    # start logging to file
+    start_logging(mjd, tileid=11111)
 
     if not set(only_cals).issubset(CAL_FLAVORS):
         raise ValueError(f"some chosen image types in 'only_cals' are not valid: {only_cals.difference(CAL_FLAVORS)}")

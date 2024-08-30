@@ -345,7 +345,7 @@ def _cross_match_float(
     # Fit Gaussian around maximum cross-correlation peak
     mask = (best_shifts >= best_shift+gauss_window[0]) & (best_shifts <= best_shift+gauss_window[1])
     guess = [numpy.trapz(best_cross_corr[mask], best_shifts[mask]), best_shift, 1.0, 0.0]
-    bound_lower = [0.0, best_shift+min_shift, gauss_sigmas[0], 0.0]
+    bound_lower = [0.0, best_shift+min_shift, gauss_sigmas[0], -numpy.inf]
     bound_upper = [numpy.inf, best_shift+max_shift, gauss_sigmas[1], numpy.inf]
     best_gauss = fit_profile.Gaussian_const(guess)
     best_gauss.fit(
@@ -3353,16 +3353,16 @@ class Spectrum1D(Header):
         flux = numpy.ones(len(cent_guess)) * numpy.nan
         cent = numpy.ones(len(cent_guess)) * numpy.nan
         fwhm = numpy.ones(len(cent_guess)) * numpy.nan
-        if fit_bg:
-            bg = numpy.ones(len(cent_guess)) * numpy.nan
+        bg = numpy.ones(len(cent_guess)) * numpy.nan
 
         fact = numpy.sqrt(2 * numpy.pi)
         hw = aperture // 2
         for i, centre in enumerate(cent_guess):
-            select = (self._wave >= centre - hw) & (self._wave <= centre + hw)
-            if mask[select].sum() == select.size:
+            if numpy.isnan(centre) or (centre + hw < self._wave[0] or centre - hw > self._wave[-1]):
                 continue
 
+            select = (self._wave >= centre - hw) & (self._wave <= centre + hw)
+            # print(i, centre, self._wave.min(), self._wave.max(), select.sum())
             if mask[select].sum() >= badpix_threshold:
                 log.warning(f"skipping line at pixel {centre} with {mask[select].sum()} >= {badpix_threshold = } bad pixels")
                 self.add_header_comment(f"skipping line at pixel {centre} with {mask[select].sum()} >= {badpix_threshold = } bad pixels")
@@ -3399,8 +3399,7 @@ class Spectrum1D(Header):
 
             if axs is not None:
                 axs[i] = gauss.plot(self._wave[select], self._data[select], mask=self._mask[select], ax=axs[i])
-                axs[i].axvline(cent_guess[i], ls="--", lw=1, color="0.7", label="orig. guess")
-                axs[i].axvline(centre, ls="--", lw=1, color="tab:red", label="ref. guess")
+                axs[i].axvline(cent_guess[i], ls="--", lw=1, color="tab:red", label="cent. guess")
                 axs[i].set_title(f"{axs[i].get_title()} @ {cent[i]:.1f} (pixel)")
                 axs[i].text(0.05, 0.9, f"flux = {flux[i]:.2f}", va="bottom", ha="left", transform=axs[i].transAxes, fontsize=11)
                 axs[i].text(0.05, 0.8, f"cent = {cent[i]:.2f}", va="bottom", ha="left", transform=axs[i].transAxes, fontsize=11)

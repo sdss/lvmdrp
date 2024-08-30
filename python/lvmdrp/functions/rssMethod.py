@@ -186,8 +186,8 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
                                   aperture: int = 12,
                                   fwhm_guess: float = 3.0,
                                   bg_guess: float = 0.0,
-                                  flux_range: List[float] = [400.0, numpy.inf],
-                                  cent_range: List[float] = [-3.0, 3.0],
+                                  flux_range: List[float] = [100.0, numpy.inf],
+                                  cent_range: List[float] = [-4.0, 4.0],
                                   fwhm_range: List[float] = [2.0, 4.5],
                                   bg_range: List[float] = [-1000.0, numpy.inf],
                                   poly_disp: int = 6, poly_fwhm: int = 4,
@@ -320,8 +320,9 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
     arc._error[select] = numpy.inf
 
     # subtract continuum
-    log.info(f"fitting and subtracting continuum with parameters: {cont_niter = }, {cont_thresh = }, {cont_box_range = }")
-    arc, _, _ = arc.subtract_continuum(niter=cont_niter, thresh=cont_thresh, median_box_range=cont_box_range)
+    if cont_niter > 0:
+        log.info(f"fitting and subtracting continuum with parameters: {cont_niter = }, {cont_thresh = }, {cont_box_range = }")
+        arc, _, _ = arc.subtract_continuum(niter=cont_niter, thresh=cont_thresh, median_box_range=cont_box_range)
 
     # replace NaNs
     mask = arc._mask | numpy.isnan(arc._data) | numpy.isnan(arc._error)
@@ -644,10 +645,12 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
     mask = numpy.zeros(arc._data.shape, dtype=bool)
     mask[(~good_fibers)|(wave_coeffs==0).all(axis=1)] = True
     wave_trace = TraceMask(data=wave_sol, mask=mask, coeffs=wave_coeffs, header=arc._header.copy())
+    wave_trace._samples = Table(data=cent_wave, names=ref_lines)
     wave_trace._header["IMAGETYP"] = "wave"
     mask = numpy.zeros(arc._data.shape, dtype=bool)
     mask[(~good_fibers)|(lsf_coeffs==0).all(axis=1)] = True
     fwhm_trace = TraceMask(data=lsf_sol, mask=mask, coeffs=lsf_coeffs, header=arc._header.copy())
+    fwhm_trace._samples = Table(data=fwhm, names=ref_lines)
     fwhm_trace._header["IMAGETYP"] = "lsf"
 
     wave_trace.interpolate_coeffs()

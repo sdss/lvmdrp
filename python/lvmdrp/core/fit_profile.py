@@ -98,7 +98,11 @@ class fit_profile1D(object):
                 self.res, x0=p0, bounds=bounds, args=(x, y, sigma), max_nfev=maxfev, ftol=ftol, xtol=xtol, method="dogbox"
             )
             self._par = model.x
-            self._par[model.active_mask!=0] = numpy.nan
+
+            mask = model.active_mask!=0
+            # for i in range(self._par.size):
+            #     mask |= (self._par[i]<=bounds[0][i])|(self._par[i]>=bounds[1][i])
+            self._par[mask] = numpy.nan
         if method == "simplex":
             try:
                 model = optimize.fmin(
