@@ -345,7 +345,7 @@ def _cross_match_float(
     # Fit Gaussian around maximum cross-correlation peak
     mask = (best_shifts >= best_shift+gauss_window[0]) & (best_shifts <= best_shift+gauss_window[1])
     guess = [numpy.trapz(best_cross_corr[mask], best_shifts[mask]), best_shift, 1.0, 0.0]
-    bound_lower = [0.0, best_shift+min_shift, gauss_sigmas[0], 0.0]
+    bound_lower = [0.0, best_shift+min_shift, gauss_sigmas[0], -numpy.inf]
     bound_upper = [numpy.inf, best_shift+max_shift, gauss_sigmas[1], numpy.inf]
     best_gauss = fit_profile.Gaussian_const(guess)
     best_gauss.fit(
