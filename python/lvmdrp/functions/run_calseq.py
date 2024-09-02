@@ -1595,6 +1595,12 @@ def create_wavelengths(mjd, use_fiducial_cals=True, expnums=None, kind="longterm
     skip_done : bool
         Skip pipeline steps that have already been done
     """
+    # run wavelength calibration for special MJDs
+    if mjd == 60177:
+        log.info(f"running dedicated script to create wavelength calibrations for MJD = {mjd}")
+        _create_wavelengths_60177(use_fiducial_cals=use_fiducial_cals, skip_done=skip_done)
+        return
+
     frames, _ = md.get_sequence_metadata(mjd, expnums=expnums, for_cals={"wave"})
 
     # define master paths for target frames
