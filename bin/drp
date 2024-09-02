@@ -220,7 +220,7 @@ cli.add_command(metacli)
 @click.option('-l', '--mjd-list', type=int, multiple=True, help='a list of specific MJDs to reduce')
 @click.option('-r', '--mjd-range', type=str, help='a range of MJDs to reduce')
 @click.option('-cr', '--reject-cr', is_flag=True, default=False, help='flag to run cosmic rays rejection')
-@click.option('-n', '--use-fiducial-cals', is_flag=True, default=False, help='flag to use fiducial calibrations instead of nightly ones')
+@click.option('-lt', '--use-longterm-cals', is_flag=True, default=False, help='flag to use long-term calibrations instead of nightly ones')
 @click.option('-b', '--skip-bias', is_flag=True, default=False, help='skip bias calibrations')
 @click.option('-t', '--skip-trace', is_flag=True, default=False, help='skip fiber traces')
 @click.option('-w', '--skip-wavelength', is_flag=True, default=False, help='skip wavelength calibrations')
@@ -235,7 +235,7 @@ cli.add_command(metacli)
 @click.option('--fflats-from-to', type=int, default=[None, None], nargs=2, help='Move twilight fiberflats from one MJD to another MJD')
 @cloup.constraint(mutually_exclusive, ['mjd', 'mjd_list', 'mjd_range'])
 @cloup.constraint(RequireExactly(1), ['mjd', 'mjd_list', 'mjd_range'])
-def nightly_calibrations(mjd, mjd_list, mjd_range, reject_cr, use_fiducial_cals,
+def nightly_calibrations(mjd, mjd_list, mjd_range, reject_cr, use_longterm_cals,
                          skip_bias, skip_trace, skip_wavelength,
                          skip_dome, skip_twilight,
                          ldls_threshold, qrtz_threshold,
@@ -261,7 +261,7 @@ def nightly_calibrations(mjd, mjd_list, mjd_range, reject_cr, use_fiducial_cals,
         mjds = [mjds]
     for mjd in mjds:
         reduce_nightly_sequence(mjd=mjd, reject_cr=reject_cr,
-                                use_fiducial_cals=use_fiducial_cals,
+                                use_longterm_cals=use_longterm_cals,
                                 only_cals=only_cals,
                                 counts_thresholds={"ldls": ldls_threshold, "quartz": qrtz_threshold},
                                 cent_guess_ncolumns=cent_ncolumns, trace_full_ncolumns=full_ncolumns,
@@ -289,7 +289,7 @@ def long_term_calibrations(mjd, reject_cr, skip_bias, skip_trace, skip_wavelengt
     only_cals = {flavor for flavor, skip in zip(["bias", "trace", "wave", "twilight"],
                                                 [skip_bias, skip_trace, skip_wavelength, skip_fiberflat]) if not skip}
     reduce_longterm_sequence(mjd=mjd, reject_cr=reject_cr,
-                             use_fiducial_cals=True,
+                             use_longterm_cals=True,
                              only_cals=only_cals,
                              skip_done=skip_done, keep_ancillary=not clean_ancillary,
                              fflats_from=fflats_from_to)
