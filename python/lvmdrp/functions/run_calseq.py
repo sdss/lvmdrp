@@ -724,7 +724,7 @@ def _create_wavelengths_60177(use_fiducial_cals=True, skip_done=True):
             rss_tasks.resample_wavelength(in_rss=harc_path, out_rss=harc_path, method="linear", wave_range=SPEC_CHANNELS[channel], wave_disp=0.5)
 
 
-def _copy_fiberflats_from(mjd, mjd_dest=60177):
+def _copy_fiberflats_from(mjd, mjd_dest=60177, use_fiducial_cals=True):
     """Copies twilight fiberflats from given MJD to MJD destination
 
     Parameters
@@ -733,9 +733,11 @@ def _copy_fiberflats_from(mjd, mjd_dest=60177):
         MJD of calibration epoch from which the twilight fiberflats will be copied
     mjd_dest : int
         MJD where copied twilight fiberflats will be stored
+    use_fiducial_cals : bool, optional
+        Whether to use fiducial calibration frames or not, defaults to True
     """
      # define master paths for target frames
-    calibs = get_calib_paths(mjd_dest, version=drpver, use_fiducial_cals=True)
+    calibs = get_calib_paths(mjd_dest, version=drpver, use_fiducial_cals=use_fiducial_cals)
     mwave_paths = group_calib_paths(calibs["wave"])
     mlsf_paths = group_calib_paths(calibs["lsf"])
 
