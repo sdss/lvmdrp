@@ -680,7 +680,10 @@ def _create_wavelengths_60177(use_fiducial_cals=True, skip_done=True):
             if skip_done and os.path.exists(xarc_path):
                 log.info(f"skipping {xarc_path}, file already exists")
             else:
-                image_tasks.extract_spectra(in_image=carc_path, out_rss=xarc_path, in_trace=calibs["trace"][camera], in_fwhm=calibs["width"][camera])
+                image_tasks.extract_spectra(in_image=carc_path, out_rss=xarc_path,
+                                            in_trace=calibs["trace"][camera],
+                                            in_fwhm=calibs["width"][camera],
+                                            in_model=calibs["model"][camera])
 
     expnum_str = f"{frames.expnum.min():>08}_{frames.expnum.max():>08}"
     for camera in np.sort(frames.camera.unique()):
@@ -1368,7 +1371,10 @@ def create_dome_fiberflats(mjd, expnums_ldls, expnums_qrtz, use_fiducial_cals=Tr
             if skip_done and os.path.isfile(xflat_path):
                 log.info(f"skipping {xflat_path}, file already exists")
             else:
-                image_tasks.extract_spectra(in_image=cflat_path, out_rss=xflat_path, in_trace=calibs["trace"][camera], in_fwhm=calibs["width"][camera], in_model=calibs["model"][camera])
+                image_tasks.extract_spectra(in_image=cflat_path, out_rss=xflat_path,
+                                            in_trace=calibs["trace"][camera],
+                                            in_fwhm=calibs["width"][camera],
+                                            in_model=calibs["model"][camera])
             xflat_paths.append(xflat_path)
         xflat = RSS.from_spectrographs(*[RSS.from_file(xflat_path) for xflat_path in xflat_paths])
 
@@ -1485,8 +1491,9 @@ def create_twilight_fiberflats(mjd: int, use_fiducial_cals: bool = True, expnums
             log.info(f"skipping {xflat_path}, file already exist")
         else:
             image_tasks.extract_spectra(in_image=lflat_path, out_rss=xflat_path,
-                                        in_trace=calibs["trace"][camera], in_fwhm=calibs["width"][camera], in_model=calibs["model"][camera],
-                                        method="optimal")
+                                        in_trace=calibs["trace"][camera],
+                                        in_fwhm=calibs["width"][camera],
+                                        in_model=calibs["model"][camera])
 
     # group calibs
     for flavor in ["trace", "width", "wave", "lsf"]:
@@ -1628,8 +1635,9 @@ def create_wavelengths(mjd, use_fiducial_cals=True, expnums=None, kind="longterm
             log.info(f"skipping extracted arc {xarc_path}, file already exists")
         else:
             image_tasks.extract_spectra(in_image=carc_path, out_rss=xarc_path,
-                                        in_trace=calibs["trace"][camera], in_fwhm=calibs["width"][camera], in_model=calibs["model"][camera],
-                                        method="optimal")
+                                        in_trace=calibs["trace"][camera],
+                                        in_fwhm=calibs["width"][camera],
+                                        in_model=calibs["model"][camera])
 
         # fit wavelength solution
         if skip_done and os.path.isfile(mwave_path) and os.path.isfile(mlsf_path):
