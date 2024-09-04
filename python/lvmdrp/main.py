@@ -44,7 +44,7 @@ from lvmdrp import config, log, path, __version__ as drpver
 CALIBRATION_NAMES = {"pixmask", "pixflat", "bias", "trace_guess", "trace", "width", "amp", "model", "wave", "lsf", "fiberflat_dome", "fiberflat_twilight"}
 
 
-def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_NAMES, use_fiducial_cals=True, from_sanbox=False):
+def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_NAMES, longterm_cals=True, from_sanbox=False):
     """Returns a dictionary containing paths for calibration frames
 
     Parameters
@@ -57,8 +57,8 @@ def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_NAMES, u
         List of cameras or wildcard to match, by default '*'
     flavors : list, tuple or set
         Only get paths for this calibrations, by default all available flavors
-    use_fiducial_cals : bool
-        Whether to use fiducial calibration frames or not, defaults to True
+    longterm_cals : bool
+        Whether to use long-term calibration frames or not, defaults to True
     from_sanbox : bool, optional
         Fall back option to pull calibrations from sandbox, by default False
 
@@ -76,7 +76,7 @@ def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_NAMES, u
     tileid = 11111
     tilegrp = tileid_grp(tileid)
 
-    cals_mjd = get_master_mjd(mjd) if use_fiducial_cals or from_sanbox else mjd
+    cals_mjd = get_master_mjd(mjd) if longterm_cals or from_sanbox else mjd
 
     # define root path to pixel flats and masks
     # TODO: remove this once sdss-tree are updated with the corresponding species
@@ -107,7 +107,7 @@ def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_NAMES, u
         if path_species == "lvm_calib":
             prefix = ""
         else:
-            prefix = "m" if flavor in ["bias", "fiberflat_twilight"] or use_fiducial_cals else "n"
+            prefix = "m" if flavor in ["bias", "fiberflat_twilight"] or longterm_cals else "n"
 
         calibs[flavor] = {c: path.full(path_species, drpver=version, tileid=tileid, mjd=cals_mjd, kind=f"{prefix}{flavor}", camera=c) for c in cam_or_chan}
 
@@ -1569,7 +1569,7 @@ def reduce_2d(mjd, calibrations, expnums=None, exptime=None, cameras=CAMERAS,
                           in_slitmap=fibermap if imagetyp in {"flat", "arc", "object"} else None)
 
 
-def science_reduction(expnum: int, use_fiducial_master: bool = False,
+def science_reduction(expnum: int, use_longterm_cals: bool = False,
                       skip_sky_subtraction: bool = False,
                       sky_weights: Tuple[float, float] = None,
                       fluxcal_method: str = 'STD',
@@ -1618,13 +1618,13 @@ def science_reduction(expnum: int, use_fiducial_master: bool = False,
     sci_expnum = sci_metadata["expnum"].unique()[0]
     sci_imagetyp = sci_metadata["imagetyp"].unique()[0]
 
-    cals_mjd = get_master_mjd(sci_mjd) if use_fiducial_master else sci_mjd
+    cals_mjd = get_master_mjd(sci_mjd) if use_longterm_cals else sci_mjd
     log.info(f"target master MJD: {cals_mjd}")
 
     # overwrite fiducial masters dir
     # masters_path = os.path.join(MASTERS_DIR, f"{cals_mjd}")
     log.info(f"target master path: {os.getenv('LVM_MASTER_DIR')}")
-    calibs = get_calib_paths(mjd=cals_mjd, version=drpver, use_fiducial_cals=use_fiducial_master, from_sanbox=True)
+    calibs = get_calib_paths(mjd=cals_mjd, version=drpver, longterm_cals=use_longterm_cals, from_sanbox=True)
 
     # make sure only one exposure number is being reduced
     sci_metadata.query("expnum == @sci_expnum", inplace=True)
@@ -1903,7 +1903,7 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
             kwargs = get_config_options('reduction_steps.science_reduction')
             for expnum in sci['expnum'].unique():
                 try:
-                    science_reduction(expnum, use_fiducial_master=True,
+                    science_reduction(expnum, use_longterm_cals=True,
                                       fluxcal_method=fluxcal_method,
                                       skip_2d=skip_2d,
                                       skip_1d=skip_1d,
