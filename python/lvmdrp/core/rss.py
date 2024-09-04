@@ -8,6 +8,9 @@ from scipy import interpolate
 from astropy.io import fits as pyfits
 from astropy.wcs import WCS
 from astropy.table import Table
+from astropy.time import Time
+from astropy.coordinates import SkyCoord
+from astropy.coordinates import EarthLocation
 from astropy import units as u
 
 from lvmdrp import log
@@ -958,7 +961,6 @@ class RSS(FiberRows):
         Append a COMMENT card at the end of the FITS header.
         '''
         self._header.append(('COMMENT', comstr), bottom=True)
-
 
     def eval_wcs(self, wave=None, data=None, as_dict=True):
         """Returns the WCS object from the current wavelength and fibers arrays"""
@@ -3396,6 +3398,57 @@ class RSS(FiberRows):
 
         coadded_flux = numpy.nanmean(masked, axis=1)
         return coadded_flux
+
+    def get_helio_rv(self, apply_hrv_corr=False):
+        """Calculates heliocentric velocity corrections for each telescope and standard fiber
+
+        Parameters
+        ----------
+        apply_heliorv : bool, optional
+            Apply heliocentric correction to all fibers
+
+        Returns
+        -------
+        hrv_corrs : dict[str, float]
+            Dictionary containing heliocentric velocity corrections
+        """
+        if self._header is None or self._header["IMAGETYP"] != "object" or not self._header["PO*RA"] or not self._header["PO*DE"]:
+            return
+
+        # calculate heliocentric velocity
+        obs_time = Time(self._header['OBSTIME'])
+        hrv_corrs = {}
+        for tel in ["SCI", "SKYE", "SKYW"]:
+            radec = SkyCoord(self._header[f"PO{tel}RA"], self._header[f"PO{tel}DE"], unit="deg") # center of the pointing or coordinates of the fiber
+            hrv_corr = radec.radial_velocity_correction(kind='heliocentric', obstime=obs_time, location=EarthLocation.of_site('lco')).to(u.km / u.s).value
+            self._header[f"HIERARCH WAVE HELIORV_{tel}"] = (numpy.round(hrv_corr, 4), f"Heliocentric velocity correction for {tel} [km/s]")
+            hrv_corrs[tel] = numpy.round(hrv_corr, 4)
+
+        # calculate standard stars heliocentric corrections
+        for istd in range(1, 15+1):
+            is_acq = self._header[f"STD{istd}ACQ"]
+            if not is_acq:
+                continue
+
+            std_obstime = Time(self._header[f"STD{istd}T0"])
+            std_radec = SkyCoord(self._header[f"STD{istd}RA"], self._header[f"STD{istd}DE"], unit="deg")
+            std_hrv_corr = std_radec.radial_velocity_correction(kind="heliocentric", obstime=std_obstime, location=EarthLocation.of_site("lco")).to(u.km / u.s).value
+            self._header[f"STD{istd}HRV"] = (numpy.round(std_hrv_corr, 4), f"Standard {istd} heliocentric vel. corr. [km/s]")
+
+        # TODO: implement apply_heliorv
+        if apply_hrv_corr: ...
+            # if helio_vel is None or helio_vel == 0.0:
+            #     helio_vel = rss._header.get(helio_vel_keyword)
+            #     if helio_vel is None:
+            #         helio_vel = 0.0
+            #         log.warning(f"no heliocentric velocity found in header by keywords {helio_vel_keyword = }, assuming {helio_vel = } km/s")
+            #         rss.add_header_comment(f"no heliocentric velocity {helio_vel_keyword = }, assuming {helio_vel = } km/s")
+            # else:
+            #     log.info(f"applying heliocentric velocity correction of {helio_vel = } km/s")
+
+            # rss._wave = rss._wave * (1 + helio_vel / c.to("km/s").value)
+
+        return hrv_corrs
 
     def fit_field_gradient(self, wrange, poly_deg):
         """Fits a polynomial function to the IFU field"""

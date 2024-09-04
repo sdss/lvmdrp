@@ -13,7 +13,6 @@ import yaml
 import bottleneck as bn
 from tqdm import tqdm
 from astropy import units as u
-from astropy.constants import c
 from astropy.io import fits
 from astropy.table import Table
 from astropy.time import Time
@@ -782,9 +781,12 @@ def shift_wave_skylines(in_frame: str, out_frame: str, dwave: float = 8.0, skyli
 # * merge arc_wave and arc_lsfs into lvmArc product, change variable name to in_arc
 # @skip_on_missing_input_path(["in_rss", "in_waves", "in_lsfs"])
 # @skip_if_drpqual_flags(["EXTRACTBAD", "BADTRACE"], "in_rss")
-def create_pixel_table(in_rss: str, out_rss: str, in_waves: str, in_lsfs: str):
-    """
-    Applies the wavelength and the spectral resolution (LSF) to an RSS
+def create_pixel_table(in_rss: str, out_rss: str, in_waves: str, in_lsfs: str, calculate_heliorv: bool = True, apply_heliorv: bool = False):
+    """Applies the wavelength and the spectral resolution (LSF) to an RSS
+
+    Additionally barycentric correction in velocity can be applied if
+    information is supplied as input parameter or in the header of the input
+    RSS.
 
     Parameters
     ----------
@@ -797,16 +799,32 @@ def create_pixel_table(in_rss: str, out_rss: str, in_waves: str, in_lsfs: str):
         RSS FITS file containing the wavelength solutions
     in_lsfs : string, optional with default: ''
         RSS FITS file containing the spectral resolution (LSF in FWHM)
+    calculate_heliorv : bool, optional
+        Calculates per-telescope heliocentric velocity corrections
+    apply_heliorv : bool, optional
+
     """
+    log.info(f"loading RSS for wavelength calibration: {in_rss}")
     rss = RSS.from_file(in_rss)
 
+    # set wavelength and LSF traces
+    log.info("adding wavelength and LSF solutions")
     wave_traces = [TraceMask.from_file(in_wave) for in_wave in in_waves]
     wave_trace = TraceMask.from_spectrographs(*wave_traces)
     rss.set_wave_trace(wave_trace)
+    rss.set_wave_array()
 
     lsf_traces = [TraceMask.from_file(in_lsfs) for in_lsfs in in_lsfs]
     lsf_trace = TraceMask.from_spectrographs(*lsf_traces)
     rss.set_lsf_trace(lsf_trace)
+    rss.set_lsf_array()
+
+    # set header keywords for heliocentric velocity corrections
+    log.info("calculating heliocentric velocity corrections")
+    helio_rvs = rss.get_helio_rv(apply_heliorv)
+    log.info(f"heliocentric velocities [km/s]: {helio_rvs}")
+
+    log.info(f"writing output RSS to {out_rss}")
     rss.writeFitsData(out_rss)
 
     return rss
@@ -1061,16 +1079,12 @@ def correctPixTable_drp(
 @skip_if_drpqual_flags(["BADTRACE", "EXTRACTBAD"], "in_rss")
 def resample_wavelength(in_rss: str, out_rss: str, method: str = "linear",
                         wave_range: Tuple[float,float] = None, wave_disp: float = None,
-                        helio_vel: float = 0.0, helio_vel_keyword: str = "HELIO_RV",
                         convert_to_density: bool = False) -> RSS:
     """Resamples the RSS wavelength solutions to a common wavelength solution
 
     A common wavelength solution is computed for the RSS by resampling the
     wavelength solution of each fiber to a common wavelength grid. The
     resampling is performed using a linear or spline interpolation scheme.
-    Additionally barycentric correction in velocity can be applied if
-    information is supplied as input parameter or in the header of the input
-    RSS.
 
     Parameters
     ----------
@@ -1089,12 +1103,6 @@ def resample_wavelength(in_rss: str, out_rss: str, method: str = "linear",
     wave_disp : string of float, optional with default: None
         Dispersion per pixel for the common resampled wavelength solution.
         The "optimal" dispersion will be used if the parameter is empty.
-    helio_vel : string of float, optional with default: 0.0
-        Heliocentric velocity in km/s. If the parameter is empty, the value
-        stored in the header of the input RSS is used.
-    helio_vel_keyword : string, optional with default: 'HELIO_RV'
-        Keyword in the header of the input RSS where the heliocentric velocity
-        is stored.
     convert_to_density : string of boolean, optional with default: False
         If True, the resampled RSS will be converted to density units.
 
@@ -1116,18 +1124,6 @@ def resample_wavelength(in_rss: str, out_rss: str, method: str = "linear",
     if wave_disp is None:
         wave_disp = numpy.min(rss._wave[:, 1:] - rss._wave[:, :-1])
     log.info(f"using wavelength range {wave_range = } angstrom and {wave_disp = } angstrom pixel size")
-
-    # apply heliocentric velocity correction
-    if helio_vel is None or helio_vel == 0.0:
-        helio_vel = rss._header.get(helio_vel_keyword)
-        if helio_vel is None:
-            helio_vel = 0.0
-            log.warning(f"no heliocentric velocity found in header by keywords {helio_vel_keyword = }, assuming {helio_vel = } km/s")
-            rss.add_header_comment(f"no heliocentric velocity {helio_vel_keyword = }, assuming {helio_vel = } km/s")
-    else:
-        log.info(f"applying heliocentric velocity correction of {helio_vel = } km/s")
-
-    rss._wave = rss._wave * (1 + helio_vel / c.to("km/s").value)
 
     # resample the wavelength solution
     log.info(f"resampling the wavelength solution using {method = } interpolation")
