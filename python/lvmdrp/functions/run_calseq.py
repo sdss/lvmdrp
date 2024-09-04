@@ -1152,6 +1152,8 @@ def create_nightly_traces(mjd, use_longterm_cals=False, expnums_ldls=None, expnu
 
 
 def create_traces(mjd, cameras=CAMERAS, use_longterm_cals=True, expnums_ldls=None, expnums_qrtz=None,
+                  counts_thresholds=COUNTS_THRESHOLDS, cent_guess_ncolumns=140,
+                  trace_full_ncolumns=40,
                   fit_poly=True, poly_deg_amp=5, poly_deg_cent=4, poly_deg_width=5,
                   skip_done=True):
     """Create traces from master dome flats
@@ -1213,7 +1215,7 @@ def create_traces(mjd, cameras=CAMERAS, use_longterm_cals=True, expnums_ldls=Non
 
         expnums = expnums_qrtz if camera[0] == "z" else expnums_ldls
         select_lamp = MASTER_CON_LAMPS[camera[0]]
-        counts_threshold = COUNTS_THRESHOLDS[select_lamp]
+        counts_threshold = counts_thresholds[select_lamp]
 
         # select fibers in current spectrograph
         fibermap = SLITMAP[SLITMAP["spectrographid"] == int(camera[1])]
@@ -1236,7 +1238,7 @@ def create_traces(mjd, cameras=CAMERAS, use_longterm_cals=True, expnums_ldls=Non
                 log.info(f"going to trace all fibers in {camera}")
                 centroids, img = image_tasks.trace_centroids(in_image=dflat_path, out_trace_cent=cent_guess_path,
                                                             correct_ref=True, median_box=(1,10), coadd=20, counts_threshold=counts_threshold,
-                                                            max_diff=5.0, guess_fwhm=2.5, method="gauss", ncolumns=140,
+                                                            max_diff=5.0, guess_fwhm=2.5, method="gauss", ncolumns=cent_guess_ncolumns,
                                                             fit_poly=fit_poly, poly_deg=poly_deg_cent,
                                                             interpolate_missing=True)
 
@@ -1258,7 +1260,7 @@ def create_traces(mjd, cameras=CAMERAS, use_longterm_cals=True, expnums_ldls=Non
                     in_trace_cent_guess=cent_guess_path,
                     median_box=(1,10), coadd=20,
                     counts_threshold=counts_threshold, max_diff=5.0, guess_fwhm=2.5,
-                    ncolumns=40, iblocks=block_idxs, fwhm_limits=(1.0, 3.5),
+                    ncolumns=trace_full_ncolumns, iblocks=block_idxs, fwhm_limits=(1.0, 3.5),
                     fit_poly=fit_poly, interpolate_missing=False, poly_deg=(poly_deg_amp, poly_deg_cent, poly_deg_width)
                 )
 
@@ -1788,6 +1790,8 @@ def reduce_nightly_sequence(mjd, use_longterm_cals=False, reject_cr=True, only_c
 
 def reduce_longterm_sequence(mjd, use_longterm_cals=True,
                              reject_cr=True, only_cals=CAL_FLAVORS,
+                             counts_thresholds=COUNTS_THRESHOLDS,
+                             cent_guess_ncolumns=140, trace_full_ncolumns=40,
                              skip_done=True, keep_ancillary=False,
                              fflats_from=None,
                              link_pixelmasks=True):
@@ -1852,6 +1856,9 @@ def reduce_longterm_sequence(mjd, use_longterm_cals=True,
                 mjd=mjd, cameras=[camera],
                 use_longterm_cals=use_longterm_cals,
                 expnums_ldls=expnums_ldls, expnums_qrtz=expnums_qrtz,
+                counts_thresholds=counts_thresholds,
+                cent_guess_ncolumns=cent_guess_ncolumns,
+                trace_full_ncolumns=trace_full_ncolumns,
                 skip_done=skip_done
             )
     else:
