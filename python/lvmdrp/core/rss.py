@@ -3412,11 +3412,11 @@ class RSS(FiberRows):
         hrv_corrs : dict[str, float]
             Dictionary containing heliocentric velocity corrections
         """
-        if self._header is None or not self._header["PO*RA"] or not self._header["PO*DE"]:
+        if self._header is None or self._header["IMAGETYP"] != "object" or not self._header["PO*RA"] or not self._header["PO*DE"]:
             return
 
         # calculate heliocentric velocity
-        obs_time = Time(self._header['OBSTIME']) # get obs. time from the header
+        obs_time = Time(self._header['OBSTIME'])
         hrv_corrs = {}
         for tel in ["SCI", "SKYE", "SKYW"]:
             radec = SkyCoord(self._header[f"PO{tel}RA"], self._header[f"PO{tel}DE"], unit="deg") # center of the pointing or coordinates of the fiber
