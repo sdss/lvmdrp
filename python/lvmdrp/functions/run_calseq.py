@@ -100,7 +100,8 @@ def choose_sequence(frames, flavor, kind, truncate=True):
     if not isinstance(kind, str) or kind not in {"nightly", "longterm"}:
         raise ValueError(f"invalid kind '{kind}', available values are 'nightly' and 'longterm'")
 
-    # TODO: filter out exposures with hartmann door wrong status
+    # filter out exposures with hartmann door wrong status
+    cleaned_frames = frames.query("hartmann == '0 0'")
 
     if flavor == "twilight":
         query = "imagetyp == 'flat' and not (ldls|quartz) and not (neon|hgne|argon|xenon)"
@@ -110,7 +111,7 @@ def choose_sequence(frames, flavor, kind, truncate=True):
         query = "imagetyp == 'flat' and (ldls|quartz)"
     elif flavor == "arc":
         query = "imagetyp == 'arc' and not (ldls|quartz) and (neon|hgne|argon|xenon)"
-    expnums = np.sort(frames.query(query).expnum.unique())
+    expnums = np.sort(cleaned_frames.query(query).expnum.unique())
     diff = np.diff(expnums)
     div, = np.where(np.abs(diff) > 1)
 
@@ -131,7 +132,7 @@ def choose_sequence(frames, flavor, kind, truncate=True):
         else:
             chosen_expnums = sequences[0]
 
-    chosen_frames = frames.query("expnum in @chosen_expnums")
+    chosen_frames = cleaned_frames.query("expnum in @chosen_expnums")
     expected_length = EXPECTED_LENGTHS[flavor]
     sequence_length = len(chosen_expnums)
     if sequence_length == expected_length:
@@ -151,7 +152,7 @@ def choose_sequence(frames, flavor, kind, truncate=True):
             chosen_expnums = np.concatenate([short_expnums, long_expnums])
         else:
             chosen_expnums = chosen_expnums[:expected_length]
-        chosen_frames = frames.query("expnum in @chosen_expnums")
+        chosen_frames = cleaned_frames.query("expnum in @chosen_expnums")
         chosen_frames.sort_values(["expnum", "camera"], inplace=True)
 
     return chosen_frames, chosen_expnums
