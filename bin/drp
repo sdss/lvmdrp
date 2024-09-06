@@ -245,7 +245,7 @@ def calibrations(mjd, mjd_list, mjd_range, reject_cr,
     """ Run calibration sequence reduction """
 
     only_cals = {flavor for flavor, skip in zip(["bias", "trace", "wave", "twilight"],
-                                                [skip_bias, skip_trace, skip_wavelength, skip_dome, skip_twilight]) if not skip}
+                                                [skip_bias, skip_trace, skip_wavelength, skip_twilight]) if not skip}
 
     # get MJDs for twilight fiberflats copies
     fflats_from, fflats_to = fflats_from_to
