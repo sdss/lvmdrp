@@ -1728,6 +1728,10 @@ def reduce_nightly_sequence(mjd, use_longterm_cals=False, reject_cr=True, only_c
     # start logging to file
     start_logging(mjd, tileid=11111)
 
+    # create symbolic link to pixel flats and masks
+    if link_pixelmasks:
+        _link_pixelmasks()
+
     if not set(only_cals).issubset(CAL_FLAVORS):
         raise ValueError(f"some chosen image types in 'only_cals' are not valid: {only_cals.difference(CAL_FLAVORS)}")
     log.info(f"going to produce nightly calibrations: {only_cals}")
@@ -1780,10 +1784,6 @@ def reduce_nightly_sequence(mjd, use_longterm_cals=False, reject_cr=True, only_c
     else:
         log.log(20 if "twilight" in found_cals else 40, "skipping production of twilight fiberflats")
 
-    # create symbolic link to pixel flats and masks
-    if link_pixelmasks:
-        _link_pixelmasks()
-
     # if not keep_ancillary:
     #     _clean_ancillary(mjd)
 
@@ -1831,6 +1831,10 @@ def reduce_longterm_sequence(mjd, use_longterm_cals=True,
 
     # start logging to file
     start_logging(mjd, tileid=11111)
+
+    # create symbolic link to pixel flats and masks
+    if link_pixelmasks:
+        _link_pixelmasks()
 
     if not set(only_cals).issubset(CAL_FLAVORS):
         raise ValueError(f"some chosen image types in 'only_cals' are not valid: {only_cals.difference(CAL_FLAVORS)}")
@@ -1885,10 +1889,6 @@ def reduce_longterm_sequence(mjd, use_longterm_cals=True,
         create_twilight_fiberflats(mjd=mjd, expnums=twilight_expnums, skip_done=skip_done)
     else:
         log.log(20 if "twilight" in found_cals else 40, "skipping production of twilight fiberflats")
-
-    # create symbolic link to pixel flats and masks
-    if link_pixelmasks:
-        _link_pixelmasks()
 
     # if not keep_ancillary:
     #     _clean_ancillary(mjd)
