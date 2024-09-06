@@ -422,7 +422,7 @@ def locate_new_frames(hemi, camera, mjd, expnum, return_excluded=False):
     # load all stores if they exist
     log.info("locating all existing metadata stores")
     try:
-        stores = _load_or_create_store(tileid="*", mjd="*", mode="r")
+        stores = _load_or_create_store(tileid="*", mjd=mjd, mode="r")
         log.info(f"found {len(stores)} metadata stores")
     except FileNotFoundError:
         log.info(f"no metadata stores found, returning {npath} new paths")
@@ -437,6 +437,9 @@ def locate_new_frames(hemi, camera, mjd, expnum, return_excluded=False):
     # filter out paths in stores
     news = ~new_path_params.isin(old_path_params).x.values
     log.info(f"filtered {news.sum()} paths of new frames present in stores")
+
+    # closing stores
+    [store["raw"].file.close() for store in stores]
 
     new_paths = np.asarray(paths)[news].tolist()
     if return_excluded:
@@ -482,7 +485,7 @@ def get_master_metadata(overwrite: bool = None) -> pd.DataFrame:
 
 
 def get_frames_metadata(
-    mjd: Union[str, int] = None, suffix: str = "fits", overwrite: bool = None
+    mjd: Union[str, int] = "*", expnum: Union[None, str, int] = None, suffix: str = "fits", overwrite: bool = None
 ) -> pd.DataFrame:
     """Extract metadata from the 2d raw frames
 
@@ -495,7 +498,9 @@ def get_frames_metadata(
     Parameters
     ----------
     mjd : Union[str, int], optional
-        The MJD of the data sub-directory to search in, by default None
+        The MJD of the data sub-directory to search in, by default '*'
+    expnum : Union[None, str, int], optional
+        The exposure number wildcard to get metadata from, by default None (all exposures in ``mjd``)
     suffix : str, optional
         The raw data file suffix, by default "fits"
     overwrite : bool, optional
@@ -506,15 +511,26 @@ def get_frames_metadata(
     pd.DataFrame
         a Pandas DataFrame of metadata
     """
+    if isinstance(expnum, (list, tuple, range, np.ndarray)):
+        metas = [get_frames_metadata(mjd=mjd, expnum=exp, suffix=suffix, overwrite=overwrite and exp == expnum[0]) for exp in expnum]
+        return pd.concat(metas, axis="index", ignore_index=True)
     # look up raw data in the relevant MJD path
     raw_data_path = os.getenv("LVM_DATA_S")
-    raw_frame = f"{mjd}/sdR*{suffix}*" if mjd else f"*/sdR*{suffix}*"
-    frames = list(pathlib.Path(raw_data_path).rglob(raw_frame))
+    raw_frame = f"{mjd}/sdR*-*{expnum or ''}.{suffix}*"
+    frames = list(map(str, pathlib.Path(raw_data_path).rglob(raw_frame)))
 
     metadata_paths = _get_metadata_paths(tileid="*", mjd=mjd, kind="raw", filter_exist=True)
     if any(metadata_paths) and not overwrite:
         log.info("Loading existing metadata store.")
-        meta = get_metadata(mjd=mjd, tileid="*")
+        meta = get_metadata(mjd=mjd, tileid="*", expnum=expnum)
+
+        # identify new frames if they exist
+        old_frames = [path.full("lvm_raw", hemi=r.hemi, mjd=r.mjd, camspec=r.camera, expnum=r.expnum) for _, r in meta.iterrows()]
+        new_frames = np.asarray(frames)[~np.isin(frames, old_frames)]
+        n_new_frames = len(new_frames)
+
+        if n_new_frames > 0:
+            meta = pd.concat((meta, extract_metadata(new_frames, kind="raw")), axis="index", ignore_index=True)
     else:
         if overwrite:
             _del_store(mjd=mjd, tileid="*")

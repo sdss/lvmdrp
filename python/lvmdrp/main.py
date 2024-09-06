@@ -1518,8 +1518,7 @@ def reduce_2d(mjd, calibrations, expnums=None, exptime=None, cameras=CAMERAS,
     keep_ancillary : bool
         Keep ancillary files, by default False
     """
-
-    frames = get_frames_metadata(mjd)
+    frames = get_frames_metadata(mjd, expnum=expnums)
     if expnums is not None:
         frames.query("expnum in @expnums", inplace=True)
     if exptime is not None:
@@ -1608,7 +1607,7 @@ def science_reduction(expnum: int, use_longterm_cals: bool = False,
 
     # get target frames metadata or extract if it doesn't exist
     sci_mjd = mjd_from_expnum(expnum)[0]
-    sci_metadata = get_frames_metadata(mjd=sci_mjd)
+    sci_metadata = get_frames_metadata(mjd=sci_mjd, expnum=expnum)
     sci_metadata.query("expnum == @expnum", inplace=True)
     sci_metadata.sort_values("expnum", ascending=False, inplace=True)
 
@@ -1851,7 +1850,7 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
         return
 
     # generate the MJD metadata
-    frames = get_frames_metadata(mjd=mjd)
+    frames = get_frames_metadata(mjd=mjd, expnum=expnum)
     sub = frames.copy()
 
     # remove bad or test quality frames
