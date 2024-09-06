@@ -274,7 +274,7 @@ def calibrations(mjd, mjd_list, mjd_range, reject_cr,
                                     counts_thresholds={"ldls": ldls_threshold, "quartz": qrtz_threshold},
                                     cent_guess_ncolumns=cent_ncolumns, trace_full_ncolumns=full_ncolumns,
                                     skip_done=skip_done, keep_ancillary=not clean_ancillary,
-                                    fflats_from=fflats_from_to)
+                                    fflats_from=fflats_from if fflats_to == mjd else None)
 
 # register calibration sequence
 cli.add_command(calibrations)
