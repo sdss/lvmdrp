@@ -1052,7 +1052,7 @@ class FiberRows(Header, PositionTable):
 
         return numpy.asarray(pix_table), numpy.asarray(poly_table), numpy.asarray(poly_all_table)
 
-    def fit_polynomial(self, deg, poly_kind="poly", clip=None):
+    def fit_polynomial(self, deg, poly_kind="poly", clip=None, min_samples_frac=0.0):
         """
         smooths the traces along the dispersion direction with a polynomical function for each individual fiber
 
@@ -1064,10 +1064,11 @@ class FiberRows(Header, PositionTable):
             the kind of polynomial to use when smoothing the trace, valid options are: 'poly' (power series, default), 'legendre', 'chebyshev'
         clip : 2-tuple of int, optional with default None
             clip data around this values, defaults to no clipping
+        min_samples_frac : float, optional
+            minimum fraction of valid samples, by default 0.0 (no threshold)
         """
-        pixels = numpy.arange(
-            self._data.shape[1]
-        )  # pixel position in dispersion direction
+        pixels = numpy.arange(self._data.shape[1])
+        samples = self._samples.to_pandas().values
         self._coeffs = numpy.zeros((self._data.shape[0], numpy.abs(deg) + 1))
         # iterate over each fiber
         pix_table = []
@@ -1075,7 +1076,8 @@ class FiberRows(Header, PositionTable):
         poly_all_table = []
         for i in range(self._fibers):
             good_pix = numpy.logical_not(self._mask[i, :])
-            if numpy.sum(good_pix) >= deg + 1:
+            good_sam = ~numpy.isnan(samples[i, :])
+            if numpy.sum(good_pix) >= deg + 1 and good_sam.sum() / good_sam.size > min_samples_frac:
                 # select the polynomial class
                 poly_cls = Spectrum1D.select_poly_class(poly_kind)
 
