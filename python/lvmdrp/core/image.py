@@ -446,7 +446,7 @@ class Image(Header):
 
             # combined mask of valid pixels if contained in both
             if self._mask is not None and other._mask is not None:
-                new_mask = numpy.logical_or(self._mask, other._mask)
+                new_mask = numpy.where(self._mask != other._mask, self._mask + other._mask, self._mask)
                 img.setData(mask=new_mask)
             else:
                 img.setData(mask=self._mask)
@@ -511,7 +511,7 @@ class Image(Header):
 
             # combined mask of valid pixels if contained in both
             if self._mask is not None and other._mask is not None:
-                new_mask = numpy.logical_or(self._mask, other._mask)
+                new_mask = numpy.where(self._mask != other._mask, self._mask + other._mask, self._mask)
                 img.setData(mask=new_mask)
             else:
                 img.setData(mask=self._mask)
@@ -572,7 +572,7 @@ class Image(Header):
 
             # combined mask of valid pixels if contained in both
             if self._mask is not None and other._mask is not None:
-                new_mask = numpy.logical_or(self._mask, other._mask)
+                new_mask = numpy.where(self._mask != other._mask, self._mask + other._mask, self._mask)
                 img.setData(mask=new_mask)
             else:
                 img.setData(mask=self._mask)
@@ -651,7 +651,7 @@ class Image(Header):
 
             # combined mask of valid pixels if contained in both
             if self._mask is not None and other._mask is not None:
-                new_mask = numpy.logical_or(self._mask, other._mask)
+                new_mask = numpy.where(self._mask != other._mask, self._mask + other._mask, self._mask)
                 img.setData(mask=new_mask)
             else:
                 img.setData(mask=self._mask)
@@ -761,7 +761,7 @@ class Image(Header):
     def apply_pixelmask(self, mask=None):
         """Applies the mask to the data and error arrays, setting to nan when True and leaving the same value otherwise"""
         if mask is None:
-            mask = self._mask
+            mask = self.get_mask(as_boolean=True)
         if mask is None:
             return self._data, self._error
 
@@ -1486,19 +1486,22 @@ class Image(Header):
             new_image :  Image object
                 Subsampled image
         """
-
         if self._data is None:
             raise RuntimeError("Image object is empty. Nothing to process.")
+        if self._mask is None:
+            return self
+
+        mask = self.get_mask(as_boolean=True)
 
         idx = numpy.indices(self._dim)  # create an index array
         # get x and y coordinates of bad pixels
 
-        y_cors = idx[0][self._mask]
-        x_cors = idx[1][self._mask]
+        y_cors = idx[0][mask]
+        x_cors = idx[1][mask]
 
         out_data = copy(self._data)
         msk_data = copy(self._data)
-        msk_data[self._mask] = numpy.nan
+        msk_data[mask] = numpy.nan
         out_error = copy(self._error)
 
         # esimate the pixel distance form the bad pixel to the filter window boundary
@@ -1625,7 +1628,7 @@ class Image(Header):
         else:
             new_error = None
         if self._mask is not None:
-            new_mask = numpy.zeros(new_dim, dtype="bool")
+            new_mask = numpy.zeros(new_dim, dtype=int)
         else:
             new_mask = None
 
@@ -1648,10 +1651,11 @@ class Image(Header):
             new_error[select3] = self._error.flatten()
             new_error[select4] = self._error.flatten()
         if self._mask is not None:
-            new_mask[select1] = self._mask.flatten()
-            new_mask[select2] = self._mask.flatten()
-            new_mask[select3] = self._mask.flatten()
-            new_mask[select4] = self._mask.flatten()
+            mask = self.get_mask(as_boolean=True)
+            new_mask[select1] = mask.flatten()
+            new_mask[select2] = mask.flatten()
+            new_mask[select3] = mask.flatten()
+            new_mask[select4] = mask.flatten()
         # create new Image object with the new subsample data
         new_image = copy(self)
         new_image.setData(data=new_data, error=new_error, mask=new_mask, inplace=True)
@@ -1714,7 +1718,7 @@ class Image(Header):
                 1,
             )
             # if only one bad pixel in the binning pixel exists the binned pixel will have the bad pixel status
-            new_mask = mask_new2 > 0
+            new_mask = mask_new2# > 0
         else:
             new_mask = None
         # create new Image object and return
@@ -1760,7 +1764,7 @@ class Image(Header):
         new_image.setData(data=new, error=new_error, inplace=True)
         return new_image
 
-    def convolveGaussImg(self, sigma_x, sigma_y, mode="nearest", mask=False):
+    def convolveGaussImg(self, sigma_x, sigma_y, mode="nearest", use_mask=False):
         """
         Convolves the data of the Image with a given kernel. The mask and error information will be unchanged.
 
@@ -1781,17 +1785,18 @@ class Image(Header):
         """
         # convolve the data array with the 2D Gaussian convolution kernel
 
-        if self._mask is not None and mask is True:
-            mask_data = self._data[self._mask]
-            self._data[self._mask] = 0
+        if self._mask is not None and use_mask is True:
+            mask = self.get_mask(as_boolean=True)
+            mask_data = self._data[mask]
+            self._data[mask] = 0
             gauss = ndimage.filters.gaussian_filter(
                 self._data, (sigma_y, sigma_x), mode=mode
             )
             scale = ndimage.filters.gaussian_filter(
-                (~self._mask).astype('float32'), (sigma_y, sigma_x), mode=mode
+                (~mask).astype('float32'), (sigma_y, sigma_x), mode=mode
             )
             new = gauss / scale
-            self._data[self._mask] = mask_data
+            self._data[mask] = mask_data
         else:
             new = ndimage.filters.gaussian_filter(
                 self._data, (sigma_y, sigma_x), mode=mode
@@ -1826,8 +1831,9 @@ class Image(Header):
             median filtered image
         """
         if self._mask is None and use_mask:
+            mask = self.get_mask(as_boolean=True)
             new_data = copy(self._data)
-            new_data[self._mask] = numpy.nan
+            new_data[mask] = numpy.nan
             new_data = ndimage.median_filter(new_data, size, mode=mode)
             new_mask = None
             new_error = None
@@ -1840,9 +1846,10 @@ class Image(Header):
             if propagate_error and self._error is not None:
                 new_error = numpy.sqrt(ndimage.median_filter(self._error ** 2, size, mode=mode))
         else:
+            mask = self.get_mask(as_boolean=True)
             # copy data and replace masked with nans
             new_data = copy(self._data)
-            new_data[self._mask] = numpy.nan
+            new_data[mask] = numpy.nan
             # perform median filter
             new_data = signal.medfilt2d(new_data, size)
             # update mask
@@ -1853,7 +1860,7 @@ class Image(Header):
             new_error = None
             if propagate_error and self._error is not None:
                 new_error = copy(self._error)
-                new_error[self._mask] = numpy.nan
+                new_error[mask] = numpy.nan
                 new_error = numpy.sqrt(signal.medfilt2d(new_error ** 2, size))
                 # reset masked errors in new array
                 new_error[new_mask] = self._error[new_mask]
@@ -3095,8 +3102,8 @@ class Image(Header):
         img_original._error = numpy.sqrt((numpy.clip(img_original._data, a_min=0.0, a_max=None) + rdnoise**2))
 
         select = numpy.zeros(img._dim, dtype=bool)
-        img_original._mask = numpy.zeros(img._dim, dtype=bool)
-        img._mask = numpy.zeros(img._dim, dtype=bool)
+        img_original._mask = numpy.zeros(img._dim, dtype=int)
+        img._mask = numpy.zeros(img._dim, dtype=int)
 
         # start iteration
         out = img
@@ -3119,7 +3126,7 @@ class Image(Header):
             S_prime = S-S.medianImg((5, 5))  # cleaning of the normalized Laplacian image
 
             # Perform additional clean using a 2D Gaussian smoothing kernel
-            fine = out.convolveGaussImg(sigma_x, sigma_y, mask=True)  # convolve image with a 2D Gaussian
+            fine = out.convolveGaussImg(sigma_x, sigma_y, use_mask=True)  # convolve image with a 2D Gaussian
             fine_norm = out/fine
             select_neg = fine_norm < 0
             fine_norm.replace_subselect(select_neg, data=0)
@@ -3135,7 +3142,7 @@ class Image(Header):
                 log.info(f'  Total number of detected cosmics: {det_pix} out of {dim[0] * dim[1]} pixels')
 
             if i == iterations-1:
-                img_original.replace_subselect(select, mask=True)  # set the new mask
+                img_original.replace_subselect(select, mask=PixMask["COSMIC"])  # set the new mask
                 if increase_radius > 0:
                     mask_img = Image(data=img_original._mask)
                     mask_new = mask_img.convolveImg(kernel=numpy.ones((2*increase_radius+1, 2*increase_radius+1)))
@@ -3147,14 +3154,14 @@ class Image(Header):
                         # leave out the dispersion direction (0 degrees), see DESI, Guy et al., ApJ, 2023, 165, 144
                         lse = LinearSelectionElement(11, 11, ang)
                         bc_mask = bc_mask | ndimage.binary_closing(bmask, structure=lse.se)
-                    img_original._mask = bc_mask
+                    img_original._mask = bc_mask * PixMask["COSMIC"]
                     if verbose:
                         log.info(f'  Total number after binary closing: {numpy.sum(bc_mask)} pixels')
 
                 # replace possible corrput pixel with median for final output
                 out = img_original.replaceMaskMedian(box_x, box_y, replace_error=replace_error)
             else:
-                out.replace_subselect(select, mask=True)  # set the new mask
+                out.replace_subselect(select, mask=PixMask["COSMIC"])  # set the new mask
                 out = out.replaceMaskMedian(box_x, box_y, replace_error=None)  # replace possible corrput pixel with median
 
         if inplace:
@@ -3166,9 +3173,10 @@ class Image(Header):
             if self._mask is None:
                 self._mask = out._mask
             else:
-                self._mask |= out._mask
+                self._mask += out._mask
         else:
             return out
+
 
     def getIndividualFrames(self):
         return self._individual_frames

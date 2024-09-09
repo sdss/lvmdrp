@@ -28,7 +28,7 @@ from typing import List, Tuple
 from lvmdrp import log, __version__ as DRPVER
 from lvmdrp.core.constants import CONFIG_PATH, SPEC_CHANNELS, ARC_LAMPS, LVM_REFERENCE_COLUMN, LVM_NBLOCKS, FIDUCIAL_PLATESCALE
 from lvmdrp.utils.decorators import skip_on_missing_input_path, drop_missing_input_paths
-from lvmdrp.utils.bitmask import QualityFlag, ReductionStage
+from lvmdrp.utils.bitmask import QualityFlag, ReductionStage, PixMask
 from lvmdrp.core.fiberrows import FiberRows, _read_fiber_ypix
 from lvmdrp.core.image import (
     Image,
@@ -1023,7 +1023,7 @@ def detCos_drp(
         noise = (noise + rdnoise**2).sqrt()
         result = []
         if cpus > 1:
-            fine = out.convolveGaussImg(sigma, sigma, mask=True)
+            fine = out.convolveGaussImg(sigma, sigma, use_mask=True)
             fine_norm = out / fine
             select_neg = fine_norm < 0
             fine_norm.setData(data=0, select=select_neg)
@@ -1072,7 +1072,7 @@ def detCos_drp(
                 (5, 5)
             )  # cleaning of the normalized Laplacian image
             fine = out.convolveGaussImg(
-                sigma, sigma, mask=True
+                sigma, sigma, use_mask=True
             )  # convolve image with a 2D Gaussian
 
             fine_norm = out / fine
@@ -4023,13 +4023,13 @@ def preproc_raw_frame(
 
     # create pixel mask on the original image
     log.info("building pixel mask")
-    proc_img._mask = master_mask
+    proc_img._mask = master_mask * PixMask["BADPIX"]
     # convert temp image to ADU for saturated pixel masking
     saturated_mask = proc_img._data >= 2**16
-    proc_img._mask |= saturated_mask
+    proc_img._mask += saturated_mask * PixMask["SATURATED"]
 
     # log number of masked pixels
-    nmasked = proc_img._mask.sum()
+    nmasked = numpy.count_nonzero(proc_img._mask)
     log.info(f"{nmasked} ({nmasked / proc_img._mask.size * 100:.2g} %) pixels masked")
 
     # update masked pixels with NaNs if needed
@@ -4451,7 +4451,7 @@ def detrend_frame(
             # gain-correct quadrant
             quad *= gain_map
             # propagate new NaNs to the mask
-            quad._mask |= numpy.isnan(quad._data)
+            quad._mask += numpy.isnan(quad._data) * PixMask["BADPIX"]
 
             quad.computePoissonError(rdnoise)
             bcorr_img.setSection(section=quad_sec, subimg=quad, inplace=True)
@@ -4478,10 +4478,8 @@ def detrend_frame(
 
     # propagate pixel mask
     log.info("propagating pixel mask")
-    nanpixels = numpy.isnan(detrended_img._data)
-    infpixels = numpy.isinf(detrended_img._data)
-    detrended_img._mask = numpy.logical_or(org_img._mask, nanpixels)
-    detrended_img._mask = numpy.logical_or(detrended_img._mask, infpixels)
+    nanpixels = ~numpy.isfinite(detrended_img._data)
+    detrended_img._mask += numpy.where(detrended_img._mask != nanpixels * PixMask["BADPIX"], detrended_img._mask + nanpixels * PixMask["BADPIX"], detrended_img._mask)
 
     # reject cosmic rays
     if reject_cr:
@@ -4493,7 +4491,7 @@ def detrend_frame(
 
     # replace masked pixels with NaNs
     if replace_with_nan:
-        log.info(f"replacing {detrended_img._mask.sum()} masked pixels with NaNs")
+        log.info(f"replacing {numpy.count_nonzero(detrended_img._mask)} masked pixels with NaNs")
         detrended_img.apply_pixelmask()
 
     # normalize in case of pixel flat calibration
