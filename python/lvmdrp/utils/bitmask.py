@@ -98,6 +98,7 @@ class BaseBitmask(IntFlag):
 
 
 class RawFrameQuality(BaseBitmask):
+    # TODO: repurpose this to use Dmitry's QC flags
     GOOD = auto()  # bit whether a raw frame is good for reduction
     TEST = auto()  # bit whether a raw frame is for instrument testing purposes
     BAD = auto()  # bit whether a raw frame is bad for reduction
@@ -218,63 +219,63 @@ class QualityFlag(BaseBitmask):
 
 class PixMask(BaseBitmask):
     # fiber bitmasks
-    NOPLUG = auto()
-    BADTRACE = auto()
-    BADFLAT = auto()
-    BADARC = auto()
-    MANYBADCOLUMNS = auto()
-    MANYREJECTED = auto()
-    LARGESHIFT = auto()
-    BADSKYFIBER = auto()
-    NEARWHOPPER = auto()
-    WHOPPER = auto()
-    SMEARIMAGE = auto()
-    SMEARHIGHSN = auto()
-    SMEARMEDSN = auto()
+    NONEXPOSED = auto()
+    WEAKFIBER = auto()
     DEADFIBER = auto()
+    INTERPOLATED = auto()
+
+    # measure quality of tracing using polynomial fit - samples residuals
+    BADTRACE = auto()
+    BADARC = auto()
+
+    # measure offset of the fiber from the median flatfielded fiber
+    BADFLAT = auto()
+
+    # offset from a preset fiber shift value
+    LARGESHIFT = auto()
+
+    BADSTDFIBER = auto()
+    BADSKYFIBER = auto()
+
     # pixel bitmasks
-    SATURATION = auto()
-    BADPIX = auto()
-    COSMIC = auto()
-    NEARBADPIXEL = auto()
-    LOWFLAT = auto()
-    FULLREJECT = auto()
-    PARTIALREJECT = auto()
-    SCATTEREDLIGHT = auto()
-    CROSSTALK = auto()
-    NOSKY = auto()
-    BRIGHTSKY = auto()
+
+    # pixels with no useful information
     NODATA = auto()
-    COMBINEREJ = auto()
+
+    # TODO: bright pixels on top and bottom edges
+
+    # set this if X% close to saturation level
+    SATURATION = auto()
+
+    # from pixelmasks
+    BADPIX = auto()
+    NEARBADPIXEL = auto()
+
+    # from CR rejection
+    COSMIC = auto()
+
+    # outlying in pixelflat? possible dust spec
+    LOWFLAT = auto()
+
+    # clipped straylight polynomial fit
+    STRAYLIGHT = auto()
+
+    CROSSTALK = auto()
+
+    # missing sky lines?
+    NOSKY = auto()
+    # too bright sky lines?
+    BRIGHTSKY = auto()
+
+    # pixels with sensitivities too deviant from instrumental sensitivity
     BADFLUXFACTOR = auto()
+
+    # large sky residuals
     BADSKYCHI = auto()
 
 
 # define flag name constants
-STATUS = list(ReductionStatus.__members__.keys())
-STAGE = list(ReductionStage.__members__.keys())
+# RAW_QUALITIES = list(RawFrameQuality.__members__.keys())
+STAGES = list(ReductionStage.__members__.keys())
 FLAGS = list(QualityFlag.__members__.keys())
-
-if __name__ == "__main__":
-    status = ReductionStatus(0)
-    stage = ReductionStage.UNREDUCED
-    print(status.get_name(), stage.get_name())
-    status += "IN_PROGRESS"
-    print(status.get_name(), stage.get_name())
-    stage += ReductionStage.PREPROCESSED
-    print(status.get_name(), stage.get_name())
-    stage += ReductionStage.CALIBRATED
-    print(status.get_name(), stage.get_name())
-    status += ReductionStatus.FINISHED
-    print(status.get_name(), stage.get_name())
-    status += ReductionStatus.IN_PROGRESS
-    print(status.get_name(), stage.get_name())
-    stage += ReductionStage.FIBERS_FOUND
-    print(status.get_name(), stage.get_name())
-    status += ReductionStatus.FINISHED
-    print(status.get_name(), stage.get_name())
-    print("finished" in status)
-    status = ReductionStatus.IN_PROGRESS
-    print(status.get_name(), stage.get_name())
-    stage += ReductionStage.PREPROCESSED | ReductionStage.CALIBRATED
-    print(status.get_name(), stage.get_name())
+DRPQUALITIES = list()
