@@ -3409,7 +3409,7 @@ class Spectrum1D(Header):
         return flux, cent, fwhm, bg
 
 
-    def obtainGaussFluxPeaks(self, pos, sigma, indices, replace_error=1e10, plot=False):
+    def obtainGaussFluxPeaks(self, pos, sigma, replace_error=1e10, plot=False):
         """returns Gaussian peaks parameters, flux error and mask
 
         this runs fiber fitting assuming that we only need to know the sigma of the Gaussian,
@@ -3421,8 +3421,6 @@ class Spectrum1D(Header):
             peaks positions
         sigma : array_like
             Gaussian widths
-        indices : array_like
-            peaks indices
         replace_error : float, optional
             replace error in bad pixels with this value, by default 1e10
         plot : bool, optional
@@ -3438,7 +3436,7 @@ class Spectrum1D(Header):
             propagated pixel mask
         """
 
-        fibers = len(pos)
+        nfibers = len(pos)
         aperture = 3
         # round up fiber locations
         pixels = numpy.round(
@@ -3447,7 +3445,7 @@ class Spectrum1D(Header):
         # defining bad pixels for each fiber if needed
         if self._mask is not None:
             # select: fibers in the boundary of the chip
-            bad_pix = numpy.zeros(fibers, dtype="bool")
+            bad_pix = numpy.zeros(nfibers, dtype="bool")
             select = bn.nansum(pixels >= self._mask.shape[0], 1)
             nselect = numpy.logical_not(select)
             bad_pix[select] = True
@@ -3459,43 +3457,40 @@ class Spectrum1D(Header):
         if self._error is None:
             self._error = numpy.ones_like(self._data)
 
+        # construct sparse projection matrix 
         fact = numpy.sqrt(2.0 * numpy.pi)
-        A = (
-            1.0
-            * numpy.exp(
-                -0.5 * ((self._wave[:, None] - pos[None, :]) / sigma[None, :]) ** 2
-            )
-            / (fact * sigma[None, :])
-        )
-        # making positive definite
-        select = A > 0.0001
-        A = A / self._error[:, None]
+        kernel_width = 7 # should exceed 4 sigma
+        vI = []
+        vJ = []
+        vV = []
+        for xx in range(nfibers):
+            for yy in range(int(pos[xx]-kernel_width),int(pos[xx]+kernel_width)):
+                v = numpy.exp(-0.5 * ((yy-pos[xx]) / sigma[xx]) ** 2) / (fact * sigma[xx])
+                if v>0.0001:   # make non-zero and positive definite
+                    vI.append(xx)
+                    vJ.append(yy)
+                    vV.append(v / self._error[yy])
+        B = sparse.csc_matrix((vV, (vJ, vI)), shape=(self._dim, nfibers))
 
-        # plt.figure(figsize=(10, 10))
-        # plt.imshow(A, origin="lower")
-        # plt.show()
-
-        B = sparse.csr_matrix(
-            (A[select], (indices[0][select], indices[1][select])),
-            shape=(self._dim, fibers),
-        )
-        # print(B)
-
+        # invert the projection matrix and solve
         ypixels = numpy.arange(self._data.size)
         guess_flux = numpy.interp(pos, ypixels, self._data) * fact * sigma
         out = sparse.linalg.lsmr(B, self._data / self._error, atol=1e-3, btol=1e-3, x0=guess_flux)
         flux = out[0]
 
-        error = numpy.sqrt(1 / bn.nansum((A**2), 0))
+        error = numpy.sqrt(1 / ((B.multiply(B)).sum(axis=0))).A
+        error = error[0,:]
         if bad_pix is not None and bn.nansum(bad_pix) > 0:
             error[bad_pix] = replace_error
+
+        # pyfits.writeto('B1.fits', B1.toarray(), overwrite=True)    
         # if plot:
         #     plt.figure(figsize=(15, 10))
         #     plt.plot(self._data, "ok")
         #     plt.plot(numpy.dot(A * self._error[:, None], out[0]), "-r")
         #     # plt.plot(numpy.dot(A, out[0]), '-r')
         #     plt.show()
-        return flux, error, bad_pix, B, A
+        return flux, error, bad_pix
 
     def collapseSpec(self, method="mean", start=None, end=None, transmission_func=None):
         if start is not None:
