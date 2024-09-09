@@ -17,6 +17,7 @@ from scipy import ndimage, signal
 from scipy import interpolate
 
 from lvmdrp import log
+from lvmdrp.utils.bitmask import PixMask
 from lvmdrp.core.constants import CON_LAMPS, ARC_LAMPS
 from lvmdrp.core.plot import plt
 from lvmdrp.core.fit_profile import gaussians, Gaussians
@@ -914,7 +915,7 @@ class Image(Header):
         """
         return self._data
 
-    def getMask(self):
+    def get_mask(self, as_boolean=False):
         """
         Returns the bad pixel mask of the image
 
@@ -924,6 +925,8 @@ class Image(Header):
             The bad pixel mask of the image
 
         """
+        if as_boolean:
+            return self._mask.astype(bool)
         return self._mask
 
     def getError(self):
@@ -998,6 +1001,12 @@ class Image(Header):
             return Spectrum1D(
                 numpy.arange(self._dim[0]), self._data[:, slice], error, mask
             )
+
+    def set_mask(self, pixmask):
+        if isinstance(pixmask, numpy.ndarray):
+            assert isinstance(pixmask[0,0], PixMask)
+
+        self._mask = pixmask
 
     def setData(
         self, data=None, error=None, mask=None, header=None, select=None, inplace=True
@@ -1303,7 +1312,7 @@ class Image(Header):
                     if hdu[i].header["EXTNAME"].split()[0] == "ERROR":
                         self._error = hdu[i].data.astype("float32")
                     elif hdu[i].header["EXTNAME"].split()[0] == "BADPIX":
-                        self._mask = hdu[i].data.astype("bool")
+                        self._mask = hdu[i].data.astype("int32")
                     elif hdu[i].header["EXTNAME"].split()[0] == "FRAMES":
                         self._individual_frames = Table(hdu[i].data)
                     elif hdu[i].header["EXTNAME"].split()[0] == "SLITMAP":
@@ -1315,7 +1324,7 @@ class Image(Header):
                 self._dim = self._data.shape  # set dimension
 
             if extension_mask is not None:
-                self._mask = hdu[extension_mask].data.astype("bool")  # take data
+                self._mask = hdu[extension_mask].data.astype("int32")  # take data
                 self._dim = self._mask.shape  # set dimension
 
             if extension_error is not None:
@@ -1371,7 +1380,7 @@ class Image(Header):
             if self._error is not None:
                 hdus[1] = pyfits.ImageHDU(self._error, name="ERROR")
             if self._mask is not None:
-                hdus[2] = pyfits.ImageHDU(self._mask.astype("uint8"), name="BADPIX")
+                hdus[2] = pyfits.ImageHDU(self._mask.astype("uint32"), name="BADPIX")
             if self._individual_frames is not None:
                 hdus[3] = pyfits.BinTableHDU(self._individual_frames, name="FRAMES")
             if self._slitmap is not None:
@@ -1384,10 +1393,10 @@ class Image(Header):
 
             # mask hdu
             if extension_mask == 0:
-                hdu = pyfits.PrimaryHDU(self._mask.astype("uint8"))
+                hdu = pyfits.PrimaryHDU(self._mask.astype("uint32"))
             elif extension_mask > 0 and extension_mask is not None:
                 hdus[extension_mask] = pyfits.ImageHDU(
-                    self._mask.astype("uint8"), name="BADPIX"
+                    self._mask.astype("uint32"), name="BADPIX"
                 )
 
             # error hdu
@@ -1924,7 +1933,7 @@ class Image(Header):
         x = x - bn.nanmean(x)
         # if self._mask is not None:
         #    self._mask = numpy.logical_and(self._mask, numpy.logical_not(numpy.isnan(self._data)))
-        valid = ~self._mask.astype("bool")
+        valid = ~self._mask
         # iterate over the image
         for i in range(slices):
             # decide on the bad pixel mask
