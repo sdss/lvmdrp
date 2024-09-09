@@ -251,6 +251,9 @@ class PixMask(BaseBitmask):
     BADPIX = auto()
     NEARBADPIXEL = auto()
 
+    # from raw data preprocessing
+    SATURATED = auto()
+
     # from CR rejection
     COSMIC = auto()
 
