@@ -2669,13 +2669,8 @@ class Image(Header):
             select_nan = numpy.isnan(slice_img._data)
             slice_img._data[select_nan] = 0
 
-            # define fiber index
-            indices = numpy.indices((self._dim[0], numpy.sum(good_fiber)))
-
             # measure flux along the given columns
-            result = slice_img.obtainGaussFluxPeaks(
-                cent[good_fiber], sigma[good_fiber], indices, plot=plot_fig
-            )
+            result = slice_img.obtainGaussFluxPeaks(cent[good_fiber], sigma[good_fiber], plot=plot_fig)
             data[good_fiber, i] = result[0]
             if self._error is not None:
                 error[good_fiber, i] = result[1]

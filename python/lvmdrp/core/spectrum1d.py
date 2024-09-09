@@ -3409,7 +3409,7 @@ class Spectrum1D(Header):
         return flux, cent, fwhm, bg
 
 
-    def obtainGaussFluxPeaks(self, pos, sigma, indices, replace_error=1e10, plot=False):
+    def obtainGaussFluxPeaks(self, pos, sigma, replace_error=1e10, plot=False):
         """returns Gaussian peaks parameters, flux error and mask
 
         this runs fiber fitting assuming that we only need to know the sigma of the Gaussian,
@@ -3421,8 +3421,6 @@ class Spectrum1D(Header):
             peaks positions
         sigma : array_like
             Gaussian widths
-        indices : array_like
-            peaks indices
         replace_error : float, optional
             replace error in bad pixels with this value, by default 1e10
         plot : bool, optional
