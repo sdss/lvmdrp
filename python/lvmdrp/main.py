@@ -1560,10 +1560,10 @@ def reduce_2d(mjd, calibrations, expnums=None, exptime=None, cameras=CAMERAS,
         if skip_done and os.path.isfile(dframe_path):
             log.info(f"skipping {dframe_path}, file already exist")
         else:
-            with Timer('Preproc'):
+            with Timer('Preproc '+pframe_path):
                 preproc_raw_frame(in_image=frame_path, out_image=pframe_path,
                                   in_mask=mpixmask_path, replace_with_nan=replace_with_nan, assume_imagetyp=assume_imagetyp)
-            with Timer('Detrend'):
+            with Timer('Detrend '+dframe_path):
                 detrend_frame(in_image=pframe_path, out_image=dframe_path,
                             in_bias=mbias_path,
                             in_pixelflat=mpixflat_path,
@@ -1674,18 +1674,18 @@ def science_reduction(expnum: int, use_longterm_cals: bool = False,
             mmodel_path = calibs["model"][sci_camera]
 
             # add astrometry to frame
-            with Timer('Astrometry '+sci_camera):
+            with Timer('Astrometry '+dsci_path):
                 add_astrometry(in_image=dsci_path, out_image=dsci_path, in_agcsci_image=agcsci_path, in_agcskye_image=agcskye_path, in_agcskyw_image=agcskyw_path)
 
             # subtract straylight
-            with Timer('Straylight '+sci_camera):
+            with Timer('Straylight '+lsci_path):
                 subtract_straylight(in_image=dsci_path, out_image=lsci_path, out_stray=lstr_path,
                                     in_cent_trace=mtrace_path, select_nrows=(5,5), use_weights=True,
                                     aperture=15, smoothing=400, median_box=101, gaussian_sigma=20.0,
                                     parallel=parallel_run)
 
             # extract 1d spectra
-            with Timer('Extract '+sci_camera):
+            with Timer('Extract '+xsci_path):
                 extract_spectra(in_image=lsci_path, out_rss=xsci_path, in_trace=mtrace_path, in_fwhm=mwidth_path,
                                 in_model=mmodel_path, method=extraction_method, parallel=parallel_run)
 
@@ -1715,43 +1715,43 @@ def science_reduction(expnum: int, use_longterm_cals: bool = False,
                                 kind='h', camera=channel, imagetype=sci_imagetyp, expnum=expnum)
 
             # stack spectrographs
-            with Timer('Stack Spectrographs '+channel):
+            with Timer('Stack Spectrographs '+xsci_path):
                 stack_spectrographs(in_rsss=xsci_paths, out_rss=xsci_path)
             if not os.path.exists(xsci_path):
                 log.error(f'No stacked file found: {xsci_path}. Skipping remaining pipeline.')
                 continue
 
             # wavelength calibrate
-            with Timer('Wavelengths '+channel):
+            with Timer('Wavelengths '+wsci_path):
                 create_pixel_table(in_rss=xsci_path, out_rss=wsci_path, in_waves=mwave_paths, in_lsfs=mlsf_paths)
 
             # apply fiberflat correction
-            with Timer('Fiberflat '+channel):
+            with Timer('Fiberflat '+frame_path):
                 apply_fiberflat(in_rss=wsci_path, out_frame=frame_path, in_flat=mflat_path)
 
             # correct thermal shift in wavelength direction
-            with Timer('Thermal Shifts '+channel):
+            with Timer('Thermal Shifts '+frame_path):
                 shift_wave_skylines(in_frame=frame_path, out_frame=frame_path)
 
             # interpolate sky fibers
-            with Timer('Interpolate Sky '+channel):
+            with Timer('Interpolate Sky '+ssci_path):
                 interpolate_sky(in_frame=frame_path, out_rss=ssci_path)
 
             # combine sky telescopes
-            with Timer('Combine Sky '+channel):
+            with Timer('Combine Sky '+ssci_path):
                 combine_skies(in_rss=ssci_path, out_rss=ssci_path, sky_weights=sky_weights)
 
             # resample wavelength into uniform grid along fiber IDs for science and sky fibers
-            with Timer('Resample '+channel):
+            with Timer('Resample '+hsci_path):
                 resample_wavelength(in_rss=ssci_path,  out_rss=hsci_path, wave_range=SPEC_CHANNELS[channel], wave_disp=0.5, convert_to_density=True)
 
             # use resampled frames for flux calibration in each camera, using standard stars observed in the spec telescope
             #  and field stars found in the sci ifu
-            fluxcal_standard_stars(hsci_path, GAIA_CACHE_DIR=MASTERS_DIR+'/gaia_cache')
-            fluxcal_sci_ifu_stars(hsci_path, GAIA_CACHE_DIR=MASTERS_DIR+'/gaia_cache')
+            with Timer('Fluxcal '+hsci_path):
+                fluxcal_standard_stars(hsci_path, GAIA_CACHE_DIR=MASTERS_DIR+'/gaia_cache')
+                fluxcal_sci_ifu_stars(hsci_path, GAIA_CACHE_DIR=MASTERS_DIR+'/gaia_cache')
 
-            # flux-calibrate each channel
-            with Timer('Fluxcal '+channel):
+                # flux-calibrate each channel
                 fframe_path = path.full("lvm_frame", mjd=sci_mjd, drpver=drpver, tileid=sci_tileid, expnum=sci_expnum, kind=f'FFrame-{channel}')
                 apply_fluxcal(in_rss=hsci_path, out_fframe=fframe_path, method=fluxcal_method)
 
@@ -1761,15 +1761,15 @@ def science_reduction(expnum: int, use_longterm_cals: bool = False,
             log.error('No fframe files found.  Cannot join spectrograph channels. Exiting pipeline.')
             return
 
-        with Timer('Join Channels'):
+        with Timer('Join Channels '+cframe_path):
             join_spec_channels(in_fframes=fframe_paths, out_cframe=cframe_path, use_weights=True)
 
         # sky subtraction
-        with Timer('QSky'):
+        with Timer('QSky '+sframe_path):
             quick_sky_subtraction(in_cframe=cframe_path, out_sframe=sframe_path, skip_subtraction=skip_sky_subtraction)
 
         # update the drpall summary file
-        with Timer('DRPAll'):
+        with Timer('DRPAll '+sframe_path):
             log.info('Updating the drpall summary file')
             update_summary_file(sframe_path, tileid=sci_tileid, mjd=sci_mjd, expnum=sci_expnum, master_mjd=cals_mjd)
 
