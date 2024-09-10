@@ -721,6 +721,11 @@ def shift_wave_skylines(in_frame: str, out_frame: str, dwave: float = 8.0, skyli
     fiber_offset_mod = fiber_offset.copy()
     for spec_offset, spec in zip(numpy.split(fiber_offset, 3), [sel1, sel2, sel3]):
         mask = numpy.isfinite(spec_offset)
+        if mask.sum() <= 0.3*spec.sum():
+            log.warning(f"<30% of the fibers have good wavelength offsets measurements: {mask.sum()} fibers, assuming zero offset")
+            lvmframe.add_header_comment(f"<30% of the fibers have good wavelength offsets measurements: {mask.sum()} fibers, assuming zero offset")
+            fiber_offset_mod[spec] = 0.0
+            continue
         t = numpy.linspace(
             fiberid[spec][mask][len(fiberid[spec][mask]) // 20],
             fiberid[spec][mask][-1 * len(fiberid[spec][mask]) // 20],
@@ -732,6 +737,7 @@ def shift_wave_skylines(in_frame: str, out_frame: str, dwave: float = 8.0, skyli
 
     # Average offsets for different skylines in each channel, apply to trace, and write them in header
     meanoffset = numpy.nanmean(specoffset, axis=(1, 2)).round(4)
+    meanoffset = numpy.nan_to_num(meanoffset)
     log.info(f'Applying the offsets [Angstroms] in [1,2,3] spectrographs with means: {meanoffset}')
     lvmframe._wave_trace['COEFF'].data[:,0] -= fiber_offset_mod
     lvmframe._header[f'HIERARCH WAVE SKYOFF_{channel.upper()}1'] = (meanoffset[0], f'Mean sky line offset in {channel}1 [Angs]')
