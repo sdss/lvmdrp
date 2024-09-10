@@ -16,6 +16,7 @@ from scipy import interpolate
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from matplotlib.gridspec import GridSpec
 
+import bottleneck as bn
 from lvmdrp import log
 from lvmdrp.core.constants import SPEC_CHANNELS
 from lvmdrp.core.tracemask import TraceMask
@@ -92,7 +93,7 @@ def remove_field_gradient(in_hflat, out_gflat, wrange, deg=1, display_plots=Fals
     x, y, flux, grad_model, grad_model_e, grad_model_w, grad_model_s = fflat.fit_field_gradient(wrange, poly_deg=deg)
 
     flux_c = flux / grad_model
-    flux_med = np.nanmedian(flux)
+    flux_med = bn.nanmedian(flux)
     flux_std = np.nanstd(flux)
 
     fig, axs = create_subplots(to_display=display_plots, nrows=1, ncols=3, figsize=(15,6), sharex=True, sharey=True, layout="constrained")
@@ -345,8 +346,8 @@ def fit_fiberflat(in_twilight: str, out_flat: str, out_twilight: str,
     axs[1].set_xlim(*axs[0].get_xlim())
 
     ypixels = np.split(np.arange(flat_twilight._fibers) + 1, 3)
-    median =  np.split(np.nanmedian(flat_twilight._data, axis=1), 3)
-    mu = np.nanmedian(flat_twilight._data)
+    median =  np.split(bn.nanmedian(flat_twilight._data, axis=1), 3)
+    mu = bn.nanmedian(flat_twilight._data)
     median = (median / mu - 1) * 100
     axs[2].axhspan(-0.5, 0.5, lw=0, alpha=0.3, color="0.7")
     axs[2].axhline(0, ls="--", lw=1, color="0.7")
@@ -474,7 +475,7 @@ def combine_twilight_sequence(in_fiberflats: List[str], out_fiberflat: str,
         # get exposed standard fiber ID
         fiber_id = fflat._header.get("CALIBFIB")
         if fiber_id is None:
-            snrs = np.nanmedian(fflat._data / fflat._error, axis=1)
+            snrs = bn.nanmedian(fflat._data / fflat._error, axis=1)
             select_nonexposed = snrs < 50
             #plt.figure(figsize=(15,5))
             #plt.plot(snrs[select_allstd])

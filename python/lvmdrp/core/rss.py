@@ -475,7 +475,7 @@ class RSS(FiberRows):
             new_data = bn.nansum(fluxes * weights, axis=0)
             new_lsf = bn.nansum(lsfs * weights, axis=0)
             new_error = numpy.sqrt(bn.nansum(vars, axis=0))
-            new_mask = (numpy.nansum(masks, axis=0)>0)
+            new_mask = (bn.nansum(masks, axis=0)>0)
             if rss._sky is not None:
                 new_sky = bn.nansum(skies * weights, axis=0)
             else:
@@ -505,7 +505,7 @@ class RSS(FiberRows):
             new_data = bn.nanmean(fluxes, axis=0)
             new_lsf = bn.nanmean(lsfs, axis=0)
             new_error = numpy.sqrt(bn.nanmean(vars, axis=0))
-            new_mask = numpy.nansum(masks, axis=0).astype("bool")
+            new_mask = bn.nansum(masks, axis=0).astype("bool")
             if skies.size != 0:
                 new_sky = bn.nansum(skies, axis=0)
             else:
@@ -1772,7 +1772,7 @@ class RSS(FiberRows):
 
             if numpy.sum(goodpix) > 0:
                 if method == "median":
-                    collapsed[i] = numpy.median(spec._data[goodpix])
+                    collapsed[i] = bn.median(spec._data[goodpix])
                 elif method == "sum":
                     collapsed[i] = numpy.sum(spec._data[goodpix])
                 elif method == "mean":
@@ -3472,7 +3472,7 @@ class RSS(FiberRows):
         x=fibermap["xpmm"].astype(float)[telescope=="Sci"]
         y=fibermap["ypmm"].astype(float)[telescope=="Sci"]
 
-        flux_med = numpy.nanmedian(flux)
+        flux_med = bn.nanmedian(flux)
         flux_fact = flux / flux_med
         select = numpy.isfinite(flux_fact)
         coeffs = polyfit2d(x[select], y[select], flux_fact[select], poly_deg)

@@ -412,7 +412,7 @@ class Cube(Header, PositionTable):
                 mask = None
         elif mode == "median":
             if numpy.sum(select_wave) > 0:
-                image = numpy.median(data[select_wave, :, :], 0)
+                image = bn.median(data[select_wave, :, :], 0)
                 mask = image == 0
             else:
                 image = None

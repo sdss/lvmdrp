@@ -97,10 +97,10 @@ def _illumination_correction(fiberflat, apply_correction=True):
     data[(fiberflat._mask)|(data <= 0)] = numpy.nan
 
     # compute median factors
-    sci_factor = numpy.nanmedian(data[sci_fibers, 1000:3000])
-    skw_factor = numpy.nanmedian(data[skw_fibers, 1000:3000])
-    ske_factor = numpy.nanmedian(data[ske_fibers, 1000:3000])
-    std_factor = numpy.nanmedian(data[std_fibers, 1000:3000])
+    sci_factor = bn.nanmedian(data[sci_fibers, 1000:3000])
+    skw_factor = bn.nanmedian(data[skw_fibers, 1000:3000])
+    ske_factor = bn.nanmedian(data[ske_fibers, 1000:3000])
+    std_factor = bn.nanmedian(data[std_fibers, 1000:3000])
     norm = numpy.mean([sci_factor, skw_factor, ske_factor, std_factor])
     sci_factor /= norm
     skw_factor /= norm
@@ -394,7 +394,7 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
 
     if negative:
         log.info("flipping arc along flux direction")
-        arc = -1 * arc + numpy.nanmedian(arc._data)
+        arc = -1 * arc + bn.nanmedian(arc._data)
 
     # setup storage array
     wave_coeffs = numpy.zeros((arc._fibers, numpy.abs(poly_disp) + 1))
@@ -502,12 +502,12 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
 
         wave_coeffs[i, :] = wave_poly.convert().coef
         wave_sol[i, :] = wave_poly(arc._pixels)
-        wave_rms[i] = numpy.nanstd(wave_poly(cent_wave[i, good_lines]) - ref_lines[good_lines])
+        wave_rms[i] = bn.nanstd(wave_poly(cent_wave[i, good_lines]) - ref_lines[good_lines])
 
     log.info(
         "finished wavelength fitting with median "
-        f"RMS = {numpy.nanmedian(wave_rms):g} Angstrom "
-        f"({numpy.nanmedian(wave_rms[:,None]/numpy.diff(wave_sol, axis=1)):g} pix)"
+        f"RMS = {bn.nanmedian(wave_rms):g} Angstrom "
+        f"({bn.nanmedian(wave_rms[:,None]/numpy.diff(wave_sol, axis=1)):g} pix)"
     )
 
     # Estimate the spectral resolution pattern
@@ -541,12 +541,12 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
 
         lsf_coeffs[i, :] = fwhm_poly.convert().coef
         lsf_sol[i, :] = fwhm_poly(arc._pixels)
-        lsf_rms[i] = numpy.nanstd(fwhm_wave - fwhm_poly(cent_wave[i, good_lines]))
+        lsf_rms[i] = bn.nanstd(fwhm_wave - fwhm_poly(cent_wave[i, good_lines]))
 
     log.info(
         "finished LSF fitting with median "
-        f"RMS = {numpy.nanmedian(lsf_rms):g} Angstrom "
-        f"({numpy.nanmedian(lsf_rms[:,None]/numpy.gradient(wave_sol, axis=1)):g} pix)"
+        f"RMS = {bn.nanmedian(lsf_rms):g} Angstrom "
+        f"({bn.nanmedian(lsf_rms[:,None]/numpy.gradient(wave_sol, axis=1)):g} pix)"
     )
 
     # create plot of reference spectrum and wavelength fitting residuals
@@ -607,7 +607,7 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
     )
     arc.setHdrValue(
         "HIERARCH PIPE DISP RMS MEDIAN",
-        "%.4f" % (numpy.median(wave_rms[good_fibers])),
+        "%.4f" % (bn.median(wave_rms[good_fibers])),
         "Median RMS of disp sol",
     )
     arc.setHdrValue(
@@ -627,7 +627,7 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
     )
     arc.setHdrValue(
         "HIERARCH PIPE DISP RMS MEDIAN",
-        "%.4f" % (numpy.median(lsf_rms[good_fibers])),
+        "%.4f" % (bn.median(lsf_rms[good_fibers])),
         "Median RMS of disp sol",
     )
     arc.setHdrValue(
@@ -713,7 +713,7 @@ def shift_wave_skylines(in_frame: str, out_frame: str, dwave: float = 8.0, skyli
             continue
 
         offsets[:, ifiber] = sky_wave - skylines
-        fiber_offset[ifiber] = numpy.nanmedian(offsets[:,ifiber], axis=0)
+        fiber_offset[ifiber] = bn.nanmedian(offsets[:,ifiber], axis=0)
 
     # split per spectrographs
     specoffset = numpy.asarray(numpy.split(offsets, 3, axis=1))
@@ -912,8 +912,8 @@ def checkPixTable_drp(
             "%.3f %.3f %.3f %.3f \n"
             % (
                 centres[j],
-                numpy.median(fit_wave[good_fiber, j]),
-                numpy.median(fit_wave[good_fiber, j]) - centres[j],
+                bn.median(fit_wave[good_fiber, j]),
+                bn.median(fit_wave[good_fiber, j]) - centres[j],
                 numpy.std(fit_wave[good_fiber, j]),
             )
         )
@@ -923,7 +923,7 @@ def checkPixTable_drp(
         for i in range(len(blocks)):
             if numpy.sum(blocks_good[i]) > 0:
                 log.write(
-                    " %.3f" % numpy.median(offset_pix[blocks[i][blocks_good[i]], j])
+                    " %.3f" % bn.median(offset_pix[blocks[i][blocks_good[i]], j])
                 )
             else:
                 log.write(" 0.0")
@@ -933,7 +933,7 @@ def checkPixTable_drp(
                 log.write(
                     " %.3f"
                     % (
-                        numpy.median(fit_wave[blocks[i][blocks_good[i]], j])
+                        bn.median(fit_wave[blocks[i][blocks_good[i]], j])
                         - centres[j]
                     )
                 )
@@ -941,7 +941,7 @@ def checkPixTable_drp(
                 log.write(" 0.0")
         log.write("\n")
 
-    off_disp_median = numpy.median(offset_pix[good_fiber, :])
+    off_disp_median = bn.median(offset_pix[good_fiber, :])
     off_disp_rms = numpy.std(offset_pix[good_fiber, :])
     off_disp_median = (
         float("%.4f" % off_disp_median)
@@ -1060,11 +1060,11 @@ def correctPixTable_drp(
     for i in range(rss._fibers):
         spec = rss[i]
         if smooth_poly_disp == "":
-            off = numpy.median(offsets.flatten())
+            off = bn.median(offsets.flatten())
         else:
             smooth_poly_disp = int(smooth_poly_disp)
             if smooth_poly_disp == "":
-                off = numpy.median(offsets[i])
+                off = bn.median(offsets[i])
             else:
                 off = Spectrum1D(wave=ref_wave, data=offsets[:, i])
                 off.smoothPoly(smooth_poly_disp, ref_base=spec._wave)
@@ -1518,7 +1518,7 @@ def correctTraceMask_drp(trace_in, trace_out, logfile, ref_file, poly_smooth="")
     trace = TraceMask.from_file(trace_in)
 
     if poly_smooth == "":
-        trace = trace + (numpy.median(offsets.flatten()) * -1)
+        trace = trace + (bn.median(offsets.flatten()) * -1)
     else:
         split_trace = trace.split(offsets.shape[1], axis="y")
         offset_trace = TraceMask()
@@ -1788,7 +1788,7 @@ def matchFluxRSS_drp(
         # load subimages from disc and append them to a list
         rss = loadRSS(list_rss[i])
         specs.append(rss.createAperSpec(center_x, center_y, arc_radius))
-        fluxes.append(numpy.median(specs[i]._data))
+        fluxes.append(bn.median(specs[i]._data))
 
     order = numpy.argsort(fluxes)
     #   print fluxes, order

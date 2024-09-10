@@ -1401,7 +1401,7 @@ def create_dome_fiberflats(mjd, expnums_ldls, expnums_qrtz, use_longterm_cals=Tr
         # normalize by median fiber
         fflat = RSS(data=mamp._data, error=np.sqrt(mamp._data), mask=xflat._mask, wave_trace=mwave, lsf_trace=mlsf, header=xflat._header)
         fflat = fflat.rectify_wave(method="linear", wave_range=SPEC_CHANNELS[channel], wave_disp=0.5)
-        median_fiber = np.nanmedian(fflat._data, axis=0)
+        median_fiber = bn.nanmedian(fflat._data, axis=0)
         fflat._data = fflat._data / median_fiber
         fflat.set_wave_trace(mwave)
         fflat.set_lsf_trace(mlsf)

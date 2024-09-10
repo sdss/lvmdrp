@@ -38,7 +38,7 @@ def adaptive_smooth(data, start_width, end_width):
         start_index = max(0, i - half_width)
         end_index = min(n_points, i + half_width + 1)
         # Apply uniform filter to the local segment of the data
-        smoothed_data[i] = numpy.median(data[start_index:end_index])
+        smoothed_data[i] = bn.median(data[start_index:end_index])
     return smoothed_data
 
 def find_continuum(spec_s,niter=15,thresh=0.8,median_box_max=100,median_box_min=1):
@@ -470,8 +470,8 @@ def wave_little_interpol(wavelist):
         # In overlap region patch in a linear scale with slightly different step.
         dw = overlap_end - overlap_start
         step = 0.5 * (
-            numpy.mean(numpy.diff(wavelist[i]))
-            + numpy.mean(numpy.diff(wavelist[i + 1]))
+            bn.mean(numpy.diff(wavelist[i]))
+            + bn.mean(numpy.diff(wavelist[i + 1]))
         )
         n_steps = int(dw / step + 0.5)
 
@@ -2032,7 +2032,7 @@ class Spectrum1D(Header):
             Pixel position of the maximum data value
 
         """
-        max = numpy.nanmax(self._data)  # get max
+        max = bn.nanmax(self._data)  # get max
         select = self._data == max  # select max value
         max_wave = self._wave[select][0]  # get corresponding wavelength
         max_pos = self._pixels[select][0]  # get corresponding position
@@ -2054,7 +2054,7 @@ class Spectrum1D(Header):
             Pixel position of the minimum data value
 
         """
-        min = numpy.nanmin(self._data)  # get min
+        min = bn.nanmin(self._data)  # get min
         select = self._data == min  # select min value
         min_wave = self._wave[select][0]  # get corresponding waveength
         min_pos = self._pixels[select][0]  # get corresponding position
@@ -2104,7 +2104,7 @@ class Spectrum1D(Header):
                 self._sky_error = numpy.flipud(self._sky_error)
 
         # case where input spectrum has more than half the pixels masked
-        if numpy.nansum(self._data) == 0.0 or (
+        if bn.nansum(self._data) == 0.0 or (
             self._mask is not None and numpy.sum(self._mask) > self._dim / 2
         ):
             # all pixels masked
@@ -3056,7 +3056,7 @@ class Spectrum1D(Header):
             pos_block = pos[
                 brackets[i] : brackets[i + 1]
             ]  # cut out the corresponding peak positions
-            median_dist = numpy.nanmedian(
+            median_dist = bn.nanmedian(
                 pos_block[1:] - pos_block[:-1]
             )  # compute median distance between peaks
             flux = (
@@ -3067,10 +3067,10 @@ class Spectrum1D(Header):
             )  # initial guess for the flux
 
             # compute lower and upper bounds of the positions for each block
-            lo = int(numpy.nanmin(pos_block) - median_dist)
+            lo = int(bn.nanmin(pos_block) - median_dist)
             if lo <= 0:
                 lo = 0
-            hi = int(numpy.nanmax(pos_block) + median_dist)
+            hi = int(bn.nanmax(pos_block) + median_dist)
             if hi >= self._wave[-1]:
                 hi = self._wave[-1]
 
@@ -3140,7 +3140,7 @@ class Spectrum1D(Header):
             pos_block = pos[blocks[i]]  # cut out the corresponding peak positions
             pos_mask = good[blocks[i]]
             if numpy.sum(pos_mask) > 0:
-                median_dist = numpy.median(
+                median_dist = bn.median(
                     pos_block[pos_mask][1:] - pos_block[pos_mask][:-1]
                 )  # compute median distance between peaks
                 flux = (
@@ -3188,7 +3188,7 @@ class Spectrum1D(Header):
                     gaussians_offset.plot(self._wave[lo:hi], self._data[lo:hi])
 
                 offsets[i] = fit_par[-1]  # get offset position
-                med_pos[i] = numpy.mean(self._wave[lo:hi])
+                med_pos[i] = bn.mean(self._wave[lo:hi])
             else:
                 offsets[i] = 0.0
                 med_pos[i] = 0.0
@@ -3216,7 +3216,7 @@ class Spectrum1D(Header):
             pos_mask = good[blocks[i]]
             pos_fwhm = fwhm[blocks[i]]
             if numpy.sum(pos_mask) > 0:
-                median_dist = numpy.median(
+                median_dist = bn.median(
                     pos_block[pos_mask][1:] - pos_block[pos_mask][:-1]
                 )  # compute median distance between peaks
 
@@ -3252,7 +3252,7 @@ class Spectrum1D(Header):
                     max_flux[o] = numpy.sum(result[0])
                 find_max = numpy.argsort(max_flux)[-1]
                 offsets[i] = offset[find_max]  # get offset position
-                med_pos[i] = numpy.mean(self._wave[lo:hi])
+                med_pos[i] = bn.mean(self._wave[lo:hi])
             else:
                 offsets[i] = 0.0
                 med_pos[i] = 0.0
@@ -3508,7 +3508,7 @@ class Spectrum1D(Header):
         if method != "mean" and method != "median" and method != "sum":
             raise ValueError("method must be either 'mean', 'median' or 'sum'")
         elif method == "mean":
-            flux = numpy.mean(self._data[select])
+            flux = bn.mean(self._data[select])
             if self._error is not None:
                 error = numpy.sqrt(
                     numpy.sum(self._error[select] ** 2) / numpy.sum(select) ** 2
@@ -3516,7 +3516,7 @@ class Spectrum1D(Header):
             else:
                 error = None
             if self._sky is not None:
-                sky = numpy.mean(self._sky[select])
+                sky = bn.mean(self._sky[select])
             else:
                 sky = None
             if self._sky_error is not None:

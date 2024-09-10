@@ -4,6 +4,7 @@ from scipy import interpolate
 from tqdm import tqdm
 from copy import deepcopy as copy
 
+import bottleneck as bn
 from lvmdrp import log
 from scipy import optimize
 from astropy.table import Table
@@ -1268,7 +1269,7 @@ class FiberRows(Header, PositionTable):
 
         # offset1 = self._data[150, select_wave] - new_trace[150, select_wave]
         # offset2 = self._data[200, select_wave] - new_trace[200, select_wave]
-        offset_mean = numpy.median(
+        offset_mean = bn.median(
             self._data[:, select_wave] - new_trace[:, select_wave], axis=0
         )  # computes that absolut trace position between the initially measured and estimated trace to compute the zero-point
         # offset_rms = numpy.std(
