@@ -3419,10 +3419,18 @@ class RSS(FiberRows):
         obs_time = Time(self._header['OBSTIME'])
         hrv_corrs = {}
         for tel in ["SCI", "SKYE", "SKYW"]:
-            radec = SkyCoord(self._header[f"PO{tel}RA"], self._header[f"PO{tel}DE"], unit="deg") # center of the pointing or coordinates of the fiber
-            hrv_corr = radec.radial_velocity_correction(kind='heliocentric', obstime=obs_time, location=EarthLocation.of_site('lco')).to(u.km / u.s).value
-            self._header[f"HIERARCH WAVE HELIORV_{tel}"] = (numpy.round(hrv_corr, 4), f"Heliocentric velocity correction for {tel} [km/s]")
-            hrv_corrs[tel] = numpy.round(hrv_corr, 4)
+            ra = self._header.get(f"PO{tel}RA", self._header.get(f"{tel}RA", self._header.get(f"TE{tel}RA"))) or 0
+            dec = self._header.get(f"PO{tel}DE", self._header.get(f"{tel}DE", self._header.get(f"TE{tel}DE"))) or 0
+            if ra == 0 or dec == 0:
+                log.warning(f"on heliocentric velocity correction, missing RA/Dec information in header, assuming: {ra = }, {dec = }")
+                self.add_header_comment(f"on heliocentric velocity correction, missing RA/Dec information in header, assuming: {ra = }, {dec = }")
+                self._header[f"HIERARCH WAVE HELIORV_{tel}"] = (numpy.round(0.0, 4), f"Heliocentric velocity correction for {tel} [km/s]")
+                hrv_corrs[tel] = numpy.round(0.0, 4)
+            else:
+                radec = SkyCoord(ra, dec, unit="deg") # center of the pointing or coordinates of the fiber
+                hrv_corr = radec.radial_velocity_correction(kind='heliocentric', obstime=obs_time, location=EarthLocation.of_site('lco')).to(u.km / u.s).value
+                self._header[f"HIERARCH WAVE HELIORV_{tel}"] = (numpy.round(hrv_corr, 4), f"Heliocentric velocity correction for {tel} [km/s]")
+                hrv_corrs[tel] = numpy.round(hrv_corr, 4)
 
         # calculate standard stars heliocentric corrections
         for istd in range(1, 15+1):
@@ -3431,7 +3439,11 @@ class RSS(FiberRows):
                 continue
 
             std_obstime = Time(self._header[f"STD{istd}T0"])
-            std_radec = SkyCoord(self._header[f"STD{istd}RA"], self._header[f"STD{istd}DE"], unit="deg")
+            std_ra, std_dec = self._header.get(f"STD{istd}RA", 0.0), self._header(f"STD{istd}DE", 0.0)
+            if std_ra == 0 or std_dec == 0:
+                self._header[f"STD{istd}HRV"] = (0.0, f"Standard {istd} heliocentric vel. corr. [km/s]")
+                continue
+            std_radec = SkyCoord(std_ra, std_dec, unit="deg")
             std_hrv_corr = std_radec.radial_velocity_correction(kind="heliocentric", obstime=std_obstime, location=EarthLocation.of_site("lco")).to(u.km / u.s).value
             self._header[f"STD{istd}HRV"] = (numpy.round(std_hrv_corr, 4), f"Standard {istd} heliocentric vel. corr. [km/s]")
 
