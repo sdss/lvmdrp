@@ -1,7 +1,7 @@
 import sys
 
 import numpy
-
+import bottleneck as bn
 
 try:
     import pylab

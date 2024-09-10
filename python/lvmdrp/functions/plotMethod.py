@@ -5,6 +5,7 @@ try:
 except ImportError:
     pass
 import numpy
+import bottleneck as bn
 
 description = "Provides Methods to make some plots"
 
