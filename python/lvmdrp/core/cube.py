@@ -1,6 +1,7 @@
 import numpy
 from astropy.io import fits as pyfits
 from scipy import ndimage
+import bottleneck as bn
 
 from lvmdrp.core.header import Header, combineHdr
 from lvmdrp.core.image import Image
