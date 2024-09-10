@@ -1,7 +1,7 @@
 import sys
 
 import numpy
-
+import bottleneck as bn
 
 try:
     import pylab
@@ -1009,8 +1009,8 @@ def createTelluricCorrection_drp(cube_in, telluric_out, airmass, mask_telluric):
         line_par = stats.linregress(
             [mask_telluric[i * 2] - 10, mask_telluric[i * 2 + 1] + 10],
             [
-                numpy.median(star_telluric1._data[select_blue]),
-                numpy.median(star_telluric1._data[select_red]),
+                bn.median(star_telluric1._data[select_blue]),
+                bn.median(star_telluric1._data[select_red]),
             ],
         )
         star_telluric2._data[select_region] = (

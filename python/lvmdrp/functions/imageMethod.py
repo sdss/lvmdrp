@@ -131,8 +131,8 @@ def _nonlinearity_correction(ptc_params: None | numpy.ndarray, nominal_gain: flo
         gain_map = Image(data=1 / (a1 + a2*a3 * quadrant._data**(a3-1)))
         gain_map.setData(data=nominal_gain, select=numpy.isnan(gain_map._data), inplace=True)
 
-        gain_med = numpy.nanmedian(gain_map._data)
-        gain_min, gain_max = numpy.nanmin(gain_map._data), numpy.nanmax(gain_map._data)
+        gain_med = bn.nanmedian(gain_map._data)
+        gain_min, gain_max = bn.nanmin(gain_map._data), bn.nanmax(gain_map._data)
         log.info(f"gain map stats: {gain_med = :.2f} [{gain_min = :.2f}, {gain_max = :.2f}] ({nominal_gain = :.2f} e-/ADU)")
     else:
         log.warning("cannot apply non-linearity correction")
@@ -391,8 +391,8 @@ def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=Non
     # calculate thermal shifts
     column_shifts = image.measure_fiber_shifts(fiber_model, columns=columns, column_width=column_width, shift_range=shift_range, axs=axs_cc)
     # shifts stats
-    median_shift = numpy.nanmedian(column_shifts, axis=0)
-    std_shift = numpy.nanstd(column_shifts, axis=0)
+    median_shift = bn.nanmedian(column_shifts, axis=0)
+    std_shift = bn.nanstd(column_shifts, axis=0)
     if numpy.abs(median_shift) > 0.5:
         log.warning(f"large thermal shift measured: {','.join(map(str, column_shifts))} pixels for {mjd = }, {expnum = }, {camera = }")
         image.add_header_comment(f"large thermal shift: {','.join(map(str, column_shifts))} pixels {camera = }")
@@ -413,8 +413,8 @@ def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=Non
         for i, (bmin, bmax) in enumerate(blocks_bounds):
             x = numpy.arange(bmax-bmin) + i*(bmax-bmin) + 10
             # y_models = fiber_model._data[bmin:bmax,c-column_width:c+column_width]
-            y_model = numpy.nanmedian(fiber_model._data[bmin:bmax,c-column_width:c+column_width], axis=1)
-            y_data = numpy.nanmedian(image._data[bmin:bmax, c-column_width:c+column_width], axis=1)
+            y_model = bn.nanmedian(fiber_model._data[bmin:bmax,c-column_width:c+column_width], axis=1)
+            y_data = bn.nanmedian(image._data[bmin:bmax, c-column_width:c+column_width], axis=1)
             snr = numpy.sqrt(y_data.mean())
             y_model = _normalize_peaks(y_model, min_peak_dist=5.0)
             y_data = _normalize_peaks(y_data, min_peak_dist=5.0)
@@ -1659,7 +1659,7 @@ def find_peaks_auto(
     ax.plot(pixels, peaks, "o", color="tab:red", mew=0, ms=5)
     ax.plot(
         centers,
-        numpy.ones(len(centers)) * numpy.nanmax(peaks) * 0.5,
+        numpy.ones(len(centers)) * bn.nanmax(peaks) * 0.5,
         "x",
         mew=1,
         ms=7,
@@ -2015,8 +2015,8 @@ def findPeaksMaster2_drp(
     # find location of peaks (local maxima) either above a fixed threshold or to reach a fixed number of peaks
 
     peaks_good = []
-    if numpy.nanmax(cut._data) < threshold:
-        threshold = numpy.nanmax(cut._data) * 0.8
+    if bn.nanmax(cut._data) < threshold:
+        threshold = bn.nanmax(cut._data) * 0.8
     while len(peaks_good) != numpy.sum(select_good):
         (peaks_good, temp, peaks_flux) = cut.findPeaks(threshold=threshold, npeaks=0)
         if peaks_good[0] < border:
@@ -2184,7 +2184,7 @@ def trace_peaks(
         profile = img.getSlice(ref_column, axis="y")._data
         if correct_ref:
             ypix = numpy.arange(profile.size)
-            guess_heights = numpy.ones_like(positions) * numpy.nanmax(profile)
+            guess_heights = numpy.ones_like(positions) * bn.nanmax(profile)
             ref_profile = _spec_from_lines(positions, sigma=1.2, wavelength=ypix, heights=guess_heights)
             log.info(f"correcting guess positions for column {ref_column}")
             cc, bhat, mhat = _cross_match(
@@ -2654,10 +2654,10 @@ def subtract_straylight(
     cbar.set_label(f"Counts ({unit})", fontsize="small", color="tab:red")
     colors_x = plt.cm.coolwarm(numpy.linspace(0, 1, img_median._data.shape[0]))
     colors_y = plt.cm.coolwarm(numpy.linspace(0, 1, img_median._data.shape[1]))
-    ax_strayx.fill_between(x_pixels, numpy.nanmedian(img._error, axis=0), lw=0, fc="0.8")
+    ax_strayx.fill_between(x_pixels, bn.nanmedian(img._error, axis=0), lw=0, fc="0.8")
     for iy in y_pixels:
         ax_strayx.plot(x_pixels, img_stray._data[iy], ",", color=colors_x[iy], alpha=0.2)
-    ax_strayy.fill_betweenx(y_pixels, 0, numpy.nanmedian(img._error, axis=1), lw=0, fc="0.8")
+    ax_strayy.fill_betweenx(y_pixels, 0, bn.nanmedian(img._error, axis=1), lw=0, fc="0.8")
     for ix in x_pixels:
         ax_strayy.plot(img_stray._data[:, ix], y_pixels, ",", color=colors_y[ix], alpha=0.2)
     save_fig(fig, product_path=out_image, to_display=display_plots, figure_path="qa", label="straylight_model")
@@ -2942,7 +2942,7 @@ def offsetTrace_drp(
                 offsets = []
             else:
                 offsets.append(
-                    numpy.nanmedian(
+                    bn.nanmedian(
                         numpy.array(log_lines[i + 2].split()[1:]).astype("float32")
                     )
                 )
@@ -3004,11 +3004,11 @@ def offsetTrace_drp(
         for j in range(len(out[0])):
             string_x += " %.3f" % (out[1][j])
             string_y += " %.3f" % (out[0][j])
-            string_pix += " %.3f" % (numpy.nanmedian(block_line_pos[j]))
+            string_pix += " %.3f" % (bn.nanmedian(block_line_pos[j]))
         log.write(string_x + "\n")
         log.write(string_pix + "\n")
         log.write(string_y + "\n")
-    off_trace_median = numpy.nanmedian(numpy.array(off_trace_all))
+    off_trace_median = bn.nanmedian(numpy.array(off_trace_all))
     off_trace_rms = numpy.std(numpy.array(off_trace_all))
     off_trace_rms = "%.4f" % off_trace_rms if numpy.isfinite(off_trace_rms) else "NAN"
     img.setHdrValue(
@@ -3150,12 +3150,12 @@ def offsetTrace2_drp(
         for j in range(len(out[0])):
             string_x += " %.3f" % (out[1][j])
             string_y += " %.3f" % (out[0][j] * -1)
-            string_pix += " %.3f" % (numpy.nanmedian(block_line_pos[j]))
+            string_pix += " %.3f" % (bn.nanmedian(block_line_pos[j]))
         log.write(string_x + "\n")
         log.write(string_pix + "\n")
         log.write(string_y + "\n")
 
-    off_trace_median = numpy.nanmedian(numpy.array(off_trace_all))
+    off_trace_median = bn.nanmedian(numpy.array(off_trace_all))
     off_trace_rms = numpy.std(numpy.array(off_trace_all))
     img.setHdrValue(
         "HIERARCH PIPE FLEX YOFF",
@@ -3366,7 +3366,7 @@ def extract_spectra(
     # propagate thermal shift to slitmap
     channel = img._header['CCD'][0]
     slitmap[f"ypix_{channel}"] = slitmap[f"ypix_{channel}"].astype("float64")
-    slitmap[f"ypix_{channel}"][select_spec] += numpy.nanmedian(shifts, axis=0)
+    slitmap[f"ypix_{channel}"][select_spec] += bn.nanmedian(shifts, axis=0)
 
     if error is not None:
         error[mask] = replace_error
@@ -3385,19 +3385,19 @@ def extract_spectra(
     rss.setHdrValue("DISPAXIS", 1)
     rss.setHdrValue(
         "HIERARCH FIBER CENT MIN",
-        numpy.nanmin(trace_mask._data[rss._good_fibers]),
+        bn.nanmin(trace_mask._data[rss._good_fibers]),
     )
     rss.setHdrValue(
         "HIERARCH FIBER CENT MAX",
-        numpy.nanmax(trace_mask._data[rss._good_fibers]),
+        bn.nanmax(trace_mask._data[rss._good_fibers]),
     )
     rss.setHdrValue(
         "HIERARCH FIBER CENT AVG",
-        numpy.nanmean(trace_mask._data[rss._good_fibers]) if data.size != 0 else 0,
+        bn.nanmean(trace_mask._data[rss._good_fibers]) if data.size != 0 else 0,
     )
     rss.setHdrValue(
         "HIERARCH FIBER CENT MED",
-        numpy.nanmedian(trace_mask._data[rss._good_fibers])
+        bn.nanmedian(trace_mask._data[rss._good_fibers])
         if data.size != 0
         else 0,
     )
@@ -3408,19 +3408,19 @@ def extract_spectra(
     if method == "optimal":
         rss.setHdrValue(
             "HIERARCH FIBER WIDTH MIN",
-            numpy.nanmin(trace_fwhm._data[rss._good_fibers]),
+            bn.nanmin(trace_fwhm._data[rss._good_fibers]),
         )
         rss.setHdrValue(
             "HIERARCH FIBER WIDTH MAX",
-            numpy.nanmax(trace_fwhm._data[rss._good_fibers]),
+            bn.nanmax(trace_fwhm._data[rss._good_fibers]),
         )
         rss.setHdrValue(
             "HIERARCH FIBER WIDTH AVG",
-            numpy.nanmean(trace_fwhm._data[rss._good_fibers]) if data.size != 0 else 0,
+            bn.nanmean(trace_fwhm._data[rss._good_fibers]) if data.size != 0 else 0,
         )
         rss.setHdrValue(
             "HIERARCH FIBER WIDTH MED",
-            numpy.nanmedian(trace_fwhm._data[rss._good_fibers])
+            bn.nanmedian(trace_fwhm._data[rss._good_fibers])
             if data.size != 0
             else 0,
         )
@@ -3910,8 +3910,8 @@ def preproc_raw_frame(
             os_models.append(os_model)
 
         # compute overscan stats
-        os_bias_med[i] = numpy.nanmedian(os_quad._data, axis=None)
-        os_bias_std[i] = numpy.nanmedian(numpy.nanstd(os_quad._data, axis=1), axis=None)
+        os_bias_med[i] = bn.nanmedian(os_quad._data, axis=None)
+        os_bias_std[i] = bn.nanmedian(bn.nanstd(os_quad._data, axis=1), axis=None)
         log.info(
             f"median and standard deviation in OS quadrant {i+1}: "
             f"{os_bias_med[i]:.2f} +/- {os_bias_std[i]:.2f} (ADU)"
@@ -4048,8 +4048,8 @@ def preproc_raw_frame(
             axis=0,
             nstrip=1,
             ax=axs[i],
-            mu_stat=numpy.nanmedian,
-            sg_stat=lambda x, axis: numpy.nanmedian(numpy.std(x, axis=axis)),
+            mu_stat=bn.nanmedian,
+            sg_stat=lambda x, axis: bn.nanmedian(numpy.std(x, axis=axis)),
             labels=True,
         )
         os_x, os_y = _parse_ccd_section(list(os_sections)[0])
@@ -4083,8 +4083,8 @@ def preproc_raw_frame(
             axis=1,
             nstrip=1,
             ax=axs[i],
-            mu_stat=numpy.nanmedian,
-            sg_stat=lambda x, axis: numpy.nanmedian(numpy.std(x, axis=axis)),
+            mu_stat=bn.nanmedian,
+            sg_stat=lambda x, axis: bn.nanmedian(numpy.std(x, axis=axis)),
             show_individuals=True,
             labels=True,
         )
@@ -4112,8 +4112,8 @@ def preproc_raw_frame(
             axis=1,
             nstrip=1,
             ax=axs[i],
-            mu_stat=numpy.nanmedian,
-            sg_stat=lambda x, axis: numpy.nanmedian(numpy.std(x, axis=axis)),
+            mu_stat=bn.nanmedian,
+            sg_stat=lambda x, axis: bn.nanmedian(numpy.std(x, axis=axis)),
             labels=True,
         )
         axs[i].step(
@@ -4121,7 +4121,7 @@ def preproc_raw_frame(
         )
         axs[i].step(numpy.arange(os_profiles[i].size), os_models[i], color="k", lw=1)
         axs[i].axhline(
-            numpy.nanmedian(os_quad._data.flatten()) + rdnoise[i],
+            bn.nanmedian(os_quad._data.flatten()) + rdnoise[i],
             ls="--",
             color="tab:purple",
             lw=1,
@@ -4436,7 +4436,7 @@ def detrend_frame(
 
             quad.computePoissonError(rdnoise)
             bcorr_img.setSection(section=quad_sec, subimg=quad, inplace=True)
-            log.info(f"median error in quadrant {i+1}: {numpy.nanmedian(quad._error):.2f} (e-)")
+            log.info(f"median error in quadrant {i+1}: {bn.nanmedian(quad._error):.2f} (e-)")
 
         bcorr_img.setHdrValue("BUNIT", "electron", "physical units of the image")
     else:
@@ -4594,7 +4594,7 @@ def create_master_frame(in_images: List[str], out_image: str, batch_size: int = 
         master_img = combineImages(org_imgs, method="median", normalize=False)
     elif master_type == "pixflat":
         master_img = combineImages(
-            [img / numpy.nanmedian(img._data) for img in org_imgs],
+            [img / bn.nanmedian(img._data) for img in org_imgs],
             method="median",
             normalize=True,
             normalize_percentile=75,

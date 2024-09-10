@@ -110,7 +110,7 @@ def _model_overscan(os_quad, axis=1, overscan_stat="biweight", threshold=None, m
     if overscan_stat == "biweight":
         stat = partial(biweight_location, ignore_nan=True)
     elif overscan_stat == "median":
-        stat = numpy.nanmedian
+        stat = bn.nanmedian
     else:
         warnings.warn(
             f"overscan statistic '{overscan_stat}' not implemented, "
@@ -742,15 +742,15 @@ class Image(Header):
 
         shifts = numpy.zeros(len(columns))
         for j,c in enumerate(columns):
-            s1 = numpy.nanmedian(ref_data[50:-50,c-column_width:c+column_width], axis=1)
-            s2 = numpy.nanmedian(self._data[50:-50,c-column_width:c+column_width], axis=1)
-            snr = numpy.sqrt(numpy.nanmedian(self._data[50:-50,c-column_width:c+column_width], axis=1))
+            s1 = bn.nanmedian(ref_data[50:-50,c-column_width:c+column_width], axis=1)
+            s2 = bn.nanmedian(self._data[50:-50,c-column_width:c+column_width], axis=1)
+            snr = numpy.sqrt(bn.nanmedian(self._data[50:-50,c-column_width:c+column_width], axis=1))
 
             min_snr = 5.0
-            if numpy.nanmedian(snr) > min_snr:
+            if bn.nanmedian(snr) > min_snr:
                 _, shifts[j], _ = _cross_match_float(s1, s2, numpy.array([1.0]), shift_range, gauss_window=[-3,3], min_peak_dist=5.0, ax=axs[j])
             else:
-                comstr = f"low SNR (<={min_snr}) for thermal shift at column {c}: {numpy.nanmedian(snr):.4f}, assuming = 0.0"
+                comstr = f"low SNR (<={min_snr}) for thermal shift at column {c}: {bn.nanmedian(snr):.4f}, assuming = 0.0"
                 log.warning(comstr)
                 self.add_header_comment(comstr)
                 shifts[j] = 0.0
@@ -2068,9 +2068,9 @@ class Image(Header):
             # collapse groups into single pixel
             new_masked_pixels, new_data, new_vars = [], [], []
             for group in groups:
-                new_masked_pixels.append(numpy.nanmean(masked_pixels[group]))
-                new_data.append(numpy.nanmedian(data[group]))
-                new_vars.append(numpy.nanmean(vars[group]))
+                new_masked_pixels.append(bn.nanmean(masked_pixels[group]))
+                new_data.append(bn.nanmedian(data[group]))
+                new_vars.append(bn.nanmean(vars[group]))
             masked_pixels = numpy.asarray(new_masked_pixels)
             data = numpy.asarray(new_data)
             vars = numpy.asarray(new_vars)
@@ -2157,7 +2157,7 @@ class Image(Header):
         profile._data = numpy.nan_to_num(profile._data, nan=0, neginf=0, posinf=0)
         pixels = profile._pixels
         pixels = numpy.arange(pixels.size)
-        guess_heights = numpy.ones_like(ref_centroids) * numpy.nanmax(profile._data)
+        guess_heights = numpy.ones_like(ref_centroids) * bn.nanmax(profile._data)
         ref_profile = _spec_from_lines(ref_centroids, sigma=1.2, wavelength=pixels, heights=guess_heights)
         log.info(f"correcting guess positions for column {ref_column}")
         cc, bhat, mhat = _cross_match(
@@ -3057,7 +3057,7 @@ class Image(Header):
         box_y = int(replace_box[1])
 
         # define Laplacian convolution kernal
-        LA_kernel = numpy.array([[0, -1, 0], [-1, 4, -1], [0, -1, 0]])/4.0
+        LA_kernel = 0.25*numpy.array([[0, -1, 0], [-1, 4, -1], [0, -1, 0]], dtype=numpy.float32)
 
         # Initiate image instances
         img_original = Image(data=self._data)
