@@ -3439,7 +3439,7 @@ class RSS(FiberRows):
                 continue
 
             std_obstime = Time(self._header[f"STD{istd}T0"])
-            std_ra, std_dec = self._header.get(f"STD{istd}RA", 0.0), self._header(f"STD{istd}DE", 0.0)
+            std_ra, std_dec = self._header.get(f"STD{istd}RA", 0.0), self._header.get(f"STD{istd}DE", 0.0)
             if std_ra == 0 or std_dec == 0:
                 self._header[f"STD{istd}HRV"] = (0.0, f"Standard {istd} heliocentric vel. corr. [km/s]")
                 continue
