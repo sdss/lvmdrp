@@ -1920,7 +1920,7 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
         if sci_cond:
             kwargs = get_config_options('reduction_steps.science_reduction')
             for expnum in sci['expnum'].unique():
-                with Timer(name='Science Reduction', logger=log.info):
+                with Timer(name=f'Reduction EXPNUM {expnum}', logger=log.info):
                     try:
                         science_reduction(expnum, use_longterm_cals=True,
                                         fluxcal_method=fluxcal_method,
