@@ -8,6 +8,7 @@
 
 from copy import copy
 from enum import IntFlag, auto
+import numpy as np
 
 
 class classproperty(object):
@@ -282,3 +283,57 @@ class PixMask(BaseBitmask):
 STAGES = list(ReductionStage.__members__.keys())
 FLAGS = list(QualityFlag.__members__.keys())
 DRPQUALITIES = list()
+
+
+def _parse_bitmask(pixmask, mask_shape):
+    if isinstance(pixmask, PixMask):
+        pixmask = np.zeros(mask_shape)
+    elif isinstance(pixmask, str):
+        pixmask = PixMask[pixmask]
+    elif isinstance(pixmask, int):
+        pixmask = PixMask(pixmask)
+    elif isinstance(pixmask, np.ndarray[int]):
+        assert pixmask.shape == mask_shape, f"Wrong `pixmask` shape {pixmask.shape} not matching `mask_image` shape {mask_shape}"
+    else:
+        raise ValueError(f"Wrong type for {pixmask = }: {type(pixmask)}; expected PixMask, string or integer")
+
+    return pixmask
+
+
+def _parse_where(where, mask_shape):
+    if where is not None and isinstance(where, np.ndarray[bool]):
+        assert where.shape == mask_shape, f"Wrong `where` shape {where.shape} not matching `mask_image` shape {mask_shape}"
+    else:
+        where = np.ones(mask_shape, dtype=bool)
+
+    return where
+
+
+def add_bitmask(mask_image, pixmask, where=None):
+    pixmask = _parse_bitmask(pixmask, mask_shape=mask_image.shape)
+    where = _parse_where(where, mask_shape=mask_image.shape)
+
+    mask = np.zeros_like(mask_image, dtype=int)
+    mask[where] |= pixmask
+
+    if mask_image is None:
+        mask_image = mask
+        return mask_image
+
+    mask_image[where] |= mask[where]
+    return mask_image
+
+
+def toggle_bitmask(mask_image, pixmask, where=None):
+    pixmask = _parse_bitmask(pixmask, mask_shape=mask_image.shape)
+    where = _parse_where(where, mask_shape=mask_image.shape)
+
+    mask = np.zeros_like(mask_image, dtype=int)
+    mask[where] |= pixmask
+
+    if mask_image is None:
+        mask_image = mask
+        return mask_image
+
+    mask_image[where] ^= mask[where]
+    return mask_image

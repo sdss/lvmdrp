@@ -17,7 +17,7 @@ from scipy import ndimage, signal
 from scipy import interpolate
 
 from lvmdrp import log
-from lvmdrp.utils.bitmask import PixMask
+from lvmdrp.utils.bitmask import PixMask, add_bitmask, toggle_bitmask
 from lvmdrp.core.constants import CON_LAMPS, ARC_LAMPS
 from lvmdrp.core.plot import plt
 from lvmdrp.core.fit_profile import gaussians, Gaussians
@@ -425,7 +425,7 @@ class Image(Header):
         """
         if isinstance(other, Image):
             # define behaviour if the other is of the same instance
-            img = Image(header=self._header, origin=self._origin)
+            img = copy(self)
 
             # add data if contained in both
             if self._data is not None and other._data is not None:
@@ -446,8 +446,7 @@ class Image(Header):
 
             # combined mask of valid pixels if contained in both
             if self._mask is not None and other._mask is not None:
-                new_mask = numpy.where(self._mask != other._mask, self._mask + other._mask, self._mask)
-                img.setData(mask=new_mask)
+                img.setData(mask=self._mask | other._mask)
             else:
                 img.setData(mask=self._mask)
             return img
@@ -511,8 +510,7 @@ class Image(Header):
 
             # combined mask of valid pixels if contained in both
             if self._mask is not None and other._mask is not None:
-                new_mask = numpy.where(self._mask != other._mask, self._mask + other._mask, self._mask)
-                img.setData(mask=new_mask)
+                img.setData(mask=self._mask | other._mask)
             else:
                 img.setData(mask=self._mask)
             return img
@@ -572,8 +570,7 @@ class Image(Header):
 
             # combined mask of valid pixels if contained in both
             if self._mask is not None and other._mask is not None:
-                new_mask = numpy.where(self._mask != other._mask, self._mask + other._mask, self._mask)
-                img.setData(mask=new_mask)
+                img.setData(mask=self._mask | other._mask)
             else:
                 img.setData(mask=self._mask)
             return img
@@ -651,8 +648,7 @@ class Image(Header):
 
             # combined mask of valid pixels if contained in both
             if self._mask is not None and other._mask is not None:
-                new_mask = numpy.where(self._mask != other._mask, self._mask + other._mask, self._mask)
-                img.setData(mask=new_mask)
+                img.setData(mask=self._mask | other._mask)
             else:
                 img.setData(mask=self._mask)
             return img
@@ -1066,6 +1062,48 @@ class Image(Header):
                 new_image.setHeader(header)  # set header
 
         return new_image
+
+    def add_bitmask(self, pixmask, where=None):
+        """Adds the given bitmask to the current mask
+
+        If no mask is present in the image, a new mask will be started
+        with the corresponding pixels flagged with `pixmask`.
+
+        Parameters
+        ----------
+        pixmask : PixMask|str|int
+            Bitmask to add to the current mask
+        where : numpy.ndarray[bool], optional
+            Boolean selection of pixels where to add given bitmask, by default all pixels
+
+        Returns
+        -------
+        mask : np.ndarray[PixMask|int]
+            Updated pixel mask
+        """
+        self._mask = add_bitmask(self._mask, pixmask=pixmask, where=where)
+        return self._mask
+
+    def toggle_bitmask(self, pixmask, where=None):
+        """Toggle the given bitmask in the current mask
+
+        If no mask is present in the image, a new mask will be started
+        with the corresponding pixels flagged with `pixmask`.
+
+        Parameters
+        ----------
+        pixmask : PixMask|str|int
+            Bitmask to add to the current mask
+        where : numpy.ndarray[bool], optional
+            Boolean selection of pixels where to add given bitmask, by default all pixels
+
+        Returns
+        -------
+        mask : np.ndarray[PixMask|int]
+            Updated pixel mask
+        """
+        self._mask = toggle_bitmask(self._mask, pixmask=pixmask, where=where)
+        return self._mask
 
     def convertUnit(self, to, assume="adu", gain_field="GAIN", inplace=False):
         """converts the unit of the image
@@ -1707,11 +1745,11 @@ class Image(Header):
 
         if self._mask is not None:
             # create the new  bad pixel mask
-            mask_new = numpy.sum(
+            mask_new = numpy.bitwise_or.reduce(
                 numpy.reshape(self._mask, (self._dim[0], self._dim[1] // bin_x, bin_x)),
                 2,
             )
-            mask_new2 = numpy.sum(
+            mask_new2 = numpy.bitwise_or.reduce(
                 numpy.reshape(
                     mask_new, (self._dim[0] // bin_y, bin_y, self._dim[1] // bin_x)
                 ),
