@@ -226,6 +226,9 @@ class PixMask(BaseBitmask):
     INTERPOLATED = auto()
 
     # measure quality of tracing using polynomial fit - samples residuals
+    FAILEDPOLY = auto()
+    FAILEDSPLINE = auto()
+    FAILEDINTERP = auto()
     BADTRACE = auto()
     BADARC = auto()
 

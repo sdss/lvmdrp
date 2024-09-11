@@ -7,6 +7,7 @@ from copy import deepcopy as copy
 from lvmdrp import log
 from scipy import optimize
 from astropy.table import Table
+from lvmdrp.utils.bitmask import PixMask
 from lvmdrp.core.header import Header, combineHdr
 from lvmdrp.core.positionTable import PositionTable
 from lvmdrp.core.spectrum1d import Spectrum1D, _cross_match_float
@@ -183,7 +184,7 @@ class FiberRows(Header, PositionTable):
 
             # combined mask of valid pixels if contained in both
             if self._mask is not None and other._mask is not None:
-                new_mask = numpy.logical_or(self._mask, other._mask)
+                new_mask = numpy.bitwise_or(self._mask, other._mask)
                 img.setData(mask=new_mask)
             else:
                 img.setData(mask=self._mask)
@@ -278,7 +279,7 @@ class FiberRows(Header, PositionTable):
 
             # combined mask of valid pixels if contained in both
             if self._mask is not None and other._mask is not None:
-                new_mask = numpy.logical_or(self._mask, other._mask)
+                new_mask = numpy.bitwise_or(self._mask, other._mask)
                 img.setData(mask=new_mask)
             else:
                 img.setData(mask=self._mask)
@@ -398,7 +399,7 @@ class FiberRows(Header, PositionTable):
 
             # combined mask of valid pixels if contained in both
             if self._mask is not None and other._mask is not None:
-                new_mask = numpy.logical_or(self._mask, other._mask)
+                new_mask = numpy.bitwise_or(self._mask, other._mask)
                 img.setData(mask=new_mask)
             else:
                 img.setData(mask=self._mask)
@@ -538,7 +539,7 @@ class FiberRows(Header, PositionTable):
 
         if data_dim is not None:
             # create empty mask all pixel assigned bad
-            self._mask = numpy.ones(data_dim, dtype="bool")
+            self._mask = numpy.ones(data_dim, dtype=int)
 
         if data_dim is not None and samples_columns is not None:
             self._samples = Table(data=numpy.zeros((data_dim[0], len(samples_columns))) + numpy.nan, names=samples_columns)
@@ -681,6 +682,20 @@ class FiberRows(Header, PositionTable):
         mask = self._mask
         return data, error, mask
 
+    def get_mask(self, as_boolean=False):
+        """
+        Returns the bad pixel mask of the image
+
+        Returns
+        -----------
+        _mask :  numpy.ndarray
+            The bad pixel mask of the image
+
+        """
+        if as_boolean:
+            return self._mask.astype(bool)
+        return self._mask
+
     def setData(self, select=None, data=None, mask=None, error=None):
         if select is not None:
             if data is not None:
@@ -699,7 +714,7 @@ class FiberRows(Header, PositionTable):
             if mask is not None:
                 self._mask = mask
                 nfibers, npixels = self._mask.shape
-                self._good_fibers = numpy.where(numpy.sum(self._mask, axis=1) != self._mask.shape[1])[0]
+                self._good_fibers = numpy.where(numpy.any(self._mask != 0, axis=1))[0]
             elif not hasattr(self, "_mask"):
                 self._mask = None
                 self._good_fibers = None
@@ -820,8 +835,8 @@ class FiberRows(Header, PositionTable):
                     if hdu[i].header["EXTNAME"].split()[0] == "ERROR":
                         self._error = hdu[i].data.astype("float32")
                     elif hdu[i].header["EXTNAME"].split()[0] == "BADPIX":
-                        self._mask = hdu[i].data.astype("bool")
-                        self._good_fibers = numpy.where(numpy.sum(self._mask, axis=1) != self._data.shape[1])[0]
+                        self._mask = hdu[i].data.astype("int32")
+                        self._good_fibers = numpy.where(numpy.any(self._mask!=0, axis=1))[0]
                     elif hdu[i].header["EXTNAME"].split()[0] == "COEFFS":
                         self._coeffs = hdu[i].data.astype("float32")
 
@@ -831,8 +846,8 @@ class FiberRows(Header, PositionTable):
                 self._fibers = self._data.shape[0]
                 self._pixels = numpy.arange(self._data.shape[1])
             if extension_mask is not None:
-                self._mask = hdu[extension_mask].data.astype("bool")
-                self._good_fibers = numpy.where(numpy.sum(self._mask, axis=1) != self._data.shape[1])[0]
+                self._mask = hdu[extension_mask].data.astype("int32")
+                self._good_fibers = numpy.where(numpy.any(self._mask!=0, axis=1))[0]
             if extension_error is not None:
                 self._error = hdu[extension_error].data.astype("float32")
             if extension_coeffs is not None:
@@ -886,7 +901,7 @@ class FiberRows(Header, PositionTable):
         )
         for i in iterator:
             spec = self.getSpec(i)
-            if spec._mask.all():
+            if (spec._mask!=0).all():
                 masked[i] = True
                 continue
 
@@ -926,7 +941,7 @@ class FiberRows(Header, PositionTable):
         )
         for i in iterator:
             spec = self.getSpec(i)
-            if spec._mask.all():
+            if (spec._mask!=0).all():
                 masked[i] = True
                 continue
 
@@ -1025,7 +1040,7 @@ class FiberRows(Header, PositionTable):
         poly_table = []
         poly_all_table = []
         for i in range(self._fibers):
-            good_pix = numpy.logical_not(self._mask[i, :])
+            good_pix = self._mask[i, :] == 0
             if numpy.sum(good_pix) >= nknots + 1:
                 pixels_, data_ = pixels[good_pix], self._data[i, good_pix]
                 (t0, c0, k) = _guess_spline(pixels_, data_, k=degree, s=smoothing, w=weights)
@@ -1037,8 +1052,8 @@ class FiberRows(Header, PositionTable):
                     poly_table.extend(numpy.column_stack([pixels_, interpolate.splev(pixels_, tck)]).tolist())
                     poly_all_table.extend(numpy.column_stack([pixels, interpolate.splev(pixels, tck)]).tolist())
                 except ValueError as e:
-                    log.error(f'Fiber trace failure at fiber {i}: {e}')
-                    self._mask[i, :] = True
+                    log.error(f'Fiber spline fitting failure at fiber {i}: {e}')
+                    self._mask[i, :] = PixMask["FAILEDSPLINE"]
                     continue
 
                 self._coeffs[i] = tck
@@ -1046,9 +1061,9 @@ class FiberRows(Header, PositionTable):
 
                 if clip is not None:
                     self._data = numpy.clip(self._data, clip[0], clip[1])
-                self._mask[i, :] = False
+                self._mask[i, :] = 0
             else:
-                self._mask[i, :] = True
+                self._mask[i, :] = PixMask["FAILEDSPLINE"]
 
         return numpy.asarray(pix_table), numpy.asarray(poly_table), numpy.asarray(poly_all_table)
 
@@ -1074,7 +1089,7 @@ class FiberRows(Header, PositionTable):
         poly_table = []
         poly_all_table = []
         for i in range(self._fibers):
-            good_pix = numpy.logical_not(self._mask[i, :])
+            good_pix = self._mask[i, :] == 0
             if numpy.sum(good_pix) >= deg + 1:
                 # select the polynomial class
                 poly_cls = Spectrum1D.select_poly_class(poly_kind)
@@ -1086,8 +1101,8 @@ class FiberRows(Header, PositionTable):
                     poly_table.extend(numpy.column_stack([pixels[good_pix], poly(pixels[good_pix])]).tolist())
                     poly_all_table.extend(numpy.column_stack([pixels, poly(pixels)]).tolist())
                 except numpy.linalg.LinAlgError as e:
-                    log.error(f'Fiber trace failure at fiber {i}: {e}')
-                    self._mask[i, :] = True
+                    log.error(f'Fiber polynomial fitting failure at fiber {i}: {e}')
+                    self._mask[i, :] = PixMask["FAILEDPOLY"]
                     continue
 
                 self._coeffs[i, :] = poly.convert().coef
@@ -1095,9 +1110,9 @@ class FiberRows(Header, PositionTable):
 
                 if clip is not None:
                     self._data = numpy.clip(self._data, clip[0], clip[1])
-                self._mask[i, :] = False
+                self._mask[i, :] = 0
             else:
-                self._mask[i, :] = True
+                self._mask[i, :] = PixMask["FAILEDPOLY"]
 
         return numpy.asarray(pix_table), numpy.asarray(poly_table), numpy.asarray(poly_all_table)
 
@@ -1158,7 +1173,7 @@ class FiberRows(Header, PositionTable):
                     init_dist / dist
                 )  # compute the relative change in the fiber distance compared to the reference dispersion column
                 change_dist[:, i] = change  # store the changes into array
-                good_mask = numpy.logical_not(bad_mask)
+                good_mask = bad_mask == 0
                 select_good = numpy.logical_and(
                     numpy.logical_and(change > 0.5, change < 2.0), good_mask
                 )  # masked unrealstic changes
@@ -1187,7 +1202,7 @@ class FiberRows(Header, PositionTable):
                     init_dist / dist
                 )  # compute the relative change in the fiber distance compared to the reference dispersion column
                 change_dist[:, i] = change  # store the changes into array
-                good_mask = numpy.logical_not(bad_mask)
+                good_mask = bad_mask == 0
                 select_good = numpy.logical_and(
                     numpy.logical_and(change > 0.5, change < 2.0), good_mask
                 )  # masked unrealstic changes
@@ -1323,7 +1338,7 @@ class FiberRows(Header, PositionTable):
         if self._coeffs is None:
             return self
         # early return if all fibers are masked
-        bad_fibers = self._mask.all(axis=1)
+        bad_fibers = (self._mask!=0).all(axis=1)
         if bad_fibers.sum() == self._fibers:
             return self
 
@@ -1339,7 +1354,7 @@ class FiberRows(Header, PositionTable):
         for ifiber in y_pixels[bad_fibers]:
             poly = numpy.polynomial.Polynomial(self._coeffs[ifiber, :])
             self._data[ifiber, :] = poly(x_pixels)
-            self._mask[ifiber, :] = False
+            self._mask[ifiber, :] = 0
 
         return self
 
@@ -1372,7 +1387,7 @@ class FiberRows(Header, PositionTable):
 
         # interpolate data
         if axis == "Y" or axis == "y" or axis == 0:
-            bad_fibers = self._mask.all(axis=1)
+            bad_fibers = (self._mask!=0).all(axis=1)
             if bad_fibers.sum() == self._fibers:
                 return self
             f_data = interpolate.interp1d(y_pixels[~bad_fibers], self._data[~bad_fibers, :], axis=0, bounds_error=False, fill_value="extrapolate")
@@ -1382,14 +1397,14 @@ class FiberRows(Header, PositionTable):
                 self._error = f_error(y_pixels)
 
             # unmask interpolated fibers
-            if self._mask is not None:
-                self._mask[bad_fibers, :] = False
+            if self._mask is not None and reset_mask:
+                self._mask[bad_fibers, :] = 0
         elif axis == "X" or axis == "x" or axis == 1:
             for ifiber in y_pixels:
-                bad_pixels = (self._data[ifiber] <= 0) | (self._mask[ifiber, :])
+                bad_pixels = (self._data[ifiber] <= 0) | (self._mask[ifiber, :] != 0)
                 # skip fiber if all pixels are bad and set mask to True
                 if bad_pixels.all():
-                    self._mask[ifiber] = True
+                    self._mask[ifiber] = PixMask["FAILEDINTERP"]
                     continue
                 # skip fiber if no bad pixels are present, no need to interpolate
                 if bad_pixels.sum() == 0:
@@ -1400,7 +1415,7 @@ class FiberRows(Header, PositionTable):
                     f_error = interpolate.interp1d(x_pixels[~bad_pixels], self._error[ifiber, ~bad_pixels], bounds_error=False, fill_value="extrapolate")
                     self._error[ifiber, :] = f_error(x_pixels)
                 if self._mask is not None and reset_mask:
-                    self._mask[ifiber, bad_pixels] = False
+                    self._mask[ifiber, bad_pixels] = 0
         else:
             raise ValueError(f"axis {axis} not supported")
 
