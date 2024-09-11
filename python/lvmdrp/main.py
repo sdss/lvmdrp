@@ -1920,20 +1920,21 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
         if sci_cond:
             kwargs = get_config_options('reduction_steps.science_reduction')
             for expnum in sci['expnum'].unique():
-                try:
-                    science_reduction(expnum, use_longterm_cals=True,
-                                      fluxcal_method=fluxcal_method,
-                                      skip_2d=skip_2d,
-                                      skip_1d=skip_1d,
-                                      skip_post_1d=skip_post_1d,
-                                      clean_ancillary=clean_ancillary,
-                                      debug_mode=debug_mode, **kwargs)
-                except Exception as e:
-                    log.exception(f'Failed to reduce science frame mjd {mjd} exposure {expnum}: {e}')
-                    create_status_file(tileid, mjd, status='error')
-                    trace = traceback.format_exc()
-                    update_error_file(tileid, mjd, expnum, trace)
-                    continue
+                with Timer(name='Science Reduction', logger=log.info):
+                    try:
+                        science_reduction(expnum, use_longterm_cals=True,
+                                        fluxcal_method=fluxcal_method,
+                                        skip_2d=skip_2d,
+                                        skip_1d=skip_1d,
+                                        skip_post_1d=skip_post_1d,
+                                        clean_ancillary=clean_ancillary,
+                                        debug_mode=debug_mode, **kwargs)
+                    except Exception as e:
+                        log.exception(f'Failed to reduce science frame mjd {mjd} exposure {expnum}: {e}')
+                        create_status_file(tileid, mjd, status='error')
+                        trace = traceback.format_exc()
+                        update_error_file(tileid, mjd, expnum, trace)
+                        continue
 
         # create done status on successful run
         if not status_file_exists(tileid, mjd, status='error'):
