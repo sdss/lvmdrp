@@ -4,6 +4,7 @@ from scipy import interpolate
 from tqdm import tqdm
 from copy import deepcopy as copy
 
+import bottleneck as bn
 from lvmdrp import log
 from scipy import optimize
 from astropy.table import Table
@@ -1067,7 +1068,7 @@ class FiberRows(Header, PositionTable):
 
         return numpy.asarray(pix_table), numpy.asarray(poly_table), numpy.asarray(poly_all_table)
 
-    def fit_polynomial(self, deg, poly_kind="poly", clip=None):
+    def fit_polynomial(self, deg, poly_kind="poly", clip=None, min_samples_frac=0.0):
         """
         smooths the traces along the dispersion direction with a polynomical function for each individual fiber
 
@@ -1079,10 +1080,11 @@ class FiberRows(Header, PositionTable):
             the kind of polynomial to use when smoothing the trace, valid options are: 'poly' (power series, default), 'legendre', 'chebyshev'
         clip : 2-tuple of int, optional with default None
             clip data around this values, defaults to no clipping
+        min_samples_frac : float, optional
+            minimum fraction of valid samples, by default 0.0 (no threshold)
         """
-        pixels = numpy.arange(
-            self._data.shape[1]
-        )  # pixel position in dispersion direction
+        pixels = numpy.arange(self._data.shape[1])
+        samples = self._samples.to_pandas().values
         self._coeffs = numpy.zeros((self._data.shape[0], numpy.abs(deg) + 1))
         # iterate over each fiber
         pix_table = []
@@ -1090,7 +1092,8 @@ class FiberRows(Header, PositionTable):
         poly_all_table = []
         for i in range(self._fibers):
             good_pix = self._mask[i, :] == 0
-            if numpy.sum(good_pix) >= deg + 1:
+            good_sam = ~numpy.isnan(samples[i, :])
+            if numpy.sum(good_pix) >= deg + 1 and good_sam.sum() / good_sam.size > min_samples_frac:
                 # select the polynomial class
                 poly_cls = Spectrum1D.select_poly_class(poly_kind)
 
@@ -1281,7 +1284,7 @@ class FiberRows(Header, PositionTable):
 
         # offset1 = self._data[150, select_wave] - new_trace[150, select_wave]
         # offset2 = self._data[200, select_wave] - new_trace[200, select_wave]
-        offset_mean = numpy.median(
+        offset_mean = bn.median(
             self._data[:, select_wave] - new_trace[:, select_wave], axis=0
         )  # computes that absolut trace position between the initially measured and estimated trace to compute the zero-point
         # offset_rms = numpy.std(

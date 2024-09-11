@@ -13,7 +13,6 @@ import yaml
 import bottleneck as bn
 from tqdm import tqdm
 from astropy import units as u
-from astropy.constants import c
 from astropy.io import fits
 from astropy.table import Table
 from astropy.time import Time
@@ -99,10 +98,10 @@ def _illumination_correction(fiberflat, apply_correction=True):
     data[(fiberflat._mask)|(data <= 0)] = numpy.nan
 
     # compute median factors
-    sci_factor = numpy.nanmedian(data[sci_fibers, 1000:3000])
-    skw_factor = numpy.nanmedian(data[skw_fibers, 1000:3000])
-    ske_factor = numpy.nanmedian(data[ske_fibers, 1000:3000])
-    std_factor = numpy.nanmedian(data[std_fibers, 1000:3000])
+    sci_factor = bn.nanmedian(data[sci_fibers, 1000:3000])
+    skw_factor = bn.nanmedian(data[skw_fibers, 1000:3000])
+    ske_factor = bn.nanmedian(data[ske_fibers, 1000:3000])
+    std_factor = bn.nanmedian(data[std_fibers, 1000:3000])
     norm = numpy.mean([sci_factor, skw_factor, ske_factor, std_factor])
     sci_factor /= norm
     skw_factor /= norm
@@ -396,7 +395,7 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
 
     if negative:
         log.info("flipping arc along flux direction")
-        arc = -1 * arc + numpy.nanmedian(arc._data)
+        arc = -1 * arc + bn.nanmedian(arc._data)
 
     # setup storage array
     wave_coeffs = numpy.zeros((arc._fibers, numpy.abs(poly_disp) + 1))
@@ -504,12 +503,12 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
 
         wave_coeffs[i, :] = wave_poly.convert().coef
         wave_sol[i, :] = wave_poly(arc._pixels)
-        wave_rms[i] = numpy.nanstd(wave_poly(cent_wave[i, good_lines]) - ref_lines[good_lines])
+        wave_rms[i] = bn.nanstd(wave_poly(cent_wave[i, good_lines]) - ref_lines[good_lines])
 
     log.info(
         "finished wavelength fitting with median "
-        f"RMS = {numpy.nanmedian(wave_rms):g} Angstrom "
-        f"({numpy.nanmedian(wave_rms[:,None]/numpy.diff(wave_sol, axis=1)):g} pix)"
+        f"RMS = {bn.nanmedian(wave_rms):g} Angstrom "
+        f"({bn.nanmedian(wave_rms[:,None]/numpy.diff(wave_sol, axis=1)):g} pix)"
     )
 
     # Estimate the spectral resolution pattern
@@ -543,12 +542,12 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
 
         lsf_coeffs[i, :] = fwhm_poly.convert().coef
         lsf_sol[i, :] = fwhm_poly(arc._pixels)
-        lsf_rms[i] = numpy.nanstd(fwhm_wave - fwhm_poly(cent_wave[i, good_lines]))
+        lsf_rms[i] = bn.nanstd(fwhm_wave - fwhm_poly(cent_wave[i, good_lines]))
 
     log.info(
         "finished LSF fitting with median "
-        f"RMS = {numpy.nanmedian(lsf_rms):g} Angstrom "
-        f"({numpy.nanmedian(lsf_rms[:,None]/numpy.gradient(wave_sol, axis=1)):g} pix)"
+        f"RMS = {bn.nanmedian(lsf_rms):g} Angstrom "
+        f"({bn.nanmedian(lsf_rms[:,None]/numpy.gradient(wave_sol, axis=1)):g} pix)"
     )
 
     # create plot of reference spectrum and wavelength fitting residuals
@@ -609,7 +608,7 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
     )
     arc.setHdrValue(
         "HIERARCH PIPE DISP RMS MEDIAN",
-        "%.4f" % (numpy.median(wave_rms[good_fibers])),
+        "%.4f" % (bn.median(wave_rms[good_fibers])),
         "Median RMS of disp sol",
     )
     arc.setHdrValue(
@@ -629,7 +628,7 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
     )
     arc.setHdrValue(
         "HIERARCH PIPE DISP RMS MEDIAN",
-        "%.4f" % (numpy.median(lsf_rms[good_fibers])),
+        "%.4f" % (bn.median(lsf_rms[good_fibers])),
         "Median RMS of disp sol",
     )
     arc.setHdrValue(
@@ -715,7 +714,7 @@ def shift_wave_skylines(in_frame: str, out_frame: str, dwave: float = 8.0, skyli
             continue
 
         offsets[:, ifiber] = sky_wave - skylines
-        fiber_offset[ifiber] = numpy.nanmedian(offsets[:,ifiber], axis=0)
+        fiber_offset[ifiber] = bn.nanmedian(offsets[:,ifiber], axis=0)
 
     # split per spectrographs
     specoffset = numpy.asarray(numpy.split(offsets, 3, axis=1))
@@ -723,6 +722,11 @@ def shift_wave_skylines(in_frame: str, out_frame: str, dwave: float = 8.0, skyli
     fiber_offset_mod = fiber_offset.copy()
     for spec_offset, spec in zip(numpy.split(fiber_offset, 3), [sel1, sel2, sel3]):
         mask = numpy.isfinite(spec_offset)
+        if mask.sum() <= 0.3*spec.sum():
+            log.warning(f"<30% of the fibers have good wavelength offsets measurements: {mask.sum()} fibers, assuming zero offset")
+            lvmframe.add_header_comment(f"<30% of the fibers have good wavelength offsets measurements: {mask.sum()} fibers, assuming zero offset")
+            fiber_offset_mod[spec] = 0.0
+            continue
         t = numpy.linspace(
             fiberid[spec][mask][len(fiberid[spec][mask]) // 20],
             fiberid[spec][mask][-1 * len(fiberid[spec][mask]) // 20],
@@ -734,6 +738,7 @@ def shift_wave_skylines(in_frame: str, out_frame: str, dwave: float = 8.0, skyli
 
     # Average offsets for different skylines in each channel, apply to trace, and write them in header
     meanoffset = numpy.nanmean(specoffset, axis=(1, 2)).round(4)
+    meanoffset = numpy.nan_to_num(meanoffset)
     log.info(f'Applying the offsets [Angstroms] in [1,2,3] spectrographs with means: {meanoffset}')
     lvmframe._wave_trace['COEFF'].data[:,0] -= fiber_offset_mod
     lvmframe._header[f'HIERARCH WAVE SKYOFF_{channel.upper()}1'] = (meanoffset[0], f'Mean sky line offset in {channel}1 [Angs]')
@@ -784,9 +789,12 @@ def shift_wave_skylines(in_frame: str, out_frame: str, dwave: float = 8.0, skyli
 # * merge arc_wave and arc_lsfs into lvmArc product, change variable name to in_arc
 # @skip_on_missing_input_path(["in_rss", "in_waves", "in_lsfs"])
 # @skip_if_drpqual_flags(["EXTRACTBAD", "BADTRACE"], "in_rss")
-def create_pixel_table(in_rss: str, out_rss: str, in_waves: str, in_lsfs: str):
-    """
-    Applies the wavelength and the spectral resolution (LSF) to an RSS
+def create_pixel_table(in_rss: str, out_rss: str, in_waves: str, in_lsfs: str, calculate_heliorv: bool = True, apply_heliorv: bool = False):
+    """Applies the wavelength and the spectral resolution (LSF) to an RSS
+
+    Additionally barycentric correction in velocity can be applied if
+    information is supplied as input parameter or in the header of the input
+    RSS.
 
     Parameters
     ----------
@@ -799,16 +807,32 @@ def create_pixel_table(in_rss: str, out_rss: str, in_waves: str, in_lsfs: str):
         RSS FITS file containing the wavelength solutions
     in_lsfs : string, optional with default: ''
         RSS FITS file containing the spectral resolution (LSF in FWHM)
+    calculate_heliorv : bool, optional
+        Calculates per-telescope heliocentric velocity corrections
+    apply_heliorv : bool, optional
+
     """
+    log.info(f"loading RSS for wavelength calibration: {in_rss}")
     rss = RSS.from_file(in_rss)
 
+    # set wavelength and LSF traces
+    log.info("adding wavelength and LSF solutions")
     wave_traces = [TraceMask.from_file(in_wave) for in_wave in in_waves]
     wave_trace = TraceMask.from_spectrographs(*wave_traces)
     rss.set_wave_trace(wave_trace)
+    rss.set_wave_array()
 
     lsf_traces = [TraceMask.from_file(in_lsfs) for in_lsfs in in_lsfs]
     lsf_trace = TraceMask.from_spectrographs(*lsf_traces)
     rss.set_lsf_trace(lsf_trace)
+    rss.set_lsf_array()
+
+    # set header keywords for heliocentric velocity corrections
+    log.info("calculating heliocentric velocity corrections")
+    helio_rvs = rss.get_helio_rv(apply_heliorv)
+    log.info(f"heliocentric velocities [km/s]: {helio_rvs}")
+
+    log.info(f"writing output RSS to {out_rss}")
     rss._header["DRPSTAGE"] = (ReductionStage(rss._header["DRPSTAGE"]) + "WAVELENGTH_CALIBRATED").value
     rss.writeFitsData(out_rss)
 
@@ -891,8 +915,8 @@ def checkPixTable_drp(
             "%.3f %.3f %.3f %.3f \n"
             % (
                 centres[j],
-                numpy.median(fit_wave[good_fiber, j]),
-                numpy.median(fit_wave[good_fiber, j]) - centres[j],
+                bn.median(fit_wave[good_fiber, j]),
+                bn.median(fit_wave[good_fiber, j]) - centres[j],
                 numpy.std(fit_wave[good_fiber, j]),
             )
         )
@@ -902,7 +926,7 @@ def checkPixTable_drp(
         for i in range(len(blocks)):
             if numpy.sum(blocks_good[i]) > 0:
                 log.write(
-                    " %.3f" % numpy.median(offset_pix[blocks[i][blocks_good[i]], j])
+                    " %.3f" % bn.median(offset_pix[blocks[i][blocks_good[i]], j])
                 )
             else:
                 log.write(" 0.0")
@@ -912,7 +936,7 @@ def checkPixTable_drp(
                 log.write(
                     " %.3f"
                     % (
-                        numpy.median(fit_wave[blocks[i][blocks_good[i]], j])
+                        bn.median(fit_wave[blocks[i][blocks_good[i]], j])
                         - centres[j]
                     )
                 )
@@ -920,7 +944,7 @@ def checkPixTable_drp(
                 log.write(" 0.0")
         log.write("\n")
 
-    off_disp_median = numpy.median(offset_pix[good_fiber, :])
+    off_disp_median = bn.median(offset_pix[good_fiber, :])
     off_disp_rms = numpy.std(offset_pix[good_fiber, :])
     off_disp_median = (
         float("%.4f" % off_disp_median)
@@ -1039,11 +1063,11 @@ def correctPixTable_drp(
     for i in range(rss._fibers):
         spec = rss[i]
         if smooth_poly_disp == "":
-            off = numpy.median(offsets.flatten())
+            off = bn.median(offsets.flatten())
         else:
             smooth_poly_disp = int(smooth_poly_disp)
             if smooth_poly_disp == "":
-                off = numpy.median(offsets[i])
+                off = bn.median(offsets[i])
             else:
                 off = Spectrum1D(wave=ref_wave, data=offsets[:, i])
                 off.smoothPoly(smooth_poly_disp, ref_base=spec._wave)
@@ -1064,16 +1088,12 @@ def correctPixTable_drp(
 @skip_if_drpqual_flags(["BADTRACE", "EXTRACTBAD"], "in_rss")
 def resample_wavelength(in_rss: str, out_rss: str, method: str = "linear",
                         wave_range: Tuple[float,float] = None, wave_disp: float = None,
-                        helio_vel: float = 0.0, helio_vel_keyword: str = "HELIO_RV",
                         convert_to_density: bool = False) -> RSS:
     """Resamples the RSS wavelength solutions to a common wavelength solution
 
     A common wavelength solution is computed for the RSS by resampling the
     wavelength solution of each fiber to a common wavelength grid. The
     resampling is performed using a linear or spline interpolation scheme.
-    Additionally barycentric correction in velocity can be applied if
-    information is supplied as input parameter or in the header of the input
-    RSS.
 
     Parameters
     ----------
@@ -1092,12 +1112,6 @@ def resample_wavelength(in_rss: str, out_rss: str, method: str = "linear",
     wave_disp : string of float, optional with default: None
         Dispersion per pixel for the common resampled wavelength solution.
         The "optimal" dispersion will be used if the parameter is empty.
-    helio_vel : string of float, optional with default: 0.0
-        Heliocentric velocity in km/s. If the parameter is empty, the value
-        stored in the header of the input RSS is used.
-    helio_vel_keyword : string, optional with default: 'HELIO_RV'
-        Keyword in the header of the input RSS where the heliocentric velocity
-        is stored.
     convert_to_density : string of boolean, optional with default: False
         If True, the resampled RSS will be converted to density units.
 
@@ -1119,18 +1133,6 @@ def resample_wavelength(in_rss: str, out_rss: str, method: str = "linear",
     if wave_disp is None:
         wave_disp = numpy.min(rss._wave[:, 1:] - rss._wave[:, :-1])
     log.info(f"using wavelength range {wave_range = } angstrom and {wave_disp = } angstrom pixel size")
-
-    # apply heliocentric velocity correction
-    if helio_vel is None or helio_vel == 0.0:
-        helio_vel = rss._header.get(helio_vel_keyword)
-        if helio_vel is None:
-            helio_vel = 0.0
-            log.warning(f"no heliocentric velocity found in header by keywords {helio_vel_keyword = }, assuming {helio_vel = } km/s")
-            rss.add_header_comment(f"no heliocentric velocity {helio_vel_keyword = }, assuming {helio_vel = } km/s")
-    else:
-        log.info(f"applying heliocentric velocity correction of {helio_vel = } km/s")
-
-    rss._wave = rss._wave * (1 + helio_vel / c.to("km/s").value)
 
     # resample the wavelength solution
     log.info(f"resampling the wavelength solution using {method = } interpolation")
@@ -1519,7 +1521,7 @@ def correctTraceMask_drp(trace_in, trace_out, logfile, ref_file, poly_smooth="")
     trace = TraceMask.from_file(trace_in)
 
     if poly_smooth == "":
-        trace = trace + (numpy.median(offsets.flatten()) * -1)
+        trace = trace + (bn.median(offsets.flatten()) * -1)
     else:
         split_trace = trace.split(offsets.shape[1], axis="y")
         offset_trace = TraceMask()
@@ -1790,7 +1792,7 @@ def matchFluxRSS_drp(
         # load subimages from disc and append them to a list
         rss = loadRSS(list_rss[i])
         specs.append(rss.createAperSpec(center_x, center_y, arc_radius))
-        fluxes.append(numpy.median(specs[i]._data))
+        fluxes.append(bn.median(specs[i]._data))
 
     order = numpy.argsort(fluxes)
     #   print fluxes, order

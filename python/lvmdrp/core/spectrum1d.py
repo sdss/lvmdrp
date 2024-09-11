@@ -39,7 +39,7 @@ def adaptive_smooth(data, start_width, end_width):
         start_index = max(0, i - half_width)
         end_index = min(n_points, i + half_width + 1)
         # Apply uniform filter to the local segment of the data
-        smoothed_data[i] = numpy.median(data[start_index:end_index])
+        smoothed_data[i] = bn.median(data[start_index:end_index])
     return smoothed_data
 
 def find_continuum(spec_s,niter=15,thresh=0.8,median_box_max=100,median_box_min=1):
@@ -471,8 +471,8 @@ def wave_little_interpol(wavelist):
         # In overlap region patch in a linear scale with slightly different step.
         dw = overlap_end - overlap_start
         step = 0.5 * (
-            numpy.mean(numpy.diff(wavelist[i]))
-            + numpy.mean(numpy.diff(wavelist[i + 1]))
+            bn.mean(numpy.diff(wavelist[i]))
+            + bn.mean(numpy.diff(wavelist[i + 1]))
         )
         n_steps = int(dw / step + 0.5)
 
@@ -2033,7 +2033,7 @@ class Spectrum1D(Header):
             Pixel position of the maximum data value
 
         """
-        max = numpy.nanmax(self._data)  # get max
+        max = bn.nanmax(self._data)  # get max
         select = self._data == max  # select max value
         max_wave = self._wave[select][0]  # get corresponding wavelength
         max_pos = self._pixels[select][0]  # get corresponding position
@@ -2055,7 +2055,7 @@ class Spectrum1D(Header):
             Pixel position of the minimum data value
 
         """
-        min = numpy.nanmin(self._data)  # get min
+        min = bn.nanmin(self._data)  # get min
         select = self._data == min  # select min value
         min_wave = self._wave[select][0]  # get corresponding waveength
         min_pos = self._pixels[select][0]  # get corresponding position
@@ -2105,7 +2105,7 @@ class Spectrum1D(Header):
                 self._sky_error = numpy.flipud(self._sky_error)
 
         # case where input spectrum has more than half the pixels masked
-        if numpy.nansum(self._data) == 0.0 or (
+        if bn.nansum(self._data) == 0.0 or (
             self._mask is not None and numpy.sum(self._mask!=0) > self._dim / 2
         ):
             # all pixels masked
@@ -3059,7 +3059,7 @@ class Spectrum1D(Header):
             pos_block = pos[
                 brackets[i] : brackets[i + 1]
             ]  # cut out the corresponding peak positions
-            median_dist = numpy.nanmedian(
+            median_dist = bn.nanmedian(
                 pos_block[1:] - pos_block[:-1]
             )  # compute median distance between peaks
             flux = (
@@ -3070,10 +3070,10 @@ class Spectrum1D(Header):
             )  # initial guess for the flux
 
             # compute lower and upper bounds of the positions for each block
-            lo = int(numpy.nanmin(pos_block) - median_dist)
+            lo = int(bn.nanmin(pos_block) - median_dist)
             if lo <= 0:
                 lo = 0
-            hi = int(numpy.nanmax(pos_block) + median_dist)
+            hi = int(bn.nanmax(pos_block) + median_dist)
             if hi >= self._wave[-1]:
                 hi = self._wave[-1]
 
@@ -3143,7 +3143,7 @@ class Spectrum1D(Header):
             pos_block = pos[blocks[i]]  # cut out the corresponding peak positions
             pos_mask = good[blocks[i]]
             if numpy.sum(pos_mask) > 0:
-                median_dist = numpy.median(
+                median_dist = bn.median(
                     pos_block[pos_mask][1:] - pos_block[pos_mask][:-1]
                 )  # compute median distance between peaks
                 flux = (
@@ -3191,7 +3191,7 @@ class Spectrum1D(Header):
                     gaussians_offset.plot(self._wave[lo:hi], self._data[lo:hi])
 
                 offsets[i] = fit_par[-1]  # get offset position
-                med_pos[i] = numpy.mean(self._wave[lo:hi])
+                med_pos[i] = bn.mean(self._wave[lo:hi])
             else:
                 offsets[i] = 0.0
                 med_pos[i] = 0.0
@@ -3219,7 +3219,7 @@ class Spectrum1D(Header):
             pos_mask = good[blocks[i]]
             pos_fwhm = fwhm[blocks[i]]
             if numpy.sum(pos_mask) > 0:
-                median_dist = numpy.median(
+                median_dist = bn.median(
                     pos_block[pos_mask][1:] - pos_block[pos_mask][:-1]
                 )  # compute median distance between peaks
 
@@ -3255,7 +3255,7 @@ class Spectrum1D(Header):
                     max_flux[o] = numpy.sum(result[0])
                 find_max = numpy.argsort(max_flux)[-1]
                 offsets[i] = offset[find_max]  # get offset position
-                med_pos[i] = numpy.mean(self._wave[lo:hi])
+                med_pos[i] = bn.mean(self._wave[lo:hi])
             else:
                 offsets[i] = 0.0
                 med_pos[i] = 0.0
@@ -3412,7 +3412,7 @@ class Spectrum1D(Header):
         return flux, cent, fwhm, bg
 
 
-    def obtainGaussFluxPeaks(self, pos, sigma, indices, replace_error=1e10, plot=False):
+    def obtainGaussFluxPeaks(self, pos, sigma, replace_error=1e10, plot=False):
         """returns Gaussian peaks parameters, flux error and mask
 
         this runs fiber fitting assuming that we only need to know the sigma of the Gaussian,
@@ -3424,8 +3424,6 @@ class Spectrum1D(Header):
             peaks positions
         sigma : array_like
             Gaussian widths
-        indices : array_like
-            peaks indices
         replace_error : float, optional
             replace error in bad pixels with this value, by default 1e10
         plot : bool, optional
@@ -3441,7 +3439,7 @@ class Spectrum1D(Header):
             propagated pixel mask
         """
 
-        fibers = len(pos)
+        nfibers = len(pos)
         aperture = 3
         # round up fiber locations
         pixels = numpy.round(
@@ -3450,7 +3448,7 @@ class Spectrum1D(Header):
         # defining bad pixels for each fiber if needed
         if self._mask is not None:
             # select: fibers in the boundary of the chip
-            bad_pix = numpy.zeros(fibers, dtype="bool")
+            bad_pix = numpy.zeros(nfibers, dtype="bool")
             select = bn.nansum(pixels >= self._mask.shape[0], 1)
             nselect = numpy.logical_not(select)
             bad_pix[select] = True
@@ -3462,43 +3460,40 @@ class Spectrum1D(Header):
         if self._error is None:
             self._error = numpy.ones_like(self._data)
 
+        # construct sparse projection matrix
         fact = numpy.sqrt(2.0 * numpy.pi)
-        A = (
-            1.0
-            * numpy.exp(
-                -0.5 * ((self._wave[:, None] - pos[None, :]) / sigma[None, :]) ** 2
-            )
-            / (fact * sigma[None, :])
-        )
-        # making positive definite
-        select = A > 0.0001
-        A = A / self._error[:, None]
+        kernel_width = 7 # should exceed 4 sigma
+        vI = []
+        vJ = []
+        vV = []
+        for xx in range(nfibers):
+            for yy in range(int(pos[xx]-kernel_width),int(pos[xx]+kernel_width)):
+                v = numpy.exp(-0.5 * ((yy-pos[xx]) / sigma[xx]) ** 2) / (fact * sigma[xx])
+                if v>0.0001:   # make non-zero and positive definite
+                    vI.append(xx)
+                    vJ.append(yy)
+                    vV.append(v / self._error[yy])
+        B = sparse.csc_matrix((vV, (vJ, vI)), shape=(self._dim, nfibers))
 
-        # plt.figure(figsize=(10, 10))
-        # plt.imshow(A, origin="lower")
-        # plt.show()
-
-        B = sparse.csr_matrix(
-            (A[select], (indices[0][select], indices[1][select])),
-            shape=(self._dim, fibers),
-        )
-        # print(B)
-
+        # invert the projection matrix and solve
         ypixels = numpy.arange(self._data.size)
         guess_flux = numpy.interp(pos, ypixels, self._data) * fact * sigma
         out = sparse.linalg.lsmr(B, self._data / self._error, atol=1e-3, btol=1e-3, x0=guess_flux)
         flux = out[0]
 
-        error = numpy.sqrt(1 / bn.nansum((A**2), 0))
+        error = numpy.sqrt(1 / ((B.multiply(B)).sum(axis=0))).A
+        error = error[0,:]
         if bad_pix is not None and bn.nansum(bad_pix) > 0:
             error[bad_pix] = replace_error
+
+        # pyfits.writeto('B1.fits', B1.toarray(), overwrite=True)
         # if plot:
         #     plt.figure(figsize=(15, 10))
         #     plt.plot(self._data, "ok")
         #     plt.plot(numpy.dot(A * self._error[:, None], out[0]), "-r")
         #     # plt.plot(numpy.dot(A, out[0]), '-r')
         #     plt.show()
-        return flux, error, bad_pix, B, A
+        return flux, error, bad_pix
 
     def collapseSpec(self, method="mean", start=None, end=None, transmission_func=None):
         if start is not None:
@@ -3516,7 +3511,7 @@ class Spectrum1D(Header):
         if method != "mean" and method != "median" and method != "sum":
             raise ValueError("method must be either 'mean', 'median' or 'sum'")
         elif method == "mean":
-            flux = numpy.mean(self._data[select])
+            flux = bn.mean(self._data[select])
             if self._error is not None:
                 error = numpy.sqrt(
                     numpy.sum(self._error[select] ** 2) / numpy.sum(select) ** 2
@@ -3524,7 +3519,7 @@ class Spectrum1D(Header):
             else:
                 error = None
             if self._sky is not None:
-                sky = numpy.mean(self._sky[select])
+                sky = bn.mean(self._sky[select])
             else:
                 sky = None
             if self._sky_error is not None:

@@ -67,7 +67,7 @@ def run_cluster(mjds: list = None, expnums: Union[list, str] = None, nodes: int 
     cmd = "run"
     if run_calibs:
         expnums = None
-        cmd = "long-term-cals"
+        cmd = "calibrations"
 
     if expnums is not None:
         if isinstance(expnums, str) and os.path.isfile(expnums):

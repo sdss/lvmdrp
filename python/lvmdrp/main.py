@@ -37,6 +37,7 @@ from lvmdrp.utils.metadata import (get_frames_metadata, get_master_metadata, ext
                                    get_analog_groups, match_master_metadata, create_master_path,
                                    update_summary_file)
 from lvmdrp.utils.convert import tileid_grp
+from lvmdrp.utils.timer import Timer
 
 from lvmdrp import config, log, path, __version__ as drpver
 
@@ -44,7 +45,7 @@ from lvmdrp import config, log, path, __version__ as drpver
 CALIBRATION_NAMES = {"pixmask", "pixflat", "bias", "trace_guess", "trace", "width", "amp", "model", "wave", "lsf", "fiberflat_dome", "fiberflat_twilight"}
 
 
-def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_NAMES, use_fiducial_cals=True, from_sanbox=False):
+def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_NAMES, longterm_cals=True, from_sanbox=False):
     """Returns a dictionary containing paths for calibration frames
 
     Parameters
@@ -57,8 +58,8 @@ def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_NAMES, u
         List of cameras or wildcard to match, by default '*'
     flavors : list, tuple or set
         Only get paths for this calibrations, by default all available flavors
-    use_fiducial_cals : bool
-        Whether to use fiducial calibration frames or not, defaults to True
+    longterm_cals : bool
+        Whether to use long-term calibration frames or not, defaults to True
     from_sanbox : bool, optional
         Fall back option to pull calibrations from sandbox, by default False
 
@@ -76,7 +77,7 @@ def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_NAMES, u
     tileid = 11111
     tilegrp = tileid_grp(tileid)
 
-    cals_mjd = get_master_mjd(mjd) if use_fiducial_cals or from_sanbox else mjd
+    cals_mjd = get_master_mjd(mjd) if longterm_cals or from_sanbox else mjd
 
     # define root path to pixel flats and masks
     # TODO: remove this once sdss-tree are updated with the corresponding species
@@ -107,7 +108,7 @@ def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_NAMES, u
         if path_species == "lvm_calib":
             prefix = ""
         else:
-            prefix = "m" if flavor in ["bias", "fiberflat_twilight"] or use_fiducial_cals else "n"
+            prefix = "m" if flavor in ["bias", "fiberflat_twilight"] or longterm_cals else "n"
 
         calibs[flavor] = {c: path.full(path_species, drpver=version, tileid=tileid, mjd=cals_mjd, kind=f"{prefix}{flavor}", camera=c) for c in cam_or_chan}
 
@@ -1559,17 +1560,19 @@ def reduce_2d(mjd, calibrations, expnums=None, exptime=None, cameras=CAMERAS,
         if skip_done and os.path.isfile(dframe_path):
             log.info(f"skipping {dframe_path}, file already exist")
         else:
-            preproc_raw_frame(in_image=frame_path, out_image=pframe_path,
-                                          in_mask=mpixmask_path, replace_with_nan=replace_with_nan, assume_imagetyp=assume_imagetyp)
-            detrend_frame(in_image=pframe_path, out_image=dframe_path,
-                          in_bias=mbias_path,
-                          in_pixelflat=mpixflat_path,
-                          replace_with_nan=replace_with_nan,
-                          reject_cr=reject_cr,
-                          in_slitmap=fibermap if imagetyp in {"flat", "arc", "object"} else None)
+            with Timer(name='Preproc '+pframe_path, logger=log.info):
+                preproc_raw_frame(in_image=frame_path, out_image=pframe_path,
+                                  in_mask=mpixmask_path, replace_with_nan=replace_with_nan, assume_imagetyp=assume_imagetyp)
+            with Timer(name='Detrend '+dframe_path, logger=log.info):
+                detrend_frame(in_image=pframe_path, out_image=dframe_path,
+                            in_bias=mbias_path,
+                            in_pixelflat=mpixflat_path,
+                            replace_with_nan=replace_with_nan,
+                            reject_cr=reject_cr,
+                            in_slitmap=fibermap if imagetyp in {"flat", "arc", "object"} else None)
 
 
-def science_reduction(expnum: int, use_fiducial_master: bool = False,
+def science_reduction(expnum: int, use_longterm_cals: bool = False,
                       skip_sky_subtraction: bool = False,
                       sky_weights: Tuple[float, float] = None,
                       fluxcal_method: str = 'STD',
@@ -1618,13 +1621,13 @@ def science_reduction(expnum: int, use_fiducial_master: bool = False,
     sci_expnum = sci_metadata["expnum"].unique()[0]
     sci_imagetyp = sci_metadata["imagetyp"].unique()[0]
 
-    cals_mjd = get_master_mjd(sci_mjd) if use_fiducial_master else sci_mjd
+    cals_mjd = get_master_mjd(sci_mjd) if use_longterm_cals else sci_mjd
     log.info(f"target master MJD: {cals_mjd}")
 
     # overwrite fiducial masters dir
     # masters_path = os.path.join(MASTERS_DIR, f"{cals_mjd}")
     log.info(f"target master path: {os.getenv('LVM_MASTER_DIR')}")
-    calibs = get_calib_paths(mjd=cals_mjd, version=drpver, use_fiducial_cals=use_fiducial_master, from_sanbox=True)
+    calibs = get_calib_paths(mjd=cals_mjd, version=drpver, longterm_cals=use_longterm_cals, from_sanbox=True)
 
     # make sure only one exposure number is being reduced
     sci_metadata.query("expnum == @sci_expnum", inplace=True)
@@ -1635,7 +1638,8 @@ def science_reduction(expnum: int, use_fiducial_master: bool = False,
     if skip_2d:
         log.info("skipping 2D reduction")
     else:
-        reduce_2d(mjd=sci_mjd, calibrations=calibs, expnums=[sci_expnum], reject_cr=reject_cr, skip_done=False)
+        with Timer(name='Reduce2d', logger=log.info):
+            reduce_2d(mjd=sci_mjd, calibrations=calibs, expnums=[sci_expnum], reject_cr=reject_cr, skip_done=False)
 
     # run reduction loop for each science camera exposure
     if skip_1d:
@@ -1670,17 +1674,20 @@ def science_reduction(expnum: int, use_fiducial_master: bool = False,
             mmodel_path = calibs["model"][sci_camera]
 
             # add astrometry to frame
-            add_astrometry(in_image=dsci_path, out_image=dsci_path, in_agcsci_image=agcsci_path, in_agcskye_image=agcskye_path, in_agcskyw_image=agcskyw_path)
+            with Timer(name='Astrometry '+dsci_path, logger=log.info):
+                add_astrometry(in_image=dsci_path, out_image=dsci_path, in_agcsci_image=agcsci_path, in_agcskye_image=agcskye_path, in_agcskyw_image=agcskyw_path)
 
             # subtract straylight
-            subtract_straylight(in_image=dsci_path, out_image=lsci_path, out_stray=lstr_path,
-                                            in_cent_trace=mtrace_path, select_nrows=(5,5), use_weights=True,
-                                            aperture=15, smoothing=400, median_box=101, gaussian_sigma=20.0,
-                                            parallel=parallel_run)
+            with Timer(name='Straylight '+lsci_path, logger=log.info):
+                subtract_straylight(in_image=dsci_path, out_image=lsci_path, out_stray=lstr_path,
+                                    in_cent_trace=mtrace_path, select_nrows=(5,5), use_weights=True,
+                                    aperture=15, smoothing=400, median_box=101, gaussian_sigma=20.0,
+                                    parallel=parallel_run)
 
             # extract 1d spectra
-            extract_spectra(in_image=lsci_path, out_rss=xsci_path, in_trace=mtrace_path, in_fwhm=mwidth_path,
-                            in_model=mmodel_path, method=extraction_method, parallel=parallel_run)
+            with Timer(name='Extract '+xsci_path, logger=log.info):
+                extract_spectra(in_image=lsci_path, out_rss=xsci_path, in_trace=mtrace_path, in_fwhm=mwidth_path,
+                                in_model=mmodel_path, method=extraction_method, parallel=parallel_run)
 
     # per channel reduction
     cframe_path = path.full("lvm_frame", drpver=drpver, tileid=sci_tileid, mjd=sci_mjd, expnum=sci_expnum, kind='CFrame')
@@ -1708,37 +1715,45 @@ def science_reduction(expnum: int, use_fiducial_master: bool = False,
                                 kind='h', camera=channel, imagetype=sci_imagetyp, expnum=expnum)
 
             # stack spectrographs
-            stack_spectrographs(in_rsss=xsci_paths, out_rss=xsci_path)
+            with Timer(name='Stack Spectrographs '+xsci_path, logger=log.info):
+                stack_spectrographs(in_rsss=xsci_paths, out_rss=xsci_path)
             if not os.path.exists(xsci_path):
                 log.error(f'No stacked file found: {xsci_path}. Skipping remaining pipeline.')
                 continue
 
             # wavelength calibrate
-            create_pixel_table(in_rss=xsci_path, out_rss=wsci_path, in_waves=mwave_paths, in_lsfs=mlsf_paths)
+            with Timer(name='Wavelengths '+wsci_path, logger=log.info):
+                create_pixel_table(in_rss=xsci_path, out_rss=wsci_path, in_waves=mwave_paths, in_lsfs=mlsf_paths)
 
             # apply fiberflat correction
-            apply_fiberflat(in_rss=wsci_path, out_frame=frame_path, in_flat=mflat_path)
+            with Timer(name='Fiberflat '+frame_path, logger=log.info):
+                apply_fiberflat(in_rss=wsci_path, out_frame=frame_path, in_flat=mflat_path)
 
             # correct thermal shift in wavelength direction
-            shift_wave_skylines(in_frame=frame_path, out_frame=frame_path)
+            with Timer(name='Thermal Shifts '+frame_path, logger=log.info):
+                shift_wave_skylines(in_frame=frame_path, out_frame=frame_path)
 
             # interpolate sky fibers
-            interpolate_sky(in_frame=frame_path, out_rss=ssci_path)
+            with Timer(name='Interpolate Sky '+ssci_path, logger=log.info):
+                interpolate_sky(in_frame=frame_path, out_rss=ssci_path)
 
             # combine sky telescopes
-            combine_skies(in_rss=ssci_path, out_rss=ssci_path, sky_weights=sky_weights)
+            with Timer(name='Combine Sky '+ssci_path, logger=log.info):
+                combine_skies(in_rss=ssci_path, out_rss=ssci_path, sky_weights=sky_weights)
 
             # resample wavelength into uniform grid along fiber IDs for science and sky fibers
-            resample_wavelength(in_rss=ssci_path,  out_rss=hsci_path, wave_range=SPEC_CHANNELS[channel], wave_disp=0.5, convert_to_density=True)
+            with Timer(name='Resample '+hsci_path, logger=log.info):
+                resample_wavelength(in_rss=ssci_path,  out_rss=hsci_path, wave_range=SPEC_CHANNELS[channel], wave_disp=0.5, convert_to_density=True)
 
             # use resampled frames for flux calibration in each camera, using standard stars observed in the spec telescope
             #  and field stars found in the sci ifu
-            fluxcal_standard_stars(hsci_path, GAIA_CACHE_DIR=MASTERS_DIR+'/gaia_cache')
-            fluxcal_sci_ifu_stars(hsci_path, GAIA_CACHE_DIR=MASTERS_DIR+'/gaia_cache')
+            with Timer(name='Fluxcal '+hsci_path, logger=log.info):
+                fluxcal_standard_stars(hsci_path, GAIA_CACHE_DIR=MASTERS_DIR+'/gaia_cache')
+                fluxcal_sci_ifu_stars(hsci_path, GAIA_CACHE_DIR=MASTERS_DIR+'/gaia_cache')
 
-            # flux-calibrate each channel
-            fframe_path = path.full("lvm_frame", mjd=sci_mjd, drpver=drpver, tileid=sci_tileid, expnum=sci_expnum, kind=f'FFrame-{channel}')
-            apply_fluxcal(in_rss=hsci_path, out_fframe=fframe_path, method=fluxcal_method)
+                # flux-calibrate each channel
+                fframe_path = path.full("lvm_frame", mjd=sci_mjd, drpver=drpver, tileid=sci_tileid, expnum=sci_expnum, kind=f'FFrame-{channel}')
+                apply_fluxcal(in_rss=hsci_path, out_fframe=fframe_path, method=fluxcal_method)
 
         # stitch channels
         fframe_paths = sorted(path.expand('lvm_frame', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver, kind='FFrame-?', expnum=sci_expnum))
@@ -1746,14 +1761,17 @@ def science_reduction(expnum: int, use_fiducial_master: bool = False,
             log.error('No fframe files found.  Cannot join spectrograph channels. Exiting pipeline.')
             return
 
-        join_spec_channels(in_fframes=fframe_paths, out_cframe=cframe_path, use_weights=True)
+        with Timer(name='Join Channels '+cframe_path, logger=log.info):
+            join_spec_channels(in_fframes=fframe_paths, out_cframe=cframe_path, use_weights=True)
 
         # sky subtraction
-        quick_sky_subtraction(in_cframe=cframe_path, out_sframe=sframe_path, skip_subtraction=skip_sky_subtraction)
+        with Timer(name='QSky '+sframe_path, logger=log.info):
+            quick_sky_subtraction(in_cframe=cframe_path, out_sframe=sframe_path, skip_subtraction=skip_sky_subtraction)
 
         # update the drpall summary file
-        log.info('Updating the drpall summary file')
-        update_summary_file(sframe_path, tileid=sci_tileid, mjd=sci_mjd, expnum=sci_expnum, master_mjd=cals_mjd)
+        with Timer(name='DRPAll '+sframe_path, logger=log.info):
+            log.info('Updating the drpall summary file')
+            update_summary_file(sframe_path, tileid=sci_tileid, mjd=sci_mjd, expnum=sci_expnum, master_mjd=cals_mjd)
 
     # clean ancillary folder
     if clean_ancillary:
@@ -1902,20 +1920,21 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
         if sci_cond:
             kwargs = get_config_options('reduction_steps.science_reduction')
             for expnum in sci['expnum'].unique():
-                try:
-                    science_reduction(expnum, use_fiducial_master=True,
-                                      fluxcal_method=fluxcal_method,
-                                      skip_2d=skip_2d,
-                                      skip_1d=skip_1d,
-                                      skip_post_1d=skip_post_1d,
-                                      clean_ancillary=clean_ancillary,
-                                      debug_mode=debug_mode, **kwargs)
-                except Exception as e:
-                    log.exception(f'Failed to reduce science frame mjd {mjd} exposure {expnum}: {e}')
-                    create_status_file(tileid, mjd, status='error')
-                    trace = traceback.format_exc()
-                    update_error_file(tileid, mjd, expnum, trace)
-                    continue
+                with Timer(name=f'Reduction EXPNUM {expnum}', logger=log.info):
+                    try:
+                        science_reduction(expnum, use_longterm_cals=True,
+                                        fluxcal_method=fluxcal_method,
+                                        skip_2d=skip_2d,
+                                        skip_1d=skip_1d,
+                                        skip_post_1d=skip_post_1d,
+                                        clean_ancillary=clean_ancillary,
+                                        debug_mode=debug_mode, **kwargs)
+                    except Exception as e:
+                        log.exception(f'Failed to reduce science frame mjd {mjd} exposure {expnum}: {e}')
+                        create_status_file(tileid, mjd, status='error')
+                        trace = traceback.format_exc()
+                        update_error_file(tileid, mjd, expnum, trace)
+                        continue
 
         # create done status on successful run
         if not status_file_exists(tileid, mjd, status='error'):
