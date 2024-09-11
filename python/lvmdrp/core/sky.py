@@ -234,9 +234,7 @@ def write_skymodel_par(parfile_path, config, verify=True):
 
 
 def skymodel_pars_header(header):
-    #if telescope not in {"SKYE", "SKYW", "SCI", "SPEC"}:
-    #    raise ValueError(f"invalid value for 'telescope' parameter: '{telescope}', valid values are 'SKYE', 'SKYW', 'SCI', or 'SPEC'")
-
+    
     # extract useful header information
     sci_ra, sci_dec = header[f"TESCIRA"], header[f"TESCIDE"]
     skye_ra, skye_dec = header[f"TESKYERA"], header[f"TESKYEDE"]
@@ -266,9 +264,11 @@ def skymodel_pars_header(header):
     sci_target_ra, sci_target_dec = sci_ra * u.deg, sci_dec * u.deg
     sci_target = Star(ra_hours=sci_target_ra.to(u.hourangle), dec_degrees=sci_target_dec.to(u.deg))
     sci_t = obs.observe(sci_target).apparent()
+
     skye_target_ra, skye_target_dec = skye_ra * u.deg, skye_dec * u.deg
     skye_target = Star(ra_hours=skye_target_ra.to(u.hourangle), dec_degrees=skye_target_dec.to(u.deg))
     skye_t = obs.observe(skye_target).apparent()
+
     skyw_target_ra, skyw_target_dec = skyw_ra * u.deg, skyw_dec * u.deg
     skyw_target = Star(ra_hours=skyw_target_ra.to(u.hourangle), dec_degrees=skyw_target_dec.to(u.deg))
     skyw_t = obs.observe(skyw_target).apparent()
@@ -291,6 +291,20 @@ def skymodel_pars_header(header):
 
     # altitude of moon ('altmoon', -90 -- 90)
     altmoon, _, moondist = m.altaz()
+
+    # RA and dec of moon (moon_RA, moon_dec)
+    moonra, moondec, _ = m.radec()
+
+    # Moon phase in deg (0:new, 90: first qt, 180: full, 270: 3rd qt)
+    _, slon, _ = s.frame_latlon(ecliptic_frame)
+    _, mlon, _ = m.frame_latlon(ecliptic_frame)
+    moon_phase = (mlon.degrees - slon.degrees) % 360.0
+
+    # Moon illumination fraction
+    moon_ill = m.fraction_illuminated(sun)
+ 
+    # altitude of sun ('altsun', -90 -- 90)
+    altsun, _, _ = s.altaz()
 
     # distance to moon ('moondist', 0.91 -- 1.08; 1: mean distance)
     moondist = moondist.to(u.m) / MEAN_MOON_DIST
@@ -350,31 +364,38 @@ def skymodel_pars_header(header):
     skymodel_pars = {
         f"HIERARCH SKYMODEL SM_H": (sm_h.to(u.km).value, "observatory height in km"),
         f"HIERARCH SKYMODEL SM_HMIN": ((2.0 * u.km).value, "lower height limit in km"),
-        f"HIERARCH SKYMODEL SCI ALT": ("{:.4f}".format(sci_alt.to(u.deg).value), "altitude of object above horizon (deg)"),
-        f"HIERARCH SKYMODEL SKYE ALT": ("{:.4f}".format(skye_alt.to(u.deg).value), "altitude of object above horizon (deg)"),
-        f"HIERARCH SKYMODEL SKYW ALT": ("{:.4f}".format(skyw_alt.to(u.deg).value), "altitude of object above horizon (deg)"),
-        f"HIERARCH SKYMODEL ALPHA": ("{:.4f}".format(alpha.to(u.deg).value), "separation of Sun and Moon from Earth (deg)"),
-        f"HIERARCH SKYMODEL SCI RHO": ("{:.4f}".format(sci_rho.to(u.deg).value), "separation of Moon and object (deg)"),
-        f"HIERARCH SKYMODEL SKYE RHO": ("{:.4f}".format(skye_rho.to(u.deg).value), "separation of Moon and object (deg)"),
-        f"HIERARCH SKYMODEL SKYW RHO": ("{:.4f}".format(skyw_rho.to(u.deg).value), "separation of Moon and object (deg)"),
-        f"HIERARCH SKYMODEL ALTMOON": ("{:.4f}".format(altmoon.to(u.deg).value), "altitude of Moon above horizon (deg)"),
-        f"HIERARCH SKYMODEL MOONDIST": ("{:.4f}".format(moondist.value), "distance to Moon (mean distance=1)"),
+        f"HIERARCH SKYMODEL SCI_ALT": (np.round(sci_alt.to(u.deg).value, 4), "altitude of object above horizon (deg)"),
+        f"HIERARCH SKYMODEL SKYE_ALT": (np.round(skye_alt.to(u.deg).value, 4), "altitude of object above horizon (deg)"),
+        f"HIERARCH SKYMODEL SKYW_ALT": (np.round(skyw_alt.to(u.deg).value, 4), "altitude of object above horizon (deg)"),
+        f"HIERARCH SKYMODEL ALPHA": (np.round(alpha.to(u.deg).value, 4), "separation of Sun and Moon from Earth (deg)"),
+        f"HIERARCH SKYMODEL SCI_RHO": (np.round(sci_rho.to(u.deg).value, 4), "separation of Moon and object (deg)"),
+        f"HIERARCH SKYMODEL SKYE_RHO": (np.round(skye_rho.to(u.deg).value, 4), "separation of Moon and object (deg)"),
+        f"HIERARCH SKYMODEL SKYW_RHO": (np.round(skyw_rho.to(u.deg).value, 4), "separation of Moon and object (deg)"),
+        f"HIERARCH SKYMODEL MOONALT": (np.round(altmoon.to(u.deg).value, 4), "altitude of Moon above horizon (deg)"),
+        f"HIERARCH SKYMODEL SUNALT": (np.round(altsun.to(u.deg).value, 4), "altitude of Sun above horizon (deg)"),
+        f"HIERARCH SKYMODEL MOONDIST": (np.round(moondist.value, 4), "distance to Moon (mean distance=1)"),
         f"HIERARCH SKYMODEL PRES": ((744 * u.hPa).value, "pressure at observer altitude (hPa), set: 744"),
         f"HIERARCH SKYMODEL SSA": (0.97, "aerosols' single scattering albedo, set: 0.97"),
         f"HIERARCH SKYMODEL CALCDS": ( "N", "cal double scattering of moon (Y or N)"),
         f"HIERARCH SKYMODEL O2COLUMN": (1.0, "relative ozone column density (1->258 DU)"),
         f"HIERARCH SKYMODEL MOONSCAL": (1.0, "scaling factor for scattered moonlight"),
-        f"HIERARCH SKYMODEL SCI LON_ECL": ("{:.4f}".format(sci_lon_ecl.to(u.deg).value), "heliocen ecliptic longitude (deg)"),
-        f"HIERARCH SKYMODEL SCI LAT_ECL": ("{:.4f}".format(sci_lat_ecl.to(u.deg).value), "ecliptic latitude (deg)"),
-        f"HIERARCH SKYMODEL SKYE LON_ECL": ("{:.4f}".format(skye_lon_ecl.to(u.deg).value), "heliocen ecliptic longitude (deg)"),
-        f"HIERARCH SKYMODEL SKYE LAT_ECL": ("{:.4f}".format(skye_lat_ecl.to(u.deg).value), "ecliptic latitude (deg)"),
-        f"HIERARCH SKYMODEL SKYW LON_ECL": ("{:.4f}".format(skyw_lon_ecl.to(u.deg).value), "heliocen ecliptic longitude (deg)"),
-        f"HIERARCH SKYMODEL SKYW LAT_ECL": ("{:.4f}".format(skyw_lat_ecl.to(u.deg).value), "ecliptic latitude (deg)"),
-        f"HIERARCH SKYMODEL EMIS_STR": (",".join(map(str, [0.2])), "grey-body emissivity"),
-        f"HIERARCH SKYMODEL TEMP_STR": (",".join(map(str, [(290.0 * u.K).value])), "grey-body temperature (K)"),
+        f"HIERARCH SKYMODEL SCI_LON_ECL": (np.round(sci_lon_ecl.to(u.deg).value, 5), "heliocen ecliptic longitude (deg)"),
+        f"HIERARCH SKYMODEL SCI_LAT_ECL": (np.round(sci_lat_ecl.to(u.deg).value, 5), "ecliptic latitude (deg)"),
+        f"HIERARCH SKYMODEL SKYE_LON_ECL": (np.round(skye_lon_ecl.to(u.deg).value, 5), "heliocen ecliptic longitude (deg)"),
+        f"HIERARCH SKYMODEL SKYE_LAT_ECL": (np.round(skye_lat_ecl.to(u.deg).value, 5), "ecliptic latitude (deg)"),
+        f"HIERARCH SKYMODEL SKYW_LON_ECL": (np.round(skyw_lon_ecl.to(u.deg).value, 5), "heliocen ecliptic longitude (deg)"),
+        f"HIERARCH SKYMODEL SKYW_LAT_ECL": (np.round(skyw_lat_ecl.to(u.deg).value, 5), "ecliptic latitude (deg)"),
+        f"HIERARCH SKYMODEL EMIS_STR": (0.2, "grey-body emissivity"),
+        f"HIERARCH SKYMODEL TEMP_STR": ((290.0 * u.K).value, "grey-body temperature (K)"),
         f"HIERARCH SKYMODEL MSOLFLUX": (130.0, "monthly-averaged solar radio flux, set: 130"),
         f"HIERARCH SKYMODEL SEASON": (season, "bimonthly period (1:Dec/Jan, 6:Oct/Nov.; 0:year)"),
         f"HIERARCH SKYMODEL TIME": (time, "period of night (x/3 night, x=1,2,3; 0:night)"),
+        f"HIERARCH SKYMODEL MOON_RA": (np.round(moonra.to(u.deg).value, 5), "RA of the moon (deg)"),
+        f"HIERARCH SKYMODEL MOON_DEC": (np.round(moondec.to(u.deg).value, 5), "DEC of the moon (deg)"),
+        f"HIERARCH SKYMODEL MOON_PHASE": (np.round(moon_phase, 2), "Phase of moon (deg; 0: new, 90: 1st qt)"),
+        f"HIERARCH SKYMODEL MOON_FLI": (np.round(moon_ill, 4), "Moon fraction lunar illumination"),
+
+
         #add Moon RA
         #add Moon dec
         #add Moon phase
@@ -779,8 +800,9 @@ def get_telescope_shadowheight(header, telescope):
 
     shadow_height = SH_CALCULATOR.get_heights()[0]
 
-    # check if the shadow height is a nan value
+    # check if the shadow height is a nan value and replace with -999
     isnan = np.isnan(shadow_height)
+    if isnan:
+        shadow_height = -999
 
-    # return None or the valid value
-    return None if isnan else shadow_height
+    return shadow_height

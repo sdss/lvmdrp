@@ -1443,14 +1443,14 @@ def interpolate_sky( in_frame: str, out_rss: str = None, display_plots: bool = F
     # https://spaceweather.gc.ca/forecast-prevision/solar-solaire/solarflux/sx-5-en.php
     # TODO: add same parameters for std *fibers*
     # new_rss._header.update(skymodel_pars_from_header(new_rss._header, telescope="SPEC"))
-    new_rss._header["HIERARCH GEOCORONAL SKYW SH_HGHT"] = (
-        "{:.4f}".format(get_telescope_shadowheight(new_rss._header, telescope="SKYW")), "height of Earth's shadow (km)" 
+    new_rss._header["HIERARCH GEOCORONAL SKYW_SH_HGHT"] = (
+        np.round(get_telescope_shadowheight(new_rss._header, telescope="SKYW"), 5), "height of Earth's shadow (km)" 
     )
-    new_rss._header["HIERARCH GEOCORONAL SKYE SH_HGHT"] = (
-        "{:.4f}".format(get_telescope_shadowheight(new_rss._header, telescope="SKYE")), "height of Earth's shadow (km)" 
+    new_rss._header["HIERARCH GEOCORONAL SKYE_SH_HGHT"] = (
+        np.round(get_telescope_shadowheight(new_rss._header, telescope="SKYE"), 5), "height of Earth's shadow (km)" 
     )
-    new_rss._header["HIERARCH GEOCORONAL SCI SH_HGHT"] = (
-        "{:.4f}".format(get_telescope_shadowheight(new_rss._header, telescope="SCI")), "height of Earth's shadow (km)" 
+    new_rss._header["HIERARCH GEOCORONAL SCI_SH_HGHT"] = (
+        np.round(get_telescope_shadowheight(new_rss._header, telescope="SCI"), 5), "height of Earth's shadow (km)" 
     )
 
     # write output RSS
