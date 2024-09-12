@@ -279,21 +279,21 @@ def skymodel_pars_header(header):
         sci_target_ra, sci_target_dec = sci_ra * u.deg, sci_dec * u.deg
         sci_target = Star(ra_hours=sci_target_ra.to(u.hourangle), dec_degrees=sci_target_dec.to(u.deg))
         sci_t = obs.observe(sci_target).apparent()
-    except:
+    except Exception:
         sci_t = np.nan
 
     try:
         skye_target_ra, skye_target_dec = skye_ra * u.deg, skye_dec * u.deg
         skye_target = Star(ra_hours=skye_target_ra.to(u.hourangle), dec_degrees=skye_target_dec.to(u.deg))
         skye_t = obs.observe(skye_target).apparent()
-    except:
+    except Exception:
         skye_t = np.nan
 
     try:
         skyw_target_ra, skyw_target_dec = skyw_ra * u.deg, skyw_dec * u.deg
         skyw_target = Star(ra_hours=skyw_target_ra.to(u.hourangle), dec_degrees=skyw_target_dec.to(u.deg))
         skyw_t = obs.observe(skyw_target).apparent()
-    except:
+    except Exception:
         skyw_t = np.nan
 
     # observatory height ('sm_h' in km)
