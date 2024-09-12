@@ -219,38 +219,7 @@ class QualityFlag(BaseBitmask):
 
 
 class PixMask(BaseBitmask):
-    # fiber bitmasks
-    NONEXPOSED = auto()
-    WEAKFIBER = auto()
-    DEADFIBER = auto()
-    INTERPOLATED = auto()
-
-    # measure quality of tracing using polynomial fit - samples residuals
-    FAILEDPOLY = auto()
-    FAILEDSPLINE = auto()
-    FAILEDINTERP = auto()
-    BADTRACE = auto()
-    BADARC = auto()
-
-    # measure offset of the fiber from the median flatfielded fiber
-    BADFLAT = auto()
-
-    # offset from a preset fiber shift value
-    LARGESHIFT = auto()
-
-    BADSTDFIBER = auto()
-    BADSKYFIBER = auto()
-
-    # pixel bitmasks
-
-    # pixels with no useful information
-    NODATA = auto()
-
-    # TODO: bright pixels on top and bottom edges
-
-    # set this if X% close to saturation level
-    SATURATION = auto()
-
+    # pixel bitmasks ------------------------------------------------------
     # from pixelmasks
     BADPIX = auto()
     NEARBADPIXEL = auto()
@@ -280,6 +249,36 @@ class PixMask(BaseBitmask):
     # large sky residuals
     BADSKYCHI = auto()
 
+    # fiber bitmasks ------------------------------------------------------
+    NONEXPOSED = auto()
+    WEAKFIBER = auto()
+    DEADFIBER = auto()
+    INTERPOLATED = auto()
+
+    # measure quality of tracing using polynomial fit - samples residuals
+    FAILEDPOLY = auto()
+    FAILEDSPLINE = auto()
+    FAILEDINTERP = auto()
+    BADTRACE = auto()
+    BADARC = auto()
+
+    # measure offset of the fiber from the median flatfielded fiber
+    BADFLAT = auto()
+
+    # offset from a preset fiber shift value
+    LARGESHIFT = auto()
+
+    BADSTDFIBER = auto()
+    BADSKYFIBER = auto()
+
+    # pixels with no useful information
+    NODATA = auto()
+
+    # TODO: bright pixels on top and bottom edges
+
+    # set this if X% close to saturation level
+    SATURATION = auto()
+
 
 # define flag name constants
 # RAW_QUALITIES = list(RawFrameQuality.__members__.keys())
@@ -304,8 +303,10 @@ def _parse_bitmask(pixmask, mask_shape):
 
 
 def _parse_where(where, mask_shape):
-    if where is not None and isinstance(where, np.ndarray[bool]):
+    if where is not None:
+        assert isinstance(where, np.ndarray), f"Wrong type for `where` {type(where)}, expected `numpy.ndarray`"
         assert where.shape == mask_shape, f"Wrong `where` shape {where.shape} not matching `mask_image` shape {mask_shape}"
+        assert isinstance(where[0,0], np.bool_), f"Wrong `where` Numpy dtype {type(where[0,0])}, expected a boolean array"
     else:
         where = np.ones(mask_shape, dtype=bool)
 
@@ -316,14 +317,7 @@ def add_bitmask(mask_image, pixmask, where=None):
     pixmask = _parse_bitmask(pixmask, mask_shape=mask_image.shape)
     where = _parse_where(where, mask_shape=mask_image.shape)
 
-    mask = np.zeros_like(mask_image, dtype=int)
-    mask[where] |= pixmask
-
-    if mask_image is None:
-        mask_image = mask
-        return mask_image
-
-    mask_image[where] |= mask[where]
+    mask_image[where] |= pixmask
     return mask_image
 
 
@@ -331,12 +325,5 @@ def toggle_bitmask(mask_image, pixmask, where=None):
     pixmask = _parse_bitmask(pixmask, mask_shape=mask_image.shape)
     where = _parse_where(where, mask_shape=mask_image.shape)
 
-    mask = np.zeros_like(mask_image, dtype=int)
-    mask[where] |= pixmask
-
-    if mask_image is None:
-        mask_image = mask
-        return mask_image
-
-    mask_image[where] ^= mask[where]
+    mask_image[where] ^= pixmask
     return mask_image

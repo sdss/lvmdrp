@@ -1081,6 +1081,8 @@ class Image(Header):
         mask : np.ndarray[PixMask|int]
             Updated pixel mask
         """
+        if self._mask is None and self._dim is not None:
+            self._mask = numpy.zeros(self._dim)
         self._mask = add_bitmask(self._mask, pixmask=pixmask, where=where)
         return self._mask
 
