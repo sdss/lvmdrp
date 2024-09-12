@@ -327,3 +327,12 @@ def toggle_bitmask(mask_image, pixmask, where=None):
 
     mask_image[where] ^= pixmask
     return mask_image
+
+
+def print_bitmasks(mask_array, logger=None):
+    uniques, counts = np.unique(mask_array, return_counts=True)
+    bitmasks = dict(zip(map(lambda p: PixMask(int(p)).get_name() if p>0 else "GOODPIX", uniques), counts))
+    if logger:
+        logger.info(f"{bitmasks}")
+        return
+    print(bitmasks)

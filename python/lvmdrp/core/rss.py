@@ -14,7 +14,7 @@ from astropy.coordinates import EarthLocation
 from astropy import units as u
 
 from lvmdrp import log
-from lvmdrp.utils.bitmask import PixMask, _parse_bitmask, add_bitmask, toggle_bitmask
+from lvmdrp.utils.bitmask import PixMask, _parse_bitmask, add_bitmask, toggle_bitmask, print_bitmasks
 from lvmdrp.core.constants import CONFIG_PATH
 from lvmdrp.core.apertures import Aperture
 from lvmdrp.core.cube import Cube
@@ -1011,12 +1011,7 @@ class RSS(FiberRows):
         """
         if self._mask is None:
             return
-        uniques, counts = numpy.unique(self._mask, return_counts=True)
-        bitmasks = dict(zip(map(lambda p: PixMask(p).name if p>0 else "GOODPIX", uniques), counts))
-        if logger:
-            logger.info(f"{bitmasks}")
-            return
-        print(bitmasks)
+        print_bitmasks(self._mask, logger=log)
 
     def add_header_comment(self, comstr):
         '''

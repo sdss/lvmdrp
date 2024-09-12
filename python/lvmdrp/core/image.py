@@ -1117,12 +1117,7 @@ class Image(Header):
         """
         if self._mask is None:
             return
-        uniques, counts = numpy.unique(self._mask, return_counts=True)
-        bitmasks = dict(zip(map(lambda p: PixMask(p).name if p>0 else "GOODPIX", uniques), counts))
-        if logger:
-            logger.info(f"{bitmasks}")
-            return
-        print(bitmasks)
+        print_bitmasks(self._mask, logger=log)
 
     def convertUnit(self, to, assume="adu", gain_field="GAIN", inplace=False):
         """converts the unit of the image
