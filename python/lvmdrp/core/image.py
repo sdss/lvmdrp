@@ -1785,14 +1785,13 @@ class Image(Header):
             median filtered image
         """
         new_data = copy(self._data)
-        new_mask = copy(self._mask) if self._mask is not None else ~numpy.isfinite(new_data)
         new_error = copy(self._error)
 
         new_data = ndimage.median_filter(new_data, size, mode="nearest")
         if propagate_error and new_error is not None:
             new_error = numpy.sqrt(ndimage.median_filter(new_error ** 2, size, mode="nearest"))
 
-        image = Image(data=new_data, error=new_error, mask=new_mask, header=self._header,
+        image = Image(data=new_data, error=new_error, mask=self._mask, header=self._header,
                       origin=self._origin, individual_frames=self._individual_frames, slitmap=self._slitmap)
         return image
 
