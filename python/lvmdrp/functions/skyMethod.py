@@ -1437,12 +1437,11 @@ def interpolate_sky( in_frame: str, out_rss: str = None, display_plots: bool = F
 
     # update header metadata
     new_rss._header.update(skymodel_pars_header(new_rss._header))
-    #new_rss._header.update(skymodel_pars_from_header(new_rss._header, telescope="SKYE"))
-    #new_rss._header.update(skymodel_pars_from_header(new_rss._header, telescope="SCI"))
+
     # TODO: add MSOLFLUX to headers. Pull data from here:
     # https://spaceweather.gc.ca/forecast-prevision/solar-solaire/solarflux/sx-5-en.php
     # TODO: add same parameters for std *fibers*
-    # new_rss._header.update(skymodel_pars_from_header(new_rss._header, telescope="SPEC"))
+
     new_rss._header["HIERARCH GEOCORONAL SKYW_SH_HGHT"] = (
         np.round(get_telescope_shadowheight(new_rss._header, telescope="SKYW"), 5), "height of Earth's shadow (km)" 
     )
@@ -1598,6 +1597,8 @@ def quick_sky_subtraction(in_cframe, out_sframe,
         input CFrame file
     out_sframe : str
         output SFrame file
+    skip_subtraction: Boolean, option
+        flag for skipping sky subtraction, not currently useable
     skymethod : str, optional
         method of computing sky continuum, by default "farlines_nearcont"
 
@@ -1608,7 +1609,7 @@ def quick_sky_subtraction(in_cframe, out_sframe,
     log.info(f"loading {in_cframe} for sky subtraction")
 
     cframe = lvmCFrame.from_file(in_cframe)
-
+    
     # read sky table hdu
     sky_hdu = prep_input_simplesky_mean(in_cframe)
 
@@ -1656,7 +1657,7 @@ def quick_sky_subtraction(in_cframe, out_sframe,
     # print("writing lvmSFrame")
     log.info(f"writing lvmSframe to {out_sframe}")
     sframe = lvmSFrame(data=skysub_data, error=skysub_error, mask=cframe._mask.astype(bool), sky=skydata, sky_error=sky_error,
-                       wave=cframe._wave, lsf=cframe._lsf, header=cframe._header, slitmap=cframe._slitmap)
+                     wave=cframe._wave, lsf=cframe._lsf, header=cframe._header, slitmap=cframe._slitmap)
     sframe._mask |= ~np.isfinite(sframe._error)
     sframe.writeFitsData(out_sframe)
     # TODO: check on expnum=7632 for halpha emission in sky fibers

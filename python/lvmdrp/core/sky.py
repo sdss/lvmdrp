@@ -234,6 +234,20 @@ def write_skymodel_par(parfile_path, config, verify=True):
 
 
 def skymodel_pars_header(header):
+    """Writes skymodel and useful sky info into header
+    To run the ESO skymodel, several parameters are needed.  These are calculated
+    and stored in the output (see ESO skymodel docu for more details).
+    Additionally useful parameters needed for analyzing sky subtraction are provided
+
+    Parameters
+    ----------
+    header: fits header
+        header with needed metadata info for given observation
+    skymodel_pars: dict
+        output dict with header keywords, values and comments
+        None/NAN/Null values replaced with -999
+    
+    """
     
     # extract useful header information
     sci_ra, sci_dec = header[f"TESCIRA"], header[f"TESCIDE"]
@@ -261,17 +275,26 @@ def skymodel_pars_header(header):
     s, m = obs.observe(sun).apparent(), obs.observe(moon).apparent()
 
     # define targets for sci, skye, skyw
-    sci_target_ra, sci_target_dec = sci_ra * u.deg, sci_dec * u.deg
-    sci_target = Star(ra_hours=sci_target_ra.to(u.hourangle), dec_degrees=sci_target_dec.to(u.deg))
-    sci_t = obs.observe(sci_target).apparent()
+    try:
+        sci_target_ra, sci_target_dec = sci_ra * u.deg, sci_dec * u.deg
+        sci_target = Star(ra_hours=sci_target_ra.to(u.hourangle), dec_degrees=sci_target_dec.to(u.deg))
+        sci_t = obs.observe(sci_target).apparent()
+    except:
+        sci_t = np.nan
 
-    skye_target_ra, skye_target_dec = skye_ra * u.deg, skye_dec * u.deg
-    skye_target = Star(ra_hours=skye_target_ra.to(u.hourangle), dec_degrees=skye_target_dec.to(u.deg))
-    skye_t = obs.observe(skye_target).apparent()
+    try:
+        skye_target_ra, skye_target_dec = skye_ra * u.deg, skye_dec * u.deg
+        skye_target = Star(ra_hours=skye_target_ra.to(u.hourangle), dec_degrees=skye_target_dec.to(u.deg))
+        skye_t = obs.observe(skye_target).apparent()
+    except:
+        skye_t = np.nan
 
-    skyw_target_ra, skyw_target_dec = skyw_ra * u.deg, skyw_dec * u.deg
-    skyw_target = Star(ra_hours=skyw_target_ra.to(u.hourangle), dec_degrees=skyw_target_dec.to(u.deg))
-    skyw_t = obs.observe(skyw_target).apparent()
+    try:
+        skyw_target_ra, skyw_target_dec = skyw_ra * u.deg, skyw_dec * u.deg
+        skyw_target = Star(ra_hours=skyw_target_ra.to(u.hourangle), dec_degrees=skyw_target_dec.to(u.deg))
+        skyw_t = obs.observe(skyw_target).apparent()
+    except:
+        skyw_t = np.nan
 
     # observatory height ('sm_h' in km)
     sm_h = SH_CALCULATOR.observatory_elevation
@@ -301,7 +324,7 @@ def skymodel_pars_header(header):
     moon_phase = (mlon.degrees - slon.degrees) % 360.0
 
     # Moon illumination fraction
-    moon_ill = m.fraction_illuminated(sun)
+    moon_fli = m.fraction_illuminated(sun)
  
     # altitude of sun ('altsun', -90 -- 90)
     altsun, _, _ = s.altaz()
@@ -333,8 +356,10 @@ def skymodel_pars_header(header):
         season = 4
     elif month in [8, 9]:
         season = 5
-    else:
+    elif month in [10, 11]:
         season = 6
+    else:
+        season = 0
 
     # time of the observation ('time' in x/3 of the night; 0: entire night)
     t_ini, t_fin = obs_time - timedelta(days=2), obs_time + timedelta(days=2)
@@ -393,14 +418,13 @@ def skymodel_pars_header(header):
         f"HIERARCH SKYMODEL MOON_RA": (np.round(moonra.to(u.deg).value, 5), "RA of the moon (deg)"),
         f"HIERARCH SKYMODEL MOON_DEC": (np.round(moondec.to(u.deg).value, 5), "DEC of the moon (deg)"),
         f"HIERARCH SKYMODEL MOON_PHASE": (np.round(moon_phase, 2), "Phase of moon (deg; 0: new, 90: 1st qt)"),
-        f"HIERARCH SKYMODEL MOON_FLI": (np.round(moon_ill, 4), "Moon fraction lunar illumination"),
-
-
-        #add Moon RA
-        #add Moon dec
-        #add Moon phase
-        #add Moon illumination
+        f"HIERARCH SKYMODEL MOON_FLI": (np.round(moon_fli, 4), "Moon fraction lunar illumination"),
     }
+
+    # checking for any empty, None, or NAN values and replacing with -999
+    for key, value in skymodel_pars.items():
+        if value[0] == '' or value[0] == None or value[0] == np.nan:
+           skymodel_pars[key]=(-999, value[1])
 
     return skymodel_pars
 
@@ -788,9 +812,7 @@ def get_telescope_shadowheight(header, telescope):
     if telescope not in {"SKYE", "SKYW", "SCI", "SPEC"}:
         raise ValueError(f"invalid value for 'telescope' parameter: '{telescope}', valid values are 'SKYE', 'SKYW', 'SCI', or 'SPEC'")
 
-    #header["JD"] = header["MJD"] + 2400000.5
     ra, dec = header[f"TE{telescope}RA"], header[f"TE{telescope}DE"]
-    #jd = header["JD"]
     time = Time(header["OBSTIME"],format='isot', scale='utc')
     jd = time.jd
 
