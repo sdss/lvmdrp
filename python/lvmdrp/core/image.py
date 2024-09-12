@@ -1082,7 +1082,7 @@ class Image(Header):
             Updated pixel mask
         """
         if self._mask is None and self._dim is not None:
-            self._mask = numpy.zeros(self._dim)
+            self._mask = numpy.zeros(self._dim, dtype=int)
         self._mask = add_bitmask(self._mask, pixmask=pixmask, where=where)
         return self._mask
 
@@ -1106,6 +1106,23 @@ class Image(Header):
         """
         self._mask = toggle_bitmask(self._mask, pixmask=pixmask, where=where)
         return self._mask
+
+    def print_bitmasks(self, logger=None):
+        """Prints or logs bitmask value counts
+
+        Parameters
+        ----------
+        logger : logger, optional
+            logs with level `info` if given, by default None (uses print)
+        """
+        if self._mask is None:
+            return
+        uniques, counts = numpy.unique(self._mask, return_counts=True)
+        bitmasks = dict(zip(map(lambda p: PixMask(p).name if p>0 else "GOODPIX", uniques), counts))
+        if logger:
+            logger.info(f"{bitmasks}")
+            return
+        print(bitmasks)
 
     def convertUnit(self, to, assume="adu", gain_field="GAIN", inplace=False):
         """converts the unit of the image

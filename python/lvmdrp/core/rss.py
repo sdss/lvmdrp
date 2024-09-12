@@ -14,7 +14,7 @@ from astropy.coordinates import EarthLocation
 from astropy import units as u
 
 from lvmdrp import log
-from lvmdrp.utils.bitmask import PixMask, _parse_bitmask
+from lvmdrp.utils.bitmask import PixMask, _parse_bitmask, add_bitmask, toggle_bitmask
 from lvmdrp.core.constants import CONFIG_PATH
 from lvmdrp.core.apertures import Aperture
 from lvmdrp.core.cube import Cube
@@ -956,6 +956,67 @@ class RSS(FiberRows):
 
         if self._sky_error is not None and spec._sky_error is not None:
             self._sky_error[fiber] = spec._sky_error
+
+    def add_bitmask(self, pixmask, where=None):
+        """Adds the given bitmask to the current mask
+
+        If no mask is present in the image, a new mask will be started
+        with the corresponding pixels flagged with `pixmask`.
+
+        Parameters
+        ----------
+        pixmask : PixMask|str|int
+            Bitmask to add to the current mask
+        where : numpy.ndarray[bool], optional
+            Boolean selection of pixels where to add given bitmask, by default all pixels
+
+        Returns
+        -------
+        mask : np.ndarray[PixMask|int]
+            Updated pixel mask
+        """
+        if self._mask is None and self._dim is not None:
+            self._mask = numpy.zeros(self._dim, dtype=int)
+        self._mask = add_bitmask(self._mask, pixmask=pixmask, where=where)
+        return self._mask
+
+    def toggle_bitmask(self, pixmask, where=None):
+        """Toggle the given bitmask in the current mask
+
+        If no mask is present in the image, a new mask will be started
+        with the corresponding pixels flagged with `pixmask`.
+
+        Parameters
+        ----------
+        pixmask : PixMask|str|int
+            Bitmask to add to the current mask
+        where : numpy.ndarray[bool], optional
+            Boolean selection of pixels where to add given bitmask, by default all pixels
+
+        Returns
+        -------
+        mask : np.ndarray[PixMask|int]
+            Updated pixel mask
+        """
+        self._mask = toggle_bitmask(self._mask, pixmask=pixmask, where=where)
+        return self._mask
+
+    def print_bitmasks(self, logger=None):
+        """Prints or logs bitmask value counts
+
+        Parameters
+        ----------
+        logger : logger, optional
+            logs with level `info` if given, by default None (uses print)
+        """
+        if self._mask is None:
+            return
+        uniques, counts = numpy.unique(self._mask, return_counts=True)
+        bitmasks = dict(zip(map(lambda p: PixMask(p).name if p>0 else "GOODPIX", uniques), counts))
+        if logger:
+            logger.info(f"{bitmasks}")
+            return
+        print(bitmasks)
 
     def add_header_comment(self, comstr):
         '''
