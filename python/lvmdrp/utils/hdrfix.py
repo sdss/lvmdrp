@@ -1,9 +1,10 @@
 #!/usr/bin/env python
 # encoding: utf-8
 
+import functools
 import os
 import pathlib
-import re
+import fnmatch
 import yaml
 
 import pandas as pd
@@ -38,6 +39,7 @@ def get_hdrfix_path(mjd: int) -> str:
         raise ValueError('LVMCORE_DIR environment variable not found.  Please set up the repo.')
 
 
+@functools.lru_cache(maxsize=256)
 def read_hdrfix_file(mjd: int) -> pd.DataFrame:
     """ Read a header fix file
 
@@ -173,18 +175,14 @@ def apply_hdrfix(mjd: int, camera: str = None, expnum: int = None,
     if fix is None or fix.empty:
         return hdr
 
-    # find matching files
-    for fileroot, key, val in zip(fix['fileroot'], fix['keyword'], fix['value']):
-        root = f'{mjd}/{fileroot}{"" if fileroot.endswith("*") else "*"}'
-        files = pathlib.Path(os.getenv('LVM_DATA_S')).rglob(root)
+    # Create the current file string
+    hemi = 's' if hdr['OBSERVAT'] == 'LCO' else 'n'
+    current_file = f'sdR-{hemi}-{camera}-{expnum:0>8}'
 
-        pattern = re.compile(f'{camera}-{expnum:0>8}')
-        sub = filter(pattern.search, map(str, files))
-
-        # apply the header fix
-        for file in sub:
-            stem = pathlib.Path(file).stem
-            log.info(f'Applying header fix on {stem} for key: {key}, value: {val}.')
-            hdr[key] = val
+    # Apply the header fixes
+    for _, row in fix.iterrows():
+        if fnmatch.fnmatch(current_file, row['fileroot']):
+            hdr[row['keyword']] = row['value']
+            log.info(f'Applying header fix on {current_file} for key: {row["keyword"]}, value: {row["value"]}.')
 
     return hdr

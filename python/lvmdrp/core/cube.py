@@ -1,6 +1,7 @@
 import numpy
 from astropy.io import fits as pyfits
 from scipy import ndimage
+import bottleneck as bn
 
 from lvmdrp.core.header import Header, combineHdr
 from lvmdrp.core.image import Image
@@ -412,7 +413,7 @@ class Cube(Header, PositionTable):
                 mask = None
         elif mode == "median":
             if numpy.sum(select_wave) > 0:
-                image = numpy.median(data[select_wave, :, :], 0)
+                image = bn.median(data[select_wave, :, :], 0)
                 mask = image == 0
             else:
                 image = None
@@ -599,7 +600,7 @@ class Cube(Header, PositionTable):
         for i in range(self._data.shape[2]):
             for j in range(self._data.shape[1]):
                 if (
-                    rescale_region is not []
+                    rescale_region != []
                     and slice1._data[j + crpix2_1 - crpix2, i + crpix1_1 - crpix1] != 0
                 ):
                     ratio = (

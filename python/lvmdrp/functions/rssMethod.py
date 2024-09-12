@@ -11,8 +11,8 @@ import matplotlib.gridspec as gridspec
 import numpy
 import yaml
 import bottleneck as bn
+from tqdm import tqdm
 from astropy import units as u
-from astropy.constants import c
 from astropy.io import fits
 from astropy.table import Table
 from astropy.time import Time
@@ -27,10 +27,13 @@ from lvmdrp.core.cube import Cube
 from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.core.image import loadImage
 from lvmdrp.core.passband import PassBand
-from lvmdrp.core.plot import plt, create_subplots, save_fig, plot_wavesol_residuals, plot_wavesol_coeffs
+from lvmdrp.core.plot import (plt, create_subplots, save_fig,
+                              plot_wavesol_coeffs, plot_wavesol_residuals,
+                              plot_wavesol_spec, plot_wavesol_wave,
+                              plot_wavesol_lsf)
 from lvmdrp.core.rss import RSS, _read_pixwav_map, loadRSS, lvmFrame, lvmFFrame, lvmCFrame
-from lvmdrp.core.spectrum1d import Spectrum1D, _spec_from_lines, _cross_match
-from lvmdrp.external import ancillary_func
+from lvmdrp.core.spectrum1d import Spectrum1D, _spec_from_lines, _cross_match_float
+from lvmdrp.core.fluxcal import galExtinct
 from lvmdrp.utils import flatten
 from lvmdrp import log
 
@@ -52,6 +55,10 @@ __all__ = [
 DONE_PASS = "gi"
 DONE_MAGS = numpy.asarray([22, 21])
 DONE_LIMS = numpy.asarray([1.7, 5.0])
+
+# GB hand picked isolated bright lines across each channel which are not doublest in UVES atlas
+# true wavelengths taken from UVES sky line atlas
+REF_SKYLINES = {'b':[5577.346680], 'r':[6363.782715, 7358.680176, 7392.209961], 'z':[8399.175781, 8988.383789, 9552.546875, 9719.838867]}
 
 
 def _linear_model(pars, xdata):
@@ -90,10 +97,10 @@ def _illumination_correction(fiberflat, apply_correction=True):
     data[(fiberflat._mask)|(data <= 0)] = numpy.nan
 
     # compute median factors
-    sci_factor = numpy.nanmedian(data[sci_fibers, 1000:3000])
-    skw_factor = numpy.nanmedian(data[skw_fibers, 1000:3000])
-    ske_factor = numpy.nanmedian(data[ske_fibers, 1000:3000])
-    std_factor = numpy.nanmedian(data[std_fibers, 1000:3000])
+    sci_factor = bn.nanmedian(data[sci_fibers, 1000:3000])
+    skw_factor = bn.nanmedian(data[skw_fibers, 1000:3000])
+    ske_factor = bn.nanmedian(data[ske_fibers, 1000:3000])
+    std_factor = bn.nanmedian(data[std_fibers, 1000:3000])
     norm = numpy.mean([sci_factor, skw_factor, ske_factor, std_factor])
     sci_factor /= norm
     skw_factor /= norm
@@ -108,6 +115,22 @@ def _illumination_correction(fiberflat, apply_correction=True):
         fiberflat[std_fibers] *= std_factor
 
     return fiberflat, dict(zip(("Sci", "SkyW", "SkyE", "Std"), (sci_factor, skw_factor, ske_factor, std_factor)))
+
+
+def _make_arcline_axes(display_plots, pixel, ref_lines, ifiber, unit="e-", ncols=3, fig_shape=(5, 4)):
+    nlines = len(pixel)
+    nrows = int(numpy.ceil(nlines / ncols))
+    fig, axs = create_subplots(to_display=display_plots,
+                               nrows=nrows, ncols=ncols,
+                               figsize=(fig_shape[0]*ncols, fig_shape[1]*nrows),
+                               layout="constrained")
+    fig.suptitle(f"Gaussian fitting for fiber {ifiber}")
+    fig.supylabel(f"Counts ({unit}/pixel)")
+    for i, ax in zip(range(nlines), axs):
+        ax.set_title(f"line {ref_lines[i]:.2f} (Ang)")
+        ax.set_xlabel("X (pixel)")
+
+    return fig, axs
 
 
 def mergeRSS_drp(files_in, file_out, mergeHdr="1"):
@@ -153,84 +176,103 @@ def mergeRSS_drp(files_in, file_out, mergeHdr="1"):
 # * merge disp_rss and res_rss products into lvmArc product, change variable to out_arc
 @skip_on_missing_input_path(["in_arc"])
 # @skip_if_drpqual_flags(["SATURATED"], "in_arc")
-def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: str,
+def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf: str,
+                                  cont_niter: int = 3, cont_thresh: float = 0.999, cont_box_range: Tuple[int] = (50, 300),
                                   ref_fiber: int = 319, pixel: List[float] = [], ref_lines: List[float] = [],
                                   use_line: List[bool] = [],
-                                  poly_disp: int = 3, poly_fwhm: int = 5,
-                                  poly_cros: int = 3, poly_kinds: list = ['poly', 'poly', 'poly'],
-                                  init_back: float = 10.0, aperture: int = 10,
-                                  flux_min: float = 10.0, fwhm_max: float = 5.0,
-                                  rel_flux_limits: list = [0.001, 100.0], fiberflat: str = "",
-                                  negative: bool = False, cc_correction: bool = True,
-                                  cc_max_shift: int = 40,
+                                  cc_correction: bool = True,
+                                  cc_max_shift: int = 30,
+                                  aperture: int = 12,
+                                  fwhm_guess: float = 3.0,
+                                  bg_guess: float = 0.0,
+                                  flux_range: List[float] = [100.0, numpy.inf],
+                                  cent_range: List[float] = [-4.0, 4.0],
+                                  fwhm_range: List[float] = [2.0, 4.5],
+                                  bg_range: List[float] = [-1000.0, numpy.inf],
+                                  poly_disp: int = 6, poly_fwhm: int = 4,
+                                  poly_cros: int = 0, poly_kinds: list = ['poly', 'poly', 'poly'],
+                                  negative: bool = False,
+                                  plot_fibers: List[int] = [],
                                   display_plots: bool = False):
     """
     Solves for the wavelength and the LSF using polynomial fitting
 
-    Measures the pixel position of emission lines in wavelength UNCALIBRATED
-    for all fibers of the RSS. Starting from the initial guess of pixel
-    positions for a given fiber, the program measures the position using
-    Gaussian fitting to the first and last fiber of the RSS. The best fit
-    emission line position of the previous fiber are used as guess parameters.
-    Certain criterion can be imposed to reject certain measurements and flag
-    those as bad. They will be ignored for the dispersion solution, which is
-    estimated for each fiber independently. Two RSS FITS file containing the
-    wavelength pixel table and the FWHM pixel table will be stored.
+    Fits Gaussian + const profiles to a set of previously identified arc lines,
+    then for each fiber fits a polynomial function for line(pix) vs
+    line(ref_wave) to get the wavelength solution. This wavelength solution is
+    used to estimate the instrumental resolution for each measured arc line.
+    Similarly, a polynomial fitting is performed to each fiber in the plane
+    FWHM(wave) vs line(wave).
 
     Parameters
-    --------------
-    arc_rss : string
-        Input RSS FITS file name of the uncalibrated arc lamp exposure
-    prefix_out : string
-        PREFIX for the output RSS file containing the wavelength RSS pixel table (PREFIX.disp.fits) and
-        the spectral resolution (FWHM) RSS pixel table (PREFIX.res.fits)
-    ref_line_file : string, optional with default: ''
-        ASCII file name containing the number of the reference fiber in the first row,
-        reference wavelength of emission line, its rough centroid pixel position a flag if the width of the
-        line should be considered for the spectral resolution measurements (space separated) in
-        each subsquent row.
-        If no ASCII file is provided those information must be given in the ref_fiber, pixel and ref_lines parameters.
-    ref_fiber : string of integer, optional with default: ''
-        Number of the fiber in the RSS for which the rough guess for their centroid pixel position (x-direction) are given.
-        Only used if no ASCII file is given.
-    pixel : string of integers, optional with default: ''
-        Comma-separated list of rough centroid pixel position for each emission line for the corresponding reference fiber.
-        Only used if no ASCII file is given.
-    ref_lines : string of floats, optional with default: ''
-        Comma-separated list of reference emission-line wavelength. Need to be same number of values as for the pixel guess
-        Only used if no ASCII file is given.
-    poly_dispersion : string of integer, optional with default: '-5'
-        Degree of polynomial used to construct the wavelength solution for each fiber. (positiv: normal polynomial, negative: Legandre polynomial)
-    poly_fwhm : string of two integers, optional with default: '-3,-5'
-        First integer is the degree of polynomial used to smooth the measured FWHM of each line as a function of fiber number (cross-dispersion).
-        Second integer is the degree of polynomial used to subsquently extrapolate the line FWHM across the disperion direction,
-        (positiv: normal polynomial, negative: Legandre polynomial)
-    init_back : string of float, optinal with default: '10.0'
-        Initial guess for the constant background level that can be fitted in addition to the Gaussian for each line.
-        If this parameter is left empty, the background level is fixed to zero.
-    aperture : string of integer, optional with default: '13'
-        Aperture centered on the guess of the pixel position from which pixel with the maximum flux is used as the guess for the Gaussian fitting.
-        This is also the size of the fitted region for each line.
-    flux_min : string of float, optional with default: '200.0'
-        Required minimum integrated flux of the best-fit Gaussian model to be considered as a reliable value.
-        The measurement for this emission line for the specific fiber is masked if it falls below this threshold.
-    fwhm_max : string of float, optional with default: '10.0'
-        Maximum FWHM of the best-fit Gaussian model to be considered as a reliable value.
-    rel_flux_limits : string of two floats, optional with default: '0.1,5.0'
-        Required relative integrated fluxes with respect to the measured fluxes  for the reference fiber.
-        If relative fluxes are outside this range, they will be masked.
-    negative : boolean, optiona with default False
-        whether to flip dark along the flux axis or not
-    plot: string of integer (0 or 1), optional  with default: 1
-        Show information during the processing on the command line (0 - no, 1 - yes)
+    ----------
+    in_arcs : list[str]|str
+        Path or a list of paths to extracted arc exposures
+    out_wave : str
+        Path to output wavelength trace file
+    out_lsf : str
+        Path to output LSF trace file
+    cont_niter : int, optional
+        Number of iterations for the continuum fitting, by default 3
+    cont_thresh : float, optional
+        Threshold above which pixels get rejected in the continuum fitting, by default 0.999
+    cont_box_range : tuple[int], optional
+        range of box sizes in adaptive median filtering for the continuum fitting, by default (50, 300)
+    ref_fiber : int, optional
+        Reference fiber used in line identification, by default 319
+    pixel : list[float], optional
+        Pixel positions for reference arc lines, by default []
+    ref_lines : list[float], optional
+        Wavelengths for reference arc lines, by default []
+    use_line : list[bool], optional
+        List of boolean selection for given `pixel` and `ref_lines`, by default []
+    cc_correction : bool, optional
+        Perform cross-correlation correction to reference arc lines to account for instrumental shifts, by default True
+    cc_max_shift : int, optional
+        Maximum shift in pixels to reference lines, by default 30
+    aperture : int, optional
+        Range of pixels around arc lines guess centroid within which the Gaussian fitting will be performed, by default 12
+    fwhm_guess : float, optional
+        Guess for the FWHM (in pixel) of the arc lines during the Gaussian fitting, by default 3.0
+    bg_guess : float, optional
+        Guess for the local background around each arc line during Gaussian fitting, by default 0.0
+    flux_range : list[float], optional
+        Range within which the integrated flux of arc lines is allowed to be during Gaussian fitting, by default [800.0, inf]
+    cent_range : list[float], optional
+        Range of arc line centroids (in pixel) within which a line centroid is expected to be during Gaussian fitting, by default [-3.0, 3.0]
+    fwhm_range : list[float], optional
+        Range of FWHM (in pixel) allowed for arc lines during Gaussian fitting, by default [2.0, 3.5]
+    bg_range : list[float], optional
+        Range local background level allowed for arc lines during Gaussian fitting, by default [1000.0, inf]
+    poly_disp : int, optional
+        Polynomial degree for fiber wavelength solution fitting, by default 5
+    poly_fwhm : int, optional
+        Polynomial degree for fiber LSF solution fitting, by default 2
+    poly_cros : int, optional
+        Polynomial degree for cross-dispersion smoothing of FWHM(pixel) ( = 0 no smoothing), by default 2
+    negative : bool, optional
+        Assume absorption spectra, by default False
+    plot_fibers : list[int], optional
+        When debug_mode == True, this will show additional plots on the fitting of the listed fibers
+    display_plots : bool, optional
+        If True, the results are plotted and displayed
 
-    Examples
-    --------
-    user:> lvmdrp rss detWaveSolution ARC_RSS.fits arc REF_FILE.txt /
-    > poly_dispersion='-7' poly_fwhm='-4,-5'
-
-    user:> lvmdrp rss detWaveSolution ARC_RSS.fits arc ref_fiber=100 /
-    > pixel=200,500,1000 ref_lines=3000.0,5000.0,8000.0 flux_min=100.0
+    Returns
+    -------
+    ref_lines : np.ndarray[float], nlines
+        Reference lines used during the Gaussian fitting
+    masked : np.ndarray[float], nfibers x nlines
+        Masked reference arc lines for each fiber after Gaussian fitting
+    cent_wave : np.ndarray[float], nfibers x nlines
+        Pixel positions of reference arc lines for each fiber
+    fwhm_wave : np.ndarray[float], nfibers x nlines
+        FWHM (in pixel) of reference arc lines for each fiber
+    arc : lvmdrp.core.rss.RSS
+        Arc used to fit wavelength and LSF solutions
+    wave_trace : lvmdrp.core.tracemask.TraceMask
+        Trace object for wavelength solution
+    fwhm_trace :
+        Trace object for LSF solution
     """
 
     # convert parameters to the correct type
@@ -238,11 +280,10 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
 
     if isinstance(in_arcs, (list, tuple)):
         pass
-    else:
+    elif isinstance(in_arcs, str):
         in_arcs = [in_arcs]
-
-    if fiberflat != "":
-        fiberflat = fiberflat.split(",")
+    else:
+        raise ValueError(f"wrong type for {in_arcs = }, it can be either a string or a list or tuple of")
 
     iarcs = []
     ilamps = []
@@ -266,15 +307,14 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
     # combine RSS objects
     arc = RSS()
     arc.combineRSS(iarcs, method="sum")
+    unit = arc._header["BUNIT"]
     # update lamps status
     lamps = set(ilamps)
 
-    # mask std fibers since they are not regularly illuminated during arc exposures
-    fibermap = arc._slitmap[arc._slitmap["spectrographid"] == int(camera[1])]
-    select = fibermap["telescope"] == "Spec"
-    arc._mask[select] = True
-    arc._data[select] = 0.0
-    arc._error[select] = numpy.inf
+    # subtract continuum
+    if cont_niter > 0:
+        log.info(f"fitting and subtracting continuum with parameters: {cont_niter = }, {cont_thresh = }, {cont_box_range = }")
+        arc, _, _ = arc.subtract_continuum(niter=cont_niter, thresh=cont_thresh, median_box_range=cont_box_range)
 
     # replace NaNs
     mask = arc._mask | numpy.isnan(arc._data) | numpy.isnan(arc._error)
@@ -320,19 +360,19 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
     if cc_correction or ref_fiber != ref_fiber_:
         log.info(f"running cross matching on all {pixel.size} identified lines")
         # determine maximum correlation shift
-        pix_spec = _spec_from_lines(pixel, sigma=2, wavelength=arc._pixels)
+        pix_spec = _spec_from_lines(pixel, sigma=2.5/2.354, wavelength=arc._pixels)
 
         # fix cc_max_shift
-        cc_max_shift = min(cc_max_shift, 50)
         # cross-match spectrum and pixwav map
-        cc, bhat, mhat = _cross_match(
+        cc, bhat, mhat = _cross_match_float(
             ref_spec=pix_spec,
             obs_spec=arc._data[ref_fiber],
-            stretch_factors=numpy.linspace(0.9,1.1,10000),
+            stretch_factors=numpy.linspace(0.8,1.2,10000),
             shift_range=[-cc_max_shift, cc_max_shift],
+            normalize_spectra=False,
         )
 
-        log.info(f"max CC = {cc:.2f} for strech = {mhat:.2f} and shift = {bhat:.2f}")
+        log.info(f"max CC = {cc:.2f} for strech = {mhat:.8f} and shift = {bhat:.8f}")
     else:
         mhat, bhat = 1.0, 0.0
 
@@ -347,79 +387,53 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
 
     if negative:
         log.info("flipping arc along flux direction")
-        arc = -1 * arc + numpy.nanmedian(arc._data)
+        arc = -1 * arc + bn.nanmedian(arc._data)
 
     # setup storage array
     wave_coeffs = numpy.zeros((arc._fibers, numpy.abs(poly_disp) + 1))
     lsf_coeffs = numpy.zeros((arc._fibers, numpy.abs(poly_fwhm) + 1))
     wave_sol = numpy.zeros((arc._fibers, arc._data.shape[1]), dtype=numpy.float32)
     wave_rms = numpy.zeros(arc._fibers, dtype=numpy.float32)
-    fwhm_sol = numpy.zeros((arc._fibers, arc._data.shape[1]), dtype=numpy.float32)
-    fwhm_rms = numpy.zeros(arc._fibers, dtype=numpy.float32)
+    lsf_sol = numpy.zeros((arc._fibers, arc._data.shape[1]), dtype=numpy.float32)
+    lsf_rms = numpy.zeros(arc._fibers, dtype=numpy.float32)
 
     # measure the ARC lines with individual Gaussian across the CCD
-    log.info(
-        f"measuring arc lines for each fiber from reference fiber {ref_fiber}, "
-        f"{flux_min = }, {fwhm_max = } and relative flux limits {rel_flux_limits}"
-        )
-
-    # TODO: run peak finder without gaussian fitting in a small running window
-    # centers = cut_iter.measurePeaks(
-    #     pix, method, init_sigma, threshold=threshold, max_diff=float(max_diff)
-    # )
+    log.info(f"fitting arc lines for each fiber for {ref_fiber = } with parameter ranges:")
+    log.info(f"   {flux_range = } {unit}")
+    log.info(f"   {cent_range = } pixel")
+    log.info(f"   {fwhm_range = } pixel")
+    log.info(f"   {bg_range   = } {unit}")
 
     # initialize plots for arc lines fitting
-    ncols = 3
-    nrows = int(numpy.ceil(nlines / ncols))
-    fig, axs = create_subplots(to_display=display_plots, nrows=nrows, ncols=ncols, figsize=(6*ncols, 6*nrows))
-    fig.suptitle("Gaussian fitting")
-    fig.supylabel("counts (e-/pixel)")
-    for i, ax in zip(range(nlines), axs):
-        # ax.axvline(pixel[i], ls="--", lw=1, color="tab:red")
-        ax.set_title(f"line @ {pixel[i]:.1f} (pixel) - {ref_lines[i]:.2f} (angstrom)")
-        ax.set_xlabel("X (pixel)")
-    # axs = None
+    axs_fibers = {}
+    axs_fibers[ref_fiber] = _make_arcline_axes(display_plots, pixel=pixel, ref_lines=ref_lines, ifiber=ref_fiber)
+    if plot_fibers:
+        for ifiber in plot_fibers:
+            axs_fibers[ifiber] = _make_arcline_axes(display_plots, pixel=pixel, ref_lines=ref_lines, ifiber=ifiber)
     fibers, flux, cent_wave, fwhm, masked = arc.measureArcLines(
         ref_fiber,
         pixel,
         aperture=aperture,
-        init_back=init_back,
-        flux_min=flux_min,
-        fwhm_max=fwhm_max,
-        rel_flux_limits=rel_flux_limits,
-        axs=axs,
+        fwhm_guess=fwhm_guess,
+        bg_guess=bg_guess,
+        flux_range=flux_range,
+        cent_range=cent_range,
+        fwhm_range=fwhm_range,
+        bg_range=bg_range,
+        axs=axs_fibers,
     )
-    save_fig(
-        fig,
-        product_path=out_wave,
-        to_display=display_plots,
-        figure_path="qa",
-        label="lines_fitting",
-    )
+    for ifiber, (fig, axs) in axs_fibers.items():
+        save_fig(
+            fig,
+            product_path=out_wave,
+            to_display=display_plots,
+            figure_path="qa",
+            label=f"lines_fitting_{ifiber:04d}",
+        )
 
     # numpy.savetxt("./pixels.txt", cent_wave)
     # numpy.savetxt("./flux.txt", flux)
     # numpy.savetxt("./fwhm.txt", fwhm)
-
-    if fiberflat != "":
-        log.info("computing fiberflat from measured lines")
-        norm_flux = numpy.zeros_like(ref_lines)
-        for n in range(len(ref_lines)):
-            norm_flux[n] = numpy.nanmean(flux[numpy.logical_not(masked[:, n]), n])
-        flat_flux = numpy.nanmean(flux / norm_flux[numpy.newaxis, :], 1)
-        log.info(
-            f"assuming wavelength range [{fiberflat[0]}, {fiberflat[1]}] and sampling {fiberflat[2]} AA"
-        )
-        wave = numpy.arange(
-            float(fiberflat[0]),
-            float(fiberflat[1]) + float(fiberflat[2]),
-            float(fiberflat[2]),
-        )
-        norm = numpy.ones((flux.shape[0], len(wave)), dtype=numpy.float32)
-        norm = norm * flat_flux[:, numpy.newaxis]
-        rss_flat = RSS(wave=wave, data=norm, header=arc.getHeader())
-        log.info(f"storing fiberflat in '{fiberflat[3]}'")
-        rss_flat.writeFitsData(f"{fiberflat[3]}.fits")
 
     # smooth the FWHM values for each ARC line in cross-dispersion direction
     if poly_cros != 0:
@@ -427,12 +441,13 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
             f"smoothing FWHM of guess lines along cross-dispersion axis using {poly_cros}-deg polynomials")
         for i in range(nlines):
             select = numpy.logical_and(
-                numpy.logical_not(masked[:, i]), flux[:, i] > flux_min
+                numpy.logical_not(masked[:, i]), flux[:, i] > flux_range[0]
             )
             fwhm_med = ndimage.filters.median_filter(numpy.fabs(fwhm[select, i]), 4)
             msg = f'Failed to fit {kind_cros} for arc line {i}'
             if kind_cros not in ["poly", "legendre", "chebyshev"]:
                 log.warning(f"invalid polynomial kind '{kind_cros}'. Falling back to 'poly'")
+                arc.add_header_comment(f"invalid polynomial kind '{kind_cros}'. Falling back to 'poly'")
                 kind_cros = "poly"
 
             if kind_cros == "poly":
@@ -454,28 +469,21 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
             fwhm[:, i] = poly(fibers)
 
     # Determine the wavelength solution
-    log.info(
-        f"fitting wavelength solutions using {poly_disp}-deg polynomials"
-    )
+    log.info(f"fitting wavelength using {poly_disp}-deg polynomials")
 
     # Iterate over the fibers
-    good_fibers = numpy.zeros(len(fibers), dtype="bool")
-    nmasked = numpy.zeros(len(fibers), dtype="uint16")
+    good_fibers = numpy.ones(len(fibers), dtype="bool")
     for i in fibers:
-        masked_lines = masked[i, use_line]
-        nmasked[i] = numpy.sum(masked_lines)
-
-        if nmasked[i] == 0:
-            good_fibers[i] = True
-        elif nmasked[i] == len(masked_lines):
-            log.warning(f"fiber {i} has all lines masked")
+        good_lines = ~masked[i]
+        if good_lines.sum() <= poly_disp + 1:
+            log.warning(f"fiber {i} has {good_lines.sum()} (< {poly_disp + 1 = }) good lines")
+            arc.add_header_comment(f"fiber {i} has {good_lines.sum()} (< {poly_disp + 1 = }) good lines")
             good_fibers[i] = False
-        # select = numpy.logical_not(masked_lines)
+            continue
 
         if kind_disp not in ["poly", "legendre", "chebyshev"]:
-            log.warning(
-                ("invalid polynomial kind " f"'{kind_disp = }'. Falling back to 'poly'")
-            )
+            log.warning(("invalid polynomial kind " f"'{kind_disp = }'. Falling back to 'poly'"))
+            arc.add_header_comment("invalid polynomial kind " f"'{kind_disp = }'. Falling back to 'poly'")
         if kind_disp == "poly":
             wave_cls = polynomial.Polynomial
         elif kind_disp == "legendre":
@@ -483,50 +491,37 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
         elif kind_disp == "chebyshev":
             wave_cls = polynomial.Chebyshev
 
-        wave_poly = wave_cls.fit(cent_wave[i, use_line], ref_lines[use_line], deg=poly_disp)
+        wave_poly = wave_cls.fit(cent_wave[i, good_lines], ref_lines[good_lines], deg=poly_disp)
 
         wave_coeffs[i, :] = wave_poly.convert().coef
         wave_sol[i, :] = wave_poly(arc._pixels)
-        wave_rms[i] = numpy.std(wave_poly(cent_wave[i, use_line]) - ref_lines[use_line])
-        # if i in [565, 566, 567, 568]:
-        #     fig, ax = plt.subplots(figsize=(15, 7))
-        #     # ax.plot(cent_wave[i], ref_lines+i - wave_poly.convert().coef[0] - wave_poly.convert().coef[1]*cent_wave[i], "ok")
-        #     # ax.plot(arc._pixels, wave_poly(arc._pixels)+i - wave_poly.convert().coef[0] - wave_poly.convert().coef[1]*arc._pixels, "-r")
-        #     residuals = wave_poly(cent_wave[i]) - ref_lines
-        #     ax.plot(cent_wave[i], residuals, "o", color=("b" if i != 319 else "r"))
-        #     fig.savefig("wave_poly.png")
-        #     print(f"{i}: {cent_wave[i]}")
-        #     print(wave_poly.convert().coef)
+        wave_rms[i] = bn.nanstd(wave_poly(cent_wave[i, good_lines]) - ref_lines[good_lines])
 
     log.info(
         "finished wavelength fitting with median "
-        f"RMS = {numpy.median(wave_rms):g} AA "
-        f"({numpy.median(wave_rms[:,None]/numpy.diff(wave_sol, axis=1)):g} pix)"
+        f"RMS = {bn.nanmedian(wave_rms):g} Angstrom "
+        f"({bn.nanmedian(wave_rms[:,None]/numpy.diff(wave_sol, axis=1)):g} pix)"
     )
 
     # Estimate the spectral resolution pattern
-    dwave = wave_sol[:, 1:] - wave_sol[:, :-1]
-    cent_round = numpy.round(cent_wave).astype(int)
-    # cent_round = numpy.clip(cent_round, 0, 4085-1)
+    dwave = numpy.fabs(numpy.gradient(wave_sol, axis=1))
 
     # Iterate over the fibers
     log.info(f"fitting LSF solutions using {poly_fwhm}-deg polynomials")
     for i in fibers:
-        # masked_lines = masked[i, use_line]
-        # nmasked[i] = numpy.sum(masked_lines)
+        good_lines = ~masked[i]
+        if good_lines.sum() <= poly_fwhm + 1:
+            log.warning(f"fiber {i} has {good_lines.sum()} (< {poly_fwhm + 1 = }) good lines")
+            arc.add_header_comment(f"fiber {i} has {good_lines.sum()} (< {poly_fwhm + 1 = }) good lines")
+            good_fibers[i] = False
+            continue
 
-        # if nmasked[i] == 0:
-        #     good_fibers[i] = True
-        # elif nmasked[i] == len(masked_lines):
-        #     log.warning(f"fiber {i} has all lines masked")
-        #     good_fibers[i] = False
-
-        fwhm_wave = numpy.fabs(dwave[i, cent_round[i, :]]) * fwhm[i, :]
+        dw = numpy.interp(cent_wave[i, good_lines], arc._pixels, dwave[i])
+        fwhm_wave = dw * fwhm[i, good_lines]
 
         if kind_fwhm not in ["poly", "legendre", "chebyshev"]:
-            log.warning(
-                f"invalid polynomial kind '{kind_fwhm = }'. Falling back to 'poly'"
-            )
+            log.warning(f"invalid polynomial kind '{kind_fwhm = }'. Falling back to 'poly'")
+            arc.add_header_comment(f"invalid polynomial kind '{kind_fwhm = }'. Falling back to 'poly'")
             kind_fwhm = "poly"
         if kind_fwhm == "poly":
             fwhm_cls = polynomial.Polynomial
@@ -535,32 +530,26 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
         elif kind_fwhm == "chebyshev":
             fwhm_cls = polynomial.Chebyshev
 
-        fwhm_poly = fwhm_cls.fit(cent_wave[i, use_line], fwhm_wave[use_line], deg=poly_fwhm)
+        fwhm_poly = fwhm_cls.fit(cent_wave[i, good_lines], fwhm_wave, deg=poly_fwhm)
 
         lsf_coeffs[i, :] = fwhm_poly.convert().coef
-        fwhm_sol[i, :] = fwhm_poly(arc._pixels)
-        fwhm_rms[i] = numpy.std(fwhm_wave[use_line] - fwhm_poly(cent_wave[i, use_line]))
+        lsf_sol[i, :] = fwhm_poly(arc._pixels)
+        lsf_rms[i] = bn.nanstd(fwhm_wave - fwhm_poly(cent_wave[i, good_lines]))
 
     log.info(
         "finished LSF fitting with median "
-        f"RMS = {numpy.median(fwhm_rms):g} AA "
-        f"({numpy.median(fwhm_rms[:,None]/numpy.diff(wave_sol, axis=1)):g} pix)"
+        f"RMS = {bn.nanmedian(lsf_rms):g} Angstrom "
+        f"({bn.nanmedian(lsf_rms[:,None]/numpy.gradient(wave_sol, axis=1)):g} pix)"
     )
 
-    # create plot of polynomial coefficients
-    fig, axs = create_subplots(to_display=display_plots, nrows=wave_coeffs.shape[1], figsize=(10, 15), sharex=True)
-    # TODO: use ypix for the fibers instead of fiber ids
-    axs = plot_wavesol_coeffs(numpy.arange(arc._fibers), coeffs=wave_coeffs, axs=axs, labels=True)
-    save_fig(
-        fig,
-        product_path=out_wave,
-        to_display=display_plots,
-        figure_path="qa",
-        label="coeffs_wave",
-    )
-    # create plot of wavelength fitting residuals
-    fig, ax = create_subplots(to_display=display_plots, figsize=(15, 7))
-    axs = plot_wavesol_residuals(lines_pixels=cent_wave[ref_fiber], lines_waves=ref_lines, model_waves=wave_cls(wave_coeffs[ref_fiber])(cent_wave[ref_fiber]), ax=ax, labels=True)
+    # create plot of reference spectrum and wavelength fitting residuals
+    fig, (ax_spec, ax_res) = create_subplots(to_display=display_plots, nrows=2, ncols=1, sharex=True, figsize=(15, 7), layout="constrained")
+
+    ax_res = plot_wavesol_residuals(ref_fiber, ref_waves=ref_lines,
+                                lines_pixels=cent_wave, poly_cls=wave_cls,
+                                coeffs=wave_coeffs, ax=ax_res, labels=True)
+    ax_spec = plot_wavesol_spec(ref_fiber, ref_pixels=pixel, aperture=aperture,
+                                mhat=mhat, bhat=bhat, arc=arc, ax=ax_spec, labels=True)
     save_fig(
         fig,
         product_path=out_wave,
@@ -569,139 +558,36 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
         label="residuals_wave",
     )
 
-    # create plot of polynomial fittings
-    fig = plt.figure(figsize=(16, 10), layout="constrained")
-    gs = gridspec.GridSpec(10, max(poly_disp + 1, poly_fwhm + 1), figure=fig)
+    # plot wavelength fitting minus linear term
+    fig_wave = plt.figure(figsize=(16, 10), layout="constrained")
+    gs = gridspec.GridSpec(10, poly_disp + 1, figure=fig_wave)
 
-    ax_spec = fig.add_subplot(gs[:3, :])
-    ax_spec.tick_params(labelbottom=False)
-    # ax_spec.set_yscale("log")
-    ax_sol_wave = fig.add_subplot(gs[3:6, :], sharex=ax_spec)
-    ax_sol_fwhm = ax_sol_wave.twinx()
-    ax_sol_wave.tick_params("y", labelcolor="tab:blue")
-    ax_sol_fwhm.tick_params("y", labelcolor="tab:red")
-    ax_coe_wave, ax_coe_fwhm = [], []
+    ax_sol_wave = fig_wave.add_subplot(gs[:5, :])
+    ax_sol_wave = plot_wavesol_wave(xpix=arc._pixels, ref_waves=ref_lines,
+                                    lines_pixels=cent_wave, wave_poly=wave_cls,
+                                    wave_coeffs=wave_coeffs, ax=ax_sol_wave, labels=True)
+
+    ax_coe_wave, ax_coe_lsf = [], []
     for i in range(poly_disp + 1):
-        ax_coe_wave.append(fig.add_subplot(gs[6:8, i]))
+        ax_coe_wave.append(fig_wave.add_subplot(gs[5:, i], sharey=None if i == 0 else ax_coe_wave[-1]))
+        ax_coe_wave[-1].tick_params(labelleft=i == 0)
+    ax_coe_wave = plot_wavesol_coeffs(numpy.arange(arc._fibers)[good_fibers], coeffs=wave_coeffs[good_fibers], axs=ax_coe_wave, labels=True)
+    save_fig(fig_wave, product_path=out_wave, to_display=display_plots, figure_path='qa', label="fit_wave")
+
+    # plot LSF fitting minus linear term
+    fig_lsf = plt.figure(figsize=(16, 10), layout="constrained")
+    gs = gridspec.GridSpec(10, poly_fwhm + 1, figure=fig_lsf)
+
+    ax_sol_lsf = fig_lsf.add_subplot(gs[:5, :])
+    ax_sol_lsf = plot_wavesol_lsf(xpix=arc._pixels, lsf=fwhm, lines_pixels=cent_wave,
+                                  wave_poly=wave_cls, wave_coeffs=wave_coeffs, lsf_poly=fwhm_cls,
+                                  lsf_coeffs=lsf_coeffs, ax=ax_sol_lsf, labels=True)
+
     for i in range(poly_fwhm + 1):
-        ax_coe_fwhm.append(fig.add_subplot(gs[8:, i]))
-
-    # add reference spectrum plot with reference lines & corrected lines
-    good_pix = ~arc._mask
-    for pix in pixel:
-        ax_spec.axvspan(
-            pix - (aperture - 1) // 2,
-            pix + (aperture - 1) // 2,
-            numpy.nanmin((arc._data * good_pix)[ref_fiber]),
-            numpy.nanmax((arc._data * good_pix)[ref_fiber]),
-            fc="0.7",
-            alpha=0.5,
-        )
-    ax_spec.vlines(
-        (pixel - bhat) / mhat,
-        numpy.nanmin((arc._data * good_pix)[ref_fiber]),
-        numpy.nanmax((arc._data * good_pix)[ref_fiber]),
-        color="tab:red",
-        lw=0.5,
-        label="orig. ref. lines",
-    )
-    ax_spec.vlines(
-        pixel,
-        numpy.nanmin((arc._data * good_pix)[ref_fiber]),
-        numpy.nanmax((arc._data * good_pix)[ref_fiber]),
-        color="tab:blue",
-        lw=0.5,
-        label=f"corr. lines ({mhat = :.2f}, {bhat = :.2f})",
-    )
-    ax_spec.step(arc._pixels, (arc._data * good_pix)[ref_fiber], color="0.2", lw=1)
-    ax_spec.set_title(f"reference arc spectrum {ref_fiber}", loc="left")
-    ax_spec.set_ylabel("count (e-/pix)")
-    ax_spec.legend(loc=1)
-
-    # add coefficients plots
-    for icoef in range(poly_disp + 1):
-        data = wave_coeffs[:, icoef]
-        mean, std = data.mean(), data.std()
-        ax_coe_wave[icoef].hist(data, bins=100, fc="tab:blue")
-        ax_coe_wave[icoef].text(
-            0.05,
-            0.95,
-            f"{mean = :g}\n{std = :g}",
-            va="top",
-            ha="left",
-            transform=ax_coe_wave[icoef].transAxes,
-        )
-        ax_coe_wave[icoef].tick_params(labelsize="x-small")
-        if icoef == 0:
-            ax_coe_wave[icoef].set_title("wavelength coefficients", loc="left")
-    for icoef in range(poly_fwhm + 1):
-        data = lsf_coeffs[:, icoef]
-        mean, std = data.mean(), data.std()
-        ax_coe_fwhm[icoef].hist(data, bins=100, fc="tab:red")
-        ax_coe_fwhm[icoef].text(
-            0.05,
-            0.95,
-            f"{mean = :g}\n{std = :g}",
-            va="top",
-            ha="left",
-            transform=ax_coe_fwhm[icoef].transAxes,
-        )
-        ax_coe_fwhm[icoef].tick_params(labelsize="x-small")
-        if icoef == 0:
-            ax_coe_fwhm[icoef].set_title("LSF coefficients", loc="left")
-
-    # add wavelength and LSF solutions plot
-    ax_sol_wave.fill_between(
-        arc._pixels,
-        wave_sol.mean(0) - wave_sol.std(0),
-        wave_sol.mean(0) + wave_sol.std(0),
-        lw=0,
-        fc="tab:blue",
-        alpha=0.5,
-    )
-    ax_sol_wave.plot(arc._pixels, wave_sol.mean(0), lw=1, color="tab:blue")
-    for i in fibers:
-        ax_sol_wave.plot(
-            cent_wave[i, use_line],
-            ref_lines[use_line],
-            ",",
-            color="tab:blue",
-        )
-    ax_sol_wave.set_xlabel("dispersion axis (pix)")
-    ax_sol_wave.set_ylabel("wavelength (AA)")
-    ax_sol_wave.set_title(
-        f"wavelength solutions with a {poly_disp}-deg polynomial",
-        loc="left",
-        color="tab:blue",
-    )
-
-    ax_sol_fwhm.fill_between(
-        arc._pixels,
-        fwhm_sol.mean(0) - fwhm_sol.std(0),
-        fwhm_sol.mean(0) + fwhm_sol.std(0),
-        lw=0,
-        fc="tab:red",
-        alpha=0.5,
-    )
-    ax_sol_fwhm.plot(arc._pixels, fwhm_sol.mean(0), lw=1, color="tab:red")
-    for i in fibers:
-        fwhm_wave = numpy.fabs(dwave[i, cent_round[i, :]]) * fwhm[i, :]
-
-        ax_sol_fwhm.plot(
-            cent_wave[i, use_line],
-            fwhm_wave[use_line],
-            ",",
-            color="tab:red",
-        )
-    ax_sol_fwhm.set_ylabel("FWHM LSF (AA)")
-    ax_sol_fwhm.set_title(
-        f"LSF solutions with a {poly_fwhm}-deg polynomial",
-        loc="right",
-        color="tab:red",
-    )
-
-    save_fig(fig, product_path=out_wave, to_display=display_plots, figure_path='qa', label="fit_wave")
-
+        ax_coe_lsf.append(fig_lsf.add_subplot(gs[5:, i], sharey=None if i == 0 else ax_coe_lsf[-1]))
+        ax_coe_lsf[-1].tick_params(labelleft=i == 0)
+    ax_coe_lsf = plot_wavesol_coeffs(numpy.arange(arc._fibers)[good_fibers], coeffs=lsf_coeffs[good_fibers], axs=ax_coe_lsf, color="tab:red", labels=True)
+    save_fig(fig_lsf, product_path=out_wave, to_display=display_plots, figure_path='qa', label="fit_lsf")
 
     # update header
     log.info(
@@ -714,7 +600,7 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
     )
     arc.setHdrValue(
         "HIERARCH PIPE DISP RMS MEDIAN",
-        "%.4f" % (numpy.median(wave_rms[good_fibers])),
+        "%.4f" % (bn.median(wave_rms[good_fibers])),
         "Median RMS of disp sol",
     )
     arc.setHdrValue(
@@ -734,33 +620,43 @@ def determine_wavelength_solution(in_arcs: List[str], out_wave: str, out_lsf: st
     )
     arc.setHdrValue(
         "HIERARCH PIPE DISP RMS MEDIAN",
-        "%.4f" % (numpy.median(fwhm_rms[good_fibers])),
+        "%.4f" % (bn.median(lsf_rms[good_fibers])),
         "Median RMS of disp sol",
     )
     arc.setHdrValue(
         "HIERARCH PIPE DISP RMS MIN",
-        "%.4f" % (numpy.min(fwhm_rms[good_fibers])),
+        "%.4f" % (numpy.min(lsf_rms[good_fibers])),
         "Min RMS of disp sol",
     )
     arc.setHdrValue(
         "HIERARCH PIPE DISP RMS MAX",
-        "%.4f" % (numpy.max(fwhm_rms[good_fibers])),
+        "%.4f" % (numpy.max(lsf_rms[good_fibers])),
         "Max RMS of disp sol",
     )
+
     mask = numpy.zeros(arc._data.shape, dtype=bool)
-    mask[~good_fibers] = True
+    mask[(~good_fibers)|(wave_coeffs==0).all(axis=1)] = True
     wave_trace = TraceMask(data=wave_sol, mask=mask, coeffs=wave_coeffs, header=arc._header.copy())
+    wave_trace._samples = Table(data=cent_wave, names=ref_lines)
     wave_trace._header["IMAGETYP"] = "wave"
-    fwhm_trace = TraceMask(data=fwhm_sol, mask=mask, coeffs=lsf_coeffs, header=arc._header.copy())
+    mask = numpy.zeros(arc._data.shape, dtype=bool)
+    mask[(~good_fibers)|(lsf_coeffs==0).all(axis=1)] = True
+    fwhm_trace = TraceMask(data=lsf_sol, mask=mask, coeffs=lsf_coeffs, header=arc._header.copy())
+    fwhm_trace._samples = Table(data=fwhm, names=ref_lines)
     fwhm_trace._header["IMAGETYP"] = "lsf"
+
+    wave_trace.interpolate_coeffs()
+    fwhm_trace.interpolate_coeffs()
+    wave_trace.eval_coeffs()
+    fwhm_trace.eval_coeffs()
 
     wave_trace.writeFitsData(out_wave)
     fwhm_trace.writeFitsData(out_lsf)
 
-
+    return ref_lines, masked, cent_wave, fwhm_wave, arc, wave_trace, fwhm_trace
 
 # method to apply shift in wavelength table based on comparison to skylines
-def shift_wave_skylines(in_frame: str, out_frame: str, channel: str):
+def shift_wave_skylines(in_frame: str, out_frame: str, dwave: float = 8.0, skylinedict = REF_SKYLINES, display_plots: bool = False):
     """
     Applies shift to wavelength map extension based on sky line centroid measurements
 
@@ -770,6 +666,12 @@ def shift_wave_skylines(in_frame: str, out_frame: str, channel: str):
         Input RSS FITS file
     out_frame : string
         Output RSS FITS file with the shifted wavelength maps
+    dwave : float, optional
+        Wavelength window used to locate the sky line, by default 8.0
+    skylinedict : dict[str, list[float]], optional
+        Dictionary containing the list of reference sky lines per channel, by default REF_SKYLINES
+    display_plots: bool, optional
+        Display plots on screen, by default False
     """
 
     # print('************************************************')
@@ -778,72 +680,99 @@ def shift_wave_skylines(in_frame: str, out_frame: str, channel: str):
     log.info("correcting wavelength using skylines")
 
 
-    # GB hand picked isolated bright lines across each channel which are not doublest in UVES atlas
-    # true wavelengths taken from UVES sky line atlas
-    skylinedict={'b':[5577.346680], 'r':[6363.782715, 7358.680176, 7392.209961], 'z':[8399.175781, 8988.383789, 9552.546875, 9719.838867]}
-    skylines=skylinedict[channel]
-    dwave=5 # width of wavelength window to measure centroid of skylines
 
     lvmframe = lvmFrame.from_file(in_frame)
-    fiberid=lvmframe._slitmap['fiberid'].data
+    channel = lvmframe._header["CCD"][0]
+    fiberid = lvmframe._slitmap['fiberid'].data
     # selection of which fibers belong to which spectrograph
-    sel1=lvmframe._slitmap['spectrographid'].data==1
-    sel2=lvmframe._slitmap['spectrographid'].data==2
-    sel3=lvmframe._slitmap['spectrographid'].data==3
+    sel1 = lvmframe._slitmap['spectrographid'].data==1
+    sel2 = lvmframe._slitmap['spectrographid'].data==2
+    sel3 = lvmframe._slitmap['spectrographid'].data==3
+    skylines = skylinedict[channel]
 
     # measure offsets
-    offsets=numpy.zeros((len(skylines), numpy.shape(lvmframe._data)[0]))
-    specoffset=numpy.zeros((len(skylines), 3))
-    for i in range(len(skylines)):
-        mask=numpy.abs(lvmframe._wave-skylines[i])>=dwave/2
-        weights=lvmframe._data.copy()
-        weights[mask]=0
-        offsets[i,:]=numpy.nansum(lvmframe._wave*weights, axis=1)/numpy.nansum(weights, axis=1)-skylines[i]
-        specoffset[i,0]=numpy.nanmedian(offsets[i,sel1])
-        specoffset[i,1]=numpy.nanmedian(offsets[i,sel2])
-        specoffset[i,2]=numpy.nanmedian(offsets[i,sel3])
+    offsets = numpy.ones((len(skylines), numpy.shape(lvmframe._data)[0])) * numpy.nan
+    fiber_offset = numpy.ones(lvmframe._data.shape[0]) * numpy.nan
+    iterator = tqdm(range(lvmframe._fibers), total=lvmframe._fibers, desc=f"measuring offsets using {len(skylines)} sky line(s)", ascii=True, unit="fiber")
+    for ifiber in iterator:
+        spec = lvmframe.getSpec(ifiber)
+        if spec._mask.all() or lvmframe._slitmap[ifiber]["telescope"] == "Spec" or lvmframe._slitmap[ifiber]["fibstatus"] in [1, 2]:
+            continue
 
-    #Average offsets for different skylines in each channel, apply to trace, and write them in header
-    meanoffset=numpy.nanmean(specoffset, axis=0)
-    log.info(f'Applying the following offsets [Angstroms] in [b,r,z] channels: {meanoffset}')
-    lvmframe._wave_trace['COEFF'].data[sel1,0] -= meanoffset[0]
-    lvmframe._wave_trace['COEFF'].data[sel2,0] -= meanoffset[1]
-    lvmframe._wave_trace['COEFF'].data[sel3,0] -= meanoffset[2]
-    lvmframe._header[f'HIERARCH WAVE SKYOFF_{channel}1']=(f'{meanoffset[0]}', f'Mean sky line offset in {channel}1 [Angs]')
-    lvmframe._header[f'HIERARCH WAVE SKYOFF_{channel}2']=(f'{meanoffset[1]}', f'Mean sky line offset in {channel}2 [Angs]')
-    lvmframe._header[f'HIERARCH WAVE SKYOFF_{channel}3']=(f'{meanoffset[2]}', f'Mean sky line offset in {channel}3 [Angs]')
+        fwhm_guess = numpy.nanmean(numpy.interp(skylines, lvmframe._wave[ifiber], lvmframe._lsf[ifiber]))
 
-    #write updated wobject
+        flux, sky_wave, fwhm, bg = spec.fitSepGauss(skylines, dwave, fwhm_guess, 0.0, [0, numpy.inf], [-2.5, 2.5], [fwhm_guess - 1.5, fwhm_guess + 1.5], [0.0, numpy.inf])
+        if numpy.any(flux / bg < 0.7) or numpy.isnan([flux, sky_wave, fwhm]).any():
+            continue
+
+        offsets[:, ifiber] = sky_wave - skylines
+        fiber_offset[ifiber] = bn.nanmedian(offsets[:,ifiber], axis=0)
+
+    # split per spectrographs
+    specoffset = numpy.asarray(numpy.split(offsets, 3, axis=1))
+    # fit smooth function to each spectrograph trend
+    fiber_offset_mod = fiber_offset.copy()
+    for spec_offset, spec in zip(numpy.split(fiber_offset, 3), [sel1, sel2, sel3]):
+        mask = numpy.isfinite(spec_offset)
+        if mask.sum() <= 0.3*spec.sum():
+            log.warning(f"<30% of the fibers have good wavelength offsets measurements: {mask.sum()} fibers, assuming zero offset")
+            lvmframe.add_header_comment(f"<30% of the fibers have good wavelength offsets measurements: {mask.sum()} fibers, assuming zero offset")
+            fiber_offset_mod[spec] = 0.0
+            continue
+        t = numpy.linspace(
+            fiberid[spec][mask][len(fiberid[spec][mask]) // 20],
+            fiberid[spec][mask][-1 * len(fiberid[spec][mask]) // 20],
+            20
+        )
+        median_offset = ndimage.median_filter(spec_offset[mask], 8)
+        tck = interpolate.splrep(fiberid[spec][mask], median_offset, task=-1, t=t)
+        fiber_offset_mod[spec] = interpolate.splev(fiberid[spec], tck)
+
+    # Average offsets for different skylines in each channel, apply to trace, and write them in header
+    meanoffset = numpy.nanmean(specoffset, axis=(1, 2)).round(4)
+    meanoffset = numpy.nan_to_num(meanoffset)
+    log.info(f'Applying the offsets [Angstroms] in [1,2,3] spectrographs with means: {meanoffset}')
+    lvmframe._wave_trace['COEFF'].data[:,0] -= fiber_offset_mod
+    lvmframe._header[f'HIERARCH WAVE SKYOFF_{channel.upper()}1'] = (meanoffset[0], f'Mean sky line offset in {channel}1 [Angs]')
+    lvmframe._header[f'HIERARCH WAVE SKYOFF_{channel.upper()}2'] = (meanoffset[1], f'Mean sky line offset in {channel}2 [Angs]')
+    lvmframe._header[f'HIERARCH WAVE SKYOFF_{channel.upper()}3'] = (meanoffset[2], f'Mean sky line offset in {channel}3 [Angs]')
+
+    wave_trace = TraceMask.from_coeff_table(lvmframe._wave_trace)
+    lvmframe._wave = wave_trace.eval_coeffs()
+
+    # write updated wobject
     log.info(f"writing updated wobject file '{os.path.basename(out_frame)}'")
     lvmframe.writeFitsData(out_frame)
 
-    # Make QA plots showing offsets for each sky line in each channel
-    for i in range(len(skylines)):
-        fig, ax = plt.subplots()
-        ax.plot(fiberid[sel1], offsets[i,sel1], label='Spec1', color='red', alpha=0.5)
-        ax.plot(fiberid[sel2], offsets[i,sel2], label='Spec2', color='green', alpha=0.5)
-        ax.plot(fiberid[sel3], offsets[i,sel3], label='Spec3', color='blue', alpha=0.5)
-        ax.plot(fiberid[sel1], numpy.repeat(specoffset[i,0], len(fiberid[sel1])), linestyle='--', color='red')
-        ax.plot(fiberid[sel2], numpy.repeat(specoffset[i,1], len(fiberid[sel2])), linestyle='--', color='green')
-        ax.plot(fiberid[sel3], numpy.repeat(specoffset[i,2], len(fiberid[sel3])), linestyle='--', color='blue')
-        ax.plot(fiberid[sel1], numpy.repeat(meanoffset[0], len(fiberid[sel1])), linestyle='-', color='red')
-        ax.plot(fiberid[sel2], numpy.repeat(meanoffset[1], len(fiberid[sel2])), linestyle='-', color='green')
-        ax.plot(fiberid[sel3], numpy.repeat(meanoffset[2], len(fiberid[sel3])), linestyle='-', color='blue')
-        ax.hlines(0, 0, 1944, linestyle='--', color='black', alpha=0.3)
-        ax.hlines(+0.05, 0, 1944, linestyle=':', color='black', alpha=0.3)
-        ax.hlines(-0.05, 0, 1944, linestyle=':', color='black', alpha=0.3)
-        ax.legend()
-        ax.set_ylim(-0.4,0.4)
-        ax.set_title(f'{lvmframe._header["EXPOSURE"]} - {channel} - {skylines[i]}')
-        ax.set_xlabel('Fiber ID')
-        ax.set_ylabel(r'$\Delta \lambda [\AA]$')
+    # Make QA plots showing offsets for each sky line in each spectrograph
+    fig, ax = plt.subplots()
+    ax.hlines(+0.05, 1, 1944, linestyle=':', color='black', alpha=0.3)
+    ax.hlines(-0.05, 1, 1944, linestyle=':', color='black', alpha=0.3)
 
-        save_fig(
+    colors = plt.cm.coolwarm(numpy.linspace(0, 1, len(skylines)))
+    for i in range(len(skylines)):
+        ax.plot(fiberid[sel1], ndimage.median_filter(offsets[i,sel1], 5), color=colors[i], lw=1, alpha=0.7)
+        ax.plot(fiberid[sel2], ndimage.median_filter(offsets[i,sel2], 5), color=colors[i], lw=1, alpha=0.7)
+        ax.plot(fiberid[sel3], ndimage.median_filter(offsets[i,sel3], 5), color=colors[i], lw=1, alpha=0.7)
+    ax.hlines(meanoffset[0], 1, 648, linestyle='-', color='tab:red', label='Spec1')
+    ax.hlines(meanoffset[1], 1+648, 2*648, linestyle='-', color='tab:green', label='Spec2')
+    ax.hlines(meanoffset[2], 1+2*648, 1944, linestyle='-', color='tab:blue', label='Spec3')
+    ax.plot(fiberid[sel1], fiber_offset_mod[sel1], color='0.2')
+    ax.plot(fiberid[sel2], fiber_offset_mod[sel2], color='0.2')
+    ax.plot(fiberid[sel3], fiber_offset_mod[sel3], color='0.2')
+    ax.hlines(0, 1, 1944, linestyle='--', color='black', alpha=0.3)
+    ax.legend()
+    ax.set_ylim(-0.4,0.4)
+    ax.set_title(f'{lvmframe._header["EXPOSURE"]} - {channel} - {numpy.round(skylines, 2)}')
+    ax.set_xlabel('Fiber ID')
+    ax.set_ylabel(r'$\Delta \lambda [\AA]$')
+
+    save_fig(
         fig,
         product_path=out_frame,
-        to_display=False,
+        to_display=display_plots,
         figure_path="qa",
-        label=f"skylineshift_{skylines[i]}")
+        label=f"skylineshift_{channel}")
 
 
 
@@ -851,9 +780,12 @@ def shift_wave_skylines(in_frame: str, out_frame: str, channel: str):
 # * merge arc_wave and arc_lsfs into lvmArc product, change variable name to in_arc
 # @skip_on_missing_input_path(["in_rss", "in_waves", "in_lsfs"])
 # @skip_if_drpqual_flags(["EXTRACTBAD", "BADTRACE"], "in_rss")
-def create_pixel_table(in_rss: str, out_rss: str, in_waves: str, in_lsfs: str):
-    """
-    Applies the wavelength and the spectral resolution (LSF) to an RSS
+def create_pixel_table(in_rss: str, out_rss: str, in_waves: str, in_lsfs: str, calculate_heliorv: bool = True, apply_heliorv: bool = False):
+    """Applies the wavelength and the spectral resolution (LSF) to an RSS
+
+    Additionally barycentric correction in velocity can be applied if
+    information is supplied as input parameter or in the header of the input
+    RSS.
 
     Parameters
     ----------
@@ -866,16 +798,32 @@ def create_pixel_table(in_rss: str, out_rss: str, in_waves: str, in_lsfs: str):
         RSS FITS file containing the wavelength solutions
     in_lsfs : string, optional with default: ''
         RSS FITS file containing the spectral resolution (LSF in FWHM)
+    calculate_heliorv : bool, optional
+        Calculates per-telescope heliocentric velocity corrections
+    apply_heliorv : bool, optional
+
     """
+    log.info(f"loading RSS for wavelength calibration: {in_rss}")
     rss = RSS.from_file(in_rss)
 
+    # set wavelength and LSF traces
+    log.info("adding wavelength and LSF solutions")
     wave_traces = [TraceMask.from_file(in_wave) for in_wave in in_waves]
     wave_trace = TraceMask.from_spectrographs(*wave_traces)
     rss.set_wave_trace(wave_trace)
+    rss.set_wave_array()
 
     lsf_traces = [TraceMask.from_file(in_lsfs) for in_lsfs in in_lsfs]
     lsf_trace = TraceMask.from_spectrographs(*lsf_traces)
     rss.set_lsf_trace(lsf_trace)
+    rss.set_lsf_array()
+
+    # set header keywords for heliocentric velocity corrections
+    log.info("calculating heliocentric velocity corrections")
+    helio_rvs = rss.get_helio_rv(apply_heliorv)
+    log.info(f"heliocentric velocities [km/s]: {helio_rvs}")
+
+    log.info(f"writing output RSS to {out_rss}")
     rss.writeFitsData(out_rss)
 
     return rss
@@ -957,8 +905,8 @@ def checkPixTable_drp(
             "%.3f %.3f %.3f %.3f \n"
             % (
                 centres[j],
-                numpy.median(fit_wave[good_fiber, j]),
-                numpy.median(fit_wave[good_fiber, j]) - centres[j],
+                bn.median(fit_wave[good_fiber, j]),
+                bn.median(fit_wave[good_fiber, j]) - centres[j],
                 numpy.std(fit_wave[good_fiber, j]),
             )
         )
@@ -968,7 +916,7 @@ def checkPixTable_drp(
         for i in range(len(blocks)):
             if numpy.sum(blocks_good[i]) > 0:
                 log.write(
-                    " %.3f" % numpy.median(offset_pix[blocks[i][blocks_good[i]], j])
+                    " %.3f" % bn.median(offset_pix[blocks[i][blocks_good[i]], j])
                 )
             else:
                 log.write(" 0.0")
@@ -978,7 +926,7 @@ def checkPixTable_drp(
                 log.write(
                     " %.3f"
                     % (
-                        numpy.median(fit_wave[blocks[i][blocks_good[i]], j])
+                        bn.median(fit_wave[blocks[i][blocks_good[i]], j])
                         - centres[j]
                     )
                 )
@@ -986,7 +934,7 @@ def checkPixTable_drp(
                 log.write(" 0.0")
         log.write("\n")
 
-    off_disp_median = numpy.median(offset_pix[good_fiber, :])
+    off_disp_median = bn.median(offset_pix[good_fiber, :])
     off_disp_rms = numpy.std(offset_pix[good_fiber, :])
     off_disp_median = (
         float("%.4f" % off_disp_median)
@@ -1105,11 +1053,11 @@ def correctPixTable_drp(
     for i in range(rss._fibers):
         spec = rss[i]
         if smooth_poly_disp == "":
-            off = numpy.median(offsets.flatten())
+            off = bn.median(offsets.flatten())
         else:
             smooth_poly_disp = int(smooth_poly_disp)
             if smooth_poly_disp == "":
-                off = numpy.median(offsets[i])
+                off = bn.median(offsets[i])
             else:
                 off = Spectrum1D(wave=ref_wave, data=offsets[:, i])
                 off.smoothPoly(smooth_poly_disp, ref_base=spec._wave)
@@ -1130,16 +1078,12 @@ def correctPixTable_drp(
 @skip_if_drpqual_flags(["BADTRACE", "EXTRACTBAD"], "in_rss")
 def resample_wavelength(in_rss: str, out_rss: str, method: str = "linear",
                         wave_range: Tuple[float,float] = None, wave_disp: float = None,
-                        helio_vel: float = 0.0, helio_vel_keyword: str = "HELIO_RV",
                         convert_to_density: bool = False) -> RSS:
     """Resamples the RSS wavelength solutions to a common wavelength solution
 
     A common wavelength solution is computed for the RSS by resampling the
     wavelength solution of each fiber to a common wavelength grid. The
     resampling is performed using a linear or spline interpolation scheme.
-    Additionally barycentric correction in velocity can be applied if
-    information is supplied as input parameter or in the header of the input
-    RSS.
 
     Parameters
     ----------
@@ -1158,12 +1102,6 @@ def resample_wavelength(in_rss: str, out_rss: str, method: str = "linear",
     wave_disp : string of float, optional with default: None
         Dispersion per pixel for the common resampled wavelength solution.
         The "optimal" dispersion will be used if the parameter is empty.
-    helio_vel : string of float, optional with default: 0.0
-        Heliocentric velocity in km/s. If the parameter is empty, the value
-        stored in the header of the input RSS is used.
-    helio_vel_keyword : string, optional with default: 'HELIO_RV'
-        Keyword in the header of the input RSS where the heliocentric velocity
-        is stored.
     convert_to_density : string of boolean, optional with default: False
         If True, the resampled RSS will be converted to density units.
 
@@ -1186,17 +1124,6 @@ def resample_wavelength(in_rss: str, out_rss: str, method: str = "linear",
         wave_disp = numpy.min(rss._wave[:, 1:] - rss._wave[:, :-1])
     log.info(f"using wavelength range {wave_range = } angstrom and {wave_disp = } angstrom pixel size")
 
-    # apply heliocentric velocity correction
-    if helio_vel is None or helio_vel == 0.0:
-        helio_vel = rss._header.get(helio_vel_keyword)
-        if helio_vel is None:
-            helio_vel = 0.0
-            log.warning(f"no heliocentric velocity found in header by keywords {helio_vel_keyword = }, assuming {helio_vel = } km/s")
-    else:
-        log.info(f"applying heliocentric velocity correction of {helio_vel = } km/s")
-
-    rss._wave = rss._wave * (1 + helio_vel / c.to("km/s").value)
-
     # resample the wavelength solution
     log.info(f"resampling the wavelength solution using {method = } interpolation")
     new_rss = rss.rectify_wave(wave_range=wave_range, wave_disp=wave_disp, method=method, return_density=convert_to_density)
@@ -1208,14 +1135,15 @@ def resample_wavelength(in_rss: str, out_rss: str, method: str = "linear",
     return new_rss
 
 
-def matchResolution_drp(in_rss, out_rss, targetFWHM, parallel="auto"):
+def match_resolution(in_rss, out_rss, target_fwhm=None, min_fwhm=0.1, plot_fibers=[0,300,600,900,1200,1400,1700], display_plots=False):
     """
     Homogenise the LSF of the RSS to a common spectral resolution (FWHM)
 
-    This task smooths the RSS with a Gaussian kernel of the corresponding
-    width. A pixel table with the spectral resolution needs to be present in
-    the RSS. If the spectral resolution is higher than than the target spectral
-    resolution for certain pixel, no smoothing is applied for those pixels.
+    This routine downgrades the RSS LSF with a Gaussian kernel of the
+    corresponding width. A pixel table with the spectral resolution needs to be
+    present in the RSS. If the spectral resolution is higher than than the
+    target spectral resolution for certain pixel, the spectra is degraded to
+    `min_fwhm` value.
 
     Parameters
     ----------
@@ -1223,48 +1151,40 @@ def matchResolution_drp(in_rss, out_rss, targetFWHM, parallel="auto"):
         Input RSS FITS file with a pixel table for the spectral resolution
     out_rss : string
         Output RSS FITS file with a homogenised spectral resolution
-    targetFWHM : string of float
-        Spectral resolution in FWHM to which the RSS shall be homogenised
-    parallel: either string of integer (>0) or  'auto', optional with default: 'auto'
-        Number of CPU cores used in parallel for the computation. If set to
-        auto, the maximum number of CPUs for the given system is used.
+    target_fwhm : float, optional
+        Spectral resolution in FWHM Agnstroms to which the RSS will be homogenised, by default None
+    min_fwhm : float, optional
+        Minimum spectral resolution in FWHM allowed, by default 0.1 Angstrom
+    plot_fibers : list[int], optional
+        List of fiber indices to plot, by default [0,300,600,900,1200,1400,1700]
+    display_plots : bool, optional
+        Show plot on screen or not, by default False
 
-    Examples
-    --------
-    user:> lvmdrp rss matchResolution RSS_in.fits RSS_out.fits 6.0
+    Returns
+    -------
+    new_rss : lvmdrp.core.rss.RSS
+        New RSS with homogenised LSF
     """
-    targetFWHM = float(targetFWHM)
     rss = RSS.from_file(in_rss)
+    camera = rss._header["CCD"]
+    expnum = rss._header["EXPOSURE"]
 
-    smoothFWHM = numpy.zeros_like(rss._lsf)
-    select = rss._lsf < targetFWHM
-    smoothFWHM[select] = numpy.sqrt(targetFWHM**2 - rss._lsf[select] ** 2)
+    new_rss = rss.match_lsf(target_fwhm, min_fwhm=min_fwhm)
+    new_rss._lsf = None
+    new_rss.setHdrValue("HIERARCH WAVE RES", target_fwhm, "spectral resolution (FWHM) [Angstrom]")
+    new_rss.writeFitsData(out_rss)
 
-    if parallel == "auto":
-        cpus = cpu_count()
-    else:
-        cpus = int(parallel)
+    if plot_fibers:
+        fig, ax = create_subplots(to_display=display_plots, figsize=(15,5), layout="constrained")
+        fig.suptitle(f"Matched LSF for {camera = }, {expnum = }")
+        for ifiber in plot_fibers:
+            wave = rss._wave if len(rss._wave.shape) == 1 else rss._wave[ifiber]
+            ln, = ax.step(wave, rss._data[ifiber], lw=1, where="mid", alpha=0.5)
+            ax.step(wave, new_rss._data[ifiber], lw=1, where="mid", color=ln.get_color(), label=ifiber)
+        ax.legend(loc=1, frameon=False, title="Fiber Idx", ncols=7)
+        save_fig(fig, to_display=display_plots, product_path=out_rss, figure_path="qa", label="match_res")
 
-    if cpus > 1:
-        pool = Pool(cpus)
-        threads = []
-        for i in range(len(rss)):
-            threads.append(
-                pool.apply_async(rss[i].smoothGaussVariable, ([smoothFWHM[i, :]]))
-            )
-
-        for i in range(len(rss)):
-            rss[i] = threads[i].get()
-        pool.close()
-        pool.join()
-    else:
-        for i in range(len(rss)):
-            rss[i] = rss[i].smoothGaussVariable(smoothFWHM[i, :])
-    rss._lsf = None
-    rss.setHdrValue(
-        "HIERARCH PIPE SPEC RES", targetFWHM, "FWHM in A of spectral resolution"
-    )
-    rss.writeFitsData(out_rss)
+    return new_rss
 
 
 def splitFibers_drp(in_rss, splitted_out, contains):
@@ -1591,7 +1511,7 @@ def correctTraceMask_drp(trace_in, trace_out, logfile, ref_file, poly_smooth="")
     trace = TraceMask.from_file(trace_in)
 
     if poly_smooth == "":
-        trace = trace + (numpy.median(offsets.flatten()) * -1)
+        trace = trace + (bn.median(offsets.flatten()) * -1)
     else:
         split_trace = trace.split(offsets.shape[1], axis="y")
         offset_trace = TraceMask()
@@ -1663,6 +1583,7 @@ def apply_fiberflat(in_rss: str, out_frame: str, in_flat: str, clip_below: float
     # check if fiberflat has the same wavelength grid as the target data
     if not numpy.isclose(rss._wave, flat._wave).all():
         log.warning("target data and fiberflat have different wavelength grids")
+        rss.add_header_comment("target data and fiberflat have different wavelength grids")
 
     # apply fiberflat
     log.info(f"applying fiberflat correction to {rss._fibers} fibers with minimum relative transmission of {clip_below}")
@@ -1675,13 +1596,14 @@ def apply_fiberflat(in_rss: str, out_frame: str, in_flat: str, clip_below: float
         if not numpy.isclose(spec_flat._wave, spec_data._wave).all():
             deltas = spec_flat._wave - spec_data._wave
             log.warning(f"at fiber {i} resampling fiberflat: {numpy.min(deltas):.4f} - {numpy.max(deltas):.4f}")
+            rss.add_header_comment(f"at fiber {i} resampling fiberflat: {numpy.min(deltas):.4f} - {numpy.max(deltas):.4f}")
             spec_flat = spec_flat.resampleSpec(spec_data._wave, err_sim=5)
 
         # apply clipping
         select_clip_below = (spec_flat < clip_below) | numpy.isnan(spec_flat._data)
         spec_flat._data[select_clip_below] = 1
-        if spec_flat._mask is not None:
-            spec_flat._mask[select_clip_below] = True
+        # if spec_flat._mask is not None:
+        #     spec_flat._mask[select_clip_below] = True
 
         # correct
         spec_new = spec_data / spec_flat._data
@@ -1859,7 +1781,7 @@ def matchFluxRSS_drp(
         # load subimages from disc and append them to a list
         rss = loadRSS(list_rss[i])
         specs.append(rss.createAperSpec(center_x, center_y, arc_radius))
-        fluxes.append(numpy.median(specs[i]._data))
+        fluxes.append(bn.median(specs[i]._data))
 
     order = numpy.argsort(fluxes)
     #   print fluxes, order
@@ -2442,7 +2364,7 @@ def correctGalExtinct_drp(in_rss, out_rss, Av, Rv="3.1", verbose="0"):
     rss = loadRSS(in_rss)
 
     if len(rss._wave.shape) == 1:
-        galExtCurve = ancillary_func.galExtinct(rss._wave, Rv)
+        galExtCurve = galExtinct(rss._wave, Rv)
         Alambda = galExtCurve * Av
         if verbose == 1:
             plt.plot(1.0 / 10 ** (Alambda._data / -2.5))

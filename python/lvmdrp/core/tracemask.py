@@ -4,6 +4,7 @@
 import os
 import numpy
 from astropy.io import fits as pyfits
+from astropy.table import Table
 from lvmdrp.core.fiberrows import FiberRows
 
 
@@ -26,6 +27,7 @@ class TraceMask(FiberRows):
         header = None
         data, error, mask = None, None, None
         coeffs, poly_kind, poly_deg = None, None, None
+        samples = None
         with pyfits.open(in_tracemask, uint=True, do_not_scale_image_data=True, memmap=False) as hdus:
             header = hdus["PRIMARY"].header
             for hdu in hdus:
@@ -35,12 +37,14 @@ class TraceMask(FiberRows):
                     error = hdu.data.astype("float32")
                 if hdu.name == "BADPIX":
                     mask = hdu.data.astype("bool")
+                if hdu.name == "SAMPLES":
+                    samples = Table(hdu.data)
                 if hdu.name == "COEFFS":
                     coeffs = hdu.data.astype("float32")
                     poly_kind = header.get("POLYKIND")
                     poly_deg = header.get("POLYDEG")
 
-            trace = cls(data=data, error=error, mask=mask, coeffs=coeffs, poly_kind=poly_kind, poly_deg=poly_deg, header=header)
+            trace = cls(data=data, error=error, mask=mask, samples=samples, coeffs=coeffs, poly_kind=poly_kind, poly_deg=poly_deg, header=header)
 
         return trace
 
@@ -50,6 +54,7 @@ class TraceMask(FiberRows):
         header=None,
         error=None,
         mask=None,
+        samples=None,
         shape=None,
         size=None,
         arc_position_x=None,
@@ -66,6 +71,7 @@ class TraceMask(FiberRows):
             header,
             error,
             mask,
+            samples,
             shape,
             size,
             arc_position_x,
@@ -126,6 +132,8 @@ class TraceMask(FiberRows):
             hdus.append(pyfits.ImageHDU(self._error.astype("float32"), name="ERROR"))
         if self._mask is not None:
             hdus.append(pyfits.ImageHDU(self._mask.astype("uint8"), name="BADPIX"))
+        if self._samples is not None:
+            hdus.append(pyfits.BinTableHDU(self._samples, name="SAMPLES"))
         if self._coeffs is not None:
             hdus.append(pyfits.ImageHDU(self._coeffs.astype("float32"), name="COEFFS"))
             hdus[0].header["POLYKIND"] = (self._poly_kind, "polynomial kind")

@@ -32,7 +32,7 @@ distribute-*.tar.gz
 *~
 
 # Test directories and files
-data*
+#data*
 lib
 *.tar.gz*
 test-*.fits
@@ -44,6 +44,8 @@ test_redux-*
 *.pdf
 tests/htmlcov
 tests/*coverage*
+*.fits
+*.csv
 
 # Mac OSX
 .DS_Store

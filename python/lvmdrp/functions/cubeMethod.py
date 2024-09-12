@@ -1,7 +1,7 @@
 import sys
 
 import numpy
-
+import bottleneck as bn
 
 try:
     import pylab
@@ -17,7 +17,7 @@ from lvmdrp.core.image import Image
 from lvmdrp.core.rss import RSS
 from lvmdrp.core.passband import PassBand
 from lvmdrp.core.spectrum1d import Spectrum1D
-from lvmdrp.external import ancillary_func
+from lvmdrp.core.fluxcal import extinctCAHA
 
 
 description = "Provides Methods to process Cube files"
@@ -814,7 +814,7 @@ def createSensFunction_drp(
     )
 
     extinct = 10 ** (
-        ancillary_func.extinctCAHA(star_spec._wave, extinct_v) * airmass * -0.4
+        extinctCAHA(star_spec._wave, extinct_v) * airmass * -0.4
     )
     ref_star_spec.loadSTDref(
         ref_spec,
@@ -1009,8 +1009,8 @@ def createTelluricCorrection_drp(cube_in, telluric_out, airmass, mask_telluric):
         line_par = stats.linregress(
             [mask_telluric[i * 2] - 10, mask_telluric[i * 2 + 1] + 10],
             [
-                numpy.median(star_telluric1._data[select_blue]),
-                numpy.median(star_telluric1._data[select_red]),
+                bn.median(star_telluric1._data[select_blue]),
+                bn.median(star_telluric1._data[select_red]),
             ],
         )
         star_telluric2._data[select_region] = (

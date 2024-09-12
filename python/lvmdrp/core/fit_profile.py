@@ -51,6 +51,13 @@ class fit_profile1D(object):
     def __call__(self, x):
         return self._func(x)
 
+    def fix_guess(self, bounds):
+        guess = numpy.asarray(self._par)
+        bounds = numpy.asarray(bounds)
+
+        guess = numpy.clip(guess, *bounds)
+        return guess
+
     def getPar(self):
         return self._par
 
@@ -85,14 +92,17 @@ class fit_profile1D(object):
         if p0 is None and p0 is not False and self._guess_par is not None:
             self._guess_par(x, y)
         perr_init = deepcopy(self)
-        p0 = self._par
+        p0 = self.fix_guess(bounds)
         if method == "leastsq":
             model = optimize.least_squares(
-                self.res, x0=p0, bounds=bounds, args=(x, y, sigma), max_nfev=maxfev, ftol=ftol, xtol=xtol,
+                self.res, x0=p0, bounds=bounds, args=(x, y, sigma), max_nfev=maxfev, ftol=ftol, xtol=xtol, method="dogbox"
             )
             self._par = model.x
-            # model = optimize.leastsq(self.res, p0, (x, y, sigma), None, 0, 0, ftol, xtol, 0.0, maxfev, 0.0, 100.0, None, warning)
 
+            mask = model.active_mask!=0
+            # for i in range(self._par.size):
+            #     mask |= (self._par[i]<=bounds[0][i])|(self._par[i]>=bounds[1][i])
+            self._par[mask] = numpy.nan
         if method == "simplex":
             try:
                 model = optimize.fmin(
@@ -227,12 +237,15 @@ class fit_profile1D(object):
         else:
             self._par_err = None
 
-    def plot(self, x, y=None, ax=None):
+    def plot(self, x, y=None, mask=None, ax=None):
         if ax is None:
             fig, ax = plt.subplots(figsize=(15,5))
+
+        mask_ = numpy.ones_like(mask)
+        mask_[mask] = numpy.nan
         if y is not None:
-            ax.step(x, y, color="0.2", lw=1, where="mid")
-        ax.step(x, self(x), color="tab:blue", lw=1, where="mid")
+            ax.step(x, y*mask_, color="0.2", lw=1, where="mid")
+        ax.step(x, self(x)*mask_, color="tab:blue", lw=1, where="mid")
         return ax
 
 

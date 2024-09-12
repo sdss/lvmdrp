@@ -25,6 +25,7 @@ from lvmdrp.core.header import Header
 from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.core.spectrum1d import Spectrum1D, _cross_match_float, _cross_match, _spec_from_lines
 
+from lvmdrp import __version__ as drpver
 
 def _fill_column_list(columns, width):
     """Adds # width columns around the given columns list
@@ -109,7 +110,7 @@ def _model_overscan(os_quad, axis=1, overscan_stat="biweight", threshold=None, m
     if overscan_stat == "biweight":
         stat = partial(biweight_location, ignore_nan=True)
     elif overscan_stat == "median":
-        stat = numpy.nanmedian
+        stat = bn.nanmedian
     else:
         warnings.warn(
             f"overscan statistic '{overscan_stat}' not implemented, "
@@ -705,7 +706,13 @@ class Image(Header):
     def __ge__(self, other):
         return self._data >= other
 
-    def measure_fiber_shifts(self, ref_image, columns=[500, 1000, 1500, 2000, 2500, 3000], column_width=25, shift_range=[-5,5]):
+    def add_header_comment(self, comstr):
+        '''
+        Append a COMMENT card at the end of the FITS header.
+        '''
+        self._header.append(('COMMENT', comstr), bottom=True)
+
+    def measure_fiber_shifts(self, ref_image, columns=[500, 1000, 1500, 2000, 2500, 3000], column_width=25, shift_range=[-5,5], axs=None):
         '''Measure the (thermal, flexure, ...) shift between the fiber (traces) in 2 detrended images in the y (cross dispersion) direction.
 
         Uses cross-correlations between (medians of a number of) columns to determine
@@ -735,9 +742,18 @@ class Image(Header):
 
         shifts = numpy.zeros(len(columns))
         for j,c in enumerate(columns):
-            s1 = numpy.nanmedian(ref_data[50:-50,c-column_width:c+column_width], axis=1)
-            s2 = numpy.nanmedian(self._data[50:-50,c-column_width:c+column_width], axis=1)
-            _, shifts[j], _ = _cross_match_float(s1, s2, numpy.array([1.0]), shift_range)
+            s1 = bn.nanmedian(ref_data[50:-50,c-column_width:c+column_width], axis=1)
+            s2 = bn.nanmedian(self._data[50:-50,c-column_width:c+column_width], axis=1)
+            snr = numpy.sqrt(bn.nanmedian(self._data[50:-50,c-column_width:c+column_width], axis=1))
+
+            min_snr = 5.0
+            if bn.nanmedian(snr) > min_snr:
+                _, shifts[j], _ = _cross_match_float(s1, s2, numpy.array([1.0]), shift_range, gauss_window=[-3,3], min_peak_dist=5.0, ax=axs[j])
+            else:
+                comstr = f"low SNR (<={min_snr}) for thermal shift at column {c}: {bn.nanmedian(snr):.4f}, assuming = 0.0"
+                log.warning(comstr)
+                self.add_header_comment(comstr)
+                shifts[j] = 0.0
 
         return shifts
 
@@ -1402,6 +1418,7 @@ class Image(Header):
         #    hdus[0].update_ext_name('T')
 
         if len(hdus) > 0:
+            hdus[0].header['DRPVER'] = drpver
             hdu = pyfits.HDUList(hdus)  # create an HDUList object
             if self._header is not None:
                 hdu[0].header = self.getHeader()  # add the primary header to the HDU
@@ -1588,45 +1605,22 @@ class Image(Header):
             Subsampled image
 
         """
+
         # create empty array with 2 time larger size in both axes
-        new_dim = (self._dim[0] * 2, self._dim[1] * 2)
         if self._data is not None:
-            new_data = numpy.zeros(new_dim, dtype=numpy.float32)
+            new_data = self._data.repeat(2, axis=0).repeat(2, axis=1)
         else:
             new_data = None
         if self._error is not None:
-            new_error = numpy.zeros(new_dim, dtype=numpy.float32)
+            new_error = self._error.repeat(2, axis=0).repeat(2, axis=1)
         else:
             new_error = None
         if self._mask is not None:
-            new_mask = numpy.zeros(new_dim, dtype="bool")
+            new_mask = numpy.zeros(new_data.shape, dtype="bool")
         else:
             new_mask = None
 
         # create index array of the new
-        indices = numpy.indices(new_dim) + 1
-        # define selection for the the 4 different subpixels in which to store the original data
-        select1 = numpy.logical_and(indices[0] % 2 == 1, indices[1] % 2 == 1)
-        select2 = numpy.logical_and(indices[0] % 2 == 1, indices[1] % 2 == 0)
-        select3 = numpy.logical_and(indices[0] % 2 == 0, indices[1] % 2 == 1)
-        select4 = numpy.logical_and(indices[0] % 2 == 0, indices[1] % 2 == 0)
-        # set pixel for the subsampled data, error and mask
-        if self._data is not None:
-            new_data[select1] = self._data.flatten()
-            new_data[select2] = self._data.flatten()
-            new_data[select3] = self._data.flatten()
-            new_data[select4] = self._data.flatten()
-        if self._error is not None:
-            new_error[select1] = self._error.flatten()
-            new_error[select2] = self._error.flatten()
-            new_error[select3] = self._error.flatten()
-            new_error[select4] = self._error.flatten()
-        if self._mask is not None:
-            new_mask[select1] = self._mask.flatten()
-            new_mask[select2] = self._mask.flatten()
-            new_mask[select3] = self._mask.flatten()
-            new_mask[select4] = self._mask.flatten()
-        # create new Image object with the new subsample data
         new_image = copy(self)
         new_image.setData(data=new_data, error=new_error, mask=new_mask, inplace=True)
         return new_image
@@ -1775,22 +1769,13 @@ class Image(Header):
         new_image.setData(data=new, inplace=True)
         return new_image
 
-    def medianImg(self, size, mode="nearest", use_mask=False, propagate_error=False):
+    def medianImg(self, size, propagate_error=False):
         """return median filtered image with the given kernel size
-
-        optionally the method for handling boundary can be set with the `mode`
-        parameter (see documentation for `scipy.ndimage.median_filter`). Masked
-        pixels are handledby setting `use_mask=True`. In this last case, the
-        `mode` is ignored (see documentation for `scipy.signal.medfilt2d`).
 
         Parameters
         ----------
         size : tuple
             2-value tuple for the size of the median box
-        mode : str, optional
-            method to handle boundary pixels, by default "nearest"
-        use_mask : bool, optional
-            whether to take into account masked pixels or not, by default False
         propagate_error : bool, optional
             whether to propagate the error or not, by default False
 
@@ -1799,41 +1784,15 @@ class Image(Header):
         lvmdrp.core.image.Image
             median filtered image
         """
-        if self._mask is None and use_mask:
-            new_data = copy(self._data)
-            new_data[self._mask] = numpy.nan
-            new_data = ndimage.median_filter(new_data, size, mode=mode)
-            new_mask = None
-            new_error = None
-            if propagate_error and self._error is not None:
-                new_error = numpy.sqrt(ndimage.median_filter(self._error ** 2, size, mode=mode))
-        elif self._mask is not None and not use_mask:
-            new_data = ndimage.median_filter(self._data, size, mode=mode)
-            new_mask = self._mask
-            new_error = None
-            if propagate_error and self._error is not None:
-                new_error = numpy.sqrt(ndimage.median_filter(self._error ** 2, size, mode=mode))
-        else:
-            # copy data and replace masked with nans
-            new_data = copy(self._data)
-            new_data[self._mask] = numpy.nan
-            # perform median filter
-            new_data = signal.medfilt2d(new_data, size)
-            # update mask
-            new_mask = numpy.isnan(new_data)
-            # reset original masked values in new array
-            new_data[new_mask] = self._data[new_mask]
-            # update error
-            new_error = None
-            if propagate_error and self._error is not None:
-                new_error = copy(self._error)
-                new_error[self._mask] = numpy.nan
-                new_error = numpy.sqrt(signal.medfilt2d(new_error ** 2, size))
-                # reset masked errors in new array
-                new_error[new_mask] = self._error[new_mask]
+        new_data = copy(self._data)
+        new_error = copy(self._error)
 
-        image = copy(self)
-        image.setData(data=new_data, error=new_error, mask=new_mask)
+        new_data = ndimage.median_filter(new_data, size, mode="nearest")
+        if propagate_error and new_error is not None:
+            new_error = numpy.sqrt(ndimage.median_filter(new_error ** 2, size, mode="nearest"))
+
+        image = Image(data=new_data, error=new_error, mask=self._mask, header=self._header,
+                      origin=self._origin, individual_frames=self._individual_frames, slitmap=self._slitmap)
         return image
 
     def collapseImg(self, axis, mode="mean"):
@@ -2051,9 +2010,9 @@ class Image(Header):
             # collapse groups into single pixel
             new_masked_pixels, new_data, new_vars = [], [], []
             for group in groups:
-                new_masked_pixels.append(numpy.nanmean(masked_pixels[group]))
-                new_data.append(numpy.nanmedian(data[group]))
-                new_vars.append(numpy.nanmean(vars[group]))
+                new_masked_pixels.append(bn.nanmean(masked_pixels[group]))
+                new_data.append(bn.nanmedian(data[group]))
+                new_vars.append(bn.nanmean(vars[group]))
             masked_pixels = numpy.asarray(new_masked_pixels)
             data = numpy.asarray(new_data)
             vars = numpy.asarray(new_vars)
@@ -2140,7 +2099,7 @@ class Image(Header):
         profile._data = numpy.nan_to_num(profile._data, nan=0, neginf=0, posinf=0)
         pixels = profile._pixels
         pixels = numpy.arange(pixels.size)
-        guess_heights = numpy.ones_like(ref_centroids) * numpy.nanmax(profile._data)
+        guess_heights = numpy.ones_like(ref_centroids) * bn.nanmax(profile._data)
         ref_profile = _spec_from_lines(ref_centroids, sigma=1.2, wavelength=pixels, heights=guess_heights)
         log.info(f"correcting guess positions for column {ref_column}")
         cc, bhat, mhat = _cross_match(
@@ -2156,7 +2115,7 @@ class Image(Header):
 
     def trace_fiber_centroids(self, ref_column=2000, ref_centroids=None, mask_fibstatus=1,
                               ncolumns=140, method="gauss", fwhm_guess=2.5, fwhm_range=[1.0, 3.5],
-                              counts_threshold=5000, max_diff=1.5, fit_polynomial=True, poly_deg=4):
+                              counts_threshold=5000, max_diff=1.5):
         if self._header is None:
             raise ValueError("No header available")
         if self._slitmap is None:
@@ -2182,11 +2141,16 @@ class Image(Header):
         bad_fibers = numpy.isin(slitmap["fibstatus"].data, mask_fibstatus)
         good_fibers = numpy.where(numpy.logical_not(bad_fibers))[0]
 
+        # select columns to measure centroids
+        step = self._dim[1] // ncolumns
+        columns = numpy.concatenate((numpy.arange(ref_column, 0, -step), numpy.arange(ref_column, self._dim[1], step)))
+        log.info(f"selecting {len(columns)-1} columns within range [{min(columns)}, {max(columns)}]")
+
         # create empty traces mask for the image
         fibers = ref_centroids.size
         dim = self.getDim()
         centroids = TraceMask()
-        centroids.createEmpty(data_dim=(fibers, dim[1]))
+        centroids.createEmpty(data_dim=(fibers, dim[1]), samples_columns=sorted(set(columns)))
         centroids.setFibers(fibers)
         centroids._good_fibers = good_fibers
         centroids.setHeader(self._header.copy())
@@ -2194,11 +2158,6 @@ class Image(Header):
 
         # set positions of fibers along reference column
         centroids.setSlice(ref_column, axis="y", data=ref_centroids, mask=numpy.zeros_like(ref_centroids, dtype="bool"))
-
-        # select columns to measure centroids
-        step = self._dim[1] // ncolumns
-        columns = numpy.concatenate((numpy.arange(ref_column, 0, -step), numpy.arange(ref_column, self._dim[1], step)))
-        log.info(f"selecting {len(columns)-1} columns: {','.join(map(str, numpy.unique(columns)))}")
 
         # trace centroids in each column
         iterator = tqdm(enumerate(columns), total=len(columns), desc="tracing centroids", unit="column", ascii=True)
@@ -2224,11 +2183,172 @@ class Image(Header):
             bound_upper = numpy.array([numpy.inf]*cent_guess.size + (cent_guess+max_diff).tolist() + [fwhm_range[1]/2.354]*cent_guess.size)
             cen_slice, msk_slice = img_slice.measurePeaks(cent_guess, method, init_sigma=fwhm_guess / 2.354, threshold=counts_threshold, bounds=(bound_lower, bound_upper))
 
-            centroids.setSlice(icolumn, axis="y", data=cen_slice, mask=msk_slice)
+            centroids._samples[f"{icolumn}"][~msk_slice] = cen_slice[~msk_slice]
+            centroids.setSlice(icolumn, axis="y", data=cen_slice, mask=msk_slice, samples=cen_slice)
 
         return centroids
 
     def trace_fiber_widths(self, fiber_centroids, ref_column=2000, ncolumns=40, nblocks=18, iblocks=[],
+                           fwhm_guess=2.5, fwhm_range=[1.0,3.5], max_diff=1.5, counts_threshold=5000):
+
+        if self._header is None:
+            raise ValueError("No header available")
+        unit = self._header["BUNIT"]
+
+        # select columns to fit for amplitudes, fiber_centroids and FWHMs per fiber block
+        step = self._dim[1] // ncolumns
+        columns = numpy.concatenate((numpy.arange(ref_column, 0, -step), numpy.arange(ref_column+step, self._dim[1], step)))
+        log.info(f"tracing fibers in {len(columns)} columns within range [{min(columns)}, {max(columns)}]")
+
+        # initialize flux and FWHM traces
+        trace_cent = TraceMask()
+        trace_cent.createEmpty(data_dim=(fiber_centroids._fibers, self._dim[1]), samples_columns=sorted(set(columns)))
+        trace_cent.setFibers(fiber_centroids._fibers)
+        trace_cent._good_fibers = fiber_centroids._good_fibers
+        trace_cent.setHeader(self._header.copy())
+        trace_amp = copy(trace_cent)
+        trace_fwhm = copy(trace_cent)
+        trace_cent._header["IMAGETYP"] = "trace_centroid"
+        trace_amp._header["IMAGETYP"] = "trace_amplitude"
+        trace_fwhm._header["IMAGETYP"] = "trace_fwhm"
+
+        # fit peaks, fiber_centroids and FWHM in each column
+        mod_columns, residuals = [], []
+        for i, icolumn in enumerate(columns):
+            log.info(f"tracing column {icolumn} ({i+1}/{len(columns)})")
+            # get slice of data and trace
+            cen_slice, _, msk_slice = fiber_centroids.getSlice(icolumn, axis="y")
+            img_slice = self.getSlice(icolumn, axis="y")
+
+            # define fiber blocks
+            if iblocks and isinstance(iblocks, (list, tuple, numpy.ndarray)):
+                cen_blocks = numpy.split(cen_slice, nblocks)
+                cen_blocks = numpy.asarray(cen_blocks)[iblocks]
+                msk_blocks = numpy.split(msk_slice, nblocks)
+                msk_blocks = numpy.asarray(msk_blocks)[iblocks]
+            else:
+                cen_blocks = numpy.split(cen_slice, nblocks)
+                msk_blocks = numpy.split(msk_slice, nblocks)
+
+            # fit each block
+            par_blocks = []
+            iterator = tqdm(enumerate(zip(cen_blocks, msk_blocks)), total=len(cen_blocks), desc="fitting fibers (00/00 good fibers)", ascii=True, unit="block")
+            for j, (cen_block, msk_block) in iterator:
+                # apply flux threshold
+                cen_idx = cen_block.round().astype("int16")
+                msk_block |= (img_slice._data[cen_idx] < counts_threshold)
+
+                # mask bad fibers
+                cen_block = cen_block[~msk_block]
+                # initialize parameters with the full block size
+                par_block = numpy.ones(3 * msk_block.size) * numpy.nan
+                par_mask = numpy.tile(msk_block, 3)
+
+                # skip block if all fibers are masked
+                if msk_block.sum() > 0.5 * msk_block.size:
+                    log.info(f"skipping fiber block {j+1}/{nblocks} (most fibers masked)")
+                else:
+                    # fit gaussian models to each fiber profile
+                    iterator.set_description(f"fitting fibers ({cen_block.size:02d}/{msk_block.size:02d} good fibers)")
+                    iterator.refresh()
+                    # log.info(f"fitting fiber block {j+1}/{nblocks} ({cen_block.size}/{msk_block.size} good fibers)")
+                    bound_lower = numpy.array([0]*cen_block.size + (cen_block-max_diff).tolist() + [fwhm_range[0]/2.354]*cen_block.size)
+                    bound_upper = numpy.array([numpy.inf]*cen_block.size + (cen_block+max_diff).tolist() + [fwhm_range[1]/2.354]*cen_block.size)
+                    _, par_block[~par_mask] = img_slice.fitMultiGauss(cen_block, init_fwhm=fwhm_guess, bounds=(bound_lower, bound_upper))
+
+                par_blocks.append(par_block)
+
+            # combine all parameters in a single array
+            par_joint = numpy.asarray([numpy.split(par_block, 3) for par_block in par_blocks])
+            par_joint = par_joint.transpose(1, 0, 2).reshape(3, -1)
+            # define joint gaussian model
+            mod_joint = Gaussians(par=par_joint.ravel())
+
+            # store joint model
+            mod_columns.append(mod_joint)
+
+            # get parameters of joint model
+            amp_slice = par_joint[0]
+            cent_slice = par_joint[1]
+            fwhm_slice = par_joint[2] * 2.354
+
+            # mask fibers with invalid values
+            amp_off = (amp_slice <= counts_threshold)
+            log.info(f"masking {amp_off.sum()} samples with amplitude < {counts_threshold} {unit}")
+            cent_off = numpy.abs(1 - cent_slice / numpy.concatenate(cen_blocks)) > 0.01
+            log.info(f"masking {cent_off.sum()} samples with centroids refined by > 1 %")
+            fwhm_off = (fwhm_slice < fwhm_range[0]) | (fwhm_slice > fwhm_range[1])
+            log.info(f"masking {fwhm_off.sum()} samples with FWHM outside {fwhm_range} pixels")
+            amp_mask = numpy.isnan(amp_slice) | amp_off | cent_off | fwhm_off
+            cent_mask = numpy.isnan(cent_slice) | amp_off | cent_off | fwhm_off
+            fwhm_mask = numpy.isnan(fwhm_slice) | amp_off | cent_off | fwhm_off
+
+            if amp_slice.size != trace_amp._data.shape[0]:
+                dummy_amp = numpy.split(numpy.zeros(trace_amp._data.shape[0]), nblocks)
+                dummy_cent = numpy.split(numpy.zeros(trace_cent._data.shape[0]), nblocks)
+                dummy_fwhm = numpy.split(numpy.zeros(trace_fwhm._data.shape[0]), nblocks)
+                dummy_amp_mask = numpy.split(numpy.ones(trace_amp._data.shape[0], dtype=bool), nblocks)
+                dummy_cent_mask = numpy.split(numpy.ones(trace_cent._data.shape[0], dtype=bool), nblocks)
+                dummy_fwhm_mask = numpy.split(numpy.ones(trace_fwhm._data.shape[0], dtype=bool), nblocks)
+
+                amp_split = numpy.split(amp_slice, len(iblocks))
+                cent_split = numpy.split(cent_slice, len(iblocks))
+                fwhm_split = numpy.split(fwhm_slice, len(iblocks))
+                amp_mask_split = numpy.split(amp_mask, len(iblocks))
+                cent_mask_split = numpy.split(cent_mask, len(iblocks))
+                fwhm_mask_split = numpy.split(fwhm_mask, len(iblocks))
+                for j, iblock in enumerate(iblocks):
+                    dummy_amp[iblock] = amp_split[j]
+                    dummy_cent[iblock] = cent_split[j]
+                    dummy_fwhm[iblock] = fwhm_split[j]
+                    dummy_amp_mask[iblock] = amp_mask_split[j]
+                    dummy_cent_mask[iblock] = cent_mask_split[j]
+                    dummy_fwhm_mask[iblock] = fwhm_mask_split[j]
+
+                # update traces
+                trace_amp._samples[f"{icolumn}"] = numpy.concatenate(dummy_amp)
+                trace_cent._samples[f"{icolumn}"] = numpy.concatenate(dummy_cent)
+                trace_fwhm._samples[f"{icolumn}"] = numpy.concatenate(dummy_fwhm)
+                trace_amp.setSlice(icolumn, axis="y", data=numpy.concatenate(dummy_amp), mask=numpy.concatenate(dummy_amp_mask))
+                trace_cent.setSlice(icolumn, axis="y", data=numpy.concatenate(dummy_cent), mask=numpy.concatenate(dummy_cent_mask))
+                trace_fwhm.setSlice(icolumn, axis="y", data=numpy.concatenate(dummy_fwhm), mask=numpy.concatenate(dummy_fwhm_mask))
+                trace_amp._good_fibers = numpy.arange(trace_amp._fibers)[~numpy.all(trace_amp._mask, axis=1)]
+                trace_cent._good_fibers = numpy.arange(trace_cent._fibers)[~numpy.all(trace_cent._mask, axis=1)]
+                trace_fwhm._good_fibers = numpy.arange(trace_fwhm._fibers)[~numpy.all(trace_fwhm._mask, axis=1)]
+            else:
+                # update traces
+                trace_amp._samples[f"{icolumn}"] = amp_slice
+                trace_cent._samples[f"{icolumn}"] = cent_slice
+                trace_fwhm._samples[f"{icolumn}"] = fwhm_slice
+                trace_amp.setSlice(icolumn, axis="y", data=amp_slice, mask=amp_mask)
+                trace_cent.setSlice(icolumn, axis="y", data=cent_slice, mask=cent_mask)
+                trace_fwhm.setSlice(icolumn, axis="y", data=fwhm_slice, mask=fwhm_mask)
+
+            # compute model column
+            mod_slice = mod_joint(img_slice._pixels)
+
+            # compute residuals
+            integral_mod = numpy.trapz(mod_slice, img_slice._pixels)
+            integral_mod = integral_mod if integral_mod != 0 else numpy.nan
+            # NOTE: this is a hack to avoid integrating the whole column when tracing a few blocks
+            integral_dat = numpy.trapz(img_slice._data * (mod_slice>0), img_slice._pixels)
+            residuals.append((integral_mod - integral_dat) / integral_dat * 100)
+
+            # compute fitted model stats
+            chisq_red = bn.nansum((mod_slice - img_slice._data)[~img_slice._mask]**2 / img_slice._error[~img_slice._mask]**2) / (self._dim[0] - 1 - 3)
+            log.info(f"joint model {chisq_red = :.2f}")
+            if amp_mask.all() or cent_mask.all() or fwhm_mask.all():
+                continue
+            min_amp, max_amp, median_amp = bn.nanmin(amp_slice[~amp_mask]), bn.nanmax(amp_slice[~amp_mask]), bn.nanmedian(amp_slice[~amp_mask])
+            min_cent, max_cent, median_cent = bn.nanmin(cent_slice[~cent_mask]), bn.nanmax(cent_slice[~cent_mask]), bn.nanmedian(cent_slice[~cent_mask])
+            min_fwhm, max_fwhm, median_fwhm = bn.nanmin(fwhm_slice[~fwhm_mask]), bn.nanmax(fwhm_slice[~fwhm_mask]), bn.nanmedian(fwhm_slice[~fwhm_mask])
+            log.info(f"joint model amplitudes: {min_amp = :.2f}, {max_amp = :.2f}, {median_amp = :.2f}")
+            log.info(f"joint model centroids: {min_cent = :.2f}, {max_cent = :.2f}, {median_cent = :.2f}")
+            log.info(f"joint model FWHMs: {min_fwhm = :.2f}, {max_fwhm = :.2f}, {median_fwhm = :.2f}")
+
+        return trace_amp, trace_cent, trace_fwhm, columns, mod_columns, residuals
+
+    def trace_fiber_widths_opt(self, fiber_centroids, ref_column=2000, ncolumns=40, nblocks=18, iblocks=[],
                            fwhm_guess=2.5, fwhm_range=[1.0,3.5], max_diff=1.5, counts_threshold=5000):
 
         if self._header is None:
@@ -2260,54 +2380,38 @@ class Image(Header):
             cen_slice, _, msk_slice = fiber_centroids.getSlice(icolumn, axis="y")
             img_slice = self.getSlice(icolumn, axis="y")
 
-            # define fiber blocks
+            # mask blocks we don't want to trace
             if iblocks and isinstance(iblocks, (list, tuple, numpy.ndarray)):
-                cen_blocks = numpy.split(cen_slice, nblocks)
-                cen_blocks = numpy.asarray(cen_blocks)[iblocks]
-                msk_blocks = numpy.split(msk_slice, nblocks)
-                msk_blocks = numpy.asarray(msk_blocks)[iblocks]
-            else:
-                cen_blocks = numpy.split(cen_slice, nblocks)
-                msk_blocks = numpy.split(msk_slice, nblocks)
+                cen_blocks = numpy.asarray(numpy.split(cen_slice, nblocks))
+                msk_blocks = numpy.asarray(numpy.split(msk_slice, nblocks))
+                cen_blocks = cen_blocks[iblocks]
+                msk_blocks = msk_blocks[iblocks]
+                msk_slice = numpy.concatenate(msk_blocks)
+                cen_slice = numpy.concatenate(cen_blocks)
 
-            # fit each block
-            par_blocks = []
-            for j, (cen_block, msk_block) in enumerate(zip(cen_blocks, msk_blocks)):
-                # apply flux threshold
-                cen_idx = cen_block.round().astype("int16")
-                msk_block |= (img_slice._data[cen_idx] < counts_threshold)
+            cen_idx = cen_slice.round().astype("int16")
+            msk_slice |= (img_slice._data[cen_idx] < counts_threshold)
 
-                # mask bad fibers
-                cen_block = cen_block[~msk_block]
-                # initialize parameters with the full block size
-                par_block = numpy.ones(3 * msk_block.size) * numpy.nan
-                par_mask = numpy.tile(msk_block, 3)
+            # initialize parameters with the full block size
+            par_slice = numpy.ones(3 * msk_slice.size) * numpy.nan
+            par_mask = numpy.tile(msk_slice, 3)
 
-                # skip block if all fibers are masked
-                if msk_block.sum() > 0.5 * msk_block.size:
-                    log.info(f"skipping fiber block {j+1}/{nblocks} (most fibers masked)")
-                else:
-                    # fit gaussian models to each fiber profile
-                    log.info(f"fitting fiber block {j+1}/{nblocks} ({cen_block.size}/{msk_block.size} good fibers)")
-                    bound_lower = numpy.array([0]*cen_block.size + (cen_block-max_diff).tolist() + [fwhm_range[0]/2.354]*cen_block.size)
-                    bound_upper = numpy.array([numpy.inf]*cen_block.size + (cen_block+max_diff).tolist() + [fwhm_range[1]/2.354]*cen_block.size)
-                    _, par_block[~par_mask] = img_slice.fitMultiGauss(cen_block, init_fwhm=fwhm_guess, bounds=(bound_lower, bound_upper))
+            # fit gaussian models to each fiber profile
+            log.info(f"fitting fibers in column {i+1}/{ncolumns} ({cen_slice.size}/{msk_slice.size} selected fibers)")
+            bound_lower = numpy.array([0]*cen_slice.size + (cen_slice-max_diff).tolist() + [fwhm_range[0]/2.354]*cen_slice.size)
+            bound_upper = numpy.array([numpy.inf]*cen_slice.size + (cen_slice+max_diff).tolist() + [fwhm_range[1]/2.354]*cen_slice.size)
+            _, par_slice[~par_mask] = img_slice.fitMultiGauss(cen_slice, init_fwhm=fwhm_guess, bounds=(bound_lower, bound_upper))
 
-                par_blocks.append(par_block)
-
-            # combine all parameters in a single array
-            par_joint = numpy.asarray([numpy.split(par_block, 3) for par_block in par_blocks])
-            par_joint = par_joint.transpose(1, 0, 2).reshape(3, -1)
             # define joint gaussian model
-            mod_joint = Gaussians(par=par_joint.ravel())
+            mod_joint = Gaussians(par=par_slice)
 
             # store joint model
             mod_columns.append(mod_joint)
 
             # get parameters of joint model
-            amp_slice = par_joint[0]
-            cent_slice = par_joint[1]
-            fwhm_slice = par_joint[2] * 2.354
+            amp_slice = par_slice[0]
+            cent_slice = par_slice[1]
+            fwhm_slice = par_slice[2] * 2.354
 
             # mask fibers with invalid values
             amp_off = (amp_slice <= counts_threshold)
@@ -2507,13 +2611,8 @@ class Image(Header):
             select_nan = numpy.isnan(slice_img._data)
             slice_img._data[select_nan] = 0
 
-            # define fiber index
-            indices = numpy.indices((self._dim[0], numpy.sum(good_fiber)))
-
             # measure flux along the given columns
-            result = slice_img.obtainGaussFluxPeaks(
-                cent[good_fiber], sigma[good_fiber], indices, plot=plot_fig
-            )
+            result = slice_img.obtainGaussFluxPeaks(cent[good_fiber], sigma[good_fiber], plot=plot_fig)
             data[good_fiber, i] = result[0]
             if self._error is not None:
                 error[good_fiber, i] = result[1]
@@ -2900,7 +2999,7 @@ class Image(Header):
         box_y = int(replace_box[1])
 
         # define Laplacian convolution kernal
-        LA_kernel = numpy.array([[0, -1, 0], [-1, 4, -1], [0, -1, 0]])/4.0
+        LA_kernel = 0.25*numpy.array([[0, -1, 0], [-1, 4, -1], [0, -1, 0]], dtype=numpy.float32)
 
         # Initiate image instances
         img_original = Image(data=self._data)

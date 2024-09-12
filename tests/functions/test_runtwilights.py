@@ -75,7 +75,7 @@ def make_fake_rss(tileid=11111, mjd=61234, expnum=6817, cameras=None, imagetyp=N
 def test_fit_continuum():
     """ test continuum fitting """
     spectrum = make_fake_spectrum()
-    best_continuum, models, masked_pixels, tck = fit_continuum(spectrum, mask_bands=[(3100,3200)], median_box=1, niter=10, threshold=0.5)
+    best_continuum, models, masked_pixels, tck = fit_continuum(spectrum, mask_bands=[(3100,3200)], median_box=1, niter=10, threshold=0.5, knots=100)
     assert best_continuum.size == spectrum._data.size
     assert len(models) == 0
     assert masked_pixels.sum() == 12

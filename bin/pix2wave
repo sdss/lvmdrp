@@ -12,13 +12,13 @@ from numpy import polynomial
 
 from lvmdrp import log
 from lvmdrp.core import rss, spectrum1d
-from lvmdrp.core.plot import plt
-from lvmdrp.core.constants import ARC_LAMPS, SPEC_CHANNELS, CONFIG_PATH
+from lvmdrp.core.plot import plt, DEFAULT_BACKEND
+from lvmdrp.core.constants import ARC_LAMPS, CONFIG_PATH, SPEC_CHANNELS
 
 
 font = {"family": "sans-serif", "weight": "bold", "size": 12}
 matplotlib.rc("font", **font)
-plt.switch_backend("TKAgg")
+plt.switch_backend(DEFAULT_BACKEND)
 
 VSPAN_PROPS = [
     dict(fc="0.8", lw=0, alpha=0.5),
@@ -32,6 +32,8 @@ TEXT_PROPS = [
     dict(va="top", ha="left", size="x-small", color="0.8", rotation=90),
     dict(va="top", ha="left", size="x-small", weight="bold", color="0.5", rotation=90)
 ]
+
+# SPEC_CHANNELS = {"b": (3600, 6000), "r": (5660, 7720), "z": (7470, 9800)}
 
 
 class SolveWavelength:
@@ -109,7 +111,7 @@ class SolveWavelength:
             self.pixmap = np.concatenate(pixmaps, axis=0)
             # sort by pixels
             self.pixmap = self.pixmap[np.argsort(self.pixmap[:,0])]
-        
+
         # define number of rows
         self.nrows = self.pixmap.shape[0]
         # define number of masked lines
@@ -130,7 +132,7 @@ class SolveWavelength:
                 reflines.append(np.genfromtxt(
                     self.reflines_table, names=True, encoding=None, dtype=None
                 ))
-        
+
         if len(reflines) == 0:
             log.warning("no reference lines found")
             self.reflines = np.array([], dtype=[("Intensity", float), ("Wavelength", float), ("Spectrum", str)])
@@ -149,6 +151,11 @@ class SolveWavelength:
         # read given image
         log.info(f"loading extracted RSS '{self.extracted_fits}'")
         spectra = rss.loadRSS(self.extracted_fits)
+        select = spectra._mask|np.isnan(spectra._data)
+        spectra._data[select] = 0.0
+        spectra._error[select] = np.inf
+        log.info("subtracting continuum")
+        spectra, _, _ = spectra.subtract_continuum(niter=3)
         # extract relevant metadata
         self.lamps = [lamp.lower() for lamp in ARC_LAMPS if spectra._header.get(lamp, "OFF") == "ON"]
         self.camera = spectra._header["CCD"]
@@ -223,11 +230,13 @@ class SolveWavelength:
         (self.line,) = self.ax_pix.step(
             self.xdata,
             self.ydata,
+            where="mid",
             lw=1,
             picker=True,
             pickradius=self.aperture,
             color="k",
         )
+        self.ax_pix.set_yscale("log")
 
         # fix table with cross-matching
         if self.table_exist and self.correct_lines:
@@ -244,7 +253,7 @@ class SolveWavelength:
         # create guess wavelength function
         poly = self._fit_wavelength()
         waves_guess = poly(self.xdata)
-        self.ax_wav.step(waves_guess, self.ydata, lw=1, color="k")
+        self.ax_wav.step(waves_guess, self.ydata, where="mid", lw=1, color="k")
         for _, ref_wave, name in self.reflines:
             self.ax_wav.axvline(ref_wave, lw=1, color="tab:red")
             self.ax_wav.text(
@@ -263,6 +272,7 @@ class SolveWavelength:
         self.ax_wav.set_xlim(*self.wave_range)
         self.ax_wav.set_xlabel("wavelength (A)")
         self.ax_wav.set_ylabel("counts (e-/pix)")
+        self.ax_wav.set_yscale("log")
 
         # adding known peaks
         log.info(f"displaying {self.pixmap.shape[0]} known lines (including masked)")
@@ -421,7 +431,7 @@ class SolveWavelength:
         log.info(f"best fitting coeffs: {coeffs}")
 
         # display plot
-        fig, ax = plt.subplots(figsize=(20, 20))
+        fig, ax = plt.subplots(figsize=(15, 10))
         ax.axhline(ls="--", lw=1, color="0.7")
         wav_residuals = waves_fit - y
         pixel_size = coeffs[1]
@@ -450,11 +460,13 @@ class SolveWavelength:
             )
         ax.set_xlabel("dispersion axis (pixel)")
         ax.set_ylabel("residuals (pixel)")
-        fig.show()
+        # fig.show()
         if self.plot:
             plot_name = os.path.basename(self.extracted_fits.replace(".fits", ""))
             log.info(f"saving residuals plot to '{plot_name}' PNG file")
             fig.savefig(f"{plot_name}.png")
+            plt.close(fig="all")
+            exit(0)
 
 
 if __name__ == "__main__":

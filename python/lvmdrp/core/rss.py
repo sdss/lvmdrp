@@ -1,11 +1,16 @@
 import os
 import numpy
+import itertools
 import bottleneck as bn
 from copy import deepcopy as copy
+from tqdm import tqdm
 from scipy import interpolate
 from astropy.io import fits as pyfits
 from astropy.wcs import WCS
 from astropy.table import Table
+from astropy.time import Time
+from astropy.coordinates import SkyCoord
+from astropy.coordinates import EarthLocation
 from astropy import units as u
 
 from lvmdrp import log
@@ -16,9 +21,33 @@ from lvmdrp.core.fiberrows import FiberRows
 from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.core.header import Header, combineHdr
 from lvmdrp.core.positionTable import PositionTable
-from lvmdrp.core.spectrum1d import Spectrum1D, wave_little_interpol
+from lvmdrp.core.spectrum1d import Spectrum1D, find_continuum, wave_little_interpol
 from lvmdrp.core import dataproducts as dp
 
+from lvmdrp import __version__ as drpver
+
+def polyfit2d(x, y, z, order=3):
+    """
+    Fit 2D polynomial
+    """
+    ncols = (order + 1) ** 2
+    G = numpy.zeros((x.size, ncols))
+    ij = itertools.product(range(order + 1), range(order + 1))
+    for k, (i, j) in enumerate(ij):
+        G[:, k] = x ** i * y ** j
+    m, null, null, null = numpy.linalg.lstsq(G, z, rcond=None)
+    return m
+
+def polyval2d(x, y, m):
+    """
+    Generate 2D polynomial
+    """
+    order = int(numpy.sqrt(len(m))) - 1
+    ij = itertools.product(range(order + 1), range(order + 1))
+    z = numpy.zeros_like(x)
+    for a, (i, j) in zip(m, ij):
+        z += a * x ** i * y ** j
+    return z
 
 def _read_pixwav_map(lamp: str, camera: str, pixels=None, waves=None):
     """read pixel-wavelength map from a lamp and camera
@@ -106,7 +135,7 @@ class RSS(FiberRows):
         sky_east, sky_east_error = None, None
         sky_west, sky_west_error = None, None
         supersky, supersky_error = None, None
-        fluxcal = None
+        fluxcal_std, fluxcal_sci = None, None
         slitmap = None
         with pyfits.open(in_rss, uint=True, do_not_scale_image_data=True, memmap=False) as hdus:
             header = hdus["PRIMARY"].header
@@ -145,8 +174,10 @@ class RSS(FiberRows):
                     supersky = hdu
                 if hdu.name == "SUPERSKY_ERROR":
                     supersky_error = hdu
-                if hdu.name == "FLUXCAL":
-                    fluxcal = hdu
+                if hdu.name == "FLUXCAL_STD":
+                    fluxcal_std = hdu
+                if hdu.name == "FLUXCAL_SCI":
+                    fluxcal_sci = hdu
                 if hdu.name == "SLITMAP":
                     slitmap = hdu
 
@@ -170,7 +201,8 @@ class RSS(FiberRows):
                 supersky_error=supersky_error,
                 header=header,
                 slitmap=slitmap,
-                fluxcal=fluxcal
+                fluxcal_std=fluxcal_std,
+                fluxcal_sci=fluxcal_sci
             )
 
         return rss
@@ -222,8 +254,10 @@ class RSS(FiberRows):
                     supersky_error_out = rss._supersky_error
                 if rss._header is not None:
                     hdrs.append(Header(rss.getHeader()))
-                if rss._fluxcal is not None:
-                    fluxcal_out = rss._fluxcal
+                if rss._fluxcal_std is not None:
+                    fluxcal_std_out = rss._fluxcal_std
+                if rss._fluxcal_sci is not None:
+                    fluxcal_sci_out = rss._fluxcal_sci
             else:
                 data_out = numpy.concatenate((data_out, rss._data), axis=0)
 
@@ -269,11 +303,16 @@ class RSS(FiberRows):
                     supersky_error_out = None
                 if rss._header is not None:
                     hdrs.append(Header(rss.getHeader()))
-                if rss._fluxcal is not None:
-                    f = fluxcal_out.to_pandas()
-                    fluxcal_out = Table.from_pandas(f.combine_first(rss._fluxcal.to_pandas()))
+                if rss._fluxcal_std is not None:
+                    f = fluxcal_std_out.to_pandas()
+                    fluxcal_std_out = Table.from_pandas(f.combine_first(rss._fluxcal_std.to_pandas()))
                 else:
-                    fluxcal_out = None
+                    fluxcal_std_out = None
+                if rss._fluxcal_sci is not None:
+                    f = fluxcal_sci_out.to_pandas()
+                    fluxcal_sci_out = Table.from_pandas(f.combine_first(rss._fluxcal_sci.to_pandas()))
+                else:
+                    fluxcal_sci_out = None
 
         # update header
         if len(hdrs) > 0:
@@ -300,7 +339,9 @@ class RSS(FiberRows):
             supersky_error=supersky_error_out,
             header=hdr_out._header,
             slitmap=slitmap_out,
-            fluxcal=fluxcal_out
+            fluxcal_std=fluxcal_std_out,
+            fluxcal_sci=fluxcal_sci_out
+
         )
 
     @classmethod
@@ -362,6 +403,7 @@ class RSS(FiberRows):
             sky_w_errors = numpy.asarray(sky_w_errors)
         else:
             log.warning("merged wavelengths are not monotonic, interpolation needed")
+            rsss[0].add_header_comment("merged wavelengths are not monotonic, interpolation needed")
             # compute the combined wavelengths
             new_wave = wave_little_interpol(waves)
             sampling = numpy.diff(new_wave)
@@ -433,7 +475,7 @@ class RSS(FiberRows):
             new_data = bn.nansum(fluxes * weights, axis=0)
             new_lsf = bn.nansum(lsfs * weights, axis=0)
             new_error = numpy.sqrt(bn.nansum(vars, axis=0))
-            new_mask = (numpy.nansum(masks, axis=0)>0)
+            new_mask = (bn.nansum(masks, axis=0)>0)
             if rss._sky is not None:
                 new_sky = bn.nansum(skies * weights, axis=0)
             else:
@@ -463,7 +505,7 @@ class RSS(FiberRows):
             new_data = bn.nanmean(fluxes, axis=0)
             new_lsf = bn.nanmean(lsfs, axis=0)
             new_error = numpy.sqrt(bn.nanmean(vars, axis=0))
-            new_mask = numpy.nansum(masks, axis=0).astype("bool")
+            new_mask = bn.nansum(masks, axis=0).astype("bool")
             if skies.size != 0:
                 new_sky = bn.nansum(skies, axis=0)
             else:
@@ -568,16 +610,16 @@ class RSS(FiberRows):
         if numpy.allclose(
             numpy.repeat(rss._wave[0][None, :], rss._fibers, axis=0), rss._wave
         ):
-            rss.setWave(rss._wave[0])
+            rss.set_wave_array(rss._wave[0])
         else:
-            rss.setWave(rss._wave)
+            rss.set_wave_array(rss._wave)
         if numpy.allclose(
             numpy.repeat(rss._lsf[0][None, :], rss._fibers, axis=0),
             rss._lsf,
         ):
-            rss.set_lsf(rss._lsf[0])
+            rss.set_lsf_array(rss._lsf[0])
         else:
-            rss.set_lsf(rss._lsf)
+            rss.set_lsf_array(rss._lsf)
         return rss
 
     def __init__(
@@ -605,7 +647,8 @@ class RSS(FiberRows):
         arc_position_x=None,
         arc_position_y=None,
         slitmap=None,
-        fluxcal=None,
+        fluxcal_std=None,
+        fluxcal_sci=None,
         good_fibers=None,
         fiber_type=None,
     ):
@@ -646,7 +689,8 @@ class RSS(FiberRows):
             self.set_supersky_error(supersky_error)
 
         self.setSlitmap(slitmap)
-        self.set_fluxcal(fluxcal)
+        self.set_fluxcal(fluxcal_std, source="std")
+        self.set_fluxcal(fluxcal_sci, source="sci")
 
     def _trace_to_coeff_table(self, trace, default_poly_deg=4):
         """Converts a given trace into its polynomial coefficients representation as an Astropy Table"""
@@ -912,6 +956,12 @@ class RSS(FiberRows):
         if self._sky_error is not None and spec._sky_error is not None:
             self._sky_error[fiber] = spec._sky_error
 
+    def add_header_comment(self, comstr):
+        '''
+        Append a COMMENT card at the end of the FITS header.
+        '''
+        self._header.append(('COMMENT', comstr), bottom=True)
+
     def eval_wcs(self, wave=None, data=None, as_dict=True):
         """Returns the WCS object from the current wavelength and fibers arrays"""
         wave = wave or self._wave
@@ -926,7 +976,7 @@ class RSS(FiberRows):
                         "CRVAL2": 1,
                         "CUNIT2": "", "CTYPE2": "FIBERID", "CRPIX2": 1}
 
-        elif len(wave.shape) == 2:
+        elif wave is None or len(wave.shape) == 2:
             wcs_dict = {"NAXIS": 2, "NAXIS1": data.shape[1], "NAXIS2": data.shape[0],
                         "CDELT1": 1,
                         "CRVAL1": 1,
@@ -1045,6 +1095,38 @@ class RSS(FiberRows):
             self._lsf = lsf
 
         return self._lsf
+
+    def match_lsf(self, target_fwhm=None, min_fwhm=0.1):
+        """Downgrade spectral resolution to match LSF in all fibers
+
+        This function will degrade the resolution of the RSS to match all
+        fibers given a scalar value for `target_fwhm` in FWHM or a callable to
+        generate one. If None is given, the resolution will be matched to the
+        worst value in the LSF.
+
+        Parameters
+        ----------
+        target_fwhm : float|callable[lsf], optional
+            Target resolution or function to apply to current LSF to get target resoltion, by default None
+        min_fwhm : float, optional
+            Minimum FWHM allowed, by default 0.1
+
+        Returns
+        -------
+        new_rss : lvmdrp.core.rss.RSS
+            A copy of the RSS with the LSF matched to the given value
+        """
+        target_fwhm = target_fwhm or numpy.max(self._lsf)
+
+        new_specs = []
+        for ifiber in tqdm(range(self._fibers), desc="matching LSF", ascii=True, unit="fiber"):
+            spec = self.getSpec(ifiber)
+            if spec._mask.all():
+                new_specs.append(spec)
+                continue
+            new_specs.append(spec.flatten_lsf(target_fwhm, min_fwhm=min_fwhm))
+
+        return RSS.from_spectra1d(new_specs, header=self._header, slitmap=self._slitmap, good_fibers=self._good_fibers)
 
     def maskFiber(self, fiber, replace_error=1e10):
         self._data[fiber, :] = 0
@@ -1690,7 +1772,7 @@ class RSS(FiberRows):
 
             if numpy.sum(goodpix) > 0:
                 if method == "median":
-                    collapsed[i] = numpy.median(spec._data[goodpix])
+                    collapsed[i] = bn.median(spec._data[goodpix])
                 elif method == "sum":
                     collapsed[i] = numpy.sum(spec._data[goodpix])
                 elif method == "mean":
@@ -1914,7 +1996,14 @@ class RSS(FiberRows):
         rss._header["BUNIT"] = unit
         rss._header["WAVREC"] = False
         rss._header["METREC"] = (method, "Wavelength rectification method")
-        del rss._header["CRPIX1"], rss._header["CRVAL1"], rss._header["CDELT1"], rss._header["CTYPE1"]
+        if "CRPIX1" in rss._header:
+            del rss._header["CRPIX1"]
+        if "CRVAL1" in rss._header:
+            del rss._header["CRVAL1"]
+        if "CDELT1" in rss._header:
+            del rss._header["CDELT1"]
+        if "CTYPE1" in rss._header:
+            del rss._header["CTYPE1"]
         # create output RSS
         new_rss = RSS(
             data=numpy.zeros((rss._fibers, wave.shape[1]), dtype="float32"),
@@ -1993,6 +2082,49 @@ class RSS(FiberRows):
             new_rss._header["BUNIT"] = unit + "/angstrom"
 
         return new_rss
+
+    def subtract_continuum(self, niter=5, thresh=0.999, median_box_range=(50, 300)):
+        """Fits and subtracts the continuum contribution in each fiber
+
+        Iteratively rejects pixels that are above `thresh` in the array
+
+            median_filter(spec) / spec
+
+        where spec is the spectrum in one fiber and the median_filter is an adaptive
+        version of median filtering whereby the median box increases in size as a
+        function of wavelength.
+
+        Parameters
+        ----------
+        niter : int, optional
+            Number of iterations, by default 5
+        thresh : float, optional
+            Threshold in median_filter(spec) / spec above which pixels get rejected, by default 0.999
+        median_box_range : tuple[int], optional
+            range of box sizes in adaptive median filtering, by default (50, 300)
+
+        Returns
+        -------
+        new_rss : lvmdrp.core.rss.RSS
+            Copy of self without continuum contribution
+        cont_data : numpy.ndarray
+            Continuum fitted for each fiber
+        cont_select : numpy.ndarray
+            Selection of continuum pixels
+        """
+        cont_select = numpy.zeros_like(self._data, dtype=bool)
+        cont_data = numpy.zeros_like(self._data, dtype="float32")
+        for ifiber in range(self._fibers):
+            if self._mask[ifiber].sum() == self._data.shape[1]:
+                continue
+            cont_data[ifiber], cont_select[ifiber] = find_continuum(self._data[ifiber],
+                                                                    niter=niter, thresh=thresh,
+                                                                    median_box_max=median_box_range[1],
+                                                                    median_box_min=median_box_range[0])
+
+        new_rss = copy(self)
+        new_rss._data = new_rss._data - cont_data
+        return new_rss, cont_data, cont_select
 
     def createCubeInterpolation(
         self,
@@ -3218,19 +3350,19 @@ class RSS(FiberRows):
 
         return self._data, self._error
 
-    def set_fluxcal(self, fluxcal):
+    def set_fluxcal(self, fluxcal, source="std"):
         if fluxcal is None:
-            self._fluxcal = None
+            setattr(self, f"_fluxcal_{source}", None)
             return
         if isinstance(fluxcal, pyfits.BinTableHDU):
-            self._fluxcal = Table(fluxcal.data)
+            setattr(self, f"_fluxcal_{source}", Table(fluxcal.data))
         elif isinstance(fluxcal, Table):
-            self._fluxcal = fluxcal
+            setattr(self, f"_fluxcal_{source}", fluxcal)
         else:
             raise TypeError(f"Invalid flux calibration table type '{type(fluxcal)}'")
 
-    def get_fluxcal(self):
-        return self._fluxcal
+    def get_fluxcal(self, source="std"):
+        return getattr(self, f"_fluxcal_{source}")
 
     def stack_trace(self, traces):
         trace_dict = dict(FUNC=[], XMIN=[], XMAX=[], COEFF=[])
@@ -3244,6 +3376,125 @@ class RSS(FiberRows):
             trace_dict["COEFF"].append(coeff)
 
         return Table(trace_dict)
+
+    def coadd_flux(self, wrange):
+        """Return the coadded flux along a given wavelength window for all fibers"""
+
+        if self._wave is None:
+            log.warning("missing wavelength information, not able to consistently coadd flux")
+            return self
+
+        naxis1 = self._data.shape[1]
+        naxis2=self._data.shape[0]
+        w = WCS(self._header)
+        wave = w.spectral.pixel_to_world(numpy.arange(naxis1)).value*1e10
+        selwave=(wave>=wrange[0])*(wave<=wrange[1])
+        selwavemask=numpy.tile(selwave, (naxis2,1))
+
+        flux = self._data
+        mask = self._mask
+        flux[mask] = numpy.nan
+        masked = flux*selwavemask
+
+        coadded_flux = numpy.nanmean(masked, axis=1)
+        return coadded_flux
+
+    def get_helio_rv(self, apply_hrv_corr=False):
+        """Calculates heliocentric velocity corrections for each telescope and standard fiber
+
+        Parameters
+        ----------
+        apply_heliorv : bool, optional
+            Apply heliocentric correction to all fibers
+
+        Returns
+        -------
+        hrv_corrs : dict[str, float]
+            Dictionary containing heliocentric velocity corrections
+        """
+        if self._header is None or self._header["IMAGETYP"] != "object" or not self._header["PO*RA"] or not self._header["PO*DE"]:
+            return
+
+        # calculate heliocentric velocity
+        obs_time = Time(self._header['OBSTIME'])
+        hrv_corrs = {}
+        for tel in ["SCI", "SKYE", "SKYW"]:
+            ra = self._header.get(f"PO{tel}RA", self._header.get(f"{tel}RA", self._header.get(f"TE{tel}RA"))) or 0
+            dec = self._header.get(f"PO{tel}DE", self._header.get(f"{tel}DE", self._header.get(f"TE{tel}DE"))) or 0
+            if ra == 0 or dec == 0:
+                log.warning(f"on heliocentric velocity correction, missing RA/Dec information in header, assuming: {ra = }, {dec = }")
+                self.add_header_comment(f"on heliocentric velocity correction, missing RA/Dec information in header, assuming: {ra = }, {dec = }")
+                self._header[f"HIERARCH WAVE HELIORV_{tel}"] = (numpy.round(0.0, 4), f"Heliocentric velocity correction for {tel} [km/s]")
+                hrv_corrs[tel] = numpy.round(0.0, 4)
+            else:
+                radec = SkyCoord(ra, dec, unit="deg") # center of the pointing or coordinates of the fiber
+                hrv_corr = radec.radial_velocity_correction(kind='heliocentric', obstime=obs_time, location=EarthLocation.of_site('lco')).to(u.km / u.s).value
+                self._header[f"HIERARCH WAVE HELIORV_{tel}"] = (numpy.round(hrv_corr, 4), f"Heliocentric velocity correction for {tel} [km/s]")
+                hrv_corrs[tel] = numpy.round(hrv_corr, 4)
+
+        # calculate standard stars heliocentric corrections
+        for istd in range(1, 15+1):
+            is_acq = self._header[f"STD{istd}ACQ"]
+            if not is_acq:
+                continue
+
+            std_obstime = Time(self._header[f"STD{istd}T0"])
+            std_ra, std_dec = self._header.get(f"STD{istd}RA", 0.0), self._header.get(f"STD{istd}DE", 0.0)
+            if std_ra == 0 or std_dec == 0:
+                self._header[f"STD{istd}HRV"] = (0.0, f"Standard {istd} heliocentric vel. corr. [km/s]")
+                continue
+            std_radec = SkyCoord(std_ra, std_dec, unit="deg")
+            std_hrv_corr = std_radec.radial_velocity_correction(kind="heliocentric", obstime=std_obstime, location=EarthLocation.of_site("lco")).to(u.km / u.s).value
+            self._header[f"STD{istd}HRV"] = (numpy.round(std_hrv_corr, 4), f"Standard {istd} heliocentric vel. corr. [km/s]")
+
+        # TODO: implement apply_heliorv
+        if apply_hrv_corr: ...
+            # if helio_vel is None or helio_vel == 0.0:
+            #     helio_vel = rss._header.get(helio_vel_keyword)
+            #     if helio_vel is None:
+            #         helio_vel = 0.0
+            #         log.warning(f"no heliocentric velocity found in header by keywords {helio_vel_keyword = }, assuming {helio_vel = } km/s")
+            #         rss.add_header_comment(f"no heliocentric velocity {helio_vel_keyword = }, assuming {helio_vel = } km/s")
+            # else:
+            #     log.info(f"applying heliocentric velocity correction of {helio_vel = } km/s")
+
+            # rss._wave = rss._wave * (1 + helio_vel / c.to("km/s").value)
+
+        return hrv_corrs
+
+    def fit_field_gradient(self, wrange, poly_deg):
+        """Fits a polynomial function to the IFU field"""
+        if self._slitmap is None:
+            log.warning("not able to fit gradient without fibermap information")
+            return self
+
+        fibermap = self._slitmap
+        telescope = fibermap["telescope"]
+
+        flux = self.coadd_flux(wrange=wrange)
+
+        x_e=fibermap["xpmm"].astype(float)[telescope=="SkyE"]
+        y_e=fibermap["ypmm"].astype(float)[telescope=="SkyE"]
+        x_w=fibermap["xpmm"].astype(float)[telescope=="SkyW"]
+        y_w=fibermap["ypmm"].astype(float)[telescope=="SkyW"]
+        x_s=fibermap["xpmm"].astype(float)[telescope=="Spec"]
+        y_s=fibermap["ypmm"].astype(float)[telescope=="Spec"]
+
+        flux = flux[telescope=="Sci"]
+        x=fibermap["xpmm"].astype(float)[telescope=="Sci"]
+        y=fibermap["ypmm"].astype(float)[telescope=="Sci"]
+
+        flux_med = bn.nanmedian(flux)
+        flux_fact = flux / flux_med
+        select = numpy.isfinite(flux_fact)
+        coeffs = polyfit2d(x[select], y[select], flux_fact[select], poly_deg)
+
+        grad_model = polyval2d(x, y, coeffs)
+        grad_model_e = polyval2d(x_e, y_e, coeffs)
+        grad_model_w = polyval2d(x_w, y_w, coeffs)
+        grad_model_s = polyval2d(x_s, y_s, coeffs)
+
+        return x, y, flux, grad_model, grad_model_e, grad_model_w, grad_model_s
 
     def writeFitsData(self, out_rss, replace_masked=True, include_wave=False):
         """Writes information from a RSS object into a FITS file.
@@ -3321,8 +3572,10 @@ class RSS(FiberRows):
             hdus.append(pyfits.BinTableHDU(self._supersky, name="SUPERSKY"))
         if self._supersky_error is not None:
             hdus.append(pyfits.BinTableHDU(self._supersky_error, name="SUPERSKY_ERROR"))
-        if self._fluxcal is not None:
-            hdus.append(pyfits.BinTableHDU(self._fluxcal, name="FLUXCAL"))
+        if self._fluxcal_std is not None:
+            hdus.append(pyfits.BinTableHDU(self._fluxcal_std, name="FLUXCAL_STD"))
+        if self._fluxcal_sci is not None:
+            hdus.append(pyfits.BinTableHDU(self._fluxcal_sci, name="FLUXCAL_SCI"))
         if self._slitmap is not None:
             hdus.append(pyfits.BinTableHDU(self._slitmap, name="SLITMAP"))
 
@@ -3332,6 +3585,7 @@ class RSS(FiberRows):
 
         os.makedirs(os.path.dirname(out_rss), exist_ok=True)
         hdus[0].header["FILENAME"] = os.path.basename(out_rss)
+        hdus[0].header['DRPVER'] = drpver
         hdus.writeto(out_rss, overwrite=True, output_verify="silentfix")
 
 def loadRSS(in_rss):
@@ -3462,6 +3716,7 @@ class lvmFrame(lvmBaseProduct):
 
         os.makedirs(os.path.dirname(out_file), exist_ok=True)
         self._template[0].header["FILENAME"] = os.path.basename(out_file)
+        self._template[0].header['DRPVER'] = drpver
         self._template.writeto(out_file, overwrite=True)
 
 
@@ -3484,23 +3739,24 @@ class lvmFFrame(lvmBaseProduct):
         sky_west = hdulist["SKY_WEST"].data
         sky_west_error = numpy.divide(1, hdulist["SKY_WEST_IVAR"].data, where=hdulist["SKY_WEST_IVAR"].data != 0, out=numpy.zeros_like(hdulist["SKY_WEST_IVAR"].data))
         sky_west_error = numpy.sqrt(sky_west_error)
-        fluxcal = Table(hdulist["FLUXCAL"].data)
+        fluxcal_std = Table(hdulist["FLUXCAL_STD"].data)
+        fluxcal_sci = Table(hdulist["FLUXCAL_SCI"].data)
         slitmap = Table(hdulist["SLITMAP"].data)
         return cls(data=data, error=error, mask=mask, header=header,
                    wave=wave, lsf=lsf,
                    sky_east=sky_east, sky_east_error=sky_east_error,
                    sky_west=sky_west, sky_west_error=sky_west_error,
-                   fluxcal=fluxcal, slitmap=slitmap)
+                   fluxcal_std=fluxcal_std, fluxcal_sci=fluxcal_sci, slitmap=slitmap)
 
     def __init__(self, data=None, error=None, mask=None, header=None, wave=None, lsf=None,
                  sky_east=None, sky_east_error=None,
                  sky_west=None, sky_west_error=None,
-                 fluxcal=None, slitmap=None, **kwargs):
+                 fluxcal_std=None, fluxcal_sci=None, slitmap=None, **kwargs):
         lvmBaseProduct.__init__(self, data=data, error=error, mask=mask, header=header,
                      wave=wave, lsf=lsf,
                      sky_east=sky_east, sky_east_error=sky_east_error,
                      sky_west=sky_west, sky_west_error=sky_west_error,
-                     fluxcal=fluxcal, slitmap=slitmap)
+                     fluxcal_std=fluxcal_std, fluxcal_sci=fluxcal_sci, slitmap=slitmap)
 
         self._blueprint = dp.load_blueprint(name="lvmFFrame")
         self._template = dp.dump_template(dataproduct_bp=self._blueprint, save=False)
@@ -3531,12 +3787,14 @@ class lvmFFrame(lvmBaseProduct):
         self._template["SKY_EAST_IVAR"].data = numpy.divide(1, self._sky_east_error**2, where=self._sky_east_error != 0, out=numpy.zeros_like(self._sky_east_error))
         self._template["SKY_WEST"].data = self._sky_west
         self._template["SKY_WEST_IVAR"].data = numpy.divide(1, self._sky_west_error**2, where=self._sky_west_error != 0, out=numpy.zeros_like(self._sky_west_error))
-        self._template["FLUXCAL"] = pyfits.BinTableHDU(data=self._fluxcal, name="FLUXCAL")
+        self._template["FLUXCAL_STD"] = pyfits.BinTableHDU(data=self._fluxcal_std, name="FLUXCAL_STD")
+        self._template["FLUXCAL_SCI"] = pyfits.BinTableHDU(data=self._fluxcal_sci, name="FLUXCAL_SCI")
         self._template["SLITMAP"] = pyfits.BinTableHDU(data=self._slitmap, name="SLITMAP")
         self._template.verify("silentfix")
 
         os.makedirs(os.path.dirname(out_file), exist_ok=True)
         self._template[0].header["FILENAME"] = os.path.basename(out_file)
+        self._template[0].header['DRPVER'] = drpver
         self._template.writeto(out_file, overwrite=True)
 
 
@@ -3608,6 +3866,7 @@ class lvmCFrame(lvmBaseProduct):
 
         os.makedirs(os.path.dirname(out_file), exist_ok=True)
         self._template[0].header["FILENAME"] = os.path.basename(out_file)
+        self._template[0].header['DRPVER'] = drpver
         self._template.writeto(out_file, overwrite=True)
 
 
@@ -3668,6 +3927,7 @@ class lvmSFrame(lvmBaseProduct):
 
         os.makedirs(os.path.dirname(out_file), exist_ok=True)
         self._template[0].header["FILENAME"] = os.path.basename(out_file)
+        self._template[0].header['DRPVER'] = drpver
         self._template.writeto(out_file, overwrite=True)
 
 
