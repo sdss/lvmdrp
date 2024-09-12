@@ -610,7 +610,7 @@ def sepContinuumLine_drp(
             int(np.ceil((sky_spec._wave / np.diff(sky_spec._wave).min()).max())),
         )
         # BUG: implement missing parameters in this call of run_skymodel
-        skymodel_pars = skymodel_pars_from_header(sky_spec._header)
+        skymodel_pars = skymodel_pars_header(sky_spec._header)
         inst_pars, model_pars, sky_model = run_skymodel(
             limlam=[sky_spec._wave.min() / 1e4, sky_spec._wave.max() / 1e4],
             dlam=resample_step / 1e4,
@@ -762,7 +762,7 @@ def evalESOSky_drp(
     )
 
     # get skymodel parameters from header
-    skymodel_pars = skymodel_pars_from_header(header=sky_spec._header)
+    skymodel_pars = skymodel_pars_header(header=sky_spec._header)
 
     # TODO: move unit and data type conversions to within the run_skymodel routine
     inst_pars, model_pars, sky_model = run_skymodel(
@@ -1601,6 +1601,7 @@ def quick_sky_subtraction(in_cframe, out_sframe,
         flag for skipping sky subtraction, not currently useable
     skymethod : str, optional
         method of computing sky continuum, by default "farlines_nearcont"
+        note, not currently being passed from science_reduction in main.py
 
     """
     # print('************************************')
@@ -1646,7 +1647,7 @@ def quick_sky_subtraction(in_cframe, out_sframe,
     sky_error[skywfibers] = skywsky_error
 
     # write out sky table to ancillary file
-    mjd = cframe._header['SMJD']  # use SMJD to account for exposures taken before the nightly MJD switch
+    mjd = cframe._header['MJD']
     expnum = cframe._header['EXPOSURE']
     tileid = cframe._header['TILE_ID']
     skytable = path.full('lvm_anc', mjd=mjd, tileid=tileid, drpver=drpver,
@@ -1657,7 +1658,7 @@ def quick_sky_subtraction(in_cframe, out_sframe,
     # print("writing lvmSFrame")
     log.info(f"writing lvmSframe to {out_sframe}")
     sframe = lvmSFrame(data=skysub_data, error=skysub_error, mask=cframe._mask.astype(bool), sky=skydata, sky_error=sky_error,
-                     wave=cframe._wave, lsf=cframe._lsf, header=cframe._header, slitmap=cframe._slitmap)
+                       wave=cframe._wave, lsf=cframe._lsf, header=cframe._header, slitmap=cframe._slitmap)
     sframe._mask |= ~np.isfinite(sframe._error)
     sframe.writeFitsData(out_sframe)
     # TODO: check on expnum=7632 for halpha emission in sky fibers
