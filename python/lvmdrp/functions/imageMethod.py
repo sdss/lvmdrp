@@ -1950,7 +1950,7 @@ def subtract_straylight(
         median_box = (1, max(1, median_box))
         img_median = img.replaceMaskMedian(*median_box, replace_error=None)
         img_median._data = numpy.nan_to_num(img_median._data)
-        img_median = img_median.medianImg(median_box, use_mask=False)
+        img_median = img_median.medianImg(median_box)
     else:
         img_median = copy(img)
 
@@ -1992,7 +1992,7 @@ def subtract_straylight(
     img_fit = img_median.fitSpline(smoothing=smoothing, use_weights=use_weights, clip=(0.0, None))
 
     # median filter to reject outlying columns
-    img_fit = img_fit.medianImg((1, 7), use_mask=False)
+    img_fit = img_fit.medianImg((1, 7))
 
     # smooth the results by 2D Gaussian filter of given width
     log.info(f"smoothing the background signal by a 2D Gaussian filter of width {gaussian_sigma}")
@@ -3994,7 +3994,7 @@ def create_master_frame(in_images: List[str], out_image: str, batch_size: int = 
             normalize=True,
             normalize_percentile=75,
         )
-        master_img = master_img / master_img.medianImg(size=21, propagate_error=True, use_mask=True)
+        master_img = master_img / master_img.medianImg(size=21, propagate_error=True)
     elif master_type == "arc":
         master_img = combineImages(
             org_imgs, method="median", normalize=True, normalize_percentile=99

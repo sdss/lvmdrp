@@ -1483,6 +1483,7 @@ def update_error_file(tileid: int, mjd: int, expnum: int, error: str,
 
 def reduce_2d(mjd, calibrations, expnums=None, exptime=None, cameras=CAMERAS,
               replace_with_nan=True, assume_imagetyp=None, reject_cr=True,
+              add_astro=True, sub_straylight=True, parallel_run=1,
               skip_done=True, keep_ancillary=False):
     """Preprocess and detrend a list of 2D frames
 
@@ -1510,6 +1511,12 @@ def reduce_2d(mjd, calibrations, expnums=None, exptime=None, cameras=CAMERAS,
         Assume the given imagetyp for all frames
     reject_cr : bool
         Reject cosmic rays
+    add_astro : bool, optional
+        Add astrometric solution to detrended frames, by default True
+    sub_straylight : bool, optional
+        Subtract straylight from detrended frames, by default True
+    parallel_run : int, optional
+        Parallel run of fiber masking in straylight subtraction, by default 1 (single core)
     counts_threshold : int
         Minimum count level to consider when tracing centroids, defaults to 500
     poly_deg_cent : int
@@ -1539,6 +1546,7 @@ def reduce_2d(mjd, calibrations, expnums=None, exptime=None, cameras=CAMERAS,
         mpixmask_path = calibrations["pixmask"][camera]
         mpixflat_path = calibrations["pixflat"][camera]
         mbias_path = calibrations["bias"][camera]
+        mtrace_path = calibrations["trace"][camera]
 
         # log the master frames
         log.info(f'Using pixel mask: {mpixmask_path}')
@@ -1549,6 +1557,13 @@ def reduce_2d(mjd, calibrations, expnums=None, exptime=None, cameras=CAMERAS,
         eframe_path = path.full("lvm_anc", drpver=drpver, kind="e", imagetype=imagetyp, **frame)
         frame_path = eframe_path if os.path.exists(eframe_path) else rframe_path
         pframe_path = path.full("lvm_anc", drpver=drpver, kind="p", imagetype=imagetyp, **frame)
+        lframe_path = path.full("lvm_anc", drpver=drpver, kind="l", imagetype=imagetyp, **frame)
+        lstr_path = path.full("lvm_anc", drpver=drpver, kind="d", imagetype="stray", **frame)
+
+        # define agc coadd path
+        agcsci_path = path.full('lvm_agcam_coadd', mjd=mjd, specframe=frame["expnum"], tel='sci')
+        agcskye_path = path.full('lvm_agcam_coadd', mjd=mjd, specframe=frame["expnum"], tel='skye')
+        agcskyw_path = path.full('lvm_agcam_coadd', mjd=mjd, specframe=frame["expnum"], tel='skyw')
 
         # bypass creation of detrended frame in case of imagetyp=bias
         if imagetyp != "bias":
@@ -1557,8 +1572,9 @@ def reduce_2d(mjd, calibrations, expnums=None, exptime=None, cameras=CAMERAS,
             dframe_path = pframe_path
 
         os.makedirs(os.path.dirname(dframe_path), exist_ok=True)
-        if skip_done and os.path.isfile(dframe_path):
-            log.info(f"skipping {dframe_path}, file already exist")
+        final_2d_dp = dframe_path if not sub_straylight else lframe_path
+        if skip_done and os.path.isfile(final_2d_dp):
+            log.info(f"skipping {final_2d_dp}, file already exist")
         else:
             with Timer(name='Preproc '+pframe_path, logger=log.info):
                 preproc_raw_frame(in_image=frame_path, out_image=pframe_path,
@@ -1570,6 +1586,19 @@ def reduce_2d(mjd, calibrations, expnums=None, exptime=None, cameras=CAMERAS,
                             replace_with_nan=replace_with_nan,
                             reject_cr=reject_cr,
                             in_slitmap=fibermap if imagetyp in {"flat", "arc", "object"} else None)
+
+            # add astrometry to frame
+            if add_astro:
+                with Timer(name='Astrometry '+dframe_path, logger=log.info):
+                    add_astrometry(in_image=dframe_path, out_image=dframe_path, in_agcsci_image=agcsci_path, in_agcskye_image=agcskye_path, in_agcskyw_image=agcskyw_path)
+
+            # subtract straylight
+            if sub_straylight:
+                with Timer(name='Straylight '+lframe_path, logger=log.info):
+                    subtract_straylight(in_image=dframe_path, out_image=lframe_path, out_stray=lstr_path,
+                                        in_cent_trace=mtrace_path, select_nrows=(5,5), use_weights=True,
+                                        aperture=15, smoothing=400, median_box=101, gaussian_sigma=20.0,
+                                        parallel=parallel_run)
 
 
 def science_reduction(expnum: int, use_longterm_cals: bool = False,
@@ -1650,39 +1679,20 @@ def science_reduction(expnum: int, use_longterm_cals: bool = False,
             sci_camera = sci["camera"]
 
             dsci_path = path.full("lvm_anc", drpver=drpver, kind="d", imagetype=sci["imagetyp"], **sci)
-            lsci_path = path.full("lvm_anc", drpver=drpver, kind="l", imagetype=sci["imagetyp"], **sci)
             xsci_path = path.full("lvm_anc", drpver=drpver, kind="x", imagetype=sci["imagetyp"], **sci)
             wsci_path = path.full("lvm_anc", drpver=drpver, kind="w", imagetype=sci["imagetyp"], **sci)
             ssci_path = path.full("lvm_anc", drpver=drpver, kind="s", imagetype=sci["imagetyp"], **sci)
             hsci_path = path.full("lvm_anc", drpver=drpver, kind="h", imagetype=sci["imagetyp"], **sci)
-            lstr_path = path.full("lvm_anc", drpver=drpver, kind="d", imagetype="stray", **sci)
+            lsci_path = path.full("lvm_anc", drpver=drpver, kind="l", imagetype=sci["imagetyp"], **sci)
             os.makedirs(os.path.dirname(hsci_path), exist_ok=True)
 
             # define science product paths
             frame_path = path.full("lvm_frame", drpver=drpver, tileid=sci_tileid, mjd=sci_mjd, expnum=sci_expnum, kind=f"Frame-{sci_camera}")
 
-            # define agc coadd path
-            agcsci_path=path.full('lvm_agcam_coadd', mjd=sci_mjd, specframe=sci_expnum, tel='sci')
-            agcskye_path=path.full('lvm_agcam_coadd', mjd=sci_mjd, specframe=sci_expnum, tel='skye')
-            agcskyw_path=path.full('lvm_agcam_coadd', mjd=sci_mjd, specframe=sci_expnum, tel='skyw')
-            #agcspec_path=path.full('lvm_agcam_coadd', mjd=sci_mjd, specframe=sci_expnum, tel='spec')
-
             # define calibration frames paths
-            # log.info(f"using calibration frames for {sci_camera}:")
             mtrace_path = calibs["trace"][sci_camera]
             mwidth_path = calibs["width"][sci_camera]
             mmodel_path = calibs["model"][sci_camera]
-
-            # add astrometry to frame
-            with Timer(name='Astrometry '+dsci_path, logger=log.info):
-                add_astrometry(in_image=dsci_path, out_image=dsci_path, in_agcsci_image=agcsci_path, in_agcskye_image=agcskye_path, in_agcskyw_image=agcskyw_path)
-
-            # subtract straylight
-            with Timer(name='Straylight '+lsci_path, logger=log.info):
-                subtract_straylight(in_image=dsci_path, out_image=lsci_path, out_stray=lstr_path,
-                                    in_cent_trace=mtrace_path, select_nrows=(5,5), use_weights=True,
-                                    aperture=15, smoothing=400, median_box=101, gaussian_sigma=20.0,
-                                    parallel=parallel_run)
 
             # extract 1d spectra
             with Timer(name='Extract '+xsci_path, logger=log.info):

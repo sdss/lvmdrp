@@ -653,7 +653,8 @@ def _create_wavelengths_60177(use_longterm_cals=True, skip_done=True):
     # define master paths for target frames
     calibs = get_calib_paths(mjd, version=drpver, longterm_cals=use_longterm_cals)
 
-    reduce_2d(mjd, calibrations=calibs, expnums=expnums, assume_imagetyp="arc", reject_cr=False, skip_done=skip_done)
+    reduce_2d(mjd, calibrations=calibs, expnums=expnums, assume_imagetyp="arc", reject_cr=False,
+              add_astro=False, sub_straylight=False, skip_done=skip_done)
 
     frames, _ = md.get_sequence_metadata(mjd=mjd, expnums=expnums, for_cals={"wave"})
 
@@ -1023,7 +1024,9 @@ def create_detrending_frames(mjd, use_longterm_cals=True, expnums=None, exptime=
     calibs = get_calib_paths(mjd, version=drpver, longterm_cals=use_longterm_cals)
 
     # preprocess and detrend frames
-    reduce_2d(mjd=mjd, calibrations=calibs, expnums=set(frames.expnum), exptime=exptime, assume_imagetyp=assume_imagetyp, reject_cr=reject_cr, skip_done=skip_done)
+    reduce_2d(mjd=mjd, calibrations=calibs, expnums=set(frames.expnum), exptime=exptime,
+              assume_imagetyp=assume_imagetyp, reject_cr=reject_cr,
+              add_astro=False, sub_straylight=False, skip_done=skip_done)
 
     # define image types to reduce
     imagetypes = set(frames.imagetyp)
@@ -1067,7 +1070,8 @@ def create_nightly_traces(mjd, use_longterm_cals=False, expnums_ldls=None, expnu
     calibs = get_calib_paths(mjd, version=drpver, longterm_cals=use_longterm_cals)
 
     # run 2D reduction on flats: preprocessing, detrending
-    reduce_2d(mjd, calibrations=calibs, expnums=expnums, reject_cr=False, skip_done=skip_done)
+    reduce_2d(mjd, calibrations=calibs, expnums=expnums, reject_cr=False,
+              add_astro=False, sub_straylight=False, skip_done=skip_done)
 
     for channel, lamp in MASTER_CON_LAMPS.items():
         counts_threshold = counts_thresholds[lamp]
@@ -1201,7 +1205,8 @@ def create_traces(mjd, cameras=CAMERAS, use_longterm_cals=True, expnums_ldls=Non
     calibs = get_calib_paths(mjd, version=drpver, longterm_cals=use_longterm_cals)
 
     # run 2D reduction on flats: preprocessing, detrending
-    reduce_2d(mjd, calibrations=calibs, expnums=expnums, cameras=cameras, reject_cr=False, skip_done=skip_done)
+    reduce_2d(mjd, calibrations=calibs, expnums=expnums, cameras=cameras, reject_cr=False,
+              add_astro=False, sub_straylight=False, skip_done=skip_done)
 
     # iterate through exposures with std fibers exposed
     for camera in cameras:
@@ -1472,24 +1477,15 @@ def create_twilight_fiberflats(mjd: int, use_longterm_cals: bool = True, expnums
     calibs = get_calib_paths(mjd, version=drpver, longterm_cals=use_longterm_cals)
 
     # 2D reduction of twilight sequence
-    reduce_2d(mjd=mjd, calibrations=calibs, expnums=flats.expnum.unique(), reject_cr=False, skip_done=skip_done)
+    reduce_2d(mjd=mjd, calibrations=calibs, expnums=flats.expnum.unique(), reject_cr=False,
+              add_astro=False, sub_straylight=True, skip_done=skip_done)
 
     for flat in flats.to_dict("records"):
         camera = flat["camera"]
 
         # extract 1D spectra for each frame
-        dflat_path = path.full("lvm_anc", drpver=drpver, kind="d", imagetype="flat", **flat)
         lflat_path = path.full("lvm_anc", drpver=drpver, kind="l", imagetype="flat", **flat)
         xflat_path = path.full("lvm_anc", drpver=drpver, kind="x", imagetype="flat", **flat)
-        stray_path = path.full("lvm_anc", drpver=drpver, kind="d", imagetype="stray", **flat)
-
-        # subtract stray light only if imagetyp is flat
-        if skip_done and os.path.isfile(lflat_path):
-            log.info(f"skipping {lflat_path}, file already exist")
-        else:
-            image_tasks.subtract_straylight(in_image=dflat_path, out_image=lflat_path, out_stray=stray_path,
-                                            in_cent_trace=calibs["trace"][camera], select_nrows=(5,5), use_weights=True,
-                                            aperture=15, smoothing=400, median_box=101, gaussian_sigma=20.0, parallel=0)
 
         if skip_done and os.path.isfile(xflat_path):
             log.info(f"skipping {xflat_path}, file already exist")
@@ -1610,7 +1606,8 @@ def create_wavelengths(mjd, use_longterm_cals=True, expnums=None, kind="longterm
     # define master paths for target frames
     calibs = get_calib_paths(mjd, version=drpver, longterm_cals=use_longterm_cals)
 
-    reduce_2d(mjd, calibrations=calibs, expnums=expnums, assume_imagetyp="arc", reject_cr=False, skip_done=skip_done)
+    reduce_2d(mjd, calibrations=calibs, expnums=expnums, assume_imagetyp="arc", reject_cr=False,
+              add_astro=False, sub_straylight=False, skip_done=skip_done)
 
     if frames.expnum.min() != frames.expnum.max():
         expnum_str = f"{frames.expnum.min():>08}_{frames.expnum.max():>08}"

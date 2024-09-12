@@ -1839,22 +1839,13 @@ class Image(Header):
         new_image.setData(data=new, inplace=True)
         return new_image
 
-    def medianImg(self, size, mode="nearest", use_mask=False, propagate_error=False):
+    def medianImg(self, size, propagate_error=False):
         """return median filtered image with the given kernel size
-
-        optionally the method for handling boundary can be set with the `mode`
-        parameter (see documentation for `scipy.ndimage.median_filter`). Masked
-        pixels are handledby setting `use_mask=True`. In this last case, the
-        `mode` is ignored (see documentation for `scipy.signal.medfilt2d`).
 
         Parameters
         ----------
         size : tuple
             2-value tuple for the size of the median box
-        mode : str, optional
-            method to handle boundary pixels, by default "nearest"
-        use_mask : bool, optional
-            whether to take into account masked pixels or not, by default False
         propagate_error : bool, optional
             whether to propagate the error or not, by default False
 
@@ -1863,43 +1854,15 @@ class Image(Header):
         lvmdrp.core.image.Image
             median filtered image
         """
-        if self._mask is None and use_mask:
-            mask = self.get_mask(as_boolean=True)
-            new_data = copy(self._data)
-            new_data[mask] = numpy.nan
-            new_data = ndimage.median_filter(new_data, size, mode=mode)
-            new_mask = None
-            new_error = None
-            if propagate_error and self._error is not None:
-                new_error = numpy.sqrt(ndimage.median_filter(self._error ** 2, size, mode=mode))
-        elif self._mask is not None and not use_mask:
-            new_data = ndimage.median_filter(self._data, size, mode=mode)
-            new_mask = self._mask
-            new_error = None
-            if propagate_error and self._error is not None:
-                new_error = numpy.sqrt(ndimage.median_filter(self._error ** 2, size, mode=mode))
-        else:
-            mask = self.get_mask(as_boolean=True)
-            # copy data and replace masked with nans
-            new_data = copy(self._data)
-            new_data[mask] = numpy.nan
-            # perform median filter
-            new_data = signal.medfilt2d(new_data, size)
-            # update mask
-            new_mask = numpy.isnan(new_data)
-            # reset original masked values in new array
-            new_data[new_mask] = self._data[new_mask]
-            # update error
-            new_error = None
-            if propagate_error and self._error is not None:
-                new_error = copy(self._error)
-                new_error[mask] = numpy.nan
-                new_error = numpy.sqrt(signal.medfilt2d(new_error ** 2, size))
-                # reset masked errors in new array
-                new_error[new_mask] = self._error[new_mask]
+        new_data = copy(self._data)
+        new_error = copy(self._error)
 
-        image = copy(self)
-        image.setData(data=new_data, error=new_error, mask=new_mask)
+        new_data = ndimage.median_filter(new_data, size, mode="nearest")
+        if propagate_error and new_error is not None:
+            new_error = numpy.sqrt(ndimage.median_filter(new_error ** 2, size, mode="nearest"))
+
+        image = Image(data=new_data, error=new_error, mask=self._mask, header=self._header,
+                      origin=self._origin, individual_frames=self._individual_frames, slitmap=self._slitmap)
         return image
 
     def collapseImg(self, axis, mode="mean"):
