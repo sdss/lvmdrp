@@ -1441,7 +1441,7 @@ def _collect_header_data(filename: str) -> dict:
                         # skyw
                         'skyw_ra': 'TESKYWRA', 'skyw_dec': 'TESKYWDE', 'skyw_amass': 'TESKYWAM',
                         'skyw_kmpos': 'TESKYWKM', 'skyw_focpos': 'TESKYWFO', 'skyw_name': 'SKYWNAME',
-                        'skyw_sh_hght': 'GEOCORONAL SKYW_SH_HGHT', 'skyw_moon_sep': 'SKYMODEL SKYW_RHO'
+                        'skyw_sh_hght': 'GEOCORONAL SKYW_SH_HGHT', 'skyw_moon_sep': 'SKYMODEL SKYW_RHO',
                         # sky parameters 
                         'moon_ra': 'SKYMODEL MOON_RA', 'moon_dec': 'SKYMODEL MOON_DEC',
                         'moon_phase': 'SKYMODEL MOON_PHASE', 'moon_fli': 'SKYMODEL MOON_FLI',
