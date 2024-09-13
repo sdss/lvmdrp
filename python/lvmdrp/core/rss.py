@@ -476,7 +476,7 @@ class RSS(FiberRows):
             new_data = bn.nansum(fluxes * weights, axis=0)
             new_lsf = bn.nansum(lsfs * weights, axis=0)
             new_error = numpy.sqrt(bn.nansum(vars, axis=0))
-            new_mask = numpy.bitwise_or(masks, axis=0)
+            new_mask = numpy.bitwise_or.reduce(masks, axis=0)
             if rss._sky is not None:
                 new_sky = bn.nansum(skies * weights, axis=0)
             else:
@@ -506,7 +506,7 @@ class RSS(FiberRows):
             new_data = bn.nanmean(fluxes, axis=0)
             new_lsf = bn.nanmean(lsfs, axis=0)
             new_error = numpy.sqrt(bn.nanmean(vars, axis=0))
-            new_mask = numpy.bitwise_or(masks, axis=0)
+            new_mask = numpy.bitwise_or.reduce(masks, axis=0)
             if skies.size != 0:
                 new_sky = bn.nansum(skies, axis=0)
             else:
