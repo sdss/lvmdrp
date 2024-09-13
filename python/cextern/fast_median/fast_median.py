@@ -10,11 +10,11 @@ try:
     s = platform.system()
     resources_dir = environ.get('LVMDRP_LIB_DIR') or path.join(path.dirname(__file__), 'src')
     if s=='Linux':
-        resources_dir = path.join(resources_dir, 'filter.so')
+        resources_dir = path.join(resources_dir, 'fast_median.so')
         #print(resources_dir)
         lib = ctypes.cdll.LoadLibrary(resources_dir)
     elif s=='Darwin':
-        resources_dir = path.join(resources_dir, 'filter.dylib')
+        resources_dir = path.join(resources_dir, 'fast_median.dylib')
         #print(resources_dir)
         lib = ctypes.cdll.LoadLibrary(resources_dir)
     else:
