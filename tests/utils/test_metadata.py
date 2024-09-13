@@ -46,28 +46,17 @@ def test_collect_header_data(make_framefits):
     sframe = make_framefits(tileid=1054755, mjd=60297, expnum=9532)
     hdr_data = _collect_header_data(sframe)
 
+
     expdata = {'drpver': '0.1.1', 'drpqual': 0, 'dpos': 0, 'object': 'tile_id=1054755',
                'obstime': '2023-12-19T00:47:39.095', 'sci_ra': 65.949555, 'sci_dec': 15.348684,
                'sci_amass': 1.857, 'sci_kmpos': -87.5, 'sci_focpos': 36.58,
-               'sci_sh_hght': None,'sci_moon_sep': None, 'skye_ra': 21.008216, 'skye_dec': -22.933382,
+               'sci_sh_hght': 165.52885,'sci_moon_sep': 29.8097, 'skye_ra': 21.008216, 'skye_dec': -22.933382,
                'skye_amass': 1.013, 'skye_kmpos': -37.5, 'skye_focpos': 36.19,
-               'skye_name': 'WHAM_south_02', 'skye_sh_hght': None, 'skye_moon_sep': None,
+               'skye_name': 'WHAM_south_02', 'skye_sh_hght': 164.79533, 'skye_moon_sep': 18.4705,
                'skyw_ra': 58.011871, 'skyw_dec': 11.817184, 'skyw_amass': 1.555, 'skyw_kmpos': -54.51,
-               'skyw_focpos': 37.11, 'skyw_name': 'grid087', 'skyw_sh_hght': None,
-               'skyw_moon_sep': None, 'moon_ra': None, 'moon_dec': None,
-               'moon_phase': None, 'moon_fli': None, 'sun_alt': None, 'moon_alt': None}
-
-    # after skydev_issues110_77 is merged, the expeted values are below 
-    #expdata = {'drpver': '0.1.1', 'drpqual': 0, 'dpos': 0, 'object': 'tile_id=1054755',
-    #           'obstime': '2023-12-19T00:47:39.095', 'sci_ra': 65.949555, 'sci_dec': 15.348684,
-    #           'sci_amass': 1.857, 'sci_kmpos': -87.5, 'sci_focpos': 36.58,
-    #           'sci_sh_hght': 165.52885,'sci_moon_sep': 29.8097, 'skye_ra': 21.008216, 'skye_dec': -22.933382,
-    #           'skye_amass': 1.013, 'skye_kmpos': -37.5, 'skye_focpos': 36.19,
-    #           'skye_name': 'WHAM_south_02', 'skye_sh_hght': 164.79533, 'skye_moon_sep': 18.4705,
-    #           'skyw_ra': 58.011871, 'skyw_dec': 11.817184, 'skyw_amass': 1.555, 'skyw_kmpos': -54.51,
-    #           'skyw_focpos': 37.11, 'skyw_name': 'grid087', 'skyw_sh_hght': 165.41738,
-    #           'skyw_moon_sep': 27.7977, 'moon_ra': 348.42157, 'moon_dec': -7.55955,
-    #           'moon_phase': 79.91, 'moon_fli': 0.4136, 'sun_alt': -13.3779, 'moon_alt': 46.8744}
+               'skyw_focpos': 37.11, 'skyw_name': 'grid087', 'skyw_sh_hght': 165.41738,
+               'skyw_moon_sep': 27.7977, 'moon_ra': 348.42157, 'moon_dec': -7.55955,
+               'moon_phase': 79.91, 'moon_fli': 0.4136, 'sun_alt': -13.3779, 'moon_alt': 46.8744}
 
     assert hdr_data == expdata
 
