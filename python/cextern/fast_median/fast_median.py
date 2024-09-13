@@ -50,7 +50,6 @@ try:
 
     HAVE_MEDIAN_SO = True
 except Exception:
-    raise
     print(Exception)
     pass
 
