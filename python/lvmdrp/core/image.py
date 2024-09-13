@@ -13,7 +13,7 @@ from astropy.table import Table
 from astropy.io import fits as pyfits
 from astropy.modeling import fitting, models
 from astropy.stats.biweight import biweight_location, biweight_scale
-from scipy import ndimage, signal
+from scipy import ndimage
 from scipy import interpolate
 
 from lvmdrp import log
