@@ -147,6 +147,7 @@ class ReductionStage(BaseBitmask):
     HDRFIX_APPLIED = auto()           # header fix applied
     OVERSCAN_SUBTRACTED = auto()      # trimmed overscan region, overscan-subtracted
     PIXELMASK_ADDED = auto()          # fiducial pixel mask was added
+    PREPROCESSED = auto()
     GAIN_CORRECTED = auto()           # gain correction applied
     POISSON_ERROR_CALCULATED = auto() # calculated poisson error
     LINEARITY_CORRECTED = auto()      # linearity correction applied
@@ -287,19 +288,17 @@ FLAGS = list(QualityFlag.__members__.keys())
 DRPQUALITIES = list()
 
 
-def _parse_bitmask(pixmask, mask_shape):
-    if isinstance(pixmask, PixMask):
-        pixmask = np.zeros(mask_shape)
-    elif isinstance(pixmask, str):
-        pixmask = PixMask[pixmask]
-    elif isinstance(pixmask, int):
-        pixmask = PixMask(pixmask)
-    elif isinstance(pixmask, np.ndarray[int]):
-        assert pixmask.shape == mask_shape, f"Wrong `pixmask` shape {pixmask.shape} not matching `mask_image` shape {mask_shape}"
+def _parse_bitmask(bitmask, kind):
+    if isinstance(bitmask, kind):
+        return bitmask
+    elif isinstance(bitmask, str):
+        bitmask = kind[bitmask]
+    elif isinstance(bitmask, int):
+        bitmask = kind(bitmask)
     else:
-        raise ValueError(f"Wrong type for {pixmask = }: {type(pixmask)}; expected PixMask, string or integer")
+        raise ValueError(f"Wrong type for {bitmask = }: {type(bitmask)}; expected {kind}, string or integer")
 
-    return pixmask
+    return bitmask
 
 
 def _parse_where(where, mask_shape):
@@ -314,7 +313,7 @@ def _parse_where(where, mask_shape):
 
 
 def add_bitmask(mask_image, pixmask, where=None):
-    pixmask = _parse_bitmask(pixmask, mask_shape=mask_image.shape)
+    pixmask = _parse_bitmask(pixmask, kind=PixMask)
     where = _parse_where(where, mask_shape=mask_image.shape)
 
     mask_image[where] |= pixmask
@@ -322,11 +321,20 @@ def add_bitmask(mask_image, pixmask, where=None):
 
 
 def toggle_bitmask(mask_image, pixmask, where=None):
-    pixmask = _parse_bitmask(pixmask, mask_shape=mask_image.shape)
+    pixmask = _parse_bitmask(pixmask, kind=PixMask)
     where = _parse_where(where, mask_shape=mask_image.shape)
 
     mask_image[where] ^= pixmask
     return mask_image
+
+
+def update_header_bitmask(header, kind, bitmask, key, comment):
+    bitmask = _parse_bitmask(bitmask, kind=kind)
+    if key not in header:
+        header[key] = (bitmask.value, comment)
+    header[key] |= bitmask.value
+
+    return header
 
 
 def print_bitmasks(mask_array, logger=None):
