@@ -3382,25 +3382,26 @@ class RSS(FiberRows):
         """Replaces masked pixels in RSS by NaN values"""
         if mask is None:
             mask = self._mask != 0
+        else:
+            mask = mask != 0
         if mask is None:
             return self._data, self._error
 
-        if self._mask is not None:
-            self._data[self._mask] = numpy.nan
-            if self._error is not None:
-                self._error[self._mask] = numpy.nan
-            if self._sky is not None:
-                self._sky[self._mask] = numpy.nan
-            if self._sky_error is not None:
-                self._sky_error[self._mask] = numpy.nan
-            if self._sky_east is not None:
-                self._sky_east[self._mask] = numpy.nan
-            if self._sky_east_error is not None:
-                self._sky_east_error[self._mask] = numpy.nan
-            if self._sky_west is not None:
-                self._sky_west[self._mask] = numpy.nan
-            if self._sky_west_error is not None:
-                self._sky_west_error[self._mask] = numpy.nan
+        self._data[mask] = numpy.nan
+        if self._error is not None:
+            self._error[mask] = numpy.nan
+        if self._sky is not None:
+            self._sky[mask] = numpy.nan
+        if self._sky_error is not None:
+            self._sky_error[mask] = numpy.nan
+        if self._sky_east is not None:
+            self._sky_east[mask] = numpy.nan
+        if self._sky_east_error is not None:
+            self._sky_east_error[mask] = numpy.nan
+        if self._sky_west is not None:
+            self._sky_west[mask] = numpy.nan
+        if self._sky_west_error is not None:
+            self._sky_west_error[mask] = numpy.nan
 
         return self._data, self._error
 
