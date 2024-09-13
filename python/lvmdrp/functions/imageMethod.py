@@ -3402,7 +3402,6 @@ def preproc_raw_frame(
 
     # create pixel mask on the original image
     log.info("building pixel mask")
-    print(proc_img._mask)
     proc_img.add_bitmask("BADPIX", where=master_mask)
     # convert temp image to ADU for saturated pixel masking
     saturated_mask = proc_img._data >= 2**16
