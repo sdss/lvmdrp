@@ -247,7 +247,7 @@ class PixMask(BaseBitmask):
     BADFLUXFACTOR = auto()
 
     # large sky residuals
-    BADSKYCHI = auto()
+    BADSKYFIT = auto()
 
     # fiber bitmasks ------------------------------------------------------
     NONEXPOSED = auto()
