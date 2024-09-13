@@ -28,7 +28,7 @@ from typing import List, Tuple
 from lvmdrp import log, __version__ as DRPVER
 from lvmdrp.core.constants import CONFIG_PATH, SPEC_CHANNELS, ARC_LAMPS, LVM_REFERENCE_COLUMN, LVM_NBLOCKS, FIDUCIAL_PLATESCALE
 from lvmdrp.utils.decorators import skip_on_missing_input_path, drop_missing_input_paths
-from lvmdrp.utils.bitmask import QualityFlag, ReductionStage, PixMask
+from lvmdrp.utils.bitmask import PixMask
 from lvmdrp.core.fiberrows import FiberRows, _read_fiber_ypix
 from lvmdrp.core.image import (
     Image,
@@ -97,7 +97,7 @@ __all__ = [
 ]
 
 
-def _nonlinearity_correction(ptc_params: None | numpy.ndarray, nominal_gain: float, quadrant: Image, iquad: int, drpstage: ReductionStage) -> Tuple[Image,ReductionStage]:
+def _nonlinearity_correction(ptc_params: None | numpy.ndarray, nominal_gain: float, quadrant: Image, iquad: int) -> Tuple[Image]:
     """calculates non-linearity correction for input quadrant
 
     Parameters
@@ -133,12 +133,12 @@ def _nonlinearity_correction(ptc_params: None | numpy.ndarray, nominal_gain: flo
         gain_med = bn.nanmedian(gain_map._data)
         gain_min, gain_max = bn.nanmin(gain_map._data), bn.nanmax(gain_map._data)
         log.info(f"gain map stats: {gain_med = :.2f} [{gain_min = :.2f}, {gain_max = :.2f}] ({nominal_gain = :.2f} e-/ADU)")
-        drpstage += "LINEARITY_CORRECTED"
+        quadrant.update_drpstage("LINEARITY_CORRECTED")
     else:
         log.warning("cannot apply non-linearity correction")
         log.info(f"using {nominal_gain = } (e-/ADU)")
         gain_map = Image(data=numpy.ones(quadrant._data.shape) * nominal_gain)
-    return gain_map, drpstage
+    return gain_map
 
 
 def _create_peaks_regions(fibermap: Table, column: int = 2000) -> None:
@@ -391,7 +391,7 @@ def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=Non
     # calculate thermal shifts
     column_shifts = image.measure_fiber_shifts(fiber_model, columns=columns, column_width=column_width, shift_range=shift_range, axs=axs_cc)
     if (column_shifts!=0).any():
-        image._header["DRPSTAGE"] = (ReductionStage(image._header["DRPSTAGE"]) + "FIBERS_SHIFTED").value
+        image.update_drpstage("FIBERS_SHIFTED")
 
     # shifts stats
     median_shift = bn.nanmedian(column_shifts, axis=0)
@@ -1941,7 +1941,6 @@ def subtract_straylight(
     # load image data
     log.info(f"using image {os.path.basename(in_image)} for stray light subtraction")
     img = loadImage(in_image)
-    drpstage = ReductionStage(img._header["DRPSTAGE"])
     unit = img._header["BUNIT"]
 
     # smooth image along dispersion axis with a median filter excluded NaN values
@@ -2002,12 +2001,11 @@ def subtract_straylight(
     log.info("subtracting the smoothed background signal from the original image")
     img_out = loadImage(in_image)
     img_out._data = img_out._data - img_stray._data
-    drpstage += "STRAYLIGHT_SUBTRACTED"
 
     # include header and write out file
     log.info(f"writing stray light subtracted image to {os.path.basename(out_image)}")
     img_out.setHeader(header=img.getHeader())
-    img_out._header["DRPSTAGE"] = drpstage.value
+    img_out.update_drpstage("STRAYLIGHT_SUBTRACTED")
     img_out.writeFitsData(out_image)
 
     # plot results: polyomial fitting & smoothing, both with masked regions on
@@ -2621,7 +2619,6 @@ def extract_spectra(
         log.info(f"extraction using aperture of {aperture} pixels")
 
     img = loadImage(in_image)
-    drpstage = ReductionStage(img._header["DRPSTAGE"])
     mjd = img._header["SMJD"]
     camera = img._header["CCD"]
     expnum = img._header["EXPOSURE"]
@@ -2752,7 +2749,6 @@ def extract_spectra(
 
     # print(numpy.unique(mask))
     # exit()
-    drpstage += "SPECTRA_EXTRACTED"
 
     # propagate thermal shift to slitmap
     channel = img._header['CCD'][0]
@@ -2769,7 +2765,7 @@ def extract_spectra(
         header=img.getHeader(),
         slitmap=slitmap
     )
-    rss._header["DRPSTAGE"] = drpstage.value
+    rss.update_drpstage("SPECTRA_EXTRACTED")
     rss.setHdrValue("NAXIS2", data.shape[0])
     rss.setHdrValue("NAXIS1", data.shape[1])
     rss.setHdrValue("DISPAXIS", 1)
@@ -3168,12 +3164,10 @@ def preproc_raw_frame(
     display_plots : bool, optional
         whether to show plots on display or not, by default False
     """
-    # initialize reduction status
-    drpstage = ReductionStage(1)
-
     # load image
     log.info(f"starting preprocessing of raw image '{os.path.basename(in_image)}'")
     org_img = loadImage(in_image)
+    org_img.update_drpqual(0)
     org_header = org_img.getHeader()
 
     camera = org_header["CCD"]
@@ -3184,7 +3178,7 @@ def preproc_raw_frame(
         sjd = int(dateobs_to_sjd(org_header.get("OBSTIME")))
         sjd = correct_sjd(in_image, sjd)
         org_header = apply_hdrfix(sjd, hdr=org_header) or org_header
-        drpstage += "HDRFIX_APPLIED"
+        org_img.update_drpstage("HDRFIX_APPLIED")
     except ValueError as e:
         log.error(f"cannot apply header fix: {e}")
 
@@ -3300,12 +3294,10 @@ def preproc_raw_frame(
                 log.info(f"masked {os_nmask} ({os_nmask/os_data.size*100:.2f}%) pixels in overscan above {overscan_threshold} standard deviations")
 
             sc_quad = sc_quad - os_model
+            sc_quad.update_drpstage("OVERSCAN_SUBTRACTED")
 
             os_profiles.append(os_profile)
             os_models.append(os_model)
-
-        if subtract_overscan:
-            drpstage += "OVERSCAN_SUBTRACTED"
 
         # compute overscan stats
         os_bias_med[i] = bn.nanmedian(os_quad._data, axis=None)
@@ -3396,13 +3388,13 @@ def preproc_raw_frame(
     if in_mask and proc_img._header["IMAGETYP"] not in {"bias", "dark", "pixflat"}:
         log.info(f"loading master pixel mask from {os.path.basename(in_mask)}")
         master_mask = loadImage(in_mask)._mask.astype(bool)
-        drpstage += "PIXELMASK_ADDED"
     else:
         master_mask = numpy.zeros_like(proc_img._data, dtype=bool)
 
     # create pixel mask on the original image
     log.info("building pixel mask")
     proc_img.add_bitmask("BADPIX", where=master_mask)
+    proc_img.update_drpstage("PIXELMASK_ADDED")
     # convert temp image to ADU for saturated pixel masking
     saturated_mask = proc_img._data >= 2**16
     proc_img.add_bitmask("SATURATED", where=saturated_mask)
@@ -3417,15 +3409,13 @@ def preproc_raw_frame(
         proc_img.apply_pixelmask()
 
     # update data reduction quality flag
-    drpqual = QualityFlag(0)
     if saturated_mask.sum() / proc_img._mask.size > 0.01:
-        drpqual += "SATURATED"
+        proc_img.update_drpqual("SATURATED")
 
     # write out FITS file
     log.info(f"writing preprocessed image to {os.path.basename(out_image)}")
+    proc_img.update_drpstage("PREPROCESSED")
     proc_img.setHdrValue("DRPVER", DRPVER, comment='data reduction pipeline version')
-    proc_img.setHdrValue("DRPSTAGE", drpstage.value, comment="data reduction stage")
-    proc_img.setHdrValue("DRPQUAL", value=drpqual.value, comment="data reduction quality flag")
     proc_img.writeFitsData(out_image)
 
     # plot overscan strips along X and Y axes
@@ -3576,7 +3566,6 @@ def add_astrometry(
 
     # reading slitmap
     org_img = loadImage(in_image)
-    drpstage = ReductionStage(org_img._header["DRPSTAGE"])
     slitmap = org_img.getSlitmap()
     telescope=numpy.array(slitmap['telescope'].data)
     x=numpy.array(slitmap['xpmm'].data)
@@ -3597,7 +3586,7 @@ def add_astrometry(
         comment = gdrhdr.comments[keyword] if inhdr else ''
         img.setHdrValue(f'HIERARCH GDRCOADD {keyword}', gdrhdr.get(keyword), comment)
 
-    def getobsparam(tel, drpstage):
+    def getobsparam(tel):
         if tel!='spec':
             if os.path.isfile(agcfiledir[tel]):
                 mfagc=fits.open(agcfiledir[tel])
@@ -3645,17 +3634,17 @@ def add_astrometry(
                     log.warning(f"some astrometry keywords for telescope '{tel}' are missing: {RAobs = }, {DECobs = }, {PAobs = }")
                     org_img.add_header_comment(f"no astromentry keywords '{tel}': {RAobs = }, {DECobs = }, {PAobs = }, using commanded")
                 org_img.setHdrValue('ASTRMSRC', 'CMD position', comment='Source of astrometric solution: commanded position')
-                drpstage += f"{tel.upper()}_ASTROMETRY_ADDED"
+                org_img.update_drpstage(f"{tel.upper()}_ASTROMETRY_ADDED")
         else:
             RAobs=0
             DECobs=0
             PAobs=0
-        return RAobs, DECobs, PAobs, drpstage
+        return RAobs, DECobs, PAobs
 
-    RAobs_sci, DECobs_sci, PAobs_sci, drpstage = getobsparam('sci', drpstage)
-    RAobs_skye, DECobs_skye, PAobs_skye, drpstage = getobsparam('skye', drpstage)
-    RAobs_skyw, DECobs_skyw, PAobs_skyw, drpstage = getobsparam('skyw', drpstage)
-    RAobs_spec, DECobs_spec, PAobs_spec, drpstage = getobsparam('spec', drpstage)
+    RAobs_sci, DECobs_sci, PAobs_sci = getobsparam('sci')
+    RAobs_skye, DECobs_skye, PAobs_skye = getobsparam('skye')
+    RAobs_skyw, DECobs_skyw, PAobs_skyw = getobsparam('skyw')
+    RAobs_spec, DECobs_spec, PAobs_spec = getobsparam('spec')
 
     # Create fake IFU image WCS object for each telescope focal plane and use it to calculate RA,DEC of each fiber
     telcoordsdir={'sci':(RAobs_sci, DECobs_sci, PAobs_sci), 'skye':(RAobs_skye, DECobs_skye, PAobs_skye), 'skyw':(RAobs_skyw, DECobs_skyw, PAobs_skyw), 'spec':(RAobs_spec, DECobs_spec, PAobs_spec)}
@@ -3693,10 +3682,9 @@ def add_astrometry(
     slitmap['ra']=RAfib
     slitmap['dec']=DECfib
     org_img._slitmap=slitmap
-    drpstage += "FIBERS_ASTROMETRY_ADDED"
+    org_img.update_drpstage("FIBERS_ASTROMETRY_ADDED")
 
     log.info(f"writing RA,DEC to slitmap in image '{os.path.basename(out_image)}'")
-    org_img._header["DRPSTAGE"] = drpstage.value
     org_img.writeFitsData(out_image)
 
 
@@ -3751,7 +3739,6 @@ def detrend_frame(
     org_img = loadImage(in_image)
     exptime = org_img._header["EXPTIME"]
     img_type = org_img._header["IMAGETYP"].lower()
-    drpstage = ReductionStage(org_img._header["DRPSTAGE"])
     log.info(
         "target frame parameters: "
         f"MJD = {org_img._header['MJD']}, "
@@ -3826,7 +3813,7 @@ def detrend_frame(
             rdnoise = quad.getHdrValue(f"AMP{i+1} RDNOISE")
 
             # non-linearity correction
-            gain_map, drpstage = _nonlinearity_correction(ptc_params, gain, quad, iquad=i+1, drpstage=drpstage)
+            gain_map = _nonlinearity_correction(ptc_params, gain, quad, iquad=i+1)
             # gain-correct quadrant
             quad *= gain_map
             # propagate new NaNs to the mask
@@ -3837,8 +3824,8 @@ def detrend_frame(
             log.info(f"median error in quadrant {i+1}: {bn.nanmedian(quad._error):.2f} (e-)")
 
         bcorr_img.setHdrValue("BUNIT", "electron", "physical units of the image")
-        drpstage += "GAIN_CORRECTED"
-        drpstage += "POISSON_ERROR_CALCULATED"
+        bcorr_img.update_drpstage("GAIN_CORRECTED")
+        bcorr_img.update_drpstage("POISSON_ERROR_CALCULATED")
     else:
         # convert to ADU
         log.info("leaving original ADU units")
@@ -3853,7 +3840,7 @@ def detrend_frame(
     detrended_img = (bcorr_img - mdark_img.convertUnit(to=bcorr_img._header["BUNIT"]))
     # NOTE: this is a hack to avoid the error propagation of the division in Image
     detrended_img._data = detrended_img._data / numpy.nan_to_num(mflat_img._data, nan=1.0)
-    drpstage += "DETRENDED"
+    detrended_img.update_drpstage("DETRENDED")
 
     # propagate pixel mask
     log.info("propagating pixel mask")
@@ -3866,7 +3853,7 @@ def detrend_frame(
         rdnoise = detrended_img.getHdrValue("AMP1 RDNOISE")
         detrended_img.reject_cosmics(gain=1.0, rdnoise=rdnoise, rlim=1.3, iterations=5, fwhm_gauss=[2.75, 2.75],
                                      replace_box=[10,2], replace_error=1e6, verbose=True, inplace=True)
-        drpstage += "COSMIC_CLEANED"
+        detrended_img.update_drpstage("COSMIC_CLEANED")
 
     # replace masked pixels with NaNs
     if replace_with_nan:
@@ -3891,7 +3878,6 @@ def detrend_frame(
 
     # save detrended image
     log.info(f"writing detrended image to '{os.path.basename(out_image)}'")
-    detrended_img._header["DRPSTAGE"] = drpstage.value
     detrended_img.writeFitsData(out_image)
 
     # show plots

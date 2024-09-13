@@ -17,7 +17,7 @@ from scipy import ndimage
 from scipy import interpolate
 
 from lvmdrp import log
-from lvmdrp.utils.bitmask import PixMask, add_bitmask, toggle_bitmask, print_bitmasks
+from lvmdrp.utils.bitmask import ReductionStage, PixMask, QualityFlag, add_bitmask, toggle_bitmask, update_header_bitmask, print_bitmasks
 from lvmdrp.core.constants import CON_LAMPS, ARC_LAMPS
 from lvmdrp.core.plot import plt
 from lvmdrp.core.fit_profile import gaussians, Gaussians
@@ -998,12 +998,6 @@ class Image(Header):
                 numpy.arange(self._dim[0]), self._data[:, slice], error, mask
             )
 
-    def set_mask(self, pixmask):
-        if isinstance(pixmask, numpy.ndarray):
-            assert isinstance(pixmask[0,0], PixMask)
-
-        self._mask = pixmask
-
     def setData(
         self, data=None, error=None, mask=None, header=None, select=None, inplace=True
     ):
@@ -1118,6 +1112,22 @@ class Image(Header):
         if self._mask is None:
             return
         print_bitmasks(self._mask, logger=log)
+
+    def update_drpstage(self, stage):
+        if self._header is None:
+            return
+
+        self._header = update_header_bitmask(header=self._header,
+                                             kind=ReductionStage, bitmask=stage,
+                                             key="DRPSTAGE", comment="data reduction stage")
+
+    def update_drpqual(self, quality):
+        if self._header is None:
+            return
+
+        self._header = update_header_bitmask(header=self._header,
+                                             kind=QualityFlag, bitmask=quality,
+                                             key="DRPQUAL", comment="data reduction quality")
 
     def convertUnit(self, to, assume="adu", gain_field="GAIN", inplace=False):
         """converts the unit of the image

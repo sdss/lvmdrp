@@ -14,7 +14,7 @@ from astropy.coordinates import EarthLocation
 from astropy import units as u
 
 from lvmdrp import log
-from lvmdrp.utils.bitmask import PixMask, _parse_bitmask, add_bitmask, toggle_bitmask, print_bitmasks
+from lvmdrp.utils.bitmask import ReductionStage, PixMask, _parse_bitmask, add_bitmask, toggle_bitmask, update_header_bitmask, print_bitmasks
 from lvmdrp.core.constants import CONFIG_PATH
 from lvmdrp.core.apertures import Aperture
 from lvmdrp.core.cube import Cube
@@ -1013,6 +1013,14 @@ class RSS(FiberRows):
             return
         print_bitmasks(self._mask, logger=log)
 
+    def update_drpstage(self, stage):
+        if self._header is None:
+            return
+
+        self._header = update_header_bitmask(header=self._header,
+                                             kind=ReductionStage, bitmask=stage,
+                                             key="DRPSTAGE", comment="data reduction stage")
+
     def add_header_comment(self, comstr):
         '''
         Append a COMMENT card at the end of the FITS header.
@@ -1186,7 +1194,7 @@ class RSS(FiberRows):
         return RSS.from_spectra1d(new_specs, header=self._header, slitmap=self._slitmap, good_fibers=self._good_fibers)
 
     def maskFiber(self, fiber, bitmask, replace_error=1e10):
-        bitmask = _parse_bitmask(bitmask)
+        bitmask = _parse_bitmask(bitmask, kind=PixMask)
         self._data[fiber, :] = 0
         if self._mask is not None:
             self._mask[fiber, :] = bitmask
