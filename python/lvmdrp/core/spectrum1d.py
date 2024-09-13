@@ -3440,21 +3440,20 @@ class Spectrum1D(Header):
         """
 
         nfibers = len(pos)
-        aperture = 3
+        nsigmas = 1
         # round up fiber locations
         pixels = numpy.round(
-            pos[:, None] + numpy.arange(-aperture / 2.0, aperture / 2.0, 1.0)[None, :]
+            pos[:, None] + numpy.arange(-nsigmas, nsigmas+1, 1)[None, :] * bn.nanmedian(sigma)
         ).astype("int")
         # defining bad pixels for each fiber if needed
         if self._mask is not None:
             # select: fibers in the boundary of the chip
-            bad_pix = numpy.zeros(nfibers, dtype="bool")
-            select = bn.nansum(pixels >= self._mask.shape[0], 1)
-            nselect = numpy.logical_not(select)
-            bad_pix[select] = True
+            bad_pix = numpy.zeros(nfibers, dtype=numpy.int32)
+            select = numpy.logical_or.reduce(pixels >= self._mask.shape[0], 1)
+            bad_pix[select] |= numpy.bitwise_or.reduce(self._mask[pixels[select, :]], 1)
 
             # masking fibers if all pixels are bad within aperture
-            bad_pix[nselect] = bn.nansum(self._mask[pixels[nselect, :]] != 0, 1) == aperture
+            bad_pix[~select] |= numpy.bitwise_or.reduce(self._mask[pixels[~select, :]], 1)
         else:
             bad_pix = None
         if self._error is None:
@@ -3483,8 +3482,6 @@ class Spectrum1D(Header):
 
         error = numpy.sqrt(1 / ((B.multiply(B)).sum(axis=0))).A
         error = error[0,:]
-        if bad_pix is not None and bn.nansum(bad_pix) > 0:
-            error[bad_pix] = replace_error
 
         # pyfits.writeto('B1.fits', B1.toarray(), overwrite=True)
         # if plot:

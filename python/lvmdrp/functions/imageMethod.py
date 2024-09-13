@@ -2743,13 +2743,15 @@ def extract_spectra(
     select_spec = slitmap["spectrographid"] == int(img._header["CCD"][1])
     slitmap_spec = slitmap[select_spec]
     exposed_selection = numpy.array(list(img._header["STD*ACQ"].values()))
-    # mask fibers that are not exposed
     # TODO: use the more reliable routine get_exposed_std_fibers once is merged from addqa branch
     if len(exposed_selection) != 0:
         exposed_std = numpy.array(list(img._header["STD*FIB"].values()))[exposed_selection]
-        mask |= (~(numpy.isin(slitmap_spec["orig_ifulabel"], exposed_std))&((slitmap_spec["telescope"] == "Spec")))[:, None]
-        mask |= (slitmap_spec["fibstatus"] == 1)[:, None]
+        mask |= (~(numpy.isin(slitmap_spec["orig_ifulabel"], exposed_std))&((slitmap_spec["telescope"] == "Spec")))[:, None] * PixMask["NONEXPOSED"]
+    # mask dead fibers
+    mask |= (slitmap_spec["fibstatus"] == 1)[:, None] * PixMask["DEADFIBER"]
 
+    # print(numpy.unique(mask))
+    # exit()
     drpstage += "SPECTRA_EXTRACTED"
 
     # propagate thermal shift to slitmap
@@ -2757,8 +2759,6 @@ def extract_spectra(
     slitmap[f"ypix_{channel}"] = slitmap[f"ypix_{channel}"].astype("float64")
     slitmap[f"ypix_{channel}"][select_spec] += bn.nanmedian(shifts, axis=0)
 
-    if error is not None:
-        error[mask] = replace_error
     rss = RSS(
         data=data,
         mask=mask,

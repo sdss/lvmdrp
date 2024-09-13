@@ -17,7 +17,7 @@ from scipy import ndimage, signal
 from scipy import interpolate
 
 from lvmdrp import log
-from lvmdrp.utils.bitmask import PixMask, add_bitmask, toggle_bitmask
+from lvmdrp.utils.bitmask import PixMask, add_bitmask, toggle_bitmask, print_bitmasks
 from lvmdrp.core.constants import CON_LAMPS, ARC_LAMPS
 from lvmdrp.core.plot import plt
 from lvmdrp.core.fit_profile import gaussians, Gaussians
@@ -2602,7 +2602,7 @@ class Image(Header):
             error = numpy.zeros((TraceMask._fibers, self._dim[1]), dtype=numpy.float32)
         else:
             error = None
-        mask = numpy.zeros((TraceMask._fibers, self._dim[1]), dtype="bool")
+        mask = numpy.zeros((TraceMask._fibers, self._dim[1]), dtype=numpy.int32)
         for i in range(self._dim[1]):
             pixels = numpy.round(
                 pos[:, i][:, numpy.newaxis]
@@ -2630,10 +2630,10 @@ class Image(Header):
                     numpy.sum(self._error[:, i][pixels] ** 2, 1)
                 )
             if self._mask is not None:
-                mask[good_pix[:, i], i] = numpy.sum(self._mask[:, i][pixels], 1) > 0
+                mask[good_pix[:, i], i] = numpy.bitwise_or.reduce(self._mask[:, i][pixels], 1)
 
         # update mask with trace mask
-        mask |= bad_pix
+        # mask |= TraceMask._mask.astype(int)
         return data, error, mask
 
     def extractSpecOptimal(self, cent_trace, trace_fwhm, plot_fig=False):
@@ -2643,7 +2643,7 @@ class Image(Header):
             error = numpy.zeros((cent_trace._fibers, self._dim[1]), dtype=numpy.float32)
         else:
             error = None
-        mask = numpy.zeros((cent_trace._fibers, self._dim[1]), dtype="bool")
+        mask = numpy.zeros((cent_trace._fibers, self._dim[1]), dtype=numpy.int32)
 
         self._data = numpy.nan_to_num(self._data)
         self._error = numpy.nan_to_num(self._error, nan=numpy.inf)
@@ -2654,19 +2654,10 @@ class Image(Header):
         for i in range(self._dim[1]):
             # get i-column from image and trace
             slice_img = self.getSlice(i, axis="y")
-            slice_cent = cent_trace.getSlice(i, axis="y")
-            cent = slice_cent[0]
+            cent, cent_err, cent_mask = cent_trace.getSlice(i, axis="y")
 
             # define fiber mask
-            bad_fiber = (slice_cent[2] == 1) | (
-                (slice_cent[0] < 0) | (slice_cent[0] > len(slice_img._data) - 1)
-            )
-            # bad_fiber = numpy.logical_or(
-            #     (slice_cent[2] == 1),
-            #     numpy.logical_or(
-            #         slice_cent[0] < 0, slice_cent[0] > len(slice_img._data) - 1
-            #     ),
-            # )
+            bad_fiber = (cent_mask != 0) | ((cent < 0) | (cent > len(slice_img._data) - 1))
             good_fiber = ~bad_fiber
 
             # get i-column from sigma trace
@@ -2677,13 +2668,13 @@ class Image(Header):
             slice_img._data[select_nan] = 0
 
             # measure flux along the given columns
-            result = slice_img.obtainGaussFluxPeaks(cent[good_fiber], sigma[good_fiber], plot=plot_fig)
-            data[good_fiber, i] = result[0]
+            edata, eerror, emask = slice_img.obtainGaussFluxPeaks(cent[good_fiber], sigma[good_fiber], plot=plot_fig)
+            data[good_fiber, i] = edata
             if self._error is not None:
-                error[good_fiber, i] = result[1]
+                error[good_fiber, i] = eerror
             if self._mask is not None:
-                mask[good_fiber, i] = result[2]
-            mask[bad_fiber, i] = True
+                mask[good_fiber, i] |= emask
+            mask[bad_fiber, i] |= cent_mask[bad_fiber]
         return data, error, mask
 
     def maskFiberTraces(self, TraceMask, aperture=3, parallel="auto"):
@@ -2691,7 +2682,7 @@ class Image(Header):
         dx = numpy.arange(-n0, n0 + 1, 0.5)
         trace = TraceMask.getData()[0]
         if self._mask is None:
-            self._mask = numpy.zeros(self._dim, dtype="bool")
+            self._mask = numpy.zeros(self._dim, dtype="int32")
         if parallel == "auto":
             cpus = cpu_count()
         else:
@@ -2722,7 +2713,7 @@ class Image(Header):
 
         for i in range(self._dim[1]):
             if cpus > 1:
-                self._mask[mask_pixels[i].get(), i] = True
+                self._mask[mask_pixels[i].get(), i] |= PixMask["NODATA"]
             else:
                 select = numpy.unique(
                     numpy.clip(
@@ -2735,7 +2726,7 @@ class Image(Header):
                     .astype("int16")
                     .flatten()
                 )
-                self._mask[select, i] = True
+                self._mask[select, i] |= PixMask["NODATA"]
 
     def peakPosition(self, guess_x=None, guess_y=None, box_x=None, box_y=None):
         image = self._data * numpy.logical_not(self._mask)
