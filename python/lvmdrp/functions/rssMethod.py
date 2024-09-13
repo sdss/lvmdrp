@@ -22,7 +22,7 @@ from numpy import polynomial
 from scipy import interpolate, ndimage
 
 from lvmdrp.utils.decorators import skip_on_missing_input_path, skip_if_drpqual_flags
-from lvmdrp.utils.bitmask import ReductionStage
+from lvmdrp.utils.bitmask import ReductionStage, PixMask
 from lvmdrp.core.constants import CONFIG_PATH, ARC_LAMPS
 from lvmdrp.core.cube import Cube
 from lvmdrp.core.tracemask import TraceMask
@@ -95,7 +95,7 @@ def _illumination_correction(fiberflat, apply_correction=True):
 
     # define data and set to NaN bad pixels
     data = copy(fiberflat._data)
-    data[(fiberflat._mask)|(data <= 0)] = numpy.nan
+    data[(fiberflat._mask != 0)|(data <= 0)] = numpy.nan
 
     # compute median factors
     sci_factor = bn.nanmedian(data[sci_fibers, 1000:3000])
@@ -318,7 +318,7 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
         arc, _, _ = arc.subtract_continuum(niter=cont_niter, thresh=cont_thresh, median_box_range=cont_box_range)
 
     # replace NaNs
-    mask = arc._mask | numpy.isnan(arc._data) | numpy.isnan(arc._error)
+    mask = (arc._mask != 0) | numpy.isnan(arc._data) | numpy.isnan(arc._error)
     mask |= (arc._data < 0.0) | (arc._error <= 0.0)
     arc._data[mask] = 0.0
     arc._error[mask] = numpy.inf
@@ -697,7 +697,7 @@ def shift_wave_skylines(in_frame: str, out_frame: str, dwave: float = 8.0, skyli
     iterator = tqdm(range(lvmframe._fibers), total=lvmframe._fibers, desc=f"measuring offsets using {len(skylines)} sky line(s)", ascii=True, unit="fiber")
     for ifiber in iterator:
         spec = lvmframe.getSpec(ifiber)
-        if spec._mask.all() or lvmframe._slitmap[ifiber]["telescope"] == "Spec" or lvmframe._slitmap[ifiber]["fibstatus"] in [1, 2]:
+        if (spec._mask!=0).all() or lvmframe._slitmap[ifiber]["telescope"] == "Spec" or lvmframe._slitmap[ifiber]["fibstatus"] in [1, 2]:
             continue
 
         fwhm_guess = numpy.nanmean(numpy.interp(skylines, lvmframe._wave[ifiber], lvmframe._lsf[ifiber]))
@@ -1324,7 +1324,7 @@ def create_fiberflat(in_rsss: List[str], out_rsss: List[str], median_box: int = 
     log.info(f"computing fiberflat across {fiberflat._fibers} fibers and {(~numpy.isnan(norm)).sum()} wavelength bins")
     normalized = fiberflat._data / norm[None, :]
     fiberflat._data = normalized
-    fiberflat._mask |= normalized <= 0
+    fiberflat._mask |= PixMask["BADFLAT"]
 
     # apply clipping
     if clip_range is not None:
@@ -1350,19 +1350,19 @@ def create_fiberflat(in_rsss: List[str], out_rsss: List[str], median_box: int = 
 
     # interpolate masked pixels in fiberflat
     for ifiber in range(fiberflat._fibers):
-        wave, data, mask = fiberflat._wave[ifiber], fiberflat._data[ifiber], fiberflat._mask[ifiber]
+        wave, data, mask = fiberflat._wave[ifiber], fiberflat._data[ifiber], fiberflat._mask[ifiber] != 0
         mask |= ~numpy.isfinite(data)
         if numpy.sum(~mask) == 0:
             continue
         fiberflat._data[ifiber, mask] = interpolate.interp1d(wave[~mask], data[~mask], bounds_error=False, assume_sorted=True)(wave[mask])
-        fiberflat._mask[ifiber, mask] = False
+        fiberflat._mask[ifiber, mask] = 0
 
     # create diagnostic plots
     log.info("creating diagnostic plots for fiberflat")
     fig, axs = create_subplots(to_display=display_plots, nrows=3, ncols=1, figsize=(12, 15), sharex=True)
     # plot original continuum exposure, fiberflat and corrected fiberflat per fiber
     colors = plt.cm.Spectral(numpy.linspace(0, 1, fiberflat._fibers))
-    rss._data[rss._mask] = numpy.nan
+    rss._data[rss._mask != 0] = numpy.nan
     stdev_ori = biweight_scale(rss._data, axis=0, ignore_nan=True)[1950:2050].mean()
     stdev_new = biweight_scale(rss._data/fiberflat._data, axis=0, ignore_nan=True)[1950:2050].mean()
     log.info(f"flatfield statistics: {stdev_ori = :.2f}, {stdev_new = :.2f} ({stdev_new/stdev_ori*100:.2f}%)")
@@ -1414,7 +1414,7 @@ def create_fiberflat(in_rsss: List[str], out_rsss: List[str], median_box: int = 
 
         # perform some statistic about the fiberflat
         if fiberflat_cam._mask is not None:
-            select = numpy.logical_not(fiberflat_cam._mask)
+            select = fiberflat_cam._mask == 0
         else:
             select = fiberflat_cam._data == fiberflat_cam._data
         min = bn.nanmin(fiberflat_cam._data[select])
@@ -2450,7 +2450,7 @@ def maskFibers_drp(in_rss, out_rss, fibers, replace_error="1e10"):
     rss.writeFitsData(out_rss)
 
 
-def maskNAN_drp(in_rss, replace_error="1e12"):
+def maskNAN_drp(in_rss, bitmask, replace_error="1e12"):
     """mask NaN values in given RSS
 
     Parameters
@@ -2469,7 +2469,7 @@ def maskNAN_drp(in_rss, replace_error="1e12"):
                 if rss._error is not None:
                     rss._error[i, :] = float(replace_error)
                 if rss._mask is not None:
-                    rss._mask[i, :] = True
+                    rss._mask[i, :] = bitmask
         rss.writeFitsData(in_rss)
 
 
@@ -3054,7 +3054,7 @@ def createMasterFiberFlat_drp(
         for ifiber in range(fiberflat._fibers):
             print(ifiber)
             fiber = fiberflat.getSpec(ifiber)
-            select = numpy.logical_not(fiber._mask)
+            select = fiber._mask == 0
             wave_ori = fiber._wave
 
             norm = superflat_func(fiber._wave[select]) * (1 / fiber[select])
