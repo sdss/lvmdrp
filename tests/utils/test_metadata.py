@@ -49,14 +49,13 @@ def test_collect_header_data(make_framefits):
     expdata = {'drpver': '0.1.1', 'drpqual': 0, 'dpos': 0, 'object': 'tile_id=1054755',
                'obstime': '2023-12-19T00:47:39.095', 'sci_ra': 65.949555, 'sci_dec': 15.348684,
                'sci_amass': 1.857, 'sci_kmpos': -87.5, 'sci_focpos': 36.58,
-               'sci_geoshadow_hgt': 18.62558009595602, 'sci_moon_alt': 58.81053409834248,
-               'sci_moon_rho': 29.809696190110667, 'skye_ra': 21.008216, 'skye_dec': -22.933382,
+               'sci_sh_hght': 165.52885,'sci_moon_sep': 29.8097, 'skye_ra': 21.008216, 'skye_dec': -22.933382,
                'skye_amass': 1.013, 'skye_kmpos': -37.5, 'skye_focpos': 36.19,
-               'skye_name': 'WHAM_south_02', 'skye_geoshadow_hgt': 18.6254096058375,
-               'skye_moon_alt': 54.040092684099854, 'skye_moon_rho': 18.470492013870395,
+               'skye_name': 'WHAM_south_02', 'skye_sh_hght': 164.79533, 'skye_moon_sep': 18.4705,
                'skyw_ra': 58.011871, 'skyw_dec': 11.817184, 'skyw_amass': 1.555, 'skyw_kmpos': -54.51,
-               'skyw_focpos': 37.11, 'skyw_name': 'grid087', 'skyw_geoshadow_hgt': 18.625554151861895,
-               'skyw_moon_alt': 58.150227082407184, 'skyw_moon_rho': 27.797702786159235}
+               'skyw_focpos': 37.11, 'skyw_name': 'grid087', 'skyw_sh_hght': 165.41738,
+               'skyw_moon_sep': 27.7977, 'moon_ra': 348.42157, 'moon_dec': -7.55955,
+               'moon_phase': 79.91, 'moon_fli': 0.4136, 'sun_alt': -13.3779, 'moon_alt': 46.8744}
 
     assert hdr_data == expdata
 

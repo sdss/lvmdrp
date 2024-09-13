@@ -1587,8 +1587,7 @@ def combine_skies(in_rss: str, out_rss, sky_weights: Tuple[float, float] = None)
     return rss, sky
 
 
-def quick_sky_subtraction(in_cframe, out_sframe,
-                          skip_subtraction=False, skymethod: str = 'farlines_nearcont'):
+def quick_sky_subtraction(in_cframe, out_sframe, skymethod: str = 'farlines_nearcont'):
     """ main sky subtraction routine using Simple Sky method
 
     Parameters
@@ -1597,8 +1596,6 @@ def quick_sky_subtraction(in_cframe, out_sframe,
         input CFrame file
     out_sframe : str
         output SFrame file
-    skip_subtraction: Boolean, option
-        flag for skipping sky subtraction, not currently useable
     skymethod : str, optional
         method of computing sky continuum, by default "farlines_nearcont"
         note, not currently being passed from science_reduction in main.py
