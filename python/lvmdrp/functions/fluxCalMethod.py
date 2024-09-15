@@ -48,7 +48,7 @@ from astropy.stats import biweight_location, biweight_scale
 from astropy.table import Table
 
 from lvmdrp.core.rss import RSS, loadRSS, lvmFFrame
-from lvmdrp.core.spectrum1d import Spectrum1D
+from lvmdrp.core.spectrum1d import Spectrum1D, convolution_matrix
 import lvmdrp.core.fluxcal as fluxcal
 from lvmdrp.core.sky import get_sky_mask_uves, get_z_continuum_mask
 from lvmdrp import log
@@ -252,6 +252,8 @@ def standard_sensitivity(stds, rss, GAIA_CACHE_DIR, ext, res, plot=False, width=
 
     master_sky = rss.eval_master_sky()
 
+    bprp_conv = get_bprp_convolution_matrix(w)
+
     # iterate over standard stars, derive sensitivity curve for each
     for s in stds:
         nn, fiber, gaia_id, exptime, secz = s  # unpack standard star tuple
@@ -288,26 +290,39 @@ def standard_sensitivity(stds, rss, GAIA_CACHE_DIR, ext, res, plot=False, width=
         # correct for extinction
         spec *= 10 ** (0.4 * ext * secz)
 
+        # convolve to bp-rp resolution
+        spec_c = bprp_conv@spec
+
         # TODO: fit continuum to instrumental std spectrum (stdflux) and normalize
         # TODO: mask telluric absorption lines from stdflux
         # TODO: match gaia spectrum and stdflux against a set of theoretical stellar templates
         # TODO: downgrade best fit template to instrumental LSF and calculate sensitivity curve (after lifting telluric mask)
 
         # divide to find sensitivity and smooth
-        sens = stdflux / spec
-        wgood, sgood = fluxcal.filter_channel(w, sens, 2)
+        sens = stdflux / spec_c
+        #wgood, sgood = fluxcal.filter_channel(w, sens, 2)
+        wgood = w[np.isfinite(sens)]
+        sgood = sens[np.isfinite(sens)]
         s = interpolate.make_smoothing_spline(wgood, sgood, lam=1e4)
         res[f"STD{nn}SEN"] = s(w).astype(np.float32)
 
         # caluculate SDSS g band magnitudes for QC
         mAB_std = np.round(fluxcal.spec_to_LVM_mAB(channel, w, stdflux), 2)
         mAB_obs = np.round(fluxcal.spec_to_LVM_mAB(channel, w[np.isfinite(spec)], spec[np.isfinite(spec)]), 2)
+        mAB_obs_c = np.round(fluxcal.spec_to_LVM_mAB(channel, w[np.isfinite(spec_c)], spec[np.isfinite(spec_c)]), 2)
         # update input file header
         label = channel.upper()
         rss.setHdrValue(f"STD{nn}{label}AB", mAB_std, f"Gaia AB mag in {channel}-band")
         rss.setHdrValue(f"STD{nn}{label}IN", mAB_obs, f"Obs AB mag in {channel}-band")
         log.info(f"AB mag in LVM_{channel}: Gaia {mAB_std:.2f}, instrumental {mAB_obs:.2f}")
-
+        print(mAB_obs-mAB_obs_c)
+        import matplotlib
+        matplotlib.use('MacOSX')
+        fig = plt.figure()
+        plt.plot(w, stdflux/1e-13, linewidth=2)
+        plt.plot(w, spec, linewidth=1)
+        plt.plot(w, spec_c, linewidth=1)
+        plt.show()
         if plot:
             plt.plot(wgood, sgood, ".k", markersize=2, zorder=-999)
             plt.plot(w, res[f"STD{nn}SEN"], linewidth=1)
@@ -598,6 +613,24 @@ def fluxcal_sci_ifu_stars(in_rss, plot=True, GAIA_CACHE_DIR=None, NSCI_MAX=15):
     rss.writeFitsData(in_rss)
 
     return res_sci, mean_sci, rms_sci, rss
+
+
+def get_bprp_convolution_matrix(w):
+    '''
+    Construct a convolution matrix to convolve spectra to the GAIA PB-RP resoltion
+
+    Input: w numpy.ndarray of wavelengths for target spectrum
+    '''
+    s = os.getenv('LVMCORE_DIR')+'/etc/Gaia_BPRP_resolution.txt'
+    log.info(f"Reading GAIA PB-RP resolution {s}")
+    txt = np.genfromtxt(s)
+    l_bprp, r_bprp = txt[:, 0], txt[:, 1]
+    sigmas = 2 * l_bprp/r_bprp/2.35
+    sigmas = np.interp(w, l_bprp, sigmas)
+    pixels = np.ceil(2 * max(sigmas))
+    pixels = np.arange(-pixels, pixels)
+    kernel = np.asarray([np.exp(-0.5 * (pixels / sigmas[iw]) ** 2) for iw in range(w.size)])
+    return convolution_matrix(kernel)
 
 
 def createSensFunction_drp(
