@@ -193,8 +193,26 @@ class ReductionStage(BaseBitmask):
         return new | flag
 
 class QualityFlag(BaseBitmask):
-    # TODO: add flag for overscan quality
-    OSFEATURES = auto()  # Overscan region has features.
+    # overall quality of the reduction
+
+    # raw frame quality
+    SATURATED10P = auto()  # 10% of saturated pixels in this frame.
+    SATURATED20P = auto()  # 20% of saturated pixels in this frame.
+    SATURATED50P = auto()  # 50% of saturated pixels in this frame.
+
+    # OS quality
+    BADOVERSCANQ1 = auto() # bad overscan (too high/low values)
+    BADOVERSCANQ2 = auto()
+    BADOVERSCANQ3 = auto()
+    BADOVERSCANQ4 = auto()
+    BADOSMODELQ1 = auto()  # bad overscan model
+    BADOSMODELQ2 = auto()
+    BADOSMODELQ3 = auto()
+    BADOSMODELQ4 = auto()
+
+    # detrending quality
+
+
     EXTRACTBAD = auto()  # Many bad values in extracted frame.
     EXTRACTBRIGHT = auto()  # Extracted spectra abnormally bright.
     LOWEXPTIME = auto()  # Exposure time less than 10 minutes.
@@ -204,9 +222,25 @@ class QualityFlag(BaseBitmask):
     BADDITHER = auto()  # Bad dither location information.
     ARCFOCUS = auto()  # Bad focus on arc frames.
     RAMPAGINGBUNNY = auto()  # Rampaging dust bunnies in IFU flats.
+
+
+    # flux calibration quality
+    FEWSTDSTARS = auto()
+    FEWSCISTARS = auto()
+    NOSTDSTARS = auto()
+    NOSCISTARS = auto()
+
+    BADSENSITIVITY = auto() # measured sensitivity curve too different from instrument one
+    SCIZEROPOINT = auto() # too low/high zero point in science stars
+
+
     SKYSUBBAD = auto()  # Bad sky subtraction.
     SKYSUBFAIL = auto()  # Failed sky subtraction.
+
+
     FULLCLOUD = auto()  # Completely cloudy exposure.
+
+    # thermal shifts
     BADFLEXURE = auto()  # Abnormally high flexure LSF correction.
     BGROOVEFAIL = auto()  # Possible B-groove glue failure.
     RGROOVEFAIL = auto()  # Possible R-groove glue failure.
@@ -216,7 +250,6 @@ class QualityFlag(BaseBitmask):
     NOSPEC3 = auto()  # No data from spec3.
     BLOWTORCH = auto()  # Blowtorch artifact detected.
     SEVEREBT = auto()  # Severe blowtorch artifact.
-    SATURATED = auto()  # X% of saturated pixels in this frame.
 
 
 class PixMask(BaseBitmask):
