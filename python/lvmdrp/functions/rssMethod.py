@@ -4,7 +4,7 @@
 import os
 from copy import deepcopy as copy
 from multiprocessing import Pool, cpu_count
-from typing import List, Tuple
+from typing import List, Tuple, Dict
 
 import matplotlib
 import matplotlib.gridspec as gridspec
@@ -656,7 +656,7 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
     return ref_lines, masked, cent_wave, fwhm_wave, arc, wave_trace, fwhm_trace
 
 # method to apply shift in wavelength table based on comparison to skylines
-def shift_wave_skylines(in_frame: str, out_frame: str, dwave: float = 8.0, skylinedict = REF_SKYLINES, display_plots: bool = False):
+def shift_wave_skylines(in_frame: str, out_frame: str, dwave: float = 8.0, skylinedict: Dict[str, float] = REF_SKYLINES, display_plots: bool = False):
     """
     Applies shift to wavelength map extension based on sky line centroid measurements
 
@@ -691,16 +691,24 @@ def shift_wave_skylines(in_frame: str, out_frame: str, dwave: float = 8.0, skyli
     skylines = skylinedict[channel]
 
     # measure offsets
+    snr = numpy.nan_to_num(lvmframe._data / lvmframe._error, nan=0, posinf=0, neginf=0)
     offsets = numpy.ones((len(skylines), numpy.shape(lvmframe._data)[0])) * numpy.nan
     fiber_offset = numpy.ones(lvmframe._data.shape[0]) * numpy.nan
     iterator = tqdm(range(lvmframe._fibers), total=lvmframe._fibers, desc=f"measuring offsets using {len(skylines)} sky line(s)", ascii=True, unit="fiber")
     for ifiber in iterator:
+        # skip dead/non-exposed fibers
         spec = lvmframe.getSpec(ifiber)
         if spec._mask.all() or lvmframe._slitmap[ifiber]["telescope"] == "Spec" or lvmframe._slitmap[ifiber]["fibstatus"] in [1, 2]:
             continue
 
-        fwhm_guess = numpy.nanmean(numpy.interp(skylines, lvmframe._wave[ifiber], lvmframe._lsf[ifiber]))
+        # skip fibers with low S/N
+        sky_snr = numpy.asarray([numpy.trapz(snr[ifiber, (w-dwave//2<spec._wave)&(spec._wave<w+dwave//2)], dx=0.6) for w in skylines]).round(2)
+        if numpy.any(sky_snr < 10):
+            log.warning(f"skipping fiber {ifiber} with S/N < 10 around sky lines {sky_snr = }")
+            continue
 
+        # skip fits with failed sky line measurements
+        fwhm_guess = numpy.nanmean(numpy.interp(skylines, lvmframe._wave[ifiber], lvmframe._lsf[ifiber]))
         flux, sky_wave, fwhm, bg = spec.fitSepGauss(skylines, dwave, fwhm_guess, 0.0, [0, numpy.inf], [-2.5, 2.5], [fwhm_guess - 1.5, fwhm_guess + 1.5], [0.0, numpy.inf])
         if numpy.any(flux / bg < 0.7) or numpy.isnan([flux, sky_wave, fwhm]).any():
             continue
