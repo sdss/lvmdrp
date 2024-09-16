@@ -136,13 +136,22 @@ def choose_sequence(frames, flavor, kind, truncate=True):
     chosen_frames = cleaned_frames.query("expnum in @chosen_expnums")
     expected_length = EXPECTED_LENGTHS[flavor]
     sequence_length = len(chosen_expnums)
+
+    # try selecting the best sequence
     if sequence_length == expected_length:
         chosen_frames.sort_values(["expnum", "camera"], inplace=True)
+        log.info(f"found matching sequence for {flavor = }: {chosen_expnums}")
         return chosen_frames, chosen_expnums
 
-    log.warning(f"wrong sequence length for {flavor = }: {sequence_length}, expected {expected_length}")
+    # fall back to full set of frames and randomly select the best matching exposures
+    log.info(f"chosen sequence for {flavor = } has the wrong length {sequence_length} != {expected_length = }")
+    chosen_expnums = expnums
+    sequence_length = len(chosen_expnums)
+    chosen_frames = cleaned_frames.query("expnum in @chosen_expnums")
+    log.info(f"selecting full set of frames with {sequence_length = } exposures")
+
+    # handle case of sequence longer than expected and truncate == True
     if truncate and sequence_length > expected_length:
-        log.info(f"selecting first {expected_length} exposures")
         if flavor == "flat":
             qrtz_expnums = chosen_frames.expnum[chosen_frames.quartz][:expected_length//2]
             ldls_expnums = chosen_frames.expnum[chosen_frames.ldls][:expected_length//2]
@@ -153,8 +162,11 @@ def choose_sequence(frames, flavor, kind, truncate=True):
             chosen_expnums = np.concatenate([short_expnums, long_expnums])
         else:
             chosen_expnums = chosen_expnums[:expected_length]
+        log.info(f"selecting first {expected_length} exposures: {chosen_expnums}")
         chosen_frames = cleaned_frames.query("expnum in @chosen_expnums")
         chosen_frames.sort_values(["expnum", "camera"], inplace=True)
+    elif sequence_length < expected_length:
+        log.warning(f"chosen sequence for {flavor = } is still shorter than expected {sequence_length} < {expected_length = }")
 
     return chosen_frames, chosen_expnums
 
@@ -1738,14 +1750,12 @@ def reduce_nightly_sequence(mjd, use_longterm_cals=False, reject_cr=True, only_c
 
     if "bias" in only_cals and "bias" in found_cals:
         biases, bias_expnums = choose_sequence(frames, flavor="bias", kind="nightly")
-        log.info(f"choosing {len(biases)} bias exposures: {bias_expnums}")
         create_detrending_frames(mjd=mjd, expnums=bias_expnums, kind="bias", use_longterm_cals=use_longterm_cals, skip_done=skip_done)
     else:
         log.log(20 if "bias" in found_cals else 40, "skipping production of bias frames")
 
     if "trace" in only_cals and "trace" in found_cals:
         dome_flats, dome_flat_expnums = choose_sequence(frames, flavor="flat", kind="nightly")
-        log.info(f"choosing {len(dome_flats)} dome flat exposures: {dome_flat_expnums}")
         expnums_ldls = np.sort(dome_flats.query("ldls").expnum.unique())
         expnums_qrtz = np.sort(dome_flats.query("quartz").expnum.unique())
         create_nightly_traces(mjd=mjd, expnums_ldls=expnums_ldls, expnums_qrtz=expnums_qrtz,
@@ -1758,14 +1768,12 @@ def reduce_nightly_sequence(mjd, use_longterm_cals=False, reject_cr=True, only_c
 
     if "wave" in only_cals and "wave" in found_cals:
         arcs, arc_expnums = choose_sequence(frames, flavor="arc", kind="nightly")
-        log.info(f"choosing {len(arcs)} arc exposures: {arc_expnums}")
         create_wavelengths(mjd=mjd, expnums=arc_expnums, use_longterm_cals=False, kind="nightly", skip_done=skip_done)
     else:
         log.log(20 if "wave" in found_cals else 40, "skipping production of wavelength calibrations")
 
     if "dome" in only_cals and "dome" in found_cals:
         dome_flats, dome_flat_expnums = choose_sequence(frames, flavor="flat", kind="nightly")
-        log.info(f"choosing {len(dome_flats)} dome flat exposures: {dome_flat_expnums}")
         expnums_ldls = np.sort(dome_flats.query("ldls").expnum.unique())
         expnums_qrtz = np.sort(dome_flats.query("quartz").expnum.unique())
         create_dome_fiberflats(mjd=mjd, expnums_ldls=expnums_ldls, expnums_qrtz=expnums_qrtz, use_longterm_cals=False, kind="nightly", skip_done=skip_done)
@@ -1777,7 +1785,6 @@ def reduce_nightly_sequence(mjd, use_longterm_cals=False, reject_cr=True, only_c
         _copy_fiberflats_from(mjd=fflats_from, mjd_dest=mjd, use_longterm_cals=False)
     elif "twilight" in only_cals and "twilight" in found_cals:
         twilight_flats, twilight_expnums = choose_sequence(frames, flavor="twilight", kind="nightly")
-        log.info(f"choosing {len(twilight_flats)} twilight exposures: {twilight_expnums}")
         create_twilight_fiberflats(mjd=mjd, expnums=sorted(np.sort(twilight_flats.expnum.unique())), use_longterm_cals=False, kind="nightly", skip_done=skip_done)
     else:
         log.log(20 if "twilight" in found_cals else 40, "skipping production of twilight fiberflats")
@@ -1842,14 +1849,12 @@ def reduce_longterm_sequence(mjd, use_longterm_cals=True,
 
     if "bias" in only_cals and "bias" in found_cals:
         biases, bias_expnums = choose_sequence(frames, flavor="bias", kind="longterm")
-        log.info(f"choosing {len(biases)} bias exposures: {bias_expnums}")
         create_detrending_frames(mjd=mjd, expnums=bias_expnums, kind="bias", use_longterm_cals=use_longterm_cals, skip_done=skip_done)
     else:
         log.log(20 if "bias" in found_cals else 40, "skipping production of bias frames")
 
     if "trace" in only_cals and "trace" in found_cals:
         dome_flats, dome_flat_expnums = choose_sequence(frames, flavor="flat", kind="longterm")
-        log.info(f"choosing {len(dome_flats)} dome flat exposures: {dome_flat_expnums}")
         expnums_ldls = np.sort(dome_flats.query("ldls").expnum.unique())
         expnums_qrtz = np.sort(dome_flats.query("quartz").expnum.unique())
 
@@ -1868,7 +1873,6 @@ def reduce_longterm_sequence(mjd, use_longterm_cals=True,
 
     if "wave" in only_cals and "wave" in found_cals:
         arcs, arc_expnums = choose_sequence(frames, flavor="arc", kind="longterm")
-        log.info(f"choosing {len(arcs)} arc exposures: {arc_expnums}")
         create_wavelengths(mjd=mjd, expnums=np.sort(arcs.expnum.unique()), skip_done=skip_done)
     else:
         log.log(20 if "wave" in found_cals else 40, "skipping production of wavelength calibrations")
@@ -1883,7 +1887,6 @@ def reduce_longterm_sequence(mjd, use_longterm_cals=True,
         _copy_fiberflats_from(mjd=fflats_from, mjd_dest=mjd, use_longterm_cals=True)
     elif "twilight" in only_cals and "twilight" in found_cals:
         twilight_flats, twilight_expnums = choose_sequence(frames, flavor="twilight", kind="longterm")
-        log.info(f"choosing {len(twilight_flats)} twilight exposures: {twilight_expnums}")
         create_twilight_fiberflats(mjd=mjd, expnums=twilight_expnums, skip_done=skip_done)
     else:
         log.log(20 if "twilight" in found_cals else 40, "skipping production of twilight fiberflats")
