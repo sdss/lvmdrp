@@ -3358,7 +3358,7 @@ class Spectrum1D(Header):
         fact = numpy.sqrt(2 * numpy.pi)
         hw = aperture // 2
         for i, centre in enumerate(cent_guess):
-            if numpy.isnan(centre) or (centre + hw < self._wave[0] or centre - hw > self._wave[-1]):
+            if numpy.isnan(centre) or (centre - hw < self._wave[0] or centre + hw > self._wave[-1]):
                 continue
 
             select = (self._wave >= centre - hw) & (self._wave <= centre + hw)
@@ -3457,7 +3457,7 @@ class Spectrum1D(Header):
         if self._error is None:
             self._error = numpy.ones_like(self._data)
 
-        # construct sparse projection matrix 
+        # construct sparse projection matrix
         fact = numpy.sqrt(2.0 * numpy.pi)
         kernel_width = 7 # should exceed 4 sigma
         vI = []
@@ -3483,7 +3483,7 @@ class Spectrum1D(Header):
         if bad_pix is not None and bn.nansum(bad_pix) > 0:
             error[bad_pix] = replace_error
 
-        # pyfits.writeto('B1.fits', B1.toarray(), overwrite=True)    
+        # pyfits.writeto('B1.fits', B1.toarray(), overwrite=True)
         # if plot:
         #     plt.figure(figsize=(15, 10))
         #     plt.plot(self._data, "ok")
