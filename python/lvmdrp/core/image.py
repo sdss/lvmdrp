@@ -25,6 +25,8 @@ from lvmdrp.core.header import Header
 from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.core.spectrum1d import Spectrum1D, _cross_match_float, _cross_match, _spec_from_lines
 
+from cextern.fast_median.fast_median import fast_median_filter_2d
+
 from lvmdrp import __version__ as drpver
 
 def _fill_column_list(columns, width):
@@ -1787,9 +1789,9 @@ class Image(Header):
         new_data = copy(self._data)
         new_error = copy(self._error)
 
-        new_data = ndimage.median_filter(new_data, size, mode="nearest")
+        new_data = fast_median_filter_2d(new_data, size)
         if propagate_error and new_error is not None:
-            new_error = numpy.sqrt(ndimage.median_filter(new_error ** 2, size, mode="nearest"))
+            new_error = numpy.sqrt(fast_median_filter_2d(new_error ** 2, size, mode="nearest"))
 
         image = Image(data=new_data, error=new_error, mask=self._mask, header=self._header,
                       origin=self._origin, individual_frames=self._individual_frames, slitmap=self._slitmap)
