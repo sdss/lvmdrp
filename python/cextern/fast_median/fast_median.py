@@ -35,7 +35,7 @@ try:
                                         ndpointer(ctypes.c_double, flags="C_CONTIGUOUS"))
     lib.median_filter_2d_double.restype = None
 
-    lib.median_filter_1d_float.argtypes = (ctypes.c_int, 
+    lib.median_filter_1d_float.argtypes = (ctypes.c_int,
                                         ctypes.c_int,
                                         ctypes.c_int,
                                         ndpointer(ctypes.c_float, flags="C_CONTIGUOUS"),
@@ -81,6 +81,6 @@ if HAVE_MEDIAN_SO is True:
         return out
 else:
     def fast_median_filter_2d(input, size=None):
-        return median_filter(input, size=size)
+        return median_filter(input, size=size, mode="nearest")
     def fast_median_filter_1d(input, size=None):
-        return median_filter(input, size=size)
+        return median_filter(input, size=size, mode="nearest")

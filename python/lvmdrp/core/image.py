@@ -1791,7 +1791,7 @@ class Image(Header):
 
         new_data = fast_median_filter_2d(new_data, size)
         if propagate_error and new_error is not None:
-            new_error = numpy.sqrt(fast_median_filter_2d(new_error ** 2, size, mode="nearest"))
+            new_error = numpy.sqrt(fast_median_filter_2d(new_error ** 2, size))
 
         image = Image(data=new_data, error=new_error, mask=self._mask, header=self._header,
                       origin=self._origin, individual_frames=self._individual_frames, slitmap=self._slitmap)
