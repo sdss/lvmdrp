@@ -205,7 +205,7 @@ hdu9:
     YPMM:
       name: ypmm
       type: float32
-      description: the x coordinate in mm of the fiber relative to the centroid
+      description: the y coordinate in mm of the fiber relative to the centroid
       unit: mm
     RINGNUM:
       name: ringnum

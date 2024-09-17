@@ -680,8 +680,8 @@ def fit_supersky(sky_wave, sky_data, sky_vars, sky_mask, sci_wave, sci_data):
     # remove outlying sky fibers
     # TODO: this rejection needs to be done on all-channels data
     mean_sky_data = np.nanmean(sky_data, axis=1)
-    mean_sky_fiber = biweight_location(mean_sky_data)
-    std_sky_fiber = biweight_scale(mean_sky_data)
+    mean_sky_fiber = biweight_location(mean_sky_data, ignore_nan=True)
+    std_sky_fiber = biweight_scale(mean_sky_data, ignore_nan=True)
     mask = np.abs(mean_sky_data - mean_sky_fiber) < 3 * std_sky_fiber
     nsky_fibers = mask.shape[0]
     sky_data = sky_data[mask]

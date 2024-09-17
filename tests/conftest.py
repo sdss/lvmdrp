@@ -44,18 +44,41 @@ def mock_sas(tmp_path_factory, session_mocker):
 
 @pytest.fixture(scope='module')
 def datadir():
-    """ fixture factory to create empty data directories for a list of mjds """
+    """ fixture factory to create an empty data directory for an mjd """
 
     path = pathlib.Path(os.getenv("LVM_DATA_S"))
     path.mkdir(parents=True, exist_ok=True)
-    outs = []
 
-    def _datadir(mjds):
-        for mjd in mjds:
-            (path / f'{mjd}').mkdir(exist_ok=True)
-            outs.append(path / f'{mjd}')
-        return outs
+    def _datadir(mjd):
+        out = (path / f'{mjd}')
+        out.mkdir(exist_ok=True)
+        return out
     yield _datadir
+
+
+@pytest.fixture(scope='module')
+def datadirs(datadir):
+    """ fixture factory to create empty data directories for a list of mjds """
+    out = []
+    def _make(mjds):
+        out.append([datadir(m) for m in mjds])
+        return out
+    yield _make
+
+
+@pytest.fixture(scope='module')
+def reduxdir():
+    """ fixture factory to create empty redux directories for a list of mjds """
+
+    path = pathlib.Path(os.getenv("LVM_SPECTRO_REDUX"))
+    path.mkdir(parents=True, exist_ok=True)
+
+    def _reduxdir(tileid, mjd):
+        tg = '{:0>4d}XX'.format(int(tileid) // 1000)
+        out = (path / os.getenv("LVMDRP_VERSION") / tg / f'{tileid}' / f'{mjd}')
+        out.mkdir(parents=True, exist_ok=True)
+        return out
+    yield _reduxdir
 
 
 @pytest.fixture(scope='module')
@@ -102,7 +125,9 @@ def multimeta(make_multi):
     yield make_multi(expnum=[6818, 6819])
 
 
-def create_fake_fits(path, tileid=11111, mjd=61234, expnum=6817, cameras=None, bias_levels=[980, 960, 1000, 1020], sci_level=60000, leak=False, shift_rows=[]):
+def create_fake_raw_fits(path, tileid=11111, mjd=61234, expnum=6817, cameras=None,
+                         bias_levels=[980, 960, 1000, 1020], sci_level=60000,
+                         leak=False, shift_rows=[]):
     """ create a fake raw frame FITS file """
     out = {}
     cameras = cameras or ['b1']
@@ -147,7 +172,50 @@ def create_fake_fits(path, tileid=11111, mjd=61234, expnum=6817, cameras=None, b
 @pytest.fixture(scope='module')
 def make_fits(datadir):
     """ fixture to create fake fits files """
-    def _make_fits(mjd=61234, cameras=["b1"], expnum=6817, bias_levels=[980, 960, 1000, 1020], sci_level=60000, leak=False, shift_rows=[]):
-        paths = datadir([mjd])
-        return create_fake_fits(paths[0], mjd=mjd, cameras=cameras, expnum=expnum, leak=leak, shift_rows=shift_rows)
+    def _make_fits(tileid=None, mjd=None, cameras=["b1"], expnum=None, bias_levels=[980, 960, 1000, 1020],
+                   sci_level=60000, leak=False, shift_rows=[]):
+        path = datadir(mjd)
+        return create_fake_raw_fits(path, tileid=tileid, mjd=mjd, cameras=cameras, expnum=expnum,
+                                    bias_levels=bias_levels, sci_level=sci_level, leak=leak,
+                                    shift_rows=shift_rows)
+    yield _make_fits
+
+
+def create_fake_frame_fits(path, kind='S', tileid=11111, mjd=61234, expnum=6817, camera='b'):
+    """ create a fake frame FITS file """
+
+    if kind in ['S', 'C']:
+        filename = f'lvm{kind.upper()}Frame-{expnum:0>8}.fits'
+    else:
+        kind = '' if not kind else kind
+        filename = f'lvm{kind.upper()}Frame-{camera}-{expnum:0>8}.fits'
+
+    hdr = {'TILE_ID': tileid, 'MJD': mjd, 'EXPOSURE': expnum, 'FILENAME': filename,
+           'OBSTIME': '2023-12-19T00:47:39.095', 'OBSERVAT': 'LCO', 'DRPVER': '0.1.1',
+           'TELESCOP': 'SDSS 0.16m', 'SURVEY': 'LVM', 'DPOS': 0, 'DRPQUAL': 0,
+           'OBJECT': f'tile_id={tileid}', 'TESCIRA': 65.949555, 'TESCIDE': 15.348684, 'TESCIAM': 1.857,
+           'TESCIKM': -87.5, 'TESCIFO': 36.58, 'GEOCORONAL SCI SHADOW_HEIGHT': 18.62558009595602,
+           'SKYMODEL SCI ALT': 58.81053409834248, 'SKYMODEL SCI RHO': 29.809696190110667,
+           'TESKYERA': 21.008216, 'TESKYEDE': -22.933382, 'TESKYEAM': 1.013, 'TESKYEKM': -37.5,
+           'TESKYEFO': 36.19, 'SKYENAME': 'WHAM_south_02',
+           'GEOCORONAL SKYE SHADOW_HEIGHT': 18.6254096058375, 'SKYMODEL SKYE ALT': 54.040092684099854,
+           'SKYMODEL SKYE RHO': 18.470492013870395, 'TESKYWRA': 58.011871, 'TESKYWDE': 11.817184,
+           'TESKYWAM': 1.555, 'TESKYWKM': -54.51, 'TESKYWFO': 37.11, 'SKYWNAME': 'grid087',
+           'GEOCORONAL SKYW SHADOW_HEIGHT': 18.625554151861895, 'SKYMODEL SKYW ALT': 58.150227082407184,
+           'SKYMODEL SKYW RHO': 27.797702786159235}
+
+    # create fake file
+    prim = fits.PrimaryHDU(header=fits.Header(hdr))
+    full = path / filename
+    hdulist = fits.HDUList(prim)
+    hdulist.writeto(full, overwrite=True)
+    return full
+
+
+@pytest.fixture()
+def make_framefits(reduxdir):
+    """ fixture to create fake fits files """
+    def _make_fits(kind='S', tileid=11111, mjd=61234, expnum=6817, camera='b'):
+        paths = reduxdir(tileid, mjd)
+        return create_fake_frame_fits(paths, kind=kind, tileid=tileid, mjd=mjd, expnum=expnum, camera=camera)
     yield _make_fits

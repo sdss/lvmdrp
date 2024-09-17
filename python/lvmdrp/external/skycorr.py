@@ -299,7 +299,7 @@ def asciiSkyCorrWrapper(
     wave = wave[good]
     objflux = objflux[good]
     skyflux = skyflux[good]
-    if type(mask) != type(None):
+    if mask is not None:
         mask = mask[good]
 
     # wave is sorted (monotonically increasing?)
@@ -307,12 +307,12 @@ def asciiSkyCorrWrapper(
     wave = wave[sw]
     objflux = objflux[sw]
     skyflux = skyflux[sw]
-    if type(mask) != type(None):
+    if mask is not None:
         mask = mask[sw]
 
     # now make the ascii files
     sp.call(["mkdir", dirname])
-    if type(mask) != type(None):
+    if mask is not None:
         np.savetxt(objfile, np.array([wave, objflux, mask]).T)
         np.savetxt(skyfile, np.array([wave, skyflux, mask]).T)
         colnames = ["lambda", "flux", "NONE", "mask"]
@@ -369,7 +369,7 @@ def asciiSkyCorrWrapper(
         # pdb.set_trace()
 
     # get new wave axis if asked
-    if calcNewWave & (type(results) != type(None)):
+    if calcNewWave & (results is not None):
         coefs = readWaveInfo(dirname, resFile)
         if coefs is not None:
             x = 2.0 * (wave - wave.min()) / (wave.max() - wave.min()) - 1.0

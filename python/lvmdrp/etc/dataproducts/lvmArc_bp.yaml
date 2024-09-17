@@ -24,18 +24,34 @@ hdu1:
   is_image: true
   shape: CCDROW x NFIBER
 hdu2:
+  name: IVAR
+  description: Inverse variance (1/sigma2) for the above
+  is_image: true
+  shape: CCDROW x NFIBER
+hdu3:
   name: MASK
   description: the bitmask describing the quality of the fiber
   is_image: true
   shape: NFIBER
-hdu3:
+hdu4:
   name: LXPEAK
   description:
-    wavelength and x positions of good arc lamp lines. 1st column element contains wavelengths,
-    the remaining NFIBER contains the lamp line positions along the CCD.
-  is_image: true
-  shape: NFIBER+1 x NLAMP
-hdu4:
+    wavelength and X positions of good arc lamp lines. Column names contain the reference wavelengths,
+    the NFIBER rows contains the lamp line X positions along the CCD.
+  is_image: false
+  shape: BINARY FITS TABLE
+  columns:
+    REFWAVE:
+      name: refwave
+      type: float32
+      unit: 'Angstrom'
+      description: 'reference wavelength for used lamp lines in air'
+    XPIXEL:
+      name: xpixel
+      type: float32
+      unit: ''
+      description: 'X position in pixels for the measured lines centroids'
+hdu5:
   name: WAVE_TRACE
   description: wavelength solution as Legendre polynomials for all fibers
   is_image: false
@@ -61,9 +77,9 @@ hdu4:
       type: float64
       unit: ''
       description: ''
-hdu5:
+hdu6:
   name: LSF_TRACE
-  description: LSF solution traceset Angstroms
+  description: LSF solution traceset in Angstroms
   is_image: false
   shape: BINARY FITS TABLE
   columns:
@@ -86,4 +102,4 @@ hdu5:
       name: COEFF
       type: float32
       unit: null
-      description: 'polynomial coefficients'  
+      description: 'polynomial coefficients'

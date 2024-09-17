@@ -16,9 +16,10 @@ import numpy as np
 import pandas as pd
 from astropy.io import fits
 from astropy.table import Table
+from filelock import FileLock, Timeout
 from tqdm import tqdm
 
-from lvmdrp.core.constants import FRAMES_CALIB_NEEDS
+from lvmdrp.core.constants import FRAMES_CALIB_NEEDS, CAMERAS
 from lvmdrp.utils.bitmask import (
     QualityFlag,
     RawFrameQuality,
@@ -53,6 +54,7 @@ RAW_METADATA_COLUMNS = [
     ("argon", bool),
     ("ldls", bool),
     ("quartz", bool),
+    ("hartmann", str),
     ("quality", str),
     ("qual", RawFrameQuality),
     ("stage", ReductionStage),
@@ -76,6 +78,7 @@ MASTER_METADATA_COLUMNS = [
     ("argon", bool),
     ("ldls", bool),
     ("quartz", bool),
+    ("hartmann", str),
     ("quality", str),
     ("qual", RawFrameQuality),
     ("stage", ReductionStage),
@@ -603,6 +606,7 @@ def extract_metadata(frames_paths: list, kind: str = "raw") -> pd.DataFrame:
                 header.get("ARGON", "OFF") in onlamp,
                 header.get("LDLS", "OFF") in onlamp,
                 header.get("QUARTZ", "OFF") in onlamp,
+                header.get("HARTMANN", "0 0"),
                 header.get("QUALITY", "excellent"),
                 header.get("QUAL", RawFrameQuality(0)),
                 header.get("DRPSTAGE", ReductionStage.UNREDUCED),
@@ -627,6 +631,7 @@ def extract_metadata(frames_paths: list, kind: str = "raw") -> pd.DataFrame:
                 header.get("ARGON", "OFF") in onlamp,
                 header.get("LDLS", "OFF") in onlamp,
                 header.get("QUARTZ", "OFF") in onlamp,
+                header.get("HARTMANN", "0 0"),
                 header.get("QUALITY", "excellent"),
                 header.get("QUAL", RawFrameQuality(0)),
                 header.get("DRPSTAGE", ReductionStage.UNREDUCED),
@@ -682,7 +687,7 @@ def add_raws(metadata):
         array = array.astype(
             [
                 (n, dtypes[n])
-                if dtypes[n] != object
+                if dtypes[n] is not np.dtype("O")
                 else (n, h5py.string_dtype("utf-8", length=None))
                 for n in dtypes.names
             ]
@@ -741,7 +746,7 @@ def add_masters(metadata):
     array = array.astype(
         [
             (n, dtypes[n])
-            if dtypes[n] != object
+            if dtypes[n] is not np.dtype("O")
             else (n, h5py.string_dtype("utf-8", length=None))
             for n in dtypes.names
         ]
@@ -937,7 +942,7 @@ def get_metadata(
     return metadata
 
 
-def get_sequence_metadata(mjd, expnums=None, exptime=None, for_cals={"bias", "trace", "wave", "fiberflat"}, extract_metadata=False):
+def get_sequence_metadata(mjd, expnums=None, exptime=None, cameras=CAMERAS, for_cals={"bias", "trace", "wave", "dome", "twilight"}, extract_metadata=False):
     """Get frames metadata for a given sequence
 
     Given a set of MJDs and (optionally) exposure numbers, get the frames
@@ -952,8 +957,10 @@ def get_sequence_metadata(mjd, expnums=None, exptime=None, for_cals={"bias", "tr
         List of exposure numbers to reduce
     exptime : int
         Filter frames metadata by exposure
+    cameras : list
+        List of cameras (e.g., "b1", "r3") to filter by
     for_cals : list, tuple or set, optional
-        Only return frames meant to produce given calibrations, {'bias', 'trace', 'wave', 'fiberflat'}
+        Only return frames meant to produce given calibrations, {'bias', 'trace', 'wave', 'dome', 'twilight'}
     extract_metadata : bool
         Whether to extract metadata or not, by default False
 
@@ -979,16 +986,19 @@ def get_sequence_metadata(mjd, expnums=None, exptime=None, for_cals={"bias", "tr
     if exptime is not None:
         frames.query("exptime == @exptime", inplace=True)
 
+    if cameras:
+        frames.query("camera in @cameras", inplace=True)
+
     # simple fix of imagetyp, some images have the wrong type in the header
     bias_selection = (frames.imagetyp == "bias")
-    twilight_selection = (frames.imagetyp == "flat") & ~(frames.ldls|frames.quartz)
+    twilight_selection = (frames.imagetyp == "flat") & ~(frames.ldls|frames.quartz) & ~(frames.neon|frames.hgne|frames.argon|frames.xenon)
     domeflat_selection = (frames.ldls|frames.quartz) & ~(frames.neon|frames.hgne|frames.argon|frames.xenon)
     arc_selection = (frames.neon|frames.hgne|frames.argon|frames.xenon) & ~(frames.ldls|frames.quartz)
     frames.loc[twilight_selection, "imagetyp"] = "flat"
     frames.loc[domeflat_selection, "imagetyp"] = "flat"
     frames.loc[arc_selection, "imagetyp"] = "arc"
 
-    found_cals = {'bias', 'trace', 'wave', 'fiberflat'}
+    found_cals = {'bias', 'trace', 'wave', 'dome', 'twilight'}
     if bias_selection.sum() == 0 and "bias" in for_cals:
         log.error("no bias exposures found")
         found_cals.remove("bias")
@@ -998,9 +1008,11 @@ def get_sequence_metadata(mjd, expnums=None, exptime=None, for_cals={"bias", "tr
     elif arc_selection.sum() == 0 and "wave" in for_cals:
         log.error("no arc exposures found")
         found_cals.remove("wave")
-    elif twilight_selection.sum() == 0 and "fiberflat" in for_cals:
+    elif domeflat_selection.sum() == 0 and "dome" in for_cals:
+        log.error("no dome flat exposures found")
+    elif twilight_selection.sum() == 0 and "twilight" in for_cals:
         log.error("no twilight exposures found")
-        found_cals.remove("fiberflat")
+        found_cals.remove("twilight")
 
     frames.sort_values(["expnum", "camera"], inplace=True)
 
@@ -1422,7 +1434,8 @@ def _collect_header_data(filename: str) -> dict:
     dict
         the extracted header key/values
     """
-    hdr_dict_mapping = {'drpver': 'DRPVER', 'drpqual': 'DRPQUAL', 'dpos': 'DPOS',
+    hdr_dict_mapping = {'drpver': 'DRPVER', 'drpqual': 'DRPQUAL', 'dpos': 'DPOS', 'object': 'OBJECT',
+                        'obstime': 'OBSTIME',
                         # sci
                         'sci_ra': 'TESCIRA', 'sci_dec': 'TESCIDE', 'sci_amass': 'TESCIAM',
                         'sci_kmpos': 'TESCIKM', 'sci_focpos': 'TESCIFO',
@@ -1473,6 +1486,7 @@ def update_summary_file(filename: str, tileid: int = None, mjd: int = None, expn
     # get the row(s) from the raw frames metadata
     df = get_metadata(tileid=int(tileid), mjd=int(mjd), expnum=int(expnum), imagetyp='object')
     if df is None or df.empty:
+        log.info(f'No metadata found for {tileid=}, {mjd=}, {expnum=}. Exiting.')
         return
 
     # select unique expnum row, i.e. remove duplicates from camera/spec rows
@@ -1505,16 +1519,29 @@ def update_summary_file(filename: str, tileid: int = None, mjd: int = None, expn
     dtypes['calib_mjd'] = 'int64'
     df = df.astype(dtypes)
 
+    # replace empty strings in object column with None
+    df['object'] = df['object'].replace('', None)
+
     # create drpall h5 filepath
     drpall = path.full('lvm_drpall', drpver=DRPVER)
     drpall = drpall.replace('.fits', '.h5')
+    lock = FileLock(drpall.replace('.h5', '.h5.lock'), timeout=5)
+
+    # set min column sizes for some columns
+    min_itemsize = {'skye_name': 20, 'skyw_name': 20, 'location': 120, 'agcam_location': 120,
+                    'object': 16, 'obstime': 23}
 
     # write to pytables hdf5
     try:
-        df.to_hdf(drpall, key='summary', append=True, data_columns=True, min_itemsize={'skye_name': 20, 'skyw_name': 20, 'location': 120, 'agcam_location': 120})
+        with lock:
+            df.to_hdf(drpall, key='summary', mode='a', append=True, data_columns=True, min_itemsize=min_itemsize)
     except ImportError:
         log.error('Missing pytables dependency. Install with `pip install "pandas[hdf5]"`. '
                       'On macs, you may first need to first run "brew install hdf5".')
+    except Timeout:
+        log.error("Another instance of the drp currently holds the drpall lock.")
+    else:
+        log.info(f'Updating drpall file {drpall}.')
 
 
 def convert_h5_to_fits(h5file: str):
@@ -1540,3 +1567,26 @@ def convert_h5_to_fits(h5file: str):
     fitsfile = h5file.replace('.h5', '.fits')
     table = Table.from_pandas(df)
     table.write(fitsfile, overwrite=True)
+
+
+def extract_from_filename(filename: str | pathlib.Path) -> tuple:
+    """ Extract metadata from a reduced frame filename
+
+    Extract metadata from a reduced lvmXFrame filename.  This is a helper
+    function to extract the tileid, mjd, and expnum from a filename.
+
+    Parameters
+    ----------
+    filename : str
+        the filename
+
+    Returns
+    -------
+    tuple
+        a tuple with the extracted metadata
+    """
+    path = pathlib.Path(filename)
+    expnum = path.parts[-1].split('.')[0].split('-')[-1].lstrip('0')
+    mjd = path.parts[-2]
+    tileid = path.parts[-3]
+    return tileid, mjd, expnum

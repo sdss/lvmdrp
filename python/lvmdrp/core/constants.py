@@ -115,6 +115,8 @@ FRAMES_CALIB_NEEDS = {
     "object": ["pixmask", "bias", "dark", "pixflat", "fiberflat", "trace", "fwhm", "wave", "lsf"],
 }
 
+CAMERAS = ["b1", "b2", "b3", "r1", "r2", "r3", "z1", "z2", "z3"]
+
 # spectrograph channels as spec
 # SPEC_CHANNELS = {"b": (3600, 5930), "r": (5660, 7720), "z": (7470, 9800)}
 # spectrograph channels as built, removing regions past the dichroics passbands

@@ -6,7 +6,10 @@ import requests
 from astropy.table import Table
 from gaiaxpy import calibrate
 from scipy import interpolate
-from scipy.integrate import simps
+try:
+    from scipy.integrate import simps
+except ImportError:
+    from scipy.integrate import simpson as simps
 
 from lvmdrp.core.spectrum1d import Spectrum1D
 

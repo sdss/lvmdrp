@@ -5,6 +5,7 @@ try:
 except ImportError:
     pass
 import numpy
+import bottleneck as bn
 
 description = "Provides Methods to make some plots"
 
@@ -141,8 +142,8 @@ def flexurePatternTarget_drp(trace_log, disp_log, figure, object, scale="200"):
         ax.arrow(
             500,
             1000,
-            numpy.median(obj_disp_offset[select_disp][0]) * scale,
-            numpy.median(obj_trace_offset[select_obj][0]) * scale,
+            bn.median(obj_disp_offset[select_disp][0]) * scale,
+            bn.median(obj_trace_offset[select_obj][0]) * scale,
             width=5,
             head_width=20,
             head_length=10,
