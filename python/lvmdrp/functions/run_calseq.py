@@ -1374,9 +1374,7 @@ def create_dome_fiberflats(mjd, expnums_ldls, expnums_qrtz, use_longterm_cals=Tr
 
     # define master paths for target frames
     calibs = get_calib_paths(mjd, version=drpver, longterm_cals=use_longterm_cals)
-    for flavor in {"trace", "width", "wave", "lsf"}:
-        calibs[flavor] = group_calib_paths(calibs[flavor])
-
+    calibs_grp = calibs.copy()
     for channel, lamp in MASTER_CON_LAMPS.items():
         # read original combined dome flats and run extraction
         flats = frames.loc[(frames[lamp])&(frames["camera"].str.startswith(channel))]
@@ -1411,11 +1409,15 @@ def create_dome_fiberflats(mjd, expnums_ldls, expnums_qrtz, use_longterm_cals=Tr
         else:
             mflat_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="nfiberflat_dome", camera=channel)
 
+        # group calibrations in channels to build lvmFlat products
+        for flavor in {"trace", "width", "wave", "lsf"}:
+            calibs_grp[flavor] = group_calib_paths(calibs[flavor])
+
         # read calibrations
-        mcent = TraceMask.from_spectrographs(*[TraceMask.from_file(mtrace_path) for mtrace_path in calibs["trace"][channel]])
-        mwidth = TraceMask.from_spectrographs(*[TraceMask.from_file(mwidth_path) for mwidth_path in calibs["width"][channel]])
-        mwave = TraceMask.from_spectrographs(*[TraceMask.from_file(mwave_path) for mwave_path in calibs["wave"][channel]])
-        mlsf = TraceMask.from_spectrographs(*[TraceMask.from_file(mlsf_path) for mlsf_path in calibs["lsf"][channel]])
+        mcent = TraceMask.from_spectrographs(*[TraceMask.from_file(mtrace_path) for mtrace_path in calibs_grp["trace"][channel]])
+        mwidth = TraceMask.from_spectrographs(*[TraceMask.from_file(mwidth_path) for mwidth_path in calibs_grp["width"][channel]])
+        mwave = TraceMask.from_spectrographs(*[TraceMask.from_file(mwave_path) for mwave_path in calibs_grp["wave"][channel]])
+        mlsf = TraceMask.from_spectrographs(*[TraceMask.from_file(mlsf_path) for mlsf_path in calibs_grp["lsf"][channel]])
         # normalize by median fiber
         fflat = RSS(data=mamp._data, error=np.sqrt(mamp._data), mask=xflat._mask, wave_trace=mwave, lsf_trace=mlsf, header=xflat._header)
         fflat = fflat.rectify_wave(method="linear", wave_range=SPEC_CHANNELS[channel], wave_disp=0.5)
