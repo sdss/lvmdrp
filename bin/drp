@@ -229,6 +229,7 @@ cli.add_command(metacli)
 @click.option('--qrtz-threshold', type=float, default=COUNTS_THRESHOLDS["quartz"], help='count thredhols for tracing with Quartz lamp exposures')
 @click.option('--cent-ncolumns', type=int, default=140, help='number of columns to trace fiber centroids')
 @click.option('--full-ncolumns', type=int, default=40, help='number of columns to full fiber tracing')
+@click.option('-x', '--extract-md', is_flag=True, default=False, help='flag to extract metadata or use cached metadata if exist')
 @click.option('-s', '--skip-done', is_flag=True, default=False, help='flag to skip reduction steps that have already been done')
 @click.option('-c', '--clean-ancillary', is_flag=True, default=False, help='Remove ancillary paths after run')
 @click.option('--fflats-from-to', type=int, default=[None, None], nargs=2, help='Move twilight fiberflats from one MJD to another MJD')
@@ -240,7 +241,7 @@ def calibrations(mjd, mjd_list, mjd_range, reject_cr,
                  skip_dome, skip_twilight,
                  ldls_threshold, qrtz_threshold,
                  cent_ncolumns, full_ncolumns,
-                 skip_done, clean_ancillary,
+                 extract_md, skip_done, clean_ancillary,
                  fflats_from_to, nightly):
     """ Run calibration sequence reduction """
 
@@ -264,7 +265,8 @@ def calibrations(mjd, mjd_list, mjd_range, reject_cr,
                                     only_cals=only_cals,
                                     counts_thresholds={"ldls": ldls_threshold, "quartz": qrtz_threshold},
                                     cent_guess_ncolumns=cent_ncolumns, trace_full_ncolumns=full_ncolumns,
-                                    skip_done=skip_done, keep_ancillary=not clean_ancillary,
+                                    extract_metadata=extract_md, skip_done=skip_done,
+                                    keep_ancillary=not clean_ancillary,
                                     fflats_from=fflats_from if fflats_to == mjd else None)
     else:
         for mjd in mjds:
@@ -273,6 +275,7 @@ def calibrations(mjd, mjd_list, mjd_range, reject_cr,
                                     only_cals=only_cals,
                                     counts_thresholds={"ldls": ldls_threshold, "quartz": qrtz_threshold},
                                     cent_guess_ncolumns=cent_ncolumns, trace_full_ncolumns=full_ncolumns,
+                                    extract_metadata=extract_md,
                                     skip_done=skip_done, keep_ancillary=not clean_ancillary,
                                     fflats_from=fflats_from if fflats_to == mjd else None)
 

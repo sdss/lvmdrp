@@ -1702,7 +1702,8 @@ def create_wavelengths(mjd, use_longterm_cals=True, expnums=None, kind="longterm
 
 def reduce_nightly_sequence(mjd, use_longterm_cals=False, reject_cr=True, only_cals=CAL_FLAVORS,
                             counts_thresholds=COUNTS_THRESHOLDS, cent_guess_ncolumns=140, trace_full_ncolumns=40,
-                            skip_done=True, keep_ancillary=False, fflats_from=None, link_pixelmasks=True):
+                            extract_metadata=False, skip_done=True, keep_ancillary=False,
+                            fflats_from=None, link_pixelmasks=True):
     """Reduces the nightly calibration sequence:
 
     The nightly calibration sequence consists of the following exposures:
@@ -1724,6 +1725,8 @@ def reduce_nightly_sequence(mjd, use_longterm_cals=False, reject_cr=True, only_c
         Reject cosmic rays in 2D reduction, by default True
     only_cals : list, tuple or set
         Only produce this calibrations, by default {'bias', 'trace', 'wave', 'dome', 'twilight'}
+    extract_metadata : bool, optional
+        Extract or use cached metadata if exist, by default False (use cache)
     skip_done : bool
         Skip pipeline steps that have already been done
     keep_ancillary : bool
@@ -1748,7 +1751,7 @@ def reduce_nightly_sequence(mjd, use_longterm_cals=False, reject_cr=True, only_c
         raise ValueError(f"some chosen image types in 'only_cals' are not valid: {only_cals.difference(CAL_FLAVORS)}")
     log.info(f"going to produce nightly calibrations: {only_cals}")
 
-    frames, found_cals = md.get_sequence_metadata(mjd, for_cals=only_cals)
+    frames, found_cals = md.get_sequence_metadata(mjd, for_cals=only_cals, extract_metadata=extract_metadata)
 
     if "bias" in only_cals and "bias" in found_cals:
         biases, bias_expnums = choose_sequence(frames, flavor="bias", kind="nightly")
@@ -1799,6 +1802,7 @@ def reduce_longterm_sequence(mjd, use_longterm_cals=True,
                              reject_cr=True, only_cals=CAL_FLAVORS,
                              counts_thresholds=COUNTS_THRESHOLDS,
                              cent_guess_ncolumns=140, trace_full_ncolumns=40,
+                             extract_metadata=False,
                              skip_done=True, keep_ancillary=False,
                              fflats_from=None,
                              link_pixelmasks=True):
@@ -1823,6 +1827,8 @@ def reduce_longterm_sequence(mjd, use_longterm_cals=True,
         Reject cosmic rays in 2D reduction, by default True
     only_cals : list, tuple or set
         Only produce this calibrations, by default {'bias', 'trace', 'wave', 'dome', 'twilight'}
+    extract_metadata : bool, optional
+        Extract or use cached metadata if exist, by default False (use cache)
     skip_done : bool
         Skip pipeline steps that have already been done
     keep_ancillary : bool
@@ -1847,7 +1853,7 @@ def reduce_longterm_sequence(mjd, use_longterm_cals=True,
         raise ValueError(f"some chosen image types in 'only_cals' are not valid: {only_cals.difference(CAL_FLAVORS)}")
     log.info(f"going to produce long-term calibrations: {only_cals}")
 
-    frames, found_cals = md.get_sequence_metadata(mjd, for_cals=only_cals)
+    frames, found_cals = md.get_sequence_metadata(mjd, for_cals=only_cals, extract_metadata=extract_metadata)
 
     if "bias" in only_cals and "bias" in found_cals:
         biases, bias_expnums = choose_sequence(frames, flavor="bias", kind="longterm")
