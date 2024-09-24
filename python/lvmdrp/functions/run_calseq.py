@@ -1397,13 +1397,6 @@ def create_dome_fiberflats(mjd, expnums_ldls, expnums_qrtz, use_longterm_cals=Tr
             xflat_paths.append(xflat_path)
         xflat = RSS.from_spectrographs(*[RSS.from_file(xflat_path) for xflat_path in xflat_paths])
 
-        # read mamp files
-        if use_longterm_cals:
-            mamp_paths = sorted(path.expand("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mamp", camera=f"{channel}?"))
-        else:
-            mamp_paths = sorted(path.expand("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="namp", camera=f"{channel}?"))
-        mamp = TraceMask.from_spectrographs(*[TraceMask.from_file(mamp_path) for mamp_path in mamp_paths])
-
         if kind == "longterm":
             mflat_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mfiberflat_dome", camera=channel)
         else:
@@ -1419,7 +1412,7 @@ def create_dome_fiberflats(mjd, expnums_ldls, expnums_qrtz, use_longterm_cals=Tr
         mwave = TraceMask.from_spectrographs(*[TraceMask.from_file(mwave_path) for mwave_path in calibs_grp["wave"][channel]])
         mlsf = TraceMask.from_spectrographs(*[TraceMask.from_file(mlsf_path) for mlsf_path in calibs_grp["lsf"][channel]])
         # normalize by median fiber
-        fflat = RSS(data=mamp._data, error=np.sqrt(mamp._data), mask=xflat._mask, wave_trace=mwave, lsf_trace=mlsf, header=xflat._header)
+        fflat = RSS(data=xflat._data, error=xflat._error, mask=xflat._mask, wave_trace=mwave, lsf_trace=mlsf, header=xflat._header)
         fflat = fflat.rectify_wave(method="linear", wave_range=SPEC_CHANNELS[channel], wave_disp=0.5)
         median_fiber = bn.nanmedian(fflat._data, axis=0)
         fflat._data = fflat._data / median_fiber
