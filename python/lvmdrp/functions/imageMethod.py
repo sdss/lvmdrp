@@ -387,8 +387,8 @@ def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=Non
     # calculate thermal shifts
     column_shifts = image.measure_fiber_shifts(fiber_model, trace_cent, columns=columns, column_width=column_width, shift_range=shift_range, axs=axs)
     # shifts stats
-    median_shift = bn.nanmedian(column_shifts, axis=0)
-    std_shift = bn.nanstd(column_shifts, axis=0)
+    median_shift = numpy.nan_to_num(bn.nanmedian(column_shifts, axis=0))
+    std_shift = numpy.nan_to_num(bn.nanstd(column_shifts, axis=0))
     if numpy.abs(median_shift) > 0.5:
         log.warning(f"large thermal shift measured: {','.join(map(str, column_shifts))} pixels for {mjd = }, {expnum = }, {camera = }")
         image.add_header_comment(f"large thermal shift: {','.join(map(str, column_shifts))} pixels {camera = }")

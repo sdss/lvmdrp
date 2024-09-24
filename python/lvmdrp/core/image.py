@@ -748,17 +748,20 @@ class Image(Header):
         shifts = numpy.zeros(len(columns))
         select_blocks = [9]
         for j,c in enumerate(columns):
+            # collapse columns
             s1 = bn.nanmedian(ref_data[50:-50,c-column_width:c+column_width], axis=1)
             s2 = bn.nanmedian(self._data[50:-50,c-column_width:c+column_width], axis=1)
-            snr = numpy.sqrt(bn.nanmedian(self._data[50:-50,c-column_width:c+column_width], axis=1))
+            # clean remaining NaNs from masked rows
+            s2 = numpy.nan_to_num(s2)
+            snr = numpy.sqrt(s2)
             median_snr = bn.nanmedian(snr)
 
             min_snr = 5.0
             if median_snr <= min_snr:
-                comstr = f"low SNR (<={min_snr}) for thermal shift at column {c}: {median_snr:.4f}, assuming = 0.0"
+                comstr = f"low SNR (<={min_snr}) for thermal shift at column {c}: {median_snr:.4f}, assuming = NaN"
                 log.warning(comstr)
                 self.add_header_comment(comstr)
-                shifts[j] = 0.0
+                shifts[j] = numpy.nan
                 continue
 
             _, shifts[j], _ = _cross_match_float(s1, s2, numpy.array([1.0]), shift_range, gauss_window=[-3,3], min_peak_dist=5.0, ax=axs_cc[j])
