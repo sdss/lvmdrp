@@ -2743,7 +2743,7 @@ def extract_spectra(
     )
     rss.setHdrValue(
         "HIERARCH FIBER CENT SIG",
-        numpy.std(trace_mask._data) if data.size != 0 else 0,
+        bn.nanstd(trace_mask._data) if data.size != 0 else 0,
     )
     if method == "optimal":
         rss.setHdrValue(
@@ -2766,7 +2766,7 @@ def extract_spectra(
         )
         rss.setHdrValue(
             "HIERARCH FIBER WIDTH SIG",
-            numpy.std(trace_fwhm._data) if data.size != 0 else 0,
+            bn.nanstd(trace_fwhm._data) if data.size != 0 else 0,
         )
     # save extracted RSS
     log.info(f"writing extracted spectra to {os.path.basename(out_rss)}")
