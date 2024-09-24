@@ -319,6 +319,7 @@ def _cross_match_float(
         # Normalize the cross correlation
         cross_corr = cross_corr.astype(numpy.float32)
         cross_corr /= norm(stretched_signal1) * norm(obs_spec_)
+        cross_corr = numpy.nan_to_num(cross_corr)
 
         # Get the correlation shifts
         shifts = signal.correlation_lags(
