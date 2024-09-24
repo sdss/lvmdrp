@@ -43,7 +43,7 @@ from lvmdrp.core.image import (
 )
 from lvmdrp.core.plot import plt, create_subplots, plot_detrend, plot_strips, plot_image_shift, plot_fiber_thermal_shift, save_fig
 from lvmdrp.core.rss import RSS
-from lvmdrp.core.spectrum1d import Spectrum1D, _spec_from_lines, _normalize_peaks, _cross_match
+from lvmdrp.core.spectrum1d import Spectrum1D, _spec_from_lines, _cross_match
 from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.utils.hdrfix import apply_hdrfix
 from lvmdrp.utils.convert import dateobs_to_sjd, correct_sjd
@@ -379,16 +379,13 @@ def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=Non
     # generate the continuum model using the master traces only along the specific columns
     if fiber_model is None:
         fiber_model, _ = image.eval_fiber_model(trace_cent, trace_width, trace_amp=trace_amp, columns=columns, column_width=column_width)
-        fiber_model.writeFitsData("./test_model.fits")
 
     mjd = image._header["SMJD"]
     expnum = image._header["EXPOSURE"]
     camera = image._header["CCD"]
 
-    # unpack axes
-    axs_cc, axs_fb = axs
     # calculate thermal shifts
-    column_shifts = image.measure_fiber_shifts(fiber_model, columns=columns, column_width=column_width, shift_range=shift_range, axs=axs_cc)
+    column_shifts = image.measure_fiber_shifts(fiber_model, trace_cent, columns=columns, column_width=column_width, shift_range=shift_range, axs=axs)
     # shifts stats
     median_shift = bn.nanmedian(column_shifts, axis=0)
     std_shift = bn.nanstd(column_shifts, axis=0)
@@ -403,42 +400,6 @@ def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=Non
     trace_cent_fixed = copy(trace_cent)
     trace_cent_fixed._coeffs[:, 0] += median_shift
     trace_cent_fixed.eval_coeffs()
-
-    select_blocks = [9]
-    for j, c in enumerate(columns):
-        blocks_pos = numpy.asarray(numpy.split(trace_cent._data[:, c], 18))[select_blocks]
-        blocks_bounds = [(int(bpos.min())-5, int(bpos.max())+5) for bpos in blocks_pos]
-
-        for i, (bmin, bmax) in enumerate(blocks_bounds):
-            x = numpy.arange(bmax-bmin) + i*(bmax-bmin) + 10
-            # y_models = fiber_model._data[bmin:bmax,c-column_width:c+column_width]
-            y_model = bn.nanmedian(fiber_model._data[bmin:bmax,c-column_width:c+column_width], axis=1)
-            y_data = bn.nanmedian(image._data[bmin:bmax, c-column_width:c+column_width], axis=1)
-            snr = numpy.sqrt(y_data.mean())
-            y_model = _normalize_peaks(y_model, min_peak_dist=5.0)
-            y_data = _normalize_peaks(y_data, min_peak_dist=5.0)
-            # axs_fib[j].step(x, y_models * norm, color="0.7", lw=0.7, alpha=0.3)
-            axs_fb[j].step(x, y_data, color="0.2", lw=1.5, label="data" if i == 0 else None)
-            axs_fb[j].step(x, y_model, color="tab:blue", lw=1, label="model" if i == 0 else None)
-            axs_fb[j].step(x+column_shifts[j], numpy.interp(x+column_shifts[j], x, y_model), color="tab:red", lw=1, label="corr. model" if i == 0 else None)
-        axs_fb[j].set_title(f"measured shift {column_shifts[j]:.4f} pixel @ column {c} with SNR = {snr:.2f}")
-        axs_fb[j].set_ylim(-0.05, 1.3)
-    axs_fb[0].legend(loc=1, frameon=False, ncols=3)
-
-    # deltas = TraceMask(data=numpy.zeros_like(trace_cent._data), mask=numpy.ones_like(trace_cent._data, dtype=bool))
-    # deltas._data[:, columns] = column_shifts
-    # deltas._mask[:, columns] = False
-    # deltas.fit_polynomial(deg=4)
-
-    # # fig, ax = create_subplots(to_display=True, figsize=(15,5))
-    # # ax.plot(deltas._data[:, columns]-column_shifts, ".k")
-
-    # trace_cent_fixed = copy(trace_cent)
-    # for ifiber in range(trace_cent._data.shape[0]):
-    #     poly_trace = numpy.polynomial.Polynomial(trace_cent._coeffs[ifiber])
-    #     poly_deltas = numpy.polynomial.Polynomial(deltas._coeffs[ifiber])
-    #     trace_cent_fixed._coeffs[ifiber] = (poly_trace + poly_deltas).coef
-    # trace_cent_fixed.eval_coeffs()
 
     return trace_cent_fixed, column_shifts, fiber_model
 

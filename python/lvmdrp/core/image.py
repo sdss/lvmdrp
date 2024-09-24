@@ -23,7 +23,7 @@ from lvmdrp.core.fit_profile import gaussians, Gaussians
 from lvmdrp.core.apertures import Apertures
 from lvmdrp.core.header import Header
 from lvmdrp.core.tracemask import TraceMask
-from lvmdrp.core.spectrum1d import Spectrum1D, _cross_match_float, _cross_match, _spec_from_lines
+from lvmdrp.core.spectrum1d import Spectrum1D, _normalize_peaks, _cross_match_float, _cross_match, _spec_from_lines
 
 from cextern.fast_median.fast_median import fast_median_filter_2d
 
@@ -714,7 +714,7 @@ class Image(Header):
         '''
         self._header.append(('COMMENT', comstr), bottom=True)
 
-    def measure_fiber_shifts(self, ref_image, columns=[500, 1000, 1500, 2000, 2500, 3000], column_width=25, shift_range=[-5,5], axs=None):
+    def measure_fiber_shifts(self, ref_image, trace_cent, columns=[500, 1000, 1500, 2000, 2500, 3000], column_width=25, shift_range=[-5,5], axs=None):
         '''Measure the (thermal, flexure, ...) shift between the fiber (traces) in 2 detrended images in the y (cross dispersion) direction.
 
         Uses cross-correlations between (medians of a number of) columns to determine
@@ -742,20 +742,42 @@ class Image(Header):
         elif isinstance(ref_image, numpy.ndarray):
             ref_data = ref_image
 
+        # unpack axes
+        axs_cc, axs_fb = axs
+
         shifts = numpy.zeros(len(columns))
+        select_blocks = [9]
         for j,c in enumerate(columns):
             s1 = bn.nanmedian(ref_data[50:-50,c-column_width:c+column_width], axis=1)
             s2 = bn.nanmedian(self._data[50:-50,c-column_width:c+column_width], axis=1)
             snr = numpy.sqrt(bn.nanmedian(self._data[50:-50,c-column_width:c+column_width], axis=1))
+            median_snr = bn.nanmedian(snr)
 
             min_snr = 5.0
-            if bn.nanmedian(snr) > min_snr:
-                _, shifts[j], _ = _cross_match_float(s1, s2, numpy.array([1.0]), shift_range, gauss_window=[-3,3], min_peak_dist=5.0, ax=axs[j])
-            else:
-                comstr = f"low SNR (<={min_snr}) for thermal shift at column {c}: {bn.nanmedian(snr):.4f}, assuming = 0.0"
+            if median_snr <= min_snr:
+                comstr = f"low SNR (<={min_snr}) for thermal shift at column {c}: {median_snr:.4f}, assuming = 0.0"
                 log.warning(comstr)
                 self.add_header_comment(comstr)
                 shifts[j] = 0.0
+                continue
+
+            _, shifts[j], _ = _cross_match_float(s1, s2, numpy.array([1.0]), shift_range, gauss_window=[-3,3], min_peak_dist=5.0, ax=axs_cc[j])
+
+            blocks_pos = numpy.asarray(numpy.split(trace_cent._data[:, c], 18))[select_blocks]
+            blocks_bounds = [(int(bpos.min())-5, int(bpos.max())+5) for bpos in blocks_pos]
+
+            for i, (bmin, bmax) in enumerate(blocks_bounds):
+                x = numpy.arange(bmax-bmin) + i*(bmax-bmin) + 10
+                y_model = bn.nanmedian(ref_data[bmin:bmax, c-column_width:c+column_width], axis=1)
+                y_data = bn.nanmedian(self._data[bmin:bmax, c-column_width:c+column_width], axis=1)
+                y_model = _normalize_peaks(y_model, min_peak_dist=5.0)
+                y_data = _normalize_peaks(y_data, min_peak_dist=5.0)
+                axs_fb[j].step(x, y_data, color="0.2", lw=1.5, label="data" if i == 0 else None)
+                axs_fb[j].step(x, y_model, color="tab:blue", lw=1, label="model" if i == 0 else None)
+                axs_fb[j].step(x+shifts[j], numpy.interp(x+shifts[j], x, y_model), color="tab:red", lw=1, label="corr. model" if i == 0 else None)
+            axs_fb[j].set_title(f"measured shift {shifts[j]:.4f} pixel @ column {c} with SNR = {median_snr:.2f}")
+            axs_fb[j].set_ylim(-0.05, 1.3)
+        axs_fb[0].legend(loc=1, frameon=False, ncols=3)
 
         return shifts
 
