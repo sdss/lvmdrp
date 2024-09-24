@@ -471,6 +471,16 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
     # Determine the wavelength solution
     log.info(f"fitting wavelength using {poly_disp}-deg polynomials")
 
+    if kind_disp not in ["poly", "legendre", "chebyshev"]:
+        log.warning(("invalid polynomial kind " f"'{kind_disp = }'. Falling back to 'poly'"))
+        arc.add_header_comment("invalid polynomial kind " f"'{kind_disp = }'. Falling back to 'poly'")
+    if kind_disp == "poly":
+        wave_cls = polynomial.Polynomial
+    elif kind_disp == "legendre":
+        wave_cls = polynomial.Legendre
+    elif kind_disp == "chebyshev":
+        wave_cls = polynomial.Chebyshev
+
     # Iterate over the fibers
     good_fibers = numpy.ones(len(fibers), dtype="bool")
     for i in fibers:
@@ -480,16 +490,6 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
             arc.add_header_comment(f"fiber {i} has {good_lines.sum()} (< {poly_disp + 1 = }) good lines")
             good_fibers[i] = False
             continue
-
-        if kind_disp not in ["poly", "legendre", "chebyshev"]:
-            log.warning(("invalid polynomial kind " f"'{kind_disp = }'. Falling back to 'poly'"))
-            arc.add_header_comment("invalid polynomial kind " f"'{kind_disp = }'. Falling back to 'poly'")
-        if kind_disp == "poly":
-            wave_cls = polynomial.Polynomial
-        elif kind_disp == "legendre":
-            wave_cls = polynomial.Legendre
-        elif kind_disp == "chebyshev":
-            wave_cls = polynomial.Chebyshev
 
         wave_poly = wave_cls.fit(cent_wave[i, good_lines], ref_lines[good_lines], deg=poly_disp)
 
@@ -503,11 +503,23 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
         f"({bn.nanmedian(wave_rms[:,None]/numpy.diff(wave_sol, axis=1)):g} pix)"
     )
 
+    # Determine LSF solution
+    log.info(f"fitting LSF solutions using {poly_fwhm}-deg polynomials")
+
+    if kind_fwhm not in ["poly", "legendre", "chebyshev"]:
+        log.warning(f"invalid polynomial kind '{kind_fwhm = }'. Falling back to 'poly'")
+        arc.add_header_comment(f"invalid polynomial kind '{kind_fwhm = }'. Falling back to 'poly'")
+        kind_fwhm = "poly"
+    if kind_fwhm == "poly":
+        fwhm_cls = polynomial.Polynomial
+    elif kind_fwhm == "legendre":
+        fwhm_cls = polynomial.Legendre
+    elif kind_fwhm == "chebyshev":
+        fwhm_cls = polynomial.Chebyshev
+
     # Estimate the spectral resolution pattern
     dwave = numpy.fabs(numpy.gradient(wave_sol, axis=1))
 
-    # Iterate over the fibers
-    log.info(f"fitting LSF solutions using {poly_fwhm}-deg polynomials")
     for i in fibers:
         good_lines = ~masked[i]
         if good_lines.sum() <= poly_fwhm + 1:
@@ -518,17 +530,6 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
 
         dw = numpy.interp(cent_wave[i, good_lines], arc._pixels, dwave[i])
         fwhm_wave = dw * fwhm[i, good_lines]
-
-        if kind_fwhm not in ["poly", "legendre", "chebyshev"]:
-            log.warning(f"invalid polynomial kind '{kind_fwhm = }'. Falling back to 'poly'")
-            arc.add_header_comment(f"invalid polynomial kind '{kind_fwhm = }'. Falling back to 'poly'")
-            kind_fwhm = "poly"
-        if kind_fwhm == "poly":
-            fwhm_cls = polynomial.Polynomial
-        elif kind_fwhm == "legendre":
-            fwhm_cls = polynomial.Legendre
-        elif kind_fwhm == "chebyshev":
-            fwhm_cls = polynomial.Chebyshev
 
         fwhm_poly = fwhm_cls.fit(cent_wave[i, good_lines], fwhm_wave, deg=poly_fwhm)
 
