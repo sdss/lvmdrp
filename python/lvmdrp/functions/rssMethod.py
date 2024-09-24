@@ -519,6 +519,7 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
 
     # Estimate the spectral resolution pattern
     dwave = numpy.fabs(numpy.gradient(wave_sol, axis=1))
+    fwhm_wave = numpy.ones_like(fwhm) * numpy.nan
 
     for i in fibers:
         good_lines = ~masked[i]
@@ -528,8 +529,9 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
             good_fibers[i] = False
             continue
 
+        # evaluate pixel width in measured arc line positions
         dw = numpy.interp(cent_wave[i, good_lines], arc._pixels, dwave[i])
-        fwhm_wave = dw * fwhm[i, good_lines]
+        fwhm_wave[i, good_lines] = dw * fwhm[i, good_lines]
 
         fwhm_poly = fwhm_cls.fit(cent_wave[i, good_lines], fwhm_wave, deg=poly_fwhm)
 
@@ -595,44 +597,28 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
         f"updating header and writing wavelength/LSF to '{out_wave}' and '{out_lsf}'"
     )
     arc.setHdrValue(
-        "HIERARCH PIPE DISP POLY",
-        "%d" % (numpy.abs(poly_disp)),
-        "Order of the dispersion polynomial",
+        "HIERARCH PIPE DISP POLY", poly_disp, "Order of the dispersion polynomial"
     )
     arc.setHdrValue(
-        "HIERARCH PIPE DISP RMS MEDIAN",
-        "%.4f" % (bn.median(wave_rms[good_fibers])),
-        "Median RMS of disp sol",
+        "HIERARCH PIPE DISP RMS MEDIAN", bn.nanmedian(wave_rms), "Median RMS of disp sol"
     )
     arc.setHdrValue(
-        "HIERARCH PIPE DISP RMS MIN",
-        "%.4f" % (numpy.min(wave_rms[good_fibers])),
-        "Min RMS of disp sol",
+        "HIERARCH PIPE DISP RMS MIN", bn.nanmin(wave_rms), "Min RMS of disp sol",
     )
     arc.setHdrValue(
-        "HIERARCH PIPE DISP RMS MAX",
-        "%.4f" % (numpy.max(wave_rms[good_fibers])),
-        "Max RMS of disp sol",
+        "HIERARCH PIPE DISP RMS MAX", bn.nanmax(wave_rms), "Max RMS of disp sol",
     )
     arc.setHdrValue(
-        "HIERARCH PIPE FWHM POLY",
-        "%d" % (numpy.abs(poly_fwhm)),
-        "Order of the resolution polynomial",
+        "HIERARCH PIPE FWHM POLY", poly_fwhm, "Order of the resolution polynomial",
     )
     arc.setHdrValue(
-        "HIERARCH PIPE DISP RMS MEDIAN",
-        "%.4f" % (bn.median(lsf_rms[good_fibers])),
-        "Median RMS of disp sol",
+        "HIERARCH PIPE DISP RMS MEDIAN", bn.nanmedian(lsf_rms), "Median RMS of disp sol",
     )
     arc.setHdrValue(
-        "HIERARCH PIPE DISP RMS MIN",
-        "%.4f" % (numpy.min(lsf_rms[good_fibers])),
-        "Min RMS of disp sol",
+        "HIERARCH PIPE DISP RMS MIN", bn.nanmin(lsf_rms), "Min RMS of disp sol",
     )
     arc.setHdrValue(
-        "HIERARCH PIPE DISP RMS MAX",
-        "%.4f" % (numpy.max(lsf_rms[good_fibers])),
-        "Max RMS of disp sol",
+        "HIERARCH PIPE DISP RMS MAX", bn.nanmax(lsf_rms), "Max RMS of disp sol",
     )
 
     mask = numpy.zeros(arc._data.shape, dtype=bool)
