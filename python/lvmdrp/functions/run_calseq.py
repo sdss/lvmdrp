@@ -1432,7 +1432,7 @@ def create_dome_fiberflats(mjd, expnums_ldls, expnums_qrtz, use_longterm_cals=Tr
                           cent_trace=mcent, width_trace=mwidth,
                           wave_trace=mwave, lsf_trace=mlsf,
                           superflat=fflat._data, slitmap=SLITMAP)
-        lvmflat.writeFitsData(path.full("lvm_frame", mjd=mjd, tileid=11111, drpver=drpver, expnum=expnum_str, kind=f'Flat-{channel}'))
+        lvmflat.writeFitsData(path.full("lvm_frame", mjd=mjd, tileid=11111, drpver=drpver, expnum=expnum_str, kind=f'DFlat-{channel}'))
 
 
 def create_twilight_fiberflats(mjd: int, use_longterm_cals: bool = True, expnums: List[int] = None, median_box: int = 10, niter: bool = 1000,
@@ -1533,7 +1533,7 @@ def create_twilight_fiberflats(mjd: int, use_longterm_cals: bool = True, expnums
             wflat_path = path.full("lvm_anc", drpver=drpver, kind="w", imagetype=flat.imagetyp, tileid=flat.tileid, mjd=flat.mjd, camera=channel, expnum=expnum)
             hflat_path = path.full("lvm_anc", drpver=drpver, kind="h", imagetype=flat.imagetyp, tileid=flat.tileid, mjd=flat.mjd, camera=channel, expnum=expnum)
             # gflat_path = path.full("lvm_anc", drpver=drpver, kind="g", imagetype=flat.imagetyp, tileid=flat.tileid, mjd=flat.mjd, camera=channel, expnum=expnum)
-            lvmflat_path = path.full("lvm_frame", mjd=mjd, tileid=tileid, drpver=drpver, expnum=expnum, kind=f'Flat-{channel}')
+            lvmflat_path = path.full("lvm_frame", mjd=mjd, tileid=tileid, drpver=drpver, expnum=expnum, kind=f'TFlat-{channel}')
 
             # spectrograph stack xflats
             rss_tasks.stack_spectrographs(in_rsss=xflat_paths, out_rss=xflat_path)
