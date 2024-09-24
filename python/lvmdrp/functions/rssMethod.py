@@ -709,15 +709,15 @@ def shift_wave_skylines(in_frame: str, out_frame: str, dwave: float = 8.0, skyli
     fiber_offset_mod = fiber_offset.copy()
     for spec_offset, spec in zip(numpy.split(fiber_offset, 3), [sel1, sel2, sel3]):
         mask = numpy.isfinite(spec_offset)
-        if mask.sum() <= 0.3*spec.sum():
-            log.warning(f"<30% of the fibers have good wavelength offsets measurements: {mask.sum()} fibers, assuming zero offset")
-            lvmframe.add_header_comment(f"<30% of the fibers have good wavelength offsets measurements: {mask.sum()} fibers, assuming zero offset")
+        if mask.sum() <= 0.5*spec.sum():
+            log.warning(f"<50% of the fibers have good wavelength offsets measurements: {mask.sum()} fibers, assuming zero offset")
+            lvmframe.add_header_comment(f"<50% of the fibers have good wavelength offsets measurements: {mask.sum()} fibers, assuming zero offset")
             fiber_offset_mod[spec] = 0.0
             continue
         t = numpy.linspace(
-            fiberid[spec][mask][len(fiberid[spec][mask]) // 20],
-            fiberid[spec][mask][-1 * len(fiberid[spec][mask]) // 20],
-            20
+            fiberid[spec][mask][len(fiberid[spec][mask]) // 10],
+            fiberid[spec][mask][-1 * len(fiberid[spec][mask]) // 10],
+            10
         )
         median_offset = ndimage.median_filter(spec_offset[mask], 8)
         tck = interpolate.splrep(fiberid[spec][mask], median_offset, task=-1, t=t)
