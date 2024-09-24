@@ -3,6 +3,9 @@ import numpy
 from numpy.ctypeslib import ndpointer
 from scipy.ndimage import median_filter
 
+from lvmdrp import log
+
+
 HAVE_MEDIAN_SO = False
 try:
     import platform
@@ -50,10 +53,10 @@ try:
 
     HAVE_MEDIAN_SO = True
 except Exception:
-    print(Exception)
+    log.error(Exception)
     pass
 
-print('HAVE_MEDIAN_SO ',HAVE_MEDIAN_SO)
+log.debug('HAVE_MEDIAN_SO ',HAVE_MEDIAN_SO)
 
 if HAVE_MEDIAN_SO is True:
     def fast_median_filter_2d(input, size=None):
