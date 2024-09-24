@@ -401,7 +401,7 @@ def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=Non
     trace_cent_fixed._coeffs[:, 0] += median_shift
     trace_cent_fixed.eval_coeffs()
 
-    return trace_cent_fixed, column_shifts, fiber_model
+    return trace_cent_fixed, column_shifts, median_shift, std_shift, fiber_model
 
 
 def _apply_electronic_shifts(images, out_images, drp_shifts=None, qc_shifts=None, custom_shifts=None, raw_shifts=None,
@@ -2614,14 +2614,14 @@ def extract_spectra(
 
     # fix centroids for thermal shifts
     log.info(f"measuring fiber thermal shifts @ columns: {','.join(map(str, columns))}")
-    trace_mask, shifts, _ = _fix_fiber_thermal_shifts(img, trace_mask, 2.5,
-                                                      fiber_model=fiber_model,
-                                                      trace_amp=10000,
-                                                      columns=columns,
-                                                      column_width=column_width,
-                                                      shift_range=shift_range, axs=[axs_cc, axs_fb])
+    trace_mask, shifts, median_shift, std_shift, _ = _fix_fiber_thermal_shifts(img, trace_mask, 2.5,
+                                                                               fiber_model=fiber_model,
+                                                                               trace_amp=10000,
+                                                                               columns=columns,
+                                                                               column_width=column_width,
+                                                                               shift_range=shift_range, axs=[axs_cc, axs_fb])
     # save columns measured for thermal shifts
-    plot_fiber_thermal_shift(columns, shifts, ax=ax_shift)
+    plot_fiber_thermal_shift(columns, shifts, median_shift, std_shift, ax=ax_shift)
     save_fig(fig, product_path=out_rss, to_display=display_plots, figure_path="qa", label="fiber_thermal_shifts")
 
     if method == "optimal":
@@ -2725,48 +2725,48 @@ def extract_spectra(
     rss.setHdrValue("DISPAXIS", 1)
     rss.setHdrValue(
         "HIERARCH FIBER CENT MIN",
-        bn.nanmin(trace_mask._data[rss._good_fibers]),
+        bn.nanmin(trace_mask._data),
     )
     rss.setHdrValue(
         "HIERARCH FIBER CENT MAX",
-        bn.nanmax(trace_mask._data[rss._good_fibers]),
+        bn.nanmax(trace_mask._data),
     )
     rss.setHdrValue(
         "HIERARCH FIBER CENT AVG",
-        bn.nanmean(trace_mask._data[rss._good_fibers]) if data.size != 0 else 0,
+        bn.nanmean(trace_mask._data) if data.size != 0 else 0,
     )
     rss.setHdrValue(
         "HIERARCH FIBER CENT MED",
-        bn.nanmedian(trace_mask._data[rss._good_fibers])
+        bn.nanmedian(trace_mask._data)
         if data.size != 0
         else 0,
     )
     rss.setHdrValue(
         "HIERARCH FIBER CENT SIG",
-        numpy.std(trace_mask._data[rss._good_fibers]) if data.size != 0 else 0,
+        numpy.std(trace_mask._data) if data.size != 0 else 0,
     )
     if method == "optimal":
         rss.setHdrValue(
             "HIERARCH FIBER WIDTH MIN",
-            bn.nanmin(trace_fwhm._data[rss._good_fibers]),
+            bn.nanmin(trace_fwhm._data),
         )
         rss.setHdrValue(
             "HIERARCH FIBER WIDTH MAX",
-            bn.nanmax(trace_fwhm._data[rss._good_fibers]),
+            bn.nanmax(trace_fwhm._data),
         )
         rss.setHdrValue(
             "HIERARCH FIBER WIDTH AVG",
-            bn.nanmean(trace_fwhm._data[rss._good_fibers]) if data.size != 0 else 0,
+            bn.nanmean(trace_fwhm._data) if data.size != 0 else 0,
         )
         rss.setHdrValue(
             "HIERARCH FIBER WIDTH MED",
-            bn.nanmedian(trace_fwhm._data[rss._good_fibers])
+            bn.nanmedian(trace_fwhm._data)
             if data.size != 0
             else 0,
         )
         rss.setHdrValue(
             "HIERARCH FIBER WIDTH SIG",
-            numpy.std(trace_fwhm._data[rss._good_fibers]) if data.size != 0 else 0,
+            numpy.std(trace_fwhm._data) if data.size != 0 else 0,
         )
     # save extracted RSS
     log.info(f"writing extracted spectra to {os.path.basename(out_rss)}")
