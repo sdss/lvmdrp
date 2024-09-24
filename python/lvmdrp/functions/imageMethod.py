@@ -47,6 +47,7 @@ from lvmdrp.core.spectrum1d import Spectrum1D, _spec_from_lines, _cross_match
 from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.utils.hdrfix import apply_hdrfix
 from lvmdrp.utils.convert import dateobs_to_sjd, correct_sjd
+from lvmdrp.utils.timer import Timer
 
 
 NQUADS = 4
@@ -2672,9 +2673,8 @@ def extract_spectra(
             else:
                 mask = None
         else:
-            (data, error, mask) = img.extractSpecOptimal(
-                trace_mask, trace_fwhm, plot_fig=display_plots
-            )
+            with Timer(name="extract optimal", logger=log.info):
+                (data, error, mask) = img.extractSpecOptimal(trace_mask, trace_fwhm, plot_fig=display_plots)
     elif method == "aperture":
         trace_fwhm = None
 
