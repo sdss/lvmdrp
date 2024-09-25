@@ -1397,13 +1397,6 @@ def create_dome_fiberflats(mjd, expnums_ldls, expnums_qrtz, use_longterm_cals=Tr
             xflat_paths.append(xflat_path)
         xflat = RSS.from_spectrographs(*[RSS.from_file(xflat_path) for xflat_path in xflat_paths])
 
-        # read mamp files
-        if use_longterm_cals:
-            mamp_paths = sorted(path.expand("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mamp", camera=f"{channel}?"))
-        else:
-            mamp_paths = sorted(path.expand("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="namp", camera=f"{channel}?"))
-        mamp = TraceMask.from_spectrographs(*[TraceMask.from_file(mamp_path) for mamp_path in mamp_paths])
-
         if kind == "longterm":
             mflat_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mfiberflat_dome", camera=channel)
         else:
@@ -1419,7 +1412,7 @@ def create_dome_fiberflats(mjd, expnums_ldls, expnums_qrtz, use_longterm_cals=Tr
         mwave = TraceMask.from_spectrographs(*[TraceMask.from_file(mwave_path) for mwave_path in calibs_grp["wave"][channel]])
         mlsf = TraceMask.from_spectrographs(*[TraceMask.from_file(mlsf_path) for mlsf_path in calibs_grp["lsf"][channel]])
         # normalize by median fiber
-        fflat = RSS(data=mamp._data, error=np.sqrt(mamp._data), mask=xflat._mask, wave_trace=mwave, lsf_trace=mlsf, header=xflat._header)
+        fflat = RSS(data=xflat._data, error=xflat._error, mask=xflat._mask, wave_trace=mwave, lsf_trace=mlsf, header=xflat._header)
         fflat = fflat.rectify_wave(method="linear", wave_range=SPEC_CHANNELS[channel], wave_disp=0.5)
         median_fiber = bn.nanmedian(fflat._data, axis=0)
         fflat._data = fflat._data / median_fiber
@@ -1432,7 +1425,7 @@ def create_dome_fiberflats(mjd, expnums_ldls, expnums_qrtz, use_longterm_cals=Tr
                           cent_trace=mcent, width_trace=mwidth,
                           wave_trace=mwave, lsf_trace=mlsf,
                           superflat=fflat._data, slitmap=SLITMAP)
-        lvmflat.writeFitsData(path.full("lvm_frame", mjd=mjd, tileid=11111, drpver=drpver, expnum=expnum_str, kind=f'Flat-{channel}'))
+        lvmflat.writeFitsData(path.full("lvm_frame", mjd=mjd, tileid=11111, drpver=drpver, expnum=expnum_str, kind=f'DFlat-{channel}'))
 
 
 def create_twilight_fiberflats(mjd: int, use_longterm_cals: bool = True, expnums: List[int] = None, median_box: int = 10, niter: bool = 1000,
@@ -1533,7 +1526,7 @@ def create_twilight_fiberflats(mjd: int, use_longterm_cals: bool = True, expnums
             wflat_path = path.full("lvm_anc", drpver=drpver, kind="w", imagetype=flat.imagetyp, tileid=flat.tileid, mjd=flat.mjd, camera=channel, expnum=expnum)
             hflat_path = path.full("lvm_anc", drpver=drpver, kind="h", imagetype=flat.imagetyp, tileid=flat.tileid, mjd=flat.mjd, camera=channel, expnum=expnum)
             # gflat_path = path.full("lvm_anc", drpver=drpver, kind="g", imagetype=flat.imagetyp, tileid=flat.tileid, mjd=flat.mjd, camera=channel, expnum=expnum)
-            lvmflat_path = path.full("lvm_frame", mjd=mjd, tileid=tileid, drpver=drpver, expnum=expnum, kind=f'Flat-{channel}')
+            lvmflat_path = path.full("lvm_frame", mjd=mjd, tileid=tileid, drpver=drpver, expnum=expnum, kind=f'TFlat-{channel}')
 
             # spectrograph stack xflats
             rss_tasks.stack_spectrographs(in_rsss=xflat_paths, out_rss=xflat_path)

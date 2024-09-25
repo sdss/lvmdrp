@@ -533,11 +533,11 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
         dw = numpy.interp(cent_wave[i, good_lines], arc._pixels, dwave[i])
         fwhm_wave[i, good_lines] = dw * fwhm[i, good_lines]
 
-        fwhm_poly = fwhm_cls.fit(cent_wave[i, good_lines], fwhm_wave, deg=poly_fwhm)
+        fwhm_poly = fwhm_cls.fit(cent_wave[i, good_lines], fwhm_wave[i, good_lines], deg=poly_fwhm)
 
         lsf_coeffs[i, :] = fwhm_poly.convert().coef
         lsf_sol[i, :] = fwhm_poly(arc._pixels)
-        lsf_rms[i] = bn.nanstd(fwhm_wave - fwhm_poly(cent_wave[i, good_lines]))
+        lsf_rms[i] = bn.nanstd(fwhm_wave[i, good_lines] - fwhm_poly(cent_wave[i, good_lines]))
 
     log.info(
         "finished LSF fitting with median "
