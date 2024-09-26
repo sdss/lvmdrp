@@ -1,6 +1,5 @@
 import os
 import numpy
-import itertools
 import bottleneck as bn
 from copy import deepcopy as copy
 from tqdm import tqdm
@@ -23,31 +22,11 @@ from lvmdrp.core.header import Header, combineHdr
 from lvmdrp.core.positionTable import PositionTable
 from lvmdrp.core.spectrum1d import Spectrum1D, find_continuum, wave_little_interpol
 from lvmdrp.core import dataproducts as dp
+from lvmdrp.core.fit_profile import polyfit2d, polyval2d
 
 from lvmdrp import __version__ as drpver
 
-def polyfit2d(x, y, z, order=3):
-    """
-    Fit 2D polynomial
-    """
-    ncols = (order + 1) ** 2
-    G = numpy.zeros((x.size, ncols))
-    ij = itertools.product(range(order + 1), range(order + 1))
-    for k, (i, j) in enumerate(ij):
-        G[:, k] = x ** i * y ** j
-    m, null, null, null = numpy.linalg.lstsq(G, z, rcond=None)
-    return m
 
-def polyval2d(x, y, m):
-    """
-    Generate 2D polynomial
-    """
-    order = int(numpy.sqrt(len(m))) - 1
-    ij = itertools.product(range(order + 1), range(order + 1))
-    z = numpy.zeros_like(x)
-    for a, (i, j) in zip(m, ij):
-        z += a * x ** i * y ** j
-    return z
 
 def _read_pixwav_map(lamp: str, camera: str, pixels=None, waves=None):
     """read pixel-wavelength map from a lamp and camera
