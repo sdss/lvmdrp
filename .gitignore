@@ -48,7 +48,8 @@ tests/*coverage*
 *.fits.gz
 *.reg
 *.csv
-
+*.dylib
+*.so
 # Mac OSX
 .DS_Store
 
@@ -62,3 +63,5 @@ de421.bsp
 
 # notebooks
 *checkpoint*
+
+gaia_cache/

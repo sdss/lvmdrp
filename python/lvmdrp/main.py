@@ -1602,7 +1602,6 @@ def reduce_2d(mjd, calibrations, expnums=None, exptime=None, cameras=CAMERAS,
 
 
 def science_reduction(expnum: int, use_longterm_cals: bool = False,
-                      skip_sky_subtraction: bool = False,
                       sky_weights: Tuple[float, float] = None,
                       fluxcal_method: str = 'STD',
                       ncpus: int = None,
@@ -1776,7 +1775,7 @@ def science_reduction(expnum: int, use_longterm_cals: bool = False,
 
         # sky subtraction
         with Timer(name='QSky '+sframe_path, logger=log.info):
-            quick_sky_subtraction(in_cframe=cframe_path, out_sframe=sframe_path, skip_subtraction=skip_sky_subtraction)
+            quick_sky_subtraction(in_cframe=cframe_path, out_sframe=sframe_path)
 
         # update the drpall summary file
         with Timer(name='DRPAll '+sframe_path, logger=log.info):

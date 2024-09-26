@@ -471,6 +471,16 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
     # Determine the wavelength solution
     log.info(f"fitting wavelength using {poly_disp}-deg polynomials")
 
+    if kind_disp not in ["poly", "legendre", "chebyshev"]:
+        log.warning(("invalid polynomial kind " f"'{kind_disp = }'. Falling back to 'poly'"))
+        arc.add_header_comment("invalid polynomial kind " f"'{kind_disp = }'. Falling back to 'poly'")
+    if kind_disp == "poly":
+        wave_cls = polynomial.Polynomial
+    elif kind_disp == "legendre":
+        wave_cls = polynomial.Legendre
+    elif kind_disp == "chebyshev":
+        wave_cls = polynomial.Chebyshev
+
     # Iterate over the fibers
     good_fibers = numpy.ones(len(fibers), dtype="bool")
     for i in fibers:
@@ -480,16 +490,6 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
             arc.add_header_comment(f"fiber {i} has {good_lines.sum()} (< {poly_disp + 1 = }) good lines")
             good_fibers[i] = False
             continue
-
-        if kind_disp not in ["poly", "legendre", "chebyshev"]:
-            log.warning(("invalid polynomial kind " f"'{kind_disp = }'. Falling back to 'poly'"))
-            arc.add_header_comment("invalid polynomial kind " f"'{kind_disp = }'. Falling back to 'poly'")
-        if kind_disp == "poly":
-            wave_cls = polynomial.Polynomial
-        elif kind_disp == "legendre":
-            wave_cls = polynomial.Legendre
-        elif kind_disp == "chebyshev":
-            wave_cls = polynomial.Chebyshev
 
         wave_poly = wave_cls.fit(cent_wave[i, good_lines], ref_lines[good_lines], deg=poly_disp)
 
@@ -503,11 +503,24 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
         f"({bn.nanmedian(wave_rms[:,None]/numpy.diff(wave_sol, axis=1)):g} pix)"
     )
 
+    # Determine LSF solution
+    log.info(f"fitting LSF solutions using {poly_fwhm}-deg polynomials")
+
+    if kind_fwhm not in ["poly", "legendre", "chebyshev"]:
+        log.warning(f"invalid polynomial kind '{kind_fwhm = }'. Falling back to 'poly'")
+        arc.add_header_comment(f"invalid polynomial kind '{kind_fwhm = }'. Falling back to 'poly'")
+        kind_fwhm = "poly"
+    if kind_fwhm == "poly":
+        fwhm_cls = polynomial.Polynomial
+    elif kind_fwhm == "legendre":
+        fwhm_cls = polynomial.Legendre
+    elif kind_fwhm == "chebyshev":
+        fwhm_cls = polynomial.Chebyshev
+
     # Estimate the spectral resolution pattern
     dwave = numpy.fabs(numpy.gradient(wave_sol, axis=1))
+    fwhm_wave = numpy.ones_like(fwhm) * numpy.nan
 
-    # Iterate over the fibers
-    log.info(f"fitting LSF solutions using {poly_fwhm}-deg polynomials")
     for i in fibers:
         good_lines = ~masked[i]
         if good_lines.sum() <= poly_fwhm + 1:
@@ -516,25 +529,15 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
             good_fibers[i] = False
             continue
 
+        # evaluate pixel width in measured arc line positions
         dw = numpy.interp(cent_wave[i, good_lines], arc._pixels, dwave[i])
-        fwhm_wave = dw * fwhm[i, good_lines]
+        fwhm_wave[i, good_lines] = dw * fwhm[i, good_lines]
 
-        if kind_fwhm not in ["poly", "legendre", "chebyshev"]:
-            log.warning(f"invalid polynomial kind '{kind_fwhm = }'. Falling back to 'poly'")
-            arc.add_header_comment(f"invalid polynomial kind '{kind_fwhm = }'. Falling back to 'poly'")
-            kind_fwhm = "poly"
-        if kind_fwhm == "poly":
-            fwhm_cls = polynomial.Polynomial
-        elif kind_fwhm == "legendre":
-            fwhm_cls = polynomial.Legendre
-        elif kind_fwhm == "chebyshev":
-            fwhm_cls = polynomial.Chebyshev
-
-        fwhm_poly = fwhm_cls.fit(cent_wave[i, good_lines], fwhm_wave, deg=poly_fwhm)
+        fwhm_poly = fwhm_cls.fit(cent_wave[i, good_lines], fwhm_wave[i, good_lines], deg=poly_fwhm)
 
         lsf_coeffs[i, :] = fwhm_poly.convert().coef
         lsf_sol[i, :] = fwhm_poly(arc._pixels)
-        lsf_rms[i] = bn.nanstd(fwhm_wave - fwhm_poly(cent_wave[i, good_lines]))
+        lsf_rms[i] = bn.nanstd(fwhm_wave[i, good_lines] - fwhm_poly(cent_wave[i, good_lines]))
 
     log.info(
         "finished LSF fitting with median "
@@ -594,44 +597,28 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
         f"updating header and writing wavelength/LSF to '{out_wave}' and '{out_lsf}'"
     )
     arc.setHdrValue(
-        "HIERARCH PIPE DISP POLY",
-        "%d" % (numpy.abs(poly_disp)),
-        "Order of the dispersion polynomial",
+        "HIERARCH PIPE DISP POLY", poly_disp, "Order of the dispersion polynomial"
     )
     arc.setHdrValue(
-        "HIERARCH PIPE DISP RMS MEDIAN",
-        "%.4f" % (bn.median(wave_rms[good_fibers])),
-        "Median RMS of disp sol",
+        "HIERARCH PIPE DISP RMS MEDIAN", bn.nanmedian(wave_rms), "Median RMS of disp sol"
     )
     arc.setHdrValue(
-        "HIERARCH PIPE DISP RMS MIN",
-        "%.4f" % (numpy.min(wave_rms[good_fibers])),
-        "Min RMS of disp sol",
+        "HIERARCH PIPE DISP RMS MIN", bn.nanmin(wave_rms), "Min RMS of disp sol",
     )
     arc.setHdrValue(
-        "HIERARCH PIPE DISP RMS MAX",
-        "%.4f" % (numpy.max(wave_rms[good_fibers])),
-        "Max RMS of disp sol",
+        "HIERARCH PIPE DISP RMS MAX", bn.nanmax(wave_rms), "Max RMS of disp sol",
     )
     arc.setHdrValue(
-        "HIERARCH PIPE FWHM POLY",
-        "%d" % (numpy.abs(poly_fwhm)),
-        "Order of the resolution polynomial",
+        "HIERARCH PIPE FWHM POLY", poly_fwhm, "Order of the resolution polynomial",
     )
     arc.setHdrValue(
-        "HIERARCH PIPE DISP RMS MEDIAN",
-        "%.4f" % (bn.median(lsf_rms[good_fibers])),
-        "Median RMS of disp sol",
+        "HIERARCH PIPE DISP RMS MEDIAN", bn.nanmedian(lsf_rms), "Median RMS of disp sol",
     )
     arc.setHdrValue(
-        "HIERARCH PIPE DISP RMS MIN",
-        "%.4f" % (numpy.min(lsf_rms[good_fibers])),
-        "Min RMS of disp sol",
+        "HIERARCH PIPE DISP RMS MIN", bn.nanmin(lsf_rms), "Min RMS of disp sol",
     )
     arc.setHdrValue(
-        "HIERARCH PIPE DISP RMS MAX",
-        "%.4f" % (numpy.max(lsf_rms[good_fibers])),
-        "Max RMS of disp sol",
+        "HIERARCH PIPE DISP RMS MAX", bn.nanmax(lsf_rms), "Max RMS of disp sol",
     )
 
     mask = numpy.zeros(arc._data.shape, dtype=bool)
@@ -722,15 +709,15 @@ def shift_wave_skylines(in_frame: str, out_frame: str, dwave: float = 8.0, skyli
     fiber_offset_mod = fiber_offset.copy()
     for spec_offset, spec in zip(numpy.split(fiber_offset, 3), [sel1, sel2, sel3]):
         mask = numpy.isfinite(spec_offset)
-        if mask.sum() <= 0.3*spec.sum():
-            log.warning(f"<30% of the fibers have good wavelength offsets measurements: {mask.sum()} fibers, assuming zero offset")
-            lvmframe.add_header_comment(f"<30% of the fibers have good wavelength offsets measurements: {mask.sum()} fibers, assuming zero offset")
+        if mask.sum() <= 0.5*spec.sum():
+            log.warning(f"<50% of the fibers have good wavelength offsets measurements: {mask.sum()} fibers, assuming zero offset")
+            lvmframe.add_header_comment(f"<50% of the fibers have good wavelength offsets measurements: {mask.sum()} fibers, assuming zero offset")
             fiber_offset_mod[spec] = 0.0
             continue
         t = numpy.linspace(
-            fiberid[spec][mask][len(fiberid[spec][mask]) // 20],
-            fiberid[spec][mask][-1 * len(fiberid[spec][mask]) // 20],
-            20
+            fiberid[spec][mask][len(fiberid[spec][mask]) // 10],
+            fiberid[spec][mask][-1 * len(fiberid[spec][mask]) // 10],
+            10
         )
         median_offset = ndimage.median_filter(spec_offset[mask], 8)
         tck = interpolate.splrep(fiberid[spec][mask], median_offset, task=-1, t=t)

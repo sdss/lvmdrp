@@ -15,7 +15,6 @@ from lvmdrp.core import fit_profile
 from lvmdrp.core import plot
 from lvmdrp.core.header import Header
 
-
 def adaptive_smooth(data, start_width, end_width):
     """
     Smooth an array with a filter that adapts in size from start_width to end_width.
@@ -227,6 +226,8 @@ def _cross_match(
 def _normalize_peaks(data, min_peak_dist):
     data_ = numpy.asarray(data).copy()
     peaks, _ = signal.find_peaks(data_, distance=min_peak_dist)
+    if peaks.size == 0:
+        return data_
     norm = numpy.interp(numpy.arange(data_.shape[0]), peaks, data_[peaks])
     data_ /= norm
     return data_
@@ -318,6 +319,7 @@ def _cross_match_float(
         # Normalize the cross correlation
         cross_corr = cross_corr.astype(numpy.float32)
         cross_corr /= norm(stretched_signal1) * norm(obs_spec_)
+        cross_corr = numpy.nan_to_num(cross_corr)
 
         # Get the correlation shifts
         shifts = signal.correlation_lags(
@@ -3460,17 +3462,28 @@ class Spectrum1D(Header):
         # construct sparse projection matrix
         fact = numpy.sqrt(2.0 * numpy.pi)
         kernel_width = 7 # should exceed 4 sigma
-        vI = []
-        vJ = []
-        vV = []
-        for xx in range(nfibers):
-            for yy in range(int(pos[xx]-kernel_width),int(pos[xx]+kernel_width)):
-                v = numpy.exp(-0.5 * ((yy-pos[xx]) / sigma[xx]) ** 2) / (fact * sigma[xx])
-                if v>0.0001:   # make non-zero and positive definite
-                    vI.append(xx)
-                    vJ.append(yy)
-                    vV.append(v / self._error[yy])
-        B = sparse.csc_matrix((vV, (vJ, vI)), shape=(self._dim, nfibers))
+        # vI = []
+        # vJ = []
+        # vV = []
+        # for xx in range(nfibers):
+        #     for yy in range(int(pos[xx]-kernel_width),int(pos[xx]+kernel_width)+1):
+        #         v = numpy.exp(-0.5 * ((yy-pos[xx]) / sigma[xx]) ** 2) / (fact * sigma[xx])
+        #         if v>=0.0000:   # make non-zero and positive definite
+        #             vI.append(xx)
+        #             vJ.append(yy)
+        #             vV.append(v / self._error[yy])
+        # B = sparse.csc_matrix((vV, (vJ, vI)), shape=(len(self._data), nfibers))
+
+        # nfibers x kernel_size
+        xx = numpy.repeat(numpy.array(range(nfibers)), 2*kernel_width+1)
+        # pixel ranges of fiber images
+        pos_t = numpy.trunc(pos)
+        yyv = numpy.linspace(pos_t-kernel_width, pos_t+kernel_width, 2*kernel_width+1, endpoint=True)
+        # nfibers x kernel_size pixel values
+        v = numpy.exp(-0.5 * ((yyv-pos) / sigma) ** 2) / (fact * sigma)
+        yyv = yyv.T.flatten()
+        v = v.T.flatten() / self._error[yyv.astype(numpy.int32)]
+        B = sparse.csc_matrix((v, (yyv, xx)), shape=(len(self._data), nfibers))
 
         # invert the projection matrix and solve
         ypixels = numpy.arange(self._data.size)
@@ -3483,9 +3496,8 @@ class Spectrum1D(Header):
         if bad_pix is not None and bn.nansum(bad_pix) > 0:
             error[bad_pix] = replace_error
 
-        # pyfits.writeto('B1.fits', B1.toarray(), overwrite=True)
+        # pyfits.writeto('B.fits', B.toarray(), overwrite=True)    
         # if plot:
-        #     plt.figure(figsize=(15, 10))
         #     plt.plot(self._data, "ok")
         #     plt.plot(numpy.dot(A * self._error[:, None], out[0]), "-r")
         #     # plt.plot(numpy.dot(A, out[0]), '-r')

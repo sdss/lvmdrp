@@ -1439,18 +1439,19 @@ def _collect_header_data(filename: str) -> dict:
                         # sci
                         'sci_ra': 'TESCIRA', 'sci_dec': 'TESCIDE', 'sci_amass': 'TESCIAM',
                         'sci_kmpos': 'TESCIKM', 'sci_focpos': 'TESCIFO',
-                        'sci_geoshadow_hgt':'GEOCORONAL SCI SHADOW_HEIGHT',
-                        'sci_moon_alt': 'SKYMODEL SCI ALT', 'sci_moon_rho': 'SKYMODEL SCI RHO',
+                        'sci_sh_hght': 'GEOCORONAL SCI_SH_HGHT', 'sci_moon_sep': 'SKYMODEL SCI_RHO',
                         # skye
                         'skye_ra': 'TESKYERA', 'skye_dec': 'TESKYEDE', 'skye_amass': 'TESKYEAM',
                         'skye_kmpos': 'TESKYEKM', 'skye_focpos': 'TESKYEFO', 'skye_name': 'SKYENAME',
-                        'skye_geoshadow_hgt':'GEOCORONAL SKYE SHADOW_HEIGHT',
-                        'skye_moon_alt': 'SKYMODEL SKYE ALT', 'skye_moon_rho': 'SKYMODEL SKYE RHO',
+                        'skye_sh_hght': 'GEOCORONAL SKYE_SH_HGHT', 'skye_moon_sep': 'SKYMODEL SKYE_RHO',
                         # skyw
                         'skyw_ra': 'TESKYWRA', 'skyw_dec': 'TESKYWDE', 'skyw_amass': 'TESKYWAM',
                         'skyw_kmpos': 'TESKYWKM', 'skyw_focpos': 'TESKYWFO', 'skyw_name': 'SKYWNAME',
-                        'skyw_geoshadow_hgt':'GEOCORONAL SKYW SHADOW_HEIGHT',
-                        'skyw_moon_alt': 'SKYMODEL SKYW ALT', 'skyw_moon_rho': 'SKYMODEL SKYW RHO'
+                        'skyw_sh_hght': 'GEOCORONAL SKYW_SH_HGHT', 'skyw_moon_sep': 'SKYMODEL SKYW_RHO',
+                        # sky parameters 
+                        'moon_ra': 'SKYMODEL MOON_RA', 'moon_dec': 'SKYMODEL MOON_DEC',
+                        'moon_phase': 'SKYMODEL MOON_PHASE', 'moon_fli': 'SKYMODEL MOON_FLI',
+                        'sun_alt': 'SKYMODEL SUNALT', 'moon_alt': 'SKYMODEL MOONALT'
                         }
 
     with fits.open(filename) as hdulist:
@@ -1514,7 +1515,7 @@ def update_summary_file(filename: str, tileid: int = None, mjd: int = None, expn
     # explicitly set some column dtypes to try and handle cases with null data
     # sci, skye, skye keys
     tels = {'sci', 'skye', 'skyw'}
-    keys = {'ra', 'dec', 'amass', 'kmpos', 'focpos', 'geoshadow_hgt', 'moon_alt', 'moon_rho'}
+    keys = {'ra', 'dec', 'amass', 'kmpos', 'focpos'}
     dtypes = {f'{i}_{j}': 'float64' for i, j in itertools.product(tels, keys)}
     dtypes['calib_mjd'] = 'int64'
     df = df.astype(dtypes)

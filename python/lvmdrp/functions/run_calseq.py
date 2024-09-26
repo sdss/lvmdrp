@@ -1374,9 +1374,7 @@ def create_dome_fiberflats(mjd, expnums_ldls, expnums_qrtz, use_longterm_cals=Tr
 
     # define master paths for target frames
     calibs = get_calib_paths(mjd, version=drpver, longterm_cals=use_longterm_cals)
-    for flavor in {"trace", "width", "wave", "lsf"}:
-        calibs[flavor] = group_calib_paths(calibs[flavor])
-
+    calibs_grp = calibs.copy()
     for channel, lamp in MASTER_CON_LAMPS.items():
         # read original combined dome flats and run extraction
         flats = frames.loc[(frames[lamp])&(frames["camera"].str.startswith(channel))]
@@ -1399,25 +1397,22 @@ def create_dome_fiberflats(mjd, expnums_ldls, expnums_qrtz, use_longterm_cals=Tr
             xflat_paths.append(xflat_path)
         xflat = RSS.from_spectrographs(*[RSS.from_file(xflat_path) for xflat_path in xflat_paths])
 
-        # read mamp files
-        if use_longterm_cals:
-            mamp_paths = sorted(path.expand("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mamp", camera=f"{channel}?"))
-        else:
-            mamp_paths = sorted(path.expand("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="namp", camera=f"{channel}?"))
-        mamp = TraceMask.from_spectrographs(*[TraceMask.from_file(mamp_path) for mamp_path in mamp_paths])
-
         if kind == "longterm":
             mflat_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mfiberflat_dome", camera=channel)
         else:
             mflat_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="nfiberflat_dome", camera=channel)
 
+        # group calibrations in channels to build lvmFlat products
+        for flavor in {"trace", "width", "wave", "lsf"}:
+            calibs_grp[flavor] = group_calib_paths(calibs[flavor])
+
         # read calibrations
-        mcent = TraceMask.from_spectrographs(*[TraceMask.from_file(mtrace_path) for mtrace_path in calibs["trace"][channel]])
-        mwidth = TraceMask.from_spectrographs(*[TraceMask.from_file(mwidth_path) for mwidth_path in calibs["width"][channel]])
-        mwave = TraceMask.from_spectrographs(*[TraceMask.from_file(mwave_path) for mwave_path in calibs["wave"][channel]])
-        mlsf = TraceMask.from_spectrographs(*[TraceMask.from_file(mlsf_path) for mlsf_path in calibs["lsf"][channel]])
+        mcent = TraceMask.from_spectrographs(*[TraceMask.from_file(mtrace_path) for mtrace_path in calibs_grp["trace"][channel]])
+        mwidth = TraceMask.from_spectrographs(*[TraceMask.from_file(mwidth_path) for mwidth_path in calibs_grp["width"][channel]])
+        mwave = TraceMask.from_spectrographs(*[TraceMask.from_file(mwave_path) for mwave_path in calibs_grp["wave"][channel]])
+        mlsf = TraceMask.from_spectrographs(*[TraceMask.from_file(mlsf_path) for mlsf_path in calibs_grp["lsf"][channel]])
         # normalize by median fiber
-        fflat = RSS(data=mamp._data, error=np.sqrt(mamp._data), mask=xflat._mask, wave_trace=mwave, lsf_trace=mlsf, header=xflat._header)
+        fflat = RSS(data=xflat._data, error=xflat._error, mask=xflat._mask, wave_trace=mwave, lsf_trace=mlsf, header=xflat._header)
         fflat = fflat.rectify_wave(method="linear", wave_range=SPEC_CHANNELS[channel], wave_disp=0.5)
         median_fiber = bn.nanmedian(fflat._data, axis=0)
         fflat._data = fflat._data / median_fiber
@@ -1430,7 +1425,7 @@ def create_dome_fiberflats(mjd, expnums_ldls, expnums_qrtz, use_longterm_cals=Tr
                           cent_trace=mcent, width_trace=mwidth,
                           wave_trace=mwave, lsf_trace=mlsf,
                           superflat=fflat._data, slitmap=SLITMAP)
-        lvmflat.writeFitsData(path.full("lvm_frame", mjd=mjd, tileid=11111, drpver=drpver, expnum=expnum_str, kind=f'Flat-{channel}'))
+        lvmflat.writeFitsData(path.full("lvm_frame", mjd=mjd, tileid=11111, drpver=drpver, expnum=expnum_str, kind=f'DFlat-{channel}'))
 
 
 def create_twilight_fiberflats(mjd: int, use_longterm_cals: bool = True, expnums: List[int] = None, median_box: int = 10, niter: bool = 1000,
@@ -1531,7 +1526,7 @@ def create_twilight_fiberflats(mjd: int, use_longterm_cals: bool = True, expnums
             wflat_path = path.full("lvm_anc", drpver=drpver, kind="w", imagetype=flat.imagetyp, tileid=flat.tileid, mjd=flat.mjd, camera=channel, expnum=expnum)
             hflat_path = path.full("lvm_anc", drpver=drpver, kind="h", imagetype=flat.imagetyp, tileid=flat.tileid, mjd=flat.mjd, camera=channel, expnum=expnum)
             # gflat_path = path.full("lvm_anc", drpver=drpver, kind="g", imagetype=flat.imagetyp, tileid=flat.tileid, mjd=flat.mjd, camera=channel, expnum=expnum)
-            lvmflat_path = path.full("lvm_frame", mjd=mjd, tileid=tileid, drpver=drpver, expnum=expnum, kind=f'Flat-{channel}')
+            lvmflat_path = path.full("lvm_frame", mjd=mjd, tileid=tileid, drpver=drpver, expnum=expnum, kind=f'TFlat-{channel}')
 
             # spectrograph stack xflats
             rss_tasks.stack_spectrographs(in_rsss=xflat_paths, out_rss=xflat_path)
@@ -1700,7 +1695,8 @@ def create_wavelengths(mjd, use_longterm_cals=True, expnums=None, kind="longterm
 
 def reduce_nightly_sequence(mjd, use_longterm_cals=False, reject_cr=True, only_cals=CAL_FLAVORS,
                             counts_thresholds=COUNTS_THRESHOLDS, cent_guess_ncolumns=140, trace_full_ncolumns=40,
-                            skip_done=True, keep_ancillary=False, fflats_from=None, link_pixelmasks=True):
+                            extract_metadata=False, skip_done=True, keep_ancillary=False,
+                            fflats_from=None, link_pixelmasks=True):
     """Reduces the nightly calibration sequence:
 
     The nightly calibration sequence consists of the following exposures:
@@ -1722,6 +1718,8 @@ def reduce_nightly_sequence(mjd, use_longterm_cals=False, reject_cr=True, only_c
         Reject cosmic rays in 2D reduction, by default True
     only_cals : list, tuple or set
         Only produce this calibrations, by default {'bias', 'trace', 'wave', 'dome', 'twilight'}
+    extract_metadata : bool, optional
+        Extract or use cached metadata if exist, by default False (use cache)
     skip_done : bool
         Skip pipeline steps that have already been done
     keep_ancillary : bool
@@ -1746,7 +1744,7 @@ def reduce_nightly_sequence(mjd, use_longterm_cals=False, reject_cr=True, only_c
         raise ValueError(f"some chosen image types in 'only_cals' are not valid: {only_cals.difference(CAL_FLAVORS)}")
     log.info(f"going to produce nightly calibrations: {only_cals}")
 
-    frames, found_cals = md.get_sequence_metadata(mjd, for_cals=only_cals)
+    frames, found_cals = md.get_sequence_metadata(mjd, for_cals=only_cals, extract_metadata=extract_metadata)
 
     if "bias" in only_cals and "bias" in found_cals:
         biases, bias_expnums = choose_sequence(frames, flavor="bias", kind="nightly")
@@ -1797,6 +1795,7 @@ def reduce_longterm_sequence(mjd, use_longterm_cals=True,
                              reject_cr=True, only_cals=CAL_FLAVORS,
                              counts_thresholds=COUNTS_THRESHOLDS,
                              cent_guess_ncolumns=140, trace_full_ncolumns=40,
+                             extract_metadata=False,
                              skip_done=True, keep_ancillary=False,
                              fflats_from=None,
                              link_pixelmasks=True):
@@ -1821,6 +1820,8 @@ def reduce_longterm_sequence(mjd, use_longterm_cals=True,
         Reject cosmic rays in 2D reduction, by default True
     only_cals : list, tuple or set
         Only produce this calibrations, by default {'bias', 'trace', 'wave', 'dome', 'twilight'}
+    extract_metadata : bool, optional
+        Extract or use cached metadata if exist, by default False (use cache)
     skip_done : bool
         Skip pipeline steps that have already been done
     keep_ancillary : bool
@@ -1845,7 +1846,7 @@ def reduce_longterm_sequence(mjd, use_longterm_cals=True,
         raise ValueError(f"some chosen image types in 'only_cals' are not valid: {only_cals.difference(CAL_FLAVORS)}")
     log.info(f"going to produce long-term calibrations: {only_cals}")
 
-    frames, found_cals = md.get_sequence_metadata(mjd, for_cals=only_cals)
+    frames, found_cals = md.get_sequence_metadata(mjd, for_cals=only_cals, extract_metadata=extract_metadata)
 
     if "bias" in only_cals and "bias" in found_cals:
         biases, bias_expnums = choose_sequence(frames, flavor="bias", kind="longterm")

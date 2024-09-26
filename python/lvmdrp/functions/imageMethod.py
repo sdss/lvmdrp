@@ -43,10 +43,11 @@ from lvmdrp.core.image import (
 )
 from lvmdrp.core.plot import plt, create_subplots, plot_detrend, plot_strips, plot_image_shift, plot_fiber_thermal_shift, save_fig
 from lvmdrp.core.rss import RSS
-from lvmdrp.core.spectrum1d import Spectrum1D, _spec_from_lines, _normalize_peaks, _cross_match
+from lvmdrp.core.spectrum1d import Spectrum1D, _spec_from_lines, _cross_match
 from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.utils.hdrfix import apply_hdrfix
 from lvmdrp.utils.convert import dateobs_to_sjd, correct_sjd
+from lvmdrp.utils.timer import Timer
 
 
 NQUADS = 4
@@ -379,19 +380,16 @@ def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=Non
     # generate the continuum model using the master traces only along the specific columns
     if fiber_model is None:
         fiber_model, _ = image.eval_fiber_model(trace_cent, trace_width, trace_amp=trace_amp, columns=columns, column_width=column_width)
-        fiber_model.writeFitsData("./test_model.fits")
 
     mjd = image._header["SMJD"]
     expnum = image._header["EXPOSURE"]
     camera = image._header["CCD"]
 
-    # unpack axes
-    axs_cc, axs_fb = axs
     # calculate thermal shifts
-    column_shifts = image.measure_fiber_shifts(fiber_model, columns=columns, column_width=column_width, shift_range=shift_range, axs=axs_cc)
+    column_shifts = image.measure_fiber_shifts(fiber_model, trace_cent, columns=columns, column_width=column_width, shift_range=shift_range, axs=axs)
     # shifts stats
-    median_shift = bn.nanmedian(column_shifts, axis=0)
-    std_shift = bn.nanstd(column_shifts, axis=0)
+    median_shift = numpy.nan_to_num(bn.nanmedian(column_shifts, axis=0))
+    std_shift = numpy.nan_to_num(bn.nanstd(column_shifts, axis=0))
     if numpy.abs(median_shift) > 0.5:
         log.warning(f"large thermal shift measured: {','.join(map(str, column_shifts))} pixels for {mjd = }, {expnum = }, {camera = }")
         image.add_header_comment(f"large thermal shift: {','.join(map(str, column_shifts))} pixels {camera = }")
@@ -404,43 +402,7 @@ def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=Non
     trace_cent_fixed._coeffs[:, 0] += median_shift
     trace_cent_fixed.eval_coeffs()
 
-    select_blocks = [9]
-    for j, c in enumerate(columns):
-        blocks_pos = numpy.asarray(numpy.split(trace_cent._data[:, c], 18))[select_blocks]
-        blocks_bounds = [(int(bpos.min())-5, int(bpos.max())+5) for bpos in blocks_pos]
-
-        for i, (bmin, bmax) in enumerate(blocks_bounds):
-            x = numpy.arange(bmax-bmin) + i*(bmax-bmin) + 10
-            # y_models = fiber_model._data[bmin:bmax,c-column_width:c+column_width]
-            y_model = bn.nanmedian(fiber_model._data[bmin:bmax,c-column_width:c+column_width], axis=1)
-            y_data = bn.nanmedian(image._data[bmin:bmax, c-column_width:c+column_width], axis=1)
-            snr = numpy.sqrt(y_data.mean())
-            y_model = _normalize_peaks(y_model, min_peak_dist=5.0)
-            y_data = _normalize_peaks(y_data, min_peak_dist=5.0)
-            # axs_fib[j].step(x, y_models * norm, color="0.7", lw=0.7, alpha=0.3)
-            axs_fb[j].step(x, y_data, color="0.2", lw=1.5, label="data" if i == 0 else None)
-            axs_fb[j].step(x, y_model, color="tab:blue", lw=1, label="model" if i == 0 else None)
-            axs_fb[j].step(x+column_shifts[j], numpy.interp(x+column_shifts[j], x, y_model), color="tab:red", lw=1, label="corr. model" if i == 0 else None)
-        axs_fb[j].set_title(f"measured shift {column_shifts[j]:.4f} pixel @ column {c} with SNR = {snr:.2f}")
-        axs_fb[j].set_ylim(-0.05, 1.3)
-    axs_fb[0].legend(loc=1, frameon=False, ncols=3)
-
-    # deltas = TraceMask(data=numpy.zeros_like(trace_cent._data), mask=numpy.ones_like(trace_cent._data, dtype=bool))
-    # deltas._data[:, columns] = column_shifts
-    # deltas._mask[:, columns] = False
-    # deltas.fit_polynomial(deg=4)
-
-    # # fig, ax = create_subplots(to_display=True, figsize=(15,5))
-    # # ax.plot(deltas._data[:, columns]-column_shifts, ".k")
-
-    # trace_cent_fixed = copy(trace_cent)
-    # for ifiber in range(trace_cent._data.shape[0]):
-    #     poly_trace = numpy.polynomial.Polynomial(trace_cent._coeffs[ifiber])
-    #     poly_deltas = numpy.polynomial.Polynomial(deltas._coeffs[ifiber])
-    #     trace_cent_fixed._coeffs[ifiber] = (poly_trace + poly_deltas).coef
-    # trace_cent_fixed.eval_coeffs()
-
-    return trace_cent_fixed, column_shifts, fiber_model
+    return trace_cent_fixed, column_shifts, median_shift, std_shift, fiber_model
 
 
 def _apply_electronic_shifts(images, out_images, drp_shifts=None, qc_shifts=None, custom_shifts=None, raw_shifts=None,
@@ -2653,14 +2615,14 @@ def extract_spectra(
 
     # fix centroids for thermal shifts
     log.info(f"measuring fiber thermal shifts @ columns: {','.join(map(str, columns))}")
-    trace_mask, shifts, _ = _fix_fiber_thermal_shifts(img, trace_mask, 2.5,
-                                                      fiber_model=fiber_model,
-                                                      trace_amp=10000,
-                                                      columns=columns,
-                                                      column_width=column_width,
-                                                      shift_range=shift_range, axs=[axs_cc, axs_fb])
+    trace_mask, shifts, median_shift, std_shift, _ = _fix_fiber_thermal_shifts(img, trace_mask, 2.5,
+                                                                               fiber_model=fiber_model,
+                                                                               trace_amp=10000,
+                                                                               columns=columns,
+                                                                               column_width=column_width,
+                                                                               shift_range=shift_range, axs=[axs_cc, axs_fb])
     # save columns measured for thermal shifts
-    plot_fiber_thermal_shift(columns, shifts, ax=ax_shift)
+    plot_fiber_thermal_shift(columns, shifts, median_shift, std_shift, ax=ax_shift)
     save_fig(fig, product_path=out_rss, to_display=display_plots, figure_path="qa", label="fiber_thermal_shifts")
 
     if method == "optimal":
@@ -2711,9 +2673,8 @@ def extract_spectra(
             else:
                 mask = None
         else:
-            (data, error, mask) = img.extractSpecOptimal(
-                trace_mask, trace_fwhm, plot_fig=display_plots
-            )
+            with Timer(name="extract optimal", logger=log.info):
+                (data, error, mask) = img.extractSpecOptimal(trace_mask, trace_fwhm, plot_fig=display_plots)
     elif method == "aperture":
         trace_fwhm = None
 
@@ -2764,48 +2725,48 @@ def extract_spectra(
     rss.setHdrValue("DISPAXIS", 1)
     rss.setHdrValue(
         "HIERARCH FIBER CENT MIN",
-        bn.nanmin(trace_mask._data[rss._good_fibers]),
+        bn.nanmin(trace_mask._data),
     )
     rss.setHdrValue(
         "HIERARCH FIBER CENT MAX",
-        bn.nanmax(trace_mask._data[rss._good_fibers]),
+        bn.nanmax(trace_mask._data),
     )
     rss.setHdrValue(
         "HIERARCH FIBER CENT AVG",
-        bn.nanmean(trace_mask._data[rss._good_fibers]) if data.size != 0 else 0,
+        bn.nanmean(trace_mask._data) if data.size != 0 else 0,
     )
     rss.setHdrValue(
         "HIERARCH FIBER CENT MED",
-        bn.nanmedian(trace_mask._data[rss._good_fibers])
+        bn.nanmedian(trace_mask._data)
         if data.size != 0
         else 0,
     )
     rss.setHdrValue(
         "HIERARCH FIBER CENT SIG",
-        numpy.std(trace_mask._data[rss._good_fibers]) if data.size != 0 else 0,
+        bn.nanstd(trace_mask._data) if data.size != 0 else 0,
     )
     if method == "optimal":
         rss.setHdrValue(
             "HIERARCH FIBER WIDTH MIN",
-            bn.nanmin(trace_fwhm._data[rss._good_fibers]),
+            bn.nanmin(trace_fwhm._data),
         )
         rss.setHdrValue(
             "HIERARCH FIBER WIDTH MAX",
-            bn.nanmax(trace_fwhm._data[rss._good_fibers]),
+            bn.nanmax(trace_fwhm._data),
         )
         rss.setHdrValue(
             "HIERARCH FIBER WIDTH AVG",
-            bn.nanmean(trace_fwhm._data[rss._good_fibers]) if data.size != 0 else 0,
+            bn.nanmean(trace_fwhm._data) if data.size != 0 else 0,
         )
         rss.setHdrValue(
             "HIERARCH FIBER WIDTH MED",
-            bn.nanmedian(trace_fwhm._data[rss._good_fibers])
+            bn.nanmedian(trace_fwhm._data)
             if data.size != 0
             else 0,
         )
         rss.setHdrValue(
             "HIERARCH FIBER WIDTH SIG",
-            numpy.std(trace_fwhm._data[rss._good_fibers]) if data.size != 0 else 0,
+            bn.nanstd(trace_fwhm._data) if data.size != 0 else 0,
         )
     # save extracted RSS
     log.info(f"writing extracted spectra to {os.path.basename(out_rss)}")
