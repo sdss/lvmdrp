@@ -52,7 +52,7 @@ from astropy.table import Table
 from astropy.io import fits
 
 from lvmdrp.core.rss import RSS, loadRSS, lvmFFrame
-from lvmdrp.core.spectrum1d import Spectrum1D
+from lvmdrp.core.spectrum1d import Spectrum1D, convolution_matrix
 import lvmdrp.core.fluxcal as fluxcal
 from lvmdrp.core.sky import get_sky_mask_uves, get_z_continuum_mask
 from lvmdrp import log
@@ -633,28 +633,40 @@ def fit_continuum_std(spectrum_wave, spectrum_flux, mask_bands=([4830,4900],), n
 
 
 def lsf_convolve(data, diff_fwhm, wave_lsf_interp):  # Initial version from Alfredo
-    fact = np.sqrt(2.0 * np.pi)
-    # mask = numpy.logical_and(mask, select)
 
-    GaussKernels = (
-            1.0
-            * np.exp(
-        -0.5
-        * (
-                (
-                        wave_lsf_interp[:, np.newaxis]
-                        - wave_lsf_interp[np.newaxis, :]
-                )
-                / np.abs(diff_fwhm[np.newaxis, :] / 2.354)
-        )
-        ** 2
-    )
-            / (fact * np.abs(diff_fwhm[np.newaxis, :] / 2.354))
-    )
-    data = np.sum(
-        data[:, np.newaxis] * GaussKernels, 0
-    ) / np.sum(GaussKernels, 0)
-    return data
+    # fact = np.sqrt(2.0 * np.pi)
+    # # mask = numpy.logical_and(mask, select)
+
+    # GaussKernels = (
+    #         1.0
+    #         * np.exp(
+    #     -0.5
+    #     * (
+    #             (
+    #                     wave_lsf_interp[:, np.newaxis]
+    #                     - wave_lsf_interp[np.newaxis, :]
+    #             )
+    #             / np.abs(diff_fwhm[np.newaxis, :] / 2.354)
+    #     )
+    #     ** 2
+    # )
+    #         / (fact * np.abs(diff_fwhm[np.newaxis, :] / 2.354))
+    # )
+    # data = np.sum(
+    #     data[:, np.newaxis] * GaussKernels, 0
+    # ) / np.sum(GaussKernels, 0)
+
+    new_data = data.copy()
+    sigmas = diff_fwhm / 2.354
+
+    # setup kernel
+    pixels = np.ceil(3 * max(sigmas))
+    pixels = np.arange(-pixels, pixels)
+    kernel = np.asarray([np.exp(-0.5 * (pixels / sigmas[iw]) ** 2) for iw in range(data.size)])
+    kernel = convolution_matrix(kernel)
+    new_data = kernel @ data
+
+    return new_data
 
 
 def calc_sensitivity_from_model(wl, obs_spec, spec_lsf, best_model='', model_to_gaia_median=1):
