@@ -40,6 +40,7 @@ from typing import List, Tuple, Dict
 from lvmdrp import log, path, __version__ as drpver
 from lvmdrp.utils import metadata as md
 from lvmdrp.utils.convert import tileid_grp
+from lvmdrp.utils.paths import get_master_mjd, get_calib_paths, group_calib_paths
 from lvmdrp.core.plot import create_subplots, save_fig
 from lvmdrp.core import dataproducts as dp
 from lvmdrp.core.constants import (
@@ -55,7 +56,7 @@ from lvmdrp.core.rss import RSS, lvmFrame
 
 from lvmdrp.functions import imageMethod as image_tasks
 from lvmdrp.functions import rssMethod as rss_tasks
-from lvmdrp.main import start_logging, get_config_options, read_fibermap, get_master_mjd, get_calib_paths, group_calib_paths, reduce_2d
+from lvmdrp.main import start_logging, get_config_options, read_fibermap, reduce_2d
 from lvmdrp.functions.run_twilights import lvmFlat, fit_fiberflat, create_lvmflat, combine_twilight_sequence
 
 
