@@ -288,9 +288,9 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3):
     n_models = len(model_names)
     log.info(f'Number of models: {n_models}')
     for i in range(n_models):
-        convolved_tmp = fits.getdata(join(model_dir, 'convolved', model_names[i]))
-        # with fits.open(join(model_dir, 'convolved', model_names[i])) as hdul:
-        #     convolved_tmp = hdul[0].data
+        # convolved_tmp = fits.getdata(join(model_dir, 'convolved', model_names[i]))
+        with fits.open(join(model_dir, 'convolved', model_names[i]), memmap=False) as hdul:
+            convolved_tmp = hdul[0].data
         model_specs_convolved_norm.append(convolved_tmp)
     model_specs_convolved_norm = np.array(model_specs_convolved_norm)
 
