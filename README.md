@@ -63,10 +63,21 @@ To install the DRP along with its dependencies, you need to run the following st
     cd lvmdrp
     ```
 
-
-3. Install the DRP package in the current python environment (see [contributing](#contributing-to-lvm-drp-development) section below for a replacement of this step):
+3. Optional, but recommended: compile c-code for better performance
 
     ```bash
+    pushd lvmdrp/python/cextern/fast_median/src
+    make
+    popd
+    ```
+    This should have created a fast_median.so (Linux) or fast_median.dylib (MacOS) in the src directory.
+    Set environment variable `LVMDRP_LIB_DIR` if you move the shared library. If you leave it in src/, no need to set this.
+    We will automate this step eventually ;-)
+
+4. Install the DRP package in the current python environment (see [contributing](#contributing-to-lvm-drp-development) section below for a replacement of this step). Make sure you're back in the lvmdrp directory.
+
+    ```bash
+    cd lvmdrp
     pip install .
     ```
 

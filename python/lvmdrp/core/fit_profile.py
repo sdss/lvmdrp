@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from copy import deepcopy
 from multiprocessing import Pool, cpu_count
+import itertools
 
 from lvmdrp.core.plot import plt
 import astropy.io.fits as pyfits
@@ -11,6 +12,29 @@ from scipy import interpolate, optimize, special
 
 
 fact = numpy.sqrt(2.0 * numpy.pi)
+
+def polyfit2d(x, y, z, order=3):
+    """
+    Fit 2D polynomial
+    """
+    ncols = (order + 1) ** 2
+    G = numpy.zeros((x.size, ncols))
+    ij = itertools.product(range(order + 1), range(order + 1))
+    for k, (i, j) in enumerate(ij):
+        G[:, k] = x ** i * y ** j
+    m, null, null, null = numpy.linalg.lstsq(G, z, rcond=None)
+    return m
+
+def polyval2d(x, y, m):
+    """
+    Generate 2D polynomial
+    """
+    order = int(numpy.sqrt(len(m))) - 1
+    ij = itertools.product(range(order + 1), range(order + 1))
+    z = numpy.zeros_like(x)
+    for a, (i, j) in zip(m, ij):
+        z += a * x ** i * y ** j
+    return z
 
 def gaussians(pars, x):
     """Gaussian models for multiple components"""
@@ -98,7 +122,11 @@ class fit_profile1D(object):
                 self.res, x0=p0, bounds=bounds, args=(x, y, sigma), max_nfev=maxfev, ftol=ftol, xtol=xtol, method="dogbox"
             )
             self._par = model.x
-            self._par[model.active_mask!=0] = numpy.nan
+
+            mask = model.active_mask!=0
+            # for i in range(self._par.size):
+            #     mask |= (self._par[i]<=bounds[0][i])|(self._par[i]>=bounds[1][i])
+            self._par[mask] = numpy.nan
         if method == "simplex":
             try:
                 model = optimize.fmin(

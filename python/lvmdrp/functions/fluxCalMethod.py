@@ -123,10 +123,15 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'STD', display_plo
     exptimes[
         (slitmap["targettype"] == "science") | (slitmap["targettype"] == "SKY")
     ] = fframe._header["EXPTIME"]
-    for std_hd in fframe._fluxcal_std.colnames:
-        exptime = fframe._header[f"{std_hd[:-3]}EXP"]
-        fiberid = fframe._header[f"{std_hd[:-3]}FIB"]
-        exptimes[slitmap["orig_ifulabel"] == fiberid] = exptime
+    if len(fframe._header["STD*EXP"]) == 0:
+        exptimes[slitmap["telescope"] == "Spec"] = fframe._header["EXPTIME"] / 12
+        log.warning(f"missing standard stars exposure time, assuming exptime = {fframe._header['EXPTIME'] / 12}s")
+        fframe.add_header_comment(f"missing standard stars exposure time, assuming exptime = {fframe._header['EXPTIME'] / 12} s")
+    else:
+        for std_hd in fframe._fluxcal_std.colnames:
+            exptime = fframe._header[f"{std_hd[:-3]}EXP"]
+            fiberid = fframe._header[f"{std_hd[:-3]}FIB"]
+            exptimes[slitmap["orig_ifulabel"] == fiberid] = exptime
 
     # apply joint sensitivity curve
     fig, ax = create_subplots(to_display=display_plots, figsize=(10, 5))

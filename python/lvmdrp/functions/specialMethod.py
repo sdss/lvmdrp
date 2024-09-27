@@ -1,6 +1,7 @@
 import numpy
 import pylab
 
+import bottleneck as bn
 from lvmdrp.core.fiberrows import FiberRows
 from lvmdrp.core.fit_profile import Exponential_constant
 from lvmdrp.core.header import Header
@@ -108,14 +109,14 @@ def extinctCAVEX_drp(
                     dates == date_in, numpy.logical_and(UThours >= 0.0, UThours <= 14.0)
                 )
                 if numpy.sum(select_time) > 0:
-                    out_av = numpy.median(av[select_time])
+                    out_av = bn.median(av[select_time])
                 else:
                     select_time = numpy.logical_or(
                         numpy.logical_and(dates == date_in, UThours > 14.0),
                         numpy.logical_and(dates == date_in + 1, UThours < 14.0),
                     )
                     if numpy.sum(select_time) > 0:
-                        out_av = numpy.median(av[select_time])
+                        out_av = bn.median(av[select_time])
                     else:
                         out_av = missing_extinct
             else:
@@ -131,7 +132,7 @@ def extinctCAVEX_drp(
                     numpy.logical_and(dates == date_max, UThours < 14.0),
                 )
                 if numpy.sum(select_time) > 0:
-                    out_av = numpy.median(av[select_time])
+                    out_av = bn.median(av[select_time])
                 else:
                     out_av = missing_extinct
 
@@ -383,14 +384,14 @@ def checkWavelengthRSS_drp(
             % (
                 line_name[i],
                 line_list[i],
-                numpy.median(cent_wave[mask_line, i]) * cdelt + crval,
-                numpy.mean(cent_wave[mask_line, i]) * cdelt + crval,
-                numpy.std(cent_wave[mask_line, i]) * cdelt,
-                numpy.median(flux[mask_line, i]),
-                numpy.std(flux[mask_line, i]),
-                numpy.median(fwhm[mask_line, i]) * cdelt,
-                numpy.mean(fwhm[mask_line, i]) * cdelt,
-                numpy.std(fwhm[mask_line, i]) * cdelt,
+                bn.median(cent_wave[mask_line, i]) * cdelt + crval,
+                bn.mean(cent_wave[mask_line, i]) * cdelt + crval,
+                bn.std(cent_wave[mask_line, i]) * cdelt,
+                bn.median(flux[mask_line, i]),
+                bn.std(flux[mask_line, i]),
+                bn.median(fwhm[mask_line, i]) * cdelt,
+                bn.mean(fwhm[mask_line, i]) * cdelt,
+                bn.std(fwhm[mask_line, i]) * cdelt,
             )
         )
 

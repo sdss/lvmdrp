@@ -151,6 +151,11 @@ class SolveWavelength:
         # read given image
         log.info(f"loading extracted RSS '{self.extracted_fits}'")
         spectra = rss.loadRSS(self.extracted_fits)
+        select = spectra._mask|np.isnan(spectra._data)
+        spectra._data[select] = 0.0
+        spectra._error[select] = np.inf
+        log.info("subtracting continuum")
+        spectra, _, _ = spectra.subtract_continuum(niter=3)
         # extract relevant metadata
         self.lamps = [lamp.lower() for lamp in ARC_LAMPS if spectra._header.get(lamp, "OFF") == "ON"]
         self.camera = spectra._header["CCD"]
@@ -225,11 +230,13 @@ class SolveWavelength:
         (self.line,) = self.ax_pix.step(
             self.xdata,
             self.ydata,
+            where="mid",
             lw=1,
             picker=True,
             pickradius=self.aperture,
             color="k",
         )
+        self.ax_pix.set_yscale("log")
 
         # fix table with cross-matching
         if self.table_exist and self.correct_lines:
@@ -246,7 +253,7 @@ class SolveWavelength:
         # create guess wavelength function
         poly = self._fit_wavelength()
         waves_guess = poly(self.xdata)
-        self.ax_wav.step(waves_guess, self.ydata, lw=1, color="k")
+        self.ax_wav.step(waves_guess, self.ydata, where="mid", lw=1, color="k")
         for _, ref_wave, name in self.reflines:
             self.ax_wav.axvline(ref_wave, lw=1, color="tab:red")
             self.ax_wav.text(
@@ -265,6 +272,7 @@ class SolveWavelength:
         self.ax_wav.set_xlim(*self.wave_range)
         self.ax_wav.set_xlabel("wavelength (A)")
         self.ax_wav.set_ylabel("counts (e-/pix)")
+        self.ax_wav.set_yscale("log")
 
         # adding known peaks
         log.info(f"displaying {self.pixmap.shape[0]} known lines (including masked)")

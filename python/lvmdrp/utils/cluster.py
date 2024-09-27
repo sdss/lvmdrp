@@ -20,7 +20,7 @@ except ImportError:
 
 
 def run_cluster(mjds: list = None, expnums: Union[list, str] = None, nodes: int = 2, ppn: int = 64, walltime: str = '24:00:00',
-                alloc: str = 'sdss-np', submit: bool = True, run_calibs: bool = False):
+                alloc: str = 'sdss-np', submit: bool = True, run_calibs: bool = False, drp_options: str = None):
     """ Submit a slurm cluster Utah job
 
     Creates the cluster job at $SLURM_SCRATCH_DIR, e.g /scratch/general/nfs1/[unid]/pbs
@@ -51,6 +51,8 @@ def run_cluster(mjds: list = None, expnums: Union[list, str] = None, nodes: int 
         Flag to submit the job or not, by default True
     run_calibs : bool, optional
         Flag to submit a job for long-term calibration reductions only, by default False (science reduction only)
+    drp_options : str, optional
+        Pass options to 'drp run' command. See drp run help to see available options
     """
 
     if not queue:
@@ -65,7 +67,7 @@ def run_cluster(mjds: list = None, expnums: Union[list, str] = None, nodes: int 
     cmd = "run"
     if run_calibs:
         expnums = None
-        cmd = "long-term-cals"
+        cmd = "calibrations"
 
     if expnums is not None:
         if isinstance(expnums, str) and os.path.isfile(expnums):
@@ -78,13 +80,13 @@ def run_cluster(mjds: list = None, expnums: Union[list, str] = None, nodes: int 
             return
         else:
             for expnum in expnums:
-                q.append(f"umask 002 && drp run -e {expnum} -c")
+                q.append(f"umask 002 && drp run -e {expnum} {drp_options}")
     else:
         # get a list of mjds
         mjds = mjds or sorted(os.listdir(os.getenv('LVM_DATA_S')))
 
         for mjd in mjds:
-            script = f"umask 002 && drp {cmd} -m {mjd} -c"
+            script = f"umask 002 && drp {cmd} -m {mjd} {drp_options}"
             q.append(script)
 
     # submit the queue

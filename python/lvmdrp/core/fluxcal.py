@@ -12,7 +12,7 @@ from scipy.integrate import simpson
 from scipy import interpolate
 import requests
 import pandas as pd
-
+import bottleneck as bn
 import os.path as path
 import pathlib
 
@@ -154,8 +154,8 @@ def mean_absolute_deviation(vals):
     Robust estimate of RMS
     - see https://en.wikipedia.org/wiki/Median_absolute_deviation
     """
-    mval = np.nanmedian(vals)
-    rms = 1.4826 * np.nanmedian(np.abs(vals - mval))
+    mval = bn.nanmedian(vals)
+    rms = 1.4826 * bn.nanmedian(np.abs(vals - mval))
     return mval, rms
     # ok=np.abs(vals-mval)<4*rms
 
@@ -347,7 +347,7 @@ def sky_flux_in_filter(cam, skyfibs, obswave, percentile=75):
 
     limidx = int(nfiber*percentile/100.0)
     skies = np.argsort(flux)[1:limidx]
-    return np.nanmedian(flux[skies])
+    return bn.nanmedian(flux[skies])
 
 
 def interpolate_mask(x, y, mask, kind="linear", fill_value=0):
