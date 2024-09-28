@@ -3481,8 +3481,8 @@ class Spectrum1D(Header):
         yyv = numpy.linspace(pos_t-kernel_width, pos_t+kernel_width, 2*kernel_width+1, endpoint=True)
         # nfibers x kernel_size pixel values
         v = numpy.exp(-0.5 * ((yyv-pos) / sigma) ** 2) / (fact * sigma)
-        yyv = yyv.T.flatten()
-        v = v.T.flatten() / self._error[yyv.astype(numpy.int32)]
+        yyv = yyv.T.ravel()
+        v = v.T.ravel() / self._error[yyv.astype(numpy.int32)]
         B = sparse.csc_matrix((v, (yyv, xx)), shape=(len(self._data), nfibers))
 
         # invert the projection matrix and solve
