@@ -1,7 +1,7 @@
 import numpy 
 from scipy.sparse import csc_array
 from scipy.signal import correlate
-
+from scipy.signal.windows import tukey
 
 def _normalize_for_template_matching(s1, s2):
     """
@@ -529,14 +529,12 @@ def _unweighted_resample(output_x,input_x,input_flux_density, extrapolate=False)
 
 def project(x1,x2):
     """
-    return a projection matrix so that arrays are related by linear interpolation
-    x1: Array with one binning
-    x2: new binning
+    return a (sparse) projection matrix so that arrays are related by linear interpolation
+    x1: Array with one binning, must be sorted in ascending order
+    x2: new binning, must be sorted in ascending order
 
     Return Pr: x1= Pr.dot(x2) in the overlap region
     """
-    #x1=numpy.sort(x1)
-    #x2=numpy.sort(x2)
     #Pr=numpy.zeros((len(x2),len(x1)))
 
     e1 = numpy.zeros(len(x1)+1)
@@ -562,7 +560,8 @@ def project(x1,x2):
         # this where obtains single e1 edge just below start of e2 bin
         emin = e2[ii]
         emax = e1hi[k]
-        if e2[ii+1] < emax : emax = e2[ii+1]
+        if e2[ii+1] < emax: 
+            emax = e2[ii+1]
         dx = (emax-emin)/(e1hi[k]-e1lo[k])
         if k.size > 0:
             R.append(ii)
@@ -572,15 +571,16 @@ def project(x1,x2):
 
         if e2[ii+1] > emax :
             # cross over to another e1 bin contributing to this e2 bin
-            l = numpy.where((e1 < e2[ii+1]) & (e1 > e1hi[k]))[0]
-            if len(l) > 0 :
+            m = numpy.where((e1 < e2[ii+1]) & (e1 > e1hi[k]))[0]
+            if len(m) > 0 :
                # several-to-one resample.  Just consider 3 bins max. case
                R.append(ii)
                C.append(k[0]+1)
                V.append(1.0)
                #Pr[ii,k[0]+1] = 1.0  # middle bin fully contained in e2
                q = k[0]+2
-            else : q = k[0]+1  # point to bin partially contained in current e2 bin
+            else: 
+                q = k[0]+1  # point to bin partially contained in current e2 bin
 
             try:
                 emin = e1lo[q]
@@ -590,7 +590,7 @@ def project(x1,x2):
                 C.append(q)
                 V.append(dx)
                 # Pr[ii,q] = dx
-            except:
+            except Exception:
                 pass
 
     #- edge:
@@ -601,15 +601,15 @@ def project(x1,x2):
         #Pr[-1,-1]=1
     return csc_array((V, (R, C)), shape=(len(x2), len(x1)), dtype=numpy.float32)
 
-def resample_project(wave,flux,outwave,ivar=None):
+def resample_project(outwave, wave, flux,ivar=None):
     """
     rebinning conserving S/N
     Algorithm is based on http://www.ast.cam.ac.uk/%7Erfc/vpfit10.2.pdf
     Appendix: B.1
 
     Args:
-    wave : original wavelength array (expected (but not limited) to be native CCD pixel wavelength grid
-    outwave: new wavelength array: expected (but not limited) to be uniform binning
+    outwave: new wavelength array
+    wave : original wavelength array
     flux : df/dx (Flux per A) sampled at x
     ivar : ivar in original binning. If not None, ivar in new binning is returned.
 
@@ -625,7 +625,6 @@ def resample_project(wave,flux,outwave,ivar=None):
     flux=flux*numpy.gradient(wave)
 
     Pr=project(wave,outwave)
-    n=len(wave)
     newflux=Pr.dot(flux)
     #- convert back to df/dx (per angstrom) sampled at outwave
     newflux/=numpy.gradient(outwave) #- per angstrom
