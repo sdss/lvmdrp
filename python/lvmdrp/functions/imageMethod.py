@@ -25,7 +25,7 @@ from tqdm import tqdm
 
 from typing import List, Tuple
 
-from lvmdrp import log, __version__ as DRPVER
+from lvmdrp import log, DRP_COMMIT, __version__ as DRPVER
 from lvmdrp.core.constants import CONFIG_PATH, SPEC_CHANNELS, ARC_LAMPS, LVM_REFERENCE_COLUMN, LVM_NBLOCKS, FIDUCIAL_PLATESCALE
 from lvmdrp.utils.decorators import skip_on_missing_input_path, drop_missing_input_paths
 from lvmdrp.utils.bitmask import QualityFlag
@@ -3365,6 +3365,8 @@ def preproc_raw_frame(
 
     # set drp tag version
     proc_img.setHdrValue("DRPVER", DRPVER, comment='data reduction pipeline software tag')
+    # set drp commit SHA
+    proc_img.setHdrValue("COMMIT", DRP_COMMIT, comment="data reduction pipeline commit HASH")
 
     # write out FITS file
     log.info(f"writing preprocessed image to {os.path.basename(out_image)}")

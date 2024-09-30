@@ -6,6 +6,7 @@ import pathlib
 from sdsstools import get_config, get_logger, get_package_version
 from tree import Tree
 from sdss_access.path import Path
+import subprocess
 
 
 NAME = 'lvmdrp'
@@ -35,3 +36,14 @@ path = setup_paths()
 
 
 __version__ = os.getenv("LVMDRP_VERSION") or get_package_version(path=__file__, package_name=NAME)
+
+
+# NOTE: taken from https://stackoverflow.com/questions/14989858/get-the-current-git-hash-in-a-python-script
+def get_git_revision_hash() -> str:
+    return subprocess.check_output(['git', 'rev-parse', 'HEAD']).decode('ascii').strip()
+
+def get_git_revision_short_hash() -> str:
+    return subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD']).decode('ascii').strip()
+
+
+DRP_COMMIT = get_git_revision_short_hash()
