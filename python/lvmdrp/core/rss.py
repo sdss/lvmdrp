@@ -3413,11 +3413,17 @@ class RSS(FiberRows):
 
         # calculate standard stars heliocentric corrections
         for istd in range(1, 15+1):
-            is_acq = self._header[f"STD{istd}ACQ"]
-            if not is_acq:
+            is_acq = self._header.get(f"STD{istd}ACQ")
+            if not is_acq or is_acq is None:
+                self._header[f"STD{istd}HRV"] = (0.0, f"Standard {istd} heliocentric vel. corr. [km/s]")
                 continue
 
-            std_obstime = Time(self._header[f"STD{istd}T0"])
+            time_str = self._header.get(f"STD{istd}T0")
+            if time_str is None:
+                self._header[f"STD{istd}HRV"] = (0.0, f"Standard {istd} heliocentric vel. corr. [km/s]")
+                continue
+
+            std_obstime = Time(time_str)
             std_ra, std_dec = self._header.get(f"STD{istd}RA", 0.0), self._header.get(f"STD{istd}DE", 0.0)
             if std_ra == 0 or std_dec == 0:
                 self._header[f"STD{istd}HRV"] = (0.0, f"Standard {istd} heliocentric vel. corr. [km/s]")
