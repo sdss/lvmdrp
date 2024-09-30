@@ -290,6 +290,9 @@ def _cross_match_float(
     best_shift = 0
     best_stretch_factor = 1
 
+    # define pixels array centered around middle part of the spectrum
+    # pixels = numpy.arange(ref_spec.size) - ref_spec.size // 2
+
     # normalize the peaks to roughly magnitude 1, so that individual very bright
     # fibers do not dominate the signal
     if normalize_spectra:
@@ -303,6 +306,7 @@ def _cross_match_float(
     for factor in stretch_factors:
         # Stretch the first signal
         stretched_signal1 = zoom(ref_spec_, factor, mode="constant", prefilter=True)
+        # stretched_signal1 = numpy.interp(pixels * factor, pixels, ref_spec_)
 
         # Make the lengths equal
         len_diff = len(obs_spec_) - len(stretched_signal1)
@@ -3496,7 +3500,7 @@ class Spectrum1D(Header):
         if bad_pix is not None and bn.nansum(bad_pix) > 0:
             error[bad_pix] = replace_error
 
-        # pyfits.writeto('B.fits', B.toarray(), overwrite=True)    
+        # pyfits.writeto('B.fits', B.toarray(), overwrite=True)
         # if plot:
         #     plt.plot(self._data, "ok")
         #     plt.plot(numpy.dot(A * self._error[:, None], out[0]), "-r")
