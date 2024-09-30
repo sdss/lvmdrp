@@ -359,7 +359,7 @@ def fit_fiberflat(in_twilight: str, out_flat: str, out_twilight: str,
     axs[2].set_ylabel("Flat-fielded flat (%)")
     axs[2].set_xlim(1, twilight._fibers)
 
-    x = (flat_twilight._data/flat_twilight._data[0]).flatten()
+    x = (flat_twilight._data/flat_twilight._data[0]).ravel()
     axs[3].axvspan(np.nanmean(x) - np.nanstd(x), np.nanmean(x) + np.nanstd(x), lw=0, alpha=0.1, color="0.2")
     axs[3].hist(x, bins=1000, range=(0.95, 1.05), color="tab:orange")
     axs[3].tick_params(labelleft=False)
