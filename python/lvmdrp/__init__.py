@@ -40,10 +40,18 @@ __version__ = os.getenv("LVMDRP_VERSION") or get_package_version(path=__file__, 
 
 # NOTE: taken from https://stackoverflow.com/questions/14989858/get-the-current-git-hash-in-a-python-script
 def get_git_revision_hash() -> str:
-    return subprocess.check_output(['git', 'rev-parse', 'HEAD']).decode('ascii').strip()
+    cwd = os.getcwd()
+    os.chdir(pathlib.Path(__file__).parent)
+    commit_hash = subprocess.check_output(['git', 'rev-parse', 'HEAD']).decode('ascii').strip()
+    os.chdir(cwd)
+    return commit_hash
 
 def get_git_revision_short_hash() -> str:
-    return subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD']).decode('ascii').strip()
+    cwd = os.getcwd()
+    os.chdir(pathlib.Path(__file__).parent)
+    commit_hash = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD']).decode('ascii').strip()
+    os.chdir(cwd)
+    return commit_hash
 
 
 DRP_COMMIT = get_git_revision_short_hash()
