@@ -281,6 +281,7 @@ def standard_sensitivity(stds, rss, GAIA_CACHE_DIR, ext, res, plot=False, width=
             continue
 
         spec = (rss._data[fibidx[0],:] - master_sky._data[fibidx[0],:])/exptime  #TODO: check exptime?
+        spec = fluxcal.interpolate_mask(w, spec, ~np.isfinite(spec), fill_value="extrapolate")
 
         # interpolate over bright sky lines
         spec = fluxcal.interpolate_mask(w, spec, m, fill_value="extrapolate")
@@ -321,6 +322,7 @@ def standard_sensitivity(stds, rss, GAIA_CACHE_DIR, ext, res, plot=False, width=
         fig = plt.figure()
         plt.plot(w, stdflux/1e-13, linewidth=2)
         plt.plot(w, spec, linewidth=1)
+        print(np.isfinite(spec).sum(), np.isfinite(spec_c).sum())
         plt.plot(w, spec_c, linewidth=1)
         plt.show()
         if plot:
@@ -614,6 +616,29 @@ def fluxcal_sci_ifu_stars(in_rss, plot=True, GAIA_CACHE_DIR=None, NSCI_MAX=15):
 
     return res_sci, mean_sci, rms_sci, rss
 
+from scipy import sparse
+
+def gaussian_convolution_matrix(sigmas, lam):
+    npix = len(lam)
+    coeff = []
+    xi = []
+    yi = []
+    for i in range(npix):
+        # xind = betw(lam - lam[i], -5 * gau[i], 5 * gau[i])
+        x1 = np.searchsorted(lam, lam[i] - 5 * sigmas[i])
+        x2 = np.searchsorted(lam, lam[i] + 5 * sigmas[i])
+        if x1 == x2:
+            continue
+
+        pos = slice(x1, x2)
+        wht = np.exp(-((lam[pos] - lam[i]) / sigmas[i])**2)
+        wht = wht / wht.sum()
+        xi.append(np.zeros(len(wht), dtype=np.int64) + i)
+        yi.append(np.arange(x1, x2))
+        coeff.append(wht)
+
+    coeff, xi, yi = [np.concatenate(_) for _ in [coeff, xi, yi]]
+    return sparse.csr_matrix((coeff, (xi, yi)))
 
 def get_bprp_convolution_matrix(w):
     '''
@@ -621,16 +646,13 @@ def get_bprp_convolution_matrix(w):
 
     Input: w numpy.ndarray of wavelengths for target spectrum
     '''
-    s = os.getenv('LVMCORE_DIR')+'/etc/Gaia_BPRP_resolution.txt'
+    s = os.getenv('LVMCORE_DIR')+'/etc/Gaia1'
     log.info(f"Reading GAIA PB-RP resolution {s}")
     txt = np.genfromtxt(s)
     l_bprp, r_bprp = txt[:, 0], txt[:, 1]
-    sigmas = 2 * l_bprp/r_bprp/2.35
+    sigmas = l_bprp/r_bprp/2.35
     sigmas = np.interp(w, l_bprp, sigmas)
-    pixels = np.ceil(2 * max(sigmas))
-    pixels = np.arange(-pixels, pixels)
-    kernel = np.asarray([np.exp(-0.5 * (pixels / sigmas[iw]) ** 2) for iw in range(w.size)])
-    return convolution_matrix(kernel)
+    return gaussian_convolution_matrix(sigmas, w) #convolution_matrix(kernel)
 
 
 def createSensFunction_drp(
