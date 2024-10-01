@@ -815,6 +815,14 @@ def create_pixel_table(in_rss: str, out_rss: str, in_waves: str, in_lsfs: str, c
     rss.set_lsf_trace(lsf_trace)
     rss.set_lsf_array()
 
+    # add calibrations used to header
+    for wave_trace, in_wave in zip(wave_traces, in_waves):
+        camera = wave_trace._header["CCD"]
+        rss.add_header_comment(f"{in_wave}, wavelength used for {camera}")
+    for lsf_trace, in_lsf in zip(lsf_traces, in_lsfs):
+        camera = lsf_trace._header["CCD"]
+        rss.add_header_comment(f"{in_lsf}, LSF used for {camera}")
+
     # set header keywords for heliocentric velocity corrections
     log.info("calculating heliocentric velocity corrections")
     helio_rvs = rss.get_helio_rv(apply_heliorv)

@@ -18,7 +18,7 @@ from lvmdrp.core.apertures import Aperture
 from lvmdrp.core.cube import Cube
 from lvmdrp.core.fiberrows import FiberRows
 from lvmdrp.core.tracemask import TraceMask
-from lvmdrp.core.header import Header, combineHdr
+from lvmdrp.core.header import Header
 from lvmdrp.core.positionTable import PositionTable
 from lvmdrp.core.spectrum1d import Spectrum1D, find_continuum, wave_little_interpol
 from lvmdrp.core import dataproducts as dp
@@ -295,8 +295,10 @@ class RSS(FiberRows):
 
         # update header
         if len(hdrs) > 0:
-            hdr_out = combineHdr(hdrs)
-            hdr_out._header["CCD"] = hdr_out._header["CCD"][0]
+            hdr_out = hdrs[0]._header.copy()
+            for hdr in hdrs[1:]:
+                hdr_out.update(hdr._header)
+            hdr_out["CCD"] = hdr_out["CCD"][0]
         else:
             hdr_out = None
 
@@ -316,7 +318,7 @@ class RSS(FiberRows):
             sky_error=sky_error_out,
             supersky=supersky_out,
             supersky_error=supersky_error_out,
-            header=hdr_out._header,
+            header=hdr_out,
             slitmap=slitmap_out,
             fluxcal_std=fluxcal_std_out,
             fluxcal_sci=fluxcal_sci_out
