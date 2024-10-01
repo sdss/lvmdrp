@@ -52,7 +52,7 @@ from astropy.table import Table
 from astropy.io import fits
 
 from lvmdrp.core.rss import RSS, loadRSS, lvmFFrame
-from lvmdrp.core.spectrum1d import Spectrum1D, convolution_matrix
+from lvmdrp.core.spectrum1d import Spectrum1D
 import lvmdrp.core.fluxcal as fluxcal
 from lvmdrp.core.sky import get_sky_mask_uves, get_z_continuum_mask
 from lvmdrp import log
@@ -243,6 +243,7 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'STD', display_plo
 
     return fframe
 
+
 def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3):
     """ Selection of the stellar atmosphere model spectra (POLLUX database, AMBRE library)
     Read all the models already convolved with Gaia LSF and normalized
@@ -272,15 +273,15 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3):
         array with conversion coefficients between model units and Gaia units
     """
 
-    model_dir = '/Users/jane/Science/LVMFluxCalib/stellar_models/'
+    models_dir = '/Users/amejia/Downloads/stellar_models/'
     telluric_file = os.path.join(ROOT_PATH, 'resources', 'telluric_lines.txt')  # wavelength regions with Telluric
     # absorptions based on KPNO data (unknown source) with a 1% transmission threshold this file is used as a mask for
     # the fit of standard stars - from Alfredo.
     # https://github.com/desihub/desispec/blob/main/py/desispec/data/arc_lines/telluric_lines.txt
     telluric_tab = Table.read(telluric_file, format='ascii.fixed_width_two_line')
 
-    model_names = [f for f in listdir(join(model_dir, 'convolved')) if
-                   isfile(join(model_dir, 'convolved', f)) and (f.lower().endswith('.fits'))]
+    model_names = [f for f in listdir(join(models_dir, 'convolved')) if
+                   isfile(join(models_dir, 'convolved', f)) and (f.lower().endswith('.fits'))]
     model_specs_convolved_norm = []
 
 
@@ -289,7 +290,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3):
     log.info(f'Number of models: {n_models}')
     for i in range(n_models):
         # convolved_tmp = fits.getdata(join(model_dir, 'convolved', model_names[i]))
-        with fits.open(join(model_dir, 'convolved', model_names[i]), memmap=False) as hdul:
+        with fits.open(join(models_dir, 'convolved', model_names[i]), memmap=False) as hdul:
             convolved_tmp = hdul[0].data
         model_specs_convolved_norm.append(convolved_tmp)
     model_specs_convolved_norm = np.array(model_specs_convolved_norm)
@@ -332,11 +333,12 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3):
         try:
             stds = fluxcal.retrieve_header_stars(rss=rss_tmp)
         except KeyError:
-            log.warning(f"no standard star metadata found in '{in_rss}', skipping sensitivity measurement")
-            rss.add_header_comment(f"no standard star metadata found in '{in_rss}', skipping sensitivity measurement")
-            rss.set_fluxcal(fluxcal=res_std, source='std')
-            rss.writeFitsData(in_rss)
-            return res_std, mean_std, rms_std, rss
+            pass
+            # log.warning(f"no standard star metadata found in '{in_rss}', skipping sensitivity measurement")
+            # rss.add_header_comment(f"no standard star metadata found in '{in_rss}', skipping sensitivity measurement")
+            # rss.set_fluxcal(fluxcal=res_std, source='std')
+            # rss.writeFitsData(in_rss)
+            # return res_std, mean_std, rms_std, rss
 
         # wavelength array
         w_tmp = rss_tmp._wave
@@ -415,6 +417,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3):
     model_to_gaia_median = []
     best_fit_models = []
     # Stitch normalized spectra in brz together
+    fig, axs = plt.subplots(len(stds), 1, figsize=(15,15), layout="constrained")
     for i in range(len(stds)):
         std_normalized_all = np.concatenate((normalized_spectra_all_bands[0][i][mask_b_norm],
                                              normalized_spectra_all_bands[1][i][mask_r_norm],
@@ -451,12 +454,17 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3):
         best_id = np.argmin(chi2)
 
         # Check the possible velocity offsets
-        rec_shift = (std_wave_all > 3900) & (std_wave_all < 4100)
+        rec_shift = (std_wave_all > 3900) & (std_wave_all < 3980)
         shift = fluxcal.derive_vecshift(normalized_std_on_gaia_cont_single[rec_shift],
                                         model_specs_convolved_norm[best_id][rec_shift], max_ampl=30)
         vel_offset_b = (shift * np.nanmedian(
             abs(std_wave_all[rec_shift] - np.roll(std_wave_all[rec_shift],1))) /
                         np.nanmedian(std_wave_all[rec_shift])) * 3e5
+
+        # NOTE: velocities are still off, refine measurements in derive_vecshift
+        axs[i].plot(std_wave_all[rec_shift], normalized_std_on_gaia_cont_single[rec_shift], color="k")
+        axs[i].plot(std_wave_all[rec_shift], model_specs_convolved_norm[best_id][rec_shift], color="r")
+        axs[i].plot(std_wave_all[rec_shift], model_specs_convolved_norm[best_id][rec_shift] * (1+vel_offset_b/3e5), color="b")
 
         rec_shift = (std_wave_all > 6500) & (std_wave_all < 6750)
         shift = fluxcal.derive_vecshift(normalized_std_on_gaia_cont_single[rec_shift],
@@ -481,7 +489,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3):
 
 
         # Conversion coefficient model to gaia units
-        with fits.open(join(model_dir, 'good_res', model_names[best_id])) as hdul:
+        with fits.open(join(models_dir, 'good_res', model_names[best_id])) as hdul:
             model_flux = hdul[0].data
             hdr = hdul[0].header
             # model_flux = best_fit_model['flux']
@@ -515,7 +523,8 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3):
         model_flux_resampled = np.interp(std_wave_all, model_wave, model_flux)
 
         # convolve model to gaia lsf
-        model_convolved_to_gaia = lsf_convolve(model_flux_resampled, gaia_lsf, std_wave_all)
+        # TODO: make sure we do this once
+        model_convolved_to_gaia = fluxcal.lsf_convolve(model_flux_resampled, gaia_lsf, std_wave_all)
         model_to_gaia = stdflux/model_convolved_to_gaia
         model_to_gaia_median.append(np.median(model_to_gaia))
 
@@ -548,7 +557,10 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3):
         # plt.xlim(6500, 8950)
         # plt.show()
 
+    fig.savefig("./test_velshifts.png")
+
     return best_fit_models, model_to_gaia_median
+
 
 def fit_continuum_std(spectrum_wave, spectrum_flux, mask_bands=([4830,4900],), niter=3, threshold=0.5, nknots=100, median_box=10, **kwargs):
     """Modified version of fit_continuum function
@@ -632,43 +644,6 @@ def fit_continuum_std(spectrum_wave, spectrum_flux, mask_bands=([4830,4900],), n
     return best_continuum, continuum_models, masked_pixels, knots
 
 
-def lsf_convolve(data, diff_fwhm, wave_lsf_interp):  # Initial version from Alfredo
-
-    # fact = np.sqrt(2.0 * np.pi)
-    # # mask = numpy.logical_and(mask, select)
-
-    # GaussKernels = (
-    #         1.0
-    #         * np.exp(
-    #     -0.5
-    #     * (
-    #             (
-    #                     wave_lsf_interp[:, np.newaxis]
-    #                     - wave_lsf_interp[np.newaxis, :]
-    #             )
-    #             / np.abs(diff_fwhm[np.newaxis, :] / 2.354)
-    #     )
-    #     ** 2
-    # )
-    #         / (fact * np.abs(diff_fwhm[np.newaxis, :] / 2.354))
-    # )
-    # data = np.sum(
-    #     data[:, np.newaxis] * GaussKernels, 0
-    # ) / np.sum(GaussKernels, 0)
-
-    new_data = data.copy()
-    sigmas = diff_fwhm / 2.354
-
-    # setup kernel
-    pixels = np.ceil(3 * max(sigmas))
-    pixels = np.arange(-pixels, pixels)
-    kernel = np.asarray([np.exp(-0.5 * (pixels / sigmas[iw]) ** 2) for iw in range(data.size)])
-    kernel = convolution_matrix(kernel)
-    new_data = kernel @ data
-
-    return new_data
-
-
 def calc_sensitivity_from_model(wl, obs_spec, spec_lsf, best_model='', model_to_gaia_median=1):
     """
     Calculate the sensitivity curves using the model spectra
@@ -679,7 +654,7 @@ def calc_sensitivity_from_model(wl, obs_spec, spec_lsf, best_model='', model_to_
     """
 
     # read the best-fit model and convolve with spectrograph LSF
-    model_dir = '/Users/jane/Science/LVMFluxCalib/stellar_models/'
+    model_dir = '/Users/amejia/Downloads/stellar_models/'
 
     with fits.open(join(model_dir, 'good_res', best_model)) as hdul:
         model_flux = hdul[0].data
@@ -693,7 +668,8 @@ def calc_sensitivity_from_model(wl, obs_spec, spec_lsf, best_model='', model_to_
     spec_lsf = np.sqrt(spec_lsf**2 - 0.3**2)  # as model spectra were already convolved with lsf=0.3, we need to account for this
 
     # # convolve model to spec lsf
-    model_convolved_spec_lsf = lsf_convolve(model_flux_resampled, spec_lsf, wl)
+    # TODO: make sure we do this once
+    model_convolved_spec_lsf = fluxcal.lsf_convolve(model_flux_resampled, spec_lsf, wl)
     sens = model_convolved_spec_lsf * model_to_gaia_median / obs_spec
 
     return sens

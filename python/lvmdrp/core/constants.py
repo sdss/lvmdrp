@@ -130,3 +130,6 @@ LVM_NBLOCKS = 18
 LVM_REFERENCE_COLUMN = 2000
 FIDUCIAL_PLATESCALE = 112.36748321030637 # Focal plane platescale in "/mm
 
+
+# stellar templates
+STELLAR_TEMP_PATH = os.path.join(os.getenv("LVM_SANDBOX"), "stellar_models")

@@ -5,7 +5,8 @@
 # @Filename: fluxcal.py
 # @License: BSD 3-Clause
 # @Copyright: SDSS-V LVM
-import matplotlib.pyplot as plt
+
+import os
 import numpy as np
 from scipy import signal
 from scipy.integrate import simpson
@@ -15,22 +16,30 @@ import pandas as pd
 import bottleneck as bn
 import os.path as path
 import pathlib
+from tqdm import tqdm
+
 
 import gaiaxpy
 from astroquery.gaia import Gaia
 
 from astropy.time import Time
+from astropy.io import fits
 from astropy.table import Table
 from astropy.coordinates import SkyCoord, EarthLocation, AltAz
 from astropy import units as u
 
 from lvmdrp import log
-from lvmdrp.core.spectrum1d import Spectrum1D
+from lvmdrp.core.constants import MASTERS_DIR
+from lvmdrp.core.tracemask import TraceMask
+from lvmdrp.core.constants import STELLAR_TEMP_PATH
+from lvmdrp.utils.paths import get_calib_paths
+from lvmdrp.core.spectrum1d import Spectrum1D, convolution_matrix
+from lvmdrp.core.rss import RSS
 
 
 def get_mean_sens_curves(sens_dir):
-    return {'b':pd.read_csv(f'{sens_dir}/mean-sens-b.csv', names=['wavelength', 'sens']), 
-            'r':pd.read_csv(f'{sens_dir}/mean-sens-r.csv', names=['wavelength', 'sens']), 
+    return {'b':pd.read_csv(f'{sens_dir}/mean-sens-b.csv', names=['wavelength', 'sens']),
+            'r':pd.read_csv(f'{sens_dir}/mean-sens-r.csv', names=['wavelength', 'sens']),
             'z':pd.read_csv(f'{sens_dir}/mean-sens-z.csv', names=['wavelength', 'sens'])}
 
 def retrieve_header_stars(rss):
@@ -140,7 +149,7 @@ def get_XP_spectra(expnum, ra_tile, dec_tile, lim_mag=14.0, n_spec=15, GAIA_CACH
     else:
         #print('reading '+GAIA_CACHE_DIR + f'/{expnum}_XP_spec.csv')
         calibrated_spectra = pd.read_pickle(GAIA_CACHE_DIR + f'/{expnum}_XP_spec.pickle')
-        
+
     # calibrated_spectra
     if(plot):
         gaiaxpy.plot_spectra(calibrated_spectra, sampling=sampling, multi=True, show_plot=True, output_path=None, legend=False)
@@ -288,7 +297,7 @@ def LVM_phot_filter(channel, w):
         return np.exp(-0.5 * ((w - 8500) / 250) ** 2)
     else:
         raise Exception(f"Unknown filter '{channel}'")
-    
+
 
 def spec_to_mAB(lam, spec, lamf, filt):
     """
@@ -331,9 +340,9 @@ def spec_to_LVM_mAB(channel, w, f):
 
 def sky_flux_in_filter(cam, skyfibs, obswave, percentile=75):
     '''
-    Given an lvmFrame, calculate the median flux in the LVM photometric system of the 
-    lowest 'percentile' of sky fibers. 
-    
+    Given an lvmFrame, calculate the median flux in the LVM photometric system of the
+    lowest 'percentile' of sky fibers.
+
     Used for sky subtraction of the photometry of stars for sci IFU self calibration.
     '''
     nfiber = skyfibs.shape[0]
@@ -372,6 +381,90 @@ def interpolate_mask(x, y, mask, kind="linear", fill_value=0):
     yy[missing_idx] = f(missing_x)
 
     return yy
+
+
+def lsf_convolve(data, diff_fwhm, wave_lsf_interp):
+    """Degrade resolution of given spectrum
+    """
+
+    new_data = data.copy()
+    sigmas = diff_fwhm / 2.354
+
+    # setup kernel
+    pixels = np.ceil(3 * max(sigmas))
+    pixels = np.arange(-pixels, pixels)
+    kernel = np.asarray([np.exp(-0.5 * (pixels / sigmas[iw]) ** 2) for iw in range(data.size)])
+    kernel = convolution_matrix(kernel)
+    new_data = kernel @ data
+
+    return new_data
+
+
+def get_worst_resolution(delta_fwhm=1.0):
+    """Get worst possible resolution + delta_fwhm from available LVM long-term calibrations
+    """
+    # get all available calibration epochs
+    calib_mjds = sorted([int(p) for p in os.listdir(MASTERS_DIR) if p.isdigit() and int(p) >= 60177])
+
+    worst_res = 0
+    for calib_mjd in calib_mjds:
+        calib_paths = get_calib_paths(mjd=calib_mjd, flavors={"lsf"}, from_sanbox=True)
+        for _, lsf_path in calib_paths["lsf"].items():
+            lsf = TraceMask.from_file(lsf_path)
+
+            mask = np.isnan(lsf._data)
+            if lsf._mask is not None:
+                mask |= lsf._mask
+            worst_ = lsf._data[~mask].max()
+            if worst_ > worst_res:
+                worst_res = worst_
+
+    # add 1 Angstrom so that we don't get collapsed Gaussians
+    worst_res += delta_fwhm
+
+    return worst_res
+
+
+def create_stellar_templates(target_fwhm, models_dir=STELLAR_TEMP_PATH, model_fwhm=0.3, model_sampling=0.05):
+    """Create stellar templates with given resolution in FWHM"""
+    # read the best-fit model and convolve with spectrograph LSF
+    n_steps = int((9800-3600) / model_sampling) + 1
+    model_wave = np.linspace(3600, 9800, n_steps)
+    model_lsf = np.ones_like(model_wave) * target_fwhm
+
+    models_dir = os.path.join(models_dir, 'good_res')
+    models_path = [os.path.join(models_dir, models_name) for models_name in os.listdir(models_dir) if models_name.endswith(".fits")]
+    log.info(f"loading stellar templates from '{models_dir}', found: {len(models_path)} templates")
+
+    log.info(f"assuming wavelength sampling of {model_sampling = } and spectral FWHM {model_fwhm = } Angstroms")
+
+    new_models = []
+    iterator = tqdm(models_path, desc="degrading models resolution", ascii=True, unit="spectrum")
+    for model_path in iterator:
+        try:
+            with fits.open(model_path, memmap=False) as hdul:
+                model_flux = hdul[0].data
+        except OSError as e:
+            log.error(f"while reading {model_path}: {e}")
+            continue
+        diff_lsf = np.sqrt(model_lsf**2 - model_fwhm**2)
+
+        # convolve model to spec lsf
+        new_models.append(lsf_convolve(model_flux, diff_lsf, model_wave))
+
+    new_header = fits.Header()
+    new_header["MODPATH"] = (models_dir, "directory of original models")
+    new_header["INISAMP"] = (model_sampling, "initial wavelength sampling [Angstrom]")
+    new_header["INIFWHM"] = (model_fwhm, "initial resolution in FWHM [Angstrom]")
+    new_header["FINFWHM"] = (target_fwhm, "final resolution in FWHM [Angstrom]")
+
+    rss_models = RSS(data=np.asarray(new_models), wave=model_wave, lsf=model_lsf, header=new_header)
+
+    out_models = os.path.join(models_dir, "lvm-stellar-templates.fits")
+    log.info(f"writing models to '{out_models}'")
+    rss_models.writeFitsData(out_models)
+
+    return rss_models
 
 
 def extinctLaSilla(wave):
