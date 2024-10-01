@@ -13,7 +13,7 @@ from astropy.coordinates import EarthLocation
 from astropy import units as u
 
 from lvmdrp import log
-from lvmdrp.core.constants import CONFIG_PATH
+from lvmdrp.core.constants import CONFIG_PATH, CON_LAMPS, ARC_LAMPS
 from lvmdrp.core.apertures import Aperture
 from lvmdrp.core.cube import Cube
 from lvmdrp.core.fiberrows import FiberRows
@@ -1607,10 +1607,28 @@ class RSS(FiberRows):
                 raise ValueError(f"Method {method} is not supported when error is None")
             raise ValueError(f"Method {method} is not supported")
 
+        # add combined lamps to header
+        new_header = rss_in[0]._header.copy()
+        if new_header["IMAGETYP"] == "flat":
+            lamps = CON_LAMPS
+        elif new_header["IMAGETYP"] == "arc":
+            lamps = ARC_LAMPS
+        else:
+            lamps = []
+
+        if lamps:
+            new_lamps = set()
+            for rss in rss_in:
+                for lamp in lamps:
+                    if rss._header.get(lamp) == "ON":
+                        new_lamps.add(lamp)
+            for lamp in new_lamps:
+                new_header[lamp] = "ON"
+
         self._data = combined_data
         self._wave = rss_in[0]._wave
         self._lsf = rss_in[0]._lsf
-        self._header = rss_in[0]._header
+        self._header = new_header
         self._mask = combined_mask
         self._error = combined_error
         self._arc_position_x = rss_in[i]._arc_position_x
