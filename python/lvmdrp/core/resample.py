@@ -203,14 +203,6 @@ def template_correlate(observed_spectrum, template_spectrum,
         window function, with ``sym=True``). If a float, will be treated as the
         ``alpha`` parameter for a Tukey window (`~scipy.signal.windows.tukey`),
         in units of pixels. If None, no apodization will be performed
-    resample: bool or dict
-        If True or a dictionary, resamples the spectrum and template following
-        the process in `template_logwl_resample`. If a dictionary, it will be
-        used as the keywords for `template_logwl_resample`.  For example,
-        ``resample=dict(delta_log_wavelength=.1)`` would be the same as calling
-        ``template_logwl_resample(spectrum, template, delta_log_wavelength=.1)``.
-        If False, *no* resampling is performed (and the user is responsible for
-        a sensible resampling).
     method: str
         If you choose "FFT", the correlation will be done through the use
         of convolution and will be calculated faster (for small spectral
@@ -219,9 +211,12 @@ def template_correlate(observed_spectrum, template_spectrum,
 
     Returns
     -------
-    (`~astropy.units.Quantity`, `~astropy.units.Quantity`)
-        Arrays with correlation values and lags in km/s
+    (`~numpy.array`, `~numpy.array`)
+        Arrays with correlation values and lags
     """
+
+    # apodize (might be a no-op if apodization_window is None)
+    observed_spectrum, template_spectrum = _apodize(observed_spectrum, template_spectrum, apodization_window)
 
     # Normalize template
     normalization = _normalize_for_template_matching(observed_spectrum, template_spectrum)
@@ -233,8 +228,7 @@ def template_correlate(observed_spectrum, template_spectrum,
     if normalization < 0.:
         normalization = 1.
 
-    corr = correlate(observed_spectrum._data, (template_spectrum._data * normalization),
-                     method=method)
+    corr = correlate(observed_spectrum._data, (template_spectrum._data * normalization), method=method)
 
     # Compute lag
     # wave_l is the wavelength array equally spaced in log space.
