@@ -42,14 +42,22 @@ __version__ = os.getenv("LVMDRP_VERSION") or get_package_version(path=__file__, 
 def get_git_revision_hash() -> str:
     cwd = os.getcwd()
     os.chdir(pathlib.Path(__file__).parent)
-    commit_hash = subprocess.check_output(['git', 'rev-parse', 'HEAD']).decode('ascii').strip()
+    try:
+        commit_hash = subprocess.check_output(['git', 'rev-parse', 'HEAD']).decode('ascii').strip()
+    except subprocess.CalledProcessError as e:
+        log.warning(f"error {e.returncode} while getting commit hash: {e.output}, setting hash to None")
+        return
     os.chdir(cwd)
     return commit_hash
 
 def get_git_revision_short_hash() -> str:
     cwd = os.getcwd()
     os.chdir(pathlib.Path(__file__).parent)
-    commit_hash = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD']).decode('ascii').strip()
+    try:
+        commit_hash = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD']).decode('ascii').strip()
+    except subprocess.CalledProcessError as e:
+        log.warning(f"error {e.returncode} while getting commit hash: {e.output}, setting hash to None")
+        return
     os.chdir(cwd)
     return commit_hash
 
