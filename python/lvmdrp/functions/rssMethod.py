@@ -366,8 +366,8 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
         # cross-match spectrum and pixwav map
         stretch_min, stretch_max, stretch_steps = 0.95, 1.05, 10000
         cc, bhat, mhat = _cross_match_float(
-            ref_spec=pix_spec,
-            obs_spec=arc._data[ref_fiber],
+            ref_spec=pix_spec[3:-3],
+            obs_spec=arc._data[ref_fiber][3:-3],
             stretch_factors=numpy.linspace(stretch_min, stretch_max, stretch_steps),
             shift_range=[-cc_max_shift, cc_max_shift],
             normalize_spectra=False,
