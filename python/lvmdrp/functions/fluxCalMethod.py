@@ -646,7 +646,7 @@ def get_bprp_convolution_matrix(w):
 
     Input: w numpy.ndarray of wavelengths for target spectrum
     '''
-    s = os.getenv('LVMCORE_DIR')+'/etc/Gaia1'
+    s = os.getenv('LVMCORE_DIR')+'/etc/Gaia_BPRP_resolution.txt'
     log.info(f"Reading GAIA PB-RP resolution {s}")
     txt = np.genfromtxt(s)
     l_bprp, r_bprp = txt[:, 0], txt[:, 1]
