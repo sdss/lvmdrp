@@ -755,12 +755,17 @@ def _copy_fiberflats_from(mjd, mjd_dest=60177, use_longterm_cals=True):
     use_longterm_cals : bool, optional
         Whether to use long-term calibration frames or not, defaults to True
     """
+
+    # get source fiberflats
+    fiberflat_paths = get_calib_paths(mjd, version=drpver, longterm_cals=use_longterm_cals)
+    fiberflat_paths = group_calib_paths(fiberflat_paths["fiberflat_twilight"])
+
      # define master paths for target frames
     calibs = get_calib_paths(mjd_dest, version=drpver, longterm_cals=use_longterm_cals)
     mwave_paths = group_calib_paths(calibs["wave"])
     mlsf_paths = group_calib_paths(calibs["lsf"])
 
-    log.info(f"going to copy twilight fiberflats from {mjd = } to {mjd_dest}")
+    log.info(f"going to copy twilight fiberflats from {mjd = } to {mjd_dest = }")
     for channel in "brz":
         log.info(f"preparing wavelength for new fiberflats: {mwave_paths[channel]}, {mlsf_paths[channel]}")
         mwaves = [TraceMask.from_file(mwave_path) for mwave_path in mwave_paths[channel]]
@@ -768,15 +773,15 @@ def _copy_fiberflats_from(mjd, mjd_dest=60177, use_longterm_cals=True):
         mlsfs = [TraceMask.from_file(mlsf_path) for mlsf_path in mlsf_paths[channel]]
         mlsf = TraceMask.from_spectrographs(*mlsfs)
 
-        fiberflat_path = path.full("lvm_calib", mjd=mjd, kind="fiberflat_twilight", camera=channel)
+        fiberflat_path = fiberflat_paths[channel][0]
         log.info(f"loading reference fiberflat from {fiberflat_path}")
         fiberflat = RSS.from_file(fiberflat_path)
 
         # interpolate fiberflats to mjd_ wavelengths
         log.info("resampling fiberflat to new wavelengths")
         new_fiberflat = copy(fiberflat)
-        new_fiberflat._header["MJD"] = mjd
-        new_fiberflat._header["SMJD"] = mjd
+        new_fiberflat._header["MJD"] = mjd_dest
+        new_fiberflat._header["SMJD"] = mjd_dest
         for ifiber in range(fiberflat._fibers):
             old_wave = fiberflat._wave[ifiber]
             new_wave = mwave._data[ifiber]
