@@ -1915,7 +1915,12 @@ def reduce_longterm_sequence(mjd, use_longterm_cals=True,
         log.log(20 if "wave" in found_cals else 40, "skipping production of wavelength calibrations")
 
     if "dome" in only_cals and "dome" in found_cals:
-        create_dome_fiberflats(mjd=mjd, use_longterm_cals=False)
+        dome_flats, dome_flat_expnums = choose_sequence(frames, flavor="flat", kind="longterm")
+        expnums_ldls = np.sort(dome_flats.query("ldls").expnum.unique())
+        expnums_qrtz = np.sort(dome_flats.query("quartz").expnum.unique())
+        create_dome_fiberflats(mjd=mjd, expnums_ldls=expnums_ldls, expnums_qrtz=expnums_qrtz,
+                               use_longterm_cals=use_longterm_cals, kind="longterm",
+                               skip_done=skip_done)
     else:
         log.log(20 if "dome" in found_cals else 40, "skipping production of dome fiberflats")
 
