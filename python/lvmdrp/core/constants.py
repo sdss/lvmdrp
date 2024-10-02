@@ -102,9 +102,6 @@ SKYCORR_PAR_MAP = {
     "PLOT_TYPE": "plotType",
 }
 
-BASIC_CALIBRATION_TYPES = ["pixmask", "bias", "dark", "pixflat"]
-CALIBRATION_TYPES = BASIC_CALIBRATION_TYPES + ["flat", "arc"]
-FRAMES_PRIORITY = CALIBRATION_TYPES + ["object"]
 FRAMES_CALIB_NEEDS = {
     "bias": [],
     "dark": ["bias"],
@@ -115,6 +112,11 @@ FRAMES_CALIB_NEEDS = {
     "object": ["pixmask", "bias", "dark", "pixflat", "fiberflat", "trace", "fwhm", "wave", "lsf"],
 }
 CALIBRATION_NAMES = {"pixmask", "pixflat", "bias", "trace_guess", "trace", "width", "amp", "model", "wave", "lsf", "fiberflat_dome", "fiberflat_twilight"}
+CALIBRATION_MATCH = {
+    "trace": ["trace", "width", "model"],
+    "wave": ["wave", "lsf"],
+    "dome": ["fiberflat_dome"],
+    "twilight": ["fiberflat_twilight"]}
 
 CAMERAS = ["b1", "b2", "b3", "r1", "r2", "r3", "z1", "z2", "z3"]
 

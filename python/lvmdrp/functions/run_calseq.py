@@ -30,6 +30,7 @@ import numpy as np
 import bottleneck as bn
 from glob import glob
 from copy import deepcopy as copy
+from datetime import datetime
 from shutil import copy2, rmtree
 from astropy.stats import biweight_location, biweight_scale
 from astropy.io import fits
@@ -41,6 +42,7 @@ from lvmdrp import log, path, __version__ as drpver
 from lvmdrp.utils import metadata as md
 from lvmdrp.utils.convert import tileid_grp
 from lvmdrp.utils.paths import get_master_mjd, get_calib_paths, group_calib_paths
+from lvmdrp.core.constants import CALIBRATION_NAMES
 from lvmdrp.core.plot import create_subplots, save_fig
 from lvmdrp.core import dataproducts as dp
 from lvmdrp.core.constants import (
@@ -389,32 +391,6 @@ def _get_reference_expnum(frame, ref_frames):
     if idx == 0:
         idx += 1
     return ref_expnums[idx]
-
-
-def _move_master_calibrations(mjd, kind=None):
-
-    kinds = {"bias", "trace", "width", "model", "fiberflat", "fiberflat_twilight", "wave", "lsf"}
-    if isinstance(kind, (list, tuple, set, np.ndarray)):
-        kinds = kind
-    elif isinstance(kind, str) and kind in kinds:
-        kinds = {kind}
-    elif kind is None:
-        pass
-    else:
-        raise ValueError(f"kind must be one of {kinds}")
-
-    for kind in kinds:
-        src_paths = path.expand("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind=f"m{kind}", camera="*")
-        for src_path in src_paths:
-            camera = os.path.basename(src_path).split(".")[0].split("-")[-1]
-            dst_path = path.full("lvm_calib", mjd=mjd, kind=kind, camera=camera)
-            if os.path.isfile(src_path):
-                try:
-                    os.makedirs(os.path.dirname(dst_path), exist_ok=True)
-                    copy2(src_path, dst_path)
-                    log.info(f"copied {src_path} into {dst_path}")
-                except PermissionError as e:
-                    log.error(f"error while copying {src_path}: {e}")
 
 
 def _clean_ancillary(mjd, expnums=None, flavors="all"):
@@ -804,6 +780,60 @@ def _copy_fiberflats_from(mjd, mjd_dest=60177, use_longterm_cals=True):
         new_fiberflat_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd_dest, camera=channel, kind="mfiberflat_twilight")
         log.info(f"writing new fiberflat to {new_fiberflat_path}")
         new_fiberflat.writeFitsData(new_fiberflat_path)
+
+
+def copy_longterm_calibrations(mjd, flavors=None, dry_run=False):
+    """Copies long-term calibrations from versioned path to sandbox
+
+    Parameters
+    ----------
+    mjd : int
+        MJD for the source calibrations to copy from
+    flavors : str, optional
+        Types of calibration (e.g., wave, bias), by default None (all calibrations)
+    dry_run : bool, optional
+        log information about source and
+    """
+    # handle possible acceptable flavors
+    if isinstance(flavors, (list, tuple, set, np.ndarray)):
+        flavors = set(flavors)
+    elif isinstance(flavors, str) and flavors in flavors:
+        flavors = {flavors}
+    elif flavors is None:
+        flavors = CALIBRATION_NAMES.difference({"pixmask", "pixflat", "trace_guess", "amp", "fiberflat_dome"})
+    else:
+        raise ValueError(f"kind must be one of {flavors}")
+
+    # filter out non-needed calibrations
+    flavors = set(flavors).difference({"pixmask", "pixflat", "trace_guess", "amp", "fiberflat_dome"})
+
+    log.info(f"going to copy calibrations: {flavors}")
+    for flavor in flavors:
+        src_paths = sorted(path.expand("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind=f"m{flavor}", camera="*"))
+        if not src_paths:
+            log.error(f"no paths found for {flavor = }: {src_paths}")
+        for src_path in src_paths:
+            camera = os.path.basename(src_path).split(".")[0].split("-")[-1]
+            dst_path = path.full("lvm_calib", mjd=mjd, kind=flavor, camera=camera)
+
+            dst_exists = os.path.isfile(dst_path)
+            if dry_run:
+                src_mtime = datetime.fromtimestamp(os.path.getmtime(src_path))
+                dst_mtime = datetime.fromtimestamp(os.path.getmtime(dst_path)) if dst_exists else None
+                log.info(f"source/destination for {flavor = }, {camera = }:")
+                log.info(f"   {src_mtime.strftime('%a %d %b %Y, %I:%M:%S%p')} {src_path}")
+                log.info(f"   {dst_mtime.strftime('%a %d %b %Y, %I:%M:%S%p') if dst_exists else None} {dst_path}")
+                if src_mtime > dst_mtime:
+                    log.info("   > source is newer than destination")
+                elif src_mtime <= dst_mtime:
+                    log.warning("   < source is older than destination")
+                continue
+            try:
+                os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+                copy2(src_path, dst_path)
+                log.info(f"copied {src_path} into {dst_path}")
+            except PermissionError as e:
+                log.error(f"error while copying {src_path}: {e}")
 
 
 def messup_frame(mjd, expnum, spec="1", shifts=[1500, 2000, 3500], shift_size=-2, undo_messup=False):
