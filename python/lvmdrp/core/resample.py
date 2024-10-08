@@ -2,6 +2,7 @@ import numpy
 from scipy.sparse import csc_array
 from scipy.signal import correlate
 from scipy.signal.windows import tukey
+from scipy import interpolate
 
 def _normalize_for_template_matching(s1, s2):
     """
@@ -333,29 +334,6 @@ def template_logwl_resample(spectrum, template, wblue=None, wred=None,
     # Build the corresponding wavelength array
     wave_array = numpy.power(10., log_wave_array) * spectrum.spectral_axis.unit
 
-    # Resample spectrum and template into wavelength array so built
-    resampled_spectrum = resampler(spectrum, wave_array)
-    resampled_template = resampler(template, wave_array)
-
-    # Resampler leaves Nans on flux bins that aren't touched by it.
-    # We replace with zeros. This has the net effect of zero-padding
-    # the spectrum and/or template so they exactly match each other,
-    # wavelengthwise.
-    clean_spectrum_flux = numpy.nan_to_num(resampled_spectrum.flux.value) * resampled_spectrum.flux.unit
-    clean_template_flux = numpy.nan_to_num(resampled_template.flux.value) * resampled_template.flux.unit
-
-    clean_spectrum = Spectrum1D(spectral_axis=resampled_spectrum.spectral_axis,
-                        flux=clean_spectrum_flux,
-                        uncertainty=resampled_spectrum.uncertainty,
-                        velocity_convention='optical',
-                        rest_value=spectrum.rest_value)
-    clean_template = Spectrum1D(spectral_axis=resampled_template.spectral_axis,
-                        flux=clean_template_flux,
-                        uncertainty=resampled_template.uncertainty,
-                        velocity_convention='optical',
-                        rest_value=template.rest_value)
-
-    return clean_spectrum, clean_template
 
 def resample_flux(xout, x, flux, ivar=None, extrapolate=False):
     """Returns a flux conserving resampling of an input flux density.
@@ -459,21 +437,36 @@ def _unweighted_resample(output_x,input_x,input_flux_density, extrapolate=False)
     flux_out(j) = int_{x>(x_{j-1}+x_j)/2}^{x<(x_j+x_{j+1})/2} y(x) dx /  0.5*(x_{j+1}+x_{j-1})
 
     """
+    def interpolate_mask(x, y, mask, kind="linear", fill_value=0):
+        if not numpy.any(mask):
+            return y
+        if numpy.all(mask):
+            return y
+        known_x, known_v = x[~mask], y[~mask]
+        missing_x = x[mask]
+        missing_idx = numpy.where(mask)
+
+        f = interpolate.interp1d(known_x, known_v, kind=kind, fill_value=fill_value, bounds_error=False)
+        yy = y.copy()
+        yy[missing_idx] = f(missing_x)
+
+        return yy
 
     # shorter names
-    ix=input_x
-    iy=input_flux_density
-    ox=output_x
+    ix = input_x
+    ox = output_x
+
+    iy = interpolate_mask(input_x, input_flux_density, ~numpy.isfinite(input_flux_density))
 
     # boundary of output bins
-    bins=numpy.zeros(ox.size+1)
-    bins[1:-1]=(ox[:-1]+ox[1:])/2.
-    bins[0]=1.5*ox[0]-0.5*ox[1]     # = ox[0]-(ox[1]-ox[0])/2
-    bins[-1]=1.5*ox[-1]-0.5*ox[-2]  # = ox[-1]+(ox[-1]-ox[-2])/2
+    bins = numpy.zeros(ox.size+1)
+    bins[1:-1] = (ox[:-1]+ox[1:])/2.
+    bins[0] = 1.5*ox[0]-0.5*ox[1]     #  = ox[0]-(ox[1]-ox[0])/2
+    bins[-1] = 1.5*ox[-1]-0.5*ox[-2]  #  = ox[-1]+(ox[-1]-ox[-2])/2
     
     # make a temporary node array including input nodes and output bin bounds
     # first the boundaries of output bins
-    tx=bins.copy()
+    tx = bins.copy()
 
     # if we do not extrapolate,
     # because the input is a considered a piece-wise linear function, i.e. the sum of triangles f_i(x),
@@ -488,32 +481,31 @@ def _unweighted_resample(output_x,input_x,input_flux_density, extrapolate=False)
         iy = numpy.append(iy, 0.)
 
     # this sets values left and right of input range to first and/or last input values
-    # first and last values are=0 if we are not extrapolating
-    ty=numpy.interp(tx,ix,iy)
+    # first and last values are = 0 if we are not extrapolating
+    ty = numpy.interp(tx,ix,iy)
     
     #  add input nodes which are inside the node array
-    k=numpy.where((ix>=tx[0])&(ix<=tx[-1]))[0]
+    k = numpy.where((ix >= tx[0])&(ix <= tx[-1]))[0]
     if k.size :
-        tx=numpy.append(tx,ix[k])
-        ty=numpy.append(ty,iy[k])
+        tx = numpy.append(tx,ix[k])
+        ty = numpy.append(ty,iy[k])
         
     # sort this node array
-    p = tx.argsort()
-    tx=tx[p]
-    ty=ty[p]
+    p  =  tx.argsort()
+    tx = tx[p]
+    ty = ty[p]
     
     # now we do a simple integration in each bin of the piece-wise
     # linear function of the temporary nodes
 
     # integral of individual trapezes
-    trapeze_integrals=(ty[1:]+ty[:-1])*(tx[1:]-tx[:-1])/2.
-    
+    trapeze_integrals = (ty[1:]+ty[:-1])*(tx[1:]-tx[:-1])/2.
+
     # output flux
     # for each bin, we sum the trapeze_integrals that belong to that bin
     # and divide by the bin size
-
-    trapeze_centers=(tx[1:]+tx[:-1])/2.
-    binsize = bins[1:]-bins[:-1]
+    trapeze_centers = (tx[1:]+tx[:-1])/2.
+    binsize  =  bins[1:]-bins[:-1]
 
     if numpy.any(binsize<=0)  :
         raise ValueError("Zero or negative bin size")

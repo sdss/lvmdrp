@@ -23,6 +23,7 @@ from lvmdrp.core.positionTable import PositionTable
 from lvmdrp.core.spectrum1d import Spectrum1D, find_continuum, wave_little_interpol
 from lvmdrp.core import dataproducts as dp
 from lvmdrp.core.fit_profile import polyfit2d, polyval2d
+from lvmdrp.core.resample import resample_flux, rebin_spectra
 
 from lvmdrp import __version__ as drpver
 
@@ -391,32 +392,32 @@ class RSS(FiberRows):
             # define interpolators
             log.info("interpolating RSS data in new wavelength array")
             for rss in rsss:
-                f = interpolate.interp1d(rss._wave, rss._data, axis=1, bounds_error=False, fill_value=numpy.nan)
-                fluxes.append(f(new_wave).astype("float32"))
-                f = interpolate.interp1d(rss._wave, rss._error, axis=1, bounds_error=False, fill_value=numpy.nan)
-                errors.append(f(new_wave).astype("float32"))
-                f = interpolate.interp1d(rss._wave, rss._mask, axis=1, kind="nearest", bounds_error=False, fill_value=0)
+                f = rebin_spectra(new_wave, rss._wave, rss._data, fill=numpy.nan)
+                fluxes.append(f.astype("float32"))
+                f = rebin_spectra(new_wave, rss._wave, rss._error, fill=numpy.nan)
+                errors.append(f.astype("float32"))
+                f = rebin_spectra(new_wave, rss._wave, rss._mask, axis=1, kind="nearest", bounds_error=False, fill_value=0)
                 masks.append(f(new_wave).astype("uint8"))
-                f = interpolate.interp1d(rss._wave, rss._lsf, axis=1, bounds_error=False, fill_value=numpy.nan)
-                lsfs.append(f(new_wave).astype("float32"))
+                f = rebin_spectra(new_wave, rss._wave, rss._lsf, fill=numpy.nan)
+                lsfs.append(f.astype("float32"))
                 if rss._sky is not None:
-                    f = interpolate.interp1d(rss._wave, rss._sky, axis=1, bounds_error=False, fill_value=numpy.nan)
-                    skies.append(f(new_wave).astype("float32"))
+                    f = rebin_spectra(new_wave, rss._wave, rss._sky, fill=numpy.nan)
+                    skies.append(f.astype("float32"))
                 if rss._sky_error is not None:
-                    f = interpolate.interp1d(rss._wave, rss._sky_error, axis=1, bounds_error=False, fill_value=numpy.nan)
-                    sky_errors.append(f(new_wave).astype("float32"))
+                    f = rebin_spectra(new_wave, rss._wave, rss._sky_error, fill=numpy.nan)
+                    sky_errors.append(f.astype("float32"))
                 if rss._sky_east is not None:
-                    f = interpolate.interp1d(rss._wave, rss._sky_east, axis=1, bounds_error=False, fill_value=numpy.nan)
-                    skies_e.append(f(new_wave).astype("float32"))
+                    f = rebin_spectra(new_wave, rss._wave, rss._sky_east, fill=numpy.nan)
+                    skies_e.append(f.astype("float32"))
                 if rss._sky_east_error is not None:
-                    f = interpolate.interp1d(rss._wave, rss._sky_east_error, axis=1, bounds_error=False, fill_value=numpy.nan)
-                    sky_e_errors.append(f(new_wave).astype("float32"))
+                    f = rebin_spectra(new_wave, rss._wave, rss._sky_east_error, fill=numpy.nan)
+                    sky_e_errors.append(f.astype("float32"))
                 if rss._sky_west is not None:
-                    f = interpolate.interp1d(rss._wave, rss._sky_west, axis=1, bounds_error=False, fill_value=numpy.nan)
-                    skies_w.append(f(new_wave).astype("float32"))
+                    f = rebin_spectra(new_wave, rss._wave, rss._sky_west, fill=numpy.nan)
+                    skies_w.append(f.astype("float32"))
                 if rss._sky_west_error is not None:
-                    f = interpolate.interp1d(rss._wave, rss._sky_west_error, axis=1, bounds_error=False, fill_value=numpy.nan)
-                    sky_w_errors.append(f(new_wave).astype("float32"))
+                    f = rebin_spectra(new_wave, rss._wave, rss._sky_west_error, fill=numpy.nan)
+                    sky_w_errors.append(f.astype("float32"))
             fluxes = numpy.asarray(fluxes)
             errors = numpy.asarray(errors)
             masks = numpy.asarray(masks)
@@ -1861,38 +1862,39 @@ class RSS(FiberRows):
         else:
             raise ValueError(f"Invalid interpolation {method = }")
 
+        # TODO: when do we have fluxes vs flux densities? what do we want?
         # fit and evaluate interpolators
         for ifiber in range(rss._fibers):
-            f = interpolate.interp1d(rss._wave[ifiber], rss._data[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
-            new_rss._data[ifiber] = f(wave).astype("float32")
+            f = resample_flux(wave, rss._wave[ifiber], rss._data[ifiber])
+            new_rss._data[ifiber] = f.astype("float32")
             if rss._error is not None:
-                f = interpolate.interp1d(rss._wave[ifiber], rss._error[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
-                new_rss._error[ifiber] = f(wave).astype("float32")
-            f = interpolate.interp1d(rss._wave[ifiber], rss._mask[ifiber], kind="nearest", bounds_error=False, fill_value=1)
-            new_rss._mask[ifiber] = f(wave).astype("bool")
+                f = resample_flux(wave, rss._wave[ifiber], rss._error[ifiber])
+                new_rss._error[ifiber] = f.astype("float32")
+            f = resample_flux(wave, rss._wave[ifiber], rss._mask[ifiber])
+            new_rss._mask[ifiber] = f.astype("bool")
             new_rss._mask[ifiber] |= numpy.isnan(new_rss._data[ifiber])|(new_rss._data[ifiber]==0)
             new_rss._mask[ifiber] |= ~numpy.isfinite(new_rss._error[ifiber])
             if rss._lsf is not None:
-                f = interpolate.interp1d(rss._wave[ifiber], rss._lsf[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
-                new_rss._lsf[ifiber] = f(wave).astype("float32")
+                f = resample_flux(wave, rss._wave[ifiber], rss._lsf[ifiber])
+                new_rss._lsf[ifiber] = f.astype("float32")
             if rss._sky is not None:
-                f = interpolate.interp1d(rss._wave[ifiber], rss._sky[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
-                new_rss._sky[ifiber] = f(wave).astype("float32")
+                f = resample_flux(wave, rss._wave[ifiber], rss._sky[ifiber])
+                new_rss._sky[ifiber] = f.astype("float32")
             if rss._sky_error is not None:
-                f = interpolate.interp1d(rss._wave[ifiber], rss._sky_error[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
-                new_rss._sky_error[ifiber] = f(wave).astype("float32")
+                f = resample_flux(wave, rss._wave[ifiber], rss._sky_error[ifiber])
+                new_rss._sky_error[ifiber] = f.astype("float32")
             if rss._sky_east is not None:
-                f = interpolate.interp1d(rss._wave[ifiber], rss._sky_east[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
-                new_rss._sky_east[ifiber] = f(wave).astype("float32")
+                f = resample_flux(wave, rss._wave[ifiber], rss._sky_east[ifiber])
+                new_rss._sky_east[ifiber] = f.astype("float32")
             if rss._sky_east_error is not None:
-                f = interpolate.interp1d(rss._wave[ifiber], rss._sky_east_error[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
-                new_rss._sky_east_error[ifiber] = f(wave).astype("float32")
+                f = resample_flux(wave, rss._wave[ifiber], rss._sky_east_error[ifiber])
+                new_rss._sky_east_error[ifiber] = f.astype("float32")
             if rss._sky_west is not None:
-                f = interpolate.interp1d(rss._wave[ifiber], rss._sky_west[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
-                new_rss._sky_west[ifiber] = f(wave).astype("float32")
+                f = resample_flux(wave, rss._wave[ifiber], rss._sky_west[ifiber])
+                new_rss._sky_west[ifiber] = f.astype("float32")
             if rss._sky_west_error is not None:
-                f = interpolate.interp1d(rss._wave[ifiber], rss._sky_west_error[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
-                new_rss._sky_west_error[ifiber] = f(wave).astype("float32")
+                f = resample_flux(wave, rss._wave[ifiber], rss._sky_west_error[ifiber])
+                new_rss._sky_west_error[ifiber] = f.astype("float32")
         # add supersky information if available
         if rss._supersky is not None:
             new_rss.set_supersky(rss._supersky)
@@ -2000,30 +2002,30 @@ class RSS(FiberRows):
 
         # interpolate data, error, mask and sky arrays from rectified grid to original grid
         for ifiber in range(rss._fibers):
-            f = interpolate.interp1d(rss._wave, rss._data[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
-            new_rss._data[ifiber] = f(wave[ifiber]).astype("float32")
-            f = interpolate.interp1d(rss._wave, rss._error[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
-            new_rss._error[ifiber] = f(wave[ifiber]).astype("float32")
-            f = interpolate.interp1d(rss._wave, rss._mask[ifiber], kind="nearest", bounds_error=False, fill_value=1)
+            f = resample_flux(wave[ifiber], rss._wave, rss._data[ifiber])
+            new_rss._data[ifiber] = f.astype("float32")
+            f = resample_flux(wave[ifiber][ifiber], rss._wave, rss._error[ifiber])
+            new_rss._error[ifiber] = f.astype("float32")
+            f = resample_flux(wave[ifiber][ifiber], rss._wave, rss._mask[ifiber], kind="nearest", bounds_error=False, fill_value=1)
             new_rss._mask[ifiber] = f(wave[ifiber]).astype("bool")
             if rss._sky is not None:
-                f = interpolate.interp1d(rss._wave, rss._sky[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
-                new_rss._sky[ifiber] = f(wave[ifiber]).astype("float32")
+                f = resample_flux(wave[ifiber], rss._wave, rss._sky[ifiber])
+                new_rss._sky[ifiber] = f.astype("float32")
             if rss._sky_error is not None:
-                f = interpolate.interp1d(rss._wave, rss._sky_error[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
-                new_rss._sky_error[ifiber] = f(wave[ifiber]).astype("float32")
+                f = resample_flux(wave[ifiber], rss._wave, rss._sky_error[ifiber])
+                new_rss._sky_error[ifiber] = f.astype("float32")
             if rss._sky_east is not None:
-                f = interpolate.interp1d(rss._wave, rss._sky_east[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
-                new_rss._sky_east[ifiber] = f(wave[ifiber]).astype("float32")
+                f = resample_flux(wave[ifiber], rss._wave, rss._sky_east[ifiber])
+                new_rss._sky_east[ifiber] = f.astype("float32")
             if rss._sky_east_error is not None:
-                f = interpolate.interp1d(rss._wave, rss._sky_east_error[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
-                new_rss._sky_east_error[ifiber] = f(wave[ifiber]).astype("float32")
+                f = resample_flux(wave[ifiber], rss._wave, rss._sky_east_error[ifiber])
+                new_rss._sky_east_error[ifiber] = f.astype("float32")
             if rss._sky_west is not None:
-                f = interpolate.interp1d(rss._wave, rss._sky_west[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
-                new_rss._sky_west[ifiber] = f(wave[ifiber]).astype("float32")
+                f = resample_flux(wave[ifiber], rss._wave, rss._sky_west[ifiber])
+                new_rss._sky_west[ifiber] = f.astype("float32")
             if rss._sky_west_error is not None:
-                f = interpolate.interp1d(rss._wave, rss._sky_west_error[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
-                new_rss._sky_west_error[ifiber] = f(wave[ifiber]).astype("float32")
+                f = resample_flux(wave[ifiber], rss._wave, rss._sky_west_error[ifiber])
+                new_rss._sky_west_error[ifiber] = f.astype("float32")
 
         if not return_density and unit.endswith("/angstrom"):
             dlambda = numpy.gradient(wave, axis=1)
