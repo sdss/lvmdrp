@@ -1762,7 +1762,7 @@ class RSS(FiberRows):
         select = numpy.logical_or(numbers < min, numbers > numbers[-1] - max)
         return arg[select]
 
-    def rectify_wave(self, wave=None, wave_range=None, wave_disp=None, method="linear", return_density=False, **interp_kwargs):
+    def rectify_wave(self, wave=None, wave_range=None, wave_disp=None):
         """Wavelength rectifies the RSS object
 
         This method rectifies the RSS object to an uniform wavelength grid. The
@@ -1788,10 +1788,6 @@ class RSS(FiberRows):
             Wavelength range to rectify to, by default None
         wave_disp : float, optional
             Wavelength dispersion to rectify to, by default None
-        method : str, optional
-            Interpolation method, by default "linear"
-        return_density : bool, optional
-            If True, returns the density of the rectification, by default False
 
         Returns
         -------
@@ -1834,7 +1830,6 @@ class RSS(FiberRows):
 
         rss._header["BUNIT"] = unit
         rss._header["WAVREC"] = True
-        rss._header["METREC"] = (method, "Wavelength rectification method")
         # create output RSS
         new_rss = RSS(
             data=numpy.zeros((rss._fibers, wave.size), dtype="float32"),
@@ -1854,15 +1849,6 @@ class RSS(FiberRows):
             header=rss._header
         )
 
-        # TODO: convert this into a interpolation class selector
-        if method == "spline":
-            method = "cubic"
-        elif method == "linear":
-            pass
-        else:
-            raise ValueError(f"Invalid interpolation {method = }")
-
-        # TODO: when do we have fluxes vs flux densities? what do we want?
         # fit and evaluate interpolators
         for ifiber in range(rss._fibers):
             f = resample_flux(wave, rss._wave[ifiber], rss._data[ifiber])
@@ -1900,27 +1886,9 @@ class RSS(FiberRows):
             new_rss.set_supersky(rss._supersky)
             new_rss.set_supersky_error(rss._supersky_error)
 
-        if not return_density:
-            dlambda = numpy.gradient(wave)
-            new_rss._data *= dlambda
-            if new_rss._error is not None:
-                new_rss._error *= dlambda
-            if new_rss._sky is not None:
-                new_rss._sky *= dlambda
-            if new_rss._sky_error is not None:
-                new_rss._sky_error *= dlambda
-            if new_rss._sky_east is not None:
-                new_rss._sky_east *= dlambda
-            if new_rss._sky_east_error is not None:
-                new_rss._sky_east_error *= dlambda
-            if new_rss._sky_west is not None:
-                new_rss._sky_west *= dlambda
-            if new_rss._sky_west_error is not None:
-                new_rss._sky_west_error *= dlambda
-            new_rss._header["BUNIT"] = unit.replace("/angstrom", "")
-
         return new_rss
 
+    # TODO: what do we want here in terms of densities?
     def to_native_wave(self, method="linear", interp_density=True, return_density=False):
         """Converts the wavelength to the native wavelength grid
 
