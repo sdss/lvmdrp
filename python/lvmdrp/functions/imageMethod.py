@@ -2723,6 +2723,10 @@ def extract_spectra(
     rss.setHdrValue("NAXIS2", data.shape[0])
     rss.setHdrValue("NAXIS1", data.shape[1])
     rss.setHdrValue("DISPAXIS", 1)
+    rss.add_header_comment(f"{in_trace}, fiber centroids used for {camera}")
+    rss.add_header_comment(f"{in_fwhm}, fiber width (FWHM) used for {camera}")
+    rss.add_header_comment(f"{in_model}, fiber model used for {camera}")
+    rss.add_header_comment(f"{in_acorr}, fiber aperture correction used for {camera}")
     rss.setHdrValue(
         "HIERARCH FIBER CENT MIN",
         bn.nanmin(trace_mask._data),
@@ -3367,6 +3371,8 @@ def preproc_raw_frame(
     proc_img.setHdrValue("DRPVER", DRPVER, comment='data reduction pipeline software tag')
     # set drp commit SHA
     proc_img.setHdrValue("COMMIT", DRP_COMMIT, comment="data reduction pipeline commit HASH")
+    # add calibrations used to header
+    proc_img.add_header_comment(f"{in_mask}, pixel mask used for {camera}")
 
     # write out FITS file
     log.info(f"writing preprocessed image to {os.path.basename(out_image)}")
@@ -3694,6 +3700,7 @@ def detrend_frame(
     # TODO: Confirm that dark is not being flat fielded in current logic
     # TODO: What is the difference between "flat" and "flatfield"? Pixel flats should not be pixel flatted but regular flats (dome and twilight) yes.
     org_img = loadImage(in_image)
+    camera = org_img._header["CCD"]
     exptime = org_img._header["EXPTIME"]
     img_type = org_img._header["IMAGETYP"].lower()
     log.info(
@@ -3830,6 +3837,12 @@ def detrend_frame(
     else:
         log.warning("no slitmap information to be added")
         detrended_img.add_header_comment("no slitmap information to be added")
+
+    # add calibrations used to header
+    detrended_img.add_header_comment(f"{in_bias}, bias used for {camera}")
+    detrended_img.add_header_comment(f"{in_dark}, dark used for {camera}")
+    detrended_img.add_header_comment(f"{in_pixelflat}, pixel flat used for {camera}")
+    detrended_img.add_header_comment(f"{in_nonlinearity}, non-linearity correction used for {camera}")
 
     # save detrended image
     log.info(f"writing detrended image to '{os.path.basename(out_image)}'")
