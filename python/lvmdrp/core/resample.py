@@ -4,6 +4,23 @@ from scipy.signal import correlate
 from scipy.signal.windows import tukey
 from scipy import interpolate
 
+def _apodize(spectrum, template, apodization_window):
+    # Apodization. Must be performed after resampling.
+    if apodization_window is None:
+        clean_spectrum = spectrum
+        clean_template = template
+    else:
+        if callable(apodization_window):
+            window = apodization_window
+        else:
+            def window(wlen):
+                return tukey(wlen, alpha=apodization_window)
+        clean_spectrum = spectrum * window(len(spectrum.spectral_axis))
+        clean_template = template * window(len(template.spectral_axis))
+
+    return clean_spectrum, clean_template
+
+
 def _normalize_for_template_matching(s1, s2):
     """
     Calculate a scale factor to be applied to the s2 spectrum so the
@@ -241,98 +258,39 @@ def template_correlate(observed_spectrum, template_spectrum,
     return corr, lags
 
 
-def _apodize(spectrum, template, apodization_window):
-    # Apodization. Must be performed after resampling.
-    if apodization_window is None:
-        clean_spectrum = spectrum
-        clean_template = template
-    else:
-        if callable(apodization_window):
-            window = apodization_window
-        else:
-            def window(wlen):
-                return tukey(wlen, alpha=apodization_window)
-        clean_spectrum = spectrum * window(len(spectrum.spectral_axis))
-        clean_template = template * window(len(template.spectral_axis))
-
-    return clean_spectrum, clean_template
-
-
-def template_logwl_resample(spectrum, template, wblue=None, wred=None,
-                            delta_log_wavelength=None,
-                            resampler=None):
+def get_logw_grid(w=None, wblue=None, wred=None, delta_log_w=None):
     """
-    Resample a spectrum and template onto a common log-spaced spectral grid.
+    Get a log-spaced wavelength grid.
 
-    If wavelength limits are not provided, the function will use
-    the limits of the merged (observed+template) wavelength scale
-    for building the log-wavelength scale.
+    If wavelength limits ``wblue``, ``wred`` are not provided, the function will use
+    the limits of the w array.
 
     For the wavelength step, the function uses either the smallest wavelength
-    interval found in the *observed* spectrum, or takes it from the
-    ``delta_log_wavelength`` parameter.
+    interval found in w, or takes it from the ``delta_log_wavelength`` parameter.
 
     Parameters
     ----------
-    observed_spectrum : :class:`~specutils.Spectrum1D`
-        The observed spectrum.
-    template_spectrum : :class:`~specutils.Spectrum1D`
-        The template spectrum.
+    w: numpy.array
+        (linear) wavelength grid
     wblue, wred: float
         Wavelength limits to include in the correlation.
-    delta_log_wavelength: float
+    delta_log_w: float
         Log-wavelength step to use to build the log-wavelength
         scale. If None, use limits defined as explained above.
-    resampler
-        A specutils resampler to use to actually do the resampling.  Defaults to
-        using a `~specutils.manipulation.LinearInterpolatedResampler`.
 
     Returns
     -------
-    resampled_observed : :class:`~specutils.Spectrum1D`
-        The observed spectrum resampled to a common spectral_axis.
-    resampled_template: :class:`~specutils.Spectrum1D`
-        The template spectrum resampled to a common spectral_axis.
+    wout: numpy.array
+        log spaced wavelength grid
     """
 
-    # Build an equally-spaced log-wavelength array based on
-    # the input and template spectrum's limit wavelengths and
-    # smallest sampling interval. Consider only the observed spectrum's
-    # sampling, since it's the one that counts for the final accuracy
-    # of the correlation. Alternatively, use the wred and wblue limits,
-    # and delta log wave provided by the user.
-    #
-    # We work with separate float and units entities instead of Quantity
-    # instances, due to the profusion of log10 and power function calls
-    # (they only work on floats)
-    if wblue:
-        w0 = numpy.log10(wblue)
-    else:
-        ws0 = numpy.log10(spectrum.spectral_axis[0].value)
-        wt0 = numpy.log10(template.spectral_axis[0].value)
-        w0 = min(ws0, wt0)
+    w0 = numpy.log10(wblue) if wblue is not None else numpy.log10(w[0])
+    w1 = numpy.log10(wred) if wred is not None else numpy.log10(w[-1])
 
-    if wred:
-        w1 = numpy.log10(wred)
-    else:
-        ws1 = numpy.log10(spectrum.spectral_axis[-1].value)
-        wt1 = numpy.log10(template.spectral_axis[-1].value)
-        w1 = max(ws1, wt1)
+    dw = delta_log_w if delta_log_w is not None else numpy.min(numpy.log10(numpy.gradient(w)))
 
-    if delta_log_wavelength is None:
-        ds = numpy.log10(spectrum.spectral_axis.value[1:]) - numpy.log10(spectrum.spectral_axis.value[:-1])
-        dw = ds[numpy.argmin(ds)]
-    else:
-        dw = delta_log_wavelength
+    return numpy.logspace(w0, w1, num=int((w1 - w0) / dw), endpoint=True, dtype=numpy.float32)
 
-    nsamples = int((w1 - w0) / dw)
-
-    log_wave_array = numpy.ones(nsamples) * w0
-    for i in range(nsamples):
-        log_wave_array[i] += dw * i
-
-    # Build the corresponding wavelength array
-    wave_array = numpy.power(10., log_wave_array) * spectrum.spectral_axis.unit
 
 
 def resample_flux_density(xout, x, flux, ivar=None, extrapolate=False):
