@@ -23,7 +23,7 @@ from lvmdrp.core.positionTable import PositionTable
 from lvmdrp.core.spectrum1d import Spectrum1D, find_continuum, wave_little_interpol
 from lvmdrp.core import dataproducts as dp
 from lvmdrp.core.fit_profile import polyfit2d, polyval2d
-from lvmdrp.core.resample import resample_flux, rebin_spectra
+from lvmdrp.core.resample import resample_flux_density, rebin_spectra
 
 from lvmdrp import __version__ as drpver
 
@@ -390,6 +390,7 @@ class RSS(FiberRows):
             log.info(f"new wavelength sampling: min = {sampling.min():.2f}, max = {sampling.max():.2f}")
 
             # define interpolators
+            # TODO: why are we rebinning again?
             log.info("interpolating RSS data in new wavelength array")
             for rss in rsss:
                 f = rebin_spectra(new_wave, rss._wave, rss._data, fill=numpy.nan)
@@ -1851,35 +1852,35 @@ class RSS(FiberRows):
 
         # fit and evaluate interpolators
         for ifiber in range(rss._fibers):
-            f = resample_flux(wave, rss._wave[ifiber], rss._data[ifiber])
+            f = resample_flux_density(wave, rss._wave[ifiber], rss._data[ifiber])
             new_rss._data[ifiber] = f.astype("float32")
             if rss._error is not None:
-                f = resample_flux(wave, rss._wave[ifiber], rss._error[ifiber])
+                f = resample_flux_density(wave, rss._wave[ifiber], rss._error[ifiber])
                 new_rss._error[ifiber] = f.astype("float32")
-            f = resample_flux(wave, rss._wave[ifiber], rss._mask[ifiber])
+            f = resample_flux_density(wave, rss._wave[ifiber], rss._mask[ifiber])
             new_rss._mask[ifiber] = f.astype("bool")
             new_rss._mask[ifiber] |= numpy.isnan(new_rss._data[ifiber])|(new_rss._data[ifiber]==0)
             new_rss._mask[ifiber] |= ~numpy.isfinite(new_rss._error[ifiber])
             if rss._lsf is not None:
-                f = resample_flux(wave, rss._wave[ifiber], rss._lsf[ifiber])
+                f = resample_flux_density(wave, rss._wave[ifiber], rss._lsf[ifiber])
                 new_rss._lsf[ifiber] = f.astype("float32")
             if rss._sky is not None:
-                f = resample_flux(wave, rss._wave[ifiber], rss._sky[ifiber])
+                f = resample_flux_density(wave, rss._wave[ifiber], rss._sky[ifiber])
                 new_rss._sky[ifiber] = f.astype("float32")
             if rss._sky_error is not None:
-                f = resample_flux(wave, rss._wave[ifiber], rss._sky_error[ifiber])
+                f = resample_flux_density(wave, rss._wave[ifiber], rss._sky_error[ifiber])
                 new_rss._sky_error[ifiber] = f.astype("float32")
             if rss._sky_east is not None:
-                f = resample_flux(wave, rss._wave[ifiber], rss._sky_east[ifiber])
+                f = resample_flux_density(wave, rss._wave[ifiber], rss._sky_east[ifiber])
                 new_rss._sky_east[ifiber] = f.astype("float32")
             if rss._sky_east_error is not None:
-                f = resample_flux(wave, rss._wave[ifiber], rss._sky_east_error[ifiber])
+                f = resample_flux_density(wave, rss._wave[ifiber], rss._sky_east_error[ifiber])
                 new_rss._sky_east_error[ifiber] = f.astype("float32")
             if rss._sky_west is not None:
-                f = resample_flux(wave, rss._wave[ifiber], rss._sky_west[ifiber])
+                f = resample_flux_density(wave, rss._wave[ifiber], rss._sky_west[ifiber])
                 new_rss._sky_west[ifiber] = f.astype("float32")
             if rss._sky_west_error is not None:
-                f = resample_flux(wave, rss._wave[ifiber], rss._sky_west_error[ifiber])
+                f = resample_flux_density(wave, rss._wave[ifiber], rss._sky_west_error[ifiber])
                 new_rss._sky_west_error[ifiber] = f.astype("float32")
         # add supersky information if available
         if rss._supersky is not None:
@@ -1970,29 +1971,29 @@ class RSS(FiberRows):
 
         # interpolate data, error, mask and sky arrays from rectified grid to original grid
         for ifiber in range(rss._fibers):
-            f = resample_flux(wave[ifiber], rss._wave, rss._data[ifiber])
+            f = resample_flux_density(wave[ifiber], rss._wave, rss._data[ifiber])
             new_rss._data[ifiber] = f.astype("float32")
-            f = resample_flux(wave[ifiber][ifiber], rss._wave, rss._error[ifiber])
+            f = resample_flux_density(wave[ifiber][ifiber], rss._wave, rss._error[ifiber])
             new_rss._error[ifiber] = f.astype("float32")
-            f = resample_flux(wave[ifiber][ifiber], rss._wave, rss._mask[ifiber], kind="nearest", bounds_error=False, fill_value=1)
+            f = resample_flux_density(wave[ifiber][ifiber], rss._wave, rss._mask[ifiber], kind="nearest", bounds_error=False, fill_value=1)
             new_rss._mask[ifiber] = f(wave[ifiber]).astype("bool")
             if rss._sky is not None:
-                f = resample_flux(wave[ifiber], rss._wave, rss._sky[ifiber])
+                f = resample_flux_density(wave[ifiber], rss._wave, rss._sky[ifiber])
                 new_rss._sky[ifiber] = f.astype("float32")
             if rss._sky_error is not None:
-                f = resample_flux(wave[ifiber], rss._wave, rss._sky_error[ifiber])
+                f = resample_flux_density(wave[ifiber], rss._wave, rss._sky_error[ifiber])
                 new_rss._sky_error[ifiber] = f.astype("float32")
             if rss._sky_east is not None:
-                f = resample_flux(wave[ifiber], rss._wave, rss._sky_east[ifiber])
+                f = resample_flux_density(wave[ifiber], rss._wave, rss._sky_east[ifiber])
                 new_rss._sky_east[ifiber] = f.astype("float32")
             if rss._sky_east_error is not None:
-                f = resample_flux(wave[ifiber], rss._wave, rss._sky_east_error[ifiber])
+                f = resample_flux_density(wave[ifiber], rss._wave, rss._sky_east_error[ifiber])
                 new_rss._sky_east_error[ifiber] = f.astype("float32")
             if rss._sky_west is not None:
-                f = resample_flux(wave[ifiber], rss._wave, rss._sky_west[ifiber])
+                f = resample_flux_density(wave[ifiber], rss._wave, rss._sky_west[ifiber])
                 new_rss._sky_west[ifiber] = f.astype("float32")
             if rss._sky_west_error is not None:
-                f = resample_flux(wave[ifiber], rss._wave, rss._sky_west_error[ifiber])
+                f = resample_flux_density(wave[ifiber], rss._wave, rss._sky_west_error[ifiber])
                 new_rss._sky_west_error[ifiber] = f.astype("float32")
 
         if not return_density and unit.endswith("/angstrom"):

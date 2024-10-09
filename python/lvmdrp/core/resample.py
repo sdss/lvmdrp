@@ -335,7 +335,7 @@ def template_logwl_resample(spectrum, template, wblue=None, wred=None,
     wave_array = numpy.power(10., log_wave_array) * spectrum.spectral_axis.unit
 
 
-def resample_flux(xout, x, flux, ivar=None, extrapolate=False):
+def resample_flux_density(xout, x, flux, ivar=None, extrapolate=False):
     """Returns a flux conserving resampling of an input flux density.
     The total integrated flux is conserved.
 
@@ -360,26 +360,6 @@ def resample_flux(xout, x, flux, ivar=None, extrapolate=False):
 
     This interpolation conserves flux such that, on average,
     output_flux_density = input_flux_density
-
-    The input flux density outside of the range defined by the edges of the first
-    and last bins is considered null. The bin size of bin 'i' is given by (x[i+1]-x[i-1])/2
-    except for the first and last bin where it is (x[1]-x[0]) and (x[-1]-x[-2])
-    so flux density is zero for x<x[0]-(x[1]-x[0])/2 and x>x[-1]-(x[-1]-x[-2])/2
-
-    The input is interpreted as the nodes positions and node values of
-    a piece-wise linear function::
-
-        y(x) = sum_i y_i * f_i(x)
-
-    with::
-
-        f_i(x) =    (x_{i-1}<x<=x_{i})*(x-x_{i-1})/(x_{i}-x_{i-1})
-                  + (x_{i}<x<=x_{i+1})*(x-x_{i+1})/(x_{i}-x_{i+1})
-
-    the output value is the average flux density in a bin::
-
-        flux_out(j) = int_{x>(x_{j-1}+x_j)/2}^{x<(x_j+x_{j+1})/2} y(x) dx /  0.5*(x_{j+1}+x_{j-1})
-
     """
     if ivar is None:
         return _unweighted_resample(xout, x, flux, extrapolate=extrapolate)
@@ -397,7 +377,33 @@ def resample_flux(xout, x, flux, ivar=None, extrapolate=False):
         
         return outflux, outivar
 
-def _unweighted_resample(output_x,input_x,input_flux_density, extrapolate=False) :
+def resample_flux(xout, x, flux, extrapolate=False):
+    """Returns a flux conserving resampling of an input flux.
+    The total integrated flux is conserved.
+
+    Args:
+        - xout: output SORTED vector, not necessarily linearly spaced
+        - x: input SORTED vector, not necessarily linearly spaced
+        - flux: input flux sampled at x
+
+    both x and xout must represent the same quantity with the same unit
+
+    Options:
+        - extrapolate: extrapolate using edge values of input array, default is False,
+          in which case values outside of input array are set to zero.
+    
+    Returns:
+        returns outflux
+
+    This interpolation conserves flux such that, on average,
+    output_flux_density = input_flux_density
+    """
+    flux_dens = flux/numpy.gradient(x)
+    f = _unweighted_resample(xout, x, flux_dens, extrapolate=extrapolate)
+    return f*numpy.gradient(xout)
+
+
+def _unweighted_resample(output_x, input_x, input_flux_density, extrapolate=False) :
     """Returns a flux conserving resampling of an input flux density.
     The total integrated flux is conserved.
 
