@@ -390,14 +390,14 @@ class RSS(FiberRows):
             log.info(f"new wavelength sampling: min = {sampling.min():.2f}, max = {sampling.max():.2f}")
 
             # define interpolators
-            # TODO: why are we rebinning again?
+            # TODO: why are we rebinning again? Should this be removed?
             log.info("interpolating RSS data in new wavelength array")
             for rss in rsss:
                 f = rebin_spectra(new_wave, rss._wave, rss._data, fill=numpy.nan)
                 fluxes.append(f.astype("float32"))
                 f = rebin_spectra(new_wave, rss._wave, rss._error, fill=numpy.nan)
                 errors.append(f.astype("float32"))
-                f = rebin_spectra(new_wave, rss._wave, rss._mask, axis=1, kind="nearest", bounds_error=False, fill_value=0)
+                f = rebin_spectra(new_wave, rss._wave, rss._mask, fill=0)
                 masks.append(f(new_wave).astype("uint8"))
                 f = rebin_spectra(new_wave, rss._wave, rss._lsf, fill=numpy.nan)
                 lsfs.append(f.astype("float32"))
@@ -1850,7 +1850,8 @@ class RSS(FiberRows):
             header=rss._header
         )
 
-        # fit and evaluate interpolators
+        # Resample spectra onto new wavelength grid:
+        # TODO: which ones are densities, which ones are not?
         for ifiber in range(rss._fibers):
             f = resample_flux_density(wave, rss._wave[ifiber], rss._data[ifiber])
             new_rss._data[ifiber] = f.astype("float32")
