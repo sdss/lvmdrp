@@ -1852,6 +1852,7 @@ class RSS(FiberRows):
 
         # Resample spectra onto new wavelength grid:
         # TODO: which ones are densities, which ones are not?
+        # TODO: how to properly resample the errors, ivar weighting ... see resample.py
         for ifiber in range(rss._fibers):
             f = resample_flux_density(wave, rss._wave[ifiber], rss._data[ifiber])
             new_rss._data[ifiber] = f.astype("float32")
@@ -3398,7 +3399,6 @@ class RSS(FiberRows):
             std_hrv_corr = std_radec.radial_velocity_correction(kind="heliocentric", obstime=std_obstime, location=EarthLocation.of_site("lco")).to(u.km / u.s).value
             self._header[f"STD{istd}HRV"] = (numpy.round(std_hrv_corr, 4), f"Standard {istd} heliocentric vel. corr. [km/s]")
 
-        # TODO: implement apply_heliorv
         if apply_hrv_corr: ...
             # if helio_vel is None or helio_vel == 0.0:
             #     helio_vel = rss._header.get(helio_vel_keyword)

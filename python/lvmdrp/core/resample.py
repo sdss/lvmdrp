@@ -1,27 +1,86 @@
 import numpy 
-from scipy.sparse import csc_array
 from scipy.signal import correlate
 from scipy.signal.windows import tukey
 from scipy import interpolate
 
-def _apodize(spectrum, template, apodization_window):
-    # Apodization. Must be performed after resampling.
-    if apodization_window is None:
-        clean_spectrum = spectrum
-        clean_template = template
+
+def template_correlate(s1, s2, apod_window=0.5, method="direct"):
+    """
+    Compute cross-correlation of the s1 and s2 spectra.
+
+    The s1 and s2 spectra have to be on a log-wavelength grid.
+    S1 and s2 are first apodized by a Tukey window in order to minimize edge
+    and consequent non-periodicity effects and thus decrease
+    high-frequency power in the correlation function. To turn off the
+    apodization, use alpha=0.
+
+    Parameters
+    ----------
+    s1 : :class:`~Spectrum1D`
+        The frist, e.g. observed spectrum.
+    s2 : :class:`~Spectrum1D`
+        The second, e.g. template spectrum, which will be correlated with s1
+    apod_window: float, callable, or None
+        If a callable, will be treated as a window function for apodization of
+        the cross-correlation (should behave like a `~scipy.signal.windows`
+        window function, with ``sym=True``). If a float, will be treated as the
+        ``alpha`` parameter for a Tukey window (`~scipy.signal.windows.tukey`),
+        in units of pixels. If None, no apodization will be performed
+    method: str
+        If you choose "FFT", the correlation will be done through the use
+        of convolution and will be calculated faster (for small spectral
+        resolutions it is often correct), otherwise the correlation is determined
+        directly from sums (the "direct" method in `~scipy.signal.correlate`).
+
+    Returns
+    -------
+    (`~numpy.array`, `~numpy.array`)
+        Arrays with correlation values and lags
+    """
+
+    # apodize (might be a no-op if apodization_window is None)
+    s1, s2 = apodize_spectrum(s1, s2, apod_window)
+
+    # Normalize template
+    normalization = normalize_for_template_matching(s1, s2)
+
+    # Not sure if we need to actually normalize the template. Depending
+    # on the specific data uncertainty, the normalization factor
+    # may turn out negative. That causes a flip of the correlation function,
+    # in which the maximum (correlation peak) is no longer meaningful.
+    if normalization < 0.:
+        normalization = 1.
+
+    corr = correlate(s1._data, (s2._data * normalization), method=method)
+
+    # Compute lag
+    # wave_l is the wavelength array equally spaced in log space.
+    wave_l = s1._wave
+    delta_log_wave = numpy.log10(wave_l[1]) - numpy.log10(wave_l[0])
+    deltas = (numpy.array(range(len(corr))) - len(corr)/2 + 0.5) * delta_log_wave
+    lags = numpy.power(10., deltas) - 1.
+
+    return corr, lags
+
+
+def apodize_spectrum(s1, apod_window):
+    '''
+    multiply a spectrum with an apodization window. should be performed after resampling,
+    before template matching. apod_window can be None, a callable window, or if a scalar it
+    is the alpha parameter of a tukey window.
+    '''
+    if apod_window is None:
+        return s1
     else:
-        if callable(apodization_window):
-            window = apodization_window
+        if callable(apod_window):
+            window = apod_window
         else:
             def window(wlen):
-                return tukey(wlen, alpha=apodization_window)
-        clean_spectrum = spectrum * window(len(spectrum.spectral_axis))
-        clean_template = template * window(len(template.spectral_axis))
-
-    return clean_spectrum, clean_template
+                return tukey(wlen, alpha=apod_window)
+        return s1 * window(s1.shape[0])
 
 
-def _normalize_for_template_matching(s1, s2):
+def normalize_for_template_matching(s1, s2):
     """
     Calculate a scale factor to be applied to the s2 spectrum so the
     total flux in s1 and s2 will be the same.
@@ -48,214 +107,6 @@ def _normalize_for_template_matching(s1, s2):
     denom = numpy.nansum(s2_filtered)
 
     return num/denom
-
-
-
-def make_bins(wavs):
-    """ Given a series of wavelength points, find the edges and widths
-    of corresponding wavelength bins. """
-    edges = numpy.zeros(wavs.shape[0]+1)
-    widths = numpy.zeros(wavs.shape[0])
-    edges[0] = wavs[0] - (wavs[1] - wavs[0])/2
-    widths[-1] = (wavs[-1] - wavs[-2])
-    edges[-1] = wavs[-1] + (wavs[-1] - wavs[-2])/2
-    edges[1:-1] = (wavs[1:] + wavs[:-1])/2
-    widths[:-1] = edges[1:-1] - edges[:-2]
-
-    return edges, widths
-
-
-def rebin_spectra(new_wavs, spec_wavs, spec_fluxes, spec_errs=None, fill=None):
-
-    """
-    Function for resampling spectra (and optionally associated
-    uncertainties) onto a new wavelength basis.
-
-    see https://arxiv.org/pdf/1705.05165
-
-    Parameters
-    ----------
-
-    new_wavs : numpy.ndarray
-        Array containing the new wavelength sampling desired for the
-        spectrum or spectra.
-
-    spec_wavs : numpy.ndarray
-        1D array containing the current wavelength sampling of the
-        spectrum or spectra.
-
-    spec_fluxes : numpy.ndarray
-        Array containing spectral fluxes at the wavelengths specified in
-        spec_wavs, last dimension must correspond to the shape of
-        spec_wavs. Extra dimensions before this may be used to include
-        multiple spectra.
-
-    spec_errs : numpy.ndarray (optional)
-        Array of the same shape as spec_fluxes containing uncertainties
-        associated with each spectral flux value.
-
-    fill : float (optional)
-        Where new_wavs extends outside the wavelength range in spec_wavs
-        this value will be used as a filler in new_fluxes and new_errs.
-
-    Returns
-    -------
-
-    new_fluxes : numpy.ndarray
-        Array of resampled flux values, first dimension is the same
-        length as new_wavs, other dimensions are the same as
-        spec_fluxes.
-
-    new_errs : numpy.ndarray
-        Array of uncertainties associated with fluxes in new_fluxes.
-        Only returned if spec_errs was specified.
-    """
-
-    # Rename the input variables for clarity within the function.
-    old_wavs = spec_wavs
-    old_fluxes = spec_fluxes
-    old_errs = spec_errs
-
-    # Make arrays of edge positions and widths for the old and new bins
-
-    old_edges, old_widths = make_bins(old_wavs)
-    new_edges, new_widths = make_bins(new_wavs)
-
-    # Generate output arrays to be populated
-    new_fluxes = numpy.zeros(old_fluxes[..., 0].shape + new_wavs.shape)
-
-    if old_errs is not None:
-        if old_errs.shape != old_fluxes.shape:
-            raise ValueError("If specified, spec_errs must be the same shape "
-                             "as spec_fluxes.")
-        else:
-            new_errs = numpy.copy(new_fluxes)
-
-    start = 0
-    stop = 0
-
-    # Calculate new flux and uncertainty values, looping over new bins
-    for j in range(new_wavs.shape[0]):
-
-        # Add filler values if new_wavs extends outside of spec_wavs
-        if (new_edges[j] < old_edges[0]) or (new_edges[j+1] > old_edges[-1]):
-            new_fluxes[..., j] = fill
-
-            if spec_errs is not None:
-                new_errs[..., j] = fill
-
-            continue
-
-        # Find first old bin which is partially covered by the new bin
-        while old_edges[start+1] <= new_edges[j]:
-            start += 1
-
-        # Find last old bin which is partially covered by the new bin
-        while old_edges[stop+1] < new_edges[j+1]:
-            stop += 1
-
-        # If new bin is fully inside an old bin start and stop are equal
-        if stop == start:
-            new_fluxes[..., j] = old_fluxes[..., start]
-            if old_errs is not None:
-                new_errs[..., j] = old_errs[..., start]
-
-        # Otherwise multiply the first and last old bin widths by P_ij
-        else:
-            start_factor = ((old_edges[start+1] - new_edges[j])
-                            / (old_edges[start+1] - old_edges[start]))
-
-            end_factor = ((new_edges[j+1] - old_edges[stop])
-                          / (old_edges[stop+1] - old_edges[stop]))
-
-            old_widths[start] *= start_factor
-            old_widths[stop] *= end_factor
-
-            # Populate new_fluxes spectrum and uncertainty arrays
-            f_widths = old_widths[start:stop+1]*old_fluxes[..., start:stop+1]
-            new_fluxes[..., j] = numpy.sum(f_widths, axis=-1)
-            new_fluxes[..., j] /= numpy.sum(old_widths[start:stop+1])
-
-            if old_errs is not None:
-                e_wid = old_widths[start:stop+1]*old_errs[..., start:stop+1]
-
-                new_errs[..., j] = numpy.sqrt(numpy.sum(e_wid**2, axis=-1))
-                new_errs[..., j] /= numpy.sum(old_widths[start:stop+1])
-
-            # Put back the old bin widths to their initial values
-            old_widths[start] /= start_factor
-            old_widths[stop] /= end_factor
-
-    # If errors were supplied return both new_fluxes and new_errs.
-    if old_errs is not None:
-        return new_fluxes, new_errs
-
-    # Otherwise just return the new_fluxes spectrum array
-    else:
-        return new_fluxes
-
-
-
-def template_correlate(observed_spectrum, template_spectrum,
-                       apodization_window=0.5, resample=True, method="direct"):
-    """
-    Compute cross-correlation of the observed and template spectra.
-
-
-    After re-sampling into log-wavelength, both observed and template
-    spectra are apodized by a Tukey window in order to minimize edge
-    and consequent non-periodicity effects and thus decrease
-    high-frequency power in the correlation function. To turn off the
-    apodization, use alpha=0.
-
-    Parameters
-    ----------
-    observed_spectrum : :class:`~specutils.Spectrum1D`
-        The observed spectrum.
-    template_spectrum : :class:`~specutils.Spectrum1D`
-        The template spectrum, which will be correlated with
-        the observed spectrum.
-    apodization_window: float, callable, or None
-        If a callable, will be treated as a window function for apodization of
-        the cross-correlation (should behave like a `~scipy.signal.windows`
-        window function, with ``sym=True``). If a float, will be treated as the
-        ``alpha`` parameter for a Tukey window (`~scipy.signal.windows.tukey`),
-        in units of pixels. If None, no apodization will be performed
-    method: str
-        If you choose "FFT", the correlation will be done through the use
-        of convolution and will be calculated faster (for small spectral
-        resolutions it is often correct), otherwise the correlation is determined
-        directly from sums (the "direct" method in `~scipy.signal.correlate`).
-
-    Returns
-    -------
-    (`~numpy.array`, `~numpy.array`)
-        Arrays with correlation values and lags
-    """
-
-    # apodize (might be a no-op if apodization_window is None)
-    observed_spectrum, template_spectrum = _apodize(observed_spectrum, template_spectrum, apodization_window)
-
-    # Normalize template
-    normalization = _normalize_for_template_matching(observed_spectrum, template_spectrum)
-
-    # Not sure if we need to actually normalize the template. Depending
-    # on the specific data uncertainty, the normalization factor
-    # may turn out negative. That causes a flip of the correlation function,
-    # in which the maximum (correlation peak) is no longer meaningful.
-    if normalization < 0.:
-        normalization = 1.
-
-    corr = correlate(observed_spectrum._data, (template_spectrum._data * normalization), method=method)
-
-    # Compute lag
-    # wave_l is the wavelength array equally spaced in log space.
-    wave_l = observed_spectrum._wave
-    delta_log_wave = numpy.log10(wave_l[1]) - numpy.log10(wave_l[0])
-    deltas = (numpy.array(range(len(corr))) - len(corr)/2 + 0.5) * delta_log_wave
-    lags = numpy.power(10., deltas) - 1.
-
-    return corr, lags
 
 
 def get_logw_grid(w=None, wblue=None, wred=None, delta_log_w=None):
@@ -290,6 +141,16 @@ def get_logw_grid(w=None, wblue=None, wred=None, delta_log_w=None):
     dw = delta_log_w if delta_log_w is not None else numpy.min(numpy.log10(numpy.gradient(w)))
 
     return numpy.logspace(w0, w1, num=int((w1 - w0) / dw), endpoint=True, dtype=numpy.float32)
+
+
+
+def make_bins(wavs):
+    """ Given a series of wavelength points, find the edges and widths
+    of corresponding wavelength bins. """
+    x = (wavs[:-1] + wavs[1:]) / 2
+    edges = numpy.concatenate([[2*x[0]-x[1]], x, [2*x[-1] - x[-2]]])
+    widths = numpy.concatenate([edges[1:-1] - edges[:-2], wavs[-1] + (wavs[-1] - wavs[-2])/2])
+    return edges, widths
 
 
 
@@ -334,6 +195,7 @@ def resample_flux_density(xout, x, flux, ivar=None, extrapolate=False):
         outivar = _unweighted_resample(xout, x, ivar/dx)*dxout
         
         return outflux, outivar
+
 
 def resample_flux(xout, x, flux, extrapolate=False):
     """Returns a flux conserving resampling of an input flux.
@@ -475,121 +337,3 @@ def _unweighted_resample(output_x, input_x, input_flux_density, extrapolate=Fals
         raise ValueError("Zero or negative bin size")
     
     return numpy.histogram(trapeze_centers, bins=bins, weights=trapeze_integrals)[0] / binsize
-
-
-def project(x1,x2):
-    """
-    return a (sparse) projection matrix so that arrays are related by linear interpolation
-    x1: Array with one binning, must be sorted in ascending order
-    x2: new binning, must be sorted in ascending order
-
-    Return Pr: x1= Pr.dot(x2) in the overlap region
-    """
-    #Pr=numpy.zeros((len(x2),len(x1)))
-
-    e1 = numpy.zeros(len(x1)+1)
-    e1[1:-1]=(x1[:-1]+x1[1:])/2.0  # calculate bin edges
-    e1[0]=1.5*x1[0]-0.5*x1[1]
-    e1[-1]=1.5*x1[-1]-0.5*x1[-2]
-    e1lo = e1[:-1]  # make upper and lower bounds arrays vs. index
-    e1hi = e1[1:]
-
-    e2=numpy.zeros(len(x2)+1)
-    e2[1:-1]=(x2[:-1]+x2[1:])/2.0  # bin edges for resampled grid
-    e2[0]=1.5*x2[0]-0.5*x2[1]
-    e2[-1]=1.5*x2[-1]-0.5*x2[-2]
-
-    R = []
-    C = []
-    V = []    
-    for ii in range(len(e2)-1): # columns
-        #- Find indices in x1, containing the element in x2
-        #- This is much faster than looping over rows
-
-        k = numpy.where((e1lo<=e2[ii]) & (e1hi>e2[ii]))[0]
-        # this where obtains single e1 edge just below start of e2 bin
-        emin = e2[ii]
-        emax = e1hi[k]
-        if e2[ii+1] < emax: 
-            emax = e2[ii+1]
-        dx = (emax-emin)/(e1hi[k]-e1lo[k])
-        if k.size > 0:
-            R.append(ii)
-            C.append(k[0])
-            V.append(dx[0])
-        #Pr[ii,k] = dx    # enter first e1 contribution to e2[ii]
-
-        if e2[ii+1] > emax :
-            # cross over to another e1 bin contributing to this e2 bin
-            m = numpy.where((e1 < e2[ii+1]) & (e1 > e1hi[k]))[0]
-            if len(m) > 0 :
-               # several-to-one resample.  Just consider 3 bins max. case
-               R.append(ii)
-               C.append(k[0]+1)
-               V.append(1.0)
-               #Pr[ii,k[0]+1] = 1.0  # middle bin fully contained in e2
-               q = k[0]+2
-            else: 
-                q = k[0]+1  # point to bin partially contained in current e2 bin
-
-            try:
-                emin = e1lo[q]
-                emax = e2[ii+1]
-                dx = (emax-emin)/(e1hi[q]-e1lo[q])
-                R.append(ii)
-                C.append(q)
-                V.append(dx)
-                # Pr[ii,q] = dx
-            except Exception:
-                pass
-
-    #- edge:
-    if x2[-1]==x1[-1]:
-        R.append(len(x2)-1)
-        C.append(len(x1)-1)
-        V.append(1.0)
-        #Pr[-1,-1]=1
-    return csc_array((V, (R, C)), shape=(len(x2), len(x1)), dtype=numpy.float32)
-
-def resample_project(outwave, wave, flux,ivar=None):
-    """
-    rebinning conserving S/N
-    Algorithm is based on http://www.ast.cam.ac.uk/%7Erfc/vpfit10.2.pdf
-    Appendix: B.1
-
-    Args:
-    outwave: new wavelength array
-    wave : original wavelength array
-    flux : df/dx (Flux per A) sampled at x
-    ivar : ivar in original binning. If not None, ivar in new binning is returned.
-
-    Note:
-    Full resolution computation for resampling is expensive for quicklook.
-
-    desispec.interpolation.resample_flux using weights by ivar does not conserve total S/N.
-    Tests with arc lines show much narrow spectral profile, thus not giving realistic psf resolutions
-    This algorithm gives the same resolution as obtained for native CCD binning, i.e, resampling has
-    insignificant effect. Details,plots in the arc processing note.
-    """
-    #- convert flux to per bin before projecting to new bins
-    flux=flux*numpy.gradient(wave)
-
-    Pr=project(wave,outwave)
-    newflux=Pr.dot(flux)
-    #- convert back to df/dx (per angstrom) sampled at outwave
-    newflux/=numpy.gradient(outwave) #- per angstrom
-    if ivar is None:
-        return newflux
-    else:
-        ivar = ivar/(numpy.gradient(wave))**2.0
-        newvar=Pr.dot(ivar**(-1.0)) #- maintaining Total S/N
-        # RK:  this is just a kludge until we more robustly ensure newvar is correct
-        k = numpy.where(newvar <= 0.0)[0]
-        newvar[k] = 0.0000001  # flag bins with no contribution from input grid
-        newivar=1/newvar
-        # newivar[k] = 0.0
-
-        #- convert to per angstrom
-        newivar*=(numpy.gradient(outwave))**2.0
-        return newflux, newivar
-
