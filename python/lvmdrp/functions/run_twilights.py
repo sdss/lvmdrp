@@ -346,7 +346,7 @@ def fit_fiberflat(in_twilight: str, out_flat: str, out_twilight: str,
     axs[1].set_xlim(*axs[0].get_xlim())
 
     ypixels = np.split(np.arange(flat_twilight._fibers) + 1, 3)
-    median =  np.split(bn.nanmedian(flat_twilight._data, axis=1), 3)
+    median =  np.asarray(np.split(bn.nanmedian(flat_twilight._data, axis=1), 3))
     mu = bn.nanmedian(flat_twilight._data)
     median = (median / mu - 1) * 100
     axs[2].axhspan(-0.5, 0.5, lw=0, alpha=0.3, color="0.7")
@@ -359,7 +359,7 @@ def fit_fiberflat(in_twilight: str, out_flat: str, out_twilight: str,
     axs[2].set_ylabel("Flat-fielded flat (%)")
     axs[2].set_xlim(1, twilight._fibers)
 
-    x = (flat_twilight._data/flat_twilight._data[0]).flatten()
+    x = (flat_twilight._data/flat_twilight._data[0]).ravel()
     axs[3].axvspan(np.nanmean(x) - np.nanstd(x), np.nanmean(x) + np.nanstd(x), lw=0, alpha=0.1, color="0.2")
     axs[3].hist(x, bins=1000, range=(0.95, 1.05), color="tab:orange")
     axs[3].tick_params(labelleft=False)

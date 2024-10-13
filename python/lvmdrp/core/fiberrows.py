@@ -870,6 +870,8 @@ class FiberRows(Header, PositionTable):
         bg = numpy.ones((self._fibers, nlines), dtype=numpy.float32) * numpy.nan
         masked = numpy.zeros((self._fibers, nlines), dtype="bool")
 
+        stretch_min, stretch_max, stretch_steps = 0.998, 1.002, 40
+
         spec = self.getSpec(ref_fiber)
         flux[ref_fiber], cent_wave[ref_fiber], fwhm[ref_fiber], bg[ref_fiber] = spec.fitSepGauss(ref_cent, aperture, fwhm_guess, bg_guess, flux_range, cent_range, fwhm_range, bg_range, axs=axs[ref_fiber][1])
         masked[ref_fiber] = numpy.isnan(flux[ref_fiber])|numpy.isnan(cent_wave[ref_fiber])|numpy.isnan(fwhm[ref_fiber])
@@ -899,15 +901,19 @@ class FiberRows(Header, PositionTable):
             cc, bhat, mhat = _cross_match_float(
                 ref_spec=last_spec._data,
                 obs_spec=spec._data,
-                stretch_factors=numpy.linspace(0.99,1.01,20),
-                shift_range=[-5, 5],
+                stretch_factors=numpy.linspace(stretch_min, stretch_max, stretch_steps),
+                shift_range=[-10, 10],
                 normalize_spectra=False,
             )
+            if mhat == stretch_min or mhat == stretch_max:
+                log.warning(f"boundary of stretch factors: {mhat = } ({stretch_min, stretch_max = })")
             cent_guess = mhat * last_cent + bhat
             flux[i], cent_wave[i], fwhm[i], bg[i] = spec.fitSepGauss(cent_guess, aperture, fwhm_guess, bg_guess, flux_range, cent_range, fwhm_range, bg_range, axs=axs_fiber)
             masked[i] = numpy.isnan(flux[i])|numpy.isnan(cent_wave[i])|numpy.isnan(fwhm[i])
             if masked[i].any():
                 log.warning(f"some lines were not fitted properly in fiber {i}: ")
+                log.warning(f"  guess = {numpy.round(cent_guess, 3)} ({mhat = :.5f}, {bhat = :.5f})")
+                log.warning(f"   mask = {masked[i]}")
                 log.warning(f"   flux = {numpy.round(flux[i],3)}")
                 log.warning(f"   cent = {numpy.round(cent_wave[i],3)}")
                 log.warning(f"   fwhm = {numpy.round(fwhm[i],3)}")
@@ -939,13 +945,23 @@ class FiberRows(Header, PositionTable):
             cc, bhat, mhat = _cross_match_float(
                 ref_spec=last_spec._data,
                 obs_spec=spec._data,
-                stretch_factors=numpy.linspace(0.99,1.01,20),
-                shift_range=[-5, 5],
-                normalize_spectra=False
+                stretch_factors=numpy.linspace(stretch_min, stretch_max, stretch_steps),
+                shift_range=[-10, 10],
+                normalize_spectra=False,
             )
+            if mhat == stretch_min or mhat == stretch_max:
+                log.warning(f"boundary of stretch factors: {mhat = } ({stretch_min, stretch_max = })")
             cent_guess = mhat * last_cent + bhat
             flux[i], cent_wave[i], fwhm[i], bg[i] = spec.fitSepGauss(cent_guess, aperture, fwhm_guess, bg_guess, flux_range, cent_range, fwhm_range, bg_range, axs=axs_fiber)
             masked[i] = numpy.isnan(flux[i])|numpy.isnan(cent_wave[i])|numpy.isnan(fwhm[i])
+            if masked[i].any():
+                log.warning(f"some lines were not fitted properly in fiber {i}: ")
+                log.warning(f"  guess = {numpy.round(cent_guess, 3)} ({mhat = :.5f}, {bhat = :.5f})")
+                log.warning(f"   mask = {masked[i]}")
+                log.warning(f"   flux = {numpy.round(flux[i],3)}")
+                log.warning(f"   cent = {numpy.round(cent_wave[i],3)}")
+                log.warning(f"   fwhm = {numpy.round(fwhm[i],3)}")
+                log.warning(f"   bg   = {numpy.round(bg[i],3)}")
 
             last_spec = copy(spec)
             last_cent = copy(cent_wave[i])
