@@ -259,7 +259,7 @@ def logscale_to_linear(wl_regular, wl_log, flux_log, shift=0):
     return flux
 
 
-def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3):
+def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     """ Selection of the stellar atmosphere model spectra (POLLUX database, AMBRE library)
     Read all the models already convolved with Gaia LSF and normalized
     Correct observed standard spectrum for the atmospheric extinction
@@ -294,6 +294,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3):
     # the fit of standard stars - from Alfredo.
     # https://github.com/desihub/desispec/blob/main/py/desispec/data/arc_lines/telluric_lines.txt
     telluric_tab = Table.read(telluric_file, format='ascii.fixed_width_two_line')
+    mask_for_fit = telluric_tab
 
     model_names = [f for f in listdir(join(model_dir, 'normalized_logscale')) if
                    isfile(join(model_dir, 'normalized_logscale', f)) and (f.lower().endswith('.fits'))]
@@ -413,7 +414,8 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3):
 
             # Fit continuum and normalize spectra
             best_continuum, continuum_models, masked_pixels, knots = fit_continuum_std(w_tmp,
-                                                                                       spec_tmp_convolved, mask_bands=mask_bands,
+                                                                                       spec_tmp_convolved,
+                                                                                       mask_bands=mask_bands,
                                                                                        threshold=0.5,niter=niter,
                                                                                        nknots=nknots,
                                                                                        median_box=median_box)
@@ -439,6 +441,17 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3):
     for i in range(len(telluric_tab)):
         mask_tellurics = mask_tellurics | ((std_wave_all > telluric_tab['Start'][i] - 10) & (
                     std_wave_all < telluric_tab['End'][i] + 10))
+
+    #
+    br_overlap_start = 5775
+    br_overlap_end = 5825
+    rz_overlap_start = 7520
+    rz_overlap_end = 7570
+    mask_for_fit['Start'] = mask_for_fit['Start'] - 10
+    mask_for_fit['End'] = mask_for_fit['End'] + 10
+    mask_for_fit.add_row([3500,3715]) #mask for bluest part of the spectra
+    mask_for_fit.add_row([3500, 3715])
+    # print(mask_for_fit)
 
     model_to_gaia_median = []
     best_fit_models = []
@@ -480,24 +493,25 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3):
                                                                                    threshold=0.1, niter=niter,
                                                                                    nknots=nknots,
                                                                                    median_box=median_box)
-        normalized_std_on_gaia_cont_single = best_continuum*std_normalized_all
-        normalized_std_on_gaia_cont_single[mask_tellurics] = np.nan
-        normalized_std_on_gaia_cont_single = normalized_std_on_gaia_cont_single / np.nansum(normalized_std_on_gaia_cont_single)
+        normalized_std_on_gaia_cont_single_tmp = best_continuum*std_normalized_all
+        normalized_std_on_gaia_cont_single_tmp[mask_tellurics] = np.nan
+        normalized_std_on_gaia_cont_single = normalized_std_on_gaia_cont_single_tmp / np.nansum(normalized_std_on_gaia_cont_single_tmp)
         # errors for gaia continuum * normalized stds:
         #gaia_std_err = np.sqrt(normalized_std_on_gaia_cont_single ** 2 * std_errors_normalized_all ** 2)
 
         # mask tellurics
         mask_tellurics_log = np.zeros_like(log_std_wave_all, dtype=bool)
         for tellur in range(len(telluric_tab)):
-            mask_tellurics_log = mask_tellurics_log | ((log_std_wave_all > np.log(telluric_tab['Start'][tellur] - 10)) & (
-                    log_std_wave_all < np.log(telluric_tab['End'][tellur] + 10)))
-        mask_wave = ((log_std_wave_all < 8.22) | ((log_std_wave_all > np.log(5775)) & (log_std_wave_all < np.log(5825)))
-                     | ((log_std_wave_all > np.log(7520)) & (log_std_wave_all < np.log(7570))))
+            mask_tellurics_log = mask_tellurics_log | ((log_std_wave_all > np.log(telluric_tab['Start'][tellur] - 10))
+                                                & (log_std_wave_all < np.log(telluric_tab['End'][tellur] + 10)))
+        mask_wave = ((log_std_wave_all < 8.22) | ((log_std_wave_all > np.log(br_overlap_start)) & (log_std_wave_all <
+                                                np.log(br_overlap_end))) | ((log_std_wave_all > np.log(rz_overlap_start))
+                                                                        & (log_std_wave_all < np.log(rz_overlap_end))))
 
         #mask_good = np.isfinite(normalized_std_on_gaia_cont_single)
         mask_good = np.isfinite(flux_std_logscale)
         mask_good = mask_good & ~mask_tellurics_log & ~mask_wave
-        print(mask_good)
+        # print(mask_good)
         # chi2 = [np.nansum(((normalized_std_on_gaia_cont_single[mask_good] -
         #                     model_specs_convolved_norm[model_ind][mask_good]) / gaia_std_err[mask_good]) ** 2) /
         #         np.sum(mask_good) for model_ind in range(n_models)]
@@ -594,66 +608,112 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3):
 
         # resample model to the same step
         model_flux_resampled = np.interp(std_wave_all, model_wave, model_flux)
+        good_model_to_std_lsf = np.sqrt(lsf_all ** 2 - 0.3 ** 2) # to degrade good resolution model to std lsf for plots
+        #print(len(good_model_to_std_lsf), len(model_flux_resampled), len(std_wave_all))
+        model_convolved_spec_lsf = lsf_convolve(model_flux_resampled, good_model_to_std_lsf, std_wave_all)
 
         # convolve model to gaia lsf
         model_convolved_to_gaia = lsf_convolve(model_flux_resampled, gaia_lsf, std_wave_all)
         model_to_gaia = stdflux/model_convolved_to_gaia
         model_to_gaia_median.append(np.median(model_to_gaia))
+        #print(np.median(model_to_gaia), model_convolved_spec_lsf, normalized_std_on_gaia_cont_single)
 
+        if plot:
+            # plt.ylabel("sensitivity [(ergs/s/cm^2/A) / (e-/s/A)]")
+            # plt.xlabel("wavelength [A]")
+            # plt.ylim(1e-14, 0.1e-11)
+            # plt.semilogy()
+            # fig1.add_axes((0.1, 0.1, 0.8, 0.2))
+            # plt.plot([w[0], w[-1]], [0.05, 0.05], color="k", linewidth=1, linestyle="dotted")
+            # plt.plot([w[0], w[-1]], [-0.05, -0.05], color="k", linewidth=1, linestyle="dotted")
+            # plt.plot([w[0], w[-1]], [0.1, 0.1], color="k", linewidth=1, linestyle="dashed")
+            # plt.plot([w[0], w[-1]], [-0.1, -0.1], color="k", linewidth=1, linestyle="dashed")
+            # plt.plot(w, rms_std / mean_std)
+            # plt.plot(w, -rms_std / mean_std)
+            # plt.ylim(-0.2, 0.2)
+            # plt.ylabel("relative residuals")
+            # plt.xlabel("wavelength [A]")
 
-        fig = plt.figure(figsize=(14, 18))
+            fig = plt.figure(figsize=(14, 24))
 
-        plt.subplot(411)
-        plt.title(label=f'Gaia ID: {gaia_ids[i]}. Model: {model_names[best_id]}')
-        plt.plot(log_std_wave_all, flux_std_logscale, label='Observed')
-        # plt.plot(std_wave_all,
-        #         np.interp(std_wave_all, std_wave_all*(1+vel_offset_b/3e5), normalized_std_on_gaia_cont_single), label='Shifted')
-        plt.plot(log_model_wave_all+log_shift_b, flux_model_logscale, label='Model shifted')
-        plt.legend()
-        plt.xlim(8.18, 9.2)
-        plt.ylim(0.0, 1.5)
+            plt.subplot(511)
+            plt.title(label=f'Gaia ID: {gaia_ids[i]}. Model: {model_names[best_id]}')
+            plt.plot(log_std_wave_all, flux_std_logscale, label='Observed standard spectrum, continuum normalized')
+            # plt.plot(std_wave_all,
+            #         np.interp(std_wave_all, std_wave_all*(1+vel_offset_b/3e5), normalized_std_on_gaia_cont_single), label='Shifted')
+            plt.plot(log_model_wave_all+log_shift_b, flux_model_logscale, label='Best-fit model spectrum, '
+                                                                                'continuum normalized', alpha=0.7) # shifted
+            for n_mask, mask_box in enumerate(mask_for_fit):
+                if n_mask == 0:
+                    plt.axvspan(np.log(mask_box[0]), np.log(mask_box[1]), alpha=0.2, color='grey',
+                                label='Mask used for model matching')
+                else:
+                    plt.axvspan(np.log(mask_box[0]), np.log(mask_box[1]), alpha=0.2, color='grey')
+            plt.legend()
+            plt.xlim(8.18, 9.2)
+            plt.ylim(0.0, 1.5)
+            plt.xlabel("ln (wavelength [A])")
 
-        plt.subplot(412)
-        plt.plot(log_std_wave_all, flux_std_logscale, label='Observed')
-        plt.plot(log_model_wave_all+log_shift_b, flux_model_logscale, label='Model shifted')
-        #plt.plot(log_std_wave_all-log_shift_b, flux_model_logscale, label='Model shifted')
-        plt.legend()
-        plt.xlim(8.24, 8.38)
-        plt.ylim(0.1,1.5)
+            plt.subplot(512)
+            plt.plot(log_std_wave_all, flux_std_logscale, label='Observed')
+            plt.plot(log_model_wave_all+log_shift_b, flux_model_logscale, label='Model shifted', alpha=0.7)
+            #plt.plot(log_std_wave_all-log_shift_b, flux_model_logscale, label='Model shifted')
+            for mask_box in mask_for_fit:
+                plt.axvspan(np.log(mask_box[0]), np.log(mask_box[1]), alpha=0.2, color='grey')
+            #plt.legend()
+            xlim = [8.24, 8.38]
+            ylim = [0.1,1.5]
+            plt.text((xlim[1] - xlim[0]) * 0.03 + xlim[0], (ylim[1] - ylim[0]) * 0.9 + ylim[0], 'b channel', size=14)
+            plt.xlim(xlim)
+            plt.ylim(ylim)
+            plt.xlabel("ln (wavelength [A])")
 
-        # plt.subplot(613)
-        # plt.plot(log_std_wave_all, flux_std_logscale, label='Observed')
-        # #plt.plot(log_model_wave_all, flux_model_logscale, label='Model')
-        # plt.plot(log_std_wave_all+log_shift_b, flux_model_logscale, label='Model shifted')
-        # plt.legend()
-        # plt.xlim(8.26, 8.306)
-        # plt.ylim(0.1, 1.5)
-        #
-        # plt.subplot(614)
-        # plt.plot(log_std_wave_all, flux_std_logscale, label='Observed')
-        # #plt.plot(log_model_wave_all, flux_model_logscale, label='Model')
-        # plt.plot(log_std_wave_all+log_shift_b, flux_model_logscale, label='Model shifted')
-        # plt.legend()
-        # plt.xlim(8.316, 8.38)
-        # plt.ylim(0.2, 1.5)
+            plt.subplot(513)
+            plt.plot(log_std_wave_all, flux_std_logscale, label='Observed')
+            #plt.plot(log_model_wave_all, flux_model_logscale, label='Model')
+            plt.plot(log_std_wave_all+log_shift_r, flux_model_logscale, label='Model shifted', alpha=0.7)
+            for mask_box in mask_for_fit:
+                plt.axvspan(np.log(mask_box[0]), np.log(mask_box[1]), alpha=0.2, color='grey')
+            #plt.legend()
+            xlim = [8.66, 8.8]
+            ylim = [0.2, 1.5]
+            plt.text((xlim[1] - xlim[0]) * 0.03 + xlim[0], (ylim[1] - ylim[0]) * 0.9 + ylim[0], 'r channel', size=14)
+            plt.xlim(xlim)
+            plt.ylim(ylim)
+            plt.xlabel("ln (wavelength [A])")
 
-        plt.subplot(413)
-        plt.plot(log_std_wave_all, flux_std_logscale, label='Observed')
-        #plt.plot(log_model_wave_all, flux_model_logscale, label='Model')
-        plt.plot(log_std_wave_all+log_shift_r, flux_model_logscale, label='Model shifted')
-        plt.legend()
-        plt.xlim(8.66, 8.8)
-        plt.ylim(0.2, 1.5)
+            plt.subplot(514)
+            plt.plot(log_std_wave_all, flux_std_logscale, label='Observed')
+            #plt.plot(log_model_wave_all, flux_model_logscale, label='Model')
+            plt.plot(log_std_wave_all+log_shift_z, flux_model_logscale, label='Model shifted', alpha=0.7)
+            for mask_box in mask_for_fit:
+                plt.axvspan(np.log(mask_box[0]), np.log(mask_box[1]), alpha=0.2, color='grey')
+            #plt.legend()
+            xlim = [9.02, 9.16]
+            ylim = [0.2, 1.5]
+            plt.text((xlim[1] - xlim[0]) * 0.03 + xlim[0], (ylim[1] - ylim[0]) * 0.9 + ylim[0], 'z channel', size=14)
+            plt.xlim(xlim)
+            plt.ylim(ylim)
+            plt.xlabel("ln (wavelength [A])")
 
-        plt.subplot(414)
-        plt.plot(log_std_wave_all, flux_std_logscale, label='Observed')
-        #plt.plot(log_model_wave_all, flux_model_logscale, label='Model')
-        plt.plot(log_std_wave_all+log_shift_z, flux_model_logscale, label='Model shifted')
-        plt.legend()
-        plt.xlim(9.02, 9.16)
-        plt.ylim(0.2, 1.5)
+            plt.subplot(515)
+            plt.plot(std_wave_all, normalized_std_on_gaia_cont_single_tmp, linewidth=1.5,
+                     label='Continuum from GAIA spectrum * observed absorptions')
+            plt.plot(std_wave_all, model_convolved_spec_lsf * np.median(model_to_gaia), label='Best-fit model',
+                     linewidth=1.5, alpha=0.7)
+            #plt.plot(log_std_wave_all+log_shift_z, flux_model_logscale, label='Model shifted')
+            for mask_box in mask_for_fit:
+               plt.axvspan((mask_box[0]), (mask_box[1]), alpha=0.2, color='grey')
+            plt.legend()
+            plt.xlim(3500,9000)
+            #plt.ylim(0.2, 1.5)
+            plt.xlabel("wavelength [A]")
+            plt.ylabel("Flux, erg/s/cm^2/A")
 
-        plt.show()
+            #plt.show()
+            fig_path = in_rss[0]
+            fig_path = f"{fig_path.replace('lvm-hobject-b', 'lvm-hobject')}"
+            save_fig(plt.gcf(), product_path=fig_path, to_display=False, figure_path="qa/model_matching", label=f"matching_std{i}")
 
     log_shift_brz_all.append(log_shift_b_all)
     log_shift_brz_all.append(log_shift_r_all)
@@ -954,15 +1014,16 @@ def standard_sensitivity(stds, rss, GAIA_CACHE_DIR, ext, res, plot=False, width=
         log.info(f"AB mag in LVM_{channel}: Gaia {mAB_std:.2f}, instrumental {mAB_obs:.2f}")
 
         if plot:
-            fig = plt.figure(figsize=(16, 6))
-            #plt.plot(wgood, sgood, ".k", markersize=2, zorder=-999)
-            plt.plot(w, s_old(w).astype(np.float32), linewidth=1, label='sens. curve before shift correction')
+            # fig = plt.figure(figsize=(16, 6))
+            # plt.plot(wgood, sgood, ".k", markersize=2, zorder=-999)
+            # plt.plot(w, s_old(w).astype(np.float32), linewidth=1, label='sens. curve before shift correction')
             plt.plot(w, sens, ".k", markersize=2, zorder=-999)
-            plt.plot(w, res[f"STD{nn}SEN"], linewidth=2, label='sens. curve after shift correction')
-            plt.plot(w, s_gaia(w).astype(np.float32), linewidth=2, color='red', label='old sens.')
-            plt.legend()
+            plt.plot(w, res[f"STD{nn}SEN"], label='sens. curve (after shift correction)')
+            #plt.plot(w, s_gaia(w).astype(np.float32), linewidth=2, color='red', label='old sensitivity curve')
+            # plt.ylim(0, 0.1e-11)
+            # plt.legend()
             # plt.show()
-            # plt.ylim(0,0.1e-11)
+
     return rss, res
 
 
@@ -1157,6 +1218,7 @@ def fluxcal_standard_stars(in_rss, plot=True, GAIA_CACHE_DIR=None, mode='GAIA', 
     rss.setHdrValue(f"STDSENR{label}", np.nanmean(rms_std[1000:3000]), f"Mean stdstar sensitivity rms in {channel}")
     log.info(f"Mean stdstar sensitivity in {channel} : {np.nanmean(mean_std[1000:3000])}")
 
+    print(f"product_path = {in_rss}")
     if plot:
         plt.ylabel("sensitivity [(ergs/s/cm^2/A) / (e-/s/A)]")
         plt.xlabel("wavelength [A]")
