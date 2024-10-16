@@ -1639,9 +1639,9 @@ def science_reduction(expnum: int, use_longterm_cals: bool = False,
 
     # clean ancillary folder
     if clean_ancillary:
-        log.info("removing ancillary paths")
         ancillary_dir = os.path.dirname(dsci_path)
         qa_dir = os.path.join(ancillary_dir, "qa")
+        log.info(f"removing ancillary files at {qa_dir}")
         if os.path.isdir(ancillary_dir):
             ancillary_paths = [os.path.join(ancillary_dir,p) for p in os.listdir(ancillary_dir) if str(sci_expnum) in p]
             qa_paths = [os.path.join(qa_dir,p) for p in os.listdir(qa_dir) if str(sci_expnum) in p]
