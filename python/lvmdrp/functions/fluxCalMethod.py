@@ -288,7 +288,9 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     model_to_gaia_median
         array with conversion coefficients between model units and Gaia units
     """
-
+    # TODO: think about uniting this code and the fluxcal code that iterates over cameras?
+    # TODO: find a place under the calib directory structure for the stellar models
+    # TODO: telluric list should go in lvmcore
     model_dir = '/Users/jane/Science/LVMFluxCalib/stellar_models/'
     telluric_file = os.path.join(ROOT_PATH, 'resources', 'telluric_lines.txt')  # wavelength regions with Telluric
     # absorptions based on KPNO data (unknown source) with a 1% transmission threshold this file is used as a mask for
@@ -315,7 +317,6 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     GAIA_CACHE_DIR = "./" if GAIA_CACHE_DIR is None else GAIA_CACHE_DIR
     log.info(f"Using Gaia CACHE DIR '{GAIA_CACHE_DIR}'")
 
-    # TODO: add heliocentric correction
     # TODO: add correction for star velocity
     # TODO: add gaia errors
     # TODO: account for sky errors
@@ -356,6 +357,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             rss.add_header_comment(f"no standard star metadata found in '{in_rss}', skipping sensitivity measurement")
             rss.set_fluxcal(fluxcal=res_std, source='std')
             rss.writeFitsData(in_rss)
+            # TODO: fix this, this seems to be copy-pasted from the gaia code
             return res_std, mean_std, rms_std, rss
 
         # wavelength array
@@ -411,9 +413,11 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             mask_bad = ~np.isfinite(spec_tmp)
 
             # # degrade observed std spectra
+            # TODO: switch to new LSF convolution code
             spec_tmp_convolved = lsf_convolve(spec_tmp, lsf_conv, w_tmp)
 
             # Fit continuum and normalize spectra
+            # TODO: evaluate this against DESI's 160A median filter
             best_continuum, continuum_models, masked_pixels, knots = fit_continuum_std(w_tmp,
                                                                                        spec_tmp_convolved,
                                                                                        mask_bands=mask_bands,
@@ -473,6 +477,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
 
        # # degrade observed std spectra
         std_normalized_all_convolved = lsf_convolve(std_normalized_all, lsf_conv, std_wave_all)
+        # TODO: switch to new resampling code
         log_std_wave_all, flux_std_logscale = linear_to_logscale(std_wave_all, std_normalized_all_convolved)
         std_errors_normalized_all = np.concatenate((std_errors_all_bands[0][i][mask_b_norm],
                                                     std_errors_all_bands[1][i][mask_r_norm],
