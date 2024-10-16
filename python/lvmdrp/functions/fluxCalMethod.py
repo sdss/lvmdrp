@@ -46,6 +46,7 @@ import numpy as np
 from scipy import interpolate
 from scipy import stats
 from scipy.ndimage import median_filter
+import re
 
 from astropy.stats import biweight_location, biweight_scale
 from astropy.table import Table
@@ -521,6 +522,10 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
                             model_specs_norm[model_ind][mask_good]) / log_std_errors_normalized_all[mask_good]) ** 2) /
                 np.sum(mask_good) for model_ind in range(n_models)]
         best_id = np.argmin(chi2)
+        print(f'chi2: {np.argmin(chi2)}')
+        print(f'Model: {model_names[best_id]}')
+        model_params = re.split('[a-z]+', model_names[best_id], flags=re.IGNORECASE)
+        print(model_params)
 
         # Check the possible velocity offsets
         # rec_shift = (std_wave_all > 3900) & (std_wave_all < 4100)
@@ -557,7 +562,8 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
                                         flux_model_logscale[log_rec_shift], max_ampl=50)*np.median(log_std_wave_all - np.roll(log_std_wave_all, 1))
         # flux_std_logscale_shifted = np.interp((log_std_wave_all + log_shift_b), log_std_wave_all, flux_std_logscale)
         flux_std_shifted_b = logscale_to_linear(std_wave_all, log_std_wave_all, flux_std_logscale, shift=-log_shift_b)
-
+        #shift_b =
+        print(f'Log-shift in b: {log_shift_b}')
 
         log_rec_shift = (log_std_wave_all > 8.77) & (log_std_wave_all < 8.82)
         log_shift_r = fluxcal.derive_vecshift(flux_std_logscale[log_rec_shift],
@@ -649,10 +655,16 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
                                 label='Mask used for model matching')
                 else:
                     plt.axvspan(np.log(mask_box[0]), np.log(mask_box[1]), alpha=0.2, color='grey')
-            plt.legend()
-            plt.xlim(8.18, 9.2)
-            plt.ylim(0.0, 1.5)
+            xlim = [8.18, 9.2]
+            ylim = [0.1,1.5]
+            plt.text((xlim[1] - xlim[0]) * 0.05 + xlim[0], (ylim[1] - ylim[0]) * 0.9 + ylim[0], f'Best-fit model: '
+                                f'Teff = {model_params[2]}, log(g) = {model_params[3]}, [Fe/H] = {model_params[4]}', size=14)
+            plt.text((xlim[1] - xlim[0]) * 0.15 + xlim[0], (ylim[1] - ylim[0]) * 0.82 + ylim[0],
+                                f'chi2 = {np.argmin(chi2)}', size=14)
+            plt.xlim(xlim)
+            plt.ylim(ylim)
             plt.xlabel("ln (wavelength [A])")
+            plt.legend(loc="lower right")
 
             plt.subplot(512)
             plt.plot(log_std_wave_all, flux_std_logscale, label='Observed')
