@@ -382,53 +382,9 @@ class RSS(FiberRows):
             skies_w = numpy.asarray(skies_w)
             sky_w_errors = numpy.asarray(sky_w_errors)
         else:
-            log.warning("merged wavelengths are not monotonic, interpolation needed")
-            rsss[0].add_header_comment("merged wavelengths are not monotonic, interpolation needed")
-            # compute the combined wavelengths
-            new_wave = wave_little_interpol(waves)
-            sampling = numpy.diff(new_wave)
-            log.info(f"new wavelength sampling: min = {sampling.min():.2f}, max = {sampling.max():.2f}")
+            log.error("merged wavelengths are not monotonic or uniform!")
+            raise RuntimeError("merged wavelengths are not monotonic or uniform!")
 
-            # define interpolators
-            # TODO: why are we rebinning again? Should this be removed?
-            log.info("interpolating RSS data in new wavelength array")
-            for rss in rsss:
-                f = rebin_spectra(new_wave, rss._wave, rss._data, fill=numpy.nan)
-                fluxes.append(f.astype("float32"))
-                f = rebin_spectra(new_wave, rss._wave, rss._error, fill=numpy.nan)
-                errors.append(f.astype("float32"))
-                f = rebin_spectra(new_wave, rss._wave, rss._mask, fill=0)
-                masks.append(f(new_wave).astype("uint8"))
-                f = rebin_spectra(new_wave, rss._wave, rss._lsf, fill=numpy.nan)
-                lsfs.append(f.astype("float32"))
-                if rss._sky is not None:
-                    f = rebin_spectra(new_wave, rss._wave, rss._sky, fill=numpy.nan)
-                    skies.append(f.astype("float32"))
-                if rss._sky_error is not None:
-                    f = rebin_spectra(new_wave, rss._wave, rss._sky_error, fill=numpy.nan)
-                    sky_errors.append(f.astype("float32"))
-                if rss._sky_east is not None:
-                    f = rebin_spectra(new_wave, rss._wave, rss._sky_east, fill=numpy.nan)
-                    skies_e.append(f.astype("float32"))
-                if rss._sky_east_error is not None:
-                    f = rebin_spectra(new_wave, rss._wave, rss._sky_east_error, fill=numpy.nan)
-                    sky_e_errors.append(f.astype("float32"))
-                if rss._sky_west is not None:
-                    f = rebin_spectra(new_wave, rss._wave, rss._sky_west, fill=numpy.nan)
-                    skies_w.append(f.astype("float32"))
-                if rss._sky_west_error is not None:
-                    f = rebin_spectra(new_wave, rss._wave, rss._sky_west_error, fill=numpy.nan)
-                    sky_w_errors.append(f.astype("float32"))
-            fluxes = numpy.asarray(fluxes)
-            errors = numpy.asarray(errors)
-            masks = numpy.asarray(masks)
-            lsfs = numpy.asarray(lsfs)
-            skies = numpy.asarray(skies)
-            sky_errors = numpy.asarray(sky_errors)
-            skies_e = numpy.asarray(skies_e)
-            sky_e_errors = numpy.asarray(sky_e_errors)
-            skies_w = numpy.asarray(skies_w)
-            sky_w_errors = numpy.asarray(sky_w_errors)
 
         # get overlapping ranges
         mask_overlap_br = (new_wave >= rss_r._wave[0]) & (new_wave <= rss_b._wave[-1])
@@ -1851,7 +1807,7 @@ class RSS(FiberRows):
         )
 
         # Resample spectra onto new wavelength grid:
-        # TODO: which ones are densities, which ones are not?
+        # TODO: which ones are densities, which ones are not? -- lsf needs just interpolation
         # TODO: how to properly resample the errors, ivar weighting ... see resample.py
         for ifiber in range(rss._fibers):
             f = resample_flux_density(wave, rss._wave[ifiber], rss._data[ifiber])
@@ -1891,149 +1847,6 @@ class RSS(FiberRows):
 
         return new_rss
 
-    # TODO: what do we want here in terms of densities?
-    def to_native_wave(self, method="linear", interp_density=True, return_density=False):
-        """Converts the wavelength to the native wavelength grid
-
-        This method de-rectifies the RSS object to the native wavelength grid.
-        The native wavelength grid is defined by the wavelength trace
-        coefficients. If no wavelength trace is found, it returns the RSS
-        object unchanged.
-
-        NOTE: all operations are perfomed in a copy of the RSS object, so the
-        original object is not modified.
-
-        NOTE: this method should be used to de-rectify RSS objects that
-        represent functions of wavelength, instead of samples. For example, RSS
-        objects that represent a fiberflat, or a supersky.
-
-        Parameters
-        ----------
-        method : str, optional
-            Interpolation method, by default "linear"
-        return_density : bool, optional
-            If True, returns the density of the rectification, by default False
-
-        Returns
-        -------
-        RSS
-            De-rectified RSS object
-        """
-        if self._wave is None and self._header is None:
-            raise ValueError("No wavelength information found in RSS object")
-        elif self._wave is None and self._header is not None:
-            self._wave, _, _, _ = self.get_wave_from_header()
-
-        if self._header is not None and not self._header.get("WAVREC", False) or len(self._wave.shape) == 2:
-            return self
-
-        # get native wavelength grid
-        trace = TraceMask.from_coeff_table(self._wave_trace)
-        wave = trace.eval_coeffs()
-
-        rss = copy(self)
-        if rss._header is None:
-            rss._header = pyfits.Header()
-        unit = rss._header["BUNIT"]
-        if not unit.endswith("/angstrom") and interp_density:
-            dlambda = numpy.gradient(rss._wave)
-            rss._data /= dlambda
-            rss._error /= dlambda
-            if rss._sky is not None:
-                rss._sky /= dlambda
-            if rss._sky_error is not None:
-                rss._sky_error /= dlambda
-            unit = unit + "/angstrom"
-
-        rss._header["BUNIT"] = unit
-        rss._header["WAVREC"] = False
-        rss._header["METREC"] = (method, "Wavelength rectification method")
-        if "CRPIX1" in rss._header:
-            del rss._header["CRPIX1"]
-        if "CRVAL1" in rss._header:
-            del rss._header["CRVAL1"]
-        if "CDELT1" in rss._header:
-            del rss._header["CDELT1"]
-        if "CTYPE1" in rss._header:
-            del rss._header["CTYPE1"]
-        # create output RSS
-        new_rss = RSS(
-            data=numpy.zeros((rss._fibers, wave.shape[1]), dtype="float32"),
-            error=numpy.zeros((rss._fibers, wave.shape[1]), dtype="float32"),
-            mask=numpy.zeros((rss._fibers, wave.shape[1]), dtype="bool"),
-            sky=numpy.zeros((rss._fibers, wave.shape[1]), dtype="float32") if rss._sky is not None else None,
-            sky_error=numpy.zeros((rss._fibers, wave.shape[1]), dtype="float32") if rss._sky_error is not None else None,
-            cent_trace=rss._cent_trace,
-            width_trace=rss._width_trace,
-            wave_trace=rss._wave_trace,
-            lsf_trace=rss._lsf_trace,
-            slitmap=rss._slitmap,
-            header=rss._header
-        )
-
-        # interpolate data, error, mask and sky arrays from rectified grid to original grid
-        for ifiber in range(rss._fibers):
-            f = resample_flux_density(wave[ifiber], rss._wave, rss._data[ifiber])
-            new_rss._data[ifiber] = f.astype("float32")
-            f = resample_flux_density(wave[ifiber][ifiber], rss._wave, rss._error[ifiber])
-            new_rss._error[ifiber] = f.astype("float32")
-            f = resample_flux_density(wave[ifiber][ifiber], rss._wave, rss._mask[ifiber], kind="nearest", bounds_error=False, fill_value=1)
-            new_rss._mask[ifiber] = f(wave[ifiber]).astype("bool")
-            if rss._sky is not None:
-                f = resample_flux_density(wave[ifiber], rss._wave, rss._sky[ifiber])
-                new_rss._sky[ifiber] = f.astype("float32")
-            if rss._sky_error is not None:
-                f = resample_flux_density(wave[ifiber], rss._wave, rss._sky_error[ifiber])
-                new_rss._sky_error[ifiber] = f.astype("float32")
-            if rss._sky_east is not None:
-                f = resample_flux_density(wave[ifiber], rss._wave, rss._sky_east[ifiber])
-                new_rss._sky_east[ifiber] = f.astype("float32")
-            if rss._sky_east_error is not None:
-                f = resample_flux_density(wave[ifiber], rss._wave, rss._sky_east_error[ifiber])
-                new_rss._sky_east_error[ifiber] = f.astype("float32")
-            if rss._sky_west is not None:
-                f = resample_flux_density(wave[ifiber], rss._wave, rss._sky_west[ifiber])
-                new_rss._sky_west[ifiber] = f.astype("float32")
-            if rss._sky_west_error is not None:
-                f = resample_flux_density(wave[ifiber], rss._wave, rss._sky_west_error[ifiber])
-                new_rss._sky_west_error[ifiber] = f.astype("float32")
-
-        if not return_density and unit.endswith("/angstrom"):
-            dlambda = numpy.gradient(wave, axis=1)
-            new_rss._data *= dlambda
-            new_rss._error *= dlambda
-            if new_rss._sky is not None:
-                new_rss._sky *= dlambda
-            if new_rss._sky_error is not None:
-                new_rss._sky_error *= dlambda
-            if new_rss._sky_east is not None:
-                new_rss._sky_east *= dlambda
-            if new_rss._sky_east_error is not None:
-                new_rss._sky_east_error *= dlambda
-            if new_rss._sky_west is not None:
-                new_rss._sky_west *= dlambda
-            if new_rss._sky_west_error is not None:
-                new_rss._sky_west_error *= dlambda
-            new_rss._header["BUNIT"] = unit.replace("/angstrom", "")
-        elif return_density and not unit.endswith("/angstrom"):
-            dlambda = numpy.gradient(wave, axis=1)
-            new_rss._data /= dlambda
-            new_rss._error /= dlambda
-            if new_rss._sky is not None:
-                new_rss._sky /= dlambda
-            if new_rss._sky_error is not None:
-                new_rss._sky_error /= dlambda
-            if new_rss._sky_east is not None:
-                new_rss._sky_east /= dlambda
-            if new_rss._sky_east_error is not None:
-                new_rss._sky_east_error /= dlambda
-            if new_rss._sky_west is not None:
-                new_rss._sky_west /= dlambda
-            if new_rss._sky_west_error is not None:
-                new_rss._sky_west_error /= dlambda
-            new_rss._header["BUNIT"] = unit + "/angstrom"
-
-        return new_rss
 
     def subtract_continuum(self, niter=5, thresh=0.999, median_box_range=(50, 300)):
         """Fits and subtracts the continuum contribution in each fiber

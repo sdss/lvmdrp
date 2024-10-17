@@ -1573,7 +1573,7 @@ def apply_fiberflat(in_rss: str, out_frame: str, in_flat: str, clip_below: float
     # check if fiberflat has the same number of fibers as the target data
     if rss._fibers != flat._fibers:
         log.error(f"number of fibers in target data ({rss._fibers}) and fiberflat ({flat._fibers}) do not match")
-        return None
+        raise RuntimeError(f"number of fibers in target data ({rss._fibers}) and fiberflat ({flat._fibers}) do not match")
 
     # check if fiberflat has the same wavelength grid as the target data
     if not numpy.isclose(rss._wave, flat._wave).all():
@@ -1587,12 +1587,10 @@ def apply_fiberflat(in_rss: str, out_frame: str, in_flat: str, clip_below: float
         spec_flat = flat.getSpec(i)
         spec_data = rss.getSpec(i)
 
-        # interpolate fiberflat to target wavelength grid to fill in missing values
         if not numpy.isclose(spec_flat._wave, spec_data._wave).all():
             deltas = spec_flat._wave - spec_data._wave
-            log.warning(f"at fiber {i} resampling fiberflat: {numpy.min(deltas):.4f} - {numpy.max(deltas):.4f}")
-            rss.add_header_comment(f"at fiber {i} resampling fiberflat: {numpy.min(deltas):.4f} - {numpy.max(deltas):.4f}")
-            spec_flat = spec_flat.resampleSpec(spec_data._wave, err_sim=5)
+            log.error(f"Fiber {i} fiberflat wrong wavelengh grid: {numpy.min(deltas):.4f} - {numpy.max(deltas):.4f}")
+            raise RuntimeError(f"Fiber {i} fiberflat wrong wavelengh grid: {numpy.min(deltas):.4f} - {numpy.max(deltas):.4f}")
 
         # apply clipping
         select_clip_below = (spec_flat < clip_below) | numpy.isnan(spec_flat._data)
