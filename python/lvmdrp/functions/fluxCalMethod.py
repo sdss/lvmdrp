@@ -59,7 +59,7 @@ from lvmdrp.core.sky import get_sky_mask_uves, get_z_continuum_mask
 from lvmdrp import log
 
 from lvmdrp.core.plot import plt, create_subplots, save_fig
-from lvmdrp.core.constants import ROOT_PATH
+from lvmdrp.core.constants import ROOT_PATH, MASTERS_DIR
 
 description = "provides flux calibration tasks"
 
@@ -292,7 +292,8 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     # TODO: think about uniting this code and the fluxcal code that iterates over cameras?
     # TODO: find a place under the calib directory structure for the stellar models
     # TODO: telluric list should go in lvmcore
-    models_dir = '/Users/amejia/Downloads/stellar_models/'
+    # models_dir = '/Users/amejia/Downloads/stellar_models/'
+    models_dir = os.path.join(MASTERS_DIR, "stellar_models")
     telluric_file = os.path.join(ROOT_PATH, 'resources', 'telluric_lines.txt')  # wavelength regions with Telluric
     # absorptions based on KPNO data (unknown source) with a 1% transmission threshold this file is used as a mask for
     # the fit of standard stars - from Alfredo.
@@ -850,9 +851,10 @@ def calc_sensitivity_from_model(wl, obs_spec, spec_lsf, best_model='', model_to_
     """
 
     # read the best-fit model and convolve with spectrograph LSF
-    model_dir = '/Users/amejia/Downloads/stellar_models/'
+    # model_dir = '/Users/amejia/Downloads/stellar_models/'
+    models_dir = os.path.join(MASTERS_DIR, "stellar_models")
 
-    with fits.open(join(model_dir, 'good_res_new', best_model)) as hdul:
+    with fits.open(join(models_dir, 'good_res_new', best_model)) as hdul:
         model_flux = hdul[0].data
         hdr = hdul[0].header
     #model_flux = best_fit_model['flux']
