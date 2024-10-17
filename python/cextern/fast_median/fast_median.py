@@ -12,11 +12,11 @@ try:
     from os import path, environ
     s = platform.system()
     resources_dir = environ.get('LVMDRP_LIB_DIR') or path.join(path.dirname(__file__), 'src')
-    if s=='Linux':
+    if s == 'Linux':
         resources_dir = path.join(resources_dir, 'fast_median.so')
         #print(resources_dir)
         lib = ctypes.cdll.LoadLibrary(resources_dir)
-    elif s=='Darwin':
+    elif s == 'Darwin':
         resources_dir = path.join(resources_dir, 'fast_median.dylib')
         #print(resources_dir)
         lib = ctypes.cdll.LoadLibrary(resources_dir)
@@ -52,8 +52,8 @@ try:
     lib.median_filter_1d_double.restype = None
 
     HAVE_MEDIAN_SO = True
-except Exception:
-    log.error(Exception)
+except Exception as e:
+    log.error(e)
     pass
 
 log.debug('HAVE_MEDIAN_SO ',HAVE_MEDIAN_SO)
