@@ -303,8 +303,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
                    isfile(join(model_dir, 'normalized_logscale', f)) and (f.lower().endswith('.fits'))]
     model_specs_norm = []
 
-
-    # !!! HERE DRP CRASHES WHEN IT TRIES TO OPEN ALL THE MODEL. Solution -> save everything to the single fits file
+    # read the downsampled to 2A, normalized, log-wavelength model grid
     n_models = len(model_names)
     log.info(f'Number of models: {n_models}')
     for i in range(n_models):
@@ -317,10 +316,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     GAIA_CACHE_DIR = "./" if GAIA_CACHE_DIR is None else GAIA_CACHE_DIR
     log.info(f"Using Gaia CACHE DIR '{GAIA_CACHE_DIR}'")
 
-    # TODO: add correction for star velocity
-    # TODO: add gaia errors
-    # TODO: account for sky errors
-
+    # TODO: remove this extinction correction
     # load extinction curve
     # Note that we assume a constant extinction curve here!
     txt = np.genfromtxt(os.getenv("LVMCORE_DIR") + "/etc/lco_extinction.txt")
@@ -339,7 +335,6 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     ext = []
     normalized_spectra_all_bands = []
     std_errors_all_bands = []
-    gaia_continuum = []
     lsf_all_bands = []
 
     for b in range(len(in_rss)):
@@ -405,9 +400,10 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             if channel == "z":
                 spec_tmp = fluxcal.interpolate_mask(w_tmp, spec_tmp, ~m2 | mask_bad, fill_value="extrapolate")
 
-            # correct for extinction
+            # TODO: remove extinction correction
             spec_tmp *= 10 ** (0.4 * ext_tmp * secz)
             error_tmp = error_tmp * 10 ** (0.4 * ext_tmp * secz)
+
             lsf_conv = np.sqrt(2 ** 2 - lsf_tmp ** 2)  # as model spectra were already convolved with lsf=2.0,
             # we need to degrade our observed std spectra
             mask_bad = ~np.isfinite(spec_tmp)
@@ -417,7 +413,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             spec_tmp_convolved = lsf_convolve(spec_tmp, lsf_conv, w_tmp)
 
             # Fit continuum and normalize spectra
-            # TODO: evaluate this against DESI's 160A median filter
+            # TODO: replace this with DESI's 160A median filter
             best_continuum, continuum_models, masked_pixels, knots = fit_continuum_std(w_tmp,
                                                                                        spec_tmp_convolved,
                                                                                        mask_bands=mask_bands,
@@ -476,6 +472,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
                                                     # we need to degrade our observed std spectra
 
        # # degrade observed std spectra
+       # TODO: it seems we are convolving a second time? perhaps remove
         std_normalized_all_convolved = lsf_convolve(std_normalized_all, lsf_conv, std_wave_all)
         # TODO: switch to new resampling code
         log_std_wave_all, flux_std_logscale = linear_to_logscale(std_wave_all, std_normalized_all_convolved)
@@ -483,12 +480,12 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
                                                     std_errors_all_bands[1][i][mask_r_norm],
                                                     std_errors_all_bands[2][i][mask_z_norm]))
         log_std_wave_all, log_std_errors_normalized_all = linear_to_logscale(std_wave_all, std_errors_normalized_all)
-        # === TODO: Update interpolated errors in logscale
 
         # load Gaia BP-RP spectrum from cache, or download from webapp, and fit the continuum to Gaia spec
+        # TODO: instead of using the GAIA continuum, use the model as is, but scale it to a broad band magnitude, see
+        # code in science_sensitivity for example
         try:
             gw, gf = fluxcal.retrive_gaia_star(gaia_ids[i], GAIA_CACHE_DIR=GAIA_CACHE_DIR)
-            # === TODO: ADD heliocentric correction GAIA->obs
             stdflux = np.interp(std_wave_all, gw, gf)  # interpolate to our wavelength grid
         except fluxcal.GaiaStarNotFound as e:
             log.warning(e)
@@ -504,6 +501,9 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         normalized_std_on_gaia_cont_single = normalized_std_on_gaia_cont_single_tmp / np.nansum(normalized_std_on_gaia_cont_single_tmp)
         # errors for gaia continuum * normalized stds:
         #gaia_std_err = np.sqrt(normalized_std_on_gaia_cont_single ** 2 * std_errors_normalized_all ** 2)
+
+        # TODO: first find redshift, redshift the models, then select based on chi2
+        # canonical f-type model: Teff=6500, logg=4, Fe/H=-1.5 or something like that
 
         # mask tellurics
         mask_tellurics_log = np.zeros_like(log_std_wave_all, dtype=bool)
@@ -531,6 +531,11 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         print(f'Model: {model_names[best_id]}')
         model_params = re.split('[a-z]+', model_names[best_id], flags=re.IGNORECASE)
         print(model_params)
+
+        # TODO: once we have the best model, we're done. We can do the rest of the calculation right here
+        # and write the sensitivity function(s) into the fits file
+        # TODO: remove the second part of the code that runs per camera
+        # TODO: add to the function that selects and applies the sens function like we do with STD, SCI (add MOD)
 
         # Check the possible velocity offsets
         # rec_shift = (std_wave_all > 3900) & (std_wave_all < 4100)
