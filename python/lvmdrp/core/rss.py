@@ -20,13 +20,18 @@ from lvmdrp.core.fiberrows import FiberRows
 from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.core.header import Header, combineHdr
 from lvmdrp.core.positionTable import PositionTable
-from lvmdrp.core.spectrum1d import Spectrum1D, find_continuum, wave_little_interpol
+from lvmdrp.core.spectrum1d import Spectrum1D, find_continuum
 from lvmdrp.core import dataproducts as dp
 from lvmdrp.core.fit_profile import polyfit2d, polyval2d
-from lvmdrp.core.resample import resample_flux_density, rebin_spectra
+from lvmdrp.core.resample import resample_flux_density
 
 from lvmdrp import __version__ as drpver
 
+def ivar_to_error(ivar):
+    return numpy.sqrt(numpy.divide(1, ivar, where=ivar != 0, out=numpy.zeros_like(ivar, dtype=numpy.float32)))
+
+def error_to_ivar(error):
+    return numpy.divide(1, error**2, where=error != 0, out=numpy.zeros_like(error, dtype=numpy.float32))
 
 
 def _read_pixwav_map(lamp: str, camera: str, pixels=None, waves=None):
@@ -1807,39 +1812,33 @@ class RSS(FiberRows):
         )
 
         # Resample spectra onto new wavelength grid:
-        # TODO: which ones are densities, which ones are not? -- lsf needs just interpolation
-        # TODO: how to properly resample the errors, ivar weighting ... see resample.py
         for ifiber in range(rss._fibers):
-            f = resample_flux_density(wave, rss._wave[ifiber], rss._data[ifiber])
-            new_rss._data[ifiber] = f.astype("float32")
             if rss._error is not None:
-                f = resample_flux_density(wave, rss._wave[ifiber], rss._error[ifiber])
-                new_rss._error[ifiber] = f.astype("float32")
+                f, ivar = resample_flux_density(wave, rss._wave[ifiber], rss._data[ifiber], ivar=error_to_ivar(rss._error[ifiber]))
+                new_rss._data[ifiber] = f.astype("float32")
+                new_rss._error[ifiber] = ivar_to_error(ivar).astype("float32")
+            else:
+                f = resample_flux_density(wave, rss._wave[ifiber], rss._data[ifiber])
+                new_rss._data[ifiber] = f.astype("float32")
             f = resample_flux_density(wave, rss._wave[ifiber], rss._mask[ifiber])
             new_rss._mask[ifiber] = f.astype("bool")
             new_rss._mask[ifiber] |= numpy.isnan(new_rss._data[ifiber])|(new_rss._data[ifiber]==0)
             new_rss._mask[ifiber] |= ~numpy.isfinite(new_rss._error[ifiber])
             if rss._lsf is not None:
-                f = resample_flux_density(wave, rss._wave[ifiber], rss._lsf[ifiber])
+                f = numpy.interp(wave, rss._wave[ifiber], rss._lsf[ifiber])
                 new_rss._lsf[ifiber] = f.astype("float32")
             if rss._sky is not None:
-                f = resample_flux_density(wave, rss._wave[ifiber], rss._sky[ifiber])
+                f, ivar = resample_flux_density(wave, rss._wave[ifiber], rss._sky[ifiber], ivar=error_to_ivar(rss._sky_error[ifiber]))
                 new_rss._sky[ifiber] = f.astype("float32")
-            if rss._sky_error is not None:
-                f = resample_flux_density(wave, rss._wave[ifiber], rss._sky_error[ifiber])
-                new_rss._sky_error[ifiber] = f.astype("float32")
+                new_rss._sky_error[ifiber] = ivar_to_error(ivar).astype("float32")
             if rss._sky_east is not None:
-                f = resample_flux_density(wave, rss._wave[ifiber], rss._sky_east[ifiber])
+                f, ivar = resample_flux_density(wave, rss._wave[ifiber], rss._sky_east[ifiber], ivar=error_to_ivar(rss._sky_east_error[ifiber]))
                 new_rss._sky_east[ifiber] = f.astype("float32")
-            if rss._sky_east_error is not None:
-                f = resample_flux_density(wave, rss._wave[ifiber], rss._sky_east_error[ifiber])
-                new_rss._sky_east_error[ifiber] = f.astype("float32")
+                new_rss._sky_east_error[ifiber] = ivar_to_error(ivar).astype("float32")
             if rss._sky_west is not None:
-                f = resample_flux_density(wave, rss._wave[ifiber], rss._sky_west[ifiber])
+                f, ivar = resample_flux_density(wave, rss._wave[ifiber], rss._sky_west[ifiber], ivar=error_to_ivar(rss._sky_west_error[ifiber]))
                 new_rss._sky_west[ifiber] = f.astype("float32")
-            if rss._sky_west_error is not None:
-                f = resample_flux_density(wave, rss._wave[ifiber], rss._sky_west_error[ifiber])
-                new_rss._sky_west_error[ifiber] = f.astype("float32")
+                new_rss._sky_west_error[ifiber] = ivar_to_error(ivar).astype("float32")
         # add supersky information if available
         if rss._supersky is not None:
             new_rss.set_supersky(rss._supersky)
