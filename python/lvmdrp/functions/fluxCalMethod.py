@@ -567,7 +567,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
                                         flux_model_logscale[log_rec_shift], max_ampl=50)*np.median(log_std_wave_all - np.roll(log_std_wave_all, 1))
         # flux_std_logscale_shifted = np.interp((log_std_wave_all + log_shift_b), log_std_wave_all, flux_std_logscale)
         flux_std_shifted_b = logscale_to_linear(std_wave_all, log_std_wave_all, flux_std_logscale, shift=-log_shift_b)
-        #shift_b =
+        vel_shift_b = log_shift_b * 3e5
         print(f'Log-shift in b: {log_shift_b}')
 
         log_rec_shift = (log_std_wave_all > 8.77) & (log_std_wave_all < 8.82)
@@ -575,12 +575,14 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
                                         flux_model_logscale[log_rec_shift], max_ampl=50)*np.median(log_std_wave_all - np.roll(log_std_wave_all, 1))
         # flux_std_logscale_shifted = np.interp((log_std_wave_all + log_shift_b), log_std_wave_all, flux_std_logscale)
         flux_std_shifted_r = logscale_to_linear(std_wave_all, log_std_wave_all, flux_std_logscale, shift=-log_shift_r)
+        vel_shift_r = log_shift_r * 3e5
 
         log_rec_shift = (log_std_wave_all > 9.03) & (log_std_wave_all < 9.07)
         log_shift_z = fluxcal.derive_vecshift(flux_std_logscale[log_rec_shift],
                                         flux_model_logscale[log_rec_shift], max_ampl=50)*np.median(log_std_wave_all - np.roll(log_std_wave_all, 1))
         # flux_std_logscale_shifted = np.interp((log_std_wave_all + log_shift_b), log_std_wave_all, flux_std_logscale)
         flux_std_shifted_z = logscale_to_linear(std_wave_all, log_std_wave_all, flux_std_logscale, shift=-log_shift_z)
+        vel_shift_z = log_shift_z * 3e5
 
         log_shift_b_all.append(log_shift_b)
         log_shift_r_all.append(log_shift_r)
@@ -681,6 +683,8 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             xlim = [8.24, 8.38]
             ylim = [0.1,1.5]
             plt.text((xlim[1] - xlim[0]) * 0.03 + xlim[0], (ylim[1] - ylim[0]) * 0.9 + ylim[0], 'b channel', size=14)
+            plt.text((xlim[1] - xlim[0]) * 0.03 + xlim[0], (ylim[1] - ylim[0]) * 0.82 + ylim[0], f'Vel. correction = '
+                                                                                    f'{vel_shift_b:.2f} km/s', size=14)
             plt.xlim(xlim)
             plt.ylim(ylim)
             plt.xlabel("ln (wavelength [A])")
@@ -695,6 +699,9 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             xlim = [8.66, 8.8]
             ylim = [0.2, 1.5]
             plt.text((xlim[1] - xlim[0]) * 0.03 + xlim[0], (ylim[1] - ylim[0]) * 0.9 + ylim[0], 'r channel', size=14)
+            plt.text((xlim[1] - xlim[0]) * 0.03 + xlim[0], (ylim[1] - ylim[0]) * 0.82 + ylim[0], f'Vel. correction = '
+                                                                                                 f'{vel_shift_r:.2f} km/s',
+                     size=14)
             plt.xlim(xlim)
             plt.ylim(ylim)
             plt.xlabel("ln (wavelength [A])")
@@ -709,6 +716,9 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             xlim = [9.02, 9.16]
             ylim = [0.2, 1.5]
             plt.text((xlim[1] - xlim[0]) * 0.03 + xlim[0], (ylim[1] - ylim[0]) * 0.9 + ylim[0], 'z channel', size=14)
+            plt.text((xlim[1] - xlim[0]) * 0.03 + xlim[0], (ylim[1] - ylim[0]) * 0.82 + ylim[0], f'Vel. correction = '
+                                                                                                 f'{vel_shift_z:.1f} km/s',
+                     size=14)
             plt.xlim(xlim)
             plt.ylim(ylim)
             plt.xlabel("ln (wavelength [A])")
