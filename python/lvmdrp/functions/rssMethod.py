@@ -364,14 +364,16 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
 
         # fix cc_max_shift
         # cross-match spectrum and pixwav map
+        stretch_min, stretch_max, stretch_steps = 0.95, 1.05, 10000
         cc, bhat, mhat = _cross_match_float(
-            ref_spec=pix_spec,
-            obs_spec=arc._data[ref_fiber],
-            stretch_factors=numpy.linspace(0.8,1.2,10000),
+            ref_spec=pix_spec[3:-3],
+            obs_spec=arc._data[ref_fiber][3:-3],
+            stretch_factors=numpy.linspace(stretch_min, stretch_max, stretch_steps),
             shift_range=[-cc_max_shift, cc_max_shift],
             normalize_spectra=False,
         )
-
+        if mhat == stretch_min or mhat == stretch_max:
+            log.warning(f"boundary of stretch factors: {mhat = } ({stretch_min, stretch_max = })")
         log.info(f"max CC = {cc:.2f} for strech = {mhat:.8f} and shift = {bhat:.8f}")
     else:
         mhat, bhat = 1.0, 0.0
@@ -812,6 +814,14 @@ def create_pixel_table(in_rss: str, out_rss: str, in_waves: str, in_lsfs: str, c
     lsf_trace = TraceMask.from_spectrographs(*lsf_traces)
     rss.set_lsf_trace(lsf_trace)
     rss.set_lsf_array()
+
+    # add calibrations used to header
+    for wave_trace, in_wave in zip(wave_traces, in_waves):
+        camera = wave_trace._header["CCD"]
+        rss.add_header_comment(f"{in_wave}, wavelength used for {camera}")
+    for lsf_trace, in_lsf in zip(lsf_traces, in_lsfs):
+        camera = lsf_trace._header["CCD"]
+        rss.add_header_comment(f"{in_lsf}, LSF used for {camera}")
 
     # set header keywords for heliocentric velocity corrections
     log.info("calculating heliocentric velocity corrections")

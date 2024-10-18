@@ -13,12 +13,12 @@ from astropy.coordinates import EarthLocation
 from astropy import units as u
 
 from lvmdrp import log
-from lvmdrp.core.constants import CONFIG_PATH
+from lvmdrp.core.constants import CONFIG_PATH, CON_LAMPS, ARC_LAMPS
 from lvmdrp.core.apertures import Aperture
 from lvmdrp.core.cube import Cube
 from lvmdrp.core.fiberrows import FiberRows
 from lvmdrp.core.tracemask import TraceMask
-from lvmdrp.core.header import Header, combineHdr
+from lvmdrp.core.header import Header
 from lvmdrp.core.positionTable import PositionTable
 from lvmdrp.core.spectrum1d import Spectrum1D, find_continuum
 from lvmdrp.core import dataproducts as dp
@@ -301,8 +301,10 @@ class RSS(FiberRows):
 
         # update header
         if len(hdrs) > 0:
-            hdr_out = combineHdr(hdrs)
-            hdr_out._header["CCD"] = hdr_out._header["CCD"][0]
+            hdr_out = hdrs[0]._header.copy()
+            for hdr in hdrs[1:]:
+                hdr_out.update(hdr._header)
+            hdr_out["CCD"] = hdr_out["CCD"][0]
         else:
             hdr_out = None
 
@@ -322,7 +324,7 @@ class RSS(FiberRows):
             sky_error=sky_error_out,
             supersky=supersky_out,
             supersky_error=supersky_error_out,
-            header=hdr_out._header,
+            header=hdr_out,
             slitmap=slitmap_out,
             fluxcal_std=fluxcal_std_out,
             fluxcal_sci=fluxcal_sci_out
@@ -1568,10 +1570,28 @@ class RSS(FiberRows):
                 raise ValueError(f"Method {method} is not supported when error is None")
             raise ValueError(f"Method {method} is not supported")
 
+        # add combined lamps to header
+        new_header = rss_in[0]._header.copy()
+        if new_header["IMAGETYP"] == "flat":
+            lamps = CON_LAMPS
+        elif new_header["IMAGETYP"] == "arc":
+            lamps = ARC_LAMPS
+        else:
+            lamps = []
+
+        if lamps:
+            new_lamps = set()
+            for rss in rss_in:
+                for lamp in lamps:
+                    if rss._header.get(lamp) == "ON":
+                        new_lamps.add(lamp)
+            for lamp in new_lamps:
+                new_header[lamp] = "ON"
+
         self._data = combined_data
         self._wave = rss_in[0]._wave
         self._lsf = rss_in[0]._lsf
-        self._header = rss_in[0]._header
+        self._header = new_header
         self._mask = combined_mask
         self._error = combined_error
         self._arc_position_x = rss_in[i]._arc_position_x
@@ -3197,11 +3217,17 @@ class RSS(FiberRows):
 
         # calculate standard stars heliocentric corrections
         for istd in range(1, 15+1):
-            is_acq = self._header[f"STD{istd}ACQ"]
-            if not is_acq:
+            is_acq = self._header.get(f"STD{istd}ACQ")
+            if not is_acq or is_acq is None:
+                self._header[f"STD{istd}HRV"] = (0.0, f"Standard {istd} heliocentric vel. corr. [km/s]")
                 continue
 
-            std_obstime = Time(self._header[f"STD{istd}T0"])
+            time_str = self._header.get(f"STD{istd}T0")
+            if time_str is None:
+                self._header[f"STD{istd}HRV"] = (0.0, f"Standard {istd} heliocentric vel. corr. [km/s]")
+                continue
+
+            std_obstime = Time(time_str)
             std_ra, std_dec = self._header.get(f"STD{istd}RA", 0.0), self._header.get(f"STD{istd}DE", 0.0)
             if std_ra == 0 or std_dec == 0:
                 self._header[f"STD{istd}HRV"] = (0.0, f"Standard {istd} heliocentric vel. corr. [km/s]")
