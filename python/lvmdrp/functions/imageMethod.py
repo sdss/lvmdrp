@@ -758,7 +758,7 @@ def fix_pixel_shifts(in_images, out_images, ref_images, in_mask, report=None,
                 [img.add_header_comment("QC reports and DRP do not agree on the shifted rows") for img in images]
                 if interactive:
                     log.info("interactive mode enabled")
-                    answer = input("apply [d]rp, [c]ustom shifts or [n]one: ")
+                    answer = input("apply [q]c, [d]rp, [c]ustom shifts or [n]one: ")
                     if answer.lower() == "q":
                         log.info("choosing QC shifts")
                         shifts = qshifts
