@@ -1497,6 +1497,11 @@ def science_reduction(expnum: int, use_longterm_cals: bool = False,
     sci_metadata = get_frames_metadata(mjd=sci_mjd)
     sci_metadata.query("expnum == @expnum", inplace=True)
     sci_metadata.sort_values("expnum", ascending=False, inplace=True)
+    sci_metadata.query("qaqual == 'good'", inplace=True)
+
+    if sci_metadata.empty:
+        log.error(f"exposure {expnum = } was flagged as 'BAD' by the raw data quality pipeline")
+        return
 
     # define general metadata
     sci_tileid = sci_metadata["tileid"].unique()[0]
@@ -1513,7 +1518,7 @@ def science_reduction(expnum: int, use_longterm_cals: bool = False,
     calibs = get_calib_paths(mjd=cals_mjd, version=drpver, longterm_cals=use_longterm_cals, from_sanbox=True)
 
     # make sure only one exposure number is being reduced
-    sci_metadata.query("expnum == @sci_expnum", inplace=True)
+    # sci_metadata.query("expnum == @sci_expnum", inplace=True)
     sci_metadata.sort_values("camera", inplace=True)
 
     # detrend science exposure
@@ -1737,7 +1742,10 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
     sub = frames.copy()
 
     # remove bad or test quality frames
-    sub = sub[~(sub['quality'] != 'excellent')]
+    sub = sub[~(sub['qaqual'] != 'good')]
+    if sub.empty:
+        log.error(f'no good exposure found with parameters: {mjd = }, {expnum = }')
+        return
 
     # filter on exposure number
     if expnum:
