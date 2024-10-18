@@ -1120,7 +1120,7 @@ def resample_wavelength(in_rss: str, out_rss: str, method: str = "linear",
     log.info(f"using wavelength range {wave_range = } angstrom and {wave_disp = } angstrom pixel size")
 
     # resample the wavelength solution
-    log.info(f"resampling the spectra ...")
+    log.info("resampling the spectra ...")
     new_rss = rss.rectify_wave(wave_range=wave_range, wave_disp=wave_disp)
 
     # write output RSS

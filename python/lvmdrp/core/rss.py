@@ -1846,7 +1846,6 @@ class RSS(FiberRows):
 
         return new_rss
 
-
     def subtract_continuum(self, niter=5, thresh=0.999, median_box_range=(50, 300)):
         """Fits and subtracts the continuum contribution in each fiber
 

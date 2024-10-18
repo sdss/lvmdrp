@@ -56,7 +56,7 @@ from lvmdrp.core.rss import RSS, lvmFrame
 from lvmdrp.functions import imageMethod as image_tasks
 from lvmdrp.functions import rssMethod as rss_tasks
 from lvmdrp.main import start_logging, get_config_options, read_fibermap, get_master_mjd, get_calib_paths, group_calib_paths, reduce_2d
-from lvmdrp.functions.run_twilights import lvmFlat, fit_fiberflat, create_lvmflat, combine_twilight_sequence
+from lvmdrp.functions.run_twilights import lvmFlat, to_native_wave, fit_fiberflat, create_lvmflat, combine_twilight_sequence
 
 
 SLITMAP = read_fibermap(as_table=True)
@@ -1418,7 +1418,7 @@ def create_dome_fiberflats(mjd, expnums_ldls, expnums_qrtz, use_longterm_cals=Tr
         fflat._data = fflat._data / median_fiber
         fflat.set_wave_trace(mwave)
         fflat.set_lsf_trace(mlsf)
-        fflat = fflat.to_native_wave(method="linear", interp_density=False, return_density=False)
+        fflat = to_native_wave(fflat)
         fflat.writeFitsData(mflat_path)
         # create lvmFlat object
         lvmflat = lvmFlat(data=xflat._data / fflat._data, error=xflat._error, mask=xflat._mask, header=xflat._header,
