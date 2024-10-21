@@ -59,7 +59,7 @@ from lvmdrp.core.sky import get_sky_mask_uves, get_z_continuum_mask
 from lvmdrp import log
 
 from lvmdrp.core.plot import plt, create_subplots, save_fig
-from lvmdrp.core.constants import ROOT_PATH
+from lvmdrp.core.constants import MASTERS_DIR
 
 description = "provides flux calibration tasks"
 
@@ -244,6 +244,7 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'STD', display_plo
 
     return fframe
 
+
 def linear_to_logscale(wl, flux):
     wl_log = np.log(wl)
     wl_log_step = np.min((wl_log-np.roll(wl_log,1))[1:])
@@ -291,17 +292,18 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     # TODO: think about uniting this code and the fluxcal code that iterates over cameras?
     # TODO: find a place under the calib directory structure for the stellar models
     # TODO: telluric list should go in lvmcore
-    model_dir = '/Users/jane/Science/LVMFluxCalib/stellar_models/'
+    # models_dir = '/Users/amejia/Downloads/stellar_models/'
+    models_dir = os.path.join(MASTERS_DIR, "stellar_models")
     template_model = 'M_p6250g4.0z-0.25t1.0_a-0.10c0.00n0.00o-0.10r0.00s0.00_VIS.fits'
-    telluric_file = os.path.join(ROOT_PATH, 'resources', 'telluric_lines.txt')  # wavelength regions with Telluric
+    telluric_file = os.path.join(os.getenv("LVMCORE_DIR"), 'etc', 'telluric_lines.txt')  # wavelength regions with Telluric
     # absorptions based on KPNO data (unknown source) with a 1% transmission threshold this file is used as a mask for
     # the fit of standard stars - from Alfredo.
     # https://github.com/desihub/desispec/blob/main/py/desispec/data/arc_lines/telluric_lines.txt
     telluric_tab = Table.read(telluric_file, format='ascii.fixed_width_two_line')
     mask_for_fit = telluric_tab
 
-    model_names = [f for f in listdir(join(model_dir, 'normalized_logscale')) if
-                   isfile(join(model_dir, 'normalized_logscale', f)) and (f.lower().endswith('.fits'))]
+    model_names = [f for f in listdir(join(models_dir, 'normalized_logscale')) if
+                   isfile(join(models_dir, 'normalized_logscale', f)) and (f.lower().endswith('.fits'))]
     model_specs_norm = []
 
     # read the downsampled to 2A, normalized, log-wavelength model grid
@@ -309,7 +311,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     log.info(f'Number of models: {n_models}')
     for i in range(n_models):
         # convolved_tmp = fits.getdata(join(model_dir, 'convolved', model_names[i]))
-        with fits.open(join(model_dir, 'normalized_logscale', model_names[i]), memmap=False) as hdul:
+        with fits.open(join(models_dir, 'normalized_logscale', model_names[i]), memmap=False) as hdul:
             convolved_tmp = hdul[0].data
         model_specs_norm.append(convolved_tmp)
     model_specs_norm = np.array(model_specs_norm)
@@ -349,12 +351,13 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         try:
             stds = fluxcal.retrieve_header_stars(rss=rss_tmp)
         except KeyError:
-            log.warning(f"no standard star metadata found in '{in_rss}', skipping sensitivity measurement")
-            rss.add_header_comment(f"no standard star metadata found in '{in_rss}', skipping sensitivity measurement")
-            rss.set_fluxcal(fluxcal=res_std, source='std')
-            rss.writeFitsData(in_rss)
+            pass
+            # log.warning(f"no standard star metadata found in '{in_rss}', skipping sensitivity measurement")
+            # rss.add_header_comment(f"no standard star metadata found in '{in_rss}', skipping sensitivity measurement")
+            # rss.set_fluxcal(fluxcal=res_std, source='std')
+            # rss.writeFitsData(in_rss)
             # TODO: fix this, this seems to be copy-pasted from the gaia code
-            return res_std, mean_std, rms_std, rss
+            # return res_std, mean_std, rms_std, rss
 
         # wavelength array
         w_tmp = rss_tmp._wave
@@ -411,7 +414,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
 
             # # degrade observed std spectra
             # TODO: switch to new LSF convolution code
-            spec_tmp_convolved = lsf_convolve(spec_tmp, lsf_conv, w_tmp)
+            spec_tmp_convolved = fluxcal.lsf_convolve(spec_tmp, lsf_conv, w_tmp)
 
             # Fit continuum and normalize spectra
             # TODO: replace this with DESI's 160A median filter
@@ -462,6 +465,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     log_shift_z_all = []
     log_shift_brz_all = []
     # Stitch normalized spectra in brz together
+    fig, axs = plt.subplots(len(stds), 1, figsize=(15,15), layout="constrained")
     for i in range(len(stds)):
         std_normalized_all = np.concatenate((normalized_spectra_all_bands[0][i][mask_b_norm],
                                              normalized_spectra_all_bands[1][i][mask_r_norm],
@@ -474,7 +478,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
 
        # # degrade observed std spectra
        # TODO: it seems we are convolving a second time? perhaps remove
-        std_normalized_all_convolved = lsf_convolve(std_normalized_all, lsf_conv, std_wave_all)
+        std_normalized_all_convolved = fluxcal.lsf_convolve(std_normalized_all, lsf_conv, std_wave_all)
         # TODO: switch to new resampling code
         log_std_wave_all, flux_std_logscale = linear_to_logscale(std_wave_all, std_normalized_all_convolved)
         std_errors_normalized_all = np.concatenate((std_errors_all_bands[0][i][mask_b_norm],
@@ -572,7 +576,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
 
 
         # Conversion coefficient model to gaia units
-        with fits.open(join(model_dir, 'good_res_new', model_names[best_id])) as hdul:
+        with fits.open(join(models_dir, 'good_res_new', model_names[best_id])) as hdul:
             model_flux = hdul[0].data
             hdr = hdul[0].header
             # model_flux = best_fit_model['flux']
@@ -606,10 +610,11 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         model_flux_resampled = np.interp(std_wave_all, model_wave, model_flux)
         good_model_to_std_lsf = np.sqrt(lsf_all ** 2 - 0.3 ** 2) # to degrade good resolution model to std lsf for plots
         #print(len(good_model_to_std_lsf), len(model_flux_resampled), len(std_wave_all))
-        model_convolved_spec_lsf = lsf_convolve(model_flux_resampled, good_model_to_std_lsf, std_wave_all)
+        model_convolved_spec_lsf = fluxcal.lsf_convolve(model_flux_resampled, good_model_to_std_lsf, std_wave_all)
 
         # convolve model to gaia lsf
-        model_convolved_to_gaia = lsf_convolve(model_flux_resampled, gaia_lsf, std_wave_all)
+        # TODO: make sure we do this once
+        model_convolved_to_gaia = fluxcal.lsf_convolve(model_flux_resampled, gaia_lsf, std_wave_all)
         model_to_gaia = stdflux/model_convolved_to_gaia
         model_to_gaia_median.append(np.median(model_to_gaia))
         #print(np.median(model_to_gaia), model_convolved_spec_lsf, normalized_std_on_gaia_cont_single)
@@ -732,6 +737,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
 
     return best_fit_models, model_to_gaia_median, log_shift_brz_all
 
+
 def fit_continuum_std(spectrum_wave, spectrum_flux, mask_bands=([4830,4900],), niter=3, threshold=0.5, nknots=100, median_box=10, **kwargs):
     """Modified version of fit_continuum function
     Fit a continuum to a spectrum using a spline interpolation
@@ -814,31 +820,6 @@ def fit_continuum_std(spectrum_wave, spectrum_flux, mask_bands=([4830,4900],), n
     return best_continuum, continuum_models, masked_pixels, knots
 
 
-def lsf_convolve(data, diff_fwhm, wave_lsf_interp):  # Initial version from Alfredo
-    fact = np.sqrt(2.0 * np.pi)
-    # mask = numpy.logical_and(mask, select)
-
-    GaussKernels = (
-            1.0
-            * np.exp(
-        -0.5
-        * (
-                (
-                        wave_lsf_interp[:, np.newaxis]
-                        - wave_lsf_interp[np.newaxis, :]
-                )
-                / np.abs(diff_fwhm[np.newaxis, :] / 2.354)
-        )
-        ** 2
-    )
-            / (fact * np.abs(diff_fwhm[np.newaxis, :] / 2.354))
-    )
-    data = np.nansum(
-        data[:, np.newaxis] * GaussKernels, 0
-    ) / np.nansum(GaussKernels, 0)
-    return data
-
-
 def calc_sensitivity_from_model(wl, obs_spec, spec_lsf, best_model='', model_to_gaia_median=1, model_log_shift=0):
     """
     Calculate the sensitivity curves using the model spectra
@@ -854,9 +835,10 @@ def calc_sensitivity_from_model(wl, obs_spec, spec_lsf, best_model='', model_to_
     """
 
     # read the best-fit model and convolve with spectrograph LSF
-    model_dir = '/Users/jane/Science/LVMFluxCalib/stellar_models/'
+    # model_dir = '/Users/amejia/Downloads/stellar_models/'
+    models_dir = os.path.join(MASTERS_DIR, "stellar_models")
 
-    with fits.open(join(model_dir, 'good_res_new', best_model)) as hdul:
+    with fits.open(join(models_dir, 'good_res_new', best_model)) as hdul:
         model_flux = hdul[0].data
         hdr = hdul[0].header
     #model_flux = best_fit_model['flux']
@@ -872,7 +854,7 @@ def calc_sensitivity_from_model(wl, obs_spec, spec_lsf, best_model='', model_to_
     spec_lsf = np.sqrt(spec_lsf**2 - 0.3**2)  # as model spectra were already convolved with lsf=0.3, we need to account for this
 
     # # convolve model to spec lsf
-    model_convolved_spec_lsf_old = lsf_convolve(model_flux_resampled_old, spec_lsf, wl)
+    model_convolved_spec_lsf_old = fluxcal.lsf_convolve(model_flux_resampled_old, spec_lsf, wl)
     sens_old = model_convolved_spec_lsf_old * model_to_gaia_median / obs_spec
 
 
@@ -881,7 +863,8 @@ def calc_sensitivity_from_model(wl, obs_spec, spec_lsf, best_model='', model_to_
     spec_lsf = np.sqrt(spec_lsf**2 - 0.3**2)  # as model spectra were already convolved with lsf=0.3, we need to account for this
 
     # # convolve model to spec lsf
-    model_convolved_spec_lsf = lsf_convolve(model_flux_resampled, spec_lsf, wl)
+    # TODO: make sure we do this once
+    model_convolved_spec_lsf = fluxcal.lsf_convolve(model_flux_resampled, spec_lsf, wl)
     sens = model_convolved_spec_lsf * model_to_gaia_median / obs_spec
 
     # fig = plt.figure(figsize=(14, 5))
