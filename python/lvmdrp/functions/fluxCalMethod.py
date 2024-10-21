@@ -292,6 +292,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     # TODO: find a place under the calib directory structure for the stellar models
     # TODO: telluric list should go in lvmcore
     model_dir = '/Users/jane/Science/LVMFluxCalib/stellar_models/'
+    template_model = 'M_p6250g4.0z-0.25t1.0_a-0.10c0.00n0.00o-0.10r0.00s0.00_VIS.fits'
     telluric_file = os.path.join(ROOT_PATH, 'resources', 'telluric_lines.txt')  # wavelength regions with Telluric
     # absorptions based on KPNO data (unknown source) with a 1% transmission threshold this file is used as a mask for
     # the fit of standard stars - from Alfredo.
@@ -502,10 +503,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         # errors for gaia continuum * normalized stds:
         #gaia_std_err = np.sqrt(normalized_std_on_gaia_cont_single ** 2 * std_errors_normalized_all ** 2)
 
-        # TODO: first find redshift, redshift the models, then select based on chi2
-        # canonical f-type model: Teff=6500, logg=4, Fe/H=-1.5 or something like that
-
-        # mask tellurics
+        # mask tellurics, channels overlaps, and bluest part of the spectra in log scale
         mask_tellurics_log = np.zeros_like(log_std_wave_all, dtype=bool)
         for tellur in range(len(telluric_tab)):
             mask_tellurics_log = mask_tellurics_log | ((log_std_wave_all > np.log(telluric_tab['Start'][tellur] - 10))
@@ -517,13 +515,44 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         #mask_good = np.isfinite(normalized_std_on_gaia_cont_single)
         mask_good = np.isfinite(flux_std_logscale)
         mask_good = mask_good & ~mask_tellurics_log & ~mask_wave
-        # print(mask_good)
-        # chi2 = [np.nansum(((normalized_std_on_gaia_cont_single[mask_good] -
-        #                     model_specs_convolved_norm[model_ind][mask_good]) / gaia_std_err[mask_good]) ** 2) /
-        #         np.sum(mask_good) for model_ind in range(n_models)]
-        #print(len(mask_good),len(flux_std_logscale), len(model_specs_norm[0]),len(std_errors_normalized_all))
-        #print('Std:',log_std_wave_all)
-        chi2 = [np.nansum(((flux_std_logscale[mask_good] -
+
+        # canonical f-type model: Teff=6500, logg=4, Fe/H=-1.5 or something like that
+        # Check the possible velocity offsets IN LOGSCALE
+        # Now we use the model template with Teff=6250, logg=4.0, Fe/H=-0.25
+        with fits.open(join(model_dir, 'normalized_logscale', template_model), memmap=False) as hdul:
+            template = hdul[0].data
+        log_model_wave_all = log_std_wave_all
+        flux_model_logscale =template
+
+        log_shift_full = fluxcal.derive_vecshift(flux_std_logscale[mask_good],
+                                        flux_model_logscale[mask_good], max_ampl=50)*np.median(log_std_wave_all - np.roll(log_std_wave_all, 1))
+        vel_shift_full = log_shift_full * 3e5
+        print(f'Log shift full:{log_shift_full}, vel. shift full: {vel_shift_full} km/s')
+
+        # Calculate the velocity corrections in different channels separately. WILL BE REMOVED LATER
+        log_rec_shift = (log_std_wave_all > 8.26) & (log_std_wave_all < 8.32)
+        log_shift_b = fluxcal.derive_vecshift(flux_std_logscale[log_rec_shift],
+                                        flux_model_logscale[log_rec_shift], max_ampl=50)*np.median(log_std_wave_all - np.roll(log_std_wave_all, 1))
+        vel_shift_b = log_shift_b * 3e5
+        print(f'Log-shift in b: {log_shift_b}')
+
+        log_rec_shift = (log_std_wave_all > 8.77) & (log_std_wave_all < 8.82)
+        log_shift_r = fluxcal.derive_vecshift(flux_std_logscale[log_rec_shift],
+                                        flux_model_logscale[log_rec_shift], max_ampl=50)*np.median(log_std_wave_all - np.roll(log_std_wave_all, 1))
+        vel_shift_r = log_shift_r * 3e5
+
+        log_rec_shift = (log_std_wave_all > 9.03) & (log_std_wave_all < 9.07)
+        log_shift_z = fluxcal.derive_vecshift(flux_std_logscale[log_rec_shift],
+                                        flux_model_logscale[log_rec_shift], max_ampl=50)*np.median(log_std_wave_all - np.roll(log_std_wave_all, 1))
+        vel_shift_z = log_shift_z * 3e5
+
+        log_shift_b_all.append(log_shift_b)
+        log_shift_r_all.append(log_shift_r)
+        log_shift_z_all.append(log_shift_z)
+
+        flux_std_logscale_shifted = np.interp((log_std_wave_all - log_shift_full), log_std_wave_all, flux_std_logscale)
+
+        chi2 = [np.nansum(((flux_std_logscale_shifted[mask_good] -
                             model_specs_norm[model_ind][mask_good]) / log_std_errors_normalized_all[mask_good]) ** 2) /
                 np.sum(mask_good) for model_ind in range(n_models)]
         best_id = np.argmin(chi2)
@@ -537,61 +566,10 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         # TODO: remove the second part of the code that runs per camera
         # TODO: add to the function that selects and applies the sens function like we do with STD, SCI (add MOD)
 
-        # Check the possible velocity offsets
-        # rec_shift = (std_wave_all > 3900) & (std_wave_all < 4100)
-        # shift_b = fluxcal.derive_vecshift(normalized_std_on_gaia_cont_single[rec_shift],
-        #                                 model_specs_convolved_norm[best_id][rec_shift], max_ampl=30)
-        # vel_offset_b = (shift_b * np.nanmedian(
-        #     abs(std_wave_all[rec_shift] - np.roll(std_wave_all[rec_shift],1))) /
-        #                 np.nanmedian(std_wave_all[rec_shift])) * 3e5
-        #
-        # rec_shift = (std_wave_all > 6500) & (std_wave_all < 6750)
-        # shift_r = fluxcal.derive_vecshift(normalized_std_on_gaia_cont_single[rec_shift],
-        #                                 model_specs_convolved_norm[best_id][rec_shift], max_ampl=30)
-        # vel_offset_r = (shift_r * np.nanmedian(
-        #     abs(std_wave_all[rec_shift] - np.roll(std_wave_all[rec_shift], 1))) /
-        #                 np.nanmedian(std_wave_all[rec_shift])) * 3e5
-        #
-        # rec_shift = (std_wave_all > 8400) & (std_wave_all < 8700)
-        # shift_z = fluxcal.derive_vecshift(normalized_std_on_gaia_cont_single[rec_shift],
-        #                                 model_specs_convolved_norm[best_id][rec_shift], max_ampl=30)
-        # vel_offset_z = (shift_z * np.nanmedian(
-        #     abs(std_wave_all[rec_shift] - np.roll(std_wave_all[rec_shift], 1))) /
-        #                 np.nanmedian(std_wave_all[rec_shift])) * 3e5
-
 
         log.info(f"GAIA id:{gaia_ids[i]}. Best model is: {best_id}, {model_names[best_id]}")
         best_fit_models.append(model_names[best_id])
 
-        # Check the possible velocity offsets IN LOGSCALE
-        log_model_wave_all = log_std_wave_all
-        flux_model_logscale = model_specs_norm[best_id]
-
-        log_rec_shift = (log_std_wave_all > 8.26) & (log_std_wave_all < 8.32)
-        log_shift_b = fluxcal.derive_vecshift(flux_std_logscale[log_rec_shift],
-                                        flux_model_logscale[log_rec_shift], max_ampl=50)*np.median(log_std_wave_all - np.roll(log_std_wave_all, 1))
-        # flux_std_logscale_shifted = np.interp((log_std_wave_all + log_shift_b), log_std_wave_all, flux_std_logscale)
-        flux_std_shifted_b = logscale_to_linear(std_wave_all, log_std_wave_all, flux_std_logscale, shift=-log_shift_b)
-        vel_shift_b = log_shift_b * 3e5
-        print(f'Log-shift in b: {log_shift_b}')
-
-        log_rec_shift = (log_std_wave_all > 8.77) & (log_std_wave_all < 8.82)
-        log_shift_r = fluxcal.derive_vecshift(flux_std_logscale[log_rec_shift],
-                                        flux_model_logscale[log_rec_shift], max_ampl=50)*np.median(log_std_wave_all - np.roll(log_std_wave_all, 1))
-        # flux_std_logscale_shifted = np.interp((log_std_wave_all + log_shift_b), log_std_wave_all, flux_std_logscale)
-        flux_std_shifted_r = logscale_to_linear(std_wave_all, log_std_wave_all, flux_std_logscale, shift=-log_shift_r)
-        vel_shift_r = log_shift_r * 3e5
-
-        log_rec_shift = (log_std_wave_all > 9.03) & (log_std_wave_all < 9.07)
-        log_shift_z = fluxcal.derive_vecshift(flux_std_logscale[log_rec_shift],
-                                        flux_model_logscale[log_rec_shift], max_ampl=50)*np.median(log_std_wave_all - np.roll(log_std_wave_all, 1))
-        # flux_std_logscale_shifted = np.interp((log_std_wave_all + log_shift_b), log_std_wave_all, flux_std_logscale)
-        flux_std_shifted_z = logscale_to_linear(std_wave_all, log_std_wave_all, flux_std_logscale, shift=-log_shift_z)
-        vel_shift_z = log_shift_z * 3e5
-
-        log_shift_b_all.append(log_shift_b)
-        log_shift_r_all.append(log_shift_r)
-        log_shift_z_all.append(log_shift_z)
 
         # Conversion coefficient model to gaia units
         with fits.open(join(model_dir, 'good_res_new', model_names[best_id])) as hdul:
@@ -659,7 +637,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             plt.plot(log_std_wave_all, flux_std_logscale, label='Observed standard spectrum, continuum normalized')
             # plt.plot(std_wave_all,
             #         np.interp(std_wave_all, std_wave_all*(1+vel_offset_b/3e5), normalized_std_on_gaia_cont_single), label='Shifted')
-            plt.plot(log_model_wave_all+log_shift_b, flux_model_logscale, label='Best-fit model spectrum, '
+            plt.plot(log_model_wave_all+log_shift_full, flux_model_logscale, label='Best-fit model spectrum, '
                                                                                 'continuum normalized', alpha=0.7) # shifted
             for n_mask, mask_box in enumerate(mask_for_fit):
                 if n_mask == 0:
@@ -670,7 +648,8 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             xlim = [8.18, 9.2]
             ylim = [0.1,1.5]
             plt.text((xlim[1] - xlim[0]) * 0.05 + xlim[0], (ylim[1] - ylim[0]) * 0.9 + ylim[0], f'Best-fit model: '
-                                f'Teff = {model_params[2]}, log(g) = {model_params[3]}, [Fe/H] = {model_params[4]}', size=14)
+                                f'Teff = {model_params[2]}, log(g) = {model_params[3]}, [Fe/H] = {model_params[4]},'
+                                f'Vel. correction = {vel_shift_full:.2f} km/s', size=14)
             plt.text((xlim[1] - xlim[0]) * 0.15 + xlim[0], (ylim[1] - ylim[0]) * 0.82 + ylim[0],
                                 f'chi2 = {np.argmin(chi2)}', size=14)
             plt.xlim(xlim)
@@ -680,7 +659,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
 
             plt.subplot(512)
             plt.plot(log_std_wave_all, flux_std_logscale, label='Observed')
-            plt.plot(log_model_wave_all+log_shift_b, flux_model_logscale, label='Model shifted', alpha=0.7)
+            plt.plot(log_model_wave_all+log_shift_full, flux_model_logscale, label='Model shifted', alpha=0.7)
             #plt.plot(log_std_wave_all-log_shift_b, flux_model_logscale, label='Model shifted')
             for mask_box in mask_for_fit:
                 plt.axvspan(np.log(mask_box[0]), np.log(mask_box[1]), alpha=0.2, color='grey')
@@ -688,7 +667,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             xlim = [8.24, 8.38]
             ylim = [0.1,1.5]
             plt.text((xlim[1] - xlim[0]) * 0.03 + xlim[0], (ylim[1] - ylim[0]) * 0.9 + ylim[0], 'b channel', size=14)
-            plt.text((xlim[1] - xlim[0]) * 0.03 + xlim[0], (ylim[1] - ylim[0]) * 0.82 + ylim[0], f'Vel. correction = '
+            plt.text((xlim[1] - xlim[0]) * 0.03 + xlim[0], (ylim[1] - ylim[0]) * 0.82 + ylim[0], f'Vel. correction old = '
                                                                                     f'{vel_shift_b:.2f} km/s', size=14)
             plt.xlim(xlim)
             plt.ylim(ylim)
@@ -697,14 +676,14 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             plt.subplot(513)
             plt.plot(log_std_wave_all, flux_std_logscale, label='Observed')
             #plt.plot(log_model_wave_all, flux_model_logscale, label='Model')
-            plt.plot(log_std_wave_all+log_shift_r, flux_model_logscale, label='Model shifted', alpha=0.7)
+            plt.plot(log_std_wave_all+log_shift_full, flux_model_logscale, label='Model shifted', alpha=0.7)
             for mask_box in mask_for_fit:
                 plt.axvspan(np.log(mask_box[0]), np.log(mask_box[1]), alpha=0.2, color='grey')
             #plt.legend()
             xlim = [8.66, 8.8]
             ylim = [0.2, 1.5]
             plt.text((xlim[1] - xlim[0]) * 0.03 + xlim[0], (ylim[1] - ylim[0]) * 0.9 + ylim[0], 'r channel', size=14)
-            plt.text((xlim[1] - xlim[0]) * 0.03 + xlim[0], (ylim[1] - ylim[0]) * 0.82 + ylim[0], f'Vel. correction = '
+            plt.text((xlim[1] - xlim[0]) * 0.03 + xlim[0], (ylim[1] - ylim[0]) * 0.82 + ylim[0], f'Vel. correction old = '
                                                                                                  f'{vel_shift_r:.2f} km/s',
                      size=14)
             plt.xlim(xlim)
@@ -714,14 +693,14 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             plt.subplot(514)
             plt.plot(log_std_wave_all, flux_std_logscale, label='Observed')
             #plt.plot(log_model_wave_all, flux_model_logscale, label='Model')
-            plt.plot(log_std_wave_all+log_shift_z, flux_model_logscale, label='Model shifted', alpha=0.7)
+            plt.plot(log_std_wave_all+log_shift_full, flux_model_logscale, label='Model shifted', alpha=0.7)
             for mask_box in mask_for_fit:
                 plt.axvspan(np.log(mask_box[0]), np.log(mask_box[1]), alpha=0.2, color='grey')
             #plt.legend()
             xlim = [9.02, 9.16]
             ylim = [0.2, 1.5]
             plt.text((xlim[1] - xlim[0]) * 0.03 + xlim[0], (ylim[1] - ylim[0]) * 0.9 + ylim[0], 'z channel', size=14)
-            plt.text((xlim[1] - xlim[0]) * 0.03 + xlim[0], (ylim[1] - ylim[0]) * 0.82 + ylim[0], f'Vel. correction = '
+            plt.text((xlim[1] - xlim[0]) * 0.03 + xlim[0], (ylim[1] - ylim[0]) * 0.82 + ylim[0], f'Vel. correction old = '
                                                                                                  f'{vel_shift_z:.1f} km/s',
                      size=14)
             plt.xlim(xlim)
