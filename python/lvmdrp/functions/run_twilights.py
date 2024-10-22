@@ -378,6 +378,42 @@ def fit_fiberflat(in_twilight: str, out_flat: str, out_twilight: str,
     return new_flat
 
 
+def to_native_wave(rss, wave=None):
+
+    # get native wavelength grid or use the one given
+    if wave is None and rss._wave_trace is not None:
+        trace = TraceMask.from_coeff_table(rss._wave_trace)
+        wave = trace.eval_coeffs()
+    elif wave is not None:
+        pass
+    else:
+        raise ValueError(f"missing wavelength trace information: {rss._wave_trace = }")
+
+    new_rss = RSS(
+        data=np.zeros((rss._fibers, wave.shape[1]), dtype="float32"),
+        error=np.zeros((rss._fibers, wave.shape[1]), dtype="float32"),
+        mask=np.zeros((rss._fibers, wave.shape[1]), dtype="bool"),
+        wave=wave,
+        cent_trace=rss._cent_trace,
+        width_trace=rss._width_trace,
+        wave_trace=rss._wave_trace,
+        lsf_trace=rss._lsf_trace,
+        slitmap=rss._slitmap,
+        header=rss._header
+    )
+
+    # interpolate data, error, mask and sky arrays from rectified grid to original grid
+    for ifiber in range(rss._fibers):
+        f = interpolate.interp1d(rss._wave, rss._data[ifiber], kind="linear", bounds_error=False, fill_value=np.nan)
+        new_rss._data[ifiber] = f(wave[ifiber]).astype("float32")
+        f = interpolate.interp1d(rss._wave, rss._error[ifiber], kind="linear", bounds_error=False, fill_value=np.nan)
+        new_rss._error[ifiber] = f(wave[ifiber]).astype("float32")
+        f = interpolate.interp1d(rss._wave, rss._mask[ifiber], kind="nearest", bounds_error=False, fill_value=1)
+        new_rss._mask[ifiber] = f(wave[ifiber]).astype("bool")
+
+    return new_rss
+
+
 def create_lvmflat(in_twilight: str, out_lvmflat: str, in_fiberflat: str,
                    in_cents: List[str], in_widths: List[str],
                    in_waves: List[str], in_lsfs: List[str]) -> lvmFlat:
@@ -422,10 +458,10 @@ def create_lvmflat(in_twilight: str, out_lvmflat: str, in_fiberflat: str,
     # build lvmFlat
     twilight.set_wave_trace(mwave)
     twilight.set_lsf_trace(mlsf)
-    twilight = twilight.to_native_wave(method="linear", interp_density=True, return_density=False)
+    twilight = to_native_wave(twilight)
     fflat.set_wave_trace(mwave)
     fflat.set_lsf_trace(mlsf)
-    fflat = fflat.to_native_wave(method="linear", interp_density=False, return_density=False)
+    fflat = to_native_wave(fflat)
     lvmflat = lvmFlat(data=twilight._data, error=twilight._error, mask=twilight._mask, header=twilight._header,
                       cent_trace=mcent, width_trace=mwidth,
                       wave_trace=mwave, lsf_trace=mlsf,
@@ -505,7 +541,7 @@ def combine_twilight_sequence(in_fiberflats: List[str], out_fiberflat: str,
 
     mflat.set_wave_trace(TraceMask.from_spectrographs(*[TraceMask.from_file(in_wave) for in_wave in in_waves]))
     mflat.set_lsf_trace(TraceMask.from_spectrographs(*[TraceMask.from_file(in_lsf) for in_lsf in in_lsfs]))
-    mflat = mflat.to_native_wave(method="linear", interp_density=False, return_density=False)
+    mflat = to_native_wave(mflat)
     mflat._error = None
     mflat._mask = None
     mflat.writeFitsData(out_fiberflat, replace_masked=False)
