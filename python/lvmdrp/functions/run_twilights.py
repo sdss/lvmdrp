@@ -378,16 +378,22 @@ def fit_fiberflat(in_twilight: str, out_flat: str, out_twilight: str,
     return new_flat
 
 
-def to_native_wave(rss, wave):
+def to_native_wave(rss, wave=None):
 
-        # get native wavelength grid
-    trace = TraceMask.from_coeff_table(rss._wave_trace)
-    wave = trace.eval_coeffs()
+    # get native wavelength grid or use the one given
+    if wave is None and rss._wave_trace is not None:
+        trace = TraceMask.from_coeff_table(rss._wave_trace)
+        wave = trace.eval_coeffs()
+    elif wave is not None:
+        pass
+    else:
+        raise ValueError(f"missing wavelength trace information: {rss._wave_trace = }")
 
     new_rss = RSS(
         data=np.zeros((rss._fibers, wave.shape[1]), dtype="float32"),
         error=np.zeros((rss._fibers, wave.shape[1]), dtype="float32"),
         mask=np.zeros((rss._fibers, wave.shape[1]), dtype="bool"),
+        wave=wave,
         cent_trace=rss._cent_trace,
         width_trace=rss._width_trace,
         wave_trace=rss._wave_trace,
@@ -398,11 +404,11 @@ def to_native_wave(rss, wave):
 
     # interpolate data, error, mask and sky arrays from rectified grid to original grid
     for ifiber in range(rss._fibers):
-        f = np.interp(wave[ifiber], rss._wave, rss._data[ifiber])
-        new_rss._data[ifiber] = f.astype("float32")
-        f = np.interp(wave[ifiber][ifiber], rss._wave, rss._error[ifiber])
-        new_rss._error[ifiber] = f.astype("float32")
-        f = np.interp(wave[ifiber][ifiber], rss._wave, rss._mask[ifiber], kind="nearest", bounds_error=False, fill_value=1)
+        f = interpolate.interp1d(rss._wave, rss._data[ifiber], kind="linear", bounds_error=False, fill_value=np.nan)
+        new_rss._data[ifiber] = f(wave[ifiber]).astype("float32")
+        f = interpolate.interp1d(rss._wave, rss._error[ifiber], kind="linear", bounds_error=False, fill_value=np.nan)
+        new_rss._error[ifiber] = f(wave[ifiber]).astype("float32")
+        f = interpolate.interp1d(rss._wave, rss._mask[ifiber], kind="nearest", bounds_error=False, fill_value=1)
         new_rss._mask[ifiber] = f(wave[ifiber]).astype("bool")
 
     return new_rss
