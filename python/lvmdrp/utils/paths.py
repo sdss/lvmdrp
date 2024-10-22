@@ -88,13 +88,18 @@ def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_NAMES, l
     if version is None and not from_sanbox:
         raise ValueError(f"You must provide a version string to get calibration paths, {version = } given")
 
+    # make long-term if taking calibrations from sandbox (nightly calibrations are not stored in sandbox)
+    if from_sanbox:
+        longterm_cals = True
+
     cams = fnmatch.filter(CAMERAS, cameras)
     channels = "".join(sorted(set(map(lambda c: c.strip("123"), cams))))
 
     tileid = 11111
     tilegrp = tileid_grp(tileid)
 
-    cals_mjd = get_master_mjd(mjd) if longterm_cals or from_sanbox else mjd
+    # get long-term MJDs from sandbox using get_master_mjd, else use given MJD
+    cals_mjd = get_master_mjd(mjd) if from_sanbox else mjd
 
     # define root path to pixel flats and masks
     # TODO: remove this once sdss-tree are updated with the corresponding species
