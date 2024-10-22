@@ -460,7 +460,16 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         std_normalized_all_convolved = np.concatenate((normalized_spectra_all_bands[0][i][mask_b_norm],
                                              normalized_spectra_all_bands[1][i][mask_r_norm],
                                              normalized_spectra_all_bands[2][i][mask_z_norm]))
+        # lsf_all will be used to convolve good res models for sens curve calculation
+        lsf_all = np.concatenate((lsf_all_bands[0][i][mask_b_norm],
+                                             lsf_all_bands[1][i][mask_r_norm],
+                                             lsf_all_bands[2][i][mask_z_norm]))
+        # lsf_conv = np.sqrt(2 ** 2 - lsf_all ** 2)  # as model spectra were already convolved with lsf=2.0,
+                                                    # we need to degrade our observed std spectra
 
+       # # degrade observed std spectra
+       # TODO: it seems we are convolving a second time? perhaps remove
+        # std_normalized_all_convolved = fluxcal.lsf_convolve(std_normalized_all, lsf_conv, std_wave_all)
         # TODO: switch to new resampling code
         log_std_wave_all, flux_std_logscale = linear_to_logscale(std_wave_all, std_normalized_all_convolved)
         std_errors_normalized_all = np.concatenate((std_errors_all_bands[0][i][mask_b_norm],
@@ -483,7 +492,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
                                                                                    threshold=0.1, niter=niter,
                                                                                    nknots=nknots,
                                                                                    median_box=median_box)
-        normalized_std_on_gaia_cont_single_tmp = best_continuum*std_normalized_all
+        normalized_std_on_gaia_cont_single_tmp = best_continuum*std_normalized_all_convolved
         normalized_std_on_gaia_cont_single_tmp[mask_tellurics] = np.nan
         normalized_std_on_gaia_cont_single = normalized_std_on_gaia_cont_single_tmp / np.nansum(normalized_std_on_gaia_cont_single_tmp)
 
@@ -825,14 +834,7 @@ def calc_sensitivity_from_model(wl, obs_spec, spec_lsf, best_model='', model_to_
     log_model_wave, flux_model_logscale = linear_to_logscale(model_wave, model_flux)
     flux_model_shifted = logscale_to_linear(model_wave, log_model_wave, flux_model_logscale, shift=model_log_shift)
 
-    # #resample model to the same step
-    model_flux_resampled_old = np.interp(wl, model_wave, model_flux)
     spec_lsf = np.sqrt(spec_lsf**2 - 0.3**2)  # as model spectra were already convolved with lsf=0.3, we need to account for this
-
-    # # convolve model to spec lsf
-    model_convolved_spec_lsf_old = fluxcal.lsf_convolve(model_flux_resampled_old, spec_lsf, wl)
-    sens_old = model_convolved_spec_lsf_old * model_to_gaia_median / obs_spec
-
 
     # #resample model to the same step
     model_flux_resampled = np.interp(wl, model_wave, flux_model_shifted)
@@ -874,7 +876,7 @@ def calc_sensitivity_from_model(wl, obs_spec, spec_lsf, best_model='', model_to_
 
     #plt.show()
 
-    return sens, sens_old
+    return sens
 
 
 def standard_sensitivity(stds, rss, GAIA_CACHE_DIR, ext, res, plot=False, width=3, mode='GAIA', model_list=[],
@@ -938,22 +940,18 @@ def standard_sensitivity(stds, rss, GAIA_CACHE_DIR, ext, res, plot=False, width=
         if mode == "GAIA":
             sens = stdflux / spec
         else:
-            sens, sens_old = calc_sensitivity_from_model(w, spec, spec_lsf=lsf, best_model=model_list[i],
+            sens = calc_sensitivity_from_model(w, spec, spec_lsf=lsf, best_model=model_list[i],
                                                model_to_gaia_median=model_coef[i], model_log_shift = model_log_shifts[i])
         if mode == "GAIA":
             wgood, sgood = fluxcal.filter_channel(w, sens, 2)
         else:
             if channel == 'b':
                 wgood, sgood = fluxcal.filter_channel(w, sens, 3, method='savgol')
-                wgood_old, sgood_old = fluxcal.filter_channel(w, sens_old, 3, method='savgol')
             elif channel == 'r':
                 wgood, sgood = fluxcal.filter_channel(w, sens, 3, method='savgol')
-                wgood_old, sgood_old = fluxcal.filter_channel(w, sens_old, 3, method='savgol')
             else:
                 wgood = w[np.isfinite(sens)]
                 sgood = sens[np.isfinite(sens)]
-                wgood_old = w[np.isfinite(sens_old)]
-                sgood_old = sens[np.isfinite(sens_old)]
 
         sens_gaia = stdflux / spec
         wgood_gaia, sgood_gaia = fluxcal.filter_channel(w, sens_gaia, 2)
@@ -968,11 +966,9 @@ def standard_sensitivity(stds, rss, GAIA_CACHE_DIR, ext, res, plot=False, width=
             else:
                 win = 15
             s = interpolate.make_smoothing_spline(wgood, sgood, lam=win)
-            s_old = interpolate.make_smoothing_spline(wgood_old, sgood_old, lam=win)
             s_gaia = interpolate.make_smoothing_spline(wgood_gaia, sgood_gaia, lam=win)
 
         res[f"STD{nn}SEN"] = s(w).astype(np.float32)
-        #res[f"STD{nn}SENo"] = s_old(w).astype(np.float32)
 
         # caluculate SDSS g band magnitudes for QC
         mAB_std = np.round(fluxcal.spec_to_LVM_mAB(channel, w, stdflux), 2)
@@ -986,7 +982,6 @@ def standard_sensitivity(stds, rss, GAIA_CACHE_DIR, ext, res, plot=False, width=
         if plot:
             # fig = plt.figure(figsize=(16, 6))
             # plt.plot(wgood, sgood, ".k", markersize=2, zorder=-999)
-            # plt.plot(w, s_old(w).astype(np.float32), linewidth=1, label='sens. curve before shift correction')
             plt.plot(w, sens, ".k", markersize=2, zorder=-999)
             plt.plot(w, res[f"STD{nn}SEN"], label='sens. curve (after shift correction)')
             #plt.plot(w, s_gaia(w).astype(np.float32), linewidth=2, color='red', label='old sensitivity curve')
