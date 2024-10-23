@@ -187,7 +187,7 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
                                   bg_guess: float = 0.0,
                                   flux_range: List[float] = [100.0, numpy.inf],
                                   cent_range: List[float] = [-4.0, 4.0],
-                                  fwhm_range: List[float] = [2.0, 4.5],
+                                  fwhm_range: List[float] = [1.5, 4.5],
                                   bg_range: List[float] = [-1000.0, numpy.inf],
                                   poly_disp: int = 6, poly_fwhm: int = 4,
                                   poly_cros: int = 0, poly_kinds: list = ['poly', 'poly', 'poly'],
@@ -366,8 +366,8 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
         # cross-match spectrum and pixwav map
         stretch_min, stretch_max, stretch_steps = 0.95, 1.05, 10000
         cc, bhat, mhat = _cross_match_float(
-            ref_spec=pix_spec[3:-3],
-            obs_spec=arc._data[ref_fiber][3:-3],
+            ref_spec=pix_spec,
+            obs_spec=arc._data[ref_fiber],
             stretch_factors=numpy.linspace(stretch_min, stretch_max, stretch_steps),
             shift_range=[-cc_max_shift, cc_max_shift],
             normalize_spectra=False,
