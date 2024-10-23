@@ -402,6 +402,17 @@ def to_native_wave(rss, wave=None):
         header=rss._header
     )
 
+    # reset header keywords to match original wavelength grid state
+    new_rss._header["WAVREC"] = False
+    if "CRPIX1" in new_rss._header:
+        del new_rss._header["CRPIX1"]
+    if "CRVAL1" in new_rss._header:
+        del new_rss._header["CRVAL1"]
+    if "CDELT1" in new_rss._header:
+        del new_rss._header["CDELT1"]
+    if "CTYPE1" in new_rss._header:
+        del new_rss._header["CTYPE1"]
+
     # interpolate data, error, mask and sky arrays from rectified grid to original grid
     for ifiber in range(rss._fibers):
         f = interpolate.interp1d(rss._wave, rss._data[ifiber], kind="linear", bounds_error=False, fill_value=np.nan)
