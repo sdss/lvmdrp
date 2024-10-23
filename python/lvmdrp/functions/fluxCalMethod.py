@@ -300,7 +300,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     # the fit of standard stars - from Alfredo.
     # https://github.com/desihub/desispec/blob/main/py/desispec/data/arc_lines/telluric_lines.txt
     telluric_tab = Table.read(telluric_file, format='ascii.fixed_width_two_line')
-    mask_for_fit = telluric_tab
+    # mask_for_fit = telluric_tab
 
     model_names = [f for f in listdir(join(models_dir, 'normalized_logscale')) if
                    isfile(join(models_dir, 'normalized_logscale', f)) and (f.lower().endswith('.fits'))]
@@ -332,8 +332,10 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     normalized_spectra_all_bands = []
     std_errors_all_bands = []
     lsf_all_bands = []
+    std_spectra_all_bands = [] ## contains original std spectra for all stars in ALL band
 
     for b in range(len(in_rss)):
+        std_spectra = []  # contains original std spectra for all stars in each band
         normalized_spectra = []
         std_errors = []
         lsf = []
@@ -415,12 +417,19 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
                                                                                        nknots=nknots,
                                                                                        median_box=median_box)
             std_errors.append(error_tmp/best_continuum)
-            normalized_spectra.append(spec_tmp_convolved/best_continuum)
-            lsf.append(lsf_tmp)
+            normalized_spectra.append(spec_tmp_convolved/best_continuum) # normalized std spestra degraded to 2A for all
+                                                                        # standards in each channel
+            lsf.append(lsf_tmp) # initial std spec LSF for all standards in each channel
+            std_spectra.append(spec_tmp)
+            #print(nn, fiber)
+        #print('!!! one band',std_spectra)
 
-        normalized_spectra_all_bands.append(normalized_spectra)
+        normalized_spectra_all_bands.append(normalized_spectra) # normalized std spestra degraded to 2A for all
+                                                                        # standards and all channels together
         std_errors_all_bands.append(std_errors)
-        lsf_all_bands.append(lsf)
+        lsf_all_bands.append(lsf) # initial std spec LSF for all standards and all channel together
+        std_spectra_all_bands.append(std_spectra)
+    #print('!!!', std_spectra_all_bands)
 
     # Stitch wavelength arrays in brz together
     wave_b = np.round(w[0],1)
@@ -431,21 +440,23 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     mask_z_norm = (wave_z > 7540)
     std_wave_all = np.concatenate((wave_b[mask_b_norm], wave_r[mask_r_norm], wave_z[mask_z_norm]))
 
-    # mask tellurics
+    # mask only tellurics - used for calculation of conversion from model to Gaia units
     mask_tellurics = np.zeros_like(std_wave_all, dtype=bool)
     for i in range(len(telluric_tab)):
         mask_tellurics = mask_tellurics | ((std_wave_all > telluric_tab['Start'][i] - 10) & (
                     std_wave_all < telluric_tab['End'][i] + 10))
 
-    #
+    # table with masks for tellurics, overlaps between channels, and bluest part og the spectra - used for model matchind
     br_overlap_start = 5775
     br_overlap_end = 5825
     rz_overlap_start = 7520
     rz_overlap_end = 7570
+    mask_for_fit = telluric_tab
     mask_for_fit['Start'] = mask_for_fit['Start'] - 10
     mask_for_fit['End'] = mask_for_fit['End'] + 10
-    mask_for_fit.add_row([3500,3715]) #mask for bluest part of the spectra
-    mask_for_fit.add_row([3500, 3715])
+    mask_for_fit.add_row([3500,3715]) #mask the bluest part of the spectra
+    mask_for_fit.add_row([br_overlap_start, br_overlap_end])
+    mask_for_fit.add_row([rz_overlap_start, rz_overlap_end])
     # print(mask_for_fit)
 
     model_to_gaia_median = []
@@ -460,16 +471,11 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         std_normalized_all_convolved = np.concatenate((normalized_spectra_all_bands[0][i][mask_b_norm],
                                              normalized_spectra_all_bands[1][i][mask_r_norm],
                                              normalized_spectra_all_bands[2][i][mask_z_norm]))
-        # lsf_all will be used to convolve good res models for sens curve calculation
+        # lsf_all (initial std lsf) - will be used to convolve good res models for sens curve calculation
         lsf_all = np.concatenate((lsf_all_bands[0][i][mask_b_norm],
                                              lsf_all_bands[1][i][mask_r_norm],
                                              lsf_all_bands[2][i][mask_z_norm]))
-        # lsf_conv = np.sqrt(2 ** 2 - lsf_all ** 2)  # as model spectra were already convolved with lsf=2.0,
-                                                    # we need to degrade our observed std spectra
 
-       # # degrade observed std spectra
-       # TODO: it seems we are convolving a second time? perhaps remove
-        # std_normalized_all_convolved = fluxcal.lsf_convolve(std_normalized_all, lsf_conv, std_wave_all)
         # TODO: switch to new resampling code
         log_std_wave_all, flux_std_logscale = linear_to_logscale(std_wave_all, std_normalized_all_convolved)
         std_errors_normalized_all = np.concatenate((std_errors_all_bands[0][i][mask_b_norm],
@@ -497,16 +503,11 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         normalized_std_on_gaia_cont_single = normalized_std_on_gaia_cont_single_tmp / np.nansum(normalized_std_on_gaia_cont_single_tmp)
 
         # mask tellurics, channels overlaps, and bluest part of the spectra in log scale
-        mask_tellurics_log = np.zeros_like(log_std_wave_all, dtype=bool)
-        for tellur in range(len(telluric_tab)):
-            mask_tellurics_log = mask_tellurics_log | ((log_std_wave_all > np.log(telluric_tab['Start'][tellur] - 10))
-                                                & (log_std_wave_all < np.log(telluric_tab['End'][tellur] + 10)))
-        mask_wave = ((log_std_wave_all < 8.22) | ((log_std_wave_all > np.log(br_overlap_start)) & (log_std_wave_all <
-                                                np.log(br_overlap_end))) | ((log_std_wave_all > np.log(rz_overlap_start))
-                                                                        & (log_std_wave_all < np.log(rz_overlap_end))))
-
-        mask_good = np.isfinite(flux_std_logscale)
-        mask_good = mask_good & ~mask_tellurics_log & ~mask_wave
+        mask_good = np.zeros_like(log_std_wave_all, dtype=bool)
+        for wave_masks in range(len(mask_for_fit)):
+            mask_good = mask_good | ((log_std_wave_all > np.log(mask_for_fit['Start'][wave_masks]))
+                                     & (log_std_wave_all < np.log(mask_for_fit['End'][wave_masks])))
+        mask_good = ~mask_good & np.isfinite(flux_std_logscale) #~mask_tellurics_log & ~mask_wave
 
         # canonical f-type model: Teff=6500, logg=4, Fe/H=-1.5 or something like that
         # Check the possible velocity offsets IN LOGSCALE
@@ -519,14 +520,12 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         log_shift_full = fluxcal.derive_vecshift(flux_std_logscale[mask_good],
                                         flux_model_logscale[mask_good], max_ampl=50)*np.median(log_std_wave_all - np.roll(log_std_wave_all, 1))
         vel_shift_full = log_shift_full * 3e5
-        # print(f'Log shift full:{log_shift_full}, vel. shift full: {vel_shift_full} km/s')
 
         # Calculate the velocity corrections in different channels separately. WILL BE REMOVED LATER
         log_rec_shift = (log_std_wave_all > 8.26) & (log_std_wave_all < 8.32)
         log_shift_b = fluxcal.derive_vecshift(flux_std_logscale[log_rec_shift],
                                         flux_model_logscale[log_rec_shift], max_ampl=50)*np.median(log_std_wave_all - np.roll(log_std_wave_all, 1))
         vel_shift_b = log_shift_b * 3e5
-        # print(f'Log-shift in b: {log_shift_b}')
 
         log_rec_shift = (log_std_wave_all > 8.77) & (log_std_wave_all < 8.82)
         log_shift_r = fluxcal.derive_vecshift(flux_std_logscale[log_rec_shift],
@@ -716,11 +715,29 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             fig_path = f"{fig_path.replace('lvm-hobject-b', 'lvm-hobject')}"
             save_fig(plt.gcf(), product_path=fig_path, to_display=False, figure_path="qa/model_matching", label=f"matching_std{i}")
 
-    log_shift_brz_all.append(log_shift_b_all)
-    log_shift_brz_all.append(log_shift_r_all)
-    log_shift_brz_all.append(log_shift_z_all)
+        # TODO: need to add ext correction
+        # calculating sensitivity curves
 
-    return best_fit_models, model_to_gaia_median, log_shift_brz_all
+    for n_chan, chan in enumerate('brz'):
+        fig = plt.figure(figsize=(14, 5))
+        for i in range(len(stds)):
+            sens_tmp = calc_sensitivity_from_model(w[n_chan], std_spectra_all_bands[n_chan][i], lsf_all_bands[n_chan][i],
+                                                   model_names[best_id], model_to_gaia_median[i], log_shift_full)
+            wgood, sgood = fluxcal.filter_channel(w[n_chan], sens_tmp, 3, method='savgol')
+            if channel == 'b':
+                win = 150
+            elif channel == 'r':
+                win = 70
+            else:
+                win = 15
+            s = interpolate.make_smoothing_spline(wgood, sgood, lam=win)
+            sens = s(w[n_chan]).astype(np.float32)
+            plt.plot(wgood, sgood, ".k", markersize=2, zorder=-999)
+            plt.plot(w[n_chan], sens, markersize=2, zorder=-999)
+            plt.ylim(0, 0.1e-11)
+        plt.show()
+
+    return best_fit_models, model_to_gaia_median
 
 
 def fit_continuum_std(spectrum_wave, spectrum_flux, mask_bands=([4830,4900],), niter=3, threshold=0.5, nknots=100, median_box=10, **kwargs):
@@ -834,8 +851,6 @@ def calc_sensitivity_from_model(wl, obs_spec, spec_lsf, best_model='', model_to_
     log_model_wave, flux_model_logscale = linear_to_logscale(model_wave, model_flux)
     flux_model_shifted = logscale_to_linear(model_wave, log_model_wave, flux_model_logscale, shift=model_log_shift)
 
-    spec_lsf = np.sqrt(spec_lsf**2 - 0.3**2)  # as model spectra were already convolved with lsf=0.3, we need to account for this
-
     # #resample model to the same step
     model_flux_resampled = np.interp(wl, model_wave, flux_model_shifted)
     spec_lsf = np.sqrt(spec_lsf**2 - 0.3**2)  # as model spectra were already convolved with lsf=0.3, we need to account for this
@@ -905,7 +920,6 @@ def standard_sensitivity(stds, rss, GAIA_CACHE_DIR, ext, res, plot=False, width=
         # load Gaia BP-RP spectrum from cache, or download from webapp
         try:
             gw, gf = fluxcal.retrive_gaia_star(gaia_id, GAIA_CACHE_DIR=GAIA_CACHE_DIR)
-            #=== TODO: ADD heliocentric correction GAIA->obs
             stdflux = np.interp(w, gw, gf)  # interpolate to our wavelength grid
         except fluxcal.GaiaStarNotFound as e:
             log.warning(e)
@@ -937,11 +951,11 @@ def standard_sensitivity(stds, rss, GAIA_CACHE_DIR, ext, res, plot=False, width=
 
         # divide to find sensitivity and smooth
         # Here we can choose if we want to use Gaia or model spectra to get the sensitivity curves
-        if mode == "GAIA":
-            sens = stdflux / spec
-        else:
-            sens = calc_sensitivity_from_model(w, spec, spec_lsf=lsf, best_model=model_list[i],
-                                               model_to_gaia_median=model_coef[i], model_log_shift = model_log_shifts[i])
+        # if mode == "GAIA":
+        sens = stdflux / spec
+        # else:
+        #     sens = calc_sensitivity_from_model(w, spec, spec_lsf=lsf, best_model=model_list[i],
+        #                                        model_to_gaia_median=model_coef[i], model_log_shift = model_log_shifts[i])
         if mode == "GAIA":
             wgood, sgood = fluxcal.filter_channel(w, sens, 2)
         else:
