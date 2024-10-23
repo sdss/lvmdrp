@@ -3360,6 +3360,10 @@ def preproc_raw_frame(
     saturated_mask = proc_img._data >= 2**16
     proc_img._mask |= saturated_mask
 
+    # NOTE: this is a patch to mask first/last 3 columns as they don't have any useful data
+    proc_img._mask[:, :3] |= True
+    proc_img._mask[:, -3:] |= True
+
     # log number of masked pixels
     nmasked = proc_img._mask.sum()
     log.info(f"{nmasked} ({nmasked / proc_img._mask.size * 100:.2g} %) pixels masked")
