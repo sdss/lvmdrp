@@ -745,10 +745,34 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
                 ylim = [0, 0.5e-12]
             s = interpolate.make_smoothing_spline(wgood, sgood, lam=win)
             sens = s(w[n_chan]).astype(np.float32)
-            plt.plot(wgood, sgood, ".k", markersize=2, zorder=-999)
-            plt.plot(w[n_chan], sens, markersize=2, zorder=-999)
-            # plt.ylim(ylim)
-        plt.show()
+        #     plt.plot(wgood, sgood, ".k", markersize=2, zorder=-999)
+        #     plt.plot(w[n_chan], sens, markersize=2, zorder=-999)
+        #     # plt.ylim(ylim)
+        # plt.show()
+
+            fig_path = in_rss[n_chan]
+            if plot:
+                # plt.plot(obswave, np.interp(obswave, gwave, gflux) / obsflux, '.',
+                #          color=colors[i % len(colors)], markersize=2, zorder=-999)
+                # plt.plot(obswave, res_sci[f"STD{i + 1}SEN"], color=colors[i % len(colors)], linewidth=2)
+                plt.plot(wgood, sgood, ".k", markersize=2, zorder=-999)
+                plt.plot(w[n_chan], sens, markersize=2, zorder=-999)
+
+            # plt.ylabel("sensitivity [(ergs/s/cm^2/A) / (e-/s/A)]")
+            # plt.xlabel("wavelength [A]")
+            # plt.ylim(1e-14, 0.1e-11)
+            # plt.semilogy()
+            # fig1.add_axes((0.1, 0.1, 0.8, 0.2))
+            # plt.plot([w[0], w[-1]], [0.05, 0.05], color="k", linewidth=1, linestyle="dotted")
+            # plt.plot([w[0], w[-1]], [-0.05, -0.05], color="k", linewidth=1, linestyle="dotted")
+            # plt.plot([w[0], w[-1]], [0.1, 0.1], color="k", linewidth=1, linestyle="dashed")
+            # plt.plot([w[0], w[-1]], [-0.1, -0.1], color="k", linewidth=1, linestyle="dashed")
+            # plt.plot(w, rms_sci / mean_sci)
+            # plt.plot(w, -rms_sci / mean_sci)
+            # plt.ylim(-0.2, 0.2)
+            # plt.ylabel("relative residuals")
+            # plt.xlabel("wavelength [A]")
+        save_fig(plt.gcf(), product_path=fig_path, to_display=False, figure_path="qa", label="fluxcal_model")
 
     return best_fit_models, model_to_gaia_median
 
