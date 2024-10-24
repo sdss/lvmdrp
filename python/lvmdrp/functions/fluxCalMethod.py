@@ -397,6 +397,17 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             if channel == "z":
                 spec_tmp = fluxcal.interpolate_mask(w_tmp, spec_tmp, ~m2 | mask_bad, fill_value="extrapolate")
 
+            # extinction correction
+            # load extinction curve
+            # Note that we assume a constant extinction curve here!
+            txt = np.genfromtxt(os.getenv("LVMCORE_DIR") + "/etc/lco_extinction.txt")
+            lext, ext = txt[:, 0], txt[:, 1]
+            ext = np.interp(w_tmp, lext, ext)
+
+            # correct for extinction
+            spec_ext_corr = spec_tmp.copy()
+            spec_ext_corr *= 10 ** (0.4 * ext * secz)
+
             lsf_conv = np.sqrt(2 ** 2 - lsf_tmp ** 2)  # as model spectra were already convolved with lsf=2.0,
             # we need to degrade our observed std spectra
             mask_bad = ~np.isfinite(spec_tmp)
@@ -420,7 +431,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             normalized_spectra.append(spec_tmp_convolved/best_continuum) # normalized std spestra degraded to 2A for all
                                                                         # standards in each channel
             lsf.append(lsf_tmp) # initial std spec LSF for all standards in each channel
-            std_spectra.append(spec_tmp)
+            std_spectra.append(spec_ext_corr)
             #print(nn, fiber)
         #print('!!! one band',std_spectra)
 
@@ -715,26 +726,28 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             fig_path = f"{fig_path.replace('lvm-hobject-b', 'lvm-hobject')}"
             save_fig(plt.gcf(), product_path=fig_path, to_display=False, figure_path="qa/model_matching", label=f"matching_std{i}")
 
-        # TODO: need to add ext correction
         # calculating sensitivity curves
-
     for n_chan, chan in enumerate('brz'):
         fig = plt.figure(figsize=(14, 5))
         for i in range(len(stds)):
             sens_tmp = calc_sensitivity_from_model(w[n_chan], std_spectra_all_bands[n_chan][i], lsf_all_bands[n_chan][i],
                                                    model_names[best_id], model_to_gaia_median[i], log_shift_full)
             wgood, sgood = fluxcal.filter_channel(w[n_chan], sens_tmp, 3, method='savgol')
-            if channel == 'b':
+            if chan == 'b':
                 win = 150
-            elif channel == 'r':
+                ylim = [0, 0.3e-11]
+                print('bbb')
+            elif chan == 'r':
                 win = 70
+                ylim = [0, 0.5e-12]
             else:
                 win = 15
+                ylim = [0, 0.5e-12]
             s = interpolate.make_smoothing_spline(wgood, sgood, lam=win)
             sens = s(w[n_chan]).astype(np.float32)
             plt.plot(wgood, sgood, ".k", markersize=2, zorder=-999)
             plt.plot(w[n_chan], sens, markersize=2, zorder=-999)
-            plt.ylim(0, 0.1e-11)
+            # plt.ylim(ylim)
         plt.show()
 
     return best_fit_models, model_to_gaia_median
