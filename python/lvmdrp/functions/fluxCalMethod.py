@@ -894,8 +894,7 @@ def calc_sensitivity_from_model(wl, obs_spec, spec_lsf, best_model='', model_to_
     return sens
 
 
-def standard_sensitivity(stds, rss, GAIA_CACHE_DIR, ext, res, plot=False, width=3, mode='GAIA', model_list=[],
-                         model_coef=[], model_log_shifts=[]):
+def standard_sensitivity(stds, rss, GAIA_CACHE_DIR, ext, res, plot=False, width=3):
     # load the sky masks
     channel = rss._header['CCD']
     w = rss._wave
@@ -938,7 +937,7 @@ def standard_sensitivity(stds, rss, GAIA_CACHE_DIR, ext, res, plot=False, width=
 
         # interpolate over bright sky lines
         spec = fluxcal.interpolate_mask(w, spec, m, fill_value="extrapolate")
-        if channel == "z" and mode == 'GAIA':
+        if channel == "z":
             spec = fluxcal.interpolate_mask(w, spec, ~m2, fill_value="extrapolate")
 
         # correct for extinction
@@ -952,36 +951,40 @@ def standard_sensitivity(stds, rss, GAIA_CACHE_DIR, ext, res, plot=False, width=
         # divide to find sensitivity and smooth
         # Here we can choose if we want to use Gaia or model spectra to get the sensitivity curves
         # if mode == "GAIA":
-        sens = stdflux / spec
+        # sens = stdflux / spec
         # else:
         #     sens = calc_sensitivity_from_model(w, spec, spec_lsf=lsf, best_model=model_list[i],
         #                                        model_to_gaia_median=model_coef[i], model_log_shift = model_log_shifts[i])
-        if mode == "GAIA":
-            wgood, sgood = fluxcal.filter_channel(w, sens, 2)
-        else:
-            if channel == 'b':
-                wgood, sgood = fluxcal.filter_channel(w, sens, 3, method='savgol')
-            elif channel == 'r':
-                wgood, sgood = fluxcal.filter_channel(w, sens, 3, method='savgol')
-            else:
-                wgood = w[np.isfinite(sens)]
-                sgood = sens[np.isfinite(sens)]
+        # if mode == "GAIA":
+        # wgood, sgood = fluxcal.filter_channel(w, sens, 2)
+        # else:
+        #     if channel == 'b':
+        #         wgood, sgood = fluxcal.filter_channel(w, sens, 3, method='savgol')
+        #     elif channel == 'r':
+        #         wgood, sgood = fluxcal.filter_channel(w, sens, 3, method='savgol')
+        #     else:
+        #         wgood = w[np.isfinite(sens)]
+        #         sgood = sens[np.isfinite(sens)]
 
-        sens_gaia = stdflux / spec
-        wgood_gaia, sgood_gaia = fluxcal.filter_channel(w, sens_gaia, 2)
+        # sens_gaia = stdflux / spec
+        # wgood_gaia, sgood_gaia = fluxcal.filter_channel(w, sens_gaia, 2)
+        #
+        # # if mode == "GAIA":
+        # s = interpolate.make_smoothing_spline(wgood_gaia, sgood_gaia, lam=1e4)
+        # else:
+        #     if channel == 'b':
+        #         win = 150
+        #     elif channel == 'r':
+        #         win = 70
+        #     else:
+        #         win = 15
+        #     s = interpolate.make_smoothing_spline(wgood, sgood, lam=win)
+        # s_gaia = interpolate.make_smoothing_spline(wgood_gaia, sgood_gaia, lam=win)
 
-        if mode == "GAIA":
-            s = interpolate.make_smoothing_spline(wgood, sgood, lam=1e4)
-        else:
-            if channel == 'b':
-                win = 150
-            elif channel == 'r':
-                win = 70
-            else:
-                win = 15
-            s = interpolate.make_smoothing_spline(wgood, sgood, lam=win)
-            s_gaia = interpolate.make_smoothing_spline(wgood_gaia, sgood_gaia, lam=win)
-
+        # divide to find sensitivity and smooth
+        sens = stdflux / spec
+        wgood, sgood = fluxcal.filter_channel(w, sens, 2)
+        s = interpolate.make_smoothing_spline(wgood, sgood, lam=1e4)
         res[f"STD{nn}SEN"] = s(w).astype(np.float32)
 
         # caluculate SDSS g band magnitudes for QC
@@ -993,15 +996,18 @@ def standard_sensitivity(stds, rss, GAIA_CACHE_DIR, ext, res, plot=False, width=
         rss.setHdrValue(f"STD{nn}{label}IN", mAB_obs, f"Obs AB mag in {channel}-band")
         log.info(f"AB mag in LVM_{channel}: Gaia {mAB_std:.2f}, instrumental {mAB_obs:.2f}")
 
+        # if plot:
+        #     # fig = plt.figure(figsize=(16, 6))
+        #     # plt.plot(wgood, sgood, ".k", markersize=2, zorder=-999)
+        #     plt.plot(w, sens, ".k", markersize=2, zorder=-999)
+        #     plt.plot(w, res[f"STD{nn}SEN"], label='sens. curve (after shift correction)')
+        #     #plt.plot(w, s_gaia(w).astype(np.float32), linewidth=2, color='red', label='old sensitivity curve')
+        #     # plt.ylim(0, 0.1e-11)
+        #     # plt.legend()
+        #     # plt.show()
         if plot:
-            # fig = plt.figure(figsize=(16, 6))
-            # plt.plot(wgood, sgood, ".k", markersize=2, zorder=-999)
-            plt.plot(w, sens, ".k", markersize=2, zorder=-999)
-            plt.plot(w, res[f"STD{nn}SEN"], label='sens. curve (after shift correction)')
-            #plt.plot(w, s_gaia(w).astype(np.float32), linewidth=2, color='red', label='old sensitivity curve')
-            # plt.ylim(0, 0.1e-11)
-            # plt.legend()
-            # plt.show()
+            plt.plot(wgood, sgood, ".k", markersize=2, zorder=-999)
+            plt.plot(w, res[f"STD{nn}SEN"], linewidth=1)
 
     return rss, res
 
@@ -1176,8 +1182,7 @@ def fluxcal_standard_stars(in_rss, plot=True, GAIA_CACHE_DIR=None, mode='GAIA', 
         frame1.set_xticklabels([])
 
     # standard fibers sensitivity curves
-    rss, res_std = standard_sensitivity(stds, rss, GAIA_CACHE_DIR, ext, res_std, plot=plot, mode=mode,
-                                        model_list=model_list, model_coef=model_coef, model_log_shifts=model_log_shifts)
+    rss, res_std = standard_sensitivity(stds, rss, GAIA_CACHE_DIR, ext, res_std, plot=plot)
     res_std_pd = res_std.to_pandas().values
     ngood_std = res_std_pd.shape[1]-2-np.isnan(res_std_pd.sum(axis=0)).sum()
     if ngood_std < 8:
