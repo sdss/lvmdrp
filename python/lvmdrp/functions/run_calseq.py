@@ -719,6 +719,9 @@ def _create_wavelengths_60177(use_longterm_cals=True, skip_done=True):
             rss_tasks.resample_wavelength(in_rss=harc_path, out_rss=harc_path, method="linear", wave_range=SPEC_CHANNELS[channel], wave_disp=0.5)
 
 
+# TODO: create a routine to copy calibrations from a given version (e.g., master) into sandbox/calib, make sure calib is clean
+
+
 def _copy_fiberflats_from(mjd, mjd_dest=60177, use_longterm_cals=True):
     """Copies twilight fiberflats from given MJD to MJD destination
 
