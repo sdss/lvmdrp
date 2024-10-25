@@ -429,7 +429,7 @@ def get_all_stats(wave, flux, sky, ivar, mask, slitmap, medlist):
     return wave, med_sky, med_flux, med_ivar, med_skye, med_skyw, stats_list, wvl_list, wvc_list
 
 def plot_intro(wave, sky, flux, ivar, skye, skyw, sky_info):
-    fig1=plt.figure(1,(8,12))
+    fig1=plt.figure(1,(8,12),layout='constrained')
     plt.clf()
     gs1= GridSpec(4, 1, figure=fig1)
 

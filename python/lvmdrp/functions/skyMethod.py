@@ -46,7 +46,7 @@ from lvmdrp.core.sky import (
 from lvmdrp.core.spectrum1d import Spectrum1D, find_continuum
 from lvmdrp import log, path, __version__ as drpver
 from lvmdrp.utils.examples import fetch_example_data
-import sky_qa
+from lvmdrp.functions.sky_qa import run_qa
 
 description = "Provides methods for sky subtraction"
 
@@ -1662,10 +1662,9 @@ def quick_sky_subtraction(in_cframe, out_sframe, skymethod: str = 'farlines_near
     # TODO: check on expnum=7632 for halpha emission in sky fibers
 
     #creating skyQA plots
-    QA_path = path.full('QA', mjd=mjd, tileid=tileid, drpver=drpver,
-                         kind='sky', camera='brz', imagetype='table', expnum=expnum)
-    outfile = QA_path +f'skyQA_{expnum}'
-    sky_qa.run_qa(out_sframe, outfile)
+    QA_path = os.path.join(os.path.dirname(out_sframe), "qa")
+    outfile = QA_path +f'/skyQA_{expnum}'
+    run_qa(out_sframe, outfile)
 
 
 def prep_input_simplesky_mean(filename: str = None) -> fits.HDUList:
