@@ -728,6 +728,18 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
 
         # calculating sensitivity curves
     for n_chan, chan in enumerate('brz'):
+        # load input RSS
+        log.info(f"loading input RSS file '{os.path.basename(in_rss[n_chan])}'")
+        rss = RSS.from_file(in_rss[n_chan])
+
+        # define dummy sensitivity array in (ergs/s/cm^2/A) / (e-/s/A) for standard star fibers
+        colnames = [f"{std_fib[:-3]}SEN" for std_fib in rss._header["STD*FIB"]]
+        if len(colnames) == 0:
+            NSTD = 15
+            colnames = [f"STD{i}SEN" for i in range(1, NSTD + 1)]
+        res_mod = Table(np.full(w[n_chan].size, np.nan, dtype=list(zip(colnames, ["f8"] * len(colnames)))))
+        # mean_mod, rms_mod = np.full(w.size, np.nan), np.full(w.size, np.nan)
+
         fig = plt.figure(figsize=(14, 5))
         for i in range(len(stds)):
             sens_tmp = calc_sensitivity_from_model(w[n_chan], std_spectra_all_bands[n_chan][i], lsf_all_bands[n_chan][i],
@@ -736,7 +748,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             if chan == 'b':
                 win = 150
                 ylim = [0, 0.3e-11]
-                print('bbb')
+                #print('bbb')
             elif chan == 'r':
                 win = 70
                 ylim = [0, 0.5e-12]
@@ -745,7 +757,15 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
                 ylim = [0, 0.5e-12]
             s = interpolate.make_smoothing_spline(wgood, sgood, lam=win)
             sens = s(w[n_chan]).astype(np.float32)
-        #     plt.plot(wgood, sgood, ".k", markersize=2, zorder=-999)
+
+
+            res_mod[f"STD{i}SEN"] = s(w[n_chan]).astype(np.float32)
+            res_mod_pd = res_mod.to_pandas().values
+            rms_mod = biweight_scale(res_mod_pd, axis=1, ignore_nan=True)
+            mean_mod = biweight_location(res_mod_pd, axis=1, ignore_nan=True)
+
+
+            #     plt.plot(wgood, sgood, ".k", markersize=2, zorder=-999)
         #     plt.plot(w[n_chan], sens, markersize=2, zorder=-999)
         #     # plt.ylim(ylim)
         # plt.show()
@@ -756,7 +776,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
                 #          color=colors[i % len(colors)], markersize=2, zorder=-999)
                 # plt.plot(obswave, res_sci[f"STD{i + 1}SEN"], color=colors[i % len(colors)], linewidth=2)
                 plt.plot(wgood, sgood, ".k", markersize=2, zorder=-999)
-                plt.plot(w[n_chan], sens, markersize=2, zorder=-999)
+                plt.plot(w[n_chan], sens, markersize=1, zorder=-999)
 
             # plt.ylabel("sensitivity [(ergs/s/cm^2/A) / (e-/s/A)]")
             # plt.xlabel("wavelength [A]")
@@ -773,6 +793,10 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             # plt.ylabel("relative residuals")
             # plt.xlabel("wavelength [A]")
         save_fig(plt.gcf(), product_path=fig_path, to_display=False, figure_path="qa", label="fluxcal_model")
+        log.info('appending FLUXCAL_MOD table')
+        print(res_mod)
+        rss.set_fluxcal(fluxcal=res_mod, source='mod')
+        rss.writeFitsData(in_rss[n_chan])
 
     return best_fit_models, model_to_gaia_median
 
