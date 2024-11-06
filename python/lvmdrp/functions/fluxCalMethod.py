@@ -407,9 +407,9 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             # correct for extinction
             spec_ext_corr = spec_tmp.copy()
             spec_ext_corr *= 10 ** (0.4 * ext * secz)
-
-            lsf_conv = np.sqrt(2 ** 2 - lsf_tmp ** 2)  # as model spectra were already convolved with lsf=2.0,
-            # we need to degrade our observed std spectra
+            pxsize = abs(np.nanmedian(w_tmp - np.roll(w_tmp, -1)))
+            lsf_conv = np.sqrt(np.clip(2 ** 2 - lsf_tmp ** 2, 0.1, None))/pxsize  # as model spectra were already convolved with lsf=2.0 A,
+            # we need to degrade our observed std spectra. Also, convert it to pixels
             mask_bad = ~np.isfinite(spec_tmp)
             mask_lsf = ~np.isfinite(lsf_conv)
             print('LSF without mask', lsf_conv)
