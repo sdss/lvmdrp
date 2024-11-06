@@ -3403,7 +3403,18 @@ class Spectrum1D(Header):
                 flux[i], cent[i], fwhm[i] = gauss.getPar()
             fwhm[i] *= 2.354
 
+            # mask line if >=2 pixels are masked within 3.5sigma
+            model_badpix = data[select] == 0
+            x = self._wave[select].copy()
+            if not numpy.isnan([cent[i], fwhm[i]]).any():
+                select_2 = (self._wave>=cent[i]-3.5*fwhm[i]/2.354) & (self._wave<=cent[i]+3.5*fwhm[i]/2.354)
+                x = self._wave[select_2]
+                model_badpix = mask[select_2]
+                if model_badpix.sum() >= 2:
+                    flux[i] = cent[i] = fwhm[i] = bg[i] = numpy.nan
+
             if axs is not None:
+                axs[i].axvspan(x[0], x[-1], alpha=0.1, fc="0.5", label="reg. of masking")
                 axs[i] = gauss.plot(self._wave[select], self._data[select], mask=self._mask[select], ax=axs[i])
                 axs[i].axvline(cent_guess[i], ls="--", lw=1, color="tab:red", label="cent. guess")
                 axs[i].set_title(f"{axs[i].get_title()} @ {cent[i]:.1f} (pixel)")

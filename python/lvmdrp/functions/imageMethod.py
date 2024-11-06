@@ -758,7 +758,7 @@ def fix_pixel_shifts(in_images, out_images, ref_images, in_mask, report=None,
                 [img.add_header_comment("QC reports and DRP do not agree on the shifted rows") for img in images]
                 if interactive:
                     log.info("interactive mode enabled")
-                    answer = input("apply [q]c, [d]rp or [c]ustom shifts: ")
+                    answer = input("apply [q]c, [d]rp, [c]ustom shifts or [n]one: ")
                     if answer.lower() == "q":
                         log.info("choosing QC shifts")
                         shifts = qshifts
@@ -777,6 +777,14 @@ def fix_pixel_shifts(in_images, out_images, ref_images, in_mask, report=None,
                         shifts = cshifts
                         corrs = numpy.zeros_like(cshifts)
                         which_shifts = "custom"
+                    elif answer.lower() == "n":
+                        log.info("choosing to apply no shift")
+                        cshifts = numpy.zeros_like(cdata.shape[0])
+                        shifts = cshifts
+                        corrs = numpy.zeros_like(cshifts)
+                        which_shifts = "custom"
+                        apply_shifts = False
+
                     apply_shifts = numpy.any(numpy.abs(shifts)>0)
                 else:
                     log.warning(f"no shift will be applied to the images: {in_images}")
@@ -3351,6 +3359,10 @@ def preproc_raw_frame(
     # convert temp image to ADU for saturated pixel masking
     saturated_mask = proc_img._data >= 2**16
     proc_img._mask |= saturated_mask
+
+    # NOTE: this is a patch to mask first/last 3 columns as they don't have any useful data
+    proc_img._mask[:, :3] |= True
+    proc_img._mask[:, -3:] |= True
 
     # log number of masked pixels
     nmasked = proc_img._mask.sum()
