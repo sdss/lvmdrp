@@ -45,6 +45,7 @@ from os.path import isfile, join
 import numpy as np
 from scipy import interpolate
 from scipy import stats
+from scipy import ndimage
 from scipy.ndimage import median_filter
 import re
 
@@ -261,6 +262,38 @@ def logscale_to_linear(wl_regular, wl_log, flux_log, shift=0):
     return flux
 
 
+def smoothSpec_old(self, size, method="gauss", mode="nearest"):
+    """
+    Smooth the spectrum
+
+    Parameters
+    --------------
+    size : float or int
+        Size of the smooth window or Gaussian width (sigma)
+    method : string, optional with default: 'gauss'
+        Available methods are 'gauss' - convolution with Gaussian kernel or
+        'median' - median smoothing of the spectrum
+    mode :  string, optional with default: 'nearest'
+        Set the mode how to handle the boundarys within the convolution
+        Possilbe modes are: reflect, constant, nearest, mirror,  wrap
+    """
+    if method == "gauss":
+        # filter with Gaussian kernel
+        median_filt = ndimage.filters.gaussian_filter1d(self['flux'], size, mode=mode)
+    elif method == "median":
+        # filter with median filter
+        median_filt = ndimage.filters.median_filter(self['flux'], size, mode=mode)
+    elif method == "BSpline":
+        smooth = interpolate.splrep(
+            self['wavelength'],
+            self['flux'],
+            #w=1.0 / np.sqrt(np.fabs(self['flux'])),
+            s=size,
+        )
+        median_filt = interpolate.splev(self['wavelength'], smooth, der=0)
+    return median_filt
+
+
 def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     """ Selection of the stellar atmosphere model spectra (POLLUX database, AMBRE library)
     Read all the models already convolved with Gaia LSF and normalized
@@ -302,15 +335,15 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     telluric_tab = Table.read(telluric_file, format='ascii.fixed_width_two_line')
     # mask_for_fit = telluric_tab
 
-    model_names = [f for f in listdir(join(models_dir, 'normalized_logscale')) if
-                   isfile(join(models_dir, 'normalized_logscale', f)) and (f.lower().endswith('.fits'))]
+    model_names = [f for f in listdir(join(models_dir, 'median_normalized_logscale')) if
+                   isfile(join(models_dir, 'median_normalized_logscale', f)) and (f.lower().endswith('.fits'))]
     model_specs_norm = []
 
     # read the downsampled to 2A, normalized, log-wavelength model grid
     n_models = len(model_names)
     log.info(f'Number of models: {n_models}')
     for i in range(n_models):
-        with fits.open(join(models_dir, 'normalized_logscale', model_names[i]), memmap=False) as hdul:
+        with fits.open(join(models_dir, 'median_normalized_logscale', model_names[i]), memmap=False) as hdul:
             convolved_tmp = hdul[0].data
         model_specs_norm.append(convolved_tmp)
     model_specs_norm = np.array(model_specs_norm)
@@ -384,6 +417,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             spec_tmp = rss_tmp._data[fibidx[0], :]
             error_tmp = rss_tmp._error[fibidx[0], :]
             lsf_tmp = rss_tmp._lsf[fibidx[0], :]
+            print('????????!', np.nanmean(spec_tmp), spec_tmp)
             if np.nanmean(spec_tmp) < 100:
                 log.warning(f"fiber {fiber} @ {fibidx[0]} has counts < 100 e-, skipping")
                 #rss.add_header_comment(f"fiber {fiber} @ {fibidx[0]} has counts < 100 e-, skipping")
@@ -412,21 +446,21 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             # we need to degrade our observed std spectra. Also, convert it to pixels
             mask_bad = ~np.isfinite(spec_tmp)
             mask_lsf = ~np.isfinite(lsf_conv)
-            print('LSF without mask', lsf_conv)
             lsf_conv_interpolated = fluxcal.interpolate_mask(w_tmp, lsf_conv, mask_lsf, fill_value="extrapolate")
-            print('LSF after interpolation', lsf_conv_interpolated)
 
             # # degrade observed std spectra
             spec_tmp_convolved = fluxcal.lsf_convolve(spec_tmp, lsf_conv_interpolated, w_tmp)
 
-            # Fit continuum and normalize spectra
-            # TODO: replace this with DESI's 160A median filter
-            best_continuum, continuum_models, masked_pixels, knots = fit_continuum_std(w_tmp,
-                                                                                       spec_tmp_convolved,
-                                                                                       mask_bands=mask_bands,
-                                                                                       threshold=0.5,niter=niter,
-                                                                                       nknots=nknots,
-                                                                                       median_box=median_box)
+            # Obtain continuum with 160A median filter and normalize spectra
+            # best_continuum, continuum_models, masked_pixels, knots = fit_continuum_std(w_tmp,
+            #                                                                            spec_tmp_convolved,
+            #                                                                            mask_bands=mask_bands,
+            #                                                                            threshold=0.5,niter=niter,
+            #                                                                            nknots=nknots,
+            #                                                                            median_box=median_box)
+            std_spec_conv = Table(data=[w_tmp, spec_tmp_convolved],
+                                         names=['wave', 'flux'])
+            best_continuum = smoothSpec_old(std_spec_conv, int(160/0.5), method="median")
             std_errors.append(error_tmp/best_continuum)
             normalized_spectra.append(spec_tmp_convolved/best_continuum) # normalized std spestra degraded to 2A for all
                                                                         # standards in each channel
@@ -504,11 +538,13 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             log.warning(e)
             rss_tmp.add_header_comment(f"Gaia star {gaia_id} not found")
             continue
-        best_continuum, continuum_models, masked_pixels, knots = fit_continuum_std(std_wave_all, stdflux,
-                                                                                   mask_bands=mask_bands,
-                                                                                   threshold=0.1, niter=niter,
-                                                                                   nknots=nknots,
-                                                                                   median_box=median_box)
+        # best_continuum, continuum_models, masked_pixels, knots = fit_continuum_std(std_wave_all, stdflux,
+        #                                                                            mask_bands=mask_bands,
+        #                                                                            threshold=0.1, niter=niter,
+        #                                                                            nknots=nknots,
+        #                                                                            median_box=median_box)
+        std_spec = Table(data=[std_wave_all, stdflux], names=['wave', 'flux'])
+        best_continuum = smoothSpec_old(std_spec, int(160 / 0.5), method="median")
         normalized_std_on_gaia_cont_single_tmp = best_continuum*std_normalized_all_convolved
         normalized_std_on_gaia_cont_single_tmp[mask_tellurics] = np.nan
         normalized_std_on_gaia_cont_single = normalized_std_on_gaia_cont_single_tmp / np.nansum(normalized_std_on_gaia_cont_single_tmp)
@@ -523,7 +559,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         # canonical f-type model: Teff=6500, logg=4, Fe/H=-1.5 or something like that
         # Check the possible velocity offsets IN LOGSCALE
         # Now we use the model template with Teff=6250, logg=4.0, Fe/H=-0.25
-        with fits.open(join(models_dir, 'normalized_logscale', template_model), memmap=False) as hdul:
+        with fits.open(join(models_dir, 'median_normalized_logscale', template_model), memmap=False) as hdul: #previous -> 'normalized_logscale'
             template = hdul[0].data
         log_model_wave_all = log_std_wave_all
         flux_model_logscale =template
@@ -563,8 +599,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         model_params = re.split('[a-z]+', model_names[best_id], flags=re.IGNORECASE)
         # print(model_params)
 
-        # TODO: once we have the best model, we're done. We can do the rest of the calculation right here
-        # and write the sensitivity function(s) into the fits file
+        # TODO: write the sensitivity function(s) into the fits file
         # TODO: remove the second part of the code that runs per camera
         # TODO: add to the function that selects and applies the sens function like we do with STD, SCI (add MOD)
 
@@ -794,7 +829,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             # plt.xlabel("wavelength [A]")
         save_fig(plt.gcf(), product_path=fig_path, to_display=False, figure_path="qa", label="fluxcal_model")
         log.info('appending FLUXCAL_MOD table')
-        print(res_mod)
+        #print(res_mod)
         rss.set_fluxcal(fluxcal=res_mod, source='mod')
         rss.writeFitsData(in_rss[n_chan])
 
