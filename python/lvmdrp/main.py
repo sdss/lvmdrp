@@ -1504,14 +1504,6 @@ def science_reduction(expnum: int, use_longterm_cals: bool = False,
 
     log.info(f"Reducing MJD {sci_mjd}, exposure {expnum}, tile_id {sci_tileid} ... ")
 
-    # skip this reduction if the MJD is in a list of excluded (bad, engineering...) MJDs
-    exclude_file = os.getenv('LVMCORE_DIR') + '/etc/exclude_mjds.txt'
-    with open(exclude_file) as exclude_mjd_file:
-        exclude = [tuple(map(int, line.split(','))) for line in exclude_mjd_file]
-    if any([m[0] <= sci_mjd <= m[1] for m in exclude]):
-        log.info(f"MJD {sci_mjd} falls within excluded period in {exclude_file}, skipping ...")
-        return
-
     cals_mjd = get_master_mjd(sci_mjd) if use_longterm_cals else sci_mjd
     log.info(f"target master MJD: {cals_mjd}")
 
@@ -1738,6 +1730,14 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
     log.info(f'MJD processing path: {mjd_path}')
     if not mjd_path.is_dir():
         log.warning(f'{mjd = } is not valid raw data directory.')
+        return
+
+    # skip this reduction if the MJD is in a list of excluded (bad, engineering...) MJDs
+    exclude_file = os.getenv('LVMCORE_DIR') + '/etc/exclude_mjds.txt'
+    with open(exclude_file) as exclude_mjd_file:
+        exclude = [tuple(map(int, line.split(','))) for line in exclude_mjd_file]
+    if any([m[0] <= mjd <= m[1] for m in exclude]):
+        log.info(f"MJD {mjd} falls within excluded period in {exclude_file}, skipping ...")
         return
 
     # generate the MJD metadata
