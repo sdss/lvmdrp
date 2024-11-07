@@ -1497,12 +1497,20 @@ def science_reduction(expnum: int, use_longterm_cals: bool = False,
     sci_metadata = get_frames_metadata(mjd=sci_mjd)
     sci_metadata.query("expnum == @expnum", inplace=True)
     sci_metadata.sort_values("expnum", ascending=False, inplace=True)
-
-    # define general metadata
     sci_tileid = sci_metadata["tileid"].unique()[0]
     sci_mjd = sci_metadata["mjd"].unique()[0]
     sci_expnum = sci_metadata["expnum"].unique()[0]
     sci_imagetyp = sci_metadata["imagetyp"].unique()[0]
+
+    log.info(f"Reducing MJD {sci_mjd}, exposure {expnum}, tile_id {sci_tileid} ... ")
+
+    # skip this reduction if the MJD is in a list of excluded (bad, engineering...) MJDs
+    exclude_file = os.getenv('LVMCORE_DIR') + '/etc/exclude_mjds.txt'
+    with open(exclude_file) as exclude_mjd_file:
+        exclude = [tuple(map(int, line.split(','))) for line in exclude_mjd_file]
+    if any([m[0] <= sci_mjd <= m[1] for m in exclude]):
+        log.info(f"MJD {sci_mjd} falls within excluded period in {exclude_file}, skipping ...")
+        return
 
     cals_mjd = get_master_mjd(sci_mjd) if use_longterm_cals else sci_mjd
     log.info(f"target master MJD: {cals_mjd}")
