@@ -499,7 +499,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     mask_for_fit = telluric_tab
     mask_for_fit['Start'] = mask_for_fit['Start'] - 10
     mask_for_fit['End'] = mask_for_fit['End'] + 10
-    mask_for_fit.add_row([3500,3715]) #mask the bluest part of the spectra
+    mask_for_fit.add_row([3500,3800]) #mask the bluest part of the spectra - prev.[3500,3715]
     mask_for_fit.add_row([br_overlap_start, br_overlap_end])
     mask_for_fit.add_row([rz_overlap_start, rz_overlap_end])
     # print(mask_for_fit)
@@ -681,7 +681,8 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
                 else:
                     plt.axvspan(np.log(mask_box[0]), np.log(mask_box[1]), alpha=0.2, color='grey')
             xlim = [8.18, 9.2]
-            ylim = [0.1,1.5]
+            # xlim = [3600,9800]
+            ylim = [0.1,1.6]
             plt.text((xlim[1] - xlim[0]) * 0.05 + xlim[0], (ylim[1] - ylim[0]) * 0.9 + ylim[0], f'Best-fit model: '
                                 f'Teff = {model_params[2]}, log(g) = {model_params[3]}, [Fe/H] = {model_params[4]},'
                                 f'Vel. correction = {vel_shift_full:.2f} km/s', size=14)
@@ -689,8 +690,11 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
                                 f'chi2 = {np.argmin(chi2)}', size=14)
             plt.xlim(xlim)
             plt.ylim(ylim)
-            plt.xlabel("ln (wavelength [A])")
-            plt.legend(loc="lower right")
+            plt.xlabel("wavelength [A]", size=14)
+            show_wl = np.arange(3500, 10000, 500)
+            plt.xticks(np.log(show_wl), labels=show_wl.astype(str), size=14)
+            plt.yticks(fontsize=14)
+            plt.legend(loc="lower right", fontsize=14)
 
             plt.subplot(512)
             plt.plot(log_std_wave_all, flux_std_logscale, label='Observed')
@@ -700,13 +704,16 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
                 plt.axvspan(np.log(mask_box[0]), np.log(mask_box[1]), alpha=0.2, color='grey')
             #plt.legend()
             xlim = [8.24, 8.38]
-            ylim = [0.1,1.5]
+            show_wl = np.arange(3700, 4400, 100)
+            plt.xticks(np.log(show_wl), labels=show_wl.astype(str), size=14)
+            plt.yticks(fontsize=14)
+            ylim = [0.1,1.6]
             plt.text((xlim[1] - xlim[0]) * 0.03 + xlim[0], (ylim[1] - ylim[0]) * 0.9 + ylim[0], 'b channel', size=14)
             plt.text((xlim[1] - xlim[0]) * 0.03 + xlim[0], (ylim[1] - ylim[0]) * 0.82 + ylim[0], f'Vel. correction old = '
                                                                                     f'{vel_shift_b:.2f} km/s', size=14)
             plt.xlim(xlim)
             plt.ylim(ylim)
-            plt.xlabel("ln (wavelength [A])")
+            plt.xlabel("wavelength [A]", size=14)
 
             plt.subplot(513)
             plt.plot(log_std_wave_all, flux_std_logscale, label='Observed')
@@ -717,13 +724,16 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             #plt.legend()
             xlim = [8.66, 8.8]
             ylim = [0.2, 1.5]
+            show_wl = np.arange(5700, 6700, 100)
+            plt.xticks(np.log(show_wl), labels=show_wl.astype(str), size=14)
+            plt.yticks(fontsize=14)
             plt.text((xlim[1] - xlim[0]) * 0.03 + xlim[0], (ylim[1] - ylim[0]) * 0.9 + ylim[0], 'r channel', size=14)
             plt.text((xlim[1] - xlim[0]) * 0.03 + xlim[0], (ylim[1] - ylim[0]) * 0.82 + ylim[0], f'Vel. correction old = '
                                                                                                  f'{vel_shift_r:.2f} km/s',
                      size=14)
             plt.xlim(xlim)
             plt.ylim(ylim)
-            plt.xlabel("ln (wavelength [A])")
+            plt.xlabel("wavelength [A]", size=14)
 
             plt.subplot(514)
             plt.plot(log_std_wave_all, flux_std_logscale, label='Observed')
@@ -734,13 +744,17 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             #plt.legend()
             xlim = [9.02, 9.16]
             ylim = [0.2, 1.5]
+            show_wl = np.arange(8300, 9500, 100)
+            plt.xticks(np.log(show_wl), labels=show_wl.astype(str), size=14)
+            plt.yticks(fontsize=14)
             plt.text((xlim[1] - xlim[0]) * 0.03 + xlim[0], (ylim[1] - ylim[0]) * 0.9 + ylim[0], 'z channel', size=14)
             plt.text((xlim[1] - xlim[0]) * 0.03 + xlim[0], (ylim[1] - ylim[0]) * 0.82 + ylim[0], f'Vel. correction old = '
                                                                                                  f'{vel_shift_z:.1f} km/s',
                      size=14)
             plt.xlim(xlim)
             plt.ylim(ylim)
-            plt.xlabel("ln (wavelength [A])")
+            plt.xlabel("wavelength [A]", size=14)
+            # plt.ylabel(size=14)
 
             plt.subplot(515)
             plt.plot(std_wave_all, normalized_std_on_gaia_cont_single_tmp, linewidth=1.5,
@@ -750,11 +764,14 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             #plt.plot(log_std_wave_all+log_shift_z, flux_model_logscale, label='Model shifted')
             for mask_box in mask_for_fit:
                plt.axvspan((mask_box[0]), (mask_box[1]), alpha=0.2, color='grey')
-            plt.legend()
+            plt.legend(fontsize=14)
             plt.xlim(3500,9000)
+            plt.gca().set_ylim(bottom=0)
             #plt.ylim(0.2, 1.5)
-            plt.xlabel("wavelength [A]")
-            plt.ylabel("Flux, erg/s/cm^2/A")
+            plt.xlabel("wavelength [A]", size=14)
+            plt.ylabel("Flux, erg/s/cm^2/A", size=14)
+            plt.xticks(fontsize=14)
+            plt.yticks(fontsize=14)
 
             #plt.show()
             fig_path = in_rss[0]
