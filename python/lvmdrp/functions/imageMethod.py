@@ -3568,8 +3568,13 @@ def add_astrometry(
                 posangrad=-1*numpy.arctan(CDmatrix[1,0]/CDmatrix[0,0])
                 PAobs=posangrad*180/numpy.pi
                 IFUcencoords=outw.pixel_to_world(2500,1000)
-                RAobs=IFUcencoords.ra.value
-                DECobs=IFUcencoords.dec.value
+                try:
+                    # some very early science data apparently fails here
+                    RAobs=IFUcencoords.ra.value
+                    DECobs=IFUcencoords.dec.value
+                except AttributeError:
+                    RAobs=0
+                    DECobs=0
                 org_img.setHdrValue('ASTRMSRC', 'GDR coadd', comment='Source of astrometric solution: guider')
                 copy_guider_keyword(mfheader, 'FRAME0  ', org_img)
                 copy_guider_keyword(mfheader, 'FRAMEN  ', org_img)
