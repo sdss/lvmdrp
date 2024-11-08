@@ -8,7 +8,8 @@ This document records the main changes to the drp code.
 
 1.1.1dev (unreleased)
 ------------------
-
+- Honor MJD exclusion list stored in LVMCORE
+- Fix crash in add_astrometry if guider frame ra,dec not present (early SV data)
 
 1.1.0 (30-10-2024)
 ------------------
