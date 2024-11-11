@@ -382,7 +382,7 @@ def science_sensitivity(rss, res_sci, ext, GAIA_CACHE_DIR, NSCI_MAX=15, r_spaxel
 
             dmin = d[fib] * 3600 # convert to arcsec
 
-            log.info(f"science fiberid '{scifibs['fiberid'][fib][0]}', star '{data['SOURCE_ID']}', secz '{secz:.2f}'")
+            log.info(f"science fiberid '{scifibs['fiberid'][fib][0]}', star '{data['source_id']}', secz '{secz:.2f}'")
 
             # correction for Evelyn's effect
             radius_fac = np.interp(dmin, np.array([0,4,6,8,10,12,14,16]), 10**(-0.4*np.array([0.0,0.0,0.05,0.12,0.15,0.2,0.2,0.2])))
@@ -411,7 +411,7 @@ def science_sensitivity(rss, res_sci, ext, GAIA_CACHE_DIR, NSCI_MAX=15, r_spaxel
             cam = channel.upper()
             rss.setHdrValue(f"SCI{i+1}{cam}AB", mAB_std, f"Gaia AB mag in {channel}-band")
             rss.setHdrValue(f"SCI{i+1}{cam}IN", mAB_obs, f"Obs AB mag in {channel}-band")
-            rss.setHdrValue(f"SCI{i+1}ID", data['SOURCE_ID'], f"Field star {i+1} Gaia source ID")
+            rss.setHdrValue(f"SCI{i+1}ID", data['source_id'], f"Field star {i+1} Gaia source ID")
             rss.setHdrValue(f"SCI{i+1}FIB", scifibs['fiberid'][fib][0], f"Field star {i+1} fiber id")
             rss.setHdrValue(f"SCI{i+1}RA", data['ra'], f"Field star {i+1} RA")
             rss.setHdrValue(f"SCI{i+1}DE", data['dec'], f"Field star {i+1} DEC")
