@@ -1744,7 +1744,7 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
     # remove bad or test quality frames
     sub = sub[~(sub['qaqual'] != 'good')]
     if sub.empty:
-        log.error(f'no good exposure found with parameters: {mjd = }, {expnum = }')
+        log.error(f"exposure {expnum = } was flagged as 'BAD' by the raw data quality pipeline")
         return
 
     # filter on exposure number
