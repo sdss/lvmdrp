@@ -571,9 +571,13 @@ def fluxcal_sci_ifu_stars(in_rss, plot=True, GAIA_CACHE_DIR=None, NSCI_MAX=15):
 
     label = rss._header['CCD']
     channel = label.lower()
-    rss.setHdrValue(f"SCISENM{label}", np.nanmean(mean_sci[1000:3000]), f"Mean scistar sensitivity in {channel}")
-    rss.setHdrValue(f"SCISENR{label}", np.nanmean(rms_sci[1000:3000]), f"Mean scistar sensitivity rms in {channel}")
-    log.info(f"Mean scistar sensitivity in {channel} : {np.nanmean(mean_sci[1000:3000])}")
+    mean_sci_band = np.nanmean(mean_sci[1000:3000])
+    rms_sci_band = np.nanmean(rms_sci[1000:3000])
+    mean_sci_band = -999.9 if np.isnan(mean_sci_band) else mean_sci_band
+    rms_sci_band = -999.9 if np.isnan(rms_sci_band) else rms_sci_band
+    rss.setHdrValue(f"SCISENM{label}", mean_sci_band, f"Mean scistar sensitivity in {channel}")
+    rss.setHdrValue(f"SCISENR{label}", rms_sci_band, f"Mean scistar sensitivity rms in {channel}")
+    log.info(f"Mean scistar sensitivity in {channel} : {mean_sci_band}")
 
     if plot:
         plt.ylabel("sensitivity [(ergs/s/cm^2/A) / (e-/s/A)]")
