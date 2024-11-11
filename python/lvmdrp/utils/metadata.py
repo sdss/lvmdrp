@@ -22,7 +22,6 @@ from tqdm import tqdm
 from lvmdrp.core.constants import FRAMES_CALIB_NEEDS, CAMERAS
 from lvmdrp.utils.bitmask import (
     QualityFlag,
-    RawFrameQuality,
     ReductionStage,
     ReductionStatus,
 )
@@ -55,8 +54,7 @@ RAW_METADATA_COLUMNS = [
     ("ldls", bool),
     ("quartz", bool),
     ("hartmann", str),
-    ("quality", str),
-    ("qual", RawFrameQuality),
+    ("qaqual", str),
     ("stage", ReductionStage),
     ("status", ReductionStatus),
     ("drpqual", QualityFlag),
@@ -79,8 +77,7 @@ MASTER_METADATA_COLUMNS = [
     ("ldls", bool),
     ("quartz", bool),
     ("hartmann", str),
-    ("quality", str),
-    ("qual", RawFrameQuality),
+    ("qaqual", str),
     ("stage", ReductionStage),
     ("status", ReductionStatus),
     ("drpqual", QualityFlag),
@@ -607,8 +604,11 @@ def extract_metadata(frames_paths: list, kind: str = "raw") -> pd.DataFrame:
                 header.get("LDLS", "OFF") in onlamp,
                 header.get("QUARTZ", "OFF") in onlamp,
                 header.get("HARTMANN", "0 0"),
-                header.get("QUALITY", "excellent"),
-                header.get("QUAL", RawFrameQuality(0)),
+                # header.get("QUALITY", "excellent"),
+                # QC pipeline keywords
+                header.get("QAQUAL", "GOOD"),
+                # header.get("QAFLAG", QAFlag(0)),
+                # DRP quality keywords
                 header.get("DRPSTAGE", ReductionStage.UNREDUCED),
                 header.get("DRPSTAT", ReductionStatus(0)),
                 header.get("DRPQUAL", QualityFlag(0)),
@@ -632,8 +632,10 @@ def extract_metadata(frames_paths: list, kind: str = "raw") -> pd.DataFrame:
                 header.get("LDLS", "OFF") in onlamp,
                 header.get("QUARTZ", "OFF") in onlamp,
                 header.get("HARTMANN", "0 0"),
-                header.get("QUALITY", "excellent"),
-                header.get("QUAL", RawFrameQuality(0)),
+                # TODO: QUALITY may be redundant, double check and remove if it is
+                # header.get("QUALITY", "excellent"),
+                header.get("QAQUAL", "GOOD"),
+                # header.get("QAFLAG", QAFlag(0)),
                 header.get("DRPSTAGE", ReductionStage.UNREDUCED),
                 header.get("DRPSTAT", ReductionStatus(0)),
                 header.get("DRPQUAL", QualityFlag(0)),
@@ -1448,7 +1450,7 @@ def _collect_header_data(filename: str) -> dict:
                         'skyw_ra': 'TESKYWRA', 'skyw_dec': 'TESKYWDE', 'skyw_amass': 'TESKYWAM',
                         'skyw_kmpos': 'TESKYWKM', 'skyw_focpos': 'TESKYWFO', 'skyw_name': 'SKYWNAME',
                         'skyw_sh_hght': 'GEOCORONAL SKYW_SH_HGHT', 'skyw_moon_sep': 'SKYMODEL SKYW_RHO',
-                        # sky parameters 
+                        # sky parameters
                         'moon_ra': 'SKYMODEL MOON_RA', 'moon_dec': 'SKYMODEL MOON_DEC',
                         'moon_phase': 'SKYMODEL MOON_PHASE', 'moon_fli': 'SKYMODEL MOON_FLI',
                         'sun_alt': 'SKYMODEL SUNALT', 'moon_alt': 'SKYMODEL MOONALT'

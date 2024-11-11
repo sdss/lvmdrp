@@ -168,6 +168,10 @@ def apply_hdrfix(mjd: int, camera: str = None, expnum: int = None,
     tileid = 11111 if tileid in (-999, 999, None) else tileid
     hdr['TILE_ID'] = tileid
 
+    # add QA header keywords default values
+    hdr['QAQUAL'] = ('GOOD', 'string value for raw data quality flag')
+    hdr['QAFLAG'] = ('0000', 'bitmask value for raw data quality flag')
+
     # read the hdr fix file
     fix = read_hdrfix_file(mjd)
 
@@ -184,5 +188,9 @@ def apply_hdrfix(mjd: int, camera: str = None, expnum: int = None,
         if fnmatch.fnmatch(current_file, row['fileroot']):
             hdr[row['keyword']] = row['value']
             log.info(f'Applying header fix on {current_file} for key: {row["keyword"]}, value: {row["value"]}.')
+
+    # fix typing in QAFLAG keyword
+    # hdr['QAQUAL'] = ('GOOD', 'string value for raw data quality flag')
+    # hdr.set('QAFLAG', QAFlag(int(hdr['QAFLAG'], base=2)), 'bitmask value for raw data quality flag')
 
     return hdr
