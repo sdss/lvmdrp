@@ -3360,6 +3360,10 @@ def preproc_raw_frame(
     saturated_mask = proc_img._data >= 2**16
     proc_img._mask |= saturated_mask
 
+    # NOTE: this is a patch to mask first/last 3 columns as they don't have any useful data
+    proc_img._mask[:, :3] |= True
+    proc_img._mask[:, -3:] |= True
+
     # log number of masked pixels
     nmasked = proc_img._mask.sum()
     log.info(f"{nmasked} ({nmasked / proc_img._mask.size * 100:.2g} %) pixels masked")
@@ -3564,8 +3568,13 @@ def add_astrometry(
                 posangrad=-1*numpy.arctan(CDmatrix[1,0]/CDmatrix[0,0])
                 PAobs=posangrad*180/numpy.pi
                 IFUcencoords=outw.pixel_to_world(2500,1000)
-                RAobs=IFUcencoords.ra.value
-                DECobs=IFUcencoords.dec.value
+                try:
+                    # some very early science data apparently fails here
+                    RAobs=IFUcencoords.ra.value
+                    DECobs=IFUcencoords.dec.value
+                except AttributeError:
+                    RAobs=0
+                    DECobs=0
                 org_img.setHdrValue('ASTRMSRC', 'GDR coadd', comment='Source of astrometric solution: guider')
                 copy_guider_keyword(mfheader, 'FRAME0  ', org_img)
                 copy_guider_keyword(mfheader, 'FRAMEN  ', org_img)

@@ -6,16 +6,33 @@ Change Log
 
 This document records the main changes to the drp code.
 
-1.1.0 (unreleased)
+1.1.1dev (unreleased)
+------------------
+- Honor MJD exclusion list stored in LVMCORE
+- Fix crash in add_astrometry if guider frame ra,dec not present (early SV data)
+
+1.1.0 (30-10-2024)
 ------------------
 
+- Implemented flux calibration using IFU field stars
+- Improved twilight flat reduction and treatment for much improved fiberflats
+- Add heliocentric velocity to headers
+- More accurate resampling/rebinning code
+- Improved wavelenth solution (especially in b channel) and more robust fits
+- Allowing wavelength thermal shifts to vary along slit and improving wavelength/LSF fitting routines
+- More robust and accurate fiber thermal shifts
+- Add memory usage and execution time reporting
+- Speed up pipeline across the board
 - Adds a lockfile to drpall write, with 5 sec timeout, to prevent collisions during parallel writes.
 - Adds `OBJECT` and `OBSTIME` header keys to the drpall summary file
-- Implemented flux calibration using IFU field stars
-- Allowing wavelength thermal shifts to vary along slit and improving wavelength/LSF fitting routines
-- Fixing fiber thermal shifts
-- Speed up tracing
+- Added sky QA plots
 - Improved QA plots across different routines
+- Log exceptions to header COMMENT section
+- Implement infrastructure for versioning for master calibration files
+- Separate 2d reductions, extraction & 1d reduction, post-extraction stages, allow
+  to run each individually
+- More flexible CLI for cluster job submission
+- Many bugfixes & stability/robustness improvements
 
 1.0.3 (29-05-2024)
 ------------------

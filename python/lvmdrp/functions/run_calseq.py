@@ -59,7 +59,7 @@ from lvmdrp.core.rss import RSS, lvmFrame
 from lvmdrp.functions import imageMethod as image_tasks
 from lvmdrp.functions import rssMethod as rss_tasks
 from lvmdrp.main import start_logging, get_config_options, read_fibermap, reduce_2d
-from lvmdrp.functions.run_twilights import lvmFlat, fit_fiberflat, create_lvmflat, combine_twilight_sequence
+from lvmdrp.functions.run_twilights import lvmFlat, to_native_wave, fit_fiberflat, create_lvmflat, combine_twilight_sequence
 
 
 SLITMAP = read_fibermap(as_table=True)
@@ -717,6 +717,9 @@ def _create_wavelengths_60177(use_longterm_cals=True, skip_done=True):
         else:
             rss_tasks.create_pixel_table(in_rss=xarc_path, out_rss=harc_path, in_waves=mwave_paths[channel], in_lsfs=mlsf_paths[channel])
             rss_tasks.resample_wavelength(in_rss=harc_path, out_rss=harc_path, method="linear", wave_range=SPEC_CHANNELS[channel], wave_disp=0.5)
+
+
+# TODO: create a routine to copy calibrations from a given version (e.g., master) into sandbox/calib, make sure calib is clean
 
 
 def _copy_fiberflats_from(mjd, mjd_dest=60177, use_longterm_cals=True):
@@ -1454,7 +1457,7 @@ def create_dome_fiberflats(mjd, expnums_ldls, expnums_qrtz, use_longterm_cals=Tr
         fflat._data = fflat._data / median_fiber
         fflat.set_wave_trace(mwave)
         fflat.set_lsf_trace(mlsf)
-        fflat = fflat.to_native_wave(method="linear", interp_density=False, return_density=False)
+        fflat = to_native_wave(fflat)
         fflat.writeFitsData(mflat_path)
         # create lvmFlat object
         lvmflat = lvmFlat(data=xflat._data / fflat._data, error=xflat._error, mask=xflat._mask, header=xflat._header,

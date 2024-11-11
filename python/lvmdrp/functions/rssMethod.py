@@ -187,7 +187,7 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
                                   bg_guess: float = 0.0,
                                   flux_range: List[float] = [100.0, numpy.inf],
                                   cent_range: List[float] = [-4.0, 4.0],
-                                  fwhm_range: List[float] = [2.0, 4.5],
+                                  fwhm_range: List[float] = [1.5, 4.5],
                                   bg_range: List[float] = [-1000.0, numpy.inf],
                                   poly_disp: int = 6, poly_fwhm: int = 4,
                                   poly_cros: int = 0, poly_kinds: list = ['poly', 'poly', 'poly'],
@@ -366,8 +366,8 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
         # cross-match spectrum and pixwav map
         stretch_min, stretch_max, stretch_steps = 0.95, 1.05, 10000
         cc, bhat, mhat = _cross_match_float(
-            ref_spec=pix_spec[3:-3],
-            obs_spec=arc._data[ref_fiber][3:-3],
+            ref_spec=pix_spec,
+            obs_spec=arc._data[ref_fiber],
             stretch_factors=numpy.linspace(stretch_min, stretch_max, stretch_steps),
             shift_range=[-cc_max_shift, cc_max_shift],
             normalize_spectra=False,
@@ -1130,8 +1130,8 @@ def resample_wavelength(in_rss: str, out_rss: str, method: str = "linear",
     log.info(f"using wavelength range {wave_range = } angstrom and {wave_disp = } angstrom pixel size")
 
     # resample the wavelength solution
-    log.info(f"resampling the wavelength solution using {method = } interpolation")
-    new_rss = rss.rectify_wave(wave_range=wave_range, wave_disp=wave_disp, method=method, return_density=convert_to_density)
+    log.info("resampling the spectra ...")
+    new_rss = rss.rectify_wave(wave_range=wave_range, wave_disp=wave_disp)
 
     # write output RSS
     log.info(f"writing resampled RSS to '{os.path.basename(out_rss)}'")
@@ -1583,7 +1583,7 @@ def apply_fiberflat(in_rss: str, out_frame: str, in_flat: str, clip_below: float
     # check if fiberflat has the same number of fibers as the target data
     if rss._fibers != flat._fibers:
         log.error(f"number of fibers in target data ({rss._fibers}) and fiberflat ({flat._fibers}) do not match")
-        return None
+        raise RuntimeError(f"number of fibers in target data ({rss._fibers}) and fiberflat ({flat._fibers}) do not match")
 
     # check if fiberflat has the same wavelength grid as the target data
     if not numpy.isclose(rss._wave, flat._wave).all():
@@ -1597,12 +1597,10 @@ def apply_fiberflat(in_rss: str, out_frame: str, in_flat: str, clip_below: float
         spec_flat = flat.getSpec(i)
         spec_data = rss.getSpec(i)
 
-        # interpolate fiberflat to target wavelength grid to fill in missing values
         if not numpy.isclose(spec_flat._wave, spec_data._wave).all():
             deltas = spec_flat._wave - spec_data._wave
-            log.warning(f"at fiber {i} resampling fiberflat: {numpy.min(deltas):.4f} - {numpy.max(deltas):.4f}")
-            rss.add_header_comment(f"at fiber {i} resampling fiberflat: {numpy.min(deltas):.4f} - {numpy.max(deltas):.4f}")
-            spec_flat = spec_flat.resampleSpec(spec_data._wave, err_sim=5)
+            log.error(f"Fiber {i} fiberflat wrong wavelengh grid: {numpy.min(deltas):.4f} - {numpy.max(deltas):.4f}")
+            raise RuntimeError(f"Fiber {i} fiberflat wrong wavelengh grid: {numpy.min(deltas):.4f} - {numpy.max(deltas):.4f}")
 
         # apply clipping
         select_clip_below = (spec_flat < clip_below) | numpy.isnan(spec_flat._data)
