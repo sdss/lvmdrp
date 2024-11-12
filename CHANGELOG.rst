@@ -10,6 +10,12 @@ This document records the main changes to the drp code.
 ------------------
 - Honor MJD exclusion list stored in LVMCORE
 - Fix crash in add_astrometry if guider frame ra,dec not present (early SV data)
+- Fix rare failure in fiber model parameter measurements
+- Fix failure due to case change in Gaia query results
+- Fix race condition due to non-unique filenames in astroquery (fixed upstream)
+- Fix NaNs in SCISEN* header keywords
+- Filter out QAFLAG BAD exposures and do not reduce
+- Catch Error on very early guider frames with no RA, DEC keywords
 
 1.1.0 (30-10-2024)
 ------------------
