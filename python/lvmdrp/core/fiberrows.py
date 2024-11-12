@@ -530,12 +530,12 @@ class FiberRows(Header, PositionTable):
         """
         if data_dim is not None:
             # create empty  data array and set number of fibers
-            self._data = numpy.zeros(data_dim, dtype=numpy.float32)
+            self._data = numpy.zeros(data_dim, dtype=numpy.float32) + numpy.nan
             self._fibers = self._data.shape[0]
 
         if data_dim is not None:
             # create empty  error array
-            self._error = numpy.zeros(data_dim, dtype=numpy.float32)
+            self._error = numpy.zeros(data_dim, dtype=numpy.float32) + numpy.nan
 
         if data_dim is not None:
             # create empty mask all pixel assigned bad
@@ -1093,7 +1093,7 @@ class FiberRows(Header, PositionTable):
         poly_all_table = []
         for i in range(self._fibers):
             good_pix = numpy.logical_not(self._mask[i, :])
-            good_sam = ~numpy.isnan(samples[i, :])
+            good_sam = numpy.isfinite(samples[i, :])
             if numpy.sum(good_pix) >= deg + 1 and good_sam.sum() / good_sam.size > min_samples_frac:
                 # select the polynomial class
                 poly_cls = Spectrum1D.select_poly_class(poly_kind)
@@ -1116,6 +1116,7 @@ class FiberRows(Header, PositionTable):
                     self._data = numpy.clip(self._data, clip[0], clip[1])
                 self._mask[i, :] = False
             else:
+                log.warning(f"fiber {i} does not meet criteria: {good_pix.sum() = } >= {deg + 1 = } or {good_sam.sum() / good_sam.size = } > {min_samples_frac = }")
                 self._mask[i, :] = True
 
         return numpy.asarray(pix_table), numpy.asarray(poly_table), numpy.asarray(poly_all_table)
