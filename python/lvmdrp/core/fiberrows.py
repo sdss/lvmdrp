@@ -530,12 +530,12 @@ class FiberRows(Header, PositionTable):
         """
         if data_dim is not None:
             # create empty  data array and set number of fibers
-            self._data = numpy.zeros(data_dim, dtype=numpy.float32)
+            self._data = numpy.zeros(data_dim, dtype=numpy.float32) + numpy.nan
             self._fibers = self._data.shape[0]
 
         if data_dim is not None:
             # create empty  error array
-            self._error = numpy.zeros(data_dim, dtype=numpy.float32)
+            self._error = numpy.zeros(data_dim, dtype=numpy.float32) + numpy.nan
 
         if data_dim is not None:
             # create empty mask all pixel assigned bad

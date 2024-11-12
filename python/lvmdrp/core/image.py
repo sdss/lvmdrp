@@ -2311,9 +2311,9 @@ class Image(Header):
             fwhm_mask = numpy.isnan(fwhm_slice) | amp_off | cent_off | fwhm_off
 
             if amp_slice.size != trace_amp._data.shape[0]:
-                dummy_amp = numpy.split(numpy.zeros(trace_amp._data.shape[0]), nblocks)
-                dummy_cent = numpy.split(numpy.zeros(trace_cent._data.shape[0]), nblocks)
-                dummy_fwhm = numpy.split(numpy.zeros(trace_fwhm._data.shape[0]), nblocks)
+                dummy_amp = numpy.split(numpy.zeros(trace_amp._data.shape[0]) + numpy.nan, nblocks)
+                dummy_cent = numpy.split(numpy.zeros(trace_cent._data.shape[0]) + numpy.nan, nblocks)
+                dummy_fwhm = numpy.split(numpy.zeros(trace_fwhm._data.shape[0]) + numpy.nan, nblocks)
                 dummy_amp_mask = numpy.split(numpy.ones(trace_amp._data.shape[0], dtype=bool), nblocks)
                 dummy_cent_mask = numpy.split(numpy.ones(trace_cent._data.shape[0], dtype=bool), nblocks)
                 dummy_fwhm_mask = numpy.split(numpy.ones(trace_fwhm._data.shape[0], dtype=bool), nblocks)
