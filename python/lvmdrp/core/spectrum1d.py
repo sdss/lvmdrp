@@ -3350,10 +3350,16 @@ class Spectrum1D(Header):
         fit_bg=True,
         warning=False,
     ):
-        error = self._error if self._error is not None else numpy.ones(self._dim, dtype=numpy.float32)
-        mask = self._mask if self._mask is not None else numpy.zeros(self._dim, dtype=bool)
-        error[mask] = numpy.inf
+        # copy main arrays to avoid side effects
         data = self._data.copy()
+        error = self._error.copy() if self._error is not None else numpy.ones(self._dim, dtype=numpy.float32)
+        mask = self._mask.copy() if self._mask is not None else numpy.zeros(self._dim, dtype=bool)
+
+        # update mask to account for unmasked invalid pixels
+        # mask |= (~numpy.isfinite(data) | ~numpy.isfinite(error))
+
+        # reset bad pixels in data and error
+        error[mask] = numpy.inf
         data[mask] = 0.0
 
         flux = numpy.ones(len(cent_guess)) * numpy.nan
