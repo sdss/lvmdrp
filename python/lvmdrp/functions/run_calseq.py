@@ -1335,9 +1335,9 @@ def create_traces(mjd, cameras=CAMERAS, use_longterm_cals=True, expnums_ldls=Non
                 mamps[camera]._data[select_block] = trace_flux_fit._data[select_block]
                 mcents[camera]._data[select_block] = trace_cent_fit._data[select_block]
                 mwidths[camera]._data[select_block] = trace_fwhm_fit._data[select_block]
-                mamps[camera]._mask[select_block] = False
-                mcents[camera]._mask[select_block] = False
-                mwidths[camera]._mask[select_block] = False
+                mamps[camera]._mask[select_block] = trace_flux_fit._mask[select_block]
+                mcents[camera]._mask[select_block] = trace_cent_fit._mask[select_block]
+                mwidths[camera]._mask[select_block] = trace_fwhm_fit._mask[select_block]
 
         mamp_path = path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=mjd, camera=camera, kind="mamp")
         mcent_path = path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=mjd, camera=camera, kind="mtrace")
@@ -1358,7 +1358,7 @@ def create_traces(mjd, cameras=CAMERAS, use_longterm_cals=True, expnums_ldls=Non
             mamps[camera]._mask[untraced_fibers] = True
             mcents[camera]._mask[untraced_fibers] = True
             mwidths[camera]._mask[untraced_fibers] = True
-            failed_fibers = (np.nansum(mcents[camera]._data, axis=1) == 0)|(np.nansum(mwidths[camera]._data, axis=1) == 0)
+            failed_fibers = (bn.nansum(mcents[camera]._data, axis=1) == 0)|(bn.nansum(mwidths[camera]._data, axis=1) == 0)
             mamps[camera]._mask[failed_fibers] = True
             mcents[camera]._mask[failed_fibers] = True
             mwidths[camera]._mask[failed_fibers] = True
