@@ -1465,6 +1465,7 @@ def science_reduction(expnum: int, use_longterm_cals: bool = False,
                       skip_2d: bool = False,
                       skip_1d: bool = False,
                       skip_post_1d: bool = False,
+                      skip_drpall: bool = False,
                       debug_mode: bool = False) -> None:
     """ Run the science reduction for a given exposure number.
     """
@@ -1639,6 +1640,9 @@ def science_reduction(expnum: int, use_longterm_cals: bool = False,
         with Timer(name='QSky '+sframe_path, logger=log.info):
             quick_sky_subtraction(in_cframe=cframe_path, out_sframe=sframe_path)
 
+    if skip_drpall:
+        log.info("skipping create/update drpall summary file")
+    else:
         # update the drpall summary file
         with Timer(name='DRPAll '+sframe_path, logger=log.info):
             log.info('Updating the drpall summary file')
@@ -1676,7 +1680,8 @@ def science_reduction(expnum: int, use_longterm_cals: bool = False,
 
 def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
             with_cals: bool = False, no_sci: bool = False,
-            fluxcal_method: str = 'STD', skip_2d: bool = False, skip_1d: bool = False, skip_post_1d: bool = False,
+            fluxcal_method: str = 'STD',
+            skip_2d: bool = False, skip_1d: bool = False, skip_post_1d: bool = False, skip_drpall: bool = False,
             clean_ancillary: bool = False, debug_mode: bool = False):
     """ Run the quick DRP
 
@@ -1704,6 +1709,8 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
         Skip astrometry, straylight subtraction and extraction, by default False
     skip_post_1d : bool, optional
         Skip wavelength calibration, flatfielding, sky processing and flux calibration
+    skip_drpall : bool, optional
+        Skip create/update drpall summary file
     clean_ancillary : bool, optional
         Flag to remove the ancillary paths, by default False
     debug_mode : bool, optional
@@ -1726,6 +1733,7 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
                     skip_2d=skip_2d,
                     skip_1d=skip_1d,
                     skip_post_1d=skip_post_1d,
+                    skip_drpall=skip_drpall,
                     clean_ancillary=clean_ancillary,
                     debug_mode=debug_mode)
         return
@@ -1809,6 +1817,7 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
                                         skip_2d=skip_2d,
                                         skip_1d=skip_1d,
                                         skip_post_1d=skip_post_1d,
+                                        skip_drpall=skip_drpall,
                                         clean_ancillary=clean_ancillary,
                                         debug_mode=debug_mode, **kwargs)
                     except Exception as e:

@@ -122,13 +122,14 @@ def cli():
 @click.option('-2d', '--skip-2d', is_flag=True, default=False, help='Skip preprocessing and detrending')
 @click.option('-1d', '--skip-1d', is_flag=True, default=False, help='Skip astrometry, straylight subtraction and extraction')
 @click.option('-p1d', '--skip-post-1d', is_flag=True, default=False, help='Skip wavelength calibration, flatfielding, sky processing and flux calibration')
+@click.option('-da', '--skip-drpall', is_flag=True, default=False, help='Skip create/update drpall summary file')
 @click.option('-c', '--clean-ancillary', is_flag=True, default=False, help='Remove ancillary paths after run')
 @click.option('-d', '--debug-mode', is_flag=True, default=False, help='Set debug mode on to run using aperture extraction and skip CR rejection')
 @cloup.constraint(mutually_exclusive, ['mjd', 'mjd_list', 'mjd_range'])
 # @cloup.constraint(RequireExactly(1), ['mjd', 'mjd_list', 'mjd_range'])
 @cloup.constraint(mutually_exclusive, ['expnum', 'exp_list', 'exp_range'])
 def run(mjd, mjd_list, mjd_range, with_cals, no_sci, expnum, exp_list, exp_range, exp_file, fluxcal_method,
-        skip_2d, skip_1d, skip_post_1d, clean_ancillary, debug_mode):
+        skip_2d, skip_1d, skip_post_1d, skip_drpall, clean_ancillary, debug_mode):
     """ Run the DRP reduction for a given MJD or range of MJDs
 
     Run the DRP for an MJD or range of MJDs.  Various flags and options are available
@@ -149,6 +150,7 @@ def run(mjd, mjd_list, mjd_range, with_cals, no_sci, expnum, exp_list, exp_range
             skip_2d=skip_2d,
             skip_1d=skip_1d,
             skip_post_1d=skip_post_1d,
+            skip_drpall=skip_drpall,
             clean_ancillary=clean_ancillary,
             debug_mode=debug_mode)
 
