@@ -12,7 +12,7 @@ import cloup
 from cloup.constraints import mutually_exclusive, RequireExactly, IsSet, If
 
 from lvmdrp.core.constants import CALIBRATION_MATCH
-from lvmdrp.main import run_drp, reduce_file, check_daily_mjd, parse_mjds, read_expfile
+from lvmdrp.main import run_drp, reduce_file, check_daily_mjd, parse_mjds, read_expfile, create_drpall
 from lvmdrp.functions.skyMethod import configureSkyModel_drp
 from lvmdrp.utils.metadata import get_frames_metadata, get_master_metadata
 from lvmdrp.utils.cluster import run_cluster
@@ -374,6 +374,15 @@ def cluster(mjd_list, mjd_range, expnum, exp_list, exp_range, exp_file, nodes, p
     # submit the cluster job
     run_cluster(mjds=mjds, expnums=expnums, nodes=nodes, ppn=ppn, walltime=walltime, alloc=alloc, submit=submit,
                 run_calibs=run_calibs, drp_options=drp_options)
+
+
+@cli.command('summary', short_help='Creates the drpall summary file for the given version of the pipeline')
+@click.option('--drp-version', type=str, default=None, help='DRP version for which a drpall summary file will be created')
+@click.option('-o', '--overwrite', is_flag=True, default=False, help='Overwrites any existing drpall file before creating a new one')
+def summary(drp_version, overwrite):
+    """ Creates the DRP summary file for a given version of the DRP """
+
+    create_drpall(drp_version=drp_version, overwrite=overwrite)
 
 
 if __name__ == "__main__":

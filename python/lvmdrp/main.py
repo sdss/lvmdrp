@@ -1832,6 +1832,38 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
             create_status_file(tileid, mjd, status='done')
 
 
+def create_drpall(drp_version: str = None, overwrite: bool = False) -> None:
+    """Create drpall summary file for a given DRP version
+
+    Parameters
+    ----------
+    drp_version: str, optional
+        Version of the DRP, by default None (current version)
+    """
+    drp_version = drp_version or drpver
+
+    if overwrite:
+        drpall = path.full('lvm_drpall', drpver=drp_version)
+        drpall = drpall.replace('.fits', '.h5')
+        if os.path.isfile(drpall):
+            log.info(f"removing existing {drpall}")
+            os.remove(drpall)
+        else:
+            log.info(f"no drpall file found for {drp_version = }")
+
+    # define lvmSFrame paths
+    sframe_paths = path.expand("lvm_frame", kind="SFrame", drpver=drp_version, tileid="*", mjd="*", expnum=8*"?")
+    log.info(f"found {len(sframe_paths)} lvmSFrames")
+    # iterate over each file and create/update the drpall file
+    for sframe_path in sframe_paths:
+        # extract Tile ID, MJD and exposure number from file
+        # pars = path.extract("lvm_frame", sframe_path)
+        pars = sframe_path.split(".fits")[0].split("/")
+        tileid, mjd, expnum = int(pars[-3]), int(pars[-2]), int(pars[-1].split("-")[-1])
+        cals_mjd = get_master_mjd(mjd)
+        update_summary_file(sframe_path, tileid=tileid, mjd=mjd, expnum=expnum, master_mjd=cals_mjd)
+
+
 def reduce_calib_frame(row: dict):
     """ Reduce an individual calibration frame
 
