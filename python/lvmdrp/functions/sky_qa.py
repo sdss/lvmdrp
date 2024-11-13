@@ -2,24 +2,14 @@
 #################################################################
 #imports
 
-import sys
-from glob import glob
-import os
-from astropy.io import ascii, fits
-from astropy.io.fits import Header
+from astropy.io import fits
 import numpy as np
-import subprocess
 import matplotlib.pyplot as plt
-#import xhtml
 from matplotlib.gridspec import GridSpec
-from astropy.wcs import WCS
-from astropy.coordinates import get_body, solar_system_ephemeris, get_sun, AltAz, EarthLocation, get_moon, SkyCoord
+from astropy.coordinates import get_body, solar_system_ephemeris, AltAz, EarthLocation
 from astropy.time import Time
 import astropy.units as u
-#import quick_map
-#import eval_standard
-from astropy.table import Table, vstack, hstack
-#from mpl_toolkits.axes_grid1 import make_axes_locatable
+from astropy.table import Table
 import matplotlib.backends.backend_pdf
 
 #Things that should not change and dir
@@ -92,11 +82,11 @@ def create_sky_table(wave, flux, sky, ivar, mask, slitmap, header, maplist, medl
         
     # getting the map info
     linetab_sci=sumlineflux(wave, flux, sky, ivar, mask, slitmap, maplist, lrangelist, crangelist, 'sci')
-    table_sci = Table(linetab_sci)
+    #table_sci = Table(linetab_sci)
     linetab_skye=sumlineflux(wave, flux, sky, ivar, mask, slitmap, maplist, lrangelist, crangelist, 'skye')
-    table_skye = Table(linetab_skye)
+    #table_skye = Table(linetab_skye)
     linetab_skyw=sumlineflux(wave, flux, sky, ivar, mask, slitmap, maplist, lrangelist, crangelist, 'skyw')
-    table_skyw = Table(linetab_skyw)
+    #table_skyw = Table(linetab_skyw)
 
     # getting the med plot and metrics info
     wave, med_sky, med_flux, med_ivar, med_skye, med_skyw, stats_list, wvl_list, wvc_list = get_all_stats(wave, flux, sky, ivar, mask, slitmap, medlist)
@@ -114,6 +104,7 @@ def create_sky_table(wave, flux, sky, ivar, mask, slitmap, header, maplist, medl
     for key,val in sky_info.items():
         sky_infotab[key]=val
     
+    # needed if want to save info as a fits file
     # hdu_list = fits.HDUList([
     #     fits.PrimaryHDU(),
     #     fits.table_to_hdu(table_sci),
@@ -449,13 +440,13 @@ def plot_intro(wave, sky, flux, ivar, skye, skyw, sky_info):
     c_fsky = 'slategray'
     c_5sky = 'mediumblue'
     c_mw = ':r'
-    c_line = 'darkviolet'
-    c_cont = 'black'
+    #c_line = 'darkviolet'
+    #c_cont = 'black'
 
 
     axt = fig1.add_subplot(gs1[0, 0])
     axt.axis([0,10,0,15])
-    #axt.text(0,0, "\n".join("{}: {}".format(k, v) for k, v in sky_info.items()))
+    
     if sky_info['Moon_Alt'] < 0:
         moon_status = 'Moon BELOW horizon'
     else:
@@ -532,8 +523,8 @@ def plot_stats(wave, sky, flux, ivar, stats_list, wvl_list, wvc_list):
     c_sky = 'blue'
     c_subsky = 'orange'
     c_ivar = 'limegreen'
-    c_nsky = 'cyan'
-    c_fsky = 'slategray'
+    #c_nsky = 'cyan'
+    #c_fsky = 'slategray'
     c_5sky = 'mediumblue'
     c_mw = ':r'
     c_line = 'darkviolet'
@@ -554,8 +545,6 @@ def plot_stats(wave, sky, flux, ivar, stats_list, wvl_list, wvc_list):
     ax3 = plot_stats_panel(ax3, wave, sky, flux, ivar, 5870, 5910, wvl_list[ind], wvc_list[ind], stats_list[ind][0], stats_list[ind][1], stats_list[ind][2], medlist[ind], c_sky, c_5sky, c_subsky, c_ivar, c_line, c_cont, c_mw)
 
     #group 3 6301
-    xmin=6280
-    xmax=6320
     ax4 = fig2.add_subplot(gs2[0, 2], sharey=ax3)
     ind=1
     ax4 = plot_stats_panel(ax4, wave, sky, flux, ivar, 6280, 6320, wvl_list[ind], wvc_list[ind], stats_list[ind][0], stats_list[ind][1], stats_list[ind][2], medlist[ind], c_sky, c_5sky, c_subsky, c_ivar, c_line, c_cont, c_mw)
@@ -640,7 +629,7 @@ def get_moon_info_las_campanas(datetime_utc,verbose=False):
 
 
     # Calculate the difference in ecliptic longitudes between the moon and the sun
-    delta_longitude = (moon_coords.spherical.lon - sun_coords.spherical.lon).to_value('deg')
+    #delta_longitude = (moon_coords.spherical.lon - sun_coords.spherical.lon).to_value('deg')
     # print('delta_long',delta_longitude)
 
     # Normalize the difference in ecliptic longitudes to get the moon's phase
@@ -707,7 +696,7 @@ def get_header_value(header, key, default_value=-999.0, verbose=False):
 
     try:
         value = header[key]
-        if value==None:
+        if value is None:
             value=default_value
         elif isinstance(value, str):
             try:
@@ -731,8 +720,8 @@ def get_header_string(header, key, default_string='Unknown', verbose=False):
 
     try:
         value = header[key]
-        if value==None:
-            value=default_value
+        if value is None:
+            value=default_string
         elif isinstance(value, str):
             if value=='':
                 return default_string
@@ -744,7 +733,7 @@ def get_header_string(header, key, default_string='Unknown', verbose=False):
     except KeyError as e:
         if verbose:
             print(f"Key '{key}' not found in header: {e}")
-        value = default_value
+        value = default_string
     return value
 
 
