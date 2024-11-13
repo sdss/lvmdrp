@@ -33,7 +33,6 @@ from lvmdrp.utils.convert import dateobs_to_sjd, correct_sjd, tileid_grp
 DRPVER = __version__
 
 
-METADATA_PATH = os.path.join(os.getenv("LVM_SPECTRO_REDUX"), DRPVER)
 # -------------------------------------------------------------------------------
 
 RAW_METADATA_COLUMNS = [
@@ -105,7 +104,7 @@ def _decode_string(metadata):
     return metadata
 
 
-def _get_metadata_paths(tileid=None, mjd=None, kind="raw", filter_exist=True):
+def _get_metadata_paths(drpver=None, tileid=None, mjd=None, kind="raw", filter_exist=True):
     """return metadata path depending on the kind
 
     this function will define a path for a metadata store
@@ -114,6 +113,8 @@ def _get_metadata_paths(tileid=None, mjd=None, kind="raw", filter_exist=True):
 
     Parameters
     ----------
+    drpver : str, optional
+        DRP version, by default None (current version)
     tileid : int, optional
         tile ID of the target frames, by default None
     mjd : int, optional
@@ -135,6 +136,12 @@ def _get_metadata_paths(tileid=None, mjd=None, kind="raw", filter_exist=True):
     ValueError
         if kind is not "raw" or "master"
     """
+    # define DRP version
+    drpver = drpver or DRPVER
+
+    # define metadata path
+    METADATA_PATH = os.path.join(os.getenv("LVM_SPECTRO_REDUX"), drpver)
+
     if kind == "raw":
         if tileid is None or mjd is None:
             raise ValueError(
@@ -307,7 +314,7 @@ def _filter_metadata(
     return metadata
 
 
-def _load_or_create_store(tileid=None, mjd=None, kind="raw", mode="a"):
+def _load_or_create_store(drpver=None, tileid=None, mjd=None, kind="raw", mode="a"):
     """return the metadata store given a tile ID and an MJD
 
     if loading/creating a store for raw frames metadata, this function will
@@ -317,6 +324,8 @@ def _load_or_create_store(tileid=None, mjd=None, kind="raw", mode="a"):
 
     Parameters
     ----------
+    drpver : str, optional
+        DRP version, by default None (current version)
     tileid : int, optional
         tile ID for which a store will be loaded, by default None
     mjd : int, optional
@@ -331,6 +340,9 @@ def _load_or_create_store(tileid=None, mjd=None, kind="raw", mode="a"):
     h5py.Group
         the metadata store for the given observatory
     """
+    # define DRP version
+    drpver = drpver or DRPVER
+
     if mode not in {"r", "a"}:
         raise ValueError(f"invalid value for {mode = }")
 
@@ -339,7 +351,7 @@ def _load_or_create_store(tileid=None, mjd=None, kind="raw", mode="a"):
 
     # define metadata path depending on the kind
     metadata_paths = _get_metadata_paths(
-        tileid=tileid, mjd=mjd, kind=kind, filter_exist=(mode == "r")
+        drpver=drpver, tileid=tileid, mjd=mjd, kind=kind, filter_exist=(mode == "r")
     )
 
     stores = []
@@ -810,6 +822,7 @@ def del_metadata(tileid=None, mjd=None, kind="raw"):
 
 
 def get_metadata(
+    drpver=None,
     tileid=None,
     mjd=None,
     rmjd=None,
@@ -836,6 +849,8 @@ def get_metadata(
 
     Parameters
     ----------
+    drpver : str, optional
+        DRP version, by default None (current version)
     tileid : int, optional
         tile ID of the target frames, by default None
     mjd : int, optional
@@ -884,6 +899,10 @@ def get_metadata(
     pandas.DataFrame
         the metadata dataframe filtered following the given criteria
     """
+
+    # define DRP version
+    drpver = drpver or DRPVER
+
     # default output
     default_output = pd.DataFrame(
         columns=list(zip(*RAW_METADATA_COLUMNS))[0]
@@ -892,7 +911,7 @@ def get_metadata(
     )
 
     # extract metadata
-    stores = _load_or_create_store(tileid=tileid, mjd=mjd, kind=kind, mode="r")
+    stores = _load_or_create_store(drpver=drpver, tileid=tileid, mjd=mjd, kind=kind, mode="r")
 
     metadatas = []
     for store in stores:
@@ -1465,7 +1484,7 @@ def _collect_header_data(filename: str) -> dict:
 
 
 def update_summary_file(filename: str, tileid: int = None, mjd: int = None, expnum: int = None,
-                        master_mjd: int = None):
+                        master_mjd: int = None, drpver: str = None):
     """ Update the DRPall summary file
 
     Update the LVM DRPall summary file with a new row of data for a given lvmSFrame file.
@@ -1485,9 +1504,11 @@ def update_summary_file(filename: str, tileid: int = None, mjd: int = None, expn
     master_mjd : int, optional
         the master calibration MJD, by default None
     """
+    # get DRP version
+    drpver = drpver or DRPVER
 
     # get the row(s) from the raw frames metadata
-    df = get_metadata(tileid=int(tileid), mjd=int(mjd), expnum=int(expnum), imagetyp='object')
+    df = get_metadata(drpver=drpver, tileid=int(tileid), mjd=int(mjd), expnum=int(expnum), imagetyp='object')
     if df is None or df.empty:
         log.info(f'No metadata found for {tileid=}, {mjd=}, {expnum=}. Exiting.')
         return
@@ -1502,14 +1523,14 @@ def update_summary_file(filename: str, tileid: int = None, mjd: int = None, expn
 
     # add additional metadata
     # get SAS location and name
-    location = path.location("lvm_frame", mjd=mjd, drpver=DRPVER, tileid=tileid, expnum=expnum, kind='SFrame')
-    name = path.name("lvm_frame", mjd=mjd, drpver=DRPVER, tileid=tileid, expnum=expnum, kind='SFrame')
+    location = path.location("lvm_frame", mjd=mjd, drpver=drpver, tileid=tileid, expnum=expnum, kind='SFrame')
+    name = path.name("lvm_frame", mjd=mjd, drpver=drpver, tileid=tileid, expnum=expnum, kind='SFrame')
     gdr_location = path.location('lvm_agcam_coadd', mjd=mjd, specframe=expnum, tel='sci')
     hdr_data['filename'] = name
     hdr_data['location'] = location
     hdr_data['agcam_location'] = gdr_location
     hdr_data['calib_mjd'] = master_mjd
-    hdr_data['drpver'] = DRPVER
+    hdr_data['drpver'] = drpver
 
     # add new columns
     df = row.assign(**hdr_data)
@@ -1526,7 +1547,7 @@ def update_summary_file(filename: str, tileid: int = None, mjd: int = None, expn
     df['object'] = df['object'].replace('', None)
 
     # create drpall h5 filepath
-    drpall = path.full('lvm_drpall', drpver=DRPVER)
+    drpall = path.full('lvm_drpall', drpver=drpver)
     drpall = drpall.replace('.fits', '.h5')
     log.info(f'Updating the drpall summary file {drpall}')
     lock = FileLock(drpall.replace('.h5', '.h5.lock'), timeout=5)

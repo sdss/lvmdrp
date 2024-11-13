@@ -1853,15 +1853,16 @@ def create_drpall(drp_version: str = None, overwrite: bool = False) -> None:
 
     # define lvmSFrame paths
     sframe_paths = path.expand("lvm_frame", kind="SFrame", drpver=drp_version, tileid="*", mjd="*", expnum=8*"?")
-    log.info(f"found {len(sframe_paths)} lvmSFrames")
+    log.info(f"found {len(sframe_paths)} lvmSFrames under {drp_version = }")
     # iterate over each file and create/update the drpall file
     for sframe_path in sframe_paths:
+        log.info(f"processing lvmSFrame {sframe_path}")
         # extract Tile ID, MJD and exposure number from file
         # pars = path.extract("lvm_frame", sframe_path)
         pars = sframe_path.split(".fits")[0].split("/")
         tileid, mjd, expnum = int(pars[-3]), int(pars[-2]), int(pars[-1].split("-")[-1])
         cals_mjd = get_master_mjd(mjd)
-        update_summary_file(sframe_path, tileid=tileid, mjd=mjd, expnum=expnum, master_mjd=cals_mjd)
+        update_summary_file(sframe_path, tileid=tileid, mjd=mjd, expnum=expnum, master_mjd=cals_mjd, drpver=drp_version)
 
 
 def reduce_calib_frame(row: dict):
