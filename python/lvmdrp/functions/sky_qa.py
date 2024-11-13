@@ -24,10 +24,8 @@ import matplotlib.backends.backend_pdf
 
 #Things that should not change and dir
 
-# Define directory paths 
+# Define directory paths (for local version, not DRP) 
 LVMDATA_DIR="/Users/amjones/repos/lvm_ksl/2024Oct15_v1.1.0/"
-
-#outdir = './'
 
 # Measure line fluxes by direct integration of the spectra and add to table
 maplist=['[OI]5577', '[OI]6300', '[OH]6865', 'Bcont(4195, 4220)', 'Rcont(6420, 6440)', 'Zcont(9130, 9145)']
@@ -221,12 +219,22 @@ def plotmap_row(data_sci, data_skye, data_skyw, line, row, fig, gs):
     cbar=fig.colorbar(sc5, ax=ax5, fraction=0.09)
     ax5.set_facecolor('black')
 
+    #need to make this look better!
+    ax6 = fig.add_subplot(gs[row+2,1:5])
+    ax6.hist(data_sci['flux_'+line], range=(vmin, vmaxs), log=True, stacked=True, bins=50, histtype='step', label='sky subtracted flux')
+    ax6.hist(data_sci['sky_'+line], range=(vmin, vmaxs), log=True, stacked=True, bins=100, label='sky flux')
+    ax6.hist(data_skye['flux_'+line]+data_skye['sky_'+line], range=(vmin, vmaxs), bins=50, histtype='step', log=True, stacked=True, label='SkyE flux')
+    ax6.hist(data_skyw['flux_'+line]+data_skyw['sky_'+line], range=(vmin, vmaxs), bins=50, histtype='step', log=True, stacked=True, label='SkyW flux')
+    ax6.tick_params(axis="x", direction="in", labeltop=True, labelbottom=False, pad=-15, top=True)
+    fig.subplots_adjust(top=0.95)
+    ax6.legend()
+
     return fig
 
 def plotmap_line(data_sci, data_skye, data_skyw, maplist):
     fig1=plt.figure(1,(12,12))
     plt.clf()
-    gs1= GridSpec(8, 6, figure=fig1)
+    gs1= GridSpec(9, 6, figure=fig1, wspace=0.4, hspace=0.4)
 
     plt.rcParams.update({'axes.titlesize': 'small',
                  'axes.labelsize':'small',
@@ -238,13 +246,13 @@ def plotmap_line(data_sci, data_skye, data_skyw, maplist):
     
     for j in range(3):
        fig1=plotmap_row(data_sci, data_skye, data_skyw, maplist[j], 3*j, fig1, gs1)
- 
+    
     return fig1
 
 def plotmap_cont(data_sci, data_skye, data_skyw, maplist):
     fig2=plt.figure(1,(12,12))
     plt.clf()
-    gs2= GridSpec(8, 6, figure=fig2)
+    gs2= GridSpec(9, 6, figure=fig2, wspace=0.4, hspace=0.4)
 
     plt.rcParams.update({'axes.titlesize': 'small',
                  'axes.labelsize':'small',
@@ -448,11 +456,16 @@ def plot_intro(wave, sky, flux, ivar, skye, skyw, sky_info):
     axt = fig1.add_subplot(gs1[0, 0])
     axt.axis([0,10,0,15])
     #axt.text(0,0, "\n".join("{}: {}".format(k, v) for k, v in sky_info.items()))
-    axt.text(0,15.5, f"Object: {sky_info['Object']}\nMJD: {sky_info['MJD'][0]}, Expnum: {sky_info['Exposure'][0]}\nObstime: {sky_info['Obstime']}")
+    if sky_info['Moon_Alt'] < 0:
+        moon_status = 'Moon BELOW horizon'
+    else:
+        moon_status = 'Moon ABOVE horizon'
+    axt.text(0,14, f"Object: {sky_info['Object']}\nMJD: {sky_info['MJD'][0]}, Expnum: {sky_info['Exposure'][0]}\nObstime: {sky_info['Obstime']}")
     axt.text(0,9,f"Coordinates (RA, dec)\nSci:       {sky_info['Sci_RA']}, {sky_info['Sci_dec']}\nSkyE:    {sky_info['SkyE_RA']}, {sky_info['SkyE_dec']}\nSkyW:   {sky_info['SkyW_RA']}, {sky_info['SkyW_dec']}")
     axt.text(0,6,f"Distance from Sci (deg)\nSkyE: {sky_info['Sci_SkyE']}, SkyW: {sky_info['Sci_SkyW']}")
     axt.text(0,3,f"Distance from Moon (deg)\nSci: {sky_info['Sci_Moon']}, SkyE: {sky_info['SkyE_Moon']}, SkyW: {sky_info['SkyW_Moon']}")
-    axt.text(0,1,f"Lunar Illumination Fraction: {sky_info['Moon_Ill']}, Moon Altitude: {sky_info['Moon_Alt']}, Sun Altitude: {sky_info['Sun_Alt']}")
+    axt.text(0,1,f"{moon_status}, Lunar Illumination Fraction: {sky_info['Moon_Ill']}")
+    axt.text(4,7,f"Altitude (deg)\nSci:       {sky_info['Sci_Alt']}\nSkyE:    {sky_info['SkyE_Alt']}\nSkyW:   {sky_info['SkyW_Alt']}\nSun:     {sky_info['Sun_Alt']}\nMoon:   {sky_info['Moon_Alt']}")
     axt.axes.get_xaxis().set_visible(False)
     axt.axes.get_yaxis().set_visible(False)
     axt.set_frame_on(False)
@@ -495,6 +508,24 @@ def plot_intro(wave, sky, flux, ivar, skye, skyw, sky_info):
     axd.legend()
     return fig1
 
+def plot_stats_panel(ax, wave, sky, flux, ivar, xmin, xmax, wvl_list, wvc_list, stats1, stats2, stats3, line_name, c_sky, c_5sky, c_subsky, c_ivar, c_line, c_cont, c_mw):
+    ax.plot(wave,sky,c=c_sky)
+    ax.plot(wave,0.05*sky,c=c_5sky, linestyle='--')
+    ax.plot(wave,flux,c=c_subsky)
+    ax.plot(wave,np.sqrt(1/ivar),c=c_ivar)
+    ax.plot(wave[wvl_list],flux[wvl_list], 'P', markersize=5, c=c_line)
+    if c_cont != -999:
+        ax.plot(wave[wvc_list],flux[wvc_list], 'P', markersize=5, c=c_cont)
+    ax.plot([3600,9600],[5.9e-15,5.9e-15],c_mw)
+    ax.plot([xmax-10,9600],[-5.9e-15,-5.9e-15],c_mw)
+    ax.set_ylim(-1e-14,1e-14)
+    ax.set_xlim(xmin,xmax)
+    ax.text(xmin+2, -5.5e-15,f'{line_name}')
+    ax.text(xmin+2, -6.5e-15,"mean {:5.4f}".format(stats1))
+    ax.text(xmin+2, -7.5e-15,"med {:5.4f}".format(stats2))
+    ax.text(xmin+2, -8.5e-15,"std {:5.4f}".format(stats3))
+    return ax
+
 def plot_stats(wave, sky, flux, ivar, stats_list, wvl_list, wvc_list):
 
     #colors
@@ -514,152 +545,50 @@ def plot_stats(wave, sky, flux, ivar, stats_list, wvl_list, wvc_list):
 
     #group 1 5577
     ax2 = fig2.add_subplot(gs2[0, 0])
-    ax2.plot(wave,sky,c=c_sky)
-    ax2.plot(wave,0.05*sky,c=c_5sky, linestyle='--')
-    ax2.plot(wave,flux,c=c_subsky)
-    ax2.plot(wave,np.sqrt(1/ivar),c=c_ivar)
-    ax2.scatter(wave[wvl_list[0]],flux[wvl_list[0]], s=10, c=c_line)
-    ax2.scatter(wave[wvc_list[0]],flux[wvc_list[0]], s=10, c=c_cont)
-    ax2.plot([3600,9600],[5.9e-15,5.9e-15],c_mw)
-    ax2.plot([3600,9600],[-5.9e-15,-5.9e-15],c_mw)
-    ax2.set_ylim(-1e-14,1e-14)
-    ax2.set_xlim(5560,5590)
-    ax2.text(5562, -5.5e-15,f'{medlist[0]}')
-    ax2.text(5562, -6.5e-15,"mean {:5.4f}".format(stats_list[0][0]))
-    ax2.text(5562, -7.5e-15,"med {:5.4f}".format(stats_list[0][1]))
-    ax2.text(5562, -8.5e-15,"std {:5.4f}".format(stats_list[0][2]))
-
+    ind=0
+    ax2 = plot_stats_panel(ax2, wave, sky, flux, ivar, 5560, 5590, wvl_list[ind], wvc_list[ind], stats_list[ind][0], stats_list[ind][1], stats_list[ind][2], medlist[ind], c_sky, c_5sky, c_subsky, c_ivar, c_line, c_cont, c_mw)
 
     #group 2 5891
-    ax3 = fig2.add_subplot(gs2[0, 1])
-    ax3.plot(wave,sky, c=c_sky)
-    ax3.plot(wave,0.05*sky,c=c_5sky, linestyle='--')
-    ax3.plot(wave,flux, c=c_subsky)
-    ax3.plot(wave,np.sqrt(1/ivar), c=c_ivar)
-    ax3.scatter(wave[wvl_list[6]],flux[wvl_list[6]], s=10, c=c_line)
-    ax3.scatter(wave[wvc_list[6]],flux[wvc_list[6]], s=10, c=c_cont)
-    ax3.plot([3600,9600],[5.9e-15,5.9e-15],c_mw)
-    ax3.plot([3600,9600],[-5.9e-15,-5.9e-15],c_mw)
-    ax3.set_ylim(-1e-14,1e-14)
-    ax3.set_xlim(5870,5910)
-    ax3.text(5872, -5.5e-15,f'{medlist[6]}')
-    ax3.text(5872, -6.5e-15,"mean {:5.4f}".format(stats_list[6][0]))
-    ax3.text(5872, -7.5e-15,"med {:5.4f}".format(stats_list[6][1]))
-    ax3.text(5872, -8.5e-15,"std {:5.4f}".format(stats_list[6][2]))
+    ax3 = fig2.add_subplot(gs2[0, 1], sharey=ax2)
+    ind=6
+    ax3 = plot_stats_panel(ax3, wave, sky, flux, ivar, 5870, 5910, wvl_list[ind], wvc_list[ind], stats_list[ind][0], stats_list[ind][1], stats_list[ind][2], medlist[ind], c_sky, c_5sky, c_subsky, c_ivar, c_line, c_cont, c_mw)
 
     #group 3 6301
-    ax4 = fig2.add_subplot(gs2[0, 2])
-    ax4.plot(wave,sky, c=c_sky)
-    ax4.plot(wave,0.05*sky,c=c_5sky, linestyle='--')
-    ax4.plot(wave,flux, c=c_subsky)
-    ax4.plot(wave,np.sqrt(1/ivar), c=c_ivar)
-    ax4.scatter(wave[wvl_list[1]],flux[wvl_list[1]], s=10, c=c_line)
-    ax4.scatter(wave[wvc_list[1]],flux[wvc_list[1]], s=10, c=c_cont)
-    ax4.plot([3600,9600],[5.9e-15,5.9e-15],c_mw)
-    ax4.plot([3600,9600],[-5.9e-15,-5.9e-15],c_mw)
-    ax4.set_ylim(-1e-14,1e-14)
-    ax4.set_xlim(6280,6320)
-    ax4.text(6282, -5.5e-15,f'{medlist[1]}')
-    ax4.text(6282, -6.5e-15,"mean {:5.4f}".format(stats_list[1][0]))
-    ax4.text(6282, -7.5e-15,"med {:5.4f}".format(stats_list[1][1]))
-    ax4.text(6282, -8.5e-15,"std {:5.4f}".format(stats_list[1][2]))
+    xmin=6280
+    xmax=6320
+    ax4 = fig2.add_subplot(gs2[0, 2], sharey=ax3)
+    ind=1
+    ax4 = plot_stats_panel(ax4, wave, sky, flux, ivar, 6280, 6320, wvl_list[ind], wvc_list[ind], stats_list[ind][0], stats_list[ind][1], stats_list[ind][2], medlist[ind], c_sky, c_5sky, c_subsky, c_ivar, c_line, c_cont, c_mw)
 
     #group 4 6865
     ax5 = fig2.add_subplot(gs2[1, 0])
-    ax5.plot(wave,sky, c=c_sky)
-    ax5.plot(wave,0.05*sky,c=c_5sky, linestyle='--')
-    ax5.plot(wave,flux, c=c_subsky)
-    ax5.plot(wave,np.sqrt(1/ivar), c=c_ivar)
-    ax5.scatter(wave[wvl_list[2]],flux[wvl_list[2]], s=10, c=c_line)
-    ax5.scatter(wave[wvc_list[2]],flux[wvc_list[2]], s=10, c=c_cont)
-    ax5.plot([3600,9600],[5.9e-15,5.9e-15],c_mw)
-    ax5.plot([3600,9600],[-5.9e-15,-5.9e-15],c_mw)
-    ax5.set_ylim(-1e-14,1e-14)
-    ax5.set_xlim(6840,6890)
-    ax5.text(6842, -5.5e-15,f'{medlist[2]}')
-    ax5.text(6842, -6.5e-15,"mean {:5.4f}".format(stats_list[2][0]))
-    ax5.text(6842, -7.5e-15,"med {:5.4f}".format(stats_list[2][1]))
-    ax5.text(6842, -8.5e-15,"std {:5.4f}".format(stats_list[2][2]))
+    ind=2
+    ax5 = plot_stats_panel(ax5, wave, sky, flux, ivar, 6840, 6890, wvl_list[ind], wvc_list[ind], stats_list[ind][0], stats_list[ind][1], stats_list[ind][2], medlist[ind], c_sky, c_5sky, c_subsky, c_ivar, c_line, c_cont, c_mw)
 
     #group 5 8630-70 O2
-    ax6 = fig2.add_subplot(gs2[1, 1])
-    ax6.plot(wave,sky, c=c_sky)
-    ax6.plot(wave,0.05*sky,c=c_5sky, linestyle='--')
-    ax6.plot(wave,flux, c=c_subsky)
-    ax6.plot(wave,np.sqrt(1/ivar), c=c_ivar)
-    ax6.scatter(wave[wvl_list[7]],flux[wvl_list[7]], s=10, c=c_line)
-    ax6.plot([3600,9600],[5.9e-15,5.9e-15],c_mw)
-    ax6.plot([3600,9600],[-5.9e-15,-5.9e-15],c_mw)
-    ax6.set_ylim(-1e-14,1e-14)
-    ax6.set_xlim(8620,8685)
-    ax6.text(8622, -5.5e-15,f'{medlist[7]}')
-    ax6.text(8622, -6.5e-15,"mean {:5.4f}".format(stats_list[7][0]))
-    ax6.text(8622, -7.5e-15,"med {:5.4f}".format(stats_list[7][1]))
-    ax6.text(8622, -8.5e-15,"std {:5.4f}".format(stats_list[7][2]))
+    ax6 = fig2.add_subplot(gs2[1, 1], sharey=ax5)
+    ind=7
+    ax6 = plot_stats_panel(ax6, wave, sky, flux, ivar, 8620, 8685, wvl_list[ind], wvc_list[ind], stats_list[ind][0], stats_list[ind][1], stats_list[ind][2], medlist[ind], c_sky, c_5sky, c_subsky, c_ivar, c_line, -999, c_mw)
 
     #group 2 Airglow cont
-    ax7 = fig2.add_subplot(gs2[1, 2])
-    ax7.plot(wave,sky, c=c_sky)
-    ax7.plot(wave,0.05*sky,c=c_5sky, linestyle='--')
-    ax7.plot(wave,flux, c=c_subsky)
-    ax7.plot(wave,np.sqrt(1/ivar), c=c_ivar)
-    ax7.scatter(wave[wvl_list[8]],flux[wvl_list[8]], s=10, c=c_line)
-    ax7.plot([3600,9600],[5.9e-15,5.9e-15],c_mw)
-    ax7.plot([3600,9600],[-5.9e-15,-5.9e-15],c_mw)
-    ax7.set_ylim(-1e-14,1e-14)
-    ax7.set_xlim(5410,5450)
-    ax7.text(5412, -5.5e-15,f'{medlist[8]}')
-    ax7.text(5412, -6.5e-15,"mean {:5.4f}".format(stats_list[8][0]))
-    ax7.text(5412, -7.5e-15,"med {:5.4f}".format(stats_list[8][1]))
-    ax7.text(5412, -8.5e-15,"std {:5.4f}".format(stats_list[8][2]))
+    ax7 = fig2.add_subplot(gs2[1, 2], sharey=ax6)
+    ind=8
+    ax7 = plot_stats_panel(ax7, wave, sky, flux, ivar, 5410, 5450, wvl_list[ind], wvc_list[ind], stats_list[ind][0], stats_list[ind][1], stats_list[ind][2], medlist[ind], c_sky, c_5sky, c_subsky, c_ivar, c_line, -999, c_mw)
 
     #cont B channel
     ax8 = fig2.add_subplot(gs2[2, 0])
-    ax8.plot(wave,sky, c=c_sky)
-    ax8.plot(wave,0.05*sky,c=c_5sky, linestyle='--')
-    ax8.plot(wave,flux, c=c_subsky)
-    ax8.plot(wave,np.sqrt(1/ivar), c=c_ivar)
-    ax8.scatter(wave[wvl_list[3]],flux[wvl_list[3]], s=10, c=c_line)
-    ax8.plot([3600,9600],[5.9e-15,5.9e-15],c_mw)
-    ax8.plot([3600,9600],[-5.9e-15,-5.9e-15],c_mw)
-    ax8.set_ylim(-1e-14,1e-14)
-    ax8.set_xlim(4185,4230)
-    ax8.text(4187, -5.5e-15,f'{medlist[3]}')
-    ax8.text(4187, -6.5e-15,"mean {:5.4f}".format(stats_list[3][0]))
-    ax8.text(4187, -7.5e-15,"med {:5.4f}".format(stats_list[3][1]))
-    ax8.text(4187, -8.5e-15,"std {:5.4f}".format(stats_list[3][2]))
+    ind=3
+    ax8 = plot_stats_panel(ax8, wave, sky, flux, ivar, 4185, 4230, wvl_list[ind], wvc_list[ind], stats_list[ind][0], stats_list[ind][1], stats_list[ind][2], medlist[ind], c_sky, c_5sky, c_subsky, c_ivar, c_line, -999, c_mw)
 
     #cont r channel
-    ax9 = fig2.add_subplot(gs2[2, 1])
-    ax9.plot(wave,sky, c=c_sky)
-    ax9.plot(wave,0.05*sky,c=c_5sky, linestyle='--')
-    ax9.plot(wave,flux, c=c_subsky)
-    ax9.plot(wave,np.sqrt(1/ivar), c=c_ivar)
-    ax9.scatter(wave[wvl_list[4]],flux[wvl_list[4]], s=10, c=c_line)
-    ax9.plot([3600,9600],[5.9e-15,5.9e-15],c_mw)
-    ax9.plot([3600,9600],[-5.9e-15,-5.9e-15],c_mw)
-    ax9.set_ylim(-1e-14,1e-14)
-    ax9.set_xlim(6410,6450)
-    ax9.text(6412, -5.5e-15,f'{medlist[4]}')
-    ax9.text(6412, -6.5e-15,"mean {:5.4f}".format(stats_list[4][0]))
-    ax9.text(6412, -7.5e-15,"med {:5.4f}".format(stats_list[4][1]))
-    ax9.text(6412, -8.5e-15,"std {:5.4f}".format(stats_list[4][2]))
+    ax9 = fig2.add_subplot(gs2[2, 1], sharey=ax8)
+    ind=4
+    ax9 = plot_stats_panel(ax9, wave, sky, flux, ivar, 6410, 6450, wvl_list[ind], wvc_list[ind], stats_list[ind][0], stats_list[ind][1], stats_list[ind][2], medlist[ind], c_sky, c_5sky, c_subsky, c_ivar, c_line, -999, c_mw)
 
     #cont z channel
-    ax10 = fig2.add_subplot(gs2[2, 2])
-    ax10.plot(wave,sky, c=c_sky)
-    ax10.plot(wave,0.05*sky,c=c_5sky, linestyle='--')
-    ax10.plot(wave,flux, c=c_subsky)
-    ax10.plot(wave,np.sqrt(1/ivar), c=c_ivar)
-    ax10.scatter(wave[wvl_list[5]],flux[wvl_list[5]], s=10, c=c_line)
-    ax10.plot([3600,9600],[5.9e-15,5.9e-15],c_mw)
-    ax10.plot([3600,9600],[-5.9e-15,-5.9e-15],c_mw)
-    ax10.set_ylim(-1e-14,1e-14)
-    ax10.set_xlim(9120,9155)
-    ax10.text(9122, -5.5e-15,f'{medlist[5]}')
-    ax10.text(9122, -6.5e-15,"mean {:5.4f}".format(stats_list[5][0]))
-    ax10.text(9122, -7.5e-15,"med {:5.4f}".format(stats_list[5][1]))
-    ax10.text(9122, -8.5e-15,"std {:5.4f}".format(stats_list[5][2]))
+    ax10 = fig2.add_subplot(gs2[2, 2], sharey=ax9)
+    ind=5
+    ax10 = plot_stats_panel(ax10, wave, sky, flux, ivar, 9120, 9155, wvl_list[ind], wvc_list[ind], stats_list[ind][0], stats_list[ind][1], stats_list[ind][2], medlist[ind], c_sky, c_5sky, c_subsky, c_ivar, c_line, -999, c_mw)
 
     plt.tight_layout()
     #plt.savefig('skyqual_fig.png')
@@ -837,12 +766,16 @@ def create_overview(hdr):
     obs_time=get_header_string(hdr,'OBSTIME')
     ra=get_header_value(hdr,'TESCIRA')
     dec=get_header_value(hdr,'TESCIDE')
+    alt=get_header_value(hdr, 'SKYMODEL SCI_ALT')
+
     
     ra_sky_e=get_header_value(hdr,'POSKYERA')
     dec_sky_e=get_header_value(hdr,'POSKYEDE')
+    alt_sky_e=get_header_value(hdr, 'SKYMODEL SKYE_ALT')
     
     ra_sky_w=get_header_value(hdr,'POSKYWRA')
     dec_sky_w=get_header_value(hdr,'POSKYWDE')
+    alt_sky_w=get_header_value(hdr, 'SKYMODEL SKYW_ALT')
 
     moon_info=get_moon_info_las_campanas(obs_time)
     
@@ -861,10 +794,13 @@ def create_overview(hdr):
         'Object' : object_name,
         'Sci_RA' : np.round(ra,2),
         'Sci_dec' : np.round(dec,2),
+        'Sci_Alt' : np.round(alt,2),
         'SkyE_RA' : np.round(ra_sky_e,2),
         'SkyE_dec' : np.round(dec_sky_e,2),
+        'SkyE_Alt' : np.round(alt_sky_e,2),
         'SkyW_RA' : np.round(ra_sky_w,2),
         'SkyW_dec' : np.round(dec_sky_w,2),
+        'SkyW_Alt' : np.round(alt_sky_w,2),
         'Moon_Alt' : np.round(moon_info['MoonAlt'],2),
         'Moon_Ill' : np.round(moon_info['MoonIll'],2),
         'Sci_SkyE' : np.round(distance_sky_e,2), 
