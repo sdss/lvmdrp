@@ -318,7 +318,7 @@ def selfib_good(slitmap,type):
 def read_rssfile(filename):
     try:
         x=fits.open(filename)
-    except:
+    except Exception:
         print('Error: eval_qual: Could not open %s' % filename)
         return   
     slitmap=Table(x['SLITMAP'].data)
