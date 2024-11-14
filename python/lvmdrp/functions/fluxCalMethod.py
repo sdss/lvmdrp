@@ -434,7 +434,6 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             spec_tmp = rss_tmp._data[fibidx[0], :]
             error_tmp = rss_tmp._error[fibidx[0], :]
             lsf_tmp = rss_tmp._lsf[fibidx[0], :]
-            # print('????????!', np.nanmean(spec_tmp), spec_tmp)
             if np.nanmean(spec_tmp) < 100:
                 log.warning(f"fiber {fiber} @ {fibidx[0]} has counts < 100 e-, skipping")
                 #rss.add_header_comment(f"fiber {fiber} @ {fibidx[0]} has counts < 100 e-, skipping")
@@ -528,7 +527,6 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     log_shift_z_all = []
     log_shift_brz_all = []
     # Stitch normalized spectra in brz together
-    fig, axs = plt.subplots(len(stds), 1, figsize=(15,15), layout="constrained")
     for i in range(len(stds)):
         std_normalized_all_convolved = np.concatenate((normalized_spectra_all_bands[0][i][mask_b_norm],
                                              normalized_spectra_all_bands[1][i][mask_r_norm],
@@ -616,7 +614,6 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         model_params = re.split('[a-z]+', model_names[best_id], flags=re.IGNORECASE)
         # print(model_params)
 
-        # TODO: write the sensitivity function(s) into the fits file
         # TODO: remove the second part of the code that runs per camera
         # TODO: add to the function that selects and applies the sens function like we do with STD, SCI (add MOD)
 
@@ -667,20 +664,6 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         model_to_gaia_median.append(np.median(model_to_gaia))
 
         if plot:
-            # plt.ylabel("sensitivity [(ergs/s/cm^2/A) / (e-/s/A)]")
-            # plt.xlabel("wavelength [A]")
-            # plt.ylim(1e-14, 0.1e-11)
-            # plt.semilogy()
-            # fig1.add_axes((0.1, 0.1, 0.8, 0.2))
-            # plt.plot([w[0], w[-1]], [0.05, 0.05], color="k", linewidth=1, linestyle="dotted")
-            # plt.plot([w[0], w[-1]], [-0.05, -0.05], color="k", linewidth=1, linestyle="dotted")
-            # plt.plot([w[0], w[-1]], [0.1, 0.1], color="k", linewidth=1, linestyle="dashed")
-            # plt.plot([w[0], w[-1]], [-0.1, -0.1], color="k", linewidth=1, linestyle="dashed")
-            # plt.plot(w, rms_std / mean_std)
-            # plt.plot(w, -rms_std / mean_std)
-            # plt.ylim(-0.2, 0.2)
-            # plt.ylabel("relative residuals")
-            # plt.xlabel("wavelength [A]")
 
             fig = plt.figure(figsize=(14, 24))
 
@@ -809,7 +792,13 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         res_mod = Table(np.full(w[n_chan].size, np.nan, dtype=list(zip(colnames, ["f8"] * len(colnames)))))
         # mean_mod, rms_mod = np.full(w.size, np.nan), np.full(w.size, np.nan)
 
-        fig = plt.figure(figsize=(14, 5))
+        if plot:
+            plt.subplot
+            fig1 = plt.figure(1)
+            frame1 = fig1.add_axes((0.1, 0.3, 0.8, 0.6))
+            frame1.set_xticklabels([])
+
+        #fig = plt.figure(figsize=(14, 5))
         for i in range(len(stds)):
             sens_tmp = calc_sensitivity_from_model(w[n_chan], std_spectra_all_bands[n_chan][i], lsf_all_bands[n_chan][i],
                                                    model_names[best_id], model_to_gaia_median[i], log_shift_full)
@@ -836,7 +825,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
                 #          color=colors[i % len(colors)], markersize=2, zorder=-999)
                 # plt.plot(obswave, res_sci[f"STD{i + 1}SEN"], color=colors[i % len(colors)], linewidth=2)
                 plt.plot(wgood, sgood, ".k", markersize=2, zorder=-999)
-                plt.plot(w[n_chan], sens, markersize=1, zorder=-999)
+                plt.plot(w[n_chan], sens, linewidth=2, zorder=-999)
 
             # plt.ylabel("sensitivity [(ergs/s/cm^2/A) / (e-/s/A)]")
             # plt.xlabel("wavelength [A]")
@@ -867,16 +856,16 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         if plot:
             plt.ylabel("sensitivity [(ergs/s/cm^2/A) / (e-/s/A)]")
             plt.xlabel("wavelength [A]")
-            plt.ylim(1e-14, 0.1e-11)
+            plt.ylim(1e-14, 0.2e-11)
             plt.semilogy()
-            fig.add_axes((0.1, 0.1, 0.8, 0.2))
+            fig1.add_axes((0.1, 0.1, 0.8, 0.2))
             plt.plot([w[n_chan][0], w[n_chan][-1]], [0.05, 0.05], color="k", linewidth=1, linestyle="dotted")
             plt.plot([w[n_chan][0], w[n_chan][-1]], [-0.05, -0.05], color="k", linewidth=1, linestyle="dotted")
             plt.plot([w[n_chan][0], w[n_chan][-1]], [0.1, 0.1], color="k", linewidth=1, linestyle="dashed")
             plt.plot([w[n_chan][0], w[n_chan][-1]], [-0.1, -0.1], color="k", linewidth=1, linestyle="dashed")
             plt.plot(w[n_chan], rms_mod / mean_mod)
             plt.plot(w[n_chan], -rms_mod / mean_mod)
-            plt.ylim(-0.2, 0.2)
+            plt.ylim(-0.5, 0.5)
             plt.ylabel("relative residuals")
             plt.xlabel("wavelength [A]")
             save_fig(plt.gcf(), product_path=in_rss[n_chan], to_display=False, figure_path="qa", label="fluxcal_mod")
@@ -1008,37 +997,6 @@ def calc_sensitivity_from_model(wl, obs_spec, spec_lsf, best_model='', model_to_
     # TODO: make sure we do this once
     model_convolved_spec_lsf = fluxcal.lsf_convolve(model_flux_resampled, spec_lsf, wl)
     sens = model_convolved_spec_lsf * model_to_gaia_median / obs_spec
-
-    # fig = plt.figure(figsize=(14, 5))
-    #
-    # plt.subplot(111)
-    # plt.plot(model_flux_resampled, sens_old, label='Old sens.curve')
-    # plt.plot(model_flux_resampled, sens, label='Sens. curve after shift')
-    # plt.legend()
-    # plt.xlim(3900, 4050)
-
-    # plt.subplot(513)
-    # plt.plot(std_wave_all, normalized_std_on_gaia_cont_single, label='Observed')
-    # plt.plot(std_wave_all, model_specs_convolved_norm[best_id], label='Model')
-    # plt.plot(std_wave_all, flux_std_shifted_b, label='Observed shifted')
-    # plt.legend()
-    # plt.xlim(4090, 4360)
-    #
-    # plt.subplot(514)
-    # plt.plot(std_wave_all, normalized_std_on_gaia_cont_single, label='Observed')
-    # plt.plot(std_wave_all, model_specs_convolved_norm[best_id], label='Model')
-    # plt.plot(std_wave_all, flux_std_shifted_r, label='Observed shifted')
-    # plt.legend()
-    # plt.xlim(6540, 6650)
-    #
-    # plt.subplot(515)
-    # plt.plot(std_wave_all, normalized_std_on_gaia_cont_single, label='Observed')
-    # plt.plot(std_wave_all, model_specs_convolved_norm[best_id], label='Model')
-    # plt.plot(std_wave_all, flux_std_shifted_z, label='Observed shifted')
-    # plt.legend()
-    # plt.xlim(8500, 9000)
-
-    #plt.show()
 
     return sens
 
