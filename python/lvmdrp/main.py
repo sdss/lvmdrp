@@ -1465,6 +1465,7 @@ def science_reduction(expnum: int, use_longterm_cals: bool = False,
                       skip_2d: bool = False,
                       skip_1d: bool = False,
                       skip_post_1d: bool = False,
+                      skip_drpall: bool = False,
                       debug_mode: bool = False,
                       force_run: bool = False) -> None:
     """ Run the science reduction for a given exposure number.
@@ -1645,6 +1646,9 @@ def science_reduction(expnum: int, use_longterm_cals: bool = False,
         with Timer(name='QSky '+sframe_path, logger=log.info):
             quick_sky_subtraction(in_cframe=cframe_path, out_sframe=sframe_path)
 
+    if skip_drpall:
+        log.info("skipping create/update drpall summary file")
+    else:
         # update the drpall summary file
         with Timer(name='DRPAll '+sframe_path, logger=log.info):
             log.info('Updating the drpall summary file')
@@ -1682,7 +1686,8 @@ def science_reduction(expnum: int, use_longterm_cals: bool = False,
 
 def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
             with_cals: bool = False, no_sci: bool = False,
-            fluxcal_method: str = 'STD', skip_2d: bool = False, skip_1d: bool = False, skip_post_1d: bool = False,
+            fluxcal_method: str = 'STD',
+            skip_2d: bool = False, skip_1d: bool = False, skip_post_1d: bool = False, skip_drpall: bool = False,
             clean_ancillary: bool = False, debug_mode: bool = False, force_run: bool = False):
     """ Run the quick DRP
 
@@ -1710,6 +1715,8 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
         Skip astrometry, straylight subtraction and extraction, by default False
     skip_post_1d : bool, optional
         Skip wavelength calibration, flatfielding, sky processing and flux calibration
+    skip_drpall : bool, optional
+        Skip create/update drpall summary file
     clean_ancillary : bool, optional
         Flag to remove the ancillary paths, by default False
     debug_mode : bool, optional
@@ -1734,6 +1741,7 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
                     skip_2d=skip_2d,
                     skip_1d=skip_1d,
                     skip_post_1d=skip_post_1d,
+                    skip_drpall=skip_drpall,
                     clean_ancillary=clean_ancillary,
                     debug_mode=debug_mode,
                     force_run=force_run)
@@ -1829,6 +1837,7 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
                                         skip_2d=skip_2d,
                                         skip_1d=skip_1d,
                                         skip_post_1d=skip_post_1d,
+                                        skip_drpall=skip_drpall,
                                         clean_ancillary=clean_ancillary,
                                         debug_mode=debug_mode,
                                         force_run=force_run, **kwargs)
@@ -1842,6 +1851,39 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
         # create done status on successful run
         if not status_file_exists(tileid, mjd, status='error'):
             create_status_file(tileid, mjd, status='done')
+
+
+def create_drpall(drp_version: str = None, overwrite: bool = False) -> None:
+    """Create drpall summary file for a given DRP version
+
+    Parameters
+    ----------
+    drp_version: str, optional
+        Version of the DRP, by default None (current version)
+    """
+    drp_version = drp_version or drpver
+
+    if overwrite:
+        drpall = path.full('lvm_drpall', drpver=drp_version)
+        drpall = drpall.replace('.fits', '.h5')
+        if os.path.isfile(drpall):
+            log.info(f"removing existing {drpall}")
+            os.remove(drpall)
+        else:
+            log.info(f"no drpall file found for {drp_version = }")
+
+    # define lvmSFrame paths
+    sframe_paths = path.expand("lvm_frame", kind="SFrame", drpver=drp_version, tileid="*", mjd="*", expnum=8*"?")
+    log.info(f"found {len(sframe_paths)} lvmSFrames under {drp_version = }")
+    # iterate over each file and create/update the drpall file
+    for sframe_path in sframe_paths:
+        log.info(f"processing lvmSFrame {sframe_path}")
+        # extract Tile ID, MJD and exposure number from file
+        # pars = path.extract("lvm_frame", sframe_path)
+        pars = sframe_path.split(".fits")[0].split("/")
+        tileid, mjd, expnum = int(pars[-3]), int(pars[-2]), int(pars[-1].split("-")[-1])
+        cals_mjd = get_master_mjd(mjd)
+        update_summary_file(sframe_path, tileid=tileid, mjd=mjd, expnum=expnum, master_mjd=cals_mjd, drpver=drp_version)
 
 
 def reduce_calib_frame(row: dict):
