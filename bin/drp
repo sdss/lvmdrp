@@ -125,11 +125,12 @@ def cli():
 @click.option('-da', '--skip-drpall', is_flag=True, default=False, help='Skip create/update drpall summary file')
 @click.option('-c', '--clean-ancillary', is_flag=True, default=False, help='Remove ancillary paths after run')
 @click.option('-d', '--debug-mode', is_flag=True, default=False, help='Set debug mode on to run using aperture extraction and skip CR rejection')
+@click.option('--force-run', is_flag=True, default=False, help='force reduction even if the exposure was flagged as BAD by the QC pipeline')
 @cloup.constraint(mutually_exclusive, ['mjd', 'mjd_list', 'mjd_range'])
 # @cloup.constraint(RequireExactly(1), ['mjd', 'mjd_list', 'mjd_range'])
 @cloup.constraint(mutually_exclusive, ['expnum', 'exp_list', 'exp_range'])
 def run(mjd, mjd_list, mjd_range, with_cals, no_sci, expnum, exp_list, exp_range, exp_file, fluxcal_method,
-        skip_2d, skip_1d, skip_post_1d, skip_drpall, clean_ancillary, debug_mode):
+        skip_2d, skip_1d, skip_post_1d, skip_drpall, clean_ancillary, debug_mode, force_run):
     """ Run the DRP reduction for a given MJD or range of MJDs
 
     Run the DRP for an MJD or range of MJDs.  Various flags and options are available
@@ -152,7 +153,8 @@ def run(mjd, mjd_list, mjd_range, with_cals, no_sci, expnum, exp_list, exp_range
             skip_post_1d=skip_post_1d,
             skip_drpall=skip_drpall,
             clean_ancillary=clean_ancillary,
-            debug_mode=debug_mode)
+            debug_mode=debug_mode,
+            force_run=force_run)
 
 
 # register full DRP command
