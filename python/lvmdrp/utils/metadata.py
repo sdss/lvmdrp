@@ -1544,7 +1544,11 @@ def update_summary_file(filename: str, tileid: int = None, mjd: int = None, expn
     df = df.astype(dtypes)
 
     # replace empty strings in object column with None
-    df['object'] = df['object'].replace('', None)
+    df['object'] = df['object'].fillna('NA')
+    df['skye_name'] = df['skye_name'].fillna('NA')
+    df['skyw_name'] = df['skyw_name'].fillna('NA')
+    # replace NaN values by invalid value -999 (NaNs will be casted to strings)
+    df.fillna(-999.9, inplace=True)
 
     # create drpall h5 filepath
     drpall = path.full('lvm_drpall', drpver=drpver)
@@ -1554,7 +1558,7 @@ def update_summary_file(filename: str, tileid: int = None, mjd: int = None, expn
 
     # set min column sizes for some columns
     min_itemsize = {'skye_name': 20, 'skyw_name': 20, 'location': 120, 'agcam_location': 120,
-                    'object': 16, 'obstime': 23}
+                    'object': 24, 'obstime': 23}
 
     # write to pytables hdf5
     try:
