@@ -526,6 +526,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     log_shift_r_all = []
     log_shift_z_all = []
     log_shift_brz_all = []
+    gaia_flux_interpolated = []
     # Stitch normalized spectra in brz together
     for i in range(len(stds)):
         std_normalized_all_convolved = np.concatenate((normalized_spectra_all_bands[0][i][mask_b_norm],
@@ -544,11 +545,10 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         log_std_wave_all, log_std_errors_normalized_all = linear_to_logscale(std_wave_all, std_errors_normalized_all)
 
         # load Gaia BP-RP spectrum from cache, or download from webapp, and fit the continuum to Gaia spec
-        # TODO: instead of using the GAIA continuum, use the model as is, but scale it to a broad band magnitude, see
-        # code in science_sensitivity for example
         try:
             gw, gf = fluxcal.retrive_gaia_star(gaia_ids[i], GAIA_CACHE_DIR=GAIA_CACHE_DIR)
             stdflux = np.interp(std_wave_all, gw, gf)  # interpolate to our wavelength grid
+            gaia_flux_interpolated.append(stdflux)
         except fluxcal.GaiaStarNotFound as e:
             log.warning(e)
             rss_tmp.add_header_comment(f"Gaia star {gaia_id} not found")
@@ -798,7 +798,6 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             frame1 = fig1.add_axes((0.1, 0.3, 0.8, 0.6))
             frame1.set_xticklabels([])
 
-        #fig = plt.figure(figsize=(14, 5))
         for i in range(len(stds)):
             sens_tmp = calc_sensitivity_from_model(w[n_chan], std_spectra_all_bands[n_chan][i], lsf_all_bands[n_chan][i],
                                                    model_names[best_id], model_to_gaia_median[i], log_shift_full)
@@ -806,7 +805,6 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             if chan == 'b':
                 win = 150
                 ylim = [0, 0.3e-11]
-                #print('bbb')
             elif chan == 'r':
                 win = 70
                 ylim = [0, 0.5e-12]
@@ -814,34 +812,23 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
                 win = 15
                 ylim = [0, 0.5e-12]
             s = interpolate.make_smoothing_spline(wgood, sgood, lam=win)
-            sens = s(w[n_chan]).astype(np.float32)
+            sens0 = s(w[n_chan]).astype(np.float32)
+
+            # calculate the normalization of the average (known) sensitivity curve in a broad band
+            lvmflux = fluxcal.spec_to_LVM_flux(chan, w[n_chan], std_spectra_all_bands[n_chan][i]*sens0)
+            gaia_flux = fluxcal.spec_to_LVM_flux(chan, std_wave_all, gaia_flux_interpolated[i])
+            sens_coef = gaia_flux/lvmflux
+            #print(f'lvmflux={lvmflux}, gaia_flux={gaia_flux}, converted to gaia flux = {lvmflux*sens_coef}')
 
 
-            res_mod[f"STD{i}SEN"] = s(w[n_chan]).astype(np.float32)
+            res_mod[f"STD{i}SEN"] = s(w[n_chan]).astype(np.float32)*sens_coef
+            sens = sens0*sens_coef
 
             fig_path = in_rss[n_chan]
             if plot:
-                # plt.plot(obswave, np.interp(obswave, gwave, gflux) / obsflux, '.',
-                #          color=colors[i % len(colors)], markersize=2, zorder=-999)
-                # plt.plot(obswave, res_sci[f"STD{i + 1}SEN"], color=colors[i % len(colors)], linewidth=2)
-                plt.plot(wgood, sgood, ".k", markersize=2, zorder=-999)
-                plt.plot(w[n_chan], sens, linewidth=2, zorder=-999)
+                plt.plot(wgood, sgood*sens_coef, ".k", markersize=2, zorder=-999)
+                plt.plot(w[n_chan], sens, linewidth=1, zorder=-999)
 
-            # plt.ylabel("sensitivity [(ergs/s/cm^2/A) / (e-/s/A)]")
-            # plt.xlabel("wavelength [A]")
-            # plt.ylim(1e-14, 0.1e-11)
-            # plt.semilogy()
-            # fig1.add_axes((0.1, 0.1, 0.8, 0.2))
-            # plt.plot([w[0], w[-1]], [0.05, 0.05], color="k", linewidth=1, linestyle="dotted")
-            # plt.plot([w[0], w[-1]], [-0.05, -0.05], color="k", linewidth=1, linestyle="dotted")
-            # plt.plot([w[0], w[-1]], [0.1, 0.1], color="k", linewidth=1, linestyle="dashed")
-            # plt.plot([w[0], w[-1]], [-0.1, -0.1], color="k", linewidth=1, linestyle="dashed")
-            # plt.plot(w, rms_sci / mean_sci)
-            # plt.plot(w, -rms_sci / mean_sci)
-            # plt.ylim(-0.2, 0.2)
-            # plt.ylabel("relative residuals")
-            # plt.xlabel("wavelength [A]")
-        # save_fig(plt.gcf(), product_path=fig_path, to_display=False, figure_path="qa", label="fluxcal_model")
 
         res_mod_pd = res_mod.to_pandas().values
         rms_mod = biweight_scale(res_mod_pd, axis=1, ignore_nan=True)
@@ -856,7 +843,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         if plot:
             plt.ylabel("sensitivity [(ergs/s/cm^2/A) / (e-/s/A)]")
             plt.xlabel("wavelength [A]")
-            plt.ylim(1e-14, 0.2e-11)
+            plt.ylim(1e-14, 0.1e-11)
             plt.semilogy()
             fig1.add_axes((0.1, 0.1, 0.8, 0.2))
             plt.plot([w[n_chan][0], w[n_chan][-1]], [0.05, 0.05], color="k", linewidth=1, linestyle="dotted")
@@ -865,7 +852,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             plt.plot([w[n_chan][0], w[n_chan][-1]], [-0.1, -0.1], color="k", linewidth=1, linestyle="dashed")
             plt.plot(w[n_chan], rms_mod / mean_mod)
             plt.plot(w[n_chan], -rms_mod / mean_mod)
-            plt.ylim(-0.5, 0.5)
+            plt.ylim(-0.2, 0.2)
             plt.ylabel("relative residuals")
             plt.xlabel("wavelength [A]")
             save_fig(plt.gcf(), product_path=in_rss[n_chan], to_display=False, figure_path="qa", label="fluxcal_mod")
