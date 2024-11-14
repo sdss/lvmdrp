@@ -1465,7 +1465,8 @@ def science_reduction(expnum: int, use_longterm_cals: bool = False,
                       skip_2d: bool = False,
                       skip_1d: bool = False,
                       skip_post_1d: bool = False,
-                      debug_mode: bool = False) -> None:
+                      debug_mode: bool = False,
+                      force_run: bool = False) -> None:
     """ Run the science reduction for a given exposure number.
     """
 
@@ -1497,16 +1498,16 @@ def science_reduction(expnum: int, use_longterm_cals: bool = False,
     sci_metadata = get_frames_metadata(mjd=sci_mjd)
     sci_metadata.query("expnum == @expnum", inplace=True)
     sci_metadata.sort_values("expnum", ascending=False, inplace=True)
-    try:
-        sci_metadata.query("qaqual == 'GOOD'", inplace=True)
-    except KeyError:
-        log.error("error while getting qaqual field in metadata.")
-        log.error(f"Please try running `drp metadata regenerate -m {sci_mjd}` before trying reducing your exposure again.")
-        return
-
-    if sci_metadata.empty:
-        log.error(f"exposure {expnum = } was flagged as 'BAD' by the raw data quality pipeline")
-        return
+    if not force_run:
+        try:
+            sci_metadata.query("qaqual == 'GOOD'", inplace=True)
+        except KeyError:
+            log.error("error while getting qaqual field in metadata.")
+            log.error(f"Please try running `drp metadata regenerate -m {sci_mjd}` before trying reducing your exposure again.")
+            return
+        if sci_metadata.empty:
+            log.error(f"exposure {expnum = } was flagged as 'BAD' by the raw data quality pipeline")
+            return
 
     # define general metadata
     sci_tileid = sci_metadata["tileid"].unique()[0]
@@ -1682,7 +1683,7 @@ def science_reduction(expnum: int, use_longterm_cals: bool = False,
 def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
             with_cals: bool = False, no_sci: bool = False,
             fluxcal_method: str = 'STD', skip_2d: bool = False, skip_1d: bool = False, skip_post_1d: bool = False,
-            clean_ancillary: bool = False, debug_mode: bool = False):
+            clean_ancillary: bool = False, debug_mode: bool = False, force_run: bool = False):
     """ Run the quick DRP
 
     Run the quick DRP for an MJD, or a range of MJDs. Reduces
@@ -1713,6 +1714,8 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
         Flag to remove the ancillary paths, by default False
     debug_mode : bool, optional
         Flag to run in debug mode, by default False
+    force_run : bool, optional
+        Flag to force reductions even if the data was flagged as BAD by the QC pipeline, by default False
     """
     # # write the drp parameter configuration
     # write_config_file()
@@ -1732,7 +1735,8 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
                     skip_1d=skip_1d,
                     skip_post_1d=skip_post_1d,
                     clean_ancillary=clean_ancillary,
-                    debug_mode=debug_mode)
+                    debug_mode=debug_mode,
+                    force_run=force_run)
         return
 
     log.info(f'Processing MJD {mjd}')
@@ -1757,15 +1761,21 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
     sub = frames.copy()
 
     # remove bad or test quality frames
-    try:
-        sub = sub[(sub['qaqual'] == 'GOOD')]
-    except KeyError:
-        log.error("error while getting qaqual field in metadata.")
-        log.error(f"Please try running `drp metadata regenerate -m {mjd}` before trying reducing your exposure again.")
-        return
-    if sub.empty:
-        log.error(f"exposure {expnum = } was flagged as 'BAD' by the raw data quality pipeline")
-        return
+    if force_run and (sub.qaqual == "BAD").all():
+        tileid = sub.tileid.iloc[0]
+        log.warning(f"You are about to reduce {expnum = } of {tileid = }, which was flagged as 'BAD' by the QC pipeline")
+        log.warning("The DRP Team will not be responsible for failures during this reduction or the quality of its results")
+        log.warning(f"We advice you to look for a good quality exposure of the same {tileid = }")
+    else:
+        try:
+            sub = sub[(sub['qaqual'] == 'GOOD')]
+        except KeyError:
+            log.error("error while getting qaqual field in metadata.")
+            log.error(f"Please try running `drp metadata regenerate -m {mjd}` before trying reducing your exposure again.")
+            return
+        if sub.empty:
+            log.error(f"exposure {expnum = } was flagged as 'BAD' by the raw data quality pipeline")
+            return
 
     # filter on exposure number
     if expnum:
@@ -1820,7 +1830,8 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
                                         skip_1d=skip_1d,
                                         skip_post_1d=skip_post_1d,
                                         clean_ancillary=clean_ancillary,
-                                        debug_mode=debug_mode, **kwargs)
+                                        debug_mode=debug_mode,
+                                        force_run=force_run, **kwargs)
                     except Exception as e:
                         log.exception(f'Failed to reduce science frame mjd {mjd} exposure {expnum}: {e}')
                         create_status_file(tileid, mjd, status='error')
