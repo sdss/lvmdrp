@@ -1538,17 +1538,18 @@ def update_summary_file(filename: str, tileid: int = None, mjd: int = None, expn
     # explicitly set some column dtypes to try and handle cases with null data
     # sci, skye, skye keys
     tels = {'sci', 'skye', 'skyw'}
-    keys = {'ra', 'dec', 'amass', 'kmpos', 'focpos'}
+    keys = {'ra', 'dec', 'amass', 'kmpos', 'focpos', 'sh_hght', 'moon_sep'}
     dtypes = {f'{i}_{j}': 'float64' for i, j in itertools.product(tels, keys)}
+    dtypes.update({colname: 'float64' for colname in ('moon_ra', 'moon_dec', 'moon_phase', 'moon_fli', 'sun_alt', 'moon_alt')})
     dtypes['calib_mjd'] = 'int64'
     df = df.astype(dtypes)
 
     # replace empty strings in object column with None
-    df['object'] = df['object'].fillna('NA')
-    df['skye_name'] = df['skye_name'].fillna('NA')
-    df['skyw_name'] = df['skyw_name'].fillna('NA')
+    df['object'] = df['object'].fillna('None')
+    df['skye_name'] = df['skye_name'].fillna('None')
+    df['skyw_name'] = df['skyw_name'].fillna('None')
     # replace NaN values by invalid value -999 (NaNs will be casted to strings)
-    df.fillna(-999.9, inplace=True)
+    df.fillna(-999, inplace=True)
 
     # create drpall h5 filepath
     drpall = path.full('lvm_drpall', drpver=drpver)
