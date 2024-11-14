@@ -1497,7 +1497,12 @@ def science_reduction(expnum: int, use_longterm_cals: bool = False,
     sci_metadata = get_frames_metadata(mjd=sci_mjd)
     sci_metadata.query("expnum == @expnum", inplace=True)
     sci_metadata.sort_values("expnum", ascending=False, inplace=True)
-    sci_metadata.query("qaqual == 'GOOD'", inplace=True)
+    try:
+        sci_metadata.query("qaqual == 'GOOD'", inplace=True)
+    except KeyError:
+        log.error("error while getting qaqual field in metadata.")
+        log.error(f"Please try running `drp metadata regenerate -m {sci_mjd}` before trying reducing your exposure again.")
+        return
 
     if sci_metadata.empty:
         log.error(f"exposure {expnum = } was flagged as 'BAD' by the raw data quality pipeline")
@@ -1752,7 +1757,12 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
     sub = frames.copy()
 
     # remove bad or test quality frames
-    sub = sub[~(sub['qaqual'] != 'GOOD')]
+    try:
+        sub = sub[(sub['qaqual'] == 'GOOD')]
+    except KeyError:
+        log.error("error while getting qaqual field in metadata.")
+        log.error(f"Please try running `drp metadata regenerate -m {mjd}` before trying reducing your exposure again.")
+        return
     if sub.empty:
         log.error(f"exposure {expnum = } was flagged as 'BAD' by the raw data quality pipeline")
         return
