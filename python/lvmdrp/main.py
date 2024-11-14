@@ -1874,16 +1874,30 @@ def create_drpall(drp_version: str = None, overwrite: bool = False) -> None:
 
     # define lvmSFrame paths
     sframe_paths = path.expand("lvm_frame", kind="SFrame", drpver=drp_version, tileid="*", mjd="*", expnum=8*"?")
-    log.info(f"found {len(sframe_paths)} lvmSFrames under {drp_version = }")
+    nframes = len(sframe_paths)
+    log.info(f"found {nframes} lvmSFrames under {drp_version = }")
     # iterate over each file and create/update the drpall file
+    nfailed = 0
+    failed = []
     for sframe_path in sframe_paths:
-        log.info(f"processing lvmSFrame {sframe_path}")
+        log.info(f"{sframe_path = }")
         # extract Tile ID, MJD and exposure number from file
         # pars = path.extract("lvm_frame", sframe_path)
         pars = sframe_path.split(".fits")[0].split("/")
         tileid, mjd, expnum = int(pars[-3]), int(pars[-2]), int(pars[-1].split("-")[-1])
         cals_mjd = get_master_mjd(mjd)
-        update_summary_file(sframe_path, tileid=tileid, mjd=mjd, expnum=expnum, master_mjd=cals_mjd, drpver=drp_version)
+        try:
+            update_summary_file(sframe_path, tileid=tileid, mjd=mjd, expnum=expnum, master_mjd=cals_mjd, drpver=drp_version)
+        except Exception as e:
+            log.error(f"while updating drpall for {tileid = }, {mjd = }, {expnum = }: {e}")
+            nfailed += 1
+            failed.append(sframe_path)
+            continue
+
+    log.info(f"finished summarizing {nframes-nfailed} lvmSFrames in {drpall}")
+    if nfailed != 0:
+        log.warning(f"with {nfailed} failed frames:")
+        log.warning(f"{failed = }")
 
 
 def reduce_calib_frame(row: dict):

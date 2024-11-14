@@ -1554,7 +1554,7 @@ def update_summary_file(filename: str, tileid: int = None, mjd: int = None, expn
     # create drpall h5 filepath
     drpall = path.full('lvm_drpall', drpver=drpver)
     drpall = drpall.replace('.fits', '.h5')
-    log.info(f'Updating the drpall summary file {drpall}')
+    # log.info(f'Updating the drpall summary file {drpall}')
     lock = FileLock(drpall.replace('.h5', '.h5.lock'), timeout=5)
 
     # set min column sizes for some columns
