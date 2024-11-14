@@ -83,6 +83,7 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'STD', display_plo
     method : str
         'STD' - apply calibration inferred from standard stars  (default)
         'SCI' - apply calibration inferred from field stars in science ifu (fallback if STD not available)
+        'MOD' - apply calibration inferred from stellar atmosphere models
         'NONE' - do not apply flux calibration
     display_plots : bool, optional
 
@@ -92,7 +93,7 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'STD', display_plo
         flux-calibrated RSS object
     """
 
-    assert (method in ['STD', 'SCI', 'NONE']), 'Fluxcal method must be either STD or SCI or NONE'
+    assert (method in ['STD', 'SCI', 'MOD', 'NONE']), 'Fluxcal method must be either STD, SCI, MOD or NONE'
 
     # read all three channels
     log.info(f"loading RSS file {os.path.basename(in_rss)}")
@@ -103,7 +104,8 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'STD', display_plo
                        wave=rss._wave, lsf=rss._lsf,
                        sky_east=rss._sky_east, sky_east_error=rss._sky_east_error,
                        sky_west=rss._sky_west, sky_west_error=rss._sky_west_error,
-                       fluxcal_std=rss._fluxcal_std, fluxcal_sci=rss._fluxcal_sci, slitmap=rss._slitmap)
+                       fluxcal_std=rss._fluxcal_std, fluxcal_sci=rss._fluxcal_sci,
+                       fluxcal_mod=rss._fluxcal_mod, slitmap=rss._slitmap)
 
     # check for flux calibration data
     fframe.setHdrValue("FLUXCAL", 'NONE', "flux-calibration method")
@@ -175,6 +177,21 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'STD', display_plo
             sens_rms = np.zeros_like(sens_rms)
         else:
             fframe.setHdrValue("FLUXCAL", 'SCI', "flux-calibration method")
+
+    if method == 'MOD':
+        log.info("flux-calibratimg using model stellar spectra")
+        sens_arr = fframe._fluxcal_mod.to_pandas().values  # * (std_exp / std_exp.sum())[None]
+        sens_ave = biweight_location(sens_arr, axis=1, ignore_nan=True)
+        sens_rms = biweight_scale(sens_arr, axis=1, ignore_nan=True)
+
+        # fix case of all invalid values
+        if (sens_ave == 0).all() or np.isnan(sens_ave).all():
+            log.warning("all sensitivities from models are zero or NaN, can't calibrate")
+            rss.add_header_comment("all sensitivities from model are zero or NaN, can't calibrate")
+            sens_ave = np.ones_like(sens_ave)
+            sens_rms = np.zeros_like(sens_rms)
+        else:
+            fframe.setHdrValue("FLUXCAL", 'MOD', "flux-calibration method")
 
     if method != 'NONE':
         # update the fluxcal extension
@@ -417,7 +434,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             spec_tmp = rss_tmp._data[fibidx[0], :]
             error_tmp = rss_tmp._error[fibidx[0], :]
             lsf_tmp = rss_tmp._lsf[fibidx[0], :]
-            print('????????!', np.nanmean(spec_tmp), spec_tmp)
+            # print('????????!', np.nanmean(spec_tmp), spec_tmp)
             if np.nanmean(spec_tmp) < 100:
                 log.warning(f"fiber {fiber} @ {fibidx[0]} has counts < 100 e-, skipping")
                 #rss.add_header_comment(f"fiber {fiber} @ {fibidx[0]} has counts < 100 e-, skipping")
@@ -668,7 +685,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             fig = plt.figure(figsize=(14, 24))
 
             plt.subplot(511)
-            plt.title(label=f'Gaia ID: {gaia_ids[i]}. Model: {model_names[best_id]}')
+            plt.title(label=f'Gaia ID: {gaia_ids[i]}. Model: {model_names[best_id]}',fontsize=14)
             plt.plot(log_std_wave_all, flux_std_logscale, label='Observed standard spectrum, continuum normalized')
             # plt.plot(std_wave_all,
             #         np.interp(std_wave_all, std_wave_all*(1+vel_offset_b/3e5), normalized_std_on_gaia_cont_single), label='Shifted')
@@ -812,15 +829,6 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
 
 
             res_mod[f"STD{i}SEN"] = s(w[n_chan]).astype(np.float32)
-            res_mod_pd = res_mod.to_pandas().values
-            rms_mod = biweight_scale(res_mod_pd, axis=1, ignore_nan=True)
-            mean_mod = biweight_location(res_mod_pd, axis=1, ignore_nan=True)
-
-
-            #     plt.plot(wgood, sgood, ".k", markersize=2, zorder=-999)
-        #     plt.plot(w[n_chan], sens, markersize=2, zorder=-999)
-        #     # plt.ylim(ylim)
-        # plt.show()
 
             fig_path = in_rss[n_chan]
             if plot:
@@ -844,9 +852,37 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             # plt.ylim(-0.2, 0.2)
             # plt.ylabel("relative residuals")
             # plt.xlabel("wavelength [A]")
-        save_fig(plt.gcf(), product_path=fig_path, to_display=False, figure_path="qa", label="fluxcal_model")
+        # save_fig(plt.gcf(), product_path=fig_path, to_display=False, figure_path="qa", label="fluxcal_model")
+
+        res_mod_pd = res_mod.to_pandas().values
+        rms_mod = biweight_scale(res_mod_pd, axis=1, ignore_nan=True)
+        mean_mod = biweight_location(res_mod_pd, axis=1, ignore_nan=True)
+
+        label = rss._header['CCD']
+        rss.setHdrValue(f"MODSENM{label}", np.nanmean(mean_mod[1000:3000]), f"Mean model sensitivity in {chan}")
+        rss.setHdrValue(f"MODSENR{label}", np.nanmean(rms_mod[1000:3000]), f"Mean model sensitivity rms in {chan}")
+        log.info(f"Mean model sensitivity in {chan} : {np.nanmean(mean_mod[1000:3000])}")
+
+        print(f"product_path = {in_rss[n_chan]}")
+        if plot:
+            plt.ylabel("sensitivity [(ergs/s/cm^2/A) / (e-/s/A)]")
+            plt.xlabel("wavelength [A]")
+            plt.ylim(1e-14, 0.1e-11)
+            plt.semilogy()
+            fig.add_axes((0.1, 0.1, 0.8, 0.2))
+            plt.plot([w[n_chan][0], w[n_chan][-1]], [0.05, 0.05], color="k", linewidth=1, linestyle="dotted")
+            plt.plot([w[n_chan][0], w[n_chan][-1]], [-0.05, -0.05], color="k", linewidth=1, linestyle="dotted")
+            plt.plot([w[n_chan][0], w[n_chan][-1]], [0.1, 0.1], color="k", linewidth=1, linestyle="dashed")
+            plt.plot([w[n_chan][0], w[n_chan][-1]], [-0.1, -0.1], color="k", linewidth=1, linestyle="dashed")
+            plt.plot(w[n_chan], rms_mod / mean_mod)
+            plt.plot(w[n_chan], -rms_mod / mean_mod)
+            plt.ylim(-0.2, 0.2)
+            plt.ylabel("relative residuals")
+            plt.xlabel("wavelength [A]")
+            save_fig(plt.gcf(), product_path=in_rss[n_chan], to_display=False, figure_path="qa", label="fluxcal_mod")
+
+        # update sensitivity extension
         log.info('appending FLUXCAL_MOD table')
-        #print(res_mod)
         rss.set_fluxcal(fluxcal=res_mod, source='mod')
         rss.writeFitsData(in_rss[n_chan])
 
