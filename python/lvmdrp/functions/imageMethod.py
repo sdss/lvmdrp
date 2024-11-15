@@ -3659,6 +3659,11 @@ def add_astrometry(
     slitmap['dec']=DECfib
     org_img._slitmap=slitmap
 
+    # set header keyword with best knowledge of IFU center
+    org_img.setHdrValue('IFUCENRA', RAobs_sci, 'Best SCI IFU RA (ASTRMSRC)')
+    org_img.setHdrValue('IFUCENDE', DECobs_sci, 'Best SCI IFU DEC (ASTRMSRC)')
+    org_img.setHdrValue('IFUCENPA', PAobs_sci, 'Best SCI IFU PA (ASTRMSRC)')
+
     log.info(f"writing RA,DEC to slitmap in image '{os.path.basename(out_image)}'")
     org_img.writeFitsData(out_image)
 
