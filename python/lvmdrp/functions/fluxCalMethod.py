@@ -479,7 +479,12 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             std_spec_conv = Table(data=[w_tmp, spec_tmp_convolved],
                                          names=['wave', 'flux'])
             best_continuum = smoothSpec_old(std_spec_conv, int(160/0.5), method="median")
-            std_errors.append(error_tmp/best_continuum)
+            #std_errors.append(error_tmp/best_continuum)
+            error_tmp = 1 / error_tmp**0.5
+            std_errors.append(error_tmp / best_continuum)
+            print(spec_tmp)
+            print(error_tmp)
+            print(best_continuum)
             normalized_spectra.append(spec_tmp_convolved/best_continuum) # normalized std spestra degraded to 2A for all
                                                                         # standards in each channel
             lsf.append(lsf_tmp) # initial std spec LSF for all standards in each channel
@@ -512,14 +517,17 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     # table with masks for tellurics, overlaps between channels, and bluest part og the spectra - used for model matchind
     br_overlap_start = 5775
     br_overlap_end = 5825
-    rz_overlap_start = 7520
-    rz_overlap_end = 7570
+    rz_overlap_start = 7520 #7520
+    rz_overlap_end = 7580 #7570
+    mask_line_start = 8620
+    mask_line_end = 8690
     mask_for_fit = telluric_tab
     mask_for_fit['Start'] = mask_for_fit['Start'] - 10
     mask_for_fit['End'] = mask_for_fit['End'] + 10
     mask_for_fit.add_row([3500,3800]) #mask the bluest part of the spectra - prev.[3500,3715]
     mask_for_fit.add_row([br_overlap_start, br_overlap_end])
     mask_for_fit.add_row([rz_overlap_start, rz_overlap_end])
+    mask_for_fit.add_row([mask_line_start, mask_line_end])
     # print(mask_for_fit)
 
     model_to_gaia_median = []
@@ -542,6 +550,8 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
                                                     std_errors_all_bands[1][i][mask_r_norm],
                                                     std_errors_all_bands[2][i][mask_z_norm]))
         log_std_wave_all, log_std_errors_normalized_all = linear_to_logscale(std_wave_all, std_errors_normalized_all)
+        print('Linear errors', std_errors_normalized_all)
+        print('Log errors', log_std_errors_normalized_all)
 
         # load Gaia BP-RP spectrum from cache, or download from webapp, and fit the continuum to Gaia spec
         try:
@@ -648,6 +658,12 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             plt.title(label=f'Gaia ID: {gaia_ids[i]}. Model: {model_names[best_id]}',fontsize=14)
             plt.plot(log_std_wave_all, flux_std_logscale, label=f'Observed standard spectrum from fiber '
                                                                 f'{fibers[i]}, continuum normalized')
+            sigma1 = flux_std_logscale + log_std_errors_normalized_all
+            sigma2 = flux_std_logscale - log_std_errors_normalized_all
+            plt.plot(log_std_wave_all, sigma2, '--', color='grey', lw=0.5)
+            plt.plot(log_std_wave_all, sigma1, '--', color='grey', lw=0.5)
+            plt.fill_between(log_std_wave_all, sigma1, sigma2, alpha=0.2, color='blue')
+
             # plt.plot(std_wave_all,
             #         np.interp(std_wave_all, std_wave_all*(1+vel_offset_b/3e5), normalized_std_on_gaia_cont_single), label='Shifted')
             plt.plot(log_model_wave_all+log_shift_full, flux_model_logscale, label='Best-fit model spectrum, '
@@ -676,6 +692,9 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
 
             plt.subplot(512)
             plt.plot(log_std_wave_all, flux_std_logscale, label='Observed')
+            plt.plot(log_std_wave_all, sigma2, '--', color='grey', lw=0.5)
+            plt.plot(log_std_wave_all, sigma1, '--', color='grey', lw=0.5)
+            plt.fill_between(log_std_wave_all, sigma1, sigma2, alpha=0.2, color='blue')
             plt.plot(log_model_wave_all+log_shift_full, flux_model_logscale, label='Model shifted', alpha=0.7)
             #plt.plot(log_std_wave_all-log_shift_b, flux_model_logscale, label='Model shifted')
             for mask_box in mask_for_fit:
@@ -686,6 +705,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             plt.xticks(np.log(show_wl), labels=show_wl.astype(str), size=14)
             plt.yticks(fontsize=14)
             ylim = [0.1,1.6]
+            # ylim = [0.9, 1.2]
             plt.text((xlim[1] - xlim[0]) * 0.03 + xlim[0], (ylim[1] - ylim[0]) * 0.9 + ylim[0], 'b channel', size=14)
             plt.xlim(xlim)
             plt.ylim(ylim)
@@ -694,11 +714,16 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             plt.subplot(513)
             plt.plot(log_std_wave_all, flux_std_logscale, label='Observed')
             #plt.plot(log_model_wave_all, flux_model_logscale, label='Model')
+            plt.plot(log_std_wave_all, sigma2, '--', color='grey', lw=0.5)
+            plt.plot(log_std_wave_all, sigma1, '--', color='grey', lw=0.5)
+            plt.fill_between(log_std_wave_all, sigma1, sigma2, alpha=0.2, color='blue')
             plt.plot(log_std_wave_all+log_shift_full, flux_model_logscale, label='Model shifted', alpha=0.7)
             for mask_box in mask_for_fit:
                 plt.axvspan(np.log(mask_box[0]), np.log(mask_box[1]), alpha=0.2, color='grey')
             #plt.legend()
-            xlim = [8.66, 8.8]
+            # xlim = [8.66, 8.8]
+            # xlim = [8.66, 8.92] #~whole channel
+            xlim = [8.69, 8.8]
             ylim = [0.2, 1.5]
             show_wl = np.arange(5700, 6700, 100)
             plt.xticks(np.log(show_wl), labels=show_wl.astype(str), size=14)
@@ -710,12 +735,16 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
 
             plt.subplot(514)
             plt.plot(log_std_wave_all, flux_std_logscale, label='Observed')
+            plt.plot(log_std_wave_all, sigma2, '--', color='grey', lw=0.5)
+            plt.plot(log_std_wave_all, sigma1, '--', color='grey', lw=0.5)
+            plt.fill_between(log_std_wave_all, sigma1, sigma2, alpha=0.2, color='blue')
             #plt.plot(log_model_wave_all, flux_model_logscale, label='Model')
             plt.plot(log_std_wave_all+log_shift_full, flux_model_logscale, label='Model shifted', alpha=0.7)
             for mask_box in mask_for_fit:
                 plt.axvspan(np.log(mask_box[0]), np.log(mask_box[1]), alpha=0.2, color='grey')
             #plt.legend()
-            xlim = [9.02, 9.16]
+            # xlim = [9.02, 9.16]
+            xlim = [9.035, 9.1]
             ylim = [0.2, 1.5]
             show_wl = np.arange(8300, 9500, 100)
             plt.xticks(np.log(show_wl), labels=show_wl.astype(str), size=14)
