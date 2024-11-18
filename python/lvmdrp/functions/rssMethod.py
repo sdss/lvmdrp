@@ -311,6 +311,11 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
     # update lamps status
     lamps = set(ilamps)
 
+    # # mask std fibers since they are not regularly illuminated during arc exposures
+    # fibermap = arc._slitmap[arc._slitmap["spectrographid"] == int(camera[1])]
+    # select = fibermap["telescope"] == "Spec"
+    # arc._mask[select] = True
+
     # subtract continuum
     if cont_niter > 0:
         log.info(f"fitting and subtracting continuum with parameters: {cont_niter = }, {cont_thresh = }, {cont_box_range = }")
