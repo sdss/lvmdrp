@@ -389,6 +389,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         normalized_spectra = []
         std_errors = []
         lsf = []
+        fibers = []
         #log.info(f"loading input RSS file '{os.path.basename(in_rss[b])}'")
         rss_tmp = RSS.from_file(in_rss[b])
 
@@ -423,6 +424,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         for s in stds:
             nn, fiber, gaia_id, exptime, secz = s  # unpack standard star tuple
             gaia_ids.append(gaia_id)
+            fibers.append(fiber)
 
             # find the fiber with our spectrum of that Gaia star, if it is not in the current spectrograph, continue
             select = rss_tmp._slitmap["orig_ifulabel"] == fiber
@@ -522,9 +524,6 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
 
     model_to_gaia_median = []
     best_fit_models = []
-    log_shift_b_all = []
-    log_shift_r_all = []
-    log_shift_z_all = []
     log_shift_brz_all = []
     gaia_flux_interpolated = []
     # Stitch normalized spectra in brz together
@@ -583,26 +582,6 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
                                         flux_model_logscale[mask_good], max_ampl=50)*np.median(log_std_wave_all - np.roll(log_std_wave_all, 1))
         vel_shift_full = log_shift_full * 3e5
 
-        # Calculate the velocity corrections in different channels separately. WILL BE REMOVED LATER
-        log_rec_shift = (log_std_wave_all > 8.26) & (log_std_wave_all < 8.32)
-        log_shift_b = fluxcal.derive_vecshift(flux_std_logscale[log_rec_shift],
-                                        flux_model_logscale[log_rec_shift], max_ampl=50)*np.median(log_std_wave_all - np.roll(log_std_wave_all, 1))
-        vel_shift_b = log_shift_b * 3e5
-
-        log_rec_shift = (log_std_wave_all > 8.77) & (log_std_wave_all < 8.82)
-        log_shift_r = fluxcal.derive_vecshift(flux_std_logscale[log_rec_shift],
-                                        flux_model_logscale[log_rec_shift], max_ampl=50)*np.median(log_std_wave_all - np.roll(log_std_wave_all, 1))
-        vel_shift_r = log_shift_r * 3e5
-
-        log_rec_shift = (log_std_wave_all > 9.03) & (log_std_wave_all < 9.07)
-        log_shift_z = fluxcal.derive_vecshift(flux_std_logscale[log_rec_shift],
-                                        flux_model_logscale[log_rec_shift], max_ampl=50)*np.median(log_std_wave_all - np.roll(log_std_wave_all, 1))
-        vel_shift_z = log_shift_z * 3e5
-
-        log_shift_b_all.append(log_shift_b)
-        log_shift_r_all.append(log_shift_r)
-        log_shift_z_all.append(log_shift_z)
-
         flux_std_logscale_shifted = np.interp((log_std_wave_all - log_shift_full), log_std_wave_all, flux_std_logscale)
 
         chi2 = [np.nansum(((flux_std_logscale_shifted[mask_good] -
@@ -615,8 +594,6 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         # print(model_params)
 
         # TODO: remove the second part of the code that runs per camera
-        # TODO: add to the function that selects and applies the sens function like we do with STD, SCI (add MOD)
-
 
         log.info(f"GAIA id:{gaia_ids[i]}. Best model is: {best_id}, {model_names[best_id]}")
         best_fit_models.append(model_names[best_id])
@@ -669,7 +646,8 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
 
             plt.subplot(511)
             plt.title(label=f'Gaia ID: {gaia_ids[i]}. Model: {model_names[best_id]}',fontsize=14)
-            plt.plot(log_std_wave_all, flux_std_logscale, label='Observed standard spectrum, continuum normalized')
+            plt.plot(log_std_wave_all, flux_std_logscale, label=f'Observed standard spectrum from fiber '
+                                                                f'{fibers[i]}, continuum normalized')
             # plt.plot(std_wave_all,
             #         np.interp(std_wave_all, std_wave_all*(1+vel_offset_b/3e5), normalized_std_on_gaia_cont_single), label='Shifted')
             plt.plot(log_model_wave_all+log_shift_full, flux_model_logscale, label='Best-fit model spectrum, '
@@ -709,8 +687,6 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             plt.yticks(fontsize=14)
             ylim = [0.1,1.6]
             plt.text((xlim[1] - xlim[0]) * 0.03 + xlim[0], (ylim[1] - ylim[0]) * 0.9 + ylim[0], 'b channel', size=14)
-            plt.text((xlim[1] - xlim[0]) * 0.03 + xlim[0], (ylim[1] - ylim[0]) * 0.82 + ylim[0], f'Vel. correction old = '
-                                                                                    f'{vel_shift_b:.2f} km/s', size=14)
             plt.xlim(xlim)
             plt.ylim(ylim)
             plt.xlabel("wavelength [A]", size=14)
@@ -728,9 +704,6 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             plt.xticks(np.log(show_wl), labels=show_wl.astype(str), size=14)
             plt.yticks(fontsize=14)
             plt.text((xlim[1] - xlim[0]) * 0.03 + xlim[0], (ylim[1] - ylim[0]) * 0.9 + ylim[0], 'r channel', size=14)
-            plt.text((xlim[1] - xlim[0]) * 0.03 + xlim[0], (ylim[1] - ylim[0]) * 0.82 + ylim[0], f'Vel. correction old = '
-                                                                                                 f'{vel_shift_r:.2f} km/s',
-                     size=14)
             plt.xlim(xlim)
             plt.ylim(ylim)
             plt.xlabel("wavelength [A]", size=14)
@@ -748,9 +721,6 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             plt.xticks(np.log(show_wl), labels=show_wl.astype(str), size=14)
             plt.yticks(fontsize=14)
             plt.text((xlim[1] - xlim[0]) * 0.03 + xlim[0], (ylim[1] - ylim[0]) * 0.9 + ylim[0], 'z channel', size=14)
-            plt.text((xlim[1] - xlim[0]) * 0.03 + xlim[0], (ylim[1] - ylim[0]) * 0.82 + ylim[0], f'Vel. correction old = '
-                                                                                                 f'{vel_shift_z:.1f} km/s',
-                     size=14)
             plt.xlim(xlim)
             plt.ylim(ylim)
             plt.xlabel("wavelength [A]", size=14)
