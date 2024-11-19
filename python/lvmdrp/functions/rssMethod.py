@@ -133,6 +133,63 @@ def _make_arcline_axes(display_plots, pixel, ref_lines, ifiber, unit="e-", ncols
     return fig, axs
 
 
+def _get_exposed_std_rss(rss, ref_fibers=None, return_nonexposed=False, plot=False):
+    """Returns exposed standard fibers given an RSS
+
+    Parameters
+    ----------
+    rss : lvmdrp.core.rss.RSS
+        RSS object
+    ref_fibers : array_like, optional
+        reference fibers to test for illumination against, by default None
+    return_nonexposed : bool, optional
+        return non-exposed fibers as well, by default False
+    plot : bool, optional
+        if True, make plots showing standard fiber offset with reference fibers
+
+    Returns
+    -------
+    array_like
+        list of indices of exposed standard fibers
+    array_like
+        list of indices of non-exposed standard fibers, only if `return_nonexposed==True`
+    """
+    # get standard fiber positions
+    slitmap = rss._slitmap
+    slitmap = slitmap[slitmap["spectrographid"] == int(rss._header["CCD"][1])]
+    std_fibers = numpy.where(slitmap["telescope"] == "Spec")[0]
+    std_names = slitmap["orig_ifulabel"][std_fibers]
+
+    # offset standard fibers to get science fibers
+    if ref_fibers is None:
+        ref_fibers = std_fibers + 5
+
+    # calculate stats
+    sci_median = bn.nanmedian(rss._data[ref_fibers])
+    p25, p75 = numpy.nanpercentile(rss._data[ref_fibers], q=25), numpy.nanpercentile(rss._data[ref_fibers], q=75)
+    std_median = bn.nanmedian(rss._data[std_fibers])
+
+    # make plots to show offset between standard fibers and reference fibers
+    if plot:
+        fig, ax = plt.subplots(figsize=(15,5), layout="constrained", sharey=True, sharex=True)
+        ax.axhspan(sci_median-p25, sci_median+p75, color="tab:blue", lw=0, alpha=0.2)
+        ax.axhline(sci_median, ls="--", lw=1, color="tab:blue")
+        ax.axhline(std_median, ls="--", lw=1, color="tab:purple")
+        ax.boxplot(numpy.nan_to_num(rss._data)[std_fibers].T, range(len(ref_fibers)), showfliers=False, autorange=False)
+        ax.set_xticklabels(std_names)
+        ax.set_xlabel("Std. Fibers")
+        ax.set_ylabel(f"Counts ({rss._header['BUNIT']})")
+        plt.yscale("log")
+
+    # calculate threshold to select exposed standard fibers
+    select_exposed = std_median > sci_median - p25
+
+    std_exposed_idx = std_fibers[select_exposed]
+    if return_nonexposed:
+        return std_exposed_idx, std_fibers[~select_exposed]
+    return std_exposed_idx
+
+
 def mergeRSS_drp(files_in, file_out, mergeHdr="1"):
     """
     Different RSS are merged into a common file by extending the number of fibers.
@@ -311,15 +368,18 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
     # update lamps status
     lamps = set(ilamps)
 
-    # # mask std fibers since they are not regularly illuminated during arc exposures
-    # fibermap = arc._slitmap[arc._slitmap["spectrographid"] == int(camera[1])]
-    # select = fibermap["telescope"] == "Spec"
-    # arc._mask[select] = True
-
     # subtract continuum
     if cont_niter > 0:
         log.info(f"fitting and subtracting continuum with parameters: {cont_niter = }, {cont_thresh = }, {cont_box_range = }")
         arc, _, _ = arc.subtract_continuum(niter=cont_niter, thresh=cont_thresh, median_box_range=cont_box_range)
+
+    # mask std fibers since they are not regularly illuminated during arc exposures
+    fibermap = arc._slitmap[arc._slitmap["spectrographid"] == int(camera[1])].as_array()
+    # select = fibermap["telescope"] == "Spec"
+    log.info("determining exposed standard fiber")
+    exposed, nonexposed = _get_exposed_std_rss(arc, return_nonexposed=True)
+    arc._mask[nonexposed] = True
+    log.info(f"found {len(exposed)} exposed standard fibers: {fibermap['orig_ifulabel'][exposed]}")
 
     # replace NaNs
     mask = arc._mask | numpy.isnan(arc._data) | numpy.isnan(arc._error)
