@@ -1873,14 +1873,14 @@ def create_drpall(drp_version: str = None, overwrite: bool = False) -> None:
             log.info(f"no drpall file found for {drp_version = }")
 
     # define lvmSFrame paths
-    sframe_paths = path.expand("lvm_frame", kind="SFrame", drpver=drp_version, tileid="*", mjd="*", expnum=8*"?")
+    sframe_paths = sorted(path.expand("lvm_frame", kind="SFrame", drpver=drp_version, tileid="*", mjd="*", expnum=8*"?"))
     nframes = len(sframe_paths)
     log.info(f"found {nframes} lvmSFrames under {drp_version = }")
     # iterate over each file and create/update the drpall file
     nfailed = 0
     failed = []
-    for sframe_path in sframe_paths:
-        log.info(f"{sframe_path = }")
+    for iframe, sframe_path in enumerate(sframe_paths):
+        log.info(f"[{iframe+1}/{nframes}] {sframe_path = }")
         # extract Tile ID, MJD and exposure number from file
         # pars = path.extract("lvm_frame", sframe_path)
         pars = sframe_path.split(".fits")[0].split("/")

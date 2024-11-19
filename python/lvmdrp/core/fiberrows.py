@@ -14,6 +14,22 @@ from lvmdrp.core.spectrum1d import Spectrum1D, _cross_match_float
 from lvmdrp.core.plot import plt
 
 
+def fillin_gap(x, distances, inplace=False):
+    """Fills in NaN values maintaining given distances
+    """
+    if inplace:
+        x_ = x
+    else:
+        x_ = x.copy()
+    igaps, = numpy.where(numpy.isnan(x))
+    for igap in igaps:
+        if igap == 0:
+            x_[igap] = x_[igap+1] - distances[igap+1]
+            continue
+        x_[igap] = x_[igap-1] + distances[igap]
+    return x_
+
+
 def _read_fiber_ypix(peaks_file):
     """
     Read peaks file and return the fiber number, pixel position, subpixel position
@@ -870,6 +886,9 @@ class FiberRows(Header, PositionTable):
         bg = numpy.ones((self._fibers, nlines), dtype=numpy.float32) * numpy.nan
         masked = numpy.zeros((self._fibers, nlines), dtype="bool")
 
+        # define pixel distance between lines, fairly constant fiber-to-fiber
+        lines_dist = numpy.asarray([0.0] + numpy.diff(ref_cent).tolist())
+
         stretch_min, stretch_max, stretch_steps = 0.998, 1.002, 40
 
         spec = self.getSpec(ref_fiber)
@@ -920,7 +939,7 @@ class FiberRows(Header, PositionTable):
                 log.warning(f"   bg   = {numpy.round(bg[i],3)}")
 
             last_spec = copy(spec)
-            last_cent = copy(cent_wave[i])
+            last_cent = fillin_gap(cent_wave[i], distances=lines_dist, inplace=False)
 
         last_spec = copy(self.getSpec(ref_fiber))
         last_cent = copy(cent_wave[ref_fiber])
@@ -964,7 +983,7 @@ class FiberRows(Header, PositionTable):
                 log.warning(f"   bg   = {numpy.round(bg[i],3)}")
 
             last_spec = copy(spec)
-            last_cent = copy(cent_wave[i])
+            last_cent = fillin_gap(cent_wave[i], distances=lines_dist, inplace=False)
 
         fibers = numpy.arange(self._fibers)
         return fibers, flux, cent_wave, fwhm, masked
