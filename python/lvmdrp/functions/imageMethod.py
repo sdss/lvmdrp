@@ -2714,7 +2714,7 @@ def extract_spectra(
     # propagate thermal shift to slitmap
     channel = img._header['CCD'][0]
     slitmap[f"ypix_{channel}"] = slitmap[f"ypix_{channel}"].astype("float64")
-    slitmap[f"ypix_{channel}"][select_spec] += bn.nanmedian(shifts, axis=0)
+    slitmap[f"ypix_{channel}"][select_spec] += numpy.nan_to_num(bn.nanmedian(shifts, axis=0))
 
     if error is not None:
         error[mask] = replace_error
