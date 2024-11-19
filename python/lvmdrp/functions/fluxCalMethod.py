@@ -380,6 +380,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     w = []
     ext = []
     normalized_spectra_all_bands = []
+    normalized_spectra_unconv_all_bands = []
     std_errors_all_bands = []
     lsf_all_bands = []
     std_spectra_all_bands = [] ## contains original std spectra for all stars in ALL band
@@ -387,6 +388,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     for b in range(len(in_rss)):
         std_spectra = []  # contains original std spectra for all stars in each band
         normalized_spectra = []
+        normalized_spectra_unconv = []
         std_errors = []
         lsf = []
         fibers = []
@@ -482,11 +484,10 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             #std_errors.append(error_tmp/best_continuum)
             error_tmp = 1 / error_tmp**0.5
             std_errors.append(error_tmp / best_continuum)
-            print(spec_tmp)
-            print(error_tmp)
-            print(best_continuum)
             normalized_spectra.append(spec_tmp_convolved/best_continuum) # normalized std spestra degraded to 2A for all
                                                                         # standards in each channel
+            best_continuum = ndimage.filters.median_filter(spec_tmp, int(160/0.5), mode="nearest")
+            normalized_spectra_unconv.append(spec_tmp/best_continuum)
             lsf.append(lsf_tmp) # initial std spec LSF for all standards in each channel
             std_spectra.append(spec_ext_corr)
             #print(nn, fiber)
@@ -494,6 +495,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
 
         normalized_spectra_all_bands.append(normalized_spectra) # normalized std spestra degraded to 2A for all
                                                                         # standards and all channels together
+        normalized_spectra_unconv_all_bands.append(normalized_spectra_unconv)
         std_errors_all_bands.append(std_errors)
         lsf_all_bands.append(lsf) # initial std spec LSF for all standards and all channel together
         std_spectra_all_bands.append(std_spectra)
@@ -543,15 +545,15 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         lsf_all = np.concatenate((lsf_all_bands[0][i][mask_b_norm],
                                              lsf_all_bands[1][i][mask_r_norm],
                                              lsf_all_bands[2][i][mask_z_norm]))
-
+        std_norm_unconv = np.concatenate((normalized_spectra_unconv_all_bands[0][i][mask_b_norm], normalized_spectra_unconv_all_bands[1][i][mask_r_norm],
+                              normalized_spectra_unconv_all_bands[2][i][mask_z_norm]))
         # TODO: switch to new resampling code
+        log_std_wave_all, flux_std_unconv_logscale = linear_to_logscale(std_wave_all, std_norm_unconv)
         log_std_wave_all, flux_std_logscale = linear_to_logscale(std_wave_all, std_normalized_all_convolved)
         std_errors_normalized_all = np.concatenate((std_errors_all_bands[0][i][mask_b_norm],
                                                     std_errors_all_bands[1][i][mask_r_norm],
                                                     std_errors_all_bands[2][i][mask_z_norm]))
         log_std_wave_all, log_std_errors_normalized_all = linear_to_logscale(std_wave_all, std_errors_normalized_all)
-        print('Linear errors', std_errors_normalized_all)
-        print('Log errors', log_std_errors_normalized_all)
 
         # load Gaia BP-RP spectrum from cache, or download from webapp, and fit the continuum to Gaia spec
         try:
@@ -643,6 +645,14 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         model_flux_resampled = np.interp(std_wave_all, model_wave, model_flux)
         good_model_to_std_lsf = np.sqrt(lsf_all ** 2 - 0.3 ** 2) # to degrade good resolution model to std lsf for plots
         model_convolved_spec_lsf = fluxcal.lsf_convolve(model_flux_resampled, good_model_to_std_lsf, std_wave_all)
+        model_tmp = Table(data=[std_wave_all, model_convolved_spec_lsf], names=['wave', 'flux'])
+        best_continuum = smoothSpec_old(model_tmp, int(160 / 0.5), method="median")
+        model_norm_convolved_spec_lsf = model_convolved_spec_lsf / best_continuum
+        # print(model_flux_resampled)
+        # print(model_convolved_spec_lsf)
+        log_std_wave_all_tmp, log_model_norm_convolved_spec_lsf = linear_to_logscale(std_wave_all, model_norm_convolved_spec_lsf)
+        model_shifted_norm_convolved_spec_lsf = logscale_to_linear(std_wave_all, log_std_wave_all_tmp,
+                                                                   log_model_norm_convolved_spec_lsf, log_shift_full)
 
         # convolve model to gaia lsf
         # TODO: make sure we do this once
@@ -656,7 +666,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
 
             plt.subplot(511)
             plt.title(label=f'Gaia ID: {gaia_ids[i]}. Model: {model_names[best_id]}',fontsize=14)
-            plt.plot(log_std_wave_all, flux_std_logscale, label=f'Observed standard spectrum from fiber '
+            plt.plot(log_std_wave_all, flux_std_unconv_logscale, label=f'Observed standard spectrum from fiber '
                                                                 f'{fibers[i]}, continuum normalized')
             sigma1 = flux_std_logscale + log_std_errors_normalized_all
             sigma2 = flux_std_logscale - log_std_errors_normalized_all
@@ -666,8 +676,8 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
 
             # plt.plot(std_wave_all,
             #         np.interp(std_wave_all, std_wave_all*(1+vel_offset_b/3e5), normalized_std_on_gaia_cont_single), label='Shifted')
-            plt.plot(log_model_wave_all+log_shift_full, flux_model_logscale, label='Best-fit model spectrum, '
-                                                                                'continuum normalized', alpha=0.7) # shifted
+            plt.plot(log_model_wave_all+log_shift_full, log_model_norm_convolved_spec_lsf, label='Best-fit model spectrum, '
+                                                'continuum normalized and convolved with std LSF', alpha=0.7) # shifted
             for n_mask, mask_box in enumerate(mask_for_fit):
                 if n_mask == 0:
                     plt.axvspan(np.log(mask_box[0]), np.log(mask_box[1]), alpha=0.2, color='grey',
@@ -691,11 +701,11 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             plt.legend(loc="lower right", fontsize=14)
 
             plt.subplot(512)
-            plt.plot(log_std_wave_all, flux_std_logscale, label='Observed')
+            plt.plot(log_std_wave_all, flux_std_unconv_logscale, label='Observed')
             plt.plot(log_std_wave_all, sigma2, '--', color='grey', lw=0.5)
             plt.plot(log_std_wave_all, sigma1, '--', color='grey', lw=0.5)
             plt.fill_between(log_std_wave_all, sigma1, sigma2, alpha=0.2, color='blue')
-            plt.plot(log_model_wave_all+log_shift_full, flux_model_logscale, label='Model shifted', alpha=0.7)
+            plt.plot(log_model_wave_all+log_shift_full, log_model_norm_convolved_spec_lsf, label='Model shifted', alpha=0.7)
             #plt.plot(log_std_wave_all-log_shift_b, flux_model_logscale, label='Model shifted')
             for mask_box in mask_for_fit:
                 plt.axvspan(np.log(mask_box[0]), np.log(mask_box[1]), alpha=0.2, color='grey')
@@ -712,12 +722,12 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             plt.xlabel("wavelength [A]", size=14)
 
             plt.subplot(513)
-            plt.plot(log_std_wave_all, flux_std_logscale, label='Observed')
+            plt.plot(log_std_wave_all, flux_std_unconv_logscale, label='Observed')
             #plt.plot(log_model_wave_all, flux_model_logscale, label='Model')
             plt.plot(log_std_wave_all, sigma2, '--', color='grey', lw=0.5)
             plt.plot(log_std_wave_all, sigma1, '--', color='grey', lw=0.5)
             plt.fill_between(log_std_wave_all, sigma1, sigma2, alpha=0.2, color='blue')
-            plt.plot(log_std_wave_all+log_shift_full, flux_model_logscale, label='Model shifted', alpha=0.7)
+            plt.plot(log_std_wave_all+log_shift_full, log_model_norm_convolved_spec_lsf, label='Model shifted', alpha=0.7)
             for mask_box in mask_for_fit:
                 plt.axvspan(np.log(mask_box[0]), np.log(mask_box[1]), alpha=0.2, color='grey')
             #plt.legend()
@@ -734,12 +744,12 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             plt.xlabel("wavelength [A]", size=14)
 
             plt.subplot(514)
-            plt.plot(log_std_wave_all, flux_std_logscale, label='Observed')
+            plt.plot(log_std_wave_all, flux_std_unconv_logscale, label='Observed')
             plt.plot(log_std_wave_all, sigma2, '--', color='grey', lw=0.5)
             plt.plot(log_std_wave_all, sigma1, '--', color='grey', lw=0.5)
             plt.fill_between(log_std_wave_all, sigma1, sigma2, alpha=0.2, color='blue')
             #plt.plot(log_model_wave_all, flux_model_logscale, label='Model')
-            plt.plot(log_std_wave_all+log_shift_full, flux_model_logscale, label='Model shifted', alpha=0.7)
+            plt.plot(log_std_wave_all+log_shift_full, log_model_norm_convolved_spec_lsf, label='Model shifted', alpha=0.7)
             for mask_box in mask_for_fit:
                 plt.axvspan(np.log(mask_box[0]), np.log(mask_box[1]), alpha=0.2, color='grey')
             #plt.legend()
@@ -756,19 +766,23 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             # plt.ylabel(size=14)
 
             plt.subplot(515)
-            plt.plot(std_wave_all, normalized_std_on_gaia_cont_single_tmp, linewidth=1.5,
-                     label='Continuum from GAIA spectrum * observed absorptions')
-            plt.plot(std_wave_all, model_convolved_spec_lsf * np.median(model_to_gaia), label='Best-fit model',
-                     linewidth=1.5, alpha=0.7)
+            # plt.plot(std_wave_all, normalized_std_on_gaia_cont_single_tmp, linewidth=1.5,
+            #          label='Continuum from GAIA spectrum * observed absorptions')
+            # plt.plot(std_wave_all, model_convolved_spec_lsf * np.median(model_to_gaia), label='Best-fit model',
+            #          linewidth=1.5, alpha=0.7)
+            # plt.plot(std_wave_all, std_norm_unconv)
+            # plt.plot(std_wave_all, model_shifted_norm_convolved_spec_lsf)
+            plt.plot(std_wave_all, std_norm_unconv/model_shifted_norm_convolved_spec_lsf, label='Observed normalised/model normalised')
+            # plt.plot(log_std_wave_all+log_shift_full, log_model_norm_convolved_spec_lsf, label='Model shifted', alpha=0.7)
             #plt.plot(log_std_wave_all+log_shift_z, flux_model_logscale, label='Model shifted')
             for mask_box in mask_for_fit:
                plt.axvspan((mask_box[0]), (mask_box[1]), alpha=0.2, color='grey')
             plt.legend(fontsize=14)
-            plt.xlim(3500,9000)
-            plt.gca().set_ylim(bottom=0)
-            #plt.ylim(0.2, 1.5)
+            plt.xlim(3800,5000)
+            #plt.gca().set_ylim(bottom=0)
+            plt.ylim(0.5, 1.6)
             plt.xlabel("wavelength [A]", size=14)
-            plt.ylabel("Flux, erg/s/cm^2/A", size=14)
+            # plt.ylabel("Flux, erg/s/cm^2/A", size=14)
             plt.xticks(fontsize=14)
             plt.yticks(fontsize=14)
 
