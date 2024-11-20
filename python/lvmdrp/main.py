@@ -34,7 +34,7 @@ from lvmdrp.functions.skyMethod import interpolate_sky, combine_skies, quick_sky
 from lvmdrp.functions.fluxCalMethod import fluxcal_standard_stars, fluxcal_sci_ifu_stars, apply_fluxcal
 from lvmdrp.utils.metadata import (get_frames_metadata, get_master_metadata, extract_metadata,
                                    get_analog_groups, match_master_metadata, create_master_path,
-                                   update_summary_file)
+                                   update_summary_file, convert_h5_to_fits)
 from lvmdrp.utils.convert import tileid_grp
 from lvmdrp.utils.paths import get_master_mjd, mjd_from_expnum, get_calib_paths, group_calib_paths
 from lvmdrp.utils.timer import Timer
@@ -1898,6 +1898,9 @@ def create_drpall(drp_version: str = None, overwrite: bool = False) -> None:
     if nfailed != 0:
         log.warning(f"with {nfailed} failed frames:")
         log.warning(f"{failed = }")
+
+    convert_h5_to_fits(drpall)
+    log.info(f"finished converting HDF5 to FITS format in {drpall.replace('h5', '.fits')}")
 
 
 def reduce_calib_frame(row: dict):
