@@ -279,38 +279,6 @@ def logscale_to_linear(wl_regular, wl_log, flux_log, shift=0):
     return flux
 
 
-def smoothSpec_old(self, size, method="gauss", mode="nearest"):
-    """
-    Smooth the spectrum
-
-    Parameters
-    --------------
-    size : float or int
-        Size of the smooth window or Gaussian width (sigma)
-    method : string, optional with default: 'gauss'
-        Available methods are 'gauss' - convolution with Gaussian kernel or
-        'median' - median smoothing of the spectrum
-    mode :  string, optional with default: 'nearest'
-        Set the mode how to handle the boundarys within the convolution
-        Possilbe modes are: reflect, constant, nearest, mirror,  wrap
-    """
-    if method == "gauss":
-        # filter with Gaussian kernel
-        median_filt = ndimage.filters.gaussian_filter1d(self['flux'], size, mode=mode)
-    elif method == "median":
-        # filter with median filter
-        median_filt = ndimage.filters.median_filter(self['flux'], size, mode=mode)
-    elif method == "BSpline":
-        smooth = interpolate.splrep(
-            self['wavelength'],
-            self['flux'],
-            #w=1.0 / np.sqrt(np.fabs(self['flux'])),
-            s=size,
-        )
-        median_filt = interpolate.splev(self['wavelength'], smooth, der=0)
-    return median_filt
-
-
 def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     """ Selection of the stellar atmosphere model spectra (POLLUX database, AMBRE library)
     Read all the models already convolved with Gaia LSF and normalized
@@ -478,9 +446,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             #                                                                            threshold=0.5,niter=niter,
             #                                                                            nknots=nknots,
             #                                                                            median_box=median_box)
-            std_spec_conv = Table(data=[w_tmp, spec_tmp_convolved],
-                                         names=['wave', 'flux'])
-            best_continuum = smoothSpec_old(std_spec_conv, int(160/0.5), method="median")
+            best_continuum = ndimage.filters.median_filter(spec_tmp_convolved, int(160/0.5), mode="nearest")
             #std_errors.append(error_tmp/best_continuum)
             error_tmp = 1 / error_tmp**0.5
             std_errors.append(error_tmp / best_continuum)
@@ -547,6 +513,8 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
                                              lsf_all_bands[2][i][mask_z_norm]))
         std_norm_unconv = np.concatenate((normalized_spectra_unconv_all_bands[0][i][mask_b_norm], normalized_spectra_unconv_all_bands[1][i][mask_r_norm],
                               normalized_spectra_unconv_all_bands[2][i][mask_z_norm]))
+        # std_init_all = np.concatenate((std_spectra_all_bands[0][i][mask_b_norm], std_spectra_all_bands[1][i][mask_r_norm],
+        #                                std_spectra_all_bands[2][i][mask_z_norm]))
         # TODO: switch to new resampling code
         log_std_wave_all, flux_std_unconv_logscale = linear_to_logscale(std_wave_all, std_norm_unconv)
         log_std_wave_all, flux_std_logscale = linear_to_logscale(std_wave_all, std_normalized_all_convolved)
@@ -569,8 +537,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         #                                                                            threshold=0.1, niter=niter,
         #                                                                            nknots=nknots,
         #                                                                            median_box=median_box)
-        std_spec = Table(data=[std_wave_all, stdflux], names=['wave', 'flux'])
-        best_continuum = smoothSpec_old(std_spec, int(160 / 0.5), method="median")
+        best_continuum = ndimage.filters.median_filter(stdflux, int(160/0.5), mode="nearest")
         normalized_std_on_gaia_cont_single_tmp = best_continuum*std_normalized_all_convolved
         normalized_std_on_gaia_cont_single_tmp[mask_tellurics] = np.nan
         normalized_std_on_gaia_cont_single = normalized_std_on_gaia_cont_single_tmp / np.nansum(normalized_std_on_gaia_cont_single_tmp)
@@ -645,8 +612,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         model_flux_resampled = np.interp(std_wave_all, model_wave, model_flux)
         good_model_to_std_lsf = np.sqrt(lsf_all ** 2 - 0.3 ** 2) # to degrade good resolution model to std lsf for plots
         model_convolved_spec_lsf = fluxcal.lsf_convolve(model_flux_resampled, good_model_to_std_lsf, std_wave_all)
-        model_tmp = Table(data=[std_wave_all, model_convolved_spec_lsf], names=['wave', 'flux'])
-        best_continuum = smoothSpec_old(model_tmp, int(160 / 0.5), method="median")
+        best_continuum = ndimage.filters.median_filter(model_convolved_spec_lsf, int(160/0.5), mode="nearest")
         model_norm_convolved_spec_lsf = model_convolved_spec_lsf / best_continuum
         # print(model_flux_resampled)
         # print(model_convolved_spec_lsf)
@@ -659,6 +625,38 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         model_convolved_to_gaia = fluxcal.lsf_convolve(model_flux_resampled, gaia_lsf, std_wave_all)
         model_to_gaia = stdflux/model_convolved_to_gaia
         model_to_gaia_median.append(np.median(model_to_gaia))
+        #
+        # if plot:
+        #     fig = plt.figure(figsize=(12, 10))
+        #
+        #     plt.subplot(211)
+        #     plt.plot(std_wave_all, model_convolved_spec_lsf, label=f'Model')
+        #     plt.plot(std_wave_all, best_continuum, label=f'Model continuum with median filter')
+        #     plt.xlabel("wavelength [A]", size=14)
+        #     plt.xticks(fontsize=14)
+        #     plt.yticks(fontsize=14)
+        #     plt.legend(fontsize=14)
+        #
+        #     plt.subplot(212)
+        #     p = plt.plot(wave_b[mask_b_norm], std_spectra_all_bands[0][i][mask_b_norm], label='Observed standard')
+        #     plt.plot(wave_r[mask_r_norm], std_spectra_all_bands[1][i][mask_r_norm], color=p[0].get_color())
+        #     plt.plot(wave_z[mask_z_norm], std_spectra_all_bands[2][i][mask_z_norm], color=p[0].get_color())
+        #     p2 = plt.plot(wave_b[mask_b_norm],
+        #                   ndimage.filters.median_filter(std_spectra_all_bands[0][i][mask_b_norm], int(160/0.5), mode="nearest"),
+        #                   label='Continuum with median filter')
+        #     plt.plot(wave_r[mask_r_norm], ndimage.filters.median_filter(std_spectra_all_bands[1][i][mask_r_norm],
+        #                                                                 int(160 / 0.5), mode="nearest"), color=p2[0].get_color())
+        #     plt.plot(wave_z[mask_z_norm], ndimage.filters.median_filter(std_spectra_all_bands[2][i][mask_z_norm],
+        #                                                                 int(160 / 0.5), mode="nearest"), color=p2[0].get_color())
+        #     plt.xlabel("wavelength [A]", size=14)
+        #     plt.xticks(fontsize=14)
+        #     plt.yticks(fontsize=14)
+        #     plt.legend(fontsize=14)
+        #
+        #     fig_path = in_rss[0]
+        #     fig_path = f"{fig_path.replace('lvm-hobject-b', 'lvm-hobject')}"
+        #     save_fig(plt.gcf(), product_path=fig_path, to_display=False, figure_path="qa/model_matching", label=f"matching_std{i}_tmp")
+        #
 
         if plot:
 
