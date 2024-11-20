@@ -223,14 +223,30 @@ def _cross_match(
     return max_correlation, best_shift, best_stretch_factor
 
 
-def _normalize_peaks(data, min_peak_dist):
+def _normalize_peaks(data, ref, min_peak_dist):
     data_ = numpy.asarray(data).copy()
-    peaks, _ = signal.find_peaks(data_, distance=min_peak_dist)
-    if peaks.size == 0:
-        return data_
-    norm = numpy.interp(numpy.arange(data_.shape[0]), peaks, data_[peaks])
-    data_ /= norm
-    return data_
+    dat_peaks, dat_peak_pars = signal.find_peaks(data_, distance=min_peak_dist, rel_height=0.5, width=(2,4), prominence=1.5)
+
+    ref_ = numpy.asarray(ref).copy()
+    ref_peaks, ref_peak_pars = signal.find_peaks(ref_, distance=min_peak_dist, rel_height=0.5, width=(2,4), prominence=1.5)
+
+    if dat_peaks.size == 0 or ref_peaks.size == 0:
+        return data_, ref_, None, None, None, None
+
+    # dat_norm = interpolate.interp1d(dat_peaks, data_[dat_peaks], kind="linear", bounds_error=False, fill_value=0.0)(numpy.arange(data_.shape[0]))
+    # ref_norm = interpolate.interp1d(ref_peaks, ref_[ref_peaks], kind="linear", bounds_error=False, fill_value=0.0)(numpy.arange(data_.shape[0]))
+    dat_norm = numpy.interp(numpy.arange(data_.shape[0]), dat_peaks, data_[dat_peaks])
+    ref_norm = numpy.interp(numpy.arange(data_.shape[0]), ref_peaks, ref_[ref_peaks])
+
+    # import matplotlib.pyplot as plt
+    # plt.figure()
+    # plt.plot(dat_norm)
+    # plt.plot(ref_norm)
+
+    ref_ = ref_ / ref_norm
+    data_ = data_ / dat_norm
+
+    return data_, ref_, dat_peaks, dat_peak_pars, ref_peaks, ref_peak_pars
 
 
 def _cross_match_float(
@@ -285,10 +301,22 @@ def _cross_match_float(
     best_stretch_factor : float
         The best stretch factor.
     """
+
+    # blocks_pos = numpy.asarray(numpy.split(trace_cent._data[:, c], 18))[select_blocks]
+    # blocks_bounds = [(int(bpos.min())-5, int(bpos.max())+5) for bpos in blocks_pos]
+
+    # obs_spec = obs_spec[1000:3000]
+    # ref_spec = ref_spec[1000:3000]
+
     min_shift, max_shift = shift_range
     max_correlation = -numpy.inf
     best_shift = 0
     best_stretch_factor = 1
+
+    import matplotlib.pyplot as plt
+    _, ax_ = plt.subplots(3,1, figsize=(15,7), sharex=True)
+    ax_[0].plot(obs_spec)
+    ax_[0].plot(ref_spec * numpy.nanmean(obs_spec) / numpy.nanmean(ref_spec))
 
     # define pixels array centered around middle part of the spectrum
     # pixels = numpy.arange(ref_spec.size) - ref_spec.size // 2
@@ -296,13 +324,26 @@ def _cross_match_float(
     # normalize the peaks to roughly magnitude 1, so that individual very bright
     # fibers do not dominate the signal
     if normalize_spectra:
-        ref_spec_ = _normalize_peaks(ref_spec, min_peak_dist=min_peak_dist)
-        obs_spec_ = _normalize_peaks(obs_spec, min_peak_dist=min_peak_dist)
+        obs_spec_, ref_spec_, obs_peak, obs_peak_pars, ref_peaks, ref_peak_pars = _normalize_peaks(obs_spec, ref_spec, min_peak_dist=min_peak_dist)
+        # obs_spec_, obs_peak, peak_pars = _normalize_peaks(obs_spec, min_peak_dist=min_peak_dist)
     else:
         ref_spec_ = ref_spec.copy()
         obs_spec_ = obs_spec.copy()
     #return ref_spec_, obs_spec_
 
+    # diff = ref_peak - obs_peak
+
+    ax_[1].plot(obs_peak, obs_peak_pars["prominences"], "-o")
+    # grad = numpy.gradient(obs_peak)
+    # sp_block = obs_peak[grad>10]
+    # md_block = numpy.asarray([0] + numpy.mean(numpy.split(sp_block, sp_block.size//2), axis=1).tolist() + [4080]).astype(int)
+
+    # # ax_[1].plot(obs_peak[grad>10], grad[grad>10], "-o")
+    # ax_[1].plot(md_block, [20]*md_block.size, "-o")
+    # # ax_[1].plot(peaks, peak_pars["widths"], "-o")
+
+    # _, ax_cc = plt.subplots(2, 9, figsize=(15,7), sharex=True, sharey=True, layout="constrained")
+    # ax_cc = ax_cc.flatten()
     for factor in stretch_factors:
         # Stretch the first signal
         stretched_signal1 = zoom(ref_spec_, factor, mode="constant", prefilter=True)
@@ -317,18 +358,29 @@ def _cross_match_float(
             # Or crop the stretched signal at the end if it's longer
             stretched_signal1 = stretched_signal1[:len_diff]
 
-        # Compute the cross correlation
+        # Get the correlation shifts
+        shifts = signal.correlation_lags(
+            len(obs_spec_), len(stretched_signal1), mode="same"
+        )
         cross_corr = signal.correlate(obs_spec_, stretched_signal1, mode="same")
+
+        # for axc, iblock, fblock in zip(ax_cc, md_block[:-1], md_block[1:]):
+        #     # Get the correlation shifts
+        #     shifts = signal.correlation_lags(
+        #         len(obs_spec_[iblock:fblock]), len(stretched_signal1[iblock:fblock]), mode="same"
+        #     )
+        #     mask = (shifts >= min_shift) & (shifts <= max_shift)
+        #     cross_corr = signal.correlate(obs_spec_[iblock:fblock], stretched_signal1[iblock:fblock], mode="same")
+        #     axc.plot(shifts[mask], cross_corr[mask])
+        #     axc.axhline(cross_corr[mask].max(), ls="--", color="k")
+
+        # ax_[1].plot(obs_spec_)
+        # ax_[1].plot(stretched_signal1)
 
         # Normalize the cross correlation
         cross_corr = cross_corr.astype(numpy.float32)
         cross_corr /= norm(stretched_signal1) * norm(obs_spec_)
         cross_corr = numpy.nan_to_num(cross_corr)
-
-        # Get the correlation shifts
-        shifts = signal.correlation_lags(
-            len(obs_spec_), len(stretched_signal1), mode="same"
-        )
 
         # Find the max correlation and the corresponding shift for this stretch factor
         mask = (shifts >= min_shift) & (shifts <= max_shift)
@@ -362,6 +414,12 @@ def _cross_match_float(
         bounds=(bound_lower, bound_upper)
     )
     area, best_shift_sp, sigma, bg = best_gauss.getPar()
+
+    # plt.figure()
+    # xxx = numpy.abs(shifts)<7
+    # plt.plot(shifts[xxx], cross_corr[xxx])
+    ax_[2].plot(obs_spec_)
+    ax_[2].plot(_apply_shift_and_stretch(ref_spec_, best_shift, best_stretch_factor))
 
     # display best match
     if ax is not None:

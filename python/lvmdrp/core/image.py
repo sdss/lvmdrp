@@ -756,7 +756,7 @@ class Image(Header):
             snr = numpy.sqrt(s2)
             median_snr = bn.nanmedian(snr)
 
-            min_snr = 5.0
+            min_snr = 1.0
             if median_snr <= min_snr:
                 comstr = f"low SNR (<={min_snr}) for thermal shift at column {c}: {median_snr:.4f}, assuming = NaN"
                 log.warning(comstr)
@@ -773,8 +773,8 @@ class Image(Header):
                 x = numpy.arange(bmax-bmin) + i*(bmax-bmin) + 10
                 y_model = bn.nanmedian(ref_data[bmin:bmax, c-column_width:c+column_width], axis=1)
                 y_data = bn.nanmedian(self._data[bmin:bmax, c-column_width:c+column_width], axis=1)
-                y_model = _normalize_peaks(y_model, min_peak_dist=5.0)
-                y_data = _normalize_peaks(y_data, min_peak_dist=5.0)
+                y_data, y_model, _, _, _, _ = _normalize_peaks(y_data, y_model, min_peak_dist=5.0)
+                # y_data, _, _ = _normalize_peaks(y_data, min_peak_dist=5.0)
                 axs_fb[j].step(x, y_data, color="0.2", lw=1.5, label="data" if i == 0 else None)
                 axs_fb[j].step(x, y_model, color="tab:blue", lw=1, label="model" if i == 0 else None)
                 axs_fb[j].step(x+shifts[j], numpy.interp(x+shifts[j], x, y_model), color="tab:red", lw=1, label="corr. model" if i == 0 else None)
