@@ -3,58 +3,40 @@
 # setup.py
 #
 
-from setuptools import setup
-from setuptools.command.develop import develop
-from setuptools.command.install import install
-import shutil
-import os
 import sys
-import site
-import subprocess
+from setuptools import Extension, setup
 
 
-py_version = '%s.%s' % (sys.version_info[0], sys.version_info[1])
-def get_env_lib_directory():
-    """Return the installation directory, or None
+FAST_MEDIAN_PATH = 'python/cextern/fast_median/src'
 
-    taken from: https://bit.ly/3BAOpQK
-    """
-    if '--user' in sys.argv:
-        paths = (site.getusersitepackages(),)
-    else:
-        paths = (s % (py_version) for s in (
-            sys.prefix + '/lib/python%s/dist-packages/',
-            sys.prefix + '/lib/python%s/site-packages/',
-            sys.prefix + '/local/lib/python%s/dist-packages/',
-            sys.prefix + '/local/lib/python%s/site-packages/',
-            '/Library/Python/%s/site-packages/',
-        ))
-    for path in paths:
-        if os.path.exists(path):
-            return os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(path))))
+if sys.platform == "linux":
+    cpp_flags = ["-fPIC", "-shared", "-O3", "-march=native"]
+elif sys.platform == "darwin":
+    cpp_flags = ["-dynamiclib", "-current_version", "1.0", "-compatibility_version", "1.0", "-O3", "-march=native"]
+else:
+    cpp_flags = []
 
 
-install_path = get_env_lib_directory()
-fast_median_src = os.path.join(install_path, f"lib/python{py_version}/site-packages/cextern/fast_median/src")
-cwd = os.getcwd()
+if sys.platform == 'darwin':
+    cpp_flags += ['-stdlib=libc++', '-mmacosx-version-min=10.9']
+    extra_link_args = ["-v", '-mmacosx-version-min=10.9']
+    from distutils import sysconfig
+    vars = sysconfig.get_config_vars()
+    vars['LDSHARED'] = vars['LDSHARED'].replace('-bundle', '-dynamiclib')
 
-class PostDevelopCommand(develop):
-    """Post-installation for development mode."""
-    def run(self):
-        develop.run(self)
 
-        shutil.copytree("python/cextern/fast_median/src", fast_median_src, dirs_exist_ok=True)
-        os.chdir(fast_median_src)
-        subprocess.run("make")
-        os.chdir(cwd)
-
-class PostInstallCommand(install):
-    """Post-installation for installation mode."""
-    def run(self):
-        install.run(self)
-        shutil.copytree("python/cextern/fast_median/src", fast_median_src, dirs_exist_ok=True)
-        os.chdir(fast_median_src)
-        subprocess.run("make")
-        os.chdir(cwd)
-
-setup(cmdclass={'install': PostInstallCommand})
+setup(
+    ext_modules=[
+        Extension(
+            name="fast_median",
+            sources=[FAST_MEDIAN_PATH + "/fast_median.cpp"],
+            include_dirs=[FAST_MEDIAN_PATH],
+            libraries=[],
+            define_macros=[],
+            extra_compile_args=cpp_flags,
+            extra_link_args=extra_link_args,
+            language='c++',
+            optional=False
+        ),
+    ]
+)
