@@ -23,7 +23,7 @@ from lvmdrp.core.fit_profile import gaussians, Gaussians
 from lvmdrp.core.apertures import Apertures
 from lvmdrp.core.header import Header
 from lvmdrp.core.tracemask import TraceMask
-from lvmdrp.core.spectrum1d import Spectrum1D, _normalize_peaks, _cross_match_float, _cross_match, _spec_from_lines
+from lvmdrp.core.spectrum1d import Spectrum1D, _normalize_peaks, _cross_match_float, _cross_match, _spec_from_lines, align_blocks
 
 from cextern.fast_median.fast_median import fast_median_filter_2d
 
@@ -745,6 +745,14 @@ class Image(Header):
         # unpack axes
         axs_cc, axs_fb = axs
 
+        # calculate shift guess along central wide column
+        s1 = bn.nanmedian(ref_data[50:-50,2000-500:2000+500], axis=1)
+        s2 = bn.nanmedian(self._data[50:-50,2000-500:2000+500], axis=1)
+        guess_shift = align_blocks(s1, s2)
+
+        if guess_shift > 6:
+            log.warning(f"measuring fiber thermal shift too large {guess_shift = } pixels")
+
         shifts = numpy.zeros(len(columns))
         select_blocks = [9]
         for j,c in enumerate(columns):
@@ -764,7 +772,7 @@ class Image(Header):
                 shifts[j] = numpy.nan
                 continue
 
-            _, shifts[j], _ = _cross_match_float(s1, s2, numpy.array([1.0]), shift_range, gauss_window=[-3,3], min_peak_dist=5.0, ax=axs_cc[j])
+            _, shifts[j], _ = _cross_match_float(s1, s2, numpy.array([1.0]), guess_shift, shift_range, gauss_window=[-3,3], min_peak_dist=5.0, ax=axs_cc[j])
 
             blocks_pos = numpy.asarray(numpy.split(trace_cent._data[:, c], 18))[select_blocks]
             blocks_bounds = [(int(bpos.min())-10, int(bpos.max())+10) for bpos in blocks_pos]

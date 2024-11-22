@@ -282,10 +282,10 @@ def _choose_cc_peak(cc, shifts, min_shift, max_shift):
         # sum_cc.append(area)
 
 
-    print(ccp, sum_cc)
+    # print(ccp, sum_cc)
     return ccp[numpy.argmax(sum_cc)]
 
-def align_blocks(obs_spec, ref_spec, median_box=21):
+def align_blocks(ref_spec, obs_spec, median_box=21):
     """Cross-correlate median-filtered versions of fiber profile data and model to get coarse alignment"""
     obs_median = signal.medfilt(obs_spec, median_box)
     ref_median = signal.medfilt(ref_spec, median_box)
@@ -305,6 +305,7 @@ def _cross_match_float(
     ref_spec: numpy.ndarray,
     obs_spec: numpy.ndarray,
     stretch_factors: numpy.ndarray,
+    guess_shift : int,
     shift_range: List[int],
     min_peak_dist: float = 5.0,
     gauss_window: List[int] = [-10, 10],
@@ -331,6 +332,8 @@ def _cross_match_float(
         The observed spectrum.
     stretch_factors : ndarray
         The stretch factors to use.
+    guess_shift : int
+        Guess for the best CC shift
     shift_range : tuple
         The range of shifts to use.
     min_peak_dist : float, optional
@@ -379,11 +382,6 @@ def _cross_match_float(
         elif len_diff < 0:
             # Or crop the stretched signal at the end if it's longer
             stretched_signal1 = stretched_signal1[:len_diff]
-
-        guess_shift = align_blocks(obs_spec_, stretched_signal1)
-
-        if guess_shift > 6:
-            log.warning(f"measuring fiber thermal shift too large {guess_shift = } pixels")
 
         # Get the correlation shifts
         shifts = signal.correlation_lags(
