@@ -2603,8 +2603,8 @@ def extract_spectra(
     else:
         fiber_model = None
 
-    shift_range = [-7,7]
-    fig = plt.figure(figsize=(15, 3*len(columns)), layout="constrained")
+    shift_range = [-4,4]
+    fig = plt.figure(figsize=(15, 4*len(columns)), layout="constrained")
     fig.suptitle(f"Thermal fiber shifts for {mjd = }, {camera = }, {expnum = }")
     gs = GridSpec(len(columns)+1, 15, figure=fig)
     axs_cc, axs_fb = [], []
@@ -2619,7 +2619,7 @@ def extract_spectra(
     axs_cc[0].set_title("Cross-correlation")
     axs_cc[-1].set_xlabel("Shift (pixel)")
     axs_fb[-1].set_xlabel("Y (pixel)")
-    axs_cc[-1].set_xlim(shift_range)
+    # axs_cc[-1].set_xlim(shift_range)
 
     # fix centroids for thermal shifts
     log.info(f"measuring fiber thermal shifts @ columns: {','.join(map(str, columns))}")

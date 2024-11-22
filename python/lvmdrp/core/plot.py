@@ -616,6 +616,7 @@ def plot_fiber_thermal_shift(columns, column_shifts, median_shift, std_shift, ax
     ax.set_title("Y shifts for each column")
     ax.set_xlabel("X (pixel)")
     ax.set_ylabel("Y shift (pixel)")
+    ax.set_ylim(median_shift-4*std_shift, median_shift+4*std_shift)
 
     if labels:
         ax.annotate(f"mean: {median_shift:.2f}", (0.9, 0.9), xycoords="axes fraction", ha="right", va="top", color="tab:red")

@@ -767,7 +767,7 @@ class Image(Header):
             _, shifts[j], _ = _cross_match_float(s1, s2, numpy.array([1.0]), shift_range, gauss_window=[-3,3], min_peak_dist=5.0, ax=axs_cc[j])
 
             blocks_pos = numpy.asarray(numpy.split(trace_cent._data[:, c], 18))[select_blocks]
-            blocks_bounds = [(int(bpos.min())-5, int(bpos.max())+5) for bpos in blocks_pos]
+            blocks_bounds = [(int(bpos.min())-10, int(bpos.max())+10) for bpos in blocks_pos]
 
             for i, (bmin, bmax) in enumerate(blocks_bounds):
                 x = numpy.arange(bmax-bmin) + i*(bmax-bmin) + 10
@@ -777,7 +777,8 @@ class Image(Header):
                 # y_data, _, _ = _normalize_peaks(y_data, min_peak_dist=5.0)
                 axs_fb[j].step(x, y_data, color="0.2", lw=1.5, label="data" if i == 0 else None)
                 axs_fb[j].step(x, y_model, color="tab:blue", lw=1, label="model" if i == 0 else None)
-                axs_fb[j].step(x+shifts[j], numpy.interp(x+shifts[j], x, y_model), color="tab:red", lw=1, label="corr. model" if i == 0 else None)
+                # axs_fb[j].step(x+shifts[j], numpy.interp(x+shifts[j], x, y_model), color="tab:red", lw=1, label="corr. model" if i == 0 else None)
+                axs_fb[j].step(x, numpy.interp(x, x+shifts[j], y_model), color="tab:red", lw=1, label="corr. model" if i == 0 else None)
             axs_fb[j].set_title(f"measured shift {shifts[j]:.4f} pixel @ column {c} with SNR = {median_snr:.2f}")
             axs_fb[j].set_ylim(-0.05, 1.3)
         axs_fb[0].legend(loc=1, frameon=False, ncols=3)
