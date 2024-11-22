@@ -23,7 +23,7 @@ from lvmdrp.core.fit_profile import gaussians, Gaussians
 from lvmdrp.core.apertures import Apertures
 from lvmdrp.core.header import Header
 from lvmdrp.core.tracemask import TraceMask
-from lvmdrp.core.spectrum1d import Spectrum1D, _normalize_peaks, _cross_match_float, _cross_match, _spec_from_lines, align_blocks
+from lvmdrp.core.spectrum1d import Spectrum1D, _normalize_peaks, _fiber_cc_match, _cross_match, _spec_from_lines, align_blocks
 
 from cextern.fast_median.fast_median import fast_median_filter_2d
 
@@ -772,7 +772,7 @@ class Image(Header):
                 shifts[j] = numpy.nan
                 continue
 
-            _, shifts[j], _ = _cross_match_float(s1, s2, numpy.array([1.0]), guess_shift, shift_range, gauss_window=[-3,3], min_peak_dist=5.0, ax=axs_cc[j])
+            _, shifts[j], _ = _fiber_cc_match(s1, s2, guess_shift, shift_range, gauss_window=[-3,3], min_peak_dist=5.0, ax=axs_cc[j])
 
             blocks_pos = numpy.asarray(numpy.split(trace_cent._data[:, c], 18))[select_blocks]
             blocks_bounds = [(int(bpos.min())-10, int(bpos.max())+10) for bpos in blocks_pos]

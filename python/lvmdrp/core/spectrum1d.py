@@ -305,10 +305,9 @@ def _cross_match_float(
     ref_spec: numpy.ndarray,
     obs_spec: numpy.ndarray,
     stretch_factors: numpy.ndarray,
-    guess_shift : int,
     shift_range: List[int],
     min_peak_dist: float = 5.0,
-    gauss_window: List[int] = [-10, 10],
+    gauss_window: List[int] = [-5, 5],
     gauss_sigmas: List[float] = [0.0, 5.0],
     normalize_spectra : bool = True,
     ax: None|plot.plt.Axes = None
@@ -332,6 +331,143 @@ def _cross_match_float(
         The observed spectrum.
     stretch_factors : ndarray
         The stretch factors to use.
+    shift_range : tuple
+        The range of shifts to use.
+    min_peak_dist : float, optional
+        Minimum distance between two consecutive peaks to be considered signal, by default 5.0
+    gauss_window : list[int], optional
+        Range of pixels to consider in Gaussian fitting relative to peak, by default [-5, 5]
+    gauss_sigmas : list[float], optional
+        Gaussian sigma boundaries, by default [0.0, 5.0]
+    normalize_spectra : bool, optional
+        Normalize both spectrum to have peaks ~1, by default True
+    ax : None|plt.Axes, optional
+        The matplotlib axes where to draw the CC and the
+
+    Returns
+    -------
+    max_correlation : float
+        The maximum correlation value.
+    best_shift : float
+        The fractional pixel shift that maximizes the correlation
+    best_stretch_factor : float
+        The best stretch factor.
+    """
+    min_shift, max_shift = shift_range
+    max_correlation = -numpy.inf
+    best_shift = 0
+    best_stretch_factor = 1
+
+    # normalize the peaks to roughly magnitude 1, so that individual very bright
+    # fibers do not dominate the signal
+    if normalize_spectra:
+        ref_spec_ = _normalize_peaks(ref_spec, min_peak_dist=min_peak_dist)
+        obs_spec_ = _normalize_peaks(obs_spec, min_peak_dist=min_peak_dist)
+    else:
+        ref_spec_ = ref_spec.copy()
+        obs_spec_ = obs_spec.copy()
+
+    for factor in stretch_factors:
+        # Stretch the first signal
+        stretched_signal1 = zoom(ref_spec_, factor, mode="constant", prefilter=True)
+
+        # Make the lengths equal
+        len_diff = len(obs_spec_) - len(stretched_signal1)
+        if len_diff > 0:
+            # Zero pad the stretched signal at the end if it's shorter
+            stretched_signal1 = numpy.pad(stretched_signal1, (0, len_diff))
+        elif len_diff < 0:
+            # Or crop the stretched signal at the end if it's longer
+            stretched_signal1 = stretched_signal1[:len_diff]
+
+        # Compute the cross correlation
+        cross_corr = signal.correlate(obs_spec_, stretched_signal1, mode="same")
+
+        # Normalize the cross correlation
+        cross_corr = cross_corr.astype(numpy.float32)
+        cross_corr /= norm(stretched_signal1) * norm(obs_spec_)
+        cross_corr = numpy.nan_to_num(cross_corr)
+
+        # Get the correlation shifts
+        shifts = signal.correlation_lags(
+            len(obs_spec_), len(stretched_signal1), mode="same"
+        )
+
+        # Find the max correlation and the corresponding shift for this stretch factor
+        mask = (shifts >= min_shift) & (shifts <= max_shift)
+        idx_max_corr = numpy.argmax(cross_corr[mask])
+        max_corr = cross_corr[mask][idx_max_corr]
+        shift = shifts[mask][idx_max_corr]
+
+        if ax is not None:
+            mask_cc = (shifts >= shift+2*gauss_window[0]) & (shifts <= shift+2*gauss_window[1])
+            ax.step(shifts[mask_cc], cross_corr[mask_cc], color="0.7", lw=1, where="mid", alpha=0.3)
+
+        condition = max_corr > max_correlation
+
+        if condition:
+            best_shifts, best_cross_corr = shifts, cross_corr
+            max_correlation = max_corr
+            best_shift = shift
+            best_stretch_factor = factor
+
+    # Fit Gaussian around maximum cross-correlation peak
+    mask = (best_shifts >= best_shift+gauss_window[0]) & (best_shifts <= best_shift+gauss_window[1])
+    guess = [numpy.trapz(best_cross_corr[mask], best_shifts[mask]), best_shift, 1.0, 0.0]
+    bound_lower = [0.0, best_shift+min_shift, gauss_sigmas[0], -numpy.inf]
+    bound_upper = [numpy.inf, best_shift+max_shift, gauss_sigmas[1], numpy.inf]
+    best_gauss = fit_profile.Gaussian_const(guess)
+    best_gauss.fit(
+        best_shifts[mask],
+        best_cross_corr[mask],
+        sigma=1.0,
+        p0=guess,
+        bounds=(bound_lower, bound_upper)
+    )
+    area, best_shift_sp, sigma, bg = best_gauss.getPar()
+
+    # display best match
+    if ax is not None:
+        mask = (best_shifts >= best_shift+gauss_window[0]) & (best_shifts <= best_shift+gauss_window[1])
+        mask_cc = (best_shifts >= best_shift+2*gauss_window[0]) & (best_shifts <= best_shift+2*gauss_window[1])
+        ax.step(best_shifts[mask_cc], best_cross_corr[mask_cc], color="0.2", lw=2, where="mid")
+        ax.step(best_shifts[mask], best_gauss(best_shifts[mask]), color="tab:red", lw=2, where="mid")
+        ax.axvline(best_shift, color="tab:blue", lw=1, ls="--")
+        ax.axvline(best_shift_sp, color="tab:red", lw=1)
+        ax.text(best_shift, (best_cross_corr[mask_cc]).min(), f"shift = {best_shift}", va="bottom", ha="left", color="tab:blue")
+        ax.text(best_shift_sp, (best_cross_corr[mask_cc]).min(), f"subpix. shift = {best_shift_sp:.3f}", va="top", ha="right", color="tab:red")
+
+    return max_correlation, best_shift_sp, best_stretch_factor
+
+
+def _fiber_cc_match(
+    ref_spec: numpy.ndarray,
+    obs_spec: numpy.ndarray,
+    guess_shift : int,
+    shift_range: List[int],
+    min_peak_dist: float = 5.0,
+    gauss_window: List[int] = [-10, 10],
+    gauss_sigmas: List[float] = [0.0, 5.0],
+    normalize_spectra : bool = True,
+    ax: None|plot.plt.Axes = None
+) -> Tuple[float, float, float]:
+    """Find the best fractional-pixel cross correlation between two fiber profiles.
+
+    This function finds the best cross correlation between two fiber profiles
+    by shifting the first spectrum and computing the cross correlation with the
+    second spectrum. The best cross correlation is defined as the
+    fractional-pixel offset with the highest correlation value. The spectra are
+    "peak-normalized" before correlating, making all peaks about 1 unit in
+    height.
+
+    This is used for measuring fiber shifts during the night
+
+    Parameters
+    ----------
+    ref_spec : ndarray
+        The reference spectrum.
+    obs_spec : ndarray
+        The observed spectrum.
     guess_shift : int
         Guess for the best CC shift
     shift_range : tuple
@@ -370,46 +506,32 @@ def _cross_match_float(
         ref_spec_ = ref_spec.copy()
         obs_spec_ = obs_spec.copy()
 
-    for factor in stretch_factors:
-        # Stretch the first signal
-        stretched_signal1 = zoom(ref_spec_, factor, mode="constant", prefilter=True)
+    # Get the correlation shifts
+    shifts = signal.correlation_lags(
+        len(obs_spec_), len(ref_spec_), mode="same"
+    )
+    cross_corr = signal.correlate(obs_spec_, ref_spec_, mode="same")
 
-        # Make the lengths equal
-        len_diff = len(obs_spec_) - len(stretched_signal1)
-        if len_diff > 0:
-            # Zero pad the stretched signal at the end if it's shorter
-            stretched_signal1 = numpy.pad(stretched_signal1, (0, len_diff))
-        elif len_diff < 0:
-            # Or crop the stretched signal at the end if it's longer
-            stretched_signal1 = stretched_signal1[:len_diff]
+    # Normalize the cross correlation
+    cross_corr = cross_corr.astype(numpy.float32)
+    cross_corr /= norm(ref_spec_) * norm(obs_spec_)
+    cross_corr = numpy.nan_to_num(cross_corr)
 
-        # Get the correlation shifts
-        shifts = signal.correlation_lags(
-            len(obs_spec_), len(stretched_signal1), mode="same"
-        )
-        cross_corr = signal.correlate(obs_spec_, stretched_signal1, mode="same")
+    # Find the max correlation and the corresponding shift for this stretch factor
+    mask = (shifts >= min_shift+guess_shift) & (shifts <= max_shift+guess_shift)
+    idx_max_corr = numpy.argmax(cross_corr[mask])
+    max_corr = cross_corr[mask][idx_max_corr]
+    shift = shifts[mask][idx_max_corr]
 
-        # Normalize the cross correlation
-        cross_corr = cross_corr.astype(numpy.float32)
-        cross_corr /= norm(stretched_signal1) * norm(obs_spec_)
-        cross_corr = numpy.nan_to_num(cross_corr)
+    if ax is not None:
+        ax.step(shifts[mask], cross_corr[mask], color="0.7", lw=1, where="mid", alpha=0.3)
 
-        # Find the max correlation and the corresponding shift for this stretch factor
-        mask = (shifts >= min_shift+guess_shift) & (shifts <= max_shift+guess_shift)
-        idx_max_corr = numpy.argmax(cross_corr[mask])
-        max_corr = cross_corr[mask][idx_max_corr]
-        shift = shifts[mask][idx_max_corr]
+    condition = max_corr > max_correlation
 
-        if ax is not None:
-            ax.step(shifts[mask], cross_corr[mask], color="0.7", lw=1, where="mid", alpha=0.3)
-
-        condition = max_corr > max_correlation
-
-        if condition:
-            best_shifts, best_cross_corr = shifts, cross_corr
-            max_correlation = max_corr
-            best_shift = shift
-            best_stretch_factor = factor
+    if condition:
+        best_shifts, best_cross_corr = shifts, cross_corr
+        max_correlation = max_corr
+        best_shift = shift
 
     # Fit Gaussian around maximum cross-correlation peak
     mask = (shifts >= min_shift+best_shift) & (shifts <= max_shift+best_shift)
