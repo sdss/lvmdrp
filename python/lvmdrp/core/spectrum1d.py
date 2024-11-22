@@ -245,8 +245,60 @@ def _normalize_peaks(data, ref, min_peak_dist):
 
     ref_ = ref_ / ref_norm
     data_ = data_ / dat_norm
+    # ref_ = ref_ / ref_norm * dat_norm / numpy.median(data_)
+    # data_ = data_ / numpy.median(data_)
 
     return data_, ref_, dat_peaks, dat_peak_pars, ref_peaks, ref_peak_pars
+
+
+def _choose_cc_peak(cc, shifts, min_shift, max_shift):
+    mask = (shifts >= min_shift) & (max_shift >= shifts)
+
+    ccp, _ = signal.find_peaks(cc[mask])
+
+    # import matplotlib.pyplot as plt
+    # plt.figure(figsize=(15,5))
+    # plt.plot(shifts[mask], cc[mask], "-o")
+    # plt.vlines(shifts[mask][ccp], 0, 1)
+
+    sum_cc = []
+    for p in ccp:
+        sum_cc.append(max((cc[mask][p-1], cc[mask][p+1])) + cc[mask][p])
+        # plt.vlines(shifts[mask][p-2], 0, 1, ls="--", color="k")
+        # plt.vlines(shifts[mask][p+3], 0, 1, ls="--", color="k")
+        # mask = (shifts >= p-7) & (shifts <= p+7)
+        # guess = [numpy.trapz(cc[mask], shifts[mask]), p, 1.0, 0.0]
+        # bound_lower = [0.0, p+min_shift, 2, -numpy.inf]
+        # bound_upper = [numpy.inf, p+max_shift, 5, numpy.inf]
+        # best_gauss = fit_profile.Gaussian_const(guess)
+        # best_gauss.fit(
+        #     shifts[mask],
+        #     cc[mask],
+        #     sigma=1.0,
+        #     p0=guess,
+        #     bounds=(bound_lower, bound_upper)
+        # )
+        # area, best_shift_sp, sigma, bg = best_gauss.getPar()
+        # sum_cc.append(area)
+
+
+    print(ccp, sum_cc)
+    return ccp[numpy.argmax(sum_cc)]
+
+def align_blocks(obs_spec, ref_spec, median_box=21):
+    """Cross-correlate median-filtered versions of fiber profile data and model to get coarse alignment"""
+    obs_median = signal.medfilt(obs_spec, median_box)
+    ref_median = signal.medfilt(ref_spec, median_box)
+
+    obs_median /= numpy.median(obs_median)
+    ref_median /= numpy.median(ref_median)
+
+    cc = signal.correlate(obs_median, ref_median, mode="same")
+
+    shifts = signal.correlation_lags(len(obs_spec), len(ref_spec), mode="same")
+    best_shift = shifts[numpy.argmax(cc)]
+
+    return best_shift
 
 
 def _cross_match_float(
@@ -255,7 +307,7 @@ def _cross_match_float(
     stretch_factors: numpy.ndarray,
     shift_range: List[int],
     min_peak_dist: float = 5.0,
-    gauss_window: List[int] = [-5, 5],
+    gauss_window: List[int] = [-10, 10],
     gauss_sigmas: List[float] = [0.0, 5.0],
     normalize_spectra : bool = True,
     ax: None|plot.plt.Axes = None
@@ -302,52 +354,22 @@ def _cross_match_float(
         The best stretch factor.
     """
 
-    # blocks_pos = numpy.asarray(numpy.split(trace_cent._data[:, c], 18))[select_blocks]
-    # blocks_bounds = [(int(bpos.min())-5, int(bpos.max())+5) for bpos in blocks_pos]
-
-    # obs_spec = obs_spec[1000:3000]
-    # ref_spec = ref_spec[1000:3000]
-
     min_shift, max_shift = shift_range
     max_correlation = -numpy.inf
     best_shift = 0
     best_stretch_factor = 1
 
-    import matplotlib.pyplot as plt
-    _, ax_ = plt.subplots(3,1, figsize=(15,7), sharex=True)
-    ax_[0].plot(obs_spec)
-    ax_[0].plot(ref_spec * numpy.nanmean(obs_spec) / numpy.nanmean(ref_spec))
-
-    # define pixels array centered around middle part of the spectrum
-    # pixels = numpy.arange(ref_spec.size) - ref_spec.size // 2
-
     # normalize the peaks to roughly magnitude 1, so that individual very bright
     # fibers do not dominate the signal
     if normalize_spectra:
         obs_spec_, ref_spec_, obs_peak, obs_peak_pars, ref_peaks, ref_peak_pars = _normalize_peaks(obs_spec, ref_spec, min_peak_dist=min_peak_dist)
-        # obs_spec_, obs_peak, peak_pars = _normalize_peaks(obs_spec, min_peak_dist=min_peak_dist)
     else:
         ref_spec_ = ref_spec.copy()
         obs_spec_ = obs_spec.copy()
-    #return ref_spec_, obs_spec_
 
-    # diff = ref_peak - obs_peak
-
-    ax_[1].plot(obs_peak, obs_peak_pars["prominences"], "-o")
-    # grad = numpy.gradient(obs_peak)
-    # sp_block = obs_peak[grad>10]
-    # md_block = numpy.asarray([0] + numpy.mean(numpy.split(sp_block, sp_block.size//2), axis=1).tolist() + [4080]).astype(int)
-
-    # # ax_[1].plot(obs_peak[grad>10], grad[grad>10], "-o")
-    # ax_[1].plot(md_block, [20]*md_block.size, "-o")
-    # # ax_[1].plot(peaks, peak_pars["widths"], "-o")
-
-    # _, ax_cc = plt.subplots(2, 9, figsize=(15,7), sharex=True, sharey=True, layout="constrained")
-    # ax_cc = ax_cc.flatten()
     for factor in stretch_factors:
         # Stretch the first signal
         stretched_signal1 = zoom(ref_spec_, factor, mode="constant", prefilter=True)
-        # stretched_signal1 = numpy.interp(pixels * factor, pixels, ref_spec_)
 
         # Make the lengths equal
         len_diff = len(obs_spec_) - len(stretched_signal1)
@@ -358,24 +380,16 @@ def _cross_match_float(
             # Or crop the stretched signal at the end if it's longer
             stretched_signal1 = stretched_signal1[:len_diff]
 
+        guess_shift = align_blocks(obs_spec_, stretched_signal1)
+
+        if guess_shift > 6:
+            log.warning(f"measuring fiber thermal shift too large {guess_shift = } pixels")
+
         # Get the correlation shifts
         shifts = signal.correlation_lags(
             len(obs_spec_), len(stretched_signal1), mode="same"
         )
         cross_corr = signal.correlate(obs_spec_, stretched_signal1, mode="same")
-
-        # for axc, iblock, fblock in zip(ax_cc, md_block[:-1], md_block[1:]):
-        #     # Get the correlation shifts
-        #     shifts = signal.correlation_lags(
-        #         len(obs_spec_[iblock:fblock]), len(stretched_signal1[iblock:fblock]), mode="same"
-        #     )
-        #     mask = (shifts >= min_shift) & (shifts <= max_shift)
-        #     cross_corr = signal.correlate(obs_spec_[iblock:fblock], stretched_signal1[iblock:fblock], mode="same")
-        #     axc.plot(shifts[mask], cross_corr[mask])
-        #     axc.axhline(cross_corr[mask].max(), ls="--", color="k")
-
-        # ax_[1].plot(obs_spec_)
-        # ax_[1].plot(stretched_signal1)
 
         # Normalize the cross correlation
         cross_corr = cross_corr.astype(numpy.float32)
@@ -383,14 +397,13 @@ def _cross_match_float(
         cross_corr = numpy.nan_to_num(cross_corr)
 
         # Find the max correlation and the corresponding shift for this stretch factor
-        mask = (shifts >= min_shift) & (shifts <= max_shift)
+        mask = (shifts >= min_shift+guess_shift) & (shifts <= max_shift+guess_shift)
         idx_max_corr = numpy.argmax(cross_corr[mask])
         max_corr = cross_corr[mask][idx_max_corr]
         shift = shifts[mask][idx_max_corr]
 
         if ax is not None:
-            mask_cc = (shifts >= shift+2*gauss_window[0]) & (shifts <= shift+2*gauss_window[1])
-            ax.step(shifts[mask_cc], cross_corr[mask_cc], color="0.7", lw=1, where="mid", alpha=0.3)
+            ax.step(shifts[mask], cross_corr[mask], color="0.7", lw=1, where="mid", alpha=0.3)
 
         condition = max_corr > max_correlation
 
@@ -401,7 +414,7 @@ def _cross_match_float(
             best_stretch_factor = factor
 
     # Fit Gaussian around maximum cross-correlation peak
-    mask = (best_shifts >= best_shift+gauss_window[0]) & (best_shifts <= best_shift+gauss_window[1])
+    mask = (shifts >= min_shift+best_shift) & (shifts <= max_shift+best_shift)
     guess = [numpy.trapz(best_cross_corr[mask], best_shifts[mask]), best_shift, 1.0, 0.0]
     bound_lower = [0.0, best_shift+min_shift, gauss_sigmas[0], -numpy.inf]
     bound_upper = [numpy.inf, best_shift+max_shift, gauss_sigmas[1], numpy.inf]
@@ -415,22 +428,15 @@ def _cross_match_float(
     )
     area, best_shift_sp, sigma, bg = best_gauss.getPar()
 
-    # plt.figure()
-    # xxx = numpy.abs(shifts)<7
-    # plt.plot(shifts[xxx], cross_corr[xxx])
-    ax_[2].plot(obs_spec_)
-    ax_[2].plot(_apply_shift_and_stretch(ref_spec_, best_shift, best_stretch_factor))
-
     # display best match
     if ax is not None:
         mask = (best_shifts >= best_shift+gauss_window[0]) & (best_shifts <= best_shift+gauss_window[1])
-        mask_cc = (best_shifts >= best_shift+2*gauss_window[0]) & (best_shifts <= best_shift+2*gauss_window[1])
-        ax.step(best_shifts[mask_cc], best_cross_corr[mask_cc], color="0.2", lw=2, where="mid")
+        ax.step(best_shifts[mask], best_cross_corr[mask], color="0.2", lw=2, where="mid")
         ax.step(best_shifts[mask], best_gauss(best_shifts[mask]), color="tab:red", lw=2, where="mid")
         ax.axvline(best_shift, color="tab:blue", lw=1, ls="--")
         ax.axvline(best_shift_sp, color="tab:red", lw=1)
-        ax.text(best_shift, (best_cross_corr[mask_cc]).min(), f"shift = {best_shift}", va="bottom", ha="left", color="tab:blue")
-        ax.text(best_shift_sp, (best_cross_corr[mask_cc]).min(), f"subpix. shift = {best_shift_sp:.3f}", va="top", ha="right", color="tab:red")
+        ax.text(best_shift, (best_cross_corr[mask]).min(), f"shift = {best_shift}", va="bottom", ha="left", color="tab:blue")
+        ax.text(best_shift_sp, (best_cross_corr[mask]).min(), f"subpix. shift = {best_shift_sp:.3f}", va="top", ha="right", color="tab:red")
 
     return max_correlation, best_shift_sp, best_stretch_factor
 
