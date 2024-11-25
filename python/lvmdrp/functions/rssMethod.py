@@ -742,7 +742,7 @@ def shift_wave_skylines(in_frame: str, out_frame: str, dwave: float = 8.0, skyli
     sel1 = lvmframe._slitmap['spectrographid'].data==1
     sel2 = lvmframe._slitmap['spectrographid'].data==2
     sel3 = lvmframe._slitmap['spectrographid'].data==3
-    skylines = skylinedict[channel]
+    skylines = numpy.asarray(skylinedict[channel])
 
     # measure offsets
     snr = numpy.nan_to_num(lvmframe._data / lvmframe._error, nan=0, posinf=0, neginf=0)
@@ -761,9 +761,12 @@ def shift_wave_skylines(in_frame: str, out_frame: str, dwave: float = 8.0, skyli
             log.warning(f"skipping fiber {ifiber} with S/N < 10 around sky lines {sky_snr = }")
             continue
 
+        guess_shift = spec._wave[[numpy.nanargmax(spec._data*((spec._wave>=skyline-dwave//2)&(skyline+dwave//2>=spec._wave))) for skyline in skylines]] - skylines
+        guess_shift = numpy.median(guess_shift)
+
         # skip fits with failed sky line measurements
         fwhm_guess = numpy.nanmean(numpy.interp(skylines, lvmframe._wave[ifiber], lvmframe._lsf[ifiber]))
-        flux, sky_wave, fwhm, bg = spec.fitSepGauss(skylines, dwave, fwhm_guess, 0.0, [0, numpy.inf], [-2.5, 2.5], [fwhm_guess - 1.5, fwhm_guess + 1.5], [0.0, numpy.inf])
+        flux, sky_wave, fwhm, bg = spec.fitSepGauss(skylines+guess_shift, dwave, fwhm_guess, 0.0, [0, numpy.inf], [-2.5, 2.5], [fwhm_guess - 1.5, fwhm_guess + 1.5], [0.0, numpy.inf])
         if numpy.any(flux / bg < 0.7) or numpy.isnan([flux, sky_wave, fwhm]).any():
             continue
 
@@ -824,7 +827,7 @@ def shift_wave_skylines(in_frame: str, out_frame: str, dwave: float = 8.0, skyli
     ax.plot(fiberid[sel3], fiber_offset_mod[sel3], color='0.2')
     ax.hlines(0, 1, 1944, linestyle='--', color='black', alpha=0.3)
     ax.legend()
-    ax.set_ylim(-0.4,0.4)
+    # ax.set_ylim(-0.4,0.4)
     ax.set_title(f'{lvmframe._header["EXPOSURE"]} - {channel} - {numpy.round(skylines, 2)}')
     ax.set_xlabel('Fiber ID')
     ax.set_ylabel(r'$\Delta \lambda [\AA]$')
