@@ -288,16 +288,17 @@ def run_qa(rssfile, outfile):
         
     data_sci, data_skye, data_skyw, wave, med_sky, med_flux, med_ivar, med_skye, med_skyw, stats_list, wvl_list, wvc_list, sky_info = create_sky_table(wave, flux, sky, ivar, mask, slitmap, header, maplist, medlist, lrangelist, crangelist, outfile)
 
-    pdf = matplotlib.backends.backend_pdf.PdfPages(f'{outfile}.pdf')
-    fig_med1=plot_intro(wave, med_sky, med_flux, med_ivar, med_skye, med_skyw, sky_info)
-    pdf.savefig(fig_med1)
-    fig_med2=plot_stats(wave, med_sky, med_flux, med_ivar, stats_list, wvl_list, wvc_list)
-    pdf.savefig(fig_med2)
-    fig_maps1=plotmap_line(data_sci, data_skye, data_skyw, maplist)
-    pdf.savefig(fig_maps1)
-    fig_maps2=plotmap_cont(data_sci, data_skye, data_skyw, maplist)
-    pdf.savefig(fig_maps2)
-    pdf.close()
+    with matplotlib.backends.backend_pdf.PdfPages(f'{outfile}.pdf') as pdf:
+        fig_med1=plot_intro(wave, med_sky, med_flux, med_ivar, med_skye, med_skyw, sky_info)
+        pdf.savefig(fig_med1)
+        fig_med2=plot_stats(wave, med_sky, med_flux, med_ivar, stats_list, wvl_list, wvc_list)
+        pdf.savefig(fig_med2)
+        fig_maps1=plotmap_line(data_sci, data_skye, data_skyw, maplist)
+        pdf.savefig(fig_maps1)
+        fig_maps2=plotmap_cont(data_sci, data_skye, data_skyw, maplist)
+        pdf.savefig(fig_maps2)
+        plt.close()
+    
 
 ####################################################################
 #selecting the good fibers for a given telescope
