@@ -1,5 +1,5 @@
 import numpy as np
-from cextern.fast_median.fast_median import fast_median_filter_2d
+from fast_median import fast_median_filter_2d
 from scipy.ndimage import median_filter
 import time
 

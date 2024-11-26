@@ -25,7 +25,7 @@ from lvmdrp.core.header import Header
 from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.core.spectrum1d import Spectrum1D, _normalize_peaks, _fiber_cc_match, _cross_match, _spec_from_lines, align_blocks
 
-from cextern.fast_median.fast_median import fast_median_filter_2d
+from fast_median import fast_median_filter_2d
 
 from lvmdrp import __version__ as drpver
 
