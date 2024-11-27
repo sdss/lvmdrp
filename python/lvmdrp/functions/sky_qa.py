@@ -12,10 +12,6 @@ import astropy.units as u
 from astropy.table import Table
 import matplotlib.backends.backend_pdf
 
-#Things that should not change and dir
-
-# Define directory paths (for local version, not DRP) 
-LVMDATA_DIR="/Users/amjones/repos/lvm_ksl/2024Oct15_v1.1.0/"
 
 # Measure line fluxes by direct integration of the spectra and add to table
 maplist=['[OI]5577', '[OI]6300', '[OH]6865', 'Bcont(4195, 4220)', 'Rcont(6420, 6440)', 'Zcont(9130, 9145)']
@@ -266,7 +262,7 @@ def run_qa_local():
     #mjdlist = [60222, 11111, 60222, 11111]  
     for i in range(len(expnumlist)):
         outfile=f'refdata_v1.1.0/skyQA_{expnumlist[i]}'
-        rssfile=LVMDATA_DIR+f'lvmSFrame-{expnumlist[i]:0>8}.fits'
+        rssfile=f'lvmSFrame-{expnumlist[i]:0>8}.fits' #now only reads in SFrames that are in current dir
         wave, flux, sky, ivar, mask, slitmap, header = read_rssfile(rssfile)
         
         data_sci, data_skye, data_skyw, wave, med_sky, med_flux, med_ivar, med_skye, med_skyw, stats_list, wvl_list, wvc_list, sky_info = create_sky_table(wave, flux, sky, ivar, mask, slitmap, header, maplist, medlist, lrangelist, crangelist, outfile)
