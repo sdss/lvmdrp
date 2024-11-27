@@ -1459,6 +1459,8 @@ class RSS(FiberRows):
                 if sky is not None:
                     sky[mask] = 0
                     combined_sky[select_mean] = bn.nansum(sky, 0)[select_mean]
+                else:
+                    combined_sky = None
             else:
                 combined_mask = None
                 combined_data = bn.nansum(data, 0) / data.shape[0]
@@ -1848,6 +1850,7 @@ class RSS(FiberRows):
                 f = numpy.interp(wave, rss._wave[ifiber], rss._lsf[ifiber])
                 new_rss._lsf[ifiber] = f.astype("float32")
             if rss._sky is not None:
+                print(rss._sky)
                 f, ivar = resample_flux_density(wave, rss._wave[ifiber], rss._sky[ifiber], ivar=error_to_ivar(rss._sky_error[ifiber]))
                 new_rss._sky[ifiber] = f.astype("float32")
                 new_rss._sky_error[ifiber] = ivar_to_error(ivar).astype("float32")

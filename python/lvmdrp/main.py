@@ -34,7 +34,7 @@ from lvmdrp.functions.skyMethod import interpolate_sky, combine_skies, quick_sky
 from lvmdrp.functions.fluxCalMethod import fluxcal_standard_stars, fluxcal_sci_ifu_stars, apply_fluxcal
 from lvmdrp.utils.metadata import (get_frames_metadata, get_master_metadata, extract_metadata,
                                    get_analog_groups, match_master_metadata, create_master_path,
-                                   update_summary_file)
+                                   update_summary_file, convert_h5_to_fits)
 from lvmdrp.utils.convert import tileid_grp
 from lvmdrp.utils.paths import get_master_mjd, mjd_from_expnum, get_calib_paths, group_calib_paths
 from lvmdrp.utils.timer import Timer
@@ -1465,7 +1465,9 @@ def science_reduction(expnum: int, use_longterm_cals: bool = False,
                       skip_2d: bool = False,
                       skip_1d: bool = False,
                       skip_post_1d: bool = False,
-                      debug_mode: bool = False) -> None:
+                      skip_drpall: bool = False,
+                      debug_mode: bool = False,
+                      force_run: bool = False) -> None:
     """ Run the science reduction for a given exposure number.
     """
 
@@ -1497,12 +1499,24 @@ def science_reduction(expnum: int, use_longterm_cals: bool = False,
     sci_metadata = get_frames_metadata(mjd=sci_mjd)
     sci_metadata.query("expnum == @expnum", inplace=True)
     sci_metadata.sort_values("expnum", ascending=False, inplace=True)
+    if not force_run:
+        try:
+            sci_metadata.query("qaqual == 'GOOD'", inplace=True)
+        except KeyError:
+            log.error("error while getting qaqual field in metadata.")
+            log.error(f"Please try running `drp metadata regenerate -m {sci_mjd}` before trying reducing your exposure again.")
+            return
+        if sci_metadata.empty:
+            log.error(f"exposure {expnum = } was flagged as 'BAD' by the raw data quality pipeline")
+            return
 
     # define general metadata
     sci_tileid = sci_metadata["tileid"].unique()[0]
     sci_mjd = sci_metadata["mjd"].unique()[0]
     sci_expnum = sci_metadata["expnum"].unique()[0]
     sci_imagetyp = sci_metadata["imagetyp"].unique()[0]
+
+    log.info(f"Reducing MJD {sci_mjd}, exposure {expnum}, tile_id {sci_tileid} ... ")
 
     cals_mjd = get_master_mjd(sci_mjd) if use_longterm_cals else sci_mjd
     log.info(f"target master MJD: {cals_mjd}")
@@ -1513,7 +1527,7 @@ def science_reduction(expnum: int, use_longterm_cals: bool = False,
     calibs = get_calib_paths(mjd=cals_mjd, version=drpver, longterm_cals=use_longterm_cals, from_sanbox=True)
 
     # make sure only one exposure number is being reduced
-    sci_metadata.query("expnum == @sci_expnum", inplace=True)
+    # sci_metadata.query("expnum == @sci_expnum", inplace=True)
     sci_metadata.sort_values("camera", inplace=True)
 
     # detrend science exposure
@@ -1632,6 +1646,9 @@ def science_reduction(expnum: int, use_longterm_cals: bool = False,
         with Timer(name='QSky '+sframe_path, logger=log.info):
             quick_sky_subtraction(in_cframe=cframe_path, out_sframe=sframe_path)
 
+    if skip_drpall:
+        log.info("skipping create/update drpall summary file")
+    else:
         # update the drpall summary file
         with Timer(name='DRPAll '+sframe_path, logger=log.info):
             log.info('Updating the drpall summary file')
@@ -1669,8 +1686,9 @@ def science_reduction(expnum: int, use_longterm_cals: bool = False,
 
 def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
             with_cals: bool = False, no_sci: bool = False,
-            fluxcal_method: str = 'STD', skip_2d: bool = False, skip_1d: bool = False, skip_post_1d: bool = False,
-            clean_ancillary: bool = False, debug_mode: bool = False):
+            fluxcal_method: str = 'STD',
+            skip_2d: bool = False, skip_1d: bool = False, skip_post_1d: bool = False, skip_drpall: bool = False,
+            clean_ancillary: bool = False, debug_mode: bool = False, force_run: bool = False):
     """ Run the quick DRP
 
     Run the quick DRP for an MJD, or a range of MJDs. Reduces
@@ -1697,10 +1715,14 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
         Skip astrometry, straylight subtraction and extraction, by default False
     skip_post_1d : bool, optional
         Skip wavelength calibration, flatfielding, sky processing and flux calibration
+    skip_drpall : bool, optional
+        Skip create/update drpall summary file
     clean_ancillary : bool, optional
         Flag to remove the ancillary paths, by default False
     debug_mode : bool, optional
         Flag to run in debug mode, by default False
+    force_run : bool, optional
+        Flag to force reductions even if the data was flagged as BAD by the QC pipeline, by default False
     """
     # # write the drp parameter configuration
     # write_config_file()
@@ -1719,8 +1741,10 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
                     skip_2d=skip_2d,
                     skip_1d=skip_1d,
                     skip_post_1d=skip_post_1d,
+                    skip_drpall=skip_drpall,
                     clean_ancillary=clean_ancillary,
-                    debug_mode=debug_mode)
+                    debug_mode=debug_mode,
+                    force_run=force_run)
         return
 
     log.info(f'Processing MJD {mjd}')
@@ -1732,12 +1756,34 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
         log.warning(f'{mjd = } is not valid raw data directory.')
         return
 
+    # skip this reduction if the MJD is in a list of excluded (bad, engineering...) MJDs
+    exclude_file = os.getenv('LVMCORE_DIR') + '/etc/exclude_mjds.txt'
+    with open(exclude_file) as exclude_mjd_file:
+        exclude = [tuple(map(int, line.split(','))) for line in exclude_mjd_file]
+    if any([m[0] <= mjd <= m[1] for m in exclude]):
+        log.info(f"MJD {mjd} falls within excluded period in {exclude_file}, skipping ...")
+        return
+
     # generate the MJD metadata
     frames = get_frames_metadata(mjd=mjd)
     sub = frames.copy()
 
     # remove bad or test quality frames
-    sub = sub[~(sub['quality'] != 'excellent')]
+    if force_run and (sub.qaqual == "BAD").all():
+        tileid = sub.tileid.iloc[0]
+        log.warning(f"You are about to reduce {expnum = } of {tileid = }, which was flagged as 'BAD' by the QC pipeline")
+        log.warning("The DRP Team will not be responsible for failures during this reduction or the quality of its results")
+        log.warning(f"We advice you to look for a good quality exposure of the same {tileid = }")
+    else:
+        try:
+            sub = sub[(sub['qaqual'] == 'GOOD')]
+        except KeyError:
+            log.error("error while getting qaqual field in metadata.")
+            log.error(f"Please try running `drp metadata regenerate -m {mjd}` before trying reducing your exposure again.")
+            return
+        if sub.empty:
+            log.error(f"exposure {expnum = } was flagged as 'BAD' by the raw data quality pipeline")
+            return
 
     # filter on exposure number
     if expnum:
@@ -1791,8 +1837,10 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
                                         skip_2d=skip_2d,
                                         skip_1d=skip_1d,
                                         skip_post_1d=skip_post_1d,
+                                        skip_drpall=skip_drpall,
                                         clean_ancillary=clean_ancillary,
-                                        debug_mode=debug_mode, **kwargs)
+                                        debug_mode=debug_mode,
+                                        force_run=force_run, **kwargs)
                     except Exception as e:
                         log.exception(f'Failed to reduce science frame mjd {mjd} exposure {expnum}: {e}')
                         create_status_file(tileid, mjd, status='error')
@@ -1803,6 +1851,56 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
         # create done status on successful run
         if not status_file_exists(tileid, mjd, status='error'):
             create_status_file(tileid, mjd, status='done')
+
+
+def create_drpall(drp_version: str = None, overwrite: bool = False) -> None:
+    """Create drpall summary file for a given DRP version
+
+    Parameters
+    ----------
+    drp_version: str, optional
+        Version of the DRP, by default None (current version)
+    """
+    drp_version = drp_version or drpver
+
+    if overwrite:
+        drpall = path.full('lvm_drpall', drpver=drp_version)
+        drpall = drpall.replace('.fits', '.h5')
+        if os.path.isfile(drpall):
+            log.info(f"removing existing {drpall}")
+            os.remove(drpall)
+        else:
+            log.info(f"no drpall file found for {drp_version = }")
+
+    # define lvmSFrame paths
+    sframe_paths = sorted(path.expand("lvm_frame", kind="SFrame", drpver=drp_version, tileid="*", mjd="*", expnum=8*"?"))
+    nframes = len(sframe_paths)
+    log.info(f"found {nframes} lvmSFrames under {drp_version = }")
+    # iterate over each file and create/update the drpall file
+    nfailed = 0
+    failed = []
+    for iframe, sframe_path in enumerate(sframe_paths):
+        log.info(f"[{iframe+1}/{nframes}] {sframe_path = }")
+        # extract Tile ID, MJD and exposure number from file
+        # pars = path.extract("lvm_frame", sframe_path)
+        pars = sframe_path.split(".fits")[0].split("/")
+        tileid, mjd, expnum = int(pars[-3]), int(pars[-2]), int(pars[-1].split("-")[-1])
+        cals_mjd = get_master_mjd(mjd)
+        try:
+            update_summary_file(sframe_path, tileid=tileid, mjd=mjd, expnum=expnum, master_mjd=cals_mjd, drpver=drp_version)
+        except Exception as e:
+            log.error(f"while updating drpall for {tileid = }, {mjd = }, {expnum = }: {e}")
+            nfailed += 1
+            failed.append(sframe_path)
+            continue
+
+    log.info(f"finished summarizing {nframes-nfailed} lvmSFrames in {drpall}")
+    if nfailed != 0:
+        log.warning(f"with {nfailed} failed frames:")
+        log.warning(f"{failed = }")
+
+    convert_h5_to_fits(drpall)
+    log.info(f"finished converting HDF5 to FITS format in {drpall.replace('h5', '.fits')}")
 
 
 def reduce_calib_frame(row: dict):

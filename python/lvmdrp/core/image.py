@@ -23,9 +23,9 @@ from lvmdrp.core.fit_profile import gaussians, Gaussians
 from lvmdrp.core.apertures import Apertures
 from lvmdrp.core.header import Header
 from lvmdrp.core.tracemask import TraceMask
-from lvmdrp.core.spectrum1d import Spectrum1D, _normalize_peaks, _cross_match_float, _cross_match, _spec_from_lines
+from lvmdrp.core.spectrum1d import Spectrum1D, _normalize_peaks, _fiber_cc_match, _cross_match, _spec_from_lines, align_blocks
 
-from cextern.fast_median.fast_median import fast_median_filter_2d
+from lvmdrp.external.fast_median import fast_median_filter_2d
 
 from lvmdrp import __version__ as drpver
 
@@ -745,6 +745,14 @@ class Image(Header):
         # unpack axes
         axs_cc, axs_fb = axs
 
+        # calculate shift guess along central wide column
+        s1 = bn.nanmedian(ref_data[50:-50,2000-500:2000+500], axis=1)
+        s2 = bn.nanmedian(self._data[50:-50,2000-500:2000+500], axis=1)
+        guess_shift = align_blocks(s1, s2)
+
+        if guess_shift > 6:
+            log.warning(f"measuring fiber thermal shift too large {guess_shift = } pixels")
+
         shifts = numpy.zeros(len(columns))
         select_blocks = [9]
         for j,c in enumerate(columns):
@@ -756,7 +764,7 @@ class Image(Header):
             snr = numpy.sqrt(s2)
             median_snr = bn.nanmedian(snr)
 
-            min_snr = 5.0
+            min_snr = 1.0
             if median_snr <= min_snr:
                 comstr = f"low SNR (<={min_snr}) for thermal shift at column {c}: {median_snr:.4f}, assuming = NaN"
                 log.warning(comstr)
@@ -764,20 +772,21 @@ class Image(Header):
                 shifts[j] = numpy.nan
                 continue
 
-            _, shifts[j], _ = _cross_match_float(s1, s2, numpy.array([1.0]), shift_range, gauss_window=[-3,3], min_peak_dist=5.0, ax=axs_cc[j])
+            _, shifts[j], _ = _fiber_cc_match(s1, s2, guess_shift, shift_range, gauss_window=[-3,3], min_peak_dist=5.0, ax=axs_cc[j])
 
             blocks_pos = numpy.asarray(numpy.split(trace_cent._data[:, c], 18))[select_blocks]
-            blocks_bounds = [(int(bpos.min())-5, int(bpos.max())+5) for bpos in blocks_pos]
+            blocks_bounds = [(int(bpos.min())-10, int(bpos.max())+10) for bpos in blocks_pos]
 
             for i, (bmin, bmax) in enumerate(blocks_bounds):
                 x = numpy.arange(bmax-bmin) + i*(bmax-bmin) + 10
                 y_model = bn.nanmedian(ref_data[bmin:bmax, c-column_width:c+column_width], axis=1)
                 y_data = bn.nanmedian(self._data[bmin:bmax, c-column_width:c+column_width], axis=1)
-                y_model = _normalize_peaks(y_model, min_peak_dist=5.0)
-                y_data = _normalize_peaks(y_data, min_peak_dist=5.0)
+                y_data, y_model, _, _, _, _ = _normalize_peaks(y_data, y_model, min_peak_dist=5.0)
+                # y_data, _, _ = _normalize_peaks(y_data, min_peak_dist=5.0)
                 axs_fb[j].step(x, y_data, color="0.2", lw=1.5, label="data" if i == 0 else None)
                 axs_fb[j].step(x, y_model, color="tab:blue", lw=1, label="model" if i == 0 else None)
-                axs_fb[j].step(x+shifts[j], numpy.interp(x+shifts[j], x, y_model), color="tab:red", lw=1, label="corr. model" if i == 0 else None)
+                # axs_fb[j].step(x+shifts[j], numpy.interp(x+shifts[j], x, y_model), color="tab:red", lw=1, label="corr. model" if i == 0 else None)
+                axs_fb[j].step(x, numpy.interp(x, x+shifts[j], y_model), color="tab:red", lw=1, label="corr. model" if i == 0 else None)
             axs_fb[j].set_title(f"measured shift {shifts[j]:.4f} pixel @ column {c} with SNR = {median_snr:.2f}")
             axs_fb[j].set_ylim(-0.05, 1.3)
         axs_fb[0].legend(loc=1, frameon=False, ncols=3)
@@ -2311,9 +2320,9 @@ class Image(Header):
             fwhm_mask = numpy.isnan(fwhm_slice) | amp_off | cent_off | fwhm_off
 
             if amp_slice.size != trace_amp._data.shape[0]:
-                dummy_amp = numpy.split(numpy.zeros(trace_amp._data.shape[0]), nblocks)
-                dummy_cent = numpy.split(numpy.zeros(trace_cent._data.shape[0]), nblocks)
-                dummy_fwhm = numpy.split(numpy.zeros(trace_fwhm._data.shape[0]), nblocks)
+                dummy_amp = numpy.split(numpy.zeros(trace_amp._data.shape[0]) + numpy.nan, nblocks)
+                dummy_cent = numpy.split(numpy.zeros(trace_cent._data.shape[0]) + numpy.nan, nblocks)
+                dummy_fwhm = numpy.split(numpy.zeros(trace_fwhm._data.shape[0]) + numpy.nan, nblocks)
                 dummy_amp_mask = numpy.split(numpy.ones(trace_amp._data.shape[0], dtype=bool), nblocks)
                 dummy_cent_mask = numpy.split(numpy.ones(trace_cent._data.shape[0], dtype=bool), nblocks)
                 dummy_fwhm_mask = numpy.split(numpy.ones(trace_fwhm._data.shape[0], dtype=bool), nblocks)

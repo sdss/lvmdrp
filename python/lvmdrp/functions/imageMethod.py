@@ -2604,7 +2604,7 @@ def extract_spectra(
         fiber_model = None
 
     shift_range = [-4,4]
-    fig = plt.figure(figsize=(15, 3*len(columns)), layout="constrained")
+    fig = plt.figure(figsize=(15, 4*len(columns)), layout="constrained")
     fig.suptitle(f"Thermal fiber shifts for {mjd = }, {camera = }, {expnum = }")
     gs = GridSpec(len(columns)+1, 15, figure=fig)
     axs_cc, axs_fb = [], []
@@ -2619,7 +2619,7 @@ def extract_spectra(
     axs_cc[0].set_title("Cross-correlation")
     axs_cc[-1].set_xlabel("Shift (pixel)")
     axs_fb[-1].set_xlabel("Y (pixel)")
-    axs_cc[-1].set_xlim(shift_range)
+    # axs_cc[-1].set_xlim(shift_range)
 
     # fix centroids for thermal shifts
     log.info(f"measuring fiber thermal shifts @ columns: {','.join(map(str, columns))}")
@@ -2714,7 +2714,7 @@ def extract_spectra(
     # propagate thermal shift to slitmap
     channel = img._header['CCD'][0]
     slitmap[f"ypix_{channel}"] = slitmap[f"ypix_{channel}"].astype("float64")
-    slitmap[f"ypix_{channel}"][select_spec] += bn.nanmedian(shifts, axis=0)
+    slitmap[f"ypix_{channel}"][select_spec] += numpy.nan_to_num(bn.nanmedian(shifts, axis=0))
 
     if error is not None:
         error[mask] = replace_error
@@ -3568,8 +3568,13 @@ def add_astrometry(
                 posangrad=-1*numpy.arctan(CDmatrix[1,0]/CDmatrix[0,0])
                 PAobs=posangrad*180/numpy.pi
                 IFUcencoords=outw.pixel_to_world(2500,1000)
-                RAobs=IFUcencoords.ra.value
-                DECobs=IFUcencoords.dec.value
+                try:
+                    # some very early science data apparently fails here
+                    RAobs=IFUcencoords.ra.value
+                    DECobs=IFUcencoords.dec.value
+                except AttributeError:
+                    RAobs=0
+                    DECobs=0
                 org_img.setHdrValue('ASTRMSRC', 'GDR coadd', comment='Source of astrometric solution: guider')
                 copy_guider_keyword(mfheader, 'FRAME0  ', org_img)
                 copy_guider_keyword(mfheader, 'FRAMEN  ', org_img)
@@ -3653,6 +3658,11 @@ def add_astrometry(
     slitmap['ra']=RAfib
     slitmap['dec']=DECfib
     org_img._slitmap=slitmap
+
+    # set header keyword with best knowledge of IFU center
+    org_img.setHdrValue('IFUCENRA', RAobs_sci, 'Best SCI IFU RA (ASTRMSRC)')
+    org_img.setHdrValue('IFUCENDE', DECobs_sci, 'Best SCI IFU DEC (ASTRMSRC)')
+    org_img.setHdrValue('IFUCENPA', PAobs_sci, 'Best SCI IFU PA (ASTRMSRC)')
 
     log.info(f"writing RA,DEC to slitmap in image '{os.path.basename(out_image)}'")
     org_img.writeFitsData(out_image)
