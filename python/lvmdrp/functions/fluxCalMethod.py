@@ -10,7 +10,6 @@
 import os
 import numpy as np
 from scipy import interpolate
-from scipy import stats
 
 from astropy.stats import biweight_location, biweight_scale
 from astropy.table import Table
@@ -26,12 +25,6 @@ from lvmdrp.core.plot import plt, create_subplots, save_fig
 
 description = "provides flux calibration tasks"
 
-__all__ = [
-    "createSensFunction_drp",
-    "createSensFunction2_drp",
-    "quickFluxCalibration_drp",
-    "correctTelluric_drp",
-]
 
 def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'STD', display_plots: bool = False):
     """applies flux calibration to spectrograph-combined data
