@@ -675,7 +675,8 @@ static PyObject* py_median_filter_1d_float(PyObject* self, PyObject* args) {
     Py_buffer input_buf, output_buf;
     int nx, box_x, blockhint;
 
-    if (!PyArg_ParseTuple(args, "iy*iy*ii", &nx, &input_buf, &output_buf, &box_x, &blockhint)) {
+    if (!PyArg_ParseTuple(args, "iiiy*y*", &nx, &box_x, &blockhint, &input_buf, &output_buf)) {
+        PyErr_SetString(PyExc_ValueError, "Failed to parse arguments. Expected: int, int, int, buffer, buffer.");
         return NULL;
     }
 
@@ -697,7 +698,8 @@ static PyObject* py_median_filter_1d_double(PyObject* self, PyObject* args) {
     Py_buffer input_buf, output_buf;
     int nx, box_x, blockhint;
 
-    if (!PyArg_ParseTuple(args, "iy*iy*ii", &nx, &input_buf, &output_buf, &box_x, &blockhint)) {
+    if (!PyArg_ParseTuple(args, "iiiy*y*", &nx, &box_x, &blockhint, &input_buf, &output_buf)) {
+        PyErr_SetString(PyExc_ValueError, "Failed to parse arguments. Expected: int, int, int, buffer, buffer.");
         return NULL;
     }
 
@@ -719,7 +721,8 @@ static PyObject* py_median_filter_2d_float(PyObject* self, PyObject* args) {
     Py_buffer input_buf, output_buf;
     int nx, ny, box_x, box_y, blockhint;
 
-    if (!PyArg_ParseTuple(args, "iiiy*iy*ii", &nx, &ny, &input_buf, &output_buf, &box_x, &box_y, &blockhint)) {
+    if (!PyArg_ParseTuple(args, "iiiiiy*y*", &nx, &ny, &box_x, &box_y, &blockhint, &input_buf, &output_buf)) {
+        PyErr_SetString(PyExc_ValueError, "Failed to parse arguments. Expected: int, int, int, int, int, buffer, buffer.");
         return NULL;
     }
 
@@ -741,7 +744,8 @@ static PyObject* py_median_filter_2d_double(PyObject* self, PyObject* args) {
     Py_buffer input_buf, output_buf;
     int nx, ny, box_x, box_y, blockhint;
 
-    if (!PyArg_ParseTuple(args, "iiiy*iy*ii", &nx, &ny, &input_buf, &output_buf, &box_x, &box_y, &blockhint)) {
+    if (!PyArg_ParseTuple(args, "iiiiiy*y*", &nx, &ny, &box_x, &box_y, &blockhint, &input_buf, &output_buf)) {
+        PyErr_SetString(PyExc_ValueError, "Failed to parse arguments. Expected: int, int, int, int, int, buffer, buffer.");
         return NULL;
     }
 
