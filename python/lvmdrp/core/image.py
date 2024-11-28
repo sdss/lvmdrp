@@ -1454,14 +1454,11 @@ class Image(Header):
         #    hdus[0].update_ext_name('T')
 
         if len(hdus) > 0:
-            hdus[0].header['DRPVER'] = drpver
             hdu = pyfits.HDUList(hdus)  # create an HDUList object
+            hdu[0].header = self.getHeader()
+            hdu[0].scale(bzero=0, bscale=1)
             if self._header is not None:
-                hdu[0].header = self.getHeader()  # add the primary header to the HDU
-                try:
-                    hdu[0].header["BZERO"] = 0
-                except KeyError:
-                    pass
+                hdu[0].header['DRPVER'] = drpver
                 hdu[0].update_header()
 
         os.makedirs(os.path.dirname(filename), exist_ok=True)

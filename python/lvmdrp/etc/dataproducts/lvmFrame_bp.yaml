@@ -15,7 +15,7 @@ hdu0:
   is_image: true
   header:
   - key: FLATNAME
-    comment: fiberflat used to flatfield the data
+    comment: flatfield used
   - key: IFIBVAR
     comment: fiber-to-fiber variance before flatfielding
   - key: FFIBVAR

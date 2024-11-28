@@ -913,21 +913,29 @@ class RSS(FiberRows):
 
         if wave is not None and len(wave.shape) == 1:
             wcs_dict = {"NAXIS": 2, "NAXIS1": data.shape[1], "NAXIS2": data.shape[0],
-                        "CDELT1": wave[1]-wave[0],
-                        "CRVAL1": wave[0],
-                        "CUNIT1": "Angstrom", "CTYPE1": "WAVE", "CRPIX1": 1,
-                        "CDELT2": 1,
-                        "CRVAL2": 1,
-                        "CUNIT2": "", "CTYPE2": "FIBERID", "CRPIX2": 1}
+                        "CDELT1": (wave[1]-wave[0], "coordinate increment along axis"),
+                        "CRVAL1": (wave[0], "coordinate system value at reference pixel"),
+                        "CUNIT1": ("Angstrom", "physical unit of the coordinate axis"),
+                        "CTYPE1": ("WAVE", "name of the coordinate axis"),
+                        "CRPIX1": (1, "coordinate system reference pixel"),
+                        "CDELT2": (1, "coordinate increment along axis"),
+                        "CRVAL2": (1, "coordinate system value at reference pixel"),
+                        "CUNIT2": ("", "physical unit of the coordinate axis"),
+                        "CTYPE2": ("FIBERID", "name of the coordinate axis"),
+                        "CRPIX2": (1, "coordinate system reference pixel")}
 
         elif wave is None or len(wave.shape) == 2:
             wcs_dict = {"NAXIS": 2, "NAXIS1": data.shape[1], "NAXIS2": data.shape[0],
-                        "CDELT1": 1,
-                        "CRVAL1": 1,
-                        "CUNIT1": "", "CTYPE1": "XAXIS", "CRPIX1": 1,
-                        "CDELT2": 1,
-                        "CRVAL2": 1,
-                        "CUNIT2": "", "CTYPE2": "FIBERID", "CRPIX2": 1}
+                        "CDELT1": (1, "coordinate increment along axis"),
+                        "CRVAL1": (1, "coordinate system value at reference pixel"),
+                        "CUNIT1": ("", "physical unit of the coordinate axis"),
+                        "CTYPE1": ("XAXIS", "name of the coordinate axis"),
+                        "CRPIX1": (1, "coordinate system reference pixel"),
+                        "CDELT2": (1, "coordinate increment along axis"),
+                        "CRVAL2": (1, "coordinate system value at reference pixel"),
+                        "CUNIT2": ("", "physical unit of the coordinate axis"),
+                        "CTYPE2": ("FIBERID", "name of the coordinate axis"),
+                        "CRPIX2": (1, "coordinate system reference pixel")}
         if as_dict:
             return wcs_dict
 
@@ -1813,7 +1821,7 @@ class RSS(FiberRows):
             unit = unit + "/angstrom"
 
         rss._header["BUNIT"] = unit
-        rss._header["WAVREC"] = True
+        rss._header["WAVREC"] = (True, "is wavelength rectified?")
         # create output RSS
         new_rss = RSS(
             data=numpy.zeros((rss._fibers, wave.size), dtype="float32"),
@@ -3210,34 +3218,34 @@ class RSS(FiberRows):
             if ra == 0 or dec == 0:
                 log.warning(f"on heliocentric velocity correction, missing RA/Dec information in header, assuming: {ra = }, {dec = }")
                 self.add_header_comment(f"on heliocentric velocity correction, missing RA/Dec information in header, assuming: {ra = }, {dec = }")
-                self._header[f"HIERARCH WAVE HELIORV_{tel}"] = (numpy.round(0.0, 4), f"Heliocentric velocity correction for {tel} [km/s]")
+                self._header[f"HIERARCH WAVE HELIORV_{tel}"] = (numpy.round(0.0, 4), f"heliocentric vel. corr. for {tel} [km/s]")
                 hrv_corrs[tel] = numpy.round(0.0, 4)
             else:
                 radec = SkyCoord(ra, dec, unit="deg") # center of the pointing or coordinates of the fiber
                 hrv_corr = radec.radial_velocity_correction(kind='heliocentric', obstime=obs_time, location=EarthLocation.of_site('lco')).to(u.km / u.s).value
-                self._header[f"HIERARCH WAVE HELIORV_{tel}"] = (numpy.round(hrv_corr, 4), f"Heliocentric velocity correction for {tel} [km/s]")
+                self._header[f"HIERARCH WAVE HELIORV_{tel}"] = (numpy.round(hrv_corr, 4), f"heliocentric vel. corr. for {tel} [km/s]")
                 hrv_corrs[tel] = numpy.round(hrv_corr, 4)
 
         # calculate standard stars heliocentric corrections
         for istd in range(1, 15+1):
             is_acq = self._header.get(f"STD{istd}ACQ")
             if not is_acq or is_acq is None:
-                self._header[f"STD{istd}HRV"] = (0.0, f"Standard {istd} heliocentric vel. corr. [km/s]")
+                self._header[f"STD{istd}HRV"] = (0.0, f"standard {istd} heliocentric vel. corr. [km/s]")
                 continue
 
             time_str = self._header.get(f"STD{istd}T0")
             if time_str is None:
-                self._header[f"STD{istd}HRV"] = (0.0, f"Standard {istd} heliocentric vel. corr. [km/s]")
+                self._header[f"STD{istd}HRV"] = (0.0, f"standard {istd} heliocentric vel. corr. [km/s]")
                 continue
 
             std_obstime = Time(time_str)
             std_ra, std_dec = self._header.get(f"STD{istd}RA", 0.0), self._header.get(f"STD{istd}DE", 0.0)
             if std_ra == 0 or std_dec == 0:
-                self._header[f"STD{istd}HRV"] = (0.0, f"Standard {istd} heliocentric vel. corr. [km/s]")
+                self._header[f"STD{istd}HRV"] = (0.0, f"standard {istd} heliocentric vel. corr. [km/s]")
                 continue
             std_radec = SkyCoord(std_ra, std_dec, unit="deg")
             std_hrv_corr = std_radec.radial_velocity_correction(kind="heliocentric", obstime=std_obstime, location=EarthLocation.of_site("lco")).to(u.km / u.s).value
-            self._header[f"STD{istd}HRV"] = (numpy.round(std_hrv_corr, 4), f"Standard {istd} heliocentric vel. corr. [km/s]")
+            self._header[f"STD{istd}HRV"] = (numpy.round(std_hrv_corr, 4), f"standard {istd} heliocentric vel. corr. [km/s]")
 
         if apply_hrv_corr: ...
             # if helio_vel is None or helio_vel == 0.0:
@@ -3325,11 +3333,12 @@ class RSS(FiberRows):
             hdus.append(pyfits.BinTableHDU(self._wave_trace, name="WAVE_TRACE"))
         elif self._wave is not None:
             if len(self._wave.shape) == 1:
-                # wcs = WCS(
-                #     header={"CDELT1": self._wave_disp, "CRVAL1": self._wave_start,
-                #     "CUNIT1": "Angstrom", "CTYPE1": "WAVE", "CRPIX1": 1.0})
-                self._header.update({"CDELT1": self._wave_disp, "CRVAL1": self._wave_start,
-                    "CUNIT1": "Angstrom", "CTYPE1": "WAVE", "CRPIX1": 1.0})
+                self._header.update({
+                    "CDELT1": (self._wave_disp, "coordinate increment along axis"),
+                    "CRVAL1": (self._wave_start, "coordinate system value at reference pixel"),
+                    "CUNIT1": ("Angstrom", "physical unit of the coordinate axis"),
+                    "CTYPE1": ("WAVE", "name of the coordinate axis"),
+                    "CRPIX1": (1, "coordinate system reference pixel")})
             elif len(self._wave.shape) == 2:
                 hdus.append(pyfits.ImageHDU(self._wave.astype("float32"), name="WAVE"))
             else:
@@ -3377,6 +3386,7 @@ class RSS(FiberRows):
         os.makedirs(os.path.dirname(out_rss), exist_ok=True)
         hdus[0].header["FILENAME"] = os.path.basename(out_rss)
         hdus[0].header['DRPVER'] = drpver
+        hdus[0].scale(bzero=0, bscale=1)
         hdus.writeto(out_rss, overwrite=True, output_verify="silentfix")
 
 def loadRSS(in_rss):
@@ -3387,7 +3397,7 @@ def loadRSS(in_rss):
 class lvmBaseProduct(RSS):
     """Base class to define an LVM product"""
 
-    _BPARS = {"BUNIT": None, "BSCALE": 1.0, "BZERO": 0.0}
+    _BPARS = {"BUNIT": None}
 
     @classmethod
     def header_from_hdulist(cls, hdulist):
@@ -3417,7 +3427,7 @@ class lvmBaseProduct(RSS):
 
     def update_header(self):
         # update flux header
-        for kw in ["BUNIT", "BSCALE", "BZERO"]:
+        for kw in ["BUNIT"]:
             if kw in self._header:
                 self._template["FLUX"].header[kw] = self._header.get(kw)
 
@@ -3508,6 +3518,7 @@ class lvmFrame(lvmBaseProduct):
         os.makedirs(os.path.dirname(out_file), exist_ok=True)
         self._template[0].header["FILENAME"] = os.path.basename(out_file)
         self._template[0].header['DRPVER'] = drpver
+        self._template[0].scale(bzero=0, bscale=1)
         self._template.writeto(out_file, overwrite=True)
 
 
@@ -3586,6 +3597,7 @@ class lvmFFrame(lvmBaseProduct):
         os.makedirs(os.path.dirname(out_file), exist_ok=True)
         self._template[0].header["FILENAME"] = os.path.basename(out_file)
         self._template[0].header['DRPVER'] = drpver
+        self._template[0].scale(bzero=0, bscale=1)
         self._template.writeto(out_file, overwrite=True)
 
 
@@ -3658,6 +3670,7 @@ class lvmCFrame(lvmBaseProduct):
         os.makedirs(os.path.dirname(out_file), exist_ok=True)
         self._template[0].header["FILENAME"] = os.path.basename(out_file)
         self._template[0].header['DRPVER'] = drpver
+        self._template[0].scale(bzero=0, bscale=1)
         self._template.writeto(out_file, overwrite=True)
 
 
@@ -3719,6 +3732,7 @@ class lvmSFrame(lvmBaseProduct):
         os.makedirs(os.path.dirname(out_file), exist_ok=True)
         self._template[0].header["FILENAME"] = os.path.basename(out_file)
         self._template[0].header['DRPVER'] = drpver
+        self._template[0].scale(bzero=0, bscale=1)
         self._template.writeto(out_file, overwrite=True)
 
 

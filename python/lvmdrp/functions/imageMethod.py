@@ -2730,56 +2730,22 @@ def extract_spectra(
     )
     rss.setHdrValue("NAXIS2", data.shape[0])
     rss.setHdrValue("NAXIS1", data.shape[1])
-    rss.setHdrValue("DISPAXIS", 1)
+    rss.setHdrValue("DISPAXIS", 1, "axis of spectral dispersion")
+    rss.setHdrValue("HIERARCH FIBER CENT_MIN", numpy.round(bn.nanmin(trace_mask._data),4), "min. fiber centroid")
+    rss.setHdrValue("HIERARCH FIBER CENT_MAX", numpy.round(bn.nanmax(trace_mask._data),4), "max. fiber centroid")
+    rss.setHdrValue("HIERARCH FIBER CENT_AVG", numpy.round(bn.nanmean(trace_mask._data),4), "avg. fiber centroid")
+    rss.setHdrValue("HIERARCH FIBER CENT_STD", numpy.round(bn.nanstd(trace_mask._data),4), "stddev. fiber centroid")
+    if method == "optimal":
+        rss.setHdrValue("HIERARCH FIBER WIDTH_MIN", numpy.round(bn.nanmin(trace_fwhm._data),4), "min. fiber width")
+        rss.setHdrValue("HIERARCH FIBER WIDTH_MAX", numpy.round(bn.nanmax(trace_fwhm._data),4), "max. fiber width")
+        rss.setHdrValue("HIERARCH FIBER WIDTH_AVG", numpy.round(bn.nanmean(trace_fwhm._data),4), "avg. fiber width")
+        rss.setHdrValue("HIERARCH FIBER WIDTH_STD", numpy.round(bn.nanstd(trace_fwhm._data),4), "stddev. fiber width")
+
     rss.add_header_comment(f"{in_trace}, fiber centroids used for {camera}")
     rss.add_header_comment(f"{in_fwhm}, fiber width (FWHM) used for {camera}")
     rss.add_header_comment(f"{in_model}, fiber model used for {camera}")
     rss.add_header_comment(f"{in_acorr}, fiber aperture correction used for {camera}")
-    rss.setHdrValue(
-        "HIERARCH FIBER CENT MIN",
-        bn.nanmin(trace_mask._data),
-    )
-    rss.setHdrValue(
-        "HIERARCH FIBER CENT MAX",
-        bn.nanmax(trace_mask._data),
-    )
-    rss.setHdrValue(
-        "HIERARCH FIBER CENT AVG",
-        bn.nanmean(trace_mask._data) if data.size != 0 else 0,
-    )
-    rss.setHdrValue(
-        "HIERARCH FIBER CENT MED",
-        bn.nanmedian(trace_mask._data)
-        if data.size != 0
-        else 0,
-    )
-    rss.setHdrValue(
-        "HIERARCH FIBER CENT SIG",
-        bn.nanstd(trace_mask._data) if data.size != 0 else 0,
-    )
-    if method == "optimal":
-        rss.setHdrValue(
-            "HIERARCH FIBER WIDTH MIN",
-            bn.nanmin(trace_fwhm._data),
-        )
-        rss.setHdrValue(
-            "HIERARCH FIBER WIDTH MAX",
-            bn.nanmax(trace_fwhm._data),
-        )
-        rss.setHdrValue(
-            "HIERARCH FIBER WIDTH AVG",
-            bn.nanmean(trace_fwhm._data) if data.size != 0 else 0,
-        )
-        rss.setHdrValue(
-            "HIERARCH FIBER WIDTH MED",
-            bn.nanmedian(trace_fwhm._data)
-            if data.size != 0
-            else 0,
-        )
-        rss.setHdrValue(
-            "HIERARCH FIBER WIDTH SIG",
-            bn.nanstd(trace_fwhm._data) if data.size != 0 else 0,
-        )
+
     # save extracted RSS
     log.info(f"writing extracted spectra to {os.path.basename(out_rss)}")
     rss.writeFitsData(out_rss)
@@ -3224,6 +3190,7 @@ def preproc_raw_frame(
             gain[2] *= 1.089
         if camera == "z3":
             gain[3] /= 1.056
+        gain = numpy.round(gain, 2)
 
         log.info(f"using header GAIN = {gain.tolist()} (e-/ADU)")
 
@@ -3262,8 +3229,8 @@ def preproc_raw_frame(
             os_models.append(os_model)
 
         # compute overscan stats
-        os_bias_med[i] = bn.nanmedian(os_quad._data, axis=None)
-        os_bias_std[i] = bn.nanmedian(bn.nanstd(os_quad._data, axis=1), axis=None)
+        os_bias_med[i] = numpy.round(bn.nanmedian(os_quad._data, axis=None), 2)
+        os_bias_std[i] = numpy.round(bn.nanmedian(bn.nanstd(os_quad._data, axis=1), axis=None), 2)
         log.info(
             f"median and standard deviation in OS quadrant {i+1}: "
             f"{os_bias_med[i]:.2f} +/- {os_bias_std[i]:.2f} (ADU)"
@@ -3315,35 +3282,35 @@ def preproc_raw_frame(
         proc_img.setHdrValue(
             f"HIERARCH AMP{i+1} TRIMSEC",
             f"[{x*xsize+1}:{xsize*(x+1)}, {y*ysize+1}:{ysize*(y+1)}]",
-            f"Region of amp. {i+1}",
+            f"region of amp. {i+1}",
         )
     # add gain keywords for the different subimages (CCDs/Amplifiers)
     for i in range(NQUADS):
         proc_img.setHdrValue(
             f"HIERARCH AMP{i+1} {gain_prefix}",
             gain[i],
-            f"Gain value of amp. {i+1} [electron/adu]",
+            f"gain value of amp. {i+1} [electron/adu]",
         )
     # add read-out noise keywords for the different subimages (CCDs/Amplifiers)
     for i in range(NQUADS):
         proc_img.setHdrValue(
             f"HIERARCH AMP{i+1} {rdnoise_prefix}",
             rdnoise[i],
-            f"Read-out noise of amp. {i+1} [electron]",
+            f"read-out noise of amp. {i+1} [electron]",
         )
     # add bias of overscan region for the different subimages (CCDs/Amplifiers)
     for i in range(NQUADS):
         proc_img.setHdrValue(
-            f"HIERARCH AMP{i+1} OVERSCAN",
+            f"HIERARCH AMP{i+1} OVERSCAN_MED",
             os_bias_med[i],
-            f"Overscan median of amp. {i+1} [adu]",
+            f"overscan median of amp. {i+1} [adu]",
         )
     # add bias std of overscan region for the different subimages (CCDs/Amplifiers)
     for i in range(NQUADS):
         proc_img.setHdrValue(
             f"HIERARCH AMP{i+1} OVERSCAN_STD",
             os_bias_std[i],
-            f"Overscan std of amp. {i+1} [adu]",
+            f"overscan std of amp. {i+1} [adu]",
         )
 
     # load master pixel mask
@@ -3575,7 +3542,7 @@ def add_astrometry(
                 except AttributeError:
                     RAobs=0
                     DECobs=0
-                org_img.setHdrValue('ASTRMSRC', 'GDR coadd', comment='Source of astrometric solution: guider')
+                org_img.setHdrValue('ASTRMSRC', 'GDR coadd', comment='source of astrometry: guider')
                 copy_guider_keyword(mfheader, 'FRAME0  ', org_img)
                 copy_guider_keyword(mfheader, 'FRAMEN  ', org_img)
                 copy_guider_keyword(mfheader, 'NFRAMES ', org_img)
@@ -3610,7 +3577,7 @@ def add_astrometry(
                 if numpy.any([RAobs, DECobs, PAobs]) == 0:
                     log.warning(f"some astrometry keywords for telescope '{tel}' are missing: {RAobs = }, {DECobs = }, {PAobs = }")
                     org_img.add_header_comment(f"no astromentry keywords '{tel}': {RAobs = }, {DECobs = }, {PAobs = }, using commanded")
-                org_img.setHdrValue('ASTRMSRC', 'CMD position', comment='Source of astrometric solution: commanded position')
+                org_img.setHdrValue('ASTRMSRC', 'CMD position', comment='source of astrometry: commanded position')
         else:
             RAobs=0
             DECobs=0
@@ -3660,14 +3627,12 @@ def add_astrometry(
     org_img._slitmap=slitmap
 
     # set header keyword with best knowledge of IFU center
-    org_img.setHdrValue('IFUCENRA', RAobs_sci, 'Best SCI IFU RA (ASTRMSRC)')
-    org_img.setHdrValue('IFUCENDE', DECobs_sci, 'Best SCI IFU DEC (ASTRMSRC)')
-    org_img.setHdrValue('IFUCENPA', PAobs_sci, 'Best SCI IFU PA (ASTRMSRC)')
+    org_img.setHdrValue('IFUCENRA', RAobs_sci, 'best SCI IFU RA (ASTRMSRC)')
+    org_img.setHdrValue('IFUCENDE', DECobs_sci, 'best SCI IFU DEC (ASTRMSRC)')
+    org_img.setHdrValue('IFUCENPA', PAobs_sci, 'best SCI IFU PA (ASTRMSRC)')
 
     log.info(f"writing RA,DEC to slitmap in image '{os.path.basename(out_image)}'")
     org_img.writeFitsData(out_image)
-
-
 
 
 @skip_on_missing_input_path(["in_image"])
@@ -3809,11 +3774,11 @@ def detrend_frame(
             bcorr_img.setSection(section=quad_sec, subimg=quad, inplace=True)
             log.info(f"median error in quadrant {i+1}: {bn.nanmedian(quad._error):.2f} (e-)")
 
-        bcorr_img.setHdrValue("BUNIT", "electron", "physical units of the image")
+        bcorr_img.setHdrValue("BUNIT", "electron", "physical units of the array values")
     else:
         # convert to ADU
         log.info("leaving original ADU units")
-        bcorr_img.setHdrValue("BUNIT", "adu", "physical units of the image")
+        bcorr_img.setHdrValue("BUNIT", "adu", "physical units of the array values")
 
     # complete image detrending
     if in_dark:
