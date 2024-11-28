@@ -1389,6 +1389,7 @@ def reduce_2d(mjd, calibrations, expnums=None, exptime=None, cameras=CAMERAS,
         frames.query("exptime == @exptime", inplace=True)
     if cameras:
         frames.query("camera in @cameras", inplace=True)
+    frames.sort_values(["camera"], inplace=True)
 
     # preprocess and detrend frames
     for frame in frames.to_dict("records"):
