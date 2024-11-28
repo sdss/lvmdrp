@@ -1570,6 +1570,9 @@ def update_summary_file(filename: str, tileid: int = None, mjd: int = None, expn
                       'On macs, you may first need to first run "brew install hdf5".')
     except Timeout:
         log.error("Another instance of the drp currently holds the drpall lock.")
+    except ValueError as e:
+        log.error(f"Error while updating drpall file: {e}")
+        log.error(f"You may need to remove {drpall} and run this code again with flags -2d -1d -p1d")
     else:
         log.info(f'Updating drpall file {drpall}.')
 
