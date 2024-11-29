@@ -18,44 +18,52 @@ hdu0:
     comment: conforms to FITS standard
 hdu1:
   name: FLUX
-  description: sky-subtracted flux in units of erg/s/cm2/Ang
+  description: sky-subtracted flux in units of erg / (Angstrom s cm2)
   is_image: true
+  shape: NWAVE x NFIBER
   header:
   - key: BUNIT
-    comment: flux units
-  - key: BSCALE
-    comment: linear scaling factor
-  - key: BZERO
-    comment: zero point
-  shape: NWAVE x NFIBER
+    comment: physical units of the array values
 hdu2:
   name: IVAR
-  description: inverse variance (1/sigma^2) of sky-subtracted flux
+  description: inverse variance in cm4 Angstrom2 s2 / erg2
   is_image: true
   shape: NWAVE x NFIBER
+  header:
+  - key: BUNIT
+    comment: physical units of the array values
 hdu3:
   name: MASK
-  description: the quality bitmask for each fiber pixel
+  description: quality bitmask for each fiber pixel
   is_image: true
   shape: NWAVE x NFIBER
 hdu4:
   name: WAVE
-  description: air wavelength solution in angstroms
+  description: air wavelength solution in Angstrom
   is_image: true
   shape: NWAVE
+  header:
+  - key: BUNIT
+    comment: physical units of the array values
 hdu5:
   name: LSF
-  description: LSF (FWHM) solution in angstroms
+  description: LSF (FWHM) solution in Angstrom
   is_image: true
   shape: NWAVE x NFIBER
+  header:
+  - key: BUNIT
+    comment: physical units of the array values
 hdu6:
   name: SKY
-  description: sky in flux-calibrated units erg/s/cm2/Ang
+  description: sky in flux-calibrated units erg / (Angstrom s cm2)
   is_image: true
   shape: NWAVE x NFIBER
+  header:
+  - key: BUNIT
+    comment: physical units of the array values
 hdu7:
   name: SKY_IVAR
-  description: sky inverse variance (1/sigma^2) in flux-calibrated units (erg/s/cm2/Ang)
+  description: sky inverse variance in flux-calibrated units erg / (Angstrom s cm2)
   is_image: true
   shape: NWAVE x NFIBER
 hdu8:
@@ -143,17 +151,17 @@ hdu8:
       name: ypix_b
       type: uint32
       description: the y coordinate in pixels of the fiber at column 2000 for channel b
-      unit: pixels
+      unit: pix
     YPIX_R:
       name: ypix_r
       type: uint32
       description: the y coordinate in pixels of the fiber at column 2000 for channel r
-      unit: pixels
+      unit: pix
     YPIX_Z:
       name: ypix_z
       type: uint32
       description: the y coordinate in pixels of the fiber at column 2000 for channel z
-      unit: pixels
+      unit: pix
     FIBSTATUS:
       name: fibstatus
       type: uint16

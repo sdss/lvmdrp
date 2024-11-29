@@ -15,25 +15,28 @@ hdu0:
   is_image: true
 hdu1:
   name: FLUX
-  description: Flat fielded counts in electron/angstrom
+  description: flat fielded counts in electron / Angstrom
+  is_image: true
+  shape: CCDROW x NFIBER
   header:
   - key: BUNIT
-    comment: flux units
-  is_image: true
-  shape: CCDROW x NFIBER
+    comment: physical units of the array values
 hdu2:
   name: IVAR
-  description: Inverse variance (1/sigma^2) for the above
+  description: inverse variance in Angstrom2 / electron2
   is_image: true
   shape: CCDROW x NFIBER
+  header:
+  - key: BUNIT
+    comment: physical units of the array values
 hdu3:
   name: MASK
-  description: the quality bitmask for each fiber pixel
+  description: quality bitmask for each fiber pixel
   is_image: true
   shape: CCDROW x NFIBER
 hdu4:
   name: WAVE_TRACE
-  description: air wavelength solution trace in angstrom
+  description: air wavelength solution trace in Angstrom
   is_image: false
   shape: BINARY FITS TABLE
   columns:
@@ -59,7 +62,7 @@ hdu4:
       description: polynomial coefficients
 hdu5:
   name: LSF_TRACE
-  description: LSF (FWHM) solution traceset in angstroms
+  description: LSF (FWHM) solution traceset in Angstrom
   is_image: false
   shape: BINARY FITS TABLE
   columns:

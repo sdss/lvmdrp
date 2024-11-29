@@ -1,16 +1,16 @@
 name: lvmCFrame
 short: the camera-combined science frames
 description: |
-    Per-exposure combinations of the lvmFrame files by stitching the blue, red, and nir channels
+    Per-exposure combinations of the lvmFFrame files by stitching the blue, red, and NIR channels
     together across the dichroic break, adding rows for fibers from spectrograph 2 and 3 atop
     those from spectrograph 1 (i.e., in order of fiberid). All spectra in this file have been
     resampled to a common wavelength grid for ALL LVM observations.  Note that 'C' in the
-    name means Spectrograph Combined.
+    name means Spectrograph Channel Combined.
 location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[MJD]/
 created_by: module.py
 used_by: module.py
 naming_convention: |
-  lvmCFrame-[CHANNEL]-[EXPNUM].fits.gz, where [CHANNEL] is the channel (brz) and [EXPNUM] is the (zero-padded) 8-digit exposure number.
+  lvmCFrame-[EXPNUM].fits.gz, where [EXPNUM] is the (zero-padded) 8-digit exposure number.
 hdu0:
   name: PRIMARY
   description: primary header metadata
@@ -21,56 +21,73 @@ hdu0:
     comment: conforms to FITS standard
 hdu1:
   name: FLUX
-  description: Flux in flat fielded electrons / angstrom
+  description: calibrated flux in erg / (Angstrom s cm2)
   is_image: true
+  shape: NWAVE x NFIBER
   header:
   - key: BUNIT
-    comment: flux units
-  - key: BSCALE
-    comment: linear scaling factor
-  - key: BZERO
-    comment: zero point
-  shape: NWAVE x NFIBER
+    comment: physical units of the array values
 hdu2:
   name: IVAR
-  description: Inverse variance (1/sigma2) for the above
+  description: inverse variance in cm4 Angstrom2 s2 / erg2
   is_image: true
   shape: NWAVE x NFIBER
+  header:
+  - key: BUNIT
+    comment: physical units of the array values
 hdu3:
   name: MASK
-  description: the quality bitmask for each fiber pixel
+  description: quality bitmask for each fiber pixel
   is_image: true
   shape: NWAVE x NFIBER
 hdu4:
   name: WAVE
-  description: air wavelength solution in angstroms
+  description: air wavelength solution in Angstrom
   is_image: true
   shape: NWAVE
+  header:
+  - key: BUNIT
+    comment: physical units of the array values
 hdu5:
   name: LSF
-  description: LSF (FWHM) solution in angstroms
+  description: LSF (FWHM) solution in Angstrom
   is_image: true
   shape: NWAVE x NFIBER
+  header:
+  - key: BUNIT
+    comment: physical units of the array values
 hdu6:
   name: SKY_EAST
-  description: sky east in flux-calibrated units (erg/s/cm2/Ang)
+  description: sky east in flux-calibrated units erg / (Angstrom s cm2)
   is_image: true
   shape: NWAVE x NFIBER
+  header:
+  - key: BUNIT
+    comment: physical units of the array values
 hdu7:
   name: SKY_EAST_IVAR
-  description: sky east inverse variance (1/sigma^2) in flux-calibrated units (erg/s/cm2/Ang)
+  description: sky east inverse variance in flux-calibrated units cm4 Angstrom2 s2 / erg2
   is_image: true
   shape: NWAVE x NFIBER
+  header:
+  - key: BUNIT
+    comment: physical units of the array values
 hdu8:
   name: SKY_WEST
-  description: sky west in flux-calibrated units (erg/s/cm2/Ang)
+  description: sky west in flux-calibrated units erg / (Angstrom s cm2)
   is_image: true
   shape: NWAVE x NFIBER
+  header:
+  - key: BUNIT
+    comment: physical units of the array values
 hdu9:
   name: SKY_WEST_IVAR
-  description: sky west inverse variance (1/sigma^2) in flux-calibrated units (erg/s/cm2/Ang)
+  description: sky west inverse variance in flux-calibrated units cm4 Angstrom2 s2 / erg2
   is_image: true
   shape: NWAVE x NFIBER
+  header:
+  - key: BUNIT
+    comment: physical units of the array values
 hdu10:
   name: SLITMAP
   description: slitmap table describing fiber positions for this exposure
@@ -156,17 +173,17 @@ hdu10:
       name: ypix_b
       type: uint32
       description: the y coordinate in pixels of the fiber at column 2000 for channel b
-      unit: pixels
+      unit: pix
     YPIX_R:
       name: ypix_r
       type: uint32
       description: the y coordinate in pixels of the fiber at column 2000 for channel r
-      unit: pixels
+      unit: pix
     YPIX_Z:
       name: ypix_z
       type: uint32
       description: the y coordinate in pixels of the fiber at column 2000 for channel z
-      unit: pixels
+      unit: pix
     FIBSTATUS:
       name: fibstatus
       type: uint16
