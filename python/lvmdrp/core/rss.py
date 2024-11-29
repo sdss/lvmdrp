@@ -3415,13 +3415,11 @@ class lvmBaseProduct(RSS):
         """Set header"""
         blueprint = dp.load_blueprint(name="lvmFrame")
         new_header = orig_header
-        new_cards = []
-        for card in blueprint["hdu0"]["header"]:
+        for card in blueprint["hdu0"].get("header", []):
             kw = card["key"]
             cm = card["comment"]
             if kw.lower() in kwargs:
-                new_cards.append((kw, kwargs[kw.lower()], cm))
-        new_header.update(new_cards)
+                new_header.append((kw, kwargs[kw.lower()], cm))
         self._header = new_header
         return self._header
 
@@ -3432,7 +3430,7 @@ class lvmBaseProduct(RSS):
                 self._template["FLUX"].header[kw] = self._header.get(kw)
 
         # update primary header
-        self._template["PRIMARY"].header.update(self._header)
+        self._template["PRIMARY"].header = self._header
         del self._template["PRIMARY"].header["WCS*"]
         del self._template["PRIMARY"].header["CDELT*"]
         del self._template["PRIMARY"].header["CRVAL*"]
