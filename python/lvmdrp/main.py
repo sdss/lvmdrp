@@ -866,7 +866,7 @@ def build_supersky(tileid: int, mjd: int, expnum: int, imagetype: str) -> fits.B
                 dlambda = np.diff(fsci._wave, axis=1, append=2*(fsci._wave[:, -1] - fsci._wave[:, -2])[:, None])
                 fsci._data /= dlambda
                 fsci._error /= dlambda
-                fsci._header["BUNIT"] = "electron/angstrom"
+                fsci._header["BUNIT"] = "electron / Angstrom"
 
             # sky fiber selection
             slitmap = fsci._slitmap[fsci._slitmap["spectrographid"] == specid]

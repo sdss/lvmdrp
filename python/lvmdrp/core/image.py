@@ -1131,15 +1131,15 @@ class Image(Header):
             for i in range(n_amp):
                 if current == "adu" and to == "electron":
                     factor = gains[i]
-                elif current == "adu" and to == "electron/s":
+                elif current == "adu" and to == "electron / s":
                     factor = gains[i] / exptime
                 elif current == "electron" and to == "adu":
                     factor = 1 / gains[i]
-                elif current == "electron" and to == "electron/s":
+                elif current == "electron" and to == "electron / s":
                     factor = 1 / exptime
-                elif current == "electron/s" and to == "adu":
+                elif current == "electron / s" and to == "adu":
                     factor = gains[i] * exptime
-                elif current == "electron/s" and to == "electron":
+                elif current == "electron / s" and to == "electron":
                     factor = exptime
                 else:
                     raise ValueError(f"Cannot convert from {current} to {to}")

@@ -140,7 +140,7 @@ hdu7:
       description: polynomial coefficients
 hdu8:
   name: SUPERFLAT
-  description: superflat vector from quartz lamps
+  description: superflat vector from LDLS/quartz lamps
   is_image: true
   shape: CCDROW x NFIBER
 hdu9:

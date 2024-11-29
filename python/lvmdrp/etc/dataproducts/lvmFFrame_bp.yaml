@@ -63,7 +63,7 @@ hdu6:
     comment: physical units of the array values
 hdu7:
   name: SKY_EAST_IVAR
-  description: sky east inverse variance in flux-calibrated units cm4 Angstrom2 s2 / erg2
+  description: sky east inverse variance in cm4 Angstrom2 s2 / erg2
   is_image: true
   shape: NWAVE x NFIBER
   header:
@@ -79,7 +79,7 @@ hdu8:
     comment: physical units of the array values
 hdu9:
   name: SKY_WEST_IVAR
-  description: sky west inverse variance in flux-calibrated units erg / (Angstrom s cm2)
+  description: sky west inverse variance in cm4 Angstrom2 s2 / erg2
   is_image: true
   shape: NWAVE x NFIBER
   header:

@@ -176,7 +176,7 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'STD', display_plo
         if fframe._sky_west_error is not None:
             fframe._sky_west_error /= exptimes[:, None]
         fframe.setHdrValue("FLUXCAL", 'NONE', "flux-calibration method")
-        fframe.setHdrValue("BUNIT", "electron/s/A", "flux units")
+        fframe.setHdrValue("BUNIT", "electron / (Angstrom s)", "physical units of the array values")
     else:
         log.info("flux-calibrating data science and sky spectra")
         fframe._data *= sens_ave * 10 ** (0.4 * ext * (sci_secz)) / exptimes[:, None]
@@ -193,7 +193,7 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'STD', display_plo
             fframe._sky_west *= sens_ave * 10 ** (0.4 * ext * (sci_secz)) / exptimes[:, None]
         if fframe._sky_west_error is not None:
             fframe._sky_west_error *= sens_ave * 10 ** (0.4 * ext * (sci_secz)) / exptimes[:, None]
-        fframe.setHdrValue("BUNIT", "ergs/s/cm^2/A", "flux units")
+        fframe.setHdrValue("BUNIT", "erg / (Angstrom s cm2)", "physical units of the array values")
 
     log.info(f"writing output file in {os.path.basename(out_fframe)}")
     fframe.writeFitsData(out_fframe)

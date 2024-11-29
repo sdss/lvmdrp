@@ -1809,7 +1809,7 @@ class RSS(FiberRows):
         if rss._header is None:
             rss._header = pyfits.Header()
         unit = rss._header["BUNIT"]
-        if not unit.endswith("/angstrom"):
+        if not unit.endswith(" / Angstrom"):
             dlambda = numpy.gradient(rss._wave, axis=1)
             rss._data /= dlambda
             if rss._error is not None:
@@ -1818,7 +1818,7 @@ class RSS(FiberRows):
                 rss._sky /= dlambda
             if rss._sky_error is not None:
                 rss._sky_error /= dlambda
-            unit = unit + "/angstrom"
+            unit = unit + " / Angstrom"
 
         rss._header["BUNIT"] = unit
         rss._header["WAVREC"] = (True, "is wavelength rectified?")
@@ -3424,11 +3424,6 @@ class lvmBaseProduct(RSS):
         return self._header
 
     def update_header(self):
-        # update flux header
-        for kw in ["BUNIT"]:
-            if kw in self._header:
-                self._template["FLUX"].header[kw] = self._header.get(kw)
-
         # update primary header
         self._template["PRIMARY"].header = self._header
         del self._template["PRIMARY"].header["WCS*"]
@@ -3481,6 +3476,12 @@ class lvmFrame(lvmBaseProduct):
         if header is not None:
             self.set_header(header, **kwargs)
 
+    def set_units(self):
+        """Sets physical units in relevant extensions"""
+        flux_units = self._header.get("BUNIT")
+        self._template["FLUX"].header["BUNIT"] = flux_units
+        self._template["IVAR"].header["BUNIT"] = (1 / u.Unit(flux_units)**2).unit.to_string()
+
     def get_superflat(self):
         """Get superflat representation as numpy array"""
         return self._superflat
@@ -3501,6 +3502,7 @@ class lvmFrame(lvmBaseProduct):
 
         # update headers
         self.update_header()
+        self.set_units()
         # fill in rest of the template
         self._template["FLUX"].data = self._data
         self._template["IVAR"].data = numpy.divide(1, self._error**2, where=self._error != 0, out=numpy.zeros_like(self._error))
@@ -3566,6 +3568,18 @@ class lvmFFrame(lvmBaseProduct):
         else:
             self._header = None
 
+    def set_units(self):
+        """Sets physical units in relevant extensions"""
+        flux_units = self._header.get("BUNIT")
+        self._template["FLUX"].header["BUNIT"] = flux_units
+        self._template["IVAR"].header["BUNIT"] = (1 / u.Unit(flux_units)**2).unit.to_string()
+        self._template["WAVE"].header["BUNIT"] = "Angstrom"
+        self._template["LSF"].header["BUNIT"] = "Angstrom"
+        self._template["SKY_EAST"].header["BUNIT"] = flux_units
+        self._template["SKY_EAST_IVAR"].header["BUNIT"] = flux_units
+        self._template["SKY_WEST"].header["BUNIT"] = flux_units
+        self._template["SKY_WEST_IVAR"].header["BUNIT"] = flux_units
+
     def loadFitsData(self, in_file):
         self = lvmFFrame.from_file(in_file)
         return self
@@ -3577,6 +3591,7 @@ class lvmFFrame(lvmBaseProduct):
 
         # update headers
         self.update_header()
+        self.set_units()
         # fill in rest of the template
         self._template["FLUX"].data = self._data
         self._template["IVAR"].data = numpy.divide(1, self._error**2, where=self._error != 0, out=numpy.zeros_like(self._error))
@@ -3641,6 +3656,18 @@ class lvmCFrame(lvmBaseProduct):
         else:
             self._header = None
 
+    def set_units(self):
+        """Sets physical units in relevant extensions"""
+        flux_units = self._header.get("BUNIT")
+        self._template["FLUX"].header["BUNIT"] = flux_units
+        self._template["IVAR"].header["BUNIT"] = (1 / u.Unit(flux_units)**2).unit.to_string()
+        self._template["WAVE"].header["BUNIT"] = "Angstrom"
+        self._template["LSF"].header["BUNIT"] = "Angstrom"
+        self._template["SKY_EAST"].header["BUNIT"] = flux_units
+        self._template["SKY_EAST_IVAR"].header["BUNIT"] = (1 / u.Unit(flux_units)**2).unit.to_string()
+        self._template["SKY_WEST"].header["BUNIT"] = flux_units
+        self._template["SKY_WEST_IVAR"].header["BUNIT"] = (1 / u.Unit(flux_units)**2).unit.to_string()
+
     def loadFitsData(self, in_file):
         self = lvmCFrame.from_file(in_file)
         return self
@@ -3652,6 +3679,7 @@ class lvmCFrame(lvmBaseProduct):
 
         # update headers
         self.update_header()
+        self.set_units()
         # fill in rest of the template
         self._template["FLUX"].data = self._data
         self._template["IVAR"].data = numpy.divide(1, self._error**2, where=self._error != 0, out=numpy.zeros_like(self._error))
@@ -3705,6 +3733,16 @@ class lvmSFrame(lvmBaseProduct):
         else:
             self._header = None
 
+    def set_units(self):
+        """Sets physical units in relevant extensions"""
+        flux_units = self._header.get("BUNIT")
+        self._template["FLUX"].header["BUNIT"] = flux_units
+        self._template["IVAR"].header["BUNIT"] = (1 / u.Unit(flux_units)**2).unit.to_string()
+        self._template["WAVE"].header["BUNIT"] = "Angstrom"
+        self._template["LSF"].header["BUNIT"] = "Angstrom"
+        self._template["SKY"].header["BUNIT"] = flux_units
+        self._template["SKY_IVAR"].header["BUNIT"] = (1 / u.Unit(flux_units)**2).unit.to_string()
+
     def loadFitsData(self, in_file):
         self = lvmSFrame.from_file(in_file)
         return self
@@ -3716,6 +3754,7 @@ class lvmSFrame(lvmBaseProduct):
 
         # update headers
         self.update_header()
+        self.set_units()
         # fill in rest of the template
         self._template["FLUX"].data = self._data
         self._template["IVAR"].data = numpy.divide(1, self._error**2, where=self._error != 0, out=numpy.zeros_like(self._error))
