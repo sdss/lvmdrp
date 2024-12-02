@@ -11,6 +11,7 @@ import os
 import numpy as np
 from scipy import interpolate
 
+from astropy import units as u
 from astropy.stats import biweight_location, biweight_scale
 from astropy.table import Table
 
@@ -133,8 +134,8 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'STD', display_plo
 
     if method != 'NONE':
         # update the fluxcal extension
-        fframe._fluxcal_std["mean"] = sens_ave
-        fframe._fluxcal_std["rms"] = sens_rms
+        fframe._fluxcal_std["mean"] = sens_ave * u.Unit("erg / (ct cm2)")
+        fframe._fluxcal_std["rms"] = sens_rms * u.Unit("erg / (ct cm2)")
 
         ax.set_title(f"flux calibration for {channel = } with {method = }", loc="left")
         for j in range(sens_arr.shape[1]):
@@ -258,7 +259,7 @@ def standard_sensitivity(stds, rss, GAIA_CACHE_DIR, ext, res, plot=False, width=
         sens = stdflux / spec
         wgood, sgood = fluxcal.filter_channel(w, sens, 2)
         s = interpolate.make_smoothing_spline(wgood, sgood, lam=1e4)
-        res[f"STD{nn}SEN"] = s(w).astype(np.float32)
+        res[f"STD{nn}SEN"] = s(w).astype(np.float32) * u.Unit("erg / (ct cm2)")
 
         # caluculate SDSS g band magnitudes for QC
         mAB_std = np.round(fluxcal.spec_to_LVM_mAB(channel, w, stdflux), 2)
@@ -363,8 +364,8 @@ def science_sensitivity(rss, res_sci, ext, GAIA_CACHE_DIR, NSCI_MAX=15, r_spaxel
             # calculate the normalization of the average (known) sensitivity curve in a broad band
             lvmflux = fluxcal.spec_to_LVM_flux(channel, obswave, obsflux)
             sens = fluxcal.spec_to_LVM_flux(channel, gwave, gflux) / lvmflux
-            res_sci[f"STD{i+1}SEN"] = (sens*np.interp(obswave, mean_sens[channel]['wavelength'],
-                                                               mean_sens[channel]['sens'])).astype(np.float32)
+            sens *= np.interp(obswave, mean_sens[channel]['wavelength'], mean_sens[channel]['sens'])
+            res_sci[f"STD{i+1}SEN"] = sens.astype(np.float32) * u.Unit("erg / (ct cm2)")
 
             mAB_std = np.round(fluxcal.spec_to_LVM_mAB(channel, gwave, gflux), 2)
             mAB_obs = np.round(fluxcal.spec_to_LVM_mAB(channel, obswave, obsflux), 2)
@@ -410,7 +411,7 @@ def fluxcal_standard_stars(in_rss, plot=True, GAIA_CACHE_DIR=None):
     if len(colnames) == 0:
         NSTD = 15
         colnames = [f"STD{i}SEN" for i in range(1, NSTD + 1)]
-    res_std = Table(np.full(w.size, np.nan, dtype=list(zip(colnames, ["f8"] * len(colnames)))))
+    res_std = Table(np.full(w.size, np.nan, dtype=list(zip(colnames, ["f8"] * len(colnames)))), units=[u.Unit("erg / (ct cm2)")]*len(colnames))
     mean_std, rms_std = np.full(w.size, np.nan), np.full(w.size, np.nan)
 
     # load extinction curve
@@ -510,7 +511,7 @@ def fluxcal_sci_ifu_stars(in_rss, plot=True, GAIA_CACHE_DIR=None, NSCI_MAX=15):
 
     # define dummy sensitivity array in (ergs/s/cm^2/A) / (e-/s/A) for standard star fibers
     colnames = [f"STD{i}SEN" for i in range(1, NSCI_MAX + 1)]
-    res_sci = Table(np.full(w.size, np.nan, dtype=list(zip(colnames, ["f8"] * len(colnames)))))
+    res_sci = Table(np.full(w.size, np.nan, dtype=list(zip(colnames, ["f8"] * len(colnames)))), units=[u.Unit("erg / (ct cm2)")]*len(colnames))
     mean_sci, rms_sci = np.full(w.size, np.nan), np.full(w.size, np.nan)
 
     # load extinction curve

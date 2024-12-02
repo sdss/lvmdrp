@@ -3149,7 +3149,7 @@ class RSS(FiberRows):
             setattr(self, f"_fluxcal_{source}", None)
             return
         if isinstance(fluxcal, pyfits.BinTableHDU):
-            setattr(self, f"_fluxcal_{source}", Table(fluxcal.data))
+            setattr(self, f"_fluxcal_{source}", Table.read(fluxcal))
         elif isinstance(fluxcal, Table):
             setattr(self, f"_fluxcal_{source}", fluxcal)
         else:
@@ -3541,8 +3541,8 @@ class lvmFFrame(lvmBaseProduct):
         sky_west = hdulist["SKY_WEST"].data
         sky_west_error = numpy.divide(1, hdulist["SKY_WEST_IVAR"].data, where=hdulist["SKY_WEST_IVAR"].data != 0, out=numpy.zeros_like(hdulist["SKY_WEST_IVAR"].data))
         sky_west_error = numpy.sqrt(sky_west_error)
-        fluxcal_std = Table(hdulist["FLUXCAL_STD"].data)
-        fluxcal_sci = Table(hdulist["FLUXCAL_SCI"].data)
+        fluxcal_std = Table.read(hdulist["FLUXCAL_STD"])
+        fluxcal_sci = Table.read(hdulist["FLUXCAL_SCI"])
         slitmap = Table.read(hdulist["SLITMAP"])
         return cls(data=data, error=error, mask=mask, header=header,
                    wave=wave, lsf=lsf,
