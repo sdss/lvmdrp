@@ -1455,11 +1455,11 @@ class Image(Header):
 
         if len(hdus) > 0:
             hdu = pyfits.HDUList(hdus)  # create an HDUList object
-            hdu[0].header = self.getHeader()
-            hdu[0].scale(bzero=0, bscale=1)
             if self._header is not None:
+                hdu[0].header = self.getHeader()
                 hdu[0].header['DRPVER'] = drpver
                 hdu[0].update_header()
+            hdu[0].scale(bzero=0, bscale=1)
 
         os.makedirs(os.path.dirname(filename), exist_ok=True)
         hdu.writeto(filename, output_verify="silentfix", overwrite=True)
