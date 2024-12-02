@@ -1638,9 +1638,6 @@ def apply_fiberflat(in_rss: str, out_frame: str, in_flat: str, clip_below: float
     log.info(f"reading target data from {os.path.basename(in_rss)}")
     rss = RSS.from_file(in_rss)
 
-    # compute initial variance
-    ifibvar = bn.nanmean(bn.nanvar(rss._data, axis=0))
-
     # load fiberflat
     log.info(f"reading fiberflat from {os.path.basename(in_flat)}")
     flat = RSS.from_file(in_flat)
@@ -1679,9 +1676,6 @@ def apply_fiberflat(in_rss: str, out_frame: str, in_flat: str, clip_below: float
         # correct
         spec_new = spec_data / spec_flat._data
         rss.setSpec(i, spec_new)
-
-    # compute final variance
-    ffibvar = bn.nanmean(bn.nanvar(rss._data, axis=0))
 
     # load ancillary data
     log.info(f"writing lvmFrame to {os.path.basename(out_frame)}")
