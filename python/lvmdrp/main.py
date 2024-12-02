@@ -1074,12 +1074,19 @@ def read_fibermap(as_table: bool = None, as_hdu: bool = None,
     with open(p, 'r') as f:
         data = yaml.load(f, Loader=yaml.CSafeLoader)
         cols = [i['name'] for i in data['schema']]
-        df = pd.DataFrame(data['fibers'], columns=cols)
+        units = [u.Unit(i['unit']) if i['unit'] is not None else None for i in data['schema']]
+
+        # define dtypes for Table and Numpy arrays because these two can't seem to talk to each other
+        tb_dtypes = [i['dtype'] for i in data['schema']]
+        np_dtypes = list(zip(cols, [d if d != 'str' else 'object' for d in tb_dtypes]))
+
+        # create table with units and correct types
+        table = Table(np.asarray([tuple(d) for d in data['fibers']], dtype=np_dtypes), units=units, dtype=tb_dtypes)
         if as_table:
-            return Table.from_pandas(df)
+            return table
         if as_hdu:
-            return fits.BinTableHDU(Table.from_pandas(df), name='SLITMAP')
-        return df
+            return fits.BinTableHDU(table, name='SLITMAP')
+        return table.to_pandas()
 
 
 fibermap = read_fibermap(as_hdu=True)

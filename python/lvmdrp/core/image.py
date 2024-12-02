@@ -1343,7 +1343,7 @@ class Image(Header):
                     elif hdu[i].header["EXTNAME"].split()[0] == "FRAMES":
                         self._individual_frames = Table(hdu[i].data)
                     elif hdu[i].header["EXTNAME"].split()[0] == "SLITMAP":
-                        self._slitmap = Table(hdu[i].data)
+                        self._slitmap = Table.read(hdu[i])
 
         else:
             if extension_data is not None:
@@ -1360,7 +1360,7 @@ class Image(Header):
             if extension_frames is not None:
                 self._individual_frames = Table(hdu[extension_frames].data)
             if extension_slitmap is not None:
-                self._slitmap = Table(hdu[extension_slitmap].data)
+                self._slitmap = Table.read(hdu[extension_slitmap])
 
         # set is_masked attribute
         self.is_masked = numpy.isnan(self._data).any()
@@ -3151,7 +3151,7 @@ class Image(Header):
 
     def setSlitmap(self, slitmap):
         if isinstance(slitmap, pyfits.BinTableHDU):
-            self._slitmap = Table(slitmap.data)
+            self._slitmap = Table.read(slitmap)
         else:
             self._slitmap = slitmap
 

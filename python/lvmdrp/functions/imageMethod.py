@@ -18,6 +18,7 @@ from astropy.table import Table
 from astropy.io import fits as pyfits
 from astropy.visualization import simple_norm
 from astropy.wcs import wcs
+from astropy import units as u
 import astropy.io.fits as fits
 from scipy import interpolate
 from scipy import signal
@@ -3622,8 +3623,8 @@ def add_astrometry(
     getfibradec('spec', platescale=FIDUCIAL_PLATESCALE)
 
     # add coordinates to slitmap
-    slitmap['ra']=RAfib
-    slitmap['dec']=DECfib
+    slitmap['ra']=RAfib * u.deg
+    slitmap['dec']=DECfib * u.deg
     org_img._slitmap=slitmap
 
     # set header keyword with best knowledge of IFU center

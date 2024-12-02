@@ -3105,7 +3105,7 @@ class RSS(FiberRows):
             self._slitmap = None
             return
         if isinstance(slitmap, pyfits.BinTableHDU):
-            self._slitmap = Table(slitmap.data)
+            self._slitmap = Table.read(slitmap)
         elif isinstance(slitmap, Table):
             self._slitmap = slitmap
         else:
@@ -3456,7 +3456,7 @@ class lvmFrame(lvmBaseProduct):
         wave_trace = Table(hdulist["WAVE_TRACE"].data)
         lsf_trace = Table(hdulist["LSF_TRACE"].data)
         superflat = hdulist["SUPERFLAT"].data
-        slitmap = Table(hdulist["SLITMAP"].data)
+        slitmap = Table.read(hdulist["SLITMAP"])
         return cls(data=data, error=error, mask=mask, header=header,
                    wave_trace=wave_trace, lsf_trace=lsf_trace,
                    cent_trace=cent_trace, width_trace=width_trace,
@@ -3543,7 +3543,7 @@ class lvmFFrame(lvmBaseProduct):
         sky_west_error = numpy.sqrt(sky_west_error)
         fluxcal_std = Table(hdulist["FLUXCAL_STD"].data)
         fluxcal_sci = Table(hdulist["FLUXCAL_SCI"].data)
-        slitmap = Table(hdulist["SLITMAP"].data)
+        slitmap = Table.read(hdulist["SLITMAP"])
         return cls(data=data, error=error, mask=mask, header=header,
                    wave=wave, lsf=lsf,
                    sky_east=sky_east, sky_east_error=sky_east_error,
@@ -3633,7 +3633,7 @@ class lvmCFrame(lvmBaseProduct):
         sky_west = hdulist["SKY_WEST"].data
         sky_west_error = numpy.divide(1, hdulist["SKY_WEST_IVAR"].data, where=hdulist["SKY_WEST_IVAR"].data != 0, out=numpy.zeros_like(hdulist["SKY_WEST_IVAR"].data))
         sky_west_error = numpy.sqrt(sky_west_error)
-        slitmap = Table(hdulist["SLITMAP"].data)
+        slitmap = Table.read(hdulist["SLITMAP"])
         return cls(data=data, error=error, mask=mask, header=header,
                    wave=wave, lsf=lsf,
                    sky_east=sky_east, sky_east_error=sky_east_error,
@@ -3716,7 +3716,7 @@ class lvmSFrame(lvmBaseProduct):
         sky = hdulist["SKY"].data
         sky_error = numpy.divide(1, hdulist["SKY_IVAR"].data, where=hdulist["SKY_IVAR"].data != 0, out=numpy.zeros_like(hdulist["SKY_IVAR"].data))
         sky_error = numpy.sqrt(sky_error)
-        slitmap = Table(hdulist["SLITMAP"].data)
+        slitmap = Table.read(hdulist["SLITMAP"])
         return cls(data=data, error=error, mask=mask, header=header,
                    wave=wave, lsf=lsf, sky=sky, sky_error=sky_error, slitmap=slitmap)
 
