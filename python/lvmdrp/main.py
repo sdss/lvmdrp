@@ -866,7 +866,7 @@ def build_supersky(tileid: int, mjd: int, expnum: int, imagetype: str) -> fits.B
                 dlambda = np.diff(fsci._wave, axis=1, append=2*(fsci._wave[:, -1] - fsci._wave[:, -2])[:, None])
                 fsci._data /= dlambda
                 fsci._error /= dlambda
-                fsci._header["BUNIT"] = "electron/angstrom"
+                fsci._header["BUNIT"] = "electron / Angstrom"
 
             # sky fiber selection
             slitmap = fsci._slitmap[fsci._slitmap["spectrographid"] == specid]
@@ -885,7 +885,7 @@ def build_supersky(tileid: int, mjd: int, expnum: int, imagetype: str) -> fits.B
             spec.extend([specid] * (nsam_e + nsam_w))
             telescope.extend(["east"] * nsam_e + ["west"] * nsam_w)
     sort_idx = np.argsort(sky_wave)
-    wave_c = fits.Column(name="wave", array=np.array(sky_wave)[sort_idx], unit="angstrom", format="E")
+    wave_c = fits.Column(name="wave", array=np.array(sky_wave)[sort_idx], unit="Angstrom", format="E")
     sky_c = fits.Column(name="sky", array=np.array(sky)[sort_idx], unit=fsci._header["BUNIT"], format="E")
     sky_error_c = fits.Column(name="sky_error", array=np.array(sky_error)[sort_idx], unit=fsci._header["BUNIT"], format="E")
     fiberidx_c = fits.Column(name="fiberidx", array=np.array(fiberidx)[sort_idx], format="J")
@@ -1074,12 +1074,19 @@ def read_fibermap(as_table: bool = None, as_hdu: bool = None,
     with open(p, 'r') as f:
         data = yaml.load(f, Loader=yaml.CSafeLoader)
         cols = [i['name'] for i in data['schema']]
-        df = pd.DataFrame(data['fibers'], columns=cols)
+        units = [u.Unit(i['unit']) if i['unit'] is not None else None for i in data['schema']]
+
+        # define dtypes for Table and Numpy arrays because these two can't seem to talk to each other
+        tb_dtypes = [i['dtype'] for i in data['schema']]
+        np_dtypes = list(zip(cols, [d if d != 'str' else 'object' for d in tb_dtypes]))
+
+        # create table with units and correct types
+        table = Table(np.asarray([tuple(d) for d in data['fibers']], dtype=np_dtypes), units=units, dtype=tb_dtypes)
         if as_table:
-            return Table.from_pandas(df)
+            return table
         if as_hdu:
-            return fits.BinTableHDU(Table.from_pandas(df), name='SLITMAP')
-        return df
+            return fits.BinTableHDU(table, name='SLITMAP')
+        return table.to_pandas()
 
 
 fibermap = read_fibermap(as_hdu=True)

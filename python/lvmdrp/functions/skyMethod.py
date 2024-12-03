@@ -1444,13 +1444,13 @@ def interpolate_sky( in_frame: str, out_rss: str = None, display_plots: bool = F
     # TODO: add same parameters for std *fibers*
 
     new_rss._header["HIERARCH GEOCORONAL SKYW_SH_HGHT"] = (
-        np.round(get_telescope_shadowheight(new_rss._header, telescope="SKYW"), 5), "height of Earth's shadow (km)" 
+        np.round(get_telescope_shadowheight(new_rss._header, telescope="SKYW"), 5), "height of Earth's shadow [km]"
     )
     new_rss._header["HIERARCH GEOCORONAL SKYE_SH_HGHT"] = (
-        np.round(get_telescope_shadowheight(new_rss._header, telescope="SKYE"), 5), "height of Earth's shadow (km)" 
+        np.round(get_telescope_shadowheight(new_rss._header, telescope="SKYE"), 5), "height of Earth's shadow [km]"
     )
     new_rss._header["HIERARCH GEOCORONAL SCI_SH_HGHT"] = (
-        np.round(get_telescope_shadowheight(new_rss._header, telescope="SCI"), 5), "height of Earth's shadow (km)" 
+        np.round(get_telescope_shadowheight(new_rss._header, telescope="SCI"), 5), "height of Earth's shadow [km]"
     )
 
     # write output RSS
@@ -1541,8 +1541,6 @@ def combine_skies(in_rss: str, out_rss, sky_weights: Tuple[float, float] = None)
 
     # write output sky-subtracted RSS
     log.info(f"writing output RSS file '{os.path.basename(out_rss)}'")
-    rss.appendHeader(sky_e._header["SKYMODEL*"])
-    rss.appendHeader(sky_e._header["GEOCORONAL*"])
     rss.setHdrValue("SKYEW", w_e, "SkyE weight for STD star sky subtraction")
     rss.setHdrValue("SKYWW", w_w, "SkyW weight for STD star sky subtraction")
     rss.set_sky(sky_east=sky_e._data, sky_east_error=sky_e._error,
@@ -1608,7 +1606,7 @@ def quick_sky_subtraction(in_cframe, out_sframe, skymethod: str = 'farlines_near
     log.info(f"loading {in_cframe} for sky subtraction")
 
     cframe = lvmCFrame.from_file(in_cframe)
-    
+
     # read sky table hdu
     sky_hdu = prep_input_simplesky_mean(in_cframe)
 

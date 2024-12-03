@@ -1124,22 +1124,23 @@ class Image(Header):
             return new_image
 
         if current != to:
+            camera = self.getHdrValue("CCD").upper()
             exptime = self.getHdrValue("EXPTIME")
-            gains = self.getHdrValue(f"AMP? {gain_field}")
-            sects = self.getHdrValue("AMP? TRIMSEC")
+            gains = self.getHdrValue(f"{camera} AMP? {gain_field}")
+            sects = self.getHdrValue(f"{camera} AMP? TRIMSEC")
             n_amp = len(gains)
             for i in range(n_amp):
                 if current == "adu" and to == "electron":
                     factor = gains[i]
-                elif current == "adu" and to == "electron/s":
+                elif current == "adu" and to == "electron / s":
                     factor = gains[i] / exptime
                 elif current == "electron" and to == "adu":
                     factor = 1 / gains[i]
-                elif current == "electron" and to == "electron/s":
+                elif current == "electron" and to == "electron / s":
                     factor = 1 / exptime
-                elif current == "electron/s" and to == "adu":
+                elif current == "electron / s" and to == "adu":
                     factor = gains[i] * exptime
-                elif current == "electron/s" and to == "electron":
+                elif current == "electron / s" and to == "electron":
                     factor = exptime
                 else:
                     raise ValueError(f"Cannot convert from {current} to {to}")
@@ -1343,7 +1344,7 @@ class Image(Header):
                     elif hdu[i].header["EXTNAME"].split()[0] == "FRAMES":
                         self._individual_frames = Table(hdu[i].data)
                     elif hdu[i].header["EXTNAME"].split()[0] == "SLITMAP":
-                        self._slitmap = Table(hdu[i].data)
+                        self._slitmap = Table.read(hdu[i])
 
         else:
             if extension_data is not None:
@@ -1360,7 +1361,7 @@ class Image(Header):
             if extension_frames is not None:
                 self._individual_frames = Table(hdu[extension_frames].data)
             if extension_slitmap is not None:
-                self._slitmap = Table(hdu[extension_slitmap].data)
+                self._slitmap = Table.read(hdu[extension_slitmap])
 
         # set is_masked attribute
         self.is_masked = numpy.isnan(self._data).any()
@@ -1454,15 +1455,12 @@ class Image(Header):
         #    hdus[0].update_ext_name('T')
 
         if len(hdus) > 0:
-            hdus[0].header['DRPVER'] = drpver
             hdu = pyfits.HDUList(hdus)  # create an HDUList object
             if self._header is not None:
-                hdu[0].header = self.getHeader()  # add the primary header to the HDU
-                try:
-                    hdu[0].header["BZERO"] = 0
-                except KeyError:
-                    pass
+                hdu[0].header = self.getHeader()
+                hdu[0].header['DRPVER'] = drpver
                 hdu[0].update_header()
+            hdu[0].scale(bzero=0, bscale=1)
 
         os.makedirs(os.path.dirname(filename), exist_ok=True)
         hdu.writeto(filename, output_verify="silentfix", overwrite=True)
@@ -3154,7 +3152,7 @@ class Image(Header):
 
     def setSlitmap(self, slitmap):
         if isinstance(slitmap, pyfits.BinTableHDU):
-            self._slitmap = Table(slitmap.data)
+            self._slitmap = Table.read(slitmap)
         else:
             self._slitmap = slitmap
 
@@ -3376,7 +3374,8 @@ def combineImages(
     stack_error[stack_mask] = numpy.nan
 
     if background_subtract:
-        quad_sections = images[0].getHdrValues("AMP? TRIMSEC")
+        camera = images[0].getHdrValue("CCD").upper()
+        quad_sections = images[0].getHdrValues(f"{camera} AMP? TRIMSEC")
         stack_image, _, _, _ = _bg_subtraction(
             images=stack_image,
             quad_sections=quad_sections,

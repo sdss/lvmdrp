@@ -18,207 +18,224 @@ hdu0:
     comment: conforms to FITS standard
 hdu1:
   name: FLUX
-  description: flux in units of erg/s/cm2/Ang
+  description: calibrated flux in erg / (Angstrom s cm2)
   is_image: true
+  shape: NWAVE x NFIBER
   header:
   - key: BUNIT
-    comment: flux units
-  - key: BSCALE
-    comment: linear scaling factor
-  - key: BZERO
-    comment: zero point
-  shape: NWAVE x NFIBER
+    comment: physical units of the array values
 hdu2:
   name: IVAR
-  description: Inverse variance (1/sigma2) for the above
+  description: inverse variance in cm4 Angstrom2 s2 / erg2
   is_image: true
   shape: NWAVE x NFIBER
+  header:
+  - key: BUNIT
+    comment: physical units of the array values
 hdu3:
   name: MASK
-  description: the quality bitmask for each fiber pixel
+  description: quality bitmask for each fiber pixel
   is_image: true
   shape: NWAVE x NFIBER
 hdu4:
   name: WAVE
-  description: air wavelength solution trace in angstroms
+  description: air wavelength solution trace in Angstrom
   is_image: true
   shape: NWAVE
+  header:
+  - key: BUNIT
+    comment: physical units of the array values
 hdu5:
   name: LSF
-  description: LSF (FWHM) solution array in angstroms
+  description: LSF (FWHM) solution array in Angstrom
   is_image: true
   shape: NWAVE x NFIBER
+  header:
+  - key: BUNIT
+    comment: physical units of the array values
 hdu6:
   name: SKY_EAST
-  description: sky east in flux-calibrated units (10(-17) erg/s/cm2/Ang/fiber)
+  description: sky east in flux-calibrated units erg / (Angstrom s cm2)
   is_image: true
   shape: NWAVE x NFIBER
+  header:
+  - key: BUNIT
+    comment: physical units of the array values
 hdu7:
   name: SKY_EAST_IVAR
-  description: sky east inverse variance (1/sigma^2) in flux-calibrated units (erg/s/cm2/Ang)
+  description: sky east inverse variance in cm4 Angstrom2 s2 / erg2
   is_image: true
   shape: NWAVE x NFIBER
+  header:
+  - key: BUNIT
+    comment: physical units of the array values
 hdu8:
   name: SKY_WEST
-  description: sky west in flux-calibrated units (erg/s/cm2/Ang)
+  description: sky west in flux-calibrated units erg / (Angstrom s cm2)
   is_image: true
   shape: NWAVE x NFIBER
+  header:
+  - key: BUNIT
+    comment: physical units of the array values
 hdu9:
   name: SKY_WEST_IVAR
-  description: sky west inverse variance (1/sigma^2) in flux-calibrated units (erg/s/cm2/Ang)
+  description: sky west inverse variance in cm4 Angstrom2 s2 / erg2
   is_image: true
   shape: NWAVE x NFIBER
+  header:
+  - key: BUNIT
+    comment: physical units of the array values
 hdu10:
   name: FLUXCAL_STD
-  description: sensitivity in units of (electron/s/Ang) / (erg/s/cm2/Ang) from standard fibers
+  description: sensitivity from standard fibers in units of electron cm2 / erg
   is_image: false
   shape: BINARY FITS TABLE
   columns:
     STD1SEN:
       name: STD1SEN
       type: float32
-      unit: (electron/s/Ang) / (erg/s/cm2/Ang)
+      unit: electron cm2 / erg
       description: standard star 1
     STD2SEN:
       name: STD2SEN
       type: float32
-      unit: (electron/s/Ang) / (erg/s/cm2/Ang)
+      unit: electron cm2 / erg
       description: standard star 2
     STD3SEN:
       name: STD3SEN
       type: float32
-      unit: (electron/s/Ang) / (erg/s/cm2/Ang)
+      unit: electron cm2 / erg
       description: standard star 3
     STD4SEN:
       name: STD4SEN
       type: float32
-      unit: (electron/s/Ang) / (erg/s/cm2/Ang)
+      unit: electron cm2 / erg
       description: standard star 4
     STD5SEN:
       name: STD5SEN
       type: float32
-      unit: (electron/s/Ang) / (erg/s/cm2/Ang)
+      unit: electron cm2 / erg
       description: standard star 5
     STD6SEN:
       name: STD6SEN
       type: float32
-      unit: (electron/s/Ang) / (erg/s/cm2/Ang)
+      unit: electron cm2 / erg
       description: standard star 6
     STD7SEN:
       name: STD7SEN
       type: float32
-      unit: (electron/s/Ang) / (erg/s/cm2/Ang)
+      unit: electron cm2 / erg
       description: standard star 7
     STD8SEN:
       name: STD8SEN
       type: float32
-      unit: (electron/s/Ang) / (erg/s/cm2/Ang)
+      unit: electron cm2 / erg
       description: standard star 8
     STD9SEN:
       name: STD9SEN
       type: float32
-      unit: (electron/s/Ang) / (erg/s/cm2/Ang)
+      unit: electron cm2 / erg
       description: standard star 9
     STD10SEN:
       name: STD10SEN
       type: float32
-      unit: (electron/s/Ang) / (erg/s/cm2/Ang)
+      unit: electron cm2 / erg
       description: standard star 10
     STD11SEN:
       name: STD11SEN
       type: float32
-      unit: (electron/s/Ang) / (erg/s/cm2/Ang)
+      unit: electron cm2 / erg
       description: standard star 11
     STD12SEN:
       name: STD12SEN
       type: float32
-      unit: (electron/s/Ang) / (erg/s/cm2/Ang)
+      unit: electron cm2 / erg
       description: standard star 12
     MEAN_SENS:
       name: MEAN_SENS
       type: float32
-      unit: (electron/s/Ang) / (erg/s/cm2/Ang)
+      unit: electron cm2 / erg
       description: mean sensitivity
     STDDEV_SENS:
       name: STDDEV_SENS
       type: float32
-      unit: (electron/s/Ang) / (erg/s/cm2/Ang)
+      unit: electron cm2 / erg
       description: standard deviation of sensitivity
 hdu11:
   name: FLUXCAL_SCI
-  description: sensitivity in units of (electron/s/Ang) / (erg/s/cm2/Ang) from science fibers
+  description: sensitivity in units of electron cm2 / erg from science fibers
   is_image: false
   shape: BINARY FITS TABLE
   columns:
     STD1SEN:
       name: STD1SEN
       type: float32
-      unit: (electron/s/Ang) / (erg/s/cm2/Ang)
+      unit: electron cm2 / erg
       description: standard star 1
     STD2SEN:
       name: STD2SEN
       type: float32
-      unit: (electron/s/Ang) / (erg/s/cm2/Ang)
+      unit: electron cm2 / erg
       description: standard star 2
     STD3SEN:
       name: STD3SEN
       type: float32
-      unit: (electron/s/Ang) / (erg/s/cm2/Ang)
+      unit: electron cm2 / erg
       description: standard star 3
     STD4SEN:
       name: STD4SEN
       type: float32
-      unit: (electron/s/Ang) / (erg/s/cm2/Ang)
+      unit: electron cm2 / erg
       description: standard star 4
     STD5SEN:
       name: STD5SEN
       type: float32
-      unit: (electron/s/Ang) / (erg/s/cm2/Ang)
+      unit: electron cm2 / erg
       description: standard star 5
     STD6SEN:
       name: STD6SEN
       type: float32
-      unit: (electron/s/Ang) / (erg/s/cm2/Ang)
+      unit: electron cm2 / erg
       description: standard star 6
     STD7SEN:
       name: STD7SEN
       type: float32
-      unit: (electron/s/Ang) / (erg/s/cm2/Ang)
+      unit: electron cm2 / erg
       description: standard star 7
     STD8SEN:
       name: STD8SEN
       type: float32
-      unit: (electron/s/Ang) / (erg/s/cm2/Ang)
+      unit: electron cm2 / erg
       description: standard star 8
     STD9SEN:
       name: STD9SEN
       type: float32
-      unit: (electron/s/Ang) / (erg/s/cm2/Ang)
+      unit: electron cm2 / erg
       description: standard star 9
     STD10SEN:
       name: STD10SEN
       type: float32
-      unit: (electron/s/Ang) / (erg/s/cm2/Ang)
+      unit: electron cm2 / erg
       description: standard star 10
     STD11SEN:
       name: STD11SEN
       type: float32
-      unit: (electron/s/Ang) / (erg/s/cm2/Ang)
+      unit: electron cm2 / erg
       description: standard star 11
     STD12SEN:
       name: STD12SEN
       type: float32
-      unit: (electron/s/Ang) / (erg/s/cm2/Ang)
+      unit: electron cm2 / erg
       description: standard star 12
     MEAN_SENS:
       name: MEAN_SENS
       type: float32
-      unit: (electron/s/Ang) / (erg/s/cm2/Ang)
+      unit: electron cm2 / erg
       description: mean sensitivity
     STDDEV_SENS:
       name: STDDEV_SENS
       type: float32
-      unit: (electron/s/Ang) / (erg/s/cm2/Ang)
+      unit: electron cm2 / erg
       description: standard deviation of sensitivity
 hdu12:
   name: SLITMAP
@@ -305,17 +322,17 @@ hdu12:
       name: ypix_b
       type: uint32
       description: the y coordinate in pixels of the fiber at column 2000 for channel b
-      unit: pixels
+      unit: pix
     YPIX_R:
       name: ypix_r
       type: uint32
       description: the y coordinate in pixels of the fiber at column 2000 for channel r
-      unit: pixels
+      unit: pix
     YPIX_Z:
       name: ypix_z
       type: uint32
       description: the y coordinate in pixels of the fiber at column 2000 for channel z
-      unit: pixels
+      unit: pix
     FIBSTATUS:
       name: fibstatus
       type: uint16

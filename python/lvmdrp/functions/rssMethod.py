@@ -798,9 +798,9 @@ def shift_wave_skylines(in_frame: str, out_frame: str, dwave: float = 8.0, skyli
     meanoffset = numpy.nan_to_num(meanoffset)
     log.info(f'Applying the offsets [Angstroms] in [1,2,3] spectrographs with means: {meanoffset}')
     lvmframe._wave_trace['COEFF'].data[:,0] -= fiber_offset_mod
-    lvmframe._header[f'HIERARCH WAVE SKYOFF_{channel.upper()}1'] = (meanoffset[0], f'Mean sky line offset in {channel}1 [Angs]')
-    lvmframe._header[f'HIERARCH WAVE SKYOFF_{channel.upper()}2'] = (meanoffset[1], f'Mean sky line offset in {channel}2 [Angs]')
-    lvmframe._header[f'HIERARCH WAVE SKYOFF_{channel.upper()}3'] = (meanoffset[2], f'Mean sky line offset in {channel}3 [Angs]')
+    lvmframe._header[f'HIERARCH {channel.upper()}1 WAVE SKYOFF'] = (meanoffset[0], f'avg. sky line offset in {channel}1 [Angstrom]')
+    lvmframe._header[f'HIERARCH {channel.upper()}2 WAVE SKYOFF'] = (meanoffset[1], f'avg. sky line offset in {channel}2 [Angstrom]')
+    lvmframe._header[f'HIERARCH {channel.upper()}3 WAVE SKYOFF'] = (meanoffset[2], f'avg. sky line offset in {channel}3 [Angstrom]')
 
     wave_trace = TraceMask.from_coeff_table(lvmframe._wave_trace)
     lvmframe._wave = wave_trace.eval_coeffs()
@@ -1638,9 +1638,6 @@ def apply_fiberflat(in_rss: str, out_frame: str, in_flat: str, clip_below: float
     log.info(f"reading target data from {os.path.basename(in_rss)}")
     rss = RSS.from_file(in_rss)
 
-    # compute initial variance
-    ifibvar = bn.nanmean(bn.nanvar(rss._data, axis=0))
-
     # load fiberflat
     log.info(f"reading fiberflat from {os.path.basename(in_flat)}")
     flat = RSS.from_file(in_flat)
@@ -1680,9 +1677,6 @@ def apply_fiberflat(in_rss: str, out_frame: str, in_flat: str, clip_below: float
         spec_new = spec_data / spec_flat._data
         rss.setSpec(i, spec_new)
 
-    # compute final variance
-    ffibvar = bn.nanmean(bn.nanvar(rss._data, axis=0))
-
     # load ancillary data
     log.info(f"writing lvmFrame to {os.path.basename(out_frame)}")
 
@@ -1698,7 +1692,7 @@ def apply_fiberflat(in_rss: str, out_frame: str, in_flat: str, clip_below: float
         slitmap=rss._slitmap,
         superflat=flat._data
     )
-    lvmframe.set_header(orig_header=rss._header, flatname=os.path.basename(in_flat), ifibvar=ifibvar, ffibvar=ffibvar)
+    lvmframe.set_header(orig_header=rss._header, flatname=os.path.basename(in_flat))
     lvmframe.writeFitsData(out_frame)
 
     return rss, lvmframe
@@ -3200,7 +3194,7 @@ def quickQuality(
 
         # compute statistics
         quads_avg, quads_std, quads_pct = [], [], []
-        for section in bias_img._header["AMP? TRIMSEC"]:
+        for section in bias_img._header[f"{camera.upper()} AMP? TRIMSEC"]:
             quad = bias_img.getSection(section)
             quads_avg.append(numpy.mean(quad._data))
             quads_std.append(numpy.std(quad._data))
