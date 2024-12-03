@@ -246,9 +246,9 @@ def skymodel_pars_header(header):
     skymodel_pars: dict
         output dict with header keywords, values and comments
         None/NAN/Null values replaced with -999
-    
+
     """
-    
+
     # extract useful header information
     sci_ra, sci_dec = header["TESCIRA"], header["TESCIDE"]
     skye_ra, skye_dec = header["TESKYERA"], header["TESKYEDE"]
@@ -325,7 +325,7 @@ def skymodel_pars_header(header):
 
     # Moon illumination fraction
     moon_fli = m.fraction_illuminated(sun)
- 
+
     # altitude of sun ('altsun', -90 -- 90)
     altsun, _, _ = s.altaz()
 
@@ -387,37 +387,37 @@ def skymodel_pars_header(header):
 
 
     skymodel_pars = {
-        "HIERARCH SKYMODEL SM_H": (sm_h.to(u.km).value, "observatory height in km"),
-        "HIERARCH SKYMODEL SM_HMIN": ((2.0 * u.km).value, "lower height limit in km"),
-        "HIERARCH SKYMODEL SCI_ALT": (np.round(sci_alt.to(u.deg).value, 4), "altitude of object above horizon (deg)"),
-        "HIERARCH SKYMODEL SKYE_ALT": (np.round(skye_alt.to(u.deg).value, 4), "altitude of object above horizon (deg)"),
-        "HIERARCH SKYMODEL SKYW_ALT": (np.round(skyw_alt.to(u.deg).value, 4), "altitude of object above horizon (deg)"),
-        "HIERARCH SKYMODEL ALPHA": (np.round(alpha.to(u.deg).value, 4), "separation of Sun and Moon from Earth (deg)"),
-        "HIERARCH SKYMODEL SCI_RHO": (np.round(sci_rho.to(u.deg).value, 4), "separation of Moon and object (deg)"),
-        "HIERARCH SKYMODEL SKYE_RHO": (np.round(skye_rho.to(u.deg).value, 4), "separation of Moon and object (deg)"),
-        "HIERARCH SKYMODEL SKYW_RHO": (np.round(skyw_rho.to(u.deg).value, 4), "separation of Moon and object (deg)"),
-        "HIERARCH SKYMODEL MOONALT": (np.round(altmoon.to(u.deg).value, 4), "altitude of Moon above horizon (deg)"),
-        "HIERARCH SKYMODEL SUNALT": (np.round(altsun.to(u.deg).value, 4), "altitude of Sun above horizon (deg)"),
+        "HIERARCH SKYMODEL SM_H": (sm_h.to(u.km).value, "observatory height [km]"),
+        "HIERARCH SKYMODEL SM_HMIN": ((2.0 * u.km).value, "lower height limit [km]"),
+        "HIERARCH SKYMODEL SCI_ALT": (np.round(sci_alt.to(u.deg).value, 4), "altitude of object above horizon [deg]"),
+        "HIERARCH SKYMODEL SKYE_ALT": (np.round(skye_alt.to(u.deg).value, 4), "altitude of object above horizon [deg]"),
+        "HIERARCH SKYMODEL SKYW_ALT": (np.round(skyw_alt.to(u.deg).value, 4), "altitude of object above horizon [deg]"),
+        "HIERARCH SKYMODEL ALPHA": (np.round(alpha.to(u.deg).value, 4), "separation of Sun and Moon from Earth [deg]"),
+        "HIERARCH SKYMODEL SCI_RHO": (np.round(sci_rho.to(u.deg).value, 4), "separation of Moon and object [deg]"),
+        "HIERARCH SKYMODEL SKYE_RHO": (np.round(skye_rho.to(u.deg).value, 4), "separation of Moon and object [deg]"),
+        "HIERARCH SKYMODEL SKYW_RHO": (np.round(skyw_rho.to(u.deg).value, 4), "separation of Moon and object [deg]"),
+        "HIERARCH SKYMODEL MOONALT": (np.round(altmoon.to(u.deg).value, 4), "altitude of Moon above horizon [deg]"),
+        "HIERARCH SKYMODEL SUNALT": (np.round(altsun.to(u.deg).value, 4), "altitude of Sun above horizon [deg]"),
         "HIERARCH SKYMODEL MOONDIST": (np.round(moondist.value, 4), "distance to Moon (mean distance=1)"),
-        "HIERARCH SKYMODEL PRES": ((744 * u.hPa).value, "pressure at observer altitude (hPa), set: 744"),
+        "HIERARCH SKYMODEL PRES": ((744 * u.hPa).value, "pressure at observer altitude, set: 744 [hPa]"),
         "HIERARCH SKYMODEL SSA": (0.97, "aerosols' single scattering albedo, set: 0.97"),
-        "HIERARCH SKYMODEL CALCDS": ( "N", "cal double scattering of moon (Y or N)"),
-        "HIERARCH SKYMODEL O2COLUMN": (1.0, "relative ozone column density (1->258 DU)"),
+        "HIERARCH SKYMODEL CALCDS": ( "N", "cal double scattering of Moon (Y or N)"),
+        "HIERARCH SKYMODEL O2COLUMN": (1.0, "relative ozone column density (1->258) [DU]"),
         "HIERARCH SKYMODEL MOONSCAL": (1.0, "scaling factor for scattered moonlight"),
-        "HIERARCH SKYMODEL SCI_LON_ECL": (np.round(sci_lon_ecl.to(u.deg).value, 5), "heliocen ecliptic longitude (deg)"),
-        "HIERARCH SKYMODEL SCI_LAT_ECL": (np.round(sci_lat_ecl.to(u.deg).value, 5), "ecliptic latitude (deg)"),
-        "HIERARCH SKYMODEL SKYE_LON_ECL": (np.round(skye_lon_ecl.to(u.deg).value, 5), "heliocen ecliptic longitude (deg)"),
-        "HIERARCH SKYMODEL SKYE_LAT_ECL": (np.round(skye_lat_ecl.to(u.deg).value, 5), "ecliptic latitude (deg)"),
-        "HIERARCH SKYMODEL SKYW_LON_ECL": (np.round(skyw_lon_ecl.to(u.deg).value, 5), "heliocen ecliptic longitude (deg)"),
-        "HIERARCH SKYMODEL SKYW_LAT_ECL": (np.round(skyw_lat_ecl.to(u.deg).value, 5), "ecliptic latitude (deg)"),
+        "HIERARCH SKYMODEL SCI_LON_ECL": (np.round(sci_lon_ecl.to(u.deg).value, 5), "heliocen ecliptic longitude [deg]"),
+        "HIERARCH SKYMODEL SCI_LAT_ECL": (np.round(sci_lat_ecl.to(u.deg).value, 5), "ecliptic latitude [deg]"),
+        "HIERARCH SKYMODEL SKYE_LON_ECL": (np.round(skye_lon_ecl.to(u.deg).value, 5), "heliocen ecliptic longitude [deg]"),
+        "HIERARCH SKYMODEL SKYE_LAT_ECL": (np.round(skye_lat_ecl.to(u.deg).value, 5), "ecliptic latitude [deg]"),
+        "HIERARCH SKYMODEL SKYW_LON_ECL": (np.round(skyw_lon_ecl.to(u.deg).value, 5), "heliocen ecliptic longitude [deg]"),
+        "HIERARCH SKYMODEL SKYW_LAT_ECL": (np.round(skyw_lat_ecl.to(u.deg).value, 5), "ecliptic latitude [deg]"),
         "HIERARCH SKYMODEL EMIS_STR": (0.2, "grey-body emissivity"),
-        "HIERARCH SKYMODEL TEMP_STR": ((290.0 * u.K).value, "grey-body temperature (K)"),
+        "HIERARCH SKYMODEL TEMP_STR": ((290.0 * u.K).value, "grey-body temperature [K]"),
         "HIERARCH SKYMODEL MSOLFLUX": (130.0, "monthly-averaged solar radio flux, set: 130"),
         "HIERARCH SKYMODEL SEASON": (season, "bimonthly period (1:Dec/Jan, 6:Oct/Nov.; 0:year)"),
         "HIERARCH SKYMODEL TIME": (time, "period of night (x/3 night, x=1,2,3; 0:night)"),
-        "HIERARCH SKYMODEL MOON_RA": (np.round(moonra.to(u.deg).value, 5), "RA of the moon (deg)"),
-        "HIERARCH SKYMODEL MOON_DEC": (np.round(moondec.to(u.deg).value, 5), "DEC of the moon (deg)"),
-        "HIERARCH SKYMODEL MOON_PHASE": (np.round(moon_phase, 2), "Phase of moon (deg; 0=new, 90=1st qt)"),
+        "HIERARCH SKYMODEL MOON_RA": (np.round(moonra.to(u.deg).value, 5), "RA of the Moon [deg]"),
+        "HIERARCH SKYMODEL MOON_DEC": (np.round(moondec.to(u.deg).value, 5), "DEC of the Moon [deg]"),
+        "HIERARCH SKYMODEL MOON_PHASE": (np.round(moon_phase, 2), "phase of Moon (0=new, 90=1st qt) [deg]"),
         "HIERARCH SKYMODEL MOON_FLI": (np.round(moon_fli, 4), "Moon fraction lunar illumination")
     }
 

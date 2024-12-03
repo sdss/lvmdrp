@@ -885,7 +885,7 @@ def build_supersky(tileid: int, mjd: int, expnum: int, imagetype: str) -> fits.B
             spec.extend([specid] * (nsam_e + nsam_w))
             telescope.extend(["east"] * nsam_e + ["west"] * nsam_w)
     sort_idx = np.argsort(sky_wave)
-    wave_c = fits.Column(name="wave", array=np.array(sky_wave)[sort_idx], unit="angstrom", format="E")
+    wave_c = fits.Column(name="wave", array=np.array(sky_wave)[sort_idx], unit="Angstrom", format="E")
     sky_c = fits.Column(name="sky", array=np.array(sky)[sort_idx], unit=fsci._header["BUNIT"], format="E")
     sky_error_c = fits.Column(name="sky_error", array=np.array(sky_error)[sort_idx], unit=fsci._header["BUNIT"], format="E")
     fiberidx_c = fits.Column(name="fiberidx", array=np.array(fiberidx)[sort_idx], format="J")

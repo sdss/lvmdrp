@@ -267,7 +267,7 @@ def standard_sensitivity(stds, rss, GAIA_CACHE_DIR, ext, res, plot=False, width=
         # update input file header
         label = channel.upper()
         rss.setHdrValue(f"STD{nn}{label}AB", mAB_std, f"Gaia AB mag in {channel}-band")
-        rss.setHdrValue(f"STD{nn}{label}IN", mAB_obs, f"Obs AB mag in {channel}-band")
+        rss.setHdrValue(f"STD{nn}{label}IN", mAB_obs, f"obs AB mag in {channel}-band")
         log.info(f"AB mag in LVM_{channel}: Gaia {mAB_std:.2f}, instrumental {mAB_obs:.2f}")
 
         if plot:
@@ -372,11 +372,11 @@ def science_sensitivity(rss, res_sci, ext, GAIA_CACHE_DIR, NSCI_MAX=15, r_spaxel
             # update input file header
             cam = channel.upper()
             rss.setHdrValue(f"SCI{i+1}{cam}AB", mAB_std, f"Gaia AB mag in {channel}-band")
-            rss.setHdrValue(f"SCI{i+1}{cam}IN", mAB_obs, f"Obs AB mag in {channel}-band")
-            rss.setHdrValue(f"SCI{i+1}ID", data['source_id'], f"Field star {i+1} Gaia source ID")
-            rss.setHdrValue(f"SCI{i+1}FIB", scifibs['fiberid'][fib][0], f"Field star {i+1} fiber id")
-            rss.setHdrValue(f"SCI{i+1}RA", data['ra'], f"Field star {i+1} RA")
-            rss.setHdrValue(f"SCI{i+1}DE", data['dec'], f"Field star {i+1} DEC")
+            rss.setHdrValue(f"SCI{i+1}{cam}IN", mAB_obs, f"obs AB mag in {channel}-band")
+            rss.setHdrValue(f"SCI{i+1}ID", data['source_id'], f"field star {i+1} Gaia source ID")
+            rss.setHdrValue(f"SCI{i+1}FIB", scifibs['fiberid'][fib][0], f"field star {i+1} fiber id")
+            rss.setHdrValue(f"SCI{i+1}RA", data['ra'], f"field star {i+1} RA")
+            rss.setHdrValue(f"SCI{i+1}DE", data['dec'], f"field star {i+1} DEC")
             log.info(f"AB mag in LVM_{channel}: Gaia {mAB_std:.2f}, instrumental {mAB_obs:.2f}")
 
             # calibrate and plot against the stars for debugging:
@@ -461,8 +461,8 @@ def fluxcal_standard_stars(in_rss, plot=True, GAIA_CACHE_DIR=None):
 
     label = rss._header['CCD']
     channel = label.lower()
-    rss.setHdrValue(f"STDSENM{label}", np.nanmean(mean_std[1000:3000]), f"Mean stdstar sensitivity in {channel}")
-    rss.setHdrValue(f"STDSENR{label}", np.nanmean(rms_std[1000:3000]), f"Mean stdstar sensitivity rms in {channel}")
+    rss.setHdrValue(f"STDSENM{label}", np.nanmean(mean_std[1000:3000]), f"mean stdstar sensitivity in {channel}")
+    rss.setHdrValue(f"STDSENR{label}", np.nanmean(rms_std[1000:3000]), f"mean stdstar sensitivity rms in {channel}")
     log.info(f"Mean stdstar sensitivity in {channel} : {np.nanmean(mean_std[1000:3000])}")
 
     if plot:
@@ -537,8 +537,8 @@ def fluxcal_sci_ifu_stars(in_rss, plot=True, GAIA_CACHE_DIR=None, NSCI_MAX=15):
     rms_sci_band = np.nanmean(rms_sci[1000:3000])
     mean_sci_band = -999.9 if np.isnan(mean_sci_band) else mean_sci_band
     rms_sci_band = -999.9 if np.isnan(rms_sci_band) else rms_sci_band
-    rss.setHdrValue(f"SCISENM{label}", mean_sci_band, f"Mean scistar sensitivity in {channel}")
-    rss.setHdrValue(f"SCISENR{label}", rms_sci_band, f"Mean scistar sensitivity rms in {channel}")
+    rss.setHdrValue(f"SCISENM{label}", mean_sci_band, f"mean scistar sensitivity in {channel}")
+    rss.setHdrValue(f"SCISENR{label}", rms_sci_band, f"mean scistar sensitivity rms in {channel}")
     log.info(f"Mean scistar sensitivity in {channel} : {mean_sci_band}")
 
     if plot:

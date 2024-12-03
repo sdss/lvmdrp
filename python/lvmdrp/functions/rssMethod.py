@@ -798,9 +798,9 @@ def shift_wave_skylines(in_frame: str, out_frame: str, dwave: float = 8.0, skyli
     meanoffset = numpy.nan_to_num(meanoffset)
     log.info(f'Applying the offsets [Angstroms] in [1,2,3] spectrographs with means: {meanoffset}')
     lvmframe._wave_trace['COEFF'].data[:,0] -= fiber_offset_mod
-    lvmframe._header[f'HIERARCH {channel.upper()}1 WAVE SKYOFF'] = (meanoffset[0], f'avg. sky line offset in {channel}1 [angstrom]')
-    lvmframe._header[f'HIERARCH {channel.upper()}2 WAVE SKYOFF'] = (meanoffset[1], f'avg. sky line offset in {channel}2 [angstrom]')
-    lvmframe._header[f'HIERARCH {channel.upper()}3 WAVE SKYOFF'] = (meanoffset[2], f'avg. sky line offset in {channel}3 [angstrom]')
+    lvmframe._header[f'HIERARCH {channel.upper()}1 WAVE SKYOFF'] = (meanoffset[0], f'avg. sky line offset in {channel}1 [Angstrom]')
+    lvmframe._header[f'HIERARCH {channel.upper()}2 WAVE SKYOFF'] = (meanoffset[1], f'avg. sky line offset in {channel}2 [Angstrom]')
+    lvmframe._header[f'HIERARCH {channel.upper()}3 WAVE SKYOFF'] = (meanoffset[2], f'avg. sky line offset in {channel}3 [Angstrom]')
 
     wave_trace = TraceMask.from_coeff_table(lvmframe._wave_trace)
     lvmframe._wave = wave_trace.eval_coeffs()

@@ -2732,15 +2732,15 @@ def extract_spectra(
     rss.setHdrValue("NAXIS2", data.shape[0])
     rss.setHdrValue("NAXIS1", data.shape[1])
     rss.setHdrValue("DISPAXIS", 1, "axis of spectral dispersion")
-    rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER CENT_MIN", numpy.round(bn.nanmin(trace_mask._data),4), "min. fiber centroid")
-    rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER CENT_MAX", numpy.round(bn.nanmax(trace_mask._data),4), "max. fiber centroid")
-    rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER CENT_AVG", numpy.round(bn.nanmean(trace_mask._data),4), "avg. fiber centroid")
-    rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER CENT_STD", numpy.round(bn.nanstd(trace_mask._data),4), "stddev. fiber centroid")
+    rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER CENT_MIN", numpy.round(bn.nanmin(trace_mask._data),4), "min. fiber centroid [pix]")
+    rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER CENT_MAX", numpy.round(bn.nanmax(trace_mask._data),4), "max. fiber centroid [pix]")
+    rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER CENT_AVG", numpy.round(bn.nanmean(trace_mask._data),4), "avg. fiber centroid [pix]")
+    rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER CENT_STD", numpy.round(bn.nanstd(trace_mask._data),4), "stddev. fiber centroid [pix]")
     if method == "optimal":
-        rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER WIDTH_MIN", numpy.round(bn.nanmin(trace_fwhm._data),4), "min. fiber width")
-        rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER WIDTH_MAX", numpy.round(bn.nanmax(trace_fwhm._data),4), "max. fiber width")
-        rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER WIDTH_AVG", numpy.round(bn.nanmean(trace_fwhm._data),4), "avg. fiber width")
-        rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER WIDTH_STD", numpy.round(bn.nanstd(trace_fwhm._data),4), "stddev. fiber width")
+        rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER WIDTH_MIN", numpy.round(bn.nanmin(trace_fwhm._data),4), "min. fiber width [pix]")
+        rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER WIDTH_MAX", numpy.round(bn.nanmax(trace_fwhm._data),4), "max. fiber width [pix]")
+        rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER WIDTH_AVG", numpy.round(bn.nanmean(trace_fwhm._data),4), "avg. fiber width [pix]")
+        rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER WIDTH_STD", numpy.round(bn.nanstd(trace_fwhm._data),4), "stddev. fiber width [pix]")
 
     rss.add_header_comment(f"{in_trace}, fiber centroids used for {camera}")
     rss.add_header_comment(f"{in_fwhm}, fiber width (FWHM) used for {camera}")
@@ -3801,7 +3801,7 @@ def detrend_frame(
     # reject cosmic rays
     if reject_cr:
         log.info("rejecting cosmic rays")
-        rdnoise = detrended_img.getHdrValue("AMP1 RDNOISE")
+        rdnoise = detrended_img.getHdrValue(f"{camera.upper()} AMP1 RDNOISE")
         detrended_img.reject_cosmics(gain=1.0, rdnoise=rdnoise, rlim=1.3, iterations=5, fwhm_gauss=[2.75, 2.75],
                                      replace_box=[10,2], replace_error=1e6, verbose=True, inplace=True)
 
