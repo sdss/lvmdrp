@@ -27,14 +27,14 @@ from skycalc_cli.skycalc import AlmanacQuery, SkyModel
 from skycalc_cli.skycalc_cli import fixObservatory
 from skyfield import almanac
 from skyfield.positionlib import ICRS
-from skyfield.api import Star, load, wgs84
+from skyfield.api import Loader, Star, load, wgs84
 from skyfield.framelib import ecliptic_frame
 
 from lvmdrp.external import shadow_height_lib as sh
 
 from lvmdrp.core.constants import (
     ALMANAC_CONFIG_PATH,
-    EPHEMERIS_PATH,
+    EPHEMERIS_DIR,
     SKYCALC_CONFIG_PATH,
     SKYCORR_CONFIG_PATH,
     SKYCORR_INST_PATH,
@@ -256,7 +256,8 @@ def skymodel_pars_header(header):
     obstime = Time(header["OBSTIME"], scale="tai")
 
     # define ephemeris object
-    astros = load(os.path.basename(EPHEMERIS_PATH))
+    ephemeris_loader = Loader(EPHEMERIS_DIR)
+    astros = ephemeris_loader("de421.bsp")
     sun, earth, moon = astros["sun"], astros["earth"], astros["moon"]
     # define location
     obs_topos = wgs84.latlon(
@@ -266,7 +267,7 @@ def skymodel_pars_header(header):
     )
     obs = earth + obs_topos
     # define observation datetime
-    ts = load.timescale()
+    ts = ephemeris_loader.timescale()
     obs_time = ts.from_astropy(obstime)
     # define observatory object
     obs = obs.at(obs_time)
