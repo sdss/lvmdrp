@@ -1124,9 +1124,10 @@ class Image(Header):
             return new_image
 
         if current != to:
+            camera = self.getHdrValue("CCD").upper()
             exptime = self.getHdrValue("EXPTIME")
-            gains = self.getHdrValue(f"AMP? {gain_field}")
-            sects = self.getHdrValue("AMP? TRIMSEC")
+            gains = self.getHdrValue(f"{camera} AMP? {gain_field}")
+            sects = self.getHdrValue(f"{camera} AMP? TRIMSEC")
             n_amp = len(gains)
             for i in range(n_amp):
                 if current == "adu" and to == "electron":
@@ -3373,7 +3374,8 @@ def combineImages(
     stack_error[stack_mask] = numpy.nan
 
     if background_subtract:
-        quad_sections = images[0].getHdrValues("AMP? TRIMSEC")
+        camera = images[0].getHdrValue("CCD").upper()
+        quad_sections = images[0].getHdrValues(f"{camera} AMP? TRIMSEC")
         stack_image, _, _, _ = _bg_subtraction(
             images=stack_image,
             quad_sections=quad_sections,

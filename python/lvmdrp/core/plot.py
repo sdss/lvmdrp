@@ -271,7 +271,8 @@ def plot_detrend(ori_image, det_image, axs, mbias=None, mdark=None, labels=False
     """
 
     # define quadrant sections
-    sections = ori_image.getHdrValue("AMP? TRIMSEC")
+    camera = ori_image.getHdrValue("CCD").upper()
+    sections = ori_image.getHdrValue(f"{camera} AMP? TRIMSEC")
 
     # convert all images to adu
     unit = "adu"

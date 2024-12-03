@@ -2732,15 +2732,15 @@ def extract_spectra(
     rss.setHdrValue("NAXIS2", data.shape[0])
     rss.setHdrValue("NAXIS1", data.shape[1])
     rss.setHdrValue("DISPAXIS", 1, "axis of spectral dispersion")
-    rss.setHdrValue("HIERARCH FIBER CENT_MIN", numpy.round(bn.nanmin(trace_mask._data),4), "min. fiber centroid")
-    rss.setHdrValue("HIERARCH FIBER CENT_MAX", numpy.round(bn.nanmax(trace_mask._data),4), "max. fiber centroid")
-    rss.setHdrValue("HIERARCH FIBER CENT_AVG", numpy.round(bn.nanmean(trace_mask._data),4), "avg. fiber centroid")
-    rss.setHdrValue("HIERARCH FIBER CENT_STD", numpy.round(bn.nanstd(trace_mask._data),4), "stddev. fiber centroid")
+    rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER CENT_MIN", numpy.round(bn.nanmin(trace_mask._data),4), "min. fiber centroid")
+    rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER CENT_MAX", numpy.round(bn.nanmax(trace_mask._data),4), "max. fiber centroid")
+    rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER CENT_AVG", numpy.round(bn.nanmean(trace_mask._data),4), "avg. fiber centroid")
+    rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER CENT_STD", numpy.round(bn.nanstd(trace_mask._data),4), "stddev. fiber centroid")
     if method == "optimal":
-        rss.setHdrValue("HIERARCH FIBER WIDTH_MIN", numpy.round(bn.nanmin(trace_fwhm._data),4), "min. fiber width")
-        rss.setHdrValue("HIERARCH FIBER WIDTH_MAX", numpy.round(bn.nanmax(trace_fwhm._data),4), "max. fiber width")
-        rss.setHdrValue("HIERARCH FIBER WIDTH_AVG", numpy.round(bn.nanmean(trace_fwhm._data),4), "avg. fiber width")
-        rss.setHdrValue("HIERARCH FIBER WIDTH_STD", numpy.round(bn.nanstd(trace_fwhm._data),4), "stddev. fiber width")
+        rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER WIDTH_MIN", numpy.round(bn.nanmin(trace_fwhm._data),4), "min. fiber width")
+        rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER WIDTH_MAX", numpy.round(bn.nanmax(trace_fwhm._data),4), "max. fiber width")
+        rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER WIDTH_AVG", numpy.round(bn.nanmean(trace_fwhm._data),4), "avg. fiber width")
+        rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER WIDTH_STD", numpy.round(bn.nanstd(trace_fwhm._data),4), "stddev. fiber width")
 
     rss.add_header_comment(f"{in_trace}, fiber centroids used for {camera}")
     rss.add_header_comment(f"{in_fwhm}, fiber width (FWHM) used for {camera}")
@@ -3281,35 +3281,35 @@ def preproc_raw_frame(
         ysize, xsize = sc_quads[i]._dim
         x, y = int(QUAD_POSITIONS[i][0]), int(QUAD_POSITIONS[i][1])
         proc_img.setHdrValue(
-            f"HIERARCH AMP{i+1} TRIMSEC",
+            f"HIERARCH {camera.upper()} AMP{i+1} TRIMSEC",
             f"[{x*xsize+1}:{xsize*(x+1)}, {y*ysize+1}:{ysize*(y+1)}]",
             f"region of amp. {i+1}",
         )
     # add gain keywords for the different subimages (CCDs/Amplifiers)
     for i in range(NQUADS):
         proc_img.setHdrValue(
-            f"HIERARCH AMP{i+1} {gain_prefix}",
+            f"HIERARCH {camera.upper()} AMP{i+1} {gain_prefix}",
             gain[i],
             f"gain value of amp. {i+1} [electron/adu]",
         )
     # add read-out noise keywords for the different subimages (CCDs/Amplifiers)
     for i in range(NQUADS):
         proc_img.setHdrValue(
-            f"HIERARCH AMP{i+1} {rdnoise_prefix}",
+            f"HIERARCH {camera.upper()} AMP{i+1} {rdnoise_prefix}",
             rdnoise[i],
             f"read-out noise of amp. {i+1} [electron]",
         )
     # add bias of overscan region for the different subimages (CCDs/Amplifiers)
     for i in range(NQUADS):
         proc_img.setHdrValue(
-            f"HIERARCH AMP{i+1} OVERSCAN_MED",
+            f"HIERARCH {camera.upper()} AMP{i+1} OVERSCAN_MED",
             os_bias_med[i],
             f"overscan median of amp. {i+1} [adu]",
         )
     # add bias std of overscan region for the different subimages (CCDs/Amplifiers)
     for i in range(NQUADS):
         proc_img.setHdrValue(
-            f"HIERARCH AMP{i+1} OVERSCAN_STD",
+            f"HIERARCH {camera.upper()} AMP{i+1} OVERSCAN_STD",
             os_bias_std[i],
             f"overscan std of amp. {i+1} [adu]",
         )
@@ -3756,13 +3756,13 @@ def detrend_frame(
     if convert_to_e:
         # calculate Poisson errors
         log.info("applying gain correction per quadrant")
-        for i, quad_sec in enumerate(bcorr_img.getHdrValue("AMP? TRIMSEC").values()):
+        for i, quad_sec in enumerate(bcorr_img.getHdrValue(f"{camera.upper()} AMP? TRIMSEC").values()):
             log.info(f"processing quadrant {i+1}: {quad_sec}")
             # extract quadrant image
             quad = bcorr_img.getSection(quad_sec)
             # extract quadrant gain and rdnoise values
-            gain = quad.getHdrValue(f"AMP{i+1} GAIN")
-            rdnoise = quad.getHdrValue(f"AMP{i+1} RDNOISE")
+            gain = quad.getHdrValue(f"{camera.upper()} AMP{i+1} GAIN")
+            rdnoise = quad.getHdrValue(f"{camera.upper()} AMP{i+1} RDNOISE")
 
             # non-linearity correction
             gain_map = _nonlinearity_correction(ptc_params, gain, quad, iquad=i+1)
@@ -4155,7 +4155,8 @@ def create_pixelmask(in_short_dark, in_long_dark, out_pixmask, in_flat_a=None, i
     ratio_dark = short_dark / long_dark
 
     # define quadrant sections
-    sections = short_dark.getHdrValue("AMP? TRIMSEC")
+    camera = short_dark.getHdrValue("CCD")
+    sections = short_dark.getHdrValue(f"{camera.upper()} AMP? TRIMSEC")
 
     # define pixelmask image
     pixmask = Image(data=numpy.zeros_like(short_dark._data), mask=numpy.zeros_like(short_dark._data, dtype="bool"))
