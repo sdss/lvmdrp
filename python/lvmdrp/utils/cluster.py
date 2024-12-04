@@ -68,6 +68,9 @@ def run_cluster(mjds: list = None, expnums: Union[list, str] = None, nodes: int 
     if run_calibs:
         expnums = None
         cmd = "calibrations"
+    else:
+        # skip drpall summary file in cluster runs to avoid race condition errors
+        drp_options += " --skip-drpall" if "--skip-drpall" not in drp_options else ""
 
     if expnums is not None:
         if isinstance(expnums, str) and os.path.isfile(expnums):

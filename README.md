@@ -63,10 +63,10 @@ To install the DRP along with its dependencies, you need to run the following st
     cd lvmdrp
     ```
 
-
-3. Install the DRP package in the current python environment (see [contributing](#contributing-to-lvm-drp-development) section below for a replacement of this step):
+3. Install the DRP package in the current python environment (see [contributing](#contributing-to-lvm-drp-development) section below for a replacement of this step). Make sure you're back in the lvmdrp directory.
 
     ```bash
+    cd lvmdrp
     pip install .
     ```
 

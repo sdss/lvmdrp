@@ -29,8 +29,8 @@ from lvmdrp.core.spectrum1d import Spectrum1D
 
 
 def get_mean_sens_curves(sens_dir):
-    return {'b':pd.read_csv(f'{sens_dir}/mean-sens-b.csv', names=['wavelength', 'sens']), 
-            'r':pd.read_csv(f'{sens_dir}/mean-sens-r.csv', names=['wavelength', 'sens']), 
+    return {'b':pd.read_csv(f'{sens_dir}/mean-sens-b.csv', names=['wavelength', 'sens']),
+            'r':pd.read_csv(f'{sens_dir}/mean-sens-r.csv', names=['wavelength', 'sens']),
             'z':pd.read_csv(f'{sens_dir}/mean-sens-z.csv', names=['wavelength', 'sens'])}
 
 def retrieve_header_stars(rss):
@@ -130,8 +130,13 @@ def get_XP_spectra(expnum, ra_tile, dec_tile, lim_mag=14.0, n_spec=15, GAIA_CACH
     #
     # get XP spectra and cache the calibrated spectra
     #
+
+    cols = r.colnames
+    new_cols = [col.lower() for col in cols]
+    r.rename_columns(cols, new_cols)
+
     sampling=np.arange(336., 1021., 2.)
-    ids = [line['SOURCE_ID'] for line in r]
+    ids = [line['source_id'] for line in r]
     if GAIA_CACHE_DIR is None or path.exists(GAIA_CACHE_DIR + f'/{expnum}_XP_spec.pickle') is False:
         calibrated_spectra, _ = gaiaxpy.calibrate(ids, truncation=False, save_file=False)
         if GAIA_CACHE_DIR is not None:
@@ -140,7 +145,7 @@ def get_XP_spectra(expnum, ra_tile, dec_tile, lim_mag=14.0, n_spec=15, GAIA_CACH
     else:
         #print('reading '+GAIA_CACHE_DIR + f'/{expnum}_XP_spec.csv')
         calibrated_spectra = pd.read_pickle(GAIA_CACHE_DIR + f'/{expnum}_XP_spec.pickle')
-        
+
     # calibrated_spectra
     if(plot):
         gaiaxpy.plot_spectra(calibrated_spectra, sampling=sampling, multi=True, show_plot=True, output_path=None, legend=False)
@@ -253,7 +258,7 @@ def LVM_phot_filter(channel, w):
         return np.exp(-0.5 * ((w - 8500) / 250) ** 2)
     else:
         raise Exception(f"Unknown filter '{channel}'")
-    
+
 
 def spec_to_mAB(lam, spec, lamf, filt):
     """
@@ -296,9 +301,9 @@ def spec_to_LVM_mAB(channel, w, f):
 
 def sky_flux_in_filter(cam, skyfibs, obswave, percentile=75):
     '''
-    Given an lvmFrame, calculate the median flux in the LVM photometric system of the 
-    lowest 'percentile' of sky fibers. 
-    
+    Given an lvmFrame, calculate the median flux in the LVM photometric system of the
+    lowest 'percentile' of sky fibers.
+
     Used for sky subtraction of the photometry of stars for sci IFU self calibration.
     '''
     nfiber = skyfibs.shape[0]

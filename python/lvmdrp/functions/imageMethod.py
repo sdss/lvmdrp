@@ -18,6 +18,7 @@ from astropy.table import Table
 from astropy.io import fits as pyfits
 from astropy.visualization import simple_norm
 from astropy.wcs import wcs
+from astropy import units as u
 import astropy.io.fits as fits
 from scipy import interpolate
 from scipy import signal
@@ -25,7 +26,7 @@ from tqdm import tqdm
 
 from typing import List, Tuple
 
-from lvmdrp import log, __version__ as DRPVER
+from lvmdrp import log, DRP_COMMIT, __version__ as DRPVER
 from lvmdrp.core.constants import CONFIG_PATH, SPEC_CHANNELS, ARC_LAMPS, LVM_REFERENCE_COLUMN, LVM_NBLOCKS, FIDUCIAL_PLATESCALE
 from lvmdrp.utils.decorators import skip_on_missing_input_path, drop_missing_input_paths
 from lvmdrp.utils.bitmask import PixMask
@@ -43,10 +44,11 @@ from lvmdrp.core.image import (
 )
 from lvmdrp.core.plot import plt, create_subplots, plot_detrend, plot_strips, plot_image_shift, plot_fiber_thermal_shift, save_fig
 from lvmdrp.core.rss import RSS
-from lvmdrp.core.spectrum1d import Spectrum1D, _spec_from_lines, _normalize_peaks, _cross_match
+from lvmdrp.core.spectrum1d import Spectrum1D, _spec_from_lines, _cross_match
 from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.utils.hdrfix import apply_hdrfix
 from lvmdrp.utils.convert import dateobs_to_sjd, correct_sjd
+from lvmdrp.utils.timer import Timer
 
 
 NQUADS = 4
@@ -380,22 +382,19 @@ def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=Non
     # generate the continuum model using the master traces only along the specific columns
     if fiber_model is None:
         fiber_model, _ = image.eval_fiber_model(trace_cent, trace_width, trace_amp=trace_amp, columns=columns, column_width=column_width)
-        fiber_model.writeFitsData("./test_model.fits")
 
     mjd = image._header["SMJD"]
     expnum = image._header["EXPOSURE"]
     camera = image._header["CCD"]
 
-    # unpack axes
-    axs_cc, axs_fb = axs
     # calculate thermal shifts
-    column_shifts = image.measure_fiber_shifts(fiber_model, columns=columns, column_width=column_width, shift_range=shift_range, axs=axs_cc)
+    column_shifts = image.measure_fiber_shifts(fiber_model, trace_cent, columns=columns, column_width=column_width, shift_range=shift_range, axs=axs)
     if (column_shifts!=0).any():
         image.update_drpstage("FIBERS_SHIFTED")
 
     # shifts stats
-    median_shift = bn.nanmedian(column_shifts, axis=0)
-    std_shift = bn.nanstd(column_shifts, axis=0)
+    median_shift = numpy.nan_to_num(bn.nanmedian(column_shifts, axis=0))
+    std_shift = numpy.nan_to_num(bn.nanstd(column_shifts, axis=0))
     if numpy.abs(median_shift) > 0.5:
         log.warning(f"large thermal shift measured: {','.join(map(str, column_shifts))} pixels for {mjd = }, {expnum = }, {camera = }")
         image.add_header_comment(f"large thermal shift: {','.join(map(str, column_shifts))} pixels {camera = }")
@@ -408,43 +407,7 @@ def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=Non
     trace_cent_fixed._coeffs[:, 0] += median_shift
     trace_cent_fixed.eval_coeffs()
 
-    select_blocks = [9]
-    for j, c in enumerate(columns):
-        blocks_pos = numpy.asarray(numpy.split(trace_cent._data[:, c], 18))[select_blocks]
-        blocks_bounds = [(int(bpos.min())-5, int(bpos.max())+5) for bpos in blocks_pos]
-
-        for i, (bmin, bmax) in enumerate(blocks_bounds):
-            x = numpy.arange(bmax-bmin) + i*(bmax-bmin) + 10
-            # y_models = fiber_model._data[bmin:bmax,c-column_width:c+column_width]
-            y_model = bn.nanmedian(fiber_model._data[bmin:bmax,c-column_width:c+column_width], axis=1)
-            y_data = bn.nanmedian(image._data[bmin:bmax, c-column_width:c+column_width], axis=1)
-            snr = numpy.sqrt(y_data.mean())
-            y_model = _normalize_peaks(y_model, min_peak_dist=5.0)
-            y_data = _normalize_peaks(y_data, min_peak_dist=5.0)
-            # axs_fib[j].step(x, y_models * norm, color="0.7", lw=0.7, alpha=0.3)
-            axs_fb[j].step(x, y_data, color="0.2", lw=1.5, label="data" if i == 0 else None)
-            axs_fb[j].step(x, y_model, color="tab:blue", lw=1, label="model" if i == 0 else None)
-            axs_fb[j].step(x+column_shifts[j], numpy.interp(x+column_shifts[j], x, y_model), color="tab:red", lw=1, label="corr. model" if i == 0 else None)
-        axs_fb[j].set_title(f"measured shift {column_shifts[j]:.4f} pixel @ column {c} with SNR = {snr:.2f}")
-        axs_fb[j].set_ylim(-0.05, 1.3)
-    axs_fb[0].legend(loc=1, frameon=False, ncols=3)
-
-    # deltas = TraceMask(data=numpy.zeros_like(trace_cent._data), mask=numpy.ones_like(trace_cent._data, dtype=bool))
-    # deltas._data[:, columns] = column_shifts
-    # deltas._mask[:, columns] = False
-    # deltas.fit_polynomial(deg=4)
-
-    # # fig, ax = create_subplots(to_display=True, figsize=(15,5))
-    # # ax.plot(deltas._data[:, columns]-column_shifts, ".k")
-
-    # trace_cent_fixed = copy(trace_cent)
-    # for ifiber in range(trace_cent._data.shape[0]):
-    #     poly_trace = numpy.polynomial.Polynomial(trace_cent._coeffs[ifiber])
-    #     poly_deltas = numpy.polynomial.Polynomial(deltas._coeffs[ifiber])
-    #     trace_cent_fixed._coeffs[ifiber] = (poly_trace + poly_deltas).coef
-    # trace_cent_fixed.eval_coeffs()
-
-    return image, trace_cent_fixed, column_shifts, fiber_model
+    return image, trace_cent_fixed, column_shifts, median_shift, std_shift, fiber_model
 
 
 def _apply_electronic_shifts(images, out_images, drp_shifts=None, qc_shifts=None, custom_shifts=None, raw_shifts=None,
@@ -800,7 +763,7 @@ def fix_pixel_shifts(in_images, out_images, ref_images, in_mask, report=None,
                 [img.add_header_comment("QC reports and DRP do not agree on the shifted rows") for img in images]
                 if interactive:
                     log.info("interactive mode enabled")
-                    answer = input("apply [q]c, [d]rp or [c]ustom shifts: ")
+                    answer = input("apply [q]c, [d]rp, [c]ustom shifts or [n]one: ")
                     if answer.lower() == "q":
                         log.info("choosing QC shifts")
                         shifts = qshifts
@@ -819,6 +782,14 @@ def fix_pixel_shifts(in_images, out_images, ref_images, in_mask, report=None,
                         shifts = cshifts
                         corrs = numpy.zeros_like(cshifts)
                         which_shifts = "custom"
+                    elif answer.lower() == "n":
+                        log.info("choosing to apply no shift")
+                        cshifts = numpy.zeros_like(cdata.shape[0])
+                        shifts = cshifts
+                        corrs = numpy.zeros_like(cshifts)
+                        which_shifts = "custom"
+                        apply_shifts = False
+
                     apply_shifts = numpy.any(numpy.abs(shifts)>0)
                 else:
                     log.warning(f"no shift will be applied to the images: {in_images}")
@@ -2639,7 +2610,7 @@ def extract_spectra(
         fiber_model = None
 
     shift_range = [-4,4]
-    fig = plt.figure(figsize=(15, 3*len(columns)), layout="constrained")
+    fig = plt.figure(figsize=(15, 4*len(columns)), layout="constrained")
     fig.suptitle(f"Thermal fiber shifts for {mjd = }, {camera = }, {expnum = }")
     gs = GridSpec(len(columns)+1, 15, figure=fig)
     axs_cc, axs_fb = [], []
@@ -2654,18 +2625,18 @@ def extract_spectra(
     axs_cc[0].set_title("Cross-correlation")
     axs_cc[-1].set_xlabel("Shift (pixel)")
     axs_fb[-1].set_xlabel("Y (pixel)")
-    axs_cc[-1].set_xlim(shift_range)
+    # axs_cc[-1].set_xlim(shift_range)
 
     # fix centroids for thermal shifts
     log.info(f"measuring fiber thermal shifts @ columns: {','.join(map(str, columns))}")
-    img, trace_mask, shifts, _ = _fix_fiber_thermal_shifts(img, trace_mask, 2.5,
-                                                           fiber_model=fiber_model,
-                                                           trace_amp=10000,
-                                                           columns=columns,
-                                                           column_width=column_width,
-                                                           shift_range=shift_range, axs=[axs_cc, axs_fb])
+    img, trace_mask, shifts, median_shift, std_shift, _ = _fix_fiber_thermal_shifts(img, trace_mask, 2.5,
+                                                                                    fiber_model=fiber_model,
+                                                                                    trace_amp=10000,
+                                                                                    columns=columns,
+                                                                                    column_width=column_width,
+                                                                                    shift_range=shift_range, axs=[axs_cc, axs_fb])
     # save columns measured for thermal shifts
-    plot_fiber_thermal_shift(columns, shifts, ax=ax_shift)
+    plot_fiber_thermal_shift(columns, shifts, median_shift, std_shift, ax=ax_shift)
     save_fig(fig, product_path=out_rss, to_display=display_plots, figure_path="qa", label="fiber_thermal_shifts")
 
     if method == "optimal":
@@ -2716,9 +2687,8 @@ def extract_spectra(
             else:
                 mask = None
         else:
-            (data, error, mask) = img.extractSpecOptimal(
-                trace_mask, trace_fwhm, plot_fig=display_plots
-            )
+            with Timer(name="extract optimal", logger=log.info):
+                (data, error, mask) = img.extractSpecOptimal(trace_mask, trace_fwhm, plot_fig=display_plots)
     elif method == "aperture":
         trace_fwhm = None
 
@@ -2753,7 +2723,7 @@ def extract_spectra(
     # propagate thermal shift to slitmap
     channel = img._header['CCD'][0]
     slitmap[f"ypix_{channel}"] = slitmap[f"ypix_{channel}"].astype("float64")
-    slitmap[f"ypix_{channel}"][select_spec] += bn.nanmedian(shifts, axis=0)
+    slitmap[f"ypix_{channel}"][select_spec] += numpy.nan_to_num(bn.nanmedian(shifts, axis=0))
 
     rss = RSS(
         data=data,
@@ -2768,52 +2738,22 @@ def extract_spectra(
     rss.update_drpstage("SPECTRA_EXTRACTED")
     rss.setHdrValue("NAXIS2", data.shape[0])
     rss.setHdrValue("NAXIS1", data.shape[1])
-    rss.setHdrValue("DISPAXIS", 1)
-    rss.setHdrValue(
-        "HIERARCH FIBER CENT MIN",
-        bn.nanmin(trace_mask._data[rss._good_fibers]),
-    )
-    rss.setHdrValue(
-        "HIERARCH FIBER CENT MAX",
-        bn.nanmax(trace_mask._data[rss._good_fibers]),
-    )
-    rss.setHdrValue(
-        "HIERARCH FIBER CENT AVG",
-        bn.nanmean(trace_mask._data[rss._good_fibers]) if data.size != 0 else 0,
-    )
-    rss.setHdrValue(
-        "HIERARCH FIBER CENT MED",
-        bn.nanmedian(trace_mask._data[rss._good_fibers])
-        if data.size != 0
-        else 0,
-    )
-    rss.setHdrValue(
-        "HIERARCH FIBER CENT SIG",
-        numpy.std(trace_mask._data[rss._good_fibers]) if data.size != 0 else 0,
-    )
+    rss.setHdrValue("DISPAXIS", 1, "axis of spectral dispersion")
+    rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER CENT_MIN", numpy.round(bn.nanmin(trace_mask._data),4), "min. fiber centroid [pix]")
+    rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER CENT_MAX", numpy.round(bn.nanmax(trace_mask._data),4), "max. fiber centroid [pix]")
+    rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER CENT_AVG", numpy.round(bn.nanmean(trace_mask._data),4), "avg. fiber centroid [pix]")
+    rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER CENT_STD", numpy.round(bn.nanstd(trace_mask._data),4), "stddev. fiber centroid [pix]")
     if method == "optimal":
-        rss.setHdrValue(
-            "HIERARCH FIBER WIDTH MIN",
-            bn.nanmin(trace_fwhm._data[rss._good_fibers]),
-        )
-        rss.setHdrValue(
-            "HIERARCH FIBER WIDTH MAX",
-            bn.nanmax(trace_fwhm._data[rss._good_fibers]),
-        )
-        rss.setHdrValue(
-            "HIERARCH FIBER WIDTH AVG",
-            bn.nanmean(trace_fwhm._data[rss._good_fibers]) if data.size != 0 else 0,
-        )
-        rss.setHdrValue(
-            "HIERARCH FIBER WIDTH MED",
-            bn.nanmedian(trace_fwhm._data[rss._good_fibers])
-            if data.size != 0
-            else 0,
-        )
-        rss.setHdrValue(
-            "HIERARCH FIBER WIDTH SIG",
-            numpy.std(trace_fwhm._data[rss._good_fibers]) if data.size != 0 else 0,
-        )
+        rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER WIDTH_MIN", numpy.round(bn.nanmin(trace_fwhm._data),4), "min. fiber width [pix]")
+        rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER WIDTH_MAX", numpy.round(bn.nanmax(trace_fwhm._data),4), "max. fiber width [pix]")
+        rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER WIDTH_AVG", numpy.round(bn.nanmean(trace_fwhm._data),4), "avg. fiber width [pix]")
+        rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER WIDTH_STD", numpy.round(bn.nanstd(trace_fwhm._data),4), "stddev. fiber width [pix]")
+
+    rss.add_header_comment(f"{in_trace}, fiber centroids used for {camera}")
+    rss.add_header_comment(f"{in_fwhm}, fiber width (FWHM) used for {camera}")
+    rss.add_header_comment(f"{in_model}, fiber model used for {camera}")
+    rss.add_header_comment(f"{in_acorr}, fiber aperture correction used for {camera}")
+
     # save extracted RSS
     log.info(f"writing extracted spectra to {os.path.basename(out_rss)}")
     rss.writeFitsData(out_rss)
@@ -3260,7 +3200,7 @@ def preproc_raw_frame(
             gain[2] *= 1.089
         if camera == "z3":
             gain[3] /= 1.056
-        gain = numpy.round(gain, 3)
+        gain = numpy.round(gain, 2)
 
         log.info(f"using header GAIN = {gain.tolist()} (e-/ADU)")
 
@@ -3300,8 +3240,8 @@ def preproc_raw_frame(
             os_models.append(os_model)
 
         # compute overscan stats
-        os_bias_med[i] = bn.nanmedian(os_quad._data, axis=None)
-        os_bias_std[i] = bn.nanmedian(bn.nanstd(os_quad._data, axis=1), axis=None)
+        os_bias_med[i] = numpy.round(bn.nanmedian(os_quad._data, axis=None), 2)
+        os_bias_std[i] = numpy.round(bn.nanmedian(bn.nanstd(os_quad._data, axis=1), axis=None), 2)
         log.info(
             f"median and standard deviation in OS quadrant {i+1}: "
             f"{os_bias_med[i]:.2f} +/- {os_bias_std[i]:.2f} (ADU)"
@@ -3351,37 +3291,37 @@ def preproc_raw_frame(
         ysize, xsize = sc_quads[i]._dim
         x, y = int(QUAD_POSITIONS[i][0]), int(QUAD_POSITIONS[i][1])
         proc_img.setHdrValue(
-            f"HIERARCH AMP{i+1} TRIMSEC",
+            f"HIERARCH {camera.upper()} AMP{i+1} TRIMSEC",
             f"[{x*xsize+1}:{xsize*(x+1)}, {y*ysize+1}:{ysize*(y+1)}]",
-            f"Region of amp. {i+1}",
+            f"region of amp. {i+1}",
         )
     # add gain keywords for the different subimages (CCDs/Amplifiers)
     for i in range(NQUADS):
         proc_img.setHdrValue(
-            f"HIERARCH AMP{i+1} {gain_prefix}",
+            f"HIERARCH {camera.upper()} AMP{i+1} {gain_prefix}",
             gain[i],
-            f"Gain value of amp. {i+1} [electron/adu]",
+            f"gain value of amp. {i+1} [electron/adu]",
         )
     # add read-out noise keywords for the different subimages (CCDs/Amplifiers)
     for i in range(NQUADS):
         proc_img.setHdrValue(
-            f"HIERARCH AMP{i+1} {rdnoise_prefix}",
+            f"HIERARCH {camera.upper()} AMP{i+1} {rdnoise_prefix}",
             rdnoise[i],
-            f"Read-out noise of amp. {i+1} [electron]",
+            f"read-out noise of amp. {i+1} [electron]",
         )
     # add bias of overscan region for the different subimages (CCDs/Amplifiers)
     for i in range(NQUADS):
         proc_img.setHdrValue(
-            f"HIERARCH AMP{i+1} OVERSCAN",
+            f"HIERARCH {camera.upper()} AMP{i+1} OVERSCAN_MED",
             os_bias_med[i],
-            f"Overscan median of amp. {i+1} [adu]",
+            f"overscan median of amp. {i+1} [adu]",
         )
     # add bias std of overscan region for the different subimages (CCDs/Amplifiers)
     for i in range(NQUADS):
         proc_img.setHdrValue(
-            f"HIERARCH AMP{i+1} OVERSCAN_STD",
+            f"HIERARCH {camera.upper()} AMP{i+1} OVERSCAN_STD",
             os_bias_std[i],
-            f"Overscan std of amp. {i+1} [adu]",
+            f"overscan std of amp. {i+1} [adu]",
         )
 
     # load master pixel mask
@@ -3399,6 +3339,10 @@ def preproc_raw_frame(
     saturated_mask = proc_img._data >= 2**16
     proc_img.add_bitmask("SATURATED", where=saturated_mask)
 
+    # NOTE: this is a patch to mask first/last 3 columns as they don't have any useful data
+    proc_img._mask[:, :3] |= PixMask["NODATA"]
+    proc_img._mask[:, -3:] |= PixMask["NODATA"]
+
     # log number of masked pixels
     nmasked = numpy.count_nonzero(proc_img._mask)
     log.info(f"{nmasked} ({nmasked / proc_img._mask.size * 100:.2g} %) pixels masked")
@@ -3411,6 +3355,10 @@ def preproc_raw_frame(
     # update data reduction quality flag
     if saturated_mask.sum() / proc_img._mask.size > 0.01:
         proc_img.update_drpqual("SATURATED")
+    # set drp commit SHA
+    proc_img.setHdrValue("COMMIT", DRP_COMMIT, comment="data reduction pipeline commit HASH")
+    # add calibrations used to header
+    proc_img.add_header_comment(f"{in_mask}, pixel mask used for {camera}")
 
     # write out FITS file
     log.info(f"writing preprocessed image to {os.path.basename(out_image)}")
@@ -3596,9 +3544,14 @@ def add_astrometry(
                 posangrad=-1*numpy.arctan(CDmatrix[1,0]/CDmatrix[0,0])
                 PAobs=posangrad*180/numpy.pi
                 IFUcencoords=outw.pixel_to_world(2500,1000)
-                RAobs=IFUcencoords.ra.value
-                DECobs=IFUcencoords.dec.value
-                org_img.setHdrValue('ASTRMSRC', 'GDR coadd', comment='Source of astrometric solution: guider')
+                try:
+                    # some very early science data apparently fails here
+                    RAobs=IFUcencoords.ra.value
+                    DECobs=IFUcencoords.dec.value
+                except AttributeError:
+                    RAobs=0
+                    DECobs=0
+                org_img.setHdrValue('ASTRMSRC', 'GDR coadd', comment='source of astrometry: guider')
                 copy_guider_keyword(mfheader, 'FRAME0  ', org_img)
                 copy_guider_keyword(mfheader, 'FRAMEN  ', org_img)
                 copy_guider_keyword(mfheader, 'NFRAMES ', org_img)
@@ -3633,7 +3586,7 @@ def add_astrometry(
                 if numpy.any([RAobs, DECobs, PAobs]) == 0:
                     log.warning(f"some astrometry keywords for telescope '{tel}' are missing: {RAobs = }, {DECobs = }, {PAobs = }")
                     org_img.add_header_comment(f"no astromentry keywords '{tel}': {RAobs = }, {DECobs = }, {PAobs = }, using commanded")
-                org_img.setHdrValue('ASTRMSRC', 'CMD position', comment='Source of astrometric solution: commanded position')
+                org_img.setHdrValue('ASTRMSRC', 'CMD position', comment='source of astrometry: commanded position')
                 org_img.update_drpstage(f"{tel.upper()}_ASTROMETRY_ADDED")
         else:
             RAobs=0
@@ -3679,9 +3632,13 @@ def add_astrometry(
     getfibradec('spec', platescale=FIDUCIAL_PLATESCALE)
 
     # add coordinates to slitmap
-    slitmap['ra']=RAfib
-    slitmap['dec']=DECfib
+    slitmap['ra']=RAfib * u.deg
+    slitmap['dec']=DECfib * u.deg
     org_img._slitmap=slitmap
+    # set header keyword with best knowledge of IFU center
+    org_img.setHdrValue('IFUCENRA', RAobs_sci, 'best SCI IFU RA (ASTRMSRC)')
+    org_img.setHdrValue('IFUCENDE', DECobs_sci, 'best SCI IFU DEC (ASTRMSRC)')
+    org_img.setHdrValue('IFUCENPA', PAobs_sci, 'best SCI IFU PA (ASTRMSRC)')
     org_img.update_drpstage("FIBERS_ASTROMETRY_ADDED")
 
     log.info(f"writing RA,DEC to slitmap in image '{os.path.basename(out_image)}'")
@@ -3737,6 +3694,7 @@ def detrend_frame(
     # TODO: Confirm that dark is not being flat fielded in current logic
     # TODO: What is the difference between "flat" and "flatfield"? Pixel flats should not be pixel flatted but regular flats (dome and twilight) yes.
     org_img = loadImage(in_image)
+    camera = org_img._header["CCD"]
     exptime = org_img._header["EXPTIME"]
     img_type = org_img._header["IMAGETYP"].lower()
     log.info(
@@ -3804,13 +3762,13 @@ def detrend_frame(
     if convert_to_e:
         # calculate Poisson errors
         log.info("applying gain correction per quadrant")
-        for i, quad_sec in enumerate(bcorr_img.getHdrValue("AMP? TRIMSEC").values()):
+        for i, quad_sec in enumerate(bcorr_img.getHdrValue(f"{camera.upper()} AMP? TRIMSEC").values()):
             log.info(f"processing quadrant {i+1}: {quad_sec}")
             # extract quadrant image
             quad = bcorr_img.getSection(quad_sec)
             # extract quadrant gain and rdnoise values
-            gain = quad.getHdrValue(f"AMP{i+1} GAIN")
-            rdnoise = quad.getHdrValue(f"AMP{i+1} RDNOISE")
+            gain = quad.getHdrValue(f"{camera.upper()} AMP{i+1} GAIN")
+            rdnoise = quad.getHdrValue(f"{camera.upper()} AMP{i+1} RDNOISE")
 
             # non-linearity correction
             gain_map = _nonlinearity_correction(ptc_params, gain, quad, iquad=i+1)
@@ -3823,13 +3781,13 @@ def detrend_frame(
             bcorr_img.setSection(section=quad_sec, subimg=quad, inplace=True)
             log.info(f"median error in quadrant {i+1}: {bn.nanmedian(quad._error):.2f} (e-)")
 
-        bcorr_img.setHdrValue("BUNIT", "electron", "physical units of the image")
+        bcorr_img.setHdrValue("BUNIT", "electron", "physical units of the array values")
         bcorr_img.update_drpstage("GAIN_CORRECTED")
         bcorr_img.update_drpstage("POISSON_ERROR_CALCULATED")
     else:
         # convert to ADU
         log.info("leaving original ADU units")
-        bcorr_img.setHdrValue("BUNIT", "adu", "physical units of the image")
+        bcorr_img.setHdrValue("BUNIT", "adu", "physical units of the array values")
 
     # complete image detrending
     if in_dark:
@@ -3850,7 +3808,7 @@ def detrend_frame(
     # reject cosmic rays
     if reject_cr:
         log.info("rejecting cosmic rays")
-        rdnoise = detrended_img.getHdrValue("AMP1 RDNOISE")
+        rdnoise = detrended_img.getHdrValue(f"{camera.upper()} AMP1 RDNOISE")
         detrended_img.reject_cosmics(gain=1.0, rdnoise=rdnoise, rlim=1.3, iterations=5, fwhm_gauss=[2.75, 2.75],
                                      replace_box=[10,2], replace_error=1e6, verbose=True, inplace=True)
         detrended_img.update_drpstage("COSMIC_CLEANED")
@@ -3875,6 +3833,12 @@ def detrend_frame(
     else:
         log.warning("no slitmap information to be added")
         detrended_img.add_header_comment("no slitmap information to be added")
+
+    # add calibrations used to header
+    detrended_img.add_header_comment(f"{in_bias}, bias used for {camera}")
+    detrended_img.add_header_comment(f"{in_dark}, dark used for {camera}")
+    detrended_img.add_header_comment(f"{in_pixelflat}, pixel flat used for {camera}")
+    detrended_img.add_header_comment(f"{in_nonlinearity}, non-linearity correction used for {camera}")
 
     # save detrended image
     log.info(f"writing detrended image to '{os.path.basename(out_image)}'")
@@ -4199,7 +4163,8 @@ def create_pixelmask(in_short_dark, in_long_dark, out_pixmask, in_flat_a=None, i
     ratio_dark = short_dark / long_dark
 
     # define quadrant sections
-    sections = short_dark.getHdrValue("AMP? TRIMSEC")
+    camera = short_dark.getHdrValue("CCD")
+    sections = short_dark.getHdrValue(f"{camera.upper()} AMP? TRIMSEC")
 
     # define pixelmask image
     pixmask = Image(data=numpy.zeros_like(short_dark._data), mask=numpy.zeros_like(short_dark._data, dtype="int32"))
@@ -4285,8 +4250,8 @@ def create_pixelmask(in_short_dark, in_long_dark, out_pixmask, in_flat_a=None, i
         fig, ax = create_subplots(to_display=display_plots, figsize=(10,5))
         fig.suptitle(os.path.basename(out_pixmask))
         ax.axvspan(flat_low, flat_high, color="0.7", alpha=0.3)
-        ax.hist(flat_a._data.flatten(), bins=1000, color="tab:blue", alpha=0.5, label=f"flat A ({os.path.basename(in_flat_a)})")
-        ax.hist(flat_b._data.flatten(), bins=1000, color="tab:red", alpha=0.5, label=f"flat B ({os.path.basename(in_flat_b)})")
+        ax.hist(flat_a._data.ravel(), bins=1000, color="tab:blue", alpha=0.5, label=f"flat A ({os.path.basename(in_flat_a)})")
+        ax.hist(flat_b._data.ravel(), bins=1000, color="tab:red", alpha=0.5, label=f"flat B ({os.path.basename(in_flat_b)})")
         ax.axvline(ratio_med, lw=1, ls="--", color="0.2")
         ax.set_xscale("log")
         ax.set_yscale("log")

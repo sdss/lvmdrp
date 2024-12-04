@@ -60,9 +60,8 @@ SKYMODEL_MODEL_CONFIG_PATH = os.path.join(
 # ESO skycorr configuration file
 SKYCORR_CONFIG_PATH = os.path.join(CONFIG_PATH, "third_configs", "skycorr_config.yml")
 
-# data paths
-DATA_PATH = os.path.join(ROOT_PATH, "data")
-EPHEMERIS_PATH = os.path.join(DATA_PATH, "de421.bsp")
+# ephemeris path
+EPHEMERIS_DIR = os.path.join(os.getenv("LVMCORE_DIR"), "etc")
 
 # fiducial calibrations directory
 MASTERS_DIR = os.getenv("LVM_MASTER_DIR")
@@ -102,9 +101,6 @@ SKYCORR_PAR_MAP = {
     "PLOT_TYPE": "plotType",
 }
 
-BASIC_CALIBRATION_TYPES = ["pixmask", "bias", "dark", "pixflat"]
-CALIBRATION_TYPES = BASIC_CALIBRATION_TYPES + ["flat", "arc"]
-FRAMES_PRIORITY = CALIBRATION_TYPES + ["object"]
 FRAMES_CALIB_NEEDS = {
     "bias": [],
     "dark": ["bias"],
@@ -114,6 +110,12 @@ FRAMES_CALIB_NEEDS = {
     "arc": ["pixmask", "bias", "dark", "pixflat", "trace", "fwhm", "wave", "lsf"],
     "object": ["pixmask", "bias", "dark", "pixflat", "fiberflat", "trace", "fwhm", "wave", "lsf"],
 }
+CALIBRATION_NAMES = {"pixmask", "pixflat", "bias", "trace_guess", "trace", "width", "amp", "model", "wave", "lsf", "fiberflat_dome", "fiberflat_twilight"}
+CALIBRATION_MATCH = {
+    "trace": ["trace", "width", "model"],
+    "wave": ["wave", "lsf"],
+    "dome": ["fiberflat_dome"],
+    "twilight": ["fiberflat_twilight"]}
 
 CAMERAS = ["b1", "b2", "b3", "r1", "r2", "r3", "z1", "z2", "z3"]
 

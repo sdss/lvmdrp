@@ -24,7 +24,9 @@ from lvmdrp.core.fit_profile import gaussians, Gaussians
 from lvmdrp.core.apertures import Apertures
 from lvmdrp.core.header import Header
 from lvmdrp.core.tracemask import TraceMask
-from lvmdrp.core.spectrum1d import Spectrum1D, _cross_match_float, _cross_match, _spec_from_lines
+from lvmdrp.core.spectrum1d import Spectrum1D, _normalize_peaks, _fiber_cc_match, _cross_match, _spec_from_lines, align_blocks
+
+from lvmdrp.external.fast_median import fast_median_filter_2d
 
 from lvmdrp import __version__ as drpver
 
@@ -709,7 +711,7 @@ class Image(Header):
         '''
         self._header.append(('COMMENT', comstr), bottom=True)
 
-    def measure_fiber_shifts(self, ref_image, columns=[500, 1000, 1500, 2000, 2500, 3000], column_width=25, shift_range=[-5,5], axs=None):
+    def measure_fiber_shifts(self, ref_image, trace_cent, columns=[500, 1000, 1500, 2000, 2500, 3000], column_width=25, shift_range=[-5,5], axs=None):
         '''Measure the (thermal, flexure, ...) shift between the fiber (traces) in 2 detrended images in the y (cross dispersion) direction.
 
         Uses cross-correlations between (medians of a number of) columns to determine
@@ -737,20 +739,54 @@ class Image(Header):
         elif isinstance(ref_image, numpy.ndarray):
             ref_data = ref_image
 
+        # unpack axes
+        axs_cc, axs_fb = axs
+
+        # calculate shift guess along central wide column
+        s1 = bn.nanmedian(ref_data[50:-50,2000-500:2000+500], axis=1)
+        s2 = bn.nanmedian(self._data[50:-50,2000-500:2000+500], axis=1)
+        guess_shift = align_blocks(s1, s2)
+
+        if guess_shift > 6:
+            log.warning(f"measuring fiber thermal shift too large {guess_shift = } pixels")
+
         shifts = numpy.zeros(len(columns))
+        select_blocks = [9]
         for j,c in enumerate(columns):
+            # collapse columns
             s1 = bn.nanmedian(ref_data[50:-50,c-column_width:c+column_width], axis=1)
             s2 = bn.nanmedian(self._data[50:-50,c-column_width:c+column_width], axis=1)
-            snr = numpy.sqrt(bn.nanmedian(self._data[50:-50,c-column_width:c+column_width], axis=1))
+            # clean remaining NaNs from masked rows
+            s2 = numpy.nan_to_num(s2)
+            snr = numpy.sqrt(s2)
+            median_snr = bn.nanmedian(snr)
 
-            min_snr = 5.0
-            if bn.nanmedian(snr) > min_snr:
-                _, shifts[j], _ = _cross_match_float(s1, s2, numpy.array([1.0]), shift_range, gauss_window=[-3,3], min_peak_dist=5.0, ax=axs[j])
-            else:
-                comstr = f"low SNR (<={min_snr}) for thermal shift at column {c}: {bn.nanmedian(snr):.4f}, assuming = 0.0"
+            min_snr = 1.0
+            if median_snr <= min_snr:
+                comstr = f"low SNR (<={min_snr}) for thermal shift at column {c}: {median_snr:.4f}, assuming = NaN"
                 log.warning(comstr)
                 self.add_header_comment(comstr)
-                shifts[j] = 0.0
+                shifts[j] = numpy.nan
+                continue
+
+            _, shifts[j], _ = _fiber_cc_match(s1, s2, guess_shift, shift_range, gauss_window=[-3,3], min_peak_dist=5.0, ax=axs_cc[j])
+
+            blocks_pos = numpy.asarray(numpy.split(trace_cent._data[:, c], 18))[select_blocks]
+            blocks_bounds = [(int(bpos.min())-10, int(bpos.max())+10) for bpos in blocks_pos]
+
+            for i, (bmin, bmax) in enumerate(blocks_bounds):
+                x = numpy.arange(bmax-bmin) + i*(bmax-bmin) + 10
+                y_model = bn.nanmedian(ref_data[bmin:bmax, c-column_width:c+column_width], axis=1)
+                y_data = bn.nanmedian(self._data[bmin:bmax, c-column_width:c+column_width], axis=1)
+                y_data, y_model, _, _, _, _ = _normalize_peaks(y_data, y_model, min_peak_dist=5.0)
+                # y_data, _, _ = _normalize_peaks(y_data, min_peak_dist=5.0)
+                axs_fb[j].step(x, y_data, color="0.2", lw=1.5, label="data" if i == 0 else None)
+                axs_fb[j].step(x, y_model, color="tab:blue", lw=1, label="model" if i == 0 else None)
+                # axs_fb[j].step(x+shifts[j], numpy.interp(x+shifts[j], x, y_model), color="tab:red", lw=1, label="corr. model" if i == 0 else None)
+                axs_fb[j].step(x, numpy.interp(x, x+shifts[j], y_model), color="tab:red", lw=1, label="corr. model" if i == 0 else None)
+            axs_fb[j].set_title(f"measured shift {shifts[j]:.4f} pixel @ column {c} with SNR = {median_snr:.2f}")
+            axs_fb[j].set_ylim(-0.05, 1.3)
+        axs_fb[0].legend(loc=1, frameon=False, ncols=3)
 
         return shifts
 
@@ -1159,22 +1195,23 @@ class Image(Header):
             return new_image
 
         if current != to:
+            camera = self.getHdrValue("CCD").upper()
             exptime = self.getHdrValue("EXPTIME")
-            gains = self.getHdrValue(f"AMP? {gain_field}")
-            sects = self.getHdrValue("AMP? TRIMSEC")
+            gains = self.getHdrValue(f"{camera} AMP? {gain_field}")
+            sects = self.getHdrValue(f"{camera} AMP? TRIMSEC")
             n_amp = len(gains)
             for i in range(n_amp):
                 if current == "adu" and to == "electron":
                     factor = gains[i]
-                elif current == "adu" and to == "electron/s":
+                elif current == "adu" and to == "electron / s":
                     factor = gains[i] / exptime
                 elif current == "electron" and to == "adu":
                     factor = 1 / gains[i]
-                elif current == "electron" and to == "electron/s":
+                elif current == "electron" and to == "electron / s":
                     factor = 1 / exptime
-                elif current == "electron/s" and to == "adu":
+                elif current == "electron / s" and to == "adu":
                     factor = gains[i] * exptime
-                elif current == "electron/s" and to == "electron":
+                elif current == "electron / s" and to == "electron":
                     factor = exptime
                 else:
                     raise ValueError(f"Cannot convert from {current} to {to}")
@@ -1378,7 +1415,7 @@ class Image(Header):
                     elif hdu[i].header["EXTNAME"].split()[0] == "FRAMES":
                         self._individual_frames = Table(hdu[i].data)
                     elif hdu[i].header["EXTNAME"].split()[0] == "SLITMAP":
-                        self._slitmap = Table(hdu[i].data)
+                        self._slitmap = Table.read(hdu[i])
 
         else:
             if extension_data is not None:
@@ -1395,7 +1432,7 @@ class Image(Header):
             if extension_frames is not None:
                 self._individual_frames = Table(hdu[extension_frames].data)
             if extension_slitmap is not None:
-                self._slitmap = Table(hdu[extension_slitmap].data)
+                self._slitmap = Table.read(hdu[extension_slitmap])
 
         # set is_masked attribute
         self.is_masked = numpy.isnan(self._data).any()
@@ -1489,15 +1526,12 @@ class Image(Header):
         #    hdus[0].update_ext_name('T')
 
         if len(hdus) > 0:
-            hdus[0].header['DRPVER'] = drpver
             hdu = pyfits.HDUList(hdus)  # create an HDUList object
             if self._header is not None:
-                hdu[0].header = self.getHeader()  # add the primary header to the HDU
-                try:
-                    hdu[0].header["BZERO"] = 0
-                except KeyError:
-                    pass
+                hdu[0].header = self.getHeader()
+                hdu[0].header['DRPVER'] = drpver
                 hdu[0].update_header()
+            hdu[0].scale(bzero=0, bscale=1)
 
         os.makedirs(os.path.dirname(filename), exist_ok=True)
         hdu.writeto(filename, output_verify="silentfix", overwrite=True)
@@ -1862,9 +1896,9 @@ class Image(Header):
         new_data = copy(self._data)
         new_error = copy(self._error)
 
-        new_data = ndimage.median_filter(new_data, size, mode="nearest")
+        new_data = fast_median_filter_2d(new_data, size)
         if propagate_error and new_error is not None:
-            new_error = numpy.sqrt(ndimage.median_filter(new_error ** 2, size, mode="nearest"))
+            new_error = numpy.sqrt(fast_median_filter_2d(new_error ** 2, size))
 
         image = Image(data=new_data, error=new_error, mask=self._mask, header=self._header,
                       origin=self._origin, individual_frames=self._individual_frames, slitmap=self._slitmap)
@@ -2359,9 +2393,9 @@ class Image(Header):
             fwhm_mask = numpy.isnan(fwhm_slice) | amp_off | cent_off | fwhm_off
 
             if amp_slice.size != trace_amp._data.shape[0]:
-                dummy_amp = numpy.split(numpy.zeros(trace_amp._data.shape[0]), nblocks)
-                dummy_cent = numpy.split(numpy.zeros(trace_cent._data.shape[0]), nblocks)
-                dummy_fwhm = numpy.split(numpy.zeros(trace_fwhm._data.shape[0]), nblocks)
+                dummy_amp = numpy.split(numpy.zeros(trace_amp._data.shape[0]) + numpy.nan, nblocks)
+                dummy_cent = numpy.split(numpy.zeros(trace_cent._data.shape[0]) + numpy.nan, nblocks)
+                dummy_fwhm = numpy.split(numpy.zeros(trace_fwhm._data.shape[0]) + numpy.nan, nblocks)
                 dummy_amp_mask = numpy.split(numpy.ones(trace_amp._data.shape[0], dtype=bool), nblocks)
                 dummy_cent_mask = numpy.split(numpy.ones(trace_cent._data.shape[0], dtype=bool), nblocks)
                 dummy_fwhm_mask = numpy.split(numpy.ones(trace_fwhm._data.shape[0], dtype=bool), nblocks)
@@ -3185,7 +3219,7 @@ class Image(Header):
 
     def setSlitmap(self, slitmap):
         if isinstance(slitmap, pyfits.BinTableHDU):
-            self._slitmap = Table(slitmap.data)
+            self._slitmap = Table.read(slitmap)
         else:
             self._slitmap = slitmap
 
@@ -3407,7 +3441,8 @@ def combineImages(
     stack_error[stack_mask] = numpy.nan
 
     if background_subtract:
-        quad_sections = images[0].getHdrValues("AMP? TRIMSEC")
+        camera = images[0].getHdrValue("CCD").upper()
+        quad_sections = images[0].getHdrValues(f"{camera} AMP? TRIMSEC")
         stack_image, _, _, _ = _bg_subtraction(
             images=stack_image,
             quad_sections=quad_sections,

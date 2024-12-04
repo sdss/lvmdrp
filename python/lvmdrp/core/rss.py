@@ -1,6 +1,5 @@
 import os
 import numpy
-import itertools
 import bottleneck as bn
 from copy import deepcopy as copy
 from tqdm import tqdm
@@ -15,40 +14,26 @@ from astropy import units as u
 
 from lvmdrp import log
 from lvmdrp.utils.bitmask import ReductionStage, PixMask, _parse_bitmask, add_bitmask, toggle_bitmask, update_header_bitmask, print_bitmasks
-from lvmdrp.core.constants import CONFIG_PATH
+from lvmdrp.core.constants import CONFIG_PATH, CON_LAMPS, ARC_LAMPS
 from lvmdrp.core.apertures import Aperture
 from lvmdrp.core.cube import Cube
 from lvmdrp.core.fiberrows import FiberRows
 from lvmdrp.core.tracemask import TraceMask
-from lvmdrp.core.header import Header, combineHdr
+from lvmdrp.core.header import Header
 from lvmdrp.core.positionTable import PositionTable
-from lvmdrp.core.spectrum1d import Spectrum1D, find_continuum, wave_little_interpol
+from lvmdrp.core.spectrum1d import Spectrum1D, find_continuum
 from lvmdrp.core import dataproducts as dp
+from lvmdrp.core.fit_profile import polyfit2d, polyval2d
+from lvmdrp.core.resample import resample_flux_density
 
 from lvmdrp import __version__ as drpver
 
-def polyfit2d(x, y, z, order=3):
-    """
-    Fit 2D polynomial
-    """
-    ncols = (order + 1) ** 2
-    G = numpy.zeros((x.size, ncols))
-    ij = itertools.product(range(order + 1), range(order + 1))
-    for k, (i, j) in enumerate(ij):
-        G[:, k] = x ** i * y ** j
-    m, null, null, null = numpy.linalg.lstsq(G, z, rcond=None)
-    return m
+def ivar_to_error(ivar):
+    return numpy.sqrt(numpy.divide(1, ivar, where=ivar != 0, out=numpy.zeros_like(ivar, dtype=numpy.float32)))
 
-def polyval2d(x, y, m):
-    """
-    Generate 2D polynomial
-    """
-    order = int(numpy.sqrt(len(m))) - 1
-    ij = itertools.product(range(order + 1), range(order + 1))
-    z = numpy.zeros_like(x)
-    for a, (i, j) in zip(m, ij):
-        z += a * x ** i * y ** j
-    return z
+def error_to_ivar(error):
+    return numpy.divide(1, error**2, where=error != 0, out=numpy.zeros_like(error, dtype=numpy.float32))
+
 
 def _read_pixwav_map(lamp: str, camera: str, pixels=None, waves=None):
     """read pixel-wavelength map from a lamp and camera
@@ -317,8 +302,10 @@ class RSS(FiberRows):
 
         # update header
         if len(hdrs) > 0:
-            hdr_out = combineHdr(hdrs)
-            hdr_out._header["CCD"] = hdr_out._header["CCD"][0]
+            hdr_out = hdrs[0]._header.copy()
+            for hdr in hdrs[1:]:
+                hdr_out.update(hdr._header)
+            hdr_out["CCD"] = hdr_out["CCD"][0]
         else:
             hdr_out = None
 
@@ -338,7 +325,7 @@ class RSS(FiberRows):
             sky_error=sky_error_out,
             supersky=supersky_out,
             supersky_error=supersky_error_out,
-            header=hdr_out._header,
+            header=hdr_out,
             slitmap=slitmap_out,
             fluxcal_std=fluxcal_std_out,
             fluxcal_sci=fluxcal_sci_out
@@ -403,52 +390,9 @@ class RSS(FiberRows):
             skies_w = numpy.asarray(skies_w)
             sky_w_errors = numpy.asarray(sky_w_errors)
         else:
-            log.warning("merged wavelengths are not monotonic, interpolation needed")
-            rsss[0].add_header_comment("merged wavelengths are not monotonic, interpolation needed")
-            # compute the combined wavelengths
-            new_wave = wave_little_interpol(waves)
-            sampling = numpy.diff(new_wave)
-            log.info(f"new wavelength sampling: min = {sampling.min():.2f}, max = {sampling.max():.2f}")
+            log.error("merged wavelengths are not monotonic or uniform!")
+            raise RuntimeError("merged wavelengths are not monotonic or uniform!")
 
-            # define interpolators
-            log.info("interpolating RSS data in new wavelength array")
-            for rss in rsss:
-                f = interpolate.interp1d(rss._wave, rss._data, axis=1, bounds_error=False, fill_value=numpy.nan)
-                fluxes.append(f(new_wave).astype("float32"))
-                f = interpolate.interp1d(rss._wave, rss._error, axis=1, bounds_error=False, fill_value=numpy.nan)
-                errors.append(f(new_wave).astype("float32"))
-                f = interpolate.interp1d(rss._wave, rss._mask, axis=1, kind="nearest", bounds_error=False, fill_value=PixMask["NODATA"])
-                masks.append(f(new_wave).astype("int32"))
-                f = interpolate.interp1d(rss._wave, rss._lsf, axis=1, bounds_error=False, fill_value=numpy.nan)
-                lsfs.append(f(new_wave).astype("float32"))
-                if rss._sky is not None:
-                    f = interpolate.interp1d(rss._wave, rss._sky, axis=1, bounds_error=False, fill_value=numpy.nan)
-                    skies.append(f(new_wave).astype("float32"))
-                if rss._sky_error is not None:
-                    f = interpolate.interp1d(rss._wave, rss._sky_error, axis=1, bounds_error=False, fill_value=numpy.nan)
-                    sky_errors.append(f(new_wave).astype("float32"))
-                if rss._sky_east is not None:
-                    f = interpolate.interp1d(rss._wave, rss._sky_east, axis=1, bounds_error=False, fill_value=numpy.nan)
-                    skies_e.append(f(new_wave).astype("float32"))
-                if rss._sky_east_error is not None:
-                    f = interpolate.interp1d(rss._wave, rss._sky_east_error, axis=1, bounds_error=False, fill_value=numpy.nan)
-                    sky_e_errors.append(f(new_wave).astype("float32"))
-                if rss._sky_west is not None:
-                    f = interpolate.interp1d(rss._wave, rss._sky_west, axis=1, bounds_error=False, fill_value=numpy.nan)
-                    skies_w.append(f(new_wave).astype("float32"))
-                if rss._sky_west_error is not None:
-                    f = interpolate.interp1d(rss._wave, rss._sky_west_error, axis=1, bounds_error=False, fill_value=numpy.nan)
-                    sky_w_errors.append(f(new_wave).astype("float32"))
-            fluxes = numpy.asarray(fluxes)
-            errors = numpy.asarray(errors)
-            masks = numpy.asarray(masks)
-            lsfs = numpy.asarray(lsfs)
-            skies = numpy.asarray(skies)
-            sky_errors = numpy.asarray(sky_errors)
-            skies_e = numpy.asarray(skies_e)
-            sky_e_errors = numpy.asarray(sky_e_errors)
-            skies_w = numpy.asarray(skies_w)
-            sky_w_errors = numpy.asarray(sky_w_errors)
 
         # get overlapping ranges
         mask_overlap_br = (new_wave >= rss_r._wave[0]) & (new_wave <= rss_b._wave[-1])
@@ -1034,21 +978,29 @@ class RSS(FiberRows):
 
         if wave is not None and len(wave.shape) == 1:
             wcs_dict = {"NAXIS": 2, "NAXIS1": data.shape[1], "NAXIS2": data.shape[0],
-                        "CDELT1": wave[1]-wave[0],
-                        "CRVAL1": wave[0],
-                        "CUNIT1": "Angstrom", "CTYPE1": "WAVE", "CRPIX1": 1,
-                        "CDELT2": 1,
-                        "CRVAL2": 1,
-                        "CUNIT2": "", "CTYPE2": "FIBERID", "CRPIX2": 1}
+                        "CDELT1": (wave[1]-wave[0], "coordinate increment along axis"),
+                        "CRVAL1": (wave[0], "coordinate system value at reference pixel"),
+                        "CUNIT1": ("Angstrom", "physical unit of the coordinate axis"),
+                        "CTYPE1": ("WAVE", "name of the coordinate axis"),
+                        "CRPIX1": (1, "coordinate system reference pixel"),
+                        "CDELT2": (1, "coordinate increment along axis"),
+                        "CRVAL2": (1, "coordinate system value at reference pixel"),
+                        "CUNIT2": ("", "physical unit of the coordinate axis"),
+                        "CTYPE2": ("FIBERID", "name of the coordinate axis"),
+                        "CRPIX2": (1, "coordinate system reference pixel")}
 
         elif wave is None or len(wave.shape) == 2:
             wcs_dict = {"NAXIS": 2, "NAXIS1": data.shape[1], "NAXIS2": data.shape[0],
-                        "CDELT1": 1,
-                        "CRVAL1": 1,
-                        "CUNIT1": "", "CTYPE1": "XAXIS", "CRPIX1": 1,
-                        "CDELT2": 1,
-                        "CRVAL2": 1,
-                        "CUNIT2": "", "CTYPE2": "FIBERID", "CRPIX2": 1}
+                        "CDELT1": (1, "coordinate increment along axis"),
+                        "CRVAL1": (1, "coordinate system value at reference pixel"),
+                        "CUNIT1": ("", "physical unit of the coordinate axis"),
+                        "CTYPE1": ("XAXIS", "name of the coordinate axis"),
+                        "CRPIX1": (1, "coordinate system reference pixel"),
+                        "CDELT2": (1, "coordinate increment along axis"),
+                        "CRVAL2": (1, "coordinate system value at reference pixel"),
+                        "CUNIT2": ("", "physical unit of the coordinate axis"),
+                        "CTYPE2": ("FIBERID", "name of the coordinate axis"),
+                        "CRPIX2": (1, "coordinate system reference pixel")}
         if as_dict:
             return wcs_dict
 
@@ -1580,6 +1532,8 @@ class RSS(FiberRows):
                 if sky is not None:
                     sky[mask] = 0
                     combined_sky[good_pix] = bn.nansum(sky, 0)[good_pix]
+                else:
+                    combined_sky = None
             else:
                 combined_mask = None
                 combined_data = bn.nansum(data, 0) / data.shape[0]
@@ -1688,10 +1642,28 @@ class RSS(FiberRows):
                 raise ValueError(f"Method {method} is not supported when error is None")
             raise ValueError(f"Method {method} is not supported")
 
+        # add combined lamps to header
+        new_header = rss_in[0]._header.copy()
+        if new_header["IMAGETYP"] == "flat":
+            lamps = CON_LAMPS
+        elif new_header["IMAGETYP"] == "arc":
+            lamps = ARC_LAMPS
+        else:
+            lamps = []
+
+        if lamps:
+            new_lamps = set()
+            for rss in rss_in:
+                for lamp in lamps:
+                    if rss._header.get(lamp) == "ON":
+                        new_lamps.add(lamp)
+            for lamp in new_lamps:
+                new_header[lamp] = "ON"
+
         self._data = combined_data
         self._wave = rss_in[0]._wave
         self._lsf = rss_in[0]._lsf
-        self._header = rss_in[0]._header
+        self._header = new_header
         self._mask = combined_mask
         self._error = combined_error
         self._arc_position_x = rss_in[i]._arc_position_x
@@ -1844,7 +1816,7 @@ class RSS(FiberRows):
         select = numpy.logical_or(numbers < min, numbers > numbers[-1] - max)
         return arg[select]
 
-    def rectify_wave(self, wave=None, wave_range=None, wave_disp=None, method="linear", return_density=False, **interp_kwargs):
+    def rectify_wave(self, wave=None, wave_range=None, wave_disp=None):
         """Wavelength rectifies the RSS object
 
         This method rectifies the RSS object to an uniform wavelength grid. The
@@ -1870,10 +1842,6 @@ class RSS(FiberRows):
             Wavelength range to rectify to, by default None
         wave_disp : float, optional
             Wavelength dispersion to rectify to, by default None
-        method : str, optional
-            Interpolation method, by default "linear"
-        return_density : bool, optional
-            If True, returns the density of the rectification, by default False
 
         Returns
         -------
@@ -1903,7 +1871,7 @@ class RSS(FiberRows):
         if rss._header is None:
             rss._header = pyfits.Header()
         unit = rss._header["BUNIT"]
-        if not unit.endswith("/angstrom"):
+        if not unit.endswith(" / Angstrom"):
             dlambda = numpy.gradient(rss._wave, axis=1)
             rss._data /= dlambda
             if rss._error is not None:
@@ -1912,11 +1880,10 @@ class RSS(FiberRows):
                 rss._sky /= dlambda
             if rss._sky_error is not None:
                 rss._sky_error /= dlambda
-            unit = unit + "/angstrom"
+            unit = unit + " / Angstrom"
 
         rss._header["BUNIT"] = unit
-        rss._header["WAVREC"] = True
-        rss._header["METREC"] = (method, "Wavelength rectification method")
+        rss._header["WAVREC"] = (True, "is wavelength rectified?")
         # create output RSS
         new_rss = RSS(
             data=numpy.zeros((rss._fibers, wave.size), dtype="float32"),
@@ -1936,212 +1903,39 @@ class RSS(FiberRows):
             header=rss._header
         )
 
-        # TODO: convert this into a interpolation class selector
-        if method == "spline":
-            method = "cubic"
-        elif method == "linear":
-            pass
-        else:
-            raise ValueError(f"Invalid interpolation {method = }")
-
-        # fit and evaluate interpolators
+        # Resample spectra onto new wavelength grid:
         for ifiber in range(rss._fibers):
-            f = interpolate.interp1d(rss._wave[ifiber], rss._data[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
-            new_rss._data[ifiber] = f(wave).astype("float32")
             if rss._error is not None:
-                f = interpolate.interp1d(rss._wave[ifiber], rss._error[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
-                new_rss._error[ifiber] = f(wave).astype("float32")
-            f = interpolate.interp1d(rss._wave[ifiber], rss._mask[ifiber], kind="nearest", bounds_error=False, fill_value=PixMask["NODATA"])
-            new_rss._mask[ifiber] = f(wave).astype("int32")
+                f, ivar = resample_flux_density(wave, rss._wave[ifiber], rss._data[ifiber], ivar=error_to_ivar(rss._error[ifiber]))
+                new_rss._data[ifiber] = f.astype("float32")
+                new_rss._error[ifiber] = ivar_to_error(ivar).astype("float32")
+            else:
+                f = resample_flux_density(wave, rss._wave[ifiber], rss._data[ifiber])
+                new_rss._data[ifiber] = f.astype("float32")
+            f = resample_flux_density(wave, rss._wave[ifiber], rss._mask[ifiber])
+            new_rss._mask[ifiber] = f.astype("int32")
             new_rss._mask[ifiber] |= numpy.isnan(new_rss._data[ifiber]) * PixMask["NODATA"]
             new_rss._mask[ifiber] |= ~numpy.isfinite(new_rss._error[ifiber]) * PixMask["BADPIX"]
             if rss._lsf is not None:
-                f = interpolate.interp1d(rss._wave[ifiber], rss._lsf[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
-                new_rss._lsf[ifiber] = f(wave).astype("float32")
+                f = numpy.interp(wave, rss._wave[ifiber], rss._lsf[ifiber])
+                new_rss._lsf[ifiber] = f.astype("float32")
             if rss._sky is not None:
-                f = interpolate.interp1d(rss._wave[ifiber], rss._sky[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
-                new_rss._sky[ifiber] = f(wave).astype("float32")
-            if rss._sky_error is not None:
-                f = interpolate.interp1d(rss._wave[ifiber], rss._sky_error[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
-                new_rss._sky_error[ifiber] = f(wave).astype("float32")
+                print(rss._sky)
+                f, ivar = resample_flux_density(wave, rss._wave[ifiber], rss._sky[ifiber], ivar=error_to_ivar(rss._sky_error[ifiber]))
+                new_rss._sky[ifiber] = f.astype("float32")
+                new_rss._sky_error[ifiber] = ivar_to_error(ivar).astype("float32")
             if rss._sky_east is not None:
-                f = interpolate.interp1d(rss._wave[ifiber], rss._sky_east[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
-                new_rss._sky_east[ifiber] = f(wave).astype("float32")
-            if rss._sky_east_error is not None:
-                f = interpolate.interp1d(rss._wave[ifiber], rss._sky_east_error[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
-                new_rss._sky_east_error[ifiber] = f(wave).astype("float32")
+                f, ivar = resample_flux_density(wave, rss._wave[ifiber], rss._sky_east[ifiber], ivar=error_to_ivar(rss._sky_east_error[ifiber]))
+                new_rss._sky_east[ifiber] = f.astype("float32")
+                new_rss._sky_east_error[ifiber] = ivar_to_error(ivar).astype("float32")
             if rss._sky_west is not None:
-                f = interpolate.interp1d(rss._wave[ifiber], rss._sky_west[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
-                new_rss._sky_west[ifiber] = f(wave).astype("float32")
-            if rss._sky_west_error is not None:
-                f = interpolate.interp1d(rss._wave[ifiber], rss._sky_west_error[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
-                new_rss._sky_west_error[ifiber] = f(wave).astype("float32")
+                f, ivar = resample_flux_density(wave, rss._wave[ifiber], rss._sky_west[ifiber], ivar=error_to_ivar(rss._sky_west_error[ifiber]))
+                new_rss._sky_west[ifiber] = f.astype("float32")
+                new_rss._sky_west_error[ifiber] = ivar_to_error(ivar).astype("float32")
         # add supersky information if available
         if rss._supersky is not None:
             new_rss.set_supersky(rss._supersky)
             new_rss.set_supersky_error(rss._supersky_error)
-
-        if not return_density:
-            dlambda = numpy.gradient(wave)
-            new_rss._data *= dlambda
-            if new_rss._error is not None:
-                new_rss._error *= dlambda
-            if new_rss._sky is not None:
-                new_rss._sky *= dlambda
-            if new_rss._sky_error is not None:
-                new_rss._sky_error *= dlambda
-            if new_rss._sky_east is not None:
-                new_rss._sky_east *= dlambda
-            if new_rss._sky_east_error is not None:
-                new_rss._sky_east_error *= dlambda
-            if new_rss._sky_west is not None:
-                new_rss._sky_west *= dlambda
-            if new_rss._sky_west_error is not None:
-                new_rss._sky_west_error *= dlambda
-            new_rss._header["BUNIT"] = unit.replace("/angstrom", "")
-
-        return new_rss
-
-    def to_native_wave(self, method="linear", interp_density=True, return_density=False):
-        """Converts the wavelength to the native wavelength grid
-
-        This method de-rectifies the RSS object to the native wavelength grid.
-        The native wavelength grid is defined by the wavelength trace
-        coefficients. If no wavelength trace is found, it returns the RSS
-        object unchanged.
-
-        NOTE: all operations are perfomed in a copy of the RSS object, so the
-        original object is not modified.
-
-        NOTE: this method should be used to de-rectify RSS objects that
-        represent functions of wavelength, instead of samples. For example, RSS
-        objects that represent a fiberflat, or a supersky.
-
-        Parameters
-        ----------
-        method : str, optional
-            Interpolation method, by default "linear"
-        return_density : bool, optional
-            If True, returns the density of the rectification, by default False
-
-        Returns
-        -------
-        RSS
-            De-rectified RSS object
-        """
-        if self._wave is None and self._header is None:
-            raise ValueError("No wavelength information found in RSS object")
-        elif self._wave is None and self._header is not None:
-            self._wave, _, _, _ = self.get_wave_from_header()
-
-        if self._header is not None and not self._header.get("WAVREC", False) or len(self._wave.shape) == 2:
-            return self
-
-        # get native wavelength grid
-        trace = TraceMask.from_coeff_table(self._wave_trace)
-        wave = trace.eval_coeffs()
-
-        rss = copy(self)
-        if rss._header is None:
-            rss._header = pyfits.Header()
-        unit = rss._header["BUNIT"]
-        if not unit.endswith("/angstrom") and interp_density:
-            dlambda = numpy.gradient(rss._wave)
-            rss._data /= dlambda
-            rss._error /= dlambda
-            if rss._sky is not None:
-                rss._sky /= dlambda
-            if rss._sky_error is not None:
-                rss._sky_error /= dlambda
-            unit = unit + "/angstrom"
-
-        rss._header["BUNIT"] = unit
-        rss._header["WAVREC"] = False
-        rss._header["METREC"] = (method, "Wavelength rectification method")
-        if "CRPIX1" in rss._header:
-            del rss._header["CRPIX1"]
-        if "CRVAL1" in rss._header:
-            del rss._header["CRVAL1"]
-        if "CDELT1" in rss._header:
-            del rss._header["CDELT1"]
-        if "CTYPE1" in rss._header:
-            del rss._header["CTYPE1"]
-        # create output RSS
-        new_rss = RSS(
-            data=numpy.zeros((rss._fibers, wave.shape[1]), dtype="float32"),
-            error=numpy.zeros((rss._fibers, wave.shape[1]), dtype="float32"),
-            mask=numpy.zeros((rss._fibers, wave.shape[1]), dtype="int32"),
-            sky=numpy.zeros((rss._fibers, wave.shape[1]), dtype="float32") if rss._sky is not None else None,
-            sky_error=numpy.zeros((rss._fibers, wave.shape[1]), dtype="float32") if rss._sky_error is not None else None,
-            cent_trace=rss._cent_trace,
-            width_trace=rss._width_trace,
-            wave_trace=rss._wave_trace,
-            lsf_trace=rss._lsf_trace,
-            slitmap=rss._slitmap,
-            header=rss._header
-        )
-
-        # interpolate data, error, mask and sky arrays from rectified grid to original grid
-        for ifiber in range(rss._fibers):
-            f = interpolate.interp1d(rss._wave, rss._data[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
-            new_rss._data[ifiber] = f(wave[ifiber]).astype("float32")
-            f = interpolate.interp1d(rss._wave, rss._error[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
-            new_rss._error[ifiber] = f(wave[ifiber]).astype("float32")
-            f = interpolate.interp1d(rss._wave, rss._mask[ifiber], kind="nearest", bounds_error=False, fill_value=PixMask["NODATA"])
-            new_rss._mask[ifiber] = f(wave[ifiber]).astype("int32")
-            if rss._sky is not None:
-                f = interpolate.interp1d(rss._wave, rss._sky[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
-                new_rss._sky[ifiber] = f(wave[ifiber]).astype("float32")
-            if rss._sky_error is not None:
-                f = interpolate.interp1d(rss._wave, rss._sky_error[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
-                new_rss._sky_error[ifiber] = f(wave[ifiber]).astype("float32")
-            if rss._sky_east is not None:
-                f = interpolate.interp1d(rss._wave, rss._sky_east[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
-                new_rss._sky_east[ifiber] = f(wave[ifiber]).astype("float32")
-            if rss._sky_east_error is not None:
-                f = interpolate.interp1d(rss._wave, rss._sky_east_error[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
-                new_rss._sky_east_error[ifiber] = f(wave[ifiber]).astype("float32")
-            if rss._sky_west is not None:
-                f = interpolate.interp1d(rss._wave, rss._sky_west[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
-                new_rss._sky_west[ifiber] = f(wave[ifiber]).astype("float32")
-            if rss._sky_west_error is not None:
-                f = interpolate.interp1d(rss._wave, rss._sky_west_error[ifiber], kind=method, bounds_error=False, fill_value=numpy.nan)
-                new_rss._sky_west_error[ifiber] = f(wave[ifiber]).astype("float32")
-
-        if not return_density and unit.endswith("/angstrom"):
-            dlambda = numpy.gradient(wave, axis=1)
-            new_rss._data *= dlambda
-            new_rss._error *= dlambda
-            if new_rss._sky is not None:
-                new_rss._sky *= dlambda
-            if new_rss._sky_error is not None:
-                new_rss._sky_error *= dlambda
-            if new_rss._sky_east is not None:
-                new_rss._sky_east *= dlambda
-            if new_rss._sky_east_error is not None:
-                new_rss._sky_east_error *= dlambda
-            if new_rss._sky_west is not None:
-                new_rss._sky_west *= dlambda
-            if new_rss._sky_west_error is not None:
-                new_rss._sky_west_error *= dlambda
-            new_rss._header["BUNIT"] = unit.replace("/angstrom", "")
-        elif return_density and not unit.endswith("/angstrom"):
-            dlambda = numpy.gradient(wave, axis=1)
-            new_rss._data /= dlambda
-            new_rss._error /= dlambda
-            if new_rss._sky is not None:
-                new_rss._sky /= dlambda
-            if new_rss._sky_error is not None:
-                new_rss._sky_error /= dlambda
-            if new_rss._sky_east is not None:
-                new_rss._sky_east /= dlambda
-            if new_rss._sky_east_error is not None:
-                new_rss._sky_east_error /= dlambda
-            if new_rss._sky_west is not None:
-                new_rss._sky_west /= dlambda
-            if new_rss._sky_west_error is not None:
-                new_rss._sky_west_error /= dlambda
-            new_rss._header["BUNIT"] = unit + "/angstrom"
 
         return new_rss
 
@@ -3373,7 +3167,7 @@ class RSS(FiberRows):
             self._slitmap = None
             return
         if isinstance(slitmap, pyfits.BinTableHDU):
-            self._slitmap = Table(slitmap.data)
+            self._slitmap = Table.read(slitmap)
         elif isinstance(slitmap, Table):
             self._slitmap = slitmap
         else:
@@ -3418,7 +3212,7 @@ class RSS(FiberRows):
             setattr(self, f"_fluxcal_{source}", None)
             return
         if isinstance(fluxcal, pyfits.BinTableHDU):
-            setattr(self, f"_fluxcal_{source}", Table(fluxcal.data))
+            setattr(self, f"_fluxcal_{source}", Table.read(fluxcal))
         elif isinstance(fluxcal, Table):
             setattr(self, f"_fluxcal_{source}", fluxcal)
         else:
@@ -3487,30 +3281,35 @@ class RSS(FiberRows):
             if ra == 0 or dec == 0:
                 log.warning(f"on heliocentric velocity correction, missing RA/Dec information in header, assuming: {ra = }, {dec = }")
                 self.add_header_comment(f"on heliocentric velocity correction, missing RA/Dec information in header, assuming: {ra = }, {dec = }")
-                self._header[f"HIERARCH WAVE HELIORV_{tel}"] = (numpy.round(0.0, 4), f"Heliocentric velocity correction for {tel} [km/s]")
+                self._header[f"HIERARCH WAVE HELIORV_{tel}"] = (numpy.round(0.0, 4), f"heliocentric vel. corr. for {tel} [km/s]")
                 hrv_corrs[tel] = numpy.round(0.0, 4)
             else:
                 radec = SkyCoord(ra, dec, unit="deg") # center of the pointing or coordinates of the fiber
                 hrv_corr = radec.radial_velocity_correction(kind='heliocentric', obstime=obs_time, location=EarthLocation.of_site('lco')).to(u.km / u.s).value
-                self._header[f"HIERARCH WAVE HELIORV_{tel}"] = (numpy.round(hrv_corr, 4), f"Heliocentric velocity correction for {tel} [km/s]")
+                self._header[f"HIERARCH WAVE HELIORV_{tel}"] = (numpy.round(hrv_corr, 4), f"heliocentric vel. corr. for {tel} [km/s]")
                 hrv_corrs[tel] = numpy.round(hrv_corr, 4)
 
         # calculate standard stars heliocentric corrections
         for istd in range(1, 15+1):
-            is_acq = self._header[f"STD{istd}ACQ"]
-            if not is_acq:
+            is_acq = self._header.get(f"STD{istd}ACQ")
+            if not is_acq or is_acq is None:
+                self._header[f"STD{istd}HRV"] = (0.0, f"standard {istd} heliocentric vel. corr. [km/s]")
                 continue
 
-            std_obstime = Time(self._header[f"STD{istd}T0"])
+            time_str = self._header.get(f"STD{istd}T0")
+            if time_str is None:
+                self._header[f"STD{istd}HRV"] = (0.0, f"standard {istd} heliocentric vel. corr. [km/s]")
+                continue
+
+            std_obstime = Time(time_str)
             std_ra, std_dec = self._header.get(f"STD{istd}RA", 0.0), self._header.get(f"STD{istd}DE", 0.0)
             if std_ra == 0 or std_dec == 0:
-                self._header[f"STD{istd}HRV"] = (0.0, f"Standard {istd} heliocentric vel. corr. [km/s]")
+                self._header[f"STD{istd}HRV"] = (0.0, f"standard {istd} heliocentric vel. corr. [km/s]")
                 continue
             std_radec = SkyCoord(std_ra, std_dec, unit="deg")
             std_hrv_corr = std_radec.radial_velocity_correction(kind="heliocentric", obstime=std_obstime, location=EarthLocation.of_site("lco")).to(u.km / u.s).value
-            self._header[f"STD{istd}HRV"] = (numpy.round(std_hrv_corr, 4), f"Standard {istd} heliocentric vel. corr. [km/s]")
+            self._header[f"STD{istd}HRV"] = (numpy.round(std_hrv_corr, 4), f"standard {istd} heliocentric vel. corr. [km/s]")
 
-        # TODO: implement apply_heliorv
         if apply_hrv_corr: ...
             # if helio_vel is None or helio_vel == 0.0:
             #     helio_vel = rss._header.get(helio_vel_keyword)
@@ -3597,11 +3396,12 @@ class RSS(FiberRows):
             hdus.append(pyfits.BinTableHDU(self._wave_trace, name="WAVE_TRACE"))
         elif self._wave is not None:
             if len(self._wave.shape) == 1:
-                # wcs = WCS(
-                #     header={"CDELT1": self._wave_disp, "CRVAL1": self._wave_start,
-                #     "CUNIT1": "Angstrom", "CTYPE1": "WAVE", "CRPIX1": 1.0})
-                self._header.update({"CDELT1": self._wave_disp, "CRVAL1": self._wave_start,
-                    "CUNIT1": "Angstrom", "CTYPE1": "WAVE", "CRPIX1": 1.0})
+                self._header.update({
+                    "CDELT1": (self._wave_disp, "coordinate increment along axis"),
+                    "CRVAL1": (self._wave_start, "coordinate system value at reference pixel"),
+                    "CUNIT1": ("Angstrom", "physical unit of the coordinate axis"),
+                    "CTYPE1": ("WAVE", "name of the coordinate axis"),
+                    "CRPIX1": (1, "coordinate system reference pixel")})
             elif len(self._wave.shape) == 2:
                 hdus.append(pyfits.ImageHDU(self._wave.astype("float32"), name="WAVE"))
             else:
@@ -3649,6 +3449,7 @@ class RSS(FiberRows):
         os.makedirs(os.path.dirname(out_rss), exist_ok=True)
         hdus[0].header["FILENAME"] = os.path.basename(out_rss)
         hdus[0].header['DRPVER'] = drpver
+        hdus[0].scale(bzero=0, bscale=1)
         hdus.writeto(out_rss, overwrite=True, output_verify="silentfix")
 
 def loadRSS(in_rss):
@@ -3659,7 +3460,7 @@ def loadRSS(in_rss):
 class lvmBaseProduct(RSS):
     """Base class to define an LVM product"""
 
-    _BPARS = {"BUNIT": None, "BSCALE": 1.0, "BZERO": 0.0}
+    _BPARS = {"BUNIT": None}
 
     @classmethod
     def header_from_hdulist(cls, hdulist):
@@ -3677,24 +3478,17 @@ class lvmBaseProduct(RSS):
         """Set header"""
         blueprint = dp.load_blueprint(name="lvmFrame")
         new_header = orig_header
-        new_cards = []
-        for card in blueprint["hdu0"]["header"]:
+        for card in blueprint["hdu0"].get("header", []):
             kw = card["key"]
             cm = card["comment"]
             if kw.lower() in kwargs:
-                new_cards.append((kw, kwargs[kw.lower()], cm))
-        new_header.update(new_cards)
+                new_header.append((kw, kwargs[kw.lower()], cm))
         self._header = new_header
         return self._header
 
     def update_header(self):
-        # update flux header
-        for kw in ["BUNIT", "BSCALE", "BZERO"]:
-            if kw in self._header:
-                self._template["FLUX"].header[kw] = self._header.get(kw)
-
         # update primary header
-        self._template["PRIMARY"].header.update(self._header)
+        self._template["PRIMARY"].header = self._header
         del self._template["PRIMARY"].header["WCS*"]
         del self._template["PRIMARY"].header["CDELT*"]
         del self._template["PRIMARY"].header["CRVAL*"]
@@ -3725,7 +3519,7 @@ class lvmFrame(lvmBaseProduct):
         wave_trace = Table(hdulist["WAVE_TRACE"].data)
         lsf_trace = Table(hdulist["LSF_TRACE"].data)
         superflat = hdulist["SUPERFLAT"].data
-        slitmap = Table(hdulist["SLITMAP"].data)
+        slitmap = Table.read(hdulist["SLITMAP"])
         return cls(data=data, error=error, mask=mask, header=header,
                    wave_trace=wave_trace, lsf_trace=lsf_trace,
                    cent_trace=cent_trace, width_trace=width_trace,
@@ -3744,6 +3538,12 @@ class lvmFrame(lvmBaseProduct):
         self.set_superflat(superflat)
         if header is not None:
             self.set_header(header, **kwargs)
+
+    def set_units(self):
+        """Sets physical units in relevant extensions"""
+        flux_units = self._header.get("BUNIT")
+        self._template["FLUX"].header["BUNIT"] = flux_units
+        self._template["IVAR"].header["BUNIT"] = (1 / u.Unit(flux_units)**2).unit.to_string()
 
     def get_superflat(self):
         """Get superflat representation as numpy array"""
@@ -3765,6 +3565,7 @@ class lvmFrame(lvmBaseProduct):
 
         # update headers
         self.update_header()
+        self.set_units()
         # fill in rest of the template
         self._template["FLUX"].data = self._data
         self._template["IVAR"].data = numpy.divide(1, self._error**2, where=self._error != 0, out=numpy.zeros_like(self._error))
@@ -3780,6 +3581,7 @@ class lvmFrame(lvmBaseProduct):
         os.makedirs(os.path.dirname(out_file), exist_ok=True)
         self._template[0].header["FILENAME"] = os.path.basename(out_file)
         self._template[0].header['DRPVER'] = drpver
+        self._template[0].scale(bzero=0, bscale=1)
         self._template.writeto(out_file, overwrite=True)
 
 
@@ -3802,9 +3604,9 @@ class lvmFFrame(lvmBaseProduct):
         sky_west = hdulist["SKY_WEST"].data
         sky_west_error = numpy.divide(1, hdulist["SKY_WEST_IVAR"].data, where=hdulist["SKY_WEST_IVAR"].data != 0, out=numpy.zeros_like(hdulist["SKY_WEST_IVAR"].data))
         sky_west_error = numpy.sqrt(sky_west_error)
-        fluxcal_std = Table(hdulist["FLUXCAL_STD"].data)
-        fluxcal_sci = Table(hdulist["FLUXCAL_SCI"].data)
-        slitmap = Table(hdulist["SLITMAP"].data)
+        fluxcal_std = Table.read(hdulist["FLUXCAL_STD"])
+        fluxcal_sci = Table.read(hdulist["FLUXCAL_SCI"])
+        slitmap = Table.read(hdulist["SLITMAP"])
         return cls(data=data, error=error, mask=mask, header=header,
                    wave=wave, lsf=lsf,
                    sky_east=sky_east, sky_east_error=sky_east_error,
@@ -3829,6 +3631,18 @@ class lvmFFrame(lvmBaseProduct):
         else:
             self._header = None
 
+    def set_units(self):
+        """Sets physical units in relevant extensions"""
+        flux_units = self._header.get("BUNIT")
+        self._template["FLUX"].header["BUNIT"] = flux_units
+        self._template["IVAR"].header["BUNIT"] = (1 / u.Unit(flux_units)**2).unit.to_string()
+        self._template["WAVE"].header["BUNIT"] = "Angstrom"
+        self._template["LSF"].header["BUNIT"] = "Angstrom"
+        self._template["SKY_EAST"].header["BUNIT"] = flux_units
+        self._template["SKY_EAST_IVAR"].header["BUNIT"] = flux_units
+        self._template["SKY_WEST"].header["BUNIT"] = flux_units
+        self._template["SKY_WEST_IVAR"].header["BUNIT"] = flux_units
+
     def loadFitsData(self, in_file):
         self = lvmFFrame.from_file(in_file)
         return self
@@ -3840,6 +3654,7 @@ class lvmFFrame(lvmBaseProduct):
 
         # update headers
         self.update_header()
+        self.set_units()
         # fill in rest of the template
         self._template["FLUX"].data = self._data
         self._template["IVAR"].data = numpy.divide(1, self._error**2, where=self._error != 0, out=numpy.zeros_like(self._error))
@@ -3858,6 +3673,7 @@ class lvmFFrame(lvmBaseProduct):
         os.makedirs(os.path.dirname(out_file), exist_ok=True)
         self._template[0].header["FILENAME"] = os.path.basename(out_file)
         self._template[0].header['DRPVER'] = drpver
+        self._template[0].scale(bzero=0, bscale=1)
         self._template.writeto(out_file, overwrite=True)
 
 
@@ -3880,7 +3696,7 @@ class lvmCFrame(lvmBaseProduct):
         sky_west = hdulist["SKY_WEST"].data
         sky_west_error = numpy.divide(1, hdulist["SKY_WEST_IVAR"].data, where=hdulist["SKY_WEST_IVAR"].data != 0, out=numpy.zeros_like(hdulist["SKY_WEST_IVAR"].data))
         sky_west_error = numpy.sqrt(sky_west_error)
-        slitmap = Table(hdulist["SLITMAP"].data)
+        slitmap = Table.read(hdulist["SLITMAP"])
         return cls(data=data, error=error, mask=mask, header=header,
                    wave=wave, lsf=lsf,
                    sky_east=sky_east, sky_east_error=sky_east_error,
@@ -3903,6 +3719,18 @@ class lvmCFrame(lvmBaseProduct):
         else:
             self._header = None
 
+    def set_units(self):
+        """Sets physical units in relevant extensions"""
+        flux_units = self._header.get("BUNIT")
+        self._template["FLUX"].header["BUNIT"] = flux_units
+        self._template["IVAR"].header["BUNIT"] = (1 / u.Unit(flux_units)**2).unit.to_string()
+        self._template["WAVE"].header["BUNIT"] = "Angstrom"
+        self._template["LSF"].header["BUNIT"] = "Angstrom"
+        self._template["SKY_EAST"].header["BUNIT"] = flux_units
+        self._template["SKY_EAST_IVAR"].header["BUNIT"] = (1 / u.Unit(flux_units)**2).unit.to_string()
+        self._template["SKY_WEST"].header["BUNIT"] = flux_units
+        self._template["SKY_WEST_IVAR"].header["BUNIT"] = (1 / u.Unit(flux_units)**2).unit.to_string()
+
     def loadFitsData(self, in_file):
         self = lvmCFrame.from_file(in_file)
         return self
@@ -3914,6 +3742,7 @@ class lvmCFrame(lvmBaseProduct):
 
         # update headers
         self.update_header()
+        self.set_units()
         # fill in rest of the template
         self._template["FLUX"].data = self._data
         self._template["IVAR"].data = numpy.divide(1, self._error**2, where=self._error != 0, out=numpy.zeros_like(self._error))
@@ -3930,6 +3759,7 @@ class lvmCFrame(lvmBaseProduct):
         os.makedirs(os.path.dirname(out_file), exist_ok=True)
         self._template[0].header["FILENAME"] = os.path.basename(out_file)
         self._template[0].header['DRPVER'] = drpver
+        self._template[0].scale(bzero=0, bscale=1)
         self._template.writeto(out_file, overwrite=True)
 
 
@@ -3949,7 +3779,7 @@ class lvmSFrame(lvmBaseProduct):
         sky = hdulist["SKY"].data
         sky_error = numpy.divide(1, hdulist["SKY_IVAR"].data, where=hdulist["SKY_IVAR"].data != 0, out=numpy.zeros_like(hdulist["SKY_IVAR"].data))
         sky_error = numpy.sqrt(sky_error)
-        slitmap = Table(hdulist["SLITMAP"].data)
+        slitmap = Table.read(hdulist["SLITMAP"])
         return cls(data=data, error=error, mask=mask, header=header,
                    wave=wave, lsf=lsf, sky=sky, sky_error=sky_error, slitmap=slitmap)
 
@@ -3966,6 +3796,16 @@ class lvmSFrame(lvmBaseProduct):
         else:
             self._header = None
 
+    def set_units(self):
+        """Sets physical units in relevant extensions"""
+        flux_units = self._header.get("BUNIT")
+        self._template["FLUX"].header["BUNIT"] = flux_units
+        self._template["IVAR"].header["BUNIT"] = (1 / u.Unit(flux_units)**2).unit.to_string()
+        self._template["WAVE"].header["BUNIT"] = "Angstrom"
+        self._template["LSF"].header["BUNIT"] = "Angstrom"
+        self._template["SKY"].header["BUNIT"] = flux_units
+        self._template["SKY_IVAR"].header["BUNIT"] = (1 / u.Unit(flux_units)**2).unit.to_string()
+
     def loadFitsData(self, in_file):
         self = lvmSFrame.from_file(in_file)
         return self
@@ -3977,6 +3817,7 @@ class lvmSFrame(lvmBaseProduct):
 
         # update headers
         self.update_header()
+        self.set_units()
         # fill in rest of the template
         self._template["FLUX"].data = self._data
         self._template["IVAR"].data = numpy.divide(1, self._error**2, where=self._error != 0, out=numpy.zeros_like(self._error))
@@ -3991,6 +3832,7 @@ class lvmSFrame(lvmBaseProduct):
         os.makedirs(os.path.dirname(out_file), exist_ok=True)
         self._template[0].header["FILENAME"] = os.path.basename(out_file)
         self._template[0].header['DRPVER'] = drpver
+        self._template[0].scale(bzero=0, bscale=1)
         self._template.writeto(out_file, overwrite=True)
 
 

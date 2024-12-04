@@ -11,7 +11,8 @@ import click
 import cloup
 from cloup.constraints import mutually_exclusive, RequireExactly, IsSet, If
 
-from lvmdrp.main import run_drp, reduce_file, check_daily_mjd, parse_mjds, read_expfile
+from lvmdrp.core.constants import CALIBRATION_MATCH
+from lvmdrp.main import run_drp, reduce_file, check_daily_mjd, parse_mjds, read_expfile, create_drpall
 from lvmdrp.functions.skyMethod import configureSkyModel_drp
 from lvmdrp.utils.metadata import get_frames_metadata, get_master_metadata
 from lvmdrp.utils.cluster import run_cluster
@@ -20,7 +21,8 @@ from lvmdrp.functions.run_calseq import (
     COUNTS_THRESHOLDS,
     reduce_nightly_sequence,
     reduce_longterm_sequence,
-    fix_raw_pixel_shifts)
+    fix_raw_pixel_shifts,
+    copy_longterm_calibrations)
 
 from sdss_access import Access
 
@@ -120,13 +122,15 @@ def cli():
 @click.option('-2d', '--skip-2d', is_flag=True, default=False, help='Skip preprocessing and detrending')
 @click.option('-1d', '--skip-1d', is_flag=True, default=False, help='Skip astrometry, straylight subtraction and extraction')
 @click.option('-p1d', '--skip-post-1d', is_flag=True, default=False, help='Skip wavelength calibration, flatfielding, sky processing and flux calibration')
+@click.option('-da', '--skip-drpall', is_flag=True, default=False, help='Skip create/update drpall summary file')
 @click.option('-c', '--clean-ancillary', is_flag=True, default=False, help='Remove ancillary paths after run')
 @click.option('-d', '--debug-mode', is_flag=True, default=False, help='Set debug mode on to run using aperture extraction and skip CR rejection')
+@click.option('--force-run', is_flag=True, default=False, help='force reduction even if the exposure was flagged as BAD by the QC pipeline')
 @cloup.constraint(mutually_exclusive, ['mjd', 'mjd_list', 'mjd_range'])
 # @cloup.constraint(RequireExactly(1), ['mjd', 'mjd_list', 'mjd_range'])
 @cloup.constraint(mutually_exclusive, ['expnum', 'exp_list', 'exp_range'])
 def run(mjd, mjd_list, mjd_range, with_cals, no_sci, expnum, exp_list, exp_range, exp_file, fluxcal_method,
-        skip_2d, skip_1d, skip_post_1d, clean_ancillary, debug_mode):
+        skip_2d, skip_1d, skip_post_1d, skip_drpall, clean_ancillary, debug_mode, force_run):
     """ Run the DRP reduction for a given MJD or range of MJDs
 
     Run the DRP for an MJD or range of MJDs.  Various flags and options are available
@@ -147,8 +151,10 @@ def run(mjd, mjd_list, mjd_range, with_cals, no_sci, expnum, exp_list, exp_range
             skip_2d=skip_2d,
             skip_1d=skip_1d,
             skip_post_1d=skip_post_1d,
+            skip_drpall=skip_drpall,
             clean_ancillary=clean_ancillary,
-            debug_mode=debug_mode)
+            debug_mode=debug_mode,
+            force_run=force_run)
 
 
 # register full DRP command
@@ -229,10 +235,12 @@ cli.add_command(metacli)
 @click.option('--qrtz-threshold', type=float, default=COUNTS_THRESHOLDS["quartz"], help='count thredhols for tracing with Quartz lamp exposures')
 @click.option('--cent-ncolumns', type=int, default=140, help='number of columns to trace fiber centroids')
 @click.option('--full-ncolumns', type=int, default=40, help='number of columns to full fiber tracing')
+@click.option('-x', '--extract-md', is_flag=True, default=False, help='flag to extract metadata or use cached metadata if exist')
 @click.option('-s', '--skip-done', is_flag=True, default=False, help='flag to skip reduction steps that have already been done')
 @click.option('-c', '--clean-ancillary', is_flag=True, default=False, help='Remove ancillary paths after run')
-@click.option('--fflats-from-to', type=int, default=[None, None], nargs=2, help='Move twilight fiberflats from one MJD to another MJD')
-@click.option('-n', '--nightly', is_flag=True, default=False, help='flag to reduce nightly calibration sequence (defaults to long-term)')
+@click.option('--fflats-from-to', type=int, default=((None, None),), nargs=2, multiple=True, help='Move twilight fiberflats from one MJD to another MJD')
+@click.option('--nightly', is_flag=True, default=False, help='flag to reduce nightly calibration sequence (defaults to long-term)')
+@click.option('--copy-to-sandbox', is_flag=True, default=False, help='copy long-term calibrations to sandbox calib folder')
 @cloup.constraint(mutually_exclusive, ['mjd', 'mjd_list', 'mjd_range'])
 @cloup.constraint(RequireExactly(1), ['mjd', 'mjd_list', 'mjd_range'])
 def calibrations(mjd, mjd_list, mjd_range, reject_cr,
@@ -240,41 +248,38 @@ def calibrations(mjd, mjd_list, mjd_range, reject_cr,
                  skip_dome, skip_twilight,
                  ldls_threshold, qrtz_threshold,
                  cent_ncolumns, full_ncolumns,
-                 skip_done, clean_ancillary,
-                 fflats_from_to, nightly):
+                 extract_md, skip_done, clean_ancillary,
+                 fflats_from_to, nightly, copy_to_sandbox):
     """ Run calibration sequence reduction """
 
-    only_cals = {flavor for flavor, skip in zip(["bias", "trace", "wave", "twilight"],
-                                                [skip_bias, skip_trace, skip_wavelength, skip_twilight]) if not skip}
+    only_cals = {flavor for flavor, skip in zip(["bias", "trace", "wave", "dome", "twilight"],
+                                                [skip_bias, skip_trace, skip_wavelength, skip_dome, skip_twilight]) if not skip}
 
     # get MJDs for twilight fiberflats copies
-    fflats_from, fflats_to = fflats_from_to
-    if any(fflats_from_to) is None:
-        fflats_from = fflats_to = None
+    fflats_from, fflats_to = zip(*fflats_from_to)
 
     # parse MJDs or
     mjds = parse_mjds(mjd=mjd or mjd_list or mjd_range or None)
     if not isinstance(mjds, (list, tuple)):
         mjds = [mjds]
 
-    if nightly:
-        for mjd in mjds:
-            reduce_nightly_sequence(mjd=mjd, reject_cr=reject_cr,
-                                    use_longterm_cals=False,
-                                    only_cals=only_cals,
-                                    counts_thresholds={"ldls": ldls_threshold, "quartz": qrtz_threshold},
-                                    cent_guess_ncolumns=cent_ncolumns, trace_full_ncolumns=full_ncolumns,
-                                    skip_done=skip_done, keep_ancillary=not clean_ancillary,
-                                    fflats_from=fflats_from if fflats_to == mjd else None)
-    else:
-        for mjd in mjds:
-            reduce_longterm_sequence(mjd=mjd, reject_cr=reject_cr,
-                                    use_longterm_cals=True,
-                                    only_cals=only_cals,
-                                    counts_thresholds={"ldls": ldls_threshold, "quartz": qrtz_threshold},
-                                    cent_guess_ncolumns=cent_ncolumns, trace_full_ncolumns=full_ncolumns,
-                                    skip_done=skip_done, keep_ancillary=not clean_ancillary,
-                                    fflats_from=fflats_from if fflats_to == mjd else None)
+    # choose reduction routine
+    reduction_routine = reduce_nightly_sequence if nightly else reduce_longterm_sequence
+    # run reduction sequence
+    for mjd in mjds:
+        reduction_routine(mjd=mjd, reject_cr=reject_cr,
+                          use_longterm_cals=not nightly,
+                          only_cals=only_cals,
+                          counts_thresholds={"ldls": ldls_threshold, "quartz": qrtz_threshold},
+                          cent_guess_ncolumns=cent_ncolumns, trace_full_ncolumns=full_ncolumns,
+                          extract_metadata=extract_md, skip_done=skip_done,
+                          keep_ancillary=not clean_ancillary,
+                          fflats_from=fflats_from[fflats_to.index(mjd)] if mjd in fflats_to else None)
+
+        if not nightly and copy_to_sandbox:
+            flavors = []
+            [flavors.extend(CALIBRATION_MATCH.get(calname, [calname])) for calname in only_cals]
+            copy_longterm_calibrations(mjd=mjd, flavors=flavors)
 
 # register calibration sequence
 cli.add_command(calibrations)
@@ -356,7 +361,7 @@ def get_calibs(kind, mjd, camera):
 @click.option('-w', '--walltime', type=str, default="24:00:00", help='the time for which the job is allowed to run')
 @click.option('-a', '--alloc', type=click.Choice(['sdss-np', 'sdss-kp']), default='sdss-np', help='which partition to use')
 @click.option('-s', '--submit', is_flag=True, type=bool, default=True, help='flag to submit the job or not')
-@click.option('--run-calibs', is_flag=True, type=bool, default=False, help="run long-term calibrations only")
+@click.option('--run-calibs', is_flag=True, type=bool, default=False, help="run calibration sequences only")
 @click.option('--drp-options', type=str, default="", help="pass options to drp run command")
 def cluster(mjd_list, mjd_range, expnum, exp_list, exp_range, exp_file, nodes, ppn, walltime,
             alloc, submit, run_calibs, drp_options):
@@ -371,6 +376,15 @@ def cluster(mjd_list, mjd_range, expnum, exp_list, exp_range, exp_file, nodes, p
     # submit the cluster job
     run_cluster(mjds=mjds, expnums=expnums, nodes=nodes, ppn=ppn, walltime=walltime, alloc=alloc, submit=submit,
                 run_calibs=run_calibs, drp_options=drp_options)
+
+
+@cli.command('summary', short_help='Creates the drpall summary file for the given version of the pipeline')
+@click.option('--drp-version', type=str, default=None, help='DRP version for which a drpall summary file will be created')
+@click.option('-o', '--overwrite', is_flag=True, default=False, help='Overwrites any existing drpall file before creating a new one')
+def summary(drp_version, overwrite):
+    """ Creates the DRP summary file for a given version of the DRP """
+
+    create_drpall(drp_version=drp_version, overwrite=overwrite)
 
 
 if __name__ == "__main__":

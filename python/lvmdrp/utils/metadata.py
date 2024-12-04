@@ -22,7 +22,6 @@ from tqdm import tqdm
 from lvmdrp.core.constants import FRAMES_CALIB_NEEDS, CAMERAS
 from lvmdrp.utils.bitmask import (
     QualityFlag,
-    RawFrameQuality,
     ReductionStage,
     ReductionStatus,
 )
@@ -34,7 +33,6 @@ from lvmdrp.utils.convert import dateobs_to_sjd, correct_sjd, tileid_grp
 DRPVER = __version__
 
 
-METADATA_PATH = os.path.join(os.getenv("LVM_SPECTRO_REDUX"), DRPVER)
 # -------------------------------------------------------------------------------
 
 RAW_METADATA_COLUMNS = [
@@ -55,8 +53,7 @@ RAW_METADATA_COLUMNS = [
     ("ldls", bool),
     ("quartz", bool),
     ("hartmann", str),
-    ("quality", str),
-    ("qual", RawFrameQuality),
+    ("qaqual", str),
     ("stage", ReductionStage),
     ("status", ReductionStatus),
     ("drpqual", QualityFlag),
@@ -79,8 +76,7 @@ MASTER_METADATA_COLUMNS = [
     ("ldls", bool),
     ("quartz", bool),
     ("hartmann", str),
-    ("quality", str),
-    ("qual", RawFrameQuality),
+    ("qaqual", str),
     ("stage", ReductionStage),
     ("status", ReductionStatus),
     ("drpqual", QualityFlag),
@@ -108,7 +104,7 @@ def _decode_string(metadata):
     return metadata
 
 
-def _get_metadata_paths(tileid=None, mjd=None, kind="raw", filter_exist=True):
+def _get_metadata_paths(drpver=None, tileid=None, mjd=None, kind="raw", filter_exist=True):
     """return metadata path depending on the kind
 
     this function will define a path for a metadata store
@@ -117,6 +113,8 @@ def _get_metadata_paths(tileid=None, mjd=None, kind="raw", filter_exist=True):
 
     Parameters
     ----------
+    drpver : str, optional
+        DRP version, by default None (current version)
     tileid : int, optional
         tile ID of the target frames, by default None
     mjd : int, optional
@@ -138,6 +136,12 @@ def _get_metadata_paths(tileid=None, mjd=None, kind="raw", filter_exist=True):
     ValueError
         if kind is not "raw" or "master"
     """
+    # define DRP version
+    drpver = drpver or DRPVER
+
+    # define metadata path
+    METADATA_PATH = os.path.join(os.getenv("LVM_SPECTRO_REDUX"), drpver)
+
     if kind == "raw":
         if tileid is None or mjd is None:
             raise ValueError(
@@ -310,7 +314,7 @@ def _filter_metadata(
     return metadata
 
 
-def _load_or_create_store(tileid=None, mjd=None, kind="raw", mode="a"):
+def _load_or_create_store(drpver=None, tileid=None, mjd=None, kind="raw", mode="a"):
     """return the metadata store given a tile ID and an MJD
 
     if loading/creating a store for raw frames metadata, this function will
@@ -320,6 +324,8 @@ def _load_or_create_store(tileid=None, mjd=None, kind="raw", mode="a"):
 
     Parameters
     ----------
+    drpver : str, optional
+        DRP version, by default None (current version)
     tileid : int, optional
         tile ID for which a store will be loaded, by default None
     mjd : int, optional
@@ -334,6 +340,9 @@ def _load_or_create_store(tileid=None, mjd=None, kind="raw", mode="a"):
     h5py.Group
         the metadata store for the given observatory
     """
+    # define DRP version
+    drpver = drpver or DRPVER
+
     if mode not in {"r", "a"}:
         raise ValueError(f"invalid value for {mode = }")
 
@@ -342,7 +351,7 @@ def _load_or_create_store(tileid=None, mjd=None, kind="raw", mode="a"):
 
     # define metadata path depending on the kind
     metadata_paths = _get_metadata_paths(
-        tileid=tileid, mjd=mjd, kind=kind, filter_exist=(mode == "r")
+        drpver=drpver, tileid=tileid, mjd=mjd, kind=kind, filter_exist=(mode == "r")
     )
 
     stores = []
@@ -607,8 +616,11 @@ def extract_metadata(frames_paths: list, kind: str = "raw") -> pd.DataFrame:
                 header.get("LDLS", "OFF") in onlamp,
                 header.get("QUARTZ", "OFF") in onlamp,
                 header.get("HARTMANN", "0 0"),
-                header.get("QUALITY", "excellent"),
-                header.get("QUAL", RawFrameQuality(0)),
+                # header.get("QUALITY", "excellent"),
+                # QC pipeline keywords
+                header.get("QAQUAL", "GOOD"),
+                # header.get("QAFLAG", QAFlag(0)),
+                # DRP quality keywords
                 header.get("DRPSTAGE", ReductionStage.UNREDUCED),
                 header.get("DRPSTAT", ReductionStatus(0)),
                 header.get("DRPQUAL", QualityFlag(0)),
@@ -632,8 +644,10 @@ def extract_metadata(frames_paths: list, kind: str = "raw") -> pd.DataFrame:
                 header.get("LDLS", "OFF") in onlamp,
                 header.get("QUARTZ", "OFF") in onlamp,
                 header.get("HARTMANN", "0 0"),
-                header.get("QUALITY", "excellent"),
-                header.get("QUAL", RawFrameQuality(0)),
+                # TODO: QUALITY may be redundant, double check and remove if it is
+                # header.get("QUALITY", "excellent"),
+                header.get("QAQUAL", "GOOD"),
+                # header.get("QAFLAG", QAFlag(0)),
                 header.get("DRPSTAGE", ReductionStage.UNREDUCED),
                 header.get("DRPSTAT", ReductionStatus(0)),
                 header.get("DRPQUAL", QualityFlag(0)),
@@ -808,6 +822,7 @@ def del_metadata(tileid=None, mjd=None, kind="raw"):
 
 
 def get_metadata(
+    drpver=None,
     tileid=None,
     mjd=None,
     rmjd=None,
@@ -834,6 +849,8 @@ def get_metadata(
 
     Parameters
     ----------
+    drpver : str, optional
+        DRP version, by default None (current version)
     tileid : int, optional
         tile ID of the target frames, by default None
     mjd : int, optional
@@ -882,6 +899,10 @@ def get_metadata(
     pandas.DataFrame
         the metadata dataframe filtered following the given criteria
     """
+
+    # define DRP version
+    drpver = drpver or DRPVER
+
     # default output
     default_output = pd.DataFrame(
         columns=list(zip(*RAW_METADATA_COLUMNS))[0]
@@ -890,7 +911,7 @@ def get_metadata(
     )
 
     # extract metadata
-    stores = _load_or_create_store(tileid=tileid, mjd=mjd, kind=kind, mode="r")
+    stores = _load_or_create_store(drpver=drpver, tileid=tileid, mjd=mjd, kind=kind, mode="r")
 
     metadatas = []
     for store in stores:
@@ -1439,18 +1460,19 @@ def _collect_header_data(filename: str) -> dict:
                         # sci
                         'sci_ra': 'TESCIRA', 'sci_dec': 'TESCIDE', 'sci_amass': 'TESCIAM',
                         'sci_kmpos': 'TESCIKM', 'sci_focpos': 'TESCIFO',
-                        'sci_geoshadow_hgt':'GEOCORONAL SCI SHADOW_HEIGHT',
-                        'sci_moon_alt': 'SKYMODEL SCI ALT', 'sci_moon_rho': 'SKYMODEL SCI RHO',
+                        'sci_sh_hght': 'GEOCORONAL SCI_SH_HGHT', 'sci_moon_sep': 'SKYMODEL SCI_RHO',
                         # skye
                         'skye_ra': 'TESKYERA', 'skye_dec': 'TESKYEDE', 'skye_amass': 'TESKYEAM',
                         'skye_kmpos': 'TESKYEKM', 'skye_focpos': 'TESKYEFO', 'skye_name': 'SKYENAME',
-                        'skye_geoshadow_hgt':'GEOCORONAL SKYE SHADOW_HEIGHT',
-                        'skye_moon_alt': 'SKYMODEL SKYE ALT', 'skye_moon_rho': 'SKYMODEL SKYE RHO',
+                        'skye_sh_hght': 'GEOCORONAL SKYE_SH_HGHT', 'skye_moon_sep': 'SKYMODEL SKYE_RHO',
                         # skyw
                         'skyw_ra': 'TESKYWRA', 'skyw_dec': 'TESKYWDE', 'skyw_amass': 'TESKYWAM',
                         'skyw_kmpos': 'TESKYWKM', 'skyw_focpos': 'TESKYWFO', 'skyw_name': 'SKYWNAME',
-                        'skyw_geoshadow_hgt':'GEOCORONAL SKYW SHADOW_HEIGHT',
-                        'skyw_moon_alt': 'SKYMODEL SKYW ALT', 'skyw_moon_rho': 'SKYMODEL SKYW RHO'
+                        'skyw_sh_hght': 'GEOCORONAL SKYW_SH_HGHT', 'skyw_moon_sep': 'SKYMODEL SKYW_RHO',
+                        # sky parameters
+                        'moon_ra': 'SKYMODEL MOON_RA', 'moon_dec': 'SKYMODEL MOON_DEC',
+                        'moon_phase': 'SKYMODEL MOON_PHASE', 'moon_fli': 'SKYMODEL MOON_FLI',
+                        'sun_alt': 'SKYMODEL SUNALT', 'moon_alt': 'SKYMODEL MOONALT'
                         }
 
     with fits.open(filename) as hdulist:
@@ -1462,7 +1484,7 @@ def _collect_header_data(filename: str) -> dict:
 
 
 def update_summary_file(filename: str, tileid: int = None, mjd: int = None, expnum: int = None,
-                        master_mjd: int = None):
+                        master_mjd: int = None, drpver: str = None):
     """ Update the DRPall summary file
 
     Update the LVM DRPall summary file with a new row of data for a given lvmSFrame file.
@@ -1482,9 +1504,11 @@ def update_summary_file(filename: str, tileid: int = None, mjd: int = None, expn
     master_mjd : int, optional
         the master calibration MJD, by default None
     """
+    # get DRP version
+    drpver = drpver or DRPVER
 
     # get the row(s) from the raw frames metadata
-    df = get_metadata(tileid=int(tileid), mjd=int(mjd), expnum=int(expnum), imagetyp='object')
+    df = get_metadata(drpver=drpver, tileid=int(tileid), mjd=int(mjd), expnum=int(expnum), imagetyp='object')
     if df is None or df.empty:
         log.info(f'No metadata found for {tileid=}, {mjd=}, {expnum=}. Exiting.')
         return
@@ -1499,14 +1523,14 @@ def update_summary_file(filename: str, tileid: int = None, mjd: int = None, expn
 
     # add additional metadata
     # get SAS location and name
-    location = path.location("lvm_frame", mjd=mjd, drpver=DRPVER, tileid=tileid, expnum=expnum, kind='SFrame')
-    name = path.name("lvm_frame", mjd=mjd, drpver=DRPVER, tileid=tileid, expnum=expnum, kind='SFrame')
+    location = path.location("lvm_frame", mjd=mjd, drpver=drpver, tileid=tileid, expnum=expnum, kind='SFrame')
+    name = path.name("lvm_frame", mjd=mjd, drpver=drpver, tileid=tileid, expnum=expnum, kind='SFrame')
     gdr_location = path.location('lvm_agcam_coadd', mjd=mjd, specframe=expnum, tel='sci')
     hdr_data['filename'] = name
     hdr_data['location'] = location
     hdr_data['agcam_location'] = gdr_location
     hdr_data['calib_mjd'] = master_mjd
-    hdr_data['drpver'] = DRPVER
+    hdr_data['drpver'] = drpver
 
     # add new columns
     df = row.assign(**hdr_data)
@@ -1514,22 +1538,28 @@ def update_summary_file(filename: str, tileid: int = None, mjd: int = None, expn
     # explicitly set some column dtypes to try and handle cases with null data
     # sci, skye, skye keys
     tels = {'sci', 'skye', 'skyw'}
-    keys = {'ra', 'dec', 'amass', 'kmpos', 'focpos', 'geoshadow_hgt', 'moon_alt', 'moon_rho'}
+    keys = {'ra', 'dec', 'amass', 'kmpos', 'focpos', 'sh_hght', 'moon_sep'}
     dtypes = {f'{i}_{j}': 'float64' for i, j in itertools.product(tels, keys)}
+    dtypes.update({colname: 'float64' for colname in ('moon_ra', 'moon_dec', 'moon_phase', 'moon_fli', 'sun_alt', 'moon_alt')})
     dtypes['calib_mjd'] = 'int64'
     df = df.astype(dtypes)
 
     # replace empty strings in object column with None
-    df['object'] = df['object'].replace('', None)
+    df['object'] = df['object'].fillna('None')
+    df['skye_name'] = df['skye_name'].fillna('None')
+    df['skyw_name'] = df['skyw_name'].fillna('None')
+    # replace NaN values by invalid value -999 (NaNs will be casted to strings)
+    df.fillna(-999, inplace=True)
 
     # create drpall h5 filepath
-    drpall = path.full('lvm_drpall', drpver=DRPVER)
+    drpall = path.full('lvm_drpall', drpver=drpver)
     drpall = drpall.replace('.fits', '.h5')
+    # log.info(f'Updating the drpall summary file {drpall}')
     lock = FileLock(drpall.replace('.h5', '.h5.lock'), timeout=5)
 
     # set min column sizes for some columns
     min_itemsize = {'skye_name': 20, 'skyw_name': 20, 'location': 120, 'agcam_location': 120,
-                    'object': 16, 'obstime': 23}
+                    'object': 24, 'obstime': 23}
 
     # write to pytables hdf5
     try:
@@ -1540,6 +1570,9 @@ def update_summary_file(filename: str, tileid: int = None, mjd: int = None, expn
                       'On macs, you may first need to first run "brew install hdf5".')
     except Timeout:
         log.error("Another instance of the drp currently holds the drpall lock.")
+    except ValueError as e:
+        log.error(f"Error while updating drpall file: {e}")
+        log.error(f"You may need to remove {drpall} and run this code again with flags -2d -1d -p1d")
     else:
         log.info(f'Updating drpall file {drpall}.')
 

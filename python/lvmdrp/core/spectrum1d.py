@@ -16,7 +16,6 @@ from lvmdrp.core import fit_profile
 from lvmdrp.core import plot
 from lvmdrp.core.header import Header
 
-
 def adaptive_smooth(data, start_width, end_width):
     """
     Smooth an array with a filter that adapts in size from start_width to end_width.
@@ -225,12 +224,82 @@ def _cross_match(
     return max_correlation, best_shift, best_stretch_factor
 
 
-def _normalize_peaks(data, min_peak_dist):
+def _normalize_peaks(data, ref, min_peak_dist):
     data_ = numpy.asarray(data).copy()
-    peaks, _ = signal.find_peaks(data_, distance=min_peak_dist)
-    norm = numpy.interp(numpy.arange(data_.shape[0]), peaks, data_[peaks])
-    data_ /= norm
-    return data_
+    dat_peaks, dat_peak_pars = signal.find_peaks(data_, distance=min_peak_dist, rel_height=0.5, width=(2,4), prominence=1.5)
+
+    ref_ = numpy.asarray(ref).copy()
+    ref_peaks, ref_peak_pars = signal.find_peaks(ref_, distance=min_peak_dist, rel_height=0.5, width=(2,4), prominence=1.5)
+
+    if dat_peaks.size == 0 or ref_peaks.size == 0:
+        return data_, ref_, None, None, None, None
+
+    # dat_norm = interpolate.interp1d(dat_peaks, data_[dat_peaks], kind="linear", bounds_error=False, fill_value=0.0)(numpy.arange(data_.shape[0]))
+    # ref_norm = interpolate.interp1d(ref_peaks, ref_[ref_peaks], kind="linear", bounds_error=False, fill_value=0.0)(numpy.arange(data_.shape[0]))
+    dat_norm = numpy.interp(numpy.arange(data_.shape[0]), dat_peaks, data_[dat_peaks])
+    ref_norm = numpy.interp(numpy.arange(data_.shape[0]), ref_peaks, ref_[ref_peaks])
+
+    # import matplotlib.pyplot as plt
+    # plt.figure()
+    # plt.plot(dat_norm)
+    # plt.plot(ref_norm)
+
+    ref_ = ref_ / ref_norm
+    data_ = data_ / dat_norm
+    # ref_ = ref_ / ref_norm * dat_norm / numpy.median(data_)
+    # data_ = data_ / numpy.median(data_)
+
+    return data_, ref_, dat_peaks, dat_peak_pars, ref_peaks, ref_peak_pars
+
+
+def _choose_cc_peak(cc, shifts, min_shift, max_shift):
+    mask = (shifts >= min_shift) & (max_shift >= shifts)
+
+    ccp, _ = signal.find_peaks(cc[mask])
+
+    # import matplotlib.pyplot as plt
+    # plt.figure(figsize=(15,5))
+    # plt.plot(shifts[mask], cc[mask], "-o")
+    # plt.vlines(shifts[mask][ccp], 0, 1)
+
+    sum_cc = []
+    for p in ccp:
+        sum_cc.append(max((cc[mask][p-1], cc[mask][p+1])) + cc[mask][p])
+        # plt.vlines(shifts[mask][p-2], 0, 1, ls="--", color="k")
+        # plt.vlines(shifts[mask][p+3], 0, 1, ls="--", color="k")
+        # mask = (shifts >= p-7) & (shifts <= p+7)
+        # guess = [numpy.trapz(cc[mask], shifts[mask]), p, 1.0, 0.0]
+        # bound_lower = [0.0, p+min_shift, 2, -numpy.inf]
+        # bound_upper = [numpy.inf, p+max_shift, 5, numpy.inf]
+        # best_gauss = fit_profile.Gaussian_const(guess)
+        # best_gauss.fit(
+        #     shifts[mask],
+        #     cc[mask],
+        #     sigma=1.0,
+        #     p0=guess,
+        #     bounds=(bound_lower, bound_upper)
+        # )
+        # area, best_shift_sp, sigma, bg = best_gauss.getPar()
+        # sum_cc.append(area)
+
+
+    # print(ccp, sum_cc)
+    return ccp[numpy.argmax(sum_cc)]
+
+def align_blocks(ref_spec, obs_spec, median_box=21):
+    """Cross-correlate median-filtered versions of fiber profile data and model to get coarse alignment"""
+    obs_median = signal.medfilt(obs_spec, median_box)
+    ref_median = signal.medfilt(ref_spec, median_box)
+
+    obs_median /= numpy.median(obs_median)
+    ref_median /= numpy.median(ref_median)
+
+    cc = signal.correlate(obs_median, ref_median, mode="same")
+
+    shifts = signal.correlation_lags(len(obs_spec), len(ref_spec), mode="same")
+    best_shift = shifts[numpy.argmax(cc)]
+
+    return best_shift
 
 
 def _cross_match_float(
@@ -298,7 +367,6 @@ def _cross_match_float(
     else:
         ref_spec_ = ref_spec.copy()
         obs_spec_ = obs_spec.copy()
-    #return ref_spec_, obs_spec_
 
     for factor in stretch_factors:
         # Stretch the first signal
@@ -319,6 +387,7 @@ def _cross_match_float(
         # Normalize the cross correlation
         cross_corr = cross_corr.astype(numpy.float32)
         cross_corr /= norm(stretched_signal1) * norm(obs_spec_)
+        cross_corr = numpy.nan_to_num(cross_corr)
 
         # Get the correlation shifts
         shifts = signal.correlation_lags(
@@ -368,6 +437,127 @@ def _cross_match_float(
         ax.axvline(best_shift_sp, color="tab:red", lw=1)
         ax.text(best_shift, (best_cross_corr[mask_cc]).min(), f"shift = {best_shift}", va="bottom", ha="left", color="tab:blue")
         ax.text(best_shift_sp, (best_cross_corr[mask_cc]).min(), f"subpix. shift = {best_shift_sp:.3f}", va="top", ha="right", color="tab:red")
+
+    return max_correlation, best_shift_sp, best_stretch_factor
+
+
+def _fiber_cc_match(
+    ref_spec: numpy.ndarray,
+    obs_spec: numpy.ndarray,
+    guess_shift : int,
+    shift_range: List[int],
+    min_peak_dist: float = 5.0,
+    gauss_window: List[int] = [-10, 10],
+    gauss_sigmas: List[float] = [0.0, 5.0],
+    normalize_spectra : bool = True,
+    ax: None|plot.plt.Axes = None
+) -> Tuple[float, float, float]:
+    """Find the best fractional-pixel cross correlation between two fiber profiles.
+
+    This function finds the best cross correlation between two fiber profiles
+    by shifting the first spectrum and computing the cross correlation with the
+    second spectrum. The best cross correlation is defined as the
+    fractional-pixel offset with the highest correlation value. The spectra are
+    "peak-normalized" before correlating, making all peaks about 1 unit in
+    height.
+
+    This is used for measuring fiber shifts during the night
+
+    Parameters
+    ----------
+    ref_spec : ndarray
+        The reference spectrum.
+    obs_spec : ndarray
+        The observed spectrum.
+    guess_shift : int
+        Guess for the best CC shift
+    shift_range : tuple
+        The range of shifts to use.
+    min_peak_dist : float, optional
+        Minimum distance between two consecutive peaks to be considered signal, by default 5.0
+    gauss_window : list[int], optional
+        Range of pixels to consider in Gaussian fitting relative to peak, by default [-5, 5]
+    gauss_sigmas : list[float], optional
+        Gaussian sigma boundaries, by default [0.0, 5.0]
+    normalize_spectra : bool, optional
+        Normalize both spectrum to have peaks ~1, by default True
+    ax : None|plt.Axes, optional
+        The matplotlib axes where to draw the CC and the
+
+    Returns
+    -------
+    max_correlation : float
+        The maximum correlation value.
+    best_shift : float
+        The fractional pixel shift that maximizes the correlation
+    best_stretch_factor : float
+        The best stretch factor.
+    """
+
+    min_shift, max_shift = shift_range
+    max_correlation = -numpy.inf
+    best_shift = 0
+    best_stretch_factor = 1
+
+    # normalize the peaks to roughly magnitude 1, so that individual very bright
+    # fibers do not dominate the signal
+    if normalize_spectra:
+        obs_spec_, ref_spec_, obs_peak, obs_peak_pars, ref_peaks, ref_peak_pars = _normalize_peaks(obs_spec, ref_spec, min_peak_dist=min_peak_dist)
+    else:
+        ref_spec_ = ref_spec.copy()
+        obs_spec_ = obs_spec.copy()
+
+    # Get the correlation shifts
+    shifts = signal.correlation_lags(
+        len(obs_spec_), len(ref_spec_), mode="same"
+    )
+    cross_corr = signal.correlate(obs_spec_, ref_spec_, mode="same")
+
+    # Normalize the cross correlation
+    cross_corr = cross_corr.astype(numpy.float32)
+    cross_corr /= norm(ref_spec_) * norm(obs_spec_)
+    cross_corr = numpy.nan_to_num(cross_corr)
+
+    # Find the max correlation and the corresponding shift for this stretch factor
+    mask = (shifts >= min_shift+guess_shift) & (shifts <= max_shift+guess_shift)
+    idx_max_corr = numpy.argmax(cross_corr[mask])
+    max_corr = cross_corr[mask][idx_max_corr]
+    shift = shifts[mask][idx_max_corr]
+
+    if ax is not None:
+        ax.step(shifts[mask], cross_corr[mask], color="0.7", lw=1, where="mid", alpha=0.3)
+
+    condition = max_corr > max_correlation
+
+    if condition:
+        best_shifts, best_cross_corr = shifts, cross_corr
+        max_correlation = max_corr
+        best_shift = shift
+
+    # Fit Gaussian around maximum cross-correlation peak
+    mask = (shifts >= min_shift+best_shift) & (shifts <= max_shift+best_shift)
+    guess = [numpy.trapz(best_cross_corr[mask], best_shifts[mask]), best_shift, 1.0, 0.0]
+    bound_lower = [0.0, best_shift+min_shift, gauss_sigmas[0], -numpy.inf]
+    bound_upper = [numpy.inf, best_shift+max_shift, gauss_sigmas[1], numpy.inf]
+    best_gauss = fit_profile.Gaussian_const(guess)
+    best_gauss.fit(
+        best_shifts[mask],
+        best_cross_corr[mask],
+        sigma=1.0,
+        p0=guess,
+        bounds=(bound_lower, bound_upper)
+    )
+    area, best_shift_sp, sigma, bg = best_gauss.getPar()
+
+    # display best match
+    if ax is not None:
+        mask = (best_shifts >= best_shift+gauss_window[0]) & (best_shifts <= best_shift+gauss_window[1])
+        ax.step(best_shifts[mask], best_cross_corr[mask], color="0.2", lw=2, where="mid")
+        ax.step(best_shifts[mask], best_gauss(best_shifts[mask]), color="tab:red", lw=2, where="mid")
+        ax.axvline(best_shift, color="tab:blue", lw=1, ls="--")
+        ax.axvline(best_shift_sp, color="tab:red", lw=1)
+        ax.text(best_shift, (best_cross_corr[mask]).min(), f"shift = {best_shift}", va="bottom", ha="left", color="tab:blue")
+        ax.text(best_shift_sp, (best_cross_corr[mask]).min(), f"subpix. shift = {best_shift_sp:.3f}", va="top", ha="right", color="tab:red")
 
     return max_correlation, best_shift_sp, best_stretch_factor
 
@@ -3347,10 +3537,17 @@ class Spectrum1D(Header):
         fit_bg=True,
         warning=False,
     ):
-        error = self._error if self._error is not None else numpy.ones(self._dim, dtype=numpy.float32)
-        mask = self._mask != 0 if self._mask is not None else numpy.zeros(self._dim, dtype=bool)
-        error[mask] = numpy.inf
+        # copy main arrays to avoid side effects
         data = self._data.copy()
+        error = self._error.copy() if self._error is not None else numpy.ones(self._dim, dtype=numpy.float32)
+        mask = self._mask.copy() if self._mask is not None else numpy.zeros(self._dim, dtype=bool)
+
+        # update mask to account for unmasked invalid pixels
+        # mask |= (~numpy.isfinite(data) | ~numpy.isfinite(error))
+
+        # reset bad pixels in data and error
+        mask = mask != 0
+        error[mask] = numpy.inf
         data[mask] = 0.0
 
         flux = numpy.ones(len(cent_guess)) * numpy.nan
@@ -3361,7 +3558,7 @@ class Spectrum1D(Header):
         fact = numpy.sqrt(2 * numpy.pi)
         hw = aperture // 2
         for i, centre in enumerate(cent_guess):
-            if numpy.isnan(centre) or (centre + hw < self._wave[0] or centre - hw > self._wave[-1]):
+            if numpy.isnan(centre) or (centre - hw < self._wave[0] or centre + hw > self._wave[-1]):
                 continue
 
             select = (self._wave >= centre - hw) & (self._wave <= centre + hw)
@@ -3400,7 +3597,18 @@ class Spectrum1D(Header):
                 flux[i], cent[i], fwhm[i] = gauss.getPar()
             fwhm[i] *= 2.354
 
+            # mask line if >=2 pixels are masked within 3.5sigma
+            model_badpix = data[select] == 0
+            x = self._wave[select].copy()
+            if not numpy.isnan([cent[i], fwhm[i]]).any():
+                select_2 = (self._wave>=cent[i]-3.5*fwhm[i]/2.354) & (self._wave<=cent[i]+3.5*fwhm[i]/2.354)
+                x = self._wave[select_2]
+                model_badpix = mask[select_2]
+                if model_badpix.sum() >= 2:
+                    flux[i] = cent[i] = fwhm[i] = bg[i] = numpy.nan
+
             if axs is not None:
+                axs[i].axvspan(x[0], x[-1], alpha=0.1, fc="0.5", label="reg. of masking")
                 axs[i] = gauss.plot(self._wave[select], self._data[select], mask=self._mask[select]!=0, ax=axs[i])
                 axs[i].axvline(cent_guess[i], ls="--", lw=1, color="tab:red", label="cent. guess")
                 axs[i].set_title(f"{axs[i].get_title()} @ {cent[i]:.1f} (pixel)")
@@ -3462,17 +3670,28 @@ class Spectrum1D(Header):
         # construct sparse projection matrix
         fact = numpy.sqrt(2.0 * numpy.pi)
         kernel_width = 7 # should exceed 4 sigma
-        vI = []
-        vJ = []
-        vV = []
-        for xx in range(nfibers):
-            for yy in range(int(pos[xx]-kernel_width),int(pos[xx]+kernel_width)):
-                v = numpy.exp(-0.5 * ((yy-pos[xx]) / sigma[xx]) ** 2) / (fact * sigma[xx])
-                if v>0.0001:   # make non-zero and positive definite
-                    vI.append(xx)
-                    vJ.append(yy)
-                    vV.append(v / self._error[yy])
-        B = sparse.csc_matrix((vV, (vJ, vI)), shape=(self._dim, nfibers))
+        # vI = []
+        # vJ = []
+        # vV = []
+        # for xx in range(nfibers):
+        #     for yy in range(int(pos[xx]-kernel_width),int(pos[xx]+kernel_width)+1):
+        #         v = numpy.exp(-0.5 * ((yy-pos[xx]) / sigma[xx]) ** 2) / (fact * sigma[xx])
+        #         if v>=0.0000:   # make non-zero and positive definite
+        #             vI.append(xx)
+        #             vJ.append(yy)
+        #             vV.append(v / self._error[yy])
+        # B = sparse.csc_matrix((vV, (vJ, vI)), shape=(len(self._data), nfibers))
+
+        # nfibers x kernel_size
+        xx = numpy.repeat(numpy.array(range(nfibers)), 2*kernel_width+1)
+        # pixel ranges of fiber images
+        pos_t = numpy.trunc(pos)
+        yyv = numpy.linspace(pos_t-kernel_width, pos_t+kernel_width, 2*kernel_width+1, endpoint=True)
+        # nfibers x kernel_size pixel values
+        v = numpy.exp(-0.5 * ((yyv-pos) / sigma) ** 2) / (fact * sigma)
+        yyv = yyv.T.ravel()
+        v = v.T.ravel() / self._error[yyv.astype(numpy.int32)]
+        B = sparse.csc_matrix((v, (yyv, xx)), shape=(len(self._data), nfibers))
 
         # invert the projection matrix and solve
         ypixels = numpy.arange(self._data.size)
@@ -3485,7 +3704,6 @@ class Spectrum1D(Header):
 
         # pyfits.writeto('B1.fits', B1.toarray(), overwrite=True)
         # if plot:
-        #     plt.figure(figsize=(15, 10))
         #     plt.plot(self._data, "ok")
         #     plt.plot(numpy.dot(A * self._error[:, None], out[0]), "-r")
         #     # plt.plot(numpy.dot(A, out[0]), '-r')
