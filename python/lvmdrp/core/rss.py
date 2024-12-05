@@ -13,6 +13,7 @@ from astropy.coordinates import EarthLocation
 from astropy import units as u
 
 from lvmdrp import log
+from lvmdrp.utils.bitmask import ReductionStage, PixMask, _parse_bitmask, add_bitmask, toggle_bitmask, update_header_bitmask, print_bitmasks
 from lvmdrp.core.constants import CONFIG_PATH, CON_LAMPS, ARC_LAMPS
 from lvmdrp.core.apertures import Aperture
 from lvmdrp.core.cube import Cube
@@ -130,7 +131,7 @@ class RSS(FiberRows):
                 if hdu.name == "ERROR":
                     error = hdu.data.astype("float32")
                 if hdu.name == "BADPIX":
-                    mask = hdu.data.astype("bool")
+                    mask = hdu.data.astype("int32")
                 if hdu.name == "WAVE_TRACE":
                     wave_trace = hdu
                 if hdu.name == "LSF_TRACE":
@@ -419,7 +420,7 @@ class RSS(FiberRows):
             new_data = bn.nansum(fluxes * weights, axis=0)
             new_lsf = bn.nansum(lsfs * weights, axis=0)
             new_error = numpy.sqrt(bn.nansum(vars, axis=0))
-            new_mask = (bn.nansum(masks, axis=0)>0)
+            new_mask = numpy.bitwise_or.reduce(masks, axis=0)
             if rss._sky is not None:
                 new_sky = bn.nansum(skies * weights, axis=0)
             else:
@@ -449,7 +450,7 @@ class RSS(FiberRows):
             new_data = bn.nanmean(fluxes, axis=0)
             new_lsf = bn.nanmean(lsfs, axis=0)
             new_error = numpy.sqrt(bn.nanmean(vars, axis=0))
-            new_mask = bn.nansum(masks, axis=0).astype("bool")
+            new_mask = numpy.bitwise_or.reduce(masks, axis=0)
             if skies.size != 0:
                 new_sky = bn.nansum(skies, axis=0)
             else:
@@ -529,7 +530,7 @@ class RSS(FiberRows):
             error=numpy.zeros((n_spectra, ref_spec._error.size))
             if ref_spec._error is not None
             else None,
-            mask=numpy.zeros((n_spectra, ref_spec._mask.size), dtype=bool)
+            mask=numpy.zeros((n_spectra, ref_spec._mask.size), dtype=int)
             if ref_spec._mask is not None
             else None,
             sky=numpy.zeros((n_spectra, ref_spec._data.size))
@@ -695,7 +696,7 @@ class RSS(FiberRows):
 
             # combined mask of valid pixels if contained in both
             if self._mask is not None and other._mask is not None:
-                mask = numpy.logical_or(self._mask, other._mask)
+                mask = numpy.bitwise_or(self._mask, other._mask)
             else:
                 mask = self._mask
             if data.dtype == numpy.float64:
@@ -738,7 +739,7 @@ class RSS(FiberRows):
 
             # combined mask of valid pixels if contained in both
             if self._mask is not None and other._mask is not None:
-                mask = numpy.logical_or(self._mask, other._mask[numpy.newaxis, :])
+                mask = numpy.bitwise_or(self._mask, other._mask[numpy.newaxis, :])
             else:
                 mask = self._mask
 
@@ -899,6 +900,70 @@ class RSS(FiberRows):
 
         if self._sky_error is not None and spec._sky_error is not None:
             self._sky_error[fiber] = spec._sky_error
+
+    def add_bitmask(self, pixmask, where=None):
+        """Adds the given bitmask to the current mask
+
+        If no mask is present in the image, a new mask will be started
+        with the corresponding pixels flagged with `pixmask`.
+
+        Parameters
+        ----------
+        pixmask : PixMask|str|int
+            Bitmask to add to the current mask
+        where : numpy.ndarray[bool], optional
+            Boolean selection of pixels where to add given bitmask, by default all pixels
+
+        Returns
+        -------
+        mask : np.ndarray[PixMask|int]
+            Updated pixel mask
+        """
+        if self._mask is None and self._dim is not None:
+            self._mask = numpy.zeros(self._dim, dtype=int)
+        self._mask = add_bitmask(self._mask, pixmask=pixmask, where=where)
+        return self._mask
+
+    def toggle_bitmask(self, pixmask, where=None):
+        """Toggle the given bitmask in the current mask
+
+        If no mask is present in the image, a new mask will be started
+        with the corresponding pixels flagged with `pixmask`.
+
+        Parameters
+        ----------
+        pixmask : PixMask|str|int
+            Bitmask to add to the current mask
+        where : numpy.ndarray[bool], optional
+            Boolean selection of pixels where to add given bitmask, by default all pixels
+
+        Returns
+        -------
+        mask : np.ndarray[PixMask|int]
+            Updated pixel mask
+        """
+        self._mask = toggle_bitmask(self._mask, pixmask=pixmask, where=where)
+        return self._mask
+
+    def print_bitmasks(self, logger=None):
+        """Prints or logs bitmask value counts
+
+        Parameters
+        ----------
+        logger : logger, optional
+            logs with level `info` if given, by default None (uses print)
+        """
+        if self._mask is None:
+            return
+        print_bitmasks(self._mask, logger=log)
+
+    def update_drpstage(self, stage):
+        if self._header is None:
+            return
+
+        self._header = update_header_bitmask(header=self._header,
+                                             kind=ReductionStage, bitmask=stage,
+                                             key="DRPSTAGE", comment="data reduction stage")
 
     def add_header_comment(self, comstr):
         '''
@@ -1080,10 +1145,11 @@ class RSS(FiberRows):
 
         return RSS.from_spectra1d(new_specs, header=self._header, slitmap=self._slitmap, good_fibers=self._good_fibers)
 
-    def maskFiber(self, fiber, replace_error=1e10):
+    def maskFiber(self, fiber, bitmask, replace_error=1e10):
+        bitmask = _parse_bitmask(bitmask, kind=PixMask)
         self._data[fiber, :] = 0
         if self._mask is not None:
-            self._mask[fiber, :] = True
+            self._mask[fiber, :] = bitmask
         if self._error is not None:
             self._error[fiber, :] = replace_error
 
@@ -1364,7 +1430,7 @@ class RSS(FiberRows):
         else:
             new_error = None
         if self._mask is not None:
-            new_mask = numpy.full((self._mask.shape[0], new_wave.size), False, dtype=bool)
+            new_mask = numpy.full((self._mask.shape[0], new_wave.size), False, dtype=numpy.int32)
             new_mask[:, ipix:fpix+1] = self._mask
         else:
             new_mask = None
@@ -1423,7 +1489,7 @@ class RSS(FiberRows):
         dim = rss_in[0]._data.shape
         data = numpy.zeros((len(rss_in), dim[0], dim[1]), dtype=numpy.float32)
         if rss_in[0]._mask is not None:
-            mask = numpy.zeros((len(rss_in), dim[0], dim[1]), dtype="bool")
+            mask = numpy.zeros((len(rss_in), dim[0], dim[1]), dtype=numpy.int32)
         else:
             mask = None
 
@@ -1453,20 +1519,19 @@ class RSS(FiberRows):
         if method == "sum":
             if mask is not None:
                 data[mask] = 0
-                good_pix = bn.nansum(numpy.logical_not(mask), 0)
-                select_mean = good_pix > 0
-                combined_data[select_mean] = bn.nansum(data, 0)[select_mean]
-                combined_mask = good_pix == 0
+                good_pix = bn.nansum(mask == 0, 0) > 0
+                combined_data[good_pix] = bn.nansum(data, 0)[good_pix]
+                combined_mask = numpy.bitwise_or(mask, 0)
                 if error is not None:
                     error[mask] = replace_error
-                    combined_error[select_mean] = numpy.sqrt(
-                        bn.nansum(error**2, 0)[select_mean]
+                    combined_error[good_pix] = numpy.sqrt(
+                        bn.nansum(error**2, 0)[good_pix]
                     )
                 else:
                     combined_error = None
                 if sky is not None:
                     sky[mask] = 0
-                    combined_sky[select_mean] = bn.nansum(sky, 0)[select_mean]
+                    combined_sky[good_pix] = bn.nansum(sky, 0)[good_pix]
                 else:
                     combined_sky = None
             else:
@@ -1486,24 +1551,23 @@ class RSS(FiberRows):
         elif method == "mean":
             if mask is not None:
                 data[mask] = 0
-                good_pix = bn.nansum(numpy.logical_not(mask), 0)
-                select_mean = good_pix > 0
-                combined_data[select_mean] = (
-                    bn.nansum(data, 0)[select_mean] / good_pix[select_mean]
+                good_pix = bn.nansum(mask == 0, 0) > 0
+                combined_data[good_pix] = (
+                    bn.nansum(data, 0)[good_pix] / good_pix[good_pix]
                 )
-                combined_mask = good_pix == 0
+                combined_mask = numpy.bitwise_or(mask, 0)
                 if error is not None:
                     error[mask] = replace_error
-                    combined_error[select_mean] = numpy.sqrt(
-                        bn.nansum(error**2, 0)[select_mean]
-                        / good_pix[select_mean] ** 2
+                    combined_error[good_pix] = numpy.sqrt(
+                        bn.nansum(error**2, 0)[good_pix]
+                        / good_pix[good_pix] ** 2
                     )
                 else:
                     combined_error = None
                 if sky is not None:
                     sky[mask] = 0
-                    combined_sky[select_mean] = (
-                        bn.nansum(sky, 0)[select_mean] / good_pix[select_mean]
+                    combined_sky[good_pix] = (
+                        bn.nansum(sky, 0)[good_pix] / good_pix[good_pix]
                     )
                 else:
                     combined_sky = None
@@ -1523,15 +1587,13 @@ class RSS(FiberRows):
 
         elif method == "weighted_mean" and error is not None:
             if mask is not None:
-                good_pix = bn.nansum(numpy.logical_not(mask), 0)
-                select_mean = good_pix > 0
-
+                good_pix = bn.nansum(mask == 0, 0) > 0
                 var = error**2
                 weights = numpy.divide(1, var, out=numpy.zeros_like(var), where=var != 0)
                 weights /= bn.nansum(weights, 0)
                 combined_data[good_pix] = bn.nansum(data[good_pix] * var[good_pix], 0)
                 combined_error[good_pix] = numpy.sqrt(bn.nansum(var[good_pix], 0))
-                combined_mask = ~good_pix
+                combined_mask = numpy.bitwise_or(mask, 0)
                 combined_error[combined_mask] = replace_error
                 if sky is not None:
                     combined_sky[good_pix] = bn.nansum(sky[good_pix] * var[good_pix], 0)
@@ -1551,9 +1613,9 @@ class RSS(FiberRows):
 
         elif method == "median":
             if mask is not None:
-                good_pix = bn.nansum(numpy.logical_not(mask), 0)
+                good_pix = bn.nansum(mask == 0, 0) > 0
                 combined_data[good_pix] = bn.nanmedian(data[good_pix], 0)
-                combined_mask = ~good_pix
+                combined_mask = numpy.bitwise_or(mask, 0)
                 if error is not None:
                     combined_error[good_pix] = numpy.sqrt(bn.nanmedian(error[good_pix] ** 2, 0))
                     combined_error[combined_mask] = replace_error
@@ -1643,7 +1705,7 @@ class RSS(FiberRows):
     def create1DSpec(self, method="mean"):
         if self._wave is not None and len(self._wave.shape) == 2:
             if self._mask is not None:
-                select = numpy.logical_not(self._mask)
+                select = self._mask == 0
             else:
                 select = numpy.ones(self._data.shape, dtype="bool")
             disp = self._wave[:, 1:] - self._wave[:, :-1]
@@ -1672,7 +1734,7 @@ class RSS(FiberRows):
                 sky = self._sky[select].flatten()[idx]
         else:
             if self._mask is not None:
-                select = numpy.logical_not(self._mask)
+                select = self._mask == 0
             else:
                 select = numpy.ones(self._data.shape, dtype="bool")
 
@@ -1708,7 +1770,7 @@ class RSS(FiberRows):
                             sky[i] = numpy.sum(self._sky[select[:, i], i])
 
             if self._mask is not None:
-                bad = numpy.sum(self._mask, 0)
+                bad = numpy.sum(self._mask != 0, 0)
                 mask = bad == self._fibers
             else:
                 mask = None
@@ -1738,7 +1800,7 @@ class RSS(FiberRows):
             spec = self[i]
 
             if spec._mask is not None:
-                goodpix = numpy.logical_not(spec._mask)
+                goodpix = spec._mask == 0
             else:
                 goodpix = numpy.ones(spec._data.dim[0], dtype=numpy.float32)
 
@@ -1826,7 +1888,7 @@ class RSS(FiberRows):
         new_rss = RSS(
             data=numpy.zeros((rss._fibers, wave.size), dtype="float32"),
             error=numpy.zeros((rss._fibers, wave.size), dtype="float32") if rss._error is not None else None,
-            mask=numpy.zeros((rss._fibers, wave.size), dtype="bool"),
+            mask=numpy.zeros((rss._fibers, wave.size), dtype="int32"),
             sky=numpy.zeros((rss._fibers, wave.size), dtype="float32") if rss._sky is not None else None,
             sky_error=numpy.zeros((rss._fibers, wave.size), dtype="float32") if rss._sky_error is not None else None,
             sky_east=numpy.zeros((rss._fibers, wave.size), dtype="float32") if rss._sky_east is not None else None,
@@ -1851,9 +1913,9 @@ class RSS(FiberRows):
                 f = resample_flux_density(wave, rss._wave[ifiber], rss._data[ifiber])
                 new_rss._data[ifiber] = f.astype("float32")
             f = resample_flux_density(wave, rss._wave[ifiber], rss._mask[ifiber])
-            new_rss._mask[ifiber] = f.astype("bool")
-            new_rss._mask[ifiber] |= numpy.isnan(new_rss._data[ifiber])|(new_rss._data[ifiber]==0)
-            new_rss._mask[ifiber] |= ~numpy.isfinite(new_rss._error[ifiber])
+            new_rss._mask[ifiber] = f.astype("int32")
+            new_rss._mask[ifiber] |= numpy.isnan(new_rss._data[ifiber]) * PixMask["NODATA"]
+            new_rss._mask[ifiber] |= ~numpy.isfinite(new_rss._error[ifiber]) * PixMask["BADPIX"]
             if rss._lsf is not None:
                 f = numpy.interp(wave, rss._wave[ifiber], rss._lsf[ifiber])
                 new_rss._lsf[ifiber] = f.astype("float32")
@@ -1955,7 +2017,7 @@ class RSS(FiberRows):
             if self._error is not None:
                 var = self._error**2
                 inv_var = numpy.zeros_like(var)
-                good_pix = numpy.logical_not(self._mask)
+                good_pix = self._mask == 0
                 inv_var[good_pix] = 1.0 / var[good_pix]
             else:
                 inv_var = numpy.ones_like(self._data)
@@ -1997,12 +2059,12 @@ class RSS(FiberRows):
                         * good_pix[i, :][:, numpy.newaxis]
                     )
                     mask[:, select_bad] = numpy.logical_or(
-                        mask[:, select_bad], self._mask[i, :][:, numpy.newaxis]
+                        mask[:, select_bad], self._mask[i, :][:, numpy.newaxis] != 0
                     )
                     mask2[:, select_bad] = numpy.logical_or(
                         mask2[:, select_bad],
                         numpy.logical_and(
-                            self._mask[i, :][:, numpy.newaxis],
+                            self._mask[i, :][:, numpy.newaxis] != 0,
                             self._data[i, :][:, numpy.newaxis] == 0,
                         ),
                     )
@@ -2051,12 +2113,12 @@ class RSS(FiberRows):
                     # fiber_mask = (self._mask[i, :])[:, numpy.newaxis, numpy.newaxis]
 
                     mask[:, select] = numpy.logical_or(
-                        mask[:, select], self._mask[i, :][:, numpy.newaxis]
+                        mask[:, select], self._mask[i, :][:, numpy.newaxis] != 0
                     )
                     mask2[:, select] = numpy.logical_or(
                         mask2[:, select],
                         numpy.logical_and(
-                            self._mask[i, :][:, numpy.newaxis],
+                            self._mask[i, :][:, numpy.newaxis] != 0,
                             self._data[i, :][:, numpy.newaxis] == 0,
                         ),
                     )
@@ -2116,7 +2178,7 @@ class RSS(FiberRows):
             if self._error is not None:
                 var = self._error**2
                 inv_var = numpy.zeros_like(var)
-                good_pix = numpy.logical_not(self._mask)
+                good_pix = self._mask == 0
                 inv_var[good_pix] = 1.0 / var[good_pix]
             else:
                 inv_var = numpy.ones_like(self._data)
@@ -2144,12 +2206,12 @@ class RSS(FiberRows):
                         )
                         cover_fraction[select] = area
                     mask[:, select] = numpy.logical_or(
-                        mask[:, select], self._mask[i, :][:, numpy.newaxis]
+                        mask[:, select], self._mask[i, :][:, numpy.newaxis] != 0
                     )
                     mask2[:, select] = numpy.logical_or(
                         mask2[:, select],
                         numpy.logical_and(
-                            self._mask[i, :][:, numpy.newaxis],
+                            self._mask[i, :][:, numpy.newaxis] != 0,
                             self._data[i, :][:, numpy.newaxis] == 0,
                         ),
                     )
@@ -2238,7 +2300,7 @@ class RSS(FiberRows):
         if self._error is not None:
             var = self._error**2
             inv_var = numpy.zeros_like(var)
-            good_pix = numpy.logical_not(self._mask)
+            good_pix = self._mask == 0
             inv_var[good_pix] = 1.0 / var[good_pix]
         else:
             inv_var = numpy.ones_like(self._data)
@@ -2269,13 +2331,13 @@ class RSS(FiberRows):
                     mask[i, select_bad] = numpy.logical_or(
                         mask[i, select_bad],
                         numpy.logical_and(
-                            self._mask[j, i], weights_0[i, select_bad] > 0
+                            self._mask[j, i] != 0, weights_0[i, select_bad] > 0
                         ),
                     )
                     mask2[i, select_bad] = numpy.logical_or(
                         mask2[i, select_bad],
                         numpy.logical_and(
-                            numpy.logical_and(self._mask[j, i], self._data[j, i] == 0),
+                            numpy.logical_and(self._mask[j, i] != 0, self._data[j, i] == 0),
                             weights_0[i, select_bad] > 0,
                         ),
                     )
@@ -2341,7 +2403,7 @@ class RSS(FiberRows):
                     mask2,
                     numpy.logical_and(
                         cover_fraction > 0,
-                        numpy.logical_and(self._mask[j, :], (self._data[j, :] == 0))[
+                        numpy.logical_and(self._mask[j, :] != 0, (self._data[j, :] == 0))[
                             :, numpy.newaxis, numpy.newaxis
                         ],
                     ),
@@ -2607,7 +2669,7 @@ class RSS(FiberRows):
                         mask,
                         numpy.logical_and(
                             cover_fraction > 0,
-                            self._mask[j, :][:, numpy.newaxis, numpy.newaxis],
+                            self._mask[j, :][:, numpy.newaxis, numpy.newaxis] != 0,
                         ),
                     )
                     mask2 = numpy.logical_or(
@@ -2615,7 +2677,7 @@ class RSS(FiberRows):
                         numpy.logical_and(
                             cover_fraction > 0,
                             numpy.logical_and(
-                                self._mask[j, :], (self._data[j, :] == 0)
+                                self._mask[j, :] != 0, (self._data[j, :] == 0)
                             )[:, numpy.newaxis, numpy.newaxis],
                         ),
                     )
@@ -2660,7 +2722,7 @@ class RSS(FiberRows):
             resolution = float(resolution)
             # points = self._res_elements
             # fibers = self._fibers
-            good_pix = numpy.logical_not(self._mask)
+            good_pix = self._mask == 0
             # arc_position_x = self._arc_position_x.astype(numpy.float32)
             # arc_position_y = self._arc_position_y.astype(numpy.float32)
             # size_x = self._size[0]
@@ -3121,26 +3183,27 @@ class RSS(FiberRows):
     def apply_pixelmask(self, mask=None):
         """Replaces masked pixels in RSS by NaN values"""
         if mask is None:
-            mask = self._mask
+            mask = self._mask != 0
+        else:
+            mask = mask != 0
         if mask is None:
             return self._data, self._error
 
-        if self._mask is not None:
-            self._data[self._mask] = numpy.nan
-            if self._error is not None:
-                self._error[self._mask] = numpy.nan
-            if self._sky is not None:
-                self._sky[self._mask] = numpy.nan
-            if self._sky_error is not None:
-                self._sky_error[self._mask] = numpy.nan
-            if self._sky_east is not None:
-                self._sky_east[self._mask] = numpy.nan
-            if self._sky_east_error is not None:
-                self._sky_east_error[self._mask] = numpy.nan
-            if self._sky_west is not None:
-                self._sky_west[self._mask] = numpy.nan
-            if self._sky_west_error is not None:
-                self._sky_west_error[self._mask] = numpy.nan
+        self._data[mask] = numpy.nan
+        if self._error is not None:
+            self._error[mask] = numpy.nan
+        if self._sky is not None:
+            self._sky[mask] = numpy.nan
+        if self._sky_error is not None:
+            self._sky_error[mask] = numpy.nan
+        if self._sky_east is not None:
+            self._sky_east[mask] = numpy.nan
+        if self._sky_east_error is not None:
+            self._sky_east_error[mask] = numpy.nan
+        if self._sky_west is not None:
+            self._sky_west[mask] = numpy.nan
+        if self._sky_west_error is not None:
+            self._sky_west_error[mask] = numpy.nan
 
         return self._data, self._error
 
@@ -3323,7 +3386,7 @@ class RSS(FiberRows):
         if self._error is not None:
             hdus.append(pyfits.ImageHDU(self._error.astype("float32"), name="ERROR"))
         if self._mask is not None:
-            hdus.append(pyfits.ImageHDU(self._mask.astype("uint8"), name="BADPIX"))
+            hdus.append(pyfits.ImageHDU(self._mask.astype("int32"), name="BADPIX"))
 
         # include wavelength extension for rectified RSSs
         if include_wave and self._wave and len(self._wave.shape) == 1:
@@ -3450,7 +3513,7 @@ class lvmFrame(lvmBaseProduct):
         data = hdulist["FLUX"].data
         error = numpy.divide(1, hdulist["IVAR"].data, where=hdulist["IVAR"].data != 0, out=numpy.zeros_like(hdulist["IVAR"].data))
         error = numpy.sqrt(error)
-        mask = hdulist["MASK"].data.astype("bool")
+        mask = hdulist["MASK"].data.astype("int32")
         cent_trace = Table(hdulist["CENT_TRACE"].data)
         width_trace = Table(hdulist["WIDTH_TRACE"].data)
         wave_trace = Table(hdulist["WAVE_TRACE"].data)
@@ -3506,7 +3569,7 @@ class lvmFrame(lvmBaseProduct):
         # fill in rest of the template
         self._template["FLUX"].data = self._data
         self._template["IVAR"].data = numpy.divide(1, self._error**2, where=self._error != 0, out=numpy.zeros_like(self._error))
-        self._template["MASK"].data = self._mask.astype("uint8")
+        self._template["MASK"].data = self._mask.astype("int32")
         self._template["WAVE_TRACE"] = pyfits.BinTableHDU(data=self._wave_trace, name="WAVE_TRACE")
         self._template["LSF_TRACE"] = pyfits.BinTableHDU(data=self._lsf_trace, name="LSF_TRACE")
         self._template["CENT_TRACE"] = pyfits.BinTableHDU(data=self._cent_trace, name="CENT_TRACE")
@@ -3532,7 +3595,7 @@ class lvmFFrame(lvmBaseProduct):
         data = hdulist["FLUX"].data
         error = numpy.divide(1, hdulist["IVAR"].data, where=hdulist["IVAR"].data != 0, out=numpy.zeros_like(hdulist["IVAR"].data))
         error = numpy.sqrt(error)
-        mask = hdulist["MASK"].data.astype("bool")
+        mask = hdulist["MASK"].data.astype("int32")
         wave = hdulist["WAVE"].data
         lsf = hdulist["LSF"].data
         sky_east = hdulist["SKY_EAST"].data
@@ -3595,7 +3658,7 @@ class lvmFFrame(lvmBaseProduct):
         # fill in rest of the template
         self._template["FLUX"].data = self._data
         self._template["IVAR"].data = numpy.divide(1, self._error**2, where=self._error != 0, out=numpy.zeros_like(self._error))
-        self._template["MASK"].data = self._mask.astype("uint8")
+        self._template["MASK"].data = self._mask.astype("int32")
         self._template["WAVE"].data = self._wave
         self._template["LSF"].data = self._lsf
         self._template["SKY_EAST"].data = self._sky_east
@@ -3624,7 +3687,7 @@ class lvmCFrame(lvmBaseProduct):
         data = hdulist["FLUX"].data
         error = numpy.divide(1, hdulist["IVAR"].data, where=hdulist["IVAR"].data != 0, out=numpy.zeros_like(hdulist["IVAR"].data))
         error = numpy.sqrt(error)
-        mask = hdulist["MASK"].data.astype("bool")
+        mask = hdulist["MASK"].data.astype("int32")
         wave = hdulist["WAVE"].data
         lsf = hdulist["LSF"].data
         sky_east = hdulist["SKY_EAST"].data
@@ -3683,7 +3746,7 @@ class lvmCFrame(lvmBaseProduct):
         # fill in rest of the template
         self._template["FLUX"].data = self._data
         self._template["IVAR"].data = numpy.divide(1, self._error**2, where=self._error != 0, out=numpy.zeros_like(self._error))
-        self._template["MASK"].data = self._mask.astype("uint8")
+        self._template["MASK"].data = self._mask.astype("int32")
         self._template["WAVE"].data = self._wave
         self._template["LSF"].data = self._lsf
         self._template["SKY_EAST"].data = self._sky_east
@@ -3710,7 +3773,7 @@ class lvmSFrame(lvmBaseProduct):
         data = hdulist["FLUX"].data
         error = numpy.divide(1, hdulist["IVAR"].data, where=hdulist["IVAR"].data != 0, out=numpy.zeros_like(hdulist["IVAR"].data))
         error = numpy.sqrt(error)
-        mask = hdulist["MASK"].data.astype("bool")
+        mask = hdulist["MASK"].data.astype("int32")
         wave = hdulist["WAVE"].data
         lsf = hdulist["LSF"].data
         sky = hdulist["SKY"].data
@@ -3758,7 +3821,7 @@ class lvmSFrame(lvmBaseProduct):
         # fill in rest of the template
         self._template["FLUX"].data = self._data
         self._template["IVAR"].data = numpy.divide(1, self._error**2, where=self._error != 0, out=numpy.zeros_like(self._error))
-        self._template["MASK"].data = self._mask.astype("uint8")
+        self._template["MASK"].data = self._mask.astype("int32")
         self._template["WAVE"].data = self._wave
         self._template["LSF"].data = self._lsf
         self._template["SKY"].data = self._sky.astype("float32")

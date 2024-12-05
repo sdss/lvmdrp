@@ -29,6 +29,7 @@ from lvmdrp.core.constants import (
     SKYMODEL_CONFIG_PATH,
     SKYMODEL_INST_PATH,
 )
+from lvmdrp.utils.bitmask import ReductionStage, PixMask
 from lvmdrp.core.plot import plt, create_subplots, save_fig
 from lvmdrp.core.header import Header
 from lvmdrp.core.passband import PassBand
@@ -1396,10 +1397,10 @@ def interpolate_sky( in_frame: str, out_rss: str = None, display_plots: bool = F
         dlambda = np.column_stack((dlambda, dlambda[:, -1]))
         new_sky = s_ssky(frame._wave).astype("float32") * dlambda
         new_error = np.sqrt(s_error(frame._wave).astype("float32")) * dlambda
-        new_mask = s_mask(frame._wave).astype(bool)
+        new_mask = s_mask(frame._wave).astype("int32")
         # update mask with new bad pixels
-        new_mask = (new_sky < 0) | np.isnan(new_sky)
-        new_mask |= (new_error < 0) | np.isnan(new_error)
+        new_mask |= ((new_sky < 0) | np.isnan(new_sky)) * PixMask["BADSKYFIT"]
+        new_mask |= ((new_error < 0) | np.isnan(new_error)) * PixMask["BADSKYFIT"]
 
         # store outputs
         supersky[telescope] = s_ssky
@@ -1455,6 +1456,7 @@ def interpolate_sky( in_frame: str, out_rss: str = None, display_plots: bool = F
 
     # write output RSS
     log.info(f"writing output RSS file '{os.path.basename(out_rss)}'")
+    new_rss._header["DRPSTAGE"] = (ReductionStage(new_rss._header["DRPSTAGE"]) + "SKY_SUPERSAMPLED").value
     new_rss.writeFitsData(out_rss)
 
     return new_rss, supersky, supererror, swave, ssky, svars, smask
@@ -1581,6 +1583,7 @@ def combine_skies(in_rss: str, out_rss, sky_weights: Tuple[float, float] = None)
         rss._sky_west[std_idx] *= exptime_factors
         rss._sky_west_error[std_idx] *= exptime_factors
 
+    rss._header["DRPSTAGE"] = (ReductionStage(rss._header["DRPSTAGE"]) + "SKY_TELESCOPES_COMBINED").value
     rss.writeFitsData(out_rss)
 
     return rss, sky
@@ -1653,9 +1656,9 @@ def quick_sky_subtraction(in_cframe, out_sframe, skymethod: str = 'farlines_near
 
     # print("writing lvmSFrame")
     log.info(f"writing lvmSframe to {out_sframe}")
-    sframe = lvmSFrame(data=skysub_data, error=skysub_error, mask=cframe._mask.astype(bool), sky=skydata, sky_error=sky_error,
+    sframe = lvmSFrame(data=skysub_data, error=skysub_error, mask=cframe._mask, sky=skydata, sky_error=sky_error,
                        wave=cframe._wave, lsf=cframe._lsf, header=cframe._header, slitmap=cframe._slitmap)
-    sframe._mask |= ~np.isfinite(sframe._error)
+    sframe._header["DRPSTAGE"] = (ReductionStage(sframe._header["DRPSTAGE"]) + "SKY_SUBTRACTED").value
     sframe.writeFitsData(out_sframe)
     # TODO: check on expnum=7632 for halpha emission in sky fibers
 
@@ -1921,22 +1924,22 @@ def create_skysub_spectrum(hdu: fits.HDUList, tel: str,
     # do continuum vs line separation
     log.info("separating line and continuum in Sci, SkyE ,and SkyW spectra")
 
-    specsci=Spectrum1D(wave=Table(hdusci.data)['WAVE'].data, data=Table(hdusci.data)['FLUX'].data, mask=np.zeros(len(Table(hdusci.data)), dtype=bool))
-    specskye=Spectrum1D(wave=Table(hduskye.data)['WAVE'].data, data=Table(hduskye.data)['FLUX'].data, mask=np.zeros(len(Table(hduskye.data)), dtype=bool))
-    specskyw=Spectrum1D(wave=Table(hduskyw.data)['WAVE'].data, data=Table(hduskyw.data)['FLUX'].data, mask=np.zeros(len(Table(hduskyw.data)), dtype=bool))
+    specsci=Spectrum1D(wave=Table(hdusci.data)['WAVE'].data, data=Table(hdusci.data)['FLUX'].data, mask=np.zeros(len(Table(hdusci.data)), dtype=np.int32))
+    specskye=Spectrum1D(wave=Table(hduskye.data)['WAVE'].data, data=Table(hduskye.data)['FLUX'].data, mask=np.zeros(len(Table(hduskye.data)), dtype=np.int32))
+    specskyw=Spectrum1D(wave=Table(hduskyw.data)['WAVE'].data, data=Table(hduskyw.data)['FLUX'].data, mask=np.zeros(len(Table(hduskyw.data)), dtype=np.int32))
 
     # specsci_error = Spectrum1D(
     #     wave=Table(hdusci.data)["WAVE"].data,
     #     data=Table(hdusci.data)['ERROR'].data,
-    #     mask=np.zeros(len(Table(hdusci.data)), dtype=bool))
+    #     mask=np.zeros(len(Table(hdusci.data)), dtype=np.int32))
     specskye_error = Spectrum1D(
         wave=Table(hduskye.data)["WAVE"].data,
         data=Table(hduskye.data)['ERROR'].data,
-        mask=np.zeros(len(Table(hduskye.data)), dtype=bool))
+        mask=np.zeros(len(Table(hduskye.data)), dtype=np.int32))
     specskyw_error = Spectrum1D(
         wave=Table(hduskyw.data)["WAVE"].data,
         data=Table(hduskyw.data)['ERROR'].data,
-        mask=np.zeros(len(Table(hduskyw.data)), dtype=bool))
+        mask=np.zeros(len(Table(hduskyw.data)), dtype=np.int32))
 
     csci, cscimask = find_continuum(specsci._data)
     cskye, cskyemask = find_continuum(specskye._data)

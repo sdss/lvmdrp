@@ -29,7 +29,7 @@ from typing import List, Tuple
 from lvmdrp import log, DRP_COMMIT, __version__ as DRPVER
 from lvmdrp.core.constants import CONFIG_PATH, SPEC_CHANNELS, ARC_LAMPS, LVM_REFERENCE_COLUMN, LVM_NBLOCKS, FIDUCIAL_PLATESCALE
 from lvmdrp.utils.decorators import skip_on_missing_input_path, drop_missing_input_paths
-from lvmdrp.utils.bitmask import QualityFlag
+from lvmdrp.utils.bitmask import PixMask
 from lvmdrp.core.fiberrows import FiberRows, _read_fiber_ypix
 from lvmdrp.core.image import (
     Image,
@@ -99,7 +99,7 @@ __all__ = [
 ]
 
 
-def _nonlinearity_correction(ptc_params: None | numpy.ndarray, nominal_gain: float, quadrant: Image, iquad: int) -> Image:
+def _nonlinearity_correction(ptc_params: None | numpy.ndarray, nominal_gain: float, quadrant: Image, iquad: int) -> Tuple[Image]:
     """calculates non-linearity correction for input quadrant
 
     Parameters
@@ -135,6 +135,7 @@ def _nonlinearity_correction(ptc_params: None | numpy.ndarray, nominal_gain: flo
         gain_med = bn.nanmedian(gain_map._data)
         gain_min, gain_max = bn.nanmin(gain_map._data), bn.nanmax(gain_map._data)
         log.info(f"gain map stats: {gain_med = :.2f} [{gain_min = :.2f}, {gain_max = :.2f}] ({nominal_gain = :.2f} e-/ADU)")
+        quadrant.update_drpstage("LINEARITY_CORRECTED")
     else:
         log.warning("cannot apply non-linearity correction")
         log.info(f"using {nominal_gain = } (e-/ADU)")
@@ -257,13 +258,13 @@ def _channel_combine_fiber_params(in_cent_traces, in_waves, add_overscan_columns
         if add_overscan_columns:
             os_region = numpy.zeros((mtraces[i]._data.shape[0], 34), dtype=int)
             trace_data = numpy.split(mtraces[i]._data, 2, axis=1)
-            trace_mask = numpy.split(mtraces[i]._mask, 2, axis=1)
+            trace_mask = numpy.split(mtraces[i]._mask.astype(bool), 2, axis=1)
             mtraces[i]._data = numpy.concatenate([trace_data[0], os_region, trace_data[1]], axis=1)
-            mtraces[i]._mask = numpy.concatenate([trace_mask[0], ~os_region.astype(bool), trace_mask[1]], axis=1)
+            mtraces[i]._mask = numpy.concatenate([trace_mask[0], ~os_region.astype("bool"), trace_mask[1]], axis=1)
             wave_data = numpy.split(mwaves[i]._data, 2, axis=1)
             wave_mask = numpy.split(mwaves[i]._mask, 2, axis=1)
             mwaves[i]._data = numpy.concatenate([wave_data[0], os_region, wave_data[1]], axis=1)
-            mwaves[i]._mask = numpy.concatenate([wave_mask[0], ~os_region.astype(bool), wave_mask[1]], axis=1)
+            mwaves[i]._mask = numpy.concatenate([wave_mask[0], ~os_region.astype("bool"), wave_mask[1]], axis=1)
 
         # get pixels where spectropgraph is not blocked
         channel_mask = (SPEC_CHANNELS[channels[i]][0]>=mwaves[i]._data)|(mwaves[i]._data>=SPEC_CHANNELS[channels[i]][1])
@@ -299,13 +300,13 @@ def _get_fiber_selection(traces, image_shape=(4080, 4120), y_widths=3):
     numpy.ndarray
         fiber selection mask
     """
-    images = [Image(data=numpy.zeros(image_shape), mask=numpy.zeros(image_shape, dtype=bool)) for _ in range(len(traces))]
+    images = [Image(data=numpy.zeros(image_shape), mask=numpy.zeros(image_shape, dtype=numpy.int32)) for _ in range(len(traces))]
     for i in range(len(traces)):
         images[i].maskFiberTraces(traces[i], aperture=y_widths, parallel=1)
     image = Image()
     image.unsplit(images)
 
-    return image._mask
+    return image._mask != 0
 
 
 def _get_wave_selection(waves, lines_list, window):
@@ -388,6 +389,9 @@ def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=Non
 
     # calculate thermal shifts
     column_shifts = image.measure_fiber_shifts(fiber_model, trace_cent, columns=columns, column_width=column_width, shift_range=shift_range, axs=axs)
+    if (column_shifts!=0).any():
+        image.update_drpstage("FIBERS_SHIFTED")
+
     # shifts stats
     median_shift = numpy.nan_to_num(bn.nanmedian(column_shifts, axis=0))
     std_shift = numpy.nan_to_num(bn.nanstd(column_shifts, axis=0))
@@ -403,7 +407,7 @@ def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=Non
     trace_cent_fixed._coeffs[:, 0] += median_shift
     trace_cent_fixed.eval_coeffs()
 
-    return trace_cent_fixed, column_shifts, median_shift, std_shift, fiber_model
+    return image, trace_cent_fixed, column_shifts, median_shift, std_shift, fiber_model
 
 
 def _apply_electronic_shifts(images, out_images, drp_shifts=None, qc_shifts=None, custom_shifts=None, raw_shifts=None,
@@ -594,7 +598,7 @@ def select_lines_2d(in_images, out_mask, in_cent_traces, in_waves, lines_list=No
     # get lines selection mask
     log.info(f"selecting lines with {wave_widths = } angstrom")
     lines_mask = _get_wave_selection(mwave._data, lines_list=lines_list, window=wave_widths)
-    lines_mask &= ~mwave._mask
+    lines_mask &= (mwave._mask == 0)
 
     # make sky mask 2d
     log.info("interpolating mask into 2D frame")
@@ -859,7 +863,7 @@ def addCCDMask_drp(image, mask, replaceError="1e10"):
     img = loadImage(image)
     bad_pixel = loadImage(mask, extension_mask=0)
     if img._mask is not None:
-        mask_comb = numpy.logical_or(img._mask, bad_pixel._mask)
+        mask_comb = numpy.bitwise_or(img._mask, bad_pixel._mask)
     else:
         mask_comb = bad_pixel._mask
     if img._error is not None:
@@ -1617,12 +1621,12 @@ def trace_peaks(
     trace_data = copy(trace)
 
     # mask zeros and data outside threshold and max_diff
-    trace._mask |= (trace._data <= 0)
+    trace._mask |= (trace._data <= 0) * PixMask["BADPIX"]
     # smooth all trace by a polynomial
     log.info(f"fitting trace with {numpy.abs(poly_disp)}-deg polynomial")
     table, table_poly, table_poly_all = trace.fit_polynomial(poly_disp, poly_kind="poly")
     # set bad fibers in trace mask
-    trace._mask[bad_fibers] = True
+    trace._mask[bad_fibers] = PixMask["BADTRACE"] | PixMask["WEAKFIBER"] | PixMask["NONEXPOSED"]
 
     if write_trace_data:
         _create_trace_regions(out_trace, table, table_poly, table_poly_all, display_plots=display_plots)
@@ -1632,7 +1636,7 @@ def trace_peaks(
     x_pixels = numpy.arange(trace._data.shape[1])
     y_pixels = numpy.arange(trace._fibers)
     for column in range(trace._data.shape[1]):
-        mask = trace._mask[:, column]
+        mask = trace._mask[:, column] != 0
         for order in range(trace._coeffs.shape[1]):
             trace._coeffs[mask, order] = numpy.interp(y_pixels[mask], y_pixels[~mask], trace._coeffs[~mask, order])
     # evaluate trace at interpolated fibers
@@ -1927,8 +1931,8 @@ def subtract_straylight(
 
     # update mask
     if img_median._mask is None:
-        img_median._mask = numpy.zeros(img_median._data.shape, dtype=bool)
-    img_median._mask = img_median._mask | numpy.isnan(img_median._data) | numpy.isinf(img_median._data) | (img_median._data == 0)
+        img_median._mask = numpy.zeros(img_median._data.shape, dtype=numpy.int32)
+    img_median._mask |= ((numpy.isnan(img_median._data) | numpy.isinf(img_median._data) | (img_median._data == 0)) * PixMask["BADPIX"])
 
     # mask regions around each fiber within a given cross-dispersion aperture
     log.info(f"masking fibers with an aperture of {aperture} pixels")
@@ -1947,11 +1951,11 @@ def subtract_straylight(
 
     for icol in range(img_median._dim[1]):
         # mask top/bottom rows before/after first/last fiber
-        img_median._mask[tfiber[icol]:, icol] = True
-        img_median._mask[:bfiber[icol], icol] = True
+        img_median._mask[tfiber[icol]:, icol] = PixMask["NODATA"]
+        img_median._mask[:bfiber[icol], icol] = PixMask["NODATA"]
         # unmask select_nrows around each region
-        img_median._mask[(tfiber[icol]+aperture//2):(tfiber[icol]+aperture//2+select_tnrows), icol] = False
-        img_median._mask[(bfiber[icol]-aperture//2-select_bnrows):(bfiber[icol]-aperture//2), icol] = False
+        img_median._mask[(tfiber[icol]+aperture//2):(tfiber[icol]+aperture//2+select_tnrows), icol] = 0
+        img_median._mask[(bfiber[icol]-aperture//2-select_bnrows):(bfiber[icol]-aperture//2), icol] = 0
 
     # fit the signal in unmaksed areas along cross-dispersion axis by a polynomial
     log.info(f"fitting spline with {smoothing = } to the background signal along cross-dispersion axis")
@@ -1972,6 +1976,7 @@ def subtract_straylight(
     # include header and write out file
     log.info(f"writing stray light subtracted image to {os.path.basename(out_image)}")
     img_out.setHeader(header=img.getHeader())
+    img_out.update_drpstage("STRAYLIGHT_SUBTRACTED")
     img_out.writeFitsData(out_image)
 
     # plot results: polyomial fitting & smoothing, both with masked regions on
@@ -2119,7 +2124,7 @@ def traceFWHM_drp(
         median_cross = max(median_cross, 1)
         img = img.medianImg((median_cross, median_box))
 
-    img._mask[...] = False
+    img._mask[...] = 0
 
     # plt.figure(figsize=(20,10))
     # plt.plot(img.getSlice(1300, axis="y")._error.tolist(), lw=0.6, color="0.7")
@@ -2149,7 +2154,7 @@ def traceFWHM_drp(
     trace_mask.loadFitsData(in_trace)
 
     orig_trace = copy(trace_mask)
-    trace_mask._mask[...] = False
+    trace_mask._mask[...] = 0
 
     # create a trace mask for the image
     traceFWHM = TraceMask()
@@ -2198,13 +2203,13 @@ def traceFWHM_drp(
         fwhm, mask = img.traceFWHM(select_steps, trace_mask, blocks, init_fwhm, threshold_flux, max_pix=dim[0])
 
     for ifiber in range(orig_trace._fibers):
-        if orig_trace._mask[ifiber].all():
+        if (orig_trace._mask[ifiber] != 0).all():
             continue
         good_pix = (~mask[ifiber]) & (~numpy.isnan(fwhm[ifiber])) & (fwhm[ifiber] != 0.0) & ((clip[0]<fwhm[ifiber]) & (fwhm[ifiber]<clip[1]))
         f_data = interpolate.interp1d(axis[good_pix], fwhm[ifiber, good_pix], kind="linear", bounds_error=False, fill_value="extrapolate")
-        f_mask = interpolate.interp1d(axis[good_pix], mask[ifiber, good_pix], kind="nearest", bounds_error=False, fill_value=0)
+        f_mask = interpolate.interp1d(axis[good_pix], mask[ifiber, good_pix], kind="nearest", bounds_error=False, fill_value=PixMask["NODATA"])
         fwhm[ifiber] = f_data(axis)
-        mask[ifiber] = f_mask(axis).astype(bool)
+        mask[ifiber] = f_mask(axis).astype(numpy.int32)
 
 
 
@@ -2336,7 +2341,7 @@ def offsetTrace_drp(
             error=collapsed_error,
         )
         if trace_mask._mask is not None:
-            mask = trace_mask._mask[numpy.arange(len(central_pix)), central_pix]
+            mask = trace_mask._mask[numpy.arange(len(central_pix)), central_pix] != 0
         else:
             mask = None
         out = trace_spec.measureOffsetPeaks(
@@ -2479,7 +2484,7 @@ def offsetTrace2_drp(
             error=collapsed_error,
         )
         if trace_mask._mask is not None:
-            mask = trace_mask._mask[numpy.arange(len(central_pix)), central_pix]
+            mask = trace_mask._mask[numpy.arange(len(central_pix)), central_pix] != 0
         else:
             mask = None
         out = trace_spec.measureOffsetPeaks2(
@@ -2624,12 +2629,12 @@ def extract_spectra(
 
     # fix centroids for thermal shifts
     log.info(f"measuring fiber thermal shifts @ columns: {','.join(map(str, columns))}")
-    trace_mask, shifts, median_shift, std_shift, _ = _fix_fiber_thermal_shifts(img, trace_mask, 2.5,
-                                                                               fiber_model=fiber_model,
-                                                                               trace_amp=10000,
-                                                                               columns=columns,
-                                                                               column_width=column_width,
-                                                                               shift_range=shift_range, axs=[axs_cc, axs_fb])
+    img, trace_mask, shifts, median_shift, std_shift, _ = _fix_fiber_thermal_shifts(img, trace_mask, 2.5,
+                                                                                    fiber_model=fiber_model,
+                                                                                    trace_amp=10000,
+                                                                                    columns=columns,
+                                                                                    column_width=column_width,
+                                                                                    shift_range=shift_range, axs=[axs_cc, axs_fb])
     # save columns measured for thermal shifts
     plot_fiber_thermal_shift(columns, shifts, median_shift, std_shift, ax=ax_shift)
     save_fig(fig, product_path=out_rss, to_display=display_plots, figure_path="qa", label="fiber_thermal_shifts")
@@ -2705,20 +2710,21 @@ def extract_spectra(
     select_spec = slitmap["spectrographid"] == int(img._header["CCD"][1])
     slitmap_spec = slitmap[select_spec]
     exposed_selection = numpy.array(list(img._header["STD*ACQ"].values()))
-    # mask fibers that are not exposed
     # TODO: use the more reliable routine get_exposed_std_fibers once is merged from addqa branch
     if len(exposed_selection) != 0:
         exposed_std = numpy.array(list(img._header["STD*FIB"].values()))[exposed_selection]
-        mask |= (~(numpy.isin(slitmap_spec["orig_ifulabel"], exposed_std))&((slitmap_spec["telescope"] == "Spec")))[:, None]
-        mask |= (slitmap_spec["fibstatus"] == 1)[:, None]
+        mask |= (~(numpy.isin(slitmap_spec["orig_ifulabel"], exposed_std))&((slitmap_spec["telescope"] == "Spec")))[:, None] * PixMask["NONEXPOSED"]
+    # mask dead fibers
+    mask |= (slitmap_spec["fibstatus"] == 1)[:, None] * PixMask["DEADFIBER"]
+
+    # print(numpy.unique(mask))
+    # exit()
 
     # propagate thermal shift to slitmap
     channel = img._header['CCD'][0]
     slitmap[f"ypix_{channel}"] = slitmap[f"ypix_{channel}"].astype("float64")
     slitmap[f"ypix_{channel}"][select_spec] += numpy.nan_to_num(bn.nanmedian(shifts, axis=0))
 
-    if error is not None:
-        error[mask] = replace_error
     rss = RSS(
         data=data,
         mask=mask,
@@ -2729,6 +2735,7 @@ def extract_spectra(
         header=img.getHeader(),
         slitmap=slitmap
     )
+    rss.update_drpstage("SPECTRA_EXTRACTED")
     rss.setHdrValue("NAXIS2", data.shape[0])
     rss.setHdrValue("NAXIS1", data.shape[1])
     rss.setHdrValue("DISPAXIS", 1, "axis of spectral dispersion")
@@ -3100,6 +3107,7 @@ def preproc_raw_frame(
     # load image
     log.info(f"starting preprocessing of raw image '{os.path.basename(in_image)}'")
     org_img = loadImage(in_image)
+    org_img.update_drpqual(0)
     org_header = org_img.getHeader()
 
     camera = org_header["CCD"]
@@ -3110,6 +3118,7 @@ def preproc_raw_frame(
         sjd = int(dateobs_to_sjd(org_header.get("OBSTIME")))
         sjd = correct_sjd(in_image, sjd)
         org_header = apply_hdrfix(sjd, hdr=org_header) or org_header
+        org_img.update_drpstage("HDRFIX_APPLIED")
     except ValueError as e:
         log.error(f"cannot apply header fix: {e}")
 
@@ -3225,6 +3234,7 @@ def preproc_raw_frame(
                 log.info(f"masked {os_nmask} ({os_nmask/os_data.size*100:.2f}%) pixels in overscan above {overscan_threshold} standard deviations")
 
             sc_quad = sc_quad - os_model
+            sc_quad.update_drpstage("OVERSCAN_SUBTRACTED")
 
             os_profiles.append(os_profile)
             os_models.append(os_model)
@@ -3323,17 +3333,18 @@ def preproc_raw_frame(
 
     # create pixel mask on the original image
     log.info("building pixel mask")
-    proc_img._mask = master_mask
+    proc_img.add_bitmask("BADPIX", where=master_mask)
+    proc_img.update_drpstage("PIXELMASK_ADDED")
     # convert temp image to ADU for saturated pixel masking
     saturated_mask = proc_img._data >= 2**16
-    proc_img._mask |= saturated_mask
+    proc_img.add_bitmask("SATURATED", where=saturated_mask)
 
     # NOTE: this is a patch to mask first/last 3 columns as they don't have any useful data
-    proc_img._mask[:, :3] |= True
-    proc_img._mask[:, -3:] |= True
+    proc_img._mask[:, :3] |= PixMask["NODATA"]
+    proc_img._mask[:, -3:] |= PixMask["NODATA"]
 
     # log number of masked pixels
-    nmasked = proc_img._mask.sum()
+    nmasked = numpy.count_nonzero(proc_img._mask)
     log.info(f"{nmasked} ({nmasked / proc_img._mask.size * 100:.2g} %) pixels masked")
 
     # update masked pixels with NaNs if needed
@@ -3342,13 +3353,8 @@ def preproc_raw_frame(
         proc_img.apply_pixelmask()
 
     # update data reduction quality flag
-    drpqual = QualityFlag(0)
     if saturated_mask.sum() / proc_img._mask.size > 0.01:
-        drpqual += "SATURATED"
-    proc_img.setHdrValue("DRPQUAL", value=drpqual.value, comment="data reduction quality flag")
-
-    # set drp tag version
-    proc_img.setHdrValue("DRPVER", DRPVER, comment='data reduction pipeline software tag')
+        proc_img.update_drpqual("SATURATED")
     # set drp commit SHA
     proc_img.setHdrValue("COMMIT", DRP_COMMIT, comment="data reduction pipeline commit HASH")
     # add calibrations used to header
@@ -3356,6 +3362,8 @@ def preproc_raw_frame(
 
     # write out FITS file
     log.info(f"writing preprocessed image to {os.path.basename(out_image)}")
+    proc_img.update_drpstage("PREPROCESSED")
+    proc_img.setHdrValue("DRPVER", DRPVER, comment='data reduction pipeline version')
     proc_img.writeFitsData(out_image)
 
     # plot overscan strips along X and Y axes
@@ -3579,6 +3587,7 @@ def add_astrometry(
                     log.warning(f"some astrometry keywords for telescope '{tel}' are missing: {RAobs = }, {DECobs = }, {PAobs = }")
                     org_img.add_header_comment(f"no astromentry keywords '{tel}': {RAobs = }, {DECobs = }, {PAobs = }, using commanded")
                 org_img.setHdrValue('ASTRMSRC', 'CMD position', comment='source of astrometry: commanded position')
+                org_img.update_drpstage(f"{tel.upper()}_ASTROMETRY_ADDED")
         else:
             RAobs=0
             DECobs=0
@@ -3626,11 +3635,11 @@ def add_astrometry(
     slitmap['ra']=RAfib * u.deg
     slitmap['dec']=DECfib * u.deg
     org_img._slitmap=slitmap
-
     # set header keyword with best knowledge of IFU center
     org_img.setHdrValue('IFUCENRA', RAobs_sci, 'best SCI IFU RA (ASTRMSRC)')
     org_img.setHdrValue('IFUCENDE', DECobs_sci, 'best SCI IFU DEC (ASTRMSRC)')
     org_img.setHdrValue('IFUCENPA', PAobs_sci, 'best SCI IFU PA (ASTRMSRC)')
+    org_img.update_drpstage("FIBERS_ASTROMETRY_ADDED")
 
     log.info(f"writing RA,DEC to slitmap in image '{os.path.basename(out_image)}'")
     org_img.writeFitsData(out_image)
@@ -3650,7 +3659,6 @@ def detrend_frame(
     calculate_error: bool = True,
     replace_with_nan: bool = True,
     reject_cr: bool = True,
-    median_box: list = [0, 0],
     display_plots: bool = False,
 ):
     """detrends input image by subtracting bias, dark and flatfielding
@@ -3677,8 +3685,6 @@ def detrend_frame(
         whether to replace or not NaN values by zeros, by default True
     reject_cr : bool, optional
         whether to reject or not cosmic rays from detrended image, by default True
-    median_box : tuple, optional
-        size of the median box to refine pixel mask, by default [0,0]
     display_plots : str, optional
         whether to show plots on display or not, by default False
     """
@@ -3769,13 +3775,15 @@ def detrend_frame(
             # gain-correct quadrant
             quad *= gain_map
             # propagate new NaNs to the mask
-            quad._mask |= numpy.isnan(quad._data)
+            quad.add_bitmask("BADPIX", where=numpy.isnan(quad._data))
 
             quad.computePoissonError(rdnoise)
             bcorr_img.setSection(section=quad_sec, subimg=quad, inplace=True)
             log.info(f"median error in quadrant {i+1}: {bn.nanmedian(quad._error):.2f} (e-)")
 
         bcorr_img.setHdrValue("BUNIT", "electron", "physical units of the array values")
+        bcorr_img.update_drpstage("GAIN_CORRECTED")
+        bcorr_img.update_drpstage("POISSON_ERROR_CALCULATED")
     else:
         # convert to ADU
         log.info("leaving original ADU units")
@@ -3790,13 +3798,12 @@ def detrend_frame(
     detrended_img = (bcorr_img - mdark_img.convertUnit(to=bcorr_img._header["BUNIT"]))
     # NOTE: this is a hack to avoid the error propagation of the division in Image
     detrended_img._data = detrended_img._data / numpy.nan_to_num(mflat_img._data, nan=1.0)
+    detrended_img.update_drpstage("DETRENDED")
 
     # propagate pixel mask
     log.info("propagating pixel mask")
-    nanpixels = numpy.isnan(detrended_img._data)
-    infpixels = numpy.isinf(detrended_img._data)
-    detrended_img._mask = numpy.logical_or(org_img._mask, nanpixels)
-    detrended_img._mask = numpy.logical_or(detrended_img._mask, infpixels)
+    nanpixels = ~numpy.isfinite(detrended_img._data)
+    detrended_img.add_bitmask("BADPIX", where=nanpixels)
 
     # reject cosmic rays
     if reject_cr:
@@ -3804,17 +3811,18 @@ def detrend_frame(
         rdnoise = detrended_img.getHdrValue(f"{camera.upper()} AMP1 RDNOISE")
         detrended_img.reject_cosmics(gain=1.0, rdnoise=rdnoise, rlim=1.3, iterations=5, fwhm_gauss=[2.75, 2.75],
                                      replace_box=[10,2], replace_error=1e6, verbose=True, inplace=True)
+        detrended_img.update_drpstage("COSMIC_CLEANED")
 
     # replace masked pixels with NaNs
     if replace_with_nan:
-        log.info(f"replacing {detrended_img._mask.sum()} masked pixels with NaNs")
+        log.info(f"replacing {numpy.count_nonzero(detrended_img._mask)} masked pixels with NaNs")
         detrended_img.apply_pixelmask()
 
     # normalize in case of pixel flat calibration
     # 'pixflat' is the imagetyp that a pixel flat can have
     if img_type == "pixflat":
         flat_array = numpy.ma.masked_array(
-            detrended_img._data, mask=detrended_img._mask
+            detrended_img._data, mask=detrended_img._mask != 0
         )
         detrended_img = detrended_img / numpy.ma.median(flat_array)
 
@@ -4159,7 +4167,7 @@ def create_pixelmask(in_short_dark, in_long_dark, out_pixmask, in_flat_a=None, i
     sections = short_dark.getHdrValue(f"{camera.upper()} AMP? TRIMSEC")
 
     # define pixelmask image
-    pixmask = Image(data=numpy.zeros_like(short_dark._data), mask=numpy.zeros_like(short_dark._data, dtype="bool"))
+    pixmask = Image(data=numpy.zeros_like(short_dark._data), mask=numpy.zeros_like(short_dark._data, dtype="int32"))
 
     # create histogram figure
     fig_dis, axs_dis = create_subplots(to_display=display_plots, nrows=2, ncols=2, figsize=(15,10), sharex=True, sharey=True)
@@ -4258,11 +4266,12 @@ def create_pixelmask(in_short_dark, in_long_dark, out_pixmask, in_flat_a=None, i
         log.info(f"masking {flat_mask.sum()} pixels with flats ratio < {flat_low} or > {flat_high}")
 
         # update pixel mask
-        pixmask.setData(mask=(pixmask._mask | flat_mask), inplace=True)
+        pixmask.add_bitmask("BADPIX", where=flat_mask)
 
     # set masked pixels to NaN
-    log.info(f"masked {pixmask._mask.sum()} pixels in total ({pixmask._mask.sum()/pixmask._mask.size*100:.2f}%)")
-    pixmask.setData(data=numpy.nan, select=pixmask._mask)
+    nmasked = numpy.count_nonzero(pixmask._mask)
+    log.info(f"masked {nmasked} pixels in total ({nmasked/pixmask._mask.size*100:.2f}%)")
+    pixmask.setData(data=numpy.nan)
 
     # write output mask
     log.info(f"writing pixel mask to '{os.path.basename(out_pixmask)}'")
@@ -4316,7 +4325,7 @@ def trace_centroids(in_image: str,
         counts_threshold = counts_threshold * coadd
 
     # handle invalid error values
-    img._error[img._mask|(img._error<=0)] = numpy.inf
+    img._error[(img._mask!=0)|(img._error<=0)] = numpy.inf
 
     # calculate centroids for reference column
     if correct_ref:
@@ -4337,7 +4346,7 @@ def trace_centroids(in_image: str,
         _create_trace_regions(out_trace_cent, table_data, table_poly, table_poly_all, display_plots=display_plots)
 
         # set bad fibers in trace mask
-        centroids._mask[bad_fibers] = True
+        centroids._mask[bad_fibers] = PixMask["DEADFIBER"]
         # linearly interpolate coefficients at masked fibers
         log.info(f"interpolating coefficients at {bad_fibers.sum()} masked fibers")
         centroids.interpolate_coeffs()
@@ -4346,7 +4355,7 @@ def trace_centroids(in_image: str,
         centroids.interpolate_data(axis="X")
 
         # set bad fibers in trace mask
-        centroids._mask[bad_fibers] = True
+        centroids._mask[bad_fibers] = PixMask["DEADFIBER"]
         log.info(f"interpolating data at {bad_fibers.sum()} masked fibers")
         centroids.interpolate_data(axis="Y")
 
@@ -4512,7 +4521,7 @@ def trace_fibers(
         counts_threshold = counts_threshold * coadd
 
     # handle invalid error values
-    img._error[img._mask|(img._error<=0)] = numpy.inf
+    img._error[(img._mask != 0)|(img._error<=0)] = numpy.inf
 
     # trace centroids in each column
     log.info(f"loading guess fiber centroids from '{os.path.basename(in_trace_cent_guess)}'")
@@ -4557,9 +4566,9 @@ def trace_fibers(
         _create_trace_regions(out_trace_fwhm, table_data, table_poly, table_poly_all, display_plots=display_plots)
 
         # set bad fibers in trace mask
-        trace_amp._mask[bad_fibers] = True
-        trace_cent._mask[bad_fibers] = True
-        trace_fwhm._mask[bad_fibers] = True
+        trace_amp._mask[bad_fibers] = PixMask["DEADFIBER"]
+        trace_cent._mask[bad_fibers] = PixMask["DEADFIBER"]
+        trace_fwhm._mask[bad_fibers] = PixMask["DEADFIBER"]
 
         # linearly interpolate coefficients at masked fibers
         if interpolate_missing:
@@ -4574,9 +4583,9 @@ def trace_fibers(
         trace_cent.interpolate_data(axis="X")
         trace_fwhm.interpolate_data(axis="X")
         # set bad fibers in trace mask
-        trace_amp._mask[bad_fibers] = True
-        trace_cent._mask[bad_fibers] = True
-        trace_fwhm._mask[bad_fibers] = True
+        trace_amp._mask[bad_fibers] = PixMask["DEADFIBER"]
+        trace_cent._mask[bad_fibers] = PixMask["DEADFIBER"]
+        trace_fwhm._mask[bad_fibers] = PixMask["DEADFIBER"]
 
         if interpolate_missing:
             log.info(f"interpolating data at {bad_fibers.sum()} masked fibers")
@@ -4634,7 +4643,7 @@ def trace_fibers(
 
         img_slice = img_.getSlice(icolumn, axis="y")
         joint_mod = mod_columns[i](img_slice._pixels)
-        img_slice._data[(img_slice._mask)|(joint_mod<=0)] = numpy.nan
+        img_slice._data[(img_slice._mask!=0)|(joint_mod<=0)] = numpy.nan
 
         weights = img_slice._data / bn.nansum(img_slice._data) * 500
         residuals = (joint_mod - img_slice._data) / img_slice._data * 100

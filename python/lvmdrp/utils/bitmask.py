@@ -8,6 +8,7 @@
 
 from copy import copy
 from enum import IntFlag, auto
+import numpy as np
 
 
 class classproperty(object):
@@ -98,6 +99,7 @@ class BaseBitmask(IntFlag):
 
 
 class RawFrameQuality(BaseBitmask):
+    # TODO: repurpose this to use Dmitry's QC flags
     GOOD = auto()  # bit whether a raw frame is good for reduction
     BAD = auto()  # bit whether a raw frame is bad for reduction
     TEST = auto()  # bit whether a raw frame is for instrument testing purposes
@@ -141,25 +143,76 @@ class ReductionStatus(BaseBitmask):
 
 class ReductionStage(BaseBitmask):
     # completed reduction steps
-    UNREDUCED = auto()  # exposure not reduced
-    PREPROCESSED = auto()  # trimmed overscan region
-    CALIBRATED = auto()  # bias, dark and pixelflat calibrated
-    COSMIC_CLEAN = auto()  # cosmic ray cleaned
-    STRAY_CLEAN = auto()  # stray light subtracted
-    FIBERS_FOUND = auto()  # fiberflat fibers located along the column
-    FIBERS_TRACED = auto()  # fiberflat fibers traces along the dispersion axis
-    SPECTRA_EXTRACTED = (
-        auto()
-    )  # extracted the fiber spectra of any arc, flat, or science frames
-    WAVELENGTH_SOLVED = auto()  # arc fiber wavelength solution found
-    WAVELENGTH_RESAMPLED = (
-        auto()
-    )  # fiber wavelength resampled to common wavelength/LSF vector
+    UNREDUCED = auto()                # exposure in raw stage
+    HDRFIX_APPLIED = auto()           # header fix applied
+    OVERSCAN_SUBTRACTED = auto()      # trimmed overscan region, overscan-subtracted
+    PIXELMASK_ADDED = auto()          # fiducial pixel mask was added
+    PREPROCESSED = auto()
+    GAIN_CORRECTED = auto()           # gain correction applied
+    POISSON_ERROR_CALCULATED = auto() # calculated poisson error
+    LINEARITY_CORRECTED = auto()      # linearity correction applied
+    DETRENDED = auto()                # bias subtracted and pixel flat-fielded
+    COSMIC_CLEANED = auto()           # cosmic ray cleaned
+    SCI_ASTROMETRY_ADDED = auto()     # added astrometric solution for science telescope
+    SPEC_ASTROMETRY_ADDED = auto()    # added astrometric solution for spectrophotometric telescope
+    SKYE_ASTROMETRY_ADDED = auto()    # added astrometric solution for sky east telescope
+    SKYW_ASTROMETRY_ADDED = auto()    # added astrometric solution for sky west telescope
+    FIBERS_ASTROMETRY_ADDED = auto()  # added astrometric solution for all fibers in the system
+    STRAYLIGHT_SUBTRACTED = auto()    # stray light subtracted
+    FIBERS_SHIFTED = auto()           # fibers positions corrected for thermal shifts
+    SPECTRA_EXTRACTED =  auto()       # extracted spectra
+    SPECTROGRAPH_STACKED = auto()     # stacked spectrograph wise
+    WAVELENGTH_CALIBRATED = auto()    # arc fiber wavelength solution found
+    FLATFIELDED = auto()              # fiber flat-fielded
+    WAVELENGTH_SHIFTED = auto()       # wavelength corrected for thermal shifts
+    SKY_SUPERSAMPLED = auto()         # extrapolated sky fibers along slit
+    SKY_TELESCOPES_COMBINED = auto()  # telescope-combined extrapolated sky fibers
+    WAVELENGTH_RECTIFIED = auto()     # wavelength resampled to common grid along slit
+    MEASURED_SENS_STD = auto()        # measured sensitivity curve using standard stars
+    MEASURED_SENS_SCI = auto()        # scaled fiducial sensitivity using science field stars
+    FLUX_CALIBRATED = auto()          # flux calibrated all fibers in the system
+    CHANNEL_COMBINED = auto()         # channel stitched together
+    SKY_SUBTRACTED = auto()           # sky-subtracted all fibers in the system
 
+
+    def __add__(self, flag):
+        if isinstance(flag, self.__class__):
+            pass
+        elif isinstance(flag, str):
+            flag = self.__class__[flag.upper()]
+        elif isinstance(flag, int):
+            flag = self.__class__(flag)
+        else:
+            try:
+                return super().__add__(flag)
+            except:
+                raise
+
+        new = copy(self)
+        new = self ^ self.__class__["UNREDUCED"]
+        return new | flag
 
 class QualityFlag(BaseBitmask):
-    # TODO: add flag for overscan quality
-    OSFEATURES = auto()  # Overscan region has features.
+    # overall quality of the reduction
+
+    # raw frame quality
+    SATURATED10P = auto()  # 10% of saturated pixels in this frame.
+    SATURATED20P = auto()  # 20% of saturated pixels in this frame.
+    SATURATED50P = auto()  # 50% of saturated pixels in this frame.
+
+    # OS quality
+    BADOVERSCANQ1 = auto() # bad overscan (too high/low values)
+    BADOVERSCANQ2 = auto()
+    BADOVERSCANQ3 = auto()
+    BADOVERSCANQ4 = auto()
+    BADOSMODELQ1 = auto()  # bad overscan model
+    BADOSMODELQ2 = auto()
+    BADOSMODELQ3 = auto()
+    BADOSMODELQ4 = auto()
+
+    # detrending quality
+
+
     EXTRACTBAD = auto()  # Many bad values in extracted frame.
     EXTRACTBRIGHT = auto()  # Extracted spectra abnormally bright.
     LOWEXPTIME = auto()  # Exposure time less than 10 minutes.
@@ -169,9 +222,25 @@ class QualityFlag(BaseBitmask):
     BADDITHER = auto()  # Bad dither location information.
     ARCFOCUS = auto()  # Bad focus on arc frames.
     RAMPAGINGBUNNY = auto()  # Rampaging dust bunnies in IFU flats.
+
+
+    # flux calibration quality
+    FEWSTDSTARS = auto()
+    FEWSCISTARS = auto()
+    NOSTDSTARS = auto()
+    NOSCISTARS = auto()
+
+    BADSENSITIVITY = auto() # measured sensitivity curve too different from instrument one
+    SCIZEROPOINT = auto() # too low/high zero point in science stars
+
+
     SKYSUBBAD = auto()  # Bad sky subtraction.
     SKYSUBFAIL = auto()  # Failed sky subtraction.
+
+
     FULLCLOUD = auto()  # Completely cloudy exposure.
+
+    # thermal shifts
     BADFLEXURE = auto()  # Abnormally high flexure LSF correction.
     BGROOVEFAIL = auto()  # Possible B-groove glue failure.
     RGROOVEFAIL = auto()  # Possible R-groove glue failure.
@@ -181,68 +250,130 @@ class QualityFlag(BaseBitmask):
     NOSPEC3 = auto()  # No data from spec3.
     BLOWTORCH = auto()  # Blowtorch artifact detected.
     SEVEREBT = auto()  # Severe blowtorch artifact.
-    SATURATED = auto()  # X% of saturated pixels in this frame.
 
 
 class PixMask(BaseBitmask):
-    # fiber bitmasks
-    NOPLUG = auto()
-    BADTRACE = auto()
-    BADFLAT = auto()
-    BADARC = auto()
-    MANYBADCOLUMNS = auto()
-    MANYREJECTED = auto()
-    LARGESHIFT = auto()
-    BADSKYFIBER = auto()
-    NEARWHOPPER = auto()
-    WHOPPER = auto()
-    SMEARIMAGE = auto()
-    SMEARHIGHSN = auto()
-    SMEARMEDSN = auto()
-    DEADFIBER = auto()
-    # pixel bitmasks
-    SATURATION = auto()
+    # pixel bitmasks ------------------------------------------------------
+    # from pixelmasks
     BADPIX = auto()
-    COSMIC = auto()
     NEARBADPIXEL = auto()
+
+    # from raw data preprocessing
+    SATURATED = auto()
+
+    # from CR rejection
+    COSMIC = auto()
+
+    # outlying in pixelflat? possible dust spec
     LOWFLAT = auto()
-    FULLREJECT = auto()
-    PARTIALREJECT = auto()
-    SCATTEREDLIGHT = auto()
+
+    # clipped straylight polynomial fit
+    STRAYLIGHT = auto()
+
     CROSSTALK = auto()
+
+    # missing sky lines?
     NOSKY = auto()
+    # too bright sky lines?
     BRIGHTSKY = auto()
-    NODATA = auto()
-    COMBINEREJ = auto()
+
+    # pixels with sensitivities too deviant from instrumental sensitivity
     BADFLUXFACTOR = auto()
-    BADSKYCHI = auto()
+
+    # large sky residuals
+    BADSKYFIT = auto()
+
+    # fiber bitmasks ------------------------------------------------------
+    NONEXPOSED = auto()
+    WEAKFIBER = auto()
+    DEADFIBER = auto()
+    INTERPOLATED = auto()
+
+    # measure quality of tracing using polynomial fit - samples residuals
+    FAILEDPOLY = auto()
+    FAILEDSPLINE = auto()
+    FAILEDINTERP = auto()
+    BADTRACE = auto()
+    BADARC = auto()
+
+    # measure offset of the fiber from the median flatfielded fiber
+    BADFLAT = auto()
+
+    # offset from a preset fiber shift value
+    LARGESHIFT = auto()
+
+    BADSTDFIBER = auto()
+    BADSKYFIBER = auto()
+
+    # pixels with no useful information
+    NODATA = auto()
+
+    # TODO: bright pixels on top and bottom edges
+
+    # set this if X% close to saturation level
+    SATURATION = auto()
 
 
 # define flag name constants
-STATUS = list(ReductionStatus.__members__.keys())
-STAGE = list(ReductionStage.__members__.keys())
+# RAW_QUALITIES = list(RawFrameQuality.__members__.keys())
+STAGES = list(ReductionStage.__members__.keys())
 FLAGS = list(QualityFlag.__members__.keys())
+DRPQUALITIES = list()
 
-if __name__ == "__main__":
-    status = ReductionStatus(0)
-    stage = ReductionStage.UNREDUCED
-    print(status.get_name(), stage.get_name())
-    status += "IN_PROGRESS"
-    print(status.get_name(), stage.get_name())
-    stage += ReductionStage.PREPROCESSED
-    print(status.get_name(), stage.get_name())
-    stage += ReductionStage.CALIBRATED
-    print(status.get_name(), stage.get_name())
-    status += ReductionStatus.FINISHED
-    print(status.get_name(), stage.get_name())
-    status += ReductionStatus.IN_PROGRESS
-    print(status.get_name(), stage.get_name())
-    stage += ReductionStage.FIBERS_FOUND
-    print(status.get_name(), stage.get_name())
-    status += ReductionStatus.FINISHED
-    print(status.get_name(), stage.get_name())
-    print("finished" in status)
-    status = ReductionStatus.IN_PROGRESS
-    print(status.get_name(), stage.get_name())
-    stage += ReductionStage.PREPROCESSED | ReductionStage.CALIBRATED
-    print(status.get_name(), stage.get_name())
+
+def _parse_bitmask(bitmask, kind):
+    if isinstance(bitmask, kind):
+        return bitmask
+    elif isinstance(bitmask, str):
+        bitmask = kind[bitmask]
+    elif isinstance(bitmask, int):
+        bitmask = kind(bitmask)
+    else:
+        raise ValueError(f"Wrong type for {bitmask = }: {type(bitmask)}; expected {kind}, string or integer")
+
+    return bitmask
+
+
+def _parse_where(where, mask_shape):
+    if where is not None:
+        assert isinstance(where, np.ndarray), f"Wrong type for `where` {type(where)}, expected `numpy.ndarray`"
+        assert where.shape == mask_shape, f"Wrong `where` shape {where.shape} not matching `mask_image` shape {mask_shape}"
+        assert isinstance(where[0,0], np.bool_), f"Wrong `where` Numpy dtype {type(where[0,0])}, expected a boolean array"
+    else:
+        where = np.ones(mask_shape, dtype=bool)
+
+    return where
+
+
+def add_bitmask(mask_image, pixmask, where=None):
+    pixmask = _parse_bitmask(pixmask, kind=PixMask)
+    where = _parse_where(where, mask_shape=mask_image.shape)
+
+    mask_image[where] |= pixmask
+    return mask_image
+
+
+def toggle_bitmask(mask_image, pixmask, where=None):
+    pixmask = _parse_bitmask(pixmask, kind=PixMask)
+    where = _parse_where(where, mask_shape=mask_image.shape)
+
+    mask_image[where] ^= pixmask
+    return mask_image
+
+
+def update_header_bitmask(header, kind, bitmask, key, comment):
+    bitmask = _parse_bitmask(bitmask, kind=kind)
+    if key not in header:
+        header[key] = (bitmask.value, comment)
+    header[key] |= bitmask.value
+
+    return header
+
+
+def print_bitmasks(mask_array, logger=None):
+    uniques, counts = np.unique(mask_array, return_counts=True)
+    bitmasks = dict(zip(map(lambda p: PixMask(int(p)).get_name() if p>0 else "GOODPIX", uniques), counts))
+    if logger:
+        logger.info(f"{bitmasks}")
+        return
+    print(bitmasks)

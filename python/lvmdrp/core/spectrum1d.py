@@ -10,6 +10,7 @@ from scipy.ndimage import zoom, median_filter
 from typing import List, Tuple
 
 from lvmdrp import log
+from lvmdrp.utils.bitmask import PixMask
 from lvmdrp.utils import gaussian
 from lvmdrp.core import fit_profile
 from lvmdrp.core import plot
@@ -783,14 +784,14 @@ class Spectrum1D(Header):
             data = self._data - other._data
 
             if self._mask is not None and other._mask is not None:
-                mask = numpy.logical_or(self._mask, other._mask)
-                select_zero = numpy.logical_and(select_zero, mask)
+                mask = numpy.bitwise_or(self._mask, other._mask)
+                select_zero = numpy.logical_and(select_zero, mask!=0)
                 data[select_zero] = 0
             elif self._mask is None and other._mask is not None:
                 mask = other._mask
             elif self._mask is not None and other._mask is None:
                 mask = self._mask
-                select_zero = numpy.logical_and(select_zero, mask)
+                select_zero = numpy.logical_and(select_zero, mask!=0)
                 data[select_zero] = 0
             else:
                 mask = None
@@ -914,14 +915,14 @@ class Spectrum1D(Header):
             data = self._data + other._data
 
             if self._mask is not None and other._mask is not None:
-                mask = numpy.logical_or(self._mask, other._mask)
-                select_zero = numpy.logical_and(select_zero, mask)
+                mask = numpy.bitwise_or(self._mask, other._mask)
+                select_zero = numpy.logical_and(select_zero, mask!=0)
                 data[select_zero] = 0
             elif self._mask is None and other._mask is not None:
                 mask = other._mask
             elif self._mask is not None and other._mask is None:
                 mask = self._mask
-                select_zero = numpy.logical_and(select_zero, mask)
+                select_zero = numpy.logical_and(select_zero, mask!=0)
                 data[select_zero] = 0
             else:
                 mask = None
@@ -1078,14 +1079,14 @@ class Spectrum1D(Header):
             )
 
             if self._mask is not None and other._mask is not None:
-                mask = numpy.logical_or(self._mask, other._mask)
-                mask[~select] = True
+                mask = numpy.bitwise_or(self._mask, other._mask)
+                mask[~select] = PixMask["BADPIX"]
             elif other._mask is not None:
                 mask = other._mask
-                mask[~select] = True
+                mask[~select] = PixMask["BADPIX"]
             elif self._mask is not None:
                 mask = self._mask
-                mask[~select] = True
+                mask[~select] = PixMask["BADPIX"]
             else:
                 mask = None
 
@@ -1201,7 +1202,7 @@ class Spectrum1D(Header):
 
             if self._mask is not None:
                 mask = self._mask
-                mask[~select] = True
+                mask[~select] = PixMask["BADPIX"]
             else:
                 mask = None
 
@@ -1259,7 +1260,7 @@ class Spectrum1D(Header):
 
                 if self._mask is not None:
                     mask = self._mask
-                    mask[~select] = True
+                    mask[~select] = PixMask["BADPIX"]
 
                 if self._sky is not None:
                     sky = numpy.divide(
@@ -1320,14 +1321,14 @@ class Spectrum1D(Header):
             )
 
             if self._mask is not None and other._mask is not None:
-                mask = numpy.logical_or(self._mask, other._mask)
-                mask[~select] = True
+                mask = numpy.bitwise_or(self._mask, other._mask)
+                mask[~select] = PixMask["BADPIX"]
             elif other._mask is not None:
                 mask = other._mask
-                mask[~select] = True
+                mask[~select] = PixMask["BADPIX"]
             elif self._mask is not None:
                 mask = self._mask
-                mask[~select] = True
+                mask[~select] = PixMask["BADPIX"]
             else:
                 mask = None
 
@@ -1446,7 +1447,7 @@ class Spectrum1D(Header):
 
             if self._mask is not None:
                 mask = self._mask
-                mask[~select] = True
+                mask[~select] = PixMask["BADPIX"]
             else:
                 mask = None
 
@@ -1512,7 +1513,7 @@ class Spectrum1D(Header):
 
             if self._mask is not None:
                 mask = self._mask
-                mask[~select] = True
+                mask[~select] = PixMask["BADPIX"]
             else:
                 mask = None
 
@@ -1973,7 +1974,7 @@ class Spectrum1D(Header):
                     if hdu[i].header["EXTNAME"].split()[0] == "ERROR":
                         self._error = hdu[i].data
                     elif hdu[i].header["EXTNAME"].split()[0] == "BADPIX":
-                        self._mask = hdu[i].data.astype("bool")
+                        self._mask = hdu[i].data.astype("int32")
                     elif hdu[i].header["EXTNAME"].split()[0] == "WAVE":
                         self._wave = hdu[i].data
                     elif hdu[i].header["EXTNAME"].split()[0] == "INSTFWHM":
@@ -1991,7 +1992,7 @@ class Spectrum1D(Header):
                 self._data = hdu[extension_data].data
 
             if extension_mask is not None:
-                self._mask = hdu[extension_mask].data
+                self._mask = hdu[extension_mask].data.astype("int32")
             if extension_error is not None:
                 self._error = hdu[extension_error].data
             if extension_wave is not None:
@@ -2081,7 +2082,7 @@ class Spectrum1D(Header):
             if self._error is not None:
                 hdus[3] = pyfits.ImageHDU(self._error, name="ERROR")
             if self._mask is not None:
-                hdus[4] = pyfits.ImageHDU(self._mask.astype("uint8"), name="BADPIX")
+                hdus[4] = pyfits.ImageHDU(self._mask.astype("int32"), name="BADPIX")
             if self._sky is not None:
                 hdus[5] = pyfits.ImageHDU(self._sky, name="SKY")
             if self._sky_error is not None:
@@ -2106,10 +2107,10 @@ class Spectrum1D(Header):
 
             # mask hdu
             if extension_mask == 0:
-                hdu = pyfits.PrimaryHDU(self._mask.astype("uint8"))
+                hdu = pyfits.PrimaryHDU(self._mask.astype("int32"))
             elif extension_mask > 0 and extension_mask is not None:
                 hdus[extension_mask] = pyfits.ImageHDU(
-                    self._mask.astype("uint8"), name="BADPIX"
+                    self._mask.astype("int32"), name="BADPIX"
                 )
 
             # error hdu
@@ -2264,7 +2265,7 @@ class Spectrum1D(Header):
             Array of the data value
         error : numpy.ndarray (float)
             Array of the corresponding errors
-        mask : numpy.ndarray (bool)
+        mask : numpy.ndarray (int)
             Array of the bad pixel mask
         sky : numpy.ndarray (float)
             Array of the sky spectrum
@@ -2295,10 +2296,10 @@ class Spectrum1D(Header):
 
         # case where input spectrum has more than half the pixels masked
         if bn.nansum(self._data) == 0.0 or (
-            self._mask is not None and numpy.sum(self._mask) > self._dim / 2
+            self._mask is not None and numpy.sum(self._mask!=0) > self._dim / 2
         ):
             # all pixels masked
-            new_mask = numpy.ones(len(ref_wave), dtype=bool)
+            new_mask = numpy.ones(len(ref_wave), dtype=numpy.int32) * PixMask["FAILEDINTERP"]
             # all data points to zero
             new_data = numpy.zeros(len(ref_wave), numpy.float32)
             # all LSF pixels zero (if present)
@@ -2337,8 +2338,8 @@ class Spectrum1D(Header):
         else:
             # good pixels selection
             if self._mask is not None:
-                select_badpix = self._mask
-                select_goodpix = numpy.logical_not(self._mask)
+                select_badpix = self._mask != 0
+                select_goodpix = self._mask == 0
             else:
                 select_badpix = numpy.zeros(self._dim, dtype=bool)
                 select_goodpix = numpy.ones(self._dim, dtype=bool)
@@ -2456,11 +2457,11 @@ class Spectrum1D(Header):
 
             # interpolate mask --------------------------------------------------------------------------------------------------------------------------------
             if self._mask is not None:
-                badpix = numpy.zeros(ref_wave.shape[0], dtype=bool)
+                badpix = numpy.zeros(ref_wave.shape[0], dtype=numpy.float32)
                 indices = numpy.arange(self._wave.shape[0])
-                nbadpix = numpy.sum(self._mask)
+                nbadpix = numpy.sum(self._mask!=0)
                 if nbadpix > 0:
-                    badpix_id = indices[self._mask]
+                    badpix_id = indices[self._mask!=0]
                     for i in range(len(badpix_id)):
                         badpix_min = badpix_id[i] - 2
                         badpix_max = badpix_id[i] + 2
@@ -2471,17 +2472,17 @@ class Spectrum1D(Header):
                             ref_wave >= self._wave[bound[0]],
                             ref_wave <= self._wave[bound[1]],
                         )
-                        badpix = numpy.logical_or(badpix, select_bad)
-                new_mask = numpy.logical_or(
+                        badpix = numpy.bitwise_or(badpix, select_bad * PixMask["FAILEDINTERP"])
+                new_mask = numpy.bitwise_or(
                     badpix,
                     numpy.logical_or(
                         ref_wave < self._wave[0], ref_wave > self._wave[-1]
-                    ),
+                    ) * PixMask["FAILEDINTERP"],
                 )
             else:
                 new_mask = numpy.logical_or(
                     ref_wave < self._wave[0], ref_wave > self._wave[-1]
-                )
+                ) * PixMask["FAILEDINTERP"]
                 # replace error values in masked pixels
                 if new_error is not None:
                     new_error[new_mask] = replace_error
@@ -2632,7 +2633,9 @@ class Spectrum1D(Header):
 
     def apply_pixelmask(self, mask=None, inplace=False):
         if mask is None:
-            mask = self._mask
+            mask = self._mask != 0
+        else:
+            mask = mask != 0
         if mask is None:
             return self
 
@@ -2653,7 +2656,7 @@ class Spectrum1D(Header):
 
     def interpolate_masked(self, mask=None, inplace=False):
         mask = mask if mask is not None else self._mask
-        if mask is None or mask.all():
+        if mask is None or (mask!=0).all():
             return self
 
         if inplace:
@@ -2661,7 +2664,7 @@ class Spectrum1D(Header):
         else:
             new_spec = deepcopy(self)
 
-        good_pix = ~mask
+        good_pix = mask==0
         new_spec._data = numpy.interp(new_spec._wave, new_spec._wave[good_pix], new_spec._data[good_pix], left=new_spec._data[good_pix][0], right=new_spec._data[good_pix][-1])
         if new_spec._error is not None:
             new_spec._error = numpy.interp(new_spec._wave, new_spec._wave[good_pix], new_spec._error[good_pix], left=new_spec._error[good_pix][0], right=new_spec._error[good_pix][-1])
@@ -2772,12 +2775,12 @@ class Spectrum1D(Header):
         new_disp = new_wave[1:] - new_wave[:-1]
         new_disp = numpy.insert(new_disp, 0, new_disp[0])
         data_out = numpy.zeros(len(new_wave), dtype=numpy.float32)
-        mask_out = numpy.zeros(len(new_wave), dtype="bool")
+        mask_out = numpy.zeros(len(new_wave), dtype=numpy.int32)
         sky_out = numpy.zeros(len(new_wave), dtype=numpy.float32)
         sky_error_out = numpy.zeros(len(new_wave), dtype=numpy.float32)
 
         if self._mask is not None:
-            mask_in = numpy.logical_and(self._mask)
+            mask_in = self._mask == 0
         else:
             mask_in = numpy.ones(len(self._wave), dtype="bool")
         # masked_data = self._wave[mask_in]
@@ -2820,7 +2823,7 @@ class Spectrum1D(Header):
                         / numpy.sum(select) ** 2
                     )
             else:
-                mask_out[i] = True
+                mask_out[i] = PixMask["FAILEDINTERP"]
         data_out = numpy.interp(new_wave, masked_wave, self._data[mask_in])
         if self._sky is not None:
             sky_out = numpy.interp(new_wave, masked_wave, self._sky[mask_in])
@@ -2852,9 +2855,9 @@ class Spectrum1D(Header):
             self._data = ndimage.filters.median_filter(self._data, size, mode=mode)
         elif method == "BSpline":
             smooth = interpolate.splrep(
-                self._wave[~self._mask],
-                self._data[~self._mask],
-                w=1.0 / numpy.sqrt(numpy.fabs(self._data[~self._mask])),
+                self._wave[self._mask==0],
+                self._data[self._mask==0],
+                w=1.0 / numpy.sqrt(numpy.fabs(self._data[self._mask==0])),
                 s=size,
             )
             self._data = interpolate.splev(self._wave, smooth, der=0)
@@ -2862,7 +2865,7 @@ class Spectrum1D(Header):
     def smoothGaussVariable(self, diff_fwhm):
         fact = numpy.sqrt(2.0 * numpy.pi)
         if self._mask is not None:
-            mask = numpy.logical_not(self._mask)
+            mask = self._mask == 0
         else:
             mask = numpy.ones(self._data.shape[0], dtype="bool")
 
@@ -2937,7 +2940,7 @@ class Spectrum1D(Header):
         self, deg=5, poly_kind="legendre", start_wave=None, end_wave=None, ref_base=None
     ):
         if self._mask is not None:
-            mask = numpy.logical_not(self._mask)
+            mask = self._mask == 0
         else:
             mask = numpy.ones(self._dim, dtype="bool")
         if start_wave is not None:
@@ -2968,7 +2971,7 @@ class Spectrum1D(Header):
         else:
             self._data[:] = 0
             if self._mask is not None:
-                self._mask[:] = True
+                self._mask[:] = PixMask["FAILEDPOLY"]
             out_par = 0
         return out_par
 
@@ -3020,7 +3023,7 @@ class Spectrum1D(Header):
             wave = self._wave[s]
             pixels = self._pixels[s]
             if self._mask is not None:
-                mask = self._mask[s]
+                mask = self._mask[s] != 0
             else:
                 mask = numpy.zeros_like(data, dtype=bool)
 
@@ -3543,6 +3546,7 @@ class Spectrum1D(Header):
         # mask |= (~numpy.isfinite(data) | ~numpy.isfinite(error))
 
         # reset bad pixels in data and error
+        mask = mask != 0
         error[mask] = numpy.inf
         data[mask] = 0.0
 
@@ -3605,7 +3609,7 @@ class Spectrum1D(Header):
 
             if axs is not None:
                 axs[i].axvspan(x[0], x[-1], alpha=0.1, fc="0.5", label="reg. of masking")
-                axs[i] = gauss.plot(self._wave[select], self._data[select], mask=self._mask[select], ax=axs[i])
+                axs[i] = gauss.plot(self._wave[select], self._data[select], mask=self._mask[select]!=0, ax=axs[i])
                 axs[i].axvline(cent_guess[i], ls="--", lw=1, color="tab:red", label="cent. guess")
                 axs[i].set_title(f"{axs[i].get_title()} @ {cent[i]:.1f} (pixel)")
                 axs[i].text(0.05, 0.9, f"flux = {flux[i]:.2f}", va="bottom", ha="left", transform=axs[i].transAxes, fontsize=11)
@@ -3644,21 +3648,20 @@ class Spectrum1D(Header):
         """
 
         nfibers = len(pos)
-        aperture = 3
+        nsigmas = 1
         # round up fiber locations
         pixels = numpy.round(
-            pos[:, None] + numpy.arange(-aperture / 2.0, aperture / 2.0, 1.0)[None, :]
+            pos[:, None] + numpy.arange(-nsigmas, nsigmas+1, 1)[None, :] * bn.nanmedian(sigma)
         ).astype("int")
         # defining bad pixels for each fiber if needed
         if self._mask is not None:
             # select: fibers in the boundary of the chip
-            bad_pix = numpy.zeros(nfibers, dtype="bool")
-            select = bn.nansum(pixels >= self._mask.shape[0], 1)
-            nselect = numpy.logical_not(select)
-            bad_pix[select] = True
+            bad_pix = numpy.zeros(nfibers, dtype=numpy.int32)
+            select = numpy.logical_or.reduce(pixels >= self._mask.shape[0], 1)
+            bad_pix[select] |= numpy.bitwise_or.reduce(self._mask[pixels[select, :]], 1)
 
             # masking fibers if all pixels are bad within aperture
-            bad_pix[nselect] = bn.nansum(self._mask[pixels[nselect, :]], 1) == aperture
+            bad_pix[~select] |= numpy.bitwise_or.reduce(self._mask[pixels[~select, :]], 1)
         else:
             bad_pix = None
         if self._error is None:
@@ -3698,10 +3701,8 @@ class Spectrum1D(Header):
 
         error = numpy.sqrt(1 / ((B.multiply(B)).sum(axis=0))).A
         error = error[0,:]
-        if bad_pix is not None and bn.nansum(bad_pix) > 0:
-            error[bad_pix] = replace_error
 
-        # pyfits.writeto('B.fits', B.toarray(), overwrite=True)
+        # pyfits.writeto('B1.fits', B1.toarray(), overwrite=True)
         # if plot:
         #     plt.plot(self._data, "ok")
         #     plt.plot(numpy.dot(A * self._error[:, None], out[0]), "-r")
@@ -3720,7 +3721,7 @@ class Spectrum1D(Header):
             select_end = numpy.ones(self._dim, dtype="bool")
         select = numpy.logical_and(select_start, select_end)
         if self._mask is not None:
-            select = numpy.logical_and(select, numpy.logical_not(self._mask))
+            select = numpy.logical_and(select, self._mask == 0)
 
         if method != "mean" and method != "median" and method != "sum":
             raise ValueError("method must be either 'mean', 'median' or 'sum'")
@@ -3764,7 +3765,7 @@ class Spectrum1D(Header):
         fluxes = numpy.ma.zeros((2, len(wave)))
         errors = numpy.zeros_like(fluxes)
         fwhms = numpy.zeros_like(fluxes)
-        masks = numpy.zeros_like(fluxes, dtype=bool)
+        masks = numpy.zeros_like(fluxes, dtype=numpy.int32)
         skies = numpy.zeros_like(fluxes)
         sky_errors = numpy.zeros_like(fluxes)
         for i, s in enumerate(spectra):
@@ -3806,11 +3807,11 @@ class Spectrum1D(Header):
         skies = bn.nansum(skies * weights, axis=0)
         sky_errors = numpy.sqrt(bn.nansum(sky_errors**2 * weights**2), axis=0)
 
-        masks = numpy.logical_and(masks[0], masks[1])
-        masks = numpy.logical_or(masks, numpy.isnan(fluxes))
-        masks = numpy.logical_or(masks, numpy.isnan(fwhms))
-        masks = numpy.logical_or(masks, numpy.isnan(errors))
-        masks = numpy.logical_or(masks, numpy.isnan(skies))
-        masks = numpy.logical_or(masks, numpy.isnan(sky_errors))
+        masks = numpy.bitwise_and(masks[0], masks[1])
+        masks = numpy.bitwise_or(masks, numpy.isnan(fluxes))
+        masks = numpy.bitwise_or(masks, numpy.isnan(fwhms))
+        masks = numpy.bitwise_or(masks, numpy.isnan(errors))
+        masks = numpy.bitwise_or(masks, numpy.isnan(skies))
+        masks = numpy.bitwise_or(masks, numpy.isnan(sky_errors))
 
         return Spectrum1D(wave=wave, data=fluxes, error=errors, lsf=fwhms, mask=masks, sky=skies, sky_error=sky_errors)

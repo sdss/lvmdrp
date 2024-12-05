@@ -43,6 +43,7 @@ from lvmdrp.core.constants import (
     SKYMODEL_INST_PATH,
     SKYMODEL_MODEL_CONFIG_PATH,
 )
+from lvmdrp.utils.bitmask import PixMask
 from lvmdrp.external.skycorr import createParFile, fitstabSkyCorrWrapper, runSkyCorr
 from lvmdrp import log
 
@@ -786,11 +787,12 @@ def fit_supersky(sky_wave, sky_data, sky_vars, sky_mask, sci_wave, sci_data):
     weights = 1 / svars
 
     # define interpolation functions
+    good_pix = smask == 0
     # NOTE: store a super sampled version of the splines as an extension of the sky RSS
-    f_data = interpolate.make_smoothing_spline(swave[~smask], ssky[~smask], w=weights[~smask], lam=1e-6)
+    f_data = interpolate.make_smoothing_spline(swave[good_pix], ssky[good_pix], w=weights[good_pix], lam=1e-6)
     # NOTE: verify that the evaluated errors are not in variance at this stage
-    f_error = interpolate.make_smoothing_spline(swave[~smask], svars[~smask] / nsky_fibers, w=weights[~smask], lam=1e-6)
-    f_mask = interpolate.interp1d(swave, smask, kind="nearest", bounds_error=False, fill_value=0)
+    f_error = interpolate.make_smoothing_spline(swave[good_pix], svars[good_pix] / nsky_fibers, w=weights[good_pix], lam=1e-6)
+    f_mask = interpolate.interp1d(swave, smask, kind="nearest", bounds_error=False, fill_value=PixMask["NODATA"])
 
     return f_data, f_error, f_mask, swave, ssky, svars, smask
 

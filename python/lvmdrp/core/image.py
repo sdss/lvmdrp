@@ -17,6 +17,7 @@ from scipy import ndimage
 from scipy import interpolate
 
 from lvmdrp import log
+from lvmdrp.utils.bitmask import ReductionStage, PixMask, QualityFlag, add_bitmask, toggle_bitmask, update_header_bitmask, print_bitmasks
 from lvmdrp.core.constants import CON_LAMPS, ARC_LAMPS
 from lvmdrp.core.plot import plt
 from lvmdrp.core.fit_profile import gaussians, Gaussians
@@ -426,7 +427,7 @@ class Image(Header):
         """
         if isinstance(other, Image):
             # define behaviour if the other is of the same instance
-            img = Image(header=self._header, origin=self._origin)
+            img = copy(self)
 
             # add data if contained in both
             if self._data is not None and other._data is not None:
@@ -447,8 +448,7 @@ class Image(Header):
 
             # combined mask of valid pixels if contained in both
             if self._mask is not None and other._mask is not None:
-                new_mask = numpy.logical_or(self._mask, other._mask)
-                img.setData(mask=new_mask)
+                img.setData(mask=self._mask | other._mask)
             else:
                 img.setData(mask=self._mask)
             return img
@@ -512,8 +512,7 @@ class Image(Header):
 
             # combined mask of valid pixels if contained in both
             if self._mask is not None and other._mask is not None:
-                new_mask = numpy.logical_or(self._mask, other._mask)
-                img.setData(mask=new_mask)
+                img.setData(mask=self._mask | other._mask)
             else:
                 img.setData(mask=self._mask)
             return img
@@ -573,8 +572,7 @@ class Image(Header):
 
             # combined mask of valid pixels if contained in both
             if self._mask is not None and other._mask is not None:
-                new_mask = numpy.logical_or(self._mask, other._mask)
-                img.setData(mask=new_mask)
+                img.setData(mask=self._mask | other._mask)
             else:
                 img.setData(mask=self._mask)
             return img
@@ -652,8 +650,7 @@ class Image(Header):
 
             # combined mask of valid pixels if contained in both
             if self._mask is not None and other._mask is not None:
-                new_mask = numpy.logical_or(self._mask, other._mask)
-                img.setData(mask=new_mask)
+                img.setData(mask=self._mask | other._mask)
             else:
                 img.setData(mask=self._mask)
             return img
@@ -796,7 +793,7 @@ class Image(Header):
     def apply_pixelmask(self, mask=None):
         """Applies the mask to the data and error arrays, setting to nan when True and leaving the same value otherwise"""
         if mask is None:
-            mask = self._mask
+            mask = self.get_mask(as_boolean=True)
         if mask is None:
             return self._data, self._error
 
@@ -950,7 +947,7 @@ class Image(Header):
         """
         return self._data
 
-    def getMask(self):
+    def get_mask(self, as_boolean=False):
         """
         Returns the bad pixel mask of the image
 
@@ -960,6 +957,8 @@ class Image(Header):
             The bad pixel mask of the image
 
         """
+        if as_boolean:
+            return self._mask.astype(bool)
         return self._mask
 
     def getError(self):
@@ -1093,6 +1092,78 @@ class Image(Header):
                 new_image.setHeader(header)  # set header
 
         return new_image
+
+    def add_bitmask(self, pixmask, where=None):
+        """Adds the given bitmask to the current mask
+
+        If no mask is present in the image, a new mask will be started
+        with the corresponding pixels flagged with `pixmask`.
+
+        Parameters
+        ----------
+        pixmask : PixMask|str|int
+            Bitmask to add to the current mask
+        where : numpy.ndarray[bool], optional
+            Boolean selection of pixels where to add given bitmask, by default all pixels
+
+        Returns
+        -------
+        mask : np.ndarray[PixMask|int]
+            Updated pixel mask
+        """
+        if self._mask is None and self._dim is not None:
+            self._mask = numpy.zeros(self._dim, dtype=int)
+        self._mask = add_bitmask(self._mask, pixmask=pixmask, where=where)
+        return self._mask
+
+    def toggle_bitmask(self, pixmask, where=None):
+        """Toggle the given bitmask in the current mask
+
+        If no mask is present in the image, a new mask will be started
+        with the corresponding pixels flagged with `pixmask`.
+
+        Parameters
+        ----------
+        pixmask : PixMask|str|int
+            Bitmask to add to the current mask
+        where : numpy.ndarray[bool], optional
+            Boolean selection of pixels where to add given bitmask, by default all pixels
+
+        Returns
+        -------
+        mask : np.ndarray[PixMask|int]
+            Updated pixel mask
+        """
+        self._mask = toggle_bitmask(self._mask, pixmask=pixmask, where=where)
+        return self._mask
+
+    def print_bitmasks(self, logger=None):
+        """Prints or logs bitmask value counts
+
+        Parameters
+        ----------
+        logger : logger, optional
+            logs with level `info` if given, by default None (uses print)
+        """
+        if self._mask is None:
+            return
+        print_bitmasks(self._mask, logger=log)
+
+    def update_drpstage(self, stage):
+        if self._header is None:
+            return
+
+        self._header = update_header_bitmask(header=self._header,
+                                             kind=ReductionStage, bitmask=stage,
+                                             key="DRPSTAGE", comment="data reduction stage")
+
+    def update_drpqual(self, quality):
+        if self._header is None:
+            return
+
+        self._header = update_header_bitmask(header=self._header,
+                                             kind=QualityFlag, bitmask=quality,
+                                             key="DRPQUAL", comment="data reduction quality")
 
     def convertUnit(self, to, assume="adu", gain_field="GAIN", inplace=False):
         """converts the unit of the image
@@ -1340,7 +1411,7 @@ class Image(Header):
                     if hdu[i].header["EXTNAME"].split()[0] == "ERROR":
                         self._error = hdu[i].data.astype("float32")
                     elif hdu[i].header["EXTNAME"].split()[0] == "BADPIX":
-                        self._mask = hdu[i].data.astype("bool")
+                        self._mask = hdu[i].data.astype("int32")
                     elif hdu[i].header["EXTNAME"].split()[0] == "FRAMES":
                         self._individual_frames = Table(hdu[i].data)
                     elif hdu[i].header["EXTNAME"].split()[0] == "SLITMAP":
@@ -1352,7 +1423,7 @@ class Image(Header):
                 self._dim = self._data.shape  # set dimension
 
             if extension_mask is not None:
-                self._mask = hdu[extension_mask].data.astype("bool")  # take data
+                self._mask = hdu[extension_mask].data.astype("int32")  # take data
                 self._dim = self._mask.shape  # set dimension
 
             if extension_error is not None:
@@ -1408,7 +1479,7 @@ class Image(Header):
             if self._error is not None:
                 hdus[1] = pyfits.ImageHDU(self._error, name="ERROR")
             if self._mask is not None:
-                hdus[2] = pyfits.ImageHDU(self._mask.astype("uint8"), name="BADPIX")
+                hdus[2] = pyfits.ImageHDU(self._mask.astype("uint32"), name="BADPIX")
             if self._individual_frames is not None:
                 hdus[3] = pyfits.BinTableHDU(self._individual_frames, name="FRAMES")
             if self._slitmap is not None:
@@ -1421,10 +1492,10 @@ class Image(Header):
 
             # mask hdu
             if extension_mask == 0:
-                hdu = pyfits.PrimaryHDU(self._mask.astype("uint8"))
+                hdu = pyfits.PrimaryHDU(self._mask.astype("uint32"))
             elif extension_mask > 0 and extension_mask is not None:
                 hdus[extension_mask] = pyfits.ImageHDU(
-                    self._mask.astype("uint8"), name="BADPIX"
+                    self._mask.astype("uint32"), name="BADPIX"
                 )
 
             # error hdu
@@ -1511,19 +1582,22 @@ class Image(Header):
             new_image :  Image object
                 Subsampled image
         """
-
         if self._data is None:
             raise RuntimeError("Image object is empty. Nothing to process.")
+        if self._mask is None:
+            return self
+
+        mask = self.get_mask(as_boolean=True)
 
         idx = numpy.indices(self._dim)  # create an index array
         # get x and y coordinates of bad pixels
 
-        y_cors = idx[0][self._mask]
-        x_cors = idx[1][self._mask]
+        y_cors = idx[0][mask]
+        x_cors = idx[1][mask]
 
         out_data = copy(self._data)
         msk_data = copy(self._data)
-        msk_data[self._mask] = numpy.nan
+        msk_data[mask] = numpy.nan
         out_error = copy(self._error)
 
         # esimate the pixel distance form the bad pixel to the filter window boundary
@@ -1650,7 +1724,7 @@ class Image(Header):
         else:
             new_error = None
         if self._mask is not None:
-            new_mask = numpy.zeros(new_data.shape, dtype="bool")
+            new_mask = numpy.zeros(new_data.shape, dtype=int)
         else:
             new_mask = None
 
@@ -1705,18 +1779,18 @@ class Image(Header):
 
         if self._mask is not None:
             # create the new  bad pixel mask
-            mask_new = numpy.sum(
+            mask_new = numpy.bitwise_or.reduce(
                 numpy.reshape(self._mask, (self._dim[0], self._dim[1] // bin_x, bin_x)),
                 2,
             )
-            mask_new2 = numpy.sum(
+            mask_new2 = numpy.bitwise_or.reduce(
                 numpy.reshape(
                     mask_new, (self._dim[0] // bin_y, bin_y, self._dim[1] // bin_x)
                 ),
                 1,
             )
             # if only one bad pixel in the binning pixel exists the binned pixel will have the bad pixel status
-            new_mask = mask_new2 > 0
+            new_mask = mask_new2# > 0
         else:
             new_mask = None
         # create new Image object and return
@@ -1762,7 +1836,7 @@ class Image(Header):
         new_image.setData(data=new, error=new_error, inplace=True)
         return new_image
 
-    def convolveGaussImg(self, sigma_x, sigma_y, mode="nearest", mask=False):
+    def convolveGaussImg(self, sigma_x, sigma_y, mode="nearest", use_mask=False):
         """
         Convolves the data of the Image with a given kernel. The mask and error information will be unchanged.
 
@@ -1783,17 +1857,18 @@ class Image(Header):
         """
         # convolve the data array with the 2D Gaussian convolution kernel
 
-        if self._mask is not None and mask is True:
-            mask_data = self._data[self._mask]
-            self._data[self._mask] = 0
+        if self._mask is not None and use_mask is True:
+            mask = self.get_mask(as_boolean=True)
+            mask_data = self._data[mask]
+            self._data[mask] = 0
             gauss = ndimage.filters.gaussian_filter(
                 self._data, (sigma_y, sigma_x), mode=mode
             )
             scale = ndimage.filters.gaussian_filter(
-                (~self._mask).astype('float32'), (sigma_y, sigma_x), mode=mode
+                (~mask).astype('float32'), (sigma_y, sigma_x), mode=mode
             )
             new = gauss / scale
-            self._data[self._mask] = mask_data
+            self._data[mask] = mask_data
         else:
             new = ndimage.filters.gaussian_filter(
                 self._data, (sigma_y, sigma_x), mode=mode
@@ -1900,7 +1975,7 @@ class Image(Header):
         x = x - bn.nanmean(x)
         # if self._mask is not None:
         #    self._mask = numpy.logical_and(self._mask, numpy.logical_not(numpy.isnan(self._data)))
-        valid = ~self._mask.astype("bool")
+        valid = ~self._mask
         # iterate over the image
         for i in range(slices):
             # decide on the bad pixel mask
@@ -2009,7 +2084,7 @@ class Image(Header):
         pixels = numpy.arange(self._dim[0])
         models = numpy.zeros(self._dim)
         for i in range(self._dim[1]):
-            good_pix = ~self._mask[:,i] if self._mask is not None else ~numpy.isnan(self._data[:,i])
+            good_pix = self._mask[:,i] == 0 if self._mask is not None else ~numpy.isnan(self._data[:,i])
 
             # skip column if all pixels are masked
             if good_pix.sum() == 0:
@@ -2571,7 +2646,7 @@ class Image(Header):
             error = numpy.zeros((TraceMask._fibers, self._dim[1]), dtype=numpy.float32)
         else:
             error = None
-        mask = numpy.zeros((TraceMask._fibers, self._dim[1]), dtype="bool")
+        mask = numpy.zeros((TraceMask._fibers, self._dim[1]), dtype=numpy.int32)
         for i in range(self._dim[1]):
             pixels = numpy.round(
                 pos[:, i][:, numpy.newaxis]
@@ -2599,10 +2674,10 @@ class Image(Header):
                     numpy.sum(self._error[:, i][pixels] ** 2, 1)
                 )
             if self._mask is not None:
-                mask[good_pix[:, i], i] = numpy.sum(self._mask[:, i][pixels], 1) > 0
+                mask[good_pix[:, i], i] = numpy.bitwise_or.reduce(self._mask[:, i][pixels], 1)
 
         # update mask with trace mask
-        mask |= bad_pix
+        # mask |= TraceMask._mask.astype(int)
         return data, error, mask
 
     def extractSpecOptimal(self, cent_trace, trace_fwhm, plot_fig=False):
@@ -2612,7 +2687,7 @@ class Image(Header):
             error = numpy.zeros((cent_trace._fibers, self._dim[1]), dtype=numpy.float32)
         else:
             error = None
-        mask = numpy.zeros((cent_trace._fibers, self._dim[1]), dtype="bool")
+        mask = numpy.zeros((cent_trace._fibers, self._dim[1]), dtype=numpy.int32)
 
         self._data = numpy.nan_to_num(self._data)
         self._error = numpy.nan_to_num(self._error, nan=numpy.inf)
@@ -2623,19 +2698,10 @@ class Image(Header):
         for i in range(self._dim[1]):
             # get i-column from image and trace
             slice_img = self.getSlice(i, axis="y")
-            slice_cent = cent_trace.getSlice(i, axis="y")
-            cent = slice_cent[0]
+            cent, cent_err, cent_mask = cent_trace.getSlice(i, axis="y")
 
             # define fiber mask
-            bad_fiber = (slice_cent[2] == 1) | (
-                (slice_cent[0] < 0) | (slice_cent[0] > len(slice_img._data) - 1)
-            )
-            # bad_fiber = numpy.logical_or(
-            #     (slice_cent[2] == 1),
-            #     numpy.logical_or(
-            #         slice_cent[0] < 0, slice_cent[0] > len(slice_img._data) - 1
-            #     ),
-            # )
+            bad_fiber = (cent_mask != 0) | ((cent < 0) | (cent > len(slice_img._data) - 1))
             good_fiber = ~bad_fiber
 
             # get i-column from sigma trace
@@ -2646,13 +2712,13 @@ class Image(Header):
             slice_img._data[select_nan] = 0
 
             # measure flux along the given columns
-            result = slice_img.obtainGaussFluxPeaks(cent[good_fiber], sigma[good_fiber], plot=plot_fig)
-            data[good_fiber, i] = result[0]
+            edata, eerror, emask = slice_img.obtainGaussFluxPeaks(cent[good_fiber], sigma[good_fiber], plot=plot_fig)
+            data[good_fiber, i] = edata
             if self._error is not None:
-                error[good_fiber, i] = result[1]
+                error[good_fiber, i] = eerror
             if self._mask is not None:
-                mask[good_fiber, i] = result[2]
-            mask[bad_fiber, i] = True
+                mask[good_fiber, i] |= emask
+            mask[bad_fiber, i] |= cent_mask[bad_fiber]
         return data, error, mask
 
     def maskFiberTraces(self, TraceMask, aperture=3, parallel="auto"):
@@ -2660,7 +2726,7 @@ class Image(Header):
         dx = numpy.arange(-n0, n0 + 1, 0.5)
         trace = TraceMask.getData()[0]
         if self._mask is None:
-            self._mask = numpy.zeros(self._dim, dtype="bool")
+            self._mask = numpy.zeros(self._dim, dtype="int32")
         if parallel == "auto":
             cpus = cpu_count()
         else:
@@ -2691,7 +2757,7 @@ class Image(Header):
 
         for i in range(self._dim[1]):
             if cpus > 1:
-                self._mask[mask_pixels[i].get(), i] = True
+                self._mask[mask_pixels[i].get(), i] |= PixMask["NODATA"]
             else:
                 select = numpy.unique(
                     numpy.clip(
@@ -2704,7 +2770,7 @@ class Image(Header):
                     .astype("int16")
                     .flatten()
                 )
-                self._mask[select, i] = True
+                self._mask[select, i] |= PixMask["NODATA"]
 
     def peakPosition(self, guess_x=None, guess_y=None, box_x=None, box_y=None):
         image = self._data * numpy.logical_not(self._mask)
@@ -3057,8 +3123,8 @@ class Image(Header):
         img_original._error = numpy.sqrt((numpy.clip(img_original._data, a_min=0.0, a_max=None) + rdnoise**2))
 
         select = numpy.zeros(img._dim, dtype=bool)
-        img_original._mask = numpy.zeros(img._dim, dtype=bool)
-        img._mask = numpy.zeros(img._dim, dtype=bool)
+        img_original._mask = numpy.zeros(img._dim, dtype=int)
+        img._mask = numpy.zeros(img._dim, dtype=int)
 
         # start iteration
         out = img
@@ -3081,7 +3147,7 @@ class Image(Header):
             S_prime = S-S.medianImg((5, 5))  # cleaning of the normalized Laplacian image
 
             # Perform additional clean using a 2D Gaussian smoothing kernel
-            fine = out.convolveGaussImg(sigma_x, sigma_y, mask=True)  # convolve image with a 2D Gaussian
+            fine = out.convolveGaussImg(sigma_x, sigma_y, use_mask=True)  # convolve image with a 2D Gaussian
             fine_norm = out/fine
             select_neg = fine_norm < 0
             fine_norm.replace_subselect(select_neg, data=0)
@@ -3097,7 +3163,7 @@ class Image(Header):
                 log.info(f'  Total number of detected cosmics: {det_pix} out of {dim[0] * dim[1]} pixels')
 
             if i == iterations-1:
-                img_original.replace_subselect(select, mask=True)  # set the new mask
+                img_original.replace_subselect(select, mask=PixMask["COSMIC"])  # set the new mask
                 if increase_radius > 0:
                     mask_img = Image(data=img_original._mask)
                     mask_new = mask_img.convolveImg(kernel=numpy.ones((2*increase_radius+1, 2*increase_radius+1)))
@@ -3109,14 +3175,14 @@ class Image(Header):
                         # leave out the dispersion direction (0 degrees), see DESI, Guy et al., ApJ, 2023, 165, 144
                         lse = LinearSelectionElement(11, 11, ang)
                         bc_mask = bc_mask | ndimage.binary_closing(bmask, structure=lse.se)
-                    img_original._mask = bc_mask
+                    img_original._mask = bc_mask * PixMask["COSMIC"]
                     if verbose:
                         log.info(f'  Total number after binary closing: {numpy.sum(bc_mask)} pixels')
 
                 # replace possible corrput pixel with median for final output
                 out = img_original.replaceMaskMedian(box_x, box_y, replace_error=replace_error)
             else:
-                out.replace_subselect(select, mask=True)  # set the new mask
+                out.replace_subselect(select, mask=PixMask["COSMIC"])  # set the new mask
                 out = out.replaceMaskMedian(box_x, box_y, replace_error=None)  # replace possible corrput pixel with median
 
         if inplace:
@@ -3128,9 +3194,10 @@ class Image(Header):
             if self._mask is None:
                 self._mask = out._mask
             else:
-                self._mask |= out._mask
+                self._mask += out._mask
         else:
             return out
+
 
     def getIndividualFrames(self):
         return self._individual_frames
