@@ -31,6 +31,7 @@ from lvmdrp.functions.imageMethod import (preproc_raw_frame, create_master_frame
 from lvmdrp.functions.rssMethod import (determine_wavelength_solution, create_pixel_table, apply_fiberflat,
                                         resample_wavelength, shift_wave_skylines, join_spec_channels, stack_spectrographs)
 from lvmdrp.functions.skyMethod import interpolate_sky, combine_skies, quick_sky_subtraction
+from lvmdrp.core import fluxcal
 from lvmdrp.functions.fluxCalMethod import fluxcal_standard_stars, fluxcal_sci_ifu_stars, apply_fluxcal
 from lvmdrp.utils.metadata import (get_frames_metadata, get_master_metadata, extract_metadata,
                                    get_analog_groups, match_master_metadata, create_master_path,
@@ -1909,6 +1910,64 @@ def create_drpall(drp_version: str = None, overwrite: bool = False) -> None:
 
     convert_h5_to_fits(drpall)
     log.info(f"finished converting HDF5 to FITS format in {drpall.replace('h5', '.fits')}")
+
+
+def cache_gaia_spectra(mjds: Union[int, str, list], min_acquired=999, dry_run: bool = False) -> None:
+    """Caches Gaia XP spectra for science field calibration
+
+    Parameters
+    ----------
+    mjds : int|str|list[int]
+        MJDs for which the caching should be run
+    min_acquired : int, optional
+        minimum number of acquired standard stars to skip caching, defaults to 999 (no skipping)
+    dry_run : bool, optional
+        lists exposures that will be targeted
+    """
+    log.info("start of Gaia XP spectra caching for science field flux calibration")
+    gaia_cache_dir = os.path.join(os.getenv("LVM_MASTER_DIR"), "gaia_cache")
+    os.makedirs(gaia_cache_dir, exist_ok=True)
+    # parse MJDs
+    mjds = parse_mjds(mjds)
+    if isinstance(mjds, int):
+        mjds = [mjds]
+    log.info(f"selecting MJDs: {','.join(map(str, mjds))}")
+
+    for mjd in mjds:
+        # load metadata and filter good quality science frames
+        frames = get_frames_metadata(mjd=mjd)
+        frames.query("imagetyp == 'object' and qaqual == 'GOOD'", inplace=True)
+        frames = frames.drop_duplicates(subset=["expnum"], keep="first")
+
+        failed_expnums = []
+        for exposure in frames.to_dict("records"):
+            raw_path = path.full("lvm_raw", camspec=exposure["camera"], **exposure)
+            # check for presence of standard stars metadata
+            with fits.open(raw_path) as f:
+                expnum = exposure["expnum"]
+                acquired_stds = list(f[0].header["STD*ACQ"].values())
+                total_acquired = sum(acquired_stds)
+                if total_acquired != 0:
+                    if total_acquired >= min_acquired:
+                        log.info(f"{expnum = } has standard stars metadata and {total_acquired} were acquired, skipping")
+                        continue
+                    log.info(f"{expnum = } has standard stars metadata and {total_acquired} were acquired")
+                # get exposure parameters
+                ra = f[0].header['POSCIRA']
+                dec = f[0].header['POSCIDE']
+
+            # cache corresponding gaia spectra
+            log.info(f"going to download 15 field stars spectra with mag<13.5 around {ra = }, {dec = }")
+            if not dry_run:
+                try:
+                    fluxcal.get_XP_spectra(expnum, ra, dec, plot=False, lim_mag=13.5, n_spec=15, GAIA_CACHE_DIR=gaia_cache_dir)
+                except Exception as e:
+                    log.error(f"failed caching of Gaia spectra for {expnum = }: {e}")
+                    failed_expnums.append(expnum)
+                    continue
+
+    # summarize run
+    log.info(f"cached metadata for {len(frames) - len(failed_expnums)} exposures, with {len(failed_expnums)} fails, {failed_expnums = }")
 
 
 def reduce_calib_frame(row: dict):

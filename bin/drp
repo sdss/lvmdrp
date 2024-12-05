@@ -12,7 +12,7 @@ import cloup
 from cloup.constraints import mutually_exclusive, RequireExactly, IsSet, If
 
 from lvmdrp.core.constants import CALIBRATION_MATCH
-from lvmdrp.main import run_drp, reduce_file, check_daily_mjd, parse_mjds, read_expfile, create_drpall
+from lvmdrp.main import run_drp, reduce_file, check_daily_mjd, parse_mjds, read_expfile, create_drpall, cache_gaia_spectra
 from lvmdrp.functions.skyMethod import configureSkyModel_drp
 from lvmdrp.utils.metadata import get_frames_metadata, get_master_metadata
 from lvmdrp.utils.cluster import run_cluster
@@ -385,6 +385,18 @@ def summary(drp_version, overwrite):
     """ Creates the DRP summary file for a given version of the DRP """
 
     create_drpall(drp_version=drp_version, overwrite=overwrite)
+
+
+@cli.command(short_help='Caches Gaia XP spectra for science field calibration')
+@click.option('-m', '--mjd', type=int, help='an MJD to reduce')
+@click.option('-l', '--mjd-list', type=int, multiple=True, help='a list of specific MJDs to reduce')
+@click.option('-r', '--mjd-range', type=str, help='a range of MJDs to reduce')
+@click.option("--min-acquired", type=int, default=999, help='minimum number of standard stars acquired to skip caching')
+@click.option('--dry-run', is_flag=True, default=False)
+def cache_gaia_xp(mjd, mjd_list, mjd_range, min_acquired, dry_run):
+    """"Caches Gaia XP spectra for science field calbration"""
+    mjds = mjd or mjd_list or mjd_range
+    cache_gaia_spectra(mjds=mjds, dry_run=dry_run, min_acquired=min_acquired)
 
 
 if __name__ == "__main__":
