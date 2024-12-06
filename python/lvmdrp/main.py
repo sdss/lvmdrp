@@ -701,6 +701,7 @@ def start_logging(mjd: int, tileid: int):
         logpath.parent.mkdir(parents=True, exist_ok=True)
 
     log.start_file_logger(logpath, rotating=False, with_json=True)
+    return logpath
 
 
 def write_config_file():
@@ -1823,7 +1824,7 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
 
         if sci_cond or cal_cond:
             # start logging for this tileid, mjd
-            start_logging(mjd, tileid)
+            logfile_path = start_logging(mjd, tileid)
 
         # attempt to reduce individual calibration files
         if cal_cond:
@@ -1855,6 +1856,7 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
                         create_status_file(tileid, mjd, status='error')
                         trace = traceback.format_exc()
                         update_error_file(tileid, mjd, expnum, trace)
+                        log.info(f"the log file can be found here: {logfile_path}")
                         continue
 
         # create done status on successful run
