@@ -1944,8 +1944,9 @@ def cache_gaia_spectra(mjds: Union[int, str, list], min_acquired=999, dry_run: b
             raw_path = path.full("lvm_raw", camspec=exposure["camera"], **exposure)
             # check for presence of standard stars metadata
             with fits.open(raw_path) as f:
+                header = f[0].header
                 expnum = exposure["expnum"]
-                acquired_stds = list(f[0].header["STD*ACQ"].values())
+                acquired_stds = list(header["STD*ACQ"].values())
                 total_acquired = sum(acquired_stds)
                 if total_acquired != 0:
                     if total_acquired >= min_acquired:
@@ -1953,11 +1954,11 @@ def cache_gaia_spectra(mjds: Union[int, str, list], min_acquired=999, dry_run: b
                         continue
                     log.info(f"{expnum = } has standard stars metadata and {total_acquired} were acquired")
                 # get exposure parameters
-                ra = f[0].header['POSCIRA']
-                dec = f[0].header['POSCIDE']
+                ra = header.get("POSCIRA", header.get("TESCIRA"))
+                dec = header.get("POSCIDE", header.get("TESCIDE"))
 
             # cache corresponding gaia spectra
-            log.info(f"going to download 15 field stars spectra with mag<13.5 around {ra = }, {dec = }")
+            log.info(f"going to download 15 field stars spectra with G<13.5 around {ra = }, {dec = } for {expnum = }")
             if not dry_run:
                 try:
                     fluxcal.get_XP_spectra(expnum, ra, dec, plot=False, lim_mag=13.5, n_spec=15, GAIA_CACHE_DIR=gaia_cache_dir)
