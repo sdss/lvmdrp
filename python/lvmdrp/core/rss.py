@@ -363,7 +363,7 @@ class RSS(FiberRows):
         # optionally interpolate if the merged wavelengths are not monotonic
         fluxes, errors, masks, lsfs, skies, sky_errors = [], [], [], [], [], []
         skies_e, skies_w, sky_e_errors, sky_w_errors = [], [], [], []
-        if numpy.all(numpy.isclose(sampling, sampling[0], atol=1e-6)):
+        if numpy.all(numpy.isclose(sampling, sampling[0], atol=1e-2)):
             log.info(f"current wavelength sampling: min = {sampling.min():.2f}, max = {sampling.max():.2f}")
             # extend rss._data to new_wave filling with NaNs
             for rss in rsss:
@@ -1100,7 +1100,7 @@ class RSS(FiberRows):
         if wcs.spectral.array_shape:
             res_elements = wcs.spectral.array_shape[0]
             wl = wcs.spectral.all_pix2world(numpy.arange(res_elements), 0)[0]
-            wave = (wl * u.m).to(u.AA).value
+            wave = (wl * u.m).to(u.AA).value.astype("float32")
             wave_disp = wave[1] - wave[0]
             wave_start = wave[0]
 
