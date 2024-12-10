@@ -23,7 +23,7 @@ from lvmdrp.core.fit_profile import gaussians, Gaussians
 from lvmdrp.core.apertures import Apertures
 from lvmdrp.core.header import Header
 from lvmdrp.core.tracemask import TraceMask
-from lvmdrp.core.spectrum1d import Spectrum1D, _normalize_peaks, _fiber_cc_match, _cross_match, _spec_from_lines, align_blocks
+from lvmdrp.core.spectrum1d import Spectrum1D, _normalize_peaks, _fiber_cc_match, _cross_match, _spec_from_lines, _align_fiber_blocks
 
 from lvmdrp.external.fast_median import fast_median_filter_2d
 
@@ -748,10 +748,14 @@ class Image(Header):
         # calculate shift guess along central wide column
         s1 = bn.nanmedian(ref_data[50:-50,2000-500:2000+500], axis=1)
         s2 = bn.nanmedian(self._data[50:-50,2000-500:2000+500], axis=1)
-        guess_shift = align_blocks(s1, s2)
+        # fig_guess, axs_guess = plt.subplots(nrows=2, ncols=1, layout="constrained")
+        # fig_guess.suptitle("Fiber block cross-correlation match")
+        guess_shift = _align_fiber_blocks(s1, s2, axs=None)
 
-        if guess_shift > 6:
-            log.warning(f"measuring fiber thermal shift too large {guess_shift = } pixels")
+        if numpy.abs(guess_shift) > 6:
+            log.warning(f"measuring guess fiber thermal shift too large {guess_shift = } pixels")
+        else:
+            log.info(f"measured guess fiber thermal shift {guess_shift = } pixels")
 
         shifts = numpy.zeros(len(columns))
         select_blocks = [9]
