@@ -290,13 +290,13 @@ def _choose_cc_peak(cc, shifts, min_shift, max_shift):
     return ccp[numpy.argmax(sum_cc)]
 
 
-def align_blocks(ref_spec, obs_spec, median_box=21):
+def _align_fiber_blocks(ref_spec, obs_spec, median_box=21, clip_factor=0.7, axs=None):
     """Cross-correlate median-filtered versions of fiber profile data and model to get coarse alignment"""
     # sigma-clip spectra to half median to remove fiber features
     obs_avg = biweight_location(obs_spec, ignore_nan=True)
     ref_avg = biweight_location(ref_spec, ignore_nan=True)
-    obs_spec = numpy.clip(obs_spec, 0, 0.5*obs_avg)
-    ref_spec = numpy.clip(ref_spec, 0, 0.5*ref_avg)
+    obs_spec = numpy.clip(obs_spec, 0, clip_factor*obs_avg)
+    ref_spec = numpy.clip(ref_spec, 0, clip_factor*ref_avg)
 
     obs_median = signal.medfilt(obs_spec, median_box)
     ref_median = signal.medfilt(ref_spec, median_box)
@@ -304,21 +304,22 @@ def align_blocks(ref_spec, obs_spec, median_box=21):
     obs_median /= numpy.median(obs_median)
     ref_median /= numpy.median(ref_median)
 
-    # import matplotlib.pyplot as plt
-    # plt.figure()
-    # pixels = numpy.arange(obs_spec.size)
-    # plt.step(pixels, obs_median, where="mid", color="green")
-    # plt.step(pixels, ref_median, where="mid", color="purple")
-    # # plt.axhline(obs_avg, ls="--")
-    # # plt.axhline(obs_avg+obs_std, ls=":")
-
     cc = signal.correlate(obs_median, ref_median, mode="same")
 
     shifts = signal.correlation_lags(len(obs_spec), len(ref_spec), mode="same")
     best_shift = shifts[numpy.argmax(cc)]
 
-    # plt.figure()
-    # plt.step(shifts, cc, where="mid")
+    if axs is not None and len(axs) >= 2:
+        pixels = numpy.arange(obs_spec.size)
+        axs[0].step(pixels, obs_median, where="mid", color="k", lw=2, label="obs. profile")
+        axs[0].step(pixels, ref_median, where="mid", color="tab:blue", lw=1, label="ref. profile")
+        axs[0].set_xlabel("Y (pix)")
+        axs[0].set_ylabel("Fiber blocks")
+        axs[0].legend(loc=2, frameon=False, ncols=2)
+        axs[0].set_ylim(-0.1, 1.2)
+        axs[1].step(shifts, cc, where="mid")
+        axs[1].set_xlabel("Shifts (pix)")
+        axs[1].set_ylabel("Cross-correlation")
 
     return best_shift
 
