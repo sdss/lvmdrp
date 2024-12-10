@@ -750,8 +750,10 @@ class Image(Header):
         s2 = bn.nanmedian(self._data[50:-50,2000-500:2000+500], axis=1)
         guess_shift = align_blocks(s1, s2)
 
-        if guess_shift > 6:
-            log.warning(f"measuring fiber thermal shift too large {guess_shift = } pixels")
+        if numpy.abs(guess_shift) > 6:
+            log.warning(f"measuring guess fiber thermal shift too large {guess_shift = } pixels")
+        else:
+            log.info(f"measured guess fiber thermal shift {guess_shift = } pixels")
 
         shifts = numpy.zeros(len(columns))
         select_blocks = [9]
