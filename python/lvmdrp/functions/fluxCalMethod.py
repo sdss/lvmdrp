@@ -103,10 +103,13 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'STD', display_plo
 
     # if instructed, use standard stars
     if method == 'STD':
-        log.info("flux-calibratimg using STD standard stars")
+        log.info("flux-calibrating using STD standard stars")
         sens_arr = fframe._fluxcal_std.to_pandas().values  # * (std_exp / std_exp.sum())[None]
         sens_ave = biweight_location(sens_arr, axis=1, ignore_nan=True)
         sens_rms = biweight_scale(sens_arr, axis=1, ignore_nan=True)
+        # update the fluxcal extension
+        fframe._fluxcal_std["mean"] = sens_ave * u.Unit("erg / (ct cm2)")
+        fframe._fluxcal_std["rms"] = sens_rms * u.Unit("erg / (ct cm2)")
 
         # fix case of all invalid values
         if (sens_ave == 0).all() or np.isnan(sens_ave).all() or (sens_ave<0).any():
@@ -122,6 +125,9 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'STD', display_plo
         sens_arr = fframe._fluxcal_sci.to_pandas().values  # * (std_exp / std_exp.sum())[None]
         sens_ave = biweight_location(sens_arr, axis=1, ignore_nan=True)
         sens_rms = biweight_scale(sens_arr, axis=1, ignore_nan=True)
+        # update the fluxcal extension
+        fframe._fluxcal_sci["mean"] = sens_ave * u.Unit("erg / (ct cm2)")
+        fframe._fluxcal_sci["rms"] = sens_rms * u.Unit("erg / (ct cm2)")
 
         # fix case of all invalid values
         if (sens_ave == 0).all() or np.isnan(sens_ave).all():
@@ -133,10 +139,6 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'STD', display_plo
             fframe.setHdrValue("FLUXCAL", 'SCI', "flux-calibration method")
 
     if method != 'NONE':
-        # update the fluxcal extension
-        fframe._fluxcal_std["mean"] = sens_ave * u.Unit("erg / (ct cm2)")
-        fframe._fluxcal_std["rms"] = sens_rms * u.Unit("erg / (ct cm2)")
-
         ax.set_title(f"flux calibration for {channel = } with {method = }", loc="left")
         for j in range(sens_arr.shape[1]):
             std_hd = fframe._fluxcal_std.colnames[j][:-3]
