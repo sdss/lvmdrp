@@ -121,7 +121,7 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'STD', display_plo
 
     # fall back to science ifu field stars if above failed or if instructed to use this method
     if method == 'SCI':
-        log.info("flux-calibratimg using SCI field stars")
+        log.info("flux-calibrating using SCI field stars")
         sens_arr = fframe._fluxcal_sci.to_pandas().values  # * (std_exp / std_exp.sum())[None]
         sens_ave = biweight_location(sens_arr, axis=1, ignore_nan=True)
         sens_rms = biweight_scale(sens_arr, axis=1, ignore_nan=True)
@@ -453,7 +453,6 @@ def fluxcal_standard_stars(in_rss, plot=True, GAIA_CACHE_DIR=None):
     if ngood_std < 8:
         log.warning("less than 8 good standard fibers, skipping standard calibration")
         rss.add_header_comment("less than 8 good standard fibers, skipping standard calibration")
-        res_std[:] = np.nan
         rss.set_fluxcal(fluxcal=res_std, source='std')
         rss.writeFitsData(in_rss)
         return res_std, mean_std, rms_std, rss
