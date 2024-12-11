@@ -111,11 +111,16 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'STD', display_plo
         fframe._fluxcal_std["mean"] = sens_ave * u.Unit("erg / (ct cm2)")
         fframe._fluxcal_std["rms"] = sens_rms * u.Unit("erg / (ct cm2)")
 
-        # fix case of all invalid values
+        # fall back to science field if all invalid values
         if (sens_ave == 0).all() or np.isnan(sens_ave).all() or (sens_ave<0).any():
             log.warning("all standard star sensitivities are <=0 or NaN, falling back to SCI stars")
             rss.add_header_comment("all standard star sensitivities are <=0 or NaN, falling back to SCI stars")
-            method = 'SCI'  # fallback to sci field stars
+            method = 'SCI'
+        # fall back to science field if less than 8 standard stars
+        elif np.isnan(sens_arr).all(axis=0).sum() < 8:
+            log.warning("less than 8 good standard fibers, falling back to science field calibration")
+            rss.add_header_comment("less than 8 good standard fibers, falling back to science field calibration")
+            method = "SCI"
         else:
             fframe.setHdrValue("FLUXCAL", 'STD', "flux-calibration method")
 
@@ -449,13 +454,6 @@ def fluxcal_standard_stars(in_rss, plot=True, GAIA_CACHE_DIR=None):
     # standard fibers sensitivity curves
     rss, res_std = standard_sensitivity(stds, rss, GAIA_CACHE_DIR, ext, res_std, plot=plot)
     res_std_pd = res_std.to_pandas().values
-    ngood_std = res_std_pd.shape[1]-2-np.isnan(res_std_pd.sum(axis=0)).sum()
-    if ngood_std < 8:
-        log.warning("less than 8 good standard fibers, skipping standard calibration")
-        rss.add_header_comment("less than 8 good standard fibers, skipping standard calibration")
-        rss.set_fluxcal(fluxcal=res_std, source='std')
-        rss.writeFitsData(in_rss)
-        return res_std, mean_std, rms_std, rss
 
     rms_std = biweight_scale(res_std_pd, axis=1, ignore_nan=True)
     mean_std = biweight_location(res_std_pd, axis=1, ignore_nan=True)
