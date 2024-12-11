@@ -462,9 +462,14 @@ def fluxcal_standard_stars(in_rss, plot=True, GAIA_CACHE_DIR=None):
 
     label = rss._header['CCD']
     channel = label.lower()
-    rss.setHdrValue(f"STDSENM{label}", np.nanmean(mean_std[1000:3000]), f"mean stdstar sensitivity in {channel}")
-    rss.setHdrValue(f"STDSENR{label}", np.nanmean(rms_std[1000:3000]), f"mean stdstar sensitivity rms in {channel}")
-    log.info(f"Mean stdstar sensitivity in {channel} : {np.nanmean(mean_std[1000:3000])}")
+
+    mean_std_band = np.nanmean(mean_std[1000:3000])
+    rms_std_band = np.nanmean(rms_std[1000:3000])
+    mean_std_band = -999.9 if np.isnan(mean_std_band) else mean_std_band
+    rms_std_band = -999.9 if np.isnan(rms_std_band) else rms_std_band
+    rss.setHdrValue(f"SCISENM{label}", mean_std_band, f"mean stdstar sensitivity in {channel}")
+    rss.setHdrValue(f"SCISENR{label}", rms_std_band, f"mean stdstar sensitivity rms in {channel}")
+    log.info(f"Mean stdstar sensitivity in {channel} : {mean_std_band}")
 
     if plot:
         plt.ylabel("sensitivity [(ergs/s/cm^2/A) / (e-/s/A)]")
