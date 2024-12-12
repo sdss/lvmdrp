@@ -121,8 +121,6 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'STD', display_plo
             log.warning("less than 8 good standard fibers, falling back to science field calibration")
             rss.add_header_comment("less than 8 good standard fibers, falling back to science field calibration")
             method = "SCI"
-        else:
-            fframe.setHdrValue("FLUXCAL", 'STD', "flux-calibration method")
 
     # fall back to science ifu field stars if above failed or if instructed to use this method
     if method == 'SCI':
@@ -140,9 +138,24 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'STD', display_plo
             rss.add_header_comment("all field star sensitivities are zero or NaN, can't calibrate")
             sens_ave = np.ones_like(sens_ave)
             sens_rms = np.zeros_like(sens_rms)
-        else:
-            fframe.setHdrValue("FLUXCAL", 'SCI', "flux-calibration method")
 
+    # final check on sensitivities
+    if method == "STD" and np.nanmean(fframe._fluxcal_std["mean"]) > 1e-12:
+        method = "SCI"
+        sens_ave = fframe._fluxcal_sci["mean"]
+        log.warning("standard calibration has average sensitivity > 1e-12, falling back to science field calibration")
+        rss.add_header_comment("standard calibration has average sensitivity > 1e-12, falling back to science field calibration")
+    if method == "SCI" and np.nanmean(fframe._fluxcal_sci["mean"]) > 1e-12:
+        method = "STD"
+        sens_ave = fframe._fluxcal_std["mean"]
+        log.warning("science field calibration has average sensitivity > 1e-12, falling back to standard calibration")
+        rss.add_header_comment("science field calibration has average sensitivity > 1e-12, falling back to standard calibration")
+    if np.nanmean(sens_ave) > 1e-12:
+        method = "NONE"
+        log.warning("standard and science field calibration yield average sensitivity > 1e-12, skipping flux calibration")
+        rss.add_header_comment("standard and science field calibration yield average sensitivity > 1e-12, skipping flux calibration")
+
+    fframe.setHdrValue("FLUXCAL", method, "flux-calibration method")
     if method != 'NONE':
         ax.set_title(f"flux calibration for {channel = } with {method = }", loc="left")
         for j in range(sens_arr.shape[1]):
@@ -373,6 +386,9 @@ def science_sensitivity(rss, res_sci, ext, GAIA_CACHE_DIR, NSCI_MAX=15, r_spaxel
             sens = fluxcal.spec_to_LVM_flux(channel, gwave, gflux) / lvmflux
             sens *= np.interp(obswave, mean_sens[channel]['wavelength'], mean_sens[channel]['sens'])
             res_sci[f"STD{i+1}SEN"] = sens.astype(np.float32) * u.Unit("erg / (ct cm2)")
+            # reject sensitivity that yield negative instrumental magnitude
+            if lvmflux <= 0:
+                res_sci[f"STD{i+1}SEN"][:] = np.nan
 
             mAB_std = np.round(fluxcal.spec_to_LVM_mAB(channel, gwave, gflux), 2)
             mAB_obs = np.round(fluxcal.spec_to_LVM_mAB(channel, obswave, obsflux), 2)
