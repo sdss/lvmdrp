@@ -208,13 +208,18 @@ def plotmap_row(data_sci, data_skye, data_skyw, line, row, fig, gs):
 
     #need to make this look better!
     ax6 = fig.add_subplot(gs[row+2,1:5])
-    ax6.hist(data_sci['flux_'+line], range=(vmin, vmaxs), log=True, stacked=True, bins=50, histtype='step', label='sky subtracted flux')
-    ax6.hist(data_sci['sky_'+line], range=(vmin, vmaxs), log=True, stacked=True, bins=100, label='sky flux')
-    ax6.hist(data_skye['flux_'+line]+data_skye['sky_'+line], range=(vmin, vmaxs), bins=50, histtype='step', log=True, stacked=True, label='SkyE flux')
-    ax6.hist(data_skyw['flux_'+line]+data_skyw['sky_'+line], range=(vmin, vmaxs), bins=50, histtype='step', log=True, stacked=True, label='SkyW flux')
-    ax6.tick_params(axis="x", direction="in", labeltop=True, labelbottom=False, pad=-15, top=True)
-    fig.subplots_adjust(top=0.95)
-    ax6.legend()
+    hmin=vmin
+    hmax=vmaxs
+    if hmax > hmin:
+        ax6.hist(data_sci['flux_'+line], range=(hmin, hmax), log=True, stacked=True, bins=50, histtype='step', label='sky subtracted flux')
+        ax6.hist(data_sci['sky_'+line], range=(hmin, hmax), log=True, stacked=True, bins=100, label='sky flux')
+        ax6.hist(data_skye['flux_'+line]+data_skye['sky_'+line], range=(hmin, hmax), bins=50, histtype='step', log=True, stacked=True, label='SkyE flux')
+        ax6.hist(data_skyw['flux_'+line]+data_skyw['sky_'+line], range=(hmin, hmax), bins=50, histtype='step', log=True, stacked=True, label='SkyW flux')
+        ax6.tick_params(axis="x", direction="in", labeltop=True, labelbottom=False, pad=-15, top=True)
+        fig.subplots_adjust(top=0.95)
+        ax6.legend()
+
+    gs.tight_layout(fig)
 
     return fig
 
@@ -429,6 +434,12 @@ def plot_intro(wave, sky, flux, ivar, skye, skyw, sky_info):
     plt.clf()
     gs1= GridSpec(4, 1, figure=fig1)
 
+    plt.rcParams.update({'axes.linewidth':     '0.5' ,
+                 'ytick.labelsize': 'small',
+                 'xtick.labelsize': 'small',
+                 'font.size': '8.0',
+                 'legend.fontsize':'small'})
+
     #colors
     c_sky = 'blue'
     c_subsky = 'orange'
@@ -497,15 +508,15 @@ def plot_intro(wave, sky, flux, ivar, skye, skyw, sky_info):
     return fig1
 
 def plot_stats_panel(ax, wave, sky, flux, ivar, xmin, xmax, wvl_list, wvc_list, stats1, stats2, stats3, line_name, c_sky, c_5sky, c_subsky, c_ivar, c_line, c_cont, c_mw):
-    ax.plot(wave,sky,c=c_sky)
-    ax.plot(wave,0.05*sky,c=c_5sky, linestyle='--')
-    ax.plot(wave,flux,c=c_subsky)
-    ax.plot(wave,np.sqrt(1/ivar),c=c_ivar)
-    ax.plot(wave[wvl_list],flux[wvl_list], 'P', markersize=5, c=c_line)
+    ax.plot(wave,sky,c=c_sky, label='Sky flux')
+    ax.plot(wave,0.05*sky,c=c_5sky, linestyle='--', label='5% Sky flux')
+    ax.plot(wave,flux,c=c_subsky, label='sky sub flux')
+    ax.plot(wave,np.sqrt(1/ivar),c=c_ivar, label='error')
+    ax.plot(wave[wvl_list],flux[wvl_list], 'P', markersize=5, c=c_line, label='selected region')
     if c_cont != -999:
-        ax.plot(wave[wvc_list],flux[wvc_list], 'P', markersize=5, c=c_cont)
-    ax.plot([3600,9600],[5.9e-15,5.9e-15],c_mw)
-    ax.plot([xmax-10,9600],[-5.9e-15,-5.9e-15],c_mw)
+        ax.plot(wave[wvc_list],flux[wvc_list], 'P', markersize=5, c=c_cont, label='background region')
+    ax.plot([3600,9600],[5.9e-15,5.9e-15],c_mw, label=r'$Med \pm$ MW 5 $\sigma$')
+    ax.plot([xmax-15,9600],[-5.9e-15,-5.9e-15],c_mw)
     ax.set_ylim(-1e-14,1e-14)
     ax.set_xlim(xmin,xmax)
     ax.text(xmin+2, -5.5e-15,f'{line_name}')
@@ -531,10 +542,18 @@ def plot_stats(wave, sky, flux, ivar, stats_list, wvl_list, wvc_list):
     plt.clf()
     gs2= GridSpec(3, 3, figure=fig2)
 
+    plt.rcParams.update({'axes.linewidth':     '1.0' ,
+                 'ytick.labelsize': 'small',
+                 'xtick.labelsize': 'small',
+                 'font.size': '8.0',
+                 'legend.fontsize':'small'})
+
+
     #group 1 5577
     ax2 = fig2.add_subplot(gs2[0, 0])
     ind=0
     ax2 = plot_stats_panel(ax2, wave, sky, flux, ivar, 5560, 5590, wvl_list[ind], wvc_list[ind], stats_list[ind][0], stats_list[ind][1], stats_list[ind][2], medlist[ind], c_sky, c_5sky, c_subsky, c_ivar, c_line, c_cont, c_mw)
+    ax2.legend(loc="lower left", bbox_to_anchor=(0.7,0.02))
 
     #group 2 5891
     ax3 = fig2.add_subplot(gs2[0, 1], sharey=ax2)
