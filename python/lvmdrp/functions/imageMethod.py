@@ -2604,7 +2604,7 @@ def extract_spectra(
     else:
         fiber_model = None
 
-    shift_range = [-4,4]
+    shift_range = [-3,3]
     fig = plt.figure(figsize=(15, 4*len(columns)), layout="constrained")
     fig.suptitle(f"Thermal fiber shifts for {mjd = }, {camera = }, {expnum = }")
     gs = GridSpec(len(columns)+1, 15, figure=fig)
