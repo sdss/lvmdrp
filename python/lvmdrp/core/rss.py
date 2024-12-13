@@ -3215,6 +3215,8 @@ class RSS(FiberRows):
         for tel in ["SCI", "SKYE", "SKYW"]:
             ra = self._header.get(f"PO{tel}RA", self._header.get(f"{tel}RA", self._header.get(f"TE{tel}RA"))) or 0
             dec = self._header.get(f"PO{tel}DE", self._header.get(f"{tel}DE", self._header.get(f"TE{tel}DE"))) or 0
+            if -999.0 in [ra, dec]:
+                ra, dec = 0, 0
             if ra == 0 or dec == 0:
                 log.warning(f"on heliocentric velocity correction, missing RA/Dec information in header, assuming: {ra = }, {dec = }")
                 self.add_header_comment(f"on heliocentric velocity correction, missing RA/Dec information in header, assuming: {ra = }, {dec = }")

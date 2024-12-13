@@ -3575,6 +3575,8 @@ def add_astrometry(
                 RAobs=org_img._header.get(f'PO{tel}RA'.capitalize(), 0) or 0
                 DECobs=org_img._header.get(f'PO{tel}DE'.capitalize(), 0) or 0
                 PAobs=org_img._header.get(f'PO{tel}PA'.capitalize(), 0) or 0
+                if -999.0 in [RAobs, DECobs]:
+                    RAobs, DECobs, PAobs = 0, 0, 0
                 if numpy.any([RAobs, DECobs, PAobs]) == 0:
                     log.warning(f"some astrometry keywords for telescope '{tel}' are missing: {RAobs = }, {DECobs = }, {PAobs = }")
                     org_img.add_header_comment(f"no astromentry keywords '{tel}': {RAobs = }, {DECobs = }, {PAobs = }, using commanded")
