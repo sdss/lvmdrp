@@ -818,10 +818,10 @@ def get_telescope_shadowheight(header, telescope):
     jd = time.jd
 
     SH_CALCULATOR.update_time(jd=jd)
-    sk = SkyCoord(ra=ra, dec=dec, unit="deg")
-    SH_CALCULATOR.set_coordinates(sk.ra, sk.dec)
+    sk = SkyCoord(ra, dec, frame='icrs', unit=u.deg)
+    SH_CALCULATOR.set_coordinates(sk.ra.deg, sk.dec.deg)
 
-    shadow_height = SH_CALCULATOR.get_heights()[0]
+    shadow_height = SH_CALCULATOR.get_heights(return_heights=True, unit="km")[0]
 
     # check if the shadow height is a nan value and replace with -999
     isnan = np.isnan(shadow_height)
