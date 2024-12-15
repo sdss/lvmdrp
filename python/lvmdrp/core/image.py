@@ -753,7 +753,8 @@ class Image(Header):
         guess_shift = _align_fiber_blocks(s1, s2, axs=None)
 
         if numpy.abs(guess_shift) > 6:
-            log.warning(f"measuring guess fiber thermal shift too large {guess_shift = } pixels")
+            log.warning(f"measuring guess fiber thermal shift too large {guess_shift = } pixels, setting guess shift to zero")
+            guess_shift = 0
         else:
             log.info(f"measured guess fiber thermal shift {guess_shift = } pixels")
 
