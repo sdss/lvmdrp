@@ -3178,17 +3178,20 @@ class RSS(FiberRows):
             log.warning("missing wavelength information, not able to consistently coadd flux")
             return self
 
-        naxis1 = self._data.shape[1]
         naxis2=self._data.shape[0]
-        w = WCS(self._header)
-        wave = w.spectral.pixel_to_world(numpy.arange(naxis1)).value*1e10
+        wave = self._wave
         selwave=(wave>=wrange[0])*(wave<=wrange[1])
-        selwavemask=numpy.tile(selwave, (naxis2,1))
+        if len(wave.shape) == 1:
+            selwave=numpy.tile(selwave, (naxis2,1))
+        elif len(wave.shape) == 2:
+            pass
+        else:
+            raise ValueError(f"wrong wavelength array shape: {wave.shape = }")
 
         flux = self._data
         mask = self._mask
         flux[mask] = numpy.nan
-        masked = flux*selwavemask
+        masked = flux*selwave
 
         coadded_flux = numpy.nanmean(masked, axis=1)
         return coadded_flux
