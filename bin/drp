@@ -6,6 +6,7 @@ import os
 import pathlib
 import shutil
 from itertools import groupby
+from typing import List
 
 import click
 import cloup
@@ -205,15 +206,24 @@ def metacli():
 
 
 @cloup.command('regenerate', short_help='Regenerate the frames metadata file')
-@click.option('-m', '--mjd', type=int, help='the MJD to regenerate the metadata for')
+@click.option('-m', '--mjd', type=int, default=None, help='the MJD to regenerate the metadata for (by default all MJDs)')
+@click.option('-l', '--mjd-list', type=int, multiple=True, help='a list of specific MJDs to regenerate metadata for')
+@click.option('-r', '--mjd-range', type=str, help='a range of MJDs to regenerate metadata for')
 @click.option('-a', '--masters', is_flag=True, default=False, help='Flag to regenerate the masters metadata')
-@cloup.constraint(If(~IsSet('masters'), then=RequireExactly(1)), ['mjd'])
-def regen(mjd: int, masters: bool):
+def regen(mjd: int, mjd_list: List[int], mjd_range: str, masters: bool):
     """ Regenerate the raw or master frames metadata file """
     if masters:
         get_master_metadata(overwrite=True)
     else:
-        get_frames_metadata(mjd=mjd, overwrite=True)
+        # parse given MJD arguments
+        mjds = parse_mjds(mjd=mjd or mjd_list or mjd_range or None)
+        # get all MJDs if no MJD argument given
+        mjds = mjds or sorted([int(mjd) for mjd in os.listdir(os.getenv('LVM_DATA_S')) if mjd.isdigit()])
+        if not isinstance(mjds, (list, tuple)):
+            mjds = [mjds]
+
+        for mjd in mjds:
+            get_frames_metadata(mjd=mjd, overwrite=True)
 
 
 metacli.add_command(regen)
