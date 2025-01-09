@@ -1981,7 +1981,7 @@ class Image(Header):
         new_img.setData(data=fit_result, mask=new_mask)
         return new_img
 
-    def fitSpline(self, axis="y", degree=3, smoothing=0, use_weights=False, clip=None, interpolate_missing=True):
+    def fitSpline(self, axis="y", degree=3, smoothing=0, use_weights=False, clip=None, interpolate_missing=True, display_plots=False):
         """Fits a spline to the image along a given axis
 
         Parameters
@@ -1999,6 +1999,8 @@ class Image(Header):
             minimum and maximum values to clip the spline model, by default None
         interpolate_missing : bool, optional
             interpolate coefficients if spline fitting failed
+        display_plot: bool, optional
+            display plots for spline fitting
 
         Returns
         -------
@@ -2013,6 +2015,13 @@ class Image(Header):
 
         pixels = numpy.arange(self._dim[0])
         models = numpy.zeros(self._dim)
+        colors = plt.cm.coolwarm(numpy.linspace(0, 1, self._dim[1]))
+        if display_plots:
+            fig, axs = plt.subplots(2, 1, figsize=(15,5), sharex=True, layout="constrained")
+            axs[1].axhline(ls=":", color="0.7")
+            axs[1].set_xlabel("Y axis (pix)")
+            axs[0].set_ylabel("Counts (e-)")
+            axs[1].set_ylabel("(model - data) / data")
         for i in range(self._dim[1]):
             good_pix = ~self._mask[:,i] if self._mask is not None else ~numpy.isnan(self._data[:,i])
 
@@ -2063,6 +2072,12 @@ class Image(Header):
             else:
                 spline_pars = interpolate.splrep(masked_pixels, data, s=smoothing)
             models[:, i] = interpolate.splev(pixels, spline_pars)
+
+            if display_plots:
+                if i % 100 == 0:
+                    axs[0].plot(pixels, models[:, i], color=colors[i])
+                    axs[0].plot(masked_pixels, data, "o", ms=7, color=colors[i])
+                axs[1].plot(masked_pixels, interpolate.splev(masked_pixels, spline_pars) / data - 1, "o", ms=7, color=colors[i])
 
         # clip spline fit if required
         if clip is not None:
