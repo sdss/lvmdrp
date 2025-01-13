@@ -401,6 +401,30 @@ class LinearSelectionElement:
         return fig
 
 
+def interpolate_mask(x, y, mask, kind="linear", fill_value=0):
+    """
+    :param x, y: numpy arrays, samples and values
+    :param mask: boolean mask, True for masked values
+    :param method: interpolation method, one of linear, nearest,
+    nearest-up, zero, slinear, quadratic, cubic, previous, or next.
+    :param fill_value: which value to use for filling up data outside the
+        convex hull of known pixel values.
+        Default is 0, Has no effect for 'nearest'.
+    :return: the image with missing values interpolated
+    """
+    if not numpy.any(mask):
+        return y
+    known_x, known_v = x[~mask], y[~mask]
+    missing_x = x[mask]
+    missing_idx = numpy.where(mask)
+
+    f = interpolate.interp1d(known_x, known_v, kind=kind, fill_value=fill_value, bounds_error=False)
+    yy = y.copy()
+    yy[missing_idx] = f(missing_x)
+
+    return yy
+
+
 class Image(Header):
     def __init__(self, data=None, header=None, mask=None, error=None, origin=None, individual_frames=None, slitmap=None):
         Header.__init__(self, header=header, origin=origin)
@@ -2105,6 +2129,57 @@ class Image(Header):
         new_img = copy(self)
         new_img.setData(data=models)
         return new_img
+
+    def fit_spline2d(self, bins, smoothing=0, display_plots=False):
+
+        x_bins, y_bins = bins
+
+        img_data = self._data
+        img_data[self._mask] = numpy.nan
+        x_pixels = numpy.arange(self._dim[1])
+        y_pixels = numpy.arange(self._dim[0])
+
+        y_bins = numpy.histogram_bin_edges(y_pixels, bins=y_bins).astype(int)
+        y = (y_bins[:-1]+y_bins[1:]) / 2
+
+        data = numpy.zeros((y_bins.size-1, self._dim[1]))
+        for i in range(y_bins.size-1):
+            data[i] = numpy.nanmedian(img_data[y_bins[i]:y_bins[i+1], :], axis=0)
+
+        if display_plots:
+            plt.figure(figsize=(15,5))
+            plt.xlabel("X axis (pix)")
+            plt.ylabel(f"Counts ({self._header['BUNIT']})")
+
+        x_step = self._dim[1] // x_bins
+        data_binned = numpy.zeros((data.shape[0], int(numpy.ceil(self._dim[1]/x_step))))
+        for i in range(y_bins.size-1):
+
+            spec = interpolate_mask(x_pixels, data[i], numpy.isnan(data[i]), fill_value="extrapolate")
+            tck = interpolate.splrep(x_pixels, spec, s=900)
+            data_binned[i] = interpolate.splev(x_pixels[::x_step], tck)
+
+            if display_plots:
+                plt.plot(data[i], "k")
+                plt.plot(interpolate.splev(x_pixels, tck), "r", lw=1)
+
+        # Y, X = numpy.meshgrid(y_pixels, x_pixels, indexing="ij")
+        # xx, yy = numpy.meshgrid(x_pixels[::x_step], y, indexing="xy")
+
+        interp = interpolate.RectBivariateSpline(x_pixels[::x_step], y, data_binned.T, s=smoothing, bbox=[0, 4086, 0, 4080])
+        stray_data = interp(x_pixels, y_pixels).T
+
+        if display_plots:
+            plt.figure()
+            plt.imshow(stray_data, interpolation="none", origin="lower")
+            plt.gca().set_aspect("auto")
+            plt.xlabel("X axis (pix)")
+            plt.ylabel("Y axis (pix)")
+
+        stray_img = copy(self)
+        stray_img.setData(data=stray_data, error=None, mask=None)
+
+        return stray_img
 
     def match_reference_column(self, ref_column=2000, ref_centroids=None, stretch_range=[0.7, 1.3], shift_range=[-100, 100], return_pars=False):
         """Returns the reference centroids matched against the current image

@@ -1851,9 +1851,9 @@ def subtract_straylight(
     in_cent_trace: str,
     out_image: str,
     out_stray: str = None,
-    select_nrows: int|Tuple[int,int] = 3,
-    aperture: int = 14,
-    smoothing: int = 20,
+    select_nrows: int|Tuple[int,int] = 10,
+    aperture: int = 11,
+    smoothing: float = 0.01,
     use_weights : bool = False,
     median_box: int = 11,
     gaussian_sigma: int = 20.0,
@@ -1911,6 +1911,7 @@ def subtract_straylight(
     unit = img._header["BUNIT"]
 
     # smooth image along dispersion axis with a median filter excluded NaN values
+    # TODO: implement fast median all across this block
     if median_box is not None:
         log.info(f"median filtering image along dispersion axis with a median filter of width {median_box}")
         median_box = (1, max(1, median_box))
@@ -1954,15 +1955,19 @@ def subtract_straylight(
         img_median._mask[(bfiber[icol]-aperture//2-select_bnrows):(bfiber[icol]-aperture//2), icol] = False
 
     # fit the signal in unmaksed areas along cross-dispersion axis by a polynomial
+    # TODO: implement 2D spline fitting (look at MaNGA DRP port to python)
+    # TODO: weights are not implemented yet, do that next
+    # img_fit = img_median.fitSpline(smoothing=smoothing, use_weights=use_weights, clip=(0.0, None), display_plots=True)
     log.info(f"fitting spline with {smoothing = } to the background signal along cross-dispersion axis")
-    img_fit = img_median.fitSpline(smoothing=smoothing, use_weights=use_weights, clip=(0.0, None))
+    img_fit = img_median.fit_spline2d(bins=(400, 19), smoothing=smoothing)
 
     # median filter to reject outlying columns
-    img_fit = img_fit.medianImg((1, 7))
+    # img_fit = img_fit.medianImg((1, 7))
 
     # smooth the results by 2D Gaussian filter of given width
-    log.info(f"smoothing the background signal by a 2D Gaussian filter of width {gaussian_sigma}")
-    img_stray = img_fit.convolveGaussImg(1, gaussian_sigma)
+    # log.info(f"smoothing the background signal by a 2D Gaussian filter of width {gaussian_sigma}")
+    # img_stray = img_fit.convolveGaussImg(1, gaussian_sigma)
+    img_stray = copy(img_fit)
 
     # subtract smoothed background signal from original image
     log.info("subtracting the smoothed background signal from the original image")
@@ -1975,6 +1980,7 @@ def subtract_straylight(
     img_out.writeFitsData(out_image)
 
     # plot results: polyomial fitting & smoothing, both with masked regions on
+    # TODO: save a low resolution image of the straylight to speed up plotting
     log.info("plotting results")
     fig = plt.figure(figsize=(10, 10), layout="constrained")
     fig.suptitle(f"Stray Light Subtraction for frame {os.path.basename(in_image)}")
@@ -1991,8 +1997,8 @@ def subtract_straylight(
     ax_strayy.tick_params(axis="y", labelleft=False)
     ax_strayx.set_ylabel(f"Counts ({unit})")
     ax_strayy.set_xlabel(f"Counts ({unit})")
-    ax_strayx.set_yscale("asinh")
-    ax_strayy.set_xscale("asinh")
+    # ax_strayx.set_yscale("asinh")
+    # ax_strayy.set_xscale("asinh")
     axins1 = inset_axes(ax, width="30%", height="2%", loc="upper right")
     axins1.tick_params(labelsize="small", labelcolor="tab:red")
 
@@ -2014,11 +2020,13 @@ def subtract_straylight(
 
     # write out stray light image
     if out_stray is not None:
+        masked = img_median._data.copy()
+        masked[img_median._mask] = numpy.nan
         log.info(f"writing stray light image to {os.path.basename(out_stray)}")
         hdus = pyfits.HDUList()
         hdus.append(pyfits.PrimaryHDU(img._data, header=img._header))
         hdus.append(pyfits.ImageHDU(img_out._data, name="CLEANED"))
-        hdus.append(pyfits.ImageHDU(img_median._data, name="MASKED"))
+        hdus.append(pyfits.ImageHDU(masked, name="MASKED"))
         hdus.append(pyfits.ImageHDU(img_fit._data, name="SPLINE"))
         hdus.append(pyfits.ImageHDU(img_stray._data, name="SMOOTH"))
         hdus.writeto(out_stray, overwrite=True)
