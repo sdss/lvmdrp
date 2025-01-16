@@ -2975,52 +2975,82 @@ def reprojectRSS_drp(
     rep.writeto(f"{out_path}/{out_name}_2d.fits", overwrite=True)
 
 
-def testres_drp(image, trace, fwhm, flux):
-    """
-    Historic task used for debugging of the the extraction routine...
-    """
-    img = Image()
-    # t1 = time.time()
-    img.loadFitsData(image, extension_data=0)
-    trace_mask = TraceMask()
-    trace_mask.loadFitsData(trace, extension_data=0)
-    trace_fwhm = TraceMask()
-    #   trace_fwhm.setData(data=numpy.ones(trace_mask._data.shape)*2.5)
-    trace_fwhm.loadFitsData(fwhm, extension_data=0)
+def validate_extraction(in_image, in_cent, in_width, in_rss):
+    """Evaluates the extracted flux into the original 2D pixel grid
 
+    This routine will evaluate the extracted flux in the original
+    2D grid and compare the resulting 2D model against the original
+    2D image. Three images are stored as outputs:
+
+        - The residual 2D image: model - data
+        - The ratio 2D image: model / data
+        - The 2D model
+
+    Parameters
+    ----------
+    in_image : str
+        path to the original 2D image of the extracted flux
+    in_cent : str
+        path to the fiber centroids trace
+    in_width : str
+        path to the fiber width (Fn_iWHM) trace
+    flux : str
+        path to the extracted flux in RSS format
+    """
+    log.info(f"loading 2D image {in_image}")
+    img = Image()
+    img._data = numpy.nan_to_num(img._data)
+    img.loadFitsData(in_image, extension_data=0)
+
+    log.info(f"loading fiber parameters in {in_cent} and {in_width}")
+    cent = TraceMask.from_file(in_cent, extension_data=0)
+    width = TraceMask.from_file(in_width, extension_data=0)
+    width._data /= 2.354
+
+    log.info(f"loading extracted flux in {in_rss}")
     trace_flux = TraceMask()
-    trace_flux.loadFitsData(flux, extension_data=0)
+    trace_flux.loadFitsData(in_rss, extension_data=0)
+    trace_flux._data = numpy.nan_to_num(trace_flux._data)
+
+    ypix_cor = trace_flux._slitmap[["spectrographid"] == int(img._header["CCD"][1])]["ypix_z"]
+    ypix_ori = img._slitmap[["spectrographid"] == int(img._header["CCD"][1])]["ypix_z"]
+    thermal_shift = ypix_cor - ypix_ori
+    log.info(f"fiber thermal shift in slitmap: {thermal_shift[0]:.4f}")
+    cent._data += thermal_shift[:, None]
+
+    log.info(f"evaluating extracted flux into 2D pixel grid for {img._dim[1]} columns")
     x = numpy.arange(img._dim[0])
     out = numpy.zeros(img._dim)
     fact = numpy.sqrt(2.0 * numpy.pi)
     for i in range(img._dim[1]):
         #  print i
-        A = (
-            1.0
-            * numpy.exp(
-                -0.5
-                * (
-                    (x[:, numpy.newaxis] - trace_mask._data[:, i][numpy.newaxis, :])
-                    / abs(trace_fwhm._data[:, i][numpy.newaxis, :] / 2.354)
-                )
-                ** 2
-            )
-            / (fact * abs(trace_fwhm._data[:, i][numpy.newaxis, :] / 2.354))
-        )
+        A = (numpy.exp(-0.5 * ((x[:, None] - cent._data[:, i][None, :]) / abs(width._data[:, i][None, :])) ** 2) / (fact * abs(width._data[:, i][None, :])))
+        # print(numpy.isnan(A).sum(), numpy.isnan(trace_flux._data[:, i]).sum())
         spec = numpy.dot(A, trace_flux._data[:, i])
         out[:, i] = spec
         if i == 1000:
-            plt.plot(spec, "-r")
-            plt.plot(img._data[:, i], "ok")
+            plt.figure()
+            plt.step(x, img._datin_a[:, i], color="k", lw=1, where="mid")
+            plt.step(x, spec, color="r", lw=1, where="mid")
             plt.show()
 
-    hdu = pyfits.PrimaryHDU(img._data - out)
-    hdu.writeto("res.fits", overwrite=True)
-    hdu = pyfits.PrimaryHDU(out)
-    hdu.writeto("fit.fits", overwrite=True)
+    out_path = os.path.dirname(in_image)
+    out_name = os.path.basename(in_image).split(".fits")[0]
+    out_residual = os.path.join(out_path, f"{out_name}_residual.fits")
+    out_2dimage = os.path.join(out_path, f"{out_name}_2dimage.fits")
+    out_ratio = os.path.join(out_path, f"{out_name}_ratio.fits")
 
-    hdu = pyfits.PrimaryHDU((img._data - out) / img._data)
-    hdu.writeto("res_rel.fits", overwrite=True)
+    log.info(f"writing residual to {out_residual}")
+    hdu = pyfits.PrimaryHDU(img._data - out)
+    hdu.writeto(out_residual, overwrite=True)
+
+    log.info(f"writing ratio to {out_ratio}")
+    hdu = pyfits.PrimaryHDU(out / img._data)
+    hdu.writeto(out_ratio, overwrite=True)
+
+    log.info(f"writing 2D model {out_2dimage}")
+    hdu = pyfits.PrimaryHDU(out)
+    hdu.writeto(out_2dimage, overwrite=True)
 
 
 # TODO: for arcs take short exposures for bright lines & long exposures for faint lines
