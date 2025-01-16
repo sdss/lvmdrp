@@ -2133,40 +2133,57 @@ class Image(Header):
     def fit_spline2d(self, bins, smoothing=0, display_plots=False):
 
         x_bins, y_bins = bins
+        x_step = self._dim[1] // x_bins
 
         img_data = self._data
         img_data[self._mask] = numpy.nan
         x_pixels = numpy.arange(self._dim[1])
         y_pixels = numpy.arange(self._dim[0])
 
+        # plt.figure()
+        # plt.plot(numpy.nansum(img_data[:, 1500:2500], axis=1))
+
         y_bins = numpy.histogram_bin_edges(y_pixels, bins=y_bins).astype(int)
         y = (y_bins[:-1]+y_bins[1:]) / 2
-
-        data = numpy.zeros((y_bins.size-1, self._dim[1]))
-        for i in range(y_bins.size-1):
-            data[i] = numpy.nanmedian(img_data[y_bins[i]:y_bins[i+1], :], axis=0)
+        x = x_pixels[::x_step]
 
         if display_plots:
             plt.figure(figsize=(15,5))
             plt.xlabel("X axis (pix)")
             plt.ylabel(f"Counts ({self._header['BUNIT']})")
 
-        x_step = self._dim[1] // x_bins
-        data_binned = numpy.zeros((data.shape[0], int(numpy.ceil(self._dim[1]/x_step))))
+        data_binned = numpy.zeros((y_bins.size-1, int(numpy.ceil(self._dim[1]/x_step))))
         for i in range(y_bins.size-1):
+            spec = numpy.nanmedian(img_data[y_bins[i]:y_bins[i+1], :], axis=0)
+            if numpy.isnan(spec).all():
+                continue
 
-            spec = interpolate_mask(x_pixels, data[i], numpy.isnan(data[i]), fill_value="extrapolate")
+            # plt.figure()
+            # plt.imshow(img_data[y_bins[i]:y_bins[i+1]], origin="lower")
+            # plt.gca().set_aspect("auto")
+
+            nan_pixels = numpy.isnan(spec)
+            spec = interpolate_mask(x_pixels, spec, nan_pixels, fill_value="extrapolate")
             tck = interpolate.splrep(x_pixels, spec, s=900)
-            data_binned[i] = interpolate.splev(x_pixels[::x_step], tck)
+            data_binned[i] = interpolate.splev(x, tck)
 
             if display_plots:
-                plt.plot(data[i], "k")
+                plt.plot(spec, "k")
                 plt.plot(interpolate.splev(x_pixels, tck), "r", lw=1)
 
-        # Y, X = numpy.meshgrid(y_pixels, x_pixels, indexing="ij")
-        # xx, yy = numpy.meshgrid(x_pixels[::x_step], y, indexing="xy")
+        valid_rows = (data_binned!=0).any(axis=1)
+        data_binned = data_binned[valid_rows]
+        y = y[valid_rows]
 
-        interp = interpolate.RectBivariateSpline(x_pixels[::x_step], y, data_binned.T, s=smoothing, bbox=[0, 4086, 0, 4080])
+        # Y, X = numpy.meshgrid(y_pixels, x_pixels, indexing="ij")
+        # xx, yy = numpy.meshgrid(x, y, indexing="xy")
+
+        # plt.figure()
+        # plt.imshow(data_binned, origin="lower")
+        # plt.gca().set_aspect("auto")
+        # plt.show()
+
+        interp = interpolate.RectBivariateSpline(x, y, data_binned.T, s=smoothing, bbox=[0, 4086, 0, 4080])
         stray_data = interp(x_pixels, y_pixels).T
 
         if display_plots:
