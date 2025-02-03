@@ -1,4 +1,4 @@
-import numpy 
+import numpy
 from scipy.signal import correlate
 from scipy.signal.windows import tukey
 from scipy import interpolate
@@ -169,9 +169,9 @@ def resample_flux_density(xout, x, flux, ivar=None, extrapolate=False):
         - ivar: weights for flux; default is unweighted resampling
         - extrapolate: extrapolate using edge values of input array, default is False,
           in which case values outside of input array are set to zero.
-    
+
     Setting both ivar and extrapolate raises a ValueError because one cannot
-    assign an ivar outside of the input data range. 
+    assign an ivar outside of the input data range.
 
     Returns:
         if ivar is None, returns outflux
@@ -190,10 +190,8 @@ def resample_flux_density(xout, x, flux, ivar=None, extrapolate=False):
         mask = (b>0)
         outflux = numpy.zeros(a.shape)
         outflux[mask] = a[mask] / b[mask]
-        dx = numpy.gradient(x)
-        dxout = numpy.gradient(xout)
-        outivar = _unweighted_resample(xout, x, ivar/dx)*dxout
-        
+        outivar = _unweighted_resample(xout, x, ivar)
+
         return outflux, outivar
 
 
@@ -211,7 +209,7 @@ def resample_flux(xout, x, flux, extrapolate=False):
     Options:
         - extrapolate: extrapolate using edge values of input array, default is False,
           in which case values outside of input array are set to zero.
-    
+
     Returns:
         returns outflux
 
@@ -234,7 +232,7 @@ def _unweighted_resample(output_x, input_x, input_flux_density, extrapolate=Fals
 
     both must represent the same quantity with the same unit
     input_flux_density =  dflux/dx sampled at input_x
-    
+
     Options:
         extrapolate: extrapolate using edge values of input array, default is False,
                      in which case values outside of input array are set to zero
@@ -289,7 +287,7 @@ def _unweighted_resample(output_x, input_x, input_flux_density, extrapolate=Fals
     bins[1:-1] = (ox[:-1]+ox[1:])/2.
     bins[0] = 1.5*ox[0]-0.5*ox[1]     #  = ox[0]-(ox[1]-ox[0])/2
     bins[-1] = 1.5*ox[-1]-0.5*ox[-2]  #  = ox[-1]+(ox[-1]-ox[-2])/2
-    
+
     # make a temporary node array including input nodes and output bin bounds
     # first the boundaries of output bins
     tx = bins.copy()
@@ -309,18 +307,18 @@ def _unweighted_resample(output_x, input_x, input_flux_density, extrapolate=Fals
     # this sets values left and right of input range to first and/or last input values
     # first and last values are = 0 if we are not extrapolating
     ty = numpy.interp(tx,ix,iy)
-    
+
     #  add input nodes which are inside the node array
     k = numpy.where((ix >= tx[0])&(ix <= tx[-1]))[0]
     if k.size :
         tx = numpy.append(tx,ix[k])
         ty = numpy.append(ty,iy[k])
-        
+
     # sort this node array
     p  =  tx.argsort()
     tx = tx[p]
     ty = ty[p]
-    
+
     # now we do a simple integration in each bin of the piece-wise
     # linear function of the temporary nodes
 
@@ -335,5 +333,5 @@ def _unweighted_resample(output_x, input_x, input_flux_density, extrapolate=Fals
 
     if numpy.any(binsize<=0)  :
         raise ValueError("Zero or negative bin size")
-    
+
     return numpy.histogram(trapeze_centers, bins=bins, weights=trapeze_integrals)[0] / binsize
