@@ -311,11 +311,74 @@ def plot_detrend(ori_image, det_image, axs, mbias=None, mdark=None, labels=False
 
     # add labels if requested
     if labels:
-        fig = axs[0].get_figure()
-        fig.supxlabel(f"counts ({unit})")
-        fig.supylabel("#")
+        axs[2].set_xlabel(f"counts ({unit})")
+        axs[3].set_xlabel(f"Counts ({unit})")
+        axs[0].set_ylabel("#")
+        axs[2].set_ylabel("#")
 
     return axs
+
+
+def plot_error(frame, axs, counts_threshold=(1000, 20000), ref_value=1.0, labels=False):
+    """Create plot to validate Poisson error propagation
+
+    It takes the given frame data and compares sqrt(data) / error to a given
+    reference value. Optionally a 3-tuple of quantiles can be given for the
+    reference value.
+
+    Parameters
+    ----------
+    frame : lvmdrp.core.image.Image|lvmdrp.core.rss.RSS
+        2D or RSS frame containing data and error attributes
+    axs : plt.Axes
+        Axes where to make the plots
+    counts_threshold : tuple[int], optional
+        levels of counts above/below which the Poisson statistic holds, by default (1000, 20000)
+    ref_value : float|tuple[float], optional
+        Reference value(s) expected for the sqrt(data) / error ratio, by default 1.0
+    labels : bool, optional
+        Whether to add titles or not to the axes, by default False
+    """
+
+    unit = frame._header["BUNIT"]
+
+    if isinstance(ref_value, (float, int)):
+        mu = ref_value
+        sig1 = sig2 = None
+    elif isinstance(ref_value, (tuple, list, np.ndarray)) and len(ref_value) == 3:
+        sig1, mu, sig2 = sorted(ref_value)
+    else:
+        raise ValueError(f"Wrong value for {ref_value = }, expected `float` or `3-tuple` for percentile levels")
+
+    data = frame._data.copy()
+    error = frame._error.copy()
+
+    pcut = (data >= counts_threshold[0])&(data<=counts_threshold[1])
+    data[~pcut] = np.nan
+    error[~pcut] = np.nan
+
+    n_pixels = pcut.sum()
+    median_ratio = np.nanmedian(np.sqrt(np.nanmedian(data, axis=0))/np.nanmedian(error, axis=0))
+
+    xs = data[pcut]
+    ys = np.sqrt(xs) / error[pcut]
+
+    axs[0].plot(xs, ys, ".", ms=4, color="tab:blue")
+    axs[0].axhline(mu, ls="--", lw=1, color="0.2")
+    axs[1].hist(ys, color="tab:blue", bins=500, range=(mu*0.9, mu*1.1), orientation="horizontal")
+    if sig1 is not None and sig2 is not None:
+        axs[0].axhspan(sig1, sig2, lw=0, color="0.2", alpha=0.2)
+        axs[1].axhspan(sig1, sig2, lw=0, color="0.2", alpha=0.2)
+    axs[1].axhline(mu, ls="--", lw=1, color="0.2")
+
+    axs[0].set_ylim(mu*0.9, mu*1.1)
+    axs[1].set_ylim(mu*0.9, mu*1.1)
+
+    if labels:
+        axs[0].set_title(f"{n_pixels = } | {median_ratio = :.2f} | {mu = :.2f}", loc="left")
+        axs[0].set_xlabel(f"Counts ({unit})")
+        axs[1].set_xlabel("#")
+        axs[0].set_ylabel(r"$\sqrt{\mathrm{Counts}} / \mathrm{Error}$")
 
 
 def plot_wavesol_residuals(fiber, ref_waves, lines_pixels, poly_cls, coeffs, ax=None, labels=False):
