@@ -42,7 +42,7 @@ from lvmdrp.core.image import (
     glueImages,
     loadImage,
 )
-from lvmdrp.core.plot import plt, create_subplots, plot_detrend, plot_strips, plot_image_shift, plot_fiber_thermal_shift, save_fig
+from lvmdrp.core.plot import plt, create_subplots, plot_detrend, plot_error, plot_strips, plot_image_shift, plot_fiber_thermal_shift, save_fig
 from lvmdrp.core.rss import RSS
 from lvmdrp.core.spectrum1d import Spectrum1D, _spec_from_lines, _cross_match
 from lvmdrp.core.tracemask import TraceMask
@@ -2747,6 +2747,16 @@ def extract_spectra(
     rss.add_header_comment(f"{in_model}, fiber model used for {camera}")
     rss.add_header_comment(f"{in_acorr}, fiber aperture correction used for {camera}")
 
+    # create error propagation plot
+    fig = plt.figure(figsize=(15, 5), layout="constrained")
+    gs = GridSpec(1, 14, figure=fig)
+
+    ax_1 = fig.add_subplot(gs[0, :-4])
+    ax_2 = fig.add_subplot(gs[0, -4:])
+
+    plot_error(frame=rss, axs=[ax_1, ax_2], counts_threshold=(3000, 60000), labels=True)
+    save_fig(fig, product_path=out_rss, to_display=display_plots, figure_path="qa", label="extracted_error")
+
     # save extracted RSS
     log.info(f"writing extracted spectra to {os.path.basename(out_rss)}")
     rss.writeFitsData(out_rss)
@@ -3873,16 +3883,22 @@ def detrend_frame(
     # show plots
     log.info("plotting results")
     # detrending process
-    fig, axs = create_subplots(
-        to_display=display_plots,
-        nrows=2,
-        ncols=2,
-        figsize=(15, 15),
-        sharex=True,
-        sharey=True,
-    )
-    plt.subplots_adjust(wspace=0.15, hspace=0.1)
-    plot_detrend(ori_image=org_img, det_image=detrended_img, axs=axs, mbias=mbias_img, mdark=mdark_img, labels=True)
+    fig = plt.figure(figsize=(15, 10), layout="constrained")
+    gs = GridSpec(3, 14, figure=fig)
+
+    ax1 = fig.add_subplot(gs[0, :7])
+    ax2 = fig.add_subplot(gs[0, 7:], sharex=ax1, sharey=ax1)
+    ax3 = fig.add_subplot(gs[1, :7], sharex=ax1, sharey=ax1)
+    ax4 = fig.add_subplot(gs[1, 7:], sharex=ax1, sharey=ax1)
+    ax1.tick_params(labelbottom=False)
+    ax2.tick_params(labelbottom=False)
+    ax2.tick_params(labelleft=False)
+    ax4.tick_params(labelleft=False)
+    ax_1 = fig.add_subplot(gs[2, :-4])
+    ax_2 = fig.add_subplot(gs[2, -4:], sharey=ax_1)
+    plot_detrend(ori_image=org_img, det_image=detrended_img, axs=[ax1, ax2, ax3, ax4], mbias=mbias_img, mdark=mdark_img, labels=True)
+    # Poisson error
+    plot_error(frame=detrended_img, axs=[ax_1, ax_2], labels=True)
     save_fig(
         fig,
         product_path=out_image,

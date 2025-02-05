@@ -3126,10 +3126,6 @@ class Image(Header):
 
         if inplace:
             self._data = out._data
-            if self._error is None:
-                self._error = out._error
-            else:
-                self._error += out._error
             if self._mask is None:
                 self._mask = out._mask
             else:

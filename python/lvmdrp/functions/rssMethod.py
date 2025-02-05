@@ -28,6 +28,7 @@ from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.core.image import loadImage
 from lvmdrp.core.passband import PassBand
 from lvmdrp.core.plot import (plt, create_subplots, save_fig,
+                              plot_error,
                               plot_wavesol_coeffs, plot_wavesol_residuals,
                               plot_wavesol_spec, plot_wavesol_wave,
                               plot_wavesol_lsf)
@@ -1151,7 +1152,7 @@ def correctPixTable_drp(
 @skip_if_drpqual_flags(["BADTRACE", "EXTRACTBAD"], "in_rss")
 def resample_wavelength(in_rss: str, out_rss: str, method: str = "linear",
                         wave_range: Tuple[float,float] = None, wave_disp: float = None,
-                        convert_to_density: bool = False) -> RSS:
+                        convert_to_density: bool = False, display_plots: bool = False) -> RSS:
     """Resamples the RSS wavelength solutions to a common wavelength solution
 
     A common wavelength solution is computed for the RSS by resampling the
@@ -1177,6 +1178,8 @@ def resample_wavelength(in_rss: str, out_rss: str, method: str = "linear",
         The "optimal" dispersion will be used if the parameter is empty.
     convert_to_density : string of boolean, optional with default: False
         If True, the resampled RSS will be converted to density units.
+    display_plots : bool, optional
+        If True, display plots to screen, by default False
 
     Returns
     -------
@@ -1200,6 +1203,17 @@ def resample_wavelength(in_rss: str, out_rss: str, method: str = "linear",
     # resample the wavelength solution
     log.info("resampling the spectra ...")
     new_rss = rss.rectify_wave(wave_range=wave_range, wave_disp=wave_disp)
+
+    # create error propagation plot
+    fig = plt.figure(figsize=(15, 5), layout="constrained")
+    gs = gridspec.GridSpec(1, 14, figure=fig)
+
+    ax_1 = fig.add_subplot(gs[0, :-4])
+    ax_2 = fig.add_subplot(gs[0, -4:])
+    dlambda = numpy.gradient(rss._wave, axis=1)
+    ref_value = numpy.percentile(dlambda / numpy.sqrt(dlambda), q=[25, 50, 75])
+    plot_error(frame=new_rss, axs=[ax_1, ax_2], counts_threshold=(3000, 60000), ref_value=ref_value, labels=True)
+    save_fig(fig, product_path=out_rss, to_display=display_plots, figure_path="qa", label="resampled_error")
 
     # write output RSS
     log.info(f"writing resampled RSS to '{os.path.basename(out_rss)}'")
