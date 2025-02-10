@@ -2533,6 +2533,7 @@ def extract_spectra(
     in_fwhm: str = None,
     in_model: str = None,
     in_acorr: str = None,
+    assume_thermal_shift: float = None,
     columns: List[int] = [500, 750, 1000, 1250, 1500, 1750, 2000, 2250, 2500, 2750, 3000],
     column_width: int = 50,
     method: str = "optimal",
@@ -2623,16 +2624,23 @@ def extract_spectra(
     # axs_cc[-1].set_xlim(shift_range)
 
     # fix centroids for thermal shifts
-    log.info(f"measuring fiber thermal shifts @ columns: {','.join(map(str, columns))}")
-    trace_mask, shifts, median_shift, std_shift, _ = _fix_fiber_thermal_shifts(img, trace_mask, 2.5,
-                                                                               fiber_model=fiber_model,
-                                                                               trace_amp=10000,
-                                                                               columns=columns,
-                                                                               column_width=column_width,
-                                                                               shift_range=shift_range, axs=[axs_cc, axs_fb])
-    # save columns measured for thermal shifts
-    plot_fiber_thermal_shift(columns, shifts, median_shift, std_shift, ax=ax_shift)
-    save_fig(fig, product_path=out_rss, to_display=display_plots, figure_path="qa", label="fiber_thermal_shifts")
+    if assume_thermal_shift is not None:
+        log.info(f"assuming fiber thermal shift {assume_thermal_shift:.4f}")
+        median_shift = assume_thermal_shift
+        std_shift = 0
+        shifts = numpy.ones_like(columns) * median_shift
+        trace_mask._data += median_shift
+    else:
+        log.info(f"measuring fiber thermal shifts @ columns: {','.join(map(str, columns))}")
+        trace_mask, shifts, median_shift, std_shift, _ = _fix_fiber_thermal_shifts(img, trace_mask, 2.5,
+                                                                                fiber_model=fiber_model,
+                                                                                trace_amp=10000,
+                                                                                columns=columns,
+                                                                                column_width=column_width,
+                                                                                shift_range=shift_range, axs=[axs_cc, axs_fb])
+        # save columns measured for thermal shifts
+        plot_fiber_thermal_shift(columns, shifts, median_shift, std_shift, ax=ax_shift)
+        save_fig(fig, product_path=out_rss, to_display=display_plots, figure_path="qa", label="fiber_thermal_shifts")
 
     if method == "optimal":
         # check if fwhm trace is given and exists
