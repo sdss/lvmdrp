@@ -268,31 +268,34 @@ def fit_fiberflat(in_twilight: str, out_flat: str, out_twilight: str,
 
     niter = max(1, niter)
     for i in range(niter):
-        median_fiber = np.nanmedian(twilight._data, axis=0)
+        median_fiber = biweight_location(twilight._data, axis=0, ignore_nan=True)
         mask = np.isfinite(median_fiber)
         median_fiber = np.interp(twilight._wave, twilight._wave[mask], median_fiber[mask])
         new_flat = copy(twilight)
         new_flat._data = twilight._data / median_fiber[None]
-        for ifiber in range(new_flat._fibers):
-            f = new_flat.getSpec(ifiber)
-            if f._mask.all():
-                continue
+        # for ifiber in range(new_flat._fibers):
+        #     f = new_flat.getSpec(ifiber)
+        #     if f._mask.all():
+        #         continue
 
-            # get selection of good pixels
-            mask = np.isfinite(f._data)
+        #     # get selection of good pixels
+        #     mask = np.isfinite(f._data)
 
-            # TODO: implement this as a separated function, skipping boundaries of fibers
-            # correct median fiber to current fiber wavelength and normalize
-            # _, shift, _ = _cross_match_float(ref_spec=median_fiber, obs_spec=f._data, stretch_factors=[1.0], shift_range=[-5,+5])
-            # f._data /= np.interp(f._wave, f._wave+shift, median_fiber)
+        #     # TODO: implement this as a separated function, skipping boundaries of fibers
+        #     # correct median fiber to current fiber wavelength and normalize
+        #     # _, shift, _ = _cross_match_float(ref_spec=median_fiber, obs_spec=f._data, stretch_factors=[1.0], shift_range=[-5,+5])
+        #     # f._data /= np.interp(f._wave, f._wave+shift, median_fiber)
 
-            # first filtering of high-frequency features
-            f._data[mask] = butter_lowpass_filter(f._data[mask], 0.1, 2)
-            new_flat._data[ifiber] = f._data
+        #     # # first filtering of high-frequency features
+        #     # f._data[mask] = butter_lowpass_filter(f._data[mask], 0.1, 2)
+        #     # new_flat._data[ifiber] = f._data
 
-            # further smoothing of remaining unwanted features
-            tck = interpolate.splrep(f._wave[mask], f._data[mask], s=0.1)
-            new_flat._data[ifiber] = interpolate.splev(f._wave, tck)
+        #     # # further smoothing of remaining unwanted features
+        #     # tck = interpolate.splrep(f._wave[mask], f._data[mask], s=0.1)
+        #     # new_flat._data[ifiber] = interpolate.splev(f._wave, tck)
+
+        #     # GET THE RAW FLATFIELD
+        #     new_flat._data[ifiber] = f._data#np.interp(f._wave, f._wave[mask], f._data[mask])
 
         # reset pixel mask
         new_flat._mask[:] = new_flat._mask.all(axis=1)[:, None]
@@ -300,17 +303,28 @@ def fit_fiberflat(in_twilight: str, out_flat: str, out_twilight: str,
         flat_twilight = copy(twilight)
         flat_twilight._data = flat_twilight._data / new_flat._data
 
-        x, y, flux, grad_model, grad_model_e, grad_model_w, grad_model_s = flat_twilight.fit_field_gradient(wrange=SPEC_CHANNELS[channel], poly_deg=1)
+        # _, axs = plt.subplots(1, 3, figsize=(15,5), sharex=True, sharey=True, layout="constrained")
+        # x, y, flux, grad_model, grad_model_e, grad_model_w, grad_model_s = flat_twilight.fit_field_gradient(wrange=twilight._wave[[500, 700]], poly_deg=1)
+        # # norm = simple_norm(flux, stretch="linear", min_percent=5, max_cut=0.5e-13)
+        # sc = axs[0].scatter(x, y, s=90, lw=0, c=flux, cmap="coolwarm")
+        # plt.colorbar(sc)
+        # x, y, flux, grad_model, grad_model_e, grad_model_w, grad_model_s = flat_twilight.fit_field_gradient(wrange=twilight._wave[[2000, 2300]], poly_deg=1)
+        # sc = axs[1].scatter(x, y, s=90, lw=0, c=flux, cmap="coolwarm")
+        # plt.colorbar(sc)
+        # x, y, flux, grad_model, grad_model_e, grad_model_w, grad_model_s = flat_twilight.fit_field_gradient(wrange=twilight._wave[[3500, 3700]], poly_deg=1)
+        # sc = axs[2].scatter(x, y, s=90, lw=0, c=flux, cmap="coolwarm")
+        # plt.colorbar(sc)
+        # plt.show()
         telescope = twilight._slitmap["telescope"]
         rss = twilight._data[telescope=="Sci"]
         rss_e = twilight._data[telescope=="SkyE"]
         rss_w = twilight._data[telescope=="SkyW"]
         rss_s = twilight._data[telescope=="Spec"]
 
-        rss = rss / grad_model[:, None]
-        rss_e = rss_e / grad_model_e[:, None]
-        rss_w = rss_w / grad_model_w[:, None]
-        rss_s = rss_s / grad_model_s[:, None]
+        # rss = rss / grad_model[:, None]
+        # rss_e = rss_e / grad_model_e[:, None]
+        # rss_w = rss_w / grad_model_w[:, None]
+        # rss_s = rss_s / grad_model_s[:, None]
 
         twilight._data[telescope == "Sci"] = rss
         twilight._data[telescope == "SkyE"] = rss_e
