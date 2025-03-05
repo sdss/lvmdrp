@@ -26,7 +26,7 @@ from tqdm import tqdm
 from typing import List, Tuple
 
 from lvmdrp import log, __version__ as DRPVER
-from lvmdrp.core.constants import CONFIG_PATH, SPEC_CHANNELS, ARC_LAMPS, LVM_REFERENCE_COLUMN, LVM_NBLOCKS, FIDUCIAL_PLATESCALE
+from lvmdrp.core.constants import CONFIG_PATH, SPEC_CHANNELS, ARC_LAMPS, LVM_REFERENCE_COLUMN, LVM_NBLOCKS, FIDUCIAL_PLATESCALE, CAMERAS
 from lvmdrp.utils.decorators import skip_on_missing_input_path, drop_missing_input_paths
 from lvmdrp.utils.bitmask import QualityFlag
 from lvmdrp.core.fiberrows import FiberRows, _read_fiber_ypix
@@ -83,6 +83,67 @@ DEFAULT_GAIN = {
     "z3": [2.75, 2.85, 2.79, 2.74]
 }
 DEFAULT_PTC_PATH = os.path.join(os.environ["LVMCORE_DIR"], "metrology", "PTC_fit.txt")
+
+# CORRECTIONS FROM APRIL 30TH 2024
+gain_corrs = {cam: numpy.ones(4) for cam in CAMERAS}
+# gain_corrs["b1"][1] *= 1.036
+# gain_corrs["b2"][1] *= 1.013
+# gain_corrs["b2"][2] *= 1.011
+# gain_corrs["b3"][1] *= 1.029
+# gain_corrs["b3"][2] *= 1.012
+# gain_corrs["r1"][1] *= 1.011
+# gain_corrs["r1"][2] *= 1.027
+# gain_corrs["r2"][1] *= 1.025
+# gain_corrs["r2"][2] *= 1.017
+# gain_corrs["r3"][1] *= 1.010
+# gain_corrs["r3"][2] *= 1.020
+# gain_corrs["z1"][1] *= 1.093
+# gain_corrs["z1"][3] *= 1.063
+# gain_corrs["z2"][0] *= 1.043
+# gain_corrs["z2"][2] *= 1.089
+# gain_corrs["z3"][3] *= 0.947
+# gain_corrs = {'b1': numpy.array([1.   , 1.036, 1.   , 1.   ]),
+#  'b2': numpy.array([1.   , 1.013, 1.011, 1.   ]),
+#  'b3': numpy.array([1.   , 1.029, 1.012, 1.   ]),
+#  'r1': numpy.array([1.   , 1.011, 1.027, 1.   ]),
+#  'r2': numpy.array([1.   , 1.025, 1.017, 1.   ]),
+#  'r3': numpy.array([1.  , 1.01, 1.02, 1.  ]),
+#  'z1': numpy.array([1.   , 1.093, 1.   , 1.063]),
+#  'z2': numpy.array([1.043, 1.   , 1.089, 1.   ]),
+#  'z3': numpy.array([1.   , 1.   , 1.   , 0.947])}
+# CORRECTIONS BASED ON PIXELFLATS FROM SEP 2024
+# gain_corrs = {'b1': numpy.array([1.        , 1.036     , 1.04739803, 1.04739803]),
+#  'b2': numpy.array([1.        , 1.013     , 0.99611226, 0.98527425]),
+#  'b3': numpy.array([1.   , 1.029, 1.012, 1.   ]),
+#  'r1': numpy.array([1.        , 1.011     , 1.01180354, 0.98520306]),
+#  'r2': numpy.array([1.        , 1.025     , 0.98361279, 0.96717089]),
+#  'r3': numpy.array([1.  , 1.01, 1.02, 1.  ]),
+#  'z1': numpy.array([1.        , 1.093     , 0.91374035, 0.97130599]),
+#  'z2': numpy.array([1.043     , 1.        , 1.07522459, 0.98735041]),
+#  'z3': numpy.array([1.   , 1.   , 1.   , 0.947])}
+# gain_corrs = {'b1': numpy.array([1.        , 1.036     , 1.05103492, 1.05103492]),
+#  'b2': numpy.array([1.        , 1.013     , 0.99704955, 0.98620134]),
+#  'b3': numpy.array([1.   , 1.029, 1.012, 1.   ]),
+#  'r1': numpy.array([1.        , 1.011     , 1.01526218, 0.98857077]),
+#  'r2': numpy.array([1.        , 1.025     , 0.9843986 , 0.96794356]),
+#  'r3': numpy.array([1.  , 1.01, 1.02, 1.  ]),
+#  'z1': numpy.array([1.        , 1.093     , 0.91355838, 0.97111255]),
+#  'z2': numpy.array([1.043     , 1.        , 1.07702745, 0.98900592]),
+#  'z3': numpy.array([1.   , 1.   , 1.   , 0.947])}
+# gain_corrs["z1"] = [1.        , 0.93497169, 1.06547021, 0.96983795]
+# gain_corrs["z1"] = [1.        , 1.05505796, 1.05505815, 1.00000208]
+# gain_corrs["z1"] = numpy.asarray([1.        , 1.09830923, 0.96412182, 1.03124008])
+# gain_corrs["r1"][:] = [1.        , 1.01811489, 1.03873477, 1.02030923]
+# gain_corrs["r1"][:] = [1.        , 0.99250367, 0.97760108, 1.0051016 ]
+gain_corrs = {'b1': numpy.asarray([1.        , 0.96936066, 0.98936944, 0.99164104]),
+ 'b2': numpy.asarray([1.        , 0.99146405, 1.00614175, 1.01945662]),
+ 'b3': numpy.asarray([1.        , 0.97158781, 1.01023353, 1.01257099]),
+ 'r1': numpy.asarray([1.        , 0.99306088, 0.97766919, 1.00602193]),
+ 'r2': numpy.asarray([1.        , 0.97837479, 1.01929449, 1.03547192]),
+ 'r3': numpy.asarray([1.        , 0.99283228, 1.0197669 , 1.04401763]),
+ 'z1': numpy.asarray([1.        , 0.91468884, 1.04798286, 0.98482936]),
+ 'z2': numpy.asarray([1.        , 1.04603072, 0.97786641, 1.05365208]),
+ 'z3': numpy.asarray([1.        , 1.00523225, 1.00502321, 1.06469578])}
 
 description = "Provides Methods to process 2D images"
 
@@ -3187,31 +3248,32 @@ def preproc_raw_frame(
         # gain = numpy.asarray(DEFAULT_GAIN[org_header["CCD"]])
         gain = numpy.asarray([org_header[f"{gain_prefix}{iquad+1}"] for iquad in range(NQUADS)])
 
-        if camera == "b1":
-            gain[1] *= 1.036
-        if camera == "b2":
-            gain[1] *= 1.013
-            gain[2] *= 1.011
-        if camera == "b3":
-            gain[1] *= 1.029
-            gain[2] *= 1.012
-        if camera == "r1":
-            gain[1] *= 1.011
-            gain[2] *= 1.027
-        if camera == "r2":
-            gain[1] *= 1.025
-            gain[2] *= 1.017
-        if camera == "r3":
-            gain[1] *= 1.010
-            gain[2] *= 1.020
-        if camera == "z1":
-            gain[1] *= 1.093
-            gain[3] *= 1.063
-        if camera == "z2":
-            gain[0] *= 1.043
-            gain[2] *= 1.089
-        if camera == "z3":
-            gain[3] /= 1.056
+        gain /= gain_corrs[camera]
+        # if camera == "b1":
+        #     gain[1] *= 1.036
+        # if camera == "b2":
+        #     gain[1] *= 1.013
+        #     gain[2] *= 1.011
+        # if camera == "b3":
+        #     gain[1] *= 1.029
+        #     gain[2] *= 1.012
+        # if camera == "r1":
+        #     gain[1] *= 1.011
+        #     gain[2] *= 1.027
+        # if camera == "r2":
+        #     gain[1] *= 1.025
+        #     gain[2] *= 1.017
+        # if camera == "r3":
+        #     gain[1] *= 1.010
+        #     gain[2] *= 1.020
+        # if camera == "z1":
+        #     gain[1] *= 1.093
+        #     gain[3] *= 1.063
+        # if camera == "z2":
+        #     gain[0] *= 1.043
+        #     gain[2] *= 1.089
+        # if camera == "z3":
+        #     gain[3] /= 1.056
 
         log.info(f"using header GAIN = {gain.tolist()} (e-/ADU)")
 
