@@ -420,9 +420,9 @@ def skymodel_pars_header(header):
         "HIERARCH SKYMODEL MOON_FLI": (np.round(moon_fli.value, 4), "Moon fraction lunar illumination")
     }
 
-    # checking for any empty, None, or NAN values and replacing with -999
+    # checking for any NAN values and replacing with -999
     for key, value in skymodel_pars.items():
-        if type(value[0]) != str:
+        if type(value[0]) is not str:
             if np.isnan(value[0]):
                skymodel_pars[key]=(-999, value[1])
 
