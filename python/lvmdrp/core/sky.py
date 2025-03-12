@@ -27,7 +27,7 @@ from skycalc_cli.skycalc import AlmanacQuery, SkyModel
 from skycalc_cli.skycalc_cli import fixObservatory
 from skyfield import almanac
 from skyfield.positionlib import ICRS
-from skyfield.api import Loader, Star, load, wgs84
+from skyfield.api import Loader, Star, load
 from skyfield.framelib import ecliptic_frame
 
 from lvmdrp.external import shadow_height_lib as sh
