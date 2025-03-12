@@ -11,7 +11,6 @@ import json
 import os
 import shutil
 import subprocess
-from datetime import timedelta
 from io import BytesIO
 
 import numpy as np
@@ -25,16 +24,14 @@ from astropy.time import Time
 from astropy.coordinates import get_body, solar_system_ephemeris, AltAz, EarthLocation, SkyCoord 
 from skycalc_cli.skycalc import AlmanacQuery, SkyModel
 from skycalc_cli.skycalc_cli import fixObservatory
-from skyfield import almanac
 from skyfield.positionlib import ICRS
-from skyfield.api import Loader, Star, load
+from skyfield.api import load
 from skyfield.framelib import ecliptic_frame
 
 from lvmdrp.external import shadow_height_lib as sh
 
 from lvmdrp.core.constants import (
     ALMANAC_CONFIG_PATH,
-    EPHEMERIS_DIR,
     SKYCALC_CONFIG_PATH,
     SKYCORR_CONFIG_PATH,
     SKYCORR_INST_PATH,
