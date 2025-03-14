@@ -1,11 +1,7 @@
 #tests for sky.py
 #first test is for the sky model headers
 
-import importlib
 import pytest
-
-from lvmdrp import path
-import lvmdrp.core.sky
 from lvmdrp.core.sky import sky_pars_header
 
 
