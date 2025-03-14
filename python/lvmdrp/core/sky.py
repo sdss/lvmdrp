@@ -230,19 +230,23 @@ def write_skymodel_par(parfile_path, config, verify=True):
                 f.write(f"{key} = {val}\n")
 
 
-def skymodel_pars_header(header):
+def sky_pars_header(header):
     """Writes skymodel and useful sky info into header
     To run the ESO skymodel, several parameters are needed.  These are calculated
     and stored in the output (see ESO skymodel docu for more details).
     Additionally useful parameters needed for analyzing sky subtraction are provided
 
-    Updated March 2025 to remove SkyFields dependencies
+    Updated March 2025 AJ:
+        removed SkyFields dependencies, 
+        split sky and skymodel (re-named function), 
+        included geo sh hght calc here,
+        made header keywords more consistent with each other and drpall
 
     Parameters
     ----------
     header: fits header
         header with needed metadata info for given observation
-    skymodel_pars: dict
+    sky_pars: dict
         output dict with header keywords, values and comments
         None/NAN/Null values replaced with -999
 
@@ -310,6 +314,10 @@ def skymodel_pars_header(header):
     skye_rho = skye_coord.separation(moon_pos)
     skyw_rho = skyw_coord.separation(moon_pos)
 
+    # separation between SCI and Sky telescopes
+    sci_skye = sci_coord.separation(skye_coord)
+    sci_skyw = sci_coord.separation(skyw_coord)
+
     # Moon phase in deg (0:new, 90: first qt, 180: full, 270: 3rd qt)
     alpha = sun_coord.separation(moon_coord)
     alpha_next = sun_coord_next.separation(moon_coord_next)
@@ -334,8 +342,9 @@ def skymodel_pars_header(header):
     skye_lat_ecl = skye_coord.geocentrictrueecliptic.lat
     skyw_lat_ecl = skyw_coord.geocentrictrueecliptic.lat
 
-    # TODO: - ** monthly-averaged solar radio flux ('msolflux' in sfu)
-    # TODO: pull this from header if it already exists
+    # TODO: add MSOLFLUX to headers. Pull data from here:
+    # https://spaceweather.gc.ca/forecast-prevision/solar-solaire/solarflux/sx-5-en.php
+    # now set to 130 sfu
 
     # bimonthly period ('season'; 1: Dec/Jan, ..., 6: Oct/Nov; 0 entire year)
     month = obs_time.to_datetime().month
@@ -375,6 +384,10 @@ def skymodel_pars_header(header):
         else:
             time = 0
 
+    sci_sh_hght = get_telescope_shadowheight(header, telescope="SCI")
+    skye_sh_hght = get_telescope_shadowheight(header, telescope="SKYE")
+    skyw_sh_hght = get_telescope_shadowheight(header, telescope="SKYW")
+
     # vacuum or air wavelengths ('vac_air', vac or air)
     # precipitable water vapour ('pwv' in mm; -1: bimonthly mean)
     # NOTE: the following is for MOD1 when we run the RT code
@@ -382,19 +395,29 @@ def skymodel_pars_header(header):
     # TODO: - ** resolving power of molecular spectra in library ('resol')
     # TODO: - ** sky model components
 
-
-    skymodel_pars = {
+    #header keywords SKY = parameters used for sky subtraction testing (incl geocoronal)
+    #header keywords SKYMODEL = additional parameters needed to run the ESO sky model
+    sky_pars = {
+        "HIERARCH SKY SCI_ALT": (np.round(sci_alt.to(u.deg).value, 4), "altitude of object above horizon [deg]"),
+        "HIERARCH SKY SKYE_ALT": (np.round(skye_alt.to(u.deg).value, 4), "altitude of object above horizon [deg]"),
+        "HIERARCH SKY SKYW_ALT": (np.round(skyw_alt.to(u.deg).value, 4), "altitude of object above horizon [deg]"),
+        "HIERARCH SKY SCI_SKYE_SEP": (np.round(sci_skye.to(u.deg).value, 4), "separation of SCI and SkyE [deg]"),
+        "HIERARCH SKY SCI_SKYW_SEP": (np.round(sci_skyw.to(u.deg).value, 4), "separation of SCI and SkyW [deg]"),
+        "HIERARCH SKY SCI_MOON_SEP": (np.round(sci_rho.to(u.deg).value, 4), "separation of Moon and object [deg]"),
+        "HIERARCH SKY SKYE_MOON_SEP": (np.round(skye_rho.to(u.deg).value, 4), "separation of Moon and object [deg]"),
+        "HIERARCH SKY SKYW_MOON_SEP": (np.round(skyw_rho.to(u.deg).value, 4), "separation of Moon and object [deg]"),
+        "HIERARCH SKY MOON_ALT": (np.round(moon_alt.to(u.deg).value, 4), "altitude of Moon above horizon [deg]"),
+        "HIERARCH SKY SUN_ALT": (np.round(sun_alt.to(u.deg).value, 4), "altitude of Sun above horizon [deg]"),
+        "HIERARCH SKY MOON_RA": (np.round(moon_ra, 5), "RA of the Moon [deg]"),
+        "HIERARCH SKY MOON_DEC": (np.round(moon_dec, 5), "DEC of the Moon [deg]"),
+        "HIERARCH SKY MOON_PHASE": (np.round(moon_phase.value, 2), "Moon phase (0=N,90=1Q,180=F,270=3Q)[deg]"),
+        "HIERARCH SKY MOON_FLI": (np.round(moon_fli.value, 4), "Moon fraction lunar illumination"),
+        "HIERARCH SKY SCI_SH_HGHT": (np.round(sci_sh_hght, 5), "height of Earth's shadow [km]"),
+        "HIERARCH SKY SKYE_SH_HGHT": (np.round(skye_sh_hght, 5), "height of Earth's shadow [km]"),
+        "HIERARCH SKY SKYW_SH_HGHT": (np.round(skyw_sh_hght, 5), "height of Earth's shadow [km]"),
         "HIERARCH SKYMODEL SM_H": (sm_h.to(u.km).value, "observatory height [km]"),
         "HIERARCH SKYMODEL SM_HMIN": ((2.0 * u.km).value, "lower height limit [km]"),
-        "HIERARCH SKYMODEL SCI_ALT": (np.round(sci_alt.to(u.deg).value, 4), "altitude of object above horizon [deg]"),
-        "HIERARCH SKYMODEL SKYE_ALT": (np.round(skye_alt.to(u.deg).value, 4), "altitude of object above horizon [deg]"),
-        "HIERARCH SKYMODEL SKYW_ALT": (np.round(skyw_alt.to(u.deg).value, 4), "altitude of object above horizon [deg]"),
-        "HIERARCH SKYMODEL SCI_RHO": (np.round(sci_rho.to(u.deg).value, 4), "separation of Moon and object [deg]"),
-        "HIERARCH SKYMODEL SKYE_RHO": (np.round(skye_rho.to(u.deg).value, 4), "separation of Moon and object [deg]"),
-        "HIERARCH SKYMODEL SKYW_RHO": (np.round(skyw_rho.to(u.deg).value, 4), "separation of Moon and object [deg]"),
-        "HIERARCH SKYMODEL MOONALT": (np.round(moon_alt.to(u.deg).value, 4), "altitude of Moon above horizon [deg]"),
-        "HIERARCH SKYMODEL SUNALT": (np.round(sun_alt.to(u.deg).value, 4), "altitude of Sun above horizon [deg]"),
-        "HIERARCH SKYMODEL MOONDIST": (np.round(moondist.value, 4), "distance to Moon (mean distance=1)"),
+        "HIERARCH SKYMODEL MOONDIST": (np.round(moondist.value, 4), "ratio of distance over mean dist to Moon"),
         "HIERARCH SKYMODEL PRES": ((744 * u.hPa).value, "pressure at observer altitude, set: 744 [hPa]"),
         "HIERARCH SKYMODEL SSA": (0.97, "aerosols' single scattering albedo, set: 0.97"),
         "HIERARCH SKYMODEL CALCDS": ( "N", "cal double scattering of Moon (Y or N)"),
@@ -410,20 +433,16 @@ def skymodel_pars_header(header):
         "HIERARCH SKYMODEL TEMP_STR": ((290.0 * u.K).value, "grey-body temperature [K]"),
         "HIERARCH SKYMODEL MSOLFLUX": (130.0, "monthly-averaged solar radio flux, set: 130"),
         "HIERARCH SKYMODEL SEASON": (season, "bimonthly period (1:Dec/Jan, 6:Oct/Nov.; 0:year)"),
-        "HIERARCH SKYMODEL TIME": (time, "period of night (x/3 night, x=1,2,3; 0:night)"),
-        "HIERARCH SKYMODEL MOON_RA": (np.round(moon_ra, 5), "RA of the Moon [deg]"),
-        "HIERARCH SKYMODEL MOON_DEC": (np.round(moon_dec, 5), "DEC of the Moon [deg]"),
-        "HIERARCH SKYMODEL MOON_PHASE": (np.round(moon_phase.value, 2), "Moon phase (0=N,90=1Q,180=F,270=3Q)[deg]"),
-        "HIERARCH SKYMODEL MOON_FLI": (np.round(moon_fli.value, 4), "Moon fraction lunar illumination")
+        "HIERARCH SKYMODEL TIME": (time, "period of night (x/3 night, x=1,2,3; 0:night)")
     }
 
     # checking for any NAN values and replacing with -999
-    for key, value in skymodel_pars.items():
+    for key, value in sky_pars.items():
         if type(value[0]) is not str:
             if np.isnan(value[0]):
-               skymodel_pars[key]=(-999, value[1])
+               sky_pars[key]=(-999, value[1])
 
-    return skymodel_pars
+    return sky_pars
 
 
 def get_bright_fiber_selection(rss):
