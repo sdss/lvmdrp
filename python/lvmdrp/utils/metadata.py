@@ -1459,7 +1459,7 @@ def _collect_header_data(filename: str) -> dict:
                         'obstime': 'OBSTIME',
                         # sci
                         'sci_ra': 'TESCIRA', 'sci_dec': 'TESCIDE', 'sci_amass': 'TESCIAM',
-                        'sci_kmpos': 'TESCIKM', 'sci_focpos': 'TESCIFO', 'sci_alt: SKY SCI_ALT',
+                        'sci_kmpos': 'TESCIKM', 'sci_focpos': 'TESCIFO', 'sci_alt': 'SKY SCI_ALT',
                         'sci_sh_hght': 'SKY SCI_SH_HGHT', 'sci_moon_sep': 'SKY SCI_MOON_SEP',
                         # skye
                         'skye_ra': 'TESKYERA', 'skye_dec': 'TESKYEDE', 'skye_amass': 'TESKYEAM',
