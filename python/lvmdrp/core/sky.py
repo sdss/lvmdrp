@@ -432,7 +432,7 @@ def sky_pars_header(header):
         "HIERARCH SKYMODEL EMIS_STR": (0.2, "grey-body emissivity"),
         "HIERARCH SKYMODEL TEMP_STR": ((290.0 * u.K).value, "grey-body temperature [K]"),
         "HIERARCH SKYMODEL MSOLFLUX": (130.0, "monthly-averaged solar radio flux, set: 130"),
-        "HIERARCH SKYMODEL SEASON": (season, "bimonthly period (1:Dec/Jan, 6:Oct/Nov.; 0:year)"),
+        "HIERARCH SKYMODEL SEASON": (season, "bimonthly period (1:Dec/Jan, 6:Oct/Nov; 0:year)"),
         "HIERARCH SKYMODEL TIME": (time, "period of night (x/3 night, x=1,2,3; 0:night)")
     }
 
