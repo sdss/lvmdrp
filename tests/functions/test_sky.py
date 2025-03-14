@@ -2,6 +2,7 @@
 #first test is for the sky model headers
 
 import pytest
+from astropy.io import fits
 from lvmdrp.core.sky import sky_pars_header
 
 
