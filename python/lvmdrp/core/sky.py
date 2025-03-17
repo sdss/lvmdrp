@@ -11,7 +11,6 @@ import json
 import os
 import shutil
 import subprocess
-from datetime import timedelta
 from io import BytesIO
 
 import numpy as np
@@ -22,19 +21,17 @@ from astropy.io import fits
 from astropy.stats import biweight_location, biweight_scale
 from astropy.table import Table, hstack
 from astropy.time import Time
-from astropy.coordinates import SkyCoord
+from astropy.coordinates import get_body, solar_system_ephemeris, AltAz, EarthLocation, SkyCoord 
 from skycalc_cli.skycalc import AlmanacQuery, SkyModel
 from skycalc_cli.skycalc_cli import fixObservatory
-from skyfield import almanac
 from skyfield.positionlib import ICRS
-from skyfield.api import Loader, Star, load, wgs84
+from skyfield.api import load
 from skyfield.framelib import ecliptic_frame
 
 from lvmdrp.external import shadow_height_lib as sh
 
 from lvmdrp.core.constants import (
     ALMANAC_CONFIG_PATH,
-    EPHEMERIS_DIR,
     SKYCALC_CONFIG_PATH,
     SKYCORR_CONFIG_PATH,
     SKYCORR_INST_PATH,
@@ -233,120 +230,124 @@ def write_skymodel_par(parfile_path, config, verify=True):
                 f.write(f"{key} = {val}\n")
 
 
-def skymodel_pars_header(header):
+def sky_pars_header(header):
     """Writes skymodel and useful sky info into header
     To run the ESO skymodel, several parameters are needed.  These are calculated
     and stored in the output (see ESO skymodel docu for more details).
     Additionally useful parameters needed for analyzing sky subtraction are provided
 
+    Updated March 2025 AJ:
+        removed SkyFields dependencies, 
+        split sky and skymodel (re-named function), 
+        included geo sh hght calc here,
+        made header keywords more consistent with each other and drpall
+
     Parameters
     ----------
     header: fits header
         header with needed metadata info for given observation
-    skymodel_pars: dict
+    sky_pars: dict
         output dict with header keywords, values and comments
         None/NAN/Null values replaced with -999
 
     """
 
     # extract useful header information
-    sci_ra, sci_dec = header["TESCIRA"], header["TESCIDE"]
-    skye_ra, skye_dec = header["TESKYERA"], header["TESKYEDE"]
-    skyw_ra, skyw_dec = header["TESKYWRA"], header["TESKYWDE"]
-    obstime = Time(header["OBSTIME"], scale="tai")
-
-    # define ephemeris object
-    ephemeris_loader = Loader(EPHEMERIS_DIR)
-    astros = ephemeris_loader("de421.bsp")
-    sun, earth, moon = astros["sun"], astros["earth"], astros["moon"]
-    # define location
-    obs_topos = wgs84.latlon(
-        latitude_degrees=SH_CALCULATOR.observatory_topo.latitude.degrees,#.to(u.deg),
-        longitude_degrees=SH_CALCULATOR.observatory_topo.longitude.degrees,#.to(u.deg),
-        elevation_m=SH_CALCULATOR.observatory_elevation.value,
-    )
-    obs = earth + obs_topos
-    # define observation datetime
-    ts = ephemeris_loader.timescale()
-    obs_time = ts.from_astropy(obstime)
-    # define observatory object
-    obs = obs.at(obs_time)
-
-    # define astros
-    s, m = obs.observe(sun).apparent(), obs.observe(moon).apparent()
-
-    # define targets for sci, skye, skyw
     try:
-        sci_target_ra, sci_target_dec = sci_ra * u.deg, sci_dec * u.deg
-        sci_target = Star(ra_hours=sci_target_ra.to(u.hourangle), dec_degrees=sci_target_dec.to(u.deg))
-        sci_t = obs.observe(sci_target).apparent()
+        sci_ra, sci_dec = header["TESCIRA"], header["TESCIDE"]
     except Exception:
-        sci_t = np.nan
-
+        sci_ra, sci_dec = np.nan, np.nan
     try:
-        skye_target_ra, skye_target_dec = skye_ra * u.deg, skye_dec * u.deg
-        skye_target = Star(ra_hours=skye_target_ra.to(u.hourangle), dec_degrees=skye_target_dec.to(u.deg))
-        skye_t = obs.observe(skye_target).apparent()
+        skye_ra, skye_dec = header["TESKYERA"], header["TESKYEDE"]
     except Exception:
-        skye_t = np.nan
-
+        skye_ra, sci_dec = np.nan, np.nan
     try:
-        skyw_target_ra, skyw_target_dec = skyw_ra * u.deg, skyw_dec * u.deg
-        skyw_target = Star(ra_hours=skyw_target_ra.to(u.hourangle), dec_degrees=skyw_target_dec.to(u.deg))
-        skyw_t = obs.observe(skyw_target).apparent()
+        skyw_ra, skyw_dec = header["TESKYWRA"], header["TESKYWDE"]
     except Exception:
-        skyw_t = np.nan
+        skyw_ra, skyw_dec = np.nan, np.nan
+    obstime = Time(header["OBSTIME"])
+
+   
+    # define location of LCO using shadow heigh calculator library
+    observatory_location = EarthLocation(lat=SH_CALCULATOR.observatory_topo.latitude.degrees*u.deg, 
+                                     lon=SH_CALCULATOR.observatory_topo.longitude.degrees*u.deg, 
+                                     height=SH_CALCULATOR.observatory_elevation.value*u.m)
+   
+    #use astropy Time class for the observing time
+    obs_time = Time(obstime)
+
+    #use astropy's builtin emphermis for the locations of the sun and moon
+    with solar_system_ephemeris.set('builtin'):
+        # Get the Moon's and Sun's coordinates at the specified time, and one hour later for moon phase 
+        moon_coord = get_body('moon', obs_time,location=observatory_location)
+        sun_coord = get_body('sun',obs_time,location=observatory_location)
+        moon_coord_next = get_body('moon', obs_time+1*u.hour,location=observatory_location)
+        sun_coord_next = get_body('sun',obs_time+1*u.hour,location=observatory_location)
+
+    #find alt-az frame/coordinates for observation    
+    altaz_frame = AltAz(obstime=obs_time, location=observatory_location)
+    
+    #use astropy SkyCoord class
+    sci_coord = SkyCoord(sci_ra, sci_dec, unit='deg')
+    skye_coord = SkyCoord(skye_ra, skye_dec, unit='deg')
+    skyw_coord = SkyCoord(skyw_ra, skyw_dec, unit='deg')
 
     # observatory height ('sm_h' in km)
     sm_h = SH_CALCULATOR.observatory_elevation
 
-    # altitude of object above the horizon (alt, 0 -- 90)
-    sci_alt, sci_az, _ = sci_t.altaz()
-    skye_alt, skye_az, _ = skye_t.altaz()
-    skyw_alt, skyw_az, _ = skyw_t.altaz()
+    # RA and dec of moon (moonra, moondec) and SkyCoord position for moon
+    moon_ra = moon_coord.ra.deg
+    moon_dec = moon_coord.dec.deg
+    moon_pos = SkyCoord(moon_ra*u.deg, moon_dec*u.deg)
+    
+    # altitude of objects above the horizon (alt, 0 -- 90)
+    sci_alt = sci_coord.transform_to(altaz_frame).alt
+    skye_alt = skye_coord.transform_to(altaz_frame).alt
+    skyw_alt = skyw_coord.transform_to(altaz_frame).alt
 
-    # separation between moon and sun from earth ('alpha', 0 -- 360, >180 for waning moon)
-    alpha = s.separation_from(m)
+    # altitude of moon ('moon_alt') and sun (sun_alt) [ -90 -- 90]
+    moon_alt=moon_coord.transform_to(altaz_frame).alt
+    sun_alt=sun_coord.transform_to(altaz_frame).alt
 
     # separation between moon and object ('rho', 0 -- 180)
-    sci_rho = sci_t.separation_from(m)
-    skye_rho = skye_t.separation_from(m)
-    skyw_rho = skyw_t.separation_from(m)
+    sci_rho = sci_coord.separation(moon_pos)
+    skye_rho = skye_coord.separation(moon_pos)
+    skyw_rho = skyw_coord.separation(moon_pos)
 
-    # altitude of moon ('altmoon', -90 -- 90)
-    altmoon, _, moondist = m.altaz()
-
-    # RA and dec of moon (moon_RA, moon_dec)
-    moonra, moondec, _ = m.radec()
+    # separation between SCI and Sky telescopes
+    sci_skye = sci_coord.separation(skye_coord)
+    sci_skyw = sci_coord.separation(skyw_coord)
 
     # Moon phase in deg (0:new, 90: first qt, 180: full, 270: 3rd qt)
-    _, slon, _ = s.frame_latlon(ecliptic_frame)
-    _, mlon, _ = m.frame_latlon(ecliptic_frame)
-    moon_phase = (mlon.degrees - slon.degrees) % 360.0
+    alpha = sun_coord.separation(moon_coord)
+    alpha_next = sun_coord_next.separation(moon_coord_next)
+    if alpha_next.value > alpha.value:
+        moon_phase = alpha.to(u.deg)
+    else:
+        moon_phase = 360 * u.deg - alpha.to(u.deg)
 
     # Moon illumination fraction
-    moon_fli = m.fraction_illuminated(sun)
-
-    # altitude of sun ('altsun', -90 -- 90)
-    altsun, _, _ = s.altaz()
+    moon_phase_angle = np.arctan2(sun_coord.distance*np.sin(alpha), moon_coord.distance - sun_coord.distance*np.cos(alpha))
+    moon_fli = (1 + np.cos(moon_phase_angle))/2.0
 
     # distance to moon ('moondist', 0.91 -- 1.08; 1: mean distance)
-    moondist = moondist.to(u.m) / MEAN_MOON_DIST
-
-    # TODO: - ** pressure at observatory altitude ('pres' in hPa)
-    # TODO: - ** calculation of double scattering of moonlight ('calcds', Y or N)
+    moondist=moon_coord.distance.to(u.m)/MEAN_MOON_DIST
 
     # heliocentric ecliptic longitude of object ('lon_ecl', -180 -- 180)
     # heliocentric ecliptic latitude of object ('lat_ecl', -90 -- 90)
-    sci_lon_ecl, sci_lat_ecl, _ = sci_t.frame_latlon(ecliptic_frame)
-    skye_lon_ecl, skye_lat_ecl, _ = skye_t.frame_latlon(ecliptic_frame)
-    skyw_lon_ecl, skyw_lat_ecl, _ = skyw_t.frame_latlon(ecliptic_frame)
+    sci_lon_ecl = sci_coord.geocentrictrueecliptic.lon - sun_coord.geocentrictrueecliptic.lon
+    skye_lon_ecl = skye_coord.geocentrictrueecliptic.lon - sun_coord.geocentrictrueecliptic.lon
+    skyw_lon_ecl = skyw_coord.geocentrictrueecliptic.lon - sun_coord.geocentrictrueecliptic.lon
+    sci_lat_ecl = sci_coord.geocentrictrueecliptic.lat
+    skye_lat_ecl = skye_coord.geocentrictrueecliptic.lat
+    skyw_lat_ecl = skyw_coord.geocentrictrueecliptic.lat
 
-    # TODO: - ** monthly-averaged solar radio flux ('msolflux' in sfu)
-    # TODO: pull this from header if it already exists
+    # TODO: add MSOLFLUX to headers. Pull data from here:
+    # https://spaceweather.gc.ca/forecast-prevision/solar-solaire/solarflux/sx-5-en.php
+    # now set to 130 sfu
 
     # bimonthly period ('season'; 1: Dec/Jan, ..., 6: Oct/Nov; 0 entire year)
-    month = obs_time.to_astropy().to_datetime().month
+    month = obs_time.to_datetime().month
     if month in [12, 1]:
         season = 1
     elif month in [2, 3]:
@@ -363,21 +364,29 @@ def skymodel_pars_header(header):
         season = 0
 
     # time of the observation ('time' in x/3 of the night; 0: entire night)
-    t_ini, t_fin = obs_time - timedelta(days=2), obs_time + timedelta(days=2)
+    hour = obs_time.to_datetime().hour
+    if season in [1, 2, 6]:
+        if hour in [0, 1, 2, 3]:
+            time = 1
+        elif hour in [4, 5, 6]:
+            time = 2
+        elif hour in [7, 8, 9]:
+            time = 3
+        else:
+            time = 0
+    else:  
+        if hour in [23, 0, 1, 2, 3]:
+            time = 1
+        elif hour in [4, 5, 6, 7]:
+            time = 2
+        elif hour in [8, 9, 10, 11]:
+            time = 3
+        else:
+            time = 0
 
-    risings_and_settings, _ = almanac.find_discrete(
-        t_ini, t_fin, almanac.sunrise_sunset(ephemeris=astros, topos=obs_topos)
-    )
-    i = np.digitize(obs_time.tt, bins=risings_and_settings.tt, right=False)
-    risings_and_settings[i - 1].tt <= obs_time.tt < risings_and_settings[i].tt, _[
-        [i - 1, i]
-    ]
-
-    night_thirds = np.linspace(*risings_and_settings[[i - 1, i]].tt, 4)
-    time = np.digitize(obs_time.tt, bins=night_thirds)
-    # assume whole night if the target obstime was observed during 'daylight'
-    if time == 4:
-        time = 0
+    sci_sh_hght = get_telescope_shadowheight(header, telescope="SCI")
+    skye_sh_hght = get_telescope_shadowheight(header, telescope="SKYE")
+    skyw_sh_hght = get_telescope_shadowheight(header, telescope="SKYW")
 
     # vacuum or air wavelengths ('vac_air', vac or air)
     # precipitable water vapour ('pwv' in mm; -1: bimonthly mean)
@@ -386,20 +395,29 @@ def skymodel_pars_header(header):
     # TODO: - ** resolving power of molecular spectra in library ('resol')
     # TODO: - ** sky model components
 
-
-    skymodel_pars = {
+    #header keywords SKY = parameters used for sky subtraction testing (incl geocoronal)
+    #header keywords SKYMODEL = additional parameters needed to run the ESO sky model
+    sky_pars = {
+        "HIERARCH SKY SCI_ALT": (np.round(sci_alt.to(u.deg).value, 4), "altitude of object above horizon [deg]"),
+        "HIERARCH SKY SKYE_ALT": (np.round(skye_alt.to(u.deg).value, 4), "altitude of object above horizon [deg]"),
+        "HIERARCH SKY SKYW_ALT": (np.round(skyw_alt.to(u.deg).value, 4), "altitude of object above horizon [deg]"),
+        "HIERARCH SKY SCI_SKYE_SEP": (np.round(sci_skye.to(u.deg).value, 4), "separation of SCI and SkyE [deg]"),
+        "HIERARCH SKY SCI_SKYW_SEP": (np.round(sci_skyw.to(u.deg).value, 4), "separation of SCI and SkyW [deg]"),
+        "HIERARCH SKY SCI_MOON_SEP": (np.round(sci_rho.to(u.deg).value, 4), "separation of Moon and object [deg]"),
+        "HIERARCH SKY SKYE_MOON_SEP": (np.round(skye_rho.to(u.deg).value, 4), "separation of Moon and object [deg]"),
+        "HIERARCH SKY SKYW_MOON_SEP": (np.round(skyw_rho.to(u.deg).value, 4), "separation of Moon and object [deg]"),
+        "HIERARCH SKY MOON_ALT": (np.round(moon_alt.to(u.deg).value, 4), "altitude of Moon above horizon [deg]"),
+        "HIERARCH SKY SUN_ALT": (np.round(sun_alt.to(u.deg).value, 4), "altitude of Sun above horizon [deg]"),
+        "HIERARCH SKY MOON_RA": (np.round(moon_ra, 5), "RA of the Moon [deg]"),
+        "HIERARCH SKY MOON_DEC": (np.round(moon_dec, 5), "DEC of the Moon [deg]"),
+        "HIERARCH SKY MOON_PHASE": (np.round(moon_phase.value, 2), "Moon phase (0=N,90=1Q,180=F,270=3Q)[deg]"),
+        "HIERARCH SKY MOON_FLI": (np.round(moon_fli.value, 4), "Moon fraction lunar illumination"),
+        "HIERARCH SKY SCI_SH_HGHT": (np.round(sci_sh_hght, 5), "height of Earth's shadow [km]"),
+        "HIERARCH SKY SKYE_SH_HGHT": (np.round(skye_sh_hght, 5), "height of Earth's shadow [km]"),
+        "HIERARCH SKY SKYW_SH_HGHT": (np.round(skyw_sh_hght, 5), "height of Earth's shadow [km]"),
         "HIERARCH SKYMODEL SM_H": (sm_h.to(u.km).value, "observatory height [km]"),
         "HIERARCH SKYMODEL SM_HMIN": ((2.0 * u.km).value, "lower height limit [km]"),
-        "HIERARCH SKYMODEL SCI_ALT": (np.round(sci_alt.to(u.deg).value, 4), "altitude of object above horizon [deg]"),
-        "HIERARCH SKYMODEL SKYE_ALT": (np.round(skye_alt.to(u.deg).value, 4), "altitude of object above horizon [deg]"),
-        "HIERARCH SKYMODEL SKYW_ALT": (np.round(skyw_alt.to(u.deg).value, 4), "altitude of object above horizon [deg]"),
-        "HIERARCH SKYMODEL ALPHA": (np.round(alpha.to(u.deg).value, 4), "separation of Sun and Moon from Earth [deg]"),
-        "HIERARCH SKYMODEL SCI_RHO": (np.round(sci_rho.to(u.deg).value, 4), "separation of Moon and object [deg]"),
-        "HIERARCH SKYMODEL SKYE_RHO": (np.round(skye_rho.to(u.deg).value, 4), "separation of Moon and object [deg]"),
-        "HIERARCH SKYMODEL SKYW_RHO": (np.round(skyw_rho.to(u.deg).value, 4), "separation of Moon and object [deg]"),
-        "HIERARCH SKYMODEL MOONALT": (np.round(altmoon.to(u.deg).value, 4), "altitude of Moon above horizon [deg]"),
-        "HIERARCH SKYMODEL SUNALT": (np.round(altsun.to(u.deg).value, 4), "altitude of Sun above horizon [deg]"),
-        "HIERARCH SKYMODEL MOONDIST": (np.round(moondist.value, 4), "distance to Moon (mean distance=1)"),
+        "HIERARCH SKYMODEL MOONDIST": (np.round(moondist.value, 4), "ratio of distance over mean dist to Moon"),
         "HIERARCH SKYMODEL PRES": ((744 * u.hPa).value, "pressure at observer altitude, set: 744 [hPa]"),
         "HIERARCH SKYMODEL SSA": (0.97, "aerosols' single scattering albedo, set: 0.97"),
         "HIERARCH SKYMODEL CALCDS": ( "N", "cal double scattering of Moon (Y or N)"),
@@ -414,20 +432,17 @@ def skymodel_pars_header(header):
         "HIERARCH SKYMODEL EMIS_STR": (0.2, "grey-body emissivity"),
         "HIERARCH SKYMODEL TEMP_STR": ((290.0 * u.K).value, "grey-body temperature [K]"),
         "HIERARCH SKYMODEL MSOLFLUX": (130.0, "monthly-averaged solar radio flux, set: 130"),
-        "HIERARCH SKYMODEL SEASON": (season, "bimonthly period (1:Dec/Jan, 6:Oct/Nov.; 0:year)"),
-        "HIERARCH SKYMODEL TIME": (time, "period of night (x/3 night, x=1,2,3; 0:night)"),
-        "HIERARCH SKYMODEL MOON_RA": (np.round(moonra.to(u.deg).value, 5), "RA of the Moon [deg]"),
-        "HIERARCH SKYMODEL MOON_DEC": (np.round(moondec.to(u.deg).value, 5), "DEC of the Moon [deg]"),
-        "HIERARCH SKYMODEL MOON_PHASE": (np.round(moon_phase, 2), "phase of Moon (0=new, 90=1st qt) [deg]"),
-        "HIERARCH SKYMODEL MOON_FLI": (np.round(moon_fli, 4), "Moon fraction lunar illumination")
+        "HIERARCH SKYMODEL SEASON": (season, "bimonthly period (1:Dec/Jan, 6:Oct/Nov; 0:year)"),
+        "HIERARCH SKYMODEL TIME": (time, "period of night (x/3 night, x=1,2,3; 0:night)")
     }
 
-    # checking for any empty, None, or NAN values and replacing with -999
-    for key, value in skymodel_pars.items():
-        if value[0] == '' or value[0] is None or value[0] == np.nan:
-           skymodel_pars[key]=(-999, value[1])
+    # checking for any NAN values and replacing with -999
+    for key, value in sky_pars.items():
+        if type(value[0]) is not str:
+            if np.isnan(value[0]):
+               sky_pars[key]=(-999, value[1])
 
-    return skymodel_pars
+    return sky_pars
 
 
 def get_bright_fiber_selection(rss):

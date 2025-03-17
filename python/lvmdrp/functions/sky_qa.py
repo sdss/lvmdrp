@@ -689,20 +689,20 @@ def distance(r1,d1,r2,d2):
 
     Note - This routine could easily be made more general
     '''
-#    print 'distance',r1,d1,r2,d2
+    #print 'distance',r1,d1,r2,d2
     r1=r1/RADIAN
     d1=d1/RADIAN
     r2=r2/RADIAN
     d2=d2/RADIAN
     xlambda=np.sin(d1)*np.sin(d2)+np.cos(d1)*np.cos(d2)*np.cos(r1-r2)
-#    print 'xlambda ',xlambda
+    #print 'xlambda ',xlambda
     if xlambda>=1.0:
         xlambda=0.0
     else:
         xlambda=np.arccos(xlambda)
 
     xlambda=xlambda*RADIAN
-#    print 'angle ',xlambda
+    #print 'angle ',xlambda
     return xlambda
 
 def get_header_value(header, key, default_value=-999.0, verbose=False):
@@ -771,16 +771,16 @@ def create_overview(hdr):
     obs_time=get_header_string(hdr,'OBSTIME')
     ra=get_header_value(hdr,'TESCIRA')
     dec=get_header_value(hdr,'TESCIDE')
-    alt=get_header_value(hdr, 'SKYMODEL SCI_ALT')
+    alt=get_header_value(hdr, 'SKY SCI_ALT')
 
     
     ra_sky_e=get_header_value(hdr,'POSKYERA')
     dec_sky_e=get_header_value(hdr,'POSKYEDE')
-    alt_sky_e=get_header_value(hdr, 'SKYMODEL SKYE_ALT')
+    alt_sky_e=get_header_value(hdr, 'SKY SKYE_ALT')
     
     ra_sky_w=get_header_value(hdr,'POSKYWRA')
     dec_sky_w=get_header_value(hdr,'POSKYWDE')
-    alt_sky_w=get_header_value(hdr, 'SKYMODEL SKYW_ALT')
+    alt_sky_w=get_header_value(hdr, 'SKY SKYW_ALT')
 
     moon_info=get_moon_info_las_campanas(obs_time)
     
