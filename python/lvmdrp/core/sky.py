@@ -254,17 +254,27 @@ def sky_pars_header(header):
 
     # extract useful header information
     try:
-        sci_ra, sci_dec = header["TESCIRA"], header["TESCIDE"]
-    except Exception:
-        sci_ra, sci_dec = np.nan, np.nan
+        sci_ra, sci_dec = header["SCIRA"], header["SCIDEC"]
+    except Exception: 
+        try:
+            sci_ra, sci_dec = header["TESCIRA"], header["TESCIDE"]
+        except Exception:
+            sci_ra, sci_dec = np.nan, np.nan
     try:
-        skye_ra, skye_dec = header["TESKYERA"], header["TESKYEDE"]
-    except Exception:
-        skye_ra, sci_dec = np.nan, np.nan
+        skye_ra, skye_dec = header["SKYERA"], header["SKYEDEC"]
+    except Exception: 
+        try:
+            skye_ra, skye_dec = header["TESKYERA"], header["TESKYEDE"]
+        except Exception:
+            skye_ra, skye_dec = np.nan, np.nan
     try:
-        skyw_ra, skyw_dec = header["TESKYWRA"], header["TESKYWDE"]
-    except Exception:
-        skyw_ra, skyw_dec = np.nan, np.nan
+        skyw_ra, skyw_dec = header["SKYWRA"], header["SKYWDEC"]
+    except Exception: 
+        try:
+            skyw_ra, skyw_dec = header["TESKYWRA"], header["TESKYWDE"]
+        except Exception:
+            skyw_ra, skyw_dec = np.nan, np.nan
+ 
     obstime = Time(header["OBSTIME"])
 
    
@@ -828,7 +838,11 @@ def get_telescope_shadowheight(header, telescope):
     if telescope not in {"SKYE", "SKYW", "SCI", "SPEC"}:
         raise ValueError(f"invalid value for 'telescope' parameter: '{telescope}', valid values are 'SKYE', 'SKYW', 'SCI', or 'SPEC'")
 
-    ra, dec = header[f"TE{telescope}RA"], header[f"TE{telescope}DE"]
+    try:
+        ra, dec = header[f"{telescope}RA"], header[f"{telescope}DEC"]
+    except Exception:
+        ra, dec = header[f"TE{telescope}RA"], header[f"TE{telescope}DE"]
+
     time = Time(header["OBSTIME"],format='isot', scale='utc')
     jd = time.jd
 
