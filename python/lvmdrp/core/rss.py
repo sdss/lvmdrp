@@ -10,6 +10,7 @@ from astropy.table import Table
 from astropy.time import Time
 from astropy.coordinates import SkyCoord
 from astropy.coordinates import EarthLocation
+from astropy.stats import biweight_location
 from astropy import units as u
 
 from lvmdrp import log
@@ -1419,169 +1420,59 @@ class RSS(FiberRows):
 
         return self
 
-    def combineRSS(self, rss_in, method="mean", replace_error=1e10):
-        dim = rss_in[0]._data.shape
-        data = numpy.zeros((len(rss_in), dim[0], dim[1]), dtype=numpy.float32)
-        if rss_in[0]._mask is not None:
-            mask = numpy.zeros((len(rss_in), dim[0], dim[1]), dtype="bool")
+    def combineRSS(self, rsss, method="mean"):
+        dim = rsss[0]._data.shape
+        data = numpy.zeros((len(rsss), dim[0], dim[1]), dtype=numpy.float32)
+        if rsss[0]._mask is not None:
+            mask = numpy.zeros((len(rsss), dim[0], dim[1]), dtype="bool")
         else:
             mask = None
 
-        if rss_in[0]._error is not None:
-            error = numpy.zeros((len(rss_in), dim[0], dim[1]), dtype=numpy.float32)
+        if rsss[0]._error is not None:
+            error = numpy.zeros((len(rsss), dim[0], dim[1]), dtype=numpy.float32)
         else:
             error = None
 
-        if rss_in[0]._sky is not None:
-            sky = numpy.zeros((len(rss_in), dim[0], dim[1]), dtype=numpy.float32)
+        if rsss[0]._sky is not None:
+            sky = numpy.zeros((len(rsss), dim[0], dim[1]), dtype=numpy.float32)
         else:
             sky = None
 
-        for i in range(len(rss_in)):
-            data[i, :, :] = rss_in[i]._data
+        for i, rss in enumerate(map(lambda r: r.apply_pixelmask(), rsss)):
+            data[i, :, :] = rss._data
             if mask is not None:
-                mask[i, :, :] = rss_in[i]._mask
+                mask[i, :, :] = rss._mask
             if error is not None:
-                error[i, :, :] = rss_in[i]._error
+                error[i, :, :] = rss._error
             if sky is not None:
-                sky[i, :, :] = rss_in[i]._sky
+                sky[i, :, :] = rss._sky
 
-        combined_data = numpy.zeros(dim, dtype=numpy.float32)
-        combined_error = numpy.zeros(dim, dtype=numpy.float32)
-        combined_sky = numpy.zeros(dim, dtype=numpy.float32)
+        weights = numpy.ones_like(data)
+        if error is not None:
+            weights = numpy.divide(1, error**2, where=error!=0, out=numpy.zeros_like(error))
+            weights /= bn.nansum(weights, 0)
 
-        if method == "sum":
-            if mask is not None:
-                data[mask] = 0
-                good_pix = bn.nansum(numpy.logical_not(mask), 0)
-                select_mean = good_pix > 0
-                combined_data[select_mean] = bn.nansum(data, 0)[select_mean]
-                combined_mask = good_pix == 0
-                if error is not None:
-                    error[mask] = replace_error
-                    combined_error[select_mean] = numpy.sqrt(
-                        bn.nansum(error**2, 0)[select_mean]
-                    )
-                else:
-                    combined_error = None
-                if sky is not None:
-                    sky[mask] = 0
-                    combined_sky[select_mean] = bn.nansum(sky, 0)[select_mean]
-                else:
-                    combined_sky = None
-            else:
-                combined_mask = None
-                combined_data = bn.nansum(data, 0) / data.shape[0]
-                if error is not None:
-                    combined_error = numpy.sqrt(
-                        bn.nansum(error**2, 0) / error.shape[0]
-                    )
-                else:
-                    combined_error = None
-                if sky is not None:
-                    combined_sky = bn.nansum(sky, 0) / sky.shape[0]
-                else:
-                    combined_sky = None
+        COMB_FUNCTIONS = {
+            "sum": lambda a, axis: bn.nansum(a, axis) if a is not None else None,
+            "mean": lambda a, axis: bn.nanmean(a, axis) if a is not None else None,
+            "median": lambda a, axis: bn.nanmedian(a, axis) if a is not None else None,
+            "weighted_mean": lambda a, axis: bn.nansum(a * weights, axis) if a is not None else None,
+            "biweight": lambda a, axis: biweight_location(a, axis=axis, ignore_nan=True) if a is not None else None,
+        }
 
-        elif method == "mean":
-            if mask is not None:
-                data[mask] = 0
-                good_pix = bn.nansum(numpy.logical_not(mask), 0)
-                select_mean = good_pix > 0
-                combined_data[select_mean] = (
-                    bn.nansum(data, 0)[select_mean] / good_pix[select_mean]
-                )
-                combined_mask = good_pix == 0
-                if error is not None:
-                    error[mask] = replace_error
-                    combined_error[select_mean] = numpy.sqrt(
-                        bn.nansum(error**2, 0)[select_mean]
-                        / good_pix[select_mean] ** 2
-                    )
-                else:
-                    combined_error = None
-                if sky is not None:
-                    sky[mask] = 0
-                    combined_sky[select_mean] = (
-                        bn.nansum(sky, 0)[select_mean] / good_pix[select_mean]
-                    )
-                else:
-                    combined_sky = None
-            else:
-                combined_mask = None
-                combined_data = bn.nansum(data, 0) / data.shape[0]
-                if error is not None:
-                    combined_error = numpy.sqrt(
-                        bn.nansum(error**2, 0) / error.shape[0]
-                    )
-                else:
-                    combined_error = None
-                if sky is not None:
-                    combined_sky = bn.nansum(sky, 0) / sky.shape[0]
-                else:
-                    combined_sky = None
+        comb_function = COMB_FUNCTIONS.get(method)
+        if comb_function is None:
+            raise NotImplementedError(f"{method = } not implemented. Try one of {', '.join(list(COMB_FUNCTIONS.keys()))}")
 
-        elif method == "weighted_mean" and error is not None:
-            if mask is not None:
-                good_pix = bn.nansum(numpy.logical_not(mask), 0)
-                select_mean = good_pix > 0
-
-                var = error**2
-                weights = numpy.divide(1, var, out=numpy.zeros_like(var), where=var != 0)
-                weights /= bn.nansum(weights, 0)
-                combined_data[good_pix] = bn.nansum(data[good_pix] * var[good_pix], 0)
-                combined_error[good_pix] = numpy.sqrt(bn.nansum(var[good_pix], 0))
-                combined_mask = ~good_pix
-                combined_error[combined_mask] = replace_error
-                if sky is not None:
-                    combined_sky[good_pix] = bn.nansum(sky[good_pix] * var[good_pix], 0)
-                else:
-                    combined_sky = None
-            else:
-                var = error**2
-                weights = numpy.divide(1, var, out=numpy.zeros_like(var), where=var != 0)
-                weights /= bn.nansum(weights, 0)
-                combined_data = bn.nansum(data * weights, 0)
-                combined_error = numpy.sqrt(bn.nansum(var, 0))
-                combined_mask = None
-                if sky is not None:
-                    combined_sky = bn.nansum(sky * weights, 0)
-                else:
-                    combined_sky = None
-
-        elif method == "median":
-            if mask is not None:
-                good_pix = bn.nansum(numpy.logical_not(mask), 0)
-                combined_data[good_pix] = bn.nanmedian(data[good_pix], 0)
-                combined_mask = ~good_pix
-                if error is not None:
-                    combined_error[good_pix] = numpy.sqrt(bn.nanmedian(error[good_pix] ** 2, 0))
-                    combined_error[combined_mask] = replace_error
-                else:
-                    combined_error = None
-                if sky is not None:
-                    combined_sky[good_pix] = bn.nanmedian(sky[good_pix], 0)
-                else:
-                    combined_sky = None
-            else:
-                combined_data = bn.nanmedian(data, 0)
-                if error is not None:
-                    combined_error = numpy.sqrt(bn.nanmedian(error**2, 0))
-                else:
-                    combined_error = None
-                combined_mask = None
-                if sky is not None:
-                    combined_sky = bn.nanmedian(sky, 0)
-                else:
-                    combined_sky = None
-
-        else:
-            if method == "weighted_mean":
-                raise ValueError(f"Method {method} is not supported when error is None")
-            raise ValueError(f"Method {method} is not supported")
+        combined_data = comb_function(data, 0)
+        combined_sky = comb_function(sky, 0)
+        combined_mask = numpy.logical_or.reduce(mask, 0) if mask is not None else None
+        combined_error = comb_function(error**2, 0)
+        if combined_error is not None:
+            combined_error = numpy.sqrt(combined_error)
 
         # add combined lamps to header
-        new_header = rss_in[0]._header.copy()
+        new_header = rsss[0]._header.copy()
         if new_header["IMAGETYP"] == "flat":
             lamps = CON_LAMPS
         elif new_header["IMAGETYP"] == "arc":
@@ -1591,7 +1482,7 @@ class RSS(FiberRows):
 
         if lamps:
             new_lamps = set()
-            for rss in rss_in:
+            for rss in rsss:
                 for lamp in lamps:
                     if rss._header.get(lamp) == "ON":
                         new_lamps.add(lamp)
@@ -1599,20 +1490,20 @@ class RSS(FiberRows):
                 new_header[lamp] = "ON"
 
         self._data = combined_data
-        self._wave = rss_in[0]._wave
-        self._lsf = rss_in[0]._lsf
+        self._wave = rsss[0]._wave
+        self._lsf = rsss[0]._lsf
         self._header = new_header
         self._mask = combined_mask
         self._error = combined_error
-        self._arc_position_x = rss_in[i]._arc_position_x
-        self._arc_position_y = rss_in[i]._arc_position_y
-        self._shape = rss_in[i]._shape
-        self._size = rss_in[i]._size
-        self._pixels = rss_in[i]._pixels
-        self._fibers = rss_in[i]._fibers
-        self._good_fibers = rss_in[i]._good_fibers
-        self._fiber_type = rss_in[i]._fiber_type
-        self._slitmap = rss_in[i]._slitmap
+        self._arc_position_x = rsss[i]._arc_position_x
+        self._arc_position_y = rsss[i]._arc_position_y
+        self._shape = rsss[i]._shape
+        self._size = rsss[i]._size
+        self._pixels = rsss[i]._pixels
+        self._fibers = rsss[i]._fibers
+        self._good_fibers = rsss[i]._good_fibers
+        self._fiber_type = rsss[i]._fiber_type
+        self._slitmap = rsss[i]._slitmap
         self._sky = combined_sky
 
     def setSpec(self, fiber, spec):
@@ -3142,7 +3033,7 @@ class RSS(FiberRows):
             if self._sky_west_error is not None:
                 self._sky_west_error[self._mask] = numpy.nan
 
-        return self._data, self._error
+        return self
 
     def set_fluxcal(self, fluxcal, source="std"):
         if fluxcal is None:
@@ -3171,30 +3062,29 @@ class RSS(FiberRows):
 
         return Table(trace_dict)
 
-    def coadd_flux(self, wrange):
-        """Return the coadded flux along a given wavelength window for all fibers"""
-
-        if self._wave is None:
-            log.warning("missing wavelength information, not able to consistently coadd flux")
-            return self
-
-        naxis2=self._data.shape[0]
-        wave = self._wave
-        selwave=(wave>=wrange[0])*(wave<=wrange[1])
-        if len(wave.shape) == 1:
-            selwave=numpy.tile(selwave, (naxis2,1))
-        elif len(wave.shape) == 2:
-            pass
+    def coadd_flux(self,  cwave, dwave=6, comb_stat=bn.nanmean, return_xy=False, telescope=None):
+        hw = dwave // 2
+        if self._wave.ndim == 1:
+            wave_sel = (cwave-hw < self._wave) & (self._wave < cwave+hw)
+        elif self._wave.ndim == 2:
+            wave_sel = (cwave-hw < self._wave) & (self._wave < cwave+hw)
         else:
-            raise ValueError(f"wrong wavelength array shape: {wave.shape = }")
+            raise ValueError("self._wave must be either 1D or 2D")
 
-        flux = self._data
-        mask = self._mask
-        flux[mask] = numpy.nan
-        masked = flux*selwave
+        data = self._data.copy()
+        if self._wave.ndim == 1:
+            data[:, ~wave_sel] = numpy.nan
+        elif self._wave.ndim == 2:
+            data[~wave_sel] = numpy.nan
+        data = comb_stat(data, axis=1)
 
-        coadded_flux = numpy.nanmean(masked, axis=1)
-        return coadded_flux
+        if telescope is not None:
+            select_tel = self._slitmap["telescope"] == telescope
+        else:
+            select_tel = numpy.ones_like(data.size, dtype="bool")
+        if return_xy:
+            return data[select_tel], self._slitmap["xpmm"].data[select_tel], self._slitmap["ypmm"].data[select_tel]
+        return data[select_tel]
 
     def get_helio_rv(self, apply_hrv_corr=False):
         """Calculates heliocentric velocity corrections for each telescope and standard fiber
