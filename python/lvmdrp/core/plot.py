@@ -12,7 +12,7 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 import bottleneck as bn
-from astropy.visualization import AsinhStretch, ImageNormalize, PercentileInterval
+from astropy.visualization import AsinhStretch, ImageNormalize, PercentileInterval, simple_norm
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 import warnings
 
@@ -54,6 +54,17 @@ def create_subplots(to_display, flatten_axes=True, **subplots_params):
     if flatten_axes and isinstance(axs, np.ndarray):
         axs = axs.flatten()
     return fig, axs
+
+def set_colorbar(axis, collection):
+    axcb = inset_axes(
+        axis,
+        width="2%",
+        height="40%",
+        loc="upper left",
+    )
+    axcb.tick_params(labelsize="x-small", labelbottom=False, width=0.8, pad=0)
+    plt.colorbar(collection, cax=axcb, orientation="vertical")
+    return axcb
 
 
 def plot_image_shift(ax, image, column_shift, xpos=None, inset_pos=(0.0,1.0-0.32), inset_box=(0.3,0.3), cmap="gray"):
@@ -686,6 +697,33 @@ def plot_fiber_thermal_shift(columns, column_shifts, median_shift, std_shift, ax
         ax.annotate(f"mean: {median_shift:.2f}", (0.9, 0.9), xycoords="axes fraction", ha="right", va="top", color="tab:red")
         ax.annotate(f"std: {std_shift:.2f}", (0.9, 0.85), xycoords="axes fraction", ha="right", va="top", color="tab:red")
 
+    return ax
+
+def display_ifu(rss=None, x=None, y=None, z=None, cwave=None, dwave=None, comb_stat=None, telescope=None,
+                marker_size=10, norm_cuts=None, norm_percents=None, cmap="coolwarm", ax=None, return_xyz=False):
+
+    if rss is None and x is not None and y is not None and z is not None:
+        pass
+    elif rss is not None and cwave is not None and dwave is not None and comb_stat is not None:
+        z, x, y = rss.coadd_flux(cwave=cwave, dwave=dwave, comb_stat=comb_stat, telescope=telescope, return_xy=True)
+    else:
+        raise ValueError(f"Either {x = }, {y = } and {z = } or {rss = }, {cwave = }, {dwave = } and {comb_stat = } have to be given")
+
+    if norm_percents is not None:
+        nminmax = dict(zip(("min_percent", "max_percent"), norm_percents))
+    elif norm_cuts is not None:
+        nminmax = dict(zip(("min_cut", "max_cut"), norm_cuts))
+    else:
+        nminmax = dict(zip(("min_percent", "max_percent"), (5.0, 95.0)))
+
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(5, 5), layout="constrained")
+    norm = simple_norm(z, **nminmax)
+    sc = ax.scatter(x, y, c=z, s=marker_size, marker="H", norm=norm, cmap=cmap)
+    set_colorbar(ax, sc)
+
+    if return_xyz:
+        return ax, x, y, z
     return ax
 
 
