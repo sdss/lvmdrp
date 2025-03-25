@@ -13,9 +13,11 @@ from copy import deepcopy as copy
 import numpy as np
 from astropy.table import Table
 from scipy import interpolate
+from scipy.optimize import least_squares
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from matplotlib.gridspec import GridSpec
 
+import itertools as it
 import bottleneck as bn
 from lvmdrp import log
 from lvmdrp.core.constants import SPEC_CHANNELS
@@ -24,7 +26,7 @@ from lvmdrp.core.spectrum1d import Spectrum1D
 from lvmdrp.core.rss import RSS, lvmFrame
 from lvmdrp.core.fluxcal import butter_lowpass_filter
 from lvmdrp.core import dataproducts as dp
-from lvmdrp.core.plot import plt, create_subplots, save_fig
+from lvmdrp.core.plot import plt, create_subplots, display_ifu, save_fig
 from lvmdrp import main as drp
 from astropy import wcs
 from astropy.io import fits
@@ -572,3 +574,321 @@ def combine_twilight_sequence(in_fiberflats: List[str], out_fiberflat: str,
     mflat.writeFitsData(out_fiberflat, replace_masked=False)
 
     return mflat
+
+def _reference_fiber(rss, ref_kind):
+
+    if isinstance(rss, RSS):
+        data = rss._data.copy()
+    elif isinstance(rss, np.ndarray):
+        data = np.atleast_2d(rss).T
+    else:
+        raise TypeError(f"Invalid type for `rss`: {type(rss)}. Expected lvmdrp.core.rss.RSS or numpy array")
+
+    if callable(ref_kind):
+        ref_fiber = ref_kind(data, axis=0)
+    elif isinstance(ref_kind, int):
+        ref_fiber = data[ref_kind, :]
+    else:
+        raise TypeError(f"Invalid type for `ref_kind`: {type(ref_kind)}. Expected an integer or a callable(x, axis)")
+    return ref_fiber
+
+def get_flatfield(rss, ref_kind=lambda x: biweight_location(x, ignore_nan=True), norm_column=None, norm_kind=np.nanmean):
+    ref_fiber = _reference_fiber(rss, ref_kind=ref_kind)
+
+    flatfield = rss / ref_fiber
+    if norm_column is not None:
+        if callable(norm_kind):
+            normalization = norm_kind(flatfield._data[:, norm_column], axis=0)
+        elif isinstance(norm_kind, int):
+            normalization = flatfield._data[norm_kind, norm_column]
+        else:
+            raise TypeError(f"Invalid type for `norm_kind`: {type(norm_kind)}. Expected an integer or a callable(x, axis)")
+    else:
+        normalization = 1.0
+
+    flatfield /= normalization
+    return flatfield, ref_fiber, normalization
+
+def get_flatfield_sequence(rsss, ref_kind=lambda x: biweight_location(x, ignore_nan=True), norm_column=None, norm_kind=np.nanmean):
+    flatfields = []
+    ref_fibers = np.zeros((len(rsss), rsss[0]._pixels.size))
+    normalizations = np.zeros(len(rsss))
+    for i, rss_ in enumerate(rsss):
+        flatfield, ref_fibers[i], normalizations[i] = get_flatfield(rss_, ref_kind=ref_kind, norm_column=norm_column, norm_kind=norm_kind)
+        flatfields.append(flatfield)
+    return flatfields, ref_fibers, normalizations
+
+def normalize_spec(rss, cwave, dwave=6, norm_stat=np.nanmean):
+    slitmap = rss._slitmap
+    sp1_sel = slitmap["spectrographid"] == 1
+    sp2_sel = slitmap["spectrographid"] == 2
+    sp3_sel = slitmap["spectrographid"] == 3
+
+    hw = dwave // 2
+    wave_sel = (cwave-hw < rss._wave)&(rss._wave < cwave+hw)
+    data = rss._data.copy()
+    data[:, ~wave_sel] = np.nan
+    sp1_norm = norm_stat(data[sp1_sel])
+    sp2_norm = norm_stat(data[sp2_sel])
+    sp3_norm = norm_stat(data[sp3_sel])
+
+    rss_n = copy(rss)
+    rss_n._data[sp1_sel] /= sp1_norm
+    rss_n._data[sp2_sel] /= sp2_norm
+    rss_n._data[sp3_sel] /= sp3_norm
+    return rss_n
+
+def fit_lines(spec, cwaves, dwave=6):
+    hw = dwave // 2
+    guess_shift = spec._wave[[np.nanargmax(spec._data*((spec._wave>=skyline-hw)&(skyline+hw>=spec._wave))) for skyline in cwaves]] - cwaves
+    guess_shift = np.median(guess_shift)
+    if spec._lsf is None:
+        fwhm_guess = 2.5
+    else:
+        fwhm_guess = np.nanmean(np.interp(cwaves, spec._wave, spec._lsf))
+    flux, sky_wave, fwhm, bg = spec.fitSepGauss(cwaves+guess_shift, dwave, fwhm_guess, 0.0, [0, np.inf], [-2.5, 2.5], [fwhm_guess - 1.5, fwhm_guess + 1.5], [0.0, np.inf])
+    return flux, sky_wave, fwhm, bg
+
+def fit_lines_slit(rss, cwaves, dwave=6):
+    flux_slit = np.zeros((len(cwaves), rss._fibers))
+    for ifiber in range(rss._fibers):
+        spec = rss[ifiber]
+        if (~np.isfinite(spec._data)|~np.isfinite(spec._error)).all():
+            continue
+        flux, _, _, _ = fit_lines(spec, cwaves, dwave=dwave)
+        flux_slit[:, ifiber] = flux
+    return np.asarray(flux_slit)
+
+def ifu_factors(factors, fibgroups):
+    iid, fid = min(fibgroups), max(fibgroups)
+    ifu = np.ones_like(fibgroups, dtype="float")
+    for spid in range(iid, fid+1):
+        ifu[fibgroups == spid] *= factors[spid-1]
+    return ifu
+
+def ifu_gradient(coeffs, x, y):
+    ncoeffs = len(coeffs)
+    order = int(np.sqrt(ncoeffs))
+
+    G = np.zeros((x.size, ncoeffs))
+    for k, (i, j) in enumerate(it.product(range(order), range(order))):
+        G[:, k] = x**i * y**j
+    ifu = np.dot(G, coeffs)
+    return ifu
+
+def ifu_joint_model(pars, x, y, fibgroups):
+    iid, fid = min(fibgroups), max(fibgroups)
+    nids = fid - iid + 1
+    coeffs, factors = pars[:-nids], pars[-nids:]
+
+    # get IFU gradient model
+    gradient_model = ifu_gradient(coeffs=coeffs, x=x, y=y)
+    # get IFU factors model
+    factors_model = ifu_factors(factors=factors, fibgroups=fibgroups)
+    # joint model
+    model = gradient_model * factors_model
+    return model
+
+def residual(pars, x, y, z, fibgroups):
+    model = ifu_joint_model(pars, x, y, fibgroups)
+    return model - z
+
+def display_ifu_gradient_fit(x, y, z, fibgroups, coeffs, factors):
+    gradient_model = ifu_gradient(coeffs=coeffs, x=x, y=y)
+    factors_model = ifu_factors(factors=factors, fibgroups=fibgroups)
+
+    model = gradient_model * factors_model
+
+    ifus = [factors_model, gradient_model, z, z/model]
+    labels = ["Spec. factors", "Gradient model", "Original exposure", "Flatfielded exposure"]
+    norms = [{}, {}, {}, {"norm_cuts": (0.98, 1.02)}, {"norm_cuts": (0.98, 1.02)}]
+
+    fig, axs = plt.subplots(1, 4, figsize=(15, 5), sharex=True, sharey=True, layout="constrained")
+    plt.xlabel("X (spaxel)", fontsize="xx-large")
+    plt.ylabel("Y (spaxel)", fontsize="xx-large")
+    for i in range(len(ifus)):
+        axs[i].set_title(labels[i], loc="left", fontsize="large")
+        display_ifu(x=x, y=y, z=ifus[i], ax=axs[i], marker_size=30, **norms[i])
+
+    return fig, axs
+
+def fit_ifu_gradient(rss, cwave, dwave=6, guess_coeffs=[0,1,2,3], fib_groupby="spec", display_plots=False):
+
+    if fib_groupby == "spec":
+        groups = [1,2,3]
+    elif fib_groupby == "quad":
+        groups = [1,2,3,4,5,6]
+    fibgroups = np.repeat(groups, rss._fibers // len(groups))
+    fibgroups = fibgroups[rss._slitmap["telescope"]=="Sci"]
+
+    z, x, y = rss.coadd_flux(cwave=cwave, dwave=dwave, return_xy=True, telescope="Sci")
+    z /= np.nanmean(z)
+
+    # mask invalid spaxels if any
+    mask = np.isfinite(z)
+    x, y, z = x[mask], y[mask], z[mask]
+    fibgroups = fibgroups[mask]
+
+    # define guess and boundary values
+    guess_factors = len(groups) * [1]
+    guess = guess_coeffs + guess_factors
+    bound_lower = len(guess_coeffs) * [-np.inf] + len(guess_factors) * [0.0]
+    bound_upper = len(guess_coeffs) * [+np.inf] + len(guess_factors) * [1.0]
+    fit = least_squares(residual, x0=guess, args=(x, y, z, fibgroups), bounds=(bound_lower, bound_upper))
+
+    coeffs = fit.x[:len(guess_coeffs)]
+    factors = fit.x[len(guess_coeffs):]
+
+    if display_plots:
+        display_ifu_gradient_fit(x, y, z, fibgroups, coeffs=coeffs, factors=factors)
+
+    return x, y, z, coeffs, factors
+
+def remove_ifu_gradient(rss, coeffs, factors=None):
+
+    if factors is None:
+        factors = np.ones(rss._fibers, dtype="float")
+
+    rss_corr = copy(rss)
+
+    telescopes = ["Sci", "SkyE", "SkyW", "Spec"]
+    for tel in telescopes:
+        tel_select = rss._slitmap["telescope"] == tel
+        slitmap = rss._slitmap[tel_select]
+        x, y = slitmap["xpmm"], slitmap["ypmm"]
+
+        gradient = ifu_gradient(coeffs=coeffs, x=x, y=y)
+        gradient *= factors[tel_select]
+
+        rss_corr._data[slitmap["fiberid"]-1] /= gradient[:, None]
+        if rss_corr._error is not None:
+            rss_corr._error[slitmap["fiberid"]-1] /= gradient[:, None]
+
+    return rss_corr
+
+def fit_flatfield(twilights, ref_kind=600, norm_cwave=None):
+    """Creates a master fiber flatfield given a set of twilight exposures
+
+    The following steps are followed:
+        - For each exposure:
+            * Normalize by the chosen reference fiber
+            * Normalize by spectrograph at `norm_cwave`
+        - Combine the resulting flatfields into a master
+        - For each exposure:
+            * Apply flatfield to each twilight exposure
+            * Fit gradient and correct each telescope IFU by it
+        - Combine gradient corrected flatfields into final master
+
+    **NOTE:** This algorithm proposed by Guillermo Blanc, will produce a
+    flatfield that fixes the spectrograph shutter timing issue at the cost of a
+    flatfield that fully accounts for spectrograph to spectrograph throughput
+    variations. As a consequence the resulting flatfield will have to be
+    corrected using the same sky line at `norm_cwave` extracted and measured
+    during science reductions, where we expect shutter timing issues to be
+    within 1%.
+
+    **NOTE:** This same procedure could be applied to dome flats, provided we
+    can use >80s exposures to reliably measure the spectrograph to spectrograph
+    throughput. LDLS seem to be the best option.
+
+    Parameters
+    ----------
+    twilights : list[lvmdrp.core.rss.RSS]
+        List of twilight exposures
+    ref_kind : int|callable, optional
+        Position of the reference fiber in RSS or a callable to produce one, by default 600
+    norm_cwave : int|None, optional
+        Normalization wavelength, by default None
+
+    Returns
+    -------
+    lvmdrp.core.rss.RSS
+        Master fiber flatfield
+    """
+
+    log.info(f"calculating raw flatfields out of {len(twilights)} exposures")
+    flats, ref_fibers, normalizations = get_flatfield_sequence(rsss=twilights, ref_kind=ref_kind)
+    log.info(f"normalizing spectrographs at {norm_cwave = :.2f} Angstrom")
+    flats = [normalize_spec(flat, cwave=norm_cwave) for flat in flats]
+
+    log.info("combining raw flatfields")
+    mflat = RSS()
+    mflat.combineRSS(flats, method="median")
+
+    log.info("fitting and normalizing IFU gradient")
+    twilights_flat = copy(twilights)
+    flats_g = []
+    for twilight_flat, flat in zip(twilights_flat, flats):
+        # flatfield twilight
+        twilight_flat = twilight_flat / mflat
+        # fit gradient with spectrograph normalizations (make n-iterations of this or stop when gradient is <1% across) ------
+        x, y, z, coeffs, factors = fit_ifu_gradient(twilight_flat, cwave=norm_cwave)
+        # apply gradient correction
+        flat = remove_ifu_gradient(flat, coeffs=coeffs, factors=None)
+        # --------------------------------------------------------------------------------------------------------------------
+        flats_g.append(flat)
+
+    log.info("calculating gradient-corrected combined flatfield")
+    mflat = RSS()
+    mflat.combineRSS(flats_g, method="median")
+
+    mflat.interpolate_data(axis="X")
+    mflat.interpolate_data(axis="Y")
+
+    return mflat, flats, flats_g
+
+def _choose_sky(rss):
+    telescope = "SkyE" if abs(rss._header["WAVE HELIORV_SKYE"]) < abs(rss._header["WAVE HELIORV_SKYW"]) else "SkyW"
+    print(telescope, rss._header["WAVE HELIORV_SKY?"])
+    return telescope
+
+def fit_skyline_flatfield(sciences, mflat, ref_kind, norm_cwave, norm_fibers=None, display_plots=False):
+
+    if isinstance(sciences, list):
+        log.info(f"fitting sky line correction using {len(sciences)} science frames")
+        science = RSS()
+        science.combineRSS([science / mflat for science in sciences], method="median")
+    elif isinstance(sciences, RSS):
+        log.info(f"fitting sky line correction using a single science exposure: {sciences}")
+        science = sciences / mflat
+    else:
+        raise TypeError(f"Invalid type for `sciences`: {type(sciences)}. Valid types are lvmdrp.core.rss.RSS and list[lvmdrp.core.rss.RSS]")
+
+    science.apply_pixelmask()
+
+    log.info(f"measuring sky line {norm_cwave:.2f} Angstrom")
+    skyline_slit = fit_lines_slit(science, cwaves=[norm_cwave])[0]
+
+    if norm_fibers is not None:
+        assert isinstance(norm_fibers, np.ndarray) and norm_fibers.dtype == bool
+        log.info(f"selecting {norm_fibers.sum()} fibers")
+    else:
+        log.info(f"selecting all {science._fibers} fibers")
+        norm_fibers = np.ones_like(skyline_slit, dtype="bool")
+
+    log.info(f"calculating flatfield slit using {ref_kind = }")
+    ref_skyline = _reference_fiber(skyline_slit[norm_fibers], ref_kind=ref_kind)
+    flatfield_slit = skyline_slit / ref_skyline
+
+
+    log.info("calculating per-spectrograph flatfield correction")
+    flatfield_corr = np.asarray([bn.nanmedian(flatfield_slit[science._slitmap["spectrographid"] == i+1]) for i in range(3)])
+    log.info(f"resulting per-spectrograph corrections: {flatfield_corr.round(4) = }")
+
+    if display_plots:
+        x = mflat._slitmap["fiberid"]
+        # y = (skyline_slit / flatfield_slit / np.repeat(flatfield_corr[:, None], 648))
+        y = skyline_slit / np.repeat(flatfield_corr, 648)
+        mu = np.nanmedian(y)
+        y /= mu
+
+        plt.figure(figsize=(14, 4), layout="constrained")
+        plt.axhspan(0.95, 1.05, lw=0, color="0.7", alpha=0.5)
+        plt.axhspan(0.98, 1.02, lw=0, color="0.7", alpha=0.5)
+        plt.axhspan(0.99, 1.01, lw=0, color="0.7", alpha=0.5)
+        plt.plot(x, y, lw=1)
+        plt.ylim(0.92, 1.08)
+        plt.xlabel("Fiber ID")
+        plt.ylabel(f"Counts ({science._header['BUNIT']})")
+
+    return skyline_slit, flatfield_corr
