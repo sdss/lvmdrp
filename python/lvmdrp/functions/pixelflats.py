@@ -13,9 +13,39 @@ from lvmdrp import main as drp
 from scipy import ndimage as ndi
 
 
-def detrend_pixelflats(mjd, camera, flat_expnums, bias_expnums=None, dark_expnums=None, use_pixmask=False, skip_done=True):
+def rsync_enight(mjds):
+    """rsyncs egineering nights from LCO directly
 
-    frames = md.get_frames_metadata(mjd=mjd, overwrite=False, suffix="fits.gz").query("camera == @camera").sort_values("expnum")
+    Parameters
+    ----------
+    mjds : int|list[int]
+        MJDs to pull from LCO computer
+    """
+    pass
+
+def get_enights_metadata(mjds):
+    """Returns metadata table for given MJDs of engineering nights
+
+    Parameters
+    ----------
+    mjds : list[int]
+        List of MJDs for a given engineering night run
+
+    Returns
+    -------
+    pd.DataFrame
+        Dataframe containing metadata for the given MJDs
+    """
+    mjds = np.atleast_1d(mjds)
+    metadata = []
+    for mjd in mjds:
+        metadata.append(md.get_frames_metadata(mjd, overwrite=False, suffix="fits.gz"))
+    return pd.concat(metadata, axis="index", ignore_index=True).sort_values("expnum")
+
+
+def detrend_pixelflats(mjds, camera, flat_expnums, bias_expnums=None, dark_expnums=None, use_pixmask=True, skip_done=True):
+
+    frames = get_enights_metadata(mjds=mjds).query("camera == @camera").sort_values("expnum")
 
     flats = frames.query("expnum in @flat_expnums")
     if bias_expnums is not None:
@@ -58,8 +88,8 @@ def detrend_pixelflats(mjd, camera, flat_expnums, bias_expnums=None, dark_expnum
 
         # BIAS -----------------------
         if bias.expnum is not None:
-            rbias_path = path.full("lvm_raw", hemi="s", mjd=mjd, camspec=camera, expnum=bias.expnum)
-            pbias_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="p", imagetype="bias", expnum=bias.expnum, camera=camera)
+            rbias_path = path.full("lvm_raw", hemi="s", mjd=bias.mjd, camspec=camera, expnum=bias.expnum)
+            pbias_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=bias.mjd, kind="p", imagetype="bias", expnum=bias.expnum, camera=camera)
             if skip_done and os.path.isfile(pbias_path):
                 pass
             else:
@@ -70,9 +100,9 @@ def detrend_pixelflats(mjd, camera, flat_expnums, bias_expnums=None, dark_expnum
 
         # DARKS ----------------------
         if dark.expnum is not None:
-            rdark_path = path.full("lvm_raw", hemi="s", mjd=mjd, camspec=camera, expnum=dark.expnum)
-            pdark_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="p", imagetype="dark", expnum=dark.expnum, camera=camera)
-            ddark_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", imagetype="dark", expnum=dark.expnum, camera=camera)
+            rdark_path = path.full("lvm_raw", hemi="s", mjd=dark.mjd, camspec=camera, expnum=dark.expnum)
+            pdark_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=dark.mjd, kind="p", imagetype="dark", expnum=dark.expnum, camera=camera)
+            ddark_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=dark.mjd, kind="d", imagetype="dark", expnum=dark.expnum, camera=camera)
             if skip_done and os.path.isfile(pdark_path):
                 pass
             else:
@@ -83,9 +113,9 @@ def detrend_pixelflats(mjd, camera, flat_expnums, bias_expnums=None, dark_expnum
             ddark_path = None
 
         # FLATS ----------------------
-        rflat_path = path.full("lvm_raw", hemi="s", mjd=mjd, camspec=camera, expnum=flat.expnum)
-        pflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="p", imagetype="pixflat", expnum=flat.expnum, camera=camera)
-        dflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", imagetype="pixflat", expnum=flat.expnum, camera=camera)
+        rflat_path = path.full("lvm_raw", hemi="s", mjd=flat.mjd, camspec=camera, expnum=flat.expnum)
+        pflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=flat.mjd, kind="p", imagetype="pixflat", expnum=flat.expnum, camera=camera)
+        dflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=flat.mjd, kind="d", imagetype="pixflat", expnum=flat.expnum, camera=camera)
 
         if skip_done and os.path.isfile(dflat_path):
             pass
@@ -98,12 +128,12 @@ def detrend_pixelflats(mjd, camera, flat_expnums, bias_expnums=None, dark_expnum
     return dflat_paths
 
 
-def combine_pixelflats(mjd, camera, flat_expnums, comb_stat=np.median, median_box=(31,31), skip_done=True):
-    frames = md.get_frames_metadata(mjd=mjd, overwrite=False, suffix="fits.gz").query("camera == @camera").sort_values("expnum")
+def combine_pixelflats(mjds, camera, flat_expnums, comb_stat=np.median, median_box=(31,31), skip_done=True):
+    frames = get_enights_metadata(mjds=mjds).query("camera == @camera").sort_values("expnum")
 
     flats = frames.query("expnum in @flat_expnums")
-    dflat_paths = [path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", imagetype="pixflat", expnum=flat.expnum, camera=camera) for _, flat in flats.iterrows()]
-    cflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="c", imagetype="pixflat", expnum=f"{flats.expnum.min()}_{flats.expnum.max()}", camera=camera)
+    dflat_paths = [path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=flat.mjd, kind="d", imagetype="pixflat", expnum=flat.expnum, camera=camera) for _, flat in flats.iterrows()]
+    cflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=flats.mjd.max(), kind="c", imagetype="pixflat", expnum=f"{flats.expnum.min()}_{flats.expnum.max()}", camera=camera)
 
     if skip_done and os.path.isfile(cflat_path):
         cflat = image_tasks.loadImage(cflat_path)
@@ -121,7 +151,7 @@ def create_pixflats_60171(median_box=(31,31), skip_done=True):
 
     flats = md.get_frames_metadata(mjd=mjd, suffix="fits.gz", overwrite=False).query("expnum in @flat_expnums")
 
-    calibs = drp.get_calib_paths(mjd=60171, from_sanbox=True)
+    calibs = drp.get_calib_paths(mjd=60171, version=drpver, longterm_cals=False)
 
     cameras = flats.camera.unique()
     flat_paths = dict.fromkeys(cameras)
@@ -139,7 +169,7 @@ def create_pixflats_60171(median_box=(31,31), skip_done=True):
                 image_tasks.preproc_raw_frame(in_image=rflat_path, out_image=pflat_path, assume_imagetyp="pixflat")
                 image_tasks.detrend_frame(in_image=pflat_path, out_image=dflat_path, in_bias=calibs["bias"][flat.camera], reject_cr=False, normalize_pixelflat=False)
 
-        cflat, cflat_path = combine_pixelflats(mjd=mjd, camera=camera, flat_expnums=flat_expnums, median_box=median_box, skip_done=skip_done)
+        cflat, cflat_path = combine_pixelflats(mjds=mjd, camera=camera, flat_expnums=flat_expnums, median_box=median_box, skip_done=skip_done)
 
         mflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="m", imagetype="pixflat", expnum=f"{flats.expnum.min()}_{flats.expnum.max()}", camera=camera)
         fflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="f", imagetype="pixflat", expnum=f"{flats.expnum.min()}_{flats.expnum.max()}", camera=camera)
@@ -176,6 +206,7 @@ def compare_pixflats(mjd, camera, flat_expnums_a, flat_expnums_b):
     dframe_b_path = test_pixflats(mjd=mjd, camera=camera, flat_expnums=flat_expnums_b)
 
     # TODO: do some plots
+    #   - From a selection of features in flats, compare the two
 
 
 def do_for_quadrants(image_path, func, *args, **kwargs):
@@ -195,30 +226,6 @@ def do_for_quadrants(image_path, func, *args, **kwargs):
         f_image.setSection(sec, quad)
 
     return image, f_image
-
-    # with fits.open(image_path) as hdul:
-    #     image = hdul['PRIMARY'].data
-    #     error = hdul['ERROR'].data
-    #     mask = hdul['BADPIX'].data
-    #     mask = ~mask*~np.isfinite(image)*error<=0
-    #     ivar = np.where(mask, 1.0/(error**2), 0.0)
-    #     header = hdul[0].header
-    #     q1x, q1y = _parse_ccd_section(header['HIERARCH AMP1 TRIMSEC'])
-    #     q2x, q2y = _parse_ccd_section(header['HIERARCH AMP2 TRIMSEC'])
-    #     q3x, q3y = _parse_ccd_section(header['HIERARCH AMP3 TRIMSEC'])
-    #     q4x, q4y = _parse_ccd_section(header['HIERARCH AMP4 TRIMSEC'])
-    #     _, f1 = func(image[q1y[0]:q1y[1],q1x[0]:q1x[1]], ivar[q1y[0]:q1y[1],q1x[0]:q1x[1]], *args, **kwargs)
-    #     _, f2 = func(image[q2y[0]:q2y[1],q2x[0]:q2x[1]], ivar[q2y[0]:q2y[1],q2x[0]:q2x[1]], *args, **kwargs)
-    #     _, f3 = func(image[q3y[0]:q3y[1],q3x[0]:q3x[1]], ivar[q3y[0]:q3y[1],q3x[0]:q3x[1]], *args, **kwargs)
-    #     _, f4 = func(image[q4y[0]:q4y[1],q4x[0]:q4x[1]], ivar[q4y[0]:q4y[1],q4x[0]:q4x[1]], *args, **kwargs)
-
-    #     filtered = image.copy()*0
-    #     filtered[q1y[0]:q1y[1],q1x[0]:q1x[1]] = f1
-    #     filtered[q2y[0]:q2y[1],q2x[0]:q2x[1]] = f2
-    #     filtered[q3y[0]:q3y[1],q3x[0]:q3x[1]] = f3
-    #     filtered[q4y[0]:q4y[1],q4x[0]:q4x[1]] = f4
-
-    #     return image, filtered, header
 
 
 def median_nan(image, ivar, size=51):
@@ -256,7 +263,7 @@ def filtering(image, ivar, size=51, replace_with_nan=True, debug=False):
         frac = np.sum(mask>0)/float(np.sum(ivar>0))
         if frac<0.05 :
             break
-    print("Used nsig = {}, frac = {:4.3f}".format(nsig,frac))
+    log.info(f"Used nsig = {nsig}, frac = {frac:4.3f}")
 
     # https://github.com/desihub/desispec/blob/main/bin/desi_compute_pixel_flatfield#L619
 
@@ -274,41 +281,29 @@ def filtering(image, ivar, size=51, replace_with_nan=True, debug=False):
 
     return image, smooth
 
+
 def filter_image(image_path):
     return do_for_quadrants(image_path, filtering)
-    #return do_for_quadrants(image_path, median_nan, size=51)
 
 
-def job(mflat_path, pixflat_path, fflat_path):
-    log.info(f"Reading : {mflat_path}")
-    image, filtered = filter_image(mflat_path)
-    flat = image/filtered
-    flat._data = np.where((flat._data>0.01)*(np.isfinite(flat._data)), flat._data, 1.0)
-    # outf = fits.HDUList(fits.PrimaryHDU(filtered))
-    # log.info("Writing :", filt_path)
-    # outf.writeto(filt_path, overwrite=True)
-    # outf.close()
-    log.info(f"Writing : {pixflat_path}")
-    flat.writeFitsData(pixflat_path)
+def get_pixflat(cflat_path, mpixflat_path, fflat_path):
+    log.info(f"filtering input combined flat at {cflat_path}")
+    image, filtered = filter_image(cflat_path)
+    flat = image / filtered
 
-    log.info(f"Writing : {fflat_path}")
+    flat._data = np.where((flat._data > 0.01) & np.isfinite(flat._data), flat._data, 1.0)
+    log.info(f"writing master pixelflat to {mpixflat_path}")
+    flat.writeFitsData(mpixflat_path)
+
+    log.info(f"writing flatfielded flat to {fflat_path}")
     fflat = image / flat
     fflat.writeFitsData(fflat_path)
-
-    # out = fits.HDUList(fits.PrimaryHDU(flat))
-    # fflat = fits.HDUList(fits.PrimaryHDU(image / flat, header=header))
-    # fflat.append(fits.ImageHDU(np.sqrt(image), name="ERROR"))
-    # fflat.append(fits.ImageHDU(np.zeros_like(image, dtype="uint8"), name="BADPIX"))
-    # out.writeto(pixflat_path, overwrite=True)
-    # fflat.writeto(fflat_path, overwrite=True)
-    # out.close()
-    # fflat.close()
 
 
 def create_pixflats(mjd, camera, flat_expnums, dark_expnums=None, bias_expnums=None, median_box=(31,31), skip_done=True):
 
-    detrend_pixelflats(mjd=mjd, camera=camera, flat_expnums=flat_expnums, dark_expnums=dark_expnums, bias_expnums=bias_expnums, skip_done=skip_done, use_pixmask=True)
-    cflat, cflat_path = combine_pixelflats(mjd=mjd, camera=camera, flat_expnums=flat_expnums, median_box=median_box, skip_done=skip_done)
+    detrend_pixelflats(mjds=mjd, camera=camera, flat_expnums=flat_expnums, dark_expnums=dark_expnums, bias_expnums=bias_expnums, skip_done=skip_done, use_pixmask=True)
+    cflat, cflat_path = combine_pixelflats(mjds=mjd, camera=camera, flat_expnums=flat_expnums, median_box=median_box, skip_done=skip_done)
 
     mflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="m", imagetype="pixflat", expnum=f"{flat_expnums.min()}_{flat_expnums.max()}", camera=camera)
     fflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="f", imagetype="pixflat", expnum=f"{flat_expnums.min()}_{flat_expnums.max()}", camera=camera)
