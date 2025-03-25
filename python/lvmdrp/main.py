@@ -1466,6 +1466,60 @@ def reduce_2d(mjd, calibrations, expnums=None, exptime=None, cameras=CAMERAS,
                                         parallel=parallel_run)
 
 
+def reduce_1d(expnum, calibrations, replace_with_nan=True, sub_straylight=True, skip_done=True, keep_ancillary=False):
+
+    mjd = mjd_from_expnum(expnum)[0]
+    frames = get_frames_metadata(mjd)
+    frames.query("expnum == @expnum", inplace=True)
+    frames.sort_values(["camera"], inplace=True)
+
+    frame = frames.iloc[0].to_dict()
+    cameras = frames.camera.unique()
+
+    for camera in cameras:
+        frame["camera"] = camera
+        if sub_straylight:
+            dframe_path = path.full("lvm_anc", drpver=drpver, kind="l", imagetype=frame["imagetyp"], **frame)
+        else:
+            dframe_path = path.full("lvm_anc", drpver=drpver, kind="d", imagetype=frame["imagetyp"], **frame)
+        xframe_path = path.full("lvm_anc", drpver=drpver, kind="x", imagetype=frame["imagetyp"], **frame)
+        os.makedirs(os.path.dirname(xframe_path), exist_ok=True)
+
+        # define calibration frames paths
+        mtrace_path = calibrations["trace"][camera]
+        mwidth_path = calibrations["width"][camera]
+        mmodel_path = calibrations["model"][camera]
+
+        # extract 1d spectra
+        if skip_done and os.path.isfile(xframe_path):
+            continue
+        else:
+            extract_spectra(in_image=dframe_path, out_rss=xframe_path, in_trace=mtrace_path, in_fwhm=mwidth_path, in_model=mmodel_path, method="optimal", parallel=1)
+
+    mwave_groups = group_calib_paths(calibrations["wave"])
+    mlsf_groups = group_calib_paths(calibrations["lsf"])
+    for channel in "brz":
+        frame["camera"] = f"{channel}[123]"
+        xframe_paths = sorted(path.expand('lvm_anc', drpver=drpver, kind='x', imagetype=frame["imagetyp"], **frame))
+        frame["camera"] = channel
+        xframe_path = path.full('lvm_anc', drpver=drpver, kind='x', imagetype=frame["imagetyp"], **frame)
+        wframe_path = path.full('lvm_anc', drpver=drpver, kind='w', imagetype=frame["imagetyp"], **frame)
+        mwave_paths = mwave_groups[channel]
+        mlsf_paths = mlsf_groups[channel]
+
+        # stack spectrographs
+        if skip_done and os.path.isfile(wframe_path):
+            continue
+        else:
+            stack_spectrographs(in_rsss=xframe_paths, out_rss=xframe_path)
+            if not os.path.exists(xframe_path):
+                log.error(f'No stacked file found: {xframe_path}. Skipping remaining pipeline.')
+                continue
+
+            # wavelength calibrate
+            create_pixel_table(in_rss=xframe_path, out_rss=wframe_path, in_waves=mwave_paths, in_lsfs=mlsf_paths)
+
+
 def science_reduction(expnum: int, use_longterm_cals: bool = False,
                       sky_weights: Tuple[float, float] = None,
                       fluxcal_method: str = 'STD',
