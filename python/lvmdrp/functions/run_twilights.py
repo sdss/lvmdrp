@@ -638,18 +638,34 @@ def normalize_spec(rss, cwave, dwave=6, norm_stat=np.nanmean):
     rss_n._data[sp3_sel] /= sp3_norm
     return rss_n
 
-def fit_lines(spec, cwaves, dwave=6):
-    hw = dwave // 2
-    guess_shift = spec._wave[[np.nanargmax(spec._data*((spec._wave>=skyline-hw)&(skyline+hw>=spec._wave))) for skyline in cwaves]] - cwaves
-    guess_shift = np.median(guess_shift)
+def fit_lines(spec, cwaves, dwave=6, display_plots=False):
+
+    cwaves_ = np.atleast_1d(cwaves) if np.isscalar(cwaves) else cwaves
+
     if spec._lsf is None:
         fwhm_guess = 2.5
     else:
-        fwhm_guess = np.nanmean(np.interp(cwaves, spec._wave, spec._lsf))
-    flux, sky_wave, fwhm, bg = spec.fitSepGauss(cwaves+guess_shift, dwave, fwhm_guess, 0.0, [0, np.inf], [-2.5, 2.5], [fwhm_guess - 1.5, fwhm_guess + 1.5], [0.0, np.inf])
+        fwhm_guess = np.nanmean(np.interp(cwaves_, spec._wave, spec._lsf))
+
+    if display_plots:
+        fig, axs = plt.subplots(1, len(cwaves_), figsize=(5, 5*len(cwaves_)), layout="constrained")
+        axs = np.atleast_1d(axs)
+    else:
+        axs = None
+
+    flux, sky_wave, fwhm, bg = spec.fitSepGauss(cwaves_, dwave,
+                                                fwhm_guess, 0.0,
+                                                [0, np.inf],
+                                                [-2.5, 2.5],
+                                                [fwhm_guess - 1.5, fwhm_guess + 1.5],
+                                                [0.0, np.inf],
+                                                axs=axs)
     return flux, sky_wave, fwhm, bg
 
-def fit_lines_slit(rss, cwaves, dwave=6, norm_fibers=None):
+def fit_lines_slit(rss, cwaves, dwave=6, norm_fibers=None, display_plots=False):
+
+    cwaves_ = np.atleast_1d(cwaves) if np.isscalar(cwaves) else cwaves
+
     if norm_fibers is not None:
         assert isinstance(norm_fibers, np.ndarray) and norm_fibers.dtype == bool
         log.info(f"selecting {norm_fibers.sum()} fibers")
@@ -657,7 +673,7 @@ def fit_lines_slit(rss, cwaves, dwave=6, norm_fibers=None):
         log.info(f"selecting all {rss._fibers} fibers")
         norm_fibers = np.ones(rss._fibers, dtype="bool")
 
-    flux_slit = np.zeros((len(cwaves), rss._fibers)) + np.nan
+    flux_slit = np.zeros((len(cwaves_), rss._fibers)) + np.nan
     for ifiber in range(rss._fibers):
         if not norm_fibers[ifiber]:
             continue
@@ -667,7 +683,7 @@ def fit_lines_slit(rss, cwaves, dwave=6, norm_fibers=None):
             continue
 
         try:
-            flux, _, _, _ = fit_lines(spec, cwaves, dwave=dwave)
+            flux, _, _, _ = fit_lines(spec, cwaves_, dwave=dwave, display_plots=display_plots)
         except ValueError as e:
             log.error(f"error while fitting fiber {ifiber}: {e}")
         flux_slit[:, ifiber] = flux
