@@ -3637,11 +3637,13 @@ class Spectrum1D(Header):
             if axs is not None:
                 axs[i].axvspan(x[0], x[-1], alpha=0.1, fc="0.5", label="reg. of masking")
                 axs[i] = gauss.plot(self._wave[select], self._data[select], mask=self._mask[select], ax=axs[i])
+                axs[i].axhline(bg[i], ls="--", color="tab:blue", lw=1)
                 axs[i].axvline(cent_guess[i], ls="--", lw=1, color="tab:red", label="cent. guess")
                 axs[i].set_title(f"{axs[i].get_title()} @ {cent[i]:.1f} (pixel)")
                 axs[i].text(0.05, 0.9, f"flux = {flux[i]:.2f}", va="bottom", ha="left", transform=axs[i].transAxes, fontsize=11)
                 axs[i].text(0.05, 0.8, f"cent = {cent[i]:.2f}", va="bottom", ha="left", transform=axs[i].transAxes, fontsize=11)
                 axs[i].text(0.05, 0.7, f"fwhm = {fwhm[i]:.2f}", va="bottom", ha="left", transform=axs[i].transAxes, fontsize=11)
+                axs[i].text(0.05, 0.6, f"bg   = {bg[i]:.2f}", va="bottom", ha="left", transform=axs[i].transAxes, fontsize=11)
                 axs[i].legend(loc="upper right", frameon=False, fontsize=11)
 
         return flux, cent, fwhm, bg
