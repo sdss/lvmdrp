@@ -47,12 +47,14 @@ from scipy import interpolate
 from scipy import stats
 from scipy import ndimage
 from scipy.ndimage import median_filter
+from scipy.signal import find_peaks
 import re
 import pandas as pd
 
 from astropy.stats import biweight_location, biweight_scale
 from astropy.table import Table
 from astropy.io import fits
+from astroquery.gaia import Gaia
 
 from lvmdrp.core.rss import RSS, loadRSS, lvmFFrame
 from lvmdrp.core.spectrum1d import Spectrum1D
@@ -402,10 +404,20 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         master_sky = rss_tmp.eval_master_sky()
         # iterate over standard stars
         gaia_ids = []
+        gaia_Teff = []
+        gaia_logg = []
+        gaia_z = []
         for s in stds:
             nn, fiber, gaia_id, exptime, secz = s  # unpack standard star tuple
             gaia_ids.append(gaia_id)
             fibers.append(fiber)
+
+            job = Gaia.launch_job(f"SELECT teff_gspspec, logg_gspspec, mh_gspspec FROM gaiadr3.astrophysical_parameters WHERE source_id = {gaia_id} ")
+            r = job.get_results()
+            gaia_Teff.append(r['teff_gspspec'])
+            gaia_logg.append(r['logg_gspspec'])
+            gaia_z.append(r['mh_gspspec'])
+            # print(r)
 
             # find the fiber with our spectrum of that Gaia star, if it is not in the current spectrograph, continue
             select = rss_tmp._slitmap["orig_ifulabel"] == fiber
@@ -461,7 +473,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             #std_errors.append(error_tmp/best_continuum)
             error_tmp = 1 / error_tmp**0.5
             std_errors.append(error_tmp / best_continuum)
-            normalized_spectra.append(spec_tmp_convolved/best_continuum) # normalized std spestra degraded to 2A for all
+            normalized_spectra.append(spec_tmp_convolved/best_continuum) # normalized std spestra degraded to 2.3A for all
                                                                         # standards in each channel
             best_continuum = ndimage.filters.median_filter(spec_tmp, int(160/0.5), mode="nearest")
             normalized_spectra_unconv.append(spec_tmp/best_continuum)
@@ -470,7 +482,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             #print(nn, fiber)
         #print('!!! one band',std_spectra)
 
-        normalized_spectra_all_bands.append(normalized_spectra) # normalized std spestra degraded to 2A for all
+        normalized_spectra_all_bands.append(normalized_spectra) # normalized std spestra degraded to 2.3A for all
                                                                         # standards and all channels together
         normalized_spectra_unconv_all_bands.append(normalized_spectra_unconv)
         std_errors_all_bands.append(std_errors)
@@ -493,7 +505,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         mask_tellurics = mask_tellurics | ((std_wave_all > telluric_tab['Start'][i] - 10) & (
                     std_wave_all < telluric_tab['End'][i] + 10))
 
-    # table with masks for tellurics, overlaps between channels, and bluest part og the spectra - used for model matchind
+    # table with masks for tellurics, overlaps between channels, and bluest part og the spectra - used for model matching
     br_overlap_start = 5775
     br_overlap_end = 5825
     rz_overlap_start = 7520 #7520
@@ -577,11 +589,65 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
 
         chi2 = [np.nansum((flux_std_logscale_shifted[mask_good] -
                             model_norm[model_ind][mask_good]) ** 2 /(log_std_errors_normalized_all[mask_good] ** 2
-                            + model_norm_err[model_ind][mask_good] ** 2)) for model_ind in range(len(model_norm))]
+                            + (0.05*model_norm[model_ind][mask_good]) ** 2))/len(flux_std_logscale_shifted[mask_good]) for model_ind in range(len(model_norm))]
+        # print(len(flux_std_logscale_shifted[mask_good]))
         best_id = np.argmin(chi2)
-        chi2_wave_bestfit = (flux_std_logscale_shifted[mask_good] -
-                            model_norm[best_id][mask_good]) ** 2 /(log_std_errors_normalized_all[mask_good] ** 2
-                            + model_norm_err[best_id][mask_good] ** 2)
+        chi2_bestfit = np.nansum((flux_std_logscale_shifted[mask_good] -
+                            model_norm[best_id][mask_good]) ** 2 / (log_std_errors_normalized_all[mask_good] ** 2
+                                + (0.05*model_norm[best_id][mask_good]) ** 2))/len(flux_std_logscale_shifted[mask_good])
+        chi2_wave_bestfit_0 = (flux_std_logscale_shifted[mask_good] -
+                           model_norm[best_id][mask_good]) ** 2 / (log_std_errors_normalized_all[mask_good] ** 2
+                            + (0.05*model_norm[best_id][mask_good]) ** 2)
+        print(f'Initial chi2={chi2_bestfit:.2f}, initial model {best_id}')
+        # chi2_wave_bestfit = (flux_std_logscale_shifted[mask_good] -
+        #                     model_norm[best_id][mask_good]) ** 2 /(log_std_errors_normalized_all[mask_good] ** 2
+        #                     + model_norm_err[best_id][mask_good] ** 2)
+        # print(mask_good)
+        mask_chi2 = ~np.zeros_like(chi2_wave_bestfit_0, dtype=bool)
+
+        do_mask = 1
+        # chi2_bestfit = np.nansum((flux_std_logscale_shifted[mask_good][mask_chi2] -
+        #                      model_norm[best_id][mask_good][mask_chi2]) ** 2 / (log_std_errors_normalized_all[mask_good][mask_chi2] ** 2
+        #                                                              + (0.05*model_norm[best_id][mask_good][mask_chi2]) ** 2))/len(flux_std_logscale_shifted[mask_good])
+        if do_mask:
+            chi2_threshold = 20
+            peak_width = 10
+            # mask_chi2 = chi2_wave_bestfit_0 <= chi2_threshold
+            peaks, properties = find_peaks(chi2_wave_bestfit_0, height=chi2_threshold, width=[1,peak_width])
+            # print(peaks, properties)
+            for peak in peaks:
+                width = int(properties["widths"][np.where(peaks == peak)][0])  # Use detected width
+                start = max(0, peak - width)
+                end = min(len(chi2_wave_bestfit_0), peak + width)
+                # print('Start and end of the mask',start, end)
+                mask_chi2[start:end] = False
+            # print(mask_chi2)
+            # Apply mask
+            # masked_spectrum = np.ma.masked_array(spectrum, mask)
+
+            chi2 = [np.nansum((flux_std_logscale_shifted[mask_good][mask_chi2] -
+                               model_norm[model_ind][mask_good][mask_chi2]) ** 2 / (log_std_errors_normalized_all[mask_good][mask_chi2] ** 2
+                                + (0.05*model_norm[best_id][mask_good][mask_chi2]) ** 2))/len(flux_std_logscale_shifted[mask_good]) for model_ind in range(len(model_norm))]
+            best_id = np.argmin(chi2)
+            chi2_bestfit = np.nansum((flux_std_logscale_shifted[mask_good][mask_chi2] -
+                               model_norm[best_id][mask_good][mask_chi2]) ** 2 / (log_std_errors_normalized_all[mask_good][mask_chi2] ** 2
+                                + (0.05*model_norm[best_id][mask_good][mask_chi2]) ** 2))/len(flux_std_logscale_shifted[mask_good][mask_chi2])
+            chi2_wave_bestfit = (flux_std_logscale_shifted[mask_good][mask_chi2] -
+                               model_norm[best_id][mask_good][mask_chi2]) ** 2 / (log_std_errors_normalized_all[mask_good][mask_chi2] ** 2
+                                + (0.05*model_norm[best_id][mask_good][mask_chi2]) ** 2)
+            npix_masked = len(chi2_wave_bestfit_0) - len(chi2_wave_bestfit)
+            print(f'Masked {npix_masked} pixels')
+            print(f'After additional masking {chi2_bestfit:.2f}')
+        else:
+            chi2_wave_bestfit = chi2_wave_bestfit_0
+            mask_chi2 = ~np.zeros_like(chi2_wave_bestfit, dtype=bool)
+
+
+        # mask_chi2 = chi2_wave_bestfit < 100
+        # print(len(chi2_wave_bestfit[mask_chi2]), len(mask_good), len(mask_good[mask_good]))
+
+        # print(mask_chi2)
+        # print(mask_good)
         # print(len(flux_std_logscale_shifted[mask_good]))
         # print(len(log_std_wave_all))
         # print(f'masked:{len(log_std_wave_all[mask_good])}')
@@ -652,25 +718,41 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             plt.title(label=f'Gaia ID: {gaia_ids[i]}. Model: {model_names[best_id]}',fontsize=14)
             plt.plot(log_std_wave_all, flux_std_unconv_logscale, label=f'Observed standard spectrum from fiber '
                                                                 f'{fibers[i]}, continuum normalized', linewidth=1)
-            sigma1 = flux_std_logscale + log_std_errors_normalized_all
-            sigma2 = flux_std_logscale - log_std_errors_normalized_all
-            plt.plot(log_std_wave_all, sigma2, '--', color='grey', lw=0.5)
-            plt.plot(log_std_wave_all, sigma1, '--', color='grey', lw=0.5)
-            plt.fill_between(log_std_wave_all, sigma1, sigma2, alpha=0.2, color='blue')
+            sigma1 = flux_std_unconv_logscale + log_std_errors_normalized_all #flux_std_logscale
+            sigma2 = flux_std_unconv_logscale - log_std_errors_normalized_all
+            # plt.plot(log_std_wave_all, sigma2, '--', color='grey', lw=0.1)
+            # plt.plot(log_std_wave_all, sigma1, '--', color='grey', lw=0.1)
+            # plt.fill_between(log_std_wave_all, sigma1, sigma2, alpha=0.2, color='blue')
 
             # plt.plot(std_wave_all,
             #         np.interp(std_wave_all, std_wave_all*(1+vel_offset_b/3e5), normalized_std_on_gaia_cont_single), label='Shifted')
             plt.plot(log_model_wave_all+log_shift_full, log_model_norm_convolved_spec_lsf, label='Best-fit model spectrum, '
                                                 'continuum normalized and convolved with std LSF', alpha=0.7, linewidth=1) # shifted
+            sigma1_model = log_model_norm_convolved_spec_lsf + (0.05*log_model_norm_convolved_spec_lsf)
+            sigma2_model = log_model_norm_convolved_spec_lsf - (0.05*log_model_norm_convolved_spec_lsf)
+
             for n_mask, mask_box in enumerate(mask_for_fit):
                 if n_mask == 0:
                     plt.axvspan(np.log(mask_box[0]), np.log(mask_box[1]), alpha=0.2, color='grey',
                                 label='Mask used for model matching')
                 else:
                     plt.axvspan(np.log(mask_box[0]), np.log(mask_box[1]), alpha=0.2, color='grey')
+
             xlim = [8.18, 9.2]
             # xlim = [3600,9800] model_params[2]
             ylim = [0.1,1.6]
+
+            if do_mask:
+                for peak in peaks:
+                    width = int(properties["widths"][np.where(peaks == peak)][0])  # Use detected width
+                    start = max(0, peak - width)
+                    end = min(len(chi2_wave_bestfit_0), peak + width)
+                    plt.axvspan(log_std_wave_all[mask_good][start], log_std_wave_all[mask_good][end],
+                                ymin=ylim[0], ymax=ylim[1], alpha=0.2, color='red')
+            # if do_mask:
+            #     plt.fill_between(log_std_wave_all[mask_good]+log_shift_full, -1,
+            #                      1.1*np.max(chi2_wave_bestfit), where=(chi2_wave_bestfit_0 >= chi2_threshold), color='gray', alpha=0.2)
+
             Teff = model_info['Teff'][best_id]
             logg = model_info['logg'][best_id]
             Z = model_info['Z'][best_id]
@@ -679,95 +761,166 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
                                 f'[Fe/H] = {Z},'
                                 f'Vel. correction = {vel_shift_full:.2f} km/s', size=14)
             plt.text((xlim[1] - xlim[0]) * 0.15 + xlim[0], (ylim[1] - ylim[0]) * 0.82 + ylim[0],
-                                f'Mean chi2 = {np.nanmean(chi2_wave_bestfit):.1f}', size=14)
+                                f'Reduced chi2 = {chi2_bestfit:.4f}', size=14)
             plt.xlim(xlim)
             plt.ylim(ylim)
             plt.xlabel("wavelength [A]", size=14)
+            plt.ylabel("Normalized Flux", size=14)
             show_wl = np.arange(3500, 10000, 500)
             plt.xticks(np.log(show_wl), labels=show_wl.astype(str), size=14)
             plt.yticks(fontsize=14)
             plt.legend(loc="lower right", fontsize=14)
 
             plt.subplot(612)
-            plt.plot(log_std_wave_all[mask_good], chi2_wave_bestfit, label='chi2', linewidth=1)
+            plt.plot(log_std_wave_all[mask_good][mask_chi2]+log_shift_full, chi2_wave_bestfit,
+                     label=f'chi2, threshold for masking chi2 = {chi2_threshold}; {npix_masked} pixels were masked', linewidth=1)
             for n_mask, mask_box in enumerate(mask_for_fit):
                 if n_mask == 0:
-                    plt.axvspan(np.log(mask_box[0]), np.log(mask_box[1]), alpha=0.2, color='grey',
-                                label='Mask used for model matching')
+                    plt.axvspan(np.log(mask_box[0]), np.log(mask_box[1]), alpha=0.2, color='grey')
                 else:
                     plt.axvspan(np.log(mask_box[0]), np.log(mask_box[1]), alpha=0.2, color='grey')
-            ylim = [0,500]
+                    # mask_chi2[start:end] = True
+
+                    # plt.fill_between(log_std_wave_all[mask_good]+log_shift_full, -1,
+                    #                  1.1*np.max(chi2_wave_bestfit), where=(chi2_wave_bestfit_0 >= chi2_threshold), color='gray', alpha=0.2)
+
+            ylim = [-1,1.1*np.max(chi2_wave_bestfit)]
+
+            if do_mask:
+                for peak in peaks:
+                    width = int(properties["widths"][np.where(peaks == peak)][0])  # Use detected width
+                    start = max(0, peak - width)
+                    end = min(len(chi2_wave_bestfit_0), peak + width)
+                    plt.axvspan(log_std_wave_all[mask_good][start], log_std_wave_all[mask_good][end],
+                                ymin=ylim[0], ymax=ylim[1], alpha=0.2, color='red')
+
             plt.xlim(xlim)
             plt.ylim(ylim)
             plt.xlabel("wavelength [A]", size=14)
+            plt.ylabel("Chi2", size=14)
             show_wl = np.arange(3500, 10000, 500)
             plt.xticks(np.log(show_wl), labels=show_wl.astype(str), size=14)
             plt.yticks(fontsize=14)
             plt.legend(fontsize=14)
 
             plt.subplot(613)
-            plt.plot(log_std_wave_all, flux_std_unconv_logscale, label='Observed', linewidth=1)
-            plt.plot(log_std_wave_all, sigma2, '--', color='grey', lw=0.5)
-            plt.plot(log_std_wave_all, sigma1, '--', color='grey', lw=0.5)
+            plt.plot(log_std_wave_all, flux_std_unconv_logscale, linewidth=1)
+            plt.plot(log_std_wave_all, sigma2, '--', color='grey', lw=0.1)
+            plt.plot(log_std_wave_all, sigma1, '--', color='grey', lw=0.1)
             plt.fill_between(log_std_wave_all, sigma1, sigma2, alpha=0.2, color='blue')
-            plt.plot(log_model_wave_all+log_shift_full, log_model_norm_convolved_spec_lsf, label='Model shifted', alpha=0.7, linewidth=1)
+
+            plt.plot(log_model_wave_all+log_shift_full, log_model_norm_convolved_spec_lsf, alpha=0.7, linewidth=1)
+            plt.plot(log_model_wave_all+log_shift_full, sigma2_model, '--', color='grey', lw=0.1)
+            plt.plot(log_model_wave_all+log_shift_full, sigma1_model, '--', color='grey', lw=0.1)
+            plt.fill_between(log_model_wave_all+log_shift_full, sigma1_model, sigma2_model, alpha=0.2, color='orange')
             #plt.plot(log_std_wave_all-log_shift_b, flux_model_logscale, label='Model shifted')
             for mask_box in mask_for_fit:
                 plt.axvspan(np.log(mask_box[0]), np.log(mask_box[1]), alpha=0.2, color='grey')
-            #plt.legend()
+            plt.plot(log_std_wave_all[mask_good][mask_chi2]+log_shift_full, chi2_wave_bestfit/100, label='chi2/100', linewidth=1)
+
+            # xlim = [np.min(log_std_wave_all), 8.2]
             xlim = [8.24, 8.38]
+            # xlim = [8.2, 8.38]
+            # ylim = [0.1,1.6]
+            ylim = [-0.1, 1.6]
             show_wl = np.arange(3700, 4400, 100)
+
+            if do_mask:
+                for peak in peaks:
+                    width = int(properties["widths"][np.where(peaks == peak)][0])  # Use detected width
+                    start = max(0, peak - width)
+                    end = min(len(chi2_wave_bestfit_0), peak + width)
+                    plt.axvspan(log_std_wave_all[mask_good][start], log_std_wave_all[mask_good][end],
+                                ymin=ylim[0], ymax=ylim[1], alpha=0.2, color='red')
+            plt.legend(fontsize=14)
+            # show_wl = np.arange(5000, 6000, 100)
             plt.xticks(np.log(show_wl), labels=show_wl.astype(str), size=14)
             plt.yticks(fontsize=14)
-            ylim = [0.1,1.6]
-            # ylim = [0.9, 1.2]
             plt.text((xlim[1] - xlim[0]) * 0.03 + xlim[0], (ylim[1] - ylim[0]) * 0.9 + ylim[0], 'b channel', size=14)
             plt.xlim(xlim)
             plt.ylim(ylim)
             plt.xlabel("wavelength [A]", size=14)
+            plt.ylabel("Normalized Flux", size=14)
 
             plt.subplot(614)
             plt.plot(log_std_wave_all, flux_std_unconv_logscale, label='Observed', linewidth=1)
             #plt.plot(log_model_wave_all, flux_model_logscale, label='Model')
-            plt.plot(log_std_wave_all, sigma2, '--', color='grey', lw=0.5)
-            plt.plot(log_std_wave_all, sigma1, '--', color='grey', lw=0.5)
+            plt.plot(log_std_wave_all, sigma2, '--', color='grey', lw=0.1)
+            plt.plot(log_std_wave_all, sigma1, '--', color='grey', lw=0.1)
             plt.fill_between(log_std_wave_all, sigma1, sigma2, alpha=0.2, color='blue')
+
             plt.plot(log_std_wave_all+log_shift_full, log_model_norm_convolved_spec_lsf, label='Model shifted', alpha=0.7, linewidth=1)
+            plt.plot(log_model_wave_all+log_shift_full, sigma2_model, '--', color='grey', lw=0.1)
+            plt.plot(log_model_wave_all+log_shift_full, sigma1_model, '--', color='grey', lw=0.1)
+            plt.fill_between(log_model_wave_all+log_shift_full, sigma1_model, sigma2_model, alpha=0.2, color='orange')
+
             for mask_box in mask_for_fit:
                 plt.axvspan(np.log(mask_box[0]), np.log(mask_box[1]), alpha=0.2, color='grey')
-            #plt.legend()
-            # xlim = [8.66, 8.8]
+            plt.plot(log_std_wave_all[mask_good][mask_chi2]+log_shift_full, chi2_wave_bestfit/100, label='chi2/100', linewidth=1)
+           #plt.legend()
+            # xlim = [8.78, 8.82]
             # xlim = [8.66, 8.92] #~whole channel
             xlim = [8.69, 8.8]
-            ylim = [0.2, 1.5]
+            # ylim = [0.2, 1.5]
+            ylim = [-0.1, 1.5]
             show_wl = np.arange(5700, 6700, 100)
+            if do_mask:
+                for peak in peaks:
+                    width = int(properties["widths"][np.where(peaks == peak)][0])  # Use detected width
+                    start = max(0, peak - width)
+                    end = min(len(chi2_wave_bestfit_0), peak + width)
+                    plt.axvspan(log_std_wave_all[mask_good][start], log_std_wave_all[mask_good][end],
+                                ymin=ylim[0], ymax=ylim[1], alpha=0.2, color='red')
+                    # print('Start mask',log_std_wave_all[start]+log_shift_full, 'end mask', log_std_wave_all[end]+log_shift_full)
+            # show_wl = np.arange(5000, 7000, 100)
             plt.xticks(np.log(show_wl), labels=show_wl.astype(str), size=14)
             plt.yticks(fontsize=14)
             plt.text((xlim[1] - xlim[0]) * 0.03 + xlim[0], (ylim[1] - ylim[0]) * 0.9 + ylim[0], 'r channel', size=14)
             plt.xlim(xlim)
             plt.ylim(ylim)
             plt.xlabel("wavelength [A]", size=14)
+            plt.ylabel("Normalized Flux", size=14)
 
             plt.subplot(615)
             plt.plot(log_std_wave_all, flux_std_unconv_logscale, label='Observed', linewidth=1)
-            plt.plot(log_std_wave_all, sigma2, '--', color='grey', lw=0.5)
-            plt.plot(log_std_wave_all, sigma1, '--', color='grey', lw=0.5)
+            plt.plot(log_std_wave_all, sigma2, '--', color='grey', lw=0.1)
+            plt.plot(log_std_wave_all, sigma1, '--', color='grey', lw=0.1)
             plt.fill_between(log_std_wave_all, sigma1, sigma2, alpha=0.2, color='blue')
             #plt.plot(log_model_wave_all, flux_model_logscale, label='Model')
+
             plt.plot(log_std_wave_all+log_shift_full, log_model_norm_convolved_spec_lsf, label='Model shifted', alpha=0.7, linewidth=1)
+            plt.plot(log_model_wave_all+log_shift_full, sigma2_model, '--', color='grey', lw=0.1)
+            plt.plot(log_model_wave_all+log_shift_full, sigma1_model, '--', color='grey', lw=0.1)
+            plt.fill_between(log_model_wave_all+log_shift_full, sigma1_model, sigma2_model, alpha=0.2, color='orange')
+
             for mask_box in mask_for_fit:
                 plt.axvspan(np.log(mask_box[0]), np.log(mask_box[1]), alpha=0.2, color='grey')
+            plt.plot(log_std_wave_all[mask_good][mask_chi2]+log_shift_full, chi2_wave_bestfit/100, label='chi2/100', linewidth=1)
+            # if do_mask:
+            #     plt.fill_between(log_std_wave_all[mask_good] + log_shift_full, chi2_wave_bestfit.min(),
+            #                  chi2_wave_bestfit.max(), where=(chi2_wave_bestfit_0 >= chi2_threshold), color='gray',
+            #                  alpha=0.2,
+            #                  label="Masked Region")
             #plt.legend()
-            # xlim = [9.02, 9.16]
             xlim = [9.035, 9.1]
-            ylim = [0.2, 1.5]
+            ylim = [-0.1, 1.5]
             show_wl = np.arange(8300, 9500, 100)
+
+            if do_mask:
+                for peak in peaks:
+                    width = int(properties["widths"][np.where(peaks == peak)][0])  # Use detected width
+                    start = max(0, peak - width)
+                    end = min(len(chi2_wave_bestfit_0), peak + width)
+                    plt.axvspan(log_std_wave_all[mask_good][start], log_std_wave_all[mask_good][end],
+                                ymin=ylim[0], ymax=ylim[1], alpha=0.2, color='red')
+
             plt.xticks(np.log(show_wl), labels=show_wl.astype(str), size=14)
             plt.yticks(fontsize=14)
             plt.text((xlim[1] - xlim[0]) * 0.03 + xlim[0], (ylim[1] - ylim[0]) * 0.9 + ylim[0], 'z channel', size=14)
             plt.xlim(xlim)
             plt.ylim(ylim)
             plt.xlabel("wavelength [A]", size=14)
+            plt.ylabel("Normalized Flux", size=14)
             # plt.ylabel(size=14)
 
             plt.subplot(616)
@@ -778,26 +931,183 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             # plt.plot(std_wave_all, std_norm_unconv)
             # plt.plot(std_wave_all, model_shifted_norm_convolved_spec_lsf)
             # plt.plot(std_wave_all, std_norm_unconv/model_shifted_norm_convolved_spec_lsf, label='Observed normalised/model normalised')
-            plt.plot(std_wave_all, model_flux_resampled * np.median(model_to_gaia), label='Model', linewidth=1)
-            plt.plot(std_wave_all,model_convolved_to_gaia * np.median(model_to_gaia), label='Model, convolved with Gaia LSF', linewidth=1)
-            plt.plot(std_wave_all, stdflux, label='Gaia', linewidth=1)
+            plt.plot(std_wave_all, model_flux_resampled * np.mean(model_to_gaia), label='Model', linewidth=1)
+            plt.plot(std_wave_all,model_convolved_to_gaia * np.mean(model_to_gaia), label='Model, convolved with Gaia LSF', linewidth=1)
+            plt.plot(std_wave_all, stdflux, label=f'Gaia, Teff={gaia_Teff[i][0]:.0f}, logg={gaia_logg[i][0]:.1f}, [Fe/H]={gaia_z[i][0]:.1f}', linewidth=1)
             # plt.plot(log_std_wave_all+log_shift_full, log_model_norm_convolved_spec_lsf, label='Model shifted', alpha=0.7)
             #plt.plot(log_std_wave_all+log_shift_z, flux_model_logscale, label='Model shifted')
             # for mask_box in mask_for_fit:
             #    plt.axvspan((mask_box[0]), (mask_box[1]), alpha=0.2, color='grey')
             plt.legend(fontsize=14)
-            plt.xlim(3600,9800)
+            plt.xlim(3500,10000)
             #plt.gca().set_ylim(bottom=0)
             # plt.ylim(0.5, 1.6)
             plt.xlabel("wavelength [A]", size=14)
-            # plt.ylabel("Flux, erg/s/cm^2/A", size=14)
+            plt.ylabel("Flux, erg/s/cm^2/A", size=14)
             plt.xticks(fontsize=14)
             plt.yticks(fontsize=14)
 
             #plt.show()
             fig_path = in_rss[0]
             fig_path = f"{fig_path.replace('lvm-hobject-b', 'lvm-hobject')}"
-            save_fig(plt.gcf(), product_path=fig_path, to_display=False, figure_path="qa/model_matching", label=f"matching_std{i}")
+            if do_mask:
+                save_fig(plt.gcf(), product_path=fig_path, to_display=False, figure_path="qa/model_matching", label=f"matching_std{i}")
+            else:
+                save_fig(plt.gcf(), product_path=fig_path, to_display=False, figure_path="qa/model_matching",
+                         label=f"matching_std{i}_nomask_chi2")
+
+        plot_tmp=0
+        if plot_tmp:
+
+            fig = plt.figure(figsize=(14, 20))
+
+            plt.subplot(511)
+            plt.plot(log_std_wave_all, flux_std_unconv_logscale, label='Observed', linewidth=1)
+            plt.plot(log_std_wave_all, sigma2, '--', color='grey', lw=0.5)
+            plt.plot(log_std_wave_all, sigma1, '--', color='grey', lw=0.5)
+            plt.fill_between(log_std_wave_all, sigma1, sigma2, alpha=0.2, color='blue')
+
+            plt.plot(log_model_wave_all+log_shift_full, log_model_norm_convolved_spec_lsf, label='Model shifted', alpha=0.7, linewidth=1)
+            # plt.plot(log_model_wave_all+log_shift_full, sigma2_model, '--', color='grey', lw=0.5)
+            # plt.plot(log_model_wave_all+log_shift_full, sigma1_model, '--', color='grey', lw=0.5)
+            # plt.fill_between(log_model_wave_all+log_shift_full, sigma1_model, sigma2_model, alpha=0.2, color='orange')
+            # #plt.plot(log_std_wave_all-log_shift_b, flux_model_logscale, label='Model shifted')
+            for mask_box in mask_for_fit:
+                plt.axvspan(np.log(mask_box[0]), np.log(mask_box[1]), alpha=0.2, color='grey')
+            plt.plot(log_std_wave_all[mask_good][mask_chi2]+log_shift_full, chi2_wave_bestfit*10, label='chi2*10', linewidth=1)
+            #plt.legend()
+            # xlim = [8.24, 8.38]
+            xlim = [8.33, 8.44]
+            # show_wl = np.arange(3700, 4400, 100)
+            show_wl = np.arange(4000, 5000, 100)
+            plt.xticks(np.log(show_wl), labels=show_wl.astype(str), size=14)
+            plt.yticks(fontsize=14)
+            # ylim = [0.1,1.6]
+            ylim = [-0.1, 1.6]
+            plt.text((xlim[1] - xlim[0]) * 0.03 + xlim[0], (ylim[1] - ylim[0]) * 0.9 + ylim[0], 'b channel', size=14)
+            plt.xlim(xlim)
+            plt.ylim(ylim)
+            plt.xlabel("wavelength [A]", size=14)
+            plt.ylabel("Normalized Flux", size=14)
+
+            plt.subplot(512)
+            plt.plot(log_std_wave_all, flux_std_unconv_logscale, label='Observed', linewidth=1)
+            plt.plot(log_std_wave_all, sigma2, '--', color='grey', lw=0.1)
+            plt.plot(log_std_wave_all, sigma1, '--', color='grey', lw=0.1)
+            plt.fill_between(log_std_wave_all, sigma1, sigma2, alpha=0.2, color='blue')
+
+            plt.plot(log_model_wave_all+log_shift_full, log_model_norm_convolved_spec_lsf, label='Model shifted', alpha=0.7, linewidth=1)
+            plt.plot(log_model_wave_all+log_shift_full, sigma2_model, '--', color='grey', lw=0.1)
+            plt.plot(log_model_wave_all+log_shift_full, sigma1_model, '--', color='grey', lw=0.1)
+            plt.fill_between(log_model_wave_all+log_shift_full, sigma1_model, sigma2_model, alpha=0.2, color='orange')
+            #plt.plot(log_std_wave_all-log_shift_b, flux_model_logscale, label='Model shifted')
+            for mask_box in mask_for_fit:
+                plt.axvspan(np.log(mask_box[0]), np.log(mask_box[1]), alpha=0.2, color='grey')
+            plt.plot(log_std_wave_all[mask_good][mask_chi2], chi2_wave_bestfit*10, label='chi2*10', linewidth=1)
+            #plt.legend()
+            # xlim = [8.24, 8.38]
+            xlim = [8.55, 8.66]
+            # show_wl = np.arange(3700, 4400, 100)
+            show_wl = np.arange(5000, 6000, 100)
+            plt.xticks(np.log(show_wl), labels=show_wl.astype(str), size=14)
+            plt.yticks(fontsize=14)
+            # ylim = [0.1,1.6]
+            ylim = [-0.1, 1.6]
+            plt.text((xlim[1] - xlim[0]) * 0.03 + xlim[0], (ylim[1] - ylim[0]) * 0.9 + ylim[0], 'r channel', size=14)
+            plt.xlim(xlim)
+            plt.ylim(ylim)
+            plt.xlabel("wavelength [A]", size=14)
+            plt.ylabel("Normalized Flux", size=14)
+
+            plt.subplot(513)
+            plt.plot(log_std_wave_all, flux_std_unconv_logscale, label='Observed', linewidth=1)
+            #plt.plot(log_model_wave_all, flux_model_logscale, label='Model')
+            plt.plot(log_std_wave_all, sigma2, '--', color='grey', lw=0.1)
+            plt.plot(log_std_wave_all, sigma1, '--', color='grey', lw=0.1)
+            plt.fill_between(log_std_wave_all, sigma1, sigma2, alpha=0.2, color='blue')
+
+            plt.plot(log_std_wave_all+log_shift_full, log_model_norm_convolved_spec_lsf, label='Model shifted', alpha=0.7, linewidth=1)
+            plt.plot(log_model_wave_all+log_shift_full, sigma2_model, '--', color='grey', lw=0.1)
+            plt.plot(log_model_wave_all+log_shift_full, sigma1_model, '--', color='grey', lw=0.1)
+            plt.fill_between(log_model_wave_all+log_shift_full, sigma1_model, sigma2_model, alpha=0.2, color='orange')
+
+            for mask_box in mask_for_fit:
+                plt.axvspan(np.log(mask_box[0]), np.log(mask_box[1]), alpha=0.2, color='grey')
+            plt.plot(log_std_wave_all[mask_good][mask_chi2], chi2_wave_bestfit*10, label='chi2*10', linewidth=1)
+            #plt.legend()
+            xlim = [8.78, 8.83]
+            # xlim = [8.66, 8.92] #~whole channel
+            # xlim = [8.69, 8.8]
+            # ylim = [0.2, 1.5]
+            ylim = [-0.1, 1.5]
+            # show_wl = np.arange(5700, 6700, 100)
+            show_wl = np.arange(5000, 7000, 100)
+            plt.xticks(np.log(show_wl), labels=show_wl.astype(str), size=14)
+            plt.yticks(fontsize=14)
+            plt.text((xlim[1] - xlim[0]) * 0.03 + xlim[0], (ylim[1] - ylim[0]) * 0.9 + ylim[0], 'r channel', size=14)
+            plt.xlim(xlim)
+            plt.ylim(ylim)
+            plt.xlabel("wavelength [A]", size=14)
+            plt.ylabel("Normalized Flux", size=14)
+
+            plt.subplot(514)
+            plt.plot(log_std_wave_all, flux_std_unconv_logscale, label='Observed', linewidth=1)
+            plt.plot(log_std_wave_all, sigma2, '--', color='grey', lw=0.1)
+            plt.plot(log_std_wave_all, sigma1, '--', color='grey', lw=0.1)
+            plt.fill_between(log_std_wave_all, sigma1, sigma2, alpha=0.2, color='blue')
+            #plt.plot(log_model_wave_all, flux_model_logscale, label='Model')
+
+            plt.plot(log_std_wave_all+log_shift_full, log_model_norm_convolved_spec_lsf, label='Model shifted', alpha=0.7, linewidth=1)
+            plt.plot(log_model_wave_all+log_shift_full, sigma2_model, '--', color='grey', lw=0.1)
+            plt.plot(log_model_wave_all+log_shift_full, sigma1_model, '--', color='grey', lw=0.1)
+            plt.fill_between(log_model_wave_all+log_shift_full, sigma1_model, sigma2_model, alpha=0.2, color='orange')
+
+            for mask_box in mask_for_fit:
+                plt.axvspan(np.log(mask_box[0]), np.log(mask_box[1]), alpha=0.2, color='grey')
+            plt.plot(log_std_wave_all[mask_good][mask_chi2], chi2_wave_bestfit*10, label='chi2*10', linewidth=1)
+            #plt.legend()
+            xlim = [8.95, 9.0]
+            # ylim = [0.2, 1.5]
+            ylim = [-0.1, 1.5]
+            show_wl = np.arange(7000, 9500, 100)
+            plt.xticks(np.log(show_wl), labels=show_wl.astype(str), size=14)
+            plt.yticks(fontsize=14)
+            plt.text((xlim[1] - xlim[0]) * 0.03 + xlim[0], (ylim[1] - ylim[0]) * 0.9 + ylim[0], 'z channel', size=14)
+            plt.xlim(xlim)
+            plt.ylim(ylim)
+            plt.xlabel("wavelength [A]", size=14)
+            plt.ylabel("Normalized Flux", size=14)
+
+            plt.subplot(515)
+            plt.plot(log_std_wave_all, flux_std_unconv_logscale, label='Observed', linewidth=1)
+            plt.plot(log_std_wave_all, sigma2, '--', color='grey', lw=0.1)
+            plt.plot(log_std_wave_all, sigma1, '--', color='grey', lw=0.1)
+            plt.fill_between(log_std_wave_all, sigma1, sigma2, alpha=0.2, color='blue')
+            #plt.plot(log_model_wave_all, flux_model_logscale, label='Model')
+
+            plt.plot(log_std_wave_all+log_shift_full, log_model_norm_convolved_spec_lsf, label='Model shifted', alpha=0.7, linewidth=1)
+            plt.plot(log_model_wave_all+log_shift_full, sigma2_model, '--', color='grey', lw=0.1)
+            plt.plot(log_model_wave_all+log_shift_full, sigma1_model, '--', color='grey', lw=0.1)
+            plt.fill_between(log_model_wave_all+log_shift_full, sigma1_model, sigma2_model, alpha=0.2, color='orange')
+
+            for mask_box in mask_for_fit:
+                plt.axvspan(np.log(mask_box[0]), np.log(mask_box[1]), alpha=0.2, color='grey')
+            plt.plot(log_std_wave_all[mask_good][mask_chi2], chi2_wave_bestfit*10, label='chi2*10', linewidth=1)
+            #plt.legend()
+            xlim = [9.035, 9.1]
+            # ylim = [0.2, 1.5]
+            ylim = [-0.1, 1.5]
+            show_wl = np.arange(8300, 9500, 100)
+            plt.xticks(np.log(show_wl), labels=show_wl.astype(str), size=14)
+            plt.yticks(fontsize=14)
+            plt.text((xlim[1] - xlim[0]) * 0.03 + xlim[0], (ylim[1] - ylim[0]) * 0.9 + ylim[0], 'z channel', size=14)
+            plt.xlim(xlim)
+            plt.ylim(ylim)
+            plt.xlabel("wavelength [A]", size=14)
+
+            fig_path = in_rss[0]
+            fig_path = f"{fig_path.replace('lvm-hobject-b', 'lvm-hobject')}"
+            save_fig(plt.gcf(), product_path=fig_path, to_display=False, figure_path="qa/model_matching", label=f"matching_std{i}_tmp")
 
         # calculating sensitivity curves
     for n_chan, chan in enumerate('brz'):
@@ -823,17 +1133,19 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             sens_tmp = calc_sensitivity_from_model(w[n_chan], std_spectra_all_bands[n_chan][i], lsf_all_bands[n_chan][i],
                                                    model_good[best_id], model_to_gaia_median[i], log_shift_full) #model_names[best_id]
             wgood, sgood = fluxcal.filter_channel(w[n_chan], sens_tmp, 3, method='savgol')
-            if chan == 'b':
-                win = 150
-                ylim = [0, 0.3e-11]
-            elif chan == 'r':
-                win = 70
-                ylim = [0, 0.5e-12]
-            else:
-                win = 15
-                ylim = [0, 0.5e-12]
-            s = interpolate.make_smoothing_spline(wgood, sgood, lam=win)
+            # if chan == 'b':
+            #     win = 150
+            #     ylim = [0, 0.3e-11]
+            # elif chan == 'r':
+            #     win = 70
+            #     ylim = [0, 0.5e-12]
+            # else:
+            #     win = 15
+            #     ylim = [0, 0.5e-12]
+            s = interpolate.make_smoothing_spline(wgood, sgood, lam=1e4) #lam=win
             sens0 = s(w[n_chan]).astype(np.float32)
+            # wgood, sgood = fluxcal.filter_channel(w, sens, 2) #for std
+            # s = interpolate.make_smoothing_spline(wgood, sgood, lam=1e4)
 
             # calculate the normalization of the average (known) sensitivity curve in a broad band
             lvmflux = fluxcal.spec_to_LVM_flux(chan, w[n_chan], std_spectra_all_bands[n_chan][i]*sens0)
@@ -848,7 +1160,8 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             fig_path = in_rss[n_chan]
             if plot:
                 plt.plot(wgood, sgood*sens_coef, ".k", markersize=2, zorder=-999)
-                plt.plot(w[n_chan], sens, linewidth=1, zorder=-999)
+                plt.plot(w[n_chan], sens, linewidth=1, zorder=-999, label = fibers[i])
+                plt.legend()
 
 
         res_mod_pd = res_mod.to_pandas().values
