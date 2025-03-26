@@ -40,8 +40,7 @@ from lvmdrp.core.sky import (
     optimize_sky,
     run_skycorr,
     run_skymodel,
-    skymodel_pars_header,
-    get_telescope_shadowheight,
+    sky_pars_header,
 )
 from lvmdrp.core.spectrum1d import Spectrum1D, find_continuum
 from lvmdrp import log, path, __version__ as drpver
@@ -611,7 +610,7 @@ def sepContinuumLine_drp(
             int(np.ceil((sky_spec._wave / np.diff(sky_spec._wave).min()).max())),
         )
         # BUG: implement missing parameters in this call of run_skymodel
-        skymodel_pars = skymodel_pars_header(sky_spec._header)
+        skymodel_pars = sky_pars_header(sky_spec._header)
         inst_pars, model_pars, sky_model = run_skymodel(
             limlam=[sky_spec._wave.min() / 1e4, sky_spec._wave.max() / 1e4],
             dlam=resample_step / 1e4,
@@ -763,7 +762,7 @@ def evalESOSky_drp(
     )
 
     # get skymodel parameters from header
-    skymodel_pars = skymodel_pars_header(header=sky_spec._header)
+    skymodel_pars = sky_pars_header(header=sky_spec._header)
 
     # TODO: move unit and data type conversions to within the run_skymodel routine
     inst_pars, model_pars, sky_model = run_skymodel(
@@ -1436,22 +1435,10 @@ def interpolate_sky( in_frame: str, out_rss: str = None, display_plots: bool = F
     new_rss.set_supersky(superskies)
     new_rss.set_supersky_error(supererrors)
 
-    # update header metadata
-    new_rss._header.update(skymodel_pars_header(new_rss._header))
+    # update header metadata for sky and skymodel pars
+    new_rss._header.update(sky_pars_header(new_rss._header))
 
-    # TODO: add MSOLFLUX to headers. Pull data from here:
-    # https://spaceweather.gc.ca/forecast-prevision/solar-solaire/solarflux/sx-5-en.php
     # TODO: add same parameters for std *fibers*
-
-    new_rss._header["HIERARCH GEOCORONAL SKYW_SH_HGHT"] = (
-        np.round(get_telescope_shadowheight(new_rss._header, telescope="SKYW"), 5), "height of Earth's shadow (km)" 
-    )
-    new_rss._header["HIERARCH GEOCORONAL SKYE_SH_HGHT"] = (
-        np.round(get_telescope_shadowheight(new_rss._header, telescope="SKYE"), 5), "height of Earth's shadow (km)" 
-    )
-    new_rss._header["HIERARCH GEOCORONAL SCI_SH_HGHT"] = (
-        np.round(get_telescope_shadowheight(new_rss._header, telescope="SCI"), 5), "height of Earth's shadow (km)" 
-    )
 
     # write output RSS
     log.info(f"writing output RSS file '{os.path.basename(out_rss)}'")
@@ -1541,8 +1528,6 @@ def combine_skies(in_rss: str, out_rss, sky_weights: Tuple[float, float] = None)
 
     # write output sky-subtracted RSS
     log.info(f"writing output RSS file '{os.path.basename(out_rss)}'")
-    rss.appendHeader(sky_e._header["SKYMODEL*"])
-    rss.appendHeader(sky_e._header["GEOCORONAL*"])
     rss.setHdrValue("SKYEW", w_e, "SkyE weight for STD star sky subtraction")
     rss.setHdrValue("SKYWW", w_w, "SkyW weight for STD star sky subtraction")
     rss.set_sky(sky_east=sky_e._data, sky_east_error=sky_e._error,
@@ -1608,7 +1593,7 @@ def quick_sky_subtraction(in_cframe, out_sframe, skymethod: str = 'farlines_near
     log.info(f"loading {in_cframe} for sky subtraction")
 
     cframe = lvmCFrame.from_file(in_cframe)
-    
+
     # read sky table hdu
     sky_hdu = prep_input_simplesky_mean(in_cframe)
 

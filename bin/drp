@@ -6,13 +6,14 @@ import os
 import pathlib
 import shutil
 from itertools import groupby
+from typing import List
 
 import click
 import cloup
 from cloup.constraints import mutually_exclusive, RequireExactly, IsSet, If
 
 from lvmdrp.core.constants import CALIBRATION_MATCH
-from lvmdrp.main import run_drp, reduce_file, check_daily_mjd, parse_mjds, read_expfile
+from lvmdrp.main import run_drp, reduce_file, check_daily_mjd, parse_mjds, read_expfile, create_drpall, cache_gaia_spectra
 from lvmdrp.functions.skyMethod import configureSkyModel_drp
 from lvmdrp.utils.metadata import get_frames_metadata, get_master_metadata
 from lvmdrp.utils.cluster import run_cluster
@@ -122,13 +123,15 @@ def cli():
 @click.option('-2d', '--skip-2d', is_flag=True, default=False, help='Skip preprocessing and detrending')
 @click.option('-1d', '--skip-1d', is_flag=True, default=False, help='Skip astrometry, straylight subtraction and extraction')
 @click.option('-p1d', '--skip-post-1d', is_flag=True, default=False, help='Skip wavelength calibration, flatfielding, sky processing and flux calibration')
+@click.option('-da', '--skip-drpall', is_flag=True, default=False, help='Skip create/update drpall summary file')
 @click.option('-c', '--clean-ancillary', is_flag=True, default=False, help='Remove ancillary paths after run')
 @click.option('-d', '--debug-mode', is_flag=True, default=False, help='Set debug mode on to run using aperture extraction and skip CR rejection')
+@click.option('--force-run', is_flag=True, default=False, help='force reduction even if the exposure was flagged as BAD by the QC pipeline')
 @cloup.constraint(mutually_exclusive, ['mjd', 'mjd_list', 'mjd_range'])
 # @cloup.constraint(RequireExactly(1), ['mjd', 'mjd_list', 'mjd_range'])
 @cloup.constraint(mutually_exclusive, ['expnum', 'exp_list', 'exp_range'])
 def run(mjd, mjd_list, mjd_range, with_cals, no_sci, expnum, exp_list, exp_range, exp_file, fluxcal_method,
-        skip_2d, skip_1d, skip_post_1d, clean_ancillary, debug_mode):
+        skip_2d, skip_1d, skip_post_1d, skip_drpall, clean_ancillary, debug_mode, force_run):
     """ Run the DRP reduction for a given MJD or range of MJDs
 
     Run the DRP for an MJD or range of MJDs.  Various flags and options are available
@@ -149,8 +152,10 @@ def run(mjd, mjd_list, mjd_range, with_cals, no_sci, expnum, exp_list, exp_range
             skip_2d=skip_2d,
             skip_1d=skip_1d,
             skip_post_1d=skip_post_1d,
+            skip_drpall=skip_drpall,
             clean_ancillary=clean_ancillary,
-            debug_mode=debug_mode)
+            debug_mode=debug_mode,
+            force_run=force_run)
 
 
 # register full DRP command
@@ -201,15 +206,24 @@ def metacli():
 
 
 @cloup.command('regenerate', short_help='Regenerate the frames metadata file')
-@click.option('-m', '--mjd', type=int, help='the MJD to regenerate the metadata for')
+@click.option('-m', '--mjd', type=int, default=None, help='the MJD to regenerate the metadata for (by default all MJDs)')
+@click.option('-l', '--mjd-list', type=int, multiple=True, help='a list of specific MJDs to regenerate metadata for')
+@click.option('-r', '--mjd-range', type=str, help='a range of MJDs to regenerate metadata for')
 @click.option('-a', '--masters', is_flag=True, default=False, help='Flag to regenerate the masters metadata')
-@cloup.constraint(If(~IsSet('masters'), then=RequireExactly(1)), ['mjd'])
-def regen(mjd: int, masters: bool):
+def regen(mjd: int, mjd_list: List[int], mjd_range: str, masters: bool):
     """ Regenerate the raw or master frames metadata file """
     if masters:
         get_master_metadata(overwrite=True)
     else:
-        get_frames_metadata(mjd=mjd, overwrite=True)
+        # parse given MJD arguments
+        mjds = parse_mjds(mjd=mjd or mjd_list or mjd_range or None)
+        # get all MJDs if no MJD argument given
+        mjds = mjds or sorted([int(mjd) for mjd in os.listdir(os.getenv('LVM_DATA_S')) if mjd.isdigit()])
+        if not isinstance(mjds, (list, tuple)):
+            mjds = [mjds]
+
+        for mjd in mjds:
+            get_frames_metadata(mjd=mjd, overwrite=True)
 
 
 metacli.add_command(regen)
@@ -372,6 +386,27 @@ def cluster(mjd_list, mjd_range, expnum, exp_list, exp_range, exp_file, nodes, p
     # submit the cluster job
     run_cluster(mjds=mjds, expnums=expnums, nodes=nodes, ppn=ppn, walltime=walltime, alloc=alloc, submit=submit,
                 run_calibs=run_calibs, drp_options=drp_options)
+
+
+@cli.command('summary', short_help='Creates the drpall summary file for the given version of the pipeline')
+@click.option('--drp-version', type=str, default=None, help='DRP version for which a drpall summary file will be created')
+@click.option('-o', '--overwrite', is_flag=True, default=False, help='Overwrites any existing drpall file before creating a new one')
+def summary(drp_version, overwrite):
+    """ Creates the DRP summary file for a given version of the DRP """
+
+    create_drpall(drp_version=drp_version, overwrite=overwrite)
+
+
+@cli.command(short_help='Caches Gaia XP spectra for science field calibration')
+@click.option('-m', '--mjd', type=int, help='an MJD to reduce')
+@click.option('-l', '--mjd-list', type=int, multiple=True, help='a list of specific MJDs to reduce')
+@click.option('-r', '--mjd-range', type=str, help='a range of MJDs to reduce')
+@click.option("--min-acquired", type=int, default=999, help='minimum number of standard stars acquired to skip caching')
+@click.option('--dry-run', is_flag=True, default=False)
+def cache_gaia_xp(mjd, mjd_list, mjd_range, min_acquired, dry_run):
+    """"Caches Gaia XP spectra for science field calbration"""
+    mjds = mjd or mjd_list or mjd_range
+    cache_gaia_spectra(mjds=mjds, dry_run=dry_run, min_acquired=min_acquired)
 
 
 if __name__ == "__main__":

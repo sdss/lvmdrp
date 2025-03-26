@@ -14,6 +14,22 @@ from lvmdrp.core.spectrum1d import Spectrum1D, _cross_match_float
 from lvmdrp.core.plot import plt
 
 
+def fillin_gap(x, distances, inplace=False):
+    """Fills in NaN values maintaining given distances
+    """
+    if inplace:
+        x_ = x
+    else:
+        x_ = x.copy()
+    igaps, = numpy.where(numpy.isnan(x))
+    for igap in igaps:
+        if igap == 0:
+            x_[igap] = x_[igap+1] - distances[igap+1]
+            continue
+        x_[igap] = x_[igap-1] + distances[igap]
+    return x_
+
+
 def _read_fiber_ypix(peaks_file):
     """
     Read peaks file and return the fiber number, pixel position, subpixel position
@@ -530,12 +546,12 @@ class FiberRows(Header, PositionTable):
         """
         if data_dim is not None:
             # create empty  data array and set number of fibers
-            self._data = numpy.zeros(data_dim, dtype=numpy.float32)
+            self._data = numpy.zeros(data_dim, dtype=numpy.float32) + numpy.nan
             self._fibers = self._data.shape[0]
 
         if data_dim is not None:
             # create empty  error array
-            self._error = numpy.zeros(data_dim, dtype=numpy.float32)
+            self._error = numpy.zeros(data_dim, dtype=numpy.float32) + numpy.nan
 
         if data_dim is not None:
             # create empty mask all pixel assigned bad
@@ -870,6 +886,9 @@ class FiberRows(Header, PositionTable):
         bg = numpy.ones((self._fibers, nlines), dtype=numpy.float32) * numpy.nan
         masked = numpy.zeros((self._fibers, nlines), dtype="bool")
 
+        # define pixel distance between lines, fairly constant fiber-to-fiber
+        lines_dist = numpy.asarray([0.0] + numpy.diff(ref_cent).tolist())
+
         stretch_min, stretch_max, stretch_steps = 0.998, 1.002, 40
 
         spec = self.getSpec(ref_fiber)
@@ -920,7 +939,7 @@ class FiberRows(Header, PositionTable):
                 log.warning(f"   bg   = {numpy.round(bg[i],3)}")
 
             last_spec = copy(spec)
-            last_cent = copy(cent_wave[i])
+            last_cent = fillin_gap(cent_wave[i], distances=lines_dist, inplace=False)
 
         last_spec = copy(self.getSpec(ref_fiber))
         last_cent = copy(cent_wave[ref_fiber])
@@ -964,7 +983,7 @@ class FiberRows(Header, PositionTable):
                 log.warning(f"   bg   = {numpy.round(bg[i],3)}")
 
             last_spec = copy(spec)
-            last_cent = copy(cent_wave[i])
+            last_cent = fillin_gap(cent_wave[i], distances=lines_dist, inplace=False)
 
         fibers = numpy.arange(self._fibers)
         return fibers, flux, cent_wave, fwhm, masked
@@ -1093,7 +1112,7 @@ class FiberRows(Header, PositionTable):
         poly_all_table = []
         for i in range(self._fibers):
             good_pix = numpy.logical_not(self._mask[i, :])
-            good_sam = ~numpy.isnan(samples[i, :])
+            good_sam = numpy.isfinite(samples[i, :])
             if numpy.sum(good_pix) >= deg + 1 and good_sam.sum() / good_sam.size > min_samples_frac:
                 # select the polynomial class
                 poly_cls = Spectrum1D.select_poly_class(poly_kind)
@@ -1116,6 +1135,7 @@ class FiberRows(Header, PositionTable):
                     self._data = numpy.clip(self._data, clip[0], clip[1])
                 self._mask[i, :] = False
             else:
+                log.warning(f"fiber {i} does not meet criteria: {good_pix.sum() = } >= {deg + 1 = } or {good_sam.sum() / good_sam.size = } > {min_samples_frac = }")
                 self._mask[i, :] = True
 
         return numpy.asarray(pix_table), numpy.asarray(poly_table), numpy.asarray(poly_all_table)

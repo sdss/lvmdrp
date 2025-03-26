@@ -139,8 +139,13 @@ def get_XP_spectra(expnum, ra_tile, dec_tile, lim_mag=14.0, n_spec=15, GAIA_CACH
     #
     # get XP spectra and cache the calibrated spectra
     #
+
+    cols = r.colnames
+    new_cols = [col.lower() for col in cols]
+    r.rename_columns(cols, new_cols)
+
     sampling=np.arange(336., 1021., 2.)
-    ids = [line['SOURCE_ID'] for line in r]
+    ids = [line['source_id'] for line in r]
     if GAIA_CACHE_DIR is None or path.exists(GAIA_CACHE_DIR + f'/{expnum}_XP_spec.pickle') is False:
         calibrated_spectra, _ = gaiaxpy.calibrate(ids, truncation=False, save_file=False)
         if GAIA_CACHE_DIR is not None:

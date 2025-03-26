@@ -219,17 +219,17 @@ hdu6:
       name: ypix_b
       type: uint32
       description: the y coordinate in pixels of the fiber at column 2000 for channel b
-      unit: pixels
+      unit: pix
     YPIX_R:
       name: ypix_r
       type: uint32
       description: the y coordinate in pixels of the fiber at column 2000 for channel r
-      unit: pixels
+      unit: pix
     YPIX_Z:
       name: ypix_z
       type: uint32
       description: the y coordinate in pixels of the fiber at column 2000 for channel z
-      unit: pixels
+      unit: pix
     FIBSTATUS:
       name: fibstatus
       type: uint16

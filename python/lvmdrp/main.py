@@ -31,10 +31,11 @@ from lvmdrp.functions.imageMethod import (preproc_raw_frame, create_master_frame
 from lvmdrp.functions.rssMethod import (determine_wavelength_solution, create_pixel_table, apply_fiberflat,
                                         resample_wavelength, shift_wave_skylines, join_spec_channels, stack_spectrographs)
 from lvmdrp.functions.skyMethod import interpolate_sky, combine_skies, quick_sky_subtraction
+from lvmdrp.core import fluxcal
 from lvmdrp.functions.fluxCalMethod import fluxcal_standard_stars, fluxcal_sci_ifu_stars, apply_fluxcal, model_selection
 from lvmdrp.utils.metadata import (get_frames_metadata, get_master_metadata, extract_metadata,
                                    get_analog_groups, match_master_metadata, create_master_path,
-                                   update_summary_file)
+                                   update_summary_file, convert_h5_to_fits)
 from lvmdrp.utils.convert import tileid_grp
 from lvmdrp.utils.paths import get_master_mjd, mjd_from_expnum, get_calib_paths, group_calib_paths
 from lvmdrp.utils.timer import Timer
@@ -700,6 +701,7 @@ def start_logging(mjd: int, tileid: int):
         logpath.parent.mkdir(parents=True, exist_ok=True)
 
     log.start_file_logger(logpath, rotating=False, with_json=True)
+    return logpath
 
 
 def write_config_file():
@@ -866,7 +868,7 @@ def build_supersky(tileid: int, mjd: int, expnum: int, imagetype: str) -> fits.B
                 dlambda = np.diff(fsci._wave, axis=1, append=2*(fsci._wave[:, -1] - fsci._wave[:, -2])[:, None])
                 fsci._data /= dlambda
                 fsci._error /= dlambda
-                fsci._header["BUNIT"] = "electron/angstrom"
+                fsci._header["BUNIT"] = "electron / Angstrom"
 
             # sky fiber selection
             slitmap = fsci._slitmap[fsci._slitmap["spectrographid"] == specid]
@@ -885,7 +887,7 @@ def build_supersky(tileid: int, mjd: int, expnum: int, imagetype: str) -> fits.B
             spec.extend([specid] * (nsam_e + nsam_w))
             telescope.extend(["east"] * nsam_e + ["west"] * nsam_w)
     sort_idx = np.argsort(sky_wave)
-    wave_c = fits.Column(name="wave", array=np.array(sky_wave)[sort_idx], unit="angstrom", format="E")
+    wave_c = fits.Column(name="wave", array=np.array(sky_wave)[sort_idx], unit="Angstrom", format="E")
     sky_c = fits.Column(name="sky", array=np.array(sky)[sort_idx], unit=fsci._header["BUNIT"], format="E")
     sky_error_c = fits.Column(name="sky_error", array=np.array(sky_error)[sort_idx], unit=fsci._header["BUNIT"], format="E")
     fiberidx_c = fits.Column(name="fiberidx", array=np.array(fiberidx)[sort_idx], format="J")
@@ -1074,12 +1076,19 @@ def read_fibermap(as_table: bool = None, as_hdu: bool = None,
     with open(p, 'r') as f:
         data = yaml.load(f, Loader=yaml.CSafeLoader)
         cols = [i['name'] for i in data['schema']]
-        df = pd.DataFrame(data['fibers'], columns=cols)
+        units = [u.Unit(i['unit']) if i['unit'] is not None else None for i in data['schema']]
+
+        # define dtypes for Table and Numpy arrays because these two can't seem to talk to each other
+        tb_dtypes = [i['dtype'] for i in data['schema']]
+        np_dtypes = list(zip(cols, [d if d != 'str' else 'object' for d in tb_dtypes]))
+
+        # create table with units and correct types
+        table = Table(np.asarray([tuple(d) for d in data['fibers']], dtype=np_dtypes), units=units, dtype=tb_dtypes)
         if as_table:
-            return Table.from_pandas(df)
+            return table
         if as_hdu:
-            return fits.BinTableHDU(Table.from_pandas(df), name='SLITMAP')
-        return df
+            return fits.BinTableHDU(table, name='SLITMAP')
+        return table.to_pandas()
 
 
 fibermap = read_fibermap(as_hdu=True)
@@ -1389,6 +1398,7 @@ def reduce_2d(mjd, calibrations, expnums=None, exptime=None, cameras=CAMERAS,
         frames.query("exptime == @exptime", inplace=True)
     if cameras:
         frames.query("camera in @cameras", inplace=True)
+    frames.sort_values(["camera"], inplace=True)
 
     # preprocess and detrend frames
     for frame in frames.to_dict("records"):
@@ -1465,7 +1475,9 @@ def science_reduction(expnum: int, use_longterm_cals: bool = False,
                       skip_2d: bool = False,
                       skip_1d: bool = False,
                       skip_post_1d: bool = False,
-                      debug_mode: bool = False) -> None:
+                      skip_drpall: bool = False,
+                      debug_mode: bool = False,
+                      force_run: bool = False) -> None:
     """ Run the science reduction for a given exposure number.
     """
 
@@ -1497,12 +1509,24 @@ def science_reduction(expnum: int, use_longterm_cals: bool = False,
     sci_metadata = get_frames_metadata(mjd=sci_mjd)
     sci_metadata.query("expnum == @expnum", inplace=True)
     sci_metadata.sort_values("expnum", ascending=False, inplace=True)
+    if not force_run:
+        try:
+            sci_metadata.query("qaqual == 'GOOD'", inplace=True)
+        except KeyError:
+            log.error("error while getting qaqual field in metadata.")
+            log.error(f"Please try running `drp metadata regenerate -m {sci_mjd}` before trying reducing your exposure again.")
+            return
+        if sci_metadata.empty:
+            log.error(f"exposure {expnum = } was flagged as 'BAD' by the raw data quality pipeline")
+            return
 
     # define general metadata
     sci_tileid = sci_metadata["tileid"].unique()[0]
     sci_mjd = sci_metadata["mjd"].unique()[0]
     sci_expnum = sci_metadata["expnum"].unique()[0]
     sci_imagetyp = sci_metadata["imagetyp"].unique()[0]
+
+    log.info(f"Reducing MJD {sci_mjd}, exposure {expnum}, tile_id {sci_tileid} ... ")
 
     cals_mjd = get_master_mjd(sci_mjd) if use_longterm_cals else sci_mjd
     log.info(f"target master MJD: {cals_mjd}")
@@ -1513,7 +1537,7 @@ def science_reduction(expnum: int, use_longterm_cals: bool = False,
     calibs = get_calib_paths(mjd=cals_mjd, version=drpver, longterm_cals=use_longterm_cals, from_sanbox=True)
 
     # make sure only one exposure number is being reduced
-    sci_metadata.query("expnum == @sci_expnum", inplace=True)
+    # sci_metadata.query("expnum == @sci_expnum", inplace=True)
     sci_metadata.sort_values("camera", inplace=True)
 
     # detrend science exposure
@@ -1647,6 +1671,9 @@ def science_reduction(expnum: int, use_longterm_cals: bool = False,
         with Timer(name='QSky '+sframe_path, logger=log.info):
             quick_sky_subtraction(in_cframe=cframe_path, out_sframe=sframe_path)
 
+    if skip_drpall:
+        log.info("skipping create/update drpall summary file")
+    else:
         # update the drpall summary file
         with Timer(name='DRPAll '+sframe_path, logger=log.info):
             log.info('Updating the drpall summary file')
@@ -1684,8 +1711,9 @@ def science_reduction(expnum: int, use_longterm_cals: bool = False,
 
 def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
             with_cals: bool = False, no_sci: bool = False,
-            fluxcal_method: str = 'STD', skip_2d: bool = False, skip_1d: bool = False, skip_post_1d: bool = False,
-            clean_ancillary: bool = False, debug_mode: bool = False):
+            fluxcal_method: str = 'STD',
+            skip_2d: bool = False, skip_1d: bool = False, skip_post_1d: bool = False, skip_drpall: bool = False,
+            clean_ancillary: bool = False, debug_mode: bool = False, force_run: bool = False):
     """ Run the quick DRP
 
     Run the quick DRP for an MJD, or a range of MJDs. Reduces
@@ -1712,10 +1740,14 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
         Skip astrometry, straylight subtraction and extraction, by default False
     skip_post_1d : bool, optional
         Skip wavelength calibration, flatfielding, sky processing and flux calibration
+    skip_drpall : bool, optional
+        Skip create/update drpall summary file
     clean_ancillary : bool, optional
         Flag to remove the ancillary paths, by default False
     debug_mode : bool, optional
         Flag to run in debug mode, by default False
+    force_run : bool, optional
+        Flag to force reductions even if the data was flagged as BAD by the QC pipeline, by default False
     """
     # # write the drp parameter configuration
     # write_config_file()
@@ -1734,8 +1766,10 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
                     skip_2d=skip_2d,
                     skip_1d=skip_1d,
                     skip_post_1d=skip_post_1d,
+                    skip_drpall=skip_drpall,
                     clean_ancillary=clean_ancillary,
-                    debug_mode=debug_mode)
+                    debug_mode=debug_mode,
+                    force_run=force_run)
         return
 
     log.info(f'Processing MJD {mjd}')
@@ -1747,12 +1781,34 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
         log.warning(f'{mjd = } is not valid raw data directory.')
         return
 
+    # skip this reduction if the MJD is in a list of excluded (bad, engineering...) MJDs
+    exclude_file = os.getenv('LVMCORE_DIR') + '/etc/exclude_mjds.txt'
+    with open(exclude_file) as exclude_mjd_file:
+        exclude = [tuple(map(int, line.split(','))) for line in exclude_mjd_file]
+    if any([m[0] <= mjd <= m[1] for m in exclude]):
+        log.info(f"MJD {mjd} falls within excluded period in {exclude_file}, skipping ...")
+        return
+
     # generate the MJD metadata
     frames = get_frames_metadata(mjd=mjd)
     sub = frames.copy()
 
     # remove bad or test quality frames
-    sub = sub[~(sub['quality'] != 'excellent')]
+    if force_run and (sub.qaqual == "BAD").all():
+        tileid = sub.tileid.iloc[0]
+        log.warning(f"You are about to reduce {expnum = } of {tileid = }, which was flagged as 'BAD' by the QC pipeline")
+        log.warning("The DRP Team will not be responsible for failures during this reduction or the quality of its results")
+        log.warning(f"We advice you to look for a good quality exposure of the same {tileid = }")
+    else:
+        try:
+            sub = sub[(sub['qaqual'] == 'GOOD')]
+        except KeyError:
+            log.error("error while getting qaqual field in metadata.")
+            log.error(f"Please try running `drp metadata regenerate -m {mjd}` before trying reducing your exposure again.")
+            return
+        if sub.empty:
+            log.error(f"exposure {expnum = } was flagged as 'BAD' by the raw data quality pipeline")
+            return
 
     # filter on exposure number
     if expnum:
@@ -1783,7 +1839,7 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
 
         if sci_cond or cal_cond:
             # start logging for this tileid, mjd
-            start_logging(mjd, tileid)
+            logfile_path = start_logging(mjd, tileid)
 
         # attempt to reduce individual calibration files
         if cal_cond:
@@ -1806,18 +1862,130 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
                                         skip_2d=skip_2d,
                                         skip_1d=skip_1d,
                                         skip_post_1d=skip_post_1d,
+                                        skip_drpall=skip_drpall,
                                         clean_ancillary=clean_ancillary,
-                                        debug_mode=debug_mode, **kwargs)
+                                        debug_mode=debug_mode,
+                                        force_run=force_run, **kwargs)
                     except Exception as e:
                         log.exception(f'Failed to reduce science frame mjd {mjd} exposure {expnum}: {e}')
                         create_status_file(tileid, mjd, status='error')
                         trace = traceback.format_exc()
                         update_error_file(tileid, mjd, expnum, trace)
+                        log.info(f"the log file can be found here: {logfile_path}")
                         continue
 
         # create done status on successful run
         if not status_file_exists(tileid, mjd, status='error'):
             create_status_file(tileid, mjd, status='done')
+
+
+def create_drpall(drp_version: str = None, overwrite: bool = False) -> None:
+    """Create drpall summary file for a given DRP version
+
+    Parameters
+    ----------
+    drp_version: str, optional
+        Version of the DRP, by default None (current version)
+    """
+    drp_version = drp_version or drpver
+
+    if overwrite:
+        drpall = path.full('lvm_drpall', drpver=drp_version)
+        drpall = drpall.replace('.fits', '.h5')
+        if os.path.isfile(drpall):
+            log.info(f"removing existing {drpall}")
+            os.remove(drpall)
+        else:
+            log.info(f"no drpall file found for {drp_version = }")
+
+    # define lvmSFrame paths
+    sframe_paths = sorted(path.expand("lvm_frame", kind="SFrame", drpver=drp_version, tileid="*", mjd="*", expnum=8*"?"))
+    nframes = len(sframe_paths)
+    log.info(f"found {nframes} lvmSFrames under {drp_version = }")
+    # iterate over each file and create/update the drpall file
+    nfailed = 0
+    failed = []
+    for iframe, sframe_path in enumerate(sframe_paths):
+        log.info(f"[{iframe+1}/{nframes}] {sframe_path = }")
+        # extract Tile ID, MJD and exposure number from file
+        # pars = path.extract("lvm_frame", sframe_path)
+        pars = sframe_path.split(".fits")[0].split("/")
+        tileid, mjd, expnum = int(pars[-3]), int(pars[-2]), int(pars[-1].split("-")[-1])
+        cals_mjd = get_master_mjd(mjd)
+        try:
+            update_summary_file(sframe_path, tileid=tileid, mjd=mjd, expnum=expnum, master_mjd=cals_mjd, drpver=drp_version)
+        except Exception as e:
+            log.error(f"while updating drpall for {tileid = }, {mjd = }, {expnum = }: {e}")
+            nfailed += 1
+            failed.append(sframe_path)
+            continue
+
+    log.info(f"finished summarizing {nframes-nfailed} lvmSFrames in {drpall}")
+    if nfailed != 0:
+        log.warning(f"with {nfailed} failed frames:")
+        log.warning(f"{failed = }")
+
+    convert_h5_to_fits(drpall)
+    log.info(f"finished converting HDF5 to FITS format in {drpall.replace('h5', '.fits')}")
+
+
+def cache_gaia_spectra(mjds: Union[int, str, list], min_acquired=999, dry_run: bool = False) -> None:
+    """Caches Gaia XP spectra for science field calibration
+
+    Parameters
+    ----------
+    mjds : int|str|list[int]
+        MJDs for which the caching should be run
+    min_acquired : int, optional
+        minimum number of acquired standard stars to skip caching, defaults to 999 (no skipping)
+    dry_run : bool, optional
+        lists exposures that will be targeted
+    """
+    log.info("start of Gaia XP spectra caching for science field flux calibration")
+    gaia_cache_dir = os.path.join(os.getenv("LVM_MASTER_DIR"), "gaia_cache")
+    os.makedirs(gaia_cache_dir, exist_ok=True)
+    # parse MJDs
+    mjds = parse_mjds(mjds)
+    if isinstance(mjds, int):
+        mjds = [mjds]
+    log.info(f"selecting MJDs: {','.join(map(str, mjds))}")
+
+    for mjd in mjds:
+        # load metadata and filter good quality science frames
+        frames = get_frames_metadata(mjd=mjd)
+        frames.query("imagetyp == 'object' and qaqual == 'GOOD'", inplace=True)
+        frames = frames.drop_duplicates(subset=["expnum"], keep="first")
+
+        failed_expnums = []
+        for exposure in frames.to_dict("records"):
+            raw_path = path.full("lvm_raw", camspec=exposure["camera"], **exposure)
+            # check for presence of standard stars metadata
+            with fits.open(raw_path) as f:
+                header = f[0].header
+                expnum = exposure["expnum"]
+                acquired_stds = list(header["STD*ACQ"].values())
+                total_acquired = sum(acquired_stds)
+                if total_acquired != 0:
+                    if total_acquired >= min_acquired:
+                        log.info(f"{expnum = } has standard stars metadata and {total_acquired} were acquired, skipping")
+                        continue
+                    log.info(f"{expnum = } has standard stars metadata and {total_acquired} were acquired")
+                # get exposure parameters
+                ra = header.get("POSCIRA", header.get("TESCIRA"))
+                dec = header.get("POSCIDE", header.get("TESCIDE"))
+
+            # cache corresponding gaia spectra
+            log.info(f"going to download 15 field stars spectra with G<13.5 around {ra = }, {dec = } for {expnum = }")
+            if not dry_run:
+                try:
+                    fluxcal.get_XP_spectra(expnum, ra, dec, plot=False, lim_mag=13.5, n_spec=15, GAIA_CACHE_DIR=gaia_cache_dir)
+                except Exception as e:
+                    log.error(f"failed caching of Gaia spectra for {expnum = }: {e}")
+                    failed_expnums.append(expnum)
+                    continue
+
+    # summarize run
+    log.info(f"cached metadata for {len(frames) - len(failed_expnums)} exposures, with {len(failed_expnums)} fails, {failed_expnums = }")
 
 
 def reduce_calib_frame(row: dict):

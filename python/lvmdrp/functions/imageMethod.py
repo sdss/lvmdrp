@@ -18,6 +18,7 @@ from astropy.table import Table
 from astropy.io import fits as pyfits
 from astropy.visualization import simple_norm
 from astropy.wcs import wcs
+from astropy import units as u
 import astropy.io.fits as fits
 from scipy import interpolate
 from scipy import signal
@@ -41,7 +42,7 @@ from lvmdrp.core.image import (
     glueImages,
     loadImage,
 )
-from lvmdrp.core.plot import plt, create_subplots, plot_detrend, plot_strips, plot_image_shift, plot_fiber_thermal_shift, save_fig
+from lvmdrp.core.plot import plt, create_subplots, plot_detrend, plot_error, plot_strips, plot_image_shift, plot_fiber_thermal_shift, save_fig
 from lvmdrp.core.rss import RSS
 from lvmdrp.core.spectrum1d import Spectrum1D, _spec_from_lines, _cross_match
 from lvmdrp.core.tracemask import TraceMask
@@ -2603,8 +2604,8 @@ def extract_spectra(
     else:
         fiber_model = None
 
-    shift_range = [-4,4]
-    fig = plt.figure(figsize=(15, 3*len(columns)), layout="constrained")
+    shift_range = [-3,3]
+    fig = plt.figure(figsize=(15, 4*len(columns)), layout="constrained")
     fig.suptitle(f"Thermal fiber shifts for {mjd = }, {camera = }, {expnum = }")
     gs = GridSpec(len(columns)+1, 15, figure=fig)
     axs_cc, axs_fb = [], []
@@ -2619,7 +2620,7 @@ def extract_spectra(
     axs_cc[0].set_title("Cross-correlation")
     axs_cc[-1].set_xlabel("Shift (pixel)")
     axs_fb[-1].set_xlabel("Y (pixel)")
-    axs_cc[-1].set_xlim(shift_range)
+    # axs_cc[-1].set_xlim(shift_range)
 
     # fix centroids for thermal shifts
     log.info(f"measuring fiber thermal shifts @ columns: {','.join(map(str, columns))}")
@@ -2714,7 +2715,7 @@ def extract_spectra(
     # propagate thermal shift to slitmap
     channel = img._header['CCD'][0]
     slitmap[f"ypix_{channel}"] = slitmap[f"ypix_{channel}"].astype("float64")
-    slitmap[f"ypix_{channel}"][select_spec] += bn.nanmedian(shifts, axis=0)
+    slitmap[f"ypix_{channel}"][select_spec] += numpy.nan_to_num(bn.nanmedian(shifts, axis=0))
 
     if error is not None:
         error[mask] = replace_error
@@ -2730,56 +2731,32 @@ def extract_spectra(
     )
     rss.setHdrValue("NAXIS2", data.shape[0])
     rss.setHdrValue("NAXIS1", data.shape[1])
-    rss.setHdrValue("DISPAXIS", 1)
+    rss.setHdrValue("DISPAXIS", 1, "axis of spectral dispersion")
+    rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER CENT_MIN", numpy.round(bn.nanmin(trace_mask._data),4), "min. fiber centroid [pix]")
+    rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER CENT_MAX", numpy.round(bn.nanmax(trace_mask._data),4), "max. fiber centroid [pix]")
+    rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER CENT_AVG", numpy.round(bn.nanmean(trace_mask._data),4), "avg. fiber centroid [pix]")
+    rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER CENT_STD", numpy.round(bn.nanstd(trace_mask._data),4), "stddev. fiber centroid [pix]")
+    if method == "optimal":
+        rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER WIDTH_MIN", numpy.round(bn.nanmin(trace_fwhm._data),4), "min. fiber width [pix]")
+        rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER WIDTH_MAX", numpy.round(bn.nanmax(trace_fwhm._data),4), "max. fiber width [pix]")
+        rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER WIDTH_AVG", numpy.round(bn.nanmean(trace_fwhm._data),4), "avg. fiber width [pix]")
+        rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER WIDTH_STD", numpy.round(bn.nanstd(trace_fwhm._data),4), "stddev. fiber width [pix]")
+
     rss.add_header_comment(f"{in_trace}, fiber centroids used for {camera}")
     rss.add_header_comment(f"{in_fwhm}, fiber width (FWHM) used for {camera}")
     rss.add_header_comment(f"{in_model}, fiber model used for {camera}")
     rss.add_header_comment(f"{in_acorr}, fiber aperture correction used for {camera}")
-    rss.setHdrValue(
-        "HIERARCH FIBER CENT MIN",
-        bn.nanmin(trace_mask._data),
-    )
-    rss.setHdrValue(
-        "HIERARCH FIBER CENT MAX",
-        bn.nanmax(trace_mask._data),
-    )
-    rss.setHdrValue(
-        "HIERARCH FIBER CENT AVG",
-        bn.nanmean(trace_mask._data) if data.size != 0 else 0,
-    )
-    rss.setHdrValue(
-        "HIERARCH FIBER CENT MED",
-        bn.nanmedian(trace_mask._data)
-        if data.size != 0
-        else 0,
-    )
-    rss.setHdrValue(
-        "HIERARCH FIBER CENT SIG",
-        bn.nanstd(trace_mask._data) if data.size != 0 else 0,
-    )
-    if method == "optimal":
-        rss.setHdrValue(
-            "HIERARCH FIBER WIDTH MIN",
-            bn.nanmin(trace_fwhm._data),
-        )
-        rss.setHdrValue(
-            "HIERARCH FIBER WIDTH MAX",
-            bn.nanmax(trace_fwhm._data),
-        )
-        rss.setHdrValue(
-            "HIERARCH FIBER WIDTH AVG",
-            bn.nanmean(trace_fwhm._data) if data.size != 0 else 0,
-        )
-        rss.setHdrValue(
-            "HIERARCH FIBER WIDTH MED",
-            bn.nanmedian(trace_fwhm._data)
-            if data.size != 0
-            else 0,
-        )
-        rss.setHdrValue(
-            "HIERARCH FIBER WIDTH SIG",
-            bn.nanstd(trace_fwhm._data) if data.size != 0 else 0,
-        )
+
+    # create error propagation plot
+    fig = plt.figure(figsize=(15, 5), layout="constrained")
+    gs = GridSpec(1, 14, figure=fig)
+
+    ax_1 = fig.add_subplot(gs[0, :-4])
+    ax_2 = fig.add_subplot(gs[0, -4:])
+
+    plot_error(frame=rss, axs=[ax_1, ax_2], counts_threshold=(3000, 60000), labels=True)
+    save_fig(fig, product_path=out_rss, to_display=display_plots, figure_path="qa", label="extracted_error")
+
     # save extracted RSS
     log.info(f"writing extracted spectra to {os.path.basename(out_rss)}")
     rss.writeFitsData(out_rss)
@@ -3008,52 +2985,84 @@ def reprojectRSS_drp(
     rep.writeto(f"{out_path}/{out_name}_2d.fits", overwrite=True)
 
 
-def testres_drp(image, trace, fwhm, flux):
-    """
-    Historic task used for debugging of the the extraction routine...
-    """
-    img = Image()
-    # t1 = time.time()
-    img.loadFitsData(image, extension_data=0)
-    trace_mask = TraceMask()
-    trace_mask.loadFitsData(trace, extension_data=0)
-    trace_fwhm = TraceMask()
-    #   trace_fwhm.setData(data=numpy.ones(trace_mask._data.shape)*2.5)
-    trace_fwhm.loadFitsData(fwhm, extension_data=0)
+def validate_extraction(in_image, in_cent, in_width, in_rss, plot_columns=[1000, 2000, 3000], display_plots=False):
+    """Evaluates the extracted flux into the original 2D pixel grid
 
-    trace_flux = TraceMask()
-    trace_flux.loadFitsData(flux, extension_data=0)
+    This routine will evaluate the extracted flux in the original
+    2D grid and compare the resulting 2D model against the original
+    2D image. Three images are stored as outputs:
+
+        - The residual 2D image: model - data
+        - The ratio 2D image: model / data
+        - The 2D model
+
+    Parameters
+    ----------
+    in_image : str
+        Path to the original 2D image of the extracted flux
+    in_cent : str
+        Path to the fiber centroids trace
+    in_width : str
+        Path to the fiber width (FWHM) trace
+    in_rss : str
+        Path to the extracted flux in RSS format
+    plot_columns : array_like, optional
+        columns to show in plot, by default [1000, 2000, 3000]
+    display_plots : bool, optional
+        whether to display plots to screen or not, by dafult False
+    """
+    log.info(f"loading 2D image {in_image}")
+    img = Image()
+    img._data = numpy.nan_to_num(img._data)
+    img.loadFitsData(in_image)
+
+    log.info(f"loading fiber parameters in {in_cent} and {in_width}")
+    cent = TraceMask.from_file(in_cent)
+    width = TraceMask.from_file(in_width)
+    width._data /= 2.354
+
+    log.info(f"loading extracted flux in {in_rss}")
+    rss = RSS.from_file(in_rss)
+    rss._data = numpy.nan_to_num(rss._data)
+
+    ypix_cor = rss._slitmap[["spectrographid"] == int(img._header["CCD"][1])]["ypix_z"]
+    ypix_ori = img._slitmap[["spectrographid"] == int(img._header["CCD"][1])]["ypix_z"]
+    thermal_shift = ypix_cor - ypix_ori
+    log.info(f"fiber thermal shift in slitmap: {thermal_shift:.4f}")
+    cent._data += thermal_shift
+
+    log.info(f"evaluating extracted flux into 2D pixel grid for {img._dim[1]} columns")
     x = numpy.arange(img._dim[0])
     out = numpy.zeros(img._dim)
     fact = numpy.sqrt(2.0 * numpy.pi)
+
+    fig, axs = create_subplots(to_display=display_plots, nrows=len(plot_columns), ncols=1, figsize=(15,5), sharex=True, layout="constrained")
     for i in range(img._dim[1]):
-        #  print i
-        A = (
-            1.0
-            * numpy.exp(
-                -0.5
-                * (
-                    (x[:, numpy.newaxis] - trace_mask._data[:, i][numpy.newaxis, :])
-                    / abs(trace_fwhm._data[:, i][numpy.newaxis, :] / 2.354)
-                )
-                ** 2
-            )
-            / (fact * abs(trace_fwhm._data[:, i][numpy.newaxis, :] / 2.354))
-        )
-        spec = numpy.dot(A, trace_flux._data[:, i])
+        A = (numpy.exp(-0.5 * ((x[:, None] - cent._data[:, i][None, :]) / abs(width._data[:, i][None, :])) ** 2) / (fact * abs(width._data[:, i][None, :])))
+        spec = numpy.dot(A, rss._data[:, i])
         out[:, i] = spec
-        if i == 1000:
-            plt.plot(spec, "-r")
-            plt.plot(img._data[:, i], "ok")
-            plt.show()
+        if i in plot_columns:
+            axs[plot_columns.index(i)].step(x, img._data[:, i], color="k", lw=1, where="mid")
+            axs[plot_columns.index(i)].step(x, spec, color="r", lw=1, where="mid")
 
+    out_path = os.path.dirname(in_image)
+    out_name = os.path.basename(in_image).split(".fits")[0]
+    out_residual = os.path.join(out_path, f"{out_name}_residual.fits")
+    out_2dimage = os.path.join(out_path, f"{out_name}_2dimage.fits")
+    out_ratio = os.path.join(out_path, f"{out_name}_ratio.fits")
+    save_fig(fig, product_path=out_2dimage, to_display=display_plots, figure_path="qa", label="2D_extracted_model")
+
+    log.info(f"writing residual to {out_residual}")
     hdu = pyfits.PrimaryHDU(img._data - out)
-    hdu.writeto("res.fits", overwrite=True)
-    hdu = pyfits.PrimaryHDU(out)
-    hdu.writeto("fit.fits", overwrite=True)
+    hdu.writeto(out_residual, overwrite=True)
 
-    hdu = pyfits.PrimaryHDU((img._data - out) / img._data)
-    hdu.writeto("res_rel.fits", overwrite=True)
+    log.info(f"writing ratio to {out_ratio}")
+    hdu = pyfits.PrimaryHDU(out / img._data)
+    hdu.writeto(out_ratio, overwrite=True)
+
+    log.info(f"writing 2D model {out_2dimage}")
+    hdu = pyfits.PrimaryHDU(out)
+    hdu.writeto(out_2dimage, overwrite=True)
 
 
 # TODO: for arcs take short exposures for bright lines & long exposures for faint lines
@@ -3224,6 +3233,7 @@ def preproc_raw_frame(
             gain[2] *= 1.089
         if camera == "z3":
             gain[3] /= 1.056
+        gain = numpy.round(gain, 2)
 
         log.info(f"using header GAIN = {gain.tolist()} (e-/ADU)")
 
@@ -3262,8 +3272,8 @@ def preproc_raw_frame(
             os_models.append(os_model)
 
         # compute overscan stats
-        os_bias_med[i] = bn.nanmedian(os_quad._data, axis=None)
-        os_bias_std[i] = bn.nanmedian(bn.nanstd(os_quad._data, axis=1), axis=None)
+        os_bias_med[i] = numpy.round(bn.nanmedian(os_quad._data, axis=None), 2)
+        os_bias_std[i] = numpy.round(bn.nanmedian(bn.nanstd(os_quad._data, axis=1), axis=None), 2)
         log.info(
             f"median and standard deviation in OS quadrant {i+1}: "
             f"{os_bias_med[i]:.2f} +/- {os_bias_std[i]:.2f} (ADU)"
@@ -3313,37 +3323,37 @@ def preproc_raw_frame(
         ysize, xsize = sc_quads[i]._dim
         x, y = int(QUAD_POSITIONS[i][0]), int(QUAD_POSITIONS[i][1])
         proc_img.setHdrValue(
-            f"HIERARCH AMP{i+1} TRIMSEC",
+            f"HIERARCH {camera.upper()} AMP{i+1} TRIMSEC",
             f"[{x*xsize+1}:{xsize*(x+1)}, {y*ysize+1}:{ysize*(y+1)}]",
-            f"Region of amp. {i+1}",
+            f"region of amp. {i+1}",
         )
     # add gain keywords for the different subimages (CCDs/Amplifiers)
     for i in range(NQUADS):
         proc_img.setHdrValue(
-            f"HIERARCH AMP{i+1} {gain_prefix}",
+            f"HIERARCH {camera.upper()} AMP{i+1} {gain_prefix}",
             gain[i],
-            f"Gain value of amp. {i+1} [electron/adu]",
+            f"gain value of amp. {i+1} [electron/adu]",
         )
     # add read-out noise keywords for the different subimages (CCDs/Amplifiers)
     for i in range(NQUADS):
         proc_img.setHdrValue(
-            f"HIERARCH AMP{i+1} {rdnoise_prefix}",
+            f"HIERARCH {camera.upper()} AMP{i+1} {rdnoise_prefix}",
             rdnoise[i],
-            f"Read-out noise of amp. {i+1} [electron]",
+            f"read-out noise of amp. {i+1} [electron]",
         )
     # add bias of overscan region for the different subimages (CCDs/Amplifiers)
     for i in range(NQUADS):
         proc_img.setHdrValue(
-            f"HIERARCH AMP{i+1} OVERSCAN",
+            f"HIERARCH {camera.upper()} AMP{i+1} OVERSCAN_MED",
             os_bias_med[i],
-            f"Overscan median of amp. {i+1} [adu]",
+            f"overscan median of amp. {i+1} [adu]",
         )
     # add bias std of overscan region for the different subimages (CCDs/Amplifiers)
     for i in range(NQUADS):
         proc_img.setHdrValue(
-            f"HIERARCH AMP{i+1} OVERSCAN_STD",
+            f"HIERARCH {camera.upper()} AMP{i+1} OVERSCAN_STD",
             os_bias_std[i],
-            f"Overscan std of amp. {i+1} [adu]",
+            f"overscan std of amp. {i+1} [adu]",
         )
 
     # load master pixel mask
@@ -3568,9 +3578,14 @@ def add_astrometry(
                 posangrad=-1*numpy.arctan(CDmatrix[1,0]/CDmatrix[0,0])
                 PAobs=posangrad*180/numpy.pi
                 IFUcencoords=outw.pixel_to_world(2500,1000)
-                RAobs=IFUcencoords.ra.value
-                DECobs=IFUcencoords.dec.value
-                org_img.setHdrValue('ASTRMSRC', 'GDR coadd', comment='Source of astrometric solution: guider')
+                try:
+                    # some very early science data apparently fails here
+                    RAobs=IFUcencoords.ra.value
+                    DECobs=IFUcencoords.dec.value
+                except AttributeError:
+                    RAobs=0
+                    DECobs=0
+                org_img.setHdrValue('ASTRMSRC', 'GDR coadd', comment='source of astrometry: guider')
                 copy_guider_keyword(mfheader, 'FRAME0  ', org_img)
                 copy_guider_keyword(mfheader, 'FRAMEN  ', org_img)
                 copy_guider_keyword(mfheader, 'NFRAMES ', org_img)
@@ -3602,10 +3617,12 @@ def add_astrometry(
                 RAobs=org_img._header.get(f'PO{tel}RA'.capitalize(), 0) or 0
                 DECobs=org_img._header.get(f'PO{tel}DE'.capitalize(), 0) or 0
                 PAobs=org_img._header.get(f'PO{tel}PA'.capitalize(), 0) or 0
+                if -999.0 in [RAobs, DECobs]:
+                    RAobs, DECobs, PAobs = 0, 0, 0
                 if numpy.any([RAobs, DECobs, PAobs]) == 0:
                     log.warning(f"some astrometry keywords for telescope '{tel}' are missing: {RAobs = }, {DECobs = }, {PAobs = }")
                     org_img.add_header_comment(f"no astromentry keywords '{tel}': {RAobs = }, {DECobs = }, {PAobs = }, using commanded")
-                org_img.setHdrValue('ASTRMSRC', 'CMD position', comment='Source of astrometric solution: commanded position')
+                org_img.setHdrValue('ASTRMSRC', 'CMD position', comment='source of astrometry: commanded position')
         else:
             RAobs=0
             DECobs=0
@@ -3650,14 +3667,17 @@ def add_astrometry(
     getfibradec('spec', platescale=FIDUCIAL_PLATESCALE)
 
     # add coordinates to slitmap
-    slitmap['ra']=RAfib
-    slitmap['dec']=DECfib
+    slitmap['ra']=RAfib * u.deg
+    slitmap['dec']=DECfib * u.deg
     org_img._slitmap=slitmap
+
+    # set header keyword with best knowledge of IFU center
+    org_img.setHdrValue('IFUCENRA', RAobs_sci, 'best SCI IFU RA (ASTRMSRC) [deg]')
+    org_img.setHdrValue('IFUCENDE', DECobs_sci, 'best SCI IFU DEC (ASTRMSRC) [deg]')
+    org_img.setHdrValue('IFUCENPA', PAobs_sci, 'best SCI IFU PA (ASTRMSRC) [deg]')
 
     log.info(f"writing RA,DEC to slitmap in image '{os.path.basename(out_image)}'")
     org_img.writeFitsData(out_image)
-
-
 
 
 @skip_on_missing_input_path(["in_image"])
@@ -3780,13 +3800,13 @@ def detrend_frame(
     if convert_to_e:
         # calculate Poisson errors
         log.info("applying gain correction per quadrant")
-        for i, quad_sec in enumerate(bcorr_img.getHdrValue("AMP? TRIMSEC").values()):
+        for i, quad_sec in enumerate(bcorr_img.getHdrValue(f"{camera.upper()} AMP? TRIMSEC").values()):
             log.info(f"processing quadrant {i+1}: {quad_sec}")
             # extract quadrant image
             quad = bcorr_img.getSection(quad_sec)
             # extract quadrant gain and rdnoise values
-            gain = quad.getHdrValue(f"AMP{i+1} GAIN")
-            rdnoise = quad.getHdrValue(f"AMP{i+1} RDNOISE")
+            gain = quad.getHdrValue(f"{camera.upper()} AMP{i+1} GAIN")
+            rdnoise = quad.getHdrValue(f"{camera.upper()} AMP{i+1} RDNOISE")
 
             # non-linearity correction
             gain_map = _nonlinearity_correction(ptc_params, gain, quad, iquad=i+1)
@@ -3799,11 +3819,11 @@ def detrend_frame(
             bcorr_img.setSection(section=quad_sec, subimg=quad, inplace=True)
             log.info(f"median error in quadrant {i+1}: {bn.nanmedian(quad._error):.2f} (e-)")
 
-        bcorr_img.setHdrValue("BUNIT", "electron", "physical units of the image")
+        bcorr_img.setHdrValue("BUNIT", "electron", "physical units of the array values")
     else:
         # convert to ADU
         log.info("leaving original ADU units")
-        bcorr_img.setHdrValue("BUNIT", "adu", "physical units of the image")
+        bcorr_img.setHdrValue("BUNIT", "adu", "physical units of the array values")
 
     # complete image detrending
     if in_dark:
@@ -3825,7 +3845,7 @@ def detrend_frame(
     # reject cosmic rays
     if reject_cr:
         log.info("rejecting cosmic rays")
-        rdnoise = detrended_img.getHdrValue("AMP1 RDNOISE")
+        rdnoise = detrended_img.getHdrValue(f"{camera.upper()} AMP1 RDNOISE")
         detrended_img.reject_cosmics(gain=1.0, rdnoise=rdnoise, rlim=1.3, iterations=5, fwhm_gauss=[2.75, 2.75],
                                      replace_box=[10,2], replace_error=1e6, verbose=True, inplace=True)
 
@@ -3863,16 +3883,22 @@ def detrend_frame(
     # show plots
     log.info("plotting results")
     # detrending process
-    fig, axs = create_subplots(
-        to_display=display_plots,
-        nrows=2,
-        ncols=2,
-        figsize=(15, 15),
-        sharex=True,
-        sharey=True,
-    )
-    plt.subplots_adjust(wspace=0.15, hspace=0.1)
-    plot_detrend(ori_image=org_img, det_image=detrended_img, axs=axs, mbias=mbias_img, mdark=mdark_img, labels=True)
+    fig = plt.figure(figsize=(15, 10), layout="constrained")
+    gs = GridSpec(3, 14, figure=fig)
+
+    ax1 = fig.add_subplot(gs[0, :7])
+    ax2 = fig.add_subplot(gs[0, 7:], sharex=ax1, sharey=ax1)
+    ax3 = fig.add_subplot(gs[1, :7], sharex=ax1, sharey=ax1)
+    ax4 = fig.add_subplot(gs[1, 7:], sharex=ax1, sharey=ax1)
+    ax1.tick_params(labelbottom=False)
+    ax2.tick_params(labelbottom=False)
+    ax2.tick_params(labelleft=False)
+    ax4.tick_params(labelleft=False)
+    ax_1 = fig.add_subplot(gs[2, :-4])
+    ax_2 = fig.add_subplot(gs[2, -4:], sharey=ax_1)
+    plot_detrend(ori_image=org_img, det_image=detrended_img, axs=[ax1, ax2, ax3, ax4], mbias=mbias_img, mdark=mdark_img, labels=True)
+    # Poisson error
+    plot_error(frame=detrended_img, axs=[ax_1, ax_2], labels=True)
     save_fig(
         fig,
         product_path=out_image,
@@ -4179,7 +4205,8 @@ def create_pixelmask(in_short_dark, in_long_dark, out_pixmask, in_flat_a=None, i
     ratio_dark = short_dark / long_dark
 
     # define quadrant sections
-    sections = short_dark.getHdrValue("AMP? TRIMSEC")
+    camera = short_dark.getHdrValue("CCD")
+    sections = short_dark.getHdrValue(f"{camera.upper()} AMP? TRIMSEC")
 
     # define pixelmask image
     pixmask = Image(data=numpy.zeros_like(short_dark._data), mask=numpy.zeros_like(short_dark._data, dtype="bool"))

@@ -60,9 +60,8 @@ SKYMODEL_MODEL_CONFIG_PATH = os.path.join(
 # ESO skycorr configuration file
 SKYCORR_CONFIG_PATH = os.path.join(CONFIG_PATH, "third_configs", "skycorr_config.yml")
 
-# data paths
-DATA_PATH = os.path.join(ROOT_PATH, "data")
-EPHEMERIS_PATH = os.path.join(DATA_PATH, "de421.bsp")
+# ephemeris path
+EPHEMERIS_DIR = os.path.join(os.getenv("LVMCORE_DIR"), "etc")
 
 # fiducial calibrations directory
 MASTERS_DIR = os.getenv("LVM_MASTER_DIR")
