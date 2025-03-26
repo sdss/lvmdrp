@@ -649,13 +649,27 @@ def fit_lines(spec, cwaves, dwave=6):
     flux, sky_wave, fwhm, bg = spec.fitSepGauss(cwaves+guess_shift, dwave, fwhm_guess, 0.0, [0, np.inf], [-2.5, 2.5], [fwhm_guess - 1.5, fwhm_guess + 1.5], [0.0, np.inf])
     return flux, sky_wave, fwhm, bg
 
-def fit_lines_slit(rss, cwaves, dwave=6):
-    flux_slit = np.zeros((len(cwaves), rss._fibers))
+def fit_lines_slit(rss, cwaves, dwave=6, norm_fibers=None):
+    if norm_fibers is not None:
+        assert isinstance(norm_fibers, np.ndarray) and norm_fibers.dtype == bool
+        log.info(f"selecting {norm_fibers.sum()} fibers")
+    else:
+        log.info(f"selecting all {rss._fibers} fibers")
+        norm_fibers = np.ones(rss._fibers, dtype="bool")
+
+    flux_slit = np.zeros((len(cwaves), rss._fibers)) + np.nan
     for ifiber in range(rss._fibers):
+        if not norm_fibers[ifiber]:
+            continue
+
         spec = rss[ifiber]
         if (~np.isfinite(spec._data)|~np.isfinite(spec._error)).all():
             continue
-        flux, _, _, _ = fit_lines(spec, cwaves, dwave=dwave)
+
+        try:
+            flux, _, _, _ = fit_lines(spec, cwaves, dwave=dwave)
+        except ValueError as e:
+            log.error(f"error while fitting fiber {ifiber}: {e}")
         flux_slit[:, ifiber] = flux
     return np.asarray(flux_slit)
 
@@ -748,6 +762,8 @@ def remove_ifu_gradient(rss, coeffs, factors=None):
 
     if factors is None:
         factors = np.ones(rss._fibers, dtype="float")
+    else:
+        factors = np.repeat(factors, rss._fibers//3)
 
     rss_corr = copy(rss)
 
@@ -766,7 +782,7 @@ def remove_ifu_gradient(rss, coeffs, factors=None):
 
     return rss_corr
 
-def fit_flatfield(twilights, ref_kind=600, norm_cwave=None):
+def fit_flatfield(twilights, ref_kind=600, norm_cwave=None, display_plots=False):
     """Creates a master fiber flatfield given a set of twilight exposures
 
     The following steps are followed:
@@ -808,25 +824,31 @@ def fit_flatfield(twilights, ref_kind=600, norm_cwave=None):
 
     log.info(f"calculating raw flatfields out of {len(twilights)} exposures")
     flats, ref_fibers, normalizations = get_flatfield_sequence(rsss=twilights, ref_kind=ref_kind)
-    log.info(f"normalizing spectrographs at {norm_cwave = :.2f} Angstrom")
-    flats = [normalize_spec(flat, cwave=norm_cwave) for flat in flats]
+    # log.info(f"normalizing spectrographs at {norm_cwave = :.2f} Angstrom")
+    # flats = [normalize_spec(flat, cwave=norm_cwave) for flat in flats]
+
+    if display_plots:
+        fig, ax = plt.subplots(figsize=(14,5), layout="constrained")
+        ax.step(flats[0]._wave, ref_fibers.T, where="mid", lw=1)
+        ax.set_xlabel("Wavelength (Angstrom)")
+        ax.set_ylabel(f"Counts ({flats[0]._header['BUNIT']})")
+        ax.set_title("Reference fiber", loc="left", fontsize="xx-large")
 
     log.info("combining raw flatfields")
     mflat = RSS()
     mflat.combineRSS(flats, method="median")
 
-    log.info("fitting and normalizing IFU gradient")
-    twilights_flat = copy(twilights)
-    flats_g = []
-    for twilight_flat, flat in zip(twilights_flat, flats):
-        # flatfield twilight
-        twilight_flat = twilight_flat / mflat
+    log.info(f"fitting and normalizing IFU gradient at {norm_cwave = :.2f}")
+    twilights_g = []
+    for twilight, flat in zip(twilights, flats):
         # fit gradient with spectrograph normalizations (make n-iterations of this or stop when gradient is <1% across) ------
-        x, y, z, coeffs, factors = fit_ifu_gradient(twilight_flat, cwave=norm_cwave)
+        x, y, z, coeffs, factors = fit_ifu_gradient(flat, cwave=norm_cwave)
         # apply gradient correction
-        flat = remove_ifu_gradient(flat, coeffs=coeffs, factors=None)
+        twilight_g = remove_ifu_gradient(twilight, coeffs=coeffs, factors=factors)
+        twilights_g.append(twilight_g)
         # --------------------------------------------------------------------------------------------------------------------
-        flats_g.append(flat)
+
+    flats_g, _, _ = get_flatfield_sequence(rsss=twilights_g, ref_kind=ref_kind)
 
     log.info("calculating gradient-corrected combined flatfield")
     mflat = RSS()
@@ -839,7 +861,6 @@ def fit_flatfield(twilights, ref_kind=600, norm_cwave=None):
 
 def _choose_sky(rss):
     telescope = "SkyE" if abs(rss._header["WAVE HELIORV_SKYE"]) < abs(rss._header["WAVE HELIORV_SKYW"]) else "SkyW"
-    print(telescope, rss._header["WAVE HELIORV_SKY?"])
     return telescope
 
 def fit_skyline_flatfield(sciences, mflat, ref_kind, norm_cwave, norm_fibers=None, display_plots=False):
@@ -856,18 +877,18 @@ def fit_skyline_flatfield(sciences, mflat, ref_kind, norm_cwave, norm_fibers=Non
 
     science.apply_pixelmask()
 
-    log.info(f"measuring sky line {norm_cwave:.2f} Angstrom")
-    skyline_slit = fit_lines_slit(science, cwaves=[norm_cwave])[0]
-
     if norm_fibers is not None:
         assert isinstance(norm_fibers, np.ndarray) and norm_fibers.dtype == bool
         log.info(f"selecting {norm_fibers.sum()} fibers")
     else:
         log.info(f"selecting all {science._fibers} fibers")
-        norm_fibers = np.ones_like(skyline_slit, dtype="bool")
+        norm_fibers = np.ones_like(science._fibers, dtype="bool")
+
+    log.info(f"measuring sky line {norm_cwave:.2f} Angstrom")
+    skyline_slit = fit_lines_slit(science, cwaves=[norm_cwave], norm_fibers=norm_fibers)[0]
 
     log.info(f"calculating flatfield slit using {ref_kind = }")
-    ref_skyline = _reference_fiber(skyline_slit[norm_fibers], ref_kind=ref_kind)
+    ref_skyline = _reference_fiber(skyline_slit, ref_kind=ref_kind)
     flatfield_slit = skyline_slit / ref_skyline
 
 
@@ -886,7 +907,7 @@ def fit_skyline_flatfield(sciences, mflat, ref_kind, norm_cwave, norm_fibers=Non
         plt.axhspan(0.95, 1.05, lw=0, color="0.7", alpha=0.5)
         plt.axhspan(0.98, 1.02, lw=0, color="0.7", alpha=0.5)
         plt.axhspan(0.99, 1.01, lw=0, color="0.7", alpha=0.5)
-        plt.plot(x, y, lw=1)
+        plt.plot(x, y, ".-", lw=1)
         plt.ylim(0.92, 1.08)
         plt.xlabel("Fiber ID")
         plt.ylabel(f"Counts ({science._header['BUNIT']})")
