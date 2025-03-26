@@ -209,8 +209,7 @@ def compare_pixflats(mjd, camera, flat_expnums_a, flat_expnums_b):
     #   - From a selection of features in flats, compare the two
 
 
-def do_for_quadrants(image_path, func, *args, **kwargs):
-    image = image_tasks.loadImage(image_path)
+def do_for_quadrants(image, func, *args, **kwargs):
     sections = image.getHdrValue("AMP? TRIMSEC").values()
 
     f_image = copy(image)
@@ -282,39 +281,111 @@ def filtering(image, ivar, size=51, replace_with_nan=True, debug=False):
     return image, smooth
 
 
-def filter_image(image_path):
-    return do_for_quadrants(image_path, filtering)
+def filter_image(image, size):
+    return do_for_quadrants(image, filtering, size=size)
 
 
-def get_pixflat(cflat_path, mpixflat_path, fflat_path):
-    log.info(f"filtering input combined flat at {cflat_path}")
-    image, filtered = filter_image(cflat_path)
-    flat = image / filtered
+def _desi_pixflat(cflat, size):
+    cflat, filtered = filter_image(cflat, size)
+    mflat = cflat / filtered
+    return cflat, mflat
 
-    flat._data = np.where((flat._data > 0.01) & np.isfinite(flat._data), flat._data, 1.0)
+
+def _simple_pixflat(cflat, size):
+    cflat_median = fast_median_filter_2d(cflat._data, size)
+    mflat = (cflat / cflat_median)
+    return cflat, mflat
+
+
+def get_pixflat(cflat_path, mpixflat_path, fflat_path, size=51, flatfield_threshold=0.01, method="desi"):
+    if method not in ["desi", "simple"]:
+        raise ValueError(f"Invalid value for `method`: {method}. Expected either 'desi' or 'simple'")
+
+    log.info(f"loading flat frame from {cflat_path}")
+    cflat = image_tasks.loadImage(cflat_path)
+
+    log.info(f"filtering input flat using {method = } and box {size = }")
+    if method == "desi":
+        cflat, mflat = _desi_pixflat(cflat, size=size)
+    elif method == "simple":
+        cflat, mflat = _simple_pixflat(cflat, size=size)
+
+    log.info(f"replacing invalid values and flatfield values below {flatfield_threshold} with ones")
+    mflat._data = np.where((mflat._data > flatfield_threshold) & np.isfinite(mflat._data), mflat._data, 1.0)
     log.info(f"writing master pixelflat to {mpixflat_path}")
-    flat.writeFitsData(mpixflat_path)
+    mflat.writeFitsData(mpixflat_path)
 
     log.info(f"writing flatfielded flat to {fflat_path}")
-    fflat = image / flat
-    fflat.writeFitsData(fflat_path)
-
-
-def create_pixflats(mjd, camera, flat_expnums, dark_expnums=None, bias_expnums=None, median_box=(31,31), skip_done=True):
-
-    detrend_pixelflats(mjds=mjd, camera=camera, flat_expnums=flat_expnums, dark_expnums=dark_expnums, bias_expnums=bias_expnums, skip_done=skip_done, use_pixmask=True)
-    cflat, cflat_path = combine_pixelflats(mjds=mjd, camera=camera, flat_expnums=flat_expnums, median_box=median_box, skip_done=skip_done)
-
-    mflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="m", imagetype="pixflat", expnum=f"{flat_expnums.min()}_{flat_expnums.max()}", camera=camera)
-    fflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="f", imagetype="pixflat", expnum=f"{flat_expnums.min()}_{flat_expnums.max()}", camera=camera)
-
-    cflat_median = fast_median_filter_2d(cflat._data, median_box)
-    mflat = (cflat / cflat_median)
-    mflat.writeFitsData(mflat_path)
-
     fflat = cflat / mflat
     fflat.writeFitsData(fflat_path)
 
-    paths = (cflat_path, mflat_path, fflat_path)
+    return cflat, mflat, fflat
 
-    return paths
+def _split_expnums_b(expnums):
+    dark_expnums = expnums[2::3]
+    dark_expnums = np.repeat(dark_expnums, 2)
+    flat_expnums = expnums[~np.isin(expnums, dark_expnums)]
+    return {"flat_expnums": flat_expnums, "dark_expnums": dark_expnums}
+
+
+def _split_expnums_r(expnums):
+    return _split_expnums_b(expnums)
+
+
+def _split_expnums_z(expnums):
+    flat_expnums = expnums[::2]
+    bias_expnums = expnums[1::2]
+    return {"flat_expnums": flat_expnums, "bias_expnums": bias_expnums}
+
+
+def create_pixflats(mjds, camera, expnums, size=51, flatfield_threshold=0.01, method="desi", skip_done=True):
+    frames = get_enights_metadata(mjds=mjds)
+    frames = frames.query("expnum in @expnums and camera == @camera")
+
+    if frames.empty:
+        log.error(f"no frames found for MJDs: {mjds}")
+        return
+
+    channel = camera[0]
+    if channel == "b":
+        expnums_dict = _split_expnums_b(expnums)
+    elif channel == "r":
+        expnums_dict = _split_expnums_r(expnums)
+    elif channel == "z":
+        expnums_dict = _split_expnums_z(expnums)
+    else:
+        ValueError(f"Invalid channel value {channel = }. Expected either of 'brz'")
+
+    flat_expnums = expnums_dict.get("flat")
+    dark_expnums = expnums_dict.get("dark")
+    bias_expnums = expnums_dict.get("bias")
+    detrend_pixelflats(mjds=mjds, camera=camera, flat_expnums=flat_expnums, dark_expnums=dark_expnums, bias_expnums=bias_expnums, skip_done=skip_done)
+    cflat, cflat_path = combine_pixelflats(mjds=mjds, camera=camera, flat_expnums=flat_expnums, skip_done=skip_done)
+
+    mjd = frames.mjd.max()
+    mflat_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mpixflat", camera=camera)
+    fflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="f", imagetype="pixflat", expnum=f"{flat_expnums.min()}_{flat_expnums.max()}", camera=camera)
+
+    get_pixflat(cflat_path, mflat_path, fflat_path, size=size, flatfield_threshold=flatfield_threshold, method=method)
+
+    return cflat_path, mflat_path, fflat_path
+
+
+# def create_pixflats(mjd, camera, flat_expnums, dark_expnums=None, bias_expnums=None, median_box=(31,31), skip_done=True):
+
+#     detrend_pixelflats(mjds=mjd, camera=camera, flat_expnums=flat_expnums, dark_expnums=dark_expnums, bias_expnums=bias_expnums, skip_done=skip_done, use_pixmask=True)
+#     cflat, cflat_path = combine_pixelflats(mjds=mjd, camera=camera, flat_expnums=flat_expnums, median_box=median_box, skip_done=skip_done)
+
+#     mflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="m", imagetype="pixflat", expnum=f"{flat_expnums.min()}_{flat_expnums.max()}", camera=camera)
+#     fflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="f", imagetype="pixflat", expnum=f"{flat_expnums.min()}_{flat_expnums.max()}", camera=camera)
+
+#     cflat_median = fast_median_filter_2d(cflat._data, median_box)
+#     mflat = (cflat / cflat_median)
+#     mflat.writeFitsData(mflat_path)
+
+#     fflat = cflat / mflat
+#     fflat.writeFitsData(fflat_path)
+
+#     paths = (cflat_path, mflat_path, fflat_path)
+
+#     return paths
