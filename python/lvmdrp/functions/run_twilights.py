@@ -662,32 +662,38 @@ def fit_lines(spec, cwaves, dwave=6, display_plots=False):
                                                 axs=axs)
     return flux, sky_wave, fwhm, bg
 
-def fit_lines_slit(rss, cwaves, dwave=6, norm_fibers=None, display_plots=False):
+def fit_lines_slit(rss, cwaves, dwave=6, return_xy=False, select_fibers=None, display_plots=False):
 
-    cwaves_ = np.atleast_1d(cwaves) if np.isscalar(cwaves) else cwaves
+    cwaves_ = np.atleast_1d(cwaves)
 
-    if norm_fibers is not None:
-        assert isinstance(norm_fibers, np.ndarray) and norm_fibers.dtype == bool
-        log.info(f"selecting {norm_fibers.sum()} fibers")
-    else:
+    if isinstance(select_fibers, str):
+        if select_fibers not in rss._slitmap["telescope"]:
+            raise ValueError(f"Invalid value for `select_fibers`: {select_fibers}. Expected either 'Sci', 'SkyE', 'SkyW' or 'Spec'")
+        select_fibers = rss._slitmap["telescope"] == select_fibers
+        log.info(f"selecting {select_fibers.sum()} fibers")
+    elif isinstance(select_fibers, np.ndarray) and select_fibers.size == rss._fibers and select_fibers.dtype == bool:
+        log.info(f"selecting {select_fibers.sum()} fibers")
+    elif select_fibers is None:
         log.info(f"selecting all {rss._fibers} fibers")
-        norm_fibers = np.ones(rss._fibers, dtype="bool")
+        select_fibers = np.ones(rss._fibers, dtype="bool")
+    else:
+        raise TypeError(f"Invalid type for `select_fibers`: {type(select_fibers)}. Expected either None, string or boolean array matching number of fibers in `rss`")
 
-    flux_slit = np.zeros((len(cwaves_), rss._fibers)) + np.nan
+    flux_slit = np.zeros((rss._fibers, cwaves_.size)) + np.nan
     for ifiber in range(rss._fibers):
-        if not norm_fibers[ifiber]:
-            continue
-
         spec = rss[ifiber]
-        if (~np.isfinite(spec._data)|~np.isfinite(spec._error)).all():
+        if not select_fibers[ifiber] or spec._mask.all():
             continue
 
         try:
             flux, _, _, _ = fit_lines(spec, cwaves_, dwave=dwave, display_plots=display_plots)
         except ValueError as e:
             log.error(f"error while fitting fiber {ifiber}: {e}")
-        flux_slit[:, ifiber] = flux
-    return np.asarray(flux_slit)
+        flux_slit[ifiber] = flux
+
+    if return_xy:
+        return flux_slit.squeeze(), rss._slitmap["xpmm"].data, rss._slitmap["ypmm"].data
+    return flux_slit.squeeze()
 
 def ifu_factors(factors, fibgroups):
     iid, fid = min(fibgroups), max(fibgroups)
@@ -699,9 +705,10 @@ def ifu_factors(factors, fibgroups):
 def ifu_gradient(coeffs, x, y):
     ncoeffs = len(coeffs)
     order = int(np.sqrt(ncoeffs))
+    ij = it.product(range(order), repeat=2)
 
     G = np.zeros((x.size, ncoeffs))
-    for k, (i, j) in enumerate(it.product(range(order), range(order))):
+    for k, (i, j) in enumerate(ij):
         G[:, k] = x**i * y**j
     ifu = np.dot(G, coeffs)
     return ifu
@@ -723,38 +730,43 @@ def residual(pars, x, y, z, fibgroups):
     model = ifu_joint_model(pars, x, y, fibgroups)
     return model - z
 
-def display_ifu_gradient_fit(x, y, z, fibgroups, coeffs, factors):
+def display_ifu_gradient_fit(x, y, z, fibgroups, coeffs, factors, telescope="Sci",
+                             labels=["Spec. factors", "Gradient model", "Original image", "Factor-corrected image", "Fully corrected image"]):
     gradient_model = ifu_gradient(coeffs=coeffs, x=x, y=y)
     factors_model = ifu_factors(factors=factors, fibgroups=fibgroups)
 
     model = gradient_model * factors_model
+    gradient_model_ = gradient_model.copy()
+    gradient_model_ /= gradient_model_.mean()
+    factors_model_ = factors_model.copy()
+    factors_model_ /= factors_model_.mean()
 
-    ifus = [factors_model, gradient_model, z, z/model]
-    labels = ["Spec. factors", "Gradient model", "Original exposure", "Flatfielded exposure"]
-    norms = [{}, {}, {}, {"norm_cuts": (0.98, 1.02)}, {"norm_cuts": (0.98, 1.02)}]
+    ifus = [factors_model_, gradient_model_, z, z/factors_model_, z/model]
 
-    fig, axs = plt.subplots(1, 4, figsize=(15, 5), sharex=True, sharey=True, layout="constrained")
-    plt.xlabel("X (spaxel)", fontsize="xx-large")
-    plt.ylabel("Y (spaxel)", fontsize="xx-large")
+    fig, axs = plt.subplots(1, 5, figsize=(15, 4), sharex=True, sharey=True, layout="constrained")
+    fig.supxlabel("X (spaxel)", fontsize="xx-large")
+    fig.supylabel("Y (spaxel)", fontsize="xx-large")
     for i in range(len(ifus)):
         axs[i].set_title(labels[i], loc="left", fontsize="large")
-        display_ifu(x=x, y=y, z=ifus[i], ax=axs[i], marker_size=30, **norms[i])
+        display_ifu(x=x, y=y, z=ifus[i], ax=axs[i], marker_size=17)
 
     return fig, axs
 
-def fit_ifu_gradient(rss, cwave, dwave=6, guess_coeffs=[0,1,2,3], fib_groupby="spec", display_plots=False):
+def fit_ifu_gradient(rss, cwave, dwave=6, guess_coeffs=[1,2,3,0], fib_groupby="spec", coadd_method="average", display_plots=False):
 
     if fib_groupby == "spec":
         groups = [1,2,3]
     elif fib_groupby == "quad":
         groups = [1,2,3,4,5,6]
     fibgroups = np.repeat(groups, rss._fibers // len(groups))
-    fibgroups = fibgroups[rss._slitmap["telescope"]=="Sci"]
 
-    z, x, y = rss.coadd_flux(cwave=cwave, dwave=dwave, return_xy=True, telescope="Sci")
+    if coadd_method == "average":
+        z, x, y = rss.coadd_flux(cwave=cwave, dwave=dwave, return_xy=True, telescope="Sci")
+    elif coadd_method == "fit":
+        z, x, y = fit_lines_slit(rss=rss, cwaves=cwave, return_xy=True, select_fibers="Sci")
     z /= np.nanmean(z)
 
-    # mask invalid spaxels if any
+    # mask invalid spaxels and spaxels from IFUs other than Sci's
     mask = np.isfinite(z)
     x, y, z = x[mask], y[mask], z[mask]
     fibgroups = fibgroups[mask]
@@ -779,7 +791,7 @@ def remove_ifu_gradient(rss, coeffs, factors=None):
     if factors is None:
         factors = np.ones(rss._fibers, dtype="float")
     else:
-        factors = np.repeat(factors, rss._fibers//3)
+        factors = np.repeat(factors, rss._fibers//factors.size)
 
     rss_corr = copy(rss)
 
@@ -787,7 +799,7 @@ def remove_ifu_gradient(rss, coeffs, factors=None):
     for tel in telescopes:
         tel_select = rss._slitmap["telescope"] == tel
         slitmap = rss._slitmap[tel_select]
-        x, y = slitmap["xpmm"], slitmap["ypmm"]
+        x, y = slitmap["xpmm"].data, slitmap["ypmm"].data
 
         gradient = ifu_gradient(coeffs=coeffs, x=x, y=y)
         gradient *= factors[tel_select]
@@ -857,8 +869,11 @@ def fit_flatfield(twilights, ref_kind=600, norm_cwave=None, display_plots=False)
     log.info(f"fitting and normalizing IFU gradient at {norm_cwave = :.2f}")
     twilights_g = []
     for twilight, flat in zip(twilights, flats):
+        log.info(f"processing {twilight._header['IMAGETYP']} exposure {twilight._header['EXPOSURE']}")
         # fit gradient with spectrograph normalizations (make n-iterations of this or stop when gradient is <1% across) ------
-        x, y, z, coeffs, factors = fit_ifu_gradient(flat, cwave=norm_cwave)
+        x, y, z, coeffs, factors = fit_ifu_gradient(flat, fib_groupby="quad", cwave=norm_cwave, display_plots=display_plots)
+        log.info(f" fitted spectrograph {factors = }")
+        log.info(f" fitted gradient {coeffs      = }")
         # apply gradient correction
         twilight_g = remove_ifu_gradient(twilight, coeffs=coeffs, factors=factors)
         twilights_g.append(twilight_g)
@@ -893,15 +908,8 @@ def fit_skyline_flatfield(sciences, mflat, ref_kind, norm_cwave, norm_fibers=Non
 
     science.apply_pixelmask()
 
-    if norm_fibers is not None:
-        assert isinstance(norm_fibers, np.ndarray) and norm_fibers.dtype == bool
-        log.info(f"selecting {norm_fibers.sum()} fibers")
-    else:
-        log.info(f"selecting all {science._fibers} fibers")
-        norm_fibers = np.ones_like(science._fibers, dtype="bool")
-
     log.info(f"measuring sky line {norm_cwave:.2f} Angstrom")
-    skyline_slit = fit_lines_slit(science, cwaves=[norm_cwave], norm_fibers=norm_fibers)[0]
+    skyline_slit = fit_lines_slit(science, cwaves=norm_cwave, norm_fibers=norm_fibers)
 
     log.info(f"calculating flatfield slit using {ref_kind = }")
     ref_skyline = _reference_fiber(skyline_slit, ref_kind=ref_kind)
