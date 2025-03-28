@@ -3672,15 +3672,15 @@ def add_astrometry(
     org_img._slitmap=slitmap
 
     # set header keyword with best knowledge of IFU center for SCI, SKYE, SKYW
-    org_img.setHdrValue('SCIRA', RAobs_sci, 'RA of central fiber in SCI IFU (ASTRMSRC)[deg]')
-    org_img.setHdrValue('SCIDEC', DECobs_sci, 'DEC of central fiber in SCI IFU (ASTRMSRC)[deg]')
-    org_img.setHdrValue('SCIPA', PAobs_sci, 'PA of central fiber in SCI IFU (ASTRMSRC)[deg]')
-    org_img.setHdrValue('SKYERA', RAobs_skye, 'RA of central fiber in SKYE IFU (ASTRMSRC)[deg]')
-    org_img.setHdrValue('SKYEDEC', DECobs_skye, 'DEC of central fiber in SKYE IFU (ASTRMSRC)[deg]')
-    org_img.setHdrValue('SKYEPA', PAobs_skye, 'PA of central fiber in SKYE IFU (ASTRMSRC)[deg]')
-    org_img.setHdrValue('SKYWRA', RAobs_skyw, 'RA of central fiber in SKYW IFU (ASTRMSRC)[deg]')
-    org_img.setHdrValue('SKYWDEC', DECobs_skyw, 'DEC of central fiber in SKYW IFU (ASTRMSRC)[deg]')
-    org_img.setHdrValue('SKYWPA', PAobs_skyw, 'PA of central fiber in SKYW IFU (ASTRMSRC)[deg]')
+    org_img.setHdrValue('SCIRA', RAobs_sci, 'SCI center, fiberid=975, RA (ASTRMSRC)[deg]')
+    org_img.setHdrValue('SCIDEC', DECobs_sci, 'SCI center, fiberid=975, DEC (ASTRMSRC)[deg]')
+    org_img.setHdrValue('SCIPA', PAobs_sci, 'SCI center, fiberid=975, PA (ASTRMSRC)[deg]')
+    org_img.setHdrValue('SKYERA', RAobs_skye, 'SKYE center, fiberid=36, RA (ASTRMSRC)[deg]')
+    org_img.setHdrValue('SKYEDEC', DECobs_skye, 'SKYE center, fiberid=36, DEC (ASTRMSRC)[deg]')
+    org_img.setHdrValue('SKYEPA', PAobs_skye, 'SKYE center, fiberid=36, PA (ASTRMSRC)[deg]')
+    org_img.setHdrValue('SKYWRA', RAobs_skyw, 'SKYW center, fiberid=1, RA (ASTRMSRC)[deg]')
+    org_img.setHdrValue('SKYWDEC', DECobs_skyw, 'SKYW center, fiberid=1, DEC (ASTRMSRC)[deg]')
+    org_img.setHdrValue('SKYWPA', PAobs_skyw, 'SKYW center, fiberid=1, PA (ASTRMSRC)[deg]')
 
     log.info(f"writing RA,DEC to slitmap in image '{os.path.basename(out_image)}'")
     org_img.writeFitsData(out_image)
