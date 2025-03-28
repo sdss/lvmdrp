@@ -852,8 +852,6 @@ def fit_flatfield(twilights, ref_kind=600, norm_cwave=None, display_plots=False)
 
     log.info(f"calculating raw flatfields out of {len(twilights)} exposures")
     flats, ref_fibers, normalizations = get_flatfield_sequence(rsss=twilights, ref_kind=ref_kind)
-    # log.info(f"normalizing spectrographs at {norm_cwave = :.2f} Angstrom")
-    # flats = [normalize_spec(flat, cwave=norm_cwave) for flat in flats]
 
     if display_plots:
         fig, ax = plt.subplots(figsize=(14,5), layout="constrained")
@@ -862,18 +860,14 @@ def fit_flatfield(twilights, ref_kind=600, norm_cwave=None, display_plots=False)
         ax.set_ylabel(f"Counts ({flats[0]._header['BUNIT']})")
         ax.set_title("Reference fiber", loc="left", fontsize="xx-large")
 
-    log.info("combining raw flatfields")
-    mflat = RSS()
-    mflat.combineRSS(flats, method="median")
-
     log.info(f"fitting and normalizing IFU gradient at {norm_cwave = :.2f}")
     twilights_g = []
     for twilight, flat in zip(twilights, flats):
         log.info(f"processing {twilight._header['IMAGETYP']} exposure {twilight._header['EXPOSURE']}")
         # fit gradient with spectrograph normalizations (make n-iterations of this or stop when gradient is <1% across) ------
-        x, y, z, coeffs, factors = fit_ifu_gradient(flat, fib_groupby="quad", cwave=norm_cwave, display_plots=display_plots)
-        log.info(f" fitted spectrograph {factors = }")
-        log.info(f" fitted gradient {coeffs      = }")
+        x, y, z, coeffs, factors = fit_ifu_gradient(flat, fib_groupby="spec", cwave=norm_cwave, display_plots=display_plots)
+        log.info(f" fitted spectrograph factors = {np.round(factors, 4)}")
+        log.info(f" fitted gradient coeffs      = {np.round(coeffs, 7)}")
         # apply gradient correction
         twilight_g = remove_ifu_gradient(twilight, coeffs=coeffs, factors=factors)
         twilights_g.append(twilight_g)
@@ -883,7 +877,7 @@ def fit_flatfield(twilights, ref_kind=600, norm_cwave=None, display_plots=False)
 
     log.info("calculating gradient-corrected combined flatfield")
     mflat = RSS()
-    mflat.combineRSS(flats_g, method="median")
+    mflat.combineRSS(flats_g, method="biweight")
 
     mflat.interpolate_data(axis="X")
     mflat.interpolate_data(axis="Y")
