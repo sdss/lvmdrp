@@ -764,11 +764,11 @@ def fit_ifu_gradient(rss, cwave, dwave=6, guess_coeffs=[1,2,3,0], fib_groupby="s
         z, x, y = rss.coadd_flux(cwave=cwave, dwave=dwave, return_xy=True, telescope="Sci")
     elif coadd_method == "fit":
         z, x, y = fit_lines_slit(rss=rss, cwaves=cwave, return_xy=True, select_fibers="Sci")
-    z /= np.nanmean(z)
+    z_ = z / np.nanmean(z)
 
     # mask invalid spaxels and spaxels from IFUs other than Sci's
-    mask = np.isfinite(z)
-    x, y, z = x[mask], y[mask], z[mask]
+    mask = np.isfinite(z_)
+    x, y, z_ = x[mask], y[mask], z_[mask]
     fibgroups = fibgroups[mask]
 
     # define guess and boundary values
@@ -776,13 +776,14 @@ def fit_ifu_gradient(rss, cwave, dwave=6, guess_coeffs=[1,2,3,0], fib_groupby="s
     guess = guess_coeffs + guess_factors
     bound_lower = len(guess_coeffs) * [-np.inf] + len(guess_factors) * [0.0]
     bound_upper = len(guess_coeffs) * [+np.inf] + len(guess_factors) * [1.0]
-    fit = least_squares(residual, x0=guess, args=(x, y, z, fibgroups), bounds=(bound_lower, bound_upper))
+    fit = least_squares(residual, x0=guess, args=(x, y, z_, fibgroups), bounds=(bound_lower, bound_upper))
 
     coeffs = fit.x[:len(guess_coeffs)]
     factors = fit.x[len(guess_coeffs):]
+    factors /= factors.mean()
 
     if display_plots:
-        display_ifu_gradient_fit(x, y, z, fibgroups, coeffs=coeffs, factors=factors)
+        display_ifu_gradient_fit(x, y, z_, fibgroups, coeffs=coeffs, factors=factors)
 
     return x, y, z, coeffs, factors
 
@@ -803,6 +804,8 @@ def remove_ifu_gradient(rss, coeffs, factors=None):
 
         gradient = ifu_gradient(coeffs=coeffs, x=x, y=y)
         gradient *= factors[tel_select]
+        # normalize gradient to conserve photon counts
+        gradient /= bn.nanmean(gradient)
 
         rss_corr._data[slitmap["fiberid"]-1] /= gradient[:, None]
         if rss_corr._error is not None:
@@ -888,36 +891,50 @@ def _choose_sky(rss):
     telescope = "SkyE" if abs(rss._header["WAVE HELIORV_SKYE"]) < abs(rss._header["WAVE HELIORV_SKYW"]) else "SkyW"
     return telescope
 
-def fit_skyline_flatfield(sciences, mflat, ref_kind, norm_cwave, norm_fibers=None, display_plots=False):
+def fit_skyline_flatfield(sciences, mflat, norm_cwave, norm_fibers=None, method="median", display_plots=False):
 
     if isinstance(sciences, list):
         log.info(f"fitting sky line correction using {len(sciences)} science frames")
-        science = RSS()
-        science.combineRSS([science / mflat for science in sciences], method="median")
     elif isinstance(sciences, RSS):
         log.info(f"fitting sky line correction using a single science exposure: {sciences}")
-        science = sciences / mflat
+        science = [sciences]
     else:
         raise TypeError(f"Invalid type for `sciences`: {type(sciences)}. Valid types are lvmdrp.core.rss.RSS and list[lvmdrp.core.rss.RSS]")
 
+    sciences_g, factors = [], []
+    for science in sciences:
+        expnum = science._header["EXPOSURE"]
+
+        log.info(f"fitting gradient and spectrograph factors around sky line @ {norm_cwave = :.2f} Angstrom for {expnum = }")
+        x, y, z, coeffs, factor = fit_ifu_gradient(science/mflat, cwave=norm_cwave, coadd_method="fit", display_plots=display_plots)
+        gradient = ifu_gradient(coeffs, x=x, y=y)
+        factors.append(factor)
+        log.info(f" gradient across = {bn.nanmax(gradient)/bn.nanmin(gradient):.4f}")
+        log.info(f" factors         = {np.round(factor, 4)}")
+
+        science_g = remove_ifu_gradient(science / mflat, coeffs=coeffs, factors=None)
+        sciences_g.append(science_g)
+
+    factor_mean = np.mean(factors, axis=0)
+    factor_sdev = np.std(factors, axis=0)
+    log.info(f"indv. factors = {factor_mean} +/- {factor_sdev}")
+
+    log.info(f"combining gradient corrected science frames using {method = }")
+    science = RSS()
+    science.combineRSS(sciences_g, method=method)
     science.apply_pixelmask()
 
-    log.info(f"measuring sky line {norm_cwave:.2f} Angstrom")
-    skyline_slit = fit_lines_slit(science, cwaves=norm_cwave, norm_fibers=norm_fibers)
+    log.info(f"measuring sky line @ {norm_cwave:.2f} Angstrom on combined science frame")
+    x, y, skyline_slit, coeffs, factor = fit_ifu_gradient(science, cwave=norm_cwave, coadd_method="fit", display_plots=display_plots)
+    gradient_res = ifu_gradient(coeffs, x=x, y=y)
+    log.info(f"residual gradient across = {bn.nanmax(gradient_res)/bn.nanmin(gradient_res):.4f}")
+    log.info(f"final factors            = {np.round(factor, 4)}")
 
-    log.info(f"calculating flatfield slit using {ref_kind = }")
-    ref_skyline = _reference_fiber(skyline_slit, ref_kind=ref_kind)
-    flatfield_slit = skyline_slit / ref_skyline
-
-
-    log.info("calculating per-spectrograph flatfield correction")
-    flatfield_corr = np.asarray([bn.nanmedian(flatfield_slit[science._slitmap["spectrographid"] == i+1]) for i in range(3)])
-    log.info(f"resulting per-spectrograph corrections: {flatfield_corr.round(4) = }")
+    flatfield_corr = np.repeat(factor, science._fibers / factor.size)
 
     if display_plots:
-        x = mflat._slitmap["fiberid"]
-        # y = (skyline_slit / flatfield_slit / np.repeat(flatfield_corr[:, None], 648))
-        y = skyline_slit / np.repeat(flatfield_corr, 648)
+        x = science._slitmap["fiberid"].data
+        y = skyline_slit / flatfield_corr
         mu = np.nanmedian(y)
         y /= mu
 
