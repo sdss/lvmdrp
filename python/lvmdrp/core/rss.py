@@ -3082,9 +3082,12 @@ class RSS(FiberRows):
             select_tel = self._slitmap["telescope"] == telescope
         else:
             select_tel = numpy.ones_like(data.size, dtype="bool")
+
+        data[~select_tel] = numpy.nan
+
         if return_xy:
-            return data[select_tel], self._slitmap["xpmm"].data[select_tel], self._slitmap["ypmm"].data[select_tel]
-        return data[select_tel]
+            return data, self._slitmap["xpmm"].data, self._slitmap["ypmm"].data
+        return data
 
     def get_helio_rv(self, apply_hrv_corr=False):
         """Calculates heliocentric velocity corrections for each telescope and standard fiber
