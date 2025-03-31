@@ -891,7 +891,7 @@ def _choose_sky(rss):
     telescope = "SkyE" if abs(rss._header["WAVE HELIORV_SKYE"]) < abs(rss._header["WAVE HELIORV_SKYW"]) else "SkyW"
     return telescope
 
-def fit_skyline_flatfield(sciences, mflat, norm_cwave, norm_fibers=None, method="median", display_plots=False):
+def fit_skyline_flatfield(sciences, mflat, norm_cwave, norm_fibers=None, method="biweight", display_plots=False):
 
     if isinstance(sciences, list):
         log.info(f"fitting sky line correction using {len(sciences)} science frames")
@@ -912,7 +912,7 @@ def fit_skyline_flatfield(sciences, mflat, norm_cwave, norm_fibers=None, method=
         log.info(f" gradient across = {bn.nanmax(gradient)/bn.nanmin(gradient):.4f}")
         log.info(f" factors         = {np.round(factor, 4)}")
 
-        science_g = remove_ifu_gradient(science / mflat, coeffs=coeffs, factors=None)
+        science_g = remove_ifu_gradient(science/mflat, coeffs=coeffs, factors=None)
         sciences_g.append(science_g)
 
     factor_mean = np.mean(factors, axis=0)
@@ -924,11 +924,22 @@ def fit_skyline_flatfield(sciences, mflat, norm_cwave, norm_fibers=None, method=
     science.combineRSS(sciences_g, method=method)
     science.apply_pixelmask()
 
-    log.info(f"measuring sky line @ {norm_cwave:.2f} Angstrom on combined science frame")
+    log.info(f"validating gradient removal around sky line @ {norm_cwave:.2f} Angstrom")
     x, y, skyline_slit, coeffs, factor = fit_ifu_gradient(science, cwave=norm_cwave, coadd_method="fit", display_plots=display_plots)
     gradient_res = ifu_gradient(coeffs, x=x, y=y)
     log.info(f"residual gradient across = {bn.nanmax(gradient_res)/bn.nanmin(gradient_res):.4f}")
-    log.info(f"final factors            = {np.round(factor, 4)}")
+    log.info(f"all fibers factors       = {np.round(factor, 4)}")
+
+    # log.info(f"measuring sky line @ {norm_cwave:.2f} Angstrom on combined science frame")
+    # skyline_slit, x, y = fit_lines_slit(science, cwaves=norm_cwave, select_fibers=science._slitmap["targettype"]=="SKY", return_xy=True)
+    # skyline_slit /= bn.nanmedian(skyline_slit)
+
+    # log.info("calculating spectrograph corrections on sky fibers")
+    # slitmap = science._slitmap
+    # factor = np.zeros(3, dtype="float")
+    # for i in range(3):
+    #     factor[i] = biweight_location(skyline_slit[slitmap["spectrographid"]==i+1], ignore_nan=True)
+    # log.info(f"final factors = {np.round(factor, 4)}")
 
     flatfield_corr = np.repeat(factor, science._fibers / factor.size)
 
@@ -942,7 +953,7 @@ def fit_skyline_flatfield(sciences, mflat, norm_cwave, norm_fibers=None, method=
         plt.axhspan(0.95, 1.05, lw=0, color="0.7", alpha=0.5)
         plt.axhspan(0.98, 1.02, lw=0, color="0.7", alpha=0.5)
         plt.axhspan(0.99, 1.01, lw=0, color="0.7", alpha=0.5)
-        plt.plot(x, y, ".-", lw=1)
+        plt.plot(x, y, lw=1, color="tab:blue")
         plt.ylim(0.92, 1.08)
         plt.xlabel("Fiber ID")
         plt.ylabel(f"Counts ({science._header['BUNIT']})")
