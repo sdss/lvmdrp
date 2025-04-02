@@ -3648,7 +3648,6 @@ class Spectrum1D(Header):
 
         return flux, cent, fwhm, bg
 
-
     def obtainGaussFluxPeaks(self, pos, sigma, replace_error=1e10, plot=False):
         """returns Gaussian peaks parameters, flux error and mask
 
@@ -3847,3 +3846,23 @@ class Spectrum1D(Header):
         masks = numpy.logical_or(masks, numpy.isnan(sky_errors))
 
         return Spectrum1D(wave=wave, data=fluxes, error=errors, lsf=fwhms, mask=masks, sky=skies, sky_error=sky_errors)
+
+    def fit_lines(self, cwaves, dwave=6, axs=None):
+
+        cwaves_ = numpy.atleast_1d(cwaves)
+
+        if self._lsf is None:
+            fwhm_guess = 2.5
+        else:
+            fwhm_guess = numpy.nanmean(numpy.interp(cwaves_, self._wave, self._lsf))
+
+        if axs is not None:
+            axs = numpy.atleast_1d(axs)
+        flux, sky_wave, fwhm, bg = self.fitSepGauss(cwaves_, dwave,
+                                                    fwhm_guess, 0.0,
+                                                    [0, numpy.inf],
+                                                    [-2.5, 2.5],
+                                                    [fwhm_guess - 1.5, fwhm_guess + 1.5],
+                                                    [0.0, numpy.inf],
+                                                    axs=axs)
+        return flux, sky_wave, fwhm, bg

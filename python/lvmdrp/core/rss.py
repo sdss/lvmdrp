@@ -1,9 +1,11 @@
 import os
+import warnings
 import numpy
 import bottleneck as bn
 from copy import deepcopy as copy
 from tqdm import tqdm
 from scipy import interpolate
+from scipy.optimize import least_squares
 from astropy.io import fits as pyfits
 from astropy.wcs import WCS
 from astropy.table import Table
@@ -23,8 +25,9 @@ from lvmdrp.core.header import Header
 from lvmdrp.core.positionTable import PositionTable
 from lvmdrp.core.spectrum1d import Spectrum1D, find_continuum
 from lvmdrp.core import dataproducts as dp
-from lvmdrp.core.fit_profile import polyfit2d, polyval2d
+from lvmdrp.core.fit_profile import ifu_factors, ifu_gradient, gradient_residual
 from lvmdrp.core.resample import resample_flux_density
+from lvmdrp.core.plot import plot_gradient_fit
 
 from lvmdrp import __version__ as drpver
 
@@ -900,6 +903,17 @@ class RSS(FiberRows):
 
         if self._sky_error is not None and spec._sky_error is not None:
             self._sky_error[fiber] = spec._sky_error
+
+    def _get_fiber_groups(self, by="spec"):
+        if by == "spec":
+            groups = [1,2,3]
+        elif by == "quad":
+            groups = [1,2,3,4,5,6]
+        else:
+            raise ValueError(f"Invalid value for `by`: {by}. Expected either 'spec' or 'quad'")
+
+        fiber_groups = numpy.repeat(groups, self._fibers // len(groups))
+        return fiber_groups
 
     def add_header_comment(self, comstr):
         '''
@@ -3063,6 +3077,9 @@ class RSS(FiberRows):
         return Table(trace_dict)
 
     def coadd_flux(self,  cwave, dwave=6, comb_stat=bn.nanmean, return_xy=False, telescope=None):
+        if telescope is not None and telescope not in self._slitmap["telescope"]:
+            raise ValueError(f"Invalid value for `telescope`: {telescope}. Expected either 'Sci', 'SkyE', 'SkyW' or 'Spec'")
+
         hw = dwave // 2
         if self._wave.ndim == 1:
             wave_sel = (cwave-hw < self._wave) & (self._wave < cwave+hw)
@@ -3159,39 +3176,100 @@ class RSS(FiberRows):
 
         return hrv_corrs
 
-    def fit_field_gradient(self, wrange, poly_deg):
-        """Fits a polynomial function to the IFU field"""
-        if self._slitmap is None:
-            log.warning("not able to fit gradient without fibermap information")
-            return self
+    def fit_lines_slit(rss, cwaves, dwave=6, return_xy=False, select_fibers=None, axs=None):
 
-        fibermap = self._slitmap
-        telescope = fibermap["telescope"]
+        cwaves_ = numpy.atleast_1d(cwaves)
 
-        flux = self.coadd_flux(wrange=wrange)
+        if isinstance(select_fibers, str):
+            if select_fibers not in rss._slitmap["telescope"]:
+                raise ValueError(f"Invalid value for `select_fibers`: {select_fibers}. Expected either 'Sci', 'SkyE', 'SkyW' or 'Spec'")
+            select_fibers = rss._slitmap["telescope"] == select_fibers
+        elif isinstance(select_fibers, numpy.ndarray) and select_fibers.size == rss._fibers and select_fibers.dtype == bool:
+            pass
+        elif select_fibers is None:
+            select_fibers = numpy.ones(rss._fibers, dtype="bool")
+        else:
+            raise TypeError(f"Invalid type for `select_fibers`: {type(select_fibers)}. Expected either None, string or boolean array matching number of fibers in `rss`")
 
-        x_e=fibermap["xpmm"].astype(float)[telescope=="SkyE"]
-        y_e=fibermap["ypmm"].astype(float)[telescope=="SkyE"]
-        x_w=fibermap["xpmm"].astype(float)[telescope=="SkyW"]
-        y_w=fibermap["ypmm"].astype(float)[telescope=="SkyW"]
-        x_s=fibermap["xpmm"].astype(float)[telescope=="Spec"]
-        y_s=fibermap["ypmm"].astype(float)[telescope=="Spec"]
+        flux_slit = numpy.zeros((rss._fibers, cwaves_.size)) + numpy.nan
+        for ifiber in range(rss._fibers):
+            spec = rss[ifiber]
+            if not select_fibers[ifiber] or spec._mask.all():
+                continue
 
-        flux = flux[telescope=="Sci"]
-        x=fibermap["xpmm"].astype(float)[telescope=="Sci"]
-        y=fibermap["ypmm"].astype(float)[telescope=="Sci"]
+            try:
+                flux, _, _, _ = spec.fit_lines(cwaves_, dwave=dwave, axs=axs)
+            except ValueError as e:
+                warnings.warn(f"while fitting fiber {ifiber}: {e}")
+                continue
+            flux_slit[ifiber] = flux
 
-        flux_med = bn.nanmedian(flux)
-        flux_fact = flux / flux_med
-        select = numpy.isfinite(flux_fact)
-        coeffs = polyfit2d(x[select], y[select], flux_fact[select], poly_deg)
+        if return_xy:
+            return flux_slit.squeeze(), rss._slitmap["xpmm"].data, rss._slitmap["ypmm"].data
+        return flux_slit.squeeze()
 
-        grad_model = polyval2d(x, y, coeffs)
-        grad_model_e = polyval2d(x_e, y_e, coeffs)
-        grad_model_w = polyval2d(x_w, y_w, coeffs)
-        grad_model_s = polyval2d(x_s, y_s, coeffs)
+    def fit_ifu_gradient(self, cwave, dwave=6, guess_coeffs=[1,2,3,0], groupby="spec", coadd_method="average", axs=None):
 
-        return x, y, flux, grad_model, grad_model_e, grad_model_w, grad_model_s
+        fiber_groups = self._get_fiber_groups(groupby)
+
+        if coadd_method == "average":
+            z, x, y = self.coadd_flux(cwave=cwave, dwave=dwave, return_xy=True, telescope="Sci")
+        elif coadd_method == "fit":
+            z, x, y = self.fit_lines_slit(cwaves=cwave, return_xy=True, select_fibers="Sci")
+        mu = numpy.nanmean(z)
+        z_ = z / mu
+        x_, y_ = copy(x), copy(y)
+
+        # mask invalid spaxels
+        mask = numpy.isfinite(z_)
+        x_, y_, z_ = x[mask], y[mask], z_[mask]
+        fiber_groups = fiber_groups[mask]
+
+        # define guess and boundary values
+        guess_factors = len(set(fiber_groups)) * [1]
+        guess = guess_coeffs + guess_factors
+        bound_lower = len(guess_coeffs) * [-numpy.inf] + len(guess_factors) * [0.0]
+        bound_upper = len(guess_coeffs) * [+numpy.inf] + len(guess_factors) * [1.0]
+        fit = least_squares(gradient_residual, x0=guess, args=(x_, y_, z_, fiber_groups), bounds=(bound_lower, bound_upper))
+
+        coeffs = fit.x[:len(guess_coeffs)]
+        factors = fit.x[len(guess_coeffs):]
+        factors /= bn.nanmean(factors)
+
+        if axs is not None:
+            gradient_model = ifu_gradient(coeffs, x=x, y=y, normalize=True)
+            factors_model = ifu_factors(factors, fiber_groups=fiber_groups, normalize=True)
+            plot_gradient_fit(self._slitmap, z/mu, gradient_model=gradient_model, factors_model=factors_model, telescope="Sci", axs=axs)
+
+        return x, y, z, coeffs, factors
+
+    def remove_ifu_gradient(self, coeffs, factors=None, groupby=None):
+
+        rss_corr = copy(self)
+
+        if factors is not None and groupby is not None:
+            factors = ifu_factors(factors, self._get_fiber_groups(groupby), normalize=True)
+        elif factors is None:
+            factors = numpy.ones(self._fibers)
+        else:
+            raise ValueError(f"Keyword argument `groupby` has to be given if `factors` is given: {groupby = }")
+
+        telescopes = ["Sci", "SkyE", "SkyW", "Spec"]
+        for tel in telescopes:
+            tel_select = rss_corr._slitmap["telescope"] == tel
+            slitmap = rss_corr._slitmap[tel_select]
+            x, y = slitmap["xpmm"].data, slitmap["ypmm"].data
+
+            gradient = ifu_gradient(coeffs=coeffs, x=x, y=y, normalize=True)
+            gradient *= factors[tel_select]
+            # normalize gradient to conserve photon counts
+            gradient /= bn.nanmean(gradient)
+
+            rss_corr._data[slitmap["fiberid"]-1] /= gradient[:, None]
+            if rss_corr._error is not None:
+                rss_corr._error[slitmap["fiberid"]-1] /= gradient[:, None]
+
+        return rss_corr
 
     def writeFitsData(self, out_rss, replace_masked=True, include_wave=False):
         """Writes information from a RSS object into a FITS file.
