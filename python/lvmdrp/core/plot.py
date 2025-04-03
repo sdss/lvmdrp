@@ -734,12 +734,13 @@ def ifu_view(slitmap=None, z=None, rss=None, cwave=None, dwave=None, comb_stat=N
 
     if use_world_coords and ("ra" in slitmap.colnames and "dec" in slitmap.colnames):
         xcol, ycol = "ra", "dec"
+        pa = getattr(rss, "_header", {}).get(f"PO{telescope.upper()}PA", 0)
     else:
         xcol, ycol = "xpmm", "ypmm"
+        pa = 0
 
     sel_telescope = slitmap["telescope"].data == telescope
     x, y = slitmap[xcol].data[sel_telescope], slitmap[ycol].data[sel_telescope]
-    pa = getattr(rss, "_header", {}).get(f"PO{telescope.upper()}PA", 0)
 
     if rss is None and slitmap is not None and z is not None:
         z_ = z[sel_telescope]
@@ -747,7 +748,7 @@ def ifu_view(slitmap=None, z=None, rss=None, cwave=None, dwave=None, comb_stat=N
         z = rss.coadd_flux(cwave=cwave, dwave=dwave, comb_stat=comb_stat, telescope=telescope)
         z_ = z[sel_telescope]
     else:
-        raise ValueError("Either `z` or `rss`, `cwave`, `dwave` and `comb_stat` have to be given")
+        raise ValueError("Either `z` and `slitmap` or `rss`, `slitmap`, `cwave`, `dwave` and `comb_stat` have to be given")
 
     if norm_z:
         z_ /= np.nanmean(z_)

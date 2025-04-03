@@ -647,9 +647,13 @@ def fit_skyline_flatfield(in_sciences, in_mflat, out_mflat, cwave, dwave=8, norm
     factor_sdev = np.std(factors, axis=0)
     log.info(f"average factors = {np.round(factor_mean, 4)} +/- {np.round(factor_sdev, 4)}")
 
-    log.info(f"combining gradient corrected science frames using {method = }")
+    zscore = np.abs(np.asarray(factors) - factor_mean) / factor_sdev
+    keep = (zscore <= 1).all(axis=1)
+    log.info(f"rejecting {len(sciences) - keep.sum()} outlying (> 1sigma) science exposures")
+
+    log.info(f"combining {keep.sum()} gradient corrected science frames using {method = }")
     science = RSS()
-    science.combineRSS(sciences_g, method=method)
+    science.combineRSS([science_g for i, science_g in enumerate(sciences_g) if keep[i]], method=method)
     science.apply_pixelmask()
 
     log.info(f"validating gradient removal around sky line @ {cwave:.2f} Angstrom")
