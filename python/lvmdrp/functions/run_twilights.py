@@ -414,7 +414,7 @@ def get_flatfield_sequence(rsss, ref_kind=lambda x: biweight_location(x, ignore_
         flatfields.append(flatfield)
     return flatfields, ref_fibers, normalizations
 
-def normalize_spec(rss, cwave, dwave=6, norm_stat=np.nanmean):
+def normalize_spec(rss, cwave, dwave=8, norm_stat=np.nanmean):
     slitmap = rss._slitmap
     sp1_sel = slitmap["spectrographid"] == 1
     sp2_sel = slitmap["spectrographid"] == 2
@@ -434,14 +434,14 @@ def normalize_spec(rss, cwave, dwave=6, norm_stat=np.nanmean):
     rss_n._data[sp3_sel] /= sp3_norm
     return rss_n
 
-def iterate_gradient_fit(rss, cwave, dwave=6, groupby="spec", coadd_method="average", niter=10, thresholds=(0.005, 0.005), axs=None):
+def iterate_gradient_fit(rss, cwave, dwave=8, groupby="spec", coadd_method="average", niter=10, thresholds=(0.005, 0.005), axs=None):
 
     rss_g = copy(rss)
 
     # first gradient fit
     x, y, z, coeffs, factors = rss_g.fit_ifu_gradient(cwave=cwave, dwave=dwave, groupby=groupby, coadd_method=coadd_method)
     _, gradient_final, factors_final = rss_g.eval_ifu_gradient(coeffs, factors, groupby, normalize=True)
-    log.info(f"initial factors         = {np.round(factors, 7)}")
+    log.info(f"initial factors         = {np.round(factors, 4)}")
     log.info(f"initial gradient across = {gradient_final.max()/gradient_final.min():.4f}")
 
     fthr, gthr = thresholds
@@ -456,8 +456,8 @@ def iterate_gradient_fit(rss, cwave, dwave=6, groupby="spec", coadd_method="aver
         fres, gres = np.abs(factors_residual.max() - 1), np.abs(gradient_residual.max() / gradient_residual.min() - 1)
 
         log.info(f" iteration {i+1}/{niter}")
-        log.info(f"     factors residuals  = {fres:.7f}")
-        log.info(f"     gradient residuals = {gres:.7f}")
+        log.info(f"     factors residuals  = {fres:.4f}")
+        log.info(f"     gradient residuals = {gres:.4f}")
         if (fthr > fres and gthr > gres) or i+1 == niter:
             break
 
@@ -468,8 +468,8 @@ def iterate_gradient_fit(rss, cwave, dwave=6, groupby="spec", coadd_method="aver
     if i == 0:
         log.info("no further iterations needed")
 
-    log.info(f"fitted factors          = {np.round(factors_final[::rss._fibers//factors.size], 7)}")
-    log.info(f"fitted gradient across  = {gradient_final.max()/gradient_final.min():.7f}")
+    log.info(f"fitted factors          = {np.round(factors_final[::rss._fibers//factors.size], 4)}")
+    log.info(f"fitted gradient across  = {gradient_final.max()/gradient_final.min():.4f}")
 
     rss_gradient = rss / rss_g
     _, _, _, coeffs, factors = rss_gradient.fit_ifu_gradient(cwave=cwave, dwave=dwave, groupby=groupby, coadd_method=coadd_method)
@@ -483,7 +483,7 @@ def iterate_gradient_fit(rss, cwave, dwave=6, groupby="spec", coadd_method="aver
 
     return x, y, z, coeffs, factors
 
-def fit_fiberflat(in_rss, out_flat, out_rss, ref_kind=600, groupby="spec", norm_cwave=None, interpolate_invalid=True, smooth=True, display_plots=False):
+def fit_fiberflat(in_rss, out_flat, out_rss, ref_kind=600, groupby="spec", norm_cwave=None, norm_dwave=8, interpolate_invalid=True, smooth=True, display_plots=False):
     """Creates a flatfield given a flat (twilight, dome) exposure
 
     The input RSS needs to be wavelength calibrated, rectified and LSF matched
@@ -524,6 +524,8 @@ def fit_fiberflat(in_rss, out_flat, out_rss, ref_kind=600, groupby="spec", norm_
         Fit factors to fiber groups by 'spec' or 'quad', by default 'spec'
     norm_cwave : int|None, optional
         Normalization wavelength, by default None
+    norm_dwave : int, optional
+        Normalization wavelength window around `norm_cwave`, by default 8 Angstrom
     interpolate_invalid : bool, optional
         Interpolate invalid pixels (NaN, infinity), by default True
     smooth : bool, optional
@@ -562,9 +564,9 @@ def fit_fiberflat(in_rss, out_flat, out_rss, ref_kind=600, groupby="spec", norm_
     axs_res[0].set_ylabel("gradient residual", fontsize="large")
     ax_ref.step(flat._wave, ref_fiber, where="mid", lw=1)
 
-    log.info(f"fitting and correcting IFU gradient and '{groupby}' factors @ {norm_cwave = :.2f} Angstrom")
+    log.info(f"fitting and correcting IFU gradient and '{groupby}' factors @ {norm_cwave:.2f} Angstrom")
     # fit gradient with spectrograph normalizations (make n-iterations of this or stop when gradient is <1% across)
-    x, y, z_ori, coeffs, factors = iterate_gradient_fit(flat, groupby=groupby, cwave=norm_cwave, axs=(axs_fin,axs_res))
+    x, y, z_ori, coeffs, factors = iterate_gradient_fit(flat, groupby=groupby, cwave=norm_cwave, dwave=norm_dwave, axs=(axs_fin,axs_res))
     # apply gradient correction
     rss_g = rss.remove_ifu_gradient(coeffs=coeffs, factors=factors, groupby=groupby)
     # get corrected flatfield
@@ -587,7 +589,7 @@ def _choose_sky(rss):
     telescope = "SkyE" if abs(rss._header["WAVE HELIORV_SKYE"]) < abs(rss._header["WAVE HELIORV_SKYW"]) else "SkyW"
     return telescope
 
-def fit_skyline_flatfield(in_sciences, in_mflat, out_mflat, cwave, norm_fibers=None, method="biweight", display_plots=False):
+def fit_skyline_flatfield(in_sciences, in_mflat, out_mflat, cwave, dwave=8, norm_fibers=None, method="median", sky_fibers_only=False, display_plots=False):
 
     log.info(f"loading {len(in_sciences)} science exposures")
     sciences = [RSS.from_file(in_science) for in_science in in_sciences]
@@ -615,9 +617,18 @@ def fit_skyline_flatfield(in_sciences, in_mflat, out_mflat, cwave, norm_fibers=N
         expnum = science._header["EXPOSURE"]
         imagetyp = science._header["IMAGETYP"]
 
-        log.info(f"fitting gradient and factors around sky line @ {cwave = :.2f} Angstrom for '{imagetyp}' exposure {expnum = }")
         fscience = science / mflat
-        x, y, z, coeffs, factor = fscience.fit_ifu_gradient(cwave=cwave, coadd_method="fit")
+
+        log.info("measuring and correcting wavelength shifts")
+        _, offsets_model = fscience.measure_wave_shifts(cwaves=cwave, dwave=dwave, smooth=True)
+        mean_offset, std_offset = bn.nanmean(offsets_model), bn.nanstd(offsets_model)
+        log.info(f"measured wavelength offsets: {mean_offset:.4f} +/- {std_offset:.4f}")
+        fscience._wave_trace['COEFF'].data[:, 0] -= offsets_model
+        wave_trace = TraceMask.from_coeff_table(fscience._wave_trace)
+        fscience._wave = wave_trace.eval_coeffs()
+
+        log.info(f"fitting gradient and factors around sky line @ {cwave:.2f} Angstrom for '{imagetyp}' exposure {expnum = }")
+        x, y, z, coeffs, factor = fscience.fit_ifu_gradient(cwave=cwave, dwave=dwave, coadd_method="fit")
         gradient_model = ifu_gradient(coeffs, x=x, y=y, normalize=True)
         factors.append(factor)
         log.info(f" factors         = {np.round(factor, 4)}")
@@ -639,28 +650,29 @@ def fit_skyline_flatfield(in_sciences, in_mflat, out_mflat, cwave, norm_fibers=N
     log.info(f"combining gradient corrected science frames using {method = }")
     science = RSS()
     science.combineRSS(sciences_g, method=method)
-    # science.apply_pixelmask()
+    science.apply_pixelmask()
 
     log.info(f"validating gradient removal around sky line @ {cwave:.2f} Angstrom")
     axs = [fig.add_subplot(gs_gra[-2, j]) for j in range(5)]
     axs[0].set_ylabel("combined exposure", fontsize="large")
-    x, y, skyline_slit, coeffs, factor = science.fit_ifu_gradient(cwave=cwave, groupby="spec", coadd_method="fit")
+    x, y, skyline_slit, coeffs, factor = science.fit_ifu_gradient(cwave=cwave, dwave=dwave, groupby="spec", coadd_method="fit")
     gradient_res = ifu_gradient(coeffs, x=x, y=y, normalize=True)
     factors_final = ifu_factors(factor, fiber_groups, normalize=True)
     plot_gradient_fit(science._slitmap, skyline_slit, gradient_res, factors_final, telescope="Sci", marker_size=15, axs=axs, labels=False)
     log.info(f"all fibers factors       = {np.round(factor, 4)}")
     log.info(f"residual gradient across = {bn.nanmax(gradient_res)/bn.nanmin(gradient_res):.4f}")
 
-    # log.info(f"measuring sky line @ {cwave:.2f} Angstrom on combined science frame")
-    # skyline_slit, x, y = fit_lines_slit(science, cwaves=cwave, select_fibers=science._slitmap["targettype"]=="SKY", return_xy=True)
-    # skyline_slit /= bn.nanmedian(skyline_slit)
+    if sky_fibers_only:
+        log.info(f"measuring sky line @ {cwave:.2f} Angstrom on combined science frame")
+        skyline_slit, x, y = science.fit_lines_slit(cwaves=cwave, dwave=dwave, select_fibers=science._slitmap["targettype"]=="SKY", return_xy=True)
+        skyline_slit /= bn.nanmedian(skyline_slit)
 
-    # log.info("calculating spectrograph corrections on sky fibers")
-    # slitmap = science._slitmap
-    # factor = np.zeros(3, dtype="float")
-    # for i in range(3):
-    #     factor[i] = biweight_location(skyline_slit[slitmap["spectrographid"]==i+1], ignore_nan=True)
-    # log.info(f"final factors = {np.round(factor, 4)}")
+        log.info("calculating spectrograph corrections using only sky fibers")
+        slitmap = science._slitmap
+        factor = np.zeros(3, dtype="float")
+        for i in range(3):
+            factor[i] = bn.nanmedian(skyline_slit[slitmap["spectrographid"]==i+1])
+        log.info(f"sky fiber factors    = {np.round(factor, 4)}")
 
     flatfield_corr = ifu_factors(factor, fiber_groups)
     flatfield_corr = np.repeat(factor, science._fibers / factor.size)

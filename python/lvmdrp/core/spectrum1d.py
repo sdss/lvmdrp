@@ -3847,7 +3847,7 @@ class Spectrum1D(Header):
 
         return Spectrum1D(wave=wave, data=fluxes, error=errors, lsf=fwhms, mask=masks, sky=skies, sky_error=sky_errors)
 
-    def fit_lines(self, cwaves, dwave=6, axs=None):
+    def fit_lines(self, cwaves, dwave=8, axs=None):
 
         cwaves_ = numpy.atleast_1d(cwaves)
 

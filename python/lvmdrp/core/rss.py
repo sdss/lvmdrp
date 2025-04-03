@@ -4,7 +4,7 @@ import numpy
 import bottleneck as bn
 from copy import deepcopy as copy
 from tqdm import tqdm
-from scipy import interpolate
+from scipy import interpolate, ndimage
 from scipy.optimize import least_squares
 from astropy.io import fits as pyfits
 from astropy.wcs import WCS
@@ -3076,7 +3076,7 @@ class RSS(FiberRows):
 
         return Table(trace_dict)
 
-    def coadd_flux(self,  cwave, dwave=6, comb_stat=bn.nanmean, return_xy=False, telescope=None):
+    def coadd_flux(self,  cwave, dwave=8, comb_stat=bn.nanmean, return_xy=False, telescope=None):
         if telescope is not None and telescope not in self._slitmap["telescope"]:
             raise ValueError(f"Invalid value for `telescope`: {telescope}. Expected either 'Sci', 'SkyE', 'SkyW' or 'Spec'")
 
@@ -3176,7 +3176,64 @@ class RSS(FiberRows):
 
         return hrv_corrs
 
-    def fit_lines_slit(rss, cwaves, dwave=6, return_xy=False, select_fibers=None, axs=None):
+    def measure_wave_shifts(self, cwaves, dwave=8, min_snr=10, flux2bg=0.7, smooth=True):
+
+        cwaves = numpy.atleast_1d(cwaves)
+
+        fiberid = self._slitmap['fiberid'].data
+        snr = numpy.nan_to_num(self._data / self._error, nan=0, posinf=0, neginf=0)
+        wave_offsets = numpy.ones((len(cwaves), numpy.shape(self._data)[0])) * numpy.nan
+        iterator = tqdm(range(self._fibers), total=self._fibers, desc=f"measuring wave_offsets using {len(cwaves)} sky line(s)", ascii=True, unit="fiber")
+        for ifiber in iterator:
+            # skip dead/non-exposed fibers
+            spec = self.getSpec(ifiber)
+            if spec._mask.all() or self._slitmap[ifiber]["telescope"] == "Spec" or self._slitmap[ifiber]["fibstatus"] in [1, 2]:
+                continue
+
+            # skip fibers with low S/N
+            sky_snr = numpy.asarray([numpy.trapz(snr[ifiber, (w-dwave//2<spec._wave)&(spec._wave<w+dwave//2)], dx=0.6) for w in cwaves]).round(2)
+            if numpy.any(sky_snr < min_snr):
+                warnings.warn(f"skipping fiber {ifiber} with S/N < {min_snr} around sky lines {sky_snr = }")
+                continue
+
+            guess_shift = spec._wave[[numpy.nanargmax(spec._data*((spec._wave>=skyline-dwave//2)&(skyline+dwave//2>=spec._wave))) for skyline in cwaves]] - cwaves
+            guess_shift = numpy.median(guess_shift)
+
+            # skip fits with failed sky line measurements
+            fwhm_guess = numpy.nanmean(numpy.interp(cwaves, self._wave[ifiber], self._lsf[ifiber]))
+            flux, sky_wave, fwhm, bg = spec.fitSepGauss(cwaves+guess_shift, dwave, fwhm_guess, 0.0, [0, numpy.inf], [-2.5, 2.5], [fwhm_guess - 1.5, fwhm_guess + 1.5], [0.0, numpy.inf])
+            if numpy.any(flux / bg < flux2bg) or numpy.isnan([flux, sky_wave, fwhm]).any():
+                continue
+
+            wave_offsets[:, ifiber] = sky_wave - cwaves
+            offset_slit = bn.nanmedian(wave_offsets, axis=0)
+
+        # fit smooth function to each spectrograph trend
+        wave_offsets_mod = offset_slit.copy()
+        for spec_offset, specid in zip(numpy.split(offset_slit, 3), [1, 2, 3]):
+            spec = self._slitmap['spectrographid'].data==specid
+
+            mask = numpy.isfinite(spec_offset)
+            if mask.sum() <= 0.5*spec.sum():
+                warnings.warn(f"<50% of the fibers have good wavelength offsets measurements: {mask.sum()} fibers, assuming zero offset")
+                self.add_header_comment(f"<50% of the fibers have good wavelength offsets measurements: {mask.sum()} fibers, assuming zero offset")
+                wave_offsets_mod[spec] = 0.0
+                continue
+            t = numpy.linspace(
+                fiberid[spec][mask][len(fiberid[spec][mask]) // 10],
+                fiberid[spec][mask][-1 * len(fiberid[spec][mask]) // 10],
+                10
+            )
+            offsets_model = ndimage.median_filter(spec_offset[mask], 8)
+            if smooth:
+                tck = interpolate.splrep(fiberid[spec][mask], offsets_model, task=-1, t=t)
+                offsets_model = interpolate.splev(fiberid[spec], tck)
+
+            wave_offsets_mod[spec] = offsets_model
+
+        return wave_offsets, wave_offsets_mod
+
+    def fit_lines_slit(rss, cwaves, dwave=8, return_xy=False, select_fibers=None, axs=None):
 
         cwaves_ = numpy.atleast_1d(cwaves)
 
@@ -3192,23 +3249,25 @@ class RSS(FiberRows):
             raise TypeError(f"Invalid type for `select_fibers`: {type(select_fibers)}. Expected either None, string or boolean array matching number of fibers in `rss`")
 
         flux_slit = numpy.zeros((rss._fibers, cwaves_.size)) + numpy.nan
+        iax = 0
         for ifiber in range(rss._fibers):
             spec = rss[ifiber]
             if not select_fibers[ifiber] or spec._mask.all():
                 continue
 
             try:
-                flux, _, _, _ = spec.fit_lines(cwaves_, dwave=dwave, axs=axs)
+                flux, _, _, _ = spec.fit_lines(cwaves_, dwave=dwave, axs=axs[iax] if axs is not None else axs)
             except ValueError as e:
                 warnings.warn(f"while fitting fiber {ifiber}: {e}")
                 continue
             flux_slit[ifiber] = flux
+            iax += 1
 
         if return_xy:
             return flux_slit.squeeze(), rss._slitmap["xpmm"].data, rss._slitmap["ypmm"].data
         return flux_slit.squeeze()
 
-    def fit_ifu_gradient(self, cwave, dwave=6, groupby="spec", coadd_method="average", axs=None):
+    def fit_ifu_gradient(self, cwave, dwave=8, groupby="spec", coadd_method="average", axs=None):
 
         fiber_groups = self._get_fiber_groups(groupby)
 
@@ -3223,15 +3282,15 @@ class RSS(FiberRows):
         # mask invalid spaxels
         mask = numpy.isfinite(z_)
         x_, y_, z_ = x[mask], y[mask], z_[mask]
-        fiber_groups = fiber_groups[mask]
+        fiber_groups_ = fiber_groups[mask]
 
         # define guess and boundary values
-        guess_coeffs = [1, 2, 3, 0]
+        guess_coeffs = [1, 2, 3, 4]
         guess_factors = len(set(fiber_groups)) * [1]
         guess = guess_coeffs + guess_factors
-        bound_lower = len(guess_coeffs) * [-numpy.inf] + len(guess_factors) * [0.0]
+        bound_lower = len(guess_coeffs) * [-numpy.inf] + len(guess_factors) * [0.1]
         bound_upper = len(guess_coeffs) * [+numpy.inf] + len(guess_factors) * [1.0]
-        fit = least_squares(gradient_residual, x0=guess, args=(x_, y_, z_, fiber_groups), bounds=(bound_lower, bound_upper))
+        fit = least_squares(gradient_residual, x0=guess, args=(x_, y_, z_, fiber_groups_), bounds=(bound_lower, bound_upper))
 
         coeffs = fit.x[:len(guess_coeffs)]
         factors = fit.x[len(guess_coeffs):]

@@ -721,7 +721,7 @@ def plot_gradient_fit(slitmap, z, gradient_model, factors_model, telescope=None,
     return axs
 
 
-def ifu_view(slitmap=None, z=None, rss=None, cwave=None, dwave=None, comb_stat=None, telescope="Sci",
+def ifu_view(slitmap=None, z=None, rss=None, cwave=None, dwave=None, comb_stat=None, telescope="Sci", use_world_coords=False,
              marker_size=50, norm_z=True, norm_cuts=None, norm_percents=None, cmap="coolwarm",
              hide_axis=True, ax=None, return_xyz=False):
 
@@ -732,7 +732,7 @@ def ifu_view(slitmap=None, z=None, rss=None, cwave=None, dwave=None, comb_stat=N
     if slitmap is None:
         raise ValueError("Either `slitmap` or `rss._slitmap` have to be given")
 
-    if "ra" in slitmap.colnames and "dec" in slitmap.colnames:
+    if use_world_coords and ("ra" in slitmap.colnames and "dec" in slitmap.colnames):
         xcol, ycol = "ra", "dec"
     else:
         xcol, ycol = "xpmm", "ypmm"
