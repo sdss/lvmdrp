@@ -722,22 +722,32 @@ def plot_gradient_fit(slitmap, z, gradient_model, factors_model, telescope=None,
 
 
 def ifu_view(slitmap=None, z=None, rss=None, cwave=None, dwave=None, comb_stat=None, telescope="Sci",
-                marker_size=50, norm_z=True, norm_cuts=None, norm_percents=None, cmap="coolwarm", hide_axis=True, ax=None, return_xyz=False):
+             marker_size=50, norm_z=True, norm_cuts=None, norm_percents=None, cmap="coolwarm",
+             hide_axis=True, ax=None, return_xyz=False):
 
     if telescope is not None and telescope not in slitmap["telescope"]:
         raise ValueError(f"Invalid value for `telescope`: {telescope}. Expected either 'Sci', 'SkyE', 'SkyW' or 'Spec'")
 
-    if rss is None and slitmap is not None and z is not None:
-        sel_telescope = slitmap["telescope"].data == telescope
-        z_ = z[sel_telescope]
-        x, y = slitmap["xpmm"].data[sel_telescope], slitmap["ypmm"].data[sel_telescope]
-    elif rss is not None and (rss._slitmap is not None or slitmap is not None) and cwave is not None and dwave is not None and comb_stat is not None:
-        slitmap = rss._slitmap or slitmap
-        z = rss.coadd_flux(cwave=cwave, dwave=dwave, comb_stat=comb_stat, telescope=telescope)
-        sel_telescope = slitmap["telescope"].data == telescope
-        z_, x, y = z[sel_telescope], slitmap["xpmm"].data[sel_telescope], slitmap["ypmm"].data[sel_telescope]
+    slitmap = getattr(rss, "_slitmap", slitmap)
+    if slitmap is None:
+        raise ValueError("Either `slitmap` or `rss._slitmap` have to be given")
+
+    if "ra" in slitmap.colnames and "dec" in slitmap.colnames:
+        xcol, ycol = "ra", "dec"
     else:
-        raise ValueError("Either `slitmap` or `z` or `rss` (with _slitmap), `cwave`, `dwave` and `comb_stat` have to be given")
+        xcol, ycol = "xpmm", "ypmm"
+
+    sel_telescope = slitmap["telescope"].data == telescope
+    x, y = slitmap[xcol].data[sel_telescope], slitmap[ycol].data[sel_telescope]
+    pa = getattr(rss, "_header", {}).get(f"PO{telescope.upper()}PA", 0)
+
+    if rss is None and slitmap is not None and z is not None:
+        z_ = z[sel_telescope]
+    elif rss is not None and (rss._slitmap is not None or slitmap is not None) and cwave is not None and dwave is not None and comb_stat is not None:
+        z = rss.coadd_flux(cwave=cwave, dwave=dwave, comb_stat=comb_stat, telescope=telescope)
+        z_ = z[sel_telescope]
+    else:
+        raise ValueError("Either `z` or `rss`, `cwave`, `dwave` and `comb_stat` have to be given")
 
     if norm_z:
         z_ /= np.nanmean(z_)
@@ -752,7 +762,7 @@ def ifu_view(slitmap=None, z=None, rss=None, cwave=None, dwave=None, comb_stat=N
     if ax is None:
         fig, ax = plt.subplots(figsize=(5, 5), layout="constrained")
     norm = simple_norm(z_[~np.isnan(z_)], **nminmax)
-    sc = ax.scatter(x, y, c=z_, s=marker_size, marker="H", norm=norm, cmap=cmap)
+    sc = ax.scatter(x, y, c=z_, s=marker_size, marker=(6, 0, 90-pa), norm=norm, cmap=cmap)
     set_colorbar(ax, sc)
 
     if hide_axis:
