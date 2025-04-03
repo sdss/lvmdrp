@@ -36,14 +36,14 @@ def polyval2d(x, y, m):
         z += a * x ** i * y ** j
     return z
 
-def ifu_factors(factors, fiber_groups, normalize=False):
+def ifu_factors(factors, fiber_groups, normalize=True):
     iid, fid = min(fiber_groups), max(fiber_groups)
     ifu = numpy.ones_like(fiber_groups, dtype="float")
     for spid in range(iid, fid+1):
         ifu[fiber_groups == spid] *= factors[spid-1]
     return ifu / bn.nanmean(ifu) if normalize else ifu
 
-def ifu_gradient(coeffs, x, y, normalize=False):
+def ifu_gradient(coeffs, x, y, normalize=True):
     ncoeffs = len(coeffs)
     order = int(numpy.sqrt(ncoeffs))
     ij = itertools.product(range(order), repeat=2)
@@ -54,17 +54,21 @@ def ifu_gradient(coeffs, x, y, normalize=False):
     ifu = numpy.dot(G, coeffs)
     return ifu / bn.nanmean(ifu) if normalize else ifu
 
-def ifu_joint_model(pars, x, y, fiber_groups):
+def ifu_joint_model(pars, x, y, fiber_groups, normalize=True, return_components=False):
     iid, fid = min(fiber_groups), max(fiber_groups)
     nids = fid - iid + 1
     coeffs, factors = pars[:-nids], pars[-nids:]
 
     # get IFU gradient model
-    gradient_model = ifu_gradient(coeffs=coeffs, x=x, y=y)
+    gradient_model = ifu_gradient(coeffs=coeffs, x=x, y=y, normalize=normalize)
     # get IFU factors model
-    factors_model = ifu_factors(factors=factors, fiber_groups=fiber_groups)
+    factors_model = ifu_factors(factors=factors, fiber_groups=fiber_groups, normalize=normalize)
     # joint model
     model = gradient_model * factors_model
+    if normalize:
+        model /= bn.nanmean(model)
+    if return_components:
+        return model, gradient_model, factors_model
     return model
 
 def gradient_residual(pars, x, y, z, fiber_groups):

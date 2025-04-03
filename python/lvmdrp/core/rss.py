@@ -25,7 +25,7 @@ from lvmdrp.core.header import Header
 from lvmdrp.core.positionTable import PositionTable
 from lvmdrp.core.spectrum1d import Spectrum1D, find_continuum
 from lvmdrp.core import dataproducts as dp
-from lvmdrp.core.fit_profile import ifu_factors, ifu_gradient, gradient_residual
+from lvmdrp.core.fit_profile import ifu_factors, ifu_gradient, ifu_joint_model, gradient_residual
 from lvmdrp.core.resample import resample_flux_density
 from lvmdrp.core.plot import plot_gradient_fit
 
@@ -3208,7 +3208,7 @@ class RSS(FiberRows):
             return flux_slit.squeeze(), rss._slitmap["xpmm"].data, rss._slitmap["ypmm"].data
         return flux_slit.squeeze()
 
-    def fit_ifu_gradient(self, cwave, dwave=6, guess_coeffs=[1,2,3,0], groupby="spec", coadd_method="average", axs=None):
+    def fit_ifu_gradient(self, cwave, dwave=6, groupby="spec", coadd_method="average", axs=None):
 
         fiber_groups = self._get_fiber_groups(groupby)
 
@@ -3226,6 +3226,7 @@ class RSS(FiberRows):
         fiber_groups = fiber_groups[mask]
 
         # define guess and boundary values
+        guess_coeffs = [1, 2, 3, 0]
         guess_factors = len(set(fiber_groups)) * [1]
         guess = guess_coeffs + guess_factors
         bound_lower = len(guess_coeffs) * [-numpy.inf] + len(guess_factors) * [0.0]
@@ -3243,32 +3244,26 @@ class RSS(FiberRows):
 
         return x, y, z, coeffs, factors
 
-    def remove_ifu_gradient(self, coeffs, factors=None, groupby=None):
-
-        rss_corr = copy(self)
-
+    def eval_ifu_gradient(self, coeffs, factors=None, groupby=None, normalize=True):
         if factors is not None and groupby is not None:
-            factors = ifu_factors(factors, self._get_fiber_groups(groupby), normalize=True)
+            pass
         elif factors is None:
-            factors = numpy.ones(self._fibers)
+            factors = [1, 1, 1]
+            groupby = "spec"
         else:
             raise ValueError(f"Keyword argument `groupby` has to be given if `factors` is given: {groupby = }")
 
-        telescopes = ["Sci", "SkyE", "SkyW", "Spec"]
-        for tel in telescopes:
-            tel_select = rss_corr._slitmap["telescope"] == tel
-            slitmap = rss_corr._slitmap[tel_select]
-            x, y = slitmap["xpmm"].data, slitmap["ypmm"].data
+        pars = list(coeffs) + list(factors)
+        fiber_groups = self._get_fiber_groups(by=groupby)
+        x, y = self._slitmap["xpmm"].data, self._slitmap["ypmm"].data
+        joint_model, gradient_model, factors_model = ifu_joint_model(pars=pars, x=x, y=y, fiber_groups=fiber_groups, normalize=normalize, return_components=True)
 
-            gradient = ifu_gradient(coeffs=coeffs, x=x, y=y, normalize=True)
-            gradient *= factors[tel_select]
-            # normalize gradient to conserve photon counts
-            gradient /= bn.nanmean(gradient)
+        return joint_model, gradient_model, factors_model
 
-            rss_corr._data[slitmap["fiberid"]-1] /= gradient[:, None]
-            if rss_corr._error is not None:
-                rss_corr._error[slitmap["fiberid"]-1] /= gradient[:, None]
-
+    def remove_ifu_gradient(self, coeffs, factors=None, groupby=None):
+        rss_corr = copy(self)
+        joint_model, _, _ = self.eval_ifu_gradient(coeffs, factors, groupby)
+        rss_corr /= joint_model[:, None]
         return rss_corr
 
     def writeFitsData(self, out_rss, replace_masked=True, include_wave=False):
