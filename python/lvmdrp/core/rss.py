@@ -302,15 +302,21 @@ class RSS(FiberRows):
         # update header
         if len(hdrs) > 0:
             hdr_out = hdrs[0]._header.copy()
+            channel = hdr_out["CCD"][0]
             for hdr in hdrs[1:]:
                 hdr_out.update(hdr._header)
-            hdr_out["CCD"] = hdr_out["CCD"][0]
+            hdr_out["CCD"] = channel
         else:
             hdr_out = None
-
+            channel = None
 
         # update slitmap
-        slitmap_out = rss._slitmap
+        slitmap_out = copy(rsss[-1]._slitmap)
+        for i in range(len(rsss)-1):
+            spec_idx = numpy.where(slitmap_out["spectrographid"] == i+1)
+            if channel is not None:
+                slitmap_out[f"ypix_{channel}"][spec_idx] = rsss[i]._slitmap[f"ypix_{channel}"][spec_idx]
+            slitmap_out["fibstatus"][spec_idx] = rsss[i]._slitmap["fibstatus"][spec_idx]
 
         return cls(
             data=data_out,

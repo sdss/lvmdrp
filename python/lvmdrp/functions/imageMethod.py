@@ -2716,6 +2716,9 @@ def extract_spectra(
     channel = img._header['CCD'][0]
     slitmap[f"ypix_{channel}"] = slitmap[f"ypix_{channel}"].astype("float64")
     slitmap[f"ypix_{channel}"][select_spec] += numpy.nan_to_num(bn.nanmedian(shifts, axis=0))
+    # propagate bad fibers to slitmap
+    slitmap_spec["fibstatus"][mask.all(axis=1)] = 5
+    slitmap["fibstatus"][select_spec] = slitmap_spec["fibstatus"]
 
     if error is not None:
         error[mask] = replace_error
