@@ -740,7 +740,8 @@ def ifu_view(slitmap=None, z=None, rss=None, cwave=None, dwave=None, comb_stat=N
         pa = 0
 
     sel_telescope = slitmap["telescope"].data == telescope
-    x, y = slitmap[xcol].data[sel_telescope], slitmap[ycol].data[sel_telescope]
+    x, y = slitmap[xcol].data, slitmap[ycol].data
+    x_, y_ = x[sel_telescope], y[sel_telescope]
 
     if rss is None and slitmap is not None and z is not None:
         z_ = z[sel_telescope]
@@ -763,7 +764,7 @@ def ifu_view(slitmap=None, z=None, rss=None, cwave=None, dwave=None, comb_stat=N
     if ax is None:
         fig, ax = plt.subplots(figsize=(5, 5), layout="constrained")
     norm = simple_norm(z_[~np.isnan(z_)], **nminmax)
-    sc = ax.scatter(x, y, c=z_, s=marker_size, marker=(6, 0, 90-pa), norm=norm, cmap=cmap)
+    sc = ax.scatter(x_, y_, c=z_, s=marker_size, marker=(6, 0, 90-pa), norm=norm, cmap=cmap)
     set_colorbar(ax, sc)
 
     if hide_axis:

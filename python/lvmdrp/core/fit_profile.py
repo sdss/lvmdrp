@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-from copy import deepcopy
+from copy import deepcopy as copy
 from multiprocessing import Pool, cpu_count
 import itertools
 
-from lvmdrp.core.plot import plt
+from lvmdrp.core.plot import plt, plot_gradient_fit
 import astropy.io.fits as pyfits
 import numpy
 import bottleneck as bn
@@ -36,50 +36,96 @@ def polyval2d(x, y, m):
         z += a * x ** i * y ** j
     return z
 
-def ifu_factors(factors, fiber_groups, normalize=True):
-    iid, fid = min(fiber_groups), max(fiber_groups)
-    ifu = numpy.ones_like(fiber_groups, dtype="float")
-    for spid in range(iid, fid+1):
-        ifu[fiber_groups == spid] *= factors[spid-1]
-    return ifu / bn.nanmean(ifu) if normalize else ifu
-
-def ifu_gradient(coeffs, x, y, normalize=True):
-    ncoeffs = len(coeffs)
-    order = int(numpy.sqrt(ncoeffs))
-    ij = itertools.product(range(order), repeat=2)
-
-    G = numpy.zeros((x.size, ncoeffs))
-    for k, (i, j) in enumerate(ij):
-        G[:, k] = x**i * y**j
-    ifu = numpy.dot(G, coeffs)
-    return ifu / bn.nanmean(ifu) if normalize else ifu
-
-def ifu_joint_model(pars, x, y, fiber_groups, normalize=True, return_components=False):
-    iid, fid = min(fiber_groups), max(fiber_groups)
-    nids = fid - iid + 1
-    coeffs, factors = pars[:-nids], pars[-nids:]
-
-    # get IFU gradient model
-    gradient_model = ifu_gradient(coeffs=coeffs, x=x, y=y, normalize=normalize)
-    # get IFU factors model
-    factors_model = ifu_factors(factors=factors, fiber_groups=fiber_groups, normalize=normalize)
-    # joint model
-    model = gradient_model * factors_model
-    if normalize:
-        model /= bn.nanmean(model)
-    if return_components:
-        return model, gradient_model, factors_model
-    return model
-
-def gradient_residual(pars, x, y, z, fiber_groups):
-    model = ifu_joint_model(pars, x, y, fiber_groups)
-    return model - z
-
 def gaussians(pars, x):
     """Gaussian models for multiple components"""
     y = pars[0][:, None] * numpy.exp(-0.5 * ((x[None, :] - pars[1][:, None]) / pars[2][:, None]) ** 2) / (pars[2][:, None] * fact)
     return bn.nansum(y, axis=0)
 
+
+class IFUGradient(object):
+
+    @classmethod
+    def ifu_factors(cls, factors, fiber_groups, normalize=True):
+        iid, fid = min(fiber_groups), max(fiber_groups)
+        ifu = numpy.ones_like(fiber_groups, dtype="float")
+        for spid in range(iid, fid+1):
+            ifu[fiber_groups == spid] *= factors[spid-1]
+        return ifu / bn.nanmean(ifu) if normalize else ifu
+
+    @classmethod
+    def ifu_gradient(cls, coeffs, x, y, normalize=True):
+        ncoeffs = len(coeffs)
+        order = int(numpy.sqrt(ncoeffs))
+
+        G = numpy.zeros((x.size, ncoeffs))
+        ij = itertools.product(range(order), repeat=2)
+        for k, (i, j) in enumerate(ij):
+            G[:, k] = x**i * y**j
+        ifu = bn.nansum(G * numpy.asarray(coeffs)[None, :], axis=1)
+        return ifu / bn.nanmean(ifu) if normalize else ifu
+
+    @classmethod
+    def ifu_joint_model(cls, coeffs, factors, x, y, fiber_groups, normalize=True, return_components=False):
+        gradient_model = cls.ifu_gradient(coeffs=coeffs, x=x, y=y, normalize=normalize)
+        factors_model = cls.ifu_factors(factors=factors, fiber_groups=fiber_groups, normalize=normalize)
+        model = gradient_model * factors_model
+        if normalize:
+            model /= bn.nanmean(model)
+        if return_components:
+            return model, gradient_model, factors_model
+        return model
+
+    def _get_fixed_selection(self, coeffs_idx, factors_idx):
+        fixed_coeffs = numpy.zeros_like(self._guess_coeffs, dtype="bool")
+        fixed_factors = numpy.zeros_like(self._guess_factors, dtype="bool")
+        fixed_coeffs[coeffs_idx] = True
+        fixed_factors[factors_idx] = True
+        return fixed_coeffs, fixed_factors
+
+    def _pack_pars(self, coeffs=None, factors=None):
+        _coeffs = numpy.where(self._fixed_coeffs, self._guess_coeffs, copy(coeffs or self._coeffs))
+        _factors = numpy.where(self._fixed_factors, self._guess_factors, copy(factors or self._factors))
+        return _coeffs.tolist(), _factors.tolist()
+
+    def _unpack_pars(self, pars):
+        _coeffs = numpy.where(self._fixed_coeffs, self._guess_coeffs, pars[:self._ncoeffs])
+        _factors = numpy.where(self._fixed_factors, self._guess_factors, pars[self._ncoeffs:])
+        return _coeffs, _factors
+
+    def __init__(self, guess_coeffs, guess_factors, fixed_coeffs=None, fixed_factors=None):
+        self._guess_coeffs = list(guess_coeffs)
+        self._guess_factors = list(guess_factors)
+        self._ncoeffs = len(self._guess_coeffs)
+        self._nfactors = len(self._guess_factors)
+
+        # this attributes should remain constant for each instance
+        self._fixed_coeffs, self._fixed_factors = self._get_fixed_selection(coeffs_idx=fixed_coeffs or [], factors_idx=fixed_factors or [])
+
+        # initialize parameters
+        self._coeffs, self._factors = copy(self._guess_coeffs), copy(self._guess_factors)
+
+    def __call__(self, x, y, fiber_groups, coeffs=None, factors=None):
+        _coeffs, _factors = self._pack_pars(coeffs, factors)
+        return self.ifu_joint_model(_coeffs, _factors, x, y, fiber_groups)
+
+    def residuals(self, pars, x, y, z, fiber_groups, sigma=None):
+        self._coeffs, self._factors = self._unpack_pars(pars)
+        return (self(x, y, fiber_groups) - z) / 1.0 if sigma is None else sigma
+
+    def fit(self, x, y, z, fiber_groups, sigma=None):
+        guess = self._guess_coeffs + self._guess_factors
+        bound_lower = len(self._guess_coeffs) * [-numpy.inf] + len(self._guess_factors) * [0.1]
+        bound_upper = len(self._guess_coeffs) * [+numpy.inf] + len(self._guess_factors) * [1.0]
+        results = optimize.least_squares(self.residuals, x0=guess, args=(x, y, z, fiber_groups), bounds=(bound_lower, bound_upper))
+        self._coeffs, self._factors = self._unpack_pars(results.x)
+        return results
+
+    def plot(self, x, y, z, fiber_groups, slitmap, axs=None):
+        if axs is None:
+            _, axs = plt.subplots(1, 5, figsize=(14,3), sharex=True, sharey=True, layout="constrained")
+        gradient_model = self.ifu_gradient(self._coeffs, x, y)
+        factors_model = self.ifu_factors(self._factors, fiber_groups)
+        plot_gradient_fit(slitmap, z, gradient_model=gradient_model, factors_model=factors_model, telescope="Sci", axs=axs)
 
 class SpectralResolution(object):
     def __init__(self, res=None):
@@ -154,7 +200,7 @@ class fit_profile1D(object):
             raise ValueError(f"Errors have non-valid values: {sigma}")
         if p0 is None and p0 is not False and self._guess_par is not None:
             self._guess_par(x, y)
-        perr_init = deepcopy(self)
+        perr_init = copy(self)
         p0 = self.fix_guess(bounds)
         if method == "leastsq":
             model = optimize.least_squares(
@@ -204,7 +250,7 @@ class fit_profile1D(object):
                 pool = Pool(processes=cpus)
                 results = []
                 for i in range(err_sim):
-                    perr = deepcopy(perr_init)
+                    perr = copy(perr_init)
                     if method == "leastsq":
                         results.append(
                             pool.apply_async(
@@ -253,7 +299,7 @@ class fit_profile1D(object):
                         self._par_err_models[i, :] = results[i].get()
             else:
                 for i in range(err_sim):
-                    perr = deepcopy(perr_init)
+                    perr = copy(perr_init)
                     if method == "leastsq":
                         try:
                             model_err = optimize.leastsq(
@@ -509,7 +555,7 @@ class parFile(fit_profile1D):
     def guessPar(self, x, y):
         w = self._guess_window
         dx = bn.nanmedian(x[1:] - x[:-1])
-        temp_y = deepcopy(y)
+        temp_y = copy(y)
         for n in self._names:
             if self._profile_type[n] == "TemplateScale":
                 if self._fixed[n]["scale"] == 1:
@@ -741,7 +787,7 @@ class parFile(fit_profile1D):
                         par_fix[line[0]] = 0
         self._parameters[self._names[-1]] = par_comp
         self._fixed[self._names[-1]] = par_fix
-        self._parameters_err = deepcopy(self._parameters)
+        self._parameters_err = copy(self._parameters)
         # for n in self._names:
         #     if self._profile_type[n]=='TemplateScale':
         #         spec = Spectrum1D()

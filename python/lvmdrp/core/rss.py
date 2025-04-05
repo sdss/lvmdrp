@@ -5,7 +5,6 @@ import bottleneck as bn
 from copy import deepcopy as copy
 from tqdm import tqdm
 from scipy import interpolate, ndimage
-from scipy.optimize import least_squares
 from astropy.io import fits as pyfits
 from astropy.wcs import WCS
 from astropy.table import Table
@@ -25,7 +24,7 @@ from lvmdrp.core.header import Header
 from lvmdrp.core.positionTable import PositionTable
 from lvmdrp.core.spectrum1d import Spectrum1D, find_continuum
 from lvmdrp.core import dataproducts as dp
-from lvmdrp.core.fit_profile import ifu_factors, ifu_gradient, ifu_joint_model, gradient_residual
+from lvmdrp.core.fit_profile import IFUGradient
 from lvmdrp.core.resample import resample_flux_density
 from lvmdrp.core.plot import plot_gradient_fit
 
@@ -3277,28 +3276,22 @@ class RSS(FiberRows):
             z, x, y = self.fit_lines_slit(cwaves=cwave, return_xy=True, select_fibers="Sci")
         mu = numpy.nanmean(z)
         z_ = z / mu
-        x_, y_ = copy(x), copy(y)
 
-        # mask invalid spaxels
-        mask = numpy.isfinite(z_)
-        x_, y_, z_ = x[mask], y[mask], z_[mask]
-        fiber_groups_ = fiber_groups[mask]
-
-        # define guess and boundary values
-        guess_coeffs = [1, 2, 3, 4]
+        # # define guess and boundary values
+        guess_coeffs = [1, 2, 3, 0]
         guess_factors = len(set(fiber_groups)) * [1]
-        guess = guess_coeffs + guess_factors
-        bound_lower = len(guess_coeffs) * [-numpy.inf] + len(guess_factors) * [0.1]
-        bound_upper = len(guess_coeffs) * [+numpy.inf] + len(guess_factors) * [1.0]
-        fit = least_squares(gradient_residual, x0=guess, args=(x_, y_, z_, fiber_groups_), bounds=(bound_lower, bound_upper))
+        model = IFUGradient(guess_coeffs, guess_factors, fixed_coeffs=[3])
 
-        coeffs = fit.x[:len(guess_coeffs)]
-        factors = fit.x[len(guess_coeffs):]
+        mask = numpy.isfinite(z_)
+        model.fit(x[mask], y[mask], z_[mask], fiber_groups[mask])
+
+        coeffs = model._coeffs
+        factors = model._factors
         factors /= bn.nanmean(factors)
 
         if axs is not None:
-            gradient_model = ifu_gradient(coeffs, x=x, y=y, normalize=True)
-            factors_model = ifu_factors(factors, fiber_groups=fiber_groups, normalize=True)
+            gradient_model = model.ifu_gradient(coeffs, x=x, y=y, normalize=True)
+            factors_model = model.ifu_factors(factors, fiber_groups=fiber_groups, normalize=True)
             plot_gradient_fit(self._slitmap, z/mu, gradient_model=gradient_model, factors_model=factors_model, telescope="Sci", axs=axs)
 
         return x, y, z, coeffs, factors
@@ -3312,10 +3305,9 @@ class RSS(FiberRows):
         else:
             raise ValueError(f"Keyword argument `groupby` has to be given if `factors` is given: {groupby = }")
 
-        pars = list(coeffs) + list(factors)
         fiber_groups = self._get_fiber_groups(by=groupby)
         x, y = self._slitmap["xpmm"].data, self._slitmap["ypmm"].data
-        joint_model, gradient_model, factors_model = ifu_joint_model(pars=pars, x=x, y=y, fiber_groups=fiber_groups, normalize=normalize, return_components=True)
+        joint_model, gradient_model, factors_model = IFUGradient.ifu_joint_model(coeffs, factors, x=x, y=y, fiber_groups=fiber_groups, normalize=normalize, return_components=True)
 
         return joint_model, gradient_model, factors_model
 

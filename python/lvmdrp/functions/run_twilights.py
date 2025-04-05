@@ -21,7 +21,7 @@ from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.core.spectrum1d import Spectrum1D
 from lvmdrp.core.rss import RSS, lvmFrame
 from lvmdrp.core.fluxcal import butter_lowpass_filter
-from lvmdrp.core.fit_profile import ifu_factors, ifu_gradient
+from lvmdrp.core.fit_profile import IFUGradient
 from lvmdrp.core import dataproducts as dp
 from lvmdrp.core.plot import plt, slit, plot_gradient_fit, save_fig
 from lvmdrp import main as drp
@@ -182,17 +182,11 @@ def to_native_wave(rss, wave=None):
     else:
         raise ValueError(f"missing wavelength trace information: {rss._wave_trace = }")
 
-    new_rss = RSS(
+    new_rss = copy(rss)
+    new_rss.setData(
         data=np.zeros((rss._fibers, wave.shape[1]), dtype="float32"),
         error=np.zeros((rss._fibers, wave.shape[1]), dtype="float32"),
-        mask=np.zeros((rss._fibers, wave.shape[1]), dtype="bool"),
-        wave=wave,
-        cent_trace=rss._cent_trace,
-        width_trace=rss._width_trace,
-        wave_trace=rss._wave_trace,
-        lsf_trace=rss._lsf_trace,
-        slitmap=rss._slitmap,
-        header=rss._header
+        mask=np.zeros((rss._fibers, wave.shape[1]), dtype="bool")
     )
 
     # reset header keywords to match original wavelength grid state
@@ -333,7 +327,7 @@ def combine_twilight_sequence(in_fiberflats: List[str], out_fiberflat: str,
 
     mflat = copy(fflats[0])
     mflat._data = biweight_location([fflat._data for fflat in fflats], axis=0, ignore_nan=True)
-    mflat._error = np.sqrt(biweight_location([fflat._error**2 for fflat in fflats], axis=0, ignore_nan=True)) / len(fflats)
+    mflat._error = np.sqrt(biweight_location([fflat._error**2 for fflat in fflats], axis=0, ignore_nan=True))
 
     # mask invalid pixels
     mflat._mask |= np.isnan(mflat._data) | (mflat._data <= 0) | np.isinf(mflat._data)
@@ -346,8 +340,6 @@ def combine_twilight_sequence(in_fiberflats: List[str], out_fiberflat: str,
     mflat.set_wave_trace(TraceMask.from_spectrographs(*[TraceMask.from_file(in_wave) for in_wave in in_waves]))
     mflat.set_lsf_trace(TraceMask.from_spectrographs(*[TraceMask.from_file(in_lsf) for in_lsf in in_lsfs]))
     mflat = to_native_wave(mflat)
-    mflat._error = None
-    mflat._mask = None
     mflat.writeFitsData(out_fiberflat, replace_masked=False)
 
     return mflat
@@ -629,7 +621,7 @@ def fit_skyline_flatfield(in_sciences, in_mflat, out_mflat, cwave, dwave=8, norm
 
         log.info(f"fitting gradient and factors around sky line @ {cwave:.2f} Angstrom for '{imagetyp}' exposure {expnum = }")
         x, y, z, coeffs, factor = fscience.fit_ifu_gradient(cwave=cwave, dwave=dwave, coadd_method="fit")
-        gradient_model = ifu_gradient(coeffs, x=x, y=y, normalize=True)
+        gradient_model = IFUGradient.ifu_gradient(coeffs, x=x, y=y, normalize=True)
         factors.append(factor)
         log.info(f" factors         = {np.round(factor, 4)}")
         log.info(f" gradient across = {bn.nanmax(gradient_model)/bn.nanmin(gradient_model):.4f}")
@@ -639,8 +631,8 @@ def fit_skyline_flatfield(in_sciences, in_mflat, out_mflat, cwave, dwave=8, norm
 
         axs = [fig.add_subplot(gs_gra[i, j]) for j in range(5)]
         axs[0].set_ylabel(f"{expnum = }", fontsize="large")
-        gradient_model = ifu_gradient(coeffs, x, y, normalize=True)
-        factors_model = ifu_factors(factor, fiber_groups, normalize=True)
+        gradient_model = IFUGradient.ifu_gradient(coeffs, x, y, normalize=True)
+        factors_model = IFUGradient.ifu_factors(factor, fiber_groups, normalize=True)
         plot_gradient_fit(fscience._slitmap, z, gradient_model, factors_model, telescope="Sci", marker_size=15, axs=axs, labels=i==0)
 
     factor_mean = np.mean(factors, axis=0)
@@ -660,8 +652,8 @@ def fit_skyline_flatfield(in_sciences, in_mflat, out_mflat, cwave, dwave=8, norm
     axs = [fig.add_subplot(gs_gra[-2, j]) for j in range(5)]
     axs[0].set_ylabel("combined exposure", fontsize="large")
     x, y, skyline_slit, coeffs, factor = science.fit_ifu_gradient(cwave=cwave, dwave=dwave, groupby="spec", coadd_method="fit")
-    gradient_res = ifu_gradient(coeffs, x=x, y=y, normalize=True)
-    factors_final = ifu_factors(factor, fiber_groups, normalize=True)
+    gradient_res = IFUGradient.ifu_gradient(coeffs, x=x, y=y, normalize=True)
+    factors_final = IFUGradient.ifu_factors(factor, fiber_groups, normalize=True)
     plot_gradient_fit(science._slitmap, skyline_slit, gradient_res, factors_final, telescope="Sci", marker_size=15, axs=axs, labels=False)
     log.info(f"all fibers factors       = {np.round(factor, 4)}")
     log.info(f"residual gradient across = {bn.nanmax(gradient_res)/bn.nanmin(gradient_res):.4f}")
@@ -678,7 +670,7 @@ def fit_skyline_flatfield(in_sciences, in_mflat, out_mflat, cwave, dwave=8, norm
             factor[i] = bn.nanmedian(skyline_slit[slitmap["spectrographid"]==i+1])
         log.info(f"sky fiber factors    = {np.round(factor, 4)}")
 
-    flatfield_corr = ifu_factors(factor, fiber_groups)
+    flatfield_corr = IFUGradient.ifu_factors(factor, fiber_groups)
     flatfield_corr = np.repeat(factor, science._fibers / factor.size)
 
     science_corr = science / flatfield_corr[:, None]
