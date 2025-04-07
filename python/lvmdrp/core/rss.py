@@ -3266,9 +3266,7 @@ class RSS(FiberRows):
             return flux_slit.squeeze(), rss._slitmap["xpmm"].data, rss._slitmap["ypmm"].data
         return flux_slit.squeeze()
 
-    def fit_ifu_gradient(self, cwave, dwave=8, groupby="spec", coadd_method="average", axs=None):
-
-        fiber_groups = self._get_fiber_groups(groupby)
+    def fit_ifu_gradient(self, cwave, dwave=8, guess_coeffs=[1,2,3,0], fixed_coeffs=[3], groupby="spec", coadd_method="average", axs=None):
 
         if coadd_method == "average":
             z, x, y = self.coadd_flux(cwave=cwave, dwave=dwave, return_xy=True, telescope="Sci")
@@ -3278,9 +3276,9 @@ class RSS(FiberRows):
         z_ = z / mu
 
         # # define guess and boundary values
-        guess_coeffs = [1, 2, 3, 0]
+        fiber_groups = self._get_fiber_groups(groupby)
         guess_factors = len(set(fiber_groups)) * [1]
-        model = IFUGradient(guess_coeffs, guess_factors, fixed_coeffs=[3])
+        model = IFUGradient(guess_coeffs, guess_factors, fixed_coeffs=fixed_coeffs)
 
         mask = numpy.isfinite(z_)
         model.fit(x[mask], y[mask], z_[mask], fiber_groups[mask])
