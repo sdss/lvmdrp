@@ -23,6 +23,7 @@ def rsync_enight(mjds):
     """
     pass
 
+
 def get_enights_metadata(mjds):
     """Returns metadata table for given MJDs of engineering nights
 
@@ -43,36 +44,26 @@ def get_enights_metadata(mjds):
     return pd.concat(metadata, axis="index", ignore_index=True).sort_values("expnum")
 
 
-def detrend_pixelflats(mjds, camera, flat_expnums, bias_expnums=None, dark_expnums=None, use_pixmask=True, skip_done=True):
+def detrend_pixelflats(mjds, camera, flat_expnums, bias_expnums=[], dark_expnums=[], use_pixmask=True, skip_done=True):
 
     frames = get_enights_metadata(mjds=mjds).query("camera == @camera").sort_values("expnum")
 
     flats = frames.query("expnum in @flat_expnums")
-    if bias_expnums is not None:
+    biases = pd.DataFrame(data={"expnum": [None]*len(flats)})
+    darks = pd.DataFrame(data={"expnum": [None]*len(flats)})
+    if len(bias_expnums) != 0:
         biases = frames.query("expnum in @bias_expnums")
-    else:
-        biases = pd.DataFrame(data={"expnum": [None]*len(flats)})
-    if dark_expnums is not None:
+    if len(dark_expnums) != 0:
         darks = frames.query("expnum in @dark_expnums")
-    else:
-        darks = pd.DataFrame(data={"expnum": [None]*len(flats)})
-
-    if biases is None and darks is None:
-        # get latest bias and dark fiducial frames
-        pass
-    elif biases is None:
-        # get latest fiducial bias
-        pass
-    elif darks is None:
-        # get latest fiducial dark
-        pass
-    else:
-        pass
 
     if use_pixmask:
         mpixmask_path = path.full("lvm_calib", mjd="pixelmasks", kind="pixmask", camera=camera)
     else:
         mpixmask_path = None
+
+    log.info(f"{len(flat_expnums)} flat exposures: {flat_expnums}")
+    log.info(f"{len(dark_expnums)} dark exposures: {dark_expnums}")
+    log.info(f"{len(bias_expnums)} bias exposures: {bias_expnums}")
 
     # NOTE: repeating bias and darks if necessary
     if len(darks) < len(flats):
@@ -81,7 +72,6 @@ def detrend_pixelflats(mjds, camera, flat_expnums, bias_expnums=None, dark_expnu
     if len(biases) < len(flats):
         n = len(flats) / len(biases)
         biases = biases.loc[biases.index.repeat(n)].reset_index(drop=True)
-
 
     dflat_paths = []
     for (_, bias), (_, dark), (_, flat) in zip(biases.iterrows(), darks.iterrows(), flats.iterrows()):
@@ -310,8 +300,8 @@ def get_pixflat(cflat_path, mpixflat_path, fflat_path, size=51, flatfield_thresh
     elif method == "simple":
         cflat, mflat = _simple_pixflat(cflat, size=size)
 
-    log.info(f"replacing invalid values and flatfield values below {flatfield_threshold} with ones")
-    mflat._data = np.where((mflat._data > flatfield_threshold) & np.isfinite(mflat._data), mflat._data, 1.0)
+    log.info(f"replacing invalid values and flatfield values below {flatfield_threshold} with NaNs")
+    mflat._data = np.where((mflat._data > flatfield_threshold) & np.isfinite(mflat._data), mflat._data, np.nan)
     log.info(f"writing master pixelflat to {mpixflat_path}")
     mflat.writeFitsData(mpixflat_path)
 
@@ -321,44 +311,112 @@ def get_pixflat(cflat_path, mpixflat_path, fflat_path, size=51, flatfield_thresh
 
     return cflat, mflat, fflat
 
-def _split_expnums_b(expnums):
-    dark_expnums = expnums[2::3]
-    dark_expnums = np.repeat(dark_expnums, 2)
-    flat_expnums = expnums[~np.isin(expnums, dark_expnums)]
-    return {"flat_expnums": flat_expnums, "dark_expnums": dark_expnums}
+
+def _parse_sequence(sequence, repeat=False):
+    """Parses a sequence dictionary to extract exposure numbers grouped by type.
+
+    The function interprets the "kind" key in the input dictionary to determine
+    the types of exposures (e.g., flat, bias, dark) and their respective counts.
+    It then uses the "expnums" key to group the exposure numbers accordingly.
+
+    Parameters
+    ----------
+    sequence : dict
+        A dictionary containing the following keys:
+        - "kind" : str
+            A string where even-indexed characters represent counts and
+            odd-indexed characters represent types ('f' for flat, 'b' for bias,
+            'd' for dark).
+        - "expnums" : list
+            A list of exposure numbers.
+    repeat : bool, optional
+        Whether to pad bias/dark sequences shorter than flat sequence, by default False
+
+    Returns
+    -------
+    dict
+        A dictionary where keys are exposure types (e.g., "flat_expnums",
+    """
+    typ_maps = {"f": "flat", "b": "bias", "d": "dark"}
+
+    kind = sequence.get("kind")
+    kind_ = list(kind)
+    typs = kind_[1::2]
+    nums = {typ_maps[typ]: num for typ, num in zip(typs, map(int, kind_[::2]))}
+    expnums = sequence.get("expnums")
+    rejects = sequence.get("rejects", [])
+
+    expnums = np.asarray(list(set(expnums).difference(rejects)))
+    expnums.sort()
+
+    expnums_split = np.split(expnums, expnums.size//sum(nums.values()))
+    expnums_dict = {typ_maps[typ]: np.array([], dtype="int") for typ in typs}
+    for exps in expnums_split:
+        offset = 0
+        for key in expnums_dict:
+            expnums_dict[key] = np.append(expnums_dict[key], exps[offset:offset+nums[key]])
+            offset += nums[key]
+
+    if repeat:
+        nflats = len(expnums_dict.get("flat", []))
+        for key in {"bias", "dark"}:
+            expnums_ = expnums_dict.get(key)
+            if expnums_ is None:
+                continue
+            n = len(expnums_)
+            expnums_dict[key] = np.repeat(expnums_, nflats//n)
+    return expnums_dict
 
 
-def _split_expnums_r(expnums):
-    return _split_expnums_b(expnums)
+def create_pixflats(mjds, camera, sequence, size=51, flatfield_threshold=0.01, method="desi", skip_done=True):
+    """
+    Creates pixel flat-field calibration files for a given camera and set of MJDs.
 
+    Parameters
+    ----------
+    mjds : list or array-like
+        List of Modified Julian Dates (MJDs) to process.
+    camera : str
+        Identifier for the camera (e.g., 'r1', 'b2').
+    sequence : dict
+        Dictionary containing exposure sequences with keys such as "flat", "dark",
+        and "bias", and their corresponding exposure numbers.
+    size : int, optional
+        Size of the smoothing kernel for flat-field correction. Default is 51.
+    flatfield_threshold : float, optional
+        Threshold for flat-field correction. Default is 0.01.
+    method : str, optional
+        Method to use for flat-field correction. Default is "desi".
+    skip_done : bool, optional
+        If True, skip processing for already completed files. Default is True.
 
-def _split_expnums_z(expnums):
-    flat_expnums = expnums[::2]
-    bias_expnums = expnums[1::2]
-    return {"flat_expnums": flat_expnums, "bias_expnums": bias_expnums}
+    Returns
+    -------
+    tuple
+        Paths to the created calibration files:
+        - cflat_path (str): Path to the combined pixel flat file.
+        - mflat_path (str): Path to the master pixel flat file.
+        - fflat_path (str): Path to the flat-fielded combined pixel flat file.
 
+    Notes
+    -----
+    - The function first parses the sequence to extract flat, dark, and bias exposure numbers.
+    - Metadata for the exposures is retrieved and filtered based on the camera and flat exposures.
+    - If no matching frames are found, the function logs an error and exits.
+    - The function performs detrending, combines pixel flats, and generates the final flat-field files.
+    """
+    expnums_dict = _parse_sequence(sequence)
+    flat_expnums = expnums_dict.get("flat")
+    dark_expnums = expnums_dict.get("dark", [])
+    bias_expnums = expnums_dict.get("bias", [])
 
-def create_pixflats(mjds, camera, expnums, size=51, flatfield_threshold=0.01, method="desi", skip_done=True):
     frames = get_enights_metadata(mjds=mjds)
-    frames = frames.query("expnum in @expnums and camera == @camera")
+    frames = frames.query("expnum in @flat_expnums and camera == @camera")
 
     if frames.empty:
-        log.error(f"no frames found for MJDs: {mjds}")
+        log.error(f"No pixel flat frames found for {camera = } and {mjds = }")
         return
 
-    channel = camera[0]
-    if channel == "b":
-        expnums_dict = _split_expnums_b(expnums)
-    elif channel == "r":
-        expnums_dict = _split_expnums_r(expnums)
-    elif channel == "z":
-        expnums_dict = _split_expnums_z(expnums)
-    else:
-        ValueError(f"Invalid channel value {channel = }. Expected either of 'brz'")
-
-    flat_expnums = expnums_dict.get("flat")
-    dark_expnums = expnums_dict.get("dark")
-    bias_expnums = expnums_dict.get("bias")
     detrend_pixelflats(mjds=mjds, camera=camera, flat_expnums=flat_expnums, dark_expnums=dark_expnums, bias_expnums=bias_expnums, skip_done=skip_done)
     cflat, cflat_path = combine_pixelflats(mjds=mjds, camera=camera, flat_expnums=flat_expnums, skip_done=skip_done)
 
@@ -370,22 +428,3 @@ def create_pixflats(mjds, camera, expnums, size=51, flatfield_threshold=0.01, me
 
     return cflat_path, mflat_path, fflat_path
 
-
-# def create_pixflats(mjd, camera, flat_expnums, dark_expnums=None, bias_expnums=None, median_box=(31,31), skip_done=True):
-
-#     detrend_pixelflats(mjds=mjd, camera=camera, flat_expnums=flat_expnums, dark_expnums=dark_expnums, bias_expnums=bias_expnums, skip_done=skip_done, use_pixmask=True)
-#     cflat, cflat_path = combine_pixelflats(mjds=mjd, camera=camera, flat_expnums=flat_expnums, median_box=median_box, skip_done=skip_done)
-
-#     mflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="m", imagetype="pixflat", expnum=f"{flat_expnums.min()}_{flat_expnums.max()}", camera=camera)
-#     fflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="f", imagetype="pixflat", expnum=f"{flat_expnums.min()}_{flat_expnums.max()}", camera=camera)
-
-#     cflat_median = fast_median_filter_2d(cflat._data, median_box)
-#     mflat = (cflat / cflat_median)
-#     mflat.writeFitsData(mflat_path)
-
-#     fflat = cflat / mflat
-#     fflat.writeFitsData(fflat_path)
-
-#     paths = (cflat_path, mflat_path, fflat_path)
-
-#     return paths
