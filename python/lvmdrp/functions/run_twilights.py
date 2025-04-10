@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import warnings
 from typing import Tuple, List
 from copy import deepcopy as copy
 import numpy as np
@@ -23,7 +24,7 @@ from lvmdrp.core.rss import RSS, lvmFrame
 from lvmdrp.core.fluxcal import butter_lowpass_filter
 from lvmdrp.core.fit_profile import IFUGradient
 from lvmdrp.core import dataproducts as dp
-from lvmdrp.core.plot import plt, slit, plot_gradient_fit, save_fig
+from lvmdrp.core.plot import plt, slit, plot_gradient_fit, plot_flat_consistency, create_subplots, save_fig
 from lvmdrp import main as drp
 from astropy import wcs
 from astropy.io import fits
@@ -173,6 +174,10 @@ def fit_continuum(spectrum: Spectrum1D, mask_bands: List[Tuple[float,float]],
 
 def to_native_wave(rss, wave=None):
 
+    if not rss._header.get("WAVREC", False):
+        warnings.warn("input RSS is not rectified, nothing to do")
+        return rss
+
     # get native wavelength grid or use the one given
     if wave is None and rss._wave_trace is not None:
         trace = TraceMask.from_coeff_table(rss._wave_trace)
@@ -212,137 +217,137 @@ def to_native_wave(rss, wave=None):
     return new_rss
 
 
-def create_lvmflat(in_twilight: str, out_lvmflat: str, in_fiberflat: str,
-                   in_cents: List[str], in_widths: List[str],
-                   in_waves: List[str], in_lsfs: List[str]) -> lvmFlat:
-    """Creates lvmFlat product from given flat-fielded twilight and fiberflat
+def combine_twilight_sequence(in_twilights: list[str], in_fflats: List[str], out_mflat: str, out_lvmflats: List[str],
+                              in_cents: List[str], in_widths: List[str],
+                              in_waves: List[str], in_lsfs: List[str], comb_method: str = "biweight",
+                              display_plots: bool = False) -> RSS:
+    """Combine twilight exposures into a master fiberflat RSS object and create lvmFlat products.
 
-    This routine takes in a flatfielded twilight exposure and the used
-    flatfield. These RSS objects are expected to be spectrograph-stacked and
-    rectified. In order to build an lvmFlat object the fiber and wavelength
-    traces are also needed. The final lvmFlat object will be in the native
-    pixel grid.
-
-    Parameters
-    ----------
-    in_twilight : str
-        Path to flat-fielded twilight
-    out_lvmflat : str
-        Path to output lvmFlat product
-    in_fiberflat : str
-        Path to fiberflat
-    {in_cents, in_widths} : List[str]
-        Paths to fiber centroids/widths for corresponding twilight spectrograph channel
-    {in_waves, in_lsfs} : List[str]
-        Paths to wavelengths/LSFs for corresponding twilight spectrograph channel
-
-    Returns
-    -------
-    lvmflat : lvmdrp.functions.run_twilights.lvmFlat
-        lvmFlat product
-    """
-
-    # load flatfielded twilight
-    twilight = RSS.from_file(in_twilight)
-    # load flatfield
-    fflat = RSS.from_file(in_fiberflat)
-
-    # load fiber and wavelength traces
-    mcent = TraceMask.from_spectrographs(*[TraceMask.from_file(master_cent) for master_cent in in_cents])
-    mwidth = TraceMask.from_spectrographs(*[TraceMask.from_file(master_width) for master_width in in_widths])
-    mwave = TraceMask.from_spectrographs(*[TraceMask.from_file(master_wave) for master_wave in in_waves])
-    mlsf = TraceMask.from_spectrographs(*[TraceMask.from_file(master_lsf) for master_lsf in in_lsfs])
-
-    # build lvmFlat
-    twilight.set_wave_trace(mwave)
-    twilight.set_lsf_trace(mlsf)
-    twilight = to_native_wave(twilight)
-    fflat.set_wave_trace(mwave)
-    fflat.set_lsf_trace(mlsf)
-    fflat = to_native_wave(fflat)
-    lvmflat = lvmFlat(data=twilight._data, error=twilight._error, mask=twilight._mask, header=twilight._header,
-                      cent_trace=mcent, width_trace=mwidth,
-                      wave_trace=mwave, lsf_trace=mlsf,
-                      superflat=fflat._data, slitmap=twilight._slitmap)
-    lvmflat.writeFitsData(out_lvmflat)
-
-    return lvmflat
-
-
-def combine_twilight_sequence(in_fiberflats: List[str], out_fiberflat: str,
-                              in_waves: List[str], in_lsfs: List[str]) -> RSS:
-    """Combine twilight exposures into a single RSS object
-
-    Given a list of RSS objects of fiberflats from twilight exposures, this
-    function combines them into a single RSS object by averaging the fiber
-    throughput of all non-standard fibers and putting the standard fibers in
-    their respective positions.
+    This function processes a sequence of twilight exposures and their
+    corresponding fiberflats to create a master fiberflat RSS object. It
+    averages the fiber throughput of all non-standard fibers while ensuring
+    that standard fibers are placed in their respective positions. The
+    resulting master fiberflat is resampled to a native wavelength grid,
+    interpolated to handle masked fibers, and saved to the specified output
+    path. Additionally, lvmFlat products are created for each twilight
+    exposure, incorporating calibration information.
 
     Parameters
     ----------
-    in_fiberflats : list[str]
-        List of paths to individual fiberflat exposures
-    out_fiberflat : str
-        Output path to master fiberflat
+    in_twilights : list[str]
+        List of paths to twilight RSS exposures.
+    in_fflats : list[str]
+        List of paths to individual fiberflat exposures.
+    out_mflat : str
+        Output path to save the master fiberflat RSS object.
+    out_lvmflats : list[str]
+        List of output paths to save the lvmFlat objects for each twilight exposure.
+    in_cents : list[str]
+        List of paths to fiber centroid traces for each channel.
+    in_widths : list[str]
+        List of paths to fiber width traces for each channel.
     in_waves : list[str]
-        List of wavelength solution path for each channel
+        List of paths to wavelength solution traces for each channel.
     in_lsfs : list[str]
-        Lost of LSF solution path for each channel
-
+        List of paths to LSF solution traces for each channel.
+    comb_method : str, optional
+        Method used to combine the individual fiberflats, by default "biweight".
+    display_plots : bool, optional
+        Whether to display diagnostic plots during processing, by default False.
 
     Returns
     -------
     mflat : RSS
-        Master twilight flat
+        Master fiberflat RSS object.
+    fflats : list[RSS]
+        List of individual fiberflat RSS objects.
+    twilights : list[RSS]
+        List of twilight RSS objects.
+    lvmflats : list[lvmFlat]
+        List of lvmFlat objects created for each twilight exposure.
     """
 
-    fflats = [RSS.from_file(in_fiberflat) for in_fiberflat in in_fiberflats]
+    log.info(f"loading {len(in_twilights)} twilights")
+    twilights = [RSS.from_file(in_twilight) for in_twilight in in_twilights]
 
-    # combine RSS exposures using an average
-    mflat = RSS(data=np.zeros_like(fflats[0]._data), error=np.zeros_like(fflats[0]._error), mask=np.ones_like(fflats[0]._mask, dtype=bool),
-                header=copy(fflats[0]._header), wave=copy(fflats[0]._wave), lsf=copy(fflats[0]._lsf), slitmap=copy(fflats[0]._slitmap))
+    log.info(f"loading {len(in_fflats)} flat fields")
+    fflats = [RSS.from_file(in_fflat) for in_fflat in in_fflats]
+
+    log.info(f"loading fiber centroids from {in_cents}")
+    mcent = TraceMask.from_spectrographs(*[TraceMask.from_file(in_cent) for in_cent in in_cents])
+    log.info(f"loading fiber widths from {in_widths}")
+    mwidth = TraceMask.from_spectrographs(*[TraceMask.from_file(in_width) for in_width in in_widths])
+    log.info(f"loading wavelength traces from {in_waves}")
+    mwave = TraceMask.from_spectrographs(*[TraceMask.from_file(in_wave) for in_wave in in_waves])
+    log.info(f"loading LSF traces from {in_lsfs}")
+    mlsf = TraceMask.from_spectrographs(*[TraceMask.from_file(in_lsf) for in_lsf in in_lsfs])
+
     # select non-std fibers
-    fibermap =  mflat._slitmap
+    fibermap =  fflats[0]._slitmap
     select_allstd = fibermap["telescope"] == "Spec"
     # select_nonstd = ~select_allstd
-    for i, fflat in enumerate(fflats):
+    log.info(f"identifying exposed standard fibers in sequence of {len(fflats)} flat fields:")
+    for twilight, fflat in zip(twilights, fflats):
+        expnum = twilight._header["EXPOSURE"]
+
         # get exposed standard fiber ID
-        fiber_id = fflat._header.get("CALIBFIB")
+        fiber_id = twilight._header.get("CALIBFIB")
         if fiber_id is None:
-            snrs = bn.nanmedian(fflat._data / fflat._error, axis=1)
-            select_nonexposed = snrs < 50
-            #plt.figure(figsize=(15,5))
-            #plt.plot(snrs[select_allstd])
-            #ids_std = fibermap[select_allstd]["orig_ifulabel"]
-            #idx_std = np.arange(ids_std.size)
-            #plt.gca().set_xticks(idx_std)
-            #plt.gca().set_xticklabels(ids_std)
+            snrs = bn.nanmedian(twilight._data / twilight._error, axis=1)
+            select_nonexposed = select_allstd & (snrs < 50)
+            fiber_id = fibermap[~select_nonexposed]["orig_ifulabel"]
+            log.info(f"  for {expnum = } no CALIBFIB header keyword found, inferred {fiber_id = }")
         else:
-            select_nonexposed = fibermap["orig_ifulabel"] != fiber_id
-
+            select_nonexposed = select_allstd & (fibermap["orig_ifulabel"] != fiber_id)
+            log.info(f"  for {expnum = } exposed {fiber_id = }")
         # put std fibers in the right position
-        fflat._data[select_allstd&select_nonexposed] = np.nan
-        fflat._error[select_allstd&select_nonexposed] = np.nan
-        fflat._mask[select_allstd&select_nonexposed] = True
+        fflat._data[select_nonexposed] = np.nan
+        fflat._error[select_nonexposed] = np.nan
+        fflat._mask[select_nonexposed] = True
 
-    mflat = copy(fflats[0])
-    mflat._data = biweight_location([fflat._data for fflat in fflats], axis=0, ignore_nan=True)
-    mflat._error = np.sqrt(biweight_location([fflat._error**2 for fflat in fflats], axis=0, ignore_nan=True))
+    log.info(f"combining {len(fflats)} individual flat fields using {comb_method = }")
+    mflat = RSS()
+    mflat.combineRSS(fflats, method=comb_method)
 
     # mask invalid pixels
     mflat._mask |= np.isnan(mflat._data) | (mflat._data <= 0) | np.isinf(mflat._data)
     mflat._mask |= np.isnan(mflat._error) | (mflat._error <= 0) | np.isinf(mflat._error)
-
+    log.info(f"interpolating {mflat._mask.sum()} masked pixels ({mflat._mask.all(axis=1).sum()} fibers)")
     # interpolate masked fibers if any remaining
     mflat = mflat.interpolate_data(axis="X")
     mflat = mflat.interpolate_data(axis="Y")
 
-    mflat.set_wave_trace(TraceMask.from_spectrographs(*[TraceMask.from_file(in_wave) for in_wave in in_waves]))
-    mflat.set_lsf_trace(TraceMask.from_spectrographs(*[TraceMask.from_file(in_lsf) for in_lsf in in_lsfs]))
-    mflat = to_native_wave(mflat)
-    mflat.writeFitsData(out_fiberflat, replace_masked=False)
+    fig, axs = create_subplots(to_display=display_plots, nrows=2, ncols=int(np.ceil(len(fflats)/2)), figsize=(14,5), sharex=True, sharey=True, layout="constrained")
+    plot_flat_consistency(fflats=fflats, mflat=mflat, log_scale=False, spec_wise=True, labels=True, axs=axs)
+    save_fig(fig, out_mflat, to_display=display_plots, figure_path="qa", label="flat_consistency")
 
-    return mflat
+    mflat.set_wave_trace(mwave)
+    mflat.set_lsf_trace(mlsf)
+    mflat = to_native_wave(mflat)
+    log.info(f"writing master flat field to {out_mflat}")
+    mflat.writeFitsData(out_mflat, replace_masked=False)
+
+    # create lvmFlat objects
+    log.info(f"creating lvmTFlat products for {len(twilights)}:")
+    lvmflats = []
+    for i, twilight in enumerate(twilights):
+        expnum = twilight._header["EXPOSURE"]
+        log.info(f"  resampling exposure {expnum = } to native wavelength grid")
+        # resample twilight to native grid
+        twilight.set_wave_trace(mwave)
+        twilight.set_lsf_trace(mlsf)
+        twilight = to_native_wave(twilight)
+
+        twilight /= mflat
+        lvmflat = lvmFlat(data=twilight._data, error=twilight._error, mask=twilight._mask, header=twilight._header,
+                          cent_trace=mcent, width_trace=mwidth,
+                          wave_trace=mwave, lsf_trace=mlsf,
+                          superflat=mflat._data, slitmap=twilight._slitmap)
+        log.info(f"  writing lvmTFlat to {out_lvmflats[i]}")
+        lvmflat.writeFitsData(out_lvmflats[i])
+        lvmflats.append(lvmflat)
+
+    return mflat, fflats, twilights, lvmflats
 
 def _reference_error(rss, ref_kind, interpolate_invalid=False):
     if isinstance(rss, RSS):
@@ -428,19 +433,19 @@ def get_flatfield(rss, ref_kind=lambda x: biweight_location(x, ignore_nan=True),
 
             flatfield.setSpec(ifiber, spec)
 
-        axs_sm = axs.get("smoothing", None)
-        if axs_sm is not None:
-            wave_ = np.repeat([rss._wave], rss._fibers, axis=0)
-            zscores = (flatfield._data - flatfield_r._data) / np.sqrt(flatfield_r._error**2 + flatfield._error**2)
-            mean = bn.nanmean(zscores, axis=0)
-            stddev = bn.nanstd(zscores, axis=0)
-            axs_sm.axhspan(-1.0, +1.0, lw=0, fc="0.7", alpha=0.5)
-            axs_sm.axhline(ls="--", lw=0.5, color="w")
-            axs_sm.plot(wave_.T, zscores.T, ",", color="0.2", alpha=0.1)
-            axs_sm.plot(rss._wave, mean, lw=0.5, color="0.8")
-            axs_sm.plot(rss._wave, mean-stddev, lw=0.5, color="0.8")
-            axs_sm.plot(rss._wave, mean+stddev, lw=0.5, color="0.8")
-            axs_sm.set_ylim(-1.5, +1.5)
+    axs_sm = axs.get("smoothing", None)
+    if axs_sm is not None:
+        wave_ = np.repeat([rss._wave], rss._fibers, axis=0)
+        zscores = (flatfield._data - flatfield_r._data) / np.sqrt(flatfield_r._error**2 + flatfield._error**2)
+        mean = bn.nanmean(zscores, axis=0)
+        stddev = bn.nanstd(zscores, axis=0)
+        axs_sm.axhspan(-1.0, +1.0, lw=0, fc="0.7", alpha=0.5)
+        axs_sm.axhline(ls="--", lw=0.5, color="w")
+        axs_sm.plot(wave_.T, zscores.T, ",", color="0.2", alpha=0.1)
+        axs_sm.plot(rss._wave, mean, lw=0.5, color="0.8")
+        axs_sm.plot(rss._wave, mean-stddev, lw=0.5, color="0.8")
+        axs_sm.plot(rss._wave, mean+stddev, lw=0.5, color="0.8")
+        axs_sm.set_ylim(-1.5, +1.5)
 
     return flatfield, flatfield_r, ref_fiber, normalization
 

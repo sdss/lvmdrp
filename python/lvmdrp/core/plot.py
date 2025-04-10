@@ -721,6 +721,42 @@ def plot_gradient_fit(slitmap, z, gradient_model, factors_model, telescope=None,
     return axs
 
 
+def plot_flat_consistency(fflats, mflat, spec_wise=False, log_scale=False, labels=False, axs=None):
+
+    if axs is None:
+        fig, axs = plt.subplots(2, int(np.ceil(len(fflats)/2)), figsize=(14,5), sharex=True, sharey=True, layout="constrained")
+        axs = axs.ravel()
+    else:
+        fig = plt.gcf()
+
+    if labels:
+        fig.supxlabel("master / individual flat field", fontsize="large")
+        fig.supylabel("Frequency", fontsize="large")
+        [axs[i].set_title(f"{fflat._header['EXPOSURE']}", loc="left", fontsize="small") for i, fflat in enumerate(fflats)]
+
+    if log_scale:
+        plt.yscale("log")
+
+    for ax in axs:
+        ax.tick_params(labelsize="x-small")
+
+    for i, flat in enumerate(fflats):
+        if spec_wise:
+            labels_ = ["sp1", "sp2", "sp3"] if i==0 else None
+            colors = ["tab:blue", "tab:red", "tab:green"]
+            data = np.split((mflat._data / flat._data), 3, axis=0)
+            data = [d.ravel() for d in data]
+            axs[i].hist(data, bins=1000, range=(0.98, 1.02), stacked=True, label=labels_, color=colors, alpha=0.5, lw=0)
+        else:
+            data = (mflat._data / flat._data).ravel()
+            axs[i].hist(data, bins=1000, range=(0.98, 1.02))
+        axs[i].axvspan(0.99, 1.01, lw=0, color="0.2", alpha=0.2, zorder=9)
+    if spec_wise:
+        axs[0].legend(loc=1, frameon=False, fontsize="small")
+
+    return axs
+
+
 def ifu_view(slitmap=None, z=None, rss=None, cwave=None, dwave=None, comb_stat=None, telescope="Sci", use_world_coords=False,
              marker_size=50, norm_z=True, norm_cuts=None, norm_percents=None, cmap="coolwarm",
              hide_axis=True, ax=None, return_xyz=False):
