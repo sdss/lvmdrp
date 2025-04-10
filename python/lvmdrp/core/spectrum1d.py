@@ -3628,7 +3628,7 @@ class Spectrum1D(Header):
                 select_2 = (self._wave>=cent[i]-3.5*fwhm[i]/2.354) & (self._wave<=cent[i]+3.5*fwhm[i]/2.354)
                 x = self._wave[select_2]
                 axs[i].axvspan(x[0], x[-1], alpha=0.1, fc="0.5", label="reg. of masking")
-                axs[i].plot(self._wave[select], self._mask[select]*numpy.nanmin(self._data[select]), "ok")
+                axs[i].plot(self._wave, (select)*numpy.nan+bn.nanmin(data), "ok")
                 axs[i] = gauss.plot(self._wave[select], self._data[select], mask=self._mask[select], ax=axs[i])
                 axs[i].axhline(bg[i], ls="--", color="tab:blue", lw=1)
                 axs[i].axvline(cent_guess[i], ls="--", lw=1, color="tab:red", label="cent. guess")

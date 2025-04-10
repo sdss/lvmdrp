@@ -365,7 +365,7 @@ def _reference_error(rss, ref_kind, interpolate_invalid=False):
 
     return ref_error
 
-def _reference_fiber(rss, ref_kind, interpolate_invalid=False, ax=None):
+def _reference_fiber(rss, ref_kind, interpolate_invalid=True, ax=None):
 
     if isinstance(rss, RSS):
         data = rss._data.copy()
@@ -385,48 +385,74 @@ def _reference_fiber(rss, ref_kind, interpolate_invalid=False, ax=None):
         mask = np.isfinite(ref_spectrum)
         ref_spectrum = np.interp(rss._wave, rss._wave[mask], ref_spectrum[mask])
 
+    ref_error = _reference_error(rss, ref_kind, interpolate_invalid)
+
+    if ax is not None:
+        ax.fill_between(rss._wave, ref_spectrum-ref_error, ref_spectrum+ref_error, step="mid", color="0.2", lw=0, alpha=0.2)
+        ax.step(rss._wave, ref_spectrum, where="mid", color="0.2", lw=1)
+        if "mask" in locals():
+            ax.vlines(rss._wave[~mask], *ax.get_ylim(), lw=2, color="0.8", zorder=-9)
+
     return ref_spectrum
 
-def get_flatfield(rss, ref_kind=lambda x: biweight_location(x, ignore_nan=True), norm_column=None, norm_kind=np.nanmean, interpolate_invalid=False, smoothing=0.1, ax=None):
-    ref_fiber = _reference_fiber(rss, ref_kind=ref_kind, interpolate_invalid=interpolate_invalid)
+def get_flatfield(rss, ref_kind=lambda x: biweight_location(x, ignore_nan=True), norm_column=None, norm_kind=np.nanmean, interpolate_invalid=True, smoothing=0.1, axs={}):
 
-    flatfield = rss / ref_fiber
+    ref_fiber = _reference_fiber(rss, ref_kind=ref_kind, interpolate_invalid=interpolate_invalid, ax=axs.pop("ref_fiber", None))
+
+    flatfield_r = rss / ref_fiber
     if norm_column is not None:
         if callable(norm_kind):
-            normalization = norm_kind(flatfield._data[:, norm_column], axis=0)
+            normalization = norm_kind(flatfield_r._data[:, norm_column], axis=0)
         elif isinstance(norm_kind, int):
-            normalization = flatfield._data[norm_kind, norm_column]
+            normalization = flatfield_r._data[norm_kind, norm_column]
         else:
             raise TypeError(f"Invalid type for `norm_kind`: {type(norm_kind)}. Expected an integer or a callable(x, axis)")
     else:
         normalization = 1.0
 
-    flatfield /= normalization
+    flatfield_r /= normalization
+    flatfield = copy(flatfield_r)
 
     if interpolate_invalid or smoothing > 0:
         flatfield = flatfield.interpolate_data(axis="X")
     if smoothing > 0:
         nyq = 1 / (rss._wave[1] - rss._wave[0])
-        for ifiber in range(flatfield._fibers):
+        for ifiber in range(flatfield_r._fibers):
             spec = flatfield.getSpec(ifiber)
             if spec._mask.all():
                 continue
 
             select = np.isfinite(spec._data)
             spec._data[select] = butter_lowpass_filter(spec._data[select], smoothing, nyq)
+            spec._error[select] = np.sqrt(butter_lowpass_filter(spec._error[select]**2, smoothing, nyq))
 
             flatfield.setSpec(ifiber, spec)
 
-    return flatfield, ref_fiber, normalization
+        axs_sm = axs.get("smoothing", None)
+        if axs_sm is not None:
+            wave_ = np.repeat([rss._wave], rss._fibers, axis=0)
+            zscores = (flatfield._data - flatfield_r._data) / np.sqrt(flatfield_r._error**2 + flatfield._error**2)
+            mean = bn.nanmean(zscores, axis=0)
+            stddev = bn.nanstd(zscores, axis=0)
+            axs_sm.axhspan(-1.0, +1.0, lw=0, fc="0.7", alpha=0.5)
+            axs_sm.axhline(ls="--", lw=0.5, color="w")
+            axs_sm.plot(wave_.T, zscores.T, ",", color="0.2", alpha=0.1)
+            axs_sm.plot(rss._wave, mean, lw=0.5, color="0.8")
+            axs_sm.plot(rss._wave, mean-stddev, lw=0.5, color="0.8")
+            axs_sm.plot(rss._wave, mean+stddev, lw=0.5, color="0.8")
+            axs_sm.set_ylim(-1.5, +1.5)
 
-def get_flatfield_sequence(rsss, ref_kind=lambda x: biweight_location(x, ignore_nan=True), norm_column=None, norm_kind=np.nanmean, interpolate_invalid=False):
-    flatfields = []
+    return flatfield, flatfield_r, ref_fiber, normalization
+
+def get_flatfield_sequence(rsss, ref_kind=lambda x: biweight_location(x, ignore_nan=True), norm_column=None, norm_kind=np.nanmean, interpolate_invalid=True):
+    flatfields, flatfields_r = [], []
     ref_fibers = np.zeros((len(rsss), rsss[0]._pixels.size))
     normalizations = np.zeros(len(rsss))
     for i, rss in enumerate(rsss):
-        flatfield, ref_fibers[i], normalizations[i] = get_flatfield(rss, ref_kind=ref_kind, norm_column=norm_column, norm_kind=norm_kind, interpolate_invalid=interpolate_invalid)
+        flatfield, flatfield_r, ref_fibers[i], normalizations[i] = get_flatfield(rss, ref_kind=ref_kind, norm_column=norm_column, norm_kind=norm_kind, interpolate_invalid=interpolate_invalid)
         flatfields.append(flatfield)
-    return flatfields, ref_fibers, normalizations
+        flatfields_r.append(flatfield_r)
+    return flatfields, flatfields_r, ref_fibers, normalizations
 
 def normalize_spec(rss, cwave, dwave=8, norm_stat=np.nanmean):
     slitmap = rss._slitmap
@@ -517,7 +543,7 @@ def reject_fibers(rss, cwave, dwave=20, coadd_stat=np.nanmedian, quantiles=(5,97
     return rejects
 
 def fit_fiberflat(in_rss, out_flat, out_rss, ref_kind=600, guess_coeffs=[1,2,3,0], fixed_coeffs=[3], groupby="spec",
-                  norm_cwave=None, norm_dwave=8, interpolate_invalid=True, smooth=True, display_plots=False):
+                  norm_cwave=None, norm_dwave=8, smoothing=0.1, interpolate_invalid=True, display_plots=False):
     """Creates a flatfield given a flat (twilight, dome) exposure
 
     The input RSS needs to be wavelength calibrated, rectified and LSF matched
@@ -562,8 +588,8 @@ def fit_fiberflat(in_rss, out_flat, out_rss, ref_kind=600, guess_coeffs=[1,2,3,0
         Normalization wavelength window around `norm_cwave`, by default 8 Angstroms
     interpolate_invalid : bool, optional
         Interpolate invalid pixels (NaN, infinity), by default True
-    smooth : bool, optional
-        Perform a low-pass filtering to remove artifacts and denoise, by default True
+    smoothing : float, optional
+        Perform a low-pass filtering to remove artifacts and denoise, by default 0.1
     display_plots : bool, optional
         Whether to display plots or not, by default False
 
@@ -584,20 +610,27 @@ def fit_fiberflat(in_rss, out_flat, out_rss, ref_kind=600, guess_coeffs=[1,2,3,0
     channel = rss._header["CCD"]
     unit = rss._header['BUNIT']
 
+    fig = plt.figure(figsize=(14,3*5))
+    fig.suptitle(f"Fiber flatfield from '{imagetyp}' exposure, {channel = }, {expnum = }", fontsize="xx-large")
+    gs_sed = GridSpec(5, 5, hspace=0.3, wspace=0.01, left=0.07, right=0.99, bottom=0.1, top=0.9, figure=fig)
+    gs_ifu = GridSpec(5, 5, hspace=0.01, wspace=0.01, left=0.07, right=0.99, bottom=0.01, top=0.9, figure=fig)
+    ax_ref = fig.add_subplot(gs_sed[:2, :])
+    ax_ref.tick_params(labelbottom=False)
+    ax_ref.set_title(f"Reference fiber using {ref_kind.__name__ if callable(ref_kind) else ref_kind}", loc="left", fontsize="large")
+    ax_ref.set_ylabel(f"Counts ({unit})", fontsize="large")
+    ax_ref.ticklabel_format(axis="y", style="sci", scilimits=(-4, 4))
+    ax_smo = fig.add_subplot(gs_sed[-3, :], sharex=ax_ref)
+    ax_smo.set_title(f"Smoothing quality with {smoothing = }", loc="left", fontsize="large")
+    ax_smo.set_ylabel("Z-scores", fontsize="large")
+    ax_smo.set_xlabel("Wavelength (Angstroms)", fontsize="large")
+    axs_fin = [fig.add_subplot(gs_ifu[-2, j]) for j in range(5)]
+    axs_fin[0].set_ylabel("gradient correction", fontsize="large")
+    axs_res = [fig.add_subplot(gs_ifu[-1, j]) for j in range(5)]
+    axs_res[0].set_ylabel("gradient residual", fontsize="large")
+
     # TODO: test normalizing factors before creating the flat field
     log.info(f"calculating flatfield from '{imagetyp}' exposure, {channel = }, {expnum = }")
-    flat, ref_fiber, _ = get_flatfield(rss=rss, ref_kind=ref_kind, interpolate_invalid=interpolate_invalid, smooth=smooth)
-
-    fig = plt.figure(figsize=(14,3*3))
-    fig.suptitle(f"Fiber flatfield from '{imagetyp}' exposure, {channel = }, {expnum = }", fontsize="xx-large")
-    gs_ref = GridSpec(3, 5, hspace=0.7, wspace=0.01, left=0.07, right=0.99, bottom=0.01, top=0.9, figure=fig)
-    gs_ifu = GridSpec(3, 5, hspace=0.01, wspace=0.01, left=0.07, right=0.99, bottom=0.01, top=0.9, figure=fig)
-    ax_ref = fig.add_subplot(gs_ref[0, :])
-    axs_fin = [fig.add_subplot(gs_ifu[1, j]) for j in range(5)]
-    axs_fin[0].set_ylabel("gradient correction", fontsize="large")
-    axs_res = [fig.add_subplot(gs_ifu[2, j]) for j in range(5)]
-    axs_res[0].set_ylabel("gradient residual", fontsize="large")
-    ax_ref.step(flat._wave, ref_fiber, where="mid", lw=1)
+    flat, _, ref_fiber, _ = get_flatfield(rss=rss, ref_kind=ref_kind, interpolate_invalid=interpolate_invalid, smoothing=smoothing, axs={"ref_fiber": ax_ref, "smoothing": ax_smo})
 
     log.info(f"fitting and correcting IFU gradient and '{groupby}' factors @ {norm_cwave:.2f} Angstroms")
     # fit gradient with spectrograph normalizations (make n-iterations of this or stop when gradient is <1% across)
@@ -617,12 +650,8 @@ def fit_fiberflat(in_rss, out_flat, out_rss, ref_kind=600, guess_coeffs=[1,2,3,0
     # # apply gradient correction
     rss_g = rss.remove_ifu_gradient(coeffs=coeffs, factors=factors, groupby=groupby)
     # get corrected flatfield
-    flat_g, _, _ = get_flatfield(rss=rss_g, ref_kind=ref_kind, interpolate_invalid=interpolate_invalid, smooth=smooth)
+    flat_g, _, _, _ = get_flatfield(rss=rss_g, ref_kind=ref_kind, interpolate_invalid=interpolate_invalid, smoothing=smoothing)
 
-    ax_ref.set_xlabel("Wavelength (Angstroms)", fontsize="large")
-    ax_ref.set_ylabel(f"Counts ({unit})", fontsize="large")
-    ax_ref.set_title("Reference fiber", loc="left", fontsize="large")
-    ax_ref.ticklabel_format(axis="y", style="sci", scilimits=(-4, 4))
     save_fig(fig, out_flat, to_display=display_plots, figure_path="qa", label="twilight_fiberflat")
 
     log.info(f"writing fiber flatfield to {out_flat}")
