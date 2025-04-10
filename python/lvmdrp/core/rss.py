@@ -1433,7 +1433,7 @@ class RSS(FiberRows):
 
         return self
 
-    def combineRSS(self, rsss, method="mean"):
+    def combineRSS(self, rsss, method="mean", quantile=50):
         dim = rsss[0]._data.shape
         data = numpy.zeros((len(rsss), dim[0], dim[1]), dtype=numpy.float32)
         if rsss[0]._mask is not None:
@@ -1469,6 +1469,7 @@ class RSS(FiberRows):
             "sum": lambda a, axis: bn.nansum(a, axis) if a is not None else None,
             "mean": lambda a, axis: bn.nanmean(a, axis) if a is not None else None,
             "median": lambda a, axis: bn.nanmedian(a, axis) if a is not None else None,
+            "quantile": lambda a, axis: numpy.nanpercentile(a, quantile, axis) if a is not None else None,
             "weighted_mean": lambda a, axis: bn.nansum(a * weights, axis) if a is not None else None,
             "biweight": lambda a, axis: biweight_location(a, axis=axis, ignore_nan=True) if a is not None else None,
         }
@@ -1479,7 +1480,7 @@ class RSS(FiberRows):
 
         combined_data = comb_function(data, 0)
         combined_sky = comb_function(sky, 0)
-        combined_mask = numpy.logical_or.reduce(mask, 0) if mask is not None else None
+        combined_mask = numpy.logical_and.reduce(mask, 0) if mask is not None else None
         combined_error = comb_function(error**2, 0)
         if combined_error is not None:
             combined_error = numpy.sqrt(combined_error)
