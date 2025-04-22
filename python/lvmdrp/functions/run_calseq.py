@@ -36,13 +36,14 @@ from astropy.stats import biweight_location, biweight_scale
 from astropy.io import fits
 from astropy.table import Table
 from scipy import interpolate
-from typing import List, Tuple, Dict
+from typing import Union, List, Dict
+from collections.abc import  Callable
 
 from lvmdrp import log, path, __version__ as drpver
 from lvmdrp.utils import metadata as md
 from lvmdrp.utils.convert import tileid_grp
 from lvmdrp.utils.paths import get_master_mjd, get_calib_paths, group_calib_paths
-from lvmdrp.core.constants import CALIBRATION_NAMES
+from lvmdrp.core.constants import CALIBRATION_NAMES, SKYLINES_FIBERFLAT
 from lvmdrp.core.plot import create_subplots, save_fig
 from lvmdrp.core import dataproducts as dp
 from lvmdrp.core.constants import (
@@ -59,7 +60,7 @@ from lvmdrp.core.rss import RSS, lvmFrame
 from lvmdrp.functions import imageMethod as image_tasks
 from lvmdrp.functions import rssMethod as rss_tasks
 from lvmdrp.main import start_logging, get_config_options, read_fibermap, reduce_2d
-from lvmdrp.functions.run_twilights import lvmFlat, to_native_wave, fit_fiberflat, create_lvmflat, combine_twilight_sequence
+from lvmdrp.functions.run_twilights import lvmFlat, to_native_wave, fit_fiberflat, combine_twilight_sequence
 
 
 SLITMAP = read_fibermap(as_table=True)
@@ -1467,11 +1468,12 @@ def create_dome_fiberflats(mjd, expnums_ldls, expnums_qrtz, use_longterm_cals=Tr
         lvmflat.writeFitsData(path.full("lvm_frame", mjd=mjd, tileid=11111, drpver=drpver, expnum=expnum_str, kind=f'DFlat-{channel}'))
 
 
-def create_twilight_fiberflats(mjd: int, use_longterm_cals: bool = True, expnums: List[int] = None, median_box: int = 10, niter: bool = 1000,
-                      threshold: Tuple[float,float]|float = (0.5,1.5), nknots: bool = 50,
-                      b_mask: List[Tuple[float,float]] = MASK_BANDS["b"],
-                      r_mask: List[Tuple[float,float]] = MASK_BANDS["r"],
-                      z_mask: List[Tuple[float,float]] = MASK_BANDS["z"],
+def create_twilight_fiberflats(mjd: int, use_longterm_cals: bool = True, expnums: List[int] = None,
+                      ref_kind: Union[int, Callable[[np.ndarray, int], np.ndarray]] = bn.nanmedian,
+                      groupby: str = "spec", guess_coeffs: List[int] = [1,0,0,0], fixed_coeffs: List[int] = [1,2,3],
+                      cnorms: Dict[str, float] = SKYLINES_FIBERFLAT, dwave: float = 8.0,
+                      smoothing: float = 0.0,
+                      interpolate_invalid: bool = True,
                       kind: str = "longterm",
                       skip_done: bool = False,
                       display_plots: bool = False) -> Dict[str, RSS]:
@@ -1551,7 +1553,7 @@ def create_twilight_fiberflats(mjd: int, use_longterm_cals: bool = True, expnums
     tileid = flats.tileid.min()
     for channel in channels:
         flat_expnums = flat_channels.get_group(channel).groupby("expnum")
-        fflat_paths = []
+        xtwi_paths, fflat_paths, lvmflat_paths = [], [], []
         for expnum in flat_expnums.groups:
             flat = flat_expnums.get_group(expnum).iloc[0]
 
@@ -1564,8 +1566,8 @@ def create_twilight_fiberflats(mjd: int, use_longterm_cals: bool = True, expnums
             xflat_path = path.full("lvm_anc", drpver=drpver, kind="x", imagetype=flat.imagetyp, tileid=flat.tileid, mjd=flat.mjd, camera=channel, expnum=expnum)
             wflat_path = path.full("lvm_anc", drpver=drpver, kind="w", imagetype=flat.imagetyp, tileid=flat.tileid, mjd=flat.mjd, camera=channel, expnum=expnum)
             hflat_path = path.full("lvm_anc", drpver=drpver, kind="h", imagetype=flat.imagetyp, tileid=flat.tileid, mjd=flat.mjd, camera=channel, expnum=expnum)
-            # gflat_path = path.full("lvm_anc", drpver=drpver, kind="g", imagetype=flat.imagetyp, tileid=flat.tileid, mjd=flat.mjd, camera=channel, expnum=expnum)
-            lvmflat_path = path.full("lvm_frame", mjd=mjd, tileid=tileid, drpver=drpver, expnum=expnum, kind=f'TFlat-{channel}')
+            xtwi_paths.append(xflat_path)
+            lvmflat_paths.append(path.full("lvm_frame", mjd=mjd, tileid=tileid, drpver=drpver, expnum=expnum, kind=f'TFlat-{channel}'))
 
             # spectrograph stack xflats
             rss_tasks.stack_spectrographs(in_rsss=xflat_paths, out_rss=xflat_path)
@@ -1580,16 +1582,18 @@ def create_twilight_fiberflats(mjd: int, use_longterm_cals: bool = True, expnums
             rss_tasks.resample_wavelength(in_rss=wflat_path, out_rss=hflat_path, wave_disp=0.5, wave_range=SPEC_CHANNELS[channel])
 
             # fit fiber throughput
-            fit_fiberflat(in_twilight=hflat_path, out_flat=fflat_path, out_twilight=fflat_flatfielded_path, remove_gradient=True, niter=4, display_plots=display_plots)
-
-            # create lvmFlat product
-            create_lvmflat(in_twilight=fflat_flatfielded_path, out_lvmflat=lvmflat_path, in_fiberflat=fflat_path,
-                           in_cents=calibs["trace"][channel], in_widths=calibs["width"][channel],
-                           in_waves=calibs["wave"][channel], in_lsfs=calibs["lsf"][channel])
+            fit_fiberflat(in_rss=hflat_path, out_flat=fflat_path, out_rss=fflat_flatfielded_path,
+                          ref_kind=ref_kind, groupby=groupby, guess_coeffs=guess_coeffs, fixed_coeffs=fixed_coeffs,
+                          norm_cwave=cnorms[channel], smoothing=smoothing, interpolate_invalid=interpolate_invalid,
+                          display_plots=display_plots)
 
         # combine individual fiberflats into master fiberflat
         mflat_path = path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=mjd, kind="mfiberflat_twilight", camera=channel)
-        combine_twilight_sequence(in_fiberflats=fflat_paths, out_fiberflat=mflat_path, in_waves=calibs["wave"][channel], in_lsfs=calibs["lsf"][channel])
+        combine_twilight_sequence(
+            in_twilights=xtwi_paths,
+            in_fflats=fflat_paths, out_mflat=mflat_path, out_lvmflats=lvmflat_paths,
+            in_cents=calibs["trace"][channel], in_widths=calibs["width"][channel],
+            in_waves=calibs["wave"][channel], in_lsfs=calibs["lsf"][channel])
 
 
 def create_illumination_corrections(mjd, use_longterm_cals=True, expnums=None):
