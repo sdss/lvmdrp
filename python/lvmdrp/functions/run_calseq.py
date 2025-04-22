@@ -36,14 +36,14 @@ from astropy.stats import biweight_location, biweight_scale
 from astropy.io import fits
 from astropy.table import Table
 from scipy import interpolate
-from typing import Union, List, Dict
+from typing import Union, Tuple, List, Dict
 from collections.abc import  Callable
 
 from lvmdrp import log, path, __version__ as drpver
 from lvmdrp.utils import metadata as md
 from lvmdrp.utils.convert import tileid_grp
-from lvmdrp.utils.paths import get_master_mjd, get_calib_paths, group_calib_paths
-from lvmdrp.core.constants import CALIBRATION_NAMES, SKYLINES_FIBERFLAT
+from lvmdrp.utils.paths import get_master_mjd, get_calib_paths, group_calib_paths, get_frames_paths
+from lvmdrp.core.constants import CALIBRATION_NAMES, SKYLINES_FIBERFLAT, CONTINUUM_FIBERFLAT
 from lvmdrp.core.plot import create_subplots, save_fig
 from lvmdrp.core import dataproducts as dp
 from lvmdrp.core.constants import (
@@ -59,8 +59,8 @@ from lvmdrp.core.rss import RSS, lvmFrame
 
 from lvmdrp.functions import imageMethod as image_tasks
 from lvmdrp.functions import rssMethod as rss_tasks
-from lvmdrp.main import start_logging, get_config_options, read_fibermap, reduce_2d
-from lvmdrp.functions.run_twilights import lvmFlat, to_native_wave, fit_fiberflat, combine_twilight_sequence
+from lvmdrp.main import start_logging, get_config_options, read_fibermap, reduce_2d, reduce_1d
+from lvmdrp.functions.run_twilights import lvmFlat, to_native_wave, fit_fiberflat, combine_twilight_sequence, fit_skyline_flatfield
 
 
 SLITMAP = read_fibermap(as_table=True)
@@ -1476,7 +1476,7 @@ def create_twilight_fiberflats(mjd: int, use_longterm_cals: bool = True, expnums
                       interpolate_invalid: bool = True,
                       kind: str = "longterm",
                       skip_done: bool = False,
-                      display_plots: bool = False) -> Dict[str, RSS]:
+                      display_plots: bool = False) -> None:
     """Reduce the twilight sequence and produces master twilight flats
 
     Given a sequence of twilight exposures, this function reduces them and
@@ -1594,6 +1594,40 @@ def create_twilight_fiberflats(mjd: int, use_longterm_cals: bool = True, expnums
             in_fflats=fflat_paths, out_mflat=mflat_path, out_lvmflats=lvmflat_paths,
             in_cents=calibs["trace"][channel], in_widths=calibs["width"][channel],
             in_waves=calibs["wave"][channel], in_lsfs=calibs["lsf"][channel])
+
+
+def create_fiberflats_corrections(mjd: int, science_mjds: Union[int, List[int]], use_longterm_cals: bool = True, science_expnums: List[int] = None,
+                                  sky_cwaves: Dict[str, float] = SKYLINES_FIBERFLAT, cont_cwaves: Dict[str, float] = CONTINUUM_FIBERFLAT,
+                                  groupby: str = "spec", quantiles: Tuple[float, float] = (5.0, 97.0), sky_fibers_only: bool = False,
+                                  nsigma: float = 2.0, comb_method: str = "median",
+                                  skip_done: bool = False, display_plots: bool = False) -> None:
+
+    if not all([mjd <= sci_mjd for sci_mjd in science_mjds]):
+        log.warning(f"some science MJDs are earlier than {mjd = }: {science_mjds = }")
+
+    calibs = get_calib_paths(mjd, version=drpver, longterm_cals=use_longterm_cals)
+
+    # 2D and 1D reduction of science exposures
+    if isinstance(science_mjds, int):
+        science_mjds = [science_mjds]
+    for sci_mjd in science_mjds:
+        reduce_2d(mjd=sci_mjd, calibrations=calibs, expnums=science_expnums, reject_cr=True, add_astro=True, sub_straylight=True, skip_done=skip_done)
+        reduce_1d(mjd=sci_mjd, calibrations=calibs, expnums=science_expnums, sub_straylight=True, skip_done=skip_done)
+
+    for channel in "brz":
+        wframe_paths = get_frames_paths(mjds=science_mjds, kind="w", camera_or_channel=channel, expnums=science_expnums, query="tileid != 11111 and qaqual != 'BAD'")
+        if len(wframe_paths) == 0:
+            log.error(f"no good quality science frames found for {science_mjds = }, {science_expnums = } in {channel = }")
+
+        fit_skyline_flatfield(
+            in_sciences=wframe_paths,
+            in_mflat=calibs["fiberflat_twilight"][channel],
+            out_mflat=calibs["fiberflat_twilight"][channel],
+            groupby="spec",
+            sky_cwave=sky_cwaves[channel], cont_cwave=cont_cwaves[channel],
+            quantiles=quantiles, sky_fibers_only=sky_fibers_only,
+            nsigma=nsigma, comb_method=comb_method,
+            display_plots=display_plots)
 
 
 def create_illumination_corrections(mjd, use_longterm_cals=True, expnums=None):

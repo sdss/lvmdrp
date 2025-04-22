@@ -269,6 +269,7 @@ def combine_twilight_sequence(in_twilights: list[str], in_fflats: List[str], out
 
     log.info(f"loading {len(in_twilights)} twilights")
     twilights = [RSS.from_file(in_twilight) for in_twilight in in_twilights]
+    channel = twilights[0]._header["CCD"]
 
     log.info(f"loading {len(in_fflats)} flat fields")
     fflats = [RSS.from_file(in_fflat) for in_fflat in in_fflats]
@@ -324,6 +325,7 @@ def combine_twilight_sequence(in_twilights: list[str], in_fflats: List[str], out
     mflat.set_wave_trace(mwave)
     mflat.set_lsf_trace(mlsf)
     mflat = to_native_wave(mflat)
+    mflat.setHdrValue(f"HIERARCH {channel} FIBERFLAT SKYCORR", False, "fiberflat skyline-corrected?")
     log.info(f"writing master flat field to {out_mflat}")
     mflat.writeFitsData(out_mflat, replace_masked=False)
 
@@ -670,7 +672,7 @@ def _choose_sky(rss):
     telescope = "SkyE" if abs(rss._header["WAVE HELIORV_SKYE"]) < abs(rss._header["WAVE HELIORV_SKYW"]) else "SkyW"
     return telescope
 
-def fit_skyline_flatfield(in_sciences, in_mflat, out_mflat, cwave, twave, dwave=8, guess_coeffs=[1,2,3,0], fixed_coeffs=[3], groupby="spec",
+def fit_skyline_flatfield(in_sciences, in_mflat, out_mflat, sky_cwave, cont_cwave, dwave=8, guess_coeffs=[1,2,3,0], fixed_coeffs=[3], groupby="spec",
                           norm_fibers=None, quantiles=(5,97), nsigma=1, comb_method="median", sky_fibers_only=False, display_plots=False):
 
     log.info(f"loading {len(in_sciences)} science exposures")
@@ -679,6 +681,9 @@ def fit_skyline_flatfield(in_sciences, in_mflat, out_mflat, cwave, twave, dwave=
     log.info(f"loading master fiberflat at {in_mflat}")
     mflat = RSS.from_file(in_mflat)
     channel = mflat._header["CCD"]
+    if mflat._header.get(f"HIERARCH {channel} FIBERFLAT SKYCORR", False):
+        log.info("fiber flat already corrected using sky lines, skipping")
+        return mflat, np.ones(mflat._fibers, dtype="float")
 
     if isinstance(sciences, list):
         log.info(f"fitting sky line correction using {len(sciences)} science frames")
@@ -689,7 +694,7 @@ def fit_skyline_flatfield(in_sciences, in_mflat, out_mflat, cwave, twave, dwave=
         raise TypeError(f"Invalid type for `sciences`: {type(sciences)}. Valid types are lvmdrp.core.rss.RSS and list[lvmdrp.core.rss.RSS]")
 
     fig = plt.figure(figsize=(14,3*(2+len(sciences))))
-    fig.suptitle(f"Fiber flatfield correction for {channel = } around sky line @ {cwave:.2f} Angstroms", fontsize="xx-large")
+    fig.suptitle(f"Fiber flatfield correction for {channel = } around sky line @ {sky_cwave:.2f} Angstroms", fontsize="xx-large")
     gs_gra = GridSpec(3+len(sciences), 5, hspace=0.01, wspace=0.01, left=0.07, right=0.99, bottom=0.03, top=0.97, figure=fig)
     gs_cor = GridSpec(3+len(sciences), 5, hspace=0.7, wspace=0.01, left=0.07, right=0.99, bottom=0.03, top=0.97, figure=fig)
 
@@ -703,15 +708,15 @@ def fit_skyline_flatfield(in_sciences, in_mflat, out_mflat, cwave, twave, dwave=
 
         fscience = science / mflat
 
-        _, offsets_model = fscience.measure_wave_shifts(cwaves=cwave, dwave=dwave, smooth=True)
+        _, offsets_model = fscience.measure_wave_shifts(cwaves=sky_cwave, dwave=dwave, smooth=True)
         mean_offset, std_offset = bn.nanmean(offsets_model), bn.nanstd(offsets_model)
         log.info(f"  measured wavelength offsets: {mean_offset:.4f} +/- {std_offset:.4f}")
         fscience._wave_trace['COEFF'].data[:, 0] -= offsets_model
         wave_trace = TraceMask.from_coeff_table(fscience._wave_trace)
         fscience._wave = wave_trace.eval_coeffs()
 
-        log.info(f"  fitting gradient and factors around sky line @ {cwave:.2f} Angstroms for '{imagetyp}' exposure {expnum = }")
-        x, y, z, coeffs, factor = fscience.fit_ifu_gradient(cwave=cwave, dwave=dwave, groupby=groupby,
+        log.info(f"  fitting gradient and factors around sky line @ {sky_cwave:.2f} Angstroms for '{imagetyp}' exposure {expnum = }")
+        x, y, z, coeffs, factor = fscience.fit_ifu_gradient(cwave=sky_cwave, dwave=dwave, groupby=groupby,
                                                        guess_coeffs=guess_coeffs, fixed_coeffs=fixed_coeffs, coadd_method="fit")
         gradient_model = IFUGradient.ifu_gradient(coeffs, x=x, y=y, normalize=True)
         factors.append(factor)
@@ -741,19 +746,19 @@ def fit_skyline_flatfield(in_sciences, in_mflat, out_mflat, cwave, twave, dwave=
     science.combineRSS([science_g for i, science_g in enumerate(sciences_g) if keep[i]], method=comb_method)
     science.apply_pixelmask()
 
-    log.info(f"measuring continuum @ {twave:.2f} Angstroms")
+    log.info(f"measuring continuum @ {cont_cwave:.2f} Angstroms")
     ax_con = fig.add_subplot(gs_cor[-2, :])
-    ax_con.axvline(cwave, lw=1, ls="--", color="0.2")
-    rejects = reject_fibers(science, cwave=twave, quantiles=quantiles, ax=ax_con)
+    ax_con.axvline(sky_cwave, lw=1, ls="--", color="0.2")
+    rejects = reject_fibers(science, cwave=cont_cwave, quantiles=quantiles, ax=ax_con)
     science._data[rejects, :] = np.nan
     science._error[rejects, :] = np.nan
     science._mask[rejects, :] = True
     log.info(f"rejected {rejects.sum()} fibers outside {quantiles = }")
 
-    log.info(f"validating gradient removal around sky line @ {cwave:.2f} Angstroms")
+    log.info(f"validating gradient removal around sky line @ {sky_cwave:.2f} Angstroms")
     axs = [fig.add_subplot(gs_gra[-3, j]) for j in range(5)]
     axs[0].set_ylabel("combined exposure", fontsize="large")
-    x, y, skyline_slit, coeffs, factor = science.fit_ifu_gradient(cwave=cwave, dwave=dwave, groupby=groupby,
+    x, y, skyline_slit, coeffs, factor = science.fit_ifu_gradient(cwave=sky_cwave, dwave=dwave, groupby=groupby,
                                                                   guess_coeffs=guess_coeffs, fixed_coeffs=fixed_coeffs, coadd_method="fit")
     gradient_res = IFUGradient.ifu_gradient(coeffs, x=x, y=y, normalize=True)
     factors_final = IFUGradient.ifu_factors(factor, fiber_groups, normalize=True)
@@ -762,8 +767,8 @@ def fit_skyline_flatfield(in_sciences, in_mflat, out_mflat, cwave, twave, dwave=
     log.info(f"residual gradient across = {bn.nanmax(gradient_res)/bn.nanmin(gradient_res):.4f}")
 
     if sky_fibers_only:
-        log.info(f"measuring sky line @ {cwave:.2f} Angstroms on combined science frame")
-        skyline_slit, x, y = science.fit_lines_slit(cwaves=cwave, dwave=dwave, select_fibers=science._slitmap["targettype"]=="SKY", return_xy=True)
+        log.info(f"measuring sky line @ {sky_cwave:.2f} Angstroms on combined science frame")
+        skyline_slit, x, y = science.fit_lines_slit(cwaves=sky_cwave, dwave=dwave, select_fibers=science._slitmap["targettype"]=="SKY", return_xy=True)
         skyline_slit /= bn.nanmedian(skyline_slit)
 
         log.info("calculating spectrograph corrections using only sky fibers")
@@ -777,7 +782,7 @@ def fit_skyline_flatfield(in_sciences, in_mflat, out_mflat, cwave, twave, dwave=
     flatfield_corr = np.repeat(factor, science._fibers / factor.size)
 
     science_corr = science / flatfield_corr[:, None]
-    skyline_slit = science_corr.fit_lines_slit(cwaves=cwave, select_fibers="Sci")
+    skyline_slit = science_corr.fit_lines_slit(cwaves=sky_cwave, select_fibers="Sci")
     fiberids = science_corr._slitmap["fiberid"].data
     ax_cor = fig.add_subplot(gs_cor[-1, :])
     ax_cor.set_title("Flatfielded slit of combined frame", loc="left")
@@ -786,8 +791,9 @@ def fit_skyline_flatfield(in_sciences, in_mflat, out_mflat, cwave, twave, dwave=
     ax_cor.set_ylim(0.92, 1.08)
     slit(x=fiberids, y=skyline_slit, ax=ax_cor)
 
-    log.info(f"writing corrected master fiberflat to {out_mflat}")
     mflat_corr = mflat * flatfield_corr[:, None]
+    mflat_corr.setHdrValue(f"HIERARCH {channel} FIBERFLAT SKYCORR", True, "fiberflat skyline-corrected?")
+    log.info(f"writing corrected master fiberflat to {out_mflat}")
     mflat_corr.writeFitsData(out_mflat)
 
     return mflat_corr, flatfield_corr
