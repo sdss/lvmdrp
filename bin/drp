@@ -300,9 +300,10 @@ cli.add_command(calibrations)
 @click.option('-m', '--mjd', type=int, required=True, help='an MJD for which fiberflats will be corrected')
 @click.option('-l', '--science-mjds', type=IntListType(), required=True, help='a list of specific MJDs to reduce')
 @click.option('-e', '--science-expnums', type=IntListType(), default=None, help='a list of specific exposure numbers to reduce')
+@click.option('--force-correction', is_flag=True, default=False, help='flag to force correction even if has been already done')
 @click.option('-s', '--skip-done', is_flag=True, default=False, help='flag to skip reduction steps that have already been done')
-def fiberflat_corrections(mjd, science_mjds, science_expnums, skip_done):
-    create_fiberflats_corrections(mjd=mjd, science_mjds=science_mjds, science_expnums=science_expnums, skip_done=skip_done)
+def fiberflat_corrections(mjd, science_mjds, science_expnums, force_correction, skip_done):
+    create_fiberflats_corrections(mjd=mjd, science_mjds=science_mjds, science_expnums=science_expnums, force_correction=force_correction, skip_done=skip_done)
 
 # register fiberflat correction routine
 cli.add_command(fiberflat_corrections)

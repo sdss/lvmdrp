@@ -1472,31 +1472,28 @@ def reduce_1d(mjd, calibrations, expnums=None, replace_with_nan=True, sub_strayl
     if expnums is not None:
         frames.query("expnum in @expnums", inplace=True)
     frames.sort_values(["expnum", "camera"], inplace=True)
-    cameras = frames.camera.unique()
 
     for _, sci in frames.iterrows():
+        if sub_straylight:
+            dframe_path = path.full("lvm_anc", drpver=drpver, kind="l", imagetype=sci["imagetyp"], **sci)
+        else:
+            dframe_path = path.full("lvm_anc", drpver=drpver, kind="d", imagetype=sci["imagetyp"], **sci)
+        xframe_path = path.full("lvm_anc", drpver=drpver, kind="x", imagetype=sci["imagetyp"], **sci)
+        os.makedirs(os.path.dirname(xframe_path), exist_ok=True)
 
-        sci_pars = sci.to_dict()
-        for camera in cameras:
-            sci["camera"] = camera
-            if sub_straylight:
-                dframe_path = path.full("lvm_anc", drpver=drpver, kind="l", imagetype=sci["imagetyp"], **sci_pars)
-            else:
-                dframe_path = path.full("lvm_anc", drpver=drpver, kind="d", imagetype=sci["imagetyp"], **sci_pars)
-            xframe_path = path.full("lvm_anc", drpver=drpver, kind="x", imagetype=sci["imagetyp"], **sci)
-            os.makedirs(os.path.dirname(xframe_path), exist_ok=True)
+        # define calibration frames paths
+        mtrace_path = calibrations["trace"][sci.camera]
+        mwidth_path = calibrations["width"][sci.camera]
+        mmodel_path = calibrations["model"][sci.camera]
 
-            # define calibration frames paths
-            mtrace_path = calibrations["trace"][camera]
-            mwidth_path = calibrations["width"][camera]
-            mmodel_path = calibrations["model"][camera]
+        # extract 1d spectra
+        if skip_done and os.path.isfile(xframe_path):
+            continue
+        else:
+            extract_spectra(in_image=dframe_path, out_rss=xframe_path, in_trace=mtrace_path, in_fwhm=mwidth_path, in_model=mmodel_path, method="optimal", parallel=1)
 
-            # extract 1d spectra
-            if skip_done and os.path.isfile(xframe_path):
-                continue
-            else:
-                extract_spectra(in_image=dframe_path, out_rss=xframe_path, in_trace=mtrace_path, in_fwhm=mwidth_path, in_model=mmodel_path, method="optimal", parallel=1)
-
+    frames = frames.drop_duplicates(subset=["expnum"])
+    for _, sci in frames.iterrows():
         mwave_groups = group_calib_paths(calibrations["wave"])
         mlsf_groups = group_calib_paths(calibrations["lsf"])
         for channel in "brz":

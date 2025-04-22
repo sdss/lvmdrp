@@ -188,7 +188,7 @@ def get_frames_paths(mjds, kind, camera_or_channel, query=None, expnums=None, fi
         A list of file paths corresponding to the specified frames and parameters.
     """
     mjds = [mjds] if isinstance(mjds, int) else mjds
-    frames = pd.concat([md.get_frames_metadata(mjd=mjd).query(query) for mjd in mjds], ignore_index=True)
+    frames = pd.concat([md.get_frames_metadata(mjd=mjd) for mjd in mjds], ignore_index=True)
     if query is not None:
         frames = frames.query(query)
     if expnums is not None:

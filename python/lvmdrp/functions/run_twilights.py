@@ -673,7 +673,7 @@ def _choose_sky(rss):
     return telescope
 
 def fit_skyline_flatfield(in_sciences, in_mflat, out_mflat, sky_cwave, cont_cwave, dwave=8, guess_coeffs=[1,2,3,0], fixed_coeffs=[3], groupby="spec",
-                          norm_fibers=None, quantiles=(5,97), nsigma=1, comb_method="median", sky_fibers_only=False, display_plots=False):
+                          norm_fibers=None, quantiles=(5,97), nsigma=1, comb_method="median", sky_fibers_only=False, force_correction=False, display_plots=False):
 
     log.info(f"loading {len(in_sciences)} science exposures")
     sciences = [RSS.from_file(in_science) for in_science in in_sciences]
@@ -681,7 +681,7 @@ def fit_skyline_flatfield(in_sciences, in_mflat, out_mflat, sky_cwave, cont_cwav
     log.info(f"loading master fiberflat at {in_mflat}")
     mflat = RSS.from_file(in_mflat)
     channel = mflat._header["CCD"]
-    if mflat._header.get(f"HIERARCH {channel} FIBERFLAT SKYCORR", False):
+    if not force_correction and mflat._header.get(f"HIERARCH {channel} FIBERFLAT SKYCORR", False):
         log.info("fiber flat already corrected using sky lines, skipping")
         return mflat, np.ones(mflat._fibers, dtype="float")
 
@@ -790,6 +790,8 @@ def fit_skyline_flatfield(in_sciences, in_mflat, out_mflat, sky_cwave, cont_cwav
     ax_cor.set_ylabel("Normalized counts", fontsize="large")
     ax_cor.set_ylim(0.92, 1.08)
     slit(x=fiberids, y=skyline_slit, ax=ax_cor)
+
+    save_fig(fig, out_mflat, to_display=display_plots, figure_path="qa", label="flat_correction")
 
     mflat_corr = mflat * flatfield_corr[:, None]
     mflat_corr.setHdrValue(f"HIERARCH {channel} FIBERFLAT SKYCORR", True, "fiberflat skyline-corrected?")

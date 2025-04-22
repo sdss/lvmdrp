@@ -28,6 +28,7 @@
 import os
 import numpy as np
 import bottleneck as bn
+import pandas as pd
 from glob import glob
 from copy import deepcopy as copy
 from datetime import datetime
@@ -1569,17 +1570,21 @@ def create_twilight_fiberflats(mjd: int, use_longterm_cals: bool = True, expnums
             xtwi_paths.append(xflat_path)
             lvmflat_paths.append(path.full("lvm_frame", mjd=mjd, tileid=tileid, drpver=drpver, expnum=expnum, kind=f'TFlat-{channel}'))
 
-            # spectrograph stack xflats
-            rss_tasks.stack_spectrographs(in_rsss=xflat_paths, out_rss=xflat_path)
+            if skip_done and os.path.isfile(hflat_path):
+                log.info(f"skipping {hflat_path}, file already exist")
+            else:
+                # spectrograph stack xflats
+                rss_tasks.stack_spectrographs(in_rsss=xflat_paths, out_rss=xflat_path)
 
-            # calibrate in wavelength
-            rss_tasks.create_pixel_table(in_rss=xflat_path, out_rss=wflat_path, in_waves=calibs["wave"][channel], in_lsfs=calibs["lsf"][channel])
+                # calibrate in wavelength
+                rss_tasks.create_pixel_table(in_rss=xflat_path, out_rss=wflat_path, in_waves=calibs["wave"][channel], in_lsfs=calibs["lsf"][channel])
 
-            # match LSF in all fibers
-            rss_tasks.match_resolution(in_rss=wflat_path, out_rss=wflat_path, target_fwhm=4.5)
+                # match LSF in all fibers
+                rss_tasks.match_resolution(in_rss=wflat_path, out_rss=wflat_path, target_fwhm=4.5)
 
-            # rectify in wavelength
-            rss_tasks.resample_wavelength(in_rss=wflat_path, out_rss=hflat_path, wave_disp=0.5, wave_range=SPEC_CHANNELS[channel])
+                # rectify in wavelength
+                rss_tasks.resample_wavelength(in_rss=wflat_path, out_rss=hflat_path, wave_disp=0.5, wave_range=SPEC_CHANNELS[channel])
+
 
             # fit fiber throughput
             fit_fiberflat(in_rss=hflat_path, out_flat=fflat_path, out_rss=fflat_flatfielded_path,
@@ -1599,23 +1604,27 @@ def create_twilight_fiberflats(mjd: int, use_longterm_cals: bool = True, expnums
 def create_fiberflats_corrections(mjd: int, science_mjds: Union[int, List[int]], use_longterm_cals: bool = True, science_expnums: List[int] = None,
                                   sky_cwaves: Dict[str, float] = SKYLINES_FIBERFLAT, cont_cwaves: Dict[str, float] = CONTINUUM_FIBERFLAT,
                                   groupby: str = "spec", quantiles: Tuple[float, float] = (5.0, 97.0), sky_fibers_only: bool = False,
-                                  nsigma: float = 2.0, comb_method: str = "median",
+                                  nsigma: float = 2.0, comb_method: str = "median", force_correction: bool = False,
                                   skip_done: bool = False, display_plots: bool = False) -> None:
 
     if not all([mjd <= sci_mjd for sci_mjd in science_mjds]):
-        log.warning(f"some science MJDs are earlier than {mjd = }: {science_mjds = }")
+        log.error(f"some science MJDs are earlier than {mjd = }: {science_mjds = }")
+        return
+
+    science_mjds = [science_mjds] if isinstance(science_mjds, int) else science_mjds
+    if science_expnums is None:
+        frames = pd.concat([md.get_frames_metadata(mjd=mjd).query("tileid != 11111 and qaqual != 'BAD'") for mjd in science_mjds], ignore_index=True)
+        science_expnums = frames.sort_values("expnum").drop_duplicates("expnum").expnum
 
     calibs = get_calib_paths(mjd, version=drpver, longterm_cals=use_longterm_cals)
 
     # 2D and 1D reduction of science exposures
-    if isinstance(science_mjds, int):
-        science_mjds = [science_mjds]
     for sci_mjd in science_mjds:
         reduce_2d(mjd=sci_mjd, calibrations=calibs, expnums=science_expnums, reject_cr=True, add_astro=True, sub_straylight=True, skip_done=skip_done)
         reduce_1d(mjd=sci_mjd, calibrations=calibs, expnums=science_expnums, sub_straylight=True, skip_done=skip_done)
 
     for channel in "brz":
-        wframe_paths = get_frames_paths(mjds=science_mjds, kind="w", camera_or_channel=channel, expnums=science_expnums, query="tileid != 11111 and qaqual != 'BAD'")
+        wframe_paths = get_frames_paths(mjds=science_mjds, kind="w", camera_or_channel=channel, expnums=science_expnums)
         if len(wframe_paths) == 0:
             log.error(f"no good quality science frames found for {science_mjds = }, {science_expnums = } in {channel = }")
 
@@ -1627,6 +1636,7 @@ def create_fiberflats_corrections(mjd: int, science_mjds: Union[int, List[int]],
             sky_cwave=sky_cwaves[channel], cont_cwave=cont_cwaves[channel],
             quantiles=quantiles, sky_fibers_only=sky_fibers_only,
             nsigma=nsigma, comb_method=comb_method,
+            force_correction=force_correction,
             display_plots=display_plots)
 
 
