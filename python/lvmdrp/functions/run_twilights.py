@@ -269,7 +269,6 @@ def combine_twilight_sequence(in_twilights: list[str], in_fflats: List[str], out
 
     log.info(f"loading {len(in_twilights)} twilights")
     twilights = [RSS.from_file(in_twilight) for in_twilight in in_twilights]
-    channel = twilights[0]._header["CCD"]
 
     log.info(f"loading {len(in_fflats)} flat fields")
     fflats = [RSS.from_file(in_fflat) for in_fflat in in_fflats]
@@ -325,7 +324,6 @@ def combine_twilight_sequence(in_twilights: list[str], in_fflats: List[str], out
     mflat.set_wave_trace(mwave)
     mflat.set_lsf_trace(mlsf)
     mflat = to_native_wave(mflat)
-    mflat.setHdrValue(f"HIERARCH {channel} FIBERFLAT SKYCORR", False, "fiberflat skyline-corrected?")
     log.info(f"writing master flat field to {out_mflat}")
     mflat.writeFitsData(out_mflat, replace_masked=False)
 
@@ -635,26 +633,15 @@ def fit_fiberflat(in_rss, out_flat, out_rss, ref_kind=600, guess_coeffs=[1,2,3,0
     axs_res = [fig.add_subplot(gs_ifu[-1, j]) for j in range(5)]
     axs_res[0].set_ylabel("gradient residual", fontsize="large")
 
-    # TODO: test normalizing factors before creating the flat field
-    log.info(f"calculating flatfield from '{imagetyp}' exposure, {channel = }, {expnum = }")
+    log.info(f"calculating flatfield from '{imagetyp}' exposure, {channel = }, {expnum = }, with parameters: {ref_kind = }, {interpolate_invalid = }, {smoothing = }")
     flat, _, ref_fiber, _ = get_flatfield(rss=rss, ref_kind=ref_kind, interpolate_invalid=interpolate_invalid, smoothing=smoothing, axs={"ref_fiber": ax_ref, "smoothing": ax_smo})
 
     log.info(f"fitting and correcting IFU gradient and '{groupby}' factors @ {norm_cwave:.2f} Angstroms")
     # fit gradient with spectrograph normalizations (make n-iterations of this or stop when gradient is <1% across)
-    # TODO:
-    #   - fit the gradient with quadrant factor corrections
-    #   - remove only the gradient
-    #   - fit for the spectrograph factors
-    #   - remove the factors
     x, y, z_ori, coeffs, factors = iterate_gradient_fit(rss, cwave=norm_cwave, dwave=norm_dwave, groupby=groupby,
                                                         guess_coeffs=guess_coeffs, fixed_coeffs=fixed_coeffs, axs=(axs_fin,axs_res))
-    # rss_g = rss.remove_ifu_gradient(coeffs=coeffs, factors=None)
-    # _, _, _, coeffs, factors = iterate_gradient_fit(rss_g, cwave=norm_cwave, dwave=norm_dwave, groupby="spec",
-    #                                                 guess_coeffs=[1,0,0,0], fixed_coeffs=[1,2,3])
-    # _, _, ifu_factors = rss_g.eval_ifu_gradient(coeffs=coeffs, factors=factors, groupby="spec")
-    # rss_g /= ifu_factors[:, None]
 
-    # # apply gradient correction
+    # apply gradient correction
     rss_g = rss.remove_ifu_gradient(coeffs=coeffs, factors=factors, groupby=groupby)
     # get corrected flatfield
     flat_g, _, _, _ = get_flatfield(rss=rss_g, ref_kind=ref_kind, interpolate_invalid=interpolate_invalid, smoothing=smoothing)
@@ -662,18 +649,16 @@ def fit_fiberflat(in_rss, out_flat, out_rss, ref_kind=600, guess_coeffs=[1,2,3,0
     save_fig(fig, out_flat, to_display=display_plots, figure_path="qa", label="twilight_fiberflat")
 
     log.info(f"writing fiber flatfield to {out_flat}")
+    flat_g.setHdrValue(f"HIERARCH {channel} FIBERFLAT SKYCORR", False, "fiberflat skyline-corrected?")
+    flat_g.setHdrValue(f"HIERARCH {channel} FIBERFLAT GROUPBY", groupby, "fiber grouping")
     flat_g.writeFitsData(out_flat)
     log.info(f"writing flatfielded exposure to {out_rss}")
     (rss_g/flat_g).writeFitsData(out_rss)
 
     return flat, flat_g, rss_g, coeffs, factors
 
-def _choose_sky(rss):
-    telescope = "SkyE" if abs(rss._header["WAVE HELIORV_SKYE"]) < abs(rss._header["WAVE HELIORV_SKYW"]) else "SkyW"
-    return telescope
-
 def fit_skyline_flatfield(in_sciences, in_mflat, out_mflat, sky_cwave, cont_cwave, dwave=8, guess_coeffs=[1,2,3,0], fixed_coeffs=[3], groupby="spec",
-                          norm_fibers=None, quantiles=(5,97), nsigma=1, comb_method="median", sky_fibers_only=False, force_correction=False, display_plots=False):
+                          quantiles=(5,97), nsigma=1, comb_method="median", sky_fibers_only=False, force_correction=False, display_plots=False):
 
     log.info(f"loading {len(in_sciences)} science exposures")
     sciences = [RSS.from_file(in_science) for in_science in in_sciences]
@@ -779,7 +764,6 @@ def fit_skyline_flatfield(in_sciences, in_mflat, out_mflat, sky_cwave, cont_cwav
         log.info(f"sky fiber factors    = {np.round(factor, 4)}")
 
     flatfield_corr = IFUGradient.ifu_factors(factor, fiber_groups)
-    flatfield_corr = np.repeat(factor, science._fibers / factor.size)
 
     science_corr = science / flatfield_corr[:, None]
     skyline_slit = science_corr.fit_lines_slit(cwaves=sky_cwave, select_fibers="Sci")
@@ -795,6 +779,9 @@ def fit_skyline_flatfield(in_sciences, in_mflat, out_mflat, sky_cwave, cont_cwav
 
     mflat_corr = mflat * flatfield_corr[:, None]
     mflat_corr.setHdrValue(f"HIERARCH {channel} FIBERFLAT SKYCORR", True, "fiberflat skyline-corrected?")
+    mflat_corr.setHdrValue(f"HIERARCH {channel} FIBERFLAT GROUPBY", groupby, "fiber grouping")
+    for i, f in enumerate(factor):
+        mflat_corr.setHdrValue(f"HIERARCH {channel} FIBERFLAT FACTOR{i+1}", f, f"{groupby}{i+1} factor")
     log.info(f"writing corrected master fiberflat to {out_mflat}")
     mflat_corr.writeFitsData(out_mflat)
 

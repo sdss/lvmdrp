@@ -38,7 +38,7 @@ from astropy.io import fits
 from astropy.table import Table
 from scipy import interpolate
 from typing import Union, Tuple, List, Dict
-from collections.abc import  Callable
+from collections.abc import Callable
 
 from lvmdrp import log, path, __version__ as drpver
 from lvmdrp.utils import metadata as md
@@ -1473,51 +1473,48 @@ def create_twilight_fiberflats(mjd: int, use_longterm_cals: bool = True, expnums
                       ref_kind: Union[int, Callable[[np.ndarray, int], np.ndarray]] = bn.nanmedian,
                       groupby: str = "spec", guess_coeffs: List[int] = [1,0,0,0], fixed_coeffs: List[int] = [1,2,3],
                       cnorms: Dict[str, float] = SKYLINES_FIBERFLAT, dwave: float = 8.0,
-                      smoothing: float = 0.0,
+                      smoothing: float = 0.2,
                       interpolate_invalid: bool = True,
                       kind: str = "longterm",
                       skip_done: bool = False,
                       display_plots: bool = False) -> None:
-    """Reduce the twilight sequence and produces master twilight flats
+    """Reduce a sequence of twilight exposures and produce master twilight fiberflats for each channel.
 
-    Given a sequence of twilight exposures, this function reduces them and
-    produces master twilight flats for each camera.
+    This function processes a set of twilight flat exposures for the specified MJD and exposure numbers,
+    extracting 1D spectra, calibrating wavelength and LSF, rectifying, and fitting fiber throughput.
+    The resulting master fiberflats are interpolated to handle masked fibers and saved to disk.
+    Optionally, diagnostic plots can be displayed.
 
     Parameters
     ----------
     mjd : int
-        MJD to reduce
-    use_longterm_cals : bool
-        Whether to use long-term calibration frames or not, defaults to True
-    expnums : list
-        List of twilight exposure numbers
-    median_box : int, optional
-        Size of the median filter box, by default 5
-    niter : int, optional
-        Number of iterations to fit the continuum, by default 1000
-    threshold : float, optional
-        Threshold to mask outliers, by default 0.5
-    nknots : int, optional
-        Number of knots for the spline fitting, by default 50
-    b_mask : list, optional
-        List of wavelength bands to mask in the blue channel, by default []
-    r_mask : list, optional
-        List of wavelength bands to mask in the red channel, by default []
-    z_mask : list, optional
-        List of wavelength bands to mask in the NIR channel, by default []
-    use_master_centroids : bool, optional
-        Use master centroids to trace the fibers, by default False
+        MJD to reduce.
+    use_longterm_cals : bool, optional
+        Whether to use long-term calibration frames. Defaults to True.
+    expnums : list[int], optional
+        List of twilight exposure numbers to process. If None, all available are used.
+    ref_kind : int or callable, optional
+        Reference fiber selection method or index. Defaults to nanmedian.
+    groupby : str, optional
+        Grouping for normalization (e.g., "spec"). Defaults to "spec".
+    guess_coeffs : list[int], optional
+        Initial guess for polynomial coefficients in gradient fitting. Defaults to [1,0,0,0].
+    fixed_coeffs : list[int], optional
+        Indices of coefficients to fix during fitting. Defaults to [1,2,3].
+    cnorms : dict, optional
+        Dictionary of normalization wavelengths per channel. Defaults to SKYLINES_FIBERFLAT.
+    dwave : float, optional
+        Width of the wavelength window for normalization. Defaults to 8.0.
+    smoothing : float, optional
+        Smoothing parameter for fiberflat fitting. Defaults to 0.2.
+    interpolate_invalid : bool, optional
+        Interpolate over invalid/masked fibers. Defaults to True.
     kind : str, optional
-        Kind of calibration frames to produce, by default 'longterm'
+        Kind of calibration frames to produce ("longterm" or "nightly"). Defaults to "longterm".
     skip_done : bool, optional
-        Skip files that already exist, by default False
+        Skip files that already exist. Defaults to False.
     display_plots : bool, optional
-        Display plots, by default False
-
-    Returns
-    -------
-    mfflats : dict
-        Dictionary with the master twilight flats for each channel
+        Display diagnostic plots. Defaults to False.
     """
     # get metadata
     flats, _ = md.get_sequence_metadata(mjd, expnums=expnums, for_cals={"fiberflat"})
@@ -1620,7 +1617,7 @@ def create_fiberflats_corrections(mjd: int, science_mjds: Union[int, List[int]],
 
     # 2D and 1D reduction of science exposures
     for sci_mjd in science_mjds:
-        reduce_2d(mjd=sci_mjd, calibrations=calibs, expnums=science_expnums, reject_cr=True, add_astro=True, sub_straylight=True, skip_done=skip_done)
+        reduce_2d(mjd=sci_mjd, calibrations=calibs, expnums=science_expnums, reject_cr=False, add_astro=True, sub_straylight=True, skip_done=skip_done)
         reduce_1d(mjd=sci_mjd, calibrations=calibs, expnums=science_expnums, sub_straylight=True, skip_done=skip_done)
 
     for channel in "brz":

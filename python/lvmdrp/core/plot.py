@@ -813,7 +813,7 @@ def ifu_view(slitmap=None, z=None, rss=None, cwave=None, dwave=None, comb_stat=N
 
 
 def slit(x=None, y=None, rss=None, cwave=None, dwave=None, comb_stat=None, telescope=None,
-         norm_stat=np.nanmean, margins_percent=[1,2,5], ax=None, return_xy=True):
+         norm_stat=np.nanmean, margins_percent=[1,2,5], style="-", color="tab:blue", label=None, ax=None, return_xy=True):
 
     if rss is None and y is not None:
         pass
@@ -829,9 +829,9 @@ def slit(x=None, y=None, rss=None, cwave=None, dwave=None, comb_stat=None, teles
         y /= norm_stat(y)
 
     if ax is None:
-        _, ax = create_subplots(figsize=(15,5), layout="constrained")
+        _, ax = plt.subplots(figsize=(14,5), layout="constrained")
 
-    ax.plot(x, y, "-", lw=1, color="tab:blue")
+    ax.plot(x, y, style, lw=1, color=color, label=label)
 
     mu = np.nanmean(y)
     ax.axhline(mu, ls="--", color="0.2", lw=1)
