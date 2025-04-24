@@ -305,6 +305,7 @@ def combine_twilight_sequence(in_twilights: list[str], in_fflats: List[str], out
         fflat._error[select_nonexposed] = np.nan
         fflat._mask[select_nonexposed] = True
 
+    # TODO: reject outlying flat fields before combining
     log.info(f"combining {len(fflats)} individual flat fields using {comb_method = }")
     mflat = RSS()
     mflat.combineRSS(fflats, method=comb_method)
@@ -503,7 +504,9 @@ def iterate_gradient_fit(rss, cwave, dwave=8, guess_coeffs=[1,2,3,0], fixed_coef
         fres, gres = np.abs(factors_residual.max() - 1), np.abs(gradient_residual.max() / gradient_residual.min() - 1)
 
         log.info(f" iteration {i+1}/{niter}")
-        log.info(f"     factors residuals  = {fres:.4f}")
+        log.info(f"                factors = {np.round(factors_residual[::rss._fibers//factors.size], 4)}")
+        log.info(f"        gradient across = {gradient_residual.max()/gradient_residual.min():.4f}")
+        log.info(f"      factors residuals = {fres:.4f}")
         log.info(f"     gradient residuals = {gres:.4f}")
         if (fthr > fres and gthr > gres) or i+1 == niter:
             break

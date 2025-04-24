@@ -3,7 +3,7 @@ from copy import deepcopy as copy
 from multiprocessing import Pool, cpu_count
 import itertools
 
-from lvmdrp.core.plot import plt, plot_gradient_fit
+from lvmdrp.core.plot import plt, plot_gradient_fit, plot_radial_gradient_fit
 import astropy.io.fits as pyfits
 import numpy
 import bottleneck as bn
@@ -110,7 +110,8 @@ class IFUGradient(object):
 
     def residuals(self, pars, x, y, z, fiber_groups, sigma=None):
         self._coeffs, self._factors = self._unpack_pars(pars)
-        return (self(x, y, fiber_groups) - z) / 1.0 if sigma is None else sigma
+        model = self(x, y, fiber_groups)
+        return (model - z) / (1.0 if sigma is None else sigma)
 
     def fit(self, x, y, z, fiber_groups, sigma=None):
         guess = self._guess_coeffs + self._guess_factors
@@ -126,6 +127,117 @@ class IFUGradient(object):
         gradient_model = self.ifu_gradient(self._coeffs, x, y)
         factors_model = self.ifu_factors(self._factors, fiber_groups)
         plot_gradient_fit(slitmap, z, gradient_model=gradient_model, factors_model=factors_model, telescope="Sci", axs=axs)
+
+
+class IFURadialGradient:
+    def __init__(self, guess_coeffs, profile="poly",
+                 guess_center=(0.0, 0.0), guess_ab=(1.0, 1.0), guess_theta=0.0,
+                 fix_coeffs=None, fit_geometry=False):
+        self.profile = profile.lower()
+        self._guess_coeffs = list(guess_coeffs)
+        self._ncoeffs = len(self._guess_coeffs)
+        self._fixed_coeffs = numpy.zeros_like(self._guess_coeffs, dtype=bool)
+        if fix_coeffs:
+            self._fixed_coeffs[fix_coeffs] = True
+
+        self._guess_center = guess_center
+        self._guess_ab = guess_ab
+        self._guess_theta = guess_theta
+        self.fit_geometry = fit_geometry
+
+        self._coeffs = copy(self._guess_coeffs)
+        self._center = guess_center
+        self._ab = guess_ab
+        self._theta = guess_theta
+
+    @classmethod
+    def elliptical_radius(cls, x, y, xc, yc, a, b, theta):
+        dx = x - xc
+        dy = y - yc
+
+        cos_t = numpy.cos(theta)
+        sin_t = numpy.sin(theta)
+
+        x_prime = dx * cos_t + dy * sin_t
+        y_prime = -dx * sin_t + dy * cos_t
+
+        return numpy.sqrt((x_prime / a)**2 + (y_prime / b)**2)
+
+    @classmethod
+    def radial_gradient(cls, coeffs, x, y, center, ab, theta, profile="poly", normalize=True):
+        r = cls.elliptical_radius(x, y, *center, *ab, theta)
+
+        if profile == "poly":
+            R = numpy.vstack([r**i for i in range(len(coeffs))]).T
+            model = bn.nansum(R * numpy.asarray(coeffs)[None, :], axis=1)
+
+        elif profile == "exp":
+            A, k = coeffs
+            model = A * numpy.exp(-k * r)
+
+        elif profile == "power":
+            A, alpha = coeffs
+            with numpy.errstate(divide="ignore", invalid="ignore"):
+                model = A * r**alpha
+                model[numpy.isnan(model)] = 0.0
+
+        else:
+            raise ValueError(f"Unknown profile: {profile}")
+
+        return model / bn.nanmean(model) if normalize else model
+
+    def _pack_pars(self, coeffs=None, center=None, ab=None, theta=None):
+        coeffs = numpy.where(self._fixed_coeffs, self._guess_coeffs, copy(coeffs or self._coeffs)).tolist()
+        extras = []
+        if self.fit_geometry:
+            extras = list(center or self._center) + list(ab or self._ab) + [theta if theta is not None else self._theta]
+        return coeffs + extras
+
+    def _unpack_pars(self, pars):
+        coeffs = numpy.where(self._fixed_coeffs, self._guess_coeffs, pars[:self._ncoeffs])
+        if self.fit_geometry:
+            xc, yc, a, b, theta = pars[self._ncoeffs:]
+            return coeffs, (xc, yc), (a, b), theta
+        return coeffs, self._center, self._ab, self._theta
+
+    def __call__(self, x, y, coeffs=None, center=None, ab=None, theta=None):
+        _coeffs, _center, _ab, _theta = self._unpack_pars(self._pack_pars(coeffs, center, ab, theta))
+        return self.radial_gradient(_coeffs, x, y, _center, _ab, _theta, profile=self.profile)
+
+    def residuals(self, pars, x, y, z, sigma=None):
+        self._coeffs, self._center, self._ab, self._theta = self._unpack_pars(pars)
+        model = self(x, y)
+        res = (model - z)
+        return res
+
+    def fit(self, x, y, z, sigma=None):
+        guess = self._pack_pars()
+        lower = [-numpy.inf] * self._ncoeffs
+        upper = [+numpy.inf] * self._ncoeffs
+
+        if self.fit_geometry:
+            xc, yc = self._guess_center
+            a, b = self._guess_ab
+
+            lower += [xc - 10, yc - 10, 0.1, 0.1, -numpy.pi]
+            upper += [xc + 10, yc + 10, 10.0, 10.0, numpy.pi]
+
+        results = optimize.least_squares(
+            self.residuals,
+            x0=guess,
+            args=(x, y, z, sigma),
+            bounds=(lower, upper),
+            loss="cauchy"
+        )
+        self._coeffs, self._center, self._ab, self._theta = self._unpack_pars(results.x)
+        return results
+
+    def plot(self, x, y, z, slitmap, axs=None):
+        if axs is None:
+            _, axs = plt.subplots(1, 3, figsize=(14,3), sharex=True, sharey=True, layout="constrained")
+        gradient_model = self(x, y)
+        plot_radial_gradient_fit(slitmap, z, gradient_model=gradient_model, telescope="Sci", axs=axs)
+
 
 class SpectralResolution(object):
     def __init__(self, res=None):

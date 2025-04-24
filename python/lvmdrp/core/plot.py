@@ -703,11 +703,12 @@ def plot_fiber_thermal_shift(columns, column_shifts, median_shift, std_shift, ax
 
 def plot_gradient_fit(slitmap, z, gradient_model, factors_model, telescope=None, marker_size=15, labels=True, axs=None):
 
-    model = gradient_model * factors_model
     gradient_model_ = gradient_model.copy()
     gradient_model_ /= gradient_model_.mean()
     factors_model_ = factors_model.copy()
     factors_model_ /= factors_model_.mean()
+    model = gradient_model_ * factors_model_
+    model /= model.mean()
 
     if axs is None:
         _, axs = plt.subplots(1, 5, figsize=(15, 4), sharex=True, sharey=True, layout="constrained")
@@ -715,6 +716,23 @@ def plot_gradient_fit(slitmap, z, gradient_model, factors_model, telescope=None,
         titles = ["Factors", "Gradient model", "Original image", "Factor-corrected image", "Fully corrected image"]
         [axs[i].set_title(titles[i], loc="left", fontsize="large") for i, ax in enumerate(axs)]
     ifus = [factors_model_, gradient_model_, z, z/factors_model_, z/model]
+    for i in range(len(ifus)):
+        ifu_view(slitmap, z=ifus[i], telescope=telescope, ax=axs[i], marker_size=marker_size)
+
+    return axs
+
+
+def plot_radial_gradient_fit(slitmap, z, gradient_model, telescope=None, marker_size=15, labels=True, axs=None):
+
+    gradient_model_ = gradient_model.copy()
+    gradient_model_ /= gradient_model_.mean()
+
+    if axs is None:
+        _, axs = plt.subplots(1, 3, figsize=(15, 4), sharex=True, sharey=True, layout="constrained")
+    if labels:
+        titles = ["Gradient model", "Original image", "Corrected image"]
+        [axs[i].set_title(titles[i], loc="left", fontsize="large") for i, ax in enumerate(axs)]
+    ifus = [gradient_model_, z, z/gradient_model_]
     for i in range(len(ifus)):
         ifu_view(slitmap, z=ifus[i], telescope=telescope, ax=axs[i], marker_size=marker_size)
 
@@ -802,6 +820,7 @@ def ifu_view(slitmap=None, z=None, rss=None, cwave=None, dwave=None, comb_stat=N
     norm = simple_norm(z_[~np.isnan(z_)], **nminmax)
     sc = ax.scatter(x_, y_, c=z_, s=marker_size, marker=(6, 0, 90-pa), norm=norm, cmap=cmap)
     set_colorbar(ax, sc)
+    ax.set_aspect("equal")
 
     if hide_axis:
         ax.set_frame_on(False)
