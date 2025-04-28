@@ -142,7 +142,7 @@ REF_SKYLINES = {
 # sky lines to fit spec-to-spec flat field factors
 SKYLINES_FIBERFLAT = {
     "b": 5577.346680,
-    "r": 6363.782715,
+    "r": 7392.209961,
     "z": 9552.546875
 }
 

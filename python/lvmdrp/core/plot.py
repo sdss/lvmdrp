@@ -739,6 +739,23 @@ def plot_radial_gradient_fit(slitmap, z, gradient_model, telescope=None, marker_
     return axs
 
 
+def plot_flatfield_validation(fframe, cwaves, dwave=8, coadd_method="integrate", labels=True, axs=None):
+
+    if axs is None:
+        _, axs = plt.subplots(1, len(cwaves), figsize=(4*len(cwaves),4), sharex=True, sharey=True, layout="constrained")
+    axs = np.atleast_1d(axs)
+    cwaves = np.atleast_1d(cwaves)
+    for i, ax in enumerate(axs):
+        if coadd_method == "fit":
+            z, x, y = fframe.fit_lines_slit(cwaves=cwaves[i], dwave=dwave, return_xy=True)
+        else:
+            z, y, y = fframe.coadd_flux(cwave=cwaves[i], dwave=dwave, comb_stat=lambda a, axis: np.trapz(np.nan_to_num(a, nan=0), fframe._wave, axis=axis), return_xy=True)
+
+        ifu_view(slitmap=fframe._slitmap, z=z, marker_size=20, ax=ax)
+        if labels:
+            ax.set_title(f"{cwaves[i]:.2f} Angstroms", loc="left", fontsize="large")
+
+
 def plot_flat_consistency(fflats, mflat, spec_wise=False, log_scale=False, labels=False, axs=None):
 
     if axs is None:
@@ -779,12 +796,12 @@ def ifu_view(slitmap=None, z=None, rss=None, cwave=None, dwave=None, comb_stat=N
              marker_size=50, norm_z=True, norm_cuts=None, norm_percents=None, cmap="coolwarm",
              hide_axis=True, ax=None, return_xyz=False):
 
-    if telescope is not None and telescope not in slitmap["telescope"]:
-        raise ValueError(f"Invalid value for `telescope`: {telescope}. Expected either 'Sci', 'SkyE', 'SkyW' or 'Spec'")
-
     slitmap = getattr(rss, "_slitmap", slitmap)
     if slitmap is None:
         raise ValueError("Either `slitmap` or `rss._slitmap` have to be given")
+
+    if telescope is not None and telescope not in slitmap["telescope"]:
+        raise ValueError(f"Invalid value for `telescope`: {telescope}. Expected either 'Sci', 'SkyE', 'SkyW' or 'Spec'")
 
     if use_world_coords and ("ra" in slitmap.colnames and "dec" in slitmap.colnames):
         xcol, ycol = "ra", "dec"
@@ -831,7 +848,7 @@ def ifu_view(slitmap=None, z=None, rss=None, cwave=None, dwave=None, comb_stat=N
     return ax
 
 
-def slit(x=None, y=None, rss=None, cwave=None, dwave=None, comb_stat=None, telescope=None,
+def slit(x=None, y=None, rss=None, data=None, cwave=None, dwave=None, comb_stat=None, telescope=None,
          norm_stat=np.nanmean, margins_percent=[1,2,5], style="-", color="tab:blue", label=None, ax=None, return_xy=True):
 
     if rss is None and y is not None:
@@ -850,16 +867,19 @@ def slit(x=None, y=None, rss=None, cwave=None, dwave=None, comb_stat=None, teles
     if ax is None:
         _, ax = plt.subplots(figsize=(14,5), layout="constrained")
 
+    if data is not None:
+        ax.plot(x, data / bn.nanmean(data, axis=0)[None, :], ",", color="0.2", alpha=0.02)
     ax.plot(x, y, style, lw=1, color=color, label=label)
 
     mu = np.nanmean(y)
     ax.axhline(mu, ls="--", color="0.2", lw=1)
+    ax.vlines([648, 2*648], *ax.get_ylim(), ls="--", color="0.2", lw=1)
     if margins_percent:
         xmin = ax.get_xlim()[0]
         for margin in margins_percent:
             m = margin / 100
             ax.text(xmin+5, (1+m)*mu, f"{margin:.2f}%", ha="left", va="bottom", color="0.2", fontsize="x-small")
-            ax.axhspan((1-m)*mu, (1+m)*mu, lw=0, fc="0.7", alpha=0.5)
+            ax.axhspan((1-m)*mu, (1+m)*mu, lw=0, fc="0.5", alpha=0.5)
 
     if return_xy:
         return ax, x, y

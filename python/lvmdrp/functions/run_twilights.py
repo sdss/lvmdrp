@@ -24,7 +24,7 @@ from lvmdrp.core.rss import RSS, lvmFrame
 from lvmdrp.core.fluxcal import butter_lowpass_filter
 from lvmdrp.core.fit_profile import IFUGradient
 from lvmdrp.core import dataproducts as dp
-from lvmdrp.core.plot import plt, slit, plot_gradient_fit, plot_flat_consistency, create_subplots, save_fig
+from lvmdrp.core.plot import plt, slit, plot_gradient_fit, plot_flatfield_validation, plot_flat_consistency, create_subplots, save_fig
 from lvmdrp import main as drp
 from astropy import wcs
 from astropy.io import fits
@@ -309,6 +309,7 @@ def combine_twilight_sequence(in_twilights: list[str], in_fflats: List[str], out
     log.info(f"combining {len(fflats)} individual flat fields using {comb_method = }")
     mflat = RSS()
     mflat.combineRSS(fflats, method=comb_method)
+    channel = mflat._header["CCD"]
 
     # mask invalid pixels
     mflat._mask |= np.isnan(mflat._data) | (mflat._data <= 0) | np.isinf(mflat._data)
@@ -319,8 +320,9 @@ def combine_twilight_sequence(in_twilights: list[str], in_fflats: List[str], out
     mflat = mflat.interpolate_data(axis="Y")
 
     fig, axs = create_subplots(to_display=display_plots, nrows=2, ncols=int(np.ceil(len(fflats)/2)), figsize=(14,5), sharex=True, sharey=True, layout="constrained")
+    fig.suptitle(f"Combined flat field consistency for {channel = }", fontsize="xx-large")
     plot_flat_consistency(fflats=fflats, mflat=mflat, log_scale=False, spec_wise=True, labels=True, axs=axs)
-    save_fig(fig, out_mflat, to_display=display_plots, figure_path="qa", label="flat_consistency")
+    save_fig(fig, out_mflat, to_display=display_plots, figure_path="qa", label="fiberflat_consistency")
 
     mflat.set_wave_trace(mwave)
     mflat.set_lsf_trace(mlsf)
@@ -480,7 +482,7 @@ def normalize_spec(rss, cwave, dwave=8, norm_stat=np.nanmean):
     rss_n._data[sp3_sel] /= sp3_norm
     return rss_n
 
-def iterate_gradient_fit(rss, cwave, dwave=8, guess_coeffs=[1,2,3,0], fixed_coeffs=[3], groupby="spec", coadd_method="average", niter=10, thresholds=(0.005, 0.005), axs=None):
+def iterate_gradient_fit(rss, cwave, dwave=8, guess_coeffs=[1,2,3,0], fixed_coeffs=[3], groupby="spec", coadd_method="integrate", niter=10, thresholds=(0.005, 0.005), axs=None):
 
     rss_g = copy(rss)
 
@@ -504,9 +506,9 @@ def iterate_gradient_fit(rss, cwave, dwave=8, guess_coeffs=[1,2,3,0], fixed_coef
         fres, gres = np.abs(factors_residual.max() - 1), np.abs(gradient_residual.max() / gradient_residual.min() - 1)
 
         log.info(f" iteration {i+1}/{niter}")
-        log.info(f"                factors = {np.round(factors_residual[::rss._fibers//factors.size], 4)}")
-        log.info(f"        gradient across = {gradient_residual.max()/gradient_residual.min():.4f}")
-        log.info(f"      factors residuals = {fres:.4f}")
+        log.info(f"     factors            = {np.round(factors_residual[::rss._fibers//factors.size], 4)}")
+        log.info(f"     gradient across    = {gradient_residual.max()/gradient_residual.min():.4f}")
+        log.info(f"     factors residuals  = {fres:.4f}")
         log.info(f"     gradient residuals = {gres:.4f}")
         if (fthr > fres and gthr > gres) or i+1 == niter:
             break
@@ -627,6 +629,7 @@ def fit_fiberflat(in_rss, out_flat, out_rss, ref_kind=600, guess_coeffs=[1,2,3,0
     ax_ref.set_title(f"Reference fiber using {ref_kind.__name__ if callable(ref_kind) else ref_kind}", loc="left", fontsize="large")
     ax_ref.set_ylabel(f"Counts ({unit})", fontsize="large")
     ax_ref.ticklabel_format(axis="y", style="sci", scilimits=(-4, 4))
+    ax_ref.axvspan(norm_cwave-norm_dwave//2, norm_cwave+norm_dwave//2, color="tab:blue", alpha=0.5, lw=0)
     ax_smo = fig.add_subplot(gs_sed[-3, :], sharex=ax_ref)
     ax_smo.set_title(f"Smoothing quality with {smoothing = }", loc="left", fontsize="large")
     ax_smo.set_ylabel("Z-scores", fontsize="large")
@@ -663,15 +666,34 @@ def fit_fiberflat(in_rss, out_flat, out_rss, ref_kind=600, guess_coeffs=[1,2,3,0
 def fit_skyline_flatfield(in_sciences, in_mflat, out_mflat, sky_cwave, cont_cwave, dwave=8, guess_coeffs=[1,2,3,0], fixed_coeffs=[3], groupby="spec",
                           quantiles=(5,97), nsigma=1, comb_method="median", sky_fibers_only=False, force_correction=False, display_plots=False):
 
-    log.info(f"loading {len(in_sciences)} science exposures")
-    sciences = [RSS.from_file(in_science) for in_science in in_sciences]
-
     log.info(f"loading master fiberflat at {in_mflat}")
     mflat = RSS.from_file(in_mflat)
     channel = mflat._header["CCD"]
-    if not force_correction and mflat._header.get(f"HIERARCH {channel} FIBERFLAT SKYCORR", False):
-        log.info("fiber flat already corrected using sky lines, skipping")
-        return mflat, np.ones(mflat._fibers, dtype="float")
+
+    # verify groupy
+    groupby_hdr = mflat._header.get(f"{channel} FIBERFLAT GROUPBY")
+    if groupby != groupby_hdr:
+        log.warning(f"requested {groupby = } but header says {groupby_hdr}, assuming header value")
+        groupby = groupby_hdr
+
+    # define fiber groups
+    fiber_groups = mflat._get_fiber_groups(by="spec")
+
+    # skip correction if already done and no force is required
+    # undo correction if done and force is required
+    if mflat._header.get(f"{channel} FIBERFLAT SKYCORR"):
+        if not force_correction:
+            log.info("fiber flat already corrected using sky lines, skipping")
+            return mflat, np.ones(mflat._fibers, dtype="float")
+        else:
+            factors = list(mflat._header[f"{channel} FIBERFLAT FACTOR?"].values())
+            log.info(f"requested {force_correction = }; undoing '{groupby}' correction with: {factors}")
+            flatfield_corr = IFUGradient.ifu_factors(factors, fiber_groups)
+            mflat /= flatfield_corr[:, None]
+            mflat.setHdrValue("HIERARCH {channel} FIBERFLAT SKYCORR", False)
+
+    log.info(f"loading {len(in_sciences)} science exposures")
+    sciences = [RSS.from_file(in_science) for in_science in in_sciences]
 
     if isinstance(sciences, list):
         log.info(f"fitting sky line correction using {len(sciences)} science frames")
@@ -681,12 +703,11 @@ def fit_skyline_flatfield(in_sciences, in_mflat, out_mflat, sky_cwave, cont_cwav
     else:
         raise TypeError(f"Invalid type for `sciences`: {type(sciences)}. Valid types are lvmdrp.core.rss.RSS and list[lvmdrp.core.rss.RSS]")
 
-    fig = plt.figure(figsize=(14,3*(2+len(sciences))))
+    fig = plt.figure(figsize=(14,3*(3+len(sciences))))
     fig.suptitle(f"Fiber flatfield correction for {channel = } around sky line @ {sky_cwave:.2f} Angstroms", fontsize="xx-large")
-    gs_gra = GridSpec(3+len(sciences), 5, hspace=0.01, wspace=0.01, left=0.07, right=0.99, bottom=0.03, top=0.97, figure=fig)
-    gs_cor = GridSpec(3+len(sciences), 5, hspace=0.7, wspace=0.01, left=0.07, right=0.99, bottom=0.03, top=0.97, figure=fig)
+    gs_gra = GridSpec(3+len(sciences), 5, hspace=0.01, wspace=0.01, left=0.07, right=0.99, figure=fig)
+    gs_cor = GridSpec(3+len(sciences), 5, hspace=0.5, wspace=0.01, left=0.07, right=0.99, figure=fig)
 
-    fiber_groups = mflat._get_fiber_groups(by="spec")
     sciences_g, factors = [], []
     log.info(f"going to process {len(sciences)} science exposures in {channel = }:")
     for i, science in enumerate(sciences):
@@ -708,8 +729,8 @@ def fit_skyline_flatfield(in_sciences, in_mflat, out_mflat, sky_cwave, cont_cwav
                                                        guess_coeffs=guess_coeffs, fixed_coeffs=fixed_coeffs, coadd_method="fit")
         gradient_model = IFUGradient.ifu_gradient(coeffs, x=x, y=y, normalize=True)
         factors.append(factor)
-        log.info(f"  factors         = {np.round(factor, 4)}")
-        log.info(f"  gradient across = {bn.nanmax(gradient_model)/bn.nanmin(gradient_model):.4f}")
+        log.info(f"  factors          = {np.round(factor, 4)}")
+        log.info(f"  gradient across  = {bn.nanmax(gradient_model)/bn.nanmin(gradient_model):.4f}")
 
         science_g = fscience.remove_ifu_gradient(coeffs=coeffs, factors=None)
         sciences_g.append(science_g)
@@ -776,7 +797,7 @@ def fit_skyline_flatfield(in_sciences, in_mflat, out_mflat, sky_cwave, cont_cwav
     ax_cor.set_xlabel("Fiber ID", fontsize="large")
     ax_cor.set_ylabel("Normalized counts", fontsize="large")
     ax_cor.set_ylim(0.92, 1.08)
-    slit(x=fiberids, y=skyline_slit, ax=ax_cor)
+    slit(x=fiberids, y=skyline_slit, data=science_corr._data, ax=ax_cor)
 
     save_fig(fig, out_mflat, to_display=display_plots, figure_path="qa", label="flat_correction")
 
@@ -787,5 +808,31 @@ def fit_skyline_flatfield(in_sciences, in_mflat, out_mflat, sky_cwave, cont_cwav
         mflat_corr.setHdrValue(f"HIERARCH {channel} FIBERFLAT FACTOR{i+1}", f, f"{groupby}{i+1} factor")
     log.info(f"writing corrected master fiberflat to {out_mflat}")
     mflat_corr.writeFitsData(out_mflat)
+
+    # plot flatfielding validation on science exposures
+    TEST_WAVES = {
+        "b": [3700, 4200, 4800, 5300],
+        "r": [5900, 6363.782715, 7200],
+        "z": [7800, 8300, 8900, 9500]
+    }
+    test_cwaves = TEST_WAVES[channel]
+    test_sciences = [science_g / flatfield_corr[:, None] for science_g in sciences_g] + [science_corr]
+
+    fig, axs = create_subplots(
+        to_display=display_plots,
+        nrows=len(test_sciences), ncols=len(test_cwaves),
+        figsize=(4*len(test_cwaves),4*len(test_sciences)),
+        sharex=True, sharey=True, layout="constrained", flatten_axes=False)
+    if axs.ndim == 1:
+        axs = np.atleast_2d(axs).T
+    fig.suptitle(f"validating flat-fielded science exposures in {channel = }", fontsize="xx-large")
+    for i in range(len(test_sciences)):
+        plot_flatfield_validation(fframe=test_sciences[i], cwaves=test_cwaves, dwave=dwave, axs=axs[i], coadd_method="integrate")
+        expnum = test_sciences[i]._header["EXPOSURE"]
+        if i == len(test_sciences) - 1:
+            axs[i,0].set_ylabel("combined exposure", fontsize="large")
+        else:
+            axs[i,0].set_ylabel(f"{expnum = }", fontsize="large")
+    save_fig(fig, out_mflat, to_display=display_plots, figure_path="qa", label="fiberflat_validation")
 
     return mflat_corr, flatfield_corr

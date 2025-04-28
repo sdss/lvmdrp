@@ -3267,16 +3267,18 @@ class RSS(FiberRows):
             return flux_slit.squeeze(), rss._slitmap["xpmm"].data, rss._slitmap["ypmm"].data
         return flux_slit.squeeze()
 
-    def fit_ifu_gradient(self, cwave, dwave=8, guess_coeffs=[1,2,3,0], fixed_coeffs=[3], groupby="spec", coadd_method="average", axs=None):
+    def fit_ifu_gradient(self, cwave, dwave=8, guess_coeffs=[1,2,3,0], fixed_coeffs=[3], groupby="spec", coadd_method="integrate", axs=None):
 
-        if coadd_method == "average":
-            z, x, y = self.coadd_flux(cwave=cwave, dwave=dwave, return_xy=True, telescope="Sci")
+        if coadd_method == "integrate":
+            z, x, y = self.coadd_flux(cwave=cwave, dwave=dwave, comb_stat=lambda a, axis: numpy.trapz(numpy.nan_to_num(a, nan=0), self._wave, axis=axis), return_xy=True, telescope="Sci")
         elif coadd_method == "fit":
             z, x, y = self.fit_lines_slit(cwaves=cwave, return_xy=True, select_fibers="Sci")
+        else:
+            raise ValueError(f"Invalid value for `coadd_method`: {coadd_method}. Expected either 'fit' or 'integrate'")
         mu = numpy.nanmean(z)
         z_ = z / mu
 
-        # # define guess and boundary values
+        # define guess and boundary values
         fiber_groups = self._get_fiber_groups(groupby)
         guess_factors = len(set(fiber_groups)) * [1]
         model = IFUGradient(guess_coeffs, guess_factors, fixed_coeffs=fixed_coeffs)
