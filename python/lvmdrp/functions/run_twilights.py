@@ -18,6 +18,7 @@ from matplotlib.gridspec import GridSpec
 
 import bottleneck as bn
 from lvmdrp import log
+from lvmdrp.core.constants import SPEC_CHANNELS
 from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.core.spectrum1d import Spectrum1D
 from lvmdrp.core.rss import RSS, lvmFrame
@@ -310,6 +311,8 @@ def combine_twilight_sequence(in_twilights: list[str], in_fflats: List[str], out
     mflat = RSS()
     mflat.combineRSS(fflats, method=comb_method)
     channel = mflat._header["CCD"]
+    cwave, dwave = mflat._header[f"{channel} FIBERFLAT CWAVE"], mflat._header[f"{channel} FIBERFLAT DWAVE"]
+    groupby = mflat._header[f"{channel} FIBERFLAT GROUPBY"]
 
     # mask invalid pixels
     mflat._mask |= np.isnan(mflat._data) | (mflat._data <= 0) | np.isinf(mflat._data)
@@ -319,10 +322,17 @@ def combine_twilight_sequence(in_twilights: list[str], in_fflats: List[str], out
     mflat = mflat.interpolate_data(axis="X")
     mflat = mflat.interpolate_data(axis="Y")
 
-    fig, axs = create_subplots(to_display=display_plots, nrows=2, ncols=int(np.ceil(len(fflats)/2)), figsize=(14,5), sharex=True, sharey=True, layout="constrained")
+    ncols = 6
+    nrows = int(np.ceil(len(fflats)/ncols))
+    fig = plt.figure(figsize=(14,3*(3+len(fflats))))
     fig.suptitle(f"Combined flat field consistency for {channel = }", fontsize="xx-large")
-    plot_flat_consistency(fflats=fflats, mflat=mflat, log_scale=False, spec_wise=True, labels=True, axs=axs)
-    save_fig(fig, out_mflat, to_display=display_plots, figure_path="qa", label="fiberflat_consistency")
+    gs = GridSpec(nrows + len(fflats), ncols, hspace=0.3, wspace=0.05, left=0.07, right=0.99, bottom=0.1, top=0.97, figure=fig)
+    axs_con = [fig.add_subplot(gs[i, j]) for i in range(nrows) for j in range(ncols)]
+    [ax.tick_params(labelbottom=ax.get_subplotspec().is_last_row(), labelleft=ax.get_subplotspec().is_first_col()) for ax in axs_con]
+    [(ax.sharex(axs_con[0]), ax.sharey(axs_con[0])) for ax in axs_con[1:]]
+    [ax.set_ylabel("Frequency", fontsize="large") for ax in axs_con[::ncols]]
+    [ax.set_xlabel("mflat / flat", fontsize="large") for i, ax in enumerate(axs_con[-ncols:])]
+    plot_flat_consistency(fflats=fflats, mflat=mflat, log_scale=False, spec_wise=True, labels=True, axs=axs_con)
 
     mflat.set_wave_trace(mwave)
     mflat.set_lsf_trace(mlsf)
@@ -335,11 +345,10 @@ def combine_twilight_sequence(in_twilights: list[str], in_fflats: List[str], out
     lvmflats = []
     for i, twilight in enumerate(twilights):
         expnum = twilight._header["EXPOSURE"]
-        log.info(f"  resampling exposure {expnum = } to native wavelength grid")
-        # resample twilight to native grid
         twilight.set_wave_trace(mwave)
         twilight.set_lsf_trace(mlsf)
-        twilight = to_native_wave(twilight)
+        if twilight._header.get("WAVEREC", False):
+            raise ValueError(f"twilight of {expnum = } is wavelength-rectified")
 
         twilight /= mflat
         lvmflat = lvmFlat(data=twilight._data, error=twilight._error, mask=twilight._mask, header=twilight._header,
@@ -349,6 +358,23 @@ def combine_twilight_sequence(in_twilights: list[str], in_fflats: List[str], out
         log.info(f"  writing lvmTFlat to {out_lvmflats[i]}")
         lvmflat.writeFitsData(out_lvmflats[i])
         lvmflats.append(lvmflat)
+
+        log.info(f"  resampling exposure {expnum = } to rectified wavelength grid")
+        lvmflat_r = lvmflat.rectify_wave(wave_range=SPEC_CHANNELS[channel], wave_disp=0.5)
+
+        log.info(f"  removing factors with fibers {groupby = }")
+        x, y, z, coeffs, factors = lvmflat_r.fit_ifu_gradient(guess_coeffs=[1,0,0,0], fixed_coeffs=[0,1,2,3], cwave=cwave, dwave=dwave, groupby=groupby)
+        lvmflat_r = lvmflat_r.remove_ifu_gradient(coeffs=coeffs, factors=factors, groupby=groupby)
+
+        ax_twi = fig.add_subplot(gs[nrows+i, :], sharex=locals().get("ax_twi"))
+        ax_twi.tick_params(labelbottom=ax_twi.get_subplotspec().is_last_row())
+        ax_twi.set_ylim(0.98, 1.02)
+        if ax_twi.get_subplotspec().is_last_row():
+            ax_twi.set_xlabel("Fiber ID", fontsize="large")
+        ax_twi.set_ylabel("Normalized counts")
+        ax_twi.set_title(f"{expnum = }", fontsize="large", loc="left")
+        slit(rss=lvmflat_r, cwave=cwave, dwave=dwave, comb_stat=np.nanmean, data=lvmflat_r._data, ax=ax_twi, margins_percent=[0.2,0.5,1.0])
+    save_fig(fig, out_mflat, to_display=display_plots, figure_path="qa", label="fiberflat_consistency")
 
     return mflat, fflats, twilights, lvmflats
 
@@ -482,7 +508,7 @@ def normalize_spec(rss, cwave, dwave=8, norm_stat=np.nanmean):
     rss_n._data[sp3_sel] /= sp3_norm
     return rss_n
 
-def iterate_gradient_fit(rss, cwave, dwave=8, guess_coeffs=[1,2,3,0], fixed_coeffs=[3], groupby="spec", coadd_method="integrate", niter=10, thresholds=(0.005, 0.005), axs=None):
+def iterate_gradient_fit(rss, cwave, dwave=8, guess_coeffs=[1,2,3,0], fixed_coeffs=[3], groupby="spec", coadd_method="average", niter=10, thresholds=(0.005, 0.005), axs=None):
 
     rss_g = copy(rss)
 
@@ -655,6 +681,8 @@ def fit_fiberflat(in_rss, out_flat, out_rss, ref_kind=600, guess_coeffs=[1,2,3,0
     save_fig(fig, out_flat, to_display=display_plots, figure_path="qa", label="twilight_fiberflat")
 
     log.info(f"writing fiber flatfield to {out_flat}")
+    flat_g.setHdrValue(f"HIERARCH {channel} FIBERFLAT CWAVE", norm_cwave, "norm. wavelength [Angstrom]")
+    flat_g.setHdrValue(f"HIERARCH {channel} FIBERFLAT DWAVE", norm_dwave, "norm. window width [Angstrom]")
     flat_g.setHdrValue(f"HIERARCH {channel} FIBERFLAT SKYCORR", False, "fiberflat skyline-corrected?")
     flat_g.setHdrValue(f"HIERARCH {channel} FIBERFLAT GROUPBY", groupby, "fiber grouping")
     flat_g.writeFitsData(out_flat)
@@ -827,7 +855,7 @@ def fit_skyline_flatfield(in_sciences, in_mflat, out_mflat, sky_cwave, cont_cwav
         axs = np.atleast_2d(axs).T
     fig.suptitle(f"validating flat-fielded science exposures in {channel = }", fontsize="xx-large")
     for i in range(len(test_sciences)):
-        plot_flatfield_validation(fframe=test_sciences[i], cwaves=test_cwaves, dwave=dwave, axs=axs[i], coadd_method="integrate")
+        plot_flatfield_validation(fframe=test_sciences[i], cwaves=test_cwaves, dwave=dwave, axs=axs[i], coadd_method="average")
         expnum = test_sciences[i]._header["EXPOSURE"]
         if i == len(test_sciences) - 1:
             axs[i,0].set_ylabel("combined exposure", fontsize="large")

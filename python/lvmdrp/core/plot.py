@@ -746,10 +746,14 @@ def plot_flatfield_validation(fframe, cwaves, dwave=8, coadd_method="integrate",
     axs = np.atleast_1d(axs)
     cwaves = np.atleast_1d(cwaves)
     for i, ax in enumerate(axs):
-        if coadd_method == "fit":
+        if coadd_method == "average":
+            z, y, y = fframe.coadd_flux(cwave=cwaves[i], dwave=dwave, comb_stat=bn.nanmedian, return_xy=True)
+        elif coadd_method == "integrate":
+            z, y, y = fframe.coadd_flux(cwave=cwaves[i], dwave=dwave, comb_stat=lambda a, axis: np.trapz(np.nan_to_num(a, nan=0), fframe._wave, axis=axis), return_xy=True)
+        elif coadd_method == "fit":
             z, x, y = fframe.fit_lines_slit(cwaves=cwaves[i], dwave=dwave, return_xy=True)
         else:
-            z, y, y = fframe.coadd_flux(cwave=cwaves[i], dwave=dwave, comb_stat=lambda a, axis: np.trapz(np.nan_to_num(a, nan=0), fframe._wave, axis=axis), return_xy=True)
+            raise ValueError(f"Invalid value for `coadd_method`: {coadd_method}. Expected either 'fit' or 'integrate'")
 
         ifu_view(slitmap=fframe._slitmap, z=z, marker_size=20, ax=ax)
         if labels:
@@ -759,21 +763,14 @@ def plot_flatfield_validation(fframe, cwaves, dwave=8, coadd_method="integrate",
 def plot_flat_consistency(fflats, mflat, spec_wise=False, log_scale=False, labels=False, axs=None):
 
     if axs is None:
-        fig, axs = plt.subplots(2, int(np.ceil(len(fflats)/2)), figsize=(14,5), sharex=True, sharey=True, layout="constrained")
+        _, axs = plt.subplots(2, int(np.ceil(len(fflats)/2)), figsize=(14,5), sharex=True, sharey=True, layout="constrained")
         axs = axs.ravel()
-    else:
-        fig = plt.gcf()
 
     if labels:
-        fig.supxlabel("master / individual flat field", fontsize="large")
-        fig.supylabel("Frequency", fontsize="large")
-        [axs[i].set_title(f"{fflat._header['EXPOSURE']}", loc="left", fontsize="small") for i, fflat in enumerate(fflats)]
+        [axs[i].set_title(f"expnum = {fflat._header['EXPOSURE']}", loc="left", fontsize="large") for i, fflat in enumerate(fflats)]
 
     if log_scale:
         plt.yscale("log")
-
-    for ax in axs:
-        ax.tick_params(labelsize="x-small")
 
     for i, flat in enumerate(fflats):
         if spec_wise:
