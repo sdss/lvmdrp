@@ -194,9 +194,12 @@ def derive_vecshift(vec, vec_ref, max_ampl=None, oversample_bin=20):
     """
     Derive shift of 1D-array vec from vec_ref using cross-correlation;
     both arrays assumed to be normalized
-    if max_ampl is set than maximum shift is max_ampl
+    if max_ampl is set then maximum shift is max_ampl
     """
+    print('Im here!')
+    print('!!!',len(vec), len(vec_ref))
     nsamples = min([len(vec), len(vec_ref)])
+    print(len(vec), len(vec_ref))
     vec[~np.isfinite(vec)] = np.nanmedian(vec)
     vec_ref[~np.isfinite(vec_ref)] = np.nanmedian(vec_ref)
     vec = signal.resample_poly(cos_apod(nsamples) * (vec[:nsamples]), oversample_bin, 1)

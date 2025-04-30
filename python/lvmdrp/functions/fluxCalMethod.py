@@ -261,6 +261,7 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'STD', display_plo
 
 
 def linear_to_logscale(wl, flux):
+    wl = np.float64(wl)
     wl_log = np.log(wl)
     wl_log_step = np.min((wl_log-np.roll(wl_log,1))[1:])
     n_elements = np.ceil((np.max(wl_log) - np.min(wl_log))/wl_log_step).astype(int)
@@ -573,10 +574,9 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         template_index =  model_info.index[(model_info['Teff'] == 6250) & (model_info['logg']==3.5) & (model_info['Z']==0.5)][0]
         template = model_norm[template_index]
         log_model_wave_all = log_std_wave_all
-        flux_model_logscale =template
+        flux_model_logscale = template
 
-        log_shift_full = fluxcal.derive_vecshift(flux_std_logscale[mask_good],
-                                        flux_model_logscale[mask_good], max_ampl=50)*np.median(log_std_wave_all - np.roll(log_std_wave_all, 1))
+        log_shift_full = fluxcal.derive_vecshift(flux_std_logscale[mask_good], flux_model_logscale[mask_good], max_ampl=50)*np.median(log_std_wave_all - np.roll(log_std_wave_all, 1))
         vel_shift_full = log_shift_full * 3e5
 
         flux_std_logscale_shifted = np.interp((log_std_wave_all - log_shift_full), log_std_wave_all, flux_std_logscale)
@@ -584,7 +584,6 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         chi2 = [np.nansum((flux_std_logscale_shifted[mask_good] -
                             model_norm[model_ind][mask_good]) ** 2 /(log_std_errors_normalized_all[mask_good] ** 2
                             + (0.05*model_norm[model_ind][mask_good]) ** 2))/len(flux_std_logscale_shifted[mask_good]) for model_ind in range(len(model_norm))]
-        # print(len(flux_std_logscale_shifted[mask_good]))
         best_id = np.argmin(chi2)
         chi2_bestfit = np.nansum((flux_std_logscale_shifted[mask_good] -
                             model_norm[best_id][mask_good]) ** 2 / (log_std_errors_normalized_all[mask_good] ** 2
