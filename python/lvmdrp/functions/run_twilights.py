@@ -313,6 +313,7 @@ def combine_twilight_sequence(in_twilights: list[str], in_fflats: List[str], out
     channel = mflat._header["CCD"]
     cwave, dwave = mflat._header[f"{channel} FIBERFLAT CWAVE"], mflat._header[f"{channel} FIBERFLAT DWAVE"]
     groupby = mflat._header[f"{channel} FIBERFLAT GROUPBY"]
+    coadd_method = mflat._header[f"{channel} FIBERFLAT COADD"]
 
     # mask invalid pixels
     mflat._mask |= np.isnan(mflat._data) | (mflat._data <= 0) | np.isinf(mflat._data)
@@ -362,8 +363,10 @@ def combine_twilight_sequence(in_twilights: list[str], in_fflats: List[str], out
         log.info(f"  resampling exposure {expnum = } to rectified wavelength grid")
         lvmflat_r = lvmflat.rectify_wave(wave_range=SPEC_CHANNELS[channel], wave_disp=0.5)
 
-        log.info(f"  removing factors with fibers {groupby = }")
-        x, y, z, coeffs, factors = lvmflat_r.fit_ifu_gradient(guess_coeffs=[1,0,0,0], fixed_coeffs=[0,1,2,3], cwave=cwave, dwave=dwave, groupby=groupby)
+        log.info(f"  removing factors with parameters: {cwave = :.2f}, {dwave = :.2f} Angstrom, {coadd_method = } and fibers {groupby = }")
+        x, y, z, coeffs, factors = lvmflat_r.fit_ifu_gradient(
+            guess_coeffs=[1,0,0,0], fixed_coeffs=[0,1,2,3],
+            cwave=cwave, dwave=dwave, coadd_method=coadd_method, groupby=groupby)
         lvmflat_r = lvmflat_r.remove_ifu_gradient(coeffs=coeffs, factors=factors, groupby=groupby)
 
         ax_twi = fig.add_subplot(gs[nrows+i, :], sharex=locals().get("ax_twi"))
@@ -579,7 +582,7 @@ def reject_fibers(rss, cwave, dwave=20, coadd_stat=np.nanmedian, quantiles=(5,97
     return rejects
 
 def fit_fiberflat(in_rss, out_flat, out_rss, ref_kind=600, guess_coeffs=[1,2,3,0], fixed_coeffs=[3], groupby="spec",
-                  norm_cwave=None, norm_dwave=8, smoothing=0.1, interpolate_invalid=True, display_plots=False):
+                  norm_cwave=None, norm_dwave=8, coadd_method="average", smoothing=0.1, interpolate_invalid=True, display_plots=False):
     """Creates a flatfield given a flat (twilight, dome) exposure
 
     The input RSS needs to be wavelength calibrated, rectified and LSF matched
@@ -622,6 +625,8 @@ def fit_fiberflat(in_rss, out_flat, out_rss, ref_kind=600, guess_coeffs=[1,2,3,0
         Normalization wavelength, by default None
     norm_dwave : int, optional
         Normalization wavelength window around `norm_cwave`, by default 8 Angstroms
+    coadd_method : str, optional
+        Coadding method used during IFU gradient fitting, by default 'average'
     interpolate_invalid : bool, optional
         Interpolate invalid pixels (NaN, infinity), by default True
     smoothing : float, optional
@@ -670,7 +675,7 @@ def fit_fiberflat(in_rss, out_flat, out_rss, ref_kind=600, guess_coeffs=[1,2,3,0
 
     log.info(f"fitting and correcting IFU gradient and '{groupby}' factors @ {norm_cwave:.2f} Angstroms")
     # fit gradient with spectrograph normalizations (make n-iterations of this or stop when gradient is <1% across)
-    x, y, z_ori, coeffs, factors = iterate_gradient_fit(rss, cwave=norm_cwave, dwave=norm_dwave, groupby=groupby,
+    x, y, z_ori, coeffs, factors = iterate_gradient_fit(rss, cwave=norm_cwave, dwave=norm_dwave, coadd_method=coadd_method, groupby=groupby,
                                                         guess_coeffs=guess_coeffs, fixed_coeffs=fixed_coeffs, axs=(axs_fin,axs_res))
 
     # apply gradient correction
@@ -683,6 +688,7 @@ def fit_fiberflat(in_rss, out_flat, out_rss, ref_kind=600, guess_coeffs=[1,2,3,0
     log.info(f"writing fiber flatfield to {out_flat}")
     flat_g.setHdrValue(f"HIERARCH {channel} FIBERFLAT CWAVE", norm_cwave, "norm. wavelength [Angstrom]")
     flat_g.setHdrValue(f"HIERARCH {channel} FIBERFLAT DWAVE", norm_dwave, "norm. window width [Angstrom]")
+    flat_g.setHdrValue(f"HIERARCH {channel} FIBERFLAT COADD", coadd_method, "coadding method")
     flat_g.setHdrValue(f"HIERARCH {channel} FIBERFLAT SKYCORR", False, "fiberflat skyline-corrected?")
     flat_g.setHdrValue(f"HIERARCH {channel} FIBERFLAT GROUPBY", groupby, "fiber grouping")
     flat_g.writeFitsData(out_flat)
@@ -697,6 +703,7 @@ def fit_skyline_flatfield(in_sciences, in_mflat, out_mflat, sky_cwave, cont_cwav
     log.info(f"loading master fiberflat at {in_mflat}")
     mflat = RSS.from_file(in_mflat)
     channel = mflat._header["CCD"]
+    coadd_method = mflat._header[f"{channel} FIBERFLAT COADD"]
 
     # verify groupy
     groupby_hdr = mflat._header.get(f"{channel} FIBERFLAT GROUPBY")
@@ -840,7 +847,7 @@ def fit_skyline_flatfield(in_sciences, in_mflat, out_mflat, sky_cwave, cont_cwav
     # plot flatfielding validation on science exposures
     TEST_WAVES = {
         "b": [3700, 4200, 4800, 5300],
-        "r": [5900, 6363.782715, 7200],
+        "r": [5900, 6300, 6800, 7200],
         "z": [7800, 8300, 8900, 9500]
     }
     test_cwaves = TEST_WAVES[channel]
@@ -855,7 +862,7 @@ def fit_skyline_flatfield(in_sciences, in_mflat, out_mflat, sky_cwave, cont_cwav
         axs = np.atleast_2d(axs).T
     fig.suptitle(f"validating flat-fielded science exposures in {channel = }", fontsize="xx-large")
     for i in range(len(test_sciences)):
-        plot_flatfield_validation(fframe=test_sciences[i], cwaves=test_cwaves, dwave=dwave, axs=axs[i], coadd_method="average")
+        plot_flatfield_validation(fframe=test_sciences[i], cwaves=test_cwaves, dwave=dwave, axs=axs[i], coadd_method=coadd_method)
         expnum = test_sciences[i]._header["EXPOSURE"]
         if i == len(test_sciences) - 1:
             axs[i,0].set_ylabel("combined exposure", fontsize="large")

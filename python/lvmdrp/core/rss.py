@@ -3267,16 +3267,16 @@ class RSS(FiberRows):
             return flux_slit.squeeze(), rss._slitmap["xpmm"].data, rss._slitmap["ypmm"].data
         return flux_slit.squeeze()
 
-    def fit_ifu_gradient(self, cwave, dwave=8, guess_coeffs=[1,2,3,0], fixed_coeffs=[3], groupby="spec", coadd_method="integrate", axs=None):
+    def fit_ifu_gradient(self, cwave, dwave=8, guess_coeffs=[1,2,3,0], fixed_coeffs=[3], groupby="spec", coadd_method="average", axs=None):
 
         if coadd_method == "average":
-            z, x, y = self.coadd_flux(cwave=cwave, dwave=dwave, comb_stat=bn.nanmedian, return_xy=True, telescope="Sci")
+            z, x, y = self.coadd_flux(cwave=cwave, dwave=dwave, comb_stat=bn.nanmean, return_xy=True, telescope="Sci")
         elif coadd_method == "integrate":
             z, x, y = self.coadd_flux(cwave=cwave, dwave=dwave, comb_stat=lambda a, axis: numpy.trapz(numpy.nan_to_num(a, nan=0), self._wave, axis=axis), return_xy=True, telescope="Sci")
         elif coadd_method == "fit":
             z, x, y = self.fit_lines_slit(cwaves=cwave, return_xy=True, select_fibers="Sci")
         else:
-            raise ValueError(f"Invalid value for `coadd_method`: {coadd_method}. Expected either 'fit' or 'integrate'")
+            raise ValueError(f"Invalid value for `coadd_method`: {coadd_method}. Expected either 'average', 'integrate' or 'fit'")
 
         mu = numpy.nanmean(z)
         z_ = z / mu

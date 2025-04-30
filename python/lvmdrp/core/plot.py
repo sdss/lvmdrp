@@ -739,7 +739,7 @@ def plot_radial_gradient_fit(slitmap, z, gradient_model, telescope=None, marker_
     return axs
 
 
-def plot_flatfield_validation(fframe, cwaves, dwave=8, coadd_method="integrate", labels=True, axs=None):
+def plot_flatfield_validation(fframe, cwaves, dwave=8, coadd_method="average", labels=True, axs=None):
 
     if axs is None:
         _, axs = plt.subplots(1, len(cwaves), figsize=(4*len(cwaves),4), sharex=True, sharey=True, layout="constrained")
@@ -747,7 +747,7 @@ def plot_flatfield_validation(fframe, cwaves, dwave=8, coadd_method="integrate",
     cwaves = np.atleast_1d(cwaves)
     for i, ax in enumerate(axs):
         if coadd_method == "average":
-            z, y, y = fframe.coadd_flux(cwave=cwaves[i], dwave=dwave, comb_stat=bn.nanmedian, return_xy=True)
+            z, y, y = fframe.coadd_flux(cwave=cwaves[i], dwave=dwave, comb_stat=bn.nanmean, return_xy=True)
         elif coadd_method == "integrate":
             z, y, y = fframe.coadd_flux(cwave=cwaves[i], dwave=dwave, comb_stat=lambda a, axis: np.trapz(np.nan_to_num(a, nan=0), fframe._wave, axis=axis), return_xy=True)
         elif coadd_method == "fit":
