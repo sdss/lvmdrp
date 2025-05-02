@@ -57,6 +57,7 @@ from lvmdrp.core.constants import (
 from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.core.image import Image, loadImage
 from lvmdrp.core.rss import RSS, lvmFrame
+from lvmdrp.core.fit_profile import gaussians
 
 from lvmdrp.functions import imageMethod as image_tasks
 from lvmdrp.functions import rssMethod as rss_tasks
@@ -513,6 +514,59 @@ def _get_ring_expnums(expnums_ldls, expnums_qrtz, ring_size=12, sort_expnums=Fal
         expnum_params[camera][0] = (expnums[0], sorted(filled_block_ids), fiber_strs[0])
 
     return expnum_params
+
+
+def _get_crosstalk(cent, fwhm, ifiber, jcolumn, ypixels=None, nfibers=1):
+    """Calculates the crosstalk between a reference fiber and its neighboring fibers
+
+    This assumes the fibers have a Gaussian profile and that they can be
+    treated as vectors, where the cross-talk is calculated as the scalar
+    projection of fibers `ifiber-1` and `ifiber+1`.
+
+    Parameters
+    ----------
+    cent : TraceMask
+        TraceMask object containing the centroid positions of the fibers.
+    fwhm : TraceMask
+        TraceMask object containing the FWHM values of the fibers.
+    ifiber : int
+        Index of the reference fiber for which to compute crosstalk.
+    jcolumn : int
+        Column index (typically along the dispersion axis) at which to evaluate the crosstalk.
+    ypixels : array-like, optional
+        Array of pixel positions along the spatial axis. If None, defaults to np.arange(0, 4080).
+    nfibers : int, optional
+        Number of neighboring fibers on each side to include in the crosstalk calculation. Default is 1.
+
+    Returns
+    -------
+    crosstalk : np.ndarray
+        Array of crosstalk values (in percent) from each neighboring fiber to the reference fiber.
+
+    Notes
+    -----
+    The crosstalk is computed as the projection of the neighboring fiber profiles onto the normalized
+    reference fiber profile at the specified column. The result is expressed as a percentage.
+    """
+    if ypixels is None:
+        ypixels = np.arange(0, 4080)
+
+    ref_cent = cent._data[[ifiber], jcolumn]
+    ref_width = fwhm._data[[ifiber], jcolumn] / 2.354
+    ref_amp = np.asarray([1.0])
+    ref_fiber = gaussians([ref_amp, ref_cent, ref_width], ypixels)
+
+    nei_ifibers = [ifiber - i for i in range(nfibers, 0, -1)] + [ifiber + i for i in range(1, nfibers + 1)]
+    nei_cents = cent._data[nei_ifibers, jcolumn]
+    nei_widths = fwhm._data[nei_ifibers, jcolumn] / 2.354
+    nei_amps = np.ones_like(nei_ifibers)
+
+    nei_fibers = gaussians([nei_amps, nei_cents, nei_widths], ypixels)
+
+    ref_unit = ref_fiber / np.sqrt(np.dot(ref_fiber, ref_fiber))
+    crosstalk = np.dot(nei_fibers, ref_unit) * 100
+
+    return crosstalk
 
 
 def _create_wavelengths_60177(use_longterm_cals=True, skip_done=True):
