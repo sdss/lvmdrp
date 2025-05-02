@@ -870,7 +870,7 @@ def slit(x=None, y=None, rss=None, data=None, cwave=None, dwave=None, comb_stat=
 
     mu = np.nanmean(y)
     ax.axhline(mu, ls="--", color="0.2", lw=1)
-    ax.vlines([648, 2*648], *ax.get_ylim(), ls="--", color="0.2", lw=1)
+    ax.vlines([648, 2*648], 0, 100, ls="--", color="0.2", lw=1)
     if margins_percent:
         xmin = ax.get_xlim()[0]
         for margin in margins_percent:

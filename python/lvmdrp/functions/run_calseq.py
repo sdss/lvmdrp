@@ -1472,8 +1472,8 @@ def create_dome_fiberflats(mjd, expnums_ldls, expnums_qrtz, use_longterm_cals=Tr
 def create_twilight_fiberflats(mjd: int, use_longterm_cals: bool = True, expnums: List[int] = None,
                       ref_kind: Union[int, Callable[[np.ndarray, int], np.ndarray]] = bn.nanmedian,
                       groupby: str = "spec", guess_coeffs: List[int] = [1,0,0,0], fixed_coeffs: List[int] = [0,1,2,3],
-                      cnorms: Dict[str, float] = SKYLINES_FIBERFLAT, dwave: float = 8.0,
-                      smoothing: float = 0.2,
+                      cnorms: Dict[str, float] = SKYLINES_FIBERFLAT, dwave: float = 20.0,
+                      smoothing: float = 0.0,
                       interpolate_invalid: bool = True,
                       kind: str = "longterm",
                       skip_done: bool = False,
@@ -1504,9 +1504,9 @@ def create_twilight_fiberflats(mjd: int, use_longterm_cals: bool = True, expnums
     cnorms : dict, optional
         Dictionary of normalization wavelengths per channel. Defaults to SKYLINES_FIBERFLAT.
     dwave : float, optional
-        Width of the wavelength window for normalization. Defaults to 8.0.
+        Width of the wavelength window for normalization. Defaults to 20.0.
     smoothing : float, optional
-        Smoothing parameter for fiberflat fitting. Defaults to 0.2.
+        Smoothing parameter for fiberflat fitting. Defaults to 0.0.
     interpolate_invalid : bool, optional
         Interpolate over invalid/masked fibers. Defaults to True.
     kind : str, optional
@@ -1586,11 +1586,14 @@ def create_twilight_fiberflats(mjd: int, use_longterm_cals: bool = True, expnums
             # fit fiber throughput
             fit_fiberflat(in_rss=hflat_path, out_flat=fflat_path, out_rss=fflat_flatfielded_path,
                           ref_kind=ref_kind, groupby=groupby, guess_coeffs=guess_coeffs, fixed_coeffs=fixed_coeffs,
-                          norm_cwave=cnorms[channel], smoothing=smoothing, interpolate_invalid=interpolate_invalid,
+                          norm_cwave=cnorms[channel], norm_dwave=dwave, smoothing=smoothing, interpolate_invalid=interpolate_invalid,
                           display_plots=display_plots)
 
         # combine individual fiberflats into master fiberflat
-        mflat_path = path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=mjd, kind="mfiberflat_twilight", camera=channel)
+        if kind == "longterm":
+            mflat_path = path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=mjd, kind="mfiberflat_twilight", camera=channel)
+        else:
+            mflat_path = path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=mjd, kind="nfiberflat_twilight", camera=channel)
         combine_twilight_sequence(
             in_twilights=xtwi_paths,
             in_fflats=fflat_paths, out_mflat=mflat_path, out_lvmflats=lvmflat_paths,
