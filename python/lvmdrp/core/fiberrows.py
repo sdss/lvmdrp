@@ -168,15 +168,7 @@ class FiberRows(Header, PositionTable):
         if isinstance(other, self.__class__):
             # define behaviour if the other is of the same instance
 
-            img = self.__class__(
-                header=self._header,
-                shape=self._shape,
-                size=self._size,
-                arc_position_x=self._arc_position_x,
-                arc_position_y=self._arc_position_y,
-                good_fibers=self._good_fibers,
-                fiber_type=self._fiber_type,
-            )
+            img = copy(self)
 
             # subtract data if contained in both
             if self._data is not None and other._data is not None:
@@ -207,17 +199,7 @@ class FiberRows(Header, PositionTable):
             return img
 
         elif isinstance(other, numpy.ndarray):
-            img = self.__class__(
-                error=self._error,
-                mask=self._mask,
-                header=self._header,
-                shape=self._shape,
-                size=self._size,
-                arc_position_x=self._arc_position_x,
-                arc_position_y=self._arc_position_y,
-                good_fibers=self._good_fibers,
-                fiber_type=self._fiber_type,
-            )
+            img = copy(self)
 
             if self._data is not None:  # check if there is data in the object
                 dim = other.shape
@@ -231,11 +213,13 @@ class FiberRows(Header, PositionTable):
                         new_data = self._data / other[numpy.newaxis, :]
                 else:
                     new_data = self._data
-                if self._error is not None:
-                    new_error = self._error / other
-                else:
-                    new_error = None
-                img.setData(data=new_data, error=new_error)
+                img.setData(data=new_data)
+
+            if self._error is not None:
+                new_error = self._error / other
+            else:
+                new_error = None
+            img.setData(error=new_error)
             return img
         else:
             # try to do addtion for other types, e.g. float, int, etc.
@@ -245,18 +229,8 @@ class FiberRows(Header, PositionTable):
                 new_error = self._error / other
             else:
                 new_error = None
-            img = self.__class__(
-                data=new_data,
-                error=new_error,
-                mask=self._mask,
-                header=self._header,
-                shape=self._shape,
-                size=self._size,
-                arc_position_x=self._arc_position_x,
-                arc_position_y=self._arc_position_y,
-                good_fibers=self._good_fibers,
-                fiber_type=self._fiber_type,
-            )
+            img = copy(self)
+            img.setData(data=new_data, error=new_error)
             return img
         # except:
         # raise exception if the type are not matching in general
@@ -383,15 +357,7 @@ class FiberRows(Header, PositionTable):
         if isinstance(other, self.__class__):
             # define behaviour if the other is of the same instance
 
-            img = self.__class__(
-                header=self._header,
-                shape=self._shape,
-                size=self._size,
-                arc_position_x=self._arc_position_x,
-                arc_position_y=self._arc_position_y,
-                good_fibers=self._good_fibers,
-                fiber_type=self._fiber_type,
-            )
+            img = copy(self)
 
             # subtract data if contained in both
             if self._data is not None and other._data is not None:
@@ -422,17 +388,7 @@ class FiberRows(Header, PositionTable):
             return img
 
         elif isinstance(other, numpy.ndarray):
-            img = self.__class__(
-                error=self._error,
-                mask=self._mask,
-                header=self._header,
-                shape=self._shape,
-                size=self._size,
-                arc_position_x=self._arc_position_x,
-                arc_position_y=self._arc_position_y,
-                good_fibers=self._good_fibers,
-                fiber_type=self._fiber_type,
-            )
+            img = copy(self)
 
             if self._data is not None:  # check if there is data in the object
                 dim = other.shape
@@ -447,6 +403,11 @@ class FiberRows(Header, PositionTable):
                 else:
                     new_data = self._data
                 img.setData(data=new_data)
+            if self._error is not None:
+                new_error = self._error * other
+            else:
+                new_error = None
+            img.setData(error=new_error)
             return img
         else:
             # try to do addtion for other types, e.g. float, int, etc.

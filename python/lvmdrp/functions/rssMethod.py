@@ -22,7 +22,7 @@ from numpy import polynomial
 from scipy import interpolate, ndimage
 
 from lvmdrp.utils.decorators import skip_on_missing_input_path, skip_if_drpqual_flags
-from lvmdrp.core.constants import CONFIG_PATH, ARC_LAMPS
+from lvmdrp.core.constants import CONFIG_PATH, ARC_LAMPS, REF_SKYLINES
 from lvmdrp.core.cube import Cube
 from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.core.image import loadImage
@@ -56,10 +56,6 @@ __all__ = [
 DONE_PASS = "gi"
 DONE_MAGS = numpy.asarray([22, 21])
 DONE_LIMS = numpy.asarray([1.7, 5.0])
-
-# GB hand picked isolated bright lines across each channel which are not doublest in UVES atlas
-# true wavelengths taken from UVES sky line atlas
-REF_SKYLINES = {'b':[5577.346680], 'r':[6363.782715, 7358.680176, 7392.209961], 'z':[8399.175781, 8988.383789, 9552.546875, 9719.838867]}
 
 
 def _linear_model(pars, xdata):

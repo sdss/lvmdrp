@@ -28,6 +28,7 @@
 import os
 import numpy as np
 import bottleneck as bn
+import pandas as pd
 from glob import glob
 from copy import deepcopy as copy
 from datetime import datetime
@@ -36,13 +37,14 @@ from astropy.stats import biweight_location, biweight_scale
 from astropy.io import fits
 from astropy.table import Table
 from scipy import interpolate
-from typing import List, Tuple, Dict
+from typing import Union, Tuple, List, Dict
+from collections.abc import Callable
 
 from lvmdrp import log, path, __version__ as drpver
 from lvmdrp.utils import metadata as md
 from lvmdrp.utils.convert import tileid_grp
-from lvmdrp.utils.paths import get_master_mjd, get_calib_paths, group_calib_paths
-from lvmdrp.core.constants import CALIBRATION_NAMES
+from lvmdrp.utils.paths import get_master_mjd, get_calib_paths, group_calib_paths, get_frames_paths
+from lvmdrp.core.constants import CALIBRATION_NAMES, SKYLINES_FIBERFLAT, CONTINUUM_FIBERFLAT
 from lvmdrp.core.plot import create_subplots, save_fig
 from lvmdrp.core import dataproducts as dp
 from lvmdrp.core.constants import (
@@ -58,8 +60,8 @@ from lvmdrp.core.rss import RSS, lvmFrame
 
 from lvmdrp.functions import imageMethod as image_tasks
 from lvmdrp.functions import rssMethod as rss_tasks
-from lvmdrp.main import start_logging, get_config_options, read_fibermap, reduce_2d
-from lvmdrp.functions.run_twilights import lvmFlat, to_native_wave, fit_fiberflat, create_lvmflat, combine_twilight_sequence
+from lvmdrp.main import start_logging, get_config_options, read_fibermap, reduce_2d, reduce_1d
+from lvmdrp.functions.run_twilights import lvmFlat, to_native_wave, fit_fiberflat, combine_twilight_sequence, fit_skyline_flatfield
 
 
 SLITMAP = read_fibermap(as_table=True)
@@ -1467,54 +1469,52 @@ def create_dome_fiberflats(mjd, expnums_ldls, expnums_qrtz, use_longterm_cals=Tr
         lvmflat.writeFitsData(path.full("lvm_frame", mjd=mjd, tileid=11111, drpver=drpver, expnum=expnum_str, kind=f'DFlat-{channel}'))
 
 
-def create_twilight_fiberflats(mjd: int, use_longterm_cals: bool = True, expnums: List[int] = None, median_box: int = 10, niter: bool = 1000,
-                      threshold: Tuple[float,float]|float = (0.5,1.5), nknots: bool = 50,
-                      b_mask: List[Tuple[float,float]] = MASK_BANDS["b"],
-                      r_mask: List[Tuple[float,float]] = MASK_BANDS["r"],
-                      z_mask: List[Tuple[float,float]] = MASK_BANDS["z"],
+def create_twilight_fiberflats(mjd: int, use_longterm_cals: bool = True, expnums: List[int] = None,
+                      ref_kind: Union[int, Callable[[np.ndarray, int], np.ndarray]] = bn.nanmedian,
+                      groupby: str = "spec", guess_coeffs: List[int] = [1,0,0,0], fixed_coeffs: List[int] = [0,1,2,3],
+                      cnorms: Dict[str, float] = SKYLINES_FIBERFLAT, dwave: float = 20.0,
+                      smoothing: float = 0.0,
+                      interpolate_invalid: bool = True,
                       kind: str = "longterm",
                       skip_done: bool = False,
-                      display_plots: bool = False) -> Dict[str, RSS]:
-    """Reduce the twilight sequence and produces master twilight flats
+                      display_plots: bool = False) -> None:
+    """Reduce a sequence of twilight exposures and produce master twilight fiberflats for each channel.
 
-    Given a sequence of twilight exposures, this function reduces them and
-    produces master twilight flats for each camera.
+    This function processes a set of twilight flat exposures for the specified MJD and exposure numbers,
+    extracting 1D spectra, calibrating wavelength and LSF, rectifying, and fitting fiber throughput.
+    The resulting master fiberflats are interpolated to handle masked fibers and saved to disk.
+    Optionally, diagnostic plots can be displayed.
 
     Parameters
     ----------
     mjd : int
-        MJD to reduce
-    use_longterm_cals : bool
-        Whether to use long-term calibration frames or not, defaults to True
-    expnums : list
-        List of twilight exposure numbers
-    median_box : int, optional
-        Size of the median filter box, by default 5
-    niter : int, optional
-        Number of iterations to fit the continuum, by default 1000
-    threshold : float, optional
-        Threshold to mask outliers, by default 0.5
-    nknots : int, optional
-        Number of knots for the spline fitting, by default 50
-    b_mask : list, optional
-        List of wavelength bands to mask in the blue channel, by default []
-    r_mask : list, optional
-        List of wavelength bands to mask in the red channel, by default []
-    z_mask : list, optional
-        List of wavelength bands to mask in the NIR channel, by default []
-    use_master_centroids : bool, optional
-        Use master centroids to trace the fibers, by default False
+        MJD to reduce.
+    use_longterm_cals : bool, optional
+        Whether to use long-term calibration frames. Defaults to True.
+    expnums : list[int], optional
+        List of twilight exposure numbers to process. If None, all available are used.
+    ref_kind : int or callable, optional
+        Reference fiber selection method or index. Defaults to nanmedian.
+    groupby : str, optional
+        Grouping for normalization (e.g., "spec"). Defaults to "spec".
+    guess_coeffs : list[int], optional
+        Initial guess for polynomial coefficients in gradient fitting. Defaults to [1,0,0,0].
+    fixed_coeffs : list[int], optional
+        Indices of coefficients to fix during fitting. Defaults to [1,2,3].
+    cnorms : dict, optional
+        Dictionary of normalization wavelengths per channel. Defaults to SKYLINES_FIBERFLAT.
+    dwave : float, optional
+        Width of the wavelength window for normalization. Defaults to 20.0.
+    smoothing : float, optional
+        Smoothing parameter for fiberflat fitting. Defaults to 0.0.
+    interpolate_invalid : bool, optional
+        Interpolate over invalid/masked fibers. Defaults to True.
     kind : str, optional
-        Kind of calibration frames to produce, by default 'longterm'
+        Kind of calibration frames to produce ("longterm" or "nightly"). Defaults to "longterm".
     skip_done : bool, optional
-        Skip files that already exist, by default False
+        Skip files that already exist. Defaults to False.
     display_plots : bool, optional
-        Display plots, by default False
-
-    Returns
-    -------
-    mfflats : dict
-        Dictionary with the master twilight flats for each channel
+        Display diagnostic plots. Defaults to False.
     """
     # get metadata
     flats, _ = md.get_sequence_metadata(mjd, expnums=expnums, for_cals={"fiberflat"})
@@ -1551,7 +1551,7 @@ def create_twilight_fiberflats(mjd: int, use_longterm_cals: bool = True, expnums
     tileid = flats.tileid.min()
     for channel in channels:
         flat_expnums = flat_channels.get_group(channel).groupby("expnum")
-        fflat_paths = []
+        xtwi_paths, fflat_paths, lvmflat_paths = [], [], []
         for expnum in flat_expnums.groups:
             flat = flat_expnums.get_group(expnum).iloc[0]
 
@@ -1564,32 +1564,80 @@ def create_twilight_fiberflats(mjd: int, use_longterm_cals: bool = True, expnums
             xflat_path = path.full("lvm_anc", drpver=drpver, kind="x", imagetype=flat.imagetyp, tileid=flat.tileid, mjd=flat.mjd, camera=channel, expnum=expnum)
             wflat_path = path.full("lvm_anc", drpver=drpver, kind="w", imagetype=flat.imagetyp, tileid=flat.tileid, mjd=flat.mjd, camera=channel, expnum=expnum)
             hflat_path = path.full("lvm_anc", drpver=drpver, kind="h", imagetype=flat.imagetyp, tileid=flat.tileid, mjd=flat.mjd, camera=channel, expnum=expnum)
-            # gflat_path = path.full("lvm_anc", drpver=drpver, kind="g", imagetype=flat.imagetyp, tileid=flat.tileid, mjd=flat.mjd, camera=channel, expnum=expnum)
-            lvmflat_path = path.full("lvm_frame", mjd=mjd, tileid=tileid, drpver=drpver, expnum=expnum, kind=f'TFlat-{channel}')
+            xtwi_paths.append(xflat_path)
+            lvmflat_paths.append(path.full("lvm_frame", mjd=mjd, tileid=tileid, drpver=drpver, expnum=expnum, kind=f'TFlat-{channel}'))
 
-            # spectrograph stack xflats
-            rss_tasks.stack_spectrographs(in_rsss=xflat_paths, out_rss=xflat_path)
+            if skip_done and os.path.isfile(hflat_path):
+                log.info(f"skipping {hflat_path}, file already exist")
+            else:
+                # spectrograph stack xflats
+                rss_tasks.stack_spectrographs(in_rsss=xflat_paths, out_rss=xflat_path)
 
-            # calibrate in wavelength
-            rss_tasks.create_pixel_table(in_rss=xflat_path, out_rss=wflat_path, in_waves=calibs["wave"][channel], in_lsfs=calibs["lsf"][channel])
+                # calibrate in wavelength
+                rss_tasks.create_pixel_table(in_rss=xflat_path, out_rss=wflat_path, in_waves=calibs["wave"][channel], in_lsfs=calibs["lsf"][channel])
 
-            # match LSF in all fibers
-            rss_tasks.match_resolution(in_rss=wflat_path, out_rss=wflat_path, target_fwhm=4.5)
+                # match LSF in all fibers
+                rss_tasks.match_resolution(in_rss=wflat_path, out_rss=wflat_path, target_fwhm=4.5)
 
-            # rectify in wavelength
-            rss_tasks.resample_wavelength(in_rss=wflat_path, out_rss=hflat_path, wave_disp=0.5, wave_range=SPEC_CHANNELS[channel])
+                # rectify in wavelength
+                rss_tasks.resample_wavelength(in_rss=wflat_path, out_rss=hflat_path, wave_disp=0.5, wave_range=SPEC_CHANNELS[channel])
+
 
             # fit fiber throughput
-            fit_fiberflat(in_twilight=hflat_path, out_flat=fflat_path, out_twilight=fflat_flatfielded_path, remove_gradient=True, niter=4, display_plots=display_plots)
-
-            # create lvmFlat product
-            create_lvmflat(in_twilight=fflat_flatfielded_path, out_lvmflat=lvmflat_path, in_fiberflat=fflat_path,
-                           in_cents=calibs["trace"][channel], in_widths=calibs["width"][channel],
-                           in_waves=calibs["wave"][channel], in_lsfs=calibs["lsf"][channel])
+            fit_fiberflat(in_rss=hflat_path, out_flat=fflat_path, out_rss=fflat_flatfielded_path,
+                          ref_kind=ref_kind, groupby=groupby, guess_coeffs=guess_coeffs, fixed_coeffs=fixed_coeffs,
+                          norm_cwave=cnorms[channel], norm_dwave=dwave, smoothing=smoothing, interpolate_invalid=interpolate_invalid,
+                          display_plots=display_plots)
 
         # combine individual fiberflats into master fiberflat
-        mflat_path = path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=mjd, kind="mfiberflat_twilight", camera=channel)
-        combine_twilight_sequence(in_fiberflats=fflat_paths, out_fiberflat=mflat_path, in_waves=calibs["wave"][channel], in_lsfs=calibs["lsf"][channel])
+        if kind == "longterm":
+            mflat_path = path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=mjd, kind="mfiberflat_twilight", camera=channel)
+        else:
+            mflat_path = path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=mjd, kind="nfiberflat_twilight", camera=channel)
+        combine_twilight_sequence(
+            in_twilights=xtwi_paths,
+            in_fflats=fflat_paths, out_mflat=mflat_path, out_lvmflats=lvmflat_paths,
+            in_cents=calibs["trace"][channel], in_widths=calibs["width"][channel],
+            in_waves=calibs["wave"][channel], in_lsfs=calibs["lsf"][channel])
+
+
+def create_fiberflats_corrections(mjd: int, science_mjds: Union[int, List[int]], use_longterm_cals: bool = True, science_expnums: List[int] = None,
+                                  sky_cwaves: Dict[str, float] = SKYLINES_FIBERFLAT, cont_cwaves: Dict[str, float] = CONTINUUM_FIBERFLAT,
+                                  groupby: str = "spec", quantiles: Tuple[float, float] = (5.0, 97.0), sky_fibers_only: bool = False,
+                                  nsigma: float = 2.0, comb_method: str = "median", force_correction: bool = False,
+                                  skip_done: bool = False, display_plots: bool = False) -> None:
+
+    if not all([mjd <= sci_mjd for sci_mjd in science_mjds]):
+        log.error(f"some science MJDs are earlier than {mjd = }: {science_mjds = }")
+        return
+
+    science_mjds = [science_mjds] if isinstance(science_mjds, int) else science_mjds
+    if science_expnums is None:
+        frames = pd.concat([md.get_frames_metadata(mjd=mjd).query("tileid != 11111 and qaqual != 'BAD'") for mjd in science_mjds], ignore_index=True)
+        science_expnums = frames.sort_values("expnum").drop_duplicates("expnum").expnum
+
+    calibs = get_calib_paths(mjd, version=drpver, longterm_cals=use_longterm_cals)
+
+    # 2D and 1D reduction of science exposures
+    for sci_mjd in science_mjds:
+        reduce_2d(mjd=sci_mjd, calibrations=calibs, expnums=science_expnums, reject_cr=False, add_astro=True, sub_straylight=True, skip_done=skip_done)
+        reduce_1d(mjd=sci_mjd, calibrations=calibs, expnums=science_expnums, sub_straylight=True, skip_done=skip_done)
+
+    for channel in "brz":
+        wframe_paths = get_frames_paths(mjds=science_mjds, kind="w", camera_or_channel=channel, expnums=science_expnums)
+        if len(wframe_paths) == 0:
+            log.error(f"no good quality science frames found for {science_mjds = }, {science_expnums = } in {channel = }")
+
+        fit_skyline_flatfield(
+            in_sciences=wframe_paths,
+            in_mflat=calibs["fiberflat_twilight"][channel],
+            out_mflat=calibs["fiberflat_twilight"][channel],
+            groupby="spec",
+            sky_cwave=sky_cwaves[channel], cont_cwave=cont_cwaves[channel],
+            quantiles=quantiles, sky_fibers_only=sky_fibers_only,
+            nsigma=nsigma, comb_method=comb_method,
+            force_correction=force_correction,
+            display_plots=display_plots)
 
 
 def create_illumination_corrections(mjd, use_longterm_cals=True, expnums=None):

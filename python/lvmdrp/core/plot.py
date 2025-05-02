@@ -12,7 +12,7 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 import bottleneck as bn
-from astropy.visualization import AsinhStretch, ImageNormalize, PercentileInterval
+from astropy.visualization import AsinhStretch, ImageNormalize, PercentileInterval, simple_norm
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 import warnings
 
@@ -54,6 +54,18 @@ def create_subplots(to_display, flatten_axes=True, **subplots_params):
     if flatten_axes and isinstance(axs, np.ndarray):
         axs = axs.flatten()
     return fig, axs
+
+def set_colorbar(axis, collection):
+    axcb = inset_axes(
+        axis,
+        width="2%",
+        height="40%",
+        loc="upper left",
+    )
+    axcb.tick_params(labelsize="x-small", labelbottom=False, width=0.8, pad=0)
+    axcb.ticklabel_format(axis="both", style="sci", scilimits=(-3, 3))
+    plt.colorbar(collection, cax=axcb, orientation="vertical")
+    return axcb
 
 
 def plot_image_shift(ax, image, column_shift, xpos=None, inset_pos=(0.0,1.0-0.32), inset_box=(0.3,0.3), cmap="gray"):
@@ -686,6 +698,206 @@ def plot_fiber_thermal_shift(columns, column_shifts, median_shift, std_shift, ax
         ax.annotate(f"mean: {median_shift:.2f}", (0.9, 0.9), xycoords="axes fraction", ha="right", va="top", color="tab:red")
         ax.annotate(f"std: {std_shift:.2f}", (0.9, 0.85), xycoords="axes fraction", ha="right", va="top", color="tab:red")
 
+    return ax
+
+
+def plot_gradient_fit(slitmap, z, gradient_model, factors_model, telescope=None, marker_size=15, labels=True, axs=None):
+
+    gradient_model_ = gradient_model.copy()
+    gradient_model_ /= gradient_model_.mean()
+    factors_model_ = factors_model.copy()
+    factors_model_ /= factors_model_.mean()
+    model = gradient_model_ * factors_model_
+    model /= model.mean()
+
+    if axs is None:
+        _, axs = plt.subplots(1, 5, figsize=(15, 4), sharex=True, sharey=True, layout="constrained")
+    if labels:
+        titles = ["Factors", "Gradient model", "Original image", "Factor-corrected image", "Fully corrected image"]
+        [axs[i].set_title(titles[i], loc="left", fontsize="large") for i, ax in enumerate(axs)]
+    ifus = [factors_model_, gradient_model_, z, z/factors_model_, z/model]
+    for i in range(len(ifus)):
+        ifu_view(slitmap, z=ifus[i], telescope=telescope, ax=axs[i], marker_size=marker_size)
+
+    return axs
+
+
+def plot_radial_gradient_fit(slitmap, z, gradient_model, telescope=None, marker_size=15, labels=True, axs=None):
+
+    gradient_model_ = gradient_model.copy()
+    gradient_model_ /= gradient_model_.mean()
+
+    if axs is None:
+        _, axs = plt.subplots(1, 3, figsize=(15, 4), sharex=True, sharey=True, layout="constrained")
+    if labels:
+        titles = ["Gradient model", "Original image", "Corrected image"]
+        [axs[i].set_title(titles[i], loc="left", fontsize="large") for i, ax in enumerate(axs)]
+    ifus = [gradient_model_, z, z/gradient_model_]
+    for i in range(len(ifus)):
+        ifu_view(slitmap, z=ifus[i], telescope=telescope, ax=axs[i], marker_size=marker_size)
+
+    return axs
+
+
+def plot_flatfield_validation(fframe, cwaves, dwave=8, coadd_method="average", labels=True, axs=None):
+
+    if axs is None:
+        _, axs = plt.subplots(1, len(cwaves), figsize=(4*len(cwaves),4), sharex=True, sharey=True, layout="constrained")
+    axs = np.atleast_1d(axs)
+    cwaves = np.atleast_1d(cwaves)
+    for i, ax in enumerate(axs):
+        if coadd_method == "average":
+            z, y, y = fframe.coadd_flux(cwave=cwaves[i], dwave=dwave, comb_stat=bn.nanmean, return_xy=True)
+        elif coadd_method == "integrate":
+            z, y, y = fframe.coadd_flux(cwave=cwaves[i], dwave=dwave, comb_stat=lambda a, axis: np.trapz(np.nan_to_num(a, nan=0), fframe._wave, axis=axis), return_xy=True)
+        elif coadd_method == "fit":
+            z, x, y = fframe.fit_lines_slit(cwaves=cwaves[i], dwave=dwave, return_xy=True)
+        else:
+            raise ValueError(f"Invalid value for `coadd_method`: {coadd_method}. Expected either 'fit' or 'integrate'")
+
+        ifu_view(slitmap=fframe._slitmap, z=z, marker_size=20, ax=ax)
+        if labels:
+            ax.set_title(f"{cwaves[i]:.2f} Angstroms", loc="left", fontsize="large")
+
+
+def plot_flat_consistency(fflats, mflat, spec_wise=False, log_scale=False, labels=False, axs=None):
+
+    if axs is None:
+        _, axs = plt.subplots(2, int(np.ceil(len(fflats)/2)), figsize=(14,5), sharex=True, sharey=True, layout="constrained")
+        axs = axs.ravel()
+
+    if labels:
+        [axs[i].set_title(f"expnum = {fflat._header['EXPOSURE']}", loc="left", fontsize="large") for i, fflat in enumerate(fflats)]
+
+    if log_scale:
+        plt.yscale("log")
+
+    for i, flat in enumerate(fflats):
+        if spec_wise:
+            labels_ = ["sp1", "sp2", "sp3"] if i==0 else None
+            colors = ["tab:blue", "tab:red", "tab:green"]
+            data = np.split((mflat._data / flat._data), 3, axis=0)
+            data = [d.ravel() for d in data]
+            axs[i].hist(data, bins=1000, range=(0.98, 1.02), stacked=True, label=labels_, color=colors, alpha=0.5, lw=0)
+        else:
+            data = (mflat._data / flat._data).ravel()
+            axs[i].hist(data, bins=1000, range=(0.98, 1.02))
+        axs[i].axvspan(0.99, 1.01, lw=0, color="0.2", alpha=0.2, zorder=9)
+    if spec_wise:
+        axs[0].legend(loc=1, frameon=False, fontsize="small")
+
+    return axs
+
+
+def ifu_view(slitmap=None, z=None, rss=None, cwave=None, dwave=None, comb_stat=None, telescope="Sci", use_world_coords=False,
+             marker_size=50, norm_z=True, norm_cuts=None, norm_percents=None, cmap="coolwarm",
+             hide_axis=True, ax=None, return_xyz=False):
+
+    slitmap = getattr(rss, "_slitmap", slitmap)
+    if slitmap is None:
+        raise ValueError("Either `slitmap` or `rss._slitmap` have to be given")
+
+    if telescope is not None and telescope not in slitmap["telescope"]:
+        raise ValueError(f"Invalid value for `telescope`: {telescope}. Expected either 'Sci', 'SkyE', 'SkyW' or 'Spec'")
+
+    if use_world_coords and ("ra" in slitmap.colnames and "dec" in slitmap.colnames):
+        xcol, ycol = "ra", "dec"
+        pa = getattr(rss, "_header", {}).get(f"PO{telescope.upper()}PA", 0)
+    else:
+        xcol, ycol = "xpmm", "ypmm"
+        pa = 0
+
+    sel_telescope = slitmap["telescope"].data == telescope
+    x, y = slitmap[xcol].data, slitmap[ycol].data
+    x_, y_ = x[sel_telescope], y[sel_telescope]
+
+    if rss is None and slitmap is not None and z is not None:
+        z_ = z[sel_telescope]
+    elif rss is not None and (rss._slitmap is not None or slitmap is not None) and cwave is not None and dwave is not None and comb_stat is not None:
+        z = rss.coadd_flux(cwave=cwave, dwave=dwave, comb_stat=comb_stat, telescope=telescope)
+        z_ = z[sel_telescope]
+    else:
+        raise ValueError("Either `z` and `slitmap` or `rss`, `slitmap`, `cwave`, `dwave` and `comb_stat` have to be given")
+
+    if norm_z:
+        z_ /= np.nanmean(z_)
+
+    if norm_percents is not None:
+        nminmax = dict(zip(("min_percent", "max_percent"), norm_percents))
+    elif norm_cuts is not None:
+        nminmax = dict(zip(("min_cut", "max_cut"), norm_cuts))
+    else:
+        nminmax = dict(zip(("min_percent", "max_percent"), (5.0, 95.0)))
+
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(5, 5), layout="constrained")
+    norm = simple_norm(z_[~np.isnan(z_)], **nminmax)
+    sc = ax.scatter(x_, y_, c=z_, s=marker_size, marker=(6, 0, 90-pa), norm=norm, cmap=cmap)
+    set_colorbar(ax, sc)
+    ax.set_aspect("equal")
+
+    if hide_axis:
+        ax.set_frame_on(False)
+        ax.tick_params(left=False, bottom=False, labelleft=False, labelbottom=False)
+
+    if return_xyz:
+        return ax, x, y, z
+    return ax
+
+
+def slit(x=None, y=None, rss=None, data=None, cwave=None, dwave=None, comb_stat=None, telescope=None,
+         norm_stat=np.nanmean, margins_percent=[1,2,5], style="-", color="tab:blue", label=None, ax=None, return_xy=True):
+
+    if rss is None and y is not None:
+        pass
+    elif rss is not None and cwave is not None and dwave is not None and comb_stat is not None:
+        y = rss.coadd_flux(cwave=cwave, dwave=dwave, comb_stat=comb_stat, telescope=telescope)
+    else:
+        raise ValueError(f"Either {x = }, {y = } or {rss = }, {cwave = }, {dwave = } and {comb_stat = } have to be given")
+
+    if x is None:
+        x = np.arange(rss._fibers) + 1
+
+    if norm_stat is not None:
+        y /= norm_stat(y)
+
+    if ax is None:
+        _, ax = plt.subplots(figsize=(14,5), layout="constrained")
+
+    if data is not None:
+        ax.plot(x, data / bn.nanmean(data, axis=0)[None, :], ",", color="0.2", alpha=0.02)
+    ax.plot(x, y, style, lw=1, color=color, label=label)
+
+    mu = np.nanmean(y)
+    ax.axhline(mu, ls="--", color="0.2", lw=1)
+    ax.vlines([648, 2*648], 0, 100, ls="--", color="0.2", lw=1)
+    if margins_percent:
+        xmin = ax.get_xlim()[0]
+        for margin in margins_percent:
+            m = margin / 100
+            ax.text(xmin+5, (1+m)*mu, f"{margin:.2f}%", ha="left", va="bottom", color="0.2", fontsize="x-small")
+            ax.axhspan((1-m)*mu, (1+m)*mu, lw=0, fc="0.5", alpha=0.5)
+
+    if return_xy:
+        return ax, x, y
+    return ax
+
+
+def spectra(rss, rwave=None, selet_fibers=None, norm_stat=None, ax=None):
+    if ax is None:
+        _, ax = create_subplots(figsize=(15,5), layout="constrained")
+
+    Y = rss._data.copy()
+    X = rss._wave.copy()
+    if X.ndim == 1:
+        X = np.repeat(X, Y.shape[0], axis=0)
+    if rwave is None:
+        rwave = X.min(), X.max()
+    if selet_fibers is not None:
+        Y[~selet_fibers] = np.nan
+
+    ax.plot(X.T, Y.T)
+    ax.set_xlim(*rwave)
     return ax
 
 

@@ -131,3 +131,24 @@ LVM_NBLOCKS = 18
 LVM_REFERENCE_COLUMN = 2000
 FIDUCIAL_PLATESCALE = 112.36748321030637 # Focal plane platescale in "/mm
 
+# GB hand picked isolated bright lines across each channel which are not doublest in UVES atlas
+# true wavelengths taken from UVES sky line atlas
+REF_SKYLINES = {
+    "b": [5577.346680],
+    "r": [6363.782715, 7358.680176, 7392.209961],
+    "z": [8399.175781, 8988.383789, 9552.546875, 9719.838867]
+}
+
+# sky lines to fit spec-to-spec flat field factors
+SKYLINES_FIBERFLAT = {
+    "b": 5577.346680,
+    "r": 6363.782715,
+    "z": 8399.175781
+}
+
+# continuum wavelengths
+CONTINUUM_FIBERFLAT = {
+    "b": 4600,
+    "r": 6760,
+    "z": 8170
+}
