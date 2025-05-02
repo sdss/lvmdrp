@@ -1640,7 +1640,6 @@ class RSS(FiberRows):
                 new_rss._sky_error *= dlambda
             new_rss._header["BUNIT"] = unit.replace("/Angstrom", "")
 
-        new_rss.setData(data=numpy.nan, error=numpy.nan, mask=True, select=(new_rss._data==0)|(new_rss._error==0))
         new_rss.apply_pixelmask()
 
         return new_rss
