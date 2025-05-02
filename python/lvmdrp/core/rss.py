@@ -672,159 +672,6 @@ class RSS(FiberRows):
         else:
             raise TypeError("table must be astropy.table.Table or None")
 
-    def __mul__(self, other):
-        """
-        Operator to add two FiberRow or divide by another type if possible
-        """
-        if isinstance(other, RSS):
-            # define behaviour if the other is of the same instance
-
-            # subtract data if contained in both
-            if self._data is not None and other._data is not None:
-                data = self._data * other._data
-            else:
-                data = self._data
-
-            # add error if contained in both
-            if self._error is not None and other._error is not None:
-                error = numpy.sqrt(
-                    other._data**2 * self._error**2
-                    + self._data**2 * other._error**2
-                )
-            elif self._error is not None:
-                error = other._data * self._error
-            else:
-                error = self._error
-
-            # combined mask of valid pixels if contained in both
-            if self._mask is not None and other._mask is not None:
-                mask = numpy.logical_or(self._mask, other._mask)
-            else:
-                mask = self._mask
-            if data.dtype == numpy.float64:
-                data = data.astype(numpy.float32)
-            if error is not None and error.dtype == numpy.float64:
-                error = error.astype(numpy.float32)
-            rss = RSS(
-                data=data,
-                error=error,
-                mask=mask,
-                header=self._header,
-                shape=self._shape,
-                size=self._size,
-                arc_position_x=self._arc_position_x,
-                arc_position_y=self._arc_position_y,
-                good_fibers=self._good_fibers,
-                fiber_type=self._fiber_type,
-            )
-            return rss
-
-        if isinstance(other, Spectrum1D):
-            # define behaviour if the other is a Spectrum1D object
-
-            # subtract data if contained in both
-            if self._data is not None and other._data is not None:
-                data = self._data * other._data[numpy.newaxis, :]
-            else:
-                data = self._data
-
-            # add error if contained in both
-            if self._error is not None and other._error is not None:
-                error = numpy.sqrt(
-                    other._data[numpy.newaxis, :] ** 2 * self._error**2
-                    + self._data**2 * other._error[numpy.newaxis, :] ** 2
-                )
-            elif self._error is not None:
-                error = other._data[numpy.newaxis, :] * self._error
-            else:
-                error = self._error
-
-            # combined mask of valid pixels if contained in both
-            if self._mask is not None and other._mask is not None:
-                mask = numpy.logical_or(self._mask, other._mask[numpy.newaxis, :])
-            else:
-                mask = self._mask
-
-            if data.dtype == numpy.float64:
-                data = data.astype(numpy.float32)
-            if error is not None and error.dtype == numpy.float64:
-                error = error.astype(numpy.float32)
-            rss = RSS(
-                data=data,
-                error=error,
-                mask=mask,
-                header=self._header,
-                shape=self._shape,
-                size=self._size,
-                arc_position_x=self._arc_position_x,
-                arc_position_y=self._arc_position_y,
-                good_fibers=self._good_fibers,
-                fiber_type=self._fiber_type,
-            )
-
-            return rss
-
-        elif isinstance(other, numpy.ndarray):
-            if self._data is not None:  # check if there is data in the object
-                dim = other.shape
-                # add ndarray according do its dimensions
-                if self._data.shape == dim:
-                    data = self._data * other
-                elif len(dim) == 1:
-                    if self._data.shape[0] == dim[0]:
-                        data = self._data * other[:, numpy.newaxis]
-                    elif self._data.shape[1] == dim[0]:
-                        data = self._data * other[numpy.newaxis, :]
-                else:
-                    data = self._data
-                if data.dtype == numpy.float64:
-                    data = data.astype(numpy.float32)
-
-                rss = RSS(
-                    data=data,
-                    error=self._error,
-                    mask=self._mask,
-                    header=self._header,
-                    shape=self._shape,
-                    size=self._size,
-                    arc_position_x=self._arc_position_x,
-                    arc_position_y=self._arc_position_y,
-                    good_fibers=self._good_fibers,
-                    fiber_type=self._fiber_type,
-                )
-            return rss
-        else:
-            # try to do addtion for other types, e.g. float, int, etc.
-            try:
-                data = self._data * other
-                if self._error is not None:
-                    error = self._error * other
-                else:
-                    error = self._error
-                if data.dtype == numpy.float64:
-                    data = data.astype(numpy.float32)
-                if error is not None and error.dtype == numpy.float64:
-                    error = error.astype(numpy.float32)
-                rss = RSS(
-                    data=data,
-                    error=error,
-                    mask=self._mask,
-                    header=self._header,
-                    shape=self._shape,
-                    size=self._size,
-                    arc_position_x=self._arc_position_x,
-                    arc_position_y=self._arc_position_y,
-                    good_fibers=self._good_fibers,
-                    fiber_type=self._fiber_type,
-                )
-                return rss
-            except (TypeError, ValueError):
-                # raise exception if the type are not matching in general
-                raise TypeError(
-                    "unsupported operand type(s) for *: %s and %s"
-                    % (str(type(self)).split("'")[1], str(type(other)).split("'")[1])
-                )
-
     def __getitem__(self, fiber):
         if not isinstance(fiber, int):
             raise TypeError("Fiber index need to be an integer")
@@ -1763,7 +1610,6 @@ class RSS(FiberRows):
                 f = numpy.interp(wave, rss._wave[ifiber], rss._lsf[ifiber])
                 new_rss._lsf[ifiber] = f.astype("float32")
             if rss._sky is not None:
-                print(rss._sky)
                 f, ivar = resample_flux_density(wave, rss._wave[ifiber], rss._sky[ifiber], ivar=error_to_ivar(rss._sky_error[ifiber]))
                 new_rss._sky[ifiber] = f.astype("float32")
                 new_rss._sky_error[ifiber] = ivar_to_error(ivar).astype("float32")
@@ -1779,6 +1625,8 @@ class RSS(FiberRows):
         if rss._supersky is not None:
             new_rss.set_supersky(rss._supersky)
             new_rss.set_supersky_error(rss._supersky_error)
+
+        # new_rss.setData(data=numpy.nan, error=numpy.nan, select=new_rss._data==0)
 
         return new_rss
 
