@@ -1146,7 +1146,7 @@ def correctPixTable_drp(
 # TODO: hacer esto antes de hacer el rasampling en wl
 @skip_on_missing_input_path(["in_rss"])
 @skip_if_drpqual_flags(["BADTRACE", "EXTRACTBAD"], "in_rss")
-def resample_wavelength(in_rss: str, out_rss: str, method: str = "linear",
+def resample_wavelength(in_rss: str, out_rss: str, method: str = "spline",
                         wave_range: Tuple[float,float] = None, wave_disp: float = None,
                         convert_to_density: bool = False, display_plots: bool = False) -> RSS:
     """Resamples the RSS wavelength solutions to a common wavelength solution
@@ -1161,7 +1161,7 @@ def resample_wavelength(in_rss: str, out_rss: str, method: str = "linear",
         Input RSS FITS file where the wavelength is stored as a pixel table
     out_rss : string
         Output RSS FITS file with a common wavelength solution
-    method : string, optional with default: 'linear'
+    method : string, optional with default: 'spline'
         Interpolation scheme used for the spectral resampling of the data.
         Available options are:
             - linear
@@ -1198,7 +1198,7 @@ def resample_wavelength(in_rss: str, out_rss: str, method: str = "linear",
 
     # resample the wavelength solution
     log.info("resampling the spectra ...")
-    new_rss = rss.rectify_wave(wave_range=wave_range, wave_disp=wave_disp)
+    new_rss = rss.rectify_wave(wave_range=wave_range, wave_disp=wave_disp, return_density=convert_to_density)
 
     # create error propagation plot
     fig = plt.figure(figsize=(15, 5), layout="constrained")
