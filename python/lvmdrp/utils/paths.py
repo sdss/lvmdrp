@@ -64,7 +64,7 @@ def mjd_from_expnum(expnum: Union[int, str, list, tuple]) -> List[int]:
     return [int(mjd)]
 
 
-def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_NAMES, longterm_cals=True, from_sanbox=False):
+def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_NAMES, longterm_cals=True, from_sanbox=False, return_mjd=False):
     """Returns a dictionary containing paths for calibration frames
 
     Parameters
@@ -101,7 +101,7 @@ def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_NAMES, l
     tilegrp = tileid_grp(tileid)
 
     # get long-term MJDs from sandbox using get_master_mjd, else use given MJD
-    cals_mjd = get_master_mjd(mjd) if from_sanbox else mjd
+    cals_mjd = get_master_mjd(mjd) if longterm_cals else mjd
 
     # define root path to pixel flats and masks
     # TODO: remove this once sdss-tree are updated with the corresponding species
@@ -136,6 +136,8 @@ def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_NAMES, l
 
         calibs[flavor] = {c: path.full(path_species, drpver=version, tileid=tileid, mjd=cals_mjd, kind=f"{prefix}{flavor}", camera=c) for c in cam_or_chan}
 
+    if return_mjd:
+        return calibs, cals_mjd
     return calibs
 
 

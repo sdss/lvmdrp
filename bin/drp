@@ -128,11 +128,14 @@ def cli():
 @click.option('-c', '--clean-ancillary', is_flag=True, default=False, help='Remove ancillary paths after run')
 @click.option('-d', '--debug-mode', is_flag=True, default=False, help='Set debug mode on to run using aperture extraction and skip CR rejection')
 @click.option('--force-run', is_flag=True, default=False, help='force reduction even if the exposure was flagged as BAD by the QC pipeline')
+@click.option('--use-nightly-cals', is_flag=True, default=False, help='Use nightly calibrations from same MJD as science frame(s). This option implies --use-untagged-cals')
+@click.option('--use-untagged-cals', is_flag=True, default=False, help='Use calibrations from the untagged (not sandbox) directory')
 @cloup.constraint(mutually_exclusive, ['mjd', 'mjd_list', 'mjd_range'])
 # @cloup.constraint(RequireExactly(1), ['mjd', 'mjd_list', 'mjd_range'])
 @cloup.constraint(mutually_exclusive, ['expnum', 'exp_list', 'exp_range'])
 def run(mjd, mjd_list, mjd_range, with_cals, no_sci, expnum, exp_list, exp_range, exp_file, fluxcal_method,
-        skip_2d, skip_1d, skip_post_1d, skip_drpall, clean_ancillary, debug_mode, force_run):
+        skip_2d, skip_1d, skip_post_1d, skip_drpall, clean_ancillary, debug_mode, force_run,
+        use_nightly_cals, use_untagged_cals):
     """ Run the DRP reduction for a given MJD or range of MJDs
 
     Run the DRP for an MJD or range of MJDs.  Various flags and options are available
@@ -149,12 +152,17 @@ def run(mjd, mjd_list, mjd_range, with_cals, no_sci, expnum, exp_list, exp_range
         fluxcal_method = 'STD'
     assert (fluxcal_method in ['STD', 'SCI', 'NONE']), 'Fluxcal method must be either STD or SCI or NONE'
 
+    if use_nightly_cals:
+        use_untagged_cals = True
+
     run_drp(mjd=mjd, expnum=expnum, no_sci=no_sci, with_cals=with_cals, fluxcal_method=fluxcal_method,
             skip_2d=skip_2d,
             skip_1d=skip_1d,
             skip_post_1d=skip_post_1d,
             skip_drpall=skip_drpall,
             clean_ancillary=clean_ancillary,
+            use_nightly_cals=use_nightly_cals,
+            use_untagged_cals=use_untagged_cals,
             debug_mode=debug_mode,
             force_run=force_run)
 

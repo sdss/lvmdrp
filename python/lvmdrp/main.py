@@ -10,6 +10,7 @@ import pandas as pd
 from typing import Union, List
 from functools import lru_cache
 from itertools import groupby
+from pprint import pformat
 
 from typing import Tuple
 
@@ -1518,7 +1519,8 @@ def reduce_1d(mjd, calibrations, expnums=None, replace_with_nan=True, sub_strayl
                 create_pixel_table(in_rss=xframe_path, out_rss=wframe_path, in_waves=mwave_paths, in_lsfs=mlsf_paths)
 
 
-def science_reduction(expnum: int, use_longterm_cals: bool = False,
+def science_reduction(expnum: int,
+                      use_longterm_cals: bool = True, from_sandbox: bool = True,
                       sky_weights: Tuple[float, float] = None,
                       fluxcal_method: str = 'STD',
                       ncpus: int = None,
@@ -1580,13 +1582,18 @@ def science_reduction(expnum: int, use_longterm_cals: bool = False,
 
     log.info(f"Reducing MJD {sci_mjd}, exposure {expnum}, tile_id {sci_tileid} ... ")
 
-    cals_mjd = get_master_mjd(sci_mjd) if use_longterm_cals else sci_mjd
-    log.info(f"target master MJD: {cals_mjd}")
-
     # overwrite fiducial masters dir
-    # masters_path = os.path.join(MASTERS_DIR, f"{cals_mjd}")
-    log.info(f"target master path: {os.getenv('LVM_MASTER_DIR')}")
-    calibs = get_calib_paths(mjd=cals_mjd, version=drpver, longterm_cals=use_longterm_cals, from_sanbox=True)
+    calibs, cals_mjd = get_calib_paths(
+        mjd=sci_mjd,
+        version=drpver,
+        longterm_cals=use_longterm_cals,
+        from_sanbox=from_sandbox,
+        flavors=["pixmask", "pixflat", "bias", "trace", "width", "model", "wave", "lsf", "fiberflat_twilight"],
+        return_mjd=True)
+
+    log.info(f"calibrations parameters: {cals_mjd = }, {use_longterm_cals = }, {from_sandbox = }")
+    for r in pformat(calibs).split("\n"):
+        log.info(r)
 
     # make sure only one exposure number is being reduced
     # sci_metadata.query("expnum == @sci_expnum", inplace=True)
@@ -1750,6 +1757,7 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
             with_cals: bool = False, no_sci: bool = False,
             fluxcal_method: str = 'STD',
             skip_2d: bool = False, skip_1d: bool = False, skip_post_1d: bool = False, skip_drpall: bool = False,
+            use_nightly_cals: bool = False, use_untagged_cals: bool = False,
             clean_ancillary: bool = False, debug_mode: bool = False, force_run: bool = False):
     """ Run the quick DRP
 
@@ -1779,6 +1787,10 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
         Skip wavelength calibration, flatfielding, sky processing and flux calibration
     skip_drpall : bool, optional
         Skip create/update drpall summary file
+    use_nightly_cals : bool, optional
+        Use nightly calibrations, by default False
+    use_untagged_cals : bool, optional
+        Use untagged (not from sandbox) calibrations, by default False
     clean_ancillary : bool, optional
         Flag to remove the ancillary paths, by default False
     debug_mode : bool, optional
@@ -1805,6 +1817,8 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
                     skip_post_1d=skip_post_1d,
                     skip_drpall=skip_drpall,
                     clean_ancillary=clean_ancillary,
+                    use_nightly_cals=use_nightly_cals,
+                    use_untagged_cals=use_untagged_cals,
                     debug_mode=debug_mode,
                     force_run=force_run)
         return
@@ -1894,13 +1908,15 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
             for expnum in sci['expnum'].unique():
                 with Timer(name=f'Reduction EXPNUM {expnum}', logger=log.info):
                     try:
-                        science_reduction(expnum, use_longterm_cals=True,
+                        science_reduction(expnum,
                                         fluxcal_method=fluxcal_method,
                                         skip_2d=skip_2d,
                                         skip_1d=skip_1d,
                                         skip_post_1d=skip_post_1d,
                                         skip_drpall=skip_drpall,
                                         clean_ancillary=clean_ancillary,
+                                        use_longterm_cals=not use_nightly_cals,
+                                        from_sandbox=not use_untagged_cals,
                                         debug_mode=debug_mode,
                                         force_run=force_run, **kwargs)
                     except Exception as e:
