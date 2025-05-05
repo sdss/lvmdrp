@@ -780,10 +780,14 @@ def fit_skyline_flatfield(in_sciences, in_mflat, out_mflat, sky_cwave, cont_cwav
     factor_sdev = np.std(factors, axis=0)
     log.info(f"average factors = {np.round(factor_mean, 4)} +/- {np.round(factor_sdev, 4)}")
 
-    zscore = np.abs(np.asarray(factors) - factor_mean) / factor_sdev
-    keep = (zscore <= nsigma).all(axis=1)
-    nkeep = keep.sum()
-    log.info(f"rejecting {len(sciences) - nkeep} outlying (> {nsigma} sigma) science exposures")
+    if len(sciences) > 2:
+        zscore = np.abs(np.asarray(factors) - factor_mean) / factor_sdev
+        keep = (zscore <= nsigma).all(axis=1)
+        nkeep = keep.sum()
+        log.info(f"rejecting {len(sciences) - nkeep} outlying (> {nsigma} sigma) science exposures")
+    else:
+        keep = np.ones(len(sciences), dtype="bool")
+        nkeep = keep.sum()
 
     log.info(f"combining {nkeep} gradient corrected science frames using {comb_method = }")
     science = RSS()
