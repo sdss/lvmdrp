@@ -15,6 +15,7 @@ from astropy.modeling import fitting, models
 from astropy.stats.biweight import biweight_location, biweight_scale
 from scipy import ndimage
 from scipy import interpolate
+from scipy.stats import binned_statistic
 
 from lvmdrp import log
 from lvmdrp.core.constants import CON_LAMPS, ARC_LAMPS
@@ -2132,69 +2133,59 @@ class Image(Header):
 
     def fit_spline2d(self, bins, smoothing=0, display_plots=False):
 
-        x_bins, y_bins = bins
-        x_step = self._dim[1] // x_bins
+        x_nbins, y_nbins = bins
 
-        img_data = self._data
+        img_data = self._data.copy()
+        img_error = self._error.copy()
         img_data[self._mask] = numpy.nan
+        img_error[self._mask] = numpy.nan
         x_pixels = numpy.arange(self._dim[1])
         y_pixels = numpy.arange(self._dim[0])
 
-        # plt.figure()
-        # plt.plot(numpy.nansum(img_data[:, 1500:2500], axis=1))
-
-        y_bins = numpy.histogram_bin_edges(y_pixels, bins=y_bins).astype(int)
-        y = (y_bins[:-1]+y_bins[1:]) / 2
-        x = x_pixels[::x_step]
+        y_bins = numpy.histogram_bin_edges(y_pixels, bins=y_nbins).astype("int")
+        x_bins = numpy.histogram_bin_edges(x_pixels, bins=x_nbins).astype("int")
+        y_cent = (y_bins[:-1]+y_bins[1:]) / 2
+        x_cent = (x_bins[:-1]+x_bins[1:]) / 2
 
         if display_plots:
-            plt.figure(figsize=(15,5))
-            plt.xlabel("X axis (pix)")
-            plt.ylabel(f"Counts ({self._header['BUNIT']})")
+            fig, axs = plt.subplots(y_nbins, 1, figsize=(15,1*y_nbins), sharex=True, sharey=True, layout="constrained")
+            fig.supxlabel("X axis (pix)", fontsize="x-large")
+            fig.supylabel(f"Counts ({self._header['BUNIT']})", fontsize="x-large")
 
-        data_binned = numpy.zeros((y_bins.size-1, int(numpy.ceil(self._dim[1]/x_step))))
-        for i in range(y_bins.size-1):
-            spec = numpy.nanmedian(img_data[y_bins[i]:y_bins[i+1], :], axis=0)
-            if numpy.isnan(spec).all():
+        data_binned = numpy.zeros((y_nbins, x_nbins))
+        error_binned = numpy.zeros((y_nbins, x_nbins))
+        for i in range(y_nbins):
+            data = bn.nanmedian(img_data[y_bins[i]:y_bins[i+1], :], axis=0)
+            error = numpy.sqrt(bn.nanmedian(img_error[y_bins[i]:y_bins[i+1], :]**2, axis=0))
+            if numpy.isnan(data).all():
                 continue
 
-            # plt.figure()
-            # plt.imshow(img_data[y_bins[i]:y_bins[i+1]], origin="lower")
-            # plt.gca().set_aspect("auto")
-
-            nan_pixels = numpy.isnan(spec)
-            spec = interpolate_mask(x_pixels, spec, nan_pixels, fill_value="extrapolate")
-            tck = interpolate.splrep(x_pixels, spec, s=900)
-            data_binned[i] = interpolate.splev(x, tck)
+            # TODO: don't do interpolation of mask (it's redundant)
+            # TODO: do a proper binning along X, with a median combining of pixels and error propabation
+            data_binned[i], _, _ = binned_statistic(x_pixels, data, statistic=bn.nanmedian, bins=x_bins)
+            error_binned[i], _, _ = binned_statistic(x_pixels, error, statistic=lambda x: numpy.sqrt(bn.nanmedian(x**2)), bins=x_bins)
 
             if display_plots:
-                plt.plot(spec, "k")
-                plt.plot(interpolate.splev(x_pixels, tck), "r", lw=1)
+                axs[i].set_title(f"Y bin: {y_bins[i], y_bins[i+1]}", fontsize="large", loc="left")
+                axs[i].errorbar(x_pixels, data, yerr=error, fmt=",", color="0.2", ecolor="0.2", elinewidth=0.5)
+                axs[i].errorbar(x_cent, data_binned[i], yerr=error_binned[i], fmt=".", mew=1, color="tab:blue", ecolor="tab:blue", elinewidth=1)
 
         valid_rows = (data_binned!=0).any(axis=1)
         data_binned = data_binned[valid_rows]
-        y = y[valid_rows]
+        y_cent = y_cent[valid_rows]
 
-        # Y, X = numpy.meshgrid(y_pixels, x_pixels, indexing="ij")
-        # xx, yy = numpy.meshgrid(x, y, indexing="xy")
-
-        # plt.figure()
-        # plt.imshow(data_binned, origin="lower")
-        # plt.gca().set_aspect("auto")
-        # plt.show()
-
-        interp = interpolate.RectBivariateSpline(x, y, data_binned.T, s=smoothing, bbox=[0, 4086, 0, 4080])
-        stray_data = interp(x_pixels, y_pixels).T
+        interp = interpolate.RectBivariateSpline(x_cent, y_cent, data_binned.T, s=smoothing, bbox=[0, 4086, 0, 4080])
+        model = interp(x_pixels, y_pixels).T
 
         if display_plots:
             plt.figure()
-            plt.imshow(stray_data, interpolation="none", origin="lower")
+            plt.imshow(model, interpolation="none", origin="lower")
             plt.gca().set_aspect("auto")
             plt.xlabel("X axis (pix)")
             plt.ylabel("Y axis (pix)")
 
         stray_img = copy(self)
-        stray_img.setData(data=stray_data, error=None, mask=None)
+        stray_img.setData(data=model, error=None, mask=None)
 
         return stray_img
 

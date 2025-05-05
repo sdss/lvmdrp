@@ -1856,7 +1856,6 @@ def subtract_straylight(
     smoothing: float = 0.01,
     use_weights : bool = False,
     median_box: int = 11,
-    gaussian_sigma: int = 20.0,
     parallel: int|str = "auto",
     display_plots: bool = False,
 ) -> Tuple[Image, Image, Image, Image]:
@@ -1887,8 +1886,6 @@ def subtract_straylight(
         If True, the error of the image is used as weights in the spline fitting
     median_box: int, optional with default: 11
         Width of the median filter used to smooth the image along the dispersion axis
-    gaussian_sigma : float, optional with default :20.0
-        Width of the 2D Gaussian filter to smooth the measured background signal
     parallel : either int (>0) or  'auto', optional with default: 'auto'
         Number of CPU cores used in parallel for the computation. If set to auto, the maximum number of CPUs
     display_plots : bool, optional with default: False
@@ -1957,21 +1954,12 @@ def subtract_straylight(
     # fit the signal in unmaksed areas along cross-dispersion axis by a polynomial
     # TODO: implement 2D spline fitting (look at MaNGA DRP port to python)
     # TODO: weights are not implemented yet, do that next
-    # img_fit = img_median.fitSpline(smoothing=smoothing, use_weights=use_weights, clip=(0.0, None), display_plots=True)
     log.info(f"fitting spline with {smoothing = } to the background signal along cross-dispersion axis")
-    img_fit = img_median.fit_spline2d(bins=(400, 19), smoothing=smoothing)
-
-    # median filter to reject outlying columns
-    # img_fit = img_fit.medianImg((1, 7))
-
-    # smooth the results by 2D Gaussian filter of given width
-    # log.info(f"smoothing the background signal by a 2D Gaussian filter of width {gaussian_sigma}")
-    # img_stray = img_fit.convolveGaussImg(1, gaussian_sigma)
-    img_stray = copy(img_fit)
+    img_stray = img_median.fit_spline2d(bins=(40, 19), smoothing=smoothing, display_plots=False)
 
     # subtract smoothed background signal from original image
     log.info("subtracting the smoothed background signal from the original image")
-    img_out = loadImage(in_image)
+    img_out = copy(img)
     img_out._data = img_out._data - img_stray._data
 
     # include header and write out file
@@ -1997,8 +1985,6 @@ def subtract_straylight(
     ax_strayy.tick_params(axis="y", labelleft=False)
     ax_strayx.set_ylabel(f"Counts ({unit})")
     ax_strayy.set_xlabel(f"Counts ({unit})")
-    # ax_strayx.set_yscale("asinh")
-    # ax_strayy.set_xscale("asinh")
     axins1 = inset_axes(ax, width="30%", height="2%", loc="upper right")
     axins1.tick_params(labelsize="small", labelcolor="tab:red")
 
@@ -2010,12 +1996,12 @@ def subtract_straylight(
     cbar.set_label(f"Counts ({unit})", fontsize="small", color="tab:red")
     colors_x = plt.cm.coolwarm(numpy.linspace(0, 1, img_median._data.shape[0]))
     colors_y = plt.cm.coolwarm(numpy.linspace(0, 1, img_median._data.shape[1]))
-    ax_strayx.fill_between(x_pixels, bn.nanmedian(img._error, axis=0), lw=0, fc="0.8")
     for iy in y_pixels:
         ax_strayx.plot(x_pixels, img_stray._data[iy], ",", color=colors_x[iy], alpha=0.2)
-    ax_strayy.fill_betweenx(y_pixels, 0, bn.nanmedian(img._error, axis=1), lw=0, fc="0.8")
+    ax_strayx.step(x_pixels, numpy.sqrt(bn.nanmedian(img._error**2, axis=0)), lw=1, color="0.8", where="mid")
     for ix in x_pixels:
         ax_strayy.plot(img_stray._data[:, ix], y_pixels, ",", color=colors_y[ix], alpha=0.2)
+    ax_strayy.step(numpy.sqrt(bn.nanmedian(img._error, axis=1)), y_pixels, lw=1, color="0.8", where="mid")
     save_fig(fig, product_path=out_image, to_display=display_plots, figure_path="qa", label="straylight_model")
 
     # write out stray light image
@@ -2027,8 +2013,7 @@ def subtract_straylight(
         hdus.append(pyfits.PrimaryHDU(img._data, header=img._header))
         hdus.append(pyfits.ImageHDU(img_out._data, name="CLEANED"))
         hdus.append(pyfits.ImageHDU(masked, name="MASKED"))
-        hdus.append(pyfits.ImageHDU(img_fit._data, name="SPLINE"))
-        hdus.append(pyfits.ImageHDU(img_stray._data, name="SMOOTH"))
+        hdus.append(pyfits.ImageHDU(img_stray._data, name="SPLINE"))
         hdus.writeto(out_stray, overwrite=True)
 
         # stray_model = fits.HDUList()
@@ -2040,7 +2025,7 @@ def subtract_straylight(
         # stray_model.append(fits.ImageHDU(data=img._data-model._data, name="NOSTRAY_MODEL"))
         # stray_model.writeto(stray_path, overwrite=True)
 
-    return img_median, img_fit, img_stray, img_out
+    return img_median, img_stray, img_out
 
 def traceFWHM_drp(
     in_image,

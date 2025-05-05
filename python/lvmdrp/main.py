@@ -1462,8 +1462,7 @@ def reduce_2d(mjd, calibrations, expnums=None, exptime=None, cameras=CAMERAS,
                 with Timer(name='Straylight '+lframe_path, logger=log.info):
                     subtract_straylight(in_image=dframe_path, out_image=lframe_path, out_stray=lstr_path,
                                         in_cent_trace=mtrace_path, select_nrows=(5,5), use_weights=True,
-                                        aperture=11, smoothing=0.001, median_box=101, gaussian_sigma=20.0,
-                                        parallel=parallel_run)
+                                        aperture=11, smoothing=100, median_box=None, parallel=parallel_run)
 
 
 def science_reduction(expnum: int, use_longterm_cals: bool = False,
