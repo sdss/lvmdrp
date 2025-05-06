@@ -1876,7 +1876,7 @@ def subtract_straylight(
     out_image : str
         Path to the output FITS file for the stray-light-subtracted image.
     out_stray : str, optional
-        Path to the output FITS file for the stray light model and intermediate images (default: None).
+        Path to the output FITS file for the stray light model (default: None).
     x_bins : int, optional
         Number of bins along the X axis for the spline fit (default: 40).
     select_nrows : int or tuple of int, optional
@@ -1992,11 +1992,10 @@ def subtract_straylight(
     # subtract smoothed background signal from original image
     log.info("subtracting the smoothed background signal from the original image")
     img_out = copy(img)
-    img_out = img - img_stray
+    img_out.setData(data=img._data-img_stray._data)
 
     # include header and write out file
     log.info(f"writing stray light subtracted image to {os.path.basename(out_image)}")
-    img_out.setHeader(header=img.getHeader())
     img_out.writeFitsData(out_image)
 
     # plot results: polyomial fitting & smoothing, both with masked regions on
@@ -2007,12 +2006,13 @@ def subtract_straylight(
         masked = img_median._data.copy()
         masked[img_median._mask] = numpy.nan
         log.info(f"writing stray light image to {os.path.basename(out_stray)}")
-        hdus = pyfits.HDUList()
-        hdus.append(pyfits.PrimaryHDU(img._data, header=img._header))
-        hdus.append(pyfits.ImageHDU(img_out._data, name="CLEANED"))
-        hdus.append(pyfits.ImageHDU(masked, name="MASKED"))
-        hdus.append(pyfits.ImageHDU(img_stray._data, name="SPLINE"))
-        hdus.writeto(out_stray, overwrite=True)
+        img_stray.writeFitsData(out_stray)
+        # hdus = pyfits.HDUList()
+        # hdus.append(pyfits.PrimaryHDU(img_stray._data, header=img._header))
+        # hdus.append(pyfits.ImageHDU(img_out._data, name="CLEANED"))
+        # hdus.append(pyfits.ImageHDU(masked, name="MASKED"))
+        # hdus.append(pyfits.ImageHDU(img_stray._data, name="SPLINE"))
+        # hdus.writeto(out_stray, overwrite=True)
 
     return img_median, img_stray, img_out
 

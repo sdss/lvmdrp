@@ -2186,21 +2186,32 @@ class Image(Header):
         data_binned = data_binned.T
         error_binned = error_binned.T
 
+        # mask out outlying/invalid bins
         zscore = numpy.abs(numpy.nanmedian(data_binned, axis=1)[:, None] - data_binned) / numpy.nanstd(data_binned, axis=1)[:, None]
         valid_bins = numpy.isfinite(data_binned) & numpy.isfinite(error_binned) & (zscore < nsigma)
 
+        # fit 2D smoothing spline
         tck = interpolate.bisplrep(
             x[valid_bins].ravel(), y[valid_bins].ravel(), data_binned[valid_bins].ravel(),
             w=1.0/error_binned[valid_bins].ravel() if use_weights else None,
             s=smoothing, xb=0, xe=4086, yb=0, ye=4080, eps=1e-8)
-        model = interpolate.bisplev(x_pixels, y_pixels, tck).T
+        model_data = interpolate.bisplev(x_pixels, y_pixels, tck).T
+
+        # calculate binned residuals & model systematic errors
+        model_binned = interpolate.bisplev(x_cent, y_cent, tck).T
+        model_residuals = (model_binned - data_binned)**2
+
+        model_error = interpolate.griddata(
+            points=(x[valid_bins].ravel(), y[valid_bins].ravel()), values=model_residuals[valid_bins].ravel(), xi=(X.ravel(), Y.ravel()),
+            method="nearest", fill_value=numpy.nan, rescale=True).reshape(self._dim)
+        model_error = numpy.sqrt(model_error)
 
         if axs is not None:
             y_pixels = numpy.arange(self._data.shape[0])
             x_pixels = numpy.arange(self._data.shape[1])
             unit = self._header["BUNIT"]
-            norm = simple_norm(data=model, stretch="asinh")
-            im = axs["img"].imshow(model, origin="lower", cmap="Greys_r", norm=norm, interpolation="none")
+            norm = simple_norm(data=model_data, stretch="asinh")
+            im = axs["img"].imshow(model_data, origin="lower", cmap="Greys_r", norm=norm, interpolation="none")
             axs["img"].set_aspect("auto")
             axs["img"].plot(x.ravel(), y.ravel(), "o", mew=0.1, ms=1, mec="tab:blue", mfc="none")
             cbar = plt.colorbar(im, cax=axs["col"], orientation="horizontal")
@@ -2208,10 +2219,10 @@ class Image(Header):
             colors_x = plt.cm.coolwarm(numpy.linspace(0, 1, self._data.shape[0]))
             colors_y = plt.cm.coolwarm(numpy.linspace(0, 1, self._data.shape[1]))
             for iy in y_pixels:
-                axs["xma"].plot(x_pixels, model[iy], ",", color=colors_x[iy], alpha=0.2)
+                axs["xma"].plot(x_pixels, model_data[iy], ",", color=colors_x[iy], alpha=0.2)
             axs["xma"].step(x_pixels, numpy.sqrt(bn.nanmedian(self._error**2, axis=0)), lw=1, color="0.8", where="mid")
             for ix in x_pixels:
-                axs["yma"].plot(model[:, ix], y_pixels, ",", color=colors_y[ix], alpha=0.2)
+                axs["yma"].plot(model_data[:, ix], y_pixels, ",", color=colors_y[ix], alpha=0.2)
             axs["yma"].step(numpy.sqrt(bn.nanmedian(self._error, axis=1)), y_pixels, lw=1, color="0.8", where="mid")
             for i in range(y_nbins):
                 mod = interpolate.bisplev(x_pixels, y_cent, tck).T
@@ -2231,7 +2242,7 @@ class Image(Header):
                 axs["res"][i].set_ylim(-1.5, +1.5)
 
         stray_img = copy(self)
-        stray_img.setData(data=model, error=None, mask=None)
+        stray_img.setData(data=model_data, error=model_error, mask=None)
 
         return stray_img, data_binned, error_binned, valid_bins
 

@@ -1462,8 +1462,8 @@ def reduce_2d(mjd, calibrations, expnums=None, exptime=None, cameras=CAMERAS,
             if sub_straylight:
                 with Timer(name='Straylight '+lframe_path, logger=log.info):
                     subtract_straylight(in_image=dframe_path, out_image=lframe_path, out_stray=lstr_path,
-                                        in_cent_trace=mtrace_path, y_bins=40, select_nrows=(10,10), use_weights=True,
-                                        aperture=11, nsigma=5.0, smoothing=None, median_box=None, parallel=parallel_run)
+                                        in_cent_trace=mtrace_path, x_bins=40, select_nrows=(10,10), use_weights=True,
+                                        aperture=11, nsigma=2.0, smoothing=None, median_box=101, parallel=parallel_run)
 
 
 def reduce_1d(mjd, calibrations, expnums=None, replace_with_nan=True, sub_straylight=True, skip_done=True, keep_ancillary=False):
