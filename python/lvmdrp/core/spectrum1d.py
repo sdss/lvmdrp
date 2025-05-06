@@ -1,4 +1,6 @@
 from copy import deepcopy
+import warnings
+from mpl_toolkits.axes_grid1.axes_divider import make_axes_locatable
 
 import numpy
 import bottleneck as bn
@@ -10,7 +12,6 @@ from scipy import signal, interpolate, ndimage, sparse
 from scipy.ndimage import zoom, median_filter
 from typing import List, Tuple
 
-from lvmdrp import log
 from lvmdrp.utils import gaussian
 from lvmdrp.core import fit_profile
 from lvmdrp.core import plot
@@ -3591,8 +3592,8 @@ class Spectrum1D(Header):
             select = (self._wave >= centre - hw) & (self._wave <= centre + hw)
             # print(i, centre, self._wave.min(), self._wave.max(), select.sum())
             if mask[select].sum() >= badpix_threshold:
-                log.warning(f"skipping line at pixel {centre} with {mask[select].sum()} >= {badpix_threshold = } bad pixels")
-                self.add_header_comment(f"skipping line at pixel {centre} with {mask[select].sum()} >= {badpix_threshold = } bad pixels")
+                warnings.warn(f"skipping line @ {centre:.2f} with {mask[select].sum()} >= {badpix_threshold = } bad pixels")
+                self.add_header_comment(f"skipping line @ {centre:.2f} with {mask[select].sum()} >= {badpix_threshold = } bad pixels")
                 continue
 
             flux_guess = numpy.interp(centre, self._wave[select], data[select]) * fact * fwhm_guess / 2.354
@@ -3624,28 +3625,50 @@ class Spectrum1D(Header):
                 flux[i], cent[i], fwhm[i] = gauss.getPar()
             fwhm[i] *= 2.354
 
-            # mask line if >=2 pixels are masked within 3.5sigma
-            model_badpix = data[select] == 0
-            x = self._wave[select].copy()
-            if not numpy.isnan([cent[i], fwhm[i]]).any():
+            if axs is not None:
                 select_2 = (self._wave>=cent[i]-3.5*fwhm[i]/2.354) & (self._wave<=cent[i]+3.5*fwhm[i]/2.354)
                 x = self._wave[select_2]
-                model_badpix = mask[select_2]
-                if model_badpix.sum() >= 2:
-                    flux[i] = cent[i] = fwhm[i] = bg[i] = numpy.nan
-
-            if axs is not None:
-                axs[i].axvspan(x[0], x[-1], alpha=0.1, fc="0.5", label="reg. of masking")
+                axs[i].plot(self._wave, (select)*numpy.nan+bn.nanmin(data), "ok")
                 axs[i] = gauss.plot(self._wave[select], self._data[select], mask=self._mask[select], ax=axs[i])
+                axs[i].errorbar(self._wave[select], self._data[select], yerr=self._error[select], fmt=",", color="k", ecolor="k", lw=1)
+                axs[i].axhline(bg[i], ls="--", color="tab:blue", lw=1)
+                axs[i].axvspan(x[0], x[-1], alpha=0.1, fc="0.5", label="reg. of masking")
                 axs[i].axvline(cent_guess[i], ls="--", lw=1, color="tab:red", label="cent. guess")
-                axs[i].set_title(f"{axs[i].get_title()} @ {cent[i]:.1f} (pixel)")
+                axs[i].axvline(cent[i], ls="--", lw=1, color="tab:blue", label="cent. model")
+                axs[i].set_title(f"{axs[i].get_title()} @ {cent[i]:.1f} {'Angstroms' if self._pixels[0]!=self._wave[0] else 'pixels'}")
                 axs[i].text(0.05, 0.9, f"flux = {flux[i]:.2f}", va="bottom", ha="left", transform=axs[i].transAxes, fontsize=11)
                 axs[i].text(0.05, 0.8, f"cent = {cent[i]:.2f}", va="bottom", ha="left", transform=axs[i].transAxes, fontsize=11)
                 axs[i].text(0.05, 0.7, f"fwhm = {fwhm[i]:.2f}", va="bottom", ha="left", transform=axs[i].transAxes, fontsize=11)
+                axs[i].text(0.05, 0.6, f"bg   = {bg[i]:.2f}", va="bottom", ha="left", transform=axs[i].transAxes, fontsize=11)
                 axs[i].legend(loc="upper right", frameon=False, fontsize=11)
 
-        return flux, cent, fwhm, bg
+                zscore = (gauss(self._wave[select]) - self._data[select]) / self._error[select]
+                ax_divider = make_axes_locatable(axs[i])
+                ax_res = ax_divider.append_axes("bottom", size="20%", pad="3%")
+                ax_res.sharex(axs[i])
+                axs[i].tick_params(labelbottom=False)
+                ax_res.fill_between(self._wave[select], zscore, zscore*0, step="mid", alpha=0.5)
+                ax_res.axvspan(x[0], x[-1], alpha=0.1, fc="0.5")
+                ax_res.axhspan(-1.0, 1.0, alpha=0.4, fc="0.5")
+                ax_res.axvline(cent_guess[i], ls="--", lw=1, color="tab:red")
+                ax_res.axvline(cent[i], ls="--", lw=1, color="tab:blue")
+                ax_res.axhline(ls="--", color="0.2", lw=1)
+                axs[i].tick_params(labelsize="x-small", width=0.8)
+                ax_res.tick_params(labelsize="x-small", width=0.8)
+                ax_res.set_ylim(-2.5, 2.5)
+                ax_res.tick_params(labelleft=False)
 
+            # mask line if >=2 pixels are masked within 3.5sigma
+            model_badpix = data[select] == 0
+            if not numpy.isnan([cent[i], fwhm[i]]).any():
+                select_2 = (self._wave>=cent[i]-3.5*fwhm[i]/2.354) & (self._wave<=cent[i]+3.5*fwhm[i]/2.354)
+                model_badpix = mask[select_2]
+                if model_badpix.sum() >= 2:
+                    warnings.warn(f"masking line @ {centre:.2f} with >= 2 masked pixels within a 3.5 sigma window")
+                    self.add_header_comment(f"masking line @ {centre:.2f} with >= 2 masked pixels within a 3.5 sigma window")
+                    flux[i] = cent[i] = fwhm[i] = bg[i] = numpy.nan
+
+        return flux, cent, fwhm, bg
 
     def obtainGaussFluxPeaks(self, pos, sigma, replace_error=1e10, plot=False):
         """returns Gaussian peaks parameters, flux error and mask
@@ -3845,3 +3868,23 @@ class Spectrum1D(Header):
         masks = numpy.logical_or(masks, numpy.isnan(sky_errors))
 
         return Spectrum1D(wave=wave, data=fluxes, error=errors, lsf=fwhms, mask=masks, sky=skies, sky_error=sky_errors)
+
+    def fit_lines(self, cwaves, dwave=8, axs=None):
+
+        cwaves_ = numpy.atleast_1d(cwaves)
+
+        if self._lsf is None:
+            fwhm_guess = 2.5
+        else:
+            fwhm_guess = numpy.nanmean(numpy.interp(cwaves_, self._wave, self._lsf))
+
+        if axs is not None:
+            axs = numpy.atleast_1d(axs)
+        flux, sky_wave, fwhm, bg = self.fitSepGauss(cwaves_, dwave,
+                                                    fwhm_guess, 0.0,
+                                                    [0, numpy.inf],
+                                                    [-2.5, 2.5],
+                                                    [max(fwhm_guess - 1.5, 0), fwhm_guess + 1.5],
+                                                    [0.0, numpy.inf],
+                                                    axs=axs)
+        return flux, sky_wave, fwhm, bg

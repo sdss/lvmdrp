@@ -42,7 +42,7 @@ from lvmdrp.core.image import (
     glueImages,
     loadImage,
 )
-from lvmdrp.core.plot import plt, create_subplots, plot_detrend, plot_strips, plot_image_shift, plot_fiber_thermal_shift, save_fig
+from lvmdrp.core.plot import plt, create_subplots, plot_detrend, plot_error, plot_strips, plot_image_shift, plot_fiber_thermal_shift, save_fig
 from lvmdrp.core.rss import RSS
 from lvmdrp.core.spectrum1d import Spectrum1D, _spec_from_lines, _cross_match
 from lvmdrp.core.tracemask import TraceMask
@@ -2519,6 +2519,7 @@ def extract_spectra(
     in_fwhm: str = None,
     in_model: str = None,
     in_acorr: str = None,
+    assume_thermal_shift: float = None,
     columns: List[int] = [500, 750, 1000, 1250, 1500, 1750, 2000, 2250, 2500, 2750, 3000],
     column_width: int = 50,
     method: str = "optimal",
@@ -2609,16 +2610,23 @@ def extract_spectra(
     # axs_cc[-1].set_xlim(shift_range)
 
     # fix centroids for thermal shifts
-    log.info(f"measuring fiber thermal shifts @ columns: {','.join(map(str, columns))}")
-    trace_mask, shifts, median_shift, std_shift, _ = _fix_fiber_thermal_shifts(img, trace_mask, 2.5,
-                                                                               fiber_model=fiber_model,
-                                                                               trace_amp=10000,
-                                                                               columns=columns,
-                                                                               column_width=column_width,
-                                                                               shift_range=shift_range, axs=[axs_cc, axs_fb])
-    # save columns measured for thermal shifts
-    plot_fiber_thermal_shift(columns, shifts, median_shift, std_shift, ax=ax_shift)
-    save_fig(fig, product_path=out_rss, to_display=display_plots, figure_path="qa", label="fiber_thermal_shifts")
+    if assume_thermal_shift is not None:
+        log.info(f"assuming fiber thermal shift {assume_thermal_shift:.4f}")
+        median_shift = assume_thermal_shift
+        std_shift = 0
+        shifts = numpy.ones_like(columns) * median_shift
+        trace_mask._data += median_shift
+    else:
+        log.info(f"measuring fiber thermal shifts @ columns: {','.join(map(str, columns))}")
+        trace_mask, shifts, median_shift, std_shift, _ = _fix_fiber_thermal_shifts(img, trace_mask, 2.5,
+                                                                                fiber_model=fiber_model,
+                                                                                trace_amp=10000,
+                                                                                columns=columns,
+                                                                                column_width=column_width,
+                                                                                shift_range=shift_range, axs=[axs_cc, axs_fb])
+        # save columns measured for thermal shifts
+        plot_fiber_thermal_shift(columns, shifts, median_shift, std_shift, ax=ax_shift)
+        save_fig(fig, product_path=out_rss, to_display=display_plots, figure_path="qa", label="fiber_thermal_shifts")
 
     if method == "optimal":
         # check if fwhm trace is given and exists
@@ -2732,6 +2740,16 @@ def extract_spectra(
     rss.add_header_comment(f"{in_fwhm}, fiber width (FWHM) used for {camera}")
     rss.add_header_comment(f"{in_model}, fiber model used for {camera}")
     rss.add_header_comment(f"{in_acorr}, fiber aperture correction used for {camera}")
+
+    # create error propagation plot
+    fig = plt.figure(figsize=(15, 5), layout="constrained")
+    gs = GridSpec(1, 14, figure=fig)
+
+    ax_1 = fig.add_subplot(gs[0, :-4])
+    ax_2 = fig.add_subplot(gs[0, -4:])
+
+    plot_error(frame=rss, axs=[ax_1, ax_2], counts_threshold=(3000, 60000), labels=True)
+    save_fig(fig, product_path=out_rss, to_display=display_plots, figure_path="qa", label="extracted_error")
 
     # save extracted RSS
     log.info(f"writing extracted spectra to {os.path.basename(out_rss)}")
@@ -2961,52 +2979,84 @@ def reprojectRSS_drp(
     rep.writeto(f"{out_path}/{out_name}_2d.fits", overwrite=True)
 
 
-def testres_drp(image, trace, fwhm, flux):
-    """
-    Historic task used for debugging of the the extraction routine...
-    """
-    img = Image()
-    # t1 = time.time()
-    img.loadFitsData(image, extension_data=0)
-    trace_mask = TraceMask()
-    trace_mask.loadFitsData(trace, extension_data=0)
-    trace_fwhm = TraceMask()
-    #   trace_fwhm.setData(data=numpy.ones(trace_mask._data.shape)*2.5)
-    trace_fwhm.loadFitsData(fwhm, extension_data=0)
+def validate_extraction(in_image, in_cent, in_width, in_rss, plot_columns=[1000, 2000, 3000], display_plots=False):
+    """Evaluates the extracted flux into the original 2D pixel grid
 
-    trace_flux = TraceMask()
-    trace_flux.loadFitsData(flux, extension_data=0)
+    This routine will evaluate the extracted flux in the original
+    2D grid and compare the resulting 2D model against the original
+    2D image. Three images are stored as outputs:
+
+        - The residual 2D image: model - data
+        - The ratio 2D image: model / data
+        - The 2D model
+
+    Parameters
+    ----------
+    in_image : str
+        Path to the original 2D image of the extracted flux
+    in_cent : str
+        Path to the fiber centroids trace
+    in_width : str
+        Path to the fiber width (FWHM) trace
+    in_rss : str
+        Path to the extracted flux in RSS format
+    plot_columns : array_like, optional
+        columns to show in plot, by default [1000, 2000, 3000]
+    display_plots : bool, optional
+        whether to display plots to screen or not, by dafult False
+    """
+    log.info(f"loading 2D image {in_image}")
+    img = Image()
+    img._data = numpy.nan_to_num(img._data)
+    img.loadFitsData(in_image)
+
+    log.info(f"loading fiber parameters in {in_cent} and {in_width}")
+    cent = TraceMask.from_file(in_cent)
+    width = TraceMask.from_file(in_width)
+    width._data /= 2.354
+
+    log.info(f"loading extracted flux in {in_rss}")
+    rss = RSS.from_file(in_rss)
+    rss._data = numpy.nan_to_num(rss._data)
+
+    ypix_cor = rss._slitmap[["spectrographid"] == int(img._header["CCD"][1])]["ypix_z"]
+    ypix_ori = img._slitmap[["spectrographid"] == int(img._header["CCD"][1])]["ypix_z"]
+    thermal_shift = ypix_cor - ypix_ori
+    log.info(f"fiber thermal shift in slitmap: {thermal_shift:.4f}")
+    cent._data += thermal_shift
+
+    log.info(f"evaluating extracted flux into 2D pixel grid for {img._dim[1]} columns")
     x = numpy.arange(img._dim[0])
     out = numpy.zeros(img._dim)
     fact = numpy.sqrt(2.0 * numpy.pi)
+
+    fig, axs = create_subplots(to_display=display_plots, nrows=len(plot_columns), ncols=1, figsize=(15,5), sharex=True, layout="constrained")
     for i in range(img._dim[1]):
-        #  print i
-        A = (
-            1.0
-            * numpy.exp(
-                -0.5
-                * (
-                    (x[:, numpy.newaxis] - trace_mask._data[:, i][numpy.newaxis, :])
-                    / abs(trace_fwhm._data[:, i][numpy.newaxis, :] / 2.354)
-                )
-                ** 2
-            )
-            / (fact * abs(trace_fwhm._data[:, i][numpy.newaxis, :] / 2.354))
-        )
-        spec = numpy.dot(A, trace_flux._data[:, i])
+        A = (numpy.exp(-0.5 * ((x[:, None] - cent._data[:, i][None, :]) / abs(width._data[:, i][None, :])) ** 2) / (fact * abs(width._data[:, i][None, :])))
+        spec = numpy.dot(A, rss._data[:, i])
         out[:, i] = spec
-        if i == 1000:
-            plt.plot(spec, "-r")
-            plt.plot(img._data[:, i], "ok")
-            plt.show()
+        if i in plot_columns:
+            axs[plot_columns.index(i)].step(x, img._data[:, i], color="k", lw=1, where="mid")
+            axs[plot_columns.index(i)].step(x, spec, color="r", lw=1, where="mid")
 
+    out_path = os.path.dirname(in_image)
+    out_name = os.path.basename(in_image).split(".fits")[0]
+    out_residual = os.path.join(out_path, f"{out_name}_residual.fits")
+    out_2dimage = os.path.join(out_path, f"{out_name}_2dimage.fits")
+    out_ratio = os.path.join(out_path, f"{out_name}_ratio.fits")
+    save_fig(fig, product_path=out_2dimage, to_display=display_plots, figure_path="qa", label="2D_extracted_model")
+
+    log.info(f"writing residual to {out_residual}")
     hdu = pyfits.PrimaryHDU(img._data - out)
-    hdu.writeto("res.fits", overwrite=True)
-    hdu = pyfits.PrimaryHDU(out)
-    hdu.writeto("fit.fits", overwrite=True)
+    hdu.writeto(out_residual, overwrite=True)
 
-    hdu = pyfits.PrimaryHDU((img._data - out) / img._data)
-    hdu.writeto("res_rel.fits", overwrite=True)
+    log.info(f"writing ratio to {out_ratio}")
+    hdu = pyfits.PrimaryHDU(out / img._data)
+    hdu.writeto(out_ratio, overwrite=True)
+
+    log.info(f"writing 2D model {out_2dimage}")
+    hdu = pyfits.PrimaryHDU(out)
+    hdu.writeto(out_2dimage, overwrite=True)
 
 
 # TODO: for arcs take short exposures for bright lines & long exposures for faint lines
@@ -3615,10 +3665,16 @@ def add_astrometry(
     slitmap['dec']=DECfib * u.deg
     org_img._slitmap=slitmap
 
-    # set header keyword with best knowledge of IFU center
-    org_img.setHdrValue('IFUCENRA', RAobs_sci, 'best SCI IFU RA (ASTRMSRC) [deg]')
-    org_img.setHdrValue('IFUCENDE', DECobs_sci, 'best SCI IFU DEC (ASTRMSRC) [deg]')
-    org_img.setHdrValue('IFUCENPA', PAobs_sci, 'best SCI IFU PA (ASTRMSRC) [deg]')
+    # set header keyword with best knowledge of IFU center for SCI, SKYE, SKYW
+    org_img.setHdrValue('SCIRA', RAobs_sci, 'SCI center, fiberid=975, RA (ASTRMSRC)[deg]')
+    org_img.setHdrValue('SCIDEC', DECobs_sci, 'SCI center, fiberid=975, DEC (ASTRMSRC)[deg]')
+    org_img.setHdrValue('SCIPA', PAobs_sci, 'SCI center, fiberid=975, PA (ASTRMSRC)[deg]')
+    org_img.setHdrValue('SKYERA', RAobs_skye, 'SKYE center, fiberid=36, RA (ASTRMSRC)[deg]')
+    org_img.setHdrValue('SKYEDEC', DECobs_skye, 'SKYE center, fiberid=36, DEC (ASTRMSRC)[deg]')
+    org_img.setHdrValue('SKYEPA', PAobs_skye, 'SKYE center, fiberid=36, PA (ASTRMSRC)[deg]')
+    org_img.setHdrValue('SKYWRA', RAobs_skyw, 'SKYW center, fiberid=1, RA (ASTRMSRC)[deg]')
+    org_img.setHdrValue('SKYWDEC', DECobs_skyw, 'SKYW center, fiberid=1, DEC (ASTRMSRC)[deg]')
+    org_img.setHdrValue('SKYWPA', PAobs_skyw, 'SKYW center, fiberid=1, PA (ASTRMSRC)[deg]')
 
     log.info(f"writing RA,DEC to slitmap in image '{os.path.basename(out_image)}'")
     org_img.writeFitsData(out_image)
@@ -3827,16 +3883,22 @@ def detrend_frame(
     # show plots
     log.info("plotting results")
     # detrending process
-    fig, axs = create_subplots(
-        to_display=display_plots,
-        nrows=2,
-        ncols=2,
-        figsize=(15, 15),
-        sharex=True,
-        sharey=True,
-    )
-    plt.subplots_adjust(wspace=0.15, hspace=0.1)
-    plot_detrend(ori_image=org_img, det_image=detrended_img, axs=axs, mbias=mbias_img, mdark=mdark_img, labels=True)
+    fig = plt.figure(figsize=(15, 10), layout="constrained")
+    gs = GridSpec(3, 14, figure=fig)
+
+    ax1 = fig.add_subplot(gs[0, :7])
+    ax2 = fig.add_subplot(gs[0, 7:], sharex=ax1, sharey=ax1)
+    ax3 = fig.add_subplot(gs[1, :7], sharex=ax1, sharey=ax1)
+    ax4 = fig.add_subplot(gs[1, 7:], sharex=ax1, sharey=ax1)
+    ax1.tick_params(labelbottom=False)
+    ax2.tick_params(labelbottom=False)
+    ax2.tick_params(labelleft=False)
+    ax4.tick_params(labelleft=False)
+    ax_1 = fig.add_subplot(gs[2, :-4])
+    ax_2 = fig.add_subplot(gs[2, -4:], sharey=ax_1)
+    plot_detrend(ori_image=org_img, det_image=detrended_img, axs=[ax1, ax2, ax3, ax4], mbias=mbias_img, mdark=mdark_img, labels=True)
+    # Poisson error
+    plot_error(frame=detrended_img, axs=[ax_1, ax_2], labels=True)
     save_fig(
         fig,
         product_path=out_image,

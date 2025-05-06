@@ -22,12 +22,13 @@ from numpy import polynomial
 from scipy import interpolate, ndimage
 
 from lvmdrp.utils.decorators import skip_on_missing_input_path, skip_if_drpqual_flags
-from lvmdrp.core.constants import CONFIG_PATH, ARC_LAMPS
+from lvmdrp.core.constants import CONFIG_PATH, ARC_LAMPS, REF_SKYLINES
 from lvmdrp.core.cube import Cube
 from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.core.image import loadImage
 from lvmdrp.core.passband import PassBand
 from lvmdrp.core.plot import (plt, create_subplots, save_fig,
+                              plot_error,
                               plot_wavesol_coeffs, plot_wavesol_residuals,
                               plot_wavesol_spec, plot_wavesol_wave,
                               plot_wavesol_lsf)
@@ -55,10 +56,6 @@ __all__ = [
 DONE_PASS = "gi"
 DONE_MAGS = numpy.asarray([22, 21])
 DONE_LIMS = numpy.asarray([1.7, 5.0])
-
-# GB hand picked isolated bright lines across each channel which are not doublest in UVES atlas
-# true wavelengths taken from UVES sky line atlas
-REF_SKYLINES = {'b':[5577.346680], 'r':[6363.782715, 7358.680176, 7392.209961], 'z':[8399.175781, 8988.383789, 9552.546875, 9719.838867]}
 
 
 def _linear_model(pars, xdata):
@@ -1149,9 +1146,9 @@ def correctPixTable_drp(
 # TODO: hacer esto antes de hacer el rasampling en wl
 @skip_on_missing_input_path(["in_rss"])
 @skip_if_drpqual_flags(["BADTRACE", "EXTRACTBAD"], "in_rss")
-def resample_wavelength(in_rss: str, out_rss: str, method: str = "linear",
+def resample_wavelength(in_rss: str, out_rss: str, method: str = "spline",
                         wave_range: Tuple[float,float] = None, wave_disp: float = None,
-                        convert_to_density: bool = False) -> RSS:
+                        convert_to_density: bool = False, display_plots: bool = False) -> RSS:
     """Resamples the RSS wavelength solutions to a common wavelength solution
 
     A common wavelength solution is computed for the RSS by resampling the
@@ -1164,7 +1161,7 @@ def resample_wavelength(in_rss: str, out_rss: str, method: str = "linear",
         Input RSS FITS file where the wavelength is stored as a pixel table
     out_rss : string
         Output RSS FITS file with a common wavelength solution
-    method : string, optional with default: 'linear'
+    method : string, optional with default: 'spline'
         Interpolation scheme used for the spectral resampling of the data.
         Available options are:
             - linear
@@ -1177,6 +1174,8 @@ def resample_wavelength(in_rss: str, out_rss: str, method: str = "linear",
         The "optimal" dispersion will be used if the parameter is empty.
     convert_to_density : string of boolean, optional with default: False
         If True, the resampled RSS will be converted to density units.
+    display_plots : bool, optional
+        If True, display plots to screen, by default False
 
     Returns
     -------
@@ -1199,7 +1198,18 @@ def resample_wavelength(in_rss: str, out_rss: str, method: str = "linear",
 
     # resample the wavelength solution
     log.info("resampling the spectra ...")
-    new_rss = rss.rectify_wave(wave_range=wave_range, wave_disp=wave_disp)
+    new_rss = rss.rectify_wave(wave_range=wave_range, wave_disp=wave_disp, return_density=convert_to_density)
+
+    # create error propagation plot
+    fig = plt.figure(figsize=(15, 5), layout="constrained")
+    gs = gridspec.GridSpec(1, 14, figure=fig)
+
+    ax_1 = fig.add_subplot(gs[0, :-4])
+    ax_2 = fig.add_subplot(gs[0, -4:])
+    dlambda = numpy.gradient(rss._wave, axis=1)
+    ref_value = numpy.percentile(dlambda / numpy.sqrt(dlambda), q=[25, 50, 75])
+    plot_error(frame=new_rss, axs=[ax_1, ax_2], counts_threshold=(3000, 60000), ref_value=ref_value, labels=True)
+    save_fig(fig, product_path=out_rss, to_display=display_plots, figure_path="qa", label="resampled_error")
 
     # write output RSS
     log.info(f"writing resampled RSS to '{os.path.basename(out_rss)}'")

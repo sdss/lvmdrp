@@ -1458,21 +1458,26 @@ def _collect_header_data(filename: str) -> dict:
     hdr_dict_mapping = {'drpver': 'DRPVER', 'drpqual': 'DRPQUAL', 'dpos': 'DPOS', 'object': 'OBJECT',
                         'obstime': 'OBSTIME',
                         # sci
-                        'sci_ra': 'TESCIRA', 'sci_dec': 'TESCIDE', 'sci_amass': 'TESCIAM',
-                        'sci_kmpos': 'TESCIKM', 'sci_focpos': 'TESCIFO',
-                        'sci_sh_hght': 'GEOCORONAL SCI_SH_HGHT', 'sci_moon_sep': 'SKYMODEL SCI_RHO',
+                        'sci_ra': 'SCIRA', 'sci_dec': 'SCIDEC', 
+                        'sci_pa': 'SCIPA', 'sci_amass': 'TESCIAM',
+                        'sci_kmpos': 'TESCIKM', 'sci_focpos': 'TESCIFO', 'sci_alt': 'SKY SCI_ALT',
+                        'sci_sh_hght': 'SKY SCI_SH_HGHT', 'sci_moon_sep': 'SKY SCI_MOON_SEP',
                         # skye
-                        'skye_ra': 'TESKYERA', 'skye_dec': 'TESKYEDE', 'skye_amass': 'TESKYEAM',
+                        'skye_ra': 'SKYERA', 'skye_dec': 'SKYEDEC', 
+                        'skye_pa': 'SKYEPA', 'skye_amass': 'TESKYEAM',
                         'skye_kmpos': 'TESKYEKM', 'skye_focpos': 'TESKYEFO', 'skye_name': 'SKYENAME',
-                        'skye_sh_hght': 'GEOCORONAL SKYE_SH_HGHT', 'skye_moon_sep': 'SKYMODEL SKYE_RHO',
+                        'skye_alt': 'SKY SKYE_ALT', 'sci_skye_sep': 'SKY SCI_SKYE_SEP',
+                        'skye_sh_hght': 'SKY SKYE_SH_HGHT', 'skye_moon_sep': 'SKY SKYE_MOON_SEP',
                         # skyw
-                        'skyw_ra': 'TESKYWRA', 'skyw_dec': 'TESKYWDE', 'skyw_amass': 'TESKYWAM',
+                        'skyw_ra': 'SKYWRA', 'skyw_dec': 'SKYWDEC', 
+                        'skyw_pa': 'SKYWPA', 'skyw_amass': 'TESKYWAM',
                         'skyw_kmpos': 'TESKYWKM', 'skyw_focpos': 'TESKYWFO', 'skyw_name': 'SKYWNAME',
-                        'skyw_sh_hght': 'GEOCORONAL SKYW_SH_HGHT', 'skyw_moon_sep': 'SKYMODEL SKYW_RHO',
+                        'skyw_alt': 'SKY SKYW_ALT', 'sci_skyw_sep': 'SKY SCI_SKYW_SEP',
+                        'skyw_sh_hght': 'SKY SKYW_SH_HGHT', 'skyw_moon_sep': 'SKY SKYW_MOON_SEP',
                         # sky parameters
-                        'moon_ra': 'SKYMODEL MOON_RA', 'moon_dec': 'SKYMODEL MOON_DEC',
-                        'moon_phase': 'SKYMODEL MOON_PHASE', 'moon_fli': 'SKYMODEL MOON_FLI',
-                        'sun_alt': 'SKYMODEL SUNALT', 'moon_alt': 'SKYMODEL MOONALT'
+                        'moon_ra': 'SKY MOON_RA', 'moon_dec': 'SKY MOON_DEC',
+                        'moon_phase': 'SKY MOON_PHASE', 'moon_fli': 'SKY MOON_FLI',
+                        'sun_alt': 'SKY SUN_ALT', 'moon_alt': 'SKY MOON_ALT'
                         }
 
     with fits.open(filename) as hdulist:

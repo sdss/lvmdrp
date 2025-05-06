@@ -481,8 +481,8 @@ def fluxcal_standard_stars(in_rss, plot=True, GAIA_CACHE_DIR=None):
     rms_std_band = np.nanmean(rms_std[1000:3000])
     mean_std_band = -999.9 if np.isnan(mean_std_band) else mean_std_band
     rms_std_band = -999.9 if np.isnan(rms_std_band) else rms_std_band
-    rss.setHdrValue(f"SCISENM{label}", mean_std_band, f"mean stdstar sensitivity in {channel}")
-    rss.setHdrValue(f"SCISENR{label}", rms_std_band, f"mean stdstar sensitivity rms in {channel}")
+    rss.setHdrValue(f"STDSENM{label}", mean_std_band, f"mean stdstar sensitivity in {channel}")
+    rss.setHdrValue(f"STDSENR{label}", rms_std_band, f"mean stdstar sensitivity rms in {channel}")
     log.info(f"Mean stdstar sensitivity in {channel} : {mean_std_band}")
 
     if plot:

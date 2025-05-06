@@ -161,320 +161,50 @@ class FiberRows(Header, PositionTable):
     def __len__(self):
         return self._fibers
 
-    def __truediv__(self, other):
-        """
-        Operator to divide two Images or divide by another type if possible
-        """
-        if isinstance(other, self.__class__):
-            # define behaviour if the other is of the same instance
+    def _propagate_error(self, other, operation):
+        """ Error propagation for different operations. """
+        if self._error is None and getattr(other, "_error", None) is None:
+            return None
 
-            img = self.__class__(
-                header=self._header,
-                shape=self._shape,
-                size=self._size,
-                arc_position_x=self._arc_position_x,
-                arc_position_y=self._arc_position_y,
-                good_fibers=self._good_fibers,
-                fiber_type=self._fiber_type,
-            )
+        err1 = self._error if self._error is not None else 0
+        err2 = other._error if isinstance(other, self.__class__) and other._error is not None else 0
 
-            # subtract data if contained in both
-            if self._data is not None and other._data is not None:
-                new_data = self._data / other._data
-                img.setData(data=new_data)
-            else:
-                img.setData(data=self._data)
-
-            # add error if contained in both
-            if self._error is not None and other._error is not None:
-                new_error = numpy.sqrt(
-                    (self._error / other._data) ** 2
-                    + (self._data * other._error / other._data**2) ** 2
-                )
-                img.setData(error=new_error)
-            elif self._error is not None and other._error is None:
-                new_error = self._error / other._data
-                img.setData(error=new_error)
-            else:
-                img.setData(error=self._error)
-
-            # combined mask of valid pixels if contained in both
-            if self._mask is not None and other._mask is not None:
-                new_mask = numpy.logical_or(self._mask, other._mask)
-                img.setData(mask=new_mask)
-            else:
-                img.setData(mask=self._mask)
-            return img
-
-        elif isinstance(other, numpy.ndarray):
-            img = self.__class__(
-                error=self._error,
-                mask=self._mask,
-                header=self._header,
-                shape=self._shape,
-                size=self._size,
-                arc_position_x=self._arc_position_x,
-                arc_position_y=self._arc_position_y,
-                good_fibers=self._good_fibers,
-                fiber_type=self._fiber_type,
-            )
-
-            if self._data is not None:  # check if there is data in the object
-                dim = other.shape
-                # add ndarray according do its dimensions
-                if self._data.shape == dim:
-                    new_data = self._data / other
-                elif len(dim) == 1:
-                    if self._data.shape[0] == dim[0]:
-                        new_data = self._data / other[:, numpy.newaxis]
-                    elif self._data.shape[1] == dim[0]:
-                        new_data = self._data / other[numpy.newaxis, :]
-                else:
-                    new_data = self._data
-                if self._error is not None:
-                    new_error = self._error / other
-                else:
-                    new_error = None
-                img.setData(data=new_data, error=new_error)
-            return img
+        if operation in ('add', 'sub'):
+            return numpy.sqrt(err1**2 + err2**2)
+        elif operation == 'mul':
+            return numpy.sqrt((err1 * other._data)**2 + (self._data * err2)**2)
+        elif operation == 'div':
+            return numpy.sqrt((err1 / other._data)**2 + (self._data * err2 / other._data**2)**2)
         else:
-            # try to do addtion for other types, e.g. float, int, etc.
-            # try:
-            new_data = self._data / other
-            if self._error is not None:
-                new_error = self._error / other
-            else:
-                new_error = None
-            img = self.__class__(
-                data=new_data,
-                error=new_error,
-                mask=self._mask,
-                header=self._header,
-                shape=self._shape,
-                size=self._size,
-                arc_position_x=self._arc_position_x,
-                arc_position_y=self._arc_position_y,
-                good_fibers=self._good_fibers,
-                fiber_type=self._fiber_type,
-            )
-            return img
-        # except:
-        # raise exception if the type are not matching in general
-        #   raise exceptions.TypeError("unsupported operand type(s) for /: %s and %s"%(str(type(self)).split("'")[1], str(type(other)).split("'")[1]))
+            raise ValueError(f"Unknown operation: {operation}")
+
+    def _apply_operation(self, other, op, op_name):
+        if isinstance(other, self.__class__):
+            new_data = op(self._data, other._data)
+            new_error = self._propagate_error(other, op_name)
+            new_mask = numpy.logical_or(self._mask, other._mask) if self._mask is not None and other._mask is not None else None
+        elif isinstance(other, numpy.ndarray) or numpy.isscalar(other):
+            new_data = op(self._data, other)
+            new_error = (op(self._error, other) if self._error is not None else None)
+            new_mask = self._mask
+        else:
+            raise NotImplementedError(f"operation '{op_name}' between {self.__class__} and {type(other)} is not implemented")
+
+        new = copy(self)
+        new.setData(data=new_data, error=new_error, mask=new_mask)
+        return new
 
     def __add__(self, other):
-        """
-        Operator to add two FiberRow or divide by another type if possible
-        """
-        if isinstance(other, self.__class__):
-            # define behaviour if the other is of the same instance
+        return self._apply_operation(other, numpy.add, 'add')
 
-            img = self.__class__(
-                header=self._header,
-                shape=self._shape,
-                size=self._size,
-                arc_position_x=self._arc_position_x,
-                arc_position_y=self._arc_position_y,
-                good_fibers=self._good_fibers,
-                fiber_type=self._fiber_type,
-            )
-
-            # subtract data if contained in both
-            if self._data is not None and other._data is not None:
-                new_data = self._data + other._data
-                img.setData(data=new_data)
-            else:
-                img.setData(data=self._data)
-
-            # add error if contained in both
-            if self._error is not None and other._error is not None:
-                new_error = numpy.sqrt(self._error**2 + other._error**2)
-                img.setData(error=new_error)
-            else:
-                img.setData(error=self._error)
-
-            # combined mask of valid pixels if contained in both
-            if self._mask is not None and other._mask is not None:
-                new_mask = numpy.logical_or(self._mask, other._mask)
-                img.setData(mask=new_mask)
-            else:
-                img.setData(mask=self._mask)
-            return img
-
-        elif isinstance(other, numpy.ndarray):
-            img = self.__class__(
-                error=self._error,
-                mask=self._mask,
-                header=self._header,
-                shape=self._shape,
-                size=self._size,
-                arc_position_x=self._arc_position_x,
-                arc_position_y=self._arc_position_y,
-                good_fibers=self._good_fibers,
-                fiber_type=self._fiber_type,
-            )
-
-            if self._data is not None:  # check if there is data in the object
-                dim = other.shape
-                # add ndarray according do its dimensions
-                if self._dim == dim:
-                    new_data = self._data + other
-                elif len(dim) == 1:
-                    if self._dim[0] == dim[0]:
-                        new_data = self._data + other[:, numpy.newaxis]
-                    elif self._dim[1] == dim[0]:
-                        new_data = self._data + other[numpy.newaxis, :]
-                else:
-                    new_data = self._data
-                img.setData(data=new_data)
-            return img
-
-        elif isinstance(other, Spectrum1D):
-            img = self.__class__(
-                error=self._error,
-                mask=self._mask,
-                header=self._header,
-                shape=self._shape,
-                size=self._size,
-                arc_position_x=self._arc_position_x,
-                arc_position_y=self._arc_position_y,
-                good_fibers=self._good_fibers,
-                fiber_type=self._fiber_type,
-            )
-
-            if self._data is not None:  # check if there is data in the object
-                # add ndarray according do its dimensions
-                if self._fibers == other._dim:
-                    new_data = self._data + other._data[:, numpy.newaxis]
-                elif self._data.shape[1] == other._dim:
-                    new_data = self._data + other._data[numpy.newaxis, :]
-                else:
-                    new_data = self._data
-                img.setData(data=new_data)
-            return img
-        else:
-            # try to do addtion for other types, e.g. float, int, etc.
-            try:
-                new_data = self._data + other
-                img = self.__class__(
-                    data=new_data,
-                    error=self._error,
-                    mask=self._mask,
-                    header=self._header,
-                    shape=self._shape,
-                    size=self._size,
-                    arc_position_x=self._arc_position_x,
-                    arc_position_y=self._arc_position_y,
-                    good_fibers=self._good_fibers,
-                    fiber_type=self._fiber_type,
-                )
-                return img
-            except Exception:
-                # raise exception if the type are not matching in general
-                raise TypeError(
-                    "unsupported operand type(s) for +: %s and %s"
-                    % (str(type(self)).split("'")[1], str(type(other)).split("'")[1])
-                )
+    def __sub__(self, other):
+        return self._apply_operation(other, numpy.subtract, 'sub')
 
     def __mul__(self, other):
-        """
-        Operator to add two FiberRow or divide by another type if possible
-        """
-        if isinstance(other, self.__class__):
-            # define behaviour if the other is of the same instance
+        return self._apply_operation(other, numpy.multiply, 'mul')
 
-            img = self.__class__(
-                header=self._header,
-                shape=self._shape,
-                size=self._size,
-                arc_position_x=self._arc_position_x,
-                arc_position_y=self._arc_position_y,
-                good_fibers=self._good_fibers,
-                fiber_type=self._fiber_type,
-            )
-
-            # subtract data if contained in both
-            if self._data is not None and other._data is not None:
-                new_data = self._data * other._data
-                img.setData(data=new_data)
-            else:
-                img.setData(data=self._data)
-
-            # add error if contained in both
-            if self._error is not None and other._error is not None:
-                new_error = numpy.sqrt(
-                    other._data**2 * self._error**2
-                    + self._data**2 * other._error**2
-                )
-                img.setData(error=new_error)
-            elif self._error is not None:
-                new_error = other._data * self._error
-                img.setData(error=new_error)
-            else:
-                img.setData(error=self._error)
-
-            # combined mask of valid pixels if contained in both
-            if self._mask is not None and other._mask is not None:
-                new_mask = numpy.logical_or(self._mask, other._mask)
-                img.setData(mask=new_mask)
-            else:
-                img.setData(mask=self._mask)
-            return img
-
-        elif isinstance(other, numpy.ndarray):
-            img = self.__class__(
-                error=self._error,
-                mask=self._mask,
-                header=self._header,
-                shape=self._shape,
-                size=self._size,
-                arc_position_x=self._arc_position_x,
-                arc_position_y=self._arc_position_y,
-                good_fibers=self._good_fibers,
-                fiber_type=self._fiber_type,
-            )
-
-            if self._data is not None:  # check if there is data in the object
-                dim = other.shape
-                # add ndarray according do its dimensions
-                if self._dim == dim:
-                    new_data = self._data * other
-                elif len(dim) == 1:
-                    if self._dim[0] == dim[0]:
-                        new_data = self._data * other[:, numpy.newaxis]
-                    elif self._dim[1] == dim[0]:
-                        new_data = self._data * other[numpy.newaxis, :]
-                else:
-                    new_data = self._data
-                img.setData(data=new_data)
-            return img
-        else:
-            # try to do addtion for other types, e.g. float, int, etc.
-            try:
-                new_data = self._data * other
-                if self._error is not None:
-                    new_error = self._error * other
-                else:
-                    new_error = self._error
-                img = self.__class__(
-                    data=new_data,
-                    error=new_error,
-                    mask=self._mask,
-                    header=self._header,
-                    shape=self._shape,
-                    size=self._size,
-                    arc_position_x=self._arc_position_x,
-                    arc_position_y=self._arc_position_y,
-                    good_fibers=self._good_fibers,
-                    fiber_type=self._fiber_type,
-                )
-                return img
-            except Exception:
-                # raise exception if the type are not matching in general
-                raise TypeError(
-                    "unsupported operand type(s) for *: %s and %s"
-                    % (str(type(self)).split("'")[1], str(type(other)).split("'")[1])
-                )
+    def __truediv__(self, other):
+        return self._apply_operation(other, numpy.divide, 'div')
 
     def __getitem__(self, fiber):
         if not isinstance(fiber, int):

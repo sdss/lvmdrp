@@ -1,12 +1,14 @@
 import os
 import fnmatch
 from itertools import groupby
+import pandas as pd
 
 from typing import List, Union
 
 from lvmdrp.core.constants import CALIBRATION_NAMES, CAMERAS, MASTERS_DIR
-from lvmdrp import path
+from lvmdrp import path, __version__ as drpver
 from lvmdrp.utils.convert import tileid_grp
+from lvmdrp.utils import metadata as md
 
 
 def get_master_mjd(sci_mjd: int) -> int:
@@ -62,7 +64,7 @@ def mjd_from_expnum(expnum: Union[int, str, list, tuple]) -> List[int]:
     return [int(mjd)]
 
 
-def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_NAMES, longterm_cals=True, from_sanbox=False):
+def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_NAMES, longterm_cals=True, from_sanbox=False, return_mjd=False):
     """Returns a dictionary containing paths for calibration frames
 
     Parameters
@@ -99,7 +101,7 @@ def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_NAMES, l
     tilegrp = tileid_grp(tileid)
 
     # get long-term MJDs from sandbox using get_master_mjd, else use given MJD
-    cals_mjd = get_master_mjd(mjd) if from_sanbox else mjd
+    cals_mjd = get_master_mjd(mjd) if longterm_cals else mjd
 
     # define root path to pixel flats and masks
     # TODO: remove this once sdss-tree are updated with the corresponding species
@@ -134,6 +136,8 @@ def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_NAMES, l
 
         calibs[flavor] = {c: path.full(path_species, drpver=version, tileid=tileid, mjd=cals_mjd, kind=f"{prefix}{flavor}", camera=c) for c in cam_or_chan}
 
+    if return_mjd:
+        return calibs, cals_mjd
     return calibs
 
 
@@ -153,4 +157,47 @@ def group_calib_paths(calib_paths):
     paths = {}
     for channel, cameras in groupby(calib_paths, key=lambda p: os.path.basename(p).split(".")[0].split("-")[-1][0]):
         paths[channel] = sorted([calib_paths[camera] for camera in cameras])
+    return paths
+
+
+def get_frames_paths(mjds, kind, camera_or_channel, query=None, expnums=None, filetype="lvm_anc", drpver=drpver, filter_existing=True):
+    """Generate file paths for a set of frames based on specified parameters.
+
+    Parameters
+    ----------
+    mjds : int or list[int]
+        MJD(s) to retrieve frame metadata for. Can be a single integer or a list of integers.
+    kind : str
+        The type of path to create (e.g., 'x', 'l', 'w').
+    camera_or_channel : str
+        The camera or channel identifier (e.g., 'r1', 'b').
+    query : str, optional
+        A query string to filter the frames DataFrame. Defaults to None.
+    expnums : list[int], optional
+        A list of exposure numbers to filter the frames. If None, no filtering
+        is applied. Defaults to None.
+    filetype : str, optional
+        The type of file to generate paths for (e.g., 'lvm_anc', 'lvm_frame'). Defaults to "lvm_anc".
+    drpver : str, optional
+        The data reduction pipeline version to use. Defaults to the current version.
+    filter_existing : bool, optional
+        If True, only include paths that correspond to existing files.
+        Defaults to True.
+
+    Returns
+    -------
+    list[str]
+        A list of file paths corresponding to the specified frames and parameters.
+    """
+    mjds = [mjds] if isinstance(mjds, int) else mjds
+    frames = pd.concat([md.get_frames_metadata(mjd=mjd) for mjd in mjds], ignore_index=True)
+    if query is not None:
+        frames = frames.query(query)
+    if expnums is not None:
+        frames = frames.query("expnum in @expnums")
+
+    f = frames.drop_duplicates(subset=["expnum"])
+    paths = [path.full(filetype, mjd=s.mjd, tileid=s.tileid, drpver=drpver, kind=kind, camera=camera_or_channel, imagetype=s.imagetyp, expnum=s.expnum) for _, s in f.iterrows()]
+    if filter_existing:
+        paths = list(filter(lambda p: os.path.isfile(p), paths))
     return paths
