@@ -15,7 +15,7 @@ from astropy.modeling import fitting, models
 from astropy.stats.biweight import biweight_location, biweight_scale
 from scipy import ndimage
 from scipy import interpolate
-from scipy.stats import binned_statistic
+from scipy.stats import binned_statistic_2d
 
 from lvmdrp import log
 from lvmdrp.core.constants import CON_LAMPS, ARC_LAMPS
@@ -2134,41 +2134,38 @@ class Image(Header):
     def fit_spline2d(self, bins, smoothing=0, display_plots=False):
 
         x_nbins, y_nbins = bins
+        x_pixels = numpy.arange(self._dim[1])
+        y_pixels = numpy.arange(self._dim[0])
+        x_bins = numpy.histogram_bin_edges(x_pixels, bins=x_nbins).astype("int")
+        y_bins = numpy.histogram_bin_edges(y_pixels, bins=y_nbins).astype("int")
+        y_cent = (y_bins[:-1]+y_bins[1:]) / 2
+        x_cent = (x_bins[:-1]+x_bins[1:]) / 2
 
         img_data = self._data.copy()
         img_error = self._error.copy()
         img_data[self._mask] = numpy.nan
         img_error[self._mask] = numpy.nan
-        x_pixels = numpy.arange(self._dim[1])
-        y_pixels = numpy.arange(self._dim[0])
 
-        y_bins = numpy.histogram_bin_edges(y_pixels, bins=y_nbins).astype("int")
-        x_bins = numpy.histogram_bin_edges(x_pixels, bins=x_nbins).astype("int")
-        y_cent = (y_bins[:-1]+y_bins[1:]) / 2
-        x_cent = (x_bins[:-1]+x_bins[1:]) / 2
+        X, Y = numpy.meshgrid(x_pixels, y_pixels, indexing="xy")
+        data_binned, _, _, _ = binned_statistic_2d(X.ravel(), Y.ravel(), img_data.ravel(), bins=(x_bins,y_bins), statistic=bn.nanmedian)
+        error_binned, _, _, _ = binned_statistic_2d(X.ravel(), Y.ravel(), img_error.ravel(), bins=(x_bins,y_bins), statistic=lambda x: numpy.sqrt(bn.nanmedian(x**2)))
+
+        data_binned = numpy.nan_to_num(data_binned.T)
+        error_binned = numpy.nan_to_num(error_binned.T)
 
         if display_plots:
             fig, axs = plt.subplots(y_nbins, 1, figsize=(15,1*y_nbins), sharex=True, sharey=True, layout="constrained")
             fig.supxlabel("X axis (pix)", fontsize="x-large")
             fig.supylabel(f"Counts ({self._header['BUNIT']})", fontsize="x-large")
 
-        data_binned = numpy.zeros((y_nbins, x_nbins))
-        error_binned = numpy.zeros((y_nbins, x_nbins))
-        for i in range(y_nbins):
-            data = bn.nanmedian(img_data[y_bins[i]:y_bins[i+1], :], axis=0)
-            error = numpy.sqrt(bn.nanmedian(img_error[y_bins[i]:y_bins[i+1], :]**2, axis=0))
-            if numpy.isnan(data).all():
-                continue
+            for i in range(y_nbins):
+                data = bn.nanmedian(img_data[y_bins[i]:y_bins[i+1], :], axis=0)
+                error = numpy.sqrt(bn.nanmedian(img_error[y_bins[i]:y_bins[i+1], :]**2, axis=0))
 
-            # TODO: don't do interpolation of mask (it's redundant)
-            # TODO: do a proper binning along X, with a median combining of pixels and error propabation
-            data_binned[i], _, _ = binned_statistic(x_pixels, data, statistic=bn.nanmedian, bins=x_bins)
-            error_binned[i], _, _ = binned_statistic(x_pixels, error, statistic=lambda x: numpy.sqrt(bn.nanmedian(x**2)), bins=x_bins)
-
-            if display_plots:
-                axs[i].set_title(f"Y bin: {y_bins[i], y_bins[i+1]}", fontsize="large", loc="left")
-                axs[i].errorbar(x_pixels, data, yerr=error, fmt=",", color="0.2", ecolor="0.2", elinewidth=0.5)
-                axs[i].errorbar(x_cent, data_binned[i], yerr=error_binned[i], fmt=".", mew=1, color="tab:blue", ecolor="tab:blue", elinewidth=1)
+                if display_plots:
+                    axs[i].set_title(f"Y bin: {y_bins[i], y_bins[i+1]}", fontsize="large", loc="left")
+                    axs[i].errorbar(x_pixels, data, yerr=error, fmt=",", color="0.2", ecolor="0.2", elinewidth=0.5)
+                    axs[i].errorbar(x_cent, data_binned[i], yerr=error_binned[i], fmt=".", mew=1, color="tab:blue", ecolor="tab:blue", elinewidth=1)
 
         valid_rows = (data_binned!=0).any(axis=1)
         data_binned = data_binned[valid_rows]
