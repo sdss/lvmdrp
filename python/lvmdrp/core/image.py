@@ -2131,7 +2131,7 @@ class Image(Header):
         new_img.setData(data=models)
         return new_img
 
-    def fit_spline2d(self, bins, smoothing=0, display_plots=False):
+    def fit_spline2d(self, bins, smoothing=None, use_weights=True, display_plots=False):
 
         x_nbins, y_nbins = bins
         x_pixels = numpy.arange(self._dim[1])
@@ -2165,13 +2165,19 @@ class Image(Header):
                 if display_plots:
                     axs[i].set_title(f"Y bin: {y_bins[i], y_bins[i+1]}", fontsize="large", loc="left")
                     axs[i].errorbar(x_pixels, data, yerr=error, fmt=",", color="0.2", ecolor="0.2", elinewidth=0.5)
-                    axs[i].errorbar(x_cent, data_binned[i], yerr=error_binned[i], fmt=".", mew=1, color="tab:blue", ecolor="tab:blue", elinewidth=1)
+                    axs[i].errorbar(x_cent, data_binned[i], yerr=error_binned[i], fmt=".", color="tab:blue", ecolor="tab:blue", elinewidth=1)
 
         valid_rows = (data_binned!=0).any(axis=1)
         data_binned = data_binned[valid_rows]
+        error_binned = error_binned[valid_rows]
         y_cent = y_cent[valid_rows]
 
-        interp = interpolate.RectBivariateSpline(x_cent, y_cent, data_binned.T, s=smoothing, bbox=[0, 4086, 0, 4080])
+        if use_weights:
+            xx, yy = numpy.meshgrid(x_cent, y_cent, indexing="xy")
+            interp = interpolate.SmoothBivariateSpline(xx.ravel(), yy.ravel(), data_binned.ravel(), w=1/error_binned.ravel(), s=smoothing, bbox=[0,4086,0,4080], eps=1e-3)
+        else:
+            interp = interpolate.RectBivariateSpline(x_cent, y_cent, data_binned.T, s=smoothing, bbox=[0,4086,0,4080])
+            model = interp(x_pixels, y_pixels).T
         model = interp(x_pixels, y_pixels).T
 
         if display_plots:

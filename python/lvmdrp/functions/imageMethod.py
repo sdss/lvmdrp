@@ -1955,7 +1955,7 @@ def subtract_straylight(
     # TODO: implement 2D spline fitting (look at MaNGA DRP port to python)
     # TODO: weights are not implemented yet, do that next
     log.info(f"fitting spline with {smoothing = } to the background signal along cross-dispersion axis")
-    img_stray = img_median.fit_spline2d(bins=(40, 19), smoothing=smoothing, display_plots=False)
+    img_stray = img_median.fit_spline2d(bins=(400, 19), smoothing=smoothing, use_weights=use_weights, display_plots=True)
 
     # subtract smoothed background signal from original image
     log.info("subtracting the smoothed background signal from the original image")
