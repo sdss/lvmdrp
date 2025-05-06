@@ -13,6 +13,7 @@ from astropy.table import Table
 from astropy.io import fits as pyfits
 from astropy.modeling import fitting, models
 from astropy.stats.biweight import biweight_location, biweight_scale
+from astropy.visualization import simple_norm
 from scipy import ndimage
 from scipy import interpolate
 from scipy.stats import binned_statistic_2d
@@ -2131,7 +2132,7 @@ class Image(Header):
         new_img.setData(data=models)
         return new_img
 
-    def fit_spline2d(self, bins, smoothing=None, use_weights=True, display_plots=False):
+    def fit_spline2d(self, bins, smoothing=None, use_weights=True, axs=None):
 
         x_nbins, y_nbins = bins
         x_pixels = numpy.arange(self._dim[1])
@@ -2147,6 +2148,7 @@ class Image(Header):
         img_error[self._mask] = numpy.nan
 
         X, Y = numpy.meshgrid(x_pixels, y_pixels, indexing="xy")
+        x, y = numpy.meshgrid(x_cent, y_cent, indexing="xy")
         data_binned, _, _, _ = binned_statistic_2d(X.ravel(), Y.ravel(), img_data.ravel(), bins=(x_bins,y_bins), statistic=bn.nanmedian)
         error_binned, _, _, _ = binned_statistic_2d(X.ravel(), Y.ravel(), img_error.ravel(), bins=(x_bins,y_bins), statistic=lambda x: numpy.sqrt(bn.nanmedian(x**2)))
 
@@ -2158,27 +2160,51 @@ class Image(Header):
 
         if use_weights:
             weights = 1 / error_binned
-            xx, yy = numpy.meshgrid(x_cent, y_cent, indexing="xy")
-            interp = interpolate.SmoothBivariateSpline(xx[valid_bins].ravel(), yy[valid_bins].ravel(), data_binned[valid_bins].ravel(), w=weights[valid_bins].ravel(), s=smoothing, bbox=[0,4086,0,4080], eps=1e-8)
+            spline = interpolate.SmoothBivariateSpline(x[valid_bins].ravel(), y[valid_bins].ravel(), data_binned[valid_bins].ravel(), w=weights[valid_bins].ravel(), s=smoothing, bbox=[0,4086,0,4080], eps=1e-8)
         else:
-            interp = interpolate.RectBivariateSpline(x_cent, y_cent, data_binned.T, s=smoothing, bbox=[0,4086,0,4080])
-        model = interp(x_pixels, y_pixels).T
+            spline = interpolate.RectBivariateSpline(x_cent, y_cent, data_binned.T, s=smoothing, bbox=[0,4086,0,4080])
+        model = spline(x_pixels, y_pixels).T
 
-        if display_plots:
-            fig, axs = plt.subplots(y_nbins, 1, figsize=(15,1*y_nbins), sharex=True, sharey=True, layout="constrained")
-            fig.supxlabel("X axis (pix)", fontsize="x-large")
-            fig.supylabel(f"Counts ({self._header['BUNIT']})", fontsize="x-large")
-
+        if axs is not None:
+            y_pixels = numpy.arange(self._data.shape[0])
+            x_pixels = numpy.arange(self._data.shape[1])
+            unit = self._header["BUNIT"]
+            norm = simple_norm(data=model, stretch="asinh")
+            im = axs["img"].imshow(model, origin="lower", cmap="Greys_r", norm=norm, interpolation="none")
+            axs["img"].set_aspect("auto")
+            axs["img"].plot(x.ravel(), y.ravel(), "o", mew=0.1, ms=1, mec="tab:blue", mfc="none")
+            cbar = plt.colorbar(im, cax=axs["col"], orientation="horizontal")
+            cbar.set_label(f"Counts ({unit})", fontsize="small", color="tab:red")
+            colors_x = plt.cm.coolwarm(numpy.linspace(0, 1, self._data.shape[0]))
+            colors_y = plt.cm.coolwarm(numpy.linspace(0, 1, self._data.shape[1]))
+            for iy in y_pixels:
+                axs["xma"].plot(x_pixels, model[iy], ",", color=colors_x[iy], alpha=0.2)
+            axs["xma"].step(x_pixels, numpy.sqrt(bn.nanmedian(self._error**2, axis=0)), lw=1, color="0.8", where="mid")
+            for ix in x_pixels:
+                axs["yma"].plot(model[:, ix], y_pixels, ",", color=colors_y[ix], alpha=0.2)
+            axs["yma"].step(numpy.sqrt(bn.nanmedian(self._error, axis=1)), y_pixels, lw=1, color="0.8", where="mid")
             for i in range(y_nbins):
-                data = bn.nanmedian(img_data[y_bins[i]:y_bins[i+1], :], axis=0)
-                error = numpy.sqrt(bn.nanmedian(img_error[y_bins[i]:y_bins[i+1], :]**2, axis=0))
+                mod = spline(x_pixels, y_cent).T
+                data = img_data[y_bins[i]:y_bins[i+1], :]
+                error = img_error[y_bins[i]:y_bins[i+1], :]
+                residuals = (mod[i] - data) / error
+                mu = numpy.nanmean(residuals, axis=0)
+                # std = numpy.nanstd(residuals, axis=0)
 
-                if display_plots:
-                    axs[i].set_title(f"Y bin: {y_bins[i], y_bins[i+1]}", fontsize="large", loc="left")
-                    axs[i].errorbar(x_pixels, data, yerr=error, fmt=",", color="0.2", ecolor="0.2", elinewidth=0.5)
-                    axs[i].errorbar(x_cent[valid_bins[i]], data_binned[i, valid_bins[i]], yerr=error_binned[i, valid_bins[i]], fmt=".", color="tab:blue", ecolor="tab:blue", elinewidth=1)
-                    # axs[i].fill_between(x_pixels, 0, (bn.nanmedian(model[y_bins[i]:y_bins[i+1]], axis=0) - data)/error, fc="tab:blue", lw=0, step="mid")
-                    axs[i].plot(x_pixels, bn.nanmedian(model[y_bins[i]:y_bins[i+1]], axis=0), "-", color="tab:red", lw=1)
+                axs["res"][i].set_title(f"Y-bin = {y_bins[i:i+2]}", fontsize="large", loc="left")
+                axs["res"][i].set_ylabel("Residuals", fontsize="large")
+                # axs["res"][i].errorbar(x_pixels, data, yerr=error, fmt=",", color="0.2", ecolor="0.2", elinewidth=0.5)
+                # axs["res"][i].errorbar(x_cent[valid_bins[i]], data_binned[i, valid_bins[i]], yerr=error_binned[i, valid_bins[i]], fmt=".", color="tab:blue", ecolor="tab:blue", elinewidth=1)
+                # axs["res"][i].plot(x_pixels, bn.nanmedian(model[y_bins[i]:y_bins[i+1]], axis=0), "-", color="tab:red", lw=1)
+
+                axs["res"][i].plot(x_pixels, residuals.T, ",", color="0.2")
+                axs["res"][i].step(x_pixels, mu, "-", color="tab:blue", lw=1, where="mid")
+                # axs["res"][i].plot(x_pixels, mu-std, "--", color="0.8", lw=1)
+                # axs["res"][i].plot(x_pixels, mu+std, "--", color="0.8", lw=1)
+                axs["res"][i].axhline(-1, ls=":", lw=1, color="0.2")
+                axs["res"][i].axhline(+1, ls=":", lw=1, color="0.2")
+                axs["res"][i].axhline(ls="--", lw=1, color="0.2")
+                axs["res"][i].set_ylim(-1.5, +1.5)
 
         stray_img = copy(self)
         stray_img.setData(data=model, error=None, mask=None)

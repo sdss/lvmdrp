@@ -1952,8 +1952,37 @@ def subtract_straylight(
         img_median._mask[(bfiber[icol]-aperture//2-select_bnrows):(bfiber[icol]-aperture//2), icol] = False
 
     # fit the signal in unmaksed areas along cross-dispersion axis by a polynomial
+    bins = (40, 19)
     log.info(f"fitting spline with {smoothing = } to the background signal along cross-dispersion axis")
-    img_stray = img_median.fit_spline2d(bins=(400, 19), smoothing=smoothing, use_weights=use_weights, display_plots=True)
+    fig = plt.figure(figsize=(13, 10+3*bins[1]), layout="constrained")
+    fig.suptitle(f"Stray Light Subtraction for frame {os.path.basename(in_image)}")
+    fig.supxlabel("X (pixel)")
+    fig.supylabel("Y (pixel)")
+    gs = GridSpec(5+bins[1], 5, figure=fig)
+
+    ax_img = fig.add_subplot(gs[1:5, :-1])
+    ax_img.tick_params(labelbottom=False)
+    ax_img.set_ylabel("Y (pixels)", fontsize="large")
+    ax_xma = fig.add_subplot(gs[0, :-1], sharex=ax_img)
+    ax_yma = fig.add_subplot(gs[1:5, -1], sharey=ax_img)
+    ax_xma.tick_params(labelbottom=False)
+    ax_yma.tick_params(labelleft=False)
+    ax_xma.set_ylabel(f"Counts ({unit})", fontsize="large")
+    ax_yma.set_xlabel(f"Counts ({unit})", fontsize="large")
+    ax_col = inset_axes(ax_img, width="40%", height="2%", loc="upper right")
+    ax_col.tick_params(labelsize="small", labelcolor="tab:red")
+
+    axs_res = []
+    for i in range(bins[1]):
+        ax = fig.add_subplot(gs[5+i, :-1], sharex=ax_img)
+        if i != bins[1]-1:
+            ax.tick_params(labelbottom=False)
+        else:
+            ax.set_xlabel("X (pixels)", fontsize="large")
+        axs_res.append(ax)
+    img_stray = img_median.fit_spline2d(
+        bins=bins, smoothing=smoothing, use_weights=use_weights,
+        axs={"img": ax_img, "col": ax_col, "xma": ax_xma, "yma": ax_yma, "res": axs_res})
 
     # subtract smoothed background signal from original image
     log.info("subtracting the smoothed background signal from the original image")
@@ -1966,41 +1995,7 @@ def subtract_straylight(
     img_out.writeFitsData(out_image)
 
     # plot results: polyomial fitting & smoothing, both with masked regions on
-    # TODO: save a low resolution image of the straylight to speed up plotting
-    log.info("plotting results")
-    fig = plt.figure(figsize=(10, 10), layout="constrained")
-    fig.suptitle(f"Stray Light Subtraction for frame {os.path.basename(in_image)}")
-    fig.supxlabel("X (pixel)")
-    fig.supylabel("Y (pixel)")
-    gs = fig.add_gridspec(2, 2,  width_ratios=(4, 1), height_ratios=(1, 4),
-                        left=0.1, right=0.9, bottom=0.1, top=0.9,
-                        wspace=0.05, hspace=0.05)
-
-    ax = fig.add_subplot(gs[1, 0])
-    ax_strayx = fig.add_subplot(gs[0, 0], sharex=ax)
-    ax_strayy = fig.add_subplot(gs[1, 1], sharey=ax)
-    ax_strayx.tick_params(axis="x", labelbottom=False)
-    ax_strayy.tick_params(axis="y", labelleft=False)
-    ax_strayx.set_ylabel(f"Counts ({unit})")
-    ax_strayy.set_xlabel(f"Counts ({unit})")
-    axins1 = inset_axes(ax, width="40%", height="2%", loc="upper right")
-    axins1.tick_params(labelsize="small", labelcolor="tab:red")
-
-    y_pixels = numpy.arange(img_median._data.shape[0])
-    x_pixels = numpy.arange(img_median._data.shape[1])
-    norm = simple_norm(data=img_stray._data, stretch="asinh")
-    im = ax.imshow(img_stray._data, origin="lower", cmap="Greys_r", norm=norm, interpolation="none")
-    cbar = fig.colorbar(im, cax=axins1, orientation="horizontal")
-    cbar.set_label(f"Counts ({unit})", fontsize="small", color="tab:red")
-    colors_x = plt.cm.coolwarm(numpy.linspace(0, 1, img_median._data.shape[0]))
-    colors_y = plt.cm.coolwarm(numpy.linspace(0, 1, img_median._data.shape[1]))
-    for iy in y_pixels:
-        ax_strayx.plot(x_pixels, img_stray._data[iy], ",", color=colors_x[iy], alpha=0.2)
-    ax_strayx.step(x_pixels, numpy.sqrt(bn.nanmedian(img._error**2, axis=0)), lw=1, color="0.8", where="mid")
-    for ix in x_pixels:
-        ax_strayy.plot(img_stray._data[:, ix], y_pixels, ",", color=colors_y[ix], alpha=0.2)
-    ax_strayy.step(numpy.sqrt(bn.nanmedian(img._error, axis=1)), y_pixels, lw=1, color="0.8", where="mid")
-    save_fig(fig, product_path=out_image, to_display=display_plots, figure_path="qa", label="straylight_model")
+    save_fig(fig, product_path=out_image, to_display=display_plots, figure_path="qa", label="straylight_model", dpi=100, transparent=False)
 
     # write out stray light image
     if out_stray is not None:
