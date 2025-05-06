@@ -2158,12 +2158,11 @@ class Image(Header):
         zscore = numpy.abs(numpy.nanmedian(data_binned, axis=1)[:, None] - data_binned) / numpy.nanstd(data_binned, axis=1)[:, None]
         valid_bins = numpy.isfinite(data_binned) & numpy.isfinite(error_binned) & (zscore < 5)
 
-        if use_weights:
-            weights = 1 / error_binned
-            spline = interpolate.SmoothBivariateSpline(x[valid_bins].ravel(), y[valid_bins].ravel(), data_binned[valid_bins].ravel(), w=weights[valid_bins].ravel(), s=smoothing, bbox=[0,4086,0,4080], eps=1e-8)
-        else:
-            spline = interpolate.RectBivariateSpline(x_cent, y_cent, data_binned.T, s=smoothing, bbox=[0,4086,0,4080])
-        model = spline(x_pixels, y_pixels).T
+        tck = interpolate.bisplrep(
+            x[valid_bins].ravel(), y[valid_bins].ravel(), data_binned[valid_bins].ravel(),
+            w=1.0/error_binned[valid_bins].ravel() if use_weights else None,
+            s=smoothing, xb=0, xe=4086, yb=0, ye=4080, eps=1e-8)
+        model = interpolate.bisplev(x_pixels, y_pixels, tck).T
 
         if axs is not None:
             y_pixels = numpy.arange(self._data.shape[0])
@@ -2184,7 +2183,7 @@ class Image(Header):
                 axs["yma"].plot(model[:, ix], y_pixels, ",", color=colors_y[ix], alpha=0.2)
             axs["yma"].step(numpy.sqrt(bn.nanmedian(self._error, axis=1)), y_pixels, lw=1, color="0.8", where="mid")
             for i in range(y_nbins):
-                mod = spline(x_pixels, y_cent).T
+                mod = interpolate.bisplev(x_pixels, y_cent, tck).T
                 data = img_data[y_bins[i]:y_bins[i+1], :]
                 error = img_error[y_bins[i]:y_bins[i+1], :]
                 residuals = (mod[i] - data) / error

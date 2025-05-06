@@ -1969,7 +1969,7 @@ def subtract_straylight(
     ax_yma.tick_params(labelleft=False)
     ax_xma.set_ylabel(f"Counts ({unit})", fontsize="large")
     ax_yma.set_xlabel(f"Counts ({unit})", fontsize="large")
-    ax_col = inset_axes(ax_img, width="40%", height="2%", loc="upper right")
+    ax_col = inset_axes(ax_img, width="60%", height="2%", loc="upper right")
     ax_col.tick_params(labelsize="small", labelcolor="tab:red")
 
     axs_res = []
