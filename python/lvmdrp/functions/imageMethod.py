@@ -1952,8 +1952,6 @@ def subtract_straylight(
         img_median._mask[(bfiber[icol]-aperture//2-select_bnrows):(bfiber[icol]-aperture//2), icol] = False
 
     # fit the signal in unmaksed areas along cross-dispersion axis by a polynomial
-    # TODO: implement 2D spline fitting (look at MaNGA DRP port to python)
-    # TODO: weights are not implemented yet, do that next
     log.info(f"fitting spline with {smoothing = } to the background signal along cross-dispersion axis")
     img_stray = img_median.fit_spline2d(bins=(400, 19), smoothing=smoothing, use_weights=use_weights, display_plots=True)
 
@@ -1985,7 +1983,7 @@ def subtract_straylight(
     ax_strayy.tick_params(axis="y", labelleft=False)
     ax_strayx.set_ylabel(f"Counts ({unit})")
     ax_strayy.set_xlabel(f"Counts ({unit})")
-    axins1 = inset_axes(ax, width="30%", height="2%", loc="upper right")
+    axins1 = inset_axes(ax, width="40%", height="2%", loc="upper right")
     axins1.tick_params(labelsize="small", labelcolor="tab:red")
 
     y_pixels = numpy.arange(img_median._data.shape[0])

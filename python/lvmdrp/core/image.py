@@ -2150,8 +2150,19 @@ class Image(Header):
         data_binned, _, _, _ = binned_statistic_2d(X.ravel(), Y.ravel(), img_data.ravel(), bins=(x_bins,y_bins), statistic=bn.nanmedian)
         error_binned, _, _, _ = binned_statistic_2d(X.ravel(), Y.ravel(), img_error.ravel(), bins=(x_bins,y_bins), statistic=lambda x: numpy.sqrt(bn.nanmedian(x**2)))
 
-        data_binned = numpy.nan_to_num(data_binned.T)
-        error_binned = numpy.nan_to_num(error_binned.T)
+        data_binned = data_binned.T
+        error_binned = error_binned.T
+
+        zscore = numpy.abs(numpy.nanmedian(data_binned, axis=1)[:, None] - data_binned) / numpy.nanstd(data_binned, axis=1)[:, None]
+        valid_bins = numpy.isfinite(data_binned) & numpy.isfinite(error_binned) & (zscore < 5)
+
+        if use_weights:
+            weights = 1 / error_binned
+            xx, yy = numpy.meshgrid(x_cent, y_cent, indexing="xy")
+            interp = interpolate.SmoothBivariateSpline(xx[valid_bins].ravel(), yy[valid_bins].ravel(), data_binned[valid_bins].ravel(), w=weights[valid_bins].ravel(), s=smoothing, bbox=[0,4086,0,4080], eps=1e-8)
+        else:
+            interp = interpolate.RectBivariateSpline(x_cent, y_cent, data_binned.T, s=smoothing, bbox=[0,4086,0,4080])
+        model = interp(x_pixels, y_pixels).T
 
         if display_plots:
             fig, axs = plt.subplots(y_nbins, 1, figsize=(15,1*y_nbins), sharex=True, sharey=True, layout="constrained")
@@ -2165,27 +2176,9 @@ class Image(Header):
                 if display_plots:
                     axs[i].set_title(f"Y bin: {y_bins[i], y_bins[i+1]}", fontsize="large", loc="left")
                     axs[i].errorbar(x_pixels, data, yerr=error, fmt=",", color="0.2", ecolor="0.2", elinewidth=0.5)
-                    axs[i].errorbar(x_cent, data_binned[i], yerr=error_binned[i], fmt=".", color="tab:blue", ecolor="tab:blue", elinewidth=1)
-
-        valid_rows = (data_binned!=0).any(axis=1)
-        data_binned = data_binned[valid_rows]
-        error_binned = error_binned[valid_rows]
-        y_cent = y_cent[valid_rows]
-
-        if use_weights:
-            xx, yy = numpy.meshgrid(x_cent, y_cent, indexing="xy")
-            interp = interpolate.SmoothBivariateSpline(xx.ravel(), yy.ravel(), data_binned.ravel(), w=1/error_binned.ravel(), s=smoothing, bbox=[0,4086,0,4080], eps=1e-3)
-        else:
-            interp = interpolate.RectBivariateSpline(x_cent, y_cent, data_binned.T, s=smoothing, bbox=[0,4086,0,4080])
-            model = interp(x_pixels, y_pixels).T
-        model = interp(x_pixels, y_pixels).T
-
-        if display_plots:
-            plt.figure()
-            plt.imshow(model, interpolation="none", origin="lower")
-            plt.gca().set_aspect("auto")
-            plt.xlabel("X axis (pix)")
-            plt.ylabel("Y axis (pix)")
+                    axs[i].errorbar(x_cent[valid_bins[i]], data_binned[i, valid_bins[i]], yerr=error_binned[i, valid_bins[i]], fmt=".", color="tab:blue", ecolor="tab:blue", elinewidth=1)
+                    # axs[i].fill_between(x_pixels, 0, (bn.nanmedian(model[y_bins[i]:y_bins[i+1]], axis=0) - data)/error, fc="tab:blue", lw=0, step="mid")
+                    axs[i].plot(x_pixels, bn.nanmedian(model[y_bins[i]:y_bins[i+1]], axis=0), "-", color="tab:red", lw=1)
 
         stray_img = copy(self)
         stray_img.setData(data=model, error=None, mask=None)
