@@ -2132,7 +2132,38 @@ class Image(Header):
         new_img.setData(data=models)
         return new_img
 
-    def fit_spline2d(self, bins, smoothing=None, use_weights=True, axs=None):
+    def fit_spline2d(self, bins, nsigma, smoothing=None, use_weights=True, axs=None):
+        """Fits a 2D bivariate spline to the image data, using binned statistics and sigma clipping.
+
+        The image is divided into bins along both axes, and the median value in each bin is computed.
+        Outlier bins are rejected based on a sigma threshold. A 2D spline is then fit to the valid bins,
+        optionally using inverse variance weights. The resulting smooth background model can be used for
+        tasks such as stray light subtraction.
+
+        Parameters
+        ----------
+        bins : tuple of int
+            Number of bins along the (X, Y) axes, e.g., (x_bins, y_bins).
+        nsigma : float
+            Sigma threshold for clipping outlier bins.
+        smoothing : float, optional
+            Smoothing parameter for the spline fit. If None, the default is used.
+        use_weights : bool, optional
+            If True, use inverse variance of the binned errors as weights in the spline fit (default: True).
+        axs : dict of matplotlib.axes.Axes, optional
+            Dictionary of axes for diagnostic plotting (default: None).
+
+        Returns
+        -------
+        stray_img : Image
+            Image object containing the fitted 2D spline model.
+        data_binned : numpy.ndarray
+            2D array of binned median values used for the fit.
+        error_binned : numpy.ndarray
+            2D array of binned errors.
+        valid_bins : numpy.ndarray
+            Boolean mask indicating which bins were used in the fit.
+        """
 
         x_nbins, y_nbins = bins
         x_pixels = numpy.arange(self._dim[1])
@@ -2156,7 +2187,7 @@ class Image(Header):
         error_binned = error_binned.T
 
         zscore = numpy.abs(numpy.nanmedian(data_binned, axis=1)[:, None] - data_binned) / numpy.nanstd(data_binned, axis=1)[:, None]
-        valid_bins = numpy.isfinite(data_binned) & numpy.isfinite(error_binned) & (zscore < 5)
+        valid_bins = numpy.isfinite(data_binned) & numpy.isfinite(error_binned) & (zscore < nsigma)
 
         tck = interpolate.bisplrep(
             x[valid_bins].ravel(), y[valid_bins].ravel(), data_binned[valid_bins].ravel(),
@@ -2188,18 +2219,12 @@ class Image(Header):
                 error = img_error[y_bins[i]:y_bins[i+1], :]
                 residuals = (mod[i] - data) / error
                 mu = numpy.nanmean(residuals, axis=0)
-                # std = numpy.nanstd(residuals, axis=0)
 
                 axs["res"][i].set_title(f"Y-bin = {y_bins[i:i+2]}", fontsize="large", loc="left")
                 axs["res"][i].set_ylabel("Residuals", fontsize="large")
-                # axs["res"][i].errorbar(x_pixels, data, yerr=error, fmt=",", color="0.2", ecolor="0.2", elinewidth=0.5)
-                # axs["res"][i].errorbar(x_cent[valid_bins[i]], data_binned[i, valid_bins[i]], yerr=error_binned[i, valid_bins[i]], fmt=".", color="tab:blue", ecolor="tab:blue", elinewidth=1)
-                # axs["res"][i].plot(x_pixels, bn.nanmedian(model[y_bins[i]:y_bins[i+1]], axis=0), "-", color="tab:red", lw=1)
 
                 axs["res"][i].plot(x_pixels, residuals.T, ",", color="0.2")
                 axs["res"][i].step(x_pixels, mu, "-", color="tab:blue", lw=1, where="mid")
-                # axs["res"][i].plot(x_pixels, mu-std, "--", color="0.8", lw=1)
-                # axs["res"][i].plot(x_pixels, mu+std, "--", color="0.8", lw=1)
                 axs["res"][i].axhline(-1, ls=":", lw=1, color="0.2")
                 axs["res"][i].axhline(+1, ls=":", lw=1, color="0.2")
                 axs["res"][i].axhline(ls="--", lw=1, color="0.2")
@@ -2208,7 +2233,7 @@ class Image(Header):
         stray_img = copy(self)
         stray_img.setData(data=model, error=None, mask=None)
 
-        return stray_img
+        return stray_img, data_binned, error_binned, valid_bins
 
     def match_reference_column(self, ref_column=2000, ref_centroids=None, stretch_range=[0.7, 1.3], shift_range=[-100, 100], return_pars=False):
         """Returns the reference centroids matched against the current image
