@@ -1349,7 +1349,7 @@ def update_error_file(tileid: int, mjd: int, expnum: int, error: str,
 def reduce_2d(mjd, calibrations, expnums=None, exptime=None, cameras=CAMERAS,
               replace_with_nan=True, assume_imagetyp=None, reject_cr=True,
               add_astro=True, sub_straylight=True, parallel_run=1,
-              skip_done=True, keep_ancillary=False):
+              skip_done=True, keep_ancillary=False, **cfg_straylight):
     """Preprocess and detrend a list of 2D frames
 
     Given a set of MJDs and (optionally) exposure numbers, preprocess detrends
@@ -1461,9 +1461,10 @@ def reduce_2d(mjd, calibrations, expnums=None, exptime=None, cameras=CAMERAS,
             # subtract straylight
             if sub_straylight:
                 with Timer(name='Straylight '+lframe_path, logger=log.info):
+                    straylight_pars = dict(x_bins=40, select_nrows=(10,10), use_weights=True, aperture=11, nsigma=4.0, smoothing=None, median_box=101)
+                    straylight_pars.update(cfg_straylight)
                     subtract_straylight(in_image=dframe_path, out_image=lframe_path, out_stray=lstr_path,
-                                        in_cent_trace=mtrace_path, x_bins=40, select_nrows=(10,10), use_weights=True,
-                                        aperture=11, nsigma=2.0, smoothing=None, median_box=101, parallel=parallel_run)
+                                        in_cent_trace=mtrace_path, parallel=parallel_run, **straylight_pars)
 
 
 def reduce_1d(mjd, calibrations, expnums=None, replace_with_nan=True, sub_straylight=True, skip_done=True, keep_ancillary=False):

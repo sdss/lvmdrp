@@ -2174,21 +2174,36 @@ class Image(Header):
         x_cent = (x_bins[:-1]+x_bins[1:]) / 2
 
         img_data = self._data.copy()
-        img_error = self._error.copy()
+        img_error = numpy.sqrt(self._data).copy()
         img_data[self._mask] = numpy.nan
         img_error[self._mask] = numpy.nan
 
         X, Y = numpy.meshgrid(x_pixels, y_pixels, indexing="xy")
         x, y = numpy.meshgrid(x_cent, y_cent, indexing="xy")
-        data_binned, _, _, _ = binned_statistic_2d(X.ravel(), Y.ravel(), img_data.ravel(), bins=(x_bins,y_bins), statistic=bn.nanmedian)
-        error_binned, _, _, _ = binned_statistic_2d(X.ravel(), Y.ravel(), img_error.ravel(), bins=(x_bins,y_bins), statistic=lambda x: numpy.sqrt(bn.nanmedian(x**2)))
 
+        # mask out outlying/invalid bins
+        x_nbins_re = 10
+        data = img_data.ravel()
+        error = img_error.ravel()
+        data_mu, _, _, ibins = binned_statistic_2d(X.ravel(), Y.ravel(), data, bins=(x_nbins_re,y_nbins), statistic=bn.nanmedian, expand_binnumbers=True)
+        data_std, _, _, _ = binned_statistic_2d(X.ravel(), Y.ravel(), data, bins=(x_nbins_re,y_nbins), statistic=bn.nanstd)
+        zscore = numpy.zeros_like(data)
+        for j, i in it.product(range(y_nbins), range(x_nbins_re)):
+            ibin = (ibins[0]==i+1)&(ibins[1]==j+1)
+            zscore[ibin] = numpy.abs(data_mu[i,j] - data[ibin]) / data_std[i,j]
+        invalid_pixels = (zscore > nsigma)
+        data[invalid_pixels] = numpy.nan
+        error[invalid_pixels] = numpy.nan
+        img_data = data.reshape(self._dim)
+        img_error = error.reshape(self._dim)
+
+        data_binned, _, _, _ = binned_statistic_2d(X.ravel(), Y.ravel(), data, bins=(x_bins,y_bins), statistic=bn.nanmedian)
+        error_binned, _, _, _ = binned_statistic_2d(X.ravel(), Y.ravel(), error**2, bins=(x_bins,y_bins), statistic=lambda x: numpy.sqrt(bn.nanmedian(x)))
         data_binned = data_binned.T
         error_binned = error_binned.T
 
-        # mask out outlying/invalid bins
-        zscore = numpy.abs(numpy.nanmedian(data_binned, axis=1)[:, None] - data_binned) / numpy.nanstd(data_binned, axis=1)[:, None]
-        valid_bins = numpy.isfinite(data_binned) & numpy.isfinite(error_binned) & (zscore < nsigma)
+        # select valid bins
+        valid_bins = numpy.isfinite(data_binned) & numpy.isfinite(error_binned)
 
         # fit 2D smoothing spline
         tck = interpolate.bisplrep(
@@ -2199,12 +2214,11 @@ class Image(Header):
 
         # calculate binned residuals & model systematic errors
         model_binned = interpolate.bisplev(x_cent, y_cent, tck).T
-        model_residuals = (model_binned - data_binned)**2
+        model_residuals = (model_binned - data_binned) / data_binned
 
         model_error = interpolate.griddata(
             points=(x[valid_bins].ravel(), y[valid_bins].ravel()), values=model_residuals[valid_bins].ravel(), xi=(X.ravel(), Y.ravel()),
-            method="nearest", fill_value=numpy.nan, rescale=True).reshape(self._dim)
-        model_error = numpy.sqrt(model_error)
+            method="nearest", rescale=True).reshape(self._dim)
 
         if axs is not None:
             y_pixels = numpy.arange(self._data.shape[0])
@@ -2213,7 +2227,7 @@ class Image(Header):
             norm = simple_norm(data=model_data, stretch="asinh")
             im = axs["img"].imshow(model_data, origin="lower", cmap="Greys_r", norm=norm, interpolation="none")
             axs["img"].set_aspect("auto")
-            axs["img"].plot(x.ravel(), y.ravel(), "o", mew=0.1, ms=1, mec="tab:blue", mfc="none")
+            axs["img"].plot(x[valid_bins].ravel(), y[valid_bins].ravel(), "o", mew=0.5, ms=4, mec="tab:blue", mfc="none")
             cbar = plt.colorbar(im, cax=axs["col"], orientation="horizontal")
             cbar.set_label(f"Counts ({unit})", fontsize="small", color="tab:red")
             colors_x = plt.cm.coolwarm(numpy.linspace(0, 1, self._data.shape[0]))
@@ -2224,22 +2238,30 @@ class Image(Header):
             for ix in x_pixels:
                 axs["yma"].plot(model_data[:, ix], y_pixels, ",", color=colors_y[ix], alpha=0.2)
             axs["yma"].step(numpy.sqrt(bn.nanmedian(self._error, axis=1)), y_pixels, lw=1, color="0.8", where="mid")
+
+            model_ = interpolate.bisplev(x_pixels, y_cent, tck).T
             for i in range(y_nbins):
-                mod = interpolate.bisplev(x_pixels, y_cent, tck).T
                 data = img_data[y_bins[i]:y_bins[i+1], :]
                 error = img_error[y_bins[i]:y_bins[i+1], :]
-                residuals = (mod[i] - data) / error
+                residuals = (model_[i] - data) / error
                 mu = numpy.nanmean(residuals, axis=0)
 
                 axs["res"][i].set_title(f"Y-bin = {y_bins[i:i+2]}", fontsize="large", loc="left")
                 axs["res"][i].set_ylabel("Residuals", fontsize="large")
 
-                axs["res"][i].plot(x_pixels, residuals.T, ",", color="0.2")
-                axs["res"][i].step(x_pixels, mu, "-", color="tab:blue", lw=1, where="mid")
-                axs["res"][i].axhline(-1, ls=":", lw=1, color="0.2")
-                axs["res"][i].axhline(+1, ls=":", lw=1, color="0.2")
+                axs["res"][i].errorbar(
+                    x_pixels, bn.nanmean(img_data[y_bins[i]:y_bins[i+1], :], axis=0),
+                    yerr=numpy.sqrt(bn.nanmean(img_error[y_bins[i]:y_bins[i+1], :]**2, axis=0)),
+                    fmt=",", color="0.2", ecolor="0.2", elinewidth=0.5)
+                axs["res"][i].errorbar(x_cent[valid_bins[i]], data_binned[i][valid_bins[i]], yerr=error_binned[i][valid_bins[i]], fmt=".", color="tab:red", ecolor="tab:red", lw=1, elinewidth=1)
+                axs["res"][i].plot(x_pixels, model_[i], "-", color="tab:blue")
+
+                f = numpy.abs(axs["res"][i].get_ylim()).max()*0.03
+                axs["res"][i].plot(x_pixels, residuals.T*f, ",", color="0.2")
+                axs["res"][i].step(x_pixels, mu*f, "-", color="tab:blue", lw=1, where="mid")
+                axs["res"][i].axhline(-f, ls=":", lw=1, color="0.2")
+                axs["res"][i].axhline(+f, ls=":", lw=1, color="0.2")
                 axs["res"][i].axhline(ls="--", lw=1, color="0.2")
-                axs["res"][i].set_ylim(-1.5, +1.5)
 
         stray_img = copy(self)
         stray_img.setData(data=model_data, error=model_error, mask=None)

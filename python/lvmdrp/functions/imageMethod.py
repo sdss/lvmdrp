@@ -1959,8 +1959,6 @@ def subtract_straylight(
     bins = (x_bins, y_bins)
     fig = plt.figure(figsize=(13, 10+3*y_bins), layout="constrained")
     fig.suptitle(f"Stray Light Subtraction for frame {os.path.basename(in_image)}")
-    fig.supxlabel("X (pixel)")
-    fig.supylabel("Y (pixel)")
     gs = GridSpec(5+y_bins, 5, figure=fig)
 
     ax_img = fig.add_subplot(gs[1:5, :-1])
@@ -2003,10 +2001,10 @@ def subtract_straylight(
 
     # write out stray light image
     if out_stray is not None:
-        masked = img_median._data.copy()
-        masked[img_median._mask] = numpy.nan
         log.info(f"writing stray light image to {os.path.basename(out_stray)}")
         img_stray.writeFitsData(out_stray)
+        # masked = img_median._data.copy()
+        # masked[img_median._mask] = numpy.nan
         # hdus = pyfits.HDUList()
         # hdus.append(pyfits.PrimaryHDU(img_stray._data, header=img._header))
         # hdus.append(pyfits.ImageHDU(img_out._data, name="CLEANED"))
