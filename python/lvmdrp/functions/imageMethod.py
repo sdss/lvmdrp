@@ -1851,9 +1851,13 @@ def subtract_straylight(
     in_cent_trace: str,
     out_image: str,
     out_stray: str = None,
-    x_bins: int = 40,
     select_nrows: int|Tuple[int,int] = 10,
     aperture: int = 11,
+    x_bins: int = 40,
+    x_bounds: Tuple[int,int] = (None, None),
+    y_bounds: Tuple[int,int] = (None, None),
+    x_nbound: int = 3,
+    y_nbound: int = 3,
     nsigma: float = 5.0,
     smoothing: float = 0.01,
     use_weights : bool = False,
@@ -1984,7 +1988,8 @@ def subtract_straylight(
 
     log.info(f"fitting 2D smoothing spline with parameters: {bins = }, {smoothing = }, {nsigma = } and {use_weights = }")
     img_stray, data_binned, error_binned, valid_bins = img_median.fit_spline2d(
-        bins=bins, nsigma=nsigma, smoothing=smoothing, use_weights=use_weights,
+        bins=bins, x_bounds=x_bounds, y_bounds=y_bounds, x_nbound=x_nbound, y_nbound=y_nbound,
+        nsigma=nsigma, smoothing=smoothing, use_weights=use_weights,
         axs={"img": ax_img, "col": ax_col, "xma": ax_xma, "yma": ax_yma, "res": axs_res})
 
     # subtract smoothed background signal from original image

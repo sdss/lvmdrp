@@ -2139,6 +2139,7 @@ class Image(Header):
         x_pixels = numpy.arange(self._dim[1], dtype="int")
         y_pixels = numpy.arange(self._dim[0], dtype="int")
         x_range, y_range = x_pixels[[0,-1]], y_pixels[[0,-1]]
+        left = right = bottom = top = 0
 
         # set left and right boundaries if given
         l_bound, r_bound = x_bounds
@@ -2232,7 +2233,7 @@ class Image(Header):
 
         return xybins, x_bins, y_bins, x, y, data_binned, error_binned, X, Y, img_data, img_error, data, error
 
-    def fit_spline2d(self, bins, x_bounds=("data","data"), y_bounds=(0.0,0.0), nsigma=None, smoothing=None, use_weights=True, axs=None):
+    def fit_spline2d(self, bins, x_bounds=("data","data"), y_bounds=(0.0,0.0), x_nbound=3, y_nbound=3, nsigma=None, smoothing=None, use_weights=True, axs=None):
         """Fits a 2D bivariate spline to the image data, using binned statistics and sigma clipping.
 
         The image is divided into bins along both axes, and the median value in each bin is computed.
@@ -2270,8 +2271,8 @@ class Image(Header):
         # get 2D histogram
         xybins, x_bins, y_bins, x, y, data_binned, error_binned, X, Y, img_data, img_error, data, error = self.histogram(
             bins=bins, nsigma=nsigma,
-            x_bounds=x_bounds,
-            y_bounds=y_bounds)
+            x_bounds=x_bounds, x_nbound=x_nbound,
+            y_bounds=y_bounds, y_nbound=y_nbound)
         y_cent = (y_bins[:-1]+y_bins[1:]) / 2
         x_cent = (x_bins[:-1]+x_bins[1:]) / 2
         y_nbins = y_cent.size
