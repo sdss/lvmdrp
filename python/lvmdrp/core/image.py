@@ -2141,12 +2141,12 @@ class Image(Header):
         x_range, y_range = x_pixels[[0,-1]], y_pixels[[0,-1]]
         left = right = bottom = top = 0
 
-        # set left and right boundaries if given
+        # set left and right boundaries if given (offset by 3 pixels to account for pre-scan regions)
         l_bound, r_bound = x_bounds
         if l_bound is not None:
-            left = x_nbound
+            left = x_nbound+3
         if r_bound is not None:
-            right = x_nbound
+            right = x_nbound+3
 
         # set top and bottom boundaries if given
         b_bound, t_bound = y_bounds
@@ -2160,9 +2160,9 @@ class Image(Header):
 
         # add extra bins
         if l_bound is not None:
-            x_bins = numpy.insert(x_bins, 0, 0)
+            x_bins = numpy.insert(x_bins, 0, 3)
         if r_bound is not None:
-            x_bins = numpy.append(x_bins, self._dim[1])
+            x_bins = numpy.append(x_bins, self._dim[1]-3)
         if b_bound is not None:
             y_bins = numpy.insert(y_bins, 0, 0)
         if t_bound is not None:
@@ -2170,7 +2170,7 @@ class Image(Header):
 
         return x_bins, y_bins
 
-    def histogram(self, bins, nbins_r=10, nsigma=5.0, stat=bn.nanmedian, x_bounds=(None,None), y_bounds=(None,None), x_nbound=3, y_nbound=3, clip=None):
+    def histogram(self, bins, nbins_r=10, nsigma=5.0, stat=bn.nanmedian, x_bounds=(None,None), y_bounds=(None,None), x_nbound=3, y_nbound=3, clip=None, use_mask=True):
 
         if clip is None:
             clip = (None, None)
@@ -2183,32 +2183,43 @@ class Image(Header):
 
         img_data = self._data.copy()
         img_error = numpy.sqrt(self._data).copy()
-        img_data[self._mask] = numpy.nan
-        img_error[self._mask] = numpy.nan
+        img_mask = self._mask.copy()
 
+        # offset by 3 pixels to account for pre-scan regions
         l_bound, r_bound = x_bounds
         if isinstance(l_bound, (float, int)):
-            img_data[:, :x_nbound] = l_bound
-            img_error[:, :x_nbound] = 0.1
+            img_data[:, 3:(x_nbound+3)] = l_bound
+            img_error[:, 3:(x_nbound+3)] = 0.1
+            img_mask[:, 3:(x_nbound+3)] = False
         elif l_bound == "data":
             pass
         if isinstance(r_bound, (float, int)):
-            img_data[:, -x_nbound:] = r_bound
-            img_error[:, -x_nbound:] = 0.1
+            img_data[:, -(x_nbound+3):-3] = r_bound
+            img_error[:, -(x_nbound+3):-3] = 0.1
+            img_mask[:, -(x_nbound+3):-3] = False
         elif r_bound == "data":
             pass
 
         b_bound, t_bound = y_bounds
-        if b_bound is not None:
+        if isinstance(b_bound, (float, int)):
             img_data[:y_nbound, :] = b_bound
             img_error[:y_nbound, :] = 0.1
-        if t_bound is not None:
+            img_mask[:y_nbound, :] = False
+        elif b_bound == "data":
+            pass
+        if isinstance(b_bound, (float, int)):
             img_data[-y_nbound, :] = t_bound
             img_error[-y_nbound, :] = 0.1
+            img_mask[-y_nbound, :] = False
+        elif t_bound == "data":
+            pass
+        x_bins, y_bins = self._get_bins(bins=bins, x_bounds=x_bounds, x_nbound=x_nbound, y_bounds=y_bounds, y_nbound=y_nbound)
+
+        if use_mask:
+            img_data[img_mask] = numpy.nan
+            img_error[img_mask] = numpy.nan
         data = img_data.ravel()
         error = img_error.ravel()
-
-        x_bins, y_bins = self._get_bins(bins=bins, x_bounds=x_bounds, y_bounds=y_bounds, y_nbound=y_nbound)
 
         # mask out outlying/invalid pixels
         if nsigma is not None:
@@ -2236,7 +2247,7 @@ class Image(Header):
 
         return xybins, x_bins, y_bins, x, y, data_binned, error_binned, X, Y, img_data, img_error, data, error
 
-    def fit_spline2d(self, bins, x_bounds=("data","data"), y_bounds=(0.0,0.0), x_nbound=3, y_nbound=3, nsigma=None, clip=None, smoothing=None, use_weights=True, axs=None):
+    def fit_spline2d(self, bins, x_bounds=("data","data"), y_bounds=(0.0,0.0), x_nbound=3, y_nbound=3, nsigma=None, clip=None, smoothing=None, use_weights=True, use_mask=True, axs=None):
         """Fits a 2D bivariate spline to the image data, using binned statistics and sigma clipping.
 
         The image is divided into bins along both axes, and the median value in each bin is computed.
@@ -2279,7 +2290,7 @@ class Image(Header):
             bins=bins, nsigma=nsigma,
             x_bounds=x_bounds, x_nbound=x_nbound,
             y_bounds=y_bounds, y_nbound=y_nbound,
-            clip=clip)
+            clip=clip, use_mask=use_mask)
         y_cent = (y_bins[:-1]+y_bins[1:]) / 2
         x_cent = (x_bins[:-1]+x_bins[1:]) / 2
         y_nbins = y_cent.size
