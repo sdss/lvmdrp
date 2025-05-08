@@ -9,6 +9,7 @@ from tqdm import tqdm
 import os
 import numpy
 import bottleneck as bn
+import itertools as it
 from astropy.table import Table
 from astropy.io import fits as pyfits
 from astropy.modeling import fitting, models
@@ -2132,6 +2133,62 @@ class Image(Header):
         new_img.setData(data=models)
         return new_img
 
+    def histogram(self, bins, nbins_r=10, nsigma=5.0, stat=bn.nanmedian, npix_boundary=3, bottom_boundary=None, top_boundary=None):
+
+        x_nbins, y_nbins = bins
+        x_pixels = numpy.arange(self._dim[1], dtype="int")
+        y_pixels = numpy.arange(self._dim[0], dtype="int")
+        x_range, y_range = x_pixels[[0,-1]], y_pixels[[0,-1]]
+        X, Y = numpy.meshgrid(x_pixels, y_pixels, indexing="xy")
+
+        img_data = self._data.copy()
+        img_error = numpy.sqrt(self._data).copy()
+        img_data[self._mask] = numpy.nan
+        img_error[self._mask] = numpy.nan
+        # set top and bottom boundaries if given
+        if bottom_boundary is not None:
+            img_data[0] = bottom_boundary
+            img_error[0] = 1e-1
+            bottom = npix_boundary
+        if top_boundary is not None:
+            img_data[-1] = top_boundary
+            img_error[-1] = 1e-1
+            top = npix_boundary
+        data = img_data.ravel()
+        error = img_error.ravel()
+
+        x_bins_r = numpy.histogram_bin_edges(x_pixels, bins=nbins_r, range=x_range)
+        x_bins = numpy.histogram_bin_edges(x_pixels, bins=x_nbins, range=x_range)
+        y_bins = numpy.histogram_bin_edges(y_pixels, bins=y_nbins, range=(y_range[0]+bottom,y_range[1]-top))
+        if bottom_boundary is not None:
+            y_bins = numpy.insert(y_bins, 0, 0)
+        if top_boundary is not None:
+            y_bins = numpy.append(y_bins, self._dim[0])
+        # mask out outlying/invalid pixels
+        if nsigma is not None:
+            data_mu, _, _, xybins = binned_statistic_2d(X.ravel(), Y.ravel(), data, bins=(x_bins_r,y_bins), range=(x_range,y_range), statistic=stat, expand_binnumbers=True)
+            data_std, _, _, _ = binned_statistic_2d(X.ravel(), Y.ravel(), data, bins=(x_bins_r,y_bins), range=(x_range,y_range), statistic=bn.nanstd)
+            zscore = numpy.zeros_like(data)
+            for j, i in it.product(range(y_nbins), range(nbins_r)):
+                ibin = (xybins[0]==i+1)&(xybins[1]==j+1)
+                zscore[ibin] = numpy.abs(data_mu[i,j] - data[ibin]) / data_std[i,j]
+            invalid_pixels = (zscore > nsigma)
+            data[invalid_pixels] = numpy.nan
+            error[invalid_pixels] = numpy.nan
+            img_data = data.reshape(self._dim)
+            img_error = error.reshape(self._dim)
+
+        data_binned, _, _, xybins = binned_statistic_2d(X.ravel(), Y.ravel(), data, bins=(x_bins,y_bins), range=(x_range,y_range), statistic=stat, expand_binnumbers=True)
+        error_binned, _, _, _ = binned_statistic_2d(X.ravel(), Y.ravel(), error**2, bins=(x_bins,y_bins), range=(x_range,y_range), statistic=lambda x: numpy.sqrt(stat(x)))
+        data_binned = data_binned.T
+        error_binned = error_binned.T
+
+        x_cent = (x_bins[:-1]+x_bins[1:]) / 2
+        y_cent = (y_bins[:-1]+y_bins[1:]) / 2
+        x, y = numpy.meshgrid(x_cent, y_cent, indexing="xy")
+
+        return xybins, x_bins, y_bins, x, y, data_binned, error_binned, X, Y, img_data, img_error, data, error
+
     def fit_spline2d(self, bins, nsigma, smoothing=None, use_weights=True, axs=None):
         """Fits a 2D bivariate spline to the image data, using binned statistics and sigma clipping.
 
@@ -2164,43 +2221,14 @@ class Image(Header):
         valid_bins : numpy.ndarray
             Boolean mask indicating which bins were used in the fit.
         """
-
-        x_nbins, y_nbins = bins
         x_pixels = numpy.arange(self._dim[1])
         y_pixels = numpy.arange(self._dim[0])
-        x_bins = numpy.histogram_bin_edges(x_pixels, bins=x_nbins).astype("int")
-        y_bins = numpy.histogram_bin_edges(y_pixels, bins=y_nbins).astype("int")
+
+        # get 2D histogram
+        xybins, x_bins, y_bins, x, y, data_binned, error_binned, X, Y, img_data, img_error, data, error = self.histogram(bins, nsigma=nsigma, top_boundary=0, bottom_boundary=0)
         y_cent = (y_bins[:-1]+y_bins[1:]) / 2
         x_cent = (x_bins[:-1]+x_bins[1:]) / 2
-
-        img_data = self._data.copy()
-        img_error = numpy.sqrt(self._data).copy()
-        img_data[self._mask] = numpy.nan
-        img_error[self._mask] = numpy.nan
-
-        X, Y = numpy.meshgrid(x_pixels, y_pixels, indexing="xy")
-        x, y = numpy.meshgrid(x_cent, y_cent, indexing="xy")
-
-        # mask out outlying/invalid bins
-        x_nbins_re = 10
-        data = img_data.ravel()
-        error = img_error.ravel()
-        data_mu, _, _, ibins = binned_statistic_2d(X.ravel(), Y.ravel(), data, bins=(x_nbins_re,y_nbins), statistic=bn.nanmedian, expand_binnumbers=True)
-        data_std, _, _, _ = binned_statistic_2d(X.ravel(), Y.ravel(), data, bins=(x_nbins_re,y_nbins), statistic=bn.nanstd)
-        zscore = numpy.zeros_like(data)
-        for j, i in it.product(range(y_nbins), range(x_nbins_re)):
-            ibin = (ibins[0]==i+1)&(ibins[1]==j+1)
-            zscore[ibin] = numpy.abs(data_mu[i,j] - data[ibin]) / data_std[i,j]
-        invalid_pixels = (zscore > nsigma)
-        data[invalid_pixels] = numpy.nan
-        error[invalid_pixels] = numpy.nan
-        img_data = data.reshape(self._dim)
-        img_error = error.reshape(self._dim)
-
-        data_binned, _, _, _ = binned_statistic_2d(X.ravel(), Y.ravel(), data, bins=(x_bins,y_bins), statistic=bn.nanmedian)
-        error_binned, _, _, _ = binned_statistic_2d(X.ravel(), Y.ravel(), error**2, bins=(x_bins,y_bins), statistic=lambda x: numpy.sqrt(bn.nanmedian(x)))
-        data_binned = data_binned.T
-        error_binned = error_binned.T
+        y_nbins = y_cent.size
 
         # select valid bins
         valid_bins = numpy.isfinite(data_binned) & numpy.isfinite(error_binned)
@@ -2241,19 +2269,20 @@ class Image(Header):
 
             model_ = interpolate.bisplev(x_pixels, y_cent, tck).T
             for i in range(y_nbins):
-                data = img_data[y_bins[i]:y_bins[i+1], :]
-                error = img_error[y_bins[i]:y_bins[i+1], :]
-                residuals = (model_[i] - data) / error
+                data_ = data[xybins[1]==i+1].reshape((-1,self._dim[1]))
+                error_ = error[xybins[1]==i+1].reshape((-1,self._dim[1]))
+                residuals = (model_[i] - data_) / error_
                 mu = numpy.nanmean(residuals, axis=0)
 
-                axs["res"][i].set_title(f"Y-bin = {y_bins[i:i+2]}", fontsize="large", loc="left")
+                axs["res"][i].set_title(f"Y-bin = [{y_bins[i]:.1f},{y_bins[i+1]:.1f})", fontsize="large", loc="left")
                 axs["res"][i].set_ylabel("Residuals", fontsize="large")
 
                 axs["res"][i].errorbar(
-                    x_pixels, bn.nanmean(img_data[y_bins[i]:y_bins[i+1], :], axis=0),
-                    yerr=numpy.sqrt(bn.nanmean(img_error[y_bins[i]:y_bins[i+1], :]**2, axis=0)),
+                    x_pixels, bn.nanmean(data_, axis=0), yerr=numpy.sqrt(bn.nanmean(error_**2, axis=0)),
                     fmt=",", color="0.2", ecolor="0.2", elinewidth=0.5)
-                axs["res"][i].errorbar(x_cent[valid_bins[i]], data_binned[i][valid_bins[i]], yerr=error_binned[i][valid_bins[i]], fmt=".", color="tab:red", ecolor="tab:red", lw=1, elinewidth=1)
+                axs["res"][i].errorbar(
+                    x_cent[valid_bins[i]], data_binned[i][valid_bins[i]], yerr=error_binned[i][valid_bins[i]],
+                    fmt=".", color="tab:red", ecolor="tab:red", lw=1, elinewidth=1)
                 axs["res"][i].plot(x_pixels, model_[i], "-", color="tab:blue")
 
                 f = numpy.abs(axs["res"][i].get_ylim()).max()*0.03

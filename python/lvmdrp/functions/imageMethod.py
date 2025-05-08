@@ -1957,9 +1957,9 @@ def subtract_straylight(
     # fit the signal in unmaksed areas along cross-dispersion axis by a polynomial
     y_bins = 19
     bins = (x_bins, y_bins)
-    fig = plt.figure(figsize=(13, 10+3*y_bins), layout="constrained")
+    fig = plt.figure(figsize=(13, 10+3*(y_bins+2)), layout="constrained")
     fig.suptitle(f"Stray Light Subtraction for frame {os.path.basename(in_image)}")
-    gs = GridSpec(5+y_bins, 5, figure=fig)
+    gs = GridSpec(5+(y_bins+2), 5, figure=fig)
 
     ax_img = fig.add_subplot(gs[1:5, :-1])
     ax_img.tick_params(labelbottom=False)
@@ -1974,7 +1974,7 @@ def subtract_straylight(
     ax_col.tick_params(labelsize="small", labelcolor="tab:red")
 
     axs_res = []
-    for i in range(y_bins):
+    for i in range(y_bins+2):
         ax = fig.add_subplot(gs[5+i, :-1], sharex=ax_img)
         if i != y_bins-1:
             ax.tick_params(labelbottom=False)
