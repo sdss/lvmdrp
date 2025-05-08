@@ -1859,6 +1859,7 @@ def subtract_straylight(
     x_nbound: int = 3,
     y_nbound: int = 3,
     nsigma: float = 5.0,
+    clip: Tuple[int,int] = None,
     smoothing: float = 0.01,
     use_weights : bool = False,
     median_box: int = 11,
@@ -1958,9 +1959,27 @@ def subtract_straylight(
         img_median._mask[(tfiber[icol]+aperture//2):(tfiber[icol]+aperture//2+select_tnrows), icol] = False
         img_median._mask[(bfiber[icol]-aperture//2-select_bnrows):(bfiber[icol]-aperture//2), icol] = False
 
-    # fit the signal in unmaksed areas along cross-dispersion axis by a polynomial
+    # # infer number of bins along X if not given
+    # SNR = numpy.nanmedian(numpy.sqrt(img_median._data))
+    # if x_bins is None:
+    #     x_bins = int(numpy.ceil(numpy.nanmedian(img_median._data)))
+    #     log.info(f"inferring number of bins along X as SNR^2 ({SNR = :.2f}): {x_bins = }")
+
+    # set number of bins in X and Y
     y_bins = 19
     bins = (x_bins, y_bins)
+
+    # infer smoothing parameter if not given
+    # if smoothing is None:
+    #     m = x_bins# * y_bins
+    #     if use_weights:
+    #         smoothing = numpy.round(m - numpy.sqrt(2*m), 4)
+    #         log.info(f"inferring spline smoothing with weighted fit: {smoothing = :.4f}")
+    #     else:
+    #         smoothing = m * SNR**2
+    #         log.info(f"inferring spline smoothing: {smoothing = :.4f}")
+
+    # fit the signal in unmaksed areas along cross-dispersion axis by a polynomial
     fig = plt.figure(figsize=(13, 10+3*(y_bins+2)), layout="constrained")
     fig.suptitle(f"Stray Light Subtraction for frame {os.path.basename(in_image)}")
     gs = GridSpec(5+(y_bins+2), 5, figure=fig)
@@ -1986,9 +2005,10 @@ def subtract_straylight(
             ax.set_xlabel("X (pixels)", fontsize="large")
         axs_res.append(ax)
 
-    log.info(f"fitting 2D smoothing spline with parameters: {bins = }, {smoothing = }, {nsigma = } and {use_weights = }")
+    log.info(f"binning with parameters: {bins = }, {x_bounds = }, {y_bounds = }, {x_nbound = }, {y_nbound = } and {clip = }")
+    log.info(f"fitting smoothing spline with parameters: {nsigma = }, {smoothing = } and {use_weights = }")
     img_stray, data_binned, error_binned, valid_bins = img_median.fit_spline2d(
-        bins=bins, x_bounds=x_bounds, y_bounds=y_bounds, x_nbound=x_nbound, y_nbound=y_nbound,
+        bins=bins, x_bounds=x_bounds, y_bounds=y_bounds, x_nbound=x_nbound, y_nbound=y_nbound, clip=clip,
         nsigma=nsigma, smoothing=smoothing, use_weights=use_weights,
         axs={"img": ax_img, "col": ax_col, "xma": ax_xma, "yma": ax_yma, "res": axs_res})
 
