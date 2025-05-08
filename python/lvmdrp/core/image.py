@@ -2133,7 +2133,43 @@ class Image(Header):
         new_img.setData(data=models)
         return new_img
 
-    def histogram(self, bins, nbins_r=10, nsigma=5.0, stat=bn.nanmedian, npix_boundary=3, bottom_boundary=None, top_boundary=None):
+    def _get_bins(self, bins, x_bounds=(None,None), y_bounds=(None,None), x_nbound=11, y_nbound=3):
+
+        x_nbins, y_nbins = bins
+        x_pixels = numpy.arange(self._dim[1], dtype="int")
+        y_pixels = numpy.arange(self._dim[0], dtype="int")
+        x_range, y_range = x_pixels[[0,-1]], y_pixels[[0,-1]]
+
+        # set left and right boundaries if given
+        l_bound, r_bound = x_bounds
+        if l_bound is not None:
+            left = x_nbound
+        if r_bound is not None:
+            right = x_nbound
+
+        # set top and bottom boundaries if given
+        b_bound, t_bound = y_bounds
+        if b_bound is not None:
+            bottom = y_nbound
+        if t_bound is not None:
+            top = y_nbound
+
+        x_bins = numpy.histogram_bin_edges(x_pixels, bins=x_nbins, range=(x_range[0]+left,x_range[1]-right))
+        y_bins = numpy.histogram_bin_edges(y_pixels, bins=y_nbins, range=(y_range[0]+bottom,y_range[1]-top))
+
+        # add extra bins
+        if l_bound is not None:
+            x_bins = numpy.insert(x_bins, 0, 0)
+        if r_bound is not None:
+            x_bins = numpy.append(x_bins, self._dim[1])
+        if b_bound is not None:
+            y_bins = numpy.insert(y_bins, 0, 0)
+        if t_bound is not None:
+            y_bins = numpy.append(y_bins, self._dim[0])
+
+        return x_bins, y_bins
+
+    def histogram(self, bins, nbins_r=10, nsigma=5.0, stat=bn.nanmedian, x_bounds=(None,None), y_bounds=(None,None), x_nbound=3, y_nbound=3):
 
         x_nbins, y_nbins = bins
         x_pixels = numpy.arange(self._dim[1], dtype="int")
@@ -2145,27 +2181,34 @@ class Image(Header):
         img_error = numpy.sqrt(self._data).copy()
         img_data[self._mask] = numpy.nan
         img_error[self._mask] = numpy.nan
-        # set top and bottom boundaries if given
-        if bottom_boundary is not None:
-            img_data[0] = bottom_boundary
-            img_error[0] = 1e-1
-            bottom = npix_boundary
-        if top_boundary is not None:
-            img_data[-1] = top_boundary
-            img_error[-1] = 1e-1
-            top = npix_boundary
+
+        l_bound, r_bound = x_bounds
+        if isinstance(l_bound, (float, int)):
+            img_data[:, :x_nbound] = l_bound
+            img_error[:, :x_nbound] = 0.1
+        elif l_bound == "data":
+            pass
+        if isinstance(r_bound, (float, int)):
+            img_data[:, -x_nbound:] = r_bound
+            img_error[:, -x_nbound:] = 0.1
+        elif r_bound == "data":
+            pass
+
+        b_bound, t_bound = y_bounds
+        if b_bound is not None:
+            img_data[:y_nbound, :] = b_bound
+            img_error[:y_nbound, :] = 0.1
+        if t_bound is not None:
+            img_data[-y_nbound, :] = t_bound
+            img_error[-y_nbound, :] = 0.1
         data = img_data.ravel()
         error = img_error.ravel()
 
-        x_bins_r = numpy.histogram_bin_edges(x_pixels, bins=nbins_r, range=x_range)
-        x_bins = numpy.histogram_bin_edges(x_pixels, bins=x_nbins, range=x_range)
-        y_bins = numpy.histogram_bin_edges(y_pixels, bins=y_nbins, range=(y_range[0]+bottom,y_range[1]-top))
-        if bottom_boundary is not None:
-            y_bins = numpy.insert(y_bins, 0, 0)
-        if top_boundary is not None:
-            y_bins = numpy.append(y_bins, self._dim[0])
+        x_bins, y_bins = self._get_bins(bins=bins, x_bounds=x_bounds, y_bounds=y_bounds, y_nbound=y_nbound)
+
         # mask out outlying/invalid pixels
         if nsigma is not None:
+            x_bins_r = numpy.histogram_bin_edges(x_pixels, bins=nbins_r, range=x_range)
             data_mu, _, _, xybins = binned_statistic_2d(X.ravel(), Y.ravel(), data, bins=(x_bins_r,y_bins), range=(x_range,y_range), statistic=stat, expand_binnumbers=True)
             data_std, _, _, _ = binned_statistic_2d(X.ravel(), Y.ravel(), data, bins=(x_bins_r,y_bins), range=(x_range,y_range), statistic=bn.nanstd)
             zscore = numpy.zeros_like(data)
@@ -2189,7 +2232,7 @@ class Image(Header):
 
         return xybins, x_bins, y_bins, x, y, data_binned, error_binned, X, Y, img_data, img_error, data, error
 
-    def fit_spline2d(self, bins, nsigma, smoothing=None, use_weights=True, axs=None):
+    def fit_spline2d(self, bins, x_bounds=("data","data"), y_bounds=(0.0,0.0), nsigma=None, smoothing=None, use_weights=True, axs=None):
         """Fits a 2D bivariate spline to the image data, using binned statistics and sigma clipping.
 
         The image is divided into bins along both axes, and the median value in each bin is computed.
@@ -2202,7 +2245,7 @@ class Image(Header):
         bins : tuple of int
             Number of bins along the (X, Y) axes, e.g., (x_bins, y_bins).
         nsigma : float
-            Sigma threshold for clipping outlier bins.
+            Sigma threshold for clipping outlier bins. If None, no rejection is performed.
         smoothing : float, optional
             Smoothing parameter for the spline fit. If None, the default is used.
         use_weights : bool, optional
@@ -2225,7 +2268,10 @@ class Image(Header):
         y_pixels = numpy.arange(self._dim[0])
 
         # get 2D histogram
-        xybins, x_bins, y_bins, x, y, data_binned, error_binned, X, Y, img_data, img_error, data, error = self.histogram(bins, nsigma=nsigma, top_boundary=0, bottom_boundary=0)
+        xybins, x_bins, y_bins, x, y, data_binned, error_binned, X, Y, img_data, img_error, data, error = self.histogram(
+            bins=bins, nsigma=nsigma,
+            x_bounds=x_bounds,
+            y_bounds=y_bounds)
         y_cent = (y_bins[:-1]+y_bins[1:]) / 2
         x_cent = (x_bins[:-1]+x_bins[1:]) / 2
         y_nbins = y_cent.size
@@ -2242,7 +2288,7 @@ class Image(Header):
 
         # calculate binned residuals & model systematic errors
         model_binned = interpolate.bisplev(x_cent, y_cent, tck).T
-        model_residuals = (model_binned - data_binned) / data_binned
+        model_residuals = (model_binned - data_binned) / error_binned
 
         model_error = interpolate.griddata(
             points=(x[valid_bins].ravel(), y[valid_bins].ravel()), values=model_residuals[valid_bins].ravel(), xi=(X.ravel(), Y.ravel()),
@@ -2275,7 +2321,7 @@ class Image(Header):
                 mu = numpy.nanmean(residuals, axis=0)
 
                 axs["res"][i].set_title(f"Y-bin = [{y_bins[i]:.1f},{y_bins[i+1]:.1f})", fontsize="large", loc="left")
-                axs["res"][i].set_ylabel("Residuals", fontsize="large")
+                axs["res"][i].set_ylabel(f"Counts ({unit})", fontsize="large")
 
                 axs["res"][i].errorbar(
                     x_pixels, bn.nanmean(data_, axis=0), yerr=numpy.sqrt(bn.nanmean(error_**2, axis=0)),
