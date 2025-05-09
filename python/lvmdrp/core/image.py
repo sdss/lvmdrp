@@ -1948,9 +1948,6 @@ class Image(Header):
 
     def histogram(self, bins, nbins_r=10, nsigma=5.0, stat=bn.nanmedian, x_bounds=(None,None), y_bounds=(None,None), x_nbound=3, y_nbound=3, clip=None, use_mask=True):
 
-        if clip is None:
-            clip = (None, None)
-
         x_nbins, y_nbins = bins
         x_pixels = numpy.arange(self._dim[1], dtype="int")
         y_pixels = numpy.arange(self._dim[0], dtype="int")
@@ -2014,8 +2011,10 @@ class Image(Header):
 
         data_binned, _, _, xybins = binned_statistic_2d(X.ravel(), Y.ravel(), data, bins=(x_bins,y_bins), range=(x_range,y_range), statistic=stat, expand_binnumbers=True)
         error_binned, _, _, _ = binned_statistic_2d(X.ravel(), Y.ravel(), error**2, bins=(x_bins,y_bins), range=(x_range,y_range), statistic=lambda x: numpy.sqrt(stat(x)))
-        data_binned = numpy.clip(data_binned.T, *clip)
+        data_binned = data_binned.T
         error_binned = error_binned.T
+        if clip is not None and isinstance(clip, tuple) and len(clip) == 2:
+            data_binned = numpy.clip(data_binned, *clip)
 
         x_cent = (x_bins[:-1]+x_bins[1:]) / 2
         y_cent = (y_bins[:-1]+y_bins[1:]) / 2
@@ -2055,9 +2054,6 @@ class Image(Header):
         valid_bins : numpy.ndarray
             Boolean mask indicating which bins were used in the fit.
         """
-        if clip is None:
-            clip = (None, None)
-
         x_pixels = numpy.arange(self._dim[1])
         y_pixels = numpy.arange(self._dim[0])
 
@@ -2079,7 +2075,9 @@ class Image(Header):
             x[valid_bins].ravel(), y[valid_bins].ravel(), data_binned[valid_bins].ravel(),
             w=1.0/error_binned[valid_bins].ravel() if use_weights else None,
             s=smoothing, xb=0, xe=4086, yb=0, ye=4080, eps=1e-8)
-        model_data = numpy.clip(interpolate.bisplev(x_pixels, y_pixels, tck).T, *clip)
+        model_data = interpolate.bisplev(x_pixels, y_pixels, tck).T
+        if clip is not None and isinstance(clip, tuple) and len(clip) == 2:
+            model_data = numpy.clip(model_data, *clip)
 
         # calculate binned residuals & model systematic errors
         model_binned = interpolate.bisplev(x_cent, y_cent, tck).T
@@ -2108,7 +2106,9 @@ class Image(Header):
                 axs["yma"].plot(model_data[:, ix], y_pixels, ",", color=colors_y[ix], alpha=0.2)
             axs["yma"].step(numpy.sqrt(bn.nanmedian(self._error, axis=1)), y_pixels, lw=1, color="0.8", where="mid")
 
-            model_ = numpy.clip(interpolate.bisplev(x_pixels, y_cent, tck).T, *clip)
+            model_ = interpolate.bisplev(x_pixels, y_cent, tck).T
+            if clip is not None and isinstance(clip, tuple) and len(clip) == 2:
+                model_ = numpy.clip(model_, *clip)
             for i in range(y_nbins):
                 data_ = data[xybins[1]==i+1].reshape((-1,self._dim[1]))
                 error_ = error[xybins[1]==i+1].reshape((-1,self._dim[1]))
