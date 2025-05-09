@@ -901,7 +901,7 @@ def spectra(rss, rwave=None, selet_fibers=None, norm_stat=None, ax=None):
     return ax
 
 
-def save_fig(fig, product_path, to_display, figure_path=None, label=None, fmt="png"):
+def save_fig(fig, product_path, to_display, figure_path=None, label=None, fmt="png", **kwargs):
     """Saves the given matplotlib figure to the given output/figure path"""
     # define figure path
     if figure_path is not None:
@@ -923,7 +923,7 @@ def save_fig(fig, product_path, to_display, figure_path=None, label=None, fmt="p
     fig_path = os.path.join(fig_path, fig_name)
 
     # save fig and close if requested
-    fig.savefig(fig_path)#, bbox_inches="tight")
+    fig.savefig(fig_path, **kwargs)#, bbox_inches="tight")
     if to_display:
         # plt.tight_layout()
         plt.show()

@@ -1851,59 +1851,65 @@ def subtract_straylight(
     in_cent_trace: str,
     out_image: str,
     out_stray: str = None,
-    select_nrows: int|Tuple[int,int] = 3,
-    aperture: int = 14,
-    smoothing: int = 20,
+    select_nrows: int|Tuple[int,int] = 10,
+    aperture: int = 11,
+    x_bins: int = 40,
+    x_bounds: Tuple[int,int] = (None, None),
+    y_bounds: Tuple[int,int] = (None, None),
+    x_nbound: int = 3,
+    y_nbound: int = 3,
+    nsigma: float = 5.0,
+    clip: Tuple[int,int] = None,
+    smoothing: float = 0.01,
     use_weights : bool = False,
     median_box: int = 11,
-    gaussian_sigma: int = 20.0,
     parallel: int|str = "auto",
     display_plots: bool = False,
-) -> Tuple[Image, Image, Image, Image]:
-    """Subtracts a diffuse background signal (stray light) from the raw data
+) -> Tuple[Image, Image, Image]:
+    """Subtracts diffuse background (stray light) from a raw 2D image using inter-fiber regions.
 
-    It uses the regions between fiber to estimate the stray light signal and
-    smoothes the result by a polyon in cross-disperion direction and afterwards
-    a wide 2D Gaussian filter to reduce the introduction of low frequency
-    noise.
+    The function masks out fiber traces using a trace mask, estimates the background
+    from the remaining pixels (between fibers and optionally at the top/bottom of the CCD),
+    fits a smooth 2D spline to this background, and subtracts it from the original image.
 
     Parameters
     ----------
-    in_image: str
-        Name of the FITS image from which the stray light should be subtracted
-    in_cent_trace: str
-        Name of the  FITS file with the trace mask of the fibers
-    out_image: str
-        Name of the FITS file in which the straylight subtracted image is stored
-    out_stray: str
-        Name of the FITS file in which the pure straylight image is stored
-    select_nrows: int or Tuple[int,int], optional with default: 30
-        Number of rows at the top and bottom of the CCD to be used for the stray light estimation
-    aperture: int, optional  with default: 14
-        Size of the aperture around each fiber in cross-disperion direction assumed to contain signal from fibers
-    smoothing: int, optional with default: 20
-        Smoothing parameter for the spline fit to the background signal
-    use_weights : bool, optional with default: False
-        If True, the error of the image is used as weights in the spline fitting
-    median_box: int, optional with default: 11
-        Width of the median filter used to smooth the image along the dispersion axis
-    gaussian_sigma : float, optional with default :20.0
-        Width of the 2D Gaussian filter to smooth the measured background signal
-    parallel : either int (>0) or  'auto', optional with default: 'auto'
-        Number of CPU cores used in parallel for the computation. If set to auto, the maximum number of CPUs
-    display_plots : bool, optional with default: False
-        If True, the results are plotted and displayed
+    in_image : str
+        Path to the input FITS image from which stray light will be subtracted.
+    in_cent_trace : str
+        Path to the FITS file containing the fiber trace mask.
+    out_image : str
+        Path to the output FITS file for the stray-light-subtracted image.
+    out_stray : str, optional
+        Path to the output FITS file for the stray light model (default: None).
+    x_bins : int, optional
+        Number of bins along the X axis for the spline fit (default: 40).
+    select_nrows : int or tuple of int, optional
+        Number of rows at the top and bottom of the CCD to use for background estimation
+        (default: 10, or (top, bottom) if tuple).
+    aperture : int, optional
+        Width (in pixels) to mask around each fiber trace (default: 11).
+    nsigma : float, optional
+        Sigma threshold for clipping outlier bins, (default: 5.0).
+    smoothing : float, optional
+        Smoothing parameter for the 2D spline fit (default: 0.01).
+    use_weights : bool, optional
+        If True, use image errors as weights in the spline fit (default: False).
+    median_box : int, optional
+        Width of the median filter along the dispersion axis (default: 11).
+    parallel : int or str, optional
+        Number of CPU cores to use for parallel computation, or "auto" for all available (default: "auto").
+    display_plots : bool, optional
+        If True, display diagnostic plots (default: False).
 
     Returns
     -------
-    img: Image
-        The original image
-    img_fit: Image
-        The polynomial fit to the background signal
-    img_smooth: Image
-        The smoothed background signal
-    img_out: Image
-        The stray light subtracted image
+    img_median : Image
+        Median-filtered version of the input image.
+    img_stray : Image
+        Fitted stray light background model.
+    img_out : Image
+        Stray-light-subtracted image.
     """
     # load image data
     log.info(f"using image {os.path.basename(in_image)} for stray light subtraction")
@@ -1935,12 +1941,12 @@ def subtract_straylight(
     img_median.maskFiberTraces(trace_mask, aperture=aperture, parallel=parallel)
 
     # mask regions around the top and bottom of the CCD
+    log.info(f"selecting (top, bottom) rows: {select_nrows = }")
     if isinstance(select_nrows, int):
         select_tnrows = select_nrows
         select_bnrows = select_nrows
     else:
         select_tnrows, select_bnrows = select_nrows
-    log.info(f"selecting top {select_tnrows} and bottom {select_bnrows} rows of the CCD")
     # define indices for top/bottom fibers
     tfiber = numpy.ceil(trace_mask._data[0]).astype(int)
     bfiber = numpy.floor(trace_mask._data[-1]).astype(int)
@@ -1953,86 +1959,90 @@ def subtract_straylight(
         img_median._mask[(tfiber[icol]+aperture//2):(tfiber[icol]+aperture//2+select_tnrows), icol] = False
         img_median._mask[(bfiber[icol]-aperture//2-select_bnrows):(bfiber[icol]-aperture//2), icol] = False
 
+    # # infer number of bins along X if not given
+    # SNR = numpy.nanmedian(numpy.sqrt(img_median._data))
+    # if x_bins is None:
+    #     x_bins = int(numpy.ceil(numpy.nanmedian(img_median._data)))
+    #     log.info(f"inferring number of bins along X as SNR^2 ({SNR = :.2f}): {x_bins = }")
+
+    # set number of bins in X and Y
+    y_extras = 0
+    if y_bounds[0] is not None:
+        y_extras += 1
+    if y_bounds[1] is not None:
+        y_extras += 1
+    y_bins = 19
+    bins = (x_bins, y_bins)
+
+    # infer smoothing parameter if not given
+    # if smoothing is None:
+    #     m = x_bins# * y_bins
+    #     if use_weights:
+    #         smoothing = numpy.round(m - numpy.sqrt(2*m), 4)
+    #         log.info(f"inferring spline smoothing with weighted fit: {smoothing = :.4f}")
+    #     else:
+    #         smoothing = m * SNR**2
+    #         log.info(f"inferring spline smoothing: {smoothing = :.4f}")
+
     # fit the signal in unmaksed areas along cross-dispersion axis by a polynomial
-    log.info(f"fitting spline with {smoothing = } to the background signal along cross-dispersion axis")
-    img_fit = img_median.fitSpline(smoothing=smoothing, use_weights=use_weights, clip=(0.0, None))
+    fig = plt.figure(figsize=(13, 10+3*(y_bins+y_extras)), layout="constrained")
+    fig.suptitle(f"Stray Light Subtraction for frame {os.path.basename(in_image)}")
+    gs = GridSpec(5+(y_bins+y_extras), 5, figure=fig)
 
-    # median filter to reject outlying columns
-    img_fit = img_fit.medianImg((1, 7))
+    ax_img = fig.add_subplot(gs[1:5, :-1])
+    ax_img.tick_params(labelbottom=False)
+    ax_img.set_ylabel("Y (pixels)", fontsize="large")
+    ax_xma = fig.add_subplot(gs[0, :-1], sharex=ax_img)
+    ax_yma = fig.add_subplot(gs[1:5, -1], sharey=ax_img)
+    ax_xma.tick_params(labelbottom=False)
+    ax_yma.tick_params(labelleft=False)
+    ax_xma.set_ylabel(f"Counts ({unit})", fontsize="large")
+    ax_yma.set_xlabel(f"Counts ({unit})", fontsize="large")
+    ax_col = inset_axes(ax_img, width="60%", height="2%", loc="upper right")
+    ax_col.tick_params(labelsize="small", labelcolor="tab:red")
 
-    # smooth the results by 2D Gaussian filter of given width
-    log.info(f"smoothing the background signal by a 2D Gaussian filter of width {gaussian_sigma}")
-    img_stray = img_fit.convolveGaussImg(1, gaussian_sigma)
+    axs_res = []
+    for i in range(y_bins+y_extras):
+        ax = fig.add_subplot(gs[5+i, :-1], sharex=ax_img)
+        if i != y_bins+y_extras-1:
+            ax.tick_params(labelbottom=False)
+        else:
+            ax.set_xlabel("X (pixels)", fontsize="large")
+        axs_res.append(ax)
+
+    log.info(f"binning with parameters: {bins = }, {x_bounds = }, {y_bounds = }, {x_nbound = }, {y_nbound = } and {clip = }")
+    log.info(f"fitting smoothing spline with parameters: {nsigma = }, {smoothing = } and {use_weights = }")
+    img_stray, data_binned, error_binned, valid_bins = img_median.fit_spline2d(
+        bins=bins, x_bounds=x_bounds, y_bounds=y_bounds, x_nbound=x_nbound, y_nbound=y_nbound, clip=clip,
+        nsigma=nsigma, smoothing=smoothing, use_weights=use_weights, use_mask=True,
+        axs={"img": ax_img, "col": ax_col, "xma": ax_xma, "yma": ax_yma, "res": axs_res})
 
     # subtract smoothed background signal from original image
     log.info("subtracting the smoothed background signal from the original image")
-    img_out = loadImage(in_image)
-    img_out._data = img_out._data - img_stray._data
+    img_out = copy(img)
+    img_out.setData(data=img._data-img_stray._data)
 
     # include header and write out file
     log.info(f"writing stray light subtracted image to {os.path.basename(out_image)}")
-    img_out.setHeader(header=img.getHeader())
     img_out.writeFitsData(out_image)
 
     # plot results: polyomial fitting & smoothing, both with masked regions on
-    log.info("plotting results")
-    fig = plt.figure(figsize=(10, 10), layout="constrained")
-    fig.suptitle(f"Stray Light Subtraction for frame {os.path.basename(in_image)}")
-    fig.supxlabel("X (pixel)")
-    fig.supylabel("Y (pixel)")
-    gs = fig.add_gridspec(2, 2,  width_ratios=(4, 1), height_ratios=(1, 4),
-                        left=0.1, right=0.9, bottom=0.1, top=0.9,
-                        wspace=0.05, hspace=0.05)
-
-    ax = fig.add_subplot(gs[1, 0])
-    ax_strayx = fig.add_subplot(gs[0, 0], sharex=ax)
-    ax_strayy = fig.add_subplot(gs[1, 1], sharey=ax)
-    ax_strayx.tick_params(axis="x", labelbottom=False)
-    ax_strayy.tick_params(axis="y", labelleft=False)
-    ax_strayx.set_ylabel(f"Counts ({unit})")
-    ax_strayy.set_xlabel(f"Counts ({unit})")
-    ax_strayx.set_yscale("asinh")
-    ax_strayy.set_xscale("asinh")
-    axins1 = inset_axes(ax, width="30%", height="2%", loc="upper right")
-    axins1.tick_params(labelsize="small", labelcolor="tab:red")
-
-    y_pixels = numpy.arange(img_median._data.shape[0])
-    x_pixels = numpy.arange(img_median._data.shape[1])
-    norm = simple_norm(data=img_stray._data, stretch="asinh")
-    im = ax.imshow(img_stray._data, origin="lower", cmap="Greys_r", norm=norm, interpolation="none")
-    cbar = fig.colorbar(im, cax=axins1, orientation="horizontal")
-    cbar.set_label(f"Counts ({unit})", fontsize="small", color="tab:red")
-    colors_x = plt.cm.coolwarm(numpy.linspace(0, 1, img_median._data.shape[0]))
-    colors_y = plt.cm.coolwarm(numpy.linspace(0, 1, img_median._data.shape[1]))
-    ax_strayx.fill_between(x_pixels, bn.nanmedian(img._error, axis=0), lw=0, fc="0.8")
-    for iy in y_pixels:
-        ax_strayx.plot(x_pixels, img_stray._data[iy], ",", color=colors_x[iy], alpha=0.2)
-    ax_strayy.fill_betweenx(y_pixels, 0, bn.nanmedian(img._error, axis=1), lw=0, fc="0.8")
-    for ix in x_pixels:
-        ax_strayy.plot(img_stray._data[:, ix], y_pixels, ",", color=colors_y[ix], alpha=0.2)
-    save_fig(fig, product_path=out_image, to_display=display_plots, figure_path="qa", label="straylight_model")
+    save_fig(fig, product_path=out_image, to_display=display_plots, figure_path="qa", label="straylight_model", dpi=100, transparent=False)
 
     # write out stray light image
     if out_stray is not None:
         log.info(f"writing stray light image to {os.path.basename(out_stray)}")
-        hdus = pyfits.HDUList()
-        hdus.append(pyfits.PrimaryHDU(img._data, header=img._header))
-        hdus.append(pyfits.ImageHDU(img_out._data, name="CLEANED"))
-        hdus.append(pyfits.ImageHDU(img_median._data, name="MASKED"))
-        hdus.append(pyfits.ImageHDU(img_fit._data, name="SPLINE"))
-        hdus.append(pyfits.ImageHDU(img_stray._data, name="SMOOTH"))
-        hdus.writeto(out_stray, overwrite=True)
+        img_stray.writeFitsData(out_stray)
+        # masked = img_median._data.copy()
+        # masked[img_median._mask] = numpy.nan
+        # hdus = pyfits.HDUList()
+        # hdus.append(pyfits.PrimaryHDU(img_stray._data, header=img._header))
+        # hdus.append(pyfits.ImageHDU(img_out._data, name="CLEANED"))
+        # hdus.append(pyfits.ImageHDU(masked, name="MASKED"))
+        # hdus.append(pyfits.ImageHDU(img_stray._data, name="SPLINE"))
+        # hdus.writeto(out_stray, overwrite=True)
 
-        # stray_model = fits.HDUList()
-        # stray_model.append(fits.PrimaryHDU(data=img._data, header=img._header))
-        # stray_model.append(fits.ImageHDU(data=img_stray._data, name="STRAY_CORR"))
-        # stray_model.append(fits.ImageHDU(data=img._data-img_stray._data, name="STRAYLIGHT"))
-        # stray_model.append(fits.ImageHDU(data=model._data, name="CONT_MODEL"))
-        # stray_model.append(fits.ImageHDU(data=img_stray._data-model._data, name="STRAY_MODEL"))
-        # stray_model.append(fits.ImageHDU(data=img._data-model._data, name="NOSTRAY_MODEL"))
-        # stray_model.writeto(stray_path, overwrite=True)
-
-    return img_median, img_fit, img_stray, img_out
+    return img_median, img_stray, img_out
 
 def traceFWHM_drp(
     in_image,

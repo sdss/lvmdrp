@@ -1618,8 +1618,6 @@ class RSS(FiberRows):
             new_rss._error[ifiber] = f(wave).astype("float32")
             f = interpolate.interp1d(rss._wave[ifiber], rss._mask[ifiber], kind="nearest", bounds_error=False, fill_value=1)
             new_rss._mask[ifiber] = f(wave).astype("bool")
-            new_rss._mask[ifiber] |= numpy.isnan(new_rss._data[ifiber])|(new_rss._data[ifiber]==0)
-            new_rss._mask[ifiber] |= (~numpy.isfinite(new_rss._error[ifiber]))|(new_rss._error[ifiber]==0)
             if rss._lsf is not None:
                 f = numpy.interp(wave, rss._wave[ifiber], rss._lsf[ifiber])
                 new_rss._lsf[ifiber] = f.astype("float32")
@@ -1640,6 +1638,7 @@ class RSS(FiberRows):
                 new_rss._sky_error *= dlambda
             new_rss._header["BUNIT"] = unit.replace("/Angstrom", "")
 
+        new_rss.setData(mask=True, select=(~numpy.isfinite(new_rss._data))|(new_rss._data==0)|(~numpy.isfinite(new_rss._error))|(new_rss._error==0))
         new_rss.apply_pixelmask()
 
         return new_rss

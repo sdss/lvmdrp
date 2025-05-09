@@ -75,6 +75,12 @@ MASK_BANDS = {
 COUNTS_THRESHOLDS = {"ldls": 1000, "quartz": 1000}
 CAL_FLAVORS = {"bias", "trace", "wave", "dome", "twilight"}
 
+STRAYLIGHT_PARS = dict(
+    select_nrows=(10,10), use_weights=True, aperture=11,
+    x_bins=60, x_bounds=("data","data"), y_bounds=(0.0,0.0),
+    x_nbound=10, y_nbound=5, clip=(0.0,None),
+    nsigma=4.0, smoothing=70, median_box=None)
+
 
 def choose_sequence(frames, flavor, kind, truncate=True):
     """Returns exposure numbers splitted in different sequences
@@ -1225,8 +1231,7 @@ def create_nightly_traces(mjd, use_longterm_cals=False, expnums_ldls=None, expnu
                 log.info(f"skipping {lflat_path}, file already exist")
             else:
                 image_tasks.subtract_straylight(in_image=cflat_path, out_image=lflat_path, out_stray=dstray_path,
-                                                in_cent_trace=cent_guess_path, select_nrows=(5,5), use_weights=True,
-                                                aperture=15, smoothing=400, median_box=101, gaussian_sigma=20.0, parallel=0)
+                                                in_cent_trace=cent_guess_path, parallel=1, **STRAYLIGHT_PARS)
 
             if skip_done and os.path.isfile(flux_path) and os.path.isfile(cent_path) and os.path.isfile(fwhm_path):
                 log.info(f"skipping {flux_path}, {cent_path} and {fwhm_path}, files already exist")
@@ -1360,8 +1365,7 @@ def create_traces(mjd, cameras=CAMERAS, use_longterm_cals=True, expnums_ldls=Non
                 log.info(f"skipping {lflat_path}, file already exist")
             else:
                 image_tasks.subtract_straylight(in_image=dflat_path, out_image=lflat_path, out_stray=dstray_path,
-                                                in_cent_trace=cent_guess_path, select_nrows=(5,5), use_weights=True,
-                                                aperture=15, smoothing=400, median_box=101, gaussian_sigma=20.0, parallel=0)
+                                                in_cent_trace=cent_guess_path, parallel=1, **STRAYLIGHT_PARS)
 
             if skip_done and os.path.isfile(cent_path) and os.path.isfile(flux_path) and os.path.isfile(fwhm_path):
                 log.info(f"skipping {cent_path}, {flux_path} and {fwhm_path}, file already exist")
@@ -1578,7 +1582,7 @@ def create_twilight_fiberflats(mjd: int, use_longterm_cals: bool = True, expnums
 
     # 2D reduction of twilight sequence
     reduce_2d(mjd=mjd, calibrations=calibs, expnums=flats.expnum.unique(), reject_cr=False,
-              add_astro=False, sub_straylight=True, skip_done=skip_done)
+              add_astro=False, sub_straylight=True, skip_done=skip_done, **STRAYLIGHT_PARS)
 
     for flat in flats.to_dict("records"):
         camera = flat["camera"]

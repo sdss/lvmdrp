@@ -9,12 +9,15 @@ from tqdm import tqdm
 import os
 import numpy
 import bottleneck as bn
+import itertools as it
 from astropy.table import Table
 from astropy.io import fits as pyfits
 from astropy.modeling import fitting, models
 from astropy.stats.biweight import biweight_location, biweight_scale
+from astropy.visualization import simple_norm
 from scipy import ndimage
 from scipy import interpolate
+from scipy.stats import binned_statistic_2d
 
 from lvmdrp import log
 from lvmdrp.core.constants import CON_LAMPS, ARC_LAMPS
@@ -399,6 +402,30 @@ class LinearSelectionElement:
         ax.grid(color='gray')
         ax.tick_params(axis='both', length=0)
         return fig
+
+
+def interpolate_mask(x, y, mask, kind="linear", fill_value=0):
+    """
+    :param x, y: numpy arrays, samples and values
+    :param mask: boolean mask, True for masked values
+    :param method: interpolation method, one of linear, nearest,
+    nearest-up, zero, slinear, quadratic, cubic, previous, or next.
+    :param fill_value: which value to use for filling up data outside the
+        convex hull of known pixel values.
+        Default is 0, Has no effect for 'nearest'.
+    :return: the image with missing values interpolated
+    """
+    if not numpy.any(mask):
+        return y
+    known_x, known_v = x[~mask], y[~mask]
+    missing_x = x[mask]
+    missing_idx = numpy.where(mask)
+
+    f = interpolate.interp1d(known_x, known_v, kind=kind, fill_value=fill_value, bounds_error=False)
+    yy = y.copy()
+    yy[missing_idx] = f(missing_x)
+
+    return yy
 
 
 class Image(Header):
@@ -1981,7 +2008,7 @@ class Image(Header):
         new_img.setData(data=fit_result, mask=new_mask)
         return new_img
 
-    def fitSpline(self, axis="y", degree=3, smoothing=0, use_weights=False, clip=None, interpolate_missing=True):
+    def fitSpline(self, axis="y", degree=3, smoothing=0, use_weights=False, clip=None, interpolate_missing=True, display_plots=False):
         """Fits a spline to the image along a given axis
 
         Parameters
@@ -1999,6 +2026,8 @@ class Image(Header):
             minimum and maximum values to clip the spline model, by default None
         interpolate_missing : bool, optional
             interpolate coefficients if spline fitting failed
+        display_plot: bool, optional
+            display plots for spline fitting
 
         Returns
         -------
@@ -2013,6 +2042,13 @@ class Image(Header):
 
         pixels = numpy.arange(self._dim[0])
         models = numpy.zeros(self._dim)
+        colors = plt.cm.coolwarm(numpy.linspace(0, 1, self._dim[1]))
+        if display_plots:
+            fig, axs = plt.subplots(2, 1, figsize=(15,5), sharex=True, layout="constrained")
+            axs[1].axhline(ls=":", color="0.7")
+            axs[1].set_xlabel("Y axis (pix)")
+            axs[0].set_ylabel("Counts (e-)")
+            axs[1].set_ylabel("(model - data) / data")
         for i in range(self._dim[1]):
             good_pix = ~self._mask[:,i] if self._mask is not None else ~numpy.isnan(self._data[:,i])
 
@@ -2064,6 +2100,12 @@ class Image(Header):
                 spline_pars = interpolate.splrep(masked_pixels, data, s=smoothing)
             models[:, i] = interpolate.splev(pixels, spline_pars)
 
+            if display_plots:
+                if i % 100 == 0:
+                    axs[0].plot(pixels, models[:, i], color=colors[i])
+                    axs[0].plot(masked_pixels, data, "o", ms=7, color=colors[i])
+                axs[1].plot(masked_pixels, interpolate.splev(masked_pixels, spline_pars) / data - 1, "o", ms=7, color=colors[i])
+
         # clip spline fit if required
         if clip is not None:
             models = numpy.clip(models, clip[0], clip[1])
@@ -2090,6 +2132,235 @@ class Image(Header):
         new_img = copy(self)
         new_img.setData(data=models)
         return new_img
+
+    def _get_bins(self, bins, x_bounds=(None,None), y_bounds=(None,None), x_nbound=11, y_nbound=3):
+
+        x_nbins, y_nbins = bins
+        x_pixels = numpy.arange(self._dim[1], dtype="int")
+        y_pixels = numpy.arange(self._dim[0], dtype="int")
+        x_range, y_range = x_pixels[[0,-1]], y_pixels[[0,-1]]
+        left = right = bottom = top = 0
+
+        # set left and right boundaries if given (offset by 3 pixels to account for pre-scan regions)
+        l_bound, r_bound = x_bounds
+        if l_bound is not None:
+            left = x_nbound+3
+        if r_bound is not None:
+            right = x_nbound+3
+
+        # set top and bottom boundaries if given
+        b_bound, t_bound = y_bounds
+        if b_bound is not None:
+            bottom = y_nbound
+        if t_bound is not None:
+            top = y_nbound
+
+        x_bins = numpy.histogram_bin_edges(x_pixels, bins=x_nbins, range=(x_range[0]+left,x_range[1]-right))
+        y_bins = numpy.histogram_bin_edges(y_pixels, bins=y_nbins, range=(y_range[0]+bottom,y_range[1]-top))
+
+        # add extra bins
+        if l_bound is not None:
+            x_bins = numpy.insert(x_bins, 0, 3)
+        if r_bound is not None:
+            x_bins = numpy.append(x_bins, self._dim[1]-3)
+        if b_bound is not None:
+            y_bins = numpy.insert(y_bins, 0, 0)
+        if t_bound is not None:
+            y_bins = numpy.append(y_bins, self._dim[0])
+
+        return x_bins, y_bins
+
+    def histogram(self, bins, nbins_r=10, nsigma=5.0, stat=bn.nanmedian, x_bounds=(None,None), y_bounds=(None,None), x_nbound=3, y_nbound=3, clip=None, use_mask=True):
+
+        if clip is None:
+            clip = (None, None)
+
+        x_nbins, y_nbins = bins
+        x_pixels = numpy.arange(self._dim[1], dtype="int")
+        y_pixels = numpy.arange(self._dim[0], dtype="int")
+        x_range, y_range = x_pixels[[0,-1]], y_pixels[[0,-1]]
+        X, Y = numpy.meshgrid(x_pixels, y_pixels, indexing="xy")
+
+        img_data = self._data.copy()
+        img_error = numpy.sqrt(self._data).copy()
+        img_mask = self._mask.copy()
+
+        # offset by 3 pixels to account for pre-scan regions
+        l_bound, r_bound = x_bounds
+        if isinstance(l_bound, (float, int)):
+            img_data[:, 3:(x_nbound+3)] = l_bound
+            img_error[:, 3:(x_nbound+3)] = 0.1
+            img_mask[:, 3:(x_nbound+3)] = False
+        elif l_bound == "data":
+            pass
+        if isinstance(r_bound, (float, int)):
+            img_data[:, -(x_nbound+3):-3] = r_bound
+            img_error[:, -(x_nbound+3):-3] = 0.1
+            img_mask[:, -(x_nbound+3):-3] = False
+        elif r_bound == "data":
+            pass
+
+        b_bound, t_bound = y_bounds
+        if isinstance(b_bound, (float, int)):
+            img_data[:y_nbound, :] = b_bound
+            img_error[:y_nbound, :] = 0.1
+            img_mask[:y_nbound, :] = False
+        elif b_bound == "data":
+            pass
+        if isinstance(b_bound, (float, int)):
+            img_data[-y_nbound, :] = t_bound
+            img_error[-y_nbound, :] = 0.1
+            img_mask[-y_nbound, :] = False
+        elif t_bound == "data":
+            pass
+        x_bins, y_bins = self._get_bins(bins=bins, x_bounds=x_bounds, x_nbound=x_nbound, y_bounds=y_bounds, y_nbound=y_nbound)
+
+        if use_mask:
+            img_data[img_mask] = numpy.nan
+            img_error[img_mask] = numpy.nan
+        data = img_data.ravel()
+        error = img_error.ravel()
+
+        # mask out outlying/invalid pixels
+        if nsigma is not None:
+            x_bins_r = numpy.histogram_bin_edges(x_pixels, bins=nbins_r, range=x_range)
+            data_mu, _, _, xybins = binned_statistic_2d(X.ravel(), Y.ravel(), data, bins=(x_bins_r,y_bins), range=(x_range,y_range), statistic=stat, expand_binnumbers=True)
+            data_std, _, _, _ = binned_statistic_2d(X.ravel(), Y.ravel(), data, bins=(x_bins_r,y_bins), range=(x_range,y_range), statistic=bn.nanstd)
+            zscore = numpy.zeros_like(data)
+            for j, i in it.product(range(y_nbins), range(nbins_r)):
+                ibin = (xybins[0]==i+1)&(xybins[1]==j+1)
+                zscore[ibin] = numpy.abs(data_mu[i,j] - data[ibin]) / data_std[i,j]
+            invalid_pixels = (zscore > nsigma)
+            data[invalid_pixels] = numpy.nan
+            error[invalid_pixels] = numpy.nan
+            img_data = data.reshape(self._dim)
+            img_error = error.reshape(self._dim)
+
+        data_binned, _, _, xybins = binned_statistic_2d(X.ravel(), Y.ravel(), data, bins=(x_bins,y_bins), range=(x_range,y_range), statistic=stat, expand_binnumbers=True)
+        error_binned, _, _, _ = binned_statistic_2d(X.ravel(), Y.ravel(), error**2, bins=(x_bins,y_bins), range=(x_range,y_range), statistic=lambda x: numpy.sqrt(stat(x)))
+        data_binned = numpy.clip(data_binned.T, *clip)
+        error_binned = error_binned.T
+
+        x_cent = (x_bins[:-1]+x_bins[1:]) / 2
+        y_cent = (y_bins[:-1]+y_bins[1:]) / 2
+        x, y = numpy.meshgrid(x_cent, y_cent, indexing="xy")
+
+        return xybins, x_bins, y_bins, x, y, data_binned, error_binned, X, Y, img_data, img_error, data, error
+
+    def fit_spline2d(self, bins, x_bounds=("data","data"), y_bounds=(0.0,0.0), x_nbound=3, y_nbound=3, nsigma=None, clip=None, smoothing=None, use_weights=True, use_mask=True, axs=None):
+        """Fits a 2D bivariate spline to the image data, using binned statistics and sigma clipping.
+
+        The image is divided into bins along both axes, and the median value in each bin is computed.
+        Outlier bins are rejected based on a sigma threshold. A 2D spline is then fit to the valid bins,
+        optionally using inverse variance weights. The resulting smooth background model can be used for
+        tasks such as stray light subtraction.
+
+        Parameters
+        ----------
+        bins : tuple of int
+            Number of bins along the (X, Y) axes, e.g., (x_bins, y_bins).
+        nsigma : float
+            Sigma threshold for clipping outlier bins. If None, no rejection is performed.
+        smoothing : float, optional
+            Smoothing parameter for the spline fit. If None, the default is used.
+        use_weights : bool, optional
+            If True, use inverse variance of the binned errors as weights in the spline fit (default: True).
+        axs : dict of matplotlib.axes.Axes, optional
+            Dictionary of axes for diagnostic plotting (default: None).
+
+        Returns
+        -------
+        stray_img : Image
+            Image object containing the fitted 2D spline model.
+        data_binned : numpy.ndarray
+            2D array of binned median values used for the fit.
+        error_binned : numpy.ndarray
+            2D array of binned errors.
+        valid_bins : numpy.ndarray
+            Boolean mask indicating which bins were used in the fit.
+        """
+        if clip is None:
+            clip = (None, None)
+
+        x_pixels = numpy.arange(self._dim[1])
+        y_pixels = numpy.arange(self._dim[0])
+
+        # get 2D histogram
+        xybins, x_bins, y_bins, x, y, data_binned, error_binned, X, Y, img_data, img_error, data, error = self.histogram(
+            bins=bins, nsigma=nsigma,
+            x_bounds=x_bounds, x_nbound=x_nbound,
+            y_bounds=y_bounds, y_nbound=y_nbound,
+            clip=clip, use_mask=use_mask)
+        y_cent = (y_bins[:-1]+y_bins[1:]) / 2
+        x_cent = (x_bins[:-1]+x_bins[1:]) / 2
+        y_nbins = y_cent.size
+
+        # select valid bins
+        valid_bins = numpy.isfinite(data_binned) & numpy.isfinite(error_binned)
+
+        # fit 2D smoothing spline
+        tck = interpolate.bisplrep(
+            x[valid_bins].ravel(), y[valid_bins].ravel(), data_binned[valid_bins].ravel(),
+            w=1.0/error_binned[valid_bins].ravel() if use_weights else None,
+            s=smoothing, xb=0, xe=4086, yb=0, ye=4080, eps=1e-8)
+        model_data = numpy.clip(interpolate.bisplev(x_pixels, y_pixels, tck).T, *clip)
+
+        # calculate binned residuals & model systematic errors
+        model_binned = interpolate.bisplev(x_cent, y_cent, tck).T
+        model_residuals = (model_binned - data_binned) / error_binned
+
+        model_error = interpolate.griddata(
+            points=(x[valid_bins].ravel(), y[valid_bins].ravel()), values=model_residuals[valid_bins].ravel(), xi=(X.ravel(), Y.ravel()),
+            method="nearest", rescale=True).reshape(self._dim)
+
+        if axs is not None:
+            y_pixels = numpy.arange(self._data.shape[0])
+            x_pixels = numpy.arange(self._data.shape[1])
+            unit = self._header["BUNIT"]
+            norm = simple_norm(data=model_data, stretch="asinh")
+            im = axs["img"].imshow(model_data, origin="lower", cmap="Greys_r", norm=norm, interpolation="none")
+            axs["img"].set_aspect("auto")
+            axs["img"].plot(x[valid_bins].ravel(), y[valid_bins].ravel(), "o", mew=0.5, ms=4, mec="tab:blue", mfc="none")
+            cbar = plt.colorbar(im, cax=axs["col"], orientation="horizontal")
+            cbar.set_label(f"Counts ({unit})", fontsize="small", color="tab:red")
+            colors_x = plt.cm.coolwarm(numpy.linspace(0, 1, self._data.shape[0]))
+            colors_y = plt.cm.coolwarm(numpy.linspace(0, 1, self._data.shape[1]))
+            for iy in y_pixels:
+                axs["xma"].plot(x_pixels, model_data[iy], ",", color=colors_x[iy], alpha=0.2)
+            axs["xma"].step(x_pixels, numpy.sqrt(bn.nanmedian(self._error**2, axis=0)), lw=1, color="0.8", where="mid")
+            for ix in x_pixels:
+                axs["yma"].plot(model_data[:, ix], y_pixels, ",", color=colors_y[ix], alpha=0.2)
+            axs["yma"].step(numpy.sqrt(bn.nanmedian(self._error, axis=1)), y_pixels, lw=1, color="0.8", where="mid")
+
+            model_ = numpy.clip(interpolate.bisplev(x_pixels, y_cent, tck).T, *clip)
+            for i in range(y_nbins):
+                data_ = data[xybins[1]==i+1].reshape((-1,self._dim[1]))
+                error_ = error[xybins[1]==i+1].reshape((-1,self._dim[1]))
+                residuals = (model_[i] - data_) / error_
+                mu = numpy.nanmean(residuals, axis=0)
+
+                axs["res"][i].set_title(f"Y-bin = [{y_bins[i]:.1f},{y_bins[i+1]:.1f})", fontsize="large", loc="left")
+                axs["res"][i].set_ylabel(f"Counts ({unit})", fontsize="large")
+
+                axs["res"][i].errorbar(
+                    x_pixels, bn.nanmean(data_, axis=0), yerr=numpy.sqrt(bn.nanmean(error_**2, axis=0)),
+                    fmt=",", color="0.2", ecolor="0.2", elinewidth=0.5)
+                axs["res"][i].errorbar(
+                    x_cent[valid_bins[i]], data_binned[i][valid_bins[i]], yerr=error_binned[i][valid_bins[i]],
+                    fmt=".", color="tab:red", ecolor="tab:red", lw=1, elinewidth=1)
+                axs["res"][i].plot(x_pixels, model_[i], "-", color="tab:blue")
+
+                f = numpy.abs(axs["res"][i].get_ylim()).max()*0.03
+                axs["res"][i].plot(x_pixels, residuals.T*f, ",", color="0.2")
+                axs["res"][i].step(x_pixels, mu*f, "-", color="tab:blue", lw=1, where="mid")
+                axs["res"][i].axhline(-f, ls=":", lw=1, color="0.2")
+                axs["res"][i].axhline(+f, ls=":", lw=1, color="0.2")
+                axs["res"][i].axhline(ls="--", lw=1, color="0.2")
+
+        stray_img = copy(self)
+        stray_img.setData(data=model_data, error=model_error, mask=None)
+
+        return stray_img, data_binned, error_binned, valid_bins
 
     def match_reference_column(self, ref_column=2000, ref_centroids=None, stretch_range=[0.7, 1.3], shift_range=[-100, 100], return_pars=False):
         """Returns the reference centroids matched against the current image
