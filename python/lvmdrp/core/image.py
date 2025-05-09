@@ -447,274 +447,50 @@ class Image(Header):
         # set slit map extension
         self._slitmap = slitmap
 
-    def __add__(self, other):
-        """
-        Operator to add two Images or add another type if possible
-        """
-        if isinstance(other, Image):
-            # define behaviour if the other is of the same instance
-            img = Image(header=self._header, origin=self._origin)
+    def _propagate_error(self, other, operation):
+        """ Error propagation for different operations. """
+        if self._error is None and getattr(other, "error", None) is None:
+            return None
 
-            # add data if contained in both
-            if self._data is not None and other._data is not None:
-                new_data = self._data + other._data
-                img.setData(data=new_data)
-            else:
-                img.setData(data=self._data)
+        err1 = self._error if self._error is not None else 0
+        err2 = other._error if isinstance(other, Image) and other._error is not None else 0
 
-            # add error if contained in both
-            if self._error is not None and other._error is not None:
-                new_error = numpy.sqrt(
-                    self._error.astype(numpy.float32) ** 2
-                    + other._error.astype(numpy.float32) ** 2
-                )
-                img.setData(error=new_error.astype(numpy.float32))
-            else:
-                img.setData(error=self._error)
-
-            # combined mask of valid pixels if contained in both
-            if self._mask is not None and other._mask is not None:
-                new_mask = numpy.logical_or(self._mask, other._mask)
-                img.setData(mask=new_mask)
-            else:
-                img.setData(mask=self._mask)
-            return img
-
-        elif isinstance(other, numpy.ndarray):
-            img = copy(self)
-            if self._data is not None:  # check if there is data in the object
-                dim = other.shape
-                # add ndarray according do its dimensions
-                if self._dim == dim:
-                    new_data = self._data + other
-                elif len(dim) == 1:
-                    if self._dim[0] == dim[0]:
-                        new_data = self._data + other[:, numpy.newaxis]
-                    elif self._dim[1] == dim[0]:
-                        new_data = self._data + other[numpy.newaxis, :]
-                else:
-                    new_data = self._data
-                img.setData(data=new_data)
-            return img
+        if operation in ('add', 'sub'):
+            return numpy.sqrt(err1**2 + err2**2)
+        elif operation == 'mul':
+            return numpy.sqrt((err1 * other._data)**2 + (self._data * err2)**2)
+        elif operation == 'div':
+            return numpy.sqrt((err1 / other._data)**2 + (self._data * err2 / other._data**2)**2)
         else:
-            # try to do addtion for other types, e.g. float, int, etc.
-            try:
-                img = copy(self)
-                img.setData(self._data + other)
-                return img
-            except Exception:
-                # raise exception if the type are not matching in general
-                raise TypeError(
-                    "unsupported operand type(s) for +: %s and %s"
-                    % (str(type(self)).split("'")[1], str(type(other)).split("'")[1])
-                )
+            raise ValueError(f"Unknown operation: {operation}")
 
-    def __radd__(self, other):
-        self.__add__(other)
+    def _apply_operation(self, other, op, op_name):
+        if isinstance(other, Image):
+            new_data = op(self._data, other._data)
+            new_error = self._propagate_error(other, op_name)
+            new_mask = numpy.logical_or(self._mask, other._mask) if self._mask is not None and other._mask is not None else None
+        elif isinstance(other, numpy.ndarray) or numpy.isscalar(other):
+            new_data = op(self._data, other)
+            new_error = (op(self._error, other) if self._error is not None else None)
+            new_mask = self._mask
+        else:
+            return NotImplemented
+
+        new_image = copy(self)
+        new_image.setData(data=new_data, error=new_error, mask=new_mask)
+        return new_image
+
+    def __add__(self, other):
+        return self._apply_operation(other, numpy.add, 'add')
 
     def __sub__(self, other):
-        """
-        Operator to subtract two Images or subtract another type if possible
-        """
-        if isinstance(other, Image):
-            # define behaviour if the other is of the same instance
-            img = copy(self)
-
-            # subtract data if contained in both
-            if self._data is not None and other._data is not None:
-                new_data = self._data - other._data
-                img.setData(data=new_data)
-            else:
-                img.setData(data=self._data)
-
-            # add error if contained in both
-            if self._error is not None and other._error is not None:
-                new_error = numpy.sqrt(
-                    self._error.astype(numpy.float32) ** 2
-                    + other._error.astype(numpy.float32) ** 2
-                )
-                img.setData(error=new_error.astype(numpy.float32))
-            else:
-                img.setData(error=self._error)
-
-            # combined mask of valid pixels if contained in both
-            if self._mask is not None and other._mask is not None:
-                new_mask = numpy.logical_or(self._mask, other._mask)
-                img.setData(mask=new_mask)
-            else:
-                img.setData(mask=self._mask)
-            return img
-
-        elif isinstance(other, numpy.ndarray):
-            img = copy(self)
-            if self._data is not None:  # check if there is data in the object
-                dim = other.shape
-                # add ndarray according do its dimensions
-                if self._dim == dim:
-                    new_data = self._data - other
-                elif len(dim) == 1:
-                    if self._dim[0] == dim[0]:
-                        new_data = self._data - other[:, numpy.newaxis]
-                    elif self._dim[1] == dim[0]:
-                        new_data = self._data - other[numpy.newaxis, :]
-                else:
-                    new_data = self._data - other
-                img.setData(data=new_data)
-            return img
-        else:
-            # try to do addtion for other types, e.g. float, int, etc.
-            try:
-                img = copy(self)
-                img.setData(self._data - other)
-                return img
-            except Exception:
-                # raise exception if the type are not matching in general
-                raise TypeError(
-                    "unsupported operand type(s) for -: %s and %s"
-                    % (str(type(self)).split("'")[1], str(type(other)).split("'")[1])
-                )
-
-    def __truediv__(self, other):
-        """
-        Operator to divide two Images or divide by another type if possible
-        """
-        if isinstance(other, Image):
-            # define behaviour if the other is of the same instance
-            img = copy(self)
-
-            # subtract data if contained in both
-            if self._data is not None and other._data is not None:
-                new_data = self._data / other._data
-                img.setData(data=new_data)
-            else:
-                img.setData(data=self._data)
-
-            # add error if contained in both
-            if self._error is not None and other._error is not None:
-                new_error = numpy.sqrt(
-                    (self._error / other._data) ** 2
-                    + ((self._data / other._data) * (other._error / other._data**2)) ** 2)
-                img.setData(error=new_error)
-            else:
-                img.setData(error=self._error)
-
-            # combined mask of valid pixels if contained in both
-            if self._mask is not None and other._mask is not None:
-                new_mask = numpy.logical_or(self._mask, other._mask)
-                img.setData(mask=new_mask)
-            else:
-                img.setData(mask=self._mask)
-            return img
-
-        elif isinstance(other, numpy.ndarray):
-            img = copy(self)
-            if self._data is not None:  # check if there is data in the object
-                dim = other.shape
-                # add ndarray according do its dimensions
-                if self._dim == dim:
-                    new_data = self._data / other
-                    if self._error is not None:
-                        new_error = self._error / other
-                    else:
-                        new_error = None
-                elif len(dim) == 1:
-                    if self._dim[0] == dim[0]:
-                        new_data = self._data / other[:, numpy.newaxis]
-                        if self._error is not None:
-                            new_error = self._error / other[:, numpy.newaxis]
-                        else:
-                            new_error is not None
-                    elif self._dim[1] == dim[0]:
-                        new_data = self._data / other[numpy.newaxis, :]
-                        if self._error is not None:
-                            new_error = self._error / other[numpy.newaxis, :]
-                        else:
-                            new_error is not None
-                else:
-                    new_data = self._data
-                img.setData(data=new_data, error=new_error)
-            return img
-        else:
-            # try to do addtion for other types, e.g. float, int, etc.
-            try:
-                new_data = self._data / other
-                if self._error is not None:
-                    new_error = self._error / other
-                else:
-                    new_error = None
-
-                img = copy(self)
-                img.setData(data=new_data, error=new_error)
-                return img
-            except Exception:
-                # raise exception if the type are not matching in general
-                raise TypeError(
-                    "unsupported operand type(s) for /: %s and %s"
-                    % (str(type(self)).split("'")[1], str(type(other)).split("'")[1])
-                )
+        return self._apply_operation(other, numpy.subtract, 'sub')
 
     def __mul__(self, other):
-        """
-        Operator to divide two Images or divide by another type if possible
-        """
-        if isinstance(other, Image):
-            # define behaviour if the other is of the same instance
-            img = copy(self)
+        return self._apply_operation(other, numpy.multiply, 'mul')
 
-            # subtract data if contained in both
-            if self._data is not None and other._data is not None:
-                new_data = self._data * other._data
-                img.setData(data=new_data)
-            else:
-                img.setData(data=self._data)
-
-            # add error if contained in both
-            if self._error is not None and other._error is not None:
-                new_error = numpy.sqrt(
-                    (self._error * other._data) ** 2 + (self._data * other._error) ** 2
-                )
-                img.setData(error=new_error)
-            else:
-                img.setData(error=self._error)
-
-            # combined mask of valid pixels if contained in both
-            if self._mask is not None and other._mask is not None:
-                new_mask = numpy.logical_or(self._mask, other._mask)
-                img.setData(mask=new_mask)
-            else:
-                img.setData(mask=self._mask)
-            return img
-
-        elif isinstance(other, numpy.ndarray):
-            img = copy(self)
-            if self._data is not None:  # check if there is data in the object
-                dim = other.shape
-                # add ndarray according do its dimensions
-                if self._dim == dim:
-                    new_data = self._data * other
-                elif len(dim) == 1:
-                    if self._dim[0] == dim[0]:
-                        new_data = self._data * other[:, numpy.newaxis]
-                    elif self._dim[1] == dim[0]:
-                        new_data = self._data * other[numpy.newaxis, :]
-                else:
-                    new_data = self._data
-                img.setData(data=new_data)
-            return img
-        else:
-            # try to do addtion for other types, e.g. float, int, etc.
-            try:
-                img = copy(self)
-                img.setData(data=self._data * other)
-                return img
-            except Exception:
-                # raise exception if the type are not matching in general
-                raise TypeError(
-                    "unsupported operand type(s) for *: %s and %s"
-                    % (str(type(self)).split("'")[1], str(type(other)).split("'")[1])
-                )
-
-    def __rmul__(self, other):
+    def __truediv__(self, other):
+        return self._apply_operation(other, numpy.divide, 'div')
         self.__mul__(other)
 
     def __lt__(self, other):
