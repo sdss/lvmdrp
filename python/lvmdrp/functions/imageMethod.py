@@ -1941,12 +1941,12 @@ def subtract_straylight(
     img_median.maskFiberTraces(trace_mask, aperture=aperture, parallel=parallel)
 
     # mask regions around the top and bottom of the CCD
+    log.info(f"selecting (top, bottom) rows: {select_nrows = }")
     if isinstance(select_nrows, int):
         select_tnrows = select_nrows
         select_bnrows = select_nrows
     else:
         select_tnrows, select_bnrows = select_nrows
-    log.info(f"selecting top {select_tnrows} and bottom {select_bnrows} rows of the CCD")
     # define indices for top/bottom fibers
     tfiber = numpy.ceil(trace_mask._data[0]).astype(int)
     bfiber = numpy.floor(trace_mask._data[-1]).astype(int)
