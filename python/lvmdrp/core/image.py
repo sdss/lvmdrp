@@ -1946,7 +1946,7 @@ class Image(Header):
 
         return x_bins, y_bins
 
-    def histogram(self, bins, nbins_r=10, nsigma=5.0, stat=bn.nanmedian, x_bounds=(None,None), y_bounds=(None,None), x_nbound=3, y_nbound=3, clip=None, use_mask=True):
+    def histogram(self, bins, nsigma=5.0, stat=bn.nanmedian, x_bounds=(None,None), y_bounds=(None,None), x_nbound=3, y_nbound=3, clip=None, use_mask=True):
 
         x_nbins, y_nbins = bins
         x_pixels = numpy.arange(self._dim[1], dtype="int")
@@ -1996,11 +1996,11 @@ class Image(Header):
 
         # mask out outlying/invalid pixels
         if nsigma is not None:
-            x_bins_r = numpy.histogram_bin_edges(x_pixels, bins=nbins_r, range=x_range)
+            x_bins_r = numpy.histogram_bin_edges(x_pixels, bins=x_nbins, range=x_range)
             data_mu, _, _, xybins = binned_statistic_2d(X.ravel(), Y.ravel(), data, bins=(x_bins_r,y_bins), range=(x_range,y_range), statistic=stat, expand_binnumbers=True)
             data_std, _, _, _ = binned_statistic_2d(X.ravel(), Y.ravel(), data, bins=(x_bins_r,y_bins), range=(x_range,y_range), statistic=bn.nanstd)
             zscore = numpy.zeros_like(data)
-            for j, i in it.product(range(y_nbins), range(nbins_r)):
+            for j, i in it.product(range(y_nbins), range(x_nbins)):
                 ibin = (xybins[0]==i+1)&(xybins[1]==j+1)
                 zscore[ibin] = numpy.abs(data_mu[i,j] - data[ibin]) / data_std[i,j]
             invalid_pixels = (zscore > nsigma)
@@ -2119,19 +2119,21 @@ class Image(Header):
                 axs["res"][i].set_ylabel(f"Counts ({unit})", fontsize="large")
 
                 axs["res"][i].errorbar(
-                    x_pixels, bn.nanmean(data_, axis=0), yerr=numpy.sqrt(bn.nanmean(error_**2, axis=0)),
-                    fmt=",", color="0.2", ecolor="0.2", elinewidth=0.5)
-                axs["res"][i].errorbar(
                     x_cent[valid_bins[i]], data_binned[i][valid_bins[i]], yerr=error_binned[i][valid_bins[i]],
                     fmt=".", color="tab:red", ecolor="tab:red", lw=1, elinewidth=1)
+                ylims = axs["res"][i].get_ylim()
+                axs["res"][i].errorbar(
+                    x_pixels, bn.nanmean(data_, axis=0), yerr=numpy.sqrt(bn.nanmean(error_**2, axis=0)),
+                    fmt=",", color="0.2", ecolor="0.2", elinewidth=0.5, zorder=-1)
                 axs["res"][i].plot(x_pixels, model_[i], "-", color="tab:blue")
 
-                f = numpy.abs(axs["res"][i].get_ylim()).max()*0.03
+                f = numpy.abs(ylims).max()*0.03
                 axs["res"][i].plot(x_pixels, residuals.T*f, ",", color="0.2")
                 axs["res"][i].step(x_pixels, mu*f, "-", color="tab:blue", lw=1, where="mid")
                 axs["res"][i].axhline(-f, ls=":", lw=1, color="0.2")
                 axs["res"][i].axhline(+f, ls=":", lw=1, color="0.2")
                 axs["res"][i].axhline(ls="--", lw=1, color="0.2")
+                axs["res"][i].set_ylim(-f*2, ylims[1])
 
         stray_img = copy(self)
         stray_img.setData(data=model_data, error=model_error, mask=None)
