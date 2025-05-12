@@ -9,7 +9,7 @@ from tqdm import tqdm
 import os
 import numpy
 import bottleneck as bn
-import itertools as it
+import pandas as pd
 from astropy.table import Table
 from astropy.io import fits as pyfits
 from astropy.modeling import fitting, models
@@ -17,7 +17,6 @@ from astropy.stats.biweight import biweight_location, biweight_scale
 from astropy.visualization import simple_norm
 from scipy import ndimage
 from scipy import interpolate
-from scipy.stats import binned_statistic_2d
 
 from lvmdrp import log
 from lvmdrp.core.constants import CON_LAMPS, ARC_LAMPS
@@ -1909,20 +1908,20 @@ class Image(Header):
         new_img.setData(data=models)
         return new_img
 
-    def _get_bins(self, bins, x_bounds=(None,None), y_bounds=(None,None), x_nbound=11, y_nbound=3):
+    def _get_bins(self, data, error, mask, bins, x_bounds=(None,None), y_bounds=(None,None), x_nbound=11, y_nbound=3):
 
         x_nbins, y_nbins = bins
-        x_pixels = numpy.arange(self._dim[1], dtype="int")
-        y_pixels = numpy.arange(self._dim[0], dtype="int")
-        x_range, y_range = x_pixels[[0,-1]], y_pixels[[0,-1]]
+        x_range, y_range = (0, self._dim[1]), (0, self._dim[0])
+        x_pixels = numpy.arange(x_range[1], dtype="int")
+        y_pixels = numpy.arange(y_range[1], dtype="int")
         left = right = bottom = top = 0
 
         # set left and right boundaries if given (offset by 3 pixels to account for pre-scan regions)
         l_bound, r_bound = x_bounds
         if l_bound is not None:
-            left = x_nbound+3
+            left = x_nbound
         if r_bound is not None:
-            right = x_nbound+3
+            right = x_nbound
 
         # set top and bottom boundaries if given
         b_bound, t_bound = y_bounds
@@ -1936,57 +1935,58 @@ class Image(Header):
 
         # add extra bins
         if l_bound is not None:
-            x_bins = numpy.insert(x_bins, 0, 3)
+            x_bins = numpy.insert(x_bins, 0, 0.0)
         if r_bound is not None:
-            x_bins = numpy.append(x_bins, self._dim[1]-3)
+            x_bins = numpy.append(x_bins, self._dim[1])
         if b_bound is not None:
             y_bins = numpy.insert(y_bins, 0, 0)
         if t_bound is not None:
             y_bins = numpy.append(y_bins, self._dim[0])
 
-        return x_bins, y_bins
+        # offset by 3 pixels to account for pre-scan regions
+        if isinstance(l_bound, (float, int)):
+            data[:, (x_nbound)] = l_bound
+            error[:, (x_nbound)] = 0.1
+            mask[:, (x_nbound)] = False
+        elif l_bound == "data":
+            pass
+        if isinstance(r_bound, (float, int)):
+            data[:, -(x_nbound):] = r_bound
+            error[:, -(x_nbound):] = 0.1
+            mask[:, -(x_nbound):] = False
+        elif r_bound == "data":
+            pass
+
+        if isinstance(b_bound, (float, int)):
+            data[:y_nbound, :] = b_bound
+            error[:y_nbound, :] = 0.1
+            mask[:y_nbound, :] = False
+        elif b_bound == "data":
+            pass
+        if isinstance(b_bound, (float, int)):
+            data[-y_nbound, :] = t_bound
+            error[-y_nbound, :] = 0.1
+            mask[-y_nbound, :] = False
+        elif t_bound == "data":
+            pass
+
+        return data, error, mask, x_bins, y_bins
 
     def histogram(self, bins, nsigma=5.0, stat=bn.nanmedian, x_bounds=(None,None), y_bounds=(None,None), x_nbound=3, y_nbound=3, clip=None, use_mask=True):
 
         x_nbins, y_nbins = bins
         x_pixels = numpy.arange(self._dim[1], dtype="int")
         y_pixels = numpy.arange(self._dim[0], dtype="int")
-        x_range, y_range = x_pixels[[0,-1]], y_pixels[[0,-1]]
         X, Y = numpy.meshgrid(x_pixels, y_pixels, indexing="xy")
+        xx, yy = X.ravel(), Y.ravel()
 
         img_data = self._data.copy()
         img_error = numpy.sqrt(self._data).copy()
         img_mask = self._mask.copy()
 
-        # offset by 3 pixels to account for pre-scan regions
-        l_bound, r_bound = x_bounds
-        if isinstance(l_bound, (float, int)):
-            img_data[:, 3:(x_nbound+3)] = l_bound
-            img_error[:, 3:(x_nbound+3)] = 0.1
-            img_mask[:, 3:(x_nbound+3)] = False
-        elif l_bound == "data":
-            pass
-        if isinstance(r_bound, (float, int)):
-            img_data[:, -(x_nbound+3):-3] = r_bound
-            img_error[:, -(x_nbound+3):-3] = 0.1
-            img_mask[:, -(x_nbound+3):-3] = False
-        elif r_bound == "data":
-            pass
-
-        b_bound, t_bound = y_bounds
-        if isinstance(b_bound, (float, int)):
-            img_data[:y_nbound, :] = b_bound
-            img_error[:y_nbound, :] = 0.1
-            img_mask[:y_nbound, :] = False
-        elif b_bound == "data":
-            pass
-        if isinstance(b_bound, (float, int)):
-            img_data[-y_nbound, :] = t_bound
-            img_error[-y_nbound, :] = 0.1
-            img_mask[-y_nbound, :] = False
-        elif t_bound == "data":
-            pass
-        x_bins, y_bins = self._get_bins(bins=bins, x_bounds=x_bounds, x_nbound=x_nbound, y_bounds=y_bounds, y_nbound=y_nbound)
+        img_data, img_error, img_mask, x_bins, y_bins = self._get_bins(
+            data=img_data, error=img_error, mask=img_mask,
+            bins=bins, x_bounds=x_bounds, x_nbound=x_nbound, y_bounds=y_bounds, y_nbound=y_nbound)
 
         if use_mask:
             img_data[img_mask] = numpy.nan
@@ -1994,23 +1994,21 @@ class Image(Header):
         data = img_data.ravel()
         error = img_error.ravel()
 
-        # mask out outlying/invalid pixels
-        if nsigma is not None:
-            x_bins_r = numpy.histogram_bin_edges(x_pixels, bins=x_nbins, range=x_range)
-            data_mu, _, _, xybins = binned_statistic_2d(X.ravel(), Y.ravel(), data, bins=(x_bins_r,y_bins), range=(x_range,y_range), statistic=stat, expand_binnumbers=True)
-            data_std, _, _, _ = binned_statistic_2d(X.ravel(), Y.ravel(), data, bins=(x_bins_r,y_bins), range=(x_range,y_range), statistic=bn.nanstd)
-            zscore = numpy.zeros_like(data)
-            for j, i in it.product(range(y_nbins), range(x_nbins)):
-                ibin = (xybins[0]==i+1)&(xybins[1]==j+1)
-                zscore[ibin] = numpy.abs(data_mu[i,j] - data[ibin]) / data_std[i,j]
-            invalid_pixels = (zscore > nsigma)
-            data[invalid_pixels] = numpy.nan
-            error[invalid_pixels] = numpy.nan
-            img_data = data.reshape(self._dim)
-            img_error = error.reshape(self._dim)
+        ix = numpy.digitize(xx, x_bins) - 1
+        iy = numpy.digitize(yy, y_bins) - 1
+        df = pd.DataFrame({'ix': ix, 'iy': iy, 'data': data, 'variance': error**2})
+        groups = df.groupby(['ix', 'iy'])
 
-        data_binned, _, _, xybins = binned_statistic_2d(X.ravel(), Y.ravel(), data, bins=(x_bins,y_bins), range=(x_range,y_range), statistic=stat, expand_binnumbers=True)
-        error_binned, _, _, _ = binned_statistic_2d(X.ravel(), Y.ravel(), error**2, bins=(x_bins,y_bins), range=(x_range,y_range), statistic=lambda x: numpy.sqrt(stat(x)))
+        zscore = groups.data.apply(lambda g: numpy.abs(g.mean() - g) / g.std(), include_groups=False)
+        invalid = zscore > nsigma
+
+        data[invalid] = numpy.nan
+        error[invalid] = numpy.nan
+        img_data = data.reshape(self._dim)
+        img_error = error.reshape(self._dim)
+
+        data_binned = groups.data.agg(stat).unstack().to_numpy()
+        error_binned = numpy.sqrt(groups.variance.agg(stat).unstack().to_numpy())
         data_binned = data_binned.T
         error_binned = error_binned.T
         if clip is not None and isinstance(clip, tuple) and len(clip) == 2:
@@ -2020,7 +2018,7 @@ class Image(Header):
         y_cent = (y_bins[:-1]+y_bins[1:]) / 2
         x, y = numpy.meshgrid(x_cent, y_cent, indexing="xy")
 
-        return xybins, x_bins, y_bins, x, y, data_binned, error_binned, X, Y, img_data, img_error, data, error
+        return (ix,iy), x_bins, y_bins, x, y, data_binned, error_binned, X, Y, img_data, img_error, data, error
 
     def fit_spline2d(self, bins, x_bounds=("data","data"), y_bounds=(0.0,0.0), x_nbound=3, y_nbound=3, nsigma=None, clip=None, smoothing=None, use_weights=True, use_mask=True, axs=None):
         """Fits a 2D bivariate spline to the image data, using binned statistics and sigma clipping.
@@ -2093,10 +2091,15 @@ class Image(Header):
             unit = self._header["BUNIT"]
             norm = simple_norm(data=model_data, stretch="asinh")
             im = axs["img"].imshow(model_data, origin="lower", cmap="Greys_r", norm=norm, interpolation="none")
-            axs["img"].set_aspect("auto")
-            axs["img"].plot(x[valid_bins].ravel(), y[valid_bins].ravel(), "o", mew=0.5, ms=4, mec="tab:blue", mfc="none")
             cbar = plt.colorbar(im, cax=axs["col"], orientation="horizontal")
             cbar.set_label(f"Counts ({unit})", fontsize="small", color="tab:red")
+            axs["img"].set_aspect("auto")
+
+            axs["img"].plot(x[valid_bins].ravel(), y[valid_bins].ravel(), "o", mew=0.5, ms=4, mec="tab:blue", mfc="none")
+
+            # CS = axs["img"].contour(X, Y, model_data, levels=numpy.percentile(model_data, q=(25,50,75)), cmap="Greys", linewidths=1)
+            # axs["img"].clabel(CS, fontsize=9)
+
             colors_x = plt.cm.coolwarm(numpy.linspace(0, 1, self._data.shape[0]))
             colors_y = plt.cm.coolwarm(numpy.linspace(0, 1, self._data.shape[1]))
             for iy in y_pixels:
@@ -2110,8 +2113,8 @@ class Image(Header):
             if clip is not None and isinstance(clip, tuple) and len(clip) == 2:
                 model_ = numpy.clip(model_, *clip)
             for i in range(y_nbins):
-                data_ = data[xybins[1]==i+1].reshape((-1,self._dim[1]))
-                error_ = error[xybins[1]==i+1].reshape((-1,self._dim[1]))
+                data_ = data[xybins[1]==i].reshape((-1,self._dim[1]))
+                error_ = error[xybins[1]==i].reshape((-1,self._dim[1]))
                 residuals = (model_[i] - data_) / error_
                 mu = numpy.nanmean(residuals, axis=0)
 
