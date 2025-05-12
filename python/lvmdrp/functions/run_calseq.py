@@ -79,7 +79,7 @@ STRAYLIGHT_PARS = dict(
     select_nrows=(10,10), use_weights=True, aperture=11,
     x_bins=60, x_bounds=("data","data"), y_bounds=(0.0,0.0),
     x_nbound=10, y_nbound=5, clip=(0.0,None),
-    nsigma=4.0, smoothing=70, median_box=None)
+    nsigma=1.0, smoothing=70, median_box=None)
 
 
 def choose_sequence(frames, flavor, kind, truncate=True):
