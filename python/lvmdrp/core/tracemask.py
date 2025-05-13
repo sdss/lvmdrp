@@ -28,6 +28,7 @@ class TraceMask(FiberRows):
         data, error, mask = None, None, None
         coeffs, poly_kind, poly_deg = None, None, None
         samples = None
+        slitmap = None
         with pyfits.open(in_tracemask, uint=True, do_not_scale_image_data=True, memmap=False) as hdus:
             header = hdus["PRIMARY"].header
             for hdu in hdus:
@@ -43,8 +44,10 @@ class TraceMask(FiberRows):
                     coeffs = hdu.data.astype("float32")
                     poly_kind = header.get("POLYKIND")
                     poly_deg = header.get("POLYDEG")
+                if hdu.name == "SLITMAP":
+                    slitmap = hdu
 
-            trace = cls(data=data, error=error, mask=mask, samples=samples, coeffs=coeffs, poly_kind=poly_kind, poly_deg=poly_deg, header=header)
+            trace = cls(data=data, error=error, mask=mask, slitmap=slitmap, samples=samples, coeffs=coeffs, poly_kind=poly_kind, poly_deg=poly_deg, header=header)
 
         return trace
 
@@ -54,6 +57,7 @@ class TraceMask(FiberRows):
         header=None,
         error=None,
         mask=None,
+        slitmap=None,
         samples=None,
         shape=None,
         size=None,
@@ -71,6 +75,7 @@ class TraceMask(FiberRows):
             header,
             error,
             mask,
+            slitmap,
             samples,
             shape,
             size,
@@ -138,6 +143,8 @@ class TraceMask(FiberRows):
             hdus.append(pyfits.ImageHDU(self._coeffs.astype("float32"), name="COEFFS"))
             hdus[0].header["POLYKIND"] = (self._poly_kind, "polynomial kind")
             hdus[0].header["POLYDEG"] = (self._poly_deg, "polynomial degree")
+        if self._slitmap is not None:
+            hdus.append(pyfits.BinTableHDU(self._slitmap, name="SLITMAP"))
 
         if len(hdus) > 0:
             hdu = pyfits.HDUList(hdus)  # create an HDUList object

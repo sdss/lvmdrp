@@ -1928,8 +1928,7 @@ def subtract_straylight(
 
     # load trace mask
     log.info(f"using centroids trace {os.path.basename(in_cent_trace)} to mask fibers")
-    trace_mask = TraceMask()
-    trace_mask.loadFitsData(in_cent_trace, extension_data=0)
+    trace_mask = TraceMask.from_file(in_cent_trace)
 
     # update mask
     if img_median._mask is None:
