@@ -237,17 +237,21 @@ def get_exposed_std_fiber(mjd, expnums, camera, imagetyp="flat", ref_column=LVM_
     fibermap = images[0]._slitmap[images[0]._slitmap["spectrographid"]==int(camera[1])]
     spec_select = fibermap["telescope"] == "Spec"
     ids_std = fibermap[spec_select]["orig_ifulabel"]
-    log.info(f"standard fibers in {camera = }: {','.join(ids_std)}")
+    log.info(f"possible standard fibers in {camera = }: {','.join(ids_std)}")
 
     # get exposed standard fibers from header if present
     exposed_stds = {image._header["EXPOSURE"]: image._header.get("CALIBFIB", None) for image in images}
     block_idxs = np.arange(LVM_NBLOCKS).tolist()
     if use_header and all([exposed_std is not None for exposed_std in exposed_stds.values()]):
-        log.info(f"standard fibers in {camera = }: {','.join(exposed_stds.values())}")
-        for expnum, exposed_std in exposed_stds.items():
+        log.info(f"extracting standard fibers information of {len(exposed_stds)} exposures:")
+        for expnum, exposed_std in list(exposed_stds.items()):
+            if exposed_std not in fibermap["orig_ifulabel"]:
+                exposed_stds.pop(expnum)
+                continue
             fiber_par = fibermap[fibermap["orig_ifulabel"] == exposed_std]
             block_idx = int(fiber_par["blockid"][0][1:])-1
             exposed_stds[expnum] = (exposed_std, [block_idx])
+            log.info(f"  {expnum = } exposed standard fiber: '{exposed_std}' ({block_idx = })")
     else:
         if use_header:
             log.warning(f"exposed standard fibers not found in header for {camera = }, going to infer exposed fibers from SNR")
@@ -271,6 +275,7 @@ def get_exposed_std_fiber(mjd, expnums, camera, imagetyp="flat", ref_column=LVM_
         fig.supylabel("SNR at fiber centroid")
         fig.suptitle(f"exposed standard fibers in sequence {expnums[0]} - {expnums[-1]} in camera '{camera}'")
         exposed_stds, block_idxs = {}, np.arange(LVM_NBLOCKS).tolist()
+        log.info(f"measuring SNR of {len(images)} exposures:")
         for image, ax in zip(images, axs):
             expnum = image._header["EXPOSURE"]
             exposed_std, _, snr_std, snr_std_med, snr_std_std = image.get_exposed_std(
@@ -285,7 +290,7 @@ def get_exposed_std_fiber(mjd, expnums, camera, imagetyp="flat", ref_column=LVM_
             block_idx = int(fiber_par["blockid"][0][1:])-1
             if block_idx in block_idxs:
                 block_idxs.remove(block_idx)
-            log.info(f"exposed standard fiber in exposure {expnum}: '{exposed_std}' ({block_idx = })")
+            log.info(f"  {expnum = } exposed standard fiber: '{exposed_std}' ({block_idx = })")
 
             exposed_stds[expnum] = (exposed_std, [block_idx])
 
