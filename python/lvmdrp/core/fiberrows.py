@@ -3,6 +3,7 @@ from astropy.io import fits as pyfits
 from scipy import interpolate
 from tqdm import tqdm
 from copy import deepcopy as copy
+import warnings
 
 import bottleneck as bn
 from lvmdrp import log
@@ -789,15 +790,23 @@ class FiberRows(Header, PositionTable):
         """
         pixels = numpy.arange(self._data.shape[1])
         samples = self._samples.to_pandas().values
-        self._coeffs = numpy.zeros((self._data.shape[0], numpy.abs(deg) + 1))
+        coeffs = numpy.zeros((self._data.shape[0], numpy.abs(deg) + 1))
         # iterate over each fiber
         pix_table = []
         poly_table = []
         poly_all_table = []
         for i in range(self._fibers):
             good_pix = numpy.logical_not(self._mask[i, :])
+            n_goodpix = good_pix.sum()
+            if n_goodpix == 0:
+                continue
+
             good_sam = numpy.isfinite(samples[i, :])
-            if numpy.sum(good_pix) >= deg + 1 and good_sam.sum() / good_sam.size > min_samples_frac:
+            nsamples = good_sam.size
+            n_goodsam = good_sam.sum()
+            can_fit = n_goodpix >= deg + 1
+            enough_samples = n_goodsam / nsamples > min_samples_frac
+            if can_fit and enough_samples:
                 # select the polynomial class
                 poly_cls = Spectrum1D.select_poly_class(poly_kind)
 
@@ -808,19 +817,24 @@ class FiberRows(Header, PositionTable):
                     poly_table.extend(numpy.column_stack([pixels[good_pix], poly(pixels[good_pix])]).tolist())
                     poly_all_table.extend(numpy.column_stack([pixels, poly(pixels)]).tolist())
                 except numpy.linalg.LinAlgError as e:
-                    log.error(f'Fiber trace failure at fiber {i}: {e}')
+                    warnings.warn(f'Fiber trace failure at fiber {i}: {e}')
                     self._mask[i, :] = True
                     continue
 
-                self._coeffs[i, :] = poly.convert().coef
+                coeffs[i, :] = poly.convert().coef
                 self._data[i, :] = poly(pixels)
 
                 if clip is not None:
                     self._data = numpy.clip(self._data, clip[0], clip[1])
                 self._mask[i, :] = False
             else:
-                log.warning(f"fiber {i} does not meet criteria: {good_pix.sum() = } >= {deg + 1 = } or {good_sam.sum() / good_sam.size = } > {min_samples_frac = }")
+                if not can_fit:
+                    warnings.warn(f"fiber {i} does not meet criterium: {n_goodpix = } >= {deg + 1 = }")
+                elif not enough_samples:
+                    warnings.warn(f"fiber {i} does not meet criterium: {n_goodsam / nsamples = } > {min_samples_frac = }")
                 self._mask[i, :] = True
+
+        self.set_coeffs(coeffs, poly_kind=poly_kind)
 
         return numpy.asarray(pix_table), numpy.asarray(poly_table), numpy.asarray(poly_all_table)
 

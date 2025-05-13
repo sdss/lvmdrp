@@ -1314,7 +1314,7 @@ def create_traces(mjd, cameras=CAMERAS, use_longterm_cals=True, expnums_ldls=Non
         fibermap = SLITMAP[SLITMAP["spectrographid"] == int(camera[1])]
 
         exposed_stds, unexposed_stds = get_exposed_std_fiber(mjd=mjd, expnums=expnums, camera=camera)
-        for expnum, (std_fiberid, block_idxs) in exposed_stds.items():
+        for iexp, (expnum, (std_fiberid, block_idxs)) in enumerate(exposed_stds.items()):
             # define paths
             dflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", imagetype="flat", camera=camera, expnum=expnum)
             lflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="l", imagetype="flat", camera=camera, expnum=expnum)
@@ -1373,6 +1373,21 @@ def create_traces(mjd, cameras=CAMERAS, use_longterm_cals=True, expnums_ldls=Non
                 mamps[camera]._mask[select_block] = trace_flux_fit._mask[select_block]
                 mcents[camera]._mask[select_block] = trace_cent_fit._mask[select_block]
                 mwidths[camera]._mask[select_block] = trace_fwhm_fit._mask[select_block]
+                if iexp == 0:
+                    mamps[camera]._poly_kind = trace_flux_fit._poly_kind
+                    mamps[camera]._poly_deg = trace_flux_fit._poly_deg
+                    mamps[camera].setHeader(trace_flux_fit._header)
+                    mamps[camera].setSlitmap(trace_flux_fit._slitmap)
+
+                    mcents[camera]._poly_kind = trace_cent_fit._poly_kind
+                    mcents[camera]._poly_deg = trace_cent_fit._poly_deg
+                    mcents[camera].setHeader(trace_cent_fit._header)
+                    mcents[camera].setSlitmap(trace_cent_fit._slitmap)
+
+                    mwidths[camera]._poly_kind = trace_fwhm_fit._poly_kind
+                    mwidths[camera]._poly_deg = trace_fwhm_fit._poly_deg
+                    mwidths[camera].setHeader(trace_fwhm_fit._header)
+                    mwidths[camera].setSlitmap(trace_fwhm_fit._slitmap)
 
         mamp_path = path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=mjd, camera=camera, kind="mamp")
         mcent_path = path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=mjd, camera=camera, kind="mtrace")

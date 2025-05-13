@@ -132,7 +132,7 @@ class TraceMask(FiberRows):
         """
         hdus = pyfits.HDUList()
 
-        hdus.append(pyfits.PrimaryHDU(self._data.astype("float32")))
+        hdus.append(pyfits.PrimaryHDU(self._data.astype("float32"), header=self.getHeader()))
         if self._error is not None:
             hdus.append(pyfits.ImageHDU(self._error.astype("float32"), name="ERROR"))
         if self._mask is not None:
@@ -143,14 +143,9 @@ class TraceMask(FiberRows):
             hdus.append(pyfits.ImageHDU(self._coeffs.astype("float32"), name="COEFFS"))
             hdus[0].header["POLYKIND"] = (self._poly_kind, "polynomial kind")
             hdus[0].header["POLYDEG"] = (self._poly_deg, "polynomial degree")
+            hdus[0].update_header()
         if self._slitmap is not None:
             hdus.append(pyfits.BinTableHDU(self._slitmap, name="SLITMAP"))
 
-        if len(hdus) > 0:
-            hdu = pyfits.HDUList(hdus)  # create an HDUList object
-            if self._header is not None:
-                hdu[0].header = self.getHeader()  # add the primary header to the HDU
-                hdu[0].update_header()
-
         os.makedirs(os.path.dirname(out_trace), exist_ok=True)
-        hdu.writeto(out_trace, output_verify="silentfix", overwrite=True)
+        hdus.writeto(out_trace, output_verify="silentfix", overwrite=True)

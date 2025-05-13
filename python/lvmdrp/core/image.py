@@ -2297,6 +2297,7 @@ class Image(Header):
         centroids.setFibers(fibers)
         centroids._good_fibers = good_fibers
         centroids.setHeader(self._header.copy())
+        centroids.setSlitmap(self._slitmap)
         centroids._header["IMAGETYP"] = "trace_centroid"
 
         # set positions of fibers along reference column
@@ -2349,6 +2350,7 @@ class Image(Header):
         trace_cent.setFibers(fiber_centroids._fibers)
         trace_cent._good_fibers = fiber_centroids._good_fibers
         trace_cent.setHeader(self._header.copy())
+        trace_cent.setSlitmap(self._slitmap)
         trace_amp = copy(trace_cent)
         trace_fwhm = copy(trace_cent)
         trace_cent._header["IMAGETYP"] = "trace_centroid"
