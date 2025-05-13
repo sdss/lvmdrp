@@ -33,7 +33,6 @@ from glob import glob
 from copy import deepcopy as copy
 from datetime import datetime
 from shutil import copy2, rmtree
-from astropy.stats import biweight_location, biweight_scale
 from astropy.io import fits
 from astropy.table import Table
 from scipy import interpolate
@@ -105,7 +104,7 @@ def choose_sequence(frames, flavor, kind, truncate=True):
         "bias": 7,
         "flat": 2 if kind=="nightly" else 24,
         "arc": 2 if kind=="nightly" else 24,
-        "twilight": 24
+        "twilight": 12
     }
 
     if not isinstance(flavor, str) or flavor not in {"twilight", "bias", "flat", "arc"}:
@@ -137,7 +136,8 @@ def choose_sequence(frames, flavor, kind, truncate=True):
 
     lengths = [len(seq) for seq in sequences]
     if flavor == "twilight":
-        chosen_expnums = np.concatenate(sequences)
+        # chosen_expnums = np.concatenate(sequences)
+        chosen_expnums = sequences[0]
     else:
         if len(sequences) > 1:
             idx = lengths.index(min(lengths) if kind == "nightly" else max(lengths))
@@ -258,10 +258,7 @@ def get_exposed_std_fiber(mjd, expnums, camera, imagetyp="flat", ref_column=LVM_
         log.info(f"combining {len(images)} exposures")
         cimage = image_tasks.combineImages(images, normalize=False, background_subtract=False)
         cimage.setData(data=np.nan_to_num(cimage._data), error=np.nan_to_num(cimage._error, nan=np.inf))
-        # calculate correction in reference Y positions along reference column
         fiber_pos = cimage.match_reference_column(ref_column)
-        pos_std = fiber_pos[spec_select].round().astype("int")
-        idx_std = np.arange(pos_std.size)
 
         # calculate SNR along colummn
         nrows = max(len(images)//3, 1)
@@ -276,39 +273,9 @@ def get_exposed_std_fiber(mjd, expnums, camera, imagetyp="flat", ref_column=LVM_
         exposed_stds, block_idxs = {}, np.arange(LVM_NBLOCKS).tolist()
         for image, ax in zip(images, axs):
             expnum = image._header["EXPOSURE"]
-            column = image.getSlice(ref_column, axis="Y")
-            snr = (column._data/column._error)
-            snr_med = biweight_location(snr[fiber_pos.round().astype("int")], ignore_nan=True)
-            snr_std = biweight_scale(snr[fiber_pos.round().astype("int")], ignore_nan=True)
-            snr_std_med = biweight_location(snr[pos_std], ignore_nan=True)
-            snr_std_std = biweight_scale(snr[pos_std], ignore_nan=True)
-            log.debug(f"{expnum = } mean SNR = {snr_med:.2f} +/- {snr_std:.2f} (standard fibers: {snr_std_med:.2f} +/- {snr_std_std:.2f})")
-
-            ax.set_title(f"{expnum = }", loc="left")
-            ax.axhspan(snr_med-snr_std, snr_med+snr_std, lw=0, fc="0.7", alpha=0.5)
-            ax.axhline(snr_med, lw=1, color="0.7")
-            ax.axhspan(max(0, snr_std_med-snr_threshold*snr_std_std), snr_std_med+snr_threshold*snr_std_std, lw=0, fc="0.7", alpha=0.5)
-            ax.axhline(snr_std_med, lw=1, color="0.7")
-            ax.bar(idx_std, snr[pos_std], hatch="///////", lw=0, ec="tab:blue", fc="none", zorder=999)
-            ax.set_xticks(idx_std)
-            ax.set_xticklabels(ids_std)
-
-            # select standard fiber exposed if any
-            select_std = snr[pos_std] > snr_std_med + snr_threshold * snr_std_std
-            exposed_std = ids_std[select_std]
-            if select_std.sum() > 1:
-                exposed_std_ = exposed_std[np.argmax(snr[pos_std[select_std]])]
-                log.warning(f"more than one standard fiber selected in {expnum = }: {','.join(exposed_std)}, selecting highest SNR: '{exposed_std_}'")
-                exposed_std = exposed_std_
-            elif select_std.sum() > 0:
-                exposed_std = exposed_std[0]
-            else:
-                exposed_std = None
+            exposed_std = image.get_exposed_std(ref_column=ref_column, fiber_pos=fiber_pos, snr_threshold=snr_threshold, trust_errors=False, ax=ax)
+            if exposed_std is None:
                 continue
-
-            # highlight exposed fiber in plot
-            select_exposed = ids_std == exposed_std
-            ax.bar(idx_std[select_exposed], snr[pos_std][select_exposed], hatch="///////", lw=0, ec="tab:red", fc="none", zorder=999)
 
             # get block ID for exposed standard fiber
             fiber_par = image._slitmap[image._slitmap["orig_ifulabel"] == exposed_std]

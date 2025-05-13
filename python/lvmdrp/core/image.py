@@ -1101,6 +1101,56 @@ class Image(Header):
             self.setHdrValue("NAXIS1", self._dim[1])
             self.setHdrValue("NAXIS2", self._dim[0])
 
+    def get_exposed_std(self, ref_column, fiber_pos=None, snr_threshold=5, trust_errors=True, ax=None):
+        if self._slitmap is None:
+            raise ValueError(f"Slitmap attribute `self._slitmap` has to be defined: {self._slitmap = }")
+
+        if fiber_pos is None:
+            fiber_pos = self.match_reference_column(ref_column)
+
+        slitmap = self._slitmap[self._slitmap["spectrographid"] == int(self._header["CCD"][1])]
+        spec_select = slitmap["telescope"] == "Spec"
+
+        ids_std = slitmap[spec_select]["orig_ifulabel"]
+        pos_std = fiber_pos[spec_select].round().astype("int")
+        idx_std = numpy.arange(pos_std.size)
+
+        expnum = self._header["EXPOSURE"]
+        column = self.getSlice(ref_column, axis="Y")
+        snr = (column._data / (column._error if trust_errors else numpy.sqrt(column._data)))
+        snr_med = biweight_location(snr[fiber_pos.round().astype("int")], ignore_nan=True)
+        snr_std = biweight_scale(snr[fiber_pos.round().astype("int")], ignore_nan=True)
+        snr_std_med = biweight_location(snr[pos_std], ignore_nan=True)
+        snr_std_std = biweight_scale(snr[pos_std], ignore_nan=True)
+        log.info(f"{expnum = } mean SNR = {snr_med:.2f} +/- {snr_std:.2f} (standard fibers: {snr_std_med:.2f} +/- {snr_std_std:.2f})")
+
+        ax.set_title(f"{expnum = }", loc="left")
+        ax.axhspan(snr_med-snr_std, snr_med+snr_std, lw=0, fc="0.7", alpha=0.5)
+        ax.axhline(snr_med, lw=1, color="0.7")
+        ax.axhspan(max(0, snr_std_med-snr_threshold*snr_std_std), snr_std_med+snr_threshold*snr_std_std, lw=0, fc="0.7", alpha=0.5)
+        ax.axhline(snr_std_med, lw=1, color="0.7")
+        ax.bar(idx_std, snr[pos_std], hatch="///////", lw=0, ec="tab:blue", fc="none", zorder=999)
+        ax.set_xticks(idx_std)
+        ax.set_xticklabels(ids_std)
+
+        # select standard fiber exposed if any
+        select_std = snr[pos_std] > snr_std_med + snr_threshold * snr_std_std
+        exposed_std = ids_std[select_std]
+        if select_std.sum() > 1:
+            exposed_std_ = exposed_std[numpy.argmax(snr[pos_std[select_std]])]
+            warnings.warn(f"more than one standard fiber selected in {expnum = }: {','.join(exposed_std)}, selecting highest SNR: '{exposed_std_}'")
+            exposed_std = exposed_std_
+        elif select_std.sum() > 0:
+            exposed_std = exposed_std[0]
+        else:
+            return None
+
+        # highlight exposed fiber in plot
+        select_exposed = ids_std == exposed_std
+        ax.bar(idx_std[select_exposed], snr[pos_std][select_exposed], hatch="///////", lw=0, ec="tab:red", fc="none", zorder=999)
+
+        return exposed_std
+
     def loadFitsData(
         self,
         filename,
