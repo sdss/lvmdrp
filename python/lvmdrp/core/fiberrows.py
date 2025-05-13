@@ -131,6 +131,7 @@ class FiberRows(Header, PositionTable):
         header=None,
         error=None,
         mask=None,
+        slitmap=None,
         samples=None,
         shape=None,
         size=None,
@@ -157,6 +158,8 @@ class FiberRows(Header, PositionTable):
         self.set_coeffs(coeffs=coeffs, poly_kind=poly_kind)
         if self._data is None and self._coeffs is not None:
             self.eval_coeffs()
+
+        self.setSlitmap(slitmap)
 
     def __len__(self):
         return self._fibers
@@ -464,6 +467,20 @@ class FiberRows(Header, PositionTable):
                 self._pixels = numpy.arange(npixels) if npixels is not None else npixels
             elif not hasattr(self, "_pixels"):
                 self._pixels = None
+
+    def getSlitmap(self):
+        return self._slitmap
+
+    def setSlitmap(self, slitmap):
+        if slitmap is None:
+            self._slitmap = None
+            return
+        if isinstance(slitmap, pyfits.BinTableHDU):
+            self._slitmap = Table.read(slitmap)
+        elif isinstance(slitmap, Table):
+            self._slitmap = slitmap
+        else:
+            raise TypeError(f"Invalid slitmap table type '{type(slitmap)}'")
 
     def set_samples(self, samples=None, columns=None):
         if isinstance(samples, Table):
