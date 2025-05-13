@@ -8,6 +8,8 @@ import bottleneck as bn
 from lvmdrp import log
 from scipy import optimize
 from astropy.table import Table
+
+from lvmdrp.core.constants import LVM_NBLOCKS, LVM_BLOCKSIZE
 from lvmdrp.core.header import Header, combineHdr
 from lvmdrp.core.positionTable import PositionTable
 from lvmdrp.core.spectrum1d import Spectrum1D, _cross_match_float
@@ -1129,7 +1131,7 @@ class FiberRows(Header, PositionTable):
 
         return self
 
-    def interpolate_data(self, axis="Y", extrapolate=False, reset_mask=True):
+    def interpolate_data(self, axis="Y", reset_mask=True):
         """Interpolate data of bad fibers (axis='Y') or bad pixels along the dispersion axis (axis='X')
 
         Parameters
@@ -1137,8 +1139,6 @@ class FiberRows(Header, PositionTable):
         axis : string or int, optional with default: 'Y'
             Defines the axis of the slice to be inserted, 'X', 'x', or 1 for the x-axis or
             'Y','y', or 0 for the y-axis.
-        extrapolate : bool, optional with default: False
-            If True, extrapolate data for bad fibers or bad pixels along the dispersion axis
         reset_mask : bool, optional with default: True
             If True, reset the mask of interpolated fibers to False
 
@@ -1152,24 +1152,38 @@ class FiberRows(Header, PositionTable):
         ValueError
             If axis is not 'X', 'x', 1, 'Y', 'y', or 0
         """
+        if self._mask is None:
+            raise ValueError(f"Attribute `_mask` needs to be set: {self._mask = }")
+
         # define coordinates
         x_pixels = numpy.arange(self._data.shape[1])
         y_pixels = numpy.arange(self._fibers)
 
         # interpolate data
         if axis == "Y" or axis == "y" or axis == 0:
-            bad_fibers = self._mask.all(axis=1)
-            if bad_fibers.sum() == self._fibers:
-                return self
-            f_data = interpolate.interp1d(y_pixels[~bad_fibers], self._data[~bad_fibers, :], axis=0, bounds_error=False, fill_value="extrapolate")
-            self._data = f_data(y_pixels)
-            if self._error is not None:
-                f_error = interpolate.interp1d(y_pixels[~bad_fibers], self._error[~bad_fibers, :], axis=0, bounds_error=False, fill_value="extrapolate")
-                self._error = f_error(y_pixels)
+            if self._slitmap is None:
+                raise ValueError(f"Attribute `_slitmap` needs to be set: {self._slitmap = }")
+            slitmap = self._slitmap[self._slitmap["spectrographid"]==int(self._header["CCD"][1])]
+            for block_idx in range(LVM_NBLOCKS):
+                select_block = slitmap["blockid"] == f"B{block_idx+1}"
+                y = y_pixels[select_block]
+                data = self._data[select_block]
+                mask = self._mask[select_block]
 
-            # unmask interpolated fibers
-            if self._mask is not None:
-                self._mask[bad_fibers, :] = False
+                bad_fibers = mask.all(axis=1)
+                if bad_fibers.sum() == 0 or bad_fibers.sum() == LVM_BLOCKSIZE:
+                    continue
+
+                f_data = interpolate.interp1d(y[~bad_fibers], data[~bad_fibers], axis=0, bounds_error=False, fill_value="extrapolate")
+                self._data[select_block] = f_data(y)
+                if self._error is not None:
+                    error = self._error[select_block]
+                    f_error = interpolate.interp1d(y[~bad_fibers], error[~bad_fibers], axis=0, bounds_error=False, fill_value="extrapolate")
+                    self._error[select_block] = f_error(y)
+
+                # unmask interpolated fibers
+                if reset_mask:
+                    self._mask[select_block] = False
         elif axis == "X" or axis == "x" or axis == 1:
             for ifiber in y_pixels:
                 bad_pixels = (self._data[ifiber] <= 0) | (self._mask[ifiber, :])
