@@ -204,7 +204,7 @@ def get_fibers_signal(mjd, camera, expnum, imagetyp="flat"):
     return fiberpos, img
 
 
-def get_exposed_std_fiber(mjd, expnums, camera, imagetyp="flat", ref_column=LVM_REFERENCE_COLUMN, snr_threshold=5, use_header=True, display_plots=False):
+def get_exposed_std_fiber(mjd, expnums, camera, imagetyp="flat", ref_column=LVM_REFERENCE_COLUMN, snr_threshold=80, use_header=True, display_plots=False):
     """Returns the exposed standard fiber IDs for a given exposure sequence and camera
 
     Parameters
@@ -218,7 +218,7 @@ def get_exposed_std_fiber(mjd, expnums, camera, imagetyp="flat", ref_column=LVM_
     ref_column : int
         Reference column for the fiber trace
     snr_threshold : float
-        SNR threshold above which a fiber is considered to be exposed
+        SNR threshold above which a fiber is considered to be exposed, by default 80
     use_header : bool
         Use CALIBFIB header keyword if available, defaults to True
     display_plots : bool
@@ -273,7 +273,10 @@ def get_exposed_std_fiber(mjd, expnums, camera, imagetyp="flat", ref_column=LVM_
         exposed_stds, block_idxs = {}, np.arange(LVM_NBLOCKS).tolist()
         for image, ax in zip(images, axs):
             expnum = image._header["EXPOSURE"]
-            exposed_std = image.get_exposed_std(ref_column=ref_column, fiber_pos=fiber_pos, snr_threshold=snr_threshold, trust_errors=False, ax=ax)
+            exposed_std, _, snr_std, snr_std_med, snr_std_std = image.get_exposed_std(
+                ref_column=ref_column, fiber_pos=fiber_pos, snr_threshold=snr_threshold, trust_errors=False, ax=ax)
+            log.info(f"  {expnum = } SNR for standards: {snr_std_med:.2f} +/- {snr_std_std:.2f}")
+
             if exposed_std is None:
                 continue
 
