@@ -316,6 +316,7 @@ def longterm(mjd, mjd_list, mjd_range, reject_cr,
 @click.option('-s', '--skip-done', is_flag=True, default=False, help='flag to skip reduction steps that have already been done')
 @click.option('-c', '--clean-ancillary', is_flag=True, default=False, help='Remove ancillary paths after run')
 @click.option('--fflats-from-to', type=int, default=((None, None),), nargs=2, multiple=True, help='Move twilight fiberflats from one MJD to another MJD')
+@click.option("--dry-run", is_flag=True, default=False, help="Shows useful information about the current setup without actually running reductions")
 @cloup.constraint(mutually_exclusive, ['mjd', 'mjd_list', 'mjd_range'])
 @cloup.constraint(RequireExactly(1), ['mjd', 'mjd_list', 'mjd_range'])
 def nightly(mjd, mjd_list, mjd_range, reject_cr,
@@ -324,7 +325,7 @@ def nightly(mjd, mjd_list, mjd_range, reject_cr,
                  ldls_threshold, qrtz_threshold,
                  cent_ncolumns, full_ncolumns,
                  extract_md, skip_done, clean_ancillary,
-                 fflats_from_to, copy_to_sandbox):
+                 fflats_from_to, dry_run):
     """ Run calibration sequence reduction """
 
     only_cals = {flavor for flavor, skip in zip(["bias", "trace", "wave", "dome", "twilight"],
@@ -348,7 +349,8 @@ def nightly(mjd, mjd_list, mjd_range, reject_cr,
             cent_guess_ncolumns=cent_ncolumns, trace_full_ncolumns=full_ncolumns,
             extract_metadata=extract_md, skip_done=skip_done,
             keep_ancillary=not clean_ancillary,
-            fflats_from=fflats_from[fflats_to.index(mjd)] if mjd in fflats_to else None)
+            fflats_from=fflats_from[fflats_to.index(mjd)] if mjd in fflats_to else None,
+            dry_run=dry_run)
 
 
 @cli.command('fiberflat-corrections', short_help='Run fiberflat skyline correction using science frames', context_settings=dict(show_default=True))
@@ -357,15 +359,17 @@ def nightly(mjd, mjd_list, mjd_range, reject_cr,
 @click.option('-e', '--science-expnums', type=IntListType(), default=None, help='a list of specific exposure numbers to reduce')
 @click.option('--force-correction', is_flag=True, default=False, help='flag to force correction even if has been already done')
 @click.option('-s', '--skip-done', is_flag=True, default=False, help='flag to skip reduction steps that have already been done')
-def fiberflat_corrections(mjd, science_mjds, science_expnums, force_correction, skip_done):
-    create_fiberflats_corrections(mjd=mjd, science_mjds=science_mjds, science_expnums=science_expnums, force_correction=force_correction, skip_done=skip_done)
+@click.option("--dry-run", is_flag=True, default=False, help="Shows useful information about the current setup without actually running reductions")
+def fiberflat_corrections(mjd, science_mjds, science_expnums, force_correction, skip_done, dry_run):
+    create_fiberflats_corrections(mjd=mjd, science_mjds=science_mjds, science_expnums=science_expnums, force_correction=force_correction, skip_done=skip_done, dry_run=dry_run)
 
 
 @click.command('create-tag', short_help='Create a tag for long-term calibrations', context_settings=dict(show_default=True))
 @click.option('--calib-version', type=str, default=drpver, help='Version of the calibration set')
+@click.option("--dry-run", is_flag=True, default=False, help="Shows useful information about the current setup without actually running reductions")
 @cloup.constraint(mutually_exclusive, ['mjd', 'mjd_list', 'mjd_range'])
 @cloup.constraint(RequireExactly(1), ['mjd', 'mjd_list', 'mjd_range'])
-def create_tag(version):
+def create_tag(version, dry_run):
 
     mjds = parse_mjds(mjd=mjd or mjd_list or mjd_range or None)
     if not isinstance(mjds, (list, tuple)):
@@ -374,7 +378,7 @@ def create_tag(version):
     for mjd in mjds:
         flavors = []
         [flavors.extend(CALIBRATION_MATCH.get(calname, [calname])) for calname in only_cals]
-        copy_longterm_calibrations(mjd=mjd, flavors=flavors)
+        copy_longterm_calibrations(mjd=mjd, flavors=flavors, dry_run=dry_run)
 
 
 @cli.command('fix-pixel-shifts', short_help='Fix the electronic pixel shifts in the raw data')
@@ -463,10 +467,11 @@ def get_calibs(kind, mjd, camera):
 @click.option('-w', '--walltime', type=str, default="24:00:00", help='the time for which the job is allowed to run')
 @click.option('-a', '--alloc', type=click.Choice(['sdss-np', 'sdss-kp']), default='sdss-np', help='which partition to use')
 @click.option('-s', '--submit', is_flag=True, type=bool, default=True, help='flag to submit the job or not')
-@click.option('--run-calibs', type=click.Choice(["long-term", "nightly"]), default="long-term", help="run long-term or nightly calibrations only")
+@click.option('--run-calibs', type=click.Choice(["long-term", "nightly"]), help="run long-term or nightly calibrations only")
 @click.option('--drp-options', type=str, default="", help="pass options to drp run command")
+@click.option("--dry-run", is_flag=True, default=False, help="Logs useful information abaut the current setup without actually reducing, by default False")
 def cluster(mjd_list, mjd_range, expnum, exp_list, exp_range, exp_file, nodes, ppn, walltime,
-            alloc, submit, run_calibs, drp_options):
+            alloc, submit, run_calibs, drp_options, dry_run):
     """ Submit a Utah cluster job to batch run the DRP by MJD """
 
     # filter the mjds
@@ -477,7 +482,7 @@ def cluster(mjd_list, mjd_range, expnum, exp_list, exp_range, exp_file, nodes, p
 
     # submit the cluster job
     run_cluster(mjds=mjds, expnums=expnums, nodes=nodes, ppn=ppn, walltime=walltime, alloc=alloc, submit=submit,
-                run_calibs=run_calibs, drp_options=drp_options)
+                run_calibs=run_calibs, drp_options=drp_options, dry_run=dry_run)
 
 
 @cli.command('summary', short_help='Creates the drpall summary file for the given version of the pipeline')

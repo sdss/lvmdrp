@@ -20,7 +20,7 @@ except ImportError:
 
 
 def run_cluster(mjds: list = None, expnums: Union[list, str] = None, nodes: int = 2, ppn: int = 64, walltime: str = '24:00:00',
-                alloc: str = 'sdss-np', submit: bool = True, run_calibs: str = None, drp_options: str = None):
+                alloc: str = 'sdss-np', submit: bool = True, run_calibs: str = None, drp_options: str = None, dry_run: bool = False):
     """ Submit a slurm cluster Utah job
 
     Creates the cluster job at $SLURM_SCRATCH_DIR, e.g /scratch/general/nfs1/[unid]/pbs
@@ -53,16 +53,23 @@ def run_cluster(mjds: list = None, expnums: Union[list, str] = None, nodes: int 
         Whether to run 'long-term' or 'nightly' calibrations only, by default None (science reduction only)
     drp_options : str, optional
         Pass options to 'drp run' command. See drp run help to see available options
+    dry_run : bool, optional
+        Logs useful information abaut the current setup without actually running, by default False
     """
 
-    if not queue:
+    if not queue and not dry_run:
         log.error('No slurm queue module available.  Cannot submit cluster run.')
         return
 
+    print(dry_run, run_calibs)
+
     # create the slurm queue
-    q = queue()
-    q.verbose = True
-    q.create(label='lvm_cluster_run', nodes=nodes, ppn=ppn, walltime=walltime, alloc=alloc, shared=True)
+    if not dry_run:
+        q = queue()
+        q.verbose = True
+        q.create(label='lvm_cluster_run', nodes=nodes, ppn=ppn, walltime=walltime, alloc=alloc, shared=True)
+    else:
+        q = []
 
     cmd = "run"
     if run_calibs is not None:
@@ -93,4 +100,9 @@ def run_cluster(mjds: list = None, expnums: Union[list, str] = None, nodes: int 
             q.append(script)
 
     # submit the queue
-    q.commit(hard=True, submit=submit)
+    if not dry_run:
+        q.commit(hard=True, submit=submit)
+    else:
+        log.info("queue for cluster run:")
+        for run_ in q:
+            log.info(f"   {run_}")

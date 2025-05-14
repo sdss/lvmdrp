@@ -1836,12 +1836,12 @@ def create_wavelengths(mjd, use_longterm_cals=True, expnums=None, kind="longterm
     # define master paths for target frames
     calibs = get_calib_paths(mjd, version=drpver, longterm_cals=use_longterm_cals)
 
-    reduce_2d(mjd, calibrations=calibs, expnums=expnums, assume_imagetyp="arc", reject_cr=False,
-              add_astro=False, sub_straylight=False, skip_done=skip_done)
-
     if dry_run:
         _log_dry_run(frames, calibs=calibs, settings=None, caller=create_wavelengths.__name__)
         return
+
+    reduce_2d(mjd, calibrations=calibs, expnums=expnums, assume_imagetyp="arc", reject_cr=False,
+              add_astro=False, sub_straylight=False, skip_done=skip_done)
 
     if frames.expnum.min() != frames.expnum.max():
         expnum_str = f"{frames.expnum.min():>08}_{frames.expnum.max():>08}"
@@ -1923,7 +1923,7 @@ def create_wavelengths(mjd, use_longterm_cals=True, expnums=None, kind="longterm
 def reduce_nightly_sequence(mjd, use_longterm_cals=False, reject_cr=True, only_cals=CAL_FLAVORS,
                             counts_thresholds=COUNTS_THRESHOLDS, cent_guess_ncolumns=140, trace_full_ncolumns=40,
                             extract_metadata=False, skip_done=True, keep_ancillary=False,
-                            fflats_from=None, link_pixelmasks=True):
+                            fflats_from=None, link_pixelmasks=True, dry_run=False):
     """Reduces the nightly calibration sequence:
 
     The nightly calibration sequence consists of the following exposures:
@@ -1955,6 +1955,8 @@ def reduce_nightly_sequence(mjd, use_longterm_cals=False, reject_cr=True, only_c
         Copy twilight fiberflats from given MJD, by default None (no copy)
     link_pixelmasks : bool, optional
         Create a symbolic link of current version of pixel mask and pixel flats to current version, by default True
+    dry_run : bool, optional
+        Logs useful information abaut the current setup without actually reducing, by default False
     """
     if mjd is None:
         log.error(f"nothing to reduce, MJD = {mjd}")
@@ -1975,7 +1977,7 @@ def reduce_nightly_sequence(mjd, use_longterm_cals=False, reject_cr=True, only_c
 
     if "bias" in only_cals and "bias" in found_cals:
         biases, bias_expnums = choose_sequence(frames, flavor="bias", kind="nightly")
-        create_detrending_frames(mjd=mjd, expnums=bias_expnums, kind="bias", use_longterm_cals=use_longterm_cals, skip_done=skip_done)
+        create_detrending_frames(mjd=mjd, expnums=bias_expnums, kind="bias", use_longterm_cals=use_longterm_cals, skip_done=skip_done, dry_run=dry_run)
     else:
         log.log(20 if "bias" in found_cals else 40, "skipping production of bias frames")
 
@@ -1987,13 +1989,13 @@ def reduce_nightly_sequence(mjd, use_longterm_cals=False, reject_cr=True, only_c
                               counts_thresholds=counts_thresholds,
                               cent_guess_ncolumns=cent_guess_ncolumns,
                               trace_full_ncolumns=trace_full_ncolumns,
-                              skip_done=skip_done)
+                              skip_done=skip_done, dry_run=dry_run)
     else:
         log.log(20 if "trace" in found_cals else 40, "skipping production of fiber traces")
 
     if "wave" in only_cals and "wave" in found_cals:
         arcs, arc_expnums = choose_sequence(frames, flavor="arc", kind="nightly")
-        create_wavelengths(mjd=mjd, expnums=arc_expnums, use_longterm_cals=False, kind="nightly", skip_done=skip_done)
+        create_wavelengths(mjd=mjd, expnums=arc_expnums, use_longterm_cals=False, kind="nightly", skip_done=skip_done, dry_run=dry_run)
     else:
         log.log(20 if "wave" in found_cals else 40, "skipping production of wavelength calibrations")
 
@@ -2001,7 +2003,7 @@ def reduce_nightly_sequence(mjd, use_longterm_cals=False, reject_cr=True, only_c
         dome_flats, dome_flat_expnums = choose_sequence(frames, flavor="flat", kind="nightly")
         expnums_ldls = np.sort(dome_flats.query("ldls").expnum.unique())
         expnums_qrtz = np.sort(dome_flats.query("quartz").expnum.unique())
-        create_dome_fiberflats(mjd=mjd, expnums_ldls=expnums_ldls, expnums_qrtz=expnums_qrtz, use_longterm_cals=False, kind="nightly", skip_done=skip_done)
+        create_dome_fiberflats(mjd=mjd, expnums_ldls=expnums_ldls, expnums_qrtz=expnums_qrtz, use_longterm_cals=False, kind="nightly", skip_done=skip_done, dry_run=dry_run)
     else:
         log.log(20 if "dome" in found_cals else 40, "skipping production of dome fiberflats")
 
@@ -2010,7 +2012,7 @@ def reduce_nightly_sequence(mjd, use_longterm_cals=False, reject_cr=True, only_c
         _copy_fiberflats_from(mjd=fflats_from, mjd_dest=mjd, use_longterm_cals=False)
     elif "twilight" in only_cals and "twilight" in found_cals:
         twilight_flats, twilight_expnums = choose_sequence(frames, flavor="twilight", kind="nightly")
-        create_twilight_fiberflats(mjd=mjd, expnums=sorted(np.sort(twilight_flats.expnum.unique())), use_longterm_cals=False, kind="nightly", skip_done=skip_done)
+        create_twilight_fiberflats(mjd=mjd, expnums=sorted(np.sort(twilight_flats.expnum.unique())), use_longterm_cals=False, kind="nightly", skip_done=skip_done, dry_run=dry_run)
     else:
         log.log(20 if "twilight" in found_cals else 40, "skipping production of twilight fiberflats")
 
