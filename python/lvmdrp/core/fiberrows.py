@@ -10,7 +10,7 @@ from lvmdrp import log
 from scipy import optimize
 from astropy.table import Table
 
-from lvmdrp.core.constants import LVM_NBLOCKS, LVM_BLOCKSIZE
+from lvmdrp.core.constants import LVM_NBLOCKS, LVM_BLOCKSIZE, LVM_NFIBERS
 from lvmdrp.core.header import Header, combineHdr
 from lvmdrp.core.positionTable import PositionTable
 from lvmdrp.core.spectrum1d import Spectrum1D, _cross_match_float
@@ -1112,7 +1112,11 @@ class FiberRows(Header, PositionTable):
         if axis == "Y" or axis == "y" or axis == 0:
             if self._slitmap is None:
                 raise ValueError(f"Attribute `_slitmap` needs to be set: {self._slitmap = }")
-            slitmap = self._slitmap[self._slitmap["spectrographid"]==int(self._header["SPEC"][-1])]
+
+            slitmap = self._slitmap
+            if self._fibers == LVM_NFIBERS:
+                slitmap = self._slitmap[self._slitmap["spectrographid"]==int(self._header["SPEC"][-1])]
+
             for block_idx in range(LVM_NBLOCKS):
                 select_block = slitmap["blockid"] == f"B{block_idx+1}"
                 y = y_pixels[select_block]
