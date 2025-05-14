@@ -20,7 +20,7 @@ except ImportError:
 
 
 def run_cluster(mjds: list = None, expnums: Union[list, str] = None, nodes: int = 2, ppn: int = 64, walltime: str = '24:00:00',
-                alloc: str = 'sdss-np', submit: bool = True, run_calibs: bool = False, drp_options: str = None):
+                alloc: str = 'sdss-np', submit: bool = True, run_calibs: str = None, drp_options: str = None):
     """ Submit a slurm cluster Utah job
 
     Creates the cluster job at $SLURM_SCRATCH_DIR, e.g /scratch/general/nfs1/[unid]/pbs
@@ -49,8 +49,8 @@ def run_cluster(mjds: list = None, expnums: Union[list, str] = None, nodes: int 
         which partition to use, by default 'sdss-np'
     submit : bool, optional
         Flag to submit the job or not, by default True
-    run_calibs : bool, optional
-        Flag to submit a job for long-term calibration reductions only, by default False (science reduction only)
+    run_calibs : str, optional
+        Whether to run 'long-term' or 'nightly' calibrations only, by default None (science reduction only)
     drp_options : str, optional
         Pass options to 'drp run' command. See drp run help to see available options
     """
@@ -65,9 +65,9 @@ def run_cluster(mjds: list = None, expnums: Union[list, str] = None, nodes: int 
     q.create(label='lvm_cluster_run', nodes=nodes, ppn=ppn, walltime=walltime, alloc=alloc, shared=True)
 
     cmd = "run"
-    if run_calibs:
+    if run_calibs is not None:
         expnums = None
-        cmd = "calibrations"
+        cmd = f"calibrations {run_calibs}"
     else:
         # skip drpall summary file in cluster runs to avoid race condition errors
         drp_options += " --skip-drpall" if "--skip-drpall" not in drp_options else ""
