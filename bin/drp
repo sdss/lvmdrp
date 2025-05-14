@@ -253,13 +253,14 @@ cli.add_command(metacli)
 @click.option('-d', '--skip-dome', is_flag=True, default=False, help='skip dome fiberflats')
 @click.option('-f', '--skip-twilight', is_flag=True, default=False, help='skip twilight fiberflats')
 @click.option('--ldls-threshold', type=float, default=COUNTS_THRESHOLDS["ldls"], help='count threshold for tracing with LDLS lamp exposures')
-@click.option('--qrtz-threshold', type=float, default=COUNTS_THRESHOLDS["quartz"], help='count thredhols for tracing with Quartz lamp exposures')
+@click.option('--qrtz-threshold', type=float, default=COUNTS_THRESHOLDS["quartz"], help='count threshold for tracing with Quartz lamp exposures')
 @click.option('--cent-ncolumns', type=int, default=140, help='number of columns to trace fiber centroids')
 @click.option('--full-ncolumns', type=int, default=40, help='number of columns to full fiber tracing')
 @click.option('-x', '--extract-md', is_flag=True, default=False, help='flag to extract metadata or use cached metadata if exist')
 @click.option('-s', '--skip-done', is_flag=True, default=False, help='flag to skip reduction steps that have already been done')
 @click.option('-c', '--clean-ancillary', is_flag=True, default=False, help='Remove ancillary paths after run')
 @click.option('--fflats-from-to', type=int, default=((None, None),), nargs=2, multiple=True, help='Move twilight fiberflats from one MJD to another MJD')
+@click.option("--dry-run", is_flag=True, default=False, help="Shows useful information about the current setup without actually running reductions")
 @cloup.constraint(mutually_exclusive, ['mjd', 'mjd_list', 'mjd_range'])
 @cloup.constraint(RequireExactly(1), ['mjd', 'mjd_list', 'mjd_range'])
 def longterm(mjd, mjd_list, mjd_range, reject_cr,
@@ -268,7 +269,8 @@ def longterm(mjd, mjd_list, mjd_range, reject_cr,
                  ldls_threshold, qrtz_threshold,
                  cent_ncolumns, full_ncolumns,
                  extract_md, skip_done, clean_ancillary,
-                 fflats_from_to):
+                 fflats_from_to,
+                 dry_run):
     """ Run calibration sequence reduction """
 
     only_cals = {flavor for flavor, skip in zip(["bias", "trace", "wave", "dome", "twilight"],
@@ -292,7 +294,8 @@ def longterm(mjd, mjd_list, mjd_range, reject_cr,
             cent_guess_ncolumns=cent_ncolumns, trace_full_ncolumns=full_ncolumns,
             extract_metadata=extract_md, skip_done=skip_done,
             keep_ancillary=not clean_ancillary,
-            fflats_from=fflats_from[fflats_to.index(mjd)] if mjd in fflats_to else None)
+            fflats_from=fflats_from[fflats_to.index(mjd)] if mjd in fflats_to else None,
+            dry_run=dry_run)
 
 
 @cli.command('nightly', short_help='Run nightly calibrations', context_settings=dict(show_default=True))
@@ -359,13 +362,10 @@ def fiberflat_corrections(mjd, science_mjds, science_expnums, force_correction, 
 
 
 @click.command('create-tag', short_help='Create a tag for long-term calibrations', context_settings=dict(show_default=True))
-@click.option('-m', '--mjd', type=int, help='an MJD to reduce')
-@click.option('-l', '--mjd-list', type=IntListType(), help='a list of specific MJDs to reduce')
-@click.option('-r', '--mjd-range', type=str, help='a range of MJDs to reduce')
 @click.option('--calib-version', type=str, default=drpver, help='Version of the calibration set')
 @cloup.constraint(mutually_exclusive, ['mjd', 'mjd_list', 'mjd_range'])
 @cloup.constraint(RequireExactly(1), ['mjd', 'mjd_list', 'mjd_range'])
-def create_tag(mjd, mjd_list, mjd_range, version):
+def create_tag(version):
 
     mjds = parse_mjds(mjd=mjd or mjd_list or mjd_range or None)
     if not isinstance(mjds, (list, tuple)):
