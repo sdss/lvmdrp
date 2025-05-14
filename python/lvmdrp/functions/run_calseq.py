@@ -55,7 +55,7 @@ from lvmdrp.core.constants import (
     MASTERS_DIR,
     ARC_LAMPS)
 from lvmdrp.core.tracemask import TraceMask
-from lvmdrp.core.image import Image, loadImage
+from lvmdrp.core.image import loadImage
 from lvmdrp.core.rss import RSS, lvmFrame
 from lvmdrp.core.fit_profile import gaussians
 
@@ -2088,18 +2088,15 @@ def reduce_longterm_sequence(mjd, use_longterm_cals=True,
         dome_flats, dome_flat_expnums = choose_sequence(frames, flavor="flat", kind="longterm")
         expnums_ldls = np.sort(dome_flats.query("ldls").expnum.unique())
         expnums_qrtz = np.sort(dome_flats.query("quartz").expnum.unique())
-
-        for camera in CAMERAS:
-            create_traces(
-                mjd=mjd, cameras=[camera],
-                use_longterm_cals=use_longterm_cals,
-                expnums_ldls=expnums_ldls, expnums_qrtz=expnums_qrtz,
-                counts_thresholds=counts_thresholds,
-                cent_guess_ncolumns=cent_guess_ncolumns,
-                trace_full_ncolumns=trace_full_ncolumns,
-                skip_done=skip_done,
-                dry_run=dry_run
-            )
+        create_traces(
+            mjd=mjd,
+            use_longterm_cals=use_longterm_cals,
+            expnums_ldls=expnums_ldls, expnums_qrtz=expnums_qrtz,
+            counts_thresholds=counts_thresholds,
+            cent_guess_ncolumns=cent_guess_ncolumns,
+            trace_full_ncolumns=trace_full_ncolumns,
+            skip_done=skip_done,
+            dry_run=dry_run)
     else:
         log.log(20 if "trace" in found_cals else 40, "skipping production of fiber traces")
 
@@ -2130,31 +2127,6 @@ def reduce_longterm_sequence(mjd, use_longterm_cals=True,
 
     # if not keep_ancillary:
     #     _clean_ancillary(mjd)
-
-
-def create_fiber_model(mjd, flux=10000):
-    """Ancillary script to evaluate fiber models for a given calibration epoch"""
-    masters_mjd = get_master_mjd(mjd)
-    masters_path = os.path.join(MASTERS_DIR, f"{masters_mjd}")
-
-    log.info(f"going to evaluate fiber model for cameras: {','.join(CAMERAS)}")
-    for camera in CAMERAS:
-        mcent_path = os.path.join(masters_path, f"lvm-mtrace-{camera}.fits")
-        mwidth_path = os.path.join(masters_path, f"lvm-mwidth-{camera}.fits")
-
-        if not (os.path.isfile(mcent_path) or os.path.isfile(mwidth_path)):
-            log.error(f"skipping creation of fiber model for {mjd = }, {camera = }, incomplete fiber traces")
-            continue
-
-        trace_cent = TraceMask.from_file(mcent_path)
-        trace_width = TraceMask.from_file(mwidth_path)
-
-        model = Image(data=np.zeros((4080, 4086)))
-        model, _ = model.eval_fiber_model(trace_cent, trace_width, trace_amp=flux)
-
-        model.setHeader(trace_cent._header)
-        model.setHdrValue("IMAGETYP", "fiber model")
-        model.writeFitsData(os.path.join(masters_path, f"lvm-mmodel-{camera}.fits"))
 
 
 class lvmArc(lvmFrame):
