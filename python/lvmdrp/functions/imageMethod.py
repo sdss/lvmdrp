@@ -1524,7 +1524,7 @@ def trace_peaks(
     if in_peaks is None:
         # read slitmap extension
         slitmap = img.getSlitmap()
-        slitmap = slitmap[slitmap["spectrographid"] == int(img._header["CCD"][1])]
+        slitmap = slitmap[slitmap["spectrographid"] == int(img._header["SPEC"][-1])]
 
         channel = img._header["CCD"][0]
         positions = slitmap[f"ypix_{channel}"]
@@ -2719,7 +2719,7 @@ def extract_spectra(
 
     # mask non-exposed standard fibers
     slitmap = img.getSlitmap()
-    select_spec = slitmap["spectrographid"] == int(img._header["CCD"][1])
+    select_spec = slitmap["spectrographid"] == int(img._header["SPEC"][-1])
     slitmap_spec = slitmap[select_spec]
     exposed_selection = numpy.array(list(img._header["STD*ACQ"].values()))
     # mask fibers that are not exposed
@@ -3042,8 +3042,8 @@ def validate_extraction(in_image, in_cent, in_width, in_rss, plot_columns=[1000,
     rss = RSS.from_file(in_rss)
     rss._data = numpy.nan_to_num(rss._data)
 
-    ypix_cor = rss._slitmap[["spectrographid"] == int(img._header["CCD"][1])]["ypix_z"]
-    ypix_ori = img._slitmap[["spectrographid"] == int(img._header["CCD"][1])]["ypix_z"]
+    ypix_cor = rss._slitmap[["spectrographid"] == int(img._header["SPEC"][-1])]["ypix_z"]
+    ypix_ori = img._slitmap[["spectrographid"] == int(img._header["SPEC"][-1])]["ypix_z"]
     thermal_shift = ypix_cor - ypix_ori
     log.info(f"fiber thermal shift in slitmap: {thermal_shift:.4f}")
     cent._data += thermal_shift
@@ -4370,7 +4370,7 @@ def trace_centroids(in_image: str,
 
     # read slitmap extension
     slitmap = img.getSlitmap()
-    slitmap = slitmap[slitmap["spectrographid"] == int(img._header["CCD"][1])]
+    slitmap = slitmap[slitmap["spectrographid"] == int(img._header["SPEC"][-1])]
     bad_fibers = slitmap["fibstatus"] == 1
 
     # perform median filtering along the dispersion axis to clean cosmic rays
@@ -4566,7 +4566,7 @@ def trace_fibers(
 
     # read slitmap extension
     slitmap = img.getSlitmap()
-    slitmap = slitmap[slitmap["spectrographid"] == int(img._header["CCD"][1])]
+    slitmap = slitmap[slitmap["spectrographid"] == int(img._header["SPEC"][-1])]
     bad_fibers = slitmap["fibstatus"] == 1
 
     # perform median filtering along the dispersion axis to clean cosmic rays

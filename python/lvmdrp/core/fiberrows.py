@@ -1112,7 +1112,7 @@ class FiberRows(Header, PositionTable):
         if axis == "Y" or axis == "y" or axis == 0:
             if self._slitmap is None:
                 raise ValueError(f"Attribute `_slitmap` needs to be set: {self._slitmap = }")
-            slitmap = self._slitmap[self._slitmap["spectrographid"]==int(self._header["CCD"][1])]
+            slitmap = self._slitmap[self._slitmap["spectrographid"]==int(self._header["SPEC"][-1])]
             for block_idx in range(LVM_NBLOCKS):
                 select_block = slitmap["blockid"] == f"B{block_idx+1}"
                 y = y_pixels[select_block]

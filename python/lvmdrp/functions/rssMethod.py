@@ -78,7 +78,7 @@ def _linear_model(pars, xdata):
 
 def _illumination_correction(fiberflat, apply_correction=True):
     # define fiberflat spectrograph id
-    specid = int(fiberflat._header["CCD"][1])
+    specid = int(fiberflat._header["SPEC"][-1])
     # load fibermap and select fibers
     fibermap = Table(fiberflat._slitmap)
     fibermap = fibermap[fibermap["spectrographid"] == specid]
@@ -153,7 +153,7 @@ def _get_exposed_std_rss(rss, ref_fibers=None, return_nonexposed=False, plot=Fal
     """
     # get standard fiber positions
     slitmap = rss._slitmap
-    slitmap = slitmap[slitmap["spectrographid"] == int(rss._header["CCD"][1])]
+    slitmap = slitmap[slitmap["spectrographid"] == int(rss._header["SPEC"][-1])]
     std_fibers = numpy.where(slitmap["telescope"] == "Spec")[0]
     std_names = slitmap["orig_ifulabel"][std_fibers]
 

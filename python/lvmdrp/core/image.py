@@ -1108,7 +1108,7 @@ class Image(Header):
         if fiber_pos is None:
             fiber_pos = self.match_reference_column(ref_column)
 
-        slitmap = self._slitmap[self._slitmap["spectrographid"] == int(self._header["CCD"][1])]
+        slitmap = self._slitmap[self._slitmap["spectrographid"] == int(self._header["SPEC"][-1])]
         spec_select = slitmap["telescope"] == "Spec"
 
         ids_std = slitmap[spec_select]["orig_ifulabel"]
