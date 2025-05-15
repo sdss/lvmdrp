@@ -289,7 +289,7 @@ def longterm(mjd, mjd_list, mjd_range, reject_cr,
     # run reduction sequence
     for mjd in mjds:
         reduce_longterm_sequence(
-            mjd=mjd, epoch=epochs.get(mjd), reject_cr=reject_cr,
+            mjd=mjd, calib_epoch=epochs.get(mjd), reject_cr=reject_cr,
             use_longterm_cals=True,
             only_cals=only_cals,
             counts_thresholds={"ldls": ldls_threshold, "quartz": qrtz_threshold},

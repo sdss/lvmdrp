@@ -112,17 +112,14 @@ def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_NAMES, l
         pixelmasks_path = os.path.join(os.getenv('LVM_SPECTRO_REDUX'), f"{version}/{tilegrp}/{tileid}/pixelmasks")
         path_species = "lvm_master"
 
-    pixel_flavors = {"pixmask", "pixflat"}
-    if not pixel_flavors.issubset(flavors):
-        pixel_flavors = set()
-    flavors_ = set(flavors) - pixel_flavors
-
     # define paths to pixel flats and masks
     calibs = {}
+    pixel_flavors = {"pixmask", "pixflat"}.intersection(flavors)
     for flavor in pixel_flavors:
         calibs[flavor] = {c: os.path.join(pixelmasks_path, f"lvm-m{flavor}-{c}.fits") for c in cams}
 
     # define paths to the rest of the calibrations
+    flavors_ = set(flavors) - pixel_flavors
     for flavor in flavors_:
         # define camera for camera frames or spectrograph combined frames
         cam_or_chan = channels if flavor.startswith("fiberflat_") else cams

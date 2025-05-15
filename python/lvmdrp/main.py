@@ -1408,17 +1408,6 @@ def reduce_2d(mjd, calibrations, expnums=None, exptime=None, cameras=CAMERAS,
         # assume given image type
         imagetyp = assume_imagetyp or frame["imagetyp"]
 
-        # get master frames paths
-        mpixmask_path = calibrations["pixmask"][camera]
-        mpixflat_path = calibrations["pixflat"][camera]
-        mbias_path = calibrations["bias"][camera]
-        mtrace_path = calibrations["trace"][camera]
-
-        # log the master frames
-        log.info(f'Using pixel mask: {mpixmask_path}')
-        log.info(f'Using bias: {mbias_path}')
-        log.info(f'Using pixel flat: {mpixflat_path}')
-
         rframe_path = path.full("lvm_raw", camspec=frame["camera"], **frame)
         eframe_path = path.full("lvm_anc", drpver=drpver, kind="e", imagetype=imagetyp, **frame)
         frame_path = eframe_path if os.path.exists(eframe_path) else rframe_path
@@ -1444,11 +1433,13 @@ def reduce_2d(mjd, calibrations, expnums=None, exptime=None, cameras=CAMERAS,
         else:
             with Timer(name='Preproc '+pframe_path, logger=log.info):
                 preproc_raw_frame(in_image=frame_path, out_image=pframe_path,
-                                  in_mask=mpixmask_path, replace_with_nan=replace_with_nan, assume_imagetyp=assume_imagetyp)
+                                  in_mask=calibrations["pixmask"][camera], replace_with_nan=replace_with_nan, assume_imagetyp=assume_imagetyp)
+            if imagetyp == "bias":
+                continue
             with Timer(name='Detrend '+dframe_path, logger=log.info):
                 detrend_frame(in_image=pframe_path, out_image=dframe_path,
-                            in_bias=mbias_path,
-                            in_pixelflat=mpixflat_path,
+                            in_bias=calibrations["bias"][camera],
+                            in_pixelflat=calibrations["pixflat"][camera],
                             replace_with_nan=replace_with_nan,
                             reject_cr=reject_cr,
                             in_slitmap=fibermap if imagetyp in {"flat", "arc", "object"} else None)
@@ -1468,7 +1459,7 @@ def reduce_2d(mjd, calibrations, expnums=None, exptime=None, cameras=CAMERAS,
                         nsigma=1.0, smoothing=40, median_box=None)
                     straylight_pars.update(cfg_straylight)
                     subtract_straylight(in_image=dframe_path, out_image=lframe_path, out_stray=lstr_path,
-                                        in_cent_trace=mtrace_path, parallel=parallel_run, **straylight_pars)
+                                        in_cent_trace=calibrations["trace"][camera], parallel=parallel_run, **straylight_pars)
 
 
 def reduce_1d(mjd, calibrations, expnums=None, replace_with_nan=True, sub_straylight=True, skip_done=True, keep_ancillary=False):

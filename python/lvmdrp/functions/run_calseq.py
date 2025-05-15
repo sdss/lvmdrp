@@ -93,7 +93,7 @@ def choose_sequence(frames, flavor, kind, truncate=True):
     frames : pd.DataFrame
         Pandas dataframe containing frames metadata
     flavor : str
-        Flavor of calibration frame: 'twilight', 'bias', 'flat', 'arc'
+        Flavor of calibration frame: 'bias', 'trace', 'wave', 'dome', 'twilight'
     kind : str
         Kind of calibration frame: 'nightly', 'longterm'
     truncate : bool, optional
@@ -104,15 +104,16 @@ def choose_sequence(frames, flavor, kind, truncate=True):
     list
         list containing arrays of exposure numbers for each sequence
     """
-    EXPECTED_LENGTHS = {
+    EXPECTED_SEQUENCE_LENGTH = {
         "bias": 7,
-        "flat": 2 if kind=="nightly" else 24,
-        "arc": 2 if kind=="nightly" else 24,
+        "trace": 2 if kind=="nightly" else 24,
+        "dome": 2 if kind=="nightly" else 24,
+        "wave": 2 if kind=="nightly" else 24,
         "twilight": 12
     }
 
-    if not isinstance(flavor, str) or flavor not in {"twilight", "bias", "flat", "arc"}:
-        raise ValueError(f"invalid flavor '{flavor}', available values are 'twilight', 'bias', 'flat', 'arc'")
+    if not isinstance(flavor, str) or flavor not in CAL_FLAVORS:
+        raise ValueError(f"invalid flavor '{flavor}', available values are {CAL_FLAVORS}")
     if not isinstance(kind, str) or kind not in {"nightly", "longterm"}:
         raise ValueError(f"invalid kind '{kind}', available values are 'nightly' and 'longterm'")
 
@@ -123,9 +124,9 @@ def choose_sequence(frames, flavor, kind, truncate=True):
         query = "imagetyp == 'flat' and not (ldls|quartz) and not (neon|hgne|argon|xenon)"
     elif flavor == "bias":
         query = "imagetyp == 'bias'"
-    elif flavor == "flat":
+    elif flavor == "dome" or flavor == "trace":
         query = "imagetyp == 'flat' and (ldls|quartz)"
-    elif flavor == "arc":
+    elif flavor == "wave":
         query = "imagetyp == 'arc' and not (ldls|quartz) and (neon|hgne|argon|xenon)"
     expnums = np.sort(cleaned_frames.query(query).expnum.unique())
     diff = np.diff(expnums)
@@ -150,7 +151,7 @@ def choose_sequence(frames, flavor, kind, truncate=True):
             chosen_expnums = sequences[0]
 
     chosen_frames = cleaned_frames.query("expnum in @chosen_expnums")
-    expected_length = EXPECTED_LENGTHS[flavor]
+    expected_length = EXPECTED_SEQUENCE_LENGTH[flavor]
     sequence_length = len(chosen_expnums)
 
     # try selecting the best sequence
@@ -168,7 +169,7 @@ def choose_sequence(frames, flavor, kind, truncate=True):
 
     # handle case of sequence longer than expected and truncate == True
     if truncate and sequence_length > expected_length:
-        if flavor == "flat":
+        if flavor == "dome":
             qrtz_expnums = chosen_frames.expnum[chosen_frames.quartz][:expected_length//2]
             ldls_expnums = chosen_frames.expnum[chosen_frames.ldls][:expected_length//2]
             chosen_expnums = np.concatenate([qrtz_expnums, ldls_expnums])
@@ -1211,7 +1212,16 @@ def create_nightly_traces(mjd, use_longterm_cals=False, expnums_ldls=None, expnu
         expnums = np.concatenate([expnums_ldls, expnums_qrtz])
     else:
         expnums = None
-    frames, _ = md.get_sequence_metadata(mjd, expnums=expnums, for_cals={"flat"})
+
+    frames, found_cals = md.get_sequence_metadata(mjd, expnums=expnums, for_cals={"trace"})
+    if "trace" not in found_cals:
+        log.error("no dome flat frames found, skipping production of fiber traces")
+        return
+
+    if expnums_ldls is None or expnums_qrtz is None:
+        frames, expnums = choose_sequence(frames, flavor="trace", kind="nightly")
+        expnums_ldls = np.sort(frames.query("ldls").expnum.unique())
+        expnums_qrtz = np.sort(frames.query("quartz").expnum.unique())
 
     # define master paths for target frames
     calibs = get_calib_paths(mjd, version=drpver, longterm_cals=use_longterm_cals, flavors=CALIBRATION_NEEDS["trace"])
@@ -1358,7 +1368,7 @@ def create_traces(mjd, cameras=CAMERAS, expnums_ldls=None, expnums_qrtz=None,
         return
 
     if expnums_ldls is None or expnums_qrtz is None:
-        frames, expnums = choose_sequence(frames, flavor="flat", kind="longterm")
+        frames, expnums = choose_sequence(frames, flavor="trace", kind="longterm")
         expnums_ldls = np.sort(frames.query("ldls").expnum.unique())
         expnums_qrtz = np.sort(frames.query("quartz").expnum.unique())
 
@@ -1537,6 +1547,9 @@ def create_dome_fiberflats(mjd, expnums_ldls=None, expnums_qrtz=None, cals_mjd=N
     dry_run : bool, optional
         Logs useful information abaut the current setup without actually reducing, by default False
     """
+    log.error("current implementation of dome flats needs updating, skipping dome fiberflat creation")
+    return
+
     if expnums_ldls is not None and expnums_qrtz is not None:
         expnums = np.concatenate([expnums_ldls, expnums_qrtz])
     else:
@@ -1548,7 +1561,7 @@ def create_dome_fiberflats(mjd, expnums_ldls=None, expnums_qrtz=None, cals_mjd=N
         return
 
     if expnums_ldls is None or expnums_qrtz is None:
-        frames, expnums = choose_sequence(frames, flavor="flat", kind="longterm")
+        frames, expnums = choose_sequence(frames, flavor="dome", kind=kind)
 
     # define master paths for target frames
     calibs = get_calib_paths(mjd=cals_mjd or mjd, version=drpver, longterm_cals=use_longterm_cals, flavors=CALIBRATION_NEEDS["dome"])
@@ -1557,6 +1570,9 @@ def create_dome_fiberflats(mjd, expnums_ldls=None, expnums_qrtz=None, cals_mjd=N
     if dry_run:
         _log_dry_run(frames, calibs=calibs, settings=None, caller=create_dome_fiberflats.__name__)
         return
+
+    # run 2D reduction on flats: preprocessing, detrending
+    reduce_2d(mjd, calibrations=calibs, expnums=expnums, reject_cr=False, add_astro=False, sub_straylight=True, skip_done=skip_done)
 
     for channel, lamp in MASTER_CON_LAMPS.items():
         # read original combined dome flats and run extraction
@@ -1617,7 +1633,6 @@ def create_twilight_fiberflats(mjd: int, expnums: List[int] = None, cals_mjd: in
                       cnorms: Dict[str, float] = SKYLINES_FIBERFLAT, dwave: float = 20.0,
                       smoothing: float = 0.0,
                       interpolate_invalid: bool = True,
-                      kind: str = "longterm",
                       skip_done: bool = False,
                       display_plots: bool = False,
                       dry_run: bool = False) -> None:
@@ -1652,8 +1667,6 @@ def create_twilight_fiberflats(mjd: int, expnums: List[int] = None, cals_mjd: in
         Smoothing parameter for fiberflat fitting. Defaults to 0.0.
     interpolate_invalid : bool, optional
         Interpolate over invalid/masked fibers. Defaults to True.
-    kind : str, optional
-        Kind of calibration frames to produce ("longterm" or "nightly"). Defaults to "longterm".
     skip_done : bool, optional
         Skip files that already exist. Defaults to False.
     display_plots : bool, optional
@@ -1744,10 +1757,7 @@ def create_twilight_fiberflats(mjd: int, expnums: List[int] = None, cals_mjd: in
                           display_plots=display_plots)
 
         # combine individual fiberflats into master fiberflat
-        if kind == "longterm":
-            mflat_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mfiberflat_twilight", camera=channel)
-        else:
-            mflat_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="nfiberflat_twilight", camera=channel)
+        mflat_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mfiberflat_twilight", camera=channel)
         combine_twilight_sequence(
             in_twilights=xtwi_paths,
             in_fflats=fflat_paths, out_mflat=mflat_path, out_lvmflats=lvmflat_paths,
@@ -1861,7 +1871,7 @@ def create_wavelengths(mjd, expnums=None, cals_mjd=None, use_longterm_cals=True,
         return
 
     if expnums is None:
-        frames, expnums = choose_sequence(frames, flavor="arc", kind="longterm")
+        frames, expnums = choose_sequence(frames, flavor="wave", kind=kind)
 
     # define master paths for target frames
     calibs = get_calib_paths(mjd=cals_mjd or mjd, version=drpver, longterm_cals=use_longterm_cals, flavors=CALIBRATION_NEEDS["wave"])
@@ -1988,12 +1998,12 @@ def reduce_nightly_sequence(mjd, use_longterm_cals=False, reject_cr=True, only_c
     dry_run : bool, optional
         Logs useful information abaut the current setup without actually reducing, by default False
     """
+    # start logging to file
+    start_logging(mjd, tileid=11111)
+
     if mjd is None:
         log.error(f"nothing to reduce, MJD = {mjd}")
         return
-
-    # start logging to file
-    start_logging(mjd, tileid=11111)
 
     # create symbolic link to pixel flats and masks
     if link_pixelmasks:
@@ -2003,48 +2013,24 @@ def reduce_nightly_sequence(mjd, use_longterm_cals=False, reject_cr=True, only_c
         raise ValueError(f"some chosen image types in 'only_cals' are not valid: {only_cals.difference(CAL_FLAVORS)}")
     log.info(f"going to produce nightly calibrations: {only_cals}")
 
-    frames, found_cals = md.get_sequence_metadata(mjd, for_cals=only_cals, extract_metadata=extract_metadata)
+    if "bias" in only_cals:
+        create_bias(mjd=mjd, use_longterm_cals=use_longterm_cals, skip_done=skip_done, dry_run=dry_run)
 
-    if "bias" in only_cals and "bias" in found_cals:
-        biases, bias_expnums = choose_sequence(frames, flavor="bias", kind="nightly")
-        create_bias(mjd=mjd, expnums=bias_expnums, kind="bias", use_longterm_cals=use_longterm_cals, skip_done=skip_done, dry_run=dry_run)
-    else:
-        log.log(20 if "bias" in found_cals else 40, "skipping production of bias frames")
-
-    if "trace" in only_cals and "trace" in found_cals:
-        dome_flats, dome_flat_expnums = choose_sequence(frames, flavor="flat", kind="nightly")
-        expnums_ldls = np.sort(dome_flats.query("ldls").expnum.unique())
-        expnums_qrtz = np.sort(dome_flats.query("quartz").expnum.unique())
-        create_nightly_traces(mjd=mjd, expnums_ldls=expnums_ldls, expnums_qrtz=expnums_qrtz,
+    if "trace" in only_cals:
+        create_nightly_traces(mjd=mjd, use_longterm_cals=use_longterm_cals,
                               counts_thresholds=counts_thresholds,
                               cent_guess_ncolumns=cent_guess_ncolumns,
                               trace_full_ncolumns=trace_full_ncolumns,
                               skip_done=skip_done, dry_run=dry_run)
-    else:
-        log.log(20 if "trace" in found_cals else 40, "skipping production of fiber traces")
 
-    if "wave" in only_cals and "wave" in found_cals:
-        arcs, arc_expnums = choose_sequence(frames, flavor="arc", kind="nightly")
-        create_wavelengths(mjd=mjd, expnums=arc_expnums, use_longterm_cals=False, kind="nightly", skip_done=skip_done, dry_run=dry_run)
-    else:
-        log.log(20 if "wave" in found_cals else 40, "skipping production of wavelength calibrations")
+    if "wave" in only_cals:
+        create_wavelengths(mjd=mjd, use_longterm_cals=use_longterm_cals, kind="nightly", skip_done=skip_done, dry_run=dry_run)
 
-    if "dome" in only_cals and "dome" in found_cals:
-        dome_flats, dome_flat_expnums = choose_sequence(frames, flavor="flat", kind="nightly")
-        expnums_ldls = np.sort(dome_flats.query("ldls").expnum.unique())
-        expnums_qrtz = np.sort(dome_flats.query("quartz").expnum.unique())
-        create_dome_fiberflats(mjd=mjd, expnums_ldls=expnums_ldls, expnums_qrtz=expnums_qrtz, use_longterm_cals=False, kind="nightly", skip_done=skip_done, dry_run=dry_run)
-    else:
-        log.log(20 if "dome" in found_cals else 40, "skipping production of dome fiberflats")
+    if "dome" in only_cals:
+        create_dome_fiberflats(mjd=mjd, use_longterm_cals=use_longterm_cals, kind="nightly", skip_done=skip_done, dry_run=dry_run)
 
-    if "twilight" in only_cals and fflats_from is not None:
-        log.info(f"copying twilight fiberflats from MJD {fflats_from} to MJD {mjd}")
-        _copy_fiberflats_from(mjd=fflats_from, mjd_dest=mjd, use_longterm_cals=False)
-    elif "twilight" in only_cals and "twilight" in found_cals:
-        twilight_flats, twilight_expnums = choose_sequence(frames, flavor="twilight", kind="nightly")
-        create_twilight_fiberflats(mjd=mjd, expnums=sorted(np.sort(twilight_flats.expnum.unique())), use_longterm_cals=False, kind="nightly", skip_done=skip_done, dry_run=dry_run)
-    else:
-        log.log(20 if "twilight" in found_cals else 40, "skipping production of twilight fiberflats")
+    if "twilight" in only_cals:
+        create_twilight_fiberflats(mjd=mjd, use_longterm_cals=use_longterm_cals, skip_done=skip_done, dry_run=dry_run)
 
     # if not keep_ancillary:
     #     _clean_ancillary(mjd)
@@ -2103,7 +2089,7 @@ def reduce_longterm_sequence(mjd, calib_epoch=None, use_longterm_cals=True,
         raise ValueError(f"some chosen image types in 'only_cals' are not valid: {only_cals.difference(CAL_FLAVORS)}")
     log.info(f"going to produce long-term calibrations: {only_cals}")
 
-    source_mjds = parse_calibration_epochs(mjd, **calib_epoch)
+    source_mjds = parse_calibration_epochs(mjd, **(calib_epoch or {}))
 
     if "bias" in only_cals:
         create_bias(mjd=source_mjds["bias"], cals_mjd=mjd, use_longterm_cals=use_longterm_cals, skip_done=skip_done, dry_run=dry_run)
