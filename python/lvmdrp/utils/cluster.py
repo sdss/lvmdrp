@@ -61,8 +61,6 @@ def run_cluster(mjds: list = None, expnums: Union[list, str] = None, nodes: int 
         log.error('No slurm queue module available.  Cannot submit cluster run.')
         return
 
-    print(dry_run, run_calibs)
-
     # create the slurm queue
     if not dry_run:
         q = queue()

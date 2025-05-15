@@ -330,6 +330,19 @@ def _load_calibration_epochs(epochs_path=CALIBRATION_EPOCHS_PATH):
     return epochs
 
 
+def _parse_epochs(mjd, sources=None, trigger=None, comment=None):
+    if sources is None:
+        calibs_mjds = {}
+        for flavor in CAL_FLAVORS:
+            calibs_mjds[flavor] = mjd
+        return calibs_mjds
+
+    calibs_mjds = {}
+    for source_mjd in sources:
+        calibs_mjds.update({flavor: source_mjd for flavor in sources[source_mjd]})
+    return calibs_mjds
+
+
 def _load_shift_report(mjd):
     """Reads QC reports with the electronic pixel shifts"""
 
@@ -1081,21 +1094,11 @@ def fix_raw_pixel_shifts(mjd, expnums=None, ref_expnums=None, use_longterm_cals=
                                          interactive=interactive, display_plots=display_plots)
 
 
-def create_detrending_frames(mjd, use_longterm_cals=True, expnums=None, exptime=None, kind="all", assume_imagetyp=None, reject_cr=True, skip_done=True, dry_run=False):
-    """Reduce a sequence of bias/dark/pixelflat frames to produce master frames
+def create_bias(mjd, use_longterm_cals=True, expnums=None, assume_imagetyp=None, skip_done=True, dry_run=False):
+    """Reduce a sequence of bias frames to produce master frames for each camera
 
     Given a set of MJDs and (optionally) exposure numbers, reduce the
-    bias/dark/pixelflat frames. The kind argument specifies which type of frame
-    to reduce:
-
-        - bias
-        - dark
-        - pixflat
-        - all (default)
-
-    This routine will store the master of each kind of frame in the
-    corresponding calibration directory in the `use_longterm_cals` or by default in
-    the smallest MJD in `mjds`.
+    bias frames.
 
     Parameters:
     ----------
@@ -1105,40 +1108,32 @@ def create_detrending_frames(mjd, use_longterm_cals=True, expnums=None, exptime=
         Whether to use long-term calibration frames or not, defaults to True
     expnums : list
         List of exposure numbers to reduce
-    exptime : int
-        Exposure time to filter by
-    kind : str
-        Kind of frame to reduce
+    flavor : str
+        The type of frame to reduce
     assume_imagetyp : str
         Assume the given imagetyp for all frames
-    reject_cr : bool
-        Reject cosmic rays
     skip_done : bool
         Skip pipeline steps that have already been done
     dry_run : bool, optional
         Logs useful information abaut the current setup without actually reducing, by default False
     """
-    frames, _ = md.get_sequence_metadata(mjd, expnums=expnums, exptime=exptime, for_cals={"bias", "dark", "pixflat"})
+    frames, found_cals = md.get_sequence_metadata(mjd, expnums=expnums)
+    if "bias" not in found_cals:
+        log.error("no bias frames found, skipping production of bias frames")
+        return
 
-    # filter by target image types
-    if kind == "all":
-        frames.query("imagetyp in ['bias', 'dark', 'pixflat']", inplace=True)
-    elif kind in ["bias", "dark", "pixflat"]:
-        frames.query("imagetyp == @kind", inplace=True)
-    else:
-        raise ValueError(f"Invalid kind: '{kind}'. Must be one of 'bias', 'dark', 'pixflat' or 'all'")
+    if expnums is None:
+        frames, expnums = choose_sequence(frames, flavor="bias", kind="longterm")
 
     # define master paths for target frames
     calibs = get_calib_paths(mjd, version=drpver, longterm_cals=use_longterm_cals)
 
     if dry_run:
-        _log_dry_run(frames, calibs=calibs, settings=None, caller=create_detrending_frames.__name__)
+        _log_dry_run(frames, calibs=calibs, settings=None, caller=create_bias.__name__)
         return
 
     # preprocess and detrend frames
-    reduce_2d(mjd=mjd, calibrations=calibs, expnums=set(frames.expnum), exptime=exptime,
-              assume_imagetyp=assume_imagetyp, reject_cr=reject_cr,
-              add_astro=False, sub_straylight=False, skip_done=skip_done)
+    reduce_2d(mjd=mjd, calibrations=calibs, expnums=set(frames.expnum), assume_imagetyp=assume_imagetyp, skip_done=skip_done)
 
     # define image types to reduce
     imagetypes = set(frames.imagetyp)
@@ -1349,8 +1344,16 @@ def create_traces(mjd, cameras=CAMERAS, use_longterm_cals=True, expnums_ldls=Non
         expnums = np.concatenate([expnums_ldls, expnums_qrtz])
     else:
         expnums = None
-    frames, _ = md.get_sequence_metadata(mjd, expnums=expnums, cameras=cameras, for_cals={"trace"})
-    tileid = frames.tileid.iloc[0]
+
+    frames, found_cals = md.get_sequence_metadata(mjd, expnums=expnums, cameras=cameras, for_cals={"trace"})
+    if "trace" not in found_cals:
+        log.error("no dome flat frames found, skipping production of fiber traces")
+        return
+
+    if expnums_ldls is None or expnums_qrtz is None:
+        frames, expnums = choose_sequence(frames, flavor="flat", kind="longterm")
+        expnums_ldls = np.sort(frames.query("ldls").expnum.unique())
+        expnums_qrtz = np.sort(frames.query("quartz").expnum.unique())
 
     # define master paths for target frames
     calibs = get_calib_paths(mjd, version=drpver, longterm_cals=use_longterm_cals)
@@ -1457,11 +1460,11 @@ def create_traces(mjd, cameras=CAMERAS, use_longterm_cals=True, expnums_ldls=Non
                     mwidths[camera].setHeader(trace_fwhm_fit._header)
                     mwidths[camera].setSlitmap(trace_fwhm_fit._slitmap)
 
-        mamp_path = path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=mjd, camera=camera, kind="mamp")
-        mcent_path = path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=mjd, camera=camera, kind="mtrace")
-        mwidth_path = path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=mjd, camera=camera, kind="mwidth")
-        mmodel_path = path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=mjd, camera=camera, kind="mmodel")
-        mratio_path = path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=mjd, camera=camera, kind="mratio")
+        mamp_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=camera, kind="mamp")
+        mcent_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=camera, kind="mtrace")
+        mwidth_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=camera, kind="mwidth")
+        mmodel_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=camera, kind="mmodel")
+        mratio_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=camera, kind="mratio")
         os.makedirs(os.path.dirname(mamp_path), exist_ok=True)
         if skip_done and os.path.isfile(mcent_path) and os.path.isfile(mamp_path) and os.path.isfile(mwidth_path):
             log.info(f"skipping {mcent_path}, {mamp_path} and {mwidth_path}, files already exist")
@@ -1507,7 +1510,7 @@ def create_traces(mjd, cameras=CAMERAS, use_longterm_cals=True, expnums_ldls=Non
             ratio.writeFitsData(mratio_path)
 
 
-def create_dome_fiberflats(mjd, expnums_ldls, expnums_qrtz, use_longterm_cals=True, kind="longterm", skip_done=True, dry_run=False):
+def create_dome_fiberflats(mjd, expnums_ldls=None, expnums_qrtz=None, use_longterm_cals=True, kind="longterm", skip_done=True, dry_run=False):
     """Create fiberflats from dome flats
 
     Parameters
@@ -1527,9 +1530,18 @@ def create_dome_fiberflats(mjd, expnums_ldls, expnums_qrtz, use_longterm_cals=Tr
     dry_run : bool, optional
         Logs useful information abaut the current setup without actually reducing, by default False
     """
+    if expnums_ldls is not None and expnums_qrtz is not None:
+        expnums = np.concatenate([expnums_ldls, expnums_qrtz])
+    else:
+        expnums = None
 
-    expnums = np.concatenate([expnums_ldls, expnums_qrtz])
-    frames, _ = md.get_sequence_metadata(mjd, expnums=expnums, for_cals={"flat"})
+    frames, found_cals = md.get_sequence_metadata(mjd, expnums=expnums, for_cals={"dome"})
+    if "dome" not in found_cals:
+        log.error("no dome flat frames found, skipping production of dome fiberflats")
+        return
+
+    if expnums_ldls is None or expnums_qrtz is None:
+        frames, expnums = choose_sequence(frames, flavor="flat", kind="longterm")
 
     # define master paths for target frames
     calibs = get_calib_paths(mjd, version=drpver, longterm_cals=use_longterm_cals)
@@ -1643,20 +1655,26 @@ def create_twilight_fiberflats(mjd: int, use_longterm_cals: bool = True, expnums
         Logs useful information abaut the current setup without actually reducing, by default False
     """
     # get metadata
-    flats, _ = md.get_sequence_metadata(mjd, expnums=expnums, for_cals={"fiberflat"})
+    frames, found_cals = md.get_sequence_metadata(mjd, expnums=expnums, for_cals={"twilight"})
+    if "twilight" not in found_cals:
+        log.error("no twilight frames found, skipping production of twilight fiberflats")
+        return
+
+    if expnums is None:
+        frames, expnums = choose_sequence(frames, flavor="twilight", kind="longterm")
 
     # define master paths for target frames
     calibs = get_calib_paths(mjd, version=drpver, longterm_cals=use_longterm_cals)
 
     if dry_run:
-        _log_dry_run(flats, calibs=calibs, settings=None, caller=create_dome_fiberflats.__name__)
+        _log_dry_run(frames, calibs=calibs, settings=None, caller=create_dome_fiberflats.__name__)
         return
 
     # 2D reduction of twilight sequence
-    reduce_2d(mjd=mjd, calibrations=calibs, expnums=flats.expnum.unique(), reject_cr=False,
+    reduce_2d(mjd=mjd, calibrations=calibs, expnums=frames.expnum.unique(), reject_cr=False,
               add_astro=False, sub_straylight=True, skip_done=skip_done, **STRAYLIGHT_PARS)
 
-    for flat in flats.to_dict("records"):
+    for flat in frames.to_dict("records"):
         camera = flat["camera"]
 
         # extract 1D spectra for each frame
@@ -1677,25 +1695,24 @@ def create_twilight_fiberflats(mjd: int, use_longterm_cals: bool = True, expnums
 
     # decompose twilight spectra into sun continuum and twilight components
     channels = "brz"
-    flat_channels = flats.groupby(flats.camera.str.__getitem__(0))
-    tileid = flats.tileid.min()
+    flat_channels = frames.groupby(frames.camera.str.__getitem__(0))
     for channel in channels:
         flat_expnums = flat_channels.get_group(channel).groupby("expnum")
         xtwi_paths, fflat_paths, lvmflat_paths = [], [], []
         for expnum in flat_expnums.groups:
             flat = flat_expnums.get_group(expnum).iloc[0]
 
-            xflat_paths = sorted(path.expand("lvm_anc", drpver=drpver, kind="x", imagetype=flat.imagetyp, tileid=flat.tileid, mjd=flat.mjd, camera=f"{channel}?", expnum=expnum))
+            xflat_paths = sorted(path.expand("lvm_anc", drpver=drpver, kind="x", imagetype=flat.imagetyp, tileid=11111, mjd=flat.mjd, camera=f"{channel}?", expnum=expnum))
             fflat_flatfielded_path = path.full("lvm_anc", drpver=drpver, kind="flatfielded_",
-                                   imagetype=flat.imagetyp, tileid=flat.tileid, mjd=flat.mjd,
+                                   imagetype=flat.imagetyp, tileid=11111, mjd=flat.mjd,
                                    camera=channel, expnum=expnum)
-            fflat_path = path.full("lvm_anc", drpver=drpver, kind="f", imagetype="flat", tileid=flat.tileid, mjd=flat.mjd, camera=channel, expnum=expnum)
+            fflat_path = path.full("lvm_anc", drpver=drpver, kind="f", imagetype="flat", tileid=11111, mjd=flat.mjd, camera=channel, expnum=expnum)
             fflat_paths.append(fflat_path)
-            xflat_path = path.full("lvm_anc", drpver=drpver, kind="x", imagetype=flat.imagetyp, tileid=flat.tileid, mjd=flat.mjd, camera=channel, expnum=expnum)
-            wflat_path = path.full("lvm_anc", drpver=drpver, kind="w", imagetype=flat.imagetyp, tileid=flat.tileid, mjd=flat.mjd, camera=channel, expnum=expnum)
-            hflat_path = path.full("lvm_anc", drpver=drpver, kind="h", imagetype=flat.imagetyp, tileid=flat.tileid, mjd=flat.mjd, camera=channel, expnum=expnum)
+            xflat_path = path.full("lvm_anc", drpver=drpver, kind="x", imagetype=flat.imagetyp, tileid=11111, mjd=flat.mjd, camera=channel, expnum=expnum)
+            wflat_path = path.full("lvm_anc", drpver=drpver, kind="w", imagetype=flat.imagetyp, tileid=11111, mjd=flat.mjd, camera=channel, expnum=expnum)
+            hflat_path = path.full("lvm_anc", drpver=drpver, kind="h", imagetype=flat.imagetyp, tileid=11111, mjd=flat.mjd, camera=channel, expnum=expnum)
             xtwi_paths.append(xflat_path)
-            lvmflat_paths.append(path.full("lvm_frame", mjd=mjd, tileid=tileid, drpver=drpver, expnum=expnum, kind=f'TFlat-{channel}'))
+            lvmflat_paths.append(path.full("lvm_frame", mjd=mjd, tileid=11111, drpver=drpver, expnum=expnum, kind=f'TFlat-{channel}'))
 
             if skip_done and os.path.isfile(hflat_path):
                 log.info(f"skipping {hflat_path}, file already exist")
@@ -1721,9 +1738,9 @@ def create_twilight_fiberflats(mjd: int, use_longterm_cals: bool = True, expnums
 
         # combine individual fiberflats into master fiberflat
         if kind == "longterm":
-            mflat_path = path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=mjd, kind="mfiberflat_twilight", camera=channel)
+            mflat_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mfiberflat_twilight", camera=channel)
         else:
-            mflat_path = path.full("lvm_master", drpver=drpver, tileid=tileid, mjd=mjd, kind="nfiberflat_twilight", camera=channel)
+            mflat_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="nfiberflat_twilight", camera=channel)
         combine_twilight_sequence(
             in_twilights=xtwi_paths,
             in_fflats=fflat_paths, out_mflat=mflat_path, out_lvmflats=lvmflat_paths,
@@ -1831,7 +1848,13 @@ def create_wavelengths(mjd, use_longterm_cals=True, expnums=None, kind="longterm
         _create_wavelengths_60177(use_longterm_cals=use_longterm_cals, skip_done=skip_done, dry_run=dry_run)
         return
 
-    frames, _ = md.get_sequence_metadata(mjd, expnums=expnums, for_cals={"wave"})
+    frames, found_cals = md.get_sequence_metadata(mjd, expnums=expnums, for_cals={"wave"})
+    if "wave" not in found_cals:
+        log.error("no arc frames found, skipping production of wavelength calibrations")
+        return
+
+    if expnums is None:
+        frames, expnums = choose_sequence(frames, flavor="arc", kind="longterm")
 
     # define master paths for target frames
     calibs = get_calib_paths(mjd, version=drpver, longterm_cals=use_longterm_cals)
@@ -1977,7 +2000,7 @@ def reduce_nightly_sequence(mjd, use_longterm_cals=False, reject_cr=True, only_c
 
     if "bias" in only_cals and "bias" in found_cals:
         biases, bias_expnums = choose_sequence(frames, flavor="bias", kind="nightly")
-        create_detrending_frames(mjd=mjd, expnums=bias_expnums, kind="bias", use_longterm_cals=use_longterm_cals, skip_done=skip_done, dry_run=dry_run)
+        create_bias(mjd=mjd, expnums=bias_expnums, kind="bias", use_longterm_cals=use_longterm_cals, skip_done=skip_done, dry_run=dry_run)
     else:
         log.log(20 if "bias" in found_cals else 40, "skipping production of bias frames")
 
@@ -2020,7 +2043,7 @@ def reduce_nightly_sequence(mjd, use_longterm_cals=False, reject_cr=True, only_c
     #     _clean_ancillary(mjd)
 
 
-def reduce_longterm_sequence(mjd, use_longterm_cals=True,
+def reduce_longterm_sequence(mjd, sources=None, use_longterm_cals=True,
                              reject_cr=True, only_cals=CAL_FLAVORS,
                              counts_thresholds=COUNTS_THRESHOLDS,
                              cent_guess_ncolumns=140, trace_full_ncolumns=40,
@@ -2044,6 +2067,8 @@ def reduce_longterm_sequence(mjd, use_longterm_cals=True,
     ----------
     mjd : int
         MJD to reduce
+    sources : dict[int, list[str]], optional
+        A dictionary pairing MJDs and a list of calibrations to create out of those, by default None (all calibrations from `mjd`)
     use_longterm_cals : bool
         Whether to use long-term calibration frames or not, defaults to True
     reject_cr : bool
@@ -2066,10 +2091,6 @@ def reduce_longterm_sequence(mjd, use_longterm_cals=True,
     # start logging to file
     start_logging(mjd, tileid=11111)
 
-    if mjd is None:
-        log.info(f"no mjd given ({mjd = }), loading calibration epochs from '{CALIBRATION_EPOCHS_PATH}'")
-        epochs = _load_calibration_epochs()
-
     # create symbolic link to pixel flats and masks
     if link_pixelmasks:
         _link_pixelmasks()
@@ -2078,54 +2099,30 @@ def reduce_longterm_sequence(mjd, use_longterm_cals=True,
         raise ValueError(f"some chosen image types in 'only_cals' are not valid: {only_cals.difference(CAL_FLAVORS)}")
     log.info(f"going to produce long-term calibrations: {only_cals}")
 
-    frames, found_cals = md.get_sequence_metadata(mjd, for_cals=only_cals, extract_metadata=extract_metadata)
+    source_mjds = _parse_epochs(mjd, sources)
+    print(source_mjds)
 
-    if "bias" in only_cals and "bias" in found_cals:
-        biases, bias_expnums = choose_sequence(frames, flavor="bias", kind="longterm")
-        create_detrending_frames(mjd=mjd, expnums=bias_expnums, kind="bias", use_longterm_cals=use_longterm_cals, skip_done=skip_done, dry_run=dry_run)
-    else:
-        log.log(20 if "bias" in found_cals else 40, "skipping production of bias frames")
+    if "bias" in only_cals:
+        create_bias(mjd=source_mjds["bias"], use_longterm_cals=use_longterm_cals, skip_done=skip_done, dry_run=dry_run)
 
-    if "trace" in only_cals and "trace" in found_cals:
-        dome_flats, dome_flat_expnums = choose_sequence(frames, flavor="flat", kind="longterm")
-        expnums_ldls = np.sort(dome_flats.query("ldls").expnum.unique())
-        expnums_qrtz = np.sort(dome_flats.query("quartz").expnum.unique())
+    if "trace" in only_cals:
         create_traces(
-            mjd=mjd,
+            mjd=source_mjds["trace"],
             use_longterm_cals=use_longterm_cals,
-            expnums_ldls=expnums_ldls, expnums_qrtz=expnums_qrtz,
             counts_thresholds=counts_thresholds,
             cent_guess_ncolumns=cent_guess_ncolumns,
             trace_full_ncolumns=trace_full_ncolumns,
             skip_done=skip_done,
             dry_run=dry_run)
-    else:
-        log.log(20 if "trace" in found_cals else 40, "skipping production of fiber traces")
 
-    if "wave" in only_cals and "wave" in found_cals:
-        arcs, arc_expnums = choose_sequence(frames, flavor="arc", kind="longterm")
-        create_wavelengths(mjd=mjd, expnums=np.sort(arcs.expnum.unique()), skip_done=skip_done, dry_run=dry_run)
-    else:
-        log.log(20 if "wave" in found_cals else 40, "skipping production of wavelength calibrations")
+    if "wave" in only_cals:
+        create_wavelengths(mjd=source_mjds["wave"], skip_done=skip_done, dry_run=dry_run)
 
-    if "dome" in only_cals and "dome" in found_cals:
-        dome_flats, dome_flat_expnums = choose_sequence(frames, flavor="flat", kind="longterm")
-        expnums_ldls = np.sort(dome_flats.query("ldls").expnum.unique())
-        expnums_qrtz = np.sort(dome_flats.query("quartz").expnum.unique())
-        create_dome_fiberflats(mjd=mjd, expnums_ldls=expnums_ldls, expnums_qrtz=expnums_qrtz,
-                               use_longterm_cals=use_longterm_cals, kind="longterm",
-                               skip_done=skip_done, dry_run=dry_run)
-    else:
-        log.log(20 if "dome" in found_cals else 40, "skipping production of dome fiberflats")
+    if "dome" in only_cals:
+        create_dome_fiberflats(mjd=source_mjds["dome"], use_longterm_cals=use_longterm_cals, kind="longterm", skip_done=skip_done, dry_run=dry_run)
 
-    if "twilight" in only_cals and fflats_from is not None:
-        log.info(f"copying twilight fiberflats from MJD {fflats_from} to MJD {mjd}")
-        _copy_fiberflats_from(mjd=fflats_from, mjd_dest=mjd, use_longterm_cals=True, dry_run=dry_run)
-    elif "twilight" in only_cals and "twilight" in found_cals:
-        twilight_flats, twilight_expnums = choose_sequence(frames, flavor="twilight", kind="longterm")
-        create_twilight_fiberflats(mjd=mjd, expnums=twilight_expnums, skip_done=skip_done, dry_run=dry_run)
-    else:
-        log.log(20 if "twilight" in found_cals else 40, "skipping production of twilight fiberflats")
+    if "twilight" in only_cals:
+        create_twilight_fiberflats(mjd=source_mjds["twilight"], skip_done=skip_done, dry_run=dry_run)
 
     # if not keep_ancillary:
     #     _clean_ancillary(mjd)
