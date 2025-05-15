@@ -19,7 +19,7 @@ from astropy.table import Table
 from filelock import FileLock, Timeout
 from tqdm import tqdm
 
-from lvmdrp.core.constants import FRAMES_CALIB_NEEDS, CAMERAS
+from lvmdrp.core.constants import CALIBRATION_NEEDS, CAMERAS
 from lvmdrp.utils.bitmask import (
     QualityFlag,
     ReductionStage,
@@ -1258,7 +1258,7 @@ def match_master_metadata(
     """return the matched master calibration frames given a target frame metadata
 
     Depending on the type of the target frame, a set of calibration frames may
-    be needed. These are stored in lvmdrp.core.constants.FRAMES_CALIB_NEEDS.
+    be needed. These are stored in lvmdrp.core.constants.CALIBRATION_NEEDS.
     This function retrieves the closest in time set of calibration frames
     according to that mapping.
 
@@ -1307,7 +1307,7 @@ def match_master_metadata(
         target_imagetyp = "flat"
 
     # locate calibration needs
-    frame_needs = FRAMES_CALIB_NEEDS.get(target_imagetyp)
+    frame_needs = CALIBRATION_NEEDS.get(target_imagetyp)
     log.info(
         f"target frame of type '{target_imagetyp}' "
         f"needs calibration frames: {', '.join(frame_needs) or None}"
@@ -1347,7 +1347,7 @@ def match_master_metadata(
     # filter by exposure number, spectrograph and/or camera
     log.info(f"final number of master frames after filtering {len(masters_metadata)}")
 
-    # raise error in case current frame is not recognized in FRAMES_CALIB_NEEDS
+    # raise error in case current frame is not recognized in CALIBRATION_NEEDS
     if frame_needs is None:
         log.error(f"no calibration frames found for '{target_imagetyp}' type")
         return calib_frames
@@ -1458,18 +1458,18 @@ def _collect_header_data(filename: str) -> dict:
     hdr_dict_mapping = {'drpver': 'DRPVER', 'drpqual': 'DRPQUAL', 'dpos': 'DPOS', 'object': 'OBJECT',
                         'obstime': 'OBSTIME',
                         # sci
-                        'sci_ra': 'SCIRA', 'sci_dec': 'SCIDEC', 
+                        'sci_ra': 'SCIRA', 'sci_dec': 'SCIDEC',
                         'sci_pa': 'SCIPA', 'sci_amass': 'TESCIAM',
                         'sci_kmpos': 'TESCIKM', 'sci_focpos': 'TESCIFO', 'sci_alt': 'SKY SCI_ALT',
                         'sci_sh_hght': 'SKY SCI_SH_HGHT', 'sci_moon_sep': 'SKY SCI_MOON_SEP',
                         # skye
-                        'skye_ra': 'SKYERA', 'skye_dec': 'SKYEDEC', 
+                        'skye_ra': 'SKYERA', 'skye_dec': 'SKYEDEC',
                         'skye_pa': 'SKYEPA', 'skye_amass': 'TESKYEAM',
                         'skye_kmpos': 'TESKYEKM', 'skye_focpos': 'TESKYEFO', 'skye_name': 'SKYENAME',
                         'skye_alt': 'SKY SKYE_ALT', 'sci_skye_sep': 'SKY SCI_SKYE_SEP',
                         'skye_sh_hght': 'SKY SKYE_SH_HGHT', 'skye_moon_sep': 'SKY SKYE_MOON_SEP',
                         # skyw
-                        'skyw_ra': 'SKYWRA', 'skyw_dec': 'SKYWDEC', 
+                        'skyw_ra': 'SKYWRA', 'skyw_dec': 'SKYWDEC',
                         'skyw_pa': 'SKYWPA', 'skyw_amass': 'TESKYWAM',
                         'skyw_kmpos': 'TESKYWKM', 'skyw_focpos': 'TESKYWFO', 'skyw_name': 'SKYWNAME',
                         'skyw_alt': 'SKY SKYW_ALT', 'sci_skyw_sep': 'SKY SCI_SKYW_SEP',

@@ -31,6 +31,7 @@ import numpy as np
 import bottleneck as bn
 import pandas as pd
 from glob import glob
+from pprint import pformat
 from copy import deepcopy as copy
 from datetime import datetime
 from shutil import copy2, rmtree
@@ -44,7 +45,7 @@ from lvmdrp import log, path, __version__ as drpver
 from lvmdrp.utils import metadata as md
 from lvmdrp.utils.convert import tileid_grp
 from lvmdrp.utils.paths import get_master_mjd, get_calib_paths, group_calib_paths, get_frames_paths
-from lvmdrp.core.constants import CALIBRATION_NAMES, SKYLINES_FIBERFLAT, CONTINUUM_FIBERFLAT
+from lvmdrp.core.constants import CALIBRATION_NAMES, SKYLINES_FIBERFLAT, CONTINUUM_FIBERFLAT, CALIBRATION_NEEDS
 from lvmdrp.core.plot import create_subplots, save_fig
 from lvmdrp.core import dataproducts as dp
 from lvmdrp.core.constants import (
@@ -578,6 +579,9 @@ def _log_dry_run(frames, calibs, settings, caller):
     records = frames.filter(["mjd", "tileid", "expnum", "imagetyp", "qaqual"]).drop_duplicates().to_string().split("\n")
     for record in records:
         log.info(f"   {record}")
+    log.info("with calibrations:")
+    for r in pformat(calibs).split("\n"):
+        log.info(r)
 
 
 def _create_wavelengths_60177(use_longterm_cals=True, skip_done=True, dry_run=False):
@@ -709,7 +713,7 @@ def _create_wavelengths_60177(use_longterm_cals=True, skip_done=True, dry_run=Fa
     frames, _ = md.get_sequence_metadata(mjd=mjd, expnums=expnums, for_cals={"wave"})
 
     # define master paths for target frames
-    calibs = get_calib_paths(mjd, version=drpver, longterm_cals=use_longterm_cals)
+    calibs = get_calib_paths(mjd, version=drpver, longterm_cals=use_longterm_cals, flavors=CALIBRATION_NEEDS["wave"])
 
     if dry_run:
         _log_dry_run(frames, calibs=calibs, settings=None, caller=_create_wavelengths_60177.__name__)
@@ -1094,7 +1098,7 @@ def fix_raw_pixel_shifts(mjd, expnums=None, ref_expnums=None, use_longterm_cals=
                                          interactive=interactive, display_plots=display_plots)
 
 
-def create_bias(mjd, use_longterm_cals=True, expnums=None, assume_imagetyp=None, skip_done=True, dry_run=False):
+def create_bias(mjd, expnums=None, cals_mjd=None, use_longterm_cals=True, assume_imagetyp=None, skip_done=True, dry_run=False):
     """Reduce a sequence of bias frames to produce master frames for each camera
 
     Given a set of MJDs and (optionally) exposure numbers, reduce the
@@ -1126,7 +1130,7 @@ def create_bias(mjd, use_longterm_cals=True, expnums=None, assume_imagetyp=None,
         frames, expnums = choose_sequence(frames, flavor="bias", kind="longterm")
 
     # define master paths for target frames
-    calibs = get_calib_paths(mjd, version=drpver, longterm_cals=use_longterm_cals)
+    calibs = get_calib_paths(mjd=cals_mjd or mjd, version=drpver, longterm_cals=use_longterm_cals, flavors=CALIBRATION_NEEDS["bias"])
 
     if dry_run:
         _log_dry_run(frames, calibs=calibs, settings=None, caller=create_bias.__name__)
@@ -1210,7 +1214,7 @@ def create_nightly_traces(mjd, use_longterm_cals=False, expnums_ldls=None, expnu
     frames, _ = md.get_sequence_metadata(mjd, expnums=expnums, for_cals={"flat"})
 
     # define master paths for target frames
-    calibs = get_calib_paths(mjd, version=drpver, longterm_cals=use_longterm_cals)
+    calibs = get_calib_paths(mjd, version=drpver, longterm_cals=use_longterm_cals, flavors=CALIBRATION_NEEDS["trace"])
 
     if dry_run:
         _log_dry_run(frames, calibs=calibs, settings=None, caller=create_nightly_traces.__name__)
@@ -1302,7 +1306,8 @@ def create_nightly_traces(mjd, use_longterm_cals=False, expnums_ldls=None, expnu
                 ratio.writeFitsData(dratio_path)
 
 
-def create_traces(mjd, cameras=CAMERAS, use_longterm_cals=True, expnums_ldls=None, expnums_qrtz=None,
+def create_traces(mjd, cameras=CAMERAS, expnums_ldls=None, expnums_qrtz=None,
+                  cals_mjd=None, use_longterm_cals=True,
                   counts_thresholds=COUNTS_THRESHOLDS, cent_guess_ncolumns=140,
                   trace_full_ncolumns=40,
                   fit_poly=True, poly_deg_amp=5, poly_deg_cent=4, poly_deg_width=5,
@@ -1323,12 +1328,14 @@ def create_traces(mjd, cameras=CAMERAS, use_longterm_cals=True, expnums_ldls=Non
         MJD to reduce
     cameras : list or tuple, optional
         List of cameras (e.g., b2, z3) to create traces for
-    use_longterm_cals : bool
-        Whether to use long-term calibration frames or not, defaults to True
     expnums_ldls : list
         List of exposure numbers for LDLS dome flats
     expnums_qrtz : list
         List of exposure numbers for quartz dome flats
+    cals_mjd : int, optional
+        MJD from which calibrations will be sourced, by default None (calibrations taken from `mjd`)
+    use_longterm_cals : bool
+        Whether to use long-term calibration frames or not, defaults to True
     fit_poly : bool, optional
         Fit polynomials to traces, by default True
     poly_deg_amp : int, optional
@@ -1356,7 +1363,7 @@ def create_traces(mjd, cameras=CAMERAS, use_longterm_cals=True, expnums_ldls=Non
         expnums_qrtz = np.sort(frames.query("quartz").expnum.unique())
 
     # define master paths for target frames
-    calibs = get_calib_paths(mjd, version=drpver, longterm_cals=use_longterm_cals)
+    calibs = get_calib_paths(mjd=cals_mjd or mjd, version=drpver, longterm_cals=use_longterm_cals, flavors=CALIBRATION_NEEDS["trace"])
 
     if dry_run:
         _log_dry_run(frames, calibs=calibs, settings=None, caller=create_traces.__name__)
@@ -1510,7 +1517,7 @@ def create_traces(mjd, cameras=CAMERAS, use_longterm_cals=True, expnums_ldls=Non
             ratio.writeFitsData(mratio_path)
 
 
-def create_dome_fiberflats(mjd, expnums_ldls=None, expnums_qrtz=None, use_longterm_cals=True, kind="longterm", skip_done=True, dry_run=False):
+def create_dome_fiberflats(mjd, expnums_ldls=None, expnums_qrtz=None, cals_mjd=None, use_longterm_cals=True, kind="longterm", skip_done=True, dry_run=False):
     """Create fiberflats from dome flats
 
     Parameters
@@ -1544,7 +1551,7 @@ def create_dome_fiberflats(mjd, expnums_ldls=None, expnums_qrtz=None, use_longte
         frames, expnums = choose_sequence(frames, flavor="flat", kind="longterm")
 
     # define master paths for target frames
-    calibs = get_calib_paths(mjd, version=drpver, longterm_cals=use_longterm_cals)
+    calibs = get_calib_paths(mjd=cals_mjd or mjd, version=drpver, longterm_cals=use_longterm_cals, flavors=CALIBRATION_NEEDS["dome"])
     calibs_grp = calibs.copy()
 
     if dry_run:
@@ -1604,7 +1611,7 @@ def create_dome_fiberflats(mjd, expnums_ldls=None, expnums_qrtz=None, use_longte
         lvmflat.writeFitsData(path.full("lvm_frame", mjd=mjd, tileid=11111, drpver=drpver, expnum=expnum_str, kind=f'DFlat-{channel}'))
 
 
-def create_twilight_fiberflats(mjd: int, use_longterm_cals: bool = True, expnums: List[int] = None,
+def create_twilight_fiberflats(mjd: int, expnums: List[int] = None, cals_mjd: int = None, use_longterm_cals: bool = True,
                       ref_kind: Union[int, Callable[[np.ndarray, int], np.ndarray]] = bn.nanmedian,
                       groupby: str = "spec", guess_coeffs: List[int] = [1,0,0,0], fixed_coeffs: List[int] = [0,1,2,3],
                       cnorms: Dict[str, float] = SKYLINES_FIBERFLAT, dwave: float = 20.0,
@@ -1664,7 +1671,7 @@ def create_twilight_fiberflats(mjd: int, use_longterm_cals: bool = True, expnums
         frames, expnums = choose_sequence(frames, flavor="twilight", kind="longterm")
 
     # define master paths for target frames
-    calibs = get_calib_paths(mjd, version=drpver, longterm_cals=use_longterm_cals)
+    calibs = get_calib_paths(mjd=cals_mjd or mjd, version=drpver, longterm_cals=use_longterm_cals, flavors=CALIBRATION_NEEDS["twilight"])
 
     if dry_run:
         _log_dry_run(frames, calibs=calibs, settings=None, caller=create_dome_fiberflats.__name__)
@@ -1748,14 +1755,14 @@ def create_twilight_fiberflats(mjd: int, use_longterm_cals: bool = True, expnums
             in_waves=calibs["wave"][channel], in_lsfs=calibs["lsf"][channel])
 
 
-def create_fiberflats_corrections(mjd: int, science_mjds: Union[int, List[int]], use_longterm_cals: bool = True, science_expnums: List[int] = None,
+def create_fiberflats_corrections(cals_mjd: int, science_mjds: Union[int, List[int]], use_longterm_cals: bool = True, science_expnums: List[int] = None,
                                   sky_cwaves: Dict[str, float] = SKYLINES_FIBERFLAT, cont_cwaves: Dict[str, float] = CONTINUUM_FIBERFLAT,
                                   groupby: str = "spec", quantiles: Tuple[float, float] = (5.0, 97.0), sky_fibers_only: bool = False,
                                   nsigma: float = 2.0, comb_method: str = "median", force_correction: bool = False,
                                   skip_done: bool = False, display_plots: bool = False, dry_run: bool = False) -> None:
 
-    if not all([mjd <= sci_mjd for sci_mjd in science_mjds]):
-        log.error(f"some science MJDs are earlier than {mjd = }: {science_mjds = }")
+    if not all([cals_mjd <= sci_mjd for sci_mjd in science_mjds]):
+        log.error(f"some science MJDs are earlier than {cals_mjd = }: {science_mjds = }")
         return
 
     science_mjds = [science_mjds] if isinstance(science_mjds, int) else science_mjds
@@ -1763,7 +1770,7 @@ def create_fiberflats_corrections(mjd: int, science_mjds: Union[int, List[int]],
         frames = pd.concat([md.get_frames_metadata(mjd=mjd).query("tileid != 11111 and qaqual != 'BAD'") for mjd in science_mjds], ignore_index=True)
         science_expnums = frames.sort_values("expnum").drop_duplicates("expnum").expnum
 
-    calibs = get_calib_paths(mjd, version=drpver, longterm_cals=use_longterm_cals)
+    calibs = get_calib_paths(mjd=cals_mjd, version=drpver, longterm_cals=use_longterm_cals, flavors=CALIBRATION_NEEDS["object"])
 
     if dry_run:
         _log_dry_run(frames, calibs=calibs, settings=None, caller=create_fiberflats_corrections.__name__)
@@ -1816,7 +1823,7 @@ def create_illumination_corrections(mjd, use_longterm_cals=True, expnums=None):
     raise NotImplementedError("create_illumination_corrections")
 
 
-def create_wavelengths(mjd, use_longterm_cals=True, expnums=None, kind="longterm", skip_done=True, dry_run=False):
+def create_wavelengths(mjd, expnums=None, cals_mjd=None, use_longterm_cals=True, kind="longterm", skip_done=True, dry_run=False):
     """Reduces an arc sequence to create master wavelength solutions
 
     Given a set of MJDs and (optionally) exposure numbers, create wavelength
@@ -1857,7 +1864,7 @@ def create_wavelengths(mjd, use_longterm_cals=True, expnums=None, kind="longterm
         frames, expnums = choose_sequence(frames, flavor="arc", kind="longterm")
 
     # define master paths for target frames
-    calibs = get_calib_paths(mjd, version=drpver, longterm_cals=use_longterm_cals)
+    calibs = get_calib_paths(mjd=cals_mjd or mjd, version=drpver, longterm_cals=use_longterm_cals, flavors=CALIBRATION_NEEDS["wave"])
 
     if dry_run:
         _log_dry_run(frames, calibs=calibs, settings=None, caller=create_wavelengths.__name__)
@@ -2100,14 +2107,14 @@ def reduce_longterm_sequence(mjd, sources=None, use_longterm_cals=True,
     log.info(f"going to produce long-term calibrations: {only_cals}")
 
     source_mjds = _parse_epochs(mjd, sources)
-    print(source_mjds)
 
     if "bias" in only_cals:
-        create_bias(mjd=source_mjds["bias"], use_longterm_cals=use_longterm_cals, skip_done=skip_done, dry_run=dry_run)
+        create_bias(mjd=source_mjds["bias"], cals_mjd=mjd, use_longterm_cals=use_longterm_cals, skip_done=skip_done, dry_run=dry_run)
 
     if "trace" in only_cals:
         create_traces(
             mjd=source_mjds["trace"],
+            cals_mjd=mjd,
             use_longterm_cals=use_longterm_cals,
             counts_thresholds=counts_thresholds,
             cent_guess_ncolumns=cent_guess_ncolumns,
@@ -2116,13 +2123,13 @@ def reduce_longterm_sequence(mjd, sources=None, use_longterm_cals=True,
             dry_run=dry_run)
 
     if "wave" in only_cals:
-        create_wavelengths(mjd=source_mjds["wave"], skip_done=skip_done, dry_run=dry_run)
+        create_wavelengths(mjd=source_mjds["wave"], cals_mjd=mjd, use_longterm_cals=use_longterm_cals, skip_done=skip_done, dry_run=dry_run)
 
     if "dome" in only_cals:
-        create_dome_fiberflats(mjd=source_mjds["dome"], use_longterm_cals=use_longterm_cals, kind="longterm", skip_done=skip_done, dry_run=dry_run)
+        create_dome_fiberflats(mjd=source_mjds["dome"], cals_mjd=mjd, use_longterm_cals=use_longterm_cals, kind="longterm", skip_done=skip_done, dry_run=dry_run)
 
     if "twilight" in only_cals:
-        create_twilight_fiberflats(mjd=source_mjds["twilight"], skip_done=skip_done, dry_run=dry_run)
+        create_twilight_fiberflats(mjd=source_mjds["twilight"], cals_mjd=mjd, use_longterm_cals=use_longterm_cals, skip_done=skip_done, dry_run=dry_run)
 
     # if not keep_ancillary:
     #     _clean_ancillary(mjd)
