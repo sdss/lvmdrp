@@ -324,14 +324,14 @@ def get_exposed_std_fiber(mjd, expnums, camera, imagetyp="flat", ref_column=LVM_
     return exposed_stds, unexposed_stds
 
 
-def _load_calibration_epochs(epochs_path=CALIBRATION_EPOCHS_PATH):
+def load_calibration_epochs(epochs_path=CALIBRATION_EPOCHS_PATH):
 
     with open(epochs_path) as f:
         epochs = yaml.safe_load(f)["epochs"]
     return epochs
 
 
-def _parse_epochs(mjd, sources=None, trigger=None, comment=None):
+def parse_calibration_epochs(mjd, sources=None, trigger=None, comment=None):
     if sources is None:
         calibs_mjds = {}
         for flavor in CAL_FLAVORS:
@@ -576,7 +576,7 @@ def _get_crosstalk(cent, fwhm, ifiber, jcolumn, ypixels=None, nfibers=1):
 
 def _log_dry_run(frames, calibs, settings, caller):
     log.info(f"dry run of {caller} with frames:")
-    records = frames.filter(["mjd", "tileid", "expnum", "imagetyp", "qaqual"]).drop_duplicates().to_string().split("\n")
+    records = frames.filter(["mjd", "tileid", "expnum", "imagetyp", "qaqual"]).drop_duplicates().to_string(index=None).split("\n")
     for record in records:
         log.info(f"   {record}")
     log.info("with calibrations:")
@@ -2050,13 +2050,12 @@ def reduce_nightly_sequence(mjd, use_longterm_cals=False, reject_cr=True, only_c
     #     _clean_ancillary(mjd)
 
 
-def reduce_longterm_sequence(mjd, sources=None, use_longterm_cals=True,
+def reduce_longterm_sequence(mjd, calib_epoch=None, use_longterm_cals=True,
                              reject_cr=True, only_cals=CAL_FLAVORS,
                              counts_thresholds=COUNTS_THRESHOLDS,
                              cent_guess_ncolumns=140, trace_full_ncolumns=40,
                              extract_metadata=False,
                              skip_done=True, keep_ancillary=False,
-                             fflats_from=None,
                              link_pixelmasks=True,
                              dry_run=False):
     """Reduces the long-term calibration sequence:
@@ -2074,8 +2073,8 @@ def reduce_longterm_sequence(mjd, sources=None, use_longterm_cals=True,
     ----------
     mjd : int
         MJD to reduce
-    sources : dict[int, list[str]], optional
-        A dictionary pairing MJDs and a list of calibrations to create out of those, by default None (all calibrations from `mjd`)
+    calib_epoch : dict[int, list[str]], optional
+        A dictionary with specifications of the calibration epoch, by default None
     use_longterm_cals : bool
         Whether to use long-term calibration frames or not, defaults to True
     reject_cr : bool
@@ -2088,8 +2087,6 @@ def reduce_longterm_sequence(mjd, sources=None, use_longterm_cals=True,
         Skip pipeline steps that have already been done
     keep_ancillary : bool
         Keep ancillary files, by default False
-    fflats_from : int, optional
-        Copy twilight fiberflats from given MJD, by default None (no copy)
     link_pixelmasks : bool, optional
         Create a symbolic link of current version of pixel mask and pixel flats to current version, by default True
     dry_run : bool, optional
@@ -2106,7 +2103,7 @@ def reduce_longterm_sequence(mjd, sources=None, use_longterm_cals=True,
         raise ValueError(f"some chosen image types in 'only_cals' are not valid: {only_cals.difference(CAL_FLAVORS)}")
     log.info(f"going to produce long-term calibrations: {only_cals}")
 
-    source_mjds = _parse_epochs(mjd, sources)
+    source_mjds = parse_calibration_epochs(mjd, **calib_epoch)
 
     if "bias" in only_cals:
         create_bias(mjd=source_mjds["bias"], cals_mjd=mjd, use_longterm_cals=use_longterm_cals, skip_done=skip_done, dry_run=dry_run)
