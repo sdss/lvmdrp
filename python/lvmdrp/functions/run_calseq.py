@@ -325,10 +325,24 @@ def get_exposed_std_fiber(mjd, expnums, camera, imagetyp="flat", ref_column=LVM_
     return exposed_stds, unexposed_stds
 
 
-def load_calibration_epochs(epochs_path=CALIBRATION_EPOCHS_PATH):
-
+def load_calibration_epochs(epochs_path=None, filter_by=None):
+    epochs_path = epochs_path or CALIBRATION_EPOCHS_PATH
     with open(epochs_path) as f:
         epochs = yaml.safe_load(f)["epochs"]
+
+    log.info(f"found {len(epochs)}:")
+    for mjd in epochs:
+        log.info(f"  {mjd}: {epochs[mjd]}")
+
+    if filter_by is not None and isinstance(filter_by, (list, tuple)):
+        log.info(f"filtering by {filter_by}")
+        epochs = {mjd: epochs[mjd] for mjd in filter_by if mjd in epochs}
+        if len(epochs) == 0:
+            log.error(f"epoch(s) {filter_by} not found in calibration epochs file: '{epochs_path}'")
+            return epochs
+        log.info(f"after filtering {len(epochs)} epoch(s):")
+        for mjd in epochs:
+            log.info(f"  {mjd}: {epochs[mjd]}")
     return epochs
 
 

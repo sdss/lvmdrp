@@ -247,6 +247,8 @@ cli.add_command(metacli)
 @click.option('-m', '--mjd', type=int, help='an MJD to reduce')
 @click.option('-l', '--mjd-list', type=IntListType(), help='a list of specific MJDs to reduce')
 @click.option('-r', '--mjd-range', type=str, help='a range of MJDs to reduce')
+@click.option('--from-epochs', is_flag=True, default=False, help="Use fiducial or given epochs file to produce long-term calibrations")
+@click.option('--epochs-file', type=str, default=None, help="Path to a calibrations epoch file")
 @click.option('-cr', '--reject-cr', is_flag=True, default=False, help='flag to run cosmic rays rejection')
 @click.option('-b', '--skip-bias', is_flag=True, default=False, help='skip bias calibrations')
 @click.option('-t', '--skip-trace', is_flag=True, default=False, help='skip fiber traces')
@@ -263,28 +265,27 @@ cli.add_command(metacli)
 @click.option("--dry-run", is_flag=True, default=False, help="Shows useful information about the current setup without actually running reductions")
 @cloup.constraint(mutually_exclusive, ['mjd', 'mjd_list', 'mjd_range'])
 @cloup.constraint(RequireExactly(1), ['mjd', 'mjd_list', 'mjd_range'])
-def longterm(mjd, mjd_list, mjd_range, reject_cr,
-                 skip_bias, skip_trace, skip_wavelength,
-                 skip_dome, skip_twilight,
-                 ldls_threshold, qrtz_threshold,
-                 cent_ncolumns, full_ncolumns,
-                 extract_md, skip_done, clean_ancillary,
-                 dry_run):
+def longterm(mjd, mjd_list, mjd_range, from_epochs, epochs_file, reject_cr,
+             skip_bias, skip_trace, skip_wavelength,
+             skip_dome, skip_twilight,
+             ldls_threshold, qrtz_threshold,
+             cent_ncolumns, full_ncolumns,
+             extract_md, skip_done, clean_ancillary,
+             dry_run):
     """ Run calibration sequence reduction """
 
     only_cals = {flavor for flavor, skip in zip(["bias", "trace", "wave", "dome", "twilight"],
                                                 [skip_bias, skip_trace, skip_wavelength, skip_dome, skip_twilight]) if not skip}
 
     # parse calibration MJDs
+    epochs = {}
     mjds = parse_mjds(mjd=mjd or mjd_list or mjd_range or None)
+    if mjds is not None and not isinstance(mjds, (list, tuple)):
+        mjds = [mjds]
     # if no MJD, get fiducial calibration epochs
-    if mjds is None:
-        epochs = load_calibration_epochs()
+    if from_epochs or mjds is None:
+        epochs = load_calibration_epochs(epochs_path=epochs_file, filter_by=mjds)
         mjds = sorted(list(epochs.keys()))
-    else:
-        if not isinstance(mjds, (list, tuple)):
-            mjds = [mjds]
-        epochs = {}
 
     # run reduction sequence
     for mjd in mjds:
