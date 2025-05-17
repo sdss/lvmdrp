@@ -3032,6 +3032,8 @@ def validate_extraction(in_image, in_cent, in_width, in_rss, plot_columns=[1000,
     img = Image()
     img._data = numpy.nan_to_num(img._data)
     img.loadFitsData(in_image)
+    channel = img._header["CCD"][0]
+    specid = int(img._header["SPEC"][-1])
 
     log.info(f"loading fiber parameters in {in_cent} and {in_width}")
     cent = TraceMask.from_file(in_cent)
@@ -3042,32 +3044,50 @@ def validate_extraction(in_image, in_cent, in_width, in_rss, plot_columns=[1000,
     rss = RSS.from_file(in_rss)
     rss._data = numpy.nan_to_num(rss._data)
 
-    ypix_cor = rss._slitmap[["spectrographid"] == int(img._header["SPEC"][-1])]["ypix_z"]
-    ypix_ori = img._slitmap[["spectrographid"] == int(img._header["SPEC"][-1])]["ypix_z"]
+    ypix_cor = rss._slitmap[["spectrographid"] == specid][f"ypix_{channel}"]
+    ypix_ori = img._slitmap[["spectrographid"] == specid][f"ypix_{channel}"]
     thermal_shift = ypix_cor - ypix_ori
     log.info(f"fiber thermal shift in slitmap: {thermal_shift:.4f}")
-    cent._data += thermal_shift
+    cent._coeffs[:, 0] += thermal_shift
+    cent.eval_coeffs()
 
     log.info(f"evaluating extracted flux into 2D pixel grid for {img._dim[1]} columns")
     x = numpy.arange(img._dim[0])
     out = numpy.zeros(img._dim)
     fact = numpy.sqrt(2.0 * numpy.pi)
 
-    fig, axs = create_subplots(to_display=display_plots, nrows=len(plot_columns), ncols=1, figsize=(15,5), sharex=True, layout="constrained")
+    fig, axs = create_subplots(to_display=display_plots, nrows=len(plot_columns), ncols=1, figsize=(15,2*len(plot_columns)), sharex=True, layout="constrained")
+    fig.supxlabel("X (pixels)", fontsize="x-large")
+    fig.supylabel("Relative residuals", fontsize="x-large")
     for i in range(img._dim[1]):
         A = (numpy.exp(-0.5 * ((x[:, None] - cent._data[:, i][None, :]) / abs(width._data[:, i][None, :])) ** 2) / (fact * abs(width._data[:, i][None, :])))
         spec = numpy.dot(A, rss._data[:, i])
         out[:, i] = spec
         if i in plot_columns:
-            axs[plot_columns.index(i)].step(x, img._data[:, i], color="k", lw=1, where="mid")
-            axs[plot_columns.index(i)].step(x, spec, color="r", lw=1, where="mid")
+            # axs[plot_columns.index(i)].errorbar(x, img._data[:, i], yerr=img._error[:, i], lw=1, elinewidth=1, color="tab:red", ecolor="0.2")
+            # axs[plot_columns.index(i)].step(x, spec, lw=1, color="tab:blue", where="mid")
+
+            axs[plot_columns.index(i)].axhspan(-0.01, 0.01, color="0.5", lw=0, alpha=0.5)
+            axs[plot_columns.index(i)].axhspan(-0.03, 0.03, color="0.5", lw=0, alpha=0.5)
+            axs[plot_columns.index(i)].axhspan(-0.05, 0.05, color="0.5", lw=0, alpha=0.5)
+            axs[plot_columns.index(i)].axhline(ls=":", color="0.2", lw=1)
+            axs[plot_columns.index(i)].fill_between(x, (spec-img._data[:, i]) / img._data[:, i], step="mid", lw=0, fc="tab:blue", alpha=0.5)
+            axs[plot_columns.index(i)].set_ylim(-0.1, +0.1)
 
     out_path = os.path.dirname(in_image)
     out_name = os.path.basename(in_image).split(".fits")[0]
     out_residual = os.path.join(out_path, f"{out_name}_residual.fits")
     out_2dimage = os.path.join(out_path, f"{out_name}_2dimage.fits")
     out_ratio = os.path.join(out_path, f"{out_name}_ratio.fits")
-    save_fig(fig, product_path=out_2dimage, to_display=display_plots, figure_path="qa", label="2D_extracted_model")
+
+    # fig, ax = create_subplots(to_display=display_plots, figsize=(15,5), layout="constrained")
+    # ax.axhspan(-0.01, 0.01, color="0.5", lw=0, alpha=0.5)
+    # ax.axhspan(-0.03, 0.03, color="0.5", lw=0, alpha=0.5)
+    # ax.axhspan(-0.05, 0.05, color="0.5", lw=0, alpha=0.5)
+    # ax.axhline(ls=":", color="0.2", lw=1)
+    # ax.plot(x, (out-img._data) / img._data, ".", lw=0, color="tab:blue")
+    # ax.set_ylim(-0.1, +0.1)
+    # save_fig(fig, product_path=out_2dimage, to_display=display_plots, figure_path="qa", label="2D_extracted_model")
 
     log.info(f"writing residual to {out_residual}")
     hdu = pyfits.PrimaryHDU(img._data - out)
