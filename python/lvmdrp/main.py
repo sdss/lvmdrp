@@ -1462,11 +1462,13 @@ def reduce_2d(mjd, calibrations, expnums=None, exptime=None, cameras=CAMERAS,
                                         in_cent_trace=calibrations["trace"][camera], parallel=parallel_run, **straylight_pars)
 
 
-def reduce_1d(mjd, calibrations, expnums=None, replace_with_nan=True, sub_straylight=True, skip_done=True, keep_ancillary=False):
+def reduce_1d(mjd, calibrations, expnums=None, cameras=CAMERAS, replace_with_nan=True, sub_straylight=True, skip_done=True, keep_ancillary=False):
 
     frames = get_frames_metadata(mjd)
     if expnums is not None:
         frames.query("expnum in @expnums", inplace=True)
+    if cameras:
+        frames.query("camera in @cameras", inplace=True)
     frames.sort_values(["expnum", "camera"], inplace=True)
 
     for _, sci in frames.iterrows():

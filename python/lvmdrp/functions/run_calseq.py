@@ -1521,9 +1521,9 @@ def create_traces(mjd, cameras=CAMERAS, expnums_ldls=None, expnums_qrtz=None,
                 mcents[camera].interpolate_coeffs()
                 mwidths[camera].interpolate_coeffs()
             else:
-                mamps[camera].interpolate_data(axis="Y", extrapolate=True)
-                mcents[camera].interpolate_data(axis="Y", extrapolate=True)
-                mwidths[camera].interpolate_data(axis="Y", extrapolate=True)
+                mamps[camera].interpolate_data(axis="Y")
+                mcents[camera].interpolate_data(axis="Y")
+                mwidths[camera].interpolate_data(axis="Y")
 
             # reset mask to propagate broken fibers
             mamps[camera]._mask[bad_fibers] = True
