@@ -605,6 +605,7 @@ class RSS(FiberRows):
             header,
             error,
             mask,
+            slitmap,
             shape,
             size,
             arc_position_x,
@@ -635,7 +636,6 @@ class RSS(FiberRows):
         if supersky_error is not None:
             self.set_supersky_error(supersky_error)
 
-        self.setSlitmap(slitmap)
         self.set_fluxcal(fluxcal_std, source="std")
         self.set_fluxcal(fluxcal_sci, source="sci")
 
@@ -2986,27 +2986,6 @@ class RSS(FiberRows):
             fiber_type=self._fiber_type,
         )
         return posTab
-
-    def getSlitmap(self):
-        return self._slitmap
-
-    def setSlitmap(self, slitmap):
-        if slitmap is None:
-            self._slitmap = None
-            return
-        if isinstance(slitmap, pyfits.BinTableHDU):
-            self._slitmap = Table.read(slitmap)
-        elif isinstance(slitmap, Table):
-            self._slitmap = slitmap
-        else:
-            raise TypeError(f"Invalid slitmap table type '{type(slitmap)}'")
-
-        # # define fiber positions in WCS
-        # if self._header is not None:
-        #     wcs = WCS(header=self._header).to_header()
-        #     wcs.update({"NAXIS": 2, "NAXIS2": self._header["NAXIS2"], "CRPIX2": 1,
-        #                 "CRVAL2": 1, "CDELT2": 1, "CTYPE2": "LINEAR"})
-        #     self._header.update(wcs)
 
     def apply_pixelmask(self, mask=None):
         """Replaces masked pixels in RSS by NaN values"""

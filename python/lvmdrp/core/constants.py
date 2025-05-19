@@ -101,14 +101,14 @@ SKYCORR_PAR_MAP = {
     "PLOT_TYPE": "plotType",
 }
 
-FRAMES_CALIB_NEEDS = {
-    "bias": [],
-    "dark": ["bias"],
-    "pixflat": ["bias", "dark"],
-    "pixmask": ["bias", "dark", "pixflat"],
-    "flat": ["pixmask", "bias", "dark", "pixflat", "trace", "fwhm", "wave", "lsf"],
-    "arc": ["pixmask", "bias", "dark", "pixflat", "trace", "fwhm", "wave", "lsf"],
-    "object": ["pixmask", "bias", "dark", "pixflat", "fiberflat", "trace", "fwhm", "wave", "lsf"],
+CALIBRATION_NEEDS = {
+    "bias": ["pixmask"],
+    "pixflat": ["pixmask", "bias", "dark"],
+    "trace": ["pixmask", "pixflat", "bias"],
+    "wave": ["pixmask", "pixflat", "bias", "trace", "width", "model"],
+    "dome": ["pixmask", "pixflat", "bias", "trace", "width", "model", "wave", "lsf"],
+    "twilight": ["pixmask", "pixflat", "bias", "trace", "width", "model", "wave", "lsf"],
+    "object": ["pixmask", "pixflat", "bias", "trace", "width", "model", "wave", "lsf"],
 }
 CALIBRATION_NAMES = {"pixmask", "pixflat", "bias", "trace_guess", "trace", "width", "amp", "model", "wave", "lsf", "fiberflat_dome", "fiberflat_twilight"}
 CALIBRATION_MATCH = {
@@ -128,6 +128,8 @@ ARC_LAMPS = ["NEON", "HGNE", "ARGON", "XENON"]
 CON_LAMPS = ["LDLS", "QUARTZ"]
 
 LVM_NBLOCKS = 18
+LVM_BLOCKSIZE = 36
+LVM_NFIBERS = LVM_NBLOCKS * LVM_BLOCKSIZE
 LVM_REFERENCE_COLUMN = 2000
 FIDUCIAL_PLATESCALE = 112.36748321030637 # Focal plane platescale in "/mm
 

@@ -3,11 +3,14 @@ from astropy.io import fits as pyfits
 from scipy import interpolate
 from tqdm import tqdm
 from copy import deepcopy as copy
+import warnings
 
 import bottleneck as bn
 from lvmdrp import log
 from scipy import optimize
 from astropy.table import Table
+
+from lvmdrp.core.constants import LVM_NBLOCKS, LVM_BLOCKSIZE, LVM_NFIBERS
 from lvmdrp.core.header import Header, combineHdr
 from lvmdrp.core.positionTable import PositionTable
 from lvmdrp.core.spectrum1d import Spectrum1D, _cross_match_float
@@ -131,6 +134,7 @@ class FiberRows(Header, PositionTable):
         header=None,
         error=None,
         mask=None,
+        slitmap=None,
         samples=None,
         shape=None,
         size=None,
@@ -157,6 +161,8 @@ class FiberRows(Header, PositionTable):
         self.set_coeffs(coeffs=coeffs, poly_kind=poly_kind)
         if self._data is None and self._coeffs is not None:
             self.eval_coeffs()
+
+        self.setSlitmap(slitmap)
 
     def __len__(self):
         return self._fibers
@@ -465,6 +471,20 @@ class FiberRows(Header, PositionTable):
             elif not hasattr(self, "_pixels"):
                 self._pixels = None
 
+    def getSlitmap(self):
+        return self._slitmap
+
+    def setSlitmap(self, slitmap):
+        if slitmap is None:
+            self._slitmap = None
+            return
+        if isinstance(slitmap, pyfits.BinTableHDU):
+            self._slitmap = Table.read(slitmap)
+        elif isinstance(slitmap, Table):
+            self._slitmap = slitmap
+        else:
+            raise TypeError(f"Invalid slitmap table type '{type(slitmap)}'")
+
     def set_samples(self, samples=None, columns=None):
         if isinstance(samples, Table):
             self._samples = samples
@@ -524,71 +544,6 @@ class FiberRows(Header, PositionTable):
             self._mask = numpy.concatenate(mask, axis_split)
         if image_list[0]._header is not None:
             self._header = image_list[0]._header
-
-    def loadFitsData(
-        self,
-        file,
-        extension_data=None,
-        extension_mask=None,
-        extension_error=None,
-        extension_coeffs=None,
-        extension_hdr=None,
-    ):
-        """
-        Load data from a FITS image into an FiberRows object (Fibers in y-direction, dispersion in x-direction)
-
-        Parameters
-        --------------
-        filename : string
-            Name or Path of the FITS image from which the data shall be loaded
-
-        extension_data : int, optional with default: None
-            Number of the FITS extension containing the data
-
-        extension_mask : int, optional with default: None
-            Number of the FITS extension containing the masked pixels
-
-        extension_error : int, optional with default: None
-            Number of the FITS extension containing the errors for the values
-        """
-        hdu = pyfits.open(file, uint=True, do_not_scale_image_data=True, memmap=False)
-        if (
-            extension_data is None
-            and extension_mask is None
-            and extension_error is None
-            and extension_coeffs is None
-        ):
-            self._data = hdu[0].data.astype("float32")
-            self._fibers = self._data.shape[0]
-            self._pixels = numpy.arange(self._data.shape[1])
-            self.setHeader(hdu[0].header)
-            if len(hdu) > 1:
-                for i in range(1, len(hdu)):
-                    if hdu[i].header["EXTNAME"].split()[0] == "ERROR":
-                        self._error = hdu[i].data.astype("float32")
-                    elif hdu[i].header["EXTNAME"].split()[0] == "BADPIX":
-                        self._mask = hdu[i].data.astype("bool")
-                        self._good_fibers = numpy.where(numpy.sum(self._mask, axis=1) != self._data.shape[1])[0]
-                    elif hdu[i].header["EXTNAME"].split()[0] == "COEFFS":
-                        self._coeffs = hdu[i].data.astype("float32")
-
-        else:
-            if extension_data is not None:
-                self._data = hdu[extension_data].data.astype("float32")
-                self._fibers = self._data.shape[0]
-                self._pixels = numpy.arange(self._data.shape[1])
-            if extension_mask is not None:
-                self._mask = hdu[extension_mask].data.astype("bool")
-                self._good_fibers = numpy.where(numpy.sum(self._mask, axis=1) != self._data.shape[1])[0]
-            if extension_error is not None:
-                self._error = hdu[extension_error].data.astype("float32")
-            if extension_coeffs is not None:
-                self._coeffs = hdu[extension_coeffs].data.astype("float32")
-
-        hdu.close()
-
-        if extension_hdr is not None:
-            self.setHeader(hdu[extension_hdr].header)
 
     def applyFibers(self, function, args):
         result = []
@@ -835,15 +790,23 @@ class FiberRows(Header, PositionTable):
         """
         pixels = numpy.arange(self._data.shape[1])
         samples = self._samples.to_pandas().values
-        self._coeffs = numpy.zeros((self._data.shape[0], numpy.abs(deg) + 1))
+        coeffs = numpy.zeros((self._data.shape[0], numpy.abs(deg) + 1))
         # iterate over each fiber
         pix_table = []
         poly_table = []
         poly_all_table = []
         for i in range(self._fibers):
             good_pix = numpy.logical_not(self._mask[i, :])
+            n_goodpix = good_pix.sum()
+            if n_goodpix == 0:
+                continue
+
             good_sam = numpy.isfinite(samples[i, :])
-            if numpy.sum(good_pix) >= deg + 1 and good_sam.sum() / good_sam.size > min_samples_frac:
+            nsamples = good_sam.size
+            n_goodsam = good_sam.sum()
+            can_fit = n_goodpix >= deg + 1
+            enough_samples = n_goodsam / nsamples > min_samples_frac
+            if can_fit and enough_samples:
                 # select the polynomial class
                 poly_cls = Spectrum1D.select_poly_class(poly_kind)
 
@@ -854,19 +817,24 @@ class FiberRows(Header, PositionTable):
                     poly_table.extend(numpy.column_stack([pixels[good_pix], poly(pixels[good_pix])]).tolist())
                     poly_all_table.extend(numpy.column_stack([pixels, poly(pixels)]).tolist())
                 except numpy.linalg.LinAlgError as e:
-                    log.error(f'Fiber trace failure at fiber {i}: {e}')
+                    warnings.warn(f'Fiber trace failure at fiber {i}: {e}')
                     self._mask[i, :] = True
                     continue
 
-                self._coeffs[i, :] = poly.convert().coef
+                coeffs[i, :] = poly.convert().coef
                 self._data[i, :] = poly(pixels)
 
                 if clip is not None:
                     self._data = numpy.clip(self._data, clip[0], clip[1])
                 self._mask[i, :] = False
             else:
-                log.warning(f"fiber {i} does not meet criteria: {good_pix.sum() = } >= {deg + 1 = } or {good_sam.sum() / good_sam.size = } > {min_samples_frac = }")
+                if not can_fit:
+                    warnings.warn(f"fiber {i} does not meet criterium: {n_goodpix = } >= {deg + 1 = }")
+                elif not enough_samples:
+                    warnings.warn(f"fiber {i} does not meet criterium: {n_goodsam / nsamples = } > {min_samples_frac = }")
                 self._mask[i, :] = True
+
+        self.set_coeffs(coeffs, poly_kind=poly_kind)
 
         return numpy.asarray(pix_table), numpy.asarray(poly_table), numpy.asarray(poly_all_table)
 
@@ -1112,7 +1080,7 @@ class FiberRows(Header, PositionTable):
 
         return self
 
-    def interpolate_data(self, axis="Y", extrapolate=False, reset_mask=True):
+    def interpolate_data(self, axis="Y", reset_mask=True):
         """Interpolate data of bad fibers (axis='Y') or bad pixels along the dispersion axis (axis='X')
 
         Parameters
@@ -1120,8 +1088,6 @@ class FiberRows(Header, PositionTable):
         axis : string or int, optional with default: 'Y'
             Defines the axis of the slice to be inserted, 'X', 'x', or 1 for the x-axis or
             'Y','y', or 0 for the y-axis.
-        extrapolate : bool, optional with default: False
-            If True, extrapolate data for bad fibers or bad pixels along the dispersion axis
         reset_mask : bool, optional with default: True
             If True, reset the mask of interpolated fibers to False
 
@@ -1135,24 +1101,42 @@ class FiberRows(Header, PositionTable):
         ValueError
             If axis is not 'X', 'x', 1, 'Y', 'y', or 0
         """
+        if self._mask is None:
+            raise ValueError(f"Attribute `_mask` needs to be set: {self._mask = }")
+
         # define coordinates
         x_pixels = numpy.arange(self._data.shape[1])
         y_pixels = numpy.arange(self._fibers)
 
         # interpolate data
         if axis == "Y" or axis == "y" or axis == 0:
-            bad_fibers = self._mask.all(axis=1)
-            if bad_fibers.sum() == self._fibers:
-                return self
-            f_data = interpolate.interp1d(y_pixels[~bad_fibers], self._data[~bad_fibers, :], axis=0, bounds_error=False, fill_value="extrapolate")
-            self._data = f_data(y_pixels)
-            if self._error is not None:
-                f_error = interpolate.interp1d(y_pixels[~bad_fibers], self._error[~bad_fibers, :], axis=0, bounds_error=False, fill_value="extrapolate")
-                self._error = f_error(y_pixels)
+            if self._slitmap is None:
+                raise ValueError(f"Attribute `_slitmap` needs to be set: {self._slitmap = }")
 
-            # unmask interpolated fibers
-            if self._mask is not None:
-                self._mask[bad_fibers, :] = False
+            slitmap = self._slitmap
+            if self._fibers == LVM_NFIBERS:
+                slitmap = self._slitmap[self._slitmap["spectrographid"]==int(self._header["SPEC"][-1])]
+
+            for block_idx in range(LVM_NBLOCKS):
+                select_block = slitmap["blockid"] == f"B{block_idx+1}"
+                y = y_pixels[select_block]
+                data = self._data[select_block]
+                mask = self._mask[select_block]
+
+                bad_fibers = mask.all(axis=1)
+                if bad_fibers.sum() == 0 or bad_fibers.sum() == LVM_BLOCKSIZE:
+                    continue
+
+                f_data = interpolate.interp1d(y[~bad_fibers], data[~bad_fibers], axis=0, bounds_error=False, fill_value="extrapolate")
+                self._data[select_block] = f_data(y)
+                if self._error is not None:
+                    error = self._error[select_block]
+                    f_error = interpolate.interp1d(y[~bad_fibers], error[~bad_fibers], axis=0, bounds_error=False, fill_value="extrapolate")
+                    self._error[select_block] = f_error(y)
+
+                # unmask interpolated fibers
+                if reset_mask:
+                    self._mask[select_block] = False
         elif axis == "X" or axis == "x" or axis == 1:
             for ifiber in y_pixels:
                 bad_pixels = (self._data[ifiber] <= 0) | (self._mask[ifiber, :])
