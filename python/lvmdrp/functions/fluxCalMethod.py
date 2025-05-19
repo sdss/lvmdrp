@@ -222,13 +222,15 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'STD', display_plo
     return fframe
 
 
-def standard_sensitivity(stds, rss, GAIA_CACHE_DIR, ext, res, plot=False, width=3):
+def standard_sensitivity(stds, rss, GAIA_CACHE_DIR, ext, res, plot=False, width=3, cutoff_freq=0.01):
     # load the sky masks
     channel = rss._header['CCD']
     w = rss._wave
 
     m = get_sky_mask_uves(w, width=width)
     m2 = None
+    # if channel == "r":
+    #     m2 = ~(((w>6563-80)&(w<6563+80))|((w>6850)&(w<6950)))
     if channel == "z":
         m2 = get_z_continuum_mask(w)
 
@@ -262,6 +264,16 @@ def standard_sensitivity(stds, rss, GAIA_CACHE_DIR, ext, res, plot=False, width=
 
         spec = (rss._data[fibidx[0],:] - master_sky._data[fibidx[0],:])/exptime  #TODO: check exptime?
 
+        # remove nans
+        # spec[(((w>6563-80)&(w<6563+80))|((w>6850)&(w<6950)))] = np.nan
+        # plt.figure()
+        # plt.plot(w, spec)
+
+        spec = fluxcal.interpolate_mask(w, spec, np.isnan(spec), fill_value="extrapolate")
+
+        # print(">>>>>>>>>>", w[(((w>6563-80)&(w<6563+80))|((w>6850)&(w<6950)))])
+
+
         # interpolate over bright sky lines
         spec = fluxcal.interpolate_mask(w, spec, m, fill_value="extrapolate")
         if channel == "z":
@@ -277,7 +289,13 @@ def standard_sensitivity(stds, rss, GAIA_CACHE_DIR, ext, res, plot=False, width=
 
         # divide to find sensitivity and smooth
         sens = stdflux / spec
-        wgood, sgood = fluxcal.filter_channel(w, sens, 2)
+        if channel == "r":
+            sens[(((w>6563-80)&(w<6563+80))|((w>6850)&(w<6950)))] = np.nan
+        if channel == "b":
+            sens[(((w>4860-50)&(w<4860+50))|((w>4340-50)&(w<4340+30)))] = np.nan
+        wgood, sgood = fluxcal.filter_channel(w, sens, 3, cutoff_freq=cutoff_freq)
+        # wgood = w[np.isfinite(sens)]
+        # sgood = sens[np.isfinite(sens)]
         s = interpolate.make_smoothing_spline(wgood, sgood, lam=1e4)
         res[f"STD{nn}SEN"] = s(w).astype(np.float32) * u.Unit("erg / (ct cm2)")
 
