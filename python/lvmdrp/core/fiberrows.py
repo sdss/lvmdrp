@@ -282,22 +282,22 @@ class FiberRows(Header, PositionTable):
         """
         if data_dim is not None:
             # create empty  data array and set number of fibers
-            self._data = numpy.zeros(data_dim, dtype=numpy.float32) + numpy.nan
+            self._data = numpy.full(data_dim, numpy.nan, dtype=numpy.float32)
             self._fibers = self._data.shape[0]
 
         if data_dim is not None:
             # create empty  error array
-            self._error = numpy.zeros(data_dim, dtype=numpy.float32) + numpy.nan
+            self._error = numpy.full(data_dim, numpy.nan, dtype=numpy.float32)
 
         if data_dim is not None:
             # create empty mask all pixel assigned bad
             self._mask = numpy.ones(data_dim, dtype="bool")
 
         if data_dim is not None and samples_columns is not None:
-            self._samples = Table(data=numpy.zeros((data_dim[0], len(samples_columns))) + numpy.nan, names=samples_columns)
+            self._samples = Table(data=numpy.full((data_dim[0], len(samples_columns)), numpy.nan), names=samples_columns)
 
         if data_dim is not None and poly_deg is not None:
-            self._coeffs = numpy.zeros((data_dim[0], poly_deg+1), dtype=numpy.float32)
+            self._coeffs = numpy.full((data_dim[0], poly_deg+1), numpy.nan, dtype=numpy.float32)
 
     def setFibers(self, fibers):
         """
@@ -502,7 +502,7 @@ class FiberRows(Header, PositionTable):
         elif isinstance(samples, numpy.ndarray) and columns is not None:
             self._samples = Table(data=samples, names=columns)
         elif columns is not None:
-            self._samples = Table(data=numpy.zeros((self._fibers, len(columns))) + numpy.nan, names=columns)
+            self._samples = Table(data=numpy.full((self._fibers, len(columns)), numpy.nan), names=columns)
         else:
             self._samples = None
 
@@ -800,22 +800,22 @@ class FiberRows(Header, PositionTable):
             minimum fraction of valid samples, by default 0.0 (no threshold)
         """
         pixels = numpy.arange(self._data.shape[1])
-        samples = self._samples.to_pandas().values
-        coeffs = numpy.zeros((self._data.shape[0], numpy.abs(deg) + 1))
+        _ = self._samples.to_pandas()
+        columns = _.columns.astype("int")
+        samples = _.values
+        coeffs = numpy.full((self._data.shape[0], numpy.abs(deg) + 1), numpy.nan)
         # iterate over each fiber
         pix_table = []
         poly_table = []
         poly_all_table = []
         for i in range(self._fibers):
-            good_pix = numpy.logical_not(self._mask[i, :])
-            n_goodpix = good_pix.sum()
-            if n_goodpix == 0:
+            good_sam = numpy.isfinite(samples[i, :])
+            n_goodsam = good_sam.sum()
+            if n_goodsam == 0:
                 continue
 
-            good_sam = numpy.isfinite(samples[i, :])
             nsamples = good_sam.size
-            n_goodsam = good_sam.sum()
-            can_fit = n_goodpix >= deg + 1
+            can_fit = n_goodsam >= deg + 1
             enough_samples = n_goodsam / nsamples > min_samples_frac
             if can_fit and enough_samples:
                 # select the polynomial class
@@ -823,9 +823,9 @@ class FiberRows(Header, PositionTable):
 
                 # try to fit
                 try:
-                    poly = poly_cls.fit(pixels[good_pix], self._data[i, good_pix], deg=deg)
-                    pix_table.extend(numpy.column_stack([pixels[good_pix], self._data[i, good_pix]]).tolist())
-                    poly_table.extend(numpy.column_stack([pixels[good_pix], poly(pixels[good_pix])]).tolist())
+                    poly = poly_cls.fit(columns[good_sam], samples[i, good_sam], deg=deg)
+                    pix_table.extend(numpy.column_stack([columns[good_sam], samples[i, good_sam]]).tolist())
+                    poly_table.extend(numpy.column_stack([pixels[columns], poly(pixels[columns])]).tolist())
                     poly_all_table.extend(numpy.column_stack([pixels, poly(pixels)]).tolist())
                 except numpy.linalg.LinAlgError as e:
                     warnings.warn(f'Fiber trace failure at fiber {i}: {e}')
@@ -840,7 +840,7 @@ class FiberRows(Header, PositionTable):
                 self._mask[i, :] = False
             else:
                 if not can_fit:
-                    warnings.warn(f"fiber {i} does not meet criterium: {n_goodpix = } >= {deg + 1 = }")
+                    warnings.warn(f"fiber {i} does not meet criterium: {n_goodsam = } >= {deg + 1 = }")
                 elif not enough_samples:
                     warnings.warn(f"fiber {i} does not meet criterium: {n_goodsam / nsamples = } > {min_samples_frac = }")
                 self._mask[i, :] = True
@@ -1052,9 +1052,13 @@ class FiberRows(Header, PositionTable):
         if pixels is None:
             pixels = self._pixels
 
-        self._data = numpy.zeros((self._fibers, pixels.size))
+        if self._data is None:
+            self._data = numpy.full((self._fibers, pixels.size), numpy.nan)
         for i in range(self._fibers):
-            poly = poly_cls(self._coeffs[i, :])
+            coeffs = self._coeffs[i, :]
+            if not numpy.isfinite(coeffs).all():
+                continue
+            poly = poly_cls(coeffs)
             self._data[i, :] = poly(pixels)
 
         return self._data

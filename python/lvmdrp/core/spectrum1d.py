@@ -3551,7 +3551,7 @@ class Spectrum1D(Header):
         params = self._parse_gaussians_params(counts, centroids, sigmas, to_fwhms=True)
         return gauss_multi, params
 
-    def fitMultiGauss_fixed_width(self, fwhms, centroids_guess, counts_range=[0.0,numpy.inf], centroids_range=[-3,+3], ftol=1e-3, xtol=1e-3, solver="trf"):
+    def fitMultiGauss_fixed_width(self, centroids_guess, fwhms, counts_range=[0.0,numpy.inf], centroids_range=[-3,+3], ftol=1e-3, xtol=1e-3, solver="trf"):
         sigmas = self._get_gaussians_sigmas(fwhms, ngaussians=centroids_guess.size)
         counts_guess, select = self._guess_gaussians_integral(centroids_guess, sigmas, return_pixels_selection=True)
         error = numpy.ones(self._dim, dtype=numpy.float32) if self._error is None else self._error
