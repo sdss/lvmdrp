@@ -3480,46 +3480,90 @@ class Spectrum1D(Header):
                 med_pos[i] = 0.0
         return offsets, med_pos
 
-    def fitMultiGauss(self, centres, init_fwhm, bounds=(-numpy.inf, numpy.inf), ftol=1e-3, xtol=1e-3):
+    def _guess_gaussians_integral(self, centroids, sigmas, nsigma=6, return_pixels_selection=False):
         fact = numpy.sqrt(2 * numpy.pi)
-        select = numpy.zeros(self._dim, dtype="bool")
-        flux_in = numpy.zeros(len(centres), dtype=numpy.float32)
-        sig_in = numpy.ones(len(centres), dtype=numpy.float32) * init_fwhm / 2.354
-        error = numpy.ones(self._dim, dtype=numpy.float32) if self._error is None else self._error
-        for i in range(len(centres)):
-            select_line = numpy.logical_and(
-                self._wave > centres[i] - 2 * init_fwhm,
-                self._wave < centres[i] + 2 * init_fwhm,
-            )
-            flux_in[i] = numpy.interp(centres[i], self._pixels, self._data) * fact * sig_in[i]
-            select = numpy.logical_or(select, select_line)
-        par = numpy.concatenate([flux_in, centres, sig_in])
-        gauss_multi = fit_profile.Gaussians(par)
-        gauss_multi.fit(self._wave[select], self._data[select], p0=par, sigma=error[select], bounds=bounds, ftol=ftol, xtol=xtol)
-        return gauss_multi, gauss_multi.getPar()
+        integrals = numpy.zeros(len(centroids), dtype=numpy.float32)
 
-    def fitMultiGauss_fixed_cent(self, centres, init_fwhm):
         select = numpy.zeros(self._dim, dtype="bool")
-        flux_in = numpy.zeros(len(centres), dtype=numpy.float32)
-        sig_in = numpy.ones_like(flux_in) * init_fwhm / 2.354
-        cent = numpy.zeros(len(centres), dtype=numpy.float32)
-        if self._error is not None:
-            error = self._error
-        else:
-            error = numpy.ones_like(self._dim, dtype=numpy.float32)
-        for i in range(len(centres)):
-            select_line = numpy.logical_and(
-                self._wave > centres[i] - 2 * init_fwhm,
-                self._wave < centres[i] + 2 * init_fwhm,
+        for i in range(len(centroids)):
+            select_ = numpy.logical_and(
+                self._wave > centroids[i] - nsigma * sigmas[i],
+                self._wave < centroids[i] + nsigma * sigmas[i],
             )
-            flux_in[i] = numpy.sum(self._data[select_line])
-            select = numpy.logical_or(select, select_line)
-            cent[i] = centres[i]
-        par = numpy.concatenate([sig_in, flux_in])
-        gauss_multi = fit_profile.Gaussians_width(par, args=cent)
-        gauss_multi.fit(self._wave[select], self._data[select], sigma=error[select])
-        params = numpy.split(gauss_multi.getPar(), 2)
-        params = numpy.concatenate([params[1], cent, params[0]])
+            integrals[i] = numpy.interp(centroids[i], self._pixels, self._data) * fact * sigmas[i]
+            select = numpy.logical_or(select, select_)
+        if return_pixels_selection:
+            return integrals, select
+        return integrals
+
+    def _get_gaussians_sigmas(self, fwhms, ngaussians):
+        if isinstance(fwhms, numpy.ndarray):
+            sigmas = fwhms / 2.354
+        elif isinstance(fwhms, (float, int)):
+            sigmas = numpy.ones(ngaussians, dtype=numpy.float32) * fwhms / 2.354
+        return sigmas
+
+    def _parse_gaussians_params(self, counts, centroids, sigmas, to_fwhms=True):
+        return numpy.concatenate([counts, centroids, sigmas * (2.354 if to_fwhms else 1.0)])
+
+    def _get_gaussians_boundaries(self, centroids, counts_range, centroids_range=None, fwhms_range=None, to_sigmas=True):
+        _ = numpy.ones_like(centroids)
+
+        bounds_lower = [_ * counts_range[0]]
+        bounds_upper = [_ * counts_range[1]]
+        if centroids_range is not None:
+            bounds_lower.append(centroids+centroids_range[0])
+            bounds_upper.append(centroids+centroids_range[1])
+        if fwhms_range is not None:
+            bounds_lower.append(_ * fwhms_range[0] / (2.354 if to_sigmas else 1.0))
+            bounds_upper.append(_ * fwhms_range[1] / (2.354 if to_sigmas else 1.0))
+
+        return [numpy.concatenate(bounds_lower), numpy.concatenate(bounds_upper)]
+
+    def fitMultiGauss(self, centroids_guess, fwhms_guess, counts_range=[0.0,numpy.inf], centroids_range=[-3,+3], fwhms_range=[1.0,3.5], ftol=1e-3, xtol=1e-3):
+        sigmas_guess = self._get_gaussians_sigmas(fwhms_guess, ngaussians=centroids_guess.size)
+        counts_guess, select = self._guess_gaussians_integral(centroids_guess, sigmas_guess, return_pixels_selection=True)
+        error = numpy.ones(self._dim, dtype=numpy.float32) if self._error is None else self._error
+
+        par = numpy.concatenate([counts_guess, centroids_guess, sigmas_guess])
+        bounds = self._get_gaussians_boundaries(centroids_guess, counts_range, centroids_range, fwhms_range, to_sigmas=True)
+
+        gauss_multi = fit_profile.Gaussians(par)
+        gauss_multi.fit(self._wave[select], self._data[select], sigma=error[select], bounds=bounds, ftol=ftol, xtol=xtol)
+
+        counts, centroids, sigmas = numpy.split(gauss_multi.getPar(), 3)
+        params = self._parse_gaussians_params(counts, centroids, sigmas, to_fwhms=True)
+
+        return gauss_multi, params
+
+    def fitMultiGauss_fixed_cent(self, centroids, fwhms_guess, counts_range=[0.0,numpy.inf], fwhms_range=[1.0,3.5], ftol=1e-3, xtol=1e-3):
+        sigmas_guess = self._get_gaussians_sigmas(fwhms_guess, ngaussians=centroids.size)
+        counts_guess, select = self._guess_gaussians_integral(centroids, sigmas_guess, return_pixels_selection=True)
+        error = numpy.ones(self._dim, dtype=numpy.float32) if self._error is None else self._error
+
+        par = numpy.concatenate([counts_guess, sigmas_guess])
+        bounds = self._get_gaussians_boundaries(centroids, counts_range, fwhms_range=fwhms_range, to_sigmas=True)
+
+        gauss_multi = fit_profile.Gaussians_width(par, args=centroids)
+        gauss_multi.fit(self._wave[select], self._data[select], sigma=error[select], bounds=bounds, ftol=ftol, xtol=xtol)
+
+        counts, sigmas = numpy.split(gauss_multi.getPar(), 2)
+        params = self._parse_gaussians_params(counts, centroids, sigmas, to_fwhms=True)
+        return gauss_multi, params
+
+    def fitMultiGauss_fixed_width(self, fwhms, centroids_guess, counts_range=[0.0,numpy.inf], centroids_range=[-3,+3], ftol=1e-3, xtol=1e-3):
+        sigmas = self._get_gaussians_sigmas(fwhms, ngaussians=centroids_guess.size)
+        counts_guess, select = self._guess_gaussians_integral(centroids_guess, sigmas, return_pixels_selection=True)
+        error = numpy.ones(self._dim, dtype=numpy.float32) if self._error is None else self._error
+
+        par = numpy.concatenate([counts_guess, centroids_guess])
+        bounds = self._get_gaussians_boundaries(centroids_guess, counts_range, centroids_range=centroids_range)
+
+        gauss_multi = fit_profile.Gaussians_cent(par, args=fwhms)
+        gauss_multi.fit(self._wave[select], self._data[select], sigma=error[select], bounds=bounds, ftol=ftol, xtol=xtol)
+
+        counts, centroids = numpy.split(gauss_multi.getPar(), 2)
+        params = self._parse_gaussians_params(counts, centroids, sigmas, to_fwhms=True)
         return gauss_multi, params
 
     def fitParFile(

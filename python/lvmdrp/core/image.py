@@ -2397,9 +2397,7 @@ class Image(Header):
                     iterator.set_description(f"fitting fibers ({cen_block.size:02d}/{msk_block.size:02d} good fibers)")
                     iterator.refresh()
                     # log.info(f"fitting fiber block {j+1}/{nblocks} ({cen_block.size}/{msk_block.size} good fibers)")
-                    bound_lower = numpy.array([0]*cen_block.size + (cen_block-max_diff).tolist() + [fwhm_range[0]/2.354]*cen_block.size)
-                    bound_upper = numpy.array([numpy.inf]*cen_block.size + (cen_block+max_diff).tolist() + [fwhm_range[1]/2.354]*cen_block.size)
-                    _, par_block[~par_mask] = img_slice.fitMultiGauss(cen_block, init_fwhm=fwhm_guess, bounds=(bound_lower, bound_upper))
+                    _, par_block[~par_mask] = img_slice.fitMultiGauss(centroids_guess=cen_block, fwhms_guess=fwhm_guess, centroids_range=[-max_diff,max_diff], fwhms_range=fwhm_range)
 
                 par_blocks.append(par_block)
 
@@ -2415,7 +2413,7 @@ class Image(Header):
             # get parameters of joint model
             amp_slice = par_joint[0]
             cent_slice = par_joint[1]
-            fwhm_slice = par_joint[2] * 2.354
+            fwhm_slice = par_joint[2]
 
             # mask fibers with invalid values
             amp_off = (amp_slice <= counts_threshold)
@@ -2543,9 +2541,7 @@ class Image(Header):
 
             # fit gaussian models to each fiber profile
             log.info(f"fitting fibers in column {i+1}/{ncolumns} ({cen_slice.size}/{msk_slice.size} selected fibers)")
-            bound_lower = numpy.array([0]*cen_slice.size + (cen_slice-max_diff).tolist() + [fwhm_range[0]/2.354]*cen_slice.size)
-            bound_upper = numpy.array([numpy.inf]*cen_slice.size + (cen_slice+max_diff).tolist() + [fwhm_range[1]/2.354]*cen_slice.size)
-            _, par_slice[~par_mask] = img_slice.fitMultiGauss(cen_slice, init_fwhm=fwhm_guess, bounds=(bound_lower, bound_upper))
+            _, par_slice[~par_mask] = img_slice.fitMultiGauss(centroids_guess=cen_slice, fwhms_guess=fwhm_guess, centroids_range=[-max_diff,max_diff], fwhms_range=fwhm_range)
 
             # define joint gaussian model
             mod_joint = Gaussians(par=par_slice)
@@ -2556,7 +2552,7 @@ class Image(Header):
             # get parameters of joint model
             amp_slice = par_slice[0]
             cent_slice = par_slice[1]
-            fwhm_slice = par_slice[2] * 2.354
+            fwhm_slice = par_slice[2]
 
             # mask fibers with invalid values
             amp_off = (amp_slice <= counts_threshold)
