@@ -269,7 +269,7 @@ class FiberRows(Header, PositionTable):
 
         return self.__class__(data=data, error=error, mask=mask)
 
-    def createEmpty(self, data_dim=None, poly_deg=None, samples_columns=None):
+    def createEmpty(self, data_dim, poly_deg=None, samples_columns=None, header=None, slitmap=None):
         """
         Fill the FiberRows object with empty data
 
@@ -280,24 +280,16 @@ class FiberRows(Header, PositionTable):
         poly_deg: int, optional with default: None
             Degree of the polynomial trace to be created
         """
-        if data_dim is not None:
-            # create empty  data array and set number of fibers
-            self._data = numpy.full(data_dim, numpy.nan, dtype=numpy.float32)
-            self._fibers = self._data.shape[0]
-
-        if data_dim is not None:
-            # create empty  error array
-            self._error = numpy.full(data_dim, numpy.nan, dtype=numpy.float32)
-
-        if data_dim is not None:
-            # create empty mask all pixel assigned bad
-            self._mask = numpy.ones(data_dim, dtype="bool")
-
-        if data_dim is not None and samples_columns is not None:
+        self._data = numpy.full(data_dim, numpy.nan, dtype=numpy.float32)
+        self._fibers = self._data.shape[0]
+        self._error = numpy.full(data_dim, numpy.nan, dtype=numpy.float32)
+        self._mask = numpy.ones(data_dim, dtype="bool")
+        if samples_columns is not None:
             self._samples = Table(data=numpy.full((data_dim[0], len(samples_columns)), numpy.nan), names=samples_columns)
-
-        if data_dim is not None and poly_deg is not None:
+        if poly_deg is not None:
             self._coeffs = numpy.full((data_dim[0], poly_deg+1), numpy.nan, dtype=numpy.float32)
+        self.setHeader(header)
+        self.setSlitmap(slitmap)
 
     def setFibers(self, fibers):
         """
