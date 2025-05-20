@@ -19,12 +19,13 @@ from scipy import ndimage
 from scipy import interpolate
 
 from lvmdrp import log
-from lvmdrp.core.constants import CON_LAMPS, ARC_LAMPS
+from lvmdrp.core.constants import CON_LAMPS, ARC_LAMPS, LVM_NBLOCKS
 from lvmdrp.core.plot import plt
 from lvmdrp.core.fit_profile import gaussians, Gaussians
 from lvmdrp.core.apertures import Apertures
 from lvmdrp.core.header import Header
 from lvmdrp.core.tracemask import TraceMask
+from lvmdrp.core.fiberrows import FiberRows
 from lvmdrp.core.spectrum1d import Spectrum1D, _normalize_peaks, _fiber_cc_match, _cross_match, _spec_from_lines, _align_fiber_blocks
 
 from lvmdrp.external.fast_median import fast_median_filter_2d
@@ -2332,6 +2333,105 @@ class Image(Header):
 
         return centroids
 
+    def _measure_block_fixed_cent(self, centroids, fwhms_guess, iblock, columns, counts_range=[0.0,numpy.inf], fwhms_range=[1.0,3.5], solver="trf"):
+        centroids_block = centroids.get_block(iblock=iblock)
+        if isinstance(fwhms_guess, (TraceMask, FiberRows)):
+            pass
+        elif isinstance(fwhms_guess, (int, float)):
+            _ = copy(centroids)
+            _._data[:] = fwhms_guess
+            _._mask[:] = False
+            _._error = None
+            fwhms_guess = _
+        else:
+            raise TypeError(f"Invalid type for `fwhms_guess`: {type(fwhms_guess)}. Expected either float/int or TraceMask")
+        fwhms_block = fwhms_guess.get_block(iblock=iblock)
+
+        counts_samples = numpy.full((centroids_block._fibers, columns.size), numpy.nan)
+        centroids_samples = numpy.full((centroids_block._fibers, columns.size), numpy.nan)
+        fwhms_samples = numpy.full((centroids_block._fibers, columns.size), numpy.nan)
+        iterator = tqdm(enumerate(columns), total=len(columns), desc=f"measuring fiber widths in block    {iblock+1}/{LVM_NBLOCKS}", ascii=True, unit="column")
+        for i, icolumn in iterator:
+            img_slice = self.getSlice(icolumn, axis="Y")
+            centroids_slice, _, _ = centroids_block.getSlice(icolumn, axis="Y")
+            fwhms_slice, _, _ = fwhms_block.getSlice(icolumn, axis="Y")
+
+            model_block, par_block = img_slice.fitMultiGauss_fixed_cent(centroids_slice, fwhms_slice, counts_range=counts_range, fwhms_range=fwhms_range, solver=solver)
+
+            counts, centroids, fwhms = numpy.split(par_block, 3)
+            counts_samples[:, i] = counts
+            centroids_samples[:, i] = centroids
+            fwhms_samples[:, i] = fwhms
+
+        return counts_samples, centroids_samples, fwhms_samples
+
+    def _measure_block_fixed_width(self, centroids_guess, fwhms, iblock, columns, counts_range=[0.0,numpy.inf], centroids_range=[-5,5], solver="trf"):
+        centroids_block = centroids_guess.get_block(iblock=iblock)
+        fwhms_block = fwhms.get_block(iblock=iblock)
+
+        counts_samples = numpy.full((centroids_block._fibers, columns.size), numpy.nan)
+        centroids_samples = numpy.full((centroids_block._fibers, columns.size), numpy.nan)
+        fwhms_samples = numpy.full((centroids_block._fibers, columns.size), numpy.nan)
+        iterator = tqdm(enumerate(columns), total=len(columns), desc=f"measuring fiber centroids in block {iblock+1}/{LVM_NBLOCKS}", ascii=True, unit="column")
+        for i, icolumn in iterator:
+            img_slice = self.getSlice(icolumn, axis="Y")
+            centroids_slice, _, _ = centroids_block.getSlice(icolumn, axis="Y")
+            fwhms_slice, _, _ = fwhms_block.getSlice(icolumn, axis="Y")
+
+            model_block, par_block = img_slice.fitMultiGauss_fixed_width(centroids_slice, fwhms_slice, counts_range=counts_range, centroids_range=centroids_range, solver=solver)
+
+            counts, centroids, fwhms = numpy.split(par_block, 3)
+            counts_samples[:, i] = counts
+            centroids_samples[:, i] = centroids
+            fwhms_samples[:, i] = fwhms
+
+        return counts_samples, centroids_samples, fwhms_samples
+
+    def iterative_block_trace(self, centroids_guess, fwhms_guess, iblock, columns,
+                              counts_range=[0.0,numpy.inf], centroids_range=[-5,5], fwhms_range=[1.0,3.5], solver="trf",
+                              centroids_deg=6, fwhms_deg=6, niter=10):
+        if isinstance(fwhms_guess, (TraceMask, FiberRows)):
+            pass
+        elif isinstance(fwhms_guess, (int, float)):
+            _ = copy(centroids_guess)
+            _._data[:] = fwhms_guess
+            _._mask[:] = False
+            _._error = None
+            fwhms_guess = _
+        else:
+            raise TypeError(f"Invalid type for `fwhms_guess`: {type(fwhms_guess)}. Expected either float/int or TraceMask")
+
+        centroids_trace = TraceMask()
+        centroids_trace.createEmpty(data_dim=(centroids_guess._fibers, self._dim[1]), samples_columns=sorted(set(columns)), header=self._header, slitmap=self._slitmap)
+        counts_trace = copy(centroids_trace)
+        fwhms_trace = copy(centroids_trace)
+        centroids_trace._header["IMAGETYP"] = "fiber_centroids"
+        counts_trace._header["IMAGETYP"] = "fiber_counts"
+        fwhms_trace._header["IMAGETYP"] = "fiber_fwhms"
+
+        centroids_trace.setData(data=centroids_guess._data, error=centroids_guess._error, mask=centroids_guess._mask)
+        fwhms_trace.setData(data=fwhms_guess._data, error=fwhms_guess._error, mask=fwhms_guess._mask)
+
+        i = 0
+        while i < niter:
+            counts_samples, centroids_samples, fwhms_samples = self._measure_block_fixed_cent(
+                centroids=centroids_trace, fwhms_guess=fwhms_trace, iblock=iblock, columns=columns, solver=solver)
+            # set tracemask objects and fit polynomials
+            fwhms_trace.set_block(iblock=iblock, samples=fwhms_samples)
+            fwhms_trace.fit_polynomial(deg=fwhms_deg)
+            counts_trace.set_block(iblock=iblock, samples=counts_samples)
+
+            counts_samples, centroids_samples, fwhms_samples = self._measure_block_fixed_width(
+                centroids_guess=centroids_trace, fwhms=fwhms_trace, iblock=iblock, columns=columns, solver=solver)
+            # set tracemask objects and fit polynomials
+            centroids_trace.set_block(iblock=iblock, samples=centroids_samples)
+            centroids_trace.fit_polynomial(deg=centroids_deg)
+            counts_trace.set_block(iblock=iblock, samples=counts_samples)
+
+            i += 1
+
+        return counts_trace, centroids_trace, fwhms_trace
+
     def trace_fibers_full(self, fiber_centroids, ref_column=2000, ncolumns=40, nblocks=18, iblocks=[],
                            fwhm_guess=2.5, fwhm_range=[1.0,3.5], max_diff=1.5, counts_threshold=5000, solver="trf"):
 
@@ -2408,7 +2508,7 @@ class Image(Header):
             centroids_samples[cent_mask] = numpy.nan
             fwhms_samples[fwhm_mask] = numpy.nan
 
-            # get tracemasks for this fiber block
+            # update tracemasks for this fiber block
             trace_amp.set_block(iblock=iblock, samples=counts_samples, mask=block_mask)
             trace_cent.set_block(iblock=iblock, samples=centroids_samples, mask=block_mask)
             trace_fwhm.set_block(iblock=iblock, samples=fwhms_samples, mask=block_mask)
