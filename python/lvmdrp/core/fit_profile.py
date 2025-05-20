@@ -316,7 +316,7 @@ class fit_profile1D(object):
         p0 = self.fix_guess(bounds)
         if method == "leastsq":
             model = optimize.least_squares(
-                self.res, x0=p0, bounds=bounds, args=(x, y, sigma), max_nfev=maxfev, ftol=ftol, xtol=xtol, method="dogbox"
+                self.res, x0=p0, bounds=bounds, args=(x, y, sigma), max_nfev=maxfev, ftol=ftol, xtol=xtol, method="trf"
             )
             self._par = model.x
 
