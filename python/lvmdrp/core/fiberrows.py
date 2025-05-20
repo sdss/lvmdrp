@@ -471,6 +471,17 @@ class FiberRows(Header, PositionTable):
             elif not hasattr(self, "_pixels"):
                 self._pixels = None
 
+    def _filter_slitmap(self):
+        if self._slitmap is None:
+                raise ValueError(f"Attribute `_slitmap` needs to be set: {self._slitmap = }")
+        if self._header is None:
+            raise ValueError(f"Attribute `_header` needs to be set: {self._header = }")
+
+        slitmap = self._slitmap
+        if self._fibers == LVM_NFIBERS:
+            slitmap = self._slitmap[self._slitmap["spectrographid"]==int(self._header["SPEC"][-1])]
+        return slitmap
+
     def getSlitmap(self):
         return self._slitmap
 
@@ -1110,12 +1121,7 @@ class FiberRows(Header, PositionTable):
 
         # interpolate data
         if axis == "Y" or axis == "y" or axis == 0:
-            if self._slitmap is None:
-                raise ValueError(f"Attribute `_slitmap` needs to be set: {self._slitmap = }")
-
-            slitmap = self._slitmap
-            if self._fibers == LVM_NFIBERS:
-                slitmap = self._slitmap[self._slitmap["spectrographid"]==int(self._header["SPEC"][-1])]
+            slitmap = self._filter_slitmap()
 
             for block_idx in range(LVM_NBLOCKS):
                 select_block = slitmap["blockid"] == f"B{block_idx+1}"

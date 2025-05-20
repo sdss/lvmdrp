@@ -3,6 +3,7 @@
 
 import os
 import numpy
+from copy import deepcopy as copy
 from astropy.io import fits as pyfits
 from astropy.table import Table
 from lvmdrp.core.fiberrows import FiberRows
@@ -87,6 +88,57 @@ class TraceMask(FiberRows):
             poly_kind,
             poly_deg
         )
+
+    def _validate_blockid(self, iblock, blockid, slitmap):
+        if blockid is not None:
+            pass
+        elif iblock is not None:
+            blockid = f"B{iblock+1}"
+        if blockid not in slitmap["blockid"]:
+            raise ValueError(f"Given {blockid = } not found in slitmap column `blockid`")
+        else:
+            raise ValueError(f"Either `iblock` or `blockid` needs to be given: {iblock = }, {blockid = }")
+
+        return blockid
+
+    def get_block(self, iblock=None, blockid=None):
+        slitmap = self._filter_slitmap()
+        blockid = self._validate_blockid(iblock, blockid, slitmap=slitmap)
+        block_selection = slitmap["blockid"] == blockid
+
+        new_trace = copy(self)
+        new_trace._data = self._data[block_selection]
+        new_trace._error = self._error[block_selection] if self._error is not None else None
+        new_trace._mask = self._mask[block_selection] if self._mask is not None else None
+        new_trace._samples = self._samples[block_selection] if self._samples is not None else None
+        new_trace.set_coeffs(self._coeffs[block_selection] if self._coeffs is not None else None, poly_kind=self._poly_kind)
+        new_trace.setFibers(block_selection.sum())
+
+        return new_trace
+
+    def set_block(self, data, iblock=None, blockid=None, error=None, mask=None, samples=None, coeffs=None, poly_kind=None):
+        slitmap = self._filter_slitmap()
+        blockid = self._validate_blockid(iblock, blockid, slitmap=slitmap)
+        block_selection = slitmap["block"] == blockid
+        nfibers = block_selection.sum()
+
+        if data.shape[0] != nfibers:
+            raise ValueError(f"Incompatible data shapes. Trying to set a block of {data.shape[0]} fibers to a selection of {nfibers}")
+
+        self._data[block_selection] = data
+        if error is not None and self._error is not None:
+            self._error[block_selection] = error
+        if mask is not None and self._error is not None:
+            self._mask[block_selection] = mask
+        if samples is not None and self._samples is not None:
+            self._samples[block_selection] = samples
+        if coeffs is not None and poly_kind is not None and self._coeffs is not None:
+            if self._poly_kind != poly_kind:
+                raise ValueError(f"Incompatible polynomial kinds. Trying to set {poly_kind} to a tracemask of {self._poly_kind}")
+            poly_deg = coeffs.shape[1] - 1
+            if self._poly_deg != poly_deg:
+                raise ValueError(f"Incompatible polynomial degree. Trying to set {poly_deg} to a tracemask of {self._poly_deg}")
+            self.set_coeffs(coeffs, poly_kind=poly_kind)
 
     def getRound(self):
         """
