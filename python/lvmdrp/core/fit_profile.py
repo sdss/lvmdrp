@@ -989,12 +989,24 @@ class Gaussians(fit_profile1D):
         fit_profile1D.__init__(self, par, self._profile)
 
 
+class Gaussians_cent(fit_profile1D):
+    def _profile(self, x):
+        y = numpy.zeros(len(x))
+        ncomp = len(self._args)
+        for i in range(ncomp):
+            y += self._par[i] * numpy.exp(-0.5 * ((x - self._par[i + ncomp]) / abs(self._args[i])) ** 2) / (fact * abs(self._args[i]))
+        return y
+
+    def __init__(self, par, args):
+        fit_profile1D.__init__(self, par, self._profile, args=args)
+
+
 class Gaussians_width(fit_profile1D):
     def _profile(self, x):
         y = numpy.zeros(len(x))
         ncomp = len(self._args)
         for i in range(ncomp):
-            y += self._par[i + ncomp] * numpy.exp(-0.5 * ((x - self._args[i]) / abs(self._par[i])) ** 2) / (fact * abs(self._par[i]))
+            y += self._par[i] * numpy.exp(-0.5 * ((x - self._args[i]) / abs(self._par[i + ncomp])) ** 2) / (fact * abs(self._par[i + ncomp]))
         return y
 
     def __init__(self, par, args):
