@@ -4618,7 +4618,7 @@ def trace_fibers(
     trace_fwhm = copy(centroids)
     trace_fwhm._header["IMAGETYP"] = "trace_fwhm"
 
-    trace_amp, trace_cent, trace_fwhm, columns, mod_columns, residuals = img.trace_fiber_widths(centroids, ref_column=LVM_REFERENCE_COLUMN,
+    trace_amp, trace_cent, trace_fwhm, columns, mod_columns, residuals = img.trace_fibers_full(centroids, ref_column=LVM_REFERENCE_COLUMN,
                                                                                                 ncolumns=ncolumns, nblocks=LVM_NBLOCKS, iblocks=iblocks,
                                                                                                 max_diff=max_diff,
                                                                                                 fwhm_guess=guess_fwhm, fwhm_range=fwhm_limits,
