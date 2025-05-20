@@ -3520,7 +3520,7 @@ class Spectrum1D(Header):
 
         return [numpy.concatenate(bounds_lower), numpy.concatenate(bounds_upper)]
 
-    def fitMultiGauss(self, centroids_guess, fwhms_guess, counts_range=[0.0,numpy.inf], centroids_range=[-3,+3], fwhms_range=[1.0,3.5], ftol=1e-3, xtol=1e-3):
+    def fitMultiGauss(self, centroids_guess, fwhms_guess, counts_range=[0.0,numpy.inf], centroids_range=[-3,+3], fwhms_range=[1.0,3.5], ftol=1e-3, xtol=1e-3, solver="trf"):
         sigmas_guess = self._get_gaussians_sigmas(fwhms_guess, ngaussians=centroids_guess.size)
         counts_guess, select = self._guess_gaussians_integral(centroids_guess, sigmas_guess, return_pixels_selection=True)
         error = numpy.ones(self._dim, dtype=numpy.float32) if self._error is None else self._error
@@ -3529,14 +3529,14 @@ class Spectrum1D(Header):
         bounds = self._get_gaussians_boundaries(centroids_guess, counts_range, centroids_range, fwhms_range, to_sigmas=True)
 
         gauss_multi = fit_profile.Gaussians(par)
-        gauss_multi.fit(self._wave[select], self._data[select], sigma=error[select], bounds=bounds, ftol=ftol, xtol=xtol)
+        gauss_multi.fit(self._wave[select], self._data[select], sigma=error[select], bounds=bounds, ftol=ftol, xtol=xtol, solver=solver)
 
         counts, centroids, sigmas = numpy.split(gauss_multi.getPar(), 3)
         params = self._parse_gaussians_params(counts, centroids, sigmas, to_fwhms=True)
 
         return gauss_multi, params
 
-    def fitMultiGauss_fixed_cent(self, centroids, fwhms_guess, counts_range=[0.0,numpy.inf], fwhms_range=[1.0,3.5], ftol=1e-3, xtol=1e-3):
+    def fitMultiGauss_fixed_cent(self, centroids, fwhms_guess, counts_range=[0.0,numpy.inf], fwhms_range=[1.0,3.5], ftol=1e-3, xtol=1e-3, solver="trf"):
         sigmas_guess = self._get_gaussians_sigmas(fwhms_guess, ngaussians=centroids.size)
         counts_guess, select = self._guess_gaussians_integral(centroids, sigmas_guess, return_pixels_selection=True)
         error = numpy.ones(self._dim, dtype=numpy.float32) if self._error is None else self._error
@@ -3545,13 +3545,13 @@ class Spectrum1D(Header):
         bounds = self._get_gaussians_boundaries(centroids, counts_range, fwhms_range=fwhms_range, to_sigmas=True)
 
         gauss_multi = fit_profile.Gaussians_width(par, args=centroids)
-        gauss_multi.fit(self._wave[select], self._data[select], sigma=error[select], bounds=bounds, ftol=ftol, xtol=xtol)
+        gauss_multi.fit(self._wave[select], self._data[select], sigma=error[select], bounds=bounds, ftol=ftol, xtol=xtol, solver=solver)
 
         counts, sigmas = numpy.split(gauss_multi.getPar(), 2)
         params = self._parse_gaussians_params(counts, centroids, sigmas, to_fwhms=True)
         return gauss_multi, params
 
-    def fitMultiGauss_fixed_width(self, fwhms, centroids_guess, counts_range=[0.0,numpy.inf], centroids_range=[-3,+3], ftol=1e-3, xtol=1e-3):
+    def fitMultiGauss_fixed_width(self, fwhms, centroids_guess, counts_range=[0.0,numpy.inf], centroids_range=[-3,+3], ftol=1e-3, xtol=1e-3, solver="trf"):
         sigmas = self._get_gaussians_sigmas(fwhms, ngaussians=centroids_guess.size)
         counts_guess, select = self._guess_gaussians_integral(centroids_guess, sigmas, return_pixels_selection=True)
         error = numpy.ones(self._dim, dtype=numpy.float32) if self._error is None else self._error
@@ -3560,7 +3560,7 @@ class Spectrum1D(Header):
         bounds = self._get_gaussians_boundaries(centroids_guess, counts_range, centroids_range=centroids_range)
 
         gauss_multi = fit_profile.Gaussians_cent(par, args=fwhms)
-        gauss_multi.fit(self._wave[select], self._data[select], sigma=error[select], bounds=bounds, ftol=ftol, xtol=xtol)
+        gauss_multi.fit(self._wave[select], self._data[select], sigma=error[select], bounds=bounds, ftol=ftol, xtol=xtol, solver=solver)
 
         counts, centroids = numpy.split(gauss_multi.getPar(), 2)
         params = self._parse_gaussians_params(counts, centroids, sigmas, to_fwhms=True)

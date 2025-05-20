@@ -306,6 +306,7 @@ class fit_profile1D(object):
         err_sim=0,
         warning=True,
         method="leastsq",
+        solver="trf",
         parallel="auto",
     ):
         if numpy.isnan(sigma).any():
@@ -315,9 +316,7 @@ class fit_profile1D(object):
         perr_init = copy(self)
         p0 = self.fix_guess(bounds)
         if method == "leastsq":
-            model = optimize.least_squares(
-                self.res, x0=p0, bounds=bounds, args=(x, y, sigma), max_nfev=maxfev, ftol=ftol, xtol=xtol, method="trf"
-            )
+            model = optimize.least_squares(self.res, x0=p0, bounds=bounds, args=(x, y, sigma), max_nfev=maxfev, ftol=ftol, xtol=xtol, method=solver)
             self._par = model.x
 
             mask = model.active_mask!=0
