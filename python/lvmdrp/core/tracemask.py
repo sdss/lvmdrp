@@ -94,10 +94,10 @@ class TraceMask(FiberRows):
             pass
         elif iblock is not None:
             blockid = f"B{iblock+1}"
-        if blockid not in slitmap["blockid"]:
-            raise ValueError(f"Given {blockid = } not found in slitmap column `blockid`")
         else:
             raise ValueError(f"Either `iblock` or `blockid` needs to be given: {iblock = }, {blockid = }")
+        if blockid not in slitmap["blockid"]:
+            raise ValueError(f"Given {blockid = } not found in slitmap column `blockid`")
 
         return blockid
 
@@ -116,22 +116,23 @@ class TraceMask(FiberRows):
 
         return new_trace
 
-    def set_block(self, data, iblock=None, blockid=None, error=None, mask=None, samples=None, coeffs=None, poly_kind=None):
+    def set_block(self, data=None, iblock=None, blockid=None, error=None, mask=None, samples=None, coeffs=None, poly_kind=None):
         slitmap = self._filter_slitmap()
         blockid = self._validate_blockid(iblock, blockid, slitmap=slitmap)
-        block_selection = slitmap["block"] == blockid
+        block_selection = slitmap["blockid"] == blockid
         nfibers = block_selection.sum()
 
-        if data.shape[0] != nfibers:
-            raise ValueError(f"Incompatible data shapes. Trying to set a block of {data.shape[0]} fibers to a selection of {nfibers}")
-
-        self._data[block_selection] = data
+        if data is not None:
+            if data.shape[0] != nfibers:
+                raise ValueError(f"Incompatible data shapes. Trying to set a block of {data.shape[0]} fibers to a selection of {nfibers}")
+            self._data[block_selection] = data
         if error is not None and self._error is not None:
             self._error[block_selection] = error
         if mask is not None and self._error is not None:
             self._mask[block_selection] = mask
         if samples is not None and self._samples is not None:
-            self._samples[block_selection] = samples
+            for i, column in enumerate(self._samples.colnames):
+                self._samples[column][block_selection] = samples[:, i]
         if coeffs is not None and poly_kind is not None and self._coeffs is not None:
             if self._poly_kind != poly_kind:
                 raise ValueError(f"Incompatible polynomial kinds. Trying to set {poly_kind} to a tracemask of {self._poly_kind}")
