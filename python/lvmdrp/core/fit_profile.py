@@ -1003,25 +1003,21 @@ class Gaussians_cent(fit_profile1D):
 class Gaussians_width(fit_profile1D):
     def _profile(self, x):
         y = numpy.zeros(len(x))
-        ncomp = len(self._args)
+        ncomp = len(self._par)
         for i in range(ncomp):
-            y += self._par[i] * numpy.exp(-0.5 * ((x - self._args[i]) / abs(self._par[i + ncomp])) ** 2) / (fact * abs(self._par[i + ncomp]))
+            y += self._args[i] * numpy.exp(-0.5 * ((x - self._args[i + ncomp]) / abs(self._par[i])) ** 2) / (fact * abs(self._par[i]))
         return y
 
     def __init__(self, par, args):
         fit_profile1D.__init__(self, par, self._profile, args=args)
 
 
-class Gaussians_flux(fit_profile1D):
+class Gaussians_counts(fit_profile1D):
     def _profile(self, x):
         y = numpy.zeros(len(x))
         ncomp = len(self._par)
         for i in range(ncomp):
-            y += (
-                self._par[i]
-                * numpy.exp(-0.5 * ((x - self._args[0]) / self._args[1]) ** 2)
-                / (fact * self._args[1])
-            )
+            y += self._par[i] * numpy.exp(-0.5 * ((x - self._args[i]) / self._args[i + ncomp]) ** 2) / (fact * self._args[i + ncomp])
         return y
 
     def __init__(self, par, args):
