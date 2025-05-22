@@ -2348,7 +2348,7 @@ class Image(Header):
             raise TypeError(f"Invalid type for `fwhms_guess`: {type(fwhms)}. Expected either float/int or TraceMask")
         return fwhms
 
-    def _measure_block_fixed_counts(self, counts, centroids, fwhms_guess, iblock, columns, fwhms_range=[-1.5,1.5], solver="trf", ax=None):
+    def _measure_block_fixed_counts(self, counts, centroids, fwhms_guess, iblock, columns, fwhms_range=[1.0,3.5], solver="trf", ax=None):
         counts_block = counts.get_block(iblock=iblock)
         centroids_block = centroids.get_block(iblock=iblock)
         fwhms_block = fwhms_guess.get_block(iblock=iblock)
@@ -2415,9 +2415,7 @@ class Image(Header):
             upper = (centroids_slice + 6*fwhms_slice).max()
             pixels_selection = (lower <= img_slice._pixels) & (img_slice._pixels <= upper)
 
-            model_block, par_block = img_slice.fitMultiGauss_fixed_width(
-                pixels_selection, counts_slice, centroids_slice, fwhms_slice,
-                counts_range=[-abs(counts_range[0]-counts_slice), counts_range[1]], solver=solver)
+            model_block, par_block = img_slice.fitMultiGauss_fixed_width(pixels_selection, counts_slice, centroids_slice, fwhms_slice, counts_range=counts_range, solver=solver)
 
             pixels, data, errors = img_slice._pixels[pixels_selection], img_slice._data[pixels_selection], img_slice._error[pixels_selection]
             model = model_block(pixels)
@@ -2444,7 +2442,7 @@ class Image(Header):
         return counts_samples, centroids_samples, fwhms_samples
 
     def iterative_block_trace(self, counts_guess, centroids, fwhms_guess, iblock, columns,
-                              counts_range=[1e3,2e5], fwhms_range=[-0.5,0.5], solver="trf",
+                              counts_range=[1e3,numpy.inf], fwhms_range=[1.0,3.5], solver="trf",
                               counts_smoothing=1.0, fwhms_smoothing=0.1, niter=10):
 
         # fwhms_guess = self._get_fwhms_trace(fwhms=fwhms_guess)
@@ -2524,7 +2522,7 @@ class Image(Header):
 
         return counts_trace, centroids, fwhms_trace
 
-    def trace_fibers_full(self, centroids_guess, fwhms_guess=2.5, centroids_range=[-5,5], fwhms_range=[-1.5,1.5], counts_range=[1000,numpy.inf],
+    def trace_fibers_full(self, centroids_guess, fwhms_guess=2.5, centroids_range=[-5,5], fwhms_range=[1.0,3.5], counts_range=[1e3,numpy.inf],
                           ref_column=2000, ncolumns=40, nblocks=18, iblocks=[], solver="trf"):
 
         if self._header is None:
@@ -2575,7 +2573,7 @@ class Image(Header):
 
                 model_block, par_block = img_slice.fitMultiGauss(
                     pixels_selection, counts_guess=counts_slice, centroids_guess=centroids_slice, fwhms_guess=fwhms_slice,
-                    counts_range=[-abs(counts_slice-counts_range[0]),abs(counts_slice-counts_range[1])], centroids_range=centroids_range, fwhms_range=fwhms_range, solver=solver)
+                    counts_range=counts_range, centroids_range=centroids_range, fwhms_range=fwhms_range, solver=solver)
 
                 counts, centroids, fwhms = numpy.split(par_block, 3)
                 counts_samples[:, i] = counts
