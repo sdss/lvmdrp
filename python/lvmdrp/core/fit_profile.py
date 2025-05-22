@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 from copy import deepcopy as copy
-from multiprocessing import Pool, cpu_count
+import warnings
 import itertools
 
 from lvmdrp.core.plot import plt, plot_gradient_fit, plot_radial_gradient_fit
@@ -303,159 +303,49 @@ class fit_profile1D(object):
         ftol=1e-8,
         xtol=1e-8,
         maxfev=9999,
-        err_sim=0,
-        warning=True,
-        method="leastsq",
-        solver="trf",
-        parallel="auto",
+        solver="trf"
     ):
         if numpy.isnan(sigma).any():
             raise ValueError(f"Errors have non-valid values: {sigma}")
         if p0 is None and p0 is not False and self._guess_par is not None:
             self._guess_par(x, y)
-        perr_init = copy(self)
+
         p0 = self.fix_guess(bounds)
-        if method == "leastsq":
+        m, n = len(x), len(p0)
+
+        try:
             model = optimize.least_squares(self.res, x0=p0, bounds=bounds, args=(x, y, sigma), max_nfev=maxfev, ftol=ftol, xtol=xtol, method=solver)
-            self._par = model.x
+        except Exception as e:
+            warnings.warn(f"{e}")
+            warnings.warn("data points:")
+            warnings.warn(f"  {x = }")
+            warnings.warn(f"  {y = }")
+            warnings.warn("current parameters:")
+            warnings.warn(f"  guess       = {p0}")
+            warnings.warn(f"  lower bound = {bounds[0]}")
+            warnings.warn(f"  upper bound = {bounds[1]}")
+            self._par = numpy.full(n, numpy.nan)
+            self._cov = numpy.full((m,n), numpy.nan)
+            self._err = numpy.full(n, numpy.nan)
+            self._mask = numpy.ones(self._par.size, dtype="bool")
+            return
 
-            mask = model.active_mask!=0
-            # for i in range(self._par.size):
-            #     mask |= (self._par[i]<=bounds[0][i])|(self._par[i]>=bounds[1][i])
-            self._par[mask] = numpy.nan
-        if method == "simplex":
+        self._par = model.x
+        try:
+            self._cov = numpy.linalg.inv(model.jac.T @ model.jac)
+        except numpy.linalg.LinAlgError:# as e:
+            # warnings.warn(f"while calculating covariance matrix: {e}. Trying numpy.linalg.pinv")
             try:
-                model = optimize.fmin(
-                    self.residuum,
-                    p0,
-                    (x, y, sigma),
-                    ftol=ftol,
-                    xtol=xtol,
-                    disp=0,
-                    full_output=0,
-                    warning=warning,
-                )
-                # model = optimize.leastsq(self.res, p0, (x, y, sigma), None, 0, 0, ftol, xtol, 0.0, maxfev, 0.0, 100.0, None, warning)
-            except TypeError:
-                model = optimize.fmin(
-                    self.residuum,
-                    p0,
-                    (x, y, sigma),
-                    ftol=ftol,
-                    xtol=xtol,
-                    disp=0,
-                    full_output=0,
-                )
-            self._par = model
-            # model = optimize.leastsq(self.res, p0, (x, y, sigma),None, 0, 0, ftol, xtol, 0.0, maxfev, 0.0, 100.0, None)
+                self._cov = numpy.linalg.pinv(model.jac.T @ model.jac)
+            except Exception as e:
+                warnings.warn(f"while calculating variance with numpy.linalg.pinv: {e}")
+                self._cov = numpy.full((m,n), numpy.nan)
 
-        if err_sim != 0:
-            if parallel == "auto":
-                cpus = cpu_count()
-            else:
-                cpus = int(parallel)
-            self._par_err_models = numpy.zeros(
-                (err_sim, len(self._par)), dtype=numpy.float32
-            )
-            if cpus > 1:
-                pool = Pool(processes=cpus)
-                results = []
-                for i in range(err_sim):
-                    perr = copy(perr_init)
-                    if method == "leastsq":
-                        results.append(
-                            pool.apply_async(
-                                optimize.leastsq,
-                                args=(
-                                    perr.res,
-                                    perr._par,
-                                    (x, numpy.random.normal(y, sigma), sigma),
-                                    None,
-                                    0,
-                                    0,
-                                    ftol,
-                                    xtol,
-                                    0.0,
-                                    maxfev,
-                                    0.0,
-                                    100,
-                                    None,
-                                ),
-                            )
-                        )
-                    if method == "simplex":
-                        results.append(
-                            pool.apply_async(
-                                optimize.fmin,
-                                args=(
-                                    perr.residuum,
-                                    perr._par,
-                                    (x, numpy.random.normal(y, sigma), sigma),
-                                    xtol,
-                                    ftol,
-                                    maxfev,
-                                    None,
-                                    0,
-                                    0,
-                                    0,
-                                ),
-                            )
-                        )
-                pool.close()
-                pool.join()
-                for i in range(err_sim):
-                    if method == "leastsq":
-                        self._par_err_models[i, :] = results[i].get()[0]
-                    elif method == "simplex":
-                        self._par_err_models[i, :] = results[i].get()
-            else:
-                for i in range(err_sim):
-                    perr = copy(perr_init)
-                    if method == "leastsq":
-                        try:
-                            model_err = optimize.leastsq(
-                                perr.res,
-                                perr._par,
-                                (x, numpy.random.normal(y, sigma), sigma),
-                                maxfev=maxfev,
-                                ftol=ftol,
-                                xtol=xtol,
-                            )
-                        except TypeError:
-                            model_err = optimize.leastsq(
-                                perr.res,
-                                perr._par,
-                                (x, numpy.random.normal(y, sigma), sigma),
-                                maxfev=maxfev,
-                                ftol=ftol,
-                                xtol=xtol,
-                            )
-                        self._par_err_models[i, :] = model_err[0]
-                    if method == "simplex":
-                        try:
-                            model_err = optimize.fmin(
-                                perr.residuum,
-                                perr._par,
-                                (x, numpy.random.normal(y, sigma), sigma),
-                                disp=0,
-                                ftol=ftol,
-                                xtol=xtol,
-                                warning=warning,
-                            )
-                        except TypeError:
-                            model_err = optimize.fmin(
-                                perr.residuum,
-                                perr._par,
-                                (x, numpy.random.normal(y, sigma), sigma),
-                                disp=0,
-                                ftol=ftol,
-                                xtol=xtol,
-                            )
-                        self._par_err_models[i, :] = model_err
+        self._err = numpy.sqrt(numpy.diag(self._cov))
 
-                self._par_err = numpy.std(self._par_err_models, 0)
-        else:
-            self._par_err = None
+        self._mask = model.active_mask!=0
+        self._par[self._mask] = numpy.nan
+        self._err[self._mask] = numpy.nan
 
     def plot(self, x, y=None, mask=None, ax=None):
         if ax is None:
