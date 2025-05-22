@@ -7,7 +7,6 @@ import warnings
 
 import bottleneck as bn
 from lvmdrp import log
-from scipy import optimize
 from astropy.table import Table
 
 from lvmdrp.core.constants import LVM_NBLOCKS, LVM_BLOCKSIZE, LVM_NFIBERS
@@ -713,7 +712,7 @@ class FiberRows(Header, PositionTable):
             combined_hdr = combineHdr([self, rows])
             self.setHeader(combined_hdr._header)
 
-    def fit_spline(self, degree=3, nknots=5, knots=None, smoothing=None, weights=None, constraints=None, clip=None):
+    def fit_spline(self, deg=3, nknots=5, knots=None, smoothing=None, weights=None, clip=None, min_samples_frac=0.0):
         """
         smooths the traces along the dispersion direction with a spline function for each individual fiber
 
@@ -743,36 +742,52 @@ class FiberRows(Header, PositionTable):
         else:
             knots = None
 
-        self._coeffs = numpy.zeros(self._data.shape[0], dtype=object)
+        _ = self._samples.to_pandas()
+        columns = _.columns.astype("int")
+        samples = _.values
+        coeffs = numpy.full(self._data.shape[0], numpy.nan, dtype=object)
 
         pix_table = []
         poly_table = []
         poly_all_table = []
         for i in range(self._fibers):
-            good_pix = numpy.logical_not(self._mask[i, :])
-            if numpy.sum(good_pix) >= nknots + 1:
-                pixels_, data_ = pixels[good_pix], self._data[i, good_pix]
-                (t0, c0, k) = _guess_spline(pixels_, data_, k=degree, s=smoothing, w=weights)
+            good_sam = numpy.isfinite(samples[i, :])
+            n_goodsam = good_sam.sum()
+            if n_goodsam == 0:
+                continue
+
+            nsamples = good_sam.size
+            can_fit = n_goodsam >= deg + 1
+            enough_samples = n_goodsam / nsamples > min_samples_frac
+            if can_fit and enough_samples:
+
+                # try to fit
                 try:
-                    opt = optimize.minimize(_residual_spline, (t0, c0), (pixels_, data_, k, weights), constraints=constraints)
-                    t, c = opt.x
-                    tck = (t, c, k)
-                    pix_table.extend(numpy.column_stack([pixels_, data_]).tolist())
-                    poly_table.extend(numpy.column_stack([pixels_, interpolate.splev(pixels_, tck)]).tolist())
+                    tck = interpolate.splrep(columns[good_sam], samples[i, good_sam], s=smoothing)
+
+                    pix_table.extend(numpy.column_stack([columns[good_sam], samples[i, good_sam]]).tolist())
+                    poly_table.extend(numpy.column_stack([pixels[columns], interpolate.splev(pixels[columns], tck)]).tolist())
                     poly_all_table.extend(numpy.column_stack([pixels, interpolate.splev(pixels, tck)]).tolist())
-                except ValueError as e:
-                    log.error(f'Fiber trace failure at fiber {i}: {e}')
+                except Exception as e:
+                    warnings.warn(f'Fiber trace failure at fiber {i}: {e}')
                     self._mask[i, :] = True
                     continue
 
-                self._coeffs[i] = tck
+                coeffs[i] = tck
                 self._data[i, :] = interpolate.splev(pixels, tck)
 
                 if clip is not None:
                     self._data = numpy.clip(self._data, clip[0], clip[1])
                 self._mask[i, :] = False
             else:
+                if not can_fit:
+                    warnings.warn(f"fiber {i} does not meet criterium: {n_goodsam = } >= {deg + 1 = }")
+                elif not enough_samples:
+                    warnings.warn(f"fiber {i} does not meet criterium: {n_goodsam / nsamples = } > {min_samples_frac = }")
                 self._mask[i, :] = True
+
+        # TODO: port existing code to deal with tck objects as tables
+        self._coeffs = coeffs
 
         return numpy.asarray(pix_table), numpy.asarray(poly_table), numpy.asarray(poly_all_table)
 
