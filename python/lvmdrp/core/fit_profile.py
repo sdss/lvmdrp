@@ -313,13 +313,22 @@ class fit_profile1D(object):
         p0 = self.fix_guess(bounds)
         m, n = len(x), len(p0)
 
+        if any(numpy.isnan(p0)):
+            raise ValueError(f"Invalid values in guess parameters:\n  {p0}")
+        if any(numpy.isnan(bounds[0])):
+            raise ValueError(f"Invalid values in lower bounds:\n  {bounds[0]}")
+        if any(numpy.isnan(bounds[1])):
+            raise ValueError(f"Invalid values in lower bounds:\n  {bounds[1]}")
+
         try:
             model = optimize.least_squares(self.res, x0=p0, bounds=bounds, args=(x, y, sigma), max_nfev=maxfev, ftol=ftol, xtol=xtol, method=solver)
         except Exception as e:
             warnings.warn(f"{e}")
             warnings.warn("data points:")
-            warnings.warn(f"  {x = }")
-            warnings.warn(f"  {y = }")
+            warnings.warn(f"  {x       = }")
+            warnings.warn(f"  {y       = }")
+            warnings.warn(f"  {sigma   = }")
+            warnings.warn(f"  {self(x) = }")
             warnings.warn("current parameters:")
             warnings.warn(f"  guess       = {p0}")
             warnings.warn(f"  lower bound = {bounds[0]}")
@@ -868,11 +877,8 @@ class Gaussian_poly(fit_profile1D):
 
 class Gaussians(fit_profile1D):
     def _profile(self, x):
-        ncomp = len(self._par) // 3
-        y = numpy.zeros((ncomp, len(x)), dtype=numpy.float32)
-        for i in range(ncomp):
-            y[i] = self._par[i] * numpy.exp(-0.5 * ((x - self._par[i + ncomp]) / abs(self._par[i + 2 * ncomp])) ** 2) / (fact * abs(self._par[i + 2 * ncomp]))
-        return bn.nansum(y, axis=0)
+        pars = numpy.split(self._par, 3)
+        return gaussians(pars, x)
 
     def __init__(self, par):
         fit_profile1D.__init__(self, par, self._profile)
@@ -880,11 +886,9 @@ class Gaussians(fit_profile1D):
 
 class Gaussians_cent(fit_profile1D):
     def _profile(self, x):
-        y = numpy.zeros(len(x))
-        ncomp = len(self._args)
-        for i in range(ncomp):
-            y += self._par[i] * numpy.exp(-0.5 * ((x - self._par[i + ncomp]) / abs(self._args[i])) ** 2) / (fact * abs(self._args[i]))
-        return y
+        pars = numpy.split(self._par, 2)
+        pars = [pars[0], pars[1], self._args]
+        return gaussians(pars, x)
 
     def __init__(self, par, args):
         fit_profile1D.__init__(self, par, self._profile, args=args)
@@ -892,11 +896,9 @@ class Gaussians_cent(fit_profile1D):
 
 class Gaussians_width(fit_profile1D):
     def _profile(self, x):
-        y = numpy.zeros(len(x))
-        ncomp = len(self._par)
-        for i in range(ncomp):
-            y += self._args[i] * numpy.exp(-0.5 * ((x - self._args[i + ncomp]) / abs(self._par[i])) ** 2) / (fact * abs(self._par[i]))
-        return y
+        args = numpy.split(self._args, 2)
+        pars = [args[0], args[1], self._par]
+        return gaussians(pars, x)
 
     def __init__(self, par, args):
         fit_profile1D.__init__(self, par, self._profile, args=args)
@@ -904,11 +906,9 @@ class Gaussians_width(fit_profile1D):
 
 class Gaussians_counts(fit_profile1D):
     def _profile(self, x):
-        y = numpy.zeros(len(x))
-        ncomp = len(self._par)
-        for i in range(ncomp):
-            y += self._par[i] * numpy.exp(-0.5 * ((x - self._args[i]) / self._args[i + ncomp]) ** 2) / (fact * self._args[i + ncomp])
-        return y
+        args = numpy.split(self._args, 2)
+        pars = [self._par, args[0], args[1]]
+        return gaussians(pars, x)
 
     def __init__(self, par, args):
         fit_profile1D.__init__(self, par, self._profile, args=args)
