@@ -2,6 +2,7 @@ from copy import deepcopy as copy
 from multiprocessing import Pool, cpu_count
 import warnings
 
+from mpl_toolkits.axes_grid1.axes_divider import make_axes_locatable
 from functools import partial
 from typing import List
 from tqdm import tqdm
@@ -2355,7 +2356,7 @@ class Image(Header):
         counts_samples = numpy.full((centroids_block._fibers, columns.size), numpy.nan)
         centroids_samples = numpy.full((centroids_block._fibers, columns.size), numpy.nan)
         fwhms_samples = numpy.full((centroids_block._fibers, columns.size), numpy.nan)
-        iterator = tqdm(enumerate(columns), total=len(columns), desc=f"measuring fiber widths in block    {iblock+1}/{LVM_NBLOCKS}", ascii=True, unit="column")
+        iterator = tqdm(enumerate(columns), total=len(columns), desc=f"measuring fiber widths in block {iblock+1}/{LVM_NBLOCKS}", ascii=True, unit="column")
 
         residuals = []
         for i, icolumn in iterator:
@@ -2403,7 +2404,7 @@ class Image(Header):
         fwhms_samples = numpy.full((centroids_block._fibers, columns.size), numpy.nan)
         iterator = tqdm(enumerate(columns), total=len(columns), desc=f"measuring fiber counts in block {iblock+1}/{LVM_NBLOCKS}", ascii=True, unit="column")
 
-        residuals = []
+        residuals, weights = [], []
         for i, icolumn in iterator:
             img_slice = self.getSlice(icolumn, axis="Y")
             counts_slice, _, _ = counts_block.getSlice(icolumn, axis="Y")
@@ -2416,11 +2417,12 @@ class Image(Header):
 
             model_block, par_block = img_slice.fitMultiGauss_fixed_width(
                 pixels_selection, counts_slice, centroids_slice, fwhms_slice,
-                counts_range=[-abs(1000-counts_slice), numpy.inf], solver=solver)
+                counts_range=[-abs(counts_range[0]-counts_slice), counts_range[1]], solver=solver)
 
             pixels, data, errors = img_slice._pixels[pixels_selection], img_slice._data[pixels_selection], img_slice._error[pixels_selection]
             model = model_block(pixels)
             residuals.append((model - data) / errors)
+            weights.append(1 / errors)
 
             counts, centroids, fwhms = numpy.split(par_block, 3)
             counts_samples[:, i] = counts
@@ -2428,7 +2430,7 @@ class Image(Header):
             fwhms_samples[:, i] = fwhms
 
         if ax is not None:
-            ax.hist(numpy.concatenate(residuals), bins=1000)
+            ax.hist(numpy.concatenate(residuals), weights=numpy.concatenate(weights), bins=1000)
             ax.set_title(f"blockid = B{iblock+1}", fontsize="large", loc="left")
             ax.set_ylabel("Frequency", fontsize="large")
             ax.set_ylabel("(model - data) / error", fontsize="large")
@@ -2442,34 +2444,81 @@ class Image(Header):
         return counts_samples, centroids_samples, fwhms_samples
 
     def iterative_block_trace(self, counts_guess, centroids, fwhms_guess, iblock, columns,
-                              counts_range=[0.0,numpy.inf], centroids_range=[-5,5], fwhms_range=[-1.5,1.5], solver="trf",
-                              fwhms_deg=6, niter=10):
+                              counts_range=[1e3,2e5], fwhms_range=[-0.5,0.5], solver="trf",
+                              counts_smoothing=1.0, fwhms_smoothing=0.1, niter=10):
 
-        fwhms_guess = self._get_fwhms_trace(fwhms=fwhms_guess)
+        # fwhms_guess = self._get_fwhms_trace(fwhms=fwhms_guess)
+        unit = self._header["BUNIT"]
 
         counts_trace = copy(counts_guess)
         counts_trace.setData(data=counts_guess._data, error=counts_guess._error, mask=counts_guess._mask)
         counts_trace.set_samples(samples=numpy.full((counts_trace._fibers,columns.size), numpy.nan), columns=columns)
+        counts_trace._coeffs = None
 
         fwhms_trace = copy(fwhms_guess)
         fwhms_trace.setData(data=fwhms_guess._data, error=fwhms_guess._error, mask=fwhms_guess._mask)
         fwhms_trace.set_samples(samples=numpy.full((fwhms_trace._fibers,columns.size), numpy.nan), columns=columns)
+        fwhms_trace._coeffs = None
+
+        fig_counts, axs_counts = plt.subplots(niter, 1, figsize=(15,3*niter), sharex=True, layout="tight")
+        axs_counts = numpy.atleast_1d(axs_counts)
+        fig_counts.suptitle(f"Iterative Counts Fitting for Block ID = B{iblock+1}", fontsize="x-large")
+        fig_counts.supxlabel("X (pixel)", fontsize="large")
+        fig_counts.supylabel(f"Counts ({unit})", fontsize="large")
+
+        fig_fwhms, axs_fwhms = plt.subplots(niter, 1, figsize=(15,3*niter), sharex=True, layout="tight")
+        axs_fwhms = numpy.atleast_1d(axs_fwhms)
+        fig_fwhms.suptitle(f"Iterative FWHMs Fitting for Block ID = B{iblock+1}", fontsize="x-large")
+        fig_fwhms.supxlabel("X (pixel)", fontsize="large")
+        fig_fwhms.supylabel("FWHM (pixel)", fontsize="large")
 
         i = 0
         log.info(f"iterating fiber measurements of counts and widths for block {iblock+1}:")
         while i < niter:
             log.info(f"   iteration {i+1:3d}/{niter}")
-            counts_samples, centroids_samples, fwhms_samples = self._measure_block_fixed_width(
-                counts_guess=counts_guess, centroids=centroids, fwhms=fwhms_trace, iblock=iblock, columns=columns, solver=solver)
-            # set tracemask objects and fit polynomials
-            counts_trace.set_block(iblock=iblock, samples=counts_samples)
-            counts_trace.fit_polynomial(deg=fwhms_deg)
 
-            counts_samples, centroids_samples, fwhms_samples = self._measure_block_fixed_counts(
-                counts=counts_trace, centroids=centroids, fwhms_guess=fwhms_trace, iblock=iblock, columns=columns, solver=solver)
-            # set tracemask objects and fit polynomials
+            counts_samples, _, _ = self._measure_block_fixed_width(
+                counts_guess=counts_trace, centroids=centroids, fwhms=fwhms_trace, counts_range=counts_range, iblock=iblock, columns=columns, solver=solver)
+            counts_trace.set_block(iblock=iblock, samples=counts_samples)
+            counts_trace.fit_spline(smoothing=counts_smoothing)
+            counts_trace._coeffs = None
+
+            _, _, fwhms_samples = self._measure_block_fixed_counts(
+                counts=counts_trace, centroids=centroids, fwhms_guess=fwhms_trace, fwhms_range=fwhms_range, iblock=iblock, columns=columns, solver=solver)
             fwhms_trace.set_block(iblock=iblock, samples=fwhms_samples)
-            fwhms_trace.fit_polynomial(deg=fwhms_deg)
+            fwhms_trace.fit_spline(smoothing=fwhms_smoothing)
+            fwhms_trace._coeffs = None
+
+            # ----------------------------------------------------------------------------------------------------------------------------------------------------
+            counts_block = counts_trace.get_block(iblock=iblock)
+            axs_counts[i].plot(columns, counts_samples[0], ".-", lw=0.5, ms=5, mew=0, mfc="0.2")
+            axs_counts[i].plot(counts_block._data[0], "-", color="tab:blue", lw=1)
+            axs_counts[i].tick_params(labelbottom=False)
+
+            ax_divider = make_axes_locatable(axs_counts[i])
+            ax_res = ax_divider.append_axes("bottom", size="30%", pad="5%")
+            ax_res.sharex(axs_counts[i])
+            ax_res.tick_params(labelbottom=i == niter-1)
+            ax_res.axhline(ls="--", lw=1, color="0.2")
+            ax_res.axhline(-0.02, ls=":", lw=1, color="0.2")
+            ax_res.axhline(+0.02, ls=":", lw=1, color="0.2")
+            ax_res.plot(columns, (counts_block._data[0,columns] - counts_samples[0]) / counts_samples[0], ".-", lw=0.5, ms=5, mew=0, mfc="0.2")
+            ax_res.set_ylim(-0.03,+0.03)
+
+            fwhms_block = fwhms_trace.get_block(iblock=iblock)
+            axs_fwhms[i].plot(columns, fwhms_samples[0], ".-", lw=0.5, ms=5, mew=0, mfc="0.2")
+            axs_fwhms[i].plot(fwhms_block._data[0], "-", color="tab:blue", lw=1)
+            axs_fwhms[i].tick_params(labelbottom=False)
+
+            ax_divider = make_axes_locatable(axs_fwhms[i])
+            ax_res = ax_divider.append_axes("bottom", size="30%", pad="5%")
+            ax_res.sharex(axs_fwhms[i])
+            ax_res.tick_params(labelbottom=i == niter-1)
+            ax_res.axhline(ls="--", lw=1, color="0.2")
+            ax_res.axhline(-0.02, ls=":", lw=1, color="0.2")
+            ax_res.axhline(+0.02, ls=":", lw=1, color="0.2")
+            ax_res.plot(columns, (fwhms_block._data[0,columns] - fwhms_samples[0]) / fwhms_samples[0], ".-", lw=0.5, ms=5, mew=0, mfc="0.2")
+            ax_res.set_ylim(-0.03,+0.03)
 
             i += 1
 
