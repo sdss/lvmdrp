@@ -3117,121 +3117,80 @@ class Spectrum1D(Header):
 
         return pixels, wave, data
 
-    def measurePeaks(self, init_pos, method="gauss", init_sigma=1.0, threshold=0, max_diff=1.5, bounds=(-numpy.inf, numpy.inf), ftol=1e-3, xtol=1e-3):
-        """
-        Find the subpixel centre for the local maxima in a Spectrum.
+    def measure_centroids(self, centroids_guess, fwhm_guess=2.5, counts_range=[0,numpy.inf], centroids_range=[-5,5], fwhms_range=[1.0,3.5], ftol=1e-3, xtol=1e-3, solver="trf"):
+        """Finds the subpixel centers for local maxima in a spectrum by fitting a Gaussian to each peak.
 
         Parameters
-        --------------
-        init_pos : numpy.ndarray
-            Initial guess for the peak centres
+        ----------
+        centroids_guess : numpy.ndarray
+            Initial guess for the peak centers (pixel positions).
+        fwhm_guess : float, optional
+            Initial guess for the Gaussian width (sigma) used for modeling each peak (default: 2.5).
+        bounds : tuple of numpy.ndarray or float, optional
+            Lower and upper bounds for the fit parameters (amplitude, center, sigma) for each peak.
+            Should be a tuple (lower, upper), where each is an array of length 3*N or a scalar (default: (-inf, inf)).
+        ftol : float, optional
+            Relative tolerance for the fit optimization (default: 1e-3).
+        xtol : float, optional
+            Absolute tolerance for the fit optimization (default: 1e-3).
+        solver : str, optional
+            Optimization algorithm to use (default: "trf").
 
-        method : string, optional with default='gauss'
-            Select the method to measure the peaks, either 'gauss' or 'hyperbolic'.
-            The first one fits a Gaussian to the 3 brightest pixels around each peak,
-            the second one uses a hyperbolic approximation to the 3 brightest pixels around each peak.
+        Returns
+        -------
+        centroids : numpy.ndarray
+            Array of subpixel peak positions (float).
+        mask : numpy.ndarray
+            Boolean array indicating which peaks have uncertain or invalid measurements.
 
-        init_sigma: float, optional with default=1.0
-            Initial guess of the Gaussian width used for the modelling.
-            Only used with the method 'gauss'
-
-        threshold: float, optional with default = 0
-            It defines the contrast between the minmum of maximum values for the
-            3 brightest pixel around a peak for which an estimated centre is assumed to be valid.
-
-        max_diff: float, optional with default = 0
-            If greater than zero, all peak centres which are different from the initial guess position by
-            this value are assumed to be invalid.
-
-        Returns (positions, mask)
-        -----------
-        positions :  numpy.ndarray (float)
-            Array of subpixel peaks positions
-        mask : numpy.ndarray (bool)
-            Array of pixels with uncertain measurements
+        Notes
+        -----
+        For each initial peak position, a Gaussian is fit to the 3 brightest pixels around the peak.
+        Peaks for which the fit fails or returns NaN are masked as invalid.
         """
-        # compute the minimum and maximum value for the 3 pixels around all peaks
-        # selection of fibers within the boundaries of the detector
-        select = numpy.logical_and(
-            init_pos - 1 >= [0], init_pos + 1 <= self._data.shape[0] - 1
-        )
-        mask = numpy.zeros(len(init_pos), dtype="bool")
-        # minimum counts of three pixels around each peak
-        # min = numpy.amin(
-        #     [
-        #         numpy.take(self._data, init_pos[select] + 1),
-        #         numpy.take(self._data, init_pos[select]),
-        #         numpy.take(self._data, init_pos[select] - 1),
-        #     ],
-        #     axis=0,
-        # )
-        # minimum counts of three pixels around each peak
-        max = numpy.amax(
-            [
-                numpy.take(self._data, init_pos[select] + 1),
-                numpy.take(self._data, init_pos[select]),
-                numpy.take(self._data, init_pos[select] - 1),
-            ],
-            axis=0,
-        )
-        # print(init_pos, max)
-        # mask all peaks where the contrast between maximum and minimum is below a threshold
-        mask[select] = (max) < threshold
-        # masking fibers outside the detector
-        mask[numpy.logical_not(select)] = True
+        fact = numpy.sqrt(2 * numpy.pi)
+        sigma_guess = fwhm_guess / 2.354
 
-        if method == "hyperbolic":
-            # compute the subpixel peak position using the hyperbolic
-            d = (
-                numpy.take(self._data, init_pos + 1)
-                - 2 * numpy.take(self._data, init_pos)
-                + numpy.take(self._data, init_pos - 1)
+        counts = numpy.full(len(centroids_guess), numpy.nan, dtype="float32")
+        centroids = numpy.full(len(centroids_guess), numpy.nan, dtype="float32")
+        sigmas = numpy.full(len(centroids_guess), numpy.nan, dtype="float32")
+        mask = numpy.isnan(centroids_guess)
+
+        bounds = self._parse_gaussians_boundaries(
+            ngaussians=centroids.size, centroids=centroids_guess, counts_range=counts_range, centroids_range=centroids_range, fwhms_range=fwhms_range, to_sigmas=True)
+
+        counts_lower, centroids_lower, sigmas_lower = numpy.split(bounds[0], 3)
+        counts_upper, centroids_upper, sigmas_upper = numpy.split(bounds[1], 3)
+        for j in range(len(centroids_guess)):
+            if mask[j]:
+                continue
+
+            pixels_selection = numpy.logical_and(
+                self._wave > centroids_guess[j] - 6 * sigma_guess,
+                self._wave < centroids_guess[j] + 6 * sigma_guess,
             )
-            positions = (
-                init_pos
-                + 1
-                - (
-                    (
-                        numpy.take(self._data, init_pos + 1)
-                        - numpy.take(self._data, init_pos)
-                    )
-                    / d
-                    + 0.5
-                )
-            )
+            counts_guess = numpy.interp(centroids_guess[j], self._wave, self._data) * fact * sigma_guess
 
-        elif method == "gauss":
-            # compute the subpixel peak position by fitting a gaussian to all peaks (3 pixel to get a unique solution
-            fact = numpy.sqrt(2 * numpy.pi)
-            ypixels = numpy.arange(self._data.size)
-            positions = numpy.zeros(len(init_pos), dtype="float32")
-            lower, upper = bounds
-            amp_lower, pos_lower, sig_lower = numpy.split(lower, 3)
-            amp_upper, pos_upper, sig_upper = numpy.split(upper, 3)
-            for j in range(len(init_pos)):
-                guess_par = [
-                                numpy.interp(init_pos[j], ypixels, self._data) * fact * init_sigma,
-                                init_pos[j],
-                                init_sigma,
-                            ]
-                # only pixels with enough contrast are fitted
-                if not mask[j]:
-                    gauss = fit_profile.Gaussian(guess_par)
-                    gauss.fit(
-                        self._pixels[init_pos[j] - 1 : init_pos[j] + 2],
-                        self._data[init_pos[j] - 1 : init_pos[j] + 2],
-                        sigma=self._error[init_pos[j]-1:init_pos[j]+2],
-                        p0=guess_par,
-                        bounds=([amp_lower[j], pos_lower[j], sig_lower[j]], [amp_upper[j], pos_upper[j], sig_upper[j]]),
-                        warning=False, ftol=ftol, xtol=xtol
-                    )  # perform fitting
-                    positions[j] = gauss.getPar()[1]
+            guess_par = [counts_guess, centroids_guess[j], sigma_guess]
+            gauss = fit_profile.Gaussian(guess_par)
+            gauss.fit(
+                self._wave[pixels_selection],
+                self._data[pixels_selection],
+                sigma=self._error[pixels_selection],
+                p0=guess_par,
+                bounds=([counts_lower[j], centroids_lower[j], sigmas_lower[j]], [counts_upper[j], centroids_upper[j], sigmas_upper[j]]),
+                ftol=ftol, xtol=xtol,
+                solver=solver)
 
-        mask = numpy.logical_or(
-            mask, numpy.isnan(positions)
-        )  # masked all corrupt subpixel peak positions
+            params = gauss.getPar()
+            counts[j] = params[0]
+            centroids[j] = params[1]
+            sigmas[j] = params[2]
 
-        return positions, mask
+        mask = mask | numpy.isnan(counts) | numpy.isnan(centroids)# | numpy.isnan(sigmas)
+        centroids[mask] = numpy.nan
+
+        return counts, centroids, sigmas*2.354, mask
 
     def measureFWHMPeaks(
         self, pos, nblocks, init_fwhm=2.4, threshold_flux=None, plot=-1
@@ -3545,7 +3504,7 @@ class Spectrum1D(Header):
             bounds_upper.append(upper)
 
         _set_boundaries(counts, counts_range, clip=(0.0,None))
-        _set_boundaries(centroids, centroids_range, clip=(0.0,4080.0))
+        _set_boundaries(centroids, centroids_range, clip=(self._wave.min(),self._wave.max()))
         _set_boundaries(fwhms, fwhms_range, clip=(0.0,None), to_sigmas=to_sigmas)
 
         if len(bounds_lower) == 0 or len(bounds_upper) == 0:

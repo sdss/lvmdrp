@@ -2282,8 +2282,8 @@ class Image(Header):
         return ref_centroids
 
     def trace_fiber_centroids(self, ref_column=2000, ref_centroids=None, mask_fibstatus=1,
-                              ncolumns=140, method="gauss", fwhm_guess=2.5, fwhm_range=[1.0, 3.5],
-                              counts_threshold=5000, max_diff=1.5):
+                              ncolumns=140, fwhm_guess=2.5, fwhms_range=[1.0, 3.5],
+                              counts_threshold=5000, max_diff=5.0, solver="trf"):
         if self._header is None:
             raise ValueError("No header available")
         if self._slitmap is None:
@@ -2311,8 +2311,7 @@ class Image(Header):
 
         # select columns to measure centroids
         step = self._dim[1] // ncolumns
-        columns = numpy.concatenate((numpy.arange(ref_column, 0, -step), numpy.arange(ref_column, self._dim[1], step)))
-        log.info(f"selecting {len(columns)-1} columns within range [{min(columns)}, {max(columns)}]")
+        columns = numpy.concatenate((numpy.arange(ref_column, 4, -step), numpy.arange(ref_column, self._dim[1]-3, step)))
 
         # create empty traces mask for the image
         fibers = ref_centroids.size
@@ -2326,7 +2325,7 @@ class Image(Header):
         centroids._header["IMAGETYP"] = "trace_centroid"
 
         # set positions of fibers along reference column
-        centroids.setSlice(ref_column, axis="y", data=ref_centroids, mask=numpy.zeros_like(ref_centroids, dtype="bool"))
+        centroids._samples[str(ref_column)] = ref_centroids
 
         # trace centroids in each column
         iterator = tqdm(enumerate(columns), total=len(columns), desc="tracing centroids", unit="column", ascii=True)
@@ -2335,25 +2334,27 @@ class Image(Header):
             img_slice = self.getSlice(icolumn, axis="y")
 
             # get fiber positions along previous column
+            # trace reference column first or skip if already traced
             if icolumn == ref_column:
-                # trace reference column first or skip if already traced
                 if i == 0:
-                    cent_guess, _, mask_guess = centroids.getSlice(ref_column, axis="y")
+                    cent_guess = centroids._samples[str(icolumn)].data
                 else:
                     continue
             else:
-                cent_guess, _, mask_guess = centroids.getSlice(columns[i-1], axis="y")
+                cent_guess = centroids._samples[str(columns[i-1])].data
 
-            # cast fiber positions to integers
-            cent_guess = cent_guess.round().astype("int16")
 
             # measure fiber positions
-            bound_lower = numpy.array([0]*cent_guess.size + (cent_guess-max_diff).tolist() + [fwhm_range[0]/2.354]*cent_guess.size)
-            bound_upper = numpy.array([numpy.inf]*cent_guess.size + (cent_guess+max_diff).tolist() + [fwhm_range[1]/2.354]*cent_guess.size)
-            cen_slice, msk_slice = img_slice.measurePeaks(cent_guess, method, init_sigma=fwhm_guess / 2.354, threshold=counts_threshold, bounds=(bound_lower, bound_upper))
+            counts_slice, centroids_slice, fwhms_slice, msk_slice = img_slice.measure_centroids(
+                centroids_guess=cent_guess, fwhm_guess=fwhm_guess,
+                counts_range=[counts_threshold,numpy.inf], centroids_range=[-max_diff,max_diff], fwhms_range=fwhms_range, solver=solver)
 
-            centroids._samples[f"{icolumn}"][~msk_slice] = cen_slice[~msk_slice]
-            centroids.setSlice(icolumn, axis="y", data=cen_slice, mask=msk_slice, samples=cen_slice)
+            # print(f"{icolumn} ------------------------------------------------")
+            # print(counts_slice[-36:])
+            # print(centroids_slice[-36:])
+            # print(fwhms_slice[-36:])
+
+            centroids._samples[str(icolumn)] = centroids_slice
 
         return centroids
 
