@@ -63,6 +63,21 @@ def _residual_spline(c, x, y, t, k, w=None):
 class FiberRows(Header, PositionTable):
 
     @classmethod
+    def create_empty(cls, data_dim, poly_kind=None, poly_deg=None, samples_columns=None, header=None, slitmap=None):
+        data = numpy.full(data_dim, numpy.nan, dtype=numpy.float32)
+        fibers = data.shape[0]
+        error = numpy.full(data_dim, numpy.nan, dtype=numpy.float32)
+        mask = numpy.ones(data_dim, dtype="bool")
+        if samples_columns is not None:
+            samples = Table(data=numpy.full((data_dim[0], len(samples_columns)), numpy.nan), names=samples_columns)
+        if poly_deg is not None:
+            coeffs = numpy.full((data_dim[0], poly_deg+1), numpy.nan, dtype=numpy.float32)
+
+        new_fiberrows = cls(data=data, error=error, mask=mask, samples=samples, poly_kind=poly_kind, coeffs=coeffs, header=header, slitmap=slitmap)
+        new_fiberrows.setFibers(fibers)
+        return new_fiberrows
+
+    @classmethod
     def from_coeff_table(cls, coeff_table, **kwargs):
         """Creates an FiberRows instance from a table of coefficients"""
 
@@ -499,7 +514,13 @@ class FiberRows(Header, PositionTable):
 
         return self._samples
 
-    def get_samples(self):
+    def get_samples(self, as_pandas=False):
+        if self._samples is None:
+            return None
+        if as_pandas:
+            df = self._samples.to_pandas()
+            df.columns = df.columns.astype("int")
+            return df
         return self._samples
 
     def split(self, fragments, axis="x"):

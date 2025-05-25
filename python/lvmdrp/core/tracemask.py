@@ -7,6 +7,7 @@ from copy import deepcopy as copy
 from astropy.io import fits as pyfits
 from astropy.table import Table
 from lvmdrp.core.fiberrows import FiberRows
+from lvmdrp.core import plot
 
 
 class TraceMask(FiberRows):
@@ -202,3 +203,58 @@ class TraceMask(FiberRows):
 
         os.makedirs(os.path.dirname(out_trace), exist_ok=True)
         hdus.writeto(out_trace, output_verify="silentfix", overwrite=True)
+
+    def plot_block(self, iblock=None, blockid=None, ref_column=None, axs=None):
+        block = self.get_block(iblock=iblock, blockid=blockid)
+
+        pixels = numpy.arange(block._data.shape[1], dtype="int")
+        samples = block.get_samples(as_pandas=True)
+
+        if axs is None:
+            _, ax = plot.create_subplots(to_display=True, figsize=(15,5), layout="constrained")
+            ax.tick_params(labelbottom=False)
+
+            ax_divider = plot.make_axes_locatable(ax)
+            ax_res = ax_divider.append_axes("bottom", size="30%", pad="5%")
+            ax_res.sharex(ax)
+
+            axs = {"mod": ax, "res": ax_res}
+
+        if "mod" in axs:
+            if ref_column is not None:
+                axs["mod"].axvline(ref_column, ls=":", lw=1, color="0.7")
+            axs["mod"].plot(pixels, block._data.T, "-", lw=1, label="model")
+            if samples is not None:
+                axs["mod"].plot(samples.columns, samples.T, ".", ms=5, mew=0, mfc="0.2", label="data")
+                axs["mod"].plot(samples.columns, block._data[:, samples.columns].T, "s", ms=5, mew=1, mec="0.2", mfc="none", label="model@data")
+        if "res" in axs:
+            axs["res"].axhline(ls="--", lw=1, color="0.4")
+            axs["res"].axhline(-0.01, ls=":", lw=1, color="0.4")
+            axs["res"].axhline(+0.01, ls=":", lw=1, color="0.4")
+            axs["res"].plot(samples.columns, ((block._data[:, samples.columns] - samples)/samples).T, ".-", lw=0.2, ms=5, mew=0)
+
+        return axs
+
+    def plot_fiber(self, ifiber, show_samples=True, axs=None):
+        fiber = self[ifiber]
+
+        pixels = fiber._wave
+        data = fiber._data
+        error = fiber._error
+        mask = fiber._mask
+
+        if axs is None:
+            _, axs = plot.create_subplots(to_display=True, figsize=(15,5), layout="constrained")
+
+        if mask is not None:
+            selection = ~mask
+            axs.vlines(pixels[mask], numpy.nanmin(data[selection]), numpy.nanmax(data[selection]), lw=1, color="0.7")
+        if error is not None:
+            axs.errorbar(pixels, data, yerr=error, fmt="", elinewidth=1, ecolor="0.5")
+        axs.step(pixels, data, lw=1, color="0.2")
+
+        if show_samples and self._samples is not None:
+            samples = self.get_samples(as_pandas=True)
+            axs.plot(samples.columns, samples.iloc[ifiber], ".", color="0.2", mew=0, ms=7)
+
+        return axs

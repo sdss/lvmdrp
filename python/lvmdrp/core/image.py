@@ -1962,6 +1962,29 @@ class Image(Header):
         new_img.setData(data=models)
         return new_img
 
+    def enhance(self, median_box=None, coadd=None, trust_errors=True, replace_errors=numpy.inf):
+
+        img = copy(self)
+        img.setData(data=0.0, error=replace_errors, select=img._mask)
+
+        if median_box is not None:
+            img = img.replaceMaskMedian(*median_box, replace_error=None)
+            img._data = numpy.nan_to_num(img._data)
+            img = img.medianImg(median_box, propagate_error=True)
+
+        # coadd images along the dispersion axis to increase the S/N of the peaks
+        if coadd is not None:
+            coadd_kernel = numpy.ones((1, coadd), dtype="uint8")
+            img = img.convolveImg(coadd_kernel)
+            # counts_threshold = counts_threshold * coadd
+
+        # handle invalid error values
+        if not trust_errors:
+            img._error = numpy.sqrt(numpy.abs(img._data))
+        img._error[img._mask|(img._error<=0)|(numpy.isnan(img._error))] = replace_errors
+
+        return img
+
     def _get_bins(self, data, error, mask, bins, x_bounds=(None,None), y_bounds=(None,None), x_nbound=11, y_nbound=3):
 
         x_nbins, y_nbins = bins
