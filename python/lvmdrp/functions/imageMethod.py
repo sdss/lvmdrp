@@ -969,7 +969,7 @@ def find_peaks_auto(
     # find the subpixel centroids of the peaks from the central 3 pixels using either a hyperbolic approximation
     # or perform a leastsq fit with a Gaussian
     log.info("refining fiber location")
-    centers = cut.measurePeaks(pixels, method, init_sigma, threshold=0, max_diff=1.0)[0]
+    centers = cut.measure_centroids(pixels, method, init_sigma, threshold=0, max_diff=1.0)[0]
     # round the subpixel peak positions to their nearest integer value
     round_cent = numpy.round(centers).astype(int)
     log.info(f"final number of fibers found {len(round_cent)}")
@@ -1096,7 +1096,7 @@ def findPeaksOffset_drp(
         #    select = numpy.logical_and(select_good_weak, select_weak)
         #    plt.plot(peaks_weak_good[0][select[select_good_weak]],peaks_weak_good[2] [select[select_good_weak]],'ob')
         peaks = cut.findPeaks(threshold=threshold)
-        centers = cut.measurePeaks(
+        centers = cut.measure_centroids(
             peaks[0], method, init_sigma, threshold=0, max_diff=1.0
         )[0]
         plt.clf()
@@ -1245,7 +1245,7 @@ def findPeaksMaster_drp(
             select_good[last_fiber] = False
     npeaks = numpy.sum(select_good)
     peaks_good = cut.findPeaks(threshold=threshold, npeaks=npeaks)
-    centers_good = cut.measurePeaks(
+    centers_good = cut.measure_centroids(
         peaks_good[0], method, init_sigma, threshold=0, max_diff=1.0
     )[0]
     peaks_ref = Spectrum1D(wave=fiber, data=ref_pos)
@@ -1261,7 +1261,7 @@ def findPeaksMaster_drp(
     select_weak = fib_qual == "WEAK"
     npeaks = numpy.sum(select_good_weak)
     peaks_weak_good = cut.findPeaks(threshold=threshold_weak, npeaks=npeaks)
-    centers_weak_good = cut.measurePeaks(
+    centers_weak_good = cut.measure_centroids(
         peaks_weak_good[0], method, init_sigma, threshold=0, max_diff=1.0
     )[0]
     offset_weak = centers._data[select_good_weak] - centers_weak_good
@@ -1396,7 +1396,7 @@ def findPeaksMaster2_drp(
             threshold = threshold * 1.05
             # print(threshold,numpy.sum(select_good),len(peaks_good),shift_peaks)
         # break
-    centers_good = cut.measurePeaks(
+    centers_good = cut.measure_centroids(
         peaks_good, method, init_sigma, threshold=0, max_diff=1.0
     )[0]
     peaks_ref = Spectrum1D(wave=fiber, data=ref_pos)
@@ -1588,7 +1588,7 @@ def trace_peaks(
             pix = numpy.round(trace.getData()[0][:, i + steps]).astype("int16")
 
         # measure the peaks for the ref_column and store it in the trace
-        centers = cut_iter.measurePeaks(pix, method, init_sigma, threshold=threshold, max_diff=float(max_diff))
+        centers = cut_iter.measure_centroids(pix, method, init_sigma, threshold=threshold, max_diff=float(max_diff))
         trace.setSlice(i, axis="y", data=centers[0], mask=centers[1])
 
     # iterate towards the last index along dispersion axis
@@ -1608,7 +1608,7 @@ def trace_peaks(
             pix = numpy.round(trace.getData()[0][:, i - steps]).astype("int16")
 
         # measure the peaks for the ref_column and store it in the trace
-        centers = cut_iter.measurePeaks(
+        centers = cut_iter.measure_centroids(
             pix, method, init_sigma, threshold=threshold, max_diff=float(max_diff)
         )
         trace.setSlice(i, axis="y", data=centers[0], mask=centers[1])
@@ -4621,7 +4621,7 @@ def trace_fibers(
     trace_amp, trace_cent, trace_fwhm, columns, mod_columns, residuals = img.trace_fibers_full(centroids, ref_column=LVM_REFERENCE_COLUMN,
                                                                                                 ncolumns=ncolumns, nblocks=LVM_NBLOCKS, iblocks=iblocks,
                                                                                                 max_diff=max_diff,
-                                                                                                fwhm_guess=guess_fwhm, fwhm_range=fwhm_limits,
+                                                                                                fwhms_guess=guess_fwhm, fwhms_range=fwhm_limits,
                                                                                                 counts_threshold=counts_threshold)
 
     # smooth all trace by a polynomial

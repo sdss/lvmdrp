@@ -3546,6 +3546,20 @@ class Spectrum1D(Header):
         params = self._parse_gaussians_params(counts, centroids, sigmas, to_fwhms=True)
         return gauss_multi, params
 
+    def fitMultiGauss_centroids(self, pixels_selection, counts, centroids_guess, fwhms, centroids_range=[-5,+5], ftol=1e-3, xtol=1e-3, solver="trf"):
+        error = numpy.ones(self._dim, dtype=numpy.float32) if self._error is None else self._error
+
+        guess = self._parse_gaussians_params(centroids=centroids_guess)
+        fixed = self._parse_gaussians_params(counts=counts, fwhms=fwhms, to_sigmas=True)
+        bounds = self._parse_gaussians_boundaries(ngaussians=counts.size, centroids=centroids_guess, centroids_range=centroids_range, to_sigmas=True)
+
+        gauss_multi = fit_profile.Gaussians_centroids(guess, args=fixed)
+        gauss_multi.fit(self._wave[pixels_selection], self._data[pixels_selection], sigma=error[pixels_selection], bounds=bounds, ftol=ftol, xtol=xtol, solver=solver)
+
+        centroids = gauss_multi.getPar()
+        params = self._parse_gaussians_params(counts, centroids, fwhms, to_fwhms=False)
+        return gauss_multi, params
+
     def fitMultiGauss_fixed_width(self, pixels_selection, counts_guess, centroids, fwhms, counts_range=[0.0,numpy.inf], ftol=1e-3, xtol=1e-3, solver="trf"):
         error = numpy.ones(self._dim, dtype=numpy.float32) if self._error is None else self._error
 

@@ -2380,7 +2380,7 @@ class Image(Header):
         counts_samples = numpy.full((centroids_block._fibers, columns.size), numpy.nan)
         centroids_samples = numpy.full((centroids_block._fibers, columns.size), numpy.nan)
         fwhms_samples = numpy.full((centroids_block._fibers, columns.size), numpy.nan)
-        iterator = tqdm(enumerate(columns), total=len(columns), desc=f"measuring fiber widths in block {iblock+1}/{LVM_NBLOCKS}", ascii=True, unit="column")
+        iterator = tqdm(enumerate(columns), total=len(columns), desc=f"measuring fiber widths in block    {iblock+1:>2d}/{LVM_NBLOCKS}", ascii=True, unit="column")
 
         residuals = []
         for i, icolumn in iterator:
@@ -2418,6 +2418,52 @@ class Image(Header):
 
         return counts_samples, centroids_samples, fwhms_samples
 
+    def _measure_block_centroids(self, counts, centroids_guess, fwhms, iblock, columns, centroids_range=[-5,+5], solver="trf", ax=None):
+        counts_block = counts.get_block(iblock=iblock)
+        centroids_block = centroids_guess.get_block(iblock=iblock)
+        fwhms_block = fwhms.get_block(iblock=iblock)
+
+        counts_samples = numpy.full((centroids_block._fibers, columns.size), numpy.nan)
+        centroids_samples = numpy.full((centroids_block._fibers, columns.size), numpy.nan)
+        fwhms_samples = numpy.full((centroids_block._fibers, columns.size), numpy.nan)
+        iterator = tqdm(enumerate(columns), total=len(columns), desc=f"measuring fiber centroids in block {iblock+1:>2d}/{LVM_NBLOCKS}", ascii=True, unit="column")
+
+        residuals = []
+        for i, icolumn in iterator:
+            img_slice = self.getSlice(icolumn, axis="Y")
+            counts_slice, _, _ = counts_block.getSlice(icolumn, axis="Y")
+            centroids_slice, _, _ = centroids_block.getSlice(icolumn, axis="Y")
+            fwhms_slice, _, _ = fwhms_block.getSlice(icolumn, axis="Y")
+
+            lower = (centroids_slice - 6*fwhms_slice).min()
+            upper = (centroids_slice + 6*fwhms_slice).max()
+            pixels_selection = (lower <= img_slice._pixels) & (img_slice._pixels <= upper)
+
+            model_block, par_block = img_slice.fitMultiGauss_centroids(pixels_selection, counts_slice, centroids_slice, fwhms_slice, centroids_range=centroids_range, solver=solver)
+
+            pixels, data, errors = img_slice._pixels[pixels_selection], img_slice._data[pixels_selection], img_slice._error[pixels_selection]
+            model = model_block(pixels)
+            residuals.append((model - data) / errors)
+
+            counts, centroids, fwhms = numpy.split(par_block, 3)
+            counts_samples[:, i] = counts
+            centroids_samples[:, i] = centroids
+            fwhms_samples[:, i] = fwhms
+
+        if ax is not None:
+            ax.hist(numpy.concatenate(residuals), bins=1000)
+            ax.set_title(f"blockid = B{iblock+1}", fontsize="large", loc="left")
+            ax.set_ylabel("Frequency", fontsize="large")
+            ax.set_ylabel("(model - data) / error", fontsize="large")
+
+            # ax.plot(pixels, residuals, ".", mew=0, mfc="0.2")
+            # ax.axhline(-1.0, ls=":", lw=1, color="0.2")
+            # ax.axhline(+1.0, ls=":", lw=1, color="0.2")
+            # ax.axhline(ls="--", lw=1, color="0.2")
+            # ax.set_ylim(-1.5, +1.5)
+
+        return counts_samples, centroids_samples, fwhms_samples
+
     def _measure_block_fixed_width(self, counts_guess, centroids, fwhms, iblock, columns, counts_range=[1000,numpy.inf], solver="trf", ax=None):
         counts_block = counts_guess.get_block(iblock=iblock)
         centroids_block = centroids.get_block(iblock=iblock)
@@ -2426,7 +2472,7 @@ class Image(Header):
         counts_samples = numpy.full((centroids_block._fibers, columns.size), numpy.nan)
         centroids_samples = numpy.full((centroids_block._fibers, columns.size), numpy.nan)
         fwhms_samples = numpy.full((centroids_block._fibers, columns.size), numpy.nan)
-        iterator = tqdm(enumerate(columns), total=len(columns), desc=f"measuring fiber counts in block {iblock+1}/{LVM_NBLOCKS}", ascii=True, unit="column")
+        iterator = tqdm(enumerate(columns), total=len(columns), desc=f"measuring fiber counts in block    {iblock+1:>2d}/{LVM_NBLOCKS}", ascii=True, unit="column")
 
         residuals, weights = [], []
         for i, icolumn in iterator:
@@ -2465,9 +2511,9 @@ class Image(Header):
 
         return counts_samples, centroids_samples, fwhms_samples
 
-    def iterative_block_trace(self, counts_guess, centroids, fwhms_guess, iblock, columns,
-                              counts_range=[1e3,numpy.inf], fwhms_range=[1.0,3.5], solver="trf",
-                              counts_smoothing=1.0, fwhms_smoothing=0.1, niter=10):
+    def iterative_block_trace(self, counts_guess, centroids_guess, fwhms_guess, iblock, columns,
+                              counts_range=[1e3,numpy.inf], centroids_range=[-5,+5], fwhms_range=[1.0,3.5], solver="trf",
+                              counts_smoothing=1.0, centroids_smoothing=0.1, fwhms_smoothing=0.1, niter=10):
 
         # fwhms_guess = self._get_fwhms_trace(fwhms=fwhms_guess)
         unit = self._header["BUNIT"]
@@ -2476,6 +2522,11 @@ class Image(Header):
         counts_trace.setData(data=counts_guess._data, error=counts_guess._error, mask=counts_guess._mask)
         counts_trace.set_samples(samples=numpy.full((counts_trace._fibers,columns.size), numpy.nan), columns=columns)
         counts_trace._coeffs = None
+
+        centroids_trace = copy(centroids_guess)
+        centroids_trace.setData(data=centroids_guess._data, error=centroids_guess._error, mask=centroids_guess._mask)
+        centroids_trace.set_samples(samples=numpy.full((centroids_trace._fibers,columns.size), numpy.nan), columns=columns)
+        centroids_trace._coeffs = None
 
         fwhms_trace = copy(fwhms_guess)
         fwhms_trace.setData(data=fwhms_guess._data, error=fwhms_guess._error, mask=fwhms_guess._mask)
@@ -2487,6 +2538,12 @@ class Image(Header):
         fig_counts.suptitle(f"Iterative Counts Fitting for Block ID = B{iblock+1}", fontsize="x-large")
         fig_counts.supxlabel("X (pixel)", fontsize="large")
         fig_counts.supylabel(f"Counts ({unit})", fontsize="large")
+
+        fig_centroids, axs_centroids = plt.subplots(niter, 1, figsize=(15,3*niter), sharex=True, layout="tight")
+        axs_centroids = numpy.atleast_1d(axs_centroids)
+        fig_centroids.suptitle(f"Iterative Centroids Fitting for Block ID = B{iblock+1}", fontsize="x-large")
+        fig_centroids.supxlabel("X (pixel)", fontsize="large")
+        fig_centroids.supylabel("Centroids (pixel)", fontsize="large")
 
         fig_fwhms, axs_fwhms = plt.subplots(niter, 1, figsize=(15,3*niter), sharex=True, layout="tight")
         axs_fwhms = numpy.atleast_1d(axs_fwhms)
@@ -2500,13 +2557,19 @@ class Image(Header):
             log.info(f"   iteration {i+1:3d}/{niter}")
 
             counts_samples, _, _ = self._measure_block_fixed_width(
-                counts_guess=counts_trace, centroids=centroids, fwhms=fwhms_trace, counts_range=counts_range, iblock=iblock, columns=columns, solver=solver)
+                counts_guess=counts_trace, centroids=centroids_trace, fwhms=fwhms_trace, counts_range=counts_range, iblock=iblock, columns=columns, solver=solver)
             counts_trace.set_block(iblock=iblock, samples=counts_samples)
             counts_trace.fit_spline(smoothing=counts_smoothing)
             counts_trace._coeffs = None
 
+            _, centroids_samples, _ = self._measure_block_centroids(
+                counts=counts_trace, centroids_guess=centroids_trace, fwhms=fwhms_trace, centroids_range=centroids_range, iblock=iblock, columns=columns, solver=solver)
+            centroids_trace.set_block(iblock=iblock, samples=centroids_samples)
+            centroids_trace.fit_spline(smoothing=centroids_smoothing)
+            centroids_trace._coeffs = None
+
             _, _, fwhms_samples = self._measure_block_fixed_counts(
-                counts=counts_trace, centroids=centroids, fwhms_guess=fwhms_trace, fwhms_range=fwhms_range, iblock=iblock, columns=columns, solver=solver)
+                counts=counts_trace, centroids=centroids_trace, fwhms_guess=fwhms_trace, fwhms_range=fwhms_range, iblock=iblock, columns=columns, solver=solver)
             fwhms_trace.set_block(iblock=iblock, samples=fwhms_samples)
             fwhms_trace.fit_spline(smoothing=fwhms_smoothing)
             fwhms_trace._coeffs = None
@@ -2527,6 +2590,21 @@ class Image(Header):
             ax_res.plot(columns, (counts_block._data[0,columns] - counts_samples[0]) / counts_samples[0], ".-", lw=0.5, ms=5, mew=0, mfc="0.2")
             ax_res.set_ylim(-0.03,+0.03)
 
+            centroids_block = centroids_trace.get_block(iblock=iblock)
+            axs_centroids[i].plot(columns, centroids_samples[0], ".-", lw=0.5, ms=5, mew=0, mfc="0.2")
+            axs_centroids[i].plot(centroids_block._data[0], "-", color="tab:blue", lw=1)
+            axs_centroids[i].tick_params(labelbottom=False)
+
+            ax_divider = make_axes_locatable(axs_centroids[i])
+            ax_res = ax_divider.append_axes("bottom", size="30%", pad="5%")
+            ax_res.sharex(axs_centroids[i])
+            ax_res.tick_params(labelbottom=i == niter-1)
+            ax_res.axhline(ls="--", lw=1, color="0.2")
+            ax_res.axhline(-0.02, ls=":", lw=1, color="0.2")
+            ax_res.axhline(+0.02, ls=":", lw=1, color="0.2")
+            ax_res.plot(columns, (centroids_block._data[0,columns] - centroids_samples[0]) / centroids_samples[0], ".-", lw=0.5, ms=5, mew=0, mfc="0.2")
+            ax_res.set_ylim(-0.03,+0.03)
+
             fwhms_block = fwhms_trace.get_block(iblock=iblock)
             axs_fwhms[i].plot(columns, fwhms_samples[0], ".-", lw=0.5, ms=5, mew=0, mfc="0.2")
             axs_fwhms[i].plot(fwhms_block._data[0], "-", color="tab:blue", lw=1)
@@ -2544,7 +2622,7 @@ class Image(Header):
 
             i += 1
 
-        return counts_trace, centroids, fwhms_trace
+        return counts_trace, centroids_trace, fwhms_trace
 
     def trace_fibers_full(self, centroids_guess, fwhms_guess=2.5, centroids_range=[-5,5], fwhms_range=[1.0,3.5], counts_range=[1e3,numpy.inf],
                           ref_column=2000, ncolumns=40, nblocks=18, iblocks=[], solver="trf"):

@@ -893,6 +893,14 @@ class Gaussians_cent(fit_profile1D):
     def __init__(self, par, args):
         fit_profile1D.__init__(self, par, self._profile, args=args)
 
+class Gaussians_centroids(fit_profile1D):
+    def _profile(self, x):
+        args = numpy.split(self._args, 2)
+        pars = [args[0], self._par, args[1]]
+        return gaussians(pars, x)
+
+    def __init__(self, par, args):
+        fit_profile1D.__init__(self, par, self._profile, args=args)
 
 class Gaussians_width(fit_profile1D):
     def _profile(self, x):
