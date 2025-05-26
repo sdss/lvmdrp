@@ -1962,7 +1962,7 @@ class Image(Header):
         new_img.setData(data=models)
         return new_img
 
-    def enhance(self, median_box=None, coadd=None, trust_errors=True, replace_errors=numpy.inf):
+    def enhance(self, median_box=None, coadd=None, trust_errors=True, apply_mask=True, replace_errors=numpy.inf):
 
         img = copy(self)
         img.setData(data=0.0, error=replace_errors, select=img._mask)
@@ -1977,6 +1977,12 @@ class Image(Header):
             coadd_kernel = numpy.ones((1, coadd), dtype="uint8")
             img = img.convolveImg(coadd_kernel)
             # counts_threshold = counts_threshold * coadd
+
+        # mask overscan columns
+        img._mask[:, :3] = True
+        img._mask[:, -3:] = True
+        if apply_mask:
+            img.apply_pixelmask()
 
         # handle invalid error values
         if not trust_errors:
